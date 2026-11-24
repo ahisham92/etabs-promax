@@ -20,18 +20,30 @@ public static class E2kWriter
         // The first line as ETABS writes it: the file's path and when it was saved.
         text.Append("$ File ").Append(path is null ? "model.e2k" : Path.GetFullPath(path)).Append(" saved ")
             .Append((SavedAt ?? DateTime.Now).ToString("M/d/yyyy h:mm:ss tt", System.Globalization.CultureInfo.InvariantCulture)).Append("\r\n");
-        var passthrough = model.Passthrough.ToList();
+        // The log closes the file (its last line is END, and ETABS reads nothing after it): always written last.
+        var log = model.Passthrough.Where(p => p.Heading == "LOG").ToList();
+        var passthrough = model.Passthrough.Except(log).ToList();
         EmitPassthroughAfter(text, passthrough, "");
 
+        var anchors = new List<string>();
         foreach (var heading in S.Order)
         {
+            // A section the source file had starts a new run: first put back the kept sections that followed the
+            // previous run. A section it did not have joins the run it follows, ahead of those kept sections.
+            if (model.SourceHeadings.Count == 0 || model.SourceHeadings.Contains(heading))
+            {
+                foreach (var anchor in anchors) EmitPassthroughAfter(text, passthrough, anchor);
+                anchors.Clear();
+            }
+            anchors.Add(heading);
             var lines = SectionLines(model, heading).ToList();
             if (model.UnparsedLines.TryGetValue(heading, out var unparsed)) lines.AddRange(unparsed);
             if (lines.Count > 0 || AlwaysWritten.Contains(heading)) Section(text, heading, lines);
-            EmitPassthroughAfter(text, passthrough, heading);
         }
+        foreach (var anchor in anchors) EmitPassthroughAfter(text, passthrough, anchor);
         // Sections whose place in the file is not known (the section they followed is not in this model).
         foreach (var section in passthrough.ToList()) Section(text, section.Heading, section.Lines);
+        foreach (var section in log) Section(text, section.Heading, section.Lines);
 
         text.Append("\r\n$ ").Append(S.End).Append("\r\n");
         return text.ToString();

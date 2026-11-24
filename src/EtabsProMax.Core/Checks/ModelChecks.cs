@@ -171,6 +171,8 @@ public static class ModelChecks
             f.Add(new(Severity.Warning, "loads", "The model has no load patterns."));
             return;
         }
+        foreach (var p in m.LoadPatterns.Where(p => !ModelEdit.LoadPatternTypes.Contains(p.Type, StringComparer.OrdinalIgnoreCase)))
+            f.Add(new(Severity.Warning, "loads", $"Load pattern '{p.Name}' has type '{p.Type}', which ETABS 23 does not list: it imports as 'Other'.", p.Name));
         if (!m.LoadPatterns.Exists(p => p.SelfWeight != 0))
             f.Add(new(Severity.Warning, "loads", "No load pattern includes self weight."));
         var used = m.PointLoads.Cast<ObjectLoad>().Concat(m.LineLoads).Concat(m.AreaLoads).Select(l => l.Pattern).ToHashSet();

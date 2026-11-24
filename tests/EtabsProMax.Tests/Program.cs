@@ -139,6 +139,38 @@ Test("a real ETABS 23.2 export reads and writes back whole", () =>
     Equal(text, E2kWriter.Write(E2kReader.Read(text)), "second pass is stable");
 });
 
+Test("what ETABS 23.2 taught us on import", () =>
+{
+    var m = Templates.ConcreteFrame("T", [6], [5], 2, 3);
+    m.AddWallSection("W250", ModelEdit.DefaultConcrete, 0.25);
+    m.AddWall(0, 0, 6, 0, "Story1", "W250");
+    m.AddLoadPattern("SDL", "super dead");
+    m.AddCombo("Gravity", ("Dead", 1.2), ("SDL", 1.2), ("Live", 1.6));
+    var text = E2kWriter.Write(m);
+    int At(string what) => text.IndexOf(what, StringComparison.Ordinal);
+    // ETABS stops reading at the log's END: combinations written after it were silently dropped.
+    Check(At("$ LOAD CASES") < At("$ LOAD COMBINATIONS") && At("$ LOAD COMBINATIONS") < At("$ STEEL DESIGN PREFERENCES"), "combinations follow the load cases");
+    Check(text.TrimEnd().EndsWith("  END\r\n\r\n$ END OF MODEL FILE"), "the log's END is the last line before the end of the file");
+    Check(text.Contains("  LOADPATTERN  \"SDL\"  TYPE  \"Super Dead\"  SELFWEIGHT  0\r\n"), "the type as ETABS writes it");
+    Check(text.Contains("SECTION  \"W250\"  OBJMESHTYPE  \"DEFAULT\"  ADDRESTRAINT  \"No\"  CARDINALPOINT  \"MIDDLE\"  TRANSFORMSTIFFNESSFOROFFSETS  \"No\""), "wall assignment as ETABS writes it");
+    try { m.AddLoadPattern("X", "Superimposed Dead"); throw new Exception("accepted a type ETABS does not have"); }
+    catch (ArgumentException ex) { Check(ex.Message.Contains("Super Dead"), ex.Message); }
+    m.LoadPatterns.Add(new LoadPattern { Name = "Y", Type = "Superimposed Dead", Extra = ["X"] });
+    Check(ModelChecks.Run(m).Exists(f => f.Message.Contains("imports as 'Other'")), "a type ETABS does not list is reported");
+    Equal(text, E2kWriter.Write(ModelFile.FromJson(ModelFile.ToJson(E2kReader.Read(text)))), "stable through .e2k and .epm");
+});
+
+Test("a model ETABS 23.2 saved after importing ours reads and writes back", () =>
+{
+    var saved = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "samples", "etabs23-after-import.e2k"));
+    var m = E2kReader.Read(saved);
+    Equal(3, Physical.Areas(m).Count(a => a.Kind == AreaKind.Wall), "walls");
+    Equal("Super Dead", m.LoadPatterns.Single(p => p.Name == "SDLSD2").Type, "the type ETABS wrote");
+    Check(ModelChecks.Run(m).TrueForAll(f => f.Severity == Severity.Warning), "no errors");
+    var text = E2kWriter.Write(m);
+    Equal(text, E2kWriter.Write(E2kReader.Read(text)), "second pass is stable");
+});
+
 Test("keeps what it doesn't understand", () =>
 {
     var m = E2kReader.Read(sample);

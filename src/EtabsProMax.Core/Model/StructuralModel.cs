@@ -39,6 +39,10 @@ public sealed class StructuralModel
     public List<LoadCombo> Combos { get; set; } = [];
     /// <summary>Sections of an ETABS file this version doesn't understand, kept word for word and written back.</summary>
     public List<RawSection> Passthrough { get; set; } = [];
+    /// <summary>The headings this version understands that the file the model came from had, in its order. A section
+    /// the file did not have (combinations added later, say) is written straight after the one before it, ahead of
+    /// the kept sections that followed that one.</summary>
+    public List<string> SourceHeadings { get; set; } = [];
     /// <summary>Lines this version doesn't understand inside sections it does, by section heading, as read.</summary>
     public Dictionary<string, List<string>> UnparsedLines { get; set; } = [];
 

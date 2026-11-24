@@ -190,7 +190,7 @@ public static class ModelEdit
         if (assign is null)
         {
             List<string> defaults = kind == AreaKind.Wall
-                ? ["OBJMESHTYPE", "\"DEFAULT\"", "ADDRESTRAINT", "\"No\""]
+                ? ["OBJMESHTYPE", "\"DEFAULT\"", "ADDRESTRAINT", "\"No\"", "CARDINALPOINT", "\"MIDDLE\"", "TRANSFORMSTIFFNESSFOROFFSETS", "\"No\""]
                 : ["OBJMESHTYPE", "\"DEFAULT\"", "ADDRESTRAINT", "\"No\"", "CARDINALPOINT", "\"TOP\"", "TRANSFORMSTIFFNESSFOROFFSETS", "\"No\""];
             m.AreaAssigns.Add(assign = new AreaAssign { Label = area.Label, Story = story, Extra = [defaults] });
         }
@@ -214,9 +214,19 @@ public static class ModelEdit
         return assign;
     }
 
-    /// <summary>A load pattern and the linear static load case that runs it, as ETABS makes them together.</summary>
+    /// <summary>The load pattern types ETABS 23 offers, as it writes them. A type it does not know imports as "Other".</summary>
+    public static readonly string[] LoadPatternTypes =
+    [
+        "Dead", "Super Dead", "Live", "Reducible Live", "Roof Live", "Pattern Live", "Pattern Live - Auto", "Notional", "Seismic",
+        "Seismic (Drift)", "Wind", "Snow", "Construction", "Prestress-Final", "Prestress-Transfer", "Temperature", "Other",
+    ];
+
+    /// <summary>A load pattern and the linear static load case that runs it, as ETABS makes them together.
+    /// <paramref name="type"/> is one of <see cref="LoadPatternTypes"/>.</summary>
     public static LoadPattern AddLoadPattern(this StructuralModel m, string name, string type, double selfWeight = 0)
     {
+        type = LoadPatternTypes.FirstOrDefault(t => t.Equals(type, StringComparison.OrdinalIgnoreCase))
+               ?? throw new ArgumentException($"ETABS has no load pattern type '{type}'. Types: {string.Join(", ", LoadPatternTypes)}.");
         if (m.LoadPatterns.Exists(p => p.Name == name)) throw new ArgumentException($"There is already a load pattern named '{name}'.");
         var pattern = new LoadPattern { Name = name, Type = type, SelfWeight = selfWeight };
         m.LoadPatterns.Add(pattern);

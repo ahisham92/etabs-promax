@@ -31,7 +31,8 @@ public static class E2kReader
                 heading = S.Canonical(name);
                 raw = null;
                 if (heading == S.End) break;
-                if (!S.IsKnown(heading))
+                if (S.IsKnown(heading)) model.SourceHeadings.Add(heading);
+                else
                 {
                     raw = new RawSection { Heading = heading, After = previous };
                     model.Passthrough.Add(raw);
