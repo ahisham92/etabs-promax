@@ -17,13 +17,13 @@ Phase 1 of 5, the shared core, is in this repository. Parts 1 to 3 are built on 
 | What | State |
 | --- | --- |
 | Model in ETABS's own shape (plan points, objects, per-story assignments) | Done |
-| Read and write ETABS text files (.e2k, .$et), keeping what it doesn't interpret word for word | Done, **not yet tested against ETABS 23 itself** |
+| Read and write ETABS text files (.e2k, .$et), keeping what it doesn't interpret word for word | Reads a real ETABS 23.2 export and writes it back whole; **importing our files into ETABS 23 is being tested** |
 | ETABS ProMax model file (.epm, JSON) | Done |
 | Checks with no analysis: missing sections, free beam ends, unsupported columns, empty stories, loads on nothing | Done |
 | Quantities: lengths, areas, concrete volumes by section | Done |
 | `epm` command-line tool | Done |
 
-The .e2k writer follows the format ETABS exports, but no file from it has been imported into ETABS 23 yet. Until that is done on a PC with ETABS, treat its output as unproven.
+New models start from the defaults ETABS 23.2 itself exports for a new model (materials, rebar sizes, analysis options, mass source, design preferences), because ETABS refuses a text file without them. Until a file from the writer has imported cleanly into ETABS 23, treat its output as unproven.
 
 ## Try it
 

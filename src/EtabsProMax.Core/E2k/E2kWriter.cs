@@ -9,12 +9,17 @@ namespace EtabsProMax.E2k;
 /// File > Import > ETABS .e2k Text File.</summary>
 public static class E2kWriter
 {
+    /// <summary>The time written on the first line; null (the default) means now. Tests set it to compare files.</summary>
+    public static DateTime? SavedAt { get; set; }
+
     public static void WriteFile(StructuralModel model, string path) => File.WriteAllText(path, Write(model, path));
 
     public static string Write(StructuralModel model, string? path = null)
     {
         var text = new StringBuilder();
-        text.Append("$ File ").Append(path ?? "model.e2k").Append(" written by ETABS ProMax").Append("\r\n");
+        // The first line as ETABS writes it: the file's path and when it was saved.
+        text.Append("$ File ").Append(path is null ? "model.e2k" : Path.GetFullPath(path)).Append(" saved ")
+            .Append((SavedAt ?? DateTime.Now).ToString("M/d/yyyy h:mm:ss tt", System.Globalization.CultureInfo.InvariantCulture)).Append("\r\n");
         var passthrough = model.Passthrough.ToList();
         EmitPassthroughAfter(text, passthrough, "");
 
@@ -22,7 +27,7 @@ public static class E2kWriter
         {
             var lines = SectionLines(model, heading).ToList();
             if (model.UnparsedLines.TryGetValue(heading, out var unparsed)) lines.AddRange(unparsed);
-            if (lines.Count > 0) Section(text, heading, lines);
+            if (lines.Count > 0 || AlwaysWritten.Contains(heading)) Section(text, heading, lines);
             EmitPassthroughAfter(text, passthrough, heading);
         }
         // Sections whose place in the file is not known (the section they followed is not in this model).
@@ -31,6 +36,9 @@ public static class E2kWriter
         text.Append("\r\n$ ").Append(S.End).Append("\r\n");
         return text.ToString();
     }
+
+    /// <summary>Headings ETABS writes even when nothing is under them.</summary>
+    private static readonly string[] AlwaysWritten = [S.PointLoads, S.FrameLoads, S.ShellLoads];
 
     private static void EmitPassthroughAfter(StringBuilder text, List<RawSection> left, string heading)
     {
@@ -58,7 +66,7 @@ public static class E2kWriter
                 break;
             case S.Controls:
                 yield return Line(["UNITS", Quote(m.Units.Force), Quote(m.Units.Length), Quote(m.Units.Temperature)]);
-                if (m.Title.Length > 0) yield return Line(["TITLE1", Quote(m.Title)]);
+                if (m.Title.Length > 0) yield return Line(["TITLE2", Quote(m.Title)]);
                 foreach (var line in m.Controls) yield return line;
                 break;
             case S.Stories:

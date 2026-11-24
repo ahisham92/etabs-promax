@@ -9,12 +9,27 @@ public static class ModelEdit
     /// <summary>Points closer than this in plan are the same point (model length units).</summary>
     public const double Tolerance = 1e-6;
 
-    public static StructuralModel New(string title, string force = "KN", string length = "M", double baseElevation = 0) => new()
+    /// <summary>
+    /// A new, empty model with ETABS 23's own defaults: its materials, rebar sizes, analysis options, mass source,
+    /// design preferences and the Dead and Live load patterns, as ETABS exports a new model (kN, m). ETABS refuses a
+    /// text file that lacks these, so every model starts from them. Stories, grids and members are yours to add.
+    /// </summary>
+    public static StructuralModel New(string title, double baseElevation = 0)
     {
-        Title = title,
-        Units = new Units { Force = force, Length = length },
-        Stories = [new Story { Name = "Base", Elevation = baseElevation }],
-    };
+        var m = Seed.Etabs23();
+        m.Title = title;
+        m.Stories = [new Story { Name = "Base", Elevation = baseElevation }];
+        m.Grids.Clear(); m.Points.Clear(); m.Lines.Clear(); m.Areas.Clear();
+        m.PointAssigns.Clear(); m.LineAssigns.Clear(); m.AreaAssigns.Clear();
+        m.PointLoads.Clear(); m.LineLoads.Clear(); m.AreaLoads.Clear();
+        var info = m.Passthrough.Find(s => s.Heading == "PROJECT INFORMATION");
+        if (info is not null) info.Lines = [E2kText.Line(["PROJECTINFO", "MODELNAME", E2kText.Quote(title)])];
+        return m;
+    }
+
+    /// <summary>The concrete ETABS's default model comes with.</summary>
+    public const string DefaultConcrete = "C30/37";
+    private const string DefaultRebar = "DefaultRebar_500";
 
     public static Story AddStory(this StructuralModel m, string name, double height)
     {
@@ -39,7 +54,7 @@ public static class ModelEdit
             Name = name,
             Lines =
             [
-                ["TYPE", "\"Concrete\"", "WEIGHTPERVOLUME", E2kText.Number(weightPerVolume)],
+                ["TYPE", "\"Concrete\"", "GRADE", E2kText.Quote(name), "WEIGHTPERVOLUME", E2kText.Number(weightPerVolume)],
                 ["SYMTYPE", "\"Isotropic\"", "E", E2kText.Number(elasticModulus), "U", "0.2", "A", "0.0000099"],
                 ["FC", E2kText.Number(fc)],
             ],
@@ -48,7 +63,9 @@ public static class ModelEdit
         return material;
     }
 
-    public static FrameSection AddRectangularSection(this StructuralModel m, string name, string material, double depth, double width)
+    /// <summary>A rectangular concrete column or beam section, with the reinforcement data ETABS keeps beside it
+    /// (ETABS's defaults for a new section: designed, not checked).</summary>
+    public static FrameSection AddRectangularSection(this StructuralModel m, string name, string material, double depth, double width, bool beam)
     {
         var section = new FrameSection
         {
@@ -56,6 +73,15 @@ public static class ModelEdit
             Lines = [["MATERIAL", E2kText.Quote(material), "SHAPE", "\"Concrete Rectangular\"", "D", E2kText.Number(depth), "B", E2kText.Number(width)]],
         };
         m.FrameSections.Add(section);
+        var rebar = m.Materials.Find(x => x.Type.Equals("Rebar", StringComparison.OrdinalIgnoreCase))?.Name ?? DefaultRebar;
+        string[] bars = ["CONCRETESECTION", E2kText.Quote(name), "LONGBARMATERIAL", E2kText.Quote(rebar), "CONFINEBARMATERIAL", E2kText.Quote(rebar)];
+        var line = beam
+            ? E2kText.Line(bars, ["TYPE", "\"Beam\"", "COVERTOP", "0.06", "COVERBOTTOM", "0.06", "ATI", "0", "ABI", "0", "ATJ", "0", "ABJ", "0"])
+            : E2kText.Line(bars, ["TYPE", "\"Column\"", "PATTERN", "\"R-5-3\"", "TRANSREINF", "\"TIES\"", "DESIGNCHECK", "\"DESIGN\"", "COVER", "0.04",
+                "LONGBARAREA", "0.0003142", "CONFINEBARAREA", "7.85E-05", "CONFINEBARSPACING", "0.15", "NUMCONFINEBARS3", "3", "NUMCONFINEBARS2", "3"]);
+        var concrete = m.Passthrough.Find(s => s.Heading == "CONCRETE SECTIONS");
+        if (concrete is null) m.Passthrough.Add(concrete = new RawSection { Heading = "CONCRETE SECTIONS", After = "FRAME SECTIONS" });
+        concrete.Lines.Add(line);
         return section;
     }
 
@@ -122,7 +148,14 @@ public static class ModelEdit
             m.Lines.Add(line);
         }
         var assign = m.LineAssigns.Find(a => a.Label == line.Label && a.Story == story);
-        if (assign is null) m.LineAssigns.Add(assign = new LineAssign { Label = line.Label, Story = story });
+        if (assign is null)
+        {
+            // What ETABS itself writes on a new member: output stations and automatic meshing.
+            List<string> defaults = kind == LineKind.Beam
+                ? ["CARDINALPT", "8", "MAXSTASPC", "0.5", "AUTOMESH", "\"YES\"", "MESHATINTERSECTIONS", "\"YES\""]
+                : ["MINNUMSTA", "3", "AUTOMESH", "\"YES\"", "MESHATINTERSECTIONS", "\"YES\""];
+            m.LineAssigns.Add(assign = new LineAssign { Label = line.Label, Story = story, Extra = [defaults] });
+        }
         assign.Section = section;
         return assign;
     }
@@ -154,7 +187,13 @@ public static class ModelEdit
             m.Areas.Add(area);
         }
         var assign = m.AreaAssigns.Find(a => a.Label == area.Label && a.Story == story);
-        if (assign is null) m.AreaAssigns.Add(assign = new AreaAssign { Label = area.Label, Story = story });
+        if (assign is null)
+        {
+            List<string> defaults = kind == AreaKind.Wall
+                ? ["OBJMESHTYPE", "\"DEFAULT\"", "ADDRESTRAINT", "\"No\""]
+                : ["OBJMESHTYPE", "\"DEFAULT\"", "ADDRESTRAINT", "\"No\"", "CARDINALPOINT", "\"TOP\"", "TRANSFORMSTIFFNESSFOROFFSETS", "\"No\""];
+            m.AreaAssigns.Add(assign = new AreaAssign { Label = area.Label, Story = story, Extra = [defaults] });
+        }
         assign.Section = section;
         if (diaphragm is not null)
         {

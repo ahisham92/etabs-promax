@@ -14,6 +14,8 @@ static void Near(double expected, double actual, string what)
 {
     if (Math.Abs(expected - actual) > 1e-6) throw new Exception($"{what}: expected {expected}, got {actual}");
 }
+E2kWriter.SavedAt = new DateTime(2026, 11, 25, 0, 57, 6);
+var etabs23 = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "samples", "etabs23-default.e2k"));
 var sample = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "samples", "etabs-style.e2k"));
 
 Test("tokenizer keeps quoted text whole", () =>
@@ -42,6 +44,7 @@ Test("template frame: counts", () =>
 {
     var m = Templates.ConcreteFrame("T", [6, 6], [5], 3, 3.5);
     Equal(4, m.Stories.Count, "levels");
+    Equal("Dead,Live", string.Join(",", m.LoadPatterns.Select(p => p.Name)), "ETABS's own load patterns");
     Equal(6, m.Points.Count, "plan points");
     Equal(18, Physical.Frames(m).Count(x => x.Kind == LineKind.Column), "columns");
     Equal(21, Physical.Frames(m).Count(x => x.Kind == LineKind.Beam), "beams");
@@ -61,19 +64,23 @@ Test("written file has the lines ETABS expects", () =>
     var text = E2kWriter.Write(Templates.ConcreteFrame("My \"tower\"", [6], [5], 1, 3));
     foreach (var expected in new[]
              {
-                 "$ PROGRAM INFORMATION", "  PROGRAM  \"ETABS\"  VERSION  \"23.0.0\"", "  UNITS  \"KN\"  \"M\"  \"C\"",
-                 "  TITLE1  \"My 'tower'\"", "$ STORIES - IN SEQUENCE FROM TOP", "  STORY  \"Story1\"  HEIGHT  3", "  STORY  \"Base\"  ELEV  0",
+                 "$ File model.e2k saved 11/25/2026 12:57:06 AM", "$ PROGRAM INFORMATION", "  PROGRAM  \"ETABS\"  VERSION  \"23.2.0\"", "  UNITS  \"KN\"  \"M\"  \"C\"",
+                 "  TITLE2  \"My 'tower'\"", "  PREFERENCE  MERGETOL 0.001", "  RLLF  METHOD \"ASCE7-10\"  USEDEFAULTMIN \"YES\"", "$ STORIES - IN SEQUENCE FROM TOP", "  STORY  \"Story1\"  HEIGHT  3", "  STORY  \"Base\"  ELEV  0",
                  "  POINT  \"1\"  0  0", "  LINE  \"C1\"  COLUMN  \"1\"  \"1\"  1", "  LINE  \"B1\"  BEAM  \"1\"  \"3\"  0",
                  "  AREA  \"F1\"  FLOOR  4  \"1\"  \"3\"  \"4\"  \"2\"  0  0  0  0",
                  "  POINTASSIGN  \"1\"  \"Base\"  RESTRAINT  \"UX UY UZ RX RY RZ\"",
-                 "  LINEASSIGN  \"C1\"  \"Story1\"  SECTION  \"C500x500\"",
-                 "  AREAASSIGN  \"F1\"  \"Story1\"  SECTION  \"S200\"  DIAPH  \"D1\"",
+                 "  LINEASSIGN  \"C1\"  \"Story1\"  SECTION  \"C500x500\"  MINNUMSTA  3  AUTOMESH  \"YES\"  MESHATINTERSECTIONS  \"YES\"",
+                 "  CONCRETESECTION  \"B300x600\"  LONGBARMATERIAL  \"DefaultRebar_500\"  CONFINEBARMATERIAL  \"DefaultRebar_500\"  TYPE  \"Beam\"  COVERTOP  0.06  COVERBOTTOM  0.06  ATI  0  ABI  0  ATJ  0  ABJ  0",
+                 "  FRAMESECTION  \"C500x500\"  MATERIAL  \"C30/37\"  SHAPE  \"Concrete Rectangular\"  D  0.5  B  0.5",
+                 "  PROJECTINFO  MODELNAME  \"My 'tower'\"", "$ MASS SOURCE", "$ CONCRETE DESIGN PREFERENCES", "  END",
+                 "  AREAASSIGN  \"F1\"  \"Story1\"  SECTION  \"S200\"  DIAPH  \"D1\"  OBJMESHTYPE  \"DEFAULT\"  ADDRESTRAINT  \"No\"  CARDINALPOINT  \"TOP\"  TRANSFORMSTIFFNESSFOROFFSETS  \"No\"",
                  "  LOADPATTERN  \"Dead\"  TYPE  \"Dead\"  SELFWEIGHT  1",
                  "  AREALOAD  \"F1\"  \"Story1\"  TYPE  \"UNIFF\"  DIR  \"GRAV\"  LC  \"Live\"  FVAL  3",
-                 "  COMBO  \"Gravity\"  LOADCASE  \"Live\"  SF  1.6", "$ END OF MODEL FILE",
+                 "  AREALOAD  \"F1\"  \"Story1\"  TYPE  \"UNIFF\"  DIR  \"GRAV\"  LC  \"Dead\"  FVAL  2", "$ END OF MODEL FILE",
              })
         Check(text.Contains(expected + "\r\n"), "missing line: " + expected);
     var stories = text.IndexOf("$ STORIES", StringComparison.Ordinal);
+    Check(!text.Contains("TITLE2  \"2\"") && !text.Contains("SteelCol\"  \"Story"), "nothing of the seed's own building is left");
     Check(text.IndexOf("\"Story1\"", stories, StringComparison.Ordinal) < text.IndexOf("\"Base\"", stories, StringComparison.Ordinal), "stories are top first");
 });
 
@@ -105,6 +112,31 @@ Test("reads an ETABS-style file", () =>
     Equal("D1", m.AreaAssigns.Single(a => a.Label == "F1").Diaphragm, "slab diaphragm");
     Equal("Dead", m.LineLoads.Single().Pattern, "line load pattern");
     Equal(2, m.LoadCases.Count, "load cases"); Equal(3, m.Combos.Single().Lines.Count, "combo lines");
+});
+
+Test("a real ETABS 23.2 export reads and writes back whole", () =>
+{
+    var m = E2kReader.Read(etabs23);
+    Equal("23.2.0", m.ProgramVersion, "version");
+    Equal(64, Physical.Frames(m).Count(x => x.Kind == LineKind.Column), "columns");
+    Equal(48, Physical.Frames(m).Count(x => x.Kind == LineKind.Beam), "beams");
+    Equal(20, Physical.Areas(m).Count(), "slabs and drops");
+    Equal(16, m.PointAssigns.Count(a => a.Restraint == "UX UY UZ"), "pinned supports");
+    Equal("Modal,Dead,Live", string.Join(",", m.LoadCases.Select(c => c.Name)), "load cases");
+    Check(ModelChecks.Run(m).TrueForAll(f => f.Severity == Severity.Warning), "no errors in ETABS's own model");
+    var text = E2kWriter.Write(m);
+    // Every word of every line of the original is in the output, in a section of the same name, in the same order of sections.
+    static string Squash(string line) => string.Join(" ", E2kText.Tokenize(line));
+    var written = text.Split('\n').Select(Squash).Where(l => l.Length > 0).ToList();
+    var original = etabs23.Split('\n').Select(Squash).Where(l => l.Length > 0).ToList();
+    Equal(string.Join("|", original.Where(l => l.StartsWith('$')).Skip(1)), string.Join("|", written.Where(l => l.StartsWith('$')).Skip(1)), "section headings and their order");
+    var writtenWords = written.Where(l => !l.StartsWith('$')).SelectMany(E2kText.Tokenize).GroupBy(w => w).ToDictionary(g => g.Key, g => g.Count());
+    var originalWords = original.Where(l => !l.StartsWith('$')).SelectMany(E2kText.Tokenize).GroupBy(w => w).ToDictionary(g => g.Key, g => g.Count());
+    foreach (var (word, count) in originalWords)
+        Equal(count, writtenWords.GetValueOrDefault(word), $"how many times '{word}' appears");
+    Equal(originalWords.Count, writtenWords.Count, "no new words");
+    Equal(original.Count, written.Count, "same number of lines");
+    Equal(text, E2kWriter.Write(E2kReader.Read(text)), "second pass is stable");
 });
 
 Test("keeps what it doesn't understand", () =>

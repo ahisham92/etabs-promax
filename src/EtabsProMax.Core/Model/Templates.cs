@@ -5,7 +5,7 @@ public static class Templates
 {
     /// <summary>
     /// A regular concrete frame building in kN and m: columns on every grid crossing, beams along every grid line,
-    /// one slab per bay, fixed supports, Dead (with self weight), SDL and Live patterns and two combinations.
+    /// one slab per bay, fixed supports, and ETABS's own Dead (self weight plus the superimposed dead load) and Live patterns.
     /// <paramref name="xSpans"/> and <paramref name="ySpans"/> are the bay sizes; grids are lettered along X and numbered along Y.
     /// </summary>
     public static StructuralModel ConcreteFrame(string title, double[] xSpans, double[] ySpans, int stories, double storyHeight,
@@ -13,14 +13,10 @@ public static class Templates
     {
         if (xSpans.Length == 0 || ySpans.Length == 0 || stories < 1) throw new ArgumentException("Give at least one bay each way and one story.");
         var m = ModelEdit.New(title);
-        // C30/37-like concrete: fc 30 MPa, E 33 GPa, 25 kN/m3.
-        m.AddConcrete("C30", 30000, 33000000, 25);
-        m.AddRectangularSection("C500x500", "C30", 0.5, 0.5);
-        m.AddRectangularSection("B300x600", "C30", 0.6, 0.3);
-        m.AddSlabSection("S200", "C30", 0.2);
-        m.AddLoadPattern("Dead", "Dead", 1);
-        m.AddLoadPattern("SDL", "Super Dead");
-        m.AddLoadPattern("Live", "Live");
+        const string concrete = ModelEdit.DefaultConcrete;
+        m.AddRectangularSection("C500x500", concrete, 0.5, 0.5, beam: false);
+        m.AddRectangularSection("B300x600", concrete, 0.6, 0.3, beam: true);
+        m.AddSlabSection("S200", concrete, 0.2);
 
         var xs = Cumulative(xSpans); var ys = Cumulative(ySpans);
         for (var i = 0; i < xs.Length; i++) m.AddGrid(Letters(i), "X", xs[i]);
@@ -37,12 +33,10 @@ public static class Templates
                 for (var j = 0; j + 1 < ys.Length; j++)
                 {
                     var slab = m.AddSlab([(xs[i], ys[j]), (xs[i + 1], ys[j]), (xs[i + 1], ys[j + 1]), (xs[i], ys[j + 1])], story, "S200", "D1");
-                    if (sdl != 0) m.AddAreaLoad(slab.Label, story, "SDL", sdl);
+                    if (sdl != 0) m.AddAreaLoad(slab.Label, story, "Dead", sdl);
                     if (live != 0) m.AddAreaLoad(slab.Label, story, "Live", live);
                 }
         }
-        m.AddCombo("Service", ("Dead", 1), ("SDL", 1), ("Live", 1));
-        m.AddCombo("Gravity", ("Dead", 1.2), ("SDL", 1.2), ("Live", 1.6));
         return m;
     }
 

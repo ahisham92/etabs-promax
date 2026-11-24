@@ -5,7 +5,7 @@ $ PROGRAM INFORMATION
 
 $ CONTROLS
   UNITS  "KN"  "M"  "C"
-  TITLE1  "Sample two-story frame"
+  TITLE2  "Sample two-story frame"
   PREFERENCE  MERGETOL 0.001
   RLLF  METHOD "ASCE7-10"  USEDEFAULTMIN "YES"
 

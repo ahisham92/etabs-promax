@@ -9,4 +9,8 @@
     <Version>0.1.0</Version>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- A new model as ETABS 23 itself exports it (File > New Model, defaults): the settings every file needs. -->
+    <EmbeddedResource Include="Seeds/etabs23.e2k" LogicalName="etabs23.e2k" />
+  </ItemGroup>
 </Project>

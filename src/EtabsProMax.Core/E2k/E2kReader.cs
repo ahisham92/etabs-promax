@@ -75,7 +75,7 @@ public static class E2kReader
                     Temperature = rest.Count > 2 ? Unquote(rest[2]) : "C",
                 };
                 return true;
-            case "TITLE1":
+            case "TITLE2":   // the name of the model; TITLE1 (the company) is kept as read
                 model.Title = Name(0);
                 return true;
             case "STORY":
