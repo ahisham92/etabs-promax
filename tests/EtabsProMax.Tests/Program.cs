@@ -1,3 +1,9 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using EtabsProMax.Assistant.Chat;
+using EtabsProMax.Assistant.Etabs;
+using EtabsProMax.Assistant.Mcp;
+using EtabsProMax.Assistant.Tools;
 using EtabsProMax.Checks;
 using EtabsProMax.E2k;
 using EtabsProMax.Model;
@@ -253,6 +259,131 @@ Test("a file that is not an ETABS text file", () =>
 {
     try { E2kReader.Read("hello\nworld"); throw new Exception("accepted a non-e2k file"); }
     catch (E2kFormatException ex) { Check(ex.Message.Contains("not an ETABS text file"), ex.Message); }
+});
+
+// The assistant, on a model kept in memory (no ETABS).
+JsonElement J(string json) => JsonDocument.Parse(json).RootElement;
+McpEndpoint Endpoint(MemoryEtabs e, bool allow = true, bool ask = false, List<string>? asked = null) =>
+    new(e, EtabsTools.All, (_, summary) => { asked?.Add(summary); return Task.FromResult(allow); }, () => ask);
+JsonNode Call(McpEndpoint mcp, string tool, string args)
+{
+    var (text, failed) = mcp.CallAsync(tool, J(args)).GetAwaiter().GetResult();
+    if (failed) throw new Exception(text);
+    return JsonNode.Parse(text)!;
+}
+string Refused(McpEndpoint mcp, string tool, string args)
+{
+    var (text, failed) = mcp.CallAsync(tool, J(args)).GetAwaiter().GetResult();
+    Check(failed, $"{tool} should have been refused, but gave {text}");
+    return text;
+}
+
+Test("assistant: a frame is built with the tools", () =>
+{
+    var e = new MemoryEtabs();
+    var mcp = Endpoint(e);
+    Equal(12, (int)Call(mcp, "add_columns", """{"points":[[0,0],[6,0],[6,5],[0,5]],"section":"c500x500"}""")["added"]!, "4 columns on 3 stories");
+    Equal(4, (int)Call(mcp, "add_beams", """{"lines":[[0,0,6,0],[6,0,6,5],[6,5,0,5],[0,5,0,0]],"stories":["Story3"],"section":"B300x600"}""")["added"]!, "beams on one story");
+    Equal(3, (int)Call(mcp, "add_slabs", """{"outlines":[[[0,0],[6,0],[6,5],[0,5]]],"section":"S200"}""")["added"]!, "a slab per story");
+    Equal(3, (int)Call(mcp, "add_walls", """{"lines":[[0,0,0,5]],"section":"W250"}""")["added"]!, "a wall panel per story");
+    var context = Call(mcp, "get_model_context", "{}");
+    Equal(12, (int)context["counts"]!["columns"]!, "columns"); Equal(4, (int)context["counts"]!["beams"]!, "beams");
+    Equal(3, (int)context["counts"]!["floors"]!, "floors"); Equal(3, (int)context["counts"]!["walls"]!, "walls");
+    Equal("m", (string)context["units"]!["length"]!, "units");
+    var column = e.Frames().First(f => f.Kind == "column" && f.Story == "Story2");
+    Near(3.2, column.Z1, "a column starts at the story below"); Near(6.4, column.Z2, "and ends at its story");
+    var beams = Call(mcp, "query_objects", """{"kind":"beam"}""");
+    Equal(4, (int)beams["count"]!, "query by kind"); Equal(4, (int)beams["by_section"]!["B300x600"]!, "counts by section");
+    Equal(4, (int)Call(mcp, "set_supports", """{"type":"fixed","at_base":true}""")["done"]!, "supports under the columns and the wall");
+    Check(e.Restraint(e.Points().First(p => p.Z == 0).Name).All(r => r), "fixed means all six");
+});
+
+Test("assistant: wrong input is answered with what the model has", () =>
+{
+    var e = new MemoryEtabs();
+    var mcp = Endpoint(e);
+    Check(Refused(mcp, "add_columns", """{"points":[[0,0]],"section":"C900"}""").Contains("C500x500"), "unknown section lists the real ones");
+    Check(Refused(mcp, "add_beams", """{"lines":[[0,0,1,0]],"stories":["Roof"],"section":"B300x600"}""").Contains("Story1, Story2, Story3"), "unknown story lists the real ones");
+    Check(Refused(mcp, "add_load_pattern", """{"name":"SDL","type":"Superimposed Dead"}""").Contains("Super Dead"), "unknown pattern type");
+    Check(Refused(mcp, "read_table", """{"table":"Drift"}""").Contains("Story Drifts"), "a close table name is offered");
+    Check(Refused(mcp, "no_such_tool", "{}").Contains("no tool"), "unknown tool");
+    Equal(0, e.Frames().Count, "nothing was added");
+});
+
+Test("assistant: loads, combinations and tables", () =>
+{
+    var e = new MemoryEtabs();
+    var mcp = Endpoint(e);
+    var beam = (string)Call(mcp, "add_beams", """{"lines":[[0,0,6,0]],"stories":["Story1"],"section":"B300x600"}""")["names"]![0]!;
+    Call(mcp, "add_load_pattern", """{"name":"SDL","type":"super dead"}""");
+    Call(mcp, "set_loads", $$"""{"frames":["{{beam}}"],"pattern":"sdl","value":8}""");
+    Call(mcp, "set_loads", $$"""{"frames":["{{beam}}"],"pattern":"SDL","value":2,"add":true}""");
+    Near(10, e.Loads[$"frame {beam} / SDL"], "the second load was added to the first");
+    Equal(3, (int)Call(mcp, "add_combination", """{"name":"ULS","cases":[{"case":"Dead","factor":1.2},{"case":"SDL","factor":1.2},{"case":"Live","factor":1.6}]}""")["cases"]!, "combination");
+    Check(Refused(mcp, "add_combination", """{"name":"X","cases":[{"case":"Wind","factor":1}]}""").Contains("Dead, Live, SDL"), "unknown case");
+    var table = Call(mcp, "read_table", """{"table":"story definitions","where":{"Story":"Story2"},"fields":["Story","Height"]}""");
+    Equal(1, (int)table["row_count"]!, "where keeps one row"); Equal("3.2", (string)table["rows"]![0]![1]!, "fields keeps two columns");
+    Check(((string)Call(mcp, "read_table", """{"table":"Story Drifts"}""")["note"]!).Contains("finished analysis"), "an empty result table says why");
+    Equal(2, (int)Call(mcp, "list_tables", "{}")["count"]!, "empty tables are left out");
+    var selected = Call(mcp, "select_objects", $$"""{"frames":["{{beam}}","nope"]}""");
+    Equal(1, (int)selected["selected"]!, "one selected"); Equal(1, selected["failed"]!.AsArray().Count, "one reported");
+});
+
+Test("assistant: the engineer is asked before deletes, saves and runs", () =>
+{
+    var e = new MemoryEtabs();
+    var asked = new List<string>();
+    var no = Endpoint(e, allow: false, asked: asked);
+    var beam = (string)Call(no, "add_beams", """{"lines":[[0,0,6,0]],"stories":["Story1"],"section":"B300x600"}""")["names"]![0]!;
+    Equal(0, asked.Count, "a normal change is not asked about by default");
+    Check(Refused(no, "delete_objects", $$"""{"frames":["{{beam}}"]}""").Contains("declined"), "declined delete");
+    Check(Refused(no, "save_model", "{}").Contains("declined"), "declined save");
+    Check(Refused(no, "run_analysis", "{}").Contains("declined"), "declined run");
+    Equal(1, e.Frames().Count, "the beam is still there"); Equal(0, e.Saves + e.Runs, "nothing saved or run");
+    Equal("Delete 1 frame", asked[0], "the question says what will happen");
+    var strict = Endpoint(e, allow: false, ask: true);
+    Check(Refused(strict, "add_beams", """{"lines":[[0,1,6,1]],"section":"B300x600"}""").Contains("declined"), "with ask-before-changes every change is asked");
+    Call(strict, "query_objects", "{}");
+    var yes = Endpoint(e);
+    Equal(1, (int)Call(yes, "delete_objects", $$"""{"frames":["{{beam}}"]}""")["done"]!, "allowed delete");
+    Call(yes, "run_analysis", "{}");
+    Check(Refused(yes, "add_load_pattern", """{"name":"W","type":"Wind"}""").Contains("locked"), "a locked model says so");
+});
+
+Test("assistant: the MCP messages Claude Code sends", () =>
+{
+    var mcp = Endpoint(new MemoryEtabs());
+    JsonObject? Send(string json) => mcp.HandleAsync(J(json)).GetAwaiter().GetResult();
+    var init = Send("""{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{}}}""")!;
+    Equal("2025-06-18", (string)init["result"]!["protocolVersion"]!, "the asked version is answered");
+    Check(Send("""{"jsonrpc":"2.0","method":"notifications/initialized"}""") is null, "a notification gets no answer");
+    var list = Send("""{"jsonrpc":"2.0","id":2,"method":"tools/list"}""")!["result"]!["tools"]!.AsArray();
+    Equal(EtabsTools.All.Count, list.Count, "every tool is listed");
+    foreach (var tool in list) Equal("object", (string)tool!["inputSchema"]!["type"]!, $"schema of {tool["name"]}");
+    Equal(EtabsTools.All.Count, EtabsTools.All.Select(t => t.Name).Distinct().Count(), "tool names are unique");
+    var call = Send("""{"jsonrpc":"2.0","id":"a","method":"tools/call","params":{"name":"get_model_context","arguments":{}}}""")!;
+    Equal("a", (string)call["id"]!, "the id comes back"); Equal(false, (bool)call["result"]!["isError"]!, "not an error");
+    Check(((string)call["result"]!["content"]![0]!["text"]!).Contains("Story3"), "the result is text");
+    Equal(-32601, (int)Send("""{"jsonrpc":"2.0","id":3,"method":"resources/list"}""")!["error"]!["code"]!, "unknown method");
+});
+
+Test("assistant: Claude Code's command line and stream", () =>
+{
+    Equal("\"a b\"", ClaudeCli.Quote("a b"), "spaces are quoted"); Equal("\"mcp__x__*\"", ClaudeCli.Quote("mcp__x__*"), "so are stars");
+    Equal("\"C:\\dir with space\\\\\"", ClaudeCli.Quote("C:\\dir with space\\"), "a trailing backslash is doubled");
+    var start = ClaudeCli.EngineStart(new ClaudeCli.Install("claude.exe", "2.0.0"), "http://127.0.0.1:1/mcp", "secret", "abc");
+    Check(start.Arguments.Contains("--permission-mode dontAsk") && start.Arguments.Contains("--strict-mcp-config") && start.Arguments.Contains("--resume abc"), start.Arguments);
+    Check(!start.Arguments.Contains("Bash") && !start.Arguments.Contains("Write"), "no shell or file editing");
+    Check(!start.Environment.ContainsKey("ANTHROPIC_API_KEY"), "the chat runs on the plan, not an API key");
+    using var hub = new ChatHub(new MemoryEtabs(), () => ("", ""));
+    var (id, events) = hub.Listen();
+    hub.Read("""{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"12 columns"}}}""");
+    hub.Read("not json"); hub.Read("""{"type":"assistant","message":{}}""");
+    hub.Read("""{"type":"result","subtype":"success","is_error":false,"result":"12 columns."}""");
+    Check(events.TryRead(out var first) && first.Contains("\"text\"") && first.Contains("12 columns"), "text is passed on as it arrives");
+    Check(events.TryRead(out var done) && done.Contains("\"done\"") && done.Contains("\"failed\":false"), "the result ends the turn");
+    Equal("assistant", (string)hub.State()["history"]![0]!["role"]!, "the answer is kept for the window");
+    hub.StopListening(id);
 });
 
 var failed = 0;

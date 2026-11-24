@@ -15,3 +15,16 @@ jobs:
           dotnet-version: 8.0.x
       - run: dotnet build EtabsProMax.sln -c Release
       - run: dotnet run -c Release --no-build --project tests/EtabsProMax.Tests
+  assistant:
+    # The assistant as one program for Windows, kept with the run so it can be downloaded and tried.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - run: dotnet publish src/EtabsProMax.Assistant -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o publish
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EtabsProMax-win-x64
+          path: publish/EtabsProMax.exe

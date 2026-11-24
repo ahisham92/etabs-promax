@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <!-- The assistant: its own small window beside ETABS. It attaches to the running, licensed ETABS through ETABS's API,
+       serves the chat window on this PC only (127.0.0.1), and runs the chat on the Claude Code installed on this PC.
+       It needs no ETABS file to build: ETABS is reached by name at run time. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>EtabsProMax</AssemblyName>
+    <RootNamespace>EtabsProMax.Assistant</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <Version>0.2.0</Version>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../EtabsProMax.Core/EtabsProMax.Core.csproj" />
+    <EmbeddedResource Include="wwwroot/index.html" LogicalName="index.html" />
+    <InternalsVisibleTo Include="EtabsProMax.Tests" />
+  </ItemGroup>
+</Project>
