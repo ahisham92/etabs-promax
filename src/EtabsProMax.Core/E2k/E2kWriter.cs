@@ -1,0 +1,171 @@
+using System.Text;
+using EtabsProMax.Model;
+using static EtabsProMax.E2k.E2kText;
+using S = EtabsProMax.E2k.E2kSections;
+
+namespace EtabsProMax.E2k;
+
+/// <summary>Writes a <see cref="StructuralModel"/> as an ETABS text file (.e2k), which licensed ETABS opens with
+/// File > Import > ETABS .e2k Text File.</summary>
+public static class E2kWriter
+{
+    public static void WriteFile(StructuralModel model, string path) => File.WriteAllText(path, Write(model, path));
+
+    public static string Write(StructuralModel model, string? path = null)
+    {
+        var text = new StringBuilder();
+        text.Append("$ File ").Append(path ?? "model.e2k").Append(" written by ETABS ProMax").Append("\r\n");
+        var passthrough = model.Passthrough.ToList();
+        EmitPassthroughAfter(text, passthrough, "");
+
+        foreach (var heading in S.Order)
+        {
+            var lines = SectionLines(model, heading).ToList();
+            if (model.UnparsedLines.TryGetValue(heading, out var unparsed)) lines.AddRange(unparsed);
+            if (lines.Count > 0) Section(text, heading, lines);
+            EmitPassthroughAfter(text, passthrough, heading);
+        }
+        // Sections whose place in the file is not known (the section they followed is not in this model).
+        foreach (var section in passthrough.ToList()) Section(text, section.Heading, section.Lines);
+
+        text.Append("\r\n$ ").Append(S.End).Append("\r\n");
+        return text.ToString();
+    }
+
+    private static void EmitPassthroughAfter(StringBuilder text, List<RawSection> left, string heading)
+    {
+        // A kept section may itself be followed by another kept section: follow the chain.
+        for (var next = left.Find(s => s.After == heading); next is not null; next = left.Find(s => s.After == heading))
+        {
+            left.Remove(next);
+            Section(text, next.Heading, next.Lines);
+            EmitPassthroughAfter(text, left, next.Heading);
+        }
+    }
+
+    private static void Section(StringBuilder text, string heading, IEnumerable<string> lines)
+    {
+        text.Append("\r\n$ ").Append(heading).Append("\r\n");
+        foreach (var line in lines) text.Append(line).Append("\r\n");
+    }
+
+    private static IEnumerable<string> SectionLines(StructuralModel m, string heading)
+    {
+        switch (heading)
+        {
+            case S.Program:
+                yield return Line(["PROGRAM", Quote("ETABS"), "VERSION", Quote(m.ProgramVersion)]);
+                break;
+            case S.Controls:
+                yield return Line(["UNITS", Quote(m.Units.Force), Quote(m.Units.Length), Quote(m.Units.Temperature)]);
+                if (m.Title.Length > 0) yield return Line(["TITLE1", Quote(m.Title)]);
+                foreach (var line in m.Controls) yield return line;
+                break;
+            case S.Stories:
+                for (var i = m.Stories.Count - 1; i >= 0; i--)
+                {
+                    var s = m.Stories[i];
+                    yield return i == 0
+                        ? Line(["STORY", Quote(s.Name), "ELEV", Number(s.Elevation)], s.Extra)
+                        : Line(["STORY", Quote(s.Name), "HEIGHT", Number(s.Height)], s.Extra);
+                }
+                break;
+            case S.Grids:
+                if (m.Grids.Count == 0) break;
+                yield return Line(["GRIDSYSTEM", Quote(m.GridSystem)], m.GridSystemExtra);
+                foreach (var g in m.Grids)
+                    yield return Line(["GRID", Quote(m.GridSystem), "LABEL", Quote(g.Label), "DIR", Quote(g.Direction), "COORD", Number(g.Coordinate)], g.Extra);
+                break;
+            case S.Diaphragms:
+                foreach (var d in m.Diaphragms) yield return Line(["DIAPHRAGM", Quote(d.Name), "TYPE", d.Type]);
+                break;
+            case S.Materials:
+                foreach (var line in DefinitionLines("MATERIAL", m.Materials)) yield return line;
+                break;
+            case S.FrameSections:
+                foreach (var line in DefinitionLines("FRAMESECTION", m.FrameSections)) yield return line;
+                break;
+            case S.SlabProperties:
+                foreach (var line in DefinitionLines("SHELLPROP", m.ShellSections.Where(s => !s.IsWall && !IsDeck(s)))) yield return line;
+                break;
+            case S.DeckProperties:
+                foreach (var line in DefinitionLines("SHELLPROP", m.ShellSections.Where(IsDeck))) yield return line;
+                break;
+            case S.WallProperties:
+                foreach (var line in DefinitionLines("SHELLPROP", m.ShellSections.Where(s => s.IsWall))) yield return line;
+                break;
+            case S.Points:
+                foreach (var p in m.Points)
+                    yield return p.Below == 0
+                        ? Line(["POINT", Quote(p.Name), Number(p.X), Number(p.Y)])
+                        : Line(["POINT", Quote(p.Name), Number(p.X), Number(p.Y), Number(p.Below)]);
+                break;
+            case S.Lines:
+                foreach (var l in m.Lines)
+                    yield return Line(["LINE", Quote(l.Label), l.Kind.ToString().ToUpperInvariant(), Quote(l.PointI), Quote(l.PointJ), l.StoriesBelowI.ToString()]);
+                break;
+            case S.Areas:
+                foreach (var a in m.Areas)
+                    yield return Line(
+                        ["AREA", Quote(a.Label), a.Kind switch { AreaKind.Wall => "PANEL", AreaKind.Ramp => "RAMP", _ => "FLOOR" }, a.PointNames.Count.ToString()],
+                        a.PointNames.Select(Quote), a.StoriesBelow.Select(o => o.ToString()));
+                break;
+            case S.PointAssigns:
+                foreach (var a in m.PointAssigns)
+                    foreach (var line in AssignLines(["POINTASSIGN", Quote(a.Point), Quote(a.Story)],
+                                 [.. Pair("RESTRAINT", a.Restraint), .. Pair("DIAPH", a.Diaphragm)], a.Extra))
+                        yield return line;
+                break;
+            case S.LineAssigns:
+                foreach (var a in m.LineAssigns)
+                    foreach (var line in AssignLines(["LINEASSIGN", Quote(a.Label), Quote(a.Story)], [.. Pair("SECTION", a.Section)], a.Extra))
+                        yield return line;
+                break;
+            case S.AreaAssigns:
+                foreach (var a in m.AreaAssigns)
+                    foreach (var line in AssignLines(["AREAASSIGN", Quote(a.Label), Quote(a.Story)],
+                                 [.. Pair("SECTION", a.Section), .. Pair("DIAPH", a.Diaphragm)], a.Extra))
+                        yield return line;
+                break;
+            case S.LoadPatterns:
+                foreach (var p in m.LoadPatterns)
+                    yield return Line(["LOADPATTERN", Quote(p.Name), "TYPE", Quote(p.Type), "SELFWEIGHT", Number(p.SelfWeight)], p.Extra);
+                break;
+            case S.PointLoads:
+                foreach (var l in m.PointLoads) yield return Line(["POINTLOAD", Quote(l.Object), Quote(l.Story)], l.Tokens);
+                break;
+            case S.FrameLoads:
+                foreach (var l in m.LineLoads) yield return Line(["LINELOAD", Quote(l.Object), Quote(l.Story)], l.Tokens);
+                break;
+            case S.ShellLoads:
+                foreach (var l in m.AreaLoads) yield return Line(["AREALOAD", Quote(l.Object), Quote(l.Story)], l.Tokens);
+                break;
+            case S.LoadCases:
+                foreach (var c in m.LoadCases)
+                    foreach (var line in c.Lines) yield return Line(["LOADCASE", Quote(c.Name)], line);
+                break;
+            case S.Combos:
+                foreach (var c in m.Combos)
+                    foreach (var line in c.Lines) yield return Line(["COMBO", Quote(c.Name)], line);
+                break;
+        }
+    }
+
+    private static bool IsDeck(ShellSection s) => string.Equals(s.Get("PROPTYPE"), "Deck", StringComparison.OrdinalIgnoreCase);
+
+    private static IEnumerable<string> Pair(string key, string? value) => value is null ? [] : [key, Quote(value)];
+
+    private static IEnumerable<string> DefinitionLines(string keyword, IEnumerable<Definition> items)
+    {
+        foreach (var item in items)
+            foreach (var line in item.Lines)
+                yield return Line([keyword, Quote(item.Name)], line);
+    }
+
+    private static IEnumerable<string> AssignLines(string[] head, List<string> named, List<List<string>> extra)
+    {
+        if (named.Count == 0 && extra.Count == 0) yield break;
+        yield return Line(head, named, extra.Count > 0 ? extra[0] : []);
+        foreach (var more in extra.Skip(1)) yield return Line(head, more);
+    }
+}
