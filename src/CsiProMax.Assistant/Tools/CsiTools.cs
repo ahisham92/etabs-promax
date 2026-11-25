@@ -681,6 +681,7 @@ public static class CsiTools
 
         var original = rows.Select(r => r.ToArray()).ToList();
         var changed = 0;
+        var updated = new List<string[]>();
         switch (action)
         {
             case "add":
@@ -700,6 +701,7 @@ public static class CsiTools
                 foreach (var row in rows.Where(r => match.All(c => string.Equals(r[c.Index], c.Value, StringComparison.OrdinalIgnoreCase))))
                 {
                     foreach (var (i, v) in set) row[i] = v;
+                    updated.Add(row);
                     changed++;
                 }
                 if (changed == 0) throw new ToolInputException($"No row of {table.Name} matches. Read it with action 'read' first.");
@@ -719,6 +721,38 @@ public static class CsiTools
         // A refused apply must not cost the model its table: SAP2000 26 refused an update of "Load Pattern Definitions"
         // and the scratch model was left with no load patterns at all (0.4.22 field test). The edit is cancelled, the
         // table read back, and the rows as they were put back when any are gone.
+        // SAP2000 26 refuses every import of "Load Pattern Definitions" for a model with loads assigned, even of its own
+        // rows unchanged, and is left with no load patterns at all (tried on a scratch SAP2000 26 from the field test's
+        // .s2k: all rows, the changed row alone, analysed or not, with or without GUIDs, answer 1 and no patterns after).
+        // A change of the self weight multiplier only is therefore made through its API, pattern by pattern.
+        if (action == "update" && e.Program.Key == CsiProgram.Sap2000.Key && string.Equals(table.Key, "Load Pattern Definitions", StringComparison.OrdinalIgnoreCase))
+        {
+            var set = Pairs("set");
+            int nameAt = Array.FindIndex(fields, f => string.Equals(f, "LoadPat", StringComparison.OrdinalIgnoreCase)),
+                weightAt = Array.FindIndex(fields, f => string.Equals(f, "SelfWtMult", StringComparison.OrdinalIgnoreCase));
+            if (nameAt >= 0 && weightAt >= 0 && set.All(p => p.Index == weightAt))
+            {
+                var done = new JsonArray();
+                e.Raw("set the self weight multipliers", m =>
+                {
+                    if (Convert.ToBoolean(m.GetModelIsLocked())) Ok(program, m.SetModelIsLocked(false), "unlock the model for the change");
+                    foreach (var row in updated)
+                    {
+                        var weight = double.Parse(row[weightAt], NumberStyles.Float, CultureInfo.InvariantCulture);
+                        Ok(program, m.LoadPatterns.SetSelfWTMultiplier(row[nameAt], weight), $"set the self weight multiplier of {row[nameAt]}");
+                        done.Add($"{row[nameAt]}: {row[weightAt]}");
+                    }
+                    return null;
+                });
+                e.Refresh();
+                return new JsonObject
+                {
+                    ["table"] = table.Name, ["rows_changed"] = changed, ["applied"] = true, ["set"] = done,
+                    ["note"] = $"Set through {program}'s API (LoadPatterns.SetSelfWTMultiplier): {program} does not take this table back for a model with loads.",
+                };
+            }
+        }
+
         var unlocked = false;
         var savedAs = "";
         var log = (JsonObject)e.Raw("apply the table edit", m =>

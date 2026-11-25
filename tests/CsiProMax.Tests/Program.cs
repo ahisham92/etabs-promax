@@ -997,6 +997,14 @@ Test("edit_table: the model is saved before the edit and opened again when the p
         "a refused edit does not open the model again from the file saved just before it");
     Check(body.Contains("\".sdb\", \".edb\", \".fdb\""), "a working file (ETABS's .$et) could be saved over");
 });
+Test("edit_table: a SAP2000 pattern's self weight is set through the API, never by importing the table back", () =>
+{
+    var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Tools", "CsiTools.cs"));
+    var api = source.IndexOf("m.LoadPatterns.SetSelfWTMultiplier(row[nameAt], weight)", StringComparison.Ordinal);
+    var import = source.IndexOf("var log = (JsonObject)e.Raw(\"apply the table edit\"", StringComparison.Ordinal);
+    Check(api > 0 && import > api, "SAP2000's self weight change does not go through LoadPatterns.SetSelfWTMultiplier before the table import");
+    Check(source.Contains("e.Program.Key == CsiProgram.Sap2000.Key && string.Equals(table.Key, \"Load Pattern Definitions\""), "the API route is not for SAP2000's Load Pattern Definitions");
+});
 foreach (var (name, body) in CdtSdkTests.All()) Test(name, body);
 foreach (var (name, body) in HandModelTests.All()) Test(name, body);
 foreach (var (name, body) in AiModeTests.All()) Test(name, body);
