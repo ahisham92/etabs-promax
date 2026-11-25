@@ -64,6 +64,8 @@ public static class Pack
             ["load_cases"] = Texts(e.LoadCases()), ["combinations"] = Texts(e.Combos()),
         };
 
+        Drawing.AddTo(model, e, points);
+
         var known = withTables ? e.Tables() : [];
         var wanted = new List<TableName>();
         foreach (var name in UsualTables)
@@ -135,8 +137,8 @@ public static class Pack
         }
         var content = new JsonObject
         {
-            ["manifest"] = Text("manifest.json") ?? throw new InvalidDataException("This is not an CSI ProMax pack (it has no manifest)."),
-            ["model"] = Text("model.json") ?? throw new InvalidDataException("This is not an CSI ProMax pack (it has no model)."),
+            ["manifest"] = Text("manifest.json") ?? throw new InvalidDataException("This is not a CSI ProMax pack (it has no manifest)."),
+            ["model"] = Text("model.json") ?? throw new InvalidDataException("This is not a CSI ProMax pack (it has no model)."),
             ["checks"] = Text("checks.json"),
             ["comments"] = Text("comments.json") ?? new JsonArray(),
         };
@@ -169,9 +171,8 @@ public static class Pack
     public static string LiveViewerHtml(JsonObject content, int revision)
     {
         var html = ViewerHtml(content);
-        var live = "<script>(function(){let rev=" + revision.ToString(CultureInfo.InvariantCulture) + ";setInterval(async()=>{try{const r=await fetch('model?rev='+rev,{cache:'no-store'});" +
-                   "if(r.status!==200)return;const j=await r.json();rev=j.rev;const v=Object.assign({},view);cpmLoad(j.pack);" +
-                   "Object.assign(view,{yaw:v.yaw,pitch:v.pitch,zoom:v.zoom,panX:v.panX,panY:v.panY,mode:v.mode});draw();}catch(e){}},1500);})();</script>";
+        var live = "<script>window.cpmLive=true;(function(){let rev=" + revision.ToString(CultureInfo.InvariantCulture) + ";setInterval(async()=>{try{const r=await fetch('model?rev='+rev,{cache:'no-store'});" +
+                   "if(r.status!==200)return;const j=await r.json();rev=j.rev;cpmLoad(j.pack,true);}catch(e){}},1500);})();</script>";
         return html.Replace("</body>", live + "</body>", StringComparison.Ordinal);
     }
 

@@ -10,7 +10,7 @@ namespace CsiProMax.Assistant.Etabs;
 /// on a live ETABS, so the chat builds a model with no ETABS on the PC. It saves ETABS text files (.e2k) that licensed
 /// ETABS imports and analyses. It does not run, emulate or unlock ETABS: there is no analysis and no design here.
 /// </summary>
-public sealed class OfflineEtabs : ICsiLink
+public sealed class OfflineEtabs : ICsiLink, CsiProMax.Assistant.Tools.IModelDrawing
 {
     public const string NoAnalysis =
         "The Modeler has no ETABS behind it, so it cannot analyse or design. Save the model (save_model), import the .e2k into licensed ETABS (File > Import > ETABS .e2k text file) and run it there.";
@@ -111,6 +111,28 @@ public sealed class OfflineEtabs : ICsiLink
         var (name, story) = Split(point);
         var set = Model.PointAssigns.Find(a => a.Point == name && a.Story == story)?.Restraint ?? "";
         return new[] { "UX", "UY", "UZ", "RX", "RY", "RZ" }.Select(d => set.Split(' ').Contains(d)).ToArray();
+    }
+
+    public IReadOnlyList<CsiProMax.Assistant.Tools.GridRow> Grids() =>
+        Model.Grids.Select(g => new CsiProMax.Assistant.Tools.GridRow(g.Label, g.Direction.StartsWith("Y", StringComparison.OrdinalIgnoreCase) ? "Y" : "X", g.Coordinate)).ToList();
+
+    public IReadOnlyList<CsiProMax.Assistant.Tools.SectionSize> FrameSizes() => Model.FrameSections
+        .Where(s => s.Number("D") is > 0)
+        .Select(s => new CsiProMax.Assistant.Tools.SectionSize(s.Name, s.Shape, s.Number("D") ?? 0, s.Number("B") ?? 0)).ToList();
+
+    public IReadOnlyList<(string Name, double Thickness)> AreaSizes() =>
+        Model.ShellSections.Where(s => s.Thickness is > 0).Select(s => (s.Name, s.Thickness ?? 0)).ToList();
+
+    public IReadOnlyList<CsiProMax.Assistant.Tools.SupportRow> Supports()
+    {
+        var rows = new List<CsiProMax.Assistant.Tools.SupportRow>();
+        foreach (var a in Model.PointAssigns)
+        {
+            if (string.IsNullOrWhiteSpace(a.Restraint) || Model.Point(a.Point) is not { } p || Model.StoryIndex(a.Story) is not (>= 0 and var i)) continue;
+            var set = a.Restraint.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            rows.Add(new CsiProMax.Assistant.Tools.SupportRow(p.X, p.Y, Model.Elevation(i) - p.Below, new[] { "UX", "UY", "UZ", "RX", "RY", "RZ" }.Select(d => set.Contains(d)).ToArray()));
+        }
+        return rows;
     }
 
     public IReadOnlyList<(string Kind, string Name)> Selected() => _selected.ToList();
