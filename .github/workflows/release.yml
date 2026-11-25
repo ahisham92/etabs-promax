@@ -1,6 +1,7 @@
 name: Release
 # Pushing a tag like v0.3.1 publishes the package the updater downloads: CsiProMax-<version>.zip with a dist folder
 # of DLLs (no .exe). The tag must match the version in the assistant's project file.
+# A tag with a suffix, like v0.4.0-test1, publishes a pre-release: a download to hand out that the updater leaves alone.
 on:
   push:
     tags: ['v*']
@@ -16,14 +17,16 @@ jobs:
           dotnet-version: 8.0.x
       - name: Version
         run: |
-          version="${GITHUB_REF_NAME#v}"
+          tag="${GITHUB_REF_NAME#v}"
+          version="${tag%%-*}"
+          if [ "$tag" != "$version" ]; then echo "PRERELEASE=--prerelease" >> "$GITHUB_ENV"; echo "NAME=$tag" >> "$GITHUB_ENV"; else echo "NAME=$version" >> "$GITHUB_ENV"; fi
           grep -q "<Version>$version</Version>" src/CsiProMax.Assistant/CsiProMax.Assistant.csproj || { echo "Tag $GITHUB_REF_NAME does not match the project's version"; exit 1; }
           echo "VERSION=$version" >> "$GITHUB_ENV"
       - run: dotnet run -c Release --project tests/CsiProMax.Tests
       - run: dotnet publish src/CsiProMax.Assistant -c Release -p:DebugType=none -o package/dist
       - run: dotnet publish src/CsiProMax.Plugin -c Release -p:DebugType=none -o package/dist
       - run: test -e package/dist/CsiProMax.dll && test ! -e package/dist/ETABSv1.dll && ! find package -iname '*.exe' | grep .
-      - run: cp docs/INSTALL.txt package/ && cd package && zip -q -r "../CsiProMax-$VERSION.zip" .
-      - run: gh release create "$GITHUB_REF_NAME" "CsiProMax-$VERSION.zip" --title "CSI ProMax $VERSION" --generate-notes
+      - run: cp docs/INSTALL.txt package/ && cd package && zip -q -r "../CsiProMax-$NAME.zip" .
+      - run: gh release create "$GITHUB_REF_NAME" "CsiProMax-$NAME.zip" --title "CSI ProMax $NAME" --generate-notes $PRERELEASE
         env:
           GH_TOKEN: ${{ github.token }}
