@@ -1029,7 +1029,9 @@ foreach (var (name, body) in WebWindowTests.All()) Test(name, body);
 foreach (var (name, body) in ModelTablesTests.All()) Test(name, body);
 foreach (var (name, body) in ModelerWindowTests.All()) Test(name, body);
 foreach (var (name, body) in LateralTests.All()) Test(name, body);
+foreach (var (name, body) in AnalysisTests.All()) Test(name, body);
 foreach (var (name, body) in KeptPlugInsTests.All()) Test(name, body);
+foreach (var (name, body) in StabilityTests.All()) Test(name, body);
 foreach (var (name, body) in FieldRun048Tests.All()) Test(name, body);
 foreach (var (name, body) in FieldQuietTests.All()) Test(name, body);
 
@@ -1737,6 +1739,8 @@ Test("field test: the full test runs every part, closes its window, and leaves t
     finally { ResultTools.SnapshotRoot = snapshots; Directory.Delete(root, true); }
 });
 
+// CPM_TESTS=words runs only the tests whose name holds those words (while fixing one part).
+if (Environment.GetEnvironmentVariable("CPM_TESTS") is { Length: > 0 } only) tests.RemoveAll(t => !t.Name.Contains(only, StringComparison.OrdinalIgnoreCase));
 foreach (var (name, body) in tests)
 {
     try { body(); Console.WriteLine($"ok    {name}"); }

@@ -22,6 +22,8 @@ public static class Pack
     /// taken whole up to this, within <see cref="PackTables.TotalMostRows"/> for the whole pack.
     /// </summary>
     public const int DefaultMostRows = 250000;
+    /// <summary>The largest model (frames and areas) whose instability check is made with the pack; a bigger one is checked with find_instabilities.</summary>
+    public const int StabilityPackLimit = 8000;
     /// <summary>Design tables are taken longer: a concrete beam table has a row per station of every beam.</summary>
     public const int DesignMostRows = 200000;
 
@@ -59,7 +61,7 @@ public static class Pack
     /// <param name="extraTables">More tables to take, by name or key (for example "Element Forces - Beams").</param>
     public static Built Build(ICsiLink e, IReadOnlyList<string> extraTables, IReadOnlyList<string> cases, IReadOnlyList<string> combos,
         JsonObject? checks, JsonArray? comments, int mostRows = DefaultMostRows, string by = "", bool withTables = true,
-        IReadOnlyList<string>? designFiles = null)
+        IReadOnlyList<string>? designFiles = null, bool instabilities = false)
     {
         var info = e.Info();
         var notes = new List<string>();
@@ -125,12 +127,19 @@ public static class Pack
         else if (e is OfflineEtabs) model["wall_labels"] = DesignResults.WallLabels(e, [], notes);
 
         var content = new JsonObject { ["manifest"] = manifest, ["model"] = model, ["checks"] = checks, ["comments"] = comments ?? [], ["tables"] = tables };
+        // What stops the analysis, as the checker found it when the pack was made: the Viewer lists and marks it.
+        if (instabilities && frames.Count + areas.Count <= StabilityPackLimit)
+        {
+            try { content["instabilities"] = StabilityTools.Json(CsiProMax.Checks.Stability.StabilityCheck.Run(StabilityTools.Read(e)), e.Program, e is OfflineEtabs); }
+            catch (Exception ex) when (ex is EtabsException or InvalidOperationException or ArgumentException) { notes.Add($"The instability check could not be made for the pack ({ex.Message})."); }
+        }
         using var stream = new MemoryStream();
         using (var zip = new ZipArchive(stream, ZipArchiveMode.Create, true))
         {
             Add(zip, "manifest.json", manifest);
             Add(zip, "model.json", model);
             if (checks is not null) Add(zip, "checks.json", checks);
+            if (content["instabilities"] is JsonObject found) Add(zip, "instabilities.json", found);
             Add(zip, "comments.json", comments ?? []);
             var n = 0;
             foreach (var (_, table) in tables) Add(zip, $"tables/{++n:000}.json", table!);
@@ -283,6 +292,7 @@ public static class Pack
             ["checks"] = Text("checks.json"),
             ["comments"] = Text("comments.json") ?? new JsonArray(),
         };
+        if (Text("instabilities.json") is { } found) content["instabilities"] = found;
         var tables = new JsonObject();
         foreach (var entry in zip.Entries.Where(en => en.FullName.StartsWith("tables/", StringComparison.Ordinal)).OrderBy(en => en.FullName, StringComparer.Ordinal))
             if (Text(entry.FullName) is JsonObject t && t["name"] is { } name) tables[name.GetValue<string>()] = t;

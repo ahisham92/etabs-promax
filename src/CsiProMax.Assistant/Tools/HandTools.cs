@@ -50,8 +50,8 @@ public static class HandTools
             """{"type":"object","required":["name","cases"],"properties":{"name":{"type":"string"},"was":{"type":"string"},"type":{"type":"string"},"cases":{"type":"array","items":{"type":"object","required":["case","factor"],"properties":{"case":{"type":"string"},"factor":{"type":"number"}}}}}}""",
             Ask.Changes, DefineCombination, a => $"Define the combination {Text(a, "name")}"),
         new("delete_definition",
-            "Deletes a material, frame section, slab or wall section, load pattern (with its loads and case) or combination. One still in use is not deleted, and the answer says what uses it.",
-            """{"type":"object","required":["kind","name"],"properties":{"kind":{"type":"string","enum":["material","frame_section","shell_section","load_pattern","combination"]},"name":{"type":"string"}}}""",
+            "Deletes a material, frame section, slab or wall section, load pattern (with its loads and case), load case, function or combination. One still in use is not deleted, and the answer says what uses it.",
+            """{"type":"object","required":["kind","name"],"properties":{"kind":{"type":"string","enum":["material","frame_section","shell_section","load_pattern","load_case","function","combination"]},"name":{"type":"string"}}}""",
             Ask.Changes, DeleteDefinition, a => $"Delete {Text(a, "kind").Replace('_', ' ')} {Text(a, "name")}"),
         new("model_definitions",
             "Everything the Define forms show: stories, grids, materials, frame and slab/wall sections, load patterns, load cases and combinations with their cases and factors.",
@@ -391,6 +391,9 @@ public static class HandTools
                     if (!m.LoadPatterns.Exists(p => p.Name == name)) throw new ToolInputException($"There is no load pattern named '{name}'.");
                     if (m.LoadPatterns.Count == 1) throw new ToolInputException("A model keeps one load pattern at least.");
                     InUse(m.Combos.Count(c => c.Lines.Any(l => l.Count >= 2 && l[0] == "LOADCASE" && E2kText.Unquote(l[1]) == name)), "combinations (take it out of them first)");
+                    InUse(m.LoadCases.Count(c => c.Name != name && c.Lines.Any(l => l.Count >= 2 && l[0] == "LOADPAT" && E2kText.Unquote(l[1]) == name)), "other load cases (take it out of them first)");
+                    InUse(CsiProMax.Lateral.MassSource.Of(m).Loads.Count(l => l.Pattern == name), "the mass source (take it out first)");
+                    InUse(AnalysisDefs.PDelta(m).Loads.Count(l => l.Pattern == name), "the P-Delta option (take it out first)");
                     m.LoadPatterns.RemoveAll(p => p.Name == name);
                     m.LoadCases.RemoveAll(c => c.Name == name);
                     m.LineLoads.RemoveAll(l => l.Pattern == name); m.AreaLoads.RemoveAll(l => l.Pattern == name); m.PointLoads.RemoveAll(l => l.Pattern == name);
@@ -399,8 +402,17 @@ public static class HandTools
                     InUse(m.Combos.Count(c => c.Lines.Any(l => l.Count >= 2 && l[0] == "LOADCOMBO" && E2kText.Unquote(l[1]) == name)), "other combinations");
                     if (m.Combos.RemoveAll(c => c.Name == name) == 0) throw new ToolInputException($"There is no combination named '{name}'.");
                     break;
+                case "load_case":
+                    InUse(m.Combos.Count(c => c.Lines.Any(l => l.Count >= 2 && l[0] == "LOADCASE" && E2kText.Unquote(l[1]) == name)), "combinations (take it out of them first)");
+                    InUse(m.LoadCases.Count(c => c.Lines.Any(l => (E2kText.Value(l, "MODALCASE") == name || E2kText.Value(l, "INITCOND") == name) && c.Name != name)), "other load cases (as their modal case or initial conditions)");
+                    if (m.LoadCases.RemoveAll(c => c.Name == name) == 0) throw new ToolInputException($"There is no load case named '{name}'.");
+                    break;
+                case "function":
+                    InUse(AnalysisDefs.UsersOfFunction(m, name).Count(), "load cases");
+                    if (!AnalysisDefs.DeleteFunction(m, name)) throw new ToolInputException($"There is no function named '{name}'.");
+                    break;
                 default:
-                    throw new ToolInputException("kind is material, frame_section, shell_section, load_pattern or combination.");
+                    throw new ToolInputException("kind is material, frame_section, shell_section, load_pattern, load_case, function or combination.");
             }
             return Done($"deleted {kind.Replace('_', ' ')} {name}");
         });

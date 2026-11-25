@@ -36,6 +36,31 @@ public static class ModelerFieldSteps
         }
     }
 
+    /// <summary>
+    /// The checker on models broken on purpose, one fault each (CsiProMax.Checks.Stability.BrokenModels): each fault is
+    /// found by the check that promises it, naming the object, with a fix; the sound model gives no error. The same
+    /// broken models open in the Modeler from the checker's window.
+    /// </summary>
+    private static void Instabilities(FieldContext ctx)
+    {
+        foreach (var c in CsiProMax.Checks.Stability.BrokenModels.All)
+            ctx.Step($"the instability checker on a broken model: {c.What}", () =>
+            {
+                var report = CsiProMax.Checks.Stability.StabilityCheck.Run(CsiProMax.Checks.Stability.FromStructural.Read(c.Build(), c.Program));
+                var found = string.Join(" | ", report.Findings.Take(6).Select(f => $"{f.Level} {f.Check}: {f.Message}"));
+                if (c.Check.Length == 0)
+                {
+                    FieldContext.Expect(report.Errors == 0, "the sound model has errors: " + found);
+                    return "no errors, as it should";
+                }
+                var hit = report.Findings.Where(f => f.Check == c.Check).ToList();
+                FieldContext.Expect(hit.Count > 0, $"no '{c.Check}' finding: " + found);
+                FieldContext.Expect(c.Object.Length == 0 || hit.Any(f => f.Objects.Any(o => o.Name.Split('@')[0] == c.Object) || f.Message.Contains(c.Object)), $"'{c.Object}' is not named: " + found);
+                FieldContext.Expect(hit.All(f => f.Fix.Length > 0), "a finding has no fix");
+                return hit[0].Message;
+            });
+    }
+
     private static string Q(string text) => JsonSerializer.Serialize(text);
     private static string List(IEnumerable<string> names) => "[" + string.Join(",", names.Select(Q)) + "]";
     private static int Int(JsonNode? node) => node?.GetValue<int>() ?? -1;
@@ -50,6 +75,7 @@ public static class ModelerFieldSteps
         ctx.Offer(HandTools.All);
         ctx.Offer(TableTools.All);
         ctx.Offer(LateralTools.All);
+        ctx.Offer(CaseTools.All);
         var folder = Q(ctx.Folder);
 
         // A new model from the template: three stories, two bays each way.
@@ -205,9 +231,13 @@ public static class ModelerFieldSteps
         Tables(ctx, modeler);
         ModelerCheck.FieldSteps(ctx);
         Lateral(ctx, modeler);
+        Analysis(ctx, modeler);
 
         // The checks and the quantities.
         ctx.Tool("check_model", "{}", a => FieldContext.Expect(Int(a["errors"]) == 0, "the model the test built has errors: " + a["findings"]!.ToJsonString()));
+        ctx.Tool(StabilityTools.Name, "{}", a => FieldContext.Expect(Int(a["errors"]) == 0 && a["checked"]?["stiffness_check"]?.GetValue<bool>() == true,
+            "the model the test built should have no instability, and the stiffness check should run: " + a["findings"]!.ToJsonString() + " " + a["notes"]!.ToJsonString()));
+        Instabilities(ctx);
         ctx.Tool("model_quantities", "{}", a =>
         {
             var rows = a["rows"]!.AsArray();
@@ -347,6 +377,41 @@ public static class ModelerFieldSteps
             ctx.Tool("delete_definition", $$"""{"kind":"load_pattern","name":"{{name}}"}""", null, $"tool delete_definition takes {name} out again");
         }
         ctx.Refused("set_lateral_load", """{"name":"CPM-EQ","code":"ASCE 7-99"}""", "codes", "tool set_lateral_load says no to a code that is not there");
+    }
+
+    /// <summary>The load cases the scratch programs must find in the files the Modeler wrote (CsiFieldSteps checks them).</summary>
+    public static readonly string[] Cases = ["CPM-RSX", "CPM-THX", "CPM-NLS", "CPM-BUCK"];
+
+    /// <summary>Functions, a case of each kind, the mass source, P-Delta and temperature: they stay in the model the
+    /// programs open, so their scratch parts show whether each program reads them.</summary>
+    private static void Analysis(FieldContext ctx, OfflineEtabs modeler)
+    {
+        ctx.Tool("define_function", """{"name":"CPM-RS","kind":"spectrum","from":"code","code":"ASCE 7-16","values":{"Ss":"1.0","S1":"0.4","SiteClass":"D"}}""", a => FieldContext.Expect(Int(a["points"]) > 50, "the spectrum has few points: " + a.ToJsonString()), "tool define_function, the ASCE 7-16 spectrum");
+        ctx.Tool("define_function", """{"name":"CPM-TH","kind":"history","from":"sine","period":0.5,"cycles":4,"amplitude":0.2}""", a => FieldContext.Expect(Int(a["points"]) == 65, "4 cycles of 16 steps: " + a.ToJsonString()), "tool define_function, a sine history");
+        ctx.Refused("define_function", """{"name":"CPM-BAD","kind":"spectrum","points":[[1,1],[0.5,1]]}""", "must go up", "tool define_function says no to periods that go back");
+        if (!modeler.Model.LoadCases.Exists(c => c.Name == "Modal"))
+            ctx.Tool("define_load_case", """{"name":"Modal","type":"Modal - Eigen","max_modes":12}""", null, "tool define_load_case, the modal case");
+        ctx.Tool("define_load_case", """{"name":"CPM-RSX","type":"Response Spectrum","modal_case":"Modal","modal_combo":"CQC","dir_combo":"SRSS","damping":0.05,"eccentricity":0.05,"loads":[{"accel":"U1","factor":9.80665,"function":"CPM-RS"}]}""", null, "tool define_load_case, a response spectrum case");
+        ctx.Tool("define_load_case", """{"name":"CPM-THX","type":"Linear Modal History","modal_case":"Modal","steps":100,"step_size":0.02,"loads":[{"accel":"U1","factor":9.80665,"function":"CPM-TH"}]}""", null, "tool define_load_case, a linear modal history");
+        ctx.Tool("define_load_case", """{"name":"CPM-NLS","type":"Nonlinear Static","geometric":"P-Delta","loads":[{"pattern":"Dead","factor":1.2},{"pattern":"Live","factor":0.5}]}""", null, "tool define_load_case, a nonlinear static case with P-Delta");
+        ctx.Tool("define_load_case", """{"name":"CPM-BUCK","type":"Buckling","max_modes":3,"loads":[{"pattern":"Dead","factor":1}]}""", null, "tool define_load_case, a buckling case");
+        ctx.Refused("define_load_case", """{"name":"CPM-BAD","type":"Response Spectrum","loads":[{"accel":"U1","factor":1,"function":"CPM-TH"}]}""", "spectrum function", "tool define_load_case says no to a history in a spectrum case");
+        ctx.Tool("define_mass_source", """{"elements":true,"loads":[{"pattern":"Live","factor":0.25}]}""", _ => FieldContext.Expect(CsiProMax.Lateral.MassSource.Of(modeler.Model).Loads.Count == 1, "the mass source has no Live"), "tool define_mass_source, the elements and a quarter of the live load");
+        ctx.Tool("define_pdelta", """{"method":"non-iterative"}""", _ => FieldContext.Expect(CsiProMax.Model.AnalysisDefs.PDelta(modeler.Model).Method == "non-iterative", "P-Delta was not set"), "tool define_pdelta, non-iterative from the mass");
+        var beam = modeler.Model.LineAssigns.FirstOrDefault(x => modeler.Model.Line(x.Label)?.Kind == CsiProMax.Model.LineKind.Beam);
+        if (beam is not null)
+        {
+            if (!modeler.Model.LoadPatterns.Exists(p => p.Name == "CPM-TEMP")) modeler.AddLoadPattern("CPM-TEMP", "Temperature", 0);
+            var obj = Q(beam.Label + "@" + beam.Story);
+            ctx.Tool("assign_object_loads", """{"kind":"frame_temperature","pattern":"CPM-TEMP","objects":[""" + obj + """],"values":{"temperature":20}}""", null, "tool assign_object_loads, a temperature on a beam");
+            ctx.Tool("assign_object_loads", """{"kind":"frame_point","pattern":"Live","objects":[""" + obj + """],"values":{"value":10,"distance":0.5}}""", null, "tool assign_object_loads, a point load mid-span");
+        }
+        ctx.Tool("analysis_definitions", "{}", a =>
+        {
+            var cases = a["load_cases"]!.AsArray().Select(c => c!["name"]!.GetValue<string>()).ToHashSet();
+            FieldContext.Expect(Cases.All(cases.Contains), "the cases are not all listed: " + string.Join(", ", cases));
+            FieldContext.Expect(a["functions"]!.AsArray().Any(f => f!["name"]!.GetValue<string>() == "CPM-RS"), "CPM-RS is not listed");
+        });
     }
 
     private static void Tables(FieldContext ctx, OfflineEtabs modeler)

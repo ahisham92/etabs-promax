@@ -21,6 +21,17 @@ button:disabled,select:disabled,input:disabled{opacity:.45;cursor:default}
 button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 button.primary:hover{background:var(--accent2)}
 input[type=checkbox],input[type=radio]{margin:0 5px 0 0;vertical-align:-2px;accent-color:var(--accent)}
+/* the instability checker's window */
+.inst{max-height:52vh;overflow:auto;border:1px solid var(--line);background:var(--field);margin-top:6px}
+.inst .it{padding:5px 8px;border-bottom:1px solid var(--line2);cursor:pointer}
+.inst .it:hover{background:var(--hot)}
+.inst .it.on{background:var(--sel)}
+.inst .lv{display:inline-block;min-width:54px;font-weight:600;font-size:11px}
+.inst .lv.error{color:var(--bad)}.inst .lv.warning{color:var(--warn)}.inst .lv.note{color:var(--mute)}
+.inst .ck{color:var(--mute);font-size:11px;margin-left:4px}
+.inst .fx{color:var(--mute);margin-top:2px}
+.inst .fx b{color:var(--ink);font-weight:600}
+.instsum{font-weight:600}.instsum.bad{color:var(--bad)}.instsum.ok{color:var(--ok)}
 /* title and menus */
 #menubar{display:flex;align-items:stretch;background:var(--menu);height:24px;user-select:none;border-bottom:1px solid var(--line2)}
 #menubar .brand{display:flex;align-items:center;gap:6px;padding:0 12px 0 8px;font-weight:600;white-space:nowrap;color:var(--accent)}
@@ -326,6 +337,8 @@ const norm = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, "");
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const num = v => { const r = Math.round(v * 1000) / 1000; return String(Object.is(r, -0) ? 0 : r); };
 function fmt(v) { const a = Math.abs(v); return a === 0 ? "0" : a >= 1000 ? v.toFixed(0) : a >= 100 ? v.toFixed(1) : a >= 1 ? v.toFixed(2) : a >= 0.001 ? v.toFixed(4) : v.toExponential(2); }
+// The instability checker's last answer and what of it is shown (its code is further down).
+const inst = {answer: null, cur: -1, show: false, busy: false, dlg: null, only: "all"};
 let P = null, frames = [], areas = [], stories = [], grids = {X: [], Y: []}, gridsGuessed = false, sizes = {}, slabT = {}, supports = [], points = [];
 let ratio = new Map(), marks = {punching: [], soil: []}, pointXyz = new Map(), pointIdx = new Map(), disp = new Map(), pointAt = new Map(), newComments = [], lit = null;
 let lo = [0, 0, 0], hi = [1, 1, 1], size = 1, unit = "", program = "etabs", sectionMat = new Map();
@@ -381,7 +394,7 @@ async function readPack(file) {
     throw new Error("This file has comments only. Open the pack first, then this file.");
   }
   const files = await unzip(buffer), text = n => files[n] ? JSON.parse(new TextDecoder().decode(files[n])) : null;
-  const pack = {manifest: text("manifest.json") || {}, model: text("model.json"), checks: text("checks.json"), comments: text("comments.json") || [], tables: {}};
+  const pack = {manifest: text("manifest.json") || {}, model: text("model.json"), checks: text("checks.json"), comments: text("comments.json") || [], tables: {}, instabilities: text("instabilities.json")};
   if (!pack.model) throw new Error("This is not a CSI ProMax pack (it has no model).");
   for (const name of Object.keys(files)) if (name.startsWith("tables/")) { const t = text(name); if (t && t.name) pack.tables[t.name] = t; }
   return pack;
@@ -1843,6 +1856,7 @@ function overlay(p, g, M, T, w, h) {
   if (opt.names) drawNames(p, g, to, T);
   if (opt.supports && !gl) drawSupports(p, g, to, T);
   drawMarks(p, g, to, T);
+  drawInst(p, g, to, T);
   drawDesign(p, g, to, T);
   if (res.mode === "reactions") drawReactions(p, g, to, T);
   if (p.diag && p.diag.labels) {
@@ -2269,6 +2283,7 @@ const I = {
   hide: '<path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8s-2.5 4.5-6.5 4.5S1.5 8 1.5 8z"/><path d="M2.5 13.5l11-11" class="c4"/>',
   show: '<path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8s-2.5 4.5-6.5 4.5S1.5 8 1.5 8z"/><path d="M5.5 8l1.8 1.8L11 6.2" class="c3"/>',
   info: '<circle cx="8" cy="8" r="6.3"/><path d="M8 7v4.5" /><circle cx="8" cy="4.8" r=".9" class="f"/>',
+  instab: '<path d="M2 13.5h12"/><path d="M4 13.5V6l4-3.5l4 3.5v7.5"/><path d="M8 7.2v3.1" class="c4"/><circle cx="8" cy="11.8" r=".8" class="f"/>',
 };
 const icon = k => `<svg viewBox="0 0 16 16">${I[k] || ""}</svg>`;
 const bar = [["open", "Open a pack (Ctrl+O)", "open"], 0, ["fit", "Restore full view", "fit"], ["zoom", "Rubber band zoom", "t:zoom"], ["zin", "Zoom in one step", "zin"], ["zout", "Zoom out one step", "zout"], ["pan", "Pan", "t:pan"], ["orbit", "Rotate the 3-D view", "t:orbit"], 0,
@@ -2276,7 +2291,7 @@ const bar = [["open", "Open a pack (Ctrl+O)", "open"], 0, ["fit", "Restore full 
   ["up", "Move up a story (Page Up)", "storyUp"], ["down", "Move down a story (Page Down)", "storyDown"], ["prev", "Previous grid line elevation", "linePrev"], ["next", "Next grid line elevation", "lineNext"], 0,
   ["display", "Set display options", "dlg:display"], ["grid", "Grid lines", "o:grid"], ["extrude", "Extruded sections", "o:extrude"], ["fill", "Floors and walls", "o:fill"], ["supports", "Supports", "o:supports"], ["names", "Labels", "o:names"], ["axes", "Global axes", "o:axes"], ["bg", "Black or white background", "bg"], 0,
   ["model", "Show undeformed shape (F4)", "r:model"], ["deformed", "Show deformed shape (F6)", "dlg:deformed", "deformed"], ["forces", "Show frame forces and moments (F8)", "dlg:forces", "forces"], ["contour", "Show joint displacement contours", "dlg:contour", "contour"], ["reactions", "Show support reactions", "dlg:reactions", "reactions"], ["ratios", "Show design ratios", "r:ratios", "ratios"], ["anim", "Animate the deformed shape", "anim"], 0,
-  ["plot", "Story response plot", "plot"], ["tables", "Show tables (Ctrl+T)", "tables"]];
+  ["plot", "Story response plot", "plot"], ["tables", "Show tables (Ctrl+T)", "tables"], 0, ["instab", "Check the model for instabilities: what would stop the analysis (F7)", "inst"]];
 $("icons").innerHTML = bar.map(b => b ? `<button class="ib" data-act="${b[2]}" ${b[3] ? `data-res="${b[3]}"` : ""} title="${b[1]}">${icon(b[0])}</button>` : `<span class="sep"></span>`).join("");
 $("icons").querySelector('[data-act="r:model"]').dataset.res = "model";
 const strip = [["select", "Select (click, or drag a box)", "t:select"], ["zoom", "Rubber band zoom", "t:zoom"], ["pan", "Pan", "t:pan"], ["orbit", "Rotate the 3-D view", "t:orbit"], 0, ["iso", "3-D view from the corner", "cam:iso"], ["top", "View from the top", "cam:top"], ["front", "View along Y (the X-Z plane)", "cam:front"], ["side", "View along X (the Y-Z plane)", "cam:side"], 0, ["all", "Select all", "selAll"], ["clear", "Clear the selection (Esc)", "selNone"], ["hide", "Hide the selected objects", "hideSel"], ["show", "Show all objects", "showAll"], ["info", "Information on the selected object", "info"]];
@@ -2397,6 +2412,9 @@ function act(name) {
     case "explorer": opt.explorer = !opt.explorer; $("explorer").hidden = !opt.explorer; return draw();
     case "side": opt.side = !opt.side; $("right").hidden = !opt.side; return draw();
     case "chat": return chatShow();
+    case "inst": return instOpen();
+    case "instMarks": inst.show = true; return draw();
+    case "instHelp": return instHelp();
     case "about": return dialogs.about();
   }
 }
@@ -2421,6 +2439,7 @@ const viewerMenus = () => {
       ["Windows", [["One window", "lay1"], ["Two windows", "lay2"], ["Three windows", "lay3"], ["Four windows", "lay4"]]]],
     Define: [["Material Properties...", "dlg:materials"], ["Frame Sections...", "dlg:frameSections"], ["Slab and Wall Sections...", "dlg:areaSections"], 0, ["Story Data...", "dlg:stories"], ["Grid Data...", "dlg:grids"], 0, ["Load Patterns...", "dlg:patterns"], ["Load Cases...", "dlg:cases"], ["Load Combinations...", "dlg:combos"]],
     Select: [["All", "selAll", "Ctrl+A"], ["All on This Story", "selStory", "", !plan], ["By Section...", "dlg:bySection"], ["By Object Type...", "dlg:byType"], ["Invert", "selInvert"], 0, ["Clear Selection", "selNone", "Esc"]],
+    Analyze: [["Check Model for Instabilities...", "inst", "F7"], ["Show the Last Check's Marks", "instMarks", "", !inst.answer], 0, ["What the check looks for", "instHelp"]],
     Display: (() => {
       const has = re => Object.values(P ? P.tables : {}).some(t => t.rows && t.rows.length && re.test(norm(t.name))), plots = P ? Object.values(P.tables).some(t => t.rows && t.rows.length > 1) : false;
       return [["Undeformed Shape", "r:model", "F4"], ["Deformed Shape...", "dlg:deformed", "F6", !disp.size], ["Mode Shapes...", "dlg:modes", "", !P || !modeCases().length], ["Animate Deformed Shape", "anim", "", res.mode !== "deformed"], 0,
@@ -3018,6 +3037,133 @@ document.addEventListener("keydown", e => {
   else if (ctrl && k.toLowerCase() === "t") { stop(); act("tables"); } else if (ctrl && k.toLowerCase() === "a") { stop(); act("selAll"); } else if (ctrl && k.toLowerCase() === "o") { stop(); act("open"); } else if (ctrl && k.toLowerCase() === "w") { stop(); dialogs.display(); }
   else if (ctrl && k.toLowerCase() === "c" && sel.size) { stop(); act("copyNames"); }
 });
+// ---- the instability checker: what would stop the analysis, found without running it. In a live window (the
+// Modeler, or the 3D view of a model open in ETABS, SAP2000 or SAFE) it runs find_instabilities behind the window
+// (POST check); in a pack it shows what was found when the pack was made, and an older pack gets a light check made
+// here from the geometry. Clicking a finding selects its objects, zooms to them and rings the places. ----
+async function instCheck() {
+  if (window.cpmLive) {
+    const r = await fetch("check", {method: "POST", headers: {"Content-Type": "application/json", "X-CPM-View": "1"}, body: "{}", cache: "no-store"});
+    if (!r.ok) return {ok: false, error: r.status === 404 ? "The window behind this view is not answering. Is CSI ProMax still open?" : "The check was refused (" + r.status + ")."};
+    return r.json();
+  }
+  return P.instabilities ? {...P.instabilities, ok: true, packed: true} : instLocal();
+}
+async function instOpen() {
+  if (!P) return;
+  if (inst.dlg) inst.dlg.close();
+  const d = dialog("Check Model for Instabilities", `<div id="instHead" class="kv">Checking the model...</div><div class="row" style="margin-top:6px;gap:6px;display:flex;flex-wrap:wrap;align-items:center">
+    <label>Show <select id="instOnly"><option value="all">Errors and warnings</option><option value="error">Errors only</option></select></label>
+    <button id="instAgain">Check again</button><button id="instSel">Select the objects of every error</button><button id="instCopy">Copy the list</button></div><div class="inst" id="instList"></div><div class="kv" id="instNotes" style="margin-top:6px"></div>`,
+    [["Close", () => { inst.show = false; inst.dlg = null; draw(); }]], {float: true, width: 560});
+  inst.dlg = d;
+  const xClose = d.close; d.close = () => { inst.dlg = null; xClose(); };
+  q(d, "#instOnly").value = inst.only;
+  q(d, "#instOnly").onchange = e => { inst.only = e.target.value; instList(); };
+  q(d, "#instAgain").onclick = () => instRun();
+  q(d, "#instSel").onclick = () => { sel.clear(); for (const f of (inst.answer && inst.answer.findings || []).filter(f => f.level === "error")) for (const id of instIds(f)) sel.add(id); selChanged(); };
+  q(d, "#instCopy").onclick = () => copyText((inst.answer && inst.answer.findings || []).map(f => `${f.level.toUpperCase()}\t${f.check}\t${f.message}\t${f.fix}`).join("\n"));
+  await instRun();
+}
+async function instRun() {
+  if (inst.busy || !inst.dlg) return;
+  inst.busy = true; const d = inst.dlg; q(d, "#instHead").textContent = "Checking the model..."; q(d, "#instAgain").disabled = true;
+  let j;
+  try { j = await instCheck(); } catch (e) { j = {ok: false, error: "The check could not be made: " + e.message}; }
+  inst.busy = false; if (!inst.dlg) return; q(d, "#instAgain").disabled = !window.cpmLive && !!P.instabilities;
+  if (!j.ok) { q(d, "#instHead").innerHTML = `<span class="instsum bad">${esc(j.error || "The check did not work.")}</span>`; return; }
+  inst.answer = j; inst.cur = -1; inst.show = true;
+  const c = j.checked || {};
+  q(d, "#instHead").innerHTML = `<div class="instsum ${j.errors ? "bad" : "ok"}">${esc(j.summary || "")}</div>` +
+    `<div>${esc([c.in ? "In " + c.in : "", c.joints != null ? c.joints + " joints" : "", c.frames != null ? c.frames + " frames" : "", c.areas != null ? c.areas + " areas" : "", c.stiffness_check ? "stiffness checked (" + c.equations + " equations)" : c.stiffness_check === false ? "no stiffness check" : "", j.packed ? "as found when the pack was made" : "", j.local ? "a light check made in this page" : "", j.seconds != null ? j.seconds + " s" : ""].filter(Boolean).join(" · "))}</div>`;
+  q(d, "#instNotes").innerHTML = (j.notes || []).map(n => `<div>${esc(n)}</div>`).join("");
+  instList(); draw();
+}
+function instShown() { const all = inst.answer && inst.answer.findings || []; return all.map((f, i) => [f, i]).filter(([f]) => inst.only === "all" || f.level === inst.only); }
+function instList() {
+  if (!inst.dlg) return;
+  const list = instShown(), box = q(inst.dlg, "#instList");
+  box.innerHTML = list.length ? list.map(([f, i]) => `<div class="it${i === inst.cur ? " on" : ""}" data-i="${i}"><span class="lv ${esc(f.level)}">${esc(f.level === "error" ? "Error" : f.level === "warning" ? "Warning" : "Note")}</span><span class="ck">${esc(f.check)}</span><div>${esc(f.message)}</div><div class="fx"><b>Fix:</b> ${esc(f.fix)}</div></div>`).join("")
+    : `<div class="it">Nothing to show.</div>`;
+  box.querySelectorAll(".it[data-i]").forEach(el => el.onclick = () => instGo(+el.dataset.i));
+}
+// The Viewer's objects a finding names: frames and areas by name (and story), joints have no object and are ringed.
+function instIds(f) {
+  const ids = [];
+  for (const o of f.objects || []) {
+    const list = o.kind === "frame" ? frames : o.kind === "shell" ? areas : null; if (!list) continue;
+    const hit = list.find(x => x.name === o.name) || (o.story ? list.find(x => x.name === o.name + "@" + o.story) : null);
+    if (hit) ids.push(hit.id);
+  }
+  return ids;
+}
+function instGo(i) {
+  const f = inst.answer && inst.answer.findings[i]; if (!f) return;
+  inst.cur = i; inst.show = true; instList();
+  sel.clear(); const ids = instIds(f); for (const id of ids) sel.add(id); selChanged();
+  const p = panes[active]; if (!p) return;
+  if (p.mode !== "3d" && p.mode !== "plan" && p.mode !== "elev") setMode(p, "3d");
+  const pts = (f.at || []).map(a => [a[0], a[1], a[2]]);
+  if (ids.length) zoomTo(p, ids);
+  else if (pts.length) { const c = mul(pts.reduce(add, [0, 0, 0]), 1 / pts.length); let r = 0; for (const q2 of pts) r = Math.max(r, len(sub(q2, c))); go(p, {...p.cam, target: c, hh: Math.max(r * 2.2, size * 0.06)}); }
+  draw();
+}
+function drawInst(p, g, to, T) {
+  if (!inst.show || !inst.answer) return;
+  const all = inst.answer.findings || [];
+  g.lineWidth = 2; g.setLineDash([]);
+  all.forEach((f, i) => {
+    if (i === inst.cur || inst.only === "error" && f.level !== "error") return;
+    const a = (f.at || [])[0]; if (!a) return; const s = to(a); if (!s[3]) return;
+    g.beginPath(); g.arc(s[0], s[1], 4, 0, 7); g.fillStyle = f.level === "error" ? "#d0342c" : "#e08a1e"; g.fill();
+  });
+  const f = all[inst.cur]; if (!f) return;
+  g.font = "11px Segoe UI, sans-serif"; g.textAlign = "left"; g.textBaseline = "alphabetic";
+  (f.at || []).slice(0, 80).forEach((a, k) => {
+    const s = to(a); if (!s[3]) return;
+    g.beginPath(); g.arc(s[0], s[1], 10, 0, 7); g.strokeStyle = f.level === "error" ? "#d0342c" : "#e08a1e"; g.lineWidth = 2.5; g.stroke();
+    g.beginPath(); g.arc(s[0], s[1], 15, 0, 7); g.lineWidth = 1; g.stroke();
+    if (k === 0) { const t = f.check; g.lineWidth = 3; g.strokeStyle = css(T.canvas); g.strokeText(t, s[0] + 17, s[1] - 10); g.fillStyle = T.text; g.fillText(t, s[0] + 17, s[1] - 10); }
+  });
+}
+function instHelp() {
+  dialog("What the Check Looks For", `<div style="max-width:520px;line-height:1.5">
+    <p>The check finds what stops an analysis from completing, or makes the program call the model unstable, without running it:</p>
+    <ul style="margin:0 0 0 18px;padding:0">
+    <li><b>Supports</b>: no supports at all, and parts of the model that touch nothing supported (they float).</li>
+    <li><b>Definitions</b>: members or areas with no section, a section or material that is not defined, a modulus of elasticity or a thickness of 0.</li>
+    <li><b>Mechanisms</b>: a light stiffness check finds joints, and rigid floors, that can move with nothing resisting them (pinned frames that sway, a floor with no columns, walls or braces to hold it sideways).</li>
+    <li><b>Releases</b>: a member released for torsion, axial force or shear at both ends.</li>
+    <li><b>Geometry and duplicates</b>: members too short or of no length, areas with no area, joints, members and areas on top of each other, members that overlap.</li>
+    <li><b>Connectivity and meshing</b>: a member that passes a joint without joining it (SAP2000 joins only where a frame is divided or meshed), joints on an area's edge that is not meshed, warped areas and slivers, SAP2000 areas of more than 4 corners.</li>
+    <li><b>Cases and mass</b>: load cases and combinations that name what is not defined, a response spectrum with no modal case, and a modal case with no mass.</li></ul>
+    <p>Each finding names its objects, marks where they are, and says how to fix it. Errors first: they stop the run. Warnings deserve a look.</p></div>`, [["Close", null]]);
+}
+// A light check made here, for a pack made before the checker: from the geometry the pack holds (no releases,
+// sections or cases): supports, parts that float, members of no length and members on top of each other.
+function instLocal() {
+  const found = [], t = tol() * 10, k = q2 => key(q2[0], q2[1], q2[2]);
+  const parent = new Map(), find = x => { while (parent.get(x) !== x) { parent.set(x, parent.get(parent.get(x))); x = parent.get(x); } return x; };
+  const node = q2 => { const n = k(q2); if (!parent.has(n)) parent.set(n, n); return n; }, join = (a, b) => { const x = find(node(a)), y = find(node(b)); if (x !== y) parent.set(x, y); };
+  for (const f of frames) { if (len(sub(f.b, f.a)) <= t) found.push({level: "error", check: "geometry", message: `Frame ${f.name} has no length: both its ends are in the same place.`, fix: "Delete it, or move one end to where the member really goes.", objects: [{kind: "frame", name: f.name}], at: [f.a]}); join(f.a, f.b); }
+  for (const a of areas) for (let i = 1; i < a.pts.length; i++) join(a.pts[0], a.pts[i]);
+  const held = new Set(supports.map(s => find(node(s.p))));
+  if (!supports.length) found.push({level: "error", check: "supports", message: "The model has no supports: nothing holds it to the ground.", fix: "Restrain the joints at the base (fixed or pinned), or give them springs.", objects: [], at: []});
+  else {
+    const parts = new Map();
+    for (const o of frames.concat(areas)) { const r = find(node(o.type === "f" ? o.a : o.pts[0])); if (!parts.has(r)) parts.set(r, []); parts.get(r).push(o); }
+    for (const [r, objs] of parts) if (!held.has(r)) found.push({level: "error", check: "floating", message: `A part of the model (${objs.length} object(s): ${objs.slice(0, 6).map(o => o.name).join(", ")}${objs.length > 6 ? " and more" : ""}) touches nothing that is supported: it floats free of the rest.`, fix: "Join it to the structure, support it, or delete it if it is left over.", objects: objs.map(o => ({kind: o.type === "f" ? "frame" : "shell", name: o.name})), at: objs.slice(0, 40).map(o => o.type === "f" ? mul(add(o.a, o.b), 0.5) : o.pts[0])});
+  }
+  const pairs = new Map();
+  for (const f of frames) { const ka = k(f.a), kb = k(f.b), pk = ka < kb ? ka + "|" + kb : kb + "|" + ka; if (!pairs.has(pk)) pairs.set(pk, []); pairs.get(pk).push(f); }
+  for (const list of pairs.values()) if (list.length > 1) found.push({level: "warning", check: "duplicates", message: `${list.length} members lie on top of each other: ${list.map(f => f.name).join(", ")}.`, fix: "Delete all but one.", objects: list.map(f => ({kind: "frame", name: f.name})), at: [mul(add(list[0].a, list[0].b), 0.5)]});
+  found.sort((a, b) => (a.level === "error" ? 0 : 1) - (b.level === "error" ? 0 : 1));
+  const errors = found.filter(f => f.level === "error").length, warnings = found.length - errors;
+  return {ok: true, local: true, errors, warnings, findings: found, checked: {joints: points.length, frames: frames.length, areas: areas.length},
+    summary: errors ? `${errors} error(s) found by the light check.` : warnings ? `No errors; ${warnings} warning(s).` : "The light check found nothing.",
+    notes: ["This pack was made before the full check: only supports, floating parts, members of no length and doubled members were looked at. Make the pack again with CSI ProMax, or open the model in the Modeler, for the full check (releases, sections, mechanisms, load cases and mass)."]};
+}
+document.addEventListener("keydown", e => { if (e.key === "F7" && !e.ctrlKey && !e.altKey && !(e.target.closest && e.target.closest("input, textarea, select"))) { e.preventDefault(); act("inst"); } });
 window.cpmLoad = load;
 // ---- the Modeler: modelling by hand. Its menus, forms and drawing clicks call the same tools the chat calls, through
 // the Modeler on this PC (POST edit), so the chat and the engineer work on one model. Only in the Modeler's own view. ----
@@ -3066,16 +3212,20 @@ function modelerMenus(m) {
   m.Edit = [[s.undo ? "Undo " + s.undo : "Undo", "m:undo", "Ctrl+Z", !s.undo], [s.redo ? "Redo " + s.redo : "Redo", "m:redo", "Ctrl+Y", !s.redo], 0,
     ["Delete", "m:delete", "Del", !any], 0, ["Copy names of the selected objects", "copyNames", "Ctrl+C", !any], 0, ["Hide the selected objects", "hideSel", "", !any], ["Show all objects", "showAll"]];
   m.Define = [["Material Properties...", "m:materials"], ["Frame Sections...", "m:frameSections"], ["Slab and Wall Sections...", "m:shellSections"], 0,
-    ["Story Data...", "m:stories"], ["Grid Data...", "m:grids"], 0, ["Load Patterns...", "m:patterns"], ["Load Cases...", "dlg:cases"], ["Load Combinations...", "m:combos"]];
+    ["Story Data...", "m:stories"], ["Grid Data...", "m:grids"], 0, ["Functions", [["Response Spectrum...", "m:fnRS"], ["Time History...", "m:fnTH"]]],
+    ["Load Patterns...", "m:patterns"], ["Load Cases...", "m:cases"], ["Load Combinations...", "m:combos"], 0, ["Mass Source...", "m:mass"], ["P-Delta Options...", "m:pdelta"]];
   m.Draw = [["Select Object", "t:select", "Esc"], 0, ["Draw Columns (click a point)", "d:column"], ["Draw Beams (click start and end)", "d:beam"], ["Quick Draw Beams (click a grid line)", "d:qbeam"], 0,
     ["Draw Floors (click corners)", "d:floor"], ["Draw Rectangular Floors (two corners)", "d:rect"], ["Quick Draw Floors (click in a bay)", "d:qfloor"], 0,
     ["Draw Walls (click start and end)", "d:wall"], ["Quick Draw Walls (click a grid line)", "d:qwall"], 0, ["Snap and Story Options...", "m:drawHelp"]];
   m.Assign = [["Frame Section...", "m:asgFrame", "", !fr], ["Slab or Wall Section...", "m:asgShell", "", !ar], 0, ["Joint Restraints (Supports)...", "m:asgSupport"], 0,
-    ["Frame Loads, Distributed...", "m:asgFrameLoad", "", !fr], ["Shell Loads, Uniform...", "m:asgShellLoad", "", !ar]];
+    ["Joint Loads", [["Forces...", "m:ld:joint_force", "", !any], ["Ground Displacements...", "m:ld:joint_displacement", "", !any], ["Temperature...", "m:ld:joint_temperature", "", !any]]],
+    ["Frame Loads", [["Distributed...", "m:asgFrameLoad", "", !fr], ["Uniform in any direction...", "m:ld:frame_uniform", "", !fr], ["Point...", "m:ld:frame_point", "", !fr], ["Trapezoidal...", "m:ld:frame_trapezoid", "", !fr], ["Temperature...", "m:ld:frame_temperature", "", !fr], ["Strain...", "m:ld:frame_strain", "", !fr]]],
+    ["Shell Loads", [["Uniform...", "m:asgShellLoad", "", !ar], ["Uniform in any direction...", "m:ld:shell_uniform", "", !ar], ["Temperature...", "m:ld:shell_temperature", "", !ar], ["Strain...", "m:ld:shell_strain", "", !ar]]]];
   return m;
 }
 async function modelAct(a) {
   hideMenus();
+  if (a.startsWith("ld:")) return hmObjectLoad(a.slice(3));
   switch (a) {
     case "undo": case "redo": { const j = await hmRun(a); if (j.ok) hmSay(j.did || "Done."); return; }
     case "delete": return hmDelete();
@@ -3097,6 +3247,11 @@ async function modelAct(a) {
     case "asgFrame": return hmAssignSection("f");
     case "asgShell": return hmAssignSection("a");
     case "asgSupport": return hmAssignSupport();
+    case "fnRS": return hmFunctions("spectrum");
+    case "fnTH": return hmFunctions("history");
+    case "cases": return hmCases();
+    case "mass": return hmMass();
+    case "pdelta": return hmPDelta();
     case "asgFrameLoad": return hmAssignLoad("f");
     case "asgShellLoad": return hmAssignLoad("a");
     case "drawHelp": return hmDrawHelp();
@@ -3408,6 +3563,199 @@ async function hmAssignLoad(t) {
     <fieldset><legend>Options</legend><label style="display:block"><input type="radio" name="lO" value="add">Add to Existing Loads</label><label style="display:block"><input type="radio" name="lO" value="replace" checked>Replace Existing Loads</label><label style="display:block"><input type="radio" name="lO" value="delete">Delete Existing Loads</label></fieldset>
     <p class="kv">${names.length} selected ${t === "f" ? "frames" : "floors and walls"}.</p>`,
     [["OK", d => { hm.pattern = q(d, "#lP").value; const o = q(d, "[name=lO]:checked").value; return submit(d, "set_loads", {[t === "f" ? "frames" : "areas"]: names, pattern: hm.pattern, value: o === "delete" ? 0 : fnum(d, "#lV"), add: o === "add"}); }, true], ["Cancel"]], {width: 400});
+}
+
+// ---- Define: the analysis (functions, load cases, mass source, P-Delta), as the programs' Define forms ----
+async function hmAnalysis() {
+  const j = await hmPost({tool: "analysis_definitions", args: {}}).catch(() => null);
+  return j && j.ok ? j.result : {functions: [], load_cases: [], case_types: [], modal_combos: [], dir_combos: [], mass_source: {loads: []}, pdelta: {loads: []}};
+}
+const pairsText = pts => pts.map(p => num(p[0]) + "\t" + num(p[1])).join("\n");
+const readPairs = text => text.split(/\r?\n/).map(l => l.trim()).filter(Boolean).map(l => l.split(/[\s,;]+/).map(Number)).filter(p => p.length >= 2 && p.every(x => !isNaN(x))).map(p => [p[0], p[1]]);
+
+async function hmFunctions(kind) {
+  const a = await hmAnalysis(), list = a.functions.filter(f => f.kind === kind);
+  const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmFunctions(kind); };
+  listForm(kind === "spectrum" ? "Define Response Spectrum Functions" : "Define Time History Functions", "Functions", list.map(f => f.name), [
+    ["Add New Function...", () => hmFunction(kind, null, again)],
+    ["Modify/Show Function...", n => n && hmFunction(kind, list.find(f => f.name === n), again)],
+    ["Delete Function", n => n && hmRun("delete_definition", {kind: "function", name: n}, true).then(j => j.ok ? again() : hmSay(j.error, true))],
+  ]);
+}
+async function hmFunction(kind, f, after) {
+  const spectrum = kind === "spectrum";
+  const codes = spectrum ? ((await hmPost({tool: "lateral_codes", args: {kind: "seismic"}}).catch(() => null)) || {}).result : null;
+  const withSpectrum = codes ? codes.codes.filter(c => !["User Coefficient", "User Loads"].includes(c.code)) : [];
+  let from = "points", code = "ASCE 7-16", values = {};
+  const srcs = spectrum ? [["points", "User: periods and values"], ["code", "From a code"]] : [["points", "User: times and values"], ["sine", "Sine wave"], ["cosine", "Cosine wave"], ["ramp", "Ramp"]];
+  const d = dialog(spectrum ? "Response Spectrum Function" : "Time History Function", `<div class="g2"><span>Function Name</span><input id="fN" value="${esc(f ? f.name : spectrum ? "RS1" : "TH1")}"><span>Define by</span><select id="fF">${opts(srcs, from)}</select>
+      ${spectrum ? `<span>Damping ratio</span><input id="fD" type="number" step="any" value="${f ? f.damping : 0.05}">` : ""}</div>
+    <fieldset id="fPts"><legend>${spectrum ? "Period (s) and value (g), one pair a line" : "Time (s) and value, one pair a line"}</legend><textarea id="fP" rows="10" style="width:100%">${f ? pairsText(f.points) : spectrum ? "0\t0.4\n0.2\t1\n0.6\t1\n2\t0.3\n4\t0.15" : "0\t0\n0.5\t1\n1\t0"}</textarea></fieldset>
+    <fieldset id="fCode" hidden><legend>Code</legend><div class="g2"><span>Code</span><select id="fC">${opts(withSpectrum.map(c => [c.code, c.code]), code)}</select></div><div class="g2" id="fCI" style="margin-top:6px"></div></fieldset>
+    <fieldset id="fWave" hidden><legend>Wave</legend><div class="g2"><span>Period (s)</span><input id="wP" type="number" step="any" value="1"><span>Cycles</span><input id="wC" type="number" step="any" value="4"><span>Amplitude</span><input id="wA" type="number" step="any" value="1"><span>Steps a cycle</span><input id="wS" type="number" value="16"></div></fieldset>`,
+    [["OK", d => {
+      const name = q(d, "#fN").value.trim(), args = {name, kind, from, was: f && f.name !== name ? f.name : undefined};
+      if (spectrum) args.damping = fnum(d, "#fD");
+      if (from === "points") args.points = readPairs(q(d, "#fP").value);
+      if (from === "code") { args.code = code; args.values = values; }
+      if (["sine", "cosine", "ramp"].includes(from)) Object.assign(args, {period: fnum(d, "#wP"), cycles: fnum(d, "#wC"), amplitude: fnum(d, "#wA"), steps_per_cycle: parseInt(q(d, "#wS").value) || 16});
+      return submit(d, "define_function", args, after);
+    }, true], ["Cancel"]], {width: 520});
+  const paint = () => {
+    q(d, "#fPts").hidden = from !== "points"; q(d, "#fCode").hidden = from !== "code"; q(d, "#fWave").hidden = !["sine", "cosine", "ramp"].includes(from);
+    const c = withSpectrum.find(x => x.code === code);
+    q(d, "#fCI").innerHTML = !c ? "" : c.inputs.filter(i => !["Dir", "Ecc", "TopStory", "BottomStory", "Period", "System", "Ct", "x", "UserT", "R", "I", "Omega", "Cd", "CuCap", "K", "Min"].includes(i.key)).map(i => `<span title="${esc(i.about || "")}">${esc(i.name)}</span>` +
+      (i.choices ? `<select data-k="${esc(i.key)}">${opts(i.choices.map(x => [x, x]), values[i.key] ?? i.default)}</select>` : `<input data-k="${esc(i.key)}" value="${esc(values[i.key] ?? i.default)}">`)).join("");
+    d.querySelectorAll("#fCI [data-k]").forEach(x => x.onchange = () => { values[x.dataset.k] = x.value; });
+  };
+  q(d, "#fF").onchange = () => { from = q(d, "#fF").value; paint(); };
+  q(d, "#fC").onchange = () => { code = q(d, "#fC").value; values = {}; paint(); };
+  paint();
+}
+
+async function hmCases() {
+  const a = await hmAnalysis();
+  const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmCases(); };
+  const find = n => a.load_cases.find(c => c.name === n);
+  listForm("Define Load Cases", "Load Cases", a.load_cases.map(c => c.name + "  (" + c.type + ")"), [
+    ["Add New Case...", () => hmCase(null, a, again)],
+    ["Add Copy of Case...", n => n && hmCase(find(n.replace(/  \(.*\)$/, "")), a, again, true)],
+    ["Modify/Show Case...", n => n && hmCase(find(n.replace(/  \(.*\)$/, "")), a, again)],
+    ["Delete Case", n => n && hmRun("delete_definition", {kind: "load_case", name: n.replace(/  \(.*\)$/, "")}, true).then(j => j.ok ? again() : hmSay(j.error, true))],
+  ]);
+}
+async function hmCase(c, a, after, copy) {
+  const defs = await hmDefs();
+  let type = c ? c.type : "Linear Static";
+  let loads = c ? c.loads.map(l => ({...l})) : [];
+  const fns = k => a.functions.filter(f => f.kind === k).map(f => f.name);
+  const modals = a.load_cases.filter(x => x.type.startsWith("Modal")).map(x => x.name), nonlinear = a.load_cases.filter(x => x.type.startsWith("Nonlinear") && (!c || x.name !== c.name)).map(x => x.name);
+  const d = dialog("Load Case Data", `<div class="g2"><span>Load Case Name</span><input id="cN" value="${esc(c ? (copy ? c.name + " copy" : c.name) : "LCase1")}"><span>Load Case Type</span><select id="cT">${opts(a.case_types.map(t => [t, t]), type)}</select></div>
+    <fieldset id="cInit"><legend>Initial Conditions</legend><select id="cI">${opts([["", "Zero initial conditions (unstressed state)"], ...nonlinear.map(n => [n, "Continue from the end of " + n])], c && c.initial_case || "")}</select></fieldset>
+    <fieldset id="cModal"><legend>Modes</legend><div class="g2"><span>Maximum number of modes</span><input id="cMx" type="number" value="${c ? c.max_modes : 12}"><span>Minimum number of modes</span><input id="cMn" type="number" value="${c ? c.min_modes : 1}"></div></fieldset>
+    <fieldset id="cRS"><legend>Response Spectrum and History Options</legend><div class="g2"><span>Modal case</span><select id="cMc">${opts(modals.map(m => [m, m]), c ? c.modal_case : modals[0])}</select>
+      <span class="rsOnly">Modal combination</span><select id="cMcb" class="rsOnly">${opts(a.modal_combos.map(x => [x, x]), c ? c.modal_combo : "CQC")}</select>
+      <span class="rsOnly">Directional combination</span><select id="cDc" class="rsOnly">${opts(a.dir_combos.map(x => [x, x]), c ? c.dir_combo : "SRSS")}</select>
+      <span>Damping ratio</span><input id="cD" type="number" step="any" value="${c ? c.damping : 0.05}">
+      <span class="rsOnly">Diaphragm eccentricity ratio</span><input id="cE" class="rsOnly" type="number" step="any" value="${c ? c.eccentricity : 0}"></div></fieldset>
+    <fieldset id="cTH"><legend>Time Steps</legend><div class="g2"><span>Number of output time steps</span><input id="cS" type="number" value="${c ? c.steps : 100}"><span>Output time step size (s)</span><input id="cSz" type="number" step="any" value="${c ? c.step_size : 0.01}"></div></fieldset>
+    <fieldset id="cGeo"><legend>Geometric Nonlinearity</legend><select id="cG">${opts([["None", "None"], ["P-Delta", "P-Delta"], ["P-Delta and Large Displacements", "P-Delta plus Large Displacements"]], c ? c.geometric : "None")}</select></fieldset>
+    <fieldset><legend>Loads Applied</legend><div class="scroll" style="max-height:24vh"><table class="list hmgrid" id="cL"></table></div><button id="cAdd" style="margin-top:6px">Add</button></fieldset>`,
+    [["OK", d => {
+      const name = q(d, "#cN").value.trim();
+      return submit(d, "define_load_case", {name, was: c && !copy && c.name !== name ? c.name : undefined, type, loads: loads.map(l => l.accel ? {accel: l.accel, factor: +l.factor, function: l.function || undefined, angle: +l.angle || 0, arrival: +l.arrival || 0} : {pattern: l.pattern, factor: +l.factor, function: l.function || undefined, arrival: +l.arrival || 0}),
+        initial_case: q(d, "#cI").value || undefined, max_modes: parseInt(q(d, "#cMx").value) || 12, min_modes: parseInt(q(d, "#cMn").value) || 1, modal_case: q(d, "#cMc").value || "Modal",
+        modal_combo: q(d, "#cMcb").value, dir_combo: q(d, "#cDc").value, damping: fnum(d, "#cD"), eccentricity: fnum(d, "#cE"), steps: parseInt(q(d, "#cS").value) || 100, step_size: fnum(d, "#cSz"), geometric: q(d, "#cG").value}, after);
+    }, true], ["Cancel"]], {width: 640});
+  const paint = () => {
+    const modal = type.startsWith("Modal"), rs = type === "Response Spectrum", hist = type.includes("History"), nl = type.startsWith("Nonlinear");
+    q(d, "#cModal").hidden = !(modal || type === "Buckling"); q(d, "#cRS").hidden = !(rs || hist); q(d, "#cTH").hidden = !hist;
+    q(d, "#cGeo").hidden = !(type === "Nonlinear Static" || type === "Nonlinear Direct History"); q(d, "#cInit").hidden = modal || rs;
+    d.querySelectorAll(".rsOnly").forEach(x => x.hidden = !rs);
+    const fnKind = rs ? "spectrum" : hist ? "history" : null, canAccel = rs || hist || type === "Modal - Ritz";
+    q(d, "#cL").innerHTML = `<tr><th>Load Type</th><th>Load Name</th>${fnKind ? "<th>Function</th>" : ""}<th>Scale Factor</th>${rs || hist ? "<th>Angle</th>" : ""}${hist ? "<th>Arrival (s)</th>" : ""}<th></th></tr>` +
+      loads.map((l, i) => `<tr data-i="${i}"><td><select data-k="kind">${opts([...(rs ? [] : [["pattern", "Load Pattern"]]), ...(canAccel ? [["accel", "Acceleration"]] : [])], l.accel ? "accel" : "pattern")}</select></td>
+        <td><select data-k="name">${opts(l.accel ? ["U1", "U2", "U3"].map(x => [x, x]) : defs.load_patterns.map(p => [p.name, p.name]), l.accel || l.pattern)}</select></td>
+        ${fnKind ? `<td><select data-k="function">${opts(fns(fnKind).map(x => [x, x]), l.function || fns(fnKind)[0])}</select></td>` : ""}<td><input data-k="factor" type="number" step="any" value="${l.factor}"></td>
+        ${rs || hist ? `<td><input data-k="angle" type="number" step="any" value="${l.angle || 0}" ${l.accel ? "" : "disabled"}></td>` : ""}${hist ? `<td><input data-k="arrival" type="number" step="any" value="${l.arrival || 0}"></td>` : ""}<td><button data-del="${i}">Delete</button></td></tr>`).join("");
+    d.querySelectorAll("#cL [data-k]").forEach(x => x.onchange = () => {
+      const l = loads[+x.closest("tr").dataset.i], k = x.dataset.k;
+      if (k === "kind") { if (x.value === "accel") { delete l.pattern; l.accel = "U1"; } else { delete l.accel; l.pattern = defs.load_patterns[0] && defs.load_patterns[0].name; } paint(); }
+      else if (k === "name") { if (l.accel) l.accel = x.value; else l.pattern = x.value; }
+      else l[k] = x.value;
+    });
+    d.querySelectorAll("#cL [data-del]").forEach(b => b.onclick = () => { loads.splice(+b.dataset.del, 1); paint(); });
+    loads.forEach(l => { if (fnKind && !l.function) l.function = fns(fnKind)[0]; });
+  };
+  q(d, "#cT").onchange = () => {
+    type = q(d, "#cT").value;
+    if (type === "Response Spectrum") loads = loads.filter(l => l.accel);
+    if (!(type === "Response Spectrum" || type.includes("History") || type === "Modal - Ritz")) loads = loads.filter(l => !l.accel);
+    paint();
+  };
+  q(d, "#cAdd").onclick = () => {
+    const accel = type === "Response Spectrum" || (type.includes("History") && !defs.load_patterns.length);
+    loads.push(accel || type === "Modal - Ritz" ? {accel: "U1", factor: type === "Response Spectrum" || type.includes("History") ? 9.80665 : 1} : {pattern: defs.load_patterns[0] && defs.load_patterns[0].name, factor: 1});
+    paint();
+  };
+  paint();
+}
+
+async function hmMass() {
+  const a = await hmAnalysis(), defs = await hmDefs(), ms = a.mass_source;
+  let loads = ms.loads.map(l => ({...l}));
+  const d = dialog("Mass Source Data", `<fieldset><legend>Mass Source</legend><label style="display:block"><input type="checkbox" id="mE" ${ms.elements ? "checked" : ""}> Element self mass</label><label style="display:block"><input type="checkbox" id="mA" ${ms.added_mass ? "checked" : ""}> Additional mass</label><label style="display:block"><input type="checkbox" id="mL" ${loads.length ? "checked" : ""}> Specified load patterns</label></fieldset>
+    <fieldset><legend>Mass Multipliers for Load Patterns</legend><table class="list hmgrid" id="mT"></table><button id="mAdd" style="margin-top:6px">Add</button></fieldset>
+    <p class="kv">The seismic loads by code are worked out from this mass.</p>`,
+    [["OK", d => submit(d, "define_mass_source", {elements: q(d, "#mE").checked, added_mass: q(d, "#mA").checked, loads: q(d, "#mL").checked ? loads.map(l => ({pattern: l.pattern, factor: +l.factor})) : []}), true], ["Cancel"]], {width: 460});
+  const paint = () => {
+    q(d, "#mT").innerHTML = `<tr><th>Load Pattern</th><th>Multiplier</th><th></th></tr>` + loads.map((l, i) => `<tr data-i="${i}"><td><select data-k="pattern">${opts(defs.load_patterns.map(p => [p.name, p.name]), l.pattern)}</select></td><td><input data-k="factor" type="number" step="any" value="${l.factor}"></td><td><button data-del="${i}">Delete</button></td></tr>`).join("");
+    d.querySelectorAll("#mT [data-k]").forEach(x => x.onchange = () => { loads[+x.closest("tr").dataset.i][x.dataset.k] = x.value; });
+    d.querySelectorAll("#mT [data-del]").forEach(b => b.onclick = () => { loads.splice(+b.dataset.del, 1); paint(); });
+  };
+  q(d, "#mAdd").onclick = () => { loads.push({pattern: (defs.load_patterns[0] || {}).name, factor: 1}); q(d, "#mL").checked = true; paint(); };
+  paint();
+}
+
+async function hmPDelta() {
+  const a = await hmAnalysis(), defs = await hmDefs(), pd = a.pdelta;
+  let loads = pd.loads.map(l => ({...l}));
+  const d = dialog("P-Delta Options", `<fieldset><legend>Automation</legend>${[["none", "None"], ["non-iterative", "Non-iterative, based on mass"], ["iterative", "Iterative, based on loads"]].map(([k, t]) => `<label style="display:block"><input type="radio" name="pM" value="${k}" ${pd.method === k ? "checked" : ""}> ${t}</label>`).join("")}</fieldset>
+    <fieldset><legend>Iteration Controls</legend><div class="g2"><span>Maximum iterations</span><input id="pI" type="number" value="${pd.iterations || 5}"><span>Relative tolerance</span><input id="pT" type="number" step="any" value="${pd.tolerance || 0.001}"></div></fieldset>
+    <fieldset><legend>Load Patterns (iterative)</legend><table class="list hmgrid" id="pL"></table><button id="pAdd" style="margin-top:6px">Add</button></fieldset>`,
+    [["OK", d => submit(d, "define_pdelta", {method: q(d, "[name=pM]:checked").value, iterations: parseInt(q(d, "#pI").value) || 5, tolerance: fnum(d, "#pT"), loads: loads.map(l => ({pattern: l.pattern, factor: +l.factor}))}), true], ["Cancel"]], {width: 440});
+  const paint = () => {
+    q(d, "#pL").innerHTML = `<tr><th>Load Pattern</th><th>Scale Factor</th><th></th></tr>` + loads.map((l, i) => `<tr data-i="${i}"><td><select data-k="pattern">${opts(defs.load_patterns.map(p => [p.name, p.name]), l.pattern)}</select></td><td><input data-k="factor" type="number" step="any" value="${l.factor}"></td><td><button data-del="${i}">Delete</button></td></tr>`).join("");
+    d.querySelectorAll("#pL [data-k]").forEach(x => x.onchange = () => { loads[+x.closest("tr").dataset.i][x.dataset.k] = x.value; });
+    d.querySelectorAll("#pL [data-del]").forEach(b => b.onclick = () => { loads.splice(+b.dataset.del, 1); paint(); });
+  };
+  q(d, "#pAdd").onclick = () => { loads.push({pattern: (defs.load_patterns[0] || {}).name, factor: 1}); paint(); };
+  paint();
+}
+
+// ---- Assign: joint, frame and shell loads of every kind ----
+function hmJoints() {
+  // The joints of the selected objects, above the base: where a joint load goes.
+  const out = new Set(), base = stories.length ? elevationOf(stories[0].name) : 0;
+  for (const id of sel) {
+    const o = objOf(id); if (!o) continue;
+    for (const e of o.type === "f" ? [o.a, o.b] : o.pts) { if (e[2] <= (base ?? 0) + 1e-6) continue; const n = pointAt.get(key(e[0], e[1], e[2])); if (n !== undefined) out.add(String(n)); }
+  }
+  return [...out];
+}
+async function hmObjectLoad(kind) {
+  const defs = await hmDefs(), u = hmU(), t = kind.split("_")[0];
+  const names = t === "joint" ? hmJoints() : hmSelected(t === "frame" ? "f" : "a");
+  if (!names.length) return hmSay(t === "joint" ? "Select the members whose joints take the load first." : t === "frame" ? "Select the frames to load first." : "Select the floors or walls to load first.", true);
+  if (!defs.load_patterns.length) return hmSay("Define a load pattern first (Define > Load Patterns).", true);
+  const F = u.f, L = u.l;
+  const fields = {
+    joint_force: [["fx", `Force Global X (${F})`, 0], ["fy", `Force Global Y (${F})`, 0], ["fz", `Force Global Z (${F})`, 0], ["mx", `Moment about X (${F}-${L})`, 0], ["my", `Moment about Y (${F}-${L})`, 0], ["mz", `Moment about Z (${F}-${L})`, 0]],
+    joint_displacement: [["ux", `Translation X (${L})`, 0], ["uy", `Translation Y (${L})`, 0], ["uz", `Translation Z (${L})`, 0], ["rx", "Rotation about X (rad)", 0], ["ry", "Rotation about Y (rad)", 0], ["rz", "Rotation about Z (rad)", 0]],
+    joint_temperature: [["temperature", "Temperature change", 20]],
+    frame_uniform: [["value", `Uniform load (${F}/${L})`, 5]],
+    frame_point: [["value", `Force (${F})`, 10], ["distance", "Relative distance from end I", 0.5]],
+    frame_trapezoid: [["start", `Load at start (${F}/${L})`, 0], ["end", `Load at end (${F}/${L})`, 10], ["from", "Relative distance, start", 0], ["to", "Relative distance, end", 1]],
+    frame_temperature: [["temperature", "Temperature change", 20], ["gradient", `Temperature gradient (per ${L})`, 0]],
+    frame_strain: [["strain", "Axial strain", 0.0001]],
+    shell_uniform: [["value", `Uniform load (${F}/${L}²)`, 2]],
+    shell_temperature: [["temperature", "Temperature change", 20], ["gradient", `Temperature gradient (per ${L})`, 0]],
+    shell_strain: [["strain", "Strain", 0.0001]],
+  }[kind];
+  const dirs = ["frame_uniform", "frame_point", "frame_trapezoid", "shell_uniform"].includes(kind);
+  const title = {joint: "Joint", frame: "Frame", shell: "Shell"}[t] + " Load Assignment - " + kind.split("_").slice(1).join(" ").replace(/^./, c => c.toUpperCase());
+  const d = dialog(title, `<fieldset><legend>Load Pattern</legend><select id="oP">${opts(defs.load_patterns.map(p => p.name), hm.pattern || defs.load_patterns[0].name)}</select></fieldset>
+    ${dirs ? `<fieldset><legend>Direction</legend><select id="oD">${opts([["GRAV", "Gravity (down positive)"], ["X", "Global X"], ["Y", "Global Y"], ["Z", "Global Z"], ["1", "Local 1"], ["2", "Local 2"], ["3", "Local 3"]], "GRAV")}</select></fieldset>` : ""}
+    <fieldset><legend>Load</legend><div class="g2">${fields.map(([k, label, v]) => `<span>${esc(label)}</span><input data-k="${k}" type="number" step="any" value="${v}">`).join("")}</div></fieldset>
+    <fieldset><legend>Options</legend><label style="display:block"><input type="radio" name="oO" value="replace" checked>Replace Existing Loads</label><label style="display:block"><input type="radio" name="oO" value="add">Add to Existing Loads</label></fieldset>
+    <p class="kv">${names.length} selected ${t === "joint" ? "joints" : t === "frame" ? "frames" : "floors and walls"}.</p>`,
+    [["OK", d => {
+      hm.pattern = q(d, "#oP").value;
+      const values = {}; d.querySelectorAll("[data-k]").forEach(x => { const v = parseFloat(x.value); if (!isNaN(v) && (v !== 0 || fields.length === 1 || kind === "frame_trapezoid")) values[x.dataset.k] = v; });
+      if (!Object.keys(values).length) { formError(d, "Give a value that is not 0."); return false; }
+      return submit(d, "assign_object_loads", {kind, pattern: hm.pattern, objects: names, values, dir: dirs ? q(d, "#oD").value : undefined, replace: q(d, "[name=oO]:checked").value === "replace"});
+    }, true], ["Cancel"]], {width: 440});
+  return d;
 }
 
 // ---- File ----

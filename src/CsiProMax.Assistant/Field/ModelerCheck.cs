@@ -103,6 +103,23 @@ public static class ModelerCheck
           await act("m:undo"); await wait(1500);
           return frames.length === before ? {ok: "drawn, then undone"} : {fail: `after Undo there are ${frames.length} frames, not ${before}`};
         });
+        await step("Analyze > Check Model for Instabilities: the checker behind the window answers, and lists nothing wrong in the sound model", async () => {
+          await act("inst"); await wait(2500);
+          if (!inst.answer) return {fail: "no answer came: " + (document.querySelector("#instHead") || {}).textContent};
+          if (!inst.answer.ok) return {fail: "the check failed: " + inst.answer.error};
+          if (inst.answer.errors) return {fail: "the sound scratch model has errors: " + inst.answer.findings.slice(0, 3).map(f => f.message).join(" | ")};
+          if (!document.querySelector("#instList")) return {fail: "the checker's window did not open"};
+          const local = instLocal();
+          if (local.errors) return {fail: "the page's light check finds errors in the sound model: " + local.findings[0].message};
+          return {ok: inst.answer.summary};
+        });
+        await step("Analyze: a finding selects its objects and rings its places", async () => {
+          inst.answer = {ok: true, errors: 1, warnings: 0, findings: [{level: "error", check: "floating", message: "test", fix: "test", objects: [{kind: "frame", name: frames[0].name}], at: [frames[0].a]}], notes: []};
+          await act("inst"); await wait(300);
+          inst.answer = {ok: true, errors: 1, warnings: 0, findings: [{level: "error", check: "floating", message: "test", fix: "test", objects: [{kind: "frame", name: frames[0].name}], at: [frames[0].a]}], notes: []};
+          instList(); instGo(0); await wait(300);
+          return sel.has(frames[0].id) && inst.cur === 0 ? {ok: "selected and ringed"} : {fail: "the finding's frame was not selected"};
+        });
         await step("Define > Load Patterns > Modify Lateral Load: a seismic pattern takes ASCE 7-16, and its story forces show", async () => {
           const made = await hmRun("define_load_pattern", {name: "CPM-CHKEQ", type: "Seismic", self_weight: 0}, true);
           if (!made.ok) return {fail: "the seismic pattern was not added: " + made.error};
@@ -129,7 +146,7 @@ public static class ModelerCheck
         // A beam and a floor selected before each item, so the items that act on a selection are on (Delete empties it).
         const pick = () => { try { sel.clear(); const b = frames.findIndex(f => f.kind === "beam"); if (b >= 0) sel.add(b + 1); if (areas.length) sel.add(frames.length + 1); selChanged(); } catch (e) { } };
         const menus = modelerMenus(viewerMenus()), list = [];
-        for (const name of ["File", "Assign", "Define", "Draw", "Edit"]) flat(menus[name], name, list);
+        for (const name of ["File", "Assign", "Define", "Draw", "Edit", "Analyze"]) flat(menus[name], name, list);
         for (const it of list) {
           await step("menu: " + it.path, async () => {
             if (NOT_RUN.includes(it.act)) return {skipped: "skipped: it asks the PC for a file or a printer, which a browser without a window can't show"};
@@ -199,6 +216,8 @@ public static class ModelerCheck
                     using var request = JsonDocument.Parse(body);
                     answer = (Encoding.UTF8.GetBytes(HandModel.Handle(link, request.RootElement.Clone()).ToJsonString()), "application/json");
                 }
+            else if (path == "check")
+                lock (gate) answer = (Encoding.UTF8.GetBytes(StabilityTools.Window(link, body).ToJsonString()), "application/json");
             else if (path == "chat")
                 answer = (Encoding.UTF8.GetBytes(chat ? """{"conv":"check","count":0,"items":[],"busy":false,"ready":true,"status":""}""" : """{"off":true}"""), "application/json");
             return Task.FromResult(answer);

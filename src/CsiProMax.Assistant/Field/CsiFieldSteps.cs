@@ -56,6 +56,40 @@ public static class CsiFieldSteps
             FieldContext.Expect(a["this_window_works_in"]!.GetValue<string>() == name, $"this part tests {name}; the tool says {a["this_window_works_in"]}");
         });
         ctx.Tool("refresh_view", "{}", a => FieldContext.Expect(a["refreshed"]?.GetValue<bool>() == true, "no redraw: " + a.ToJsonString()));
+
+        // ---- what the Modeler wrote into this program's file: its load cases, and for SAP2000 its table fields ----
+        if (live && !isSafe && ctx.Files.TryGetValue(program.Key, out var written) && File.Exists(written))
+        {
+            ctx.Step($"{name} opened the Modeler's response spectrum, history, nonlinear static and buckling cases", () =>
+            {
+                var have = link.LoadCases().ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var missing = ModelerFieldSteps.Cases.Where(c => !have.Contains(c)).ToList();
+                FieldContext.Expect(missing.Count == 0, $"{name} has no {string.Join(", ", missing)} from the Modeler's file; it has {string.Join(", ", have)}");
+                return "all there";
+            });
+            if (program.Key == CsiProgram.Sap2000.Key)
+                ctx.Step("SAP2000 knows every table and field the Modeler writes into the .s2k", () =>
+                {
+                    var tables = CsiProMax.CsiTables.CsiTableText.Parse(File.ReadAllText(written));
+                    var known = link.Tables().ToDictionary(t => t.Name.ToUpperInvariant(), t => t.Key);
+                    var wrong = new List<string>();
+                    foreach (var (table, rows) in tables)
+                    {
+                        if (!known.TryGetValue(table.ToUpperInvariant(), out var key)) { wrong.Add($"no table '{table}'"); continue; }
+                        var fields = (string[])link.Raw($"read the fields of {table}", m =>
+                        {
+                            int version = 0, n = 0; string[] keys = [], names = [], about = [], units = []; bool[] importable = [];
+                            m.DatabaseTables.GetAllFieldsInTable(key, ref version, ref n, ref keys, ref names, ref about, ref units, ref importable);
+                            return keys ?? [];
+                        })!;
+                        var set = fields.ToHashSet(StringComparer.OrdinalIgnoreCase);
+                        var bad = rows.SelectMany(r => r.Keys).Distinct().Where(f => !set.Contains(f)).ToList();
+                        if (bad.Count > 0) wrong.Add($"'{table}' has no {string.Join(", ", bad)} (its fields: {string.Join(", ", fields)})");
+                    }
+                    FieldContext.Expect(wrong.Count == 0, string.Join(" | ", wrong));
+                    return $"{tables.Count} tables, every field known";
+                });
+        }
         // ---- the model must be changeable for the rest (a locked SAP2000 refused the pattern added by hand, 0.4.17) ----
         var locked = Read(ctx, "whether the model is locked", () => link.Info().Locked, false);
         // The Viewer is checked first, while the results are still there (SAP2000's Viewer had no result to show, 0.4.20).
@@ -165,6 +199,13 @@ public static class CsiFieldSteps
             }
         }
 
+        // ---- the checker for what stops the analysis, on the scratch model as it is (what it finds is listed) ----
+        var before = T(StabilityTools.Name, "{}", a =>
+        {
+            FieldContext.Expect(Int(a["checked"]?["joints"]) > 0 && a["findings"] is JsonArray, "the checker read no joints: " + Cut(a.ToJsonString()));
+            FieldContext.Expect(a["checked"]?["in"]?.GetValue<string>() == name, $"the checker says it read {a["checked"]?["in"]}, and this is {name}");
+        }, "tool find_instabilities on the scratch model");
+
         // ---- the SAP2000 tools the other programs share ----
         if (offered.Contains("add_frames"))
         {
@@ -177,6 +218,16 @@ public static class CsiFieldSteps
                 var kinds = link.Frames().Where(f => names.Contains(f.Name)).Select(f => f.Kind).OrderBy(k => k).ToList();
                 FieldContext.Expect(names.Count == 2 && string.Join(",", kinds) == "brace,column", "a column and a brace were asked for; the model has: " + string.Join(", ", kinds));
             }, "tool add_frames, a column and a brace by coordinates"), "frames");
+            // They stand on nothing: the checker must find them floating, named, beside what it found before.
+            if (made.Count == 2 && before is not null)
+                T(StabilityTools.Name, """{"stiffness":true}""", a =>
+                {
+                    var floating = a["findings"]!.AsArray().Where(f => f!["check"]!.GetValue<string>() == "floating").ToList();
+                    FieldContext.Expect(floating.Any(f => made.All(m => f!["objects"]!.AsArray().Any(o => o!["name"]!.GetValue<string>() == m))),
+                        $"the column and brace that stand on nothing ({string.Join(", ", made)}) were not found floating: " + Cut(a["findings"]!.ToJsonString()));
+                    FieldContext.Expect(Int(a["errors"]) > Int(before["errors"]), "the checker found no more errors with the floating frames than without them");
+                }, "tool find_instabilities finds the frames that stand on nothing");
+            else if (live) ctx.Fail("tool find_instabilities finds the frames that stand on nothing", "the frames or the first check were not there");
             if (made.Count == 2)
             {
                 T("set_releases", $$"""{"frames":[{{Q(made[1])}}],"type":"pinned"}""", null, "tool set_releases pins the brace");
