@@ -366,20 +366,21 @@ internal sealed class MarkdownView : RichTextBox
             {
                 var text = new TextBlock { TextWrapping = TextWrapping.Wrap, MaxWidth = 260, FontSize = ChatUi.SmallSize };
                 AddInlines(text.Inlines, c < cells.Count ? cells[c] : "");
-                if (header) text.FontWeight = FontWeights.SemiBold;
+                // ETABS's tables: plain header text on grey, numbers in even columns, thin grid lines, tight cells.
+                text.Typography.NumeralAlignment = FontNumeralAlignment.Tabular;
                 var align = c < table.Align.Count ? table.Align[c] : 'l';
                 text.TextAlignment = align == 'r' ? TextAlignment.Right : align == 'c' ? TextAlignment.Center : TextAlignment.Left;
                 // The frame draws the outer edge; the cells draw only the lines between them. Tinted cells in a corner
                 // follow the frame's rounding, so no square tint pokes out of it.
                 var cell = new Border
                 {
-                    Child = text, Padding = new Thickness(ChatUi.S2 + 2, ChatUi.S1 + 2, ChatUi.S2 + 2, ChatUi.S1 + 2),
+                    Child = text, Padding = new Thickness(5, 2, 5, 2),
                     BorderThickness = new Thickness(0, 0, c == columns - 1 ? 0 : 1, last ? 0 : 1),
                     CornerRadius = new CornerRadius(row == 0 && c == 0 ? inner : 0, row == 0 && c == columns - 1 ? inner : 0,
                         last && c == columns - 1 ? inner : 0, last && c == 0 ? inner : 0),
                 };
-                cell.SetResourceReference(Border.BorderBrushProperty, Brand.K.BorderSubtle);
-                if (header) cell.SetResourceReference(Border.BackgroundProperty, Brand.K.Surface);
+                cell.SetResourceReference(Border.BorderBrushProperty, header ? Brand.K.Border : Brand.K.GridLine);
+                cell.SetResourceReference(Border.BackgroundProperty, header ? Brand.K.GridHeader : Brand.K.Bg);
                 Grid.SetRow(cell, row);
                 Grid.SetColumn(cell, c);
                 grid.Children.Add(cell);
