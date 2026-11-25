@@ -480,6 +480,7 @@ public static class EtabsTools
         else if (coefficient is not null)
         {
             string? other = null;
+            var refusedAsce = false;
             e.Raw("define the seismic load", m =>
             {
                 int answer;
@@ -497,10 +498,20 @@ public static class EtabsTools
                         8.0, 3.0, 5.5, 1.0, 1.0, 0.4, 8.0, 4, 1.0, 1.0));
                     other = $"ASCE 7-16 ({e.Program.Name}'s API has no user coefficient): direction {dir}, eccentricity {ecc.ToString(System.Globalization.CultureInfo.InvariantCulture)}, R 8, Omega 3, Cd 5.5, Ie 1, Ss 1.0, S1 0.4, TL 8 s, site class D, program period. For a user coefficient instead (C = {c.ToString(System.Globalization.CultureInfo.InvariantCulture)}, K = {k.ToString(System.Globalization.CultureInfo.InvariantCulture)}): Define > Load Patterns, select {name}, Modify Lateral Load, User Coefficient";
                 }
-                if (answer != 0) throw new EtabsException($"{e.Program.Name} refused the automatic seismic load for {name}.");
+                // ETABS 23 answered 1 to SetASCE716 for every set of values tried on the field-test PC (0.4.18 field test,
+                // and by hand on a scratch ETABS 23): the pattern is kept, with no automatic load, and the answer says how
+                // to set it. A refused user coefficient (SAP2000) is still an error.
+                if (answer != 0 && other is null) throw new EtabsException($"{e.Program.Name} refused the automatic seismic load for {name}.");
+                if (answer != 0) { other = null; refusedAsce = true; }
                 return null;
             });
             if (other is not null) { result["lateral"] = other; return result; }
+            if (refusedAsce)
+            {
+                result["note"] = $"{e.Program.Name} added {name} as a Seismic pattern but did not take an automatic seismic load through its API (it has no user coefficient, and it refused ASCE 7-16). " +
+                                 $"Set it in {e.Program.Name}: Define > Load Patterns, select {name}, Modify Lateral Load, User Coefficient (C = {c.ToString(System.Globalization.CultureInfo.InvariantCulture)}, K = {k.ToString(System.Globalization.CultureInfo.InvariantCulture)}, direction {dir}), or give its load with joint forces.";
+                return result;
+            }
             result["lateral"] = $"user coefficient C = {c.ToString(System.Globalization.CultureInfo.InvariantCulture)}, K = {k.ToString(System.Globalization.CultureInfo.InvariantCulture)}, direction {dir}, eccentricity {ecc.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
         }
         return result;
