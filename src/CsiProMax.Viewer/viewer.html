@@ -2590,7 +2590,7 @@ async function hmRun(tool, args, quiet) {
   if (j.ok) {
     hm.lastError = ""; hm.defs = null; if (window.cpmPull) await window.cpmPull(); await hmDefs();
     // A new model, another file, or new stories and grids: the windows show all of it again, plans at the top story.
-    if (["new_model", "open_model_file", "define_stories", "define_grids"].includes(tool)) {
+    if (["new_model", "open_model_file", "define_stories", "define_grids", "import_tables_excel"].includes(tool)) {
       const top = stories.length ? stories[stories.length - 1].name : "";
       for (const p of panes) { if (p.mode === "plan" && top && !stories.some(s => s.name === p.story && s !== stories[0])) { p.story = top; p.sig = ""; p.vis = null; p.cam = {...p.cam, ...planeCam(p)}; } fit(p, false); }
       syncTools(); draw();
@@ -2612,7 +2612,8 @@ const hmU = () => { const u = (hm.defs && hm.defs.units) || {}; return {f: (u.fo
 function modelerMenus(m) {
   const s = hm.state || {}, any = sel.size > 0, fr = [...sel].some(id => (objOf(id) || {}).type === "f"), ar = [...sel].some(id => (objOf(id) || {}).type === "a");
   m.File = [["New Model...", "m:new", "Ctrl+N"], ["Open...", "m:open", "Ctrl+O"], 0, ["Save", "m:save", "Ctrl+S"], ["Save As...", "m:saveAs"], 0,
-    ["Export", [["SAP2000 .s2k Text File...", "m:s2k"], ["SAFE .f2k Text File (one floor)...", "m:f2k"]]], 0, ["Print the active window...", "print", "Ctrl+P"]];
+    ["Import", [["Tables from Excel (.xlsx)...", "m:xlsxIn"]]],
+    ["Export", [["Tables to Excel (.xlsx)...", "m:xlsxOut"], 0, ["SAP2000 .s2k Text File...", "m:s2k"], ["SAFE .f2k Text File (one floor)...", "m:f2k"]]], 0, ["Print the active window...", "print", "Ctrl+P"]];
   m.Edit = [[s.undo ? "Undo " + s.undo : "Undo", "m:undo", "Ctrl+Z", !s.undo], [s.redo ? "Redo " + s.redo : "Redo", "m:redo", "Ctrl+Y", !s.redo], 0,
     ["Delete", "m:delete", "Del", !any], 0, ["Copy names of the selected objects", "copyNames", "Ctrl+C", !any], 0, ["Hide the selected objects", "hideSel", "", !any], ["Show all objects", "showAll"]];
   m.Define = [["Material Properties...", "m:materials"], ["Frame Sections...", "m:frameSections"], ["Slab and Wall Sections...", "m:shellSections"], 0,
@@ -2633,6 +2634,8 @@ async function modelAct(a) {
     case "saveAs": return hmSave(true);
     case "s2k": return hmExport("s2k");
     case "f2k": return hmExport("f2k");
+    case "xlsxOut": return hmTablesOut();
+    case "xlsxIn": return hmTablesIn();
     case "new": return hmNew();
     case "open": return hmOpen();
     case "materials": return hmMaterials();
@@ -2960,6 +2963,54 @@ function hmExport(kind) {
     [["Export", d => submit(d, "save_model_s2k", {name: q(d, "#xn").value.trim(), folder: q(d, "#xf").value.trim() || undefined}, j => hmSay("Exported " + JSON.stringify(j.result).slice(0, 160))), true], ["Cancel"]], {width: 460});
   dialog("Export SAFE .f2k", `<div class="g2"><span>Floor</span><select id="xs">${opts(stories.slice().reverse().map(s => s.name), (panes[active] || {}).story)}</select><span>File name</span><input id="xn" placeholder="model and floor"><span>Folder</span><input id="xf" placeholder="Documents\\CSI ProMax\\Models"></div>`,
     [["Export", d => submit(d, "save_safe_file", {story: q(d, "#xs").value, name: q(d, "#xn").value.trim() || undefined, folder: q(d, "#xf").value.trim() || undefined}, j => hmSay("Exported " + JSON.stringify(j.result).slice(0, 160))), true], ["Cancel"]], {width: 460});
+}
+
+// ---- Excel: the model's tables out and in, as SAP2000 does (File > Export / Import > Excel) ----
+async function hmTablesOut() {
+  const j = await hmPost({tool: "model_tables", args: {}}).catch(() => null);
+  if (!j || !j.ok) return hmSay((j && j.error) || "The Modeler is not answering.", true);
+  const list = j.result.tables, u = j.result.units;
+  const groups = [["Definitions", 0, 9], ["Objects and assignments", 9, 15], ["Loads", 15, 99]];
+  const rows = g => list.slice(g[1], g[2]).map((t, i) => `<label style="display:flex;gap:6px;align-items:center;margin:2px 0;white-space:nowrap"><input type="checkbox" data-t="${esc(t.name)}" ${t.rows ? "checked" : ""}> ${esc(t.name)} <span style="margin-left:auto;padding-left:12px;opacity:.7">${t.rows} row${t.rows === 1 ? "" : "s"}</span></label>`).join("");
+  const name = (P && P.manifest && P.manifest.model) || "Model";
+  const d = dialog("Choose Tables for Export to Excel", `
+    <div style="display:flex;gap:10px"><div style="flex:1 1 auto;min-width:0;max-height:400px;overflow:auto">${groups.map(g => `<fieldset style="margin:0 0 6px"><legend>${esc(g[0])}</legend>${rows(g)}</fieldset>`).join("")}</div>
+    <fieldset style="flex:0 0 210px;width:210px;box-sizing:border-box;margin:0;min-width:0"><legend>Options</legend><div style="display:flex;flex-direction:column;gap:6px;white-space:normal">
+      <button id="xa">Select All</button><button id="xn0">Select None</button>
+      <label style="display:flex;gap:6px;align-items:flex-start;white-space:normal;min-width:0"><input type="radio" name="xfm" value="model" checked><span style="white-space:normal;min-width:0">Model tables, to edit and import back</span></label>
+      <label style="display:flex;gap:6px;align-items:flex-start;white-space:normal;min-width:0"><input type="radio" name="xfm" value="sap2000"><span style="white-space:normal;min-width:0">SAP2000 tables (joints, frames, areas), for SAP2000's File &gt; Import &gt; Excel</span></label>
+      <p class="kv" style="margin:4px 0 0">Units: ${esc(u.force)}, ${esc(u.length)}</p></div></fieldset></div>
+    <div class="g2" style="margin-top:8px"><span>File name</span><input id="xnm" value="${esc(name)} tables"><span>Folder</span><input id="xfd" placeholder="the model's own folder"></div>
+    <p class="kv" style="max-width:700px">One sheet per table: row 1 is the table's title, row 2 the field names, row 3 the units, then one row per item, as SAP2000 writes them. Edit the rows in Excel, save, and bring them back with File &gt; Import &gt; Tables from Excel.</p>`,
+    [["OK", d => {
+      const fmt = q(d, "input[name=xfm]:checked").value, tables = [...d.querySelectorAll("[data-t]")].filter(c => c.checked).map(c => c.dataset.t);
+      if (fmt === "model" && !tables.length) { formError(d, "Pick a table at least."); return false; }
+      return submit(d, "export_tables_excel", {name: q(d, "#xnm").value.trim() || undefined, folder: q(d, "#xfd").value.trim() || undefined, format: fmt, tables: fmt === "model" ? tables : undefined},
+        j => hmSay("Exported " + ((j.result && j.result.saved) || "") + " (" + ((j.result && j.result.tables) || []).length + " tables)."));
+    }], ["Cancel"]], {width: 760});
+  q(d, "#xa").onclick = () => d.querySelectorAll("[data-t]").forEach(c => c.checked = true);
+  q(d, "#xn0").onclick = () => d.querySelectorAll("[data-t]").forEach(c => c.checked = false);
+  d.querySelectorAll("input[name=xfm]").forEach(r => r.onchange = () => { const sap = q(d, "input[name=xfm]:checked").value === "sap2000"; d.querySelectorAll("[data-t]").forEach(c => c.disabled = sap); q(d, "#xnm").value = name + (sap ? " SAP2000 tables" : " tables"); });
+}
+function hmTablesIn() {
+  const d = dialog("Import Tables from Excel", `
+    <div class="g2"><span>Workbook</span><input id="iF" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"><span>or its path</span><input id="iP" placeholder="C:\\Users\\...\\Model tables.xlsx" style="min-width:360px"></div>
+    <p class="kv" style="max-width:520px">Each table in the workbook replaces the same table in the model, the way SAP2000 imports Excel: rows you deleted are removed, new rows are added, changed rows are changed. Tables that are not in the workbook stay as they are. Values in other units (mm, N/mm², ...) are converted. If any table can't be read, nothing changes and the message names the table, row and field. Edit &gt; Undo takes an import back.</p>`,
+    [["Import", d => {
+      const f = q(d, "#iF").files[0], path = q(d, "#iP").value.trim().replace(/^"|"$/g, "");
+      const done = j => { const r = j.result || {}; hmSay("Imported " + (r.read || []).join("; ") + ((r.notes || []).length ? ". " + r.notes.slice(0, 3).join(" ") : "")); if ((r.notes || []).length > 3 || (r.checks || []).length) hmImportReport(r); };
+      if (!f && !path) { formError(d, "Choose the workbook, or type its path."); return false; }
+      if (!f) return submit(d, "import_tables_excel", {path}, done);
+      const rd = new FileReader();
+      rd.onload = () => submit(d, "import_tables_excel", {data: String(rd.result), file_name: f.name}, done);
+      rd.onerror = () => formError(d, "The browser could not read " + f.name + ".");
+      rd.readAsDataURL(f);
+      return false;
+    }], ["Cancel"]], {width: 580});
+}
+function hmImportReport(r) {
+  const li = a => a.map(x => `<li>${esc(x)}</li>`).join("");
+  dialog("Import Log", `<div style="max-height:380px;overflow:auto;max-width:620px"><b>Tables read</b><ul>${li(r.read || [])}</ul>${(r.notes || []).length ? `<b>Notes</b><ul>${li(r.notes)}</ul>` : ""}${(r.checks || []).length ? `<b>Model check</b><ul>${li(r.checks)}</ul>` : ""}</div>`, [["OK"]], {width: 660});
 }
 
 // ---- Draw: clicks in a plan view, snapped to grid crossings, joints and grid lines ----

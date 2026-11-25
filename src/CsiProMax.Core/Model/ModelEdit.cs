@@ -150,15 +150,21 @@ public static class ModelEdit
         var assign = m.LineAssigns.Find(a => a.Label == line.Label && a.Story == story);
         if (assign is null)
         {
-            // What ETABS itself writes on a new member: output stations and automatic meshing.
-            List<string> defaults = kind == LineKind.Beam
-                ? ["CARDINALPT", "8", "MAXSTASPC", "0.5", "AUTOMESH", "\"YES\"", "MESHATINTERSECTIONS", "\"YES\""]
-                : ["MINNUMSTA", "3", "AUTOMESH", "\"YES\"", "MESHATINTERSECTIONS", "\"YES\""];
-            m.LineAssigns.Add(assign = new LineAssign { Label = line.Label, Story = story, Extra = [defaults] });
+            m.LineAssigns.Add(assign = new LineAssign { Label = line.Label, Story = story, Extra = [LineAssignDefaults(kind)] });
         }
         assign.Section = section;
         return assign;
     }
+
+    /// <summary>What ETABS itself writes on a new member's assignment: output stations and automatic meshing.</summary>
+    public static List<string> LineAssignDefaults(LineKind kind) => kind == LineKind.Beam
+        ? ["CARDINALPT", "8", "MAXSTASPC", "0.5", "AUTOMESH", "\"YES\"", "MESHATINTERSECTIONS", "\"YES\""]
+        : ["MINNUMSTA", "3", "AUTOMESH", "\"YES\"", "MESHATINTERSECTIONS", "\"YES\""];
+
+    /// <summary>What ETABS itself writes on a new slab's or wall's assignment.</summary>
+    public static List<string> AreaAssignDefaults(AreaKind kind) => kind == AreaKind.Wall
+        ? ["OBJMESHTYPE", "\"DEFAULT\"", "ADDRESTRAINT", "\"No\"", "CARDINALPOINT", "\"MIDDLE\"", "TRANSFORMSTIFFNESSFOROFFSETS", "\"No\""]
+        : ["OBJMESHTYPE", "\"DEFAULT\"", "ADDRESTRAINT", "\"No\"", "CARDINALPOINT", "\"TOP\"", "TRANSFORMSTIFFNESSFOROFFSETS", "\"No\""];
 
     /// <summary>A floor slab on the story, corners in order around its edge.</summary>
     public static AreaAssign AddSlab(this StructuralModel m, IReadOnlyList<(double X, double Y)> corners, string story, string section, string? diaphragm = null)
@@ -189,10 +195,7 @@ public static class ModelEdit
         var assign = m.AreaAssigns.Find(a => a.Label == area.Label && a.Story == story);
         if (assign is null)
         {
-            List<string> defaults = kind == AreaKind.Wall
-                ? ["OBJMESHTYPE", "\"DEFAULT\"", "ADDRESTRAINT", "\"No\"", "CARDINALPOINT", "\"MIDDLE\"", "TRANSFORMSTIFFNESSFOROFFSETS", "\"No\""]
-                : ["OBJMESHTYPE", "\"DEFAULT\"", "ADDRESTRAINT", "\"No\"", "CARDINALPOINT", "\"TOP\"", "TRANSFORMSTIFFNESSFOROFFSETS", "\"No\""];
-            m.AreaAssigns.Add(assign = new AreaAssign { Label = area.Label, Story = story, Extra = [defaults] });
+            m.AreaAssigns.Add(assign = new AreaAssign { Label = area.Label, Story = story, Extra = [AreaAssignDefaults(kind)] });
         }
         assign.Section = section;
         if (diaphragm is not null)
