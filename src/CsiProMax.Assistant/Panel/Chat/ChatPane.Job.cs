@@ -302,7 +302,7 @@ internal sealed partial class ChatPane
         item.Job = view.Model.ToJson();
         view.End();
         Save();
-        Status("Undo all: ETABS undid the task's changes (Redo brings them back).", spin: false);
+        Status($"Undo all: {Csi.Name} undid the task's changes (Redo brings them back).", spin: false);
     }
 
     // ---- Messages while the task runs -------------------------------------------------------------------------------

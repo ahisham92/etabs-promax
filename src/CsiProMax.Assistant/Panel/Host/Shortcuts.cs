@@ -107,7 +107,7 @@ internal static class Shortcuts
                     link.Arguments = "\"" + Path.Combine(AppContext.BaseDirectory, "CsiProMax.dll") + "\" --modeler";
                     link.WorkingDirectory = AppContext.BaseDirectory;
                     link.WindowStyle = 7; // minimised: dotnet's own console window stays out of the way
-                    link.Description = "CSI ProMax Modeler: build ETABS models with no ETABS open";
+                    link.Description = "CSI ProMax Modeler: build ETABS models with no ETABS open"; // ETABS itself
                     if (File.Exists(icon)) link.IconLocation = icon;
                     link.Save();
                     made.Add(modeler);
@@ -117,7 +117,7 @@ internal static class Shortcuts
                 {
                     dynamic link = shell.CreateShortcut(viewer);
                     link.TargetPath = ViewerPage;
-                    link.Description = "CSI ProMax Viewer: open a review pack (.cpmx) with no ETABS";
+                    link.Description = "CSI ProMax Viewer: open a review pack (.cpmx) with no ETABS"; // ETABS itself
                     if (File.Exists(icon)) link.IconLocation = icon;
                     link.Save();
                     made.Add(viewer);

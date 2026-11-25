@@ -174,8 +174,8 @@ internal sealed class StreamParser
             {
                 var tool = Str(root, "tool_name");
                 events.Add(new NoticeEvent(tool.Length > 0
-                    ? $"CSI ProMax tried a step the ETABS chat doesn't allow ({StepNames.Title(tool)}). It carries on without it."
-                    : "CSI ProMax tried a step the ETABS chat doesn't allow. It carries on without it."));
+                    ? $"CSI ProMax tried a step the {Csi.Name} chat doesn't allow ({StepNames.Title(tool)}). It carries on without it."
+                    : $"CSI ProMax tried a step the {Csi.Name} chat doesn't allow. It carries on without it."));
                 break;
             }
         }

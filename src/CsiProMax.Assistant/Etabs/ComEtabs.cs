@@ -25,7 +25,7 @@ public sealed class ComEtabs : ICsiLink, IDisposable
     {
         _pid = pid;
         Program = program ?? CsiProgram.Etabs;
-        _thread = new Thread(() => { foreach (var job in _work.GetConsumingEnumerable()) job(); }) { IsBackground = true, Name = "ETABS" };
+        _thread = new Thread(() => { foreach (var job in _work.GetConsumingEnumerable()) job(); }) { IsBackground = true, Name = Program.ProcessName };
         if (OperatingSystem.IsWindows()) _thread.SetApartmentState(ApartmentState.STA);
         _thread.Start();
     }
@@ -90,10 +90,10 @@ public sealed class ComEtabs : ICsiLink, IDisposable
         return _model!;
     }
 
-    /// <summary>ETABS's API answers 0 when a call worked.</summary>
-    private static void Ok(object result, string what)
+    /// <summary>The API answers 0 when a call worked. The refusal names the program this link drives, never another.</summary>
+    private void Ok(object result, string what)
     {
-        if (Convert.ToInt32(result) != 0) throw new EtabsException($"ETABS refused to {what}.");
+        if (Convert.ToInt32(result) != 0) throw new EtabsException($"{Program.Name} refused to {what}.");
     }
 
     private static string[] None => [];

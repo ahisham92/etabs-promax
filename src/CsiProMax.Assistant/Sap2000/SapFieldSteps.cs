@@ -185,6 +185,7 @@ public static class SapFieldSteps
         ctx.Tool("save_model", "{}", a => FieldContext.Expect(a["saved"]!.GetValue<string>().Replace('\\', '/').Split('/').Last().StartsWith(ModelerFieldSteps.ModelName, StringComparison.OrdinalIgnoreCase), $"it saved '{a["saved"]}', which is not the scratch model"));
 
         // ---- SAP2000's own analysis and design ----
+        NoVerdictBeforeAnalysis(ctx);
         ctx.Tool("run_analysis", "{}", _ => FieldContext.Expect(link.Info().Locked, "the analysis answered, but SAP2000 does not say the model is analysed (locked)"));
         var analysed = false;
         try { analysed = link.Info().Locked; }

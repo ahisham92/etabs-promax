@@ -54,8 +54,8 @@ internal sealed partial class ChatPane
             if (!on && Away.Take() is { Length: > 0 } meanwhile) Note(meanwhile);
             Away.Set(on, DateTime.UtcNow);
             var text = on
-                ? $"Away mode until {Away.Until.ToLocalTime():HH:mm}: nothing pops up. ETABS's pop-ups during the jobs' work are answered (Cancel, else No, else OK), " +
-                  "an ETABS command left doing nothing is ended, steps only you can do are skipped and risky changes (deletes) wait for you. Click Away again when you're back."
+                ? $"Away mode until {Away.Until.ToLocalTime():HH:mm}: nothing pops up. {Csi.Name}'s pop-ups during the jobs' work are answered (Cancel, else No, else OK), " +
+                  $"{Csi.AName} command left doing nothing is ended, steps only you can do are skipped and risky changes (deletes) wait for you. Click Away again when you're back."
                 : "Away mode is off: pop-ups and questions show again.";
             Note(text);
             Status(text, spin: false);
@@ -76,7 +76,7 @@ internal sealed partial class ChatPane
         _awayDot.SetResourceReference(Shape.FillProperty, on ? Brand.K.WarningText : Brand.K.Muted);
         var tip = on
             ? "On: nothing pops up and the jobs carry on by themselves. Click when you're back."
-            : "Off. Click before you leave ETABS: nothing pops up, ETABS's pop-ups during the jobs' work are answered and a command left open is ended, for up to 12 hours.";
+            : $"Off. Click before you leave {Csi.Name}: nothing pops up, {Csi.Name}'s pop-ups during the jobs' work are answered and a command left open is ended, for up to 12 hours.";
         _awayPill.ToolTip = tip;
         AutomationProperties.SetName(_awayPill, _awayLabel.Text);
         AutomationProperties.SetHelpText(_awayPill, tip);
@@ -92,19 +92,19 @@ internal sealed partial class ChatPane
         if (JobPause.On && running > 0)
         {
             text = $"Pausing… ({running} finishing a step)";
-            tip = "Each job stops as soon as it has nothing running in ETABS. Click to carry on instead.";
+            tip = $"Each job stops as soon as it has nothing running in {Csi.Name}. Click to carry on instead.";
         }
         else if (JobPause.On)
         {
             text = paused > 0 ? $"Continue ({paused} paused)" : "Continue";
             tip = JobPause.Why == JobPause.ForUpdate
                 ? "Paused so the update goes in; they carry on by themselves right after. Click to carry on now."
-                : "Everything is paused: ETABS is free to sync or update. Click to carry on from where each job stopped.";
+                : $"Everything is paused: {Csi.Name} is free to sync or update. Click to carry on from where each job stopped.";
         }
         else
         {
             text = "Pause all";
-            tip = "Pauses every job once its current step in ETABS is done, so you can sync or update. Continue carries on from there; nothing is lost.";
+            tip = $"Pauses every job once its current step in {Csi.Name} is done, so you can sync or update. Continue carries on from there; nothing is lost.";
         }
         _pauseLabel.Text = text;
         Brand.Fg(_pauseLabel, JobPause.On ? Brand.K.Link : Brand.K.Muted);
@@ -131,7 +131,7 @@ internal sealed partial class ChatPane
         if (!JobPause.On) return;
         if (why == JobPause.ForUser)
         {
-            var text = "Pausing all jobs: each stops as soon as its current step in ETABS is done, and nothing new starts. " +
+            var text = $"Pausing all jobs: each stops as soon as its current step in {Csi.Name} is done, and nothing new starts. " +
                        "Sync or update when it says Continue; press Continue to carry on from where each stopped.";
             Note(text);
             Status(text, spin: false);
@@ -192,7 +192,7 @@ internal sealed partial class ChatPane
             }
             if (JobPause.UpdateTooLong(now))
             {
-                Note($"CSI ProMax {staged} couldn't go in yet (ETABS was never free long enough), so the jobs carry on without it; it is tried again in an hour.");
+                Note($"CSI ProMax {staged} couldn't go in yet ({Csi.Name} was never free long enough), so the jobs carry on without it; it is tried again in an hour.");
                 foreach (var s in Sessions) s.UpdateRetryAt = now.AddHours(1);
                 ContinueAll(byUser: false);
                 return;
@@ -218,7 +218,7 @@ internal sealed partial class ChatPane
             {
                 Save();
                 if (Sessions.All(s => s.Runs.Count == 0) && JobPause.Why == JobPause.ForUser)
-                    Status("All jobs are paused: ETABS is free to sync or update. Press Continue to carry on.", spin: false);
+                    Status($"All jobs are paused: {Csi.Name} is free to sync or update. Press Continue to carry on.", spin: false);
             }
         }
         ShowPause();

@@ -26,22 +26,22 @@ internal static class ScreenGrab
     /// <summary>All of ETABS's main window as a PNG at most <paramref name="maxWidth"/> wide (the chat's camera button, capture_view_image).</summary>
     public static byte[] Capture(IntPtr main, int maxWidth)
     {
-        if (main == IntPtr.Zero) throw new InvalidOperationException("ETABS's main window was not found.");
-        if (IsIconic(main)) throw new InvalidOperationException("ETABS is minimized; restore its window first.");
-        if (!GetWindowRect(main, out var w)) throw new InvalidOperationException("Could not read ETABS's window position.");
+        if (main == IntPtr.Zero) throw new InvalidOperationException($"{Csi.Name}'s main window was not found.");
+        if (IsIconic(main)) throw new InvalidOperationException($"{Csi.Name} is minimized; restore its window first.");
+        if (!GetWindowRect(main, out var w)) throw new InvalidOperationException($"Could not read {Csi.Name}'s window position.");
         int width = w.Right - w.Left, height = w.Bottom - w.Top;
-        if (width < 50 || height < 50) throw new InvalidOperationException("ETABS's window is too small to capture.");
+        if (width < 50 || height < 50) throw new InvalidOperationException($"{Csi.Name}'s window is too small to capture.");
         return Grab(main, width, height, 0, 0, width, height, maxWidth, new System.Windows.Media.Imaging.PngBitmapEncoder());
     }
 
     /// <summary>All of ETABS's main window as a JPEG at most <paramref name="maxWidth"/> wide (bug reports).</summary>
     public static byte[] Window(IntPtr main, int maxWidth)
     {
-        if (main == IntPtr.Zero) throw new InvalidOperationException("ETABS's main window was not found.");
-        if (IsIconic(main)) throw new InvalidOperationException("ETABS is minimized.");
-        if (!GetWindowRect(main, out var w)) throw new InvalidOperationException("Could not read ETABS's window position.");
+        if (main == IntPtr.Zero) throw new InvalidOperationException($"{Csi.Name}'s main window was not found.");
+        if (IsIconic(main)) throw new InvalidOperationException($"{Csi.Name} is minimized.");
+        if (!GetWindowRect(main, out var w)) throw new InvalidOperationException($"Could not read {Csi.Name}'s window position.");
         int width = w.Right - w.Left, height = w.Bottom - w.Top;
-        if (width < 50 || height < 50) throw new InvalidOperationException("ETABS's window is too small to capture.");
+        if (width < 50 || height < 50) throw new InvalidOperationException($"{Csi.Name}'s window is too small to capture.");
         return Grab(main, width, height, 0, 0, width, height, maxWidth, new System.Windows.Media.Imaging.JpegBitmapEncoder { QualityLevel = 70 });
     }
 
@@ -54,7 +54,7 @@ internal static class ScreenGrab
         try
         {
             if (!PrintWindow(main, memDc, PwRenderFullContent))
-                throw new InvalidOperationException("Windows would not render ETABS's window.");
+                throw new InvalidOperationException($"Windows would not render {Csi.Name}'s window.");
             SelectObject(memDc, old);
             System.Windows.Media.Imaging.BitmapSource image = System.Windows.Interop.Imaging.CreateBitmapSourceFromHBitmap(
                 bitmap, IntPtr.Zero, new System.Windows.Int32Rect(x, y, cw, ch),
@@ -89,9 +89,9 @@ public sealed class CaptureViewImageTool : IEtabsTool
 {
     public string Name => "capture_view_image";
     public string Description =>
-        "Takes a picture of the ETABS window as it shows the model now (its open views with whatever is displayed: the model, loads, " +
+        $"Takes a picture of the {Csi.Name} window as it shows the model now (its open views with whatever is displayed: the model, loads, " +
         "deformed shape, force diagrams, design ratios) and returns it as an image. Use it to see what the engineer sees, and to check " +
-        "the result of a change by eye. It shows what ETABS is showing; it does not change the views.";
+        $"the result of a change by eye. It shows what {Csi.Name} is showing; it does not change the views.";
     public string PropertiesJson => """{"pixel_width": {"type": "integer", "description": "The picture's width in pixels (400 to 2400, default 1600)."}}""";
     public string[] Required => [];
     public bool ModifiesModel => false;
@@ -103,7 +103,7 @@ public sealed class CaptureViewImageTool : IEtabsTool
         {
             var png = ScreenGrab.Capture(CsiProMax.App.MainWindow, width);
             var title = app.ActiveUIDocument?.Title ?? "the model";
-            return new ToolResult($"Picture of the ETABS window, view '{title}'.", PngImage: png);
+            return new ToolResult($"Picture of the {Csi.Name} window, view '{title}'.", PngImage: png);
         }
         catch (InvalidOperationException ex) { return ToolResult.Error(ex.Message); }
     }

@@ -13,7 +13,7 @@ internal static class SettingsLayout
 
     public static readonly Tab[] Tabs =
     [
-        new(Approvals, "Approvals", "When ETABS asks before CSI ProMax changes the model."),
+        new(Approvals, "Approvals", $"When {Csi.Name} asks before CSI ProMax changes the model."),
         new(Chat, "Chat", "How the Chat pane looks and moves, the type, model and effort new chats start with, how many jobs run at once, and when to synchronize."),
         new(Standards, "Firm standards", "Your office's rules, followed in every conversation."),
         new(Time, "Time tracking", "Working time and time saved, kept in each model."),

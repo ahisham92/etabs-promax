@@ -149,7 +149,7 @@ internal static class StepNames
     public static string Running(string tool, string text, bool mayAsk)
     {
         var what = Line(tool, text).TrimEnd('…', '.', ' ');
-        return "Running: " + what + "…" + (mayAsk ? " If ETABS asks, answer it there." : "");
+        return "Running: " + what + "…" + (mayAsk ? $" If {Csi.Name} asks, answer it there." : "");
     }
 
     /// <summary>True for steps that only read (no approval is ever asked for them).</summary>

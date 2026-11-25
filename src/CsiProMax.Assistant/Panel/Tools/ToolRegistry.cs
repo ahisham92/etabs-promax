@@ -49,12 +49,12 @@ public sealed class ToolRegistry
         new RunETABSQueryCodeTool(),
         new RunETABSCodeTool(),
     ]);
-        // The ETABS model: read, build, load, analyse (Assistant/Tools/EtabsTools).
-        foreach (var tool in CsiProMax.Assistant.Tools.EtabsTools.All) registry.Add(new ModelTool(tool));
+        // The model: read, build, load, analyse. The shared tools and the program's own, as ProgramTools.Chat gives
+        // them: the self test and the field test take them from the same place.
         if (modeler)
-            foreach (var tool in CsiProMax.Assistant.Tools.ModelerTools.All.Concat(CsiProMax.Assistant.Tools.ProgramTools.Modeler)) registry.Add(new ModelTool(tool));
+            foreach (var tool in CsiProMax.Assistant.Tools.EtabsTools.All.Concat(CsiProMax.Assistant.Tools.ModelerTools.All).Concat(CsiProMax.Assistant.Tools.ProgramTools.Modeler)) registry.Add(new ModelTool(tool));
         else
-            foreach (var tool in CsiProMax.Assistant.Tools.ProgramTools.For(program ?? CsiProMax.Assistant.Etabs.CsiProgram.Etabs)) registry.Add(new ModelTool(tool));
+            foreach (var tool in CsiProMax.Assistant.Tools.ProgramTools.Chat(program ?? CsiProMax.Assistant.Etabs.CsiProgram.Etabs)) registry.Add(new ModelTool(tool));
         // Recipes replay other tools, so they need the registry itself.
         registry.Add(new SaveRecipeTool(registry));
         registry.Add(new RunRecipeTool(registry));

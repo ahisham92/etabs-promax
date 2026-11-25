@@ -14,7 +14,7 @@ internal static class ManualSteps
         Kind = "missing_file",
         What = $"Put the {what} at {path}, or check the name and folder",
         Where = "Windows File Explorer (copy it there, or connect the network drive it is on)",
-        Why = $"The {what} '{Path.GetFileName(path)}' was not found at that path, so it can't be brought into ETABS.",
+        Why = $"The {what} '{Path.GetFileName(path)}' was not found at that path, so it can't be brought into {Csi.Name}.",
         Recheck = () => File.Exists(path),
     });
 }

@@ -123,7 +123,7 @@ internal static class LearnedTools
     /// </summary>
     public static bool OpensOwnTransactions(string code) => OwnTransaction.IsMatch(code);
 
-    private static readonly Regex OwnTransaction = new(@"new\s+(Autodesk\.ETABS\.DB\.)?(Transaction|TransactionGroup)\s*\(|EditScope\b");
+    private static readonly Regex OwnTransaction = new(@"new\s+(Autodesk\.ETABS\.DB\.)?(Transaction|TransactionGroup)\s*\(|EditScope\b"); // ETABS itself
 }
 
 /// <summary>One saved tool. The MCP server reads the same file to list it, so the JSON shape is shared.</summary>
@@ -225,20 +225,20 @@ public sealed class SaveAsToolTool : IEtabsTool
 {
     public string Name => "save_as_tool";
     public string Description =>
-        "Save working ETABS API code as a new reusable tool, so next time the request has a dedicated tool. Use it after " +
+        $"Save working {Csi.Name} API code as a new reusable tool, so next time the request has a dedicated tool. Use it after " +
         "run_etabs_code or run_etabs_query_code solved something no existing tool covers and that is likely to come up " +
         "again: generalise the code so whatever changes between uses (names, levels, sizes, ids) comes from 'args', a " +
         "dictionary of the tool's inputs (args[\"width_mm\"] is a long, double, string, bool, List<object> or " +
         "Dictionary<string, object>; use Convert.ToDouble etc.). Saving under an existing learned tool's name replaces it, " +
         "which is how a learned tool is fixed or improved. The code is compiled before saving.";
-    public string PropertiesJson => """
+    public string PropertiesJson => $$$"""
     {
       "name": {"type": "string", "description": "snake_case, 3 to 48 characters, verb first, e.g. renumber_parking_spaces"},
       "description": {"type": "string", "description": "What the tool does and when to use it, written for Claude choosing tools in a later chat. Mention units."},
       "code": {"type": "string", "description": "C# method body, as for run_etabs_code, reading its inputs from args. Must end with a return statement."},
       "parameters": {"type": "object", "description": "JSON Schema 'properties' for the inputs, e.g. {\"level\": {\"type\": \"string\", \"description\": \"Level name\"}}"},
       "required": {"type": "array", "items": {"type": "string"}},
-      "changes_model": {"type": "boolean", "description": "True when the code changes the model. It then runs behind the same approval as run_etabs_code. ETABS has no undo."}
+      "changes_model": {"type": "boolean", "description": "True when the code changes the model. It then runs behind the same approval as run_etabs_code. {{{Csi.Name}}} has no undo."}
     }
     """;
     public string[] Required => ["name", "description", "code", "changes_model"];

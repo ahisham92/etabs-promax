@@ -101,7 +101,7 @@ internal sealed class MainWindow : Window
         else
         {
             view.Items.Add(new Separator());
-            Add(view, "Open the _Modeler (no ETABS needed)", ModelView.StartModeler);
+            Add(view, $"Open the _Modeler (no {Csi.Name} needed)", ModelView.StartModeler);
         }
         Add(view, "Make the Modeler and Viewer _shortcuts again", () => TaskDialog.Show("CSI ProMax", "The Modeler and Viewer shortcuts are on your desktop and in the Start menu (CSI ProMax):\n" + string.Join("\n", Shortcuts.MakeAll())));
 
@@ -111,6 +111,7 @@ internal sealed class MainWindow : Window
         Add(help, "_Export chats and bugs", ExportChatsAndBugs);
         Add(help, "Open _folders…", () => UserFoldersWindow.Open());
         Add(help, "Self _test", RunSelfTest);
+        Add(help, "_Tools menu of each CSI program: check and repair", CheckToolsMenus);
         help.Items.Add(new Separator());
         Add(help, "_Field test: everything (saves a report to send)…", () => RunFieldTest(full: true));
         Add(help, "Field test, _quick: this PC and the open model", () => RunFieldTest(full: false));
@@ -144,6 +145,15 @@ internal sealed class MainWindow : Window
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) { }
     }
 
+    /// <summary>Looks at each CSI program's plug-in list, adds CSI ProMax where it is missing and may be added, and says what it found.</summary>
+    private async void CheckToolsMenus()
+    {
+        IReadOnlyList<CsiProMax.Assistant.ToolsMenu.Entry> entries;
+        try { entries = await Task.Run(() => CsiProMax.Assistant.ToolsMenu.Repair()); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { TaskDialog.Show("CSI ProMax", "The Tools menus could not be looked at: " + ex.Message); return; }
+        TaskDialog.Show("CSI ProMax", "Tools > CSI ProMax in each CSI program of this Windows user:\n\n" + CsiProMax.Assistant.ToolsMenu.Summary(entries));
+    }
+
     private async void RunSelfTest()
     {
         if (CsiProMax.App.Etabs is not { } etabs) return;
@@ -175,7 +185,7 @@ internal sealed class MainWindow : Window
         {
             var programs = CsiProMax.Assistant.FieldTest.Installed(etabs.Link.Program);
             var which = programs.Count == 0
-                ? "No ETABS, SAP2000 or SAFE was found on this PC, so the tools inside the programs will be listed as not tested."
+                ? "No ETABS, SAP2000 or SAFE was found on this PC, so the tools inside the programs will be listed as not tested." // ETABS itself
                 : $"Then it opens a second window of {string.Join(", ", programs.Select(p => p.Name))} on that test model, runs every tool and check there " +
                   "(the analysis and design too), and closes each window again without saving. Each window takes a licence as usual.";
             if (TaskDialog.Show("CSI ProMax",

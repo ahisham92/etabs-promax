@@ -191,7 +191,7 @@ internal sealed class CrewStrip : Border
         grid.Children.Add(_bubbles);
         grid.Children.Add(TeamSize());
         Child = grid;
-        AutomationProperties.SetName(this, "Who is working: you, the coordinator, its workers and who applies changes in ETABS");
+        AutomationProperties.SetName(this, $"Who is working: you, the coordinator, its workers and who applies changes in {Csi.Name}");
         Focusable = false;
 
         _you = Person(YouShirt, null, standing: true);
@@ -419,12 +419,12 @@ internal sealed class CrewStrip : Border
         _applier.Name.Text = names.Applier;
         AutomationProperties.SetName(_you.Root, names.You + ", you");
         AutomationProperties.SetName(_coordinator.Root, names.Coordinator + ", the coordinator");
-        AutomationProperties.SetName(_station, names.Applier + " applies changes in ETABS, one at a time");
+        AutomationProperties.SetName(_station, names.Applier + $" applies changes in {Csi.Name}, one at a time");
     }
 
     private static string Words(CrewMood mood) => mood switch
     {
-        CrewMood.Applying => "having the change applied in ETABS",
+        CrewMood.Applying => $"having the change applied in {Csi.Name}",
         CrewMood.Waiting => "in line to apply a change",
         CrewMood.Reading => "reading the model",
         CrewMood.Resting => "waiting to start again",
@@ -910,7 +910,7 @@ internal sealed class CrewStrip : Border
             ? _inLine > 0 ? $"Applying {_applyingFor}'s · {waiting}" : $"Applying {_applyingFor}'s change"
             : _inLine > 0 ? $"{waiting} in line"
             : _applied > 0 ? $"{_applied} applied · ready" : "Ready for changes";
-        AutomationProperties.SetName(_station, $"{Names.Applier} applies changes in ETABS, one at a time: {_applier.Status.Text}");
+        AutomationProperties.SetName(_station, $"{Names.Applier} applies changes in {Csi.Name}, one at a time: {_applier.Status.Text}");
     }
 
     private void Leave(int number)
@@ -983,7 +983,7 @@ internal sealed class CrewStrip : Border
     private void BuildStation()
     {
         _station.Children.Add(_applier.Root);
-        _station.Children.Add(HitArea(-14, 76, "What goes into ETABS: now, waiting and done", b => ApplierPicked?.Invoke(b)));
+        _station.Children.Add(HitArea(-14, 76, $"What goes into {Csi.Name}: now, waiting and done", b => ApplierPicked?.Invoke(b)));
         double cx = 46, top = Top + 22;
         _modelTop.Data = Geometry.Parse(Inv($"M{cx},{top} L{cx + 14},{top + 7} L{cx},{top + 14} L{cx - 14},{top + 7} Z"));
         _modelLeft.Data = Geometry.Parse(Inv($"M{cx - 14},{top + 7} L{cx},{top + 14} L{cx},{top + 30} L{cx - 14},{top + 23} Z"));

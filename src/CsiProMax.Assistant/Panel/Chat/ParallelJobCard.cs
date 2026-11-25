@@ -39,7 +39,7 @@ internal sealed class ParallelJobCard : ContentControl
         Margin = new Thickness(0, ChatUi.S3, 0, ChatUi.S1);
 
         _open = JobCardView.Pill(OpenText, "SpmChatPill", $"Shows job {number}'s own chat: everything it was asked and did. Messages you send there go to this job; Back to coordinator returns.");
-        _stop = JobCardView.Pill("Stop", "SpmChatDanger", "Stops this job. A change it already started in ETABS finishes on its own; send it a message later to carry on.");
+        _stop = JobCardView.Pill("Stop", "SpmChatDanger", $"Stops this job. A change it already started in {Csi.Name} finishes on its own; send it a message later to carry on.");
         AutomationProperties.SetName(_open, $"Open job {number}");
         AutomationProperties.SetName(_stop, $"Stop job {number}");
         _open.Click += (_, _) => Opened?.Invoke(Number);
@@ -116,7 +116,7 @@ internal sealed class ParallelJobCard : ContentControl
         var line = job.State switch
         {
             JobBoard.Queued => $"Starts when a place is free (up to {JobBoard.ClampLimit(limit)} jobs run at once).",
-            JobBoard.Waiting => "Its change waits for ETABS to finish another job's change." + (job.Now.Length > 0 ? " Next: " + job.Now : ""),
+            JobBoard.Waiting => $"Its change waits for {Csi.Name} to finish another job's change." + (job.Now.Length > 0 ? " Next: " + job.Now : ""),
             JobBoard.Running => job.Now.Length > 0 ? "Now: " + job.Now : "Working…",
             JobBoard.Stopped => "Stopped. Open the job and send it a message to carry on.",
             _ => Cut(job.Summary.Trim(), 600),

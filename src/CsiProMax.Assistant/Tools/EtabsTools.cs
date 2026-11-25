@@ -12,7 +12,7 @@ public static class EtabsTools
     public static IReadOnlyList<Tool> All { get; } =
     [
         new("get_model_context",
-            "The open ETABS model at a glance: file, units, stories with elevations, how many columns, beams, braces, floors and walls, the section, material, load pattern, load case and combination names, and what is selected. Call it once at the start of a conversation.",
+            $"The open {Csi.Name} model at a glance: file, units, stories with elevations, how many columns, beams, braces, floors and walls, the section, material, load pattern, load case and combination names, and what is selected. Call it once at the start of a conversation.",
             """{"type":"object","properties":{}}""", Ask.Never, (_, e) => Context(e)),
 
         new("query_objects",
@@ -28,7 +28,7 @@ public static class EtabsTools
             """, Ask.Never, Query),
 
         new("select_objects",
-            "Selects frames and areas in ETABS by name, so the engineer sees them highlighted.",
+            $"Selects frames and areas in {Csi.Name} by name, so the engineer sees them highlighted.",
             """
             {"type":"object","properties":{
               "frames":{"type":"array","items":{"type":"string"}},
@@ -37,11 +37,11 @@ public static class EtabsTools
             """, Ask.Never, Select),
 
         new("list_tables",
-            "Lists ETABS's own tables (the ones under Display > Show Tables): model definitions, assignments, analysis results, design results. Give 'contains' to search by name. Tables with no data are left out unless include_empty is true.",
+            $"Lists {Csi.Name}'s own tables (the ones under Display > Show Tables): model definitions, assignments, analysis results, design results. Give 'contains' to search by name. Tables with no data are left out unless include_empty is true.",
             """{"type":"object","properties":{"contains":{"type":"string"},"include_empty":{"type":"boolean"}}}""", Ask.Never, ListTables),
 
         new("read_table",
-            "Reads one ETABS table by its name or key from list_tables: reactions, story drifts, modal periods, member forces, design summaries, section definitions and so on. Results need a finished analysis. Choose load cases or combinations for result tables, 'fields' to keep columns, 'where' to keep rows whose field equals a value, and offset/limit to page.",
+            $"Reads one {Csi.Name} table by its name or key from list_tables: reactions, story drifts, modal periods, member forces, design summaries, section definitions and so on. Results need a finished analysis. Choose load cases or combinations for result tables, 'fields' to keep columns, 'where' to keep rows whose field equals a value, and offset/limit to page.",
             """
             {"type":"object","required":["table"],"properties":{
               "table":{"type":"string","description":"Table name or key, as list_tables gives it."},
@@ -107,7 +107,7 @@ public static class EtabsTools
             """, Ask.Changes, SetSupports, a => $"Set {a.Text("type")} supports"),
 
         new("add_load_pattern",
-            "Adds a load pattern (ETABS adds its load case with it).",
+            $"Adds a load pattern ({Csi.Name} adds its load case with it).",
             """
             {"type":"object","required":["name","type"],"properties":{
               "name":{"type":"string"},
@@ -140,12 +140,12 @@ public static class EtabsTools
             Ask.Always, Delete, a => "Delete " + string.Join(" and ", new[] { Plural(Count(a, "frames"), "frame"), Plural(Count(a, "areas"), "area") }.Where(t => t.Length > 0))),
 
         new("run_analysis",
-            "Runs the analysis in ETABS (ETABS's own solver, on its license). The model must be saved. The engineer is always asked first. It can take a while.",
+            $"Runs the analysis in {Csi.Name} ({Csi.Name}'s own solver, on its license). The model must be saved. The engineer is always asked first. It can take a while.",
             """{"type":"object","properties":{}}""", Ask.Always,
             (_, e) => { e.RunAnalysis(); return new JsonObject { ["done"] = true, ["note"] = "The analysis ran. Read results with read_table." }; }, _ => "Run the analysis"),
 
         new("save_model",
-            "Saves the model in ETABS under its current file name. The engineer is always asked first.",
+            $"Saves the model in {Csi.Name} under its current file name. The engineer is always asked first.",
             """{"type":"object","properties":{}}""", Ask.Always,
             (_, e) => { e.Save(); return new JsonObject { ["saved"] = e.Info().File }; }, _ => "Save the model"),
 
@@ -168,7 +168,9 @@ public static class EtabsTools
         return new JsonObject
         {
             ["file"] = info.File,
-            ["etabs"] = info.Version,
+            // The program the model is open in, by its own name: this tool answers in ETABS, SAFE and SAP2000 alike.
+            ["program"] = e is OfflineEtabs ? "CSI ProMax Modeler" : e.Program.Name,
+            ["version"] = info.Version,
             ["units"] = new JsonObject { ["force"] = info.Force, ["length"] = info.Length, ["temperature"] = info.Temperature },
             ["locked"] = info.Locked,
             ["stories"] = new JsonArray(e.Stories().Select(s => (JsonNode)new JsonObject { ["name"] = s.Name, ["elevation"] = Args.Round(s.Elevation), ["height"] = Args.Round(s.Height) }).ToArray()),

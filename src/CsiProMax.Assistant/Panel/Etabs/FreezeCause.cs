@@ -112,14 +112,14 @@ internal static class FreezeCause
         var id = comma >= 0 ? text.Substring(comma + 3).Trim() : null;
         if (id is { Length: 0 }) id = null;
         if (name.Length == 0 && id is not null) name = Humanize(id);
-        return (name.Length == 0 ? "an ETABS command" : name, id);
+        return (name.Length == 0 ? $"{Csi.AName} command" : name, id);
     }
 
     /// <summary>"ID_FILE_CADFORMAT_LINK" → "File cadformat link", for a command the journal doesn't describe.</summary>
     public static string Humanize(string id)
     {
         var words = (id.StartsWith("ID_", StringComparison.Ordinal) ? id.Substring(3) : id).Replace('_', ' ').Trim().ToLowerInvariant();
-        return words.Length == 0 ? "an ETABS command" : char.ToUpperInvariant(words[0]) + words.Substring(1);
+        return words.Length == 0 ? $"{Csi.AName} command" : char.ToUpperInvariant(words[0]) + words.Substring(1);
     }
 
     private static string Trimmed(string name) => name.TrimEnd('.', ' ');
@@ -157,16 +157,16 @@ internal static class FreezeCause
         ours |= busy.Ours;
         var step = busy.Step is { Length: > 0 } s && !string.Equals(s, busy.What, StringComparison.OrdinalIgnoreCase) && !ours ? $" ({s})" : "";
         var what = ours ? "a CSI ProMax task" : busy.What + step;
-        return $"ETABS is busy with {what}. It hasn't responded for {Duration(frozen)}.";
+        return $"{Csi.Name} is busy with {what}. It hasn't responded for {Duration(frozen)}.";
     }
 
     /// <summary>Whose work it is, in one short line.</summary>
     public static string Whose(Busy busy, bool jobRunning) =>
         busy.Ours || jobRunning
-            ? "This is a CSI ProMax task, not ETABS's own: a task, a tool or a Lifeline replay. Stop it below or in its own window, or let it finish."
+            ? $"This is a CSI ProMax task, not {Csi.Name}'s own: a task, a tool or a Lifeline replay. Stop it below or in its own window, or let it finish."
             : busy.CommandId is null && busy.What == "something of its own"
-                ? "This is ETABS's own work, not CSI ProMax."
-                : "This is ETABS's own command, not CSI ProMax.";
+                ? $"This is {Csi.Name}'s own work, not CSI ProMax."
+                : $"This is {Csi.Name}'s own command, not CSI ProMax.";
 
     /// <summary>
     /// Offer "Warn me before this command next time" once ETABS has been frozen a while by a command of its own that
@@ -262,12 +262,12 @@ internal static class FreezeCause
     /// <summary>What to do, for the verdict (and what ETABS is busy with).</summary>
     public static string Advice(Activity a, Busy busy) => a.Progress switch
     {
-        Progress.Working => "ETABS is using the processor and memory is changing, so it is still working. Waiting usually pays off.",
-        Progress.Files => "ETABS is reading or writing files (the model, links or the central model). Wait while this goes on.",
-        Progress.Quiet => $"If nothing changes for {Duration(StuckAfter)}, ETABS is most likely stuck.",
+        Progress.Working => $"{Csi.Name} is using the processor and memory is changing, so it is still working. Waiting usually pays off.",
+        Progress.Files => $"{Csi.Name} is reading or writing files (the model, links or the central model). Wait while this goes on.",
+        Progress.Quiet => $"If nothing changes for {Duration(StuckAfter)}, {Csi.Name} is most likely stuck.",
         _ when busy.What == "Synchronizing with central" =>
-            $"Nothing has changed for {Duration(a.Quiet)}. ETABS may be waiting for the central model on the network. Give it a few more minutes before closing it.",
-        _ => $"Nothing has changed for {Duration(a.Quiet)}, so waiting is unlikely to help. Try Press Esc in ETABS; if that does nothing, close ETABS (Lifeline keeps your changes).",
+            $"Nothing has changed for {Duration(a.Quiet)}. {Csi.Name} may be waiting for the central model on the network. Give it a few more minutes before closing it.",
+        _ => $"Nothing has changed for {Duration(a.Quiet)}, so waiting is unlikely to help. Try Press Esc in {Csi.Name}; if that does nothing, close {Csi.Name} (Lifeline keeps your changes).",
     };
 
     /// <summary>"CPU 6% · memory 9.1 GB (+420 MB in 30 s) · files 4 MB in 30 s".</summary>
@@ -374,9 +374,9 @@ internal static class FreezeCause
     public static (string Main, string Content) Warning(Warned w) =>
         ($"{w.Name} can take a while",
          (w.Seconds > 0
-             ? $"On {w.On} it kept ETABS frozen for {Duration(TimeSpan.FromSeconds(w.Seconds))}."
-             : "ETABS doesn't respond while it runs, and on a big model with links that can take a long time.") +
-         " It is running now. If ETABS stops responding, the CSI ProMax Rescue window lets you stop or close it safely.");
+             ? $"On {w.On} it kept {Csi.Name} frozen for {Duration(TimeSpan.FromSeconds(w.Seconds))}."
+             : $"{Csi.Name} doesn't respond while it runs, and on a big model with links that can take a long time.") +
+         $" It is running now. If {Csi.Name} stops responding, the CSI ProMax Rescue window lets you stop or close it safely.");
 
     private static Saved Read()
     {

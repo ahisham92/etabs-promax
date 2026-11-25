@@ -116,7 +116,7 @@ namespace CsiProMax.Assistant.Etabs
         public override bool TryGetMember(GetMemberBinder binder, out object result)
         {
             var property = _type.GetProperty(binder.Name);
-            if (property == null) throw new MissingMemberException("ETABS's " + _type.Name + " has no " + binder.Name + ".");
+            if (property == null) throw new MissingMemberException("The program's " + _type.Name + " has no " + binder.Name + ".");
             result = Wrap(Call(() => property.GetValue(_target, null)), property.PropertyType);
             return true;
         }
@@ -143,7 +143,7 @@ namespace CsiProMax.Assistant.Etabs
                 result = Wrap(value, method.ReturnType);
                 return true;
             }
-            throw new MissingMethodException("ETABS's " + _type.Name + " has no " + binder.Name + " that takes these " + args.Length + " values.");
+            throw new MissingMethodException("The program's " + _type.Name + " has no " + binder.Name + " that takes these " + args.Length + " values.");
         }
 
         private static object Call(Func<object> body)

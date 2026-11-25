@@ -123,9 +123,9 @@ internal sealed partial class ChatPane : DockPanel, IHistoryHost
         // Closed the normal way: an autopilot's run isn't carried on by a restart (the watcher starts no ETABS).
         if (pane.Sessions.Any(s => s.Conv.Autopilot is { Active: true })) AutopilotShare.MarkClosed();
         pane.CloseBig();
-        pane.EndRuns("ETABS closed, so this job stopped. Send it a message to carry on.", now: true);
-        pane.StopBackground("ETABS closed while this chat worked in the background, so it stopped here. Send your message again to carry on.",
-            "ETABS closed, so this job stopped. Send it a message to carry on.", now: true);
+        pane.EndRuns($"{Csi.Name} closed, so this job stopped. Send it a message to carry on.", now: true);
+        pane.StopBackground($"{Csi.Name} closed while this chat worked in the background, so it stopped here. Send your message again to carry on.",
+            $"{Csi.Name} closed, so this job stopped. Send it a message to carry on.", now: true);
         pane.Save();
         pane._engine?.KillNow();
         pane._engine = null;
@@ -536,7 +536,7 @@ internal sealed partial class ChatPane : DockPanel, IHistoryHost
         _prompts = ChatUi.IconButton(ChatUi.Paths.Bookmark, "Saved prompts", "Your saved prompts: pick one to put it in the message box. Save one from any message with ⋯ › Save prompt.");
         _prompts.Click += (_, _) => TogglePrompts();
         AutomationProperties.SetItemStatus(_prompts, "Collapsed");
-        _view = ChatUi.IconButton(ChatUi.Paths.Camera, "Attach the ETABS window", "Attaches a picture of the ETABS window, as it shows the model now.");
+        _view = ChatUi.IconButton(ChatUi.Paths.Camera, $"Attach the {Csi.Name} window", $"Attaches a picture of the {Csi.Name} window, as it shows the model now.");
         _view.Click += (_, _) => AttachView();
         // Send is a round accent arrow; while Claude works a round red Stop square takes its place (never the default).
         _send = new Button { Content = ChatUi.Icon(ChatUi.Paths.Send, stroke: 2), ToolTip = "Send (Enter)" };
@@ -546,7 +546,7 @@ internal sealed partial class ChatPane : DockPanel, IHistoryHost
         _send.Click += (_, _) => Send();
         _stop = new Button { Content = ChatUi.Icon(ChatUi.Paths.Square, fill: true), Visibility = Visibility.Collapsed };
         _stop.SetResourceReference(StyleProperty, "SpmChatStop");
-        _stop.ToolTip = "Stops CSI ProMax's answer (Escape). A change already made in ETABS stays (ETABS has no undo for it).";
+        _stop.ToolTip = $"Stops CSI ProMax's answer (Escape). A change already made in {Csi.Name} stays ({Csi.Name} has no undo for it).";
         AutomationProperties.SetName(_stop, "Stop CSI ProMax's answer");
         AutomationProperties.SetHelpText(_stop, _stop.ToolTip as string ?? "");
         _stop.Click += (_, _) => StopPressed(); // in a running autopilot's chat: stops the run, its answer and jobs
@@ -584,7 +584,7 @@ internal sealed partial class ChatPane : DockPanel, IHistoryHost
         {
             Content = ChatUi.Small("Always allow"), Margin = new Thickness(0, 0, ChatUi.S1, 0), VerticalAlignment = VerticalAlignment.Center,
             Padding = new Thickness(ChatUi.S2, ChatUi.S1, ChatUi.S2, ChatUi.S1),
-            ToolTip = "Ask before changes: Always allow. Nothing asks in ETABS before CSI ProMax changes the model, risky changes included. Click to change.",
+            ToolTip = $"Ask before changes: Always allow. Nothing asks in {Csi.Name} before CSI ProMax changes the model, risky changes included. Click to change.",
         };
         _allowPill.SetResourceReference(StyleProperty, "SpmChatGhost");
         _allowPill.Click += (_, _) => ToggleModelMenu(brief: true);
@@ -1227,7 +1227,7 @@ internal sealed partial class ChatPane : DockPanel, IHistoryHost
             case Setup.Failed:
                 Title("The chat setup couldn't be checked");
                 Para(_setupDetail, Brand.K.DangerText);
-                Para("Press Check again. If it keeps failing, restart ETABS.", Brand.K.Muted);
+                Para($"Press Check again. If it keeps failing, restart {Csi.Name}.", Brand.K.Muted);
                 Add("Check again", Brand.Weight.Secondary, () => Check(quiet: false));
                 break;
         }
@@ -1320,9 +1320,9 @@ internal sealed partial class ChatPane : DockPanel, IHistoryHost
         _conv.Models ??= [];
         var models = string.Join(" + ", new[] { _conv.Title }.Concat(_conv.Models));
         _modelLine.Text = (_conv.Pinned ? "\u2605 Pinned · " : "") + models;
-        _modelLine.ToolTip = "Each ETABS model keeps its own chats, also after ETABS restarts; open the others from the menu at the top left. " + _conv.Key;
+        _modelLine.ToolTip = $"Each {Csi.Name} model keeps its own chats, also after {Csi.Name} restarts; open the others from the menu at the top left. " + _conv.Key;
         AutomationProperties.SetName(_chatName, "Chat: " + _chatName.Text);
-        AutomationProperties.SetName(_modelLine, (_conv.Models.Count > 0 ? "ETABS models: " : "ETABS model: ") + models);
+        AutomationProperties.SetName(_modelLine, (_conv.Models.Count > 0 ? $"{Csi.Name} models: " : $"{Csi.Name} model: ") + models);
         ShowType();
         ShowModelChoice();
     }
@@ -1410,7 +1410,7 @@ internal sealed partial class ChatPane : DockPanel, IHistoryHost
     {
         if (_turn is null || !IsVisible) return false;
         Add(HandoffCard.Item(request));
-        ShowStatus("Over to you: do the step in ETABS, then press Continue on the card.");
+        ShowStatus($"Over to you: do the step in {Csi.Name}, then press Continue on the card.");
         return true;
     }
 
@@ -1896,17 +1896,17 @@ internal sealed partial class ChatPane : DockPanel, IHistoryHost
         if (item.Result.Length > 0) UI.Pane.Collect(item.Result, ids);
         if (ids.Count > 0)
         {
-            Label("Elements (click to select and zoom in ETABS)");
+            Label($"Elements (click to select and zoom in {Csi.Name})");
             var links = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = ChatUi.SmallSize };
             foreach (var id in ids.Take(MaxIdLinks))
             {
                 if (links.Inlines.Count > 0) links.Inlines.Add(new Run("  "));
-                links.Inlines.Add(IdLink(id.ToString(CultureInfo.InvariantCulture), new[] { id }, $"Select element {id} in ETABS"));
+                links.Inlines.Add(IdLink(id.ToString(CultureInfo.InvariantCulture), new[] { id }, $"Select element {id} in {Csi.Name}"));
             }
             if (ids.Count > 1)
             {
                 links.Inlines.Add(new Run("   "));
-                links.Inlines.Add(IdLink($"Select all {ids.Count}", ids, $"Select all {ids.Count} elements in ETABS"));
+                links.Inlines.Add(IdLink($"Select all {ids.Count}", ids, $"Select all {ids.Count} elements in {Csi.Name}"));
             }
             row.Details.Children.Add(links);
         }
@@ -1941,7 +1941,7 @@ internal sealed partial class ChatPane : DockPanel, IHistoryHost
         // async void: nothing may escape to ETABS's UI dispatcher.
         catch (Exception ex)
         {
-            Status("ETABS couldn't select the elements now: " + ex.Message, spin: false);
+            Status($"{Csi.Name} couldn't select the elements now: " + ex.Message, spin: false);
         }
     }
 
@@ -2265,7 +2265,7 @@ internal sealed partial class ChatPane : DockPanel, IHistoryHost
     public static string Ask(string text)
     {
         var pane = (ChatPane)Get();
-        if (pane._stopped) return "The chat isn't running. Restart ETABS, then try again.";
+        if (pane._stopped) return $"The chat isn't running. Restart {Csi.Name}, then try again.";
         if (pane._turn is not null) return "The chat is still answering something else. Wait for it (or press Stop in the chat), then ask again.";
         if (pane._setup != Setup.Ready)
         {
@@ -2567,8 +2567,8 @@ internal sealed partial class ChatPane : DockPanel, IHistoryHost
             {
                 ".doc" or ".ppt" => "older Word or PowerPoint file, which can't be read here. Ask the user to save it as .docx or .pptx (File > Save As) and attach that",
                 ".dwg" or ".dxf" => "CAD drawing; read it with the tool mcp__csi-promax__read_cad_drawing (load it with ToolSearch; the overview first, then the layers you need)",
-                ".e2k" or ".$et" => "ETABS text file; read it with the Read tool",
-                ".edb" => "ETABS model file; it can be opened in ETABS by the user, not read here",
+                ".e2k" or ".$et" => "ETABS text file; read it with the Read tool", // ETABS itself
+                ".edb" => "ETABS model file; it can be opened in ETABS by the user, not read here", // ETABS itself
                 ".xls" or ".xlsb" => "older or binary Excel file, which can't be read here. Ask the user to save it as .xlsx (File > Save As) and attach that",
                 ".csv" => "spreadsheet as plain text; read it with the Read tool",
                 _ when ImageType(a.Path) is not null => "image (more than " + MaxImages + " images: read it with the Read tool)",
@@ -2657,7 +2657,7 @@ internal sealed partial class ChatPane : DockPanel, IHistoryHost
             shown == content.Pictures.Count ? $"; its {shown} picture{(shown == 1 ? " is" : "s are")} attached" :
             $"; {shown} of its {content.Pictures.Count} pictures {(shown == 1 ? "is" : "are")} attached (the limit is {MaxImages} pictures a message)";
         var sheets = workbook ? "; each sheet is a table headed by its column letters, each row led by its row number, so name cells like B12. " +
-                                "Values are what Excel last showed (formula results; a formula saved without one shows as =formula). The ETABS tools that take a file (e.g. place_many, boq_check) accept this path" : "";
+                                $"Values are what Excel last showed (formula results; a formula saved without one shows as =formula). The {Csi.Name} tools that take a file (e.g. place_many, boq_check) accept this path" : "";
         return $"{what}; {where}{pictures}{sheets}";
     }
 
@@ -3114,7 +3114,7 @@ internal sealed partial class ChatPane : DockPanel, IHistoryHost
         }
         else if (SignInHealth.LooksBlocked(tail)) Error(SignInHealth.ChatNetBlocked(tail));
         else if (Regex.IsMatch(tail, @"unknown option|unrecognized|invalid value", RegexOptions.IgnoreCase))
-            Error("The chat engine (Claude Code) is too old for the ETABS chat. Update it (open a Command Prompt and run: claude update), then send again." +
+            Error($"The chat engine (Claude Code) is too old for the {Csi.Name} chat. Update it (open a Command Prompt and run: claude update), then send again." +
                   (detail.Length > 0 ? "\n\n" + detail : ""));
         else
             Error("The chat stopped unexpectedly. Send your message again; the conversation is kept." + (detail.Length > 0 ? "\n\n" + detail : ""));
@@ -3291,7 +3291,7 @@ internal sealed partial class ChatPane : DockPanel, IHistoryHost
             _engine?.Kill();
             _engine = null;
             RenderDirty();
-            Note("Stopped. Ask again, or say what to do instead. (An ETABS tool that was already running finishes on its own.)");
+            Note($"Stopped. Ask again, or say what to do instead. ({Csi.ANameCap} tool that was already running finishes on its own.)");
             EndTurn();
         });
         turn.KillTimer.Start();
@@ -3711,12 +3711,12 @@ internal sealed partial class ChatPane : DockPanel, IHistoryHost
     {
         if (Brand.IsBusy(_view) || _stopped) return;
         Brand.SetBusy(_view, true, "");
-        Status("Capturing the ETABS window…", spin: true);
+        Status($"Capturing the {Csi.Name} window…", spin: true);
         try
         {
             var result = await App.Dispatcher.InvokeAsync(app =>
             {
-                if (app.ActiveUIDocument?.Document is null) return ToolResult.Error("Open a model in ETABS first, then press the camera button again.");
+                if (app.ActiveUIDocument?.Document is null) return ToolResult.Error($"Open a model in {Csi.Name} first, then press the camera button again.");
                 try
                 {
                     var args = new Dictionary<string, JsonElement> { ["pixel_width"] = JsonDocument.Parse("1600").RootElement.Clone() };

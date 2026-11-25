@@ -52,8 +52,8 @@ internal static class ChatRecall
         "no new reading of the model. Drop greetings, repeated tool output and anything already fixed.";
 
     /// <summary>The instructions of the run that writes a chat's summary.</summary>
-    public const string SummaryInstructions =
-        "You write the memory of one chat between a structural engineer and Claude inside ETABS, so that later chats know " +
+    public static string SummaryInstructions =>
+        $"You write the memory of one chat between a structural engineer and Claude inside {Csi.Name}, so that later chats know " +
         "it without being told again. Use no tools. Answer with 3 to 8 short Markdown bullets and nothing else: the project " +
         "and model facts learned, the decisions and choices the user made, the standards, families, types, sizes and " +
         "settings used, the steps that worked (name the action and the values, e.g. \"made 600x600 columns at every grid " +

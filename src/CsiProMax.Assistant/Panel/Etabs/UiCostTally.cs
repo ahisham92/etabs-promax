@@ -36,7 +36,7 @@ internal sealed class UiCostTally
         if (ms < SlowMs) return null;
         if (_lastSlow.TryGetValue(what, out var last) && now - last < TimeSpan.FromMinutes(1)) return null;
         _lastSlow[what] = now;
-        return $"CSI ProMax held ETABS for {Ms(ms)} ({what})";
+        return $"CSI ProMax held {Csi.Name} for {Ms(ms)} ({what})";
     }
 
     /// <summary>The line for the time since the last one, when it is due and worth writing (then the sums start again).</summary>
@@ -52,7 +52,7 @@ internal sealed class UiCostTally
         _since = now;
         if (total < ReportFromMs) return null;
         var share = (total / span.TotalMilliseconds * 100).ToString("0.0", CultureInfo.InvariantCulture);
-        return $"CSI ProMax used {Ms(total)} of ETABS's time in the last {Math.Round(span.TotalMinutes)} min ({share}%): {string.Join(", ", parts)}";
+        return $"CSI ProMax used {Ms(total)} of {Csi.Name}'s time in the last {Math.Round(span.TotalMinutes)} min ({share}%): {string.Join(", ", parts)}";
     }
 
     private static string Ms(double ms) =>

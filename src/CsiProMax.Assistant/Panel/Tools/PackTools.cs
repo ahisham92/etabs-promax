@@ -15,20 +15,20 @@ public sealed class ExportPackTool : IEtabsTool
     public string Name => "export_pack";
 
     public string Description =>
-        "Make a review pack of the open model for someone who has no ETABS: the model's geometry and sections, ETABS's " +
+        $"Make a review pack of the open model for someone who has no {Csi.Name}: the model's geometry and sections, {Csi.Name}'s " +
         "own result tables (modes, base reactions, story drifts, displacements, story forces and stiffness, design " +
         "summaries) and the check report. It writes two files into the model's own folder, beside the model file: the " +
         "pack (.cpmx) and a Viewer page (.html) with the pack inside it (Documents\\CSI ProMax\\Made in chat only when the " +
         "model has not been saved yet or its folder cannot be written to). The reviewer opens the page in a browser, with " +
         "nothing to install: a 3D view, deformed shapes, design ratios in colour, the tables and the checks, and they " +
         "write comments and send a comments file back (read it with read_pack_comments). Run the analysis first if the " +
-        "results should be in it. Give 'tables' for more ETABS tables by name (from list_tables), 'cases' and " +
+        $"results should be in it. Give 'tables' for more {Csi.Name} tables by name (from list_tables), 'cases' and " +
         "'combinations' to limit the results, and 'drift_limit' for the drift verdict. Not a model change.";
 
-    public string PropertiesJson => """
+    public string PropertiesJson => $$$"""
     {
       "name": {"type": "string", "description": "The file name without extension. Default: the model's name."},
-      "tables": {"type": "array", "items": {"type": "string"}, "description": "More ETABS tables to take, by name."},
+      "tables": {"type": "array", "items": {"type": "string"}, "description": "More {{{Csi.Name}}} tables to take, by name."},
       "cases": {"type": "array", "items": {"type": "string"}},
       "combinations": {"type": "array", "items": {"type": "string"}},
       "drift_limit": {"type": "number", "description": "Allowed drift ratio for the check report, e.g. 0.002."},

@@ -104,8 +104,8 @@ internal sealed partial class ChatPane
             var number = job;
             rows.Add(($"Applied {at:HH:mm}: {worker} · job {job}", jobs.FirstOrDefault(j => j.Number == job) is { } j ? JobBoard.OneLine(j.Title, 60) : "", false, () => OpenJobView(number)));
         }
-        if (rows.Count == 0) rows.Add(("Nothing yet", $"{names.Applier} puts the workers' changes into ETABS one at a time; they show here.", false, () => { }));
-        ToggleChoice(anchor, new Choice($"{names.Applier}: changes into ETABS", rows));
+        if (rows.Count == 0) rows.Add(("Nothing yet", $"{names.Applier} puts the workers' changes into {Csi.Name} one at a time; they show here.", false, () => { }));
+        ToggleChoice(anchor, new Choice($"{names.Applier}: changes into {Csi.Name}", rows));
     }
 
     private object? _costEngine { get => _s.CostEngine; set => _s.CostEngine = value; }

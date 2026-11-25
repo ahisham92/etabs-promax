@@ -33,7 +33,7 @@ internal static class PdfPartReader
         var folder = Path.GetDirectoryName(Path.GetFullPath(file))!;
         var info = Info(folder, Path.GetFileName(file));
         if (string.IsNullOrEmpty(claude) || !File.Exists(claude))
-            return new("The part can't be read here: Claude Code wasn't passed to the CSI ProMax connector (only the chat in ETABS reads parts). " +
+            return new($"The part can't be read here: Claude Code wasn't passed to the CSI ProMax connector (only the chat in {Csi.Name} reads parts). " +
                        "Answer from the text file instead.", true);
 
         var key = Path.GetFileName(file);

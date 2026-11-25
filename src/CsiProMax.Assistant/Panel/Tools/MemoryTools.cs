@@ -10,7 +10,7 @@ public sealed class MemoryNoteTool : IEtabsTool
         "Remember or forget a note for the user. When the user says \"remember that ...\" use action=remember with the note " +
         "in their words, short and self-contained; when they say \"forget ...\" use action=forget with the note or a few " +
         "words of it. scope=model (default) keeps it for the open model only; scope=global for every model (their habits, " +
-        "standards, preferences). Notes are given to every in-ETABS chat at its start (global plus that model's) and can be " +
+        $"standards, preferences). Notes are given to every in-{Csi.Name} chat at its start (global plus that model's) and can be " +
         "seen and edited in the Notes tab of the CSI ProMax pane. action=list shows them. When the new note changes an earlier " +
         "one (the user corrected it), pass replaces with words of the earlier note: it is taken out, in either scope, so the two never " +
         "stand side by side. Not a model change.";
@@ -111,7 +111,7 @@ public sealed class RecallChatsTool : IEtabsTool
 {
     public string Name => "recall_chats";
     public string Description =>
-        "Search the user's earlier chats in the ETABS pane, across every model and project. Use it when the user refers to " +
+        $"Search the user's earlier chats in the {Csi.Name} pane, across every model and project. Use it when the user refers to " +
         "something done before (\"the same way as in the Tower project\", \"like last time\", \"what did we decide about ...\"). " +
         "action=search (default) with query = the words that name the project, model or task: lists the best matching chats " +
         "with their model, date, summary and matching lines. action=open with chat = a chat's id from search: its summary, " +

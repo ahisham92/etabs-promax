@@ -32,7 +32,7 @@ internal static class LifelineWatchMath
     public static bool SyncDue(bool changed, TimeSpan sinceSync, int minutes, TimeSpan sinceInput, bool toolOpen, bool working, bool serverAnswers, TimeSpan sinceFailed) =>
         changed && serverAnswers && !toolOpen && !working && sinceSync >= TimeSpan.FromMinutes(ClampSyncMinutes(minutes)) && sinceInput >= QuietBeforeSave && sinceFailed >= RetrySync;
 
-    public static Warning Syncing(string model) => new("syncing", "Lifeline is synchronizing with central", $"{model}: ETABS is busy for the time a synchronize takes.");
+    public static Warning Syncing(string model) => new("syncing", "Lifeline is synchronizing with central", $"{model}: {Csi.Name} is busy for the time a synchronize takes.");
 
     public static Warning Synced(string model, TimeSpan took, int minutes) => new("synced", "Lifeline synchronized with central",
         $"{model}: synchronized in {Math.Max(1, (int)Math.Round(took.TotalSeconds))} s; what you borrowed is given back. Next one in {ClampSyncMinutes(minutes)} min if you change something.");
@@ -59,13 +59,13 @@ internal static class LifelineWatchMath
         var warnings = new List<Warning>();
         if (s.FreeMemoryMb >= 0 && s.TotalMemoryMb > 0 && (s.FreeMemoryMb < LowMemoryMb || s.FreeMemoryMb * 100 / s.TotalMemoryMb < 6))
             warnings.Add(new("memory", "Your PC is almost out of memory",
-                $"ETABS uses {Gb(Math.Max(0, s.ETABSMemoryMb))} and only {Gb(s.FreeMemoryMb)} is free. Save now. Closing other programs or views you don't need helps."));
+                $"{Csi.Name} uses {Gb(Math.Max(0, s.ETABSMemoryMb))} and only {Gb(s.FreeMemoryMb)} is free. Save now. Closing other programs or views you don't need helps."));
         if (s.FreeDiskMb >= 0 && s.FreeDiskMb < LowDiskMb)
             warnings.Add(new("disk", $"Drive {s.Disk} is almost full",
-                $"Only {s.FreeDiskMb:N0} MB is free where ETABS saves. A save can fail: free some space, then save."));
+                $"Only {s.FreeDiskMb:N0} MB is free where {Csi.Name} saves. A save can fail: free some space, then save."));
         if (s.Handles >= HandleWarn)
-            warnings.Add(new("handles", "ETABS has been open for a long time",
-                $"It uses {s.Handles:N0} of the {HandleLimit:N0} window handles Windows allows, a known cause of crashes. Save, then close and reopen ETABS when you can."));
+            warnings.Add(new("handles", $"{Csi.Name} has been open for a long time",
+                $"It uses {s.Handles:N0} of the {HandleLimit:N0} window handles Windows allows, a known cause of crashes. Save, then close and reopen {Csi.Name} when you can."));
         return warnings;
     }
 
@@ -117,7 +117,7 @@ internal static class LifelineWatchMath
     public static bool SaveDue(bool modified, TimeSpan sinceSave, int minutes, TimeSpan sinceInput, bool toolOpen, TimeSpan sinceFailed) =>
         modified && !toolOpen && sinceSave >= TimeSpan.FromMinutes(ClampMinutes(minutes)) && sinceInput >= QuietBeforeSave && sinceFailed >= RetrySave;
 
-    public static Warning Saving(string model) => new("saving", "Lifeline is saving your local copy", $"{model}: ETABS is busy for the time a save takes. Nothing is synchronized.");
+    public static Warning Saving(string model) => new("saving", "Lifeline is saving your local copy", $"{model}: {Csi.Name} is busy for the time a save takes. Nothing is synchronized.");
 
     public static Warning Saved(string model, TimeSpan took, int minutes) => new("saved", "Lifeline saved your local copy",
         $"{model}: saved in {Math.Max(1, (int)Math.Round(took.TotalSeconds))} s, not synchronized. Next save in {ClampMinutes(minutes)} min if you change something.");

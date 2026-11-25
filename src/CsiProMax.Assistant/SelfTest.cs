@@ -1,13 +1,18 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using CsiProMax.Assistant.Etabs;
 using CsiProMax.Assistant.Tools;
 
 namespace CsiProMax.Assistant;
 
 /// <summary>
-/// Checks the connection to the running ETABS, one API call at a time, and prints what each gave: run CsiProMax
-/// --selftest with a model open. With --changes it also adds a column, a slab, a load pattern, loads and a combination
-/// to the open model (use a scratch model), to check the calls that change it.
+/// Checks the connection to the running CSI program (ETABS, SAFE or SAP2000), one API call at a time, and prints what
+/// each gave: run CsiProMax --selftest with a model open. With --changes it also adds a column, a slab, a load
+/// pattern, loads and a combination to the open model (use a scratch model), to check the calls that change it.
+///
+/// It runs in every program, so nothing here may assume ETABS: a table is taken from the program's own table list,
+/// never by a name written here; a tool is the one the chat is given in this program (ProgramTools.Chat); a step that
+/// belongs to one program is named after that program; and what it touches in the window (the selection) is put back.
 /// </summary>
 public static class SelfTest
 {
@@ -44,11 +49,13 @@ public static class SelfTest
     private static List<StepResult> StepsCore(ICsiLink etabs, bool changes)
     {
         var done = new List<StepResult>();
+        var program = etabs.Program.Name;
+        var none = JsonDocument.Parse("{}").RootElement;
         void Step(string name, Func<object?> body)
         {
             try
             {
-                var text = JsonSerializer.Serialize(body(), new JsonSerializerOptions { IncludeFields = true });
+                var text = Readable.Text(body());
                 done.Add(new StepResult(name, true, text.Length > 300 ? text[..300] + "..." : text,
                     text.Length <= 300 ? null : text.Length > MostFull ? text[..MostFull] + "..." : text));
             }
@@ -74,27 +81,50 @@ public static class SelfTest
         Step("LoadCases", () => etabs.LoadCases());
         Step("Combos", () => etabs.Combos());
         Step("Tables", () => etabs.Tables().Count);
-        Step("ReadTable", () => { var t = etabs.ReadTable("Story Definitions", null, null); return new { t.Fields, Rows = t.Rows.Take(2) }; });
-        if (Any(() => etabs.Frames().Count)) Step("Select", () => { var f = etabs.Frames()[0].Name; etabs.ClearSelection(); etabs.Select("frame", f); var s = etabs.Selected(); etabs.ClearSelection(); return s; });
+        // A table the program itself lists as having data, by the key it lists it under. Each program has its own
+        // tables (SAFE has no 'Story Definitions'), so no table name is written here.
+        TableName? readable = null;
+        try { readable = etabs.Tables().FirstOrDefault(t => !t.Empty); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { /* the Tables step above says why */ }
+        if (readable is { } table) Step("ReadTable", () => { var t = etabs.ReadTable(table.Key, null, null); return new { table = table.Name, t.Fields, Rows = t.Rows.Take(2) }; });
+        else done.Add(new StepResult("ReadTable", true, $"skipped: {program} lists no table with data in this model, so there was none to read"));
+        if (Any(() => etabs.Frames().Count)) Step("Select", () => SelectAndPutBack(etabs));
         else NotHere("Select", "frames");
-        Step("Tool get_model_context", () => EtabsTools.All.First(t => t.Name == "get_model_context").Run(JsonDocument.Parse("{}").RootElement, etabs).ToJsonString());
+        // The tool the chat is given in this program, not ETABS's when the program has its own.
+        Step("Tool get_model_context", () =>
+        {
+            var answer = ProgramTools.Chat(etabs.Program).First(t => t.Name == "get_model_context").Run(none, etabs);
+            var named = answer["program"]?.GetValue<string>();
+            if (named != program) throw new InvalidOperationException($"the model context says the program is '{named ?? "(not said)"}', and this is {program}");
+            return answer;
+        });
+        // The one rule for checks (Verdict), held on the engineer's own model: nothing passes or fails without an analysis.
+        Step($"{program} checks give no verdict without an analysis", () =>
+        {
+            // An analysed model's checks are run further down, where they answer from its results.
+            if (etabs.Info().Locked) return (object)"the model has been analysed, so its checks answer from its results (see the result steps)";
+            var report = ProgramTools.Report(none, etabs);
+            var lines = report["summary"] is JsonArray list ? list.Select(n => n?.GetValue<string>() ?? "").ToList() : [];
+            var verdicts = lines.Where(l => !l.EndsWith(": " + Verdict.NotAvailable, StringComparison.Ordinal)).ToList();
+            if (verdicts.Count > 0) throw new InvalidOperationException($"the model has not been analysed, and {verdicts.Count} of {lines.Count} checks answered as if it had: " + string.Join("; ", verdicts));
+            return new { analysed = false, summary = lines };
+        });
         if (etabs.Program.Key == CsiProgram.Etabs.Key)
         {
             // ETABS's result tables and checks. The table and field names the checks look for were written from
             // ETABS's documentation, so the field test says what a real ETABS calls them: each table the checks read
             // with its fields and first rows, then every check's own answer.
-            JsonElement none = JsonDocument.Parse("{}").RootElement;
-            string Result(string name) => ResultTools.All.First(t => t.Name == name).Run(none, etabs).ToJsonString();
-            Step("ETABS result and design tables", () => etabs.Tables().Where(t => ResultTools.IsResultTable(t.Name) || ResultTools.IsDesignSummary(t.Name)).Select(t => $"{t.Name}{(t.Empty ? " (empty)" : "")}").ToList());
+            JsonNode Result(string name) => ResultTools.All.First(t => t.Name == name).Run(none, etabs);
+            Step($"{program} result and design tables", () => etabs.Tables().Where(t => ResultTools.IsResultTable(t.Name) || ResultTools.IsDesignSummary(t.Name)).Select(t => $"{t.Name}{(t.Empty ? " (empty)" : "")}").ToList());
             if (etabs.Info().Locked)
             {
-                foreach (var names in ResultTools.CheckedTables) Step($"ETABS table {names[0]}", () => ResultTools.Sample(etabs, names));
+                foreach (var names in ResultTools.CheckedTables) Step($"{program} table {names[0]}", () => ResultTools.Sample(etabs, names));
                 foreach (var check in new[] { "results_overview", "check_modal", "check_drift", "check_torsion", "check_story_irregularity", "design_ratios", "check_report" })
-                    Step($"ETABS {check}", () => Result(check));
+                    Step($"{program} {check}", () => Result(check));
             }
-            else done.Add(new StepResult("ETABS results", true, "skipped: the model has not been analysed. Run the analysis (and the design) in ETABS, then run this again for the result checks."));
+            else done.Add(new StepResult($"{program} results", true, $"skipped: the model has not been analysed. Run the analysis (and the design) in {program}, then run this again for the result checks."));
             // The review pack from this model, with one load case so a large model stays quick. Nothing is written to disk.
-            Step("ETABS review pack", () =>
+            Step($"{program} review pack", () =>
             {
                 var pack = Pack.Build(etabs, [], etabs.LoadCases().Take(1).ToList(), [], null, null, mostRows: 2000);
                 return new { bytes = pack.Zip.Length, frames = pack.Frames, areas = pack.Areas, tables = pack.Tables, notes = pack.Notes };
@@ -103,11 +133,10 @@ public static class SelfTest
         if (etabs.Program.Key == CsiProgram.Safe.Key)
         {
             // SAFE's own calls and tables: what the SAFE tools lean on.
-            var none = JsonDocument.Parse("{}").RootElement;
             Step("SAFE tables", () => etabs.Tables().Where(t => Safe.SafePack.Takes(t.Name) || ResultTools.Norm(t.Name).Contains("strip", StringComparison.Ordinal)).Select(t => $"{t.Name}{(t.Empty ? " (empty)" : "")}").ToList());
-            Step("SAFE list_design_strips", () => Safe.SafeTools.All.First(t => t.Name == "list_design_strips").Run(none, etabs).ToJsonString());
+            Step("SAFE list_design_strips", () => Safe.SafeTools.All.First(t => t.Name == "list_design_strips").Run(none, etabs));
             Step("SAFE area spring properties", () => etabs.Raw("list the soil properties", m => { int n = 0; string[] a = []; m.PropAreaSpring.GetNameList(ref n, ref a); return a; }));
-            Step("SAFE safe_results_overview", () => Safe.SafeTools.All.First(t => t.Name == "safe_results_overview").Run(none, etabs).ToJsonString());
+            Step("SAFE safe_results_overview", () => Safe.SafeTools.All.First(t => t.Name == "safe_results_overview").Run(none, etabs));
             Step("SAFE API file", () => EtabsApi.FindApiFile(CsiProgram.Safe));
             Step("SAFE slab properties", () => etabs.Raw("read the slab properties", m =>
             {
@@ -116,11 +145,17 @@ public static class SelfTest
                 return names.Take(n).Take(10).Select(name =>
                 {
                     int type = 0, shell = 0, color = 0; string mat = "", notes = "", guid = ""; double t = 0;
-                    try { m.PropArea.GetSlab(name, ref type, ref shell, ref mat, ref t, ref color, ref notes, ref guid); return $"{name}: type {type}, shell {shell}, {mat}, {t}"; }
+                    // SAFE answers 0 for a slab property. Anything else (a wall property, say) has no slab data: said so,
+                    // not shown as a slab with thickness 0.
+                    try
+                    {
+                        var answer = Convert.ToInt32(m.PropArea.GetSlab(name, ref type, ref shell, ref mat, ref t, ref color, ref notes, ref guid));
+                        return answer == 0 ? $"{name}: type {type}, shell {shell}, {mat}, {t}" : $"{name}: not a slab property (SAFE answered {answer})";
+                    }
                     catch (Exception ex) { return $"{name}: {ex.Message}"; }
                 }).ToList();
             }));
-            Step("SAFE safe_check_report", () => Safe.SafeTools.Report(none, etabs)["summary"]?.ToJsonString());
+            Step("SAFE safe_check_report", () => Safe.SafeTools.Report(none, etabs)["summary"]);
         }
 
         var sap = etabs.Program.Key == CsiProgram.Sap2000.Key;
@@ -128,7 +163,7 @@ public static class SelfTest
         {
             // SAP2000's own tools: the reads always, the results when the model has been analysed.
             JsonElement J(string json) => JsonDocument.Parse(json).RootElement;
-            string Tool(string name, string json) => Sap2000.SapTools.All.First(t => t.Name == name).Run(J(json), etabs).ToJsonString();
+            JsonNode Tool(string name, string json) => Sap2000.SapTools.All.First(t => t.Name == name).Run(J(json), etabs);
             Step("SAP2000 get_model_context", () => Tool("get_model_context", "{}"));
             Step("SAP2000 query_joints", () => Tool("query_joints", "{\"limit\":3}"));
             Step("SAP2000 table names", () => etabs.Tables().Where(t => Sap2000.SapPack.Takes(t.Name)).Select(t => $"{t.Name}{(t.Empty ? " (empty)" : "")}").ToList());
@@ -179,5 +214,33 @@ public static class SelfTest
             Step("Refresh", () => { etabs.Refresh(); return null; });
         }
         return done;
+    }
+
+    /// <summary>
+    /// Selects one frame, reads the selection back, and puts the engineer's own selection back as it was: the test
+    /// reads the open model, and the selection is part of what the engineer sees in it.
+    /// </summary>
+    internal static object SelectAndPutBack(ICsiLink link)
+    {
+        var before = link.Selected();
+        var frame = link.Frames()[0].Name;
+        IReadOnlyList<(string Kind, string Name)> read;
+        try
+        {
+            link.ClearSelection();
+            link.Select("frame", frame);
+            read = link.Selected();
+        }
+        finally
+        {
+            link.ClearSelection();
+            foreach (var (kind, name) in before)
+                if (kind is "frame" or "area" or "point")
+                    try { link.Select(kind, name); }
+                    catch (EtabsException) { /* an object that is gone meanwhile */ }
+        }
+        if (read.Count != 1 || read[0] != ("frame", frame))
+            throw new InvalidOperationException($"frame {frame} was selected; the selection read back as: {string.Join(", ", read.Select(s => s.Kind + " " + s.Name))}");
+        return new { selected = $"frame {frame}", read_back = true, selection_put_back = $"{before.Count(s => s.Kind is "frame" or "area" or "point")} of {before.Count} objects that were selected before" };
     }
 }

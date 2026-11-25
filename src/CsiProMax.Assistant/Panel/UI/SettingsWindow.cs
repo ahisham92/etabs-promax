@@ -184,7 +184,7 @@ public sealed class SettingsWindow : Window
         foot.SetResourceReference(Border.BorderBrushProperty, Brand.K.Border);
 
         var root = new DockPanel();
-        var header = Brand.Header("Settings", "How CSI ProMax works in this ETABS.");
+        var header = Brand.Header("Settings", $"How CSI ProMax works in this {Csi.Name}.");
         DockPanel.SetDock(header, Dock.Top);
         root.Children.Add(header);
         DockPanel.SetDock(foot, Dock.Bottom);
@@ -302,7 +302,7 @@ public sealed class SettingsWindow : Window
             page.Children.Add(Place("ApprovalLevel", radio));
         }
         page.Children.Add(Hint(
-            "ETABS has no undo for what CSI ProMax changes, so these are asked at the first three levels, whatever you choose: " +
+            $"{Csi.Name} has no undo for what CSI ProMax changes, so these are asked at the first three levels, whatever you choose: " +
             "code CSI ProMax wrote, deletes, saving the model, running the analysis, and overwriting a file outside " +
             "Documents\\CSI ProMax. Always allow runs those too, without asking. A brief you run counts as approving its task."));
         page.Children.Add(SubHeading("Not asked again"));
@@ -489,7 +489,7 @@ public sealed class SettingsWindow : Window
         page.Children.Add(Place("AutopilotResumeWeekly", _autopilotWeekly));
         page.Children.Add(Hint("Any pause carries on when you press Resume on the chat's banner or type \"continue\" in the autopilot chat. A weekly limit near full pauses it too.", 2));
         page.Children.Add(SubHeading("Names of the crew"));
-        page.Children.Add(Hint("Over a chat With coordinator, a strip shows the work as people: you hand it to the coordinator, who gives each job to a worker; a worker with a change for the model queues for the one who applies changes in ETABS, one at a time. Leave a name blank for its default.", 2));
+        page.Children.Add(Hint($"Over a chat With coordinator, a strip shows the work as people: you hand it to the coordinator, who gives each job to a worker; a worker with a change for the model queues for the one who applies changes in {Csi.Name}, one at a time. Leave a name blank for its default.", 2));
         var names = Chat.CrewNames.From(_settings.ChatCrewYou, _settings.ChatCrewCoordinator, _settings.ChatCrewWorkers, _settings.ChatCrewApplier, Environment.UserName);
         var grid = new Grid { Margin = new Thickness(0, 8, 0, 0), MaxWidth = 520, HorizontalAlignment = HorizontalAlignment.Left };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -516,7 +516,7 @@ public sealed class SettingsWindow : Window
         NameRow("You", Place("ChatCrewYou", _crewYou), names.You, "Your name, on the person who hands over the requests.");
         NameRow("Coordinator", Place("ChatCrewCoordinator", _crewCoordinator), names.Coordinator, "The main chat that hands out the jobs.");
         NameRow("Workers", Place("ChatCrewWorkers", _crewWorkers), string.Join(", ", names.Workers), "One name per job that runs at once, separated by commas. More jobs than names get Worker 4, Worker 5 and so on.");
-        NameRow("Applies changes in ETABS", Place("ChatCrewApplier", _crewApplier), names.Applier, "Takes each worker's change into the model, one at a time.");
+        NameRow($"Applies changes in {Csi.Name}", Place("ChatCrewApplier", _crewApplier), names.Applier, "Takes each worker's change into the model, one at a time.");
         page.Children.Add(grid);
         page.Children.Add(Hint("The model and Brief before running are chosen in the Chat pane, next to the message box.", 12));
         return page;
@@ -565,7 +565,7 @@ public sealed class SettingsWindow : Window
         var dialog = new Microsoft.Win32.OpenFileDialog
         {
             Title = "Pick the legend seed file",
-            Filter = "ETABS projects and templates|*.rvt;*.rte|All files|*.*",
+            Filter = $"{Csi.Name} projects and templates|*.rvt;*.rte|All files|*.*",
         };
         try
         {
@@ -918,7 +918,7 @@ public sealed class SettingsWindow : Window
     {
         var page = new StackPanel();
         page.Children.Add(Place("AutoUpdate", _autoUpdate));
-        page.Children.Add(Hint("New versions install while ETABS stays open and switch over when no job is running."));
+        page.Children.Add(Hint($"New versions install while {Csi.Name} stays open and switch over when no job is running."));
         page.Children.Add(SubHeading("This version"));
         string state;
         try { state = Update.Updater.Describe(); }

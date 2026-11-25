@@ -89,9 +89,9 @@ internal static class ApprovalPolicy
 
         var risks = new List<string>();
         if (fromChat && RunsNewCode.Contains(tool))
-            risks.Add("The chat wrote code to run in ETABS. Read it in the details before you allow it.");
+            risks.Add($"The chat wrote code to run in {Csi.Name}. Read it in the details before you allow it.");
         if (AsksEachTime.Contains(tool))
-            risks.Add("ETABS has no undo for this. Check it before you allow it.");
+            risks.Add($"{Csi.Name} has no undo for this. Check it before you allow it.");
         if (facts.NewCode && isLearned)
             risks.Add("This learned tool's code has not been allowed on this PC yet, or it changed since. Read it in the details.");
         if (facts.NewCode && RunsRecipe.Contains(tool))
@@ -118,7 +118,7 @@ internal static class ApprovalPolicy
         // Reads never ask, and neither does a cleanup tool's preview (it changes nothing). Normal changes are one Undo away.
         if (!modifiesModel || IsPreview(tool, args)) return ApprovalDecision.No;
         if (level == ApprovalLevel.RiskyOnly || remembered.Contains(tool) || fromChat && taskApproved) return ApprovalDecision.No;
-        return new(true, AskKind.Change, "It changes the model. ETABS can't undo it, so check it before you allow it.");
+        return new(true, AskKind.Change, $"It changes the model. {Csi.Name} can't undo it, so check it before you allow it.");
     }
 
     /// <summary>A purge or cleanup tool run without apply true: a preview made in a rolled-back transaction.</summary>

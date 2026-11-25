@@ -141,6 +141,25 @@ public static class FieldParts
     }
 
     /// <summary>
+    /// The one rule for checks (Verdict), held on the program's own tables: before the analysis has run on the
+    /// scratch model, the program's whole check report must say "not available" for every check. A check that says
+    /// pass, fail or reported here took a table of what was entered (overwrites, design load combinations) for results.
+    /// </summary>
+    public static void NoVerdictBeforeAnalysis(FieldContext ctx) =>
+        ctx.Step($"no check passes or fails before {ctx.Program.Name}'s analysis has run", () =>
+        {
+            var link = ctx.Link;
+            if (link.Info().Locked) throw new FieldSkipException("the scratch model is already analysed at this point");
+            var report = ProgramTools.Report(JsonDocument.Parse("{}").RootElement, link);
+            var lines = report["summary"] is JsonArray list ? list.Select(n => n?.GetValue<string>() ?? "").ToList() : [];
+            FieldContext.Expect(lines.Count > 0, "the check report has no summary");
+            var verdicts = lines.Where(l => !l.EndsWith(": " + Verdict.NotAvailable, StringComparison.Ordinal)).ToList();
+            FieldContext.Expect(verdicts.Count == 0, $"the model is not analysed, and {verdicts.Count} of {lines.Count} checks answered as if it had: {string.Join("; ", verdicts)}");
+            // The tables that have rows before any analysis: what a check must never read as results.
+            return new { summary = lines, tables_with_data_before_the_analysis = link.Tables().Where(t => !t.Empty).Select(t => t.Name).Take(120).ToList() };
+        });
+
+    /// <summary>
     /// After the result tools ran: one line that fails naming every check that answered "not available" with its
     /// reason, so a table name or field the program calls differently is listed under "Not working".
     /// </summary>
@@ -148,6 +167,8 @@ public static class FieldParts
         ctx.Step(name, () =>
         {
             var given = answers.Where(a => a.Answer is not null).ToList();
+            var odd = given.Where(a => a.Answer!["status"]?.GetValue<string>() is { } s && !Verdict.Words.Contains(s)).Select(a => $"{a.Check}: '{a.Answer!["status"]}'").ToList();
+            FieldContext.Expect(odd.Count == 0, "a check's status is not one of pass, fail, reported, not available: " + string.Join("; ", odd));
             var none = given.Where(a => a.Answer!["status"]?.GetValue<string>() == "not available")
                 .Select(a => $"{a.Check}: {a.Answer!["note"]?.GetValue<string>() ?? "no reason given"}").ToList();
             FieldContext.Expect(none.Count == 0, $"{none.Count} of {given.Count} checks had nothing to read. " + string.Join(" | ", none));

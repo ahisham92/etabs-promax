@@ -171,6 +171,7 @@ public static class SafeFieldSteps
         ctx.Tool("save_model", "{}", a => FieldContext.Expect(a["saved"]!.GetValue<string>().Replace('\\', '/').Split('/').Last().StartsWith(ModelerFieldSteps.ModelName, StringComparison.OrdinalIgnoreCase), $"it saved '{a["saved"]}', which is not the scratch model"));
 
         // ---- SAFE's own analysis and design ----
+        NoVerdictBeforeAnalysis(ctx);
         ctx.Tool("run_analysis", "{}", _ => FieldContext.Expect(link.Info().Locked, "the analysis answered, but SAFE does not say the model is analysed (locked)"));
         var analysed = false;
         try { analysed = link.Info().Locked; }

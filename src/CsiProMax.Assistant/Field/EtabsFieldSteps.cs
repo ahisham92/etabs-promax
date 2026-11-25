@@ -78,7 +78,7 @@ public static class EtabsFieldSteps
         // ---- the tools, each change read back from ETABS ----
         ctx.Tool("get_model_context", "{}", a =>
         {
-            foreach (var key in new[] { "file", "etabs", "units", "locked", "stories", "counts", "frame_sections", "slab_and_wall_sections", "materials", "load_patterns", "load_cases", "combinations", "selected", "selected_count" })
+            foreach (var key in new[] { "file", "program", "version", "units", "locked", "stories", "counts", "frame_sections", "slab_and_wall_sections", "materials", "load_patterns", "load_cases", "combinations", "selected", "selected_count" })
                 FieldContext.Expect(a[key] is not null, $"the answer has no '{key}'");
             var c = a["counts"]!;
             FieldContext.Expect(Int(c["columns"]) + Int(c["beams"]) + Int(c["braces"]) == link.Frames().Count && Int(c["floors"]) + Int(c["walls"]) == link.Areas().Count, "the counts do not add up to the model's frames and areas: " + c.ToJsonString());
@@ -249,6 +249,7 @@ public static class EtabsFieldSteps
         });
 
         // ---- ETABS's own analysis and design ----
+        NoVerdictBeforeAnalysis(ctx);
         ctx.Tool("run_analysis", "{}", _ => FieldContext.Expect(link.Info().Locked, "the analysis answered, but ETABS does not say the model is analysed (locked)"));
         var analysed = false;
         try { analysed = link.Info().Locked; }

@@ -66,7 +66,7 @@ internal static class ChatFiles
         ".txt" => "Text file",
         ".md" => "Markdown file",
         ".json" => "JSON file",
-        ".e2k" => "ETABS text file",
+        ".e2k" => "ETABS text file", // ETABS itself
         ".cpmx" => "CSI ProMax review pack",
         ".cpm" => "CSI ProMax model",
         ".html" => "Web page (opens in the browser)",

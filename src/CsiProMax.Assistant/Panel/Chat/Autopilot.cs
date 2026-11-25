@@ -103,7 +103,7 @@ internal static class Autopilot
             if (Here) Logged?.Invoke(kind, text);
             // For another window's run: written for its report, saying which model it was in.
             else if (AutopilotShare.Remote(DateTime.UtcNow) is { } run)
-                AutopilotShare.AppendLog(run, kind, (ModelTitle?.Invoke() is { Length: > 0 } model ? $"[{model}] " : "[other ETABS window] ") + text, DateTime.UtcNow);
+                AutopilotShare.AppendLog(run, kind, (ModelTitle?.Invoke() is { Length: > 0 } model ? $"[{model}] " : $"[other {Csi.Name} window] ") + text, DateTime.UtcNow);
         }
         catch (Exception) { /* a log line must never break the call */ }
     }
@@ -292,11 +292,11 @@ internal static class Autopilot
         runKey.Length == 0 || openKeys.Any(k => string.Equals(k, runKey, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>The pause's reason when the run's model isn't open (<paramref name="title"/>: its name).</summary>
-    public static string ModelGoneWhy(string title) => $"{title}, the model it works on, isn't open in this ETABS";
+    public static string ModelGoneWhy(string title) => $"{title}, the model it works on, isn't open in this {Csi.Name}";
 
     /// <summary>The note (chat, log and phone) when the run pauses because its model isn't open.</summary>
     public static string ModelGoneNote(string title) =>
-        $"Autopilot paused: {title}, the model it works on, isn't open in this ETABS any more. The chat is free to leave. Open {title} " +
+        $"Autopilot paused: {title}, the model it works on, isn't open in this {Csi.Name} any more. The chat is free to leave. Open {title} " +
         "again, then press Resume (or type \"continue\") in this chat to carry on, or Stop to end it.";
 
     /// <summary>Times a job that ended with a problem is started again by itself during a run, before it is reported.</summary>
@@ -378,12 +378,12 @@ internal static class Autopilot
         "- You may change and delete whatever the goal needs; a backup copy of the model was saved before you started.\n" +
         "- Hand the work to jobs, divided across the free workers; review each report like a senior reviewer and send back " +
         "what is wrong or not good enough.\n" +
-        "- A step ETABS refuses is undone; find another way, and skip it only when there is none (list it).\n" +
+        $"- A step {Csi.Name} refuses is undone; find another way, and skip it only when there is none (list it).\n" +
         "- Never stop to wait for the user's confirmation or go-ahead, even where an earlier message or a brief says to wait: " +
         "the run only stops when the goal is met, a limit pauses it or the user presses Stop. A choice you'd ask about: make it, " +
         "carry on, and list it under Decisions I made.\n" +
         "- Keep every worker busy: never hold parts back for a slow job. Start every part that doesn't depend on it; a big part " +
-        "with several steps is split across the free workers (changes still go into ETABS one at a time, by themselves).\n" +
+        $"with several steps is split across the free workers (changes still go into {Csi.Name} one at a time, by themselves).\n" +
         "- When you say the goal is met, a review team checks every item the user asked for in the models and files. What " +
         "they find not done comes back to you, so finish everything the user asked for, not only the easy parts.\n" +
         "- Final report, when the goal is met: Done (what was done, with counts), Checked (what you verified and how), " +
@@ -601,7 +601,7 @@ internal static class GoalReview
     public static readonly (string Title, string Scope)[] Parts =
     [
         ("Review: model", "the model: geometry, stories and grids, sections and materials, supports, releases and " +
-                          "diaphragms. Check the model open in ETABS."),
+                          $"diaphragms. Check the model open in {Csi.Name}."),
         ("Review: loads, results and files", "the loads and what was made from the model: load patterns, cases and combinations, " +
                                              "assigned loads, the analysis and the results the goal asked for, and the " +
                                              "files made (calculation notes, schedules, tables, drawings)."),

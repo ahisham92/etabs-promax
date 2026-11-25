@@ -32,7 +32,6 @@ public sealed class FieldSkipException(string why) : Exception(why);
 /// </summary>
 public sealed class FieldContext(CsiProgram program, string folder, ICsiLink link)
 {
-    private static readonly JsonSerializerOptions Options = new() { IncludeFields = true };
     private const int MostShort = 300, MostFull = 20000;
 
     private readonly Dictionary<string, Tool> _tools = new(StringComparer.Ordinal);
@@ -234,7 +233,48 @@ public sealed class FieldContext(CsiProgram program, string folder, ICsiLink lin
         if (!_tools.TryGetValue(name, out var tool)) throw new FieldCheckException($"There is no tool named {name} here.");
         _run.Add(name);
         using var document = JsonDocument.Parse(json);
-        return tool.Run(document.RootElement.Clone(), Link);
+        JsonNode answer;
+        try { answer = tool.Run(document.RootElement.Clone(), Link); }
+        catch (Exception ex) when (ex is ToolInputException or EtabsException && NamesAnotherProgram(ex.Message) is { } other)
+        {
+            throw new FieldCheckException($"{name} answered in {other}'s words, and this is {Link.Program.Name}: {ex.Message}");
+        }
+        if (WordsOf(answer).Select(w => (Text: w, Other: NamesAnotherProgram(w))).FirstOrDefault(w => w.Other is not null) is { Other: { } named } wrong)
+            throw new FieldCheckException($"{name} answered in {named}'s words, and this is {Link.Program.Name}: {wrong.Text}");
+        return answer;
+    }
+
+    /// <summary>
+    /// The program a text of ours names when it is not the one the link works in: "ETABS" in an answer given in SAFE
+    /// or SAP2000. Only in a live program (the Modeler writes ETABS's files and says so), and never for ETABS itself,
+    /// whose tools may name the other programs' files.
+    /// </summary>
+    internal string? NamesAnotherProgram(string text)
+    {
+        if (Link is OfflineEtabs || Link.Program.Key == CsiProgram.Etabs.Key) return null;
+        return System.Text.RegularExpressions.Regex.IsMatch(text, @"\b" + CsiProgram.Etabs.Name + @"\b") ? CsiProgram.Etabs.Name : null;
+    }
+
+    /// <summary>
+    /// The sentences of ours in a tool's answer: the texts under note, next, warning, why, message and error, at any
+    /// depth. Names from the model (a file, a section, a table) are not ours and are not looked at.
+    /// </summary>
+    internal static IEnumerable<string> WordsOf(JsonNode? node)
+    {
+        switch (node)
+        {
+            case JsonObject o:
+                foreach (var (key, value) in o)
+                {
+                    if (value is JsonValue v && v.TryGetValue<string>(out var text) && key is "note" or "next" or "warning" or "why" or "message" or "error") yield return text!;
+                    else foreach (var inner in WordsOf(value)) yield return inner;
+                }
+                break;
+            case JsonArray a:
+                foreach (var item in a)
+                    foreach (var inner in WordsOf(item)) yield return inner;
+                break;
+        }
     }
 
     /// <summary>Counts a tool as covered that was exercised another way (the runner itself, say).</summary>
@@ -259,11 +299,5 @@ public sealed class FieldContext(CsiProgram program, string folder, ICsiLink lin
         lock (_gate) Steps.Add(step);
     }
 
-    private static string Text(object? value) => value switch
-    {
-        null => "null",
-        string s => s,
-        JsonNode node => node.ToJsonString(),
-        _ => JsonSerializer.Serialize(value, Options),
-    };
+    private static string Text(object? value) => Readable.Text(value);
 }

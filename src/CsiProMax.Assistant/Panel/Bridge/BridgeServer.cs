@@ -33,7 +33,7 @@ public sealed class BridgeServer
 {
     public static int SessionId { get; } = System.Diagnostics.Process.GetCurrentProcess().Id;
 
-    public static string PipeName => $"CsiProMax.ETABS.{Environment.UserName}.{SessionId}";
+    public static string PipeName => $"CsiProMax.ETABS.{Environment.UserName}.{SessionId}"; // ETABS itself
 
     private static string Root => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "CsiProMax");
 
@@ -274,7 +274,7 @@ public sealed class BridgeServer
 
                 case "activate_document":
                 case "open_document":
-                    return Error("CSI ProMax works on the model open in the ETABS window it was started from. Ask the user to open the other model in ETABS.");
+                    return Error($"CSI ProMax works on the model open in the {Csi.Name} window it was started from. Ask the user to open the other model in {Csi.Name}.");
 
                 case "call_tool":
                     var name = root.GetProperty("name").GetString() ?? "";
@@ -342,9 +342,9 @@ public sealed class BridgeServer
     /// <summary>A short "why ETABS isn't answering" for pings, or null when there is nothing to say.</summary>
     private static string? Blocked(ETABSBlock.State state) => state.Kind switch
     {
-        ETABSBlock.Kind.Dialog => string.IsNullOrWhiteSpace(state.Title) ? "a dialog is open in ETABS" : $"a dialog is open in ETABS: '{state.Title!.Trim()}'",
-        ETABSBlock.Kind.NotResponding => "ETABS is busy with a long operation of its own",
-        ETABSBlock.Kind.EditMode => "ETABS is in an edit mode",
+        ETABSBlock.Kind.Dialog => string.IsNullOrWhiteSpace(state.Title) ? $"a dialog is open in {Csi.Name}" : $"a dialog is open in {Csi.Name}: '{state.Title!.Trim()}'",
+        ETABSBlock.Kind.NotResponding => $"{Csi.Name} is busy with a long operation of its own",
+        ETABSBlock.Kind.EditMode => $"{Csi.Name} is in an edit mode",
         _ => null,
     };
 
@@ -427,7 +427,7 @@ public sealed class BridgeServer
             // A parallel job waits instead: a change for its turn in the one line (the applier), any call for ETABS to be free and rested.
             (job, turn) = await TakeTurnAsync(jobKey, tool, ct).ConfigureAwait(false);
             if (job is null) return ToolResult.Error(ct.IsCancellationRequested ? "The call was cancelled while it waited its turn; nothing was run."
-                : $"{tool.Name} waited more than {(int)TurnWait.TotalMinutes} minutes for its turn in ETABS, so nothing was run. Call it again to wait again.");
+                : $"{tool.Name} waited more than {(int)TurnWait.TotalMinutes} minutes for its turn in {Csi.Name}, so nothing was run. Call it again to wait again.");
         }
         job.Key = key;
         // From here until job.Task is set, an exception would leave a job that holds ETABS "busy" for ever (bug 87: the
@@ -441,7 +441,7 @@ public sealed class BridgeServer
         job.CanContinue = true;
         firstCall = _dispatcher.InvokeAsync(app =>
         {
-            if (!job.TryStart()) return ToolResult.Error("Dropped before ETABS started it; nothing was changed.");
+            if (!job.TryStart()) return ToolResult.Error($"Dropped before {Csi.Name} started it; nothing was changed.");
             Jobs.Running = job;
             job.StartedSignal.TrySetResult(true);
             // The chat task this call belongs to, for its whole run (a later task gets a control of its own).
@@ -458,7 +458,7 @@ public sealed class BridgeServer
             {
                 // Time saved and AI time: from here (the approval wait included) to the end of the run.
                 TimeLog.BeginTool(app, tool, fromChat);
-                if (app.ActiveUIDocument is null) return Ended(ToolResult.Error("No model is open in this ETABS window. Open one with open_etabs_model (its file path), or ask the user to open one."));
+                if (app.ActiveUIDocument is null) return Ended(ToolResult.Error($"No model is open in this {Csi.Name} window. Open one with open_etabs_model (its file path), or ask the user to open one."));
                 // A batch of this call may stop at an item boundary to synchronize (auto sync); nothing else may.
                 ETABS.AutoSync.Seen(app.ActiveUIDocument.Document);
                 // An autopilot (this window's, or another window's reaching this one) backs up each model before its first change.
@@ -471,7 +471,7 @@ public sealed class BridgeServer
                 // A tool with its own approval dialog (the package plan, each redline) asks a normal change there instead.
                 var askHere = decision.Ask && !(decision.CanSilence && Approvals.OwnDialog(tool.Name));
                 Approvals.Call = new Approvals.CallState(decision, chat, askHere);
-                if (askHere && !Approvals.Ask(tool, args, decision, chat)) return Ended(ToolResult.Error("The user rejected this change in ETABS. Ask them how to proceed."));
+                if (askHere && !Approvals.Ask(tool, args, decision, chat)) return Ended(ToolResult.Error($"The user rejected this change in {Csi.Name}. Ask them how to proceed."));
                 RunningCall.Begin(fromChat ? "the chat" : "Claude", tool.Name, app.ActiveUIDocument.Document.Title, args);
                 ToolResult result;
                 try
@@ -516,7 +516,7 @@ public sealed class BridgeServer
         {
             if (turn is not null) JobTurns.Shared.Leave(turn);
             ActivityLog.Note("job_not_queued", $"job {job.Id} ({tool.Name}): {ex.GetBaseException().Message}");
-            return job.FailBeforeStart(ex is InvalidOperationException ? ex.Message : $"ETABS couldn't take the call ({ex.GetBaseException().Message}).");
+            return job.FailBeforeStart(ex is InvalidOperationException ? ex.Message : $"{Csi.Name} couldn't take the call ({ex.GetBaseException().Message}).");
         }
         job.Task = Jobs.Follow(job, firstCall);
         // A parallel job's call holds its turn until its ETABS job ends (a "still running" answer doesn't give it back),
@@ -575,7 +575,7 @@ public sealed class BridgeServer
         try { busy = ETABS.FreezeWatch.Cause().What; } catch (Exception) { /* the journal can't be read: no name */ }
         Chat.ChatJobs.SetActivity(jobKey, Chat.JobBoard.Blocked);
         var line = ETABSBlock.HeldLine(state, busy);
-        ActivityLog.Note("etabs_held", $"{tool.Name} (job {id}) waits for ETABS: {state.Kind}, last command {busy}");
+        ActivityLog.Note("etabs_held", $"{tool.Name} (job {id}) waits for {Csi.Name}: {state.Kind}, last command {busy}");
         Chat.ChatPane.ETABSHeld(line);
         var started = DateTime.UtcNow;
         var tries = 0;
@@ -598,16 +598,16 @@ public sealed class BridgeServer
                         activity.Quiet, ETABS.FreezeCause.IsLongWork(cause)))
                 {
                     if (Chat.Away.On || Chat.Autopilot.Unattended)
-                        ActivityLog.Note("etabs_esc_skipped", $"{tool.Name} (job {id}): ETABS held {(int)(DateTime.UtcNow - heldSince).TotalSeconds} s, {now.Kind}, " +
+                        ActivityLog.Note("etabs_esc_skipped", $"{tool.Name} (job {id}): {Csi.Name} held {(int)(DateTime.UtcNow - heldSince).TotalSeconds} s, {now.Kind}, " +
                                                               $"{FreezeCause.Verdict(activity)} ({activity.CpuPercent}% processor), last command {cause.What}: not ended");
                     continue;
                 }
                 tries++;
                 ETABS.FreezeWatch.EndLeftCommand();
-                ActivityLog.Note("etabs_esc", $"{tool.Name} (job {id}): ETABS took no work for {(int)(DateTime.UtcNow - heldSince).TotalMinutes} min while nobody was there " +
+                ActivityLog.Note("etabs_esc", $"{tool.Name} (job {id}): {Csi.Name} took no work for {(int)(DateTime.UtcNow - heldSince).TotalMinutes} min while nobody was there " +
                                               $"(last command {cause.What}, {FreezeCause.Verdict(activity)}, {activity.CpuPercent}% processor); Esc pressed twice to end it (try {tries})");
                 if (tries == 1)
-                    Chat.Away.Note($"ETABS took no work for two minutes{(busy.Length > 0 ? $" ({busy} was still open)" : "")}; Esc ended it so the jobs could carry on");
+                    Chat.Away.Note($"{Csi.Name} took no work for two minutes{(busy.Length > 0 ? $" ({busy} was still open)" : "")}; Esc ended it so the jobs could carry on");
             }
         }
         catch (OperationCanceledException) { }
@@ -617,8 +617,8 @@ public sealed class BridgeServer
             return null;
         }
         Chat.ChatJobs.SetActivity(jobKey, "");
-        return $"ETABS took no work for {(int)TurnWait.TotalMinutes} minutes ({why}) Nothing was run. Tell the user in one sentence what " +
-               "holds ETABS (" + line + "); don't start other ETABS work meanwhile.";
+        return $"{Csi.Name} took no work for {(int)TurnWait.TotalMinutes} minutes ({why}) Nothing was run. Tell the user in one sentence what " +
+               $"holds {Csi.Name} (" + line + $"); don't start other {Csi.Name} work meanwhile.";
     }
 
     /// <summary>How long each wait step of a held call lasts (one activity-log line per step).</summary>
@@ -804,7 +804,7 @@ public sealed class BridgeServer
 
     private static ToolResult StillRunning(Job job) => new(JsonSerializer.Serialize(new
     {
-        status = "still running in ETABS",
+        status = $"still running in {Csi.Name}",
         job = job.Id, tool = job.Tool, elapsed = Jobs.Duration(job.Elapsed), progress = job.Progress(),
         next = $"Call wait_for_job (a csi-promax tool) with job_id {job.Id} to wait for the result; it is kept when it finishes. Don't send other model work meanwhile, " +
                "and use cancel_job if it should stop.",
@@ -843,7 +843,7 @@ public sealed class BridgeServer
             using (ct.Register(() => gone.TrySetResult(true)))
             {
                 if (await Task.WhenAny(entry.Result.Task, gone.Task).ConfigureAwait(false) != entry.Result.Task)
-                    return ToolResult.Error("The call was cancelled while the user was asked to free ETABS.");
+                    return ToolResult.Error($"The call was cancelled while the user was asked to free {Csi.Name}.");
             }
             return await entry.Result.Task.ConfigureAwait(false);
         }

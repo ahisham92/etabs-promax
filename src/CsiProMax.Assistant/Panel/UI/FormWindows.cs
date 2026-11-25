@@ -172,8 +172,8 @@ internal sealed class InputsWindow : Window
                 use.Margin = new Thickness(8, 0, 0, 0);
                 use.IsEnabled = count > 0;
                 use.ToolTip = count > 0
-                    ? $"Fills in the {count} element(s) selected in ETABS."
-                    : "Nothing is selected in ETABS. Close this window, select elements, then run the tool again.";
+                    ? $"Fills in the {count} element(s) selected in {Csi.Name}."
+                    : $"Nothing is selected in {Csi.Name}. Close this window, select elements, then run the tool again.";
                 ToolTipService.SetShowOnDisabled(use, true);
                 AutomationProperties.SetName(use, $"Use current selection for {field.Label}");
                 use.Click += (_, _) => { ids.Text = selection; ids.Focus(); };
@@ -283,7 +283,7 @@ internal sealed class ResultWindow : Window
         if (!ok)
         {
             var next = Brand.Text("Read the details below. To get it fixed, press Copy and paste them into the chat; " +
-                                  "Ctrl+Z in ETABS undoes anything it changed.", Brand.K.Muted);
+                                  $"Ctrl+Z in {Csi.Name} undoes anything it changed.", Brand.K.Muted);
             next.Margin = new Thickness(0, 4, 0, 0);
             status.Children.Add(next);
         }
@@ -340,7 +340,7 @@ internal sealed class ResultWindow : Window
         }
 
         var root = new DockPanel();
-        var header = Brand.Header(title, "Ran in ETABS without the AI. Ctrl+Z undoes any change.");
+        var header = Brand.Header(title, $"Ran in {Csi.Name} without the AI. Ctrl+Z undoes any change.");
         DockPanel.SetDock(header, Dock.Top);
         root.Children.Add(header);
         root.Children.Add(body);
@@ -430,16 +430,16 @@ internal sealed class ResultWindow : Window
         var line = new DockPanel { LastChildFill = true };
         if (row.ElementIds.Count > 0)
         {
-            var select = Brand.Button(row.ElementIds.Count == 1 ? "Select in ETABS" : $"Select {row.ElementIds.Count} in ETABS");
+            var select = Brand.Button(row.ElementIds.Count == 1 ? $"Select in {Csi.Name}" : $"Select {row.ElementIds.Count} in {Csi.Name}");
             select.Margin = new Thickness(8, 0, 0, 0);
             select.Padding = new Thickness(8, 2, 8, 2);
             select.ToolTip = "Selects and zooms to them in the active view.";
-            AutomationProperties.SetName(select, $"Select in ETABS: {row.Text}");
+            AutomationProperties.SetName(select, $"Select in {Csi.Name}: {row.Text}");
             var ids = string.Join(",", row.ElementIds.Take(500));
             select.Click += async (_, _) =>
             {
                 try { await App.Dispatcher.InvokeAsync(a => Pane.Select(a, ids)); }
-                catch (Exception ex) when (ex is not OutOfMemoryException) { select.Content = "ETABS is busy, try again"; }
+                catch (Exception ex) when (ex is not OutOfMemoryException) { select.Content = $"{Csi.Name} is busy, try again"; }
             };
             DockPanel.SetDock(select, Dock.Right);
             line.Children.Add(select);

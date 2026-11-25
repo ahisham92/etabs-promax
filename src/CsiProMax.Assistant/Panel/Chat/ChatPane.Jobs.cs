@@ -881,7 +881,7 @@ internal sealed partial class ChatPane
         if (Run is not null || _sample || !Update.Updater.CanSwitchLive) return;
         var now = DateTime.UtcNow;
         if (now < _updateRetryAt || JobPause.On || Update.Updater.Staged is not { } ready || _runs.Count == 0 && board.OpenCount == 0) return;
-        Note($"CSI ProMax {ready} is ready with the latest fixes. The jobs pause for a moment, each once it has nothing running in ETABS, " +
+        Note($"CSI ProMax {ready} is ready with the latest fixes. The jobs pause for a moment, each once it has nothing running in {Csi.Name}, " +
              "so it goes in; they carry on by themselves right after. Nothing is lost.");
         PauseAll(JobPause.ForUpdate);
         Save();
@@ -1029,7 +1029,7 @@ internal sealed partial class ChatPane
         ShowJobCard(number);
         RefreshJobView();
         ShowSwitcher();
-        Status($"Job {number} stopped. A change it had already started in ETABS finishes on its own.", spin: false);
+        Status($"Job {number} stopped. A change it had already started in {Csi.Name} finishes on its own.", spin: false);
         SaveSoon();
     }
 
@@ -1064,7 +1064,7 @@ internal sealed partial class ChatPane
         bar.Children.Add(_jobBack);
         _jobStop = new Button { Content = "Stop job", MinWidth = 64, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(ChatUi.S2, 0, 0, 0) };
         _jobStop.SetResourceReference(StyleProperty, "SpmChatDanger");
-        _jobStop.ToolTip = "Stops this job. A change it already started in ETABS finishes on its own; send it a message later to carry on.";
+        _jobStop.ToolTip = $"Stops this job. A change it already started in {Csi.Name} finishes on its own; send it a message later to carry on.";
         AutomationProperties.SetHelpText(_jobStop, (string)_jobStop.ToolTip);
         _jobStop.Click += (_, _) => { if (_viewJob is { } n) StopJob(n); };
         DockPanel.SetDock(_jobStop, Dock.Right);
@@ -1354,7 +1354,7 @@ internal sealed partial class ChatPane
         var line = job.State switch
         {
             JobBoard.Running when job.Now.Length > 0 => state + ". Now: " + job.Now,
-            JobBoard.Waiting => state + ": its change waits for ETABS to finish another job's change.",
+            JobBoard.Waiting => state + $": its change waits for {Csi.Name} to finish another job's change.",
             JobBoard.Queued => state + $" (up to {ChatJobs.Limit} jobs run at once).",
             JobBoard.Stopped => state + ". Send it a message to carry on.",
             JobBoard.Done or JobBoard.Failed => state + ". Send it a message to carry on.",

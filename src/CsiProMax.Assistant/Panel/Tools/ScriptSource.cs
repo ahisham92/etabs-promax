@@ -9,7 +9,7 @@ namespace CsiProMax.Tools;
 /// </summary>
 internal static class ScriptSource
 {
-    internal const string Header = """
+    internal static string Header => $$"""
         using System;
         using System.Linq;
         using System.Collections.Generic;
@@ -22,7 +22,7 @@ internal static class ScriptSource
             static int spmLast;
             static void SpmCheckpoint() { var now = Environment.TickCount; if (spmLast != 0 && unchecked(now - spmLast) < 20) return; spmLast = now == 0 ? 1 : now; CheckCancel(); }
             static T SpmCheckpoint<T>(T value) { SpmCheckpoint(); return value; }
-            static void Ok(object ret, string what) { if (ret is int n && n != 0) throw new InvalidOperationException("ETABS refused to " + what + " (it returned " + n + ")."); }
+            static void Ok(object ret, string what) { if (ret is int n && n != 0) throw new InvalidOperationException("{{Csi.Name}} refused to " + what + " (it returned " + n + ")."); }
             public static object Run(dynamic sap, System.Text.StringBuilder log, IDictionary<string, object> args)
             {
         #line 1 "snippet"
@@ -114,11 +114,11 @@ internal static class ScriptSource
     /// </summary>
     private static readonly (string Match, string Fix)[] Hints =
     [
-        ("Object reference not set", "Something was null on that line. An ETABS call gave nothing back (a name that doesn't exist, no model open, or results not available). Check the names with get_model_context or query_objects first."),
-        ("Specified cast is not valid", "ETABS's objects can't be cast freely. Use the members of the interface the property returns (SapModel.FrameObj, SapModel.AreaObj, SapModel.Results, ...) and pass enums as their own type."),
+        ("Object reference not set", $"Something was null on that line. {Csi.ANameCap} call gave nothing back (a name that doesn't exist, no model open, or results not available). Check the names with get_model_context or query_objects first."),
+        ("Specified cast is not valid", $"{Csi.Name}'s objects can't be cast freely. Use the members of the interface the property returns (SapModel.FrameObj, SapModel.AreaObj, SapModel.Results, ...) and pass enums as their own type."),
         ("model is locked", "The model is locked after an analysis run. Unlocking deletes the results, so ask the engineer before SapModel.SetModelIsLocked(false)."),
         ("No results", "Results exist only after the analysis has run, and only for the cases and combinations selected for output. Select them with SapModel.Results.Setup before reading."),
-        ("ref ", "ETABS's API returns arrays through ref parameters. Declare each one first (for example string[] names = null; int count = 0;) and pass it with ref."),
+        ("ref ", $"{Csi.Name}'s API returns arrays through ref parameters. Declare each one first (for example string[] names = null; int count = 0;) and pass it with ref."),
     ];
 
     /// <summary>The fix for a snippet's failure message, as a line to append ("" when none is known).</summary>

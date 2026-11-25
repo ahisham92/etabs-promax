@@ -135,9 +135,9 @@ internal static class StartupTimings
     }
 
     internal static string OpenLine(string title, long openMs, long handlersMs, long idleMs, bool testRunning = false) =>
-        $"model open '{title}': ETABS took {(openMs < 0 ? "?" : openMs.ToString(System.Globalization.CultureInfo.InvariantCulture))} ms " +
+        $"model open '{title}': {Csi.Name} took {(openMs < 0 ? "?" : openMs.ToString(System.Globalization.CultureInfo.InvariantCulture))} ms " +
         $"(DocumentOpening to DocumentOpened), CSI ProMax DocumentOpened handlers {handlersMs} ms, " +
-        (idleMs < 0 ? "closed again before ETABS was idle" : $"first Idling {idleMs} ms after open") +
+        (idleMs < 0 ? $"closed again before {Csi.Name} was idle" : $"first Idling {idleMs} ms after open") +
         (testRunning ? " (test running)" : "");
 
     /// <summary>The model opens measured in this session, oldest first.</summary>
@@ -152,7 +152,7 @@ internal static class StartupTimings
         var sb = new StringBuilder("## Startup and model-open timings\n\n");
         sb.Append("- ").Append(StartLine()).Append('\n');
         var opens = OpenLines();
-        if (opens.Count == 0) sb.Append("- no model opened since CSI ProMax started in this ETABS session\n");
+        if (opens.Count == 0) sb.Append($"- no model opened since CSI ProMax started in this {Csi.Name} session\n");
         foreach (var o in opens) sb.Append("- ").Append(o).Append('\n');
         return sb.ToString();
     }

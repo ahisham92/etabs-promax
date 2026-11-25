@@ -15,7 +15,7 @@ public sealed class ChatJobsTool : IEtabsTool
 
     public string Name => ToolName;
     public string Description =>
-        "Jobs that work side by side in the ETABS chat pane, each its own helper with a card the user sees. action=start opens a job: " +
+        $"Jobs that work side by side in the {Csi.Name} chat pane, each its own helper with a card the user sees. action=start opens a job: " +
         "title (a few words), task (everything it needs, in full: it doesn't see this chat) and done_when (how the job can check in the model that it " +
         "is finished; it checks that before it reports). To divide work across the free workers, " +
         "give parts instead (one {title, task, kind} per part, which don't overlap) and facts (what you read that every part needs): they " +
@@ -26,9 +26,9 @@ public sealed class ChatJobsTool : IEtabsTool
         "job; call it again with new=true when it really is separate work. A job may call it too, to work with its teammates: action=list " +
         "shows them, action=ask with job and question gets what that job has found so far (forward=true also passes the question on, and it " +
         "messages you back), action=message with job and text tells it something it needs. Reads run in parallel; model changes take turns. " +
-        "Work on two models open in two ETABS windows (list_etabs_models), for example a working model and a documentation model " +
+        $"Work on two models open in two {Csi.Name} windows (list_etabs_models), for example a working model and a documentation model " +
         "that links it: give each job its model (model=its title); jobs in different windows really work at once. Not a model change.";
-    public string PropertiesJson => """
+    public string PropertiesJson => $$$"""
     {
       "action": {"type": "string", "enum": ["start", "list", "message", "stop", "ask"], "description": "Default list. A job (not the main chat) may use list, ask and message."},
       "question": {"type": "string", "description": "ask (from a job): what you need from that job, e.g. 'the ids of the grids you read'."},
@@ -39,11 +39,11 @@ public sealed class ChatJobsTool : IEtabsTool
       "job": {"type": "integer", "description": "message, stop and ask: the job's number."},
       "text": {"type": "string", "description": "message: what to tell the job, in full."},
       "parts": {"type": "array", "description": "start: divide the work, one job per part, all started at once (each part's task in full; the parts must not overlap, e.g. levels 1-3 and 4-6).", "items": {"type": "object", "properties": {"title": {"type": "string"}, "task": {"type": "string"}, "done_when": {"type": "string"}, "kind": {"type": "string", "enum": ["simple", "everyday", "hard"]}, "model": {"type": "string"}}, "required": ["title", "task"]}},
-      "model": {"type": "string", "description": "start (and each part): the open model the job works on, its title as list_etabs_models gives it, when several are open (also in another ETABS window). Left out: the model active in this window."},
+      "model": {"type": "string", "description": "start (and each part): the open model the job works on, its title as list_etabs_models gives it, when several are open (also in another {{{Csi.Name}}} window). Left out: the model active in this window."},
       "facts": {"type": "string", "description": "start with parts: what you already read from the model that every part needs (levels, grids, types, names, ids); each job gets it with its task."},
       "single": {"type": "string", "description": "start without parts while two or more workers are free: why this work can't be divided (one element, one sheet, one short answer). Without it such a start is sent back to be divided."},
       "new": {"type": "boolean", "description": "start: true when it is separate work even though it resembles an existing job."},
-      "kind": {"type": "string", "enum": ["simple", "everyday", "hard"], "description": "start: the kind of work, which picks the job's model and effort when the chat is on Automatic. simple: mechanical work (rename, tag, list, fill parameters, short summaries); everyday: most ETABS work (sheets, views, dimensions, checks, normal modelling); hard: hard reasoning (a spec or BEP against the model, redlines, tricky modelling logic, costing decisions). Left out, it is judged from the task's words."}
+      "kind": {"type": "string", "enum": ["simple", "everyday", "hard"], "description": "start: the kind of work, which picks the job's model and effort when the chat is on Automatic. simple: mechanical work (rename, tag, list, fill parameters, short summaries); everyday: most {{{Csi.Name}}} work (sheets, views, dimensions, checks, normal modelling); hard: hard reasoning (a spec or BEP against the model, redlines, tricky modelling logic, costing decisions). Left out, it is judged from the task's words."}
     }
     """;
     public string[] Required => [];
@@ -92,7 +92,7 @@ public sealed class ChatJobsTool : IEtabsTool
         if (jobKey is not null && !JobBoard.IsChatKey(jobKey) && board?.FindKey(jobKey) is { } me) return Teamwork(board, me, action, args, jobKey);
         if (action == "ask") return ToolResult.Error("ask is for a job asking another job; the main chat reads a job's report with action=list.");
         if (!coordinator || board is null)
-            return ToolResult.Error("Jobs run only from the main chat of the CSI ProMax pane in ETABS. Do the work here yourself instead.");
+            return ToolResult.Error($"Jobs run only from the main chat of the CSI ProMax pane in {Csi.Name}. Do the work here yourself instead.");
         if (!ChatJobs.CoordinatorFor(jobKey))
             return ToolResult.Error(SimpleChatRefusal);
         if (!ClaudeCli.JobsAvailable)
@@ -175,7 +175,7 @@ public sealed class ChatJobsTool : IEtabsTool
                     job = number,
                     stopped = was is JobBoard.Running or JobBoard.Waiting or JobBoard.Queued,
                     note = was is JobBoard.Running or JobBoard.Waiting
-                        ? "Stopped. An ETABS change it had already started finishes on its own."
+                        ? $"Stopped. {Csi.ANameCap} change it had already started finishes on its own."
                         : was == JobBoard.Queued ? "Stopped before it started." : "It wasn't running.",
                 });
             }

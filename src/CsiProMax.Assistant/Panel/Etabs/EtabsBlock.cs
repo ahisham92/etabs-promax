@@ -37,21 +37,21 @@ internal static class ETABSBlock
     /// </summary>
     public static string Explain(State state, string what, int seconds)
     {
-        var lead = $"{what} could not start: ETABS didn't take it within {seconds} s, so it was dropped and nothing was changed. ";
+        var lead = $"{what} could not start: {Csi.Name} didn't take it within {seconds} s, so it was dropped and nothing was changed. ";
         return state.Kind switch
         {
             Kind.Dialog => lead + (string.IsNullOrWhiteSpace(state.Title)
-                               ? "ETABS has a dialog or message box open. "
-                               : $"ETABS has a dialog open: '{state.Title!.Trim()}'. ") +
-                           "Ask the user to answer or close it in ETABS (it may be behind another window), then try again.",
-            Kind.NotResponding => lead + "ETABS is busy with a long operation of its own and isn't responding right now (for example a " +
-                                  "regeneration, sync with central, loading a model or printing). Ask the user to wait until ETABS " +
-                                  "responds again, or to cancel that operation in ETABS, then try again. Don't send other work meanwhile.",
-            Kind.EditMode => lead + "ETABS is in an edit mode (its Finish button is on the ribbon: a sketch, a group or an in-place family " +
-                             "is being edited). Ask the user to finish or cancel it in ETABS, then try again.",
+                               ? $"{Csi.Name} has a dialog or message box open. "
+                               : $"{Csi.Name} has a dialog open: '{state.Title!.Trim()}'. ") +
+                           $"Ask the user to answer or close it in {Csi.Name} (it may be behind another window), then try again.",
+            Kind.NotResponding => lead + $"{Csi.Name} is busy with a long operation of its own and isn't responding right now (for example a " +
+                                  $"regeneration, sync with central, loading a model or printing). Ask the user to wait until {Csi.Name} " +
+                                  $"responds again, or to cancel that operation in {Csi.Name}, then try again. Don't send other work meanwhile.",
+            Kind.EditMode => lead + $"{Csi.Name} is in an edit mode (its Finish button is on the ribbon: a sketch, a group or an in-place family " +
+                             $"is being edited). Ask the user to finish or cancel it in {Csi.Name}, then try again.",
             // Nothing that can be seen from outside: say so plainly rather than guess at an edit mode.
-            _ => lead + "ETABS is busy with something of its own, most often a command that is still running. Ask the user, in one " +
-                 "short sentence, to press Esc in ETABS once or twice and say when done, then try again.",
+            _ => lead + $"{Csi.Name} is busy with something of its own, most often a command that is still running. Ask the user, in one " +
+                 $"short sentence, to press Esc in {Csi.Name} once or twice and say when done, then try again.",
         };
     }
 
@@ -78,16 +78,16 @@ internal static class ETABSBlock
     public static string HeldLine(State state, string busy)
     {
         var named = busy.Length > 0 && !busy.Equals("something of its own", StringComparison.OrdinalIgnoreCase);
-        var tail = " The jobs wait and carry on by themselves as soon as ETABS is free; nothing is lost.";
+        var tail = $" The jobs wait and carry on by themselves as soon as {Csi.Name} is free; nothing is lost.";
         return state.Kind switch
         {
-            Kind.Dialog => "ETABS isn't taking any work: it has a dialog open" +
+            Kind.Dialog => $"{Csi.Name} isn't taking any work: it has a dialog open" +
                                       (string.IsNullOrWhiteSpace(state.Title) ? "" : $" ('{state.Title!.Trim()}')") +
                                       ". Answer or close it (it may be behind another window)." + tail,
-            Kind.EditMode => "ETABS isn't taking any work while an edit mode is open. Finish or cancel it (the green tick or red cross on the Modify tab)." + tail,
-            Kind.NotResponding => "ETABS is busy with a long task of its own" + (named ? $" ({busy})" : "") + ". Let it finish." + tail,
-            _ => "ETABS isn't taking any work right now" + (named ? $", most likely because {busy} is still running" : ", most likely a command still running") +
-                 ". Press Esc in ETABS once or twice." + tail,
+            Kind.EditMode => $"{Csi.Name} isn't taking any work while an edit mode is open. Finish or cancel it (the green tick or red cross on the Modify tab)." + tail,
+            Kind.NotResponding => $"{Csi.Name} is busy with a long task of its own" + (named ? $" ({busy})" : "") + ". Let it finish." + tail,
+            _ => $"{Csi.Name} isn't taking any work right now" + (named ? $", most likely because {busy} is still running" : ", most likely a command still running") +
+                 $". Press Esc in {Csi.Name} once or twice." + tail,
         };
     }
 
@@ -119,27 +119,27 @@ internal static class ETABSBlock
             Kind.Dialog => new HandoffStep
             {
                 Kind = "dialog",
-                What = string.IsNullOrWhiteSpace(state.Title) ? "Close the dialog in ETABS" : $"Close the dialog '{state.Title!.Trim()}' in ETABS",
-                Where = "ETABS's window (the dialog may be behind another window), then click Continue",
-                Why = $"ETABS can't start {friendly} while a dialog is open." + nothing,
+                What = string.IsNullOrWhiteSpace(state.Title) ? $"Close the dialog in {Csi.Name}" : $"Close the dialog '{state.Title!.Trim()}' in {Csi.Name}",
+                Where = $"{Csi.Name}'s window (the dialog may be behind another window), then click Continue",
+                Why = $"{Csi.Name} can't start {friendly} while a dialog is open." + nothing,
             },
             Kind.NotResponding => new HandoffStep
             {
-                Kind = "busy", What = "ETABS is busy with a long task",
-                Where = "Wait until ETABS responds, then click Continue",
-                Why = $"ETABS can't start {friendly} until it's done." + nothing,
+                Kind = "busy", What = $"{Csi.Name} is busy with a long task",
+                Where = $"Wait until {Csi.Name} responds, then click Continue",
+                Why = $"{Csi.Name} can't start {friendly} until it's done." + nothing,
             },
             Kind.EditMode => new HandoffStep
             {
-                Kind = "edit_mode", What = "Finish or cancel the edit in ETABS",
+                Kind = "edit_mode", What = $"Finish or cancel the edit in {Csi.Name}",
                 Where = "Modify tab: the green tick (Finish) or the red cross (Cancel), then click Continue",
-                Why = $"ETABS can't start {friendly} while you edit." + nothing,
+                Why = $"{Csi.Name} can't start {friendly} while you edit." + nothing,
             },
             _ => new HandoffStep
             {
-                Kind = "busy", What = "ETABS is busy",
-                Where = "Press Esc in ETABS once or twice, then click Continue",
-                Why = $"ETABS didn't start {friendly} yet." + nothing,
+                Kind = "busy", What = $"{Csi.Name} is busy",
+                Where = $"Press Esc in {Csi.Name} once or twice, then click Continue",
+                Why = $"{Csi.Name} didn't start {friendly} yet." + nothing,
             },
         };
     }

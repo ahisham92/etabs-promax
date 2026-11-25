@@ -40,10 +40,10 @@ internal static class JobUndo
 
     public static bool CanUndo(out string why)
     {
-        why = "ETABS can't undo changes made through its API. Use ETABS's File > Open on the last saved model, or the Autopilot backup, to go back.";
+        why = $"{Csi.Name} can't undo changes made through its API. Use {Csi.Name}'s File > Open on the last saved model, or the Autopilot backup, to go back.";
         return false;
     }
 
     public static string? Undo(EtabsApp app, int task) =>
-        "ETABS can't undo changes made through its API. Open the last saved model, or the Autopilot backup beside it, to go back.";
+        $"{Csi.Name} can't undo changes made through its API. Open the last saved model, or the Autopilot backup beside it, to go back.";
 }

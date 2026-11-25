@@ -60,7 +60,7 @@ public static class ModelerFieldSteps
             var c = a["counts"]!;
             FieldContext.Expect(Int(c["columns"]) == 27 && Int(c["beams"]) == 36 && Int(c["floors"]) == 12 && Int(c["walls"]) == 0 && Int(c["braces"]) == 0, "the counts are not 27 columns, 36 beams, 12 floors: " + c.ToJsonString());
             FieldContext.Expect(a["units"]!["force"]!.GetValue<string>() == "kN" && a["units"]!["length"]!.GetValue<string>() == "m", "the units are not kN, m: " + a["units"]!.ToJsonString());
-            foreach (var key in new[] { "file", "etabs", "locked", "stories", "frame_sections", "slab_and_wall_sections", "materials", "load_patterns", "load_cases", "combinations", "selected", "selected_count" })
+            foreach (var key in new[] { "file", "program", "version", "locked", "stories", "frame_sections", "slab_and_wall_sections", "materials", "load_patterns", "load_cases", "combinations", "selected", "selected_count" })
                 FieldContext.Expect(a[key] is not null, $"the answer has no '{key}'");
         });
         if (context is null) { ctx.Fail("the Modeler's model", "the model could not be started, so the Modeler's other tools were not run"); ctx.Coverage("every Modeler tool was run"); return; }

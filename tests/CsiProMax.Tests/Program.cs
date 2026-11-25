@@ -334,6 +334,7 @@ Test("results: drift, torsion, modal, soft story, mass and design ratios from ET
     var e = new MemoryEtabs();
     var mcp = Endpoint(e);
     Equal("not available", (string)Call(mcp, "check_drift", "{}")["status"]!, "no analysis yet");
+    e.Locked = true;   // the analysis has run: only now may a check pass or fail
     e.ResultTables["Story Drifts"] = new(["Story", "Output Case", "Case Type", "Direction", "Drift", "Label"],
     [
         ["Story3", "EQX", "LinStatic", "X", "0.0011", "5"], ["Story2", "EQX", "LinStatic", "X", "0.0024", "5"], ["Story1", "EQX", "LinStatic", "X", "0.0019", "7"],
@@ -415,6 +416,7 @@ Test("pack: the model, ETABS's tables and the checks go into one file and the Vi
     Call(mcp, "add_slabs", """{"outlines":[[[0,0],[6,0],[6,5],[0,5]]],"section":"S200"}""");
     Call(mcp, "add_walls", """{"lines":[[0,0,0,5]],"section":"W250"}""");
     var top = e.Points().Where(p => p.Z > 9).ToList();
+    e.Locked = true;   // analysed: the checks answer from the result tables below
     e.ResultTables["Story Drifts"] = new(["Story", "Output Case", "Direction", "Drift"], [["Story3", "EQX", "X", "0.0011"], ["Story2", "EQX", "X", "0.0024"], ["Story1", "EQX", "X", "0.0019"]]);
     e.ResultTables["Joint Displacements"] = new(["Story", "UniqueName", "Output Case", "Ux", "Uy", "Uz"],
         e.Points().Select(p => new[] { "", p.Name, "EQX", (p.Z * 0.002).ToString(System.Globalization.CultureInfo.InvariantCulture), "0", "0" }).ToList());
@@ -530,7 +532,7 @@ Test("modeler: a building is modelled with no ETABS and saved as an ETABS text f
         Equal(2, (int)Call(mcp, "set_loads", $$"""{"pattern":"SDL","value":2.5,"areas":["{{slabs["names"]![0]}}","{{slabs["names"]![1]}}"]}""")["done"]!, "slab loads");
         Call(mcp, "add_combination", """{"name":"ULS","cases":[{"case":"Dead","factor":1.35},{"case":"SDL","factor":1.35},{"case":"Live","factor":1.5}]}""");
         var context = Call(mcp, "get_model_context", "{}");
-        Equal(8, (int)context["counts"]!["columns"]!, "columns"); Equal(2, (int)context["counts"]!["walls"]!, "walls"); Equal("Modeler (no ETABS)", (string)context["etabs"]!, "says it is not ETABS");
+        Equal(8, (int)context["counts"]!["columns"]!, "columns"); Equal(2, (int)context["counts"]!["walls"]!, "walls"); Equal("CSI ProMax Modeler", (string)context["program"]!, "says it is the Modeler"); Equal("Modeler (no ETABS)", (string)context["version"]!, "and that no ETABS is behind it");
         Near(7.2, (double)context["stories"]![2]!["elevation"]!, "story levels");
         Equal(0, (int)Call(mcp, "check_model", "{}")["errors"]!, "no errors");
         Check(Call(mcp, "model_quantities", "{}")["rows"]!.AsArray().Count >= 4, "quantities by section");

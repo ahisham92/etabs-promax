@@ -158,7 +158,7 @@ public sealed class RunRecipeTool : IEtabsTool
             // Calls the bridge always asks about (what_if with confirm...) are asked about here too, whatever the settings say.
             if (OutputPaths.AlwaysAskReason(name, stepArgs) is { } ask && !Bridge.BridgeServer.Approve(tool, stepArgs, ask))
             {
-                results.Add(new { step = index, tool = name, error = "the user said no in ETABS; nothing was run" });
+                results.Add(new { step = index, tool = name, error = $"the user said no in {Csi.Name}; nothing was run" });
                 if (!keepGoing) break;
                 continue;
             }

@@ -81,7 +81,7 @@ internal sealed class JobCardModel
     /// <summary>What a tool call's result means for its step: running (still running in ETABS), done, failed, skipped or stopped, with the reason.</summary>
     public static (string State, string Reason) Outcome(string result, bool isError)
     {
-        if (result.Contains("\"status\":\"still running in ETABS\"")) return ("running", "");
+        if (result.Contains($"\"status\":\"still running in {Csi.Name}\"")) return ("running", "");
         if (result.Contains(JobControl.PausedText)) return ("running", "");
         // A step that can only finish whole says it kept nothing: the card says so, not "finished items kept".
         if (result.Contains(JobControl.SkippedNothingKeptText.Substring(0, 60))) return ("skipped", "skipped by you; this step can only finish whole, so nothing of it was kept");

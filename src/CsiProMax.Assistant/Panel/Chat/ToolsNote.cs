@@ -21,8 +21,8 @@ internal static class ToolsNote
 
     /// <summary>The tools aren't in the session at all.</summary>
     public static string Missing(bool inside, bool job = false) => inside
-        ? $"The ETABS tools didn't load {(job ? "for this job" : "in this chat")}. {(job ? "Send it a message to try again" : "Press New chat to try again")}; if it happens again, restart ETABS."
-        : $"The ETABS tools didn't load {(job ? "for this job" : "in this chat")}. Run Install.cmd from the CSI ProMax download again{(job ? "." : ", then press New chat.")}";
+        ? $"The {Csi.Name} tools didn't load {(job ? "for this job" : "in this chat")}. {(job ? "Send it a message to try again" : "Press New chat to try again")}; if it happens again, restart {Csi.Name}."
+        : $"The {Csi.Name} tools didn't load {(job ? "for this job" : "in this chat")}. Run Install.cmd from the CSI ProMax download again{(job ? "." : ", then press New chat.")}";
 
     /// <param name="status">Claude Code's word for it (failed, needs-auth...).</param>
     /// <param name="inside">The chat used the connection inside ETABS, at <paramref name="where"/>; otherwise the connector program at <paramref name="where"/>.</param>
@@ -31,11 +31,11 @@ internal static class ToolsNote
     {
         var again = job ? "send the job a message" : "press New chat";
         if (blocked && !inside)
-            return $"Your company blocks CSI ProMax's helper program ({where}). Ask IT to allow it, or restart ETABS so the chat connects inside ETABS without it, then {again}.";
+            return $"Your company blocks CSI ProMax's helper program ({where}). Ask IT to allow it, or restart {Csi.Name} so the chat connects inside {Csi.Name} without it, then {again}.";
         if (blocked)
-            return $"Your company blocks the chat's connection to ETABS on this PC ({where}). Ask IT to allow connections to this PC's own address (127.0.0.1), then {again}.";
+            return $"Your company blocks the chat's connection to {Csi.Name} on this PC ({where}). Ask IT to allow connections to this PC's own address (127.0.0.1), then {again}.";
         return inside
-            ? $"The ETABS tools didn't connect ({status}). To try again, {again}; if it happens again, restart ETABS."
-            : $"The ETABS tools didn't connect ({status}). Check that CSI ProMax is installed (Install.cmd), then {again}.";
+            ? $"The {Csi.Name} tools didn't connect ({status}). To try again, {again}; if it happens again, restart {Csi.Name}."
+            : $"The {Csi.Name} tools didn't connect ({status}). Check that CSI ProMax is installed (Install.cmd), then {again}.";
     }
 }

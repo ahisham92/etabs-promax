@@ -121,10 +121,10 @@ internal static class ChatFocus
         "action=ask), then answer. When part of it truly isn't known yet, say what is known and what isn't. Change nothing";
 
     /// <summary>The instructions of the quick run that answers a question while the chat is busy with other work.</summary>
-    public const string QuickInstructions =
-        "You answer the user's question in the CSI ProMax chat inside ETABS while the main chat and its jobs are busy. " +
+    public static string QuickInstructions =>
+        $"You answer the user's question in the CSI ProMax chat inside {Csi.Name} while the main chat and its jobs are busy. " +
         "The user is a structural engineer. You get the summary of the chat, its last messages and the jobs with their " +
-        "reports. Answer from those first; use a read-only ETABS tool only when the answer is not there and one quick read " +
+        $"reports. Answer from those first; use a read-only {Csi.Name} tool only when the answer is not there and one quick read " +
         "settles it. Start with the answer (yes or no when it asks yes or no), then at most two short lines. Plain words, " +
         "no tables, no headings, no element ids. Never change the model and never promise work: when something isn't done " +
         "yet, say so plainly. When it truly can't be known yet, say what is known and which job is still on it.";
@@ -244,8 +244,8 @@ internal static class ChatFocus
     /// <summary>How a lesson starts in the memory notes, so the Notes tab shows which notes were learned from corrections.</summary>
     public const string LessonPrefix = "Lesson: ";
 
-    public const string LessonInstructions =
-        "You turn a user's correction into one lesson for next time. The user is a structural engineer working in ETABS with an " +
+    public static string LessonInstructions =>
+        $"You turn a user's correction into one lesson for next time. The user is a structural engineer working in {Csi.Name} with an " +
         "assistant. You get the request, the assistant's answer, and the user's correction of it. Use no tools.";
 
     /// <summary>The message for the one-shot run that distils a correction.</summary>

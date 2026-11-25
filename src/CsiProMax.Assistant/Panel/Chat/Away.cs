@@ -185,7 +185,7 @@ internal static class Away
                 _until = now + span;
                 Write();
                 var end = (local ?? (t => t.ToLocalTime()))(_until);
-                note = $"Away mode until {end:HH:mm}: nothing pops up. ETABS's pop-ups during the jobs' work are answered (Cancel, else No, else OK), " +
+                note = $"Away mode until {end:HH:mm}: nothing pops up. {Csi.Name}'s pop-ups during the jobs' work are answered (Cancel, else No, else OK), " +
                        "steps only you can do are skipped, and risky changes (deletes) wait for you. You get the list when you write next.";
             }
             else if (_until != default && (IsBack(text) || now >= _until))

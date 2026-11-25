@@ -416,8 +416,9 @@ public static class SafeTools
     // ---- reading SAFE's tables ----
 
     /// <summary>The tables with data whose name holds every one of the words (letters and digits only, any case).</summary>
+    /// <remarks>Never a table of what the engineer entered (Verdict.IsInputTable): those have rows before any analysis.</remarks>
     internal static List<TableName> Like(IReadOnlyList<TableName> known, params string[] words) =>
-        known.Where(t => !t.Empty && words.All(w => ResultTools.Norm(t.Name).Contains(ResultTools.Norm(w), StringComparison.Ordinal))).ToList();
+        known.Where(t => !t.Empty && !Verdict.IsInputTable(t.Name) && words.All(w => ResultTools.Norm(t.Name).Contains(ResultTools.Norm(w), StringComparison.Ordinal))).ToList();
 
     /// <summary>The first field whose name holds one of the fragments; -1 when none.</summary>
     internal static int ColLike(IReadOnlyList<string> fields, params string[] fragments)
@@ -470,6 +471,7 @@ public static class SafeTools
     {
         var limit = a.Number("limit", 1.0);
         var list = a.Whole("list", 40);
+        if (Verdict.NotAnalysed(e, "punching shear") is { } notRun) return notRun;
         var found = First(e, Like(e.Tables(), "punch"), a);
         if (found is not { } f) return Missing("punching shear", "punching shear design");
         var (data, name) = f;
@@ -491,7 +493,7 @@ public static class SafeTools
         };
         return new JsonObject
         {
-            ["status"] = over.Count > 0 ? "fail" : valued.Count > 0 ? "pass" : "not available",
+            ["status"] = Verdict.From(valued.Count, over.Count),
             ["table"] = name, ["limit"] = limit, ["limit_is_default"] = !a.TryGetProperty("limit", out _),
             ["points"] = rows.Count,
             ["largest"] = valued.Count > 0 ? Item(valued[0]) : null,
@@ -506,6 +508,7 @@ public static class SafeTools
 
     internal static JsonNode Deflection(JsonElement a, ICsiLink e)
     {
+        if (Verdict.NotAnalysed(e, "deflection") is { } notRun) return notRun;
         var table = Like(e.Tables(), "joint", "displacement").Where(t => !ResultTools.Norm(t.Name).Contains("diaphragm", StringComparison.Ordinal)).ToList();
         var found = First(e, table, a);
         if (found is not { } f) return Missing("deflection", "joint displacements");
@@ -539,6 +542,7 @@ public static class SafeTools
 
     internal static JsonNode StripForces(JsonElement a, ICsiLink e)
     {
+        if (Verdict.NotAnalysed(e, "the strip forces") is { } notRun) return notRun;
         var found = First(e, Like(e.Tables(), "strip", "force"), a);
         if (found is not { } f) return Missing("strip forces", "strip forces");
         var (data, name) = f;
@@ -584,6 +588,7 @@ public static class SafeTools
 
     internal static JsonNode SoilPressure(JsonElement a, ICsiLink e)
     {
+        if (Verdict.NotAnalysed(e, "soil pressure") is { } notRun) return notRun;
         var found = First(e, Like(e.Tables(), "soil", "pressure"), a);
         if (found is not { } f) return Missing("soil pressure", "soil pressure");
         var (data, name) = f;
@@ -624,10 +629,14 @@ public static class SafeTools
 
     // ---- slab design ----
 
+    /// <summary>
+    /// A table of SAFE's slab or beam design results, by its name. The design's inputs (overwrites, preferences, the
+    /// design load combinations) are not results: they have rows on a model that was never designed.
+    /// </summary>
     internal static bool IsDesignTable(string name)
     {
         var n = ResultTools.Norm(name);
-        if (n.Contains("punch", StringComparison.Ordinal) || n.Contains("preference", StringComparison.Ordinal) || n.Contains("overwrite", StringComparison.Ordinal)) return false;
+        if (n.Contains("punch", StringComparison.Ordinal) || Verdict.IsInputTable(name)) return false;
         return n.Contains("design", StringComparison.Ordinal) && (n.Contains("slab", StringComparison.Ordinal) || n.Contains("strip", StringComparison.Ordinal) || n.Contains("beam", StringComparison.Ordinal));
     }
 
@@ -635,6 +644,9 @@ public static class SafeTools
     {
         var only = a.Text("table");
         var list = a.Whole("list", 40);
+        if (Verdict.NotAnalysed(e, "slab design") is { } notRun) return notRun;
+        // Rows SAFE gave a status for. Without any, there is nothing to pass or fail: the tables are reported only.
+        var judged = 0;
         var tables = e.Tables().Where(t => !t.Empty && (only.Length > 0 ? string.Equals(t.Name, only, StringComparison.OrdinalIgnoreCase) || string.Equals(t.Key, only, StringComparison.OrdinalIgnoreCase) : IsDesignTable(t.Name))).ToList();
         var results = new JsonArray();
         var failing = 0;
@@ -648,6 +660,7 @@ public static class SafeTools
             var steel = data.Fields.Select((x, i) => (x, i)).Where(p => { var n = ResultTools.Norm(p.x); return n.StartsWith("as", StringComparison.Ordinal) || n.Contains("rebar", StringComparison.Ordinal) || n.Contains("area", StringComparison.Ordinal) && n.Length <= 12; }).Select(p => p.i).ToList();
             var bad = status < 0 ? [] : data.Rows.Where(r => Cell(r, status) is { Length: > 0 } s && !s.Equals("OK", StringComparison.OrdinalIgnoreCase) && !s.Equals("No Message", StringComparison.OrdinalIgnoreCase) && !s.Equals("None", StringComparison.OrdinalIgnoreCase)).ToList();
             failing += bad.Count;
+            if (status >= 0) judged += data.Rows.Count;
             var o = new JsonObject
             {
                 ["table"] = t.Name, ["rows"] = data.Rows.Count, ["not_ok"] = bad.Count,
@@ -668,8 +681,9 @@ public static class SafeTools
         if (results.Count == 0) return Missing("slab design", "slab or beam design");
         return new JsonObject
         {
-            ["status"] = failing > 0 ? "fail" : "pass", ["tables"] = results,
-            ["note"] = "Statuses and reinforcement are SAFE's own design results for the code set in SAFE. 'not_ok' counts rows whose status is not OK (failures and warnings).",
+            ["status"] = judged > 0 ? Verdict.From(judged, failing) : Verdict.Reported, ["tables"] = results, ["rows_with_a_status"] = judged,
+            ["note"] = "Statuses and reinforcement are SAFE's own design results for the code set in SAFE. 'not_ok' counts rows whose status is not OK (failures and warnings)."
+                + (judged > 0 ? "" : " None of these tables has a status field, so there is no pass or fail here: the reinforcement is reported only."),
         };
     }
 
@@ -689,7 +703,7 @@ public static class SafeTools
         };
         var tables = new JsonObject();
         foreach (var (name, @is) in groups)
-            tables[name] = new JsonArray(known.Where(t => !t.Empty && @is(t)).Select(t => (JsonNode)t.Name).ToArray());
+            tables[name] = new JsonArray(known.Where(t => !t.Empty && !Verdict.IsInputTable(t.Name) && @is(t)).Select(t => (JsonNode)t.Name).ToArray());
         var result = new JsonObject { ["analysis_run"] = e.Info().Locked, ["tables_with_data"] = tables };
         if (First(e, Like(known, "base", "reaction"), a) is { } br)
         {
@@ -726,9 +740,9 @@ public static class SafeTools
         {
             JsonNode node;
             try { node = run(); }
-            catch (Exception ex) when (ex is EtabsException or ToolInputException) { node = new JsonObject { ["status"] = "not available", ["note"] = ex.Message }; }
+            catch (Exception ex) when (ex is EtabsException or ToolInputException) { node = new JsonObject { ["status"] = Verdict.NotAvailable, ["note"] = ex.Message }; }
             checks[name] = node;
-            summary.Add($"{name.Replace('_', ' ')}: {node["status"]?.GetValue<string>() ?? "reported"}");
+            summary.Add($"{name.Replace('_', ' ')}: {node["status"]?.GetValue<string>() ?? Verdict.Reported}");
         }
         return new JsonObject
         {

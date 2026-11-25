@@ -193,7 +193,7 @@ internal sealed partial class ChatPane
             false, (Action)(() => NewChat(t))))
             .Append(("New autopilot chat", "Give a goal and approve the plan once: the coordinator and workers carry on without you until it's done",
                 false, (Action)NewAutopilotChat))
-            .Append(("Routines…", "Work the crew does by itself at set times, like a nightly model check; missed runs catch up at the next ETABS start",
+            .Append(("Routines…", $"Work the crew does by itself at set times, like a nightly model check; missed runs catch up at the next {Csi.Name} start",
                 false, (Action)OpenRoutines)).ToList());
     }
 

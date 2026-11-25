@@ -19,7 +19,7 @@ internal static class ProjectPack
     internal static string RenderChat(CsiProMax.Chat.Conversation conv)
     {
         var sb = new StringBuilder();
-        sb.AppendLine(conv.Name.Length > 0 ? $"# In-ETABS chat: {conv.Name} ({conv.Title})" : $"# In-ETABS chat: {conv.Title}");
+        sb.AppendLine(conv.Name.Length > 0 ? $"# In-{Csi.Name} chat: {conv.Name} ({conv.Title})" : $"# In-{Csi.Name} chat: {conv.Title}");
         if (conv.Updated != default) sb.AppendLine($"Last updated {conv.Updated.ToLocalTime():yyyy-MM-dd HH:mm}");
         foreach (var item in conv.Items)
         {

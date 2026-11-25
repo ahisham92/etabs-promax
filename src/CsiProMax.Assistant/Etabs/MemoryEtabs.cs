@@ -20,6 +20,8 @@ public sealed class MemoryEtabs : ICsiLink
     public List<string> AreaSectionNames { get; } = ["S200", "W250"];
     public Dictionary<string, double> Loads { get; } = [];
     public bool Locked { get; set; }
+    /// <summary>The program this stands in for. The tests give SAFE or SAP2000 to see what a tool says there.</summary>
+    public CsiProgram Program { get; init; } = CsiProgram.Etabs;
     public int Saves { get; private set; }
     public int Runs { get; private set; }
 
@@ -35,7 +37,7 @@ public sealed class MemoryEtabs : ICsiLink
     public void Select(string kind, string name)
     {
         var known = kind == "frame" ? _frames.Any(f => f.Name == name) : kind == "area" ? _areas.Any(a => a.Name == name) : _points.Any(p => p.Name == name);
-        if (!known) throw new EtabsException($"ETABS refused to select {kind} {name}.");
+        if (!known) throw new EtabsException($"{Program.Name} refused to select {kind} {name}.");
         _selected.Add((kind, name));
     }
 
@@ -48,7 +50,7 @@ public sealed class MemoryEtabs : ICsiLink
 
     private void Changing()
     {
-        if (Locked) throw new EtabsException("ETABS refused: the model is locked. Unlock it in ETABS first.");
+        if (Locked) throw new EtabsException($"{Program.Name} refused: the model is locked. Unlock it in {Program.Name} first.");
     }
 
     private string Point(double x, double y, double z)
@@ -83,7 +85,7 @@ public sealed class MemoryEtabs : ICsiLink
     {
         Changing();
         var at = _frames.FindIndex(f => f.Name == name);
-        if (at < 0) throw new EtabsException($"ETABS refused to give frame {name} the section {section}.");
+        if (at < 0) throw new EtabsException($"{Program.Name} refused to give frame {name} the section {section}.");
         _frames[at] = _frames[at] with { Section = section };
     }
 
@@ -91,7 +93,7 @@ public sealed class MemoryEtabs : ICsiLink
     {
         Changing();
         var at = _areas.FindIndex(a => a.Name == name);
-        if (at < 0) throw new EtabsException($"ETABS refused to give area {name} the section {section}.");
+        if (at < 0) throw new EtabsException($"{Program.Name} refused to give area {name} the section {section}.");
         _areas[at] = _areas[at] with { Section = section };
     }
 
@@ -99,7 +101,7 @@ public sealed class MemoryEtabs : ICsiLink
     {
         Changing();
         var removed = kind == "frame" ? _frames.RemoveAll(f => f.Name == name) : _areas.RemoveAll(a => a.Name == name);
-        if (removed == 0) throw new EtabsException($"ETABS refused to delete {kind} {name}.");
+        if (removed == 0) throw new EtabsException($"{Program.Name} refused to delete {kind} {name}.");
     }
 
     public void SetRestraint(string point, bool[] restraint) { Changing(); _restraints[point] = restraint.ToArray(); }
@@ -139,7 +141,7 @@ public sealed class MemoryEtabs : ICsiLink
     };
 
     public object? Raw(string what, Func<dynamic, object?> work) =>
-        throw new EtabsException("Code runs in ETABS itself, and this is the demo model with no ETABS behind it.");
+        throw new EtabsException($"Code runs in {Program.Name} itself, and this is the demo model with no {Program.Name} behind it.");
 
     public void RunAnalysis() { Runs++; Locked = true; }
     public void Save() => Saves++;

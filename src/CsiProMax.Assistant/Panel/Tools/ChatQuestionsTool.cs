@@ -14,7 +14,7 @@ public sealed class ChatQuestionsTool : IEtabsTool
 
     public string Name => ToolName;
     public string Description =>
-        "The Questions tab of the ETABS chat: every question for the user goes here, numbered, not in your answer's text. action=ask " +
+        $"The Questions tab of the {Csi.Name} chat: every question for the user goes here, numbered, not in your answer's text. action=ask " +
         "with questions (one {question, options, recommended} each; all your open questions in one call): short and plain, with two to " +
         "four answers to tap where you can (the tab adds Other to type) and the index of the one you suggest. A job's questions show " +
         "as from that job. Then say in one line that it is in the Questions tab (\"Q4 in Questions\"), never the question again. The " +
@@ -36,7 +36,7 @@ public sealed class ChatQuestionsTool : IEtabsTool
 
     /// <summary>Run from a recipe or the self-test (not the chat): nobody to ask.</summary>
     public ToolResult Execute(EtabsApp app, ToolArgs args) =>
-        ToolResult.Error("chat_questions works only in the chat inside ETABS: there the Questions tab shows the questions to the user.");
+        ToolResult.Error($"chat_questions works only in the chat inside {Csi.Name}: there the Questions tab shows the questions to the user.");
 
     /// <summary>The bridge's call, from the chat (<paramref name="jobKey"/>: the caller, null or a chat key for the main chat).</summary>
     internal static ToolResult Answer(ToolArgs args, bool fromChat, string? jobKey)

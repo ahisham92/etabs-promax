@@ -149,9 +149,13 @@ public static class FieldTest
         var work = o.WorkFolder ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CsiProMax", "Field test", $"{link.Program.Name} {now:yyyy-MM-dd HHmmss}");
         if (o.Full) Directory.CreateDirectory(work);
         var ctx = new FieldContext(link.Program, work, link) { Progress = o.Progress };
+        // Tools > CSI ProMax in each program: put right where it may be, as at every start, then read as it stands.
+        IReadOnlyList<ToolsMenu.Entry> menus = [];
+        try { menus = ToolsMenu.Repair(o.InstallFolder, o.SettingsRoot); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* the lists below still show what is there */ }
         var plugIns = PlugInLists(o.SettingsRoot);
 
-        PcFieldSteps.Run(ctx, o.InstallFolder ?? AppContext.BaseDirectory, plugIns, o.Full ? [target, work] : [target]);
+        PcFieldSteps.Run(ctx, o.InstallFolder ?? AppContext.BaseDirectory, plugIns, o.Full ? [target, work] : [target], menus);
 
         ctx.Section(OpenSection);
         o.Progress?.Invoke("reading the open model");
@@ -187,7 +191,7 @@ public static class FieldTest
         {
             ctx.Section(ScratchSection);
             ctx.Skip("a second window of a CSI program, on a scratch model",
-                "no ETABS, SAP2000 or SAFE was found on this PC, so no tool was run inside a program. Run the field test on a PC that has them.");
+                "no ETABS, SAP2000 or SAFE was found on this PC, so no tool was run inside a program. Run the field test on a PC that has them."); // ETABS itself
         }
         var panelDone = false;
         foreach (var program in programs)
@@ -275,7 +279,7 @@ public static class FieldTest
     /// <summary>What no test can do for the person: they look at these themselves.</summary>
     internal static readonly string[] ByHand =
     [
-        "Tools > CSI ProMax is in the menu of each CSI program (ETABS, SAP2000, SAFE), and opens this window on that program's model.",
+        "Tools > CSI ProMax is in the menu of each CSI program (ETABS, SAP2000, SAFE), and opens this window on that program's model.", // ETABS itself
         "A message in the chat gets an answer from Claude Code.",
         "A question the chat asks shows in its Questions tab, and your answer reaches the chat.",
         "Help > Report a bug: the picture of the screen is in the report.",

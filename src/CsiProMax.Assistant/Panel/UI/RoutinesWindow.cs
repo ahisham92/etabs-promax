@@ -41,7 +41,7 @@ internal sealed class RoutinesWindow : Window
         Brand.Prepare(this);
 
         var body = new StackPanel { Margin = new Thickness(18, 14, 18, 14) };
-        body.Children.Add(Brand.Text("The crew runs these by itself at their time, as a job in a chat With coordinator. A run missed while ETABS or the PC was off runs once at the next ETABS start. Each run is listed with what it found.", Brand.K.Muted, size: 12));
+        body.Children.Add(Brand.Text($"The crew runs these by itself at their time, as a job in a chat With coordinator. A run missed while {Csi.Name} or the PC was off runs once at the next {Csi.Name} start. Each run is listed with what it found.", Brand.K.Muted, size: 12));
         _list.Margin = new Thickness(0, 10, 0, 0);
         body.Children.Add(_list);
         var add = new WrapPanel { Margin = new Thickness(0, 12, 0, 0) };
