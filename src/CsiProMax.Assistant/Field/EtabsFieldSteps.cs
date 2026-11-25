@@ -305,7 +305,15 @@ public static class EtabsFieldSteps
             ctx.Step("ETABS tables with data after the analysis and design", () => link.Tables().Where(t => !t.Empty).Select(t => t.Name).ToList());
             var sampled = new HashSet<string>(StringComparer.Ordinal);
             foreach (var names in ResultTools.CheckedTables.Concat(Pack.UsualTables.Select(t => new[] { t })))
-                if (sampled.Add(ResultTools.Norm(names[0]))) ctx.Step($"ETABS table {names[0]}", () => ResultTools.Sample(link, names));
+                if (sampled.Add(ResultTools.Norm(names[0])))
+                {
+                    // A table the pack takes when it is there (brace forces in a model with no braces is not): ETABS
+                    // does not list it for this model, so there is nothing to read. A table a check needs must be there.
+                    var usual = !ResultTools.CheckedTables.Any(c => c.Any(n => ResultTools.Norm(n) == ResultTools.Norm(names[0])));
+                    if (usual && !link.Tables().Any(t => names.Any(n => ResultTools.Norm(t.Name) == ResultTools.Norm(n) || ResultTools.Norm(t.Key) == ResultTools.Norm(n))))
+                        ctx.Skip($"ETABS table {names[0]}", "ETABS does not list this table for the scratch model (it has no members of that kind)");
+                    else ctx.Step($"ETABS table {names[0]}", () => ResultTools.Sample(link, names));
+                }
             var summaries = link.Tables().Where(t => ResultTools.IsDesignSummary(t.Name)).ToList();
             ctx.Step("ETABS design summary tables", () =>
             {
@@ -387,6 +395,9 @@ public static class EtabsFieldSteps
             FieldContext.Expect(!piered || pack.Content["model"]!["wall_labels"] is JsonArray { Count: > 0 }, "the wall is pier CPM-P1 and the pack has no wall labels for the Viewer");
             return new { file = Path.GetFileName(file), kilobytes = pack.Zip.Length / 1024, frames = pack.Frames, areas = pack.Areas, tables = pack.Tables, design = design?.ToJsonString(), notes = pack.Notes };
         });
+
+        // The Viewer's check runs here, while the model still has its results (it is unlocked next).
+        if (analysed) ctx.WithResults();
 
         // ---- unlocked again: every load pattern type by its name, read back from ETABS ----
         if (analysed)

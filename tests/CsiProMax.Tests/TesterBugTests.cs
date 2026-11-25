@@ -711,6 +711,18 @@ static class TesterBugTests
             var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Tools/ResultTools.cs"));
             Check(source.Contains("result[\"note\"] = string.Join(\" \", parts.Select", StringComparison.Ordinal), "check_story_irregularity may say 'not available' with no reason");
         });
+        yield return ("ETABS 23 field test: the Viewer is checked while the model still has its results, once", () =>
+        {
+            // Seen on 2026-11-25 with 0.4.11: every result button of the Viewer was greyed out for ETABS, because the
+            // ETABS steps unlock the model at their end and the Viewer's check came after them.
+            var steps = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/EtabsFieldSteps.cs"));
+            Check(steps.IndexOf("ctx.WithResults()", StringComparison.Ordinal) is var at and > 0 && at < steps.IndexOf("m.SetModelIsLocked(false)", StringComparison.Ordinal), "the Viewer's check does not come before the model is unlocked");
+            var ctx = new FieldContext(CsiProgram.Etabs, Path.GetTempPath(), new MemoryEtabs());
+            var runs = 0;
+            ctx.WhileAnalysed = () => runs++;
+            ctx.WithResults(); ctx.WithResults();
+            Equal(1, runs, "times the Viewer's check ran");
+        });
         yield return ("ETABS 20 tester: the field test tries what Tools > CSI ProMax does in each program, and fails where the plug-in cannot be created", () =>
         {
             // What the check answered on that PC (in its own words), and a PC where all is well.
