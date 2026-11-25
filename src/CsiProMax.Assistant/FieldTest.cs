@@ -201,7 +201,17 @@ public static class FieldTest
             ctx.Skip("the checks of the open model", "the open model could not be read (see above)");
         }
 
-        if (o.Full) Full(ctx, link, o);
+        if (o.Full)
+        {
+            // Whatever a part throws, the report is written: a run that ends without one tells nobody what it found.
+            try { Full(ctx, link, o); }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                var real = ex is AggregateException { InnerException: { } inner } ? inner : ex;
+                try { ctx.Fail("the full test stopped before its end", $"{real.GetType().Name}: {real.Message} The steps after this one were not run. Where: {Where(real)}"); }
+                catch (OperationCanceledException) { }
+            }
+        }
 
         var steps = ctx.Steps.ToList();
         var report = Render(link, steps, o, now, plugIns, o.Full ? work : null);
@@ -278,9 +288,18 @@ public static class FieldTest
             }
             if (window is { } open)
             {
-                ScratchProgram.CloseStep(ctx, open, program);
-                // A window that stopped answering is left as it is: letting go of it could wait for ever too.
-                if (finished) open.Dispose();
+                // Closing and letting go never stop the test: the next program and the report still follow.
+                try
+                {
+                    ScratchProgram.CloseStep(ctx, open, program);
+                    // A window that stopped answering is left as it is: letting go of it could wait for ever too.
+                    if (finished) open.Dispose();
+                }
+                catch (Exception ex) when (ex is not (OutOfMemoryException or OperationCanceledException))
+                {
+                    var real = ex is AggregateException { InnerException: { } inner } ? inner : ex;
+                    ctx.Fail($"let go of the scratch {program.Name} window", $"{real.GetType().Name}: {real.Message}");
+                }
             }
         }
         if (!panelDone) PanelFieldSteps.Run(ctx, link, scratch: false, live: IsLive(link));

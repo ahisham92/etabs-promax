@@ -1447,6 +1447,21 @@ Test("field test: the full test runs every part, closes its window, and leaves t
         Check(!FieldTest.IsRunning, "it is not running any more");
         Check(CsiProMax.Bugs.BugLog.RootOverride is null, "the bug folder is put back");
 
+        // Seen on a real SAP2000 on 2026-11-25: letting go of the scratch window threw (a faulted call, wrapped), the test
+        // ended there and no report was written. Whatever closing throws, the report is written and says so.
+        var thrown = FieldTest.Run(open, options with
+        {
+            At = at.AddMinutes(3), Viewer = false,
+            StartScratch = (program, ctx, file) =>
+            {
+                var path = Path.Combine(ctx.Folder, "cpm-field-test.edb");
+                return new CsiProMax.Tests.StandInWindow(new OfflineEtabs(OfflineEtabs.Load(file), path), path) { OnDispose = new AggregateException(new EtabsException("the scratch window is no longer there")) };
+            },
+        });
+        Check(File.Exists(thrown.File) && thrown.Zip is not null, "the report and its zip are written when letting go of the window throws");
+        Check(thrown.Steps.Any(s => !s.Ok && s.Name == "let go of the scratch ETABS window" && s.Detail.Contains("no longer there")), "the report says what letting go threw");
+        Check(thrown.Steps.Any(s => s.Name == "every tool of the panel was run, or is listed as not tested"), "the parts after it still ran");
+
         // A program window that never comes back is given up on; the rest of the test still runs and the report is saved.
         using var hold = new ManualResetEventSlim(false);
         var stuck = FieldTest.Run(open, options with
@@ -1481,7 +1496,8 @@ namespace CsiProMax.Tests
         public ICsiLink Link => link;
         public string ModelPath => path;
         public string Close() { Closed = true; return "the scratch ETABS window was closed without saving"; }
-        public void Dispose() => Disposed = true;
+        public Exception? OnDispose;
+        public void Dispose() { Disposed = true; if (OnDispose is not null) throw OnDispose; }
     }
 }
 

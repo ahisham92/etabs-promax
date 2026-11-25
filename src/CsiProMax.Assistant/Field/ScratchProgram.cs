@@ -285,7 +285,13 @@ public sealed class ScratchProgram : IScratchWindow
             lock (_noticesClosed) notices = _noticesClosed.Count;
             return $"the scratch {name} window was closed without saving" + (notices > 0 ? $" ({notices} 'analysis complete' notice{(notices == 1 ? "" : "s")} of it closed along the way)" : "");
         }
-        catch (EtabsException ex) { return Said(_left ? ex.Message : $"the scratch {name} window could not be closed ({ex.Message}); close it yourself without saving"); }
+        // Whatever the program or the link throws (a window that is no longer there, a call that faulted on another
+        // thread): closing says what happened and never stops the test, whose report must still be written.
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            var why = (ex is AggregateException { InnerException: { } inner } ? inner : ex).Message;
+            return Said(_left ? why : $"the scratch {name} window could not be closed ({why}); close it yourself without saving");
+        }
     }
 
     /// <summary>What happened, with what became of a process that stayed: ended by the test, or left for the engineer.</summary>
@@ -345,8 +351,9 @@ public sealed class ScratchProgram : IScratchWindow
 
     public void Dispose()
     {
-        if (_app is not null && !_closed && !_left) Close();
-        _watch?.Dispose();
-        _com?.Dispose();
+        // Letting go never throws: the report is written after it.
+        try { if (_app is not null && !_closed && !_left) Close(); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
+        try { _watch?.Dispose(); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
+        try { _com?.Dispose(); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
     }
 }
