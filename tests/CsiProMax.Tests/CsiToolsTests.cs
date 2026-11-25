@@ -256,6 +256,18 @@ static class CsiToolsTests
             Check(api.Log.Contains("pier label P1"), "the label made");
         });
 
+        yield return ("pack: SAP2000, which has no stories, gets the levels its joints stand on, for the Viewer's plan views", () =>
+        {
+            var inner = new MemoryEtabs();
+            inner.AddFrame(0, 0, 0, 0, 0, 3.2, "C500x500");
+            inner.AddFrame(0, 0, 3.2, 0, 0, 6.4, "C500x500");
+            var sap = new CsiProMax.Assistant.Sap2000.SapLink(new SafeMemory(inner, program: CsiProgram.Sap2000));
+            Equal(0, sap.Stories().Count, "SAP2000 has no stories");
+            var levels = Pack.Levels(sap, [new PointRow("1", 0, 0, 0), new PointRow("2", 0, 0, 3.2), new PointRow("3", 5, 0, 3.2000001), new PointRow("4", 0, 0, 6.4)]);
+            Equal("Base@0|Z 3.2@3.2|Z 6.4@6.4", string.Join("|", levels.Select(l => $"{l.Name}@{l.Elevation.ToString(System.Globalization.CultureInfo.InvariantCulture)}")), "one level a height");
+            Equal(inner.Stories().Count, Pack.Levels(new SafeMemory(inner, program: CsiProgram.Etabs), []).Count, "ETABS keeps its own stories");
+        });
+
         yield return ("CSI tools: table edits update and delete rows; what changed since a starting point; checkpoints", () =>
         {
             var (link, api, inner) = Model(CsiProgram.Safe);
