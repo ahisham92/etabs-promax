@@ -55,13 +55,14 @@ public sealed class ComEtabs : ICsiLink, IDisposable
     public void Dispose() => _work.CompleteAdding();
 
     /// <summary>
-    /// How long an ordinary call may take before the link stops waiting for it: reading a large table can take
-    /// minutes, but never this long.
+    /// How long an ordinary call (a read, a table, a definition, a change) may take before the link stops waiting
+    /// for it. Reading a large table takes seconds to a minute; a call still out after this is waiting on something.
     /// </summary>
-    public TimeSpan CallLimit { get; set; } = TimeSpan.FromMinutes(15);
+    public TimeSpan CallLimit { get; set; } = TimeSpan.FromMinutes(3);
 
     /// <summary>
-    /// How long an analysis or a design may take (the calls whose purpose starts with "run " or "start "). A large
+    /// How long an analysis, a design, or opening or saving a model may take (the calls whose purpose starts with
+    /// "run ", "start ", "open ", "save " or "import "). A large
     /// model's analysis can take hours, so the engineer's own window gets hours; a scratch window's model is small.
     /// </summary>
     public TimeSpan AnalysisLimit { get; set; } = TimeSpan.FromHours(4);
@@ -70,7 +71,7 @@ public sealed class ComEtabs : ICsiLink, IDisposable
     private volatile string _stuck = "";
 
     internal static bool IsLong(string what) =>
-        what.StartsWith("run ", StringComparison.OrdinalIgnoreCase) || what.StartsWith("start ", StringComparison.OrdinalIgnoreCase);
+        new[] { "run ", "start ", "open ", "save ", "import " }.Any(w => what.StartsWith(w, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
     /// Runs one piece of work on the program's thread and waits for it, for at most <see cref="CallLimit"/>
