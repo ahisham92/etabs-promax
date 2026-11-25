@@ -1050,6 +1050,28 @@ Test("field test: the Modeler part runs every Modeler tool, and every step holds
     finally { ResultTools.SnapshotRoot = snapshots; Directory.Delete(folder, true); }
 });
 
+Test("field test: the panel's own tools are each run or listed as not tested, and nothing of the test is left behind", () =>
+{
+    var folder = Path.Combine(Path.GetTempPath(), "cpm-field-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(folder);
+    try
+    {
+        var e = new MemoryEtabs();
+        e.AddFrame(0, 0, 0, 0, 0, 3, e.FrameSections()[0]);
+        var ctx = new FieldContext(CsiProgram.Etabs, folder, e);
+        PanelFieldSteps.Run(ctx, e, scratch: false, live: false);
+        if (Environment.GetEnvironmentVariable("CPM_FIELD_DUMP") == "1")
+            foreach (var s in ctx.Steps) Console.WriteLine($"      {(s.Skipped ? "skip" : s.Ok ? "ok  " : "FAIL")} {s.Name}: {(s.Detail.Length > 200 ? s.Detail[..200] : s.Detail)}");
+        var failed = ctx.Steps.Where(s => !s.Ok).Select(s => $"{s.Name}: {s.Full ?? s.Detail}").ToList();
+        Check(failed.Count == 0, $"{failed.Count} of {ctx.Steps.Count} steps failed:\n      - " + string.Join("\n      - ", failed));
+        Check(ctx.Steps.Any(s => s.Name == "every tool of the panel was run, or is listed as not tested" && s.Ok), "the closing check");
+        Check(ctx.Steps.Where(s => s.Skipped).All(s => s.Detail.Length > 20), "everything not tested says why");
+        Check(!File.Exists(CsiProMax.Tools.Recipes.PathFor("cpm-field-test-recipe")) && !File.Exists(CsiProMax.Tools.LearnedTools.PathFor("cpm_field_test_tool")), "the test's recipe and learned tool are gone again");
+        Check(CsiProMax.Bugs.BugLog.RootOverride is null, "the bug folder is put back");
+    }
+    finally { Directory.Delete(folder, true); }
+});
+
 foreach (var (name, body) in tests)
 {
     try { body(); Console.WriteLine($"ok    {name}"); }

@@ -85,11 +85,27 @@ public static class PanelFieldSteps
         Make("dxf", drawing);
         Make("dwg", drawing);
 
-        foreach (var format in new[] { "word", "excel", "powerpoint", "csv", "text", "markdown", "json" })
+        foreach (var format in new[] { "word", "excel", "powerpoint" })
             if (made.TryGetValue(format, out var file))
                 Tool("read_document_text", $$"""{"path":{{FieldParts.Q(file)}}}""", (a, r) =>
                     FieldContext.Expect(r.Text.Contains("CPM field test", StringComparison.OrdinalIgnoreCase) || r.Text.Contains("CPM-C400", StringComparison.Ordinal),
                         "the text that was written is not in what was read back: " + Short(r.Text)), $"tool read_document_text reads the {format} file back");
+        // The plain kinds are read by the chat's own Read, not by a tool: the file itself is looked at.
+        foreach (var format in new[] { "csv", "text", "markdown", "json" })
+            if (made.TryGetValue(format, out var file) && file.Length > 0)
+                ctx.Step($"the {format} file holds what was written", () =>
+                {
+                    var text = File.ReadAllText(file);
+                    FieldContext.Expect(text.Contains("CPM-C400", StringComparison.Ordinal) || text.Contains("CPM field test", StringComparison.OrdinalIgnoreCase), "the text that was written is not in the file: " + Short(text));
+                    return $"{Path.GetFileName(file)}, {text.Length} characters";
+                });
+        if (made.TryGetValue("text", out var plain) && plain.Length > 0)
+            ctx.Step("tool read_document_text says what reads a plain text file", () =>
+            {
+                var result = Execute(registry, app, "read_document_text", $$"""{"path":{{FieldParts.Q(plain)}}}""");
+                FieldContext.Expect(result.IsError && result.Text.Contains("Read", StringComparison.Ordinal), "it should have pointed to Read: " + Short(result.Text));
+                return "refused as it should: " + result.Text;
+            });
         Tool("read_document_text", $$"""{"path":{{q}}}""", (_, r) =>
             FieldContext.Expect(made.Values.Where(f => f.Length > 0).Take(3).All(f => r.Text.Contains(Path.GetFileName(f), StringComparison.OrdinalIgnoreCase)),
                 "the folder's files are not all listed: " + Short(r.Text)), "tool read_document_text lists a folder");
@@ -138,6 +154,13 @@ public static class PanelFieldSteps
 
         // ---- Notes, earlier chats, the activity log, code that worked before. ----
         var note = $"{Marker} note {DateTime.Now:yyyyMMdd-HHmmss}: safe to delete";
+        if (!windows)
+        {
+            NotTested("memory_note", "the notes belong to the chat pane, which needs Windows");
+            NotTested("recall_chats", "the earlier chats belong to the chat pane, which needs Windows");
+        }
+        else
+        {
         try
         {
             Tool("memory_note", """{"action":"list"}""", step: "tool memory_note lists the notes");
@@ -157,6 +180,7 @@ public static class PanelFieldSteps
         }
         Tool("recall_chats", """{"action":"list"}""", step: "tool recall_chats lists earlier chats");
         Tool("recall_chats", """{"action":"search","query":"cpm field test scratch"}""", step: "tool recall_chats searches");
+        }
         Tool("get_activity_log", """{"limit":5}""");
         Tool("get_activity_log", """{"limit":5,"changes_only":true}""", step: "tool get_activity_log, changes only");
         Tool("worked_code", """{"action":"list","max":3}""", step: "tool worked_code lists");
@@ -165,7 +189,7 @@ public static class PanelFieldSteps
         // ---- Recipes: saved, listed, run, and the file taken away again. ----
         try
         {
-            Tool("save_recipe", $$"""{"name":"{{RecipeName}}","description":"{{Marker}}: reads the model twice. Safe to delete.","steps":[{"tool":"get_model_context"},{"tool":"query_objects","arguments":{"kind":"frame","limit":1}}]}""");
+            Tool("save_recipe", $$$"""{"name":"{{{RecipeName}}}","description":"{{{Marker}}}: reads the model twice. Safe to delete.","steps":[{"tool":"get_model_context"},{"tool":"query_objects","arguments":{"kind":"frame","limit":1}}]}""");
             Tool("list_recipes", "{}", (_, r) => FieldContext.Expect(r.Text.Contains(RecipeName, StringComparison.Ordinal), "the recipe that was just saved is not listed: " + Short(r.Text)));
             Tool("run_recipe", $$"""{"name":"{{RecipeName}}"}""", (_, r) =>
                 FieldContext.Expect(!r.Text.Contains("\"error\":true", StringComparison.OrdinalIgnoreCase) && !r.Text.Contains("\"ok\":false", StringComparison.OrdinalIgnoreCase), "a step of the recipe failed: " + Short(r.Text)));
@@ -185,11 +209,15 @@ public static class PanelFieldSteps
         try
         {
             Tool("save_as_tool", $$"""{"name":"{{LearnedName}}","description":"{{Marker}}: gives 42. Safe to delete.","code":"return 40 + 2;","changes_model":false}""");
-            Tool("list_learned_tools", $$"""{"name":"{{LearnedName}}","include_code":true}""", (_, r) =>
-                FieldContext.Expect(r.Text.Contains(LearnedName, StringComparison.Ordinal) && r.Text.Contains("40 + 2", StringComparison.Ordinal), "the tool that was just saved is not listed with its code: " + Short(r.Text)));
+            Tool("list_learned_tools", $$"""{"name":"{{LearnedName}}","include_code":true}""", (a, r) =>
+            {
+                var mine = (a["tools"] as JsonArray)?.FirstOrDefault(t => t?["name"]?.GetValue<string>() == LearnedName);
+                FieldContext.Expect(mine is not null, "the tool that was just saved is not listed: " + Short(r.Text));
+                FieldContext.Expect((mine!["code"]?.GetValue<string>() ?? "").Contains("40 + 2", StringComparison.Ordinal), "its code is not in the list: " + mine.ToJsonString());
+            });
             if (live)
             {
-                Tool("run_learned_tool", $$"""{"name":"{{LearnedName}}","arguments":{}}""", (_, r) => FieldContext.Expect(r.Text.Contains("42", StringComparison.Ordinal), "it should have given 42: " + Short(r.Text)));
+                Tool("run_learned_tool", $$$"""{"name":"{{{LearnedName}}}","arguments":{}}""", (_, r) => FieldContext.Expect(r.Text.Contains("42", StringComparison.Ordinal), "it should have given 42: " + Short(r.Text)));
                 ctx.Step("a learned tool is found by its own name, as the chat calls it", () =>
                 {
                     var tool = registry.Find(LearnedName);
