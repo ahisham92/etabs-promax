@@ -32,6 +32,14 @@ public static class ScratchDialogs
     /// <summary>True for a window the test may close itself: only the notice that an analysis has finished.</summary>
     public static bool MayClose(string title) => title.TrimStart().StartsWith("Analysis Complete", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Whether the "analysis complete" notice of this program is closed by the test at all. SAP2000 leaves that notice
+    /// waiting and nothing goes on until it is closed (seen on SAP2000 26). ETABS and SAFE show their analysis window
+    /// under the same title while they still work, and closing it makes them ask "Program is active. Do you really want
+    /// to close the program?" (seen on ETABS 23, 2026-11-25): theirs is left alone.
+    /// </summary>
+    public static bool ClosesNotices(CsiProgram? program) => program is null || program.Key == "sap2000";
+
     /// <summary>The visible titled windows of one process.</summary>
     public static List<(IntPtr Window, string Title)> Of(int processId)
     {
@@ -49,13 +57,51 @@ public static class ScratchDialogs
     }
 
     /// <summary>Asks each "analysis complete" notice of the process to close, as its own X button does. Returns their titles.</summary>
-    public static List<string> CloseNotices(int processId)
+    public static List<string> CloseNotices(int processId, CsiProgram? program = null)
     {
         var closed = new List<string>();
+        if (!ClosesNotices(program)) return closed;
         foreach (var (window, title) in Of(processId))
             if (MayClose(title) && PostMessageW(window, 0x0010 /* WM_CLOSE */, IntPtr.Zero, IntPtr.Zero)) closed.Add(title);
         return closed;
     }
+
+    /// <summary>
+    /// True for the one question the test answers itself: the program asking whether it may really close ("Program is
+    /// active. Do you really want to close the program?"), which it shows when the test closes its own scratch window
+    /// while the program is still busy. Told by the question's own words; a licence message is never this.
+    /// </summary>
+    public static bool IsCloseQuestion(IEnumerable<string> words) =>
+        words.Any(w => w.Contains("Program is active", StringComparison.OrdinalIgnoreCase) && w.Contains("close the program", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>The words on a window: the texts of its child controls.</summary>
+    public static List<string> Words(IntPtr window)
+    {
+        var words = new List<string>();
+        if (!OperatingSystem.IsWindows()) return words;
+        EnumChildWindows(window, (child, _) =>
+        {
+            var text = new System.Text.StringBuilder(600);
+            if (GetWindowTextW(child, text, text.Capacity) > 0) words.Add(text.ToString());
+            return true;
+        }, IntPtr.Zero);
+        return words;
+    }
+
+    /// <summary>
+    /// Answers the "really close the program?" question of the process, as its own buttons do: Yes while the test is
+    /// closing its own scratch window, No at any other time (the test goes on in that window). Returns how many were answered.
+    /// </summary>
+    public static int AnswerCloseQuestion(int processId, bool yes)
+    {
+        var answered = 0;
+        foreach (var (window, _) in Of(processId))
+            if (IsCloseQuestion(Words(window)) && PostMessageW(window, 0x0111 /* WM_COMMAND */, new IntPtr(CloseAnswer(yes)), IntPtr.Zero)) answered++;
+        return answered;
+    }
+
+    /// <summary>The button the test presses on the close question: Yes (6) only while it is closing the window itself, else No (7).</summary>
+    public static int CloseAnswer(bool closing) => closing ? 6 : 7;
 
     /// <summary>What Windows says of a window: " (cannot be clicked: another window of the program holds it)", " (not answering)", or nothing.</summary>
     public static string State(IntPtr window)
@@ -71,6 +117,7 @@ public static class ScratchDialogs
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool IsHungAppWindow(IntPtr window);
     private delegate bool Each(IntPtr window, IntPtr data);
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool EnumWindows(Each each, IntPtr data);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool EnumChildWindows(IntPtr window, Each each, IntPtr data);
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr window);
     [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] private static extern int GetWindowTextW(IntPtr window, System.Text.StringBuilder text, int most);
@@ -97,6 +144,12 @@ public sealed class ScratchProgram : IScratchWindow
     /// <summary>The window stopped answering: its thread is still waiting on it, so nothing more can be asked of it.</summary>
     private bool _left;
     private bool _closed;
+    /// <summary>The test is closing its own window: only then is the program's "really close?" question answered.</summary>
+    private volatile bool _closing;
+    private volatile bool _closeAnswered;
+    /// <summary>How often the program asked whether to really close while the test was still working in it, and the test answered No.</summary>
+    private int _keptOpen;
+    public int KeptOpen => _keptOpen;
 
     private ScratchProgram(CsiProgram program) => _program = program;
 
@@ -191,7 +244,7 @@ public sealed class ScratchProgram : IScratchWindow
             var mine = Process.GetProcessesByName(_program.ProcessName).Select(p => p.Id).Where(id => !before.Contains(id)).ToList();
             ProcessId = mine.Count == 1 ? mine[0] : 0;
             // From here to the window's end, an "analysis complete" notice of this process is closed as it appears.
-            if (ProcessId != 0) _watch = new Timer(_ => { try { lock (_noticesClosed) _noticesClosed.AddRange(ScratchDialogs.CloseNotices(ProcessId)); } catch (Exception ex) when (ex is not OutOfMemoryException) { /* the next look tries again */ } }, null, 1000, 1000);
+            if (ProcessId != 0) _watch = new Timer(_ => { try { lock (_noticesClosed) _noticesClosed.AddRange(ScratchDialogs.CloseNotices(ProcessId, _program)); var closing = _closing; if (ScratchDialogs.AnswerCloseQuestion(ProcessId, closing) > 0) { if (closing) _closeAnswered = true; else Interlocked.Increment(ref _keptOpen); } } catch (Exception ex) when (ex is not OutOfMemoryException) { /* the next look tries again */ } }, null, 1000, 1000);
             return mine.Count == 1 ? $"{name} process {ProcessId}, through {Path.GetFileName(ApiFile)}"
                 : $"{name} started through {Path.GetFileName(ApiFile)}; its process could not be told apart ({mine.Count} new {name} processes)";
         }) is null) return false;
@@ -279,6 +332,7 @@ public sealed class ScratchProgram : IScratchWindow
         if (_app is null) return "it was not started";
         if (_closed) return $"the scratch {name} window was already closed";
         if (_left) return Said($"the scratch {name} window stopped answering, so it was left as it is; close it yourself without saving");
+        _closing = true;
         try
         {
             Ask(TimeSpan.FromMinutes(1), "close the window", _ => { _app.ApplicationExit(false); return null; },
@@ -288,7 +342,7 @@ public sealed class ScratchProgram : IScratchWindow
             if (!Gone(TimeSpan.FromSeconds(30))) return Said($"the scratch {name} window was told to close, and its process did not end; end it yourself");
             int notices;
             lock (_noticesClosed) notices = _noticesClosed.Count;
-            return $"the scratch {name} window was closed without saving" + (notices > 0 ? $" ({notices} 'analysis complete' notice{(notices == 1 ? "" : "s")} of it closed along the way)" : "");
+            return $"the scratch {name} window was closed without saving" + (_closeAnswered ? " (it asked whether to really close, and the test answered Yes)" : "") + (_keptOpen > 0 ? $" (earlier it asked {_keptOpen} time{(_keptOpen == 1 ? "" : "s")} whether to close while the test was working in it, and the test answered No)" : "") + (notices > 0 ? $" ({notices} 'analysis complete' notice{(notices == 1 ? "" : "s")} of it closed along the way)" : "");
         }
         // Whatever the program or the link throws (a window that is no longer there, a call that faulted on another
         // thread): closing says what happened and never stops the test, whose report must still be written.

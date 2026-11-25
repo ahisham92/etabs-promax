@@ -575,7 +575,7 @@ static class TesterBugTests
             // No process: nothing is looked for or closed.
             Equal(0, ScratchDialogs.CloseNotices(0).Count, "notices closed with no process");
             var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));
-            Check(source.Contains("ScratchDialogs.CloseNotices(ProcessId)"), "the scratch window no longer watches for the notice");
+            Check(source.Contains("ScratchDialogs.CloseNotices(ProcessId, _program)"), "the scratch window no longer watches for the notice");
         });
 
         yield return ("SAP2000 field test: a scratch process left running is named with its process id, and counts as a failure", () =>
@@ -661,6 +661,19 @@ static class TesterBugTests
             Check(!ToolsMenu.LeftBehind(null, now.AddHours(-8), now) && !ToolsMenu.LeftBehind(false, null, now), "a process that cannot be read counts as open");
             var install = File.ReadAllText(Path.Combine(SourceText.Root(), "install.ps1"));
             Check(install.Contains("MainWindowHandle -ne 0") && install.Contains("TotalMinutes -le 10"), "install.ps1 follows the same rule");
+        });
+        yield return ("ETABS 23 field test: the test never makes ETABS ask to close, and answers that question itself", () =>
+        {
+            // Seen on Ahmed's PC on 2026-11-25: "Program is active. Do you really want to close the program?" (Yes / No)
+            // in the scratch ETABS during its analysis, waiting for a person.
+            Check(ScratchDialogs.ClosesNotices(CsiProgram.Sap2000), "SAP2000's 'analysis complete' notice is closed, as before");
+            Check(!ScratchDialogs.ClosesNotices(CsiProgram.Etabs) && !ScratchDialogs.ClosesNotices(CsiProgram.Safe), "the analysis window of ETABS and SAFE is left alone");
+            Check(ScratchDialogs.IsCloseQuestion(["&Yes", "&No", "Program is active. Do you really want to close the program?"]), "the close question is known by its words");
+            foreach (var other in new[] { "License Message", "Your license will expire in 5 days.", "Do you want to save changes to the model?", "Analysis Complete", "" })
+                Check(!ScratchDialogs.IsCloseQuestion(["OK", other]), $"'{other}' is taken for the close question");
+            Equal(7, ScratchDialogs.CloseAnswer(closing: false), "while the test works in the window the answer is No");
+            Equal(6, ScratchDialogs.CloseAnswer(closing: true), "while the test closes its own window the answer is Yes");
+            Equal(0, ScratchDialogs.AnswerCloseQuestion(0, yes: false), "nothing is answered with no process");
         });
         yield return ("ETABS 20 tester: the field test tries what Tools > CSI ProMax does in each program, and fails where the plug-in cannot be created", () =>
         {
