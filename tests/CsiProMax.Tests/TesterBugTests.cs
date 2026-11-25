@@ -578,6 +578,21 @@ static class TesterBugTests
             Check(source.Contains("ScratchDialogs.CloseNotices(ProcessId)"), "the scratch window no longer watches for the notice");
         });
 
+        // ---- the full field test of 0.4.9 on ETABS 23: its analysis window has the same title, and closing it asked ----
+        // ---- "Program is active. Do you really want to close the program?" ----
+
+        yield return ("ETABS field test: a notice is answered by its OK button (never closed), and 'really close the program?' by No", () =>
+        {
+            Check(ScratchDialogs.AsksToClose("Program is active. Do you really want to close the program? Yes No"), "ETABS's question is not seen");
+            Check(!ScratchDialogs.AsksToClose("Analysis Complete OK") && !ScratchDialogs.AsksToClose("Save changes to cpm-field-test?"), "another message is taken for the close question");
+            Equal("", ScratchDialogs.DialogText(IntPtr.Zero), "no window, no text");
+            var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));
+            var at = source.IndexOf("public static List<string> CloseNotices(", StringComparison.Ordinal);
+            var body = source.Substring(at, source.IndexOf("public static bool AsksToClose(", at, StringComparison.Ordinal) - at);
+            Check(!body.Contains("WM_CLOSE"), "a notice is still closed by its X, which closed ETABS's and SAP2000's analysis windows");
+            Check(body.Contains("Button(window, \"OK\")") && body.Contains("Button(window, \"No\")") && body.Contains("BM_CLICK"), "the notice is not answered by its OK button, or the close question by No");
+        });
+
         yield return ("SAP2000 field test: a scratch process left running is named with its process id, and counts as a failure", () =>
         {
             var said = "the scratch SAP2000 window stopped answering, so it was left as it is; close it yourself without saving" + ScratchProgram.LeftRunning("SAP2000", "SAP2000", 47136, hasWindow: false);

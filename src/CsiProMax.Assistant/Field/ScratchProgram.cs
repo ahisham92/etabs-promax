@@ -48,13 +48,67 @@ public static class ScratchDialogs
         return found;
     }
 
-    /// <summary>Asks each "analysis complete" notice of the process to close, as its own X button does. Returns their titles.</summary>
+    /// <summary>
+    /// Answers each "analysis complete" notice of the process the way a person does: by its own OK button. Returns
+    /// what it answered.
+    /// </summary>
+    /// <remarks>
+    /// Never by closing the window (its X): ETABS's and SAP2000's analysis windows carry the same title, and closing
+    /// one made ETABS ask "Program is active. Do you really want to close the program?" in the middle of its analysis,
+    /// and left SAP2000 with no analysis window ("Invoke or BeginInvoke cannot be called on a control until the window
+    /// handle has been created") in the second full field test of 0.4.9 (2026-11-25). A notice with no OK button to
+    /// press is left alone. The close question, in the test's own scratch window, is answered No: the test never
+    /// closes a program while it works in it, and its own closing does not ask.
+    /// </remarks>
     public static List<string> CloseNotices(int processId)
     {
         var closed = new List<string>();
         foreach (var (window, title) in Of(processId))
-            if (MayClose(title) && PostMessageW(window, 0x0010 /* WM_CLOSE */, IntPtr.Zero, IntPtr.Zero)) closed.Add(title);
+        {
+            if (MayClose(title))
+            {
+                if (Button(window, "OK") is { } ok && IsWindowEnabled(ok) && PostMessageW(ok, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero)) closed.Add(title);
+            }
+            else if (AsksToClose(DialogText(window)) && Button(window, "No") is { } no && PostMessageW(no, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero))
+                closed.Add($"{title}: answered No to \"{DialogText(window).Trim()}\"");
+        }
         return closed;
+    }
+
+    /// <summary>The window's own button with this text (an "&amp;" for its access key is left out), or null.</summary>
+    private static IntPtr? Button(IntPtr window, string text)
+    {
+        IntPtr? found = null;
+        if (!OperatingSystem.IsWindows() || window == IntPtr.Zero) return null;
+        EnumChildWindows(window, (child, _) =>
+        {
+            var label = new System.Text.StringBuilder(64);
+            if (GetWindowTextW(child, label, label.Capacity) > 0 && string.Equals(label.ToString().Replace("&", "").Trim(), text, StringComparison.OrdinalIgnoreCase)
+                && IsWindowVisible(child))
+            {
+                found = child;
+                return false;
+            }
+            return true;
+        }, IntPtr.Zero);
+        return found;
+    }
+
+    /// <summary>The program asking whether to close itself while it works ("Program is active. Do you really want to close the program?").</summary>
+    public static bool AsksToClose(string text) => text.Contains("really want to close the program", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The text of a dialog's own controls (its message, its buttons), one after another.</summary>
+    public static string DialogText(IntPtr window)
+    {
+        if (!OperatingSystem.IsWindows() || window == IntPtr.Zero) return "";
+        var parts = new List<string>();
+        EnumChildWindows(window, (child, _) =>
+        {
+            var text = new System.Text.StringBuilder(512);
+            if (GetWindowTextW(child, text, text.Capacity) > 0) parts.Add(text.ToString());
+            return true;
+        }, IntPtr.Zero);
+        return string.Join(" ", parts);
     }
 
     /// <summary>What Windows says of a window: " (cannot be clicked: another window of the program holds it)", " (not answering)", or nothing.</summary>
@@ -75,6 +129,7 @@ public static class ScratchDialogs
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr window);
     [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] private static extern int GetWindowTextW(IntPtr window, System.Text.StringBuilder text, int most);
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool PostMessageW(IntPtr window, uint message, IntPtr w, IntPtr l);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool EnumChildWindows(IntPtr parent, Each each, IntPtr data);
 }
 
 /// <summary>
@@ -286,9 +341,13 @@ public sealed class ScratchProgram : IScratchWindow
             _closed = true;
             // The program said yes to closing: its process must go too, or it keeps a licence with no window to show for it.
             if (!Gone(TimeSpan.FromSeconds(30))) return Said($"the scratch {name} window was told to close, and its process did not end; end it yourself");
-            int notices;
-            lock (_noticesClosed) notices = _noticesClosed.Count;
-            return $"the scratch {name} window was closed without saving" + (notices > 0 ? $" ({notices} 'analysis complete' notice{(notices == 1 ? "" : "s")} of it closed along the way)" : "");
+            List<string> handled;
+            lock (_noticesClosed) handled = [.. _noticesClosed];
+            var notices = handled.Count(h => !h.Contains("answered No", StringComparison.Ordinal));
+            var answered = handled.Where(h => h.Contains("answered No", StringComparison.Ordinal)).Distinct().ToList();
+            return $"the scratch {name} window was closed without saving" +
+                   (notices > 0 ? $" ({notices} 'analysis complete' notice{(notices == 1 ? "" : "s")} of it closed along the way)" : "") +
+                   (answered.Count > 0 ? $". Message boxes the test answered itself in it: {string.Join("; ", answered)}" : "");
         }
         // Whatever the program or the link throws (a window that is no longer there, a call that faulted on another
         // thread): closing says what happened and never stops the test, whose report must still be written.
