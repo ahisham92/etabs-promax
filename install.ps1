@@ -309,8 +309,8 @@ function Install-CsiProMax {
             foreach ($item in ($found | Sort-Object { $_.Plugin.Program }, Number)) {
                 $program = $item.Plugin.Program
                 $status = 'unknown'
-                # A process left behind with no window for more than ten minutes (the program hung on closing) is not the program being open.
-                if (-not $SettingsRoot -and (Get-Process -Name $program -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 -or -not $_.StartTime -or ((Get-Date) - $_.StartTime).TotalMinutes -le 10 })) { $status = 'open' }
+                # A process left behind with no titled window for more than ten minutes (the program hung on closing; SAP2000 keeps a hidden helper window) is not the program being open.
+                if (-not $SettingsRoot -and (Get-Process -Name $program -ErrorAction SilentlyContinue | Where-Object { ($_.MainWindowHandle -ne 0 -and $_.MainWindowTitle) -or -not $_.StartTime -or ((Get-Date) - $_.StartTime).TotalMinutes -le 10 })) { $status = 'open' }
                 else {
                     try { $status = Register-PlugIn $item.Ini $item.Plugin.Name (Join-Path $Folder $item.Plugin.Dll) }
                     catch { $status = 'unknown' }
