@@ -288,15 +288,19 @@ public static class SapFieldSteps
         // ---- snapshots and the review pack ----
         ctx.Tool("list_snapshots", "{}", a => FieldContext.Expect(Int(a["count"]) >= 1, "the snapshot is not listed"));
         ctx.Tool("compare_snapshots", """{"from":"cpm-before-analysis"}""");
+        JsonObject? packed = null;
         ctx.Step("the review pack of the scratch model is written", () =>
         {
             var checks = ProgramTools.Report(System.Text.Json.JsonDocument.Parse("{}").RootElement, link).AsObject();
             var pack = Pack.Build(link, [], link.LoadCases(), link.Combos(), checks, null, mostRows: 20000, by: "CSI ProMax field test");
             var file = Path.Combine(ctx.Folder, ModelerFieldSteps.ModelName + " SAP2000.cpmx");
             File.WriteAllBytes(file, pack.Zip);
+            packed = pack.Content;
             FieldContext.Expect(pack.Frames == link.Frames().Count && pack.Areas == link.Areas().Count, $"the pack holds {pack.Frames} frames and {pack.Areas} areas, the model has {link.Frames().Count} and {link.Areas().Count}");
             return new { file = Path.GetFileName(file), kilobytes = pack.Zip.Length / 1024, frames = pack.Frames, areas = pack.Areas, tables = pack.Tables, notes = pack.Notes };
         });
+        // The Viewer's screen with that pack: the page a reviewer opens, the live 3D view, the design ratio colours.
+        if (packed is not null) ViewerScreen.Steps(ctx, packed, "SAP2000");
 
         ctx.Coverage("every SAP2000 tool was run");
     }

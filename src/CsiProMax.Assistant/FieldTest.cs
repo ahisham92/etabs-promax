@@ -423,6 +423,8 @@ public static class FieldTest
     {
         ".md", ".txt", ".log", ".out", ".json", ".csv", ".e2k", ".$et", ".s2k", ".$2k", ".f2k", ".$fk", ".cpm", ".cpmx",
         ".xlsx", ".docx", ".pptx", ".pdf", ".dxf", ".dwg",
+        // The pictures of the Viewer's screen (ViewerScreen).
+        ".png",
     };
 
     private const long MostFile = 3 * 1024 * 1024, MostZip = 25 * 1024 * 1024;

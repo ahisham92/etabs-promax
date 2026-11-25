@@ -205,15 +205,19 @@ public static class SafeFieldSteps
         // ---- snapshots and the review pack ----
         ctx.Tool("list_snapshots", "{}", a => FieldContext.Expect(Int(a["count"]) >= 1, "the snapshot is not listed"));
         ctx.Tool("compare_snapshots", """{"from":"cpm-before-analysis"}""");
+        JsonObject? packed = null;
         ctx.Step("the review pack of the scratch model is written", () =>
         {
             var checks = ProgramTools.Report(System.Text.Json.JsonDocument.Parse("{}").RootElement, link).AsObject();
             var pack = Pack.Build(link, [], link.LoadCases(), link.Combos(), checks, null, mostRows: 20000, by: "CSI ProMax field test");
             var file = Path.Combine(ctx.Folder, ModelerFieldSteps.ModelName + " SAFE.cpmx");
             File.WriteAllBytes(file, pack.Zip);
+            packed = pack.Content;
             FieldContext.Expect(pack.Areas == link.Areas().Count, $"the pack holds {pack.Areas} areas, the model has {link.Areas().Count}");
             return new { file = Path.GetFileName(file), kilobytes = pack.Zip.Length / 1024, frames = pack.Frames, areas = pack.Areas, tables = pack.Tables, notes = pack.Notes };
         });
+        // The Viewer's screen with that pack: the page a reviewer opens, the live 3D view, the design ratio colours.
+        if (packed is not null) ViewerScreen.Steps(ctx, packed, "SAFE");
 
         // ---- the link with GeoProMax: the pressures out, the springs back in (the model is unlocked for them) ----
         GeoProMaxFieldSteps.Run(ctx);

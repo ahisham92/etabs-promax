@@ -368,6 +368,7 @@ public static class EtabsFieldSteps
         ctx.Tool("compare_snapshots", """{"from":"cpm-before-analysis","to":"cpm-after-analysis"}""", a =>
             FieldContext.Expect(Int(a["frames"]!["removed"]) == 0 && Int(a["areas"]!["removed"]) == 0, "nothing was removed between the two snapshots: " + a.ToJsonString()));
         ctx.Tool("compare_snapshots", """{"from":"cpm-before-analysis"}""", null, "tool compare_snapshots with the model as it is now");
+        JsonObject? packed = null;
         ctx.Step("the review pack of the scratch model is written", () =>
         {
             var cases = link.LoadCases();
@@ -375,6 +376,7 @@ public static class EtabsFieldSteps
             var pack = Pack.Build(link, [], cases, link.Combos(), checks, null, mostRows: 20000, by: "CSI ProMax field test");
             var file = Path.Combine(ctx.Folder, ModelerFieldSteps.ModelName + " ETABS.cpmx");
             File.WriteAllBytes(file, pack.Zip);
+            packed = pack.Content;
             FieldContext.Expect(pack.Frames == link.Frames().Count && pack.Areas == link.Areas().Count, $"the pack holds {pack.Frames} frames and {pack.Areas} areas, the model has {link.Frames().Count} and {link.Areas().Count}");
             FieldContext.Expect(!analysed || pack.Tables.Count > 1, "the model is analysed and the pack took no result table: " + string.Join("; ", pack.Notes));
             var design = pack.Content["manifest"]!["design"] as JsonObject;
@@ -382,6 +384,8 @@ public static class EtabsFieldSteps
             FieldContext.Expect(!piered || pack.Content["model"]!["wall_labels"] is JsonArray { Count: > 0 }, "the wall is pier CPM-P1 and the pack has no wall labels for the Viewer");
             return new { file = Path.GetFileName(file), kilobytes = pack.Zip.Length / 1024, frames = pack.Frames, areas = pack.Areas, tables = pack.Tables, design = design?.ToJsonString(), notes = pack.Notes };
         });
+        // The Viewer's screen with that pack: the page a reviewer opens, the live 3D view, the design ratio colours.
+        if (packed is not null) ViewerScreen.Steps(ctx, packed, "ETABS");
 
         // ---- unlocked again: every load pattern type by its name, read back from ETABS ----
         if (analysed)
