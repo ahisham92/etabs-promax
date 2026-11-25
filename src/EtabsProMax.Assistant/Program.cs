@@ -13,12 +13,14 @@ using EtabsProMax.Assistant.Tools;
 // It runs on the .NET 8 that ETABS 23 itself needs: dotnet EtabsProMax.dll, or from ETABS's Tools menu (the plug-in).
 
 // --demo: a small model in memory instead of ETABS, to see the window on a PC without ETABS.
-using var com = new ComEtabs();
+// --etabs-pid: the ETABS window this was started from (the plug-in passes it), when several are open.
+int? etabsPid = Array.IndexOf(args, "--etabs-pid") is var pidAt and >= 0 && pidAt + 1 < args.Length && int.TryParse(args[pidAt + 1], out var pidValue) ? pidValue : null;
+using var com = new ComEtabs(etabsPid);
 IEtabsLink etabs = args.Contains("--demo") ? new MemoryEtabs() : com;
 if (args.Contains("--selftest")) return SelfTest.Run(etabs, args.Contains("--changes"));
 
 // Already running (started again from ETABS's menu): show its window again and leave.
-if (!args.Contains("--no-window") && Running.Find() is { } running) { AppWindow.Open(running); return 0; }
+if (!args.Contains("--no-window") && Running.Find(etabsPid) is { } running) { AppWindow.Open(running); return 0; }
 
 var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(24)).ToLowerInvariant();
 var address = "";
@@ -108,18 +110,25 @@ _ = Task.Run(hub.CheckClaude);
 
 if (!args.Contains("--no-window"))
 {
-    Running.Write(window);
+    Running.Write(etabsPid, window);
     AppWindow.Open(window);
     // The program ends a little after its window is closed.
     _ = Task.Run(async () =>
     {
         await Task.Delay(TimeSpan.FromSeconds(60));
-        while (hub.Listeners > 0 || DateTime.UtcNow - hub.LastListener < TimeSpan.FromSeconds(20)) await Task.Delay(2000);
+        while ((hub.Listeners > 0 || DateTime.UtcNow - hub.LastListener < TimeSpan.FromSeconds(20)) && EtabsIsOpen()) await Task.Delay(2000);
         ended.TrySetResult();
     });
 }
+// Started from an ETABS window: when that ETABS is closed, this ends too.
+bool EtabsIsOpen()
+{
+    if (etabsPid is null) return true;
+    try { using var process = System.Diagnostics.Process.GetProcessById(etabsPid.Value); return !process.HasExited; }
+    catch (ArgumentException) { return false; }
+}
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; ended.TrySetResult(); };
 await ended.Task;
-if (!args.Contains("--no-window")) Running.Clear();
+if (!args.Contains("--no-window")) Running.Clear(etabsPid);
 hub.Dispose();
 return 0;

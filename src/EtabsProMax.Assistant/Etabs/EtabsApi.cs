@@ -29,10 +29,10 @@ namespace EtabsProMax.Assistant.Etabs
             _type = type;
         }
 
-        /// <summary>The API file of the running ETABS, or of ETABS 23 where it is usually installed.</summary>
-        public static string FindApiFile()
+        /// <summary>The API file of the running ETABS (the one with this process id, when given), or of ETABS 23 where it is usually installed.</summary>
+        public static string FindApiFile(int? pid = null)
         {
-            foreach (var process in Process.GetProcessesByName("ETABS"))
+            foreach (var process in Process.GetProcessesByName("ETABS").OrderByDescending(p => p.Id == pid))
             {
                 try
                 {
@@ -52,23 +52,26 @@ namespace EtabsProMax.Assistant.Etabs
         private static extern int GetActiveObject(ref Guid clsid, IntPtr reserved, [MarshalAs(UnmanagedType.IUnknown)] out object obj);
 
         /// <summary>
-        /// The running ETABS (its cOAPI object), or null when ETABS isn't open. Windows is asked for the running ETABS
-        /// directly; the API's own Helper.GetObject is the second try (it needs the .NET Framework's way of asking,
-        /// which newer .NET doesn't have).
+        /// The running ETABS (its cOAPI object), or null when it isn't open. With a process id, that ETABS window and no
+        /// other (the API's own Helper.GetObjectProcess): several ETABS windows can be open, and the assistant must work
+        /// on the one it was started from. Without one, the ETABS that is the "active instance for API".
         /// </summary>
-        public static EtabsApi Attach(string apiFile, string progId)
+        public static EtabsApi Attach(string apiFile, string progId, int? pid = null)
         {
             var api = Assembly.LoadFrom(apiFile);
             var type = api.GetType("ETABSv1.cOAPI", true);
-            if (CLSIDFromProgID(progId, out var clsid) == 0 && GetActiveObject(ref clsid, IntPtr.Zero, out var running) == 0 && running != null)
-                return new EtabsApi(running, type);
             try
             {
+                if (pid == null && CLSIDFromProgID(progId, out var clsid) == 0 && GetActiveObject(ref clsid, IntPtr.Zero, out var running) == 0 && running != null)
+                    return new EtabsApi(running, type);
                 var helper = Activator.CreateInstance(api.GetType("ETABSv1.Helper", true));
-                var app = api.GetType("ETABSv1.cHelper", true).GetMethod("GetObject").Invoke(helper, new object[] { progId });
+                var helperType = api.GetType("ETABSv1.cHelper", true);
+                var app = pid == null
+                    ? helperType.GetMethod("GetObject").Invoke(helper, new object[] { progId })
+                    : helperType.GetMethod("GetObjectProcess").Invoke(helper, new object[] { progId, pid.Value });
                 return app == null ? null : new EtabsApi(app, type);
             }
-            catch (Exception ex) when (ex is TargetInvocationException || ex is MissingMethodException || ex is COMException) { return null; }
+            catch (Exception ex) when (ex is TargetInvocationException || ex is MissingMethodException || ex is COMException || ex is NullReferenceException) { return null; }
         }
 
         private static object Wrap(object value, Type declared)

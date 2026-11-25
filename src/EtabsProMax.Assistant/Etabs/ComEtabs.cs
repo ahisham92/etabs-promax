@@ -16,8 +16,12 @@ public sealed class ComEtabs : IEtabsLink, IDisposable
     private readonly Thread _thread;
     private dynamic? _model;
 
-    public ComEtabs()
+    private readonly int? _pid;
+
+    /// <param name="pid">The ETABS window to work on, by its process id. Left out: the one ETABS marks as active for the API.</param>
+    public ComEtabs(int? pid = null)
     {
+        _pid = pid;
         _thread = new Thread(() => { foreach (var job in _work.GetConsumingEnumerable()) job(); }) { IsBackground = true, Name = "ETABS" };
         if (OperatingSystem.IsWindows()) _thread.SetApartmentState(ApartmentState.STA);
         _thread.Start();
@@ -52,13 +56,13 @@ public sealed class ComEtabs : IEtabsLink, IDisposable
     {
         if (_model is not null) return _model;
         if (!OperatingSystem.IsWindows()) throw new EtabsException("ETABS runs on Windows only.");
-        var apiFile = EtabsApi.FindApiFile();
+        var apiFile = EtabsApi.FindApiFile(_pid);
         if (!File.Exists(apiFile))
             throw new EtabsException("ETABS is not installed on this PC, or its API is not registered. Open ETABS once as administrator to register it.");
         // Plain COM late binding fails on ETABS 23 ("Specified cast is not valid" for SapModel), so the calls go
         // through the API's own interfaces in ETABSv1.dll, still by name.
-        dynamic etabs = EtabsApi.Attach(apiFile, ProgId)
-            ?? throw new EtabsException("ETABS is not open. Open ETABS and a model, then try again.");
+        dynamic etabs = EtabsApi.Attach(apiFile, ProgId, _pid)
+            ?? throw new EtabsException(_pid is null ? "ETABS is not open. Open ETABS and a model, then try again." : "The ETABS window this was started from is closed. Start ETABS ProMax again from ETABS's Tools menu.");
         _model = etabs.SapModel;
         return _model!;
     }

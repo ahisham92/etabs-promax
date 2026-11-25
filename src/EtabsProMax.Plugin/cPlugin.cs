@@ -36,11 +36,12 @@ internal static class Launcher
 {
     public static void Start() => Process.Start(StartInfo(
         Path.GetDirectoryName(typeof(Launcher).Assembly.Location) ?? "",
-        Path.GetDirectoryName(typeof(object).Assembly.Location) ?? ""))?.Dispose();
+        Path.GetDirectoryName(typeof(object).Assembly.Location) ?? "", Environment.ProcessId))?.Dispose();
 
     /// <param name="pluginFolder">Where this plug-in lies.</param>
     /// <param name="runtimeFolder">The running .NET's own folder, such as C:\Program Files\dotnet\shared\Microsoft.NETCore.App\8.0.29.</param>
-    internal static ProcessStartInfo StartInfo(string pluginFolder, string runtimeFolder)
+    /// <param name="etabsPid">This ETABS window's process id: the assistant works on this ETABS, whichever others are open.</param>
+    internal static ProcessStartInfo StartInfo(string pluginFolder, string runtimeFolder, int etabsPid)
     {
         var assistant = Path.Combine(pluginFolder, "EtabsProMax.dll");
         if (!File.Exists(assistant)) throw new IOException($"EtabsProMax.dll is missing from {pluginFolder}. Copy the whole ETABS ProMax folder, not only the plug-in file.");
@@ -50,6 +51,8 @@ internal static class Launcher
         if (!File.Exists(dotnet)) throw new IOException($"The .NET that ETABS runs on was not found at {dotnet}.");
         var info = new ProcessStartInfo(dotnet) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = pluginFolder };
         info.ArgumentList.Add(assistant);
+        info.ArgumentList.Add("--etabs-pid");
+        info.ArgumentList.Add(etabsPid.ToString(System.Globalization.CultureInfo.InvariantCulture));
         return info;
     }
 }
