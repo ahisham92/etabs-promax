@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Build-time stand-in for SAP2000's API file, SAP2000v1.dll: only the three types a plug-in must name, with the
+       same assembly name and version. Never shipped, and holds no code of CSI's. SAP2000 26 and later run on .NET 8,
+       which binds this by name and version alone, so the stand-in needs no key. For an older SAP2000 on .NET
+       Framework, put the public half of SAP2000v1.dll's key (sn -e SAP2000v1.dll sap2000v1-public.snk) beside this
+       file and the stand-in is signed with it, so the plug-in binds to the real SAP2000v1.dll there too. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>SAP2000v1</AssemblyName>
+    <RootNamespace>SAP2000v1</RootNamespace>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <LangVersion>latest</LangVersion>
+    <NoWarn>IDE1006;CS8981</NoWarn>
+  </PropertyGroup>
+  <PropertyGroup Condition="Exists('sap2000v1-public.snk')">
+    <SignAssembly>true</SignAssembly>
+    <PublicSign>true</PublicSign>
+    <AssemblyOriginatorKeyFile>sap2000v1-public.snk</AssemblyOriginatorKeyFile>
+  </PropertyGroup>
+</Project>

@@ -71,7 +71,7 @@ textarea{width:100%;min-height:64px;resize:vertical}
     </div>
     <div id="stage">
       <canvas id="c"></canvas>
-      <div id="drop"><div><b>Open an CSI ProMax pack (.cpmx)</b><br>Use Open a pack, or drop the file here. Nothing is uploaded: the file is read on this computer only, and ETABS is not needed.</div></div>
+      <div id="drop"><div><b>Open an CSI ProMax pack (.cpmx)</b><br>Use Open a pack, or drop the file here. Nothing is uploaded: the file is read on this computer only, and no CSI program (ETABS, SAP2000, SAFE) is needed.</div></div>
       <div id="legend" hidden></div>
       <div id="pick"></div>
     </div>
@@ -162,7 +162,7 @@ function load(pack) {
   view.cx = (lo[0] + hi[0]) / 2; view.cy = (lo[1] + hi[1]) / 2; view.cz = (lo[2] + hi[2]) / 2;
   view.size = Math.max(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2], 1); view.zoom = 1; view.panX = view.panY = 0;
   const man = P.manifest || {}, u = man.units || {};
-  $("meta").textContent = [man.model || "Model", u.force && u.length ? u.force + ", " + u.length : "", man.etabs ? "ETABS " + man.etabs : "", man.created ? "packed " + String(man.created).replace("T", " ").slice(0, 16) : "", frames.length + " frames, " + areas.length + " areas"].filter(Boolean).join(" · ");
+  $("meta").textContent = [man.model || "Model", u.force && u.length ? u.force + ", " + u.length : "", man.etabs ? (man.program || "ETABS") + " " + man.etabs : "", man.created ? "packed " + String(man.created).replace("T", " ").slice(0, 16) : "", frames.length + " frames, " + areas.length + " areas"].filter(Boolean).join(" · ");
   document.title = (man.model || "Model") + " · CSI ProMax Viewer";
   $("story").innerHTML = "<option value=''>All</option>" + (m.stories || []).slice().reverse().filter(s => frames.some(f => f.story === s.name)).map(s => `<option>${esc(s.name)}</option>`).join("");
   readRatios(); readDisplacements();

@@ -42,7 +42,25 @@ namespace CsiProMax.Assistant.Etabs
                 catch (Exception) { }
             }
             var programs = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
-            return Path.Combine(programs, "Computers and Structures", program.UsualFolder, program.ApiFile);
+            var usual = Path.Combine(programs, "Computers and Structures", program.UsualFolder, program.ApiFile);
+            if (File.Exists(usual)) return usual;
+            // Another version than the usual one (SAP2000 24, 25, 26...): the newest installed that has the API file.
+            try
+            {
+                var newest = Directory.GetDirectories(Path.Combine(programs, "Computers and Structures"), program.Name + " *")
+                    .Select(d => Path.Combine(d, program.ApiFile)).Where(File.Exists)
+                    .OrderByDescending(f => Version(Path.GetFileName(Path.GetDirectoryName(f)))).FirstOrDefault();
+                if (newest != null) return newest;
+            }
+            catch (Exception) { }
+            return usual;
+        }
+
+        private static double Version(string folder)
+        {
+            var digits = new string(folder.SkipWhile(c => !char.IsDigit(c)).TakeWhile(c => char.IsDigit(c) || c == '.').ToArray());
+            double value;
+            return double.TryParse(digits, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out value) ? value : 0;
         }
 
         [DllImport("ole32.dll")]
@@ -67,9 +85,11 @@ namespace CsiProMax.Assistant.Etabs
                     return new EtabsApi(running, type);
                 var helper = Activator.CreateInstance(api.GetType(program.ApiNamespace + ".Helper", true));
                 var helperType = api.GetType(program.ApiNamespace + ".cHelper", true);
-                var app = pid == null
+                // Older APIs (SAP2000 before 23, say) have no GetObjectProcess: then the active instance is the one.
+                var byProcess = pid == null ? null : helperType.GetMethod("GetObjectProcess");
+                var app = byProcess == null
                     ? helperType.GetMethod("GetObject").Invoke(helper, new object[] { progId })
-                    : helperType.GetMethod("GetObjectProcess").Invoke(helper, new object[] { progId, pid.Value });
+                    : byProcess.Invoke(helper, new object[] { progId, pid.Value });
                 return app == null ? null : new EtabsApi(app, type);
             }
             catch (Exception ex) when (ex is TargetInvocationException || ex is MissingMethodException || ex is COMException || ex is NullReferenceException) { return null; }

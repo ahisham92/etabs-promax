@@ -1,6 +1,6 @@
 # CSI ProMax
 
-An AI assistant for the CSI programs, built the way [Sketch ProMax](https://github.com/ahisham92/sketch-promax) is for Revit. It works with ETABS today. SAP2000 and SAFE share the same CSI API and plug into the same core later. Two parts need no CSI program on the PC: a Modeler that writes ETABS files, and a Viewer for reviewing a model and its results.
+An AI assistant for the CSI programs, built the way [Sketch ProMax](https://github.com/ahisham92/sketch-promax) is for Revit. It works with ETABS and SAP2000. SAFE shares the same CSI API and plugs into the same core. Two parts need no CSI program on the PC: a Modeler that writes ETABS files, and a Viewer for reviewing a model and its results.
 
 It was called ETABS ProMax until version 0.4.
 
@@ -13,11 +13,12 @@ It was called ETABS ProMax until version 0.4.
 | **CSI ProMax in ETABS** | Its own chat window beside ETABS, opened from ETABS's Tools menu. Claude reads, models, loads, runs and checks the open model through ETABS's API. The full Sketch ProMax panel: workers and parallel jobs, home screen and prompt library, history, questions, autopilot and routines, phone connection, settings and updater, bug reports, files in and out (Excel, Word, PowerPoint, PDF, DWG, DXF). | Licensed ETABS 23, Claude Code on your Claude plan |
 | **Results and checks** | Drift, torsion, soft and heavy stories, modes, design ratios, one check report, snapshots and compare. Every value is read from ETABS's own tables. | ETABS with a finished analysis |
 | **Review pack and Viewer** | `export_pack` writes one `.cpmx` file (model, ETABS's result tables, checks) and a Viewer page with the pack inside. A reviewer opens the page in any browser: 3D view, deformed shape, design ratios in colour, tables, checks, and comments that go back to the engineer. | Nothing for the reviewer |
-| **Modeler** | The same window with no ETABS behind it. The chat builds a model (stories, grids, sections, members, loads, combinations), a 3D view follows it in the browser, and it saves `.e2k` for ETABS to import. No analysis, no design. | Claude Code |
+| **CSI ProMax in SAP2000** | The same window from SAP2000's Tools menu. SAP2000 has no stories, so its tools build with joints, frames and areas in 3D, support joints, load joints and members in any direction, release frame ends, and read joint displacements, frame forces, base reactions, modes and SAP2000's steel and concrete design ratios. | Licensed SAP2000 (26 or later on .NET 8; older on .NET Framework once its key is in the stand-in, see below), Claude Code |
+| **Modeler** | The same window with no ETABS behind it. The chat builds a model (stories, grids, sections, members, loads, combinations), a 3D view follows it in the browser, and it saves `.e2k` for ETABS to import, or `.s2k` for SAP2000 (`save_model_s2k`: stories become Z grid lines and groups, each rigid diaphragm a diaphragm constraint per story). No analysis, no design. | Claude Code |
 
 ## Install
 
-Nothing is an .exe and nothing needs administrator rights. It runs on the .NET 8 that ETABS 23 itself uses. See [docs/INSTALL.txt](docs/INSTALL.txt): copy the folder, add `CsiProMaxPlugin.dll` in ETABS under Tools > Add/Show Plugins, then Tools > CSI ProMax. Later versions download by themselves from this repository's releases.
+Nothing is an .exe and nothing needs administrator rights. It runs on the .NET 8 that ETABS 23 itself uses. See [docs/INSTALL.txt](docs/INSTALL.txt): copy the folder, add `CsiProMaxPlugin.dll` in ETABS under Tools > Add/Show Plugins, then Tools > CSI ProMax. In SAP2000: Tools > Add/Show Plug-Ins, plug-in name `CsiProMaxSapPlugin`, the path of `CsiProMaxSapPlugin.dll` in the same folder, menu text `CSI ProMax`. Later versions download by themselves from this repository's releases.
 
 The Modeler starts from the window's View menu, or from a desktop shortcut that the same menu makes.
 
@@ -37,10 +38,12 @@ dotnet build CsiProMax.sln
 dotnet run --project tests/CsiProMax.Tests
 dotnet publish src/CsiProMax.Assistant -c Release -o "publish/CSI ProMax"
 dotnet publish src/CsiProMax.Plugin    -c Release -o "publish/CSI ProMax"
+dotnet publish src/CsiProMax.Plugin.Sap -c Release -o "publish/CSI ProMax"
 ```
 
 ```
 dotnet CsiProMax.dll --selftest             checks each ETABS API call against the open model, read-only
+dotnet CsiProMax.dll --selftest --program sap2000   the same against the open SAP2000
 dotnet CsiProMax.dll --selftest --changes   also adds and removes a few objects: use a scratch model
 dotnet CsiProMax.dll --demo                 the window on a small stand-in model, without ETABS
 dotnet CsiProMax.dll --modeler [file]       the Modeler, on a new model or an .e2k or .cpm file
@@ -51,12 +54,15 @@ Pushing a tag `vX.Y.Z` that matches the assistant's version publishes the releas
 ## Layout
 
 ```
-src/CsiProMax.Core/       Model, .e2k reader and writer, .cpm file, checks, quantities. No CSI program, no Windows.
-src/CsiProMax.Assistant/  The window: Etabs/ (the link to a CSI program), Tools/ (model, results, pack, Modeler tools), Panel/ (the Sketch ProMax panel).
+src/CsiProMax.Core/       Model, .e2k reader and writer, .s2k writer (S2k/, on the CSI table text in CsiTables/), .cpm file, checks, quantities. No CSI program, no Windows.
+src/CsiProMax.Assistant/  The window: Etabs/ (the link to a CSI program), Sap2000/ (SAP2000's link, tools and wording), Tools/ (model, results, pack, Modeler tools), Panel/ (the Sketch ProMax panel).
 src/CsiProMax.Viewer/     The Viewer page (one HTML file, no dependencies).
-src/CsiProMax.Plugin/     The entry in ETABS's Tools menu: starts the assistant.
+src/CsiProMax.Plugin/     The entry in ETABS's Tools menu: starts the assistant (Launcher.cs is shared by every program's plug-in).
+src/CsiProMax.Plugin.Sap/ The entry in SAP2000's Tools menu.
 src/CsiProMax.Cli/        cpm: make, convert, check and measure models from the command line.
 src/EtabsApiStub/         Build-time stand-in for the ETABSv1.dll types a plug-in names. Never shipped.
+src/SapApiStub/           The same for SAP2000v1.dll. Unsigned, which SAP2000 on .NET 8 accepts; for an older SAP2000 on .NET Framework put the
+                          public key (sn -e SAP2000v1.dll sap2000v1-public.snk) beside it and it is signed with it.
 tests/CsiProMax.Tests/    Checks that run without ETABS.
 ```
 
@@ -64,10 +70,13 @@ tests/CsiProMax.Tests/    Checks that run without ETABS.
 
 Everything above the link is shared: the panel, the licence, the workers, the chat engine, the updater, the checks, the pack and the Viewer. A program is:
 
-1. A row in `Etabs/CsiProgram.cs` (process name, API file, ProgID). ETABS is checked. The SAP2000 and SAFE rows are there but not confirmed, so they are switched off.
+1. A row in `Etabs/CsiProgram.cs` (process name, API file, ProgID). ETABS is checked. SAP2000 is on (built, tested here, not yet checked in SAP2000 itself).
 2. The link, `ICsiLink`. `ComEtabs` drives a running program through the CSI API by name, so it serves any row. `MemoryEtabs` is the demo and `OfflineEtabs` is the Modeler.
 3. A plug-in entry built against that program's API file, and that program's wording in the prompts.
+4. Where the program differs, its own folder: `Sap2000/SapLink.cs` (no stories; joints, frames and areas read one by one), `SapTools.cs` (tools that replace or add to the shared ones by name, through `Tools/ProgramTools.cs`) and `SapPrompt.cs` (through `Panel/Agent/ProgramPrompt.cs`).
 
 ## Status
 
 Checked in ETABS Plus 23.2.0 on the owner's PC: the window and its menus, chat answers about the model, adding and deleting with approval, parallel jobs, files in each format, DWG reading. Checked here in tests and a browser only, not yet in ETABS: the result checks against a real analysed model, the review pack from a real model, and the Modeler window.
+
+SAP2000 (added in 0.4): built and checked here with a stand-in SAP2000 (joints, frames, areas, results through the analysis results) and the .s2k writer's tables read back. Not yet checked in SAP2000 itself: the plug-in loading, the API calls on a live model, design result reading, and an .s2k import. The .s2k tables and field names follow SAP2000's own text export and need that import to confirm them.

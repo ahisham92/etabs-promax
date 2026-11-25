@@ -25,7 +25,8 @@ jobs:
           dotnet-version: 8.0.x
       - run: dotnet publish src/CsiProMax.Assistant -c Release -p:DebugType=none -o "publish/CSI ProMax"
       - run: dotnet publish src/CsiProMax.Plugin -c Release -p:DebugType=none -o "publish/CSI ProMax"
-      - run: test ! -e "publish/CSI ProMax/ETABSv1.dll" && ! ls "publish/CSI ProMax" | grep -i '\.exe$'
+      - run: dotnet publish src/CsiProMax.Plugin.Sap -c Release -p:DebugType=none -o "publish/CSI ProMax"
+      - run: test ! -e "publish/CSI ProMax/ETABSv1.dll" && test ! -e "publish/CSI ProMax/SAP2000v1.dll" && ! ls "publish/CSI ProMax" | grep -i '\.exe$'
       - uses: actions/upload-artifact@v4
         with:
           name: CSI-ProMax

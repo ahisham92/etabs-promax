@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The SAP2000 plug-in: CSI ProMax's entry in SAP2000's Tools menu (Tools > Add/Show Plug-Ins). SAP2000 loads this
+       DLL itself; it starts the assistant that lies beside it (CsiProMax.dll) with the PC's .NET 8, as the ETABS
+       plug-in does. Built for .NET Standard 2.0, so SAP2000 on .NET 8 (26 and later) and on .NET Framework both load it. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>CsiProMaxSapPlugin</AssemblyName>
+    <RootNamespace>CsiProMaxSapPlugin</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <Version>0.4.0</Version>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <NoWarn>IDE1006;CS8981</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Compile against the stand-in only: inside SAP2000 the real SAP2000v1.dll is already loaded. -->
+    <ProjectReference Include="../SapApiStub/SapApiStub.csproj" Private="false" />
+    <!-- The same launcher as the ETABS plug-in. -->
+    <Compile Include="../CsiProMax.Plugin/Launcher.cs" />
+    <InternalsVisibleTo Include="CsiProMax.Tests" />
+  </ItemGroup>
+</Project>

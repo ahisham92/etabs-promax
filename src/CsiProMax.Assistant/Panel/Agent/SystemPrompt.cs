@@ -120,6 +120,6 @@ internal static class SystemPrompt
         """;
 
     public static string Build(string firmStandards) =>
-        (App.Modeler ? Base + Modeler : Base) + "\n" + Practice +
+        (App.Modeler ? Base + Modeler : Base) + ProgramPrompt.For(ProgramPrompt.Current) + "\n" + Practice +
         (string.IsNullOrWhiteSpace(firmStandards) ? "" : "\n\nFirm standards to follow (from the firm's settings):\n" + firmStandards.Trim());
 }

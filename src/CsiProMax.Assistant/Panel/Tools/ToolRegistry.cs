@@ -51,7 +51,9 @@ public sealed class ToolRegistry
         // The ETABS model: read, build, load, analyse (Assistant/Tools/EtabsTools).
         foreach (var tool in CsiProMax.Assistant.Tools.EtabsTools.All) registry.Add(new ModelTool(tool));
         if (modeler)
-            foreach (var tool in CsiProMax.Assistant.Tools.ModelerTools.All) registry.Add(new ModelTool(tool));
+            foreach (var tool in CsiProMax.Assistant.Tools.ModelerTools.All.Concat(CsiProMax.Assistant.Tools.ProgramTools.Modeler)) registry.Add(new ModelTool(tool));
+        // The program's own tools (SAP2000's, say), in place of shared ones with the same name.
+        foreach (var tool in CsiProMax.Assistant.Tools.ProgramTools.For(CsiProMax.Agent.ProgramPrompt.Current)) registry.Add(new ModelTool(tool));
         // Recipes replay other tools, so they need the registry itself.
         registry.Add(new SaveRecipeTool(registry));
         registry.Add(new RunRecipeTool(registry));

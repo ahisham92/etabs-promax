@@ -24,6 +24,8 @@ public static class Pack
         "Story Definitions", "Modal Participating Mass Ratios", "Modal Periods And Frequencies", "Base Reactions", "Story Drifts",
         "Story Max Over Avg Displacements", "Story Max Over Avg Drifts", "Story Stiffness", "Story Forces", "Mass Summary by Story",
         "Centers Of Mass And Rigidity", "Joint Displacements", "Joint Reactions", "Diaphragm Center Of Mass Displacements",
+        // SAP2000's own names for what it has instead of stories.
+        "Assembled Joint Masses", "Element Forces - Frames",
     ];
 
     public sealed record Built(byte[] Zip, JsonObject Content, int Frames, int Areas, IReadOnlyList<string> Tables, IReadOnlyList<string> Notes);
@@ -39,7 +41,7 @@ public static class Pack
         {
             ["format"] = "cpmx", ["version"] = Version,
             ["model"] = file.Length > 0 ? Path.GetFileNameWithoutExtension(file) : "Unsaved model",
-            ["file"] = info.File, ["etabs"] = info.Version,
+            ["file"] = info.File, ["etabs"] = info.Version, ["program"] = e.Program.Name,
             ["units"] = new JsonObject { ["force"] = info.Force, ["length"] = info.Length, ["temperature"] = info.Temperature },
             ["analysis_run"] = info.Locked,
             ["created"] = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture),

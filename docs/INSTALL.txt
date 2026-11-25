@@ -15,10 +15,21 @@ Older ETABS (18 to 22). Not yet confirmed on these versions: please report what 
 2. Then the three steps above.
 If the window does not open, CSI ProMax shows a message that says what is missing.
 
+SAP2000 (the same folder serves ETABS and SAP2000)
+1. Step 1 above, if it is not done yet.
+2. In SAP2000: Tools > Add/Show Plug-Ins. Plug-in name "CsiProMaxSapPlugin", path
+   Documents\CSI ProMax\CsiProMaxSapPlugin.dll, menu text "CSI ProMax". Add it.
+3. Open a model, then Tools > CSI ProMax. The window opens beside SAP2000.
+SAP2000 26 and later run on .NET 8. An older SAP2000 needs the .NET Desktop Runtime 8 (see above) and may not load
+the plug-in yet: then start the window from a command prompt in that folder with
+   dotnet CsiProMax.dll --program sap2000
+while SAP2000 is open. Not yet confirmed in SAP2000: please report what happens.
+
 The chat runs on Claude Code on your own Claude plan. The window offers to install it or sign in when needed.
 A PC other than the owner's needs a licence key: the Licence window shows this PC's code (CPM-....); send it to the
 owner and paste the key you get back.
 Later versions download by themselves (CSI ProMax > Check for updates). The CSI program must be open and licensed on
 this PC: CSI ProMax never starts, unlocks or stands in for it.
 
-The Modeler (no ETABS needed): in the window, View > Put a Modeler shortcut on the desktop.
+The Modeler (no ETABS needed): in the window, View > Put a Modeler shortcut on the desktop. It saves .e2k for ETABS and
+.s2k for SAP2000 (SAP2000: File > Import > SAP2000 .s2k Text File).
