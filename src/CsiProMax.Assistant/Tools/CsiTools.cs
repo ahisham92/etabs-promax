@@ -715,14 +715,34 @@ public static class CsiTools
             default: throw new ToolInputException("'action' is fields, read, add, update or delete.");
         }
 
+        var unlocked = false;
         var log = (JsonObject)e.Raw("apply the table edit", m =>
         {
+            // An analysed model is locked, and SAP2000 26 refuses a table edit then (SetTableForEditingArray answered 1 on
+            // an analysed scratch model; 0.4.22 field test): it is unlocked first, as the program itself does when a
+            // definition changes, and the answer says its results are gone.
+            if (Convert.ToBoolean(m.GetModelIsLocked()))
+            {
+                Ok(program, m.SetModelIsLocked(false), "unlock the model for the table edit");
+                unlocked = true;
+            }
             int version = 0; string[] f = fields.ToArray(); string[] data = rows.SelectMany(r => r).ToArray();
-            Ok(program, m.DatabaseTables.SetTableForEditingArray(table.Key, ref version, ref f, rows.Count, ref data), $"take the edit of {table.Name}");
-            int fatal = 0, errors = 0, warnings = 0, info = 0; string text = "";
-            Ok(program, m.DatabaseTables.ApplyEditedTables(true, ref fatal, ref errors, ref warnings, ref info, ref text), $"apply the edit of {table.Name}");
-            return new JsonObject { ["fatal_errors"] = fatal, ["errors"] = errors, ["warnings"] = warnings, ["import_log"] = text ?? "" };
+            try
+            {
+                Ok(program, m.DatabaseTables.SetTableForEditingArray(table.Key, ref version, ref f, rows.Count, ref data), $"take the edit of {table.Name}");
+                int fatal = 0, errors = 0, warnings = 0, info = 0; string text = "";
+                Ok(program, m.DatabaseTables.ApplyEditedTables(true, ref fatal, ref errors, ref warnings, ref info, ref text), $"apply the edit of {table.Name}");
+                return new JsonObject { ["fatal_errors"] = fatal, ["errors"] = errors, ["warnings"] = warnings, ["import_log"] = text ?? "" };
+            }
+            catch
+            {
+                // An edit the program did not take is given up, so the program is not left in table editing (after one
+                // refused edit SAP2000 then refused to open the table, and listed no load patterns at all).
+                try { m.DatabaseTables.CancelTableEditing(); } catch { /* nothing more to undo */ }
+                throw;
+            }
         })!;
+        if (unlocked) log["unlocked"] = $"The model was analysed: it was unlocked for the edit, so its analysis results are gone. Run the analysis again.";
         e.Refresh();
         var bad = log["fatal_errors"]!.GetValue<int>() + log["errors"]!.GetValue<int>();
         log["table"] = table.Name;

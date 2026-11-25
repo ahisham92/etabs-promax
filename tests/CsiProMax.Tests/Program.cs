@@ -973,6 +973,18 @@ Test("tables for editing: every load pattern is selected for display first (SAP2
     var helper = File.ReadAllText(Path.Combine(root, "src", "CsiProMax.Assistant", "Etabs", "EditableTables.cs"));
     Check(helper.Contains("m.DatabaseTables.SetLoadPatternsSelectedForDisplay(ref names)") && helper.Contains("m.LoadPatterns.GetNameList(ref n, ref names)"), "ShowEveryPattern does not select the model's own patterns");
 });
+Test("edit_table: an analysed model is unlocked first, and a refused edit is cancelled", () =>
+{
+    var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Tools", "CsiTools.cs"));
+    var at = source.IndexOf("var log = (JsonObject)e.Raw(\"apply the table edit\"", StringComparison.Ordinal);
+    Check(at > 0, "the table edit's apply step is gone");
+    var body = source.Substring(at, source.IndexOf("e.Refresh();", at, StringComparison.Ordinal) - at);
+    var unlock = body.IndexOf("m.SetModelIsLocked(false)", StringComparison.Ordinal);
+    var set = body.IndexOf("m.DatabaseTables.SetTableForEditingArray(", StringComparison.Ordinal);
+    Check(unlock > 0 && unlock < set, "an analysed (locked) model is not unlocked before the edit; SAP2000 26 refuses it then");
+    Check(body.Contains("m.DatabaseTables.CancelTableEditing()"), "a refused edit is not cancelled; SAP2000 then refused the table and listed no patterns");
+    Check(source.Contains("log[\"unlocked\"]"), "the answer does not say the results are gone");
+});
 foreach (var (name, body) in CdtSdkTests.All()) Test(name, body);
 foreach (var (name, body) in HandModelTests.All()) Test(name, body);
 foreach (var (name, body) in AiModeTests.All()) Test(name, body);
