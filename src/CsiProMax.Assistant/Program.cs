@@ -108,9 +108,19 @@ public static class Program
             using var check = new ComEtabs(etabsPid, program);
             // --full: every tool, on scratch models in windows of the programs the test opens itself (20 to 60 minutes).
             var link = demo ? new MemoryEtabs() : CsiProMax.Assistant.Tools.ProgramTools.Live(check);
-            var outcome = args.Contains("--full")
-                ? FieldTest.Run(link, new FieldTest.Options { Full = true, StartedFrom = "the command line", Progress = step => Console.Error.WriteLine("... " + step) })
-                : FieldTest.Run(link, args.Contains("--changes"), "the command line");
+            FieldTest.Outcome outcome;
+            try
+            {
+                outcome = args.Contains("--full")
+                    ? FieldTest.Run(link, new FieldTest.Options { Full = true, StartedFrom = "the command line", Progress = step => Console.Error.WriteLine("... " + step) })
+                    : FieldTest.Run(link, args.Contains("--changes"), "the command line");
+            }
+            catch (InvalidOperationException ex) when (ex.Message.Contains("already running", StringComparison.Ordinal))
+            {
+                // Another full test holds the PC: said, and nothing is started.
+                Console.Error.WriteLine(ex.Message);
+                return 2;
+            }
             Console.WriteLine(outcome.Report);
             Console.WriteLine("Saved: " + outcome.File);
             if (outcome.Zip is not null) Console.WriteLine("To send: " + outcome.Zip);

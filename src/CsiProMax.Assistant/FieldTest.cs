@@ -108,8 +108,49 @@ public static class FieldTest
     public static Outcome Run(ICsiLink link, Options o)
     {
         if (Interlocked.Exchange(ref _running, 1) == 1) throw new InvalidOperationException("A field test is already running.");
-        try { return RunCore(link, o); }
-        finally { Volatile.Write(ref _running, 0); }
+        Mutex? pc = null;
+        try
+        {
+            // One full test on the PC at a time, whichever window or command line started it: a CSI program's API hands a
+            // second "new" window request the window already started, so two full tests at once drive the same scratch
+            // window, each opening its own model over the other's, until one of them waits for ever.
+            if (o.Full) pc = TakePcLock();
+            return RunCore(link, o);
+        }
+        finally
+        {
+            if (pc is not null) { try { pc.ReleaseMutex(); } catch (ApplicationException) { } pc.Dispose(); }
+            Volatile.Write(ref _running, 0);
+        }
+    }
+
+    /// <summary>The name of the PC-wide lock a full field test holds while it runs.</summary>
+    internal const string PcLockName = "CsiProMax.FullFieldTest";
+
+    private static string PcLockNote => Path.Combine(Path.GetTempPath(), PcLockName + ".txt");
+
+    /// <summary>
+    /// The PC-wide lock of the full field test, or an InvalidOperationException that says which test holds it. A lock left
+    /// by a test that ended without letting go (its process was ended) is taken over.
+    /// </summary>
+    internal static Mutex TakePcLock()
+    {
+        var pc = new Mutex(false, PcLockName);
+        bool mine;
+        try { mine = pc.WaitOne(0); }
+        catch (AbandonedMutexException) { mine = true; }
+        if (!mine)
+        {
+            pc.Dispose();
+            string who;
+            try { who = File.Exists(PcLockNote) ? File.ReadAllText(PcLockNote).Trim() : ""; }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { who = ""; }
+            throw new InvalidOperationException("A full field test is already running on this PC" + (who.Length > 0 ? $" ({who})" : "") +
+                ". Two at once would drive the same scratch window of the CSI program, so this one did not start. Wait for that one's report, or end it, and start this one again.");
+        }
+        try { File.WriteAllText(PcLockNote, $"CSI ProMax {global::CsiProMax.Update.Updater.CurrentText}, process {Environment.ProcessId}, started {DateTime.Now:HH:mm}"); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        return pc;
     }
 
     /// <summary>A field test that runs in the background (the full one takes a while): what it is at, and its outcome when done.</summary>
@@ -134,6 +175,8 @@ public static class FieldTest
     public static Running Start(ICsiLink link, Options o)
     {
         if (IsRunning || Last is { Task.IsCompleted: false }) throw new InvalidOperationException("A field test is already running.");
+        // Said now, not after the start: a full test of another window or the command line holds the PC's lock.
+        if (o.Full) { var pc = TakePcLock(); pc.ReleaseMutex(); pc.Dispose(); }
         var run = new Running(o.Full, o.StartedFrom);
         var mine = o with { Progress = step => { run.Saw(step); o.Progress?.Invoke(step); } };
         run.Task = System.Threading.Tasks.Task.Factory.StartNew(() => Run(link, mine), CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
