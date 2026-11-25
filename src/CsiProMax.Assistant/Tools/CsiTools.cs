@@ -602,7 +602,7 @@ public static class CsiTools
             })!;
 
         string? readNote = null;
-        var (fields, rows) = ((string[], List<string[]>))e.Raw("read a table for editing", m =>
+        var (fields, rows, readVersion) = ((string[], List<string[]>, int))e.Raw("read a table for editing", m =>
         {
             int version = 0, records = 0; string[] f = [], data = [];
             CsiProMax.Assistant.Etabs.EditableTables.ShowEveryPattern(m);
@@ -656,7 +656,7 @@ public static class CsiTools
                 }
                 readNote = string.Join("; ", tried);
             }
-            return (f, list);
+            return (f, list, version);
         })!;
 
         if (action == "read")
@@ -679,6 +679,7 @@ public static class CsiTools
         List<(int Index, string Value)> Pairs(string name) =>
             Strings(a.TryGetProperty(name, out var p) ? p : default).Select(x => (Field(x.Key), x.Value)).ToList();
 
+        var original = rows.Select(r => r.ToArray()).ToList();
         var changed = 0;
         switch (action)
         {
@@ -715,13 +716,34 @@ public static class CsiTools
             default: throw new ToolInputException("'action' is fields, read, add, update or delete.");
         }
 
+        // A refused apply must not cost the model its table: SAP2000 26 refused an update of "Load Pattern Definitions"
+        // and the scratch model was left with no load patterns at all (0.4.22 field test). The edit is cancelled, the
+        // table read back, and the rows as they were put back when any are gone.
         var log = (JsonObject)e.Raw("apply the table edit", m =>
         {
-            int version = 0; string[] f = fields.ToArray(); string[] data = rows.SelectMany(r => r).ToArray();
-            Ok(program, m.DatabaseTables.SetTableForEditingArray(table.Key, ref version, ref f, rows.Count, ref data), $"take the edit of {table.Name}");
-            int fatal = 0, errors = 0, warnings = 0, info = 0; string text = "";
-            Ok(program, m.DatabaseTables.ApplyEditedTables(true, ref fatal, ref errors, ref warnings, ref info, ref text), $"apply the edit of {table.Name}");
-            return new JsonObject { ["fatal_errors"] = fatal, ["errors"] = errors, ["warnings"] = warnings, ["import_log"] = text ?? "" };
+            string? refused = null; int fatal = 0, errors = 0, warnings = 0, info = 0; string text = "";
+            try
+            {
+                int version = readVersion; string[] f = fields.ToArray(); string[] data = rows.SelectMany(r => r).ToArray();
+                int took = Convert.ToInt32(m.DatabaseTables.SetTableForEditingArray(table.Key, ref version, ref f, rows.Count, ref data));
+                if (took != 0) refused = $"{program} refused to take the edit of {table.Name} (answer {took})";
+                else
+                {
+                    int applied = Convert.ToInt32(m.DatabaseTables.ApplyEditedTables(true, ref fatal, ref errors, ref warnings, ref info, ref text));
+                    text ??= "";
+                    if (applied != 0) refused = $"{program} refused to apply the edit of {table.Name} (answer {applied})";
+                    else if (fatal + errors > 0) refused = $"{program} did not take the edit of {table.Name} ({fatal} fatal, {errors} errors)";
+                }
+            }
+            catch (Exception ex) when (ex is not EtabsException) { refused = $"{program} failed on the edit of {table.Name}: {ex.Message}"; }
+            if (refused is null)
+                return new JsonObject { ["fatal_errors"] = fatal, ["errors"] = errors, ["warnings"] = warnings, ["import_log"] = text ?? "" };
+
+            try { m.DatabaseTables.CancelTableEditing(); } catch { /* nothing more to undo */ }
+            var restored = RestoreRows(m, table.Key, fields, original);
+            var cut = (text ?? "").Replace("\r", " ").Replace("\n", " ").Trim();
+            if (cut.Length > 600) cut = cut[..600] + "...";
+            throw new EtabsException($"{refused}. {restored}" + (cut.Length > 0 ? $" Its import log: {cut}" : ""));
         })!;
         e.Refresh();
         var bad = log["fatal_errors"]!.GetValue<int>() + log["errors"]!.GetValue<int>();
@@ -730,6 +752,30 @@ public static class CsiTools
         log["applied"] = bad == 0;
         if (bad > 0) log["note"] = $"{program} did not take the edit as it was: read its import log.";
         return log;
+    }
+
+    /// <summary>
+    /// After a refused edit: reads <paramref name="key"/> back and, when it has fewer rows than <paramref name="original"/>,
+    /// puts the original rows back. Says what it found, for the error message.
+    /// </summary>
+    internal static string RestoreRows(dynamic m, string key, string[] fields, List<string[]> original)
+    {
+        try
+        {
+            int version = 0, records = 0; string[] f = [], data = [];
+            CsiProMax.Assistant.Etabs.EditableTables.ShowEveryPattern(m);
+            int got = Convert.ToInt32(m.DatabaseTables.GetTableForEditingArray(key, "", ref version, ref f, ref records, ref data));
+            if (got == 0 && records >= original.Count) return $"The table is as it was ({records} rows).";
+            if (original.Count == 0) return "The table had no rows to put back.";
+            string[] f2 = fields.ToArray(); string[] all = original.SelectMany(r => r).ToArray();
+            int took = Convert.ToInt32(m.DatabaseTables.SetTableForEditingArray(key, ref version, ref f2, original.Count, ref all));
+            int fatal = 0, errors = 0, warnings = 0, info = 0; string log = "";
+            int applied = took == 0 ? Convert.ToInt32(m.DatabaseTables.ApplyEditedTables(true, ref fatal, ref errors, ref warnings, ref info, ref log)) : -1;
+            if (took == 0 && applied == 0 && fatal + errors == 0) return $"Its {original.Count} rows as they were were put back (the read back had {records}).";
+            try { m.DatabaseTables.CancelTableEditing(); } catch { /* nothing more to undo */ }
+            return $"The read back had {records} of its {original.Count} rows and putting them back was refused too: check the model before saving it.";
+        }
+        catch (Exception ex) { return $"It could not be read back ({ex.Message}): check the model before saving it."; }
     }
 
     private static void Ok(string program, object result, string what)

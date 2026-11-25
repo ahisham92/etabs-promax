@@ -284,6 +284,15 @@ static class CsiToolsTests
             Equal(1, shown["rows_total"]!.GetValue<int>(), "read for display: " + shown.ToJsonString());
             Check(shown["read_note"]!.GetValue<string>().Contains("display", StringComparison.Ordinal), "the reads tried are said");
             api.EditingEmpty = false;
+            // A refused apply that empties the table gets the rows back and says so (0.4.22: SAP2000 lost every pattern).
+            api.WipeOnApply = 1;
+            var count = api.Table.Count;
+            string said = "";
+            try { Run(CsiProgram.Safe, "edit_table", """{"table":"Load Pattern Definitions","action":"update","match":{"Name":"Dead"},"set":{"SelfWtMult":"0.9"}}""", link); }
+            catch (EtabsException ex) { said = ex.Message; }
+            Check(said.Contains("were put back", StringComparison.Ordinal) && said.Contains("could not be imported", StringComparison.Ordinal), "a refused apply says the rows were put back, with its log: " + said);
+            Equal(count, api.Table.Count, "the rows are back after a refused apply");
+            Equal("1", api.Table[0][2], "the rows are back as they were");
 
             var root = Path.Combine(Path.GetTempPath(), "cpm-csi-" + Guid.NewGuid().ToString("N"));
             var before = ResultTools.SnapshotRoot;
@@ -497,6 +506,8 @@ public sealed class FakeApi
     public Dictionary<string, string> SeismicCodes { get; } = new(StringComparer.OrdinalIgnoreCase);
     public (bool Elements, bool Added, bool Loads, string[] Patterns, double[] Factors) Mass;
     public bool EditingEmpty;
+    /// <summary>The next applies that refuse and leave the patterns' table empty, as SAP2000 26 did (0.4.22 field test).</summary>
+    public int WipeOnApply;
 
     public sealed class PatternsApi(FakeApi o)
     {
@@ -702,6 +713,13 @@ public sealed class FakeApi
         public int CancelTableEditing() { o._pending.Clear(); return 0; }
         public int ApplyEditedTables(bool FillImportLog, ref int NumFatalErrors, ref int NumErrorMsgs, ref int NumWarnMsgs, ref int NumInfoMsgs, ref string ImportLog)
         {
+            if (o.WipeOnApply > 0)
+            {
+                o.WipeOnApply--;
+                if (o._pending.ContainsKey(Patterns)) o.Table.Clear();
+                o._pending.Clear();
+                NumErrorMsgs = 1; ImportLog = "Error: the patterns could not be imported"; return 1;
+            }
             foreach (var (key, (fields, rows)) in o._pending)
             {
                 if (key == Patterns)

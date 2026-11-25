@@ -5,8 +5,10 @@ namespace CsiProMax.Assistant.Etabs;
 /// some definitions (a user coefficient seismic load, ASCE 7-16 wind, a user response spectrum, a named mass source:
 /// read from its ETABSv1.dll and its "Table and Field Keys.xml", 0.4.17 field test), and its tables take them.
 /// </summary>
-public static class EditableTables
-{
+public static class EditableTables
+
+{
+
     /// <summary>
     /// Selects every load pattern for display before a table is read. SAP2000 26 shows only the patterns selected for
     /// display in its database tables (DEAD alone in a new model, none in a model imported from .s2k), so a pattern added
@@ -46,6 +48,11 @@ public static class EditableTables
                 records = 0; data = [];
             }
             if (fields.Length == 0) throw new EtabsException($"{program} gave no fields for the table '{key}' (answer {read}), so it cannot {what}.");
+
+            // The rows as read, to put back when the apply is refused and takes rows with it (SAP2000 26, 0.4.22 field test).
+            var readFields = fields.ToArray();
+            var readRows = Enumerable.Range(0, records).Select(r => data.Skip(r * readFields.Length).Take(readFields.Length).Select(v => v ?? "").ToArray())
+                .Where(r => r.Length == readFields.Length).ToList();
 
             // A field the editing read leaves out (ETABS 23 leaves out AutoLoad of "Load Pattern Definitions") is added as a column.
             var missing = rows.SelectMany(r => r.Keys).Distinct(StringComparer.OrdinalIgnoreCase)
@@ -101,7 +108,11 @@ public static class EditableTables
                 int applied = Convert.ToInt32(m.DatabaseTables.ApplyEditedTables(true, ref fatal, ref errors, ref warnings, ref info, ref log));
                 log ??= "";
                 if (applied != 0 || fatal + errors > 0)
-                    throw new EtabsException($"{program} did not apply '{key}' ({fatal} fatal, {errors} errors), so it cannot {what}. Its import log: {Cut(log)}" + About(m, key, rows));
+                {
+                    try { m.DatabaseTables.CancelTableEditing(); } catch { /* nothing more to undo */ }
+                    string restored = Tools.CsiTools.RestoreRows(m, key, readFields, readRows);
+                    throw new EtabsException($"{program} did not apply '{key}' ({fatal} fatal, {errors} errors), so it cannot {what}. {restored} Its import log: {Cut(log)}" + About(m, key, rows));
+                }
                 return log;
             }
             catch
