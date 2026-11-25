@@ -63,9 +63,24 @@ public static class ScratchDialogs
     {
         var closed = new List<string>();
         foreach (var (window, title) in Of(processId))
+        {
             if (MayClose(title) && Button(window, "OK") is { } ok && IsWindowEnabled(ok) && PostMessageW(ok, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero)) closed.Add(title);
+            else if (IsStoryPicker(title) && Button(window, "OK") is { } go && IsWindowEnabled(go))
+            {
+                // All stories first, then OK: the two presses reach the window in this order.
+                if (Button(window, "Select All") is { } all && IsWindowEnabled(all)) PostMessageW(all, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero);
+                if (PostMessageW(go, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero)) closed.Add(title + " (all stories, OK)");
+            }
+        }
         return closed;
     }
+
+    /// <summary>
+    /// True for the story picker ETABS 23 opens when the slab design is started through the API ("Select Stories for
+    /// Slab Design", seen 2026-11-25: run_design waited on it for ten minutes). In the test's own scratch window the
+    /// test answers it: all stories, OK.
+    /// </summary>
+    public static bool IsStoryPicker(string title) => title.TrimStart().StartsWith("Select Stories for Slab Design", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>The label of a button as a person reads it: without the "&amp;" of its access key.</summary>
     public static bool IsButton(string label, string text) => string.Equals(label.Replace("&", "").Trim(), text, StringComparison.OrdinalIgnoreCase);
@@ -363,8 +378,9 @@ public sealed class ScratchProgram : IScratchWindow
             // The program said yes to closing: its process must go too, or it keeps a licence with no window to show for it.
             if (!Gone(TimeSpan.FromSeconds(30))) return Said($"the scratch {name} window was told to close, and its process did not end; end it yourself");
             int notices;
-            lock (_noticesClosed) notices = _noticesClosed.Count;
-            return $"the scratch {name} window was closed without saving" + (_closeAnswered ? " (it asked whether to really close, and the test answered Yes)" : "") + (_keptOpen > 0 ? $" (earlier it asked {_keptOpen} time{(_keptOpen == 1 ? "" : "s")} whether to close while the test was working in it, and the test answered No)" : "") + (notices > 0 ? $" ({notices} 'analysis complete' notice{(notices == 1 ? "" : "s")} of it closed along the way)" : "");
+            List<string> titles;
+            lock (_noticesClosed) { notices = _noticesClosed.Count; titles = [.. _noticesClosed.GroupBy(t => t).Select(g => g.Count() == 1 ? g.Key : $"{g.Key}, {g.Count()} times")]; }
+            return $"the scratch {name} window was closed without saving" + (_closeAnswered ? " (it asked whether to really close, and the test answered Yes)" : "") + (_keptOpen > 0 ? $" (earlier it asked {_keptOpen} time{(_keptOpen == 1 ? "" : "s")} whether to close while the test was working in it, and the test answered No)" : "") + (notices > 0 ? $" (windows of it the test answered itself along the way: {string.Join("; ", titles)})" : "");
         }
         // Whatever the program or the link throws (a window that is no longer there, a call that faulted on another
         // thread): closing says what happened and never stops the test, whose report must still be written.
