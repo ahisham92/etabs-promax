@@ -84,6 +84,9 @@ public sealed class ComEtabs : ICsiLink, IDisposable
         if (_stuck is { Length: > 0 } stuck)
             throw new EtabsException($"{app} has still not come back from the last call ({stuck}). A message may be waiting in {app}'s window " +
                 "(such as \"Analysis Complete\" or a licence notice): answer or close it there, then try again.");
+        // A call made from inside another call (a tool's Raw work that asks the link for the load cases) is already on
+        // the program's thread: it runs at once. Queued, it would wait for the call it is part of, which never ends.
+        if (Thread.CurrentThread == _thread) return body(Model());
         var done = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
         _work.Add(() =>
         {
