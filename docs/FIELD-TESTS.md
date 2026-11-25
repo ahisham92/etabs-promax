@@ -43,7 +43,8 @@ E4. **Checks against ETABS's own tables.** After the analysis, ask: "Check the d
     Compare one number with Display > Show Tables in ETABS. A check that says "not available" while ETABS shows
     that table: the field test report already holds the table names, so send it.
 E5. **Check report and review pack.** Ask for the check report, then "export the review pack". Open the Viewer page
-    it names. Expected: the model in 3D, the checks, and the results tables.
+    it names. Expected: the model in 3D, the checks, and the results tables; both files (the `.cpmx` and the
+    `viewer.html`) are in the model's own folder, beside the `.edb`.
 E6. **The window.** Shrink the chat to one line and back, maximise the window, close it and open it again from
     Tools > CSI ProMax. Expected: the chat of this model is still there (Home > history).
 E7. **Bug report.** Help > Report a bug, write one line. Expected: a zip in `Documents\CSI ProMax\Bugs\Reports`.
@@ -78,7 +79,8 @@ Install: run the one-line install, or copy the CSI ProMax folder to Documents. T
    pressure and span/240. Expected: punching shear, deflection, soil pressure, strip forces and slab design each
    say pass, fail or reported, and name the SAFE table they read. Any check that says "not available" while SAFE
    has that result: send the table's name from Display > Show Tables.
-7. **Review pack.** Ask for `export_pack`. Open the Viewer page in a browser. Expected: the header says SAFE; the
+7. **Review pack.** Ask for `export_pack`. Open the Viewer page in a browser (it is in the model's own folder,
+   beside the `.fdb`). Expected: the header says SAFE; the
    Colour list offers Punching ratio and Soil pressure, and the dots sit on the columns and on the mat.
 8. **Modeler .f2k into SAFE.** In the Modeler, build or open a small frame and ask to `save_safe_file` for one
    floor (and once with a subgrade for a mat). In SAFE: File > Import > SAFE .F2K file. Expected: slabs, beams,

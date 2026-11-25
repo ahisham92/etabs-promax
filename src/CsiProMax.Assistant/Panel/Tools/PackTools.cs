@@ -17,8 +17,9 @@ public sealed class ExportPackTool : IEtabsTool
     public string Description =>
         "Make a review pack of the open model for someone who has no ETABS: the model's geometry and sections, ETABS's " +
         "own result tables (modes, base reactions, story drifts, displacements, story forces and stiffness, design " +
-        "summaries) and the check report. It writes two files into Documents\\CSI ProMax\\Made in chat: the pack " +
-        "(.cpmx) and a Viewer page (.html) with the pack inside it. The reviewer opens the page in a browser, with " +
+        "summaries) and the check report. It writes two files into the model's own folder, beside the model file: the " +
+        "pack (.cpmx) and a Viewer page (.html) with the pack inside it (Documents\\CSI ProMax\\Made in chat only when the " +
+        "model has not been saved yet or its folder cannot be written to). The reviewer opens the page in a browser, with " +
         "nothing to install: a 3D view, deformed shapes, design ratios in colour, the tables and the checks, and they " +
         "write comments and send a comments file back (read it with read_pack_comments). Run the analysis first if the " +
         "results should be in it. Give 'tables' for more ETABS tables by name (from list_tables), 'cases' and " +
@@ -32,7 +33,7 @@ public sealed class ExportPackTool : IEtabsTool
       "combinations": {"type": "array", "items": {"type": "string"}},
       "drift_limit": {"type": "number", "description": "Allowed drift ratio for the check report, e.g. 0.002."},
       "design_limit": {"type": "number", "description": "Design ratio limit (default 1.0)."},
-      "folder": {"type": "string", "description": "Another folder for the files."}
+      "folder": {"type": "string", "description": "Another folder for the files. Leave it out: they go beside the model."}
     }
     """;
     public string[] Required => [];
@@ -40,10 +41,50 @@ public sealed class ExportPackTool : IEtabsTool
 
     public ToolResult Execute(EtabsApp app, ToolArgs args) => Make(app.Link, args, MakeDocumentTool.DefaultFolder);
 
-    internal static ToolResult Make(CsiProMax.Assistant.Etabs.ICsiLink link, ToolArgs args, string defaultFolder)
+    /// <summary>
+    /// Where the pack goes when no folder was asked for: the model's own folder, beside the model file, so it is found
+    /// where the engineer already works (ETABS, SAP2000 and SAFE alike). A model that was never saved has no folder,
+    /// and a folder may be read-only (a share, an archive): then <paramref name="fallback"/>, with the reason to tell.
+    /// </summary>
+    internal static (string Folder, string? Why) BesideModel(CsiProMax.Assistant.Etabs.ICsiLink link, string fallback)
+    {
+        try { return BesideModel(link.Info().File, fallback); }
+        catch (CsiProMax.Assistant.Etabs.EtabsException ex) { return (fallback, $"the model's file could not be read ({ex.Message})"); }
+    }
+
+    /// <param name="file">The model's file as the program gives it: a full path, or "" or a bare name for a model never saved.</param>
+    internal static (string Folder, string? Why) BesideModel(string? file, string fallback)
+    {
+        file = (file ?? "").Trim().Trim('"');
+        string? folder = null;
+        try { if (file.Length > 0 && Path.IsPathRooted(file)) folder = Path.GetDirectoryName(file); }
+        catch (ArgumentException) { }
+        if (string.IsNullOrEmpty(folder)) return (fallback, "the model has not been saved yet, so it has no folder of its own");
+        if (!Directory.Exists(folder)) return (fallback, $"the model's folder is not there ({folder})");
+        // The only sure way to know a folder takes files: put one in it and take it out again.
+        var probe = Path.Combine(folder, ".csi-promax-" + Guid.NewGuid().ToString("N") + ".tmp");
+        try
+        {
+            File.WriteAllBytes(probe, []);
+            File.Delete(probe);
+            return (folder, null);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or System.Security.SecurityException)
+        {
+            return (fallback, $"the model's folder cannot be written to ({folder}: {ex.Message.TrimEnd('.')})");
+        }
+    }
+
+    /// <param name="fallbackFolder">Where the files go when the model has no folder of its own that can be written to.</param>
+    internal static ToolResult Make(CsiProMax.Assistant.Etabs.ICsiLink link, ToolArgs args, string fallbackFolder)
     {
         string folder;
-        try { folder = OutputPaths.Checked(args.OptString("folder")) is { Length: > 0 } f ? f.Trim().Trim('"') : defaultFolder; }
+        string? elsewhere = null;
+        try
+        {
+            if (OutputPaths.Checked(args.OptString("folder")) is { Length: > 0 } asked) folder = asked.Trim().Trim('"');
+            else (folder, elsewhere) = BesideModel(link, fallbackFolder);
+        }
         catch (ArgumentException ex) { return ToolResult.Error(ex.Message); }
         try
         {
@@ -66,12 +107,14 @@ public sealed class ExportPackTool : IEtabsTool
             return ToolResult.Ok(new
             {
                 files = new[] { page, pack },
-                viewer = page, pack,
+                viewer = page, pack, folder,
+                beside_model = elsewhere is null && !args.Has("folder"),
+                not_beside_model = elsewhere is null ? null : $"The files are in {folder}, not beside the model: {elsewhere}. Tell the user.",
                 frames = built.Frames, areas = built.Areas, tables = built.Tables,
                 checks = checks["summary"],
                 size_kb = Math.Max(1, (int)Math.Round(new FileInfo(page).Length / 1024.0)),
                 notes = built.Notes,
-                shown = "The chat shows both files as cards. Tell the user to send the viewer page (.html): it opens in any browser with the pack inside. The .cpmx is the same pack for the Viewer's Open button.",
+                shown = "The chat shows both files as cards. Say they are in the model's own folder (or where 'folder' says), and tell the user to send the viewer page (.html): it opens in any browser with the pack inside. The .cpmx is the same pack for the Viewer's Open button.",
             });
         }
         catch (Exception ex) when (ex is CsiProMax.Assistant.Etabs.EtabsException or IOException or UnauthorizedAccessException or InvalidOperationException)
