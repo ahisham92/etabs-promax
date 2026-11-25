@@ -36,6 +36,7 @@
     <!-- PDFium (BSD-3/Apache 2.0, Chrome's PDF engine) draws PDF pages so the chat can read drawings. Only the 64-bit
          Windows library is shipped, as CsiProMax.pdfium.dll next to the assistant. It is a .dll, not a program. -->
     <PackageReference Include="bblanchon.PDFium.Win32" Version="157.0.8086" ExcludeAssets="all" PrivateAssets="all" GeneratePathProperty="true" />
+    <None Include="Open the Modeler.cmd" CopyToOutputDirectory="PreserveNewest" />
     <None Include="$(Pkgbblanchon_PDFium_Win32)/runtimes/win-x64/native/pdfium.dll" Link="CsiProMax.pdfium.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" />
     <ProjectReference Include="../CsiProMax.Core/CsiProMax.Core.csproj" />
     <InternalsVisibleTo Include="CsiProMax.Tests" />
