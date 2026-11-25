@@ -377,6 +377,67 @@ public static class PropertyDefs
         m.Passthrough.RemoveAll(r => r.Heading == LinkHeading && r.Lines.Count == 0);
     }
 
+    // ---- frame hinges ----
+
+    public const string HingeHeading = "FRAME HINGE ASSIGNMENTS";
+
+    /// <summary>The degrees of freedom of an auto hinge, as Assign > Frame > Hinges offers them (the program picks the
+    /// hinge from the code's tables for the member's section and kind).</summary>
+    public static readonly string[] HingeDofs = ["M3", "M2", "P", "V2", "V3", "T", "P-M2-M3", "P-M3", "M3-V2"];
+
+    /// <summary>One hinge on a frame: where along it (0 to 1 of its length) and its degrees of freedom.</summary>
+    public sealed record HingeDef(double At, string Dof);
+
+    /// <summary>Every hinge, by frame. The program cannot assign hinges by its API, so they go in by the file.</summary>
+    public static List<(string Label, string Story, HingeDef Hinge)> Hinges(StructuralModel m)
+    {
+        var list = new List<(string, string, HingeDef)>();
+        foreach (var line in m.Passthrough.Where(r => r.Heading == HingeHeading).SelectMany(r => r.Lines))
+        {
+            var t = Tokenize(line);
+            if (t.Count < 7 || t[0] != "HINGEASSIGN") continue;
+            string? dof = null; double? at = null;
+            for (var i = 3; i + 1 < t.Count; i += 2)
+            {
+                if (t[i] == "AUTO") dof = Unquote(t[i + 1]);
+                else if (t[i] == "RELDIST" && TryNumber(t[i + 1], out var d)) at = d;
+            }
+            if (dof is not null && at is { } a) list.Add((Unquote(t[1]), Unquote(t[2]), new HingeDef(a, dof)));
+        }
+        return list;
+    }
+
+    public static List<HingeDef> HingesOf(StructuralModel m, string label, string story) =>
+        Hinges(m).Where(h => h.Label == label && h.Story == story).Select(h => h.Hinge).ToList();
+
+    public static void CheckHinges(IReadOnlyList<HingeDef> hinges)
+    {
+        foreach (var h in hinges)
+        {
+            if (!double.IsFinite(h.At) || h.At < 0 || h.At > 1) throw new ArgumentException("A hinge's relative distance is from 0 to 1 of the member's length.");
+            if (!HingeDofs.Contains(h.Dof)) throw new ArgumentException($"A hinge is one of {string.Join(", ", HingeDofs)}, not '{h.Dof}'.");
+        }
+        if (hinges.GroupBy(h => (Math.Round(h.At, 6), h.Dof)).Any(g => g.Count() > 1)) throw new ArgumentException("Two of the hinges are the same, at the same place.");
+    }
+
+    /// <summary>Replaces the hinges of one frame (none takes them all off).</summary>
+    public static void SetHinges(StructuralModel m, string label, string story, IReadOnlyList<HingeDef> hinges)
+    {
+        CheckHinges(hinges);
+        bool Mine(string l) => Tokenize(l) is { Count: >= 3 } t && t[0] == "HINGEASSIGN" && Unquote(t[1]) == label && Unquote(t[2]) == story;
+        var raw = m.Passthrough.Find(r => r.Heading == HingeHeading);
+        if (raw is null)
+        {
+            if (hinges.Count == 0) return;
+            m.Passthrough.Add(raw = new RawSection { Heading = HingeHeading, After = "LINE ASSIGNS" });
+        }
+        var at = raw.Lines.FindIndex(Mine);
+        raw.Lines.RemoveAll(Mine);
+        var lines = hinges.OrderBy(h => h.At).Select(h => "  " + Line(["HINGEASSIGN", Quote(label), Quote(story), "AUTO", Quote(h.Dof), "RELDIST", Number(h.At)])).ToList();
+        raw.Lines.InsertRange(at < 0 ? raw.Lines.Count : Math.Min(at, raw.Lines.Count), lines);
+        m.Passthrough.RemoveAll(r => r.Heading == HingeHeading && r.Lines.Count == 0);
+    }
+
     private static void Name(string name, string what)
     {
         if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException($"Give the {what} a name.");

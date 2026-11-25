@@ -192,6 +192,8 @@ public static class S2kWriter
             if (fm.Values.Any(v => Math.Abs(v - 1) > 1e-12))
                 frameMods.Add(Row(("Frame", name), ("AMod", N(fm["AMOD"])), ("A2Mod", N(fm["A2MOD"])), ("A3Mod", N(fm["A3MOD"])), ("JMod", N(fm["JMOD"])), ("I2Mod", N(fm["I2MOD"])), ("I3Mod", N(fm["I3MOD"])), ("MMod", N(fm["MMOD"])), ("WMod", N(fm["WMOD"]))));
             if (PropertyDefs.Value(x.Extra, "SPRINGPROP") is { } sp) notes.Add($"Frame {name} has the line spring {sp}: assign it in SAP2000 (Assign > Frame > Line Springs).");
+            var hinges = PropertyDefs.HingesOf(m, x.Label, x.Story);
+            if (hinges.Count > 0) notes.Add($"Frame {name} has {hinges.Count} auto hinge(s) ({string.Join(", ", hinges.Select(h => $"{h.Dof} at {N(h.At)}"))}): assign them in SAP2000 (Assign > Frame > Hinges).");
         }
         foreach (var x in m.AreaAssigns)
         {

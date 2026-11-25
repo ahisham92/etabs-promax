@@ -3242,7 +3242,7 @@ function modelerMenus(m) {
     ["Draw Walls (click start and end)", "d:wall"], ["Quick Draw Walls (click a grid line)", "d:qwall"], 0, ["Snap and Story Options...", "m:drawHelp"]];
   m.Assign = [["Frame Section...", "m:asgFrame", "", !fr], ["Slab or Wall Section...", "m:asgShell", "", !ar], 0, ["Joint Restraints (Supports)...", "m:asgSupport"], 0,
     ["Joint", [["Springs...", "m:ad:joint", "", !any], ["Diaphragms...", "m:sa:jdiaph", "", !any]]],
-    ["Frame", [["Releases...", "m:ad:releases", "", !fr], ["Local Axes...", "m:ad:axes", "", !fr], ["Insertion Point...", "m:ad:insertion", "", !fr], ["End Length Offsets...", "m:ad:offsets", "", !fr], ["Property Modifiers...", "m:ad:fmods", "", !fr], ["Line Springs...", "m:ad:lspring", "", !fr]]],
+    ["Frame", [["Releases...", "m:ad:releases", "", !fr], ["Local Axes...", "m:ad:axes", "", !fr], ["Insertion Point...", "m:ad:insertion", "", !fr], ["End Length Offsets...", "m:ad:offsets", "", !fr], ["Property Modifiers...", "m:ad:fmods", "", !fr], ["Line Springs...", "m:ad:lspring", "", !fr], ["Hinges...", "m:ad:hinges", "", !fr]]],
     ["Shell", [["Property Modifiers...", "m:ad:smods", "", !ar], ["Area Springs...", "m:ad:aspring", "", !ar], ["Diaphragms...", "m:sa:diaph", "", !ar], ["Pier Label...", "m:sa:pier", "", !any], ["Spandrel Label...", "m:sa:spandrel", "", !any]]],
     ["Assign Objects to Group...", "m:sa:group", "", !any], 0,
     ["Joint Loads", [["Forces...", "m:ld:joint_force", "", !any], ["Ground Displacements...", "m:ld:joint_displacement", "", !any], ["Temperature...", "m:ld:joint_temperature", "", !any]]],
@@ -3569,6 +3569,19 @@ async function hmAssignData(what) {
   } else if (what === "offsets") {
     body = `<div class="g2"><span>End-I offset, ${u.l}</span><input id="xI" type="number" step="any" value="${now.offset_i || 0}"><span>End-J offset, ${u.l}</span><input id="xJ" type="number" step="any" value="${now.offset_j || 0}"><span>Rigid zone factor (0 to 1)</span><input id="xR" type="number" step="any" value="${now.rigid_zone || 0}"></div>`;
     read = d => ({offset_i: fnum(d, "#xI"), offset_j: fnum(d, "#xJ"), rigid_zone: fnum(d, "#xR")});
+  } else if (what === "hinges") {
+    // Auto hinges: the program picks each from the code's tables for the member's section, as in Assign > Frame > Hinges.
+    const rows = (now.hinges || []).map(h => ({at: h.at, dof: h.dof})), dofs = pd.hinge_dofs || ["M3"];
+    const paint = d => {
+      q(d, "#hT").innerHTML = `<tr><th>Relative distance (0 to 1)</th><th>Degrees of freedom</th><th></th></tr>` + rows.map((h, i) => `<tr data-i="${i}"><td><input data-k="at" type="number" step="any" min="0" max="1" value="${h.at}"></td><td><select data-k="dof">${opts(dofs, h.dof)}</select></td><td><button data-del="${i}">Delete</button></td></tr>`).join("");
+      d.querySelectorAll("#hT [data-k]").forEach(x => x.onchange = () => { const h = rows[+x.closest("tr").dataset.i]; h[x.dataset.k] = x.dataset.k === "at" ? parseFloat(x.value) : x.value; });
+      d.querySelectorAll("#hT [data-del]").forEach(b => b.onclick = () => { rows.splice(+b.dataset.del, 1); paint(d); });
+    };
+    body = `<p class="kv" style="margin:0 0 6px">Auto hinges from the code's tables (for a pushover). The program picks each for the member's section.</p><div class="scroll" style="max-height:40vh"><table class="list hmgrid" id="hT"></table></div><div style="display:flex;gap:6px;margin-top:6px"><button id="hAdd">Add</button><button id="hEnds">Both ends (0.05 and 0.95)</button></div>`;
+    read = () => ({hinges: rows.map(h => ({at: +h.at, dof: h.dof}))});
+    setTimeout(() => { const d = [...document.querySelectorAll(".dlg")].pop(); if (!d || !d.querySelector("#hT")) return; paint(d);
+      q(d, "#hAdd").onclick = () => { rows.push({at: 0.5, dof: dofs[0]}); paint(d); };
+      q(d, "#hEnds").onclick = () => { for (const at of [0.05, 0.95]) if (!rows.some(h => Math.abs(h.at - at) < 1e-9 && h.dof === dofs[0])) rows.push({at, dof: dofs[0]}); paint(d); }; }, 0);
   } else if (what === "fmods" || what === "smods") {
     const keys = what === "fmods" ? pd.frame_modifiers : pd.shell_modifiers;
     return hmModifiers(keys, now.modifiers, o => hmRun(tool, {objects: names, modifiers: o}, true).then(j => j.ok ? hmSay("Done. Edit > Undo steps back.") : hmSay(j.error, true)));
@@ -3578,7 +3591,7 @@ async function hmAssignData(what) {
     read = d => ({spring: q(d, "#xS").value});
     setTimeout(() => { const d = [...document.querySelectorAll(".dlg")].pop(), nb = d && d.querySelector("#xNew"); if (nb) nb.onclick = () => hmSpring(k, null, async () => { const p2 = (await hmRun("property_definitions", {}, true)).result; const l2 = p2.springs.filter(x => x.kind === k).map(x => x.name); q(d, "#xS").innerHTML = opts([["", "None"]].concat(l2.map(n => [n, n])), l2[l2.length - 1]); }); }, 0);
   }
-  const title = {releases: "Frame Releases", axes: "Frame Local Axes", insertion: "Frame Insertion Point", offsets: "Frame End Length Offsets", lspring: "Frame Line Springs", aspring: "Shell Area Springs", joint: "Joint Springs"}[what];
+  const title = {releases: "Frame Releases", axes: "Frame Local Axes", insertion: "Frame Insertion Point", offsets: "Frame End Length Offsets", lspring: "Frame Line Springs", hinges: "Frame Hinges", aspring: "Shell Area Springs", joint: "Joint Springs"}[what];
   return dialog("Assign " + title, body + `<p class="kv">${names.length} selected ${joint ? "joints" : shell ? "floors and walls" : "frames"}.</p>`,
     [["OK", d => submit(d, tool, Object.assign({objects: names}, read(d))), true], ["Cancel"]], {width: 420});
 }

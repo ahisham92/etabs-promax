@@ -103,6 +103,34 @@ public static class CsiFieldSteps
                 FieldContext.Expect(missing.Count == 0, $"{name} has no {string.Join("; ", missing)} from the Modeler's file");
                 return "all there";
             });
+            // The CSI APIs read hinges and cannot assign them, so the Modeler's hinges go in by the .e2k. Which hinge tables
+            // and fields the program has is said either way, so its own words can be written next time when the file's are not.
+            string HingeTables() { try { return HingeTablesOf(); } catch (Exception ex) { return "they could not be read: " + ex.Message; } }
+            string HingeTablesOf() => string.Join(" | ", link.Tables().Where(t => t.Name.Contains("Hinge", StringComparison.OrdinalIgnoreCase) && t.Name.Contains("Assign", StringComparison.OrdinalIgnoreCase)).Select(t =>
+            {
+                var fields = (string[])(link.Raw($"read the fields of {t.Name}", m =>
+                {
+                    int version = 0, n = 0; string[] keys = [], names = [], about = [], units = []; bool[] importable = [];
+                    m.DatabaseTables.GetAllFieldsInTable(t.Key, ref version, ref n, ref keys, ref names, ref about, ref units, ref importable);
+                    return keys ?? [];
+                }) ?? Array.Empty<string>());
+                return $"{t.Name}: {string.Join(", ", fields)}";
+            }));
+            if (program.Key == CsiProgram.Etabs.Key)
+                ctx.Step($"{name} opened the Modeler's frame hinges", () =>
+                {
+                    var hinges = 0; JsonObject? last = null;
+                    foreach (var f in link.Frames())
+                    {
+                        var call = (JsonObject)link.Raw("read a frame's hinges", m => ApiCall.Invoke((object)m, "FrameObj.GetHingeAssigns", CsiTools.D(("Name", f.Name))))!;
+                        last = call;
+                        hinges += call.Where(kv => kv.Key != "return").Select(kv => kv.Value is JsonArray a ? a.Count : 0).DefaultIfEmpty(0).Max();
+                    }
+                    FieldContext.Expect(hinges >= 3, $"{name} has {hinges} hinges from the Modeler's file, 3 were written (a frame's answer: {last?.ToJsonString()}; its hinge tables: {HingeTables()})");
+                    return $"{hinges} hinges";
+                });
+            else
+                ctx.Skip($"{name} opened the Modeler's frame hinges", $"the .s2k does not carry hinges yet (they go across as a note); {name}'s hinge tables: " + (HingeTables() is { Length: > 0 } t ? t : "none listed"));
             if (program.Key == CsiProgram.Sap2000.Key)
                 ctx.Step("SAP2000 knows every table and field the Modeler writes into the .s2k", () =>
                 {

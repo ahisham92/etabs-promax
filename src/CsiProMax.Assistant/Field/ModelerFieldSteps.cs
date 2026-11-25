@@ -462,6 +462,10 @@ public static class ModelerFieldSteps
             var obj = Q(beam.Label + "@" + beam.Story);
             ctx.Tool("assign_frame_data", """{"objects":[""" + obj + """],"release_i":["M3"],"release_j":["M3"],"angle":0,"cardinal":8,"modifiers":{"I3MOD":0.35,"JMOD":0.01}}""", null, "tool assign_frame_data, pinned ends, top center and cracked");
             ctx.Refused("assign_frame_data", """{"objects":[""" + obj + """],"release_i":["T"],"release_j":["T"]}""", "unstable", "tool assign_frame_data says no to torsion released at both ends");
+            ctx.Tool("assign_frame_data", """{"objects":[""" + obj + """],"hinges":[{"at":0.05,"dof":"M3"},{"at":0.95,"dof":"M3"},{"at":0.5,"dof":"V2"}]}""", null, "tool assign_frame_data, auto hinges at both ends and a shear hinge");
+            ctx.Refused("assign_frame_data", """{"objects":[""" + obj + """],"hinges":[{"at":1.5,"dof":"M3"}]}""", "0 to 1", "tool assign_frame_data says no to a hinge beyond the member");
+            ctx.Tool("property_definitions", """{"objects":[""" + obj + """]}""", a =>
+                FieldContext.Expect(a["objects"]![0]!["hinges"]!.AsArray().Count == 3, "the beam does not show its 3 hinges: " + a["objects"]!.ToJsonString()), "tool property_definitions, the beam's hinges");
         }
         var floor = modeler.Model.AreaAssigns.FirstOrDefault(x => modeler.Model.Area(x.Label)?.Kind == CsiProMax.Model.AreaKind.Floor);
         if (floor is not null) ctx.Tool("assign_shell_data", """{"objects":[""" + Q(floor.Label + "@" + floor.Story) + """],"modifiers":{"M11MOD":0.25,"M22MOD":0.25}}""", null, "tool assign_shell_data, cracked slab modifiers");
