@@ -11,8 +11,12 @@ internal static class ProgramPrompt
     public static string For(CsiProgram program) => program.Key switch
     {
         "safe" => CsiProMax.Assistant.Safe.SafePrompt.Text,
+        "sap2000" => CsiProMax.Assistant.Sap2000.SapPrompt.Text,
         _ => "",
     };
+
+    /// <summary>What the Modeler adds about writing other programs' files.</summary>
+    public static string Modeler => CsiProMax.Assistant.Sap2000.SapPrompt.Modeler;
 
     /// <summary>The shared prompt in the program's own words: "SAFE" where it says "ETABS", for a program that is not ETABS.</summary>
     public static string Reword(string text, CsiProgram program) =>

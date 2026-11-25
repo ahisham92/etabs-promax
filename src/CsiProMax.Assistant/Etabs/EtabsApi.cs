@@ -97,9 +97,11 @@ namespace CsiProMax.Assistant.Etabs
                     return new EtabsApi(running, type);
                 var helper = Activator.CreateInstance(api.GetType(ns + ".Helper", true));
                 var helperType = api.GetType(ns + ".cHelper", true);
-                var app = pid == null
+                // Older APIs (SAP2000 before 23, say) have no GetObjectProcess: then the active instance is the one.
+                var byProcess = pid == null ? null : helperType.GetMethod("GetObjectProcess");
+                var app = byProcess == null
                     ? helperType.GetMethod("GetObject").Invoke(helper, new object[] { progId })
-                    : helperType.GetMethod("GetObjectProcess").Invoke(helper, new object[] { progId, pid.Value });
+                    : byProcess.Invoke(helper, new object[] { progId, pid.Value });
                 return app == null ? null : new EtabsApi(app, type);
             }
             catch (Exception ex) when (ex is TargetInvocationException || ex is MissingMethodException || ex is COMException || ex is NullReferenceException) { return null; }

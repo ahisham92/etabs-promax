@@ -8,13 +8,13 @@ const string Help = """
 
       cpm new-frame <out> --x 6,6,6 --y 5,5 --stories 4 [--height 3.2] [--sdl 2] [--live 3] [--title "Name"]
             A regular concrete frame building (kN, m), ready to import into ETABS.
-      cpm convert <in> <out>     Between ETABS text files (.e2k, .$et) and CSI ProMax models (.cpm), either way.
+      cpm convert <in> <out>     Between ETABS text files (.e2k, .$et) and CSI ProMax models (.cpm), either way, or to SAP2000 (.s2k).
       cpm info <file>            What is in a model.
       cpm check <file>           Completeness and connectivity checks. Exit code 1 when there are errors.
       cpm quantities <file>      Lengths, areas and concrete volumes by section.
 
-    <out> ending in .cpm is a CSI ProMax model; anything else is written as an ETABS text file.
-    In ETABS: File > Import > ETABS .e2k Text File.
+    <out> ending in .cpm is a CSI ProMax model, .s2k a SAP2000 text file; anything else is written as an ETABS text file.
+    In ETABS: File > Import > ETABS .e2k Text File. In SAP2000: File > Import > SAP2000 .s2k Text File.
     """;
 
 try
@@ -113,7 +113,10 @@ static StructuralModel Load(string path)
 
 static void Save(StructuralModel model, string path)
 {
-    if (IsEpm(path)) ModelFile.Save(model, path); else E2kWriter.WriteFile(model, path);
+    if (IsEpm(path)) ModelFile.Save(model, path);
+    else if (path.EndsWith(".s2k", StringComparison.OrdinalIgnoreCase))
+        foreach (var note in CsiProMax.S2k.S2kWriter.WriteFile(model, path).Notes) Console.WriteLine("  left out: " + note);
+    else E2kWriter.WriteFile(model, path);
 }
 
 static string Summary(StructuralModel m)

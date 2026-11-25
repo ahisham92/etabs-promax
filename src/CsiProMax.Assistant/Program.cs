@@ -58,7 +58,7 @@ public static class Program
         if (args.Contains("--selftest"))
         {
             using var check = new ComEtabs(etabsPid, program);
-            return SelfTest.Run(demo ? new MemoryEtabs() : check, args.Contains("--changes"));
+            return SelfTest.Run(demo ? new MemoryEtabs() : CsiProMax.Assistant.Tools.ProgramTools.Live(check), args.Contains("--changes"));
         }
         try
         {
@@ -88,7 +88,7 @@ public static class Program
                 return 2;
             }
             using var com = new ComEtabs(etabsPid, program);
-            ICsiLink link = modeler ? OpenModeler(args) : demo ? new MemoryEtabs() : com;
+            ICsiLink link = modeler ? OpenModeler(args) : demo ? new MemoryEtabs() : CsiProMax.Assistant.Tools.ProgramTools.Live(com);
             var app = new System.Windows.Application { ShutdownMode = System.Windows.ShutdownMode.OnMainWindowClose };
             app.DispatcherUnhandledException += (_, e) => Note("window", e.Exception);
             AppDomain.CurrentDomain.UnhandledException += (_, e) => Note("unhandled", e.ExceptionObject as Exception);

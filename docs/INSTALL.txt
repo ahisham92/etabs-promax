@@ -24,6 +24,16 @@ SAFE (20 and later)
 If SAFE runs on .NET Framework (older versions), install the .NET Desktop Runtime 8 first, as for older ETABS.
 Not yet confirmed in SAFE: please report what happens.
 
+SAP2000
+1. Copy the folder as for ETABS (the same "CSI ProMax" folder serves every program).
+2. In SAP2000: Tools > Add/Show Plug-Ins. Plug-in name "CsiProMaxSapPlugin", path
+   Documents\CSI ProMax\CsiProMaxSapPlugin.dll, menu text "CSI ProMax". Add it.
+3. Open a model, then Tools > CSI ProMax. The same window opens, working in SAP2000: joints, frames and areas in 3D,
+   loads in any direction, displacements, member forces, reactions, modes and steel and concrete design.
+SAP2000 26 and later run on .NET 8. An older SAP2000 needs the .NET Desktop Runtime 8 first, as for older ETABS, and
+may not load the plug-in yet: then, with SAP2000 open, run  dotnet CsiProMax.dll --program sap2000  in that folder.
+Not yet confirmed in SAP2000: please report what happens.
+
 The chat runs on Claude Code on your own Claude plan. The window offers to install it or sign in when needed.
 A PC other than the owner's needs a licence key: the Licence window shows this PC's code (CPM-....); send it to the
 owner and paste the key you get back.
@@ -31,8 +41,8 @@ Later versions download by themselves (CSI ProMax > Check for updates). The CSI 
 this PC: CSI ProMax never starts, unlocks or stands in for it.
 
 The Modeler (no ETABS and no CSI licence needed)
-It builds a model and writes an .e2k file that ETABS opens later, or one floor or a mat as an .f2k file for SAFE
-(File > Import > SAFE .F2K file). It does not analyse or design: that needs ETABS.
+It builds a model and writes an .e2k file that ETABS opens later, one floor or a mat as an .f2k file for SAFE
+(File > Import > SAFE .F2K file), or the whole model as an .s2k file for SAP2000 (File > Import > SAP2000 .s2k Text File). It does not analyse or design: that needs ETABS.
 - On a PC with ETABS: the first time the window opens it puts "CSI ProMax Modeler" and "CSI ProMax Viewer"
   shortcuts on the desktop and in the Start menu (CSI ProMax). Delete one and it stays deleted; View > Make the
   Modeler and Viewer shortcuts again brings them back.

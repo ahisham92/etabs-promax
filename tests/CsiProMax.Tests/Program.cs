@@ -635,6 +635,167 @@ Test("plug-in: the assistant is started with the dotnet ETABS runs on", () =>
 foreach (var (name, body) in SafeTests.All()) Test(name, body);
 
 var failed = 0;
+// ---- SAP2000 ----
+
+Test("table text: values quoted where needed, read back whole", () =>
+{
+    var text = CsiProMax.CsiTables.CsiTableText.Document("File x.s2k", [CsiProMax.CsiTables.CsiTableText.Table("Joint Coordinates",
+        [[("Joint", "1"), ("Note", "two words"), ("Empty", ""), ("Z", CsiProMax.CsiTables.CsiTableText.Number(-0.0))]])]);
+    Check(text.Contains("TABLE:  \"JOINT COORDINATES\""), "heading upper-cased");
+    Check(text.Contains("Note=\"two words\"") && text.Contains("Empty=\"\"") && text.Contains("Z=0"), "quoting");
+    Check(text.TrimEnd().EndsWith("END TABLE DATA"), "end line");
+    var back = CsiProMax.CsiTables.CsiTableText.Parse(text + "TABLE:  \"X\"\r\n   A=1   B=\"long _\r\n value\"\r\n");
+    Equal("two words", back["joint coordinates"][0]["Note"], "quoted value");
+    Equal(1, back["JOINT COORDINATES"].Count, "rows");
+});
+
+Test("s2k: the template frame becomes joints, frames and areas in 3D", () =>
+{
+    CsiProMax.S2k.S2kWriter.SavedAt = new DateTime(2026, 11, 25, 6, 0, 0);
+    var m = Templates.ConcreteFrame("T", [6, 6], [5], 3, 3.5);
+    var r = CsiProMax.S2k.S2kWriter.Write(m, "t.s2k");
+    Equal(24, r.Joints, "joints: 6 plan points on 4 levels");
+    Equal(39, r.Frames, "frames: 18 columns and 21 beams");
+    Equal(6, r.Areas, "areas");
+    var t = CsiProMax.CsiTables.CsiTableText.Parse(r.Text);
+    Check(r.Text.StartsWith("File t.s2k was saved on 11/25/26 at 6:00:00"), "header line");
+    Equal("KN, m, C", t["PROGRAM CONTROL"][0]["CurrUnits"], "units");
+    Equal(24, t["JOINT COORDINATES"].Count, "joint rows");
+    Equal(39, t["CONNECTIVITY - FRAME"].Count, "frame rows");
+    Equal(39, t["FRAME SECTION ASSIGNMENTS"].Count, "every frame has its section");
+    Equal(6, t["JOINT RESTRAINT ASSIGNMENTS"].Count, "fixed supports at the base");
+    Check(t["JOINT RESTRAINT ASSIGNMENTS"].All(x => x["U1"] == "Yes" && x["R3"] == "Yes"), "fixed");
+    var top = t["JOINT COORDINATES"].Max(x => double.Parse(x["Z"], System.Globalization.CultureInfo.InvariantCulture));
+    Near(10.5, top, "top level");
+    var c1 = t["CONNECTIVITY - FRAME"].First(x => x["Frame"] == "C1_Story1");
+    var zi = t["JOINT COORDINATES"].First(x => x["Joint"] == c1["JointI"])["Z"];
+    var zj = t["JOINT COORDINATES"].First(x => x["Joint"] == c1["JointJ"])["Z"];
+    Equal("0", zi, "column bottom at the base"); Equal("3.5", zj, "column top at story 1");
+    Equal(4, t["GRID LINES"].Count(x => x["AxisDir"] == "Z"), "a Z grid per level");
+    Equal(3, t["CONSTRAINT DEFINITIONS - DIAPHRAGM"].Count, "one diaphragm per story");
+    Equal(12, t["AREA LOADS - UNIFORM"].Count, "SDL and live on 2 slabs on 3 stories");
+    Check(t["AREA LOADS - UNIFORM"].All(x => x["Dir"] == "Gravity"), "gravity");
+    Equal("Dead", t["LOAD PATTERN DEFINITIONS"].First(x => x["LoadPat"] == "Dead")["DesignType"], "pattern type");
+    Check(t["LOAD CASE DEFINITIONS"].Any(x => x["Case"] == "Modal" && x["Type"] == "LinModal"), "modal case");
+    Check(t["LOAD CASE DEFINITIONS"].Any(x => x["Case"] == "Dead" && x["Type"] == "LinStatic"), "static case");
+    Equal(3, t["GROUPS 1 - DEFINITIONS"].Count + 0 - (t["GROUPS 1 - DEFINITIONS"].Any(x => x["GroupName"] == "Base") ? 1 : 0), "a group per story");
+    Check(t["FRAME SECTION PROPERTIES 01 - GENERAL"].Any(x => x["SectionName"] == "C500x500" && x["Shape"] == "Rectangular" && x["t3"] == "0.5"), "rectangle");
+    Check(t["MATERIAL PROPERTIES 03B - CONCRETE DATA"].Any(x => x["Material"] == "C30/37" && x["Fc"] == "30000"), "concrete strength");
+    Check(t["AREA SECTION PROPERTIES"].Any(x => x["Section"] == "S200" && x["Thickness"] == "0.2"), "slab");
+});
+
+Test("s2k: combinations, point and line loads go across", () =>
+{
+    var m = Templates.ConcreteFrame("T", [6], [5], 1, 3);
+    m.AddCombo("ULS", ("Dead", 1.35), ("Live", 1.5));
+    m.AddLineLoad("B1", "Story1", "Dead", 4.5);
+    m.PointLoads.Add(new PointLoad { Object = m.Points[0].Name, Story = "Story1", Tokens = ["TYPE", "\"FORCE\"", "LC", "\"Live\"", "FZ", "-10"] });
+    var r = CsiProMax.S2k.S2kWriter.Write(m);
+    var t = CsiProMax.CsiTables.CsiTableText.Parse(r.Text);
+    var combo = t["COMBINATION DEFINITIONS"].Where(x => x["ComboName"] == "ULS").ToList();
+    Equal(2, combo.Count, "two cases");
+    Equal("Linear Add", combo[0]["ComboType"], "type");
+    Equal("1.5", combo[1]["ScaleFactor"], "factor");
+    var line = t["FRAME LOADS - DISTRIBUTED"].Single();
+    Equal("B1_Story1", line["Frame"], "frame"); Equal("4.5", line["FOverLA"], "value"); Equal("6", line["AbsDistB"], "length");
+    Equal("-10", t["JOINT LOADS - FORCE"].Single()["F3"], "point load");
+});
+
+Test("s2k: section properties", () =>
+{
+    var rect = CsiProMax.S2k.S2kWriter.Rectangle(0.6, 0.3);
+    Near(0.18, rect.A, "area"); Near(0.3 * Math.Pow(0.6, 3) / 12, rect.I33, "I33"); Near(0.6 * Math.Pow(0.3, 3) / 12, rect.I22, "I22");
+    Check(Math.Abs(rect.J - 0.0037) < 0.0002, $"torsion of a 2:1 rectangle about 0.229 b^3 d, got {rect.J}");
+    var i = CsiProMax.S2k.S2kWriter.ISection(0.5, 0.2, 0.02, 0.01, 0.2, 0.02);
+    Near(0.2 * 0.02 * 2 + 0.46 * 0.01, i.A, "I area");
+    Near((0.2 * Math.Pow(0.5, 3) - 0.19 * Math.Pow(0.46, 3)) / 12, i.I33, "I33 of a doubly symmetric I");
+});
+
+Test("SAP2000: joints, frames and areas read one by one, no stories", () =>
+{
+    var sap = new SapStandIn();
+    var link = new CsiProMax.Assistant.Sap2000.SapLink(sap);
+    Equal("SAP2000", link.Program.Name, "program");
+    Equal(0, link.Stories().Count, "no stories");
+    Equal(4, link.Points().Count, "joints");
+    var frames = link.Frames();
+    Equal(2, frames.Count, "frames");
+    Equal("column", frames.First(f => f.Name == "1").Kind, "vertical");
+    Equal("brace", frames.First(f => f.Name == "2").Kind, "sloping");
+    Equal("FSEC1", frames[0].Section, "section");
+    Equal("", frames[0].Story, "no story");
+    var area = link.Areas().Single();
+    Equal("wall", area.Kind, "upright area");
+    Equal(3, area.Corners.Count, "corners");
+    Equal("floor", CsiProMax.Assistant.Sap2000.SapLink.AreaKind([(0, 0, 1), (1, 0, 1), (1, 1, 1)]), "level area");
+    Equal("shell", CsiProMax.Assistant.Sap2000.SapLink.AreaKind([(0, 0, 0), (1, 0, 0), (1, 1, 1)]), "sloping area");
+});
+
+Test("SAP2000: messages name SAP2000", () =>
+{
+    var link = new CsiProMax.Assistant.Sap2000.SapLink(new SapStandIn { Fail = true });
+    try { link.Info(); throw new Exception("no error"); }
+    catch (EtabsException ex) { Check(ex.Message.Contains("SAP2000") && !ex.Message.Contains("ETABS"), ex.Message); }
+});
+
+Test("SAP2000: its tools replace the story tools and add its own", () =>
+{
+    var tools = ProgramTools.For(CsiProgram.Sap2000);
+    foreach (var name in new[] { "add_joints", "add_frames", "add_areas", "set_restraints", "joint_displacements", "frame_forces", "base_reactions", "modal_results", "check_displacement", "run_design", "design_ratios", "check_report", "get_model_context" })
+        Check(tools.Any(t => t.Name == name), name);
+    var addColumns = tools.First(t => t.Name == "add_columns");
+    try { addColumns.Run(JsonDocument.Parse("{}").RootElement, new MemoryEtabs()); throw new Exception("no error"); }
+    catch (ToolInputException ex) { Check(ex.Message.Contains("add_frames"), ex.Message); }
+    Equal(0, ProgramTools.For(CsiProgram.Etabs).Count, "ETABS has only the shared tools");
+    var always = ProgramTools.Every.Where(t => t.Ask == Ask.Always).Select(t => t.Name).ToHashSet();
+    Check(always.IsSupersetOf(["delete_joints", "run_design", "save_model_s2k"]), "always asked");
+    Check(ProgramTools.Modeler.Any(t => t.Name == "save_model_s2k"), "the Modeler writes .s2k");
+    Check(ProgramTools.PackTable(CsiProgram.Sap2000, "Element Forces - Frames") && !ProgramTools.PackTable(CsiProgram.Sap2000, "Story Drifts"), "pack tables");
+});
+
+Test("SAP2000: add_frames sends coordinates and joint pairs", () =>
+{
+    var sap = new SapStandIn();
+    var link = new CsiProMax.Assistant.Sap2000.SapLink(sap);
+    var tool = ProgramTools.For(CsiProgram.Sap2000).First(t => t.Name == "add_frames");
+    var result = tool.Run(JsonDocument.Parse("""{"section":"W1","lines":[[0,0,0,0,0,3]],"joints":[["1","2"]]}""").RootElement, link);
+    Equal(2, result["added"]!.GetValue<int>(), "added");
+    Equal("coord W1;point 1 2 W1", string.Join(";", sap.Added), "calls");
+});
+
+Test("SAP2000: results through the analysis results", () =>
+{
+    var sap = new SapStandIn();
+    var link = new CsiProMax.Assistant.Sap2000.SapLink(sap);
+    var tools = ProgramTools.For(CsiProgram.Sap2000);
+    var d = tools.First(t => t.Name == "joint_displacements").Run(JsonDocument.Parse("""{"cases":["DEAD"]}""").RootElement, link);
+    Near(-0.012, d["largest"]!["U3"]!["value"]!.GetValue<double>(), "largest U3");
+    Equal("2", d["largest"]!["U3"]!["joint"]!.GetValue<string>(), "at joint");
+    Equal("DEAD", string.Join(",", sap.Output), "the case chosen for output");
+    var check = tools.First(t => t.Name == "check_displacement").Run(JsonDocument.Parse("""{"lateral_limit":500}""").RootElement, link);
+    Near(3.0 / 500, check["lateral"]!["allowed"]!.GetValue<double>(), "H/500");
+    Check(check["lateral"]!["passes"]!.GetValue<bool>(), "0.004 < 0.006");
+    var modal = tools.First(t => t.Name == "modal_results").Run(JsonDocument.Parse("{}").RootElement, link);
+    Check(!modal["passes"]!.GetValue<bool>(), "85% in UY is under 90%");
+});
+
+Test("plug-in: SAP2000 starts the assistant for SAP2000", () =>
+{
+    var root = Path.Combine(Path.GetTempPath(), "cpm-sap-" + Guid.NewGuid().ToString("N"));
+    var folder = Path.Combine(root, "plugin");
+    Directory.CreateDirectory(folder); Directory.CreateDirectory(Path.Combine(root, "dotnet"));
+    File.WriteAllText(Path.Combine(folder, "CsiProMax.dll"), "");
+    File.WriteAllText(Path.Combine(root, "dotnet", OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet"), "");
+    try
+    {
+        var start = CsiProMaxPlugin.Launcher.StartInfo(folder, "/x", 9, "SAP2000", [Path.Combine(root, "dotnet")]);
+        Check(start.Arguments.EndsWith("--etabs-pid 9 --program sap2000"), start.Arguments);
+        Equal(CsiProgram.Sap2000, CsiProgram.Find("sap2000"), "program row");
+        Check(CsiProgram.Sap2000.Ready, "SAP2000 is offered");
+    }
+    finally { Directory.Delete(root, true); }
+});
+
 foreach (var (name, body) in tests)
 {
     try { body(); Console.WriteLine($"ok    {name}"); }
@@ -679,4 +840,106 @@ sealed class Harness(ICsiLink etabs, bool allow, bool ask, List<string>? asked)
         var result = tool.Execute(new CsiProMax.ETABS.EtabsApp(etabs), input);
         return (result.Text, result.IsError);
     }
+}
+
+/// <summary>A small SAP2000 model behind the calls SAP2000's API answers: four joints, a column, a brace, an area, and results.</summary>
+public sealed class SapStandIn : ICsiLink
+{
+    public bool Fail { get; init; }
+    public List<string> Added { get; } = [];
+    public List<string> Output { get; } = [];
+    private readonly Model _m;
+    public SapStandIn() => _m = new Model(this);
+
+    public ModelInfo Info() => Fail ? throw new EtabsException("ETABS is not open. Open ETABS and a model, then try again.") : new("C:/m.sdb", "26.0.0", "kN", "m", "C", true);
+    public object? Raw(string what, Func<dynamic, object?> work) => work(_m);
+
+    public sealed class Model(SapStandIn owner)
+    {
+        public PointApi PointObj { get; } = new();
+        public FrameApi FrameObj { get; } = new(owner);
+        public AreaApi AreaObj { get; } = new();
+        public ResultsApi Results { get; } = new(owner);
+    }
+
+    public sealed class PointApi
+    {
+        private static readonly (string N, double X, double Y, double Z)[] All = [("1", 0, 0, 0), ("2", 0, 0, 3), ("3", 4, 0, 0), ("4", 4, 0, 3)];
+        public int GetNameList(ref int n, ref string[] names) { n = All.Length; names = All.Select(p => p.N).ToArray(); return 0; }
+        public int GetCoordCartesian(string name, ref double x, ref double y, ref double z, string csys)
+        { var p = All.First(a => a.N == name); x = p.X; y = p.Y; z = p.Z; return 0; }
+    }
+
+    public sealed class FrameApi(SapStandIn owner)
+    {
+        public int GetNameList(ref int n, ref string[] names) { n = 2; names = ["1", "2"]; return 0; }
+        public int GetPoints(string name, ref string i, ref string j) { (i, j) = name == "1" ? ("1", "2") : ("3", "2"); return 0; }
+        public int GetSection(string name, ref string section, ref string auto) { section = "FSEC1"; return 0; }
+        public int AddByPoint(string i, string j, ref string name, string section, string user) { owner.Added.Add($"point {i} {j} {section}"); name = "9"; return 0; }
+    }
+
+    public sealed class AreaApi
+    {
+        public int GetNameList(ref int n, ref string[] names) { n = 1; names = ["A1"]; return 0; }
+        public int GetPoints(string name, ref int n, ref string[] corners) { n = 3; corners = ["1", "3", "4"]; return 0; }
+        public int GetProperty(string name, ref string section) { section = "ASEC1"; return 0; }
+    }
+
+    public sealed class ResultsApi(SapStandIn owner)
+    {
+        public SetupApi Setup { get; } = new(owner);
+        public int JointDispl(string name, int item, ref int n, ref string[] obj, ref string[] elm, ref string[] cases, ref string[] steps, ref double[] num,
+            ref double[] u1, ref double[] u2, ref double[] u3, ref double[] r1, ref double[] r2, ref double[] r3)
+        {
+            n = 2; obj = ["2", "4"]; elm = obj; cases = ["DEAD", "DEAD"]; steps = ["", ""]; num = [0, 0];
+            u1 = [0.004, 0.003]; u2 = [0, 0.001]; u3 = [-0.012, -0.002]; r1 = [0, 0]; r2 = [0, 0]; r3 = [0, 0];
+            return 0;
+        }
+        public int ModalParticipatingMassRatios(ref int n, ref string[] cases, ref string[] steps, ref double[] num, ref double[] period,
+            ref double[] ux, ref double[] uy, ref double[] uz, ref double[] sux, ref double[] suy, ref double[] suz,
+            ref double[] rx, ref double[] ry, ref double[] rz, ref double[] srx, ref double[] sry, ref double[] srz)
+        {
+            n = 2; cases = ["MODAL", "MODAL"]; steps = ["Mode", "Mode"]; num = [1, 2]; period = [0.8, 0.5];
+            ux = [0.92, 0]; uy = [0, 0.85]; uz = [0, 0]; sux = [0.92, 0.92]; suy = [0, 0.85]; suz = [0, 0];
+            rx = [0, 0]; ry = [0, 0]; rz = [0, 0]; srx = [0, 0]; sry = [0, 0]; srz = [0, 0];
+            return 0;
+        }
+    }
+
+    public sealed class SetupApi(SapStandIn owner)
+    {
+        public int DeselectAllCasesAndCombosForOutput() { owner.Output.Clear(); return 0; }
+        public int SetCaseSelectedForOutput(string name, bool selected) { owner.Output.Add(name); return 0; }
+        public int SetComboSelectedForOutput(string name, bool selected) { owner.Output.Add(name); return 0; }
+    }
+
+    public IReadOnlyList<StoryRow> Stories() => [];
+    public IReadOnlyList<FrameRow> Frames() => [];
+    public IReadOnlyList<AreaRow> Areas() => [];
+    public IReadOnlyList<PointRow> Points() => [];
+    public bool[] Restraint(string point) => new bool[6];
+    public IReadOnlyList<(string Kind, string Name)> Selected() => [];
+    public void ClearSelection() { }
+    public void Select(string kind, string name) { }
+    public IReadOnlyList<string> FrameSections() => ["FSEC1"];
+    public IReadOnlyList<string> AreaSections() => ["ASEC1"];
+    public IReadOnlyList<string> Materials() => ["4000Psi"];
+    public IReadOnlyList<LoadPatternRow> LoadPatterns() => [new("DEAD", "Dead", 1)];
+    public IReadOnlyList<string> LoadCases() => ["DEAD", "MODAL"];
+    public IReadOnlyList<string> Combos() => [];
+    public string AddFrame(double x1, double y1, double z1, double x2, double y2, double z2, string section) { Added.Add("coord " + section); return "8"; }
+    public string AddArea(IReadOnlyList<(double X, double Y, double Z)> corners, string section) => "A9";
+    public void SetFrameSection(string name, string section) { }
+    public void SetAreaSection(string name, string section) { }
+    public void Delete(string kind, string name) { }
+    public void SetRestraint(string point, bool[] restraint) { }
+    public void AddLoadPattern(string name, string type, double selfWeight) { }
+    public void SetFrameLoad(string frame, string pattern, double value, bool replace) { }
+    public void SetAreaLoad(string area, string pattern, double value, bool replace) { }
+    public void AddCombo(string name, IReadOnlyList<(string Case, double Factor)> cases) { }
+    public IReadOnlyList<TableName> Tables() => [];
+    public TableData ReadTable(string key, IReadOnlyList<string>? cases, IReadOnlyList<string>? combos) => new([], []);
+    public void RunAnalysis() { }
+    public void Save() { }
+    public void Refresh() { }
 }

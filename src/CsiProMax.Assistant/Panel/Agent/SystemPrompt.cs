@@ -123,7 +123,7 @@ internal static class SystemPrompt
     {
         // The CSI program the window works in: the shared text in its words, then its own (ProgramPrompt).
         var program = App.Etabs?.Link.Program ?? CsiProMax.Assistant.Etabs.CsiProgram.Etabs;
-        var start = App.Modeler ? Base + Modeler : ProgramPrompt.Reword(Base, program) + ProgramPrompt.For(program);
+        var start = App.Modeler ? Base + Modeler + ProgramPrompt.Modeler : ProgramPrompt.Reword(Base, program) + ProgramPrompt.For(program);
         return start + "\n" + Practice +
             (string.IsNullOrWhiteSpace(firmStandards) ? "" : "\n\nFirm standards to follow (from the firm's settings):\n" + firmStandards.Trim());
     }

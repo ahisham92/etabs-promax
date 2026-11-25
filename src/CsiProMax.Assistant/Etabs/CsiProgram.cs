@@ -11,7 +11,7 @@ namespace CsiProMax.Assistant.Etabs;
 public sealed record CsiProgram(string Key, string Name, string ProcessName, string ProgId, string ApiFile, string ApiNamespace, string UsualFolder, bool Ready)
 {
     public static readonly CsiProgram Etabs = new("etabs", "ETABS", "ETABS", "CSI.ETABS.API.ETABSObject", "ETABSv1.dll", "ETABSv1", "ETABS 23", true);
-    public static readonly CsiProgram Sap2000 = new("sap2000", "SAP2000", "SAP2000", "CSI.SAP2000.API.SapObject", "SAP2000v1.dll", "SAP2000v1", "SAP2000 26", false);
+    public static readonly CsiProgram Sap2000 = new("sap2000", "SAP2000", "SAP2000", "CSI.SAP2000.API.SapObject", "SAP2000v1.dll", "SAP2000v1", "SAP2000 26", true);
     // SAFE 20 and later: the same API shape as ETABS (its ProgID even says ETABSObject), in SAFEv1.dll, and in newer
     // versions also CSI's common CSiAPIv1.dll. Its own plug-in is CsiProMaxSafePlugin.dll (src/CsiProMax.Plugin.Safe).
     public static readonly CsiProgram Safe = new("safe", "SAFE", "SAFE", "CSI.SAFE.API.ETABSObject", "SAFEv1.dll", "SAFEv1", "SAFE 22", true);
