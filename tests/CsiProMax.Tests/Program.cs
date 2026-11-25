@@ -453,6 +453,53 @@ Test("pack: the model, ETABS's tables and the checks go into one file and the Vi
     finally { if (Directory.Exists(folder)) Directory.Delete(folder, true); }
 });
 
+Test("pack: it is saved in the model's own folder, beside the model file", () =>
+{
+    var root = Path.Combine(Path.GetTempPath(), "cpm-pack-" + Guid.NewGuid().ToString("N"));
+    var (project, made, other) = (Path.Combine(root, "Tower", "run"), Path.Combine(root, "Made in chat"), Path.Combine(root, "elsewhere"));
+    var before = OfflineEtabs.DefaultFolder;
+    OfflineEtabs.DefaultFolder = project;
+    try
+    {
+        var o = new OfflineEtabs();
+        var mcp = Endpoint(o);
+        Call(mcp, "new_model", """{"title":"Tower"}""");
+        var none = new CsiProMax.Tools.ToolArgs(new Dictionary<string, JsonElement>());
+
+        // Never saved: the model has no folder yet, so the files go to the usual one, and the answer says so.
+        var unsaved = JsonNode.Parse(CsiProMax.Tools.ExportPackTool.Make(o, none, made).Text)!;
+        Equal(made, (string)unsaved["folder"]!, "an unsaved model's pack goes to the usual folder");
+        Check(!(bool)unsaved["beside_model"]! && ((string?)unsaved["not_beside_model"] ?? "").Contains("not been saved"), "and it says why: " + unsaved.ToJsonString());
+
+        // Saved: both files land beside the model file, with nothing to say about it.
+        var file = (string)Call(mcp, "save_model_as", """{"name":"tower"}""")["file"]!;
+        Equal(project, Path.GetDirectoryName(file), "the model's folder");
+        var beside = CsiProMax.Tools.ExportPackTool.Make(o, none, made);
+        Check(!beside.IsError, beside.Text);
+        var answer = JsonNode.Parse(beside.Text)!;
+        Equal(project, (string)answer["folder"]!, "the pack's folder is the model's");
+        Check((bool)answer["beside_model"]! && answer["not_beside_model"] is null, "nothing to explain: " + answer.ToJsonString());
+        var files = CsiProMax.Chat.ChatFiles.Find(beside.Text);
+        Equal(2, files.Count, "the page and the pack get a card each, the folder does not");
+        Check(files.All(f => Path.GetDirectoryName(f) == project && File.Exists(f)), "both files are beside the model: " + string.Join(", ", files));
+        Equal(0, Directory.GetFiles(project, ".csi-promax-*").Length, "the file that tried the folder is gone again");
+        var again = CsiProMax.Chat.ChatFiles.Find(CsiProMax.Tools.ExportPackTool.Make(o, none, made).Text);
+        Check(again.All(f => !files.Contains(f) && Path.GetDirectoryName(f) == project), "a second pack does not replace the first");
+
+        // A folder that was asked for wins.
+        var asked = JsonNode.Parse(CsiProMax.Tools.ExportPackTool.Make(o, new CsiProMax.Tools.ToolArgs(new Dictionary<string, JsonElement> { ["folder"] = J(JsonSerializer.Serialize(other)) }), made).Text)!;
+        Equal(other, (string)asked["folder"]!, "the folder that was asked for");
+        Check(!(bool)asked["beside_model"]! && asked["not_beside_model"] is null, "asked for, so nothing to explain");
+
+        // The model's folder is gone (a drive that was unplugged): the usual folder again, with the reason.
+        var (where, why) = CsiProMax.Tools.ExportPackTool.BesideModel(Path.Combine(root, "unplugged", "tower.EDB"), made);
+        Equal(made, where, "no folder to write to"); Check(why!.Contains("is not there"), why);
+        Equal(project, CsiProMax.Tools.ExportPackTool.BesideModel(Path.Combine(project, "tower.sdb"), made).Folder, "SAP2000 and SAFE models the same way");
+        Equal(made, CsiProMax.Tools.ExportPackTool.BesideModel("(Untitled)", made).Folder, "a name with no folder is an unsaved model");
+    }
+    finally { OfflineEtabs.DefaultFolder = before; if (Directory.Exists(root)) Directory.Delete(root, true); }
+});
+
 Test("modeler: a building is modelled with no ETABS and saved as an ETABS text file", () =>
 {
     var folder = Path.Combine(Path.GetTempPath(), "cpm-modeler-" + Guid.NewGuid().ToString("N"));
