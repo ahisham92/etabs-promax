@@ -737,6 +737,21 @@ static class TesterBugTests
             Check(runner.IndexOf("o.EndLeftCopies()", StringComparison.Ordinal) is var at and > 0 && at < runner.IndexOf("menus = ToolsMenu.Repair(", StringComparison.Ordinal), "leftovers are not closed before the Tools menu is looked at");
             Check(runner.Contains("Tools > CSI ProMax is still in each program after the test", StringComparison.Ordinal), "the Tools menu is not looked at again after the scratch windows closed");
         });
+        yield return ("Tools menu: an entry that names a copy outside the installed folder is made to name the installed one", () =>
+        {
+            // Seen on 2026-11-25 after the 0.4.15 run: both settings files named ...\etabs-promax-test\v0415\app\dist, so
+            // Tools > CSI ProMax would have started the test copy and not the one in Documents\CSI ProMax.
+            const string test = @"C:\Users\a\etabs-promax-test\v0415\app\dist\CsiProMaxPlugin.dll", installed = @"C:\Users\a\Documents\CSI ProMax\CsiProMaxPlugin.dll";
+            var ini = "[PlugIn]\r\n NumberPlugIns=1\r\n PlugInName=CsiProMaxPlugin\r\n PlugInMenuText=CSI ProMax\r\n PlugInPath=" + test + "\r\n[Other]\r\n A=1\r\n";
+            var (state, text) = ToolsMenu.Edit(ini, "CsiProMaxPlugin", installed, _ => true, prefer: true);
+            Equal(ToolsMenu.State.Moved, state, "the test copy's entry, seen from the installed folder");
+            Check(text!.Contains("PlugInPath=" + installed, StringComparison.Ordinal) && !text.Contains("etabs-promax-test", StringComparison.Ordinal) && text.Contains("NumberPlugIns=1", StringComparison.Ordinal) && text.Contains("[Other]\r\n A=1", StringComparison.Ordinal), text);
+            // Without that preference (CSI ProMax runs from a folder of its own choosing) a copy that is there is left alone, as before.
+            Equal(ToolsMenu.State.Already, ToolsMenu.Edit(ini, "CsiProMaxPlugin", installed, _ => true).State, "no preference: left alone");
+            Equal(ToolsMenu.State.Already, ToolsMenu.Edit(ini.Replace(test, installed), "CsiProMaxPlugin", installed, _ => true, prefer: true).State, "already the installed one");
+            var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/ToolsMenu.cs"));
+            Check(source.Contains("new[] { DefaultInstall(), InstalledIn, AppContext.BaseDirectory }", StringComparison.Ordinal), "Documents\\CSI ProMax no longer comes before the folder CSI ProMax runs from");
+        });
         yield return ("ETABS 20 tester: the field test tries what Tools > CSI ProMax does in each program, and fails where the plug-in cannot be created", () =>
         {
             // What the check answered on that PC (in its own words), and a PC where all is well.
