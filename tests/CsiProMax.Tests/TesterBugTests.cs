@@ -660,7 +660,10 @@ static class TesterBugTests
             Check(!ToolsMenu.LeftBehind(false, now.AddSeconds(-20), now), "a program that is starting (no window yet) is open");
             Check(!ToolsMenu.LeftBehind(null, now.AddHours(-8), now) && !ToolsMenu.LeftBehind(false, null, now), "a process that cannot be read counts as open");
             var install = File.ReadAllText(Path.Combine(SourceText.Root(), "install.ps1"));
-            Check(install.Contains("MainWindowHandle -ne 0") && install.Contains("TotalMinutes -le 10"), "install.ps1 follows the same rule");
+            Check(install.Contains("($_.MainWindowHandle -ne 0 -and $_.MainWindowTitle)") && install.Contains("TotalMinutes -le 10"), "install.ps1 follows the same rule");
+            // The three left on Ahmed's PC had a main window after all: SAP2000's hidden helper, with no title and no size.
+            Check(!ToolsMenu.HasWindow(true, "") && !ToolsMenu.HasWindow(true, null) && !ToolsMenu.HasWindow(false, "SAP2000"), "a hidden helper window with no title is taken for the program's window");
+            Check(ToolsMenu.HasWindow(true, "SAP2000 26.3.0 Ultimate - (Untitled)"), "a titled main window is the program being open");
         });
         yield return ("ETABS 23 field test: the test never makes ETABS ask to close, and answers that question itself", () =>
         {
