@@ -468,6 +468,15 @@ static class TesterBugTests
             Check(source.Contains("ScratchDialogs.CloseNotices(ProcessId)"), "the scratch window no longer watches for the notice");
         });
 
+        yield return ("SAP2000 field test: a scratch process left running is named with its process id, and counts as a failure", () =>
+        {
+            var said = "the scratch SAP2000 window stopped answering, so it was left as it is; close it yourself without saving" + ScratchProgram.LeftRunning("SAP2000", "SAP2000", 47136, hasWindow: false);
+            Check(said.Contains("process id 47136") && said.Contains("no window on the screen") && said.Contains("Task Manager") && said.Contains("licence"), said);
+            Check(ScratchProgram.LeftRunning("SAFE", "SAFE", 7, hasWindow: true).Contains("close that window without saving, or end"), "a window that is there is not offered to be closed");
+            // The close step fails on any answer that asks the engineer to do something.
+            Check(said.Contains("yourself"), "a process left running would pass the close step");
+        });
+
         yield return ("ETABS 20 tester: the field test tries what Tools > CSI ProMax does in each program, and fails where the plug-in cannot be created", () =>
         {
             // What the check answered on that PC (in its own words), and a PC where all is well.

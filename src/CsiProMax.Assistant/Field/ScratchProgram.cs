@@ -266,18 +266,38 @@ public sealed class ScratchProgram : IScratchWindow
         var name = _program.Name;
         if (_app is null) return "it was not started";
         if (_closed) return $"the scratch {name} window was already closed";
-        if (_left) return $"the scratch {name} window stopped answering, so it was left as it is; close it yourself without saving";
+        if (_left) return $"the scratch {name} window stopped answering, so it was left as it is; close it yourself without saving" + StillRunning();
         try
         {
             Ask(TimeSpan.FromMinutes(1), "close the window", _ => { _app.ApplicationExit(false); return null; },
                 $"the scratch {name} window did not close within a minute; close it yourself without saving");
             _closed = true;
+            // The program said yes to closing: its process must go too, or it keeps a licence with no window to show for it.
+            if (!Gone(TimeSpan.FromSeconds(30))) return $"the scratch {name} window was told to close, and its process did not end; end it yourself" + StillRunning();
             int notices;
             lock (_noticesClosed) notices = _noticesClosed.Count;
             return $"the scratch {name} window was closed without saving" + (notices > 0 ? $" ({notices} 'analysis complete' notice{(notices == 1 ? "" : "s")} of it closed along the way)" : "");
         }
-        catch (EtabsException ex) { return _left ? ex.Message : $"the scratch {name} window could not be closed ({ex.Message}); close it yourself without saving"; }
+        catch (EtabsException ex) { return (_left ? ex.Message : $"the scratch {name} window could not be closed ({ex.Message}); close it yourself without saving") + StillRunning(); }
     }
+
+    /// <summary>True when the scratch process has ended (or could not be told apart, so nothing is known of it).</summary>
+    private bool Gone(TimeSpan wait)
+    {
+        if (ProcessId == 0) return true;
+        try { using var process = Process.GetProcessById(ProcessId); return process.WaitForExit((int)wait.TotalMilliseconds); }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception) { return true; }
+    }
+
+    /// <summary>
+    /// What to tell the engineer about a scratch process that is still there: it holds a licence until it ends, and it
+    /// may have no window left to close. The test does not end a CSI program's process itself.
+    /// </summary>
+    private string StillRunning() => Gone(TimeSpan.Zero) ? "" : LeftRunning(_program.Name, _program.ProcessName, ProcessId, ScratchDialogs.Of(ProcessId).Count > 0);
+
+    public static string LeftRunning(string name, string processName, int processId, bool hasWindow) =>
+        $". Its process is still running ({processName}.exe, process id {processId}, {(hasWindow ? "with a window" : "with no window on the screen")}) and holds a {name} licence until it ends: " +
+        $"{(hasWindow ? "close that window without saving, or " : "")}end the {processName}.exe with process id {processId} in Task Manager (Details tab). It is the test's own scratch model; nothing of yours is in it";
 
     public void Dispose()
     {
