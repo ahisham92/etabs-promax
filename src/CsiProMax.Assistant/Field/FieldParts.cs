@@ -169,7 +169,10 @@ public static class FieldParts
             var given = answers.Where(a => a.Answer is not null).ToList();
             var odd = given.Where(a => a.Answer!["status"]?.GetValue<string>() is { } s && !Verdict.Words.Contains(s)).Select(a => $"{a.Check}: '{a.Answer!["status"]}'").ToList();
             FieldContext.Expect(odd.Count == 0, "a check's status is not one of pass, fail, reported, not available: " + string.Join("; ", odd));
-            var none = given.Where(a => a.Answer!["status"]?.GetValue<string>() == "not available")
+            // "Not available" because the scratch model has no earthquake or wind load is the model's doing, not a fault:
+            // it is said in the answer, and not counted as a check with nothing to read.
+            var none = given.Where(a => a.Answer!["status"]?.GetValue<string>() == "not available"
+                                        && !(a.Answer!["note"]?.GetValue<string>() ?? "").Contains("no earthquake or wind load pattern", StringComparison.Ordinal))
                 .Select(a => $"{a.Check}: {a.Answer!["note"]?.GetValue<string>() ?? "no reason given"}").ToList();
             FieldContext.Expect(none.Count == 0, $"{none.Count} of {given.Count} checks had nothing to read. " + string.Join(" | ", none));
             return string.Join(", ", given.Select(a => $"{a.Check}: {a.Answer!["status"]?.GetValue<string>() ?? "reported"}"));

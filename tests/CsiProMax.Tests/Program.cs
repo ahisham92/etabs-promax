@@ -927,6 +927,26 @@ Test("set_section: a frame or area that is not in the model is reported as faile
     var areas = Call(mcp, "set_section", """{"areas":["no such slab"],"section":"S200"}""");
     Check(areas["failed"]!.AsArray().Count == 1, "the missing area is not reported: " + areas.ToJsonString());
 });
+Test("check_story_irregularity: with gravity loads only, the soft story check says why it cannot run", () =>
+{
+    Check(ResultTools.IsLateral("Seismic") && ResultTools.IsLateral("Quake") && ResultTools.IsLateral("Wind") && ResultTools.IsLateral("QuakeDrift"), "a lateral pattern type is not seen as one");
+    Check(!ResultTools.IsLateral("Dead") && !ResultTools.IsLateral("Live") && !ResultTools.IsLateral("Super Dead"), "a gravity pattern type is taken for a lateral one");
+    var e = new MemoryEtabs();
+    var said = ResultTools.NoLateralLoad(e);
+    Check(said.Contains("earthquake and wind") && said.Contains("add_load_pattern") && said.Contains("no earthquake or wind load pattern"), said);
+    var field = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Field", "FieldParts.cs"));
+    Check(field.Contains("\"no earthquake or wind load pattern\""), "the field test still counts a soft story check the model cannot give as a failure");
+    var irregular = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Tools", "ResultTools.cs"));
+    Check(irregular.Contains("result[\"note\"] = string.Join(\" \", notes)"), "the irregularity check gives no reason at its top when a part is not available");
+});
+
+Test("field test: ETABS tables it cannot have are not tested, and the pier tables wait for the menu's shear wall design", () =>
+{
+    var steps = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Field", "EtabsFieldSteps.cs"));
+    Check(steps.Contains("withData.Contains(ResultTools.Norm(n))"), "a table ETABS lists with no data (no braces: no brace forces) is still read and failed");
+    Check(steps.Contains("!ResultTools.HasLateralLoad(link)"), "Story Stiffness is still read on a model with gravity loads only");
+    Check(steps.Contains("wallsByHand is not null && pier.All(t => t.Empty)"), "empty pier tables still fail when the shear wall design can only be run from the menu");
+});
 foreach (var (name, body) in CdtSdkTests.All()) Test(name, body);
 foreach (var (name, body) in FieldRun048Tests.All()) Test(name, body);
 foreach (var (name, body) in FieldQuietTests.All()) Test(name, body);

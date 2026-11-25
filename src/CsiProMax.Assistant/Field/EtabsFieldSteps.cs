@@ -275,9 +275,13 @@ public static class EtabsFieldSteps
         var analysed = false;
         try { analysed = link.Info().Locked; }
         catch (EtabsException) { }
+        // The shear wall design, when ETABS's API cannot start it, is left to the menu: its tables are then empty by design.
+        string? wallsByHand = null;
         if (analysed)
             ctx.Tool("run_design", "{}", a =>
             {
+                if ((a["run_in_program"] as JsonArray)?.FirstOrDefault(k => k?["kind"]?.GetValue<string>() == "shear_wall") is { } wall)
+                    wallsByHand = $"ETABS's API has no call to start the shear wall design, so it is run from {wall["menu"]?.GetValue<string>() ?? "the Design menu"} by hand; its tables stay empty until then";
                 FieldContext.Expect(a["ran"] is JsonArray ran && ran.Any(k => k!.GetValue<string>() == "concrete"), "the concrete frame design did not run: " + a.ToJsonString());
             }, "tool run_design (every kind; the ones the API cannot start are named with their menu)");
         else ctx.Refused("run_design", "{}", "design", "tool run_design says the analysis must run first");
@@ -303,8 +307,23 @@ public static class EtabsFieldSteps
         {
             ctx.Step("ETABS tables with data after the analysis and design", () => link.Tables().Where(t => !t.Empty).Select(t => t.Name).ToList());
             var sampled = new HashSet<string>(StringComparer.Ordinal);
+            var withData = link.Tables().Where(t => !t.Empty).Select(t => ResultTools.Norm(t.Name)).ToHashSet(StringComparer.Ordinal);
             foreach (var names in ResultTools.CheckedTables.Concat(Pack.UsualTables.Select(t => new[] { t })))
-                if (sampled.Add(ResultTools.Norm(names[0]))) ctx.Step($"ETABS table {names[0]}", () => ResultTools.Sample(link, names));
+                if (sampled.Add(ResultTools.Norm(names[0])))
+                {
+                    // A table ETABS does not list with data for this model (no braces: no brace forces) is not a failure.
+                    if (ResultTools.Norm(names[0]) == ResultTools.Norm("Story Stiffness") && !ResultTools.HasLateralLoad(link))
+                    {
+                        ctx.Skip($"ETABS table {names[0]}", "ETABS gives story stiffness only for earthquake and wind load cases, and the scratch model has gravity loads only");
+                        continue;
+                    }
+                    if (!names.Any(n => withData.Contains(ResultTools.Norm(n))))
+                    {
+                        ctx.Skip($"ETABS table {names[0]}", "ETABS lists it with no data for the scratch model (it has nothing of that kind, or no load case that gives it)");
+                        continue;
+                    }
+                    ctx.Step($"ETABS table {names[0]}", () => ResultTools.Sample(link, names));
+                }
             var summaries = link.Tables().Where(t => ResultTools.IsDesignSummary(t.Name)).ToList();
             ctx.Step("ETABS design summary tables", () =>
             {
@@ -318,6 +337,7 @@ public static class EtabsFieldSteps
             {
                 if (!piered) throw new FieldSkipException("the wall was not made a pier");
                 var pier = link.Tables().Where(t => DesignResults.FamilyOf(t.Name)?.Key == "pier").ToList();
+                if (wallsByHand is not null && pier.All(t => t.Empty)) throw new FieldSkipException(wallsByHand);
                 FieldContext.Expect(pier.Count > 0, "ETABS lists no shear wall pier design table at all");
                 var full = pier.FirstOrDefault(t => !t.Empty) ?? throw new FieldCheckException("the pier design tables are empty after the design: " + string.Join("; ", pier.Select(t => t.Name)) + ". The export file is then the way to the results.");
                 var data = link.ReadTable(full.Key, null, null);

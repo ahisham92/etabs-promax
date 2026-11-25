@@ -353,13 +353,37 @@ public static class ResultTools
         var mass = Read(e, known, default, false, "Mass Summary by Story", "Mass Summary By Story");
         var result = new JsonObject
         {
-            ["soft_story"] = stiffness is null ? Missing(e, "the story stiffness", "Story Stiffness") : SoftStoryCheck(stiffness, order, a.Number("soft", 0.7), a.Number("soft_average", 0.8)),
+            ["soft_story"] = stiffness is not null ? SoftStoryCheck(stiffness, order, a.Number("soft", 0.7), a.Number("soft_average", 0.8))
+                : HasLateralLoad(e) ? Missing(e, "the story stiffness", "Story Stiffness")
+                : new JsonObject { ["status"] = Verdict.NotAvailable, ["note"] = NoLateralLoad(e) },
             ["mass"] = mass is null ? Missing(e, "the story masses", "Mass Summary by Story") : MassCheck(mass, order, a.Number("mass", 1.5)),
         };
         var states = new[] { result["soft_story"]!["status"]!.GetValue<string>(), result["mass"]!["status"]!.GetValue<string>() };
         result["status"] = states.Contains(Verdict.Fail) ? Verdict.Fail : states.All(s => s == Verdict.Pass) ? Verdict.Pass : Verdict.NotAvailable;
+        // The reason, at the top as every check gives it: the parts that could not be checked, each with its own.
+        var notes = new[] { "soft_story", "mass" }.Where(k => result[k]?["status"]?.GetValue<string>() == Verdict.NotAvailable)
+            .Select(k => result[k]?["note"]?.GetValue<string>()).Where(n => !string.IsNullOrWhiteSpace(n)).ToList();
+        if (notes.Count > 0) result["note"] = string.Join(" ", notes);
         return result;
     }
+
+    /// <summary>
+    /// True when the model has an earthquake or wind load pattern: the only kinds ETABS gives story stiffness for. With
+    /// gravity loads alone ETABS lists the Story Stiffness table and refuses to read it, for every case (seen on ETABS 23,
+    /// the 0.4.11 field test's scratch model, 2026-11-25).
+    /// </summary>
+    internal static bool HasLateralLoad(ICsiLink e)
+    {
+        try { return e.LoadPatterns().Any(p => IsLateral(p.Type)); }
+        catch (EtabsException) { return true; } // not known: the usual message
+    }
+
+    internal static bool IsLateral(string type) =>
+        new[] { "quake", "seismic", "wind" }.Any(w => type.Contains(w, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>What the soft story check says when the model has no earthquake or wind load.</summary>
+    internal static string NoLateralLoad(ICsiLink e) =>
+        $"{e.Program.Name} gives story stiffness only for earthquake and wind load cases, and this model has no earthquake or wind load pattern, so the soft story check cannot run. Add one (add_load_pattern with type Seismic or Wind), run the analysis, and check again.";
 
     /// <param name="topFirst">Story names from the top story down.</param>
     internal static JsonObject SoftStoryCheck(TableData data, IReadOnlyList<string> topFirst, double soft, double softAverage)
