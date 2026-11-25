@@ -408,8 +408,20 @@ public static class EtabsTools
         if (frames.Count + areas.Count == 0) throw new ToolInputException("Give 'frames' or 'areas' to change.");
         var frameSection = frames.Count > 0 ? Section(a, e.FrameSections(), "frame") : "";
         var areaSection = areas.Count > 0 ? Section(a, e.AreaSections(), "slab or wall") : "";
-        return Each(e, frames.Select(f => (f, (Action)(() => e.SetFrameSection(f, frameSection))))
-            .Concat(areas.Select(x => (x, (Action)(() => e.SetAreaSection(x, areaSection))))));
+        // ETABS 23 answers "done" to a section set on a frame or area that is not there (field test of 0.4.9,
+        // 2026-11-25), so the names are checked against the model first and a missing one is reported as failed.
+        var knownFrames = frames.Count > 0 ? e.Frames().Select(f => f.Name).ToHashSet(StringComparer.OrdinalIgnoreCase) : [];
+        var knownAreas = areas.Count > 0 ? e.Areas().Select(x => x.Name).ToHashSet(StringComparer.OrdinalIgnoreCase) : [];
+        return Each(e, frames.Select(f => (f, (Action)(() =>
+            {
+                if (!knownFrames.Contains(f)) throw new EtabsException($"there is no frame '{f}' in the model.");
+                e.SetFrameSection(f, frameSection);
+            })))
+            .Concat(areas.Select(x => (x, (Action)(() =>
+            {
+                if (!knownAreas.Contains(x)) throw new EtabsException($"there is no slab or wall '{x}' in the model.");
+                e.SetAreaSection(x, areaSection);
+            })))));
     }
 
     private static JsonNode SetSupports(JsonElement a, ICsiLink e)

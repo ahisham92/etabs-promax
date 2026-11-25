@@ -915,6 +915,18 @@ Test("plug-in: the assistant is started with the dotnet ETABS runs on", () =>
 
 foreach (var (name, body) in SafeTests.All()) Test(name, body);
 foreach (var (name, body) in TesterBugTests.All()) Test(name, body);
+Test("set_section: a frame or area that is not in the model is reported as failed (ETABS 23 says done to it)", () =>
+{
+    var e = new MemoryEtabs();
+    var mcp = Endpoint(e);
+    Call(mcp, "add_columns", """{"points":[[0,0]],"stories":["Story1"],"section":"C500x500"}""");
+    var made = e.Frames().Select(f => f.Name).ToList();
+    var r = Call(mcp, "set_section", $$"""{"frames":["no such frame","{{made[0]}}"],"section":"C500x500"}""");
+    Equal(1, (int)r["done"]!, "the frame that is there is set");
+    Check(r["failed"]!.AsArray().Count == 1 && r["failed"]![0]!.GetValue<string>().Contains("no such frame"), "the missing frame is not reported: " + r.ToJsonString());
+    var areas = Call(mcp, "set_section", """{"areas":["no such slab"],"section":"S200"}""");
+    Check(areas["failed"]!.AsArray().Count == 1, "the missing area is not reported: " + areas.ToJsonString());
+});
 foreach (var (name, body) in CdtSdkTests.All()) Test(name, body);
 foreach (var (name, body) in FieldRun048Tests.All()) Test(name, body);
 foreach (var (name, body) in FieldQuietTests.All()) Test(name, body);
