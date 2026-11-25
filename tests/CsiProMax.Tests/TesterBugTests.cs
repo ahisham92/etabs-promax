@@ -454,6 +454,20 @@ static class TesterBugTests
             Check(source.IndexOf("Newer(args) is { } newerTest", StringComparison.Ordinal) is var at and > 0 && at < source.IndexOf("FieldTest.Run(link", StringComparison.Ordinal), "--fieldtest runs before a newer version is looked for");
         });
 
+        // ---- the first full field test on a real SAP2000 26: run_analysis never came back, "Analysis Complete" waited for OK ----
+
+        yield return ("SAP2000 field test: only the 'analysis complete' notice of the scratch window is closed for it, never a licence or other message", () =>
+        {
+            Check(ScratchDialogs.MayClose("Analysis Complete - cpm-field-test"), "the notice that stopped the test is not closed");
+            Check(ScratchDialogs.MayClose("analysis complete"), "the notice in other letters is not closed");
+            foreach (var other in new[] { "Maintenance Expiring", "SAP2000 26.3.0 Ultimate - cpm-field-test", "License", "Save Model File As", "SAFE", "" })
+                Check(!ScratchDialogs.MayClose(other), $"'{other}' would be closed by the test");
+            // No process: nothing is looked for or closed.
+            Equal(0, ScratchDialogs.CloseNotices(0).Count, "notices closed with no process");
+            var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));
+            Check(source.Contains("ScratchDialogs.CloseNotices(ProcessId)"), "the scratch window no longer watches for the notice");
+        });
+
         yield return ("ETABS 20 tester: the field test tries what Tools > CSI ProMax does in each program, and fails where the plug-in cannot be created", () =>
         {
             // What the check answered on that PC (in its own words), and a PC where all is well.

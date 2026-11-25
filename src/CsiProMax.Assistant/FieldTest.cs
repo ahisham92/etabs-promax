@@ -234,6 +234,14 @@ public static class FieldTest
             });
             // ctx.Link stays on the scratch window: a part that was given up on must never reach the engineer's model.
             ctx.Section(FieldParts.ScratchSection(program));
+            // Given up on: the windows waiting in the scratch program are named, so the engineer knows which to answer.
+            if (!finished && window is { } stuck)
+            {
+                IReadOnlyList<string> waiting;
+                try { waiting = stuck.OpenWindows(); } catch (Exception ex) when (ex is not OutOfMemoryException) { waiting = []; }
+                if (waiting.Count > 0)
+                    ctx.Fail($"windows waiting in the scratch {program.Name}", "These were open in it when the test gave up: " + string.Join("; ", waiting.Select(t => $"'{t}'")) + ". Answer them yourself, close that window without saving, and run the field test again.");
+            }
             if (window is { } open)
             {
                 ScratchProgram.CloseStep(ctx, open, program);
