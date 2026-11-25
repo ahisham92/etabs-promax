@@ -251,6 +251,7 @@ public static class FieldTest
                 window = o.StartScratch(program, ctx, file);
                 if (window is null) return;
                 ctx.Link = window.Link;
+                ctx.Watched = window.Link;
                 try { ScratchSteps(program)(ctx); }
                 catch (Exception ex) when (ex is not (OperationCanceledException or OutOfMemoryException))
                 {
@@ -260,6 +261,7 @@ public static class FieldTest
                     ctx.Fail($"{program.Name}'s part stopped before its end",
                         $"{ex.GetType().Name}: {ex.Message} Tools not run because of it: {(left.Count == 0 ? "none" : string.Join(", ", left))}. Where: {Where(ex)}");
                 }
+                finally { ctx.Watched = null; }
                 // The Viewer's own screen on this program's model: one check, the same for every program.
                 ctx.Section(FieldParts.ScratchSection(program));
                 if (o.Viewer) ViewerCheck.FieldSteps(ctx, window.Link, program.Name);
@@ -284,6 +286,7 @@ public static class FieldTest
                 }) is not null;
                 PanelFieldSteps.Run(ctx, window.Link, scratch: mine, live: o.LiveScratch);
             });
+            ctx.Watched = null;
             // ctx.Link stays on the scratch window: a part that was given up on must never reach the engineer's model.
             ctx.Section(FieldParts.ScratchSection(program));
             // Given up on: the windows waiting in the scratch program are named, so the engineer knows which to answer.

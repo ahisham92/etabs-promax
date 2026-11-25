@@ -1501,6 +1501,11 @@ Test("field test: the full test runs every part, closes its window, and leaves t
             StartScratch = (program, ctx, file) => new CsiProMax.Tests.StandInWindow(System.Reflection.DispatchProxy.Create<ICsiLink, CsiProMax.Tests.DeadLink>(), Path.Combine(ctx.Folder, "cpm-field-test.edb")),
         });
         Check(dead.Steps.Any(s => s.Skipped && s.Name == "CSI ProMax's own features on the scratch ETABS window" && s.Detail.Contains("no longer answers")), "the window that stopped answering is left out of CSI ProMax's own features, and the report says so");
+        var etabsPart = dead.Steps.Where(s => s.Section == FieldParts.ScratchSection(CsiProgram.Etabs)).ToList();
+        if (Environment.GetEnvironmentVariable("CPM_FIELD_DUMP") == "1")
+            foreach (var s in etabsPart) Console.WriteLine($"      {(s.Skipped ? "skip" : s.Ok ? "ok  " : "FAIL")} {s.Name}: {(s.Detail.Length > 140 ? s.Detail[..140] : s.Detail)}");
+        Check(etabsPart.Count(s => !s.Ok) <= 4, $"one window that stopped answering is a few failures, not one per step: {etabsPart.Count(s => !s.Ok)} failed");
+        Check(etabsPart.Any(s => s.Skipped && s.Detail.Contains("stopped answering at the step")), "the steps after it are listed as not tested, naming the step it stopped at");
         var own = dead.Steps.Where(s => s.Section == PanelFieldSteps.Section).ToList();
         Check(own.Count > 20 && own.All(s => !s.Detail.Contains("stopped answering")), "CSI ProMax's own features ran on a link that answers: " + string.Join("; ", own.Where(s => s.Detail.Contains("stopped answering")).Take(3).Select(s => s.Name)));
 
