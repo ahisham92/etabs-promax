@@ -11,6 +11,13 @@ namespace CsiProMax.Assistant.Etabs;
 /// </summary>
 public sealed class ComEtabs : ICsiLink, IDisposable
 {
+    /// <summary>
+    /// The COM apartment of the thread that talks to the program. --mta on the command line makes it multi-threaded,
+    /// as CSI's own console examples are: a way to try, on a real program, whether a call that never comes back
+    /// (SAP2000's RunAnalysis in the first full field test) is the apartment's doing.
+    /// </summary>
+    public static ApartmentState Apartment { get; set; } = ApartmentState.STA;
+
     private readonly BlockingCollection<Action> _work = new();
     private readonly Thread _thread;
     private dynamic? _model;
@@ -26,7 +33,7 @@ public sealed class ComEtabs : ICsiLink, IDisposable
         _pid = pid;
         Program = program ?? CsiProgram.Etabs;
         _thread = new Thread(() => { foreach (var job in _work.GetConsumingEnumerable()) job(); }) { IsBackground = true, Name = Program.ProcessName };
-        if (OperatingSystem.IsWindows()) _thread.SetApartmentState(ApartmentState.STA);
+        if (OperatingSystem.IsWindows()) _thread.SetApartmentState(Apartment);
         _thread.Start();
     }
 
