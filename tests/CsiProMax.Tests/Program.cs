@@ -980,7 +980,7 @@ Test("edit_table: an analysed model is unlocked first, and a refused edit is can
     Check(at > 0, "the table edit's apply step is gone");
     var body = source.Substring(at, source.IndexOf("e.Refresh();", at, StringComparison.Ordinal) - at);
     var unlock = body.IndexOf("m.SetModelIsLocked(false)", StringComparison.Ordinal);
-    var set = body.IndexOf("SetTableForEditingArray", StringComparison.Ordinal);
+    var set = body.IndexOf("m.DatabaseTables.SetTableForEditingArray(", StringComparison.Ordinal);
     Check(unlock > 0 && unlock < set, "an analysed (locked) model is not unlocked before the edit; SAP2000 26 refuses it then");
     Check(body.Contains("m.DatabaseTables.CancelTableEditing()"), "a refused edit is not cancelled; SAP2000 then refused the table and listed no patterns");
     Check(source.Contains("log[\"unlocked\"]"), "the answer does not say the results are gone");
