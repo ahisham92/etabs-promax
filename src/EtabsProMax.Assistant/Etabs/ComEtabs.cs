@@ -6,7 +6,8 @@ namespace EtabsProMax.Assistant.Etabs;
 /// <summary>
 /// The running ETABS, through ETABS's own API (the same one ETABS plug-ins and spreadsheets use). ETABS must be open
 /// and licensed: this attaches to it and never starts, unlocks or stands in for it. Calls are made by name at run
-/// time, so nothing of ETABS is needed to build. Every call runs on one thread of its own, one at a time.
+/// time through <see cref="EtabsApi"/>, so nothing of ETABS is needed to build. Every call runs on one thread of its
+/// own, one at a time.
 /// </summary>
 public sealed class ComEtabs : IEtabsLink, IDisposable
 {
@@ -26,9 +27,6 @@ public sealed class ComEtabs : IEtabsLink, IDisposable
 
     [DllImport("ole32.dll")]
     private static extern int CLSIDFromProgID([MarshalAs(UnmanagedType.LPWStr)] string progId, out Guid clsid);
-
-    [DllImport("oleaut32.dll")]
-    private static extern int GetActiveObject(ref Guid clsid, IntPtr reserved, [MarshalAs(UnmanagedType.IUnknown)] out object? obj);
 
     /// <summary>Runs one piece of work on the ETABS thread and waits for it.</summary>
     private T On<T>(string what, Func<dynamic, T> body)
@@ -56,11 +54,13 @@ public sealed class ComEtabs : IEtabsLink, IDisposable
     {
         if (_model is not null) return _model;
         if (!OperatingSystem.IsWindows()) throw new EtabsException("ETABS runs on Windows only.");
-        if (CLSIDFromProgID(ProgId, out var clsid) != 0)
+        var apiFile = EtabsApi.FindApiFile();
+        if (CLSIDFromProgID(ProgId, out _) != 0 || !File.Exists(apiFile))
             throw new EtabsException("ETABS is not installed on this PC, or its API is not registered. Open ETABS once as administrator to register it.");
-        if (GetActiveObject(ref clsid, IntPtr.Zero, out var app) != 0 || app is null)
-            throw new EtabsException("ETABS is not open. Open ETABS and a model, then try again.");
-        dynamic etabs = app;
+        // Plain COM late binding fails on ETABS 23 ("Specified cast is not valid" for SapModel), so the calls go
+        // through the API's own interfaces in ETABSv1.dll, still by name.
+        dynamic etabs = EtabsApi.Attach(apiFile, ProgId)
+            ?? throw new EtabsException("ETABS is not open. Open ETABS and a model, then try again.");
         _model = etabs.SapModel;
         return _model!;
     }
