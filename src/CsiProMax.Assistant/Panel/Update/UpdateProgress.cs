@@ -87,7 +87,7 @@ public sealed class UpdateProgress
         UpdateStage.Unpacking => "Unpacking…",
         UpdateStage.Applying => "Applying…",
         UpdateStage.Updated => $"Updated\nto {s.Version}",
-        UpdateStage.RestartNeeded => "Restart\nto finish",
+        UpdateStage.RestartNeeded => "Switching\nversion",
         UpdateStage.UpToDate => "Up to date",
         UpdateStage.Failed => "Update\nfailed",
         UpdateStage.Cancelled => "Update\ncancelled",

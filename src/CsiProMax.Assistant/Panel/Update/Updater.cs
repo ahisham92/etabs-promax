@@ -77,9 +77,9 @@ public static class Updater
     {
         var state = LoadState();
         if (Latest is { } latest && Staged is null)
-            return $"CSI ProMax {latest} is available (this is {CurrentText}). Check for updates in Settings to install it; {Csi.Name} stays open.";
+            return $"This window runs CSI ProMax {CurrentText}. {latest} is out and not installed yet: click Update to install it; {Csi.Name} stays open.";
         if (Staged is { } staged)
-            return $"CSI ProMax {staged} is downloaded. Close the CSI ProMax window and open it again from {Csi.Name}'s Tools menu to start using it.";
+            return $"This window runs CSI ProMax {CurrentText}. {staged} is downloaded and not in use yet: the window switches to it by itself as soon as no work is running ({Csi.Name} stays open).";
         if (state.LastError is { } error)
             return $"CSI ProMax {CurrentText}. The last update check failed: {error}";
         return state.LastCheck is { } last
@@ -213,11 +213,11 @@ public static class Updater
         }
     }
 
-    /// <summary>A downloaded version is used the next time the CSI ProMax window is opened.</summary>
+    /// <summary>A downloaded version is switched to by the open window itself as soon as no work is running (App.SwitchWhenIdle).</summary>
     private static void Apply(string versionFolder, string version, UpdateProgress progress) =>
         progress.Report(UpdateStage.RestartNeeded,
-            $"CSI ProMax {version} is downloaded. Close this window and open CSI ProMax again from {Csi.Name}'s Tools menu to use it " +
-            $"({Csi.Name} itself stays open, and your model is not touched).", version);
+            $"CSI ProMax {version} is downloaded. This window closes and opens again on {version} by itself as soon as no work is running; " +
+            $"{Csi.Name} stays open and your model is not touched. The window's title shows the version that is running.", version);
 
     /// <summary>Nothing to settle: CSI ProMax has no add-in manifest (ETABS keeps the plug-in's path itself).</summary>
     public static int SettleInstall(string? packageFolder = null) => 1;
@@ -238,6 +238,32 @@ public static class Updater
                 .OrderByDescending(f => f.Version).Select(f => f.Folder).FirstOrDefault();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
+    }
+
+    /// <summary>For the tests: what <see cref="Behind()"/> answers, instead of this PC's own update state.</summary>
+    internal static Func<string?>? BehindProbe;
+
+    /// <summary>
+    /// The one rule for "is this the newest CSI ProMax": null when it is, otherwise a line that says which version runs,
+    /// which newer one is known and how to get onto it. Every test and report asks here, so a run on old code says so
+    /// itself (a tester once sent two reports from an old version while the window offered the new one).
+    /// </summary>
+    public static string? Behind()
+    {
+        if (BehindProbe is { } probe) return probe();
+        var state = LoadState();
+        return Behind(Current, state.Latest, state.Staged, NewestDownloaded(Current) is { } folder ? Path.GetFileName(folder) : null);
+    }
+
+    internal static string? Behind(Version running, string? latest, string? staged, string? downloaded)
+    {
+        var mine = $"{running.Major}.{running.Minor}.{running.Build}";
+        var ready = new[] { staged, downloaded }.Where(v => v is not null && Parse(v) > running).OrderByDescending(v => Parse(v!)).FirstOrDefault();
+        var newest = new[] { latest, ready }.Where(v => v is not null && Parse(v) > running).OrderByDescending(v => Parse(v!)).FirstOrDefault();
+        if (newest is null) return null;
+        return ready is not null && Parse(ready) >= Parse(newest)
+            ? $"This is CSI ProMax {mine}, an old version: {ready} is downloaded on this PC and not in use yet. The window switches to it by itself when no work is running (or close the CSI ProMax window and open it again from the Tools menu); its title then says {ready}. Then run this again. What an old version reports is already fixed or changed."
+            : $"This is CSI ProMax {mine}, an old version: {newest} is out. Update first (Settings > Updates > Check for updates, or close the CSI program and run the install line again), open CSI ProMax again, and run this again. What an old version reports is already fixed or changed.";
     }
 
     internal sealed record Release(string Version, string ZipUrl, string? Sha256, string? Notes = null);

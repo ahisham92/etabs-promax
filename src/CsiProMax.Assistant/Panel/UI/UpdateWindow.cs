@@ -203,7 +203,7 @@ internal sealed class UpdateWindow : Window
             // A detail on "updated" is the restart note: what of the new version shows only after ETABS restarts.
             UpdateStage.Updated => s.Detail is { } note ? $"Updated to {s.Version}. {note}" : $"Updated to {s.Version}. You can keep working; no restart needed.",
             UpdateStage.UpToDate => s.Detail ?? $"{Product} {Updater.CurrentText} is up to date.",
-            UpdateStage.RestartNeeded => s.Detail ?? $"Restart {Csi.Name} to finish (your work is not interrupted until then).",
+            UpdateStage.RestartNeeded => s.Detail ?? $"Downloaded. This window opens again on the new version by itself as soon as no work is running; {Csi.Name} stays open.",
             UpdateStage.Failed => s.Detail ?? "The update didn't finish. Nothing changed; it is tried again later.",
             UpdateStage.Cancelled => s.Detail ?? "The update was cancelled.",
             UpdateStage.Available => $"{Product} {s.Version} is available. Use Update on the ribbon to install it now.",
@@ -229,7 +229,7 @@ internal sealed class UpdateWindow : Window
                   "and install the release by hand."
                 : "Use Check now in the Updates panel to try again.",
             UpdateStage.Cancelled => canRetry ? "Press Try again to update now, or Close to keep this version." : "",
-            UpdateStage.RestartNeeded => $"Save your work, then close and reopen {Csi.Name} when it suits you.",
+            UpdateStage.RestartNeeded => $"Nothing to do: {Csi.Name} and your model stay as they are. The window's title shows the running version.",
             UpdateStage.Updated when s.Detail is not null => $"You can keep working now. Save your work and restart {Csi.Name} when it suits you.",
             UpdateStage.Downloading or UpdateStage.Checking when _progress is not null =>
                 App.Shared
