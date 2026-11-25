@@ -17,6 +17,30 @@ internal static class HistoryArchive
 
     private static string Source => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude", "projects");
 
+    /// <summary>
+    /// Only ETABS ProMax's own conversations are kept: Claude Code names each project's folder after the folder it ran
+    /// in, and the chat's engine runs in ETABS ProMax's own folder. The user's other Claude Code work is not ours to copy.
+    /// </summary>
+    internal static bool Ours(string root, string file)
+    {
+        var relative = Relative(root, file);
+        var cut = relative.IndexOfAny(new[] { '\\', '/' });
+        return (cut < 0 ? relative : relative.Substring(0, cut)).IndexOf("EtabsProMax", StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    /// <summary>Removes copies an earlier build made of projects that are not ETABS ProMax's (the originals are untouched).</summary>
+    private static void DropOthers(string archive)
+    {
+        try
+        {
+            if (!Directory.Exists(archive)) return;
+            foreach (var folder in Directory.GetDirectories(archive))
+                if (Path.GetFileName(folder).IndexOf("EtabsProMax", StringComparison.OrdinalIgnoreCase) < 0)
+                    try { Directory.Delete(folder, true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+    }
+
     private static int _started;
 
     /// <summary>Copies now, then every hour while ETABS runs (once per ETABS session).</summary>
@@ -25,6 +49,7 @@ internal static class HistoryArchive
         if (Interlocked.Exchange(ref _started, 1) == 1) return;
         _ = Task.Run(async () =>
         {
+            DropOthers(Folder);
             while (true)
             {
                 Copy(Source, Folder);
@@ -45,6 +70,7 @@ internal static class HistoryArchive
             if (!Directory.Exists(source)) return 0;
             foreach (var file in Directory.EnumerateFiles(source, "*.jsonl", SearchOption.AllDirectories))
             {
+                if (!Ours(source, file)) continue;
                 try
                 {
                     var target = Path.Combine(archive, Relative(source, file) + ".gz");
@@ -80,7 +106,7 @@ internal static class HistoryArchive
         if (string.IsNullOrEmpty(session)) return null;
         try
         {
-            if (Directory.Exists(Source) && Directory.EnumerateFiles(Source, session + ".jsonl", SearchOption.AllDirectories).FirstOrDefault() is { } live)
+            if (Directory.Exists(Source) && Directory.EnumerateFiles(Source, session + ".jsonl", SearchOption.AllDirectories).FirstOrDefault(f => Ours(Source, f)) is { } live)
                 return () => ReadShared(live);
             if (Directory.Exists(Folder) && Directory.EnumerateFiles(Folder, session + ".jsonl.gz", SearchOption.AllDirectories).FirstOrDefault() is { } kept)
                 return () => ReadZipped(kept);
@@ -98,6 +124,7 @@ internal static class HistoryArchive
             if (Directory.Exists(source))
                 foreach (var file in Directory.EnumerateFiles(source, "*.jsonl", SearchOption.AllDirectories))
                 {
+                    if (!Ours(source, file)) continue;
                     live.Add(Relative(source, file));
                     var path = file;
                     list.Add(() => ReadShared(path));
@@ -105,6 +132,7 @@ internal static class HistoryArchive
             if (Directory.Exists(archive))
                 foreach (var file in Directory.EnumerateFiles(archive, "*.jsonl.gz", SearchOption.AllDirectories))
                 {
+                    if (!Ours(archive, file)) continue;
                     var name = Relative(archive, file);
                     if (live.Contains(name.Substring(0, name.Length - 3))) continue;
                     var path = file;

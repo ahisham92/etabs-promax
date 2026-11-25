@@ -114,6 +114,8 @@ internal sealed partial class ChatPane
     }
 
     /// <summary>The Routines window: add, edit, switch off and run routines, and see each one's runs.</summary>
+    internal static void OpenRoutinesWindow() => _instance?.OpenRoutines();
+
     private void OpenRoutines()
     {
         var window = new UI.RoutinesWindow(ClaudeCli.Folder, _modelTitle);

@@ -60,6 +60,7 @@ public static class App
         Dispatcher = new EtabsDispatcher();
         Dispatcher.Initialize(Etabs);
         Host.ModelWatch.Start(link);
+        DropForeignHistory();
         var registry = ToolRegistry.CreateDefault();
         Bridge = new BridgeServer(registry, Dispatcher, ETABSYear);
         Bridge.Start();
@@ -94,6 +95,29 @@ public static class App
         try { Bridge?.Stop(); } catch (Exception) { }
         Host.ModelWatch.Stop();
         try { if (Etabs is { } app) Dispatcher.Shutdown(app); } catch (Exception) { }
+    }
+
+    /// <summary>
+    /// Once per PC: the first test build (25 Nov 2026) built its code library and job recipes from every Claude Code
+    /// conversation on the PC, Revit work included. Those two folders are emptied so they are built again from ETABS
+    /// ProMax's own chats only (Chat.HistoryArchive.Ours). Nothing of the user's own is touched.
+    /// </summary>
+    private static void DropForeignHistory()
+    {
+        try
+        {
+            var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "EtabsProMax");
+            var mark = Path.Combine(root, "own-history-only.txt");
+            if (File.Exists(mark)) return;
+            foreach (var name in new[] { "worked-code", "job-recipes" })
+            {
+                var folder = Path.Combine(root, name);
+                if (Directory.Exists(folder)) Directory.Delete(folder, true);
+            }
+            Directory.CreateDirectory(root);
+            File.WriteAllText(mark, DateTime.UtcNow.ToString("s"));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* tried again at the next start */ }
     }
 
     private static IntPtr FindEtabsWindow(int? pid)
