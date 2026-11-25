@@ -149,7 +149,11 @@ namespace CsiProMax.Assistant.Etabs
                 result = Wrap(value, method.ReturnType);
                 return true;
             }
-            throw new MissingMethodException("The program's " + _type.Name + " has no " + binder.Name + " that takes these " + args.Length + " values.");
+            // Name what the program does have, so the next field test report says which shape to call.
+            var shapes = _type.GetMethods().Where(m => m.Name == binder.Name)
+                .Select(m => binder.Name + "(" + string.Join(", ", m.GetParameters().Select(p => p.ParameterType.Name.Replace("&", " ref") + " " + p.Name)) + ")").ToList();
+            throw new MissingMethodException("The program's " + _type.Name + " has no " + binder.Name + " that takes these " + args.Length + " values." +
+                (shapes.Count > 0 ? " It has: " + string.Join("; ", shapes) + "." : ""));
         }
 
         private static object Call(Func<object> body)
