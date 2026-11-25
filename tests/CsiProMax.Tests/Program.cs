@@ -1415,6 +1415,7 @@ Test("field test: the full test runs every part, closes its window, and leaves t
         {
             Check(opened is { Ok: true, Skipped: false }, "the Viewer opened: " + opened.Detail);
             Check(viewer.Any(s => s.Name == "Viewer, the model is drawn" && s.Ok) && viewer.Count(s => s.Name.StartsWith("Viewer, button: ", StringComparison.Ordinal)) > 30, $"the Viewer's buttons are steps of the report: {viewer.Count}");
+            Check(outcome.Steps.Any(s => s.Name.StartsWith("Viewer, the page shows the same numbers", StringComparison.Ordinal) && s.Ok), "the numbers of objects on the Viewer page are checked against the pack");
             Check(Directory.GetFiles(Path.Combine(root, "work"), "viewer ETABS *.png", SearchOption.AllDirectories).Length == ViewerCheck.Shots.Length, "a picture of each Viewer view is in the test's folder");
             using var sent = System.IO.Compression.ZipFile.OpenRead(outcome.Zip!);
             Check(sent.Entries.Count(x => x.Name.StartsWith("viewer ETABS ", StringComparison.Ordinal) && x.Name.EndsWith(".png", StringComparison.Ordinal)) == ViewerCheck.Shots.Length, "the pictures are in the zip to send");

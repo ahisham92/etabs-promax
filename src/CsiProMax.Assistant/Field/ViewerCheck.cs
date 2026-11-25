@@ -132,7 +132,7 @@ public static class ViewerCheck
             if (!b || b.hidden) return {skipped: "skipped: this tab is not shown for this pack"};
             b.click(); await wait(80);
             const page = document.getElementById(tab);
-            return page && page.classList.contains("on") && page.textContent.trim() ? {ok: page.textContent.trim().slice(0, 80)} : {fail: "the tab is empty or did not open"};
+            return page && page.classList.contains("on") && page.textContent.trim() ? {ok: page.textContent.trim().slice(0, 390)} : {fail: "the tab is empty or did not open"};
           });
         }
         if (errors.length) add("no errors on the page during the whole check", items.every(i => i.ok), errors.slice(0, 5).join("; "));
@@ -249,6 +249,7 @@ public static class ViewerCheck
     public static void FieldSteps(FieldContext ctx, ICsiLink link, string program, string? browser = null)
     {
         Result? seen = null;
+        JsonObject? content = null;
         var ran = ctx.Step($"the Viewer opens on the scratch {program} model's pack", () =>
         {
             var cases = link.LoadCases();
@@ -256,6 +257,7 @@ public static class ViewerCheck
             try { checks = ProgramTools.Report(JsonDocument.Parse("""{"drift_limit":0.002}""").RootElement, link).AsObject(); }
             catch (Exception ex) when (ex is not (OperationCanceledException or OutOfMemoryException)) { /* the pack goes without checks; the checks have their own steps */ }
             var pack = Pack.Build(link, [], cases, link.Combos(), checks, null, mostRows: 20000, by: "CSI ProMax field test");
+            content = pack.Content;
             seen = Run(pack.Content, Path.Combine(ctx.Folder, "Viewer"), program, browser);
             if (seen.NotRun is not null) throw new FieldSkipException(seen.NotRun);
             return new { checked_items = seen.Items.Count, pictures = seen.Pictures.Select(Path.GetFileName).ToArray() };
@@ -268,6 +270,17 @@ public static class ViewerCheck
             else if (item.Ok) ctx.Step(name, () => item.Detail.Length > 0 ? item.Detail : "ok");
             else ctx.Fail(name, item.Detail);
         }
+        ctx.Step($"Viewer, the page shows the same numbers of columns, beams, braces, floors and walls as the {program} model's pack", () =>
+        {
+            var shown = seen.Items.FirstOrDefault(i => i.Name == "side tab: props")?.Detail ?? "";
+            var read = System.Text.RegularExpressions.Regex.Match(shown, @"Columns(\d+)Beams(\d+)Braces(\d+)Floors(\d+)Walls(\d+)");
+            FieldContext.Expect(read.Success, "the Properties tab does not list the numbers of objects: " + shown);
+            int Of(string list, string kind) => (content!["model"]?[list] as JsonArray)?.Count(o => (string?)(o is JsonArray row ? row[1] : o?["k"]) == kind) ?? 0;
+            var has = new[] { Of("frames", "column"), Of("frames", "beam"), Of("frames", "brace"), Of("areas", "floor"), Of("areas", "wall") };
+            var page = Enumerable.Range(1, 5).Select(i => int.Parse(read.Groups[i].Value, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+            FieldContext.Expect(has.SequenceEqual(page), $"the page shows {string.Join(", ", page)} columns, beams, braces, floors, walls and the pack holds {string.Join(", ", has)}");
+            return string.Join(", ", page);
+        });
         ctx.Step($"the Viewer's pictures of the {program} model are saved", () =>
         {
             FieldContext.Expect(seen.Pictures.Count == Shots.Length, $"{seen.Pictures.Count} of {Shots.Length} pictures were saved");
