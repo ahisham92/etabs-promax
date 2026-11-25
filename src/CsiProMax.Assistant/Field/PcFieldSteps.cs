@@ -31,7 +31,17 @@ public static class PcFieldSteps
             ctx.Step($"{found.Program} can create the CSI ProMax plug-in (what Tools > CSI ProMax does)", () =>
             {
                 FieldContext.Expect(found.Reasons.Count == 0 && found.Loads != false, $"{found.Program} cannot open CSI ProMax: {string.Join(" ", found.Reasons)}");
-                if (found.Loads is null) throw new FieldSkipException($"it could not be tried on this PC for a program on {found.Runtime}");
+                if (found.Loads is null)
+                {
+                    // No PowerShell on this program's .NET here. A program on .NET 8 is tried in this process, which runs on it too.
+                    if (found.Runtime != ".NET" || found.Path.Length == 0 || !File.Exists(found.Path))
+                        throw new FieldSkipException($"it could not be tried on this PC for a program on {found.Runtime}");
+                    if (found.ApiFile.Length == 0 || !File.Exists(found.ApiFile))
+                        throw new FieldSkipException($"the program's own API file was not found on this PC, so creating the plug-in against it could not be tried");
+                    var (ok, detail) = PlugInCheck.TryHere(found.Path, found.ApiFile);
+                    FieldContext.Expect(ok, $"{found.Program} cannot create the CSI ProMax plug-in: {detail}");
+                    return detail;
+                }
                 return $"created, on {found.Runtime}";
             });
         ctx.Note("the plug-in check's own report", check.Text);
