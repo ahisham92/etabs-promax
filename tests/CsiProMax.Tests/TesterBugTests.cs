@@ -454,6 +454,96 @@ static class TesterBugTests
             Check(window.Contains("UpdateBadge.TopButton(") && window.Contains("CsiProMax.App.SwitchWhenIdle();"), "the window has no update button that installs and switches");
         });
 
+        // ---- Ahmed: "no need to download everything let it be just the updated things only" ----
+
+        yield return ("update: only the changed files are downloaded, the rest comes from this PC, and every file is checked", () =>
+        {
+            var root = Path.Combine(Path.GetTempPath(), "cpm-delta-" + Guid.NewGuid().ToString("N"));
+            string Dir(string name) { var d = Path.Combine(root, name); Directory.CreateDirectory(d); return d; }
+            string old = Dir("old"), next = Dir("new"), updates = Dir("updates"), release = Dir("release");
+            try
+            {
+                var big = new byte[300_000];
+                new Random(7).NextBytes(big);
+                foreach (var d in new[] { old, next }) { File.WriteAllBytes(Path.Combine(d, "Library.dll"), big); File.WriteAllText(Path.Combine(d, "check.ps1"), "same"); }
+                File.WriteAllText(Path.Combine(old, "CsiProMax.dll"), "version 1");
+                File.WriteAllText(Path.Combine(next, "CsiProMax.dll"), "version 2");
+                File.WriteAllText(Path.Combine(next, "New.dll"), "added in 2");
+                // The release's own script writes the file list and the changed zip.
+                var script = Path.Combine(SourceText.Root(), "scripts", "changed-files.py");
+                string manifest = Path.Combine(release, "files.json"), changed = Path.Combine(release, DeltaUpdate.ChangedName("9.9.9"));
+                using (var run = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("python3") { ArgumentList = { script, next, old, manifest, changed }, RedirectStandardOutput = true, RedirectStandardError = true })!)
+                {
+                    run.WaitForExit();
+                    Check(run.ExitCode == 0, "scripts/changed-files.py failed: " + run.StandardError.ReadToEnd());
+                }
+                var files = DeltaUpdate.Read(File.ReadAllText(manifest)) ?? throw new Exception("the file list was not read");
+                Equal("CsiProMax.dll, New.dll", string.Join(", ", files.Where(f => f.Changed).Select(f => f.Path).OrderBy(f => f, StringComparer.Ordinal)), "the changed files");
+                Check(new FileInfo(changed).Length < 5000, $"the changed zip holds more than what changed ({new FileInfo(changed).Length} bytes)");
+
+                var asked = new List<string>();
+                using var http = new HttpClient(new Served(url =>
+                {
+                    asked.Add(url);
+                    return url.EndsWith("/files.json", StringComparison.Ordinal) ? File.ReadAllBytes(manifest) : url.EndsWith("/" + DeltaUpdate.ChangedName("9.9.9"), StringComparison.Ordinal) ? File.ReadAllBytes(changed) : null;
+                }));
+                var target = Path.Combine(root, "versions", "9.9.9");
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                Check(DeltaUpdate.TryAsync(http, "o/r", "9.9.9", target, updates, [old], new UpdateProgress(), CancellationToken.None).GetAwaiter().GetResult(), "the update of changed files only did not work");
+                Equal("version 2", File.ReadAllText(Path.Combine(target, "CsiProMax.dll")), "the changed file");
+                Equal("added in 2", File.ReadAllText(Path.Combine(target, "New.dll")), "the new file");
+                Check(File.ReadAllBytes(Path.Combine(target, "Library.dll")).AsSpan().SequenceEqual(big), "the unchanged file was not carried over whole");
+                Check(UpdateResume.IsComplete(target), "the new version's folder is not marked complete");
+                Equal(2, asked.Count, "downloads (the file list and the changed zip): " + string.Join(", ", asked));
+
+                // A PC that lacks a file the changed zip does not hold: the whole package is taken instead, and nothing is left behind.
+                var bare = Dir("bare");
+                var second = Path.Combine(root, "versions", "9.9.8");
+                Check(!DeltaUpdate.TryAsync(http, "o/r", "9.9.9", second, updates, [bare], new UpdateProgress(), CancellationToken.None).GetAwaiter().GetResult(), "an update was built without the files it needs");
+                Check(!Directory.Exists(second) && !Directory.Exists(second + ".delta"), "a half-built version folder was left behind");
+
+                // A file on this PC that is not what the release lists is never trusted: it is downloaded, or the update falls back.
+                File.WriteAllText(Path.Combine(old, "Library.dll"), "damaged");
+                Check(!DeltaUpdate.TryAsync(http, "o/r", "9.9.9", Path.Combine(root, "versions", "9.9.7"), updates, [old], new UpdateProgress(), CancellationToken.None).GetAwaiter().GetResult(), "a damaged local file was used");
+
+                // A release without the list (0.4.7 and older): the whole package, as before.
+                using var none = new HttpClient(new Served(_ => null));
+                Check(!DeltaUpdate.TryAsync(none, "o/r", "9.9.9", Path.Combine(root, "versions", "9.9.6"), updates, [old], new UpdateProgress(), CancellationToken.None).GetAwaiter().GetResult(), "a release without a file list was not left to the whole package");
+            }
+            finally { try { Directory.Delete(root, true); } catch (IOException) { } }
+        });
+
+        yield return ("update: no update text tells the user to close or restart the CSI program", () =>
+        {
+            // Ahmed: "I need all updates not to close the etabs or safe or sap it should be automatic while they're open".
+            var files = SourceText.Files("src/CsiProMax.Assistant/Panel/Update").ToList();
+            files.AddRange(SourceText.Files("src/CsiProMax.Assistant/Panel/UI").Where(f => Path.GetFileName(f.Path).StartsWith("Update", StringComparison.Ordinal) || f.Path.EndsWith("RestartNote.cs", StringComparison.Ordinal)));
+            var bad = new List<string>();
+            foreach (var (path, text) in files)
+            {
+                var lines = text.Split('\n');
+                for (var i = 0; i < lines.Length; i++)
+                    if (!lines[i].TrimStart().StartsWith("//", StringComparison.Ordinal) && Regex.IsMatch(lines[i], @"(?i)(restart|reopen|close and reopen|restart of|close) \{Csi\.Name\}")) bad.Add($"{path}:{i + 1}");
+            }
+            Check(files.Count > 4, "the update files were not found");
+            Check(bad.Count == 0, "these update texts tell the user to restart or reopen the program: " + string.Join(", ", bad));
+        });
+
+        yield return ("update: the file list refuses paths outside the package, and the changed zip can never be taken for the whole package", () =>
+        {
+            foreach (var bad in new[] { "../x.dll", "/x.dll", "a/../../x.dll", "C:/x.dll", "a\\b.dll", "" })
+                Check(!DeltaUpdate.Safe(bad), $"'{bad}' was accepted as a path inside the package");
+            Check(DeltaUpdate.Safe("CsiProMax.dll") && DeltaUpdate.Safe("runtimes/win-x64/native/a.dll"), "a normal path was refused");
+            var sha = new string('a', 64);
+            Check(DeltaUpdate.Read($$"""{"files":[{"path":"CsiProMax.dll","sha256":"{{sha}}","size":1,"changed":true},{"path":"../evil.dll","sha256":"{{sha}}","size":1,"changed":true}]}""") is null, "a list with a path outside the package was read");
+            Check(DeltaUpdate.Read($$"""{"files":[{"path":"Other.dll","sha256":"{{sha}}","size":1,"changed":true}]}""") is null, "a list without CsiProMax.dll was read");
+            Check(DeltaUpdate.Read("not json") is null, "text that is no list was read");
+            // Versions up to 0.4.7 take the first release file named CsiProMax-*.zip as the whole package.
+            Check(!DeltaUpdate.ChangedName("0.4.8").StartsWith("CsiProMax-", StringComparison.OrdinalIgnoreCase), "an older version would install the changed zip as if it were the whole package");
+            var workflow = File.ReadAllText(Path.Combine(SourceText.Root(), ".github/workflows/release.yml"));
+            Check(workflow.Contains("\"changed-$NAME.zip\" files.json") && !workflow.Contains("-changed.zip"), "the release does not publish the changed zip and the file list under the names the updater asks for");
+        });
+
         yield return ("second SAFE run: a newer version is started with the same arguments, once, and told what to wait for", () =>
         {
             var info = CsiProMax.Assistant.Program.Start("dotnet", "/v/0.4.5", ["--etabs-pid", "7", "--program", "SAFE", "--this-version", "--installed-in", "/old", "--after-pid", "3", "--fieldtest"], 42);
@@ -638,5 +728,15 @@ public sealed class SafeApi
     public sealed class Springs
     {
         public int GetNameList(ref int n, ref string[] names) { names = []; n = 0; return 0; }
+    }
+}
+
+/// <summary>Answers downloads from a function of the address: bytes, or null for "not found".</summary>
+sealed class Served(Func<string, byte[]?> files) : HttpMessageHandler
+{
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+    {
+        var bytes = files(request.RequestUri!.ToString());
+        return Task.FromResult(bytes is null ? new HttpResponseMessage(System.Net.HttpStatusCode.NotFound) : new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) });
     }
 }

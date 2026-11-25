@@ -23,7 +23,7 @@ internal static partial class UpdateNotice
         {
             Kind.Available => $"Update now installs it while {Csi.Name} stays open. Your work is not interrupted.",
             Kind.Updated => Note ?? "You can keep working; no restart needed.",
-            _ => Note ?? $"Save your work and restart {Csi.Name} when it suits you to start using it.",
+            _ => Note ?? $"This window opens again on it by itself as soon as no work is running. {Csi.Name} stays open.",
         };
     }
 

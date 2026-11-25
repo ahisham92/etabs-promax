@@ -230,7 +230,7 @@ internal sealed class UpdateWindow : Window
                 : "Use Check now in the Updates panel to try again.",
             UpdateStage.Cancelled => canRetry ? "Press Try again to update now, or Close to keep this version." : "",
             UpdateStage.RestartNeeded => $"Nothing to do: {Csi.Name} and your model stay as they are. The window's title shows the running version.",
-            UpdateStage.Updated when s.Detail is not null => $"You can keep working now. Save your work and restart {Csi.Name} when it suits you.",
+            UpdateStage.Updated when s.Detail is not null => $"You can keep working now. {Csi.Name} stays open; nothing needs restarting.",
             UpdateStage.Downloading or UpdateStage.Checking when _progress is not null =>
                 App.Shared
                 ? "You can keep working. Hide keeps the update running; the Update button brings this window back."
