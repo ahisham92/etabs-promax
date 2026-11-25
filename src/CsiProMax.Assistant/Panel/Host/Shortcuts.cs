@@ -39,7 +39,7 @@ internal static class Shortcuts
         if (!OperatingSystem.IsWindows()) return;
         try
         {
-            var folder = AppContext.BaseDirectory;
+            var folder = ProgramFolder();
             var first = !File.Exists(Mark);
             WriteViewerPage();
             if (!first && !Due(File.ReadAllText(Mark), folder)) return;
@@ -50,13 +50,27 @@ internal static class Shortcuts
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or COMException or InvalidOperationException or NotSupportedException) { }
     }
 
+    /// <summary>
+    /// The CSI ProMax the shortcuts start: the installed copy (Documents\CSI ProMax, as the Tools menus name it), and the
+    /// folder this copy runs from only when none is installed. A copy unpacked elsewhere to try a version (as the field
+    /// test runs are) once pointed the desktop and Start menu Modeler at itself, and the engineer then opened that test
+    /// copy from the desktop (2026-11-25).
+    /// </summary>
+    internal static string ProgramFolder()
+    {
+        string? installed = null;
+        try { installed = CsiProMax.Assistant.ToolsMenu.InstallFolder(); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        var folder = installed ?? AppContext.BaseDirectory;
+        return folder.EndsWith(Path.DirectorySeparatorChar) || folder.EndsWith(Path.AltDirectorySeparatorChar) ? folder : folder + Path.DirectorySeparatorChar;
+    }
+
     /// <summary>Makes all four again, whatever was deleted (the View menu's button). Gives back the files made.</summary>
     public static IReadOnlyList<string> MakeAll()
     {
         WriteViewerPage();
         var made = Make(onlyExisting: false);
         Directory.CreateDirectory(Root);
-        File.WriteAllText(Mark, AppContext.BaseDirectory + Mark2);
+        File.WriteAllText(Mark, ProgramFolder() + Mark2);
         return made;
     }
 
@@ -106,8 +120,8 @@ internal static class Shortcuts
                 {
                     dynamic link = shell.CreateShortcut(modeler);
                     link.TargetPath = dotnet;
-                    link.Arguments = "\"" + Path.Combine(AppContext.BaseDirectory, "CsiProMax.dll") + "\" --modeler";
-                    link.WorkingDirectory = AppContext.BaseDirectory;
+                    link.Arguments = "\"" + Path.Combine(ProgramFolder(), "CsiProMax.dll") + "\" --modeler";
+                    link.WorkingDirectory = ProgramFolder();
                     link.WindowStyle = 7; // minimised: dotnet's own console window stays out of the way
                     link.Description = "CSI ProMax Modeler: build ETABS models with no ETABS open"; // ETABS itself
                     if (File.Exists(icon)) link.IconLocation = icon;
