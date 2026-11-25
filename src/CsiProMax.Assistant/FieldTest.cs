@@ -488,7 +488,7 @@ public static class FieldTest
             foreach (var folder in Directory.GetDirectories(root).OrderBy(d => d, StringComparer.OrdinalIgnoreCase))
             {
                 var name = Path.GetFileName(folder);
-                if (!Regex.IsMatch(name, @"^(ETABS|SAFE|SAP2000|CSiBridge) \d+$", RegexOptions.IgnoreCase)) continue;
+                if (!Regex.IsMatch(name, @"^(ETABS|SAFE|SAP2000|CSiBridge) \d+$", RegexOptions.IgnoreCase)) continue; // ETABS itself
                 foreach (var ini in Directory.GetFiles(folder, "*.ini").OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
                     if (PlugInSection(File.ReadAllText(ini)) is { } section) found.Add(($"{name}\\{Path.GetFileName(ini)}", section));
             }

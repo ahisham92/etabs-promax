@@ -88,7 +88,7 @@ internal sealed class MainWindow : Window
         Add(app, "_Settings…", () => Dialog(new SettingsWindow()));
         Add(app, "Check for _updates", CsiProMax.App.CheckForUpdatesInteractive);
         Add(app, "_About", () => TaskDialog.Show("CSI ProMax",
-            $"CSI ProMax {Update.Updater.CurrentText}\nETABS {(CsiProMax.App.ETABSYear.Length > 0 ? CsiProMax.App.ETABSYear : "not answering yet")}\n" +
+            $"CSI ProMax {Update.Updater.CurrentText}\n{Csi.Name} {(CsiProMax.App.ETABSYear.Length > 0 ? CsiProMax.App.ETABSYear : "not answering yet")}\n" +
             $"Model: {ModelWatch.Current?.Title ?? "none"}\n\n{Update.Updater.Describe()}"));
         app.Items.Add(new Separator());
         Add(app, "_Close CSI ProMax", Close);
@@ -190,7 +190,7 @@ internal sealed class MainWindow : Window
 
     private static string Describe(string? title)
     {
-        var program = CsiProMax.App.Modeler ? "Modeler" : CsiProMax.App.ETABSYear.Length > 0 ? "ETABS " + CsiProMax.App.ETABSYear : "ETABS";
+        var program = CsiProMax.App.Modeler ? "Modeler" : CsiProMax.App.ETABSYear.Length > 0 ? Csi.Name + " " + CsiProMax.App.ETABSYear : Csi.Name;
         return title is { Length: > 0 } ? $"Connected to {program}  ·  {title}" : $"{program}: no model open";
     }
 

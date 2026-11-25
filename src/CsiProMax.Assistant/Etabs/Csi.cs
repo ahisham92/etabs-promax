@@ -33,5 +33,5 @@ public static class Csi
     /// written with <see cref="Name"/> instead, or a name that holds "ETABS" would be changed too.
     /// </summary>
     public static string Words(string fixedText) =>
-        Program.Key == CsiProgram.Etabs.Key ? fixedText : fixedText.Replace("ETABS", Name, StringComparison.Ordinal);
+        Program.Key == CsiProgram.Etabs.Key ? fixedText : fixedText.Replace("ETABS", Name, StringComparison.Ordinal); // ETABS itself
 }

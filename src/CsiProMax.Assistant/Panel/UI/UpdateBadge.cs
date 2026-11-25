@@ -26,7 +26,7 @@ internal static class UpdateBadge
     {
         if (!string.IsNullOrWhiteSpace(working)) return (working!.Trim(), Kind.Working);
         if (!string.IsNullOrWhiteSpace(ready)) return ($"Update ready\n{ready!.Trim()}", Kind.Ready);
-        if (restart) return ("Restart\nETABS", Kind.Restart);
+        if (restart) return ($"Restart\n{Csi.Name}", Kind.Restart);
         if (seen is not null && Plain(current) > Plain(seen)) return ($"Updated to\n{Plain(current)}", Kind.WhatsNew);
         if (lastError is not null) return ("Couldn't\ncheck", Kind.Failed);
         if (lastCheck is not { } last || now - last > Fresh || last > now.AddMinutes(5)) return ("Check for\nupdates", Kind.Check);

@@ -200,7 +200,7 @@ public static class SafeFieldSteps
         ctx.Tool("safe_check_report", """{"punching_limit":1.0,"span":6,"ratio":240,"allowable":200}""", null, "tool safe_check_report" + none);
         if (analysed) Verdicts(ctx, "every SAFE check had its table to read", answers);
         foreach (var name in new[] { "results_overview", "check_modal", "check_drift", "check_torsion", "check_story_irregularity", "design_ratios", "check_report" })
-            ctx.Tool(name, "{}", null, $"tool {name} (the ETABS check, as SAFE answers it)");
+            ctx.Tool(name, "{}", null, $"tool {name} (the ETABS check, as SAFE answers it)"); // ETABS itself
 
         // ---- snapshots and the review pack ----
         ctx.Tool("list_snapshots", "{}", a => FieldContext.Expect(Int(a["count"]) >= 1, "the snapshot is not listed"));

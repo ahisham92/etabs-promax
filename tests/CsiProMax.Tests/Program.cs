@@ -902,6 +902,7 @@ Test("plug-in: the assistant is started with the dotnet ETABS runs on", () =>
 });
 
 foreach (var (name, body) in SafeTests.All()) Test(name, body);
+foreach (var (name, body) in TesterBugTests.All()) Test(name, body);
 
 var failed = 0;
 // ---- SAP2000 ----
@@ -1514,6 +1515,12 @@ public sealed class SapStandIn : ICsiLink
         {
             n = 2; obj = ["2", "4"]; elm = obj; cases = ["DEAD", "DEAD"]; steps = ["", ""]; num = [0, 0];
             u1 = [0.004, 0.003]; u2 = [0, 0.001]; u3 = [-0.012, -0.002]; r1 = [0, 0]; r2 = [0, 0]; r3 = [0, 0];
+            return 0;
+        }
+        public int BaseReact(ref int n, ref string[] cases, ref string[] steps, ref double[] num, ref double[] fx, ref double[] fy, ref double[] fz,
+            ref double[] mx, ref double[] my, ref double[] mz, ref double gx, ref double gy, ref double gz)
+        {
+            n = 1; cases = ["DEAD"]; steps = [""]; num = [0]; fx = [0]; fy = [0]; fz = [120]; mx = [0]; my = [0]; mz = [0];
             return 0;
         }
         public int ModalParticipatingMassRatios(ref int n, ref string[] cases, ref string[] steps, ref double[] num, ref double[] period,

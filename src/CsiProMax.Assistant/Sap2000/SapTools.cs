@@ -224,7 +224,8 @@ public static class SapTools
             if (Verdict.NotAnalysed(e, name.Replace('_', ' ')) is { } notRun) { node = notRun; state = Verdict.NotAvailable; }
             else
                 try { node = run(); state = status(node); node["status"] = state; }
-                catch (Exception ex) when (ex is EtabsException or ToolInputException) { state = Verdict.NotAvailable; node = new JsonObject { ["status"] = state, ["note"] = ex.Message }; }
+                // One check that cannot be made (also a call this version of the API does not have) is said in its place; the others still answer.
+                catch (Exception ex) when (ex is EtabsException or ToolInputException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException) { state = Verdict.NotAvailable; node = new JsonObject { ["status"] = state, ["note"] = ex.Message }; }
             checks[name] = node;
             summary.Add($"{name.Replace('_', ' ')}: {state}");
         }

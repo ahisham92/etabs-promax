@@ -70,9 +70,9 @@ public static class PcFieldSteps
             });
 
         // The plug-in lists: what makes Tools > CSI ProMax appear in each program.
-        var ours = plugInLists.Where(l => Regex.IsMatch(l.File, @"^(ETABS|SAFE|SAP2000) ", RegexOptions.IgnoreCase)).ToList();
+        var ours = plugInLists.Where(l => Regex.IsMatch(l.File, @"^(ETABS|SAFE|SAP2000) ", RegexOptions.IgnoreCase)).ToList(); // ETABS itself
         if (ours.Count == 0)
-            ctx.Skip("the programs' plug-in lists", "No ETABS, SAFE or SAP2000 has kept a plug-in list for this Windows user yet. Open the program once, close it, and run the install line again; or add the plug-in in the program under Tools > Add/Show Plugins.");
+            ctx.Skip("the programs' plug-in lists", "No ETABS, SAFE or SAP2000 has kept a plug-in list for this Windows user yet. Open the program once, close it, and run the install line again; or add the plug-in in the program under Tools > Add/Show Plugins."); // ETABS itself
         foreach (var (file, section) in ours)
             ctx.Step($"plug-in list {file}", () =>
             {
