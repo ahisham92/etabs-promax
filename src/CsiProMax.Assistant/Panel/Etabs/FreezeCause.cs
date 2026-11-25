@@ -17,7 +17,7 @@ internal static class FreezeCause
     /// <param name="CommandId">ETABS's id for the command ("ID_RUN_SYSTEMS_ANALYSIS"), or null when no command started it.</param>
     /// <param name="Step">The transaction it is in ("Create Energy Analysis Model"), or null.</param>
     /// <param name="Since">When the command started (journal time), or null.</param>
-    /// <param name="Ours">The step is an CSI ProMax transaction.</param>
+    /// <param name="Ours">The step is a CSI ProMax transaction.</param>
     /// <param name="Dialog">The text of an ETABS message still waiting for an answer, or null.</param>
     public sealed record Busy(string What, string? CommandId, string? Step, DateTime? Since, bool Ours, string? Dialog);
 
@@ -150,20 +150,20 @@ internal static class FreezeCause
         : $"{(int)t.TotalHours} h {t.Minutes} min";
 
     /// <summary>The window's main line: what ETABS is busy with, and for how long.</summary>
-    /// <param name="ours">An CSI ProMax call is running on ETABS's thread now (a task, a tool, a Lifeline replay): that, not
+    /// <param name="ours">A CSI ProMax call is running on ETABS's thread now (a task, a tool, a Lifeline replay): that, not
     /// the journal's last command, is what keeps ETABS busy (calls of ours don't show as commands in the journal).</param>
     public static string Line(Busy busy, TimeSpan frozen, bool ours = false)
     {
         ours |= busy.Ours;
         var step = busy.Step is { Length: > 0 } s && !string.Equals(s, busy.What, StringComparison.OrdinalIgnoreCase) && !ours ? $" ({s})" : "";
-        var what = ours ? "an CSI ProMax task" : busy.What + step;
+        var what = ours ? "a CSI ProMax task" : busy.What + step;
         return $"ETABS is busy with {what}. It hasn't responded for {Duration(frozen)}.";
     }
 
     /// <summary>Whose work it is, in one short line.</summary>
     public static string Whose(Busy busy, bool jobRunning) =>
         busy.Ours || jobRunning
-            ? "This is an CSI ProMax task, not ETABS's own: a task, a tool or a Lifeline replay. Stop it below or in its own window, or let it finish."
+            ? "This is a CSI ProMax task, not ETABS's own: a task, a tool or a Lifeline replay. Stop it below or in its own window, or let it finish."
             : busy.CommandId is null && busy.What == "something of its own"
                 ? "This is ETABS's own work, not CSI ProMax."
                 : "This is ETABS's own command, not CSI ProMax.";

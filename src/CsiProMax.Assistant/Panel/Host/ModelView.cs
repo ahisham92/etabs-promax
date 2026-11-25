@@ -18,7 +18,12 @@ internal static class ModelView
 
     private static int Revision(ICsiLink link) => link is OfflineEtabs offline ? offline.Revision : 0;
 
-    private static JsonObject Content(ICsiLink link) => Pack.Build(link, [], [], [], null, null, withTables: false).Content;
+    /// <summary>The Modeler's own tables come along (they cost nothing); a CSI program's result tables do not.</summary>
+    private static readonly string[] ModelerTables = ["Grid Definitions", "Frame Assignments - Section Properties", "Area Assignments - Section Properties", "Model Checks", "Quantities"];
+
+    private static JsonObject Content(ICsiLink link) => link is OfflineEtabs
+        ? Pack.Build(link, ModelerTables, [], [], null, null).Content
+        : Pack.Build(link, [], [], [], null, null, withTables: false).Content;
 
     internal static (byte[] Body, string ContentType)? Handle(string path, string query)
     {
@@ -51,31 +56,5 @@ internal static class ModelView
         info.ArgumentList.Add(Path.Combine(AppContext.BaseDirectory, "CsiProMax.dll"));
         info.ArgumentList.Add("--modeler");
         Process.Start(info)?.Dispose();
-    }
-
-    /// <summary>
-    /// A shortcut on the desktop that starts the Modeler with no ETABS: a .lnk to the PC's own dotnet with
-    /// CsiProMax.dll --modeler (no .exe of ours). Made through Windows' own shortcut object.
-    /// </summary>
-    public static string MakeModelerShortcut()
-    {
-        var dotnet = Environment.ProcessPath ?? throw new InvalidOperationException("This program's own path is not known.");
-        var file = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "CSI ProMax Modeler.lnk");
-        var type = Type.GetTypeFromProgID("WScript.Shell") ?? throw new InvalidOperationException("Windows' shortcut maker is not available on this PC.");
-        dynamic shell = Activator.CreateInstance(type)!;
-        try
-        {
-            dynamic link = shell.CreateShortcut(file);
-            link.TargetPath = dotnet;
-            link.Arguments = "\"" + Path.Combine(AppContext.BaseDirectory, "CsiProMax.dll") + "\" --modeler";
-            link.WorkingDirectory = AppContext.BaseDirectory;
-            link.WindowStyle = 7; // minimised: dotnet's own console window stays out of the way
-            link.Description = "CSI ProMax Modeler: build ETABS models with no ETABS open";
-            var icon = Path.Combine(AppContext.BaseDirectory, "csi-promax.ico");
-            if (File.Exists(icon)) link.IconLocation = icon;
-            link.Save();
-        }
-        finally { System.Runtime.InteropServices.Marshal.FinalReleaseComObject(shell); }
-        return file;
     }
 }

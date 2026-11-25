@@ -906,7 +906,7 @@ public sealed class BridgeServer
             .Select(f => f.GetMethod())
             .FirstOrDefault(m => m?.DeclaringType?.Namespace?.StartsWith("CsiProMax", StringComparison.Ordinal) == true);
         var where = frame is null ? "" : $" in {frame.DeclaringType!.Name}.{frame.Name}";
-        return $"{tool.Name} hit an internal error ({ex.GetType().Name}{where}: {ex.Message}). This is an CSI ProMax bug; " +
+        return $"{tool.Name} hit an internal error ({ex.GetType().Name}{where}: {ex.Message}). This is a CSI ProMax bug; " +
                "tell the user, and try another way for now (for example run_etabs_code).";
     }
 

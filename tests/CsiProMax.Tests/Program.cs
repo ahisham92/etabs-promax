@@ -507,6 +507,11 @@ Test("modeler: a building is modelled with no ETABS and saved as an ETABS text f
 
         var page = Pack.LiveViewerHtml(Pack.Build(o, [], [], [], null, null, withTables: false).Content, o.Revision);
         Check(page.Contains("fetch('model?rev='") && page.Contains("\"model\":\"Frame\""), "the live view page carries the model and asks for changes");
+        var drawn = Pack.Build(o, [], [], [], null, null, withTables: false).Content["model"]!;
+        Check(drawn["grids"] is JsonArray { Count: 5 } && drawn["frame_sizes"] is JsonObject { Count: > 0 } && drawn["supports"] is JsonArray { Count: 6 }, "the view gets grid lines, section sizes and supports");
+        Check(page.Contains("Model Explorer") && page.Contains("window.cpmLive=true") && page.Contains("Elevation View"), "the view is the workbench: explorer, plan, elevation and 3-D");
+        Equal("fixed", Drawing.Kind([true, true, true, true, true, true]), "a fixed support"); Equal("pinned", Drawing.Kind([true, true, true, false, false, false]), "a pinned support");
+        Check(CsiProMax.Host.Shortcuts.Due(null, "C:/a") && CsiProMax.Host.Shortcuts.Due("C:/old", "C:/a") && !CsiProMax.Host.Shortcuts.Due("c:/A\n", "C:/a"), "shortcuts are made once, and again when the program's folder changes");
         Check(Refused(Endpoint(new MemoryEtabs()), "add_stories", """{"stories":[{"name":"L3","height":3}]}""").Contains("Modeler"), "Modeler tools say so when ETABS is behind");
         Check(CsiProMax.Tools.ToolRegistry.CreateDefault(true).IsBuiltIn("new_model") && !CsiProMax.Tools.ToolRegistry.CreateDefault().IsBuiltIn("new_model"), "Modeler tools are offered in the Modeler only");
     }
