@@ -152,7 +152,7 @@ internal sealed class JobCardModel
             _ => "",
         };
         var time = Summary.Length > 0 ? Summary : State == "done" && took.Length > 0 ? (Changed > 0 ? $"Done in {took}." : $"Answered in {took}.") : "";
-        var changed = Changed > 0 ? $"{Changed} element{(Changed == 1 ? "" : "s")} changed." : "Nothing in the model changed.";
+        var changed = Changed > 0 ? $"{Changed} object{(Changed == 1 ? "" : "s")} changed." : "Nothing in the model changed.";
         return string.Join(" ", new[] { head, time, changed }.Where(s => s.Length > 0));
     }
 

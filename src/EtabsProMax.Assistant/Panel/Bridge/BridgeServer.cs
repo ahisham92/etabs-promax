@@ -41,6 +41,21 @@ public sealed class BridgeServer
 
     public bool IsListening { get; private set; }
 
+    /// <summary>How many objects a change reported ("added", "done", "changed", "deleted" in its result); 1 when it says none of them.</summary>
+    internal static int ChangedCount(string result)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(result);
+            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object) return 1;
+            var total = 0;
+            foreach (var key in new[] { "added", "done", "changed", "deleted", "assigned" })
+                if (doc.RootElement.TryGetProperty(key, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.Number && v.TryGetInt32(out var n)) total += n;
+            return Math.Max(1, total);
+        }
+        catch (System.Text.Json.JsonException) { return 1; }
+    }
+
     public static string ToolsFile => Path.Combine(Root, "tools.json");
 
     private readonly ToolRegistry _registry;
@@ -473,6 +488,7 @@ public sealed class BridgeServer
                 result = ETABS.AutoSync.Noted(result);
                 ActivityLog.Write(app.ActiveUIDocument?.Document?.Title ?? "", tool, args, result);
                 // Changes that worked, with their whole arguments, so redo_steps can do the work again after a crash.
+                if (tool.ModifiesModel && !result.IsError) ETABS.JobUndo.Changed(ChangedCount(result.Text));
                 if (tool.ModifiesModel && !result.IsError)
                     RedoLog.Write(app.ActiveUIDocument?.Document?.Title ?? "", tool.Name, System.Text.Json.JsonSerializer.Serialize(args), result.Text);
                 TimeLog.EndTool(result);

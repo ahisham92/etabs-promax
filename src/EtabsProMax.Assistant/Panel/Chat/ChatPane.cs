@@ -2499,7 +2499,7 @@ internal sealed partial class ChatPane : DockPanel, IHistoryHost
             var kind = read ?? ext switch
             {
                 ".doc" or ".ppt" => "older Word or PowerPoint file, which can't be read here. Ask the user to save it as .docx or .pptx (File > Save As) and attach that",
-                ".dwg" or ".dxf" => "CAD drawing; read it with read_cad_drawing (the overview first, then the layers you need)",
+                ".dwg" or ".dxf" => "CAD drawing; read it with the tool mcp__etabs-promax__read_cad_drawing (load it with ToolSearch; the overview first, then the layers you need)",
                 ".e2k" or ".$et" => "ETABS text file; read it with the Read tool",
                 ".edb" => "ETABS model file; it can be opened in ETABS by the user, not read here",
                 ".xls" or ".xlsb" => "older or binary Excel file, which can't be read here. Ask the user to save it as .xlsx (File > Save As) and attach that",

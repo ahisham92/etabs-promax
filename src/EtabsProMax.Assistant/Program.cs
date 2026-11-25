@@ -43,6 +43,13 @@ public static class Program
             using var show = new EventWaitHandle(false, EventResetMode.AutoReset, name + ".show");
             if (!first) { show.Set(); return 0; }
 
+            // Started for an ETABS that is no longer open: say so, instead of a window that closes by itself.
+            if (!demo && etabsPid is { } asked && !EtabsIsOpen(asked))
+            {
+                if (OperatingSystem.IsWindows())
+                    MessageBoxW(IntPtr.Zero, "The ETABS window ETABS ProMax was started for is closed.\n\nOpen ETABS and start ETABS ProMax from its Tools menu.", "ETABS ProMax", 0x40);
+                return 2;
+            }
             using var com = new ComEtabs(etabsPid);
             IEtabsLink link = demo ? new MemoryEtabs() : com;
             var app = new System.Windows.Application { ShutdownMode = System.Windows.ShutdownMode.OnMainWindowClose };
@@ -64,7 +71,13 @@ public static class Program
                 _ = Task.Run(async () =>
                 {
                     while (!life.IsCancellationRequested && EtabsIsOpen(watched)) await Task.Delay(3000).ConfigureAwait(false);
-                    if (!life.IsCancellationRequested) _ = window.Dispatcher.BeginInvoke(new Action(window.Close));
+                    if (!life.IsCancellationRequested)
+                        _ = window.Dispatcher.BeginInvoke(new Action(() =>
+                        {
+                            // The chats are saved as they go; the window says why it closes.
+                            EtabsProMax.ETABS.TaskDialog.Show("ETABS ProMax", "ETABS was closed, so ETABS ProMax closes too. Your chats are saved: open ETABS and start ETABS ProMax from its Tools menu to carry on.");
+                            window.Close();
+                        }));
                 });
 
             app.Run(window);

@@ -118,6 +118,8 @@ public sealed class TaskDialog(string title)
                 Content = content, HorizontalContentAlignment = HorizontalAlignment.Left, Padding = new Thickness(12, 8, 12, 8),
                 Margin = new Thickness(0, 0, 0, 6), Cursor = Cursors.Hand,
             };
+            System.Windows.Automation.AutomationProperties.SetName(button, text);
+            if (note.Length > 0) System.Windows.Automation.AutomationProperties.SetHelpText(button, note);
             var answer = (TaskDialogResult)(int)id;
             button.Click += (_, _) => Close(answer);
             if (DefaultButton == answer) { button.IsDefault = true; first = button; }

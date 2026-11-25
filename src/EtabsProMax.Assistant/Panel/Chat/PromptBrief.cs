@@ -73,8 +73,7 @@ internal static class PromptBriefs
     /// </summary>
     public static readonly string[] PlannerTools =
     [
-        "get_model_context", "query_elements", "get_element_parameters", "list_views_and_sheets", "list_types",
-        "list_view_templates", "list_view_filters", "list_revisions", "list_title_blocks", "list_worksets", "read_schedule",
+        "get_model_context", "query_objects", "list_tables", "read_table",
     ];
 
     // ---- When to make a brief ------------------------------------------------------------------------------------------
@@ -202,22 +201,24 @@ internal static class PromptBriefs
         You can only read the model now. Nothing you do may change it, and you must not do the task itself.
 
         1. Start from what the message already gives you: the conversation so far, what this chat remembers, and the
-           model note (what changed since the last answer, the active view, the selected elements with their ids). Don't
-           read again what they already say. Read only what is missing with the read-only ETABS tools (get_model_context,
-           list_types, list_views_and_sheets, query_elements, list_view_templates ...) to find the exact levels, types,
-           views, sheets and element counts the request is about: at most three calls, none for a follow-up that only
-           finishes or repeats earlier work. The ETABS tools are listed by name only: load the ones you use with
-           ToolSearch in one call (select:mcp__etabs-promax__get_model_context,mcp__etabs-promax__query_elements).
+           model note (the model's file and the selected objects with their names). Don't read again what they already
+           say. Read only what is missing with the read-only ETABS tools (get_model_context, query_objects, list_tables,
+           read_table) to find the exact stories, sections, load patterns and object counts the request is about: at
+           most three calls, none for a follow-up that only finishes or repeats earlier work, and none for a request
+           that is not about the model (a note to remember, a file to read). The ETABS tools are listed by name only:
+           load the ones you use with ToolSearch in one call
+           (select:mcp__etabs-promax__get_model_context,mcp__etabs-promax__query_objects).
         2. Answer with ONE JSON object and nothing else (no prose, no code fence):
-           {"kind":"change","brief":"...","scope":[{"label":"Levels","value":"Level 1 (0 mm), Level 2 (3500 mm)"}],
-            "units":"mm","tools":["create_walls"],"assumptions":["..."],
+           {"kind":"change","brief":"...","scope":[{"label":"Stories","value":"Story1 (3.2 m), Story2 (6.4 m)"}],
+            "units":"kN, m","tools":["add_beams"],"assumptions":["..."],
             "questions":[{"id":"q1","question":"...","options":["...","..."],"recommended":0}]}
-           - kind: "change" when the task would change the model (create, place, modify, delete, tag, dimension, rename,
-             load ...), "multi_step" when it needs several steps but changes nothing, "read_only" for a question or a
+           - kind: "change" when the task would change the model (add, assign, modify, delete, rename, save,
+             run the analysis ...), "multi_step" when it needs several steps but changes nothing, "read_only" for a question or a
              report, "unsure" when you can't tell.
            - brief: the request rewritten as a precise instruction for the assistant that will do it, using the exact names,
              counts and units from the model. Write {q1} where the answer to question q1 goes.
-           - scope: what is in scope, each with exact names and counts (levels, types, views, sheets, element counts).
+           - scope: what is in scope, each with exact names and counts (stories, sections, load patterns, object counts).
+           - units: the model's own units as get_model_context gives them; leave it out when the request is not about the model.
            - tools: the ETABS ProMax tool names you expect to be used.
            - assumptions: every assumption you made, one short line each.
            - questions: only what is genuinely ambiguous and would change the result (0 to 4), each with 2 to 4 short
