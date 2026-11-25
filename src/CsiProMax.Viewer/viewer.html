@@ -21,6 +21,17 @@ button:disabled,select:disabled,input:disabled{opacity:.45;cursor:default}
 button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 button.primary:hover{background:var(--accent2)}
 input[type=checkbox],input[type=radio]{margin:0 5px 0 0;vertical-align:-2px;accent-color:var(--accent)}
+/* the instability checker's window */
+.inst{max-height:52vh;overflow:auto;border:1px solid var(--line);background:var(--field);margin-top:6px}
+.inst .it{padding:5px 8px;border-bottom:1px solid var(--line2);cursor:pointer}
+.inst .it:hover{background:var(--hot)}
+.inst .it.on{background:var(--sel)}
+.inst .lv{display:inline-block;min-width:54px;font-weight:600;font-size:11px}
+.inst .lv.error{color:var(--bad)}.inst .lv.warning{color:var(--warn)}.inst .lv.note{color:var(--mute)}
+.inst .ck{color:var(--mute);font-size:11px;margin-left:4px}
+.inst .fx{color:var(--mute);margin-top:2px}
+.inst .fx b{color:var(--ink);font-weight:600}
+.instsum{font-weight:600}.instsum.bad{color:var(--bad)}.instsum.ok{color:var(--ok)}
 /* title and menus */
 #menubar{display:flex;align-items:stretch;background:var(--menu);height:24px;user-select:none;border-bottom:1px solid var(--line2)}
 #menubar .brand{display:flex;align-items:center;gap:6px;padding:0 12px 0 8px;font-weight:600;white-space:nowrap;color:var(--accent)}
@@ -326,6 +337,8 @@ const norm = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, "");
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const num = v => { const r = Math.round(v * 1000) / 1000; return String(Object.is(r, -0) ? 0 : r); };
 function fmt(v) { const a = Math.abs(v); return a === 0 ? "0" : a >= 1000 ? v.toFixed(0) : a >= 100 ? v.toFixed(1) : a >= 1 ? v.toFixed(2) : a >= 0.001 ? v.toFixed(4) : v.toExponential(2); }
+// The instability checker's last answer and what of it is shown (its code is further down).
+const inst = {answer: null, cur: -1, show: false, busy: false, dlg: null, only: "all"};
 let P = null, frames = [], areas = [], stories = [], grids = {X: [], Y: []}, gridsGuessed = false, sizes = {}, slabT = {}, supports = [], points = [];
 let ratio = new Map(), marks = {punching: [], soil: []}, pointXyz = new Map(), pointIdx = new Map(), disp = new Map(), pointAt = new Map(), newComments = [], lit = null;
 let lo = [0, 0, 0], hi = [1, 1, 1], size = 1, unit = "", program = "etabs", sectionMat = new Map();
@@ -381,7 +394,7 @@ async function readPack(file) {
     throw new Error("This file has comments only. Open the pack first, then this file.");
   }
   const files = await unzip(buffer), text = n => files[n] ? JSON.parse(new TextDecoder().decode(files[n])) : null;
-  const pack = {manifest: text("manifest.json") || {}, model: text("model.json"), checks: text("checks.json"), comments: text("comments.json") || [], tables: {}};
+  const pack = {manifest: text("manifest.json") || {}, model: text("model.json"), checks: text("checks.json"), comments: text("comments.json") || [], tables: {}, instabilities: text("instabilities.json")};
   if (!pack.model) throw new Error("This is not a CSI ProMax pack (it has no model).");
   for (const name of Object.keys(files)) if (name.startsWith("tables/")) { const t = text(name); if (t && t.name) pack.tables[t.name] = t; }
   return pack;
@@ -1843,6 +1856,7 @@ function overlay(p, g, M, T, w, h) {
   if (opt.names) drawNames(p, g, to, T);
   if (opt.supports && !gl) drawSupports(p, g, to, T);
   drawMarks(p, g, to, T);
+  drawInst(p, g, to, T);
   drawDesign(p, g, to, T);
   if (res.mode === "reactions") drawReactions(p, g, to, T);
   if (p.diag && p.diag.labels) {
@@ -2269,6 +2283,7 @@ const I = {
   hide: '<path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8s-2.5 4.5-6.5 4.5S1.5 8 1.5 8z"/><path d="M2.5 13.5l11-11" class="c4"/>',
   show: '<path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8s-2.5 4.5-6.5 4.5S1.5 8 1.5 8z"/><path d="M5.5 8l1.8 1.8L11 6.2" class="c3"/>',
   info: '<circle cx="8" cy="8" r="6.3"/><path d="M8 7v4.5" /><circle cx="8" cy="4.8" r=".9" class="f"/>',
+  instab: '<path d="M2 13.5h12"/><path d="M4 13.5V6l4-3.5l4 3.5v7.5"/><path d="M8 7.2v3.1" class="c4"/><circle cx="8" cy="11.8" r=".8" class="f"/>',
 };
 const icon = k => `<svg viewBox="0 0 16 16">${I[k] || ""}</svg>`;
 const bar = [["open", "Open a pack (Ctrl+O)", "open"], 0, ["fit", "Restore full view", "fit"], ["zoom", "Rubber band zoom", "t:zoom"], ["zin", "Zoom in one step", "zin"], ["zout", "Zoom out one step", "zout"], ["pan", "Pan", "t:pan"], ["orbit", "Rotate the 3-D view", "t:orbit"], 0,
@@ -2276,7 +2291,7 @@ const bar = [["open", "Open a pack (Ctrl+O)", "open"], 0, ["fit", "Restore full 
   ["up", "Move up a story (Page Up)", "storyUp"], ["down", "Move down a story (Page Down)", "storyDown"], ["prev", "Previous grid line elevation", "linePrev"], ["next", "Next grid line elevation", "lineNext"], 0,
   ["display", "Set display options", "dlg:display"], ["grid", "Grid lines", "o:grid"], ["extrude", "Extruded sections", "o:extrude"], ["fill", "Floors and walls", "o:fill"], ["supports", "Supports", "o:supports"], ["names", "Labels", "o:names"], ["axes", "Global axes", "o:axes"], ["bg", "Black or white background", "bg"], 0,
   ["model", "Show undeformed shape (F4)", "r:model"], ["deformed", "Show deformed shape (F6)", "dlg:deformed", "deformed"], ["forces", "Show frame forces and moments (F8)", "dlg:forces", "forces"], ["contour", "Show joint displacement contours", "dlg:contour", "contour"], ["reactions", "Show support reactions", "dlg:reactions", "reactions"], ["ratios", "Show design ratios", "r:ratios", "ratios"], ["anim", "Animate the deformed shape", "anim"], 0,
-  ["plot", "Story response plot", "plot"], ["tables", "Show tables (Ctrl+T)", "tables"]];
+  ["plot", "Story response plot", "plot"], ["tables", "Show tables (Ctrl+T)", "tables"], 0, ["instab", "Check the model for instabilities: what would stop the analysis (F7)", "inst"]];
 $("icons").innerHTML = bar.map(b => b ? `<button class="ib" data-act="${b[2]}" ${b[3] ? `data-res="${b[3]}"` : ""} title="${b[1]}">${icon(b[0])}</button>` : `<span class="sep"></span>`).join("");
 $("icons").querySelector('[data-act="r:model"]').dataset.res = "model";
 const strip = [["select", "Select (click, or drag a box)", "t:select"], ["zoom", "Rubber band zoom", "t:zoom"], ["pan", "Pan", "t:pan"], ["orbit", "Rotate the 3-D view", "t:orbit"], 0, ["iso", "3-D view from the corner", "cam:iso"], ["top", "View from the top", "cam:top"], ["front", "View along Y (the X-Z plane)", "cam:front"], ["side", "View along X (the Y-Z plane)", "cam:side"], 0, ["all", "Select all", "selAll"], ["clear", "Clear the selection (Esc)", "selNone"], ["hide", "Hide the selected objects", "hideSel"], ["show", "Show all objects", "showAll"], ["info", "Information on the selected object", "info"]];
@@ -2397,6 +2412,9 @@ function act(name) {
     case "explorer": opt.explorer = !opt.explorer; $("explorer").hidden = !opt.explorer; return draw();
     case "side": opt.side = !opt.side; $("right").hidden = !opt.side; return draw();
     case "chat": return chatShow();
+    case "inst": return instOpen();
+    case "instMarks": inst.show = true; return draw();
+    case "instHelp": return instHelp();
     case "about": return dialogs.about();
   }
 }
@@ -2421,6 +2439,7 @@ const viewerMenus = () => {
       ["Windows", [["One window", "lay1"], ["Two windows", "lay2"], ["Three windows", "lay3"], ["Four windows", "lay4"]]]],
     Define: [["Material Properties...", "dlg:materials"], ["Frame Sections...", "dlg:frameSections"], ["Slab and Wall Sections...", "dlg:areaSections"], 0, ["Story Data...", "dlg:stories"], ["Grid Data...", "dlg:grids"], 0, ["Load Patterns...", "dlg:patterns"], ["Load Cases...", "dlg:cases"], ["Load Combinations...", "dlg:combos"]],
     Select: [["All", "selAll", "Ctrl+A"], ["All on This Story", "selStory", "", !plan], ["By Section...", "dlg:bySection"], ["By Object Type...", "dlg:byType"], ["Invert", "selInvert"], 0, ["Clear Selection", "selNone", "Esc"]],
+    Analyze: [["Check Model for Instabilities...", "inst", "F7"], ["Show the Last Check's Marks", "instMarks", "", !inst.answer], 0, ["What the check looks for", "instHelp"]],
     Display: (() => {
       const has = re => Object.values(P ? P.tables : {}).some(t => t.rows && t.rows.length && re.test(norm(t.name))), plots = P ? Object.values(P.tables).some(t => t.rows && t.rows.length > 1) : false;
       return [["Undeformed Shape", "r:model", "F4"], ["Deformed Shape...", "dlg:deformed", "F6", !disp.size], ["Mode Shapes...", "dlg:modes", "", !P || !modeCases().length], ["Animate Deformed Shape", "anim", "", res.mode !== "deformed"], 0,
@@ -3018,6 +3037,133 @@ document.addEventListener("keydown", e => {
   else if (ctrl && k.toLowerCase() === "t") { stop(); act("tables"); } else if (ctrl && k.toLowerCase() === "a") { stop(); act("selAll"); } else if (ctrl && k.toLowerCase() === "o") { stop(); act("open"); } else if (ctrl && k.toLowerCase() === "w") { stop(); dialogs.display(); }
   else if (ctrl && k.toLowerCase() === "c" && sel.size) { stop(); act("copyNames"); }
 });
+// ---- the instability checker: what would stop the analysis, found without running it. In a live window (the
+// Modeler, or the 3D view of a model open in ETABS, SAP2000 or SAFE) it runs find_instabilities behind the window
+// (POST check); in a pack it shows what was found when the pack was made, and an older pack gets a light check made
+// here from the geometry. Clicking a finding selects its objects, zooms to them and rings the places. ----
+async function instCheck() {
+  if (window.cpmLive) {
+    const r = await fetch("check", {method: "POST", headers: {"Content-Type": "application/json", "X-CPM-View": "1"}, body: "{}", cache: "no-store"});
+    if (!r.ok) return {ok: false, error: r.status === 404 ? "The window behind this view is not answering. Is CSI ProMax still open?" : "The check was refused (" + r.status + ")."};
+    return r.json();
+  }
+  return P.instabilities ? {...P.instabilities, ok: true, packed: true} : instLocal();
+}
+async function instOpen() {
+  if (!P) return;
+  if (inst.dlg) inst.dlg.close();
+  const d = dialog("Check Model for Instabilities", `<div id="instHead" class="kv">Checking the model...</div><div class="row" style="margin-top:6px;gap:6px;display:flex;flex-wrap:wrap;align-items:center">
+    <label>Show <select id="instOnly"><option value="all">Errors and warnings</option><option value="error">Errors only</option></select></label>
+    <button id="instAgain">Check again</button><button id="instSel">Select the objects of every error</button><button id="instCopy">Copy the list</button></div><div class="inst" id="instList"></div><div class="kv" id="instNotes" style="margin-top:6px"></div>`,
+    [["Close", () => { inst.show = false; inst.dlg = null; draw(); }]], {float: true, width: 560});
+  inst.dlg = d;
+  const xClose = d.close; d.close = () => { inst.dlg = null; xClose(); };
+  q(d, "#instOnly").value = inst.only;
+  q(d, "#instOnly").onchange = e => { inst.only = e.target.value; instList(); };
+  q(d, "#instAgain").onclick = () => instRun();
+  q(d, "#instSel").onclick = () => { sel.clear(); for (const f of (inst.answer && inst.answer.findings || []).filter(f => f.level === "error")) for (const id of instIds(f)) sel.add(id); selChanged(); };
+  q(d, "#instCopy").onclick = () => copyText((inst.answer && inst.answer.findings || []).map(f => `${f.level.toUpperCase()}\t${f.check}\t${f.message}\t${f.fix}`).join("\n"));
+  await instRun();
+}
+async function instRun() {
+  if (inst.busy || !inst.dlg) return;
+  inst.busy = true; const d = inst.dlg; q(d, "#instHead").textContent = "Checking the model..."; q(d, "#instAgain").disabled = true;
+  let j;
+  try { j = await instCheck(); } catch (e) { j = {ok: false, error: "The check could not be made: " + e.message}; }
+  inst.busy = false; if (!inst.dlg) return; q(d, "#instAgain").disabled = !window.cpmLive && !!P.instabilities;
+  if (!j.ok) { q(d, "#instHead").innerHTML = `<span class="instsum bad">${esc(j.error || "The check did not work.")}</span>`; return; }
+  inst.answer = j; inst.cur = -1; inst.show = true;
+  const c = j.checked || {};
+  q(d, "#instHead").innerHTML = `<div class="instsum ${j.errors ? "bad" : "ok"}">${esc(j.summary || "")}</div>` +
+    `<div>${esc([c.in ? "In " + c.in : "", c.joints != null ? c.joints + " joints" : "", c.frames != null ? c.frames + " frames" : "", c.areas != null ? c.areas + " areas" : "", c.stiffness_check ? "stiffness checked (" + c.equations + " equations)" : c.stiffness_check === false ? "no stiffness check" : "", j.packed ? "as found when the pack was made" : "", j.local ? "a light check made in this page" : "", j.seconds != null ? j.seconds + " s" : ""].filter(Boolean).join(" · "))}</div>`;
+  q(d, "#instNotes").innerHTML = (j.notes || []).map(n => `<div>${esc(n)}</div>`).join("");
+  instList(); draw();
+}
+function instShown() { const all = inst.answer && inst.answer.findings || []; return all.map((f, i) => [f, i]).filter(([f]) => inst.only === "all" || f.level === inst.only); }
+function instList() {
+  if (!inst.dlg) return;
+  const list = instShown(), box = q(inst.dlg, "#instList");
+  box.innerHTML = list.length ? list.map(([f, i]) => `<div class="it${i === inst.cur ? " on" : ""}" data-i="${i}"><span class="lv ${esc(f.level)}">${esc(f.level === "error" ? "Error" : f.level === "warning" ? "Warning" : "Note")}</span><span class="ck">${esc(f.check)}</span><div>${esc(f.message)}</div><div class="fx"><b>Fix:</b> ${esc(f.fix)}</div></div>`).join("")
+    : `<div class="it">Nothing to show.</div>`;
+  box.querySelectorAll(".it[data-i]").forEach(el => el.onclick = () => instGo(+el.dataset.i));
+}
+// The Viewer's objects a finding names: frames and areas by name (and story), joints have no object and are ringed.
+function instIds(f) {
+  const ids = [];
+  for (const o of f.objects || []) {
+    const list = o.kind === "frame" ? frames : o.kind === "shell" ? areas : null; if (!list) continue;
+    const hit = list.find(x => x.name === o.name) || (o.story ? list.find(x => x.name === o.name + "@" + o.story) : null);
+    if (hit) ids.push(hit.id);
+  }
+  return ids;
+}
+function instGo(i) {
+  const f = inst.answer && inst.answer.findings[i]; if (!f) return;
+  inst.cur = i; inst.show = true; instList();
+  sel.clear(); const ids = instIds(f); for (const id of ids) sel.add(id); selChanged();
+  const p = panes[active]; if (!p) return;
+  if (p.mode !== "3d" && p.mode !== "plan" && p.mode !== "elev") setMode(p, "3d");
+  const pts = (f.at || []).map(a => [a[0], a[1], a[2]]);
+  if (ids.length) zoomTo(p, ids);
+  else if (pts.length) { const c = mul(pts.reduce(add, [0, 0, 0]), 1 / pts.length); let r = 0; for (const q2 of pts) r = Math.max(r, len(sub(q2, c))); go(p, {...p.cam, target: c, hh: Math.max(r * 2.2, size * 0.06)}); }
+  draw();
+}
+function drawInst(p, g, to, T) {
+  if (!inst.show || !inst.answer) return;
+  const all = inst.answer.findings || [];
+  g.lineWidth = 2; g.setLineDash([]);
+  all.forEach((f, i) => {
+    if (i === inst.cur || inst.only === "error" && f.level !== "error") return;
+    const a = (f.at || [])[0]; if (!a) return; const s = to(a); if (!s[3]) return;
+    g.beginPath(); g.arc(s[0], s[1], 4, 0, 7); g.fillStyle = f.level === "error" ? "#d0342c" : "#e08a1e"; g.fill();
+  });
+  const f = all[inst.cur]; if (!f) return;
+  g.font = "11px Segoe UI, sans-serif"; g.textAlign = "left"; g.textBaseline = "alphabetic";
+  (f.at || []).slice(0, 80).forEach((a, k) => {
+    const s = to(a); if (!s[3]) return;
+    g.beginPath(); g.arc(s[0], s[1], 10, 0, 7); g.strokeStyle = f.level === "error" ? "#d0342c" : "#e08a1e"; g.lineWidth = 2.5; g.stroke();
+    g.beginPath(); g.arc(s[0], s[1], 15, 0, 7); g.lineWidth = 1; g.stroke();
+    if (k === 0) { const t = f.check; g.lineWidth = 3; g.strokeStyle = css(T.canvas); g.strokeText(t, s[0] + 17, s[1] - 10); g.fillStyle = T.text; g.fillText(t, s[0] + 17, s[1] - 10); }
+  });
+}
+function instHelp() {
+  dialog("What the Check Looks For", `<div style="max-width:520px;line-height:1.5">
+    <p>The check finds what stops an analysis from completing, or makes the program call the model unstable, without running it:</p>
+    <ul style="margin:0 0 0 18px;padding:0">
+    <li><b>Supports</b>: no supports at all, and parts of the model that touch nothing supported (they float).</li>
+    <li><b>Definitions</b>: members or areas with no section, a section or material that is not defined, a modulus of elasticity or a thickness of 0.</li>
+    <li><b>Mechanisms</b>: a light stiffness check finds joints, and rigid floors, that can move with nothing resisting them (pinned frames that sway, a floor with no columns, walls or braces to hold it sideways).</li>
+    <li><b>Releases</b>: a member released for torsion, axial force or shear at both ends.</li>
+    <li><b>Geometry and duplicates</b>: members too short or of no length, areas with no area, joints, members and areas on top of each other, members that overlap.</li>
+    <li><b>Connectivity and meshing</b>: a member that passes a joint without joining it (SAP2000 joins only where a frame is divided or meshed), joints on an area's edge that is not meshed, warped areas and slivers, SAP2000 areas of more than 4 corners.</li>
+    <li><b>Cases and mass</b>: load cases and combinations that name what is not defined, a response spectrum with no modal case, and a modal case with no mass.</li></ul>
+    <p>Each finding names its objects, marks where they are, and says how to fix it. Errors first: they stop the run. Warnings deserve a look.</p></div>`, [["Close", null]]);
+}
+// A light check made here, for a pack made before the checker: from the geometry the pack holds (no releases,
+// sections or cases): supports, parts that float, members of no length and members on top of each other.
+function instLocal() {
+  const found = [], t = tol() * 10, k = q2 => key(q2[0], q2[1], q2[2]);
+  const parent = new Map(), find = x => { while (parent.get(x) !== x) { parent.set(x, parent.get(parent.get(x))); x = parent.get(x); } return x; };
+  const node = q2 => { const n = k(q2); if (!parent.has(n)) parent.set(n, n); return n; }, join = (a, b) => { const x = find(node(a)), y = find(node(b)); if (x !== y) parent.set(x, y); };
+  for (const f of frames) { if (len(sub(f.b, f.a)) <= t) found.push({level: "error", check: "geometry", message: `Frame ${f.name} has no length: both its ends are in the same place.`, fix: "Delete it, or move one end to where the member really goes.", objects: [{kind: "frame", name: f.name}], at: [f.a]}); join(f.a, f.b); }
+  for (const a of areas) for (let i = 1; i < a.pts.length; i++) join(a.pts[0], a.pts[i]);
+  const held = new Set(supports.map(s => find(node(s.p))));
+  if (!supports.length) found.push({level: "error", check: "supports", message: "The model has no supports: nothing holds it to the ground.", fix: "Restrain the joints at the base (fixed or pinned), or give them springs.", objects: [], at: []});
+  else {
+    const parts = new Map();
+    for (const o of frames.concat(areas)) { const r = find(node(o.type === "f" ? o.a : o.pts[0])); if (!parts.has(r)) parts.set(r, []); parts.get(r).push(o); }
+    for (const [r, objs] of parts) if (!held.has(r)) found.push({level: "error", check: "floating", message: `A part of the model (${objs.length} object(s): ${objs.slice(0, 6).map(o => o.name).join(", ")}${objs.length > 6 ? " and more" : ""}) touches nothing that is supported: it floats free of the rest.`, fix: "Join it to the structure, support it, or delete it if it is left over.", objects: objs.map(o => ({kind: o.type === "f" ? "frame" : "shell", name: o.name})), at: objs.slice(0, 40).map(o => o.type === "f" ? mul(add(o.a, o.b), 0.5) : o.pts[0])});
+  }
+  const pairs = new Map();
+  for (const f of frames) { const ka = k(f.a), kb = k(f.b), pk = ka < kb ? ka + "|" + kb : kb + "|" + ka; if (!pairs.has(pk)) pairs.set(pk, []); pairs.get(pk).push(f); }
+  for (const list of pairs.values()) if (list.length > 1) found.push({level: "warning", check: "duplicates", message: `${list.length} members lie on top of each other: ${list.map(f => f.name).join(", ")}.`, fix: "Delete all but one.", objects: list.map(f => ({kind: "frame", name: f.name})), at: [mul(add(list[0].a, list[0].b), 0.5)]});
+  found.sort((a, b) => (a.level === "error" ? 0 : 1) - (b.level === "error" ? 0 : 1));
+  const errors = found.filter(f => f.level === "error").length, warnings = found.length - errors;
+  return {ok: true, local: true, errors, warnings, findings: found, checked: {joints: points.length, frames: frames.length, areas: areas.length},
+    summary: errors ? `${errors} error(s) found by the light check.` : warnings ? `No errors; ${warnings} warning(s).` : "The light check found nothing.",
+    notes: ["This pack was made before the full check: only supports, floating parts, members of no length and doubled members were looked at. Make the pack again with CSI ProMax, or open the model in the Modeler, for the full check (releases, sections, mechanisms, load cases and mass)."]};
+}
+document.addEventListener("keydown", e => { if (e.key === "F7" && !e.ctrlKey && !e.altKey && !(e.target.closest && e.target.closest("input, textarea, select"))) { e.preventDefault(); act("inst"); } });
 window.cpmLoad = load;
 // ---- the Modeler: modelling by hand. Its menus, forms and drawing clicks call the same tools the chat calls, through
 // the Modeler on this PC (POST edit), so the chat and the engineer work on one model. Only in the Modeler's own view. ----

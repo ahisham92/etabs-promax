@@ -12,6 +12,9 @@ const string Help = """
       cpm info <file>            What is in a model.
       cpm check <file>           Completeness and connectivity checks. Exit code 1 when there are errors.
       cpm quantities <file>      Lengths, areas and concrete volumes by section.
+      cpm instabilities <file> [--program etabs|sap2000]
+            What would stop the analysis from completing, found without running it: floating parts, missing
+            supports, sections and materials, mechanisms, releases, duplicates, load cases and mass. Exit code 1 on errors.
 
     <out> ending in .cpm is a CSI ProMax model, .s2k a SAP2000 text file; anything else is written as an ETABS text file.
     In ETABS: File > Import > ETABS .e2k Text File. In SAP2000: File > Import > SAP2000 .s2k Text File.
@@ -43,6 +46,16 @@ try
             Save(model, output);
             Console.WriteLine($"Wrote {output}: {Summary(model)}");
             return 0;
+        }
+        case "instabilities":
+        {
+            var model = Load(Positional(1, "the file to read"));
+            var report = CsiProMax.Checks.Stability.StabilityCheck.Run(CsiProMax.Checks.Stability.FromStructural.Read(model, Option("--program") ?? "etabs"));
+            foreach (var f in report.Findings)
+                Console.WriteLine($"{f.Level.ToString().ToUpperInvariant(),-8} {f.Check,-13} {f.Message}\n{"",22}Fix: {f.Fix}");
+            foreach (var n in report.Notes) Console.WriteLine("note: " + n);
+            Console.WriteLine($"{report.Errors} error(s), {report.Warnings} warning(s); {report.Joints} joints, {report.Frames} frames, {report.Shells} areas, stiffness check {(report.StiffnessRan ? $"made ({report.Equations} equations)" : "not made")}.");
+            return report.Errors > 0 ? 1 : 0;
         }
         case "info":
         {
