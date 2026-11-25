@@ -122,6 +122,21 @@ public sealed class FieldContext(CsiProgram program, string folder, ICsiLink lin
     /// otherwise). When a step fails and that window no longer gives its model, the steps left in the part are
     /// recorded as not tested: one hang is one failure in the report, not fifty.
     /// </summary>
+    /// <summary>
+    /// What must run while the scratch model still has its results: the Viewer's check. A program's steps call
+    /// <see cref="WithResults"/> before they unlock the model (ETABS unlocks it at the end of its part, and the Viewer
+    /// then had no result to show: every result button was greyed out in the 0.4.11 run). Run once.
+    /// </summary>
+    public Action? WhileAnalysed { get; set; }
+
+    /// <summary>Runs <see cref="WhileAnalysed"/> if it has not run yet.</summary>
+    public void WithResults()
+    {
+        var work = WhileAnalysed;
+        WhileAnalysed = null;
+        work?.Invoke();
+    }
+
     public ICsiLink? Watched
     {
         get => _watched;

@@ -275,8 +275,9 @@ public static class EtabsFieldSteps
         var analysed = false;
         try { analysed = link.Info().Locked; }
         catch (EtabsException) { }
+        JsonNode? designed = null;
         if (analysed)
-            ctx.Tool("run_design", "{}", a =>
+            designed = ctx.Tool("run_design", "{}", a =>
             {
                 FieldContext.Expect(a["ran"] is JsonArray ran && ran.Any(k => k!.GetValue<string>() == "concrete"), "the concrete frame design did not run: " + a.ToJsonString());
             }, "tool run_design (every kind; the ones the API cannot start are named with their menu)");
@@ -304,7 +305,15 @@ public static class EtabsFieldSteps
             ctx.Step("ETABS tables with data after the analysis and design", () => link.Tables().Where(t => !t.Empty).Select(t => t.Name).ToList());
             var sampled = new HashSet<string>(StringComparer.Ordinal);
             foreach (var names in ResultTools.CheckedTables.Concat(Pack.UsualTables.Select(t => new[] { t })))
-                if (sampled.Add(ResultTools.Norm(names[0]))) ctx.Step($"ETABS table {names[0]}", () => ResultTools.Sample(link, names));
+                if (sampled.Add(ResultTools.Norm(names[0])))
+                {
+                    // A table the pack takes when it is there (brace forces in a model with no braces is not): ETABS
+                    // does not list it for this model, so there is nothing to read. A table a check needs must be there.
+                    var usual = !ResultTools.CheckedTables.Any(c => c.Any(n => ResultTools.Norm(n) == ResultTools.Norm(names[0])));
+                    if (usual && !link.Tables().Any(t => names.Any(n => ResultTools.Norm(t.Name) == ResultTools.Norm(n) || ResultTools.Norm(t.Key) == ResultTools.Norm(n))))
+                        ctx.Skip($"ETABS table {names[0]}", "ETABS does not list this table for the scratch model (it has no members of that kind)");
+                    else ctx.Step($"ETABS table {names[0]}", () => ResultTools.Sample(link, names));
+                }
             var summaries = link.Tables().Where(t => ResultTools.IsDesignSummary(t.Name)).ToList();
             ctx.Step("ETABS design summary tables", () =>
             {
@@ -319,6 +328,10 @@ public static class EtabsFieldSteps
                 if (!piered) throw new FieldSkipException("the wall was not made a pier");
                 var pier = link.Tables().Where(t => DesignResults.FamilyOf(t.Name)?.Key == "pier").ToList();
                 FieldContext.Expect(pier.Count > 0, "ETABS lists no shear wall pier design table at all");
+                // The shear wall design has no start call in some versions of the API: run_design then names its menu, and
+                // the tables stay empty until the engineer runs it there. That is not tested, and it is not a failure.
+                if (pier.All(t => t.Empty) && designed is not null && !(designed["ran"] is JsonArray ran && ran.Any(k => k!.GetValue<string>() == "shear_wall")))
+                    throw new FieldSkipException("run_design could not start the shear wall design in this ETABS (" + WhyNot(designed, "shear_wall") + "), so the pier design tables are empty. Run Design > Shear Wall Design > Start Design/Check in ETABS to test them.");
                 var full = pier.FirstOrDefault(t => !t.Empty) ?? throw new FieldCheckException("the pier design tables are empty after the design: " + string.Join("; ", pier.Select(t => t.Name)) + ". The export file is then the way to the results.");
                 var data = link.ReadTable(full.Key, null, null);
                 FieldContext.Expect(data.Rows.Any(r => r.Any(v => v == "CPM-P1")), $"'{full.Name}' has no row for pier CPM-P1");
@@ -382,6 +395,9 @@ public static class EtabsFieldSteps
             FieldContext.Expect(!piered || pack.Content["model"]!["wall_labels"] is JsonArray { Count: > 0 }, "the wall is pier CPM-P1 and the pack has no wall labels for the Viewer");
             return new { file = Path.GetFileName(file), kilobytes = pack.Zip.Length / 1024, frames = pack.Frames, areas = pack.Areas, tables = pack.Tables, design = design?.ToJsonString(), notes = pack.Notes };
         });
+
+        // The Viewer's check runs here, while the model still has its results (it is unlocked next).
+        if (analysed) ctx.WithResults();
 
         // ---- unlocked again: every load pattern type by its name, read back from ETABS ----
         if (analysed)
