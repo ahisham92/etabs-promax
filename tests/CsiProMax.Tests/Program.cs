@@ -453,6 +453,128 @@ Test("pack: the model, ETABS's tables and the checks go into one file and the Vi
     finally { if (Directory.Exists(folder)) Directory.Delete(folder, true); }
 });
 
+Test("design: every kind of design table is sorted into its kind, and analysis tables are not design", () =>
+{
+    foreach (var (table, kind) in new[]
+             {
+                 ("Steel Frame Design Summary - AISC 360-16", "steel"), ("Concrete Beam Flexure Envelope - ACI 318-19", "concrete"), ("Concrete Column PMM Envelope - ACI 318-14", "concrete"),
+                 ("Concrete Joint Envelope - ACI 318-19", "concrete"), ("Concrete Column Summary - ACI 318-19", "concrete"), ("Composite Beam Design Summary - AISC 360-16", "composite"),
+                 ("Composite Column Design Summary - AISC 360-16", "compcol"), ("Steel Joist Design Summary", "joist"), ("Shear Wall Pier Design Summary - ACI 318-19", "pier"),
+                 ("Shear Wall Spandrel Design Summary - ACI 318-19", "spandrel"), ("Pier Design Envelope - Eurocode 2-2004", "pier"), ("Concrete Slab Design Summary - Strip Based Design", "slab"),
+                 ("Concrete Slab Design - Punching Shear Data", "punching"), ("Steel Design 1 - Summary Data - AISC 360-16", "steel"), ("Concrete Design 2 - Beam Summary Data - ACI 318-14", "concrete"),
+                 ("Steel Frame Design Summary (from the API)", "steel"),
+             })
+        Equal(kind, DesignResults.FamilyOf(table)?.Key, table);
+    foreach (var table in new[] { "Pier Forces", "Spandrel Forces", "Mass Summary by Story", "Modal Participating Mass Ratios", "Story Drifts", "Shear Wall Pier Design Preferences", "Steel Frame Design Overwrites - AISC 360-16", "Concrete Frame Design Preferences - ACI 318-19", "Area Assignments - Pier Labels", "Element Forces - Beams" })
+        Check(DesignResults.FamilyOf(table) is null, "not a design result: " + table);
+    Check(DesignResults.IsWallTable("Area Assignments - Pier Labels") && DesignResults.IsWallTable("Frame Assignments - Spandrel Labels") && DesignResults.IsWallTable("Pier Section Properties"), "the wall label tables");
+});
+
+Test("design: shear wall piers and spandrels, concrete beams and columns all go into the pack, with the walls' labels", () =>
+{
+    var e = new MemoryEtabs();
+    var mcp = Endpoint(e);
+    Call(mcp, "add_columns", """{"points":[[0,0],[6,0]],"section":"C500x500"}""");
+    Call(mcp, "add_beams", """{"lines":[[0,0,6,0]],"section":"B300x600"}""");
+    Call(mcp, "add_walls", """{"lines":[[10,0,13,0],[15,0,18,0]],"section":"W250"}""");
+    Call(mcp, "add_walls", """{"lines":[[13,0,15,0]],"stories":["Story2","Story3"],"section":"W250"}""");
+    var inv = System.Globalization.CultureInfo.InvariantCulture;
+    var walls = e.Areas().Where(a => a.Kind == "wall").ToList();
+    string StoryOf(AreaRow a) => e.Stories().First(s => Math.Abs(s.Elevation - a.Corners.Max(c => c.Z)) < 1e-6).Name;
+    string PierOf(AreaRow a) => a.Corners.Max(c => c.X) <= 13.001 ? "P1" : a.Corners.Min(c => c.X) >= 14.999 ? "P2" : "";
+    e.ResultTables["Area Assignments - Pier Labels"] = new(["Story", "Label", "UniqueName", "Pier Name"], walls.Where(a => PierOf(a) != "").Select(a => new[] { StoryOf(a), a.Name, a.Name, PierOf(a) }).ToList());
+    e.ResultTables["Area Assignments - Spandrel Labels"] = new(["Story", "Label", "UniqueName", "Spandrel Name"], walls.Where(a => PierOf(a) == "").Select(a => new[] { StoryOf(a), a.Name, a.Name, "S1" }).ToList());
+    e.ResultTables["Shear Wall Pier Design Summary - ACI 318-19"] = new(["Story", "Pier", "Centerline", "Station", "Required Reinf Ratio", "Current Reinf Ratio", "Flexural Combo", "D/C Ratio", "Shear Rebar"],
+        e.Stories().Skip(1).SelectMany(s => new[] { "P1", "P2" }.SelectMany(p => new[] { "Top", "Bottom" }.Select(st => new[] { s.Name, p, "Leg 1", st, "0.0125", "0.0125", "ULS1", p == "P1" && s.Name == "Story1" && st == "Bottom" ? "1.12" : "0.64", "0.00075" }))).ToList());
+    e.ResultTables["Shear Wall Spandrel Design Summary - ACI 318-19"] = new(["Story", "Spandrel", "Station", "As Top", "As Bottom", "Av Vert", "Shear Combo"],
+        new[] { "Story2", "Story3" }.SelectMany(s => new[] { "Left", "Right" }.Select(st => new[] { s, "S1", st, "0.00062", "0.00048", "0.0009", "ULS2" })).ToList());
+    var beam = e.Frames().First(f => f.Kind == "beam");
+    e.ResultTables["Concrete Beam Flexure Envelope - ACI 318-19"] = new(["Story", "Label", "UniqueName", "Station", "As Top", "As Bottom", "As Top Combo"],
+        new[] { "0.25", "3", "5.75" }.Select(st => new[] { beam.Story, beam.Name, beam.Name, st, st == "3" ? "0.0003" : "0.0011", "0.0006", "ULS1" }).ToList());
+    e.ResultTables["Concrete Column PMM Envelope - ACI 318-19"] = new(["Story", "Label", "UniqueName", "Station", "PMM Combo", "PMM Ratio", "Rebar %"],
+        e.Frames().Where(f => f.Kind == "column").Select(f => new[] { f.Story, f.Name, f.Name, "0", "ULS1", "0.81", "1.2" }).ToList());
+    e.ResultTables["Shear Wall Pier Design Preferences"] = new(["Item", "Value"], [["Code", "ACI 318-19"]]);
+    e.Locked = true;
+
+    var built = Pack.Build(e, [], [], [], null, null);
+    foreach (var t in new[] { "Shear Wall Pier Design Summary - ACI 318-19", "Shear Wall Spandrel Design Summary - ACI 318-19", "Concrete Beam Flexure Envelope - ACI 318-19", "Concrete Column PMM Envelope - ACI 318-19", "Area Assignments - Pier Labels", "Area Assignments - Spandrel Labels" })
+        Check(built.Tables.Contains(t), "the pack takes " + t);
+    Check(!built.Tables.Contains("Shear Wall Pier Design Preferences"), "preferences are not results");
+    var design = built.Content["manifest"]!["design"]!.AsObject();
+    foreach (var k in new[] { "pier", "spandrel", "concrete" }) Check(design.ContainsKey(k), "the manifest says where the " + k + " design came from");
+    var labels = built.Content["model"]!["wall_labels"]!.AsArray();
+    Equal(walls.Count, labels.Count, "every wall panel has its pier or spandrel");
+    Check(labels.Any(l => (string)l![2]! == "P1") && labels.Any(l => (string)l![3]! == "S1"), "piers and spandrels");
+
+    // The check reads the pier's D/C, not its reinforcing ratio.
+    var ratios = ResultTools.DesignCheck(e.ResultTables["Shear Wall Pier Design Summary - ACI 318-19"], "pier", 1.0, 10)!;
+    Equal(1, (int)ratios["over_limit"]!, "one pier station over 1.0"); Equal("D/C Ratio", (string)ratios["worst"]!["governs"]!, "the D/C governs, not the reinforcing ratio");
+    Equal("P1", (string)ratios["worst"]!["label"]!, "the pier is named");
+    if (Environment.GetEnvironmentVariable("CPM_KEEP_PACK") is { Length: > 0 } keep) File.WriteAllText(Path.Combine(keep, "design viewer.html"), Pack.ViewerHtml(built.Content));
+});
+
+Test("design: a kind with empty tables says what to run in the program, and run_design asks first and needs the analysis", () =>
+{
+    var e = new MemoryEtabs();
+    e.ResultTables["Shear Wall Pier Design Summary - ACI 318-19"] = new(["Story", "Pier", "D/C Ratio"], []);
+    var built = Pack.Build(e, [], [], [], null, null);
+    Check(built.Notes.Any(n => n.Contains("Shear Wall Pier Design has no results") && n.Contains("Design > Shear Wall Design > Start Design/Check") && n.Contains("Excel")), "the note says what to run: " + string.Join(" | ", built.Notes));
+    Check(built.Content["manifest"]!["design"]!["not_run"]!.AsArray().Any(n => (string)n! == "Shear Wall Pier Design"), "the Viewer is told too");
+    Check(Refused(Endpoint(e), "run_design", "{}").Contains("has not run"), "no design before the analysis");
+    var asked = new List<string>();
+    e.Locked = true;
+    Check(Refused(Endpoint(e, allow: false, asked: asked), "run_design", "{}").Contains("declined") && asked.Count == 1, "the engineer is asked first");
+    var offline = new OfflineEtabs(E2kReader.Read(sample));
+    Check(Refused(Endpoint(offline), "run_design", "{}").Contains("cannot analyse or design"), "the Modeler says no");
+});
+
+Test("design: exported Excel and text table files fill what the program's tables lack, and the .e2k's pier labels are read", () =>
+{
+    var folder = Path.Combine(Path.GetTempPath(), "cpm-design-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(folder);
+    try
+    {
+        // CSI's Excel layout: a sheet per table, "TABLE:  name", the fields, the units, the rows.
+        var xlsx = Path.Combine(folder, "Tower tables.xlsx");
+        using (var zip = System.IO.Compression.ZipFile.Open(xlsx, System.IO.Compression.ZipArchiveMode.Create))
+        {
+            void Put(string name, string text) { using var w = new StreamWriter(zip.CreateEntry(name).Open()); w.Write(text); }
+            Put("xl/workbook.xml", """<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Shear Wall Pier Design Su" sheetId="1" r:id="rId1"/><sheet name="Story Drifts" sheetId="2" r:id="rId2"/></sheets></workbook>""");
+            Put("xl/_rels/workbook.xml.rels", """<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Target="worksheets/sheet2.xml"/></Relationships>""");
+            Put("xl/sharedStrings.xml", """<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><t>TABLE:  Shear Wall Pier Design Summary - ACI 318-19</t></si><si><t>Story</t></si><si><t>Pier</t></si><si><t>Station</t></si><si><t>D/C Ratio</t></si><si><t>Story1</t></si><si><t>P1</t></si><si><t>Top</t></si></sst>""");
+            Put("xl/worksheets/sheet1.xml", """<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c></row><row r="2"><c r="A2" t="s"><v>1</v></c><c r="B2" t="s"><v>2</v></c><c r="C2" t="s"><v>3</v></c><c r="D2" t="s"><v>4</v></c></row><row r="3"><c r="D3" t="inlineStr"><is><t>Unitless</t></is></c></row><row r="4"><c r="A4" t="s"><v>5</v></c><c r="B4" t="s"><v>6</v></c><c r="C4" t="s"><v>7</v></c><c r="D4"><v>0.912</v></c></row></sheetData></worksheet>""");
+            Put("xl/worksheets/sheet2.xml", """<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>TABLE:  Story Drifts</t></is></c></row><row r="2"><c r="A2" t="inlineStr"><is><t>Story</t></is></c></row><row r="3"><c r="A3" t="inlineStr"><is><t>Story1</t></is></c></row></sheetData></worksheet>""");
+        }
+        var read = DesignResults.ReadExport(xlsx);
+        Equal(2, read.Count, "two tables"); Equal("Shear Wall Pier Design Summary - ACI 318-19", read[0].Name, "the name from the first row, not the cut sheet name");
+        Equal("Story,Pier,Station,D/C Ratio", string.Join(",", read[0].Data.Fields), "fields"); Equal(1, read[0].Data.Rows.Count, "the units row is not data");
+        Equal("0.912", read[0].Data.Rows[0][3], "value"); Equal(1, read[1].Data.Rows.Count, "a table with no units row keeps its first row");
+
+        // CSI's text layout.
+        var txt = Path.Combine(folder, "Tower.txt");
+        File.WriteAllText(txt, "TABLE:  \"SHEAR WALL SPANDREL DESIGN SUMMARY - ACI 318-19\"\r\n   Story=Story2   Spandrel=S1   Station=Left   \"As Top\"=0.0006\r\n");
+        var text = DesignResults.ReadExport(txt);
+        Equal("spandrel", DesignResults.FamilyOf(text[0].Name)?.Key, "the text table's kind"); Equal("S1", text[0].Data.Rows[0][1], "the text table's rows");
+        Check(DesignResults.ExportsBeside(Path.Combine(folder, "Tower.EDB")).Count() == 2, "both files beside the model, named after it, are found");
+        Check(!DesignResults.ExportsBeside(Path.Combine(folder, "Other.EDB")).Any(), "files named after another model are not");
+        try { DesignResults.ReadExport(Path.Combine(folder, "Tower.mdb")); Check(false, "an Access file should be refused"); }
+        catch (InvalidDataException ex) { Check(ex.Message.Contains("Excel"), "an Access file says to use Excel"); }
+
+        // The pack takes the file's pier design, as the program's tables have none.
+        var e = new MemoryEtabs();
+        var built = Pack.Build(e, [], [], [], null, null, designFiles: [xlsx]);
+        Check(built.Tables.Contains("Shear Wall Pier Design Summary - ACI 318-19") && !built.Tables.Contains("Story Drifts"), "the design table is taken, the file's other tables are not");
+        Equal("file: Tower tables.xlsx", (string)built.Content["tables"]!["Shear Wall Pier Design Summary - ACI 318-19"]!["from"]!, "the table says where it came from");
+        Check(built.Notes.Any(n => n.Contains("Tower tables.xlsx") && n.Contains("check it is from the model")), "the engineer is told it came from a file");
+    }
+    finally { Directory.Delete(folder, true); }
+
+    var offline = new OfflineEtabs(E2kReader.Read(sample));
+    var labels = offline.WallLabels();
+    Check(labels.Any(l => l.Type == "a" && l.Name == "W1@Story1" && l.Pier == "P1"), "the .e2k's PIER \"P1\" on W1 is read: " + string.Join("; ", labels));
+    Check(Pack.Build(offline, [], [], [], null, null).Content["model"]!["wall_labels"]!.AsArray().Count == labels.Count, "the Modeler's pack carries the labels");
+});
+
 Test("pack: it is saved in the model's own folder, beside the model file", () =>
 {
     var root = Path.Combine(Path.GetTempPath(), "cpm-pack-" + Guid.NewGuid().ToString("N"));

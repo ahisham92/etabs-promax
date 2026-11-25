@@ -210,6 +210,7 @@ public static class ModelerFieldSteps
         foreach (var name in new[] { "results_overview", "check_drift", "check_torsion", "check_story_irregularity", "check_modal", "design_ratios", "check_report" })
             ctx.Tool(name, "{}", a => FieldContext.Expect(a.ToJsonString().Contains("not available", StringComparison.Ordinal), "with no analysis the answer should say 'not available'"), $"tool {name} with no analysis says so");
         ctx.Refused("run_analysis", "{}", "cannot analyse", "tool run_analysis says no in the Modeler");
+        ctx.Refused("run_design", "{}", "cannot analyse or design", "tool run_design says no in the Modeler");
 
         // The files the programs open.
         var saved = ctx.Tool("save_model_as", $$"""{"name":"{{ModelName}}","folder":{{folder}}}""", a =>

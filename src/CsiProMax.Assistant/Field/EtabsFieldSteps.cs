@@ -248,19 +248,38 @@ public static class EtabsFieldSteps
             FieldContext.Expect(File.Exists(file) && File.GetLastWriteTimeUtc(file) >= before, "the scratch model's file was not written again");
         });
 
+        // The wall becomes pier CPM-P1, so ETABS's shear wall design has a pier to design and the pack has labels to read.
+        var piered = false;
+        if (walls.Count > 0)
+            ctx.Step("the scratch wall is made pier CPM-P1 (for the shear wall design)", () =>
+            {
+                if (link is OfflineEtabs) throw new FieldSkipException("the stand-in has no ETABS API to label piers with");
+                link.Raw("label the wall as a pier", m =>
+                {
+                    try { m.PierLabel.SetPier("CPM-P1"); } catch (Exception ex) when (ex is not System.Runtime.InteropServices.COMException) { }
+                    foreach (var w in walls)
+                    {
+                        var answer = Convert.ToInt32(m.AreaObj.SetPier(w, "CPM-P1", 0));
+                        if (answer != 0) throw new EtabsException($"ETABS answered {answer} to AreaObj.SetPier for {w}");
+                    }
+                    return null;
+                });
+                piered = true;
+                return $"{walls.Count} wall panels are pier CPM-P1";
+            });
+        else ctx.Skip("the scratch wall is made pier CPM-P1 (for the shear wall design)", "the wall was not added");
+
         // ---- ETABS's own analysis and design ----
         ctx.Tool("run_analysis", "{}", _ => FieldContext.Expect(link.Info().Locked, "the analysis answered, but ETABS does not say the model is analysed (locked)"));
         var analysed = false;
         try { analysed = link.Info().Locked; }
         catch (EtabsException) { }
         if (analysed)
-            ctx.Step("ETABS's concrete frame design runs", () =>
+            ctx.Tool("run_design", "{}", a =>
             {
-                var answer = Convert.ToInt32(link.Raw("run the concrete frame design", m => m.DesignConcrete.StartDesign()));
-                FieldContext.Expect(answer == 0, $"ETABS answered {answer} to DesignConcrete.StartDesign");
-                return "the design ran";
-            });
-        else ctx.Skip("ETABS's concrete frame design runs", "the analysis did not run");
+                FieldContext.Expect(a["ran"] is JsonArray ran && ran.Any(k => k!.GetValue<string>() == "concrete"), "the concrete frame design did not run: " + a.ToJsonString());
+            }, "tool run_design (every kind; the ones the API cannot start are named with their menu)");
+        else ctx.Refused("run_design", "{}", "design", "tool run_design says the analysis must run first");
 
         // A change on the analysed model must be refused or made, never lost without a word.
         ctx.Step("a change on the analysed model is refused, or made: never lost", () =>
@@ -291,7 +310,34 @@ public static class EtabsFieldSteps
                 FieldContext.Expect(summaries.Any(t => !t.Empty), "no design summary table has data after the design: " + string.Join("; ", summaries.Select(t => t.Name)));
                 return summaries.Select(t => $"{t.Name}{(t.Empty ? " (empty)" : "")}").ToList();
             });
-            foreach (var table in summaries.Where(t => !t.Empty).Take(4)) ctx.Step($"ETABS table {table.Name}", () => ResultTools.Sample(link, table.Name));
+            foreach (var table in summaries.Where(t => !t.Empty).Take(8)) ctx.Step($"ETABS table {table.Name}", () => ResultTools.Sample(link, table.Name));
+            // Every design table ETABS lists, by kind, with data or empty: the names the Viewer must know.
+            ctx.Step("ETABS design tables of every kind (steel, concrete, composite, shear wall, slab)", () => DesignResults.Survey(link.Tables()).ToJsonString());
+            ctx.Step("ETABS shear wall pier design table has the scratch pier", () =>
+            {
+                if (!piered) throw new FieldSkipException("the wall was not made a pier");
+                var pier = link.Tables().Where(t => DesignResults.FamilyOf(t.Name)?.Key == "pier").ToList();
+                FieldContext.Expect(pier.Count > 0, "ETABS lists no shear wall pier design table at all");
+                var full = pier.FirstOrDefault(t => !t.Empty) ?? throw new FieldCheckException("the pier design tables are empty after the design: " + string.Join("; ", pier.Select(t => t.Name)) + ". The export file is then the way to the results.");
+                var data = link.ReadTable(full.Key, null, null);
+                FieldContext.Expect(data.Rows.Any(r => r.Any(v => v == "CPM-P1")), $"'{full.Name}' has no row for pier CPM-P1");
+                return new { table = full.Name, fields = data.Fields, rows = data.Rows.Take(4) };
+            });
+            ctx.Step("the pier labels of the walls are read for the Viewer", () =>
+            {
+                if (!piered) throw new FieldSkipException("the wall was not made a pier");
+                var notes = new List<string>();
+                var labels = DesignResults.WallLabels(link, link.Tables(), notes);
+                FieldContext.Expect(walls.All(w => labels.Any(l => l![1]!.GetValue<string>() == w && l[2]!.GetValue<string>() == "CPM-P1")), "not every wall panel came back as pier CPM-P1: " + labels.ToJsonString() + " " + string.Join(" ", notes));
+                return labels.ToJsonString();
+            });
+            ctx.Step("the API's own steel and concrete design summaries", () =>
+            {
+                var notes = new List<string>();
+                var made = DesignResults.FromApi(link, new HashSet<string>(), notes);
+                FieldContext.Expect(made.Any(m => m.Name.Contains("Concrete", StringComparison.Ordinal)), "the API gave no concrete design summary after the concrete design ran. " + string.Join(" ", notes));
+                return new { tables = made.Select(m => new { m.Name, rows = m.Data.Rows.Count, fields = m.Data.Fields }), notes };
+            });
 
             // ---- every check ----
             ctx.Tool("results_overview", "{}", a =>
@@ -330,7 +376,10 @@ public static class EtabsFieldSteps
             File.WriteAllBytes(file, pack.Zip);
             FieldContext.Expect(pack.Frames == link.Frames().Count && pack.Areas == link.Areas().Count, $"the pack holds {pack.Frames} frames and {pack.Areas} areas, the model has {link.Frames().Count} and {link.Areas().Count}");
             FieldContext.Expect(!analysed || pack.Tables.Count > 1, "the model is analysed and the pack took no result table: " + string.Join("; ", pack.Notes));
-            return new { file = Path.GetFileName(file), kilobytes = pack.Zip.Length / 1024, frames = pack.Frames, areas = pack.Areas, tables = pack.Tables, notes = pack.Notes };
+            var design = pack.Content["manifest"]!["design"] as JsonObject;
+            FieldContext.Expect(!analysed || design is not null && design.ContainsKey("concrete"), "the model is designed and the pack has no concrete design results: " + design?.ToJsonString() + " " + string.Join("; ", pack.Notes));
+            FieldContext.Expect(!piered || pack.Content["model"]!["wall_labels"] is JsonArray { Count: > 0 }, "the wall is pier CPM-P1 and the pack has no wall labels for the Viewer");
+            return new { file = Path.GetFileName(file), kilobytes = pack.Zip.Length / 1024, frames = pack.Frames, areas = pack.Areas, tables = pack.Tables, design = design?.ToJsonString(), notes = pack.Notes };
         });
 
         // ---- unlocked again: every load pattern type by its name, read back from ETABS ----
