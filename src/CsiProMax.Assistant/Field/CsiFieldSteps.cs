@@ -85,6 +85,22 @@ public static class CsiFieldSteps
                 FieldContext.Expect(missing.Count == 0, $"{name} has no {string.Join("; ", missing)} from the Modeler's file");
                 return "all there";
             });
+            ctx.Step($"{name} opened the Modeler's groups" + (program.Key == CsiProgram.Etabs.Key ? ", diaphragms and pier labels" : ""), () =>
+            {
+                string[] Names(string what, Func<dynamic, string[]> read) => (string[])(link.Raw(what, m => read(m)) ?? Array.Empty<string>());
+                var missing = new List<string>();
+                var groups = Names("list the groups", m => { int n = 0; string[] names = []; m.GroupDef.GetNameList(ref n, ref names); return names ?? []; });
+                if (!groups.Contains("CPM-G")) missing.Add($"the group CPM-G (it has {string.Join(", ", groups)})");
+                if (program.Key == CsiProgram.Etabs.Key)
+                {
+                    var diaphragms = Names("list the diaphragms", m => { int n = 0; string[] names = []; m.Diaphragm.GetNameList(ref n, ref names); return names ?? []; });
+                    if (!diaphragms.Contains("CPM-D2")) missing.Add($"the diaphragm CPM-D2 (it has {string.Join(", ", diaphragms)})");
+                    var piers = Names("list the pier labels", m => { int n = 0; string[] names = []; m.PierLabel.GetNameList(ref n, ref names); return names ?? []; });
+                    if (!piers.Contains("CPM-P1")) missing.Add($"the pier CPM-P1 (it has {string.Join(", ", piers)})");
+                }
+                FieldContext.Expect(missing.Count == 0, $"{name} has no {string.Join("; ", missing)} from the Modeler's file");
+                return "all there";
+            });
             if (program.Key == CsiProgram.Sap2000.Key)
                 ctx.Step("SAP2000 knows every table and field the Modeler writes into the .s2k", () =>
                 {

@@ -78,6 +78,7 @@ public static class ModelerFieldSteps
         ctx.Offer(CaseTools.All);
         ctx.Offer(ModelTextTools.All);
         ctx.Offer(PropertyTools.All);
+        ctx.Offer(StructureTools.All);
         var folder = Q(ctx.Folder);
 
         // A new model from the template: three stories, two bays each way.
@@ -416,6 +417,25 @@ public static class ModelerFieldSteps
         });
         ModelText(ctx, modeler);
         Properties(ctx, modeler);
+        Structure(ctx, modeler);
+    }
+
+    /// <summary>Diaphragms, pier and spandrel labels, groups and a section cut, named CPM- for the program checks.</summary>
+    private static void Structure(FieldContext ctx, OfflineEtabs modeler)
+    {
+        var m = modeler.Model;
+        var floors = m.AreaAssigns.Where(x => m.Area(x.Label)?.Kind == CsiProMax.Model.AreaKind.Floor).Select(x => x.Label + "@" + x.Story).ToList();
+        var beams = m.LineAssigns.Where(x => m.Line(x.Label)?.Kind == CsiProMax.Model.LineKind.Beam).Select(x => x.Label + "@" + x.Story).ToList();
+        ctx.Tool("define_diaphragm", """{"name":"CPM-D2","semi_rigid":true}""", null, "tool define_diaphragm, a semi-rigid diaphragm");
+        if (floors.Count > 0) ctx.Tool("assign_diaphragm_data", """{"objects":[""" + Q(floors[0]) + """],"diaphragm":"CPM-D2"}""", null, "tool assign_diaphragm_data, on a floor");
+        ctx.Refused("define_diaphragm", """{"name":"CPM-D2","delete":true}""", floors.Count > 0 ? "take it off" : "", "tool define_diaphragm says no to deleting one in use");
+        ctx.Tool("define_pier_spandrel", """{"kind":"pier","name":"CPM-P1"}""", null, "tool define_pier_spandrel, a pier label");
+        if (beams.Count > 0) ctx.Tool("assign_pier_spandrel_data", """{"objects":[""" + Q(beams[0]) + """],"spandrel":"CPM-S1"}""", null, "tool assign_pier_spandrel_data, a spandrel on a beam");
+        ctx.Tool("define_group", """{"name":"CPM-G","color":"Blue"}""", null, "tool define_group");
+        ctx.Tool("assign_group_data", """{"group":"CPM-G","objects":""" + List(beams.Take(3)) + "}", a => FieldContext.Expect(Int(a["members"]) == Math.Min(3, beams.Count), "the group has " + a["members"]), "tool assign_group_data, three beams");
+        ctx.Tool("define_section_cut", """{"name":"CPM-SC","group":"CPM-G"}""", null, "tool define_section_cut, from the group");
+        ctx.Refused("define_group", """{"name":"CPM-G","delete":true}""", "CPM-SC", "tool define_group says no to deleting a group a section cut uses");
+        ctx.Tool("structure_definitions", "{}", a => FieldContext.Expect(a["groups"]!.AsArray().Any(g => g!["name"]!.GetValue<string>() == "CPM-G"), "CPM-G is not listed"));
     }
 
     /// <summary>The property items: a steel, a steel I section with modifiers, a cracked drop panel, releases and more on a

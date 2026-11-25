@@ -211,6 +211,18 @@ public static class S2kWriter
             springs.Add(Row(("Joint", Joint(Physical.At(m, p, story))), ("CoordSys", "GLOBAL"), ("U1", N(k.Values["UX"])), ("U2", N(k.Values["UY"])), ("U3", N(k.Values["UZ"])), ("R1", N(k.Values["RX"])), ("R2", N(k.Values["RY"])), ("R3", N(k.Values["RZ"]))));
         }
 
+        // The model's own groups (Define > Groups), by the SAP2000 names of their objects.
+        foreach (var g in GroupDefs.Groups(m))
+        {
+            if (!groups.ContainsKey(g.Name)) groups[g.Name] = [];
+            foreach (var (type, label, story) in g.Members)
+            {
+                if (type == "LINE" && frameNames.TryGetValue((label, story), out var f)) groups[g.Name].Add(("Frame", f));
+                else if (type == "AREA" && areaNames.TryGetValue((label, story), out var ar)) groups[g.Name].Add(("Area", ar));
+                else if (type == "POINT" && points.TryGetValue(label, out var pt) && m.StoryIndex(story) is var si && si >= 0) groups[g.Name].Add(("Joint", Joint(Physical.At(m, pt, si))));
+            }
+        }
+
         Add(tables, "JOINT COORDINATES", jointRows);
         Add(tables, "CONNECTIVITY - FRAME", connect);
         Add(tables, "CONNECTIVITY - AREA", areaConnect);
@@ -231,10 +243,10 @@ public static class S2kWriter
             Add(tables, "JOINT CONSTRAINT ASSIGNMENTS", diaphragms.SelectMany(d => d.Value.Select(j => Row(("Joint", j), ("Constraint", d.Key), ("Type", "Diaphragm")))));
         }
 
-        // Groups, one per story.
+        // Groups, one per story, and the model's own.
         if (groups.Count > 0)
         {
-            Add(tables, "GROUPS 1 - DEFINITIONS", m.Stories.Where(s => groups.ContainsKey(s.Name)).Select(s => Row(("GroupName", s.Name), ("Selection", "Yes"),
+            Add(tables, "GROUPS 1 - DEFINITIONS", groups.Keys.Select(name => Row(("GroupName", name), ("Selection", "Yes"),
                 ("SectionCut", "Yes"), ("Steel", "Yes"), ("Concrete", "Yes"), ("Aluminum", "Yes"), ("ColdFormed", "Yes"), ("Stage", "Yes"), ("Bridge", "Yes"),
                 ("AutoSeismic", "No"), ("AutoWind", "No"), ("SelDesSteel", "No"), ("SelDesAlum", "No"), ("SelDesCold", "No"), ("MassWeight", "Yes"))));
             Add(tables, "GROUPS 2 - ASSIGNMENTS", groups.SelectMany(g => g.Value.Distinct().Select(o => Row(("GroupName", g.Key), ("ObjectType", o.Type), ("ObjectLabel", o.Label)))));

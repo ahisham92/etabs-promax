@@ -14,7 +14,7 @@ public static class HandModel
 {
     /// <summary>The tools the window may call: the Modeler's model tools. No code, no files outside the model.</summary>
     public static IReadOnlyDictionary<string, Tool> Tools { get; } =
-        EtabsTools.All.Concat(ModelerTools.All).Concat(ProgramTools.Modeler).Concat(HandTools.All).Concat(TableTools.All).Concat(LateralTools.All).Concat(CaseTools.All).Concat(ModelTextTools.All).Concat(PropertyTools.All)
+        EtabsTools.All.Concat(ModelerTools.All).Concat(ProgramTools.Modeler).Concat(HandTools.All).Concat(TableTools.All).Concat(LateralTools.All).Concat(CaseTools.All).Concat(ModelTextTools.All).Concat(PropertyTools.All).Concat(StructureTools.All)
             .Where(t => t.Name is not ("run_analysis" or "run_design"))
             .GroupBy(t => t.Name).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
 

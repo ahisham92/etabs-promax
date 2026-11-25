@@ -3234,15 +3234,17 @@ function modelerMenus(m) {
   m.Edit = [[s.undo ? "Undo " + s.undo : "Undo", "m:undo", "Ctrl+Z", !s.undo], [s.redo ? "Redo " + s.redo : "Redo", "m:redo", "Ctrl+Y", !s.redo], 0,
     ["Delete", "m:delete", "Del", !any], 0, ["Copy names of the selected objects", "copyNames", "Ctrl+C", !any], 0, ["Hide the selected objects", "hideSel", "", !any], ["Show all objects", "showAll"], 0, ["Model Text...", "m:text"]];
   m.Define = [["Material Properties...", "m:materials"], ["Frame Sections...", "m:frameSections"], ["Slab and Wall Sections...", "m:shellSections"], ["Spring Properties", [["Point Springs...", "m:spr:point"], ["Line Springs...", "m:spr:line"], ["Area Springs...", "m:spr:area"]]], 0,
+    ["Diaphragms...", "m:st:diaphragm"], ["Pier Labels...", "m:st:pier"], ["Spandrel Labels...", "m:st:spandrel"], ["Groups...", "m:st:group"], ["Section Cuts...", "m:st:cut"], 0,
     ["Story Data...", "m:stories"], ["Grid Data...", "m:grids"], 0, ["Functions", [["Response Spectrum...", "m:fnRS"], ["Time History...", "m:fnTH"]]],
     ["Load Patterns...", "m:patterns"], ["Load Cases...", "m:cases"], ["Load Combinations...", "m:combos"], 0, ["Mass Source...", "m:mass"], ["P-Delta Options...", "m:pdelta"]];
   m.Draw = [["Select Object", "t:select", "Esc"], 0, ["Draw Columns (click a point)", "d:column"], ["Draw Beams (click start and end)", "d:beam"], ["Quick Draw Beams (click a grid line)", "d:qbeam"], 0,
     ["Draw Floors (click corners)", "d:floor"], ["Draw Rectangular Floors (two corners)", "d:rect"], ["Quick Draw Floors (click in a bay)", "d:qfloor"], 0,
     ["Draw Walls (click start and end)", "d:wall"], ["Quick Draw Walls (click a grid line)", "d:qwall"], 0, ["Snap and Story Options...", "m:drawHelp"]];
   m.Assign = [["Frame Section...", "m:asgFrame", "", !fr], ["Slab or Wall Section...", "m:asgShell", "", !ar], 0, ["Joint Restraints (Supports)...", "m:asgSupport"], 0,
-    ["Joint", [["Springs...", "m:ad:joint", "", !any]]],
+    ["Joint", [["Springs...", "m:ad:joint", "", !any], ["Diaphragms...", "m:sa:jdiaph", "", !any]]],
     ["Frame", [["Releases...", "m:ad:releases", "", !fr], ["Local Axes...", "m:ad:axes", "", !fr], ["Insertion Point...", "m:ad:insertion", "", !fr], ["End Length Offsets...", "m:ad:offsets", "", !fr], ["Property Modifiers...", "m:ad:fmods", "", !fr], ["Line Springs...", "m:ad:lspring", "", !fr]]],
-    ["Shell", [["Property Modifiers...", "m:ad:smods", "", !ar], ["Area Springs...", "m:ad:aspring", "", !ar]]], 0,
+    ["Shell", [["Property Modifiers...", "m:ad:smods", "", !ar], ["Area Springs...", "m:ad:aspring", "", !ar], ["Diaphragms...", "m:sa:diaph", "", !ar], ["Pier Label...", "m:sa:pier", "", !any], ["Spandrel Label...", "m:sa:spandrel", "", !any]]],
+    ["Assign Objects to Group...", "m:sa:group", "", !any], 0,
     ["Joint Loads", [["Forces...", "m:ld:joint_force", "", !any], ["Ground Displacements...", "m:ld:joint_displacement", "", !any], ["Temperature...", "m:ld:joint_temperature", "", !any]]],
     ["Frame Loads", [["Distributed...", "m:asgFrameLoad", "", !fr], ["Uniform in any direction...", "m:ld:frame_uniform", "", !fr], ["Point...", "m:ld:frame_point", "", !fr], ["Trapezoidal...", "m:ld:frame_trapezoid", "", !fr], ["Temperature...", "m:ld:frame_temperature", "", !fr], ["Strain...", "m:ld:frame_strain", "", !fr]]],
     ["Shell Loads", [["Uniform...", "m:asgShellLoad", "", !ar], ["Uniform in any direction...", "m:ld:shell_uniform", "", !ar], ["Temperature...", "m:ld:shell_temperature", "", !ar], ["Strain...", "m:ld:shell_strain", "", !ar]]]];
@@ -3253,6 +3255,8 @@ async function modelAct(a) {
   if (a.startsWith("ld:")) return hmObjectLoad(a.slice(3));
   if (a.startsWith("spr:")) return hmSprings(a.slice(4));
   if (a.startsWith("ad:")) return hmAssignData(a.slice(3));
+  if (a.startsWith("st:")) return hmStructure(a.slice(3));
+  if (a.startsWith("sa:")) return hmAssignStructure(a.slice(3));
   switch (a) {
     case "undo": case "redo": { const j = await hmRun(a); if (j.ok) hmSay(j.did || "Done."); return; }
     case "delete": return hmDelete();
@@ -3479,6 +3483,45 @@ function hmSpring(kind, sp, after) {
   return dialog({point: "Point", line: "Line", area: "Area"}[kind] + " Spring Property Data", `<div class="g2"><span>Property Name</span><input id="kN" value="${esc(sp ? sp.name : kind[0].toUpperCase() + "Spr1")}" ${sp ? "disabled" : ""}></div>
     <fieldset><legend>Stiffness</legend><div class="g2" id="kV">${keys.map(k => `<span>${k} (${unit(k)})</span><input data-k="${k}" type="number" step="any" value="${sp ? sp.values[k] : 0}">`).join("")}</div></fieldset>`,
     [["OK", d => { const values = {}; d.querySelectorAll("#kV [data-k]").forEach(x => { const v = parseFloat(x.value); if (isFinite(v)) values[x.dataset.k] = v; }); return submit(d, "define_spring", {kind, name: q(d, "#kN").value.trim(), values}, after); }, true], ["Cancel"]], {width: 400});
+}
+
+// ---- Define: diaphragms, pier and spandrel labels, groups, section cuts ----
+async function hmStructure(kind) {
+  const sd = (await hmRun("structure_definitions", {}, true)).result; if (!sd) return;
+  const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmStructure(kind); };
+  const del = (tool, args) => hmRun(tool, Object.assign(args, {delete: true}), true).then(j => j.ok ? again() : hmSay(j.error, true));
+  const name = (title, label, v, extra, run) => dialog(title, `<div class="g2"><span>${label}</span><input id="zN" value="${esc(v || "")}">${extra || ""}</div>`, [["OK", d => run(d), true], ["Cancel"]], {width: 380});
+  if (kind === "diaphragm") {
+    const one = (d0) => name("Diaphragm Data", "Diaphragm", d0 ? d0.name : "D" + (sd.diaphragms.length + 1), `<span>Rigidity</span><select id="zR">${opts([["rigid", "Rigid"], ["semi", "Semi Rigid"]], d0 && d0.semi_rigid ? "semi" : "rigid")}</select>`,
+      d => submit(d, "define_diaphragm", {name: q(d, "#zN").value.trim(), semi_rigid: q(d, "#zR").value === "semi"}, again));
+    return listForm("Define Diaphragm", "Diaphragms", sd.diaphragms.map(x => x.name), [["Add New Diaphragm...", () => one(null)], ["Modify/Show Diaphragm...", n => n && one(sd.diaphragms.find(x => x.name === n))], ["Delete Diaphragm", n => n && del("define_diaphragm", {name: n})]], n => one(sd.diaphragms.find(x => x.name === n)));
+  }
+  if (kind === "pier" || kind === "spandrel") {
+    const list = kind === "pier" ? sd.piers : sd.spandrels, T = kind === "pier" ? "Pier" : "Spandrel";
+    const one = () => name(T + " Label", T + " label", (kind === "pier" ? "P" : "S") + (list.length + 1), "", d => submit(d, "define_pier_spandrel", {kind, name: q(d, "#zN").value.trim()}, again));
+    return listForm(`${T} Labels`, T + "s", list.map(x => x.name), [["Add New Name...", one], ["Delete Name", n => n && del("define_pier_spandrel", {kind, name: n})]], () => {});
+  }
+  if (kind === "group") {
+    const one = g => name("Group Definition", "Group name", g ? g.name : "Group" + (sd.groups.length + 1), `<span>Color</span><select id="zC">${opts(sd.colors, g ? g.color : "Red")}</select>`,
+      d => submit(d, "define_group", {name: q(d, "#zN").value.trim(), color: q(d, "#zC").value}, again));
+    return listForm("Define Groups", "Groups", sd.groups.map(x => x.name), [["Add New Group...", () => one(null)], ["Modify/Show Group...", n => n && one(sd.groups.find(x => x.name === n))], ["Delete Group", n => n && del("define_group", {name: n})]], n => one(sd.groups.find(x => x.name === n)));
+  }
+  const one = c => name("Section Cut Data", "Section cut name", c ? c.name : "SCut" + (sd.section_cuts.length + 1), `<span>Group</span><select id="zG">${opts(sd.groups.map(g => g.name), c ? c.group : (sd.groups[0] || {}).name)}</select>`,
+    d => submit(d, "define_section_cut", {name: q(d, "#zN").value.trim(), group: q(d, "#zG").value}, again));
+  return listForm("Section Cuts", "Section cuts", sd.section_cuts.map(x => x.name), [["Add Section Cut...", () => one(null)], ["Modify/Show Section Cut...", n => n && one(sd.section_cuts.find(x => x.name === n))], ["Delete Section Cut", n => n && del("define_section_cut", {name: n})]], n => one(sd.section_cuts.find(x => x.name === n)));
+}
+async function hmAssignStructure(what) {
+  const sd = (await hmRun("structure_definitions", {}, true)).result; if (!sd) return;
+  const joints = what === "jdiaph", names = joints ? hmJoints() : what === "diaph" ? hmSelected("a") : hmSelected("f").concat(hmSelected("a"));
+  if (!names.length) return hmSay("Select the objects first.", true);
+  const pick = (list, v) => `<select id="zS">${opts([["", "None"]].concat(list.map(n => [n, n])), v)}</select>`;
+  let title, body, args;
+  if (what === "diaph" || what === "jdiaph") { title = joints ? "Joint Diaphragms" : "Shell Diaphragms"; body = pick(sd.diaphragms.map(x => x.name), (sd.diaphragms[0] || {}).name || ""); args = d => ({objects: names, joints, diaphragm: q(d, "#zS").value}); }
+  else if (what === "pier" || what === "spandrel") { title = what === "pier" ? "Pier Label" : "Spandrel Label"; const list = (what === "pier" ? sd.piers : sd.spandrels).map(x => x.name); body = `<span style="display:flex;gap:6px">${pick(list, list[0] || "")}<input id="zNew" placeholder="or a new label"></span>`; args = d => ({objects: names, [what]: q(d, "#zNew").value.trim() || q(d, "#zS").value}); }
+  else { title = "Assign Objects to Group"; body = `<span style="display:flex;gap:6px"><select id="zS">${opts(sd.groups.map(g => g.name), (sd.groups[0] || {}).name)}</select><input id="zNew" placeholder="or a new group"></span><label style="display:block;margin-top:6px"><input type="checkbox" id="zR"> Remove them from the group</label>`; args = d => ({group: q(d, "#zNew").value.trim() || q(d, "#zS").value, objects: names, remove: q(d, "#zR").checked}); }
+  const tool = what.endsWith("diaph") ? "assign_diaphragm_data" : what === "group" ? "assign_group_data" : "assign_pier_spandrel_data";
+  return dialog("Assign " + title, `<fieldset><legend>${esc(title)}</legend>${body}</fieldset><p class="kv">${names.length} selected objects.</p>`,
+    [["OK", d => { const a = args(d); if (tool === "assign_group_data" && !a.group) { formError(d, "Give the group a name."); return false; } return submit(d, tool, a); }, true], ["Cancel"]], {width: 420});
 }
 
 // ---- Assign: frame releases, axes, insertion point, offsets, modifiers, springs; shell modifiers and springs; joint springs ----
