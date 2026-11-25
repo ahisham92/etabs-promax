@@ -636,7 +636,7 @@ function readDisplacements() {
   disp = new Map();
   const t = P.tables["Joint Displacements"];
   if (t) {
-    const u = col(t.fields, "UniqueName", "Unique Name", "Joint", "Label"), c = col(t.fields, "OutputCase", "Output Case", "Load Case/Combo"), x = col(t.fields, "Ux", "UX"), y = col(t.fields, "Uy", "UY"), z = col(t.fields, "Uz", "UZ");
+    const u = col(t.fields, "UniqueName", "Unique Name", "Joint", "Label"), c = col(t.fields, "OutputCase", "Output Case", "Load Case/Combo"), x = col(t.fields, "Ux", "UX", "U1"), y = col(t.fields, "Uy", "UY", "U2"), z = col(t.fields, "Uz", "UZ", "U3"); // SAP2000 names them U1 U2 U3
     const st = col(t.fields, "StepType", "Step Type"), sn = col(t.fields, "StepNum", "Step Num", "StepNumber");
     if (u >= 0 && c >= 0 && x >= 0 && y >= 0 && z >= 0)
       for (const r of t.rows) {
@@ -672,7 +672,7 @@ function readReactions() {
   for (const t of tablesLike(n => n === "jointreactions")) {
     const u = col(t.fields, "UniqueName", "Unique Name", "Joint"), c = col(t.fields, "OutputCase", "Output Case", "Load Case/Combo"), st = col(t.fields, "StepType", "Step Type"), sn = col(t.fields, "StepNum", "Step Num");
     if (u < 0 || c < 0) continue;
-    const idx = ["FX", "FY", "FZ", "MX", "MY", "MZ"].map(k => col(t.fields, k));
+    const idx = [["FX", "F1"], ["FY", "F2"], ["FZ", "F3"], ["MX", "M1"], ["MY", "M2"], ["MZ", "M3"]].map(k => col(t.fields, ...k)); // SAP2000: F1..M3
     for (const r of t.rows) { if (st >= 0 && /min/i.test(r[st])) continue; const k = caseKey(t, r, c, st, sn); let m = reacts.get(k); if (!m) reacts.set(k, m = new Map()); m.set(String(r[u]), idx.map(i => i >= 0 ? parseFloat(r[i]) || 0 : 0)); }
   }
 }

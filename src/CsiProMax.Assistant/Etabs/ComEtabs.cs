@@ -163,8 +163,30 @@ public sealed class ComEtabs : ICsiLink, IDisposable
         try { m.GetPresentUnits_2(ref force, ref length, ref temperature); } catch (Exception ex) when (ex is not COMException) { }
         string file = Convert.ToString(m.GetModelFilename(true)) ?? "";
         bool locked = Convert.ToBoolean(m.GetModelIsLocked());
-        return new ModelInfo(file, version, Name(Forces, force), Name(Lengths, length), Name(Temperatures, temperature), locked);
+        var (f, l, t) = (Name(Forces, force), Name(Lengths, length), Name(Temperatures, temperature));
+        // SAP2000 26 answered GetPresentUnits_2 with nothing on Ahmed's PC: every program also has the older
+        // GetPresentUnits, one value naming all three (kN_m_C).
+        if (f.Length == 0 || l.Length == 0)
+            try { object present = m.GetPresentUnits(); (f, l, t) = Units(present); } catch (Exception ex) when (ex is not COMException) { }
+        return new ModelInfo(file, version, f, l, t, locked);
     });
+
+    /// <summary>The CSI eUnits value, by its name (kN_m_C) or its number (6), as force, length and temperature.</summary>
+    internal static (string Force, string Length, string Temperature) Units(object? units)
+    {
+        var text = Convert.ToString(units, System.Globalization.CultureInfo.InvariantCulture) ?? "";
+        if (int.TryParse(text, out var number)) text = number >= 1 && number <= UnitNames.Length ? UnitNames[number - 1] : "";
+        var parts = text.Split('_');
+        if (parts.Length != 3) return ("", "", "");
+        var force = parts[0].Equals("Ton", StringComparison.OrdinalIgnoreCase) ? "tonf" : parts[0];
+        return (force, parts[1], parts[2]);
+    }
+
+    private static readonly string[] UnitNames =
+    [
+        "lb_in_F", "lb_ft_F", "kip_in_F", "kip_ft_F", "kN_mm_C", "kN_m_C", "kgf_mm_C", "kgf_m_C",
+        "N_mm_C", "N_m_C", "Ton_mm_C", "Ton_m_C", "kN_cm_C", "kgf_cm_C", "N_cm_C", "Ton_cm_C",
+    ];
 
     private static readonly string[] Forces = ["", "lb", "kip", "N", "kN", "kgf", "tonf"];
     private static readonly string[] Lengths = ["", "in", "ft", "micron", "mm", "cm", "m"];
@@ -259,11 +281,11 @@ public sealed class ComEtabs : ICsiLink, IDisposable
         return (IReadOnlyList<string>)names.ToList();
     });
 
-    public IReadOnlyList<string> FrameSections() => Names("frame sections", m => { int n = 0; string[] a = None; Ok(m.PropFrame.GetNameList(ref n, ref a), "list the frame sections"); return a.Take(n).ToArray(); });
-    public IReadOnlyList<string> AreaSections() => Names("slab and wall sections", m => { int n = 0; string[] a = None; Ok(m.PropArea.GetNameList(ref n, ref a), "list the slab and wall sections"); return a.Take(n).ToArray(); });
-    public IReadOnlyList<string> Materials() => Names("materials", m => { int n = 0; string[] a = None; Ok(m.PropMaterial.GetNameList(ref n, ref a), "list the materials"); return a.Take(n).ToArray(); });
-    public IReadOnlyList<string> LoadCases() => Names("load cases", m => { int n = 0; string[] a = None; Ok(m.LoadCases.GetNameList(ref n, ref a), "list the load cases"); return a.Take(n).ToArray(); });
-    public IReadOnlyList<string> Combos() => Names("load combinations", m => { int n = 0; string[] a = None; Ok(m.RespCombo.GetNameList(ref n, ref a), "list the load combinations"); return a.Take(n).ToArray(); });
+    public IReadOnlyList<string> FrameSections() => Names("frame sections", m => { int n = 0; string[] a = None; Ok(m.PropFrame.GetNameList(ref n, ref a), "list the frame sections"); return (a ?? None).Take(n).ToArray(); });
+    public IReadOnlyList<string> AreaSections() => Names("slab and wall sections", m => { int n = 0; string[] a = None; Ok(m.PropArea.GetNameList(ref n, ref a), "list the slab and wall sections"); return (a ?? None).Take(n).ToArray(); });
+    public IReadOnlyList<string> Materials() => Names("materials", m => { int n = 0; string[] a = None; Ok(m.PropMaterial.GetNameList(ref n, ref a), "list the materials"); return (a ?? None).Take(n).ToArray(); });
+    public IReadOnlyList<string> LoadCases() => Names("load cases", m => { int n = 0; string[] a = None; Ok(m.LoadCases.GetNameList(ref n, ref a), "list the load cases"); return (a ?? None).Take(n).ToArray(); });
+    public IReadOnlyList<string> Combos() => Names("load combinations", m => { int n = 0; string[] a = None; Ok(m.RespCombo.GetNameList(ref n, ref a), "list the load combinations"); return (a ?? None).Take(n).ToArray(); });
 
     public IReadOnlyList<LoadPatternRow> LoadPatterns() => On("read the load patterns", m =>
     {
