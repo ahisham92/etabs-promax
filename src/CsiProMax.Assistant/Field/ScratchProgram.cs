@@ -100,6 +100,8 @@ public sealed class ScratchProgram : IScratchWindow
 
     private ScratchProgram(CsiProgram program) => _program = program;
 
+    /// <summary>When this test asked the program to start: a process older than that is never the test's.</summary>
+    private DateTime _startedAt;
     private Timer? _watch;
     private readonly List<string> _noticesClosed = [];
 
@@ -164,6 +166,7 @@ public sealed class ScratchProgram : IScratchWindow
         }) is null || loaded is not { } api) return false;
 
         var before = Process.GetProcessesByName(_program.ProcessName).Select(p => p.Id).ToHashSet();
+        _startedAt = DateTime.Now;
         var com = _com = new ComEtabs(_program, () =>
         {
             var ns = EtabsApi.NamespaceOf(ApiFile);
@@ -266,19 +269,28 @@ public sealed class ScratchProgram : IScratchWindow
         var name = _program.Name;
         if (_app is null) return "it was not started";
         if (_closed) return $"the scratch {name} window was already closed";
-        if (_left) return $"the scratch {name} window stopped answering, so it was left as it is; close it yourself without saving" + StillRunning();
+        if (_left) return Said($"the scratch {name} window stopped answering, so it was left as it is; close it yourself without saving");
         try
         {
             Ask(TimeSpan.FromMinutes(1), "close the window", _ => { _app.ApplicationExit(false); return null; },
                 $"the scratch {name} window did not close within a minute; close it yourself without saving");
             _closed = true;
             // The program said yes to closing: its process must go too, or it keeps a licence with no window to show for it.
-            if (!Gone(TimeSpan.FromSeconds(30))) return $"the scratch {name} window was told to close, and its process did not end; end it yourself" + StillRunning();
+            if (!Gone(TimeSpan.FromSeconds(30))) return Said($"the scratch {name} window was told to close, and its process did not end; end it yourself");
             int notices;
             lock (_noticesClosed) notices = _noticesClosed.Count;
             return $"the scratch {name} window was closed without saving" + (notices > 0 ? $" ({notices} 'analysis complete' notice{(notices == 1 ? "" : "s")} of it closed along the way)" : "");
         }
-        catch (EtabsException ex) { return (_left ? ex.Message : $"the scratch {name} window could not be closed ({ex.Message}); close it yourself without saving") + StillRunning(); }
+        catch (EtabsException ex) { return Said(_left ? ex.Message : $"the scratch {name} window could not be closed ({ex.Message}); close it yourself without saving"); }
+    }
+
+    /// <summary>What happened, with what became of a process that stayed: ended by the test, or left for the engineer.</summary>
+    private string Said(string what)
+    {
+        var after = StillRunning();
+        if (!after.Contains("the test ended it", StringComparison.Ordinal)) return what + after;
+        _closed = true;
+        return $"the scratch {_program.Name} window stopped answering" + after;
     }
 
     /// <summary>True when the scratch process has ended (or could not be told apart, so nothing is known of it).</summary>
@@ -290,10 +302,38 @@ public sealed class ScratchProgram : IScratchWindow
     }
 
     /// <summary>
-    /// What to tell the engineer about a scratch process that is still there: it holds a licence until it ends, and it
-    /// may have no window left to close. The test does not end a CSI program's process itself.
+    /// A scratch process that is still there after its window was left or told to close: the test ends it (Ahmed's
+    /// choice, 2026-11-25: "end only its own test copy"), so no licence stays held by a program with no window. Only
+    /// the process this object started, and only when <see cref="MayEnd"/> says it can be no one else's. Otherwise
+    /// the engineer is told its process id and how to end it.
     /// </summary>
-    private string StillRunning() => Gone(TimeSpan.Zero) ? "" : LeftRunning(_program.Name, _program.ProcessName, ProcessId, ScratchDialogs.Of(ProcessId).Count > 0);
+    private string StillRunning()
+    {
+        if (Gone(TimeSpan.Zero)) return "";
+        var hasWindow = false;
+        try
+        {
+            using var process = Process.GetProcessById(ProcessId);
+            var titles = ScratchDialogs.Of(ProcessId).Select(w => w.Title).ToList();
+            hasWindow = titles.Count > 0;
+            if (string.Equals(process.ProcessName, _program.ProcessName, StringComparison.OrdinalIgnoreCase) && MayEnd(process.StartTime, _startedAt, titles))
+            {
+                process.Kill();
+                if (process.WaitForExit(15000))
+                    return $". Its process (process id {ProcessId}) no longer answered, so the test ended it: this scratch {_program.Name} was closed without saving and holds no licence now";
+            }
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException) { /* said below */ }
+        return Gone(TimeSpan.Zero) ? "" : LeftRunning(_program.Name, _program.ProcessName, ProcessId, hasWindow);
+    }
+
+    /// <summary>
+    /// True when a process can only be the test's own scratch program: it started after the test asked for it, and
+    /// every window it shows is the scratch model's (or it shows none). A window that names anything else keeps it alive.
+    /// </summary>
+    public static bool MayEnd(DateTime processStarted, DateTime testAsked, IEnumerable<string> titles) =>
+        testAsked != default && processStarted >= testAsked.AddSeconds(-2)
+        && titles.All(t => t.Contains("cpm-field-test", StringComparison.OrdinalIgnoreCase));
 
     public static string LeftRunning(string name, string processName, int processId, bool hasWindow) =>
         $". Its process is still running ({processName}.exe, process id {processId}, {(hasWindow ? "with a window" : "with no window on the screen")}) and holds a {name} licence until it ends: " +
