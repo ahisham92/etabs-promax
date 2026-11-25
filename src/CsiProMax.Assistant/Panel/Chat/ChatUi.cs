@@ -31,9 +31,10 @@ internal static class ChatUi
     public const double S1 = 4, S2 = 8, S3 = 12, S4 = 16, S5 = 20, S6 = 24, S8 = 32;
     public const double BodySize = ChatStyles.Body, SmallSize = ChatStyles.Caption, CodeSize = ChatStyles.Caption, TitleSize = ChatStyles.Subtitle;
     public const double HeadingSize = ChatStyles.Title, GreetingSize = ChatStyles.Display;
-    public const double RadiusSmall = 8, Radius = 12;
-    /// <summary>The message box's card: rounder than the cards, as the one place you type.</summary>
-    public const double RadiusComposer = 16;
+    /// <summary>Square corners everywhere, as ETABS 23 draws its panes, lists and forms.</summary>
+    public const double RadiusSmall = 0, Radius = 0;
+    /// <summary>The message box: a plain square field, like ETABS's own text boxes.</summary>
+    public const double RadiusComposer = 0;
 
     public static readonly FontFamily Icons = new("Segoe Fluent Icons, Segoe MDL2 Assets");
     public static readonly FontFamily Mono = new("Cascadia Mono, Consolas, Courier New");
@@ -220,7 +221,7 @@ internal static class ChatUi
     {
         var shadow = new Border { CornerRadius = new CornerRadius(radius), Margin = new Thickness(1) };
         shadow.SetResourceReference(Border.BackgroundProperty, Brand.K.Raised);
-        shadow.Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 14, ShadowDepth = 2, Direction = 270, Opacity = 0.09, Color = Colors.Black };
+        // No shadow: ETABS's panes and lists are flat, framed by a hairline only.
         frame = new Border { Child = content, CornerRadius = new CornerRadius(radius), BorderThickness = new Thickness(1), SnapsToDevicePixels = true };
         frame.SetResourceReference(Border.BackgroundProperty, Brand.K.Raised);
         Opaque(frame);

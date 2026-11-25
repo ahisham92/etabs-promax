@@ -1441,8 +1441,9 @@ internal sealed partial class ChatPane : DockPanel, IHistoryHost
 
     private UIElement UserMessage(ChatItem item)
     {
-        var panel = new StackPanel { HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(ChatUi.S8 + ChatUi.S2, ChatUi.S6, 0, ChatUi.S1) };
-        var head = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 0, 0, ChatUi.S1) };
+        // ETABS-native: your message is a grey band across the list (who and when above it), not a bubble on the right.
+        var panel = new StackPanel { HorizontalAlignment = HorizontalAlignment.Stretch, Margin = new Thickness(0, ChatUi.S4, 0, ChatUi.S1) };
+        var head = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 2) };
         var more = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right, Visibility = Visibility.Collapsed };
         if (item.Text.Length > 0)
         {
@@ -1472,9 +1473,9 @@ internal sealed partial class ChatPane : DockPanel, IHistoryHost
         // Your messages: a rounded bubble in the accent colour with white text, tail corner bottom right, so who said
         // what shows at a glance; what the coordinator sent a job keeps the quiet raised bubble. Attachments sit under
         // the bubble, on the page. The answers sit on the page under the chat's mark and name.
-        var solid = !fromCoordinator;
+        var solid = false; // plain black text on the grey band, as ETABS writes everything
         var body = new StackPanel();
-        var below = new StackPanel { HorizontalAlignment = HorizontalAlignment.Right };
+        var below = new StackPanel { HorizontalAlignment = HorizontalAlignment.Left };
         if (item.Text.Length > 0)
         {
             var text = ChatUi.Selectable(item.Text, "Your message");
@@ -1521,10 +1522,11 @@ internal sealed partial class ChatPane : DockPanel, IHistoryHost
         {
             var bubble = ChatUi.Opaque(new Border
             {
-                Child = body, Padding = new Thickness(ChatUi.S3 + 2, ChatUi.S2, ChatUi.S3 + 2, ChatUi.S2 + 1), CornerRadius = new CornerRadius(ChatUi.Radius + 2, ChatUi.Radius + 2, ChatUi.S1, ChatUi.Radius + 2),
-                HorizontalAlignment = HorizontalAlignment.Right, SnapsToDevicePixels = true,
+                Child = body, Padding = new Thickness(ChatUi.S2, ChatUi.S1 + 1, ChatUi.S2, ChatUi.S1 + 2), BorderThickness = new Thickness(0, 1, 0, 1),
+                HorizontalAlignment = HorizontalAlignment.Stretch, SnapsToDevicePixels = true,
             });
-            bubble.SetResourceReference(Border.BackgroundProperty, solid ? Brand.K.Accent : Brand.K.Raised);
+            bubble.SetResourceReference(Border.BackgroundProperty, fromCoordinator ? Brand.K.Raised : Brand.K.AccentSoft);
+            bubble.SetResourceReference(Border.BorderBrushProperty, Brand.K.BorderSubtle);
             panel.Children.Add(bubble);
         }
         if (below.Children.Count > 0) panel.Children.Add(below);

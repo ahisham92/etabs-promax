@@ -35,7 +35,14 @@ internal sealed class MainWindow : Window
         var menu = BuildMenu();
         DockPanel.SetDock(menu, Dock.Top);
         layout.Children.Add(menu);
-        layout.Children.Add(Chat.ChatPane.Get());
+        // The look of an ETABS docked pane: a grey strip with the pane's tab, the pane's own tabs, and a status bar.
+        var strip = Brand.Strip(CsiProMax.App.Product);
+        DockPanel.SetDock(strip, Dock.Top);
+        layout.Children.Add(strip);
+        var status = StatusBar();
+        DockPanel.SetDock(status, Dock.Bottom);
+        layout.Children.Add(status);
+        layout.Children.Add(BuildTabs());
         Content = layout;
         SourceInitialized += (_, _) => Handle = new WindowInteropHelper(this).Handle;
         Closing += (_, _) => Remember();
@@ -48,7 +55,8 @@ internal sealed class MainWindow : Window
     /// </summary>
     private Menu BuildMenu()
     {
-        var menu = new Menu { Background = System.Windows.Media.Brushes.Transparent, Padding = new Thickness(4, 2, 4, 2) };
+        var menu = new Menu { Padding = new Thickness(2, 1, 2, 1) };
+        menu.SetResourceReference(BackgroundProperty, Brand.K.MenuBar);
         System.Windows.Automation.AutomationProperties.SetName(menu, "CSI ProMax menu");
         MenuItem Top(string header)
         {
@@ -116,6 +124,74 @@ internal sealed class MainWindow : Window
         Add(help, "_Field test: everything (saves a report to send)…", () => RunFieldTest(full: true));
         Add(help, "Field test, _quick: this PC and the open model", () => RunFieldTest(full: false));
         return menu;
+    }
+
+    private TabControl? _tabs;
+    private TabItem? _assistantTab;
+    private Chat.HistoryDrawer? _history;
+
+    /// <summary>
+    /// The pane's tabs, as in the design Ahmed settled on: Assistant (the chat), Checks (the check report as a tree),
+    /// Review (the review pack, saved beside the model) and History (the saved chats).
+    /// </summary>
+    private TabControl BuildTabs()
+    {
+        var tabs = new TabControl();
+        System.Windows.Automation.AutomationProperties.SetName(tabs, "CSI ProMax tabs");
+        _assistantTab = new TabItem { Header = "_Assistant", Content = Chat.ChatPane.Get() };
+        tabs.Items.Add(_assistantTab);
+        tabs.Items.Add(new TabItem { Header = "_Checks", Content = new ChecksView() });
+        tabs.Items.Add(new TabItem { Header = "_Review", Content = new ReviewView() });
+        var historyTab = new TabItem { Header = "_History" };
+        tabs.Items.Add(historyTab);
+        tabs.SelectionChanged += (_, e) =>
+        {
+            if (e.Source != tabs || !ReferenceEquals(tabs.SelectedItem, historyTab)) return;
+            if (Chat.ChatPane.Get() is not Chat.IHistoryHost pane) return;
+            _history ??= new Chat.HistoryDrawer(new HistoryTab(pane, ShowAssistant));
+            historyTab.Content ??= _history;
+            _history.Refresh();
+        };
+        _tabs = tabs;
+        return tabs;
+    }
+
+    private void ShowAssistant()
+    {
+        if (_tabs is not null && _assistantTab is not null) _tabs.SelectedItem = _assistantTab;
+    }
+
+    /// <summary>The History tab hands the pane's history work to the chat, and goes back to the Assistant tab to show a chat.</summary>
+    private sealed class HistoryTab(Chat.IHistoryHost pane, Action showChat) : Chat.IHistoryHost
+    {
+        public string ModelKey => pane.ModelKey;
+        public string CurrentFile => pane.CurrentFile;
+        public string? StateOf(string file) => pane.StateOf(file);
+        public void OpenChat(Chat.ChatSummary chat) { pane.OpenChat(chat); showChat(); }
+        public void NewChat() { pane.NewChat(); showChat(); }
+        public void ChangeChat(string file, Action<Chat.Conversation> change) => pane.ChangeChat(file, change);
+        public bool DeleteChat(string file) => pane.DeleteChat(file);
+        public void CloseDrawer() => showChat();
+    }
+
+    /// <summary>The status bar along the foot, on ETABS's grey: which program and model CSI ProMax is connected to.</summary>
+    private static Border StatusBar()
+    {
+        var text = Brand.Text(Describe(ModelWatch.Current?.Title), Brand.K.Text);
+        text.TextTrimming = TextTrimming.CharacterEllipsis;
+        text.TextWrapping = TextWrapping.NoWrap;
+        ModelWatch.Changed += (_, title) => text.Dispatcher.BeginInvoke(() => text.Text = Describe(title));
+        var bar = new Border { Child = text, Padding = new Thickness(8, 3, 8, 3), BorderThickness = new Thickness(0, 1, 0, 0) };
+        bar.SetResourceReference(Border.BackgroundProperty, Brand.K.Strip);
+        bar.SetResourceReference(Border.BorderBrushProperty, Brand.K.StripBorder);
+        System.Windows.Automation.AutomationProperties.SetName(bar, "Status");
+        return bar;
+    }
+
+    private static string Describe(string? title)
+    {
+        var program = CsiProMax.App.Modeler ? "Modeler" : CsiProMax.App.ETABSYear.Length > 0 ? "ETABS " + CsiProMax.App.ETABSYear : "ETABS";
+        return title is { Length: > 0 } ? $"Connected to {program}  ·  {title}" : $"{program}: no model open";
     }
 
     private static Window? _notes;

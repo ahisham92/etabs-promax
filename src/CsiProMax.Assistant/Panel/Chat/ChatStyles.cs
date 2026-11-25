@@ -14,15 +14,15 @@ internal static class ChatStyles
     // ---- The type scale: every size of text in the chat is one of these (Segoe UI Variable, else Segoe UI) -------------
 
     /// <summary>Captions: names, times, labels, the status line, code and table cells.</summary>
-    public const double Caption = 12;
+    public const double Caption = 11;
     /// <summary>Messages, fields and buttons.</summary>
-    public const double Body = 13;
+    public const double Body = 12;
     /// <summary>Card titles and level-3 headings.</summary>
-    public const double Subtitle = 14;
+    public const double Subtitle = 12;
     /// <summary>Level-1 and level-2 headings in an answer (laid out with Ideal text, being large).</summary>
-    public const double Title = 16;
+    public const double Title = 14;
     /// <summary>The home screen's greeting (Ideal text).</summary>
-    public const double Display = 20;
+    public const double Display = 16;
 
     /// <summary>Text from this size up is laid out with Ideal text (its shapes kept); smaller text uses Display (snapped to pixels).</summary>
     public const double IdealFrom = 15;
@@ -95,7 +95,8 @@ internal static class ChatStyles
     private static string Template(double radius, bool animate, bool shadow = false, string hoverBg = "SpmSurfaceHover", string? hoverBorder = null, bool clearWhenDisabled = false)
     {
         var r = N(radius);
-        var behind = shadow && !Plain
+        // ETABS draws nothing with a shadow, so the cards and floating buttons are flat too.
+        var behind = false && shadow && !Plain
             ? "<Border CornerRadius=\"" + r + "\" Background=\"{TemplateBinding Background}\" Margin=\"1\">" +
               "<Border.Effect><DropShadowEffect BlurRadius=\"10\" ShadowDepth=\"1\" Direction=\"270\" Opacity=\"0.08\" Color=\"#000000\"/></Border.Effect></Border>"
             : "";
@@ -143,8 +144,8 @@ internal static class ChatStyles
     private static string Round(string key, string bg, string hover, string pressed, string fg, bool animate) => """
         <Style x:Key="KEY" TargetType="Button">
           <Setter Property="FocusVisualStyle" Value="{StaticResource SpmChatFocusRound}"/>
-          <Setter Property="Width" Value="32"/>
-          <Setter Property="Height" Value="32"/>
+          <Setter Property="Width" Value="28"/>
+          <Setter Property="Height" Value="24"/>
           <Setter Property="Padding" Value="0"/>
           <Setter Property="Cursor" Value="Hand"/>
           <Setter Property="Background" Value="{DynamicResource BG}"/>
@@ -171,7 +172,7 @@ internal static class ChatStyles
             </ControlTemplate>
           </Setter.Value></Setter>
         </Style>
-        """.Replace("CHROME", Chrome("16", "{TemplateBinding Background}", hover)).Replace("FADE", HoverFade(animate))
+        """.Replace("CHROME", Chrome("0", "{TemplateBinding Background}", hover)).Replace("FADE", HoverFade(animate))
         .Replace("PRESSROUND", Plain ? "" : "<Setter TargetName=\"chrome\" Property=\"RenderTransform\"><Setter.Value><ScaleTransform ScaleX=\"0.96\" ScaleY=\"0.96\"/></Setter.Value></Setter>")
         .Replace("KEY", key).Replace("BG", bg).Replace("FG", fg).Replace("PRESSED", pressed);
 
@@ -434,17 +435,17 @@ internal static class ChatStyles
           </Style>
         </ResourceDictionary>
         """
-        .Replace("FOCUS", Focus("SpmChatFocus", small) + Focus("SpmChatFocusCard", card) + Focus("SpmChatFocusRound", 16))
+        .Replace("FOCUS", Focus("SpmChatFocus", small) + Focus("SpmChatFocusCard", card) + Focus("SpmChatFocusRound", 0))
         .Replace("DISCLOSURECHROME", Chrome("SMALL", "{TemplateBinding Background}", "SpmSurfaceHover"))
         .Replace("DISCLOSUREFADE", HoverFade(animate))
         .Replace("DISCLOSUREPRESS", Press)
-        .Replace("CHIPTPL", Template(ChipHeight / 2, animate, hoverBorder: "SpmBorder", clearWhenDisabled: true))
+        .Replace("CHIPTPL", Template(0, animate, hoverBorder: "SpmBorder", clearWhenDisabled: true))
         .Replace("CHIPHEIGHT", N(ChipHeight))
         .Replace("GHOST", Template(small, animate, clearWhenDisabled: true))
-        .Replace("PILL", Template(14, animate, hoverBorder: "SpmBorder"))
-        .Replace("PRIMARY", Template(14, animate, hoverBg: "SpmAccentHover", hoverBorder: "SpmAccentHover"))
-        .Replace("FLOAT", Template(14, animate, shadow: true, hoverBorder: "SpmBorder"))
-        .Replace("DANGERTPL", Template(14, animate, hoverBg: "SpmDangerHover", hoverBorder: "SpmDangerHover"))
+        .Replace("PILL", Template(0, animate, hoverBorder: "SpmBorder"))
+        .Replace("PRIMARY", Template(0, animate, hoverBg: "SpmAccentHover", hoverBorder: "SpmAccentHover"))
+        .Replace("FLOAT", Template(0, animate, shadow: true, hoverBorder: "SpmBorder"))
+        .Replace("DANGERTPL", Template(0, animate, hoverBg: "SpmDangerHover", hoverBorder: "SpmDangerHover"))
         .Replace("CARD", Template(card, animate, shadow: true, hoverBg: "SpmSurface", hoverBorder: "SpmBorder"))
         .Replace("SEND", Round("SpmChatSend", "SpmAccent", "SpmAccentHover", "SpmAccentPressed", "SpmOnAccent", animate))
         .Replace("STOP", Round("SpmChatStop", "SpmDanger", "SpmDangerHover", "SpmDangerPressed", "SpmOnDanger", animate))

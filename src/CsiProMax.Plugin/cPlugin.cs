@@ -8,13 +8,19 @@ namespace CsiProMaxPlugin;
 /// What ETABS calls when the engineer picks CSI ProMax in the Tools menu. It opens the assistant's window and gives
 /// ETABS back at once, so ETABS stays free to work in while the window is open. The assistant then talks to this
 /// ETABS through ETABS's API, as before. The class and method names are the ones ETABS looks for.
+/// A plain class on purpose: the program finds it by its name (CsiProMaxPlugin.cPlugin, the plug-in name and the class
+/// name) and calls Main and Info by their names. It must not say ": cPluginContract". That interface is only in the
+/// API file of the programs that run on .NET 8 (ETABS 22 and later); the older ones, which run on the
+/// .NET Framework, have none, so there a class that names it cannot be created at all: the program says "Cannot create
+/// plugin!" and shows "Not Found" in its plug-in list. That was version 0.4.4 in ETABS 20. CSI's own example says the
+/// interface is not required. The stand-in API files leave it out, so naming it here does not compile.
 /// </summary>
-public class cPlugin : cPluginContract
+public class cPlugin
 {
     public void Main(ref cSapModel SapModel, ref cPluginCallback ISapPlugin)
     {
         try { Launcher.Start(); }
-        catch (Exception ex) when (ex is IOException or System.ComponentModel.Win32Exception or InvalidOperationException)
+        catch (Exception ex)   // whatever it is: a plug-in must never throw into the program that loaded it
         {
             if (Launcher.Windows) MessageBoxW(IntPtr.Zero, "CSI ProMax could not start.\n\n" + ex.Message, "CSI ProMax", 0x30);
         }

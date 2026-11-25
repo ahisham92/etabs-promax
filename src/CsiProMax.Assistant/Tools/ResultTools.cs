@@ -199,10 +199,8 @@ public static class ResultTools
         new[] { "Story Drifts", "Story Max", "Story Stiffness", "Story Forces", "Base Reactions", "Modal", "Joint Displacements", "Joint Reactions", "Diaphragm", "Element Forces", "Centers Of Mass", "Mass Summary", "Pier Forces", "Spandrel Forces" }
             .Any(k => name.Contains(k, StringComparison.OrdinalIgnoreCase));
 
-    internal static bool IsDesignSummary(string name) =>
-        name.Contains("Summary", StringComparison.OrdinalIgnoreCase) &&
-        new[] { "Design", "Column", "Beam", "Pier", "Spandrel", "Brace", "Joint", "Slab", "Wall" }.Any(k => name.Contains(k, StringComparison.OrdinalIgnoreCase)) &&
-        !name.Contains("Mass Summary", StringComparison.OrdinalIgnoreCase) && !Verdict.IsInputTable(name);
+    /// <summary>A design result table of any kind (steel, concrete, composite, shear wall, slab, punching): see <see cref="DesignResults"/>.</summary>
+    internal static bool IsDesignSummary(string name) => DesignResults.IsDesignTable(name);
 
     private static JsonNode Modal(JsonElement a, ICsiLink e) => ModalCore(e, e.Tables(), a, a.Number("min_mass", 0.9), Math.Max(1, a.Whole("modes", 6)));
 
@@ -469,9 +467,9 @@ public static class ResultTools
     internal static JsonObject? DesignCheck(TableData data, string table, double limit, int list)
     {
         var f = data.Fields;
-        var ratios = Enumerable.Range(0, f.Count).Where(i => { var n = Norm(f[i]); return (n.Contains("ratio") || n.Contains("dc") && n.Length <= 8) && !n.Contains("combo") && !n.Contains("rebar"); }).ToList();
+        var ratios = Enumerable.Range(0, f.Count).Where(i => { var n = Norm(f[i]); return (n.Contains("ratio") || n.Contains("dc") && n.Length <= 8) && !n.Contains("combo") && !n.Contains("rebar") && !n.Contains("reinf") && !n.Contains("percent"); }).ToList();
         if (ratios.Count == 0) return null;
-        int story = Col(f, "Story"), label = Col(f, "Label", "Pier", "Spandrel", "Beam", "Column"), unique = Col(f, "UniqueName", "Unique Name"), section = Col(f, "DesignSect", "Design Section", "Section", "DesignSection");
+        int story = Col(f, "Story"), label = Col(f, "Label", "Pier", "Pier Label", "Spandrel", "Spandrel Label", "Beam", "Column"), unique = Col(f, "UniqueName", "Unique Name"), section = Col(f, "DesignSect", "Design Section", "Section", "DesignSection");
         var combos = Enumerable.Range(0, f.Count).Where(i => Norm(f[i]).Contains("combo")).ToList();
         var members = new List<(double Ratio, string[] Row, int Field)>();
         foreach (var r in data.Rows)

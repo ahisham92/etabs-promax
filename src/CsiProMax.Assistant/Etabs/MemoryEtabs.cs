@@ -131,7 +131,7 @@ public sealed class MemoryEtabs : ICsiLink
 
     public IReadOnlyList<TableName> Tables() =>
         [new("Story Definitions", "Story Definitions", false), new("Story Drifts", "Story Drifts", !ResultTables.ContainsKey("Story Drifts")), new("Frame Assignments - Section Properties", "Frame Assignments - Section Properties", _frames.Count == 0),
-         .. ResultTables.Keys.Where(k => k != "Story Drifts").Select(k => new TableName(k, k, false))];
+         .. ResultTables.Where(t => t.Key != "Story Drifts").Select(t => new TableName(t.Key, t.Key, t.Value.Rows.Count == 0))];
 
     public TableData ReadTable(string key, IReadOnlyList<string>? cases, IReadOnlyList<string>? combos) => ResultTables.TryGetValue(key, out var given) ? given : key switch
     {

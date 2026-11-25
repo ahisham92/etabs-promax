@@ -150,6 +150,15 @@ for (const f of frames) {
   sd.rows.push([st, name, name, kind === "column" ? "Column" : kind === "beam" ? "Beam" : "Brace", sec, ratio > 1 ? "Overstressed" : "No Messages", kind === "column" ? "ULS1" : "ULS2", s(ratio), s(pr), s(mr), s(ratio * 0.05), "ULS1", s(ratio * 0.31)]);
 }
 
+// The core's four walls are piers P1 to P4, designed by ETABS's shear wall design (ACI 318-19), top and bottom of each story.
+const wallLabels = areas.filter(a => a.k === "wall").map((a, i) => ["a", a.n, "P" + (i % 4 + 1), ""]);
+const pd = {name: "Shear Wall Pier Design Summary - ACI 318-19", fields: ["Story", "Pier", "Centerline", "Station", "Design Type", "Edge Bar", "End Bar", "Bar Spacing", "Required Reinf Ratio", "Current Reinf Ratio", "Flexural Combo", "Pu", "Mu2", "Mu3", "D/C Ratio", "Shear Combo", "Vu", "Shear Rebar", "Boundary Zone Length"], rows: []};
+for (let i = N; i >= 1; i--) for (let k = 1; k <= 4; k++) for (const station of ["Top", "Bottom"]) {
+  const f = (N - i + (station === "Bottom" ? 0.6 : 0)) / N, side = k % 2 ? 1.0 : 0.86;
+  const dc = Math.min(1.08, (0.28 + 0.74 * f * f) * side * (0.94 + 0.1 * rnd())), req = Math.max(0.0025, 0.0025 + 0.011 * f * f * side);
+  pd.rows.push([stories[i].name, "P" + k, "Leg 1", station, "Uniform Reinforcing", "20d", "25d", "0.2", s(req), s(Math.max(req, 0.006)), "ULS2", s(-1200 - 950 * f * 15 * side), s(80 * f), s(6200 * f * f * side), s(dc), "ULS3", s(900 + 1300 * f), s(0.00052 + 0.0009 * f), s(f > 0.7 ? 0.9 + f : 0)]);
+}
+
 const sizes = {"W14X257": ["I/Wide Flange", 0.416, 0.406, 0.048, 0.0299], "W14X176": ["I/Wide Flange", 0.387, 0.398, 0.0334, 0.0211], "W14X109": ["I/Wide Flange", 0.364, 0.371, 0.0218, 0.0133], "W14X74": ["I/Wide Flange", 0.360, 0.257, 0.0199, 0.0114],
   "W24X76": ["I/Wide Flange", 0.607, 0.228, 0.0173, 0.0111], "W21X50": ["I/Wide Flange", 0.529, 0.166, 0.0136, 0.0097], "W16X31": ["I/Wide Flange", 0.403, 0.140, 0.0112, 0.007], "HSS8X8X1/2": ["Box/Tube", 0.203, 0.203, 0.0118, 0.0118]};
 const pack = {
@@ -159,7 +168,7 @@ const pack = {
     section_materials: {...Object.fromEntries(Object.keys(sizes).filter(k => k[0] === "W").map(k => [k, "A992Fy50"])), "HSS8X8X1/2": "A500GrC", Deck150: "C30", Wall350: "C40", Wall400: "C40"},
     supports, frame_sections: Object.keys(sizes), area_sections: ["Deck150", "Wall350", "Wall400"], materials: ["A992Fy50", "A500GrC", "C30", "C40"],
     load_patterns: [{name: "DEAD", type: "Dead", self_weight: 1}, {name: "LIVE", type: "Live", self_weight: 0}, {name: "EQX", type: "Seismic", self_weight: 0}, {name: "EQY", type: "Seismic", self_weight: 0}],
-    load_cases: ["DEAD", "LIVE", "EQX", "EQY", "Modal"], combinations: Object.keys(combos),
+    load_cases: ["DEAD", "LIVE", "EQX", "EQY", "Modal"], combinations: Object.keys(combos), wall_labels: wallLabels,
   },
   checks: {note: "Checks made from the tables in this pack. Sample data.", checks: {
     drift: {status: "pass", limit: 0.0025, largest: Math.max(...dr.rows.map(r => +r[4])), at: dr.rows.reduce((a, r) => +r[4] > +a[4] ? r : a)[0]},
@@ -169,7 +178,8 @@ const pack = {
   comments: [{id: "s1", by: "Reviewer", at: "2026-11-25T09:10:00Z", text: "This filler beam is over 1.0 at Story2. Is the deck span right here?", target: {kind: "frame", what: "beam", name: sd.rows.find(r => +r[7] > 1 && r[4] === "W16X31")?.[2] || "B1", story: "Story2"}}],
   tables: {},
 };
-for (const t of [jd, EB, EC, ED, jr, dr, mp, mm, br, sd]) pack.tables[t.name] = t;
+pack.manifest.design = {steel: {name: "Steel Frame Design", from: ["the program's design tables"]}, pier: {name: "Shear Wall Pier Design", from: ["the program's design tables"]}};
+for (const t of [jd, EB, EC, ED, jr, dr, mp, mm, br, sd, pd]) pack.tables[t.name] = t;
 const json = JSON.stringify(pack);
 const html = fs.readFileSync(viewerPath, "utf8"), slot = '<script id="pack" type="application/json"></script>';
 if (!html.includes(slot)) throw new Error("no pack slot in the viewer");

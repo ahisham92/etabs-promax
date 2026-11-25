@@ -184,6 +184,8 @@ public static class SafeFieldSteps
                 return "the design ran";
             });
         else ctx.Skip("SAFE's slab design runs", "the analysis did not run");
+        if (analysed) ctx.Tool("run_design", """{"kinds":["slab"]}""", null, "tool run_design (slab design, or the menu to run it)");
+        else ctx.Refused("run_design", """{"kinds":["slab"]}""", "design", "tool run_design says the analysis must run first");
 
         // ---- every slab check ----
         var none = analysed ? "" : " (no analysis: it must still answer)";

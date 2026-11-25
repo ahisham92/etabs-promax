@@ -17,7 +17,7 @@ public sealed class ExportPackTool : IEtabsTool
     public string Description =>
         $"Make a review pack of the open model for someone who has no {Csi.Name}: the model's geometry and sections, {Csi.Name}'s " +
         "own result tables (modes, base reactions, story drifts, displacements, story forces and stiffness, design " +
-        "summaries) and the check report. It writes two files into the model's own folder, beside the model file: the " +
+        "results of every kind: steel, concrete, composite, shear wall pier and spandrel, slab and punching) and the check report. It writes two files into the model's own folder, beside the model file: the " +
         "pack (.cpmx) and a Viewer page (.html) with the pack inside it (Documents\\CSI ProMax\\Made in chat only when the " +
         "model has not been saved yet or its folder cannot be written to). The reviewer opens the page in a browser, with " +
         "nothing to install: a 3D view, deformed shapes, design ratios in colour, the tables and the checks, and they " +
@@ -33,7 +33,8 @@ public sealed class ExportPackTool : IEtabsTool
       "combinations": {"type": "array", "items": {"type": "string"}},
       "drift_limit": {"type": "number", "description": "Allowed drift ratio for the check report, e.g. 0.002."},
       "design_limit": {"type": "number", "description": "Design ratio limit (default 1.0)."},
-      "folder": {"type": "string", "description": "Another folder for the files. Leave it out: they go beside the model."}
+      "folder": {"type": "string", "description": "Another folder for the files. Leave it out: they go beside the model."},
+      "design_files": {"type": "array", "items": {"type": "string"}, "description": "Table files exported from the program (File > Export > tables to Excel .xlsx, or to a text file) whose design tables fill what the program's own tables lack, for example shear wall pier and spandrel design. Files beside the model named after it are taken without asking."}
     }
     """;
     public string[] Required => [];
@@ -96,7 +97,7 @@ public sealed class ExportPackTool : IEtabsTool
             if (cases.Count > 0) limits["cases"] = new JsonArray(cases.Select(c => (JsonNode)c).ToArray());
             if (combos.Count > 0) limits["combinations"] = new JsonArray(combos.Select(c => (JsonNode)c).ToArray());
             var checks = ProgramTools.Report(JsonDocument.Parse(limits.ToJsonString()).RootElement, link).AsObject();
-            var built = Pack.Build(link, args.StringList("tables"), cases, combos, checks, null);
+            var built = Pack.Build(link, args.StringList("tables"), cases, combos, checks, null, designFiles: args.StringList("design_files"));
             var model = built.Content["manifest"]!["model"]!.GetValue<string>();
             var name = OfficeDocs.SafeName((args.OptString("name") ?? "").Trim() is { Length: > 0 } n ? n : model);
             Directory.CreateDirectory(folder);
@@ -112,6 +113,7 @@ public sealed class ExportPackTool : IEtabsTool
                 not_beside_model = elsewhere is null ? null : $"The files are in {folder}, not beside the model: {elsewhere}. Tell the user.",
                 frames = built.Frames, areas = built.Areas, tables = built.Tables,
                 checks = checks["summary"],
+                design = built.Content["manifest"]!["design"],
                 size_kb = Math.Max(1, (int)Math.Round(new FileInfo(page).Length / 1024.0)),
                 notes = built.Notes,
                 shown = "The chat shows both files as cards. Say they are in the model's own folder (or where 'folder' says), and tell the user to send the viewer page (.html): it opens in any browser with the pack inside. The .cpmx is the same pack for the Viewer's Open button.",
