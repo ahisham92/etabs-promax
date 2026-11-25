@@ -334,8 +334,22 @@ public sealed class RunLearnedToolTool : IEtabsTool
     // Approval for model changes is asked by the bridge, which resolves this call to the learned tool itself.
     public bool ModifiesModel => false;
 
-    public ToolResult Execute(EtabsApp app, ToolArgs args) =>
-        ToolResult.Error($"No learned tool named '{args.String("name")}'. Call list_learned_tools.");
+    /// <summary>
+    /// The chat's calls never get here: the bridge runs the learned tool itself, with its own approval and transaction.
+    /// A call from anywhere else (the field test, a recipe) runs a learned tool that only reads; one that changes the
+    /// model is sent back to the chat, where it is approved. Before 0.4.8 every such call said there was no such tool.
+    /// </summary>
+    public ToolResult Execute(EtabsApp app, ToolArgs args)
+    {
+        var name = args.String("name");
+        if (LearnedTools.Load(name) is not { } learned) return ToolResult.Error($"No learned tool named '{name}'. Call list_learned_tools.");
+        if (learned.ModifiesModel)
+            return ToolResult.Error($"The learned tool '{name}' changes the model, so it runs from the chat, where the change is approved first.");
+        var inner = args.Raw.TryGetValue("arguments", out var a) && a.ValueKind == JsonValueKind.Object
+            ? a.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.Clone())
+            : new Dictionary<string, JsonElement>();
+        return learned.Execute(app, new ToolArgs(inner));
+    }
 }
 
 public sealed class DeleteLearnedToolTool : IEtabsTool

@@ -59,7 +59,7 @@ public static class ToolsMenu
             State.Moved => $"{Label}: the Tools menu named a CSI ProMax file that is gone, or named CSI ProMax twice, and names this install now, once.",
             State.Already => $"{Label}: CSI ProMax is in the Tools menu.",
             State.Missing => $"{Label}: CSI ProMax is not in the Tools menu, and can be added.",
-            State.Open => $"{Label}: CSI ProMax is not in the Tools menu, and {Label} is open, so its plug-in list is left alone. Close {Label}, then open CSI ProMax again (from another program, or the Modeler): it adds itself.",
+            State.Open => $"{Label}: CSI ProMax is not in the Tools menu, and {Label} is open (or one is still running with no window on the screen: Task Manager, Details tab), so its plug-in list is left alone. Close {Label}, then open CSI ProMax again (from another program, or the Modeler): it adds itself.",
             State.Others => $"{Label}: CSI ProMax is not in the Tools menu, and {Label} has other plug-ins, so its list is left alone. Add it in {Label}: Tools > Add/Show Plugins, plug-in name {Name(Program)}, menu text {MenuText}, file {Path}.",
             _ => $"{Label}: its settings file was not understood, so it is left alone. Add CSI ProMax in {Label}: Tools > Add/Show Plugins, plug-in name {Name(Program)}, menu text {MenuText}, file {Path}.",
         };
