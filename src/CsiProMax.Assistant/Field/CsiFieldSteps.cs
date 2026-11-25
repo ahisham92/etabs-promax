@@ -247,13 +247,15 @@ public static class CsiFieldSteps
                 FieldContext.Expect(link.LoadPatterns().Any(p => p.Name == "CPM-WX" && p.Type == "Wind"), "CPM-WX should be a wind pattern: " + a.ToJsonString()));
 
         // ---- checkpoints of the scratch model's file ----
+        // The open model is told by its name without the file type: ETABS 23 answers its working file (name.$et) for a
+        // model saved as name.edb, which failed both comparisons below in the 0.4.17 run.
         var scratchFile = Read(ctx, "the scratch model's file", () => link.Info().File, "");
         string? checkpoint = null;
         T("save_checkpoint", """{"name":"cpm-cp1"}""", a =>
         {
             checkpoint = a["file"]!.GetValue<string>();
             FieldContext.Expect(File.Exists(checkpoint), "the checkpoint's file is not there: " + a.ToJsonString());
-            FieldContext.Expect(string.Equals(Path.GetFileName(link.Info().File), Path.GetFileName(scratchFile), StringComparison.OrdinalIgnoreCase), $"{name} should have the scratch model open again after the checkpoint; it has {link.Info().File}");
+            FieldContext.Expect(ScratchProgram.SameName(link.Info().File, scratchFile), $"{name} should have the scratch model open again after the checkpoint; it has {link.Info().File}");
         });
         ctx.Tool("list_checkpoints", "{}", a => FieldContext.Expect(!live || Int(a["count"]) >= 1, "the checkpoint is not listed: " + a.ToJsonString()));
         var after = live && Read(ctx, "a pattern added after the checkpoint", () => { link.AddLoadPattern("CPM-AFTER-CP", "Other", 0); return true; }, false);
@@ -294,7 +296,7 @@ public static class CsiFieldSteps
                     ApiCall.Must(model, "File.OpenFile", CsiTools.D(("FileName", checkpoint)), "open the checkpoint of the scratch model");
                     return ApiCall.Must(model, "File.Save", CsiTools.D(("FileName", scratchFile)), "save it as the scratch model");
                 });
-                FieldContext.Expect(string.Equals(Path.GetFileName(link.Info().File), Path.GetFileName(scratchFile), StringComparison.OrdinalIgnoreCase), $"{name} has {link.Info().File} open, not the scratch model");
+                FieldContext.Expect(ScratchProgram.SameName(link.Info().File, scratchFile), $"{name} has {link.Info().File} open, not the scratch model");
                 return Path.GetFileName(scratchFile);
             });
     }

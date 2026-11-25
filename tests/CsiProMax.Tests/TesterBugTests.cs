@@ -798,6 +798,16 @@ static class TesterBugTests
             Check(app.Contains("if (NoUpdate && !interactive) return;", StringComparison.Ordinal) && app.Contains("if (NoUpdate || SwitchTo is null", StringComparison.Ordinal), "--no-update does not stop the look for a version and the switch to it");
             Check(File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Program.cs")).Contains("args.Contains(\"--no-update\")", StringComparison.Ordinal), "--no-update is not read");
         });
+        yield return ("ETABS 23 field test: delete_joints deletes a loose joint in ETABS and SAFE too", () =>
+        {
+            // Seen on 2026-11-25 with 0.4.17: "a test joint is still in the model". The ETABS link knew frames and areas only.
+            var link = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Etabs/ComEtabs.cs"));
+            Check(link.Contains("\"point\" => m.PointObj.DeleteSpecialPoint(name, 0)", StringComparison.Ordinal), "the ETABS link cannot delete a joint");
+            // Same run: "should have the scratch model open again after the checkpoint; it has ...cpm-field-test-xxxxxx.$et".
+            var steps = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/CsiFieldSteps.cs"));
+            Check(!steps.Contains("Path.GetFileName(link.Info().File), Path.GetFileName(scratchFile)", StringComparison.Ordinal) && steps.Contains("ScratchProgram.SameName(link.Info().File, scratchFile)", StringComparison.Ordinal), "the checkpoint steps compare the open model's name with its file type");
+            Check(ScratchProgram.SameName(@"C:\t\cpm-field-test-1ff9a4.$et", @"C:\t\cpm-field-test-1ff9a4.edb"), "ETABS's working file is not taken for the scratch model");
+        });
         yield return ("ETABS 20 tester: the field test tries what Tools > CSI ProMax does in each program, and fails where the plug-in cannot be created", () =>
         {
             // What the check answered on that PC (in its own words), and a PC where all is well.
