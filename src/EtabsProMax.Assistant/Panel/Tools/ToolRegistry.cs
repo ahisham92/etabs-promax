@@ -36,6 +36,8 @@ public sealed class ToolRegistry
         new ReadDocumentTextTool(),
         new ReadDrawingTool(),
         new ReadCadDrawingTool(),
+        new ExportPackTool(),
+        new ReadPackCommentsTool(),
         new CaptureViewImageTool(),
         new ReportBugTool(),
         new ExportChatsAndBugsTool(),

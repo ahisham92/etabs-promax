@@ -31,6 +31,7 @@
     <EmbeddedResource Include="../../assets/logo/etabs-promax-64.png" LogicalName="EtabsProMax.logo-64.png" />
     <EmbeddedResource Include="../../assets/logo/etabs-promax.ico" LogicalName="EtabsProMax.etabs-promax.ico" />
     <EmbeddedResource Include="../../docs/guides/*.md" LogicalName="EtabsProMax.guides.%(Filename).md" />
+    <EmbeddedResource Include="../EtabsProMax.Viewer/viewer.html" LogicalName="EtabsProMax.viewer.html" />
     <EmbeddedResource Include="Panel/Chat/chat-prompts.json" LogicalName="EtabsProMax.chat-prompts.json" />
     <!-- PDFium (BSD-3/Apache 2.0, Chrome's PDF engine) draws PDF pages so the chat can read drawings. Only the 64-bit
          Windows library is shipped, as EtabsProMax.pdfium.dll next to the assistant. It is a .dll, not a program. -->

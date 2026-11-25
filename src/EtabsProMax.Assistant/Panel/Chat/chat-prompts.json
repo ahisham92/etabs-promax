@@ -186,6 +186,16 @@
   },
   {
    "group": "Documents",
+   "title": "Review pack for a colleague",
+   "prompt": "Make a review pack of this model with its results and checks, for a colleague who has no ETABS. Drift limit {limit}."
+  },
+  {
+   "group": "Documents",
+   "title": "Answer review comments",
+   "prompt": "Read the review comments in the attached file, select each member they are about, and tell me what you find for each one."
+  },
+  {
+   "group": "Documents",
    "title": "Calculation note",
    "prompt": "Write a short calculation note in Word for this model: description, materials, sections, loads, combinations and the main results, with tables."
   },

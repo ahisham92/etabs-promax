@@ -406,6 +406,53 @@ Test("results: a snapshot is kept and compared with the model later", () =>
     finally { if (Directory.Exists(ResultTools.SnapshotRoot)) Directory.Delete(ResultTools.SnapshotRoot, true); }
 });
 
+Test("pack: the model, ETABS's tables and the checks go into one file and the Viewer page", () =>
+{
+    var e = new MemoryEtabs();
+    var mcp = Endpoint(e);
+    Call(mcp, "add_columns", """{"points":[[0,0],[6,0],[6,5],[0,5]],"section":"C500x500"}""");
+    Call(mcp, "add_beams", """{"lines":[[0,0,6,0],[6,0,6,5],[6,5,0,5],[0,5,0,0]],"section":"B300x600"}""");
+    Call(mcp, "add_slabs", """{"outlines":[[[0,0],[6,0],[6,5],[0,5]]],"section":"S200"}""");
+    Call(mcp, "add_walls", """{"lines":[[0,0,0,5]],"section":"W250"}""");
+    var top = e.Points().Where(p => p.Z > 9).ToList();
+    e.ResultTables["Story Drifts"] = new(["Story", "Output Case", "Direction", "Drift"], [["Story3", "EQX", "X", "0.0011"], ["Story2", "EQX", "X", "0.0024"], ["Story1", "EQX", "X", "0.0019"]]);
+    e.ResultTables["Joint Displacements"] = new(["Story", "UniqueName", "Output Case", "Ux", "Uy", "Uz"],
+        e.Points().Select(p => new[] { "", p.Name, "EQX", (p.Z * 0.002).ToString(System.Globalization.CultureInfo.InvariantCulture), "0", "0" }).ToList());
+    e.ResultTables["Concrete Column Summary - ACI 318-19"] = new(["Story", "UniqueName", "PMM Combo", "PMM Ratio"],
+        e.Frames().Where(f => f.Kind == "column").Select((f, i) => new[] { f.Story, f.Name, "ULS1", (0.45 + i * 0.06).ToString(System.Globalization.CultureInfo.InvariantCulture) }).ToList());
+    var checks = ResultTools.Report(J("""{"drift_limit":0.002}"""), e).AsObject();
+    var built = Pack.Build(e, ["Frame Assignments - Section Properties", "No Such Table"], [], [], checks, null);
+    Equal(24, built.Frames, "frames"); Equal(6, built.Areas, "areas");
+    Check(built.Tables.Contains("Story Drifts") && built.Tables.Contains("Concrete Column Summary - ACI 318-19") && built.Tables.Contains("Frame Assignments - Section Properties"), "usual, design and asked-for tables");
+    Check(built.Notes.Any(n => n.Contains("No Such Table")), "a table that does not exist is reported");
+    var back = Pack.Read(built.Zip);
+    Equal("demo", (string)back["manifest"]!["model"]!, "model name"); Equal("m", (string)back["manifest"]!["units"]!["length"]!, "units");
+    Equal(24, back["model"]!["frames"]!.AsArray().Count, "frames read back"); Equal(3, back["tables"]!["Story Drifts"]!["rows"]!.AsArray().Count, "table rows read back");
+    Equal("fail", (string)back["checks"]!["checks"]!["drift"]!["status"]!, "checks read back");
+    var small = Pack.Build(e, [], [], [], null, null, mostRows: 2);
+    Equal(1, (int)small.Content["tables"]!["Story Drifts"]!["left_out"]!, "a long table is cut and says so");
+    var html = Pack.ViewerHtml(built.Content);
+    Check(html.Contains("\"format\":\"epmx\"") && html.Contains("ETABS ProMax Viewer") && !html.Contains("<script id=\"pack\" type=\"application/json\"></script>"), "the page carries the pack");
+    Check(Pack.ViewerHtml().Contains("<script id=\"pack\" type=\"application/json\"></script>"), "the empty page has none");
+
+    var folder = Path.Combine(Path.GetTempPath(), "epm-pack-" + Guid.NewGuid().ToString("N"));
+    try
+    {
+        var made = EtabsProMax.Tools.ExportPackTool.Make(e, new EtabsProMax.Tools.ToolArgs(new Dictionary<string, JsonElement> { ["drift_limit"] = J("0.002") }), folder);
+        Check(!made.IsError, made.Text);
+        var files = EtabsProMax.Chat.ChatFiles.Find(made.Text);
+        Equal(2, files.Count, "both files get a card"); Check(files[0].EndsWith("demo viewer.html") && files[1].EndsWith("demo.epmx"), "the page first, then the pack");
+        Check(File.Exists(files[0]) && File.Exists(files[1]), "written");
+        var comments = Path.Combine(folder, "demo comments.json");
+        File.WriteAllText(comments, """{"format":"epmx-comments","model":"demo","comments":[{"id":"a1","by":"Sara","at":"2026-11-25T08:00:00Z","text":"Check this beam","target":{"kind":"frame","what":"beam","name":"B7","story":"Story2"}}]}""");
+        var read = JsonNode.Parse(EtabsProMax.Tools.ReadPackCommentsTool.Read(comments).Text)!;
+        Equal(1, (int)read["count"]!, "one comment"); Equal("B7", (string)read["comments"]![0]!["target"]!["name"]!, "on which member");
+        Equal(0, (int)JsonNode.Parse(EtabsProMax.Tools.ReadPackCommentsTool.Read(files[1]).Text)!["count"]!, "a fresh pack has none");
+        if (Environment.GetEnvironmentVariable("EPM_KEEP_PACK") is { Length: > 0 } keep) { File.Copy(files[0], Path.Combine(keep, "demo viewer.html"), true); File.Copy(files[1], Path.Combine(keep, "demo.epmx"), true); File.WriteAllText(Path.Combine(keep, "viewer.html"), Pack.ViewerHtml()); }
+    }
+    finally { if (Directory.Exists(folder)) Directory.Delete(folder, true); }
+});
+
 Test("assistant: the engineer is asked before deletes, saves and runs", () =>
 {
     var e = new MemoryEtabs();
