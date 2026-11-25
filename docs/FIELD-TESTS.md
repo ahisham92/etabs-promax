@@ -115,6 +115,19 @@ Install: run the one-line install, or copy the CSI ProMax folder to Documents. T
    floor (and once with a subgrade for a mat). In SAFE: File > Import > SAFE .F2K file. Expected: slabs, beams,
    column supports, strips, loads and combinations come in. If SAFE reports a table or field it does not know,
    send the import log.
+8a. **GeoProMax, the loop on a mat.** On a scratch mat with soil under it, divided into panels of about 1.5 m
+   (Edit > Divide Areas), analysed:
+   - "Export the soil pressures for GeoProMax" (export_soil_pressures). Expected: a `.csv` beside the `.fdb`, in
+     kN and m, with a pressure for every point.
+   - In GeoProMax, SAFE link: load the file, pick the service case, work out the springs, save
+     "Download for CSI ProMax".
+   - "Apply the GeoProMax springs from <path>" (apply_geopromax_springs). Expected: it says the model is locked and
+     asks to unlock; then SAFE has soil properties GPM-K1 ... (Define > Soil Subgrade Properties) with the moduli
+     of the file in the model's units, and Display shows the zones under the panels as in GeoProMax's zone map.
+   - Run again, export again: GeoProMax's next round shows a smaller change. Repeat until it says converged.
+   - On a mat drawn as one area: the answer lists it under `mixed`; with "as points" SAFE gets point springs at
+     the cell centres and the area's own soil is taken off. Send the answer if SAFE refuses any call.
+   The same three steps in ETABS on a model with a raft at the base (areas only).
 
 ## ETABS, for the SAFE file format (needs licensed ETABS 23)
 
