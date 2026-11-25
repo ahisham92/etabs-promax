@@ -120,6 +120,29 @@ public static class ModelerCheck
           instList(); instGo(0); await wait(300);
           return sel.has(frames[0].id) && inst.cur === 0 ? {ok: "selected and ringed"} : {fail: "the finding's frame was not selected"};
         });
+        await step("Define > Load Patterns > Modify Lateral Load: a seismic pattern takes ASCE 7-16, and its story forces show", async () => {
+          const made = await hmRun("define_load_pattern", {name: "CPM-CHKEQ", type: "Seismic", self_weight: 0}, true);
+          if (!made.ok) return {fail: "the seismic pattern was not added: " + made.error};
+          await act("m:patterns"); await wait(600);
+          const row = [...document.querySelectorAll(".dlg #pL tr")].find(tr => tr.textContent.includes("CPM-CHKEQ"));
+          if (!row) return {fail: "CPM-CHKEQ is not in the Load Patterns form"};
+          row.click(); await wait(200);
+          const lat = document.querySelector(".dlg #pLat");
+          if (!lat || lat.disabled) return {fail: "Modify Lateral Load Pattern is not there, or greyed out, for a seismic pattern"};
+          lat.click(); await wait(1200);
+          const code = document.querySelector(".dlg #lCode");
+          if (!code) return {fail: "the lateral load form did not open"};
+          code.value = "ASCE 7-16"; code.dispatchEvent(new Event("change", {bubbles: true})); await wait(200);
+          const forms = document.querySelectorAll(".dlg"); forms[forms.length - 1].querySelector(".df button.primary").click();
+          await wait(2000);
+          const defs = await hmDefs(), p = (defs.load_patterns || []).find(x => x.name === "CPM-CHKEQ");
+          closeDialogs(); await wait(150);
+          await hmRun("undo"); await wait(800); await hmRun("undo"); await wait(800);
+          const back = ((await hmDefs()).load_patterns || []).some(x => x.name === "CPM-CHKEQ");
+          if (!p || !p.lateral || p.lateral.code !== "ASCE 7-16") return {fail: "the code did not reach the pattern: " + (hm.lastError || JSON.stringify(p && p.lateral))};
+          if (p.lateral.error || !(p.lateral.story_forces || []).some(f => f.fx > 0)) return {fail: "no story forces: " + (p.lateral.error || "")};
+          return back ? {fail: "two undos did not take the pattern out again"} : {ok: `V = ${p.lateral.results.V} on ${p.lateral.story_forces.length} stories, then undone`};
+        });
         // A beam and a floor selected before each item, so the items that act on a selection are on (Delete empties it).
         const pick = () => { try { sel.clear(); const b = frames.findIndex(f => f.kind === "beam"); if (b >= 0) sel.add(b + 1); if (areas.length) sel.add(frames.length + 1); selChanged(); } catch (e) { } };
         const menus = modelerMenus(viewerMenus()), list = [];

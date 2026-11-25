@@ -74,6 +74,7 @@ public static class ModelerFieldSteps
         ctx.Offer(ProgramTools.Modeler);
         ctx.Offer(HandTools.All);
         ctx.Offer(TableTools.All);
+        ctx.Offer(LateralTools.All);
         var folder = Q(ctx.Folder);
 
         // A new model from the template: three stories, two bays each way.
@@ -228,6 +229,7 @@ public static class ModelerFieldSteps
         Defining(ctx, modeler);
         Tables(ctx, modeler);
         ModelerCheck.FieldSteps(ctx);
+        Lateral(ctx, modeler);
 
         // The checks and the quantities.
         ctx.Tool("check_model", "{}", a => FieldContext.Expect(Int(a["errors"]) == 0, "the model the test built has errors: " + a["findings"]!.ToJsonString()));
@@ -348,6 +350,33 @@ public static class ModelerFieldSteps
 
     /// <summary>The model's tables to Excel and back, the way SAP2000 does it: the workbook the Modeler writes reads back
     /// into the very same model, and SAP2000's own tables go to Excel too.</summary>
+    /// <summary>Every seismic and wind code the Modeler lists, set on a pattern with its defaults: the forces must
+    /// come out and add up. Ahmed: wind and seismic "should cover all options as csi programs gives them".</summary>
+    private static void Lateral(FieldContext ctx, OfflineEtabs modeler)
+    {
+        ctx.Tool("lateral_codes", """{"kind":"seismic"}""", a => FieldContext.Expect(a["codes"]!.AsArray().Count >= 25, "the seismic codes are missing: " + a["codes"]!.AsArray().Count));
+        ctx.Tool("lateral_codes", """{"kind":"wind","code":"ASCE 7-16"}""", a => FieldContext.Expect(a["inputs"]!.AsArray().Count > 5, "ASCE 7-16 wind has no inputs: " + a.ToJsonString()), "tool lateral_codes gives one code's inputs");
+        foreach (var code in CsiProMax.Lateral.LateralCodes.All)
+        {
+            var name = code.Kind == CsiProMax.Lateral.LateralCodes.Wind ? "CPM-WIND" : "CPM-EQ";
+            ctx.Tool("set_lateral_load", $$"""{"name":"{{name}}","kind":"{{code.Kind.ToLowerInvariant()}}","code":{{Q(code.Name)}}}""", a =>
+            {
+                FieldContext.Expect(a["error"] is null, $"{code.Name} could not be computed: {a["error"]}");
+                var forces = a["story_forces"]!.AsArray();
+                FieldContext.Expect(code.Family == "user-loads" || forces.Sum(f => Math.Abs(f!["fx"]!.GetValue<double>()) + Math.Abs(f["fy"]!.GetValue<double>())) > 0, $"{code.Name} gave no story forces: " + a.ToJsonString());
+                var shear = modeler.Model.PointLoads.Where(l => l.Pattern == name).Sum(l => CsiProMax.E2k.E2kText.TryNumber(CsiProMax.E2k.E2kText.Value(l.Tokens, "FX"), out var v) ? v : 0);
+                var expected = forces.Sum(f => f!["fx"]!.GetValue<double>());
+                FieldContext.Expect(Math.Abs(shear - expected) <= 1e-3 * Math.Max(1, Math.Abs(expected)), $"the joint loads add up to {shear}, the story forces to {expected}");
+            }, $"tool set_lateral_load, {code.Kind.ToLowerInvariant()} {code.Name}");
+        }
+        foreach (var name in new[] { "CPM-EQ", "CPM-WIND" })
+        {
+            ctx.Tool("set_lateral_load", $$"""{"name":"{{name}}","code":"None"}""", _ => FieldContext.Expect(!modeler.Model.PointLoads.Any(l => l.Pattern == name), $"{name}'s forces are still there"), $"tool set_lateral_load takes the code load off {name}");
+            ctx.Tool("delete_definition", $$"""{"kind":"load_pattern","name":"{{name}}"}""", null, $"tool delete_definition takes {name} out again");
+        }
+        ctx.Refused("set_lateral_load", """{"name":"CPM-EQ","code":"ASCE 7-99"}""", "codes", "tool set_lateral_load says no to a code that is not there");
+    }
+
     private static void Tables(FieldContext ctx, OfflineEtabs modeler)
     {
         ctx.Tool("model_tables", "{}", a => FieldContext.Expect(a["tables"]!.AsArray().Any(t => t!["name"]!.GetValue<string>() == "Frame Assignments - Section Properties" && t["rows"]!.GetValue<int>() == modeler.Model.LineAssigns.Count),

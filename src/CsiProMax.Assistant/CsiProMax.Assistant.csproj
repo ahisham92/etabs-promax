@@ -12,7 +12,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
-    <Version>0.4.29</Version>
+    <Version>0.4.33</Version>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <NoWarn>$(NoWarn);CA1416</NoWarn>
     <UseAppHost>false</UseAppHost>
@@ -28,6 +28,10 @@
     <!-- ACadSharp (MIT): reads and writes AutoCAD DWG and DXF files, for drawings attached to the chat and layouts given back. -->
     <PackageReference Include="ACadSharp" Version="1.0.6" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" />
+    <!-- WebView2 (Microsoft, BSD-3): the Modeler's 3D view and the Viewer open in a CSI ProMax window of their own
+         (Panel/Host/WebWindow.cs) instead of the PC's browser. It ships DLLs only (and WebView2Loader.dll under
+         runtimes/); the page is drawn by the Edge WebView2 Runtime that Windows 10 and 11 already have. -->
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" />
     <EmbeddedResource Include="../../assets/logo/csi-promax-64.png" LogicalName="CsiProMax.logo-64.png" />
     <EmbeddedResource Include="../../assets/logo/csi-promax.ico" LogicalName="CsiProMax.csi-promax.ico" />
     <EmbeddedResource Include="../../docs/guides/*.md" LogicalName="CsiProMax.guides.%(Filename).md" />

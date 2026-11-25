@@ -265,6 +265,30 @@ public static class CsiFieldSteps
             T("add_wind_load", """{"name":"CPM-WX","speed":110,"angle":0,"exposure":"C"}""", a =>
                 FieldContext.Expect(link.LoadPatterns().Any(p => p.Name == "CPM-WX" && p.Type == "Wind"), "CPM-WX should be a wind pattern: " + a.ToJsonString()));
 
+        // ---- every seismic and wind code the program lists, through its own table for the code ----
+        // Ahmed: wind and seismic "should cover all options as csi programs gives them", even where the API has no call.
+        if (!isSafe)
+        {
+            ctx.Offer(LateralTools.All);
+            foreach (var kind in new[] { "seismic", "wind" })
+            {
+                var listed = T("lateral_codes", $$"""{"kind":"{{kind}}"}""", a => FieldContext.Expect(Int(a["count"]) >= 1, $"{name} lists no {kind} codes: " + a.ToJsonString()), $"tool lateral_codes lists {name}'s {kind} codes");
+                var codes = listed?["codes"] is JsonArray arr ? arr.Select(c => c!.GetValue<string>()).ToList() : [];
+                var pattern = kind == "wind" ? "CPM-AUTO-W" : "CPM-AUTO-S";
+                if (codes.Count > 0)
+                    T("lateral_codes", $$"""{"kind":"{{kind}}","code":{{Q(codes[0])}},"pattern":"{{pattern}}"}""", a => FieldContext.Expect(a["inputs"] is JsonArray { Count: > 0 }, $"{codes[0]} has no inputs: " + a.ToJsonString()), $"tool lateral_codes gives the inputs of {kind} {codes[0]}");
+                foreach (var code in codes)
+                    T("set_lateral_load", $$"""{"name":"{{pattern}}","kind":"{{kind}}","code":{{Q(code)}}}""", a =>
+                        FieldContext.Expect(a["read_back"] is JsonObject { Count: > 0 }, $"{code} was not read back from its table: " + a.ToJsonString()), $"tool set_lateral_load, {kind} {code}");
+                if (codes.Count > 0)
+                    T("set_lateral_load", $$"""{"name":"{{pattern}}","kind":"{{kind}}","code":"None"}""", null, $"tool set_lateral_load takes the {kind} code off {pattern}");
+            }
+            if (live && link.LoadPatterns().Any(p => p.Name == "CPM-AUTO-S"))
+                T("set_lateral_load", """{"name":"CPM-AUTO-S","code":"ASCE 7-16","values":{"R":"6"}}""", a =>
+                    FieldContext.Expect(a["read_back"]?["R"]?.ToString() is "6" or "6.0", "R 6 was not read back: " + a.ToJsonString()), "tool set_lateral_load gives ASCE 7-16 its R, read back");
+            No("set_lateral_load", """{"name":"CPM-AUTO-S","code":"ASCE 7-99"}""", "no seismic code", "tool set_lateral_load says no to a code the program does not list");
+        }
+
         // ---- checkpoints of the scratch model's file ----
         // The open model is told by its name without the file type: ETABS 23 answers its working file (name.$et) for a
         // model saved as name.edb, which failed both comparisons below in the 0.4.17 run.

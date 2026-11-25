@@ -114,6 +114,7 @@ public static class Pack
             if (data.Rows.Count == 0) continue;
             tables[t.Name] = TableJson(t.Name, data, DesignResults.IsDesignTable(t.Name) ? Math.Max(mostRows, DesignMostRows) : mostRows, notes, null);
         }
+        if (withTables) AddEverything(e, known, wanted, cases, combos, tables, mostRows, notes, manifest);
         if (withTables && tables.Count <= 1 && !info.Locked) notes.Add("The analysis has not been run, so the pack holds the model without results.");
         if (withTables) manifest["design"] = AddDesign(e, info, known, tables, designFiles ?? [], Math.Max(mostRows, DesignMostRows), notes);
         if (withTables && (areas.Any(a => a.Kind == "wall") || tables.Select(t => t.Key).Any(n => DesignResults.FamilyOf(n) is { On: "pier" or "spandrel" })))
@@ -139,6 +140,36 @@ public static class Pack
             foreach (var (_, table) in tables) Add(zip, $"tables/{++n:000}.json", table!);
         }
         return new Built(stream.ToArray(), content, frames.Count, areas.Count, tables.Select(t => t.Key).ToList(), notes);
+    }
+
+    /// <summary>
+    /// Every other result, design and design-input table that has data (<see cref="PackTables"/>), within the pack's
+    /// total of rows, and the steps of time history and nonlinear cases. What did not fit is named in the manifest, so
+    /// the Viewer can say which tables to ask for.
+    /// </summary>
+    private static void AddEverything(ICsiLink e, IReadOnlyList<TableName> known, IReadOnlyList<TableName> wanted, IReadOnlyList<string> cases,
+        IReadOnlyList<string> combos, JsonObject tables, int mostRows, List<string> notes, JsonObject manifest)
+    {
+        var left = new JsonArray();
+        var budget = PackTables.TotalMostRows;
+        foreach (var t in PackTables.More(known, wanted))
+        {
+            if (tables.ContainsKey(t.Name)) continue;
+            if (budget <= 0) { left.Add((JsonNode)t.Name); continue; }
+            TableData data;
+            try { data = e.ReadTable(t.Key, cases, combos); }
+            catch (EtabsException ex) { notes.Add($"'{t.Name}' could not be read ({ex.Message})."); continue; }
+            if (data.Rows.Count == 0) continue;
+            var most = Math.Min(mostRows, budget);
+            tables[t.Name] = TableJson(t.Name, data, most, notes, PackTables.Kind(t) == "input" ? "input" : null);
+            budget -= Math.Min(data.Rows.Count, most);
+        }
+        PackTables.AddSteps(e, known, cases, combos, tables, mostRows, notes, (name, data, most) => TableJson(name, data, most, notes, null));
+        if (left.Count > 0)
+        {
+            manifest["left_out_tables"] = left;
+            notes.Add($"{left.Count} more result tables did not fit in the pack ({string.Join(", ", left.Take(8).Select(n => n!.GetValue<string>()))}{(left.Count > 8 ? ", ..." : "")}): make the pack again with those tables named, or with fewer load cases.");
+        }
     }
 
     private static JsonObject TableJson(string name, TableData data, int most, List<string> notes, string? from)

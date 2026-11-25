@@ -58,7 +58,9 @@ public sealed record FrameRow(string Name, string Section, string Story, string 
 public sealed record AreaRow(string Name, string Section, string Kind, IReadOnlyList<(double X, double Y, double Z)> Corners);
 public sealed record PointRow(string Name, double X, double Y, double Z);
 public sealed record LoadPatternRow(string Name, string Type, double SelfWeight);
-public sealed record TableName(string Key, string Name, bool Empty);
+/// <param name="Import">The program's import type: 0 for a table that cannot be imported (results, design), more for a
+/// model table, -1 when the link does not say.</param>
+public sealed record TableName(string Key, string Name, bool Empty, int Import = -1);
 public sealed record TableData(IReadOnlyList<string> Fields, IReadOnlyList<string[]> Rows);
 
 /// <summary>ETABS said no, or isn't there: the message is written for the engineer.</summary>

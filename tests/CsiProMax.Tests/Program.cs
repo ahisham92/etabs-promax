@@ -517,7 +517,10 @@ Test("design: shear wall piers and spandrels, concrete beams and columns all go 
     var built = Pack.Build(e, [], [], [], null, null);
     foreach (var t in new[] { "Shear Wall Pier Design Summary - ACI 318-19", "Shear Wall Spandrel Design Summary - ACI 318-19", "Concrete Beam Flexure Envelope - ACI 318-19", "Concrete Column PMM Envelope - ACI 318-19", "Area Assignments - Pier Labels", "Area Assignments - Spandrel Labels" })
         Check(built.Tables.Contains(t), "the pack takes " + t);
-    Check(!built.Tables.Contains("Shear Wall Pier Design Preferences"), "preferences are not results");
+    // Preferences and overwrites are taken beside the design (Ahmed: every design detail in the Viewer), marked as
+    // input, and are never a design of their own.
+    Check(built.Tables.Contains("Shear Wall Pier Design Preferences") && (string?)built.Content["tables"]!["Shear Wall Pier Design Preferences"]!["from"] == "input", "preferences are taken as design input");
+    Check(!built.Content["manifest"]!["design"]!.ToJsonString().Contains("Preferences", StringComparison.Ordinal), "preferences are not a design result");
     var design = built.Content["manifest"]!["design"]!.AsObject();
     foreach (var k in new[] { "pier", "spandrel", "concrete" }) Check(design.ContainsKey(k), "the manifest says where the " + k + " design came from");
     var labels = built.Content["model"]!["wall_labels"]!.AsArray();
@@ -698,7 +701,7 @@ Test("modeler: a building is modelled with no ETABS and saved as an ETABS text f
         Check(drawn["grids"] is JsonArray { Count: 5 } && drawn["frame_sizes"] is JsonObject { Count: > 0 } && drawn["supports"] is JsonArray { Count: 6 }, "the view gets grid lines, section sizes and supports");
         Check(page.Contains("Model Explorer") && page.Contains("window.cpmLive=true") && page.Contains("Elevation View"), "the view is the workbench: explorer, plan, elevation and 3-D");
         Equal("fixed", Drawing.Kind([true, true, true, true, true, true]), "a fixed support"); Equal("pinned", Drawing.Kind([true, true, true, false, false, false]), "a pinned support");
-        Check(CsiProMax.Host.Shortcuts.Due(null, "C:/a") && CsiProMax.Host.Shortcuts.Due("C:/old", "C:/a") && !CsiProMax.Host.Shortcuts.Due("c:/A|2\n", "C:/a") && CsiProMax.Host.Shortcuts.Due("C:/a", "C:/a"), "shortcuts are made once, and again when the program's folder changes");
+        Check(CsiProMax.Host.Shortcuts.Due(null, "C:/a") && CsiProMax.Host.Shortcuts.Due("C:/old", "C:/a") && !CsiProMax.Host.Shortcuts.Due("c:/A" + CsiProMax.Host.Shortcuts.Mark2 + "\n", "C:/a") && CsiProMax.Host.Shortcuts.Due("C:/a", "C:/a"), "shortcuts are made once, and again when the program's folder changes");
         Check(Refused(Endpoint(new MemoryEtabs()), "add_stories", """{"stories":[{"name":"L3","height":3}]}""").Contains("Modeler"), "Modeler tools say so when ETABS is behind");
         Check(CsiProMax.Tools.ToolRegistry.CreateDefault(true).IsBuiltIn("new_model") && !CsiProMax.Tools.ToolRegistry.CreateDefault().IsBuiltIn("new_model"), "Modeler tools are offered in the Modeler only");
     }
@@ -1011,11 +1014,21 @@ Test("scratch window: closing may take three minutes (SAP2000 26 took over one)"
     var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Field", "ScratchProgram.cs"));
     Check(source.Contains("Ask(CloseTimeout, \"close the window\""), "closing does not wait for CloseTimeout");
 });
+Test("shortcuts: the Modeler shortcut starts the installed copy, not a copy unpacked to try a version", () =>
+{
+    var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Panel", "Host", "Shortcuts.cs"));
+    Check(source.Contains("CsiProMax.Assistant.ToolsMenu.InstallFolder()"), "the shortcuts do not ask for the installed copy");
+    var make = source.IndexOf("private static List<string> Make(", StringComparison.Ordinal);
+    Check(make > 0 && !source.Substring(make).Contains("AppContext.BaseDirectory"), "the Modeler shortcut still points at the folder this copy runs from");
+    Check(CsiProMax.Host.Shortcuts.ProgramFolder().EndsWith(Path.DirectorySeparatorChar), "the program folder has no closing separator");
+});
 foreach (var (name, body) in CdtSdkTests.All()) Test(name, body);
 foreach (var (name, body) in HandModelTests.All()) Test(name, body);
 foreach (var (name, body) in AiModeTests.All()) Test(name, body);
+foreach (var (name, body) in WebWindowTests.All()) Test(name, body);
 foreach (var (name, body) in ModelTablesTests.All()) Test(name, body);
 foreach (var (name, body) in ModelerWindowTests.All()) Test(name, body);
+foreach (var (name, body) in LateralTests.All()) Test(name, body);
 foreach (var (name, body) in KeptPlugInsTests.All()) Test(name, body);
 foreach (var (name, body) in StabilityTests.All()) Test(name, body);
 foreach (var (name, body) in FieldRun048Tests.All()) Test(name, body);
