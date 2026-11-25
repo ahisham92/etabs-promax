@@ -517,7 +517,10 @@ Test("design: shear wall piers and spandrels, concrete beams and columns all go 
     var built = Pack.Build(e, [], [], [], null, null);
     foreach (var t in new[] { "Shear Wall Pier Design Summary - ACI 318-19", "Shear Wall Spandrel Design Summary - ACI 318-19", "Concrete Beam Flexure Envelope - ACI 318-19", "Concrete Column PMM Envelope - ACI 318-19", "Area Assignments - Pier Labels", "Area Assignments - Spandrel Labels" })
         Check(built.Tables.Contains(t), "the pack takes " + t);
-    Check(!built.Tables.Contains("Shear Wall Pier Design Preferences"), "preferences are not results");
+    // Preferences and overwrites are taken beside the design (Ahmed: every design detail in the Viewer), marked as
+    // input, and are never a design of their own.
+    Check(built.Tables.Contains("Shear Wall Pier Design Preferences") && (string?)built.Content["tables"]!["Shear Wall Pier Design Preferences"]!["from"] == "input", "preferences are taken as design input");
+    Check(!built.Content["manifest"]!["design"]!.ToJsonString().Contains("Preferences", StringComparison.Ordinal), "preferences are not a design result");
     var design = built.Content["manifest"]!["design"]!.AsObject();
     foreach (var k in new[] { "pier", "spandrel", "concrete" }) Check(design.ContainsKey(k), "the manifest says where the " + k + " design came from");
     var labels = built.Content["model"]!["wall_labels"]!.AsArray();

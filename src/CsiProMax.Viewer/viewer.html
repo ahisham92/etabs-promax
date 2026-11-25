@@ -333,7 +333,7 @@ const opt = {grid: true, extrude: true, fill: true, supports: true, names: false
 const hidden = {kind: new Set(), section: new Set(), objs: new Set()};
 let panes = [], active = 0, layout = 2;
 let forces = new Map(), reacts = new Map(), drifts = new Map();
-const res = {mode: "model", case: "", comp: "M3", scale: 50, fill: true, values: true, ghost: true, range: null, bands: 9, anim: false, dfam: "", dshow: "", dvalues: true, dnames: true};
+const res = {mode: "model", case: "", comp: "M3", scale: 50, fill: true, values: true, ghost: true, range: null, bands: 9, anim: false, dfam: "", dshow: "", dvalues: true, dnames: true, vt: "", vf: "", vcase: ""};
 const sel = new Set(); let hover = 0;
 let bg = "black", bgSaved = false;
 try { const b = localStorage.getItem("cpm-bg"); if (b === "white" || b === "black") { bg = b; bgSaved = true; } } catch (e) {}
@@ -446,7 +446,7 @@ function load(pack, keep) {
   $("units").textContent = u.force && u.length ? u.force + ", " + u.length + (u.temperature ? ", " + u.temperature : "") : "";
   $("story").innerHTML = stories.slice().reverse().map(s => `<option value="${esc(s.name)}">${esc(s.name)}</option>`).join("");
   $("line").innerHTML = allLines().map(g => `<option value="${esc(g.dir + g.label)}">${esc(g.label)}</option>`).join("");
-  readRatios(); readDisplacements(); readMarks(); readForces(); readReactions(); readDrifts(); syncResults();
+  readRatios(); readDisplacements(); readMarks(); readForces(); readReactions(); readDrifts(); readShells(); if (plotSpec && !P.tables[plotSpec.table]) plotSpec = null; syncResults();
   $("drop").style.display = "none";
   sel.clear(); hover = 0;
   for (const k of selNames) { const o = (k[0] === "f" ? frames : areas).find(x => x.name === k.slice(2)); if (o) sel.add(o.id); }
@@ -577,6 +577,7 @@ function designShows(fam) {
 const areaField = name => /^a[sv]|area|rebar|reinf|ast|asc|^al$|^at$/.test(norm(name)) && !/ratio|percent|spacing/.test(norm(name));
 function buildDesignView() {
   dview = null;
+  if (res.mode === "values") return buildValuesView();
   if (res.mode !== "design") return;
   const fam = design.find(f => f.key === res.dfam); if (!fam) return;
   const shows = designShows(fam), show = shows.find(s => s.id === res.dshow) || (res.dshow && res.dshow.startsWith("field:") ? {id: res.dshow, name: res.dshow.slice(6), a: res.dshow.slice(6), ratio: (fam.fields.find(f => f.name === res.dshow.slice(6)) || {}).ratio, area: areaField(res.dshow.slice(6))} : shows[0]);
@@ -636,7 +637,7 @@ function drawDesign(p, g, to, T) {
   g.font = "10.5px Segoe UI, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle";
   const taken = [];
   for (const l of dview.labels) {
-    if (!p.vis || !l.objs.some(o => p.vis[o.id])) continue;
+    if (l.pt ? !ptShown(p, l.at) : !p.vis || !l.objs.some(o => p.vis[o.id])) continue;
     const q = to(l.at); if (!q[3]) continue;
     const tw = g.measureText(l.text).width, x = q[0], y = q[1] + l.dy * 9;
     if (taken.some(r => x - tw / 2 < r[2] && x + tw / 2 > r[0] && y - 6 < r[3] && y + 6 > r[1])) continue;
@@ -743,13 +744,13 @@ function readDrifts() {
     }
   }
 }
-const resCases = mode => { mode = mode || res.mode; return mode === "forces" ? [...forces.keys()] : mode === "reactions" ? [...reacts.keys()] : mode === "deformed" || mode === "contour" ? [...disp.keys()] : [...new Set([...drifts.keys(), ...disp.keys(), ...forces.keys()])]; };
+const resCases = mode => { mode = mode || res.mode; return mode === "shell" ? [...shellRes.keys()] : mode === "forces" ? [...forces.keys()] : mode === "reactions" ? [...reacts.keys()] : mode === "deformed" || mode === "contour" ? [...disp.keys()] : [...new Set([...drifts.keys(), ...disp.keys(), ...forces.keys()])]; };
 const forceComps = [["P", "Axial force"], ["V2", "Shear 2-2"], ["V3", "Shear 3-3"], ["T", "Torsion"], ["M2", "Moment 2-2"], ["M3", "Moment 3-3"]];
-const resComps = mode => { mode = mode || res.mode; return mode === "forces" ? forceComps : mode === "contour" ? [["UZ", "Displacement UZ"], ["UX", "Displacement UX"], ["UY", "Displacement UY"], ["U", "Resultant displacement"]] : mode === "reactions" ? [["FZ", "Vertical FZ"], ["FX", "FX"], ["FY", "FY"], ["ALL", "FX, FY and FZ"]] : []; };
+const resComps = mode => { mode = mode || res.mode; return mode === "shell" ? shellFields.map(s => [s.name, s.name]) : mode === "forces" ? forceComps : mode === "contour" ? [["UZ", "Displacement UZ"], ["UX", "Displacement UX"], ["UY", "Displacement UY"], ["U", "Resultant displacement"]] : mode === "reactions" ? [["FZ", "Vertical FZ"], ["FX", "FX"], ["FY", "FY"], ["ALL", "FX, FY and FZ"]] : []; };
 const compName = () => (resComps().find(c => c[0] === res.comp) || ["", res.comp])[1];
 function syncResults() {
   if (!P) return;
-  const have = {deformed: disp.size, contour: disp.size, forces: forces.size, reactions: reacts.size, ratios: ratio.size, design: design.length, model: 1};
+  const have = {deformed: disp.size, contour: disp.size, forces: forces.size, reactions: reacts.size, ratios: ratio.size, design: design.length, shell: shellRes.size, values: P.tables[res.vt] ? 1 : 0, model: 1};
   if (!have[res.mode] || res.mode === "ratios") res.mode = "model";
   document.querySelectorAll("[data-res]").forEach(b => { b.disabled = !have[b.dataset.res]; b.classList.toggle("on", b.dataset.res === "ratios" ? res.mode === "model" && $("colour").value === "ratio" : b.dataset.res === res.mode && !(res.mode === "model" && $("colour").value === "ratio")); });
   const cases = resCases(), comps = resComps();
@@ -760,6 +761,401 @@ function syncResults() {
   $("scale").disabled = !(res.mode === "deformed" || res.mode === "forces");
   const anim = document.querySelector('[data-act="anim"]'); if (anim) { anim.disabled = res.mode !== "deformed"; anim.classList.toggle("on", res.anim && res.mode === "deformed"); }
   pointsDirty = true;
+}
+
+// ---- every other result the programs show, read from whichever table holds it: shell forces and stresses as
+// contours, any table's values on the model (pier, spandrel, link, spring, hinge, section cut...), story response
+// plots and plot functions (time history, pushover, spectrum, modal). Nothing is analysed here. ----
+let shellRes = new Map(), shellFields = [], plotSpec = null;
+const caseCol = f => col(f, "OutputCase", "Output Case", "Load Case/Combo", "LoadCase", "Load Case", "Case", "Combo", "LoadCombo");
+const stepCol = f => col(f, "StepType", "Step Type");
+const stepNumCol = f => col(f, "StepNum", "Step Num", "StepNumber", "Step");
+const objWords = ["UniqueName", "Unique Name", "Frame", "Beam", "Column", "Brace", "Link", "Area", "Shell", "Wall", "Slab", "Element", "Elem", "Line", "Tendon", "Cable", "Solid"];
+function numericCols(t, skip, all) {
+  const out = [];
+  t.fields.forEach((x, i) => {
+    if (skip.has(i) || !all && /^(story|label|uniquename|outputcase|casetype|steptype|stepnum|steplabel|location|direction|dir|pier|spandrel|joint|point|area|frame|link|element|elem|ishell|shell)$/.test(norm(x))) return;
+    let n = 0, m = 0; for (const r of t.rows.slice(0, 300)) { const v = r[i]; if (v === "" || v === undefined) continue; m++; if (isNum(v)) n++; }
+    if (m > 0 && n >= m * 0.6) out.push({i, name: x});
+  });
+  return out;
+}
+const isShellTable = n => /(forces|stresses|strains)/.test(n) && /(area|shell|slab|plane|solid|wall)/.test(n) && !/(frame|beam|column|brace|link|design|pier|spandrel|strip|cut|summary|definition|assign)/.test(n);
+function readShells() {
+  // The force or stress at each joint of each shell, averaged over the shells that meet at the joint, as the programs
+  // draw their shell contours.
+  shellRes = new Map(); shellFields = [];
+  const aBy = new Map(areas.map(a => [a.name, a]));
+  for (const t of tablesLike(isShellTable)) {
+    const f = t.fields, c = caseCol(f), st = stepCol(f), sn = stepNumCol(f);
+    const j = col(f, "Joint", "Point", "ElemJoint", "Elem Joint", "Node", "PointElm", "AreaPoint", "Area Point", "JointElem");
+    const u = col(f, "UniqueName", "Unique Name", "Area", "Shell", "Slab", "Wall", "Label", "AreaElem", "Element");
+    const gx = col(f, "GlobalX"), gy = col(f, "GlobalY"), gz = col(f, "GlobalZ");
+    if (c < 0 || (j < 0 && u < 0 && gx < 0) || !t.rows.length) continue;
+    const nums = numericCols(t, new Set([c, st, sn, j, u, gx, gy, gz]));
+    const fields = nums.map(n => { let name = n.name; if (shellFields.some(s => s.name === name)) name += " (" + t.name + ")"; const s = {name, i: n.i, t: t.name, stress: /stress/.test(norm(t.name))}; shellFields.push(s); return s; });
+    if (!fields.length) continue;
+    for (const r of t.rows) {
+      if (st >= 0 && /min/i.test(r[st])) continue;
+      const k = caseKey(t, r, c, st, sn);
+      let names = [];
+      if (j >= 0 && pointXyz.has(String(r[j]))) names = [String(r[j])];
+      else if (gx >= 0 && gy >= 0 && gz >= 0) { const n = pointAt.get(key(+r[gx], +r[gy], +r[gz])); if (n !== undefined) names = [String(n)]; }
+      if (!names.length && u >= 0 && aBy.has(String(r[u]))) names = aBy.get(String(r[u])).idx.filter(i => i >= 0).map(i => String(points[i][0]));
+      if (!names.length) continue;
+      let m = shellRes.get(k); if (!m) shellRes.set(k, m = new Map());
+      for (const pn of names) {
+        let a = m.get(pn); if (!a) m.set(pn, a = {});
+        for (const s of fields) { const v = parseFloat(r[s.i]); if (isNaN(v)) continue; const e = a[s.name] || (a[s.name] = [0, 0]); e[0] += v; e[1]++; }
+      }
+    }
+  }
+}
+// Which object, pier, spandrel, joint or story a row of any table is about, and where on the model its value goes.
+function rowPlacer(t) {
+  const f = t.fields, fBy = new Map(frames.map(x => [x.name, x])), aBy = new Map(areas.map(x => [x.name, x])), tn = norm(t.name);
+  // The programs number joints, frames and areas apart, so a table's kind says which a unique name is.
+  const jointTable = /^(joint|diaphragm|pointspring|soilpressure|assembledjoint|point)/.test(tn), areaFirst = /(area|shell|slab|wall|plane|floor)/.test(tn) && !/(frame|beam|column|brace)/.test(tn);
+  const u = jointTable ? -1 : col(f, ...objWords), lab = col(f, "Label"), story = col(f, "Story"), pier = col(f, "Pier", "Pier Label", "PierLabel", "Pier Name"), span = col(f, "Spandrel", "Spandrel Label", "SpandrelLabel", "Spandrel Name");
+  const jt = jointTable ? col(f, "UniqueName", "Unique Name", "Joint", "Point", "Node", "PointLabel", "Label") : col(f, "Joint", "Point", "Node", "PointLabel", "Joint Label"), gx = col(f, "GlobalX", "X"), gy = col(f, "GlobalY", "Y"), gz = col(f, "GlobalZ", "Z");
+  const station = col(f, "Station", "Loc", "ElemStation", "Location"), loc = col(f, "Location");
+  const walls = {pier: new Map(), spandrel: new Map()};
+  for (const o of frames.concat(areas)) for (const k of ["pier", "spandrel"]) if (o[k]) { const key = (o.story || "") + "|" + o[k]; if (!walls[k].has(key)) walls[k].set(key, []); walls[k].get(key).push(o); }
+  const elevOf = s => { const x = stories.find(q => q.name === s); return x ? x.elevation : null; };
+  return r => {
+    const sv = story >= 0 ? String(r[story]) : "";
+    for (const [k, ci] of [["pier", pier], ["spandrel", span]]) if (ci >= 0 && r[ci] !== "" && r[ci] !== undefined) {
+      const objs = walls[k].get(sv + "|" + r[ci]) || [];
+      return {key: k + ":" + sv + "|" + r[ci], label: String(r[ci]), objs, st: loc >= 0 ? String(r[loc]) : ""};
+    }
+    const name = u >= 0 ? String(r[u]) : "", l = lab >= 0 ? String(r[lab]) : "";
+    const o = jointTable ? null : (areaFirst ? aBy.get(name) || fBy.get(name) : fBy.get(name) || aBy.get(name)) || (l && (fBy.get(l + "@" + sv) || (u < 0 ? (areaFirst ? aBy.get(l) || fBy.get(l) : fBy.get(l) || aBy.get(l)) : null)));
+    if (o) return {key: o.type + ":" + o.name, label: o.name, objs: [o], st: station >= 0 ? String(r[station]) : ""};
+    if (jt >= 0 && pointXyz.has(String(r[jt]))) return {key: "p:" + r[jt], label: String(r[jt]), objs: [], at: pointXyz.get(String(r[jt]))};
+    if (gx >= 0 && gy >= 0 && isNum(r[gx]) && isNum(r[gy])) { const z = gz >= 0 && isNum(r[gz]) ? +r[gz] : elevOf(sv) ?? slabLevel(); return {key: "x:" + r[gx] + "," + r[gy] + "," + z, label: "", objs: [], at: [+r[gx], +r[gy], z]}; }
+    if (sv && elevOf(sv) !== null && u < 0 && jt < 0 && lab < 0) return {key: "s:" + sv, label: sv, objs: [], at: [hi[0] + size * 0.03, lo[1], elevOf(sv)]};
+    return null;
+  };
+}
+const valueTables = () => Object.values(P.tables).filter(t => t.rows && t.rows.length && numericCols(t, new Set()).length);
+const tableCases = t => { const c = caseCol(t.fields); if (c < 0) return []; const st = stepCol(t.fields), sn = stepNumCol(t.fields); return [...new Set(t.rows.map(r => caseKey(t, r, c, st, sn)))]; };
+function buildValuesView() {
+  // Any number of any table on the model: on each member, wall, pier, spandrel, joint or story the row names, the
+  // value of largest size for the chosen case, coloured on the model and written beside it.
+  const t = P.tables[res.vt]; if (!t) return;
+  const ci = t.fields.indexOf(res.vf); if (ci < 0) return;
+  const c = caseCol(t.fields), st = stepCol(t.fields), sn = stepNumCol(t.fields), place = rowPlacer(t), items = new Map();
+  for (const r of t.rows) {
+    if (c >= 0 && res.vcase && caseKey(t, r, c, st, sn) !== res.vcase) continue;
+    if (!isNum(r[ci])) continue;
+    const at = place(r); if (!at) continue;
+    const v = parseFloat(r[ci]);
+    let it = items.get(at.key); if (!it) items.set(at.key, it = {...at, v, by: new Map()});
+    if (Math.abs(v) > Math.abs(it.v)) it.v = v;
+    const s = at.st || ""; if (!it.by.has(s) || Math.abs(v) > Math.abs(it.by.get(s))) it.by.set(s, v);
+  }
+  const byObj = new Map(), labels = [], ratio = /ratio|^dc/.test(norm(res.vf));
+  for (const it of items.values()) {
+    for (const o of it.objs) byObj.set(o.id, Math.abs(it.v) > Math.abs(byObj.get(o.id) ?? 0) ? it.v : byObj.get(o.id));
+    if (!res.dvalues) continue;
+    const text = x => (res.dnames && it.label && !it.objs.some(o => o.type === "f") ? it.label + ": " : "") + (ratio ? x.toFixed(3) : fmt(x));
+    if (it.at) { labels.push({at: it.at, text: text(it.v), dy: 0, objs: [], pt: true, v: it.v, over: ratio && it.v > 1}); continue; }
+    if (!it.objs.length) continue;
+    if (it.objs.length === 1 && it.objs[0].type === "f") {
+      const o = it.objs[0], L = len(sub(o.b, o.a)) || 1;
+      let sts = [...it.by.entries()].map(([s, v]) => ({s: isNum(s) ? parseFloat(s) : /^j$|end|top/i.test(s) ? L : /^i$|start|bot/i.test(s) ? 0 : null, v})).sort((a, b) => (a.s ?? 0) - (b.s ?? 0));
+      if (sts.length > 3) { const m = sts.reduce((bi, x, i) => Math.abs(x.v) > Math.abs(sts[bi].v) ? i : bi, 0); sts = [...new Set([0, m, sts.length - 1])].map(i => sts[i]); }
+      for (const g of sts) { const tt = g.s === null ? 0.5 : Math.max(0.04, Math.min(0.96, g.s / L)); labels.push({at: add(o.a, mul(sub(o.b, o.a), tt)), text: text(g.v), dy: 0, objs: it.objs, v: g.v, over: ratio && g.v > 1}); }
+    } else {
+      const pts = it.objs.flatMap(o => o.type === "f" ? [o.a, o.b] : o.pts), lo3 = [0, 1, 2].map(i => Math.min(...pts.map(q => q[i]))), hi3 = [0, 1, 2].map(i => Math.max(...pts.map(q => q[i])));
+      const mid = [0, 1, 2].map(i => (lo3[i] + hi3[i]) / 2), h = hi3[2] - lo3[2], ax = hi3[0] - lo3[0] >= hi3[1] - lo3[1] ? 0 : 1;
+      for (const [s, v] of it.by) {
+        const at = mid.slice(), n = norm(s);
+        if (/top/.test(n)) at[2] = hi3[2] - h * 0.18; else if (/bot/.test(n)) at[2] = lo3[2] + h * 0.18;
+        else if (/left|^i$|start/.test(n)) at[ax] = lo3[ax] + (hi3[ax] - lo3[ax]) * 0.2; else if (/right|^j$|end/.test(n)) at[ax] = hi3[ax] - (hi3[ax] - lo3[ax]) * 0.2;
+        labels.push({at, text: text(v), dy: 0, objs: it.objs, v, over: ratio && v > 1});
+      }
+    }
+  }
+  const vs = [...byObj.values()].filter(v => isFinite(v)).concat(labels.filter(l => l.pt).map(l => l.v));
+  dview = {fam: {key: "values", name: t.name}, show: {id: "values", name: res.vf, ratio}, byObj, labels, items: items.size, lo: vs.length ? Math.min(...vs) : 0, hi: vs.length ? Math.max(...vs) : 1, k: 1, suffix: "",
+    title: t.name + " · " + res.vf + (res.vcase ? " · " + res.vcase : "")};
+}
+function ptShown(p, at) {
+  if (p.mode === "plan") { const z = elevationOf(p.story); return z === null || Math.abs(at[2] - z) <= Math.max(tol() * 10, 1e-3); }
+  if (p.mode === "elev" && p.line) return onLine(at, p.line);
+  return true;
+}
+// ---- the values window: Display > Table Values on Model, and its short ways in (pier, spandrel, link, spring...) ----
+const valuePresets = {
+  pier: [/^pierforces/, /^m3$/], spandrel: [/^spandrelforces/, /^v2$/], link: [/link.*(force|deform)|(force|deform).*link/, /^(p|u1)$/],
+  spring: [/spring|soilpressure/, /^(f3|fz|pressure)$/], hinge: [/hinge/, /state|^(rotation|r3plastic|r2plastic)$/], cut: [/sectioncut/, /^(f1|fx|p)$/],
+  joint: [/^joint(?!displacement|reaction)/, /./], tendon: [/tendon|cable/, /^(p|f)$/],
+};
+function openValues(kind) {
+  const list = valueTables(); if (!list.length) return;
+  const pre = valuePresets[kind];
+  let cur = P.tables[res.vt] && list.includes(P.tables[res.vt]) && !pre ? P.tables[res.vt] : (pre && list.find(t => pre[0].test(norm(t.name)))) || list[0];
+  const fieldOpts = t => { const ns = numericCols(t, new Set()); const want = pre ? ns.find(n => pre[1].test(norm(n.name))) : null; const pick = t.name === res.vt && ns.some(n => n.name === res.vf) ? res.vf : (want || ns[0] || {}).name; return opts(ns.map(n => n.name), pick); };
+  const caseOpts = t => { const cs = tableCases(t); return cs.length ? `<option value="">All cases (largest value)</option>` + opts(cs, cs.includes(res.vcase) ? res.vcase : cs.find(c => !/mode/i.test(c)) || cs[0]) : `<option value="">(this table has no load cases)</option>`; };
+  const title = {pier: "Pier Forces", spandrel: "Spandrel Forces", link: "Link Forces and Deformations", spring: "Spring Forces and Soil Pressures", hinge: "Hinge Results", cut: "Section Cut Forces", joint: "Joint Results", tendon: "Tendon and Cable Results"}[kind] || "Table Values on Model";
+  const d = dialog(title, `
+    <fieldset><legend>Table</legend><div class="g2"><span>Table</span><select id="vT">${opts(list.map(t => t.name), cur.name)}</select><span>Value</span><select id="vF">${fieldOpts(cur)}</select><span>Case/Combo</span><select id="vC">${caseOpts(cur)}</select></div></fieldset>
+    <fieldset><legend>Options</legend><div class="g3"><label><input type="checkbox" id="vVals" ${res.dvalues ? "checked" : ""}>Show values on the model</label><label><input type="checkbox" id="vNames" ${res.dnames ? "checked" : ""}>Names with the values</label></div></fieldset>
+    <p class="kv" id="vNote"></p>`,
+    [["OK", d => applyValues(d)], ["Apply", d => { applyValues(d); return false; }, true], ["Cancel"]], {width: 520});
+  const note = () => { const t = P.tables[q(d, "#vT").value], place = rowPlacer(t); let n = 0; for (const r of t.rows.slice(0, 2000)) if (place(r)) n++; q(d, "#vNote").textContent = n ? `${t.rows.length} rows; each is shown on the member, wall, pier, spandrel, joint or story it names.` : `The rows of this table name nothing this pack's model has, so it is only in Display > Tables, and in Plot Functions.`; };
+  q(d, "#vT").onchange = () => { const t = P.tables[q(d, "#vT").value]; q(d, "#vF").innerHTML = fieldOpts(t); q(d, "#vC").innerHTML = caseOpts(t); note(); };
+  note();
+}
+function applyValues(d) {
+  res.mode = "values"; res.vt = q(d, "#vT").value; res.vf = q(d, "#vF").value; res.vcase = q(d, "#vC").value; res.dvalues = q(d, "#vVals").checked; res.dnames = q(d, "#vNames").checked;
+  if ($("colour").value === "ratio") $("colour").value = "kind";
+  colourDirty = true; syncResults(); panes.forEach(p => p.diagSig = ""); syncTools(); draw();
+}
+// ---- the shell forces and stresses window ----
+function openShells() {
+  if (!shellRes.size) return;
+  const cases = [...shellRes.keys()], cur = res.mode === "shell" ? res.comp : (shellFields.find(s => /^m11$/i.test(s.name)) || shellFields[0]).name;
+  const group = (st) => shellFields.filter(s => s.stress === st).map(s => `<label><input type="radio" name="comp" value="${esc(s.name)}" ${s.name === cur ? "checked" : ""}>${esc(s.name)}</label>`).join("");
+  dialog("Shell Forces/Stresses", `
+    <fieldset><legend>Load Case/Load Combination</legend><div class="g2"><span>Case/Combo name</span><select id="dCase">${caseGroups(cases)}</select></div></fieldset>
+    ${shellFields.some(s => !s.stress) ? `<fieldset><legend>Forces and moments (per unit length)</legend><div class="g4">${group(false)}</div></fieldset>` : ""}
+    ${shellFields.some(s => s.stress) ? `<fieldset><legend>Stresses</legend><div class="g4">${group(true)}</div></fieldset>` : ""}
+    <fieldset><legend>Contour Range</legend><div class="g2"><label><input type="radio" name="rg" value="auto" ${res.range ? "" : "checked"}>Auto</label><span></span><label><input type="radio" name="rg" value="user" ${res.range ? "checked" : ""}>Minimum</label><input type="number" step="any" id="dMin" value="${res.range ? res.range[0] : ""}"><span style="padding-left:22px">Maximum</span><input type="number" step="any" id="dMax" value="${res.range ? res.range[1] : ""}"></div></fieldset>
+    <p class="kv">Values at each joint are averaged over the shells that meet there.</p>`,
+    [["OK", d => applyShells(d)], ["Apply", d => { applyShells(d); return false; }, true], ["Cancel"]], {width: 560});
+}
+function applyShells(d) {
+  res.mode = "shell"; syncResults(); res.case = q(d, "#dCase").value; const c = q(d, "[name=comp]:checked"); if (c) res.comp = c.value;
+  const a = parseFloat(q(d, "#dMin").value), b = parseFloat(q(d, "#dMax").value);
+  res.range = q(d, "[name=rg]:checked").value === "user" && !isNaN(a) && !isNaN(b) && b > a ? [a, b] : null;
+  $("case").value = res.case; pointsDirty = true; syncResults(); syncTools(); draw();
+}
+// ---- story response plots and plot functions ----
+const storyPresets = [
+  ["Maximum story displacement", /^storymaxoveravgdisplacements$|^diaphragmcenterofmassdisplacements$|^storydisplacements$/, /^(maximum|max|ux|uy)$/],
+  ["Maximum story drifts", /^storydrifts$/, /^drift$/],
+  ["Story shears", /^storyforces$/, /^v[xy]$/],
+  ["Story overturning moments", /^storyforces$/, /^m[xy]$/],
+  ["Story axial force", /^storyforces$/, /^p$/],
+  ["Story torsion", /^storyforces$/, /^t$/],
+  ["Story stiffness", /^storystiffness$/, /stiff/],
+  ["Story accelerations", /accel/, /^(ux|uy|accel.*)$/],
+  ["Max over average drifts", /^storymaxoveravgdrifts$/, /ratio/],
+  ["Center of mass displacements", /^diaphragmcenterofmassdisplacements$/, /^u[xy]$/],
+];
+const storyTables = () => Object.values(P.tables).filter(t => t.rows && t.rows.length && col(t.fields, "Story") >= 0 && numericCols(t, new Set([col(t.fields, "Story")])).length);
+function storySeries(spec) {
+  const t = P.tables[spec.table]; if (!t) return null;
+  const f = t.fields, s = col(f, "Story"), c = caseCol(f), st = stepCol(f), sn = stepNumCol(f), dir = col(f, "Direction", "Dir"), lc = col(f, "Location");
+  const fi = spec.fields.map(n => f.indexOf(n)).filter(i => i >= 0);
+  const series = new Map();
+  for (const r of t.rows) {
+    if (c >= 0 && spec.case && caseKey(t, r, c, st, sn) !== spec.case) continue;
+    const story = stories.find(x => x.name === String(r[s])); if (!story) continue;
+    const where = lc >= 0 && /bot/i.test(r[lc]) ? story.elevation - (story.height || 0) : story.elevation;
+    for (const i of fi) {
+      if (!isNum(r[i])) continue;
+      const name = f[i] + (dir >= 0 && r[dir] ? " (" + r[dir] + ")" : ""), v = parseFloat(r[i]);
+      let m = series.get(name); if (!m) series.set(name, m = new Map());
+      const k = where.toFixed(6) + "|" + (lc >= 0 ? String(r[lc]) : "");
+      if (!m.has(k) || Math.abs(v) > Math.abs(m.get(k).v)) m.set(k, {z: where, v, top: !(lc >= 0 && /bot/i.test(r[lc]))});
+    }
+  }
+  return [...series.entries()].map(([name, m]) => ({name, pts: [...m.values()].sort((a, b) => a.z - b.z || (a.top ? -1 : 1))}));
+}
+function xySeries(spec) {
+  const t = P.tables[spec.table]; if (!t) return null;
+  const f = t.fields, c = caseCol(f), st = stepCol(f), sn = stepNumCol(f), xi = f.indexOf(spec.x), fc = spec.filterCol ? f.indexOf(spec.filterCol) : -1;
+  const out = spec.ys.map(n => ({name: n, i: f.indexOf(n), pts: []})).filter(s => s.i >= 0);
+  t.rows.forEach((r, n) => {
+    if (c >= 0 && spec.case && String(r[c]) !== spec.case && caseKey(t, r, c, st, sn) !== spec.case) return;
+    if (fc >= 0 && spec.filter !== "" && String(r[fc]) !== spec.filter) return;
+    if (st >= 0 && /^(max|min)$/i.test(String(r[st]).trim())) return;
+    const x = xi >= 0 ? parseFloat(r[xi]) : n + 1; if (isNaN(x)) return;
+    for (const s of out) if (isNum(r[s.i])) s.pts.push([x, parseFloat(r[s.i])]);
+  });
+  if (spec.sort) out.forEach(s => s.pts.sort((a, b) => a[0] - b[0]));
+  return out;
+}
+function niceTicks(a, b, n) {
+  if (!(b > a)) { b = a + 1; }
+  const step0 = (b - a) / n, mag = Math.pow(10, Math.floor(Math.log10(step0))), step = [1, 2, 2.5, 5, 10].map(k => k * mag).find(s => s >= step0) || step0;
+  const s0 = Math.floor(a / step) * step, out = []; for (let v = s0; v <= b + step * 1e-6; v += step) out.push(+v.toPrecision(12)); return out;
+}
+function drawStoryPlot(p, g, T, w, h) {
+  const spec = plotSpec && plotSpec.kind === "story" ? plotSpec : defaultStorySpec();
+  g.fillStyle = T.text; g.font = "12px Segoe UI, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle";
+  const series = spec && storySeries(spec);
+  if (!series || !series.length || !series.some(s => s.pts.length)) { g.fillText(spec ? "Nothing to plot for this choice: " + spec.table + (spec.case ? " · " + spec.case : "") : "This pack has no story results to plot.", w / 2, h / 2); return; }
+  const L = 86, R = 24, Tm = 40, B = 48, all = series.flatMap(s => s.pts), colours = [T.column, T.negEdge, T.beam, T.brace, "#9b59b6", "#16a085", "#e67e22", "#7f8c8d"];
+  let vmin = Math.min(0, ...all.map(q => q.v)), vmax = Math.max(0, ...all.map(q => q.v)); if (!(vmax > vmin)) vmax = vmin + 1;
+  const ticks = niceTicks(vmin, vmax, 5); vmin = Math.min(vmin, ticks[0]); vmax = Math.max(vmax, ticks[ticks.length - 1]);
+  const z0 = stories[0].elevation, z1 = stories[stories.length - 1].elevation, X = v => L + (w - L - R) * (v - vmin) / (vmax - vmin), Y = z => h - B - (h - B - Tm) * (z - z0) / ((z1 - z0) || 1);
+  g.lineWidth = 1; g.setLineDash([]); g.textAlign = "right"; g.font = "10.5px Segoe UI, sans-serif";
+  const every = Math.max(1, Math.ceil(stories.length * 14 / Math.max(1, h - B - Tm)));
+  stories.forEach((s, i) => { g.strokeStyle = css(T.level); g.beginPath(); g.moveTo(L, Y(s.elevation)); g.lineTo(w - R, Y(s.elevation)); g.stroke(); if (i % every === 0 || i === stories.length - 1) { g.fillStyle = T.text; g.fillText(s.name, L - 6, Y(s.elevation)); } });
+  g.textAlign = "center";
+  for (const v of ticks) { const x = X(v); g.strokeStyle = css(T.level); g.beginPath(); g.moveTo(x, Tm); g.lineTo(x, h - B); g.stroke(); g.fillStyle = T.text; g.fillText(fmt(v), x, h - B + 12); }
+  g.strokeStyle = T.text; g.beginPath(); g.moveTo(L, Tm); g.lineTo(L, h - B); g.lineTo(w - R, h - B); g.stroke();
+  if (vmin < 0) { g.beginPath(); g.moveTo(X(0), Tm); g.lineTo(X(0), h - B); g.stroke(); }
+  series.forEach((s, n) => {
+    g.strokeStyle = g.fillStyle = colours[n % colours.length]; g.lineWidth = 1.8; g.beginPath();
+    s.pts.forEach((q, i) => i ? g.lineTo(X(q.v), Y(q.z)) : g.moveTo(X(q.v), Y(q.z))); g.stroke();
+    for (const q of s.pts) { g.beginPath(); g.arc(X(q.v), Y(q.z), 2.6, 0, 7); g.fill(); }
+    g.textAlign = "left"; g.fillText(s.name, L + 10 + (n % 4) * 150, Tm - 26 + Math.floor(n / 4) * 13);
+  });
+  g.fillStyle = T.text; g.textAlign = "center"; g.fillText(spec.title + (spec.case ? " · " + spec.case : ""), (L + w - R) / 2, h - 14);
+}
+function drawXYPlot(p, g, T, w, h) {
+  const spec = plotSpec, series = xySeries(spec) || [];
+  g.fillStyle = T.text; g.font = "12px Segoe UI, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle";
+  const all = series.flatMap(s => s.pts);
+  if (!all.length) { g.fillText("Nothing to plot for this choice: " + spec.table, w / 2, h / 2); return; }
+  const L = 78, R = 24, Tm = 40, B = 48, colours = [T.column, T.negEdge, T.beam, T.brace, "#9b59b6", "#16a085", "#e67e22", "#7f8c8d"];
+  let x0 = Math.min(...all.map(q => q[0])), x1 = Math.max(...all.map(q => q[0])), y0 = Math.min(0, ...all.map(q => q[1])), y1 = Math.max(0, ...all.map(q => q[1]));
+  const xt = niceTicks(x0, x1, 6), yt = niceTicks(y0, y1, 5); x0 = Math.min(x0, xt[0]); x1 = Math.max(x1, xt[xt.length - 1]); y0 = Math.min(y0, yt[0]); y1 = Math.max(y1, yt[yt.length - 1]);
+  if (!(x1 > x0)) x1 = x0 + 1; if (!(y1 > y0)) y1 = y0 + 1;
+  const X = v => L + (w - L - R) * (v - x0) / (x1 - x0), Y = v => h - B - (h - B - Tm) * (v - y0) / (y1 - y0);
+  g.lineWidth = 1; g.font = "10.5px Segoe UI, sans-serif";
+  for (const v of xt) { g.strokeStyle = css(T.level); g.beginPath(); g.moveTo(X(v), Tm); g.lineTo(X(v), h - B); g.stroke(); g.fillStyle = T.text; g.textAlign = "center"; g.fillText(fmt(v), X(v), h - B + 12); }
+  for (const v of yt) { g.strokeStyle = css(T.level); g.beginPath(); g.moveTo(L, Y(v)); g.lineTo(w - R, Y(v)); g.stroke(); g.fillStyle = T.text; g.textAlign = "right"; g.fillText(fmt(v), L - 6, Y(v)); }
+  g.strokeStyle = T.text; g.beginPath(); g.moveTo(L, Tm); g.lineTo(L, h - B); g.lineTo(w - R, h - B); g.stroke();
+  if (y0 < 0 && y1 > 0) { g.beginPath(); g.moveTo(L, Y(0)); g.lineTo(w - R, Y(0)); g.stroke(); }
+  series.forEach((s, n) => {
+    g.strokeStyle = g.fillStyle = colours[n % colours.length]; g.lineWidth = 1.6; g.beginPath();
+    s.pts.forEach((q, i) => i ? g.lineTo(X(q[0]), Y(q[1])) : g.moveTo(X(q[0]), Y(q[1]))); g.stroke();
+    if (s.pts.length <= 60) for (const q of s.pts) { g.beginPath(); g.arc(X(q[0]), Y(q[1]), 2.4, 0, 7); g.fill(); }
+    const top = s.pts.reduce((b, q) => Math.abs(q[1]) > Math.abs(b[1]) ? q : b, s.pts[0] || [0, 0]);
+    g.textAlign = "left"; g.fillText(s.name + (top ? "   max " + fmt(top[1]) + " at " + fmt(top[0]) : ""), L + 10 + (n % 3) * 210, Tm - 26 + Math.floor(n / 3) * 13);
+  });
+  g.fillStyle = T.text; g.textAlign = "center";
+  g.fillText(spec.title + (spec.filter ? " · " + spec.filterCol + " " + spec.filter : "") + (spec.case ? " · " + spec.case : "") + "   (horizontal: " + (spec.x || "row") + ")", (L + w - R) / 2, h - 14);
+}
+function drawPlot(p, g, T, w, h) { if (plotSpec && plotSpec.kind === "xy") drawXYPlot(p, g, T, w, h); else drawStoryPlot(p, g, T, w, h); }
+function defaultStorySpec() {
+  const t = Object.values(P.tables).find(t => norm(t.name) === "storydrifts" && t.rows.length) || storyTables()[0];
+  if (!t) return null;
+  const f = t.fields.find(x => norm(x) === "drift") || numericCols(t, new Set([col(t.fields, "Story")]))[0].name;
+  return {kind: "story", table: t.name, fields: [f], case: drifts.has(res.case) ? res.case : (tableCases(t).find(c => !/mode/i.test(c)) || tableCases(t)[0] || ""), title: norm(t.name) === "storydrifts" ? "Maximum story drift" : t.name};
+}
+function showPlot(spec) {
+  plotSpec = spec;
+  const p = panes.find(x => x.mode === "plot") || panes[active];
+  if (p && p.mode !== "plot") setMode(p, "plot"); else draw();
+  syncTools();
+}
+function openStoryPlot() {
+  const list = storyTables(); if (!list.length) return;
+  const have = storyPresets.filter(s => list.some(t => s[1].test(norm(t.name))));
+  const cur = plotSpec && plotSpec.kind === "story" ? plotSpec : defaultStorySpec();
+  const fieldBoxes = (t, pick) => numericCols(t, new Set([col(t.fields, "Story")])).map(n => `<label><input type="checkbox" data-f="${esc(n.name)}" ${pick(n.name) ? "checked" : ""}>${esc(n.name)}</label>`).join("");
+  const caseOpts = t => { const cs = tableCases(t); return cs.length ? opts(cs, cs.includes(cur && cur.case) ? cur.case : cs.find(c => !/mode/i.test(c)) || cs[0]) : `<option value="">(no load cases)</option>`; };
+  const d = dialog("Story Response Plots", `
+    <fieldset><legend>Display Type</legend><div class="g2"><span>Display type</span><select id="sP">${opts([["", "Any story table"], ...have.map(s => [s[0], s[0]])], have.length && cur && cur.title && have.some(s => s[0] === cur.title) ? cur.title : "")}</select><span>Table</span><select id="sT">${opts(list.map(t => t.name), cur ? cur.table : list[0].name)}</select><span>Case/Combo</span><select id="sC"></select></div></fieldset>
+    <fieldset><legend>Values plotted</legend><div class="g3" id="sF"></div></fieldset>
+    <p class="kv">Each value is plotted at its story (top and bottom where the table gives both), one line per direction.</p>`,
+    [["OK", d => applyStoryPlot(d)], ["Apply", d => { applyStoryPlot(d); return false; }, true], ["Cancel"]], {width: 560});
+  const fill = (pick) => { const t = P.tables[q(d, "#sT").value]; q(d, "#sF").innerHTML = fieldBoxes(t, pick); q(d, "#sC").innerHTML = caseOpts(t); };
+  fill(n => cur ? cur.fields.includes(n) : false);
+  if (!d.querySelector("[data-f]:checked")) { const b = d.querySelector("[data-f]"); if (b) b.checked = true; }
+  q(d, "#sP").onchange = () => { const pr = storyPresets.find(s => s[0] === q(d, "#sP").value); if (!pr) return; const t = list.find(t => pr[1].test(norm(t.name))); q(d, "#sT").value = t.name; fill(n => pr[2].test(norm(n))); };
+  q(d, "#sT").onchange = () => { q(d, "#sP").value = ""; fill((n, i) => false); const b = d.querySelector("[data-f]"); if (b) b.checked = true; };
+}
+function applyStoryPlot(d) {
+  const fields = [...d.querySelectorAll("[data-f]:checked")].map(x => x.dataset.f); if (!fields.length) return false;
+  showPlot({kind: "story", table: q(d, "#sT").value, fields, case: q(d, "#sC").value, title: q(d, "#sP").value || q(d, "#sT").value});
+}
+const xyPresets = {
+  history: [/stepbystep/, /^(stepnum|time)$/], pushover: [/pushover|capacitycurve/, /displ|^d$|^u[123xyz]?$/, /force|shear|^v/], spectrum: [/responsespectrum/, /^period$/, /^(value|accel|sa)/],
+  modal: [/^modalperiods|^modalparticipat/, /^mode$/], buckling: [/buckling/, /^mode$/], energy: [/energy|virtualwork/, /^(stepnum|time)$/], function: [/^functions/, /^(time|period)$/],
+};
+function openPlotFunctions(kind) {
+  const list = Object.values(P.tables).filter(t => t.rows && t.rows.length > 1 && numericCols(t, new Set(), true).length); if (!list.length) return;
+  const pre = xyPresets[kind];
+  const cur = plotSpec && plotSpec.kind === "xy" && !pre && P.tables[plotSpec.table] ? P.tables[plotSpec.table] : (pre && list.find(t => pre[0].test(norm(t.name)))) || list.find(t => /stepbystep/.test(norm(t.name))) || list[0];
+  const title = {history: "Plot Functions - Time History Traces", pushover: "Static Pushover Curve", spectrum: "Response Spectrum Curves", modal: "Modal Results Plot", buckling: "Buckling Factors Plot", energy: "Energy Plot", function: "Function Graphs"}[kind] || "Plot Functions";
+  const d = dialog(title, `
+    <fieldset><legend>Table</legend><div class="g2"><span>Table</span><select id="xT">${opts(list.map(t => t.name), cur.name)}</select><span>Case/Combo</span><select id="xC"></select><span>For</span><span style="display:flex;gap:4px"><select id="xFc" style="flex:1"></select><select id="xFv" style="flex:1"></select></span><span>Horizontal axis</span><select id="xX"></select></div></fieldset>
+    <fieldset><legend>Vertical axis (one line each)</legend><div class="g3" id="xY"></div></fieldset>
+    <label><input type="checkbox" id="xSort" checked>Sort by the horizontal value</label>`,
+    [["OK", d => applyPlotFunctions(d, title)], ["Apply", d => { applyPlotFunctions(d, title); return false; }, true], ["Cancel"]], {width: 580});
+  const fill = () => {
+    const t = P.tables[q(d, "#xT").value], nums = numericCols(t, new Set(), true), c = caseCol(t.fields);
+    const xPick = (nums.find(n => (pre ? pre[1] : /^(stepnum|time|period|mode|frequency|step)$/).test(norm(n.name))) || nums.find(n => /^(stepnum|time|period|mode|step)$/.test(norm(n.name))) || {}).name;
+    q(d, "#xX").innerHTML = `<option value="">Row number</option>` + opts(nums.map(n => n.name), xPick);
+    const cs = c >= 0 ? [...new Set(t.rows.map(r => String(r[c])))] : [];
+    q(d, "#xC").innerHTML = cs.length ? `<option value="">All</option>` + opts(cs, cs.find(x => !/^modal$/i.test(x)) || cs[0]) : `<option value="">(no load cases)</option>`;
+    const text = t.fields.map((x, i) => i).filter(i => i !== c && !nums.some(n => n.i === i) && !/^(casetype|steptype|units?)$/.test(norm(t.fields[i])) && new Set(t.rows.slice(0, 5000).map(r => r[i])).size > 1);
+    const objCol = text.find(i => /^(uniquename|joint|point|story|label|frame|area|link|pier|spandrel|name|function|element|beam|column|brace|wall)$/.test(norm(t.fields[i])));
+    q(d, "#xFc").innerHTML = `<option value="">(all rows)</option>` + opts(text.map(i => t.fields[i]), objCol === undefined ? "" : t.fields[objCol]);
+    const fv = () => { const i = t.fields.indexOf(q(d, "#xFc").value); q(d, "#xFv").innerHTML = i < 0 ? "" : opts([...new Set(t.rows.map(r => String(r[i])))].slice(0, 3000), ""); q(d, "#xFv").disabled = i < 0; };
+    q(d, "#xFc").onchange = fv; fv();
+    const ys = nums.filter(n => n.name !== xPick && !/^(stepnum|step|mode|time)$/.test(norm(n.name)));
+    const yi = Math.max(0, pre && pre[2] ? ys.findIndex(n => pre[2].test(norm(n.name))) : 0);
+    q(d, "#xY").innerHTML = ys.map((n, k) => `<label><input type="checkbox" data-y="${esc(n.name)}" ${k === yi ? "checked" : ""}>${esc(n.name)}</label>`).join("");
+  };
+  q(d, "#xT").onchange = fill; fill();
+}
+function applyPlotFunctions(d, title) {
+  const ys = [...d.querySelectorAll("[data-y]:checked")].map(x => x.dataset.y); if (!ys.length) return false;
+  showPlot({kind: "xy", table: q(d, "#xT").value, x: q(d, "#xX").value, ys, case: q(d, "#xC").value, filterCol: q(d, "#xFc").value, filter: q(d, "#xFc").value ? q(d, "#xFv").value : "", sort: q(d, "#xSort").checked, title: title.replace(/^Plot Functions - /, "")});
+}
+// ---- mode shapes: the deformed shape of each mode, with its period ----
+const modeCases = () => [...disp.keys()].filter(c => / · Mode \d+$/.test(c));
+function periodOf(c) {
+  const m = / · Mode (\d+)$/.exec(c || ""); if (!m) return "";
+  const t = Object.values(P.tables).find(t => /^modalperiodsandfrequencies$|^modalparticipatingmassratios$/.test(norm(t.name))); if (!t) return "";
+  const mi = col(t.fields, "Mode"), pi = col(t.fields, "Period"), ci = caseCol(t.fields), name = c.replace(/ · Mode \d+$/, "");
+  const r = t.rows.find(r => +r[mi] === +m[1] && (ci < 0 || String(r[ci]) === name)); return r && pi >= 0 ? "T = " + fmt(parseFloat(r[pi])) + " sec" : "";
+}
+function openModes() {
+  const ms = modeCases(); if (!ms.length) return;
+  dialog("Mode Shape", `<fieldset><legend>Mode</legend><div class="g2"><span>Case and mode</span><select id="dCase">${ms.map(c => `<option ${c === res.case ? "selected" : ""} value="${esc(c)}">${esc(c)}${periodOf(c) ? "   " + esc(periodOf(c)) : ""}</option>`).join("")}</select></div></fieldset>
+    <fieldset><legend>Options</legend><div class="g3"><label><input type="checkbox" id="dAnim" ${res.anim ? "checked" : ""}>Animate</label><label><input type="checkbox" id="dGhost" ${res.ghost ? "checked" : ""}>Wire shadow (undeformed)</label></div></fieldset>`,
+    [["OK", d => { res.mode = "deformed"; res.ghost = q(d, "#dGhost").checked; res.anim = q(d, "#dAnim").checked; syncResults(); res.case = q(d, "#dCase").value; $("case").value = res.case; pointsDirty = true; syncResults(); syncTools(); draw(); }], ["Cancel"]], {width: 420});
+}
+// ---- every table row about one object, for its information window ----
+function objectRows(o) {
+  const out = [];
+  for (const t of Object.values(P.tables)) {
+    if (!t.rows || !t.rows.length) continue;
+    const place = rowPlacer(t), mine = [];
+    for (const r of t.rows) { const at = place(r); if (at && at.objs.includes(o)) { mine.push(r); if (mine.length >= 200) break; } }
+    if (mine.length) out.push({t, rows: mine});
+  }
+  return out;
+}
+function rowsHtml(t, rows, most) {
+  const keep = t.fields.map((f, i) => rows.some(r => r[i] !== "" && r[i] !== undefined) ? i : -1).filter(i => i >= 0);
+  return `<p class="kv" style="margin:8px 0 3px">${esc(t.name)}${t.from === "input" ? " (design or load input)" : ""}${rows.length > most ? ` · first ${most} of ${rows.length} rows` : ""}</p><div class="scroll" style="max-height:220px"><table class="list"><tr>${keep.map(i => `<th>${esc(t.fields[i])}</th>`).join("")}</tr>${rows.slice(0, most).map(r => `<tr>${keep.map(i => `<td class="${isNum(r[i]) ? "r" : ""}">${esc(r[i])}</td>`).join("")}</tr>`).join("")}</table></div>`;
+}
+// What the Viewer shows of each kind of result, for Help > Results Coverage: the menu item, and whether this pack has it.
+function coverage() {
+  const has = re => Object.values(P.tables).some(t => t.rows && t.rows.length && re.test(norm(t.name)));
+  return [
+    ["Deformed shape, every case and combination", "Display > Deformed Shape", disp.size > 0],
+    ["Mode shapes with periods", "Display > Mode Shapes", modeCases().length > 0],
+    ["Joint displacement contours", "Display > Joint Displacement Contours", disp.size > 0],
+    ["Support and spring reactions", "Display > Support Reactions", reacts.size > 0],
+    ["Frame forces and moments (P V2 V3 T M2 M3)", "Display > Frame Forces and Moments", forces.size > 0],
+    ["Shell forces and stresses (F11 ... M22, S11 ... SVM)", "Display > Shell Forces/Stresses", shellRes.size > 0],
+    ["Pier and spandrel forces", "Display > Pier and Spandrel Forces", has(/pierforces|spandrelforces/)],
+    ["Link and spring forces and deformations", "Display > Link Forces", has(/link|spring/)],
+    ["Hinge results", "Display > Hinge Results", has(/hinge/)],
+    ["Section cut forces", "Display > Section Cut Forces", has(/sectioncut/)],
+    ["Any value of any result table on the model", "Display > Table Values on Model", valueTables().length > 0],
+    ["Story response plots (displacement, drift, shear, overturning, stiffness...)", "Display > Story Response Plots", storyTables().length > 0],
+    ["Time history traces", "Display > Plot Functions", has(/stepbystep/)],
+    ["Static pushover curve", "Display > Static Pushover Curve", has(/pushover|capacitycurve/)],
+    ["Response spectrum curves", "Display > Response Spectrum Curves", has(/responsespectrum/)],
+    ["Modal periods, frequencies and participation", "Display > Tables", has(/^modal/)],
+    ["Base reactions, story forces, centers of mass and rigidity", "Display > Tables", has(/basereaction|storyforces|centersofmass/)],
+    ["Design results of every kind, with details", "Design menu", design.length > 0],
+    ["Design preferences and overwrites", "an object's Design tab, and Display > Tables", has(/overwrite|preference/)],
+    ["Every table of the pack", "Display > Tables", Object.keys(P.tables).length > 0],
+  ];
 }
 
 // ---- vectors and matrices (column-major, as WebGL takes them) ----
@@ -1135,12 +1531,21 @@ function litHas(id) { const o = objOf(id); return o && lit.type === o.type && li
 let contour = null;
 function contourOf() {
   // The chosen displacement at every point of the case, and the range the colours cover.
+  if (res.mode === "shell") {
+    const m = shellRes.get(res.case); if (!m) return null;
+    const vals = new Map(); let a0 = 1e30, b0 = -1e30;
+    m.forEach((o, pn) => { const e = o[res.comp]; if (!e || !e[1]) return; const v = e[0] / e[1]; vals.set(pn, v); a0 = Math.min(a0, v); b0 = Math.max(b0, v); });
+    if (!vals.size) return null;
+    if (res.range) { a0 = res.range[0]; b0 = res.range[1]; }
+    if (!(b0 > a0)) b0 = a0 + 1e-12;
+    return {lo: a0, hi: b0, at: pn => vals.get(pn), title: res.comp};
+  }
   if (res.mode !== "contour" || !disp.has(res.case)) return null;
   const map = disp.get(res.case), i = {UX: 0, UY: 1, UZ: 2}[res.comp], val = d => i === undefined ? Math.hypot(...d) : d[i];
   let a = 1e30, b = -1e30; map.forEach(d => { const v = val(d); a = Math.min(a, v); b = Math.max(b, v); });
   if (res.range) { a = res.range[0]; b = res.range[1]; }
   if (!(b > a)) b = a + 1e-12;
-  return {lo: a, hi: b, val, map, title: compName() + (unit ? ", " + unit : "")};
+  return {lo: a, hi: b, val, map, at: pn => { const d = map.get(pn); return d ? val(d) : undefined; }, title: compName() + (unit ? ", " + unit : "")};
 }
 function deformK() {
   if (res.mode !== "deformed" || !disp.has(res.case)) return 0;
@@ -1155,7 +1560,8 @@ function uploadPoints() {
   for (let i = 0; i < n; i++) {
     const d = dm && dm.get(String(points[i][0]));
     if (d) { data[i * 4] = d[0]; data[i * 4 + 1] = d[1]; data[i * 4 + 2] = d[2]; }
-    data[i * 4 + 3] = contour && d ? contour.val(d) : -1e30;
+    const cv = contour ? contour.at(String(points[i][0])) : undefined;
+    data[i * 4 + 3] = cv === undefined ? -1e30 : cv;
   }
   gl.bindTexture(gl.TEXTURE_2D, ptsTex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, TEXW, rows, 0, gl.RGBA, gl.FLOAT, data);
   pointsDirty = false;
@@ -1302,7 +1708,7 @@ let curDefK = 0;
 function drawScene(p, M, R, dpr, mode) {
   // mode 0 draws for the eye, mode 1 draws object numbers for picking.
   const T = theme(), extrude = opt.extrude && opt.sections && res.mode !== "forces", see = !extrude || opt.see || p.mode !== "3d";
-  const contourOn = res.mode === "contour" && contour;
+  const contourOn = (res.mode === "contour" || res.mode === "shell") && contour;
   const L = unitv(add(add(mul(M.d, -0.55), mul(M.up, 0.75)), mul(M.right, -0.35)));
   gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.depthMask(true); gl.disable(gl.BLEND);
   const solids = (buf, alpha, noContour) => {
@@ -1455,7 +1861,7 @@ function overlay(p, g, M, T, w, h) {
     g.beginPath(); g.moveTo(q[0], q[1]); g.lineTo(q[0] + 10, q[1] - 12); g.lineTo(q[0] + 22, q[1] - 12); g.lineTo(q[0] + 22, q[1] - 24); g.lineTo(q[0] + 4, q[1] - 24); g.lineTo(q[0] + 4, q[1] - 12); g.closePath();
     g.fillStyle = "#f0a020"; g.fill(); g.strokeStyle = "#7a4a00"; g.lineWidth = 1; g.stroke();
   }
-  if (res.mode === "contour" && contour) { const nb = bandSet().length, step = (contour.hi - contour.lo) / nb, dec = Math.max(0, Math.min(6, Math.ceil(-Math.log10(Math.abs(step) || 1)) + 1)); hScale(g, T, w, h, contour.title + " · " + res.case, bandSet(), k => (contour.lo + step * k).toFixed(dec)); }
+  if ((res.mode === "contour" || res.mode === "shell") && contour) { const nb = bandSet().length, step = (contour.hi - contour.lo) / nb, dec = Math.max(0, Math.min(6, Math.ceil(-Math.log10(Math.abs(step) || 1)) + 1)); hScale(g, T, w, h, contour.title + " · " + res.case, bandSet(), k => (contour.lo + step * k).toFixed(dec)); }
   else if (dview && dview.show.ratio) hScale(g, T, w, h, dview.title, ratioCols, k => ["0.00", "0.50", "0.70", "0.90", "1.00", ">1"][k]);
   else if (dview) { const nb = bandSet().length, step = (dview.hi - dview.lo) / nb; hScale(g, T, w, h, dview.title, bandSet(), k => dview.hi <= dview.lo && k ? undefined : dview.k !== 1 ? String(Math.round((dview.lo + step * k) * dview.k)) : fmt(dview.lo + step * k)); }
   else if ($("colour").value === "ratio" && ratio.size) hScale(g, T, w, h, "Design ratio (demand / capacity)", ratioCols, k => ["0.00", "0.50", "0.70", "0.90", "1.00", ">1"][k]);
@@ -1548,35 +1954,12 @@ function drawAxes(p, g, M, T, h) {
     g.fillText(name, o[0] + dx * (L + 9), o[1] - dy * (L + 9));
   }
 }
-function drawPlot(p, g, T, w, h) {
-  // Story response: the largest drift of each story for the chosen case, X and Y.
-  const cases = [...drifts.keys()], name = drifts.has(res.case) ? res.case : cases[0], m = name && drifts.get(name);
-  g.fillStyle = T.text; g.font = "12px Segoe UI, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle";
-  if (!m) { g.fillText("This pack has no story drift results to plot.", w / 2, h / 2); return; }
-  const L = 86, R = 24, Tm = 34, B = 48, rows = stories.filter(s => [...m.keys()].some(k => k.endsWith("|" + s.name)));
-  const dirs = [...new Set([...m.keys()].map(k => k.split("|")[0]))].sort(), colours = [T.column, T.negEdge, T.beam, T.brace];
-  let max = 0; m.forEach(v => max = Math.max(max, v)); if (!(max > 0) || !rows.length) { g.fillText("The drifts of this case are all zero.", w / 2, h / 2); return; }
-  const z0 = stories[0].elevation, z1 = rows[rows.length - 1].elevation, X = v => L + (w - L - R) * v / (max * 1.1), Y = z => h - B - (h - B - Tm) * (z - z0) / ((z1 - z0) || 1);
-  g.lineWidth = 1; g.setLineDash([]); g.textAlign = "right"; g.font = "10.5px Segoe UI, sans-serif";
-  for (const s of [stories[0], ...rows]) { g.strokeStyle = css(T.level); g.beginPath(); g.moveTo(L, Y(s.elevation)); g.lineTo(w - R, Y(s.elevation)); g.stroke(); g.fillStyle = T.text; g.fillText(s.name, L - 6, Y(s.elevation)); }
-  g.textAlign = "center";
-  for (let i = 0; i <= 5; i++) { const v = max * 1.1 * i / 5, x = X(v); g.strokeStyle = css(T.level); g.beginPath(); g.moveTo(x, Tm); g.lineTo(x, h - B); g.stroke(); g.fillStyle = T.text; g.fillText(fmt(v), x, h - B + 12); }
-  g.strokeStyle = T.text; g.beginPath(); g.moveTo(L, Tm); g.lineTo(L, h - B); g.lineTo(w - R, h - B); g.stroke();
-  dirs.forEach((d, n) => {
-    g.strokeStyle = g.fillStyle = colours[n % colours.length]; g.lineWidth = 1.8; g.beginPath(); g.moveTo(X(0), Y(z0));
-    for (const s of rows) g.lineTo(X(m.get(d + "|" + s.name) || 0), Y(s.elevation));
-    g.stroke();
-    for (const s of rows) { g.beginPath(); g.arc(X(m.get(d + "|" + s.name) || 0), Y(s.elevation), 3, 0, 7); g.fill(); }
-    g.textAlign = "left"; g.fillText((d || "Drift") + " direction", L + 10 + n * 110, Tm - 16);
-  });
-  g.fillStyle = T.text; g.textAlign = "center"; g.fillText("Maximum story drift · " + name, (L + w - R) / 2, h - 14);
-}
 function paneTitle(p) {
-  const what = res.mode === "design" && dview ? "Design: " + dview.title : res.mode === "deformed" ? `Deformed Shape (${res.case})` : res.mode === "forces" ? `${compName()} Diagram (${res.case})` : res.mode === "contour" ? `Joint Displacement Contours (${res.case})` : res.mode === "reactions" ? `Joint Reactions (${res.case})` : $("colour").value === "ratio" ? "Design Ratios" : "";
+  const what = res.mode === "design" && dview ? "Design: " + dview.title : res.mode === "deformed" ? (periodOf(res.case) ? `Mode Shape (${res.case} · ${periodOf(res.case)})` : `Deformed Shape (${res.case})`) : res.mode === "forces" ? `${compName()} Diagram (${res.case})` : res.mode === "shell" ? `Shell ${res.comp} (${res.case})` : res.mode === "values" && dview ? dview.title : res.mode === "contour" ? `Joint Displacement Contours (${res.case})` : res.mode === "reactions" ? `Joint Reactions (${res.case})` : $("colour").value === "ratio" ? "Design Ratios" : "";
   let t;
   if (p.mode === "plan") { const z = elevationOf(p.story); t = "Plan View - " + (p.story || "no stories") + (z === null ? "" : " - Z = " + num(z) + (unit ? " (" + unit + ")" : "")); }
   else if (p.mode === "elev") t = "Elevation View - " + (p.line ? p.line.label + (gridsGuessed ? " (column line)" : "") : "whole model");
-  else if (p.mode === "plot") return "Story Response Plot - Maximum Story Drifts";
+  else if (p.mode === "plot") return plotSpec && plotSpec.kind === "xy" ? "Plot Functions - " + plotSpec.title : "Story Response Plot - " + ((plotSpec || defaultStorySpec() || {}).title || "");
   else t = "3-D View";
   return what ? t + "  ·  " + what : t;
 }
@@ -1957,7 +2340,7 @@ function stepStory(d) { const p = panes[active]; if (!p || p.mode !== "plan") re
 function stepLine(d) { const p = panes[active]; if (!p || p.mode !== "elev") return; const lines = p.line ? grids[p.line.dir] : allLines(), i = lines.indexOf(p.line), j = Math.max(0, Math.min(lines.length - 1, i + d)); if (lines[j]) setLine(lines[j]); }
 $("story").onchange = () => setStory($("story").value);
 $("line").onchange = () => { const g = allLines().find(g => g.dir + g.label === $("line").value); if (g) setLine(g); };
-$("colour").addEventListener("input", () => { if (res.mode === "design") res.mode = "model"; colourDirty = true; syncResults(); syncTools(); draw(); });
+$("colour").addEventListener("input", () => { if (res.mode === "design" || res.mode === "values") res.mode = "model"; colourDirty = true; syncResults(); syncTools(); draw(); });
 $("case").addEventListener("input", () => { res.case = $("case").value; pointsDirty = true; draw(); });
 $("comp").addEventListener("input", () => { res.comp = $("comp").value; pointsDirty = true; res.range = null; draw(); });
 $("scale").addEventListener("input", () => { res.scale = +$("scale").value; res.userScale = 0; draw(); });
@@ -1981,6 +2364,8 @@ function act(name) {
   if (name.startsWith("cam:")) { if (p) setView3d(p, name.slice(4)); return; }
   if (name.startsWith("dlg:")) return dialogs[name.slice(4)]();
   if (name.startsWith("des:")) return openDesign(name.slice(4));
+  if (name.startsWith("vals:")) return openValues(name.slice(5));
+  if (name.startsWith("xy:")) return openPlotFunctions(name.slice(3));
   if (name.startsWith("dshow:")) { const [, k, id] = name.split(":"); return showDesign(k, id); }
   if (name.startsWith("lay")) return document.querySelector(`[data-lay="${name.slice(3)}"]`).click();
   if (name.startsWith("story:")) return setStory(name.slice(6));
@@ -2036,8 +2421,17 @@ const viewerMenus = () => {
       ["Windows", [["One window", "lay1"], ["Two windows", "lay2"], ["Three windows", "lay3"], ["Four windows", "lay4"]]]],
     Define: [["Material Properties...", "dlg:materials"], ["Frame Sections...", "dlg:frameSections"], ["Slab and Wall Sections...", "dlg:areaSections"], 0, ["Story Data...", "dlg:stories"], ["Grid Data...", "dlg:grids"], 0, ["Load Patterns...", "dlg:patterns"], ["Load Cases...", "dlg:cases"], ["Load Combinations...", "dlg:combos"]],
     Select: [["All", "selAll", "Ctrl+A"], ["All on This Story", "selStory", "", !plan], ["By Section...", "dlg:bySection"], ["By Object Type...", "dlg:byType"], ["Invert", "selInvert"], 0, ["Clear Selection", "selNone", "Esc"]],
-    Display: [["Undeformed Shape", "r:model", "F4"], ["Deformed Shape...", "dlg:deformed", "F6", !disp.size], ["Frame Forces and Moments...", "dlg:forces", "F8", !forces.size], ["Joint Displacement Contours...", "dlg:contour", "", !disp.size], ["Support Reactions...", "dlg:reactions", "", !reacts.size], ["Design Ratios", "r:ratios", "", !ratio.size], ["Animate Deformed Shape", "anim", "", res.mode !== "deformed"], 0,
-      ["Story Response Plots", "plot", "", !drifts.size], ["Tables...", "tables", "Ctrl+T"]],
+    Display: (() => {
+      const has = re => Object.values(P ? P.tables : {}).some(t => t.rows && t.rows.length && re.test(norm(t.name))), plots = P ? Object.values(P.tables).some(t => t.rows && t.rows.length > 1) : false;
+      return [["Undeformed Shape", "r:model", "F4"], ["Deformed Shape...", "dlg:deformed", "F6", !disp.size], ["Mode Shapes...", "dlg:modes", "", !P || !modeCases().length], ["Animate Deformed Shape", "anim", "", res.mode !== "deformed"], 0,
+        ["Force/Stress Diagrams", [["Support/Spring Reactions...", "dlg:reactions", "", !reacts.size], ["Frame Forces and Moments...", "dlg:forces", "F8", !forces.size], ["Shell Forces/Stresses...", "dlg:shells", "", !shellRes.size],
+          ["Pier and Spandrel Forces...", "vals:pier", "", !has(/pierforces|spandrelforces/)], ["Link Forces and Deformations...", "vals:link", "", !has(/link/)], ["Spring Forces and Soil Pressures...", "vals:spring", "", !has(/spring|soilpressure/)],
+          ["Hinge Results...", "vals:hinge", "", !has(/hinge/)], ["Section Cut Forces...", "vals:cut", "", !has(/sectioncut/)], ["Tendon and Cable Results...", "vals:tendon", "", !has(/tendon|cable/)]]],
+        ["Joint Displacement Contours...", "dlg:contour", "", !disp.size], ["Table Values on Model...", "vals:", "", !P || !valueTables().length], ["Design Ratios", "r:ratios", "", !ratio.size], 0,
+        ["Story Response Plots...", "dlg:storyPlot", "", !P || !storyTables().length], ["Plot Functions...", "xy:history", "", !plots], ["Static Pushover Curve...", "xy:pushover", "", !has(/pushover|capacitycurve/)],
+        ["Response Spectrum Curves...", "xy:spectrum", "", !has(/responsespectrum/)], ["Modal Results Plot...", "xy:modal", "", !has(/^modal/)], 0,
+        ["Tables...", "tables", "Ctrl+T"], ["Results Coverage...", "dlg:coverage", "", !P]];
+    })(),
     Design: design.length ? [...design.map(f => [f.name, [["Display Design Info...", "des:" + f.key], ...designShows(f).map(s => [s.name.replace(/ \(.*\)$/, ""), "dshow:" + f.key + ":" + s.id])]]), 0, ["All Design Ratios", "r:ratios", "", !ratio.size], ["Display Design Results...", "des:"], ["Summary of Design Results...", "dlg:designSummary"]]
       : [["No design results in this pack", "", "", true], ["Summary of Design Results...", "dlg:designSummary"]],
     Options: [["Black Background", "bg"], 0, ["Grid Lines", "o:grid"], ["Extruded Sections", "o:extrude"], ["Floors and Walls", "o:fill"], ["See-through Floors and Walls", "o:see"], ["Object Edges", "o:edges"], ["Supports", "o:supports"], ["Joints", "o:joints"], ["Labels", "o:names"], ["Global Axes", "o:axes"]],
@@ -2126,6 +2520,15 @@ const caseGroups = list => {
 };
 const q = (d, s) => d.querySelector(s);
 const dialogs = {
+  modes() { openModes(); },
+  shells() { openShells(); },
+  storyPlot() { openStoryPlot(); },
+  coverage() {
+    const rows = coverage();
+    dialog("Results Coverage", `<p class="kv" style="max-width:640px">Every kind of result and design the CSI programs show, where it is in this Viewer, and whether this pack holds it. A kind this pack does not hold was not run or not kept in the program: run it there and make the pack again.</p>
+      <div class="scroll" style="max-height:60vh"><table class="list"><tr><th>Result</th><th>Where</th><th>In this pack</th></tr>${rows.map(r => `<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td><td>${r[2] ? "Yes" : "No"}</td></tr>`).join("")}</table></div>
+      ${((P.manifest || {}).left_out_tables || []).length ? `<p class="kv">Left out of this pack for its size: ${esc(P.manifest.left_out_tables.join(", "))}.</p>` : ""}`, [["Close"]], {width: 700, float: true});
+  },
   forces() {
     if (!forces.size) return;
     const comps = forceComps.map(([k, l]) => `<label><input type="radio" name="comp" value="${k}" ${(res.mode === "forces" ? res.comp : "M3") === k ? "checked" : ""}>${l}</label>`).join("");
@@ -2257,7 +2660,7 @@ function applyDisplay(d) {
   d.querySelectorAll("[data-o]").forEach(x => { const k = x.dataset.o; if (opt[k] !== x.checked) { opt[k] = x.checked; if (k === "extrude") { geometryDirty = true; geometryStamp++; } if (k === "fill") hiddenVersion++; } });
   d.querySelectorAll("[data-k]").forEach(x => { x.checked ? hidden.kind.delete(x.dataset.k) : hidden.kind.add(x.dataset.k); });
   hiddenVersion++;
-  const c = q(d, "#dCol").value; if (c !== $("colour").value) { $("colour").value = c; if (res.mode === "design") res.mode = "model"; syncResults(); }
+  const c = q(d, "#dCol").value; if (c !== $("colour").value) { $("colour").value = c; if (res.mode === "design" || res.mode === "values") res.mode = "model"; syncResults(); }
   const b = q(d, "#dBg").value; if (b !== bg) act("bg");
   colourDirty = true; buildTree(); syncTools(); draw();
 }
@@ -2285,7 +2688,9 @@ function infoWindow(id) {
     const dr = idx.filter(i => i >= 0).map(i => { const d = disp.get(c).get(String(points[i][0])); return d ? [points[i][0], ...d.map(fmt)] : null; }).filter(Boolean);
     if (dr.length) resHtml += `<p class="kv" style="margin:8px 0 3px">Joint displacements, ${esc(c)}${u ? " (" + unit + ")" : ""}</p><table class="list"><tr><th>Joint</th><th>UX</th><th>UY</th><th>UZ</th></tr>${dr.map(r => `<tr>${r.map((v, i) => `<td class="${i ? "r" : ""}">${esc(v)}</td>`).join("")}</tr>`).join("")}</table>`;
   }
-  const des = designHtml(o);
+  const mine = objectRows(o), inputs = mine.filter(x => x.t.from === "input"), others = mine.filter(x => x.t.from !== "input" && famOf(x.t.name) === null);
+  if (others.length) resHtml += `<p class="kv" style="margin:8px 0 3px">Every result table row about ${esc(o.name)}:</p>` + others.map(x => rowsHtml(x.t, x.rows, 40)).join("");
+  const des = designHtml(o) + (inputs.length ? (designOf(o).length ? "<hr>" : "") + inputs.map(x => rowsHtml(x.t, x.rows, 40)).join("") : "");
   const notes = P.comments.filter(c => c.target && c.target.name === o.name);
   const w = dialog((o.type === "f" ? "Frame" : "Shell") + " Information - " + o.name, `<div class="itabs"><button data-page="geo" class="on">Geometry</button><button data-page="asg">Assignments</button><button data-page="res">Results</button><button data-page="des">Design</button><button data-page="com">Comments (${notes.length})</button></div>
     <div class="ipage on" data-page="geo">${rows(geo)}</div><div class="ipage" data-page="asg">${rows(asg)}</div>
@@ -2480,7 +2885,7 @@ function modelTables() {
   add("Load Combination Definitions", "Loads", ["Name"], (m.combinations || []).map(c => [c]));
   return t;
 }
-function groupOf(name) { const n = norm(name); return /summary|design|punch|ratio/.test(n) && !/assign/.test(n) ? "Design results" : /definition|assign|propert|coordinat/.test(n) ? "Model definition" : "Analysis results"; }
+function groupOf(name) { const n = norm(name); if (P && P.tables[name] && P.tables[name].from === "input" || /overwrite|preference/.test(n)) return "Design and load inputs"; return /summary|design|punch|ratio/.test(n) && !/assign/.test(n) ? "Design results" : /definition|assign|propert|coordinat/.test(n) ? "Model definition" : "Analysis results"; }
 function fillTables() {
   tables = modelTables();
   for (const t of Object.values(P.tables)) tables[t.name] = {...t, group: groupOf(t.name)};
