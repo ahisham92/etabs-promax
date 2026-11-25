@@ -52,6 +52,17 @@ public static class PanelFieldSteps
             ctx.Skip(step ?? "tool " + name, why);
         }
 
+        // The panel's look: the CDT SDK theme, as in Sketch ProMax. Without it every window falls back to CSI ProMax's own older styles.
+        if (!windows) ctx.Skip("the panel's CDT SDK theme loaded", "the panel's windows are drawn on Windows only");
+        else if (!UI.CdtTheme.Tried) ctx.Skip("the panel's CDT SDK theme loaded", "no CSI ProMax window had opened before the test, so the theme was not loaded yet");
+        else ctx.Step("the panel's CDT SDK theme loaded", () =>
+        {
+            FieldContext.Expect(UI.CdtTheme.Error is null && UI.CdtTheme.Styles is not null,
+                "the CDT SDK theme didn't load, so windows show CSI ProMax's own older look: " + (UI.CdtTheme.Error ?? "not loaded") + ". Run the install line again (CDT.Wpf.dll and CDT.Core.dll belong beside CsiProMax.dll).");
+            FieldContext.Expect(Chat.ChatUi.StylesError is null, "the chat's styles didn't load as designed, so it shows a plainer look: " + Chat.ChatUi.StylesError);
+            return "the CDT SDK theme and the chat's styles are in use";
+        });
+
         // ---- Files out and in: every kind make_document writes, each read back with the tool that reads it. ----
         var made = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var q = FieldParts.Q(folder);

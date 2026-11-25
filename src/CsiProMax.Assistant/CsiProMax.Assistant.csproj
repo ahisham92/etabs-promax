@@ -41,4 +41,24 @@
     <ProjectReference Include="../CsiProMax.Core/CsiProMax.Core.csproj" />
     <InternalsVisibleTo Include="CsiProMax.Tests" />
   </ItemGroup>
+  <!--
+    CDT SDK (Dar Structural Computational Design, private repository): the theme, control styles and message boxes every
+    CSI ProMax window uses (Panel/UI/CdtTheme.cs), as in Sketch ProMax 0.35.121. Only its compiled DLLs live here, in
+    lib/cdt-sdk/net8.0-windows/, built in Release from the commit named in cdt-sdk.ref (the same DLLs Sketch ProMax ships);
+    its source never comes into this repository. CSI ProMax runs in a process of its own (the plug-in starts it), so the
+    two DLLs simply sit beside CsiProMax.dll; no merge is needed.
+  -->
+  <PropertyGroup>
+    <CdtSdkLib>$(MSBuildThisFileDirectory)..\..\lib\cdt-sdk\net8.0-windows\</CdtSdkLib>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="CDT.Core"><HintPath>$(CdtSdkLib)CDT.Core.dll</HintPath><Private>true</Private></Reference>
+    <Reference Include="CDT.Wpf"><HintPath>$(CdtSdkLib)CDT.Wpf.dll</HintPath><Private>true</Private></Reference>
+    <!-- CDT.Wpf's one package (LaTeX rendering, MIT), at the version the SDK is built against. -->
+    <PackageReference Include="WpfMath" Version="2.1.0" />
+  </ItemGroup>
+  <Target Name="CpmCheckCdtSdk" BeforeTargets="PrepareForBuild">
+    <Error Condition="!Exists('$(CdtSdkLib)CDT.Wpf.dll')" Text="The CDT SDK DLLs are missing from lib\cdt-sdk\net8.0-windows." />
+  </Target>
+
 </Project>
