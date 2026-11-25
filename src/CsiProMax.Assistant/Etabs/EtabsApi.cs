@@ -29,39 +29,50 @@ namespace CsiProMax.Assistant.Etabs
             _type = type;
         }
 
-        /// <summary>The API file of the running ETABS (the one with this process id, when given), or of ETABS 23 where it is usually installed.</summary>
+        /// <summary>
+        /// The API file of the running program (the one with this process id, when given), or of the program where it is
+        /// usually installed. Each program has its own API file (ETABSv1.dll, SAP2000v1.dll, SAFEv1.dll); the newer
+        /// versions also ship CSI's common API, CSiAPIv1.dll, which is used when the program's own file is not there.
+        /// </summary>
         public static string FindApiFile(CsiProgram program, int? pid = null)
         {
             foreach (var process in Process.GetProcessesByName(program.ProcessName).OrderByDescending(p => p.Id == pid))
             {
                 try
                 {
-                    var file = Path.Combine(Path.GetDirectoryName(process.MainModule.FileName), program.ApiFile);
-                    if (File.Exists(file)) return file;
+                    var found = InFolder(Path.GetDirectoryName(process.MainModule.FileName), program);
+                    if (found != null) return found;
                 }
                 catch (Exception) { }
             }
-            var programs = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
-            var usual = Path.Combine(programs, "Computers and Structures", program.UsualFolder, program.ApiFile);
-            if (File.Exists(usual)) return usual;
-            // Another version than the usual one (SAP2000 24, 25, 26...): the newest installed that has the API file.
+            var csi = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Computers and Structures");
+            var usual = InFolder(Path.Combine(csi, program.UsualFolder), program);
+            if (usual != null) return usual;
+            // Another version than the usual one: the newest folder named after the program ("SAFE 21", "SAFE 22").
             try
             {
-                var newest = Directory.GetDirectories(Path.Combine(programs, "Computers and Structures"), program.Name + " *")
-                    .Select(d => Path.Combine(d, program.ApiFile)).Where(File.Exists)
-                    .OrderByDescending(f => Version(Path.GetFileName(Path.GetDirectoryName(f)))).FirstOrDefault();
-                if (newest != null) return newest;
+                foreach (var folder in Directory.GetDirectories(csi, program.Name + "*").OrderByDescending(f => f, StringComparer.OrdinalIgnoreCase))
+                    if (InFolder(folder, program) is string other) return other;
             }
             catch (Exception) { }
-            return usual;
+            return Path.Combine(csi, program.UsualFolder, program.ApiFile);
         }
 
-        private static double Version(string folder)
+        /// <summary>The program's API file in one folder, else CSI's common API file there, else null.</summary>
+        private static string InFolder(string folder, CsiProgram program)
         {
-            var digits = new string(folder.SkipWhile(c => !char.IsDigit(c)).TakeWhile(c => char.IsDigit(c) || c == '.').ToArray());
-            double value;
-            return double.TryParse(digits, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out value) ? value : 0;
+            if (string.IsNullOrEmpty(folder)) return null;
+            var own = Path.Combine(folder, program.ApiFile);
+            if (File.Exists(own)) return own;
+            var common = Path.Combine(folder, CommonApiFile);
+            return File.Exists(common) ? common : null;
         }
+
+        /// <summary>CSI's common API for ETABS, SAP2000, SAFE and CSiBridge (newer versions ship it beside their own).</summary>
+        public const string CommonApiFile = "CSiAPIv1.dll";
+
+        /// <summary>The namespace of an API file's types: the file's own name (ETABSv1, SAP2000v1, SAFEv1, CSiAPIv1).</summary>
+        public static string NamespaceOf(string apiFile) => Path.GetFileNameWithoutExtension(apiFile);
 
         [DllImport("ole32.dll")]
         private static extern int CLSIDFromProgID([MarshalAs(UnmanagedType.LPWStr)] string progId, out Guid clsid);
@@ -77,14 +88,15 @@ namespace CsiProMax.Assistant.Etabs
         public static EtabsApi Attach(string apiFile, CsiProgram program, int? pid = null)
         {
             var api = Assembly.LoadFrom(apiFile);
-            var type = api.GetType(program.ApiNamespace + ".cOAPI", true);
+            var ns = NamespaceOf(apiFile);
+            var type = api.GetType(ns + ".cOAPI", true);
             var progId = program.ProgId;
             try
             {
                 if (pid == null && CLSIDFromProgID(progId, out var clsid) == 0 && GetActiveObject(ref clsid, IntPtr.Zero, out var running) == 0 && running != null)
                     return new EtabsApi(running, type);
-                var helper = Activator.CreateInstance(api.GetType(program.ApiNamespace + ".Helper", true));
-                var helperType = api.GetType(program.ApiNamespace + ".cHelper", true);
+                var helper = Activator.CreateInstance(api.GetType(ns + ".Helper", true));
+                var helperType = api.GetType(ns + ".cHelper", true);
                 // Older APIs (SAP2000 before 23, say) have no GetObjectProcess: then the active instance is the one.
                 var byProcess = pid == null ? null : helperType.GetMethod("GetObjectProcess");
                 var app = byProcess == null
@@ -98,7 +110,7 @@ namespace CsiProMax.Assistant.Etabs
         private static object Wrap(object value, Type declared)
         {
             if (value == null) return null;
-            return declared.IsInterface && declared.Namespace is "ETABSv1" or "SAP2000v1" or "SAFEv1" ? new EtabsApi(value, declared) : value;
+            return declared.IsInterface && declared.Namespace is "ETABSv1" or "SAP2000v1" or "SAFEv1" or "CSiAPIv1" ? new EtabsApi(value, declared) : value;
         }
 
         public override bool TryGetMember(GetMemberBinder binder, out object result)

@@ -15,15 +15,24 @@ Older ETABS (18 to 22). Not yet confirmed on these versions: please report what 
 2. Then the three steps above.
 If the window does not open, CSI ProMax shows a message that says what is missing.
 
-SAP2000 (the same folder serves ETABS and SAP2000)
-1. Step 1 above, if it is not done yet.
+SAFE (20 and later)
+1. Copy the folder as for ETABS (one "CSI ProMax" folder serves ETABS and SAFE).
+2. In SAFE: Tools > Add/Show Plugins. Browse to Documents\CSI ProMax\CsiProMaxSafePlugin.dll, plug-in name
+   CsiProMaxSafePlugin, menu text "CSI ProMax".
+3. Open a model, then Tools > CSI ProMax. The same window opens, working in SAFE: slabs, mats, punching shear,
+   deflection, strip forces, soil pressure and slab design.
+If SAFE runs on .NET Framework (older versions), install the .NET Desktop Runtime 8 first, as for older ETABS.
+Not yet confirmed in SAFE: please report what happens.
+
+SAP2000
+1. Copy the folder as for ETABS (the same "CSI ProMax" folder serves every program).
 2. In SAP2000: Tools > Add/Show Plug-Ins. Plug-in name "CsiProMaxSapPlugin", path
    Documents\CSI ProMax\CsiProMaxSapPlugin.dll, menu text "CSI ProMax". Add it.
-3. Open a model, then Tools > CSI ProMax. The window opens beside SAP2000.
-SAP2000 26 and later run on .NET 8. An older SAP2000 needs the .NET Desktop Runtime 8 (see above) and may not load
-the plug-in yet: then start the window from a command prompt in that folder with
-   dotnet CsiProMax.dll --program sap2000
-while SAP2000 is open. Not yet confirmed in SAP2000: please report what happens.
+3. Open a model, then Tools > CSI ProMax. The same window opens, working in SAP2000: joints, frames and areas in 3D,
+   loads in any direction, displacements, member forces, reactions, modes and steel and concrete design.
+SAP2000 26 and later run on .NET 8. An older SAP2000 needs the .NET Desktop Runtime 8 first, as for older ETABS, and
+may not load the plug-in yet: then, with SAP2000 open, run  dotnet CsiProMax.dll --program sap2000  in that folder.
+Not yet confirmed in SAP2000: please report what happens.
 
 The chat runs on Claude Code on your own Claude plan. The window offers to install it or sign in when needed.
 A PC other than the owner's needs a licence key: the Licence window shows this PC's code (CPM-....); send it to the
@@ -32,8 +41,8 @@ Later versions download by themselves (CSI ProMax > Check for updates). The CSI 
 this PC: CSI ProMax never starts, unlocks or stands in for it.
 
 The Modeler (no ETABS and no CSI licence needed)
-It builds a model and writes an .e2k file that ETABS opens later, or an .s2k file for SAP2000 (File > Import >
-SAP2000 .s2k Text File). It does not analyse or design: that needs ETABS.
+It builds a model and writes an .e2k file that ETABS opens later, one floor or a mat as an .f2k file for SAFE
+(File > Import > SAFE .F2K file), or the whole model as an .s2k file for SAP2000 (File > Import > SAP2000 .s2k Text File). It does not analyse or design: that needs ETABS.
 - On a PC with ETABS: the first time the window opens it puts "CSI ProMax Modeler" and "CSI ProMax Viewer"
   shortcuts on the desktop and in the Start menu (CSI ProMax). Delete one and it stays deleted; View > Make the
   Modeler and Viewer shortcuts again brings them back.

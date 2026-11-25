@@ -632,6 +632,8 @@ Test("plug-in: the assistant is started with the dotnet ETABS runs on", () =>
     Directory.Delete(root, true);
 });
 
+foreach (var (name, body) in SafeTests.All()) Test(name, body);
+
 var failed = 0;
 // ---- SAP2000 ----
 
@@ -745,7 +747,10 @@ Test("SAP2000: its tools replace the story tools and add its own", () =>
     try { addColumns.Run(JsonDocument.Parse("{}").RootElement, new MemoryEtabs()); throw new Exception("no error"); }
     catch (ToolInputException ex) { Check(ex.Message.Contains("add_frames"), ex.Message); }
     Equal(0, ProgramTools.For(CsiProgram.Etabs).Count, "ETABS has only the shared tools");
-    Check(ProgramTools.Every.Where(t => t.Ask == Ask.Always).Select(t => t.Name).Order().SequenceEqual(["delete_joints", "run_design", "save_model_s2k"]), "always asked");
+    var always = ProgramTools.Every.Where(t => t.Ask == Ask.Always).Select(t => t.Name).ToHashSet();
+    Check(always.IsSupersetOf(["delete_joints", "run_design", "save_model_s2k"]), "always asked");
+    Check(ProgramTools.Modeler.Any(t => t.Name == "save_model_s2k"), "the Modeler writes .s2k");
+    Check(ProgramTools.PackTable(CsiProgram.Sap2000, "Element Forces - Frames") && !ProgramTools.PackTable(CsiProgram.Sap2000, "Story Drifts"), "pack tables");
 });
 
 Test("SAP2000: add_frames sends coordinates and joint pairs", () =>

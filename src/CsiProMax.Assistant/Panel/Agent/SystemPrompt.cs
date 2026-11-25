@@ -119,7 +119,12 @@ internal static class SystemPrompt
         - The engineer sees the model in the 3D view (View menu). model_quantities gives quantities.
         """;
 
-    public static string Build(string firmStandards) =>
-        (App.Modeler ? Base + Modeler : Base) + ProgramPrompt.For(ProgramPrompt.Current) + "\n" + Practice +
-        (string.IsNullOrWhiteSpace(firmStandards) ? "" : "\n\nFirm standards to follow (from the firm's settings):\n" + firmStandards.Trim());
+    public static string Build(string firmStandards)
+    {
+        // The CSI program the window works in: the shared text in its words, then its own (ProgramPrompt).
+        var program = App.Etabs?.Link.Program ?? CsiProMax.Assistant.Etabs.CsiProgram.Etabs;
+        var start = App.Modeler ? Base + Modeler + ProgramPrompt.Modeler : ProgramPrompt.Reword(Base, program) + ProgramPrompt.For(program);
+        return start + "\n" + Practice +
+            (string.IsNullOrWhiteSpace(firmStandards) ? "" : "\n\nFirm standards to follow (from the firm's settings):\n" + firmStandards.Trim());
+    }
 }

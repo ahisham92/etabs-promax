@@ -100,7 +100,7 @@ footer #coords{font-variant-numeric:tabular-nums;color:var(--ink)}
   <button data-opt="names" title="Member names">Names</button>
   <button data-opt="axes" title="Global axes">Axes</button>
   <span class="sep"></span>
-  <label>Colour <select id="colour"><option value="kind">Object type</option><option value="section">Section</option><option value="ratio">Design ratio</option></select></label>
+  <label>Colour <select id="colour"><option value="kind">Object type</option><option value="section">Section</option><option value="ratio">Design ratio</option><option value="punching">Punching ratio</option><option value="soil">Soil pressure</option></select></label>
   <label id="defBox" style="display:none">Deformed <select id="defCase"></select> <input type="range" id="defScale" min="0" max="100" value="30" style="width:80px;padding:0"></label>
 </div>
 <main>
@@ -141,7 +141,7 @@ const norm = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, "");
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const num = v => { const r = Math.round(v * 1000) / 1000; return String(Object.is(r, -0) ? 0 : r); };
 let P = null, frames = [], areas = [], stories = [], grids = {X: [], Y: []}, gridsGuessed = false, sizes = {}, slabT = {}, supports = [];
-let ratio = new Map(), disp = new Map(), pointAt = new Map(), picked = null, newComments = [], lit = null;
+let ratio = new Map(), marks = {punching: [], soil: []}, pointXyz = new Map(), disp = new Map(), pointAt = new Map(), picked = null, newComments = [], lit = null;
 let lo = [0, 0, 0], hi = [1, 1, 1], size = 1, unit = "";
 const opt = {grid: true, extrude: true, fill: true, supports: true, names: false, axes: true};
 const hidden = {kind: new Set(), section: new Set()};
@@ -210,6 +210,7 @@ function load(pack, keep) {
   frames = (m.frames || []).map(f => ({name: f[0], kind: f[1], section: f[2], story: f[3], a: [f[4], f[5], f[6]], b: [f[7], f[8], f[9]]}));
   areas = (m.areas || []).map(a => ({name: a.n, kind: a.k, section: a.s, pts: chunk(a.c)}));
   pointAt = new Map((m.points || []).map(p => [key(p[1], p[2], p[3]), p[0]]));
+  pointXyz = new Map((m.points || []).map(p => [String(p[0]), [p[1], p[2], p[3]]]));
   stories = (m.stories || []).slice().sort((a, b) => a.elevation - b.elevation);
   sizes = m.frame_sizes || {}; slabT = m.area_sizes || {};
   supports = (m.supports || []).map(s => ({p: [s[0], s[1], s[2]], kind: s[3]}));
@@ -234,7 +235,7 @@ function load(pack, keep) {
   $("units").textContent = u.force && u.length ? u.force + ", " + u.length : "";
   $("story").innerHTML = stories.slice().reverse().map(s => `<option value="${esc(s.name)}">${esc(s.name)}</option>`).join("");
   $("line").innerHTML = allLines().map(g => `<option value="${esc(g.dir + g.label)}">${esc(g.label)}</option>`).join("");
-  readRatios(); readDisplacements();
+  readRatios(); readDisplacements(); readMarks();
   $("drop").style.display = "none";
   picked = pickedName ? (pickedName[0] === "f" ? frames.find(f => f.name === pickedName.slice(2)) : areas.find(a => a.name === pickedName.slice(2))) || null : null;
   buildPanes(before);
@@ -263,6 +264,62 @@ function readRatios() {
   const o = $("colour").querySelector("[value=ratio]"); o.disabled = ratio.size === 0;
   if (o.disabled && $("colour").value === "ratio") $("colour").value = "kind";
 }
+// SAFE: punching shear ratios and soil pressures, drawn as dots where the point or column is.
+function slabLevel() {
+  const count = new Map(); for (const a of areas) if (a.kind !== "wall") for (const q of a.pts) { const z = Math.round(q[2] * 1000) / 1000; count.set(z, (count.get(z) || 0) + 1); }
+  let best = 0, n = -1; count.forEach((c, z) => { if (c > n) { n = c; best = z; } }); return best;
+}
+function markAt(t, r, z) {
+  const x = col(t.fields, "GlobalX", "X"), y = col(t.fields, "GlobalY", "Y"), id = col(t.fields, "Point", "PointLabel", "UniqueName", "Label", "Joint", "Column");
+  if (x >= 0 && y >= 0 && !isNaN(parseFloat(r[x])) && !isNaN(parseFloat(r[y]))) return {at: [parseFloat(r[x]), parseFloat(r[y]), z], name: id >= 0 ? r[id] : ""};
+  const q = id >= 0 && pointXyz.get(String(r[id])); return q ? {at: q, name: r[id]} : null;
+}
+function readMarks() {
+  marks = {punching: [], soil: []};
+  const z = slabLevel();
+  for (const t of Object.values(P.tables)) {
+    const n = norm(t.name);
+    if (n.includes("punch")) {
+      let rc = col(t.fields, "Ratio", "ShearRatio", "StressRatio", "DCRatio"); if (rc < 0) rc = t.fields.findIndex(f => /ratio/.test(norm(f)));
+      if (rc < 0) continue;
+      const best = new Map();
+      for (const r of t.rows) { const v = parseFloat(r[rc]), m = markAt(t, r, z); if (isNaN(v) || !m) continue; const k = m.at.join(","); if (!best.has(k) || v > best.get(k).v) best.set(k, {...m, v}); }
+      marks.punching.push(...best.values());
+    } else if (n.includes("soil") && n.includes("pressure")) {
+      let pc = col(t.fields, "Pressure", "SoilPressure"); if (pc < 0) pc = t.fields.findIndex(f => /pressure/.test(norm(f)));
+      if (pc < 0) continue;
+      const best = new Map();
+      // SAFE gives bearing as a negative pressure: shown positive.
+      for (const r of t.rows) { const v = -parseFloat(r[pc]), m = markAt(t, r, z); if (isNaN(v) || !m) continue; const k = m.at.join(","); if (!best.has(k) || v > best.get(k).v) best.set(k, {...m, v}); }
+      marks.soil.push(...best.values());
+    }
+  }
+  for (const k of ["punching", "soil"]) {
+    const o = $("colour").querySelector(`[value=${k}]`); o.disabled = marks[k].length === 0;
+    if (o.disabled && $("colour").value === k) $("colour").value = "kind";
+  }
+  if (/safe/i.test((P.manifest || {}).program || "") && marks.punching.length && $("colour").value === "kind") $("colour").value = "punching";
+}
+function soilColour(v, max, T) { if (v <= 0) return T.text; const f = max > 0 ? v / max : 0; return f > 0.9 ? "#d0342c" : f > 0.7 ? "#e08a1e" : f > 0.5 ? "#c9b21f" : f > 0.3 ? "#6aa84f" : "#2e8b57"; }
+function drawMarks(p, g, to, T) {
+  const mode = $("colour").value;
+  if (mode !== "punching" && mode !== "soil") return;
+  const list = marks[mode], max = Math.max(0, ...list.map(m => m.v)), u = ((P.manifest || {}).units || {});
+  const z = p.mode === "plan" ? elevationOf(p.story) : null, onStory = z !== null && list.some(m => Math.abs(m.at[2] - z) <= tol() * 10);
+  g.setLineDash([]); g.font = "10.5px Segoe UI, sans-serif"; g.textAlign = "left"; g.textBaseline = "alphabetic";
+  for (const m of list) {
+    if (p.mode === "plan" && onStory && Math.abs(m.at[2] - z) > tol() * 10) continue;
+    if (p.mode === "elev" && p.line && !onLine(m.at, p.line)) continue;
+    const [x, y] = to(m.at);
+    let c, label;
+    if (mode === "punching") { c = ratioColour(m.v, T); label = m.v > 1 ? "above 1.0" : m.v > 0.9 ? "0.9 to 1.0" : m.v > 0.7 ? "0.7 to 0.9" : m.v > 0.5 ? "0.5 to 0.7" : "up to 0.5"; }
+    else { c = soilColour(m.v, max, T); const f = max > 0 ? m.v / max : 0; label = m.v <= 0 ? "lifts off" : "up to " + num([0.3, 0.5, 0.7, 0.9, 1].find(b => f <= b) * max) + (u.force ? " " + u.force + "/" + u.length + "²" : ""); }
+    legend.set(label, c);
+    g.beginPath(); g.arc(x, y, mode === "punching" ? 7 : 4, 0, 7); g.fillStyle = c; g.fill();
+    if (mode === "punching") { g.strokeStyle = T.canvas; g.lineWidth = 1.5; g.stroke(); }
+    if (opt.names || mode === "punching" && m.v > 1) { g.fillStyle = T.text; g.fillText((m.name ? m.name + " " : "") + (mode === "punching" ? m.v.toFixed(2) : num(m.v)), x + 8, y - 6); }
+  }
+}
 function readDisplacements() {
   disp = new Map();
   const t = P.tables["Joint Displacements"];
@@ -283,7 +340,11 @@ function readDisplacements() {
 
 // ---- view windows ----
 const layouts = {1: ["3d"], 2: ["plan", "3d"], 3: ["plan", "3d", "elev"], 4: ["plan", "3d", "elev", "elev"]};
-function topStory() { return stories.length ? stories[stories.length - 1].name : ""; }
+function topStory() {
+  // A SAFE model is one slab: its plan opens on the slab's level.
+  if (/safe/i.test(((P || {}).manifest || {}).program || "")) { const z = slabLevel(), s = stories.find(s => Math.abs(s.elevation - z) <= tol() * 10); if (s) return s.name; }
+  return stories.length ? stories[stories.length - 1].name : "";
+}
 function newPane(mode, n) {
   const lines = allLines();
   // The second elevation window looks along the other direction.
@@ -469,6 +530,7 @@ function drawPane(p, n) {
     for (const it of items) if (it.frame) g.fillText(it.frame.name, (it.a[0] + it.b[0]) / 2 + 4, (it.a[1] + it.b[1]) / 2 - 4);
   }
   if (opt.supports) drawSupports(p, g, to, T);
+  drawMarks(p, g, to, T);
   p.drawn = items;
   for (const c of P.comments) {
     const t = c.target && (frames.find(f => f.name === c.target.name && c.target.kind === "frame") || areas.find(a => a.name === c.target.name && c.target.kind === "area"));

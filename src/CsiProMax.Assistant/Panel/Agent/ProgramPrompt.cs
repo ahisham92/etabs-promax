@@ -2,16 +2,23 @@ using CsiProMax.Assistant.Etabs;
 
 namespace CsiProMax.Agent;
 
-/// <summary>What the chat's Claude is told for the CSI program it works beside, on top of the shared notes. Each
-/// program keeps its own text in its own folder; ETABS's is the shared notes themselves.</summary>
+/// <summary>
+/// What the chat's Claude is told about the CSI program it works in, on top of the shared prompt. Each program keeps
+/// its text in its own folder (Safe/SafePrompt.cs, Sap2000/SapPrompt.cs); ETABS is the shared prompt itself.
+/// </summary>
 internal static class ProgramPrompt
 {
     public static string For(CsiProgram program) => program.Key switch
     {
+        "safe" => CsiProMax.Assistant.Safe.SafePrompt.Text,
         "sap2000" => CsiProMax.Assistant.Sap2000.SapPrompt.Text,
         _ => "",
-    } + (CsiProMax.App.Modeler ? CsiProMax.Assistant.Sap2000.SapPrompt.Modeler : "");
+    };
 
-    /// <summary>The program the window was started for: SAP2000 or SAFE when the plug-in said so, otherwise ETABS.</summary>
-    public static CsiProgram Current => CsiProMax.App.Etabs?.Link.Program ?? CsiProgram.Etabs;
+    /// <summary>What the Modeler adds about writing other programs' files.</summary>
+    public static string Modeler => CsiProMax.Assistant.Sap2000.SapPrompt.Modeler;
+
+    /// <summary>The shared prompt in the program's own words: "SAFE" where it says "ETABS", for a program that is not ETABS.</summary>
+    public static string Reword(string text, CsiProgram program) =>
+        program.Key == CsiProgram.Etabs.Key ? text : text.Replace("CSI ETABS", "CSI " + program.Name, StringComparison.Ordinal).Replace("ETABS", program.Name, StringComparison.Ordinal);
 }

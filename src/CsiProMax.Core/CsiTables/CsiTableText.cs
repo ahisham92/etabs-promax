@@ -4,89 +4,81 @@ using System.Text;
 namespace CsiProMax.CsiTables;
 
 /// <summary>
-/// The table text that SAP2000 (.s2k), SAFE (.f2k) and CSiBridge (.b2k) read and write: a header line, then tables,
-/// each a <c>TABLE:  "NAME"</c> line followed by one line per row of <c>Key=Value</c> pairs, and <c>END TABLE DATA</c>.
-/// A long row may go on over several lines that end in " _". Values with a space, comma, equals sign or quote, and
-/// empty values, are quoted. Numbers are written with a decimal point whatever the Windows language.
+/// The table text that SAP2000 (.s2k) and SAFE (.f2k) read and write: a heading line per table,
+/// <c>TABLE:  "NAME"</c>, then one line per row of <c>Key=Value</c> pairs, three spaces apart, and
+/// <c>END TABLE DATA</c> at the end. A value with a space, a comma or a quote is written in double quotes.
 /// </summary>
 public static class CsiTableText
 {
-    private const string Gap = "   ";
-
-    public static string Value(string text)
+    /// <summary>A value as the table text writes it: quoted when it has a space, comma, equals sign or quote, or is empty.</summary>
+    public static string Value(string value)
     {
-        if (text.Length == 0) return "\"\"";
-        return text.IndexOfAny([' ', ',', '=', '"', '\t']) >= 0 ? "\"" + text.Replace("\"", "'") + "\"" : text;
+        if (value.Length == 0) return "\"\"";
+        return value.IndexOfAny([' ', ',', '=', '"', '\t']) >= 0 ? "\"" + value.Replace("\"", "'", StringComparison.Ordinal) + "\"" : value;
     }
 
+    /// <summary>A number as the table text writes it: invariant culture, up to 10 significant digits, no exponent for ordinary sizes.</summary>
     public static string Number(double value)
     {
         if (Math.Abs(value) < 1e-12) return "0";
         return value.ToString("0.##########", CultureInfo.InvariantCulture);
     }
 
-    /// <summary>One table: its heading (upper-cased) and one line per row, ended by a blank line. Values are given as they
-    /// should read; text that needs quotes is quoted here.</summary>
+    /// <summary>One table: its heading and one line per row.</summary>
     public static string Table(string name, IEnumerable<IReadOnlyList<(string Key, string Value)>> rows)
     {
         var text = new StringBuilder();
         text.Append("TABLE:  \"").Append(name.ToUpperInvariant()).Append("\"\r\n");
         foreach (var row in rows)
         {
-            text.Append(Gap);
-            text.Append(string.Join(Gap, row.Select(p => p.Key + "=" + Value(p.Value))));
+            text.Append("   ");
+            text.Append(string.Join("   ", row.Select(p => p.Key + "=" + Value(p.Value))));
             text.Append("\r\n");
         }
-        text.Append("\r\n");
-        return text.ToString();
+        return text.Append("\r\n").ToString();
     }
 
-    /// <summary>A whole file: the header line, the tables, and END TABLE DATA.</summary>
+    /// <summary>A whole file: a first line saying what wrote it, the tables, and END TABLE DATA.</summary>
     public static string Document(string firstLine, IEnumerable<string> tables)
     {
         var text = new StringBuilder();
-        text.Append(firstLine).Append("\r\n \r\n");
+        text.Append(firstLine).Append("\r\n\r\n");
         foreach (var table in tables) text.Append(table);
-        text.Append("END TABLE DATA\r\n");
-        return text.ToString();
+        return text.Append("END TABLE DATA\r\n").ToString();
     }
 
-    /// <summary>Reads table text back: each table (by name, any case) to its rows, each row its keys to values (unquoted).</summary>
+    /// <summary>
+    /// Reads table text back: each table by its heading (upper case) with its rows as key to value, in order. Lines
+    /// that end in " _" carry on to the next line. Values come back without their quotes.
+    /// </summary>
     public static Dictionary<string, List<Dictionary<string, string>>> Parse(string text)
     {
         var tables = new Dictionary<string, List<Dictionary<string, string>>>(StringComparer.OrdinalIgnoreCase);
-        List<Dictionary<string, string>>? rows = null;
+        List<Dictionary<string, string>>? current = null;
         var pending = new StringBuilder();
-        foreach (var raw in text.Replace("\r\n", "\n").Split('\n'))
+        foreach (var raw in text.Replace("\r", "", StringComparison.Ordinal).Split('\n'))
         {
             var line = raw.TrimEnd();
-            if (pending.Length > 0 || line.EndsWith(" _", StringComparison.Ordinal))
+            if (line.EndsWith(" _", StringComparison.Ordinal)) { pending.Append(line[..^2]).Append(' '); continue; }
+            line = pending.Append(line).ToString().Trim();
+            pending.Clear();
+            if (line.Length == 0 || line.StartsWith('$')) continue;
+            if (line.StartsWith("TABLE:", StringComparison.OrdinalIgnoreCase))
             {
-                if (line.EndsWith(" _", StringComparison.Ordinal)) { pending.Append(line[..^2]).Append(' '); continue; }
-                pending.Append(line);
-                line = pending.ToString();
-                pending.Clear();
-            }
-            var trimmed = line.Trim();
-            if (trimmed.Length == 0) continue;
-            if (trimmed.StartsWith("TABLE:", StringComparison.OrdinalIgnoreCase))
-            {
-                var name = trimmed[6..].Trim().Trim('"');
-                if (!tables.TryGetValue(name, out rows)) tables[name] = rows = [];
+                var name = line[6..].Trim().Trim('"');
+                if (!tables.TryGetValue(name, out current)) tables[name] = current = [];
                 continue;
             }
-            if (trimmed.StartsWith("END TABLE DATA", StringComparison.OrdinalIgnoreCase)) { rows = null; continue; }
-            if (rows is null) continue;
-            var pairs = Pairs(trimmed);
-            if (pairs.Count > 0) rows.Add(pairs);
+            if (line.StartsWith("END TABLE DATA", StringComparison.OrdinalIgnoreCase)) break;
+            current?.Add(Pairs(line));
         }
         return tables;
     }
 
-    /// <summary>The Key=Value pairs of one row line; quoted values may hold spaces.</summary>
+    /// <summary>The Key=Value pairs of one row line; a quoted value may hold spaces.</summary>
     public static Dictionary<string, string> Pairs(string line)
     {
-        var pairs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var row = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var i = 0;
         while (i < line.Length)
         {
@@ -98,10 +90,10 @@ public static class CsiTableText
             string value;
             if (i < line.Length && line[i] == '"')
             {
-                var end = line.IndexOf('"', i + 1);
-                if (end < 0) end = line.Length;
-                value = line[(i + 1)..end];
-                i = Math.Min(line.Length, end + 1);
+                var close = line.IndexOf('"', i + 1);
+                if (close < 0) close = line.Length;
+                value = line[(i + 1)..close];
+                i = close + 1;
             }
             else
             {
@@ -110,8 +102,8 @@ public static class CsiTableText
                 value = line[i..end];
                 i = end;
             }
-            if (key.Length > 0) pairs[key] = value;
+            if (key.Length > 0) row[key] = value;
         }
-        return pairs;
+        return row;
     }
 }

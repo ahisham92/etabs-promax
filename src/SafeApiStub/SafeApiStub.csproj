@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Build-time stand-in for SAFE's API file, SAFEv1.dll: only the types a plug-in must name, under the same assembly
+       name, so the SAFE plug-in binds to the real SAFEv1.dll inside SAFE. SAFE versions on .NET 8 ignore strong names
+       when they bind, so this needs no key. For a SAFE on .NET Framework, put the public half of SAFEv1.dll's key in
+       safev1-public.snk (read from the file on a PC with SAFE) and the stub is signed with it. Never shipped. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>SAFEv1</AssemblyName>
+    <RootNamespace>SAFEv1</RootNamespace>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <LangVersion>latest</LangVersion>
+    <NoWarn>IDE1006;CS8981</NoWarn>
+  </PropertyGroup>
+  <PropertyGroup Condition="Exists('safev1-public.snk')">
+    <SignAssembly>true</SignAssembly>
+    <PublicSign>true</PublicSign>
+    <AssemblyOriginatorKeyFile>safev1-public.snk</AssemblyOriginatorKeyFile>
+  </PropertyGroup>
+</Project>
