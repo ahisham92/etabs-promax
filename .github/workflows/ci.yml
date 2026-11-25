@@ -15,6 +15,8 @@ jobs:
           dotnet-version: 8.0.x
       - run: dotnet build CsiProMax.sln -c Release
       - run: dotnet run -c Release --no-build --project tests/CsiProMax.Tests
+      # The one-line install (install.ps1), on a made-up package and made-up settings files.
+      - run: pwsh -NoProfile -File tests/install.Tests.ps1
   assistant:
     # The assistant and its ETABS plug-in as one folder of DLLs (no .exe), kept with the run so it can be tried.
     runs-on: ubuntu-latest

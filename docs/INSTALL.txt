@@ -2,6 +2,23 @@ CSI ProMax: first install
 
 Nothing here is an .exe and nothing needs administrator rights for ETABS 23.
 
+The quick way: one line
+Open Windows PowerShell (Start menu, type "PowerShell"), paste this line and press Enter:
+
+   irm https://raw.githubusercontent.com/ahisham92/etabs-promax/main/install.ps1 | iex
+
+It downloads the newest version into Documents\CSI ProMax, looks for the .NET 8 Desktop Runtime (and gets it from
+Microsoft into your user folder when the PC has none), and adds "CSI ProMax" to the Tools menu of each ETABS, SAFE and
+SAP2000 that is closed and has no other plug-in. It keeps a copy of each settings file it changes, and never starts,
+closes or changes a CSI program or a model. Then open the program and a model, and choose Tools > CSI ProMax.
+For a program it could not add itself to, it prints the plug-in name and file to add by hand (the steps below).
+Run the same line again at any time: it only replaces what changed.
+If that address cannot be reached, this line gets the same script from the releases page:
+
+   irm https://github.com/ahisham92/etabs-promax/releases/latest/download/install.ps1 | iex
+
+The rest of this file is the same install by hand.
+
 ETABS 23
 1. Copy the "dist" folder from this zip to your Documents folder and rename it "CSI ProMax".
 2. In ETABS: Tools > Add/Show Plugins. Browse to Documents\CSI ProMax\CsiProMaxPlugin.dll and add it with the
@@ -35,7 +52,7 @@ may not load the plug-in yet: then, with SAP2000 open, run  dotnet CsiProMax.dll
 Not yet confirmed in SAP2000: please report what happens.
 
 The chat runs on Claude Code on your own Claude plan. The window offers to install it or sign in when needed.
-A PC other than the owner's needs a licence key: the Licence window shows this PC's code (CPM-....); send it to the
+A PC other than the owner's needs a licence key: the Licence window shows this PC's code (SPM-....); send it to the
 owner and paste the key you get back.
 Later versions download by themselves (CSI ProMax > Check for updates). The CSI program must be open and licensed on
 this PC: CSI ProMax never starts, unlocks or stands in for it.

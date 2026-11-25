@@ -641,6 +641,7 @@ Test("plug-in: the assistant is started with the dotnet ETABS runs on", () =>
 {
     var root = Directory.CreateTempSubdirectory("cpm").FullName;
     var runtime = Directory.CreateDirectory(Path.Combine(root, "dotnet", "shared", "Microsoft.NETCore.App", "8.0.29")).FullName;
+    Directory.CreateDirectory(Path.Combine(root, "dotnet", "shared", "Microsoft.WindowsDesktop.App", "8.0.29"));
     var folder = Directory.CreateDirectory(Path.Combine(root, "CSI ProMax")).FullName;
     string Message() { try { CsiProMaxPlugin.Launcher.StartInfo(folder, runtime, 42004, "ETABS", [Path.Combine(root, "dotnet")]); return ""; } catch (IOException ex) { return ex.Message; } }
     Check(Message().Contains("CsiProMax.dll is missing"), "a plug-in copied alone says what is missing");
@@ -655,6 +656,17 @@ Test("plug-in: the assistant is started with the dotnet ETABS runs on", () =>
     Equal(dotnet, older.FileName, "a program on .NET Framework: the PC's own .NET 8 is found");
     Check(older.Arguments.EndsWith("--etabs-pid 7 --program sap2000"), "the program is named");
     Check(start.CreateNoWindow && !start.UseShellExecute, "no console window");
+    // An older dotnet in Program Files and the Desktop Runtime 8 in the user's own folder (the one-line install).
+    var old = Directory.CreateDirectory(Path.Combine(root, "old")).FullName;
+    var own = Path.Combine(root, "own");
+    Directory.CreateDirectory(Path.Combine(own, "shared", "Microsoft.WindowsDesktop.App", "8.0.11"));
+    File.WriteAllText(Path.Combine(old, Path.GetFileName(dotnet)), "");
+    File.WriteAllText(Path.Combine(own, Path.GetFileName(dotnet)), "");
+    var mixed = CsiProMaxPlugin.Launcher.StartInfo(folder, @"C:\Windows\Microsoft.NET\Framework64\v4.0.30319", 7, "SAFE", [old, own]);
+    Equal(Path.Combine(own, Path.GetFileName(dotnet)), mixed.FileName, "the dotnet that has the Desktop Runtime 8 is used, not the first one found");
+    var only = CsiProMaxPlugin.Launcher.StartInfo(folder, @"C:\Windows\Microsoft.NET\Framework64\v4.0.30319", 7, "SAFE", [old]);
+    Equal(Path.Combine(old, Path.GetFileName(dotnet)), only.FileName, "with no Desktop Runtime 8 anywhere the dotnet that exists is started, and says itself what is missing");
+    Check(!CsiProMaxPlugin.Launcher.HasDesktopRuntime8(old) && CsiProMaxPlugin.Launcher.HasDesktopRuntime8(own), "Desktop Runtime 8 is told by its folder");
     Directory.Delete(root, true);
 });
 

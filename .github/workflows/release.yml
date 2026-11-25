@@ -38,8 +38,10 @@ jobs:
       - run: dotnet publish src/CsiProMax.Plugin -c Release -p:DebugType=none -o package/dist
       - run: dotnet publish src/CsiProMax.Plugin.Safe -c Release -p:DebugType=none -o package/dist
       - run: dotnet publish src/CsiProMax.Plugin.Sap -c Release -p:DebugType=none -o package/dist
-      - run: test -e package/dist/CsiProMax.dll && test ! -e package/dist/ETABSv1.dll && ! find package -iname '*.exe' | grep .
+      - run: test -e package/dist/CsiProMax.dll && test -e package/dist/CsiProMaxPlugin.dll && test -e package/dist/CsiProMaxSafePlugin.dll && test -e package/dist/CsiProMaxSapPlugin.dll
+      - run: test ! -e package/dist/ETABSv1.dll && test ! -e package/dist/SAFEv1.dll && test ! -e package/dist/SAP2000v1.dll && ! find package -iname '*.exe' | grep .
+      - run: pwsh -NoProfile -File tests/install.Tests.ps1
       - run: cp docs/INSTALL.txt package/ && cd package && zip -q -r "../CsiProMax-$NAME.zip" .
-      - run: gh release create "$TAG" "CsiProMax-$NAME.zip" --target "$GITHUB_SHA" --title "CSI ProMax $NAME" --generate-notes $PRERELEASE
+      - run: gh release create "$TAG" "CsiProMax-$NAME.zip" install.ps1 --target "$GITHUB_SHA" --title "CSI ProMax $NAME" --generate-notes $PRERELEASE
         env:
           GH_TOKEN: ${{ github.token }}
