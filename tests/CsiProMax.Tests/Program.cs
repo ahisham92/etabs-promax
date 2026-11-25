@@ -1050,6 +1050,29 @@ Test("SAP2000: results through the analysis results", () =>
     Check(!modal["passes"]!.GetValue<bool>(), "85% in UY is under 90%");
 });
 
+Test("link: a call the program does not come back from is given up on, later calls say so at once, and it recovers", () =>
+{
+    using var link = new ComEtabs(CsiProgram.Sap2000, () => new object()) { CallLimit = TimeSpan.FromMilliseconds(300), AnalysisLimit = TimeSpan.FromMilliseconds(600) };
+    Check(ComEtabs.IsLong("run the analysis") && ComEtabs.IsLong("start the steel frame design") && !ComEtabs.IsLong("read the joints"), "analysis and design calls get the long limit");
+    using var release = new ManualResetEventSlim();
+    var clock = System.Diagnostics.Stopwatch.StartNew();
+    try { link.Raw("run the analysis", _ => { release.Wait(); return null; }); throw new Exception("the stuck call returned"); }
+    catch (EtabsException ex) { Check(ex.Message.Contains("Analysis Complete") && ex.Message.Contains("SAP2000"), ex.Message); }
+    Check(clock.ElapsedMilliseconds < 5000, "it gave up within its limit");
+    clock.Restart();
+    try { link.Raw("read the joints", _ => 1); throw new Exception("a call behind the stuck one ran"); }
+    catch (EtabsException ex) { Check(ex.Message.Contains("run the analysis"), "the next call names the stuck one: " + ex.Message); }
+    Check(clock.ElapsedMilliseconds < 200, "the next call says so at once");
+    release.Set();
+    var answer = 0;
+    for (var i = 0; i < 50 && answer == 0; i++)
+    {
+        Thread.Sleep(50);
+        try { answer = (int)link.Raw("read the joints", _ => 7)!; } catch (EtabsException) { }
+    }
+    Equal(7, answer, "calls work again once the program answers");
+});
+
 Test("plug-in: SAP2000 starts the assistant for SAP2000", () =>
 {
     var root = Path.Combine(Path.GetTempPath(), "cpm-sap-" + Guid.NewGuid().ToString("N"));
