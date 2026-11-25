@@ -30,7 +30,7 @@ jobs:
         with:
           dotnet-version: 8.0.x
       - run: dotnet build CsiProMax.sln -c Release
-      - run: dotnet run -c Release --no-build --project tests/CsiProMax.Tests
+      # (The C# tests run in the core job: some of them stand in for Windows parts and are written for a machine without them.)
       - run: powershell -NoProfile -ExecutionPolicy Bypass -File tests/check.Tests.ps1
         shell: cmd
       - run: pwsh -NoProfile -File tests/install.Tests.ps1
