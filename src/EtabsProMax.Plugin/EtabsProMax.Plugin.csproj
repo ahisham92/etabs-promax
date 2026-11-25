@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The ETABS plug-in: the entry in ETABS's Tools menu. ETABS loads this DLL itself (Tools > Add/Show Plugins);
+       it starts the assistant that lies beside it, on the .NET 8 that ETABS runs on. No .exe of ours anywhere. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>EtabsProMaxPlugin</AssemblyName>
+    <RootNamespace>EtabsProMaxPlugin</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <Version>0.2.0</Version>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <NoWarn>IDE1006;CS8981</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Compile against the stand-in only: inside ETABS the real ETABSv1.dll is already loaded. -->
+    <ProjectReference Include="../EtabsApiStub/EtabsApiStub.csproj" Private="false" />
+    <InternalsVisibleTo Include="EtabsProMax.Tests" />
+  </ItemGroup>
+</Project>

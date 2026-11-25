@@ -1,3 +1,8 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using EtabsProMax.Assistant;
+using EtabsProMax.Assistant.Etabs;
+using EtabsProMax.Assistant.Tools;
 using EtabsProMax.Checks;
 using EtabsProMax.E2k;
 using EtabsProMax.Model;
@@ -255,6 +260,187 @@ Test("a file that is not an ETABS text file", () =>
     catch (E2kFormatException ex) { Check(ex.Message.Contains("not an ETABS text file"), ex.Message); }
 });
 
+// The assistant, on a model kept in memory (no ETABS).
+JsonElement J(string json) => JsonDocument.Parse(json).RootElement;
+// The tools as the panel runs them (ModelTool), with the asking the approvals do: always for deletes, saves and
+// analysis runs, and for every change when the engineer set it so.
+Harness Endpoint(MemoryEtabs e, bool allow = true, bool ask = false, List<string>? asked = null) => new(e, allow, ask, asked);
+JsonNode Call(Harness mcp, string tool, string args)
+{
+    var (text, failed) = mcp.Call(tool, J(args));
+    if (failed) throw new Exception(text);
+    return JsonNode.Parse(text)!;
+}
+string Refused(Harness mcp, string tool, string args)
+{
+    var (text, failed) = mcp.Call(tool, J(args));
+    Check(failed, $"{tool} should have been refused, but gave {text}");
+    return text;
+}
+
+Test("assistant: a frame is built with the tools", () =>
+{
+    var e = new MemoryEtabs();
+    var mcp = Endpoint(e);
+    Equal(12, (int)Call(mcp, "add_columns", """{"points":[[0,0],[6,0],[6,5],[0,5]],"section":"c500x500"}""")["added"]!, "4 columns on 3 stories");
+    Equal(4, (int)Call(mcp, "add_beams", """{"lines":[[0,0,6,0],[6,0,6,5],[6,5,0,5],[0,5,0,0]],"stories":["Story3"],"section":"B300x600"}""")["added"]!, "beams on one story");
+    Equal(3, (int)Call(mcp, "add_slabs", """{"outlines":[[[0,0],[6,0],[6,5],[0,5]]],"section":"S200"}""")["added"]!, "a slab per story");
+    Equal(3, (int)Call(mcp, "add_walls", """{"lines":[[0,0,0,5]],"section":"W250"}""")["added"]!, "a wall panel per story");
+    var context = Call(mcp, "get_model_context", "{}");
+    Equal(12, (int)context["counts"]!["columns"]!, "columns"); Equal(4, (int)context["counts"]!["beams"]!, "beams");
+    Equal(3, (int)context["counts"]!["floors"]!, "floors"); Equal(3, (int)context["counts"]!["walls"]!, "walls");
+    Equal("m", (string)context["units"]!["length"]!, "units");
+    var column = e.Frames().First(f => f.Kind == "column" && f.Story == "Story2");
+    Near(3.2, column.Z1, "a column starts at the story below"); Near(6.4, column.Z2, "and ends at its story");
+    var beams = Call(mcp, "query_objects", """{"kind":"beam"}""");
+    Equal(4, (int)beams["count"]!, "query by kind"); Equal(4, (int)beams["by_section"]!["B300x600"]!, "counts by section");
+    Equal(4, (int)Call(mcp, "set_supports", """{"type":"fixed","at_base":true}""")["done"]!, "supports under the columns and the wall");
+    Check(e.Restraint(e.Points().First(p => p.Z == 0).Name).All(r => r), "fixed means all six");
+});
+
+Test("assistant: wrong input is answered with what the model has", () =>
+{
+    var e = new MemoryEtabs();
+    var mcp = Endpoint(e);
+    Check(Refused(mcp, "add_columns", """{"points":[[0,0]],"section":"C900"}""").Contains("C500x500"), "unknown section lists the real ones");
+    Check(Refused(mcp, "add_beams", """{"lines":[[0,0,1,0]],"stories":["Roof"],"section":"B300x600"}""").Contains("Story1, Story2, Story3"), "unknown story lists the real ones");
+    Check(Refused(mcp, "add_load_pattern", """{"name":"SDL","type":"Superimposed Dead"}""").Contains("Super Dead"), "unknown pattern type");
+    Check(Refused(mcp, "read_table", """{"table":"Drift"}""").Contains("Story Drifts"), "a close table name is offered");
+    Check(Refused(mcp, "no_such_tool", "{}").Contains("no tool"), "unknown tool");
+    Equal(0, e.Frames().Count, "nothing was added");
+});
+
+Test("assistant: loads, combinations and tables", () =>
+{
+    var e = new MemoryEtabs();
+    var mcp = Endpoint(e);
+    var beam = (string)Call(mcp, "add_beams", """{"lines":[[0,0,6,0]],"stories":["Story1"],"section":"B300x600"}""")["names"]![0]!;
+    Call(mcp, "add_load_pattern", """{"name":"SDL","type":"super dead"}""");
+    Call(mcp, "set_loads", $$"""{"frames":["{{beam}}"],"pattern":"sdl","value":8}""");
+    Call(mcp, "set_loads", $$"""{"frames":["{{beam}}"],"pattern":"SDL","value":2,"add":true}""");
+    Near(10, e.Loads[$"frame {beam} / SDL"], "the second load was added to the first");
+    Equal(3, (int)Call(mcp, "add_combination", """{"name":"ULS","cases":[{"case":"Dead","factor":1.2},{"case":"SDL","factor":1.2},{"case":"Live","factor":1.6}]}""")["cases"]!, "combination");
+    Check(Refused(mcp, "add_combination", """{"name":"X","cases":[{"case":"Wind","factor":1}]}""").Contains("Dead, Live, SDL"), "unknown case");
+    var table = Call(mcp, "read_table", """{"table":"story definitions","where":{"Story":"Story2"},"fields":["Story","Height"]}""");
+    Equal(1, (int)table["row_count"]!, "where keeps one row"); Equal("3.2", (string)table["rows"]![0]![1]!, "fields keeps two columns");
+    Check(((string)Call(mcp, "read_table", """{"table":"Story Drifts"}""")["note"]!).Contains("finished analysis"), "an empty result table says why");
+    Equal(2, (int)Call(mcp, "list_tables", "{}")["count"]!, "empty tables are left out");
+    var selected = Call(mcp, "select_objects", $$"""{"frames":["{{beam}}","nope"]}""");
+    Equal(1, (int)selected["selected"]!, "one selected"); Equal(1, selected["failed"]!.AsArray().Count, "one reported");
+});
+
+Test("assistant: the engineer is asked before deletes, saves and runs", () =>
+{
+    var e = new MemoryEtabs();
+    var asked = new List<string>();
+    var no = Endpoint(e, allow: false, asked: asked);
+    var beam = (string)Call(no, "add_beams", """{"lines":[[0,0,6,0]],"stories":["Story1"],"section":"B300x600"}""")["names"]![0]!;
+    Equal(0, asked.Count, "a normal change is not asked about by default");
+    Check(Refused(no, "delete_objects", $$"""{"frames":["{{beam}}"]}""").Contains("declined"), "declined delete");
+    Check(Refused(no, "save_model", "{}").Contains("declined"), "declined save");
+    Check(Refused(no, "run_analysis", "{}").Contains("declined"), "declined run");
+    Equal(1, e.Frames().Count, "the beam is still there"); Equal(0, e.Saves + e.Runs, "nothing saved or run");
+    Equal("Delete 1 frame", asked[0], "the question says what will happen");
+    var strict = Endpoint(e, allow: false, ask: true);
+    Check(Refused(strict, "add_beams", """{"lines":[[0,1,6,1]],"section":"B300x600"}""").Contains("declined"), "with ask-before-changes every change is asked");
+    Call(strict, "query_objects", "{}");
+    var yes = Endpoint(e);
+    Equal(1, (int)Call(yes, "delete_objects", $$"""{"frames":["{{beam}}"]}""")["done"]!, "allowed delete");
+    Call(yes, "run_analysis", "{}");
+    Check(Refused(yes, "add_load_pattern", """{"name":"W","type":"Wind"}""").Contains("locked"), "a locked model says so");
+});
+
+Test("assistant: every tool has a name of its own and a schema", () =>
+{
+    Equal(EtabsTools.All.Count, EtabsTools.All.Select(t => t.Name).Distinct().Count(), "tool names are unique");
+    foreach (var tool in EtabsTools.All)
+    {
+        var wrapped = new EtabsProMax.Tools.ModelTool(tool);
+        Check(JsonDocument.Parse(wrapped.PropertiesJson).RootElement.ValueKind == JsonValueKind.Object, $"schema of {tool.Name}");
+    }
+});
+
+Test("assistant: the chat is given every tool, the drawing reader too", () =>
+{
+    var registry = EtabsProMax.Tools.ToolRegistry.CreateDefault();
+    foreach (var name in new[] { "read_cad_drawing", "read_drawing", "make_document", "run_self_test", "memory_note", "ask_user" })
+        Check(registry.Find(name) is not null && registry.IsBuiltIn(name), "the chat has no " + name);
+    foreach (var tool in EtabsTools.All)
+        Check(registry.IsBuiltIn(tool.Name), "the chat has no " + tool.Name);
+});
+
+Test("files: a drawing is written as DXF and DWG and read back", () =>
+{
+    var folder = Directory.CreateTempSubdirectory("epm").FullName;
+    var entities = J("""[{"type":"line","x1":0,"y1":0,"x2":6,"y2":0,"layer":"Grid A"},{"type":"polyline","points":[[0,0],[6,0],[6,5],[0,5]],"closed":true,"layer":"slab"},{"type":"circle","x":3,"y":2.5,"r":0.3,"layer":"columns"},{"type":"text","x":3,"y":3,"height":0.25,"text":"C1","layer":"columns"},{"type":"nope"}]""").EnumerateArray().ToList();
+    var (drawn, skipped) = EtabsProMax.Tools.CadOut.Write(Path.Combine(folder, "a.dxf"), entities);
+    Equal(4, drawn, "four drawn"); Equal(1, skipped, "one skipped");
+    var back = JsonNode.Parse(EtabsProMax.Tools.ReadCadDrawingTool.Read(Path.Combine(folder, "a.dxf"), [], [], 0, 0).Text)!;
+    Equal(4, (int)back["objects"]!, "the DXF reads back");
+    Check(back["layers"]!.AsArray().Any(l => (string)l!["layer"]! == "GRID_A"), "layer names are made safe");
+    var (dwgDrawn, _) = EtabsProMax.Tools.CadOut.Write(Path.Combine(folder, "a.dwg"), entities);
+    Equal(4, dwgDrawn, "four in the DWG");
+    var overview = JsonNode.Parse(EtabsProMax.Tools.ReadCadDrawingTool.Read(Path.Combine(folder, "a.dwg"), [], [], 0, 0).Text)!;
+    Equal(4, (int)overview["objects"]!, "the DWG reads back"); Near(6, (double)overview["extents"]!["width"]!, "its extents");
+    var columns = JsonNode.Parse(EtabsProMax.Tools.ReadCadDrawingTool.Read(Path.Combine(folder, "a.dwg"), ["COLUMNS"], ["text"], 0, 0).Text)!;
+    Equal("C1", (string)columns["objects"]![0]!["text"]!, "text on a layer");
+    Directory.Delete(folder, true);
+});
+
+Test("files: the kinds of file the chat makes", () =>
+{
+    var folder = Directory.CreateTempSubdirectory("epm").FullName;
+    EtabsProMax.Tools.ToolResult Make(string json) => EtabsProMax.Tools.MakeDocumentTool.Make(new EtabsProMax.Tools.ToolArgs(JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json)!), folder);
+    foreach (var (format, ext) in new[] { ("csv", ".csv"), ("text", ".txt"), ("markdown", ".md"), ("word", ".docx"), ("pdf", ".pdf") })
+    {
+        var made = Make($$"""{"format":"{{format}}","title":"Reactions","content":"# Reactions\n\nA,B\n1,2"}""");
+        Check(!made.IsError, format + ": " + made.Text);
+        Check(File.Exists(Path.Combine(folder, "Reactions" + ext)), format + " file is there");
+    }
+    var excel = Make("""{"format":"excel","title":"Sections","sheets":[{"name":"S","columns":["Section","Count"],"rows":[["C500x500",12]]}]}""");
+    Check(!excel.IsError && EtabsProMax.Chat.ChatFiles.Find(excel.Text).Count == 1, "the Excel file shows as a card: " + excel.Text);
+    var dwg = Make("""{"format":"dwg","title":"Layout","entities":[{"type":"line","x1":0,"y1":0,"x2":1,"y2":1}]}""");
+    Check(!dwg.IsError && EtabsProMax.Chat.ChatFiles.Find(dwg.Text).Single().EndsWith(".dwg"), "a DWG shows as a card: " + dwg.Text);
+    Directory.Delete(folder, true);
+});
+
+Test("licensing: ETABS ProMax keys are its own", () =>
+{
+    Check(EtabsProMax.Licensing.LicenseKey.Prefix.StartsWith("EPM"), "the key prefix");
+});
+
+Test("assistant: ETABS's API is called by name, with numbers for its enums", () =>
+{
+    dynamic api = new EtabsApi(new ETABSv1.FakeApp(), typeof(ETABSv1.cFakeApp));
+    dynamic model = api.SapModel;
+    int n = 0; string[] names = []; int unit = 0;
+    Equal(0, (int)model.GetNames(ref n, ref names, ref unit), "the call's own answer");
+    Equal(2, n, "a number comes back"); Equal("B", names[1], "a list comes back"); Equal(6, unit, "an enum comes back as its number");
+    Equal(4, (int)model.Add("x", 4, 1), "a number goes in as the enum, a whole number as a decimal");
+    Equal(7, (int)model.Add("x", 7), "a left-out value takes its default");
+    try { model.Nope(); throw new Exception("accepted a method ETABS doesn't have"); }
+    catch (MissingMethodException ex) { Check(ex.Message.Contains("cFakeModel has no Nope"), ex.Message); }
+});
+
+Test("plug-in: the assistant is started with the dotnet ETABS runs on", () =>
+{
+    var root = Directory.CreateTempSubdirectory("epm").FullName;
+    var runtime = Directory.CreateDirectory(Path.Combine(root, "dotnet", "shared", "Microsoft.NETCore.App", "8.0.29")).FullName;
+    var folder = Directory.CreateDirectory(Path.Combine(root, "ETABS ProMax")).FullName;
+    string Message() { try { EtabsProMaxPlugin.Launcher.StartInfo(folder, runtime, 42004); return ""; } catch (IOException ex) { return ex.Message; } }
+    Check(Message().Contains("EtabsProMax.dll is missing"), "a plug-in copied alone says what is missing");
+    File.WriteAllText(Path.Combine(folder, "EtabsProMax.dll"), "");
+    Check(Message().Contains("was not found"), "no dotnet");
+    var dotnet = Path.Combine(root, "dotnet", OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
+    File.WriteAllText(dotnet, "");
+    var start = EtabsProMaxPlugin.Launcher.StartInfo(folder, runtime, 42004);
+    Equal(dotnet, start.FileName, "dotnet from three folders above the runtime");
+    Equal(Path.Combine(folder, "EtabsProMax.dll"), start.ArgumentList[0], "a path with a space is one argument");
+    Equal("--etabs-pid 42004", start.ArgumentList[1] + " " + start.ArgumentList[2], "the assistant is told which ETABS window started it");
+    Check(start.CreateNoWindow && !start.UseShellExecute, "no console window");
+    Directory.Delete(root, true);
+});
+
 var failed = 0;
 foreach (var (name, body) in tests)
 {
@@ -263,3 +449,41 @@ foreach (var (name, body) in tests)
 }
 Console.WriteLine($"\n{tests.Count - failed} of {tests.Count} passed.");
 return failed == 0 ? 0 : 1;
+
+namespace ETABSv1
+{
+    // A stand-in shaped like ETABS's API (interfaces in the ETABSv1 namespace, ref lists, enums), for the EtabsApi test.
+    public enum eFakeLength { mm = 4, m = 6 }
+    public interface cFakeModel
+    {
+        int GetNames(ref int count, ref string[] names, ref eFakeLength unit);
+        int Add(string name, eFakeLength unit, double factor = 1);
+    }
+    public interface cFakeApp { cFakeModel SapModel { get; } }
+    public sealed class FakeModel : cFakeModel
+    {
+        public int GetNames(ref int count, ref string[] names, ref eFakeLength unit) { count = 2; names = ["A", "B"]; unit = eFakeLength.m; return 0; }
+        public int Add(string name, eFakeLength unit, double factor = 1) => (int)unit * (int)factor;
+    }
+    public sealed class FakeApp : cFakeApp { public cFakeModel SapModel { get; } = new FakeModel(); }
+}
+
+
+/// <summary>Runs a tool as the panel does, with the approvals' asking.</summary>
+sealed class Harness(MemoryEtabs etabs, bool allow, bool ask, List<string>? asked)
+{
+    public (string Text, bool Failed) Call(string name, JsonElement args)
+    {
+        var found = EtabsTools.All.FirstOrDefault(t => t.Name == name);
+        if (found is null) return ($"There is no tool '{name}'.", true);
+        var tool = new EtabsProMax.Tools.ModelTool(found);
+        var input = new EtabsProMax.Tools.ToolArgs(JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(args.GetRawText())!);
+        if (tool.AlwaysAsks || tool.ModifiesModel && ask)
+        {
+            asked?.Add(tool.Summary(input) ?? name);
+            if (!allow) return ("The engineer declined this. Nothing was changed.", true);
+        }
+        var result = tool.Execute(new EtabsProMax.ETABS.EtabsApp(etabs), input);
+        return (result.Text, result.IsError);
+    }
+}

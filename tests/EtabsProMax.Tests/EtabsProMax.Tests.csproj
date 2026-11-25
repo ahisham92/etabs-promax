@@ -5,10 +5,13 @@
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <DisableTransitiveFrameworkReferences>true</DisableTransitiveFrameworkReferences>
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/EtabsProMax.Core/EtabsProMax.Core.csproj" />
+    <ProjectReference Include="../../src/EtabsProMax.Assistant/EtabsProMax.Assistant.csproj" />
+    <ProjectReference Include="../../src/EtabsProMax.Plugin/EtabsProMax.Plugin.csproj" />
     <None Include="samples/**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
