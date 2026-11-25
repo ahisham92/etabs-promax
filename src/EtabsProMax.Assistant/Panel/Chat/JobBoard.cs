@@ -36,7 +36,7 @@ internal sealed class ChatJob
 {
     /// <summary>The job's number in its chat (1, 2, …): how the main chat and the user name it.</summary>
     public int Number { get; set; }
-    /// <summary>Unique for good: the session's key in sessions.json and what the connector passes on (SKETCHPROMAX_JOB).</summary>
+    /// <summary>Unique for good: the session's key in sessions.json and what the connector passes on (ETABSPROMAX_JOB).</summary>
     public string Key { get; set; } = "";
     public string Title { get; set; } = "";
     /// <summary>What the job was asked to do, in full (it doesn't see the main chat).</summary>

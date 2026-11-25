@@ -271,7 +271,7 @@ internal static class WorkedCode
     }
 
     public static string Line(Entry e) =>
-        $"{e.Id}: {OneLine(e.Description, 140)} ({e.Tool}{(e.OwnTransactions ? ", own_transactions" : "")}, worked {e.Uses}x, last {e.Last:yyyy-MM-dd}" +
+        $"{e.Id}: {OneLine(e.Description, 140)} ({e.Tool}, worked {e.Uses}x, last {e.Last:yyyy-MM-dd}" +
         (e.Model.Length > 0 ? $", in {e.Model}" : "") + ")";
 
     private static string OneLine(string text, int max)
