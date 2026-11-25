@@ -386,6 +386,8 @@ public sealed class ComEtabs : ICsiLink, IDisposable
     {
         int n = 0; string[] keys = None, names = None; int[] import = []; bool[] empty = [];
         Ok(m.DatabaseTables.GetAllTables(ref n, ref keys, ref names, ref import, ref empty), "list the tables");
+        keys ??= None; names ??= None; empty ??= [];
+        n = Math.Min(n, Math.Min(keys.Length, names.Length));
         return (IReadOnlyList<TableName>)Enumerable.Range(0, n).Select(i => new TableName(keys[i], names[i], i < empty.Length && empty[i])).ToList();
     });
 
@@ -394,9 +396,18 @@ public sealed class ComEtabs : ICsiLink, IDisposable
         if (cases is { Count: > 0 }) { string[] list = cases.ToArray(); m.DatabaseTables.SetLoadCasesSelectedForDisplay(ref list); }
         if (combos is { Count: > 0 }) { string[] list = combos.ToArray(); m.DatabaseTables.SetLoadCombinationsSelectedForDisplay(ref list); }
         string[] ask = None, fields = None, data = None; int version = 0, records = 0;
-        Ok(m.DatabaseTables.GetTableForDisplayArray(key, ref ask, "", ref version, ref fields, ref records, ref data), $"read the table '{key}' (check its name with the table list)");
-        var rows = new List<string[]>(records);
+        int ret = Convert.ToInt32(m.DatabaseTables.GetTableForDisplayArray(key, ref ask, "", ref version, ref fields, ref records, ref data));
+        fields ??= None; data ??= None;
+        if (ret != 0)
+        {
+            // ETABS 23 refuses to read a table it lists as having no data, such as Story Stiffness with no seismic
+            // case or Element Forces - Braces with no braces (0.4.11 field test): that is an empty table, not an error.
+            if (Tables().Any(t => (t.Key == key || t.Name == key) && t.Empty)) return new TableData(fields, []);
+            throw new EtabsException($"{Program.Name} refused to read the table '{key}' (check its name with the table list).");
+        }
+        var rows = new List<string[]>(Math.Max(records, 0));
         var width = fields.Length;
+        records = width > 0 ? Math.Min(records, data.Length / width) : 0;
         for (var r = 0; r < records && width > 0; r++) rows.Add(data.Skip(r * width).Take(width).Select(v => v ?? "").ToArray());
         return new TableData(fields, rows);
     });
