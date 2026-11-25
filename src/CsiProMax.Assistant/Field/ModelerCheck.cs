@@ -162,9 +162,13 @@ public static class ModelerCheck
           return back ? {fail: "undo did not take the group away"} : {ok: "in the group, then undone"};
         });
         await step("Draw > Draw Columns: a column is drawn by a click, and Edit > Undo takes it back", async () => {
+          // The plan's view matrix is set when the pane is drawn, and a headless page does not always draw between steps
+          // (CI, and 2 runs in 9 here): it is drawn on purpose, and the matrix taken from the pane's own size if need be.
           const p = panes.find(x => x.mode === "plan");
           if (!p) return {fail: "no plan view is open"};
-          active = panes.indexOf(p);
+          active = panes.indexOf(p); draw();
+          for (let i = 0; i < 20 && !(p.M && p.M.to); i++) await wait(100);
+          if (!(p.M && p.M.to)) { const r = p.hold.getBoundingClientRect(); if (r.width < 4 || r.height < 4) return {fail: `the plan view has no room (${r.width} x ${r.height})`}; p.M = matrices(p, r.width, r.height); }
           const before = frames.length;
           act("d:column"); await wait(200);
           const z = elevationOf(p.story) ?? 0, s = p.M.to([3, 2.5, z]);
