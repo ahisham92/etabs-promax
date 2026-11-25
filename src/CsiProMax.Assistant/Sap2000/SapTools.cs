@@ -313,7 +313,7 @@ public static class SapTools
             {
                 int n = 0; string[] names = None;
                 Ok(m.GroupDef.GetNameList(ref n, ref names), "list the groups");
-                return names.Take(n).ToArray();
+                return (names ?? None).Take(n).ToArray();
             })!);
         }
         catch (EtabsException) { }
@@ -872,7 +872,7 @@ public static class SapTools
         var result = new JsonObject();
         e.Raw("read the design results", m =>
         {
-            var targets = frames.Count > 0 ? frames.Select(f => (f, 0)).ToList() : [("ALL", 2)];
+            var targets = frames.Count > 0 ? frames.Select(f => (f, 0)).ToList() : [("ALL", 1)]; // design takes eItemType: 0 object, 1 group, 2 selected (not the results' eItemTypeElm, where the group is 2)
             var steel = new List<(string Frame, double Ratio, string Type, string Combo, string Error)>();
             var columns = new List<(string Frame, double Ratio, double Area, string Combo, string Error)>();
             var beams = new List<(string Frame, double Top, double Bottom, double Shear, string Error)>();
