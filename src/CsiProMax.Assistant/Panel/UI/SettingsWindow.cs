@@ -870,7 +870,9 @@ public sealed class SettingsWindow : Window
             }
             var (found, signedIn) = result;
             install = found;
-            if (found is null) Say("The chat isn't installed on this PC yet. Open Chat: it offers to install it.", Brand.K.Muted);
+            if (found is null && Chat.ClaudeCli.LastSearch is { Failed.Count: > 0 })
+                Say("Claude Code is on this PC, but CSI ProMax couldn't use it. Open Chat: its card says which file and why.", Brand.K.DangerText);
+            else if (found is null) Say("The chat isn't installed on this PC yet. Open Chat: it offers to install it, or to point at it.", Brand.K.Muted);
             else if (Chat.SignInFlow.Now == Chat.SignInFlow.State.Waiting) Say("Finish signing in in your browser…");
             else if (Chat.SignInHealth.Broken) Say("Sign-in expired: CSI ProMax can't use your plan until you sign in again.", Brand.K.DangerText);
             else if (signedIn == Chat.ClaudeCli.SignIn.SignedOut) Say("Signed out. Sign in to chat.", Brand.K.DangerText);

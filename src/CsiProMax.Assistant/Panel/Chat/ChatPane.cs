@@ -202,6 +202,8 @@ internal sealed partial class ChatPane : DockPanel, IHistoryHost
 
     /// <summary>Why ETABS couldn't open PowerShell to install Claude Code, once it couldn't: the user pastes the line instead.</summary>
     private string? _installBlocked;
+    /// <summary>What the last look for Claude Code saw (set off the UI thread, read on it after the check).</summary>
+    private volatile ClaudeFinder.Result? _search;
 
     private sealed class Turn
     {
@@ -1018,7 +1020,10 @@ internal sealed partial class ChatPane : DockPanel, IHistoryHost
         }
         Task.Run(() =>
         {
-            var install = ClaudeCli.Find();
+            // What the search saw is kept: the card says where it looked, and which file was there but did not answer.
+            var search = ClaudeCli.Search();
+            _search = search;
+            var install = search.Install;
             var signIn = install is null ? (ClaudeCli.SignIn.Unknown, "") : ClaudeCli.CheckSignIn(install);
             // "auth status" says signed in while a saved sign-in that expired is still on disk: what the chat saw counts.
             return (install, SignInCheck.Real(signIn.Item1));
@@ -1113,6 +1118,23 @@ internal sealed partial class ChatPane : DockPanel, IHistoryHost
             case Setup.Checking:
                 Waiting("Checking the chat setup on this PC…");
                 break;
+            case Setup.Missing when _search is { Failed.Count: > 0 } seen:
+                // A Claude Code is on this PC but could not be used: say which file and why, not "it isn't installed".
+                Title("Claude Code is on this PC, but CSI ProMax couldn't use it");
+                Para("The chat runs Claude Code, Anthropic's app, signed in with your Claude account. This is what was found:");
+                foreach (var look in seen.Failed.Take(4))
+                {
+                    var found = Brand.Text(look.Path + ": " + look.Outcome + ".", Brand.K.DangerText, ChatUi.SmallSize);
+                    found.Margin = new Thickness(0, 2, 0, 0);
+                    panel.Children.Add(found);
+                }
+                Para("Press Check again. If it stays like this, security software on this PC may be stopping it (ask IT to allow " +
+                     "claude.exe), or install it again. Is it somewhere else? Press Choose the file and pick claude.exe.", Brand.K.Muted);
+                Add("Check again", Brand.Weight.Primary, () => Check(quiet: false));
+                Add("Install it again", Brand.Weight.Secondary, () => Launch(Setup.Installing));
+                Add("Choose the file", Brand.Weight.Secondary, ChooseClaude);
+                row.Children.Add(ChatUi.CopyButton(() => seen.Details("CSI ProMax " + CsiProMax.Update.Updater.CurrentText), "what CSI ProMax found", "Copy details"));
+                break;
             case Setup.Missing:
                 Title("Install Claude Code to chat here");
                 Para("The chat runs Claude Code, Anthropic's app, signed in with your Claude account, so it uses your Claude plan: " +
@@ -1123,8 +1145,19 @@ internal sealed partial class ChatPane : DockPanel, IHistoryHost
                 cmd.Margin = new Thickness(0, 2, 0, 0);
                 panel.Children.Add(cmd);
                 Para("It takes a minute or two and doesn't need admin rights. This pane notices by itself when it's done.", Brand.K.Muted);
+                // What people take for Claude Code, where it looked, and a way out when it is somewhere CSI ProMax does not know.
+                if (_search is { DesktopAppSeen: true })
+                    Para("The Claude desktop app is on this PC, but it is a different program: the chat needs Claude Code as well. " +
+                         "Install adds it and leaves the app as it is.");
+                if (_search is { ChosenGone: { } gone })
+                    Para("The file chosen earlier is no longer there: " + gone, Brand.K.DangerText);
+                if (_search is { } nothing)
+                    Para(nothing.Where + " Already installed? Press Choose the file and pick claude.exe.", Brand.K.Muted);
                 Add("Install Claude Code", Brand.Weight.Primary, () => Launch(Setup.Installing));
                 Add("Check again", Brand.Weight.Secondary, () => Check(quiet: false));
+                Add("Choose the file", Brand.Weight.Secondary, ChooseClaude);
+                if (_search is { } all)
+                    row.Children.Add(ChatUi.CopyButton(() => all.Details("CSI ProMax " + CsiProMax.Update.Updater.CurrentText), "where CSI ProMax looked", "Copy details"));
                 break;
             case Setup.Installing when _installBlocked is not null:
                 // Some company PCs don't let ETABS start PowerShell; the user's own PowerShell window usually still works.
@@ -1207,6 +1240,40 @@ internal sealed partial class ChatPane : DockPanel, IHistoryHost
         _setupCard.SetResourceReference(Border.BorderBrushProperty, Brand.K.NoticeBorder);
         AutomationProperties.SetLiveSetting(_setupCard, AutomationLiveSetting.Polite);
         _setupCard.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>
+    /// The user points at Claude Code themselves (claude.exe, or npm's claude.cmd): kept in the settings and looked at
+    /// first from then on. A file that is not Claude Code is named on the card with the reason; nothing else changes.
+    /// </summary>
+    private void ChooseClaude()
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Where is Claude Code? Pick claude.exe (or claude.cmd)",
+            Filter = "Claude Code (claude.exe, claude.cmd)|claude.exe;claude.cmd|Programs|*.exe;*.cmd|All files|*.*",
+            CheckFileExists = true,
+        };
+        try
+        {
+            var usual = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "bin");
+            if (Directory.Exists(usual)) dialog.InitialDirectory = usual;
+        }
+        catch (ArgumentException) { }
+        var owner = Window.GetWindow(this);
+        if ((owner is null ? dialog.ShowDialog() : dialog.ShowDialog(owner)) != true) return;
+        try
+        {
+            var settings = CsiProMax.Settings.AgentSettings.Load();
+            settings.ClaudePath = dialog.FileName;
+            settings.Save();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Status("The choice couldn't be saved: " + ex.Message, spin: false);
+            return;
+        }
+        Check(quiet: false);
     }
 
     private void Launch(Setup next)

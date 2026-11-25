@@ -894,6 +894,132 @@ Test("plug-in: SAP2000 starts the assistant for SAP2000", () =>
     finally { Directory.Delete(root, true); }
 });
 
+Test("chat: Claude Code is looked for where each way of installing puts it, the most likely first", () =>
+{
+    var root = Path.Combine(Path.GetTempPath(), "cpm-find-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(root);
+    string Make(params string[] parts)
+    {
+        var file = Path.Combine(new[] { root }.Concat(parts).ToArray());
+        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+        File.WriteAllText(file, "");
+        return file;
+    }
+    try
+    {
+        var (home, local, roaming, programs, tools) = (Path.Combine(root, "home"), Path.Combine(root, "local"), Path.Combine(root, "roaming"), Path.Combine(root, "pf"), Path.Combine(root, "tools"));
+        var places = new CsiProMax.Chat.ClaudeFinder.Places([home], local, roaming, [programs], [tools], User: "DAR\\tester");
+        var asked = new List<string>();
+        (int, string) Answer(string path, int ms) { asked.Add(path); return (0, "2.1.119 (Claude Code)\n"); }
+        string? Found() => CsiProMax.Chat.ClaudeFinder.Search(places, Answer).Install?.Path;
+
+        // A PC with no Claude Code: nothing is started, and the answer says where it looked and for whom.
+        var none = CsiProMax.Chat.ClaudeFinder.Search(places, Answer);
+        Check(none.Install is null && asked.Count == 0 && none.Tried.Count == 0, "nothing is there, so nothing is started");
+        Equal(Path.Combine(home, ".local", "bin", "claude.exe"), none.Looked[0], "the first place is where Anthropic's installer puts it");
+        Check(none.Looked.Count >= 15, $"only {none.Looked.Count} places were looked at");
+        Check(none.Where.Contains("DAR\\tester") && none.Where.Contains(Path.Combine(home, ".local", "bin")), none.Where);
+        Check(none.Details("CSI ProMax 0.4.2").Contains("no Claude Code that answers") && none.Details("x").Contains(Path.Combine(roaming, "npm", "claude.cmd")), "the details list every place");
+
+        // Each kind of install is found; a likelier place wins over a wider guess.
+        Make("roaming", "Claude", "claude-code", "2.1.90", "claude.exe");
+        var desktop = Make("roaming", "Claude", "claude-code", "2.1.119", "claude.exe");
+        Equal(desktop, Found(), "the copy inside the Claude desktop app, its newest version");
+        var store = Make("local", "Packages", "Claude_pzs8sxrjxfjjc", "LocalCache", "Roaming", "Claude", "claude-code", "2.1.120", "claude.exe");
+        Check(CsiProMax.Chat.ClaudeFinder.Candidates(places).Contains(store), "the desktop app from the Store keeps its copy under Packages");
+        var backup = Make("home", ".local", "bin", "claude.exe.old.1764000000000");
+        Make("home", ".local", "bin", "claude.exe.old.1763000000000");
+        Equal(backup, Found(), "an update that was cut off leaves only the backup: the newest one is used");
+        Make("home", ".local", "share", "claude", "versions", "2.1.97");
+        var kept = Make("home", ".local", "share", "claude", "versions", "2.1.118");
+        Equal(kept, Found(), "the installer's own store of versions, the newest");
+        var nvm = Make("roaming", "nvm", "v22.11.0", "claude.cmd");
+        Equal(nvm, Found(), "a Node version kept by nvm");
+        var winget = Make("local", "Microsoft", "WinGet", "Packages", "Anthropic.ClaudeCode_Microsoft.Winget.Source_8wekyb3d8bbwe", "claude.exe");
+        Equal(winget, Found(), "WinGet's package folder, when it made no link");
+        var npm = Make("roaming", "npm", "claude.cmd");
+        Equal(npm, Found(), "npm install -g");
+        var onPath = Make("tools", "claude.cmd");
+        Equal(onPath, Found(), "a folder on PATH");
+        var native = Make("home", ".local", "bin", "claude.exe");
+        Equal(native, Found(), "Anthropic's installer");
+        var mine = Make("elsewhere", "claude.exe");
+        places = places with { Chosen = "\"" + mine + "\"" };
+        Equal(mine, Found(), "the file the user pointed at comes first");
+        Equal("2.1.119", CsiProMax.Chat.ClaudeFinder.Search(places, Answer).Install?.Version, "its version");
+
+        // A package manager's own folder (npm's prefix, pnpm, Volta, Bun, Scoop).
+        var prefix = Make("d", "npm-global", "claude.cmd");
+        Check(CsiProMax.Chat.ClaudeFinder.Candidates(places with { Prefixes = [Path.Combine(root, "d", "npm-global")] }).Contains(prefix), "npm's prefix");
+        Equal(@"D:\npm-global", CsiProMax.Chat.ClaudeFinder.NpmPrefix("# mine\nregistry=https://registry.npmjs.org/\nprefix = \"D:\\npm-global\"\r\n"), "the prefix line of .npmrc");
+        Equal("", CsiProMax.Chat.ClaudeFinder.NpmPrefix("registry=https://registry.npmjs.org/\n;prefix=C:\\old"), "no prefix line");
+    }
+    finally { Directory.Delete(root, true); }
+});
+
+Test("chat: a Claude Code that is there but does not answer is named with the reason, and the desktop app is never started", () =>
+{
+    var root = Path.Combine(Path.GetTempPath(), "cpm-find-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(root);
+    string Make(params string[] parts)
+    {
+        var file = Path.Combine(new[] { root }.Concat(parts).ToArray());
+        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+        File.WriteAllText(file, "");
+        return file;
+    }
+    try
+    {
+        var (home, local, roaming) = (Path.Combine(root, "home"), Path.Combine(root, "local"), Path.Combine(root, "roaming"));
+        var native = Make("home", ".local", "bin", "claude.exe");
+        var blocked = Make("tools", "claude.exe");
+        var slowToo = Make("tools", "claude.cmd");
+        var npm = Make("roaming", "npm", "claude.cmd");
+        var squirrel = Make("local", "AnthropicClaude", "claude.exe");
+        var app = Make("apps", "Claude", "claude.exe");
+        Make("apps", "Claude", "resources", "app.asar");
+        var gone = Path.Combine(root, "was-here", "claude.exe");
+        var places = new CsiProMax.Chat.ClaudeFinder.Places([home], local, roaming, [], [Path.Combine(root, "tools"), Path.Combine(local, "AnthropicClaude"), Path.Combine(root, "apps", "Claude")], Chosen: gone, User: "DAR\\tester");
+        var asked = new List<(string Path, int Ms)>();
+        (int, string) Answer(string path, int ms)
+        {
+            asked.Add((path, ms));
+            if (path == native || path == slowToo) return (-1, "");                       // no answer in time
+            if (path == blocked) return (-1, "Access is denied");                          // Windows did not start it
+            return (1, "\n'node' is not recognized as an internal or external command,\noperable program or batch file.\n");
+        }
+        var result = CsiProMax.Chat.ClaudeFinder.Search(places, Answer);
+        Check(result.Install is null, "none of them counts");
+        string Why(string path) => result.Tried.FirstOrDefault(t => t.Path == path)?.Outcome ?? "(not listed)";
+        Equal("the file chosen in CSI ProMax is no longer there", Why(gone), "a chosen file that is gone");
+        Equal("did not answer within 60 seconds", Why(native), "a slow one gets a second, longer try");
+        Equal("did not answer within 20 seconds", Why(slowToo), "the longer try is given once in a search");
+        Equal("Windows did not start it: Access is denied", Why(blocked), "blocked");
+        Equal("answered with exit code 1: 'node' is not recognized as an internal or external command,", Why(npm), "an npm install without Node");
+        Check(Why(squirrel).Contains("Claude desktop app") && Why(app).Contains("Claude desktop app"), "the desktop app is named: " + Why(squirrel) + " / " + Why(app));
+        Check(!asked.Any(a => a.Path == squirrel || a.Path == app), "the desktop app was started");
+        Check(result.DesktopAppSeen && result.ChosenGone == gone, "the desktop app and the chosen file that is gone are told apart from a Claude Code that failed");
+        Equal(4, result.Failed.Count, "files that are Claude Code but did not work");
+
+        // Only the desktop app on the PC: that is "not installed", with the app named, never "couldn't use it".
+        var appOnly = CsiProMax.Chat.ClaudeFinder.Search(new CsiProMax.Chat.ClaudeFinder.Places([Path.Combine(root, "nobody")], local, Path.Combine(root, "nothing"), [], []), Answer);
+        Check(appOnly.Install is null && appOnly.Failed.Count == 0 && appOnly.DesktopAppSeen && appOnly.ChosenGone is null, "a PC with only the desktop app");
+        Equal("20000,60000", string.Join(",", asked.Where(a => a.Path == native).Select(a => a.Ms)), "the waits for the slow one");
+        Equal(1, asked.Count(a => a.Path == slowToo), "tries for the second slow one");
+        var details = result.Details("CSI ProMax 0.4.2");
+        Check(details.Contains("CSI ProMax 0.4.2") && details.Contains("DAR\\tester") && details.Contains(native + ": did not answer within 60 seconds") && details.Contains("Places looked at"), details);
+
+        // The answer to --version: Claude Code's own line counts, whatever else was printed around it.
+        var judge = CsiProMax.Chat.ClaudeFinder.Judge;
+        Check(judge(0, "2.1.119 (Claude Code)\n\n", 20000) is (true, "2.1.119", ""), "the usual answer");
+        Check(judge(1, "warning: could not check for updates\n2.0.14 (Claude Code)", 20000) is (true, "2.0.14", _), "a version with a warning and exit code 1");
+        Check(judge(0, "1.0.3", 20000).Works, "an older one that prints only the number");
+        Check(!judge(0, "", 20000).Works && !judge(1, "Error 1.2.3 happened", 20000).Works, "no version, or an error that happens to hold numbers");
+        Check(CsiProMax.Chat.ClaudeFinder.IsDesktopApp(@"C:\Users\x\AppData\Local\Microsoft\WindowsApps\claude.exe"), "the desktop app's alias in WindowsApps");
+    }
+    finally { Directory.Delete(root, true); }
+});
+
 foreach (var (name, body) in tests)
 {
     try { body(); Console.WriteLine($"ok    {name}"); }
