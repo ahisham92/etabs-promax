@@ -479,13 +479,28 @@ public static class EtabsTools
             result["note"] = "The automatic lateral load is set only in the running program: open the model there and add it again.";
         else if (coefficient is not null)
         {
-            // DirFlag 1 is global X, 4 is global Y; the load goes over the whole height (UserZ false).
+            string? other = null;
             e.Raw("define the seismic load", m =>
             {
-                var answer = Convert.ToInt32(m.LoadPatterns.AutoSeismic.SetUserCoefficient(name, dir == "X" ? 1 : 4, ecc, false, 0.0, 0.0, c, k));
-                if (answer != 0) throw new EtabsException($"{e.Program.Name} refused the user coefficient for {name}.");
+                int answer;
+                try
+                {
+                    // SAP2000 26: SetUserCoefficient(Name, DirFlag, Eccen, UserZ, TopZ, BottomZ, C, K); DirFlag 1 is X, 4 is Y.
+                    answer = Convert.ToInt32(m.LoadPatterns.AutoSeismic.SetUserCoefficient(name, dir == "X" ? 1 : 4, ecc, false, 0.0, 0.0, c, k));
+                }
+                catch (Exception ex) when (ex is MissingMethodException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
+                {
+                    // ETABS 23's API has no user coefficient (0.4.15 field test: cAutoSeismic has only ASCE 7-16 and
+                    // IBC 2006). ASCE 7-16 with the program's period, R 8, Omega 3, Cd 5.5, Ie 1, Ss 1.0, S1 0.4, TL 8 s, site D.
+                    bool[] flags = [dir == "X", false, false, dir == "Y", false, false];
+                    answer = Convert.ToInt32(m.LoadPatterns.AutoSeismic.SetASCE716(name, ref flags, ecc, 2, 1, 0.0, false, 0.0, 0.0,
+                        8.0, 3.0, 5.5, 1.0, 1.0, 0.4, 8.0, 4, 1.0, 1.0));
+                    other = $"ASCE 7-16 ({e.Program.Name}'s API has no user coefficient): direction {dir}, eccentricity {ecc.ToString(System.Globalization.CultureInfo.InvariantCulture)}, R 8, Omega 3, Cd 5.5, Ie 1, Ss 1.0, S1 0.4, TL 8 s, site class D, program period";
+                }
+                if (answer != 0) throw new EtabsException($"{e.Program.Name} refused the automatic seismic load for {name}.");
                 return null;
             });
+            if (other is not null) { result["lateral"] = other; return result; }
             result["lateral"] = $"user coefficient C = {c.ToString(System.Globalization.CultureInfo.InvariantCulture)}, K = {k.ToString(System.Globalization.CultureInfo.InvariantCulture)}, direction {dir}, eccentricity {ecc.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
         }
         return result;

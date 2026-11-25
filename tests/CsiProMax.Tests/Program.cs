@@ -1148,6 +1148,18 @@ Test("tool: add_load_pattern refuses a user coefficient that is not for a seismi
     Throws<ToolInputException>(() => tool.Run(JsonDocument.Parse("""{"name":"E","type":"Seismic","user_coefficient":{"c":0.05,"direction":"Z"}}""").RootElement, link), "direction Z");
 });
 
+Test("tool: a seismic pattern by coefficient in ETABS, whose API has only ASCE 7-16, uses ASCE 7-16 and says so", () =>
+{
+    // 0.4.15 field test: ETABS 23's cAutoSeismic has no SetUserCoefficient, only SetASCE716 and SetIBC2006.
+    var model = new CpmFakes.EtabsSeismic();
+    using var link = new ComEtabs(CsiProgram.Etabs, () => model);
+    var tool = EtabsTools.All.First(t => t.Name == "add_load_pattern");
+    var a = tool.Run(JsonDocument.Parse("""{"name":"EQX","type":"Seismic","user_coefficient":{"c":0.05,"direction":"X"}}""").RootElement, link);
+    Check(a["lateral"]!.GetValue<string>().StartsWith("ASCE 7-16", StringComparison.Ordinal), a.ToJsonString());
+    Equal("EQX", model.AutoSeismic.Named, "the pattern given ASCE 7-16");
+    Check(model.AutoSeismic.Flags is [true, false, false, false, false, false], "X only");
+});
+
 Test("link: units from the older one-value call, by name or number", () =>
 {
     Equal(("kN", "m", "C"), ComEtabs.Units("kN_m_C"), "by name");
@@ -1852,4 +1864,29 @@ namespace CpmFakes
         }
     }
     public sealed class TablesModel { public Tables DatabaseTables { get; } = new(); }
+}
+
+namespace CpmFakes
+{
+    public sealed class Asce716
+    {
+        public string Named = ""; public bool[] Flags = [];
+        public int SetASCE716(string name, ref bool[] dir, double ecc, int period, int ct, double userT, bool userZ, double top, double bottom,
+            double r, double omega, double cd, double i, double ss, double s1, double tl, int site, double fa, double fv) { Named = name; Flags = dir; return 0; }
+    }
+    public sealed class SeismicPatterns
+    {
+        public readonly List<string> Names = [];
+        public Asce716 AutoSeismic { get; } = new();
+        public int Add(string name, int type, double self, bool addCase) { Names.Add(name); return 0; }
+        public int GetNameList(ref int n, ref string[] names) { n = Names.Count; names = Names.ToArray(); return 0; }
+        public int GetLoadType(string name, ref int type) { type = 5; return 0; }
+        public int GetSelfWTMultiplier(string name, ref double self) { self = 0; return 0; }
+    }
+    public sealed class EtabsSeismic
+    {
+        public SeismicPatterns LoadPatterns { get; } = new();
+        public Asce716 AutoSeismic => LoadPatterns.AutoSeismic;
+        public int GetNameList(ref int n, ref string[] names) { n = 0; names = []; return 0; }
+    }
 }
