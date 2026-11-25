@@ -27,7 +27,7 @@ static class FieldRun048Tests
             Check(ComEtabs.Units(0) == (0, 0, 0) && ComEtabs.Units(99) == (0, 0, 0), "an unknown number gives nothing");
             var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Etabs", "ComEtabs.cs"));
             var two = source.IndexOf("GetPresentUnits_2(", StringComparison.Ordinal);
-            var one = source.IndexOf("Units(Convert.ToInt32(m.GetPresentUnits()))", StringComparison.Ordinal);
+            var one = source.IndexOf("Convert.ToInt32(m.GetPresentUnits())", StringComparison.Ordinal);
             Check(two > 0 && one > two, "Info does not fall back to GetPresentUnits after GetPresentUnits_2");
         });
 

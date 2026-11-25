@@ -163,7 +163,7 @@ public sealed class ComEtabs : ICsiLink, IDisposable
         try { m.GetPresentUnits_2(ref force, ref length, ref temperature); } catch (Exception ex) when (ex is not COMException) { }
         // SAP2000 26 left all three empty here (field test, 2026-11-25): the older call, one set of units by number, then.
         if (force <= 0 || length <= 0)
-            try { (force, length, temperature) = Units(Convert.ToInt32(m.GetPresentUnits())); } catch (Exception ex) when (ex is not COMException) { }
+            try { int units = Convert.ToInt32(m.GetPresentUnits()); (force, length, temperature) = Units(units); } catch (Exception ex) when (ex is not COMException) { }
         string file = Convert.ToString(m.GetModelFilename(true)) ?? "";
         bool locked = Convert.ToBoolean(m.GetModelIsLocked());
         return new ModelInfo(file, version, Name(Forces, force), Name(Lengths, length), Name(Temperatures, temperature), locked);
