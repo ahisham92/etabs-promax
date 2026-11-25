@@ -40,6 +40,63 @@ public static class SapFieldSteps
 
     private static bool At(double a, double b) => Math.Abs(a - b) < 1e-4;
 
+    private static double Num(JsonNode? node) => node is JsonValue v && v.TryGetValue<double>(out var x) ? x : double.NaN;
+
+    private static string Short(JsonNode a)
+    {
+        var text = a.ToJsonString();
+        return text.Length > 400 ? text[..400] + "..." : text;
+    }
+
+    /// <summary>
+    /// Reads something back through SAP2000's own API. When the API cannot be called this way here, that says nothing
+    /// about the tool under test, so the check is listed as not tested; a call SAP2000 refuses is a failure.
+    /// </summary>
+    private static T Back<T>(ICsiLink link, string what, Func<dynamic, object?> read)
+    {
+        try { return (T)link.Raw(what, read)!; }
+        catch (EtabsException ex) when (ex.Message.Contains("SAP2000 refused to", StringComparison.Ordinal)) { throw new FieldCheckException(ex.Message); }
+        catch (EtabsException ex) { throw new FieldSkipException($"the change could not be read back from SAP2000 ({ex.Message})"); }
+        catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException ex) { throw new FieldSkipException($"the change could not be read back from SAP2000 ({ex.Message})"); }
+    }
+
+    private static void Ok(object result, string what) => FieldContext.Expect(Convert.ToInt32(result) == 0, $"SAP2000 refused to {what}");
+
+    /// <summary>The distributed loads on a frame in CPM-TEST, by their first value.</summary>
+    private static List<double> FrameLoads(ICsiLink link, string frame) => Back<List<double>>(link, $"read the loads on frame {frame}", m =>
+    {
+        int n = 0; string[] names = [], patterns = [], systems = []; int[] types = [], dirs = [];
+        double[] rd1 = [], rd2 = [], d1 = [], d2 = [], v1 = [], v2 = [];
+        Ok(m.FrameObj.GetLoadDistributed(frame, ref n, ref names, ref patterns, ref types, ref systems, ref dirs, ref rd1, ref rd2, ref d1, ref d2, ref v1, ref v2, 0), $"read the loads on frame {frame}");
+        return Enumerable.Range(0, n).Where(i => patterns[i] == "CPM-TEST").Select(i => v1[i]).ToList();
+    });
+
+    /// <summary>The uniform loads on an area in CPM-TEST.</summary>
+    private static List<double> AreaLoads(ICsiLink link, string area) => Back<List<double>>(link, $"read the loads on area {area}", m =>
+    {
+        int n = 0; string[] names = [], patterns = [], systems = []; int[] dirs = []; double[] values = [];
+        Ok(m.AreaObj.GetLoadUniform(area, ref n, ref names, ref patterns, ref systems, ref dirs, ref values, 0), $"read the loads on area {area}");
+        return Enumerable.Range(0, n).Where(i => patterns[i] == "CPM-TEST").Select(i => values[i]).ToList();
+    });
+
+    /// <summary>A frame's end releases, U1 U2 U3 R1 R2 R3 at each end.</summary>
+    private static (bool[] I, bool[] J) Releases(ICsiLink link, string frame) => Back<(bool[], bool[])>(link, $"read the releases of frame {frame}", m =>
+    {
+        bool[] ii = new bool[6], jj = new bool[6]; double[] sv = new double[6], ev = new double[6];
+        Ok(m.FrameObj.GetReleases(frame, ref ii, ref jj, ref sv, ref ev), $"read the releases of frame {frame}");
+        return (ii, jj);
+    });
+
+    /// <summary>A joint's force load in CPM-TEST: F1 F2 F3 M1 M2 M3, or null when it has none.</summary>
+    private static double[]? JointLoad(ICsiLink link, string joint) => Back<double[]?>(link, $"read the loads on joint {joint}", m =>
+    {
+        int n = 0; string[] names = [], patterns = [], systems = []; int[] steps = [];
+        double[] f1 = [], f2 = [], f3 = [], m1 = [], m2 = [], m3 = [];
+        Ok(m.PointObj.GetLoadForce(joint, ref n, ref names, ref patterns, ref steps, ref systems, ref f1, ref f2, ref f3, ref m1, ref m2, ref m3, 0), $"read the loads on joint {joint}");
+        var i = Array.IndexOf(patterns, "CPM-TEST");
+        return i < 0 || i >= n ? null : new[] { f1[i], f2[i], f3[i], m1[i], m2[i], m3[i] };
+    });
+
     private static void Steps(FieldContext ctx)
     {
         var link = ctx.Link;
@@ -142,14 +199,30 @@ public static class SapFieldSteps
         if (beams.Count > 1 && areas.Count > 0)
         {
             ctx.Tool("set_loads", $$"""{"frames":{{List(beams)}},"areas":{{List(areas)}},"pattern":"CPM-TEST","value":3}""", a => FieldContext.Expect(Int(a["done"]) == beams.Count + areas.Count && a["failed"]!.AsArray().Count == 0, "not every object was loaded: " + a.ToJsonString()));
-            ctx.Tool("set_member_loads", $$"""{"frames":[{{Q(beams[1])}}],"pattern":"CPM-TEST","value":2,"direction":"x"}""", null, "tool set_member_loads on a frame, along x");
-            ctx.Tool("set_member_loads", $$"""{"areas":{{List(areas)}},"pattern":"CPM-TEST","value":1,"direction":"local_3","add":true}""", null, "tool set_member_loads on an area, local 3");
-            ctx.Tool("set_releases", $$"""{"frames":[{{Q(beams[1])}}],"type":"pinned","ends":"j"}""", null, "tool set_releases pinned at one end");
-            ctx.Tool("set_releases", $$"""{"frames":[{{Q(beams[1])}}],"type":"fixed","ends":"both"}""", null, "tool set_releases fixed again");
+            ctx.Tool("set_member_loads", $$"""{"frames":[{{Q(beams[1])}}],"pattern":"CPM-TEST","value":2,"direction":"x"}""",
+                _ => FieldContext.Expect(FrameLoads(link, beams[1]).Any(l => At(Math.Abs(l), 2)), "no load of 2 in CPM-TEST on the frame when read back from SAP2000: " + string.Join(", ", FrameLoads(link, beams[1]))),
+                "tool set_member_loads on a frame, along x");
+            ctx.Tool("set_member_loads", $$"""{"areas":{{List(areas)}},"pattern":"CPM-TEST","value":1,"direction":"local_3","add":true}""",
+                _ => FieldContext.Expect(AreaLoads(link, areas[0]).Any(l => At(Math.Abs(l), 1)), "no load of 1 in CPM-TEST on the area when read back from SAP2000: " + string.Join(", ", AreaLoads(link, areas[0]))),
+                "tool set_member_loads on an area, local 3");
+            ctx.Tool("set_releases", $$"""{"frames":[{{Q(beams[1])}}],"type":"pinned","ends":"j"}""", _ =>
+            {
+                var (i, j) = Releases(link, beams[1]);
+                FieldContext.Expect(j[4] && j[5] && !i.Any(r => r), $"R2 and R3 released at the j end only were expected; SAP2000 has i [{string.Join(" ", i)}], j [{string.Join(" ", j)}]");
+            }, "tool set_releases pinned at one end");
+            ctx.Tool("set_releases", $$"""{"frames":[{{Q(beams[1])}}],"type":"fixed","ends":"both"}""", _ =>
+            {
+                var (i, j) = Releases(link, beams[1]);
+                FieldContext.Expect(!i.Any(r => r) && !j.Any(r => r), $"no releases were expected; SAP2000 has i [{string.Join(" ", i)}], j [{string.Join(" ", j)}]");
+            }, "tool set_releases fixed again");
         }
         else ctx.Fail("tools set_loads, set_member_loads and set_releases", "the beams and the area to load were not added");
         if (tops.Count > 0)
-            ctx.Tool("set_joint_loads", $$"""{"joints":[{{Q(tops[0])}}],"pattern":"CPM-TEST","fz":-5,"fx":1,"my":0.5}""");
+            ctx.Tool("set_joint_loads", $$"""{"joints":[{{Q(tops[0])}}],"pattern":"CPM-TEST","fz":-5,"fx":1,"my":0.5}""", _ =>
+            {
+                var f = JointLoad(link, tops[0]);
+                FieldContext.Expect(f is { } v && At(v[0], 1) && At(v[2], -5) && At(v[4], 0.5), $"F1 = 1, F3 = -5 and M2 = 0.5 in CPM-TEST were expected; SAP2000 has {(f is null ? "no load" : string.Join(" ", f))}");
+            });
         var first = Read(ctx, "the load cases", () => link.LoadCases().FirstOrDefault(c => c.Equals("Dead", StringComparison.OrdinalIgnoreCase)) ?? link.LoadCases().FirstOrDefault(), null) ?? "DEAD";
         ctx.Tool("add_combination", $$"""{"name":"CPM-TEST-COMBO","cases":[{"case":{{Q(first)}},"factor":1.2},{"case":"CPM-TEST","factor":1.6}]}""", _ => FieldContext.Expect(link.Combos().Contains("CPM-TEST-COMBO"), "the combination is not in SAP2000"));
 
@@ -190,15 +263,24 @@ public static class SapFieldSteps
         var analysed = false;
         try { analysed = link.Info().Locked; }
         catch (EtabsException) { }
-        ctx.Tool("run_design", """{"steel":true,"concrete":true}""");
+        // Once SAP2000 has analysed and designed, each result must hold numbers; without an analysis each tool must still answer.
+        Action<JsonNode>? Has(Func<JsonNode, bool> holds, string what) => analysed ? a => FieldContext.Expect(holds(a), what + ": " + Short(a)) : null;
+        ctx.Tool("run_design", """{"steel":true,"concrete":true}""", Has(a => a["designed"] is JsonArray { Count: > 0 }, "SAP2000 designed nothing"));
         var none = analysed ? "" : " (no analysis: it must still answer)";
-        ctx.Tool("joint_displacements", """{"limit":5}""", null, "tool joint_displacements" + none);
-        ctx.Tool("frame_forces", """{"limit":5}""", null, "tool frame_forces" + none);
-        ctx.Tool("base_reactions", """{"per_joint":true}""", null, "tool base_reactions" + none);
-        ctx.Tool("modal_results", "{}", null, "tool modal_results" + none);
-        ctx.Tool("check_displacement", """{"lateral_limit":500,"vertical_limit":0.02}""", null, "tool check_displacement" + none);
-        ctx.Tool("design_ratios", """{"limit":10}""", null, "tool design_ratios" + none);
-        ctx.Tool("check_report", """{"lateral_limit":500}""", null, "tool check_report" + none);
+        ctx.Tool("joint_displacements", """{"limit":5}""", Has(a => Int(a["rows"]) > 0 && a["list"] is JsonArray { Count: > 0 }, "no joint displacements after the analysis"), "tool joint_displacements" + none);
+        ctx.Tool("frame_forces", """{"limit":5}""", Has(a => Int(a["rows"]) > 0, "no frame forces after the analysis"), "tool frame_forces" + none);
+        ctx.Tool("base_reactions", """{"per_joint":true}""", Has(a =>
+            a["base_reactions"] is JsonArray { Count: > 0 } total && a["joint_reactions"] is JsonArray { Count: > 0 }
+            && total.Any(r => r?["case"]?.GetValue<string>() == "CPM-TEST" && (Math.Abs(Num(r["FX"])) + Math.Abs(Num(r["FZ"]))) > 1e-6),
+            "base reactions for every case, reactions at the supports, and a reaction to the loads in CPM-TEST were expected"), "tool base_reactions" + none);
+        ctx.Tool("modal_results", "{}", Has(a => a["modes"] is JsonArray { Count: > 0 } && Num(a["first_period"]) > 0, "modes with a first period above 0 were expected"), "tool modal_results" + none);
+        ctx.Tool("check_displacement", """{"lateral_limit":500,"vertical_limit":0.02}""", Has(a => a["lateral"]?["largest"] is not null && a["vertical"]?["passes"] is not null, "the lateral largest and the vertical check were expected"), "tool check_displacement" + none);
+        ctx.Tool("design_ratios", """{"limit":10}""", Has(a => Int(a["steel"]?["members"]) > 0 || Int(a["concrete_columns"]?["members"]) > 0 || Int(a["concrete_beams"]?["members"]) > 0,
+            "design results for the steel beams or the concrete columns were expected"), "tool design_ratios" + none);
+        JsonObject? report = null;
+        ctx.Tool("check_report", """{"lateral_limit":500}""", a => report = a["checks"] as JsonObject, "tool check_report" + none);
+        if (analysed && report is not null)
+            Verdicts(ctx, "every SAP2000 check had its results to read", report.Select(c => (c.Key, c.Value)).ToList());
         ctx.Tool("results_overview", "{}", null, "tool results_overview (the ETABS tool, as SAP2000 answers it)"); // ETABS itself
         ctx.Tool("check_modal", "{}", null, "tool check_modal (the ETABS tool, as SAP2000 answers it)"); // ETABS itself
         if (analysed) ctx.Step("SAP2000 tables with data after the analysis and design", () => link.Tables().Where(t => !t.Empty).Select(t => t.Name).ToList());
