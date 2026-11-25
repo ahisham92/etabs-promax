@@ -3212,16 +3212,20 @@ function modelerMenus(m) {
   m.Edit = [[s.undo ? "Undo " + s.undo : "Undo", "m:undo", "Ctrl+Z", !s.undo], [s.redo ? "Redo " + s.redo : "Redo", "m:redo", "Ctrl+Y", !s.redo], 0,
     ["Delete", "m:delete", "Del", !any], 0, ["Copy names of the selected objects", "copyNames", "Ctrl+C", !any], 0, ["Hide the selected objects", "hideSel", "", !any], ["Show all objects", "showAll"]];
   m.Define = [["Material Properties...", "m:materials"], ["Frame Sections...", "m:frameSections"], ["Slab and Wall Sections...", "m:shellSections"], 0,
-    ["Story Data...", "m:stories"], ["Grid Data...", "m:grids"], 0, ["Load Patterns...", "m:patterns"], ["Load Cases...", "dlg:cases"], ["Load Combinations...", "m:combos"]];
+    ["Story Data...", "m:stories"], ["Grid Data...", "m:grids"], 0, ["Functions", [["Response Spectrum...", "m:fnRS"], ["Time History...", "m:fnTH"]]],
+    ["Load Patterns...", "m:patterns"], ["Load Cases...", "m:cases"], ["Load Combinations...", "m:combos"], 0, ["Mass Source...", "m:mass"], ["P-Delta Options...", "m:pdelta"]];
   m.Draw = [["Select Object", "t:select", "Esc"], 0, ["Draw Columns (click a point)", "d:column"], ["Draw Beams (click start and end)", "d:beam"], ["Quick Draw Beams (click a grid line)", "d:qbeam"], 0,
     ["Draw Floors (click corners)", "d:floor"], ["Draw Rectangular Floors (two corners)", "d:rect"], ["Quick Draw Floors (click in a bay)", "d:qfloor"], 0,
     ["Draw Walls (click start and end)", "d:wall"], ["Quick Draw Walls (click a grid line)", "d:qwall"], 0, ["Snap and Story Options...", "m:drawHelp"]];
   m.Assign = [["Frame Section...", "m:asgFrame", "", !fr], ["Slab or Wall Section...", "m:asgShell", "", !ar], 0, ["Joint Restraints (Supports)...", "m:asgSupport"], 0,
-    ["Frame Loads, Distributed...", "m:asgFrameLoad", "", !fr], ["Shell Loads, Uniform...", "m:asgShellLoad", "", !ar]];
+    ["Joint Loads", [["Forces...", "m:ld:joint_force", "", !any], ["Ground Displacements...", "m:ld:joint_displacement", "", !any], ["Temperature...", "m:ld:joint_temperature", "", !any]]],
+    ["Frame Loads", [["Distributed...", "m:asgFrameLoad", "", !fr], ["Uniform in any direction...", "m:ld:frame_uniform", "", !fr], ["Point...", "m:ld:frame_point", "", !fr], ["Trapezoidal...", "m:ld:frame_trapezoid", "", !fr], ["Temperature...", "m:ld:frame_temperature", "", !fr], ["Strain...", "m:ld:frame_strain", "", !fr]]],
+    ["Shell Loads", [["Uniform...", "m:asgShellLoad", "", !ar], ["Uniform in any direction...", "m:ld:shell_uniform", "", !ar], ["Temperature...", "m:ld:shell_temperature", "", !ar], ["Strain...", "m:ld:shell_strain", "", !ar]]]];
   return m;
 }
 async function modelAct(a) {
   hideMenus();
+  if (a.startsWith("ld:")) return hmObjectLoad(a.slice(3));
   switch (a) {
     case "undo": case "redo": { const j = await hmRun(a); if (j.ok) hmSay(j.did || "Done."); return; }
     case "delete": return hmDelete();
@@ -3243,6 +3247,11 @@ async function modelAct(a) {
     case "asgFrame": return hmAssignSection("f");
     case "asgShell": return hmAssignSection("a");
     case "asgSupport": return hmAssignSupport();
+    case "fnRS": return hmFunctions("spectrum");
+    case "fnTH": return hmFunctions("history");
+    case "cases": return hmCases();
+    case "mass": return hmMass();
+    case "pdelta": return hmPDelta();
     case "asgFrameLoad": return hmAssignLoad("f");
     case "asgShellLoad": return hmAssignLoad("a");
     case "drawHelp": return hmDrawHelp();
@@ -3554,6 +3563,199 @@ async function hmAssignLoad(t) {
     <fieldset><legend>Options</legend><label style="display:block"><input type="radio" name="lO" value="add">Add to Existing Loads</label><label style="display:block"><input type="radio" name="lO" value="replace" checked>Replace Existing Loads</label><label style="display:block"><input type="radio" name="lO" value="delete">Delete Existing Loads</label></fieldset>
     <p class="kv">${names.length} selected ${t === "f" ? "frames" : "floors and walls"}.</p>`,
     [["OK", d => { hm.pattern = q(d, "#lP").value; const o = q(d, "[name=lO]:checked").value; return submit(d, "set_loads", {[t === "f" ? "frames" : "areas"]: names, pattern: hm.pattern, value: o === "delete" ? 0 : fnum(d, "#lV"), add: o === "add"}); }, true], ["Cancel"]], {width: 400});
+}
+
+// ---- Define: the analysis (functions, load cases, mass source, P-Delta), as the programs' Define forms ----
+async function hmAnalysis() {
+  const j = await hmPost({tool: "analysis_definitions", args: {}}).catch(() => null);
+  return j && j.ok ? j.result : {functions: [], load_cases: [], case_types: [], modal_combos: [], dir_combos: [], mass_source: {loads: []}, pdelta: {loads: []}};
+}
+const pairsText = pts => pts.map(p => num(p[0]) + "\t" + num(p[1])).join("\n");
+const readPairs = text => text.split(/\r?\n/).map(l => l.trim()).filter(Boolean).map(l => l.split(/[\s,;]+/).map(Number)).filter(p => p.length >= 2 && p.every(x => !isNaN(x))).map(p => [p[0], p[1]]);
+
+async function hmFunctions(kind) {
+  const a = await hmAnalysis(), list = a.functions.filter(f => f.kind === kind);
+  const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmFunctions(kind); };
+  listForm(kind === "spectrum" ? "Define Response Spectrum Functions" : "Define Time History Functions", "Functions", list.map(f => f.name), [
+    ["Add New Function...", () => hmFunction(kind, null, again)],
+    ["Modify/Show Function...", n => n && hmFunction(kind, list.find(f => f.name === n), again)],
+    ["Delete Function", n => n && hmRun("delete_definition", {kind: "function", name: n}, true).then(j => j.ok ? again() : hmSay(j.error, true))],
+  ]);
+}
+async function hmFunction(kind, f, after) {
+  const spectrum = kind === "spectrum";
+  const codes = spectrum ? ((await hmPost({tool: "lateral_codes", args: {kind: "seismic"}}).catch(() => null)) || {}).result : null;
+  const withSpectrum = codes ? codes.codes.filter(c => !["User Coefficient", "User Loads"].includes(c.code)) : [];
+  let from = "points", code = "ASCE 7-16", values = {};
+  const srcs = spectrum ? [["points", "User: periods and values"], ["code", "From a code"]] : [["points", "User: times and values"], ["sine", "Sine wave"], ["cosine", "Cosine wave"], ["ramp", "Ramp"]];
+  const d = dialog(spectrum ? "Response Spectrum Function" : "Time History Function", `<div class="g2"><span>Function Name</span><input id="fN" value="${esc(f ? f.name : spectrum ? "RS1" : "TH1")}"><span>Define by</span><select id="fF">${opts(srcs, from)}</select>
+      ${spectrum ? `<span>Damping ratio</span><input id="fD" type="number" step="any" value="${f ? f.damping : 0.05}">` : ""}</div>
+    <fieldset id="fPts"><legend>${spectrum ? "Period (s) and value (g), one pair a line" : "Time (s) and value, one pair a line"}</legend><textarea id="fP" rows="10" style="width:100%">${f ? pairsText(f.points) : spectrum ? "0\t0.4\n0.2\t1\n0.6\t1\n2\t0.3\n4\t0.15" : "0\t0\n0.5\t1\n1\t0"}</textarea></fieldset>
+    <fieldset id="fCode" hidden><legend>Code</legend><div class="g2"><span>Code</span><select id="fC">${opts(withSpectrum.map(c => [c.code, c.code]), code)}</select></div><div class="g2" id="fCI" style="margin-top:6px"></div></fieldset>
+    <fieldset id="fWave" hidden><legend>Wave</legend><div class="g2"><span>Period (s)</span><input id="wP" type="number" step="any" value="1"><span>Cycles</span><input id="wC" type="number" step="any" value="4"><span>Amplitude</span><input id="wA" type="number" step="any" value="1"><span>Steps a cycle</span><input id="wS" type="number" value="16"></div></fieldset>`,
+    [["OK", d => {
+      const name = q(d, "#fN").value.trim(), args = {name, kind, from, was: f && f.name !== name ? f.name : undefined};
+      if (spectrum) args.damping = fnum(d, "#fD");
+      if (from === "points") args.points = readPairs(q(d, "#fP").value);
+      if (from === "code") { args.code = code; args.values = values; }
+      if (["sine", "cosine", "ramp"].includes(from)) Object.assign(args, {period: fnum(d, "#wP"), cycles: fnum(d, "#wC"), amplitude: fnum(d, "#wA"), steps_per_cycle: parseInt(q(d, "#wS").value) || 16});
+      return submit(d, "define_function", args, after);
+    }, true], ["Cancel"]], {width: 520});
+  const paint = () => {
+    q(d, "#fPts").hidden = from !== "points"; q(d, "#fCode").hidden = from !== "code"; q(d, "#fWave").hidden = !["sine", "cosine", "ramp"].includes(from);
+    const c = withSpectrum.find(x => x.code === code);
+    q(d, "#fCI").innerHTML = !c ? "" : c.inputs.filter(i => !["Dir", "Ecc", "TopStory", "BottomStory", "Period", "System", "Ct", "x", "UserT", "R", "I", "Omega", "Cd", "CuCap", "K", "Min"].includes(i.key)).map(i => `<span title="${esc(i.about || "")}">${esc(i.name)}</span>` +
+      (i.choices ? `<select data-k="${esc(i.key)}">${opts(i.choices.map(x => [x, x]), values[i.key] ?? i.default)}</select>` : `<input data-k="${esc(i.key)}" value="${esc(values[i.key] ?? i.default)}">`)).join("");
+    d.querySelectorAll("#fCI [data-k]").forEach(x => x.onchange = () => { values[x.dataset.k] = x.value; });
+  };
+  q(d, "#fF").onchange = () => { from = q(d, "#fF").value; paint(); };
+  q(d, "#fC").onchange = () => { code = q(d, "#fC").value; values = {}; paint(); };
+  paint();
+}
+
+async function hmCases() {
+  const a = await hmAnalysis();
+  const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmCases(); };
+  const find = n => a.load_cases.find(c => c.name === n);
+  listForm("Define Load Cases", "Load Cases", a.load_cases.map(c => c.name + "  (" + c.type + ")"), [
+    ["Add New Case...", () => hmCase(null, a, again)],
+    ["Add Copy of Case...", n => n && hmCase(find(n.replace(/  \(.*\)$/, "")), a, again, true)],
+    ["Modify/Show Case...", n => n && hmCase(find(n.replace(/  \(.*\)$/, "")), a, again)],
+    ["Delete Case", n => n && hmRun("delete_definition", {kind: "load_case", name: n.replace(/  \(.*\)$/, "")}, true).then(j => j.ok ? again() : hmSay(j.error, true))],
+  ]);
+}
+async function hmCase(c, a, after, copy) {
+  const defs = await hmDefs();
+  let type = c ? c.type : "Linear Static";
+  let loads = c ? c.loads.map(l => ({...l})) : [];
+  const fns = k => a.functions.filter(f => f.kind === k).map(f => f.name);
+  const modals = a.load_cases.filter(x => x.type.startsWith("Modal")).map(x => x.name), nonlinear = a.load_cases.filter(x => x.type.startsWith("Nonlinear") && (!c || x.name !== c.name)).map(x => x.name);
+  const d = dialog("Load Case Data", `<div class="g2"><span>Load Case Name</span><input id="cN" value="${esc(c ? (copy ? c.name + " copy" : c.name) : "LCase1")}"><span>Load Case Type</span><select id="cT">${opts(a.case_types.map(t => [t, t]), type)}</select></div>
+    <fieldset id="cInit"><legend>Initial Conditions</legend><select id="cI">${opts([["", "Zero initial conditions (unstressed state)"], ...nonlinear.map(n => [n, "Continue from the end of " + n])], c && c.initial_case || "")}</select></fieldset>
+    <fieldset id="cModal"><legend>Modes</legend><div class="g2"><span>Maximum number of modes</span><input id="cMx" type="number" value="${c ? c.max_modes : 12}"><span>Minimum number of modes</span><input id="cMn" type="number" value="${c ? c.min_modes : 1}"></div></fieldset>
+    <fieldset id="cRS"><legend>Response Spectrum and History Options</legend><div class="g2"><span>Modal case</span><select id="cMc">${opts(modals.map(m => [m, m]), c ? c.modal_case : modals[0])}</select>
+      <span class="rsOnly">Modal combination</span><select id="cMcb" class="rsOnly">${opts(a.modal_combos.map(x => [x, x]), c ? c.modal_combo : "CQC")}</select>
+      <span class="rsOnly">Directional combination</span><select id="cDc" class="rsOnly">${opts(a.dir_combos.map(x => [x, x]), c ? c.dir_combo : "SRSS")}</select>
+      <span>Damping ratio</span><input id="cD" type="number" step="any" value="${c ? c.damping : 0.05}">
+      <span class="rsOnly">Diaphragm eccentricity ratio</span><input id="cE" class="rsOnly" type="number" step="any" value="${c ? c.eccentricity : 0}"></div></fieldset>
+    <fieldset id="cTH"><legend>Time Steps</legend><div class="g2"><span>Number of output time steps</span><input id="cS" type="number" value="${c ? c.steps : 100}"><span>Output time step size (s)</span><input id="cSz" type="number" step="any" value="${c ? c.step_size : 0.01}"></div></fieldset>
+    <fieldset id="cGeo"><legend>Geometric Nonlinearity</legend><select id="cG">${opts([["None", "None"], ["P-Delta", "P-Delta"], ["P-Delta and Large Displacements", "P-Delta plus Large Displacements"]], c ? c.geometric : "None")}</select></fieldset>
+    <fieldset><legend>Loads Applied</legend><div class="scroll" style="max-height:24vh"><table class="list hmgrid" id="cL"></table></div><button id="cAdd" style="margin-top:6px">Add</button></fieldset>`,
+    [["OK", d => {
+      const name = q(d, "#cN").value.trim();
+      return submit(d, "define_load_case", {name, was: c && !copy && c.name !== name ? c.name : undefined, type, loads: loads.map(l => l.accel ? {accel: l.accel, factor: +l.factor, function: l.function || undefined, angle: +l.angle || 0, arrival: +l.arrival || 0} : {pattern: l.pattern, factor: +l.factor, function: l.function || undefined, arrival: +l.arrival || 0}),
+        initial_case: q(d, "#cI").value || undefined, max_modes: parseInt(q(d, "#cMx").value) || 12, min_modes: parseInt(q(d, "#cMn").value) || 1, modal_case: q(d, "#cMc").value || "Modal",
+        modal_combo: q(d, "#cMcb").value, dir_combo: q(d, "#cDc").value, damping: fnum(d, "#cD"), eccentricity: fnum(d, "#cE"), steps: parseInt(q(d, "#cS").value) || 100, step_size: fnum(d, "#cSz"), geometric: q(d, "#cG").value}, after);
+    }, true], ["Cancel"]], {width: 640});
+  const paint = () => {
+    const modal = type.startsWith("Modal"), rs = type === "Response Spectrum", hist = type.includes("History"), nl = type.startsWith("Nonlinear");
+    q(d, "#cModal").hidden = !(modal || type === "Buckling"); q(d, "#cRS").hidden = !(rs || hist); q(d, "#cTH").hidden = !hist;
+    q(d, "#cGeo").hidden = !(type === "Nonlinear Static" || type === "Nonlinear Direct History"); q(d, "#cInit").hidden = modal || rs;
+    d.querySelectorAll(".rsOnly").forEach(x => x.hidden = !rs);
+    const fnKind = rs ? "spectrum" : hist ? "history" : null, canAccel = rs || hist || type === "Modal - Ritz";
+    q(d, "#cL").innerHTML = `<tr><th>Load Type</th><th>Load Name</th>${fnKind ? "<th>Function</th>" : ""}<th>Scale Factor</th>${rs || hist ? "<th>Angle</th>" : ""}${hist ? "<th>Arrival (s)</th>" : ""}<th></th></tr>` +
+      loads.map((l, i) => `<tr data-i="${i}"><td><select data-k="kind">${opts([...(rs ? [] : [["pattern", "Load Pattern"]]), ...(canAccel ? [["accel", "Acceleration"]] : [])], l.accel ? "accel" : "pattern")}</select></td>
+        <td><select data-k="name">${opts(l.accel ? ["U1", "U2", "U3"].map(x => [x, x]) : defs.load_patterns.map(p => [p.name, p.name]), l.accel || l.pattern)}</select></td>
+        ${fnKind ? `<td><select data-k="function">${opts(fns(fnKind).map(x => [x, x]), l.function || fns(fnKind)[0])}</select></td>` : ""}<td><input data-k="factor" type="number" step="any" value="${l.factor}"></td>
+        ${rs || hist ? `<td><input data-k="angle" type="number" step="any" value="${l.angle || 0}" ${l.accel ? "" : "disabled"}></td>` : ""}${hist ? `<td><input data-k="arrival" type="number" step="any" value="${l.arrival || 0}"></td>` : ""}<td><button data-del="${i}">Delete</button></td></tr>`).join("");
+    d.querySelectorAll("#cL [data-k]").forEach(x => x.onchange = () => {
+      const l = loads[+x.closest("tr").dataset.i], k = x.dataset.k;
+      if (k === "kind") { if (x.value === "accel") { delete l.pattern; l.accel = "U1"; } else { delete l.accel; l.pattern = defs.load_patterns[0] && defs.load_patterns[0].name; } paint(); }
+      else if (k === "name") { if (l.accel) l.accel = x.value; else l.pattern = x.value; }
+      else l[k] = x.value;
+    });
+    d.querySelectorAll("#cL [data-del]").forEach(b => b.onclick = () => { loads.splice(+b.dataset.del, 1); paint(); });
+    loads.forEach(l => { if (fnKind && !l.function) l.function = fns(fnKind)[0]; });
+  };
+  q(d, "#cT").onchange = () => {
+    type = q(d, "#cT").value;
+    if (type === "Response Spectrum") loads = loads.filter(l => l.accel);
+    if (!(type === "Response Spectrum" || type.includes("History") || type === "Modal - Ritz")) loads = loads.filter(l => !l.accel);
+    paint();
+  };
+  q(d, "#cAdd").onclick = () => {
+    const accel = type === "Response Spectrum" || (type.includes("History") && !defs.load_patterns.length);
+    loads.push(accel || type === "Modal - Ritz" ? {accel: "U1", factor: type === "Response Spectrum" || type.includes("History") ? 9.80665 : 1} : {pattern: defs.load_patterns[0] && defs.load_patterns[0].name, factor: 1});
+    paint();
+  };
+  paint();
+}
+
+async function hmMass() {
+  const a = await hmAnalysis(), defs = await hmDefs(), ms = a.mass_source;
+  let loads = ms.loads.map(l => ({...l}));
+  const d = dialog("Mass Source Data", `<fieldset><legend>Mass Source</legend><label style="display:block"><input type="checkbox" id="mE" ${ms.elements ? "checked" : ""}> Element self mass</label><label style="display:block"><input type="checkbox" id="mA" ${ms.added_mass ? "checked" : ""}> Additional mass</label><label style="display:block"><input type="checkbox" id="mL" ${loads.length ? "checked" : ""}> Specified load patterns</label></fieldset>
+    <fieldset><legend>Mass Multipliers for Load Patterns</legend><table class="list hmgrid" id="mT"></table><button id="mAdd" style="margin-top:6px">Add</button></fieldset>
+    <p class="kv">The seismic loads by code are worked out from this mass.</p>`,
+    [["OK", d => submit(d, "define_mass_source", {elements: q(d, "#mE").checked, added_mass: q(d, "#mA").checked, loads: q(d, "#mL").checked ? loads.map(l => ({pattern: l.pattern, factor: +l.factor})) : []}), true], ["Cancel"]], {width: 460});
+  const paint = () => {
+    q(d, "#mT").innerHTML = `<tr><th>Load Pattern</th><th>Multiplier</th><th></th></tr>` + loads.map((l, i) => `<tr data-i="${i}"><td><select data-k="pattern">${opts(defs.load_patterns.map(p => [p.name, p.name]), l.pattern)}</select></td><td><input data-k="factor" type="number" step="any" value="${l.factor}"></td><td><button data-del="${i}">Delete</button></td></tr>`).join("");
+    d.querySelectorAll("#mT [data-k]").forEach(x => x.onchange = () => { loads[+x.closest("tr").dataset.i][x.dataset.k] = x.value; });
+    d.querySelectorAll("#mT [data-del]").forEach(b => b.onclick = () => { loads.splice(+b.dataset.del, 1); paint(); });
+  };
+  q(d, "#mAdd").onclick = () => { loads.push({pattern: (defs.load_patterns[0] || {}).name, factor: 1}); q(d, "#mL").checked = true; paint(); };
+  paint();
+}
+
+async function hmPDelta() {
+  const a = await hmAnalysis(), defs = await hmDefs(), pd = a.pdelta;
+  let loads = pd.loads.map(l => ({...l}));
+  const d = dialog("P-Delta Options", `<fieldset><legend>Automation</legend>${[["none", "None"], ["non-iterative", "Non-iterative, based on mass"], ["iterative", "Iterative, based on loads"]].map(([k, t]) => `<label style="display:block"><input type="radio" name="pM" value="${k}" ${pd.method === k ? "checked" : ""}> ${t}</label>`).join("")}</fieldset>
+    <fieldset><legend>Iteration Controls</legend><div class="g2"><span>Maximum iterations</span><input id="pI" type="number" value="${pd.iterations || 5}"><span>Relative tolerance</span><input id="pT" type="number" step="any" value="${pd.tolerance || 0.001}"></div></fieldset>
+    <fieldset><legend>Load Patterns (iterative)</legend><table class="list hmgrid" id="pL"></table><button id="pAdd" style="margin-top:6px">Add</button></fieldset>`,
+    [["OK", d => submit(d, "define_pdelta", {method: q(d, "[name=pM]:checked").value, iterations: parseInt(q(d, "#pI").value) || 5, tolerance: fnum(d, "#pT"), loads: loads.map(l => ({pattern: l.pattern, factor: +l.factor}))}), true], ["Cancel"]], {width: 440});
+  const paint = () => {
+    q(d, "#pL").innerHTML = `<tr><th>Load Pattern</th><th>Scale Factor</th><th></th></tr>` + loads.map((l, i) => `<tr data-i="${i}"><td><select data-k="pattern">${opts(defs.load_patterns.map(p => [p.name, p.name]), l.pattern)}</select></td><td><input data-k="factor" type="number" step="any" value="${l.factor}"></td><td><button data-del="${i}">Delete</button></td></tr>`).join("");
+    d.querySelectorAll("#pL [data-k]").forEach(x => x.onchange = () => { loads[+x.closest("tr").dataset.i][x.dataset.k] = x.value; });
+    d.querySelectorAll("#pL [data-del]").forEach(b => b.onclick = () => { loads.splice(+b.dataset.del, 1); paint(); });
+  };
+  q(d, "#pAdd").onclick = () => { loads.push({pattern: (defs.load_patterns[0] || {}).name, factor: 1}); paint(); };
+  paint();
+}
+
+// ---- Assign: joint, frame and shell loads of every kind ----
+function hmJoints() {
+  // The joints of the selected objects, above the base: where a joint load goes.
+  const out = new Set(), base = stories.length ? elevationOf(stories[0].name) : 0;
+  for (const id of sel) {
+    const o = objOf(id); if (!o) continue;
+    for (const e of o.type === "f" ? [o.a, o.b] : o.pts) { if (e[2] <= (base ?? 0) + 1e-6) continue; const n = pointAt.get(key(e[0], e[1], e[2])); if (n !== undefined) out.add(String(n)); }
+  }
+  return [...out];
+}
+async function hmObjectLoad(kind) {
+  const defs = await hmDefs(), u = hmU(), t = kind.split("_")[0];
+  const names = t === "joint" ? hmJoints() : hmSelected(t === "frame" ? "f" : "a");
+  if (!names.length) return hmSay(t === "joint" ? "Select the members whose joints take the load first." : t === "frame" ? "Select the frames to load first." : "Select the floors or walls to load first.", true);
+  if (!defs.load_patterns.length) return hmSay("Define a load pattern first (Define > Load Patterns).", true);
+  const F = u.f, L = u.l;
+  const fields = {
+    joint_force: [["fx", `Force Global X (${F})`, 0], ["fy", `Force Global Y (${F})`, 0], ["fz", `Force Global Z (${F})`, 0], ["mx", `Moment about X (${F}-${L})`, 0], ["my", `Moment about Y (${F}-${L})`, 0], ["mz", `Moment about Z (${F}-${L})`, 0]],
+    joint_displacement: [["ux", `Translation X (${L})`, 0], ["uy", `Translation Y (${L})`, 0], ["uz", `Translation Z (${L})`, 0], ["rx", "Rotation about X (rad)", 0], ["ry", "Rotation about Y (rad)", 0], ["rz", "Rotation about Z (rad)", 0]],
+    joint_temperature: [["temperature", "Temperature change", 20]],
+    frame_uniform: [["value", `Uniform load (${F}/${L})`, 5]],
+    frame_point: [["value", `Force (${F})`, 10], ["distance", "Relative distance from end I", 0.5]],
+    frame_trapezoid: [["start", `Load at start (${F}/${L})`, 0], ["end", `Load at end (${F}/${L})`, 10], ["from", "Relative distance, start", 0], ["to", "Relative distance, end", 1]],
+    frame_temperature: [["temperature", "Temperature change", 20], ["gradient", `Temperature gradient (per ${L})`, 0]],
+    frame_strain: [["strain", "Axial strain", 0.0001]],
+    shell_uniform: [["value", `Uniform load (${F}/${L}²)`, 2]],
+    shell_temperature: [["temperature", "Temperature change", 20], ["gradient", `Temperature gradient (per ${L})`, 0]],
+    shell_strain: [["strain", "Strain", 0.0001]],
+  }[kind];
+  const dirs = ["frame_uniform", "frame_point", "frame_trapezoid", "shell_uniform"].includes(kind);
+  const title = {joint: "Joint", frame: "Frame", shell: "Shell"}[t] + " Load Assignment - " + kind.split("_").slice(1).join(" ").replace(/^./, c => c.toUpperCase());
+  const d = dialog(title, `<fieldset><legend>Load Pattern</legend><select id="oP">${opts(defs.load_patterns.map(p => p.name), hm.pattern || defs.load_patterns[0].name)}</select></fieldset>
+    ${dirs ? `<fieldset><legend>Direction</legend><select id="oD">${opts([["GRAV", "Gravity (down positive)"], ["X", "Global X"], ["Y", "Global Y"], ["Z", "Global Z"], ["1", "Local 1"], ["2", "Local 2"], ["3", "Local 3"]], "GRAV")}</select></fieldset>` : ""}
+    <fieldset><legend>Load</legend><div class="g2">${fields.map(([k, label, v]) => `<span>${esc(label)}</span><input data-k="${k}" type="number" step="any" value="${v}">`).join("")}</div></fieldset>
+    <fieldset><legend>Options</legend><label style="display:block"><input type="radio" name="oO" value="replace" checked>Replace Existing Loads</label><label style="display:block"><input type="radio" name="oO" value="add">Add to Existing Loads</label></fieldset>
+    <p class="kv">${names.length} selected ${t === "joint" ? "joints" : t === "frame" ? "frames" : "floors and walls"}.</p>`,
+    [["OK", d => {
+      hm.pattern = q(d, "#oP").value;
+      const values = {}; d.querySelectorAll("[data-k]").forEach(x => { const v = parseFloat(x.value); if (!isNaN(v) && (v !== 0 || fields.length === 1 || kind === "frame_trapezoid")) values[x.dataset.k] = v; });
+      if (!Object.keys(values).length) { formError(d, "Give a value that is not 0."); return false; }
+      return submit(d, "assign_object_loads", {kind, pattern: hm.pattern, objects: names, values, dir: dirs ? q(d, "#oD").value : undefined, replace: q(d, "[name=oO]:checked").value === "replace"});
+    }, true], ["Cancel"]], {width: 440});
+  return d;
 }
 
 // ---- File ----
