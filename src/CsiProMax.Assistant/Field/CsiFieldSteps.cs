@@ -116,8 +116,7 @@ public static class CsiFieldSteps
                 }) ?? Array.Empty<string>());
                 return $"{t.Name}: {string.Join(", ", fields)}";
             }));
-            if (program.Key == CsiProgram.Etabs.Key)
-                ctx.Step($"{name} opened the Modeler's frame hinges", () =>
+            ctx.Step($"{name} opened the Modeler's frame hinges", () =>
                 {
                     var hinges = 0; JsonObject? last = null;
                     foreach (var f in link.Frames())
@@ -129,8 +128,6 @@ public static class CsiFieldSteps
                     FieldContext.Expect(hinges >= 3, $"{name} has {hinges} hinges from the Modeler's file, 3 were written (a frame's answer: {last?.ToJsonString()}; its hinge tables: {HingeTables()})");
                     return $"{hinges} hinges";
                 });
-            else
-                ctx.Skip($"{name} opened the Modeler's frame hinges", $"the .s2k does not carry hinges yet (they go across as a note); {name}'s hinge tables: " + (HingeTables() is { Length: > 0 } t ? t : "none listed"));
             if (program.Key == CsiProgram.Sap2000.Key)
                 ctx.Step("SAP2000 knows every table and field the Modeler writes into the .s2k", () =>
                 {
