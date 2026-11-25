@@ -985,6 +985,18 @@ Test("edit_table: an analysed model is unlocked first, and a refused edit is can
     Check(body.Contains("m.DatabaseTables.CancelTableEditing()"), "a refused edit is not cancelled; SAP2000 then refused the table and listed no patterns");
     Check(source.Contains("log[\"unlocked\"]"), "the answer does not say the results are gone");
 });
+Test("edit_table: the model is saved before the edit and opened again when the program refuses it (SAP2000 lost its patterns)", () =>
+{
+    var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Tools", "CsiTools.cs"));
+    var at = source.IndexOf("var log = (JsonObject)e.Raw(\"apply the table edit\"", StringComparison.Ordinal);
+    var body = source.Substring(at, source.IndexOf("e.Refresh();", at, StringComparison.Ordinal) - at);
+    var save = body.IndexOf("m.File.Save(saved)", StringComparison.Ordinal);
+    var set = body.IndexOf("m.DatabaseTables.SetTableForEditingArray(", StringComparison.Ordinal);
+    Check(save > 0 && save < set, "the model is not saved before the table edit");
+    Check(body.Contains("SafeOpen(m, saved)") && body.IndexOf("SafeOpen(m, saved)", StringComparison.Ordinal) > body.IndexOf("CancelTableEditing", StringComparison.Ordinal),
+        "a refused edit does not open the model again from the file saved just before it");
+    Check(body.Contains("\".sdb\", \".edb\", \".fdb\""), "a working file (ETABS's .$et) could be saved over");
+});
 foreach (var (name, body) in CdtSdkTests.All()) Test(name, body);
 foreach (var (name, body) in HandModelTests.All()) Test(name, body);
 foreach (var (name, body) in AiModeTests.All()) Test(name, body);
