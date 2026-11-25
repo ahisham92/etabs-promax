@@ -1,14 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- The ETABS plug-in: the entry in ETABS's Tools menu. ETABS loads this DLL itself (Tools > Add/Show Plugins);
-       it starts the assistant that lies beside it, on the .NET 8 that ETABS runs on. No .exe of ours anywhere. -->
+       it starts the assistant that lies beside it with the PC's .NET 8. Built for .NET Standard 2.0, so both the
+       ETABS versions that run on .NET 8 (23) and the older ones on .NET Framework can load it. No .exe of ours anywhere. -->
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>netstandard2.0</TargetFramework>
     <AssemblyName>CsiProMaxPlugin</AssemblyName>
     <RootNamespace>CsiProMaxPlugin</RootNamespace>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
-    <Version>0.2.0</Version>
+    <Version>0.4.0</Version>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <GenerateDependencyFile>false</GenerateDependencyFile>
     <NoWarn>IDE1006;CS8981</NoWarn>

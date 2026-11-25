@@ -611,16 +611,18 @@ Test("plug-in: the assistant is started with the dotnet ETABS runs on", () =>
     var root = Directory.CreateTempSubdirectory("cpm").FullName;
     var runtime = Directory.CreateDirectory(Path.Combine(root, "dotnet", "shared", "Microsoft.NETCore.App", "8.0.29")).FullName;
     var folder = Directory.CreateDirectory(Path.Combine(root, "CSI ProMax")).FullName;
-    string Message() { try { CsiProMaxPlugin.Launcher.StartInfo(folder, runtime, 42004); return ""; } catch (IOException ex) { return ex.Message; } }
+    string Message() { try { CsiProMaxPlugin.Launcher.StartInfo(folder, runtime, 42004, "ETABS", [Path.Combine(root, "dotnet")]); return ""; } catch (IOException ex) { return ex.Message; } }
     Check(Message().Contains("CsiProMax.dll is missing"), "a plug-in copied alone says what is missing");
     File.WriteAllText(Path.Combine(folder, "CsiProMax.dll"), "");
-    Check(Message().Contains("was not found"), "no dotnet");
+    Check(Message().Contains(".NET 8 Desktop Runtime"), "no dotnet: the message says what to install");
     var dotnet = Path.Combine(root, "dotnet", OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
     File.WriteAllText(dotnet, "");
     var start = CsiProMaxPlugin.Launcher.StartInfo(folder, runtime, 42004);
     Equal(dotnet, start.FileName, "dotnet from three folders above the runtime");
-    Equal(Path.Combine(folder, "CsiProMax.dll"), start.ArgumentList[0], "a path with a space is one argument");
-    Equal("--etabs-pid 42004", start.ArgumentList[1] + " " + start.ArgumentList[2], "the assistant is told which ETABS window started it");
+    Equal($"\"{Path.Combine(folder, "CsiProMax.dll")}\" --etabs-pid 42004 --program etabs", start.Arguments, "the path is quoted, and the assistant is told which window and program started it");
+    var older = CsiProMaxPlugin.Launcher.StartInfo(folder, @"C:\Windows\Microsoft.NET\Framework64\v4.0.30319", 7, "SAP2000", [Path.Combine(root, "nope"), Path.Combine(root, "dotnet")]);
+    Equal(dotnet, older.FileName, "a program on .NET Framework: the PC's own .NET 8 is found");
+    Check(older.Arguments.EndsWith("--etabs-pid 7 --program sap2000"), "the program is named");
     Check(start.CreateNoWindow && !start.UseShellExecute, "no console window");
     Directory.Delete(root, true);
 });
