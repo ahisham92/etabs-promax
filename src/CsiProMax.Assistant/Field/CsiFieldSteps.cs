@@ -85,12 +85,14 @@ public static class CsiFieldSteps
                 FieldContext.Expect(missing.Count == 0, $"{name} has no {string.Join("; ", missing)} from the Modeler's file");
                 return "all there";
             });
-            ctx.Step($"{name} opened the Modeler's groups" + (program.Key == CsiProgram.Etabs.Key ? ", diaphragms and pier labels" : ""), () =>
+            ctx.Step($"{name} opened the Modeler's groups, links" + (program.Key == CsiProgram.Etabs.Key ? ", diaphragms and pier labels" : ""), () =>
             {
                 string[] Names(string what, Func<dynamic, string[]> read) => (string[])(link.Raw(what, m => read(m)) ?? Array.Empty<string>());
                 var missing = new List<string>();
                 var groups = Names("list the groups", m => { int n = 0; string[] names = []; m.GroupDef.GetNameList(ref n, ref names); return names ?? []; });
                 if (!groups.Contains("CPM-G")) missing.Add($"the group CPM-G (it has {string.Join(", ", groups)})");
+                var links = Names("list the link properties", m => { int n = 0; string[] names = []; m.PropLink.GetNameList(ref n, ref names); return names ?? []; });
+                if (!links.Contains("CPM-LINK")) missing.Add($"the link property CPM-LINK (it has {string.Join(", ", links)})");
                 if (program.Key == CsiProgram.Etabs.Key)
                 {
                     var diaphragms = Names("list the diaphragms", m => { int n = 0; string[] names = []; m.Diaphragm.GetNameList(ref n, ref names); return names ?? []; });

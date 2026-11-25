@@ -166,6 +166,28 @@ static class PropertyTests
             Check(defs["objects"]!.AsArray().Count == 3 && defs["objects"]![1]!["spring"]!.GetValue<string>() == "AS1", "property_definitions reads the objects: " + defs["objects"]!.ToJsonString());
         });
 
+        yield return ("properties: link properties of every type are written as ETABS writes them, and ETABS's own link reads back", () =>
+        {
+            var sample = E2kReader.ReadFile(Path.Combine(AppContext.BaseDirectory, "samples", "etabs23-default.e2k"));
+            var own = PropertyDefs.Links(sample).Single(l => l.Name == "Link1");
+            Check(own.Type == "LINEAR" && own.Dofs["U1"].Stiff == 1, "ETABS's Link1: " + own.Type + " " + string.Join(",", own.Dofs.Keys));
+            var link = Frame();
+            foreach (var type in PropertyDefs.LinkTypes)
+                Run(link, "define_link", new { name = "L-" + type, type, dofs = new Dictionary<string, object> { ["U1"] = new { stiffness = 1000, damping = 5 }, ["R3"] = new { stiffness = 20 } } });
+            var back = PropertyDefs.Links(ViaE2k(link.Model));
+            Check(back.Count(x => x.Name.StartsWith("L-")) == PropertyDefs.LinkTypes.Length, "every type back from the .e2k");
+            var l = back.Single(x => x.Name == "L-RUBBER ISOLATOR");
+            Check(l.Type == "RUBBER ISOLATOR" && l.Dofs["U1"] == (1000, 5) && l.Dofs["R3"] == (20, 0), "the isolator's directions back");
+            Check(E2kWriter.Write(link.Model).Contains("LINKPROP  \"L-LINEAR\"  U1STIFF  1000"), "written as ETABS writes it");
+            Run(link, "define_link", new { name = "L-GAP", type = "GAP", dofs = new Dictionary<string, object> { ["U1"] = new { stiffness = 50 } } });
+            Check(PropertyDefs.Links(link.Model).Single(x => x.Name == "L-GAP").Dofs.Count == 1, "changing a link replaces its directions");
+            Refused(link, "define_link", new { name = "L-X", type = "SPRINGY", dofs = new Dictionary<string, object> { ["U1"] = new { stiffness = 1 } } }, "link type");
+            Refused(link, "define_link", new { name = "L-X", dofs = new Dictionary<string, object> { ["U7"] = new { stiffness = 1 } } }, "not 'U7'");
+            Refused(link, "define_link", new { name = "L-X" }, "at least one direction");
+            Run(link, "define_link", new { name = "L-GAP", delete = true });
+            Check(!PropertyDefs.Links(link.Model).Exists(x => x.Name == "L-GAP"), "deleted");
+        });
+
         yield return ("properties: every edit is one undo step in the Modeler window", () =>
         {
             var link = Frame();

@@ -467,6 +467,8 @@ public static class ModelerFieldSteps
         if (floor is not null) ctx.Tool("assign_shell_data", """{"objects":[""" + Q(floor.Label + "@" + floor.Story) + """],"modifiers":{"M11MOD":0.25,"M22MOD":0.25}}""", null, "tool assign_shell_data, cracked slab modifiers");
         var support = modeler.Model.PointAssigns.FirstOrDefault(p => p.Restraint is not null);
         if (support is not null) ctx.Tool("assign_joint_data", """{"objects":[""" + Q(support.Point + "@" + support.Story) + """],"spring":"CPM-PS"}""", null, "tool assign_joint_data, a spring under a support");
+        ctx.Tool("define_link", """{"name":"CPM-LINK","type":"RUBBER ISOLATOR","dofs":{"U1":{"stiffness":500000},"U2":{"stiffness":1000,"damping":20},"U3":{"stiffness":1000,"damping":20}}}""", null, "tool define_link, a rubber isolator");
+        ctx.Refused("define_link", """{"name":"CPM-BAD","type":"SPRINGY","dofs":{"U1":{"stiffness":1}}}""", "link type", "tool define_link says no to a type the programs do not have");
         ctx.Tool("property_definitions", "{}", a =>
         {
             FieldContext.Expect(a["frame_sections"]!.AsArray().Count(s => Shapes.Contains(s!["name"]!.GetValue<string>())) == Shapes.Length, "the new sections are not all listed");
