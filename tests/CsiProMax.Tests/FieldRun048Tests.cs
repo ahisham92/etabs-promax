@@ -30,5 +30,29 @@ static class FieldRun048Tests
             var one = source.IndexOf("Units(Convert.ToInt32(m.GetPresentUnits()))", StringComparison.Ordinal);
             Check(two > 0 && one > two, "Info does not fall back to GetPresentUnits after GetPresentUnits_2");
         });
+
+        yield return ("field test 0.4.8: SAP2000's design summaries read the group ALL, not the selection", () =>
+        {
+            var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Sap2000", "SapTools.cs"));
+            var at = source.IndexOf("private static JsonNode DesignRatios(", StringComparison.Ordinal);
+            var body = source.Substring(at, source.IndexOf("GetSummaryResults(", at, StringComparison.Ordinal) - at);
+            Check(body.Contains("[(\"ALL\", 1)]") && !body.Contains("[(\"ALL\", 2)]"), "design_ratios does not ask for the group ALL (eItemType 1)");
+        });
+
+        yield return ("field test 0.4.8: a snapshot is taken even when a result table answers with no fields", () =>
+        {
+            var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Tools", "ResultTools.cs"));
+            var at = source.IndexOf("internal static JsonObject Capture(", StringComparison.Ordinal);
+            var body = source.Substring(at, source.IndexOf("private static JsonNode Snapshot(", at, StringComparison.Ordinal) - at);
+            Check(body.Contains("ArgumentNullException") && body.Contains("NullReferenceException"), "the snapshot's results part still lets a table with no fields stop the snapshot");
+        });
+
+        yield return ("field test 0.4.8: run_learned_tool outside the chat runs a learned tool that only reads", () =>
+        {
+            var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Panel", "Tools", "LearnedTools.cs"));
+            var at = source.IndexOf("public sealed class RunLearnedToolTool", StringComparison.Ordinal);
+            var body = source.Substring(at, source.IndexOf("public sealed class DeleteLearnedToolTool", at, StringComparison.Ordinal) - at);
+            Check(body.Contains("learned.Execute(app,") && body.Contains("learned.ModifiesModel"), "run_learned_tool still answers 'no such tool' to every call outside the chat");
+        });
     }
 }
