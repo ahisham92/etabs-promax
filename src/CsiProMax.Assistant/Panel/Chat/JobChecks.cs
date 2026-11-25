@@ -1,0 +1,382 @@
+using System.Globalization;
+using System.Text.RegularExpressions;
+
+namespace CsiProMax.Chat;
+
+/// <summary>
+/// Each job's budget (Settings > Chat): a job that uses more than its share of the plan's 5-hour limit pauses itself
+/// with a warning, so a job going round in circles can't use up the limit. A job's share is the rise of the 5-hour
+/// figure reported with its own requests (<see cref="Rise"/>). Needs no WPF or ETABS (the unit tests compile this file).
+/// </summary>
+internal static class JobBudget
+{
+    /// <summary>The share of the 5-hour limit one job may use before it pauses (15 %), and the choices in Settings (0: off).</summary>
+    public const int DefaultPercent = 15;
+    public static readonly int[] Choices = [0, 5, 10, 15, 20, 25, 30, 40, 50];
+
+    /// <summary>The Settings' percent as a share (0 to 1); 0 when off or out of range.</summary>
+    public static double Share(int percent) => percent is > 0 and <= 100 ? percent / 100.0 : 0;
+
+    /// <summary>True once the job used <paramref name="budget"/> (a share; 0 is off) since it was last let go on.</summary>
+    public static bool Over(ChatJob job, double budget) => budget > 0 && job.Spent - job.BudgetFrom >= budget - 1e-9;
+
+    /// <summary>
+    /// How much the 5-hour figure rose with a new report (<paramref name="used"/>, 0 to 1) over the highest one seen from
+    /// any chat or job (<paramref name="last"/>, updated). Parallel jobs report the same figure a moment apart, so a lower
+    /// figure is an older reading and counts nothing; only <paramref name="reset"/> (the window's reset time moved on)
+    /// starts it again, and then what it shows was used since. The first report, or one without a figure, counts nothing.
+    /// </summary>
+    public static double Rise(ref double? last, double? used, bool reset = false)
+    {
+        if (used is not { } now) return 0;
+        var before = last;
+        if (before is not { } was)
+        {
+            last = now;
+            return 0;
+        }
+        if (reset)
+        {
+            last = now;
+            return now;
+        }
+        if (now <= was) return 0;
+        last = now;
+        return now - was;
+    }
+
+    /// <summary>
+    /// The rise counted to the job whose answer reported it: the whole plan's figure rose with every chat and job working
+    /// since the last report, so it is shared out between them (<paramref name="working"/>, at least 1).
+    /// </summary>
+    public static double ShareOf(double rise, int working) => rise / Math.Max(1, working);
+
+    /// <summary>True when the window's reset time moved on since the last report (a new 5-hour window began).</summary>
+    public static bool NewWindow(ref DateTimeOffset? seen, DateTimeOffset? resets)
+    {
+        if (resets is not { } now) return false;
+        var before = seen;
+        seen = now;
+        return before is { } was && now - was > TimeSpan.FromMinutes(5);
+    }
+
+    public static string Percent(double share) => Math.Round(share * 100).ToString("0", CultureInfo.InvariantCulture) + "%";
+
+    /// <summary>The job's line when it pauses itself.</summary>
+    public static string Paused(ChatJob job, double budget) =>
+        $"Paused: this job used {Percent(job.Spent - job.BudgetFrom)} of your 5-hour limit, its budget ({Percent(budget)}, Settings > Chat), " +
+        "so it stopped before using more. Send it a message to let it carry on with another budget.";
+
+    /// <summary>What the coordinator is told about a job paused at its budget.</summary>
+    public static string ReportLine(ChatJob job) =>
+        $"It used {Percent(job.Spent - job.BudgetFrom)} of the 5-hour limit, its budget, so it was paused before finishing. Look at what it did " +
+        "(chat_jobs list, or its card): send it a message to carry on only if it was making real progress; if it went round in circles, " +
+        "give the work another way (smaller parts, clearer steps) instead.";
+}
+
+/// <summary>
+/// The check before a job is done (Settings > Chat): when a job finishes, a teammate (a new job, on another worker's desk)
+/// reads the model to check the work against the task, without changing anything, and its verdict goes with the job's
+/// report to the coordinator. Needs no WPF or ETABS (the unit tests compile this file).
+/// </summary>
+internal static class JobReview
+{
+    /// <summary>The Settings' choices: check every finished job, only in an autopilot (nobody watching), or never.</summary>
+    public const string Always = "always", AutopilotOnly = "autopilot", Off = "off";
+
+    /// <summary>A job's <see cref="ChatJob.Review"/> while its check runs.</summary>
+    public const string Pending = "pending";
+
+    /// <summary>
+    /// Checks of one job at most. A job whose check found parts not done is sent back to finish exactly those by itself
+    /// and is checked again (<see cref="SendBack"/>); only after the last check does unfinished work reach the user, named
+    /// as not done (the owner, 2026-11-17: "when checks are done I see things not done at the end").
+    /// </summary>
+    public const int MaxReviews = 3;
+
+    /// <summary>The verdict's first word when the work is right.</summary>
+    public const string PassedWord = "PASSED", IssuesWord = "ISSUES";
+
+    public static string Normal(string? mode) => mode is Always or AutopilotOnly or Off ? mode : Always;
+
+    /// <summary>
+    /// True when job <paramref name="job"/>, just finished, gets a check before it is reported: a job that read is checked
+    /// too (the user wants every job's work confirmed), but only once per piece of work (<see cref="ChatJob.Unchecked"/>: a
+    /// job reported after its check is not checked again), and at most <see cref="MaxReviews"/> times.
+    /// </summary>
+    public static bool Wanted(string? mode, bool autopilot, ChatJob job) =>
+        Normal(mode) switch { Off => false, AutopilotOnly => autopilot, _ => true }
+        && job.State == JobBoard.Done && job.ReviewOf == 0 && job.GoalCheck == 0 && job.Unchecked
+        && job.Review != Pending && job.Reviews < MaxReviews
+        // A job that changed nothing in the model since its last check (a read, a triage) is checked once, not again and
+        // again (bug 131: read-only triage jobs were checked and sent back up to three times while nothing was fixed).
+        && (job.Reviews == 0 || job.ChangedModel);
+
+    /// <summary>The words that mark a part in a check's list.</summary>
+    public const string DoneWord = "DONE", NotDoneWord = "NOT DONE";
+
+    /// <summary>
+    /// A part that isn't the job's to finish (the owner, 19 Nov 2026: the 1800 mm beam and the pipes took "multiple multiple
+    /// multiple chats"): it waits for the user's decision, or another job changed it. Listed for the user, never sent back.
+    /// </summary>
+    public const string WaitingWord = "WAITING";
+
+    /// <summary>
+    /// The checking job's task: the job's task and report, what the user asked in their own words (<paramref name="asked"/>,
+    /// so a part the task left out is still caught), and how to answer: every part listed and read back, one by one.
+    /// </summary>
+    public static string Task(ChatJob done, string asked = "", string rules = "", IReadOnlyList<string>? alongside = null) =>
+        $"Check the work of job {done.Number} (\"{done.Title}\"), which says it is finished, against what it was asked to do.\n\n" +
+        $"Its task:\n{done.Task.Trim()}\n\n" +
+        (LaterAsks(done) is { Length: > 0 } later ? $"What it was asked later, while it worked (part of its task too):\n{later}\n\n" : "") +
+        $"Its report:\n{(done.Summary.Trim().Length > 0 ? done.Summary.Trim() : "(it gave none)")}\n\n" +
+        (done.PassedAt != default
+            ? $"This work already PASSED a check. Since then the job was asked only this:\n{(AsksSince(done, done.PassedAt) is { Length: > 0 } since ? since : "(nothing new)")}\n" +
+              "Check only that, and that the parts that passed are still there. Don't raise a part or a demand the earlier check didn't " +
+              $"raise: what isn't in those asks is {DoneWord}.\n\n"
+            : "") +
+        (done.Reviews > 0 && done.LastIssues.Trim().Length > 0
+            ? $"This is check {done.Reviews + 1}. The last check found these parts not done, and the job was sent back to finish them:\n" +
+              $"{Cut(done.LastIssues.Trim(), 1500)}\nRead those parts again carefully. The parts the last check found {DoneWord} only need a quick " +
+              "read that they are still there (no pictures unless the job changed them since): don't check everything again from the start.\n\n"
+            : "") +
+        (alongside is { Count: > 0 }
+            ? $"Other jobs worked in the model at the same time: {string.Join(", ", alongside)}. A change one of them made (joins, cuts, " +
+              $"moved or new elements) is not this job's part: mark it {WaitingWord} with that job's number, never {NotDoneWord}.\n\n"
+            : "") +
+        (asked.Trim().Length > 0
+            ? "What the user asked, in their own words (the task above was written from this; a part of it that belongs to this job and is " +
+              $"missing from the task still counts):\n{asked.Trim()}\n\n"
+            : "") +
+        (rules.Trim().Length > 0
+            ? $"The rules, methods and decisions agreed earlier in the chat (they hold for this job too):\n{Cut(rules.Trim(), 3000)}\n\n"
+            : "") +
+        "How to check, part by part:\n" +
+        "1. Write the task as a numbered list of its parts: every thing it had to make, change, place, name or leave alone. Leave nothing " +
+        "out because it is small, and don't take the report's word for any of it.\n" +
+        "2. For each part, read the model with CSI ProMax's tools and see that it is really there: the elements, names, values, views " +
+        "and sheets. Where the task says all or gives a number (all piles, every sheet, berths 7 to 11), count what was done against what " +
+        "was asked. For anything drawn (geometry, lines, tags, dimensions, text), also look at it in its view (capture_view_image): " +
+        "overlapping tags, a missing dimension or a hidden element show there and not in the numbers.\n" +
+        "3. Check how it was done, not only the numbers: where the user agreed a method or pointed at a reference (\"the same as the " +
+        "reference strip\", \"neater like the decks\", generic model voids), the work must use that method, and it must look like that " +
+        "reference in the view: extra lines, a mesh of creases, steps or gaps that the reference doesn't show make the part NOT DONE " +
+        "even when every level matches. A method the task allows \"or another way\" doesn't excuse a result that looks worse than the " +
+        "reference.\n" +
+        "4. When the work was a berth's submission drawings or sheets, also call submission_format (action=check, berths): every line " +
+        "it lists for those berths is a part that is NOT DONE.\n" +
+        "5. When the job changed anything that shows on a sheet (a view on a sheet, tags, rebar, dimensions, schedules, detail " +
+        "lines, colours), look at each such sheet as a drawing (capture_view_image on the sheet, zoomed to what changed): tags use " +
+        "the tag family the other sheets use, never typed text; nothing that was on the drawing before is gone (dowel lengths, " +
+        "notes, dimensions); no check or clash colours or overrides are left on; rebar and sections follow the model as it is now; " +
+        "no stray lines; nothing from outside the submission (RoRo, unless the user named it) shows in its views or schedules. " +
+        "Each problem seen there is NOT DONE, even when every number in the model is right (bug 126).\n" +
+        "6. Where the task gives a way out (\"within 10 mm, or the remaining deviation noted with its cause\"), a part that took it is " +
+        $"{DoneWord}: never ask for the stricter way the task itself let go, and never ask for two things that can't both hold.\n" +
+        "7. Where the user said exactly, follow, match or flush, the tolerance is 1 mm: a part 2 mm or more off is NOT DONE, even when a " +
+        "tolerance from another rule (the clash tolerance) would allow it. A tolerance belongs only to the rule that gives it.\n" +
+        "8. Don't change the model: changes are refused for a check.\n\n" +
+        $"Answer with the list, one line per part: \"<n>. <the part>: {DoneWord}\" with what you read, or \"<n>. <the part>: {NotDoneWord} - " +
+        "<what is missing or wrong, and where>\". A part you could not check is NOT DONE with the reason.\n" +
+        $"A part that is not the job's to finish is \"<n>. <the part>: {WaitingWord} - <why>\": it needs the user's decision or yes that " +
+        "nobody has given (a choice the job asked about, a change the user must approve), or another job changed it or does it. " +
+        $"{NotDoneWord} is only for what the job itself can still finish now, without asking anyone.\n" +
+        "Read each part once, with the tool that reads it directly; don't read the same thing twice.\n" +
+        $"If any part is {WaitingWord}, write one line \"{WaitingWord}: \" with those parts, each with the one thing it waits for.\n" +
+        $"End with one line: \"{PassedWord}\" when no part is {NotDoneWord} ({WaitingWord} parts don't stop a pass), or \"{IssuesWord}: \" " +
+        $"followed by the {NotDoneWord} parts only, each with what to fix.";
+
+    /// <summary>The job's later asks: messages it was sent after its task, not the check's send-back or Continue.</summary>
+    public static string LaterAsks(ChatJob job)
+    {
+        var said = job.Items.Where(i => i.Kind == "user").Skip(1).Select(i => i.Text.Trim())
+            .Where(t => t.Length > 0 && !t.StartsWith("A teammate checked your work", StringComparison.Ordinal)
+                        && t != JobPause.CarryOn && !t.StartsWith("Carry on with your task", StringComparison.Ordinal))
+            .ToList();
+        return Cut(string.Join("\n", said.Skip(Math.Max(0, said.Count - 5))), 2000);
+    }
+
+    /// <summary>
+    /// The rules agreed in the chat (its summary: methods, standing rules, decisions), given to a job when it starts, so it
+    /// works by the same rules its check judges by (bug 115, 21 Nov 2026: the user asked again and again for the grading
+    /// to be followed, EL and TL to be followed, no floor cut openings and neat modelling; the jobs never saw those rules,
+    /// only the coordinator's summary and the checks did, so each job made the same mistakes and was sent back). "" none.
+    /// </summary>
+    public static string RulesForJob(string recall) =>
+        recall.Trim().Length == 0 ? "" :
+        "\n\nThe rules, methods and decisions agreed earlier in the chat. They hold for your work too, and the teammate who checks " +
+        $"your work judges it by them:\n{Cut(recall.Trim(), 3000)}";
+
+    /// <summary>The user's or the main chat's asks to the job after <paramref name="since"/> (not a check's send-back).</summary>
+    public static string AsksSince(ChatJob job, DateTime since) =>
+        Cut(string.Join("\n", job.Items.Where(i => i.Kind == "user" && i.Time > since).Select(i => i.Text.Trim())
+            .Where(t => t.Length > 0 && !t.StartsWith("A teammate checked your work", StringComparison.Ordinal)
+                        && t != JobPause.CarryOn && !t.StartsWith("Carry on with your task", StringComparison.Ordinal))), 2000);
+
+    /// <summary>The parts a check found waiting on the user or on another job: its WAITING line, "" none.</summary>
+    public static string WaitingOf(ChatJob check)
+    {
+        if (check.State != JobBoard.Done) return "";
+        var lines = check.Summary.Split('\n').Select(l => l.Trim().Trim('*', '_', '`').Trim()).ToList();
+        var line = lines.LastOrDefault(l => l.StartsWith(WaitingWord + ":", StringComparison.OrdinalIgnoreCase));
+        if (line is null) return "";
+        var text = line.Substring(WaitingWord.Length + 1).Trim();
+        return text.Length == 0 || text.Equals("none", StringComparison.OrdinalIgnoreCase) ? "" : JobBoard.OneLine(text, 800);
+    }
+
+    /// <summary>
+    /// True when a job whose check found parts not done goes back to finish them by itself, without the user or the main
+    /// chat in between: it finished, a check gave a verdict that isn't a pass, and it has checks left.
+    /// </summary>
+    public static bool SendBack(ChatJob job) =>
+        job.State == JobBoard.Done && job.Review.Length > 0 && job.Review != Pending && !Passed(job.Review)
+        && job.Review.StartsWith(IssuesWord, StringComparison.OrdinalIgnoreCase) && job.Reviews < MaxReviews;
+
+    /// <summary>What a job sent back is told: exactly the parts the check found not done.</summary>
+    public static string FixMessage(ChatJob job) =>
+        $"A teammate checked your work in the model, part by part, and it is not finished. {job.Review}\n\n" +
+        "Finish exactly these parts now; leave what was found done as it is. After each one, read it back in the model (and look at " +
+        "drawn work in its view) before you go on. A part that truly can't be done: say why in one line, don't call it done. " +
+        (job.WaitingOn.Length > 0 ? $"Leave the parts that wait for the user or another job ({job.WaitingOn}): they are not yours to do now. " : "") +
+        "Then report each of these parts as done or not done. Your work is checked again.";
+
+    /// <summary>The checking job's verdict, from its report: its last line when that says PASSED or ISSUES, else the whole report.</summary>
+    public static string Verdict(ChatJob check)
+    {
+        if (check.State != JobBoard.Done) return "The check couldn't finish" + (check.Summary.Length > 0 ? ": " + JobBoard.OneLine(check.Summary, 300) : ".");
+        var text = check.Summary.Trim();
+        var lines = text.Split('\n').Select(l => l.Trim().Trim('*', '_', '`').Trim()).Where(l => l.Length > 0).ToList();
+        var marked = lines.LastOrDefault(l => l.StartsWith(PassedWord, StringComparison.OrdinalIgnoreCase) || l.StartsWith(IssuesWord, StringComparison.OrdinalIgnoreCase));
+        if (marked is null) return text.Length > 0 ? JobBoard.OneLine(text, 1500) : "The check gave no verdict.";
+        if (marked.StartsWith(PassedWord, StringComparison.OrdinalIgnoreCase)) return PassedWord;
+        // The issues: the marked line and anything listed after it.
+        var at = lines.LastIndexOf(marked);
+        return JobBoard.OneLine(string.Join(" ", lines.Skip(at)), 1500);
+    }
+
+    private static string Cut(string text, int max) => text.Length > max ? text.Substring(0, max) + "…" : text;
+
+    public static bool Passed(string verdict) => string.Equals(verdict, PassedWord, StringComparison.Ordinal);
+
+    /// <summary>What the coordinator is told about the check of a job's work; "" when it wasn't checked.</summary>
+    public static string ReportLine(ChatJob job) =>
+        job.Review.Length == 0 || job.Review == Pending ? ""
+        : Passed(job.Review) ? $"A teammate (job {job.ReviewedBy}) checked the work in the model: it passed." +
+          (job.WaitingOn.Length > 0 ? $" Waiting, not the job's to finish: {job.WaitingOn} Ask the user what only they can decide in one short question; don't send the job back for these." : "")
+        : $"A teammate (job {job.ReviewedBy}) checked the work in the model, part by part" + (job.Reviews > 1 ? $" ({job.Reviews} checks, the job was sent back to finish in between)" : "") +
+          $", and this is still not done: {job.Review} Tell the user these parts first, exactly as not done; don't say the work is finished. " +
+          $"Then send job {job.Number} a message to finish them another way, or ask the user the one thing that blocks them." +
+          (job.WaitingOn.Length > 0 ? $" Also waiting, not the job's to finish: {job.WaitingOn}" : "");
+}
+
+/// <summary>
+/// Jobs that stop moving (JobWatch): one that wrote its report but whose run never ended is finished with that report,
+/// and one with no step for <see cref="Stuck"/> is stopped and handed back to the coordinator, so the rest of the work
+/// never waits on it (the 29-30 Oct overnight run lost 12 hours to two of each). Needs no WPF or ETABS (the unit tests
+/// compile this file).
+/// </summary>
+internal static class JobWatch
+{
+    /// <summary>A report written, then nothing for this long: the run is taken as finished.</summary>
+    public static readonly TimeSpan Hung = TimeSpan.FromMinutes(5);
+
+    /// <summary>No step and no words for this long: the job is stopped.</summary>
+    public static readonly TimeSpan Stuck = TimeSpan.FromMinutes(20);
+
+    /// <summary>The shortest answer that reads as a report, not a line between steps.</summary>
+    public const int ReportLength = 400;
+
+    public const string Fine = "", Finished = "finished", Stopped = "stuck";
+
+    /// <summary>
+    /// When the job last did anything: its latest step or words, or when its ETABS call began, waited or ended (a call that
+    /// waited 20 minutes for ETABS must not make the job look stuck the moment it ends), else when it started.
+    /// </summary>
+    public static DateTime LastMove(ChatJob job)
+    {
+        var last = job.Items.Count > 0 ? job.Items.Max(i => i.Time) : default;
+        if (job.Moved > last) last = job.Moved; // an ETABS call that began or ended is a move too
+        return last > job.Started ? last : job.Started;
+    }
+
+    /// <summary>
+    /// What to do with a running job now: <see cref="Finished"/> (its last item is a long answer, no step runs, and
+    /// nothing came for <see cref="Hung"/>), <see cref="Stopped"/> (nothing for <see cref="Stuck"/>), else <see cref="Fine"/>.
+    /// A job waiting its turn to change the model, while the model synchronizes, or while ETABS takes no work at all (a
+    /// command or dialog of ETABS's own, <see cref="JobBoard.Blocked"/>) is never judged: it isn't its doing (19 Nov 2026: two
+    /// jobs were stopped and split while ETABS took nothing for 32 minutes).
+    /// </summary>
+    public static string Judge(ChatJob job, DateTime now)
+    {
+        if (job.State != JobBoard.Running || job.Activity is JobBoard.Syncing or JobBoard.Applying or JobBoard.Reading or JobBoard.Blocked) return Fine;
+        var quiet = now - LastMove(job);
+        var last = job.Items.LastOrDefault(i => i.Kind != "note");
+        if (last is { Kind: "assistant" } && last.Text.Trim().Length >= ReportLength && quiet >= Hung) return Finished;
+        return quiet >= Stuck ? Stopped : Fine;
+    }
+
+    /// <summary>The note on a job finished here.</summary>
+    public const string FinishedNote = "Its report was written but its run didn't end, so it was finished here with that report.";
+
+    /// <summary>What a stuck job reports to the coordinator.</summary>
+    public static string StuckReport(ChatJob job)
+    {
+        var said = job.Items.Where(i => i.Kind == "assistant" && i.Text.Trim().Length > 0).Select(i => i.Text.Trim()).ToList();
+        return $"It showed no progress for {Stuck.TotalMinutes:0} minutes, so it was stopped." +
+               (said.Count > 0 ? " What it had found so far: " + JobBoard.OneLine(string.Join(" ", said.Skip(Math.Max(0, said.Count - 3))), 3000) : " It hadn't reported anything.") +
+               " Give the rest of its work another way (smaller parts), and don't hold other parts back for it.";
+    }
+}
+
+/// <summary>
+/// No worker waits while there is work (FreeWorkers): when a worker is free and a running job still has several steps
+/// it hasn't started, the coordinator is told to hand some of them to the free worker. Only changes go into ETABS one
+/// at a time; reading and thinking run side by side. Needs no WPF or ETABS (the unit tests compile this file).
+/// </summary>
+internal static class FreeWorkers
+{
+    /// <summary>Steps not started yet that make a job worth sharing.</summary>
+    public const int MinSteps = 2;
+
+    /// <summary>Workers free now: the Settings' number less the jobs running or waiting to start.</summary>
+    public static int Free(IEnumerable<ChatJob> jobs, int limit) => Math.Max(0, limit - jobs.Count(j => j.Open));
+
+    /// <summary>The job to share with a free worker (the most steps not started), or null; each job is offered once (<paramref name="offered"/>).</summary>
+    public static ChatJob? ToShare(IReadOnlyList<ChatJob> jobs, int limit, ICollection<int> offered)
+    {
+        if (Free(jobs, limit) < 1) return null;
+        return jobs.Where(j => j.Active && j.GoalCheck == 0 && j.ReviewOf == 0 && !offered.Contains(j.Number))
+            .Select(j => (Job: j, Left: j.Plan.Values.Count(v => v == JobPlan.ToDo)))
+            .Where(x => x.Left >= MinSteps).OrderByDescending(x => x.Left).Select(x => x.Job).FirstOrDefault();
+    }
+
+    /// <summary>What the coordinator is told (a turn the user didn't type).</summary>
+    public static string Nudge(ChatJob job, int free) =>
+        $"[CSI ProMax, not typed by the user] {free} worker(s) are free while job {job.Number} (\"{job.Title}\") still has " +
+        $"{job.Plan.Values.Count(v => v == JobPlan.ToDo)} steps it hasn't started. Nobody should wait while there is work: hand the " +
+        "steps that don't depend on its current one to new jobs now (chat_jobs start, with the facts it found), and tell job " +
+        $"{job.Number} (chat_jobs message) which steps moved so it leaves them. Changes still go into ETABS one at a time by " +
+        "themselves. If nothing can be split off, answer only \"No split.\" and carry on: the user doesn't need the reason " +
+        "(this answer is never shown to them).";
+
+    /// <summary>
+    /// The coordinator's answer to <see cref="Nudge"/> when nothing could be split off ("No split.", perhaps with a short
+    /// reason): an internal decision, so the chat drops it instead of showing it as CSI ProMax's answer.
+    /// </summary>
+    public static bool IsNothing(string text) => Strip(text).Length == 0;
+
+    /// <summary>
+    /// The text without the coordinator's "No split." (a line of its own, or the end of the last line), wherever it
+    /// appears: a reply that did real work can still end with it (bug 94). Text that is only "No split." becomes "".
+    /// </summary>
+    public static string Strip(string text)
+    {
+        if (string.IsNullOrEmpty(text) || text.IndexOf("split", StringComparison.OrdinalIgnoreCase) < 0) return (text ?? "").Trim().Length == 0 ? "" : text ?? "";
+        var kept = OwnLine.Replace(text, "");
+        kept = AtEnd.Replace(kept, "");
+        return kept.Trim().Length == 0 ? "" : kept.TrimEnd();
+    }
+
+    private static readonly Regex OwnLine = new(@"^[ \t>*_`]*no split(?:\b[^\n]{0,200})?$\r?\n?", RegexOptions.IgnoreCase | RegexOptions.Multiline);
+    private static readonly Regex AtEnd = new(@"[ \t]+[*_`]*no split[.!]?[*_`]*\s*$", RegexOptions.IgnoreCase);
+}

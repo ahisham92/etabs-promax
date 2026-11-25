@@ -1,0 +1,3695 @@
+using System.Globalization;
+using System.Runtime.InteropServices;
+using System.IO;
+using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Documents;
+using System.Windows.Input;
+using System.Windows.Interop;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Threading;
+using CsiProMax.Bridge;
+using CsiProMax.Tools;
+using CsiProMax.UI;
+
+namespace CsiProMax.Chat;
+
+/// <summary>
+/// The Chat tab of the CSI ProMax pane: a conversation with Claude through Claude Code, signed in with the user's
+/// Claude account (so it runs on their plan). The loader owns the dockable pane and asks the running core for this
+/// element through CoreEntry.PaneContent("chat"); after a version switch the new core's element takes its place and
+/// resumes the same conversation.
+///
+/// Claude reaches ETABS only through the csi-promax MCP server, i.e. the same bridge, job queue and approval dialog
+/// as the Claude desktop app. Everything slow (finding Claude Code, starting it, reading its output, encoding pictures)
+/// runs off ETABS's UI thread.
+/// </summary>
+internal sealed partial class ChatPane : DockPanel, IHistoryHost
+{
+    // ---- Lifecycle (called by App and CoreEntry on ETABS's UI thread) ---------------------------------------------
+
+    private static ChatPane? _instance, _retired;
+    private static string _modelKey = "", _modelTitle = "";
+
+    /// <summary>True while a turn or a parallel job runs: switching to a new core version waits for it.</summary>
+    public static bool IsBusy => _instance is { } pane && pane.Sessions.Any(s => s.Turn is not null
+        // Jobs waiting to start don't hold an update back while an autopilot waits for it: they carry on in the new version.
+        // Paused jobs (Pause all, or paused for the update itself) carry on in the new version: only a process still ending holds it.
+        || (s.Conv.Autopilot is { Updating.Length: > 0 } || s.UpdateHold.Length > 0 || JobPause.On ? s.Runs.Count > 0 : s.Runs.Count > 0 || (s.Board?.OpenCount ?? 0) > 0));
+
+    /// <summary>The pane's chat element (created on first use).</summary>
+    public static FrameworkElement Get() => _instance ??= new ChatPane();
+
+    public static void Start(EtabsApp app)
+    {
+        try
+        {
+            var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "CsiProMax");
+            JobPause.StoreFile = Path.Combine(folder, "jobs-paused.txt");
+            JobPause.Restore(); // paused before a version switch: still paused, or carried on once the chat is up (PauseTick)
+            Away.StoreFile = Path.Combine(folder, "away.txt");
+            Away.Restore();
+            HistoryArchive.Start(); // Claude Code deletes its transcripts after 30 days: they are kept here for good (19 Nov 2026)
+            Tools.WorkedCode.BackfillOnce(); // all code written before the library began comes in once (19 Nov 2026)
+            Tools.WorkedCode.MergeDaily(); // the same code kept twice is folded into one, once a day (bug 135)
+            Tools.JobRecipes.BackfillOnce(JobsFolder); // every finished job in every chat can be replayed (bug 135)
+            // ETABS has no event for "another model is open now": the model's file is read every few seconds instead.
+            Host.ModelWatch.Changed -= SetModel;
+            Host.ModelWatch.Changed += SetModel;
+            if (Host.ModelWatch.Current is { } now) SetModel(now.Path, now.Title);
+        }
+        catch (Exception) { /* the chat still works, with one conversation */ }
+        // Started by a version switch while no model was known to ETABS's API (ActiveUIDocument): the chat that was open
+        // tells which model it is, so the pane doesn't open the "no model" chat instead of it.
+        if (_modelKey.Length == 0 && _instance is null && _retired is null && ChatHandover.Peek() is { } left && left.Key != NoModelKey)
+        {
+            var onPane = left.PaneKey.Length > 0 && left.PaneKey != NoModelKey;
+            _modelKey = onPane ? left.PaneKey : left.Key;
+            _modelTitle = onPane ? left.PaneTitle : left.Title;
+        }
+        // Jobs paused for this update (or chats handed over with jobs): the chat is made at once, even with the pane
+        // hidden, so they carry on by themselves in this version without the chat being opened first.
+        if (_instance is null && _retired is null && (JobPause.Why == JobPause.ForUpdate || ChatHandover.Peek() is { Away.Count: > 0 }))
+            System.Windows.Application.Current?.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.ApplicationIdle, new Action(() =>
+            {
+                try { Get(); }
+                catch (Exception) { /* the chat is made when it is opened, and the jobs carry on then */ }
+            }));
+        // An autopilot running when the version switched (or a run to take over): the chat is made at once, even with the
+        // pane hidden, so the run carries on in this version.
+        if (_instance is null && _retired is null && AutopilotShare.Any(DateTime.UtcNow) is not null)
+            System.Windows.Application.Current?.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.ApplicationIdle, new Action(() =>
+            {
+                try { Get(); }
+                catch (Exception) { /* the chat is made when it is opened, and the run carries on then */ }
+            }));
+        // Started again after a version switch that failed: the pane still shows this core's element, so revive it.
+        if (_instance is null && _retired is { } pane)
+        {
+            ChatHandover.Take(); // this pane still has the chat it left
+            _instance = pane;
+            _retired = null;
+            pane._stopped = false;
+            pane._handedOver = false;
+            UI.RestartNote.Changed -= pane.ShowRestartNote;
+            UI.RestartNote.Changed += pane.ShowRestartNote;
+            Bridge.Approvals.LevelChanged -= pane.ShowApprovalLevel;
+            Bridge.Approvals.LevelChanged += pane.ShowApprovalLevel;
+            pane._idle.Start();
+            Brand.UseTheme(pane);
+            pane.ShowStatus();
+            pane.HookJobs();
+            pane.ModelChanged();
+        }
+    }
+
+    /// <summary>The core is stopping (switching versions): end the engine and save; the new core resumes the session.</summary>
+    public static void Stop(EtabsApp app)
+    {
+        Host.ModelWatch.Changed -= SetModel;
+        _instance?.Retire();
+    }
+
+    /// <summary>ETABS is closing.</summary>
+    public static void Shutdown()
+    {
+        if (_instance is not { } pane) return;
+        // Closed the normal way: an autopilot's run isn't carried on by a restart (the watcher starts no ETABS).
+        if (pane.Sessions.Any(s => s.Conv.Autopilot is { Active: true })) AutopilotShare.MarkClosed();
+        pane.CloseBig();
+        pane.EndRuns("ETABS closed, so this job stopped. Send it a message to carry on.", now: true);
+        pane.StopBackground("ETABS closed while this chat worked in the background, so it stopped here. Send your message again to carry on.",
+            "ETABS closed, so this job stopped. Send it a message to carry on.", now: true);
+        pane.Save();
+        pane._engine?.KillNow();
+        pane._engine = null;
+    }
+
+    /// <summary>
+    /// The key a model's chats are saved under (ChatStore; ChatModelKeys): the central model's path for a workshared
+    /// model, else its file, else (never saved: a new project, a detached copy) a key of its own while it is open.
+    /// </summary>
+    internal static string ModelKey(string path, string title)
+    {
+        string id;
+        lock (UnsavedIds)
+            if (!UnsavedIds.TryGetValue(title, out id!)) UnsavedIds[title] = id = Guid.NewGuid().ToString("N").Substring(0, 8);
+        return ChatModelKeys.For(path, title, null, false, id);
+    }
+
+    /// <summary>The key of each open never-saved model, by its title.</summary>
+    private static readonly Dictionary<string, string> UnsavedIds = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Moves model <paramref name="from"/>'s chats and notes to <paramref name="to"/>; the open chat follows.</summary>
+    private static void MoveChats(string from, string to)
+    {
+        try
+        {
+            _instance?.Rekeyed(from, to);
+            ChatStore.Rekey(from, to);
+            if (MemoryNotes.Load().Any(n => n.Key is { } k && string.Equals(k, from, StringComparison.OrdinalIgnoreCase)))
+                MemoryNotes.Change(sections => MemoryNotes.Rekey(sections, from, to));
+        }
+        catch (Exception) { }
+    }
+
+    /// <summary>The shown chat (and any chat working in the background) now belongs to model <paramref name="to"/>.</summary>
+    private void Rekeyed(string from, string to)
+    {
+        if (string.Equals(_conv.Key, from, StringComparison.OrdinalIgnoreCase))
+        {
+            var old = _conv.File;
+            _conv.Key = to;
+            _conv.Title = _modelTitle;
+            Save();
+            if (old.Length > 0 && !string.Equals(old, _conv.File, StringComparison.OrdinalIgnoreCase)) ChatStore.Delete(old);
+            ShowTitle();
+        }
+        RekeyBackground(from, to);
+    }
+
+    /// <summary>The open model's key (see <see cref="ModelKey"/>), "" before one is open: memory notes are kept under it.</summary>
+    internal static string CurrentModelKey => _modelKey;
+
+    internal static string CurrentModelTitle => _modelTitle;
+
+    private static void SetModel(string path, string title)
+    {
+        var key = ModelKey(path, title);
+        if (string.Equals(key, _modelKey, StringComparison.OrdinalIgnoreCase)) return;
+        // Save As of a model never saved: its chats and memory notes go with it to the file.
+        if (ChatModelKeys.IsUnsaved(_modelKey) && !ChatModelKeys.IsUnsaved(key) && Host.ModelWatch.SavedAs)
+        {
+            var from = _modelKey;
+            CsiProMax.App.Dispatcher.Later(() => MoveChats(from, key));
+        }
+        _modelKey = key;
+        _modelTitle = title;
+        // Switching conversations reads and lays out the saved one: at the next idle moment, not inside ETABS's model
+        // open or view activation (bug #18). It reads the current key then, so several switches collapse into one.
+        if (_instance is not null) CsiProMax.App.Dispatcher.Later(() => _instance?.ModelChanged());
+    }
+
+    // ---- State ----------------------------------------------------------------------------------------------------
+
+    private enum Setup { Checking, Missing, Installing, SignedOut, SigningIn, Ready, Failed }
+
+    /// <summary>Why ETABS couldn't open PowerShell to install Claude Code, once it couldn't: the user pastes the line instead.</summary>
+    private string? _installBlocked;
+
+    private sealed class Turn
+    {
+        public string Line = "";
+        public bool Stopping, Retried, SawText, SawTool, ModelRetried;
+        /// <summary>A Shrink chat turn (/compact); AutoShrink when the pane started it; Compacted once Claude Code did it.</summary>
+        public bool Shrinking, AutoShrink, Compacted;
+        public DispatcherTimer? KillTimer;
+        /// <summary>True while the prompt enhancer reads the model to make a brief (nothing is sent to the chat yet).</summary>
+        public bool Planning;
+        public CancellationTokenSource? Cancel;
+        /// <summary>How the turn ended for the job card: done, or failed when Claude Code reported an error.</summary>
+        public string Outcome = "done";
+        /// <summary>The brief this task runs ("" when it runs as typed or had none): see ChatPane.ActiveBrief.</summary>
+        public string Brief = "";
+        /// <summary>When the turn started: a long one that finishes glows and flashes ETABS's taskbar button (<see cref="Finished"/>).</summary>
+        public DateTime Started = DateTime.UtcNow;
+        /// <summary>Where its time goes, for the activity log's answer_time line.</summary>
+        public AnswerTiming? Timing;
+        /// <summary>
+        /// A turn CSI ProMax sent on its own whose "nothing to do" answer the user mustn't see (FreeWorkers.Nudge): its
+        /// text is held out of sight while it streams and dropped at the end when it only says so (FreeWorkers.IsNothing).
+        /// </summary>
+        public bool Quiet;
+        public readonly List<(ChatItem Item, UIElement? Element)> Held = new();
+        /// <summary>Where the turn's items start in the conversation: its text is cleaned of "No split." when it ends.</summary>
+        public int FirstItem;
+        /// <summary>The jobs as they were when the turn started: a reply calling one busy that finished meanwhile is corrected (<see cref="JobTruth"/>).</summary>
+        public List<ChatJob>? JobsAtStart;
+    }
+
+    /// <summary>A task at least this long that finishes gets the finished glow and, when you are in another program, the taskbar flash.</summary>
+    internal static readonly TimeSpan LongTask = TimeSpan.FromSeconds(20);
+
+    private sealed class Attachment
+    {
+        public string Path = "", Name = "";
+        public bool IsImage => ImageType(Path) is not null;
+    }
+
+    private sealed class ToolRow
+    {
+        public ChatItem Item = new();
+        public ContentControl Mark = new();
+        public ToggleButton Header = new();
+        public TextBlock Line = new(), Chevron = new();
+        public TextBlock Detail = new();
+        public StackPanel Details = new();
+    }
+
+    private const int MaxImages = 8, MaxResult = 3000, MaxIdLinks = 20;
+
+    private Conversation _conv { get => _s.Conv; set => _s.Conv = value; }
+    private ChatEngine? _engine { get => _s.Engine; set => _s.Engine = value; }
+    private ClaudeCli.Install? _install;
+    private Setup _setup = Setup.Checking;
+    private string _setupDetail = "";
+    private Turn? _turn { get => _s.Turn; set => _s.Turn = value; }
+    private bool _stopped, _checking, _scrollQueued;
+    private int _firstShown; // the first conversation item drawn (see History)
+    private readonly ScrollFollow _follow = new();
+    private readonly Throttle _throttle = new(TimeSpan.FromMilliseconds(40));
+    private (string Key, string Title)? _pendingModel;
+    private DateTime _waitingSince;
+    private DateTime _lastActivity { get => _s.LastActivity; set => _s.LastActivity = value; }
+    private readonly List<Attachment> _pending = [];
+
+    /// <summary>When the user sent the message the running task answers (UTC); null for a turn CSI ProMax started itself.</summary>
+    private DateTime? _askedAt;
+    private readonly Dictionary<string, (ChatItem Item, MarkdownView View)> _texts = new();
+    private readonly Dictionary<string, ToolRow> _tools = new();
+    private readonly Dictionary<ChatItem, MarkdownView> _views = new();
+    private readonly Dictionary<ChatItem, ToolRow> _rows = new();
+    private readonly HashSet<string> _dirty = [];
+
+    // ---- Controls -------------------------------------------------------------------------------------------------
+
+    private readonly TextBlock _modelLine, _chatName;
+    private readonly Button _newChat, _refresh, _send, _stop, _attach, _view, _menu, _prompts, _modelPill, _briefPill;
+    private readonly TextBlock _briefLabel = new() { FontSize = ChatUi.SmallSize, VerticalAlignment = VerticalAlignment.Center };
+    // "Always allow" next to the brief pill while nothing asks before changes (a quiet reminder; it opens the same menu).
+    private Button _allowPill = null!;
+    private readonly Border _promptPanel = new() { Visibility = Visibility.Collapsed, Margin = new Thickness(0, 0, 0, ChatUi.S2) };
+    private List<SavedPrompt>? _saved;
+    private HistoryDrawer? _drawer;
+    private readonly Border _scrim = new() { Visibility = Visibility.Collapsed };
+    private readonly Grid _center = new();
+    private readonly Popup _modelMenu = new() { StaysOpen = false, AllowsTransparency = true, Placement = PlacementMode.Custom };
+    private readonly StackPanel _modelList = new() { Margin = new Thickness(ChatUi.S1) };
+    private readonly TextBlock _modelLabel = new() { FontSize = ChatUi.SmallSize, VerticalAlignment = VerticalAlignment.Center };
+    private bool _refreshAsked;
+    private DateTime _modelMenuClosed;
+    // The model and effort the main chat's next process runs with: the chat's own choice, or what Automatic picked for
+    // the latest request (ChatAuto; see PickFor).
+    private string _lastWorkingModel = "";
+    private string _model { get => _s.Model; set => _s.Model = value; }
+    private string _effort { get => _s.Effort; set => _s.Effort = value; }
+    private readonly Border _setupCard = new() { Visibility = Visibility.Collapsed };
+    private readonly StackPanel _messages = new();
+    private readonly ScrollViewer _scroll;
+    private readonly UIElement _empty;
+    private readonly Button _earlier, _jump;
+    private readonly TextBlock _earlierText = new() { FontSize = ChatUi.SmallSize, VerticalAlignment = VerticalAlignment.Center };
+    private readonly TextBlock _jumpText = new() { FontSize = ChatUi.SmallSize, VerticalAlignment = VerticalAlignment.Center };
+    private readonly Border _working = new() { Visibility = Visibility.Collapsed, Padding = new Thickness(0, ChatUi.S4, 0, ChatUi.S1) };
+    private readonly FrameworkElement _shimmer = ChatUi.Shimmer();
+    private bool _gliding, _workingShown, _shimmerShown, _drawerOpen;
+    private int _glideStill;
+    private double _glideLast = -1;
+    private readonly bool _sample;
+    private readonly TextBlock _workingText = Brand.Text("", Brand.K.Muted, ChatUi.SmallSize);
+    private readonly TextBox _input;
+    private readonly WrapPanel _chips = new();
+    // The message box's frame (border and field colour) and its hint; built with the composer.
+    private Border _field = null!;
+    private Border? _composerFrame, _composerGlow;
+    private TextBlock _hint = null!;
+    private readonly DockPanel _statusRow = new() { Margin = new Thickness(0, 0, 0, 4) };
+    private readonly ContentControl _statusSpin = new() { Focusable = false, VerticalAlignment = VerticalAlignment.Center };
+    private readonly TextBlock _status;
+    private readonly DispatcherTimer _render = new(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(40) };
+    private readonly DispatcherTimer _poll = new() { Interval = TimeSpan.FromSeconds(4) };
+    private readonly DispatcherTimer _idle = new() { Interval = TimeSpan.FromMinutes(1) };
+    // Saves the chat shortly after each message (and while an answer streams), so a crash or ETABS closing loses nothing.
+    private readonly DispatcherTimer _saveSoon = new() { Interval = TimeSpan.FromSeconds(2) };
+    // Set once this pane saved and handed its chat to the next core (Retire): it writes nothing after that.
+    private bool _handedOver;
+    private readonly Border _restartNote = new() { Visibility = Visibility.Collapsed };
+    private readonly TextBlock _restartNoteText = Brand.Text("", Brand.K.Text, 12);
+
+    private void ShowRestartNote()
+    {
+        var note = UI.RestartNote.Text;
+        _restartNoteText.Text = note ?? "";
+        _restartNote.Visibility = note is null ? Visibility.Collapsed : Visibility.Visible;
+        AutomationProperties.SetName(_restartNote, note ?? "");
+    }
+
+    private ChatPane() : this(null) { }
+
+    /// <summary>The pane; with <paramref name="sample"/> a stand-alone copy showing that conversation (the DPI snapshot), which looks for nothing and saves nothing.</summary>
+    private ChatPane(Conversation? sample)
+    {
+        Brand.UseTheme(this);
+        Resources.MergedDictionaries.Add(ChatUi.Styles());
+        // The animation setting (or Windows' Show animations) changed: hover fades follow at once, no restart needed.
+        ChatUi.WatchWindows();
+        Loaded += (_, _) =>
+        {
+            ChatUi.MotionChanged -= MotionChanged;
+            ChatUi.MotionChanged += MotionChanged;
+            MotionChanged();
+        };
+        Unloaded += (_, _) => ChatUi.MotionChanged -= MotionChanged;
+        _sample = sample is not null;
+        if (sample is null) Tools.Handoff.ChatPresenter = r => _instance is { } pane && pane.ShowHandoff(r);
+        if (sample is null)
+        {
+            SignInHealth.Changed += SignInChangedSoon;
+            SignInFlow.Changed += SignInChangedSoon;
+        }
+        SetResourceReference(BackgroundProperty, Brand.K.Bg);
+        SetResourceReference(TextElement.ForegroundProperty, Brand.K.Text);
+        TextElement.SetFontSize(this, ChatUi.BodySize);
+        TextElement.SetFontFamily(this, ChatUi.Text);
+        // Sharp lines and text: whole-pixel layout, and text laid out for the screen (Display) with ClearType where the
+        // pane allows it. The greeting, being large, uses Ideal (HomeView).
+        UseLayoutRounding = true;
+        SnapsToDevicePixels = true;
+        TextOptions.SetTextFormattingMode(this, TextFormattingMode.Display);
+        TextOptions.SetTextRenderingMode(this, TextRenderingMode.ClearType);
+        ChatUi.Opaque(this); // an opaque background: ClearType holds even where a child fades or moves
+        // Tab order follows the reading order: header, notices, conversation, then the message box.
+        KeyboardNavigation.SetTabNavigation(this, KeyboardNavigationMode.Local);
+        LastChildFill = true;
+        // After an in-session update: the chat the previous version had open, with its unsent message (ChatHandover).
+        var handover = sample is null ? ChatHandover.Take() : null;
+        if (sample is null) DefaultType();
+        _s = _shown = new ChatSession(sample ?? ChatHandover.Open(handover, ConversationKey, ConversationTitle));
+
+        // Top: the history menu, this chat's name with its type and the ETABS model as a muted caption, its effort and
+        // the plan's usage; on the right Shrink, New chat (one button: its menu picks the type), the large window and,
+        // only while the setup needs it, Check again. A narrow pane shortens the words (Narrow).
+        var top = new DockPanel { Margin = new Thickness(ChatUi.S2, ChatUi.S2, ChatUi.S2, ChatUi.S2) };
+        _menu = ChatUi.IconButton(ChatUi.Paths.Menu, "Chat history", "Your chats: search, open, rename, pin, export or delete them.");
+        _menu.Margin = new Thickness(0, 0, ChatUi.S1, 0);
+        _menu.Click += (_, _) => ToggleDrawer();
+        DockPanel.SetDock(_menu, Dock.Left);
+        top.Children.Add(_menu);
+        _refresh = ChatUi.IconButton(ChatUi.Paths.Refresh, "Check the setup again", "Checks again that the chat is installed and signed in.");
+        _refresh.Visibility = Visibility.Collapsed; // ShowSetup shows it while the chat isn't ready
+        _refresh.Click += (_, _) =>
+        {
+            _refreshAsked = true;
+            Status("Checking the chat setup…", spin: true);
+            Check(quiet: false);
+        };
+        DockPanel.SetDock(_refresh, Dock.Right);
+        top.Children.Add(_refresh);
+        // The large window (and back to the side).
+        BuildBigButton();
+        DockPanel.SetDock(_bigButton, Dock.Right);
+        top.Children.Add(_bigButton);
+        // New chat: one button whose menu starts a chat With coordinator or a Simple one, your default (Settings, Chat
+        // tab) first and marked.
+        BuildTypeControls();
+        _newChat = ChatUi.IconButton(ChatUi.Paths.Plus, "New chat", "New chat: pick With coordinator or Simple chat (your default is marked, Settings > Chat). This one stays in the history (the menu at the top left).");
+        _newChat.Margin = new Thickness(ChatUi.S1, 0, 0, 0);
+        _newChat.Click += (_, _) => ToggleChoice(_newChat, NewChoices());
+        AutomationProperties.SetItemStatus(_newChat, "Collapsed");
+        DockPanel.SetDock(_newChat, Dock.Right);
+        top.Children.Add(_newChat);
+        // Chats: switch between this model's chats; it says which chats work or finished in the background.
+        BuildChatsPill();
+        DockPanel.SetDock(_chatsPill, Dock.Right);
+        top.Children.Add(_chatsPill);
+        DockPanel.SetDock(_choiceMenu, Dock.Right);
+        top.Children.Add(_choiceMenu);
+        // The plan's usage (5-hour and weekly limits), as Claude Code reports it with each answer.
+        BuildUsageMeter();
+        DockPanel.SetDock(_usageMenu, Dock.Right);
+        top.Children.Add(_usageMenu);
+        _shrink = ShrinkButton();
+        DockPanel.SetDock(_shrink, Dock.Right);
+        top.Children.Add(_shrink);
+        var names = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(ChatUi.S1, 0, 0, 0) };
+        _chatName = ChatUi.Small("", Brand.K.Text, bold: true);
+        _chatName.FontSize = ChatUi.BodySize;
+        _chatName.TextTrimming = TextTrimming.CharacterEllipsis;
+        names.Children.Add(_chatName);
+        _modelLine = ChatUi.Small("");
+        _modelLine.FontSize = ChatUi.SmallSize;
+        _modelLine.TextTrimming = TextTrimming.CharacterEllipsis;
+        _modelLine.VerticalAlignment = VerticalAlignment.Center;
+        // The ETABS model. The chat's type, effort and the plan's usage sit under the message box, to keep this short.
+        names.Children.Add(_modelLine);
+        top.Children.Add(names);
+        // A hairline under the header, so the conversation scrolls away beneath it instead of running into the title.
+        var header = new Border { Child = top, BorderThickness = new Thickness(0, 0, 0, 1), SnapsToDevicePixels = true };
+        header.SetResourceReference(Border.BorderBrushProperty, Brand.K.BorderSubtle);
+        SetDock(header, Dock.Top);
+        KeyboardNavigation.SetTabIndex(header, 0);
+        KeyboardNavigation.SetTabIndex(top, 0);
+        Children.Add(header);
+
+        SetDock(_setupCard, Dock.Top);
+        KeyboardNavigation.SetTabIndex(_setupCard, 1);
+        _setupCard.Margin = new Thickness(ChatUi.S3, ChatUi.S1, ChatUi.S3, ChatUi.S1);
+        Children.Add(_setupCard);
+
+        // "Restart ETABS to see the new buttons and pane" after an in-session update that couldn't show everything.
+        SetDock(_restartNote, Dock.Top);
+        KeyboardNavigation.SetTabIndex(_restartNote, 2);
+        _restartNote.Margin = new Thickness(ChatUi.S3, 0, ChatUi.S3, ChatUi.S1);
+        _restartNote.Padding = new Thickness(ChatUi.S3, ChatUi.S2, ChatUi.S3, ChatUi.S2);
+        _restartNote.BorderThickness = new Thickness(1);
+        _restartNote.CornerRadius = new CornerRadius(ChatUi.RadiusSmall);
+        _restartNote.SetResourceReference(Border.BackgroundProperty, Brand.K.NoticeBg);
+        _restartNote.SetResourceReference(Border.BorderBrushProperty, Brand.K.NoticeBorder);
+        _restartNote.Child = _restartNoteText;
+        AutomationProperties.SetLiveSetting(_restartNote, AutomationLiveSetting.Polite);
+        Children.Add(_restartNote);
+        ShowRestartNote();
+        if (sample is null) UI.RestartNote.Changed += ShowRestartNote;
+
+        // "CSI ProMax 0.32.0 is available" / "Updated to ...": the same message as the update toast (UI/UpdateNotice).
+        var updateBand = UI.UpdateNotice.Banner();
+        SetDock(updateBand, Dock.Top);
+        KeyboardNavigation.SetTabIndex(updateBand, 2);
+        Children.Add(updateBand);
+
+        // Bottom: the saved prompts (when asked for), then one rounded card holding the attachments, the message box and
+        // a row of icon buttons with the model and Send; the status line under it.
+        var composer = new StackPanel { Margin = new Thickness(ChatUi.S3, ChatUi.S3, ChatUi.S3, ChatUi.S2) };
+        KeyboardNavigation.SetTabIndex(composer, 4);
+        KeyboardNavigation.SetTabNavigation(composer, KeyboardNavigationMode.Local);
+        _status = Brand.Text("", Brand.K.Muted, ChatUi.SmallSize);
+        _status.VerticalAlignment = VerticalAlignment.Center;
+        AutomationProperties.SetLiveSetting(_status, AutomationLiveSetting.Polite);
+        DockPanel.SetDock(_statusSpin, Dock.Left);
+        _statusRow.Children.Add(_statusSpin);
+        _statusRow.Children.Add(_status);
+        _statusRow.Margin = new Thickness(ChatUi.S2, ChatUi.S2, ChatUi.S2, 0);
+        composer.Children.Add(_promptPanel);
+        // The message box: a field a shade off the card with a visible border, about two lines tall at rest. The first
+        // line sits top-left, exactly where the hint is, and the box grows upward as lines are added (the composer is
+        // docked at the bottom), then scrolls.
+        _input = new TextBox
+        {
+            AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = ChatStyles.ComposerMinHeight, MaxHeight = ChatStyles.ComposerMaxHeight,
+            Padding = new Thickness(ChatStyles.ComposerPadX, ChatStyles.ComposerPadY, ChatStyles.ComposerPadX, ChatStyles.ComposerPadY),
+            VerticalContentAlignment = VerticalAlignment.Top, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, SpellCheck = { IsEnabled = true }, FontSize = ChatUi.BodySize,
+        };
+        _input.SetResourceReference(StyleProperty, "SpmChatBare");
+        AutomationProperties.SetName(_input, "Message to CSI ProMax");
+        AutomationProperties.SetHelpText(_input, "Type your question or request here. Enter sends, Shift+Enter starts a new line, Escape stops the answer. Paste a picture or a file to attach it.");
+        _input.ToolTip = "Type here. Enter sends. Shift+Enter: new line. Paste or drop pictures, PDFs, Word, PowerPoint and Excel files and drawings to attach them.";
+        _input.PreviewKeyDown += OnInputKey;
+        // A click in the box: once WPF has placed the caret, check Windows' keyboard focus followed (see TakeKeyboard).
+        _input.PreviewMouseLeftButtonDown += (_, _) => Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(TakeKeyboard));
+        CommandManager.AddPreviewExecutedHandler(_input, OnPreviewPaste);
+        CommandManager.AddPreviewCanExecuteHandler(_input, OnPreviewCanPaste);
+        // A hint inside the empty box (the box's name and help text say the same for screen readers), on the caret's
+        // spot: the box's padding plus the 2 px WPF leaves before the first character, in the box's own font.
+        _hint = Brand.Text(ChatStyles.ComposerHint, Brand.K.Muted, ChatUi.BodySize);
+        _hint.IsHitTestVisible = false;
+        _hint.TextWrapping = TextWrapping.Wrap;
+        _hint.VerticalAlignment = VerticalAlignment.Top;
+        _hint.Margin = new Thickness(ChatStyles.ComposerPadX + 2, ChatStyles.ComposerPadY, ChatStyles.ComposerPadX + 2, 0);
+        _hint.SetBinding(TextBlock.FontFamilyProperty, new System.Windows.Data.Binding(nameof(TextBox.FontFamily)) { Source = _input });
+        _input.TextChanged += (_, _) => _hint.Visibility = _input.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        _input.TextChanged += (_, _) => { if (_turn is not null) ShowSteer(); };
+        _input.TextChanged += (_, _) => { if (_input.Text.Length > 0) WarmEngine(); };
+        var field = new Grid();
+        field.Children.Add(_input);
+        field.Children.Add(_hint);
+        _field = new Border
+        {
+            Child = field, CornerRadius = new CornerRadius(ChatUi.RadiusSmall), SnapsToDevicePixels = true,
+            Margin = new Thickness(ChatUi.S1, ChatUi.S1, ChatUi.S1, 0), Cursor = Cursors.IBeam,
+        };
+        // One box: the card around it is the field (its border and glow show hover and focus, see ShowFieldState), so
+        // the message box itself has no border or fill of its own.
+        _field.Background = Brushes.Transparent;
+
+        var buttons = new DockPanel { Margin = new Thickness(ChatUi.S1, 0, ChatUi.S2, ChatUi.S2) };
+        _attach = ChatUi.IconButton(ChatUi.Paths.Plus, "Attach files", "Attach pictures, PDFs, Word, PowerPoint and Excel files, or drawings (DWG, DXF). You can also paste or drop them here.");
+        _attach.Click += (_, _) => PickFiles();
+        _prompts = ChatUi.IconButton(ChatUi.Paths.Bookmark, "Saved prompts", "Your saved prompts: pick one to put it in the message box. Save one from any message with ⋯ › Save prompt.");
+        _prompts.Click += (_, _) => TogglePrompts();
+        AutomationProperties.SetItemStatus(_prompts, "Collapsed");
+        _view = ChatUi.IconButton(ChatUi.Paths.Camera, "Attach the ETABS window", "Attaches a picture of the ETABS window, as it shows the model now.");
+        _view.Click += (_, _) => AttachView();
+        // Send is a round accent arrow; while Claude works a round red Stop square takes its place (never the default).
+        _send = new Button { Content = ChatUi.Icon(ChatUi.Paths.Send, stroke: 2), ToolTip = "Send (Enter)" };
+        _send.SetResourceReference(StyleProperty, "SpmChatSend");
+        AutomationProperties.SetName(_send, "Send message");
+        AutomationProperties.SetHelpText(_send, "Sends your message to CSI ProMax (Enter).");
+        _send.Click += (_, _) => Send();
+        _stop = new Button { Content = ChatUi.Icon(ChatUi.Paths.Square, fill: true), Visibility = Visibility.Collapsed };
+        _stop.SetResourceReference(StyleProperty, "SpmChatStop");
+        _stop.ToolTip = "Stops CSI ProMax's answer (Escape). A change already made in ETABS stays (ETABS has no undo for it).";
+        AutomationProperties.SetName(_stop, "Stop CSI ProMax's answer");
+        AutomationProperties.SetHelpText(_stop, _stop.ToolTip as string ?? "");
+        _stop.Click += (_, _) => StopPressed(); // in a running autopilot's chat: stops the run, its answer and jobs
+        DockPanel.SetDock(_send, Dock.Right);
+        DockPanel.SetDock(_stop, Dock.Right);
+        // The model for the next message: a pill left of Send that opens a small menu.
+        _lastWorkingModel = _model;
+        var pill = new StackPanel { Orientation = Orientation.Horizontal };
+        pill.Children.Add(_modelLabel);
+        var chevron = ChatUi.Icon(ChatUi.Paths.ChevronUp);
+        chevron.Margin = new Thickness(2, 0, -4, 0);
+        pill.Children.Add(chevron);
+        _modelPill = new Button { Content = pill, Margin = new Thickness(0, 0, ChatUi.S2, 0), VerticalAlignment = VerticalAlignment.Center, Padding = new Thickness(ChatUi.S3, ChatUi.S1, ChatUi.S3, ChatUi.S1) };
+        _modelPill.SetResourceReference(StyleProperty, "SpmChatPill");
+        _modelPill.SetResourceReference(BackgroundProperty, Brand.K.Raised);
+        _modelPill.Click += (_, _) => ToggleModelMenu();
+        AutomationProperties.SetItemStatus(_modelPill, "Collapsed");
+        DockPanel.SetDock(_modelPill, Dock.Right);
+        BuildModelMenu();
+        ShowModelChoice();
+        // "Brief before running" next to the model, so the setting is in sight where the message is sent: a quiet pill
+        // that opens the same menu at its brief section.
+        var briefIcon = ChatUi.Icon(ChatUi.Paths.Sparkle, 14);
+        briefIcon.Margin = new Thickness(0, 0, ChatUi.S1, 0);
+        var briefRow = new StackPanel { Orientation = Orientation.Horizontal };
+        briefRow.Children.Add(briefIcon);
+        briefRow.Children.Add(_briefLabel);
+        _briefPill = new Button { Content = briefRow, Margin = new Thickness(0, 0, ChatUi.S1, 0), VerticalAlignment = VerticalAlignment.Center, Padding = new Thickness(ChatUi.S2, ChatUi.S1, ChatUi.S2, ChatUi.S1) };
+        _briefPill.SetResourceReference(StyleProperty, "SpmChatGhost");
+        _briefPill.Click += (_, _) => ToggleModelMenu(brief: true);
+        AutomationProperties.SetItemStatus(_briefPill, "Collapsed");
+        DockPanel.SetDock(_briefPill, Dock.Right);
+        ShowBriefChoice();
+        _allowPill = new Button
+        {
+            Content = ChatUi.Small("Always allow"), Margin = new Thickness(0, 0, ChatUi.S1, 0), VerticalAlignment = VerticalAlignment.Center,
+            Padding = new Thickness(ChatUi.S2, ChatUi.S1, ChatUi.S2, ChatUi.S1),
+            ToolTip = "Ask before changes: Always allow. Nothing asks in ETABS before CSI ProMax changes the model, risky changes included. Click to change.",
+        };
+        _allowPill.SetResourceReference(StyleProperty, "SpmChatGhost");
+        _allowPill.Click += (_, _) => ToggleModelMenu(brief: true);
+        AutomationProperties.SetName(_allowPill, "Ask before changes: Always allow");
+        AutomationProperties.SetHelpText(_allowPill, (string)_allowPill.ToolTip);
+        DockPanel.SetDock(_allowPill, Dock.Right);
+        ShowApprovalLevel();
+        if (sample is null) Bridge.Approvals.LevelChanged += ShowApprovalLevel;
+        _attach.Margin = _prompts.Margin = _view.Margin = new Thickness(0, 0, 2, 0);
+        buttons.Children.Add(_send);
+        buttons.Children.Add(_stop);
+        buttons.Children.Add(_modelPill);
+        buttons.Children.Add(_briefPill);
+        buttons.Children.Add(_allowPill);
+        buttons.Children.Add(_attach);
+        buttons.Children.Add(_prompts);
+        buttons.Children.Add(_view);
+        // Keyboard order follows the reading order (left to right), not the docking order.
+        KeyboardNavigation.SetTabNavigation(buttons, KeyboardNavigationMode.Local);
+        KeyboardNavigation.SetTabIndex(_attach, 1);
+        KeyboardNavigation.SetTabIndex(_prompts, 2);
+        KeyboardNavigation.SetTabIndex(_view, 3);
+        KeyboardNavigation.SetTabIndex(_allowPill, 4);
+        KeyboardNavigation.SetTabIndex(_briefPill, 4);
+        KeyboardNavigation.SetTabIndex(_modelPill, 5);
+        KeyboardNavigation.SetTabIndex(_stop, 6);
+        KeyboardNavigation.SetTabIndex(_send, 7);
+        buttons.Children.Add(new Border()); // fills the middle
+
+        var inside = new StackPanel();
+        _chips.Margin = new Thickness(ChatUi.S3, ChatUi.S3, ChatUi.S3, 0);
+        inside.Children.Add(_chips);
+        inside.Children.Add(_field);
+        inside.Children.Add(buttons);
+        var card = ChatUi.Elevated(inside, out var frame, ChatUi.RadiusComposer);
+        _composerFrame = frame;
+        // A soft glow around the box while the caret is in it, on a layer of its own behind the card (no text on it).
+        _composerGlow = new Border
+        {
+            CornerRadius = new CornerRadius(ChatUi.RadiusComposer + 3), Margin = new Thickness(-3), Opacity = 0.18,
+            IsHitTestVisible = false, Visibility = Visibility.Hidden, SnapsToDevicePixels = true,
+        };
+        _composerGlow.SetResourceReference(Border.BackgroundProperty, Brand.K.Focus);
+        card.Children.Insert(0, _composerGlow);
+        ShowFieldState();
+        frame.MouseEnter += (_, _) => ShowFieldState();
+        frame.MouseLeave += (_, _) => ShowFieldState();
+        _input.IsKeyboardFocusedChanged += (_, _) => ShowFieldState();
+        // A click anywhere on the card that no button took (its empty parts, the space around the box, the attachments'
+        // gaps) puts the caret in the box, at the end of the text, as in a text field.
+        frame.AddHandler(MouseDownEvent, new MouseButtonEventHandler((_, e) =>
+        {
+            if (e.Handled || e.ChangedButton != MouseButton.Left || _input.IsKeyboardFocused) return;
+            FocusInput();
+            e.Handled = true;
+        }));
+        composer.Children.Add(card);
+        // Under the message box: the chat's type (a pill that switches it) and effort (Automatic unless picked here) on
+        // the left, the plan's usage on the right. The model is picked on the pill in the box.
+        var settings = new DockPanel { Margin = new Thickness(0, ChatUi.S2, 0, 0) };
+        DockPanel.SetDock(_usagePill, Dock.Right);
+        _usagePill.Margin = new Thickness(ChatUi.S1, 0, -ChatUi.S1, 0);
+        settings.Children.Add(_usagePill);
+        var pickers = new WrapPanel();
+        pickers.Children.Add(QuestionsPill());
+        pickers.Children.Add(_typePill);
+        pickers.Children.Add(_effortPick);
+        pickers.Children.Add(PhonePill());
+        pickers.Children.Add(AwayPill());
+        pickers.Children.Add(PausePill());
+        // Each a small outlined chip of the same height, so the row reads as one line of settings; the usage, top right,
+        // lines up with the first row when the chips wrap.
+        foreach (Button chip in pickers.Children)
+        {
+            chip.SetResourceReference(StyleProperty, "SpmChatChip");
+            chip.Padding = new Thickness(ChatUi.S2, 0, ChatUi.S2, 0);
+            chip.Margin = new Thickness(0, 0, ChatUi.S1, ChatUi.S1);
+        }
+        _usagePill.VerticalAlignment = VerticalAlignment.Top;
+        _usagePill.MinHeight = ChatStyles.ChipHeight;
+        settings.Children.Add(pickers);
+        composer.Children.Add(settings);
+        composer.Children.Add(_statusRow);
+        composer.Children.Add(_modelMenu);
+        // The conversation above is on the tinted canvas; the message box's area is the page colour, a hairline between.
+        var foot = new Border { Child = composer, BorderThickness = new Thickness(0, 1, 0, 0), SnapsToDevicePixels = true };
+        foot.SetResourceReference(Border.BackgroundProperty, Brand.K.Bg);
+        foot.SetResourceReference(Border.BorderBrushProperty, Brand.K.BorderSubtle);
+        KeyboardNavigation.SetTabIndex(foot, 4);
+        SetDock(foot, Dock.Bottom);
+        Children.Add(foot);
+
+        // The conversation: "Show earlier", the messages, the typing indicator; "Jump to latest" floats over its foot.
+        _earlier = ChatUi.Ghost(ChatUi.GlyphUp, null, "Show earlier messages", "Shows the earlier messages of this conversation.");
+        _earlier.Content = Row(ChatUi.Glyph(ChatUi.GlyphUp, Brand.K.Muted, 10), _earlierText);
+        _earlier.HorizontalAlignment = HorizontalAlignment.Center;
+        _earlier.Margin = new Thickness(0, ChatUi.S1, 0, 0);
+        _earlier.Click += (_, _) => ShowEarlier();
+        var home = new HomeView(UsePrompt, () => Saved, () => App.Dispatcher.InvokeAsync(ETABS.PromptChoices.Read));
+        PromptsChanged += home.SavedChanged;
+        _empty = home;
+        // What Claude is doing: the breathing mark and a line, and until the first words a shimmering placeholder.
+        var dots = ChatUi.Thinking();
+        var working = new DockPanel();
+        DockPanel.SetDock(dots, Dock.Left);
+        working.Children.Add(dots);
+        working.Children.Add(_workingText);
+        var workingStack = new StackPanel();
+        workingStack.Children.Add(working);
+        _shimmer.Visibility = Visibility.Collapsed;
+        workingStack.Children.Add(_shimmer);
+        _working.Child = workingStack;
+        AutomationProperties.SetLiveSetting(_working, AutomationLiveSetting.Polite);
+        var conversation = new StackPanel { Margin = new Thickness(ChatUi.S4, 0, ChatUi.S4, ChatUi.S8) };
+        conversation.Children.Add(_earlier);
+        conversation.Children.Add(_empty);
+        conversation.Children.Add(_messages);
+        conversation.Children.Add(_working);
+        _scroll = new ScrollViewer
+        {
+            Content = conversation, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Focusable = true, IsTabStop = true,
+        };
+        _scroll.SetResourceReference(FocusVisualStyleProperty, "SpmChatFocus");
+        AutomationProperties.SetName(_scroll, "Conversation");
+        AutomationProperties.SetHelpText(_scroll, "Arrow keys and Page Up/Down scroll; End goes to the latest message.");
+        _scroll.ScrollChanged += (_, e) =>
+        {
+            // The list's own glide to the bottom isn't the reader scrolling (the wheel, keys and a click stop it).
+            if (!_gliding || e.ExtentHeightChange != 0 || e.ViewportHeightChange != 0)
+                _follow.Scrolled(_scroll.VerticalOffset, _scroll.ScrollableHeight, e.ExtentHeightChange, e.ViewportHeightChange);
+            if (_follow.Following && (e.ExtentHeightChange != 0 || e.ViewportHeightChange != 0)) ScrollToEnd();
+            else UpdateJump();
+        };
+        // Reading back while Claude writes: stop following at once, before the next streamed text pulls the list down.
+        _scroll.PreviewMouseWheel += (_, e) =>
+        {
+            if (e.Delta > 0 && _scroll.VerticalOffset > 0) _follow.ReaderScrolledUp();
+        };
+        // A click in the list (the scroll bar, say) takes over from the glide.
+        _scroll.PreviewMouseDown += (_, _) => StopGlide();
+        _scroll.PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key is Key.PageUp or Key.Up or Key.Home && _scroll.VerticalOffset > 0 && e.OriginalSource == _scroll) _follow.ReaderScrolledUp();
+        };
+        var jumpIcon = ChatUi.Icon(ChatUi.Paths.ArrowDown);
+        _jump = new Button { Content = Row(jumpIcon, _jumpText), Visibility = Visibility.Collapsed };
+        _jump.SetResourceReference(StyleProperty, "SpmChatFloat");
+        _jump.HorizontalAlignment = HorizontalAlignment.Center;
+        _jump.VerticalAlignment = VerticalAlignment.Bottom;
+        _jump.Margin = new Thickness(0, 0, 0, ChatUi.S3);
+        _jump.ToolTip = "Scrolls to the newest message and follows the answer again (End).";
+        _jump.Click += (_, _) => ScrollToEnd(force: true);
+        _jumpText.Text = "Jump to latest";
+        AutomationProperties.SetName(_jump, "Jump to latest");
+        _center.SetResourceReference(Panel.BackgroundProperty, Brand.K.Canvas);
+        _center.Children.Add(_scroll);
+        // A job's own chat takes the conversation's place; the switcher and the job's bar sit above it.
+        var jobTop = BuildJobView();
+        _center.Children.Add(_jobScroll!);
+        _center.Children.Add(BuildQuestionsView());
+        _center.Children.Add(_jump);
+        // The history drawer slides over the conversation; the dimmed rest closes it when clicked.
+        _scrim.Background = Brand.Brush(Color.FromArgb(0x55, 0, 0, 0));
+        _scrim.MouseDown += (_, _) => CloseDrawer();
+        _center.Children.Add(_scrim);
+        SetDock(jobTop, Dock.Top);
+        KeyboardNavigation.SetTabIndex(jobTop, 3);
+        Children.Add(jobTop);
+        KeyboardNavigation.SetTabIndex(_center, 3);
+        Children.Add(_center);
+
+        // Escape stops Claude from anywhere in the chat (the message box handles it itself first); in a job's view it goes
+        // back to the coordinator.
+        KeyDown += (_, e) =>
+        {
+            if (e.Key != Key.Escape || e.Handled) return;
+            if (_questionsShown)
+            {
+                e.Handled = true;
+                HideQuestions(focus: true);
+                return;
+            }
+            if (_viewJob is not null)
+            {
+                e.Handled = true;
+                ShowCoordinator(focus: true);
+                return;
+            }
+            if (_turn is null) return;
+            e.Handled = true;
+            StopTurn();
+        };
+
+        // Files dropped anywhere on the chat are attached.
+        AllowDrop = true;
+        PreviewDragOver += (_, e) =>
+        {
+            if (!e.Data.GetDataPresent(DataFormats.FileDrop)) return;
+            e.Effects = DragDropEffects.Copy;
+            e.Handled = true;
+        };
+        PreviewDrop += (_, e) =>
+        {
+            if (e.Data.GetData(DataFormats.FileDrop) is not string[] files) return;
+            e.Handled = true;
+            AddFiles(files);
+        };
+
+        _render.Tick += (_, _) => RenderDirty();
+        _poll.Tick += (_, _) => Check(quiet: true);
+        _idle.Tick += (_, _) => IdleCheck();
+        _idle.Tick += (_, _) => ShowUsage(); // a limit's reset time passing
+        _idle.Tick += (_, _) => StallCheckAll(); // an answer stuck mid-stream, in any chat
+        _saveSoon.Tick += (_, _) =>
+        {
+            _saveSoon.Stop();
+            if (!_stopped)
+            {
+                Save();
+                SaveAway();
+            }
+        };
+        if (sample is not null) _setup = Setup.Ready;
+        else _idle.Start();
+
+        _afterUpdate = handover is not null;
+        ShowConversation();
+        _afterUpdate = false;
+        ShowSetup();
+        ShowStatus();
+        if (sample is not null) return;
+        if (handover is not null)
+        {
+            // The chats that worked in the background before the update: there again, their jobs as they were.
+            try { ReopenAway(ChatHandover.OpenAway(handover)); }
+            catch (Exception) { /* those chats open from the history, their jobs paused */ }
+            _input.Text = handover.Draft;
+            _input.CaretIndex = _input.Text.Length;
+            AddFiles(handover.Attachments.Where(File.Exists));
+        }
+        Check(quiet: false);
+        StartRoutineClock();
+        Task.Run(CleanAttachments);
+    }
+
+    /// <summary>Pasted pictures and captured views are kept two weeks (a resumed conversation may refer to them).</summary>
+    private static void CleanAttachments()
+    {
+        try
+        {
+            if (!Directory.Exists(ClaudeCli.AttachmentsFolder)) return;
+            foreach (var file in Directory.GetFiles(ClaudeCli.AttachmentsFolder))
+                if (File.GetLastWriteTimeUtc(file) < DateTime.UtcNow.AddDays(-14)) File.Delete(file);
+            // A large PDF's parts (PdfFiles.ForChat), two weeks after it was last attached.
+            foreach (var folder in Directory.GetDirectories(ClaudeCli.AttachmentsFolder))
+                if (Directory.GetLastWriteTimeUtc(folder) < DateTime.UtcNow.AddDays(-14)) Directory.Delete(folder, true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+    }
+
+    private const string NoModelKey = "(no model)";
+
+    private static string ConversationKey => _modelKey.Length > 0 ? _modelKey : NoModelKey;
+
+    private static string ConversationTitle => _modelTitle.Length > 0 ? _modelTitle : "no model open";
+
+    // ---- The model pill and its menu -----------------------------------------------------------------------------
+
+    /// <summary>The menu over the model pill: one row per model with its hint, a check on the chosen one.</summary>
+    private void BuildModelMenu()
+    {
+        var card = ChatUi.Elevated(_modelList, out _, ChatUi.Radius);
+        card.Margin = new Thickness(ChatUi.S3); // room for the shadow inside the transparent popup
+        card.MinWidth = 220;
+        card.MaxWidth = 300;
+        _modelMenu.Child = card;
+        _modelMenu.PlacementTarget = _modelPill;
+        // Above the pill, right edges aligned (below it when there is no room above).
+        _modelMenu.CustomPopupPlacementCallback = (popup, target, _) =>
+        [
+            new CustomPopupPlacement(new Point(target.Width - popup.Width + ChatUi.S3, -popup.Height + ChatUi.S3 - 2), PopupPrimaryAxis.Horizontal),
+            new CustomPopupPlacement(new Point(target.Width - popup.Width + ChatUi.S3, target.Height - ChatUi.S3 + 2), PopupPrimaryAxis.Horizontal),
+        ];
+        KeyboardNavigation.SetTabNavigation(_modelList, KeyboardNavigationMode.Cycle);
+        KeyboardNavigation.SetDirectionalNavigation(_modelList, KeyboardNavigationMode.Cycle);
+        AutomationProperties.SetName(_modelList, "Model");
+        _modelList.PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key != Key.Escape) return;
+            e.Handled = true;
+            CloseModelMenu(focusPill: true);
+        };
+        _modelMenu.Closed += (_, _) =>
+        {
+            _modelMenuClosed = DateTime.UtcNow;
+            AutomationProperties.SetItemStatus(_modelPill, "Collapsed");
+            AutomationProperties.SetItemStatus(_briefPill, "Collapsed");
+            ShowBriefChoice();
+        };
+    }
+
+    private void ToggleModelMenu(bool brief = false)
+    {
+        if (_modelMenu.IsOpen)
+        {
+            CloseModelMenu(focusPill: true);
+            return;
+        }
+        // A click on the pill while the menu is open first closes it (it closes on any click outside): don't reopen it.
+        if (DateTime.UtcNow - _modelMenuClosed < TimeSpan.FromMilliseconds(250)) return;
+        _modelList.Children.Clear();
+        var heading = Brand.Text("Model for this chat", Brand.K.Muted, ChatUi.SmallSize, bold: true);
+        heading.Margin = new Thickness(10, 6, 10, 4);
+        _modelList.Children.Add(heading);
+        Button? chosen = null;
+        var current = ChatAuto.ParseModel(_conv.Model);
+        foreach (var choice in ModelChoices())
+        {
+            var selected = choice.Id == current;
+            var text = new StackPanel();
+            text.Children.Add(Brand.Text(choice.Label, Brand.K.Text, ChatUi.BodySize, bold: selected));
+            var line = Brand.Text(choice.Hint, Brand.K.Muted, ChatUi.SmallSize);
+            line.Margin = new Thickness(0, 1, 0, 0);
+            text.Children.Add(line);
+            var row = new DockPanel();
+            var check = ChatUi.Glyph(ChatUi.GlyphCheck, Brand.K.Accent, 12);
+            check.Margin = new Thickness(ChatUi.S2, 0, 0, 0);
+            check.Visibility = selected ? Visibility.Visible : Visibility.Hidden;
+            DockPanel.SetDock(check, Dock.Right);
+            row.Children.Add(check);
+            row.Children.Add(text);
+            var item = new Button { Content = row, HorizontalContentAlignment = HorizontalAlignment.Stretch };
+            item.SetResourceReference(StyleProperty, "SpmChatMenuItem");
+            AutomationProperties.SetName(item, choice.Label + (selected ? ", chosen" : ""));
+            AutomationProperties.SetHelpText(item, choice.Hint);
+            var id = choice.Id;
+            item.Click += (_, _) =>
+            {
+                CloseModelMenu(focusPill: true);
+                PickModel(id);
+            };
+            _modelList.Children.Add(item);
+            if (selected) chosen = item;
+        }
+        AddBriefMenu();
+        AddApprovalMenu();
+        _modelMenu.IsOpen = true;
+        AutomationProperties.SetItemStatus(_modelPill, "Expanded");
+        AutomationProperties.SetItemStatus(_briefPill, brief ? "Expanded" : "Collapsed");
+        // From the brief pill, the keyboard starts on the chosen brief setting.
+        var briefChosen = brief ? _modelList.Children.OfType<Button>().FirstOrDefault(b =>
+            AutomationProperties.GetName(b) is { } n && n.StartsWith("Brief before running:", StringComparison.Ordinal) && n.EndsWith(", chosen", StringComparison.Ordinal)) : null;
+        var first = briefChosen ?? chosen ?? _modelList.Children.OfType<Button>().FirstOrDefault();
+        Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(() => first?.Focus()));
+    }
+
+    private void CloseModelMenu(bool focusPill)
+    {
+        _modelMenu.IsOpen = false;
+        if (focusPill) _modelPill.Focus();
+    }
+
+    private void PickModel(string id) => SetChatModel(id);
+
+    /// <summary>Shows the chat's model on the pill (Auto, with what it picked last), with its hint as the tooltip.</summary>
+    private void ShowModelChoice()
+    {
+        if (Hidden) return;
+        var chosen = ChatAuto.ParseModel(_conv.Model);
+        var auto = ChatAuto.IsAuto(chosen);
+        var label = auto ? "Auto" + (_lastPick is { } p ? " · " + ChatModels.Find(p.Model).Label : "") : ChatModels.Find(chosen).Label;
+        _modelLabel.Text = label;
+        _modelPill.ToolTip = auto && IsCoordinator
+            ? "Model: Automatic. The coordinator runs light on one model (Settings > Chat, Coordinating) and each job gets Haiku, Sonnet or Opus by its kind of work. Click to pick one for this chat."
+            : auto
+            ? "Model: Automatic. Each request gets Haiku, Sonnet or Opus by the kind of work (Settings > Chat). Click to pick one for this chat."
+            : $"Model: {ChatModels.Find(chosen).Label} for this chat and its new jobs, until you set it back to Automatic. Click to change.";
+        AutomationProperties.SetName(_modelPill, "Model: " + (auto ? "Automatic" : ChatModels.Find(chosen).Label));
+        AutomationProperties.SetHelpText(_modelPill, _modelPill.ToolTip as string ?? "");
+        ShowPickers();
+    }
+
+    /// <summary>Shows the brief setting on its pill: Brief: Always, Changes or Off.</summary>
+    private void ShowBriefChoice()
+    {
+        var label = _briefMode switch { BriefMode.Always => "Always", BriefMode.Off => "Off", _ => "Changes" };
+        _briefLabel.Text = "Brief: " + label;
+        _briefLabel.Visibility = _narrow ? Visibility.Collapsed : Visibility.Visible; // a narrow pane: the icon, with the tooltip
+        _briefPill.ToolTip = "Brief before running: " + PromptBriefs.Label(_briefMode) + ". " + PromptBriefs.Hint(_briefMode) + ". Click to change.";
+        AutomationProperties.SetName(_briefPill, "Brief before running: " + PromptBriefs.Label(_briefMode));
+        AutomationProperties.SetHelpText(_briefPill, _briefPill.ToolTip as string ?? "");
+    }
+
+    /// <summary>Shows or hides the "Always allow" reminder by the message box.</summary>
+    private void ShowApprovalLevel()
+    {
+        Tools.ApprovalLevel level;
+        try { level = Bridge.Approvals.Level; }
+        catch (Exception) { level = Tools.ApprovalLevel.RiskyOnly; }
+        _allowPill.Visibility = level == Tools.ApprovalLevel.AlwaysAllow ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>True when ETABS may ask before this step runs: a step that can change the model, unless the level is Always allow.</summary>
+    private static bool MayAsk(string tool)
+    {
+        if (StepNames.ReadOnly(tool)) return false;
+        try { return Bridge.Approvals.Level != Tools.ApprovalLevel.AlwaysAllow; }
+        catch (Exception) { return true; }
+    }
+
+    private static StackPanel Row(params UIElement[] children)
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal };
+        foreach (var child in children)
+        {
+            if (row.Children.Count > 0 && child is FrameworkElement f) f.Margin = new Thickness(6, 0, 0, 0);
+            row.Children.Add(child);
+        }
+        return row;
+    }
+
+    // ---- Setup: find Claude Code and its sign-in -------------------------------------------------------------------
+
+    private void Check(bool quiet)
+    {
+        if (_checking || _stopped) return;
+        _checking = true;
+        if (!quiet && _setup != Setup.Ready)
+        {
+            _setup = Setup.Checking;
+            ShowSetup();
+        }
+        Task.Run(() =>
+        {
+            var install = ClaudeCli.Find();
+            var signIn = install is null ? (ClaudeCli.SignIn.Unknown, "") : ClaudeCli.CheckSignIn(install);
+            // "auth status" says signed in while a saved sign-in that expired is still on disk: what the chat saw counts.
+            return (install, SignInCheck.Real(signIn.Item1));
+        }).ContinueWith(t => Dispatcher.BeginInvoke(new Action(() => Checked(t))), TaskScheduler.Default);
+    }
+
+    private void Checked(Task<(ClaudeCli.Install? install, ClaudeCli.SignIn signIn)> t)
+    {
+        {
+            _checking = false;
+            if (t.IsFaulted)
+            {
+                _setup = Setup.Failed;
+                _setupDetail = t.Exception?.GetBaseException().Message ?? "";
+            }
+            else
+            {
+                var (install, signIn) = t.Result;
+                _install = install;
+                var waiting = _setup is Setup.Installing or Setup.SigningIn;
+                if (install is null) _setup = _setup == Setup.Installing ? Setup.Installing : Setup.Missing;
+                else if (signIn == ClaudeCli.SignIn.SignedOut) _setup = _setup == Setup.SigningIn ? Setup.SigningIn : Setup.SignedOut;
+                else
+                {
+                    var was = _setup;
+                    if (_setup != Setup.Ready) RememberLeftOver();
+                    _setup = Setup.Ready;
+                    // Jobs sent on before the chat was ready (carried on after an update while it checked): they start now.
+                    if (was != Setup.Ready) foreach (var s in Sessions.ToList()) In(s, JobsChanged);
+                    if (waiting) Note("CSI ProMax is ready. Ask your first question below.");
+                    // An Autopilot paused because the sign-in stopped working carries on as soon as it works again.
+                    if (was != Setup.Ready && Run is { State: AutopilotRun.Paused, AccessLost: true }) AutopilotResume("Signed in again.");
+                }
+                // Give up waiting after a quarter of an hour; the card then offers to try again.
+                if (_setup is Setup.Installing or Setup.SigningIn && DateTime.UtcNow - _waitingSince > TimeSpan.FromMinutes(15))
+                    _setup = _setup == Setup.Installing ? Setup.Missing : Setup.SignedOut;
+            }
+            if (_setup is Setup.Installing or Setup.SigningIn) _poll.Start();
+            else _poll.Stop();
+            ShowSetup();
+            ShowStatus();
+            if (_refreshAsked)
+            {
+                _refreshAsked = false;
+                if (_setup == Setup.Ready && _turn is null && !_stopped) Status("CSI ProMax is ready and signed in.", spin: false);
+            }
+        }
+    }
+
+    private void ShowSetup()
+    {
+        ShowUsage(); // the line under the box says when the sign-in doesn't work
+        // Check again is in the header only while the setup needs it (the card has its own too).
+        _refresh.Visibility = _setup == Setup.Ready ? Visibility.Collapsed : Visibility.Visible;
+        if (_setup == Setup.Ready)
+        {
+            _setupCard.Visibility = Visibility.Collapsed;
+            _setupCard.Child = null;
+            return;
+        }
+        var panel = new StackPanel();
+        void Title(string text) => panel.Children.Add(Brand.Text(text, Brand.K.Text, ChatUi.TitleSize, bold: true));
+        void Para(string text, string key = Brand.K.Text)
+        {
+            var t = Brand.Text(text, key);
+            t.Margin = new Thickness(0, 4, 0, 0);
+            panel.Children.Add(t);
+        }
+        var row = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
+        Button Add(string text, Brand.Weight weight, Action click)
+        {
+            var b = new Button { Content = text };
+            b.SetResourceReference(StyleProperty, weight == Brand.Weight.Primary ? "SpmChatPrimary" : "SpmChatPill");
+            b.Margin = new Thickness(0, 0, ChatUi.S2, ChatUi.S1);
+            b.Click += (_, _) => click();
+            row.Children.Add(b);
+            return b;
+        }
+        void Waiting(string text)
+        {
+            var line = new DockPanel { Margin = new Thickness(0, 4, 0, 0) };
+            var spin = Brand.Spinner();
+            spin.SetResourceReference(TextElement.ForegroundProperty, Brand.K.Text);
+            DockPanel.SetDock(spin, Dock.Left);
+            line.Children.Add(spin);
+            line.Children.Add(Brand.Text(text));
+            panel.Children.Add(line);
+        }
+
+        switch (_setup)
+        {
+            case Setup.Checking:
+                Waiting("Checking the chat setup on this PC…");
+                break;
+            case Setup.Missing:
+                Title("Install Claude Code to chat here");
+                Para("The chat runs Claude Code, Anthropic's app, signed in with your Claude account, so it uses your Claude plan: " +
+                     "no API key and no extra cost. It isn't installed on this PC yet.");
+                Para("Install opens a PowerShell window that runs Anthropic's official installer:");
+                var cmd = Brand.Text(ClaudeCli.InstallCommand, Brand.K.Text, ChatUi.SmallSize);
+                cmd.FontFamily = new FontFamily("Consolas, Courier New");
+                cmd.Margin = new Thickness(0, 2, 0, 0);
+                panel.Children.Add(cmd);
+                Para("It takes a minute or two and doesn't need admin rights. This pane notices by itself when it's done.", Brand.K.Muted);
+                Add("Install Claude Code", Brand.Weight.Primary, () => Launch(Setup.Installing));
+                Add("Check again", Brand.Weight.Secondary, () => Check(quiet: false));
+                break;
+            case Setup.Installing when _installBlocked is not null:
+                // Some company PCs don't let ETABS start PowerShell; the user's own PowerShell window usually still works.
+                Title("Install Claude Code from your own PowerShell");
+                Para("This PC didn't let CSI ProMax open PowerShell (" + _installBlocked + "). Open PowerShell yourself " +
+                     "(Start menu, type PowerShell), paste this line and press Enter:");
+                var line = Brand.Text(ClaudeCli.InstallCommand, Brand.K.Text, ChatUi.SmallSize);
+                line.FontFamily = new FontFamily("Consolas, Courier New");
+                line.Margin = new Thickness(0, 2, 0, 0);
+                panel.Children.Add(line);
+                Waiting("Waiting for Claude Code to be installed…");
+                Para("If PowerShell says it can't run it, ask IT to install Claude Code for you.", Brand.K.Muted);
+                row.Children.Add(ChatUi.CopyButton(() => ClaudeCli.InstallCommand, "the install line", "Copy the line"));
+                Add("Check again", Brand.Weight.Secondary, () => Check(quiet: false));
+                break;
+            case Setup.Installing:
+                Title("Installing Claude Code");
+                Waiting("Waiting for the installer in the PowerShell window to finish…");
+                Para("If the window shows an error, press Install again, or ask IT to install Claude Code for you.", Brand.K.Muted);
+                Add("Check again", Brand.Weight.Secondary, () => Check(quiet: false));
+                Add("Install again", Brand.Weight.Secondary, () => Launch(Setup.Installing));
+                break;
+            case Setup.SignedOut:
+                var expired = SignInHealth.Broken;
+                Title(expired ? "Sign-in expired" : "Sign in to your Claude account");
+                Para(expired
+                    ? "CSI ProMax is signed out: your sign-in expired. Sign in again opens your browser; sign in with the account that has your plan."
+                    : "Sign in opens your browser: sign in with the Claude account that has your plan. The chat carries on by itself.");
+                if (SignInFlow.Now == SignInFlow.State.Failed && SignInFlow.Problem.Length > 0)
+                    Para("The last sign-in didn't finish: " + SignInFlow.Problem, Brand.K.DangerText);
+                Add(expired ? "Sign in again" : "Sign in", Brand.Weight.Primary, () => Launch(Setup.SigningIn));
+                Add("Check again", Brand.Weight.Secondary, () =>
+                {
+                    SignInHealth.Clear(); // the user says try anyway: the next message shows whether it works
+                    Check(quiet: false);
+                });
+                break;
+            case Setup.SigningIn:
+                Title("Signing in");
+                Waiting("Finish signing in in your browser…");
+                Para("Browser didn't open? Press Open the page, sign in, then paste the code it shows here.", Brand.K.Muted);
+                var codeBox = new TextBox { MinWidth = 180, Margin = new Thickness(0, 0, ChatUi.S2, ChatUi.S1), VerticalContentAlignment = VerticalAlignment.Center };
+                AutomationProperties.SetName(codeBox, "Sign-in code");
+                Add("Open the page", Brand.Weight.Secondary, () =>
+                {
+                    if (SignInFlow.OpenPage() || _install is not { } cli) return;
+                    // No page address came yet: the sign-in window as before (it shows the address and takes the code).
+                    SignInFlow.Cancel();
+                    try { ClaudeCli.StartSignIn(cli); }
+                    catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) { Status("The sign-in page couldn't be opened: " + ex.Message, spin: false); }
+                });
+                row.Children.Add(codeBox);
+                Add("Send code", Brand.Weight.Secondary, () =>
+                {
+                    if (!SignInFlow.SendCode(codeBox.Text)) Status("Press Sign in again first, then paste the code.", spin: false);
+                    else Status("Code sent; finishing the sign-in…", spin: true);
+                });
+                Add("Cancel", Brand.Weight.Secondary, () =>
+                {
+                    SignInFlow.Cancel();
+                    _setup = Setup.SignedOut;
+                    _poll.Stop();
+                    ShowSetup();
+                    ShowStatus();
+                });
+                break;
+            case Setup.Failed:
+                Title("The chat setup couldn't be checked");
+                Para(_setupDetail, Brand.K.DangerText);
+                Para("Press Check again. If it keeps failing, restart ETABS.", Brand.K.Muted);
+                Add("Check again", Brand.Weight.Secondary, () => Check(quiet: false));
+                break;
+        }
+        panel.Children.Add(row);
+        _setupCard.Child = panel;
+        _setupCard.Padding = new Thickness(ChatUi.S4, ChatUi.S3, ChatUi.S4, ChatUi.S2);
+        _setupCard.BorderThickness = new Thickness(1);
+        _setupCard.CornerRadius = new CornerRadius(ChatUi.Radius);
+        _setupCard.SetResourceReference(Border.BackgroundProperty, Brand.K.NoticeBg);
+        _setupCard.SetResourceReference(Border.BorderBrushProperty, Brand.K.NoticeBorder);
+        AutomationProperties.SetLiveSetting(_setupCard, AutomationLiveSetting.Polite);
+        _setupCard.Visibility = Visibility.Visible;
+    }
+
+    private void Launch(Setup next)
+    {
+        try
+        {
+            if (next == Setup.Installing) ClaudeCli.StartInstall();
+            else if (_install is { } install) StartSignIn(install);
+            else { Check(quiet: false); return; }
+        }
+        catch (Exception ex) when (next == Setup.Installing && ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            // Blocked by a company policy, most often: ask for the line to be pasted into the user's own PowerShell.
+            _installBlocked = ex.Message.TrimEnd('.');
+            _setup = Setup.Installing;
+            _waitingSince = DateTime.UtcNow;
+            _poll.Start();
+            ShowSetup();
+            ShowStatus();
+            return;
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            _setup = Setup.Failed;
+            _setupDetail = (next == Setup.Installing ? "PowerShell could not be opened: " : "The sign-in window could not be opened: ") + ex.Message;
+            ShowSetup();
+            return;
+        }
+        _setup = next;
+        _waitingSince = DateTime.UtcNow;
+        _poll.Start();
+        ShowSetup();
+        ShowStatus();
+    }
+
+    // ---- Conversation view ----------------------------------------------------------------------------------------
+
+    private void ShowTitle()
+    {
+        if (Hidden) return;
+        _chatName.Text = ChatHistory.NameFor(_conv) is { Length: > 0 } name ? name : ChatHistory.Untitled;
+        _chatName.ToolTip = _chatName.Text;
+        // A chat that also works on other models (another ETABS window) names them all: "Tower-Model + Tower-Docs".
+        _conv.Models ??= [];
+        var models = string.Join(" + ", new[] { _conv.Title }.Concat(_conv.Models));
+        _modelLine.Text = (_conv.Pinned ? "\u2605 Pinned · " : "") + models;
+        _modelLine.ToolTip = "Each ETABS model keeps its own chats, also after ETABS restarts; open the others from the menu at the top left. " + _conv.Key;
+        AutomationProperties.SetName(_chatName, "Chat: " + _chatName.Text);
+        AutomationProperties.SetName(_modelLine, (_conv.Models.Count > 0 ? "ETABS models: " : "ETABS model: ") + models);
+        ShowType();
+        ShowModelChoice();
+    }
+
+    private void ShowConversation()
+    {
+        ChatJobs.Shown = JobBoard.ChatKey(_conv.Id);
+        _pendingType = null;
+        ShowCoordinator(focus: false);
+        _lastPick = null;
+        AttachJobs();
+        ShowTitle();
+        // Another chat: the saved prompts and the model menu open only on request, so they start closed.
+        if (_promptPanel.Visibility == Visibility.Visible) TogglePrompts();
+        _modelMenu.IsOpen = false;
+        _messages.Children.Clear();
+        _texts.Clear();
+        _tools.Clear();
+        _views.Clear();
+        _rows.Clear();
+        _dirty.Clear();
+        _briefCards.Clear();
+        _acks.Clear();
+        // Long conversations draw their latest page; "Show earlier" adds a page at a time.
+        _firstShown = History.FirstShown(_conv.Items.Count);
+        for (var k = _firstShown; k < _conv.Items.Count; k++) _messages.Children.Add(Build(k));
+        ShowEarlierButton();
+        _empty.Visibility = _conv.Items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        ShowSwitcher();
+        ShowAutopilot();
+        ScrollToEnd(force: true, instant: true);
+    }
+
+    private void Add(ChatItem item)
+    {
+        if (item.Time == default) item.Time = DateTime.UtcNow;
+        if (Hidden)
+        {
+            // A chat working in the background: kept and saved, drawn when it is opened again.
+            _conv.Items.Add(item);
+            SaveSoon();
+            return;
+        }
+        _empty.Visibility = Visibility.Collapsed;
+        _conv.Items.Add(item);
+        SaveSoon();
+        var element = Build(_conv.Items.Count - 1);
+        _messages.Children.Add(element);
+        // Eases in and settles at full opacity with no transform; your own message rises a little further, from the box.
+        ChatUi.Arrive(element, item.Kind == "user" && ChatUi.Lively ? ChatUi.S6 : ChatUi.S2);
+        if (_shimmerShown && item.Kind is "assistant" or "tool") ChatUi.Reveal(_shimmer, _shimmerShown = false);
+        if (item.Kind == "user") _follow.Jump(); // sending shows the answer as it comes
+        else _follow.Added();
+        UpdateJump();
+        ScrollToEnd();
+    }
+
+    /// <summary>The element for one conversation item; Claude's name and time head each run of Claude's messages and steps.</summary>
+    private UIElement Build(int index)
+    {
+        var item = _conv.Items[index];
+        var first = index == 0 || _conv.Items[index - 1].Kind is not ("assistant" or "tool" or "file");
+        return item.Kind switch
+        {
+            "user" => UserMessage(item),
+            // An answer that was only the coordinator's "No split." (saved before 0.35.85) isn't drawn.
+            "assistant" when item.Text.Length > 0 && FreeWorkers.IsNothing(item.Text) => new Border { Visibility = Visibility.Collapsed },
+            "assistant" => AssistantMessage(item, first),
+            "tool" => ToolCard(item, first),
+            "file" => FileCard(item),
+            "error" => ErrorBox(item),
+            "handoff" => HandoffCard.Build(item, Tools.Handoff.Find(item.Name)),
+            "brief" => BriefCard(item),
+            "job" => JobCard(item),
+            "pjob" => ParallelJobCardFor(item),
+            "note" when item.Name.StartsWith("ack:", StringComparison.Ordinal) => AckLine(item),
+            "note" when item.Name.StartsWith(AdvicePrefix, StringComparison.Ordinal) => AdviceLine(item),
+            "note" when item.Name == AutopilotApprove => AutopilotApproveLine(item),
+            _ => NoteLine(item),
+        };
+    }
+
+    /// <summary>A step only the user can do, as a card, while a turn runs and the pane is on screen; false: the window shows it.</summary>
+    private bool ShowHandoff(Tools.HandoffRequest request)
+    {
+        if (_turn is null || !IsVisible) return false;
+        Add(HandoffCard.Item(request));
+        ShowStatus("Over to you: do the step in ETABS, then press Continue on the card.");
+        return true;
+    }
+
+    private static string When(ChatItem item)
+    {
+        var stamp = StreamRender.Stamp(item.Time == default ? default : item.Time.ToLocalTime(), DateTime.Now);
+        return stamp.Length > 0 ? " · " + stamp : "";
+    }
+
+    private static string WhenLong(ChatItem item) =>
+        item.Time == default ? "" : item.Time.ToLocalTime().ToString("dddd d MMMM yyyy, HH:mm", CultureInfo.InvariantCulture);
+
+    private UIElement ClaudeHeader(ChatItem item)
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, ChatUi.S2) };
+        var mark = ChatUi.Mark(20);
+        mark.Margin = new Thickness(0, 0, ChatUi.S2, 0);
+        mark.VerticalAlignment = VerticalAlignment.Center;
+        AutomationProperties.SetName(mark, "");
+        row.Children.Add(mark);
+        // A Simple chat is a talk with one worker: the answers carry that worker's name.
+        row.Children.Add(ChatUi.Small(DirectWorker is { } worker ? worker + " · CSI ProMax" : "CSI ProMax", Brand.K.Text, bold: true));
+        var time = ChatUi.Small(When(item));
+        time.ToolTip = WhenLong(item);
+        row.Children.Add(time);
+        return row;
+    }
+
+    private UIElement UserMessage(ChatItem item)
+    {
+        var panel = new StackPanel { HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(ChatUi.S8 + ChatUi.S2, ChatUi.S6, 0, ChatUi.S1) };
+        var head = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 0, 0, ChatUi.S1) };
+        var more = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right, Visibility = Visibility.Collapsed };
+        if (item.Text.Length > 0)
+        {
+            // Copy and ⋯ show when the mouse is over the message or the keyboard is on them, as on the answers: the
+            // line above a message then reads as just who and when.
+            var copy = ChatUi.CopyButton(() => item.Text, "your message", null);
+            var tools = new StackPanel { Orientation = Orientation.Horizontal, Opacity = 0 };
+            tools.Children.Add(copy);
+            tools.Children.Add(MoreButton(item, more));
+            void ToolsShown() => tools.Opacity = panel.IsMouseOver || tools.IsKeyboardFocusWithin || more.Visibility == Visibility.Visible ? 1 : 0;
+            panel.MouseEnter += (_, _) => ToolsShown();
+            panel.MouseLeave += (_, _) => ToolsShown();
+            tools.IsKeyboardFocusWithinChanged += (_, _) => ToolsShown();
+            more.IsVisibleChanged += (_, _) => ToolsShown();
+            head.Children.Add(tools);
+        }
+        // In a job's view, what the coordinator (the main chat) sent the job is marked as such.
+        var fromCoordinator = item.State == JobBoard.FromCoordinator;
+        var fromTeam = item.State.StartsWith(JobBoard.FromTeam, StringComparison.Ordinal) ? item.State.Substring(JobBoard.FromTeam.Length) : null;
+        var who = ChatUi.Small((fromCoordinator ? "From the coordinator" : fromTeam is not null ? "From job " + fromTeam : "You") + When(item));
+        who.ToolTip = WhenLong(item);
+        who.Margin = new Thickness(ChatUi.S1, 0, 0, 0);
+        head.Children.Add(who);
+        panel.Children.Add(head);
+        panel.Children.Add(more);
+
+        // Your messages: a rounded bubble in the accent colour with white text, tail corner bottom right, so who said
+        // what shows at a glance; what the coordinator sent a job keeps the quiet raised bubble. Attachments sit under
+        // the bubble, on the page. The answers sit on the page under the chat's mark and name.
+        var solid = !fromCoordinator;
+        var body = new StackPanel();
+        var below = new StackPanel { HorizontalAlignment = HorizontalAlignment.Right };
+        if (item.Text.Length > 0)
+        {
+            var text = ChatUi.Selectable(item.Text, "Your message");
+            if (solid)
+            {
+                text.SetResourceReference(Control.ForegroundProperty, Brand.K.OnAccent);
+                text.SetResourceReference(System.Windows.Controls.Primitives.TextBoxBase.SelectionBrushProperty, Brand.K.OnAccent);
+                text.SelectionOpacity = 0.3;
+            }
+            body.Children.Add(text);
+        }
+        if (item.Files.Count > 0)
+        {
+            var files = new WrapPanel { Margin = new Thickness(0, item.Text.Length > 0 ? ChatUi.S1 : 0, 0, 0), HorizontalAlignment = HorizontalAlignment.Right };
+            foreach (var path in item.Files)
+            {
+                FrameworkElement shown;
+                if (ImageType(path) is not null) shown = ChatUi.Thumbnail(path, 72);
+                else
+                {
+                    var chip = new StackPanel { Orientation = Orientation.Horizontal };
+                    chip.Children.Add(ChatUi.Glyph(ChatUi.GlyphFile, Brand.K.Muted));
+                    chip.Children.Add(ChatUi.Small(" " + System.IO.Path.GetFileName(path), Brand.K.Text));
+                    var open = new Button { Content = chip, ToolTip = path };
+                    open.SetResourceReference(StyleProperty, "SpmChatGhost");
+                    AutomationProperties.SetName(open, "Attached file " + System.IO.Path.GetFileName(path) + ", open it");
+                    var target = path;
+                    open.Click += (_, _) => ChatUi.Open(target);
+                    shown = open;
+                }
+                shown.Margin = new Thickness(ChatUi.S1, 0, 0, ChatUi.S1);
+                files.Children.Add(shown);
+            }
+            below.Children.Add(files);
+        }
+        else if (item.Name.Length > 0)
+        {
+            var files = Brand.Text("Attached: " + item.Name, Brand.K.Muted, ChatUi.SmallSize);
+            files.Margin = new Thickness(0, 2, 0, 0);
+            files.HorizontalAlignment = HorizontalAlignment.Right;
+            below.Children.Add(files);
+        }
+        if (body.Children.Count > 0)
+        {
+            var bubble = ChatUi.Opaque(new Border
+            {
+                Child = body, Padding = new Thickness(ChatUi.S3 + 2, ChatUi.S2, ChatUi.S3 + 2, ChatUi.S2 + 1), CornerRadius = new CornerRadius(ChatUi.Radius + 2, ChatUi.Radius + 2, ChatUi.S1, ChatUi.Radius + 2),
+                HorizontalAlignment = HorizontalAlignment.Right, SnapsToDevicePixels = true,
+            });
+            bubble.SetResourceReference(Border.BackgroundProperty, solid ? Brand.K.Accent : Brand.K.Raised);
+            panel.Children.Add(bubble);
+        }
+        if (below.Children.Count > 0) panel.Children.Add(below);
+        AutomationProperties.SetName(panel, (fromCoordinator ? "From the coordinator" : "You") + When(item) + ": " + item.Text + (item.Name.Length > 0 ? ". Attached: " + item.Name : ""));
+        return panel;
+    }
+
+    private UIElement AssistantMessage(ChatItem item, bool header)
+    {
+        var panel = new StackPanel { Margin = new Thickness(0, header ? ChatUi.S6 : ChatUi.S2, 0, 0) };
+        if (header) panel.Children.Add(ClaudeHeader(item));
+        var view = new MarkdownView();
+        view.SetMarkdown(FreeWorkers.Strip(item.Text)); // never the coordinator's "No split." (chats saved before 0.35.85 have it)
+        _views[item] = view;
+        // Copy sits over the top right corner, shown on hover or when it has keyboard focus, so it takes no room.
+        var grid = new Grid();
+        grid.Children.Add(view);
+        var copy = ChatUi.CopyButton(() => FreeWorkers.Strip(item.Text), "the answer", null);
+        copy.HorizontalAlignment = HorizontalAlignment.Right;
+        copy.VerticalAlignment = VerticalAlignment.Top;
+        copy.Margin = new Thickness(0, -ChatUi.S1, 0, 0);
+        copy.SetResourceReference(BackgroundProperty, Brand.K.Canvas);
+        var more = new WrapPanel { Visibility = Visibility.Collapsed };
+        var moreButton = MoreButton(item, more);
+        var tools = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = copy.Margin };
+        copy.Margin = new Thickness(0);
+        tools.SetResourceReference(BackgroundProperty, Brand.K.Canvas);
+        tools.Children.Add(copy);
+        tools.Children.Add(moreButton);
+        tools.Opacity = 0;
+        void ToolsShown() => tools.Opacity = grid.IsMouseOver || tools.IsKeyboardFocusWithin || more.Visibility == Visibility.Visible ? 1 : 0;
+        grid.MouseEnter += (_, _) => ToolsShown();
+        grid.MouseLeave += (_, _) => ToolsShown();
+        tools.IsKeyboardFocusWithinChanged += (_, _) => ToolsShown();
+        grid.Children.Add(tools);
+        panel.Children.Add(grid);
+        panel.Children.Add(more);
+        return panel;
+    }
+
+    /// <summary>A message's ⋯: shows (or hides) its extra actions under it: Save prompt.</summary>
+    private Button MoreButton(ChatItem item, WrapPanel more)
+    {
+        var button = ChatUi.Ghost(ChatUi.GlyphMore, null, "More actions for this message", "More: save it as a prompt");
+        AutomationProperties.SetItemStatus(button, "Collapsed");
+        var save = ChatUi.Ghost(ChatUi.GlyphPrompts, "Save prompt", "Save this message as a prompt",
+            "Keeps this text in your saved prompts, to use again from the bookmark button by the message box or the home screen.");
+        save.Click += (_, _) =>
+        {
+            SavePrompt(item.Text);
+            more.Visibility = Visibility.Collapsed;
+            AutomationProperties.SetItemStatus(button, "Collapsed");
+            button.Focus();
+        };
+        more.Children.Add(save);
+        button.Click += (_, _) =>
+        {
+            var open = more.Visibility != Visibility.Visible;
+            more.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+            AutomationProperties.SetItemStatus(button, open ? "Expanded" : "Collapsed");
+            if (open) save.Focus();
+        };
+        return button;
+    }
+
+    // ---- Saved prompts --------------------------------------------------------------------------------------------
+
+    private List<SavedPrompt> Saved => _saved ??= SavedPrompts.Load(SavedPrompts.DefaultFile);
+
+    private void SavePrompt(string text)
+    {
+        if (text.Trim().Length == 0) return;
+        try
+        {
+            var (list, saved) = SavedPrompts.Update(SavedPrompts.DefaultFile, l => SavedPrompts.Add(l, text, DateTime.UtcNow));
+            _saved = list;
+            Status(saved
+                ? "Saved to your prompts. Use it again from the bookmark button below."
+                : "The prompt couldn't be saved (the prompts file is in use or read-only).", spin: false);
+            if (_promptPanel.Visibility == Visibility.Visible) ShowPrompts();
+            PromptsChanged?.Invoke();
+        }
+        catch (Exception ex) { Status($"The prompt couldn't be saved ({ex.Message}).", spin: false); } // never into ETABS's dispatcher
+    }
+
+    /// <summary>Raised when the saved prompts change (the home screen lists them).</summary>
+    private event Action? PromptsChanged;
+
+    private void TogglePrompts()
+    {
+        if (_promptPanel.Visibility == Visibility.Visible)
+        {
+            _promptPanel.Visibility = Visibility.Collapsed;
+            AutomationProperties.SetItemStatus(_prompts, "Collapsed");
+            return;
+        }
+        ShowPrompts();
+        _promptPanel.Visibility = Visibility.Visible;
+        AutomationProperties.SetItemStatus(_prompts, "Expanded");
+        _promptPanel.MoveFocus(new TraversalRequest(FocusNavigationDirection.First));
+    }
+
+    /// <summary>The saved prompts above the message box: pick one to put it in the box, or delete it.</summary>
+    private void ShowPrompts()
+    {
+        var panel = new DockPanel();
+        var head = new DockPanel { Margin = new Thickness(ChatUi.S2, ChatUi.S1, ChatUi.S1, ChatUi.S1) };
+        var close = ChatUi.Ghost(ChatUi.GlyphCross, null, "Close saved prompts", "Close");
+        close.Click += (_, _) => TogglePrompts();
+        DockPanel.SetDock(close, Dock.Right);
+        head.Children.Add(close);
+        head.Children.Add(ChatUi.Small("Saved prompts", Brand.K.Text, bold: true));
+        DockPanel.SetDock(head, Dock.Top);
+        panel.Children.Add(head);
+        var list = new StackPanel { Margin = new Thickness(ChatUi.S1, 0, ChatUi.S1, ChatUi.S1) };
+        if (Saved.Count == 0)
+        {
+            var none = Brand.Text("No saved prompts yet. Save one from any message: ⋯ › Save prompt.", Brand.K.Muted, ChatUi.SmallSize);
+            none.Margin = new Thickness(ChatUi.S1, 0, 0, ChatUi.S1);
+            list.Children.Add(none);
+        }
+        foreach (var prompt in Saved)
+        {
+            var row = new DockPanel();
+            var delete = ChatUi.Ghost(ChatUi.GlyphDelete, null, "Delete saved prompt " + prompt.Title, "Delete this saved prompt");
+            delete.Click += (_, _) =>
+            {
+                try
+                {
+                    var (list, saved) = SavedPrompts.Update(SavedPrompts.DefaultFile, l => SavedPrompts.Remove(l, prompt.Text));
+                    _saved = list;
+                    if (!saved) Status("The prompt couldn't be deleted (the prompts file is in use or read-only).", spin: false);
+                    ShowPrompts();
+                    PromptsChanged?.Invoke();
+                    _prompts.Focus();
+                }
+                catch (Exception ex) { Status($"The prompt couldn't be deleted ({ex.Message}).", spin: false); }
+            };
+            DockPanel.SetDock(delete, Dock.Right);
+            row.Children.Add(delete);
+            var use = new Button { Content = ChatUi.Small(prompt.Title, Brand.K.Text), HorizontalContentAlignment = HorizontalAlignment.Left, ToolTip = prompt.Text };
+            use.SetResourceReference(StyleProperty, "SpmChatGhost");
+            AutomationProperties.SetName(use, "Use prompt: " + prompt.Title);
+            AutomationProperties.SetHelpText(use, "Puts it in the message box to edit or send.");
+            use.Click += (_, _) =>
+            {
+                try
+                {
+                    UsePrompt(prompt.Text);
+                    TogglePrompts();
+                }
+                catch (Exception ex) { Status($"The prompt couldn't be used ({ex.Message}).", spin: false); }
+            };
+            row.Children.Add(use);
+            list.Children.Add(row);
+        }
+        var scroll = new ScrollViewer { Content = list, MaxHeight = 200, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Focusable = false };
+        panel.Children.Add(scroll);
+        _promptPanel.Child = panel;
+        _promptPanel.BorderThickness = new Thickness(1);
+        _promptPanel.CornerRadius = new CornerRadius(ChatUi.Radius);
+        _promptPanel.Padding = new Thickness(ChatUi.S1);
+        _promptPanel.SetResourceReference(Border.BackgroundProperty, Brand.K.Raised);
+        _promptPanel.SetResourceReference(Border.BorderBrushProperty, Brand.K.BorderSubtle);
+        AutomationProperties.SetName(_promptPanel, "Saved prompts");
+        _promptPanel.PreviewKeyDown -= OnPromptPanelKey;
+        _promptPanel.PreviewKeyDown += OnPromptPanelKey;
+    }
+
+    private void OnPromptPanelKey(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape) return;
+        e.Handled = true;
+        TogglePrompts();
+        _prompts.Focus();
+    }
+
+    /// <summary>Puts a prompt in the message box, to edit before sending.</summary>
+    private void UsePrompt(string text)
+    {
+        _input.Text = text;
+        _input.CaretIndex = text.Length;
+        _input.Focus();
+    }
+
+    private UIElement ErrorBox(ChatItem item)
+    {
+        var row = new DockPanel();
+        var icon = ChatUi.Glyph(ChatUi.GlyphError, Brand.K.DangerText, 14);
+        icon.VerticalAlignment = VerticalAlignment.Top;
+        icon.Margin = new Thickness(0, 1, ChatUi.S2, 0);
+        DockPanel.SetDock(icon, Dock.Left);
+        row.Children.Add(icon);
+        if (IsSignInError(item.Text) && !_sample)
+        {
+            // A sign-in problem: the way out is right here (never "New chat", which can't help).
+            var again = new Button { Content = "Sign in again", Margin = new Thickness(ChatUi.S2, 0, 0, 0), VerticalAlignment = VerticalAlignment.Top };
+            again.SetResourceReference(StyleProperty, "SpmChatPrimary");
+            again.Click += (_, _) => SignInAgain();
+            DockPanel.SetDock(again, Dock.Right);
+            row.Children.Add(again);
+        }
+        row.Children.Add(Brand.Text(item.Text, Brand.K.Text));
+        var box = new Border
+        {
+            Child = row, Padding = new Thickness(ChatUi.S4, ChatUi.S3, ChatUi.S4, ChatUi.S3), BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(ChatUi.Radius), Margin = new Thickness(0, ChatUi.S4, 0, ChatUi.S1),
+        };
+        box.SetResourceReference(Border.BackgroundProperty, Brand.K.NoticeBg);
+        box.SetResourceReference(Border.BorderBrushProperty, Brand.K.NoticeBorder);
+        AutomationProperties.SetName(box, "Problem: " + item.Text);
+        AutomationProperties.SetLiveSetting(box, AutomationLiveSetting.Assertive);
+        return box;
+    }
+
+    private static UIElement NoteLine(ChatItem item)
+    {
+        var row = new DockPanel { Margin = new Thickness(0, ChatUi.S4, 0, ChatUi.S1) };
+        var icon = ChatUi.Glyph(ChatUi.GlyphInfo, Brand.K.Muted, 12);
+        icon.VerticalAlignment = VerticalAlignment.Top;
+        icon.Margin = new Thickness(0, 1, ChatUi.S2, 0);
+        DockPanel.SetDock(icon, Dock.Left);
+        row.Children.Add(icon);
+        var text = Brand.Text(item.Text, Brand.K.Muted, ChatUi.SmallSize);
+        text.FontStyle = FontStyles.Italic;
+        row.Children.Add(text);
+        AutomationProperties.SetName(row, item.Text);
+        return row;
+    }
+
+    // ---- Tool steps -----------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A tool step: a one-line header (status, tool, short input) that opens to the input, the result and the element
+    /// ids found in it, which select and zoom to the elements in ETABS.
+    /// </summary>
+    private UIElement ToolCard(ChatItem item, bool header)
+    {
+        var row = new ToolRow { Item = item };
+        _rows[item] = row;
+        var outer = new StackPanel { Margin = new Thickness(0, header ? ChatUi.S6 : ChatUi.S1, 0, 0) };
+        if (header) outer.Children.Add(ClaudeHeader(item));
+
+        var line = new DockPanel();
+        // The status mark keeps its box when the spinner turns into a check, so the line doesn't shift.
+        row.Mark.Width = 18;
+        row.Mark.Height = 18;
+        row.Mark.Focusable = false;
+        row.Mark.VerticalAlignment = VerticalAlignment.Center;
+        DockPanel.SetDock(row.Mark, Dock.Left);
+        line.Children.Add(row.Mark);
+        row.Chevron = ChatUi.Glyph(ChatUi.GlyphRight, Brand.K.Muted, 9);
+        row.Chevron.Margin = new Thickness(ChatUi.S2, 0, 0, 0);
+        DockPanel.SetDock(row.Chevron, Dock.Right);
+        line.Children.Add(row.Chevron);
+        row.Line = new TextBlock { TextTrimming = TextTrimming.CharacterEllipsis, FontSize = ChatUi.SmallSize, VerticalAlignment = VerticalAlignment.Center };
+        Brand.Fg(row.Line, Brand.K.Muted);
+        line.Children.Add(row.Line);
+        row.Header = new ToggleButton { Content = line };
+        row.Header.SetResourceReference(StyleProperty, "SpmChatDisclosure");
+        row.Header.Checked += (_, _) => Expand(row, true);
+        row.Header.Unchecked += (_, _) => Expand(row, false);
+
+        row.Detail = Brand.Text("", Brand.K.DangerText, ChatUi.SmallSize);
+        row.Detail.Margin = new Thickness(26, 0, ChatUi.S2, ChatUi.S2);
+        row.Detail.Visibility = Visibility.Collapsed;
+        row.Details = new StackPanel { Margin = new Thickness(26, 0, ChatUi.S2, ChatUi.S2), Visibility = Visibility.Collapsed };
+
+        var stack = new StackPanel();
+        stack.Children.Add(row.Header);
+        stack.Children.Add(row.Detail);
+        stack.Children.Add(row.Details);
+        var card = ChatUi.Opaque(new Border { Child = stack, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(ChatUi.Radius), Padding = new Thickness(ChatUi.S1 / 2), SnapsToDevicePixels = true });
+        card.SetResourceReference(Border.BorderBrushProperty, Brand.K.BorderSubtle);
+        card.SetResourceReference(Border.BackgroundProperty, Brand.K.Raised);
+        outer.Children.Add(card);
+        SetTool(row, item.State, item.Text, "");
+        return outer;
+    }
+
+    /// <summary>Opens or closes a step's details: they slide open (height eased, clipped) and closed again.</summary>
+    private void Expand(ToolRow row, bool open)
+    {
+        row.Chevron.Text = open ? ChatUi.GlyphDown : ChatUi.GlyphRight;
+        AutomationProperties.SetItemStatus(row.Header, open ? "Expanded" : "Collapsed");
+        if (open) FillDetails(row);
+        ChatUi.Reveal(row.Details, open);
+    }
+
+    private void SetTool(ToolRow row, string state, string summary, string result)
+    {
+        var was = row.Mark.Content is null ? "" : row.Item.State;
+        row.Item.State = state;
+        row.Item.Text = summary;
+        if (result.Length > 0) row.Item.Result = result.Length > MaxResult ? result.Substring(0, MaxResult) + "…" : result;
+        // The friendly step name and the call's own description, never the tool id or its arguments (those are in the details).
+        var title = StepNames.Title(row.Item.Name);
+        var line = StepNames.Line(row.Item.Name, summary);
+        row.Line.Inlines.Clear();
+        row.Line.Inlines.Add(new Run(line));
+        Brand.Fg(row.Line, Brand.K.Muted);
+        FrameworkElement mark;
+        string said;
+        switch (state)
+        {
+            case "running":
+                mark = ChatUi.StepRing();
+                said = "running";
+                break;
+            case "done":
+                mark = ChatUi.StepMark(done: true);
+                said = "succeeded";
+                break;
+            case "stopped":
+                mark = ChatUi.Glyph(ChatUi.GlyphStop, Brand.K.Muted, 11);
+                said = "stopped";
+                break;
+            default:
+                mark = ChatUi.StepMark(done: false);
+                said = "failed";
+                break;
+        }
+        row.Mark.Content = mark;
+        // A step that just finished ticks off: its check or cross pops in where the ring was.
+        if (was == "running" && state is "done" or "failed") ChatUi.Pop(mark);
+        row.Header.ToolTip = title + " (" + said + ")" + (line != title ? "\n" + line : "") + "\nClick for the input, the result and the elements.";
+        AutomationProperties.SetName(row.Header, $"Step {title}, {said}." + (line != title ? " " + line : ""));
+        AutomationProperties.SetHelpText(row.Header, "Press Space to show or hide the step's input, result and elements.");
+        if (state == "failed" && row.Item.Result.Length > 0)
+        {
+            var first = row.Item.Result.Replace("\r", "").Split('\n').FirstOrDefault(l => l.Trim().Length > 0) ?? "";
+            row.Detail.Text = first.Length > 240 ? first.Substring(0, 240) + "…" : first;
+            if (was == "running") ChatUi.Reveal(row.Detail, true);
+            else row.Detail.Visibility = Visibility.Visible;
+        }
+        if (row.Header.IsChecked == true) FillDetails(row);
+    }
+
+    private void FillDetails(ToolRow row)
+    {
+        var item = row.Item;
+        row.Details.Children.Clear();
+        void Label(string text)
+        {
+            var t = ChatUi.Small(text, Brand.K.Muted, bold: true);
+            t.Margin = new Thickness(0, ChatUi.S2, 0, 2);
+            row.Details.Children.Add(t);
+        }
+        void Mono(string text, string name)
+        {
+            var box = ChatUi.Selectable(text, name);
+            box.FontFamily = ChatUi.Mono;
+            box.FontSize = ChatUi.SmallSize;
+            box.Padding = new Thickness(ChatUi.S2, ChatUi.S1, ChatUi.S2, ChatUi.S1);
+            box.SetResourceReference(BackgroundProperty, Brand.K.Surface);
+            row.Details.Children.Add(box);
+        }
+        if (item.Input.Length > 0)
+        {
+            Label("Input");
+            Mono(item.Input, StepNames.Title(item.Name) + " input");
+        }
+        if (item.Result.Length > 0)
+        {
+            Label(item.State == "failed" ? "Error" : "Result");
+            Mono(item.Result, StepNames.Title(item.Name) + " result");
+        }
+        var ids = new List<long>();
+        if (item.Result.Length > 0) UI.Pane.Collect(item.Result, ids);
+        if (ids.Count > 0)
+        {
+            Label("Elements (click to select and zoom in ETABS)");
+            var links = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = ChatUi.SmallSize };
+            foreach (var id in ids.Take(MaxIdLinks))
+            {
+                if (links.Inlines.Count > 0) links.Inlines.Add(new Run("  "));
+                links.Inlines.Add(IdLink(id.ToString(CultureInfo.InvariantCulture), new[] { id }, $"Select element {id} in ETABS"));
+            }
+            if (ids.Count > 1)
+            {
+                links.Inlines.Add(new Run("   "));
+                links.Inlines.Add(IdLink($"Select all {ids.Count}", ids, $"Select all {ids.Count} elements in ETABS"));
+            }
+            row.Details.Children.Add(links);
+        }
+        if (row.Details.Children.Count == 0)
+        {
+            var none = ChatUi.Small(item.State == "running" ? "Running; the result shows here when it's done." : "No details were kept for this step.");
+            none.Margin = new Thickness(0, ChatUi.S1, 0, 0);
+            row.Details.Children.Add(none);
+        }
+        if (WhenLong(item) is { Length: > 0 } when)
+        {
+            var t = ChatUi.Small(when);
+            t.Margin = new Thickness(0, ChatUi.S2, 0, 0);
+            row.Details.Children.Add(t);
+        }
+    }
+
+    private Hyperlink IdLink(string text, IReadOnlyList<long> ids, string name)
+    {
+        var link = new Hyperlink(new Run(text)) { ToolTip = name };
+        link.SetResourceReference(TextElement.ForegroundProperty, Brand.K.Link);
+        AutomationProperties.SetName(link, name);
+        link.Click += (_, _) => SelectInETABS(ids);
+        return link;
+    }
+
+    /// <summary>Selects the elements in the active model and zooms to them (one view id opens that view), as the job pane does.</summary>
+    private async void SelectInETABS(IReadOnlyList<long> ids)
+    {
+        var list = string.Join(",", ids.Select(i => i.ToString(CultureInfo.InvariantCulture)));
+        try { await App.Dispatcher.InvokeAsync(app => UI.Pane.Select(app, list)); }
+        // async void: nothing may escape to ETABS's UI dispatcher.
+        catch (Exception ex)
+        {
+            Status("ETABS couldn't select the elements now: " + ex.Message, spin: false);
+        }
+    }
+
+    private void Note(string text)
+    {
+        if (text.Length == 0) return;
+        Add(new ChatItem { Kind = "note", Text = text });
+    }
+
+    private void Error(string text) => Add(new ChatItem { Kind = "error", Text = text });
+
+    // ---- Scrolling and history ------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Scrolls to the newest message once layout is done, when the list follows (or <paramref name="force"/>): a short
+    /// glide (see <see cref="SmoothScroll"/>), or a jump with <paramref name="instant"/> (another chat opened) or when
+    /// Windows' animations are off.
+    /// </summary>
+    private void ScrollToEnd(bool force = false, bool instant = false)
+    {
+        if (Hidden) return;
+        if (force) _follow.Jump();
+        UpdateJump();
+        if (!_follow.Following || _scrollQueued) return;
+        _scrollQueued = true;
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
+        {
+            _scrollQueued = false;
+            if (_follow.Following)
+            {
+                if (instant || !ChatUi.Animate)
+                {
+                    StopGlide();
+                    _scroll.ScrollToEnd();
+                }
+                else StartGlide();
+            }
+            UpdateJump();
+        }));
+    }
+
+    /// <summary>The message box's border for its state: at rest, under the mouse, or with the caret in it.</summary>
+    private void ShowFieldState()
+    {
+        if (_composerFrame is not { } frame) return;
+        var focused = _input.IsKeyboardFocused;
+        var (brush, thickness) = ChatStyles.ComposerBorder(focused, frame.IsMouseOver);
+        frame.SetResourceReference(Border.BorderBrushProperty, brush);
+        frame.BorderThickness = new Thickness(thickness);
+        // The 2 px ring takes its extra pixel from the inside, so nothing moves when the box gets the caret.
+        var inset = 2 - thickness;
+        frame.Padding = new Thickness(inset);
+        if (_composerGlow is { } glow) glow.Visibility = focused ? Visibility.Visible : Visibility.Hidden;
+    }
+
+    /// <summary>Puts the caret in the message box, after the text, with the keyboard really going to it (see <see cref="TakeKeyboard"/>).</summary>
+    internal void FocusInput()
+    {
+        _input.Focus();
+        Keyboard.Focus(_input);
+        _input.CaretIndex = _input.Text.Length;
+        TakeKeyboard();
+    }
+
+    /// <summary>
+    /// ETABS hosts the pane in a window of its own inside its main window. WPF can give the box its focus while
+    /// Windows' keyboard focus stays on ETABS's view, and then letters go to ETABS as keyboard shortcuts instead of
+    /// into the box. When the box has WPF's focus, make sure the pane's window has Windows' too.
+    /// </summary>
+    private void TakeKeyboard()
+    {
+        if (!_input.IsKeyboardFocusWithin && !_input.IsFocused) return;
+        if (PresentationSource.FromVisual(_input) is not HwndSource { Handle: var pane } || pane == IntPtr.Zero) return;
+        try
+        {
+            var focus = GetFocus();
+            if (focus != pane && !IsChild(pane, focus)) SetFocus(pane);
+        }
+        catch (Exception) { /* best effort: WPF's own focus handling still applies */ }
+    }
+
+    [DllImport("user32.dll")] private static extern IntPtr GetFocus();
+    [DllImport("user32.dll")] private static extern IntPtr SetFocus(IntPtr hwnd);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool IsChild(IntPtr parent, IntPtr hwnd);
+
+    private void StartGlide()
+    {
+        if (_gliding) return;
+        _gliding = true;
+        _glideStill = 0;
+        CompositionTarget.Rendering += Glide;
+    }
+
+    private void StopGlide()
+    {
+        if (!_gliding) return;
+        _gliding = false;
+        CompositionTarget.Rendering -= Glide;
+    }
+
+    /// <summary>One frame of the glide to the bottom, on whole device pixels; it stops at the bottom or when the reader takes over.</summary>
+    private void Glide(object? sender, EventArgs e)
+    {
+        var target = _scroll.ScrollableHeight;
+        if (!_follow.Following)
+        {
+            StopGlide();
+            return;
+        }
+        // Hidden (the pane closed or behind another tab): layout doesn't run, so the offset would never move and this
+        // handler would keep WPF drawing every frame. Jump instead; the same when the offset stops following.
+        if (!IsVisible || PresentationSource.FromVisual(this) is null || _glideStill > 10)
+        {
+            StopGlide();
+            _scroll.ScrollToEnd();
+            return;
+        }
+        var offset = _scroll.VerticalOffset;
+        _glideStill = offset == _glideLast ? _glideStill + 1 : 0;
+        _glideLast = offset;
+        var next = SmoothScroll.Next(offset, target, _scroll.ViewportHeight, VisualTreeHelper.GetDpi(this).PixelsPerDip);
+        if (next != offset) _scroll.ScrollToVerticalOffset(next);
+        if (next >= target) StopGlide();
+    }
+
+    private void UpdateJump()
+    {
+        var hasMessages = _conv.Items.Count > 0 && _empty.Visibility != Visibility.Visible;
+        var show = ScrollFollow.JumpVisible(hasMessages, _follow.Following, _scroll.ScrollableHeight, _scroll.VerticalOffset);
+        _jump.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        var text = _follow.Unseen > 0 ? $"Jump to latest ({_follow.Unseen} new)" : "Jump to latest";
+        if (_jumpText.Text != text)
+        {
+            _jumpText.Text = text;
+            AutomationProperties.SetName(_jump, text);
+        }
+    }
+
+    private void ShowEarlierButton()
+    {
+        _earlier.Visibility = _firstShown > 0 ? Visibility.Visible : Visibility.Collapsed;
+        var text = _firstShown == 1 ? "Show 1 earlier message" : $"Show earlier messages ({_firstShown} more)";
+        _earlierText.Text = text;
+        AutomationProperties.SetName(_earlier, text);
+    }
+
+    /// <summary>Draws the page before the first message drawn, keeping what the reader sees in place.</summary>
+    private void ShowEarlier()
+    {
+        if (_firstShown == 0) return;
+        var from = History.Earlier(_firstShown);
+        var before = _scroll.ExtentHeight;
+        var offset = _scroll.VerticalOffset;
+        for (var k = _firstShown - 1; k >= from; k--) _messages.Children.Insert(0, Build(k));
+        _firstShown = from;
+        ShowEarlierButton();
+        _scroll.UpdateLayout();
+        _scroll.ScrollToVerticalOffset(offset + _scroll.ExtentHeight - before);
+        if (_firstShown == 0) _scroll.Focus(); // the button is gone: keep the keyboard in the list
+    }
+
+    /// <summary>After a turn, while the reader is at the bottom, the oldest drawn messages beyond two pages are let go.</summary>
+    private void TrimDrawn()
+    {
+        if (Hidden) return;
+        var drop = History.Trim(_messages.Children.Count, _follow.Following);
+        if (drop <= 0) return;
+        Forget(_conv.Items.Skip(_firstShown).Take(drop));
+        _messages.Children.RemoveRange(0, drop);
+        _firstShown += drop;
+        ShowEarlierButton();
+    }
+
+    /// <summary>Lets go of everything kept for items no longer drawn (their views, tool rows and streaming keys).</summary>
+    private void Forget(IEnumerable<ChatItem> items)
+    {
+        var gone = new HashSet<ChatItem>(items);
+        if (gone.Count == 0) return;
+        foreach (var item in gone)
+        {
+            _views.Remove(item);
+            _rows.Remove(item);
+        }
+        foreach (var key in _texts.Where(kv => gone.Contains(kv.Value.Item)).Select(kv => kv.Key).ToList()) { _texts.Remove(key); _dirty.Remove(key); }
+        foreach (var id in _tools.Where(kv => gone.Contains(kv.Value.Item)).Select(kv => kv.Key).ToList()) _tools.Remove(id);
+    }
+
+    private void RenderDirty()
+    {
+        if (Hidden) return;
+        _render.Stop();
+        _throttle.Drawn(DateTime.UtcNow);
+        foreach (var key in _dirty)
+            if (_texts.TryGetValue(key, out var t)) t.View.SetMarkdown(FreeWorkers.Strip(t.Item.Text), fade: ChatUi.Lively);
+        _dirty.Clear();
+        ScrollToEnd();
+    }
+
+    /// <summary>Streamed text changed: draw it soon, at most every 40 ms, together with whatever else arrives meanwhile.</summary>
+    private void RequestRender()
+    {
+        if (Hidden) return;
+        if (_throttle.Request(DateTime.UtcNow) is not { } wait) return;
+        _render.Interval = wait > TimeSpan.FromMilliseconds(1) ? wait : TimeSpan.FromMilliseconds(1);
+        _render.Start();
+    }
+
+    // ---- Status and buttons ---------------------------------------------------------------------------------------
+
+    private void ShowStatus(string? text = null)
+    {
+        if (Hidden) return;
+        // In a job's view Send stays: it talks to the job, whatever the main chat is doing.
+        var busy = _turn is not null && _viewJob is null;
+        // While Claude works, Stop takes Send's place (Send isn't greyed out: the pane is working, not disabled).
+        var sendHadFocus = _send.IsKeyboardFocused;
+        var stopHadFocus = _stop.IsKeyboardFocused;
+        var swapped = (_stop.Visibility == Visibility.Visible) != busy;
+        _stop.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+        _send.Visibility = busy ? Visibility.Collapsed : Visibility.Visible;
+        // Send turns into Stop and back: the button taking the place pops in (Full animations only).
+        if (swapped && IsVisible) ChatUi.Pop(busy ? _stop : _send, 0.6, 200);
+        ShowSteer();
+        if (!busy) Brand.SetBusy(_stop, false);
+        if (busy && sendHadFocus) _stop.Focus();
+        if (!busy && stopHadFocus) _input.Focus();
+        _newChat.IsEnabled = _typePill.IsEnabled = _effortPick.IsEnabled = !_stopped;
+        ShowShrink();
+        _send.IsEnabled = _attach.IsEnabled = _view.IsEnabled = _prompts.IsEnabled = !_stopped;
+        if (_stopped)
+        {
+            Status("CSI ProMax is switching to its new version. The chat continues in a moment.", spin: true);
+            return;
+        }
+        if (busy)
+        {
+            Status(text ?? (_turn!.Stopping ? "Stopping…" : "CSI ProMax is thinking…"), spin: true);
+            return;
+        }
+        if (_viewJob is not null && _setup == Setup.Ready) return; // the job view's own line stays
+        Status(_setup switch
+        {
+            Setup.Ready => "", // the box's hint and tooltip say how to send; the model pill says where it goes
+            Setup.Checking => "Checking the chat setup…",
+            _ => "Finish the step above to start chatting.",
+        }, spin: false);
+    }
+
+    /// <summary>
+    /// Shows a status line. While a turn runs, what Claude is doing shows at the end of the conversation with the typing
+    /// dots, and the line under the message box says how to stop it.
+    /// </summary>
+    private void Status(string text, bool spin)
+    {
+        if (Hidden) return; // a chat in the background: its status shows in Chats, and in it when opened
+        // The main chat's progress isn't shown in a job's view (it shows again on the way back).
+        if (_viewJob is not null && spin && _turn is not null && !_stopped) return;
+        var working = _turn is not null && !_stopped && _viewJob is null;
+        var wasWorking = _workingShown;
+        // The typing line eases open and closed, so the list doesn't jump when a turn starts or ends; the shimmer
+        // stands in for the answer until its first words or step.
+        var waiting = working && _turn is { SawText: false, SawTool: false };
+        if (waiting != _shimmerShown)
+        {
+            _shimmerShown = waiting;
+            // While the line stays, only the shimmer eases; when the whole block opens it is part of it, and when the
+            // block closes the shimmer goes once it has.
+            if (working && _workingShown) ChatUi.Reveal(_shimmer, waiting);
+            else if (working) _shimmer.Visibility = waiting ? Visibility.Visible : Visibility.Collapsed;
+        }
+        if (working != _workingShown)
+            ChatUi.Reveal(_working, _workingShown = working, () => { if (!_shimmerShown) _shimmer.Visibility = Visibility.Collapsed; });
+        if (working && !wasWorking) ScrollToEnd();
+        if (working && spin)
+        {
+            _workingText.Text = text;
+            AutomationProperties.SetName(_working, text);
+            _status.Text = _turn!.Stopping ? "Stopping…" : _control is not null
+                ? "CSI ProMax is working. Send a message to steer it: it is applied after the current item. Esc or Stop ends it."
+                : "CSI ProMax is working. Esc or Stop ends it; you can type your next message meanwhile.";
+            _statusRow.Visibility = Visibility.Visible;
+            _statusSpin.Content = null;
+            return;
+        }
+        _status.Text = text;
+        _statusRow.Visibility = text.Length > 0 || spin ? Visibility.Visible : Visibility.Collapsed;
+        if (spin && _statusSpin.Content is null)
+        {
+            var s = Brand.Spinner();
+            s.SetResourceReference(TextElement.ForegroundProperty, Brand.K.Muted);
+            _statusSpin.Content = s;
+        }
+        else if (!spin) _statusSpin.Content = null;
+    }
+
+    private void OnInputKey(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter && (Keyboard.Modifiers & ModifierKeys.Shift) == 0 && (Keyboard.Modifiers & ModifierKeys.Control) == 0)
+        {
+            e.Handled = true;
+            Send();
+        }
+        else if (e.Key == Key.Escape && _viewJob is not null)
+        {
+            e.Handled = true;
+            ShowCoordinator(focus: true);
+        }
+        else if (e.Key == Key.Escape && _turn is not null)
+        {
+            e.Handled = true;
+            StopTurn();
+        }
+    }
+
+    // ---- Sending --------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Sends <paramref name="text"/> as the user's message from elsewhere in CSI ProMax (the checklist's Ask button).
+    /// Returns "" when it went, else why not (a turn is running, the chat isn't set up), in a sentence for the user.
+    /// </summary>
+    public static string Ask(string text)
+    {
+        var pane = (ChatPane)Get();
+        if (pane._stopped) return "The chat isn't running. Restart ETABS, then try again.";
+        if (pane._turn is not null) return "The chat is still answering something else. Wait for it (or press Stop in the chat), then ask again.";
+        if (pane._setup != Setup.Ready)
+        {
+            pane.ShowSetup();
+            return "The chat isn't set up yet: open the Chat pane and finish its first step, then ask again.";
+        }
+        pane._input.Text = text;
+        pane.Send();
+        return "";
+    }
+
+    /// <summary>
+    /// The Send button and Enter. async void: an exception would reach ETABS's UI dispatcher and could close ETABS, so
+    /// whatever <see cref="SendAsync"/> throws ends here, said in the status line.
+    /// </summary>
+    private async void Send()
+    {
+        try { await SendAsync(); }
+        catch (Exception ex)
+        {
+            try { Status($"The message couldn't be sent ({ex.GetType().Name}: {ex.Message}). Try again.", spin: false); }
+            catch (Exception) { /* the pane is closing */ }
+        }
+    }
+
+    private async Task SendAsync()
+    {
+        if (_stopped) return;
+        // A PC without a valid key: the License window, and nothing is sent.
+        if (UI.LicenseWindow.BlockIfLocked())
+        {
+            Status("CSI ProMax needs a license for this PC. Send the PC code in the License window for a key.", spin: false);
+            return;
+        }
+        // In a job's view the message goes to that job, also while the main chat answers.
+        if (_viewJob is { } shownJob)
+        {
+            SendToJob(shownJob);
+            return;
+        }
+        // "stop" typed to a running autopilot stops it now (not "after this item", behind an answer that may hang).
+        if (!_sample && Run is { Active: true } && Autopilot.SaysStop(_input.Text))
+        {
+            var said = _input.Text.Trim();
+            _input.Clear();
+            Add(new ChatItem { Kind = "user", Text = said });
+            AutopilotStopTyped(said, "");
+            return;
+        }
+        // "Are you working?", "how many jobs left?": answered at once from the job list, not queued behind the answer.
+        if (!_sample && StatusAnswer(_input.Text) is { Length: > 0 } status)
+        {
+            var asked = _input.Text.Trim();
+            _input.Clear();
+            Add(new ChatItem { Kind = "user", Text = asked });
+            Note(status);
+            Save();
+            return;
+        }
+        // "No pop-ups, I'm away for an hour" starts away mode (Chat.Away); "I'm back" or the time ends it. What was answered
+        // or skipped meanwhile is said before the message.
+        if (Away.Take() is { Length: > 0 } meanwhile) Note(meanwhile);
+        if (Away.Heard(_input.Text, DateTime.UtcNow) is { } away) Note(away);
+        // A plain question while the chat is busy (answering, writing a brief, hearing a job): answered at once (ChatPane.Quick).
+        // "4 yes" answers question 4 of the Questions tab (ChatPane.Questions), also while the chat is busy.
+        if (!_sample && TypedAnswers(_input.Text)) return;
+        if (QuickAnswer(_input.Text)) return;
+        if (_turn is not null)
+        {
+            // While a task runs the box stays open: the message reaches Claude at the next step boundary.
+            var note = _input.Text.Trim();
+            if (_turn.Planning || _control is null || note.Length == 0)
+            {
+                Status(note.Length == 0 && !_turn.Planning ? "Type a message first; CSI ProMax gets it after the current item." : "CSI ProMax is still answering. Wait for it, or press Stop.", spin: true);
+                return;
+            }
+            _input.Clear();
+            QueueNote(note);
+            if (_pending.Count > 0) Status("Got it. Attachments go with your next message, after this task.", spin: true);
+            return;
+        }
+        if (_setup != Setup.Ready)
+        {
+            ShowSetup();
+            Status(_setup == Setup.Checking ? "Still checking the chat setup; try again in a moment." : "Finish the step above first, then send.", spin: false);
+            if (_setup is Setup.Missing or Setup.SignedOut or Setup.Failed) Check(quiet: true);
+            return;
+        }
+        var text = _input.Text.Trim();
+        var attachments = _pending.ToList();
+        if (text.Length == 0 && attachments.Count == 0)
+        {
+            Status("Type a message first.", spin: false);
+            _input.Focus();
+            return;
+        }
+        _input.Clear();
+        _pending.Clear();
+        ShowChips();
+        Add(new ChatItem { Kind = "user", Text = text, Name = string.Join(", ", attachments.Select(a => a.Name)), Files = attachments.Select(a => a.Path).ToList() });
+        _askedAt = DateTime.UtcNow; // the task's time runs from here, through any brief written first
+        _conv.Name = ChatHistory.NameFor(_conv);
+        Save(); // the request is on disk before Claude Code starts on it
+        ShowTitle();
+        SupersedeBriefs();
+        if (AutopilotGoal(text, attachments)) return; // an autopilot's goal: the coordinator plans it first
+        LearnFrom(text); // a correction becomes a lesson for next time, in the background
+        if (StartBrief(text, attachments)) return; // a brief card first; the choice on it runs the turn
+        // Code that did this kind of work before is named with the message, so it is adapted and not written again.
+        await RunTurn(text, attachments, "", hint: FocusHint(text, attachments) + TakeAsides() + (Run is { Active: true } ? "" : CsiProMax.Tools.WorkedCode.HintFor(text)));
+    }
+
+    /// <summary>The answer to a status question from the job list (ChatFocus.StatusLine); "" when it isn't one or nothing runs.</summary>
+    private string StatusAnswer(string typed)
+    {
+        if (_pending.Count > 0 || !ChatFocus.IsStatusAsk(typed)) return "";
+        var since = _conv.Items.LastOrDefault(i => i.Kind == "user" && !ChatFocus.IsStatusAsk(i.Text))?.Time ?? DateTime.MinValue;
+        return ChatFocus.StatusLine(_board?.Snapshot() ?? [], _turn is not null, since, DateTime.UtcNow);
+    }
+
+    /// <summary>Sends a message to Claude Code as a new turn (from Send, or from a choice on a brief card).</summary>
+    /// <param name="hint">What goes to Claude after the text and is never shown (ChatFocus.Hint): how to take a small ask or a correction.</param>
+    /// <param name="quiet">A turn CSI ProMax sent on its own (not the user's): no task card, and an answer that only says
+    /// there was nothing to do is never shown (<see cref="Turn.Quiet"/>).</param>
+    private async Task RunTurn(string text, List<Attachment> attachments, string brief, PromptBrief? plan = null, string hint = "", bool quiet = false)
+    {
+        if (DeliveryCapture is { } capture)
+        {
+            capture(text); // the field test's hook: what would be sent, never sent
+            return;
+        }
+        var turn = _turn = new Turn { Brief = brief, Quiet = quiet, FirstItem = _conv.Items.Count, JobsAtStart = _board?.Snapshot() };
+        CrewHeard(); // the large chat's coordinator nods: your message, or a job reporting back
+        // Automatic model and effort: picked for this request by its kind of work, and said in the chat when it changes.
+        PickFor(text, attachments.Any(a => System.IO.Path.GetExtension(a.Path).ToLowerInvariant() is ".pdf" or ".docx" or ".pptx" or ".doc"));
+        // A chat working in the background (a job's report, its Autopilot's next step) has no task card or task time.
+        // Nor does a quiet turn: it isn't the user's task (it mustn't reset their Undo all or count task time).
+        if (!Hidden && !quiet)
+        {
+            ETABS.TimeLog.BeginChat(brief);
+            BeginJob(plan);
+        }
+        _lastActivity = DateTime.UtcNow;
+        ShowStatus(attachments.Count > 0 ? "Preparing the attachments…" : null);
+        try
+        {
+            var used = _conv.SessionId.Length == 0 ? new AttachedSoFar()
+                : _conv.AttachedSession.Length == 0 || _conv.AttachedSession == _conv.SessionId ? new AttachedSoFar { Bytes = _conv.AttachedBytes, Pages = _conv.AttachedPages }
+                : new AttachedSoFar();
+            // What changed since the last answer, the active view and the selection: a follow-up needn't read the model again to know.
+            // And the jobs as they are, with the changes each made, so "what is done?" is answered from them (bug 132).
+            var sent = text + hint + (_board is { } jobs ? JobTruth.Note(jobs.Snapshot()) : "") + ETABS.ChatModelWatch.Note(_conv.Key);
+            turn.Line = await On(Task.Run(() => BuildMessage(sent, attachments, used)));
+            (_conv.AttachedBytes, _conv.AttachedPages, _conv.AttachedSession) = (used.Bytes, used.Pages, _conv.SessionId);
+        }
+        catch (Exception ex)
+        {
+            // Whatever went wrong (an unreadable file, a picture WPF can't decode), the pane must not stay busy.
+            if (_turn == turn) EndTurn();
+            Error($"An attachment couldn't be read: {ex.Message} Remove it or attach it again, then send.");
+            return;
+        }
+        if (_turn != turn) return; // stopped meanwhile
+        try
+        {
+            await On(Deliver(turn));
+        }
+        catch (Exception ex)
+        {
+            if (_turn == turn) EndTurn();
+            Error($"The message could not be sent ({ex.Message}). Send it again.");
+        }
+    }
+
+    private async Task Deliver(Turn turn)
+    {
+        try
+        {
+            var effort = ClaudeCli.EffortRefused ? "" : _effort;
+            // A process started for another model, kind or effort needs a new one, and so does one whose ETABS tools are at
+            // an address that changed (a new core while ETABS runs, or the connection inside ETABS started after a fallback).
+            // The chat's own key goes with its calls (JobBoard.Caller): a chat saved before 0.31 gets its id first.
+            if (_conv.Id.Length == 0) Save();
+            var chatKey = JobBoard.ChatKey(_conv.Id);
+            if (!Hidden) ChatJobs.Shown = chatKey;
+            if (_engine is { Warming: true } warming)
+            {
+                // Started early while the user typed: it is nearly ready. One that failed to start is replaced below.
+                ShowStatus("Starting…");
+                try { await On(warming.WarmAsync()); }
+                catch (Exception) { /* replaced below */ }
+                if (_turn != turn) return;
+            }
+            if (_engine is { IsAlive: true } engine && engine.Model == _model && engine.Coordinator == IsCoordinator && engine.Effort == effort
+                && engine.McpAddress == ClaudeCli.McpAddress && (engine.ChatKey ?? "") == chatKey)
+            {
+                ShowStatus();
+                await On(engine.SendAsync(turn.Line));
+                return;
+            }
+            _engine?.Dispose();
+            var resume = _conv.SessionId.Length > 0 && !turn.Retried ? _conv.SessionId : null;
+            if (resume is null)
+            {
+                // A new conversation starts with what earlier chats remembered: the one just left may still be writing it.
+                await On(WaitForMemory(turn));
+                if (_turn != turn) return;
+            }
+            // A new model needs a new Claude Code process; it resumes the same conversation.
+            var fresh = new ChatEngine(Dispatcher, _install!, resume, _model, coordinator: IsCoordinator, effort: effort, chatKey: chatKey.Length > 0 ? chatKey : null);
+            Hook(fresh);
+            _engine = fresh;
+            ShowStatus(resume is null ? "Starting…" : "Reopening this conversation…");
+            await On(fresh.StartAsync(turn.Line));
+        }
+        catch (Exception ex)
+        {
+            if (_turn != turn) return;
+            // Writing failed because Claude Code already ended (a bad option, a session it couldn't open): its Exited
+            // event follows and says why, or starts fresh. The pipe can break a moment before the process is seen to end,
+            // so it gets half a second to end before it is killed.
+            if (ex is IOException && _engine is { } ended && await On(Task.Run(() => ended.WaitForExit(500)))) return;
+            if (_turn != turn) return; // stopped meanwhile
+            _engine?.Kill();
+            _engine = null;
+            EndTurn();
+            Error(ex is System.ComponentModel.Win32Exception or FileNotFoundException
+                ? $"The chat could not be started ({ex.Message}). Press Check again above; if it keeps happening, reinstall Claude Code."
+                : $"The message could not be sent ({ex.Message}). Send it again.");
+            if (ex is System.ComponentModel.Win32Exception or FileNotFoundException) Check(quiet: false);
+        }
+    }
+
+    /// <summary>
+    /// The user started typing in a chat that has a conversation and no Claude Code running for it (ETABS just opened, or
+    /// the chat was switched to): its process starts now, so the message goes the moment it is sent instead of waiting for
+    /// Claude Code to start and fetch the ETABS tools. Only where the model and effort don't depend on the message (a
+    /// chat With coordinator, or a chosen model and effort); Send uses it when it still matches, and replaces it otherwise.
+    /// </summary>
+    private void WarmEngine()
+    {
+        try
+        {
+            if (_turn is not null || _sample || _stopped || _setup != Setup.Ready || _install is null || _conv.SessionId.Length == 0 || _conv.Id.Length == 0) return;
+            if (_engine is { } running && (running.IsAlive || running.Warming)) return;
+            if (!IsCoordinator && (ChatAuto.IsAuto(_conv.Model) || ChatAuto.IsAuto(_conv.Effort))) return;
+            var pick = ChatJobs.Pick("", _conv.Model, _conv.Effort, IsCoordinator ? ChatAuto.Coordinating : null, false, _refusedModels);
+            var effort = ClaudeCli.EffortRefused ? "" : pick.Effort;
+            _engine?.Dispose();
+            var warm = new ChatEngine(Dispatcher, _install, _conv.SessionId, pick.Model, coordinator: IsCoordinator, effort: effort, chatKey: JobBoard.ChatKey(_conv.Id));
+            Hook(warm);
+            _engine = warm;
+            _ = warm.WarmAsync().ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted); // Send starts it again
+        }
+        catch (Exception) { /* Send starts it */ }
+    }
+
+    /// <summary>What the chat's session already carries as attachments; BuildMessage adds this message's.</summary>
+    private sealed class AttachedSoFar
+    {
+        public long Bytes;
+        public int Pages;
+    }
+
+    /// <summary>Longer text from a Word, PowerPoint or Excel file goes to a text file named in the message instead.</summary>
+    private const int MaxInlineText = 60_000;
+
+    /// <summary>
+    /// The stream-json line for a turn: text with notes on attached files, pictures as image blocks, PDFs that fit what
+    /// the chat already carries (<paramref name="used"/>, updated) as document blocks, and the text of Word,
+    /// PowerPoint and Excel files. A PDF too large to send whole has its text written to a file the note names.
+    /// </summary>
+    private static string BuildMessage(string text, List<Attachment> attachments, AttachedSoFar used)
+    {
+        var images = new List<(string, string)>();
+        var pdfs = new List<(string, string)>();
+        var notes = new StringBuilder();
+        var contents = new StringBuilder();
+        var pictureNames = new List<string>();
+        void AddImage(string path, string name)
+        {
+            var image = EncodeImage(path);
+            images.Add(image);
+            pictureNames.Add(name);
+            used.Bytes += image.Base64.Length * 3L / 4;
+        }
+        foreach (var a in attachments)
+        {
+            if (a.IsImage && images.Count < MaxImages)
+            {
+                AddImage(a.Path, a.Name);
+                continue;
+            }
+            var ext = System.IO.Path.GetExtension(a.Path).ToLowerInvariant();
+            string? read = null;
+            if (ext == ".pdf") read = PdfNote(a, used, pdfs);
+            else if (OfficeText.IsOffice(a.Path)) read = OfficeNote(a, contents, images.Count, (path, name) => AddImage(path, name));
+            var kind = read ?? ext switch
+            {
+                ".doc" or ".ppt" => "older Word or PowerPoint file, which can't be read here. Ask the user to save it as .docx or .pptx (File > Save As) and attach that",
+                ".dwg" or ".dxf" => "CAD drawing; read it with the tool mcp__csi-promax__read_cad_drawing (load it with ToolSearch; the overview first, then the layers you need)",
+                ".e2k" or ".$et" => "ETABS text file; read it with the Read tool",
+                ".edb" => "ETABS model file; it can be opened in ETABS by the user, not read here",
+                ".xls" or ".xlsb" => "older or binary Excel file, which can't be read here. Ask the user to save it as .xlsx (File > Save As) and attach that",
+                ".csv" => "spreadsheet as plain text; read it with the Read tool",
+                _ when ImageType(a.Path) is not null => "image (more than " + MaxImages + " images: read it with the Read tool)",
+                _ => "file; read it with the Read tool if it is text",
+            };
+            notes.Append("- ").Append(a.Path).Append(" (").Append(kind).Append(")\n");
+        }
+        var body = text.Length > 0 ? text : attachments.Count == 1 ? "Please look at the attached file." : "Please look at the attached files.";
+        if (notes.Length > 0) body += "\n\nAttached files (full paths on this PC):\n" + notes.ToString().TrimEnd();
+        if (contents.Length > 0) body += contents.ToString().TrimEnd();
+        if (images.Count > 0)
+            body += "\n\n(Attached picture" + (images.Count > 1 ? "s" : "") + ": " + string.Join(", ", pictureNames) + ")";
+        return StreamInput.UserMessage(body, images, pdfs);
+    }
+
+    /// <summary>A PDF: sent whole when it fits, as the Claude app does; otherwise its text goes to a file the note names.</summary>
+    private static string PdfNote(Attachment a, AttachedSoFar used, List<(string, string)> pdfs)
+    {
+        var bytes = Tools.SharedRead.AllBytes(a.Path);
+        // PdfPig opens it only when it could still fit, for an exact page count.
+        var check = PdfAttachment.Assess(bytes, used.Pages, used.Bytes, used.Bytes + bytes.Length <= PdfAttachment.MaxBytes ? PdfFiles.PageCount(bytes) : null);
+        if (check.Verdict == PdfAttachment.Verdict.Send)
+        {
+            pdfs.Add((a.Name, Convert.ToBase64String(bytes)));
+            used.Pages += check.Pages == 0 ? 20 : check.Pages;
+            used.Bytes += bytes.Length;
+            return "PDF" + (check.Pages > 0 ? $" of {check.Pages} page{(check.Pages == 1 ? "" : "s")}" : "") +
+                   ", included in full with this message: read it from there, not with the Read tool";
+        }
+        if (check.Verdict == PdfAttachment.Verdict.NotPdf) return PdfAttachment.Note(check, null, false);
+        // Split by itself into parts its helpers read whole (read_pdf_part: always in the connection inside ETABS, and in a
+        // connector program as new as this add-in).
+        if (check.Verdict != PdfAttachment.Verdict.Locked && !ClaudeCli.OlderConnectorInUse)
+        {
+            try
+            {
+                var ready = PdfFiles.ForChat(a.Path, ClaudeCli.AttachmentsFolder, PdfAttachment.MaxBytes);
+                if (ready.Parts.Count > 0)
+                    return PdfAttachment.PartsNote(check, ready.Parts.Select(p => (p.File, p.FirstPage, p.LastPage)).ToList(), ready.Pages, ready.TextFile);
+            }
+            catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or InvalidOperationException) { }
+        }
+        var target = ReadFileName(a.Path, "text");
+        var result = PdfFiles.WriteText(a.Path, target);
+        return PdfAttachment.Note(check, result.Error is null ? target : null, result.MostlyPictures);
+    }
+
+    /// <summary>A Word, PowerPoint or Excel file: its text in the message (or in a file when long), and its larger pictures while there is room.</summary>
+    private static string OfficeNote(Attachment a, StringBuilder contents, int imagesSoFar, Action<string, string> addImage)
+    {
+        var ext = System.IO.Path.GetExtension(a.Path).ToLowerInvariant();
+        var workbook = OfficeText.IsWorkbook(a.Path);
+        var what = ext == ".docx" ? "Word document" : workbook ? "Excel workbook" : "PowerPoint file";
+        OfficeText.Content content;
+        try { content = OfficeText.Read(a.Path); }
+        catch (Exception ex) when (ex is InvalidDataException or System.Xml.XmlException)
+        {
+            return $"{what} that couldn't be read ({ex.Message}). Ask the user to save it again as {(workbook ? ".xlsx" : ".docx or .pptx")}, or to export it to PDF and attach that";
+        }
+        string where;
+        if (content.Text.Length == 0) where = "it has no text";
+        else if (content.Text.Length <= MaxInlineText)
+        {
+            contents.Append($"\n\nText of {a.Name}:\n<file name=\"{a.Name}\">\n{content.Text}\n</file>");
+            where = "its text is below";
+        }
+        else
+        {
+            var target = ReadFileName(a.Path, "text");
+            File.WriteAllText(target, content.Text, new UTF8Encoding(false));
+            where = $"its text is long, so it is in {target}: search it with Grep and read the parts you need with the Read tool";
+        }
+        var room = Math.Max(0, MaxImages - imagesSoFar);
+        var shown = 0;
+        if (room > 0 && content.Pictures.Count > 0)
+        {
+            foreach (var (name, bytes) in content.Pictures.Take(room))
+            {
+                var path = ReadFileName(a.Path, name);
+                File.WriteAllBytes(path, bytes);
+                try { addImage(path, $"{a.Name}: {name}"); shown++; }
+                catch (Exception ex) when (ex is NotSupportedException or FileFormatException or ArgumentException or InvalidOperationException or IOException) { }
+            }
+        }
+        var pictures = content.Pictures.Count == 0 ? "" :
+            shown == content.Pictures.Count ? $"; its {shown} picture{(shown == 1 ? " is" : "s are")} attached" :
+            $"; {shown} of its {content.Pictures.Count} pictures {(shown == 1 ? "is" : "are")} attached (the limit is {MaxImages} pictures a message)";
+        var sheets = workbook ? "; each sheet is a table headed by its column letters, each row led by its row number, so name cells like B12. " +
+                                "Values are what Excel last showed (formula results; a formula saved without one shows as =formula). The ETABS tools that take a file (e.g. place_many, boq_check) accept this path" : "";
+        return $"{what}; {where}{pictures}{sheets}";
+    }
+
+    /// <summary>
+    /// A file next to the pasted pictures (kept two weeks, like them) for what was read from <paramref name="source"/>:
+    /// "name stamp - text.txt", or "name stamp - image1.png" for a picture taken out of it.
+    /// </summary>
+    private static string ReadFileName(string source, string what)
+    {
+        Directory.CreateDirectory(ClaudeCli.AttachmentsFolder);
+        var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss", System.Globalization.CultureInfo.InvariantCulture);
+        var name = $"{System.IO.Path.GetFileNameWithoutExtension(source)} {stamp} - {what}";
+        return System.IO.Path.Combine(ClaudeCli.AttachmentsFolder, what == "text" ? name + ".txt" : name);
+    }
+
+    private static string? ImageType(string path) => System.IO.Path.GetExtension(path).ToLowerInvariant() switch
+    {
+        ".png" => "image/png",
+        ".jpg" or ".jpeg" => "image/jpeg",
+        ".gif" => "image/gif",
+        ".webp" => "image/webp",
+        ".bmp" or ".tif" or ".tiff" => "image/png", // converted
+        _ => null,
+    };
+
+    /// <summary>
+    /// A picture as an image block: passed as is when it is a small PNG/JPEG/GIF/WebP, otherwise scaled to at most
+    /// 1568 px on the long side (what Claude looks at anyway) and re-encoded, keeping it under the API's size limit.
+    /// </summary>
+    private static (string MediaType, string Base64) EncodeImage(string path)
+    {
+        var bytes = Tools.SharedRead.AllBytes(path);
+        var type = ImageType(path)!;
+        var native = System.IO.Path.GetExtension(path).ToLowerInvariant() is ".png" or ".jpg" or ".jpeg" or ".gif" or ".webp";
+        if (native && bytes.Length <= 3_500_000 && type == "image/webp") return (type, Convert.ToBase64String(bytes)); // WPF may not decode it
+
+        // The size from the header only, so a huge photo is never decoded at full resolution.
+        int width = 0, height = 0;
+        try
+        {
+            var probe = BitmapDecoder.Create(new MemoryStream(bytes), BitmapCreateOptions.DelayCreation, BitmapCacheOption.None).Frames[0];
+            (width, height) = (probe.PixelWidth, probe.PixelHeight);
+        }
+        catch (Exception ex) when (ex is NotSupportedException or FileFormatException or ArgumentException or InvalidOperationException) { }
+        if (native && bytes.Length <= 3_500_000 && width > 0 && Math.Max(width, height) <= 2000) return (type, Convert.ToBase64String(bytes));
+
+        // Decoded straight to at most 1568 px on the long side (setting one side keeps the aspect ratio).
+        var image = new BitmapImage();
+        image.BeginInit();
+        image.CacheOption = BitmapCacheOption.OnLoad;
+        image.StreamSource = new MemoryStream(bytes);
+        if (width <= 0 || Math.Max(width, height) > 1568)
+        {
+            if (width >= height) image.DecodePixelWidth = 1568;
+            else image.DecodePixelHeight = 1568;
+        }
+        image.EndInit();
+        image.Freeze();
+        BitmapSource source = image;
+        var png = Encode(new PngBitmapEncoder(), source);
+        if (png.Length <= 3_500_000) return ("image/png", Convert.ToBase64String(png));
+        var jpeg = Encode(new JpegBitmapEncoder { QualityLevel = 85 }, new FormatConvertedBitmap(source, PixelFormats.Bgr24, null, 0));
+        return ("image/jpeg", Convert.ToBase64String(jpeg));
+    }
+
+    private static byte[] Encode(BitmapEncoder encoder, BitmapSource source)
+    {
+        encoder.Frames.Add(BitmapFrame.Create(source));
+        using var stream = new MemoryStream();
+        encoder.Save(stream);
+        return stream.ToArray();
+    }
+
+    // ---- Events from Claude Code ----------------------------------------------------------------------------------
+
+    private void OnEvent(ChatEvent e)
+    {
+        _lastActivity = DateTime.UtcNow;
+        var turn = _turn;
+        switch (e)
+        {
+            case InitEvent init:
+                if (init.SessionId.Length > 0 && init.SessionId != _conv.SessionId)
+                {
+                    _conv.SessionId = init.SessionId;
+                    SaveSoon();
+                }
+                var server = init.Servers.FirstOrDefault(s => s.Name == ClaudeCli.ServerName);
+                var address = _engine?.McpAddress ?? ClaudeCli.McpAddress;
+                if (server.Name is null)
+                    Note(ToolsNote.Missing(inside: address.Length > 0));
+                else if (server.Status is not ("connected" or "pending" or ""))
+                {
+                    // Whether the PC blocks it takes a look at Claude Code's log and perhaps starting the connector: off the UI thread.
+                    var status = server.Status;
+                    var session = _s;
+                    _ = Task.Run(() => ClaudeCli.ToolsFailed(status, address))
+                        .ContinueWith(t => Dispatcher.BeginInvoke(new Action(() => In(session, () => { if (!_stopped) Note(t.Result); }))), TaskContinuationOptions.OnlyOnRanToCompletion);
+                }
+                if (turn is not null && !turn.Stopping) ShowStatus(turn.Shrinking ? "Shrinking this chat…" : null);
+                break;
+            case TextStartEvent start:
+            {
+                JobWriting();
+                var item = new ChatItem { Kind = "assistant" };
+                Add(item);
+                Hold(turn, item);
+                _texts[start.Key] = (item, _views[item]);
+                if (turn is not null) turn.SawText = true;
+                if (turn is { Stopping: false }) ShowStatus("CSI ProMax is writing…");
+                break;
+            }
+            case TextDeltaEvent delta:
+                if (!_texts.TryGetValue(delta.Key, out var target)) break;
+                target.Item.Text += delta.Text;
+                _dirty.Add(delta.Key);
+                SaveSoon();
+                RequestRender();
+                break;
+            case AssistantTextEvent text:
+                if (text.Text.Trim().Length == 0) break;
+                JobWriting();
+                if (turn is not null) turn.SawText = true;
+                var said = new ChatItem { Kind = "assistant", Text = text.Text };
+                Add(said);
+                Hold(turn, said);
+                break;
+            case ThinkingEvent:
+                JobThinking("", newBlock: true);
+                if (turn is { Stopping: false }) ShowStatus("CSI ProMax is thinking…");
+                break;
+            case ThinkingDeltaEvent thought:
+                JobThinking(thought.Text, newBlock: false);
+                break;
+            case ThinkingTextEvent whole:
+                JobThinking(whole.Text, newBlock: true);
+                break;
+            case ToolUseEvent tool:
+            {
+                var summary = StepNames.Describe(StreamParser.ShortName(tool.Name), tool.InputJson);
+                if (!_tools.TryGetValue(tool.Id, out var row))
+                {
+                    var item = new ChatItem { Kind = "tool", Name = StreamParser.ShortName(tool.Name), State = "running", Text = summary };
+                    Add(item);
+                    row = _rows[item];
+                    _tools[tool.Id] = row;
+                    JobToolStarted(tool.Id, item.Name, summary);
+                }
+                if (turn is not null) turn.SawTool = true;
+                if (turn is not null) (turn.Timing ??= new AnswerTiming(turn.Started)).ToolStarted(tool.Id, row.Item.Name, DateTime.UtcNow);
+                CrewCoordinatorDoes(row.Item.Name);
+                if (tool.InputJson.Length > 0)
+                {
+                    row.Item.Input = Pretty(tool.InputJson);
+                    SetTool(row, row.Item.State, summary, "");
+                    if (summary.Length > 0) _jobInputs[tool.Id] = summary;
+                }
+                if (turn is { Stopping: false })
+                    ShowStatus(StepNames.Running(row.Item.Name, row.Item.Text, MayAsk(row.Item.Name)));
+                break;
+            }
+            case ToolResultEvent result:
+                if (_tools.TryGetValue(result.ToolUseId, out var done))
+                {
+                    SetTool(done, result.IsError ? "failed" : "done", done.Item.Text, result.Text);
+                    // A file the step made (a workbook, a report, a presentation…): a card to open or save it.
+                    if (!result.IsError && FilesItem(done.Item.Name, result.Text) is { } files) Add(files);
+                }
+                JobToolEnded(result.ToolUseId, result.Text, result.IsError);
+                turn?.Timing?.ToolEnded(result.ToolUseId, DateTime.UtcNow);
+                if (turn is { Stopping: false }) ShowStatus("CSI ProMax is thinking…");
+                break;
+            case RetryEvent retry:
+                if (turn is { Stopping: false })
+                    ShowStatus(retry.Error is "rate_limit" or "overloaded"
+                        ? $"The service is busy right now; trying again (attempt {retry.Attempt} of {retry.MaxRetries})…"
+                        : $"Couldn't reach the service ({retry.Error}); trying again (attempt {retry.Attempt} of {retry.MaxRetries})…");
+                break;
+            case NoticeEvent notice:
+                Note(notice.Text);
+                break;
+            case CompactedEvent compacted:
+                Compacted(compacted, turn);
+                break;
+            case UsageEvent usage:
+                OnUsage(usage.Usage);
+                break;
+            case ContextEvent context:
+                // The summarising request of a shrink is not what later messages send.
+                if (turn is not { Shrinking: true })
+                {
+                    _contextTokens = context.Tokens;
+                    _conv.ContextFloor = ChatRecall.Floor(_conv.ContextFloor, context.Tokens);
+                }
+                break;
+            case ResultEvent end:
+                OnResult(end);
+                break;
+        }
+    }
+
+    private void OnResult(ResultEvent end)
+    {
+        var turn = _turn;
+        if (end.SessionId.Length > 0) _conv.SessionId = end.SessionId;
+        CountTurn(turn, end);
+        RenderDirty();
+        if (turn is null) return;
+        if (!turn.Shrinking) Tools.ActivityLog.Note("answer_time", (turn.Timing ?? new AnswerTiming(turn.Started)).Line(IsCoordinator ? "Coordinator" : "Chat", DateTime.UtcNow, _engine?.ThinkingMs(end.ApiMs) ?? end.ApiMs));
+        if (ShrinkEnded(turn, end)) return;
+        var message = end.Text.Trim().Length > 0 ? end.Text.Trim() : string.Join(" ", end.Errors);
+        if (end.IsError && !turn.Stopping && !turn.Retried && _engine?.ResumedFrom is not null &&
+            message.IndexOf("No conversation found", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            // The saved session is gone (deleted, or made on another PC): start fresh with the same message.
+            turn.Retried = true;
+            _conv.SessionId = "";
+            _conv.AttachedSession = ""; // the fresh session carries this message's attachments: counted as before, never less
+            _engine?.Kill();
+            _engine = null;
+            Note("The earlier conversation couldn't be reopened, so CSI ProMax starts fresh (it doesn't remember the messages above).");
+            _ = Deliver(turn);
+            return;
+        }
+        if (end.IsError && !turn.Stopping && ChatModels.IsRejection(message) && _engine is { } refused && FallBack(turn, refused.Model, message)) return;
+        if (!end.IsError && _engine is { } worked) _lastWorkingModel = worked.Model;
+        if (!end.IsError && !turn.Stopping) SignInHealth.Clear(); // an answer came: the sign-in works
+        if (end.IsError) turn.Outcome = "failed";
+        if (turn.Stopping)
+            Note("Stopped. Ask again, or say what to do instead.");
+        else if (end.IsError)
+            Failure(message, end.Subtype);
+        else if (!turn.SawText && message.Length > 0 && !FreeWorkers.IsNothing(message))
+            Add(new ChatItem { Kind = "assistant", Text = FreeWorkers.Strip(message) });
+        EndTurn();
+    }
+
+    /// <summary>A quiet turn's text is drawn out of sight until the turn ends (<see cref="CleanTurn"/>).</summary>
+    private void Hold(Turn? turn, ChatItem item)
+    {
+        if (turn is not { Quiet: true }) return;
+        UIElement? element = null;
+        if (!Hidden && _messages.Children.Count > 0)
+        {
+            element = _messages.Children[_messages.Children.Count - 1];
+            element.Visibility = Visibility.Collapsed;
+        }
+        turn.Held.Add((item, element));
+    }
+
+    /// <summary>
+    /// A turn ended: the coordinator's internal "No split." is taken out of everything it wrote (bugs 88, 94), and text
+    /// that said nothing else is dropped from the chat and its history. A quiet turn's held text is shown when it stays.
+    /// </summary>
+    private void CleanTurn(Turn turn)
+    {
+        var items = new List<ChatItem>();
+        for (var k = Math.Min(Math.Max(0, turn.FirstItem), _conv.Items.Count); k < _conv.Items.Count; k++)
+            if (_conv.Items[k].Kind == "assistant") items.Add(_conv.Items[k]);
+        foreach (var (item, _) in turn.Held) if (!items.Contains(item)) items.Add(item);
+        var gone = new List<ChatItem>();
+        foreach (var item in items)
+        {
+            var held = turn.Held.FirstOrDefault(h => h.Item == item).Element;
+            var kept = FreeWorkers.Strip(item.Text);
+            if (kept.Length == 0)
+            {
+                var element = held ?? ElementOf(item);
+                _conv.Items.Remove(item);
+                if (element is not null) _messages.Children.Remove(element);
+                gone.Add(item);
+                continue;
+            }
+            if (kept != item.Text)
+            {
+                item.Text = kept;
+                if (_views.TryGetValue(item, out var view)) view.SetMarkdown(kept);
+            }
+            if (held is not null) held.Visibility = Visibility.Visible;
+        }
+        if (gone.Count > 0) Forget(gone);
+        turn.Held.Clear();
+    }
+
+    /// <summary>The drawn element in the chat that holds an answer's text, or null when it isn't drawn.</summary>
+    private UIElement? ElementOf(ChatItem item)
+    {
+        if (Hidden || !_views.TryGetValue(item, out var view)) return null;
+        DependencyObject? at = view;
+        while (at is FrameworkElement fe && fe.Parent is { } parent)
+        {
+            if (ReferenceEquals(parent, _messages)) return fe;
+            at = parent;
+        }
+        return null;
+    }
+
+    private void Failure(string message, string subtype)
+    {
+        if (SignInHealth.LooksBlocked(message))
+        {
+            Error(SignInHealth.ChatNetBlocked(message));
+            return;
+        }
+        if (Autopilot.LostAccess(message)) AutopilotLostAccess(message);
+        if (LooksSignedOut(message))
+        {
+            SignInLost();
+            Error(Regex.IsMatch(message, "disabled|admin", RegexOptions.IgnoreCase)
+                ? $"CSI ProMax can't use this sign-in: {message.Trim()} Press Sign in again and sign in with the account that has your own plan, then send your message again."
+                : SignInError);
+            return;
+        }
+        if (subtype == "error_max_turns")
+        {
+            Error("CSI ProMax stopped after many steps. Say \"continue\" to let it carry on.");
+            return;
+        }
+        if (Regex.IsMatch(message, @"usage limit|rate limit|limit reached|out of (extra )?usage", RegexOptions.IgnoreCase))
+        {
+            Error($"Your plan's usage limit is reached: {message}. The conversation is kept; send again when the limit resets.");
+            return;
+        }
+        Error((message.Length > 0 ? message : "The chat reported an error.") + " Send your message again; if it keeps happening, press New chat.");
+    }
+
+    /// <summary>
+    /// The plan can't use the chosen model: say so with Claude Code's own words, go back to the model that last worked
+    /// (or the default) and send the same message again, once. False when there is nothing to go back to.
+    /// </summary>
+    private bool FallBack(Turn turn, string refused, string said)
+    {
+        // Only a turn that did nothing yet is sent again: never after text was streamed or a tool ran (it could run twice).
+        if (turn.SawText || turn.SawTool || turn.ModelRetried || ChatModels.Fallback(refused, _lastWorkingModel) is not { } back) return false;
+        turn.ModelRetried = true;
+        _engine?.Kill();
+        _engine = null;
+        _model = back;
+        // Automatic skips the refused model from now on; a model picked by hand goes back to the one that worked.
+        _refusedModels.Add(ChatModels.Find(refused).Id);
+        if (!ChatAuto.IsAuto(_conv.Model)) _conv.Model = back;
+        ShowModelChoice();
+        Error($"{ChatModels.Find(refused).Label} isn't available with your plan, so the chat went back to {ChatModels.Find(back).Label} " +
+              $"and sent your message again. The reply was: {said.Trim()}");
+        _ = Deliver(turn);
+        return true;
+    }
+
+    private static bool LooksSignedOut(string text) => Autopilot.LostAccess(text);
+
+    // ---- Sign-in ------------------------------------------------------------------------------------------------
+
+    /// <summary>What a message that failed for the sign-in says; its box carries a Sign in again button.</summary>
+    internal const string SignInError = "Your sign-in expired, so CSI ProMax couldn't answer. Press Sign in again, then send your message again.";
+
+    internal const string JobSignInError = "Your sign-in expired. Press Sign in again in the chat, then send this job a message to carry on.";
+
+    internal static bool IsSignInError(string text) =>
+        text.StartsWith("Your sign-in expired", StringComparison.Ordinal) || text.StartsWith("You're not signed in", StringComparison.Ordinal) ||
+        text.StartsWith("CSI ProMax can't use this sign-in", StringComparison.Ordinal);
+
+    /// <summary>A message (the chat's or a job's) failed for the sign-in: the chat says so until the user signs in again.</summary>
+    private void SignInLost()
+    {
+        SignInHealth.MarkFailed();
+        if (_setup is not (Setup.SigningIn or Setup.Checking)) _setup = Setup.SignedOut;
+        ShowSetup();
+        ShowStatus();
+    }
+
+    /// <summary>Sign in again (the error box, the usage menu): runs the sign-in in the browser, no console window.</summary>
+    internal void SignInAgain()
+    {
+        if (_stopped) return;
+        if (_install is null) { Check(quiet: false); return; }
+        Launch(Setup.SigningIn);
+    }
+
+    /// <summary>Claude Code's sign-in, hidden: it opens the browser. A PC that won't run it hidden gets the old window.</summary>
+    private static void StartSignIn(ClaudeCli.Install install)
+    {
+        try { SignInFlow.Start(install); }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
+        {
+            ClaudeCli.StartSignIn(install);
+        }
+    }
+
+    private void SignInChangedSoon()
+    {
+        try { Dispatcher.BeginInvoke(new Action(SignInChanged)); }
+        catch (InvalidOperationException) { }
+    }
+
+    /// <summary>The sign-in finished, failed or broke (from this chat, a job or Settings): the card and Autopilot follow.</summary>
+    private void SignInChanged()
+    {
+        if (_stopped || _sample) return;
+        switch (SignInFlow.Now)
+        {
+            case SignInFlow.State.Done when _setup is Setup.SigningIn or Setup.SignedOut:
+                Check(quiet: true);
+                break;
+            case SignInFlow.State.Failed when _setup == Setup.SigningIn:
+                _setup = Setup.SignedOut;
+                _poll.Stop();
+                ShowSetup();
+                ShowStatus();
+                break;
+        }
+        if (_setup == Setup.Ready && SignInHealth.Broken) SignInLost();
+    }
+
+    private void OnExited(ChatEngine engine, string tail)
+    {
+        _engine = null;
+        engine.Dispose();
+        var turn = _turn;
+        if (turn is null) return; // an idle engine ended: the next message starts another
+        RenderDirty();
+        if (turn.Stopping)
+        {
+            Note("Stopped. Ask again, or say what to do instead.");
+            EndTurn();
+            return;
+        }
+        if (!engine.Initialized && engine.ResumedFrom is not null && !turn.Retried)
+        {
+            // The saved session couldn't be reopened (deleted, or from another PC): start fresh with the same message.
+            turn.Retried = true;
+            _conv.SessionId = "";
+            _conv.AttachedSession = ""; // the fresh session carries this message's attachments: counted as before, never less
+            Note("The earlier conversation couldn't be reopened, so CSI ProMax starts fresh (it doesn't remember the messages above).");
+            _ = Deliver(turn);
+            return;
+        }
+        if (ChatModels.IsRejection(tail) && FallBack(turn, engine.Model, Last(tail, 300))) return;
+        if (!engine.Initialized && engine.Effort.Length > 0 && ChatAuto.IsEffortRefusal(tail) && !ClaudeCli.EffortRefused)
+        {
+            // An older Claude Code without --effort: the same message again without it.
+            ClaudeCli.EffortRefused = true;
+            Note("This Claude Code doesn't take an effort setting, so the chat runs at its default effort. Update Claude Code (claude update) to use the effort picker.");
+            _ = Deliver(turn);
+            return;
+        }
+        MarkRunningTools("stopped");
+        // What went wrong is said first, and the answer ends after (messages typed meanwhile go next, EndTurn; not
+        // when signed out).
+        var detail = Last(tail, 500);
+        if (LooksSignedOut(tail))
+        {
+            SignInLost();
+            Error(SignInError);
+        }
+        else if (SignInHealth.LooksBlocked(tail)) Error(SignInHealth.ChatNetBlocked(tail));
+        else if (Regex.IsMatch(tail, @"unknown option|unrecognized|invalid value", RegexOptions.IgnoreCase))
+            Error("The chat engine (Claude Code) is too old for the ETABS chat. Update it (open a Command Prompt and run: claude update), then send again." +
+                  (detail.Length > 0 ? "\n\n" + detail : ""));
+        else
+            Error("The chat stopped unexpectedly. Send your message again; the conversation is kept." + (detail.Length > 0 ? "\n\n" + detail : ""));
+        EndTurn();
+    }
+
+    private static string Last(string text, int max)
+    {
+        text = text.Trim();
+        return text.Length <= max ? text : "…" + text.Substring(text.Length - max);
+    }
+
+    private void MarkRunningTools(string state)
+    {
+        if (Hidden)
+        {
+            foreach (var item in _s.Tools.Values.Where(i => i.State == "running")) item.State = state;
+            return;
+        }
+        foreach (var row in _tools.Values.Where(r => r.Item.State == "running").ToList()) SetTool(row, state, row.Item.Text, "");
+    }
+
+    /// <summary>
+    /// The turn's last answer calls a job busy ("still drawing ...") that finished while it was being written (bug 123):
+    /// one line saying so is added to it, so the chat and the phone never leave a finished job looking busy.
+    /// </summary>
+    private void CorrectJobClaims(Turn turn)
+    {
+        if (turn.JobsAtStart is not { Count: > 0 } before || _board is null || turn.Planning || turn.Shrinking) return;
+        ChatItem? last = null;
+        for (var k = _conv.Items.Count - 1; k >= Math.Max(0, turn.FirstItem); k--)
+            if (_conv.Items[k].Kind == "assistant") { last = _conv.Items[k]; break; }
+        if (last is null || JobTruth.Correction(last.Text, before, _board.Snapshot()) is not { } line) return;
+        last.Text = last.Text.TrimEnd() + "\n\n" + line;
+        if (_views.TryGetValue(last, out var view)) view.SetMarkdown(last.Text);
+        Tools.ActivityLog.Note("job_claim_corrected", line);
+    }
+
+    private void EndTurn()
+    {
+        var ended = _turn;
+        if (ended is not null)
+        {
+            if (!Hidden) RenderDirty(); // the turn's text is complete before it is cleaned
+            CleanTurn(ended);
+            CorrectJobClaims(ended);
+            if (!ended.Planning && !ended.Shrinking) CatchQuestions(ended);
+        }
+        if (_turn?.KillTimer is { } timer) timer.Stop();
+        // An answer ended: the next message's model note counts changes from now (not after a brief's planning or a shrink).
+        if (ended is { Planning: false, Shrinking: false }) ETABS.ChatModelWatch.Mark(_conv.Key);
+        // "Done in X. By hand: about Y. Saved: Z." when the task's tools saved any time: on the job card when it has one.
+        string? time = null;
+        // (A chat answering in the background has no task time: it ended when the chat was left.)
+        try
+        {
+            if (_turn is not null && !Hidden)
+            {
+                var since = _turn.Started;
+                var jobs = _board?.Snapshot().Count(j => j.ReviewOf == 0 && j.GoalCheck == 0 && j.Created >= since) ?? 0;
+                time = ETABS.TimeLog.EndChat(ETABS.JobUndo.ElementsChanged, _askedAt, jobs);
+            }
+        }
+        catch (Exception) { }
+        _askedAt = null;
+        var stopped = _turn?.Stopping == true || _control?.State == JobState.Stopping;
+        var left = new List<(string Id, string Text)>();
+        if (_control is not null) left = EndJob(stopped ? "stopped" : _turn?.Outcome ?? "done", time);
+        else if (time is not null) Note(time);
+        MarkRunningTools("stopped");
+        _turn = null;
+        CrewCoordinatorDoes(null);
+        // Idle now: the streaming keys and tool ids of the turn are no longer needed (the drawn items stay in _views/_rows).
+        if (_dirty.Count > 0) RenderDirty();
+        if (Hidden)
+        {
+            _s.Texts.Clear();
+            _s.Tools.Clear();
+            _s.Now = "";
+        }
+        else
+        {
+            _texts.Clear();
+            _tools.Clear();
+        }
+        _lastActivity = DateTime.UtcNow;
+        Save();
+        ShowStatus();
+        TrimDrawn();
+        // Messages sent during the task that no step picked up: sent now as the next message, however the answer ended
+        // (finished, Stop, killed, failed or stuck), so they never wait behind a dead answer (bug 68). Back in the box only
+        // when they can't go (a model switch waits, or the chat isn't ready).
+        SendLeftover(left, hold: !Hidden && _pendingModel is not null, stopped);
+        if (!Hidden) ShrinkIfLong(ended, stopped || left.Count > 0);
+        if (ended is { Planning: false, Shrinking: false } && !stopped && ended.Outcome == "done") Finished(ended);
+        // A kind picked while it answered: the chat switches now (in the background it is only kept for the next message).
+        if (_pendingType is { } kind)
+        {
+            _pendingType = null;
+            if (Hidden) _conv.Type = kind;
+            else SetChatType(kind);
+        }
+        // Jobs that finished while the main chat answered report back now.
+        Later(FlushReports, DispatcherPriority.Background);
+        // Requests handed over from another chat go to the coordinator next.
+        Later(SendHanded, DispatcherPriority.Background);
+        AutopilotTurnEnded(ended, stopped);
+        if (Hidden) Later(AwayCheck, DispatcherPriority.Background);
+        In(_shown, TryPendingModel);
+    }
+
+    /// <summary>A model switch held while the shown chat answered or its jobs worked happens once they are done.</summary>
+    private void TryPendingModel()
+    {
+        if (_pendingModel is not { } next || _turn is not null || JobsOpen) return;
+        _pendingModel = null;
+        SwitchTo(next.Key, next.Title);
+    }
+
+    /// <summary>Swaps the chat styles for the ones with (or without) hover fades when the animation level changed.</summary>
+    private void MotionChanged()
+    {
+        var want = ChatUi.Styles();
+        var styles = Resources.MergedDictionaries;
+        if (styles.Contains(want)) return;
+        var at = styles.IndexOf(ChatUi.Styles(!ChatUi.Animate));
+        if (at >= 0) styles[at] = want;
+    }
+
+    /// <summary>
+    /// A long task just finished: the last answer or job card glows once in the accent colour (Full animations), and
+    /// ETABS's taskbar button flashes when another program is in front (Full and Reduced).
+    /// </summary>
+    private void Finished(Turn turn)
+    {
+        if (Hidden) return;
+        if (DateTime.UtcNow - turn.Started < LongTask || _messages.Children.Count == 0) return;
+        // The answer or job card, not the "Done in…" note after it (each drawn child is item _firstShown + its index).
+        var index = _conv.Items.FindLastIndex(i => i.Kind is "assistant" or "job") - _firstShown;
+        var last = (index >= 0 && index < _messages.Children.Count ? _messages.Children[index] : _messages.Children[_messages.Children.Count - 1]) as FrameworkElement;
+        // After the list has laid out the last message (and glided to it), so the glow sits around what you see.
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
+        {
+            if (last is not null && IsVisible) ChatUi.Glow(last);
+            ChatUi.FlashIfAway(this);
+        }));
+    }
+
+    private void StopTurn()
+    {
+        var turn = _turn;
+        if (turn is null || turn.Stopping) return;
+        if (turn.Planning)
+        {
+            StopBrief(turn);
+            return;
+        }
+        turn.Stopping = true;
+        // The running ETABS tool stops at its next item too: the item in progress is rolled back, finished ones kept.
+        _control?.Apply(JobAction.Stop);
+        Brand.SetBusy(_stop, true, ""); // a spinner in the round button; the status line says "Stopping…"
+        if (_stop.Content is StackPanel { Children.Count: > 0 } busy && busy.Children[0] is FrameworkElement spinner) spinner.Margin = new Thickness(0);
+        ShowStatus("Stopping…");
+        var engine = _engine;
+        if (engine is { IsAlive: true }) _ = engine.InterruptAsync().ContinueWith(_ => { }, TaskScheduler.Default);
+        // If Claude Code doesn't end the turn soon (a tool call waiting on ETABS, say), end the process; the
+        // conversation is resumed with the next message.
+        turn.KillTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(engine is { IsAlive: true } ? 6 : 0.1) };
+        var session = _s; // the chat may be left meanwhile: it stops there all the same
+        turn.KillTimer.Tick += (_, _) => In(session, () =>
+        {
+            turn.KillTimer.Stop();
+            if (_turn != turn) return;
+            _engine?.Kill();
+            _engine = null;
+            RenderDirty();
+            Note("Stopped. Ask again, or say what to do instead. (An ETABS tool that was already running finishes on its own.)");
+            EndTurn();
+        });
+        turn.KillTimer.Start();
+    }
+
+    /// <summary>A new chat, of <paramref name="type"/> (ChatTypes) or the Settings' default type.</summary>
+    private void NewChat(string? type = null)
+    {
+        if (_stopped) return;
+        // The chat shown stays in the history; whatever it is doing (an answer, its jobs, an Autopilot run) carries on in
+        // the background, and Chats at the top says when it is done.
+        if (!LeaveShown(out var why))
+        {
+            Status(why ?? "This chat can't be left right now.", spin: false);
+            return;
+        }
+        ShowNew(ChatStore.New(ConversationKey, ConversationTitle, type ?? DefaultType()));
+        CloseDrawer();
+        _input.Focus();
+    }
+
+    // ---- History drawer (IHistoryHost) ----------------------------------------------------------------------------
+
+    private void ToggleDrawer()
+    {
+        if (_drawerOpen) CloseDrawer();
+        else OpenDrawer();
+    }
+
+    private void OpenDrawer()
+    {
+        if (_stopped) return;
+        if (_drawer is null)
+        {
+            _drawer = new HistoryDrawer(this) { HorizontalAlignment = HorizontalAlignment.Left };
+            _center.Children.Add(_drawer);
+            _center.SizeChanged += (_, _) => SizeDrawer();
+        }
+        SizeDrawer();
+        _drawerOpen = true;
+        _scrim.Visibility = Visibility.Visible;
+        _drawer.Visibility = Visibility.Visible;
+        // The drawer slides in from the left over a scrim that fades in; neither keeps a transform once there.
+        ChatUi.Slide(_drawer, -_drawer.Width, open: true);
+        ChatUi.Fade(_scrim, show: true);
+        AutomationProperties.SetItemStatus(_menu, "Expanded");
+        _drawer.Refresh();
+        _drawer.FocusSearch();
+    }
+
+    private void SizeDrawer()
+    {
+        if (_drawer is not null) _drawer.Width = Math.Max(200, Math.Min(340, _center.ActualWidth - 40));
+    }
+
+    public void CloseDrawer()
+    {
+        if (_drawer is not { } drawer || !_drawerOpen) return;
+        _drawerOpen = false;
+        ChatUi.Slide(drawer, -drawer.Width, open: false, () => { if (!_drawerOpen) drawer.Visibility = Visibility.Collapsed; });
+        ChatUi.Fade(_scrim, show: false, () => { if (!_drawerOpen) _scrim.Visibility = Visibility.Collapsed; });
+        AutomationProperties.SetItemStatus(_menu, "Collapsed");
+        _menu.Focus();
+    }
+
+    string IHistoryHost.ModelKey => ConversationKey;
+
+    string IHistoryHost.CurrentFile => _conv.File;
+
+    string? IHistoryHost.StateOf(string file) => StateOf(file);
+
+    void IHistoryHost.NewChat() => NewChat();
+
+    void IHistoryHost.OpenChat(ChatSummary chat)
+    {
+        if (string.Equals(chat.File, _conv.File, StringComparison.OrdinalIgnoreCase))
+        {
+            CloseDrawer();
+            return;
+        }
+        var away = AwayOf(chat.File);
+        var conv = away is null ? ChatStore.Read(chat.File) : null;
+        if (away is null && conv is null)
+        {
+            Status("That chat couldn't be read. Open the history again and press Refresh.", spin: false);
+            return;
+        }
+        // The chat shown carries on in the background with whatever it is doing (its answer, jobs or Autopilot).
+        if (!LeaveShown(out var why))
+        {
+            Status(why ?? "This chat can't be left right now.", spin: false);
+            CloseDrawer();
+            return;
+        }
+        if (away is not null) ShowSession(away);
+        else ShowNew(conv!);
+        CloseDrawer();
+        _input.Focus();
+    }
+
+    void IHistoryHost.ChangeChat(string file, Action<Conversation> change)
+    {
+        if (string.Equals(file, _conv.File, StringComparison.OrdinalIgnoreCase))
+        {
+            change(_conv);
+            ChatStore.Save(_conv, touch: false);
+            ShowTitle();
+            return;
+        }
+        if (ChatStore.Read(file) is not { } conv) return;
+        change(conv);
+        ChatStore.Save(conv, touch: false);
+    }
+
+    bool IHistoryHost.DeleteChat(string file)
+    {
+        var current = string.Equals(file, _conv.File, StringComparison.OrdinalIgnoreCase);
+        if (current && Working(_shown)) return false;
+        if (AwayOf(file) is { } away)
+        {
+            if (Working(away)) return false;
+            _away.Remove(away);
+            ShowChats();
+        }
+        if (!ChatStore.Delete(file)) return false;
+        if (current)
+        {
+            LetGo(_shown);
+            ShowNew(ChatStore.New(ConversationKey, ConversationTitle));
+        }
+        return true;
+    }
+
+    private void ModelChanged()
+    {
+        if (_stopped) return;
+        // An autopilot keeps its chat whichever model ETABS shows (it may work on several), unless its own model was
+        // closed (it paused, AutopilotModelCheck): then the chat follows the model shown, as any chat does.
+        if (Run is { Active: true, ModelGone: false }) return;
+        // Not while the chat answers or its jobs work: the switch happens when they are done.
+        if (_turn is not null || JobsOpen) _pendingModel = (ConversationKey, ConversationTitle);
+        else SwitchTo(ConversationKey, ConversationTitle);
+    }
+
+    private void SwitchTo(string key, string title)
+    {
+        if (string.Equals(key, _conv.Key, StringComparison.OrdinalIgnoreCase)) return;
+        if (!LeaveShown(out _))
+        {
+            _pendingModel = (key, title); // tried again when a background chat is done (EndTurn, EndRun)
+            return;
+        }
+        var conv = ChatStore.Load(key, title);
+        if (AwayOf(conv.File) is { } away) ShowSession(away);
+        else ShowNew(conv);
+        if (_setup == Setup.Ready) RememberLeftOver();
+    }
+
+    private void IdleCheck()
+    {
+        // An idle Claude Code (and its MCP server) is ended after a while; the next message resumes the session.
+        if (_turn is null && _engine is not null && DateTime.UtcNow - _lastActivity > TimeSpan.FromMinutes(20))
+        {
+            _engine.Dispose();
+            _engine = null;
+            Remember(_conv);
+        }
+    }
+
+    /// <summary>Saves in a moment (several changes in a row are one write).</summary>
+    private void SaveSoon()
+    {
+        if (_sample || _stopped) return;
+        if (Hidden) _s.SaveDue = true; // written with the shown chat's next save (SaveAway)
+        if (!_saveSoon.IsEnabled) _saveSoon.Start();
+    }
+
+    private void Save()
+    {
+        if (_sample || _handedOver) return; // the DPI snapshot's and frame test's stand-alone pane keeps nothing; nor a retired one
+        if (Hidden)
+        {
+            _s.SaveDue = false;
+            if (_board is { } away) lock (away.Gate) ChatStore.Save(_conv);
+            else ChatStore.Save(_conv);
+            return;
+        }
+        _saveSoon.Stop();
+        var old = _conv.Items.ToList();
+        // The bridge may change a job meanwhile (a chat_jobs call): the jobs are written as one consistent state.
+        if (_board is { } board) lock (board.Gate) ChatStore.Save(_conv);
+        else ChatStore.Save(_conv);
+        // The store keeps the latest items only: let go of the drawn ones it dropped too.
+        var removed = old.Count - _conv.Items.Count;
+        if (removed <= 0) return;
+        Forget(old.Take(removed));
+        var drawnGone = Math.Min(Math.Max(0, removed - _firstShown), _messages.Children.Count);
+        if (drawnGone > 0) _messages.Children.RemoveRange(0, drawnGone);
+        _firstShown = Math.Max(0, _firstShown - removed);
+        ShowEarlierButton();
+    }
+
+    /// <summary>
+    /// This core is stopping: save the open chat (an answer cut off mid-way included, marked so), hand it to the next
+    /// core (ChatHandover, which reopens this same chat with its unsent message and Claude Code session), end the engine.
+    /// </summary>
+    private void Retire()
+    {
+        List<string> awayFiles = [];
+        // Large: back in the dock first, so the next core (or this one, revived) finds the pane where ETABS shows it.
+        CloseBig();
+        _stopped = true;
+        _poll.Stop();
+        SignInHealth.Changed -= SignInChangedSoon;
+        SignInFlow.Changed -= SignInChangedSoon;
+        // Nothing may keep a retired pane alive after a hot swap: timers (rooted by the dispatcher while running) and static events.
+        _idle.Stop();
+        _render.Stop();
+        _saveSoon.Stop();
+        // The autopilot's and the routines' clocks too: the next version runs them (a retired pane must not start turns).
+        _autoTimer?.Stop();
+        _jobsTimer?.Stop();
+        _routineTimer?.Stop();
+        Autopilot.Here = false;
+        // An Autopilot running in the background: its chat is the one handed over, so the next version carries the run on.
+        if (Run is not { Active: true } && _away.FirstOrDefault(a => a.Conv.Autopilot is { Active: true }) is { } run)
+        {
+            _away.Add(_shown);
+            _away.Remove(run);
+            _s = _shown = run;
+        }
+        UI.RestartNote.Changed -= ShowRestartNote;
+        Bridge.Approvals.LevelChanged -= ShowApprovalLevel;
+        try
+        {
+            if (_turn is { } turn)
+            {
+                turn.KillTimer?.Stop();
+                turn.Cancel?.Cancel();
+                MarkRunningTools("stopped");
+                // What streamed so far is already in the chat's items; say where it stopped.
+                _conv.Items.Add(new ChatItem { Kind = "note", Text = CutOffNote, Time = DateTime.UtcNow });
+                try { ETABS.TimeLog.EndChat(0, null, 0); } catch (Exception) { }
+            }
+            if (_control is not null)
+            {
+                _control.Apply(JobAction.Stop);
+                EndJob("stopped", null);
+            }
+            _undoTimer?.Stop();
+            _reportTimer?.Stop();
+            // The jobs carry on in the next version (21 Nov 2026, the owner: "when it updates it should continue jobs
+            // automatically"): one still at work is paused for the update rather than stopped, and the chats working in
+            // the background go over too (ChatHandover.Away), so the next version sends them all on by themselves.
+            PauseRunsForUpdate(now: false);
+            awayFiles = StopBackground("CSI ProMax updated while this chat worked in the background, so it stopped here. Send your message again to carry on.",
+                "", now: false, forUpdate: true);
+            if (ChatJobs.Board == _board) { ChatJobs.Board = null; ChatJobs.Changed = null; }
+            if (_boardChat.Length > 0) ChatJobs.Boards.Remove(_boardChat);
+        }
+        catch (Exception) { /* whatever failed above, the chat is saved and handed over below */ }
+        finally
+        {
+            _turn = null;
+            CrewCoordinatorDoes(null);
+            Save();
+            _handedOver = true;
+            ChatHandover.Leave(_conv, _input.Text, _pending.Select(p => p.Path), paneKey: _modelKey, paneTitle: _modelTitle, away: awayFiles);
+        }
+        _engine?.Kill();
+        _engine = null;
+        ShowStatus();
+        Brand.ReleaseTheme(this);
+        _instance = null;
+        _retired = this;
+    }
+
+    internal const string CutOffNote = "CSI ProMax updated while it was answering, so the answer stopped here. Send a message to carry on; the conversation is kept.";
+
+    // ---- Attachments ----------------------------------------------------------------------------------------------
+
+    private void PickFiles()
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Attach files for CSI ProMax",
+            Multiselect = true,
+            Filter = "Pictures, PDFs, CAD drawings, Excel, Word and other files|*.png;*.jpg;*.jpeg;*.gif;*.webp;*.bmp;*.tif;*.tiff;*.pdf;*.dwg;*.dxf;*.xlsx;*.xlsm;*.xls;*.csv;*.docx;*.pptx;*.txt;*.md;*.json;*.e2k|All files|*.*",
+        };
+        var owner = Window.GetWindow(this);
+        if ((owner is null ? dialog.ShowDialog() : dialog.ShowDialog(owner)) == true) AddFiles(dialog.FileNames);
+        _input.Focus();
+    }
+
+    private void AddFiles(IEnumerable<string> files)
+    {
+        foreach (var file in files)
+        {
+            if (Directory.Exists(file))
+            {
+                Status($"{System.IO.Path.GetFileName(file)} is a folder; attach the files in it instead.", spin: false);
+                continue;
+            }
+            if (!File.Exists(file) || _pending.Any(p => string.Equals(p.Path, file, StringComparison.OrdinalIgnoreCase))) continue;
+            _pending.Add(new Attachment { Path = file, Name = System.IO.Path.GetFileName(file) });
+        }
+        ShowChips();
+    }
+
+    private void ShowChips()
+    {
+        _chips.Children.Clear();
+        _chips.Margin = new Thickness(ChatUi.S2, _pending.Count > 0 ? ChatUi.S2 : 0, ChatUi.S2, 0);
+        foreach (var a in _pending)
+        {
+            var row = new DockPanel();
+            var remove = ChatUi.Ghost(ChatUi.GlyphCross, null, "Remove attachment " + a.Name, "Remove " + a.Name);
+            remove.Padding = new Thickness(4, 0, 4, 0);
+            remove.Margin = new Thickness(4, 0, 0, 0);
+            var attachment = a;
+            remove.Click += (_, _) =>
+            {
+                _pending.Remove(attachment);
+                ShowChips();
+                _input.Focus();
+            };
+            DockPanel.SetDock(remove, Dock.Right);
+            row.Children.Add(remove);
+            if (a.IsImage)
+            {
+                var thumb = ChatUi.Thumbnail(a.Path, 28);
+                thumb.Margin = new Thickness(0, 0, ChatUi.S1, 0);
+                DockPanel.SetDock(thumb, Dock.Left);
+                row.Children.Add(thumb);
+            }
+            else
+            {
+                var icon = ChatUi.Glyph(ChatUi.GlyphFile, Brand.K.Muted);
+                icon.Margin = new Thickness(2, 0, ChatUi.S1 + 2, 0);
+                DockPanel.SetDock(icon, Dock.Left);
+                row.Children.Add(icon);
+            }
+            row.Children.Add(new TextBlock
+            {
+                Text = a.Name, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 200,
+                VerticalAlignment = VerticalAlignment.Center, ToolTip = a.Path, FontSize = ChatUi.SmallSize,
+            });
+            var chip = new Border { Child = row, Padding = new Thickness(4, 2, 2, 2), Margin = new Thickness(0, 0, ChatUi.S1, ChatUi.S1), CornerRadius = new CornerRadius(ChatUi.RadiusSmall), BorderThickness = new Thickness(1) };
+            AutomationProperties.SetName(chip, (a.IsImage ? "Picture " : "File ") + a.Name);
+            chip.SetResourceReference(Border.BackgroundProperty, Brand.K.Surface);
+            chip.SetResourceReference(Border.BorderBrushProperty, Brand.K.BorderSubtle);
+            _chips.Children.Add(chip);
+        }
+    }
+
+    private void OnPreviewCanPaste(object sender, CanExecuteRoutedEventArgs e)
+    {
+        if (e.Command != ApplicationCommands.Paste) return;
+        try
+        {
+            if (Clipboard.ContainsImage() || Clipboard.ContainsFileDropList())
+            {
+                e.CanExecute = true;
+                e.Handled = true;
+            }
+        }
+        catch (System.Runtime.InteropServices.COMException) { }
+    }
+
+    private void OnPreviewPaste(object sender, ExecutedRoutedEventArgs e)
+    {
+        if (e.Command != ApplicationCommands.Paste) return;
+        try
+        {
+            if (Clipboard.ContainsFileDropList())
+            {
+                e.Handled = true;
+                AddFiles(Clipboard.GetFileDropList().Cast<string>());
+                return;
+            }
+            if (!Clipboard.ContainsImage()) return; // ordinary text paste
+            e.Handled = true;
+            byte[] png;
+            if (Clipboard.GetData("PNG") is MemoryStream stream) png = stream.ToArray();
+            else if (Clipboard.GetImage() is { } image)
+                // Screenshots often come as 32-bit bitmaps with an empty alpha channel: drop the alpha.
+                png = Encode(new PngBitmapEncoder(), new FormatConvertedBitmap(image, PixelFormats.Bgr24, null, 0));
+            else return;
+            AddFiles(new[] { SaveAttachment(png, "Pasted picture") });
+        }
+        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or IOException or UnauthorizedAccessException or NotSupportedException or InvalidOperationException)
+        {
+            Status("The clipboard couldn't be read: " + ex.Message, spin: false);
+        }
+    }
+
+    private static string SaveAttachment(byte[] png, string name)
+    {
+        Directory.CreateDirectory(ClaudeCli.AttachmentsFolder);
+        var stamp = DateTime.Now.ToString("yyyy-MM-dd HH.mm.ss", CultureInfo.InvariantCulture);
+        var safe = string.Concat(name.Select(c => System.IO.Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
+        var path = System.IO.Path.Combine(ClaudeCli.AttachmentsFolder, $"{safe} {stamp}.png");
+        File.WriteAllBytes(path, png);
+        return path;
+    }
+
+    /// <summary>The ribbon's Send view button (the loader shows the chat first). False when the chat isn't there.</summary>
+    internal static bool AttachCurrentView()
+    {
+        if (_instance is null) return false;
+        _instance.AttachView();
+        return true;
+    }
+
+    /// <summary>"Send current view": the same capture as capture_view_image (screen when possible), run on ETABS's thread.</summary>
+    private async void AttachView()
+    {
+        if (Brand.IsBusy(_view) || _stopped) return;
+        Brand.SetBusy(_view, true, "");
+        Status("Capturing the ETABS window…", spin: true);
+        try
+        {
+            var result = await App.Dispatcher.InvokeAsync(app =>
+            {
+                if (app.ActiveUIDocument?.Document is null) return ToolResult.Error("Open a model in ETABS first, then press the camera button again.");
+                try
+                {
+                    var args = new Dictionary<string, JsonElement> { ["pixel_width"] = JsonDocument.Parse("1600").RootElement.Clone() };
+                    return new CaptureViewImageTool().Execute(app, new ToolArgs(args));
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    return ToolResult.Error("The view couldn't be captured: " + ex.Message);
+                }
+            });
+            if (result.IsError || result.PngImage is not { Length: > 0 } png)
+            {
+                Status(result.IsError ? result.Text : "The view couldn't be captured. Try again, or attach a screenshot.", spin: false);
+                return;
+            }
+            var name = Regex.Match(result.Text, @"view '([^']+)'") is { Success: true } m ? "View " + m.Groups[1].Value : "Current view";
+            AddFiles(new[] { SaveAttachment(png, name) });
+            ShowStatus();
+        }
+        // async void: nothing may escape to ETABS's UI dispatcher.
+        catch (Exception ex)
+        {
+            Status("The view couldn't be captured: " + ex.Message, spin: false);
+        }
+        finally
+        {
+            Brand.SetBusy(_view, false);
+        }
+    }
+
+    // ---- Helpers --------------------------------------------------------------------------------------------------
+
+    private static string Pretty(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var text = JsonSerializer.Serialize(doc.RootElement, new JsonSerializerOptions { WriteIndented = true });
+            return text.Length > 1200 ? text.Substring(0, 1200) + "…" : text;
+        }
+        catch (JsonException) { return json; }
+    }
+}

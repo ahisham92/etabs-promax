@@ -1,3 +1,3 @@
-# ETABS ProMax licence changes, read by every copy at start.
+# CSI ProMax licence changes, read by every copy at start.
 # One per line: "<key id> ends yyyy-MM-dd" or "<key id> cancelled". Ids only, never names or PC codes.
 # The License manager on the owner's PC adds lines here.

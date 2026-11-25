@@ -1,12 +1,12 @@
-ETABS ProMax: first install
+CSI ProMax: first install
 
 Nothing here is an .exe and nothing needs administrator rights. It runs on the .NET 8 that ETABS 23 itself uses.
 
-1. Copy the "dist" folder from this zip to your Documents folder and rename it "ETABS ProMax".
-2. In ETABS: Tools > Add/Show Plugins. Browse to Documents\ETABS ProMax\EtabsProMaxPlugin.dll and add it with the
-   menu text "ETABS ProMax".
-3. Open a model, then Tools > ETABS ProMax. The window opens beside ETABS.
+1. Copy the "dist" folder from this zip to your Documents folder and rename it "CSI ProMax".
+2. In ETABS: Tools > Add/Show Plugins. Browse to Documents\CSI ProMax\CsiProMaxPlugin.dll and add it with the
+   menu text "CSI ProMax".
+3. Open a model, then Tools > CSI ProMax. The window opens beside ETABS.
 
 The chat runs on Claude Code on your own Claude plan. The window offers to install it or sign in when needed.
-Later versions download by themselves (ETABS ProMax > Check for updates). ETABS must be open and licensed on this PC:
-ETABS ProMax never starts, unlocks or stands in for ETABS.
+Later versions download by themselves (CSI ProMax > Check for updates). ETABS must be open and licensed on this PC:
+CSI ProMax never starts, unlocks or stands in for ETABS.

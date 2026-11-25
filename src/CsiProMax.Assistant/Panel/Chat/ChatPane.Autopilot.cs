@@ -1,0 +1,1204 @@
+using System.IO;
+using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Controls;
+using System.Windows.Threading;
+using CsiProMax.UI;
+
+namespace CsiProMax.Chat;
+
+/// <summary>
+/// Autopilot in the pane (Autopilot): a chat With coordinator started from New chat › New autopilot chat. The user types
+/// the goal; the coordinator answers with a plan and a card offers Approve (or the user sends changes and it plans
+/// again). Approve saves a backup copy of the model in a Backup folder beside it and starts the run: job reports come back as review
+/// turns, a turn that leaves nothing open gets a nudge, the final report ends it, usage near a limit pauses it until
+/// the limit resets. A banner over the chat says where it is, with Stop (and Resume when paused without a reset time).
+/// </summary>
+internal sealed partial class ChatPane
+{
+    public const string AutopilotApprove = "autopilot:approve";
+
+    private Border? _autoBanner;
+    private readonly TextBlock _autoText = new() { FontSize = ChatUi.SmallSize, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap };
+    private Button? _autoStop, _autoResume;
+    private DispatcherTimer? _autoTimer;
+    private bool _autoHooked;
+    private DateTime _autoIdleSince { get => _s.AutoIdleSince; set => _s.AutoIdleSince = value; }
+
+    private AutopilotRun? Run => _conv.Autopilot;
+
+    /// <summary>New chat › New autopilot chat: a chat With coordinator waiting for the goal.</summary>
+    private void NewAutopilotChat()
+    {
+        // One run at a time in this ETABS window (the phone and the unattended answers belong to it).
+        if (!_sample && Sessions.FirstOrDefault(s => s.Conv.Autopilot is { Active: true }) is { } running)
+        {
+            Status($"An Autopilot already runs in “{(ChatHistory.NameFor(running.Conv) is { Length: > 0 } n ? n : ChatHistory.Untitled)}”: one at a time. " +
+                   "Open it from Chats at the top, or press Stop on its banner first.", spin: false);
+            return;
+        }
+        NewChat(ChatTypes.Coordinator);
+        if (_conv.Type != ChatTypes.Coordinator) return; // the new chat couldn't be opened (the status line says why)
+        _conv.Autopilot = new AutopilotRun();
+        Note("Autopilot: type the goal and send. The coordinator answers with a plan; once you approve it, he and the " +
+             "workers carry on without asking you anything until the goal is met, a usage limit pauses them (they carry on " +
+             "when it resets) or you press Stop. A backup copy of the model is saved first, in a Backup folder beside it.");
+        Save();
+        ShowAutopilot();
+    }
+
+    /// <summary>The chat with an Autopilot on (shown or working in the background), else the shown one: the phone talks to it.</summary>
+    private ChatSession RunSession => Sessions.FirstOrDefault(s => s.Conv.Autopilot is { Active: true }) ?? _shown;
+
+    /// <summary>The project of chat <paramref name="s"/> on the phone: its own chat there, "Sam (Harbour)" (PhoneProjects).</summary>
+    private static string TopicOf(ChatSession? s) =>
+        s is null ? "" : Phone.PhoneProjects.Of(s.Conv.Key, s.Conv.Title, Environment.UserName, Settings.AgentSettings.Load().PhoneProjectNames);
+
+    /// <summary>The phone chat of the chat working now (_conv): updates and answers go there.</summary>
+    private string PhoneTopic => TopicOf(_s);
+
+    /// <summary>The projects this window's chats work on, for which this ETABS takes the phone's messages (PhoneLink.Claim).</summary>
+    private void ClaimPhoneProjects()
+    {
+        if (_sample) return;
+        try { Phone.PhoneLink.Claim(Sessions.Select(TopicOf).Where(t => t.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList(), DateTime.UtcNow); }
+        catch (Exception) { /* the next minute tries again */ }
+    }
+
+    /// <summary>
+    /// A message or button from the phone chat of project <paramref name="topic"/>: to the chat here on that project (the one
+    /// with an autopilot first, then the one shown, then any). The tool's main chat ("") goes to RunSession, as before.
+    /// </summary>
+    private void ToPhoneChat(string topic, Action act)
+    {
+        if (topic.Length == 0) { In(RunSession, act); return; }
+        var same = Sessions.Where(s => Phone.PhoneProjects.Same(TopicOf(s), topic)).ToList();
+        var to = same.FirstOrDefault(s => s.Conv.Autopilot is { Active: true }) ?? same.FirstOrDefault(s => ReferenceEquals(s, _shown)) ?? same.FirstOrDefault();
+        if (to is not null) { In(to, act); return; }
+        _ = AskUser.SendUpdateAsync($"{topic} isn't open in CSI ProMax on the PC now, so this wasn't taken in. Open the model there (central, local or detached copy) and write again.", topic);
+    }
+
+    /// <summary>The banner, the unattended switch and the timer, for the chat shown now.</summary>
+    private void ShowAutopilot()
+    {
+        if (!_autoHooked)
+        {
+            _autoHooked = true;
+            // The run's log, the phone's answers, messages and commands go to the chat the run works in, shown or not.
+            Autopilot.Logged += (kind, text) => Dispatcher.BeginInvoke(new Action(() => In(RunSession, () => AutopilotLog(kind, text))));
+            AskUser.Logged += text => Dispatcher.BeginInvoke(new Action(() => In(RunSession, () => AutopilotLog(AutopilotEntry.Asked, text))));
+            AskUser.Answered += q => Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (q.TabNumber == 0)
+                {
+                    In(q.JobKey.Length > 0 && SessionOf(q.JobKey) is { } of ? of : RunSession, () => PhoneAnswered(q));
+                    return;
+                }
+                // A Questions tab question: to the tab of the chat that asked it.
+                if (_instance != this) return;
+                if (SessionOf(q.JobKey) is { } tab && JobBoard.ChatKey(tab.Conv.Id) == q.JobKey) In(tab, () => PhoneTabAnswered(q));
+                else _ = AskUser.SendUpdateAsync($"Q{q.TabNumber}'s chat isn't open in CSI ProMax on the PC now, so this answer wasn't taken in.", q.Topic);
+            }));
+            AskUser.TabSent += (q, error) => Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (_instance == this && SessionOf(q.JobKey) is { } tab && JobBoard.ChatKey(tab.Conv.Id) == q.JobKey) In(tab, () => PhoneTabSent(q, error));
+            }));
+            // Each project has its own chat on the phone (PhoneProjects): a message goes to this window's chat on that project.
+            AskUser.UserWrote += (text, topic, picture) => Dispatcher.BeginInvoke(new Action(() => ToPhoneChat(topic, () => FromPhone(text, picture))));
+            AskUser.Command += (name, topic) => Dispatcher.BeginInvoke(new Action(() => ToPhoneChat(topic, () => PhoneCommand(name))));
+            ChatJobs.TopicFor = key =>
+            {
+                try { return Dispatcher.Invoke(() => TopicOf(key is { Length: > 0 } && SessionOf(key) is { } of ? of : RunSession), DispatcherPriority.Send, CancellationToken.None, TimeSpan.FromSeconds(5)); }
+                catch (Exception) { return ""; } // a busy window: the tool's main chat
+            };
+            AskUser.Listen(); // a connected phone is read from now on: the user can write to the chat from it
+            // The phone shows the coordinator's name (Sam for one user, another name for the next): Settings › Chat.
+            Phone.PhoneLink.Agent = CrewStrip.Names.Coordinator;
+            CrewStrip.NamesChanged += () => Phone.PhoneLink.Agent = CrewStrip.Names.Coordinator;
+            _jobsTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher) { Interval = TimeSpan.FromMinutes(1) };
+            _jobsTimer.Tick += (_, _) =>
+            {
+                try { ClaimPhoneProjects(); PhoneRetry(); JobsProgress(); }
+                catch (Exception) { /* the next tick tries again */ }
+            };
+            _jobsTimer.Start();
+            ClaimPhoneProjects();
+        }
+        var run = _sample ? null : Run;
+        // Popups and approvals are answered for the user while a run works in any of this window's chats.
+        var anyRun = !_sample && Sessions.Any(s => s.Conv.Autopilot is { Active: true });
+        Autopilot.Here = anyRun;
+        // The clock ticks for every run, shown or in the background (AutopilotTickAll).
+        _autoTimer ??= AutopilotClock();
+        if (anyRun) _autoTimer.Start();
+        else _autoTimer.Stop();
+        if (Hidden)
+        {
+            if (run is { Active: true } && run.State != AutopilotRun.Approval) StartWatchdog();
+            return;
+        }
+        if (run is null)
+        {
+            if (_autoBanner is not null) _autoBanner.Visibility = Visibility.Collapsed;
+            return;
+        }
+        if (_autoBanner is null) BuildAutopilotBanner();
+        var done = _board?.Snapshot().Count(j => j.Number > run.JobsBefore && j.State == JobBoard.Done) ?? 0;
+        _autoText.Text = Autopilot.Banner(run, done, DateTimeOffset.UtcNow);
+        _autoBanner!.Visibility = Visibility.Visible;
+        _autoStop!.Visibility = run.Active ? Visibility.Visible : Visibility.Collapsed;
+        _autoResume!.Visibility = run.State == AutopilotRun.Paused && run.PausedUntil is null ? Visibility.Visible : Visibility.Collapsed;
+        AutomationProperties.SetName(_autoBanner, _autoText.Text);
+        if (run.Active && run.State != AutopilotRun.Approval) StartWatchdog();
+    }
+
+    /// <summary>Every 30 s: each run's tick (AutopilotTick) in its own chat, shown or working in the background.</summary>
+    private DispatcherTimer AutopilotClock()
+    {
+        var timer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher) { Interval = TimeSpan.FromSeconds(30) };
+        timer.Tick += (_, _) =>
+        {
+            foreach (var s in Sessions.Where(s => s.Conv.Autopilot is { Active: true }).ToList())
+                In(s, () =>
+                {
+                    try { AutopilotTick(); }
+                    catch (Exception) { /* the next tick tries again */ }
+                });
+        };
+        return timer;
+    }
+
+    private void BuildAutopilotBanner()
+    {
+        var row = new DockPanel { Margin = new Thickness(ChatUi.S3, ChatUi.S1, ChatUi.S3, ChatUi.S1) };
+        _autoStop = Pill("Stop", primary: false, "Stop the autopilot: open jobs stop and the report is written.", () => AutopilotStop("you pressed Stop"));
+        _autoResume = Pill("Resume", primary: true, "Carry on now.", () => AutopilotResume("You pressed Resume."));
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        buttons.Children.Add(_autoResume);
+        buttons.Children.Add(_autoStop);
+        DockPanel.SetDock(buttons, Dock.Right);
+        row.Children.Add(buttons);
+        var icon = ChatUi.Glyph("", Brand.K.Accent, 12);
+        icon.Margin = new Thickness(0, 0, ChatUi.S2, 0);
+        DockPanel.SetDock(icon, Dock.Left);
+        row.Children.Add(icon);
+        row.Children.Add(_autoText);
+        _autoBanner = new Border { Child = row, BorderThickness = new Thickness(0, 0, 0, 1) };
+        _autoBanner.SetResourceReference(Border.BackgroundProperty, Brand.K.Raised);
+        _autoBanner.SetResourceReference(Border.BorderBrushProperty, Brand.K.BorderSubtle);
+        Brand.Fg(_autoText, Brand.K.Text);
+        SetDock(_autoBanner, Dock.Top);
+        var at = Children.IndexOf(_switcherHome);
+        Children.Insert(at < 0 ? Children.Count - 1 : at, _autoBanner);
+
+        Button Pill(string text, bool primary, string help, Action click)
+        {
+            var b = new Button { Content = text, Margin = new Thickness(ChatUi.S2, 0, 0, 0), ToolTip = help };
+            b.SetResourceReference(StyleProperty, primary ? "SpmChatPrimary" : "SpmChatPill");
+            AutomationProperties.SetName(b, text);
+            AutomationProperties.SetHelpText(b, help);
+            b.Click += (_, _) =>
+            {
+                try { click(); }
+                catch (Exception ex) { Status($"That didn't work ({ex.Message}).", spin: false); }
+            };
+            return b;
+        }
+    }
+
+    /// <summary>
+    /// Send while the autopilot waits for its goal (or its plan's approval): the goal (or the change to it) goes to the
+    /// coordinator to plan. False when the chat isn't an autopilot waiting for a goal.
+    /// </summary>
+    private bool AutopilotGoal(string text, List<Attachment> attachments)
+    {
+        // A run that started keeps what the user writes with its goal: every later prompt, every job and the review team
+        // see it, not only the turn it came in with (31 Oct 2026: comments on how to do the plans were lost).
+        if (Run is { } said && said.Started != default && said.State is not (AutopilotRun.Planning or AutopilotRun.Approval) && text.Length > 0)
+        {
+            Autopilot.Heard(said, text);
+            Save();
+        }
+        // A paused run: whatever the user types carries it on, with their message as the coordinator's next turn.
+        if (Run is { State: AutopilotRun.Paused } && text.Length > 0)
+        {
+            AutopilotResume("You said to carry on.", turn: false);
+            return false;
+        }
+        // A run that ended (or that the coordinator stopped short): writing in its chat starts it again, so the rules,
+        // the free-worker rule and the review team apply to what the user asks now.
+        if (Run is { State: AutopilotRun.Done or AutopilotRun.Stopped } ended && ended.Started != default && text.Length > 0)
+        {
+            AutopilotRestart(ended);
+            return false;
+        }
+        if (Run is not { State: AutopilotRun.Planning or AutopilotRun.Approval } run || text.Length == 0) return false;
+        run.Goal = run.State == AutopilotRun.Approval && run.Goal.Length > 0 ? run.Goal + "\nChange from the user: " + text : text;
+        run.State = AutopilotRun.Planning;
+        Save();
+        ShowAutopilot();
+        _ = RunTurn(Autopilot.PlanRequest(run.Goal), attachments, "");
+        return true;
+    }
+
+    /// <summary>A coordinator turn ended (EndTurn): the plan waits for approval, the run carries on, or it is finished.</summary>
+    private void AutopilotTurnEnded(Turn? ended, bool stopped)
+    {
+        PhoneTurnEnded(ended, stopped);
+        if (Run is not { } run || ended is null || ended.Planning || ended.Shrinking) return;
+        if (!stopped && ended.Outcome == "done") _stalls = 0; // an answer that ended by itself: the stuck ones before don't add up
+        var last = _conv.Items.LastOrDefault(i => i.Kind == "assistant")?.Text ?? "";
+        if (run.State == AutopilotRun.Planning)
+        {
+            // Reading jobs still out: their reports bring the next turn, and the plan comes once they all reported.
+            if (JobsOpen || _reports.Count > 0) return;
+            if (stopped || ended.Outcome != "done" || last.Trim().Length == 0) return;
+            run.Plan = last.Trim();
+            run.State = AutopilotRun.Approval;
+            Add(new ChatItem { Kind = "note", Name = AutopilotApprove, Text = "Approve this plan to start the autopilot. To change it, type what to change and send." });
+            Save();
+            ShowAutopilot();
+            return;
+        }
+        if (run.State != AutopilotRun.Running) return;
+        if (last.Contains(Autopilot.DoneMark))
+        {
+            // Said to be met: the review team checks it in the models and files before the run ends.
+            if (!JobsOpen) AutopilotReview(last);
+            return;
+        }
+        _autoIdleSince = DateTime.UtcNow;
+        // Jobs still working or reports on their way: they bring the next turn.
+        Later(AutopilotNudgeIfIdle, DispatcherPriority.Background);
+    }
+
+    /// <summary>Nothing open, nothing to report, no final report: tell the coordinator to carry on (a few times at most).</summary>
+    private void AutopilotNudgeIfIdle()
+    {
+        if (Run is not { State: AutopilotRun.Running } run || _turn is not null || JobsOpen || _reports.Count > 0 || _stopped) return;
+        run.Idle++;
+        if (run.Idle > Autopilot.MaxIdle)
+        {
+            // The coordinator stopped short: the review team says what is still to do, and it goes back to him.
+            if (GoalReview.MoreRounds(run)) AutopilotReview(_conv.Items.LastOrDefault(i => i.Kind == "assistant")?.Text ?? "");
+            else AutopilotFinish(AutopilotRun.Stopped, "the coordinator stopped making progress without a final report");
+            return;
+        }
+        _ = RunTurn(Autopilot.Nudge(run), [], "");
+    }
+
+    /// <summary>The card's Approve: a backup copy of the model in a Backup folder beside it, then the run starts.</summary>
+    private async void ApproveAutopilot()
+    {
+        try
+        {
+            if (Run is not { State: AutopilotRun.Approval } run) return;
+            if (_turn is not null)
+            {
+                Status("Wait for the coordinator to finish answering, then approve.", spin: false);
+                return;
+            }
+            run.State = AutopilotRun.Running;
+            run.Started = DateTime.UtcNow;
+            run.Idle = 0;
+            // The reading jobs before approval stay the run's (their findings are what it builds on), and may change now.
+            run.JobsBefore = 0;
+            _board?.AllowChanges();
+            ShowAutopilot();
+            Status("Saving a backup copy of the model…", spin: true);
+            var (model, copy) = await On(AutopilotBackup());
+            run.Backup = copy;
+            // Other ETABS windows the run reaches (a documentation model linking this one) answer for you too, and back
+            // up their model before its first change.
+            AutopilotShare.Begin(Autopilot.RunId(_conv.Id, run), copy.Length > 0 ? model : "", DateTime.UtcNow);
+            AskUser.Goal = run.Goal;
+            Autopilot.UserWords = Autopilot.Words(run);
+            AskUser.Listen();
+            Note(run.Backup.Length > 0 ? $"Autopilot started. Backup copy of the model: {run.Backup}"
+                : "Autopilot started. No backup copy could be saved (the model has never been saved to a file).");
+            Save();
+            ShowAutopilot();
+            await RunTurn(Autopilot.Approved(run), [], "");
+        }
+        catch (Exception ex) { Status($"The autopilot couldn't start ({ex.Message}).", spin: false); }
+    }
+
+    /// <summary>Saves the model and copies it into a Backup folder beside it: the model's file and the copy's path ("" when none).</summary>
+    private static async Task<(string Model, string Copy)> AutopilotBackup()
+    {
+        string path;
+        try
+        {
+            // Saved first, so the copy has the model as it is now (the user approved anything the goal needs).
+            path = await CsiProMax.App.Dispatcher.InvokeAsync(app =>
+            {
+                if (app.ActiveUIDocument?.Document is not { } doc) return "";
+                return doc.PathName;
+            });
+        }
+        catch (Exception) { return ("", ""); }
+        if (path.Length == 0) return ("", "");
+        return (path, await Task.Run(() => ETABS.AutopilotBackups.Copy(path)));
+    }
+
+    /// <summary>Every 30 s: carry on after a pause whose limit has reset; nudge a run that went quiet.</summary>
+    private void AutopilotTick()
+    {
+        if (Run is not { Active: true } run) return;
+        var now = DateTimeOffset.UtcNow;
+        if (AskUser.Goal.Length == 0) AskUser.Goal = run.Goal; // a run carried on after ETABS started again
+        AutopilotBackfill(run);
+        if (Autopilot.UserWords.Length == 0) Autopilot.UserWords = Autopilot.Words(run);
+        AskUser.Listen(); // the phone is read for Stop/Resume while the run is on
+        AutopilotUpdateTick(run);
+        // The other ETABS windows know the run is still on, and what they answered goes into its log.
+        if (run.State != AutopilotRun.Approval && run.Started != default) AutopilotShare.Beat(Autopilot.RunId(_conv.Id, run), DateTime.UtcNow);
+        TakeSharedLog(run);
+        // Progress to the phone, and what came back from it (also while paused: the user's word carries a paused run on).
+        AutopilotProgress(run);
+        SendLateAnswers();
+        AutopilotConnection(run);
+        AutopilotModelCheck(run);
+        AutopilotStallCheck(run);
+        if (run.State == AutopilotRun.Paused)
+        {
+            // Paused for the sign-in: no retry while it is known not to work (each try would fail the same way); signing
+            // in again carries the run on (Checked).
+            if (run.AccessLost && run.PausedUntil is { } due && due <= now && SignInHealth.Broken)
+                run.PausedUntil = now + Autopilot.AccessRetry;
+            if (run.PausedUntil is { } until && until <= now)
+                AutopilotResume(run.AccessLost ? "Trying again after CSI ProMax lost access to your plan." : "The usage limit has reset.");
+            ShowAutopilot();
+            return;
+        }
+        if (_gapsWaiting && _turn is null && _reports.Count == 0) SendGaps(run);
+        if (_backfillWaiting && _turn is null && _reports.Count == 0 && run.State == AutopilotRun.Running)
+        {
+            _backfillWaiting = false;
+            _ = RunTurn(Autopilot.Recheck(run), [], "");
+        }
+
+        if (_turn is null && !JobsOpen && _reports.Count == 0 && DateTime.UtcNow - _autoIdleSince > TimeSpan.FromMinutes(2))
+        {
+            _autoIdleSince = DateTime.UtcNow;
+            AutopilotNudgeIfIdle();
+        }
+        ShowAutopilot();
+    }
+
+    /// <summary>The usage changed: near a limit the run pauses (running jobs finish their step; no new ones start).</summary>
+    private void AutopilotUsage()
+    {
+        if (Run is not { State: AutopilotRun.Running } run) return;
+        Settings.AgentSettings settings;
+        try { settings = Settings.AgentSettings.Load(); } catch (Exception) { settings = new Settings.AgentSettings(); }
+        var (pause, until, why, weekCap) = Autopilot.ShouldPause(_usage, DateTimeOffset.UtcNow, settings.AutopilotResumeWeekly,
+            Math.Min(1, Math.Max(0.1, settings.AutopilotFiveHourMax / 100.0)), JobBudget.Share(settings.AutopilotWeekShare), run.WeekUsed);
+        if (!pause) return;
+        run.State = AutopilotRun.Paused;
+        run.PausedUntil = until;
+        run.PauseWhy = why;
+        run.WeekCap = weekCap;
+        AutopilotLog(AutopilotEntry.Paused, why + (until is { } u ? $" Paused until {u.ToLocalTime():ddd HH:mm}." : " Paused until you press Resume or type \"continue\"."));
+        Note("Autopilot paused: " + why + (until is { } at ? $" It carries on at {at.ToLocalTime():ddd HH:mm}, when the limit resets." : " Press Resume, or type \"continue\", to carry on."));
+        Save();
+        ShowAutopilot();
+    }
+
+    /// <summary>The run's use of the week (its own share, Settings): the weekly figure's rises while it runs.</summary>
+    private double? _weekSeen;
+    private DateTimeOffset? _weekResets;
+
+    private void AutopilotWeekUsage(PlanUsage reported)
+    {
+        var week = reported.Windows.FirstOrDefault(w => w.Key == PlanUsage.Weekly);
+        var rise = JobBudget.Rise(ref _weekSeen, week?.Used, JobBudget.NewWindow(ref _weekResets, week?.ResetsAt));
+        if (rise > 0 && Run is { Active: true } run) run.WeekUsed += rise;
+    }
+
+    /// <summary>
+    /// A turn or job failed because Claude Code can't use the plan: the run pauses now and says so on the PC and the phone
+    /// (AutopilotTick tries again every 20 minutes). A review round cut off by it is run again after, without using a round.
+    /// </summary>
+    private void AutopilotLostAccess(string message)
+    {
+        if (Run is not { State: AutopilotRun.Running } run) return;
+        run.State = AutopilotRun.Paused;
+        run.AccessLost = true;
+        run.PausedUntil = DateTimeOffset.UtcNow + Autopilot.AccessRetry;
+        run.PauseWhy = "CSI ProMax can't use your Claude plan (sign in again).";
+        var text = Autopilot.AccessNote(message);
+        AutopilotLog(AutopilotEntry.Paused, text);
+        Note(text);
+        _ = AskUser.SendUpdateAsync(text, PhoneTopic);
+        Save();
+        ShowAutopilot();
+    }
+
+    private bool _reviewAgain { get => _s.ReviewAgain; set => _s.ReviewAgain = value; }
+
+    private void AutopilotResume(string why, bool turn = true)
+    {
+        if (Run is not { State: AutopilotRun.Paused } run) return;
+        run.State = AutopilotRun.Running;
+        var access = run.AccessLost;
+        run.AccessLost = false;
+        run.PausedUntil = null;
+        run.Offline = "";
+        run.ModelGone = false;
+        run.Idle = 0;
+        // A pause for the run's share of the week: carrying on starts its share again (a new week, or the user's say).
+        if (run.WeekCap) run.WeekUsed = 0;
+        run.WeekCap = false;
+        AutopilotLog(AutopilotEntry.Resumed, why);
+        Save();
+        ShowAutopilot();
+        PumpJobs();
+        if (_reviewAgain && _board is { } reviewBoard && !reviewBoard.Snapshot().Any(j => j.GoalCheck > 0 && j.Open))
+        {
+            // The review round lost access part-way: it runs again in full, and the lost one doesn't count.
+            _reviewAgain = false;
+            run.ReviewRound = Math.Max(0, run.ReviewRound - 1);
+            AutopilotReview(_conv.Items.LastOrDefault(i => i.Kind == "assistant")?.Text ?? "");
+            return;
+        }
+        if (access) Tools.ActivityLog.Note("autopilot", "resumed after lost access");
+        if (turn && _turn is null) _ = RunTurn(Autopilot.Resume(run, why), [], "");
+    }
+
+    /// <summary>The run's model is open in this ETABS (checked every 30 s, AutopilotModelCheck); true until known otherwise.</summary>
+
+    private bool _modelChecking { get => _s.ModelChecking; set => _s.ModelChecking = value; }
+
+    /// <summary>
+    /// Every 30 s while a run is on: is the model it works on (its chat's) still open in this ETABS? When it isn't, the run
+    /// pauses with a note naming it and the chat is free to leave; Resume carries it on once the model is open again.
+    /// </summary>
+    private void AutopilotModelCheck(AutopilotRun run)
+    {
+        var key = _conv.Key == NoModelKey ? "" : _conv.Key;
+        if (_modelChecking || key.Length == 0) return;
+        _modelChecking = true;
+        var s = _s;
+        _ = CsiProMax.App.Dispatcher.InvokeAsync(app => app.ActiveUIDocument is { } open ? new List<string> { ModelKey(open.PathName, open.Title) } : new List<string>())
+            .ContinueWith(t => Dispatcher.BeginInvoke(new Action(() => In(s, () =>
+            {
+                _modelChecking = false;
+                if (t.Status != TaskStatus.RanToCompletion || Run is not { Active: true } now || !ReferenceEquals(now, run) || _conv.Key != key) return;
+                try { ModelOpenChanged(run, Autopilot.ModelOpen(key, t.Result)); }
+                catch (Exception) { /* the next check tries again */ }
+            }))), TaskScheduler.Default);
+    }
+
+    private void ModelOpenChanged(AutopilotRun run, bool open)
+    {
+        if (open || run.ModelGone) return;
+        var title = _conv.Title.Length > 0 ? _conv.Title : "the model";
+        run.State = AutopilotRun.Paused;
+        run.ModelGone = true;
+        run.PausedUntil = null;
+        run.PauseWhy = Autopilot.ModelGoneWhy(title);
+        var text = Autopilot.ModelGoneNote(title);
+        AutopilotLog(AutopilotEntry.Paused, text);
+        Note(text);
+        _ = AskUser.SendUpdateAsync(text, PhoneTopic);
+        Save();
+        ShowAutopilot();
+        Status("Autopilot paused: " + run.PauseWhy + ".", spin: false);
+    }
+
+    /// <summary>When the connection last came back (default: it didn't drop): answers and jobs silent since are stuck.</summary>
+    private DateTime _reconnectedAt { get => _s.ReconnectedAt; set => _s.ReconnectedAt = value; }
+    private int _stalls { get => _s.Stalls; set => _s.Stalls = value; }
+
+    /// <summary>The coordinator's answer runs and is stuck (Autopilot.Stalled): no word from its Claude Code for too long.</summary>
+    private bool TurnStalled(DateTime now) =>
+        _turn is { Planning: false } && Autopilot.Stalled(_lastActivity, now, StepRunning, _reconnectedAt);
+
+    /// <summary>
+    /// Every minute, in every chat (shown or in the background, any type, with an Autopilot or not): an answer stuck
+    /// mid-stream (no word from its Claude Code for Autopilot.TurnStuck, ToolStuck while an ETABS step runs, AfterReconnect
+    /// once the connection came back) is ended and its process killed, with a note. Nothing is sent again by itself; the
+    /// messages typed while it hung ("will apply after this item") go as the next message (EndTurn). A running Autopilot
+    /// watches its coordinator itself (AutopilotStallCheck).
+    /// </summary>
+    private void StallCheckAll()
+    {
+        if (_stopped || _sample) return;
+        foreach (var s in Sessions.ToList()) In(s, AnswerStallCheck);
+    }
+
+    private void AnswerStallCheck()
+    {
+        if (Autopilot.RunWatchesAnswer(Run)) return;
+        var now = DateTime.UtcNow;
+        if (!TurnStalled(now)) return;
+        var quiet = now - _lastActivity;
+        Tools.ActivityLog.Note("chat", $"answer stuck for {quiet.TotalMinutes:0} min: ended");
+        var text = Autopilot.AnswerStalledNote(quiet);
+        if (Run is { Active: true }) AutopilotLog(AutopilotEntry.Note, text);
+        AbortTurn(text);
+    }
+
+    /// <summary>
+    /// Every 30 s while a run works: an answer of the coordinator stuck mid-stream (a connection dropped and came back, and
+    /// no error ever came) is ended and he is told to carry on; after a few in a row the run pauses for the user. Jobs
+    /// silent since the connection came back are restarted and told to check the model and carry on.
+    /// </summary>
+    private void AutopilotStallCheck(AutopilotRun run)
+    {
+        if (run.State != AutopilotRun.Running) return;
+        var now = DateTime.UtcNow;
+        if (_board is { } board)
+        {
+            var stuck = board.Snapshot().Where(j => Autopilot.JobStalled(j, run.JobsBefore, _reconnectedAt, now)).ToList();
+            foreach (var job in stuck)
+            {
+                board.Stop(job.Number, now);
+                if (_runs.Values.FirstOrDefault(r => r.Job.Number == job.Number) is { } jobRun) EndRun(jobRun, kill: true);
+                board.Message(job.Number, ConnectionWatch.CarryOnLine, now);
+                Tools.ActivityLog.Note("autopilot", $"job {job.Number} silent after the connection came back: restarted");
+            }
+            if (stuck.Count > 0)
+            {
+                AutopilotLog(AutopilotEntry.Note, $"Job{(stuck.Count == 1 ? "" : "s")} {string.Join(", ", stuck.Select(j => j.Number))} said nothing after the connection came back, " +
+                                                  "so they were restarted and told to check the model and carry on.");
+                JobsChanged();
+            }
+        }
+        if (!TurnStalled(now)) return;
+        var quiet = now - _lastActivity;
+        Tools.ActivityLog.Note("autopilot", $"coordinator answer stuck for {quiet.TotalMinutes:0} min: ended");
+        _stalls++;
+        if (_stalls >= Autopilot.MaxStalls)
+        {
+            // It keeps getting stuck: the run waits for the user instead of trying all night.
+            _stalls = 0;
+            run.State = AutopilotRun.Paused;
+            run.PausedUntil = null;
+            run.PauseWhy = Autopilot.StalledWhy;
+            AbortTurn("");
+            var why = $"Autopilot paused: {Autopilot.StalledWhy}. Press Resume, or type \"continue\", to carry on, or Stop to end it.";
+            AutopilotLog(AutopilotEntry.Paused, why);
+            Note(why);
+            _ = AskUser.SendUpdateAsync(why, PhoneTopic);
+            Save();
+            ShowAutopilot();
+            return;
+        }
+        var text = Autopilot.StalledNote(quiet);
+        AutopilotLog(AutopilotEntry.Note, text);
+        AbortTurn(text);
+        // Reports waiting go to him first (FlushReports), and bring the next turn themselves.
+        if (Run is { State: AutopilotRun.Running } still && ReferenceEquals(still, run) && _turn is null && _reports.Count == 0)
+            _ = RunTurn(Autopilot.Resume(run, "Your last answer got stuck (no word for a long time) and was ended."), [], "");
+    }
+
+    private ConnectionWatch _connection => _s.Connection;
+    private bool _probing { get => _s.Probing; set => _s.Probing = value; }
+
+    /// <summary>
+    /// Every 30 s while a run is on: is the internet there, and the company network the central model is on? When either
+    /// drops (two probes in a row) the run pauses: running jobs finish or fail their step, nothing new starts. When it is
+    /// back the run carries on by itself, and the jobs the drop cut off are told to check the model and carry on.
+    /// </summary>
+    private void AutopilotConnection(AutopilotRun run)
+    {
+        if (_probing) return;
+        _probing = true;
+        var central = _modelKey;
+        var s = _s;
+        _ = Task.Run(async () => (internet: await ConnectionProbe.InternetAsync().ConfigureAwait(false), network: await ConnectionProbe.NetworkAsync(central).ConfigureAwait(false)))
+            .ContinueWith(t => Dispatcher.BeginInvoke(new Action(() => In(s, () =>
+            {
+                _probing = false;
+                if (t.Status != TaskStatus.RanToCompletion || Run is not { Active: true } now || !ReferenceEquals(now, run)) return;
+                try { ConnectionChanged(run, t.Result.internet, t.Result.network); }
+                catch (Exception) { /* the next probe tries again */ }
+            }))), TaskScheduler.Default);
+    }
+
+    private void ConnectionChanged(AutopilotRun run, bool internet, bool? network)
+    {
+        _connection.Record(internet, network);
+        var down = _connection.Down;
+        if (down.Length > 0)
+        {
+            if (run.State == AutopilotRun.Running)
+            {
+                // Only a running run: a usage pause stays as it is (this one takes over if the limit resets while still offline).
+                run.State = AutopilotRun.Paused;
+                run.PausedUntil = null;
+                run.Offline = down;
+                run.OfflineSince = DateTime.UtcNow;
+                run.PauseWhy = ConnectionWatch.Why(down);
+                var text = $"Paused: {run.PauseWhy}. It carries on by itself when the connection is back.";
+                AutopilotLog(AutopilotEntry.Paused, text);
+                Note("Autopilot " + char.ToLowerInvariant(text[0]) + text.Substring(1));
+                Save();
+                ShowAutopilot();
+            }
+            else if (ConnectionWatch.IsConnectionPause(run) && run.Offline != down)
+            {
+                run.Offline = down;
+                run.PauseWhy = ConnectionWatch.Why(down);
+                Save();
+                ShowAutopilot();
+            }
+            return;
+        }
+        // Back only on a probe that worked (after ETABS started again, the watch knows nothing yet).
+        if (!ConnectionWatch.IsConnectionPause(run) || !internet || network == false) return;
+        // An answer or job silent since now is stuck (AutopilotStallCheck): no error comes from a stream that lost its connection.
+        _reconnectedAt = DateTime.UtcNow;
+        foreach (var other in Sessions) other.ReconnectedAt = _reconnectedAt; // every chat's answer silent since is stuck too
+        var back = ConnectionWatch.BackLine(run.Offline, run.OfflineSince, DateTime.UtcNow);
+        var cut = _board is { } board ? ConnectionWatch.CutOff(board.Snapshot(), run.JobsBefore, run.OfflineSince) : [];
+        foreach (var job in cut) _board!.Message(job.Number, ConnectionWatch.CarryOnLine, DateTime.UtcNow);
+        if (cut.Count > 0)
+        {
+            back += $" Job{(cut.Count == 1 ? "" : "s")} {string.Join(", ", cut.Select(j => j.Number))}, cut off by the drop, " +
+                    $"{(cut.Count == 1 ? "was" : "were")} told to check the model and carry on.";
+            JobsChanged();
+        }
+        Note(back);
+        AutopilotResume(back);
+    }
+
+    private bool _gapsWaiting { get => _s.GapsWaiting; set => _s.GapsWaiting = value; }
+    private List<UserQuestion> _lateAnswers => _s.LateAnswers;
+
+    /// <summary>
+    /// The user answered a question on the phone after the asking job stopped waiting for it (AskUser): the job gets it as a
+    /// message (it reopens if it had finished) to put its work right; the coordinator's own question comes as its next turn.
+    /// </summary>
+    private void PhoneAnswered(UserQuestion q)
+    {
+        AutopilotLog(AutopilotEntry.Asked, $"You answered Q{q.Id} on your phone: {q.Answer}");
+        if (q.JobKey.Length > 0 && _board?.FindKey(q.JobKey) is { } job)
+        {
+            _board.Message(job.Number, AskRules.LateLine(q), DateTime.UtcNow);
+            JobsChanged();
+            return;
+        }
+        _lateAnswers.Add(q);
+        SendLateAnswers();
+    }
+
+    private void SendLateAnswers()
+    {
+        if (_turn is not null || Run is not { State: AutopilotRun.Running or AutopilotRun.Paused }) return;
+        if (_fromPhone.Count > 0)
+        {
+            var asks = string.Join("\n\n", _fromPhone);
+            _fromPhone.Clear();
+            var turn = RunTurn(AskRules.FromPhone(asks, CrewStrip.Names.Coordinator, AskUser.History(PhoneTopic)), [], "");
+            _phoneTurn = _turn; // its answer goes back to the phone
+            _ = turn;
+            return;
+        }
+        if (_lateAnswers.Count == 0 || Run is not { State: AutopilotRun.Running }) return;
+        var text = "[Autopilot, not typed by the user] " + string.Join("\n", _lateAnswers.Select(AskRules.LateLine));
+        _lateAnswers.Clear();
+        _ = RunTurn(text, [], "");
+    }
+
+    private List<string> _fromPhone => _s.FromPhone;
+
+    /// <summary>
+    /// The user wrote from the phone: shown in the chat as their message (from your phone). During a run the coordinator
+    /// takes it in; otherwise the chat answers it as if typed here, and the answer goes back to the phone.
+    /// </summary>
+    private void FromPhone(string text, string? picture = null)
+    {
+        if (_instance != this) return; // one chat takes it
+        if (text.Length == 0) text = "(a picture)";
+        // An autopilot runs in one of this window's chats (shown or in the background): this runs in it (RunSession), so
+        // its coordinator takes the message and the phone never talks to a chat that only sees "another chat" (31 Oct 2026).
+        if (Run is not { Active: true } run)
+        {
+            _phoneAsks.Add(text);
+            if (picture is not null) _phoneFiles.Add(picture);
+            // Busy with something else: say so, so the phone isn't left wondering.
+            if (_turn is not null && _phoneAsks.Count == 1) _ = AskUser.SendUpdateAsync("Got it. Finishing the current task first, then this.", PhoneTopic);
+            NextPhoneAsk();
+            return;
+        }
+        const string how = "from your phone";
+        Add(new ChatItem { Kind = "user", Text = text + $"\n\n({how})", Files = picture is null ? [] : [picture], Name = picture is null ? "" : System.IO.Path.GetFileName(picture) });
+        // The run's coordinator reads the picture from its file.
+        if (picture is not null) text += $"\n\n[A picture came with it: {picture}. Look at it with Read.]";
+        if (AutopilotStopTyped(text.Trim(), " " + how)) return;
+        AutopilotLog(AutopilotEntry.Asked, $"You wrote {how}: " + (text.Length > 200 ? text.Substring(0, 199) + "…" : text));
+        Autopilot.Heard(run, text);
+        // A paused run: the user's word carries it on, as typing "continue" would.
+        if (run.State == AutopilotRun.Paused) AutopilotResume($"You wrote {how}.", turn: false);
+        _fromPhone.Add(text);
+        Save();
+        SendLateAnswers();
+    }
+
+    private readonly List<string> _phoneAsks = [];
+    private readonly List<string> _phoneFiles = [];
+    private Turn? _phoneTurn { get => _s.PhoneTurn; set => _s.PhoneTurn = value; }
+
+    /// <summary>The next message from the phone, once the chat is free: answered as a turn of its own (no brief card: nobody is here to choose).</summary>
+    private void NextPhoneAsk()
+    {
+        if (_phoneAsks.Count == 0 || _turn is not null || _stopped || Run is { Active: true }) return;
+        if (_setup != Setup.Ready || !Licensing.LicenseState.Allowed)
+        {
+            _phoneAsks.Clear();
+            _phoneFiles.Clear();
+            _ = AskUser.SendUpdateAsync("The chat on the PC isn't ready (it needs signing in or a license there), so your message wasn't taken in.", PhoneTopic);
+            return;
+        }
+        var text = string.Join("\n\n", _phoneAsks);
+        _phoneAsks.Clear();
+        var files = _phoneFiles.Where(System.IO.File.Exists).ToList();
+        _phoneFiles.Clear();
+        Add(new ChatItem { Kind = "user", Text = text + "\n\n(from your phone)", Files = files, Name = string.Join(", ", files.Select(System.IO.Path.GetFileName)) });
+        _conv.Name = ChatHistory.NameFor(_conv);
+        Save();
+        ShowTitle();
+        SupersedeBriefs();
+        _ = RunPhoneTurn(text, files);
+    }
+
+    private async Task RunPhoneTurn(string text, List<string>? files = null)
+    {
+        var attachments = (files ?? []).Select(f => new Attachment { Path = f, Name = System.IO.Path.GetFileName(f) }).ToList();
+        var run = RunTurn(AskRules.PhoneTurn(text, CrewStrip.Names.Coordinator, AskUser.History(PhoneTopic)), attachments, "");
+        _phoneTurn = _turn; // set before RunTurn's first wait
+        await run;
+    }
+
+    /// <summary>A turn ended: when it answered a message from the phone, the answer goes back there; then the next one waiting.</summary>
+    private void PhoneTurnEnded(Turn? ended, bool stopped)
+    {
+        if (ended is null || ended.Planning || ended.Shrinking) return;
+        if (ReferenceEquals(ended, _phoneTurn))
+        {
+            _phoneTurn = null;
+            var last = _conv.Items.LastOrDefault(i => i.Kind == "assistant")?.Text ?? "";
+            var topic = PhoneTopic;
+            // The views it looked at while answering go with the reply (capture_view_image), at most two.
+            var pictures = Phone.PhonePictures.Take(JobBoard.ChatKey(_conv.Id), ReferenceEquals(_s, _shown), ended.Started).Select(PhoneJpeg).Where(p => p is not null).ToList();
+            var reply = AskRules.PhoneReply(last, stopped ? "stopped" : ended.Outcome);
+            _ = Task.Run(async () =>
+            {
+                await AskUser.SendUpdateAsync(reply, topic).ConfigureAwait(false);
+                foreach (var p in pictures) await AskUser.SendUpdateAsync("", topic, p).ConfigureAwait(false);
+            });
+        }
+        if (_phoneAsks.Count > 0) Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(NextPhoneAsk));
+    }
+
+    /// <summary>Stop or Resume pressed on the phone (PhoneLink.Commands): as if pressed on the banner.</summary>
+    private void PhoneCommand(string name)
+    {
+        if (Run is not { Active: true }) return;
+        if (name.Equals("Stop", StringComparison.OrdinalIgnoreCase))
+        {
+            AutopilotLog(AutopilotEntry.Asked, "You pressed Stop on your phone.");
+            AutopilotStop("you pressed Stop on your phone");
+        }
+        else if (name.Equals("Resume", StringComparison.OrdinalIgnoreCase)) AutopilotResume("You pressed Resume on your phone.");
+    }
+
+    private bool _updateSending;
+    private DispatcherTimer? _jobsTimer;
+    private DateTime _jobsLastUpdate;
+
+    /// <summary>How an update opens on the phone: the user's name, from the coordinator.</summary>
+    private static string PhoneGreeting() => $"Hi {CrewStrip.Names.You} 👋 here's the latest from the team:\n";
+
+    /// <summary>
+    /// Workers busy without an autopilot (jobs handed out in the chat): the same update every interval while the phone is
+    /// on, so the user away from the PC still sees what the workers are doing.
+    /// </summary>
+    private void JobsProgress()
+    {
+        if (_updateSending || _sample || Run is { Active: true } || !Phone.PhoneLink.Active || _board is not { } board) return;
+        var jobs = board.Snapshot();
+        var now = DateTime.UtcNow;
+        if (!jobs.Any(j => j.Active))
+        {
+            _jobsLastUpdate = default;
+            return;
+        }
+        if (_jobsLastUpdate == default) _jobsLastUpdate = now; // the first update one interval after the work started
+        if (!AskRules.UpdateDue(_jobsLastUpdate, now, AskUser.UpdateMinutes)) return;
+        var since = _jobsLastUpdate;
+        _jobsLastUpdate = now;
+        var body = PhoneGreeting() + AskRules.UpdateBody(new AutopilotRun { State = AutopilotRun.Running }, jobs, since, AskUser.Waiting(), now, CrewStrip.Names.Worker);
+        _updateSending = true;
+        _ = AskUser.SendUpdateAsync(body, PhoneTopic).ContinueWith(_ => Dispatcher.BeginInvoke(new Action(() => _updateSending = false)), TaskScheduler.Default);
+    }
+
+    /// <summary>Every hour or so (Settings): a progress update to the phone; what the user writes back comes as their message.</summary>
+    private void AutopilotProgress(AutopilotRun run)
+    {
+        if (_updateSending || run.State is not (AutopilotRun.Running or AutopilotRun.Paused)) return;
+        var now = DateTime.UtcNow;
+        if (run.LastUpdate == default) run.LastUpdate = run.Started;
+        if (!AskRules.UpdateDue(run.LastUpdate, now, AskUser.UpdateMinutes)) return;
+        var since = run.LastUpdate;
+        run.LastUpdate = now;
+        var body = PhoneGreeting() + AskRules.UpdateBody(run, _board?.Snapshot() ?? [], since, AskUser.Waiting(), now, CrewStrip.Names.Worker);
+        _updateSending = true;
+        var s = _s;
+        _ = AskUser.SendUpdateAsync(body, PhoneTopic).ContinueWith(t => Dispatcher.BeginInvoke(new Action(() => In(s, () =>
+        {
+            _updateSending = false;
+            var error = t.Status == TaskStatus.RanToCompletion ? t.Result : t.Exception?.GetBaseException().Message;
+            AutopilotLog(AutopilotEntry.Asked, error is null ? "Sent a progress update to your phone." : $"Couldn't send the progress update to your phone ({error}).");
+            Save();
+        }))), TaskScheduler.Default);
+    }
+
+    /// <summary>
+    /// The coordinator says the goal is met (or stopped short): the review team, read-only jobs side by side, checks every
+    /// item the user asked for in the models and files (GoalReview). Past the last round the run stops, listing what is
+    /// still not done.
+    /// </summary>
+    private void AutopilotReview(string claims)
+    {
+        if (Run is not { State: AutopilotRun.Running } run || _board is not { } board) return;
+        if (!GoalReview.MoreRounds(run))
+        {
+            AutopilotFinish(AutopilotRun.Stopped, $"the review team still found work not done after {run.ReviewRound} rounds, the last {run.StuckRounds} with no fewer items left");
+            return;
+        }
+        run.ReviewRound++;
+        run.Idle = 0;
+        var now = DateTime.UtcNow;
+        for (var part = 0; part < GoalReview.Parts.Length; part++)
+        {
+            var reviewer = board.StartGoalCheck(GoalReview.Parts[part].Title, GoalReview.Task(run, part, claims), run.ReviewRound, now);
+            ChatJobs.Assign(reviewer, ChatAuto.Everyday);
+        }
+        var text = $"The coordinator says the goal is met. The review team ({GoalReview.Parts.Length} reviewers, round {run.ReviewRound}) " +
+                   "is checking every item you asked for in the models and files before the run ends; anything not done goes back to the coordinator.";
+        Note(text);
+        AutopilotLog(AutopilotEntry.Note, text);
+        Save();
+        ShowJobCards();
+        PumpJobs();
+        ShowAutopilot();
+    }
+
+    /// <summary>A reviewer finished: once the whole round has, the run ends (all met) or the gaps go back to the coordinator.</summary>
+    private void GoalCheckEnded(ChatJob reviewer)
+    {
+        if (Run is not { State: AutopilotRun.Running or AutopilotRun.Paused } run || _board is not { } board || reviewer.GoalCheck != run.ReviewRound) return;
+        var round = board.Snapshot().Where(j => j.GoalCheck == run.ReviewRound).ToList();
+        if (round.Any(j => j.Open)) return;
+        // Cut off because the plan couldn't be used: not a verdict; the round runs again once access is back.
+        if (round.Any(j => j.State == JobBoard.Failed && Autopilot.LostAccess(j.Summary)))
+        {
+            _reviewAgain = true;
+            AutopilotLostAccess(round.First(j => Autopilot.LostAccess(j.Summary)).Summary);
+            return;
+        }
+        var (met, gaps) = GoalReview.Combine(round);
+        if (met)
+        {
+            run.Gaps = "";
+            AutopilotLog(AutopilotEntry.Note, $"The review team checked the goal (round {run.ReviewRound}): met.");
+            AutopilotFinish(AutopilotRun.Done, "");
+            return;
+        }
+        run.Gaps = gaps;
+        var count = gaps.Split('\n').Count(l => l.TrimStart().StartsWith("- ", StringComparison.Ordinal));
+        GoalReview.Counted(run, Math.Max(1, count));
+        AutopilotLog(AutopilotEntry.Note, $"The review team found the goal not met yet (round {run.ReviewRound}): {Math.Max(1, count)} item(s) went back to the coordinator.");
+        Note($"The review team found {Math.Max(1, count)} item(s) not done yet. They went back to the coordinator, who carries on.");
+        Save();
+        _gapsWaiting = true;
+        SendGaps(run);
+    }
+
+    /// <summary>What the review team found goes to the coordinator as soon as the chat is free (or at the next tick).</summary>
+    private void SendGaps(AutopilotRun run)
+    {
+        if (run.State != AutopilotRun.Running || _turn is not null) return;
+        _gapsWaiting = false;
+        run.Idle = 0;
+        _ = RunTurn(GoalReview.SendBack(run, run.Gaps), [], "");
+    }
+
+    /// <summary>The user wrote in the chat of a run that ended: it runs again, with what they wrote as the next turn.</summary>
+    private void AutopilotRestart(AutopilotRun run)
+    {
+        TakeSharedLog(run);
+        run.State = AutopilotRun.Running;
+        run.Ended = default;
+        run.PauseWhy = "";
+        run.PausedUntil = null;
+        run.Idle = 0;
+        run.ReviewRound = 0;
+        AutopilotShare.Begin(Autopilot.RunId(_conv.Id, run), "", DateTime.UtcNow);
+        AutopilotBackfill(run);
+        AskUser.Goal = run.Goal;
+        Autopilot.UserWords = Autopilot.Words(run);
+        AskUser.Listen();
+        var text = "Autopilot started again with your message: the coordinator and workers carry on without asking you, and the review team checks the goal before it ends.";
+        AutopilotLog(AutopilotEntry.Resumed, text);
+        Note(text);
+        Save();
+        ShowAutopilot();
+    }
+
+    /// <summary>
+    /// A run from before 0.35.58: the comments already written in its chat join the goal, the jobs and the review team, and
+    /// the coordinator is told to check the work done so far against them.
+    /// </summary>
+    private void AutopilotBackfill(AutopilotRun run)
+    {
+        if (run.Backfilled) return;
+        if (!Autopilot.Backfill(run, _conv.Items.Select(i => (i.Time, i.Kind, i.Text)).ToList())) { Save(); return; }
+        Autopilot.UserWords = Autopilot.Words(run);
+        var text = $"Autopilot now keeps your {run.Said.Count} message(s) written since it started with the goal: every job follows them and the review team checks them.";
+        AutopilotLog(AutopilotEntry.Resumed, text);
+        Note(text);
+        Save();
+        _backfillWaiting = true;
+    }
+
+    private bool _backfillWaiting { get => _s.BackfillWaiting; set => _s.BackfillWaiting = value; }
+
+    /// <summary>
+    /// Stop on the banner, the round stop button, the phone, or "stop" typed: the open jobs stop, the coordinator's answer
+    /// ends now (its Claude Code is ended, also when it hangs), and the report is written.
+    /// </summary>
+    private void AutopilotStop(string why)
+    {
+        if (Run is not { Active: true } run) return;
+        run.State = AutopilotRun.Stopped; // first: the stopped reviewers must not send anything back
+        foreach (var job in _board?.Snapshot().Where(j => j.Active || j.State == JobBoard.Queued).ToList() ?? []) StopJob(job.Number);
+        _reports.Clear();
+        _stalls = 0;
+        AbortTurn("");
+        AutopilotFinish(AutopilotRun.Stopped, why);
+    }
+
+    /// <summary>
+    /// The coordinator's answer ends now, whatever it is doing: its Claude Code is ended (not asked to stop, which a stuck
+    /// one never answers) and the conversation is resumed with the next message. <paramref name="note"/> goes in the chat.
+    /// </summary>
+    private void AbortTurn(string note)
+    {
+        if (_turn is not { } turn) return;
+        if (turn.Planning)
+        {
+            StopBrief(turn);
+            return;
+        }
+        turn.Stopping = true;
+        turn.KillTimer?.Stop();
+        _control?.Apply(Bridge.JobAction.Stop);
+        _engine?.Kill();
+        _engine = null;
+        RenderDirty();
+        if (note.Length > 0) Note(note);
+        EndTurn();
+    }
+
+    /// <summary>The round stop button: in a running autopilot's chat it stops the run (as the banner's Stop), else the answer.</summary>
+    private void StopPressed()
+    {
+        if (!_sample && _viewJob is null && Run is { Active: true })
+        {
+            AutopilotLog(AutopilotEntry.Asked, "You pressed the stop button.");
+            AutopilotStop("you pressed Stop");
+            return;
+        }
+        StopTurn();
+    }
+
+    /// <summary>
+    /// A message to a running autopilot that only says to stop it (Autopilot.SaysStop): the run stops now, instead of the
+    /// message waiting "after this item" behind an answer that may never end. True when it was one.
+    /// </summary>
+    private bool AutopilotStopTyped(string text, string how)
+    {
+        if (_sample || Run is not { Active: true } || !Autopilot.SaysStop(text)) return false;
+        AutopilotLog(AutopilotEntry.Asked, $"You wrote{how}: {text}");
+        AutopilotStop($"you wrote \"{text}\"{how}");
+        return true;
+    }
+
+    private void AutopilotFinish(string state, string why)
+    {
+        if (Run is not { } run) return;
+        run.State = state;
+        run.PauseWhy = why;
+        run.Ended = DateTime.UtcNow;
+        Autopilot.Here = false;
+        TakeSharedLog(run);
+        AutopilotShare.End(Autopilot.RunId(_conv.Id, run));
+        AskUser.Clear();
+        Autopilot.UserWords = "";
+        Add(new ChatItem { Kind = "assistant", Text = Autopilot.Report(run, _board?.Snapshot() ?? [], DateTime.UtcNow) });
+        Save();
+        ShowAutopilot();
+        if (Hidden) Later(AwayCheck, DispatcherPriority.Background); // a run in the background ended: its chat is marked finished
+    }
+
+    private DateTime _updateRetryAt { get => _s.UpdateRetryAt; set => _s.UpdateRetryAt = value; }
+
+    /// <summary>
+    /// CSI ProMax updates during a run without losing work: once a newer version is ready, no new job starts and the
+    /// running ones finish their step, so ETABS's next quiet moment switches the version in (ChatPane.IsBusy lets queued
+    /// jobs wait across it). In the new version the run carries on (<see cref="AutopilotUpdated"/>). A hold that lasts
+    /// too long is let go, and tried again later.
+    /// </summary>
+    private void AutopilotUpdateTick(AutopilotRun run)
+    {
+        if (Autopilot.UpdateIn(run, Update.Updater.Current))
+        {
+            AutopilotUpdated(run);
+            return;
+        }
+        if (run.State != AutopilotRun.Running) return;
+        var now = DateTime.UtcNow;
+        if (run.Updating.Length > 0)
+        {
+            if (now - run.HeldSince < Autopilot.UpdateHoldMax) return;
+            AutopilotLog(AutopilotEntry.Note, $"CSI ProMax {run.Updating} waited {Autopilot.UpdateHoldMax.TotalMinutes:0} minutes for a quiet moment; the work carried on without it, to try again in an hour.");
+            run.Updating = "";
+            _updateRetryAt = now.AddHours(1);
+            Save();
+            PumpJobs();
+            return;
+        }
+        if (now < _updateRetryAt || Update.Updater.Staged is not { } ready) return;
+        run.Updating = ready;
+        run.HeldSince = now;
+        AutopilotLog(AutopilotEntry.Note, $"CSI ProMax {ready} is ready: no new job starts until it is in; the running jobs finish their step first.");
+        Save();
+    }
+
+    /// <summary>The new version took over the run: the jobs the switch left waiting or stopped carry on, and the coordinator is told.</summary>
+    private void AutopilotUpdated(AutopilotRun run)
+    {
+        var version = Update.Updater.Current.ToString();
+        var since = run.HeldSince;
+        run.Updating = "";
+        AutopilotLog(AutopilotEntry.Resumed, $"CSI ProMax updated to {version}; the autopilot carried on.");
+        Note($"Autopilot: CSI ProMax updated to {version}. The work carries on.");
+        foreach (var job in _board?.Snapshot().Where(j => j.Number > run.JobsBefore && j.State == JobBoard.Stopped && !j.OverBudget && j.Ended >= since.AddMinutes(-1)).ToList() ?? [])
+            _board!.Message(job.Number, "CSI ProMax was updated. Carry on with your task where you left off (check in the model what is already done first).", DateTime.UtcNow);
+        JobsChanged();
+        Save();
+        ShowAutopilot();
+        if (run.State == AutopilotRun.Running && _turn is null) _ = RunTurn(Autopilot.Resume(run, $"CSI ProMax was updated to {version}."), [], "");
+    }
+
+    private static bool _watching;
+
+    /// <summary>
+    /// While a run is on: a small watcher outside ETABS (the connector program, --watch-etabs) that starts ETABS again on
+    /// the same model if it ends without closing the normal way (a crash); the new ETABS carries the run on.
+    /// </summary>
+    private static void StartWatchdog()
+    {
+        if (_watching) return;
+        _watching = true;
+        // CSI ProMax ships no program of its own to watch ETABS (no .exe): after a crash the run carries on when
+        // CSI ProMax is opened again from ETABS.
+    }
+
+    private bool _recoverChecked;
+
+    /// <summary>
+    /// Once the chat is ready after ETABS started: a run left behind by an ETABS that went away without closing (a crash,
+    /// or a restart after a hang) is taken over. Its chat opens, the jobs that were working carry on, and the coordinator
+    /// is told what happened.
+    /// </summary>
+    private void AutopilotRecoverTick()
+    {
+        if (_recoverChecked || _stopped || _sample || _setup != Setup.Ready || _install is null) return;
+        if (AutopilotShare.Orphan(DateTime.UtcNow) is not { } orphan)
+        {
+            _recoverChecked = true;
+            return;
+        }
+        var chatId = orphan.Run.Split(':')[0];
+        var conv = ChatStore.All().FirstOrDefault(c => c.Id == chatId && c.Autopilot is { Active: true });
+        if (conv is null)
+        {
+            _recoverChecked = true;
+            return;
+        }
+        if (!string.Equals(conv.Id, _conv.Id, StringComparison.Ordinal))
+        {
+            // The chat shown carries on in the background; tried again next minute when it can't be left now.
+            ((IHistoryHost)this).OpenChat(ChatHistory.Summarize(conv));
+            if (!string.Equals(_conv.Id, chatId, StringComparison.Ordinal)) return;
+        }
+        _recoverChecked = true;
+        if (Run is not { Active: true } run) return;
+        var why = orphan.Why.Length > 0 ? orphan.Why + "." : "ETABS closed unexpectedly and was started again.";
+        AutopilotShare.Beat(Autopilot.RunId(_conv.Id, run), DateTime.UtcNow); // this ETABS runs it now
+        TakeSharedLog(run);
+        if (!orphan.Relaunched && run.State == AutopilotRun.Running)
+        {
+            // The user opened ETABS (no restart they said yes to): they are at the computer, so the run waits for them.
+            run.State = AutopilotRun.Paused;
+            run.PausedUntil = null;
+            run.PauseWhy = "ETABS was opened again by you.";
+            AutopilotLog(AutopilotEntry.Paused, "ETABS closed unexpectedly and you opened it again: paused until you press Resume.");
+            Note("Autopilot paused: ETABS closed unexpectedly and you opened it again. Press Resume, or type \"continue\", to carry on, or Stop to end it.");
+            Save();
+            ShowAutopilot();
+            return;
+        }
+        AutopilotLog(AutopilotEntry.Resumed, why + " The autopilot carried on.");
+        Note("Autopilot: " + why + " It carries on where it was.");
+        ShowAutopilot();
+        // The jobs that were working when ETABS went (stopped when the chat reopened) carry on.
+        foreach (var job in _board?.Snapshot().Where(j => j.Number > run.JobsBefore && j.State == JobBoard.Stopped && !j.OverBudget
+                                                          && j.Ended >= orphan.Beat.AddMinutes(-1)).ToList() ?? [])
+            _board!.Message(job.Number, "ETABS was restarted while you worked. Carry on with your task where you left off: first check in the " +
+                                        "model what is already done (a change that was being applied may be missing).", DateTime.UtcNow);
+        JobsChanged();
+        Save();
+        if (run.State == AutopilotRun.Running && _turn is null) _ = RunTurn(Autopilot.Recovered(run, why), [], "");
+    }
+
+    /// <summary>What the other ETABS windows answered for this run (AutopilotShare), into its log.</summary>
+    private void TakeSharedLog(AutopilotRun run)
+    {
+        foreach (var entry in AutopilotShare.TakeLog()) AutopilotLog(entry.Kind, entry.Text);
+    }
+
+    /// <summary>Something answered or allowed for the user while away: kept in the run's log for the report.</summary>
+    private void AutopilotLog(string kind, string text)
+    {
+        if (Run is not { } run) return;
+        run.Log.Add(new AutopilotEntry { Time = DateTime.UtcNow, Kind = kind, Text = text });
+        if (run.Log.Count > 500) run.Log.RemoveRange(0, run.Log.Count - 500);
+        SaveSoon();
+    }
+
+    /// <summary>The plan's card line: Approve while the plan waits for it.</summary>
+    private UIElement AutopilotApproveLine(ChatItem item)
+    {
+        var panel = new StackPanel { Margin = new Thickness(0, ChatUi.S3, 0, ChatUi.S1) };
+        panel.Children.Add(NoteLine(item));
+        if (Run is not { State: AutopilotRun.Approval } || !ReferenceEquals(_conv.Items.LastOrDefault(i => i.Name == AutopilotApprove), item)) return panel;
+        var approve = new Button { Content = "Approve and start", Margin = new Thickness(ChatUi.S4, ChatUi.S2, 0, 0), HorizontalAlignment = HorizontalAlignment.Left,
+            ToolTip = "Starts the autopilot: a backup copy of the model is saved, then the coordinator and workers carry on without asking you." };
+        approve.SetResourceReference(StyleProperty, "SpmChatPrimary");
+        AutomationProperties.SetName(approve, "Approve the plan and start the autopilot");
+        approve.Click += (_, _) =>
+        {
+            approve.IsEnabled = false;
+            ApproveAutopilot();
+        };
+        panel.Children.Add(approve);
+        return panel;
+    }
+}
