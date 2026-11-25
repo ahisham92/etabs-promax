@@ -605,6 +605,7 @@ public static class CsiTools
         var (fields, rows) = ((string[], List<string[]>))e.Raw("read a table for editing", m =>
         {
             int version = 0, records = 0; string[] f = [], data = [];
+            CsiProMax.Assistant.Etabs.EditableTables.ShowEveryPattern(m);
             int got = Convert.ToInt32(m.DatabaseTables.GetTableForEditingArray(table.Key, "", ref version, ref f, ref records, ref data));
             Ok(program, got, $"open {table.Name} for editing (is it an editable table?)");
             f ??= []; data ??= [];

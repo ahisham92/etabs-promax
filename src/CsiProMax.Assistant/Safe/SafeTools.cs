@@ -349,6 +349,7 @@ public static class SafeTools
         var (fields, rows) = ((string[], List<string[]>))e.Raw("read a table for editing", m =>
         {
             int version = 0, records = 0; string[] f = [], data = [];
+            CsiProMax.Assistant.Etabs.EditableTables.ShowEveryPattern(m);
             Ok(m.DatabaseTables.GetTableForEditingArray(table.Key, "", ref version, ref f, ref records, ref data), $"open {table.Name} for editing (is it an editable table?)");
             var list = new List<string[]>();
             for (var r = 0; r < records && f.Length > 0; r++) list.Add(data.Skip(r * f.Length).Take(f.Length).Select(v => v ?? "").ToArray());

@@ -960,6 +960,19 @@ Test("add_load_pattern: ETABS refusing ASCE 7-16 keeps the Seismic pattern and s
     Check(a["lateral"] is null && a["note"]!.GetValue<string>().Contains("Modify Lateral Load", StringComparison.Ordinal), a.ToJsonString());
     Check(model.LoadPatterns.Names.Contains("EQX"), "the Seismic pattern is kept");
 });
+Test("tables for editing: every load pattern is selected for display first (SAP2000 26 hides the others)", () =>
+{
+    var root = SourceText.Root();
+    foreach (var file in new[] { "Etabs/EditableTables.cs", "Tools/CsiTools.cs", "Safe/SafeTools.cs" })
+    {
+        var text = File.ReadAllText(Path.Combine(root, "src", "CsiProMax.Assistant", file));
+        var reads = System.Text.RegularExpressions.Regex.Matches(text, @"GetTableForEditingArray\(").Count;
+        var shown = System.Text.RegularExpressions.Regex.Matches(text, @"ShowEveryPattern\(m\);").Count;
+        Check(reads > 0 && shown >= reads, $"{file}: {reads} table reads for editing, {shown} with every load pattern selected for display first");
+    }
+    var helper = File.ReadAllText(Path.Combine(root, "src", "CsiProMax.Assistant", "Etabs", "EditableTables.cs"));
+    Check(helper.Contains("m.DatabaseTables.SetLoadPatternsSelectedForDisplay(ref names)") && helper.Contains("m.LoadPatterns.GetNameList(ref n, ref names)"), "ShowEveryPattern does not select the model's own patterns");
+});
 foreach (var (name, body) in CdtSdkTests.All()) Test(name, body);
 foreach (var (name, body) in HandModelTests.All()) Test(name, body);
 foreach (var (name, body) in ModelTablesTests.All()) Test(name, body);

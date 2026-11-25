@@ -5,8 +5,26 @@ namespace CsiProMax.Assistant.Etabs;
 /// some definitions (a user coefficient seismic load, ASCE 7-16 wind, a user response spectrum, a named mass source:
 /// read from its ETABSv1.dll and its "Table and Field Keys.xml", 0.4.17 field test), and its tables take them.
 /// </summary>
-public static class EditableTables
-{
+public static class EditableTables
+{
+    /// <summary>
+    /// Selects every load pattern for display before a table is read. SAP2000 26 shows only the patterns selected for
+    /// display in its database tables (DEAD alone in a new model, none in a model imported from .s2k), so a pattern added
+    /// through the API was not in "Load Pattern Definitions": edit_table found no rows (0.4.18 and 0.4.20 field tests;
+    /// tried on a scratch SAP2000 26: 1 row before, 2 after selecting both patterns). Writing such a table back could
+    /// leave the hidden patterns out. Best effort: a program without the call reads as before.
+    /// </summary>
+    public static void ShowEveryPattern(dynamic m)
+    {
+        try
+        {
+            int n = 0; string[] names = [];
+            if (Convert.ToInt32(m.LoadPatterns.GetNameList(ref n, ref names)) != 0 || names is not { Length: > 0 }) return;
+            m.DatabaseTables.SetLoadPatternsSelectedForDisplay(ref names);
+        }
+        catch (Exception) { /* the table is read as the program shows it */ }
+    }
+
     /// <summary>
     /// Puts <paramref name="rows"/> into the table <paramref name="key"/>: a row already there with the same <paramref name="keyField"/>
     /// takes the given fields and keeps its others; the table's other rows are kept. Throws with the program's import log when it does not take them.
@@ -18,6 +36,7 @@ public static class EditableTables
         {
             int version = 0, records = 0;
             string[] fields = [], data = [];
+            ShowEveryPattern(m);
             int read = Convert.ToInt32(m.DatabaseTables.GetTableForEditingArray(key, "", ref version, ref fields, ref records, ref data));
             fields ??= []; data ??= [];
             if (fields.Length == 0)
@@ -117,6 +136,7 @@ public static class EditableTables
             return (Dictionary<string, string>?)e.Raw($"read {name} from {key}", m =>
             {
                 int version = 0, records = 0; string[] fields = [], data = [];
+                ShowEveryPattern(m);
                 if (Convert.ToInt32(m.DatabaseTables.GetTableForEditingArray(key, "", ref version, ref fields, ref records, ref data)) != 0) return null;
                 fields ??= []; data ??= [];
                 var at = Array.FindIndex(fields, f => string.Equals(f, keyField, StringComparison.OrdinalIgnoreCase));
