@@ -1062,6 +1062,16 @@ Test("SAP2000: results through the analysis results", () =>
     Check(!modal["passes"]!.GetValue<bool>(), "85% in UY is under 90%");
 });
 
+Test("link: a call that fails comes out as an EtabsException, never wrapped", () =>
+{
+    using var link = new ComEtabs(CsiProgram.Sap2000, () => throw new EtabsException("The scratch SAP2000 window is no longer there."));
+    try { link.Raw("close the scratch window", _ => null); throw new Exception("no error"); }
+    catch (EtabsException ex) { Check(ex.Message.Contains("no longer there"), ex.Message); }
+    using var other = new ComEtabs(CsiProgram.Sap2000, () => new object());
+    try { other.Raw("read the joints", _ => throw new InvalidOperationException("boom")); throw new Exception("no error"); }
+    catch (EtabsException ex) { Check(ex.Message.Contains("boom"), ex.Message); }
+});
+
 Test("link: a call made from inside another call runs at once instead of waiting for itself", () =>
 {
     using var link = new ComEtabs(CsiProgram.Sap2000, () => new object()) { CallLimit = TimeSpan.FromSeconds(5) };
