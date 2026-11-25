@@ -1032,6 +1032,7 @@ foreach (var (name, body) in LateralTests.All()) Test(name, body);
 foreach (var (name, body) in AnalysisTests.All()) Test(name, body);
 foreach (var (name, body) in ModelTextTests.All()) Test(name, body);
 foreach (var (name, body) in PropertyTests.All()) Test(name, body);
+foreach (var (name, body) in StructureTests.All()) Test(name, body);
 foreach (var (name, body) in KeptPlugInsTests.All()) Test(name, body);
 foreach (var (name, body) in StabilityTests.All()) Test(name, body);
 foreach (var (name, body) in FieldRun048Tests.All()) Test(name, body);

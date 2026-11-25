@@ -127,6 +127,22 @@ public static class ModelerCheck
           const back = (await hmRun("property_definitions", {}, true)).result.springs.some(x => x.name === "CPM-CHKPS");
           return back ? {fail: "two undos did not take the spring away"} : {ok: `on ${sp.used_by} joints, then undone`};
         });
+        await step("Assign > Assign Objects to Group: a selected beam goes into a new group, and undo takes it out", async () => {
+          const b = frames.findIndex(f => f.kind === "beam");
+          sel.clear(); sel.add(b + 1); selChanged();
+          await act("m:sa:group"); await wait(900);
+          const box = document.querySelector(".dlg #zNew");
+          if (!box) { closeDialogs(); return {fail: "the group form did not open"}; }
+          box.value = "CPM-CHKG";
+          const forms = document.querySelectorAll(".dlg"); forms[forms.length - 1].querySelector(".df button.primary").click();
+          await wait(1200);
+          const g = ((await hmRun("structure_definitions", {}, true)).result.groups || []).find(x => x.name === "CPM-CHKG");
+          closeDialogs(); await wait(150);
+          if (!g || g.members !== 1) return {fail: "the beam is not in CPM-CHKG: " + (hm.lastError || JSON.stringify(g))};
+          await hmRun("undo"); await wait(800);
+          const back = ((await hmRun("structure_definitions", {}, true)).result.groups || []).some(x => x.name === "CPM-CHKG");
+          return back ? {fail: "undo did not take the group away"} : {ok: "in the group, then undone"};
+        });
         await step("Draw > Draw Columns: a column is drawn by a click, and Edit > Undo takes it back", async () => {
           const p = panes.find(x => x.mode === "plan");
           if (!p) return {fail: "no plan view is open"};
