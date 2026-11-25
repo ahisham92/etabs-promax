@@ -26,7 +26,7 @@ internal sealed class RoutineRun
 }
 
 /// <summary>
-/// A scheduled routine: work the crew does by itself at a set time (a nightly model check, a BIM-ready audit), as a job
+/// A scheduled routine: work the crew does by itself at a set time (a nightly model check, a results summary), as a job
 /// of a chat With coordinator, with a history of its runs.
 /// </summary>
 internal sealed class Routine
@@ -64,10 +64,12 @@ internal static class Routines
     /// <summary>Ready-made routines the window offers (name, what to do, time).</summary>
     public static readonly (string Name, string Task, string Time)[] Presets =
     [
-        ("Nightly model check", "Run a model check of the open model: warnings, duplicates, unplaced or unused elements, missing parameters and anything " +
-            "else ETABS ProMax's model check tools report. Don't change the model. Report what you found, worst first, with counts and how to fix each.", "02:00"),
-        ("BIM-ready audit", "Audit the open model for BIM readiness: check it against the pre-submission checklist and the BIM-ready rules (naming, " +
-            "levels, scope boxes, view templates, parameters, LOI data). Don't change the model. Report what fails, worst first, and what would fix it.", "03:00"),
+        ("Nightly model check", "Check the open model: members with no section, duplicated or overlapping members, unsupported columns, " +
+            "stories with no loads, points with no restraint at the base, and load patterns nothing uses. Don't change the model. " +
+            "Report what you found, worst first, with counts and how to fix each.", "02:00"),
+        ("Results summary", "If the open model has analysis results, read the base reactions, the periods and the largest story drift per " +
+            "direction from ETABS's tables and write them to an Excel file. Don't run the analysis and don't change the model. " +
+            "If there are no results, say so.", "03:00"),
     ];
 
     public static string File(string folder) => Path.Combine(folder, "routines.json");

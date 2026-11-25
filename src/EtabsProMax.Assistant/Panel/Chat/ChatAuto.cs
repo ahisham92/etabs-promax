@@ -57,10 +57,10 @@ internal static class ChatAuto
 
     public static string KindHint(string kind) => kind switch
     {
-        Simple => "rename, tag, list, count, fill parameters, short summaries",
-        Hard => "specs or a BEP against the model, redlines, tricky modelling logic, costing decisions",
+        Simple => "rename, list, count, select, one section or load, short summaries",
+        Hard => "a design basis or drawings against the model, studying results, tricky modelling logic",
         Coordinating => "the coordinator's own turns: reading what the parts share, planning and handing out jobs (each job gets the model of its own kind)",
-        _ => "sheets, views, dimensions, checks, normal modelling",
+        _ => "normal modelling, loads, combinations, result tables, checks",
     };
 
     public static string ModelLabel(string model) => IsAuto(model) ? "Automatic" : ChatModels.Find(model).Label;

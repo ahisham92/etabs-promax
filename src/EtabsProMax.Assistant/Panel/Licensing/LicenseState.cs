@@ -141,8 +141,12 @@ internal static class LicenseState
                 File.Delete(PlainSigningFile);
                 return plain;
             }
-            if (!File.Exists(SigningFile)) return null;
-            var secret = Encoding.UTF8.GetString(Dpapi.Unprotect(File.ReadAllBytes(SigningFile)));
+            // The owner signs ETABS ProMax keys with the same secret as Sketch ProMax keys: when it is already on this
+            // PC for Sketch ProMax, it is used from there, so it isn't pasted twice.
+            var sketch = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SketchProMax", "license", "signing.dat");
+            var file = File.Exists(SigningFile) ? SigningFile : File.Exists(sketch) ? sketch : null;
+            if (file is null) return null;
+            var secret = Encoding.UTF8.GetString(Dpapi.Unprotect(File.ReadAllBytes(file)));
             return LicenseKey.MatchesBuiltIn(secret) ? secret : null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception) { return null; }

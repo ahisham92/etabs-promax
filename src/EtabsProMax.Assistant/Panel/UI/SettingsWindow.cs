@@ -549,7 +549,7 @@ public sealed class SettingsWindow : Window
         var page = new StackPanel();
         var standardsLabel = Brand.Text(
             "Firm standards (plain English). ETABS ProMax follows these in every conversation, e.g. " +
-            "'Sheet numbers are A-xxx. View names: LEVEL - PURPOSE. Door tags use the Mark parameter.'");
+            "'Concrete is C40 for columns and C30 for slabs. Drift limit is H/500. Cracked stiffness: beams 0.35, columns 0.7, walls 0.35.'");
         standardsLabel.Margin = new Thickness(0, 10, 0, 4);
         page.Children.Add(standardsLabel);
         AutomationProperties.SetName(_standards, "Firm standards");
@@ -557,23 +557,6 @@ public sealed class SettingsWindow : Window
         page.Children.Add(Place("FirmStandards", _standards));
         page.Children.Add(Hint("Enter starts a new line here; Ctrl+Enter saves."));
 
-        var seedLabel = Brand.Text(
-            "Legend seed file (optional): a firm template or project (.rvt/.rte) with a legend. create_legend copies from it when a model has no legend.");
-        seedLabel.Margin = new Thickness(0, 16, 0, 4);
-        page.Children.Add(seedLabel);
-        var seedRow = new DockPanel();
-        var browse = Brand.Button("Browse…");
-        AutomationProperties.SetName(browse, "Browse for the legend seed file");
-        browse.Click += (_, _) => BrowseSeed();
-        DockPanel.SetDock(browse, Dock.Right);
-        seedRow.Children.Add(browse);
-        AutomationProperties.SetName(_legendSeed, "Legend seed file");
-        seedRow.Children.Add(Place("LegendSeedPath", _legendSeed));
-        page.Children.Add(seedRow);
-        _seedHint.Margin = new Thickness(0, 2, 0, 0);
-        page.Children.Add(_seedHint);
-        _legendSeed.TextChanged += (_, _) => CheckSeed();
-        CheckSeed();
         return page;
     }
 
