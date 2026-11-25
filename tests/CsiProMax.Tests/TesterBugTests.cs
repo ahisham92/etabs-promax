@@ -723,6 +723,20 @@ static class TesterBugTests
             ctx.WithResults(); ctx.WithResults();
             Equal(1, runs, "times the Viewer's check ran");
         });
+        yield return ("ETABS 23 field test: a test copy an earlier run left open is closed by the next run, and nothing else is", () =>
+        {
+            // Seen on 2026-11-25: the 0.4.10 run gave up on ETABS with the story picker showing; the 0.4.14 run then failed
+            // "Tools > CSI ProMax in ETABS 23: ... ETABS 23 is open" because of that leftover.
+            Check(ScratchProgram.IsLeftCopy(["ETABS Plus v23.2.0 - cpm-field-test-400277", "Select Stories for Slab Design"]), "the leftover with the story picker is not known");
+            Check(ScratchProgram.IsLeftCopy(["SAP2000 26.3.0 Ultimate - cpm-field-test-1ff9a4", "", "Analysis Complete - cpm-field-test-1ff9a4"]), "a leftover with the analysis notice is not known");
+            Check(!ScratchProgram.IsLeftCopy(["ETABS Plus v23.2.0 - Tower A"]), "an engineer's own model would be closed");
+            Check(!ScratchProgram.IsLeftCopy(["ETABS Plus v23.2.0 - cpm-field-test-400277", "License"]), "a copy showing a licence message would be closed");
+            Check(!ScratchProgram.IsLeftCopy([]) && !ScratchProgram.IsLeftCopy([""]) && !ScratchProgram.IsLeftCopy(["Select Stories for Slab Design"]), "a process with no scratch model would be closed");
+            Check(!ScratchProgram.IsLeftCopy(["ETABS Plus v23.2.0 - cpm-field-test"]), "the Modeler's own model name is taken for a scratch copy");
+            var runner = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/FieldTest.cs"));
+            Check(runner.IndexOf("o.EndLeftCopies()", StringComparison.Ordinal) is var at and > 0 && at < runner.IndexOf("menus = ToolsMenu.Repair(", StringComparison.Ordinal), "leftovers are not closed before the Tools menu is looked at");
+            Check(runner.Contains("Tools > CSI ProMax is still in each program after the test", StringComparison.Ordinal), "the Tools menu is not looked at again after the scratch windows closed");
+        });
         yield return ("ETABS 20 tester: the field test tries what Tools > CSI ProMax does in each program, and fails where the plug-in cannot be created", () =>
         {
             // What the check answered on that PC (in its own words), and a PC where all is well.

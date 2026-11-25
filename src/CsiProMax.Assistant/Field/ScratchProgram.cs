@@ -442,6 +442,48 @@ public sealed class ScratchProgram : IScratchWindow
         testAsked != default && processStarted >= testAsked.AddSeconds(-2)
         && titles.All(t => t.Contains("cpm-field-test", StringComparison.OrdinalIgnoreCase));
 
+    /// <summary>
+    /// True when the windows of a process show it is a test copy an earlier run left open: one of them names a scratch
+    /// model ("cpm-field-test-" and its six characters), and every other one is a window the test answers itself (the
+    /// analysis notice, the story picker). A window that names anything else keeps the process alive.
+    /// </summary>
+    public static bool IsLeftCopy(IEnumerable<string> titles)
+    {
+        var all = titles.Where(t => !string.IsNullOrWhiteSpace(t)).ToList();
+        return all.Any(t => t.Contains("cpm-field-test-", StringComparison.OrdinalIgnoreCase))
+            && all.All(t => t.Contains("cpm-field-test-", StringComparison.OrdinalIgnoreCase) || ScratchDialogs.MayClose(t) || ScratchDialogs.IsStoryPicker(t));
+    }
+
+    /// <summary>
+    /// Ends the test copies an earlier run left open (a run that gave up on a window, as the 0.4.10 run did on ETABS 23
+    /// with the story picker showing): they hold a licence, and they keep CSI ProMax out of that program's Tools menu
+    /// ("ETABS 23 is open"). Only a process <see cref="IsLeftCopy"/> names; it is ended without saving (Ahmed's choice,
+    /// 2026-11-25: the test may end "only its own test copy"). Returns one line for each.
+    /// </summary>
+    public static List<string> EndLeftCopies()
+    {
+        var said = new List<string>();
+        if (!OperatingSystem.IsWindows()) return said;
+        foreach (var program in CsiProgram.All)
+        {
+            Process[] running;
+            try { running = Process.GetProcessesByName(program.ProcessName); }
+            catch (InvalidOperationException) { continue; }
+            foreach (var process in running)
+                using (process)
+                    try
+                    {
+                        var titles = ScratchDialogs.Of(process.Id).Select(w => w.Title).ToList();
+                        if (!IsLeftCopy(titles)) continue;
+                        var name = titles.First(t => t.Contains("cpm-field-test-", StringComparison.OrdinalIgnoreCase));
+                        process.Kill();
+                        said.Add(process.WaitForExit(15000) ? $"'{name}' (process id {process.Id}) was closed without saving" : $"'{name}' (process id {process.Id}) was told to end and is still there");
+                    }
+                    catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException) { /* not ours to end, or already gone */ }
+        }
+        return said;
+    }
+
     public static string LeftRunning(string name, string processName, int processId, bool hasWindow) =>
         $". Its process is still running ({processName}.exe, process id {processId}, {(hasWindow ? "with a window" : "with no window on the screen")}) and holds a {name} licence until it ends: " +
         $"{(hasWindow ? "close that window without saving, or " : "")}end the {processName}.exe with process id {processId} in Task Manager (Details tab). It is the test's own scratch model; nothing of yours is in it";
