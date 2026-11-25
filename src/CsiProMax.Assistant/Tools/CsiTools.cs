@@ -719,8 +719,17 @@ public static class CsiTools
         // A refused apply must not cost the model its table: SAP2000 26 refused an update of "Load Pattern Definitions"
         // and the scratch model was left with no load patterns at all (0.4.22 field test). The edit is cancelled, the
         // table read back, and the rows as they were put back when any are gone.
+        var unlocked = false;
         var log = (JsonObject)e.Raw("apply the table edit", m =>
         {
+            // An analysed model is locked, and SAP2000 26 refuses a table edit then (SetTableForEditingArray answered 1 on
+            // an analysed scratch model; 0.4.22 field test): it is unlocked first, as the program itself does when a
+            // definition changes, and the answer says its results are gone.
+            if (Convert.ToBoolean(m.GetModelIsLocked()))
+            {
+                Ok(program, m.SetModelIsLocked(false), "unlock the model for the table edit");
+                unlocked = true;
+            }
             string? refused = null; int fatal = 0, errors = 0, warnings = 0, info = 0; string text = "";
             try
             {
@@ -745,6 +754,7 @@ public static class CsiTools
             if (cut.Length > 600) cut = cut[..600] + "...";
             throw new EtabsException($"{refused}. {restored}" + (cut.Length > 0 ? $" Its import log: {cut}" : ""));
         })!;
+        if (unlocked) log["unlocked"] = $"The model was analysed: it was unlocked for the edit, so its analysis results are gone. Run the analysis again.";
         e.Refresh();
         var bad = log["fatal_errors"]!.GetValue<int>() + log["errors"]!.GetValue<int>();
         log["table"] = table.Name;
