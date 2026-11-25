@@ -118,6 +118,23 @@ public static class ViewerCheck
           // Back to the plain model in a 3-D view before the next button.
           try { if (a === "anim") { const on = document.querySelector('[data-act="anim"].on'); if (on) on.click(); } if (needs[a]) { const back = document.querySelector(needs[a].startsWith("v:") ? '[data-act="v:3d"]' : '[data-act="r:model"]'); if (back && !back.disabled) back.click(); } if (isResult) { const m = document.querySelector('[data-act="r:model"]'); if (m && !m.disabled) m.click(); } if (a === "plot") { const p = document.querySelector('[data-act="plot"].on'); if (p) p.click(); } await wait(60); } catch (e) { }
         }
+        // Every item of the Display and Design menus, as an engineer would choose them: each window it opens is
+        // applied with its first button (OK), and the view must draw with no error. A menu item added later is
+        // pressed too, so every result display is covered by rule.
+        const leaves = [];
+        try { const walk = l => (l || []).forEach(i => { if (!i) return; if (Array.isArray(i[1])) walk(i[1]); else leaves.push([i[0], i[1], !!i[3]]); }); const m = menus(); walk(m.Display); walk(m.Design); } catch (e) { add("menus", false, "the menus could not be read: " + (e && e.message || e)); }
+        for (const [label, a, off] of leaves) {
+          if (!a || a === "tables" || a === "anim" || a === "print") continue;
+          await step(`menu: ${label}`, async () => {
+            if (off) return {skipped: "skipped: greyed out, this pack has nothing for it"};
+            act(a); await wait(250);
+            const d = document.querySelector(".dlg");
+            if (d) { const go = d.querySelector('[data-b="0"]'); if (go) go.click(); await wait(300); }
+            const share = drawn();
+            return share > 0.002 ? {ok: `drawn (${(share * 100).toFixed(1)}%)`} : {fail: `nothing is drawn after it (${share})`};
+          });
+          try { closeDialogs(); const m = document.querySelector('[data-act="r:model"]'); if (m && !m.disabled) m.click(); const p = document.querySelector('[data-act="plot"].on'); if (p) p.click(); await wait(60); } catch (e) { }
+        }
         // Every table the pack holds, opened in the tables window.
         const tableNames = [...document.querySelectorAll("#tree [data-table]")].map(e => e.dataset.table);
         if (!tableNames.length) add("tables", true, "skipped: the pack has no result tables", true);

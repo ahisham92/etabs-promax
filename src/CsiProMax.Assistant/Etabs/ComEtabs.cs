@@ -389,9 +389,9 @@ public sealed class ComEtabs : ICsiLink, IDisposable
     {
         int n = 0; string[] keys = None, names = None; int[] import = []; bool[] empty = [];
         Ok(m.DatabaseTables.GetAllTables(ref n, ref keys, ref names, ref import, ref empty), "list the tables");
-        keys ??= None; names ??= None; empty ??= [];
+        keys ??= None; names ??= None; empty ??= []; import ??= [];
         n = Math.Min(n, Math.Min(keys.Length, names.Length));
-        return (IReadOnlyList<TableName>)Enumerable.Range(0, n).Select(i => new TableName(keys[i], names[i], i < empty.Length && empty[i])).ToList();
+        return (IReadOnlyList<TableName>)Enumerable.Range(0, n).Select(i => new TableName(keys[i], names[i], i < empty.Length && empty[i], i < import.Length ? import[i] : -1)).ToList();
     });
 
     public TableData ReadTable(string key, IReadOnlyList<string>? cases, IReadOnlyList<string>? combos) => On("read a table", m =>

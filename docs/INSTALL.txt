@@ -22,7 +22,7 @@ Excel tables), the 3D view of an open model, review packs and the Viewer, with n
 Everything else is the same: the same files, Tools > CSI ProMax in each program, and updates that go in without closing
 the program. Running the plain line again later keeps the choice. To turn the chat on or off afterwards, use the
 CSI ProMax menu in the window (Turn the AI chat on / off): CSI ProMax starts again with it, and the program and the
-model stay open. With the chat on, the 3D view in the browser has a Chat tab too: the same conversation as the window.
+model stay open. With the chat on, the 3D view (its own CSI ProMax window) has a Chat tab too: the same conversation as the window.
 Modelling and viewing work with or without ETABS, SAFE or SAP2000 on the PC. Without one, start the "CSI ProMax
 Modeler" shortcut (the install makes it), or double-click "Open the Modeler.cmd" in Documents\CSI ProMax.
 
