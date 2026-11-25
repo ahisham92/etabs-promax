@@ -175,6 +175,9 @@ public sealed class ScratchProgram : IScratchWindow
     /// <summary>How long the program may take to start before the test gives up on it (a licence message may be waiting).</summary>
     public static TimeSpan StartTimeout { get; set; } = TimeSpan.FromMinutes(4);
 
+    /// <summary>How long closing the scratch window may take before the test gives up on it.</summary>
+    public static TimeSpan CloseTimeout { get; set; } = TimeSpan.FromMinutes(3);
+
     /// <summary>How long opening the model file, or saving the scratch model, may take.</summary>
     public static TimeSpan FileTimeout { get; set; } = TimeSpan.FromMinutes(3);
 
@@ -390,8 +393,10 @@ public sealed class ScratchProgram : IScratchWindow
         _closing = true;
         try
         {
-            Ask(TimeSpan.FromMinutes(1), "close the window", _ => { _app.ApplicationExit(false); return null; },
-                $"the scratch {name} window did not close within a minute; close it yourself without saving");
+            // Three minutes: in the 0.4.28 full test SAP2000 26 took over a minute to close its scratch window after the
+            // whole test (the test had given up and named its process, which had ended by the time anyone looked).
+            Ask(CloseTimeout, "close the window", _ => { _app.ApplicationExit(false); return null; },
+                $"the scratch {name} window did not close within {CloseTimeout.TotalMinutes:0} minutes; close it yourself without saving");
             _closed = true;
             // The program said yes to closing: its process must go too, or it keeps a licence with no window to show for it.
             if (!Gone(TimeSpan.FromSeconds(30))) return Said($"the scratch {name} window was told to close, and its process did not end; end it yourself");
