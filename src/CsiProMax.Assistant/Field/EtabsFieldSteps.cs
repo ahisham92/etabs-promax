@@ -275,8 +275,9 @@ public static class EtabsFieldSteps
         var analysed = false;
         try { analysed = link.Info().Locked; }
         catch (EtabsException) { }
+        JsonNode? designed = null;
         if (analysed)
-            ctx.Tool("run_design", "{}", a =>
+            designed = ctx.Tool("run_design", "{}", a =>
             {
                 FieldContext.Expect(a["ran"] is JsonArray ran && ran.Any(k => k!.GetValue<string>() == "concrete"), "the concrete frame design did not run: " + a.ToJsonString());
             }, "tool run_design (every kind; the ones the API cannot start are named with their menu)");
@@ -319,6 +320,10 @@ public static class EtabsFieldSteps
                 if (!piered) throw new FieldSkipException("the wall was not made a pier");
                 var pier = link.Tables().Where(t => DesignResults.FamilyOf(t.Name)?.Key == "pier").ToList();
                 FieldContext.Expect(pier.Count > 0, "ETABS lists no shear wall pier design table at all");
+                // The shear wall design has no start call in some versions of the API: run_design then names its menu, and
+                // the tables stay empty until the engineer runs it there. That is not tested, and it is not a failure.
+                if (pier.All(t => t.Empty) && designed is not null && !(designed["ran"] is JsonArray ran && ran.Any(k => k!.GetValue<string>() == "shear_wall")))
+                    throw new FieldSkipException("run_design could not start the shear wall design in this ETABS (" + WhyNot(designed, "shear_wall") + "), so the pier design tables are empty. Run Design > Shear Wall Design > Start Design/Check in ETABS to test them.");
                 var full = pier.FirstOrDefault(t => !t.Empty) ?? throw new FieldCheckException("the pier design tables are empty after the design: " + string.Join("; ", pier.Select(t => t.Name)) + ". The export file is then the way to the results.");
                 var data = link.ReadTable(full.Key, null, null);
                 FieldContext.Expect(data.Rows.Any(r => r.Any(v => v == "CPM-P1")), $"'{full.Name}' has no row for pier CPM-P1");

@@ -159,6 +159,16 @@ public static class FieldParts
             return new { summary = lines, tables_with_data_before_the_analysis = link.Tables().Where(t => !t.Empty).Select(t => t.Name).Take(120).ToList() };
         });
 
+    /// <summary>What run_design said of a kind of design it did not run.</summary>
+    public static string WhyNot(JsonNode designed, string kind)
+    {
+        foreach (var list in new[] { "run_in_program", "not_designed" })
+            if (designed[list] is JsonArray items)
+                foreach (var item in items)
+                    if (item?["kind"]?.GetValue<string>() == kind) return item["why"]?.GetValue<string>() ?? item["note"]?.GetValue<string>() ?? "no reason given";
+        return "it was not among the kinds run";
+    }
+
     /// <summary>
     /// After the result tools ran: one line that fails naming every check that answered "not available" with its
     /// reason, so a table name or field the program calls differently is listed under "Not working".
@@ -169,9 +179,14 @@ public static class FieldParts
             var given = answers.Where(a => a.Answer is not null).ToList();
             var odd = given.Where(a => a.Answer!["status"]?.GetValue<string>() is { } s && !Verdict.Words.Contains(s)).Select(a => $"{a.Check}: '{a.Answer!["status"]}'").ToList();
             FieldContext.Expect(odd.Count == 0, "a check's status is not one of pass, fail, reported, not available: " + string.Join("; ", odd));
-            var none = given.Where(a => a.Answer!["status"]?.GetValue<string>() == "not available")
+            var unavailable = given.Where(a => a.Answer!["status"]?.GetValue<string>() == "not available").ToList();
+            var none = unavailable.Where(a => a.Answer!["no_data"]?.GetValue<bool>() != true)
                 .Select(a => $"{a.Check}: {a.Answer!["note"]?.GetValue<string>() ?? "no reason given"}").ToList();
             FieldContext.Expect(none.Count == 0, $"{none.Count} of {given.Count} checks had nothing to read. " + string.Join(" | ", none));
+            // A table the program has, with no rows for this model (no lateral load case in the scratch model), is not a
+            // table called differently: that check is not tested here, and says so.
+            if (unavailable.Count > 0)
+                throw new FieldSkipException($"{unavailable.Count} of {given.Count} checks had a table with no data for the scratch model. " + string.Join(" | ", unavailable.Select(a => $"{a.Check}: {a.Answer!["note"]?.GetValue<string>()}")));
             return string.Join(", ", given.Select(a => $"{a.Check}: {a.Answer!["status"]?.GetValue<string>() ?? "reported"}"));
         });
 
