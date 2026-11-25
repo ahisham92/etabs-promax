@@ -12,7 +12,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
-    <Version>0.4.16</Version>
+    <Version>0.4.17</Version>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <NoWarn>$(NoWarn);CA1416</NoWarn>
     <UseAppHost>false</UseAppHost>
@@ -57,6 +57,17 @@
     <!-- CDT.Wpf's one package (LaTeX rendering, MIT), at the version the SDK is built against. -->
     <PackageReference Include="WpfMath" Version="2.1.0" />
   </ItemGroup>
+  <!-- Each source file with the hash of its text, inside CsiProMax.dll: the field test's "only what changed" mode
+       (Field/FieldRetest.cs) tells from it which part's code changed since the version that part last passed on. -->
+  <Target Name="CpmSourcePrints" BeforeTargets="BeforeBuild">
+    <GetFileHash Files="@(Compile)" Algorithm="SHA256">
+      <Output TaskParameter="Items" ItemName="CpmHashedSource" />
+    </GetFileHash>
+    <WriteLinesToFile File="$(IntermediateOutputPath)source-prints.txt" Lines="@(CpmHashedSource->'%(Identity)|%(FileHash)')" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <EmbeddedResource Include="$(IntermediateOutputPath)source-prints.txt" LogicalName="CsiProMax.source-prints.txt" />
+    </ItemGroup>
+  </Target>
   <Target Name="CpmCheckCdtSdk" BeforeTargets="PrepareForBuild">
     <Error Condition="!Exists('$(CdtSdkLib)CDT.Wpf.dll')" Text="The CDT SDK DLLs are missing from lib\cdt-sdk\net8.0-windows." />
   </Target>
