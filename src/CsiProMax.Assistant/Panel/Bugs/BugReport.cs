@@ -255,7 +255,7 @@ public sealed class ReportBugTool : IEtabsTool
 {
     public string Name => "report_bug";
     public string Description =>
-        "File an CSI ProMax bug report when the user says something is a bug (\"that's a bug\", \"report this\"). Writes ONE " +
+        "File a CSI ProMax bug report when the user says something is a bug (\"that's a bug\", \"report this\"). Writes ONE " +
         "small zip to Documents\\CSI ProMax\\Bugs\\Reports with the description, a picture of the ETABS window, add-in and " +
         "ETABS versions, the model name, the last 50 tool calls with their errors and the loaded-assemblies report. Nothing is " +
         "sent anywhere; the user sends the zip. Write the description yourself from the conversation: one plain line saying " +

@@ -13,7 +13,7 @@ const string Help = """
       cpm check <file>           Completeness and connectivity checks. Exit code 1 when there are errors.
       cpm quantities <file>      Lengths, areas and concrete volumes by section.
 
-    <out> ending in .cpm is an CSI ProMax model; anything else is written as an ETABS text file.
+    <out> ending in .cpm is a CSI ProMax model; anything else is written as an ETABS text file.
     In ETABS: File > Import > ETABS .e2k Text File.
     """;
 

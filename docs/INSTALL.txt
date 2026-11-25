@@ -23,6 +23,8 @@ this PC: CSI ProMax never starts, unlocks or stands in for it.
 
 The Modeler (no ETABS and no CSI licence needed)
 It builds a model and writes an .e2k file that ETABS opens later. It does not analyse or design: that needs ETABS.
-- On a PC with ETABS: in the window, View > Put a Modeler shortcut on the desktop.
+- On a PC with ETABS: the first time the window opens it puts "CSI ProMax Modeler" and "CSI ProMax Viewer"
+  shortcuts on the desktop and in the Start menu (CSI ProMax). Delete one and it stays deleted; View > Make the
+  Modeler and Viewer shortcuts again brings them back.
 - On a PC with no ETABS: install ".NET Desktop Runtime 8" (x64) as above, copy the "dist" folder to Documents and
   rename it "CSI ProMax", then double-click "Open the Modeler.cmd" inside it.

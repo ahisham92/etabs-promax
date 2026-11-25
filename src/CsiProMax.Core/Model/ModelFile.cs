@@ -31,7 +31,7 @@ public static class ModelFile
     {
         var envelope = JsonSerializer.Deserialize<Envelope>(json, Options);
         if (envelope?.Model is null || envelope.Format != "csi-promax-model")
-            throw new InvalidDataException("This is not an CSI ProMax model file.");
+            throw new InvalidDataException("This is not a CSI ProMax model file.");
         if (envelope.Version > FormatVersion)
             throw new InvalidDataException($"This model was saved by a newer CSI ProMax (file version {envelope.Version}). Update CSI ProMax to open it.");
         return envelope.Model;
