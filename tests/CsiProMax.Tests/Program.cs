@@ -1914,6 +1914,9 @@ namespace CpmFakes
     public sealed class Asce716
     {
         public string Named = ""; public bool[] Flags = [];
+        // ETABS 23: 0-based, X, Y, X+e, Y+e, X-e, Y-e.
+        public int SetASCE716_1(string name, ref bool[] dir, double ecc, int period, int ct, double userT, bool userZ, double top, double bottom,
+            double r, double omega, double cd, double i, double ss, double s1, double tl, int site, double fa, double fv) { Named = name; Flags = dir; return 0; }
         public int SetASCE716(string name, ref bool[] dir, double ecc, int period, int ct, double userT, bool userZ, double top, double bottom,
             double r, double omega, double cd, double i, double ss, double s1, double tl, int site, double fa, double fv) { Named = name; Flags = dir; return 0; }
     }
@@ -1925,9 +1928,18 @@ namespace CpmFakes
         public int GetNameList(ref int n, ref string[] names) { n = Names.Count; names = Names.ToArray(); return 0; }
         public int GetLoadType(string name, ref int type) { type = 5; return 0; }
         public int GetSelfWTMultiplier(string name, ref double self) { self = 0; return 0; }
+        public int GetAutoSeismicCode(string name, ref string code) { code = AutoSeismic.Named == name ? "ASCE 7-16" : ""; return 0; }
+    }
+    public sealed class StoryFake
+    {
+        public int GetStories_2(ref double baseElevation, ref int n, ref string[] names, ref double[] elevations, ref double[] heights, ref bool[] master, ref string[] similar, ref bool[] splice, ref double[] spliceHeight, ref int[] color)
+        {
+            n = 2; names = ["Story1", "Story2"]; elevations = [3, 6]; heights = [3, 3]; master = [false, true]; similar = ["", ""]; splice = [false, false]; spliceHeight = [0, 0]; color = [0, 0]; return 0;
+        }
     }
     public sealed class EtabsSeismic
     {
+        public StoryFake Story { get; } = new();
         public SeismicPatterns LoadPatterns { get; } = new();
         public Asce716 AutoSeismic => LoadPatterns.AutoSeismic;
         public int GetNameList(ref int n, ref string[] names) { n = 0; names = []; return 0; }

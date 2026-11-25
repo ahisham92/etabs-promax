@@ -56,6 +56,9 @@ public static class CsiFieldSteps
             FieldContext.Expect(a["this_window_works_in"]!.GetValue<string>() == name, $"this part tests {name}; the tool says {a["this_window_works_in"]}");
         });
         ctx.Tool("refresh_view", "{}", a => FieldContext.Expect(a["refreshed"]?.GetValue<bool>() == true, "no redraw: " + a.ToJsonString()));
+        // ---- the model must be changeable for the rest (a locked SAP2000 refused the pattern added by hand, 0.4.17) ----
+        var locked = Read(ctx, "whether the model is locked", () => link.Info().Locked, false);
+        if (locked) T("unlock_model", "{}", a => FieldContext.Expect(a["locked"]?.GetValue<bool>() == false, "still locked: " + a.ToJsonString()), "tool unlock_model on the analysed scratch model");
         ctx.Tool("what_changed", """{"reset":true}""", a => FieldContext.Expect(a["baseline"]?.GetValue<string>() == "set", "the starting point was not set: " + a.ToJsonString()), "tool what_changed sets its starting point");
         var marker = Read(ctx, "a load pattern added by hand for what_changed", () => { link.AddLoadPattern("CPM-BYHAND", "Other", 0); return true; }, false);
         ctx.Tool("what_changed", "{}", a =>
@@ -84,9 +87,6 @@ public static class CsiFieldSteps
             FieldContext.Expect(Int(a["calls"]) == 2 && a["results"] is JsonArray { Count: 2 } r && r.All(x => x?["return"] is not null || x?["error"] is not null), "two answers were expected: " + a.ToJsonString()), "tool call_api, two calls in one go");
         No("call_api", """{"path":"FrameObj.Delete","args":{"Name":"1"}}""", "only reads", "tool call_api says no to a call that changes the model");
 
-        // ---- the model must be changeable for the rest ----
-        var locked = Read(ctx, "whether the model is locked", () => link.Info().Locked, false);
-        if (locked) T("unlock_model", "{}", a => FieldContext.Expect(a["locked"]?.GetValue<bool>() == false, "still locked: " + a.ToJsonString()), "tool unlock_model on the analysed scratch model");
 
         // ---- units, properties, load definitions, design codes ----
         var info = Read(ctx, "the units", link.Info, new ModelInfo("", "", "kN", "m", "C", false));
