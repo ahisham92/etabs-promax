@@ -180,17 +180,16 @@ internal sealed class MainWindow : Window
                   "(the analysis and design too), and closes each window again without saving. Each window takes a licence as usual.";
             if (TaskDialog.Show("CSI ProMax",
                     "The full field test checks everything CSI ProMax does. It checks this PC and the install, reads your open model, and builds a test model of its own with every Modeler tool. " +
-                    which + "\n\nYour open model is only read: nothing in it is changed. It takes 20 to 60 minutes. While it runs, leave the windows it opens alone; you can keep working here. " +
-                    "A message says when the report is ready.\n\nStart it now?",
-                    TaskDialogCommonButtons.Yes | TaskDialogCommonButtons.No, TaskDialogResult.Yes) != TaskDialogResult.Yes) return;
+                    which + "\n\nYour open model is only read: nothing in it is changed. It can take up to an hour. While it runs, leave the windows it opens alone, " +
+                    "and wait for it before you use the chat. A message says when the report is ready.\n\nStart it now?",
+                    TaskDialogCommonButtons.Yes | TaskDialogCommonButtons.No, TaskDialogResult.No) != TaskDialogResult.Yes) return;
+            // It says on the screen when it is done, the same way whether the menu or the chat started it.
+            try { CsiProMax.Tools.FieldTestRuns.StartFull(etabs.Link, "the Help menu"); }
+            catch (InvalidOperationException ex) { TaskDialog.Show("CSI ProMax", ex.Message); }
+            return;
         }
         CsiProMax.Assistant.FieldTest.Outcome outcome;
-        try
-        {
-            outcome = full
-                ? await CsiProMax.Assistant.FieldTest.Start(etabs.Link, new CsiProMax.Assistant.FieldTest.Options { Full = true, StartedFrom = "the Help menu" }).Task
-                : await Task.Run(() => CsiProMax.Assistant.FieldTest.Run(etabs.Link, changes: false, "the Help menu"));
-        }
+        try { outcome = await Task.Run(() => CsiProMax.Assistant.FieldTest.Run(etabs.Link, changes: false, "the Help menu")); }
         catch (Exception ex) when (ex is not OutOfMemoryException) { TaskDialog.Show("CSI ProMax", "The field test could not run: " + ex.Message); return; }
         TaskDialog.Show("CSI ProMax", outcome.Summary());
         try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"/select,\"{outcome.Send}\"") { UseShellExecute = true })?.Dispose(); }

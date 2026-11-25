@@ -104,7 +104,7 @@ public static class SapFieldSteps
             var made = link.Frames().Where(f => columns.Contains(f.Name)).ToList();
             FieldContext.Expect(made.Count == 4 && made.All(f => f.Kind == "column" && f.Section == "CPM-R300x600"), "4 columns with CPM-R300x600 were expected; SAP2000 has: " + string.Join("; ", made.Select(f => $"{f.Name} {f.Kind} {f.Section}")));
         }, "tool add_frames by coordinates");
-        var tops = link.Points().Where(p => At(p.Z, 3) && p.X > 29.9 && p.X < 36.1).OrderBy(p => p.Y).ThenBy(p => p.X).Select(p => p.Name).ToList();
+        var tops = Read(ctx, "the joints at the top of the new columns", () => link.Points().Where(p => At(p.Z, 3) && p.X > 29.9 && p.X < 36.1).OrderBy(p => p.Y).ThenBy(p => p.X).Select(p => p.Name).ToList(), []);
         if (tops.Count == 4)
             ctx.Tool("add_frames", $$"""{"section":"CPM-I400","joints":[[{{Q(tops[0])}},{{Q(tops[1])}}],[{{Q(tops[1])}},{{Q(tops[3])}}],[{{Q(tops[3])}},{{Q(tops[2])}}],[{{Q(tops[2])}},{{Q(tops[0])}}]]}""", a =>
             {
@@ -150,7 +150,7 @@ public static class SapFieldSteps
         else ctx.Fail("tools set_loads, set_member_loads and set_releases", "the beams and the area to load were not added");
         if (tops.Count > 0)
             ctx.Tool("set_joint_loads", $$"""{"joints":[{{Q(tops[0])}}],"pattern":"CPM-TEST","fz":-5,"fx":1,"my":0.5}""");
-        var first = link.LoadCases().FirstOrDefault(c => c.Equals("Dead", StringComparison.OrdinalIgnoreCase)) ?? link.LoadCases().FirstOrDefault() ?? "DEAD";
+        var first = Read(ctx, "the load cases", () => link.LoadCases().FirstOrDefault(c => c.Equals("Dead", StringComparison.OrdinalIgnoreCase)) ?? link.LoadCases().FirstOrDefault(), null) ?? "DEAD";
         ctx.Tool("add_combination", $$"""{"name":"CPM-TEST-COMBO","cases":[{"case":{{Q(first)}},"factor":1.2},{"case":"CPM-TEST","factor":1.6}]}""", _ => FieldContext.Expect(link.Combos().Contains("CPM-TEST-COMBO"), "the combination is not in SAP2000"));
 
         // ---- reading ----
@@ -163,7 +163,7 @@ public static class SapFieldSteps
         }
         ctx.Tool("query_objects", """{"section":"CPM-R300x600"}""", a => FieldContext.Expect(Int(a["count"]) == 4, $"4 frames with CPM-R300x600 were expected: {a["count"]}"), "tool query_objects by section");
         ctx.Tool("list_tables", "{}", a => FieldContext.Expect(Int(a["count"]) >= 3, $"SAP2000's tables with data were expected: {a["count"]}"));
-        if (link.Tables().FirstOrDefault(t => !t.Empty) is { } table)
+        if (Read(ctx, "the tables", () => link.Tables().FirstOrDefault(t => !t.Empty), null) is { } table)
             ctx.Tool("read_table", $$"""{"table":{{Q(table.Key)}},"limit":3}""", a => FieldContext.Expect(a["fields"] is JsonArray { Count: > 0 }, "the table has no fields"), $"tool read_table {table.Name}");
         else ctx.Fail("tool read_table", "SAP2000 listed no table with data");
 
@@ -177,7 +177,7 @@ public static class SapFieldSteps
         if (spare.Count > 0)
             ctx.Tool("delete_objects", $$"""{"frames":{{List(spare)}}}""", _ => FieldContext.Expect(!link.Frames().Any(f => f.Name == spare[0]), "the deleted frame is still in SAP2000"));
         else ctx.Fail("tool delete_objects", "the frame to delete was not added");
-        var loose = link.Points().Where(p => At(p.X, 48)).Select(p => p.Name).ToList();
+        var loose = Read(ctx, "the joints the deleted frame left", () => link.Points().Where(p => At(p.X, 48)).Select(p => p.Name).ToList(), []);
         if (loose.Count > 0)
             ctx.Tool("delete_joints", $$"""{"joints":{{List(loose)}}}""", _ => FieldContext.Expect(!link.Points().Any(p => At(p.X, 48)), "the joints at x = 48 are still in SAP2000"));
         else ctx.Tool("delete_joints", """{"joints":["no such joint"]}""", null, "tool delete_joints (the spare frame's joints went with it)");

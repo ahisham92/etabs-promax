@@ -86,12 +86,12 @@ public static class EtabsFieldSteps
             FieldContext.Expect(a["locked"]!.GetValue<bool>() == false, "the scratch model is locked before any analysis");
         });
 
-        var levels = link.Stories();
+        var levels = Read(ctx, "the stories", link.Stories, []);
         if (levels.Count < 2) { ctx.Fail("the scratch model's stories", "ETABS gave no stories, so the tools that build by story were not run"); ctx.Coverage("every ETABS tool was run"); return; }
         var (z0, story, z1) = (levels[0].Elevation, levels[1].Name, levels[1].Elevation);
         var storyList = List([story]);
-        var otherBeam = link.FrameSections().FirstOrDefault(s => s != "CPM-B250x500" && s != "CPM-C400") ?? "CPM-C400";
-        var otherSlab = link.AreaSections().FirstOrDefault(s => s != "CPM-S180" && s != "CPM-W200") ?? "CPM-S180";
+        var otherBeam = Read(ctx, "the frame sections", () => link.FrameSections().FirstOrDefault(s => s != "CPM-B250x500" && s != "CPM-C400"), null) ?? "CPM-C400";
+        var otherSlab = Read(ctx, "the slab sections", () => link.AreaSections().FirstOrDefault(s => s != "CPM-S180" && s != "CPM-W200"), null) ?? "CPM-S180";
 
         List<string> columns = [], beams = [], slabs = [], walls = [], spareFrames = [], spareAreas = [];
         ctx.Tool("add_columns", $$"""{"points":[[30,0],[36,0],[36,5],[30,5]],"stories":{{storyList}},"section":"CPM-C400"}""", a =>
@@ -148,7 +148,7 @@ public static class EtabsFieldSteps
         ctx.Tool("set_section", """{"frames":["no such frame"],"section":"CPM-C400"}""", a => FieldContext.Expect(Int(a["done"]) == 0 && a["failed"]!.AsArray().Count == 1, "a frame that is not there should be reported as failed: " + a.ToJsonString()), "tool set_section reports a frame that is not there");
 
         // Supports: the new columns' feet by name, then everything on the base.
-        var feet = link.Points().Where(p => At(p.Z, z0) && p.X > 29.9 && p.X < 36.1).Select(p => p.Name).ToList();
+        var feet = Read(ctx, "the points under the new columns", () => link.Points().Where(p => At(p.Z, z0) && p.X > 29.9 && p.X < 36.1).Select(p => p.Name).ToList(), []);
         if (feet.Count > 0)
             ctx.Tool("set_supports", $$"""{"type":"pinned","points":{{List(feet)}}}""", a =>
             {
@@ -165,7 +165,7 @@ public static class EtabsFieldSteps
             var under = link.Points().Where(p => At(p.Z, z0) && At(p.X, 42)).ToList();
             FieldContext.Expect(under.Count == 2 && under.All(p => link.Restraint(p.Name).All(r => r)), $"the wall's two base points should be fixed; {under.Count} points are under it");
         }, "tool set_supports fixed at the base");
-        if (spareFrames.Count > 0 && link.Points().FirstOrDefault(p => At(p.Z, z0) && At(p.X, 48)) is { } loose)
+        if (spareFrames.Count > 0 && Read(ctx, "the point under the spare column", () => link.Points().FirstOrDefault(p => At(p.Z, z0) && At(p.X, 48)), null) is { } loose)
             ctx.Tool("set_supports", $$"""{"type":"free","points":[{{Q(loose.Name)}}]}""", _ => FieldContext.Expect(link.Restraint(loose.Name).All(r => !r), "the point is not free when read back from ETABS"), "tool set_supports free");
         ctx.Refused("set_supports", """{"type":"welded","at_base":true}""", "fixed, pinned or free", "tool set_supports says no to a type that is not one");
 
@@ -189,7 +189,7 @@ public static class EtabsFieldSteps
         }
         else ctx.Fail("tool set_loads", "the beams and the slab to load were not added");
         ctx.Refused("set_loads", """{"frames":["1"],"pattern":"No such pattern","value":1}""", "no load pattern", "tool set_loads says no to a pattern that is not there");
-        var first = link.LoadCases().FirstOrDefault(c => c.Equals("Dead", StringComparison.OrdinalIgnoreCase)) ?? link.LoadCases().FirstOrDefault() ?? "Dead";
+        var first = Read(ctx, "the load cases", () => link.LoadCases().FirstOrDefault(c => c.Equals("Dead", StringComparison.OrdinalIgnoreCase)) ?? link.LoadCases().FirstOrDefault(), null) ?? "Dead";
         ctx.Tool("add_combination", $$"""{"name":"CPM-TEST-COMBO","cases":[{"case":{{Q(first)}},"factor":1.2},{"case":"CPM-TEST","factor":1.6}]}""", _ =>
             FieldContext.Expect(link.Combos().Contains("CPM-TEST-COMBO"), "the combination is not in ETABS: " + string.Join(", ", link.Combos())));
         ctx.Step("the combination's cases and factors are in ETABS (read from its tables)", () => ComboRows(link, "CPM-TEST-COMBO"));

@@ -142,6 +142,18 @@ public static class PanelFieldSteps
             pack = FileIn(a);
             FieldContext.Expect(pack.Length > 0 && File.Exists(pack) && new FileInfo(pack).Length > 200, "no pack was written: " + a.ToJsonString());
         });
+        // With no folder named, the pack goes beside the model. Tried on the scratch model only, whose folder is the test's own.
+        const string besideStep = "tool export_pack with no folder saves beside the model";
+        if (!scratch) ctx.Skip(besideStep, "that writes into the model's own folder, so it is only tried on a scratch model, never on your open model");
+        else
+            Tool("export_pack", """{"name":"cpm-field-test beside"}""", (a, _) =>
+            {
+                var file = FileIn(a);
+                var model = Path.GetDirectoryName(link.Info().File) ?? "";
+                FieldContext.Expect(file.Length > 0 && File.Exists(file), "no pack was written: " + a.ToJsonString());
+                FieldContext.Expect(string.Equals(Path.GetFullPath(Path.GetDirectoryName(file) ?? ""), Path.GetFullPath(model), StringComparison.OrdinalIgnoreCase),
+                    $"the model is in {model}; the pack went to {Path.GetDirectoryName(file)} ({a["not_beside_model"]?.ToJsonString() ?? "no reason given"})");
+            }, besideStep);
         if (pack.Length == 0) NotTested("read_pack_comments", "the pack it would read was not written (see export_pack above)");
         else
             ctx.Step("tool read_pack_comments on a pack nobody has commented on", () =>

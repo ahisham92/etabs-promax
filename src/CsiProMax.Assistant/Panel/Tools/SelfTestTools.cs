@@ -36,10 +36,11 @@ public sealed class RunFieldTestTool : IEtabsTool
         "(the default) tests everything: this PC and the install, the open model (reading only), every Modeler tool, then " +
         "a second window of each CSI program on this PC (ETABS, SAP2000, SAFE) opened by the test on its own scratch " +
         "model, where every tool and check is run with each change read back (the analysis and design too), CSI " +
-        "ProMax's own features, and each window is closed without saving. It never changes the open model. It takes " +
-        "20 to 60 minutes and runs in the background: it answers at once, and scope \"status\" says where it is and, " +
-        "when it is done, what failed and which file to send. scope \"quick\" checks this PC, the install and the open " +
-        "model in a minute or two. Use it when the user asks for the field test, or is asked to send one.";
+        "ProMax's own features, and each window is closed without saving. It never changes the open model. It can take " +
+        "up to an hour and runs in the background: it answers at once, a message on the screen says when it is done, " +
+        "and scope \"status\" says where it is and, when it is done, what failed and which file to send. scope " +
+        "\"quick\" checks this PC, the install and the open model in a minute or two. Use it when the user asks for " +
+        "the field test, or is asked to send one.";
     public string PropertiesJson => """
     {
       "scope": {"type": "string", "enum": ["full", "quick", "status"], "description": "full (default): everything, on scratch models, in the background. quick: this PC, the install and the open model, reading only. status: how the field test started last is doing, or what it found."}
@@ -63,17 +64,18 @@ public sealed class RunFieldTestTool : IEtabsTool
         try
         {
             var programs = FieldTest.Installed(app.Link.Program);
-            FieldTest.Start(app.Link, new FieldTest.Options { Full = true, StartedFrom = "the chat" });
+            FieldTestRuns.StartFull(app.Link, "the chat");
             return ToolResult.Ok(new
             {
                 status = "started",
                 programs = programs.Count == 0 ? "none found on this PC: the tools inside the programs will be listed as not tested" : string.Join(", ", programs.Select(p => p.Name)),
-                takes = "20 to 60 minutes",
+                takes = "up to an hour",
                 report_folder = FieldTest.Folder,
                 next = "Tell the user the full field test has started and runs in the background: it opens its own windows of " +
-                       "the CSI programs listed, on a test model of its own, and closes them again; they should leave those " +
-                       "windows alone and can keep working in this one. Their open model is only read. Call run_field_test with " +
-                       "scope \"status\" when they ask how it is going, or after a while, to give them the result and the file to send.",
+                       "the CSI programs listed, on a test model of its own, and closes them again. They should leave those " +
+                       "windows alone and wait for it before asking for other work; a message on the screen says when it is " +
+                       "done. Their open model is only read. Call run_field_test with scope \"status\" when they ask how it " +
+                       "is going, and when it is done give them the result and the file to send.",
             });
         }
         catch (InvalidOperationException ex) { return ToolResult.Error(ex.Message); }
@@ -111,6 +113,39 @@ public sealed class RunFieldTestTool : IEtabsTool
         next = "Tell the user the counts and what failed, and ask them to send file_to_send to whoever gave them CSI ProMax." +
                (outcome.Zip is not null ? " The report also lists a few things to check by hand (the Tools menu entry, a chat answer, and so on): ask them to try those." : ""),
     };
+}
+
+/// <summary>
+/// Starts the full field test in the background, from the chat or the Help menu alike, and says on the screen when it
+/// is done: the counts, what did not work and the file to send, shown in its folder.
+/// </summary>
+public static class FieldTestRuns
+{
+    public static FieldTest.Running StartFull(CsiProMax.Assistant.Etabs.ICsiLink link, string from)
+    {
+        var run = FieldTest.Start(link, new FieldTest.Options { Full = true, StartedFrom = from });
+        run.Task.ContinueWith(Announce, TaskScheduler.Default);
+        return run;
+    }
+
+    private static void Announce(Task<FieldTest.Outcome> done)
+    {
+        // No window (a test, the command line): the caller reads the outcome itself.
+        if (CsiProMax.App.Ui is null) return;
+        try
+        {
+            if (done.Exception is { } failed)
+            {
+                CsiProMax.ETABS.TaskDialog.Show("CSI ProMax", "The field test stopped before it could save its report: " + (failed.InnerException ?? failed).Message);
+                return;
+            }
+            var outcome = done.Result;
+            CsiProMax.ETABS.TaskDialog.Show("CSI ProMax", outcome.Summary());
+            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"/select,\"{outcome.Send}\"") { UseShellExecute = true })?.Dispose(); }
+            catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) { }
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { /* the window is closing: the report is saved all the same */ }
+    }
 }
 
 /// <summary>What the last self test of this session found, without running it again.</summary>

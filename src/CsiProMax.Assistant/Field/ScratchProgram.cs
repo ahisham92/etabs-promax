@@ -69,8 +69,9 @@ public sealed class ScratchProgram : IScratchWindow
         {
             if (!ok)
             {
-                if (scratch._app is not null) CloseStep(ctx, scratch, program);
-                scratch.Dispose();
+                // Dispose closes the window when the step could not (the part was given up on meanwhile).
+                try { if (scratch._app is not null) CloseStep(ctx, scratch, program); }
+                finally { scratch.Dispose(); }
             }
         }
     }

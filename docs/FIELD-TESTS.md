@@ -14,7 +14,7 @@ The field test is inside CSI ProMax. It checks what it can by itself and saves o
    beside the program. If the menu does not show it, add it by hand (the install line prints the plug-in name, menu
    text and file) and say so: that tells us the automatic entry needs fixing.
 3. **Run the full field test.** In the CSI ProMax window choose Help > Field test: everything (saves a report to
-   send), or type "run the field test" in the chat. It asks first, then runs in the background for 20 to 60 minutes:
+   send), or type "run the field test" in the chat. It asks first, then runs in the background (up to an hour):
    - this PC and the install: versions, the plug-in files and each program's plug-in list, the folders CSI ProMax
      writes to, the licence, Claude Code and its sign-in;
    - the open model, reading only (run it on a model that has been analysed and designed, so the result checks have
@@ -27,8 +27,10 @@ The field test is inside CSI ProMax. It checks what it can by itself and saves o
    - CSI ProMax's own features: every kind of file it writes and reads, the review pack, notes, recipes, learned
      tools, code, the self test, the bug report and the export. What it makes is taken away again.
 
-   Leave the windows it opens alone while it runs. Your open model is only read, never changed.
-   Expected: a message with the counts (passed, failed, not tested), and two files in
+   Leave the windows it opens alone while it runs, and wait for it before using the chat. Your open model is only
+   read, never changed. If a program shows a message of its own in the window the test opened (a licence message,
+   say), the test waits a few minutes, then gives up on that program and says so in the report.
+   Expected: a message on the screen with the counts (passed, failed, not tested), and two files in
    `Documents\CSI ProMax\Bugs\Field tests`: `Field test <program> <date>.md` (the report) and a `.zip` beside it
    with the report and the small files the test made. **Send the zip.**
 4. **Check by hand.** The report ends its first part with a short list of what no test can do (the Tools menu entry,

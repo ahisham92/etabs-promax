@@ -21,6 +21,20 @@ public static class FieldParts
     public static List<string> Names(JsonNode? answer, string key = "names") =>
         answer?[key] is JsonArray list ? list.Select(n => n?.GetValue<string>() ?? "").Where(n => n.Length > 0).ToList() : [];
 
+    /// <summary>
+    /// A read between steps that the next steps build on. When the program does not give it, that is a failure in the
+    /// report and the steps go on with <paramref name="otherwise"/>, so one read never ends a program's whole part.
+    /// </summary>
+    public static T Read<T>(FieldContext ctx, string what, Func<T> read, T otherwise)
+    {
+        try { return read(); }
+        catch (Exception ex) when (ex is not (OperationCanceledException or OutOfMemoryException))
+        {
+            ctx.Fail($"read {what}, for the steps that follow", $"{ex.GetType().Name}: {ex.Message}");
+            return otherwise;
+        }
+    }
+
     /// <summary>The section name of the scratch part of a program.</summary>
     public static string ScratchSection(CsiProgram program) => $"{program.Name} on a scratch model (a second {program.Name} window)";
 

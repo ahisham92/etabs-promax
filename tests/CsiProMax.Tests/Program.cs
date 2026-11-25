@@ -1125,10 +1125,13 @@ Test("field test: the full test runs every part, closes its window, and leaves t
         var (frames, patterns) = (open.Frames().Count, open.LoadPatterns().Count);
         CsiProMax.Tests.StandInWindow? window = null;
         var at = new DateTime(2026, 11, 25, 15, 30, 0);
+        var install = Path.Combine(root, "install");
+        Directory.CreateDirectory(install);
+        foreach (var plugIn in new[] { "CsiProMaxPlugin.dll", "CsiProMaxSafePlugin.dll", "CsiProMaxSapPlugin.dll" }) File.WriteAllText(Path.Combine(install, plugIn), "");
         var options = new FieldTest.Options
         {
             Full = true, StartedFrom = "the Help menu", Folder = Path.Combine(root, "out"), WorkFolder = Path.Combine(root, "work"), At = at,
-            SettingsRoot = Path.Combine(root, "nowhere"), Programs = [CsiProgram.Etabs], LiveScratch = false,
+            SettingsRoot = Path.Combine(root, "nowhere"), InstallFolder = install, Programs = [CsiProgram.Etabs], LiveScratch = false,
             // The stand-in for a second ETABS window: the Modeler's .e2k read into a model of its own.
             StartScratch = (program, ctx, file) =>
             {
@@ -1148,13 +1151,20 @@ Test("field test: the full test runs every part, closes its window, and leaves t
         Check(window is { Closed: true, Disposed: true }, "the scratch window is closed and let go of");
         Check(outcome.Steps.Any(s => s.Name == "close the scratch ETABS window without saving" && s.Ok), "closing it is a step of the report");
         Check(outcome.Steps.Any(s => s.Name == "ETABS read every story, frame and area the Modeler wrote" && s.Ok), "the scratch part reads the model the Modeler wrote");
-        var modeler = outcome.Steps.Where(s => s.Section == ModelerFieldSteps.Section && !s.Ok).Select(s => s.Name).ToList();
-        Check(modeler.Count == 0, "the Modeler's part failed: " + string.Join(", ", modeler));
+        // The stand-in is the Modeler's model, which cannot analyse: that one step fails, and nothing else may.
+        var failures = outcome.Steps.Where(s => !s.Ok).Select(s => $"[{s.Section}] {s.Name}: {s.Detail}").ToList();
+        Check(failures.Count == 1 && failures[0].Contains("tool run_analysis"), $"{failures.Count} steps failed, and only the analysis should:\n      - " + string.Join("\n      - ", failures));
+        Check(outcome.Steps.Any(s => s.Name == "the scratch ETABS window still has the scratch model open" && s.Ok), "the scratch model is checked again before CSI ProMax's own tools change it");
+        Check(outcome.Steps.Any(s => s.Name == "tool export_pack with no folder saves beside the model" && s.Ok), "the pack goes beside the scratch model");
+        Check(outcome.Steps.Count > 200, $"only {outcome.Steps.Count} steps");
+        Check(outcome.Steps.Where(s => s.Skipped).All(s => s.Detail.Length > 20), "everything not tested says why");
         Check(outcome.Steps.Any(s => s.Section == PanelFieldSteps.Section && s.Name == "every tool of the panel was run, or is listed as not tested" && s.Ok), "the panel's part ran on the scratch window");
         Check(outcome.Steps.Any(s => s.Section == FieldTest.OpenSection && s.Name == "Info" && s.Ok), "the open model is read");
         Equal(frames, open.Frames().Count, "no frame was added to the open model");
         Equal(patterns, open.LoadPatterns().Count, "no load pattern was added to the open model");
         Check(outcome.Report.Contains("Kind: the full test") && outcome.Report.Contains("none to the open model"), "the report says what kind of test it was");
+        Check(outcome.Report.Contains("Please send the zip beside this report"), "the report says to send the zip");
+        Check(outcome.Report.Replace("\r\n", "\n").Contains("## Not working\n\n" + FieldParts.ScratchSection(CsiProgram.Etabs) + ":\n\n- tool run_analysis:"), "what failed is listed under the part it belongs to");
         Check(outcome.NotTested > 0 && outcome.Report.Contains("## Not tested") && outcome.Report.Contains("## Check by hand"), "what was not tested, and what to check by hand, come first");
         Check(outcome.Report.Contains("### not tested: "), "a step that was not tested says so in its own part");
         Equal(Path.Combine(root, "out", "Field test ETABS 2026-11-25 1530.zip"), outcome.Zip, "the zip is beside the report");

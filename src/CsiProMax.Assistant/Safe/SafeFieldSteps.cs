@@ -71,12 +71,12 @@ public static class SafeFieldSteps
 
         // ---- the shared tools, as SAFE answers them ----
         ctx.Tool("get_model_context", "{}", a => FieldContext.Expect(Int(a["counts"]!["floors"]) > 0, "the context counts no floors: " + a["counts"]!.ToJsonString()));
-        var levels = link.Stories();
+        var levels = Read(ctx, "the stories", link.Stories, []);
         var story = levels.Count > 1 ? levels[^1].Name : "";
         var storyList = List(story.Length > 0 ? [story] : []);
-        var concrete = link.Materials().FirstOrDefault(m => m.StartsWith("C", StringComparison.OrdinalIgnoreCase) || m.Contains("psi", StringComparison.OrdinalIgnoreCase)) ?? link.Materials().FirstOrDefault() ?? "";
-        var pattern = link.LoadPatterns().FirstOrDefault(p => p.Type == "Live")?.Name ?? link.LoadPatterns().FirstOrDefault()?.Name ?? "Live";
-        var frameSection = link.FrameSections().FirstOrDefault() ?? "";
+        var concrete = Read(ctx, "the materials", () => link.Materials().FirstOrDefault(m => m.StartsWith("C", StringComparison.OrdinalIgnoreCase) || m.Contains("psi", StringComparison.OrdinalIgnoreCase)) ?? link.Materials().FirstOrDefault(), null) ?? "";
+        var pattern = Read(ctx, "the load patterns", () => link.LoadPatterns().FirstOrDefault(p => p.Type == "Live")?.Name ?? link.LoadPatterns().FirstOrDefault()?.Name, null) ?? "Live";
+        var frameSection = Read(ctx, "the frame sections", () => link.FrameSections().FirstOrDefault(), null) ?? "";
 
         // ---- SAFE's own modelling tools ----
         foreach (var (name, type, thickness) in new[] { ("CPM-SLAB250", "slab", 0.25), ("CPM-DROP400", "drop", 0.4), ("CPM-MAT600", "mat", 0.6), ("CPM-FTG500", "footing", 0.5) })
@@ -134,7 +134,7 @@ public static class SafeFieldSteps
 
         // ---- SAFE's strips and its own tables ----
         ctx.Tool("list_design_strips", """{"limit":5}""", a => FieldContext.Expect(a["strips"] is JsonArray, "no list of strips came back"));
-        var tables = link.Tables();
+        var tables = Read(ctx, "the tables", link.Tables, []);
         var slabTable = tables.FirstOrDefault(t => ResultTools.Norm(t.Name).Contains("slabpropert", StringComparison.Ordinal)) ?? tables.FirstOrDefault(t => !t.Empty);
         if (slabTable is not null)
         {

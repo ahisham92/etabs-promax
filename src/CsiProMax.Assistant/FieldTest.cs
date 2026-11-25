@@ -155,7 +155,16 @@ public static class FieldTest
 
         ctx.Section(OpenSection);
         o.Progress?.Invoke("reading the open model");
-        foreach (var step in SelfTest.Steps(link, o.Changes && !o.Full)) ctx.Record(step);
+        // A model that cannot be read at all is one failure that says so, not one for every read that follows.
+        string? unread = null;
+        try { link.Info(); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { unread = $"{ex.GetType().Name}: {ex.Message}"; }
+        if (unread is null) foreach (var step in SelfTest.Steps(link, o.Changes && !o.Full)) ctx.Record(step);
+        else
+        {
+            ctx.Fail("read the open model", unread + " Nothing of the open model could be read. Open a model in the program, start CSI ProMax from the program's Tools menu, and run the field test again.");
+            ctx.Skip("the checks of the open model", "the open model could not be read (see above)");
+        }
 
         if (o.Full) Full(ctx, link, o);
 
@@ -197,10 +206,27 @@ public static class FieldTest
                 window = o.StartScratch(program, ctx, file);
                 if (window is null) return;
                 ctx.Link = window.Link;
-                ScratchSteps(program)(ctx);
+                try { ScratchSteps(program)(ctx); }
+                catch (Exception ex) when (ex is not (OperationCanceledException or OutOfMemoryException))
+                {
+                    // One call the steps did not expect to fail: said once, with what was not reached because of it.
+                    ctx.Section(FieldParts.ScratchSection(program));
+                    var left = ctx.NotRun;
+                    ctx.Fail($"{program.Name}'s part stopped before its end",
+                        $"{ex.GetType().Name}: {ex.Message} Tools not run because of it: {(left.Count == 0 ? "none" : string.Join(", ", left))}. Where: {Where(ex)}");
+                }
                 if (panelDone) return;
                 panelDone = true;
-                PanelFieldSteps.Run(ctx, window.Link, scratch: true, live: o.LiveScratch);
+                // CSI ProMax's own tools change the model too (code): only while this window still has the test's model.
+                var mine = ctx.Step($"the scratch {program.Name} window still has the scratch model open", () =>
+                {
+                    // By its name without the file type: a save may write the program's other type beside it.
+                    var now = Path.GetFileName(window.Link.Info().File.Replace('\\', '/'));
+                    FieldContext.Expect(string.Equals(Path.GetFileNameWithoutExtension(now), Path.GetFileNameWithoutExtension(window.ModelPath), StringComparison.OrdinalIgnoreCase),
+                        $"it has '{now}' open, not '{Path.GetFileName(window.ModelPath)}', so nothing more is changed through it");
+                    return now;
+                }) is not null;
+                PanelFieldSteps.Run(ctx, window.Link, scratch: mine, live: o.LiveScratch);
             });
             // ctx.Link stays on the scratch window: a part that was given up on must never reach the engineer's model.
             ctx.Section(FieldParts.ScratchSection(program));
@@ -213,6 +239,10 @@ public static class FieldTest
         }
         if (!panelDone) PanelFieldSteps.Run(ctx, link, scratch: false, live: IsLive(link));
     }
+
+    /// <summary>The first calls of where an exception came from, for the report: enough to find the step.</summary>
+    private static string Where(Exception ex) =>
+        string.Join(" < ", (ex.StackTrace ?? "").Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).Take(4).Select(l => l.Length > 160 ? l[..160] : l));
 
     private static Action<FieldContext> ScratchSteps(CsiProgram program) => program.Key switch
     {
@@ -247,7 +277,7 @@ public static class FieldTest
     [
         "Tools > CSI ProMax is in the menu of each CSI program (ETABS, SAP2000, SAFE), and opens this window on that program's model.",
         "A message in the chat gets an answer from Claude Code.",
-        "A question the chat asks (ask_user) shows its card, and your answer reaches the chat.",
+        "A question the chat asks shows in its Questions tab, and your answer reaches the chat.",
         "Help > Report a bug: the picture of the screen is in the report.",
         "The review pack opens in its viewer page (the .html beside the .cpmx) in your browser.",
         "CSI ProMax > Check for updates finds the newest version.",
@@ -261,9 +291,19 @@ public static class FieldTest
         var sb = new StringBuilder();
         sb.AppendLine("# CSI ProMax field test");
         sb.AppendLine();
-        sb.AppendLine("Please send this file to whoever gave you CSI ProMax. It holds the versions on this PC, the plug-in lists of the");
-        sb.AppendLine("CSI programs, and small samples of the open model (names, counts and the first rows of result tables). Read it");
-        sb.AppendLine("before you send it.");
+        if (o.Full)
+        {
+            sb.AppendLine("Please send the zip beside this report (the same name, ending in .zip) to whoever gave you CSI ProMax. The zip");
+            sb.AppendLine("holds this report and the small files the test made on its own test model. This report holds the versions on");
+            sb.AppendLine("this PC, the plug-in lists of the CSI programs, and small samples of the open model (names, counts and the first");
+            sb.AppendLine("rows of result tables). Read it before you send it.");
+        }
+        else
+        {
+            sb.AppendLine("Please send this file to whoever gave you CSI ProMax. It holds the versions on this PC, the plug-in lists of the");
+            sb.AppendLine("CSI programs, and small samples of the open model (names, counts and the first rows of result tables). Read it");
+            sb.AppendLine("before you send it.");
+        }
         sb.AppendLine();
         sb.AppendLine($"- Result: {Counts(steps.Count(s => s.Ok && !s.Skipped), bad.Count, skipped.Count)}");
         sb.AppendLine(o.Full
@@ -285,20 +325,21 @@ public static class FieldTest
         if (work is not null) sb.AppendLine($"- The test's own files (scratch models, the files it made): {work}. The zip beside this report holds the small ones; that folder can be deleted.");
         sb.AppendLine();
 
-        if (bad.Count > 0)
+        // What failed, then what was left out, each under the part of the test it belongs to (a tool has the same name in every program).
+        void Listed(string title, IReadOnlyList<FieldStep> which)
         {
-            sb.AppendLine("## Not working");
+            if (which.Count == 0) return;
+            sb.AppendLine("## " + title);
             sb.AppendLine();
-            foreach (var s in bad) sb.AppendLine($"- {s.Name}: {Short(s.Detail, 400)}");
-            sb.AppendLine();
+            foreach (var part in which.GroupBy(s => s.Section))
+            {
+                if (part.Key.Length > 0) sb.AppendLine(part.Key + ":").AppendLine();
+                foreach (var s in part) sb.AppendLine($"- {s.Name}: {Short(Regex.Replace(s.Detail, "^skipped: ", ""), 400)}");
+                sb.AppendLine();
+            }
         }
-        if (skipped.Count > 0)
-        {
-            sb.AppendLine("## Not tested");
-            sb.AppendLine();
-            foreach (var s in skipped) sb.AppendLine($"- {s.Name}: {Short(Regex.Replace(s.Detail, "^skipped: ", ""), 400)}");
-            sb.AppendLine();
-        }
+        Listed("Not working", bad);
+        Listed("Not tested", skipped);
         if (o.Full)
         {
             sb.AppendLine("## Check by hand");
