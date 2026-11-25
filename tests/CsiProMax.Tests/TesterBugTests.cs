@@ -780,6 +780,15 @@ static class TesterBugTests
             var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/FieldTest.cs"));
             Check(source.Contains("WindowFieldSteps.Run(ctx, o.OpenWindow)", StringComparison.Ordinal), "the full test no longer opens the window");
         });
+        yield return ("edit_table says that it saved the model before the edit", () =>
+        {
+            // 0.4.26 saves the model before every table edit (SAP2000 26 empties its load patterns on a refused edit).
+            // A save nobody asked for must be said: in the tool's description and in every answer.
+            var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Tools/CsiTools.cs"));
+            Check(source.Contains("log[\"saved_before_edit\"]", StringComparison.Ordinal), "the answer of an applied edit does not say the model was saved");
+            var tool = ProgramTools.Chat(CsiProgram.Sap2000).First(x => x.Name == "edit_table");
+            Check(tool.Description.Contains("first saves the model", StringComparison.Ordinal), "edit_table's description does not say that a change saves the model");
+        });
         yield return ("ETABS 23 field test: a test copy an earlier run left open is closed by the next run, and nothing else is", () =>
         {
             // Seen on 2026-11-25: the 0.4.10 run gave up on ETABS with the story picker showing; the 0.4.14 run then failed
