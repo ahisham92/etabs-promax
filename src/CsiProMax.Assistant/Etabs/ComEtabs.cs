@@ -400,9 +400,11 @@ public sealed class ComEtabs : ICsiLink, IDisposable
         fields ??= None; data ??= None;
         if (ret != 0)
         {
-            // ETABS 23 refuses to read a table it lists as having no data, such as Story Stiffness with no seismic
-            // case or Element Forces - Braces with no braces (0.4.11 field test): that is an empty table, not an error.
-            if (Tables().Any(t => (t.Key == key || t.Name == key) && t.Empty)) return new TableData(fields, []);
+            // ETABS 23 lists tables it then refuses to read because there is nothing in them: Story Stiffness with no
+            // seismic case, Steel Column Envelope with no steel columns, even with their "empty" flag off (0.4.11
+            // field test). A table the program lists is then an empty table, not an error; a name it does not list
+            // is still refused.
+            if (Tables().Any(t => t.Key == key || t.Name == key)) return new TableData(fields, []);
             throw new EtabsException($"{Program.Name} refused to read the table '{key}' (check its name with the table list).");
         }
         var rows = new List<string[]>(Math.Max(records, 0));

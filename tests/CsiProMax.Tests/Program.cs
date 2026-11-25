@@ -1127,12 +1127,13 @@ Test("pack: SAP2000's steel design summary comes from its API, as ETABS's does",
     Equal("0.75", steel.Data!.Rows[0][2], "B1's ratio");
 });
 
-Test("link: a table the program lists as empty reads as empty, even when the program refuses to read it", () =>
+Test("link: a table the program lists reads as empty when the program refuses to read it", () =>
 {
     // ETABS 23 field test (0.4.11): "refused to read the table 'Story Stiffness'" with no seismic case, and
     // 'Element Forces - Braces' with no braces.
     using var link = new ComEtabs(CsiProgram.Etabs, () => new CpmFakes.TablesModel());
     Equal(0, link.ReadTable("Story Stiffness", ["DEAD"], null).Rows.Count, "a listed empty table");
+    Equal(0, link.ReadTable("Steel Column Envelope - AISC 360-16", null, null).Rows.Count, "a listed table marked with data that ETABS refuses");
     Equal(1, link.ReadTable("Story Definitions", null, null).Rows.Count, "a table with data");
     Throws<EtabsException>(() => link.ReadTable("No Such Table", null, null), "a table that is not there");
 });
@@ -1831,7 +1832,7 @@ namespace CpmFakes
     public sealed class Tables
     {
         public int GetAllTables(ref int n, ref string[] keys, ref string[] names, ref int[] import, ref bool[] empty)
-        { n = 2; keys = ["Story Definitions", "Story Stiffness"]; names = keys; import = [0, 0]; empty = [false, true]; return 0; }
+        { n = 3; keys = ["Story Definitions", "Story Stiffness", "Steel Column Envelope - AISC 360-16"]; names = keys; import = [0, 0, 0]; empty = [false, true, false]; return 0; }
         public int SetLoadCasesSelectedForDisplay(ref string[] list) => 0;
         public int SetLoadCombinationsSelectedForDisplay(ref string[] list) => 0;
         public int GetTableForDisplayArray(string key, ref string[] ask, string group, ref int version, ref string[]? fields, ref int records, ref string[]? data)
