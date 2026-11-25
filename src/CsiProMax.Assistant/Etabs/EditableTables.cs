@@ -5,10 +5,8 @@ namespace CsiProMax.Assistant.Etabs;
 /// some definitions (a user coefficient seismic load, ASCE 7-16 wind, a user response spectrum, a named mass source:
 /// read from its ETABSv1.dll and its "Table and Field Keys.xml", 0.4.17 field test), and its tables take them.
 /// </summary>
-public static class EditableTables
-
-{
-
+public static class EditableTables
+{
     /// <summary>
     /// Selects every load pattern for display before a table is read. SAP2000 26 shows only the patterns selected for
     /// display in its database tables (DEAD alone in a new model, none in a model imported from .s2k), so a pattern added
