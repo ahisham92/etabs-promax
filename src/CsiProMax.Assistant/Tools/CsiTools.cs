@@ -105,7 +105,7 @@ public static class CsiTools
             """{"type":"object","properties":{}}""", Ask.Never, (_, e) => LoadDefinitions(e)),
 
         new("edit_table",
-            "The program's own editable tables (interactive database editing): the way to change anything the other tools do not, in bulk. action 'fields' gives a table's fields and units; 'read' its rows; 'add' adds rows (each row an object of field to value); 'update' changes the fields in 'set' on the rows whose fields equal 'match'; 'delete' removes the rows that match. The program checks the edit and its import log comes back. Find tables with list_tables.",
+            "The program's own editable tables (interactive database editing): the way to change anything the other tools do not, in bulk. action 'fields' gives a table's fields and units; 'read' its rows; 'add' adds rows (each row an object of field to value); 'update' changes the fields in 'set' on the rows whose fields equal 'match'; 'delete' removes the rows that match. The program checks the edit and its import log comes back. A change (add, update, delete) first saves the model under its own file name, so that an edit the program refuses can be undone by opening that file again: say so to the engineer before the first change in a conversation. Find tables with list_tables.",
             """
             {"type":"object","required":["table","action"],"properties":{
               "table":{"type":"string"},"action":{"type":"string","enum":["fields","read","add","update","delete"]},
@@ -720,6 +720,7 @@ public static class CsiTools
         // and the scratch model was left with no load patterns at all (0.4.22 field test). The edit is cancelled, the
         // table read back, and the rows as they were put back when any are gone.
         var unlocked = false;
+        var savedAs = "";
         var log = (JsonObject)e.Raw("apply the table edit", m =>
         {
             // An analysed model is locked, and SAP2000 26 refuses a table edit then (SetTableForEditingArray answered 1 on
@@ -738,7 +739,10 @@ public static class CsiTools
             try { saved = Convert.ToString(m.GetModelFilename(true)) ?? ""; } catch (Exception) { saved = ""; }
             // Only a model file of the program's own (ETABS 23 answers its working .$et, which is not one to save to).
             if (!new[] { ".sdb", ".edb", ".fdb" }.Contains(Path.GetExtension(saved), StringComparer.OrdinalIgnoreCase)) saved = "";
+            var named = saved.Length > 0;
             if (saved.Length > 0 && Convert.ToInt32(m.File.Save(saved)) != 0) saved = "";
+            var notSaved = named && saved.Length == 0;
+            savedAs = saved;
             string? refused = null; int fatal = 0, errors = 0, warnings = 0, info = 0; string text = "";
             try
             {
@@ -765,8 +769,12 @@ public static class CsiTools
                 restored = RestoreRows(m, table.Key, fields, original);
             var cut = (text ?? "").Replace("\r", " ").Replace("\n", " ").Trim();
             if (cut.Length > 600) cut = cut[..600] + "...";
-            throw new EtabsException($"{refused}. {restored}" + (cut.Length > 0 ? $" Its import log: {cut}" : ""));
+            // What the link remembers of the model is read again: the model may have been opened again from its file.
+            try { e.Refresh(); } catch (Exception ex) when (ex is EtabsException or InvalidOperationException) { /* the next call reads it */ }
+            throw new EtabsException($"{refused}. {restored}" + (notSaved ? $" ({program} could not save the model before the edit, so it could not be opened again from its file.)" : "") + (cut.Length > 0 ? $" Its import log: {cut}" : ""));
         })!;
+        // The engineer is always told that the model's file was written: a save nobody asked for must never be silent.
+        if (savedAs.Length > 0) log["saved_before_edit"] = $"The model was saved as {Path.GetFileName(savedAs)} just before the edit, so that a refused edit could be undone. Tell the engineer that the file was saved.";
         if (unlocked) log["unlocked"] = $"The model was analysed: it was unlocked for the edit, so its analysis results are gone. Run the analysis again.";
         e.Refresh();
         var bad = log["fatal_errors"]!.GetValue<int>() + log["errors"]!.GetValue<int>();
