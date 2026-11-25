@@ -360,6 +360,15 @@ Test("assistant: every tool has a name of its own and a schema", () =>
     }
 });
 
+Test("assistant: the chat is given every tool, the drawing reader too", () =>
+{
+    var registry = EtabsProMax.Tools.ToolRegistry.CreateDefault();
+    foreach (var name in new[] { "read_cad_drawing", "read_drawing", "make_document", "run_self_test", "memory_note", "ask_user" })
+        Check(registry.Find(name) is not null && registry.IsBuiltIn(name), "the chat has no " + name);
+    foreach (var tool in EtabsTools.All)
+        Check(registry.IsBuiltIn(tool.Name), "the chat has no " + tool.Name);
+});
+
 Test("files: a drawing is written as DXF and DWG and read back", () =>
 {
     var folder = Directory.CreateTempSubdirectory("epm").FullName;
