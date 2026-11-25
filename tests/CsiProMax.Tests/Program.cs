@@ -7,6 +7,12 @@ using CsiProMax.Checks;
 using CsiProMax.E2k;
 using CsiProMax.Model;
 
+if (Environment.GetEnvironmentVariable("CPM_DUMP_TOOLS") == "1")
+{
+    foreach (var t in CsiProMax.Tools.ToolRegistry.CreateDefault().All.Where(t => t is not CsiProMax.Tools.ModelTool))
+        Console.WriteLine($"## {t.Name} [modifies={t.ModifiesModel}] required={string.Join(",", t.Required)}\n{t.PropertiesJson}\n");
+    return 0;
+}
 // Small self-contained checks, as in Sketch ProMax: each is a name and a body that throws when it fails.
 var tests = new List<(string Name, Action Body)>();
 void Test(string name, Action body) => tests.Add((name, body));
@@ -1018,6 +1024,30 @@ Test("chat: a Claude Code that is there but does not answer is named with the re
         Check(CsiProMax.Chat.ClaudeFinder.IsDesktopApp(@"C:\Users\x\AppData\Local\Microsoft\WindowsApps\claude.exe"), "the desktop app's alias in WindowsApps");
     }
     finally { Directory.Delete(root, true); }
+});
+
+Test("field test: the Modeler part runs every Modeler tool, and every step holds", () =>
+{
+    var folder = Path.Combine(Path.GetTempPath(), "cpm-field-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(folder);
+    var snapshots = ResultTools.SnapshotRoot;
+    try
+    {
+        var ctx = new FieldContext(CsiProgram.Etabs, folder, new MemoryEtabs());
+        ModelerFieldSteps.Run(ctx);
+        // CPM_FIELD_DUMP=1 prints every step, to read what the field test did when working on it.
+        if (Environment.GetEnvironmentVariable("CPM_FIELD_DUMP") == "1")
+            foreach (var s in ctx.Steps) Console.WriteLine($"      {(s.Skipped ? "skip" : s.Ok ? "ok  " : "FAIL")} {s.Name}: {(s.Detail.Length > 140 ? s.Detail[..140] : s.Detail)}");
+        var failed = ctx.Steps.Where(s => !s.Ok).Select(s => $"{s.Name}: {s.Full ?? s.Detail}").ToList();
+        Check(failed.Count == 0, $"{failed.Count} of {ctx.Steps.Count} steps failed:\n      - " + string.Join("\n      - ", failed));
+        Check(ctx.Steps.Count > 60, $"only {ctx.Steps.Count} steps");
+        Check(ctx.Steps.All(s => s.Section == ModelerFieldSteps.Section), "every step is in the Modeler's part of the report");
+        Check(ctx.Steps.Any(s => s.Name == "every Modeler tool was run" && s.Ok), "the closing check that every tool was run");
+        foreach (var key in new[] { "etabs", "sap2000", "safe" })
+            Check(ctx.Files.TryGetValue(key, out var file) && File.Exists(file) && new FileInfo(file).Length > 500, $"the file for {key} was not written");
+        Equal(ResultTools.SnapshotRoot, snapshots, "the snapshot folder is put back");
+    }
+    finally { ResultTools.SnapshotRoot = snapshots; Directory.Delete(folder, true); }
 });
 
 foreach (var (name, body) in tests)
