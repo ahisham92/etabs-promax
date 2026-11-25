@@ -65,6 +65,15 @@ public static class SelfTest
         Step("ReadTable", () => { var t = etabs.ReadTable("Story Definitions", null, null); return new { t.Fields, Rows = t.Rows.Take(2) }; });
         Step("Select", () => { var f = etabs.Frames()[0].Name; etabs.ClearSelection(); etabs.Select("frame", f); var s = etabs.Selected(); etabs.ClearSelection(); return s; });
         Step("Tool get_model_context", () => EtabsTools.All.First(t => t.Name == "get_model_context").Run(JsonDocument.Parse("{}").RootElement, etabs).ToJsonString());
+        if (etabs.Program.Key == CsiProgram.Safe.Key)
+        {
+            // SAFE's own calls and tables: what the SAFE tools lean on.
+            var none = JsonDocument.Parse("{}").RootElement;
+            Step("SAFE tables", () => etabs.Tables().Where(t => Safe.SafePack.Takes(t.Name) || ResultTools.Norm(t.Name).Contains("strip", StringComparison.Ordinal)).Select(t => $"{t.Name}{(t.Empty ? " (empty)" : "")}").ToList());
+            Step("SAFE list_design_strips", () => Safe.SafeTools.All.First(t => t.Name == "list_design_strips").Run(none, etabs).ToJsonString());
+            Step("SAFE area spring properties", () => etabs.Raw("list the soil properties", m => { int n = 0; string[] a = []; m.PropAreaSpring.GetNameList(ref n, ref a); return a; }));
+            Step("SAFE safe_results_overview", () => Safe.SafeTools.All.First(t => t.Name == "safe_results_overview").Run(none, etabs).ToJsonString());
+        }
 
         if (changes)
         {

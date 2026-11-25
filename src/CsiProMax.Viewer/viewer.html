@@ -64,7 +64,7 @@ textarea{width:100%;min-height:64px;resize:vertical}
     <div id="bar">
       <button data-view="3d" class="on">3D</button><button data-view="plan">Plan</button><button data-view="x">Elevation X</button><button data-view="y">Elevation Y</button>
       <label>Story <select id="story"></select></label>
-      <label>Colour <select id="colour"><option value="kind">Kind</option><option value="section">Section</option><option value="ratio">Design ratio</option></select></label>
+      <label>Colour <select id="colour"><option value="kind">Kind</option><option value="section">Section</option><option value="ratio">Design ratio</option><option value="punching">Punching ratio</option><option value="soil">Soil pressure</option></select></label>
       <label><input type="checkbox" id="showAreas" checked>Slabs and walls</label>
       <label><input type="checkbox" id="showNames">Names</label>
       <label id="defBox" style="display:none">Deformed <select id="defCase"></select> <input type="range" id="defScale" min="0" max="100" value="30" style="width:90px;padding:0"></label>
@@ -100,7 +100,7 @@ textarea{width:100%;min-height:64px;resize:vertical}
 const $ = id => document.getElementById(id);
 const norm = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, "");
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-let P = null, frames = [], areas = [], ratio = new Map(), disp = new Map(), pointAt = new Map(), picked = null, newComments = [];
+let P = null, frames = [], areas = [], ratio = new Map(), marks = {punching: [], soil: []}, pointXyz = new Map(), disp = new Map(), pointAt = new Map(), picked = null, newComments = [];
 const view = {yaw: -0.9, pitch: 0.5, zoom: 1, cx: 0, cy: 0, cz: 0, size: 10, panX: 0, panY: 0, mode: "3d"};
 const palette = ["#0f7c82","#c0562b","#6a55b0","#2e8b57","#b8860b","#c2417a","#3b73c4","#7a8a2a","#a0522d","#4b9aa8","#8e44ad","#d35400"];
 
@@ -155,6 +155,7 @@ function load(pack) {
   frames = (m.frames || []).map(f => ({name: f[0], kind: f[1], section: f[2], story: f[3], a: [f[4], f[5], f[6]], b: [f[7], f[8], f[9]]}));
   areas = (m.areas || []).map(a => ({name: a.n, kind: a.k, section: a.s, pts: chunk(a.c)}));
   pointAt = new Map((m.points || []).map(p => [key(p[1], p[2], p[3]), p[0]]));
+  pointXyz = new Map((m.points || []).map(p => [String(p[0]), [p[1], p[2], p[3]]]));
   let lo = [1e30, 1e30, 1e30], hi = [-1e30, -1e30, -1e30];
   const grow = p => { for (let i = 0; i < 3; i++) { lo[i] = Math.min(lo[i], p[i]); hi[i] = Math.max(hi[i], p[i]); } };
   frames.forEach(f => { grow(f.a); grow(f.b); }); areas.forEach(a => a.pts.forEach(grow));
@@ -162,10 +163,10 @@ function load(pack) {
   view.cx = (lo[0] + hi[0]) / 2; view.cy = (lo[1] + hi[1]) / 2; view.cz = (lo[2] + hi[2]) / 2;
   view.size = Math.max(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2], 1); view.zoom = 1; view.panX = view.panY = 0;
   const man = P.manifest || {}, u = man.units || {};
-  $("meta").textContent = [man.model || "Model", u.force && u.length ? u.force + ", " + u.length : "", man.etabs ? "ETABS " + man.etabs : "", man.created ? "packed " + String(man.created).replace("T", " ").slice(0, 16) : "", frames.length + " frames, " + areas.length + " areas"].filter(Boolean).join(" · ");
+  $("meta").textContent = [man.model || "Model", u.force && u.length ? u.force + ", " + u.length : "", man.etabs ? (man.program || "ETABS") + " " + man.etabs : "", man.created ? "packed " + String(man.created).replace("T", " ").slice(0, 16) : "", frames.length + " frames, " + areas.length + " areas"].filter(Boolean).join(" · ");
   document.title = (man.model || "Model") + " · CSI ProMax Viewer";
   $("story").innerHTML = "<option value=''>All</option>" + (m.stories || []).slice().reverse().filter(s => frames.some(f => f.story === s.name)).map(s => `<option>${esc(s.name)}</option>`).join("");
-  readRatios(); readDisplacements();
+  readRatios(); readDisplacements(); readMarks();
   $("drop").style.display = "none";
   drawChecks(); fillTables(); drawComments(); draw();
 }
@@ -183,6 +184,42 @@ function readRatios() {
   }
   $("colour").querySelector("[value=ratio]").disabled = ratio.size === 0;
 }
+// SAFE: punching shear ratios and soil pressures, drawn as dots where the point or column is.
+function slabLevel() {
+  const count = new Map(); for (const a of areas) if (a.kind !== "wall") for (const p of a.pts) { const z = Math.round(p[2] * 1000) / 1000; count.set(z, (count.get(z) || 0) + 1); }
+  let best = 0, n = -1; count.forEach((c, z) => { if (c > n) { n = c; best = z; } }); return best;
+}
+function markAt(t, r, z) {
+  const x = col(t.fields, "GlobalX", "X"), y = col(t.fields, "GlobalY", "Y"), id = col(t.fields, "Point", "PointLabel", "UniqueName", "Label", "Joint", "Column");
+  if (x >= 0 && y >= 0 && !isNaN(parseFloat(r[x])) && !isNaN(parseFloat(r[y]))) return {at: [parseFloat(r[x]), parseFloat(r[y]), z], name: id >= 0 ? r[id] : ""};
+  const p = id >= 0 && pointXyz.get(String(r[id])); return p ? {at: p, name: r[id]} : null;
+}
+function readMarks() {
+  marks = {punching: [], soil: []};
+  const z = slabLevel();
+  for (const t of Object.values(P.tables)) {
+    const n = norm(t.name);
+    if (n.includes("punch")) {
+      let rc = col(t.fields, "Ratio", "ShearRatio", "StressRatio", "DCRatio"); if (rc < 0) rc = t.fields.findIndex(f => /ratio/.test(norm(f)));
+      const cc = t.fields.findIndex(f => /combo/.test(norm(f)));
+      if (rc < 0) continue;
+      const best = new Map();
+      for (const r of t.rows) { const v = parseFloat(r[rc]); const m = markAt(t, r, z); if (isNaN(v) || !m) continue; const k = m.at.join(","); if (!best.has(k) || v > best.get(k).v) best.set(k, {...m, v, note: cc >= 0 ? r[cc] : ""}); }
+      marks.punching.push(...best.values());
+    } else if (n.includes("soil") && n.includes("pressure")) {
+      let pc = col(t.fields, "Pressure", "SoilPressure"); if (pc < 0) pc = t.fields.findIndex(f => /pressure/.test(norm(f)));
+      if (pc < 0) continue;
+      const best = new Map();
+      for (const r of t.rows) { const v = -parseFloat(r[pc]); const m = markAt(t, r, z); if (isNaN(v) || !m) continue; const k = m.at.join(","); if (!best.has(k) || v > best.get(k).v) best.set(k, {...m, v}); }
+      marks.soil.push(...best.values());
+    }
+  }
+  $("colour").querySelector("[value=punching]").disabled = marks.punching.length === 0;
+  $("colour").querySelector("[value=soil]").disabled = marks.soil.length === 0;
+  const safe = /safe/i.test((P.manifest || {}).program || "");
+  if (safe && marks.punching.length) $("colour").value = "punching";
+}
+function soilColour(v, max) { if (v <= 0) return css("--mute"); const f = max > 0 ? v / max : 0; return f > 0.9 ? "#d0342c" : f > 0.7 ? "#e08a1e" : f > 0.5 ? "#c9b21f" : f > 0.3 ? "#6aa84f" : "#2e8b57"; }
 function readDisplacements() {
   disp = new Map();
   const t = P.tables["Joint Displacements"];
@@ -260,6 +297,21 @@ function draw() {
     if (names) { g.fillStyle = css("--mute"); g.font = "10.5px Segoe UI, sans-serif"; g.fillText(f.name, (it.a[0] + it.b[0]) / 2 + 3, (it.a[1] + it.b[1]) / 2 - 3); }
   }
   drawn = items;
+  // SAFE's punching ratios or soil pressures, as dots
+  if (mode === "punching" || mode === "soil") {
+    const list = marks[mode], max = Math.max(0, ...list.map(m => m.v)), unit = ((P.manifest || {}).units || {});
+    for (const m of list) {
+      if (story && Math.abs(m.at[2] - elevation) > 1e-6) continue;
+      const p = project(m.at);
+      let colour, label;
+      if (mode === "punching") { colour = ratioColour(m.v); label = m.v > 1 ? "above 1.0" : m.v > 0.9 ? "0.9 to 1.0" : m.v > 0.7 ? "0.7 to 0.9" : m.v > 0.5 ? "0.5 to 0.7" : "up to 0.5"; }
+      else { colour = soilColour(m.v, max); label = m.v <= 0 ? "lifts off" : "up to " + (m.v <= 0.3 * max ? 0.3 * max : m.v <= 0.5 * max ? 0.5 * max : m.v <= 0.7 * max ? 0.7 * max : m.v <= 0.9 * max ? 0.9 * max : max).toFixed(1) + (unit.force ? " " + unit.force + "/" + unit.length + "²" : ""); }
+      legend.set(label, colour);
+      g.beginPath(); g.arc(p[0], p[1], mode === "punching" ? 7 : 4, 0, 7); g.fillStyle = colour; g.fill();
+      if (mode === "punching") { g.strokeStyle = css("--panel"); g.lineWidth = 1.5; g.stroke(); }
+      if (names || mode === "punching" && m.v > 1) { g.fillStyle = css("--mute"); g.font = "10.5px Segoe UI, sans-serif"; g.fillText((m.name ? m.name + " " : "") + m.v.toFixed(mode === "punching" ? 2 : 1), p[0] + 8, p[1] - 6); }
+    }
+  }
   // comment markers
   for (const c of P.comments) {
     const t = c.target && (frames.find(f => f.name === c.target.name && c.target.kind === "frame") || areas.find(a => a.name === c.target.name && c.target.kind === "area"));

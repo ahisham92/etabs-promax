@@ -22,6 +22,7 @@ jobs:
       - run: dotnet run -c Release --project tests/CsiProMax.Tests
       - run: dotnet publish src/CsiProMax.Assistant -c Release -p:DebugType=none -o package/dist
       - run: dotnet publish src/CsiProMax.Plugin -c Release -p:DebugType=none -o package/dist
+      - run: dotnet publish src/CsiProMax.Plugin.Safe -c Release -p:DebugType=none -o package/dist
       - run: test -e package/dist/CsiProMax.dll && test ! -e package/dist/ETABSv1.dll && ! find package -iname '*.exe' | grep .
       - run: cp docs/INSTALL.txt package/ && cd package && zip -q -r "../CsiProMax-$VERSION.zip" .
       - run: gh release create "$GITHUB_REF_NAME" "CsiProMax-$VERSION.zip" --title "CSI ProMax $VERSION" --generate-notes

@@ -39,7 +39,7 @@ public static class Pack
         {
             ["format"] = "cpmx", ["version"] = Version,
             ["model"] = file.Length > 0 ? Path.GetFileNameWithoutExtension(file) : "Unsaved model",
-            ["file"] = info.File, ["etabs"] = info.Version,
+            ["file"] = info.File, ["etabs"] = info.Version, ["program"] = e.Program.Name,
             ["units"] = new JsonObject { ["force"] = info.Force, ["length"] = info.Length, ["temperature"] = info.Temperature },
             ["analysis_run"] = info.Locked,
             ["created"] = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture),
@@ -69,6 +69,7 @@ public static class Pack
         foreach (var name in UsualTables)
             if (known.FirstOrDefault(t => !t.Empty && (ResultTools.Norm(t.Name) == ResultTools.Norm(name) || ResultTools.Norm(t.Key) == ResultTools.Norm(name))) is { } t) wanted.Add(t);
         wanted.AddRange(known.Where(t => !t.Empty && ResultTools.IsDesignSummary(t.Name)));
+        wanted.AddRange(known.Where(t => !t.Empty && ProgramTools.PackTable(e.Program, t.Name)));
         foreach (var name in extraTables)
         {
             var t = known.FirstOrDefault(k => string.Equals(k.Name, name, StringComparison.OrdinalIgnoreCase) || string.Equals(k.Key, name, StringComparison.OrdinalIgnoreCase));

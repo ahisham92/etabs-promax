@@ -67,7 +67,7 @@ public static class App
         Dispatcher.Initialize(Etabs);
         Host.ModelWatch.Start(link);
         DropForeignHistory();
-        var registry = ToolRegistry.CreateDefault(Modeler);
+        var registry = ToolRegistry.CreateDefault(Modeler, link.Program);
         Bridge = new BridgeServer(registry, Dispatcher, ETABSYear);
         Bridge.Start();
         _started = true;

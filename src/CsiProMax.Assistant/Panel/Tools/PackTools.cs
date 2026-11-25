@@ -54,7 +54,7 @@ public sealed class ExportPackTool : IEtabsTool
             var combos = args.StringList("combinations");
             if (cases.Count > 0) limits["cases"] = new JsonArray(cases.Select(c => (JsonNode)c).ToArray());
             if (combos.Count > 0) limits["combinations"] = new JsonArray(combos.Select(c => (JsonNode)c).ToArray());
-            var checks = ResultTools.Report(JsonDocument.Parse(limits.ToJsonString()).RootElement, link).AsObject();
+            var checks = ProgramTools.Report(JsonDocument.Parse(limits.ToJsonString()).RootElement, link).AsObject();
             var built = Pack.Build(link, args.StringList("tables"), cases, combos, checks, null);
             var model = built.Content["manifest"]!["model"]!.GetValue<string>();
             var name = OfficeDocs.SafeName((args.OptString("name") ?? "").Trim() is { Length: > 0 } n ? n : model);
