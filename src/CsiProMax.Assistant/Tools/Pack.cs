@@ -24,6 +24,8 @@ public static class Pack
         "Story Definitions", "Modal Participating Mass Ratios", "Modal Periods And Frequencies", "Base Reactions", "Story Drifts",
         "Story Max Over Avg Displacements", "Story Max Over Avg Drifts", "Story Stiffness", "Story Forces", "Mass Summary by Story",
         "Centers Of Mass And Rigidity", "Joint Displacements", "Joint Reactions", "Diaphragm Center Of Mass Displacements",
+        // What the Viewer draws force and moment diagrams from.
+        "Element Forces - Beams", "Element Forces - Columns", "Element Forces - Braces",
     ];
 
     public sealed record Built(byte[] Zip, JsonObject Content, int Frames, int Areas, IReadOnlyList<string> Tables, IReadOnlyList<string> Notes);
