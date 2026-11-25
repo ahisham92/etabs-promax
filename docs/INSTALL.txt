@@ -30,5 +30,11 @@ owner and paste the key you get back.
 Later versions download by themselves (CSI ProMax > Check for updates). The CSI program must be open and licensed on
 this PC: CSI ProMax never starts, unlocks or stands in for it.
 
-The Modeler (no ETABS needed): in the window, View > Put a Modeler shortcut on the desktop. It saves .e2k for
-ETABS, and one floor or a mat as .f2k for SAFE (File > Import > SAFE .F2K file in SAFE).
+The Modeler (no ETABS and no CSI licence needed)
+It builds a model and writes an .e2k file that ETABS opens later, or one floor or a mat as an .f2k file for SAFE
+(File > Import > SAFE .F2K file). It does not analyse or design: that needs ETABS.
+- On a PC with ETABS: the first time the window opens it puts "CSI ProMax Modeler" and "CSI ProMax Viewer"
+  shortcuts on the desktop and in the Start menu (CSI ProMax). Delete one and it stays deleted; View > Make the
+  Modeler and Viewer shortcuts again brings them back.
+- On a PC with no ETABS: install ".NET Desktop Runtime 8" (x64) as above, copy the "dist" folder to Documents and
+  rename it "CSI ProMax", then double-click "Open the Modeler.cmd" inside it.

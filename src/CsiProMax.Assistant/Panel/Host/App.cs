@@ -84,6 +84,7 @@ public static class App
 
         var token = _life.Token;
         _ = Task.Run(() => BackgroundStartAsync(link, token));
+        _ = Task.Run(Host.Shortcuts.Ensure);
         RunningCall.Version = Updater.CurrentText;
         RunningCall.Enabled = true;
         _ = Task.Run(() => { foreach (var line in RunningCall.Recover()) ActivityLog.Note("etabs_closed_during", line); });

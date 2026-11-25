@@ -5,80 +5,118 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CSI ProMax Viewer</title>
 <style>
-:root{--bg:#f4f6f7;--panel:#ffffff;--ink:#1c2428;--mute:#5f6d74;--line:#d5dcdf;--accent:#0f7c82;--accent-ink:#ffffff;--bad:#c0392b;--ok:#1e8449;--warn:#b9770e;--canvas:#eef2f3;--floor:rgba(15,124,130,.16);--wall:rgba(120,90,160,.22)}
-@media (prefers-color-scheme: dark){:root{--bg:#12181b;--panel:#1b2327;--ink:#e6ecee;--mute:#93a2a9;--line:#2e3a40;--accent:#35b3ba;--accent-ink:#06282a;--bad:#ff7a6b;--ok:#5fd08b;--warn:#f0b24a;--canvas:#161d20;--floor:rgba(53,179,186,.18);--wall:rgba(170,140,220,.22)}}
+:root{--bg:#e9edf0;--panel:#f7f9fa;--panel2:#eef1f3;--ink:#1c2428;--mute:#5f6d74;--line:#c3ccd1;--accent:#0f6fb4;--accent-ink:#ffffff;--bad:#c0392b;--ok:#1e8449;--warn:#b9770e;--title:#dfe5e9;--sel:#d6e8f6}
+@media (prefers-color-scheme: dark){:root{--bg:#0e1316;--panel:#182024;--panel2:#141b1f;--ink:#e6ecee;--mute:#93a2a9;--line:#2e3a40;--accent:#4aa8e8;--accent-ink:#06202f;--bad:#ff7a6b;--ok:#5fd08b;--warn:#f0b24a;--title:#202a2f;--sel:#1d3547}}
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
-body{background:var(--bg);color:var(--ink);font:14px/1.45 "Segoe UI",system-ui,sans-serif;display:flex;flex-direction:column}
-header{display:flex;gap:12px;align-items:center;padding:8px 14px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
-header h1{font-size:16px;margin:0;font-weight:600}
-header .meta{color:var(--mute);font-size:12.5px;flex:1;min-width:160px}
-button,select,input,textarea{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:5px 9px}
+body{background:var(--bg);color:var(--ink);font:13px/1.4 "Segoe UI",system-ui,sans-serif;display:flex;flex-direction:column;overflow:hidden}
+header{display:flex;gap:10px;align-items:center;padding:5px 10px;background:var(--panel);border-bottom:1px solid var(--line)}
+header h1{font-size:14px;margin:0;font-weight:600;white-space:nowrap}
+header .meta{color:var(--mute);font-size:12px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+button,select,input,textarea{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:3px 7px}
 button{cursor:pointer}
+button:disabled,select:disabled{opacity:.45;cursor:default}
 button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
-button.on{border-color:var(--accent);color:var(--accent)}
+button.on{background:var(--sel);border-color:var(--accent)}
+#tools{display:flex;gap:4px;align-items:center;padding:4px 8px;flex-wrap:wrap;border-bottom:1px solid var(--line);background:var(--panel2)}
+#tools .sep{width:1px;align-self:stretch;background:var(--line);margin:0 4px}
+#tools label{color:var(--mute);font-size:12px;display:flex;gap:4px;align-items:center}
+#tools button{min-width:28px}
+#tools svg{width:16px;height:16px;vertical-align:-3px;fill:none;stroke:currentColor;stroke-width:1.4}
 main{flex:1;display:flex;min-height:0}
-#left{flex:1;display:flex;flex-direction:column;min-width:0}
-#bar{display:flex;gap:6px;align-items:center;padding:6px 10px;flex-wrap:wrap;border-bottom:1px solid var(--line);background:var(--panel)}
-#bar label{color:var(--mute);font-size:12.5px;display:flex;gap:4px;align-items:center}
-#stage{flex:1;position:relative;background:var(--canvas);min-height:240px}
-canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none}
-#legend{position:absolute;left:10px;bottom:10px;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:6px 9px;font-size:12px;max-height:45%;overflow:auto;max-width:60%}
+#explorer{width:230px;min-width:150px;display:flex;flex-direction:column;border-right:1px solid var(--line);background:var(--panel);min-height:0}
+.ptitle,.dock{background:var(--title);border-bottom:1px solid var(--line);padding:3px 8px;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#tree{flex:1;overflow:auto;padding:4px 2px 8px 4px;font-size:12.5px}
+#tree details{margin-left:10px}
+#tree>details{margin-left:0}
+#tree summary{cursor:pointer;padding:1px 2px;white-space:nowrap;user-select:none}
+#tree summary:hover,#tree .leaf:hover{background:var(--sel)}
+#tree .leaf{margin-left:22px;padding:1px 4px;white-space:nowrap;display:flex;gap:5px;align-items:center;cursor:default}
+#tree .leaf.go{cursor:pointer}
+#tree .leaf.cur{background:var(--sel);font-weight:600}
+#tree .leaf input{margin:0;padding:0}
+#tree .leaf i{width:10px;height:10px;display:inline-block;border:1px solid var(--line);flex:none}
+#tree .n{color:var(--mute);margin-left:auto;padding-left:8px;font-size:11.5px}
+#legend{border-top:1px solid var(--line);padding:5px 8px;font-size:12px;max-height:30%;overflow:auto}
 #legend div{display:flex;gap:6px;align-items:center;white-space:nowrap}
-#legend i{width:12px;height:12px;border-radius:2px;display:inline-block}
-#pick{position:absolute;right:10px;top:10px;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:8px 10px;font-size:12.5px;max-width:300px;display:none}
-#pick b{font-size:13.5px}
-#right{width:400px;max-width:46%;display:flex;flex-direction:column;border-left:1px solid var(--line);background:var(--panel);min-height:0}
-#tabs{display:flex;border-bottom:1px solid var(--line)}
-#tabs button{flex:1;border:0;border-radius:0;border-bottom:2px solid transparent;padding:9px 4px;background:none}
-#tabs button.on{border-bottom-color:var(--accent);color:var(--accent);font-weight:600}
-.tab{flex:1;overflow:auto;padding:10px 12px;display:none;min-height:0}
+#legend i{width:11px;height:11px;display:inline-block}
+#views{flex:1;display:grid;gap:3px;padding:3px;min-width:0;min-height:0;background:var(--bg)}
+.pane{display:flex;flex-direction:column;min-width:0;min-height:0;border:1px solid var(--line);background:var(--panel)}
+.pane.act{border-color:var(--accent)}
+.pane.act .ptitle{background:var(--accent);color:var(--accent-ink)}
+.pane .hold{flex:1;position:relative;min-height:0}
+canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;display:block}
+#right{width:340px;max-width:40%;display:flex;flex-direction:column;border-left:1px solid var(--line);background:var(--panel);min-height:0}
+#tabs{display:flex;border-bottom:1px solid var(--line);background:var(--title)}
+#tabs button{flex:1;border:0;border-radius:0;border-bottom:2px solid transparent;padding:5px 4px;background:none;font-size:12.5px}
+#tabs button.on{border-bottom-color:var(--accent);color:var(--accent);font-weight:600;background:var(--panel)}
+.tab{flex:1;overflow:auto;padding:8px 10px;display:none;min-height:0}
 .tab.on{display:block}
-.card{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:8px}
-.card h3{margin:0 0 4px;font-size:13.5px;display:flex;justify-content:space-between;gap:8px}
+.card{border:1px solid var(--line);border-radius:4px;padding:7px 9px;margin-bottom:7px}
+.card h3{margin:0 0 4px;font-size:13px;display:flex;justify-content:space-between;gap:8px}
 .pill{font-size:11.5px;border-radius:10px;padding:1px 8px;border:1px solid currentColor;font-weight:600;white-space:nowrap}
 .pass{color:var(--ok)}.fail{color:var(--bad)}.na{color:var(--mute)}.reported{color:var(--warn)}
-.kv{color:var(--mute);font-size:12.5px}
+.kv{color:var(--mute);font-size:12px}
 table{border-collapse:collapse;width:100%;font-size:12px}
 th,td{border-bottom:1px solid var(--line);padding:3px 6px;text-align:left;white-space:nowrap}
 th{position:sticky;top:0;background:var(--panel);cursor:pointer}
+.props td:first-child{color:var(--mute);width:40%}
 .scroll{overflow:auto;max-height:100%}
 .row{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;align-items:center}
 textarea{width:100%;min-height:64px;resize:vertical}
 .comment .who{color:var(--mute);font-size:12px}
 .comment a{color:var(--accent);cursor:pointer}
-#drop{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:24px;color:var(--mute)}
+footer{display:flex;gap:14px;padding:2px 10px;border-top:1px solid var(--line);background:var(--panel2);font-size:12px;color:var(--mute);white-space:nowrap}
+footer #hint{flex:1;overflow:hidden;text-overflow:ellipsis}
+footer #coords{font-variant-numeric:tabular-nums;color:var(--ink)}
+#drop{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:24px;color:var(--mute);z-index:2;background:var(--bg)}
 #drop div{max-width:420px}
-@media (max-width:820px){main{flex-direction:column}#right{width:auto;max-width:none;border-left:0;border-top:1px solid var(--line);height:46%}}
+#center{flex:1;position:relative;display:flex;min-width:0;min-height:0}
+@media (max-width:900px){#explorer{display:none}#right{width:280px}}
+@media (max-width:640px){main{flex-direction:column}#right{width:auto;max-width:none;border-left:0;border-top:1px solid var(--line);height:40%}}
 </style>
 </head>
 <body>
 <header>
-  <h1>CSI ProMax Viewer</h1>
+  <h1 id="app">CSI ProMax Viewer</h1>
   <div class="meta" id="meta">No pack open</div>
   <button id="open">Open a pack</button>
   <input type="file" id="file" accept=".cpmx,.zip,.json" hidden>
 </header>
+<div id="tools">
+  <button data-view="plan" title="Plan view in the active window">Plan</button><button data-view="elev" title="Elevation view in the active window">Elev</button><button data-view="3d" title="3-D view in the active window">3-D</button>
+  <span class="sep"></span>
+  <label>Story <button id="up" title="Up one story">&#9650;</button><button id="down" title="Down one story">&#9660;</button><select id="story"></select></label>
+  <label>Elevation <select id="line"></select></label>
+  <span class="sep"></span>
+  <label title="How many view windows">Windows
+    <button data-lay="1">1</button><button data-lay="2">2</button><button data-lay="3">3</button><button data-lay="4">4</button></label>
+  <span class="sep"></span>
+  <button id="fit" title="Fit the model in every window">Fit</button>
+  <button data-opt="grid" title="Grid lines and their bubbles">Grid</button>
+  <button data-opt="extrude" title="Show members with their real section size">Extrude</button>
+  <button data-opt="fill" title="Slabs and walls">Slabs</button>
+  <button data-opt="supports" title="Support symbols">Supports</button>
+  <button data-opt="names" title="Member names">Names</button>
+  <button data-opt="axes" title="Global axes">Axes</button>
+  <span class="sep"></span>
+  <label>Colour <select id="colour"><option value="kind">Object type</option><option value="section">Section</option><option value="ratio">Design ratio</option><option value="punching">Punching ratio</option><option value="soil">Soil pressure</option></select></label>
+  <label id="defBox" style="display:none">Deformed <select id="defCase"></select> <input type="range" id="defScale" min="0" max="100" value="30" style="width:80px;padding:0"></label>
+</div>
 <main>
-  <div id="left">
-    <div id="bar">
-      <button data-view="3d" class="on">3D</button><button data-view="plan">Plan</button><button data-view="x">Elevation X</button><button data-view="y">Elevation Y</button>
-      <label>Story <select id="story"></select></label>
-      <label>Colour <select id="colour"><option value="kind">Kind</option><option value="section">Section</option><option value="ratio">Design ratio</option><option value="punching">Punching ratio</option><option value="soil">Soil pressure</option></select></label>
-      <label><input type="checkbox" id="showAreas" checked>Slabs and walls</label>
-      <label><input type="checkbox" id="showNames">Names</label>
-      <label id="defBox" style="display:none">Deformed <select id="defCase"></select> <input type="range" id="defScale" min="0" max="100" value="30" style="width:90px;padding:0"></label>
-    </div>
-    <div id="stage">
-      <canvas id="c"></canvas>
-      <div id="drop"><div><b>Open an CSI ProMax pack (.cpmx)</b><br>Use Open a pack, or drop the file here. Nothing is uploaded: the file is read on this computer only, and ETABS is not needed.</div></div>
-      <div id="legend" hidden></div>
-      <div id="pick"></div>
-    </div>
+  <div id="explorer">
+    <div class="dock">Model Explorer</div>
+    <div id="tree"></div>
+    <div id="legend" hidden></div>
+  </div>
+  <div id="center">
+    <div id="views"></div>
+    <div id="drop"><div><b>Open a CSI ProMax pack (.cpmx)</b><br>Use Open a pack, or drop the file here. Nothing is uploaded: the file is read on this computer only, and no CSI program is needed.</div></div>
   </div>
   <div id="right">
-    <div id="tabs"><button data-tab="checks" class="on">Checks</button><button data-tab="tables">Tables</button><button data-tab="comments">Comments</button></div>
-    <div class="tab on" id="checks"><p class="kv">Open a pack to see its checks.</p></div>
+    <div id="tabs"><button data-tab="props" class="on">Properties</button><button data-tab="checks">Checks</button><button data-tab="tables">Tables</button><button data-tab="comments">Comments</button></div>
+    <div class="tab on" id="props"><p class="kv">Open a pack to see the model.</p></div>
+    <div class="tab" id="checks"><p class="kv">Open a pack to see its checks.</p></div>
     <div class="tab" id="tables">
       <div class="row"><select id="table" style="flex:1;min-width:0"></select></div>
       <div class="row"><input id="filter" placeholder="Filter rows" style="flex:1;min-width:0"><span class="kv" id="count"></span></div>
@@ -86,7 +124,7 @@ textarea{width:100%;min-height:64px;resize:vertical}
     </div>
     <div class="tab" id="comments">
       <div class="row"><input id="who" placeholder="Your name" style="flex:1;min-width:0"></div>
-      <div class="row kv" id="target">Comment on the whole model. Click a member in the view to comment on it.</div>
+      <div class="row kv" id="target">Comment on the whole model. Click a member in a view to comment on it.</div>
       <textarea id="text" placeholder="Write a review comment"></textarea>
       <div class="row" style="margin-top:6px"><button class="primary" id="add">Add comment</button><button id="save">Save comments to a file</button></div>
       <p class="kv">Send the saved comments file back to the engineer. CSI ProMax reads it into the chat.</p>
@@ -94,15 +132,27 @@ textarea{width:100%;min-height:64px;resize:vertical}
     </div>
   </div>
 </main>
+<footer><span id="hint">Drag to pan, or to turn the 3-D view (Shift or right button pans it). Wheel zooms. Click a member to select it.</span><span id="sel"></span><span id="coords"></span><span id="units"></span></footer>
 <script id="pack" type="application/json"></script>
 <script>
 "use strict";
 const $ = id => document.getElementById(id);
 const norm = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, "");
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-let P = null, frames = [], areas = [], ratio = new Map(), marks = {punching: [], soil: []}, pointXyz = new Map(), disp = new Map(), pointAt = new Map(), picked = null, newComments = [];
-const view = {yaw: -0.9, pitch: 0.5, zoom: 1, cx: 0, cy: 0, cz: 0, size: 10, panX: 0, panY: 0, mode: "3d"};
-const palette = ["#0f7c82","#c0562b","#6a55b0","#2e8b57","#b8860b","#c2417a","#3b73c4","#7a8a2a","#a0522d","#4b9aa8","#8e44ad","#d35400"];
+const num = v => { const r = Math.round(v * 1000) / 1000; return String(Object.is(r, -0) ? 0 : r); };
+let P = null, frames = [], areas = [], stories = [], grids = {X: [], Y: []}, gridsGuessed = false, sizes = {}, slabT = {}, supports = [];
+let ratio = new Map(), marks = {punching: [], soil: []}, pointXyz = new Map(), disp = new Map(), pointAt = new Map(), picked = null, newComments = [], lit = null;
+let lo = [0, 0, 0], hi = [1, 1, 1], size = 1, unit = "";
+const opt = {grid: true, extrude: true, fill: true, supports: true, names: false, axes: true};
+const hidden = {kind: new Set(), section: new Set()};
+let panes = [], active = 0, layout = 2;
+const palette = ["#1f6fb4","#c0562b","#6a55b0","#2e8b57","#b8860b","#c2417a","#3b9ab8","#7a8a2a","#a0522d","#5b6fd0","#8e44ad","#d35400"];
+const dark = () => matchMedia("(prefers-color-scheme: dark)").matches;
+function theme() {
+  return dark()
+    ? {canvas: "#0b0f12", column: "#5aa2f0", beam: "#57c98a", brace: "#e0a04a", other: "#b9a0e8", floor: "rgba(150,170,185,.20)", floorEdge: "#5b6a73", wall: "rgba(222,120,110,.34)", wallEdge: "#d07a70", grid: "#55626a", bubble: "#0b0f12", level: "#3d4950", text: "#aebbc2", pick: "#ffd23f", support: "#7fd6c0", lit: "#ff8a3d"}
+    : {canvas: "#ffffff", column: "#1c4fa8", beam: "#1f8a4c", brace: "#b86a12", other: "#6a55b0", floor: "rgba(120,140,155,.22)", floorEdge: "#8a989f", wall: "rgba(196,70,60,.30)", wallEdge: "#b0463c", grid: "#9aa6ad", bubble: "#ffffff", level: "#c4ccd1", text: "#4c5a61", pick: "#e6007a", support: "#0c7a66", lit: "#e2620d"};
+}
 
 // ---- reading a pack ----
 async function inflate(bytes) {
@@ -113,7 +163,7 @@ async function unzip(buffer) {
   const b = new Uint8Array(buffer), v = new DataView(buffer), files = {};
   let end = -1;
   for (let i = b.length - 22; i >= Math.max(0, b.length - 66000); i--) if (v.getUint32(i, true) === 0x06054b50) { end = i; break; }
-  if (end < 0) throw new Error("This is not an CSI ProMax pack.");
+  if (end < 0) throw new Error("This is not a CSI ProMax pack.");
   let at = v.getUint32(end + 16, true);
   const count = v.getUint16(end + 10, true);
   for (let n = 0; n < count; n++) {
@@ -138,7 +188,7 @@ async function readPack(file) {
   }
   const files = await unzip(buffer), text = n => files[n] ? JSON.parse(new TextDecoder().decode(files[n])) : null;
   const pack = {manifest: text("manifest.json") || {}, model: text("model.json"), checks: text("checks.json"), comments: text("comments.json") || [], tables: {}};
-  if (!pack.model) throw new Error("This is not an CSI ProMax pack (it has no model).");
+  if (!pack.model) throw new Error("This is not a CSI ProMax pack (it has no model).");
   for (const name of Object.keys(files)) if (name.startsWith("tables/")) { const t = text(name); if (t && t.name) pack.tables[t.name] = t; }
   return pack;
 }
@@ -149,30 +199,59 @@ function mergeComments(list) {
 }
 
 // ---- preparing ----
-function load(pack) {
+const chunk = c => { const out = []; for (let i = 0; i + 2 < c.length; i += 3) out.push([c[i], c[i + 1], c[i + 2]]); return out; };
+const key = (x, y, z) => Math.round(x * 1000) + "," + Math.round(y * 1000) + "," + Math.round(z * 1000);
+function col(fields, ...names) { for (const n of names) { const i = fields.findIndex(f => norm(f) === norm(n)); if (i >= 0) return i; } return -1; }
+function load(pack, keep) {
+  const before = keep && P ? panes.map(p => ({mode: p.mode, story: p.story, line: p.line && p.line.label + p.line.dir, yaw: p.yaw, pitch: p.pitch, zoom: p.zoom, panX: p.panX, panY: p.panY})) : null;
+  const pickedName = keep && picked ? (picked.a ? "f:" : "a:") + picked.name : "";
   P = pack; P.comments = P.comments || []; P.tables = P.tables || {};
   const m = P.model;
   frames = (m.frames || []).map(f => ({name: f[0], kind: f[1], section: f[2], story: f[3], a: [f[4], f[5], f[6]], b: [f[7], f[8], f[9]]}));
   areas = (m.areas || []).map(a => ({name: a.n, kind: a.k, section: a.s, pts: chunk(a.c)}));
   pointAt = new Map((m.points || []).map(p => [key(p[1], p[2], p[3]), p[0]]));
   pointXyz = new Map((m.points || []).map(p => [String(p[0]), [p[1], p[2], p[3]]]));
-  let lo = [1e30, 1e30, 1e30], hi = [-1e30, -1e30, -1e30];
+  stories = (m.stories || []).slice().sort((a, b) => a.elevation - b.elevation);
+  sizes = m.frame_sizes || {}; slabT = m.area_sizes || {};
+  supports = (m.supports || []).map(s => ({p: [s[0], s[1], s[2]], kind: s[3]}));
+  lo = [1e30, 1e30, 1e30]; hi = [-1e30, -1e30, -1e30];
   const grow = p => { for (let i = 0; i < 3; i++) { lo[i] = Math.min(lo[i], p[i]); hi[i] = Math.max(hi[i], p[i]); } };
   frames.forEach(f => { grow(f.a); grow(f.b); }); areas.forEach(a => a.pts.forEach(grow));
-  if (lo[0] > hi[0]) { lo = [0, 0, 0]; hi = [1, 1, 1]; }
-  view.cx = (lo[0] + hi[0]) / 2; view.cy = (lo[1] + hi[1]) / 2; view.cz = (lo[2] + hi[2]) / 2;
-  view.size = Math.max(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2], 1); view.zoom = 1; view.panX = view.panY = 0;
+  grids = {X: [], Y: []}; gridsGuessed = false;
+  for (const g of m.grids || []) (g[1] === "Y" ? grids.Y : grids.X).push({label: String(g[0]), dir: g[1] === "Y" ? "Y" : "X", at: g[2]});
+  if (!grids.X.length && !grids.Y.length) guessGrids();
+  grids.X.sort((a, b) => a.at - b.at); grids.Y.sort((a, b) => a.at - b.at);
+  if (lo[0] > hi[0]) {
+    lo = [0, 0, 0]; hi = [1, 1, 1];
+    if (grids.X.length) { lo[0] = grids.X[0].at; hi[0] = grids.X[grids.X.length - 1].at; }
+    if (grids.Y.length) { lo[1] = grids.Y[0].at; hi[1] = grids.Y[grids.Y.length - 1].at; }
+    if (stories.length) { lo[2] = stories[0].elevation; hi[2] = stories[stories.length - 1].elevation; }
+  }
+  size = Math.max(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2], 1e-9);
   const man = P.manifest || {}, u = man.units || {};
-  $("meta").textContent = [man.model || "Model", u.force && u.length ? u.force + ", " + u.length : "", man.etabs ? (man.program || "ETABS") + " " + man.etabs : "", man.created ? "packed " + String(man.created).replace("T", " ").slice(0, 16) : "", frames.length + " frames, " + areas.length + " areas"].filter(Boolean).join(" · ");
-  document.title = (man.model || "Model") + " · CSI ProMax Viewer";
-  $("story").innerHTML = "<option value=''>All</option>" + (m.stories || []).slice().reverse().filter(s => frames.some(f => f.story === s.name)).map(s => `<option>${esc(s.name)}</option>`).join("");
+  unit = u.length || "";
+  $("meta").textContent = [man.model || "Model", u.force && u.length ? u.force + ", " + u.length : "", man.etabs ? (/modeler/i.test(man.etabs) ? man.etabs : (man.program || "ETABS") + " " + man.etabs) : "", !window.cpmLive && man.created ? "packed " + String(man.created).replace("T", " ").slice(0, 16) : ""].filter(Boolean).join(" · ");
+  document.title = (man.model || "Model") + " · " + $("app").textContent;
+  $("units").textContent = u.force && u.length ? u.force + ", " + u.length : "";
+  $("story").innerHTML = stories.slice().reverse().map(s => `<option value="${esc(s.name)}">${esc(s.name)}</option>`).join("");
+  $("line").innerHTML = allLines().map(g => `<option value="${esc(g.dir + g.label)}">${esc(g.label)}</option>`).join("");
   readRatios(); readDisplacements(); readMarks();
   $("drop").style.display = "none";
-  drawChecks(); fillTables(); drawComments(); draw();
+  picked = pickedName ? (pickedName[0] === "f" ? frames.find(f => f.name === pickedName.slice(2)) : areas.find(a => a.name === pickedName.slice(2))) || null : null;
+  buildPanes(before);
+  buildTree(); drawChecks(); fillTables(); drawComments(); showPick(); syncTools(); draw();
 }
-const chunk = c => { const out = []; for (let i = 0; i + 2 < c.length; i += 3) out.push([c[i], c[i + 1], c[i + 2]]); return out; };
-const key = (x, y, z) => Math.round(x * 1000) + "," + Math.round(y * 1000) + "," + Math.round(z * 1000);
-function col(fields, ...names) { for (const n of names) { const i = fields.findIndex(f => norm(f) === norm(n)); if (i >= 0) return i; } return -1; }
+function guessGrids() {
+  // No grid in the file: the column lines stand in, when there are few enough to read.
+  const xs = new Map(), ys = new Map();
+  for (const f of frames) if (f.kind === "column") { xs.set(Math.round(f.a[0] * 1000), f.a[0]); ys.set(Math.round(f.a[1] * 1000), f.a[1]); }
+  if (!xs.size || xs.size > 40 || ys.size > 40) return;
+  const letters = i => { let s = ""; i++; while (i > 0) { s = String.fromCharCode(65 + (i - 1) % 26) + s; i = Math.floor((i - 1) / 26); } return s; };
+  [...xs.values()].sort((a, b) => a - b).forEach((at, i) => grids.X.push({label: letters(i), dir: "X", at}));
+  [...ys.values()].sort((a, b) => a - b).forEach((at, i) => grids.Y.push({label: String(i + 1), dir: "Y", at}));
+  gridsGuessed = true;
+}
+const allLines = () => grids.Y.concat(grids.X);
 function readRatios() {
   ratio = new Map();
   for (const t of Object.values(P.tables)) {
@@ -182,17 +261,18 @@ function readRatios() {
     if (u < 0 || !rs.length) continue;
     for (const r of t.rows) { const best = Math.max(...rs.map(i => parseFloat(r[i])).filter(x => !isNaN(x)), -1); if (best >= 0) ratio.set(r[u], Math.max(best, ratio.get(r[u]) ?? 0)); }
   }
-  $("colour").querySelector("[value=ratio]").disabled = ratio.size === 0;
+  const o = $("colour").querySelector("[value=ratio]"); o.disabled = ratio.size === 0;
+  if (o.disabled && $("colour").value === "ratio") $("colour").value = "kind";
 }
 // SAFE: punching shear ratios and soil pressures, drawn as dots where the point or column is.
 function slabLevel() {
-  const count = new Map(); for (const a of areas) if (a.kind !== "wall") for (const p of a.pts) { const z = Math.round(p[2] * 1000) / 1000; count.set(z, (count.get(z) || 0) + 1); }
+  const count = new Map(); for (const a of areas) if (a.kind !== "wall") for (const q of a.pts) { const z = Math.round(q[2] * 1000) / 1000; count.set(z, (count.get(z) || 0) + 1); }
   let best = 0, n = -1; count.forEach((c, z) => { if (c > n) { n = c; best = z; } }); return best;
 }
 function markAt(t, r, z) {
   const x = col(t.fields, "GlobalX", "X"), y = col(t.fields, "GlobalY", "Y"), id = col(t.fields, "Point", "PointLabel", "UniqueName", "Label", "Joint", "Column");
   if (x >= 0 && y >= 0 && !isNaN(parseFloat(r[x])) && !isNaN(parseFloat(r[y]))) return {at: [parseFloat(r[x]), parseFloat(r[y]), z], name: id >= 0 ? r[id] : ""};
-  const p = id >= 0 && pointXyz.get(String(r[id])); return p ? {at: p, name: r[id]} : null;
+  const q = id >= 0 && pointXyz.get(String(r[id])); return q ? {at: q, name: r[id]} : null;
 }
 function readMarks() {
   marks = {punching: [], soil: []};
@@ -201,25 +281,45 @@ function readMarks() {
     const n = norm(t.name);
     if (n.includes("punch")) {
       let rc = col(t.fields, "Ratio", "ShearRatio", "StressRatio", "DCRatio"); if (rc < 0) rc = t.fields.findIndex(f => /ratio/.test(norm(f)));
-      const cc = t.fields.findIndex(f => /combo/.test(norm(f)));
       if (rc < 0) continue;
       const best = new Map();
-      for (const r of t.rows) { const v = parseFloat(r[rc]); const m = markAt(t, r, z); if (isNaN(v) || !m) continue; const k = m.at.join(","); if (!best.has(k) || v > best.get(k).v) best.set(k, {...m, v, note: cc >= 0 ? r[cc] : ""}); }
+      for (const r of t.rows) { const v = parseFloat(r[rc]), m = markAt(t, r, z); if (isNaN(v) || !m) continue; const k = m.at.join(","); if (!best.has(k) || v > best.get(k).v) best.set(k, {...m, v}); }
       marks.punching.push(...best.values());
     } else if (n.includes("soil") && n.includes("pressure")) {
       let pc = col(t.fields, "Pressure", "SoilPressure"); if (pc < 0) pc = t.fields.findIndex(f => /pressure/.test(norm(f)));
       if (pc < 0) continue;
       const best = new Map();
-      for (const r of t.rows) { const v = -parseFloat(r[pc]); const m = markAt(t, r, z); if (isNaN(v) || !m) continue; const k = m.at.join(","); if (!best.has(k) || v > best.get(k).v) best.set(k, {...m, v}); }
+      // SAFE gives bearing as a negative pressure: shown positive.
+      for (const r of t.rows) { const v = -parseFloat(r[pc]), m = markAt(t, r, z); if (isNaN(v) || !m) continue; const k = m.at.join(","); if (!best.has(k) || v > best.get(k).v) best.set(k, {...m, v}); }
       marks.soil.push(...best.values());
     }
   }
-  $("colour").querySelector("[value=punching]").disabled = marks.punching.length === 0;
-  $("colour").querySelector("[value=soil]").disabled = marks.soil.length === 0;
-  const safe = /safe/i.test((P.manifest || {}).program || "");
-  if (safe && marks.punching.length) $("colour").value = "punching";
+  for (const k of ["punching", "soil"]) {
+    const o = $("colour").querySelector(`[value=${k}]`); o.disabled = marks[k].length === 0;
+    if (o.disabled && $("colour").value === k) $("colour").value = "kind";
+  }
+  if (/safe/i.test((P.manifest || {}).program || "") && marks.punching.length && $("colour").value === "kind") $("colour").value = "punching";
 }
-function soilColour(v, max) { if (v <= 0) return css("--mute"); const f = max > 0 ? v / max : 0; return f > 0.9 ? "#d0342c" : f > 0.7 ? "#e08a1e" : f > 0.5 ? "#c9b21f" : f > 0.3 ? "#6aa84f" : "#2e8b57"; }
+function soilColour(v, max, T) { if (v <= 0) return T.text; const f = max > 0 ? v / max : 0; return f > 0.9 ? "#d0342c" : f > 0.7 ? "#e08a1e" : f > 0.5 ? "#c9b21f" : f > 0.3 ? "#6aa84f" : "#2e8b57"; }
+function drawMarks(p, g, to, T) {
+  const mode = $("colour").value;
+  if (mode !== "punching" && mode !== "soil") return;
+  const list = marks[mode], max = Math.max(0, ...list.map(m => m.v)), u = ((P.manifest || {}).units || {});
+  const z = p.mode === "plan" ? elevationOf(p.story) : null, onStory = z !== null && list.some(m => Math.abs(m.at[2] - z) <= tol() * 10);
+  g.setLineDash([]); g.font = "10.5px Segoe UI, sans-serif"; g.textAlign = "left"; g.textBaseline = "alphabetic";
+  for (const m of list) {
+    if (p.mode === "plan" && onStory && Math.abs(m.at[2] - z) > tol() * 10) continue;
+    if (p.mode === "elev" && p.line && !onLine(m.at, p.line)) continue;
+    const [x, y] = to(m.at);
+    let c, label;
+    if (mode === "punching") { c = ratioColour(m.v, T); label = m.v > 1 ? "above 1.0" : m.v > 0.9 ? "0.9 to 1.0" : m.v > 0.7 ? "0.7 to 0.9" : m.v > 0.5 ? "0.5 to 0.7" : "up to 0.5"; }
+    else { c = soilColour(m.v, max, T); const f = max > 0 ? m.v / max : 0; label = m.v <= 0 ? "lifts off" : "up to " + num([0.3, 0.5, 0.7, 0.9, 1].find(b => f <= b) * max) + (u.force ? " " + u.force + "/" + u.length + "²" : ""); }
+    legend.set(label, c);
+    g.beginPath(); g.arc(x, y, mode === "punching" ? 7 : 4, 0, 7); g.fillStyle = c; g.fill();
+    if (mode === "punching") { g.strokeStyle = T.canvas; g.lineWidth = 1.5; g.stroke(); }
+    if (opt.names || mode === "punching" && m.v > 1) { g.fillStyle = T.text; g.fillText((m.name ? m.name + " " : "") + (mode === "punching" ? m.v.toFixed(2) : num(m.v)), x + 8, y - 6); }
+  }
+}
 function readDisplacements() {
   disp = new Map();
   const t = P.tables["Joint Displacements"];
@@ -232,147 +332,448 @@ function readDisplacements() {
         if (!had || Math.hypot(...d) > Math.hypot(...had)) disp.get(r[c]).set(r[u], d);
       }
   }
+  const was = $("defCase").value;
   $("defBox").style.display = disp.size ? "" : "none";
   $("defCase").innerHTML = "<option value=''>Off</option>" + [...disp.keys()].map(k => `<option>${esc(k)}</option>`).join("");
+  if (disp.has(was)) $("defCase").value = was;
 }
 
-// ---- drawing ----
-const cv = $("c"), g = cv.getContext("2d");
-function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
-function project(p) {
-  const x = p[0] - view.cx, y = p[1] - view.cy, z = p[2] - view.cz;
-  let yaw = view.yaw, pitch = view.pitch;
-  if (view.mode === "plan") { yaw = 0; pitch = Math.PI / 2; } else if (view.mode === "x") { yaw = 0; pitch = 0; } else if (view.mode === "y") { yaw = -Math.PI / 2; pitch = 0; }
-  const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
-  const rx = x * cy - y * sy, ry = x * sy + y * cy;
-  const sx = rx, syy = z * cp + ry * sp, depth = ry * cp - z * sp;
-  const scale = Math.min(cv.clientWidth, cv.clientHeight) * 0.62 / view.size * view.zoom;
-  return [cv.clientWidth / 2 + view.panX + sx * scale, cv.clientHeight / 2 + view.panY - syy * scale, depth];
+// ---- view windows ----
+const layouts = {1: ["3d"], 2: ["plan", "3d"], 3: ["plan", "3d", "elev"], 4: ["plan", "3d", "elev", "elev"]};
+function topStory() {
+  // A SAFE model is one slab: its plan opens on the slab's level.
+  if (/safe/i.test(((P || {}).manifest || {}).program || "")) { const z = slabLevel(), s = stories.find(s => Math.abs(s.elevation - z) <= tol() * 10); if (s) return s.name; }
+  return stories.length ? stories[stories.length - 1].name : "";
+}
+function newPane(mode, n) {
+  const lines = allLines();
+  // The second elevation window looks along the other direction.
+  const line = n === 3 ? (grids.X[0] || lines[0]) : lines[0];
+  return {mode, story: topStory(), line: line || null, yaw: -0.9, pitch: 0.42, zoom: 1, panX: 0, panY: 0, drawn: []};
+}
+function buildPanes(before) {
+  const modes = layouts[layout], host = $("views");
+  host.innerHTML = "";
+  host.style.gridTemplateColumns = layout === 1 ? "1fr" : layout === 4 ? "1fr 1fr" : "repeat(" + layout + ",1fr)";
+  host.style.gridTemplateRows = layout === 4 ? "1fr 1fr" : "1fr";
+  panes = [];
+  modes.forEach((mode, n) => {
+    const p = newPane(mode, n), was = before ? before[n] : null;
+    if (was) {
+      Object.assign(p, {mode: was.mode, yaw: was.yaw, pitch: was.pitch, zoom: was.zoom, panX: was.panX, panY: was.panY});
+      if (stories.some(s => s.name === was.story)) p.story = was.story;
+      p.line = allLines().find(g => g.label + g.dir === was.line) || p.line;
+    }
+    const el = document.createElement("div"); el.className = "pane";
+    el.innerHTML = `<div class="ptitle"></div><div class="hold"><canvas></canvas></div>`;
+    host.appendChild(el);
+    p.el = el; p.title = el.firstChild; p.cv = el.querySelector("canvas"); p.g = p.cv.getContext("2d");
+    wire(p, n); panes.push(p);
+    new ResizeObserver(draw).observe(p.cv);
+  });
+  if (active >= panes.length) active = 0;
+}
+function basis(p) {
+  // Screen axes for a window: where a model point lands before scaling.
+  if (p.mode === "plan") return {u: q => q[0], v: q => q[1], d: q => -q[2]};
+  if (p.mode === "elev") return p.line && p.line.dir === "X" ? {u: q => q[1], v: q => q[2], d: q => -q[0]} : {u: q => q[0], v: q => q[2], d: q => q[1]};
+  const cy = Math.cos(p.yaw), sy = Math.sin(p.yaw), cp = Math.cos(p.pitch), sp = Math.sin(p.pitch);
+  return {u: q => q[0] * cy - q[1] * sy, v: q => q[2] * cp + (q[0] * sy + q[1] * cy) * sp, d: q => (q[0] * sy + q[1] * cy) * cp - q[2] * sp};
+}
+function frameOf(p) {
+  const b = basis(p), w = p.cv.clientWidth, h = p.cv.clientHeight, c = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2];
+  let scale;
+  if (p.mode === "3d") scale = Math.min(w, h) * 0.6 / size;
+  else {
+    let du = 1e-9, dv = 1e-9;
+    for (let i = 0; i < 8; i++) { const q = [i & 1 ? hi[0] : lo[0], i & 2 ? hi[1] : lo[1], i & 4 ? hi[2] : lo[2]]; du = Math.max(du, Math.abs(b.u(q) - b.u(c)) * 2); dv = Math.max(dv, Math.abs(b.v(q) - b.v(c)) * 2); }
+    scale = Math.min((w - 150) / du, (h - 110) / dv);
+    if (!(scale > 0)) scale = 1;
+  }
+  scale *= p.zoom;
+  const cu = b.u(c), cv2 = b.v(c), ox = w / 2 + p.panX, oy = h / 2 + p.panY;
+  return {scale, to: q => [ox + (b.u(q) - cu) * scale, oy - (b.v(q) - cv2) * scale, b.d(q)], back: (x, y) => [(x - ox) / scale + cu, (oy - y) / scale + cv2], b};
 }
 function moved(p, shift) {
   if (!shift) return p;
   const d = shift.map.get(pointAt.get(key(p[0], p[1], p[2])));
   return d ? [p[0] + d[0] * shift.k, p[1] + d[1] * shift.k, p[2] + d[2] * shift.k] : p;
 }
-function ratioColour(r) { return r === undefined ? css("--mute") : r > 1 ? "#d0342c" : r > 0.9 ? "#e08a1e" : r > 0.7 ? "#c9b21f" : r > 0.5 ? "#6aa84f" : "#2e8b57"; }
-function draw() {
-  const dpr = window.devicePixelRatio || 1;
-  if (cv.width !== Math.round(cv.clientWidth * dpr) || cv.height !== Math.round(cv.clientHeight * dpr)) { cv.width = Math.round(cv.clientWidth * dpr); cv.height = Math.round(cv.clientHeight * dpr); }
-  g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, cv.clientWidth, cv.clientHeight);
-  if (!P) return;
-  const story = $("story").value, mode = $("colour").value, names = $("showNames").checked, legend = new Map();
-  const dcase = $("defCase").value, shift = dcase && disp.has(dcase) ? {map: disp.get(dcase), k: 0} : null;
-  if (shift) { let max = 0; shift.map.forEach(d => max = Math.max(max, Math.hypot(...d))); shift.k = max > 0 ? view.size * 0.15 * ($("defScale").value / 100) / max : 0; }
-  const kindColour = {column: palette[0], beam: palette[1], brace: palette[2]};
-  const sections = [...new Set(frames.map(f => f.section))].sort();
-  const items = [];
-  const elevation = story ? ((P.model.stories || []).find(s => s.name === story) || {}).elevation : null;
-  if ($("showAreas").checked)
-    for (const a of areas) {
-      if (story && !a.pts.some(p => Math.abs(p[2] - elevation) < 1e-6)) continue;
-      const pts = a.pts.map(p => project(moved(p, shift)));
-      items.push({d: pts.reduce((s, p) => s + p[2], 0) / pts.length + 1e-3, area: a, pts});
-    }
-  for (const f of frames) {
-    if (story && f.story !== story) continue;
-    const a = project(moved(f.a, shift)), b = project(moved(f.b, shift));
-    items.push({d: (a[2] + b[2]) / 2, frame: f, a, b});
+function ratioColour(r, T) { return r === undefined ? T.text : r > 1 ? "#d0342c" : r > 0.9 ? "#e08a1e" : r > 0.7 ? "#c9b21f" : r > 0.5 ? "#6aa84f" : "#2e8b57"; }
+function shade(hex, k) {
+  // k below 1 darkens, above 1 lightens.
+  const n = parseInt(hex.slice(1), 16), c = [n >> 16 & 255, n >> 8 & 255, n & 255].map(v => Math.round(k <= 1 ? v * k : v + (255 - v) * (k - 1)));
+  return "rgb(" + c.join(",") + ")";
+}
+const tol = () => Math.max(size * 1e-5, 1e-6);
+function elevationOf(name) { const s = stories.find(s => s.name === name); return s ? s.elevation : null; }
+function onLine(q, line) { return Math.abs((line.dir === "X" ? q[0] : q[1]) - line.at) <= tol() * 10; }
+function frameShown(f, p) {
+  if (hidden.kind.has(f.kind) || hidden.section.has("f:" + f.section)) return false;
+  if (p.mode === "plan") { const z = elevationOf(p.story); return f.story ? f.story === p.story : z !== null && Math.abs(Math.max(f.a[2], f.b[2]) - z) <= tol() * 10; }
+  if (p.mode === "elev") return !p.line || (onLine(f.a, p.line) && onLine(f.b, p.line));
+  return true;
+}
+function areaShown(a, p) {
+  if (!opt.fill || hidden.kind.has(a.kind) || hidden.section.has("a:" + a.section)) return false;
+  if (p.mode === "plan") { const z = elevationOf(p.story); return z !== null && Math.abs(Math.max(...a.pts.map(q => q[2])) - z) <= tol() * 10; }
+  if (p.mode === "elev") return !p.line || a.pts.every(q => onLine(q, p.line));
+  return true;
+}
+function profile(f) {
+  // The section's outline around the member's axis, as offsets along two directions across it.
+  const s = sizes[f.section]; if (!s) return null;
+  const d = s[1], b = s[2] || s[1], dx = f.b[0] - f.a[0], dy = f.b[1] - f.a[1], dz = f.b[2] - f.a[2], len = Math.hypot(dx, dy, dz);
+  if (!(len > 0) || !(d > 0)) return null;
+  let e2, e3, drop = 0;
+  if (f.kind === "column") { e2 = [1, 0, 0]; e3 = [0, 1, 0]; }
+  else {
+    const plan = Math.hypot(dx, dy);
+    e3 = plan > 0 ? [-dy / plan, dx / plan, 0] : [0, 1, 0];
+    const a = [dx / len, dy / len, dz / len];
+    e2 = [a[1] * e3[2] - a[2] * e3[1], a[2] * e3[0] - a[0] * e3[2], a[0] * e3[1] - a[1] * e3[0]];
+    if (e2[2] < 0) e2 = e2.map(v => -v);
+    if (f.kind === "beam") drop = d / 2; // a beam hangs below its line, as it is built
   }
-  items.sort((p, q) => q.d - p.d);
+  const round = /circ|pipe/i.test(s[0]), out = [];
+  if (round) for (let i = 0; i < 12; i++) { const t = i * Math.PI / 6; out.push([Math.cos(t) * d / 2, Math.sin(t) * d / 2]); }
+  else out.push([d / 2, b / 2], [d / 2, -b / 2], [-d / 2, -b / 2], [-d / 2, b / 2]);
+  return {e2, e3, drop, out, d, b};
+}
+function corner(q, pr, o) { return [q[0] + pr.e2[0] * (o[0] - pr.drop) + pr.e3[0] * o[1], q[1] + pr.e2[1] * (o[0] - pr.drop) + pr.e3[1] * o[1], q[2] + pr.e2[2] * (o[0] - pr.drop) + pr.e3[2] * o[1]]; }
+
+// ---- drawing ----
+let waiting = false;
+function draw() { if (waiting) return; waiting = true; requestAnimationFrame(() => { waiting = false; panes.forEach(drawPane); drawLegend(); }); }
+let legend = new Map();
+function colourOf(f, T, sections) {
+  const mode = $("colour").value;
+  if (mode === "section") { const c = palette[sections.indexOf(f.section) % palette.length]; legend.set(f.section || "(none)", c); return c; }
+  if (mode === "ratio") { const r = ratio.get(f.name), c = ratioColour(r, T); legend.set(r === undefined ? "no ratio" : r > 1 ? "above 1.0" : r > 0.9 ? "0.9 to 1.0" : r > 0.7 ? "0.7 to 0.9" : r > 0.5 ? "0.5 to 0.7" : "up to 0.5", c); return c; }
+  const c = T[f.kind] || T.other; legend.set(f.kind, c); return c;
+}
+function hexOf(c) { return c[0] === "#" ? c : "#888888"; }
+function drawPane(p, n) {
+  const cv = p.cv, g = p.g, dpr = window.devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight, T = theme();
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+  g.setTransform(dpr, 0, 0, dpr, 0, 0); g.fillStyle = T.canvas; g.fillRect(0, 0, w, h);
+  p.el.classList.toggle("act", n === active);
+  p.title.textContent = paneTitle(p);
+  if (n === 0) legend = new Map();
+  if (!P || w < 4 || h < 4) return;
+  const F = frameOf(p), to = F.to, sections = [...new Set(frames.map(f => f.section))].sort();
+  const dcase = $("defCase").value, shift = dcase && disp.has(dcase) ? {map: disp.get(dcase), k: 0} : null;
+  if (shift) { let max = 0; shift.map.forEach(d => max = Math.max(max, Math.hypot(...d))); shift.k = max > 0 ? size * 0.15 * ($("defScale").value / 100) / max : 0; }
+  g.lineJoin = "round";
+  if (opt.grid) drawGrid(p, g, F, T, w, h);
+  const items = [], solid = opt.extrude && p.mode === "3d" && frames.length <= 4000;
+  for (const a of areas) {
+    if (!areaShown(a, p)) continue;
+    const pts = a.pts.map(q => to(moved(q, shift)));
+    items.push({d: pts.reduce((s, q) => s + q[2], 0) / pts.length + (p.mode === "3d" ? 0 : 1e6), area: a, pts});
+  }
+  for (const f of frames) {
+    if (!frameShown(f, p)) continue;
+    const A = moved(f.a, shift), B = moved(f.b, shift), a = to(A), b = to(B), colour = colourOf(f, T, sections), pr = opt.extrude ? profile(f) : null;
+    if (solid && pr) {
+      const ea = pr.out.map(o => to(corner(A, pr, o))), eb = pr.out.map(o => to(corner(B, pr, o))), m = pr.out.length, base = hexOf(colour);
+      for (let i = 0; i < m; i++) {
+        const j = (i + 1) % m, pts = [ea[i], ea[j], eb[j], eb[i]];
+        items.push({d: (pts[0][2] + pts[1][2] + pts[2][2] + pts[3][2]) / 4, face: f, pts, fill: shade(base, 0.62 + 0.5 * ((i * 2 + 1) % m) / m), edge: shade(base, 0.5)});
+      }
+      for (const cap of [ea, eb]) items.push({d: cap.reduce((s, q) => s + q[2], 0) / m, face: f, pts: cap, fill: shade(base, 1.18), edge: shade(base, 0.5)});
+      items.push({d: -1e9, frame: f, a, b, ghost: true});
+    } else items.push({d: (a[2] + b[2]) / 2, frame: f, a, b, colour, pr});
+  }
+  items.sort((x, y) => y.d - x.d);
+  const sel = it => picked && (it.frame === picked || it.face === picked || it.area === picked), hot = o => lit && o && ((lit.type === "f" && o.a && o.section === lit.name) || (lit.type === "a" && o.pts && o.section === lit.name));
   for (const it of items) {
     if (it.area) {
-      g.beginPath(); it.pts.forEach((p, i) => i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1])); g.closePath();
-      g.fillStyle = css(it.area.kind === "wall" ? "--wall" : "--floor"); g.fill();
-      g.strokeStyle = picked === it.area ? css("--bad") : css("--line"); g.lineWidth = picked === it.area ? 2.5 : 1; g.stroke();
+      const wallLine = p.mode === "plan" && it.area.kind === "wall", slabLine = p.mode === "elev" && flat(it.pts);
+      if (wallLine || slabLine) {
+        const t = slabT[it.area.section], ends = spread(it.pts);
+        g.beginPath(); g.moveTo(ends[0][0], ends[0][1]); g.lineTo(ends[1][0], ends[1][1]);
+        g.strokeStyle = sel(it) ? T.pick : hot(it.area) ? T.lit : it.area.kind === "wall" ? T.wallEdge : T.floorEdge; g.lineCap = "butt";
+        g.lineWidth = Math.max(opt.extrude && t ? t * F.scale : 0, it.area.kind === "wall" ? 4 : 2.5); g.stroke();
+        continue;
+      }
+      g.beginPath(); it.pts.forEach((q, i) => i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1])); g.closePath();
+      g.fillStyle = it.area.kind === "wall" ? T.wall : T.floor; g.fill();
+      g.strokeStyle = sel(it) ? T.pick : hot(it.area) ? T.lit : it.area.kind === "wall" ? T.wallEdge : T.floorEdge; g.lineWidth = sel(it) || hot(it.area) ? 2.5 : 1; g.stroke();
       continue;
     }
-    const f = it.frame;
-    let colour, label;
-    if (mode === "section") { colour = palette[sections.indexOf(f.section) % palette.length]; label = f.section || "(none)"; }
-    else if (mode === "ratio") { const r = ratio.get(f.name); colour = ratioColour(r); label = r === undefined ? "no ratio" : r > 1 ? "above 1.0" : r > 0.9 ? "0.9 to 1.0" : r > 0.7 ? "0.7 to 0.9" : r > 0.5 ? "0.5 to 0.7" : "up to 0.5"; }
-    else { colour = kindColour[f.kind] || palette[3]; label = f.kind; }
-    legend.set(label, colour);
-    g.beginPath(); g.moveTo(it.a[0], it.a[1]); g.lineTo(it.b[0], it.b[1]);
-    g.strokeStyle = picked === f ? css("--bad") : colour; g.lineWidth = picked === f ? 4.5 : f.kind === "column" ? 3 : 2.2; g.lineCap = "round"; g.stroke();
-    if (names) { g.fillStyle = css("--mute"); g.font = "10.5px Segoe UI, sans-serif"; g.fillText(f.name, (it.a[0] + it.b[0]) / 2 + 3, (it.a[1] + it.b[1]) / 2 - 3); }
-  }
-  drawn = items;
-  // SAFE's punching ratios or soil pressures, as dots
-  if (mode === "punching" || mode === "soil") {
-    const list = marks[mode], max = Math.max(0, ...list.map(m => m.v)), unit = ((P.manifest || {}).units || {});
-    for (const m of list) {
-      if (story && Math.abs(m.at[2] - elevation) > 1e-6) continue;
-      const p = project(m.at);
-      let colour, label;
-      if (mode === "punching") { colour = ratioColour(m.v); label = m.v > 1 ? "above 1.0" : m.v > 0.9 ? "0.9 to 1.0" : m.v > 0.7 ? "0.7 to 0.9" : m.v > 0.5 ? "0.5 to 0.7" : "up to 0.5"; }
-      else { colour = soilColour(m.v, max); label = m.v <= 0 ? "lifts off" : "up to " + (m.v <= 0.3 * max ? 0.3 * max : m.v <= 0.5 * max ? 0.5 * max : m.v <= 0.7 * max ? 0.7 * max : m.v <= 0.9 * max ? 0.9 * max : max).toFixed(1) + (unit.force ? " " + unit.force + "/" + unit.length + "²" : ""); }
-      legend.set(label, colour);
-      g.beginPath(); g.arc(p[0], p[1], mode === "punching" ? 7 : 4, 0, 7); g.fillStyle = colour; g.fill();
-      if (mode === "punching") { g.strokeStyle = css("--panel"); g.lineWidth = 1.5; g.stroke(); }
-      if (names || mode === "punching" && m.v > 1) { g.fillStyle = css("--mute"); g.font = "10.5px Segoe UI, sans-serif"; g.fillText((m.name ? m.name + " " : "") + m.v.toFixed(mode === "punching" ? 2 : 1), p[0] + 8, p[1] - 6); }
+    if (it.face) {
+      g.beginPath(); it.pts.forEach((q, i) => i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1])); g.closePath();
+      g.fillStyle = sel(it) ? T.pick : hot(it.face) ? T.lit : it.fill; g.fill(); g.strokeStyle = it.edge; g.lineWidth = 0.6; g.stroke();
+      continue;
+    }
+    if (it.ghost) continue;
+    const f = it.frame, c = sel(it) ? T.pick : hot(f) ? T.lit : it.colour, flatDot = Math.hypot(it.b[0] - it.a[0], it.b[1] - it.a[1]) < 1.5;
+    if (flatDot) {
+      // A member seen end on: a column in plan, a beam across an elevation. Its section, to scale.
+      const pr = it.pr, x = it.a[0], y = it.a[1];
+      let hw = 4, hh = 4, round = false;
+      if (pr) { round = pr.out.length > 4; const along = p.mode === "plan"; hw = Math.max(3, (along ? pr.d : pr.b) * F.scale / 2); hh = Math.max(3, (along ? pr.b : pr.d) * F.scale / 2); }
+      g.beginPath(); if (round) g.ellipse(x, y, hw, hw, 0, 0, 7); else g.rect(x - hw, y - hh + (pr && p.mode === "elev" && f.kind === "beam" ? hh : 0), hw * 2, hh * 2);
+      g.fillStyle = c; g.globalAlpha = 0.85; g.fill(); g.globalAlpha = 1; g.strokeStyle = shade(hexOf(c), 0.6); g.lineWidth = 1; g.stroke();
+    } else {
+      let width = f.kind === "column" ? 3 : 2.2;
+      if (it.pr && p.mode !== "3d") width = Math.max(width, (p.mode === "plan" ? it.pr.b : f.kind === "column" ? (p.line && p.line.dir === "X" ? it.pr.b : it.pr.d) : it.pr.d) * F.scale);
+      let ay = it.a[1], by = it.b[1];
+      if (it.pr && p.mode === "elev" && f.kind === "beam") { ay += width / 2; by += width / 2; }
+      g.beginPath(); g.moveTo(it.a[0], ay); g.lineTo(it.b[0], by);
+      g.strokeStyle = c; g.lineWidth = sel(it) ? width + 2 : width; g.lineCap = width > 4 ? "butt" : "round"; g.globalAlpha = width > 4 ? 0.8 : 1; g.stroke(); g.globalAlpha = 1;
     }
   }
-  // comment markers
+  if (opt.names) {
+    g.fillStyle = T.text; g.font = "10.5px Segoe UI, sans-serif"; g.textAlign = "left"; g.textBaseline = "alphabetic";
+    for (const it of items) if (it.frame) g.fillText(it.frame.name, (it.a[0] + it.b[0]) / 2 + 4, (it.a[1] + it.b[1]) / 2 - 4);
+  }
+  if (opt.supports) drawSupports(p, g, to, T);
+  drawMarks(p, g, to, T);
+  p.drawn = items;
   for (const c of P.comments) {
     const t = c.target && (frames.find(f => f.name === c.target.name && c.target.kind === "frame") || areas.find(a => a.name === c.target.name && c.target.kind === "area"));
     if (!t) continue;
     const it = items.find(i => i.frame === t || i.area === t); if (!it) continue;
-    const x = it.frame ? (it.a[0] + it.b[0]) / 2 : it.pts.reduce((s, p) => s + p[0], 0) / it.pts.length, y = it.frame ? (it.a[1] + it.b[1]) / 2 : it.pts.reduce((s, p) => s + p[1], 0) / it.pts.length;
-    g.beginPath(); g.arc(x, y, 6, 0, 7); g.fillStyle = css("--warn"); g.fill(); g.strokeStyle = css("--panel"); g.lineWidth = 1.5; g.stroke();
+    const x = it.frame ? (it.a[0] + it.b[0]) / 2 : it.pts.reduce((s, q) => s + q[0], 0) / it.pts.length, y = it.frame ? (it.a[1] + it.b[1]) / 2 : it.pts.reduce((s, q) => s + q[1], 0) / it.pts.length;
+    g.beginPath(); g.arc(x, y, 6, 0, 7); g.fillStyle = "#f0a020"; g.fill(); g.strokeStyle = T.canvas; g.lineWidth = 1.5; g.stroke();
   }
-  const el = $("legend"); el.hidden = legend.size === 0;
-  el.innerHTML = [...legend].sort().slice(0, 40).map(([k, c]) => `<div><i style="background:${c}"></i>${esc(k)}</div>`).join("") + (shift ? `<div class="kv">Deformed shape is exaggerated</div>` : "");
+  if (opt.axes) drawAxes(p, g, T, h);
+  if (shift) { g.fillStyle = T.text; g.font = "11px Segoe UI, sans-serif"; g.textAlign = "right"; g.textBaseline = "alphabetic"; g.fillText("Deformed shape, exaggerated", w - 8, h - 8); }
 }
-let drawn = [];
-function pickAt(x, y) {
-  let best = null, bestD = 9;
-  for (const it of drawn) {
+function flat(pts) { const xs = pts.map(q => q[0]), ys = pts.map(q => q[1]); return Math.max(...ys) - Math.min(...ys) < 1.5 || Math.max(...xs) - Math.min(...xs) < 1.5; }
+function spread(pts) { let best = [pts[0], pts[0]], d = -1; for (const a of pts) for (const b of pts) { const k = Math.hypot(a[0] - b[0], a[1] - b[1]); if (k > d) { d = k; best = [a, b]; } } return best; }
+function bubble(g, T, x, y, label) {
+  const r = 10;
+  g.beginPath(); g.arc(x, y, r, 0, 7); g.fillStyle = T.bubble; g.fill(); g.strokeStyle = T.grid; g.lineWidth = 1; g.setLineDash([]); g.stroke();
+  g.fillStyle = T.text; g.font = (label.length > 2 ? "9px" : "11px") + " Segoe UI, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(label.slice(0, 4), x, y + 0.5);
+}
+function drawGrid(p, g, F, T, w, h) {
+  const to = F.to, pad = Math.max(size * 0.07, 1e-9);
+  g.strokeStyle = T.grid; g.lineWidth = 1;
+  const dash = () => g.setLineDash(gridsGuessed ? [2, 5] : [9, 4, 2, 4]);
+  if (p.mode === "elev") {
+    const along = p.line && p.line.dir === "X" ? grids.Y : grids.X, ax = p.line && p.line.dir === "X" ? 1 : 0;
+    const z0 = stories.length ? stories[0].elevation : lo[2], z1 = stories.length ? stories[stories.length - 1].elevation : hi[2];
+    const at = (c, z) => { const q = [p.line ? p.line.at : 0, p.line ? p.line.at : 0, z]; q[ax] = c; return to(q); };
+    const left = lo[ax] - pad, right = hi[ax] + pad;
+    g.font = "11px Segoe UI, sans-serif";
+    for (const s of stories) {
+      const a = at(left, s.elevation), b = at(right, s.elevation);
+      g.setLineDash([]); g.strokeStyle = T.level; g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
+      g.fillStyle = T.text; g.textAlign = "right"; g.textBaseline = "middle"; g.fillText(s.name, a[0] - 6, a[1] - 6); g.fillText(num(s.elevation), a[0] - 6, a[1] + 7);
+    }
+    g.strokeStyle = T.grid;
+    for (const gl of along) {
+      const a = at(gl.at, z0), b = at(gl.at, z1 + pad);
+      dash(); g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
+      bubble(g, T, b[0], b[1] - 10, gl.label);
+    }
+    g.setLineDash([]);
+    return;
+  }
+  const z = p.mode === "plan" ? (elevationOf(p.story) ?? lo[2]) : (stories.length ? stories[0].elevation : lo[2]);
+  const x0 = (grids.X.length ? Math.min(lo[0], grids.X[0].at) : lo[0]) - pad, x1 = (grids.X.length ? Math.max(hi[0], grids.X[grids.X.length - 1].at) : hi[0]) + pad;
+  const y0 = (grids.Y.length ? Math.min(lo[1], grids.Y[0].at) : lo[1]) - pad, y1 = (grids.Y.length ? Math.max(hi[1], grids.Y[grids.Y.length - 1].at) : hi[1]) + pad;
+  const out = (a, b) => { const dx = a[0] - b[0], dy = a[1] - b[1], l = Math.hypot(dx, dy) || 1; return [a[0] + dx / l * 10, a[1] + dy / l * 10]; };
+  for (const gl of grids.X) {
+    const a = to([gl.at, y1, z]), b = to([gl.at, y0, z]);
+    dash(); g.strokeStyle = T.grid; g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
+    const c = out(a, b); bubble(g, T, c[0], c[1], gl.label);
+  }
+  for (const gl of grids.Y) {
+    const a = to([x0, gl.at, z]), b = to([x1, gl.at, z]);
+    dash(); g.strokeStyle = T.grid; g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
+    const c = out(a, b); bubble(g, T, c[0], c[1], gl.label);
+  }
+  g.setLineDash([]);
+}
+function drawSupports(p, g, to, T) {
+  g.strokeStyle = T.support; g.fillStyle = T.support; g.lineWidth = 1.4; g.setLineDash([]);
+  for (const s of supports) {
+    if (p.mode === "elev" && p.line && !onLine(s.p, p.line)) continue;
+    if (p.mode === "plan") { const z = elevationOf(p.story); if (z === null || Math.abs(s.p[2] - z) > tol() * 10) continue; }
+    const [x, y] = to(s.p);
+    if (p.mode === "plan") { g.strokeRect(x - 7, y - 7, 14, 14); if (s.kind === "fixed") { g.beginPath(); g.moveTo(x - 7, y - 7); g.lineTo(x + 7, y + 7); g.moveTo(x + 7, y - 7); g.lineTo(x - 7, y + 7); g.stroke(); } continue; }
+    if (s.kind === "fixed") {
+      g.fillRect(x - 9, y, 18, 3);
+      g.beginPath(); for (let i = -8; i <= 8; i += 4) { g.moveTo(x + i, y + 3); g.lineTo(x + i - 4, y + 8); } g.stroke();
+    } else {
+      g.beginPath(); g.moveTo(x, y); g.lineTo(x - 7, y + 10); g.lineTo(x + 7, y + 10); g.closePath(); g.stroke();
+      g.beginPath(); g.moveTo(x - 10, y + (s.kind === "roller" ? 14 : 10)); g.lineTo(x + 10, y + (s.kind === "roller" ? 14 : 10)); g.stroke();
+    }
+  }
+}
+function drawAxes(p, g, T, h) {
+  const b = basis(p), o = [34, h - 34], len = 24, zero = [0, 0, 0];
+  const axes = [["X", [1, 0, 0], "#d0342c"], ["Y", [0, 1, 0], "#2e9b4f"], ["Z", [0, 0, 1], "#2f6fd0"]];
+  g.lineWidth = 1.8; g.setLineDash([]); g.font = "bold 11px Segoe UI, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.lineCap = "round";
+  for (const [name, v, c] of axes) {
+    const dx = b.u(v) - b.u(zero), dy = b.v(v) - b.v(zero);
+    if (Math.hypot(dx, dy) < 0.05) continue;
+    g.strokeStyle = c; g.fillStyle = c; g.beginPath(); g.moveTo(o[0], o[1]); g.lineTo(o[0] + dx * len, o[1] - dy * len); g.stroke();
+    g.fillText(name, o[0] + dx * (len + 9), o[1] - dy * (len + 9));
+  }
+}
+function paneTitle(p) {
+  if (p.mode === "plan") { const z = elevationOf(p.story); return "Plan View · " + (p.story || "no stories") + (z === null ? "" : " · Z = " + num(z) + (unit ? " " + unit : "")); }
+  if (p.mode === "elev") return "Elevation View · " + (p.line ? p.line.label + (gridsGuessed ? " (column line)" : "") : "whole model");
+  return "3-D View";
+}
+function drawLegend() {
+  const el = $("legend"); el.hidden = legend.size === 0;
+  el.innerHTML = [...legend].sort().slice(0, 40).map(([k, c]) => `<div><i style="background:${c}"></i>${esc(k)}</div>`).join("");
+}
+
+// ---- picking and the mouse ----
+function inside(pts, x, y) { let c = false; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) if ((pts[i][1] > y) !== (pts[j][1] > y) && x < (pts[j][0] - pts[i][0]) * (y - pts[i][1]) / (pts[j][1] - pts[i][1]) + pts[i][0]) c = !c; return c; }
+function pickAt(p, x, y) {
+  const d = p.drawn;
+  for (let i = d.length - 1; i >= 0; i--) if (d[i].face && inside(d[i].pts, x, y)) return d[i].face;
+  let best = null, bestD = 8;
+  for (const it of d) {
     if (!it.frame) continue;
     const [x1, y1] = it.a, [x2, y2] = it.b, dx = x2 - x1, dy = y2 - y1, len = dx * dx + dy * dy;
-    const t = len ? Math.max(0, Math.min(1, ((x - x1) * dx + (y - y1) * dy) / len)) : 0, d = Math.hypot(x - x1 - t * dx, y - y1 - t * dy);
-    if (d < bestD) { bestD = d; best = it.frame; }
+    const t = len ? Math.max(0, Math.min(1, ((x - x1) * dx + (y - y1) * dy) / len)) : 0, k = Math.hypot(x - x1 - t * dx, y - y1 - t * dy);
+    if (k < bestD) { bestD = k; best = it.frame; }
   }
-  if (!best)
-    for (let i = drawn.length - 1; i >= 0; i--) { const it = drawn[i]; if (it.area && inside(it.pts, x, y)) { best = it.area; break; } }
-  return best;
+  if (best) return best;
+  for (let i = d.length - 1; i >= 0; i--) if (d[i].area && (inside(d[i].pts, x, y) || near(d[i].pts, x, y))) return d[i].area;
+  return null;
 }
-function inside(pts, x, y) { let c = false; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) if ((pts[i][1] > y) !== (pts[j][1] > y) && x < (pts[j][0] - pts[i][0]) * (y - pts[i][1]) / (pts[j][1] - pts[i][1]) + pts[i][0]) c = !c; return c; }
+function near(pts, x, y) { if (!flat(pts)) return false; const [a, b] = spread(pts), dx = b[0] - a[0], dy = b[1] - a[1], len = dx * dx + dy * dy, t = len ? Math.max(0, Math.min(1, ((x - a[0]) * dx + (y - a[1]) * dy) / len)) : 0; return Math.hypot(x - a[0] - t * dx, y - a[1] - t * dy) < 6; }
+function wire(p, n) {
+  const cv = p.cv; let drag = null;
+  cv.addEventListener("pointerdown", e => { cv.setPointerCapture(e.pointerId); if (active !== n) { active = n; syncTools(); draw(); } drag = {x: e.clientX, y: e.clientY, moved: false, pan: e.button !== 0 || e.shiftKey || p.mode !== "3d"}; });
+  cv.addEventListener("pointermove", e => {
+    const r = cv.getBoundingClientRect();
+    if (P && p.mode !== "3d") {
+      const [u, v] = frameOf(p).back(e.clientX - r.left, e.clientY - r.top), z = elevationOf(p.story);
+      $("coords").textContent = p.mode === "plan" ? `X ${num(u)}  Y ${num(v)}  Z ${z === null ? "" : num(z)}` : p.line && p.line.dir === "X" ? `X ${num(p.line.at)}  Y ${num(u)}  Z ${num(v)}` : `X ${num(u)}  Y ${p.line ? num(p.line.at) : ""}  Z ${num(v)}`;
+    } else $("coords").textContent = "";
+    if (!drag) return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+    if (!drag.moved) return;
+    if (drag.pan) { p.panX += dx; p.panY += dy; } else { p.yaw += dx * 0.008; p.pitch = Math.max(-1.5, Math.min(1.5, p.pitch + dy * 0.008)); }
+    drag.x = e.clientX; drag.y = e.clientY; draw();
+  });
+  cv.addEventListener("pointerup", e => {
+    if (drag && !drag.moved && P) { const r = cv.getBoundingClientRect(); picked = pickAt(p, e.clientX - r.left, e.clientY - r.top); lit = null; showPick(); markTree(); draw(); }
+    drag = null;
+  });
+  cv.addEventListener("pointerleave", () => $("coords").textContent = "");
+  cv.addEventListener("contextmenu", e => e.preventDefault());
+  cv.addEventListener("wheel", e => {
+    e.preventDefault();
+    const r = cv.getBoundingClientRect(), k = e.deltaY < 0 ? 1.15 : 1 / 1.15, z = Math.max(0.05, Math.min(200, p.zoom * k)), real = z / p.zoom;
+    const mx = e.clientX - r.left - r.width / 2, my = e.clientY - r.top - r.height / 2;
+    p.panX = mx - (mx - p.panX) * real; p.panY = my - (my - p.panY) * real; p.zoom = z; draw();
+  }, {passive: false});
+}
 function showPick() {
-  const el = $("pick");
-  if (!picked) { el.style.display = "none"; $("target").textContent = "Comment on the whole model. Click a member in the view to comment on it."; return; }
-  const f = picked, isFrame = !!f.a, u = ((P.manifest || {}).units || {}).length || "";
-  const rows = [["Kind", f.kind], ["Section", f.section || "(none)"]];
-  if (isFrame) { rows.push(["Story", f.story], ["Length", Math.hypot(f.b[0] - f.a[0], f.b[1] - f.a[1], f.b[2] - f.a[2]).toFixed(3) + " " + u], ["From", f.a.map(v => +v.toFixed(3)).join(", ")], ["To", f.b.map(v => +v.toFixed(3)).join(", ")]); if (ratio.has(f.name)) rows.push(["Design ratio", ratio.get(f.name).toFixed(3)]); }
-  else rows.push(["Corners", f.pts.length], ["Elevation", [...new Set(f.pts.map(p => +p[2].toFixed(3)))].join(" to ")]);
-  el.innerHTML = `<b>${esc(f.name)}</b><table>${rows.map(r => `<tr><td class="kv">${r[0]}</td><td>${esc(r[1])}</td></tr>`).join("")}</table>`;
-  el.style.display = "block";
+  const el = $("props");
+  if (!P) return;
+  if (!picked) {
+    const man = P.manifest || {}, count = k => frames.filter(f => f.kind === k).length;
+    const rows = [["Model", man.model || ""], ["Units", $("units").textContent], ["Stories", Math.max(stories.length - 1, 0)], ["Grid lines", gridsGuessed ? "none in the file (column lines shown)" : grids.X.length + grids.Y.length],
+      ["Columns", count("column")], ["Beams", count("beam")], ["Braces", count("brace")], ["Floors", areas.filter(a => a.kind !== "wall").length], ["Walls", areas.filter(a => a.kind === "wall").length], ["Supports", supports.length],
+      ["Size X, Y, Z", [0, 1, 2].map(i => num(hi[i] - lo[i])).join(", ") + (unit ? " " + unit : "")]];
+    el.innerHTML = `<table class="props">${rows.map(r => `<tr><td>${r[0]}</td><td>${esc(r[1])}</td></tr>`).join("")}</table><p class="kv">Click a member in a view to see what it is.</p>`;
+    $("target").textContent = "Comment on the whole model. Click a member in a view to comment on it."; $("sel").textContent = "";
+    return;
+  }
+  const f = picked, isFrame = !!f.a, s = isFrame ? sizes[f.section] : null;
+  const rows = [["Name", f.name], ["Object", f.kind], ["Section", f.section || "(none)"]];
+  if (isFrame) {
+    if (s) rows.push(["Shape", s[0] || ""], ["Depth x width", num(s[1]) + (s[2] ? " x " + num(s[2]) : "") + (unit ? " " + unit : "")]);
+    rows.push(["Story", f.story || ""], ["Length", num(Math.hypot(f.b[0] - f.a[0], f.b[1] - f.a[1], f.b[2] - f.a[2])) + (unit ? " " + unit : "")], ["Start X, Y, Z", f.a.map(num).join(", ")], ["End X, Y, Z", f.b.map(num).join(", ")]);
+    if (ratio.has(f.name)) rows.push(["Design ratio", ratio.get(f.name).toFixed(3)]);
+  } else {
+    if (slabT[f.section]) rows.push(["Thickness", num(slabT[f.section]) + (unit ? " " + unit : "")]);
+    rows.push(["Corners", f.pts.length], ["Elevation", [...new Set(f.pts.map(q => num(q[2])))].join(" to ")]);
+  }
+  el.innerHTML = `<table class="props">${rows.map(r => `<tr><td>${r[0]}</td><td>${esc(r[1])}</td></tr>`).join("")}</table>`;
   $("target").textContent = "Comment on " + f.kind + " " + f.name + ".";
+  $("sel").textContent = "Selected: " + f.kind + " " + f.name;
 }
 
-// ---- mouse ----
-let drag = null;
-cv.addEventListener("pointerdown", e => { cv.setPointerCapture(e.pointerId); drag = {x: e.clientX, y: e.clientY, moved: false, pan: e.button !== 0 || e.shiftKey || view.mode !== "3d"}; });
-cv.addEventListener("pointermove", e => {
-  if (!drag) return;
-  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
-  if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
-  if (!drag.moved) return;
-  if (drag.pan) { view.panX += dx; view.panY += dy; } else { view.yaw += dx * 0.008; view.pitch = Math.max(-1.5, Math.min(1.5, view.pitch + dy * 0.008)); }
-  drag.x = e.clientX; drag.y = e.clientY; draw();
-});
-cv.addEventListener("pointerup", e => {
-  if (drag && !drag.moved && P) { const r = cv.getBoundingClientRect(); picked = pickAt(e.clientX - r.left, e.clientY - r.top); showPick(); draw(); }
-  drag = null;
-});
-cv.addEventListener("contextmenu", e => e.preventDefault());
-cv.addEventListener("wheel", e => { e.preventDefault(); view.zoom = Math.max(0.1, Math.min(60, view.zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15))); draw(); }, {passive: false});
-document.querySelectorAll("[data-view]").forEach(b => b.onclick = () => { view.mode = b.dataset.view; view.panX = view.panY = 0; document.querySelectorAll("[data-view]").forEach(x => x.classList.toggle("on", x === b)); draw(); });
-["story", "colour", "showAreas", "showNames", "defCase", "defScale"].forEach(id => $(id).addEventListener("input", draw));
-new ResizeObserver(draw).observe($("stage"));
+// ---- toolbar ----
+function syncTools() {
+  const p = panes[active]; if (!p) return;
+  document.querySelectorAll("[data-view]").forEach(b => b.classList.toggle("on", b.dataset.view === p.mode));
+  document.querySelectorAll("[data-lay]").forEach(b => b.classList.toggle("on", +b.dataset.lay === layout));
+  document.querySelectorAll("[data-opt]").forEach(b => b.classList.toggle("on", opt[b.dataset.opt]));
+  const plan = p.mode === "plan", elev = p.mode === "elev";
+  $("story").disabled = $("up").disabled = $("down").disabled = !plan || !stories.length;
+  $("line").disabled = !elev || !allLines().length;
+  if (plan) $("story").value = p.story;
+  if (elev && p.line) $("line").value = p.line.dir + p.line.label;
+  markTree();
+}
+function setStory(name) {
+  let p = panes[active];
+  if (!p || p.mode !== "plan") { const i = panes.findIndex(q => q.mode === "plan"); if (i >= 0) { active = i; p = panes[i]; } else if (p) p.mode = "plan"; }
+  if (!p) return;
+  p.story = name; p.panX = p.panY = 0; syncTools(); draw();
+}
+function setLine(g) {
+  let p = panes[active];
+  if (!p || p.mode !== "elev") { const i = panes.findIndex(q => q.mode === "elev"); if (i >= 0) { active = i; p = panes[i]; } else if (p) p.mode = "elev"; }
+  if (!p) return;
+  p.line = g; p.panX = p.panY = 0; p.zoom = 1; syncTools(); draw();
+}
+document.querySelectorAll("[data-view]").forEach(b => b.onclick = () => { const p = panes[active]; if (!p) return; p.mode = b.dataset.view; p.panX = p.panY = 0; p.zoom = 1; if (p.mode === "elev" && !p.line) p.line = allLines()[0] || null; syncTools(); draw(); });
+document.querySelectorAll("[data-lay]").forEach(b => b.onclick = () => { layout = +b.dataset.lay; active = 0; buildPanes(null); syncTools(); draw(); try { localStorage.setItem("cpm-layout", layout); } catch (e) {} });
+document.querySelectorAll("[data-opt]").forEach(b => b.onclick = () => { opt[b.dataset.opt] = !opt[b.dataset.opt]; syncTools(); draw(); });
+$("fit").onclick = () => { panes.forEach(p => { p.zoom = 1; p.panX = p.panY = 0; }); draw(); };
+$("story").onchange = () => setStory($("story").value);
+$("line").onchange = () => { const g = allLines().find(g => g.dir + g.label === $("line").value); if (g) setLine(g); };
+function step(d) { const p = panes[active]; if (!p || p.mode !== "plan") return; const i = stories.findIndex(s => s.name === p.story), j = Math.max(0, Math.min(stories.length - 1, i + d)); if (stories[j]) setStory(stories[j].name); }
+$("up").onclick = () => step(1); $("down").onclick = () => step(-1);
+["colour", "defCase", "defScale"].forEach(id => $(id).addEventListener("input", draw));
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", draw);
+try { const l = +localStorage.getItem("cpm-layout"); if (layouts[l]) layout = l; } catch (e) {}
+if (innerWidth < 760) layout = 1;
+
+// ---- model explorer ----
+function buildTree() {
+  const open = new Set([...document.querySelectorAll("#tree details[open]")].map(d => d.dataset.k)), first = !document.querySelector("#tree details");
+  const node = (k, title, n, body, wide) => `<details data-k="${k}" ${first ? (wide ? "open" : "") : open.has(k) ? "open" : ""}><summary>${esc(title)}${n === null ? "" : ` <span class="n">(${n})</span>`}</summary>${body}</details>`;
+  const plain = list => list.length ? list.map(x => `<div class="leaf">${esc(x)}</div>`).join("") : `<div class="leaf kv">none</div>`;
+  const T = theme(), m = P.model, count = (list, f) => list.filter(f).length;
+  const kinds = [["column", "Columns", frames], ["beam", "Beams", frames], ["brace", "Braces", frames], ["floor", "Floors", areas], ["wall", "Walls", areas]];
+  const kindLeaves = kinds.map(([k, title, list]) => { const n = count(list, o => o.kind === k); return n ? `<label class="leaf"><input type="checkbox" data-hide="kind" data-v="${k}" ${hidden.kind.has(k) ? "" : "checked"}><i style="background:${k === "floor" ? T.floorEdge : k === "wall" ? T.wallEdge : T[k]}"></i>${title}<span class="n">${n}</span></label>` : ""; }).join("");
+  const secLeaves = (type, names, list) => names.map(s => { const n = count(list, o => o.section === s), z = type === "f" ? sizes[s] : slabT[s]; return `<div class="leaf go" data-sec="${type}" data-v="${esc(s)}"><input type="checkbox" data-hide="section" data-v="${esc(type + ":" + s)}" ${hidden.section.has(type + ":" + s) ? "" : "checked"}>${esc(s)}<span class="n">${z ? (type === "f" ? num(z[1]) + (z[2] ? "x" + num(z[2]) : "") : num(z)) + " · " : ""}${n}</span></div>`; }).join("") || `<div class="leaf kv">none</div>`;
+  const fs = m.frame_sections || [...new Set(frames.map(f => f.section))], as = m.area_sections || [...new Set(areas.map(a => a.section))];
+  const lines = dir => grids[dir].map(g => `<div class="leaf go" data-line="${esc(g.dir + g.label)}">${esc(g.label)}<span class="n">${dir === "X" ? "X" : "Y"} = ${num(g.at)}</span></div>`).join("");
+  $("tree").innerHTML = node("model", (P.manifest || {}).model || "Model", null,
+    node("stories", "Stories", stories.length, stories.slice().reverse().map(s => `<div class="leaf go" data-story="${esc(s.name)}">${esc(s.name)}<span class="n">${num(s.elevation)}</span></div>`).join(""), true) +
+    node("grids", gridsGuessed ? "Column lines" : "Grid lines", grids.X.length + grids.Y.length, lines("X") + lines("Y")) +
+    node("objects", "Objects", frames.length + areas.length, kindLeaves || `<div class="leaf kv">nothing drawn yet</div>`, true) +
+    node("fsec", "Frame sections", fs.length, secLeaves("f", fs, frames)) +
+    node("asec", "Slab and wall sections", as.length, secLeaves("a", as, areas)) +
+    node("mat", "Materials", (m.materials || []).length, plain(m.materials || [])) +
+    node("pat", "Load patterns", (m.load_patterns || []).length, plain((m.load_patterns || []).map(p => p.name + " (" + p.type + ")"))) +
+    node("cases", "Load cases", (m.load_cases || []).length, plain(m.load_cases || [])) +
+    node("combos", "Load combinations", (m.combinations || []).length, plain(m.combinations || [])), true);
+  $("tree").querySelectorAll("[data-story]").forEach(el => el.onclick = () => setStory(el.dataset.story));
+  $("tree").querySelectorAll("[data-line]").forEach(el => el.onclick = () => { const g = allLines().find(g => g.dir + g.label === el.dataset.line); if (g) setLine(g); });
+  $("tree").querySelectorAll("[data-hide]").forEach(el => { el.onclick = e => e.stopPropagation(); el.onchange = () => { const set = hidden[el.dataset.hide]; el.checked ? set.delete(el.dataset.v) : set.add(el.dataset.v); draw(); }; });
+  $("tree").querySelectorAll("[data-sec]").forEach(el => el.onclick = () => { const same = lit && lit.type === el.dataset.sec && lit.name === el.dataset.v; lit = same ? null : {type: el.dataset.sec, name: el.dataset.v}; markTree(); draw(); });
+  markTree();
+}
+function markTree() {
+  const p = panes[active];
+  document.querySelectorAll("#tree [data-story]").forEach(el => el.classList.toggle("cur", !!p && p.mode === "plan" && el.dataset.story === p.story));
+  document.querySelectorAll("#tree [data-line]").forEach(el => el.classList.toggle("cur", !!p && p.mode === "elev" && !!p.line && el.dataset.line === p.line.dir + p.line.label));
+  document.querySelectorAll("#tree [data-sec]").forEach(el => el.classList.toggle("cur", !!lit && lit.type === el.dataset.sec && lit.name === el.dataset.v));
+}
 
 // ---- tabs ----
-document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => { document.querySelectorAll("[data-tab]").forEach(x => x.classList.toggle("on", x === b)); document.querySelectorAll(".tab").forEach(t => t.classList.toggle("on", t.id === b.dataset.tab)); });
+function showTab(name) { document.querySelectorAll("[data-tab]").forEach(x => x.classList.toggle("on", x.dataset.tab === name)); document.querySelectorAll(".tab").forEach(t => t.classList.toggle("on", t.id === name)); }
+document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => showTab(b.dataset.tab));
 
 // ---- checks ----
 function pill(status) { const s = status || "reported", c = s === "pass" ? "pass" : s === "fail" ? "fail" : s === "reported" ? "reported" : "na"; return `<span class="pill ${c}">${esc(s)}</span>`; }
@@ -448,8 +849,19 @@ $("file").onchange = e => { if (e.target.files[0]) openFile(e.target.files[0]); 
 document.addEventListener("dragover", e => e.preventDefault());
 document.addEventListener("drop", e => { e.preventDefault(); if (e.dataTransfer.files[0]) openFile(e.dataTransfer.files[0]); });
 window.cpmLoad = load;
-const built = $("pack").textContent.trim();
-if (built) { try { load(JSON.parse(built)); } catch (ex) { console.error(ex); } }
+function start() {
+  if (window.cpmLive) {
+    // The Modeler's own view: it follows the model as the chat builds it. Review tools stay with the Viewer.
+    $("app").textContent = "CSI ProMax Modeler"; $("open").hidden = true;
+    document.querySelector('[data-tab="comments"]').hidden = true; document.querySelector('[data-tab="checks"]').hidden = true;
+  }
+  const built = $("pack").textContent.trim();
+  if (built) { try { load(JSON.parse(built)); } catch (ex) { console.error(ex); } }
+  else { buildPanes(null); syncTools(); draw(); }
+}
+// The Modeler adds its own script after this one, which is where it says the page is live.
+addEventListener("DOMContentLoaded", start);
+if (document.readyState !== "loading") start();
 </script>
 </body>
 </html>
