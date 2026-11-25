@@ -581,7 +581,7 @@ static class TesterBugTests
         // ---- the full field test of 0.4.9 on ETABS 23: its analysis window has the same title, and closing it asked ----
         // ---- "Program is active. Do you really want to close the program?" ----
 
-        yield return ("ETABS field test: only message boxes are closed, and ETABS's 'really close the program?' is answered No", () =>
+        yield return ("ETABS field test: a notice is answered by its OK button (never closed), and 'really close the program?' by No", () =>
         {
             Check(ScratchDialogs.AsksToClose("Program is active. Do you really want to close the program? Yes No"), "ETABS's question is not seen");
             Check(!ScratchDialogs.AsksToClose("Analysis Complete OK") && !ScratchDialogs.AsksToClose("Save changes to cpm-field-test?"), "another message is taken for the close question");
@@ -589,9 +589,8 @@ static class TesterBugTests
             var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));
             var at = source.IndexOf("public static List<string> CloseNotices(", StringComparison.Ordinal);
             var body = source.Substring(at, source.IndexOf("public static bool AsksToClose(", at, StringComparison.Ordinal) - at);
-            Check(body.Contains("if (!IsDialog(window)) continue;") && body.IndexOf("IsDialog", StringComparison.Ordinal) < body.IndexOf("WM_CLOSE", StringComparison.Ordinal),
-                "a window that is not a message box can still be closed by the test (ETABS's analysis window was)");
-            Check(body.Contains("IDNO"), "the close question is not answered No");
+            Check(!body.Contains("WM_CLOSE"), "a notice is still closed by its X, which closed ETABS's and SAP2000's analysis windows");
+            Check(body.Contains("Button(window, \"OK\")") && body.Contains("Button(window, \"No\")") && body.Contains("BM_CLICK"), "the notice is not answered by its OK button, or the close question by No");
         });
 
         yield return ("SAP2000 field test: a scratch process left running is named with its process id, and counts as a failure", () =>

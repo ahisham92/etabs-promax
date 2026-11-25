@@ -48,38 +48,54 @@ public static class ScratchDialogs
         return found;
     }
 
-    /// <summary>Asks each "analysis complete" notice of the process to close, as its own X button does. Returns their titles.</summary>
+    /// <summary>
+    /// Answers each "analysis complete" notice of the process the way a person does: by its own OK button. Returns
+    /// what it answered.
+    /// </summary>
     /// <remarks>
-    /// Only message boxes (the Windows dialog class #32770), never a program's own windows: ETABS's analysis window has
-    /// the same title, and closing it while the analysis ran made ETABS ask "Program is active. Do you really want to
-    /// close the program?" (field test of 0.4.9, 2026-11-25). That question, in the test's own scratch window, is
-    /// answered No: the test never closes a program while it works in it; its own closing does not ask.
+    /// Never by closing the window (its X): ETABS's and SAP2000's analysis windows carry the same title, and closing
+    /// one made ETABS ask "Program is active. Do you really want to close the program?" in the middle of its analysis,
+    /// and left SAP2000 with no analysis window ("Invoke or BeginInvoke cannot be called on a control until the window
+    /// handle has been created") in the second full field test of 0.4.9 (2026-11-25). A notice with no OK button to
+    /// press is left alone. The close question, in the test's own scratch window, is answered No: the test never
+    /// closes a program while it works in it, and its own closing does not ask.
     /// </remarks>
     public static List<string> CloseNotices(int processId)
     {
         var closed = new List<string>();
         foreach (var (window, title) in Of(processId))
         {
-            if (!IsDialog(window)) continue;
             if (MayClose(title))
             {
-                if (PostMessageW(window, 0x0010 /* WM_CLOSE */, IntPtr.Zero, IntPtr.Zero)) closed.Add(title);
+                if (Button(window, "OK") is { } ok && IsWindowEnabled(ok) && PostMessageW(ok, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero)) closed.Add(title);
             }
-            else if (AsksToClose(DialogText(window)) && PostMessageW(window, 0x0111 /* WM_COMMAND */, (IntPtr)7 /* IDNO */, IntPtr.Zero))
+            else if (AsksToClose(DialogText(window)) && Button(window, "No") is { } no && PostMessageW(no, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero))
                 closed.Add($"{title}: answered No to \"{DialogText(window).Trim()}\"");
         }
         return closed;
     }
 
+    /// <summary>The window's own button with this text (an "&amp;" for its access key is left out), or null.</summary>
+    private static IntPtr? Button(IntPtr window, string text)
+    {
+        IntPtr? found = null;
+        if (!OperatingSystem.IsWindows() || window == IntPtr.Zero) return null;
+        EnumChildWindows(window, (child, _) =>
+        {
+            var label = new System.Text.StringBuilder(64);
+            if (GetWindowTextW(child, label, label.Capacity) > 0 && string.Equals(label.ToString().Replace("&", "").Trim(), text, StringComparison.OrdinalIgnoreCase)
+                && IsWindowVisible(child))
+            {
+                found = child;
+                return false;
+            }
+            return true;
+        }, IntPtr.Zero);
+        return found;
+    }
+
     /// <summary>The program asking whether to close itself while it works ("Program is active. Do you really want to close the program?").</summary>
     public static bool AsksToClose(string text) => text.Contains("really want to close the program", StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>True for a message box or dialog box (window class #32770).</summary>
-    private static bool IsDialog(IntPtr window)
-    {
-        var name = new System.Text.StringBuilder(64);
-        return GetClassNameW(window, name, name.Capacity) > 0 && name.ToString() == "#32770";
-    }
 
     /// <summary>The text of a dialog's own controls (its message, its buttons), one after another.</summary>
     public static string DialogText(IntPtr window)
@@ -114,7 +130,6 @@ public static class ScratchDialogs
     [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] private static extern int GetWindowTextW(IntPtr window, System.Text.StringBuilder text, int most);
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool PostMessageW(IntPtr window, uint message, IntPtr w, IntPtr l);
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool EnumChildWindows(IntPtr parent, Each each, IntPtr data);
-    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] private static extern int GetClassNameW(IntPtr window, System.Text.StringBuilder name, int most);
 }
 
 /// <summary>
