@@ -68,6 +68,8 @@ public static class FieldTest
         public Action<string>? Outcome { get; init; }
 
         /// <summary>The most one program's part may take before the test gives up on it and goes on.</summary>
+        /// <summary>Open the Viewer in a browser without a window and check its screen, for each program's scratch model.</summary>
+        public bool Viewer { get; init; } = true;
         public TimeSpan ScratchLimit { get; init; } = TimeSpan.FromMinutes(45);
     }
 
@@ -248,6 +250,9 @@ public static class FieldTest
                     ctx.Fail($"{program.Name}'s part stopped before its end",
                         $"{ex.GetType().Name}: {ex.Message} Tools not run because of it: {(left.Count == 0 ? "none" : string.Join(", ", left))}. Where: {Where(ex)}");
                 }
+                // The Viewer's own screen on this program's model: one check, the same for every program.
+                ctx.Section(FieldParts.ScratchSection(program));
+                if (o.Viewer) ViewerCheck.FieldSteps(ctx, window.Link, program.Name);
                 if (panelDone) return;
                 panelDone = true;
                 // CSI ProMax's own tools change the model too (code): only while this window still has the test's model.
@@ -451,7 +456,7 @@ public static class FieldTest
     private static readonly HashSet<string> Small = new(StringComparer.OrdinalIgnoreCase)
     {
         ".md", ".txt", ".log", ".out", ".json", ".csv", ".e2k", ".$et", ".s2k", ".$2k", ".f2k", ".$fk", ".cpm", ".cpmx",
-        ".xlsx", ".docx", ".pptx", ".pdf", ".dxf", ".dwg",
+        ".xlsx", ".docx", ".pptx", ".pdf", ".dxf", ".dwg", ".png",
     };
 
     private const long MostFile = 3 * 1024 * 1024, MostZip = 25 * 1024 * 1024;
