@@ -158,6 +158,7 @@ public static class EtabsTools
             (_, e) => { e.Save(); return new JsonObject { ["saved"] = e.Info().File }; }, _ => "Save the model"),
 
         .. ResultTools.All,
+        .. StabilityTools.All,
     ];
 
     private static string Plural(int count, string word) => count == 0 ? "" : count == 1 ? "1 " + word : $"{count} {word}s";
