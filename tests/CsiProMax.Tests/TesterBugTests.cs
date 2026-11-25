@@ -679,6 +679,17 @@ static class TesterBugTests
             Equal(6, ScratchDialogs.CloseAnswer(closing: true), "while the test closes its own window the answer is Yes");
             Equal(0, ScratchDialogs.AnswerCloseQuestion(0, yes: false), "nothing is answered with no process");
         });
+        yield return ("ETABS 23 field test: the story picker of the slab design is answered by the test (all stories, OK), nothing else is", () =>
+        {
+            // Seen on 2026-11-25 with 0.4.10: run_design waited ten minutes on "Select Stories for Slab Design".
+            Check(ScratchDialogs.IsStoryPicker("Select Stories for Slab Design"), "the story picker is not known");
+            foreach (var other in new[] { "Select Stories", "License", "Maintenance Expiring", "Save Model File As", "ETABS", "" })
+                Check(!ScratchDialogs.IsStoryPicker(other) , $"'{other}' is taken for the story picker");
+            Check(!ScratchDialogs.MayClose("Select Stories for Slab Design"), "the story picker is not an 'analysis complete' notice");
+            var scratch = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));
+            var notices = scratch[scratch.IndexOf("public static List<string> CloseNotices", StringComparison.Ordinal)..scratch.IndexOf("public static bool IsStoryPicker", StringComparison.Ordinal)];
+            Check(notices.Contains("IsStoryPicker(title)", StringComparison.Ordinal) && notices.IndexOf("\"Select All\"", StringComparison.Ordinal) is var all and > 0 && all < notices.LastIndexOf("PostMessageW(go", StringComparison.Ordinal) && !notices.Contains("0x0010", StringComparison.Ordinal), "all stories are picked before OK, and the window is never closed");
+        });
         yield return ("ETABS 20 tester: the field test tries what Tools > CSI ProMax does in each program, and fails where the plug-in cannot be created", () =>
         {
             // What the check answered on that PC (in its own words), and a PC where all is well.
