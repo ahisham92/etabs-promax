@@ -150,20 +150,24 @@ public static class LateralTools
 
     // ---- a live program: its own table for the code ----
 
-    private sealed record CodeTable(string Code, string Key, string Name);
+    /// <summary>A code's table. Its name and its key can name the code differently (ETABS 23: "KDS 2019" in the name,
+    /// "KDS 41 17 00:2019" in the key, 0.4.34 field test); the key's is the program's own, so it goes into AutoLoad.</summary>
+    private sealed record CodeTable(string Code, string Key, string Name, string KeyCode);
 
     private static List<CodeTable> CodeTables(ICsiLink e, string kind)
     {
         var marker = kind == LateralCodes.Wind ? "Auto Wind - " : "Auto Seismic - ";
         return e.Tables().Select(t => (t, at: t.Name.IndexOf(marker, StringComparison.OrdinalIgnoreCase)))
-            .Where(x => x.at >= 0).Select(x => new CodeTable(x.t.Name[(x.at + marker.Length)..].Trim(), x.t.Key, x.t.Name))
+            .Where(x => x.at >= 0).Select(x => new CodeTable(x.t.Name[(x.at + marker.Length)..].Trim(), x.t.Key, x.t.Name,
+                x.t.Key.IndexOf(marker, StringComparison.OrdinalIgnoreCase) is var k and >= 0 ? x.t.Key[(k + marker.Length)..].Trim() : x.t.Name[(x.at + marker.Length)..].Trim()))
             .GroupBy(c => c.Code, StringComparer.OrdinalIgnoreCase).Select(g => g.First()).ToList();
     }
 
     private static string Norm(string s) => new(s.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
 
     private static CodeTable Table(ICsiLink e, List<CodeTable> tables, string kind, string code) =>
-        tables.FirstOrDefault(t => t.Code.Equals(code, StringComparison.OrdinalIgnoreCase)) ?? tables.FirstOrDefault(t => Norm(t.Code) == Norm(code))
+        tables.FirstOrDefault(t => t.Code.Equals(code, StringComparison.OrdinalIgnoreCase)) ?? tables.FirstOrDefault(t => t.KeyCode.Equals(code, StringComparison.OrdinalIgnoreCase))
+        ?? tables.FirstOrDefault(t => Norm(t.Code) == Norm(code)) ?? tables.FirstOrDefault(t => Norm(t.KeyCode) == Norm(code))
         ?? throw new ToolInputException(tables.Count == 0
             ? $"{e.Program.Name} lists no auto {kind.ToLowerInvariant()} tables, so a code load cannot be set here. Give the story forces as joint loads instead."
             : $"{e.Program.Name} has no {kind.ToLowerInvariant()} code '{code}'. Its codes: {string.Join(", ", tables.Select(t => t.Code))}.");
@@ -187,8 +191,13 @@ public static class LateralTools
         var patterns = e.Tables().FirstOrDefault(t => t.Name.Equals("Load Pattern Definitions", StringComparison.OrdinalIgnoreCase))
             ?? throw new EtabsException($"{e.Program.Name} has no table 'Load Pattern Definitions' to give {name} its code.");
         var patternKey = KeyField(e, patterns.Key);
+        // SAP2000 26 refuses every import of "Load Pattern Definitions" for a model with loads and is left with almost no
+        // load patterns (0.4.22 and 0.4.34 field tests: 9 patterns, then 1), so its patterns' table is never written here.
+        var sap = e.Program.Key == CsiProgram.Sap2000.Key;
         if (code.Equals("None", StringComparison.OrdinalIgnoreCase))
         {
+            if (sap)
+                throw new ToolInputException($"{e.Program.Name} does not take its 'Load Pattern Definitions' table back, which is where a code load is taken off. In {e.Program.Name}: Define > Load Patterns, set {name}'s Auto Lateral Load to None.");
             EditableTables.Put(e, patterns.Key, patternKey, [EditableTables.Row((patternKey, name), ("AutoLoad", "None"))], $"take the code load off {name}");
             return new JsonObject { ["pattern"] = name, ["code"] = "None", ["done"] = $"{name} has no auto {kind.ToLowerInvariant()} load now." };
         }
@@ -196,12 +205,12 @@ public static class LateralTools
         var key = KeyField(e, table.Key);
         // The pattern takes the code first, which makes its row in the code's table with the program's defaults;
         // then the given inputs go into that row, and the row's other fields keep the defaults.
-        EditableTables.Put(e, patterns.Key, patternKey, [EditableTables.Row((patternKey, name), ("AutoLoad", table.Code))], $"make {name} a {table.Code} load");
-        if (values.Count > 0)
-        {
-            var row = new Dictionary<string, string>(values, StringComparer.OrdinalIgnoreCase) { [key] = name };
-            EditableTables.Put(e, table.Key, key, [row], $"give {name} its {table.Code} inputs");
-        }
+        // ETABS 23 takes the AutoLoad but makes no row in the code's table from it (0.4.34 field test: every code read back
+        // empty, except where inputs were given): the row is always written to the code's table too, with the inputs given.
+        if (!sap)
+            EditableTables.Put(e, patterns.Key, patternKey, [EditableTables.Row((patternKey, name), ("AutoLoad", table.KeyCode))], $"make {name} a {table.Code} load");
+        var row = new Dictionary<string, string>(values, StringComparer.OrdinalIgnoreCase) { [key] = name };
+        EditableTables.Put(e, table.Key, key, [row], $"give {name} its {table.Code} inputs");
         var back = EditableTables.Read(e, table.Key, key, name)
             ?? throw new EtabsException($"{e.Program.Name} took {table.Code} for {name}, but its table '{table.Name}' has no row for {name} when read back.");
         foreach (var (field, value) in values)

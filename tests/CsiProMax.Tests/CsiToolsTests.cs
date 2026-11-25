@@ -268,6 +268,43 @@ static class CsiToolsTests
             Equal(inner.Stories().Count, Pack.Levels(new SafeMemory(inner, program: CsiProgram.Etabs), []).Count, "ETABS keeps its own stories");
         });
 
+        yield return ("CSI tools: nothing imports SAP2000's load patterns table (0.4.34: set_lateral_load emptied it); a code load goes into the code's own table", () =>
+        {
+            const string uc = "Load Pattern Definitions - Auto Seismic - User Coefficient";
+            var (link, api, inner) = Model(CsiProgram.Sap2000);
+            api.PatternName = "LoadPat";
+            inner.ResultTables["Load Pattern Definitions"] = new(["LoadPat", "Type", "SelfWtMult"], [["Dead", "Dead", "1"]]);
+            inner.ResultTables[uc] = new(["LoadPat"], []);
+            api.Tables[uc] = (["LoadPat", "IsAuto", "XDir", "YDir", "EccRatio", "C", "K"], []);
+            var before = string.Join(";", api.Table.Select(r => string.Join("|", r)));
+            // The guard is in EditableTables.Put itself, so no tool that writes through it can reach the wipe.
+            string said = "";
+            try { EditableTables.Put(link, "Load Pattern Definitions", "LoadPat", [EditableTables.Row(("LoadPat", "Dead"), ("AutoLoad", "None"))], "test it"); }
+            catch (EtabsException ex) { said = ex.Message; }
+            Check(said.Contains("does not take its 'Load Pattern Definitions' table back", StringComparison.Ordinal), "Put refuses SAP2000's patterns' table: " + said);
+            // set_lateral_load writes the code's own table only.
+            var set = Run(CsiProgram.Sap2000, "set_lateral_load", """{"name":"CPM-AUTO-S","kind":"seismic","code":"User Coefficient"}""", link);
+            Check(set["read_back"] is JsonObject { Count: > 0 }, "the code's row is read back: " + set.ToJsonString());
+            Check(api.Tables[uc].Rows.Any(r => r[0] == "CPM-AUTO-S"), "the code's table has the pattern's row");
+            Throws(() => Run(CsiProgram.Sap2000, "set_lateral_load", """{"name":"CPM-AUTO-S","kind":"seismic","code":"None"}""", link), "taking the code off through the patterns' table");
+            Equal(0, api.PatternTableWrites, "nothing was written to SAP2000's patterns' table");
+            Equal(before, string.Join(";", api.Table.Select(r => string.Join("|", r))), "SAP2000's patterns are as they were");
+            // Every direct import call in the program is one of the guarded ones.
+            var root = Path.Combine(SourceText.Root(), "src");
+            var direct = Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)
+                .Where(f => File.ReadAllText(f).Contains("DatabaseTables.SetTableForEditingArray(", StringComparison.Ordinal))
+                .Select(f => Path.GetFileName(f)).OrderBy(f => f).ToList();
+            Equal("CsiTools.cs,EditableTables.cs,SafeTools.cs", string.Join(",", direct), "the files that import a table directly (each new one needs SAP2000's guard)");
+        });
+        yield return ("CSI tools: ETABS 23 gets a code load's row in the code's table even with no inputs given (0.4.34: none was read back)", () =>
+        {
+            const string uc = "Load Pattern Definitions - Auto Seismic - User Coefficient";
+            var (link, api, inner) = Model(CsiProgram.Etabs);
+            inner.ResultTables["Load Pattern Definitions"] = new(["Name", "Type", "SelfWtMult"], [["Dead", "Dead", "1"]]);
+            inner.ResultTables[uc] = new(["Name"], []);
+            var set = Run(CsiProgram.Etabs, "set_lateral_load", """{"name":"CPM-AUTO-S","kind":"seismic","code":"User Coefficient"}""", link);
+            Check(set["read_back"] is JsonObject { Count: > 0 } && api.Tables[uc].Rows.Any(r => r[0] == "CPM-AUTO-S"), "the row is in the code's table: " + set.ToJsonString());
+        });
         yield return ("CSI tools: SAP2000's load patterns table: only a number for SelfWtMult, through the API; anything else refused up front", () =>
         {
             var (link, api, inner) = Model(CsiProgram.Sap2000);
@@ -544,6 +581,8 @@ public sealed class FakeApi
     public string PatternName = "Name";
     /// <summary>Patterns whose SetSelfWTMultiplier is refused.</summary>
     public HashSet<string> RefuseSelfWeight { get; } = [];
+    /// <summary>How many times the patterns' table was given rows to import.</summary>
+    public int PatternTableWrites;
 
     public sealed class PatternsApi(FakeApi o)
     {
@@ -742,6 +781,7 @@ public sealed class FakeApi
         }
         public int SetTableForEditingArray(string TableKey, ref int TableVersion, ref string[] FieldsKeysIncluded, int NumberRecords, ref string[] TableData)
         {
+            if (TableKey == Patterns) o.PatternTableWrites++;
             var rows = new List<string[]>();
             for (var r = 0; r < NumberRecords; r++) rows.Add(TableData.Skip(r * FieldsKeysIncluded.Length).Take(FieldsKeysIncluded.Length).ToArray());
             o._pending[TableKey] = (FieldsKeysIncluded, rows);
@@ -772,7 +812,7 @@ public sealed class FakeApi
                     continue;
                 }
                 o.Tables[key] = (fields, rows);
-                int name = Array.IndexOf(fields, "Name");
+                int name = Math.Max(0, Array.IndexOf(fields, "Name"));
                 if (key.Contains("User Coefficient")) foreach (var r in rows) o.SeismicCodes[r[name]] = "User Coefficient";
                 if (key.StartsWith("Functions")) foreach (var g in rows.GroupBy(r => r[name]))
                         o.Functions[g.Key] = g.Select(r => double.Parse(r[Array.IndexOf(fields, "Value")], System.Globalization.CultureInfo.InvariantCulture)).ToArray();

@@ -32,6 +32,10 @@ public static class EditableTables
     public static string Put(ICsiLink e, string key, string keyField, IReadOnlyList<IReadOnlyDictionary<string, string>> rows, string what)
     {
         var program = e.Program.Name;
+        // SAP2000 26 refuses every import of this table for a model with loads and is left with almost no load patterns,
+        // and putting them back is refused too (0.4.22 and 0.4.34 field tests): it is never written here.
+        if (e.Program.Key == CsiProgram.Sap2000.Key && string.Equals(key, "Load Pattern Definitions", StringComparison.OrdinalIgnoreCase))
+            throw new EtabsException($"{program} does not take its 'Load Pattern Definitions' table back (every import is refused and leaves no load patterns), so it cannot {what}. Use add_load_pattern, or Define > Load Patterns in {program}.");
         return (string)e.Raw(what, m =>
         {
             int version = 0, records = 0;
