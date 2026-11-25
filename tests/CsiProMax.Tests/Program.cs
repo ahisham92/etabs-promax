@@ -946,6 +946,14 @@ Test("field test: the ETABS scratch model gets a lateral load its checks can rea
     var analysis = steps.IndexOf("ctx.Tool(\"run_analysis\"", load > 0 ? load : 0, StringComparison.Ordinal);
     Check(load > 0 && analysis > load && steps.Contains("m.PointObj.SetLoadForce(p, \"CPM-EQX\""), "the seismic pattern has no load before the analysis when ETABS cannot take a user coefficient");
 });
+Test("add_load_pattern: ETABS refusing ASCE 7-16 keeps the Seismic pattern and says how to set it, not an error", () =>
+{
+    var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Tools", "EtabsTools.cs"));
+    var at = source.IndexOf("private static JsonNode AddPattern(", StringComparison.Ordinal);
+    var body = source.Substring(at, source.IndexOf("private static JsonNode SetLoads(", at, StringComparison.Ordinal) - at);
+    Check(body.Contains("if (answer != 0 && other is null) throw") && body.Contains("refusedAsce = true") && body.Contains("Modify Lateral Load"),
+        "a refused ASCE 7-16 load still fails add_load_pattern (0.4.18 field test on ETABS 23)");
+});
 foreach (var (name, body) in CdtSdkTests.All()) Test(name, body);
 foreach (var (name, body) in KeptPlugInsTests.All()) Test(name, body);
 foreach (var (name, body) in FieldRun048Tests.All()) Test(name, body);
