@@ -3233,13 +3233,16 @@ function modelerMenus(m) {
     ["Export", [["Tables to Excel (.xlsx)...", "m:xlsxOut"], 0, ["SAP2000 .s2k Text File...", "m:s2k"], ["SAFE .f2k Text File (one floor)...", "m:f2k"]]], 0, ["Print the active window...", "print", "Ctrl+P"]];
   m.Edit = [[s.undo ? "Undo " + s.undo : "Undo", "m:undo", "Ctrl+Z", !s.undo], [s.redo ? "Redo " + s.redo : "Redo", "m:redo", "Ctrl+Y", !s.redo], 0,
     ["Delete", "m:delete", "Del", !any], 0, ["Copy names of the selected objects", "copyNames", "Ctrl+C", !any], 0, ["Hide the selected objects", "hideSel", "", !any], ["Show all objects", "showAll"], 0, ["Model Text...", "m:text"]];
-  m.Define = [["Material Properties...", "m:materials"], ["Frame Sections...", "m:frameSections"], ["Slab and Wall Sections...", "m:shellSections"], 0,
+  m.Define = [["Material Properties...", "m:materials"], ["Frame Sections...", "m:frameSections"], ["Slab and Wall Sections...", "m:shellSections"], ["Spring Properties", [["Point Springs...", "m:spr:point"], ["Line Springs...", "m:spr:line"], ["Area Springs...", "m:spr:area"]]], 0,
     ["Story Data...", "m:stories"], ["Grid Data...", "m:grids"], 0, ["Functions", [["Response Spectrum...", "m:fnRS"], ["Time History...", "m:fnTH"]]],
     ["Load Patterns...", "m:patterns"], ["Load Cases...", "m:cases"], ["Load Combinations...", "m:combos"], 0, ["Mass Source...", "m:mass"], ["P-Delta Options...", "m:pdelta"]];
   m.Draw = [["Select Object", "t:select", "Esc"], 0, ["Draw Columns (click a point)", "d:column"], ["Draw Beams (click start and end)", "d:beam"], ["Quick Draw Beams (click a grid line)", "d:qbeam"], 0,
     ["Draw Floors (click corners)", "d:floor"], ["Draw Rectangular Floors (two corners)", "d:rect"], ["Quick Draw Floors (click in a bay)", "d:qfloor"], 0,
     ["Draw Walls (click start and end)", "d:wall"], ["Quick Draw Walls (click a grid line)", "d:qwall"], 0, ["Snap and Story Options...", "m:drawHelp"]];
   m.Assign = [["Frame Section...", "m:asgFrame", "", !fr], ["Slab or Wall Section...", "m:asgShell", "", !ar], 0, ["Joint Restraints (Supports)...", "m:asgSupport"], 0,
+    ["Joint", [["Springs...", "m:ad:joint", "", !any]]],
+    ["Frame", [["Releases...", "m:ad:releases", "", !fr], ["Local Axes...", "m:ad:axes", "", !fr], ["Insertion Point...", "m:ad:insertion", "", !fr], ["End Length Offsets...", "m:ad:offsets", "", !fr], ["Property Modifiers...", "m:ad:fmods", "", !fr], ["Line Springs...", "m:ad:lspring", "", !fr]]],
+    ["Shell", [["Property Modifiers...", "m:ad:smods", "", !ar], ["Area Springs...", "m:ad:aspring", "", !ar]]], 0,
     ["Joint Loads", [["Forces...", "m:ld:joint_force", "", !any], ["Ground Displacements...", "m:ld:joint_displacement", "", !any], ["Temperature...", "m:ld:joint_temperature", "", !any]]],
     ["Frame Loads", [["Distributed...", "m:asgFrameLoad", "", !fr], ["Uniform in any direction...", "m:ld:frame_uniform", "", !fr], ["Point...", "m:ld:frame_point", "", !fr], ["Trapezoidal...", "m:ld:frame_trapezoid", "", !fr], ["Temperature...", "m:ld:frame_temperature", "", !fr], ["Strain...", "m:ld:frame_strain", "", !fr]]],
     ["Shell Loads", [["Uniform...", "m:asgShellLoad", "", !ar], ["Uniform in any direction...", "m:ld:shell_uniform", "", !ar], ["Temperature...", "m:ld:shell_temperature", "", !ar], ["Strain...", "m:ld:shell_strain", "", !ar]]]];
@@ -3248,6 +3251,8 @@ function modelerMenus(m) {
 async function modelAct(a) {
   hideMenus();
   if (a.startsWith("ld:")) return hmObjectLoad(a.slice(3));
+  if (a.startsWith("spr:")) return hmSprings(a.slice(4));
+  if (a.startsWith("ad:")) return hmAssignData(a.slice(3));
   switch (a) {
     case "undo": case "redo": { const j = await hmRun(a); if (j.ok) hmSay(j.did || "Done."); return; }
     case "delete": return hmDelete();
@@ -3322,18 +3327,26 @@ async function hmMaterials() {
     ["Delete Material", n => n && hmRun("delete_definition", {kind: "material", name: n}).then(j => j.ok && again())],
   ], n => hmMaterial(defs.materials.find(m => m.name === n), again));
 }
-function hmMaterial(m, after, copy) {
-  const u = hmU(), concrete = !m || /concrete/i.test(m.type), was = m && !copy ? m.name : null;
-  if (m && !concrete) return dialog("Material Property Data", `<p class="kv" style="max-width:340px">${esc(m.name)} is ${esc(m.type)}. The Modeler shows it and keeps it as the file has it; it changes concrete materials only.</p>`, [["OK"]], {width: 380});
+async function hmMaterial(m, after, copy) {
+  const u = hmU(), pd = (await hmRun("property_definitions", {}, true)).result || {materials: [], material_types: ["Concrete"], material_values: []};
+  const cur = m ? pd.materials.find(x => x.name === m.name) || {name: m.name, type: m.type, values: {}} : {name: "", type: "Concrete", grade: "", values: {WEIGHTPERVOLUME: 25, E: 32836568, U: 0.2, FC: 30000}};
+  const was = m && !copy ? cur.name : null, V = cur.values || {};
+  const unit = {WEIGHTPERVOLUME: `${u.f}/${u.l}³`, E: `${u.f}/${u.l}²`, U: "", A: "1/°", FC: `${u.f}/${u.l}²`, FY: `${u.f}/${u.l}²`, FU: `${u.f}/${u.l}²`, FYE: `${u.f}/${u.l}²`, FUE: `${u.f}/${u.l}²`};
   const d = dialog("Material Property Data", `<fieldset><legend>General Data</legend><div class="g2">
-      <span>Material Name</span><input id="mN" value="${esc(m ? (copy ? m.name + " copy" : m.name) : "Concrete")}">
-      <span>Material Type</span><select disabled><option>Concrete</option></select></div></fieldset>
-    <fieldset><legend>Weight and Mass</legend><div class="g2"><span>Weight per Unit Volume (${u.f}/${u.l}³)</span><input id="mW" type="number" step="any" value="${m && m.unit_weight != null ? m.unit_weight : 25}"></div></fieldset>
-    <fieldset><legend>Mechanical Property Data</legend><div class="g2">
-      <span>Modulus of Elasticity, E (${u.f}/${u.l}²)</span><input id="mE" type="number" step="any" value="${m && m.elastic_modulus != null ? m.elastic_modulus : 32836568}">
-      <span>Poisson's Ratio, U</span><input id="mU" type="number" step="any" value="${m && m.poisson != null ? m.poisson : 0.2}"></div></fieldset>
-    <fieldset><legend>Design Property Data</legend><div class="g2"><span>Specified Concrete Compressive Strength, fc (${u.f}/${u.l}²)</span><input id="mF" type="number" step="any" value="${m && m.fc != null ? m.fc : 30000}"></div></fieldset>`,
-    [["OK", d => submit(d, "define_material", {name: q(d, "#mN").value.trim(), was, fc: fnum(d, "#mF"), elastic_modulus: fnum(d, "#mE"), unit_weight: fnum(d, "#mW"), poisson: fnum(d, "#mU")}, after), true], ["Cancel"]], {width: 460});
+      <span>Material Name</span><input id="mN" value="${esc(m ? (copy ? cur.name + " copy" : cur.name) : "Concrete")}">
+      <span>Material Type</span><select id="mT">${opts(pd.material_types, cur.type)}</select>
+      <span>Grade</span><input id="mG" value="${esc(cur.grade || "")}"></div></fieldset>
+    <fieldset><legend>Material Property Data</legend><div class="g2" id="mV">${pd.material_values.map(v => `<span data-row="${v.key}">${esc(v.label)}${unit[v.key] ? ", " + unit[v.key] : ""}</span><input data-k="${v.key}" data-row="${v.key}" type="number" step="any" value="${V[v.key] != null ? V[v.key] : ""}">`).join("")}</div></fieldset>
+    <p class="kv">Blank values take the programs' defaults (the expected strengths 1.1 times the minimum).</p>`,
+    [["OK", d => {
+      const values = {}; d.querySelectorAll("#mV [data-k]").forEach(x => { if (x.closest("[hidden]") || x.hidden) return; const v = parseFloat(x.value); if (isFinite(v)) values[x.dataset.k] = v; });
+      return submit(d, "define_material_data", {name: q(d, "#mN").value.trim(), was, type: q(d, "#mT").value, grade: q(d, "#mG").value.trim() || undefined, values}, after);
+    }, true], ["Cancel"]], {width: 480});
+  const show = () => {
+    const t = q(d, "#mT").value, steel = /steel|rebar|tendon|coldformed|aluminum/i.test(t), conc = t === "Concrete", uni = t === "Rebar" || t === "Tendon";
+    d.querySelectorAll("#mV [data-row]").forEach(x => { const k = x.dataset.row; x.hidden = (k === "FC" && !conc) || (/^F[YU]/.test(k) && !steel) || (k === "U" && uni); });
+  };
+  q(d, "#mT").onchange = show; show();
   return d;
 }
 
@@ -3353,21 +3366,62 @@ function sectionSvg(dep, wid) {
   const k = 70 / Math.max(dep || 1, wid || 1), h = Math.max(4, (dep || 0) * k), w = Math.max(4, (wid || 0) * k);
   return `<svg width="110" height="100" viewBox="0 0 110 100"><rect x="${55 - w / 2}" y="${50 - h / 2}" width="${w}" height="${h}" fill="#b8c4cc" stroke="#3a4650"/><path d="M55 8v84M8 50h94" stroke="#7a8890" stroke-dasharray="3 2"/><text x="60" y="12" font-size="10" fill="#555">3</text><text x="96" y="46" font-size="10" fill="#555">2</text></svg>`;
 }
+// The property modifiers of a section or a selection: one row per factor, 1 where not changed.
+function hmModifiers(keys, now, done) {
+  const label = {AMOD: "Cross-section (axial) area", A2MOD: "Shear area in 2 direction", A3MOD: "Shear area in 3 direction", JMOD: "Torsional constant", I2MOD: "Moment of inertia about 2 axis", I3MOD: "Moment of inertia about 3 axis", MMOD: "Mass", WMOD: "Weight",
+    F11MOD: "Membrane f11 direction", F22MOD: "Membrane f22 direction", F12MOD: "Membrane f12 direction", M11MOD: "Bending m11 direction", M22MOD: "Bending m22 direction", M12MOD: "Bending m12 direction", V13MOD: "Shear v13 direction", V23MOD: "Shear v23 direction"};
+  const d = dialog("Property/Stiffness Modifiers", `<div class="g2" id="pmV">${keys.map(k => `<span>${esc(label[k] || k)}</span><input data-k="${k}" type="number" step="any" value="${now && now[k] != null ? now[k] : 1}">`).join("")}</div>`,
+    [["OK", d => { const o = {}; d.querySelectorAll("#pmV [data-k]").forEach(x => { const v = parseFloat(x.value); if (isFinite(v)) o[x.dataset.k] = v; }); done(o); }, true], ["Cancel"]], {width: 380});
+  return d;
+}
 async function hmFrameSection(s, after, copy) {
-  const defs = await hmDefs(), u = hmU(), was = s && !copy ? s.name : null;
-  if (s && !s.editable) return dialog("Frame Section Property Data", `<p class="kv" style="max-width:360px">${esc(s.name)} is a ${esc(s.shape)} section. The Modeler keeps it as the file has it and draws with it; it changes rectangular concrete sections only.</p>`, [["OK"]], {width: 400});
+  const defs = await hmDefs(), u = hmU(), pd = (await hmRun("property_definitions", {}, true)).result;
+  const cur = s && pd ? pd.frame_sections.find(x => x.name === s.name) : null, was = s && !copy ? s.name : null;
+  if (cur && pd && !pd.shapes.some(x => x.shape === cur.shape)) return dialog("Frame Section Property Data", `<p class="kv" style="max-width:360px">${esc(cur.name)} is a ${esc(cur.shape)} section. The Modeler keeps it as the file has it and draws with it; Edit > Model Text changes it.</p>`, [["OK"]], {width: 400});
+  let mods = cur ? {...cur.modifiers} : null;
+  const shapes = pd ? pd.shapes : [{shape: "Concrete Rectangular", dims: ["D", "B"], concrete: true}];
+  const shape0 = cur && shapes.some(x => x.shape === cur.shape) ? cur.shape : "Concrete Rectangular";
+  const dimLabel = {D: "Depth (t3)", B: "Width (t2)", TF: "Flange thickness (tf)", TW: "Web thickness (tw)", BBOTTOM: "Bottom flange width (t2b)", TFBOTTOM: "Bottom flange thickness (tfb)", DIS: "Back to back distance (dis)"};
+  const mats = pd ? pd.materials : defs.materials.map(m => ({name: m.name, type: m.type}));
   const d = dialog("Frame Section Property Data", `<div style="display:flex;gap:10px"><div style="flex:1"><fieldset><legend>General Data</legend><div class="g2">
       <span>Property Name</span><input id="sN" value="${esc(s ? (copy ? s.name + " copy" : s.name) : "C400X400")}">
-      <span>Material</span><select id="sM">${matOpts(defs, s ? s.material : "")}</select>
-      <span>Shape</span><select disabled><option>Concrete Rectangular</option></select></div></fieldset>
-    <fieldset><legend>Section Dimensions</legend><div class="g2"><span>Depth (t3), ${u.l}</span><input id="sD" type="number" step="any" value="${s && s.depth != null ? s.depth : 0.4}">
-      <span>Width (t2), ${u.l}</span><input id="sB" type="number" step="any" value="${s && s.width != null ? s.width : 0.4}"></div></fieldset>
-    <fieldset><legend>Design Type</legend><label><input type="radio" name="sK" value="column" ${!s || s.kind !== "beam" ? "checked" : ""}>Column</label> &nbsp; <label><input type="radio" name="sK" value="beam" ${s && s.kind === "beam" ? "checked" : ""}>Beam</label></fieldset></div>
+      <span>Shape</span><select id="sS">${opts(shapes.map(x => x.shape), shape0)}</select>
+      <span>Material</span><select id="sM"></select></div></fieldset>
+    <fieldset><legend>Section Dimensions, ${u.l}</legend><div class="g2" id="sDims"></div></fieldset>
+    <fieldset id="sDes"><legend>Design Type</legend><label><input type="radio" name="sK" value="column" ${!s || s.kind !== "beam" ? "checked" : ""}>Column</label> &nbsp; <label><input type="radio" name="sK" value="beam" ${s && s.kind === "beam" ? "checked" : ""}>Beam</label></fieldset>
+    <button id="sMod">Property Modifiers...</button> <span class="kv" id="sModT"></span></div>
     <fieldset style="margin:0"><legend>Section</legend><div id="sP">${sectionSvg(s && s.depth, s && s.width)}</div></fieldset></div>`,
-    [["OK", d => { const kind = q(d, "[name=sK]:checked").value, name = q(d, "#sN").value.trim(); return submit(d, "define_frame_section", {name, was, kind, depth: fnum(d, "#sD"), width: fnum(d, "#sB"), material: q(d, "#sM").value}, j => { hm.sec[kind] = name; if (after) after(j); }); }, true], ["Cancel"]], {width: 520});
-  const redraw = () => q(d, "#sP").innerHTML = sectionSvg(fnum(d, "#sD"), fnum(d, "#sB"));
-  q(d, "#sD").oninput = redraw; q(d, "#sB").oninput = redraw;
-  if (s && copy === undefined && s.used) formError(d, "");
+    [["OK", d => {
+      const name = q(d, "#sN").value.trim(), shape = q(d, "#sS").value, material = q(d, "#sM").value, dims = {};
+      d.querySelectorAll("#sDims [data-k]").forEach(x => { const v = parseFloat(x.value); if (isFinite(v)) dims[x.dataset.k] = v; });
+      const changed = mods && Object.values(mods).some(v => Math.abs(v - 1) > 1e-12) || cur && Object.values(cur.modifiers).some(v => Math.abs(v - 1) > 1e-12);
+      if (shape === "Concrete Rectangular") {
+        const kind = q(d, "[name=sK]:checked").value;
+        formError(d, "");
+        hmRun("define_frame_section", {name, was, kind, depth: dims.D, width: dims.B, material}, true).then(async j => {
+          if (!j.ok) return formError(d, j.error);
+          if (changed) { const k = await hmRun("define_frame_shape", {name, was: name, shape, material, dims, modifiers: mods || {}}, true); if (!k.ok) return formError(d, k.error); }
+          hm.sec[kind] = name; d.close(); hmSay("Done. Edit > Undo steps back."); if (after) after(j);
+        });
+        return false;
+      }
+      return submit(d, "define_frame_shape", {name, was, shape, material, dims, modifiers: mods || undefined}, after);
+    }, true], ["Cancel"]], {width: 560});
+  const paint = () => {
+    const sh = shapes.find(x => x.shape === q(d, "#sS").value) || shapes[0], old = cur && cur.shape === sh.shape ? cur.dims : {};
+    const def = {D: s && s.depth || 0.4, B: s && s.width || 0.4, TF: sh.concrete ? 0.15 : 0.016, TW: sh.concrete ? 0.3 : 0.01, DIS: 0.01};
+    q(d, "#sDims").innerHTML = sh.dims.map(k => `<span>${esc(dimLabel[k] || k)}</span><input data-k="${k}" type="number" step="any" value="${old[k] != null ? old[k] : /BOTTOM/.test(k) ? "" : def[k]}" ${/BOTTOM/.test(k) ? 'placeholder="as the top"' : ""}>`).join("");
+    const list = mats.filter(m => sh.concrete ? /concrete/i.test(m.type) : !/concrete/i.test(m.type)).map(m => m.name);
+    q(d, "#sM").innerHTML = opts(list, cur && list.includes(cur.material) ? cur.material : list[0]);
+    q(d, "#sDes").hidden = sh.shape !== "Concrete Rectangular";
+    if (!list.length) formError(d, sh.concrete ? "Define a concrete material first." : "Define a steel material first (Define > Material Properties)."); else formError(d, "");
+    d.querySelectorAll("#sDims [data-k]").forEach(x => x.oninput = redraw); redraw();
+  };
+  const redraw = () => { const D = parseFloat((q(d, '#sDims [data-k="D"]') || {}).value), B = parseFloat((q(d, '#sDims [data-k="B"]') || {}).value); q(d, "#sP").innerHTML = sectionSvg(D, isFinite(B) ? B : D); };
+  const modText = () => { const m = mods || (cur && cur.modifiers) || {}; const o = Object.entries(m).filter(([, v]) => Math.abs(v - 1) > 1e-12); q(d, "#sModT").textContent = o.length ? o.map(([k, v]) => k + " " + v).join(", ") : "none"; };
+  q(d, "#sS").onchange = paint;
+  q(d, "#sMod").onclick = () => hmModifiers(pd.frame_modifiers, mods || (cur && cur.modifiers), o => { mods = o; modText(); });
+  paint(); modText();
 }
 
 // ---- Define: slab and wall sections ----
@@ -3383,13 +3437,86 @@ async function hmShellSections() {
   ], n => hmShellSection(find(n.replace(/  \(wall\)$/, "")), again));
 }
 async function hmShellSection(s, after, copy) {
-  const defs = await hmDefs(), u = hmU(), was = s && !copy ? s.name : null;
-  dialog("Slab or Wall Property Data", `<fieldset><legend>General Data</legend><div class="g2">
+  const defs = await hmDefs(), u = hmU(), pd = (await hmRun("property_definitions", {}, true)).result;
+  const cur = s && pd ? pd.shell_sections.find(x => x.name === s.name) : null, was = s && !copy ? s.name : null;
+  let mods = cur ? {...cur.modifiers} : null;
+  const d = dialog("Slab or Wall Property Data", `<fieldset><legend>General Data</legend><div class="g2">
       <span>Property Name</span><input id="aN" value="${esc(s ? (copy ? s.name + " copy" : s.name) : "Slab200")}">
       <span>Type</span><select id="aK" ${s && !copy ? "disabled" : ""}>${opts([["slab", "Slab"], ["wall", "Wall"]], s ? s.kind : "slab")}</select>
+      <span data-slab>Slab Type</span><select data-slab id="aY">${opts((pd && pd.slab_types) || ["Slab"], cur && cur.slab_type || "Slab")}</select>
+      <span>Modeling Type</span><select id="aG">${opts((pd && pd.modeling_types) || ["ShellThin"], cur && cur.modeling || "ShellThin")}</select>
       <span>Material</span><select id="aM">${matOpts(defs, s ? s.material : "")}</select>
-      <span>Thickness, ${u.l}</span><input id="aT" type="number" step="any" value="${s && s.thickness != null ? s.thickness : 0.2}"></div></fieldset>`,
-    [["OK", d => { const kind = q(d, "#aK").value, name = q(d, "#aN").value.trim(); return submit(d, "define_shell_section", {name, was, kind, thickness: fnum(d, "#aT"), material: q(d, "#aM").value}, j => { hm.sec[kind] = name; if (after) after(j); }); }, true], ["Cancel"]], {width: 400});
+      <span>Thickness, ${u.l}</span><input id="aT" type="number" step="any" value="${s && s.thickness != null ? s.thickness : 0.2}"></div>
+      <label data-slab style="display:block;margin-top:6px"><input type="checkbox" id="aO" ${cur && cur.one_way ? "checked" : ""}> Use special one-way load distribution</label></fieldset>
+    <button id="aMod">Stiffness Modifiers...</button> <span class="kv" id="aModT"></span>`,
+    [["OK", d => {
+      const kind = q(d, "#aK").value, name = q(d, "#aN").value.trim();
+      const args = {name, was, kind, thickness: fnum(d, "#aT"), material: q(d, "#aM").value, modeling: q(d, "#aG").value, modifiers: mods || undefined};
+      if (kind === "slab") { args.slab_type = q(d, "#aY").value; args.one_way = q(d, "#aO").checked; }
+      return submit(d, "define_shell_type", args, j => { hm.sec[kind] = name; if (after) after(j); });
+    }, true], ["Cancel"]], {width: 440});
+  const show = () => d.querySelectorAll("[data-slab]").forEach(x => x.hidden = q(d, "#aK").value === "wall");
+  const modText = () => { const m = mods || {}; const o = Object.entries(m).filter(([, v]) => Math.abs(v - 1) > 1e-12); q(d, "#aModT").textContent = o.length ? o.map(([k, v]) => k + " " + v).join(", ") : "none"; };
+  q(d, "#aK").onchange = show; show(); modText();
+  q(d, "#aMod").onclick = () => hmModifiers((pd && pd.shell_modifiers) || [], mods, o => { mods = o; modText(); });
+}
+
+// ---- Define: spring properties ----
+async function hmSprings(kind) {
+  const pd = (await hmRun("property_definitions", {}, true)).result; if (!pd) return;
+  const list = pd.springs.filter(x => x.kind === kind);
+  const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmSprings(kind); };
+  const title = {point: "Point", line: "Line", area: "Area"}[kind];
+  listForm(`Define ${title} Springs`, "Springs", list.map(x => x.name), [
+    ["Add New Property...", () => hmSpring(kind, null, again)],
+    ["Modify/Show Property...", n => n && hmSpring(kind, list.find(x => x.name === n), again)],
+    ["Delete Property", n => n && hmRun("define_spring", {kind, name: n, delete: true}, true).then(j => j.ok ? again() : hmSay(j.error, true))],
+  ], n => hmSpring(kind, list.find(x => x.name === n), again));
+}
+function hmSpring(kind, sp, after) {
+  const u = hmU(), keys = {point: ["UX", "UY", "UZ", "RX", "RY", "RZ"], line: ["U1", "U2", "U3", "R1"], area: ["U1", "U2", "U3"]}[kind];
+  const unit = k => kind === "point" ? (k[0] === "U" ? `${u.f}/${u.l}` : `${u.f}-${u.l}/rad`) : kind === "line" ? (k[0] === "U" ? `${u.f}/${u.l}/${u.l}` : `${u.f}-${u.l}/rad/${u.l}`) : `${u.f}/${u.l}/${u.l}²`;
+  return dialog({point: "Point", line: "Line", area: "Area"}[kind] + " Spring Property Data", `<div class="g2"><span>Property Name</span><input id="kN" value="${esc(sp ? sp.name : kind[0].toUpperCase() + "Spr1")}" ${sp ? "disabled" : ""}></div>
+    <fieldset><legend>Stiffness</legend><div class="g2" id="kV">${keys.map(k => `<span>${k} (${unit(k)})</span><input data-k="${k}" type="number" step="any" value="${sp ? sp.values[k] : 0}">`).join("")}</div></fieldset>`,
+    [["OK", d => { const values = {}; d.querySelectorAll("#kV [data-k]").forEach(x => { const v = parseFloat(x.value); if (isFinite(v)) values[x.dataset.k] = v; }); return submit(d, "define_spring", {kind, name: q(d, "#kN").value.trim(), values}, after); }, true], ["Cancel"]], {width: 400});
+}
+
+// ---- Assign: frame releases, axes, insertion point, offsets, modifiers, springs; shell modifiers and springs; joint springs ----
+async function hmAssignData(what) {
+  const joint = what === "joint", shell = what === "smods" || what === "aspring";
+  const names = joint ? hmJoints() : hmSelected(shell ? "a" : "f");
+  if (!names.length) return hmSay(joint ? "Select the members whose joints take the spring first." : shell ? "Select the floors or walls first." : "Select the frames first.", true);
+  const pd = (await hmRun("property_definitions", {objects: names.slice(0, 1)}, true)).result; if (!pd) return;
+  const now = (pd.objects || [])[0] || {}, u = hmU();
+  const springs = k => pd.springs.filter(x => x.kind === k).map(x => x.name);
+  const tool = joint ? "assign_joint_data" : shell ? "assign_shell_data" : "assign_frame_data";
+  let body = "", read;
+  if (what === "releases") {
+    const rel = ["P", "V2", "V3", "T", "M2", "M3"], lab = {P: "Axial load", V2: "Shear force 2 (major)", V3: "Shear force 3 (minor)", T: "Torsion", M2: "Moment 22 (minor)", M3: "Moment 33 (major)"};
+    body = `<table class="list hmgrid"><tr><th>Release</th><th>Start</th><th>End</th></tr>${rel.map(r => `<tr><td>${lab[r]}</td><td><input type="checkbox" data-i="${r}" ${(now.release_i || []).includes(r) ? "checked" : ""}></td><td><input type="checkbox" data-j="${r}" ${(now.release_j || []).includes(r) ? "checked" : ""}></td></tr>`).join("")}</table>`;
+    read = d => ({release_i: [...d.querySelectorAll("[data-i]:checked")].map(x => x.dataset.i), release_j: [...d.querySelectorAll("[data-j]:checked")].map(x => x.dataset.j)});
+  } else if (what === "axes") {
+    body = `<div class="g2"><span>Rotate local axis 2 by angle (degrees)</span><input id="xA" type="number" step="any" value="${now.angle || 0}"></div>`;
+    read = d => ({angle: fnum(d, "#xA")});
+  } else if (what === "insertion") {
+    const cp = ["1 Bottom left", "2 Bottom center", "3 Bottom right", "4 Middle left", "5 Middle center", "6 Middle right", "7 Top left", "8 Top center", "9 Top right", "10 Centroid", "11 Shear center"];
+    body = `<div class="g2"><span>Cardinal point</span><select id="xC">${opts(cp.map((t, i) => [String(i + 1), t]), String(now.cardinal || 10))}</select></div>`;
+    read = d => ({cardinal: parseInt(q(d, "#xC").value)});
+  } else if (what === "offsets") {
+    body = `<div class="g2"><span>End-I offset, ${u.l}</span><input id="xI" type="number" step="any" value="${now.offset_i || 0}"><span>End-J offset, ${u.l}</span><input id="xJ" type="number" step="any" value="${now.offset_j || 0}"><span>Rigid zone factor (0 to 1)</span><input id="xR" type="number" step="any" value="${now.rigid_zone || 0}"></div>`;
+    read = d => ({offset_i: fnum(d, "#xI"), offset_j: fnum(d, "#xJ"), rigid_zone: fnum(d, "#xR")});
+  } else if (what === "fmods" || what === "smods") {
+    const keys = what === "fmods" ? pd.frame_modifiers : pd.shell_modifiers;
+    return hmModifiers(keys, now.modifiers, o => hmRun(tool, {objects: names, modifiers: o}, true).then(j => j.ok ? hmSay("Done. Edit > Undo steps back.") : hmSay(j.error, true)));
+  } else {
+    const k = joint ? "point" : what === "lspring" ? "line" : "area", list = springs(k);
+    body = `<div class="g2"><span>Spring property</span><span style="display:flex;gap:6px"><select id="xS" style="flex:1">${opts([["", "None"]].concat(list.map(n => [n, n])), now.spring || list[0] || "")}</select><button id="xNew">Add New...</button></span></div>`;
+    read = d => ({spring: q(d, "#xS").value});
+    setTimeout(() => { const d = [...document.querySelectorAll(".dlg")].pop(), nb = d && d.querySelector("#xNew"); if (nb) nb.onclick = () => hmSpring(k, null, async () => { const p2 = (await hmRun("property_definitions", {}, true)).result; const l2 = p2.springs.filter(x => x.kind === k).map(x => x.name); q(d, "#xS").innerHTML = opts([["", "None"]].concat(l2.map(n => [n, n])), l2[l2.length - 1]); }); }, 0);
+  }
+  const title = {releases: "Frame Releases", axes: "Frame Local Axes", insertion: "Frame Insertion Point", offsets: "Frame End Length Offsets", lspring: "Frame Line Springs", aspring: "Shell Area Springs", joint: "Joint Springs"}[what];
+  return dialog("Assign " + title, body + `<p class="kv">${names.length} selected ${joint ? "joints" : shell ? "floors and walls" : "frames"}.</p>`,
+    [["OK", d => submit(d, tool, Object.assign({objects: names}, read(d))), true], ["Cancel"]], {width: 420});
 }
 
 // ---- Define: stories (ETABS's Story Data, edited in the grid) ----
