@@ -730,6 +730,15 @@ public static class CsiTools
                 Ok(program, m.SetModelIsLocked(false), "unlock the model for the table edit");
                 unlocked = true;
             }
+            // The model is saved just before the edit, and opened again from that file when the program does not take it:
+            // SAP2000 26 answered 1 to ApplyEditedTables for "Load Pattern Definitions" on the field test's model and then
+            // had no load patterns at all (0.4.24 field test; replayed on a scratch SAP2000 26 from the test's .s2k: 4
+            // patterns before, none after the refused apply, all 4 back after opening the file saved just before).
+            var saved = "";
+            try { saved = Convert.ToString(m.GetModelFilename(true)) ?? ""; } catch (Exception) { saved = ""; }
+            // Only a model file of the program's own (ETABS 23 answers its working .$et, which is not one to save to).
+            if (!new[] { ".sdb", ".edb", ".fdb" }.Contains(Path.GetExtension(saved), StringComparer.OrdinalIgnoreCase)) saved = "";
+            if (saved.Length > 0 && Convert.ToInt32(m.File.Save(saved)) != 0) saved = "";
             string? refused = null; int fatal = 0, errors = 0, warnings = 0, info = 0; string text = "";
             try
             {
@@ -749,7 +758,11 @@ public static class CsiTools
                 return new JsonObject { ["fatal_errors"] = fatal, ["errors"] = errors, ["warnings"] = warnings, ["import_log"] = text ?? "" };
 
             try { m.DatabaseTables.CancelTableEditing(); } catch { /* nothing more to undo */ }
-            var restored = RestoreRows(m, table.Key, fields, original);
+            string restored;
+            if (saved.Length > 0 && SafeOpen(m, saved))
+                restored = $"The model was opened again as it was saved just before the edit ({Path.GetFileName(saved)}), so nothing of the refused edit is left in it.";
+            else
+                restored = RestoreRows(m, table.Key, fields, original);
             var cut = (text ?? "").Replace("\r", " ").Replace("\n", " ").Trim();
             if (cut.Length > 600) cut = cut[..600] + "...";
             throw new EtabsException($"{refused}. {restored}" + (cut.Length > 0 ? $" Its import log: {cut}" : ""));
@@ -786,6 +799,13 @@ public static class CsiTools
             return $"The read back had {records} of its {original.Count} rows and putting them back was refused too: check the model before saving it.";
         }
         catch (Exception ex) { return $"It could not be read back ({ex.Message}): check the model before saving it."; }
+    }
+
+    /// <summary>Opens the model's file again; false when the program does not.</summary>
+    private static bool SafeOpen(dynamic m, string file)
+    {
+        try { return Convert.ToInt32(m.File.OpenFile(file)) == 0; }
+        catch (Exception) { return false; }
     }
 
     private static void Ok(string program, object result, string what)
