@@ -196,9 +196,9 @@ public static class CsiFieldSteps
             T("set_mass_source", """{"name":"CPM-MS","loads":[{"pattern":"CPM-SDL","factor":1}]}""", a => FieldContext.Expect(a["from_loads"] is not JsonArray l || l.Any(x => x!.GetValue<string>() == "CPM-SDL"), "CPM-SDL is not in the mass source when read back: " + a.ToJsonString()));
             T("set_modal_case", """{"name":"CPM-MODAL","max_modes":6}""", a => FieldContext.Expect(Int(a["max_modes"]) == 6, "6 modes were asked for: " + a.ToJsonString()));
             T("assign_diaphragm", """{"name":"CPM-D","all_floors":true}""", a => FieldContext.Expect(Int(a["done"]) > 0 || a["diaphragms"] is JsonArray { Count: > 0 }, "no floor took the diaphragm: " + a.ToJsonString()));
-            T("add_seismic_load", """{"name":"CPM-EQX","direction":"x","method":"user","coefficient":0.1,"k":1}""", a =>
-                FieldContext.Expect(link.LoadPatterns().Any(p => p.Name == "CPM-EQX" && p.Type == "Seismic") && a["read_back"] is not null, "CPM-EQX should be a seismic pattern with its coefficient read back: " + a.ToJsonString()), "tool add_seismic_load, a user coefficient");
-            T("add_seismic_load", """{"name":"CPM-EQY","direction":"y","r":8,"omega":3,"cd":5.5,"ss":1.0,"s1":0.4,"site_class":"D"}""", a =>
+            T("add_seismic_load", """{"name":"CPM-ELFX","direction":"x","method":"user","coefficient":0.1,"k":1}""", a =>
+                FieldContext.Expect(link.LoadPatterns().Any(p => p.Name == "CPM-ELFX" && p.Type == "Seismic") && a["read_back"] is not null, "CPM-ELFX should be a seismic pattern with its coefficient read back: " + a.ToJsonString()), "tool add_seismic_load, a user coefficient");
+            T("add_seismic_load", """{"name":"CPM-ELFY","direction":"y","r":8,"omega":3,"cd":5.5,"ss":1.0,"s1":0.4,"site_class":"D"}""", a =>
                 FieldContext.Expect(a["read_back"] is JsonObject r && r.ToJsonString().Contains('8'), "ASCE 7-16 with R 8 should read back: " + a.ToJsonString()), "tool add_seismic_load, ASCE 7-16");
             No("add_seismic_load", """{"name":"CPM-SDL","direction":"x","method":"user","coefficient":0.1}""", "is there as", "tool add_seismic_load says no to a pattern of another type");
             T("add_response_spectrum", """{"case":"CPM-RS","function":"CPM-ASCE716","direction":"x","ss":1.0,"s1":0.4,"site_class":"D","r":8,"modal_case":"CPM-MODAL"}""", a =>
@@ -233,12 +233,12 @@ public static class CsiFieldSteps
         {
             if (analysed)
             {
-                T("scale_response_spectrum", """{"rs_case":"CPM-RS","elf_case":"CPM-EQX","direction":"x"}""", a =>
+                T("scale_response_spectrum", """{"rs_case":"CPM-RS","elf_case":"CPM-ELFX","direction":"x"}""", a =>
                     FieldContext.Expect(a["rs_base_shear"]?.GetValue<double>() > 0 && a["elf_base_shear"]?.GetValue<double>() > 0, "both base shears were expected: " + a.ToJsonString()), "tool scale_response_spectrum compares");
-                T("scale_response_spectrum", """{"rs_case":"CPM-RS","elf_case":"CPM-EQX","direction":"x","apply":true}""", a =>
+                T("scale_response_spectrum", """{"rs_case":"CPM-RS","elf_case":"CPM-ELFX","direction":"x","apply":true}""", a =>
                     FieldContext.Expect(a["applied"]?.GetValue<bool>() == true || a["passes"]?.GetValue<bool>() == true, "it should scale, or say there is nothing to scale: " + a.ToJsonString()), "tool scale_response_spectrum scales");
             }
-            else No("scale_response_spectrum", """{"rs_case":"CPM-RS","elf_case":"CPM-EQX","direction":"x"}""", "analysis", "tool scale_response_spectrum says the analysis must run first");
+            else No("scale_response_spectrum", """{"rs_case":"CPM-RS","elf_case":"CPM-ELFX","direction":"x"}""", "analysis", "tool scale_response_spectrum says the analysis must run first");
         }
         if (Read(ctx, "whether the model is locked", () => link.Info().Locked, false) || !locked)
             T("unlock_model", "{}", a => FieldContext.Expect(a["locked"]?.GetValue<bool>() == false, "still locked: " + a.ToJsonString()));
