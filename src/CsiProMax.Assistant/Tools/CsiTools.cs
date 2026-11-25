@@ -601,24 +601,59 @@ public static class CsiTools
                 };
             })!;
 
+        string? readNote = null;
         var (fields, rows) = ((string[], List<string[]>))e.Raw("read a table for editing", m =>
         {
             int version = 0, records = 0; string[] f = [], data = [];
-            Ok(program, m.DatabaseTables.GetTableForEditingArray(table.Key, "", ref version, ref f, ref records, ref data), $"open {table.Name} for editing (is it an editable table?)");
+            int got = Convert.ToInt32(m.DatabaseTables.GetTableForEditingArray(table.Key, "", ref version, ref f, ref records, ref data));
+            Ok(program, got, $"open {table.Name} for editing (is it an editable table?)");
             f ??= []; data ??= [];
             var list = new List<string[]>();
             for (var r = 0; r < records && f.Length > 0; r++) list.Add(data.Skip(r * f.Length).Take(f.Length).Select(v => v ?? "").ToArray());
             if (list.Count == 0 && f.Length > 0)
             {
-                // SAP2000 26 gave "Load Pattern Definitions" for editing with no rows while the model had four patterns
-                // (0.4.17 field test): the same rows are read for display, field by field.
-                string[] ask = f.ToArray(), shown = [], rowsShown = []; int v2 = 0, n2 = 0;
-                if (Convert.ToInt32(m.DatabaseTables.GetTableForDisplayArray(table.Key, ref ask, "", ref v2, ref shown, ref n2, ref rowsShown)) == 0 && shown is { Length: > 0 } && rowsShown is not null)
-                    for (var r = 0; r < n2; r++)
+                // SAP2000 26 gives "Load Pattern Definitions" for editing with no rows while the model has its patterns
+                // (0.4.17 and 0.4.20 field tests): the rows are read for display (all fields, by group "" then "All"),
+                // then as the editing CSV text, and mapped onto the editing fields by name.
+                var tried = new List<string> { $"editing array: answer {got}, 0 rows" };
+                foreach (var group in new[] { "", "All" })
+                {
+                    if (list.Count > 0) break;
+                    try
                     {
-                        var source = rowsShown.Skip(r * shown.Length).Take(shown.Length).ToArray();
-                        list.Add(f.Select(k => Array.FindIndex(shown, x => string.Equals(x, k, StringComparison.OrdinalIgnoreCase)) is var i and >= 0 && i < source.Length ? source[i] ?? "" : "").ToArray());
+                        string[] ask = [], shown = [], rowsShown = []; int v2 = 0, n2 = 0;
+                        int answer = Convert.ToInt32(m.DatabaseTables.GetTableForDisplayArray(table.Key, ref ask, group, ref v2, ref shown, ref n2, ref rowsShown));
+                        tried.Add($"display, group '{group}': answer {answer}, {n2} rows");
+                        if (answer == 0 && shown is { Length: > 0 } && rowsShown is not null)
+                            for (var r = 0; r < n2; r++)
+                            {
+                                var source = rowsShown.Skip(r * shown.Length).Take(shown.Length).ToArray();
+                                list.Add(f.Select(k => Array.FindIndex(shown, x => string.Equals(x, k, StringComparison.OrdinalIgnoreCase)) is var i and >= 0 && i < source.Length ? source[i] ?? "" : "").ToArray());
+                            }
                     }
+                    catch (Exception ex) { tried.Add($"display, group '{group}': {ex.Message}"); }
+                }
+                if (list.Count == 0)
+                {
+                    try
+                    {
+                        int v3 = 0; string csv = "";
+                        int answer = Convert.ToInt32(m.DatabaseTables.GetTableForEditingCSVString(table.Key, "", ref v3, ref csv));
+                        var lines = (csv ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                        tried.Add($"editing CSV: answer {answer}, {Math.Max(0, lines.Length - 1)} lines after the header");
+                        if (answer == 0 && lines.Length > 1)
+                        {
+                            var head = lines[0].Split(',').Select(x => x.Trim().Trim('"')).ToArray();
+                            foreach (var line in lines.Skip(1))
+                            {
+                                var cells = line.Split(',').Select(x => x.Trim().Trim('"')).ToArray();
+                                list.Add(f.Select(k => Array.FindIndex(head, x => string.Equals(x, k, StringComparison.OrdinalIgnoreCase)) is var i and >= 0 && i < cells.Length ? cells[i] : "").ToArray());
+                            }
+                        }
+                    }
+                    catch (Exception ex) { tried.Add($"editing CSV: {ex.Message}"); }
+                }
+                readNote = string.Join("; ", tried);
             }
             return (f, list);
         })!;
@@ -628,7 +663,7 @@ public static class CsiTools
             var limit = a.Whole("limit", 100);
             return new JsonObject
             {
-                ["table"] = table.Name, ["fields"] = Arr(fields), ["rows_total"] = rows.Count,
+                ["table"] = table.Name, ["fields"] = Arr(fields), ["rows_total"] = rows.Count, ["read_note"] = readNote,
                 ["rows"] = new JsonArray(rows.Take(limit).Select(r => (JsonNode)Arr(r)).ToArray()),
             };
         }
@@ -1031,8 +1066,11 @@ public static class CsiTools
             if (IsEtabs(e))
             {
                 var said = EtabsLateral.UserCoefficient(e, name, direction, a.Number("eccentricity", 0.05), a.Number("coefficient"), a.Number("k", 1));
-                return new JsonObject { ["pattern"] = name, ["method"] = method, ["direction"] = direction.ToLowerInvariant(), ["lateral"] = said, ["code"] = EtabsLateral.SeismicCode(e, name),
-                    ["note"] = $"{e.Program.Name} computes the loads when the analysis runs. Check them in its Load Patterns > Modify Lateral Load." };
+                var made = new JsonObject { ["pattern"] = name, ["method"] = method, ["direction"] = direction.ToLowerInvariant(), ["lateral"] = said, ["code"] = EtabsLateral.SeismicCode(e, name) };
+                if (EditableTables.Read(e, "Load Pattern Definitions - Auto Seismic - User Coefficient", "Name", name) is { } row)
+                    made["read_back"] = new JsonObject(row.Where(kv => kv.Key is not ("Name" or "GUID")).Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value)));
+                made["note"] = $"{e.Program.Name} computes the loads when the analysis runs. Check them in its Load Patterns > Modify Lateral Load.";
+                return made;
             }
             Call(e, $"set {name} to a user coefficient", "LoadPatterns.AutoSeismic.SetUserCoefficient", common);
             back = Try(e, $"read {name}", "LoadPatterns.AutoSeismic.GetUserCoefficient", D(("Name", name)));
@@ -1060,8 +1098,14 @@ public static class CsiTools
             {
                 var took = EtabsLateral.Asce716(e, name, direction, a.Number("eccentricity", 0.05), (int)common["PeriodFlag"]!, (int)common["CtType"]!, (double)common["UserT"]!,
                     (double)common["R"]!, (double)common["Omega"]!, (double)common["Cd"]!, (double)common["I"]!, ss, s1, (double)common["TL"]!, (int)common["SiteClass"]!, (double)common["Fa"]!, (double)common["Fv"]!);
-                return new JsonObject { ["pattern"] = name, ["method"] = method, ["direction"] = direction.ToLowerInvariant(), ["set_by"] = took, ["code"] = EtabsLateral.SeismicCode(e, name),
-                    ["note"] = $"{e.Program.Name} computes the loads when the analysis runs. Check them in its Load Patterns > Modify Lateral Load." };
+                var made = new JsonObject { ["pattern"] = name, ["method"] = method, ["direction"] = direction.ToLowerInvariant(), ["set_by"] = took, ["code"] = EtabsLateral.SeismicCode(e, name) };
+                // Read back by ETABS's own getter, else from its ASCE 7-16 table.
+                if ((Try(e, $"read {name}", "LoadPatterns.AutoSeismic.GetASCE716_1", D(("Name", name))) ?? Try(e, $"read {name}", "LoadPatterns.AutoSeismic.GetASCE716", D(("Name", name))))?["values"] is JsonObject got)
+                    made["read_back"] = got.DeepClone();
+                else if (EditableTables.Read(e, "Load Pattern Definitions - Auto Seismic - ASCE 7-16", "Name", name) is { } row)
+                    made["read_back"] = new JsonObject(row.Where(kv => kv.Key is not ("Name" or "GUID")).Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value)));
+                made["note"] = $"{e.Program.Name} computes the loads when the analysis runs. Check them in its Load Patterns > Modify Lateral Load.";
+                return made;
             }
             // SAP2000 26's SetASCE716(_1) takes nDir, the directions X and Y, not a DirFlag (its help; 0.4.17 field test).
             var x = direction.Equals("x", StringComparison.OrdinalIgnoreCase);
