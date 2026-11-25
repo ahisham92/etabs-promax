@@ -103,7 +103,9 @@ public sealed class ComEtabs : ICsiLink, IDisposable
             finally { _stuck = ""; }
         });
         var limit = IsLong(what) ? AnalysisLimit : CallLimit;
-        if (!done.Task.Wait(limit))
+        // Waits without throwing: a call that failed must come out as its own EtabsException below, never wrapped
+        // in an AggregateException that no "catch (EtabsException)" would take.
+        if (!((IAsyncResult)done.Task).AsyncWaitHandle.WaitOne(limit))
         {
             _stuck = what;
             // The call may still come back later; the next call works again from then on.
