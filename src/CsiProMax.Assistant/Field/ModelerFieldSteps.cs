@@ -77,6 +77,7 @@ public static class ModelerFieldSteps
         ctx.Offer(LateralTools.All);
         ctx.Offer(CaseTools.All);
         ctx.Offer(ModelTextTools.All);
+        ctx.Offer(PropertyTools.All);
         var folder = Q(ctx.Folder);
 
         // A new model from the template: three stories, two bays each way.
@@ -414,6 +415,43 @@ public static class ModelerFieldSteps
             FieldContext.Expect(a["functions"]!.AsArray().Any(f => f!["name"]!.GetValue<string>() == "CPM-RS"), "CPM-RS is not listed");
         });
         ModelText(ctx, modeler);
+        Properties(ctx, modeler);
+    }
+
+    /// <summary>The property items: a steel, a steel I section with modifiers, a cracked drop panel, releases and more on a
+    /// beam, and a spring under a base joint. Their names start with CPM- so the program checks can find them.</summary>
+    public static readonly string[] Shapes = ["CPM-W", "CPM-PIPE", "CPM-ANGLE"];
+
+    private static void Properties(FieldContext ctx, OfflineEtabs modeler)
+    {
+        ctx.Tool("define_material_data", """{"name":"CPM-S355","type":"Steel","grade":"S355","values":{"WEIGHTPERVOLUME":77,"E":210000000,"U":0.3,"FY":355000,"FU":510000}}""",
+            _ => FieldContext.Expect(modeler.Model.Materials.Exists(m => m.Name == "CPM-S355" && m.Type == "Steel"), "CPM-S355 is not a steel in the model"));
+        ctx.Refused("define_material_data", """{"name":"CPM-BAD","type":"Steel","values":{"E":200000000,"FY":355000,"FU":100}}""", "Fu at least Fy", "tool define_material_data says no to Fu below Fy");
+        ctx.Tool("define_frame_shape", """{"name":"CPM-W","shape":"Steel I/Wide Flange","material":"CPM-S355","dims":{"D":0.5,"B":0.2,"TF":0.016,"TW":0.01},"modifiers":{"I3MOD":0.9}}""", null, "tool define_frame_shape, a steel I with a modifier");
+        ctx.Tool("define_frame_shape", """{"name":"CPM-PIPE","shape":"Steel Pipe","material":"CPM-S355","dims":{"D":0.3,"TW":0.01}}""", null, "tool define_frame_shape, a pipe");
+        ctx.Tool("define_frame_shape", """{"name":"CPM-ANGLE","shape":"Steel Angle","material":"CPM-S355","dims":{"D":0.1,"B":0.1,"TF":0.01,"TW":0.01}}""", null, "tool define_frame_shape, an angle");
+        ctx.Refused("define_frame_shape", """{"name":"CPM-BAD","shape":"Steel Pipe","material":"CPM-S355","dims":{"D":0.3}}""", "needs TW", "tool define_frame_shape says no to a missing dimension");
+        var conc = modeler.Model.Materials.FirstOrDefault(m => m.IsConcrete)?.Name ?? "";
+        ctx.Tool("define_shell_type", """{"name":"CPM-DROP","kind":"slab","slab_type":"Drop","modeling":"ShellThick","thickness":0.3,"material":""" + Q(conc) + ""","modifiers":{"M11MOD":0.25,"M22MOD":0.25}}""", null, "tool define_shell_type, a cracked drop panel");
+        ctx.Tool("define_spring", """{"kind":"point","name":"CPM-PS","values":{"UX":1000,"UY":1000,"UZ":50000}}""", null, "tool define_spring, a point spring");
+        ctx.Tool("define_spring", """{"kind":"area","name":"CPM-AS","values":{"U3":20000}}""", null, "tool define_spring, an area spring");
+        ctx.Refused("define_spring", """{"kind":"line","name":"CPM-BAD","values":{"UX":5}}""", "not 'UX'", "tool define_spring says no to a value the kind does not have");
+        var beam = modeler.Model.LineAssigns.FirstOrDefault(x => modeler.Model.Line(x.Label)?.Kind == CsiProMax.Model.LineKind.Beam);
+        if (beam is not null)
+        {
+            var obj = Q(beam.Label + "@" + beam.Story);
+            ctx.Tool("assign_frame_data", """{"objects":[""" + obj + """],"release_i":["M3"],"release_j":["M3"],"angle":0,"cardinal":8,"modifiers":{"I3MOD":0.35,"JMOD":0.01}}""", null, "tool assign_frame_data, pinned ends, top center and cracked");
+            ctx.Refused("assign_frame_data", """{"objects":[""" + obj + """],"release_i":["T"],"release_j":["T"]}""", "unstable", "tool assign_frame_data says no to torsion released at both ends");
+        }
+        var floor = modeler.Model.AreaAssigns.FirstOrDefault(x => modeler.Model.Area(x.Label)?.Kind == CsiProMax.Model.AreaKind.Floor);
+        if (floor is not null) ctx.Tool("assign_shell_data", """{"objects":[""" + Q(floor.Label + "@" + floor.Story) + """],"modifiers":{"M11MOD":0.25,"M22MOD":0.25}}""", null, "tool assign_shell_data, cracked slab modifiers");
+        var support = modeler.Model.PointAssigns.FirstOrDefault(p => p.Restraint is not null);
+        if (support is not null) ctx.Tool("assign_joint_data", """{"objects":[""" + Q(support.Point + "@" + support.Story) + """],"spring":"CPM-PS"}""", null, "tool assign_joint_data, a spring under a support");
+        ctx.Tool("property_definitions", "{}", a =>
+        {
+            FieldContext.Expect(a["frame_sections"]!.AsArray().Count(s => Shapes.Contains(s!["name"]!.GetValue<string>())) == Shapes.Length, "the new sections are not all listed");
+            FieldContext.Expect(a["springs"]!.AsArray().Count >= 2, "the springs are not listed");
+        });
     }
 
     /// <summary>Edit > Model Text: the safety net reads every section, takes a hand-written combination, and refuses text that breaks the model.</summary>

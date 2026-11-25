@@ -165,12 +165,65 @@ public static class S2kWriter
                 ("F1", N(V("FX"))), ("F2", N(V("FY"))), ("F3", N(V("FZ"))), ("M1", N(V("MX"))), ("M2", N(V("MY"))), ("M3", N(V("MZ")))));
         }
 
+        // What Assign > Frame, Shell and Joint set beyond sections: releases, local axes, insertion points, end offsets,
+        // modifiers and springs.
+        var releases = new List<IReadOnlyList<(string, string)>>();
+        var axes = new List<IReadOnlyList<(string, string)>>();
+        var insertion = new List<IReadOnlyList<(string, string)>>();
+        var offsets = new List<IReadOnlyList<(string, string)>>();
+        var frameMods = new List<IReadOnlyList<(string, string)>>();
+        var areaMods = new List<IReadOnlyList<(string, string)>>();
+        var springs = new List<IReadOnlyList<(string, string)>>();
+        var springDefs = PropertyDefs.Springs(m);
+        foreach (var x in m.LineAssigns)
+        {
+            if (!frameNames.TryGetValue((x.Label, x.Story), out var name)) continue;
+            var (ri, rj) = PropertyDefs.ReleasesOf(x);
+            if (ri.Count + rj.Count > 0)
+                releases.Add(Row(("Frame", name), ("PI", YesNo(ri.Contains("P"))), ("V2I", YesNo(ri.Contains("V2"))), ("V3I", YesNo(ri.Contains("V3"))), ("TI", YesNo(ri.Contains("T"))), ("M2I", YesNo(ri.Contains("M2"))), ("M3I", YesNo(ri.Contains("M3"))),
+                    ("PJ", YesNo(rj.Contains("P"))), ("V2J", YesNo(rj.Contains("V2"))), ("V3J", YesNo(rj.Contains("V3"))), ("TJ", YesNo(rj.Contains("T"))), ("M2J", YesNo(rj.Contains("M2"))), ("M3J", YesNo(rj.Contains("M3"))), ("PartialFix", "No")));
+            if (PropertyDefs.Value(x.Extra, "ANG") is { } ang) axes.Add(Row(("Frame", name), ("Angle", ang), ("AdvanceAxes", "No")));
+            if (PropertyDefs.Value(x.Extra, "CARDINALPT") is { } cp && cp != "10")
+                insertion.Add(Row(("Frame", name), ("CardinalPt", Cardinal(cp)), ("Mirror2", "No"), ("Mirror3", "No"), ("StiffTransform", "Yes"), ("XI", "0"), ("YI", "0"), ("ZI", "0"), ("XJ", "0"), ("YJ", "0"), ("ZJ", "0"), ("CoordSys", "Local")));
+            var oi = PropertyDefs.Value(x.Extra, "LENGTHOFFI"); var oj = PropertyDefs.Value(x.Extra, "LENGTHOFFJ"); var rz = PropertyDefs.Value(x.Extra, "RIGIDZONE");
+            if (oi is not null || oj is not null || rz is not null)
+                offsets.Add(Row(("Frame", name), ("LengthType", "User Defined"), ("Offset1", oi ?? "0"), ("Offset2", oj ?? "0"), ("RZ", rz ?? "0"), ("FixedRZ", "No")));
+            var fm = PropertyDefs.Modifiers(x.Extra, PropertyDefs.FrameModifiers);
+            if (fm.Values.Any(v => Math.Abs(v - 1) > 1e-12))
+                frameMods.Add(Row(("Frame", name), ("AMod", N(fm["AMOD"])), ("A2Mod", N(fm["A2MOD"])), ("A3Mod", N(fm["A3MOD"])), ("JMod", N(fm["JMOD"])), ("I2Mod", N(fm["I2MOD"])), ("I3Mod", N(fm["I3MOD"])), ("MMod", N(fm["MMOD"])), ("WMod", N(fm["WMOD"]))));
+            if (PropertyDefs.Value(x.Extra, "SPRINGPROP") is { } sp) notes.Add($"Frame {name} has the line spring {sp}: assign it in SAP2000 (Assign > Frame > Line Springs).");
+        }
+        foreach (var x in m.AreaAssigns)
+        {
+            if (!areaNames.TryGetValue((x.Label, x.Story), out var name)) continue;
+            var am = PropertyDefs.Modifiers(x.Extra, PropertyDefs.ShellModifiers);
+            if (am.Values.Any(v => Math.Abs(v - 1) > 1e-12))
+                areaMods.Add(Row(("Area", name), ("f11", N(am["F11MOD"])), ("f22", N(am["F22MOD"])), ("f12", N(am["F12MOD"])), ("m11", N(am["M11MOD"])), ("m22", N(am["M22MOD"])), ("m12", N(am["M12MOD"])), ("v13", N(am["V13MOD"])), ("v23", N(am["V23MOD"])), ("MMod", N(am["MMOD"])), ("WMod", N(am["WMOD"]))));
+            if (PropertyDefs.Value(x.Extra, "SPRINGPROP") is { } sp) notes.Add($"Area {name} has the area spring {sp}: assign it in SAP2000 (Assign > Area > Area Springs).");
+        }
+        foreach (var pa in m.PointAssigns)
+        {
+            if (PropertyDefs.Value(pa.Extra, "SPRINGPROP") is not { } sp) continue;
+            var story = m.StoryIndex(pa.Story);
+            if (story < 0 || !points.TryGetValue(pa.Point, out var p)) continue;
+            var k = springDefs.Find(d => d.Kind == "point" && d.Name == sp);
+            if (k is null) { notes.Add($"Joint {pa.Point}@{pa.Story} has a spring {sp} that is not defined; left out."); continue; }
+            springs.Add(Row(("Joint", Joint(Physical.At(m, p, story))), ("CoordSys", "GLOBAL"), ("U1", N(k.Values["UX"])), ("U2", N(k.Values["UY"])), ("U3", N(k.Values["UZ"])), ("R1", N(k.Values["RX"])), ("R2", N(k.Values["RY"])), ("R3", N(k.Values["RZ"]))));
+        }
+
         Add(tables, "JOINT COORDINATES", jointRows);
         Add(tables, "CONNECTIVITY - FRAME", connect);
         Add(tables, "CONNECTIVITY - AREA", areaConnect);
         Add(tables, "FRAME SECTION ASSIGNMENTS", frameSections);
         Add(tables, "AREA SECTION ASSIGNMENTS", areaSections);
         Add(tables, "JOINT RESTRAINT ASSIGNMENTS", restraints);
+        Add(tables, "JOINT SPRING ASSIGNMENTS 1 - UNCOUPLED", springs);
+        Add(tables, "FRAME RELEASE ASSIGNMENTS 1 - GENERAL", releases);
+        Add(tables, "FRAME LOCAL AXES ASSIGNMENTS 1 - TYPICAL", axes);
+        Add(tables, "FRAME INSERTION POINT ASSIGNMENTS", insertion);
+        Add(tables, "FRAME OFFSET ALONG LENGTH ASSIGNMENTS", offsets);
+        Add(tables, "FRAME PROPERTY MODIFIERS", frameMods);
+        Add(tables, "AREA STIFFNESS MODIFIERS", areaMods);
 
         if (diaphragms.Count > 0)
         {
@@ -343,7 +396,7 @@ public static class S2kWriter
             Props? p;
             string name;
             if (shape.Contains("rectangular") && d > 0 && b > 0) { name = "Rectangular"; p = Rectangle(d, b); }
-            else if (shape.Contains("circle") && d > 0) { name = "Circle"; p = Circle(d); }
+            else if ((shape.Contains("circle") || shape.Contains("rod")) && d > 0) { name = "Circle"; p = Circle(d); }
             else if (shape.Contains("i/wide flange") && d > 0 && b > 0 && tf > 0 && tw > 0) { name = "I/Wide Flange"; p = ISection(d, b, tf, tw, bb, tfb); }
             else if ((shape.Contains("tube") || shape.Contains("box")) && d > 0 && b > 0 && tf > 0 && tw > 0) { name = "Box/Tube"; p = Tube(d, b, tf, tw); }
             else if (shape.Contains("pipe") && d > 0 && tw > 0) { name = "Pipe"; p = Pipe(d, tw); }
@@ -353,6 +406,7 @@ public static class S2kWriter
                     notes.Add($"Frame section {s.Name} ({s.Shape}) has no plain SAP2000 shape here and was left out: define it in SAP2000 (Define > Section Properties > Frame Sections).");
                 continue;
             }
+            var fm = PropertyDefs.Modifiers(s.Lines, PropertyDefs.FrameModifiers);
             var concrete = m.Materials.Find(x => x.Name == s.Material)?.IsConcrete ?? false;
             var isBeam = m.Passthrough.Find(r => r.Heading == "CONCRETE SECTIONS")?.Lines.Any(l => l.Contains(E2kText.Quote(s.Name)) && l.Contains("\"Beam\"")) ?? false;
             shapes[s.Name] = name;
@@ -363,7 +417,7 @@ public static class S2kWriter
                 ("AS2", N(p.Value.As2)), ("AS3", N(p.Value.As3)), ("S33", N(p.Value.S33)), ("S22", N(p.Value.S22)), ("Z33", N(p.Value.Z33)), ("Z22", N(p.Value.Z22)),
                 ("R33", N(Math.Sqrt(p.Value.I33 / p.Value.A))), ("R22", N(Math.Sqrt(p.Value.I22 / p.Value.A))),
                 ("ConcCol", YesNo(concrete && !isBeam)), ("ConcBeam", YesNo(concrete && isBeam)), ("Color", "Yellow"),
-                ("AMod", "1"), ("A2Mod", "1"), ("A3Mod", "1"), ("JMod", "1"), ("I2Mod", "1"), ("I3Mod", "1"), ("MMod", "1"), ("WMod", "1")));
+                ("AMod", N(fm["AMOD"])), ("A2Mod", N(fm["A2MOD"])), ("A3Mod", N(fm["A3MOD"])), ("JMod", N(fm["JMOD"])), ("I2Mod", N(fm["I2MOD"])), ("I3Mod", N(fm["I3MOD"])), ("MMod", N(fm["MMOD"])), ("WMod", N(fm["WMOD"]))));
         }
         Add(tables, "FRAME SECTION PROPERTIES 01 - GENERAL", rows);
         return shapes;
@@ -386,9 +440,10 @@ public static class S2kWriter
                 "membrane" => "Membrane", "shellthick" => "Shell-Thick", "layered" => "Shell-Thin", _ => "Shell-Thin",
             };
             names.Add(s.Name);
+            var sm = PropertyDefs.Modifiers(s.Lines, PropertyDefs.ShellModifiers);
             rows.Add(Row(("Section", s.Name), ("Material", s.Material), ("MatAngle", "0"), ("AreaType", "Shell"), ("Type", modelling), ("DrillDOF", "Yes"),
                 ("Thickness", N(t)), ("BendThick", N(t)), ("Color", s.IsWall ? "Red" : "Cyan"),
-                ("F11Mod", "1"), ("F22Mod", "1"), ("F12Mod", "1"), ("M11Mod", "1"), ("M22Mod", "1"), ("M12Mod", "1"), ("V13Mod", "1"), ("V23Mod", "1"), ("MMod", "1"), ("WMod", "1")));
+                ("F11Mod", N(sm["F11MOD"])), ("F22Mod", N(sm["F22MOD"])), ("F12Mod", N(sm["F12MOD"])), ("M11Mod", N(sm["M11MOD"])), ("M22Mod", N(sm["M22MOD"])), ("M12Mod", N(sm["M12MOD"])), ("V13Mod", N(sm["V13MOD"])), ("V23Mod", N(sm["V23MOD"])), ("MMod", N(sm["MMOD"])), ("WMod", N(sm["WMOD"]))));
         }
         Add(tables, "AREA SECTION PROPERTIES", rows);
         return names;
@@ -602,6 +657,13 @@ public static class S2kWriter
     public static string Name(string label, string story) => label + "_" + story;
 
     private static long Key(double v) => (long)Math.Round(v / Tol);
+    /// <summary>ETABS's insertion point number as SAP2000 names it.</summary>
+    private static string Cardinal(string number) => number switch
+    {
+        "1" => "1 (Bottom left)", "2" => "2 (Bottom center)", "3" => "3 (Bottom right)", "4" => "4 (Middle left)", "5" => "5 (Middle center)",
+        "6" => "6 (Middle right)", "7" => "7 (Top left)", "8" => "8 (Top center)", "9" => "9 (Top right)", "11" => "11 (Shear center)", _ => "10 (Centroid)",
+    };
+
     private static string N(double v) => CsiTableText.Number(v);
     private static string YesNo(bool v) => v ? "Yes" : "No";
     private static IReadOnlyList<(string, string)> Row(params (string, string)[] pairs) => pairs;
