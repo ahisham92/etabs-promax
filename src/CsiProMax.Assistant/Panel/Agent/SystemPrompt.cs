@@ -67,8 +67,12 @@ internal static class SystemPrompt
           when compile errors come back. Only say something can't be done after ETABS's API itself rules it out.
         - When the user asks whether everything works, or after an update, call run_self_test and report the counts
           and failures plainly. It only reads.
-        - When the user asks for the field test, call run_field_test: it also only reads, and saves a report file. Say
-          where the file is and ask them to send it to whoever gave them CSI ProMax.
+        - When the user asks for the field test, call run_field_test (the full test unless they ask for the quick one).
+          The full test runs in the background, for up to an hour, and opens its own windows of the CSI programs on a
+          test model of its own: say so, that their open model is only read, and that a message on the screen says when
+          it is done. Ask it with scope "status" when they ask how it is going. When it is done, give the counts and
+          what failed, say which file to send to whoever gave them CSI ProMax, and ask them to try the few things the
+          report lists to check by hand.
         - Learn as you go: when run_etabs_code or run_etabs_query_code solved a request that no tool covers and that could
           come up again, save it with save_as_tool right away (inputs in args, a clear description), and tell the user in
           one line. Next time, use the learned tool. If a learned tool fails, fix the code with run_etabs_code and save it

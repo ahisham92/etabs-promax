@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Text;
 using System.Text.RegularExpressions;
 using CsiProMax.Assistant.Etabs;
@@ -5,80 +6,347 @@ using CsiProMax.Assistant.Etabs;
 namespace CsiProMax.Assistant;
 
 /// <summary>
-/// The field test: what a person runs on a PC that has a licensed CSI program, so the checks that cannot be made
-/// without one are made there. It runs the self test's steps on the open model (reading only, unless changes are asked
-/// for on a scratch model), adds what this PC and this install are like, and saves one report file to send back
-/// (Help > Field test, the run_field_test tool, or CsiProMax --fieldtest).
+/// The field test: what a person runs on a PC that has licensed CSI programs, so that what cannot be checked without
+/// them is checked there, and one report comes back that says what works and what does not.
+///
+/// The quick test reads the open model (the self test's steps and the result checks) and checks this PC and the
+/// install. The full test adds every tool: it builds a model in the Modeler with every Modeler tool, opens a second
+/// window of each CSI program on this PC on that model (a scratch model in the test's own folder), runs every tool and
+/// check of that program there with each change read back, runs CSI ProMax's own features, and closes each window
+/// without saving. The engineer's open model is only ever read.
+///
+/// Help > Field test, the run_field_test tool ("run the field test" in the chat), or CsiProMax --fieldtest [--full].
 /// </summary>
 public static class FieldTest
 {
-    public sealed record Outcome(string File, IReadOnlyList<SelfTest.StepResult> Steps, string Report)
+    /// <summary>The report's part for the open model.</summary>
+    public const string OpenSection = "The open model (reading only)";
+
+    /// <summary>The report's part for the scratch windows when none could be opened.</summary>
+    public const string ScratchSection = "The CSI programs, on scratch models";
+
+    /// <summary>How the field test is run.</summary>
+    public sealed record Options
+    {
+        /// <summary>True: every tool, on scratch models (the full test). False: the open model, reading only.</summary>
+        public bool Full { get; init; }
+
+        /// <summary>The quick test only: also adds test objects to the open model (a scratch model). The full test never changes the open model.</summary>
+        public bool Changes { get; init; }
+
+        /// <summary>Where the person started it: "the Help menu", "the chat", "the command line".</summary>
+        public string StartedFrom { get; init; } = "the chat";
+
+        /// <summary>Where the report goes. Left out: <see cref="FieldTest.Folder"/>.</summary>
+        public string? Folder { get; init; }
+
+        /// <summary>The full test's own folder (the scratch models, the files it makes). Left out: one in %LOCALAPPDATA%\CsiProMax\Field test.</summary>
+        public string? WorkFolder { get; init; }
+
+        public DateTime? At { get; init; }
+
+        /// <summary>For tests: stands in for %LOCALAPPDATA%\Computers and Structures.</summary>
+        public string? SettingsRoot { get; init; }
+
+        /// <summary>The folder CsiProMax.dll is in. Left out: this program's own.</summary>
+        public string? InstallFolder { get; init; }
+
+        /// <summary>The programs to open a scratch window of. Left out: every CSI program on this PC, the open one first.</summary>
+        public IReadOnlyList<CsiProgram>? Programs { get; init; }
+
+        /// <summary>Opens a scratch window (for tests, a stand-in): null when it could not, with its steps in the report.</summary>
+        public Func<CsiProgram, FieldContext, string, IScratchWindow?> StartScratch { get; init; } = ScratchProgram.Start;
+
+        /// <summary>True when a CSI program is behind the scratch windows, so code is run against its API (tests: false).</summary>
+        public bool LiveScratch { get; init; } = true;
+
+        /// <summary>Told each step's name as it starts.</summary>
+        public Action<string>? Progress { get; init; }
+
+        /// <summary>The most one program's part may take before the test gives up on it and goes on.</summary>
+        public TimeSpan ScratchLimit { get; init; } = TimeSpan.FromMinutes(45);
+    }
+
+    /// <summary>What a field test found, and the files it saved.</summary>
+    /// <param name="File">The report.</param>
+    /// <param name="Zip">The full test's zip beside the report: the report and the small files the test made. The file to send.</param>
+    /// <param name="WorkFolder">The full test's own folder, which can be deleted afterwards.</param>
+    public sealed record Outcome(string File, IReadOnlyList<FieldStep> Steps, string Report, string? Zip = null, string? WorkFolder = null)
     {
         public int Failed => Steps.Count(s => !s.Ok);
+        public int NotTested => Steps.Count(s => s.Skipped);
+        public int Passed => Steps.Count(s => s.Ok && !s.Skipped);
 
-        /// <summary>The result in a few lines, for a dialog: the counts, what did not work, and where the report is.</summary>
+        /// <summary>The file the person sends back: the zip when there is one, else the report.</summary>
+        public string Send => Zip ?? File;
+
+        /// <summary>The result in a few lines, for a dialog: the counts, what did not work, and where the file to send is.</summary>
         public string Summary()
         {
             var bad = Steps.Where(s => !s.Ok).ToList();
+            var counts = Counts(Passed, Failed, NotTested);
             var text = bad.Count == 0
-                ? $"Field test: all {Steps.Count} checks passed."
-                : $"Field test: {Steps.Count - bad.Count} of {Steps.Count} checks passed. Not working:\n" +
+                ? $"Field test: {counts}."
+                : $"Field test: {counts}. Not working:\n" +
                   string.Join("\n", bad.Take(12).Select(s => $"- {s.Name}: {Short(s.Detail, 160)}")) + (bad.Count > 12 ? $"\n- and {bad.Count - 12} more, in the report" : "");
-            return text + "\n\nThe report is saved here. Please send this file to whoever gave you CSI ProMax:\n" + File;
+            return text + "\n\nThe report is saved here. Please send this file to whoever gave you CSI ProMax:\n" + Send;
         }
     }
 
     /// <summary>Documents\CSI ProMax\Bugs\Field tests: beside the bug reports, and taken by Export chats and bugs.</summary>
     public static string Folder => Path.Combine(global::CsiProMax.Bugs.BugLog.Root, "Field tests");
 
-    /// <param name="startedFrom">Where the person started it: "the Help menu", "the chat", "the command line".</param>
-    /// <param name="folder">Where the report goes. Left out: <see cref="Folder"/>.</param>
-    /// <param name="settingsRoot">For tests: stands in for %LOCALAPPDATA%\Computers and Structures.</param>
-    public static Outcome Run(ICsiLink link, bool changes, string startedFrom, string? folder = null, DateTime? at = null, string? settingsRoot = null)
+    private static int _running;
+
+    /// <summary>True while a field test runs (one at a time).</summary>
+    public static bool IsRunning => Volatile.Read(ref _running) == 1;
+
+    /// <summary>The quick test, as before: the open model (reading only unless <paramref name="changes"/>), this PC and the install.</summary>
+    public static Outcome Run(ICsiLink link, bool changes, string startedFrom, string? folder = null, DateTime? at = null, string? settingsRoot = null) =>
+        Run(link, new Options { Changes = changes, StartedFrom = startedFrom, Folder = folder, At = at, SettingsRoot = settingsRoot });
+
+    public static Outcome Run(ICsiLink link, Options o)
     {
-        var now = at ?? DateTime.Now;
-        var steps = SelfTest.Steps(link, changes);
-        var report = Render(link, steps, changes, startedFrom, now, PlugInLists(settingsRoot));
-        var target = folder ?? Folder;
+        if (Interlocked.Exchange(ref _running, 1) == 1) throw new InvalidOperationException("A field test is already running.");
+        try { return RunCore(link, o); }
+        finally { Volatile.Write(ref _running, 0); }
+    }
+
+    /// <summary>A field test that runs in the background (the full one takes a while): what it is at, and its outcome when done.</summary>
+    public sealed class Running
+    {
+        internal Running(bool full, string startedFrom) { Full = full; StartedFrom = startedFrom; }
+        public bool Full { get; }
+        public string StartedFrom { get; }
+        public DateTime Started { get; } = DateTime.Now;
+        public Task<Outcome> Task { get; internal set; } = null!;
+        private volatile string _doing = "starting";
+        private int _steps;
+        public string Doing => _doing;
+        public int StepsSoFar => Volatile.Read(ref _steps);
+        internal void Saw(string step) { _doing = step; Interlocked.Increment(ref _steps); }
+    }
+
+    /// <summary>The last field test started in the background in this session (the chat and the Help menu both see it).</summary>
+    public static Running? Last { get; private set; }
+
+    /// <summary>Starts a field test on its own thread and returns at once. Refused while one runs.</summary>
+    public static Running Start(ICsiLink link, Options o)
+    {
+        if (IsRunning || Last is { Task.IsCompleted: false }) throw new InvalidOperationException("A field test is already running.");
+        var run = new Running(o.Full, o.StartedFrom);
+        var mine = o with { Progress = step => { run.Saw(step); o.Progress?.Invoke(step); } };
+        run.Task = System.Threading.Tasks.Task.Factory.StartNew(() => Run(link, mine), CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        Last = run;
+        return run;
+    }
+
+    private static Outcome RunCore(ICsiLink link, Options o)
+    {
+        var now = o.At ?? DateTime.Now;
+        // The report's folder is fixed first: the test points the bug folder at its own while it checks the bug report.
+        var target = o.Folder ?? Folder;
+        var work = o.WorkFolder ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CsiProMax", "Field test", $"{link.Program.Name} {now:yyyy-MM-dd HHmmss}");
+        if (o.Full) Directory.CreateDirectory(work);
+        var ctx = new FieldContext(link.Program, work, link) { Progress = o.Progress };
+        var plugIns = PlugInLists(o.SettingsRoot);
+
+        PcFieldSteps.Run(ctx, o.InstallFolder ?? AppContext.BaseDirectory, plugIns, o.Full ? [target, work] : [target]);
+
+        ctx.Section(OpenSection);
+        o.Progress?.Invoke("reading the open model");
+        // A model that cannot be read at all is one failure that says so, not one for every read that follows.
+        string? unread = null;
+        try { link.Info(); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { unread = $"{ex.GetType().Name}: {ex.Message}"; }
+        if (unread is null) foreach (var step in SelfTest.Steps(link, o.Changes && !o.Full)) ctx.Record(step);
+        else
+        {
+            ctx.Fail("read the open model", unread + " Nothing of the open model could be read. Open a model in the program, start CSI ProMax from the program's Tools menu, and run the field test again.");
+            ctx.Skip("the checks of the open model", "the open model could not be read (see above)");
+        }
+
+        if (o.Full) Full(ctx, link, o);
+
+        var steps = ctx.Steps.ToList();
+        var report = Render(link, steps, o, now, plugIns, o.Full ? work : null);
         Directory.CreateDirectory(target);
         var file = Path.Combine(target, $"Field test {link.Program.Name} {now:yyyy-MM-dd HHmm}.md");
         if (File.Exists(file)) file = Path.Combine(target, $"Field test {link.Program.Name} {now:yyyy-MM-dd HHmmss}.md");
         File.WriteAllText(file, report, new UTF8Encoding(false));
-        return new Outcome(file, steps, report);
+        return new Outcome(file, steps, report, o.Full ? Pack(file, report, work) : null, o.Full ? work : null);
     }
 
-    internal static string Render(ICsiLink link, IReadOnlyList<SelfTest.StepResult> steps, bool changes, string startedFrom, DateTime now,
-        IReadOnlyList<(string File, string Section)> plugIns)
+    /// <summary>The full test's parts after the open model: the Modeler, a scratch window of each program, CSI ProMax's own features.</summary>
+    private static void Full(FieldContext ctx, ICsiLink link, Options o)
+    {
+        ModelerFieldSteps.Run(ctx);
+
+        var programs = o.Programs ?? Installed(link.Program);
+        if (programs.Count == 0)
+        {
+            ctx.Section(ScratchSection);
+            ctx.Skip("a second window of a CSI program, on a scratch model",
+                "no ETABS, SAP2000 or SAFE was found on this PC, so no tool was run inside a program. Run the field test on a PC that has them.");
+        }
+        var panelDone = false;
+        foreach (var program in programs)
+        {
+            ctx.Section(FieldParts.ScratchSection(program));
+            var file = ctx.Files.GetValueOrDefault(program.Key, "");
+            if (file.Length == 0 || !File.Exists(file))
+            {
+                ctx.Fail($"open {program.Name} on a scratch model", $"the Modeler did not write the file {program.Name} opens (see the Modeler's part), so no {program.Name} window was opened");
+                continue;
+            }
+            IScratchWindow? window = null;
+            var finished = ctx.Within(o.ScratchLimit, $"{program.Name} on a scratch model", () =>
+            {
+                ctx.Program = program;
+                window = o.StartScratch(program, ctx, file);
+                if (window is null) return;
+                ctx.Link = window.Link;
+                try { ScratchSteps(program)(ctx); }
+                catch (Exception ex) when (ex is not (OperationCanceledException or OutOfMemoryException))
+                {
+                    // One call the steps did not expect to fail: said once, with what was not reached because of it.
+                    ctx.Section(FieldParts.ScratchSection(program));
+                    var left = ctx.NotRun;
+                    ctx.Fail($"{program.Name}'s part stopped before its end",
+                        $"{ex.GetType().Name}: {ex.Message} Tools not run because of it: {(left.Count == 0 ? "none" : string.Join(", ", left))}. Where: {Where(ex)}");
+                }
+                if (panelDone) return;
+                panelDone = true;
+                // CSI ProMax's own tools change the model too (code): only while this window still has the test's model.
+                var mine = ctx.Step($"the scratch {program.Name} window still has the scratch model open", () =>
+                {
+                    // By its name without the file type: a save may write the program's other type beside it.
+                    var now = Path.GetFileName(window.Link.Info().File.Replace('\\', '/'));
+                    FieldContext.Expect(string.Equals(Path.GetFileNameWithoutExtension(now), Path.GetFileNameWithoutExtension(window.ModelPath), StringComparison.OrdinalIgnoreCase),
+                        $"it has '{now}' open, not '{Path.GetFileName(window.ModelPath)}', so nothing more is changed through it");
+                    return now;
+                }) is not null;
+                PanelFieldSteps.Run(ctx, window.Link, scratch: mine, live: o.LiveScratch);
+            });
+            // ctx.Link stays on the scratch window: a part that was given up on must never reach the engineer's model.
+            ctx.Section(FieldParts.ScratchSection(program));
+            if (window is { } open)
+            {
+                ScratchProgram.CloseStep(ctx, open, program);
+                // A window that stopped answering is left as it is: letting go of it could wait for ever too.
+                if (finished) open.Dispose();
+            }
+        }
+        if (!panelDone) PanelFieldSteps.Run(ctx, link, scratch: false, live: IsLive(link));
+    }
+
+    /// <summary>The first calls of where an exception came from, for the report: enough to find the step.</summary>
+    private static string Where(Exception ex) =>
+        string.Join(" < ", (ex.StackTrace ?? "").Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).Take(4).Select(l => l.Length > 160 ? l[..160] : l));
+
+    private static Action<FieldContext> ScratchSteps(CsiProgram program) => program.Key switch
+    {
+        "sap2000" => Sap2000.SapFieldSteps.Scratch,
+        "safe" => Safe.SafeFieldSteps.Scratch,
+        _ => EtabsFieldSteps.Scratch,
+    };
+
+    /// <summary>The CSI programs installed on this PC, <paramref name="first"/> first.</summary>
+    internal static IReadOnlyList<CsiProgram> Installed(CsiProgram first) =>
+        CsiProgram.All.Where(p =>
+            {
+                try { return File.Exists(EtabsApi.FindApiFile(p)); }
+                catch (Exception ex) when (ex is not OutOfMemoryException) { return false; }
+            })
+            .OrderBy(p => p.Key == first.Key ? 0 : 1).ToList();
+
+    /// <summary>True when a CSI program is behind the link (not the Modeler, not a model in memory).</summary>
+    internal static bool IsLive(ICsiLink link) => link switch
+    {
+        OfflineEtabs or MemoryEtabs => false,
+        Sap2000.SapLink sap => IsLive(sap.Inner),
+        _ => true,
+    };
+
+    private static string Counts(int passed, int failed, int notTested) =>
+        (failed == 0 ? $"all {passed} checks passed" : $"{passed} checks passed, {failed} did not") +
+        (notTested > 0 ? $", {notTested} not tested" : "");
+
+    /// <summary>What no test can do for the person: they look at these themselves.</summary>
+    internal static readonly string[] ByHand =
+    [
+        "Tools > CSI ProMax is in the menu of each CSI program (ETABS, SAP2000, SAFE), and opens this window on that program's model.",
+        "A message in the chat gets an answer from Claude Code.",
+        "A question the chat asks shows in its Questions tab, and your answer reaches the chat.",
+        "Help > Report a bug: the picture of the screen is in the report.",
+        "The review pack opens in its viewer page (the .html beside the .cpmx) in your browser.",
+        "CSI ProMax > Check for updates finds the newest version.",
+    ];
+
+    internal static string Render(ICsiLink link, IReadOnlyList<FieldStep> steps, Options o, DateTime now,
+        IReadOnlyList<(string File, string Section)> plugIns, string? work)
     {
         var bad = steps.Where(s => !s.Ok).ToList();
+        var skipped = steps.Where(s => s.Skipped).ToList();
         var sb = new StringBuilder();
         sb.AppendLine("# CSI ProMax field test");
         sb.AppendLine();
-        sb.AppendLine("Please send this file to whoever gave you CSI ProMax. It holds the versions on this PC, the plug-in lists of the");
-        sb.AppendLine("CSI programs, and small samples of the open model (names, counts and the first rows of result tables). Read it");
-        sb.AppendLine("before you send it.");
+        if (o.Full)
+        {
+            sb.AppendLine("Please send the zip beside this report (the same name, ending in .zip) to whoever gave you CSI ProMax. The zip");
+            sb.AppendLine("holds this report and the small files the test made on its own test model. This report holds the versions on");
+            sb.AppendLine("this PC, the plug-in lists of the CSI programs, and small samples of the open model (names, counts and the first");
+            sb.AppendLine("rows of result tables). Read it before you send it.");
+        }
+        else
+        {
+            sb.AppendLine("Please send this file to whoever gave you CSI ProMax. It holds the versions on this PC, the plug-in lists of the");
+            sb.AppendLine("CSI programs, and small samples of the open model (names, counts and the first rows of result tables). Read it");
+            sb.AppendLine("before you send it.");
+        }
         sb.AppendLine();
-        sb.AppendLine(bad.Count == 0 ? $"- Result: all {steps.Count} checks passed" : $"- Result: {steps.Count - bad.Count} of {steps.Count} checks passed, {bad.Count} did not");
-        sb.AppendLine($"- Run: {now:yyyy-MM-dd HH:mm}, started from {startedFrom}");
-        sb.AppendLine(changes
-            ? "- Changes to the model: a test column, a slab, the load pattern CPM-TEST, loads and the combination CPM-TEST-COMBO were added; the column and the slab were deleted again"
-            : "- Changes to the model: none (reading only)");
-        sb.AppendLine($"- CSI ProMax: {Update.Updater.CurrentText}, in {AppContext.BaseDirectory}");
+        sb.AppendLine($"- Result: {Counts(steps.Count(s => s.Ok && !s.Skipped), bad.Count, skipped.Count)}");
+        sb.AppendLine(o.Full
+            ? "- Kind: the full test (every tool: the Modeler, a second window of each CSI program on a scratch model, CSI ProMax's own features)"
+            : "- Kind: the quick test (this PC, the install and the open model)");
+        sb.AppendLine($"- Run: {now:yyyy-MM-dd HH:mm}, started from {o.StartedFrom}");
+        sb.AppendLine(o.Full
+            ? "- Changes to the model: none to the open model (reading only). Every change was made on the test's own scratch models, in program windows the test opened and closed itself"
+            : o.Changes
+                ? "- Changes to the model: a test column, a slab, the load pattern CPM-TEST, loads and the combination CPM-TEST-COMBO were added; the column and the slab were deleted again"
+                : "- Changes to the model: none (reading only)");
+        sb.AppendLine($"- CSI ProMax: {Update.Updater.CurrentText}, in {o.InstallFolder ?? AppContext.BaseDirectory}");
         sb.AppendLine("- " + ProgramLine(link));
         // Only the plug-in passes --etabs-pid, so this says whether the Tools menu entry works on this PC.
         sb.AppendLine(Environment.GetCommandLineArgs().Contains("--etabs-pid")
             ? "- Window: opened from the program's Tools menu (the plug-in started it)"
             : "- Window: opened on its own, not from the program's Tools menu");
         sb.AppendLine($"- This PC: {Environment.OSVersion}, .NET {Environment.Version}, started with {Environment.ProcessPath}");
-        var beside = new[] { "CsiProMaxPlugin.dll", "CsiProMaxSafePlugin.dll", "CsiProMaxSapPlugin.dll" };
-        sb.AppendLine("- Plug-in files beside CsiProMax.dll: " + string.Join(", ", beside.Select(f => $"{f} {(File.Exists(Path.Combine(AppContext.BaseDirectory, f)) ? "yes" : "NO")}")));
+        if (work is not null) sb.AppendLine($"- The test's own files (scratch models, the files it made): {work}. The zip beside this report holds the small ones; that folder can be deleted.");
         sb.AppendLine();
 
-        if (bad.Count > 0)
+        // What failed, then what was left out, each under the part of the test it belongs to (a tool has the same name in every program).
+        void Listed(string title, IReadOnlyList<FieldStep> which)
         {
-            sb.AppendLine("## Not working");
+            if (which.Count == 0) return;
+            sb.AppendLine("## " + title);
             sb.AppendLine();
-            foreach (var s in bad) sb.AppendLine($"- {s.Name}: {Short(s.Detail, 400)}");
+            foreach (var part in which.GroupBy(s => s.Section))
+            {
+                if (part.Key.Length > 0) sb.AppendLine(part.Key + ":").AppendLine();
+                foreach (var s in part) sb.AppendLine($"- {s.Name}: {Short(Regex.Replace(s.Detail, "^skipped: ", ""), 400)}");
+                sb.AppendLine();
+            }
+        }
+        Listed("Not working", bad);
+        Listed("Not tested", skipped);
+        if (o.Full)
+        {
+            sb.AppendLine("## Check by hand");
+            sb.AppendLine();
+            sb.AppendLine("No test can do these for you. Please try each one and write in your message which did not work:");
+            sb.AppendLine();
+            foreach (var line in ByHand) sb.AppendLine("- " + line);
             sb.AppendLine();
         }
 
@@ -94,30 +362,89 @@ public static class FieldTest
 
         sb.AppendLine("## Every check");
         sb.AppendLine();
-        foreach (var s in steps)
+        sb.AppendLine("Each part of the test, in the order it ran. Each check has what it found, or why it failed.");
+        sb.AppendLine();
+        foreach (var part in steps.GroupBy(s => s.Section))
         {
-            sb.AppendLine($"### {(s.Ok ? "ok" : "FAIL")}: {s.Name}");
-            sb.AppendLine();
-            Fence(sb, s.Full ?? s.Detail, s.Ok ? "json" : "");
+            if (part.Key.Length > 0)
+            {
+                sb.AppendLine($"## {part.Key}");
+                sb.AppendLine();
+            }
+            foreach (var s in part)
+            {
+                var took = s.Seconds >= 1 ? $" ({s.Seconds:0} s)" : "";
+                sb.AppendLine($"### {(s.Skipped ? "not tested" : s.Ok ? "ok" : "FAIL")}: {s.Name}{took}");
+                sb.AppendLine();
+                Fence(sb, s.Full ?? s.Detail, s.Ok && !s.Skipped ? "json" : "");
+            }
         }
-        return HideModelFolder(sb.ToString(), link);
+        var text = HideFolder(sb.ToString(), ModelFolder(link), "(model folder)");
+        return HideFolder(text, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "%USERPROFILE%");
     }
 
-    /// <summary>
-    /// The report without the folder the model is in, wherever a check's answer names it: the report is sent on, and a
-    /// folder can name a client or a person. The file's own name stays.
-    /// </summary>
-    private static string HideModelFolder(string report, ICsiLink link)
+    /// <summary>The folder the open model is in, "" when it has none.</summary>
+    private static string ModelFolder(ICsiLink link)
     {
         string file;
         try { file = link.Info().File; }
-        catch (Exception ex) when (ex is not OutOfMemoryException) { return report; }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return ""; }
         var cut = Math.Max(file.LastIndexOf('\\'), file.LastIndexOf('/'));
-        if (cut <= 0) return report;
+        return cut <= 0 ? "" : file[..cut];
+    }
+
+    /// <summary>
+    /// The report without a folder, wherever a check's answer names it: the report is sent on, and a folder can name a
+    /// client or a person (the model's folder, the Windows user's own). File names stay.
+    /// </summary>
+    private static string HideFolder(string report, string folder, string instead)
+    {
         // An answer inside an answer is escaped again, so the folder's parts may be one, two or four back-slashes apart.
-        // A model in the root of a drive has no folder worth hiding, and "C:" alone is in other paths too.
-        var parts = file[..cut].Split('\\', '/').Where(p => p.Length > 0).Select(Regex.Escape).ToList();
-        return parts.Count < 2 ? report : Regex.Replace(report, string.Join(@"[\\/]+", parts), "(model folder)", RegexOptions.IgnoreCase);
+        // A folder in the root of a drive has nothing worth hiding, and "C:" alone is in other paths too.
+        var parts = folder.Split('\\', '/').Where(p => p.Length > 0).Select(Regex.Escape).ToList();
+        return parts.Count < 2 ? report : Regex.Replace(report, string.Join(@"[\\/]+", parts), instead.Replace("$", "$$"), RegexOptions.IgnoreCase);
+    }
+
+    /// <summary>File kinds the zip takes from the test's folder: what was written and read, never the programs' model files.</summary>
+    private static readonly HashSet<string> Small = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".md", ".txt", ".log", ".out", ".json", ".csv", ".e2k", ".$et", ".s2k", ".$2k", ".f2k", ".$fk", ".cpm", ".cpmx",
+        ".xlsx", ".docx", ".pptx", ".pdf", ".dxf", ".dwg",
+    };
+
+    private const long MostFile = 3 * 1024 * 1024, MostZip = 25 * 1024 * 1024;
+
+    /// <summary>
+    /// The zip to send: the report, and the small files the test wrote and read back (the files the Modeler wrote for
+    /// each program, the packs, the documents, the programs' messages). Not the scratch models themselves, nothing over
+    /// 3 MB, nothing from the made-up bug report. Null when it could not be written (then the report is sent alone).
+    /// </summary>
+    internal static string? Pack(string reportFile, string report, string work)
+    {
+        var zip = Path.ChangeExtension(reportFile, ".zip");
+        try
+        {
+            if (File.Exists(zip)) File.Delete(zip);
+            using var archive = ZipFile.Open(zip, ZipArchiveMode.Create);
+            using (var writer = new StreamWriter(archive.CreateEntry(Path.GetFileName(reportFile)).Open(), new UTF8Encoding(false))) writer.Write(report);
+            long total = 0;
+            if (!Directory.Exists(work)) return zip;
+            foreach (var path in Directory.EnumerateFiles(work, "*", SearchOption.AllDirectories).OrderBy(p => p, StringComparer.OrdinalIgnoreCase))
+            {
+                var inside = Path.GetRelativePath(work, path).Replace('\\', '/');
+                if (inside.StartsWith("Bugs/", StringComparison.OrdinalIgnoreCase) || !Small.Contains(Path.GetExtension(path))) continue;
+                var size = new FileInfo(path).Length;
+                if (size > MostFile || total + size > MostZip) continue;
+                archive.CreateEntryFromFile(path, "files/" + inside, CompressionLevel.Optimal);
+                total += size;
+            }
+            return zip;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            try { if (File.Exists(zip)) File.Delete(zip); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+            return null;
+        }
     }
 
     private static string ProgramLine(ICsiLink link)

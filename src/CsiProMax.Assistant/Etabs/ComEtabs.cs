@@ -30,6 +30,16 @@ public sealed class ComEtabs : ICsiLink, IDisposable
         _thread.Start();
     }
 
+    private readonly Func<dynamic>? _start;
+    private bool _started;
+
+    /// <summary>
+    /// A link to a window of the program that this link starts for itself (the field test's scratch window): the
+    /// model comes from <paramref name="start"/>, called once on this link's own thread. It never attaches to a
+    /// window the engineer has open, and when its window is gone it says so instead of looking for another.
+    /// </summary>
+    internal ComEtabs(CsiProgram program, Func<dynamic> start) : this(null, program) => _start = start;
+
     public void Dispose() => _work.CompleteAdding();
 
     /// <summary>Runs one piece of work on the ETABS thread and waits for it.</summary>
@@ -61,6 +71,13 @@ public sealed class ComEtabs : ICsiLink, IDisposable
     {
         if (_model is not null) return _model;
         var app = Program.Name;
+        if (_start is not null)
+        {
+            if (_started) throw new EtabsException($"The scratch {app} window is no longer there.");
+            _started = true;
+            _model = _start();
+            return _model!;
+        }
         if (!OperatingSystem.IsWindows()) throw new EtabsException($"{app} runs on Windows only.");
         var apiFile = EtabsApi.FindApiFile(Program, _pid);
         if (!File.Exists(apiFile))

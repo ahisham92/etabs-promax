@@ -1,0 +1,269 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using CsiProMax.Assistant.Etabs;
+using CsiProMax.Assistant.Tools;
+
+namespace CsiProMax.Assistant;
+
+/// <summary>One thing the field test did: the part of the test it belongs to, whether it worked, and the answer.</summary>
+/// <param name="Detail">Short, for a dialog or a list.</param>
+/// <param name="Full">The whole answer when it was longer, for the report.</param>
+/// <param name="Skipped">Left out on purpose; Detail says why. It counts as not tested, not as a failure.</param>
+/// <param name="Seconds">How long it took, for the steps that take a while (starting the program, the analysis).</param>
+public sealed record FieldStep(string Section, string Name, bool Ok, string Detail, string? Full = null, bool Skipped = false, double Seconds = 0);
+
+/// <summary>A check inside a field test step did not hold: the message says what was expected and what was found.</summary>
+public sealed class FieldCheckException(string message) : Exception(message);
+
+/// <summary>
+/// Inside a field test step: the check could not be made here (the way the test reads something back did not work),
+/// which says nothing about the tool under test. The step is listed as not tested, with the reason.
+/// </summary>
+public sealed class FieldSkipException(string why) : Exception(why);
+
+/// <summary>
+/// What the steps of a field test work with: the model they act on, the folder for the files they make, and the list
+/// they add their results to. Each program has its own steps (Field/EtabsFieldSteps, Safe/SafeFieldSteps,
+/// Sap2000/SapFieldSteps); they all record through this, so the report and the count of what was not tested are made
+/// in one place.
+///
+/// The rule that makes the test complete: every tool that is offered (<see cref="Offer"/>) must be run at least once
+/// through <see cref="Tool"/> or <see cref="Refused"/>, and <see cref="Coverage"/> fails naming the ones that were not.
+/// </summary>
+public sealed class FieldContext(CsiProgram program, string folder, ICsiLink link)
+{
+    private static readonly JsonSerializerOptions Options = new() { IncludeFields = true };
+    private const int MostShort = 300, MostFull = 20000;
+
+    private readonly Dictionary<string, Tool> _tools = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _run = new(StringComparer.Ordinal);
+    private readonly object _gate = new();
+    private readonly AsyncLocal<int> _stage = new();
+    private int _stageNow;
+    private string _section = "";
+
+    /// <summary>The CSI program under test now.</summary>
+    public CsiProgram Program { get; set; } = program;
+
+    /// <summary>Where the test puts the files it makes (the scratch model, packs, documents). Made by the runner.</summary>
+    public string Folder { get; } = folder;
+
+    /// <summary>
+    /// The model the steps act on now: the Modeler's model while the scratch model is built, then the scratch model in
+    /// the test's own window of the program. Never the engineer's open model while changes are made.
+    /// </summary>
+    public ICsiLink Link { get; set; } = link;
+
+    /// <summary>The file the Modeler wrote for each program, by the program's key: .e2k for etabs, .s2k for sap2000, .f2k for safe.</summary>
+    public Dictionary<string, string> Files { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The file the Modeler wrote for the program under test ("" when it wrote none), which the program then opens.</summary>
+    public string ModelFile
+    {
+        get => Files.GetValueOrDefault(Program.Key, "");
+        set => Files[Program.Key] = value;
+    }
+
+    /// <summary>Numbers one part of the test leaves for a later part, by name ("sap2000.joints": what the .s2k was written with).</summary>
+    public Dictionary<string, double> Facts { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>What the Modeler's model held when it was written, to compare with what the program read in.</summary>
+    public (int Stories, int Frames, int Areas) Written { get; set; }
+
+    public List<FieldStep> Steps { get; } = [];
+
+    /// <summary>Told each step's name as it starts, so a long run shows where it is. It may throw to stop the run.</summary>
+    public Action<string>? Progress { get; set; }
+
+    /// <summary>Starts a part of the report; the steps that follow belong to it.</summary>
+    public void Section(string title) => _section = title;
+
+    /// <summary>
+    /// Runs one check and records it: ok with what the body gave, or FAIL with why it threw. Gives the body's value
+    /// back (the default when it failed), so later steps can build on it.
+    /// </summary>
+    public T? Step<T>(string name, Func<T> body)
+    {
+        StillWanted();
+        lock (_gate) _doing = name;
+        Progress?.Invoke(name);
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var value = body();
+            Add(name, true, Text(value), clock.Elapsed.TotalSeconds);
+            return value;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (FieldSkipException ex)
+        {
+            lock (_gate) Steps.Add(new FieldStep(_section, name, true, "skipped: " + ex.Message, null, true));
+            return default;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            var real = ex is System.Reflection.TargetInvocationException { InnerException: { } inner } ? inner : ex;
+            Add(name, false, $"{real.GetType().Name}: {real.Message}", clock.Elapsed.TotalSeconds);
+            return default;
+        }
+    }
+
+    /// <summary>
+    /// Runs a part of the test that talks to a program which may stop answering (a message waiting in its window), and
+    /// gives up on it after <paramref name="most"/>: the part is recorded as failed at the step it was on, the steps it
+    /// would still record are dropped, and the test goes on so the report is always written. False when it gave up.
+    /// </summary>
+    public bool Within(TimeSpan most, string what, Action part)
+    {
+        var mine = Interlocked.Increment(ref _stageNow);
+        var section = _section;
+        var work = Task.Run(() => { _stage.Value = mine; part(); });
+        bool done;
+        try { done = work.Wait(most); }
+        catch (AggregateException ex) when (ex.InnerException is OperationCanceledException stop) { throw new OperationCanceledException(stop.Message); }
+        catch (AggregateException ex)
+        {
+            _section = section;
+            Add(what, false, $"{ex.InnerException?.GetType().Name}: {ex.InnerException?.Message}");
+            return true;
+        }
+        if (done) return true;
+        string last;
+        lock (_gate) { last = _doing; _givenUp.Add(mine); }
+        _section = section;
+        Add(what, false, $"It did not come back within {Span(most)} and was given up on. It was at: {(last.Length > 0 ? last : "its start")}. A message may be waiting in the program's window: look at it, answer it, and run the field test again.");
+        return false;
+    }
+
+    private static string Span(TimeSpan t) => t.TotalMinutes >= 1 ? $"{t.TotalMinutes:0} minutes" : $"{Math.Max(1, t.TotalSeconds):0} seconds";
+
+    /// <summary>Stops a part that was given up on (<see cref="Within"/>) the next time it comes back to record something.</summary>
+    private void StillWanted()
+    {
+        bool gone;
+        lock (_gate) gone = _givenUp.Contains(_stage.Value);
+        if (gone) throw new OperationCanceledException("This part of the field test was given up on.");
+    }
+
+    private readonly HashSet<int> _givenUp = [];
+    private string _doing = "";
+
+    /// <summary>The same for a check that gives nothing back. True when it worked.</summary>
+    public bool Step(string name, Action body) => Step(name, () => { body(); return "done"; }) is not null;
+
+    /// <summary>Records something left out on purpose, with the reason. It is listed as not tested.</summary>
+    public void Skip(string name, string why)
+    {
+        StillWanted();
+        lock (_gate) Steps.Add(new FieldStep(_section, name, true, "skipped: " + why, null, true));
+    }
+
+    /// <summary>
+    /// Records a step the self test made (the open model's part): its answer as it gave it, and "skipped: ..." as not
+    /// tested.
+    /// </summary>
+    public void Record(SelfTest.StepResult step)
+    {
+        StillWanted();
+        var skipped = step.Ok && step.Detail.StartsWith("skipped:", StringComparison.OrdinalIgnoreCase);
+        lock (_gate) Steps.Add(new FieldStep(_section, step.Name, step.Ok, step.Detail, step.Full, skipped));
+    }
+
+    /// <summary>Records something found that is neither a pass nor a failure: a fact for the report.</summary>
+    public void Note(string name, string what) => Add(name, true, what);
+
+    /// <summary>Records a failure found outside a step.</summary>
+    public void Fail(string name, string why) => Add(name, false, why);
+
+    /// <summary>Inside a step: the check that must hold. The message says what was expected and what was found.</summary>
+    public static void Expect(bool condition, string what)
+    {
+        if (!condition) throw new FieldCheckException(what);
+    }
+
+    /// <summary>
+    /// The tools this part of the test must cover. A later tool with the same name replaces an earlier one, as in the
+    /// chat (a program's own get_model_context replaces the shared one).
+    /// </summary>
+    public void Offer(IEnumerable<Tool> tools)
+    {
+        foreach (var tool in tools) _tools[tool.Name] = tool;
+    }
+
+    /// <summary>Forgets the offered tools and which were run: the next part of the test has its own set.</summary>
+    public void ClearTools()
+    {
+        _tools.Clear();
+        _run.Clear();
+    }
+
+    /// <summary>
+    /// Runs a tool by name on <see cref="Link"/> with these arguments, as the chat would, and records it as a step
+    /// named "tool name" (or <paramref name="step"/>). Gives the tool's answer, or null when it failed.
+    /// <paramref name="check"/> looks at the answer and throws (<see cref="Expect"/>) when it is not what it should be.
+    /// </summary>
+    public JsonNode? Tool(string name, string json = "{}", Action<JsonNode>? check = null, string? step = null) =>
+        Step(step ?? "tool " + name, () =>
+        {
+            var answer = Call(name, json);
+            check?.Invoke(answer);
+            return answer;
+        });
+
+    /// <summary>
+    /// Runs a tool that must say no here (the analysis in the Modeler, say) and records it as ok when it refuses with a
+    /// message that holds <paramref name="saying"/>, and as a failure when it goes through or refuses in other words.
+    /// </summary>
+    public void Refused(string name, string json, string saying, string? step = null) =>
+        Step(step ?? $"tool {name} says no", () =>
+        {
+            try { Call(name, json); }
+            catch (Exception ex) when (ex is ToolInputException or EtabsException)
+            {
+                Expect(ex.Message.Contains(saying, StringComparison.OrdinalIgnoreCase), $"it refused, but not with '{saying}': {ex.Message}");
+                return "refused as it should: " + ex.Message;
+            }
+            throw new FieldCheckException("it should have refused, and went through");
+        });
+
+    /// <summary>Runs an offered tool without recording a step, for a step that looks at the outcome itself. It counts as run.</summary>
+    public JsonNode Call(string name, string json)
+    {
+        // A part that was given up on never makes another call: the link may be another model's by now.
+        StillWanted();
+        if (!_tools.TryGetValue(name, out var tool)) throw new FieldCheckException($"There is no tool named {name} here.");
+        _run.Add(name);
+        using var document = JsonDocument.Parse(json);
+        return tool.Run(document.RootElement.Clone(), Link);
+    }
+
+    /// <summary>Counts a tool as covered that was exercised another way (the runner itself, say).</summary>
+    public void Covered(string name) => _run.Add(name);
+
+    /// <summary>The offered tools no step has run yet.</summary>
+    public IReadOnlyList<string> NotRun => _tools.Keys.Where(k => !_run.Contains(k)).OrderBy(k => k, StringComparer.Ordinal).ToList();
+
+    /// <summary>The closing check of a part: every offered tool was run. It fails with the names of the ones that were not.</summary>
+    public void Coverage(string name) =>
+        Step(name, () =>
+        {
+            var missing = NotRun;
+            Expect(missing.Count == 0, $"{missing.Count} of {_tools.Count} tools were not run by the field test: {string.Join(", ", missing)}");
+            return $"all {_tools.Count} tools were run";
+        });
+
+    private void Add(string name, bool ok, string text, double seconds = 0)
+    {
+        var step = new FieldStep(_section, name, ok, text.Length > MostShort ? text[..MostShort] + "..." : text,
+            text.Length <= MostShort ? null : text.Length > MostFull ? text[..MostFull] + "..." : text, false, Math.Round(seconds, 1));
+        lock (_gate) Steps.Add(step);
+    }
+
+    private static string Text(object? value) => value switch
+    {
+        null => "null",
+        string s => s,
+        JsonNode node => node.ToJsonString(),
+        _ => JsonSerializer.Serialize(value, Options),
+    };
+}

@@ -61,7 +61,11 @@ public static class SelfTest
         Step("Frames", () => etabs.Frames().Take(3));
         Step("Areas", () => etabs.Areas().Take(2));
         Step("Points", () => etabs.Points().Take(3));
-        Step("Restraint", () => etabs.Restraint(etabs.Points()[0].Name));
+        // A model with nothing in it yet has no point to read and no frame to select: said so, not counted as broken.
+        void NotHere(string name, string what) => done.Add(new StepResult(name, true, $"skipped: the open model has no {what} yet, so there was nothing to try this on"));
+        bool Any(Func<int> count) { try { return count() > 0; } catch (Exception ex) when (ex is not OutOfMemoryException) { return true; } }
+        if (Any(() => etabs.Points().Count)) Step("Restraint", () => etabs.Restraint(etabs.Points()[0].Name));
+        else NotHere("Restraint", "points");
         Step("Selected", () => etabs.Selected().Take(5));
         Step("FrameSections", () => etabs.FrameSections());
         Step("AreaSections", () => etabs.AreaSections());
@@ -71,7 +75,8 @@ public static class SelfTest
         Step("Combos", () => etabs.Combos());
         Step("Tables", () => etabs.Tables().Count);
         Step("ReadTable", () => { var t = etabs.ReadTable("Story Definitions", null, null); return new { t.Fields, Rows = t.Rows.Take(2) }; });
-        Step("Select", () => { var f = etabs.Frames()[0].Name; etabs.ClearSelection(); etabs.Select("frame", f); var s = etabs.Selected(); etabs.ClearSelection(); return s; });
+        if (Any(() => etabs.Frames().Count)) Step("Select", () => { var f = etabs.Frames()[0].Name; etabs.ClearSelection(); etabs.Select("frame", f); var s = etabs.Selected(); etabs.ClearSelection(); return s; });
+        else NotHere("Select", "frames");
         Step("Tool get_model_context", () => EtabsTools.All.First(t => t.Name == "get_model_context").Run(JsonDocument.Parse("{}").RootElement, etabs).ToJsonString());
         if (etabs.Program.Key == CsiProgram.Etabs.Key)
         {

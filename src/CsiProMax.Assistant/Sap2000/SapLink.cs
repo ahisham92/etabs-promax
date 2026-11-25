@@ -17,6 +17,9 @@ public sealed class SapLink : ICsiLink, IDisposable
 
     public CsiProgram Program => CsiProgram.Sap2000;
 
+    /// <summary>The link that makes the calls.</summary>
+    internal ICsiLink Inner => _inner;
+
     public void Dispose() => (_inner as IDisposable)?.Dispose();
 
     /// <summary>The ETABS link's messages, in SAP2000's words.</summary>
