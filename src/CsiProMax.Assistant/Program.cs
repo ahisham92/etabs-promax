@@ -44,6 +44,7 @@ public static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        DropOwnConsole();
         int? etabsPid = Array.IndexOf(args, "--etabs-pid") is var at and >= 0 && at + 1 < args.Length && int.TryParse(args[at + 1], out var pid) ? pid : null;
         // The CSI program this was started from: named by the plug-in, or told from the process. ETABS when neither says.
         var program = (Array.IndexOf(args, "--program") is var named and >= 0 && named + 1 < args.Length ? CsiProgram.Find(args[named + 1]) : null) ?? CsiProgram.OfProcess(etabsPid);
@@ -94,6 +95,13 @@ public static class Program
             AppDomain.CurrentDomain.UnhandledException += (_, e) => Note("unhandled", e.ExceptionObject as Exception);
             CsiProMax.App.Start(link, etabsPid, demo);
             var window = new CsiProMax.Host.MainWindow();
+            // Started from a shortcut, Windows hands the window the shortcut's "minimised" (meant for dotnet's console):
+            // the window comes up normal and in front.
+            window.ContentRendered += (_, _) =>
+            {
+                if (window.WindowState == System.Windows.WindowState.Minimized) window.WindowState = System.Windows.WindowState.Normal;
+                window.Activate();
+            };
             app.MainWindow = window;
 
             using var life = new CancellationTokenSource();
@@ -152,4 +160,21 @@ public static class Program
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int MessageBoxW(IntPtr owner, string text, string caption, uint type);
+
+    [DllImport("kernel32.dll")]
+    private static extern bool FreeConsole();
+    [DllImport("kernel32.dll")]
+    private static extern uint GetConsoleProcessList(uint[] list, uint count);
+
+    /// <summary>
+    /// Started from a shortcut or by double-click, dotnet opens a console window of its own that stays in the taskbar.
+    /// When this is the only program in that console it is let go, which closes it. A terminal someone started this
+    /// from has other programs in it and is left alone.
+    /// </summary>
+    private static void DropOwnConsole()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        try { if (GetConsoleProcessList(new uint[4], 4) == 1) FreeConsole(); }
+        catch (Exception ex) when (ex is EntryPointNotFoundException or DllNotFoundException) { }
+    }
 }

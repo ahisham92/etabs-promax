@@ -28,7 +28,10 @@ internal static class Shortcuts
     }
 
     /// <summary>What the mark file holds: the program folder the shortcuts were last made for.</summary>
-    internal static bool Due(string? marked, string folder) => !string.Equals(marked?.Trim(), folder, StringComparison.OrdinalIgnoreCase);
+    internal static bool Due(string? marked, string folder) => !string.Equals(marked?.Trim(), folder + Mark2, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Added to the mark when the shortcuts themselves change (2: they have the icon), so they are made again once.</summary>
+    internal const string Mark2 = "|2";
 
     /// <summary>Called at every start, off the window's thread. Never throws: a PC that forbids shortcuts just has none.</summary>
     public static void Ensure()
@@ -42,7 +45,7 @@ internal static class Shortcuts
             if (!first && !Due(File.ReadAllText(Mark), folder)) return;
             Make(onlyExisting: !first);
             Directory.CreateDirectory(Root);
-            File.WriteAllText(Mark, folder);
+            File.WriteAllText(Mark, folder + Mark2);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or COMException or InvalidOperationException or NotSupportedException) { }
     }
@@ -53,8 +56,26 @@ internal static class Shortcuts
         WriteViewerPage();
         var made = Make(onlyExisting: false);
         Directory.CreateDirectory(Root);
-        File.WriteAllText(Mark, AppContext.BaseDirectory);
+        File.WriteAllText(Mark, AppContext.BaseDirectory + Mark2);
         return made;
+    }
+
+    /// <summary>The icon as a file the shortcuts can point at: it is inside the program, so it is written out once.</summary>
+    private static string IconFile()
+    {
+        var file = Path.Combine(Root, "csi-promax.ico");
+        try
+        {
+            using var stream = typeof(Shortcuts).Assembly.GetManifestResourceStream("CsiProMax.csi-promax.ico");
+            if (stream is null) return file;
+            using var memory = new MemoryStream();
+            stream.CopyTo(memory);
+            var bytes = memory.ToArray();
+            Directory.CreateDirectory(Root);
+            if (!File.Exists(file) || new FileInfo(file).Length != bytes.Length) File.WriteAllBytes(file, bytes);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        return file;
     }
 
     private static void WriteViewerPage()
@@ -69,7 +90,7 @@ internal static class Shortcuts
     {
         var dotnet = Environment.ProcessPath ?? throw new InvalidOperationException("This program's own path is not known.");
         var type = Type.GetTypeFromProgID("WScript.Shell") ?? throw new InvalidOperationException("Windows' shortcut maker is not available on this PC.");
-        var icon = Path.Combine(AppContext.BaseDirectory, "csi-promax.ico");
+        var icon = IconFile();
         var made = new List<string>();
         dynamic shell = Activator.CreateInstance(type)!;
         try

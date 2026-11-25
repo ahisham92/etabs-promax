@@ -40,7 +40,7 @@ public static class Pack
         var manifest = new JsonObject
         {
             ["format"] = "cpmx", ["version"] = Version,
-            ["model"] = file.Length > 0 ? Path.GetFileNameWithoutExtension(file) : "Unsaved model",
+            ["model"] = file.Length > 0 ? Path.GetFileNameWithoutExtension(file) : e is OfflineEtabs { Model.Title.Length: > 0 } own ? own.Model.Title : "Unsaved model",
             ["file"] = info.File, ["etabs"] = info.Version, ["program"] = e.Program.Name,
             ["units"] = new JsonObject { ["force"] = info.Force, ["length"] = info.Length, ["temperature"] = info.Temperature },
             ["analysis_run"] = info.Locked,
