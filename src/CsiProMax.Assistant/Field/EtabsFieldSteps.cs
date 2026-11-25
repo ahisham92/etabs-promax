@@ -274,7 +274,8 @@ public static class EtabsFieldSteps
         ctx.Tool("add_load_pattern", """{"name":"CPM-EQX","type":"Seismic","user_coefficient":{"c":0.05,"k":1,"direction":"X"}}""",
             a =>
             {
-                if (a["note"] is not null) throw new FieldSkipException("this ETABS stand-in has no automatic lateral loads");
+                if (a["note"] is not null && a["lateral"] is null && link.LoadPatterns().Any(p => p.Name == "CPM-EQX"))
+                    throw new FieldSkipException("the Seismic pattern is added; its automatic load cannot be set through this ETABS's API: " + a["note"]!.GetValue<string>());
                 FieldContext.Expect(a["lateral"] is not null && link.LoadPatterns().Any(p => p.Name == "CPM-EQX"), "the seismic pattern or its coefficient is not in ETABS: " + a.ToJsonString());
             },
             "tool add_load_pattern, seismic by a user coefficient");

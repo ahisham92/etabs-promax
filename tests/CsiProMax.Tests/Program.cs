@@ -929,6 +929,16 @@ Test("set_section: a frame or area that is not in the model is reported as faile
     var areas = Call(mcp, "set_section", """{"areas":["no such slab"],"section":"S200"}""");
     Check(areas["failed"]!.AsArray().Count == 1, "the missing area is not reported: " + areas.ToJsonString());
 });
+Test("add_load_pattern: a user coefficient the program's API cannot set keeps the Seismic pattern and says how to set it (ETABS 23)", () =>
+{
+    var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Tools", "EtabsTools.cs"));
+    var at = source.IndexOf("private static JsonNode AddPattern(", StringComparison.Ordinal);
+    var body = source.Substring(at, source.IndexOf("private static JsonNode SetLoads(", at, StringComparison.Ordinal) - at);
+    Check(body.Contains("ex is MissingMethodException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException") && body.Contains("Modify Lateral Load"),
+        "a program with no SetUserCoefficient (ETABS 23) still fails add_load_pattern instead of keeping the pattern and saying how to set it");
+    var steps = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Field", "EtabsFieldSteps.cs"));
+    Check(steps.Contains("its automatic load cannot be set through this ETABS's API"), "the field test still fails the seismic step on an ETABS with no user coefficient");
+});
 foreach (var (name, body) in CdtSdkTests.All()) Test(name, body);
 foreach (var (name, body) in KeptPlugInsTests.All()) Test(name, body);
 foreach (var (name, body) in FieldRun048Tests.All()) Test(name, body);

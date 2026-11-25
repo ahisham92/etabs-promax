@@ -495,7 +495,7 @@ public static class EtabsTools
                     bool[] flags = [dir == "X", false, false, dir == "Y", false, false];
                     answer = Convert.ToInt32(m.LoadPatterns.AutoSeismic.SetASCE716(name, ref flags, ecc, 2, 1, 0.0, false, 0.0, 0.0,
                         8.0, 3.0, 5.5, 1.0, 1.0, 0.4, 8.0, 4, 1.0, 1.0));
-                    other = $"ASCE 7-16 ({e.Program.Name}'s API has no user coefficient): direction {dir}, eccentricity {ecc.ToString(System.Globalization.CultureInfo.InvariantCulture)}, R 8, Omega 3, Cd 5.5, Ie 1, Ss 1.0, S1 0.4, TL 8 s, site class D, program period";
+                    other = $"ASCE 7-16 ({e.Program.Name}'s API has no user coefficient): direction {dir}, eccentricity {ecc.ToString(System.Globalization.CultureInfo.InvariantCulture)}, R 8, Omega 3, Cd 5.5, Ie 1, Ss 1.0, S1 0.4, TL 8 s, site class D, program period. For a user coefficient instead (C = {c.ToString(System.Globalization.CultureInfo.InvariantCulture)}, K = {k.ToString(System.Globalization.CultureInfo.InvariantCulture)}): Define > Load Patterns, select {name}, Modify Lateral Load, User Coefficient";
                 }
                 if (answer != 0) throw new EtabsException($"{e.Program.Name} refused the automatic seismic load for {name}.");
                 return null;
