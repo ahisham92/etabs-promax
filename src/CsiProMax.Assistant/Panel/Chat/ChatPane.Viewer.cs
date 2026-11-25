@@ -12,8 +12,6 @@ internal sealed partial class ChatPane
     /// <summary>True once the chat pane was made in this window (never, with the AI chat off).</summary>
     internal static bool Made => _instance is not null;
 
-    /// <summary>The kinds of item the page shows: the messages, the steps, notes and errors (cards stay in this pane).</summary>
-    internal static bool ShownInViewer(string kind) => kind is "user" or "assistant" or "tool" or "note" or "error";
 
     /// <summary>
     /// The open conversation from item <paramref name="after"/> on (that one again, since an answer grows while it is
@@ -38,7 +36,7 @@ internal sealed partial class ChatPane
         for (var i = Math.Clamp(after, 0, count); i < count; i++)
         {
             var item = conv.Items[i];
-            if (!ShownInViewer(item.Kind)) continue;
+            if (!ChatInViewer.Shows(item.Kind)) continue;
             items.Add(new JsonObject
             {
                 ["i"] = i,
@@ -55,4 +53,11 @@ internal sealed partial class ChatPane
         answer["status"] = pane._turn is not null ? pane._status.Text : "";
         return answer;
     }
+}
+
+/// <summary>What of the chat the Viewer page shows (apart from the pane, so it is checked without WPF).</summary>
+internal static class ChatInViewer
+{
+    /// <summary>The kinds of item the page shows: the messages, the steps, notes and errors (cards stay in the pane).</summary>
+    internal static bool Shows(string kind) => kind is "user" or "assistant" or "tool" or "note" or "error";
 }

@@ -68,7 +68,7 @@ static class AiModeTests
                 Check(routed is { } r && JsonNode.Parse(r.Body)?["off"]?.GetValue<bool>() == true, "POST chat reaches the chat address, which follows the window's choice");
             }
             finally { AiMode.Use(true); }
-            Check(CsiProMax.Chat.ChatPane.ShownInViewer("assistant") && CsiProMax.Chat.ChatPane.ShownInViewer("tool") && !CsiProMax.Chat.ChatPane.ShownInViewer("brief") && !CsiProMax.Chat.ChatPane.ShownInViewer("job"),
+            Check(CsiProMax.Chat.ChatInViewer.Shows("assistant") && CsiProMax.Chat.ChatInViewer.Shows("tool") && !CsiProMax.Chat.ChatInViewer.Shows("brief") && !CsiProMax.Chat.ChatInViewer.Shows("job"),
                 "the page shows the messages and steps; cards stay in the window");
         });
 
