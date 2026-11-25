@@ -285,6 +285,7 @@ public static class EtabsFieldSteps
         ctx.Step("a lateral load for the checks: joint forces in X in CPM-EQX", () =>
         {
             if (!link.LoadPatterns().Any(p => p.Name == "CPM-EQX")) throw new FieldSkipException("the seismic pattern was not added");
+            if (!FieldTest.IsLive(link)) throw new FieldSkipException("no CSI program is behind this stand-in, so there is no API to load the joints through");
             var bottom = link.Stories()[0].Elevation;
             var above = link.Points().Where(p => p.Z > bottom + 0.1).Select(p => p.Name).ToList();
             var loaded = Convert.ToInt32(link.Raw("load the seismic pattern", m =>
