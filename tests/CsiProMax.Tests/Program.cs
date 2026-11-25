@@ -598,6 +598,32 @@ Test("licensing: CSI ProMax keys are its own", () =>
     Check(CsiProMax.Licensing.LicenseKey.Prefix.StartsWith("CPM"), "the key prefix");
 });
 
+Test("licensing: keys from Sketch ProMax's one License manager work here when they name CSI ProMax", () =>
+{
+    using var signer = System.Security.Cryptography.ECDsa.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
+    static string B64(byte[] b) => Convert.ToBase64String(b).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+    string Signed(string prefix, string payload) => prefix + B64(System.Text.Encoding.UTF8.GetBytes(payload)) + "." +
+        B64(signer.SignData(System.Text.Encoding.UTF8.GetBytes(payload), System.Security.Cryptography.HashAlgorithmName.SHA256));
+    var machine = "11111111-2222-3333-4444-555555555555";
+    var spm = CsiProMax.Licensing.LicenseKey.SketchPcCode(machine);
+    Check(spm == "SPM-YEX9-X05P-6G8D", "the Sketch ProMax PC code is the same as Sketch ProMax's: " + spm);
+    var today = new DateTime(2026, 11, 25);
+    var all3 = Signed("SPM1.", $"2|ALL30001|{spm}|Test Friend|2026-11-25|-|sketch,csi,plaxis|LIBRARYKEY");
+    var read = CsiProMax.Licensing.LicenseKey.Read(all3, signer);
+    Check(read is { Shared: true, ForCsi: true }, "a key for all three apps reads as shared and for CSI ProMax");
+    Check(CsiProMax.Licensing.LicenseKey.Verify(all3, spm, today, verifier: signer) == CsiProMax.Licensing.LicenseKey.Check.Valid, "it unlocks this PC");
+    Check(CsiProMax.Licensing.LicenseKey.Verify(all3, CsiProMax.Licensing.LicenseKey.PcCode(machine), today, verifier: signer) == CsiProMax.Licensing.LicenseKey.Check.WrongPc,
+        "it is bound to the Sketch ProMax PC code, not the CPM- one");
+    var sketchOnly = Signed("SPM1.", $"1|SKETCH01|{spm}|Test Friend|2026-11-25|-|LIBRARYKEY");
+    Check(CsiProMax.Licensing.LicenseKey.Verify(sketchOnly, spm, today, verifier: signer) == CsiProMax.Licensing.LicenseKey.Check.OtherProgram, "a Sketch-only key isn't for CSI ProMax");
+    var plaxisOnly = Signed("SPM1.", $"2|PLAXIS01|{spm}|Test Friend|2026-11-25|-|plaxis");
+    Check(CsiProMax.Licensing.LicenseKey.Verify(plaxisOnly, spm, today, verifier: signer) == CsiProMax.Licensing.LicenseKey.Check.OtherProgram, "a Plaxis-only key isn't for CSI ProMax");
+    var own = Signed("CPM1.", $"1|CSIOWN01|{CsiProMax.Licensing.LicenseKey.PcCode(machine)}|Test Friend|2026-11-25|-");
+    Check(CsiProMax.Licensing.LicenseKey.Verify(own, CsiProMax.Licensing.LicenseKey.PcCode(machine), today, verifier: signer) == CsiProMax.Licensing.LicenseKey.Check.Valid,
+        "CSI ProMax's own keys still work");
+    Check(CsiProMax.Licensing.LicenseState.Explain(CsiProMax.Licensing.LicenseKey.Check.OtherProgram).Contains("includes CSI ProMax"), "it says what to ask for");
+});
+
 Test("assistant: ETABS's API is called by name, with numbers for its enums", () =>
 {
     dynamic api = new EtabsApi(new ETABSv1.FakeApp(), typeof(ETABSv1.cFakeApp));

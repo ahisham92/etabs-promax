@@ -17,6 +17,15 @@ internal static class LicenseState
     internal static string Folder => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "CsiProMax", "license");
     private static string KeyFile => Path.Combine(Folder, "key.txt");
     private static string ChangesFile => Path.Combine(Folder, "changes.txt");
+    /// <summary>The changes to keys from Sketch ProMax's License manager, published in that repository.</summary>
+    private static string SharedChangesFile => Path.Combine(Folder, "changes-shared.txt");
+    /// <summary>Where Sketch ProMax and Plaxis ProMax keep the key pasted there: a key for every app works here without pasting it again.</summary>
+    private static string[] OtherKeyFiles =>
+    [
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SketchProMax", "license", "key.txt"),
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "PlaxisProMax", "license", "key.txt"),
+    ];
+    internal const string SharedChangesUrl = "https://raw.githubusercontent.com/ahisham92/sketch-promax/main/licenses/changes.txt";
     private static string SigningFile => Path.Combine(Folder, "signing.dat");
     /// <summary>A secret dropped here in plain text is protected into signing.dat the first time the manager opens.</summary>
     private static string PlainSigningFile => Path.Combine(Folder, "signing-secret.txt");
@@ -55,22 +64,33 @@ internal static class LicenseState
     private static Status Evaluate()
     {
         var id = MachineId();
-        var code = LicenseKey.PcCode(id);
-        if (LicenseKey.IsOwner(id)) return new Status(Kind.Owner, code, null, LicenseKey.Check.Valid, null);
-        var key = ReadText(KeyFile);
-        var changes = LicenseChanges.Parse(ReadText(ChangesFile));
-        var license = LicenseKey.Read(key);
-        var check = code.Length == 0 ? LicenseKey.Check.WrongPc : LicenseKey.Verify(license, code, DateTime.Today, changes);
-        var ends = license is null ? null : LicenseKey.EndsOf(license, changes);
-        return new Status(check == LicenseKey.Check.Valid ? Kind.Licensed : Kind.Locked, code, license, check, ends);
+        // The code shown is Sketch ProMax's, which the one License manager makes keys for; CSI ProMax's own keys
+        // (made for its CPM- code) still work.
+        var shown = LicenseKey.SketchPcCode(id);
+        if (LicenseKey.IsOwner(id)) return new Status(Kind.Owner, shown, null, LicenseKey.Check.Valid, null);
+        (LicenseKey.License? License, LicenseKey.Check Check, DateTime? Ends) Try(string? key)
+        {
+            var license = LicenseKey.Read(key);
+            var changes = LicenseChanges.Parse(ReadText(license?.Shared == true ? SharedChangesFile : ChangesFile));
+            var code = license?.Shared == true ? shown : LicenseKey.PcCode(id);
+            var check = code.Length == 0 ? LicenseKey.Check.WrongPc : LicenseKey.Verify(license, code, DateTime.Today, changes);
+            return (license, check, license is null ? null : LicenseKey.EndsOf(license, changes));
+        }
+        var best = Try(ReadText(KeyFile));
+        if (best.Check != LicenseKey.Check.Valid)
+            foreach (var other in OtherKeyFiles)
+                if (ReadText(other) is { } text && Try(text) is { Check: LicenseKey.Check.Valid } found) { best = found; break; }
+        return new Status(best.Check == LicenseKey.Check.Valid ? Kind.Licensed : Kind.Locked, shown, best.License, best.Check, best.Ends);
     }
 
     /// <summary>Checks <paramref name="key"/> for this PC; saves it and unlocks when it is good. Returns the check.</summary>
     public static LicenseKey.Check Activate(string key)
     {
-        var code = Current.PcCode;
-        var changes = LicenseChanges.Parse(ReadText(ChangesFile));
-        var check = LicenseKey.Verify(key, code, DateTime.Today, changes);
+        var license = LicenseKey.Read(key);
+        var id = MachineId();
+        var code = license?.Shared == true ? LicenseKey.SketchPcCode(id) : LicenseKey.PcCode(id);
+        var changes = LicenseChanges.Parse(ReadText(license?.Shared == true ? SharedChangesFile : ChangesFile));
+        var check = LicenseKey.Verify(license, code, DateTime.Today, changes);
         if (check == LicenseKey.Check.Valid)
         {
             Directory.CreateDirectory(Folder);
@@ -86,8 +106,9 @@ internal static class LicenseState
         LicenseKey.Check.Valid => "The key is valid for this PC.",
         LicenseKey.Check.WrongPc => "This key belongs to another PC. Send your PC code (above) to whoever gave you CSI ProMax to get a key for this PC.",
         LicenseKey.Check.Expired => ends is { } e ? $"This key ended on {e:d MMM yyyy}. Ask for a new key." : "This key has ended. Ask for a new key.",
+        LicenseKey.Check.OtherProgram => "This key is for Sketch ProMax or Plaxis ProMax, not CSI ProMax. Ask whoever gave it to you for a key that includes CSI ProMax (your PC code stays the same).",
         LicenseKey.Check.Cancelled => "This key was cancelled. Ask whoever gave you CSI ProMax for a new key.",
-        _ => "That isn't a CSI ProMax key. Paste the whole key, starting with CPM1.",
+        _ => "That isn't a CSI ProMax key. Paste the whole key, starting with SPM1. or CPM1.",
     };
 
     /// <summary>The Windows machine ID (HKLM\SOFTWARE\Microsoft\Cryptography\MachineGuid), or "" when it can't be read.</summary>
@@ -115,14 +136,18 @@ internal static class LicenseState
             System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
 #endif
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
-            using var response = await http.GetAsync(ChangesUrl + "?t=" + DateTime.UtcNow.Ticks, ct).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode) return;
-            var text = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-            if (text.Length > 1_000_000) return;
-            if (text == ReadText(ChangesFile)) return;
-            Directory.CreateDirectory(Folder);
-            SafeFile.Write(ChangesFile, text);
-            Refresh();
+            var changed = false;
+            foreach (var (url, file) in new[] { (ChangesUrl, ChangesFile), (SharedChangesUrl, SharedChangesFile) })
+            {
+                using var response = await http.GetAsync(url + "?t=" + DateTime.UtcNow.Ticks, ct).ConfigureAwait(false);
+                if (!response.IsSuccessStatusCode) continue;
+                var text = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                if (text.Length > 1_000_000 || text == ReadText(file)) continue;
+                Directory.CreateDirectory(Folder);
+                SafeFile.Write(file, text);
+                changed = true;
+            }
+            if (changed) Refresh();
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException or UnauthorizedAccessException) { }
     }
