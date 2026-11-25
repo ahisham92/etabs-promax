@@ -644,6 +644,14 @@ static class TesterBugTests
             var bare = CsiProMax.Chat.PlanUsage.ParseLine("{\"type\":\"rate_limit_event\",\"rate_limit_info\":{\"status\":\"allowed\",\"rateLimitType\":\"seven_day\",\"resetsAt\":" + now.AddDays(3).ToUnixTimeSeconds() + "}}", now)!;
             Equal("Week no figure yet", bare.Meter(now), "no figure");
         });
+        yield return ("ETABS 23 field test: the scratch model is known by its name when the program answers with its working file (.$et)", () =>
+        {
+            Check(ScratchProgram.SameName(@"C:\Users\x\AppData\Local\CsiProMax\Field test\ETABS 1\cpm-field-test-949e09.$et", @"C:/Users/x/AppData/Local/CsiProMax/Field test/ETABS 1/cpm-field-test-949e09.edb"), "the .$et beside the scratch .edb is the scratch model");
+            Check(ScratchProgram.SameName("CPM-FIELD-TEST-949e09.EDB", "cpm-field-test-949e09.edb"), "the same name in other letters");
+            Check(!ScratchProgram.SameName(@"C:\Models\Tower.edb", @"C:\t\cpm-field-test-949e09.edb"), "another model is not the scratch model");
+            Check(!ScratchProgram.SameName(@"C:\t\cpm-field-test-111111.$et", @"C:\t\cpm-field-test-949e09.edb"), "another run's scratch model is not this one's");
+            Check(!ScratchProgram.SameName("", @"C:\t\cpm-field-test-949e09.edb"), "no model open is not the scratch model");
+        });
         yield return ("ETABS 20 tester: the field test tries what Tools > CSI ProMax does in each program, and fails where the plug-in cannot be created", () =>
         {
             // What the check answered on that PC (in its own words), and a PC where all is well.
