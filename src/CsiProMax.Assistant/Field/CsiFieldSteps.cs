@@ -67,6 +67,24 @@ public static class CsiFieldSteps
                 FieldContext.Expect(missing.Count == 0, $"{name} has no {string.Join(", ", missing)} from the Modeler's file; it has {string.Join(", ", have)}");
                 return "all there";
             });
+            ctx.Step($"{name} opened the Modeler's steel, section shapes, modifiers, releases and springs", () =>
+            {
+                var missing = new List<string>();
+                if (!link.Materials().Contains("CPM-S355")) missing.Add("the material CPM-S355");
+                var sections = link.FrameSections().ToHashSet(StringComparer.OrdinalIgnoreCase);
+                missing.AddRange(ModelerFieldSteps.Shapes.Where(x => !sections.Contains(x)).Select(x => "the section " + x));
+                // Each assignment shows as rows in one of the program's own tables (ETABS and SAP2000 name them differently).
+                var tables = link.Tables();
+                foreach (var (what, words) in new[] { ("releases", new[] { "RELEASE" }), ("frame modifiers", new[] { "FRAME", "MODIFIER" }), ("area modifiers", new[] { "AREA", "MODIFIER" }), ("insertion points", new[] { "INSERTION" }), ("joint springs", new[] { "SPRING" }) })
+                {
+                    var found = tables.Where(t => words.All(w => t.Name.Contains(w, StringComparison.OrdinalIgnoreCase)) && t.Name.Contains("ASSIGN", StringComparison.OrdinalIgnoreCase)).ToList();
+                    var rows = 0;
+                    foreach (var t in found) { try { rows += link.ReadTable(t.Key, null, null).Rows.Count; } catch (EtabsException) { } }
+                    if (rows == 0) missing.Add($"{what} (no rows in {(found.Count == 0 ? "any table named like it" : string.Join(", ", found.Select(t => t.Name)))})");
+                }
+                FieldContext.Expect(missing.Count == 0, $"{name} has no {string.Join("; ", missing)} from the Modeler's file");
+                return "all there";
+            });
             if (program.Key == CsiProgram.Sap2000.Key)
                 ctx.Step("SAP2000 knows every table and field the Modeler writes into the .s2k", () =>
                 {
