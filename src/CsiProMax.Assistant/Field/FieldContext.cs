@@ -84,7 +84,7 @@ public sealed class FieldContext(CsiProgram program, string folder, ICsiLink lin
     public T? Step<T>(string name, Func<T> body)
     {
         StillWanted();
-        lock (_gate) _doing = name;
+        lock (_gate) { _doing = name; _moved = DateTime.UtcNow; }
         Progress?.Invoke(name);
         var clock = System.Diagnostics.Stopwatch.StartNew();
         try
@@ -117,8 +117,22 @@ public sealed class FieldContext(CsiProgram program, string folder, ICsiLink lin
         var mine = Interlocked.Increment(ref _stageNow);
         var section = _section;
         var work = Task.Run(() => { _stage.Value = mine; part(); });
+        lock (_gate) _moved = DateTime.UtcNow;
+        var clock = System.Diagnostics.Stopwatch.StartNew();
         bool done;
-        try { done = work.Wait(most); }
+        var quiet = false;
+        try
+        {
+            // Given up on at the part's limit, or sooner when no step has started or ended for Quiet: one call to the
+            // program that never comes back (with nothing on its screen) is not waited on for the whole limit.
+            while (!(done = work.Wait(TimeSpan.FromMilliseconds(Math.Clamp((most - clock.Elapsed).TotalMilliseconds, 1, 5000)))))
+            {
+                if (clock.Elapsed >= most) break;
+                DateTime moved;
+                lock (_gate) moved = _moved;
+                if (DateTime.UtcNow - moved >= Quiet) { quiet = true; break; }
+            }
+        }
         catch (AggregateException ex) when (ex.InnerException is OperationCanceledException stop) { throw new OperationCanceledException(stop.Message); }
         catch (AggregateException ex)
         {
@@ -130,7 +144,8 @@ public sealed class FieldContext(CsiProgram program, string folder, ICsiLink lin
         string last;
         lock (_gate) { last = _doing; _givenUp.Add(mine); }
         _section = section;
-        Add(what, false, $"It did not come back within {Span(most)} and was given up on. It was at: {(last.Length > 0 ? last : "its start")}. A message may be waiting in the program's window: look at it, answer it, and run the field test again.");
+        Add(what, false, (quiet ? $"Nothing moved in it for {Span(Quiet)} (one call to the program did not come back), so it was given up on." : $"It did not come back within {Span(most)} and was given up on.") +
+            $" It was at: {(last.Length > 0 ? last : "its start")}. A message may be waiting in the program's window: look at it, answer it, and run the field test again.");
         return false;
     }
 
@@ -146,6 +161,13 @@ public sealed class FieldContext(CsiProgram program, string folder, ICsiLink lin
 
     private readonly HashSet<int> _givenUp = [];
     private string _doing = "";
+    private DateTime _moved = DateTime.UtcNow;
+
+    /// <summary>
+    /// How long a part may go without a step starting or ending before it is given up on (<see cref="Within"/>). The
+    /// slowest single step of a scratch model (its analysis or design) takes a minute or two.
+    /// </summary>
+    public TimeSpan Quiet { get; set; } = TimeSpan.FromMinutes(10);
 
     /// <summary>The same for a check that gives nothing back. True when it worked.</summary>
     public bool Step(string name, Action body) => Step(name, () => { body(); return "done"; }) is not null;
@@ -296,7 +318,7 @@ public sealed class FieldContext(CsiProgram program, string folder, ICsiLink lin
     {
         var step = new FieldStep(_section, name, ok, text.Length > MostShort ? text[..MostShort] + "..." : text,
             text.Length <= MostShort ? null : text.Length > MostFull ? text[..MostFull] + "..." : text, false, Math.Round(seconds, 1));
-        lock (_gate) Steps.Add(step);
+        lock (_gate) { Steps.Add(step); _moved = DateTime.UtcNow; }
     }
 
     private static string Text(object? value) => Readable.Text(value);
