@@ -22,13 +22,14 @@ public static class ProgramTools
 
     /// <summary>
     /// The model tools the chat is given in this program, each once by its name: the shared tools, then the program's
-    /// own, which take the place of a shared tool of the same name (SAP2000's get_model_context). The chat's registry,
+    /// own, which take the place of a shared tool of the same name (SAP2000's get_model_context). Between them come the
+    /// tools every program has through the same API (CsiTools: the whole API, lateral loads, checkpoints...). The chat's registry,
     /// the self test and the field test all take the tools from here, so what is tested is what the chat is given.
     /// </summary>
     public static IReadOnlyList<Tool> Chat(CsiProgram program)
     {
         var byName = new Dictionary<string, Tool>(StringComparer.Ordinal);
-        foreach (var tool in EtabsTools.All.Concat(For(program))) byName[tool.Name] = tool;
+        foreach (var tool in EtabsTools.All.Concat(CsiTools.For(program)).Concat(For(program))) byName[tool.Name] = tool;
         return [.. byName.Values];
     }
 
@@ -36,7 +37,7 @@ public static class ProgramTools
     public static IReadOnlyList<Tool> Modeler { get; } = [.. Safe.SafeModelerTools.All, .. Sap2000.SapModelerTools.All];
 
     /// <summary>Every program's own tools, for lists that must know them all (which tools always ask first).</summary>
-    public static IEnumerable<Tool> Every => CsiProgram.All.SelectMany(For).Concat(Modeler).DistinctBy(t => t.Name);
+    public static IEnumerable<Tool> Every => CsiProgram.All.SelectMany(For).Concat(CsiTools.Every).Concat(Modeler).DistinctBy(t => t.Name);
 
     /// <summary>The check report a review pack carries: the program's own checks, or the shared ETABS ones.</summary>
     public static JsonNode Report(JsonElement a, ICsiLink e) => e.Program.Key switch
