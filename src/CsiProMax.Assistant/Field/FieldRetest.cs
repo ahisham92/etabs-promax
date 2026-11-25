@@ -28,8 +28,8 @@ public static class FieldRetest
     /// <summary>The source files whose change means a part must be tried again, by the start of their path.</summary>
     private static readonly Dictionary<string, string[]> Sources = new()
     {
-        ["etabs"] = ["Etabs/", "Tools/", "Field/EtabsFieldSteps.cs", "Field/CsiFieldSteps.cs", "Field/ViewerCheck.cs", "Field/GeoProMaxFieldSteps.cs"],
-        ["sap2000"] = ["Sap2000/", "Etabs/", "Tools/", "Field/CsiFieldSteps.cs", "Field/ViewerCheck.cs"],
+        ["etabs"] = ["Etabs/", "Tools/", "Field/ScratchExtras.cs", "Field/EtabsFieldSteps.cs", "Field/CsiFieldSteps.cs", "Field/ViewerCheck.cs", "Field/GeoProMaxFieldSteps.cs"],
+        ["sap2000"] = ["Sap2000/", "Etabs/", "Tools/", "Field/ScratchExtras.cs", "Field/CsiFieldSteps.cs", "Field/ViewerCheck.cs"],
         ["safe"] = ["Safe/", "Etabs/", "Tools/", "Field/CsiFieldSteps.cs", "Field/ViewerCheck.cs", "Field/GeoProMaxFieldSteps.cs"],
         [Panel] = ["Panel/", "Field/PanelFieldSteps.cs"],
     };
