@@ -136,7 +136,7 @@ public static class Updater
         {
             _runningProgress = null;
             Interlocked.Exchange(ref _running, 0);
-            progress.Report(UpdateStage.Failed, $"Another open {Csi.Name} is updating right now. This one follows it when it is done (or after a restart of {Csi.Name}).");
+            progress.Report(UpdateStage.Failed, $"Another open {Csi.Name} is updating right now. This one follows it by itself when it is done.");
             return null;
         }
 
@@ -309,7 +309,8 @@ public static class Updater
             foreach (var asset in assets.EnumerateArray())
             {
                 var name = asset.GetProperty("name").GetString() ?? "";
-                if (!name.StartsWith("CsiProMax-", StringComparison.OrdinalIgnoreCase) || !name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)) continue;
+                // The whole package, by its exact name: a release has other zips too (the changed files).
+                if (!name.Equals($"CsiProMax-{version}.zip", StringComparison.OrdinalIgnoreCase)) continue;
                 // GitHub publishes a "sha256:..." digest for each release file; verify it when present.
                 var digest = asset.TryGetProperty("digest", out var dg) && dg.ValueKind == JsonValueKind.String ? dg.GetString() : null;
                 var sha = digest is not null && digest.StartsWith("sha256:", StringComparison.Ordinal) ? digest.Substring(7) : null;
@@ -371,6 +372,10 @@ public static class Updater
             return target;
         }
         Directory.CreateDirectory(updatesFolder);
+        // Only what changed, when the release says what that is and this PC has the rest (DeltaUpdate); else the whole package.
+        using (var http = CreateClient())
+            if (await DeltaUpdate.TryAsync(http, Repository, release.Version, target, updatesFolder, DeltaSources(), progress, ct).ConfigureAwait(false))
+                return target;
         var zip = Path.Combine(updatesFolder, $"CsiProMax-{release.Version}.zip");
 
         // A complete download from an earlier try is checked rather than fetched again; a damaged one is fetched afresh.
@@ -422,6 +427,10 @@ public static class Updater
         return target;
     }
 
+    /// <summary>Where this PC has CSI ProMax files an update can reuse: the running version first, then the installed folder.</summary>
+    private static IReadOnlyList<string> DeltaSources() =>
+        new[] { AppContext.BaseDirectory, Assistant.ToolsMenu.InstalledIn }.Where(f => !string.IsNullOrEmpty(f) && Directory.Exists(f)).Select(f => f!).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
     /// <summary>
     /// Builds &lt;versions&gt;\&lt;version&gt; from the installed files that are unchanged and downloads only the rest
     /// (<see cref="DeltaUpdate"/>). False when that isn't possible (an older release without a file list, a failed
@@ -456,10 +465,11 @@ public static class Updater
         if (latest is not null) keep.Add(latest + ".partial");
         // Downloads (whole or partial) of any other version are no longer wanted.
         if (Directory.Exists(UpdatesFolder))
-            foreach (var file in Directory.GetFiles(UpdatesFolder, "CsiProMax-*"))
+            foreach (var file in Directory.GetFiles(UpdatesFolder, "CsiProMax-*").Concat(Directory.GetFiles(UpdatesFolder, "changed-*")))
             {
                 var name = Path.GetFileName(file);
                 if (latest is not null && name.StartsWith($"CsiProMax-{latest}.zip", StringComparison.OrdinalIgnoreCase)) continue;
+                if (latest is not null && name.StartsWith(DeltaUpdate.ChangedName(latest), StringComparison.OrdinalIgnoreCase)) continue;
                 TryDelete(() => File.Delete(file));
             }
 

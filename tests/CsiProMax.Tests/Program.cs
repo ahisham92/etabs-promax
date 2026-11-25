@@ -436,6 +436,17 @@ Test("pack: the model, ETABS's tables and the checks go into one file and the Vi
     var html = Pack.ViewerHtml(built.Content);
     Check(html.Contains("\"format\":\"cpmx\"") && html.Contains("CSI ProMax Viewer") && !html.Contains("<script id=\"pack\" type=\"application/json\"></script>"), "the page carries the pack");
     Check(Pack.ViewerHtml().Contains("<script id=\"pack\" type=\"application/json\"></script>"), "the empty page has none");
+    // The Viewer's own screen, in a real browser when this machine has one.
+    if (CsiProMax.Assistant.ViewerCheck.FindBrowser() is not null)
+    {
+        var shots = Path.Combine(Path.GetTempPath(), "cpm-viewer-check");
+        var seen = CsiProMax.Assistant.ViewerCheck.Run(built.Content, shots, "test");
+        Check(seen.NotRun is null, "the browser ran: " + seen.NotRun);
+        if (Environment.GetEnvironmentVariable("CPM_SHOW_VIEWER_CHECK") == "1")
+            foreach (var i in seen.Items) Console.WriteLine($"   {(i.Skipped ? "skip" : i.Ok ? "ok  " : "FAIL")} {i.Name}: {i.Detail}");
+        Check(seen.Items.Count > 10 && seen.Items.All(i => i.Ok || i.Skipped), "the Viewer's screen: " + string.Join("; ", seen.Items.Where(i => !i.Ok && !i.Skipped).Select(i => i.Name + ": " + i.Detail)));
+        Check(seen.Pictures.Count == CsiProMax.Assistant.ViewerCheck.Shots.Length, $"a picture of each view: {seen.Pictures.Count}");
+    }
 
     var folder = Path.Combine(Path.GetTempPath(), "cpm-pack-" + Guid.NewGuid().ToString("N"));
     try
@@ -1396,6 +1407,18 @@ Test("field test: the full test runs every part, closes its window, and leaves t
         Check(failures.Count == 1 && failures[0].Contains("tool run_analysis"), $"{failures.Count} steps failed, and only the analysis should:\n      - " + string.Join("\n      - ", failures));
         Check(outcome.Steps.Any(s => s.Name == "the scratch ETABS window still has the scratch model open" && s.Ok), "the scratch model is checked again before CSI ProMax's own tools change it");
         Check(outcome.Steps.Any(s => s.Name == "tool export_pack with no folder saves beside the model" && s.Ok), "the pack goes beside the scratch model");
+        // The Viewer's screen is part of every program's scratch part: checked where a browser is found, else not tested.
+        var viewer = outcome.Steps.Where(s => s.Section == FieldParts.ScratchSection(CsiProgram.Etabs) && s.Name.StartsWith("Viewer, ", StringComparison.Ordinal)).ToList();
+        var opened = outcome.Steps.Single(s => s.Name == "the Viewer opens on the scratch ETABS model's pack");
+        if (ViewerCheck.FindBrowser() is null) Check(opened.Skipped && viewer.Count == 0, "no browser here: the Viewer is listed as not tested");
+        else
+        {
+            Check(opened is { Ok: true, Skipped: false }, "the Viewer opened: " + opened.Detail);
+            Check(viewer.Any(s => s.Name == "Viewer, the model is drawn" && s.Ok) && viewer.Count(s => s.Name.StartsWith("Viewer, button: ", StringComparison.Ordinal)) > 30, $"the Viewer's buttons are steps of the report: {viewer.Count}");
+            Check(Directory.GetFiles(Path.Combine(root, "work"), "viewer ETABS *.png", SearchOption.AllDirectories).Length == ViewerCheck.Shots.Length, "a picture of each Viewer view is in the test's folder");
+            using var sent = System.IO.Compression.ZipFile.OpenRead(outcome.Zip!);
+            Check(sent.Entries.Count(x => x.Name.StartsWith("viewer ETABS ", StringComparison.Ordinal) && x.Name.EndsWith(".png", StringComparison.Ordinal)) == ViewerCheck.Shots.Length, "the pictures are in the zip to send");
+        }
         Check(outcome.Steps.Count > 200, $"only {outcome.Steps.Count} steps");
         Check(outcome.Steps.Where(s => s.Skipped).All(s => s.Detail.Length > 20), "everything not tested says why");
         Check(outcome.Steps.Any(s => s.Section == PanelFieldSteps.Section && s.Name == "every tool of the panel was run, or is listed as not tested" && s.Ok), "the panel's part ran on the scratch window");

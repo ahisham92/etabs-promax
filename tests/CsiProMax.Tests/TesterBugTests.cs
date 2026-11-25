@@ -441,6 +441,116 @@ static class TesterBugTests
             finally { Updater.BehindProbe = null; }
         });
 
+        yield return ("update button: at the top only while a newer version is out or downloaded, and it names that version", () =>
+        {
+            var now = new Version(0, 4, 6);
+            Equal<string?>(null, CsiProMax.UI.UpdateBadge.TopButton(now, null, null), "nothing known");
+            Equal<string?>(null, CsiProMax.UI.UpdateBadge.TopButton(now, "0.4.6", "0.4.6"), "the newest is running");
+            Equal<string?>(null, CsiProMax.UI.UpdateBadge.TopButton(now, "0.4.5", null), "an older release");
+            Equal<string?>("Update to 0.4.7", CsiProMax.UI.UpdateBadge.TopButton(now, "0.4.7", null), "a newer release that is not downloaded");
+            Equal<string?>("Switch to 0.4.7 now", CsiProMax.UI.UpdateBadge.TopButton(now, "0.4.7", "0.4.7"), "a newer release that is downloaded");
+            Equal<string?>("Update to 0.4.8", CsiProMax.UI.UpdateBadge.TopButton(now, "0.4.8", "0.4.7"), "a release newer than the download");
+            var window = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Panel/Host/MainWindow.cs"));
+            Check(window.Contains("UpdateBadge.TopButton(") && window.Contains("CsiProMax.App.SwitchWhenIdle();"), "the window has no update button that installs and switches");
+        });
+
+        // ---- Ahmed: "no need to download everything let it be just the updated things only" ----
+
+        yield return ("update: only the changed files are downloaded, the rest comes from this PC, and every file is checked", () =>
+        {
+            var root = Path.Combine(Path.GetTempPath(), "cpm-delta-" + Guid.NewGuid().ToString("N"));
+            string Dir(string name) { var d = Path.Combine(root, name); Directory.CreateDirectory(d); return d; }
+            string old = Dir("old"), next = Dir("new"), updates = Dir("updates"), release = Dir("release");
+            try
+            {
+                var big = new byte[300_000];
+                new Random(7).NextBytes(big);
+                foreach (var d in new[] { old, next }) { File.WriteAllBytes(Path.Combine(d, "Library.dll"), big); File.WriteAllText(Path.Combine(d, "check.ps1"), "same"); }
+                File.WriteAllText(Path.Combine(old, "CsiProMax.dll"), "version 1");
+                File.WriteAllText(Path.Combine(next, "CsiProMax.dll"), "version 2");
+                File.WriteAllText(Path.Combine(next, "New.dll"), "added in 2");
+                // The release's own script writes the file list and the changed zip.
+                var script = Path.Combine(SourceText.Root(), "scripts", "changed-files.py");
+                string manifest = Path.Combine(release, "files.json"), changed = Path.Combine(release, DeltaUpdate.ChangedName("9.9.9"));
+                using (var run = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("python3") { ArgumentList = { script, next, old, manifest, changed }, RedirectStandardOutput = true, RedirectStandardError = true })!)
+                {
+                    run.WaitForExit();
+                    Check(run.ExitCode == 0, "scripts/changed-files.py failed: " + run.StandardError.ReadToEnd());
+                }
+                var files = DeltaUpdate.Read(File.ReadAllText(manifest)) ?? throw new Exception("the file list was not read");
+                Equal("CsiProMax.dll, New.dll", string.Join(", ", files.Where(f => f.Changed).Select(f => f.Path).OrderBy(f => f, StringComparer.Ordinal)), "the changed files");
+                Check(new FileInfo(changed).Length < 5000, $"the changed zip holds more than what changed ({new FileInfo(changed).Length} bytes)");
+
+                var asked = new List<string>();
+                using var http = new HttpClient(new Served(url =>
+                {
+                    asked.Add(url);
+                    return url.EndsWith("/files.json", StringComparison.Ordinal) ? File.ReadAllBytes(manifest) : url.EndsWith("/" + DeltaUpdate.ChangedName("9.9.9"), StringComparison.Ordinal) ? File.ReadAllBytes(changed) : null;
+                }));
+                var target = Path.Combine(root, "versions", "9.9.9");
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                Check(DeltaUpdate.TryAsync(http, "o/r", "9.9.9", target, updates, [old], new UpdateProgress(), CancellationToken.None).GetAwaiter().GetResult(), "the update of changed files only did not work");
+                Equal("version 2", File.ReadAllText(Path.Combine(target, "CsiProMax.dll")), "the changed file");
+                Equal("added in 2", File.ReadAllText(Path.Combine(target, "New.dll")), "the new file");
+                Check(File.ReadAllBytes(Path.Combine(target, "Library.dll")).AsSpan().SequenceEqual(big), "the unchanged file was not carried over whole");
+                Check(UpdateResume.IsComplete(target), "the new version's folder is not marked complete");
+                Equal(2, asked.Count, "downloads (the file list and the changed zip): " + string.Join(", ", asked));
+
+                // A PC that lacks a file the changed zip does not hold: the whole package is taken instead, and nothing is left behind.
+                var bare = Dir("bare");
+                var second = Path.Combine(root, "versions", "9.9.8");
+                Check(!DeltaUpdate.TryAsync(http, "o/r", "9.9.9", second, updates, [bare], new UpdateProgress(), CancellationToken.None).GetAwaiter().GetResult(), "an update was built without the files it needs");
+                Check(!Directory.Exists(second) && !Directory.Exists(second + ".delta"), "a half-built version folder was left behind");
+
+                // A file on this PC that is not what the release lists is never trusted: it is downloaded, or the update falls back.
+                File.WriteAllText(Path.Combine(old, "Library.dll"), "damaged");
+                Check(!DeltaUpdate.TryAsync(http, "o/r", "9.9.9", Path.Combine(root, "versions", "9.9.7"), updates, [old], new UpdateProgress(), CancellationToken.None).GetAwaiter().GetResult(), "a damaged local file was used");
+
+                // A release without the list (0.4.7 and older): the whole package, as before.
+                using var none = new HttpClient(new Served(_ => null));
+                Check(!DeltaUpdate.TryAsync(none, "o/r", "9.9.9", Path.Combine(root, "versions", "9.9.6"), updates, [old], new UpdateProgress(), CancellationToken.None).GetAwaiter().GetResult(), "a release without a file list was not left to the whole package");
+            }
+            finally { try { Directory.Delete(root, true); } catch (IOException) { } }
+        });
+
+        yield return ("update: no update text tells the user to close or restart the CSI program", () =>
+        {
+            // Ahmed: "I need all updates not to close the etabs or safe or sap it should be automatic while they're open".
+            var files = SourceText.Files("src/CsiProMax.Assistant/Panel/Update").ToList();
+            files.AddRange(SourceText.Files("src/CsiProMax.Assistant/Panel/UI").Where(f => Path.GetFileName(f.Path).StartsWith("Update", StringComparison.Ordinal) || f.Path.EndsWith("RestartNote.cs", StringComparison.Ordinal)));
+            var bad = new List<string>();
+            foreach (var (path, text) in files)
+            {
+                var lines = text.Split('\n');
+                for (var i = 0; i < lines.Length; i++)
+                    if (!lines[i].TrimStart().StartsWith("//", StringComparison.Ordinal) && Regex.IsMatch(lines[i], @"(?i)(restart|reopen|close and reopen|restart of|close) \{Csi\.Name\}")) bad.Add($"{path}:{i + 1}");
+            }
+            Check(files.Count > 4, "the update files were not found");
+            Check(bad.Count == 0, "these update texts tell the user to restart or reopen the program: " + string.Join(", ", bad));
+        });
+
+        yield return ("update: looked for within seconds of opening the window, so close and open updates", () =>
+        {
+            Check(CsiProMax.App.UpdateDelay <= TimeSpan.FromSeconds(5), $"the first update check waits {CsiProMax.App.UpdateDelay.TotalSeconds:0} s after the window opens");
+            var app = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Panel/Host/App.cs"));
+            Check(app.IndexOf("Task.Delay(UpdateDelay, stop)", StringComparison.Ordinal) is var first and > 0 && first < app.IndexOf("Task.Delay(BackgroundDelay, stop)", StringComparison.Ordinal), "the update check waits for the other background work again");
+        });
+
+        yield return ("update: the file list refuses paths outside the package, and the changed zip can never be taken for the whole package", () =>
+        {
+            foreach (var bad in new[] { "../x.dll", "/x.dll", "a/../../x.dll", "C:/x.dll", "a\\b.dll", "" })
+                Check(!DeltaUpdate.Safe(bad), $"'{bad}' was accepted as a path inside the package");
+            Check(DeltaUpdate.Safe("CsiProMax.dll") && DeltaUpdate.Safe("runtimes/win-x64/native/a.dll"), "a normal path was refused");
+            var sha = new string('a', 64);
+            Check(DeltaUpdate.Read($$"""{"files":[{"path":"CsiProMax.dll","sha256":"{{sha}}","size":1,"changed":true},{"path":"../evil.dll","sha256":"{{sha}}","size":1,"changed":true}]}""") is null, "a list with a path outside the package was read");
+            Check(DeltaUpdate.Read($$"""{"files":[{"path":"Other.dll","sha256":"{{sha}}","size":1,"changed":true}]}""") is null, "a list without CsiProMax.dll was read");
+            Check(DeltaUpdate.Read("not json") is null, "text that is no list was read");
+            // Versions up to 0.4.7 take the first release file named CsiProMax-*.zip as the whole package.
+            Check(!DeltaUpdate.ChangedName("0.4.8").StartsWith("CsiProMax-", StringComparison.OrdinalIgnoreCase), "an older version would install the changed zip as if it were the whole package");
+            var workflow = File.ReadAllText(Path.Combine(SourceText.Root(), ".github/workflows/release.yml"));
+            Check(workflow.Contains("\"changed-$NAME.zip\" files.json") && !workflow.Contains("-changed.zip"), "the release does not publish the changed zip and the file list under the names the updater asks for");
+        });
+
         yield return ("second SAFE run: a newer version is started with the same arguments, once, and told what to wait for", () =>
         {
             var info = CsiProMax.Assistant.Program.Start("dotnet", "/v/0.4.5", ["--etabs-pid", "7", "--program", "SAFE", "--this-version", "--installed-in", "/old", "--after-pid", "3", "--fieldtest"], 42);
@@ -493,6 +603,47 @@ static class TesterBugTests
             Check(kills.Contains("src/CsiProMax.Assistant/Field/ScratchProgram.cs"), "the rule is not used");
         });
 
+        yield return ("SAP2000 field test: a second full test on the same PC is refused, and each run's scratch model has its own name", () =>
+        {
+            var file = Path.Combine(Path.GetTempPath(), "cpm-lock-" + Guid.NewGuid().ToString("N"), "field-test.lock");
+            using (FieldTest.OnlyOne(file))
+            {
+                try { FieldTest.OnlyOne(file).Dispose(); throw new Exception("a second full field test was let in while one is running"); }
+                catch (InvalidOperationException ex) { Check(ex.Message.Contains("already running on this PC"), ex.Message); }
+            }
+            // The first one ended: the next may start.
+            FieldTest.OnlyOne(file).Dispose();
+            string a = ScratchProgram.ScratchName(), b = ScratchProgram.ScratchName();
+            Check(a != b && a.StartsWith("cpm-field-test-", StringComparison.Ordinal) && a.Length == "cpm-field-test-".Length + 6, $"scratch names: {a}, {b}");
+            // The rules that look for the scratch model by name still know it.
+            Check(ScratchProgram.MayEnd(DateTime.Now, DateTime.Now, [$"SAP2000 26.3.0 Ultimate - {a}"]) && ScratchDialogs.MayClose($"Analysis Complete - {a}"), "the scratch model's own name is not recognised");
+        });
+
+        yield return ("field test: each step's outcome is said as it happens and kept in the work folder, so a run can be followed live", () =>
+        {
+            // Ahmed: "can we work live whenever something is there in field test you can work on it here until the test finish".
+            Equal("FAIL        [SAP2000] tool run_analysis: it never came back", FieldContext.LiveLine(new FieldStep("SAP2000", "tool run_analysis", false, "it never\ncame back")), "a failure's line");
+            Equal("ok          [This PC] the install folder", FieldContext.LiveLine(new FieldStep("This PC", "the install folder", true, "C:/x")), "a passed step's line");
+            Check(FieldContext.LiveLine(new FieldStep("ETABS", "open", true, "skipped: no licence", null, true)).StartsWith("not tested  [ETABS] open: skipped: no licence", StringComparison.Ordinal), "a step left out");
+            var folder = Path.Combine(Path.GetTempPath(), "cpm-live-" + Guid.NewGuid().ToString("N"));
+            var said = new List<string>();
+            var outcome = FieldTest.Run(new MemoryEtabs(), new FieldTest.Options { StartedFrom = "a test", Folder = folder, WorkFolder = Path.Combine(folder, "work"), Outcome = said.Add });
+            Check(said.Count > 10 && said.Count == outcome.Steps.Count, $"{said.Count} outcomes were said for {outcome.Steps.Count} steps");
+            Equal(said.Count, File.ReadAllLines(Path.Combine(folder, "work", FieldContext.LiveFile)).Length, "lines in the work folder's live file");
+        });
+
+        yield return ("usage line: a limit that reset since the last answer is said in words, never a bare 'Week reset'", () =>
+        {
+            var now = DateTimeOffset.FromUnixTimeSeconds(1795620000);
+            var past = now.AddHours(-3).ToUnixTimeSeconds();
+            var old = CsiProMax.Chat.PlanUsage.ParseLine("{\"type\":\"rate_limit_event\",\"rate_limit_info\":{\"status\":\"allowed\",\"rateLimitType\":\"seven_day\",\"resetsAt\":" + past + "}}", now.AddDays(-1))!;
+            Equal(CsiProMax.Chat.PlanUsage.AllReset, old.Meter(now, timeLeft: true, narrow: false), "all reset");
+            Check(!old.Meter(now).Contains("Week reset"), "the line still reads 'Week reset'");
+            var fresh = CsiProMax.Chat.PlanUsage.ParseLine("{\"type\":\"rate_limit_event\",\"rate_limit_info\":{\"status\":\"allowed\",\"rateLimitType\":\"five_hour\",\"resetsAt\":" + now.AddHours(2).ToUnixTimeSeconds() + ",\"unifiedWindows\":{\"five_hour\":{\"utilization\":0.43,\"resetsAt\":" + now.AddHours(2).ToUnixTimeSeconds() + "},\"seven_day\":{\"utilization\":0.05,\"resetsAt\":" + now.AddDays(3).ToUnixTimeSeconds() + "}}}}", now)!;
+            Equal("5h 43%, 2h 0m left · Week 5%", CsiProMax.Chat.PlanUsage.Merge(old, fresh).Meter(now), "fresh figures");
+            var bare = CsiProMax.Chat.PlanUsage.ParseLine("{\"type\":\"rate_limit_event\",\"rate_limit_info\":{\"status\":\"allowed\",\"rateLimitType\":\"seven_day\",\"resetsAt\":" + now.AddDays(3).ToUnixTimeSeconds() + "}}", now)!;
+            Equal("Week no figure yet", bare.Meter(now), "no figure");
+        });
         yield return ("ETABS 20 tester: the field test tries what Tools > CSI ProMax does in each program, and fails where the plug-in cannot be created", () =>
         {
             // What the check answered on that PC (in its own words), and a PC where all is well.
@@ -625,5 +776,15 @@ public sealed class SafeApi
     public sealed class Springs
     {
         public int GetNameList(ref int n, ref string[] names) { names = []; n = 0; return 0; }
+    }
+}
+
+/// <summary>Answers downloads from a function of the address: bytes, or null for "not found".</summary>
+sealed class Served(Func<string, byte[]?> files) : HttpMessageHandler
+{
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+    {
+        var bytes = files(request.RequestUri!.ToString());
+        return Task.FromResult(bytes is null ? new HttpResponseMessage(System.Net.HttpStatusCode.NotFound) : new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) });
     }
 }

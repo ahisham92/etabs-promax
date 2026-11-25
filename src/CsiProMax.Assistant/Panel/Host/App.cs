@@ -148,10 +148,20 @@ public static class App
     /// <summary>How long after start the network work waits, so the window is up first.</summary>
     internal static readonly TimeSpan BackgroundDelay = TimeSpan.FromSeconds(20);
 
+    /// <summary>How soon after the window opens updates are first looked for.</summary>
+    internal static readonly TimeSpan UpdateDelay = TimeSpan.FromSeconds(3);
+
     private static async Task BackgroundStartAsync(ICsiLink link, CancellationToken stop)
     {
         // ETABS's version, for the bug reports and the system prompt: asked off the window's thread.
         try { ETABSYear = link.Info().Version; } catch (Exception) { }
+        // Updates are looked for a moment after the window opens, not after the other background work: a version that
+        // is out is downloaded and switched to while the engineer is still reading the first screen.
+        var updates = Task.Run(async () =>
+        {
+            try { await Task.Delay(UpdateDelay, stop).ConfigureAwait(false); } catch (OperationCanceledException) { return; }
+            await UpdateLoopAsync(stop).ConfigureAwait(false);
+        });
         try { await Task.Delay(BackgroundDelay, stop).ConfigureAwait(false); }
         catch (OperationCanceledException) { return; }
         // Tools > CSI ProMax in every CSI program of this user: added where it is missing (a program that had no
@@ -165,7 +175,7 @@ public static class App
         // The owner's changes to keys given out (a shorter date, a cancelled key), kept for offline days.
         try { await Licensing.LicenseState.RefreshChangesAsync(stop).ConfigureAwait(false); } catch (Exception) { }
         if (stop.IsCancellationRequested) return;
-        await UpdateLoopAsync(stop).ConfigureAwait(false);
+        await updates.ConfigureAwait(false);
     }
 
     /// <summary>How often updates are looked for while the window stays open.</summary>
