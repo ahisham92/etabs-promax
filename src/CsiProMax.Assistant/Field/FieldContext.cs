@@ -96,7 +96,9 @@ public sealed class FieldContext(CsiProgram program, string folder, ICsiLink lin
         catch (OperationCanceledException) { throw; }
         catch (FieldSkipException ex)
         {
-            lock (_gate) Steps.Add(new FieldStep(_section, name, true, "skipped: " + ex.Message, null, true));
+            var left = new FieldStep(_section, name, true, "skipped: " + ex.Message, null, true);
+            lock (_gate) Steps.Add(left);
+            Live(left);
             return default;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
@@ -154,7 +156,9 @@ public sealed class FieldContext(CsiProgram program, string folder, ICsiLink lin
     public void Skip(string name, string why)
     {
         StillWanted();
-        lock (_gate) Steps.Add(new FieldStep(_section, name, true, "skipped: " + why, null, true));
+        var skipped = new FieldStep(_section, name, true, "skipped: " + why, null, true);
+        lock (_gate) Steps.Add(skipped);
+        Live(skipped);
     }
 
     /// <summary>
@@ -165,7 +169,9 @@ public sealed class FieldContext(CsiProgram program, string folder, ICsiLink lin
     {
         StillWanted();
         var skipped = step.Ok && step.Detail.StartsWith("skipped:", StringComparison.OrdinalIgnoreCase);
-        lock (_gate) Steps.Add(new FieldStep(_section, step.Name, step.Ok, step.Detail, step.Full, skipped));
+        var recorded = new FieldStep(_section, step.Name, step.Ok, step.Detail, step.Full, skipped);
+        lock (_gate) Steps.Add(recorded);
+        Live(recorded);
     }
 
     /// <summary>Records something found that is neither a pass nor a failure: a fact for the report.</summary>
@@ -297,6 +303,34 @@ public sealed class FieldContext(CsiProgram program, string folder, ICsiLink lin
         var step = new FieldStep(_section, name, ok, text.Length > MostShort ? text[..MostShort] + "..." : text,
             text.Length <= MostShort ? null : text.Length > MostFull ? text[..MostFull] + "..." : text, false, Math.Round(seconds, 1));
         lock (_gate) Steps.Add(step);
+        Live(step);
+    }
+
+    /// <summary>The file in the work folder each step's outcome is added to as it happens, so a run can be followed (and fixed) before its report exists.</summary>
+    public const string LiveFile = "results so far.txt";
+
+    /// <summary>
+    /// Says a step's outcome as it happens: to whoever follows the run (the console shows "ok" or "FAIL: why"), and
+    /// to <see cref="LiveFile"/> in the work folder. A full run takes up to an hour, and its failures were only known
+    /// when the report was written.
+    /// </summary>
+    private void Live(FieldStep step)
+    {
+        var line = LiveLine(step);
+        try { Outcome?.Invoke(line); } catch (Exception ex) when (ex is not OutOfMemoryException) { /* following the run never stops it */ }
+        try { Directory.CreateDirectory(Folder); lock (_gate) File.AppendAllText(Path.Combine(Folder, LiveFile), $"{DateTime.Now:HH:mm:ss} {line}{Environment.NewLine}"); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException) { }
+    }
+
+    /// <summary>Called with each step's outcome line as it is recorded.</summary>
+    public Action<string>? Outcome { get; set; }
+
+    public static string LiveLine(FieldStep step)
+    {
+        var detail = step.Detail.ReplaceLineEndings(" ");
+        return step.Skipped ? $"not tested  [{step.Section}] {step.Name}: {detail}"
+            : step.Ok ? $"ok          [{step.Section}] {step.Name}"
+            : $"FAIL        [{step.Section}] {step.Name}: {detail}";
     }
 
     private static string Text(object? value) => Readable.Text(value);

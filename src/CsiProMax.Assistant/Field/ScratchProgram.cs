@@ -196,7 +196,8 @@ public sealed class ScratchProgram : IScratchWindow
                 : $"{name} started through {Path.GetFileName(ApiFile)}; its process could not be told apart ({mine.Count} new {name} processes)";
         }) is null) return false;
 
-        var target = Path.Combine(ctx.Folder, "cpm-field-test" + ModelExtension(_program));
+        // A name of this run's own: two tests on one PC (it happened) must never take each other's window for theirs.
+        var target = Path.Combine(ctx.Folder, ScratchName() + ModelExtension(_program));
         if (ctx.Step($"open {Path.GetFileName(modelFile)} in it", () =>
         {
             var answer = Convert.ToInt32(Ask(FileTimeout, "open the file", m => m.File.OpenFile(Path.GetFullPath(modelFile)),
@@ -236,6 +237,9 @@ public sealed class ScratchProgram : IScratchWindow
         else ctx.Skip("reach the scratch window by its process id, as the Tools menu does", "its process could not be told apart from the other windows of the program");
         return true;
     }
+
+    /// <summary>The scratch model's name: "cpm-field-test-" and six characters no other run has.</summary>
+    public static string ScratchName() => "cpm-field-test-" + Guid.NewGuid().ToString("N")[..6];
 
     /// <summary>One call to the scratch window that may never come back (a message waiting in it): then it is left alone.</summary>
     private object? Ask(TimeSpan most, string what, Func<dynamic, object?> work, string late)

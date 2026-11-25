@@ -56,12 +56,16 @@ public static class FieldTest
 
         /// <summary>Opens a scratch window (for tests, a stand-in): null when it could not, with its steps in the report.</summary>
         public Func<CsiProgram, FieldContext, string, IScratchWindow?> StartScratch { get; init; } = ScratchProgram.Start;
+        /// <summary>For the tests: the file that says a full test is running, instead of this PC's own.</summary>
+        public string? LockFile { get; init; }
 
         /// <summary>True when a CSI program is behind the scratch windows, so code is run against its API (tests: false).</summary>
         public bool LiveScratch { get; init; } = true;
 
         /// <summary>Told each step's name as it starts.</summary>
         public Action<string>? Progress { get; init; }
+        /// <summary>Called with each step's outcome as it is recorded: "ok ...", "FAIL ...: why", "not tested ...: why".</summary>
+        public Action<string>? Outcome { get; init; }
 
         /// <summary>The most one program's part may take before the test gives up on it and goes on.</summary>
         public TimeSpan ScratchLimit { get; init; } = TimeSpan.FromMinutes(45);
@@ -108,8 +112,33 @@ public static class FieldTest
     public static Outcome Run(ICsiLink link, Options o)
     {
         if (Interlocked.Exchange(ref _running, 1) == 1) throw new InvalidOperationException("A field test is already running.");
-        try { return RunCore(link, o); }
-        finally { Volatile.Write(ref _running, 0); }
+        FileStream? only = null;
+        try
+        {
+            // One full test at a time on a PC, whoever starts it: two at once opened windows of the same program
+            // seconds apart and worked in each other's (Ahmed's PC, 2026-11-25).
+            if (o.Full) only = OnlyOne(o.LockFile);
+            return RunCore(link, o);
+        }
+        finally { only?.Dispose(); Volatile.Write(ref _running, 0); }
+    }
+
+    /// <summary>The file a full field test holds open while it runs, so a second one on the same PC is refused.</summary>
+    public static string DefaultLockFile => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CsiProMax", "field-test.lock");
+
+    internal static FileStream OnlyOne(string? file)
+    {
+        file ??= DefaultLockFile;
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+            return new FileStream(file, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None, 1, FileOptions.None);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new InvalidOperationException("Another full field test is already running on this PC (from another CSI ProMax window, or from a command line). " +
+                                                "Two at once would work in each other's test windows, so this one was not started. Wait for the other to end, then run it again.");
+        }
     }
 
     /// <summary>A field test that runs in the background (the full one takes a while): what it is at, and its outcome when done.</summary>
@@ -148,7 +177,7 @@ public static class FieldTest
         var target = o.Folder ?? Folder;
         var work = o.WorkFolder ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CsiProMax", "Field test", $"{link.Program.Name} {now:yyyy-MM-dd HHmmss}");
         if (o.Full) Directory.CreateDirectory(work);
-        var ctx = new FieldContext(link.Program, work, link) { Progress = o.Progress };
+        var ctx = new FieldContext(link.Program, work, link) { Progress = o.Progress, Outcome = o.Outcome };
         // Tools > CSI ProMax in each program: put right where it may be, as at every start, then read as it stands.
         IReadOnlyList<ToolsMenu.Entry> menus = [];
         try { menus = ToolsMenu.Repair(o.InstallFolder, o.SettingsRoot); }

@@ -603,6 +603,35 @@ static class TesterBugTests
             Check(kills.Contains("src/CsiProMax.Assistant/Field/ScratchProgram.cs"), "the rule is not used");
         });
 
+        yield return ("SAP2000 field test: a second full test on the same PC is refused, and each run's scratch model has its own name", () =>
+        {
+            var file = Path.Combine(Path.GetTempPath(), "cpm-lock-" + Guid.NewGuid().ToString("N"), "field-test.lock");
+            using (FieldTest.OnlyOne(file))
+            {
+                try { FieldTest.OnlyOne(file).Dispose(); throw new Exception("a second full field test was let in while one is running"); }
+                catch (InvalidOperationException ex) { Check(ex.Message.Contains("already running on this PC"), ex.Message); }
+            }
+            // The first one ended: the next may start.
+            FieldTest.OnlyOne(file).Dispose();
+            string a = ScratchProgram.ScratchName(), b = ScratchProgram.ScratchName();
+            Check(a != b && a.StartsWith("cpm-field-test-", StringComparison.Ordinal) && a.Length == "cpm-field-test-".Length + 6, $"scratch names: {a}, {b}");
+            // The rules that look for the scratch model by name still know it.
+            Check(ScratchProgram.MayEnd(DateTime.Now, DateTime.Now, [$"SAP2000 26.3.0 Ultimate - {a}"]) && ScratchDialogs.MayClose($"Analysis Complete - {a}"), "the scratch model's own name is not recognised");
+        });
+
+        yield return ("field test: each step's outcome is said as it happens and kept in the work folder, so a run can be followed live", () =>
+        {
+            // Ahmed: "can we work live whenever something is there in field test you can work on it here until the test finish".
+            Equal("FAIL        [SAP2000] tool run_analysis: it never came back", FieldContext.LiveLine(new FieldStep("SAP2000", "tool run_analysis", false, "it never\ncame back")), "a failure's line");
+            Equal("ok          [This PC] the install folder", FieldContext.LiveLine(new FieldStep("This PC", "the install folder", true, "C:/x")), "a passed step's line");
+            Check(FieldContext.LiveLine(new FieldStep("ETABS", "open", true, "skipped: no licence", null, true)).StartsWith("not tested  [ETABS] open: skipped: no licence", StringComparison.Ordinal), "a step left out");
+            var folder = Path.Combine(Path.GetTempPath(), "cpm-live-" + Guid.NewGuid().ToString("N"));
+            var said = new List<string>();
+            var outcome = FieldTest.Run(new MemoryEtabs(), new FieldTest.Options { StartedFrom = "a test", Folder = folder, WorkFolder = Path.Combine(folder, "work"), Outcome = said.Add });
+            Check(said.Count > 10 && said.Count == outcome.Steps.Count, $"{said.Count} outcomes were said for {outcome.Steps.Count} steps");
+            Equal(said.Count, File.ReadAllLines(Path.Combine(folder, "work", FieldContext.LiveFile)).Length, "lines in the work folder's live file");
+        });
+
         yield return ("ETABS 20 tester: the field test tries what Tools > CSI ProMax does in each program, and fails where the plug-in cannot be created", () =>
         {
             // What the check answered on that PC (in its own words), and a PC where all is well.

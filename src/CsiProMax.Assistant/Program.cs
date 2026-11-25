@@ -109,7 +109,7 @@ public static class Program
             // --full: every tool, on scratch models in windows of the programs the test opens itself (20 to 60 minutes).
             var link = demo ? new MemoryEtabs() : CsiProMax.Assistant.Tools.ProgramTools.Live(check);
             var outcome = args.Contains("--full")
-                ? FieldTest.Run(link, new FieldTest.Options { Full = true, StartedFrom = "the command line", Progress = step => Console.Error.WriteLine("... " + step) })
+                ? FieldTest.Run(link, new FieldTest.Options { Full = true, StartedFrom = "the command line", Progress = step => Console.Error.WriteLine("... " + step), Outcome = line => Console.Error.WriteLine(line) })
                 : FieldTest.Run(link, args.Contains("--changes"), "the command line");
             Console.WriteLine(outcome.Report);
             Console.WriteLine("Saved: " + outcome.File);
