@@ -915,6 +915,7 @@ Test("plug-in: the assistant is started with the dotnet ETABS runs on", () =>
 foreach (var (name, body) in SafeTests.All()) Test(name, body);
 foreach (var (name, body) in TesterBugTests.All()) Test(name, body);
 foreach (var (name, body) in CdtSdkTests.All()) Test(name, body);
+foreach (var (name, body) in FieldQuietTests.All()) Test(name, body);
 
 var failed = 0;
 // ---- SAP2000 ----
