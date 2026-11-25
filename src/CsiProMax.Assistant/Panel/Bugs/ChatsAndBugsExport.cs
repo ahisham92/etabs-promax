@@ -37,6 +37,8 @@ public sealed class ExportChatsAndBugsTool : IEtabsTool
 internal static class ChatsAndBugsExport
 {
     private const long BugReportsCap = 40_000_000;
+    /// <summary>The newest field test reports an export takes.</summary>
+    private const int MostFieldTests = 20;
 
     public static string Folder => Path.Combine(BugLog.Root, "Exports");
 
@@ -96,6 +98,21 @@ internal static class ChatsAndBugsExport
         try { if (File.Exists(BugLog.LocalLog)) files.Add(("Bug log.md", File.ReadAllBytes(BugLog.LocalLog))); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
 
+        Step("field tests");
+        var fieldTests = 0;
+        try
+        {
+            var folder = CsiProMax.Assistant.FieldTest.Folder;
+            if (Directory.Exists(folder))
+                foreach (var path in Directory.GetFiles(folder, "*.md").OrderByDescending(File.GetLastWriteTime).Take(MostFieldTests))
+                {
+                    if (since is { } from && File.GetLastWriteTime(path) < from) continue;
+                    files.Add(($"field-tests/{Path.GetFileName(path)}", File.ReadAllBytes(path)));
+                    fieldTests++;
+                }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { notes.Add("The field test reports could not be read: " + ex.Message); }
+
         Step("activity log");
         var (activityFiles, calls, failed) = Activity(since);
         files.AddRange(activityFiles);
@@ -119,6 +136,7 @@ internal static class ChatsAndBugsExport
         readme.AppendLine($"| chats/ | {chats.Count} in-ETABS chat(s) updated in the period, one per model, oldest message first, tool calls and errors included |");
         readme.AppendLine($"| bugs/ | {bugCount} bug report zip(s), sent and not sent ({reports.Count(r => unsent.Contains(r.Path))} not in the published log yet); each has report.md, a screenshot, the last tool calls and the assemblies |");
         readme.AppendLine("| Bug log.md | The published bug log with this PC's reports not sent yet |");
+        readme.AppendLine($"| field-tests/ | {fieldTests} field test report(s) made in the period (Help > Field test) |");
         readme.AppendLine($"| activity/ | {calls} tool call(s) in the period, one JSON line each ({failed} did not work) |");
         readme.AppendLine("| assemblies.md | Which copies of the shared libraries are loaded |");
         if (notes.Count > 0)

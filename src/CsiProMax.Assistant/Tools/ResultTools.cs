@@ -129,6 +129,33 @@ public static class ResultTools
         return null;
     }
 
+    /// <summary>The tables the checks read, each with the names it is looked for under (first match wins).</summary>
+    internal static readonly string[][] CheckedTables =
+    [
+        ["Story Drifts"], ["Modal Participating Mass Ratios"], ["Base Reactions"], ["Story Stiffness"],
+        ["Story Max Over Avg Drifts", "Story Max/Avg Drifts"], ["Story Max Over Avg Displacements", "Story Max/Avg Displacements"],
+        ["Mass Summary by Story", "Mass Summary By Story"],
+    ];
+
+    /// <summary>
+    /// For the field test: the table a check would read under these names as ETABS gives it, with its key, its fields
+    /// and its first rows. A name ETABS does not have is an error that lists the tables with a similar name, because
+    /// that is how a wrong name in the checks is found.
+    /// </summary>
+    internal static object Sample(ICsiLink e, params string[] names)
+    {
+        var known = e.Tables();
+        var table = names.Select(n => known.FirstOrDefault(t => Norm(t.Name) == Norm(n) || Norm(t.Key) == Norm(n))).FirstOrDefault(t => t is not null);
+        if (table is null)
+        {
+            var words = names.SelectMany(n => n.Split(' ', '/')).Select(Norm).Where(w => w.Length >= 4).Distinct().ToList();
+            var like = known.Where(t => words.Any(w => Norm(t.Name).Contains(w, StringComparison.Ordinal))).Select(t => t.Name).Take(40).ToList();
+            throw new EtabsException($"There is no table named '{string.Join("' or '", names)}'. Tables with a similar name: {(like.Count > 0 ? string.Join("; ", like) : "none")}.");
+        }
+        var data = e.ReadTable(table.Key, e.LoadCases(), e.Combos());
+        return new { key = table.Key, name = table.Name, empty = table.Empty, fields = data.Fields, rows = data.Rows.Count, first_rows = data.Rows.Take(2).ToList() };
+    }
+
     private static JsonObject Missing(string what, string table) => new()
     {
         ["status"] = "not available",
@@ -168,7 +195,7 @@ public static class ResultTools
         return result;
     }
 
-    private static bool IsResultTable(string name) =>
+    internal static bool IsResultTable(string name) =>
         new[] { "Story Drifts", "Story Max", "Story Stiffness", "Story Forces", "Base Reactions", "Modal", "Joint Displacements", "Joint Reactions", "Diaphragm", "Element Forces", "Centers Of Mass", "Mass Summary", "Pier Forces", "Spandrel Forces" }
             .Any(k => name.Contains(k, StringComparison.OrdinalIgnoreCase));
 

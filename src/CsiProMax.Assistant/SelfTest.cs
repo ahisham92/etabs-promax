@@ -11,13 +11,19 @@ namespace CsiProMax.Assistant;
 /// </summary>
 public static class SelfTest
 {
-    /// <summary>One checked call: its name, whether it worked, and what it gave or why it failed.</summary>
-    public sealed record StepResult(string Name, bool Ok, string Detail);
+    /// <summary>
+    /// One checked call: its name, whether it worked, and what it gave or why it failed. Detail is cut short for a
+    /// dialog; Full is the whole answer when it was longer, for the field test's report.
+    /// </summary>
+    public sealed record StepResult(string Name, bool Ok, string Detail, string? Full = null);
 
     /// <summary>The last run in this session, for the self_test_status tool; null before the first.</summary>
     public static (DateTime At, List<StepResult> Steps)? Last { get; private set; }
 
     public static bool IsRunning { get; private set; }
+
+    /// <summary>The most of one answer the field test's report keeps.</summary>
+    private const int MostFull = 20000;
 
     public static int Run(ICsiLink etabs, bool changes)
     {
@@ -43,12 +49,14 @@ public static class SelfTest
             try
             {
                 var text = JsonSerializer.Serialize(body(), new JsonSerializerOptions { IncludeFields = true });
-                done.Add(new StepResult(name, true, text.Length > 300 ? text[..300] + "..." : text));
+                done.Add(new StepResult(name, true, text.Length > 300 ? text[..300] + "..." : text,
+                    text.Length <= 300 ? null : text.Length > MostFull ? text[..MostFull] + "..." : text));
             }
             catch (Exception ex) { done.Add(new StepResult(name, false, $"{ex.GetType().Name}: {ex.Message}")); }
         }
 
-        Step("Info", () => etabs.Info());
+        // The model's file name without its folder: the report is sent on, and a folder can name a client or a person.
+        Step("Info", () => { var info = etabs.Info(); return info with { File = info.File.Replace('\\', '/').Split('/').Last() }; });
         Step("Stories", () => etabs.Stories());
         Step("Frames", () => etabs.Frames().Take(3));
         Step("Areas", () => etabs.Areas().Take(2));
@@ -65,6 +73,28 @@ public static class SelfTest
         Step("ReadTable", () => { var t = etabs.ReadTable("Story Definitions", null, null); return new { t.Fields, Rows = t.Rows.Take(2) }; });
         Step("Select", () => { var f = etabs.Frames()[0].Name; etabs.ClearSelection(); etabs.Select("frame", f); var s = etabs.Selected(); etabs.ClearSelection(); return s; });
         Step("Tool get_model_context", () => EtabsTools.All.First(t => t.Name == "get_model_context").Run(JsonDocument.Parse("{}").RootElement, etabs).ToJsonString());
+        if (etabs.Program.Key == CsiProgram.Etabs.Key)
+        {
+            // ETABS's result tables and checks. The table and field names the checks look for were written from
+            // ETABS's documentation, so the field test says what a real ETABS calls them: each table the checks read
+            // with its fields and first rows, then every check's own answer.
+            JsonElement none = JsonDocument.Parse("{}").RootElement;
+            string Result(string name) => ResultTools.All.First(t => t.Name == name).Run(none, etabs).ToJsonString();
+            Step("ETABS result and design tables", () => etabs.Tables().Where(t => ResultTools.IsResultTable(t.Name) || ResultTools.IsDesignSummary(t.Name)).Select(t => $"{t.Name}{(t.Empty ? " (empty)" : "")}").ToList());
+            if (etabs.Info().Locked)
+            {
+                foreach (var names in ResultTools.CheckedTables) Step($"ETABS table {names[0]}", () => ResultTools.Sample(etabs, names));
+                foreach (var check in new[] { "results_overview", "check_modal", "check_drift", "check_torsion", "check_story_irregularity", "design_ratios", "check_report" })
+                    Step($"ETABS {check}", () => Result(check));
+            }
+            else done.Add(new StepResult("ETABS results", true, "skipped: the model has not been analysed. Run the analysis (and the design) in ETABS, then run this again for the result checks."));
+            // The review pack from this model, with one load case so a large model stays quick. Nothing is written to disk.
+            Step("ETABS review pack", () =>
+            {
+                var pack = Pack.Build(etabs, [], etabs.LoadCases().Take(1).ToList(), [], null, null, mostRows: 2000);
+                return new { bytes = pack.Zip.Length, frames = pack.Frames, areas = pack.Areas, tables = pack.Tables, notes = pack.Notes };
+            });
+        }
         if (etabs.Program.Key == CsiProgram.Safe.Key)
         {
             // SAFE's own calls and tables: what the SAFE tools lean on.

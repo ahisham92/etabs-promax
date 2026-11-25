@@ -111,6 +111,9 @@ internal sealed class MainWindow : Window
         Add(help, "_Export chats and bugs", ExportChatsAndBugs);
         Add(help, "Open _folders…", () => UserFoldersWindow.Open());
         Add(help, "Self _test", RunSelfTest);
+        help.Items.Add(new Separator());
+        Add(help, "_Field test (saves a report to send)", () => RunFieldTest(false));
+        Add(help, "Field test with _changes (scratch model only)…", () => RunFieldTest(true));
         return menu;
     }
 
@@ -152,6 +155,27 @@ internal sealed class MainWindow : Window
         TaskDialog.Show("CSI ProMax", bad.Count == 0
             ? $"Self test: all {steps.Count} checks passed. CSI ProMax can read the open model. Nothing was changed."
             : $"Self test: {steps.Count - bad.Count} of {steps.Count} checks passed. Not working:\n" + string.Join("\n", bad.Select(s => $"- {s.Name}: {s.Detail}")));
+    }
+
+    /// <summary>
+    /// The field test: the self test's steps and the result checks on the open model, saved as one report file that the
+    /// person sends back. With changes it also adds and deletes test objects, which is asked first: no undo in ETABS.
+    /// </summary>
+    private async void RunFieldTest(bool changes)
+    {
+        if (CsiProMax.App.Etabs is not { } etabs) return;
+        if (CsiProMax.Assistant.SelfTest.IsRunning) { TaskDialog.Show("CSI ProMax", "A test is already running."); return; }
+        if (changes && TaskDialog.Show("CSI ProMax",
+                "This adds a test column, a slab, the load pattern CPM-TEST, loads and the combination CPM-TEST-COMBO to the model that is open now, " +
+                "then deletes the column and the slab again. The load pattern and the combination stay, and there is no undo.\n\n" +
+                "Use it only on a scratch model, never on a project model. Go on?",
+                TaskDialogCommonButtons.Yes | TaskDialogCommonButtons.No, TaskDialogResult.No) != TaskDialogResult.Yes) return;
+        CsiProMax.Assistant.FieldTest.Outcome outcome;
+        try { outcome = await Task.Run(() => CsiProMax.Assistant.FieldTest.Run(etabs.Link, changes, "the Help menu")); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { TaskDialog.Show("CSI ProMax", "The field test could not run: " + ex.Message); return; }
+        TaskDialog.Show("CSI ProMax", outcome.Summary());
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"/select,\"{outcome.File}\"") { UseShellExecute = true })?.Dispose(); }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) { }
     }
 
     /// <summary>Brings the window forward (ETABS's menu was used again while it is open).</summary>

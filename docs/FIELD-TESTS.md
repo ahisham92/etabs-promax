@@ -3,6 +3,53 @@
 Checks that need a licensed CSI program, to run on a PC that has one. Each line says what to do and what should
 happen. Mark each as passed or failed, and note what you saw when it fails.
 
+## Start here (ETABS, SAP2000 and SAFE)
+
+The field test is inside CSI ProMax. It checks what it can by itself and saves one report file to send back.
+
+1. **Install.** With the CSI program closed, paste this line into Windows PowerShell:
+   `irm https://raw.githubusercontent.com/ahisham92/etabs-promax/main/install.ps1 | iex`
+   Expected: it ends with a line per program, such as "ETABS 23  CSI ProMax is added to the Tools menu."
+2. **Tools menu.** Open the program and a model. Expected: Tools > CSI ProMax is there and opens the CSI ProMax window
+   beside the program. If the menu does not show it, add it by hand (the install line prints the plug-in name, menu
+   text and file) and say so: that tells us the automatic entry needs fixing.
+3. **Run the field test.** In the CSI ProMax window either type "run the field test" in the chat, or choose
+   Help > Field test (saves a report to send). It only reads the open model. Run it once on a model that has been
+   analysed and designed, so the result checks have something to read.
+   Expected: a message with the count of checks that passed, and a file
+   `Documents\CSI ProMax\Bugs\Field tests\Field test <program> <date>.md`. Send that file.
+4. **Field test with changes, on a scratch model only.** Open a new or throw-away model, then Help > Field test with
+   changes (scratch model only). It asks first. It adds a test column, a slab, a load pattern, loads and a combination,
+   and deletes the column and slab again. Expected: every check `ok`. Send that report too. Never on a project model.
+5. **One zip instead of single files.** Help > Export chats and bugs makes one zip with the chats, the bug reports
+   and the field test reports of the period. Send it when more than one thing went wrong.
+
+What the report holds: the versions on the PC, the plug-in lists of the CSI programs, every check with its answer, and
+for ETABS the name, fields and first rows of each result table the checks read. The folder of the model is left out.
+Without the window: `dotnet CsiProMax.dll --program etabs --fieldtest` (or `sap2000`, `safe`) prints the same report.
+
+## ETABS (needs ETABS 18 or later, licensed; 23 is the one built against)
+
+After the three steps above, with a scratch model open:
+
+E1. **Chat, model.** Ask: "What is in this model?" Expected: stories, counts of beams, columns, slabs and walls,
+    sections, load patterns and units, in ETABS's words.
+E2. **Chat, a change.** Ask: "Add a 300x600 concrete beam section and put a beam between two columns on Story1."
+    Expected: asked for approval when "ask before changes" is on, then done, and ETABS shows the beam.
+E3. **Chat, what always asks.** Ask to delete that beam, then to run the analysis. Expected: each asks first, every
+    time, because ETABS has no undo.
+E4. **Checks against ETABS's own tables.** After the analysis, ask: "Check the drift against H/500" and "Check the
+    modal mass". Expected: the governing story and load case, pass or fail, and the name of the ETABS table read.
+    Compare one number with Display > Show Tables in ETABS. A check that says "not available" while ETABS shows
+    that table: the field test report already holds the table names, so send it.
+E5. **Check report and review pack.** Ask for the check report, then "export the review pack". Open the Viewer page
+    it names. Expected: the model in 3D, the checks, and the results tables.
+E6. **The window.** Shrink the chat to one line and back, maximise the window, close it and open it again from
+    Tools > CSI ProMax. Expected: the chat of this model is still there (Home > history).
+E7. **Bug report.** Help > Report a bug, write one line. Expected: a zip in `Documents\CSI ProMax\Bugs\Reports`.
+E8. **Update.** Settings > Check for updates now. Expected: "up to date", or a newer version that downloads and is
+    used the next time the window opens.
+
 ## SAFE (needs SAFE 20 or later, licensed)
 
 Install: run the one-line install, or copy the CSI ProMax folder to Documents. The SAFE plug-in is
