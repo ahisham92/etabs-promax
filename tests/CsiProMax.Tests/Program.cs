@@ -1011,6 +1011,14 @@ Test("scratch window: closing may take three minutes (SAP2000 26 took over one)"
     var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Field", "ScratchProgram.cs"));
     Check(source.Contains("Ask(CloseTimeout, \"close the window\""), "closing does not wait for CloseTimeout");
 });
+Test("shortcuts: the Modeler shortcut starts the installed copy, not a copy unpacked to try a version", () =>
+{
+    var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Panel", "Host", "Shortcuts.cs"));
+    Check(source.Contains("CsiProMax.Assistant.ToolsMenu.InstallFolder()"), "the shortcuts do not ask for the installed copy");
+    var make = source.IndexOf("private static List<string> Make(", StringComparison.Ordinal);
+    Check(make > 0 && !source.Substring(make).Contains("AppContext.BaseDirectory"), "the Modeler shortcut still points at the folder this copy runs from");
+    Check(CsiProMax.Host.Shortcuts.ProgramFolder().EndsWith(Path.DirectorySeparatorChar), "the program folder has no closing separator");
+});
 foreach (var (name, body) in CdtSdkTests.All()) Test(name, body);
 foreach (var (name, body) in HandModelTests.All()) Test(name, body);
 foreach (var (name, body) in AiModeTests.All()) Test(name, body);
