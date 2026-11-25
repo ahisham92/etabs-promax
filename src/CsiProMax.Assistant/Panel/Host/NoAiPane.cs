@@ -33,9 +33,9 @@ internal static class NoAiPane
 
         var body = new StackPanel { Margin = new Thickness(18, 16, 18, 16) };
         body.Children.Add(Brand.Text(modeler
-            ? "Build the model by hand in the 3D view, which opens in your browser: Draw, Assign, Define and Edit, and File > Import/Export for the Excel tables. " +
+            ? "Build the model by hand in the 3D view, which opens in a CSI ProMax window of its own: Draw, Assign, Define and Edit, and File > Import/Export for the Excel tables. " +
               $"Save it as a model file that {Csi.Name} opens. Nothing here needs a CSI program, a licence of one, or the internet."
-            : $"Beside {Csi.Name}: see the open model in 3D in your browser, make a review pack for someone who has no {Csi.Name}, or build a model by hand in the Modeler.",
+            : $"Beside {Csi.Name}: see the open model in 3D in a window of its own, make a review pack for someone who has no {Csi.Name}, or build a model by hand in the Modeler.",
             Brand.K.Text, 13));
         var list = new StackPanel { Margin = new Thickness(0, 14, 0, 0) };
         Button Add(string text, Action run, bool primary = false)
@@ -105,8 +105,7 @@ internal static class NoAiPane
         Process.Start(new ProcessStartInfo(CsiProMax.Assistant.Etabs.OfflineEtabs.DefaultFolder) { UseShellExecute = true })?.Dispose();
     }
 
-    private static void OpenViewer() =>
-        Process.Start(new ProcessStartInfo(Shortcuts.WriteViewerPage()) { UseShellExecute = true })?.Dispose();
+    private static void OpenViewer() => WebPages.Open(Shortcuts.WriteViewerPage(), WebPages.Kind.Viewer);
 
     /// <summary>The review pack of the open model, beside the model file, the same as the chat's export_pack; then the Viewer page opens.</summary>
     private static async void MakePack(Button button)
@@ -129,7 +128,7 @@ internal static class NoAiPane
         TaskDialog.Show("CSI ProMax", $"The review pack is in {folder}.{elsewhere}\n\nSend the Viewer page ({Path.GetFileName(page)}): it opens in any browser with the pack inside, with nothing to install.");
         try
         {
-            if (page.Length > 0) Process.Start(new ProcessStartInfo(page) { UseShellExecute = true })?.Dispose();
+            if (page.Length > 0) WebPages.Open(page, WebPages.Kind.Viewer);
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) { }
     }

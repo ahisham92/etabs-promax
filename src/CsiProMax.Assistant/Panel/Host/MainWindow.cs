@@ -65,6 +65,19 @@ internal sealed class MainWindow : Window
         // With the AI chat off on this PC (AiMode): the Modeler, the 3D view and the review pack by hand, and no chat at all.
         layout.Children.Add(CsiProMax.AiMode.On ? Chat.ChatPane.Get() : NoAiPane.Build(CsiProMax.App.Reopened));
         Content = layout;
+        // The Modeler is its 3D view: with the chat on it opens in its own window at the first start too (the no-AI
+        // pane opens it itself), beside this window, which holds the chat. Not again after an update or a switch.
+        if (CsiProMax.AiMode.On && CsiProMax.App.Modeler && !CsiProMax.App.Reopened)
+        {
+            var once = false;
+            ContentRendered += (_, _) =>
+            {
+                if (once) return;
+                once = true;
+                try { ModelView.Open(); }
+                catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { /* View > Open the 3D view opens it */ }
+            };
+        }
         SourceInitialized += (_, _) => Handle = new WindowInteropHelper(this).Handle;
         Closing += (_, _) => Remember();
         Closed += (_, _) => { Handle = IntPtr.Zero; _open = null; };
@@ -125,6 +138,7 @@ internal sealed class MainWindow : Window
 
         var view = Top("_View");
         Add(view, "Open the _3D view", ModelView.Open);
+        Add(view, "Open the _Viewer (a pack someone sent)", () => WebPages.Open(Shortcuts.WriteViewerPage(), WebPages.Kind.Viewer));
         if (CsiProMax.App.Modeler)
             Add(view, "Open the _models folder", () =>
             {

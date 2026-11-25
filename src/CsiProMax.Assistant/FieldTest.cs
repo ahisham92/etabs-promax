@@ -208,6 +208,8 @@ public static class FieldTest
         PcFieldSteps.Run(ctx, o.InstallFolder ?? AppContext.BaseDirectory, plugIns, o.Full ? [target, work] : [target], menus);
         // With the AI chat and without it (install-no-ai.ps1): both ways, whichever this PC has.
         AiModeFieldSteps.Run(ctx);
+        // The Modeler and the Viewer in CSI ProMax windows of their own, never a browser tab.
+        WebWindowFieldSteps.Run(ctx);
         // The real window, opened a second time on the demo model, with the chat and without it (the full test on a real PC).
         if (o.Full && (o.OpenWindow is not null || (o.LiveScratch && o.SettingsRoot is null))) WindowFieldSteps.Run(ctx, o.OpenWindow);
         if (left.Count > 0) ctx.Step("test copies an earlier run left open are closed", () => string.Join("; ", left));

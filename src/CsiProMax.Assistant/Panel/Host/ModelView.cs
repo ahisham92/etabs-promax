@@ -9,8 +9,8 @@ using CsiProMax.Bridge;
 namespace CsiProMax.Host;
 
 /// <summary>
-/// The 3D view of the open model in the PC's browser: the Viewer page, served on 127.0.0.1 by the chat's own server
-/// under a secret address. In the Modeler it follows the model as the chat builds it. It only reads.
+/// The 3D view of the open model in a CSI ProMax window of its own (WebPages, WebWindow): the Viewer page, served on
+/// 127.0.0.1 by the chat's own server under a secret address. In the Modeler it follows the model as the chat builds it. It only reads.
 /// </summary>
 internal static class ModelView
 {
@@ -92,12 +92,15 @@ internal static class ModelView
         }
     }
 
-    /// <summary>Opens the view in the default browser.</summary>
+    /// <summary>Opens the view in its CSI ProMax window (not a browser tab); the open one comes forward.</summary>
     public static void Open()
     {
         var server = ChatMcp.Ensure() ?? throw new InvalidOperationException("The view could not start on this PC (no local port).");
-        Process.Start(new ProcessStartInfo(server.ViewUrl) { UseShellExecute = true })?.Dispose();
+        WebPages.Open(server.ViewUrl, Kind);
     }
+
+    /// <summary>Which window the view is: the Modeler itself, or the 3D view beside a CSI program.</summary>
+    internal static WebPages.Kind Kind => App.Modeler ? WebPages.Kind.ModelerView : WebPages.Kind.ProgramView;
 
     /// <summary>Starts the Modeler in a window of its own: the same program, with no ETABS behind it.</summary>
     public static void StartModeler()
