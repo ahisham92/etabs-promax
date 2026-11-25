@@ -109,6 +109,29 @@ public static class EditableTables
         catch { return ""; }
     }
 
+    /// <summary>The first row of a table whose <paramref name="keyField"/> is <paramref name="name"/>, field by field; null when there is none.</summary>
+    public static Dictionary<string, string>? Read(ICsiLink e, string key, string keyField, string name)
+    {
+        try
+        {
+            return (Dictionary<string, string>?)e.Raw($"read {name} from {key}", m =>
+            {
+                int version = 0, records = 0; string[] fields = [], data = [];
+                if (Convert.ToInt32(m.DatabaseTables.GetTableForEditingArray(key, "", ref version, ref fields, ref records, ref data)) != 0) return null;
+                fields ??= []; data ??= [];
+                var at = Array.FindIndex(fields, f => string.Equals(f, keyField, StringComparison.OrdinalIgnoreCase));
+                for (var r = 0; r < records && at >= 0; r++)
+                {
+                    var row = data.Skip(r * fields.Length).Take(fields.Length).Select(v => v ?? "").ToArray();
+                    if (row.Length == fields.Length && string.Equals(row[at], name, StringComparison.OrdinalIgnoreCase))
+                        return fields.Select((f, i) => (f, row[i])).ToDictionary(x => x.f, x => x.Item2, StringComparer.OrdinalIgnoreCase);
+                }
+                return null;
+            });
+        }
+        catch (EtabsException) { return null; }
+    }
+
     public static IReadOnlyDictionary<string, string> Row(params (string Field, string Value)[] values) =>
         values.ToDictionary(v => v.Field, v => v.Value, StringComparer.OrdinalIgnoreCase);
 
