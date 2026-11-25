@@ -5,103 +5,120 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CSI ProMax Viewer</title>
 <style>
-:root{--bg:#e9edf0;--panel:#f7f9fa;--panel2:#eef1f3;--ink:#1c2428;--mute:#5f6d74;--line:#c3ccd1;--accent:#0f6fb4;--accent-ink:#ffffff;--bad:#c0392b;--ok:#1e8449;--warn:#b9770e;--title:#dfe5e9;--sel:#d6e8f6}
-@media (prefers-color-scheme: dark){:root{--bg:#0e1316;--panel:#182024;--panel2:#141b1f;--ink:#e6ecee;--mute:#93a2a9;--line:#2e3a40;--accent:#4aa8e8;--accent-ink:#06202f;--bad:#ff7a6b;--ok:#5fd08b;--warn:#f0b24a;--title:#202a2f;--sel:#1d3547}}
+:root{--bg:#a9b0b6;--panel:#f0f0f0;--panel2:#e6e6e6;--ink:#111;--mute:#55606a;--line:#a7adb3;--accent:#0b62b0;--accent-ink:#fff;--bad:#c0392b;--ok:#1e8449;--warn:#b9770e;--title:#d9dde1;--sel:#cfe3f7;--field:#fff}
+@media (prefers-color-scheme: dark){:root{--bg:#14181b;--panel:#262b2f;--panel2:#1f2428;--ink:#e8ecee;--mute:#9aa7ae;--line:#3d464c;--accent:#4aa8e8;--accent-ink:#06202f;--bad:#ff7a6b;--ok:#5fd08b;--warn:#f0b24a;--title:#30373c;--sel:#1d3f5c;--field:#171b1e}}
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
-body{background:var(--bg);color:var(--ink);font:13px/1.4 "Segoe UI",system-ui,sans-serif;display:flex;flex-direction:column;overflow:hidden}
-header{display:flex;gap:10px;align-items:center;padding:5px 10px;background:var(--panel);border-bottom:1px solid var(--line)}
-header h1{font-size:14px;margin:0;font-weight:600;white-space:nowrap}
-header .meta{color:var(--mute);font-size:12px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-button,select,input,textarea{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:3px 7px}
-button{cursor:pointer}
+body{background:var(--bg);color:var(--ink);font:12px/1.35 "Segoe UI",Tahoma,system-ui,sans-serif;display:flex;flex-direction:column;overflow:hidden}
+button,select,input,textarea{font:inherit;color:var(--ink);background:var(--field);border:1px solid var(--line);border-radius:2px;padding:2px 6px}
+button{cursor:pointer;background:var(--panel)}
 button:disabled,select:disabled{opacity:.45;cursor:default}
 button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 button.on{background:var(--sel);border-color:var(--accent)}
-#tools{display:flex;gap:4px;align-items:center;padding:4px 8px;flex-wrap:wrap;border-bottom:1px solid var(--line);background:var(--panel2)}
-#tools .sep{width:1px;align-self:stretch;background:var(--line);margin:0 4px}
-#tools label{color:var(--mute);font-size:12px;display:flex;gap:4px;align-items:center}
-#tools button{min-width:28px}
-#tools svg{width:16px;height:16px;vertical-align:-3px;fill:none;stroke:currentColor;stroke-width:1.4}
+#menubar{display:flex;align-items:stretch;background:var(--panel);border-bottom:1px solid var(--line);height:24px;user-select:none}
+#menubar .brand{display:flex;align-items:center;gap:6px;padding:0 10px 0 8px;font-weight:600;white-space:nowrap}
+#menubar .brand svg{width:15px;height:15px}
+.menu{position:relative;padding:0 9px;display:flex;align-items:center;cursor:default}
+.menu:hover,.menu.open{background:var(--sel)}
+.menu .drop{display:none;position:absolute;left:0;top:23px;z-index:20;background:var(--panel);border:1px solid var(--line);box-shadow:2px 3px 8px rgba(0,0,0,.3);min-width:220px;padding:3px 0}
+.menu.open .drop{display:block}
+.drop div{padding:3px 14px 3px 26px;white-space:nowrap;position:relative}
+.drop div:hover{background:var(--accent);color:var(--accent-ink)}
+.drop div.tick::before{content:"\2713";position:absolute;left:9px}
+.drop hr{border:0;border-top:1px solid var(--line);margin:3px 0}
+#menubar .meta{margin-left:auto;color:var(--mute);padding:0 10px;display:flex;align-items:center;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar{display:flex;gap:2px;align-items:center;padding:2px 6px;flex-wrap:wrap;border-bottom:1px solid var(--line);background:var(--panel2);min-height:27px}
+.bar .sep{width:1px;align-self:stretch;background:var(--line);margin:1px 4px}
+.bar label{color:var(--mute);display:flex;gap:4px;align-items:center;margin-right:4px}
+.bar select{max-width:170px}
+.ib{width:24px;height:22px;padding:0;display:inline-flex;align-items:center;justify-content:center;border-color:transparent;background:none}
+.ib:hover{border-color:var(--line);background:var(--panel)}
+.ib.on{background:var(--sel);border-color:var(--accent)}
+.ib svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.3;stroke-linejoin:round;stroke-linecap:round}
+.tb{min-width:22px;height:22px;padding:0 5px}
 main{flex:1;display:flex;min-height:0}
-#explorer{width:230px;min-width:150px;display:flex;flex-direction:column;border-right:1px solid var(--line);background:var(--panel);min-height:0}
-.ptitle,.dock{background:var(--title);border-bottom:1px solid var(--line);padding:3px 8px;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#tree{flex:1;overflow:auto;padding:4px 2px 8px 4px;font-size:12.5px}
+#explorer{width:220px;min-width:150px;display:flex;flex-direction:column;border-right:1px solid var(--line);background:var(--field);min-height:0}
+.ptitle,.dock{background:var(--title);border-bottom:1px solid var(--line);padding:2px 7px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;gap:6px;align-items:center}
+#tree{flex:1;overflow:auto;padding:3px 2px 8px 3px}
 #tree details{margin-left:10px}
 #tree>details{margin-left:0}
 #tree summary{cursor:pointer;padding:1px 2px;white-space:nowrap;user-select:none}
 #tree summary:hover,#tree .leaf:hover{background:var(--sel)}
-#tree .leaf{margin-left:22px;padding:1px 4px;white-space:nowrap;display:flex;gap:5px;align-items:center;cursor:default}
+#tree .leaf{margin-left:20px;padding:1px 4px;white-space:nowrap;display:flex;gap:5px;align-items:center;cursor:default}
 #tree .leaf.go{cursor:pointer}
 #tree .leaf.cur{background:var(--sel);font-weight:600}
 #tree .leaf input{margin:0;padding:0}
 #tree .leaf i{width:10px;height:10px;display:inline-block;border:1px solid var(--line);flex:none}
-#tree .n{color:var(--mute);margin-left:auto;padding-left:8px;font-size:11.5px}
-#legend{border-top:1px solid var(--line);padding:5px 8px;font-size:12px;max-height:30%;overflow:auto}
+#tree .n{color:var(--mute);margin-left:auto;padding-left:8px;font-size:11px}
+#legend{border-top:1px solid var(--line);padding:4px 8px;max-height:26%;overflow:auto;background:var(--panel)}
 #legend div{display:flex;gap:6px;align-items:center;white-space:nowrap}
 #legend i{width:11px;height:11px;display:inline-block}
-#views{flex:1;display:grid;gap:3px;padding:3px;min-width:0;min-height:0;background:var(--bg)}
+#center{flex:1;position:relative;display:flex;flex-direction:column;min-width:0;min-height:0}
+#views{flex:1;display:grid;gap:2px;padding:2px;min-width:0;min-height:0;background:var(--bg)}
 .pane{display:flex;flex-direction:column;min-width:0;min-height:0;border:1px solid var(--line);background:var(--panel)}
 .pane.act{border-color:var(--accent)}
 .pane.act .ptitle{background:var(--accent);color:var(--accent-ink)}
 .pane .hold{flex:1;position:relative;min-height:0}
 canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;display:block}
-#right{width:340px;max-width:40%;display:flex;flex-direction:column;border-left:1px solid var(--line);background:var(--panel);min-height:0}
+#dock{height:34%;min-height:120px;display:flex;flex-direction:column;border-top:1px solid var(--line);background:var(--field)}
+#dock[hidden]{display:none}
+#dock .dock select{max-width:340px;font-weight:400}
+#dock .dock input{font-weight:400;width:150px}
+#dock .dock .kv{font-weight:400}
+#grid{flex:1;overflow:auto}
+#right{width:320px;max-width:38%;display:flex;flex-direction:column;border-left:1px solid var(--line);background:var(--field);min-height:0}
 #tabs{display:flex;border-bottom:1px solid var(--line);background:var(--title)}
-#tabs button{flex:1;border:0;border-radius:0;border-bottom:2px solid transparent;padding:5px 4px;background:none;font-size:12.5px}
-#tabs button.on{border-bottom-color:var(--accent);color:var(--accent);font-weight:600;background:var(--panel)}
-.tab{flex:1;overflow:auto;padding:8px 10px;display:none;min-height:0}
+#tabs button{flex:1;border:0;border-radius:0;border-bottom:2px solid transparent;padding:3px 4px;background:none}
+#tabs button.on{border-bottom-color:var(--accent);color:var(--accent);font-weight:600;background:var(--field)}
+.tab{flex:1;overflow:auto;padding:7px 9px;display:none;min-height:0}
 .tab.on{display:block}
-.card{border:1px solid var(--line);border-radius:4px;padding:7px 9px;margin-bottom:7px}
-.card h3{margin:0 0 4px;font-size:13px;display:flex;justify-content:space-between;gap:8px}
-.pill{font-size:11.5px;border-radius:10px;padding:1px 8px;border:1px solid currentColor;font-weight:600;white-space:nowrap}
+.card{border:1px solid var(--line);border-radius:2px;padding:6px 8px;margin-bottom:6px}
+.card h3{margin:0 0 4px;font-size:12.5px;display:flex;justify-content:space-between;gap:8px}
+.pill{font-size:11px;border-radius:10px;padding:0 8px;border:1px solid currentColor;font-weight:600;white-space:nowrap}
 .pass{color:var(--ok)}.fail{color:var(--bad)}.na{color:var(--mute)}.reported{color:var(--warn)}
-.kv{color:var(--mute);font-size:12px}
-table{border-collapse:collapse;width:100%;font-size:12px}
-th,td{border-bottom:1px solid var(--line);padding:3px 6px;text-align:left;white-space:nowrap}
-th{position:sticky;top:0;background:var(--panel);cursor:pointer}
-.props td:first-child{color:var(--mute);width:40%}
+.kv{color:var(--mute);font-size:11.5px}
+table{border-collapse:collapse;width:100%;font-size:11.5px}
+th,td{border:1px solid var(--line);padding:1px 6px;text-align:left;white-space:nowrap}
+th{position:sticky;top:0;background:var(--title);cursor:pointer;font-weight:600}
+#grid td{font-variant-numeric:tabular-nums}
+#grid tr:nth-child(odd) td{background:var(--panel)}
+.props td:first-child{color:var(--mute);width:42%;background:var(--panel)}
 .scroll{overflow:auto;max-height:100%}
-.row{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;align-items:center}
-textarea{width:100%;min-height:64px;resize:vertical}
-.comment .who{color:var(--mute);font-size:12px}
+.row{display:flex;gap:6px;margin-bottom:7px;flex-wrap:wrap;align-items:center}
+textarea{width:100%;min-height:60px;resize:vertical}
+.comment .who{color:var(--mute);font-size:11.5px}
 .comment a{color:var(--accent);cursor:pointer}
-footer{display:flex;gap:14px;padding:2px 10px;border-top:1px solid var(--line);background:var(--panel2);font-size:12px;color:var(--mute);white-space:nowrap}
-footer #hint{flex:1;overflow:hidden;text-overflow:ellipsis}
-footer #coords{font-variant-numeric:tabular-nums;color:var(--ink)}
-#drop{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:24px;color:var(--mute);z-index:2;background:var(--bg)}
+footer{display:flex;gap:0;border-top:1px solid var(--line);background:var(--panel);color:var(--ink);white-space:nowrap;height:21px;align-items:center}
+footer span{padding:0 10px;border-right:1px solid var(--line);height:100%;display:flex;align-items:center}
+footer #hint{flex:1;overflow:hidden;text-overflow:ellipsis;color:var(--mute)}
+footer #coords{font-variant-numeric:tabular-nums;min-width:210px}
+#drop{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:24px;color:#cfd8dc;z-index:2;background:#000}
 #drop div{max-width:420px}
-#center{flex:1;position:relative;display:flex;min-width:0;min-height:0}
-@media (max-width:900px){#explorer{display:none}#right{width:280px}}
-@media (max-width:640px){main{flex-direction:column}#right{width:auto;max-width:none;border-left:0;border-top:1px solid var(--line);height:40%}}
+@media (max-width:900px){#explorer{display:none}#right{width:260px}}
+@media (max-width:640px){main{flex-direction:column}#right{width:auto;max-width:none;border-left:0;border-top:1px solid var(--line);height:38%}}
 </style>
 </head>
 <body>
-<header>
-  <h1 id="app">CSI ProMax Viewer</h1>
-  <div class="meta" id="meta">No pack open</div>
-  <button id="open">Open a pack</button>
+<div id="menubar">
+  <span class="brand"><svg viewBox="0 0 16 16"><path d="M2 14V5l6-3l6 3v9M2 9.500h12M8 2v12" fill="none" stroke="currentColor" stroke-width="1.4"/></svg><span id="app">CSI ProMax Viewer</span></span>
+  <div class="menu" data-menu="File">File<div class="drop"></div></div>
+  <div class="menu" data-menu="View">View<div class="drop"></div></div>
+  <div class="menu" data-menu="Display">Display<div class="drop"></div></div>
+  <div class="menu" data-menu="Options">Options<div class="drop"></div></div>
+  <div class="menu" data-menu="Help">Help<div class="drop"></div></div>
+  <span class="meta" id="meta">No pack open</span>
   <input type="file" id="file" accept=".cpmx,.zip,.json" hidden>
-</header>
-<div id="tools">
-  <button data-view="plan" title="Plan view in the active window">Plan</button><button data-view="elev" title="Elevation view in the active window">Elev</button><button data-view="3d" title="3-D view in the active window">3-D</button>
-  <span class="sep"></span>
-  <label>Story <button id="up" title="Up one story">&#9650;</button><button id="down" title="Down one story">&#9660;</button><select id="story"></select></label>
+</div>
+<div class="bar" id="icons"><button class="ib" data-act="open" id="open" title="Open a pack"><svg viewBox="0 0 16 16"><path d="M2 5h4l1.5 1.5H14v6.5H2z"/></svg></button><span class="sep"></span><button class="ib" data-act="fit" title="Fit the model in every window"><svg viewBox="0 0 16 16"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4M5.5 5.5h5v5h-5z"/></svg></button><button class="ib" data-act="zin" title="Zoom in"><svg viewBox="0 0 16 16"><path d="M7 3a4 4 0 1 0 0 8a4 4 0 0 0 0-8zM10 10l4 4M5 7h4M7 5v4"/></svg></button><button class="ib" data-act="zout" title="Zoom out"><svg viewBox="0 0 16 16"><path d="M7 3a4 4 0 1 0 0 8a4 4 0 0 0 0-8zM10 10l4 4M5 7h4"/></svg></button><span class="sep"></span><button class="ib" data-view="plan" title="Plan view in the active window"><svg viewBox="0 0 16 16"><path d="M2.5 2.5h11v11h-11zM2.5 8h11M8 2.5v11"/></svg></button><button class="ib" data-view="elev" title="Elevation view in the active window"><svg viewBox="0 0 16 16"><path d="M3 14V3M8 14V3M13 14V3M3 6h10M3 10h10M1.5 14h13"/></svg></button><button class="ib" data-view="3d" title="3-D view in the active window"><svg viewBox="0 0 16 16"><path d="M8 1.5l5.5 3v7L8 14.5l-5.5-3v-7zM8 8l5.5-3.5M8 8L2.5 4.5M8 8v6.5"/></svg></button><button class="ib" id="up" title="Up one story"><svg viewBox="0 0 16 16"><path d="M8 3l5 6H3zM4 12.5h8"/></svg></button><button class="ib" id="down" title="Down one story"><svg viewBox="0 0 16 16"><path d="M8 13L3 7h10zM4 3.5h8"/></svg></button><span class="sep"></span><button class="ib" data-opt="grid" title="Grid lines"><svg viewBox="0 0 16 16"><path d="M4.5 1.5v13M11.5 1.5v13M1.5 4.5h13M1.5 11.5h13"/></svg></button><button class="ib" data-opt="extrude" title="Extruded sections"><svg viewBox="0 0 16 16"><path d="M2 6l4-3h8v7l-4 3H2zM2 6h8v7M10 6l4-3"/></svg></button><button class="ib" data-opt="fill" title="Slabs and walls"><svg viewBox="0 0 16 16"><path d="M2 10l5-3l7 2l-5 3zM2 10v2l7 2v-2M14 9v2l-5 3"/></svg></button><button class="ib" data-opt="supports" title="Supports"><svg viewBox="0 0 16 16"><path d="M8 3l-4 7h8zM2.5 12.5h11"/></svg></button><button class="ib" data-opt="names" title="Member names"><svg viewBox="0 0 16 16"><path d="M4 13L8 3l4 10M5.5 9.5h5"/></svg></button><button class="ib" data-opt="axes" title="Global axes"><svg viewBox="0 0 16 16"><path d="M3 13V3M3 13h10M3 13l5-4"/></svg></button><button class="ib" data-act="bg" title="Black or white background"><svg viewBox="0 0 16 16"><path d="M8 2a6 6 0 1 0 0 12zM8 2a6 6 0 0 1 0 12"/></svg></button><span class="sep"></span><button class="ib" data-res="model" title="Model, with no results"><svg viewBox="0 0 16 16"><path d="M3 13V4h10v9M3 8.5h10"/></svg></button><button class="ib" data-res="deformed" title="Deformed shape"><svg viewBox="0 0 16 16"><path d="M3 13C3 9 4.5 6 5 4c3 1.5 6 1.5 9 .5c0 3 .5 6-1 8.5M5 8.5c3 1 5.500 1 8.500 .5"/></svg></button><button class="ib" data-res="forces" title="Frame forces and moments"><svg viewBox="0 0 16 16"><path d="M2 11h12M2 11c2-8 10-8 12 0M5 11V6.300M8 11V5M11 11V6.300"/></svg></button><button class="ib" data-res="contour" title="Displacement contours"><svg viewBox="0 0 16 16"><path d="M2 13c1-7 11-7 12 0M4.5 13c1-4 6-4 7 0M7 13c.3-1.500 1.700-1.500 2 0"/></svg></button><button class="ib" data-res="reactions" title="Support reactions"><svg viewBox="0 0 16 16"><path d="M8 14V6M5 9l3-3l3 3M3 3h10"/></svg></button><button class="ib" data-res="ratios" title="Design ratios"><svg viewBox="0 0 16 16"><path d="M3 13V9M7 13V5M11 13V7M2 13.5h12"/></svg></button><span class="sep"></span><button class="ib" data-act="plot" title="Story response plot in the active window"><svg viewBox="0 0 16 16"><path d="M2.5 2v11.5H14M4.5 11l3-4l2.5 2l3.5-5"/></svg></button><button class="ib" data-act="tables" title="Tables"><svg viewBox="0 0 16 16"><path d="M2 3h12v10H2zM2 6.500h12M2 10h12M6 3v10"/></svg></button></div>
+<div class="bar" id="tools">
+  <label>Story <select id="story"></select></label>
   <label>Elevation <select id="line"></select></label>
+  <label title="How many view windows">Windows <button class="tb" data-lay="1">1</button><button class="tb" data-lay="2">2</button><button class="tb" data-lay="3">3</button><button class="tb" data-lay="4">4</button></label>
+  <label>Colour by <select id="colour"><option value="kind">Object type</option><option value="section">Section</option><option value="ratio">Design ratio</option><option value="punching">Punching ratio</option><option value="soil">Soil pressure</option></select></label>
   <span class="sep"></span>
-  <label title="How many view windows">Windows
-    <button data-lay="1">1</button><button data-lay="2">2</button><button data-lay="3">3</button><button data-lay="4">4</button></label>
-  <span class="sep"></span>
-  <button id="fit" title="Fit the model in every window">Fit</button>
-  <button data-opt="grid" title="Grid lines and their bubbles">Grid</button>
-  <button data-opt="extrude" title="Show members with their real section size">Extrude</button>
-  <button data-opt="fill" title="Slabs and walls">Slabs</button>
-  <button data-opt="supports" title="Support symbols">Supports</button>
-  <button data-opt="names" title="Member names">Names</button>
-  <button data-opt="axes" title="Global axes">Axes</button>
-  <span class="sep"></span>
-  <label>Colour <select id="colour"><option value="kind">Object type</option><option value="section">Section</option><option value="ratio">Design ratio</option><option value="punching">Punching ratio</option><option value="soil">Soil pressure</option></select></label>
-  <label id="defBox" style="display:none">Deformed <select id="defCase"></select> <input type="range" id="defScale" min="0" max="100" value="30" style="width:80px;padding:0"></label>
+  <label>Case <select id="case"></select></label>
+  <label>Component <select id="comp"></select></label>
+  <label>Scale <input type="range" id="scale" min="1" max="100" value="50" style="width:90px;padding:0"></label>
 </div>
 <main>
   <div id="explorer">
@@ -111,17 +128,16 @@ footer #coords{font-variant-numeric:tabular-nums;color:var(--ink)}
   </div>
   <div id="center">
     <div id="views"></div>
-    <div id="drop"><div><b>Open a CSI ProMax pack (.cpmx)</b><br>Use Open a pack, or drop the file here. Nothing is uploaded: the file is read on this computer only, and no CSI program is needed.</div></div>
-  </div>
-  <div id="right">
-    <div id="tabs"><button data-tab="props" class="on">Properties</button><button data-tab="checks">Checks</button><button data-tab="tables">Tables</button><button data-tab="comments">Comments</button></div>
-    <div class="tab on" id="props"><p class="kv">Open a pack to see the model.</p></div>
-    <div class="tab" id="checks"><p class="kv">Open a pack to see its checks.</p></div>
-    <div class="tab" id="tables">
-      <div class="row"><select id="table" style="flex:1;min-width:0"></select></div>
-      <div class="row"><input id="filter" placeholder="Filter rows" style="flex:1;min-width:0"><span class="kv" id="count"></span></div>
+    <div id="dock" hidden>
+      <div class="dock">Tables <select id="table"></select><input id="filter" placeholder="Filter rows"><span class="kv" id="count"></span><span style="flex:1"></span><button class="tb" id="dockClose" title="Close the tables">&#10005;</button></div>
       <div id="grid"></div>
     </div>
+    <div id="drop"><div><b>Open a CSI ProMax pack (.cpmx)</b><br>Use File, Open a pack, or drop the file here. Nothing is uploaded: the file is read on this computer only, and no CSI program is needed.</div></div>
+  </div>
+  <div id="right">
+    <div id="tabs"><button data-tab="props" class="on">Properties</button><button data-tab="checks">Checks</button><button data-tab="comments">Comments</button></div>
+    <div class="tab on" id="props"><p class="kv">Open a pack to see the model.</p></div>
+    <div class="tab" id="checks"><p class="kv">Open a pack to see its checks.</p></div>
     <div class="tab" id="comments">
       <div class="row"><input id="who" placeholder="Your name" style="flex:1;min-width:0"></div>
       <div class="row kv" id="target">Comment on the whole model. Click a member in a view to comment on it.</div>
@@ -146,12 +162,17 @@ let lo = [0, 0, 0], hi = [1, 1, 1], size = 1, unit = "";
 const opt = {grid: true, extrude: true, fill: true, supports: true, names: false, axes: true};
 const hidden = {kind: new Set(), section: new Set()};
 let panes = [], active = 0, layout = 2;
+let forces = new Map(), reacts = new Map(), drifts = new Map();
+const res = {mode: "model", case: "", comp: "M3", scale: 50};
+let bg = "black";
+try { if (localStorage.getItem("cpm-bg") === "white") bg = "white"; } catch (e) {}
+const bands = ["#1b2ad6", "#1f7bf2", "#19c3e6", "#19d38a", "#7fdc2a", "#e9e21c", "#f5a51a", "#f2601b", "#e01f1f"];
 const palette = ["#1f6fb4","#c0562b","#6a55b0","#2e8b57","#b8860b","#c2417a","#3b9ab8","#7a8a2a","#a0522d","#5b6fd0","#8e44ad","#d35400"];
-const dark = () => matchMedia("(prefers-color-scheme: dark)").matches;
 function theme() {
-  return dark()
-    ? {canvas: "#0b0f12", column: "#5aa2f0", beam: "#57c98a", brace: "#e0a04a", other: "#b9a0e8", floor: "rgba(150,170,185,.20)", floorEdge: "#5b6a73", wall: "rgba(222,120,110,.34)", wallEdge: "#d07a70", grid: "#55626a", bubble: "#0b0f12", level: "#3d4950", text: "#aebbc2", pick: "#ffd23f", support: "#7fd6c0", lit: "#ff8a3d"}
-    : {canvas: "#ffffff", column: "#1c4fa8", beam: "#1f8a4c", brace: "#b86a12", other: "#6a55b0", floor: "rgba(120,140,155,.22)", floorEdge: "#8a989f", wall: "rgba(196,70,60,.30)", wallEdge: "#b0463c", grid: "#9aa6ad", bubble: "#ffffff", level: "#c4ccd1", text: "#4c5a61", pick: "#e6007a", support: "#0c7a66", lit: "#e2620d"};
+  // The model windows: black the way analysis programs have always drawn, or white for printing.
+  return bg === "black"
+    ? {canvas: "#000000", column: "#3aa0ff", beam: "#f2d13c", brace: "#ff8a3c", other: "#c79bff", floor: "rgba(150,165,178,.26)", floorEdge: "#7d8a92", wall: "rgba(235,75,70,.36)", wallEdge: "#ff6a5e", grid: "#6f7b84", bubble: "#000000", level: "#39424a", text: "#d5dde1", pick: "#ff4df0", support: "#35e06f", lit: "#ffffff", pos: "rgba(255,216,60,.50)", neg: "rgba(255,84,84,.50)", posEdge: "#ffd83c", negEdge: "#ff6a6a", ghost: "#5a646b"}
+    : {canvas: "#ffffff", column: "#1c4fa8", beam: "#1f8a4c", brace: "#b86a12", other: "#6a55b0", floor: "rgba(120,140,155,.22)", floorEdge: "#8a989f", wall: "rgba(196,70,60,.30)", wallEdge: "#b0463c", grid: "#9aa6ad", bubble: "#ffffff", level: "#c4ccd1", text: "#3c4a51", pick: "#e6007a", support: "#0c7a66", lit: "#e2620d", pos: "rgba(40,110,220,.35)", neg: "rgba(215,50,50,.35)", posEdge: "#1c5fd0", negEdge: "#c62828", ghost: "#b9c2c7"};
 }
 
 // ---- reading a pack ----
@@ -235,7 +256,7 @@ function load(pack, keep) {
   $("units").textContent = u.force && u.length ? u.force + ", " + u.length : "";
   $("story").innerHTML = stories.slice().reverse().map(s => `<option value="${esc(s.name)}">${esc(s.name)}</option>`).join("");
   $("line").innerHTML = allLines().map(g => `<option value="${esc(g.dir + g.label)}">${esc(g.label)}</option>`).join("");
-  readRatios(); readDisplacements(); readMarks();
+  readRatios(); readDisplacements(); readMarks(); readForces(); readReactions(); readDrifts(); syncResults();
   $("drop").style.display = "none";
   picked = pickedName ? (pickedName[0] === "f" ? frames.find(f => f.name === pickedName.slice(2)) : areas.find(a => a.name === pickedName.slice(2))) || null : null;
   buildPanes(before);
@@ -332,10 +353,59 @@ function readDisplacements() {
         if (!had || Math.hypot(...d) > Math.hypot(...had)) disp.get(r[c]).set(r[u], d);
       }
   }
-  const was = $("defCase").value;
-  $("defBox").style.display = disp.size ? "" : "none";
-  $("defCase").innerHTML = "<option value=''>Off</option>" + [...disp.keys()].map(k => `<option>${esc(k)}</option>`).join("");
-  if (disp.has(was)) $("defCase").value = was;
+}
+function tablesLike(test) { return Object.values(P.tables).filter(t => test(norm(t.name))); }
+function readForces() {
+  // case -> member -> stations along it, each with P V2 V3 T M2 M3 as the program reported them.
+  forces = new Map();
+  for (const t of tablesLike(n => /(element|frame|beam|column|brace)forces/.test(n))) {
+    const u = col(t.fields, "UniqueName", "Unique Name", "Frame"), c = col(t.fields, "OutputCase", "Output Case", "Load Case/Combo"), st = col(t.fields, "Station", "Loc", "ElemStation"), step = col(t.fields, "StepType", "Step Type");
+    if (u < 0 || c < 0 || st < 0) continue;
+    const idx = {}; for (const k of ["P", "V2", "V3", "T", "M2", "M3"]) idx[k] = col(t.fields, k);
+    for (const r of t.rows) {
+      if (step >= 0 && /min/i.test(r[step])) continue;
+      let m = forces.get(r[c]); if (!m) forces.set(r[c], m = new Map());
+      let a = m.get(r[u]); if (!a) m.set(r[u], a = []);
+      const o = {s: parseFloat(r[st]) || 0}; for (const k in idx) o[k] = idx[k] >= 0 ? parseFloat(r[idx[k]]) || 0 : 0;
+      a.push(o);
+    }
+  }
+  forces.forEach(m => m.forEach(a => a.sort((x, y) => x.s - y.s)));
+}
+function readReactions() {
+  reacts = new Map();
+  for (const t of tablesLike(n => n === "jointreactions")) {
+    const u = col(t.fields, "UniqueName", "Unique Name", "Joint"), c = col(t.fields, "OutputCase", "Output Case", "Load Case/Combo");
+    if (u < 0 || c < 0) continue;
+    const idx = ["FX", "FY", "FZ", "MX", "MY", "MZ"].map(k => col(t.fields, k));
+    for (const r of t.rows) { let m = reacts.get(r[c]); if (!m) reacts.set(r[c], m = new Map()); m.set(r[u], idx.map(i => i >= 0 ? parseFloat(r[i]) || 0 : 0)); }
+  }
+}
+function readDrifts() {
+  drifts = new Map();
+  for (const t of tablesLike(n => n === "storydrifts")) {
+    const st = col(t.fields, "Story"), c = col(t.fields, "OutputCase", "Output Case", "Load Case/Combo"), d = col(t.fields, "Direction", "Dir"), v = col(t.fields, "Drift");
+    if (st < 0 || c < 0 || v < 0) continue;
+    for (const r of t.rows) {
+      let m = drifts.get(r[c]); if (!m) drifts.set(r[c], m = new Map());
+      const dir = d >= 0 ? r[d] : "", k = dir + "|" + r[st], val = Math.abs(parseFloat(r[v]) || 0);
+      m.set(k, Math.max(val, m.get(k) || 0));
+    }
+  }
+}
+const resCases = () => res.mode === "forces" ? [...forces.keys()] : res.mode === "reactions" ? [...reacts.keys()] : res.mode === "deformed" || res.mode === "contour" ? [...disp.keys()] : [...new Set([...drifts.keys(), ...disp.keys(), ...forces.keys()])];
+const resComps = () => res.mode === "forces" ? [["M3", "Moment 3-3"], ["V2", "Shear 2-2"], ["P", "Axial force"], ["T", "Torsion"], ["M2", "Moment 2-2"], ["V3", "Shear 3-3"]] : res.mode === "contour" ? [["UZ", "Displacement UZ"], ["UX", "Displacement UX"], ["UY", "Displacement UY"], ["U", "Resultant displacement"]] : res.mode === "reactions" ? [["FZ", "Vertical FZ"], ["FX", "FX"], ["FY", "FY"]] : [];
+function syncResults() {
+  if (!P) return;
+  const have = {deformed: disp.size, contour: disp.size, forces: forces.size, reactions: reacts.size, ratios: ratio.size, model: 1};
+  if (!have[res.mode] || res.mode === "ratios") res.mode = "model";
+  document.querySelectorAll("[data-res]").forEach(b => { b.disabled = !have[b.dataset.res]; b.classList.toggle("on", b.dataset.res === "ratios" ? res.mode === "model" && $("colour").value === "ratio" : b.dataset.res === res.mode && !(res.mode === "model" && $("colour").value === "ratio")); });
+  const cases = resCases(), comps = resComps();
+  if (!cases.includes(res.case)) res.case = cases[0] || "";
+  if (!comps.some(c => c[0] === res.comp)) res.comp = comps.length ? comps[0][0] : "";
+  $("case").innerHTML = cases.map(c => `<option>${esc(c)}</option>`).join(""); $("case").value = res.case; $("case").disabled = !cases.length;
+  $("comp").innerHTML = comps.map(c => `<option value="${c[0]}">${c[1]}</option>`).join(""); $("comp").value = res.comp; $("comp").disabled = !comps.length;
+  $("scale").disabled = !(res.mode === "deformed" || res.mode === "forces");
 }
 
 // ---- view windows ----
@@ -461,12 +531,20 @@ function drawPane(p, n) {
   p.title.textContent = paneTitle(p);
   if (n === 0) legend = new Map();
   if (!P || w < 4 || h < 4) return;
+  if (p.mode === "plot") { drawPlot(p, g, T, w, h); p.drawn = []; return; }
   const F = frameOf(p), to = F.to, sections = [...new Set(frames.map(f => f.section))].sort();
-  const dcase = $("defCase").value, shift = dcase && disp.has(dcase) ? {map: disp.get(dcase), k: 0} : null;
-  if (shift) { let max = 0; shift.map.forEach(d => max = Math.max(max, Math.hypot(...d))); shift.k = max > 0 ? size * 0.15 * ($("defScale").value / 100) / max : 0; }
+  const shift = res.mode === "deformed" && disp.has(res.case) ? {map: disp.get(res.case), k: 0} : null;
+  if (shift) { let max = 0; shift.map.forEach(d => max = Math.max(max, Math.hypot(...d))); shift.k = max > 0 ? size * 0.3 * (res.scale / 100) / max : 0; }
+  const contour = res.mode === "contour" && disp.has(res.case) ? contourOf() : null;
   g.lineJoin = "round";
   if (opt.grid) drawGrid(p, g, F, T, w, h);
-  const items = [], solid = opt.extrude && p.mode === "3d" && frames.length <= 4000;
+  const items = [], solid = opt.extrude && p.mode === "3d" && frames.length <= 4000 && res.mode !== "forces" && res.mode !== "deformed";
+  if (shift) {
+    // The shape before loading, faint behind the deformed one.
+    g.strokeStyle = T.ghost; g.lineWidth = 1; g.setLineDash([3, 3]); g.beginPath();
+    for (const f of frames) if (frameShown(f, p)) { const a = to(f.a), b = to(f.b); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); }
+    g.stroke(); g.setLineDash([]);
+  }
   for (const a of areas) {
     if (!areaShown(a, p)) continue;
     const pts = a.pts.map(q => to(moved(q, shift)));
@@ -498,7 +576,7 @@ function drawPane(p, n) {
         continue;
       }
       g.beginPath(); it.pts.forEach((q, i) => i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1])); g.closePath();
-      g.fillStyle = it.area.kind === "wall" ? T.wall : T.floor; g.fill();
+      g.fillStyle = (contour && contourFill(g, it, contour)) || (it.area.kind === "wall" ? T.wall : T.floor); g.fill();
       g.strokeStyle = sel(it) ? T.pick : hot(it.area) ? T.lit : it.area.kind === "wall" ? T.wallEdge : T.floorEdge; g.lineWidth = sel(it) || hot(it.area) ? 2.5 : 1; g.stroke();
       continue;
     }
@@ -531,6 +609,10 @@ function drawPane(p, n) {
   }
   if (opt.supports) drawSupports(p, g, to, T);
   drawMarks(p, g, to, T);
+  if (res.mode === "forces") drawForces(p, g, F, T, items);
+  if (res.mode === "reactions") drawReactions(p, g, to, T);
+  if (contour) drawScale(g, T, w, h, contour.lo, contour.hi, contour.title);
+  else if ($("colour").value === "ratio" && ratio.size) drawScale(g, T, w, h, 0, 1, "Design ratio", ["#2e8b57", "#6aa84f", "#c9b21f", "#e08a1e", "#d0342c"], ["0", "0.5", "0.7", "0.9", "1.0", "above"]);
   p.drawn = items;
   for (const c of P.comments) {
     const t = c.target && (frames.find(f => f.name === c.target.name && c.target.kind === "frame") || areas.find(a => a.name === c.target.name && c.target.kind === "area"));
@@ -540,7 +622,113 @@ function drawPane(p, n) {
     g.beginPath(); g.arc(x, y, 6, 0, 7); g.fillStyle = "#f0a020"; g.fill(); g.strokeStyle = T.canvas; g.lineWidth = 1.5; g.stroke();
   }
   if (opt.axes) drawAxes(p, g, T, h);
-  if (shift) { g.fillStyle = T.text; g.font = "11px Segoe UI, sans-serif"; g.textAlign = "right"; g.textBaseline = "alphabetic"; g.fillText("Deformed shape, exaggerated", w - 8, h - 8); }
+  const note = shift ? "Deformed shape (" + res.case + "), exaggerated" : res.mode === "forces" ? compName() + " (" + res.case + ")" : res.mode === "reactions" ? "Reactions (" + res.case + ")" : "";
+  if (note) { g.fillStyle = T.text; g.font = "11px Segoe UI, sans-serif"; g.textAlign = "left"; g.textBaseline = "alphabetic"; g.fillText(note, 70, h - 10); }
+}
+const compName = () => (resComps().find(c => c[0] === res.comp) || ["", res.comp])[1];
+function contourOf() {
+  // The chosen displacement at every point of the case, and the range the colours cover.
+  const map = disp.get(res.case), i = {UX: 0, UY: 1, UZ: 2}[res.comp], val = d => i === undefined ? Math.hypot(...d) : d[i];
+  let lo = 1e30, hi = -1e30; map.forEach(d => { const v = val(d); lo = Math.min(lo, v); hi = Math.max(hi, v); });
+  if (!(hi > lo)) { hi = lo + 1e-12; }
+  return {lo, hi, title: compName() + (unit ? ", " + unit : ""), at: q => { const d = map.get(pointAt.get(key(q[0], q[1], q[2]))); return d ? val(d) : null; }};
+}
+const bandOf = (v, c) => Math.max(0, Math.min(bands.length - 1, Math.floor((v - c.lo) / (c.hi - c.lo) * bands.length)));
+function contourFill(g, it, c) {
+  // Bands across the panel, from its lowest corner to its highest: what the corner values allow.
+  const vals = it.area.pts.map(c.at); if (vals.some(v => v === null)) return null;
+  let a = 0, b = 0; vals.forEach((v, i) => { if (v < vals[a]) a = i; if (v > vals[b]) b = i; });
+  if (a === b || vals[b] - vals[a] < (c.hi - c.lo) * 1e-6) return bands[bandOf(vals[a], c)];
+  const grad = g.createLinearGradient(it.pts[a][0], it.pts[a][1], it.pts[b][0], it.pts[b][1]), step = (c.hi - c.lo) / bands.length;
+  grad.addColorStop(0, bands[bandOf(vals[a], c)]);
+  for (let k = bandOf(vals[a], c) + 1; k <= bandOf(vals[b], c); k++) { const t = Math.max(0, Math.min(1, (c.lo + k * step - vals[a]) / (vals[b] - vals[a]))); grad.addColorStop(t, bands[k - 1]); grad.addColorStop(t, bands[k]); }
+  grad.addColorStop(1, bands[bandOf(vals[b], c)]);
+  return grad;
+}
+function drawScale(g, T, w, h, lo, hi, title, colours, labels) {
+  // The colour scale down the right edge of the window.
+  const cs = colours || bands, n = cs.length, bh = Math.min(22, (h - 70) / n), x = w - 30, top = 34;
+  if (bh < 6) return;
+  g.font = "10.5px Segoe UI, sans-serif"; g.textAlign = "right"; g.textBaseline = "middle"; g.setLineDash([]);
+  for (let i = 0; i < n; i++) {
+    const y = top + (n - 1 - i) * bh;
+    g.fillStyle = cs[i]; g.fillRect(x, y, 18, bh); g.strokeStyle = T.canvas; g.lineWidth = 1; g.strokeRect(x, y, 18, bh);
+    g.fillStyle = T.text; g.fillText(labels ? labels[i] : fmt(lo + (hi - lo) * i / n), x - 5, y + bh);
+  }
+  g.fillStyle = T.text; g.fillText(labels ? labels[n] : fmt(hi), x - 5, top); g.textBaseline = "alphabetic"; g.fillText(title, w - 10, 20);
+}
+function fmt(v) { const a = Math.abs(v); return a === 0 ? "0" : a >= 100 ? v.toFixed(0) : a >= 1 ? v.toFixed(2) : a >= 0.001 ? v.toFixed(4) : v.toExponential(2); }
+function memberAxes(f) {
+  const dx = f.b[0] - f.a[0], dy = f.b[1] - f.a[1], dz = f.b[2] - f.a[2], len = Math.hypot(dx, dy, dz) || 1, a = [dx / len, dy / len, dz / len];
+  if (f.kind === "column") return {a, len, e2: [1, 0, 0], e3: [0, 1, 0]};
+  const plan = Math.hypot(dx, dy), e3 = plan > 0 ? [-dy / plan, dx / plan, 0] : [0, 1, 0];
+  let e2 = [a[1] * e3[2] - a[2] * e3[1], a[2] * e3[0] - a[0] * e3[2], a[0] * e3[1] - a[1] * e3[0]]; if (e2[2] < 0) e2 = e2.map(v => -v);
+  return {a, len, e2, e3};
+}
+function drawForces(p, g, F, T, items) {
+  // Force and moment diagrams along each member, from the stations the program reported. Moments are drawn on
+  // the tension side; the largest value of each member is written beside it.
+  const map = forces.get(res.case); if (!map) return;
+  const comp = res.comp, moment = comp[0] === "M";
+  let max = 0; map.forEach(a => a.forEach(o => max = Math.max(max, Math.abs(o[comp]))));
+  if (!(max > 0)) return;
+  const k = size * 0.08 * (res.scale / 50) / max, shown = items.filter(it => it.frame && map.has(it.frame.name)), label = shown.length <= 120;
+  g.setLineDash([]); g.lineWidth = 1; g.font = "10px Segoe UI, sans-serif"; g.textBaseline = "middle";
+  for (const it of shown) {
+    const f = it.frame, rows = map.get(f.name), ax = memberAxes(f), dir = comp === "M2" || comp === "V3" ? ax.e3 : ax.e2, sign = moment ? -1 : 1;
+    const base = rows.map(o => { const s = Math.max(0, Math.min(ax.len, o.s)); return [f.a[0] + ax.a[0] * s, f.a[1] + ax.a[1] * s, f.a[2] + ax.a[2] * s]; });
+    const tip = rows.map((o, i) => [0, 1, 2].map(j => base[i][j] + dir[j] * o[comp] * k * sign));
+    const B = base.map(F.to), Tp = tip.map(F.to);
+    if (Math.hypot(B[B.length - 1][0] - B[0][0], B[B.length - 1][1] - B[0][1]) < 1.5) continue; // the member is seen end on
+    if (Math.hypot(Tp[0][0] - B[0][0], Tp[0][1] - B[0][1]) < 0.01 && rows.every((o, i) => Math.hypot(Tp[i][0] - B[i][0], Tp[i][1] - B[i][1]) < 0.6)) continue; // seen edge on
+    for (let i = 0; i + 1 < rows.length; i++) {
+      const pos = rows[i][comp] + rows[i + 1][comp] >= 0;
+      g.beginPath(); g.moveTo(B[i][0], B[i][1]); g.lineTo(Tp[i][0], Tp[i][1]); g.lineTo(Tp[i + 1][0], Tp[i + 1][1]); g.lineTo(B[i + 1][0], B[i + 1][1]); g.closePath();
+      g.fillStyle = pos ? T.pos : T.neg; g.fill();
+      g.beginPath(); g.moveTo(Tp[i][0], Tp[i][1]); g.lineTo(Tp[i + 1][0], Tp[i + 1][1]); g.strokeStyle = pos ? T.posEdge : T.negEdge; g.stroke();
+    }
+    for (const i of [0, rows.length - 1]) { g.beginPath(); g.moveTo(B[i][0], B[i][1]); g.lineTo(Tp[i][0], Tp[i][1]); g.strokeStyle = rows[i][comp] >= 0 ? T.posEdge : T.negEdge; g.stroke(); }
+    if (label || f === picked) {
+      let m = 0; rows.forEach((o, i) => { if (Math.abs(o[comp]) > Math.abs(rows[m][comp])) m = i; });
+      if (Math.abs(rows[m][comp]) > max * 0.02) { g.fillStyle = T.text; g.textAlign = Tp[m][0] >= B[m][0] ? "left" : "right"; g.fillText(fmt(rows[m][comp]), Tp[m][0] + (Tp[m][0] >= B[m][0] ? 3 : -3), Tp[m][1] + (Tp[m][1] > B[m][1] ? 7 : -7)); }
+    }
+  }
+}
+function drawReactions(p, g, to, T) {
+  const map = reacts.get(res.case); if (!map) return;
+  const i = {FX: 0, FY: 1, FZ: 2}[res.comp] ?? 2;
+  g.setLineDash([]); g.strokeStyle = T.posEdge; g.fillStyle = T.posEdge; g.lineWidth = 1.6; g.font = "10.5px Segoe UI, sans-serif"; g.textAlign = "center"; g.textBaseline = "top";
+  map.forEach((r, name) => {
+    const q = pointXyz.get(String(name)); if (!q) return;
+    if (p.mode === "elev" && p.line && !onLine(q, p.line)) return;
+    if (p.mode === "plan") { const z = elevationOf(p.story); if (z === null || Math.abs(q[2] - z) > tol() * 10) return; }
+    const [x, y] = to(q), v = r[i];
+    if (p.mode !== "plan") { g.beginPath(); g.moveTo(x, y + 40); g.lineTo(x, y + 16); g.moveTo(x - 4, y + 23); g.lineTo(x, y + 16); g.lineTo(x + 4, y + 23); g.stroke(); }
+    g.fillText(fmt(v), x, y + (p.mode === "plan" ? 10 : 42));
+  });
+}
+function drawPlot(p, g, T, w, h) {
+  // Story response: the largest drift of each story for the chosen case, X and Y.
+  const cases = [...drifts.keys()], name = drifts.has(res.case) ? res.case : cases[0], m = name && drifts.get(name);
+  g.fillStyle = T.text; g.font = "12px Segoe UI, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle";
+  if (!m) { g.fillText("This pack has no story drift results to plot.", w / 2, h / 2); return; }
+  const L = 86, R = 24, Tm = 30, B = 44, rows = stories.filter(s => [...m.keys()].some(k => k.endsWith("|" + s.name)));
+  const dirs = [...new Set([...m.keys()].map(k => k.split("|")[0]))].sort(), colours = [T.column, T.negEdge, T.beam, T.brace];
+  let max = 0; m.forEach(v => max = Math.max(max, v)); if (!(max > 0) || !rows.length) { g.fillText("The drifts of this case are all zero.", w / 2, h / 2); return; }
+  const z0 = stories[0].elevation, z1 = rows[rows.length - 1].elevation, X = v => L + (w - L - R) * v / (max * 1.1), Y = z => h - B - (h - B - Tm) * (z - z0) / ((z1 - z0) || 1);
+  g.strokeStyle = T.level; g.lineWidth = 1; g.setLineDash([]); g.textAlign = "right"; g.font = "10.5px Segoe UI, sans-serif";
+  for (const s of [stories[0], ...rows]) { g.beginPath(); g.moveTo(L, Y(s.elevation)); g.lineTo(w - R, Y(s.elevation)); g.stroke(); g.fillStyle = T.text; g.fillText(s.name, L - 6, Y(s.elevation)); }
+  g.textAlign = "center";
+  for (let i = 0; i <= 5; i++) { const v = max * 1.1 * i / 5, x = X(v); g.strokeStyle = T.level; g.beginPath(); g.moveTo(x, Tm); g.lineTo(x, h - B); g.stroke(); g.fillStyle = T.text; g.fillText(fmt(v), x, h - B + 12); }
+  g.strokeStyle = T.text; g.beginPath(); g.moveTo(L, Tm); g.lineTo(L, h - B); g.lineTo(w - R, h - B); g.stroke();
+  dirs.forEach((d, n) => {
+    g.strokeStyle = g.fillStyle = colours[n % colours.length]; g.lineWidth = 1.8; g.beginPath(); g.moveTo(X(0), Y(z0));
+    for (const s of rows) g.lineTo(X(m.get(d + "|" + s.name) || 0), Y(s.elevation));
+    g.stroke();
+    for (const s of rows) { g.beginPath(); g.arc(X(m.get(d + "|" + s.name) || 0), Y(s.elevation), 3, 0, 7); g.fill(); }
+    g.textAlign = "left"; g.fillText((d || "Drift") + " direction", L + 10 + n * 110, Tm - 14);
+  });
+  g.fillStyle = T.text; g.textAlign = "center"; g.fillText("Maximum story drift, " + name, (L + w - R) / 2, h - 12);
 }
 function flat(pts) { const xs = pts.map(q => q[0]), ys = pts.map(q => q[1]); return Math.max(...ys) - Math.min(...ys) < 1.5 || Math.max(...xs) - Math.min(...xs) < 1.5; }
 function spread(pts) { let best = [pts[0], pts[0]], d = -1; for (const a of pts) for (const b of pts) { const k = Math.hypot(a[0] - b[0], a[1] - b[1]); if (k > d) { d = k; best = [a, b]; } } return best; }
@@ -619,6 +807,7 @@ function drawAxes(p, g, T, h) {
 function paneTitle(p) {
   if (p.mode === "plan") { const z = elevationOf(p.story); return "Plan View · " + (p.story || "no stories") + (z === null ? "" : " · Z = " + num(z) + (unit ? " " + unit : "")); }
   if (p.mode === "elev") return "Elevation View · " + (p.line ? p.line.label + (gridsGuessed ? " (column line)" : "") : "whole model");
+  if (p.mode === "plot") return "Story Response · Maximum story drift";
   return "3-D View";
 }
 function drawLegend() {
@@ -705,6 +894,8 @@ function syncTools() {
   document.querySelectorAll("[data-view]").forEach(b => b.classList.toggle("on", b.dataset.view === p.mode));
   document.querySelectorAll("[data-lay]").forEach(b => b.classList.toggle("on", +b.dataset.lay === layout));
   document.querySelectorAll("[data-opt]").forEach(b => b.classList.toggle("on", opt[b.dataset.opt]));
+  document.querySelector('[data-act="plot"]').classList.toggle("on", p.mode === "plot");
+  document.querySelector('[data-act="bg"]').classList.toggle("on", bg === "black");
   const plan = p.mode === "plan", elev = p.mode === "elev";
   $("story").disabled = $("up").disabled = $("down").disabled = !plan || !stories.length;
   $("line").disabled = !elev || !allLines().length;
@@ -727,13 +918,68 @@ function setLine(g) {
 document.querySelectorAll("[data-view]").forEach(b => b.onclick = () => { const p = panes[active]; if (!p) return; p.mode = b.dataset.view; p.panX = p.panY = 0; p.zoom = 1; if (p.mode === "elev" && !p.line) p.line = allLines()[0] || null; syncTools(); draw(); });
 document.querySelectorAll("[data-lay]").forEach(b => b.onclick = () => { layout = +b.dataset.lay; active = 0; buildPanes(null); syncTools(); draw(); try { localStorage.setItem("cpm-layout", layout); } catch (e) {} });
 document.querySelectorAll("[data-opt]").forEach(b => b.onclick = () => { opt[b.dataset.opt] = !opt[b.dataset.opt]; syncTools(); draw(); });
-$("fit").onclick = () => { panes.forEach(p => { p.zoom = 1; p.panX = p.panY = 0; }); draw(); };
 $("story").onchange = () => setStory($("story").value);
 $("line").onchange = () => { const g = allLines().find(g => g.dir + g.label === $("line").value); if (g) setLine(g); };
 function step(d) { const p = panes[active]; if (!p || p.mode !== "plan") return; const i = stories.findIndex(s => s.name === p.story), j = Math.max(0, Math.min(stories.length - 1, i + d)); if (stories[j]) setStory(stories[j].name); }
 $("up").onclick = () => step(1); $("down").onclick = () => step(-1);
-["colour", "defCase", "defScale"].forEach(id => $(id).addEventListener("input", draw));
-matchMedia("(prefers-color-scheme: dark)").addEventListener("change", draw);
+$("colour").addEventListener("input", () => { syncResults(); draw(); });
+$("case").addEventListener("input", () => { res.case = $("case").value; draw(); });
+$("comp").addEventListener("input", () => { res.comp = $("comp").value; draw(); });
+$("scale").addEventListener("input", () => { res.scale = +$("scale").value; draw(); });
+function setRes(mode) {
+  if (mode === "ratios") { res.mode = "model"; $("colour").value = "ratio"; }
+  else { res.mode = mode; if ($("colour").value === "ratio") $("colour").value = "kind"; }
+  syncResults(); draw();
+}
+document.querySelectorAll("[data-res]").forEach(b => b.onclick = () => setRes(b.dataset.res));
+function zoomAll(k) { const p = panes[active]; if (!p) return; p.zoom = Math.max(0.05, Math.min(200, p.zoom * k)); p.panX *= k; p.panY *= k; draw(); }
+function showTables(on) { $("dock").hidden = !on; document.querySelector('[data-act="tables"]').classList.toggle("on", on); if (on) drawTable(); draw(); }
+function act(name) {
+  if (name.startsWith("r:")) return setRes(name.slice(2));
+  if (name.startsWith("o:")) { const k = name.slice(2); opt[k] = !opt[k]; syncTools(); return draw(); }
+  if (name.startsWith("lay")) return document.querySelector(`[data-lay="${name.slice(3)}"]`).click();
+  if (name === "plan" || name === "elev" || name === "3d") return document.querySelector(`[data-view="${name}"]`).click();
+  if (name === "open") return $("file").click();
+  if (name === "saveComments") return $("save").click();
+  if (name === "fit") { panes.forEach(p => { p.zoom = 1; p.panX = p.panY = 0; }); return draw(); }
+  if (name === "zin") return zoomAll(1.25);
+  if (name === "zout") return zoomAll(0.8);
+  if (name === "bg") { bg = bg === "black" ? "white" : "black"; try { localStorage.setItem("cpm-bg", bg); } catch (e) {} if (P) buildTree(); return draw(); }
+  if (name === "plot") { const p = panes[active]; if (p) { p.mode = p.mode === "plot" ? "3d" : "plot"; syncTools(); draw(); } return; }
+  if (name === "tables") return showTables($("dock").hidden);
+  if (name === "about") { showTab("props"); $("props").innerHTML = `<p><b>${esc($("app").textContent)}</b></p><p class="kv">Opens a CSI ProMax review pack with no CSI program on this computer. The model, the result tables and the design tables in a pack are the ones the CSI program produced; nothing is analysed here.</p>`; }
+}
+const menus = {
+  File: [["Open a pack...", "open"], ["Save comments to a file", "saveComments"]],
+  View: [["Plan view", "plan"], ["Elevation view", "elev"], ["3-D view", "3d"], 0, ["Fit all windows", "fit"], ["Zoom in", "zin"], ["Zoom out", "zout"], 0, ["One window", "lay1"], ["Two windows", "lay2"], ["Three windows", "lay3"], ["Four windows", "lay4"]],
+  Display: [["Model, with no results", "r:model"], ["Deformed shape", "r:deformed"], ["Frame forces and moments", "r:forces"], ["Displacement contours", "r:contour"], ["Support reactions", "r:reactions"], ["Design ratios", "r:ratios"], 0, ["Story response plot", "plot"], ["Tables", "tables"]],
+  Options: [["Black background", "bg"], 0, ["Grid lines", "o:grid"], ["Extruded sections", "o:extrude"], ["Slabs and walls", "o:fill"], ["Supports", "o:supports"], ["Member names", "o:names"], ["Global axes", "o:axes"]],
+  Help: [["About", "about"]],
+};
+function ticked(a) {
+  const p = panes[active];
+  if (a.startsWith("o:")) return opt[a.slice(2)];
+  if (a.startsWith("r:")) return a === "r:ratios" ? res.mode === "model" && $("colour").value === "ratio" : res.mode === a.slice(2) && !(a === "r:model" && $("colour").value === "ratio");
+  if (a.startsWith("lay")) return layout === +a.slice(3);
+  if (a === "bg") return bg === "black";
+  if (a === "tables") return !$("dock").hidden;
+  if (a === "plot") return !!p && p.mode === "plot";
+  return !!p && p.mode === a;
+}
+document.querySelectorAll(".menu").forEach(el => {
+  el.addEventListener("click", e => {
+    if (e.target.dataset.act) { act(e.target.dataset.act); el.classList.remove("open"); return; }
+    const was = el.classList.contains("open");
+    document.querySelectorAll(".menu").forEach(m => m.classList.remove("open"));
+    if (was) return;
+    el.querySelector(".drop").innerHTML = menus[el.dataset.menu].map(i => i ? `<div data-act="${i[1]}" class="${ticked(i[1]) ? "tick" : ""}">${i[0]}</div>` : "<hr>").join("");
+    el.classList.add("open");
+  });
+  el.addEventListener("mouseenter", () => { if (document.querySelector(".menu.open") && !el.classList.contains("open")) el.click(); });
+});
+document.addEventListener("pointerdown", e => { if (!e.target.closest(".menu")) document.querySelectorAll(".menu").forEach(m => m.classList.remove("open")); });
+document.querySelectorAll("#icons [data-act]").forEach(b => { if (b.id !== "open") b.onclick = () => act(b.dataset.act); });
+$("dockClose").onclick = () => showTables(false);
 try { const l = +localStorage.getItem("cpm-layout"); if (layouts[l]) layout = l; } catch (e) {}
 if (innerWidth < 760) layout = 1;
 
@@ -845,6 +1091,7 @@ async function openFile(file) {
   catch (ex) { $("drop").style.display = "flex"; $("drop").firstElementChild.innerHTML = `<b>That file could not be opened</b><br>${esc(ex.message)}`; }
 }
 $("open").onclick = () => $("file").click();
+document.addEventListener("keydown", e => { if (e.key === "F4") { e.preventDefault(); setRes("model"); } if (e.key === "F6") { e.preventDefault(); setRes("deformed"); } if (e.key === "F8") { e.preventDefault(); setRes("forces"); } });
 $("file").onchange = e => { if (e.target.files[0]) openFile(e.target.files[0]); e.target.value = ""; };
 document.addEventListener("dragover", e => e.preventDefault());
 document.addEventListener("drop", e => { e.preventDefault(); if (e.dataTransfer.files[0]) openFile(e.dataTransfer.files[0]); });
@@ -854,6 +1101,7 @@ function start() {
     // The Modeler's own view: it follows the model as the chat builds it. Review tools stay with the Viewer.
     $("app").textContent = "CSI ProMax Modeler"; $("open").hidden = true;
     document.querySelector('[data-tab="comments"]').hidden = true; document.querySelector('[data-tab="checks"]').hidden = true;
+    menus.File = [["Save comments to a file", "saveComments"]].slice(1); document.querySelector('[data-menu="File"]').hidden = true;
   }
   const built = $("pack").textContent.trim();
   if (built) { try { load(JSON.parse(built)); } catch (ex) { console.error(ex); } }
