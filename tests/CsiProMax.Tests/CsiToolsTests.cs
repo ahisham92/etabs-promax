@@ -268,6 +268,38 @@ static class CsiToolsTests
             Equal(inner.Stories().Count, Pack.Levels(new SafeMemory(inner, program: CsiProgram.Etabs), []).Count, "ETABS keeps its own stories");
         });
 
+        yield return ("CSI tools: SAP2000's load patterns table: only a number for SelfWtMult, through the API; anything else refused up front", () =>
+        {
+            var (link, api, inner) = Model(CsiProgram.Sap2000);
+            inner.ResultTables["Load Pattern Definitions"] = new(["LoadPat", "Type", "SelfWtMult"], [["Dead", "Dead", "1"]]);
+            api.PatternName = "LoadPat";
+            api.Table.Add(["Wind", "Wind", "0"]);
+            string Said(string json)
+            {
+                try { Run(CsiProgram.Sap2000, "edit_table", json, link); return ""; }
+                catch (Exception ex) when (ex is ToolInputException or EtabsException) { return ex.Message; }
+            }
+            var before = string.Join(";", api.Table.Select(r => string.Join("|", r)));
+            // 1) An add, a delete or a set of another field is refused before any save or import.
+            var add = Said("""{"table":"Load Pattern Definitions","action":"add","rows":[{"LoadPat":"New","Type":"Dead","SelfWtMult":"0"}]}""");
+            Check(add.Contains("add_load_pattern", StringComparison.Ordinal), "an add is refused with the tool to use: " + add);
+            var delete = Said("""{"table":"Load Pattern Definitions","action":"delete","match":{"LoadPat":"Live"}}""");
+            Check(delete.Contains("does not take", StringComparison.Ordinal) && delete.Contains("delete", StringComparison.Ordinal), "a delete is refused: " + delete);
+            var type = Said("""{"table":"Load Pattern Definitions","action":"update","match":{"LoadPat":"Live"},"set":{"Type":"Dead"}}""");
+            Check(type.Contains("only SelfWtMult", StringComparison.Ordinal), "a set of another field is refused: " + type);
+            // 2) A self weight that is not a number is said to be one.
+            var word = Said("""{"table":"Load Pattern Definitions","action":"update","match":{"LoadPat":"Live"},"set":{"SelfWtMult":"half"}}""");
+            Check(word.Contains("must be a number", StringComparison.Ordinal), "a word for SelfWtMult: " + word);
+            Equal(before, string.Join(";", api.Table.Select(r => string.Join("|", r))), "nothing refused changed the table");
+            Check(!api.Log.Any(l => l.StartsWith("self weight", StringComparison.Ordinal)), "nothing refused reached the API");
+            // 3) When one of several is refused, the error names the ones already changed.
+            api.RefuseSelfWeight.Add("Wind");
+            var part = Said("""{"table":"Load Pattern Definitions","action":"update","match":{"SelfWtMult":"0"},"set":{"SelfWtMult":"0.5"}}""");
+            Check(part.Contains("Wind", StringComparison.Ordinal) && part.Contains("Already changed: Live", StringComparison.Ordinal), "the refusal names the patterns already changed: " + part);
+            api.RefuseSelfWeight.Clear();
+            var ok = Run(CsiProgram.Sap2000, "edit_table", """{"table":"Load Pattern Definitions","action":"update","match":{"LoadPat":"Live"},"set":{"SelfWtMult":"0.25"}}""", link);
+            Check(ok["applied"]!.GetValue<bool>() && api.Table.First(r => r[0] == "Live")[2] == "0.25", "a number goes through the API: " + ok.ToJsonString());
+        });
         yield return ("CSI tools: table edits update and delete rows; what changed since a starting point; checkpoints", () =>
         {
             var (link, api, inner) = Model(CsiProgram.Safe);
@@ -508,12 +540,22 @@ public sealed class FakeApi
     public bool EditingEmpty;
     /// <summary>The next applies that refuse and leave the patterns' table empty, as SAP2000 26 did (0.4.22 field test).</summary>
     public int WipeOnApply;
+    /// <summary>The patterns' table's name field: "Name" in ETABS and SAFE, "LoadPat" in SAP2000.</summary>
+    public string PatternName = "Name";
+    /// <summary>Patterns whose SetSelfWTMultiplier is refused.</summary>
+    public HashSet<string> RefuseSelfWeight { get; } = [];
 
     public sealed class PatternsApi(FakeApi o)
     {
         public SeismicApi AutoSeismic { get; } = new(o);
         public WindApi AutoWind { get; } = new(o);
         public int GetAutoSeismicCode(string Name, ref string CodeName) { CodeName = o.SeismicCodes.GetValueOrDefault(Name, ""); return 0; }
+        public int SetSelfWTMultiplier(string Name, double Value)
+        {
+            var row = o.Table.FirstOrDefault(r => r[0] == Name);
+            if (row is null || o.RefuseSelfWeight.Contains(Name)) return 1;
+            row[2] = Value.ToString(System.Globalization.CultureInfo.InvariantCulture); o.Log.Add($"self weight {Name} {row[2]}"); return 0;
+        }
     }
 
     public sealed class SeismicApi(FakeApi o)
@@ -689,13 +731,13 @@ public sealed class FakeApi
         private const string Patterns = "Load Pattern Definitions";
         public int GetTableForEditingArray(string TableKey, string GroupName, ref int TableVersion, ref string[] FieldsKeysIncluded, ref int NumberRecords, ref string[] TableData)
         {
-            if (TableKey == Patterns) { FieldsKeysIncluded = ["Name", "Type", "SelfWtMult"]; NumberRecords = o.EditingEmpty ? 0 : o.Table.Count; TableData = o.EditingEmpty ? [] : o.Table.SelectMany(r => r).ToArray(); return 0; }
+            if (TableKey == Patterns) { FieldsKeysIncluded = [o.PatternName, "Type", "SelfWtMult"]; NumberRecords = o.EditingEmpty ? 0 : o.Table.Count; TableData = o.EditingEmpty ? [] : o.Table.SelectMany(r => r).ToArray(); return 0; }
             if (!o.Tables.TryGetValue(TableKey, out var t)) return 1;
             FieldsKeysIncluded = t.Fields; NumberRecords = t.Rows.Count; TableData = t.Rows.SelectMany(r => r).ToArray(); return 0;
         }
         public int GetAllFieldsInTable(string TableKey, ref int TableVersion, ref int NumberFields, ref string[] FieldKey, ref string[] FieldName, ref string[] Description, ref string[] UnitsString, ref bool[] IsImportable)
         {
-            FieldKey = TableKey == Patterns ? ["Name", "IsAuto", "Type", "SelfWtMult", "AutoLoad", "GUID"] : o.Tables.TryGetValue(TableKey, out var t) ? t.Fields : [];
+            FieldKey = TableKey == Patterns ? [o.PatternName, "IsAuto", "Type", "SelfWtMult", "AutoLoad", "GUID"] : o.Tables.TryGetValue(TableKey, out var t) ? t.Fields : [];
             NumberFields = FieldKey.Length; FieldName = FieldKey; Description = FieldKey.Select(f => "about " + f).ToArray(); UnitsString = new string[NumberFields]; IsImportable = FieldKey.Select(_ => true).ToArray(); return 0;
         }
         public int SetTableForEditingArray(string TableKey, ref int TableVersion, ref string[] FieldsKeysIncluded, int NumberRecords, ref string[] TableData)
@@ -708,7 +750,7 @@ public sealed class FakeApi
         public int GetTableForDisplayArray(string TableKey, ref string[] FieldKeyList, string GroupName, ref int TableVersion, ref string[] FieldsKeysIncluded, ref int NumberRecords, ref string[] TableData)
         {
             if (TableKey != Patterns) return 1;
-            FieldsKeysIncluded = ["Name", "Type", "SelfWtMult", "AutoLoad"]; NumberRecords = o.Table.Count; TableData = o.Table.SelectMany(r => r.Append("None")).ToArray(); return 0;
+            FieldsKeysIncluded = [o.PatternName, "Type", "SelfWtMult", "AutoLoad"]; NumberRecords = o.Table.Count; TableData = o.Table.SelectMany(r => r.Append("None")).ToArray(); return 0;
         }
         public int CancelTableEditing() { o._pending.Clear(); return 0; }
         public int ApplyEditedTables(bool FillImportLog, ref int NumFatalErrors, ref int NumErrorMsgs, ref int NumWarnMsgs, ref int NumInfoMsgs, ref string ImportLog)
@@ -726,7 +768,7 @@ public sealed class FakeApi
                 {
                     // Only the fields the patterns' table is read with are kept, as before.
                     o.Table.Clear();
-                    foreach (var r in rows) o.Table.Add(new[] { "Name", "Type", "SelfWtMult" }.Select(f => Array.IndexOf(fields, f) is var i and >= 0 ? r[i] : "").ToArray());
+                    foreach (var r in rows) o.Table.Add(new[] { o.PatternName, "Type", "SelfWtMult" }.Select(f => Array.IndexOf(fields, f) is var i and >= 0 ? r[i] : "").ToArray());
                     continue;
                 }
                 o.Tables[key] = (fields, rows);

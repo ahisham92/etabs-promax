@@ -725,32 +725,46 @@ public static class CsiTools
         // rows unchanged, and is left with no load patterns at all (tried on a scratch SAP2000 26 from the field test's
         // .s2k: all rows, the changed row alone, analysed or not, with or without GUIDs, answer 1 and no patterns after).
         // A change of the self weight multiplier only is therefore made through its API, pattern by pattern.
-        if (action == "update" && e.Program.Key == CsiProgram.Sap2000.Key && string.Equals(table.Key, "Load Pattern Definitions", StringComparison.OrdinalIgnoreCase))
+        // Any other edit of that table would go to the same refused import, so it is refused here, before any save or
+        // import, with the reason and the tool to use instead.
+        if (e.Program.Key == CsiProgram.Sap2000.Key && string.Equals(table.Key, "Load Pattern Definitions", StringComparison.OrdinalIgnoreCase))
         {
+            const string why = "does not take its 'Load Pattern Definitions' table back for a model with loads (every import is refused and leaves no load patterns)";
+            if (action != "update")
+                throw new ToolInputException($"{program} {why}, so the {action} is not made. To add a pattern use add_load_pattern; to delete or rename one use {program}'s Define > Load Patterns (or call_api LoadPatterns.Delete / ChangeName).");
             var set = Pairs("set");
             int nameAt = Array.FindIndex(fields, f => string.Equals(f, "LoadPat", StringComparison.OrdinalIgnoreCase)),
                 weightAt = Array.FindIndex(fields, f => string.Equals(f, "SelfWtMult", StringComparison.OrdinalIgnoreCase));
-            if (nameAt >= 0 && weightAt >= 0 && set.All(p => p.Index == weightAt))
+            if (nameAt < 0 || weightAt < 0 || !set.All(p => p.Index == weightAt))
+                throw new ToolInputException($"{program} {why}, so only SelfWtMult can be changed here (through its API). Change a pattern's type with add_load_pattern, or in {program}'s Define > Load Patterns.");
+            foreach (var (_, v) in set)
+                if (!double.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out _))
+                    throw new ToolInputException($"SelfWtMult must be a number, not '{v}'.");
+            var done = new JsonArray();
+            var doneNames = new List<string>();
+            e.Raw("set the self weight multipliers", m =>
             {
-                var done = new JsonArray();
-                e.Raw("set the self weight multipliers", m =>
+                if (Convert.ToBoolean(m.GetModelIsLocked())) Ok(program, m.SetModelIsLocked(false), "unlock the model for the change");
+                foreach (var row in updated)
                 {
-                    if (Convert.ToBoolean(m.GetModelIsLocked())) Ok(program, m.SetModelIsLocked(false), "unlock the model for the change");
-                    foreach (var row in updated)
-                    {
-                        var weight = double.Parse(row[weightAt], NumberStyles.Float, CultureInfo.InvariantCulture);
-                        Ok(program, m.LoadPatterns.SetSelfWTMultiplier(row[nameAt], weight), $"set the self weight multiplier of {row[nameAt]}");
-                        done.Add($"{row[nameAt]}: {row[weightAt]}");
-                    }
-                    return null;
-                });
-                e.Refresh();
-                return new JsonObject
-                {
-                    ["table"] = table.Name, ["rows_changed"] = changed, ["applied"] = true, ["set"] = done,
-                    ["note"] = $"Set through {program}'s API (LoadPatterns.SetSelfWTMultiplier): {program} does not take this table back for a model with loads.",
-                };
-            }
+                    var weight = double.Parse(row[weightAt], NumberStyles.Float, CultureInfo.InvariantCulture);
+                    int answer;
+                    try { answer = Convert.ToInt32(m.LoadPatterns.SetSelfWTMultiplier(row[nameAt], weight)); }
+                    catch (Exception ex) when (ex is not EtabsException) { answer = -1; }
+                    if (answer != 0)
+                        throw new EtabsException($"{program} refused to set the self weight multiplier of {row[nameAt]}" +
+                            (doneNames.Count > 0 ? $". Already changed: {string.Join(", ", doneNames)} (set them back with the same edit if needed)." : "; nothing was changed."));
+                    doneNames.Add(row[nameAt]);
+                    done.Add($"{row[nameAt]}: {row[weightAt]}");
+                }
+                return null;
+            });
+            e.Refresh();
+            return new JsonObject
+            {
+                ["table"] = table.Name, ["rows_changed"] = changed, ["applied"] = true, ["set"] = done,
+                ["note"] = $"Set through {program}'s API (LoadPatterns.SetSelfWTMultiplier): {program} does not take this table back for a model with loads.",
+            };
         }
 
         var unlocked = false;
