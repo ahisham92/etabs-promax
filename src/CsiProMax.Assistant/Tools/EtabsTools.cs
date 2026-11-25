@@ -480,13 +480,22 @@ public static class EtabsTools
         else if (coefficient is not null)
         {
             // DirFlag 1 is global X, 4 is global Y; the load goes over the whole height (UserZ false).
+            // ETABS 23's API has no user coefficient at all (its cAutoSeismic has only ASCE 7-16 and IBC 2006: read from
+            // ETABSv1.dll on the field-test PC, 0.4.16 field test): the pattern is kept, and the answer says how to set it.
+            var missing = false;
             e.Raw("define the seismic load", m =>
             {
-                var answer = Convert.ToInt32(m.LoadPatterns.AutoSeismic.SetUserCoefficient(name, dir == "X" ? 1 : 4, ecc, false, 0.0, 0.0, c, k));
-                if (answer != 0) throw new EtabsException($"{e.Program.Name} refused the user coefficient for {name}.");
+                object answer;
+                try { answer = m.LoadPatterns.AutoSeismic.SetUserCoefficient(name, dir == "X" ? 1 : 4, ecc, false, 0.0, 0.0, c, k); }
+                catch (Exception ex) when (ex is MissingMethodException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException) { missing = true; return null; }
+                if (Convert.ToInt32(answer) != 0) throw new EtabsException($"{e.Program.Name} refused the user coefficient for {name}.");
                 return null;
             });
-            result["lateral"] = $"user coefficient C = {c.ToString(System.Globalization.CultureInfo.InvariantCulture)}, K = {k.ToString(System.Globalization.CultureInfo.InvariantCulture)}, direction {dir}, eccentricity {ecc.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+            if (missing)
+                result["note"] = $"{e.Program.Name}'s API cannot set a seismic load by a user coefficient, so {name} was added as a Seismic pattern with no automatic load. " +
+                                 $"Set it in {e.Program.Name}: Define > Load Patterns, select {name}, Modify Lateral Load, User Coefficient (C = {c.ToString(System.Globalization.CultureInfo.InvariantCulture)}, K = {k.ToString(System.Globalization.CultureInfo.InvariantCulture)}, direction {dir}).";
+            else
+                result["lateral"] = $"user coefficient C = {c.ToString(System.Globalization.CultureInfo.InvariantCulture)}, K = {k.ToString(System.Globalization.CultureInfo.InvariantCulture)}, direction {dir}, eccentricity {ecc.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
         }
         return result;
     }
