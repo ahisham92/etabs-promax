@@ -336,6 +336,12 @@ public static class FieldTest
                     ScratchProgram.CloseStep(ctx, open, program);
                     // A window that stopped answering is left as it is: letting go of it could wait for ever too.
                     if (finished) open.Dispose();
+                    // Tools > CSI ProMax stays where it was: a scratch window started through the API empties the plug-in list.
+                    ctx.Step($"{program.Name}'s plug-in lists are as they were before the scratch window", () =>
+                    {
+                        var back = open.PutBackPlugIns();
+                        return back.Count == 0 ? "unchanged" : "the scratch window had emptied them; put back: " + string.Join(", ", back.Select(Path.GetFileName));
+                    });
                 }
                 catch (Exception ex) when (ex is not (OutOfMemoryException or OperationCanceledException))
                 {

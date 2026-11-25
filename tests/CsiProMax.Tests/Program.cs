@@ -928,6 +928,7 @@ Test("set_section: a frame or area that is not in the model is reported as faile
     Check(areas["failed"]!.AsArray().Count == 1, "the missing area is not reported: " + areas.ToJsonString());
 });
 foreach (var (name, body) in CdtSdkTests.All()) Test(name, body);
+foreach (var (name, body) in KeptPlugInsTests.All()) Test(name, body);
 foreach (var (name, body) in FieldRun048Tests.All()) Test(name, body);
 foreach (var (name, body) in FieldQuietTests.All()) Test(name, body);
 
