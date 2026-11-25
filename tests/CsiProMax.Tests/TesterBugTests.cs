@@ -807,6 +807,24 @@ static class TesterBugTests
                 Check(CsiProMax.Tools.OutputPaths.AlwaysAskReason("edit_table", Args($$"""{"table":"Load Pattern Definitions","action":"{{action}}"}""")) is null, $"reading a table ({action}) asks about a save it does not make");
             Check(ProgramTools.Chat(CsiProgram.Etabs).First(x => x.Name == "edit_table").Description.Contains("always asked before that save", StringComparison.Ordinal), "edit_table's description does not say the engineer is asked");
         });
+        yield return ("0.4.33 run: the pack takes SAP2000's own names for springs, hinges, functions, cases and section cuts (13 Viewer items were greyed out)", () =>
+        {
+            foreach (var table in new[] { "Joint Spring Assignments 1 - Uncoupled", "Frame Hinge Assigns 04 - Auto FEMA 356 - Concrete Beam", "Function - Response Spectrum - User", "Function - Time History - User",
+                         "Case - Modal History 1 - General", "Case - Static 2 - Nonlinear Load Application", "Section Cuts 1 - General", "Section Cut Definitions", "Joint Assignments - Springs" })
+                Check(CsiProMax.Assistant.Tools.PackTables.Kind(new CsiProMax.Assistant.Etabs.TableName(table, table, false, 1)) == "input", $"'{table}' is not taken by the pack as an input");
+            foreach (var table in new[] { "Section Cut Forces - Analysis", "Element Forces - Links", "Element Deformations - Links" })
+                Check(CsiProMax.Assistant.Tools.PackTables.Kind(new CsiProMax.Assistant.Etabs.TableName(table, table, false, 0)) == "result", $"'{table}' is not taken by the pack as a result");
+            // The scratch model's extras are one honest line on a stand-in, and every name they use is fixed.
+            var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchExtras.cs"));
+            foreach (var call in new[] { "PointObj.SetSpring", "PropLink.SetLinear", "LinkObj.AddByPoint", "SectCut.SetByGroup", "LoadCases.StaticNonlinear.SetLoadApplication", "Func.FuncTH.SetUser", "LoadCases.ModHistLinear.SetTimeStep" })
+                Check(source.Contains('"' + call + '"'), $"the scratch extras no longer call {call}");
+            foreach (var steps in new[] { "Field/EtabsFieldSteps.cs", "Sap2000/SapFieldSteps.cs" })
+            {
+                var text = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant", steps));
+                Check(text.IndexOf("ScratchExtras.Add(ctx)", StringComparison.Ordinal) is var add and >= 0 && text.IndexOf("\"run_analysis\"", StringComparison.Ordinal) > add, $"{steps} must add the extras before its first analysis");
+                Check(text.Contains("ScratchExtras.Check(ctx)"), $"{steps} must check the extras' tables after the analysis");
+            }
+        });
         yield return ("ETABS 23 field test: a test copy an earlier run left open is closed by the next run, and nothing else is", () =>
         {
             // Seen on 2026-11-25: the 0.4.10 run gave up on ETABS with the story picker showing; the 0.4.14 run then failed

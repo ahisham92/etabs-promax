@@ -398,6 +398,15 @@ public sealed class ComEtabs : ICsiLink, IDisposable
     {
         if (cases is { Count: > 0 }) { string[] list = cases.ToArray(); m.DatabaseTables.SetLoadCasesSelectedForDisplay(ref list); }
         if (combos is { Count: > 0 }) { string[] list = combos.ToArray(); m.DatabaseTables.SetLoadCombinationsSelectedForDisplay(ref list); }
+        // Section cut forces are given only for the cuts selected for display; none is selected at first (ETABS 23
+        // answered no rows for a cut that was defined and analysed), so every cut is selected. Best effort.
+        if (key.Contains("Section Cut Forces", StringComparison.OrdinalIgnoreCase))
+            try
+            {
+                int cutCount = 0; string[] cuts = None;
+                if (Convert.ToInt32(m.SectCut.GetNameList(ref cutCount, ref cuts)) == 0 && cuts is { Length: > 0 }) m.DatabaseTables.SetSectionCutsSelectedForDisplay(ref cuts);
+            }
+            catch (Exception ex) when (ex is Microsoft.CSharp.RuntimeBinder.RuntimeBinderException or MissingMethodException or System.Runtime.InteropServices.COMException or InvalidCastException or ArgumentException) { }
         string[] ask = None, fields = None, data = None; int version = 0, records = 0;
         int ret = Convert.ToInt32(m.DatabaseTables.GetTableForDisplayArray(key, ref ask, "", ref version, ref fields, ref records, ref data));
         fields ??= None; data ??= None;

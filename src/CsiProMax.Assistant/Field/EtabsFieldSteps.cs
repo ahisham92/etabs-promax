@@ -301,6 +301,8 @@ public static class EtabsFieldSteps
             FieldContext.Expect(loaded > 0, $"no joint above the base took the load ({above.Count} tried)");
             return $"{loaded} joints above the base carry 5 in X in CPM-EQX";
         });
+        // What the Viewer needs to show every display: a spring, a link, a section cut, a pushover case.
+        ScratchExtras.Add(ctx);
         NoVerdictBeforeAnalysis(ctx);
         ctx.Tool("run_analysis", "{}", _ => FieldContext.Expect(link.Info().Locked, "the analysis answered, but ETABS does not say the model is analysed (locked)"));
         var analysed = false;
@@ -346,6 +348,7 @@ public static class EtabsFieldSteps
                     else ctx.Step($"ETABS table {names[0]}", () => ResultTools.Sample(link, names));
                 }
             var summaries = link.Tables().Where(t => ResultTools.IsDesignSummary(t.Name)).ToList();
+            ScratchExtras.Check(ctx);
             ctx.Step("ETABS design summary tables", () =>
             {
                 FieldContext.Expect(summaries.Any(t => !t.Empty), "no design summary table has data after the design: " + string.Join("; ", summaries.Select(t => t.Name)));
