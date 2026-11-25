@@ -59,7 +59,8 @@ public sealed class OfflineEtabs : ICsiLink, CsiProMax.Assistant.Tools.IModelDra
 
     // ---- reading ----
 
-    public ModelInfo Info() => new(Path.Length > 0 ? Path : Model.Title, "Modeler (no ETABS)", Unit(Model.Units.Force), Unit(Model.Units.Length), Model.Units.Temperature, false);
+    // A model not saved yet has no file, as in ETABS: its chats then follow it to the file at the first Save As.
+    public ModelInfo Info() => new(Path, "Modeler (no ETABS)", Unit(Model.Units.Force), Unit(Model.Units.Length), Model.Units.Temperature, false);
 
     private static string Unit(string u) => u.ToUpperInvariant() switch { "KN" => "kN", "M" => "m", "MM" => "mm", "CM" => "cm", "N" => "N", "KIP" => "kip", "LB" => "lb", "FT" => "ft", "IN" => "in", _ => u };
 
