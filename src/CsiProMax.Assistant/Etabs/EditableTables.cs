@@ -47,6 +47,11 @@ public static class EditableTables
             }
             if (fields.Length == 0) throw new EtabsException($"{program} gave no fields for the table '{key}' (answer {read}), so it cannot {what}.");
 
+            // The rows as read, to put back when the apply is refused and takes rows with it (SAP2000 26, 0.4.22 field test).
+            var readFields = fields.ToArray();
+            var readRows = Enumerable.Range(0, records).Select(r => data.Skip(r * readFields.Length).Take(readFields.Length).Select(v => v ?? "").ToArray())
+                .Where(r => r.Length == readFields.Length).ToList();
+
             // A field the editing read leaves out (ETABS 23 leaves out AutoLoad of "Load Pattern Definitions") is added as a column.
             var missing = rows.SelectMany(r => r.Keys).Distinct(StringComparer.OrdinalIgnoreCase)
                 .Where(k => !fields.Contains(k, StringComparer.OrdinalIgnoreCase)).ToList();
@@ -101,7 +106,11 @@ public static class EditableTables
                 int applied = Convert.ToInt32(m.DatabaseTables.ApplyEditedTables(true, ref fatal, ref errors, ref warnings, ref info, ref log));
                 log ??= "";
                 if (applied != 0 || fatal + errors > 0)
-                    throw new EtabsException($"{program} did not apply '{key}' ({fatal} fatal, {errors} errors), so it cannot {what}. Its import log: {Cut(log)}" + About(m, key, rows));
+                {
+                    try { m.DatabaseTables.CancelTableEditing(); } catch { /* nothing more to undo */ }
+                    string restored = Tools.CsiTools.RestoreRows(m, key, readFields, readRows);
+                    throw new EtabsException($"{program} did not apply '{key}' ({fatal} fatal, {errors} errors), so it cannot {what}. {restored} Its import log: {Cut(log)}" + About(m, key, rows));
+                }
                 return log;
             }
             catch
