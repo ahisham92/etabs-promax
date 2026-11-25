@@ -210,6 +210,35 @@ table.hmgrid td{padding:0 2px}
 #pobj .g2{display:grid;grid-template-columns:auto 1fr;gap:5px 10px;align-items:center}
 footer select{font-size:11.5px}
 .swatch{display:inline-block;width:14px;height:12px;border:1px solid rgba(0,0,0,.3);vertical-align:-2px;margin-right:4px}
+/* The chat (only in a page CSI ProMax serves on this PC with its AI chat on): Sketch ProMax's chat look, not ETABS's */
+#chat{--c-bg:#f2f0e8;--c-surface:#e7e4da;--c-border:#ded9cc;--c-field:#fff;--c-line:#7d786b;--c-ink:#1e1d1a;--c-mute:#5f5c55;--c-accent:#1c63bc;--c-accent2:#1958a8;--c-on:#fff;--c-bad:#c42020;padding:0;flex-direction:column;background:var(--c-bg);color:var(--c-ink);font:13px/1.45 "Segoe UI",system-ui,sans-serif}
+@media (prefers-color-scheme: dark){:root:not([data-theme=light]) #chat{--c-bg:#1b1b19;--c-surface:#2a2a27;--c-border:#353532;--c-field:#232321;--c-line:#7a766e;--c-ink:#f2efe9;--c-mute:#9f9b92;--c-accent:#4b9ff3;--c-accent2:#3a96f2;--c-on:#1b1b19;--c-bad:#f87171}}
+#chat.tab.on{display:flex}
+body.chaton #right{width:380px;max-width:42%}
+#chatlog{flex:1;overflow:auto;padding:12px 12px 6px;display:flex;flex-direction:column;gap:9px;min-height:0}
+#chatlog .cm{max-width:100%;overflow-wrap:anywhere}
+#chatlog .cm p{margin:0 0 6px}#chatlog .cm p:last-child{margin:0}
+#chatlog .cm ul{margin:2px 0 6px;padding-left:18px}
+#chatlog .cm pre{background:var(--c-surface);border:1px solid var(--c-border);border-radius:6px;padding:6px 8px;overflow:auto;font:12px Consolas,monospace;margin:4px 0}
+#chatlog .cm code{background:var(--c-surface);border-radius:4px;padding:0 3px;font:12px Consolas,monospace}
+#chatlog .cm.user{align-self:flex-end;background:var(--c-surface);border:1px solid var(--c-border);border-radius:14px 14px 4px 14px;padding:6px 11px;max-width:88%}
+#chatlog .cm.tool{color:var(--c-mute);font-size:11.5px}
+#chatlog .cm.tool.failed{color:var(--c-bad)}
+#chatlog .cm.note{color:var(--c-mute);font-size:12px}
+#chatlog .cm.error{color:var(--c-bad)}
+#chatempty{color:var(--c-mute);text-align:center;margin:auto 10px}
+#chatwait{color:var(--c-mute);font-size:12px}
+#chatwait i{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--c-mute);margin-right:3px;animation:cdot 1.2s infinite}
+#chatwait i:nth-child(2){animation-delay:.2s}#chatwait i:nth-child(3){animation-delay:.4s}
+@keyframes cdot{0%,80%,100%{opacity:.25}40%{opacity:1}}
+#chatbox{border-top:1px solid var(--c-border);padding:8px 10px 10px}
+#chatin{display:block;width:100%;min-height:58px;max-height:180px;resize:vertical;border:1px solid var(--c-line);border-radius:10px;background:var(--c-field);color:var(--c-ink);padding:7px 9px;font:inherit}
+#chatin:focus{outline:2px solid var(--c-accent);outline-offset:-1px}
+#chatbox .row{display:flex;align-items:center;gap:8px;margin-top:6px}
+#chatbox label{color:var(--c-mute);font-size:11.5px;flex:1;min-width:0}
+#chatstat{color:var(--c-mute);font-size:11.5px;margin-top:4px;min-height:15px}
+#chatsend{background:var(--c-accent);color:var(--c-on);border:0;border-radius:8px;padding:4px 16px;font-weight:600}
+#chatsend:hover:not(:disabled){background:var(--c-accent2)}
 @media (max-width:1000px){#explorer{display:none}#right{width:250px}#strip{display:none}}
 @media (max-width:700px){main{flex-direction:column}#right{width:auto;max-width:none;border-left:0;border-top:1px solid var(--line);height:36%}#tlist{display:none}}
 </style>
@@ -266,7 +295,7 @@ footer select{font-size:11.5px}
     <div id="drop"><div><b>Open a CSI ProMax pack (.cpmx)</b><br>Use File, Open, or drop the file here. Nothing is uploaded: the file is read on this computer only, and no CSI program is needed.</div></div>
   </div>
   <div id="right">
-    <div id="tabs"><button data-tab="props" class="on">Properties</button><button data-tab="checks">Checks</button><button data-tab="comments">Comments</button><button class="x" data-close="right" title="Close" style="flex:none;width:26px">&#10005;</button></div>
+    <div id="tabs"><button data-tab="props" class="on">Properties</button><button data-tab="checks">Checks</button><button data-tab="comments">Comments</button><button data-tab="chat" hidden>Chat</button><button class="x" data-close="right" title="Close" style="flex:none;width:26px">&#10005;</button></div>
     <div class="tab on" id="props"><p class="kv">Open a pack to see the model.</p></div>
     <div class="tab" id="checks"><p class="kv">Open a pack to see its checks.</p></div>
     <div class="tab" id="comments">
@@ -276,6 +305,14 @@ footer select{font-size:11.5px}
       <div class="row" style="margin-top:6px"><button class="primary" id="add">Add comment</button><button id="save">Save comments to a file</button></div>
       <p class="kv">Send the saved comments file back to the engineer. CSI ProMax reads it into the chat.</p>
       <div id="list"></div>
+    </div>
+    <div class="tab" id="chat">
+      <div id="chatlog"><div id="chatempty">Ask CSI ProMax about this model, or ask it to change it. This is the same chat as in the CSI ProMax window.</div><div id="chatwait" hidden><i></i><i></i><i></i> Working</div></div>
+      <div id="chatbox">
+        <textarea id="chatin" placeholder="Message CSI ProMax (Enter sends, Shift+Enter for a new line)"></textarea>
+        <div class="row"><label><input type="checkbox" id="chatsel" checked><span id="chatseltext">Send the selected objects with it</span></label><button id="chatsend">Send</button></div>
+        <div id="chatstat"></div>
+      </div>
     </div>
   </div>
 </main>
@@ -1974,6 +2011,7 @@ function act(name) {
     case "copyNames": { const t = [...sel].map(objOf).filter(Boolean).map(o => o.name).join("\n"); copyText(t); return; }
     case "explorer": opt.explorer = !opt.explorer; $("explorer").hidden = !opt.explorer; return draw();
     case "side": opt.side = !opt.side; $("right").hidden = !opt.side; return draw();
+    case "chat": return chatShow();
     case "about": return dialogs.about();
   }
 }
@@ -1988,7 +2026,7 @@ const viewerMenus = () => {
     Edit: [["Copy names of the selected objects", "copyNames", "Ctrl+C"], 0, ["Hide the selected objects", "hideSel"], ["Show all objects", "showAll"]],
     View: [["Set 3-D View...", "dlg:view3d"], ["Set Plan View...", "dlg:plan"], ["Set Elevation View...", "dlg:elev"], 0, ["Restore Full View", "fitActive", "F3"], ["Rubber Band Zoom", "t:zoom", "F2"], ["Zoom In One Step", "zin"], ["Zoom Out One Step", "zout"], ["Pan", "t:pan"], ["Rotate 3-D View", "t:orbit"], ["Perspective", "persp"], 0,
       ["Move Up a Story", "storyUp", "PgUp", !plan], ["Move Down a Story", "storyDown", "PgDn", !plan], ["Previous Elevation", "linePrev", "", !elev], ["Next Elevation", "lineNext", "", !elev], 0,
-      ["Set Display Options...", "dlg:display", "Ctrl+W"], ["Model Explorer", "explorer"], ["Side Panel", "side"], 0,
+      ["Set Display Options...", "dlg:display", "Ctrl+W"], ["Model Explorer", "explorer"], ["Side Panel", "side"], ...(window.cpmChat ? [["Chat", "chat"]] : []), 0,
       ["Windows", [["One window", "lay1"], ["Two windows", "lay2"], ["Three windows", "lay3"], ["Four windows", "lay4"]]]],
     Define: [["Material Properties...", "dlg:materials"], ["Frame Sections...", "dlg:frameSections"], ["Slab and Wall Sections...", "dlg:areaSections"], 0, ["Story Data...", "dlg:stories"], ["Grid Data...", "dlg:grids"], 0, ["Load Patterns...", "dlg:patterns"], ["Load Cases...", "dlg:cases"], ["Load Combinations...", "dlg:combos"]],
     Select: [["All", "selAll", "Ctrl+A"], ["All on This Story", "selStory", "", !plan], ["By Section...", "dlg:bySection"], ["By Object Type...", "dlg:byType"], ["Invert", "selInvert"], 0, ["Clear Selection", "selNone", "Esc"]],
@@ -2034,7 +2072,7 @@ document.addEventListener("pointerdown", e => { if (!e.target.closest(".menu") &
 function contextMenu(p, x, y, id) {
   hideMenus(); hideTip();
   const o = objOf(id), m = document.createElement("div"); m.className = "ctx";
-  const items = o ? [["Object Information...", () => infoWindow(id)], ["Show in Tables", () => showInTable(o)], ["Comment on It...", () => { showTab("comments"); opt.side = true; $("right").hidden = false; $("text").focus(); }], 0,
+  const items = o ? [["Object Information...", () => infoWindow(id)], ["Show in Tables", () => showInTable(o)], ["Comment on It...", () => { showTab("comments"); opt.side = true; $("right").hidden = false; $("text").focus(); }], window.cpmChat ? ["Ask the Chat About It...", () => chatAbout(o)] : null, 0,
       ["Zoom to It", () => zoomTo(p, [id])], ["Hide It", () => hideObjs([id])], ["Select Same Section", () => { for (const q of frames.concat(areas)) if (q.type === o.type && q.section === o.section && (!p.vis || p.vis[q.id])) sel.add(q.id); selChanged(); }],
       o.story ? ["Open Its Story in Plan", () => setStory(o.story)] : null, 0, ["Clear Selection", () => act("selNone")], ["Show All Objects", () => act("showAll"), !hidden.objs.size]]
     : [["Restore Full View", () => fit(p)], ["Set Display Options...", () => dialogs.display()], 0, ["Plan View", () => setMode(p, "plan")], ["Elevation View", () => setMode(p, "elev")], ["3-D View", () => setMode(p, "3d")], ["Perspective", () => act("persp"), p.mode !== "3d"], 0, ["Show Tables", () => showTables(true)], ["Show All Objects", () => act("showAll"), !hidden.objs.size && !hidden.kind.size]];
@@ -3199,6 +3237,90 @@ function start() {
 // The Modeler adds its own script after this one, which is where it says the page is live.
 addEventListener("DOMContentLoaded", start);
 if (document.readyState === "complete") start();
+</script>
+<script>
+"use strict";
+// ---- the chat inside the Viewer: the same conversation as the CSI ProMax window, read and sent through the window
+// that serves this page (POST chat). Only when that window's AI chat is on (window.cpmChat); otherwise none of it shows. ----
+const chat = {after: 0, conv: null, items: new Map(), busy: false, sending: false, timer: 0, quiet: 0};
+async function chatPost(body) {
+  const r = await fetch("chat", {method: "POST", headers: {"Content-Type": "application/json", "X-CPM-View": "1"}, body: JSON.stringify(body), cache: "no-store"});
+  if (!r.ok) throw new Error(r.status === 404 ? "CSI ProMax is not answering. Is its window still open?" : "CSI ProMax refused the message (" + r.status + ").");
+  return r.json();
+}
+const chatInline = s => esc(s).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/^#{1,6}\s+(.*)$/, "<b>$1</b>");
+function chatMd(text) {
+  return String(text || "").split("```").map((part, i) => i % 2 ? `<pre>${esc(part.replace(/^[\w-]*\n/, ""))}</pre>` : part.split(/\n{2,}/).filter(b => b.trim()).map(block => {
+    const lines = block.replace(/^\n+|\n+$/g, "").split("\n"), item = /^\s*([-*]|\d+\.)\s+/;
+    if (lines.every(l => item.test(l))) return "<ul>" + lines.map(l => `<li>${chatInline(l.replace(item, ""))}</li>`).join("") + "</ul>";
+    return "<p>" + lines.map(chatInline).join("<br>") + "</p>";
+  }).join("")).join("");
+}
+function chatRender(list) {
+  const log = $("chatlog"), atEnd = log.scrollHeight - log.scrollTop - log.clientHeight < 60;
+  for (const it of list) {
+    let el = chat.items.get(it.i);
+    if (!el) { el = document.createElement("div"); chat.items.set(it.i, el); log.insertBefore(el, $("chatwait")); }
+    el.className = "cm " + it.kind + (it.state === "failed" ? " failed" : "");
+    el.innerHTML = it.kind === "assistant" ? chatMd(it.text) : it.kind === "tool" ? "&#9656; " + esc(it.text) + (it.state === "failed" ? " (did not work)" : it.state === "running" ? " ..." : "") : esc(it.text).replace(/\n/g, "<br>");
+  }
+  $("chatempty").hidden = chat.items.size > 0;
+  if (atEnd || list.length) log.scrollTop = log.scrollHeight;
+}
+function chatReset() { chat.items.forEach(el => el.remove()); chat.items.clear(); chat.after = 0; }
+async function chatPull(send) {
+  let j;
+  try { j = await chatPost(send ? {after: chat.after, send} : {after: chat.after}); }
+  catch (e) { $("chatstat").textContent = e.message; return null; }
+  if (j.off) { chatOff(); return j; }
+  // Another chat is open in the window now (another model): this one follows it.
+  if (chat.conv !== null && j.conv !== chat.conv) { chat.conv = j.conv; chatReset(); return chatPull().then(k => k && Object.assign(k, {sent: j.sent, said: j.said})); }
+  chat.conv = j.conv;
+  chatRender(j.items || []);
+  chat.after = Math.max(0, (j.count || 0) - 1); // the last message may still be growing: it is asked for again
+  chat.busy = !!j.busy;
+  $("chatwait").hidden = !chat.busy;
+  $("chatstat").textContent = j.said || (!j.ready ? "The chat is not set up yet: finish its first step in the CSI ProMax window." : chat.busy ? (j.status || "CSI ProMax is working. Stop it in the CSI ProMax window.") : "");
+  return j;
+}
+function chatSelText() { return [...sel].map(objOf).filter(Boolean).slice(0, 40).map(describe).join("; ") + (sel.size > 40 ? ` and ${sel.size - 40} more` : ""); }
+function chatTick() {
+  $("chatseltext").textContent = sel.size ? `Send the ${sel.size} selected object${sel.size > 1 ? "s" : ""} with it` : "Send the selected objects with it (none selected)";
+  // Every second while it works or the tab is open, else every few seconds, and not while the page is hidden.
+  if (document.hidden && !chat.busy) return;
+  const shown = $("chat").classList.contains("on");
+  if (!chat.busy && !shown && ++chat.quiet % 4) return;
+  chatPull();
+}
+async function chatSend() {
+  const box = $("chatin"); let text = box.value.trim();
+  if (!text || chat.sending) return;
+  if ($("chatsel").checked && sel.size) text += "\n\n(Selected in the 3D view: " + chatSelText() + ")";
+  chat.sending = true; $("chatsend").disabled = true;
+  const j = await chatPull(text);
+  chat.sending = false; $("chatsend").disabled = false;
+  if (j && j.sent) box.value = "";
+  box.focus();
+}
+function chatShow() { opt.side = true; $("right").hidden = false; showTab("chat"); $("chatin").focus(); chatPull(); }
+function chatAbout(o) { chatShow(); const box = $("chatin"); if (!box.value.trim()) box.value = `About ${describe(o)}: `; box.focus(); box.setSelectionRange(box.value.length, box.value.length); }
+function chatOff() {
+  clearInterval(chat.timer); chat.timer = 0; window.cpmChat = false; document.body.classList.remove("chaton");
+  const b = document.querySelector('[data-tab="chat"]'); b.hidden = true;
+  if ($("chat").classList.contains("on")) showTab("props");
+}
+function chatStart() {
+  if (!window.cpmChat || chat.timer) return;
+  document.body.classList.add("chaton");
+  document.querySelector('[data-tab="chat"]').hidden = false;
+  $("chatsend").onclick = chatSend;
+  $("chatin").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); chatSend(); } });
+  showTab("chat");
+  chatPull();
+  chat.timer = setInterval(chatTick, 1000);
+}
+addEventListener("DOMContentLoaded", chatStart);
+if (document.readyState === "complete") chatStart();
 </script>
 </body>
 </html>

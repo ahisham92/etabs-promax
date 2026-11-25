@@ -76,6 +76,9 @@ public static class Program
         // Every text names the program the window works beside (Csi.Name), so it is told before anything else is made.
         Csi.Program = program;
         CsiProMax.App.NoUpdate = args.Contains("--no-update");
+        // With the AI chat or without it (AiMode): read before anything is made, since the window is built for it.
+        CsiProMax.AiMode.Load(args);
+        CsiProMax.App.Reopened = args.Contains("--after-pid");
         if (Array.IndexOf(args, "--installed-in") is var origin and >= 0 && origin + 1 < args.Length) ToolsMenu.InstalledIn = args[origin + 1];
         if (!program.Ready)
         {
@@ -178,6 +181,19 @@ public static class Program
                     window.Close();
                 }
                 catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or InvalidOperationException) { Note("switch to the newer version", ex); }
+            };
+            // The AI chat switched on or off in the window: this version starts again with it, read from its file.
+            CsiProMax.App.Restart = () =>
+            {
+                if (Environment.ProcessPath is not { } exe) return;
+                try
+                {
+                    var next = Start(exe, AppContext.BaseDirectory, args.Where(a => a != "--no-ai").ToArray(), Environment.ProcessId);
+                    next.CreateNoWindow = true;
+                    Process.Start(next)?.Dispose();
+                    window.Close();
+                }
+                catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or InvalidOperationException) { Note("start again", ex); }
             };
             // A version downloaded while an older window was busy, or by another window: used as soon as this one is idle.
             window.ContentRendered += (_, _) => CsiProMax.App.SwitchWhenIdle();
