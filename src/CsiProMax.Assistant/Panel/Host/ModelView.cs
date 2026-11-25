@@ -24,10 +24,13 @@ internal static class ModelView
     /// The Modeler's hand edits (HandModel): run on the window's thread, one at a time with the chat's own tool calls,
     /// so the two never change the model at once.
     /// </summary>
-    internal static async Task<(byte[] Body, string ContentType)?> PostAsync(string path, byte[] body)
+    internal static Task<(byte[] Body, string ContentType)?> PostAsync(string path, byte[] body) =>
+        path == "chat" ? ChatAsync(body) : path == "edit" ? EditAsync(body) : Task.FromResult<(byte[] Body, string ContentType)?>(null);
+
+    // Apart from PostAsync and ChatAsync, which are reached without WPF (the tests and the field test, chat off).
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static async Task<(byte[] Body, string ContentType)?> EditAsync(byte[] body)
     {
-        if (path == "chat") return await ChatAsync(body).ConfigureAwait(false);
-        if (path != "edit") return null;
         var dispatcher = App.Dispatcher;
         using var request = System.Text.Json.JsonDocument.Parse(body);
         var element = request.RootElement.Clone();
@@ -42,9 +45,12 @@ internal static class ModelView
     internal static Task<(byte[] Body, string ContentType)?> ChatAsync(byte[] body) => ChatAsync(body, AiMode.On);
 
     /// <param name="on">Whether the AI chat is on in this window (AiMode.On; the field test asks with it off).</param>
-    internal static async Task<(byte[] Body, string ContentType)?> ChatAsync(byte[] body, bool on)
+    internal static Task<(byte[] Body, string ContentType)?> ChatAsync(byte[] body, bool on) =>
+        on ? ChatOnAsync(body) : Task.FromResult<(byte[] Body, string ContentType)?>((Encoding.UTF8.GetBytes("{\"off\":true}"), "application/json"));
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static async Task<(byte[] Body, string ContentType)?> ChatOnAsync(byte[] body)
     {
-        if (!on) return (Encoding.UTF8.GetBytes("{\"off\":true}"), "application/json");
         var after = 0;
         string? send = null;
         using (var request = System.Text.Json.JsonDocument.Parse(body.Length == 0 ? "{}"u8.ToArray() : body))
