@@ -25,7 +25,7 @@ internal sealed class MainWindow : Window
     public MainWindow()
     {
         _open = this;
-        Title = "ETABS ProMax";
+        Title = EtabsProMax.App.Product;
         MinWidth = 340;
         MinHeight = 420;
         if (Brand.Icon is { } icon) Icon = icon;
@@ -89,6 +89,21 @@ internal sealed class MainWindow : Window
         Add(chat, "_Notes…", OpenNotes);
         Add(chat, "_Routines…", Chat.ChatPane.OpenRoutinesWindow);
         Add(chat, "_Team performance…", () => { var w = new CrewPerformanceWindow(); Brand.Prepare(w); w.Show(); });
+
+        var view = Top("_View");
+        Add(view, "Open the _3D view", ModelView.Open);
+        if (EtabsProMax.App.Modeler)
+            Add(view, "Open the _models folder", () =>
+            {
+                Directory.CreateDirectory(EtabsProMax.Assistant.Etabs.OfflineEtabs.DefaultFolder);
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(EtabsProMax.Assistant.Etabs.OfflineEtabs.DefaultFolder) { UseShellExecute = true })?.Dispose();
+            });
+        else
+        {
+            view.Items.Add(new Separator());
+            Add(view, "Open the _Modeler (no ETABS needed)", ModelView.StartModeler);
+        }
+        Add(view, "Put a Modeler _shortcut on the desktop", () => TaskDialog.Show("ETABS ProMax", $"The shortcut is on your desktop:\n{ModelView.MakeModelerShortcut()}\n\nIt starts the Modeler with no ETABS open."));
 
         var help = Top("_Help");
         Add(help, "_Report a bug…", () => { if (EtabsProMax.App.Etabs is { } etabs) Bugs.BugReport.Command(etabs); });

@@ -37,6 +37,12 @@ public static class App
     /// <summary>True in the demo (a small model in memory, no ETABS).</summary>
     internal static bool Demo { get; private set; }
 
+    /// <summary>True in the Modeler: ETABS ProMax's own model with no ETABS behind it, saved as ETABS text files.</summary>
+    internal static bool Modeler => Etabs?.Link is EtabsProMax.Assistant.Etabs.OfflineEtabs;
+
+    /// <summary>What the window and the chat call themselves.</summary>
+    internal static string Product => Modeler ? "ETABS ProMax Modeler" : "ETABS ProMax";
+
     /// <summary>Sketch ProMax's shared-tools mode; never on here.</summary>
     internal static bool Shared => false;
 
@@ -61,7 +67,7 @@ public static class App
         Dispatcher.Initialize(Etabs);
         Host.ModelWatch.Start(link);
         DropForeignHistory();
-        var registry = ToolRegistry.CreateDefault();
+        var registry = ToolRegistry.CreateDefault(Modeler);
         Bridge = new BridgeServer(registry, Dispatcher, ETABSYear);
         Bridge.Start();
         _started = true;

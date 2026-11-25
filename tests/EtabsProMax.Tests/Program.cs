@@ -264,7 +264,7 @@ Test("a file that is not an ETABS text file", () =>
 JsonElement J(string json) => JsonDocument.Parse(json).RootElement;
 // The tools as the panel runs them (ModelTool), with the asking the approvals do: always for deletes, saves and
 // analysis runs, and for every change when the engineer set it so.
-Harness Endpoint(MemoryEtabs e, bool allow = true, bool ask = false, List<string>? asked = null) => new(e, allow, ask, asked);
+Harness Endpoint(IEtabsLink e, bool allow = true, bool ask = false, List<string>? asked = null) => new(e, allow, ask, asked);
 JsonNode Call(Harness mcp, string tool, string args)
 {
     var (text, failed) = mcp.Call(tool, J(args));
@@ -453,6 +453,66 @@ Test("pack: the model, ETABS's tables and the checks go into one file and the Vi
     finally { if (Directory.Exists(folder)) Directory.Delete(folder, true); }
 });
 
+Test("modeler: a building is modelled with no ETABS and saved as an ETABS text file", () =>
+{
+    var folder = Path.Combine(Path.GetTempPath(), "epm-modeler-" + Guid.NewGuid().ToString("N"));
+    var before = OfflineEtabs.DefaultFolder;
+    OfflineEtabs.DefaultFolder = folder;
+    try
+    {
+        var o = new OfflineEtabs();
+        var asked = new List<string>();
+        var mcp = Endpoint(o, asked: asked);
+        Equal(0, (int)Call(mcp, "new_model", """{"title":"Office block"}""")["stories"]!, "an empty model");
+        Equal(1, asked.Count, "replacing the model is asked about");
+        Call(mcp, "add_stories", """{"stories":[{"name":"L1","height":4},{"name":"L2","height":3.2}]}""");
+        Equal(4, (int)Call(mcp, "add_grids", """{"grids":[{"label":"A","direction":"X","coordinate":0},{"label":"B","direction":"X","coordinate":6},{"label":"1","direction":"Y","coordinate":0},{"label":"2","direction":"Y","coordinate":5}]}""")["grids"]!, "grids");
+        Check(Refused(mcp, "add_grids", """{"grids":[{"label":"A","direction":"X","coordinate":9}]}""").Contains("already"), "a grid label twice");
+        Call(mcp, "add_section", """{"name":"C400","kind":"column","depth":0.4,"width":0.4}""");
+        Call(mcp, "add_section", """{"name":"B250x500","kind":"beam","depth":0.5,"width":0.25}""");
+        Call(mcp, "add_section", """{"name":"S180","kind":"slab","thickness":0.18}""");
+        Call(mcp, "add_section", """{"name":"W200","kind":"wall","thickness":0.2}""");
+        Check(Refused(mcp, "add_section", """{"name":"X","kind":"slab","thickness":0.2,"material":"Gold"}""").Contains("C30/37"), "an unknown material lists the real ones");
+        Equal(8, (int)Call(mcp, "add_columns", """{"points":[[0,0],[6,0],[6,5],[0,5]],"section":"C400"}""")["added"]!, "columns on both stories");
+        var beams = Call(mcp, "add_beams", """{"lines":[[0,0,6,0],[6,0,6,5],[6,5,0,5],[0,5,0,0]],"section":"B250x500"}""");
+        Equal(8, (int)beams["added"]!, "beams"); Equal("B1@L1", (string)beams["names"]![0]!, "names carry the story");
+        var slabs = Call(mcp, "add_slabs", """{"outlines":[[[0,0],[6,0],[6,5],[0,5]]],"section":"S180"}""");
+        Equal(2, (int)Call(mcp, "add_walls", """{"lines":[[0,0,0,5]],"section":"W200"}""")["added"]!, "a wall panel per story");
+        Equal(4, (int)Call(mcp, "set_supports", """{"type":"fixed","at_base":true}""")["done"]!, "supports at the base");
+        Call(mcp, "add_load_pattern", """{"name":"SDL","type":"Super Dead"}""");
+        Equal(2, (int)Call(mcp, "set_loads", $$"""{"pattern":"SDL","value":2.5,"areas":["{{slabs["names"]![0]}}","{{slabs["names"]![1]}}"]}""")["done"]!, "slab loads");
+        Call(mcp, "add_combination", """{"name":"ULS","cases":[{"case":"Dead","factor":1.35},{"case":"SDL","factor":1.35},{"case":"Live","factor":1.5}]}""");
+        var context = Call(mcp, "get_model_context", "{}");
+        Equal(8, (int)context["counts"]!["columns"]!, "columns"); Equal(2, (int)context["counts"]!["walls"]!, "walls"); Equal("Modeler (no ETABS)", (string)context["etabs"]!, "says it is not ETABS");
+        Near(7.2, (double)context["stories"]![2]!["elevation"]!, "story levels");
+        Equal(0, (int)Call(mcp, "check_model", "{}")["errors"]!, "no errors");
+        Check(Call(mcp, "model_quantities", "{}")["rows"]!.AsArray().Count >= 4, "quantities by section");
+        Equal(1, (int)Call(mcp, "delete_objects", """{"frames":["B1@L2"]}""")["done"]!, "one beam on one story deleted");
+        Equal(7, (int)Call(mcp, "query_objects", """{"kind":"beam","limit":0}""")["count"]!, "seven beams left");
+        Check(Refused(mcp, "run_analysis", "{}").Contains("no ETABS"), "the Modeler never analyses");
+        Equal("not available", (string)Call(mcp, "check_drift", "{}")["status"]!, "and has no results");
+        Check(Refused(mcp, "add_columns", """{"points":[[1,1]],"stories":["L9"],"section":"C400"}""").Contains("L1, L2"), "unknown story");
+
+        var revision = o.Revision;
+        var saved = Call(mcp, "save_model_as", """{"name":"office"}""");
+        var file = (string)saved["file"]!;
+        Check(file.EndsWith("office.e2k") && File.Exists(file) && File.Exists(Path.ChangeExtension(file, ".epm")), "both files written");
+        Check(o.Revision > revision && !o.Unsaved, "saved");
+        var back = E2kReader.ReadFile(file);
+        Equal(15, back.LineAssigns.Count, "frames in the ETABS file"); Equal(4, back.AreaAssigns.Count, "areas in the ETABS file");
+        Check(back.FrameSections.Exists(x => x.Name == "C400") && back.Combos.Exists(c => c.Name == "ULS") && back.AreaLoads.Count == 2, "sections, combination and loads are in it");
+        Check(ModelChecks.Run(back).TrueForAll(f => f.Severity == Severity.Warning), "the file reads back with no errors");
+        Equal(15, (int)Call(mcp, "open_model_file", $$"""{"path":{{JsonSerializer.Serialize(file)}}}""")["frames"]!, "the file opens again");
+        Equal(4, (int)Call(mcp, "new_model", """{"title":"Frame","template":"concrete_frame","x_spans":[6,6],"y_spans":[5],"stories":4,"story_height":3.2}""")["stories"]!, "the template");
+
+        var page = Pack.LiveViewerHtml(Pack.Build(o, [], [], [], null, null, withTables: false).Content, o.Revision);
+        Check(page.Contains("fetch('model?rev='") && page.Contains("\"model\":\"Frame\""), "the live view page carries the model and asks for changes");
+        Check(Refused(Endpoint(new MemoryEtabs()), "add_stories", """{"stories":[{"name":"L3","height":3}]}""").Contains("Modeler"), "Modeler tools say so when ETABS is behind");
+        Check(EtabsProMax.Tools.ToolRegistry.CreateDefault(true).IsBuiltIn("new_model") && !EtabsProMax.Tools.ToolRegistry.CreateDefault().IsBuiltIn("new_model"), "Modeler tools are offered in the Modeler only");
+    }
+    finally { OfflineEtabs.DefaultFolder = before; if (Directory.Exists(folder)) Directory.Delete(folder, true); }
+});
+
 Test("assistant: the engineer is asked before deletes, saves and runs", () =>
 {
     var e = new MemoryEtabs();
@@ -594,11 +654,11 @@ namespace ETABSv1
 
 
 /// <summary>Runs a tool as the panel does, with the approvals' asking.</summary>
-sealed class Harness(MemoryEtabs etabs, bool allow, bool ask, List<string>? asked)
+sealed class Harness(IEtabsLink etabs, bool allow, bool ask, List<string>? asked)
 {
     public (string Text, bool Failed) Call(string name, JsonElement args)
     {
-        var found = EtabsTools.All.FirstOrDefault(t => t.Name == name);
+        var found = EtabsTools.All.Concat(ModelerTools.All).FirstOrDefault(t => t.Name == name);
         if (found is null) return ($"There is no tool '{name}'.", true);
         var tool = new EtabsProMax.Tools.ModelTool(found);
         var input = new EtabsProMax.Tools.ToolArgs(JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(args.GetRawText())!);

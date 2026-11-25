@@ -22,7 +22,8 @@ public sealed class ToolRegistry
 
     public bool IsBuiltIn(string name) => _tools.ContainsKey(name);
 
-    public static ToolRegistry CreateDefault()
+    /// <param name="modeler">True in the Modeler (no ETABS): its file, story, grid and section tools are added.</param>
+    public static ToolRegistry CreateDefault(bool modeler = false)
     {
         var registry = new ToolRegistry(
     [
@@ -49,6 +50,8 @@ public sealed class ToolRegistry
     ]);
         // The ETABS model: read, build, load, analyse (Assistant/Tools/EtabsTools).
         foreach (var tool in EtabsProMax.Assistant.Tools.EtabsTools.All) registry.Add(new ModelTool(tool));
+        if (modeler)
+            foreach (var tool in EtabsProMax.Assistant.Tools.ModelerTools.All) registry.Add(new ModelTool(tool));
         // Recipes replay other tools, so they need the registry itself.
         registry.Add(new SaveRecipeTool(registry));
         registry.Add(new RunRecipeTool(registry));

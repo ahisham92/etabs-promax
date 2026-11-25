@@ -44,6 +44,14 @@ internal sealed class McpHttpServer : IDisposable
     /// <summary>The secret every request must carry (Authorization: Bearer), new for each server.</summary>
     public string Token { get; }
 
+    /// <summary>The secret in the 3D view's address (not the tools' secret, which never goes to a browser).</summary>
+    public string ViewToken { get; } = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N");
+
+    /// <summary>Serves the 3D view: given the path after the secret and the query, the body and its type (an empty body: nothing new).</summary>
+    public Func<string, string, (byte[] Body, string ContentType)?>? ViewHandler { get; set; }
+
+    public string ViewUrl => $"http://127.0.0.1:{Port}/view/{ViewToken}/";
+
     public int Port { get; private set; }
 
     public string Url => $"http://127.0.0.1:{Port}/mcp";
@@ -125,6 +133,17 @@ internal sealed class McpHttpServer : IDisposable
 
     private async Task RouteAsync(HttpRequest request, NetworkStream stream, CancellationToken stop)
     {
+        // The 3D view of the model, for a browser on this PC: its own secret in the address, and it only reads.
+        if (request.Method == "GET" && request.Path.StartsWith("/view/" + ViewToken + "/", StringComparison.Ordinal))
+        {
+            (byte[] Body, string ContentType)? page = null;
+            try { page = ViewHandler?.Invoke(request.Path.Substring(7 + ViewToken.Length), request.Query); }
+            catch (Exception) { /* answered as not found */ }
+            await WriteAsync(stream, page is { } p
+                ? HttpRequest.Response(p.Body.Length == 0 ? 204 : 200, p.Body, p.ContentType, new Dictionary<string, string> { ["Cache-Control"] = "no-store" })
+                : HttpRequest.Response(404, Json(new { error = "not found" }), "application/json")).ConfigureAwait(false);
+            return;
+        }
         if (request.Path != "/mcp")
         {
             await WriteAsync(stream, HttpRequest.Response(404, Json(new { error = "not found" }), "application/json")).ConfigureAwait(false);
@@ -490,6 +509,7 @@ internal sealed class HttpRequest
 
     /// <summary>The path, without the query.</summary>
     public string Path { get; private set; } = "";
+    public string Query { get; private set; } = "";
 
     public byte[] Body { get; private set; } = [];
 
@@ -505,7 +525,7 @@ internal sealed class HttpRequest
         if (line is null) return null;
         var parts = line.Split(' ');
         if (parts.Length != 3 || !parts[2].StartsWith("HTTP/1.", StringComparison.Ordinal)) throw new Refused(400, "bad request line");
-        var request = new HttpRequest { Method = parts[0], Path = parts[1].Split('?')[0] };
+        var request = new HttpRequest { Method = parts[0], Path = parts[1].Split('?')[0], Query = parts[1].Contains('?') ? parts[1].Substring(parts[1].IndexOf('?') + 1) : "" };
         var headSize = line.Length;
         while (true)
         {
@@ -576,7 +596,7 @@ internal sealed class HttpRequest
 
     private static string Reason(int status) => status switch
     {
-        200 => "OK", 202 => "Accepted", 400 => "Bad Request", 401 => "Unauthorized", 403 => "Forbidden", 404 => "Not Found",
+        200 => "OK", 202 => "Accepted", 204 => "No Content", 400 => "Bad Request", 401 => "Unauthorized", 403 => "Forbidden", 404 => "Not Found",
         405 => "Method Not Allowed", 413 => "Payload Too Large", 431 => "Request Header Fields Too Large", _ => "Error",
     };
 

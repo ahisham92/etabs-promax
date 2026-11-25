@@ -67,7 +67,7 @@ internal static class ApprovalPolicy
 
     /// <summary>ETABS tools that are asked each time unless the level is "Always allow": deletes, saving over the file, running or unlocking the analysis.</summary>
     private static readonly HashSet<string> AsksEachTime = new(
-        EtabsProMax.Assistant.Tools.EtabsTools.All.Where(t => t.Ask == EtabsProMax.Assistant.Tools.Ask.Always).Select(t => t.Name), StringComparer.Ordinal);
+        EtabsProMax.Assistant.Tools.EtabsTools.All.Concat(EtabsProMax.Assistant.Tools.ModelerTools.All).Where(t => t.Ask == EtabsProMax.Assistant.Tools.Ask.Always).Select(t => t.Name), StringComparer.Ordinal);
 
     /// <summary>Tools that run a saved recipe: asked when its steps are new to this PC (<see cref="ApprovalFacts.NewCode"/>).</summary>
     private static readonly HashSet<string> RunsRecipe = new(StringComparer.Ordinal) { "run_recipe", "batch_run_recipe" };

@@ -10,15 +10,28 @@ namespace EtabsProMax.Assistant;
 /// .NET 8 that ETABS 23 itself runs on: dotnet EtabsProMax.dll, or from ETABS's Tools menu (the plug-in).
 ///   --etabs-pid N   the ETABS window this was started from (the plug-in passes it), when several are open
 ///   --demo          a small model in memory instead of ETABS, to see the window on a PC without ETABS
+///   --modeler [file] the Modeler: ETABS ProMax's own model with no ETABS, saved as .e2k for licensed ETABS to import
 ///   --selftest      check the link to ETABS call by call and print the result (--changes also adds and deletes objects)
 /// </summary>
 public static class Program
 {
+    /// <summary>The Modeler's model: the file named after --modeler when there is one and it reads, otherwise a new model.</summary>
+    private static OfflineEtabs OpenModeler(string[] args)
+    {
+        var at = Array.IndexOf(args, "--modeler");
+        var file = at + 1 < args.Length && !args[at + 1].StartsWith("--", StringComparison.Ordinal) ? args[at + 1] : null;
+        if (file is not null && File.Exists(file))
+            try { return new OfflineEtabs(OfflineEtabs.Load(file), file.EndsWith(".e2k", StringComparison.OrdinalIgnoreCase) ? file : ""); }
+            catch (Exception ex) when (ex is IOException or EtabsProMax.E2k.E2kFormatException or System.Text.Json.JsonException or InvalidDataException) { Note("modeler file", ex); }
+        return new OfflineEtabs();
+    }
+
     [STAThread]
     public static int Main(string[] args)
     {
         int? etabsPid = Array.IndexOf(args, "--etabs-pid") is var at and >= 0 && at + 1 < args.Length && int.TryParse(args[at + 1], out var pid) ? pid : null;
-        var demo = args.Contains("--demo");
+        var modeler = args.Contains("--modeler");
+        var demo = args.Contains("--demo") || modeler;
         if (args.Contains("--selftest"))
         {
             using var check = new ComEtabs(etabsPid);
@@ -38,7 +51,7 @@ public static class Program
             }
 
             // One window per ETABS: started again from ETABS's menu, the open window comes forward.
-            var name = "EtabsProMax." + (demo ? "demo" : etabsPid?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "any");
+            var name = "EtabsProMax." + (modeler ? "modeler" : demo ? "demo" : etabsPid?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "any");
             using var one = new Mutex(true, name, out var first);
             using var show = new EventWaitHandle(false, EventResetMode.AutoReset, name + ".show");
             if (!first) { show.Set(); return 0; }
@@ -51,7 +64,7 @@ public static class Program
                 return 2;
             }
             using var com = new ComEtabs(etabsPid);
-            IEtabsLink link = demo ? new MemoryEtabs() : com;
+            IEtabsLink link = modeler ? OpenModeler(args) : demo ? new MemoryEtabs() : com;
             var app = new System.Windows.Application { ShutdownMode = System.Windows.ShutdownMode.OnMainWindowClose };
             app.DispatcherUnhandledException += (_, e) => Note("window", e.Exception);
             AppDomain.CurrentDomain.UnhandledException += (_, e) => Note("unhandled", e.ExceptionObject as Exception);

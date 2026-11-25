@@ -87,7 +87,9 @@ internal static class ChatMcp
             () => Agent.SystemPrompt.Build(AgentSettings.Load().FirmStandards),
             _ => ConnectorTools.Compose(etabsTools.Value, LearnedTools.Folder),
             (session, name, args, ct) => Targets(session, bridge).CallAsync(name, args, ct));
-        return new McpHttpServer(endpoint);
+        var server = new McpHttpServer(endpoint);
+        Host.ModelView.Attach(server);
+        return server;
     }
 
     /// <summary>The session's way to the ETABS windows: it keeps which window and model Claude works on, as a connector does.</summary>

@@ -30,7 +30,7 @@ public static class Pack
 
     /// <param name="extraTables">More tables to take, by name or key (for example "Element Forces - Beams").</param>
     public static Built Build(IEtabsLink e, IReadOnlyList<string> extraTables, IReadOnlyList<string> cases, IReadOnlyList<string> combos,
-        JsonObject? checks, JsonArray? comments, int mostRows = DefaultMostRows, string by = "")
+        JsonObject? checks, JsonArray? comments, int mostRows = DefaultMostRows, string by = "", bool withTables = true)
     {
         var info = e.Info();
         var notes = new List<string>();
@@ -64,7 +64,7 @@ public static class Pack
             ["load_cases"] = Texts(e.LoadCases()), ["combinations"] = Texts(e.Combos()),
         };
 
-        var known = e.Tables();
+        var known = withTables ? e.Tables() : [];
         var wanted = new List<TableName>();
         foreach (var name in UsualTables)
             if (known.FirstOrDefault(t => !t.Empty && (ResultTools.Norm(t.Name) == ResultTools.Norm(name) || ResultTools.Norm(t.Key) == ResultTools.Norm(name))) is { } t) wanted.Add(t);
@@ -95,7 +95,7 @@ public static class Pack
             }
             tables[t.Name] = table;
         }
-        if (tables.Count <= 1 && !info.Locked) notes.Add("The analysis has not been run, so the pack holds the model without results.");
+        if (withTables && tables.Count <= 1 && !info.Locked) notes.Add("The analysis has not been run, so the pack holds the model without results.");
 
         var content = new JsonObject { ["manifest"] = manifest, ["model"] = model, ["checks"] = checks, ["comments"] = comments ?? [], ["tables"] = tables };
         using var stream = new MemoryStream();
@@ -160,6 +160,19 @@ public static class Pack
         // Inside a script element only "</" and "<!--" can end or confuse it.
         var json = content.ToJsonString().Replace("</", "<\\/", StringComparison.Ordinal).Replace("<!--", "<\\u0021--", StringComparison.Ordinal);
         return html.Replace(slot, "<script id=\"pack\" type=\"application/json\">" + json + "</script>", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The Viewer page for the model that is open now, served on this PC: it asks for the model again whenever the
+    /// revision moves, and keeps the reader's view.
+    /// </summary>
+    public static string LiveViewerHtml(JsonObject content, int revision)
+    {
+        var html = ViewerHtml(content);
+        var live = "<script>(function(){let rev=" + revision.ToString(CultureInfo.InvariantCulture) + ";setInterval(async()=>{try{const r=await fetch('model?rev='+rev,{cache:'no-store'});" +
+                   "if(r.status!==200)return;const j=await r.json();rev=j.rev;const v=Object.assign({},view);epmLoad(j.pack);" +
+                   "Object.assign(view,{yaw:v.yaw,pitch:v.pitch,zoom:v.zoom,panX:v.panX,panY:v.panY,mode:v.mode});draw();}catch(e){}},1500);})();</script>";
+        return html.Replace("</body>", live + "</body>", StringComparison.Ordinal);
     }
 
     /// <summary>The comments in a pack (.epmx) or in a comments file the Viewer saved (.json).</summary>
