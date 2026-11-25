@@ -55,6 +55,12 @@ public static class Program
         }
         var modeler = args.Contains("--modeler");
         var demo = args.Contains("--demo") || modeler;
+        if (Array.IndexOf(args, "--test-sap2000") is var sapTest and >= 0)
+        {
+            var s2k = sapTest + 1 < args.Length ? args[sapTest + 1] : "test-frame.s2k";
+            var folder = sapTest + 2 < args.Length ? args[sapTest + 2] : Path.Combine(Path.GetTempPath(), "CsiProMax-sap-test");
+            return CsiProMax.Assistant.Sap2000.SapScratchTest.Run(s2k, folder);
+        }
         if (args.Contains("--selftest"))
         {
             using var check = new ComEtabs(etabsPid, program);
