@@ -18,19 +18,6 @@ static class FieldRun048Tests
             Check(!ScratchProgram.SameName("C:/a/cpm-field-test-111111.edb", "C:/a/cpm-field-test-949e09.edb"), "another run's scratch model was taken for this one's");
         });
 
-        yield return ("field test 0.4.8: units come from GetPresentUnits when GetPresentUnits_2 gives none (SAP2000 26)", () =>
-        {
-            Check(ComEtabs.Units(6) == (4, 6, 2), "kN_m_C");
-            Check(ComEtabs.Units(10) == (3, 6, 2), "N_m_C");
-            Check(ComEtabs.Units(4) == (2, 2, 1), "kip_ft_F");
-            Check(ComEtabs.Units(13) == (4, 5, 2), "kN_cm_C");
-            Check(ComEtabs.Units(0) == (0, 0, 0) && ComEtabs.Units(99) == (0, 0, 0), "an unknown number gives nothing");
-            var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Etabs", "ComEtabs.cs"));
-            var two = source.IndexOf("GetPresentUnits_2(", StringComparison.Ordinal);
-            var one = source.IndexOf("Convert.ToInt32(m.GetPresentUnits())", StringComparison.Ordinal);
-            Check(two > 0 && one > two, "Info does not fall back to GetPresentUnits after GetPresentUnits_2");
-        });
-
         yield return ("field test 0.4.8: SAP2000's design summaries read the group ALL, not the selection", () =>
         {
             var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Sap2000", "SapTools.cs"));

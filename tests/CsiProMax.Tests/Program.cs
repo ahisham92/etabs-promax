@@ -1063,6 +1063,26 @@ Test("SAP2000: results through the analysis results", () =>
     Check(!modal["passes"]!.GetValue<bool>(), "85% in UY is under 90%");
 });
 
+Test("link: SAP2000 that answers an empty list with no list at all, and units only by the older call", () =>
+{
+    // Ahmed's SAP2000 26 field test (0.4.8): a scratch model with no combinations gave a null list, so model_snapshot
+    // failed with "Value cannot be null (source)"; GetPresentUnits_2 left the units empty.
+    using var link = new ComEtabs(CsiProgram.Sap2000, () => new CpmFakes.SapLikeModel());
+    Equal(0, link.Combos().Count, "no combinations");
+    Equal(1, link.LoadCases().Count, "one load case");
+    var info = link.Info();
+    Equal("kN", info.Force, "force"); Equal("m", info.Length, "length"); Equal("C", info.Temperature, "temperature");
+});
+
+Test("link: units from the older one-value call, by name or number", () =>
+{
+    Equal(("kN", "m", "C"), ComEtabs.Units("kN_m_C"), "by name");
+    Equal(("kN", "m", "C"), ComEtabs.Units(6), "by number");
+    Equal(("tonf", "cm", "C"), ComEtabs.Units(16), "tonne");
+    Equal(("kip", "ft", "F"), ComEtabs.Units("kip_ft_F"), "US");
+    Equal(("", "", ""), ComEtabs.Units(99), "unknown");
+});
+
 Test("link: a call that fails comes out as an EtabsException, never wrapped", () =>
 {
     using var link = new ComEtabs(CsiProgram.Sap2000, () => throw new EtabsException("The scratch SAP2000 window is no longer there."));
@@ -1656,4 +1676,24 @@ public sealed class SapStandIn : ICsiLink
     public void RunAnalysis() { }
     public void Save() { }
     public void Refresh() { }
+}
+
+
+namespace CpmFakes
+{
+    // Shaped like SAP2000 26 on Ahmed's PC: lists with nothing in them come back as null, and the three-value units call gives nothing.
+    public sealed class NameList(string[]? names)
+    {
+        public int GetNameList(ref int count, ref string[]? list) { count = names?.Length ?? 0; list = names; return 0; }
+    }
+    public sealed class SapLikeModel
+    {
+        public NameList RespCombo { get; } = new(null);
+        public NameList LoadCases { get; } = new(["DEAD"]);
+        public int GetVersion(ref string version, ref double number) { version = "26.3.0"; number = 26.3; return 0; }
+        public int GetPresentUnits_2(ref int force, ref int length, ref int temperature) => 1;
+        public int GetPresentUnits() => 6;
+        public string GetModelFilename(bool path) => @"C:\x\cpm.sdb";
+        public bool GetModelIsLocked() => false;
+    }
 }
