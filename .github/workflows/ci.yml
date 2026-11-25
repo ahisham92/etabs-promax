@@ -16,15 +16,17 @@ jobs:
       - run: dotnet build EtabsProMax.sln -c Release
       - run: dotnet run -c Release --no-build --project tests/EtabsProMax.Tests
   assistant:
-    # The assistant as one program for Windows, kept with the run so it can be downloaded and tried.
-    runs-on: windows-latest
+    # The assistant and its ETABS plug-in as one folder of DLLs (no .exe), kept with the run so it can be tried.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
-      - run: dotnet publish src/EtabsProMax.Assistant -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o publish
+      - run: dotnet publish src/EtabsProMax.Assistant -c Release -p:DebugType=none -o "publish/ETABS ProMax"
+      - run: dotnet publish src/EtabsProMax.Plugin -c Release -p:DebugType=none -o "publish/ETABS ProMax"
+      - run: test ! -e "publish/ETABS ProMax/ETABSv1.dll" && ! ls "publish/ETABS ProMax" | grep -i '\.exe$'
       - uses: actions/upload-artifact@v4
         with:
-          name: EtabsProMax-win-x64
-          path: publish/EtabsProMax.exe
+          name: ETABS-ProMax
+          path: publish

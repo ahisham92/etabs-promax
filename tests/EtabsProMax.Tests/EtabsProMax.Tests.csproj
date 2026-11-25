@@ -10,6 +10,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/EtabsProMax.Core/EtabsProMax.Core.csproj" />
     <ProjectReference Include="../../src/EtabsProMax.Assistant/EtabsProMax.Assistant.csproj" />
+    <ProjectReference Include="../../src/EtabsProMax.Plugin/EtabsProMax.Plugin.csproj" />
     <None Include="samples/**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

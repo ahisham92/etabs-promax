@@ -45,7 +45,8 @@ public sealed class ComEtabs : IEtabsLink, IDisposable
         catch (EtabsException) { throw; }
     }
 
-    private void On(string what, Action<dynamic> body) => On<bool>(what, m => { body(m); return true; });
+    /// <summary>The same for work that gives nothing back. Its own name, so a call can never be mistaken for one that does.</summary>
+    private void Do(string what, Action<dynamic> body) => On<bool>(what, m => { body(m); return true; });
 
     private dynamic Model()
     {
@@ -156,9 +157,9 @@ public sealed class ComEtabs : IEtabsLink, IDisposable
             .Select(i => (types[i] switch { 1 => "point", 2 => "frame", 5 => "area", 7 => "link", _ => "other" }, names[i])).ToList();
     });
 
-    public void ClearSelection() => On("clear the selection", m => Ok(m.SelectObj.ClearSelection(), "clear the selection"));
+    public void ClearSelection() => Do("clear the selection", m => { Ok(m.SelectObj.ClearSelection(), "clear the selection"); });
 
-    public void Select(string kind, string name) => On("select", m =>
+    public void Select(string kind, string name) => Do("select", m =>
     {
         Ok(kind switch
         {
@@ -212,10 +213,10 @@ public sealed class ComEtabs : IEtabsLink, IDisposable
         return name;
     });
 
-    public void SetFrameSection(string name, string section) => On("change a section", m => Ok(m.FrameObj.SetSection(name, section, 0, 0.0, 0.0), $"give frame {name} the section {section}"));
-    public void SetAreaSection(string name, string section) => On("change a section", m => Ok(m.AreaObj.SetProperty(name, section, 0), $"give area {name} the section {section}"));
+    public void SetFrameSection(string name, string section) => Do("change a section", m => { Ok(m.FrameObj.SetSection(name, section, 0, 0.0, 0.0), $"give frame {name} the section {section}"); });
+    public void SetAreaSection(string name, string section) => Do("change a section", m => { Ok(m.AreaObj.SetProperty(name, section, 0), $"give area {name} the section {section}"); });
 
-    public void Delete(string kind, string name) => On("delete", m =>
+    public void Delete(string kind, string name) => Do("delete", m =>
     {
         Ok(kind switch
         {
@@ -225,13 +226,13 @@ public sealed class ComEtabs : IEtabsLink, IDisposable
         }, $"delete {kind} {name}");
     });
 
-    public void SetRestraint(string point, bool[] restraint) => On("set a support", m =>
+    public void SetRestraint(string point, bool[] restraint) => Do("set a support", m =>
     {
         bool[] value = restraint.ToArray();
         Ok(m.PointObj.SetRestraint(point, ref value, 0), $"set the support of point {point}");
     });
 
-    public void AddLoadPattern(string name, string type, double selfWeight) => On("add a load pattern", m =>
+    public void AddLoadPattern(string name, string type, double selfWeight) => Do("add a load pattern", m =>
     {
         var value = EtabsWords.PatternTypes.FirstOrDefault(t => string.Equals(t.Name, type, StringComparison.OrdinalIgnoreCase)).Value;
         if (value == 0) throw new EtabsException($"'{type}' is not a load pattern type. Use one of: {string.Join(", ", EtabsWords.PatternTypes.Select(t => t.Name))}.");
@@ -239,13 +240,11 @@ public sealed class ComEtabs : IEtabsLink, IDisposable
     });
 
     // Direction 10 is gravity; type 1 is a force per length.
-    public void SetFrameLoad(string frame, string pattern, double value, bool replace) => On("load a frame", m =>
-        Ok(m.FrameObj.SetLoadDistributed(frame, pattern, 1, 10, 0.0, 1.0, value, value, "Global", true, replace, 0), $"put the load on frame {frame}"));
+    public void SetFrameLoad(string frame, string pattern, double value, bool replace) => Do("load a frame", m => { Ok(m.FrameObj.SetLoadDistributed(frame, pattern, 1, 10, 0.0, 1.0, value, value, "Global", true, replace, 0), $"put the load on frame {frame}"); });
 
-    public void SetAreaLoad(string area, string pattern, double value, bool replace) => On("load an area", m =>
-        Ok(m.AreaObj.SetLoadUniform(area, pattern, value, 10, replace, "Global", 0), $"put the load on area {area}"));
+    public void SetAreaLoad(string area, string pattern, double value, bool replace) => Do("load an area", m => { Ok(m.AreaObj.SetLoadUniform(area, pattern, value, 10, replace, "Global", 0), $"put the load on area {area}"); });
 
-    public void AddCombo(string name, IReadOnlyList<(string Case, double Factor)> cases) => On("add a combination", m =>
+    public void AddCombo(string name, IReadOnlyList<(string Case, double Factor)> cases) => Do("add a combination", m =>
     {
         Ok(m.RespCombo.Add(name, 0), $"add the combination {name}");
         foreach (var (item, factor) in cases)
@@ -274,7 +273,7 @@ public sealed class ComEtabs : IEtabsLink, IDisposable
         return new TableData(fields, rows);
     });
 
-    public void RunAnalysis() => On("run the analysis", m => Ok(m.Analyze.RunAnalysis(), "run the analysis (the model must be saved first)"));
-    public void Save() => On("save the model", m => Ok(m.File.Save(""), "save the model"));
-    public void Refresh() => On("refresh the view", m => { try { m.View.RefreshView(0, false); } catch (Exception ex) when (ex is not COMException) { } });
+    public void RunAnalysis() => Do("run the analysis", m => { Ok(m.Analyze.RunAnalysis(), "run the analysis (the model must be saved first)"); });
+    public void Save() => Do("save the model", m => { Ok(m.File.Save(""), "save the model"); });
+    public void Refresh() => Do("refresh the view", m => { try { m.View.RefreshView(0, false); } catch (Exception ex) when (ex is not COMException) { } });
 }

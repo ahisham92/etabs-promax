@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using EtabsProMax.Assistant;
 using EtabsProMax.Assistant.Chat;
 using EtabsProMax.Assistant.Etabs;
 using EtabsProMax.Assistant.Mcp;
@@ -397,6 +398,43 @@ Test("assistant: ETABS's API is called by name, with numbers for its enums", () 
     Equal(7, (int)model.Add("x", 7), "a left-out value takes its default");
     try { model.Nope(); throw new Exception("accepted a method ETABS doesn't have"); }
     catch (MissingMethodException ex) { Check(ex.Message.Contains("cFakeModel has no Nope"), ex.Message); }
+});
+
+Test("assistant: the small server answers the window and Claude Code", () =>
+{
+    using var server = new MiniHttp(async call =>
+    {
+        if (call.Path == "/events") { await call.StartEventsAsync(); await call.EventAsync("{\"n\":1}"); await call.EventAsync(null); return; }
+        await call.JsonAsync($"{{\"method\":\"{call.Method}\",\"k\":\"{call.Query("k")}\",\"auth\":\"{call.Header("authorization")}\",\"body\":{call.Body.Length}}}");
+    });
+    server.Start();
+    using var http = new HttpClient();
+    var get = http.GetStringAsync(server.Address + "/x?k=a%20b").GetAwaiter().GetResult();
+    Check(get.Contains("\"method\":\"GET\"") && get.Contains("\"k\":\"a b\""), get);
+    var request = new HttpRequestMessage(HttpMethod.Post, server.Address + "/mcp") { Content = new StringContent(new string('x', 200_000)) };
+    request.Headers.Add("Authorization", "Bearer t");
+    var post = http.Send(request).Content.ReadAsStringAsync().GetAwaiter().GetResult();
+    Check(post.Contains("\"auth\":\"Bearer t\"") && post.Contains("\"body\":200000"), post);
+    var events = http.GetStringAsync(server.Address + "/events").GetAwaiter().GetResult();
+    Check(events.Contains("data: {\"n\":1}\n\n") && events.Contains(": keep-alive"), events);
+});
+
+Test("plug-in: the assistant is started with the dotnet ETABS runs on", () =>
+{
+    var root = Directory.CreateTempSubdirectory("epm").FullName;
+    var runtime = Directory.CreateDirectory(Path.Combine(root, "dotnet", "shared", "Microsoft.NETCore.App", "8.0.29")).FullName;
+    var folder = Directory.CreateDirectory(Path.Combine(root, "ETABS ProMax")).FullName;
+    string Message() { try { EtabsProMaxPlugin.Launcher.StartInfo(folder, runtime); return ""; } catch (IOException ex) { return ex.Message; } }
+    Check(Message().Contains("EtabsProMax.dll is missing"), "a plug-in copied alone says what is missing");
+    File.WriteAllText(Path.Combine(folder, "EtabsProMax.dll"), "");
+    Check(Message().Contains("was not found"), "no dotnet");
+    var dotnet = Path.Combine(root, "dotnet", OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
+    File.WriteAllText(dotnet, "");
+    var start = EtabsProMaxPlugin.Launcher.StartInfo(folder, runtime);
+    Equal(dotnet, start.FileName, "dotnet from three folders above the runtime");
+    Equal(Path.Combine(folder, "EtabsProMax.dll"), start.ArgumentList[0], "a path with a space is one argument");
+    Check(start.CreateNoWindow && !start.UseShellExecute, "no console window");
+    Directory.Delete(root, true);
 });
 
 var failed = 0;
