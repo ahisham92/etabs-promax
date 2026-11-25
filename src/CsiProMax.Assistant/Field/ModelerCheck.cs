@@ -82,13 +82,50 @@ public static class ModelerCheck
           await act("m:frameSections"); await wait(500);
           const addNew = document.querySelector('.dlg button[data-a="0"]');
           if (!addNew) return {fail: "the Frame Sections form has no Add button"};
-          addNew.click(); await wait(400);
+          addNew.click(); await wait(1000);
           const set = (sel, v) => { const e = document.querySelector(sel); if (!e) throw new Error("the form has no " + sel); e.value = v; e.dispatchEvent(new Event("input", {bubbles: true})); e.dispatchEvent(new Event("change", {bubbles: true})); };
-          set("#sN", "CPM-CHK450"); set("#sD", "0.45"); set("#sB", "0.3");
+          set("#sN", "CPM-CHK450"); set('#sDims [data-k="D"]', "0.45"); set('#sDims [data-k="B"]', "0.3");
           const forms = document.querySelectorAll(".dlg"); forms[forms.length - 1].querySelector(".df button.primary").click();
           await wait(1500);
           const defs = await hmDefs();
           return (defs.frame_sections || []).some(s => s.name === "CPM-CHK450") ? {ok: "CPM-CHK450 is in the model"} : {fail: "the section did not reach the model: " + (hm.lastError || document.getElementById("hint").textContent)};
+        });
+        await step("Assign > Frame > Releases: a beam pinned at both ends through the form, and undo takes it off", async () => {
+          const b = frames.findIndex(f => f.kind === "beam");
+          if (b < 0) return {fail: "the model has no beam"};
+          sel.clear(); sel.add(b + 1); selChanged();
+          await act("m:ad:releases"); await wait(900);
+          const i = document.querySelector('.dlg [data-i="M3"]'), j = document.querySelector('.dlg [data-j="M3"]');
+          if (!i || !j) return {fail: "the releases form did not open"};
+          i.checked = true; j.checked = true;
+          const forms = document.querySelectorAll(".dlg"); forms[forms.length - 1].querySelector(".df button.primary").click();
+          await wait(1200);
+          const name = frames[b].name, pd = await hmRun("property_definitions", {objects: [name]}, true);
+          const o = pd.ok && pd.result.objects && pd.result.objects[0];
+          closeDialogs(); await wait(150);
+          if (!o || !(o.release_i || []).includes("M3") || !(o.release_j || []).includes("M3")) return {fail: "the releases did not reach the beam: " + (hm.lastError || JSON.stringify(o))};
+          await hmRun("undo"); await wait(800);
+          const back = await hmRun("property_definitions", {objects: [name]}, true);
+          return (back.result.objects[0].release_i || []).length ? {fail: "undo did not take the releases off"} : {ok: "M3 released at both ends of " + name + ", then undone"};
+        });
+        await step("Assign > Joint > Springs: a point spring goes on the joints of a selected beam, and undo takes it off", async () => {
+          const made = await hmRun("define_spring", {kind: "point", name: "CPM-CHKPS", values: {UZ: 1000}}, true);
+          if (!made.ok) return {fail: "the spring was not defined: " + made.error};
+          const b = frames.findIndex(f => f.kind === "beam");
+          sel.clear(); sel.add(b + 1); selChanged();
+          await act("m:ad:joint"); await wait(900);
+          const pick = document.querySelector(".dlg #xS");
+          if (!pick) { closeDialogs(); return {fail: "the joint springs form did not open: " + (hm.lastError || "")}; }
+          pick.value = "CPM-CHKPS";
+          const forms = document.querySelectorAll(".dlg"); forms[forms.length - 1].querySelector(".df button.primary").click();
+          await wait(1200);
+          const err = document.querySelector(".dlg .ferr:not([hidden])");
+          const pd = await hmRun("property_definitions", {}, true), sp = pd.result.springs.find(x => x.name === "CPM-CHKPS");
+          closeDialogs(); await wait(150);
+          if (!sp || sp.used_by < 2) return {fail: "the spring is not on the beam's two joints: " + (err ? err.textContent : hm.lastError) + " " + JSON.stringify(sp)};
+          await hmRun("undo"); await wait(800); await hmRun("undo"); await wait(800);
+          const back = (await hmRun("property_definitions", {}, true)).result.springs.some(x => x.name === "CPM-CHKPS");
+          return back ? {fail: "two undos did not take the spring away"} : {ok: `on ${sp.used_by} joints, then undone`};
         });
         await step("Draw > Draw Columns: a column is drawn by a click, and Edit > Undo takes it back", async () => {
           const p = panes.find(x => x.mode === "plan");
