@@ -36,6 +36,31 @@ public static class ModelerFieldSteps
         }
     }
 
+    /// <summary>
+    /// The checker on models broken on purpose, one fault each (CsiProMax.Checks.Stability.BrokenModels): each fault is
+    /// found by the check that promises it, naming the object, with a fix; the sound model gives no error. The same
+    /// broken models open in the Modeler from the checker's window.
+    /// </summary>
+    private static void Instabilities(FieldContext ctx)
+    {
+        foreach (var c in CsiProMax.Checks.Stability.BrokenModels.All)
+            ctx.Step($"the instability checker on a broken model: {c.What}", () =>
+            {
+                var report = CsiProMax.Checks.Stability.StabilityCheck.Run(CsiProMax.Checks.Stability.FromStructural.Read(c.Build(), c.Program));
+                var found = string.Join(" | ", report.Findings.Take(6).Select(f => $"{f.Level} {f.Check}: {f.Message}"));
+                if (c.Check.Length == 0)
+                {
+                    FieldContext.Expect(report.Errors == 0, "the sound model has errors: " + found);
+                    return "no errors, as it should";
+                }
+                var hit = report.Findings.Where(f => f.Check == c.Check).ToList();
+                FieldContext.Expect(hit.Count > 0, $"no '{c.Check}' finding: " + found);
+                FieldContext.Expect(c.Object.Length == 0 || hit.Any(f => f.Objects.Any(o => o.Name.Split('@')[0] == c.Object) || f.Message.Contains(c.Object)), $"'{c.Object}' is not named: " + found);
+                FieldContext.Expect(hit.All(f => f.Fix.Length > 0), "a finding has no fix");
+                return hit[0].Message;
+            });
+    }
+
     private static string Q(string text) => JsonSerializer.Serialize(text);
     private static string List(IEnumerable<string> names) => "[" + string.Join(",", names.Select(Q)) + "]";
     private static int Int(JsonNode? node) => node?.GetValue<int>() ?? -1;
@@ -206,6 +231,9 @@ public static class ModelerFieldSteps
 
         // The checks and the quantities.
         ctx.Tool("check_model", "{}", a => FieldContext.Expect(Int(a["errors"]) == 0, "the model the test built has errors: " + a["findings"]!.ToJsonString()));
+        ctx.Tool(StabilityTools.Name, "{}", a => FieldContext.Expect(Int(a["errors"]) == 0 && a["checked"]?["stiffness_check"]?.GetValue<bool>() == true,
+            "the model the test built should have no instability, and the stiffness check should run: " + a["findings"]!.ToJsonString() + " " + a["notes"]!.ToJsonString()));
+        Instabilities(ctx);
         ctx.Tool("model_quantities", "{}", a =>
         {
             var rows = a["rows"]!.AsArray();

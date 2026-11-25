@@ -165,6 +165,13 @@ public static class CsiFieldSteps
             }
         }
 
+        // ---- the checker for what stops the analysis, on the scratch model as it is (what it finds is listed) ----
+        var before = T(StabilityTools.Name, "{}", a =>
+        {
+            FieldContext.Expect(Int(a["checked"]?["joints"]) > 0 && a["findings"] is JsonArray, "the checker read no joints: " + Cut(a.ToJsonString()));
+            FieldContext.Expect(a["checked"]?["in"]?.GetValue<string>() == name, $"the checker says it read {a["checked"]?["in"]}, and this is {name}");
+        }, "tool find_instabilities on the scratch model");
+
         // ---- the SAP2000 tools the other programs share ----
         if (offered.Contains("add_frames"))
         {
@@ -177,6 +184,16 @@ public static class CsiFieldSteps
                 var kinds = link.Frames().Where(f => names.Contains(f.Name)).Select(f => f.Kind).OrderBy(k => k).ToList();
                 FieldContext.Expect(names.Count == 2 && string.Join(",", kinds) == "brace,column", "a column and a brace were asked for; the model has: " + string.Join(", ", kinds));
             }, "tool add_frames, a column and a brace by coordinates"), "frames");
+            // They stand on nothing: the checker must find them floating, named, beside what it found before.
+            if (made.Count == 2 && before is not null)
+                T(StabilityTools.Name, """{"stiffness":true}""", a =>
+                {
+                    var floating = a["findings"]!.AsArray().Where(f => f!["check"]!.GetValue<string>() == "floating").ToList();
+                    FieldContext.Expect(floating.Any(f => made.All(m => f!["objects"]!.AsArray().Any(o => o!["name"]!.GetValue<string>() == m))),
+                        $"the column and brace that stand on nothing ({string.Join(", ", made)}) were not found floating: " + Cut(a["findings"]!.ToJsonString()));
+                    FieldContext.Expect(Int(a["errors"]) > Int(before["errors"]), "the checker found no more errors with the floating frames than without them");
+                }, "tool find_instabilities finds the frames that stand on nothing");
+            else if (live) ctx.Fail("tool find_instabilities finds the frames that stand on nothing", "the frames or the first check were not there");
             if (made.Count == 2)
             {
                 T("set_releases", $$"""{"frames":[{{Q(made[1])}}],"type":"pinned"}""", null, "tool set_releases pins the brace");
