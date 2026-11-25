@@ -107,7 +107,7 @@ public sealed class ComEtabs : ICsiLink, IDisposable
         // in an AggregateException that no "catch (EtabsException)" would take.
         if (!((IAsyncResult)done.Task).AsyncWaitHandle.WaitOne(limit))
         {
-            _stuck = what;
+            _stuck = Volatile.Read(ref _refreshing) == 1 ? "refresh the view" : what;
             // The call may still come back later; the next call works again from then on.
             throw new EtabsException($"{app} did not come back from \"{what}\" within {Span(limit)}. A message may be waiting in {app}'s window " +
                 "(such as \"Analysis Complete\" or a licence notice): answer or close it there, then try again.");
@@ -318,8 +318,31 @@ public sealed class ComEtabs : ICsiLink, IDisposable
         return name;
     });
 
-    public void SetFrameSection(string name, string section) => Do("change a section", m => { Ok(m.FrameObj.SetSection(name, section, 0, 0.0, 0.0), $"give frame {name} the section {section}"); });
-    public void SetAreaSection(string name, string section) => Do("change a section", m => { Ok(m.AreaObj.SetProperty(name, section, 0), $"give area {name} the section {section}"); });
+    // ETABS 23 answers SetSection for a frame that is not there with 0 (done), as if it had worked (0.4.9 field test,
+    // Ahmed's PC): the section is read back, so a missing object or a change the program did not make is reported.
+    public void SetFrameSection(string name, string section) => Do("change a section", m =>
+    {
+        Ok(m.FrameObj.SetSection(name, section, 0, 0.0, 0.0), $"give frame {name} the section {section}");
+        string now = "", auto = "";
+        try { m.FrameObj.GetSection(name, ref now, ref auto); } catch (Exception ex) when (ex is not COMException) { now = section; }
+        Given("frame", name, section, now);
+    });
+    public void SetAreaSection(string name, string section) => Do("change a section", m =>
+    {
+        Ok(m.AreaObj.SetProperty(name, section, 0), $"give area {name} the section {section}");
+        string now = "";
+        try { m.AreaObj.GetProperty(name, ref now); } catch (Exception ex) when (ex is not COMException) { now = section; }
+        Given("area", name, section, now);
+    });
+
+    /// <summary>Throws when the section read back is not the one given: the object is not there, or the program kept its old section.</summary>
+    internal void Given(string kind, string name, string section, string? now)
+    {
+        if (string.Equals(now ?? "", section, StringComparison.OrdinalIgnoreCase)) return;
+        throw new EtabsException(string.IsNullOrEmpty(now)
+            ? $"{Program.Name} has no {kind} named {name}, so it was not given {section}."
+            : $"{Program.Name} kept {kind} {name} on {now}, not {section}.");
+    }
 
     public void Delete(string kind, string name) => Do("delete", m =>
     {
@@ -380,5 +403,32 @@ public sealed class ComEtabs : ICsiLink, IDisposable
 
     public void RunAnalysis() => Do("run the analysis", m => { Ok(m.Analyze.RunAnalysis(), "run the analysis (the model must be saved first)"); });
     public void Save() => Do("save the model", m => { Ok(m.File.Save(""), "save the model"); });
-    public void Refresh() => Do("refresh the view", m => { try { m.View.RefreshView(0, false); } catch (Exception ex) when (ex is not COMException) { } });
+    /// <summary>How long a tool waits for the program to redraw. The redraw only shows the change; the change is made already.</summary>
+    public TimeSpan RefreshLimit { get; set; } = TimeSpan.FromSeconds(10);
+    private int _refreshing;
+    private volatile bool _refreshOff;
+
+    /// <summary>
+    /// Asks the program to redraw, best effort: it never fails a tool and never marks the link stuck. ETABS 23 did not
+    /// come back from RefreshView after a selection (0.4.9 field test on Ahmed's PC), and the 3-minute wait then failed
+    /// every later call. Now a tool waits for the redraw at most <see cref="RefreshLimit"/>; one redraw is out at a time,
+    /// and after one that did not come back in time no more are asked for on this link.
+    /// </summary>
+    public void Refresh()
+    {
+        if (_refreshOff || _stuck.Length > 0 || _work.IsAddingCompleted) return;
+        if (Thread.CurrentThread == _thread) { Redraw(); return; }
+        if (Interlocked.Exchange(ref _refreshing, 1) == 1) return;
+        using var done = new ManualResetEventSlim();
+        try { _work.Add(() => { try { Redraw(); } finally { Interlocked.Exchange(ref _refreshing, 0); try { done.Set(); } catch (ObjectDisposedException) { } } }); }
+        catch (InvalidOperationException) { Interlocked.Exchange(ref _refreshing, 0); return; }
+        if (!done.Wait(RefreshLimit)) _refreshOff = true;
+    }
+
+    private void Redraw()
+    {
+        try { Model().View.RefreshView(0, false); }
+        catch (COMException) { _model = null; }
+        catch (Exception) { } // a redraw that fails changes nothing in the model
+    }
 }
