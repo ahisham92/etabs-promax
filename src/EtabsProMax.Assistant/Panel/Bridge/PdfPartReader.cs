@@ -103,7 +103,7 @@ internal static class PdfPartReader
         start.WorkingDirectory = folder;
         // The helper is a chat of its own, not one of ETABS's: it gets no ETABS tools and no instructions to ask in ETABS.
         // It runs on the user's Claude plan, like the chat: an API key in the environment would bill the API instead.
-        start.Environment.Remove("SKETCHPROMAX_CHAT");
+        start.Environment.Remove("ETABSPROMAX_CHAT");
         start.Environment.Remove("ANTHROPIC_API_KEY");
         foreach (var name in start.Environment.Keys.Where(k => k == "CLAUDECODE" || k.StartsWith("CLAUDE_CODE_", StringComparison.Ordinal) && k.Contains("SESSION")).ToList())
             start.Environment.Remove(name);

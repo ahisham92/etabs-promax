@@ -114,15 +114,11 @@ internal static class ScriptSource
     /// </summary>
     private static readonly (string Match, string Fix)[] Hints =
     [
-        ("outside of ETABS design limits", "ETABS only takes points within about 32 km of the internal origin. This model's own coordinates can be far from it: build points from the elements' own geometry (bounding boxes, locations), never from shared/survey values or values in metres or millimetres not converted to feet."),
-        ("revision numbering is per sheet", "With per-sheet revision numbering, read a revision's number on a sheet with sheet.GetRevisionNumberOnSheet(revisionId) instead of Revision.RevisionNumber."),
-        ("Zoom Type is NOT Zoom", "Set PrintParameters.ZoomType = ZoomType.Zoom before setting Zoom (and ZoomType.FitToPage before PageOrientation-only changes)."),
-        ("Zoom Type is NOT", "Set PrintParameters.ZoomType to the matching ZoomType before setting that value."),
-        ("Object reference not set", "Something was null on that line: get_Parameter/LookupParameter, doc.GetElement, Category, Location, get_Geometry and ActiveView return null when absent. Check them (?. or 'is not null') before use."),
-        ("no open transaction", "run_etabs_query_code already runs inside a rolled-back transaction; don't start or commit your own there. In run_etabs_code use own_transactions only for edit scopes."),
-        ("is not a valid object", "An element or object was deleted or regenerated (for example after doc.Regenerate or a delete). Fetch it again by id after the change."),
-        ("Family loading failed", "Loading an edited family back into the project (familyDoc.LoadFamily) fails inside run_etabs_query_code (its rolled-back trial) and while any transaction is open in the project, and each try can hold ETABS for minutes. Don't try it there: do the edit for real with run_etabs_code (own_transactions, close the family's transactions first, then LoadFamily with an IFamilyLoadOptions that overwrites), or use a void cut / join in the project instead."),
-        ("Can't cut joined element", "These elements are already joined or cut in a way that blocks this join, and in one code call one refused join undoes all of them. For joins and unjoins use join_elements (one pair per step, tries the other order, lists what ETABS refuses); otherwise skip and report them rather than unjoining anything."),
+        ("Object reference not set", "Something was null on that line. An ETABS call gave nothing back (a name that doesn't exist, no model open, or results not available). Check the names with get_model_context or query_objects first."),
+        ("Specified cast is not valid", "ETABS's objects can't be cast freely. Use the members of the interface the property returns (SapModel.FrameObj, SapModel.AreaObj, SapModel.Results, ...) and pass enums as their own type."),
+        ("model is locked", "The model is locked after an analysis run. Unlocking deletes the results, so ask the engineer before SapModel.SetModelIsLocked(false)."),
+        ("No results", "Results exist only after the analysis has run, and only for the cases and combinations selected for output. Select them with SapModel.Results.Setup before reading."),
+        ("ref ", "ETABS's API returns arrays through ref parameters. Declare each one first (for example string[] names = null; int count = 0;) and pass it with ref."),
     ];
 
     /// <summary>The fix for a snippet's failure message, as a line to append ("" when none is known).</summary>

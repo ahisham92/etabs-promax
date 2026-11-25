@@ -140,7 +140,7 @@ internal static class ClaudeCli
     /// connection inside ETABS, or the connector the desktop app is given when that couldn't start) and its tools allowed
     /// without prompts, Read, Glob and Grep for attached files, and nothing else that could act on the PC. Anything that
     /// would need a permission prompt is denied (dontAsk), because nobody can answer a prompt in a hidden process. The MCP
-    /// server knows it serves the chat (inside ETABS always; the connector by SKETCHPROMAX_CHAT), so ETABS's own dialog
+    /// server knows it serves the chat (inside ETABS always; the connector by ETABSPROMAX_CHAT), so ETABS's own dialog
     /// asks before model changes (per the settings) and always before code, recipes and files written to a folder Claude chose.
     /// </summary>
     /// <param name="coordinator">A chat With coordinator (ChatTypes): it may start jobs with chat_jobs and is told how.
@@ -171,7 +171,7 @@ internal static class ClaudeCli
             "--permission-mode", "dontAsk",
         };
         // A connector older than this add-in (only used when the connection inside ETABS couldn't start) may not pass
-        // SKETCHPROMAX_CHAT on, so ETABS would not know to ask: then the code and recipe tools are left out of the chat altogether.
+        // ETABSPROMAX_CHAT on, so ETABS would not know to ask: then the code and recipe tools are left out of the chat altogether.
         // Claude Code's own transcripts of earlier conversations (…\.claude\projects\…\<session>.jsonl): after a shrink
         // it is told it may read the full transcript, which would send the long conversation again and fill the chat with
         // file steps. The summary is what a shrink keeps; anything else is asked for or found with recall_chats.
@@ -188,7 +188,7 @@ internal static class ClaudeCli
         AddEffort(args, effort);
 
         var info = CliStart(install, args);
-        info.EnvironmentVariables["SKETCHPROMAX_ETABS_PID"] = pid;
+        info.EnvironmentVariables["ETABSPROMAX_ETABS_PID"] = pid;
         return info;
     }
 
@@ -226,7 +226,7 @@ internal static class ClaudeCli
 
     /// <summary>
     /// A parallel job's own Claude Code (Chat.JobBoard, ChatPane.Jobs): like the chat's engine, with the job's instructions,
-    /// the connector told which job it serves (SKETCHPROMAX_JOB, so its changes take turns with the other jobs'), no
+    /// the connector told which job it serves (ETABSPROMAX_JOB, so its changes take turns with the other jobs'), no
     /// chat_jobs (a job doesn't start jobs), whole messages rather than streamed words, and its own session: a new id
     /// (<paramref name="newSession"/>) or the one it resumes, never the main chat's.
     /// </summary>
@@ -259,7 +259,7 @@ internal static class ClaudeCli
         // Its own session, always: nothing of a parent session carries over.
         foreach (var name in info.EnvironmentVariables.Keys.Cast<string>().Where(k => k == "CLAUDECODE" || k.StartsWith("CLAUDE_CODE_", StringComparison.Ordinal) && k.Contains("SESSION")).ToList())
             info.EnvironmentVariables.Remove(name);
-        info.EnvironmentVariables["SKETCHPROMAX_ETABS_PID"] = pid;
+        info.EnvironmentVariables["ETABSPROMAX_ETABS_PID"] = pid;
         // A change may wait its turn behind other jobs' changes (BridgeServer.TurnWait): the call must not time out first.
         info.EnvironmentVariables["MCP_TOOL_TIMEOUT"] = JobToolTimeoutMs.ToString(System.Globalization.CultureInfo.InvariantCulture);
         return info;
@@ -330,9 +330,9 @@ internal static class ClaudeCli
             ["type"] = "stdio",
             ["command"] = ClaudeRegistration.ConnectorPath,
             ["args"] = new JsonArray(),
-            // SKETCHPROMAX_CHAT: the bridge then asks in ETABS before code, recipes and files written where Claude chose.
-            // SKETCHPROMAX_CLAUDE and _MODEL: read_pdf_part reads a part of a large PDF with the same Claude Code and model.
-            // SKETCHPROMAX_JOB: the parallel job this connector serves (its changes take turns with the other jobs').
+            // ETABSPROMAX_CHAT: the bridge then asks in ETABS before code, recipes and files written where Claude chose.
+            // ETABSPROMAX_CLAUDE and _MODEL: read_pdf_part reads a part of a large PDF with the same Claude Code and model.
+            // ETABSPROMAX_JOB: the parallel job this connector serves (its changes take turns with the other jobs').
             ["env"] = Env(pid, claude, model, job),
         };
     }
@@ -368,16 +368,16 @@ internal static class ClaudeCli
         }
         if (!string.IsNullOrEmpty(model)) { args.Add("--model"); args.Add(model!); }
         var info = CliStart(install, args);
-        info.EnvironmentVariables["SKETCHPROMAX_ETABS_PID"] = pid;
+        info.EnvironmentVariables["ETABSPROMAX_ETABS_PID"] = pid;
         return info;
     }
 
     private static JsonObject Env(string pid, string? claude, string? model, string? job = null)
     {
-        var env = new JsonObject { ["SKETCHPROMAX_ETABS_PID"] = pid, ["SKETCHPROMAX_CHAT"] = "1" };
-        if (!string.IsNullOrEmpty(claude)) env["SKETCHPROMAX_CLAUDE"] = claude;
-        if (!string.IsNullOrEmpty(model)) env["SKETCHPROMAX_MODEL"] = model;
-        if (!string.IsNullOrEmpty(job)) env["SKETCHPROMAX_JOB"] = job;
+        var env = new JsonObject { ["ETABSPROMAX_ETABS_PID"] = pid, ["ETABSPROMAX_CHAT"] = "1" };
+        if (!string.IsNullOrEmpty(claude)) env["ETABSPROMAX_CLAUDE"] = claude;
+        if (!string.IsNullOrEmpty(model)) env["ETABSPROMAX_MODEL"] = model;
+        if (!string.IsNullOrEmpty(job)) env["ETABSPROMAX_JOB"] = job;
         return env;
     }
 
@@ -705,6 +705,17 @@ internal static class ClaudeCli
     }
 
     /// <summary>Runs a short command hidden and returns its exit code and output (stdout then stderr); -1 on timeout or failure.</summary>
+    /// <summary>Short helper runs still going (claude --version, auth status): stopped when ETABS ProMax closes, so none is left behind.</summary>
+    private static readonly HashSet<Process> Helpers = new();
+
+    static ClaudeCli() => AppDomain.CurrentDomain.ProcessExit += (_, _) =>
+    {
+        Process[] left;
+        lock (Helpers) left = Helpers.ToArray();
+        foreach (var p in left)
+            try { KillTree(p); } catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+    };
+
     public static (int Code, string Output) Run(string exe, string arguments, int timeoutMs)
     {
         try
@@ -726,7 +737,11 @@ internal static class ClaudeCli
             process.StandardInput!.Close();
             var stdout = process.StandardOutput!.ReadToEndAsync();
             var stderr = process.StandardError!.ReadToEndAsync();
-            if (!process.WaitForExit(timeoutMs))
+            bool exited;
+            lock (Helpers) Helpers.Add(process.Process);
+            try { exited = process.WaitForExit(timeoutMs); }
+            finally { lock (Helpers) Helpers.Remove(process.Process); }
+            if (!exited)
             {
                 KillTree(process.Process);
                 return (-1, "");

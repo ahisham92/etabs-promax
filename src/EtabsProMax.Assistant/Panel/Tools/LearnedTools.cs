@@ -238,8 +238,7 @@ public sealed class SaveAsToolTool : IEtabsTool
       "code": {"type": "string", "description": "C# method body, as for run_etabs_code, reading its inputs from args. Must end with a return statement."},
       "parameters": {"type": "object", "description": "JSON Schema 'properties' for the inputs, e.g. {\"level\": {\"type\": \"string\", \"description\": \"Level name\"}}"},
       "required": {"type": "array", "items": {"type": "string"}},
-      "changes_model": {"type": "boolean", "description": "True when the code changes the model. It then runs in one transaction behind the same approval as run_etabs_code."},
-      "own_transactions": {"type": "boolean", "description": "True when the code starts and commits its own transactions (as with own_transactions in run_etabs_code: one transaction per item, so one refused item doesn't undo the rest). Default: worked out from the code."}
+      "changes_model": {"type": "boolean", "description": "True when the code changes the model. It then runs behind the same approval as run_etabs_code. ETABS has no undo."}
     }
     """;
     public string[] Required => ["name", "description", "code", "changes_model"];
