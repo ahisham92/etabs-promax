@@ -930,6 +930,7 @@ Test("set_section: a frame or area that is not in the model is reported as faile
 foreach (var (name, body) in CdtSdkTests.All()) Test(name, body);
 foreach (var (name, body) in FieldRun048Tests.All()) Test(name, body);
 foreach (var (name, body) in FieldQuietTests.All()) Test(name, body);
+foreach (var (name, body) in TeamLibraryTests.All()) Test(name, body);
 
 var failed = 0;
 // ---- SAP2000 ----

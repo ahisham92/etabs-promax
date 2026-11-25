@@ -18,6 +18,7 @@ internal static class UserFolders
     [
         new("Bugs", BugLog.Root, "Report bug zips (Reports), Export chats & bugs zips (Exports), field test reports (Field tests) and the bug log."),
         new("Learned tools", System.IO.Path.Combine(Roaming, "learned-tools"), "The tools saved from the chat, one .json file each."),
+        new("Team library backups", System.IO.Path.Combine(Roaming, "team-library-backups"), "Learned tools that a newer version from the team library replaced, or that a teammate took out of it."),
         new("Recipes", System.IO.Path.Combine(Roaming, "recipes"), "Saved recipes: steps the chat can run again."),
         new("Chats", System.IO.Path.Combine(Local, "chat", "conversations"), "The saved chats of every model."),
         new("Made in chat", System.IO.Path.Combine(Documents, "CSI ProMax", "Made in chat"), "The Excel, Word, PowerPoint, PDF and CAD files the chat made for you."),

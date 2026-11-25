@@ -264,6 +264,22 @@ public static class PanelFieldSteps
             ctx.Step("the test's learned tool is taken away again", () => Remove(LearnedTools.PathFor(LearnedName)));
         }
 
+        // ---- The team library: the sync's rules on made-up PCs, how it stands, then the real library on GitHub. ----
+        var builtIn = registry.All.Select(t => t.Name).ToHashSet(StringComparer.Ordinal);
+        ctx.Step("the team library's sync rules hold on two made-up PCs and a library in memory", () =>
+            TeamSyncCheck.Run(Path.Combine(folder, "Team library"), t => TeamLibrary.Check(t, builtIn)));
+        Tool("team_library", """{"action":"status"}""", (a, _) =>
+            FieldContext.Expect(a["line"]?.GetValue<string>() is { Length: > 0 }, "it does not say how the team library stands: " + a.ToJsonString()));
+        if (!live)
+            ctx.Skip("the team library on GitHub: sign in, write, read back and remove a test file",
+                "this run has no CSI program behind it (the tests' stand-in), and such a run never writes to the team's real library");
+        else
+            ctx.Step("the team library on GitHub: sign in, write, read back and remove a test file", () =>
+            {
+                using var limit = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+                return TeamLibrary.RoundTripAsync(limit.Token).GetAwaiter().GetResult();
+            });
+
         // ---- Code: read through the API, a change on the scratch model, and a mistake that must come back as one. ----
         if (!live)
         {
@@ -341,6 +357,44 @@ public static class PanelFieldSteps
             FieldContext.Expect(missing.Count == 0, $"{missing.Count} of {own.Count} tools of the panel were not run by the field test: {string.Join(", ", missing)}");
             return $"all {own.Count} tools of the panel were run or listed";
         });
+    }
+
+    /// <summary>
+    /// In each program's scratch window: a learned tool made in another CSI program runs here through this program's
+    /// API, and then says it has run here too (what the team sees in the library). Learned tools are shared by ETABS,
+    /// SAP2000 and SAFE, so each of the three is checked, not only the first.
+    /// </summary>
+    public static void InProgram(FieldContext ctx, ICsiLink link, CsiProgram program, bool live)
+    {
+        var step = $"a learned tool made in another program runs in {program.Name}";
+        if (!live) { ctx.Skip(step, "code runs against a CSI program's API, and no program is behind this window"); return; }
+        var name = "cpm_field_test_" + program.Key;
+        var other = CsiProgram.All.First(p => p.Key != program.Key).Key;
+        const string code = "int n = 0; string[] names = null; Ok(sap.FrameObj.GetNameList(ref n, ref names), \"list the frames\"); return n;";
+        try
+        {
+            ctx.Step(step, () =>
+            {
+                var made = LearnedTool.Create(name, Marker + ": counts the frames. Safe to delete.", code, "{}", [], false, 0, null, "", [other]);
+                Directory.CreateDirectory(LearnedTools.Folder);
+                File.WriteAllText(LearnedTools.PathFor(name), made.ToJson());
+                // The test's own code: allowed here so the run does not stop to ask.
+                LearnedTools.MarkApproved(code);
+                var registry = ToolRegistry.CreateDefault(link is OfflineEtabs, program);
+                var tool = registry.Find(name) ?? throw new FieldCheckException("the registry does not find the learned tool by its name");
+                var result = tool.Execute(new EtabsApp(link), new ToolArgs(new Dictionary<string, JsonElement>()));
+                FieldContext.Expect(!result.IsError, "it failed in " + program.Name + ": " + Short(result.Text));
+                var frames = link.Frames().Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                FieldContext.Expect(result.Text.Contains(frames, StringComparison.Ordinal), $"the model has {frames} frames; the tool gave: {Short(result.Text)}");
+                var after = LearnedTools.Load(name) ?? throw new FieldCheckException("the tool's file is gone after it ran");
+                FieldContext.Expect(after.Programs.Contains(program.Key), $"after it worked here it still says only {string.Join(", ", after.Programs)}, so the team would not see that it works in {program.Name}");
+                return $"it counted {frames} frames through {program.Name}'s API and now says it runs in {string.Join(", ", after.Programs)}";
+            });
+        }
+        finally
+        {
+            ctx.Step($"the learned tool of {program.Name}'s check is taken away again", () => Remove(LearnedTools.PathFor(name)));
+        }
     }
 
     private static ToolResult Execute(ToolRegistry registry, EtabsApp app, string name, string json)

@@ -26,9 +26,12 @@ The field test is inside CSI ProMax. It checks what it can by itself and saves o
    - each CSI program on the PC (ETABS, SAP2000, SAFE): a second window that the test opens itself on that test
      model, saved as a scratch model in the test's own folder. Every tool of that program is run there with each
      change read back through the program's API, then the analysis, the design, every result table and check, the
-     snapshots and the review pack. The window is closed without saving at the end;
+     snapshots and the review pack, and a learned tool made in another program is run there. The window is closed
+     without saving at the end;
    - CSI ProMax's own features: every kind of file it writes and reads, the review pack, notes, recipes, learned
-     tools, code, the self test, the bug report and the export. What it makes is taken away again.
+     tools, code, the self test, the bug report and the export. What it makes is taken away again;
+   - the team library: its sync rules on two made-up PCs, then the real library on GitHub (sign in, write a test
+     file in field-test/, read it back, remove it). No GitHub sign-in on the PC is "not tested", with how to sign in.
 
    Leave the windows it opens alone while it runs, and wait for it before using the chat. Your open model is only
    read, never changed. If a program shows a message of its own in the window the test opened (a licence message,

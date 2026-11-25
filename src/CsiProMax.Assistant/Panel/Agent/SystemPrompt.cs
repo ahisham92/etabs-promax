@@ -83,6 +83,9 @@ internal static class SystemPrompt
           come up again, save it with save_as_tool right away (inputs in args, a clear description), and tell the user in
           one line. Next time, use the learned tool. If a learned tool fails, fix the code with run_etabs_code and save it
           again under the same name. If a just-saved tool isn't in your tool list yet, call it with run_learned_tool.
+          Learned tools are shared with the team: what you save or fix here is published to the team library, and the
+          teammates' tools arrive by themselves (team_library tells how it stands; "by <name>" says who made one). A tool
+          made in another CSI program says so: use it, and fix and save it again if its API calls differ here.
         - Once coded, not written again. In this order: a ready-made tool first (built-in, or learned: they are in your
           tool list); then the code library: before you write code for run_etabs_code or run_etabs_query_code, call
           worked_code (action=find, a few words on the work) and adapt the match (names, stories, sizes); only then
