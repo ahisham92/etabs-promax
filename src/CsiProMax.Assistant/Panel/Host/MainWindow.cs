@@ -112,8 +112,8 @@ internal sealed class MainWindow : Window
         Add(help, "Open _folders…", () => UserFoldersWindow.Open());
         Add(help, "Self _test", RunSelfTest);
         help.Items.Add(new Separator());
-        Add(help, "_Field test (saves a report to send)", () => RunFieldTest(false));
-        Add(help, "Field test with _changes (scratch model only)…", () => RunFieldTest(true));
+        Add(help, "_Field test: everything (saves a report to send)…", () => RunFieldTest(full: true));
+        Add(help, "Field test, _quick: this PC and the open model", () => RunFieldTest(full: false));
         return menu;
     }
 
@@ -158,23 +158,42 @@ internal sealed class MainWindow : Window
     }
 
     /// <summary>
-    /// The field test: the self test's steps and the result checks on the open model, saved as one report file that the
-    /// person sends back. With changes it also adds and deletes test objects, which is asked first: no undo in ETABS.
+    /// The field test, saved as one report for the person to send back. The full test runs every tool: on a model the
+    /// Modeler builds, then in a second window of each CSI program on this PC that it opens on its own scratch model and
+    /// closes again without saving. The open model is only read. It runs in the background; a message says when it is done.
     /// </summary>
-    private async void RunFieldTest(bool changes)
+    private async void RunFieldTest(bool full)
     {
         if (CsiProMax.App.Etabs is not { } etabs) return;
-        if (CsiProMax.Assistant.SelfTest.IsRunning) { TaskDialog.Show("CSI ProMax", "A test is already running."); return; }
-        if (changes && TaskDialog.Show("CSI ProMax",
-                "This adds a test column, a slab, the load pattern CPM-TEST, loads and the combination CPM-TEST-COMBO to the model that is open now, " +
-                "then deletes the column and the slab again. The load pattern and the combination stay, and there is no undo.\n\n" +
-                "Use it only on a scratch model, never on a project model. Go on?",
-                TaskDialogCommonButtons.Yes | TaskDialogCommonButtons.No, TaskDialogResult.No) != TaskDialogResult.Yes) return;
+        if (CsiProMax.Assistant.SelfTest.IsRunning || CsiProMax.Assistant.FieldTest.IsRunning)
+        {
+            var at = CsiProMax.Assistant.FieldTest.Last is { Task.IsCompleted: false } run ? $"\n\nIt started at {run.Started:HH:mm} and is at: {run.Doing}" : "";
+            TaskDialog.Show("CSI ProMax", "A test is already running. A message says when it is done." + at);
+            return;
+        }
+        if (full)
+        {
+            var programs = CsiProMax.Assistant.FieldTest.Installed(etabs.Link.Program);
+            var which = programs.Count == 0
+                ? "No ETABS, SAP2000 or SAFE was found on this PC, so the tools inside the programs will be listed as not tested."
+                : $"Then it opens a second window of {string.Join(", ", programs.Select(p => p.Name))} on that test model, runs every tool and check there " +
+                  "(the analysis and design too), and closes each window again without saving. Each window takes a licence as usual.";
+            if (TaskDialog.Show("CSI ProMax",
+                    "The full field test checks everything CSI ProMax does. It checks this PC and the install, reads your open model, and builds a test model of its own with every Modeler tool. " +
+                    which + "\n\nYour open model is only read: nothing in it is changed. It takes 20 to 60 minutes. While it runs, leave the windows it opens alone; you can keep working here. " +
+                    "A message says when the report is ready.\n\nStart it now?",
+                    TaskDialogCommonButtons.Yes | TaskDialogCommonButtons.No, TaskDialogResult.Yes) != TaskDialogResult.Yes) return;
+        }
         CsiProMax.Assistant.FieldTest.Outcome outcome;
-        try { outcome = await Task.Run(() => CsiProMax.Assistant.FieldTest.Run(etabs.Link, changes, "the Help menu")); }
+        try
+        {
+            outcome = full
+                ? await CsiProMax.Assistant.FieldTest.Start(etabs.Link, new CsiProMax.Assistant.FieldTest.Options { Full = true, StartedFrom = "the Help menu" }).Task
+                : await Task.Run(() => CsiProMax.Assistant.FieldTest.Run(etabs.Link, changes: false, "the Help menu"));
+        }
         catch (Exception ex) when (ex is not OutOfMemoryException) { TaskDialog.Show("CSI ProMax", "The field test could not run: " + ex.Message); return; }
         TaskDialog.Show("CSI ProMax", outcome.Summary());
-        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"/select,\"{outcome.File}\"") { UseShellExecute = true })?.Dispose(); }
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"/select,\"{outcome.Send}\"") { UseShellExecute = true })?.Dispose(); }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) { }
     }
 

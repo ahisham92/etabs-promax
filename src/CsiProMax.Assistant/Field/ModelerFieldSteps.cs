@@ -26,7 +26,7 @@ public static class ModelerFieldSteps
         var snapshots = ResultTools.SnapshotRoot;
         ctx.Link = modeler;
         ctx.Program = CsiProgram.Etabs;
-        ResultTools.SnapshotRoot = Path.Combine(ctx.Folder, "snapshots");
+        ResultTools.SnapshotRoot = Path.Combine(ctx.Folder, "snapshots", "modeler");
         try { Steps(ctx, modeler); }
         finally
         {

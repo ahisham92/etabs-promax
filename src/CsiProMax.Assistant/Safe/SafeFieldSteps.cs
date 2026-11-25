@@ -32,7 +32,7 @@ public static class SafeFieldSteps
     public static void Scratch(FieldContext ctx)
     {
         var snapshots = ResultTools.SnapshotRoot;
-        ResultTools.SnapshotRoot = Path.Combine(ctx.Folder, "snapshots");
+        ResultTools.SnapshotRoot = Path.Combine(ctx.Folder, "snapshots", "safe");
         try { Steps(ctx); }
         finally { ResultTools.SnapshotRoot = snapshots; }
     }

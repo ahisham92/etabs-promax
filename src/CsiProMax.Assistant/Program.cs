@@ -66,9 +66,14 @@ public static class Program
         {
             // The field test without the window: prints the report and says where it was saved.
             using var check = new ComEtabs(etabsPid, program);
-            var outcome = FieldTest.Run(demo ? new MemoryEtabs() : CsiProMax.Assistant.Tools.ProgramTools.Live(check), args.Contains("--changes"), "the command line");
+            // --full: every tool, on scratch models in windows of the programs the test opens itself (20 to 60 minutes).
+            var link = demo ? new MemoryEtabs() : CsiProMax.Assistant.Tools.ProgramTools.Live(check);
+            var outcome = args.Contains("--full")
+                ? FieldTest.Run(link, new FieldTest.Options { Full = true, StartedFrom = "the command line", Progress = step => Console.Error.WriteLine("... " + step) })
+                : FieldTest.Run(link, args.Contains("--changes"), "the command line");
             Console.WriteLine(outcome.Report);
             Console.WriteLine("Saved: " + outcome.File);
+            if (outcome.Zip is not null) Console.WriteLine("To send: " + outcome.Zip);
             return outcome.Failed == 0 ? 0 : 1;
         }
         if (args.Contains("--selftest"))

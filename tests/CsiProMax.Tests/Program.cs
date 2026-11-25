@@ -7,12 +7,6 @@ using CsiProMax.Checks;
 using CsiProMax.E2k;
 using CsiProMax.Model;
 
-if (Environment.GetEnvironmentVariable("CPM_DUMP_TOOLS") == "1")
-{
-    foreach (var t in CsiProMax.Tools.ToolRegistry.CreateDefault().All.Where(t => t is not CsiProMax.Tools.ModelTool))
-        Console.WriteLine($"## {t.Name} [modifies={t.ModifiesModel}] required={string.Join(",", t.Required)}\n{t.PropertiesJson}\n");
-    return 0;
-}
 // Small self-contained checks, as in Sketch ProMax: each is a name and a body that throws when it fails.
 var tests = new List<(string Name, Action Body)>();
 void Test(string name, Action body) => tests.Add((name, body));
@@ -1119,6 +1113,81 @@ Test("field test: the panel's own tools are each run or listed as not tested, an
     finally { Directory.Delete(folder, true); }
 });
 
+Test("field test: the full test runs every part, closes its window, and leaves the open model as it was", () =>
+{
+    var root = Path.Combine(Path.GetTempPath(), "cpm-full-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(root);
+    var snapshots = ResultTools.SnapshotRoot;
+    try
+    {
+        var open = new MemoryEtabs();
+        open.AddFrame(0, 0, 0, 0, 0, 3, open.FrameSections()[0]);
+        var (frames, patterns) = (open.Frames().Count, open.LoadPatterns().Count);
+        CsiProMax.Tests.StandInWindow? window = null;
+        var at = new DateTime(2026, 11, 25, 15, 30, 0);
+        var options = new FieldTest.Options
+        {
+            Full = true, StartedFrom = "the Help menu", Folder = Path.Combine(root, "out"), WorkFolder = Path.Combine(root, "work"), At = at,
+            SettingsRoot = Path.Combine(root, "nowhere"), Programs = [CsiProgram.Etabs], LiveScratch = false,
+            // The stand-in for a second ETABS window: the Modeler's .e2k read into a model of its own.
+            StartScratch = (program, ctx, file) =>
+            {
+                var path = Path.Combine(ctx.Folder, "cpm-field-test.edb");
+                return window = new CsiProMax.Tests.StandInWindow(new OfflineEtabs(OfflineEtabs.Load(file), path), path);
+            },
+        };
+        var outcome = FieldTest.Run(open, options);
+        if (Environment.GetEnvironmentVariable("CPM_FIELD_DUMP") == "1")
+            foreach (var s in outcome.Steps) Console.WriteLine($"      {(s.Skipped ? "skip" : s.Ok ? "ok  " : "FAIL")} [{s.Section}] {s.Name}: {(s.Detail.Length > 160 ? s.Detail[..160] : s.Detail)}");
+        var sections = outcome.Steps.Select(s => s.Section).Distinct().ToList();
+        foreach (var part in new[] { PcFieldSteps.Section, FieldTest.OpenSection, ModelerFieldSteps.Section, FieldParts.ScratchSection(CsiProgram.Etabs), PanelFieldSteps.Section })
+        {
+            Check(sections.Contains(part), "no part " + part + " in " + string.Join(" | ", sections));
+            Check(outcome.Report.Contains("\n## " + part), "the report has no heading for " + part);
+        }
+        Check(window is { Closed: true, Disposed: true }, "the scratch window is closed and let go of");
+        Check(outcome.Steps.Any(s => s.Name == "close the scratch ETABS window without saving" && s.Ok), "closing it is a step of the report");
+        Check(outcome.Steps.Any(s => s.Name == "ETABS read every story, frame and area the Modeler wrote" && s.Ok), "the scratch part reads the model the Modeler wrote");
+        var modeler = outcome.Steps.Where(s => s.Section == ModelerFieldSteps.Section && !s.Ok).Select(s => s.Name).ToList();
+        Check(modeler.Count == 0, "the Modeler's part failed: " + string.Join(", ", modeler));
+        Check(outcome.Steps.Any(s => s.Section == PanelFieldSteps.Section && s.Name == "every tool of the panel was run, or is listed as not tested" && s.Ok), "the panel's part ran on the scratch window");
+        Check(outcome.Steps.Any(s => s.Section == FieldTest.OpenSection && s.Name == "Info" && s.Ok), "the open model is read");
+        Equal(frames, open.Frames().Count, "no frame was added to the open model");
+        Equal(patterns, open.LoadPatterns().Count, "no load pattern was added to the open model");
+        Check(outcome.Report.Contains("Kind: the full test") && outcome.Report.Contains("none to the open model"), "the report says what kind of test it was");
+        Check(outcome.NotTested > 0 && outcome.Report.Contains("## Not tested") && outcome.Report.Contains("## Check by hand"), "what was not tested, and what to check by hand, come first");
+        Check(outcome.Report.Contains("### not tested: "), "a step that was not tested says so in its own part");
+        Equal(Path.Combine(root, "out", "Field test ETABS 2026-11-25 1530.zip"), outcome.Zip, "the zip is beside the report");
+        Equal(outcome.Zip, outcome.Send, "the zip is what to send");
+        Check(outcome.Summary().Contains(outcome.Zip!), "the dialog names the zip");
+        using (var zip = System.IO.Compression.ZipFile.OpenRead(outcome.Zip!))
+        {
+            var names = zip.Entries.Select(e => e.FullName).ToList();
+            Check(names.Contains("Field test ETABS 2026-11-25 1530.md"), "the report is in the zip");
+            Check(names.Any(n => n.EndsWith(".e2k")) && names.Any(n => n.EndsWith(".s2k")) && names.Any(n => n.EndsWith(".f2k")), "the files the Modeler wrote are in the zip: " + string.Join(", ", names));
+            Check(!names.Any(n => n.StartsWith("files/Bugs/")), "nothing of the made-up bug report");
+        }
+        Check(Directory.Exists(Path.Combine(root, "work")) && outcome.WorkFolder == Path.Combine(root, "work"), "the test's own folder");
+        Check(!FieldTest.IsRunning, "it is not running any more");
+        Check(CsiProMax.Bugs.BugLog.RootOverride is null, "the bug folder is put back");
+
+        // A program window that never comes back is given up on; the rest of the test still runs and the report is saved.
+        using var hold = new ManualResetEventSlim(false);
+        var stuck = FieldTest.Run(open, options with
+        {
+            At = at.AddMinutes(1), Programs = [CsiProgram.Sap2000], ScratchLimit = TimeSpan.FromSeconds(1),
+            StartScratch = (_, _, _) => { hold.Wait(TimeSpan.FromSeconds(30)); return null; },
+        });
+        hold.Set();
+        var given = stuck.Steps.SingleOrDefault(s => s.Name == "SAP2000 on a scratch model");
+        Check(given is { Ok: false } && given.Detail.Contains("given up on"), "the part that did not come back is a failure that says so");
+        Check(stuck.Steps.Any(s => s.Name == "every tool of the panel was run, or is listed as not tested"), "the panel's part still ran, on the open model");
+        Check(File.Exists(stuck.File) && stuck.Zip is not null, "the report is still saved");
+        Equal(frames, open.Frames().Count, "the open model is still as it was");
+    }
+    finally { ResultTools.SnapshotRoot = snapshots; Directory.Delete(root, true); }
+});
+
 foreach (var (name, body) in tests)
 {
     try { body(); Console.WriteLine($"ok    {name}"); }
@@ -1126,6 +1195,19 @@ foreach (var (name, body) in tests)
 }
 Console.WriteLine($"\n{tests.Count - failed} of {tests.Count} passed.");
 return failed == 0 ? 0 : 1;
+
+namespace CsiProMax.Tests
+{
+    /// <summary>Stands in for the field test's own window of a CSI program.</summary>
+    sealed class StandInWindow(ICsiLink link, string path) : IScratchWindow
+    {
+        public bool Closed, Disposed;
+        public ICsiLink Link => link;
+        public string ModelPath => path;
+        public string Close() { Closed = true; return "the scratch ETABS window was closed without saving"; }
+        public void Dispose() => Disposed = true;
+    }
+}
 
 namespace ETABSv1
 {

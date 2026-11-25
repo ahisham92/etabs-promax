@@ -13,20 +13,38 @@ The field test is inside CSI ProMax. It checks what it can by itself and saves o
 2. **Tools menu.** Open the program and a model. Expected: Tools > CSI ProMax is there and opens the CSI ProMax window
    beside the program. If the menu does not show it, add it by hand (the install line prints the plug-in name, menu
    text and file) and say so: that tells us the automatic entry needs fixing.
-3. **Run the field test.** In the CSI ProMax window either type "run the field test" in the chat, or choose
-   Help > Field test (saves a report to send). It only reads the open model. Run it once on a model that has been
-   analysed and designed, so the result checks have something to read.
-   Expected: a message with the count of checks that passed, and a file
-   `Documents\CSI ProMax\Bugs\Field tests\Field test <program> <date>.md`. Send that file.
-4. **Field test with changes, on a scratch model only.** Open a new or throw-away model, then Help > Field test with
-   changes (scratch model only). It asks first. It adds a test column, a slab, a load pattern, loads and a combination,
-   and deletes the column and slab again. Expected: every check `ok`. Send that report too. Never on a project model.
-5. **One zip instead of single files.** Help > Export chats and bugs makes one zip with the chats, the bug reports
-   and the field test reports of the period. Send it when more than one thing went wrong.
+3. **Run the full field test.** In the CSI ProMax window choose Help > Field test: everything (saves a report to
+   send), or type "run the field test" in the chat. It asks first, then runs in the background for 20 to 60 minutes:
+   - this PC and the install: versions, the plug-in files and each program's plug-in list, the folders CSI ProMax
+     writes to, the licence, Claude Code and its sign-in;
+   - the open model, reading only (run it on a model that has been analysed and designed, so the result checks have
+     something to read);
+   - the Modeler: a test building made with every Modeler tool, each change read back, written as .e2k, .s2k and .f2k;
+   - each CSI program on the PC (ETABS, SAP2000, SAFE): a second window that the test opens itself on that test
+     model, saved as a scratch model in the test's own folder. Every tool of that program is run there with each
+     change read back through the program's API, then the analysis, the design, every result table and check, the
+     snapshots and the review pack. The window is closed without saving at the end;
+   - CSI ProMax's own features: every kind of file it writes and reads, the review pack, notes, recipes, learned
+     tools, code, the self test, the bug report and the export. What it makes is taken away again.
 
-What the report holds: the versions on the PC, the plug-in lists of the CSI programs, every check with its answer, and
-for ETABS the name, fields and first rows of each result table the checks read. The folder of the model is left out.
-Without the window: `dotnet CsiProMax.dll --program etabs --fieldtest` (or `sap2000`, `safe`) prints the same report.
+   Leave the windows it opens alone while it runs. Your open model is only read, never changed.
+   Expected: a message with the counts (passed, failed, not tested), and two files in
+   `Documents\CSI ProMax\Bugs\Field tests`: `Field test <program> <date>.md` (the report) and a `.zip` beside it
+   with the report and the small files the test made. **Send the zip.**
+4. **Check by hand.** The report ends its first part with a short list of what no test can do (the Tools menu entry,
+   an answer in the chat, the picture in a bug report, the pack in a browser). Try each and say which did not work.
+5. **The quick test.** Help > Field test, quick: this PC and the open model, or "run the quick field test" in the
+   chat. A minute or two, reading only. Use it after an update, or when the full test cannot run.
+6. **One zip of everything.** Help > Export chats and bugs makes one zip with the chats, the bug reports and the field
+   test reports of the period. Send it when more than one thing went wrong.
+
+What the report holds: "Not working" first (each failure with what was expected and what was found), then "Not
+tested" (each with the reason), then the plug-in lists, then every check of every part with its answer. The folder of
+the model and the Windows user's folder are left out. Without the window: `dotnet CsiProMax.dll --program etabs
+--fieldtest --full` (or `sap2000`, `safe`; leave out `--full` for the quick test) prints the same report.
+
+The numbered checks below are what the field test does by itself, kept as a list to go through by hand when it
+cannot run, or to look closer at one that failed.
 
 ## ETABS (needs ETABS 18 or later, licensed; 23 is the one built against)
 

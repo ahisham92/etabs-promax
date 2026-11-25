@@ -16,7 +16,7 @@ public static class EtabsFieldSteps
     public static void Scratch(FieldContext ctx)
     {
         var snapshots = ResultTools.SnapshotRoot;
-        ResultTools.SnapshotRoot = Path.Combine(ctx.Folder, "snapshots");
+        ResultTools.SnapshotRoot = Path.Combine(ctx.Folder, "snapshots", "etabs");
         try { Steps(ctx); }
         finally { ResultTools.SnapshotRoot = snapshots; }
     }

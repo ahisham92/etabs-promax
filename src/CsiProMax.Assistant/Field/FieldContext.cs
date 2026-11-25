@@ -131,9 +131,11 @@ public sealed class FieldContext(CsiProgram program, string folder, ICsiLink lin
         string last;
         lock (_gate) { last = _doing; _givenUp.Add(mine); }
         _section = section;
-        Add(what, false, $"It did not come back within {most.TotalMinutes:0} minutes and was given up on. It was at: {(last.Length > 0 ? last : "its start")}. A message may be waiting in the program's window: look at it, answer it, and run the field test again.");
+        Add(what, false, $"It did not come back within {Span(most)} and was given up on. It was at: {(last.Length > 0 ? last : "its start")}. A message may be waiting in the program's window: look at it, answer it, and run the field test again.");
         return false;
     }
+
+    private static string Span(TimeSpan t) => t.TotalMinutes >= 1 ? $"{t.TotalMinutes:0} minutes" : $"{Math.Max(1, t.TotalSeconds):0} seconds";
 
     /// <summary>Stops a part that was given up on (<see cref="Within"/>) the next time it comes back to record something.</summary>
     private void StillWanted()
@@ -154,6 +156,17 @@ public sealed class FieldContext(CsiProgram program, string folder, ICsiLink lin
     {
         StillWanted();
         lock (_gate) Steps.Add(new FieldStep(_section, name, true, "skipped: " + why, null, true));
+    }
+
+    /// <summary>
+    /// Records a step the self test made (the open model's part): its answer as it gave it, and "skipped: ..." as not
+    /// tested.
+    /// </summary>
+    public void Record(SelfTest.StepResult step)
+    {
+        StillWanted();
+        var skipped = step.Ok && step.Detail.StartsWith("skipped:", StringComparison.OrdinalIgnoreCase);
+        lock (_gate) Steps.Add(new FieldStep(_section, step.Name, step.Ok, step.Detail, step.Full, skipped));
     }
 
     /// <summary>Records something found that is neither a pass nor a failure: a fact for the report.</summary>
@@ -216,6 +229,8 @@ public sealed class FieldContext(CsiProgram program, string folder, ICsiLink lin
     /// <summary>Runs an offered tool without recording a step, for a step that looks at the outcome itself. It counts as run.</summary>
     public JsonNode Call(string name, string json)
     {
+        // A part that was given up on never makes another call: the link may be another model's by now.
+        StillWanted();
         if (!_tools.TryGetValue(name, out var tool)) throw new FieldCheckException($"There is no tool named {name} here.");
         _run.Add(name);
         using var document = JsonDocument.Parse(json);

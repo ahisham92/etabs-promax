@@ -33,7 +33,7 @@ public static class SapFieldSteps
     public static void Scratch(FieldContext ctx)
     {
         var snapshots = ResultTools.SnapshotRoot;
-        ResultTools.SnapshotRoot = Path.Combine(ctx.Folder, "snapshots");
+        ResultTools.SnapshotRoot = Path.Combine(ctx.Folder, "snapshots", "sap2000");
         try { Steps(ctx); }
         finally { ResultTools.SnapshotRoot = snapshots; }
     }
