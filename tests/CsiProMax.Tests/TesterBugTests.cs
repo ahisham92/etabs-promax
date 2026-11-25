@@ -723,6 +723,14 @@ static class TesterBugTests
             ctx.WithResults(); ctx.WithResults();
             Equal(1, runs, "times the Viewer's check ran");
         });
+        yield return ("SAP2000 26 field test: the shared steps check the Viewer before they unlock the analysed model", () =>
+        {
+            // Seen on 2026-11-25 with 0.4.20: the shared steps now unlock the model at their start (a locked SAP2000
+            // refused a pattern added by hand), and SAP2000's Viewer check came after them: 10 buttons greyed out and
+            // "the pack has no result tables".
+            var steps = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/CsiFieldSteps.cs"));
+            Check(steps.IndexOf("ctx.WithResults()", StringComparison.Ordinal) is var at and > 0 && at < steps.IndexOf("\"unlock_model\"", StringComparison.Ordinal), "the shared steps unlock the model before the Viewer is checked");
+        });
         yield return ("ETABS 23 field test: a test copy an earlier run left open is closed by the next run, and nothing else is", () =>
         {
             // Seen on 2026-11-25: the 0.4.10 run gave up on ETABS with the story picker showing; the 0.4.14 run then failed

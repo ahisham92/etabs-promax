@@ -447,6 +447,10 @@ Test("pack: the model, ETABS's tables and the checks go into one file and the Vi
             foreach (var i in seen.Items) Console.WriteLine($"   {(i.Skipped ? "skip" : i.Ok ? "ok  " : "FAIL")} {i.Name}: {i.Detail}");
         Check(seen.Items.Count > 10 && seen.Items.All(i => i.Ok || i.Skipped), "the Viewer's screen: " + string.Join("; ", seen.Items.Where(i => !i.Ok && !i.Skipped).Select(i => i.Name + ": " + i.Detail)));
         Check(seen.Pictures.Count == CsiProMax.Assistant.ViewerCheck.Shots.Length, $"a picture of each view: {seen.Pictures.Count}");
+        // Seen on 2026-11-25 with 0.4.20: the story, grid line and animation buttons were "not tested" on every
+        // model, because they only work in a plan, an elevation or on the deformed shape and were pressed in 3-D.
+        var left = seen.Items.Where(i => i.Skipped && (i.Name.Contains("story", StringComparison.OrdinalIgnoreCase) || i.Name.Contains("grid line", StringComparison.OrdinalIgnoreCase) || i.Name.Contains("Animate", StringComparison.Ordinal))).ToList();
+        Check(left.Count == 0, "buttons left untested on a model that has stories, grid lines and results: " + string.Join("; ", left.Select(i => i.Name + ": " + i.Detail)));
     }
 
     var folder = Path.Combine(Path.GetTempPath(), "cpm-pack-" + Guid.NewGuid().ToString("N"));
@@ -959,6 +963,7 @@ Test("add_load_pattern: ETABS refusing ASCE 7-16 keeps the Seismic pattern and s
 foreach (var (name, body) in CdtSdkTests.All()) Test(name, body);
 foreach (var (name, body) in HandModelTests.All()) Test(name, body);
 foreach (var (name, body) in AiModeTests.All()) Test(name, body);
+foreach (var (name, body) in ModelTablesTests.All()) Test(name, body);
 foreach (var (name, body) in KeptPlugInsTests.All()) Test(name, body);
 foreach (var (name, body) in FieldRun048Tests.All()) Test(name, body);
 foreach (var (name, body) in FieldQuietTests.All()) Test(name, body);

@@ -48,6 +48,7 @@ public static class ModelerFieldSteps
         ctx.Offer(ModelerTools.All);
         ctx.Offer(ProgramTools.Modeler);
         ctx.Offer(HandTools.All);
+        ctx.Offer(TableTools.All);
         var folder = Q(ctx.Folder);
 
         // A new model from the template: three stories, two bays each way.
@@ -200,6 +201,7 @@ public static class ModelerFieldSteps
         ctx.Refused("read_table", """{"table":"Story Drift"}""", "no table", "tool read_table says no to a table that is not there");
 
         Defining(ctx, modeler);
+        Tables(ctx, modeler);
 
         // The checks and the quantities.
         ctx.Tool("check_model", "{}", a => FieldContext.Expect(Int(a["errors"]) == 0, "the model the test built has errors: " + a["findings"]!.ToJsonString()));
@@ -313,6 +315,38 @@ public static class ModelerFieldSteps
             FieldContext.Expect(modeler.LoadPatterns().Count == before, "the test's pattern was left in the model");
             return "made, undone, redone and undone again";
         });
+    }
+
+    /// <summary>The model's tables to Excel and back, the way SAP2000 does it: the workbook the Modeler writes reads back
+    /// into the very same model, and SAP2000's own tables go to Excel too.</summary>
+    private static void Tables(FieldContext ctx, OfflineEtabs modeler)
+    {
+        ctx.Tool("model_tables", "{}", a => FieldContext.Expect(a["tables"]!.AsArray().Any(t => t!["name"]!.GetValue<string>() == "Frame Assignments - Section Properties" && t["rows"]!.GetValue<int>() == modeler.Model.LineAssigns.Count),
+            "the table list does not count the model's frames: " + a.ToJsonString()));
+        var before = CsiProMax.Model.ModelFile.ToJson(modeler.Model);
+        string? saved = null;
+        ctx.Tool("export_tables_excel", $$"""{"name":"CPM field test tables","folder":{{Q(ctx.Folder)}}}""", a =>
+        {
+            saved = a["saved"]?.GetValue<string>();
+            FieldContext.Expect(saved is not null && File.Exists(saved), "the workbook was not written: " + a.ToJsonString());
+            FieldContext.Expect(a["tables"]!.AsArray().Count == CsiProMax.CsiTables.ModelTables.Names.Length, "not every table went to the workbook");
+        }, "tool export_tables_excel writes the model's tables");
+        if (saved is not null)
+            ctx.Tool("import_tables_excel", $$"""{"path":{{Q(saved)}}}""", a =>
+            {
+                FieldContext.Expect(a["read"]!.AsArray().Count == CsiProMax.CsiTables.ModelTables.Names.Length, "not every table was read back: " + a.ToJsonString());
+                var after = CsiProMax.Model.ModelFile.ToJson(modeler.Model);
+                var at = 0;
+                while (at < Math.Min(before.Length, after.Length) && before[at] == after[at]) at++;
+                string Around(string text) => text.Substring(Math.Max(0, at - 120), Math.Min(text.Length - Math.Max(0, at - 120), 200));
+                FieldContext.Expect(after == before, $"the workbook read back did not give the same model: before ...{Around(before)}... after ...{Around(after)}...");
+            }, "tool import_tables_excel reads the workbook back into the same model");
+        ctx.Tool("export_tables_excel", $$"""{"name":"CPM field test SAP2000 tables","folder":{{Q(ctx.Folder)}},"format":"sap2000"}""", a =>
+        {
+            var path = a["saved"]?.GetValue<string>();
+            FieldContext.Expect(path is not null && TableTools.Read(path).Exists(t => t.Name == "Joint Coordinates" && t.Rows.Count > 0), "SAP2000's joint table is not in the workbook");
+        }, "tool export_tables_excel writes SAP2000's own tables");
+        ctx.Refused("import_tables_excel", $$"""{"path":{{Q(Path.Combine(ctx.Folder, "no such workbook.xlsx"))}}}""", "There is no file", "tool import_tables_excel refuses a file that is not there");
     }
 
     private static void Same(FieldContext ctx, JsonNode answer, string what) =>

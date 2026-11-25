@@ -58,6 +58,8 @@ public static class CsiFieldSteps
         ctx.Tool("refresh_view", "{}", a => FieldContext.Expect(a["refreshed"]?.GetValue<bool>() == true, "no redraw: " + a.ToJsonString()));
         // ---- the model must be changeable for the rest (a locked SAP2000 refused the pattern added by hand, 0.4.17) ----
         var locked = Read(ctx, "whether the model is locked", () => link.Info().Locked, false);
+        // The Viewer is checked first, while the results are still there (SAP2000's Viewer had no result to show, 0.4.20).
+        if (locked) ctx.WithResults();
         if (locked) T("unlock_model", "{}", a => FieldContext.Expect(a["locked"]?.GetValue<bool>() == false, "still locked: " + a.ToJsonString()), "tool unlock_model on the analysed scratch model");
         ctx.Tool("what_changed", """{"reset":true}""", a => FieldContext.Expect(a["baseline"]?.GetValue<string>() == "set", "the starting point was not set: " + a.ToJsonString()), "tool what_changed sets its starting point");
         var marker = Read(ctx, "a load pattern added by hand for what_changed", () => { link.AddLoadPattern("CPM-BYHAND", "Other", 0); return true; }, false);

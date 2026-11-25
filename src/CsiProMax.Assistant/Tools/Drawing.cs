@@ -75,7 +75,9 @@ public static class Drawing
     private static IReadOnlyList<GridRow> GridsFromTables(ICsiLink e)
     {
         var table = e.Tables().FirstOrDefault(t => !t.Empty && ResultTools.Norm(t.Name).StartsWith("griddefinitionsgridlines", StringComparison.Ordinal))
-            ?? e.Tables().FirstOrDefault(t => !t.Empty && ResultTools.Norm(t.Name) == "griddefinitions");
+            ?? e.Tables().FirstOrDefault(t => !t.Empty && ResultTools.Norm(t.Name) == "griddefinitions")
+            // SAP2000's own: "Grid Lines" (CoordSys, AxisDir, GridID, XRYZCoord).
+            ?? e.Tables().FirstOrDefault(t => !t.Empty && ResultTools.Norm(t.Name) == "gridlines");
         if (table is null) return [];
         var data = e.ReadTable(table.Key, null, null);
         int label = ResultTools.Col(data.Fields, "ID", "Label", "GridID", "Grid ID"), type = ResultTools.Col(data.Fields, "LineType", "Grid Line Type", "Direction", "AxisDir"),

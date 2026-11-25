@@ -30,6 +30,25 @@ public static class Pack
         "Element Forces - Beams", "Element Forces - Columns", "Element Forces - Braces",
     ];
 
+    /// <summary>
+    /// The program's stories; for a program without stories (SAP2000), the levels its joints stand on, so the Viewer's
+    /// plan and elevation views have levels to step through (0.4.20 field test: the SAP2000 pack had none).
+    /// </summary>
+    internal static IReadOnlyList<StoryRow> Levels(ICsiLink e, IReadOnlyList<PointRow> points)
+    {
+        var stories = e.Stories();
+        if (stories.Count > 0 || e.Program.Key != CsiProgram.Sap2000.Key || points.Count == 0) return stories;
+        var span = points.Max(p => p.Z) - points.Min(p => p.Z);
+        var tolerance = Math.Max(1e-6, span * 1e-4);
+        var zs = new List<double>();
+        foreach (var z in points.Select(p => p.Z).OrderBy(z => z))
+            if (zs.Count == 0 || z - zs[^1] > tolerance) zs.Add(z);
+        if (zs.Count < 2 || zs.Count > 200) return [];
+        var rows = new List<StoryRow> { new("Base", zs[0], 0) };
+        for (var i = 1; i < zs.Count; i++) rows.Add(new StoryRow($"Z {Math.Round(zs[i], 3).ToString(CultureInfo.InvariantCulture)}", zs[i], zs[i] - zs[i - 1]));
+        return rows;
+    }
+
     public sealed record Built(byte[] Zip, JsonObject Content, int Frames, int Areas, IReadOnlyList<string> Tables, IReadOnlyList<string> Notes);
 
     /// <param name="extraTables">More tables to take, by name or key (for example "Element Forces - Beams").</param>
@@ -56,7 +75,7 @@ public static class Pack
         var points = e.Points();
         var model = new JsonObject
         {
-            ["stories"] = new JsonArray(e.Stories().Select(s => (JsonNode)new JsonObject { ["name"] = s.Name, ["elevation"] = R(s.Elevation), ["height"] = R(s.Height) }).ToArray()),
+            ["stories"] = new JsonArray(Levels(e, points).Select(s => (JsonNode)new JsonObject { ["name"] = s.Name, ["elevation"] = R(s.Elevation), ["height"] = R(s.Height) }).ToArray()),
             ["frames"] = new JsonArray(frames.Select(f => (JsonNode)new JsonArray(f.Name, f.Kind, f.Section, f.Story, R(f.X1), R(f.Y1), R(f.Z1), R(f.X2), R(f.Y2), R(f.Z2))).ToArray()),
             ["areas"] = new JsonArray(areas.Select(a => (JsonNode)new JsonObject
             {
