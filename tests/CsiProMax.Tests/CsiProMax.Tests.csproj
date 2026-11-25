@@ -12,6 +12,9 @@
     <ProjectReference Include="../../src/CsiProMax.Core/CsiProMax.Core.csproj" />
     <ProjectReference Include="../../src/CsiProMax.Assistant/CsiProMax.Assistant.csproj" />
     <ProjectReference Include="../../src/CsiProMax.Plugin/CsiProMax.Plugin.csproj" />
+    <!-- Built before the tests, which read these plug-ins and their API stand-ins as files (nothing of them is referenced). -->
+    <ProjectReference Include="../../src/CsiProMax.Plugin.Safe/CsiProMax.Plugin.Safe.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../../src/CsiProMax.Plugin.Sap/CsiProMax.Plugin.Sap.csproj" ReferenceOutputAssembly="false" />
     <None Include="samples/**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

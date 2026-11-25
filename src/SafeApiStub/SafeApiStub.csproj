@@ -1,8 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- Build-time stand-in for SAFE's API file, SAFEv1.dll: only the types a plug-in must name, under the same assembly
-       name, so the SAFE plug-in binds to the real SAFEv1.dll inside SAFE. SAFE versions on .NET 8 ignore strong names
-       when they bind, so this needs no key. For a SAFE on .NET Framework, put the public half of SAFEv1.dll's key in
-       safev1-public.snk (read from the file on a PC with SAFE) and the stub is signed with it. Never shipped. -->
+       name and version. It is signed with the public half of the key ETABSv1.dll and SAP2000v1.dll are signed with
+       (token 453d728ef24c6f5e, read from those files), because a SAFE that runs on the .NET Framework (SAFE 20, 21)
+       binds the plug-in to SAFEv1.dll only when name, version and key are all the same. That SAFEv1.dll carries this
+       same key is taken from its sister files and not yet read from a SAFE 20 or 21: check.ps1 prints the real file's
+       name, version and key on a PC that has one. SAFE on .NET 8 goes by the name alone. Never shipped. -->
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
     <AssemblyName>SAFEv1</AssemblyName>
