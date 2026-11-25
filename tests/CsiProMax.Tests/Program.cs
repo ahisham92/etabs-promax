@@ -1105,6 +1105,16 @@ Test("link: a redraw the program does not come back from never fails the tool, a
     Equal(2, model.Redraws, "no redraw was asked for after the hang");
 });
 
+Test("pack: SAP2000's steel design summary comes from its API, as ETABS's does", () =>
+{
+    // 0.4.9 field test: the SAP2000 pack had no design ratios, so the Viewer's "Show design ratios" had nothing.
+    using var com = new ComEtabs(CsiProgram.Sap2000, () => new CpmFakes.SapDesigned());
+    var made = DesignResults.FromApi(new CsiProMax.Assistant.Sap2000.SapLink(com), new HashSet<string>(), []);
+    var steel = made.FirstOrDefault(m => m.Name.StartsWith("Steel", StringComparison.Ordinal));
+    Check(steel.Data is not null, "no steel design table: " + string.Join(", ", made.Select(m => m.Name)));
+    Equal("0.75", steel.Data!.Rows[0][2], "B1's ratio");
+});
+
 Test("link: units from the older one-value call, by name or number", () =>
 {
     Equal(("kN", "m", "C"), ComEtabs.Units("kN_m_C"), "by name");
@@ -1756,4 +1766,17 @@ namespace CpmFakes
         public HangingView View => this;
         public int RefreshView(int window, bool zoom) { Redraws++; Hang.Wait(); return 0; }
     }
+}
+
+namespace CpmFakes
+{
+    public sealed class SteelDesign
+    {
+        public int GetSummaryResults(string name, ref int n, ref string[] frame, ref double[] ratio, ref int[] type, ref double[] loc, ref string[] combo, ref string[] err, ref string[] warn, int item)
+        {
+            if (name != "ALL" || item != 1) return 1;
+            n = 1; frame = ["B1"]; ratio = [0.75]; type = [1]; loc = [0]; combo = ["COMB1"]; err = [""]; warn = [""]; return 0;
+        }
+    }
+    public sealed class SapDesigned { public SteelDesign DesignSteel { get; } = new(); }
 }
