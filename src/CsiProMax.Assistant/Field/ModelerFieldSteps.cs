@@ -76,6 +76,7 @@ public static class ModelerFieldSteps
         ctx.Offer(TableTools.All);
         ctx.Offer(LateralTools.All);
         ctx.Offer(CaseTools.All);
+        ctx.Offer(ModelTextTools.All);
         var folder = Q(ctx.Folder);
 
         // A new model from the template: three stories, two bays each way.
@@ -412,6 +413,19 @@ public static class ModelerFieldSteps
             FieldContext.Expect(Cases.All(cases.Contains), "the cases are not all listed: " + string.Join(", ", cases));
             FieldContext.Expect(a["functions"]!.AsArray().Any(f => f!["name"]!.GetValue<string>() == "CPM-RS"), "CPM-RS is not listed");
         });
+        ModelText(ctx, modeler);
+    }
+
+    /// <summary>Edit > Model Text: the safety net reads every section, takes a hand-written combination, and refuses text that breaks the model.</summary>
+    private static void ModelText(FieldContext ctx, OfflineEtabs modeler)
+    {
+        ctx.Tool("model_text", "{}", a => FieldContext.Expect(a["sections"]!.AsArray().Any(s => s!["section"]!.GetValue<string>() == "LOAD CASES"), "LOAD CASES is not listed: " + a.ToJsonString()));
+        var combos = "";
+        ctx.Tool("model_text", """{"section":"LOAD COMBINATIONS"}""", a => combos = a["text"]?.GetValue<string>() ?? "", "tool model_text, one section");
+        var text = (combos.Length > 0 ? combos + "\n" : "") + "  COMBO \"CPM-TXT\"  TYPE \"Linear Add\"\n  COMBO \"CPM-TXT\"  LOADCASE \"Dead\"  SF 1.4";
+        ctx.Tool("edit_model_text", """{"section":"LOAD COMBINATIONS","text":""" + Q(text) + "}", _ =>
+            FieldContext.Expect(modeler.Combos().Contains("CPM-TXT"), "the combination written as text is not in the model"), "tool edit_model_text, a combination written by hand");
+        ctx.Refused("edit_model_text", """{"section":"LINE CONNECTIVITIES","text":"  LINE \"B1\" BEAM \"no such point\""}""", "Nothing was changed", "tool edit_model_text says no to text that breaks the model");
     }
 
     private static void Tables(FieldContext ctx, OfflineEtabs modeler)

@@ -143,6 +143,21 @@ public static class ModelerCheck
           if (p.lateral.error || !(p.lateral.story_forces || []).some(f => f.fx > 0)) return {fail: "no story forces: " + (p.lateral.error || "")};
           return back ? {fail: "two undos did not take the pattern out again"} : {ok: `V = ${p.lateral.results.V} on ${p.lateral.story_forces.length} stories, then undone`};
         });
+        await step("Edit > Model Text: a combination written in the program's own text goes into the model, and undo takes it out", async () => {
+          await act("m:text"); await wait(900);
+          const sec = document.querySelector(".dlg #tS"), box = document.querySelector(".dlg #tX");
+          if (!sec || !box) return {fail: "the Model Text form did not open"};
+          document.querySelector(".dlg #tNew").value = "LOAD COMBINATIONS"; document.querySelector(".dlg #tNew").dispatchEvent(new Event("change", {bubbles: true})); await wait(900);
+          box.value = (box.value ? box.value + "\n" : "") + '  COMBO "CPM-CHKTXT"  TYPE "Linear Add"\n  COMBO "CPM-CHKTXT"  LOADCASE "Dead"  SF 1.4';
+          const ok = [...document.querySelectorAll(".dlg .df button")].find(b => b.textContent === "OK"); ok.click(); await wait(1500);
+          const err = document.querySelector(".dlg .ferr:not([hidden])");
+          const has = ((await hmDefs()).combinations || []).some(c => c.name === "CPM-CHKTXT");
+          closeDialogs(); await wait(150);
+          if (!has) return {fail: "the combination is not in the model: " + (err ? err.textContent : hm.lastError)};
+          await hmRun("undo"); await wait(800);
+          const back = ((await hmDefs()).combinations || []).some(c => c.name === "CPM-CHKTXT");
+          return back ? {fail: "undo did not take it out"} : {ok: "taken, then undone"};
+        });
         // A beam and a floor selected before each item, so the items that act on a selection are on (Delete empties it).
         const pick = () => { try { sel.clear(); const b = frames.findIndex(f => f.kind === "beam"); if (b >= 0) sel.add(b + 1); if (areas.length) sel.add(frames.length + 1); selChanged(); } catch (e) { } };
         const menus = modelerMenus(viewerMenus()), list = [];
