@@ -40,11 +40,11 @@ public sealed class RunFieldTestTool : IEtabsTool
         "ProMax's own features, and each window is closed without saving. It never changes the open model. It can take " +
         "up to an hour and runs in the background: it answers at once, a message on the screen says when it is done, " +
         "and scope \"status\" says where it is and, when it is done, what failed and which file to send. scope " +
-        "\"quick\" checks this PC, the install and the open model in a minute or two. Use it when the user asks for " +
+        "\"changed\" is the full test without the parts that already passed on this PC and have not changed. scope \"quick\" checks this PC, the install and the open model in a minute or two. Use it when the user asks for " +
         "the field test, or is asked to send one.";
     public string PropertiesJson => """
     {
-      "scope": {"type": "string", "enum": ["full", "quick", "status"], "description": "full (default): everything, on scratch models, in the background. quick: this PC, the install and the open model, reading only. status: how the field test started last is doing, or what it found."}
+      "scope": {"type": "string", "enum": ["full", "changed", "quick", "status"], "description": "full (default): everything, on scratch models, in the background. changed: like full, but a program's part or CSI ProMax's own features is left out when all of it passed on this PC and its code is unchanged since; use it after an update or a fix. quick: this PC, the install and the open model, reading only. status: how the field test started last is doing, or what it found."}
     }
     """;
     public string[] Required => [];
@@ -54,7 +54,7 @@ public sealed class RunFieldTestTool : IEtabsTool
     {
         var scope = (args.OptString("scope") ?? "full").Trim().ToLowerInvariant();
         if (scope == "status") return Status();
-        if (scope is not ("full" or "quick")) return ToolResult.Error($"scope is full, quick or status, not '{scope}'.");
+        if (scope is not ("full" or "changed" or "quick")) return ToolResult.Error($"scope is full, changed, quick or status, not '{scope}'.");
         if (Stale.Refusal() is { } old) return ToolResult.Error(old);
         if (FieldTest.IsRunning || SelfTest.IsRunning)
             return ToolResult.Error("A test is already running. Call run_field_test with scope \"status\" to see where it is.");
@@ -66,7 +66,7 @@ public sealed class RunFieldTestTool : IEtabsTool
         try
         {
             var programs = FieldTest.Installed(app.Link.Program);
-            FieldTestRuns.StartFull(app.Link, "the chat");
+            FieldTestRuns.StartFull(app.Link, "the chat", retest: scope == "changed");
             return ToolResult.Ok(new
             {
                 status = "started",
@@ -123,9 +123,9 @@ public sealed class RunFieldTestTool : IEtabsTool
 /// </summary>
 public static class FieldTestRuns
 {
-    public static FieldTest.Running StartFull(CsiProMax.Assistant.Etabs.ICsiLink link, string from)
+    public static FieldTest.Running StartFull(CsiProMax.Assistant.Etabs.ICsiLink link, string from, bool retest = false)
     {
-        var run = FieldTest.Start(link, new FieldTest.Options { Full = true, StartedFrom = from });
+        var run = FieldTest.Start(link, new FieldTest.Options { Full = true, Retest = retest, StartedFrom = from });
         run.Task.ContinueWith(Announce, TaskScheduler.Default);
         return run;
     }

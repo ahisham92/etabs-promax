@@ -752,6 +752,42 @@ static class TesterBugTests
             var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/ToolsMenu.cs"));
             Check(source.Contains("new[] { DefaultInstall(), InstalledIn, AppContext.BaseDirectory }", StringComparison.Ordinal), "Documents\\CSI ProMax no longer comes before the folder CSI ProMax runs from");
         });
+        yield return ("field test, only what changed or failed: a part that passed and is unchanged is not run again; a failed, new or changed one is", () =>
+        {
+            // Ahmed, 2026-11-25: "ignore for testing things that passed and just check the new things in addition to the things failed or not tested".
+            var passed = new FieldRetest.Part("0.4.16", "aaaa", 140, 0, [("ETABS table Element Forces - Braces", "ETABS does not list this table")]);
+            Check(!FieldRetest.Decide(passed, "aaaa").Run && FieldRetest.Decide(passed, "aaaa").Why.Contains("0.4.16", StringComparison.Ordinal), "a part that passed and is unchanged would run again");
+            Check(FieldRetest.Decide(passed, "bbbb").Run, "a part whose code changed is left out");
+            Check(FieldRetest.Decide(passed with { Failed = 1 }, "aaaa").Run, "a part with a failed step is left out");
+            Check(FieldRetest.Decide(null, "aaaa").Run && FieldRetest.Decide(passed, "").Run && FieldRetest.Decide(passed with { Print = "" }, "aaaa").Run, "a part never run, or a build with no source hashes, is left out");
+            // The code of a part: its own files and the shared tools, not another program's.
+            var files = new Dictionary<string, string> { ["Etabs/ComEtabs.cs"] = "1", ["Tools/ResultTools.cs"] = "2", ["Sap2000/SapTools.cs"] = "3", ["Safe/SafeTools.cs"] = "4", ["Panel/Chat/ChatPane.cs"] = "5", ["FieldTest.cs"] = "6" };
+            string Print(string part, string file, string hash) => FieldRetest.Print(part, new Dictionary<string, string>(files) { [file] = hash });
+            Check(Print("sap2000", "Sap2000/SapTools.cs", "x") != FieldRetest.Print("sap2000", files), "a change in SAP2000's tools does not change SAP2000's part");
+            Check(Print("etabs", "Sap2000/SapTools.cs", "x") == FieldRetest.Print("etabs", files) && Print(FieldRetest.Panel, "Sap2000/SapTools.cs", "x") == FieldRetest.Print(FieldRetest.Panel, files), "a change in SAP2000's tools changes another part");
+            Check(new[] { "etabs", "sap2000", "safe" }.All(part => Print(part, "Tools/ResultTools.cs", "x") != FieldRetest.Print(part, files)), "a change in a shared tool does not change every program's part");
+            Check(Print(FieldRetest.Panel, "Panel/Chat/ChatPane.cs", "x") != FieldRetest.Print(FieldRetest.Panel, files) && Print("etabs", "FieldTest.cs", "x") == FieldRetest.Print("etabs", files), "the panel's part, or the runner itself, is not told apart");
+            Check(FieldRetest.Files().Count > 100 && FieldRetest.Print("etabs").Length == 16 && FieldRetest.Print(FieldRetest.Panel).Length == 16, $"this build carries no source hashes ({FieldRetest.Files().Count} files)");
+            // Kept on the PC and read back; a part that did not run keeps what it had.
+            var folder = Path.Combine(Path.GetTempPath(), "cpm-retest-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                var file = Path.Combine(folder, "last-results.json");
+                FieldRetest.Save(new Dictionary<string, FieldRetest.Part> { ["etabs"] = passed, ["sap2000"] = passed with { Failed = 2 } }, file);
+                FieldRetest.Save(new Dictionary<string, FieldRetest.Part> { ["sap2000"] = passed with { Version = "0.4.17" } }, file);
+                var back = FieldRetest.Load(file);
+                Equal("0.4.16|aaaa|140|0|1", $"{back["etabs"].Version}|{back["etabs"].Print}|{back["etabs"].Passed}|{back["etabs"].Failed}|{back["etabs"].NotTested.Count}", "ETABS's part read back");
+                Equal("0.4.17|0", $"{back["sap2000"].Version}|{back["sap2000"].Failed}", "SAP2000's part after its next run");
+                File.WriteAllText(file, "not json");
+                Equal(0, FieldRetest.Load(file).Count, "parts read from a file that is not understood");
+            }
+            finally { if (Directory.Exists(folder)) Directory.Delete(folder, true); }
+            // In the report: one line that says it was not run again, and what it could not test, with its reason.
+            var ctx = new FieldContext(CsiProgram.Etabs, Path.GetTempPath(), new MemoryEtabs());
+            FieldRetest.LeftOut(ctx, "ETABS on a scratch model", passed, "all 140 steps of it passed in version 0.4.16 and its code is unchanged since");
+            var steps = ctx.Steps.ToList();
+            Check(steps.Count == 2 && steps[0].Ok && !steps[0].Skipped && steps[0].Name.Contains("not run again", StringComparison.Ordinal) && steps[1].Skipped && steps[1].Detail.Contains("as in the run of version 0.4.16", StringComparison.Ordinal), string.Join(" | ", steps.Select(s => $"{s.Name}: {s.Detail}")));
+        });
         yield return ("ETABS 20 tester: the field test tries what Tools > CSI ProMax does in each program, and fails where the plug-in cannot be created", () =>
         {
             // What the check answered on that PC (in its own words), and a PC where all is well.

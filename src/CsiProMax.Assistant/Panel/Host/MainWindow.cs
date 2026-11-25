@@ -141,6 +141,7 @@ internal sealed class MainWindow : Window
         Add(help, "_Tools menu of each CSI program: check and repair", CheckToolsMenus);
         help.Items.Add(new Separator());
         Add(help, "_Field test: everything (saves a report to send)…", () => RunFieldTest(full: true));
+        Add(help, "Field test: only what is _new, changed or failed…", () => RunFieldTest(full: true, retest: true));
         Add(help, "Field test, _quick: this PC and the open model", () => RunFieldTest(full: false));
         return menu;
     }
@@ -199,7 +200,7 @@ internal sealed class MainWindow : Window
     /// Modeler builds, then in a second window of each CSI program on this PC that it opens on its own scratch model and
     /// closes again without saving. The open model is only read. It runs in the background; a message says when it is done.
     /// </summary>
-    private async void RunFieldTest(bool full)
+    private async void RunFieldTest(bool full, bool retest = false)
     {
         if (CsiProMax.App.Etabs is not { } etabs) return;
         if (CsiProMax.Assistant.SelfTest.IsRunning || CsiProMax.Assistant.FieldTest.IsRunning)
@@ -216,12 +217,13 @@ internal sealed class MainWindow : Window
                 : $"Then it opens a second window of {string.Join(", ", programs.Select(p => p.Name))} on that test model, runs every tool and check there " +
                   "(the analysis and design too), and closes each window again without saving. Each window takes a licence as usual.";
             if (TaskDialog.Show("CSI ProMax",
+                    (retest ? "This field test runs only what is new, changed or failed: a program's part, or CSI ProMax's own features, is left out when all of it passed on this PC and its code is unchanged since. The report names what was left out. Otherwise it is the full test.\n\n" : "") +
                     "The full field test checks everything CSI ProMax does. It checks this PC and the install, reads your open model, and builds a test model of its own with every Modeler tool. " +
                     which + "\n\nYour open model is only read: nothing in it is changed. It can take up to an hour. While it runs, leave the windows it opens alone, " +
                     "and wait for it before you use the chat. A message says when the report is ready.\n\nStart it now?",
                     TaskDialogCommonButtons.Yes | TaskDialogCommonButtons.No, TaskDialogResult.No) != TaskDialogResult.Yes) return;
             // It says on the screen when it is done, the same way whether the menu or the chat started it.
-            try { CsiProMax.Tools.FieldTestRuns.StartFull(etabs.Link, "the Help menu"); }
+            try { CsiProMax.Tools.FieldTestRuns.StartFull(etabs.Link, "the Help menu", retest); }
             catch (InvalidOperationException ex) { TaskDialog.Show("CSI ProMax", ex.Message); }
             return;
         }

@@ -58,6 +58,15 @@ public static class FieldTest
         public Func<CsiProgram, FieldContext, string, IScratchWindow?> StartScratch { get; init; } = ScratchProgram.Start;
         /// <summary>Ends the test copies an earlier run left open, and says which. For tests: a stand-in.</summary>
         public Func<List<string>> EndLeftCopies { get; init; } = ScratchProgram.EndLeftCopies;
+        /// <summary>
+        /// Only what is new, changed or failed: a program's part, or CSI ProMax's own features, is left out when all of
+        /// it passed on this PC and its code is unchanged since (see <see cref="FieldRetest"/>). With <see cref="Full"/>.
+        /// </summary>
+        public bool Retest { get; init; }
+        /// <summary>Where each part's last result is kept. Left out: this PC's own file, and nothing for a stand-in run.</summary>
+        public string? ResultsFile { get; init; }
+        /// <summary>For tests: the value that stands for a part's code. Left out: from the source hashes in this build.</summary>
+        public Func<string, string>? Print { get; init; }
         /// <summary>For the tests: the file that says a full test is running, instead of this PC's own.</summary>
         public string? LockFile { get; init; }
 
@@ -209,10 +218,11 @@ public static class FieldTest
             ctx.Skip("the checks of the open model", "the open model could not be read (see above)");
         }
 
+        var ranParts = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase); // part -> its section in the report
         if (o.Full)
         {
             // Whatever a part throws, the report is written: a run that ends without one tells nobody what it found.
-            try { Full(ctx, link, o); }
+            try { Full(ctx, link, o, ranParts); }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 var real = ex is AggregateException { InnerException: { } inner } ? inner : ex;
@@ -242,6 +252,9 @@ public static class FieldTest
         }
 
         var steps = ctx.Steps.ToList();
+        // Each part that ran keeps its result on this PC, for the next test of "only what changed or failed".
+        if (o.Full && ResultsFile(o) is { } results)
+            FieldRetest.Save(ranParts.ToDictionary(r => r.Key, r => FieldRetest.Of(steps.Where(s => s.Section == r.Value), Update.Updater.CurrentText, PrintOf(o, r.Key))), results);
         var report = Render(link, steps, o, now, plugIns, o.Full ? work : null);
         Directory.CreateDirectory(target);
         var file = Path.Combine(target, $"Field test {link.Program.Name} {now:yyyy-MM-dd HHmm}.md");
@@ -251,9 +264,15 @@ public static class FieldTest
     }
 
     /// <summary>The full test's parts after the open model: the Modeler, a scratch window of each program, CSI ProMax's own features.</summary>
-    private static void Full(FieldContext ctx, ICsiLink link, Options o)
+    private static string? ResultsFile(Options o) => o.ResultsFile ?? (o.LiveScratch ? FieldRetest.File : null);
+
+    private static string PrintOf(Options o, string part) => o.Print is { } print ? print(part) : FieldRetest.Print(part);
+
+    private static void Full(FieldContext ctx, ICsiLink link, Options o, Dictionary<string, string> ran)
     {
         ModelerFieldSteps.Run(ctx);
+        var last = o.Retest && ResultsFile(o) is { } kept ? FieldRetest.Load(kept) : [];
+        (bool Run, string Why) Choice(string part) => o.Retest ? FieldRetest.Decide(last.GetValueOrDefault(part), PrintOf(o, part)) : (true, "");
 
         var programs = o.Programs ?? Installed(link.Program);
         if (programs.Count == 0)
@@ -263,9 +282,25 @@ public static class FieldTest
                 "no ETABS, SAP2000 or SAFE was found on this PC, so no tool was run inside a program. Run the field test on a PC that has them."); // ETABS itself
         }
         var panelDone = false;
+        var panel = Choice(FieldRetest.Panel);
+        if (!panel.Run)
+        {
+            panelDone = true;
+            ctx.Section(PanelFieldSteps.Section);
+            FieldRetest.LeftOut(ctx, "CSI ProMax's own features", last[FieldRetest.Panel], panel.Why);
+        }
+        // CSI ProMax's own features need one scratch window: when no program's part is due, the first program's runs for them.
+        var due = programs.Where(p => Choice(p.Key).Run).Select(p => p.Key).ToHashSet();
+        if (panel.Run && due.Count == 0 && programs.Count > 0) due.Add(programs[0].Key);
         foreach (var program in programs)
         {
             ctx.Section(FieldParts.ScratchSection(program));
+            if (!due.Contains(program.Key))
+            {
+                FieldRetest.LeftOut(ctx, $"{program.Name} on a scratch model", last[program.Key], Choice(program.Key).Why);
+                continue;
+            }
+            ran[program.Key] = FieldParts.ScratchSection(program);
             var file = ctx.Files.GetValueOrDefault(program.Key, "");
             if (file.Length == 0 || !File.Exists(file))
             {
@@ -306,6 +341,7 @@ public static class FieldTest
                     return;
                 }
                 panelDone = true;
+                ran[FieldRetest.Panel] = PanelFieldSteps.Section;
                 // CSI ProMax's own tools change the model too (code): only while this window still has the test's model.
                 var mine = ctx.Step($"the scratch {program.Name} window still has the scratch model open", () =>
                 {
@@ -350,7 +386,11 @@ public static class FieldTest
                 }
             }
         }
-        if (!panelDone) PanelFieldSteps.Run(ctx, link, scratch: false, live: IsLive(link));
+        if (!panelDone)
+        {
+            ran[FieldRetest.Panel] = PanelFieldSteps.Section;
+            PanelFieldSteps.Run(ctx, link, scratch: false, live: IsLive(link));
+        }
     }
 
     /// <summary>The first calls of where an exception came from, for the report: enough to find the step.</summary>
@@ -423,6 +463,7 @@ public static class FieldTest
             ? "- Kind: the full test (every tool: the Modeler, a second window of each CSI program on a scratch model, CSI ProMax's own features)"
             : "- Kind: the quick test (this PC, the install and the open model)");
         sb.AppendLine($"- Run: {now:yyyy-MM-dd HH:mm}, started from {o.StartedFrom}");
+        if (o.Full && o.Retest) sb.AppendLine("- Kind of run: only what is new, changed or failed. A part marked \"not run again\" passed on this PC before and its code is unchanged since.");
         sb.AppendLine(o.Full
             ? "- Changes to the model: none to the open model (reading only). Every change was made on the test's own scratch models, in program windows the test opened and closed itself"
             : o.Changes

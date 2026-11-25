@@ -1509,7 +1509,31 @@ Test("field test: the full test runs every part, closes its window, and leaves t
                 return window = new CsiProMax.Tests.StandInWindow(new OfflineEtabs(OfflineEtabs.Load(file), path), path);
             },
         };
+        var resultsFile = Path.Combine(root, "last-results.json");
+        options = options with { ResultsFile = resultsFile, Print = _ => "same" };
         var outcome = FieldTest.Run(open, options);
+        // Only what changed or failed: with every part passed and unchanged, no scratch window is reopened again.
+        {
+            var keptParts = FieldRetest.Load(resultsFile);
+            Check(keptParts.ContainsKey("etabs") && keptParts.ContainsKey(FieldRetest.Panel), "the full run did not keep its parts' results: " + string.Join(", ", keptParts.Keys));
+            var reopened = 0;
+            var again = options with { Retest = true, Folder = Path.Combine(root, "out2"), WorkFolder = Path.Combine(root, "work2"), At = at.AddMinutes(10),
+                StartScratch = (program, ctx, file) => { reopened++; return options.StartScratch(program, ctx, file); } };
+            var partsDue = keptParts["etabs"].Failed > 0 || keptParts[FieldRetest.Panel].Failed > 0;
+            var second = FieldTest.Run(open, again);
+            Equal(partsDue ? 1 : 0, reopened, "scratch windows reopened by the retest of an unchanged build");
+            if (!partsDue)
+            {
+                Check(second.Steps.Any(s => s.Name == "ETABS on a scratch model: not run again") && second.Steps.Any(s => s.Name == "CSI ProMax's own features: not run again"), "the report does not name the parts left out");
+                Check(second.Report.Contains("only what is new, changed or failed", StringComparison.Ordinal), "the report does not say what kind of run it was");
+                Equal(keptParts["etabs"].NotTested.Count + keptParts[FieldRetest.Panel].NotTested.Count, second.Steps.Count(s => s.Skipped && s.Detail.Contains("as in the run of version", StringComparison.Ordinal)), "steps listed again as not tested");
+            }
+            // Changed code of ETABS's part: its window opens again; the panel's part stays left out when it passed.
+            reopened = 0;
+            var changed = FieldTest.Run(open, again with { Print = part => part == "etabs" ? "new" : "same", Folder = Path.Combine(root, "out3"), WorkFolder = Path.Combine(root, "work3"), At = at.AddMinutes(20) });
+            Equal(1, reopened, "scratch windows reopened after ETABS's code changed");
+            Check(!changed.Steps.Any(s => s.Name == "ETABS on a scratch model: not run again"), "ETABS's part was left out though its code changed");
+        }
         if (Environment.GetEnvironmentVariable("CPM_FIELD_DUMP") == "1")
             foreach (var s in outcome.Steps) Console.WriteLine($"      {(s.Skipped ? "skip" : s.Ok ? "ok  " : "FAIL")} [{s.Section}] {s.Name}: {(s.Detail.Length > 160 ? s.Detail[..160] : s.Detail)}");
         var sections = outcome.Steps.Select(s => s.Section).Distinct().ToList();
