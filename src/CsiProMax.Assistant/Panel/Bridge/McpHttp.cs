@@ -50,6 +50,12 @@ internal sealed class McpHttpServer : IDisposable
     /// <summary>Serves the 3D view: given the path after the secret and the query, the body and its type (an empty body: nothing new).</summary>
     public Func<string, string, (byte[] Body, string ContentType)?>? ViewHandler { get; set; }
 
+    /// <summary>
+    /// The Modeler's hand edits from its 3D window (POST, JSON in and out): given the path after the secret and the
+    /// body. Only a page of this server may send them (same origin, and a header a plain form or link cannot add).
+    /// </summary>
+    public Func<string, byte[], Task<(byte[] Body, string ContentType)?>>? ViewPost { get; set; }
+
     public string ViewUrl => $"http://127.0.0.1:{Port}/view/{ViewToken}/";
 
     public int Port { get; private set; }
@@ -142,6 +148,23 @@ internal sealed class McpHttpServer : IDisposable
             await WriteAsync(stream, page is { } p
                 ? HttpRequest.Response(p.Body.Length == 0 ? 204 : 200, p.Body, p.ContentType, new Dictionary<string, string> { ["Cache-Control"] = "no-store" })
                 : HttpRequest.Response(404, Json(new { error = "not found" }), "application/json")).ConfigureAwait(false);
+            return;
+        }
+        if (request.Method == "POST" && request.Path.StartsWith("/view/" + ViewToken + "/", StringComparison.Ordinal))
+        {
+            // Another site can't know the secret, can't add the header without asking first (and nothing here answers
+            // that ask), and its Origin is not this server's.
+            var origin = request.Header("Origin");
+            var own = origin is null || origin == $"http://127.0.0.1:{Port}";
+            (byte[] Body, string ContentType)? done = null;
+            if (own && request.Header("X-CPM-View") == "1" && ViewPost is { } post)
+            {
+                try { done = await post(request.Path.Substring(7 + ViewToken.Length), request.Body).ConfigureAwait(false); }
+                catch (Exception ex) { done = (Json(new { ok = false, error = ex.Message }), "application/json"); }
+            }
+            await WriteAsync(stream, done is { } d
+                ? HttpRequest.Response(200, d.Body, d.ContentType, new Dictionary<string, string> { ["Cache-Control"] = "no-store" })
+                : HttpRequest.Response(own ? 404 : 403, Json(new { error = own ? "not found" : "forbidden" }), "application/json")).ConfigureAwait(false);
             return;
         }
         if (request.Path != "/mcp")

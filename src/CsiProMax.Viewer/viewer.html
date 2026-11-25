@@ -197,6 +197,18 @@ footer select{height:19px;font-size:11.5px;border-radius:0;margin:0 -4px}
 .dlg .itabs button.on{background:var(--field);border-color:var(--line);font-weight:600}
 .dlg .ipage{display:none}.dlg .ipage.on{display:block}
 .dlg table.list td.r{text-align:right;font-variant-numeric:tabular-nums}
+.ferr{color:var(--bad);margin-top:6px;max-width:560px;white-space:normal}
+#hint.bad{color:var(--bad)}
+body.hmbusy,body.hmbusy canvas{cursor:progress!important}
+table.hmgrid input,table.hmgrid select{width:100%;border:0;background:transparent;height:20px;padding:0 3px}
+table.hmgrid tr.on td{background:var(--sel)}
+table.hmgrid tr.edit td{background:var(--field)}
+table.hmgrid td{padding:0 2px}
+#pobj{position:absolute;left:10px;top:34px;z-index:5;background:var(--form);border:1px solid var(--formline);box-shadow:0 4px 14px rgba(0,0,0,.3);min-width:230px}
+#pobj .dt{height:24px;display:flex;align-items:center;padding:0 8px;background:var(--ftitle);border-bottom:1px solid var(--line2)}
+#pobj .dt b{font-weight:400}
+#pobj .g2{display:grid;grid-template-columns:auto 1fr;gap:5px 10px;align-items:center}
+footer select{font-size:11.5px}
 .swatch{display:inline-block;width:14px;height:12px;border:1px solid rgba(0,0,0,.3);vertical-align:-2px;margin-right:4px}
 @media (max-width:1000px){#explorer{display:none}#right{width:250px}#strip{display:none}}
 @media (max-width:700px){main{flex-direction:column}#right{width:auto;max-width:none;border-left:0;border-top:1px solid var(--line);height:36%}#tlist{display:none}}
@@ -209,7 +221,9 @@ footer select{height:19px;font-size:11.5px;border-radius:0;margin:0 -4px}
   <div class="menu" data-menu="Edit">Edit<div class="drop"></div></div>
   <div class="menu" data-menu="View">View<div class="drop"></div></div>
   <div class="menu" data-menu="Define">Define<div class="drop"></div></div>
+  <div class="menu" data-menu="Draw" hidden>Draw<div class="drop"></div></div>
   <div class="menu" data-menu="Select">Select<div class="drop"></div></div>
+  <div class="menu" data-menu="Assign" hidden>Assign<div class="drop"></div></div>
   <div class="menu" data-menu="Display">Display<div class="drop"></div></div>
   <div class="menu" data-menu="Design">Design<div class="drop"></div></div>
   <div class="menu" data-menu="Options">Options<div class="drop"></div></div>
@@ -237,7 +251,7 @@ footer select{height:19px;font-size:11.5px;border-radius:0;margin:0 -4px}
     <div id="legend" hidden></div>
   </div>
   <div id="center">
-    <div id="views"><canvas id="gl"></canvas></div>
+    <div id="views"><canvas id="gl"></canvas><div id="pobj" hidden></div></div>
     <div id="dock" hidden>
       <div class="grip" id="grip"></div>
       <div class="dock">Tables<span style="flex:1"></span><button class="x" id="dockMax" title="Fill the window" style="font-size:12px">&#9634;</button><button class="x" id="dockClose" title="Close the tables">&#10005;</button></div>
@@ -265,7 +279,7 @@ footer select{height:19px;font-size:11.5px;border-radius:0;margin:0 -4px}
     </div>
   </div>
 </main>
-<footer><span id="hint">Ready</span><span id="sel"></span><span id="coords"></span><span>Global</span><span id="units"></span></footer>
+<footer><span id="hint">Ready</span><span id="sel"></span><span id="coords"></span><span id="similarWrap" hidden><select id="similar" title="Draw on one story or on all stories" style="height:19px;padding:0 2px"><option value="one">One Story</option><option value="all">All Stories</option></select></span><span>Global</span><span id="units"></span></footer>
 <div id="rubber"></div><div id="tip"></div>
 <script id="pack" type="application/json"></script>
 <script>
@@ -375,6 +389,10 @@ function load(pack, keep) {
   for (const g of m.grids || []) (g[1] === "Y" ? grids.Y : grids.X).push({label: String(g[0]), dir: g[1] === "Y" ? "Y" : "X", at: g[2]});
   if (!grids.X.length && !grids.Y.length) guessGrids();
   grids.X.sort((a, b) => a.at - b.at); grids.Y.sort((a, b) => a.at - b.at);
+  // In the Modeler the grids and stories are where the next object goes, so the views take them in too.
+  if (window.cpmLive && grids.X.length && grids.Y.length && stories.length > 1) {
+    for (const gx of [grids.X[0], grids.X[grids.X.length - 1]]) for (const gy of [grids.Y[0], grids.Y[grids.Y.length - 1]]) { grow([gx.at, gy.at, stories[0].elevation]); grow([gx.at, gy.at, stories[stories.length - 1].elevation]); }
+  }
   if (lo[0] > hi[0]) {
     lo = [0, 0, 0]; hi = [1, 1, 1];
     if (grids.X.length) { lo[0] = grids.X[0].at; hi[0] = grids.X[grids.X.length - 1].at; }
@@ -1405,6 +1423,7 @@ function overlay(p, g, M, T, w, h) {
   else if (dview) { const nb = bandSet().length, step = (dview.hi - dview.lo) / nb; hScale(g, T, w, h, dview.title, bandSet(), k => dview.hi <= dview.lo && k ? undefined : dview.k !== 1 ? String(Math.round((dview.lo + step * k) * dview.k)) : fmt(dview.lo + step * k)); }
   else if ($("colour").value === "ratio" && ratio.size) hScale(g, T, w, h, "Design ratio (demand / capacity)", ratioCols, k => ["0.00", "0.50", "0.70", "0.90", "1.00", ">1"][k]);
   if (opt.axes) drawAxes(p, g, M, T, h);
+  if (window.cpmLive) drawPreview(p, g, M);
 }
 function hScale(g, T, w, h, title, cols, label) {
   // The colour scale along the bottom of the window, as the programs put it.
@@ -1702,14 +1721,14 @@ function wire(p) {
     let act;
     if (e.button === 1) { act = e.shiftKey ? "orbit" : "pan"; if (performance.now() - lastMid < 350) { fit(p); act = "none"; } lastMid = performance.now(); e.preventDefault(); }
     else if (e.button === 2) act = p.mode === "3d" && !e.shiftKey ? "orbit" : "pan";
-    else act = tool === "orbit" ? (p.mode === "3d" ? "orbit" : "pan") : tool === "pan" ? "pan" : tool === "zoom" ? "rubberzoom" : e.altKey && p.mode === "3d" ? "orbit" : "box";
+    else act = tool.startsWith("d:") ? "draw" : tool === "orbit" ? (p.mode === "3d" ? "orbit" : "pan") : tool === "pan" ? "pan" : tool === "zoom" ? "rubberzoom" : e.altKey && p.mode === "3d" ? "orbit" : "box";
     drag = {x, y, x0: x, y0: y, sx: e.clientX, sy: e.clientY, moved: false, act, button: e.button, ctrl: e.ctrlKey || e.metaKey || e.shiftKey};
     hideTip();
   });
   cv.addEventListener("pointermove", e => {
     const [x, y] = local(e);
     showCoords(p, x, y);
-    if (!drag) { scheduleHover(p, x, y, e.clientX, e.clientY); return; }
+    if (!drag) { if (tool.startsWith("d:")) drawMove(p, x, y); else scheduleHover(p, x, y, e.clientX, e.clientY); return; }
     const dx = x - drag.x, dy = y - drag.y;
     if (Math.abs(x - drag.x0) + Math.abs(y - drag.y0) > 3) drag.moved = true;
     if (!drag.moved) return;
@@ -1725,6 +1744,8 @@ function wire(p) {
   cv.addEventListener("pointerup", e => {
     const [x, y] = local(e), d = drag; drag = null; $("rubber").style.display = "none";
     if (!d || !P) return;
+    if (d.act === "draw") { if (!d.moved) drawClick(p, x, y, false); return; }
+    if (!d.moved && d.button === 2 && tool.startsWith("d:") && hm.chain.length) { hm.chain = []; draw(); return; }
     if (!d.moved) {
       if (d.button === 2) { const id = idAt(p, x, y); if (id && !sel.has(id)) { sel.clear(); sel.add(id); selChanged(); } contextMenu(p, e.clientX, e.clientY, id); return; }
       if (d.button === 0 && (d.act === "box" || d.act === "orbit" || d.act === "pan")) {
@@ -1741,7 +1762,7 @@ function wire(p) {
       else boxSelect(p, r, x < d.x0, true);
     }
   });
-  cv.addEventListener("dblclick", e => { const [x, y] = local(e), id = idAt(p, x, y); if (id) infoWindow(id); });
+  cv.addEventListener("dblclick", e => { const [x, y] = local(e); if (tool.startsWith("d:")) { if (drawKind() === "floor") drawClick(p, x, y, true); return; } const id = idAt(p, x, y); if (id) infoWindow(id); });
   cv.addEventListener("pointerleave", () => { $("coords").textContent = ""; hideTip(); if (hover) { hover = 0; draw(); } });
   cv.addEventListener("contextmenu", e => e.preventDefault());
   cv.addEventListener("auxclick", e => e.preventDefault());
@@ -1782,7 +1803,7 @@ function tipText(o) {
   if ((res.mode === "contour" || res.mode === "deformed") && disp.has(res.case)) { const idx = o.type === "f" ? [o.ia, o.ib] : o.idx; const ds = idx.filter(i => i >= 0).map(i => disp.get(res.case).get(String(points[i][0]))).filter(Boolean); if (ds.length) { const c = ["UX", "UY", "UZ"], best = ds.reduce((m, d) => Math.max(m, Math.hypot(...d)), 0); lines.push(`Largest movement ${fmt(best)}${unit ? " " + unit : ""} (${res.case})`); } }
   return lines.join("\n");
 }
-const hintText = () => tool === "zoom" ? "Drag a box to zoom into it." : tool === "pan" ? "Drag to pan. Wheel zooms." : tool === "orbit" ? "Drag to turn the 3-D view. Wheel zooms." : "Click to select, drag a box to select (left to right: inside, right to left: touching). Right drag turns 3-D, middle drag pans, wheel zooms, right click for more.";
+const hintText = () => tool.startsWith("d:") ? drawHint() : tool === "zoom" ? "Drag a box to zoom into it." : tool === "pan" ? "Drag to pan. Wheel zooms." : tool === "orbit" ? "Drag to turn the 3-D view. Wheel zooms." : "Click to select, drag a box to select (left to right: inside, right to left: touching). Right drag turns 3-D, middle drag pans, wheel zooms, right click for more.";
 
 // ---- toolbars ----
 const I = {
@@ -1847,6 +1868,7 @@ function syncTools() {
   const on = (sel, v) => document.querySelectorAll(sel).forEach(b => b.classList.toggle("on", v));
   for (const m of ["plan", "elev", "3d"]) on(`[data-act="v:${m}"]`, p.mode === m);
   for (const t of ["select", "zoom", "pan", "orbit"]) on(`[data-act="t:${t}"]`, tool === t);
+  document.querySelectorAll('[data-act^="d:"]').forEach(b => b.classList.toggle("on", b.dataset.act === tool));
   for (const k of Object.keys(opt)) on(`[data-act="o:${k}"]`, opt[k]);
   on('[data-act="persp"]', p.mode === "3d" && !!p.cam.persp);
   on('[data-act="bg"]', bg === "black");
@@ -1916,7 +1938,8 @@ function act(name) {
   hideMenus();
   if (name.startsWith("r:")) return setRes(name.slice(2));
   if (name.startsWith("o:")) { const k = name.slice(2); opt[k] = !opt[k]; if (k === "extrude" || k === "sections") { geometryDirty = true; geometryStamp++; } if (k === "fill") hiddenVersion++; if (k === "explorer") $("explorer").hidden = !opt.explorer; if (k === "side") $("right").hidden = !opt.side; syncTools(); return draw(); }
-  if (name.startsWith("t:")) { tool = name.slice(2); syncTools(); return; }
+  if (name.startsWith("m:")) return modelAct(name.slice(2));
+  if (name.startsWith("t:") || name.startsWith("d:")) { tool = name.startsWith("t:") ? name.slice(2) : name; hm.chain = []; hm.hover = null; syncTools(); showObjBox(); draw(); return; }
   if (name.startsWith("v:")) return setMode(p, name.slice(2));
   if (name.startsWith("cam:")) { if (p) setView3d(p, name.slice(4)); return; }
   if (name.startsWith("dlg:")) return dialogs[name.slice(4)]();
@@ -1957,7 +1980,8 @@ function act(name) {
 function copyText(t) { try { navigator.clipboard.writeText(t); } catch (e) { const a = document.createElement("textarea"); a.value = t; document.body.appendChild(a); a.select(); document.execCommand("copy"); a.remove(); } $("hint").textContent = "Copied."; }
 
 // ---- menus ----
-const menus = () => {
+const menus = () => window.cpmLive ? modelerMenus(viewerMenus()) : viewerMenus();
+const viewerMenus = () => {
   const p = panes[active], plan = p && p.mode === "plan", elev = p && p.mode === "elev";
   return {
     File: [["Open...", "open", "Ctrl+O"], ["Save comments to a file", "saveComments"], 0, ["Print the active window...", "print", "Ctrl+P"]],
@@ -1984,6 +2008,7 @@ function ticked(a) {
   if (a.startsWith("lay")) return layout === +a.slice(3);
   if (a.startsWith("dshow:")) { const [, k, id] = a.split(":"); return res.mode === "design" && res.dfam === k && res.dshow === id; }
   if (a.startsWith("t:")) return tool === a.slice(2);
+  if (a.startsWith("d:")) return tool === a;
   return {bg: bg === "black", tables: !$("dock").hidden, plot: !!p && p.mode === "plot", persp: !!p && !!p.cam.persp && p.mode === "3d", explorer: opt.explorer, side: opt.side, anim: res.anim}[a] || false;
 }
 function menuHtml(list) {
@@ -2545,6 +2570,564 @@ document.addEventListener("keydown", e => {
   else if (ctrl && k.toLowerCase() === "c" && sel.size) { stop(); act("copyNames"); }
 });
 window.cpmLoad = load;
+// ---- the Modeler: modelling by hand. Its menus, forms and drawing clicks call the same tools the chat calls, through
+// the Modeler on this PC (POST edit), so the chat and the engineer work on one model. Only in the Modeler's own view. ----
+const hm = {state: {}, defs: null, chain: [], hover: null, busy: false, sec: {}, pattern: "", similar: "one", lastError: ""};
+async function hmPost(body) {
+  const r = await fetch("edit", {method: "POST", headers: {"Content-Type": "application/json", "X-CPM-View": "1"}, body: JSON.stringify(body), cache: "no-store"});
+  if (!r.ok) return {ok: false, error: r.status === 404 ? "The Modeler is not answering. Is its window still open?" : "The Modeler refused the change (" + r.status + ")."};
+  return r.json();
+}
+// One change: the answer, and the view and the forms' lists brought up to date. Errors go to the status bar.
+async function hmRun(tool, args, quiet) {
+  if (hm.busy) return {ok: false, error: "The last change is still being made."};
+  hm.busy = true; document.body.classList.add("hmbusy");
+  let j;
+  try { j = await hmPost(tool === "undo" || tool === "redo" ? {[tool]: true} : {tool, args: args || {}}); }
+  catch (e) { j = {ok: false, error: "The Modeler could not be reached: " + e.message}; }
+  finally { hm.busy = false; document.body.classList.remove("hmbusy"); }
+  if ("rev" in j) hm.state = j;
+  if (j.ok) {
+    hm.lastError = ""; hm.defs = null; if (window.cpmPull) await window.cpmPull(); await hmDefs();
+    // A new model, another file, or new stories and grids: the windows show all of it again, plans at the top story.
+    if (["new_model", "open_model_file", "define_stories", "define_grids"].includes(tool)) {
+      const top = stories.length ? stories[stories.length - 1].name : "";
+      for (const p of panes) { if (p.mode === "plan" && top && !stories.some(s => s.name === p.story && s !== stories[0])) { p.story = top; p.sig = ""; p.vis = null; p.cam = {...p.cam, ...planeCam(p)}; } fit(p, false); }
+      syncTools(); draw();
+    }
+  }
+  else if (!quiet) hmSay(j.error || "That did not work.", true);
+  return j;
+}
+function hmSay(text, bad) { const h = $("hint"); h.textContent = text; h.classList.toggle("bad", !!bad); hm.lastError = bad ? text : ""; }
+async function hmDefs() {
+  if (hm.defs) return hm.defs;
+  const j = await hmPost({tool: "model_definitions", args: {}}).catch(() => null);
+  if (j && j.ok) { hm.defs = j.result; if ("rev" in j) hm.state = j; }
+  return hm.defs || {stories: [], grids: [], materials: [], frame_sections: [], shell_sections: [], load_patterns: [], load_cases: [], combinations: [], pattern_types: [], base: {name: "Base", elevation: 0}, units: {}};
+}
+const hmU = () => { const u = (hm.defs && hm.defs.units) || {}; return {f: (u.force || "kN").replace(/^KN$/i, "kN"), l: (u.length || "m").toLowerCase()}; };
+
+// ---- menus ----
+function modelerMenus(m) {
+  const s = hm.state || {}, any = sel.size > 0, fr = [...sel].some(id => (objOf(id) || {}).type === "f"), ar = [...sel].some(id => (objOf(id) || {}).type === "a");
+  m.File = [["New Model...", "m:new", "Ctrl+N"], ["Open...", "m:open", "Ctrl+O"], 0, ["Save", "m:save", "Ctrl+S"], ["Save As...", "m:saveAs"], 0,
+    ["Export", [["SAP2000 .s2k Text File...", "m:s2k"], ["SAFE .f2k Text File (one floor)...", "m:f2k"]]], 0, ["Print the active window...", "print", "Ctrl+P"]];
+  m.Edit = [[s.undo ? "Undo " + s.undo : "Undo", "m:undo", "Ctrl+Z", !s.undo], [s.redo ? "Redo " + s.redo : "Redo", "m:redo", "Ctrl+Y", !s.redo], 0,
+    ["Delete", "m:delete", "Del", !any], 0, ["Copy names of the selected objects", "copyNames", "Ctrl+C", !any], 0, ["Hide the selected objects", "hideSel", "", !any], ["Show all objects", "showAll"]];
+  m.Define = [["Material Properties...", "m:materials"], ["Frame Sections...", "m:frameSections"], ["Slab and Wall Sections...", "m:shellSections"], 0,
+    ["Story Data...", "m:stories"], ["Grid Data...", "m:grids"], 0, ["Load Patterns...", "m:patterns"], ["Load Cases...", "dlg:cases"], ["Load Combinations...", "m:combos"]];
+  m.Draw = [["Select Object", "t:select", "Esc"], 0, ["Draw Columns (click a point)", "d:column"], ["Draw Beams (click start and end)", "d:beam"], ["Quick Draw Beams (click a grid line)", "d:qbeam"], 0,
+    ["Draw Floors (click corners)", "d:floor"], ["Draw Rectangular Floors (two corners)", "d:rect"], ["Quick Draw Floors (click in a bay)", "d:qfloor"], 0,
+    ["Draw Walls (click start and end)", "d:wall"], ["Quick Draw Walls (click a grid line)", "d:qwall"], 0, ["Snap and Story Options...", "m:drawHelp"]];
+  m.Assign = [["Frame Section...", "m:asgFrame", "", !fr], ["Slab or Wall Section...", "m:asgShell", "", !ar], 0, ["Joint Restraints (Supports)...", "m:asgSupport"], 0,
+    ["Frame Loads, Distributed...", "m:asgFrameLoad", "", !fr], ["Shell Loads, Uniform...", "m:asgShellLoad", "", !ar]];
+  return m;
+}
+async function modelAct(a) {
+  hideMenus();
+  switch (a) {
+    case "undo": case "redo": { const j = await hmRun(a); if (j.ok) hmSay(j.did || "Done."); return; }
+    case "delete": return hmDelete();
+    case "save": return hmSave(false);
+    case "saveAs": return hmSave(true);
+    case "s2k": return hmExport("s2k");
+    case "f2k": return hmExport("f2k");
+    case "new": return hmNew();
+    case "open": return hmOpen();
+    case "materials": return hmMaterials();
+    case "frameSections": return hmFrameSections();
+    case "shellSections": return hmShellSections();
+    case "stories": return hmStories();
+    case "grids": return hmGrids();
+    case "patterns": return hmPatterns();
+    case "combos": return hmCombos();
+    case "asgFrame": return hmAssignSection("f");
+    case "asgShell": return hmAssignSection("a");
+    case "asgSupport": return hmAssignSupport();
+    case "asgFrameLoad": return hmAssignLoad("f");
+    case "asgShellLoad": return hmAssignLoad("a");
+    case "drawHelp": return hmDrawHelp();
+  }
+}
+const hmSelected = t => [...sel].map(objOf).filter(o => o && o.type === t).map(o => o.name);
+async function hmDelete() {
+  const frames_ = hmSelected("f"), areas_ = hmSelected("a");
+  if (!frames_.length && !areas_.length) return hmSay("Select the objects to delete first.", true);
+  const j = await hmRun("delete_objects", {frames: frames_, areas: areas_});
+  if (j.ok) { sel.clear(); selChanged(); hmSay(`Deleted ${frames_.length + areas_.length} objects. Edit > Undo brings them back.`); }
+}
+
+// ---- forms: small helpers in the programs' own layout ----
+const fnum = (d, s) => { const v = parseFloat(q(d, s).value); return isFinite(v) ? v : NaN; };
+function formError(d, text) { let e = d.querySelector(".ferr"); if (!e) { e = document.createElement("div"); e.className = "ferr"; d.querySelector(".db").appendChild(e); } e.textContent = text || ""; e.hidden = !text; }
+// A form that changes the model: its button waits for the answer, keeps the form open on an error and shows why.
+function submit(d, tool, args, after) {
+  formError(d, "");
+  hmRun(tool, args, true).then(j => { if (j.ok) { d.close(); hmSay((hm.state && hm.state.undo ? "Done: " + hm.state.undo : "Done") + ". Edit > Undo steps back."); if (after) after(j); } else formError(d, j.error); });
+  return false;
+}
+// The programs' Define list: the names on the left, "Click to:" buttons on the right.
+function listForm(title, what, names, actions, onPick) {
+  const d = dialog(title, `<div style="display:flex;gap:10px"><fieldset style="flex:1;margin:0"><legend>${esc(what)}</legend>
+      <select id="hmList" size="14" style="width:100%;height:auto;min-width:220px">${names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join("")}</select></fieldset>
+      <fieldset style="width:190px;margin:0"><legend>Click to:</legend><div style="display:flex;flex-direction:column;gap:6px">${actions.map((x, i) => `<button data-a="${i}">${esc(x[0])}</button>`).join("")}</div></fieldset></div>`,
+    [["OK"]], {width: 480});
+  const list = q(d, "#hmList"); if (names.length) list.selectedIndex = 0;
+  d.querySelectorAll("[data-a]").forEach(b => b.onclick = () => { const x = actions[+b.dataset.a]; x[1](list.value, d); });
+  list.ondblclick = () => { if (onPick && list.value) onPick(list.value, d); };
+  return d;
+}
+// The sections the Modeler makes are concrete, so their forms offer the concrete materials (ETABS's C30/37 first).
+const matOpts = (defs, v) => { const list = defs.materials.filter(m => /concrete/i.test(m.type)).map(m => m.name); return opts(list, v && list.includes(v) ? v : list.includes("C30/37") ? "C30/37" : list[0]); };
+
+// ---- Define: materials ----
+async function hmMaterials() {
+  const defs = await hmDefs();
+  const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmMaterials(); };
+  listForm("Define Materials", "Materials", defs.materials.map(m => m.name), [
+    ["Add New Material...", () => hmMaterial(null, again)],
+    ["Add Copy of Material...", n => n && hmMaterial(defs.materials.find(m => m.name === n), again, true)],
+    ["Modify/Show Material...", n => n && hmMaterial(defs.materials.find(m => m.name === n), again)],
+    ["Delete Material", n => n && hmRun("delete_definition", {kind: "material", name: n}).then(j => j.ok && again())],
+  ], n => hmMaterial(defs.materials.find(m => m.name === n), again));
+}
+function hmMaterial(m, after, copy) {
+  const u = hmU(), concrete = !m || /concrete/i.test(m.type), was = m && !copy ? m.name : null;
+  if (m && !concrete) return dialog("Material Property Data", `<p class="kv" style="max-width:340px">${esc(m.name)} is ${esc(m.type)}. The Modeler shows it and keeps it as the file has it; it changes concrete materials only.</p>`, [["OK"]], {width: 380});
+  const d = dialog("Material Property Data", `<fieldset><legend>General Data</legend><div class="g2">
+      <span>Material Name</span><input id="mN" value="${esc(m ? (copy ? m.name + " copy" : m.name) : "Concrete")}">
+      <span>Material Type</span><select disabled><option>Concrete</option></select></div></fieldset>
+    <fieldset><legend>Weight and Mass</legend><div class="g2"><span>Weight per Unit Volume (${u.f}/${u.l}³)</span><input id="mW" type="number" step="any" value="${m && m.unit_weight != null ? m.unit_weight : 25}"></div></fieldset>
+    <fieldset><legend>Mechanical Property Data</legend><div class="g2">
+      <span>Modulus of Elasticity, E (${u.f}/${u.l}²)</span><input id="mE" type="number" step="any" value="${m && m.elastic_modulus != null ? m.elastic_modulus : 32836568}">
+      <span>Poisson's Ratio, U</span><input id="mU" type="number" step="any" value="${m && m.poisson != null ? m.poisson : 0.2}"></div></fieldset>
+    <fieldset><legend>Design Property Data</legend><div class="g2"><span>Specified Concrete Compressive Strength, fc (${u.f}/${u.l}²)</span><input id="mF" type="number" step="any" value="${m && m.fc != null ? m.fc : 30000}"></div></fieldset>`,
+    [["OK", d => submit(d, "define_material", {name: q(d, "#mN").value.trim(), was, fc: fnum(d, "#mF"), elastic_modulus: fnum(d, "#mE"), unit_weight: fnum(d, "#mW"), poisson: fnum(d, "#mU")}, after), true], ["Cancel"]], {width: 460});
+  return d;
+}
+
+// ---- Define: frame sections ----
+async function hmFrameSections() {
+  const defs = await hmDefs();
+  const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmFrameSections(); };
+  const find = n => defs.frame_sections.find(s => s.name === n);
+  listForm("Frame Properties", "Properties", defs.frame_sections.map(s => s.name), [
+    ["Add New Property...", () => hmFrameSection(null, again)],
+    ["Add Copy of Property...", n => n && hmFrameSection(find(n), again, true)],
+    ["Modify/Show Property...", n => n && hmFrameSection(find(n), again)],
+    ["Delete Property", n => n && hmRun("delete_definition", {kind: "frame_section", name: n}).then(j => j.ok && again())],
+  ], n => hmFrameSection(find(n), again));
+}
+function sectionSvg(dep, wid) {
+  const k = 70 / Math.max(dep || 1, wid || 1), h = Math.max(4, (dep || 0) * k), w = Math.max(4, (wid || 0) * k);
+  return `<svg width="110" height="100" viewBox="0 0 110 100"><rect x="${55 - w / 2}" y="${50 - h / 2}" width="${w}" height="${h}" fill="#b8c4cc" stroke="#3a4650"/><path d="M55 8v84M8 50h94" stroke="#7a8890" stroke-dasharray="3 2"/><text x="60" y="12" font-size="10" fill="#555">3</text><text x="96" y="46" font-size="10" fill="#555">2</text></svg>`;
+}
+async function hmFrameSection(s, after, copy) {
+  const defs = await hmDefs(), u = hmU(), was = s && !copy ? s.name : null;
+  if (s && !s.editable) return dialog("Frame Section Property Data", `<p class="kv" style="max-width:360px">${esc(s.name)} is a ${esc(s.shape)} section. The Modeler keeps it as the file has it and draws with it; it changes rectangular concrete sections only.</p>`, [["OK"]], {width: 400});
+  const d = dialog("Frame Section Property Data", `<div style="display:flex;gap:10px"><div style="flex:1"><fieldset><legend>General Data</legend><div class="g2">
+      <span>Property Name</span><input id="sN" value="${esc(s ? (copy ? s.name + " copy" : s.name) : "C400X400")}">
+      <span>Material</span><select id="sM">${matOpts(defs, s ? s.material : "")}</select>
+      <span>Shape</span><select disabled><option>Concrete Rectangular</option></select></div></fieldset>
+    <fieldset><legend>Section Dimensions</legend><div class="g2"><span>Depth (t3), ${u.l}</span><input id="sD" type="number" step="any" value="${s && s.depth != null ? s.depth : 0.4}">
+      <span>Width (t2), ${u.l}</span><input id="sB" type="number" step="any" value="${s && s.width != null ? s.width : 0.4}"></div></fieldset>
+    <fieldset><legend>Design Type</legend><label><input type="radio" name="sK" value="column" ${!s || s.kind !== "beam" ? "checked" : ""}>Column</label> &nbsp; <label><input type="radio" name="sK" value="beam" ${s && s.kind === "beam" ? "checked" : ""}>Beam</label></fieldset></div>
+    <fieldset style="margin:0"><legend>Section</legend><div id="sP">${sectionSvg(s && s.depth, s && s.width)}</div></fieldset></div>`,
+    [["OK", d => { const kind = q(d, "[name=sK]:checked").value, name = q(d, "#sN").value.trim(); return submit(d, "define_frame_section", {name, was, kind, depth: fnum(d, "#sD"), width: fnum(d, "#sB"), material: q(d, "#sM").value}, j => { hm.sec[kind] = name; if (after) after(j); }); }, true], ["Cancel"]], {width: 520});
+  const redraw = () => q(d, "#sP").innerHTML = sectionSvg(fnum(d, "#sD"), fnum(d, "#sB"));
+  q(d, "#sD").oninput = redraw; q(d, "#sB").oninput = redraw;
+  if (s && copy === undefined && s.used) formError(d, "");
+}
+
+// ---- Define: slab and wall sections ----
+async function hmShellSections() {
+  const defs = await hmDefs();
+  const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmShellSections(); };
+  const find = n => defs.shell_sections.find(s => s.name === n);
+  listForm("Slab and Wall Properties", "Properties", defs.shell_sections.map(s => s.name + (s.kind === "wall" ? "  (wall)" : "")), [
+    ["Add New Property...", () => hmShellSection(null, again)],
+    ["Add Copy of Property...", n => n && hmShellSection(find(n.replace(/  \(wall\)$/, "")), again, true)],
+    ["Modify/Show Property...", n => n && hmShellSection(find(n.replace(/  \(wall\)$/, "")), again)],
+    ["Delete Property", n => n && hmRun("delete_definition", {kind: "shell_section", name: n.replace(/  \(wall\)$/, "")}).then(j => j.ok && again())],
+  ], n => hmShellSection(find(n.replace(/  \(wall\)$/, "")), again));
+}
+async function hmShellSection(s, after, copy) {
+  const defs = await hmDefs(), u = hmU(), was = s && !copy ? s.name : null;
+  dialog("Slab or Wall Property Data", `<fieldset><legend>General Data</legend><div class="g2">
+      <span>Property Name</span><input id="aN" value="${esc(s ? (copy ? s.name + " copy" : s.name) : "Slab200")}">
+      <span>Type</span><select id="aK" ${s && !copy ? "disabled" : ""}>${opts([["slab", "Slab"], ["wall", "Wall"]], s ? s.kind : "slab")}</select>
+      <span>Material</span><select id="aM">${matOpts(defs, s ? s.material : "")}</select>
+      <span>Thickness, ${u.l}</span><input id="aT" type="number" step="any" value="${s && s.thickness != null ? s.thickness : 0.2}"></div></fieldset>`,
+    [["OK", d => { const kind = q(d, "#aK").value, name = q(d, "#aN").value.trim(); return submit(d, "define_shell_section", {name, was, kind, thickness: fnum(d, "#aT"), material: q(d, "#aM").value}, j => { hm.sec[kind] = name; if (after) after(j); }); }, true], ["Cancel"]], {width: 400});
+}
+
+// ---- Define: stories (ETABS's Story Data, edited in the grid) ----
+async function hmStories() {
+  const defs = await hmDefs(), u = hmU();
+  let rows = defs.stories.map(s => ({name: s.name, height: s.height, was: s.name})).reverse(), base = {...defs.base};
+  const d = dialog("Story Data", `<p class="kv" style="margin:0 0 6px">Top story first, as ETABS lists them. Type in the cells. Deleting a story deletes what stands on it.</p>
+    <div style="display:flex;gap:10px"><div class="scroll" style="max-height:52vh;flex:1"><table class="list hmgrid" id="stT"></table></div>
+    <fieldset style="width:170px;margin:0"><legend>Click to:</legend><div style="display:flex;flex-direction:column;gap:6px">
+      <button id="stAbove">Add Story Above</button><button id="stBelow">Insert Story Below</button><button id="stDel">Delete Story</button>
+      <span class="kv" style="margin-top:6px">Several stories at once:</span><label>Count <input id="stN" type="number" value="1" min="1" style="width:60px"></label><label>Height <input id="stH" type="number" step="any" value="3" style="width:60px"></label><button id="stMany">Add on Top</button></div></fieldset></div>`,
+    [["OK", d => {
+      const names = new Set(defs.stories.map(s => s.name));
+      return submit(d, "define_stories", {base_name: base.name, base_elevation: base.elevation, stories: rows.slice().reverse().map(r => ({name: r.name.trim(), height: r.height, was: r.was && names.has(r.was) ? r.was : undefined}))});
+    }, true], ["Cancel"]], {width: 600});
+  let at = 0;
+  const next = () => { let i = rows.length + 1; const used = new Set(rows.map(r => r.name)); while (used.has("Story" + i)) i++; return "Story" + i; };
+  const paint = () => {
+    let z = base.elevation; const elev = rows.slice().reverse().map(r => (z += +r.height || 0)).reverse();
+    q(d, "#stT").innerHTML = `<tr><th>Story</th><th>Height (${u.l})</th><th>Elevation (${u.l})</th></tr>` + rows.map((r, i) => `<tr data-i="${i}" class="${i === at ? "on" : ""}"><td><input data-k="name" value="${esc(r.name)}"></td><td><input data-k="height" type="number" step="any" value="${r.height}"></td><td class="r">${num(elev[i])}</td></tr>`).join("") +
+      `<tr data-base="1"><td><input data-b="name" value="${esc(base.name)}"></td><td class="kv">base</td><td><input data-b="elevation" type="number" step="any" value="${base.elevation}"></td></tr>`;
+    d.querySelectorAll("[data-i]").forEach(tr => { tr.onclick = () => { at = +tr.dataset.i; d.querySelectorAll("[data-i]").forEach(x => x.classList.toggle("on", x === tr)); }; });
+    d.querySelectorAll("[data-k]").forEach(inp => inp.onchange = () => { const r = rows[+inp.closest("tr").dataset.i]; r[inp.dataset.k] = inp.dataset.k === "height" ? parseFloat(inp.value) : inp.value; paint(); });
+    d.querySelectorAll("[data-b]").forEach(inp => inp.onchange = () => { base[inp.dataset.b] = inp.dataset.b === "elevation" ? parseFloat(inp.value) || 0 : inp.value; paint(); });
+  };
+  q(d, "#stAbove").onclick = () => { rows.splice(at, 0, {name: next(), height: rows[at] ? rows[at].height : 3}); paint(); };
+  q(d, "#stBelow").onclick = () => { rows.splice(Math.min(at + 1, rows.length), 0, {name: next(), height: rows[at] ? rows[at].height : 3}); at = Math.min(at + 1, rows.length - 1); paint(); };
+  q(d, "#stDel").onclick = () => { if (rows.length > 1) { rows.splice(at, 1); at = Math.max(0, Math.min(at, rows.length - 1)); paint(); } };
+  q(d, "#stMany").onclick = () => { const n = Math.max(1, Math.min(200, parseInt(q(d, "#stN").value) || 1)), h = parseFloat(q(d, "#stH").value) || 3; for (let i = 0; i < n; i++) rows.unshift({name: next(), height: h}); at = 0; paint(); };
+  paint();
+}
+
+// ---- Define: grids (SAP2000's Define Grid System Data: X and Y grid data, ordinates) ----
+async function hmGrids() {
+  const defs = await hmDefs(), u = hmU();
+  const data = {X: defs.grids.filter(g => g.direction === "X").map(g => ({label: g.label, at: g.coordinate})), Y: defs.grids.filter(g => g.direction === "Y").map(g => ({label: g.label, at: g.coordinate}))};
+  const table = dir => `<fieldset style="flex:1;margin:0"><legend>${dir} Grid Data</legend><div class="scroll" style="max-height:40vh"><table class="list hmgrid" id="g${dir}"></table></div>
+      <div style="display:flex;gap:6px;margin-top:6px"><button data-add="${dir}">Add Line</button><button data-del="${dir}">Delete Line</button></div></fieldset>`;
+  const d = dialog("Define Grid System Data", `<p class="kv" style="margin:0 0 6px">X grid lines stand at an X ordinate (lettered A, B, C), Y grid lines at a Y ordinate (numbered 1, 2, 3), as ETABS and SAP2000 number them.</p>
+    <div style="display:flex;gap:10px">${table("X")}${table("Y")}</div>
+    <fieldset style="margin-top:8px"><legend>Quick Start: uniform spacing</legend><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <label>X lines <input id="qxN" type="number" value="${Math.max(data.X.length, 4)}" style="width:55px"></label><label>X spacing <input id="qxS" type="number" step="any" value="6" style="width:60px"></label>
+      <label>Y lines <input id="qyN" type="number" value="${Math.max(data.Y.length, 4)}" style="width:55px"></label><label>Y spacing <input id="qyS" type="number" step="any" value="6" style="width:60px"></label><button id="qGo">Fill the tables</button></div></fieldset>`,
+    [["OK", d => submit(d, "define_grids", {grids: ["X", "Y"].flatMap(dir => data[dir].map(g => ({label: String(g.label).trim(), direction: dir, coordinate: g.at})))}), true], ["Cancel"]], {width: 640});
+  const sel_ = {X: 0, Y: 0};
+  const letters = i => { let s = ""; i++; while (i > 0) { s = String.fromCharCode(65 + (i - 1) % 26) + s; i = Math.floor((i - 1) / 26); } return s; };
+  const paint = dir => {
+    q(d, "#g" + dir).innerHTML = `<tr><th>Grid ID</th><th>Ordinate (${u.l})</th></tr>` + data[dir].map((g, i) => `<tr data-i="${i}" class="${i === sel_[dir] ? "on" : ""}"><td><input data-k="label" value="${esc(g.label)}"></td><td><input data-k="at" type="number" step="any" value="${g.at}"></td></tr>`).join("");
+    q(d, "#g" + dir).querySelectorAll("[data-i]").forEach(tr => tr.onclick = () => { sel_[dir] = +tr.dataset.i; q(d, "#g" + dir).querySelectorAll("[data-i]").forEach(x => x.classList.toggle("on", x === tr)); });
+    q(d, "#g" + dir).querySelectorAll("[data-k]").forEach(inp => inp.onchange = () => { const g = data[dir][+inp.closest("tr").dataset.i]; g[inp.dataset.k] = inp.dataset.k === "at" ? parseFloat(inp.value) : inp.value; });
+  };
+  d.querySelectorAll("[data-add]").forEach(b => b.onclick = () => { const dir = b.dataset.add, L = data[dir], last = L.length ? L[L.length - 1].at : 0, gap = L.length > 1 ? L[L.length - 1].at - L[L.length - 2].at : 6; L.push({label: dir === "X" ? letters(L.length) : String(L.length + 1), at: L.length ? last + gap : 0}); sel_[dir] = L.length - 1; paint(dir); });
+  d.querySelectorAll("[data-del]").forEach(b => b.onclick = () => { const dir = b.dataset.del; data[dir].splice(sel_[dir], 1); sel_[dir] = Math.max(0, sel_[dir] - 1); paint(dir); });
+  q(d, "#qGo").onclick = () => {
+    const nx = Math.max(1, Math.min(100, parseInt(q(d, "#qxN").value) || 1)), ny = Math.max(1, Math.min(100, parseInt(q(d, "#qyN").value) || 1)), sx = parseFloat(q(d, "#qxS").value) || 6, sy = parseFloat(q(d, "#qyS").value) || 6;
+    data.X = Array.from({length: nx}, (_, i) => ({label: letters(i), at: +(i * sx).toFixed(6)})); data.Y = Array.from({length: ny}, (_, i) => ({label: String(i + 1), at: +(i * sy).toFixed(6)})); paint("X"); paint("Y");
+  };
+  paint("X"); paint("Y");
+}
+
+// ---- Define: load patterns (SAP2000's Define Load Patterns: the edit row, then the list) ----
+async function hmPatterns() {
+  const defs = await hmDefs();
+  let pick = defs.load_patterns.length ? 0 : -1;
+  const d = dialog("Define Load Patterns", `<div style="display:flex;gap:10px"><fieldset style="flex:1;margin:0"><legend>Load Patterns</legend>
+      <div class="scroll" style="max-height:46vh"><table class="list hmgrid"><thead><tr><th>Load Pattern Name</th><th>Type</th><th>Self Weight Multiplier</th><th>Loads on</th></tr>
+      <tr class="edit"><td><input id="pN"></td><td><select id="pT">${opts(defs.pattern_types, "Dead")}</select></td><td><input id="pS" type="number" step="any" value="0"></td><td></td></tr></thead><tbody id="pL"></tbody></table></div></fieldset>
+    <fieldset style="width:180px;margin:0"><legend>Click To:</legend><div style="display:flex;flex-direction:column;gap:6px"><button id="pAdd">Add New Load Pattern</button><button id="pMod">Modify Load Pattern</button><button id="pDel">Delete Load Pattern</button></div></fieldset></div>`,
+    [["OK"]], {width: 700});
+  const L = () => hm.defs ? hm.defs.load_patterns : defs.load_patterns;
+  const fill = () => { const p = L()[pick]; if (!p) return; q(d, "#pN").value = p.name; q(d, "#pT").value = p.type; q(d, "#pS").value = p.self_weight; };
+  const paint = () => {
+    q(d, "#pL").innerHTML = L().map((p, i) => `<tr data-i="${i}" class="${i === pick ? "on" : ""}"><td>${esc(p.name)}</td><td>${esc(p.type)}</td><td class="r">${num(p.self_weight)}</td><td class="r">${p.loads}</td></tr>`).join("");
+    d.querySelectorAll("#pL [data-i]").forEach(tr => tr.onclick = () => { pick = +tr.dataset.i; paint(); fill(); });
+  };
+  const go = async (tool, args) => { formError(d, ""); const j = await hmRun(tool, args, true); if (!j.ok) return formError(d, j.error); await hmDefs(); pick = Math.min(pick, L().length - 1); paint(); };
+  q(d, "#pAdd").onclick = () => { const name = q(d, "#pN").value.trim(); go("define_load_pattern", {name, type: q(d, "#pT").value, self_weight: fnum(d, "#pS")}).then(() => { pick = L().findIndex(p => p.name === name); paint(); }); };
+  q(d, "#pMod").onclick = () => { const p = L()[pick]; if (p) go("define_load_pattern", {name: q(d, "#pN").value.trim(), was: p.name, type: q(d, "#pT").value, self_weight: fnum(d, "#pS")}); };
+  q(d, "#pDel").onclick = () => { const p = L()[pick]; if (p) go("delete_definition", {kind: "load_pattern", name: p.name}); };
+  paint(); fill();
+}
+
+// ---- Define: load combinations (SAP2000's Define Load Combinations, then Load Combination Data) ----
+async function hmCombos() {
+  const defs = await hmDefs();
+  const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmCombos(); };
+  const find = n => defs.combinations.find(c => c.name === n);
+  listForm("Define Load Combinations", "Load Combinations", defs.combinations.map(c => c.name), [
+    ["Add New Combo...", () => hmCombo(null, again)],
+    ["Add Copy of Combo...", n => n && hmCombo(find(n), again, true)],
+    ["Modify/Show Combo...", n => n && hmCombo(find(n), again)],
+    ["Delete Combo", n => n && hmRun("delete_definition", {kind: "combination", name: n}).then(j => j.ok && again())],
+  ], n => hmCombo(find(n), again));
+}
+async function hmCombo(c, after, copy) {
+  const defs = await hmDefs(), was = c && !copy ? c.name : null;
+  const names = defs.load_cases.map(x => x.name).concat(defs.combinations.map(x => x.name).filter(n => n !== was));
+  const rows = c ? c.cases.map(x => ({case: x.case, factor: x.factor})) : [];
+  let pick = rows.length ? 0 : -1, n = defs.combinations.length + 1; while (defs.combinations.some(x => x.name === "Comb" + n)) n++;
+  const d = dialog("Load Combination Data", `<fieldset><legend>Load Combination Name</legend><div class="g2"><span>Load Combination Name</span><input id="cN" value="${esc(c ? (copy ? c.name + " copy" : c.name) : "Comb" + n)}">
+      <span>Load Combination Type</span><select id="cT">${opts(["Linear Add", "Envelope", "Absolute Add", "SRSS", "Range Add"], c ? c.type : "Linear Add")}</select></div></fieldset>
+    <fieldset><legend>Define Combination of Load Case Results</legend><div style="display:flex;gap:10px"><div style="flex:1">
+      <div class="scroll" style="max-height:40vh"><table class="list hmgrid"><thead><tr><th>Load Case Name</th><th>Scale Factor</th></tr><tr class="edit"><td><select id="cC">${opts(names, names[0])}</select></td><td><input id="cF" type="number" step="any" value="1"></td></tr></thead><tbody id="cL"></tbody></table></div></div>
+      <div style="display:flex;flex-direction:column;gap:6px;width:90px"><button id="cAdd">Add</button><button id="cMod">Modify</button><button id="cDel">Delete</button></div></div></fieldset>`,
+    [["OK", d => submit(d, "define_combination", {name: q(d, "#cN").value.trim(), was, type: q(d, "#cT").value, cases: rows}, after), true], ["Cancel"]], {width: 520});
+  const paint = () => {
+    q(d, "#cL").innerHTML = rows.map((r, i) => `<tr data-i="${i}" class="${i === pick ? "on" : ""}"><td>${esc(r.case)}</td><td class="r">${num(r.factor)}</td></tr>`).join("") || `<tr><td colspan="2" class="kv">Pick a load case and a scale factor above, then Add.</td></tr>`;
+    d.querySelectorAll("#cL [data-i]").forEach(tr => tr.onclick = () => { pick = +tr.dataset.i; q(d, "#cC").value = rows[pick].case; q(d, "#cF").value = rows[pick].factor; paint(); });
+  };
+  q(d, "#cAdd").onclick = () => { rows.push({case: q(d, "#cC").value, factor: fnum(d, "#cF")}); pick = rows.length - 1; paint(); };
+  q(d, "#cMod").onclick = () => { if (rows[pick]) { rows[pick] = {case: q(d, "#cC").value, factor: fnum(d, "#cF")}; paint(); } };
+  q(d, "#cDel").onclick = () => { if (rows[pick]) { rows.splice(pick, 1); pick = Math.min(pick, rows.length - 1); paint(); } };
+  paint();
+}
+
+// ---- Assign ----
+async function hmAssignSection(t) {
+  const defs = await hmDefs(), names = hmSelected(t);
+  if (!names.length) return hmSay(t === "f" ? "Select columns, beams or braces first." : "Select floors or walls first.", true);
+  const list = t === "f" ? defs.frame_sections.map(s => s.name) : defs.shell_sections.map(s => s.name);
+  const now = objOf([...sel].find(id => (objOf(id) || {}).type === t)).section;
+  dialog(t === "f" ? "Assign Frame Section" : "Assign Slab or Wall Section", `<p class="kv" style="margin:0 0 6px">${names.length} selected ${t === "f" ? "frames" : "floors and walls"}.</p><select id="aS" size="12" style="width:100%;height:auto">${opts(list, now)}</select>`,
+    [["OK", d => submit(d, "set_section", {[t === "f" ? "frames" : "areas"]: names, section: q(d, "#aS").value}), true], ["Cancel"]], {width: 320});
+}
+function supportPoints() {
+  // The bottom end of each selected column, brace or wall: where a support goes.
+  const out = new Set();
+  for (const id of sel) {
+    const o = objOf(id); if (!o) continue;
+    const ends = o.type === "f" ? [o.a, o.b] : o.pts, zmin = Math.min(...ends.map(e => e[2]));
+    for (const e of ends) if (Math.abs(e[2] - zmin) < 1e-6) { const n = pointAt.get(key(e[0], e[1], e[2])); if (n !== undefined) out.add(String(n)); }
+  }
+  return [...out];
+}
+function hmAssignSupport() {
+  const pts = supportPoints();
+  const icons = {fixed: '<path d="M4 4h16v10H4z" fill="#6c7a84"/><path d="M2 16h20M4 16l-2 3M8 16l-2 3M12 16l-2 3M16 16l-2 3M20 16l-2 3" stroke="#333"/>', pinned: '<path d="M12 4L5 14h14z" fill="#6c7a84"/><path d="M3 16h18" stroke="#333"/>', free: '<circle cx="12" cy="10" r="3" fill="#6c7a84"/>'};
+  const d = dialog("Assign Joint Restraints", `<fieldset><legend>Fast Restraints</legend><div style="display:flex;gap:8px">${["fixed", "pinned", "free"].map(k => `<label style="display:flex;flex-direction:column;align-items:center;gap:3px;border:1px solid var(--fgroup);padding:6px 10px"><svg width="24" height="22" viewBox="0 0 24 22">${icons[k]}</svg><span><input type="radio" name="rK" value="${k}" ${k === "fixed" ? "checked" : ""}>${k[0].toUpperCase() + k.slice(1)}</span></label>`).join("")}</div></fieldset>
+    <fieldset><legend>Where</legend><label style="display:block"><input type="radio" name="rW" value="sel" ${pts.length ? "checked" : "disabled"}>The bottom ends of the selected columns and walls (${pts.length} joints)</label><label style="display:block"><input type="radio" name="rW" value="base" ${pts.length ? "" : "checked"}>Every column and wall that stands on the base</label></fieldset>`,
+    [["OK", d => { const where = q(d, "[name=rW]:checked").value; return submit(d, "set_supports", where === "base" ? {type: q(d, "[name=rK]:checked").value, at_base: true} : {type: q(d, "[name=rK]:checked").value, points: pts}); }, true], ["Cancel"]], {width: 420});
+  return d;
+}
+async function hmAssignLoad(t) {
+  const defs = await hmDefs(), names = hmSelected(t), u = hmU();
+  if (!names.length) return hmSay(t === "f" ? "Select the beams to load first." : "Select the floors to load first.", true);
+  if (!defs.load_patterns.length) return hmSay("Define a load pattern first (Define > Load Patterns).", true);
+  const unitText = t === "f" ? `${u.f}/${u.l}` : `${u.f}/${u.l}²`;
+  dialog(t === "f" ? "Frame Load Assignment - Distributed" : "Shell Load Assignment - Uniform", `<fieldset><legend>Load Pattern</legend><select id="lP">${opts(defs.load_patterns.map(p => p.name), hm.pattern || (defs.load_patterns.find(p => /live/i.test(p.type)) || defs.load_patterns[0]).name)}</select></fieldset>
+    <fieldset><legend>Uniform Load</legend><div class="g2"><span>Load (${unitText}), gravity, down positive</span><input id="lV" type="number" step="any" value="${t === "f" ? 10 : 2}"></div></fieldset>
+    <fieldset><legend>Options</legend><label style="display:block"><input type="radio" name="lO" value="add">Add to Existing Loads</label><label style="display:block"><input type="radio" name="lO" value="replace" checked>Replace Existing Loads</label><label style="display:block"><input type="radio" name="lO" value="delete">Delete Existing Loads</label></fieldset>
+    <p class="kv">${names.length} selected ${t === "f" ? "frames" : "floors and walls"}.</p>`,
+    [["OK", d => { hm.pattern = q(d, "#lP").value; const o = q(d, "[name=lO]:checked").value; return submit(d, "set_loads", {[t === "f" ? "frames" : "areas"]: names, pattern: hm.pattern, value: o === "delete" ? 0 : fnum(d, "#lV"), add: o === "add"}); }, true], ["Cancel"]], {width: 400});
+}
+
+// ---- File ----
+function hmNew() {
+  const d = dialog("New Model Quick Templates", `<div class="g2" style="margin-bottom:8px"><span>Model title</span><input id="nT" value="Model"></div>
+    <div style="display:flex;gap:10px"><fieldset style="flex:1"><legend>Grid Dimensions (Plan)</legend><div class="g2">
+      <span>Number of Grid Lines in X Direction</span><input id="nXn" type="number" value="4" min="1"><span>Number of Grid Lines in Y Direction</span><input id="nYn" type="number" value="4" min="1">
+      <span>Spacing of Grids in X Direction</span><input id="nXs" type="number" step="any" value="6"><span>Spacing of Grids in Y Direction</span><input id="nYs" type="number" step="any" value="6"></div></fieldset>
+    <fieldset style="flex:1"><legend>Story Dimensions</legend><div class="g2"><span>Number of Stories</span><input id="nS" type="number" value="4" min="1"><span>Typical Story Height</span><input id="nH" type="number" step="any" value="3"><span>Bottom Story Height</span><input id="nB" type="number" step="any" value="3"></div></fieldset></div>
+    <fieldset><legend>Add Structural Objects</legend><label style="display:block"><input type="radio" name="nK" value="grid" checked>Grid Only: grids and stories, nothing drawn (draw it with the Draw menu)</label><label style="display:block"><input type="radio" name="nK" value="frame">Concrete Frame: columns, beams, slabs, supports and loads on every grid</label><label style="display:block"><input type="radio" name="nK" value="blank">Blank: one story, no grids</label></fieldset>
+    <p class="kv">Units kN, m. The model in the Modeler is replaced: save it first if you want it (Edit > Undo also brings it back).</p>`,
+    [["OK", d => { hmNewGo(d); return false; }, true], ["Cancel"]], {width: 640});
+  return d;
+}
+async function hmNewGo(d) {
+  {
+      const t = q(d, "#nT").value.trim() || "Model", k = q(d, "[name=nK]:checked").value, nx = Math.max(1, parseInt(q(d, "#nXn").value) || 1), ny = Math.max(1, parseInt(q(d, "#nYn").value) || 1), sx = fnum(d, "#nXs"), sy = fnum(d, "#nYs"), ns = Math.max(1, parseInt(q(d, "#nS").value) || 1), h = fnum(d, "#nH"), hb = fnum(d, "#nB");
+      formError(d, "");
+      if (k === "frame") {
+        if (Math.abs(hb - h) > 1e-9) return formError(d, "The concrete frame template has one story height: make the bottom story the same height, or start from Grid Only.");
+        return submit(d, "new_model", {title: t, template: "concrete_frame", x_spans: Array(Math.max(1, nx - 1)).fill(sx), y_spans: Array(Math.max(1, ny - 1)).fill(sy), stories: ns, story_height: h});
+      }
+      let j = await hmRun("new_model", {title: t, template: "empty"}, true); if (!j.ok) return formError(d, j.error);
+      const stories_ = k === "blank" ? [{name: "Story1", height: h}] : Array.from({length: ns}, (_, i) => ({name: "Story" + (i + 1), height: i === 0 ? hb : h}));
+      j = await hmRun("define_stories", {stories: stories_}, true); if (!j.ok) return formError(d, j.error);
+      if (k === "grid") {
+        const letters = i => { let s = ""; i++; while (i > 0) { s = String.fromCharCode(65 + (i - 1) % 26) + s; i = Math.floor((i - 1) / 26); } return s; };
+        j = await hmRun("define_grids", {grids: Array.from({length: nx}, (_, i) => ({label: letters(i), direction: "X", coordinate: +(i * sx).toFixed(6)})).concat(Array.from({length: ny}, (_, i) => ({label: String(i + 1), direction: "Y", coordinate: +(i * sy).toFixed(6)})))}, true);
+        if (!j.ok) return formError(d, j.error);
+      }
+      d.close(); hmSay("New model ready. Draw > Draw Columns, then beams and floors; or ask the chat.");
+  }
+}
+function hmOpen() {
+  dialog("Open Model", `<div class="g2"><span>File</span><input id="oP" placeholder="C:\\Users\\...\\Models\\Tower.e2k" style="min-width:380px"></div><p class="kv" style="max-width:480px">Type or paste the full path of an ETABS text file (.e2k, .$et) or a Modeler file (.cpm). A browser can't hand over a file's place on the PC, so the path is typed here; the Modeler reads it.</p>`,
+    [["Open", d => submit(d, "open_model_file", {path: q(d, "#oP").value.trim().replace(/^"|"$/g, "")}, () => hmSay("Opened.")), true], ["Cancel"]], {width: 560});
+}
+function hmSave(as) {
+  const file = (hm.state && hm.state.file) || "";
+  if (!as && file) return hmRun("save_model", {}).then(j => j.ok && hmSay("Saved " + file));
+  dialog("Save Model As", `<div class="g2"><span>File name</span><input id="sv" value="${esc(file ? file.split(/[\\/]/).pop().replace(/\.e2k$/i, "") : ((P && P.manifest && P.manifest.model) || "Model"))}"><span>Folder</span><input id="sf" placeholder="Documents\\CSI ProMax\\Models" value="${esc(file ? file.replace(/[\\/][^\\/]*$/, "") : "")}"></div><p class="kv">Saves an ETABS text file (.e2k, for File > Import in ETABS) and the Modeler's .cpm beside it. An empty folder means Documents\\CSI ProMax\\Models.</p>`,
+    [["Save", d => submit(d, "save_model_as", {name: q(d, "#sv").value.trim(), folder: q(d, "#sf").value.trim() || undefined}, j => hmSay("Saved " + ((j.result && (j.result.path || j.result.file)) || ""))), true], ["Cancel"]], {width: 500});
+}
+function hmExport(kind) {
+  if (kind === "s2k") return dialog("Export SAP2000 .s2k", `<div class="g2"><span>File name</span><input id="xn" value="${esc((P && P.manifest && P.manifest.model) || "Model")}"><span>Folder</span><input id="xf" placeholder="Documents\\CSI ProMax\\Models"></div>`,
+    [["Export", d => submit(d, "save_model_s2k", {name: q(d, "#xn").value.trim(), folder: q(d, "#xf").value.trim() || undefined}, j => hmSay("Exported " + JSON.stringify(j.result).slice(0, 160))), true], ["Cancel"]], {width: 460});
+  dialog("Export SAFE .f2k", `<div class="g2"><span>Floor</span><select id="xs">${opts(stories.slice().reverse().map(s => s.name), (panes[active] || {}).story)}</select><span>File name</span><input id="xn" placeholder="model and floor"><span>Folder</span><input id="xf" placeholder="Documents\\CSI ProMax\\Models"></div>`,
+    [["Export", d => submit(d, "save_safe_file", {story: q(d, "#xs").value, name: q(d, "#xn").value.trim() || undefined, folder: q(d, "#xf").value.trim() || undefined}, j => hmSay("Exported " + JSON.stringify(j.result).slice(0, 160))), true], ["Cancel"]], {width: 460});
+}
+
+// ---- Draw: clicks in a plan view, snapped to grid crossings, joints and grid lines ----
+const drawKinds = {column: "column", beam: "beam", qbeam: "beam", wall: "wall", qwall: "wall", floor: "slab", rect: "slab", qfloor: "slab"};
+const drawing = () => tool.startsWith("d:");
+const drawKind = () => tool.slice(2);
+function drawHint() {
+  const k = drawKind(), p = panes[active];
+  if (!p || p.mode !== "plan") return "Drawing is done in a plan view: click a Plan View window, or press the plan button on the toolbar.";
+  const where = hm.similar === "all" ? "on every story" : "on " + p.story;
+  return {column: `Click a grid crossing or a point to place a column ${where}.`, beam: `Click the start, then each next point of the beams ${where}. Right click or Esc ends the line.`, qbeam: `Click a grid line between two crossings: a beam fills that span ${where}.`,
+    wall: `Click the start, then each next point of the walls ${where}. Right click or Esc ends the line.`, qwall: `Click a grid line between two crossings: a wall fills that span ${where}.`,
+    floor: `Click the floor's corners in order; click the first corner again (or double click) to close it, ${where}.`, rect: `Click two opposite corners of the floor ${where}.`, qfloor: `Click inside a grid bay: a floor fills it ${where}.`}[k] || "";
+}
+function drawStories(p) {
+  if (hm.similar === "all") return stories.slice(1).map(s => s.name);
+  return [p.story];
+}
+function snapAt(p, x, y) {
+  // Screen distance decides: a grid crossing or a joint within 12 px, else a point on a grid line within 8 px, else where the pointer is.
+  const M = p.M; if (!M) return null;
+  const z = elevationOf(p.story) ?? 0, raw = M.back(x, y), cand = [];
+  for (const gx of grids.X) for (const gy of grids.Y) cand.push({q: [gx.at, gy.at], what: `grid ${gx.label}-${gy.label}`});
+  for (const pt of points) if (Math.abs(pt[3] - z) < 1e-6) cand.push({q: [pt[1], pt[2]], what: "joint"});
+  if (hm.chain.length) cand.push({q: hm.chain[0], what: "first point"});
+  let best = null, bd = 12;
+  for (const c of cand) { const s = M.to([c.q[0], c.q[1], z]), dd = Math.hypot(s[0] - x, s[1] - y); if (dd < bd) { bd = dd; best = c; } }
+  if (best) return {q: best.q.slice(), what: best.what};
+  bd = 8; let onLine = null;
+  for (const g of grids.X) { const s = M.to([g.at, raw[1], z]), dd = Math.abs(s[0] - x); if (dd < bd) { bd = dd; onLine = {q: [g.at, raw[1]], what: "grid " + g.label}; } }
+  for (const g of grids.Y) { const s = M.to([raw[0], g.at, z]), dd = Math.abs(s[1] - y); if (dd < bd) { bd = dd; onLine = {q: [raw[0], g.at], what: "grid " + g.label}; } }
+  if (onLine) { onLine.q = onLine.q.map(v => Math.round(v * 1000) / 1000); return onLine; }
+  return {q: [Math.round(raw[0] * 1000) / 1000, Math.round(raw[1] * 1000) / 1000], what: ""};
+}
+function spanAt(p, x, y) {
+  // The grid line span under the pointer: from one crossing to the next.
+  const M = p.M, z = elevationOf(p.story) ?? 0, raw = M.back(x, y); let best = null, bd = 10;
+  const pick = (lines, cross, dir) => {
+    for (const g of lines) {
+      const s = M.to(dir === "X" ? [g.at, raw[1], z] : [raw[0], g.at, z]), dd = dir === "X" ? Math.abs(s[0] - x) : Math.abs(s[1] - y);
+      if (dd >= bd) continue;
+      const t = dir === "X" ? raw[1] : raw[0], c = cross.map(h => h.at).sort((a, b) => a - b);
+      for (let i = 0; i + 1 < c.length; i++) if (t >= c[i] && t <= c[i + 1]) { bd = dd; best = dir === "X" ? [g.at, c[i], g.at, c[i + 1]] : [c[i], g.at, c[i + 1], g.at]; }
+    }
+  };
+  pick(grids.X, grids.Y, "X"); pick(grids.Y, grids.X, "Y");
+  return best;
+}
+function bayAt(p, x, y) {
+  const raw = p.M.back(x, y), xs = grids.X.map(g => g.at).sort((a, b) => a - b), ys = grids.Y.map(g => g.at).sort((a, b) => a - b);
+  for (let i = 0; i + 1 < xs.length; i++) for (let j = 0; j + 1 < ys.length; j++)
+    if (raw[0] > xs[i] && raw[0] < xs[i + 1] && raw[1] > ys[j] && raw[1] < ys[j + 1]) return [[xs[i], ys[j]], [xs[i + 1], ys[j]], [xs[i + 1], ys[j + 1]], [xs[i], ys[j + 1]]];
+  return null;
+}
+async function drawSection(kind) {
+  const defs = await hmDefs(), list = kind === "slab" || kind === "wall" ? defs.shell_sections.filter(s => s.kind === kind).map(s => s.name) : defs.frame_sections.map(s => s.name);
+  if (!hm.sec[kind] || !list.includes(hm.sec[kind])) {
+    // A concrete section made for this kind first (ETABS's own ConcCol and ConcBm in a new model), then any.
+    const pref = kind === "column" || kind === "beam" ? defs.frame_sections.find(s => s.kind === kind && s.editable) || defs.frame_sections.find(s => s.kind === kind) : null;
+    hm.sec[kind] = (pref && pref.name) || list[0] || "";
+  }
+  return {list, now: hm.sec[kind]};
+}
+async function showObjBox() {
+  const box = $("pobj"); if (!box) return;
+  if (!window.cpmLive || !drawing()) { box.hidden = true; return; }
+  const kind = drawKinds[drawKind()], s = await drawSection(kind);
+  box.hidden = false; $("similar").value = hm.similar;
+  box.innerHTML = `<div class="dt"><b>Properties of Object</b></div><div class="g2" style="padding:6px 8px"><span>Type</span><b style="font-weight:400">${{column: "Column", beam: "Beam", wall: "Wall", slab: "Floor"}[kind]}</b>
+    <span>Section</span><select id="pobjS">${s.list.length ? opts(s.list, s.now) : `<option value="">(define one first)</option>`}</select>
+    <span>Stories</span><select id="pobjW">${opts([["one", "One Story"], ["all", "All Stories"]], hm.similar)}</select></div>
+    ${s.list.length ? "" : `<p class="kv" style="padding:0 8px 6px">No ${kind === "slab" ? "slab" : kind} section yet: Define > ${kind === "slab" || kind === "wall" ? "Slab and Wall Sections" : "Frame Sections"}.</p>`}`;
+  q(box, "#pobjS").onchange = e => hm.sec[kind] = e.target.value;
+  q(box, "#pobjW").onchange = e => { hm.similar = e.target.value; $("similar").value = hm.similar; $("hint").textContent = hintText(); };
+}
+async function drawClick(p, x, y, dbl) {
+  if (p.mode !== "plan") { hmSay(drawHint(), true); return; }
+  const k = drawKind(), kind = drawKinds[k], sec = (await drawSection(kind)).now, st = drawStories(p);
+  if (!sec) return hmSay(`Define a ${kind === "slab" ? "slab" : kind} section first (Define menu).`, true);
+  const s = snapAt(p, x, y);
+  if (k === "column") return hmRun("add_columns", {points: [s.q], stories: st, section: sec});
+  if (k === "qbeam" || k === "qwall") { const sp = spanAt(p, x, y); if (!sp) return hmSay("Click on a grid line, between two crossing grid lines.", true); return hmRun(k === "qbeam" ? "add_beams" : "add_walls", {lines: [sp], stories: st, section: sec}); }
+  if (k === "qfloor") { const bay = bayAt(p, x, y); if (!bay) return hmSay("Click inside a bay of the grid.", true); return hmRun("add_slabs", {outlines: [bay], stories: st, section: sec}); }
+  if (k === "beam" || k === "wall") {
+    if (!hm.chain.length) { hm.chain = [s.q]; draw(); return; }
+    const a = hm.chain[hm.chain.length - 1]; if (Math.hypot(a[0] - s.q[0], a[1] - s.q[1]) < 1e-6) return;
+    const j = await hmRun(k === "beam" ? "add_beams" : "add_walls", {lines: [[a[0], a[1], s.q[0], s.q[1]]], stories: st, section: sec});
+    if (j.ok) hm.chain = [s.q]; draw(); return;
+  }
+  if (k === "rect") {
+    if (!hm.chain.length) { hm.chain = [s.q]; draw(); return; }
+    const a = hm.chain[0], b = s.q; hm.chain = [];
+    if (Math.abs(a[0] - b[0]) < 1e-6 || Math.abs(a[1] - b[1]) < 1e-6) return hmSay("The two corners must differ in X and in Y.", true);
+    return hmRun("add_slabs", {outlines: [[[a[0], a[1]], [b[0], a[1]], [b[0], b[1]], [a[0], b[1]]]], stories: st, section: sec});
+  }
+  if (k === "floor") {
+    const first = hm.chain[0], close = hm.chain.length >= 3 && (dbl || (first && Math.hypot(first[0] - s.q[0], first[1] - s.q[1]) < 1e-6));
+    if (!close) { if (!dbl) hm.chain.push(s.q); draw(); return; }
+    const outline = hm.chain.slice(); hm.chain = [];
+    return hmRun("add_slabs", {outlines: [outline], stories: st, section: sec});
+  }
+}
+function drawPreview(p, g, M) {
+  if (!drawing() || p.mode !== "plan" || panes[active] !== p) return;
+  const z = elevationOf(p.story) ?? 0, to = q2 => M.to([q2[0], q2[1], z]), k = drawKind();
+  g.save(); g.lineWidth = 2; g.strokeStyle = "#ffd83c"; g.fillStyle = "rgba(255,216,60,.18)"; g.setLineDash([6, 4]);
+  const h = hm.hover;
+  if (h && h.bay) { g.beginPath(); h.bay.forEach((c, i) => { const s = to(c); i ? g.lineTo(s[0], s[1]) : g.moveTo(s[0], s[1]); }); g.closePath(); g.fill(); g.stroke(); }
+  if (h && h.span) { const a = to([h.span[0], h.span[1]]), b = to([h.span[2], h.span[3]]); g.setLineDash([]); g.lineWidth = 4; g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke(); }
+  if (hm.chain.length) {
+    g.beginPath(); hm.chain.forEach((c, i) => { const s = to(c); i ? g.lineTo(s[0], s[1]) : g.moveTo(s[0], s[1]); });
+    if (h && h.snap) { if (k === "rect") { const a = hm.chain[0], b = h.snap.q; g.beginPath(); [[a[0], a[1]], [b[0], a[1]], [b[0], b[1]], [a[0], b[1]]].forEach((c, i) => { const s = to(c); i ? g.lineTo(s[0], s[1]) : g.moveTo(s[0], s[1]); }); g.closePath(); g.fill(); } else { const s = to(h.snap.q); g.lineTo(s[0], s[1]); } }
+    g.stroke();
+  }
+  if (h && h.snap) {
+    const s = to(h.snap.q); g.setLineDash([]); g.lineWidth = 1.5; g.strokeStyle = h.snap.what ? "#ffd83c" : "#9aa6ad"; g.strokeRect(s[0] - 5, s[1] - 5, 10, 10);
+    if (h.snap.what) { g.font = "11px Segoe UI, sans-serif"; g.fillStyle = "#ffd83c"; g.textAlign = "left"; g.textBaseline = "bottom"; g.fillText(h.snap.what, s[0] + 8, s[1] - 6); }
+  }
+  g.restore();
+}
+function drawMove(p, x, y) {
+  if (p.mode !== "plan") { hm.hover = null; return; }
+  const k = drawKind();
+  hm.hover = k === "qfloor" ? {bay: bayAt(p, x, y)} : k === "qbeam" || k === "qwall" ? {span: spanAt(p, x, y)} : {snap: snapAt(p, x, y)};
+  draw();
+}
+function hmDrawHelp() {
+  dialog("Drawing in the Modeler", `<table class="list">${[["Snap", "Clicks snap to grid crossings and joints (12 px), then to grid lines (8 px). The point it snaps to shows a yellow square and its name."],
+    ["Stories", "One Story draws on the plan's story; All Stories draws the same object on every story (ETABS's All Stories). Pick it in the status bar or in Properties of Object."],
+    ["Columns, walls", "A column or wall on a story runs from the story below up to it."], ["Beams, floors", "A beam or floor sits at the story's level."],
+    ["Quick draw", "Quick Draw Beams and Walls fill one grid span per click; Quick Draw Floors fill one bay."],
+    ["Finish a line", "Right click, Esc or another tool ends a chain of beams or walls."], ["Undo", "Edit > Undo (Ctrl+Z) steps back one change at a time; Redo (Ctrl+Y) steps forward."],
+    ["Change and delete", "Select, then the Assign menu (section, supports, loads) or Delete."], ["With the chat", "The chat and these menus change the same model. Undo steps back over your own changes; ask the chat to undo its own."]].map(r => `<tr><td><b>${r[0]}</b></td><td>${r[1]}</td></tr>`).join("")}</table>`, [["OK"]], {width: 560});
+}
+// The draw tools on the left strip, as ETABS has them.
+const drawIcons = {
+  "d:column": '<rect x="6" y="2" width="4" height="12" class="k1"/>', "d:beam": '<path d="M2 8h12" stroke-width="3"/><circle cx="2.5" cy="8" r="1.4" class="f"/><circle cx="13.5" cy="8" r="1.4" class="f"/>',
+  "d:qbeam": '<path d="M1.5 4.5h13M1.5 11.5h13M4.5 1.5v13M11.5 1.5v13" stroke-dasharray="2 1.2" opacity=".6"/><path d="M4.5 4.5h7" stroke-width="3" class="c1"/>',
+  "d:floor": '<path d="M2 11l3-7l9 1l-2 8z" class="k5"/>', "d:rect": '<rect x="2.5" y="3.5" width="11" height="9" class="k5"/>',
+  "d:qfloor": '<path d="M1.5 4.5h13M1.5 11.5h13M4.5 1.5v13M11.5 1.5v13" stroke-dasharray="2 1.2" opacity=".6"/><rect x="4.5" y="4.5" width="7" height="7" class="k5"/>',
+  "d:wall": '<path d="M2 4h12v8H2z" class="k3"/>', "d:qwall": '<path d="M1.5 4.5h13M1.5 11.5h13M4.5 1.5v13M11.5 1.5v13" stroke-dasharray="2 1.2" opacity=".6"/><path d="M4.5 3.5h7v2h-7z" class="k3"/>',
+  undo: '<path d="M5 3L2 6l3 3"/><path d="M2 6h7.5a4 4 0 0 1 0 8H6"/>', redo: '<path d="M11 3l3 3l-3 3"/><path d="M14 6H6.5a4 4 0 0 0 0 8H10"/>',
+  save: '<path d="M2 2h10l2 2v10H2z"/><path d="M5 2v4h6V2M4.5 14V9.5h7V14" class="c1"/>', del: '<path d="M3 4h10M6 4V2.5h4V4M4.5 4l.8 10h5.4l.8-10"/><path d="M7 6.5v5M9 6.5v5" class="c4"/>',
+};
+function modelerStart() {
+  document.querySelectorAll('[data-menu="Draw"], [data-menu="Assign"]').forEach(m => m.hidden = false);
+  document.querySelector('[data-menu="File"]').hidden = false;
+  $("similarWrap").hidden = false;
+  const sb = [["d:column", "Draw columns (click a point)"], ["d:beam", "Draw beams (click start and end)"], ["d:qbeam", "Quick draw beams (click a grid line)"], ["d:wall", "Draw walls"], ["d:qwall", "Quick draw walls (click a grid line)"], ["d:floor", "Draw floors (click corners)"], ["d:rect", "Draw rectangular floors (two corners)"], ["d:qfloor", "Quick draw floors (click in a bay)"]];
+  $("strip").insertAdjacentHTML("beforeend", `<span class="sep"></span>` + sb.map(b => `<button class="ib" data-act="${b[0]}" title="${b[1]}"><svg viewBox="0 0 16 16">${drawIcons[b[0]]}</svg></button>`).join(""));
+  const ib = [["m:undo", "Undo (Ctrl+Z)", "undo"], ["m:redo", "Redo (Ctrl+Y)", "redo"], ["m:save", "Save (Ctrl+S)", "save"], ["m:delete", "Delete the selected objects (Del)", "del"]];
+  const open = $("icons").querySelector('[data-act="open"]');
+  open.insertAdjacentHTML("afterend", ib.map(b => `<button class="ib" data-act="${b[0]}" title="${b[1]}"><svg viewBox="0 0 16 16">${drawIcons[b[2]]}</svg></button>`).join(""));
+  document.querySelectorAll("#strip [data-act^='d:'], #icons [data-act^='m:']").forEach(b => b.onclick = () => act(b.dataset.act));
+  $("similar").onchange = e => { hm.similar = e.target.value; showObjBox(); $("hint").textContent = hintText(); };
+  document.addEventListener("keydown", e => {
+    if (e.target.closest && e.target.closest("input, textarea, select") || document.querySelector(".veil")) return;
+    const k = e.key, ctrl = e.ctrlKey || e.metaKey;
+    if (k === "Escape" && hm.chain.length) { e.stopImmediatePropagation(); hm.chain = []; draw(); return; }
+    if (ctrl && k.toLowerCase() === "z") { e.preventDefault(); e.stopImmediatePropagation(); modelAct("undo"); }
+    else if (ctrl && k.toLowerCase() === "y") { e.preventDefault(); e.stopImmediatePropagation(); modelAct("redo"); }
+    else if (ctrl && k.toLowerCase() === "s") { e.preventDefault(); e.stopImmediatePropagation(); modelAct("save"); }
+    else if (ctrl && k.toLowerCase() === "n") { e.preventDefault(); e.stopImmediatePropagation(); modelAct("new"); }
+    else if (ctrl && k.toLowerCase() === "o") { e.preventDefault(); e.stopImmediatePropagation(); modelAct("open"); }
+    else if (k === "Delete" && sel.size) { e.preventDefault(); e.stopImmediatePropagation(); modelAct("delete"); }
+  }, true);
+  hmDefs();
+}
 let started = false;
 function start() {
   if (started) return; started = true;
@@ -2554,6 +3137,7 @@ function start() {
     $("app").textContent = "CSI ProMax Modeler"; document.querySelector('[data-act="open"]').hidden = true;
     document.querySelector('[data-tab="comments"]').hidden = true; document.querySelector('[data-tab="checks"]').hidden = true;
     document.querySelector('[data-menu="File"]').hidden = true;
+    modelerStart();
   }
   $("hint").textContent = hintText();
   const built = $("pack").textContent.trim();
