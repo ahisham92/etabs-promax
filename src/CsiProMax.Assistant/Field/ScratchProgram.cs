@@ -521,14 +521,8 @@ public static class KeptPlugIns
     /// <summary>The settings text with its [PlugIn] section replaced by <paramref name="section"/>, in the file's own line ends.</summary>
     internal static string? Replace(string text, string section)
     {
-        var crlf = text.Contains("
-
-", StringComparison.Ordinal);
-        var lines = text.Replace("
-
-", "
-").Split('
-').ToList();
+        var crlf = text.Contains("\r\n", StringComparison.Ordinal);
+        var lines = text.Replace("\r\n", "\n").Split('\n').ToList();
         var start = lines.FindIndex(l => l.Trim().Equals("[PlugIn]", StringComparison.OrdinalIgnoreCase));
         if (start < 0) return null;
         var end = lines.FindIndex(start + 1, l => l.TrimStart().StartsWith('['));
@@ -536,13 +530,8 @@ public static class KeptPlugIns
         // The section ends with its last line of text: blank lines after it stay where they were.
         while (end - 1 > start && lines[end - 1].Trim().Length == 0) end--;
         lines.RemoveRange(start, end - start);
-        lines.InsertRange(start, section.Split('
-'));
-        var joined = string.Join("
-", lines);
-        return crlf ? joined.Replace("
-", "
-
-") : joined;
+        lines.InsertRange(start, section.Split('\n'));
+        var joined = string.Join("\n", lines);
+        return crlf ? joined.Replace("\n", "\r\n") : joined;
     }
 }
