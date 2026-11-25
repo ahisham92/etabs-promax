@@ -143,6 +143,14 @@ public static class PcFieldSteps
             return new { kind = status.Kind.ToString(), pc_code = status.PcCode, ends = status.Ends?.ToString("yyyy-MM-dd") ?? "no end date" };
         });
 
+        // Installed without the AI chat (install-no-ai.ps1, or turned off in the window): no Claude Code is needed.
+        if (!CsiProMax.AiMode.On)
+        {
+            const string off = "the AI chat is off on this PC (installed without AI, or turned off in the CSI ProMax menu), so no Claude Code is needed";
+            ctx.Skip("Claude Code on this PC", off);
+            ctx.Skip("Claude Code is signed in", off);
+            return;
+        }
         Chat.ClaudeCli.Install? claude = null;
         ctx.Step("Claude Code on this PC", () =>
         {

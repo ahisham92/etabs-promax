@@ -271,13 +271,14 @@ public static class Pack
 
     /// <summary>
     /// The Viewer page for the model that is open now, served on this PC: it asks for the model again whenever the
-    /// revision moves, and keeps the reader's view.
+    /// revision moves, and keeps the reader's view. With <paramref name="chat"/> (the AI chat is on in the window that
+    /// serves it) the page has a Chat tab: the window's own conversation.
     /// </summary>
-    public static string LiveViewerHtml(JsonObject content, int revision)
+    public static string LiveViewerHtml(JsonObject content, int revision, bool chat = false)
     {
         var html = ViewerHtml(content);
         // cpmPull asks at once (after a hand edit); otherwise every second and a half.
-        var live = "<script>window.cpmLive=true;(function(){let rev=" + revision.ToString(CultureInfo.InvariantCulture) + ";window.cpmPull=async()=>{try{const r=await fetch('model?rev='+rev,{cache:'no-store'});" +
+        var live = "<script>window.cpmLive=true;" + (chat ? "window.cpmChat=true;" : "") + "(function(){let rev=" + revision.ToString(CultureInfo.InvariantCulture) + ";window.cpmPull=async()=>{try{const r=await fetch('model?rev='+rev,{cache:'no-store'});" +
                    "if(r.status!==200)return;const j=await r.json();rev=j.rev;cpmLoad(j.pack,true);}catch(e){}};setInterval(window.cpmPull,1500);})();</script>";
         return html.Replace("</body>", live + "</body>", StringComparison.Ordinal);
     }

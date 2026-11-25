@@ -24,13 +24,46 @@ internal static class ModelView
     /// The Modeler's hand edits (HandModel): run on the window's thread, one at a time with the chat's own tool calls,
     /// so the two never change the model at once.
     /// </summary>
-    internal static async Task<(byte[] Body, string ContentType)?> PostAsync(string path, byte[] body)
+    internal static Task<(byte[] Body, string ContentType)?> PostAsync(string path, byte[] body) =>
+        path == "chat" ? ChatAsync(body) : path == "edit" ? EditAsync(body) : Task.FromResult<(byte[] Body, string ContentType)?>(null);
+
+    // Apart from PostAsync and ChatAsync, which are reached without WPF (the tests and the field test, chat off).
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static async Task<(byte[] Body, string ContentType)?> EditAsync(byte[] body)
     {
-        if (path != "edit") return null;
         var dispatcher = App.Dispatcher;
         using var request = System.Text.Json.JsonDocument.Parse(body);
         var element = request.RootElement.Clone();
         var answer = await dispatcher.InvokeAsync(app => HandModel.Handle(app.Link, element)).ConfigureAwait(false);
+        return (Encoding.UTF8.GetBytes(answer.ToJsonString()), "application/json");
+    }
+
+    /// <summary>
+    /// The chat inside the Viewer page: {"after":n,"send":"text"} reads the open conversation from item n on and, with
+    /// send, sends a message first. With the AI chat off on this PC the answer is {"off":true} and the page hides its tab.
+    /// </summary>
+    internal static Task<(byte[] Body, string ContentType)?> ChatAsync(byte[] body) => ChatAsync(body, AiMode.On);
+
+    /// <param name="on">Whether the AI chat is on in this window (AiMode.On; the field test asks with it off).</param>
+    internal static Task<(byte[] Body, string ContentType)?> ChatAsync(byte[] body, bool on) =>
+        on ? ChatOnAsync(body) : Task.FromResult<(byte[] Body, string ContentType)?>((Encoding.UTF8.GetBytes("{\"off\":true}"), "application/json"));
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static async Task<(byte[] Body, string ContentType)?> ChatOnAsync(byte[] body)
+    {
+        var after = 0;
+        string? send = null;
+        using (var request = System.Text.Json.JsonDocument.Parse(body.Length == 0 ? "{}"u8.ToArray() : body))
+        {
+            var root = request.RootElement;
+            if (root.ValueKind == System.Text.Json.JsonValueKind.Object)
+            {
+                if (root.TryGetProperty("after", out var a) && a.ValueKind == System.Text.Json.JsonValueKind.Number && a.TryGetInt32(out var n)) after = n;
+                if (root.TryGetProperty("send", out var t) && t.ValueKind == System.Text.Json.JsonValueKind.String) send = t.GetString()?.Trim();
+            }
+        }
+        var ui = App.Ui ?? throw new InvalidOperationException("The CSI ProMax window is not open.");
+        var answer = await ui.InvokeAsync(() => Chat.ChatPane.ForViewer(after, send));
         return (Encoding.UTF8.GetBytes(answer.ToJsonString()), "application/json");
     }
 
@@ -50,7 +83,7 @@ internal static class ModelView
         switch (path)
         {
             case "":
-                return (Encoding.UTF8.GetBytes(Pack.LiveViewerHtml(Content(link), revision)), "text/html; charset=utf-8");
+                return (Encoding.UTF8.GetBytes(Pack.LiveViewerHtml(Content(link), revision, chat: AiMode.On)), "text/html; charset=utf-8");
             case "model":
                 if (query == "rev=" + revision.ToString(System.Globalization.CultureInfo.InvariantCulture)) return ([], "application/json");
                 return (Encoding.UTF8.GetBytes(new JsonObject { ["rev"] = revision, ["pack"] = Content(link) }.ToJsonString()), "application/json");

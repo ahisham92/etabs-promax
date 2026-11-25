@@ -203,6 +203,8 @@ public static class FieldTest
         var plugIns = PlugInLists(o.SettingsRoot);
 
         PcFieldSteps.Run(ctx, o.InstallFolder ?? AppContext.BaseDirectory, plugIns, o.Full ? [target, work] : [target], menus);
+        // With the AI chat and without it (install-no-ai.ps1): both ways, whichever this PC has.
+        AiModeFieldSteps.Run(ctx);
         if (left.Count > 0) ctx.Step("test copies an earlier run left open are closed", () => string.Join("; ", left));
 
         ctx.Section(OpenSection);

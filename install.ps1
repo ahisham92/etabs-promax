@@ -20,6 +20,12 @@
 #     -NoRuntime      do not look for or install the .NET 8 Desktop Runtime
 #     -Preview        say what would be added to the Tools menus, and change none of them
 #     -Zip <file>     a CsiProMax-<version>.zip you already have, instead of downloading
+#     -NoAI           CSI ProMax without the AI chat: the Modeler, the 3D view, review packs and the Viewer only, with
+#                     no Claude Code used or installed. The same as this line:
+#                       irm https://raw.githubusercontent.com/ahisham92/etabs-promax/main/install-no-ai.ps1 | iex
+#     -WithAI         the AI chat on again (the default for a first install)
+#   Without -NoAI or -WithAI, a PC keeps the choice it has. It can also be switched in the CSI ProMax window
+#   (CSI ProMax menu, Turn the AI chat on/off), without closing ETABS, SAFE or SAP2000.
 #
 # This file is plain ASCII on purpose, and works in Windows PowerShell 5.1 and PowerShell 7.
 
@@ -32,6 +38,10 @@ function Install-CsiProMax {
         # For tests: a folder that stands in for %LOCALAPPDATA%\Computers and Structures. The files in it are copies,
         # so whether a program is open is not looked at.
         [string]$SettingsRoot,
+        # For tests: where the AI choice is kept (normally %LOCALAPPDATA%\CsiProMax\ai.txt, which every version reads).
+        [string]$AiFile,
+        [switch]$NoAI,
+        [switch]$WithAI,
         [switch]$NoPlugins,
         [switch]$NoRuntime,
         [switch]$Preview
@@ -201,6 +211,7 @@ function Install-CsiProMax {
 
         Say ''
         Say 'CSI ProMax install' 'Cyan'
+        if ($NoAI -and $WithAI) { throw 'Give -NoAI or -WithAI, not both.' }
 
         # 1. The package.
         $work = Join-Path ([IO.Path]::GetTempPath()) ('CsiProMax-install-' + [Guid]::NewGuid().ToString('N').Substring(0, 8))
@@ -265,6 +276,30 @@ function Install-CsiProMax {
         if ($changes.Count -gt 0) { Say "  CSI ProMax $versionText is in $Folder ($($changes.Count) files added or replaced)." 'Green' }
         else { Say "  CSI ProMax $versionText was already in $Folder. Nothing needed replacing." 'Green' }
 
+        # 2b. With the AI chat or without it: one word in a file every version of CSI ProMax reads (AiMode).
+        if (-not $AiFile) {
+            $local = $env:LOCALAPPDATA
+            if (-not $local) { $local = [Environment]::GetFolderPath('LocalApplicationData') }
+            if ($local) { $AiFile = Join-Path (Join-Path $local 'CsiProMax') 'ai.txt' }
+        }
+        $aiOn = $true
+        if ($AiFile) {
+            if ($NoAI -or $WithAI) {
+                $aiFolder = Split-Path -Parent $AiFile
+                if (-not (Test-Path -LiteralPath $aiFolder)) { New-Item -ItemType Directory -Path $aiFolder -Force | Out-Null }
+                $word = 'on'
+                if ($NoAI) { $word = 'off' }
+                [IO.File]::WriteAllText($AiFile, $word)
+            }
+            if (Test-Path -LiteralPath $AiFile -PathType Leaf) {
+                $said = ([IO.File]::ReadAllText($AiFile)).Trim().ToLowerInvariant()
+                if (@('off', 'no', 'false', '0', 'no-ai', 'noai') -contains $said) { $aiOn = $false }
+            }
+        }
+        elseif ($NoAI) { $aiOn = $false }
+        if ($aiOn) { Say '  The AI chat is on. To install without it, use install-no-ai.ps1 (see INSTALL.txt).' }
+        else { Say '  The AI chat is off: the Modeler, the 3D view, review packs and the Viewer, with no Claude Code used or installed.' 'Green' }
+
         # 3. The .NET 8 Desktop Runtime.
         if ($onWindows -and -not $NoRuntime) {
             $runtime = Find-DesktopRuntime
@@ -280,6 +315,33 @@ function Install-CsiProMax {
                     Say '  https://dotnet.microsoft.com/download/dotnet/8.0 and CSI ProMax will find it.' 'Yellow'
                 }
             }
+        }
+
+        # 3b. The Modeler's shortcut, so a PC with no CSI program can start CSI ProMax at all. Only the first time:
+        # CSI ProMax makes both shortcuts (Modeler and Viewer) at its first start and keeps them up to date, and one the
+        # person deleted stays deleted. Not in the tests (they name a settings folder of their own).
+        if ($onWindows -and -not $SettingsRoot -and $env:LOCALAPPDATA) {
+            try {
+                $mark = Join-Path $env:LOCALAPPDATA 'CsiProMax\shortcuts.txt'
+                $dotnetRoot = Find-DesktopRuntime
+                if (-not (Test-Path -LiteralPath $mark) -and $dotnetRoot) {
+                    $shell = New-Object -ComObject WScript.Shell
+                    $places = @([Environment]::GetFolderPath('Desktop'), (Join-Path ([Environment]::GetFolderPath('Programs')) 'CSI ProMax'))
+                    foreach ($place in $places) {
+                        if (-not $place) { continue }
+                        if (-not (Test-Path -LiteralPath $place)) { New-Item -ItemType Directory -Path $place -Force | Out-Null }
+                        $link = $shell.CreateShortcut((Join-Path $place 'CSI ProMax Modeler.lnk'))
+                        $link.TargetPath = Join-Path $dotnetRoot.Root 'dotnet.exe'
+                        $link.Arguments = '"' + (Join-Path $Folder 'CsiProMax.dll') + '" --modeler'
+                        $link.WorkingDirectory = $Folder
+                        $link.WindowStyle = 7
+                        $link.Description = 'CSI ProMax Modeler: build models with no CSI program open'
+                        $link.Save()
+                    }
+                    Say '  The "CSI ProMax Modeler" shortcut is on your desktop and in the Start menu: it needs no CSI program.'
+                }
+            }
+            catch { Say "  (The Modeler shortcut could not be made: $($_.Exception.Message) Double-click 'Open the Modeler.cmd' in $Folder instead.)" }
         }
 
         # 4. The Tools menu of each program.
@@ -359,7 +421,11 @@ function Install-CsiProMax {
         Say ''
         Say 'Next' 'Cyan'
         Say '  1. Open ETABS, SAFE or SAP2000 and a model, then Tools > CSI ProMax. The window opens beside the program.'
-        Say '  2. The chat runs on Claude Code on your own Claude plan. The window offers to install it or sign in.'
+        if ($aiOn) { Say '  2. The chat runs on Claude Code on your own Claude plan. The window offers to install it or sign in.' }
+        else {
+            Say '  2. Without the AI chat. The "CSI ProMax Modeler" and "CSI ProMax Viewer" shortcuts (desktop and Start menu)'
+            Say '     work with no CSI program. To turn the chat on later: CSI ProMax menu, Turn the AI chat on.'
+        }
         Say "  3. On a PC other than the owner's, the Licence window shows this PC's code (SPM-....). Send it to the owner"
         Say '     and paste the key you get back.'
         Say ''

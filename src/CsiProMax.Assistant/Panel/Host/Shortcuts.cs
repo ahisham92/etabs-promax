@@ -78,12 +78,14 @@ internal static class Shortcuts
         return file;
     }
 
-    private static void WriteViewerPage()
+    /// <summary>Writes the Viewer page when it is missing or another version's, and gives back its file.</summary>
+    internal static string WriteViewerPage()
     {
         var html = Pack.ViewerHtml();
         Directory.CreateDirectory(Root);
         if (!File.Exists(ViewerPage) || File.ReadAllText(ViewerPage, Encoding.UTF8) != html)
             File.WriteAllText(ViewerPage, html, new UTF8Encoding(false));
+        return ViewerPage;
     }
 
     private static List<string> Make(bool onlyExisting)
