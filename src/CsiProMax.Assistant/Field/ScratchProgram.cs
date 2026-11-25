@@ -255,9 +255,14 @@ public sealed class ScratchProgram : IScratchWindow
         throw new EtabsException(late);
     }
 
-    /// <summary>The same file by its name: the program may write the folder another way than Windows gave it.</summary>
-    private static bool SameName(string a, string b) =>
-        string.Equals(a.Replace('\\', '/').Split('/').Last(), b.Replace('\\', '/').Split('/').Last(), StringComparison.OrdinalIgnoreCase);
+    /// <summary>
+    /// The same model by its name without the file type: the program may write the folder another way than Windows gave
+    /// it, and ETABS 23 names the model by its text file after a save (cpm-field-test-949e09.$et for the .EDB the test
+    /// saved, seen on the field-test PC on 2026-11-25). The name carries the run's own mark, so no other model has it.
+    /// </summary>
+    internal static bool SameName(string a, string b) =>
+        string.Equals(Path.GetFileNameWithoutExtension(a.Replace('\\', '/').Split('/').Last()),
+            Path.GetFileNameWithoutExtension(b.Replace('\\', '/').Split('/').Last()), StringComparison.OrdinalIgnoreCase);
 
     /// <summary>The program's own model file type.</summary>
     public static string ModelExtension(CsiProgram program) => program.Key switch
