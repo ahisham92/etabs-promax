@@ -82,6 +82,7 @@ public static class Program
                 MessageBoxW(IntPtr.Zero, $"CSI ProMax for {program.Name} is not built yet. It works with {CsiProgram.Etabs.Name} today; {program.Name} is planned.", "CSI ProMax", 0x40);
             return 3;
         }
+        if (args.Contains("--mta")) ComEtabs.Apartment = ApartmentState.MTA;
         var modeler = args.Contains("--modeler");
         var demo = args.Contains("--demo") || modeler;
         if (Array.IndexOf(args, "--test-sap2000") is var sapTest and >= 0)

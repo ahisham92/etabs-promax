@@ -16,6 +16,65 @@ public interface IScratchWindow : IDisposable
 
     /// <summary>Closes the window without saving, and says in a sentence what happened.</summary>
     string Close();
+
+    /// <summary>The titles of the windows the scratch program has open now (a message waiting for an answer is one of them).</summary>
+    IReadOnlyList<string> OpenWindows() => [];
+}
+
+/// <summary>
+/// The windows a scratch program puts up by itself. SAP2000 shows "Analysis Complete - (model)" after an analysis and
+/// waits for OK, so run_analysis never came back in the first field test on a real SAP2000. That one window, in the
+/// test's own scratch process, is closed for it. Nothing else is: a licence notice or any other message is the
+/// engineer's to read and answer, and the report names it.
+/// </summary>
+public static class ScratchDialogs
+{
+    /// <summary>True for a window the test may close itself: only the notice that an analysis has finished.</summary>
+    public static bool MayClose(string title) => title.TrimStart().StartsWith("Analysis Complete", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The visible titled windows of one process.</summary>
+    public static List<(IntPtr Window, string Title)> Of(int processId)
+    {
+        var found = new List<(IntPtr, string)>();
+        if (processId == 0 || !OperatingSystem.IsWindows()) return found;
+        EnumWindows((window, _) =>
+        {
+            GetWindowThreadProcessId(window, out var owner);
+            if (owner != (uint)processId || !IsWindowVisible(window)) return true;
+            var text = new System.Text.StringBuilder(300);
+            if (GetWindowTextW(window, text, text.Capacity) > 0) found.Add((window, text.ToString()));
+            return true;
+        }, IntPtr.Zero);
+        return found;
+    }
+
+    /// <summary>Asks each "analysis complete" notice of the process to close, as its own X button does. Returns their titles.</summary>
+    public static List<string> CloseNotices(int processId)
+    {
+        var closed = new List<string>();
+        foreach (var (window, title) in Of(processId))
+            if (MayClose(title) && PostMessageW(window, 0x0010 /* WM_CLOSE */, IntPtr.Zero, IntPtr.Zero)) closed.Add(title);
+        return closed;
+    }
+
+    /// <summary>What Windows says of a window: " (cannot be clicked: another window of the program holds it)", " (not answering)", or nothing.</summary>
+    public static string State(IntPtr window)
+    {
+        if (!OperatingSystem.IsWindows()) return "";
+        var said = new List<string>();
+        if (!IsWindowEnabled(window)) said.Add("cannot be clicked: the program has it disabled");
+        if (IsHungAppWindow(window)) said.Add("not answering");
+        return said.Count == 0 ? "" : " (" + string.Join(", ", said) + ")";
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool IsWindowEnabled(IntPtr window);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool IsHungAppWindow(IntPtr window);
+    private delegate bool Each(IntPtr window, IntPtr data);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool EnumWindows(Each each, IntPtr data);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr window);
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] private static extern int GetWindowTextW(IntPtr window, System.Text.StringBuilder text, int most);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool PostMessageW(IntPtr window, uint message, IntPtr w, IntPtr l);
 }
 
 /// <summary>
@@ -40,6 +99,13 @@ public sealed class ScratchProgram : IScratchWindow
     private bool _closed;
 
     private ScratchProgram(CsiProgram program) => _program = program;
+
+    private Timer? _watch;
+    private readonly List<string> _noticesClosed = [];
+
+    /// <summary>The titles of the windows the scratch program has open now, each with whether it can be clicked and whether it answers.</summary>
+    public IReadOnlyList<string> OpenWindows() =>
+        ScratchDialogs.Of(ProcessId).Select(w => w.Title + ScratchDialogs.State(w.Window)).ToList();
 
     public ICsiLink Link { get; private set; } = null!;
 
@@ -121,6 +187,8 @@ public sealed class ScratchProgram : IScratchWindow
                 $"{name} did not start within {StartTimeout.TotalMinutes:0} minutes. A licence or start-up message may be waiting in its window: answer it yourself, close that window, and run the field test again.");
             var mine = Process.GetProcessesByName(_program.ProcessName).Select(p => p.Id).Where(id => !before.Contains(id)).ToList();
             ProcessId = mine.Count == 1 ? mine[0] : 0;
+            // From here to the window's end, an "analysis complete" notice of this process is closed as it appears.
+            if (ProcessId != 0) _watch = new Timer(_ => { try { lock (_noticesClosed) _noticesClosed.AddRange(ScratchDialogs.CloseNotices(ProcessId)); } catch (Exception ex) when (ex is not OutOfMemoryException) { /* the next look tries again */ } }, null, 1000, 1000);
             return mine.Count == 1 ? $"{name} process {ProcessId}, through {Path.GetFileName(ApiFile)}"
                 : $"{name} started through {Path.GetFileName(ApiFile)}; its process could not be told apart ({mine.Count} new {name} processes)";
         }) is null) return false;
@@ -204,7 +272,9 @@ public sealed class ScratchProgram : IScratchWindow
             Ask(TimeSpan.FromMinutes(1), "close the window", _ => { _app.ApplicationExit(false); return null; },
                 $"the scratch {name} window did not close within a minute; close it yourself without saving");
             _closed = true;
-            return $"the scratch {name} window was closed without saving";
+            int notices;
+            lock (_noticesClosed) notices = _noticesClosed.Count;
+            return $"the scratch {name} window was closed without saving" + (notices > 0 ? $" ({notices} 'analysis complete' notice{(notices == 1 ? "" : "s")} of it closed along the way)" : "");
         }
         catch (EtabsException ex) { return _left ? ex.Message : $"the scratch {name} window could not be closed ({ex.Message}); close it yourself without saving"; }
     }
@@ -212,6 +282,7 @@ public sealed class ScratchProgram : IScratchWindow
     public void Dispose()
     {
         if (_app is not null && !_closed && !_left) Close();
+        _watch?.Dispose();
         _com?.Dispose();
     }
 }
