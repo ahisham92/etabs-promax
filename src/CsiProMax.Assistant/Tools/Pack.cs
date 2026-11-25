@@ -17,6 +17,8 @@ public static class Pack
 {
     public const int Version = 1;
     public const int DefaultMostRows = 60000;
+    /// <summary>Design tables are taken longer: a concrete beam table has a row per station of every beam.</summary>
+    public const int DesignMostRows = 200000;
 
     /// <summary>The result tables a pack takes when they have data. Design summaries are added by name.</summary>
     public static readonly string[] UsualTables =
@@ -32,7 +34,8 @@ public static class Pack
 
     /// <param name="extraTables">More tables to take, by name or key (for example "Element Forces - Beams").</param>
     public static Built Build(ICsiLink e, IReadOnlyList<string> extraTables, IReadOnlyList<string> cases, IReadOnlyList<string> combos,
-        JsonObject? checks, JsonArray? comments, int mostRows = DefaultMostRows, string by = "", bool withTables = true)
+        JsonObject? checks, JsonArray? comments, int mostRows = DefaultMostRows, string by = "", bool withTables = true,
+        IReadOnlyList<string>? designFiles = null)
     {
         var info = e.Info();
         var notes = new List<string>();
@@ -72,7 +75,7 @@ public static class Pack
         var wanted = new List<TableName>();
         foreach (var name in UsualTables)
             if (known.FirstOrDefault(t => !t.Empty && (ResultTools.Norm(t.Name) == ResultTools.Norm(name) || ResultTools.Norm(t.Key) == ResultTools.Norm(name))) is { } t) wanted.Add(t);
-        wanted.AddRange(known.Where(t => !t.Empty && ResultTools.IsDesignSummary(t.Name)));
+        wanted.AddRange(known.Where(t => !t.Empty && (DesignResults.IsDesignTable(t.Name) || DesignResults.IsWallTable(t.Name))));
         wanted.AddRange(known.Where(t => !t.Empty && ProgramTools.PackTable(e.Program, t.Name)));
         foreach (var name in extraTables)
         {
@@ -88,19 +91,13 @@ public static class Pack
             try { data = e.ReadTable(t.Key, cases, combos); }
             catch (EtabsException ex) { notes.Add($"'{t.Name}' could not be read ({ex.Message})."); continue; }
             if (data.Rows.Count == 0) continue;
-            var table = new JsonObject
-            {
-                ["name"] = t.Name, ["fields"] = Texts(data.Fields),
-                ["rows"] = new JsonArray(data.Rows.Take(mostRows).Select(r => (JsonNode)new JsonArray(r.Select(v => (JsonNode)v).ToArray())).ToArray()),
-            };
-            if (data.Rows.Count > mostRows)
-            {
-                table["left_out"] = data.Rows.Count - mostRows;
-                notes.Add($"'{t.Name}' has {data.Rows.Count} rows; the first {mostRows} are in the pack. Choose fewer load cases to take it whole.");
-            }
-            tables[t.Name] = table;
+            tables[t.Name] = TableJson(t.Name, data, DesignResults.IsDesignTable(t.Name) ? Math.Max(mostRows, DesignMostRows) : mostRows, notes, null);
         }
         if (withTables && tables.Count <= 1 && !info.Locked) notes.Add("The analysis has not been run, so the pack holds the model without results.");
+        if (withTables) manifest["design"] = AddDesign(e, info, known, tables, designFiles ?? [], Math.Max(mostRows, DesignMostRows), notes);
+        if (withTables && (areas.Any(a => a.Kind == "wall") || tables.Select(t => t.Key).Any(n => DesignResults.FamilyOf(n) is { On: "pier" or "spandrel" })))
+            model["wall_labels"] = DesignResults.WallLabels(e, known, notes);
+        else if (e is OfflineEtabs) model["wall_labels"] = DesignResults.WallLabels(e, [], notes);
 
         var content = new JsonObject { ["manifest"] = manifest, ["model"] = model, ["checks"] = checks, ["comments"] = comments ?? [], ["tables"] = tables };
         using var stream = new MemoryStream();
@@ -114,6 +111,92 @@ public static class Pack
             foreach (var (_, table) in tables) Add(zip, $"tables/{++n:000}.json", table!);
         }
         return new Built(stream.ToArray(), content, frames.Count, areas.Count, tables.Select(t => t.Key).ToList(), notes);
+    }
+
+    private static JsonObject TableJson(string name, TableData data, int most, List<string> notes, string? from)
+    {
+        var table = new JsonObject
+        {
+            ["name"] = name, ["fields"] = Texts(data.Fields),
+            ["rows"] = new JsonArray(data.Rows.Take(most).Select(r => (JsonNode)new JsonArray(r.Select(v => (JsonNode)v).ToArray())).ToArray()),
+        };
+        if (from is not null) table["from"] = from;
+        if (data.Rows.Count > most)
+        {
+            table["left_out"] = data.Rows.Count - most;
+            notes.Add($"'{name}' has {data.Rows.Count} rows; the first {most} are in the pack. Choose fewer load cases to take it whole.");
+        }
+        return table;
+    }
+
+    /// <summary>
+    /// The design results beyond the tables that had data: the API's own summaries for the families no table gave,
+    /// then tables exported from the program into files (given, or beside the model). Says per family where its
+    /// results came from, and what to do in the program for a family that has none.
+    /// </summary>
+    private static JsonObject AddDesign(ICsiLink e, ModelInfo info, IReadOnlyList<TableName> known, JsonObject tables, IReadOnlyList<string> files, int most, List<string> notes)
+    {
+        var from = new Dictionary<string, List<string>>();
+        void Took(string family, string what) { if (!from.TryGetValue(family, out var l)) from[family] = l = []; if (!l.Contains(what)) l.Add(what); }
+        foreach (var (name, _) in tables) if (DesignResults.FamilyOf(name) is { } f) Took(f.Key, "the program's design tables");
+        var have = new HashSet<string>(from.Keys);
+        var apiNotes = new List<string>();
+        foreach (var (name, data) in DesignResults.FromApi(e, have, apiNotes))
+        {
+            tables[name] = TableJson(name, data, most, notes, "api");
+            Took(DesignResults.FamilyOf(name)!.Key, "the API's design summary");
+        }
+        // Exported files fill what is still missing: a family the live tables have is not replaced by an older file.
+        var paths = files.Concat(DesignResults.ExportsBeside(info.File)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        foreach (var path in paths)
+        {
+            List<(string Name, TableData Data)> read;
+            try { read = DesignResults.ReadExport(path); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or System.Xml.XmlException)
+            {
+                if (files.Contains(path, StringComparer.OrdinalIgnoreCase)) notes.Add($"The file {path} could not be read ({ex.Message}).");
+                continue;
+            }
+            var file = Path.GetFileName(path);
+            foreach (var (name, data) in read)
+            {
+                var family = DesignResults.FamilyOf(name);
+                var walls = DesignResults.IsWallTable(name);
+                if (family is null && !walls || data.Rows.Count == 0 || tables.ContainsKey(name)) continue;
+                if (family is not null && have.Contains(family.Key)) continue;
+                tables[name] = TableJson(name, data, most, notes, "file: " + file);
+                if (family is not null) Took(family.Key, $"the exported file {file} ({File.GetLastWriteTime(path):yyyy-MM-dd HH:mm})");
+            }
+        }
+        foreach (var family in from.Keys.Where(k => !have.Contains(k) && from[k].Any(w => w.StartsWith("the exported", StringComparison.Ordinal))))
+            notes.Add($"{DesignResults.All.First(f => f.Key == family).Name} came from {string.Join(", ", from[family])}: check it is from the model as it is now.");
+        // Families the model has tables for, but empty: the design was not run (or not kept) in the program.
+        var waiting = known.Where(t => t.Empty && DesignResults.FamilyOf(t.Name) is { } f && !from.ContainsKey(f.Key)).Select(t => DesignResults.FamilyOf(t.Name)!).DistinctBy(f => f.Key).ToList();
+        foreach (var f in waiting) notes.Add(HowToGet(f, e.Program));
+        notes.AddRange(apiNotes.Take(3));
+        var o = new JsonObject();
+        foreach (var (k, list) in from) o[k] = new JsonObject { ["name"] = DesignResults.All.First(f => f.Key == k).Name, ["from"] = new JsonArray(list.Select(x => (JsonNode)x).ToArray()) };
+        if (waiting.Count > 0) o["not_run"] = new JsonArray(waiting.Select(f => (JsonNode)f.Name).ToArray());
+        return o;
+    }
+
+    /// <summary>What to do in the program to have a family's results in the next pack.</summary>
+    internal static string HowToGet(DesignResults.Family f, CsiProgram program)
+    {
+        var menu = f.Key switch
+        {
+            "pier" or "spandrel" => "Design > Shear Wall Design > Start Design/Check",
+            "steel" => "Design > Steel Frame Design > Start Design/Check",
+            "concrete" => "Design > Concrete Frame Design > Start Design/Check",
+            "composite" => "Design > Composite Beam Design > Start Design/Check",
+            "compcol" => "Design > Composite Column Design > Start Design/Check",
+            "joist" => "Design > Steel Joist Design > Start Design/Check",
+            "slab" or "punching" => "Design > Concrete Slab Design > Start Design/Check",
+            "connection" => "Design > Steel Connection Design",
+            _ => "the Design menu",
+        };
+        return $"{f.Name} has no results in {program.Name} yet: run {menu} there, then make the pack again. If {program.Name} still gives none, " +
+               "export the design tables (File > Export > tables to Excel) into the model's folder with the model's name: the next pack takes them from that file.";
     }
 
     private static double R(double v) => Math.Round(v, 5);

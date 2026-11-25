@@ -80,6 +80,23 @@ public sealed class OfflineEtabs : ICsiLink, CsiProMax.Assistant.Tools.IModelDra
     public IReadOnlyList<AreaRow> Areas() => Physical.Areas(Model)
         .Select(a => new AreaRow(Name(a.Label, a.Story), a.Section ?? "", a.Kind == AreaKind.Wall ? "wall" : "floor", a.Corners.Select(c => (c.X, c.Y, c.Z)).ToList())).ToList();
 
+    /// <summary>The pier and spandrel labels the .e2k gives (PIER "P1", SPANDREL "S1" on an assignment line), with the
+    /// object's name as <see cref="Frames"/> and <see cref="Areas"/> give it. Type is "a" for an area, "f" for a frame.</summary>
+    public IReadOnlyList<(string Type, string Name, string Pier, string Spandrel)> WallLabels()
+    {
+        static string Find(List<List<string>> extra, string key)
+        {
+            foreach (var tokens in extra)
+                for (var i = 0; i + 1 < tokens.Count; i++)
+                    if (tokens[i] == key) return tokens[i + 1].Trim('"');
+            return "";
+        }
+        var list = new List<(string, string, string, string)>();
+        foreach (var a in Model.AreaAssigns) { var (p, s) = (Find(a.Extra, "PIER"), Find(a.Extra, "SPANDREL")); if (p.Length + s.Length > 0) list.Add(("a", Name(a.Label, a.Story), p, s)); }
+        foreach (var a in Model.LineAssigns) { var (p, s) = (Find(a.Extra, "PIER"), Find(a.Extra, "SPANDREL")); if (p.Length + s.Length > 0) list.Add(("f", Name(a.Label, a.Story), p, s)); }
+        return list;
+    }
+
     public IReadOnlyList<PointRow> Points()
     {
         var seen = new Dictionary<string, PointRow>();

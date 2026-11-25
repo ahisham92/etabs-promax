@@ -144,6 +144,11 @@ public static class EtabsTools
             """{"type":"object","properties":{}}""", Ask.Always,
             (_, e) => { e.RunAnalysis(); return new JsonObject { ["done"] = true, ["note"] = "The analysis ran. Read results with read_table." }; }, _ => "Run the analysis"),
 
+        new("run_design",
+            "Runs the design in the program after the analysis (the program's own design, on its licence): steel frame, concrete frame, composite beam, shear wall, as the model has them, or the ones in 'kinds'. The engineer is always asked first. A kind whose design the API cannot start is listed with the menu to use instead. Then design_ratios and export_pack read the results.",
+            """{"type":"object","properties":{"kinds":{"type":"array","items":{"type":"string","enum":["steel","concrete","composite","shear_wall","slab"]}}}}""",
+            Ask.Always, (a, e) => DesignResults.RunDesign(e, a.Texts("kinds")), a => "Run the design" + (a.Texts("kinds") is { Count: > 0 } k ? " (" + string.Join(", ", k) + ")" : "")),
+
         new("save_model",
             "Saves the model in ETABS under its current file name. The engineer is always asked first.",
             """{"type":"object","properties":{}}""", Ask.Always,

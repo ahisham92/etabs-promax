@@ -209,6 +209,7 @@ footer select{height:19px;font-size:11.5px;border-radius:0;margin:0 -4px}
   <div class="menu" data-menu="Define">Define<div class="drop"></div></div>
   <div class="menu" data-menu="Select">Select<div class="drop"></div></div>
   <div class="menu" data-menu="Display">Display<div class="drop"></div></div>
+  <div class="menu" data-menu="Design">Design<div class="drop"></div></div>
   <div class="menu" data-menu="Options">Options<div class="drop"></div></div>
   <div class="menu" data-menu="Help">Help<div class="drop"></div></div>
   <span class="meta" id="meta">No pack open</span>
@@ -279,7 +280,7 @@ const opt = {grid: true, extrude: true, fill: true, supports: true, names: false
 const hidden = {kind: new Set(), section: new Set(), objs: new Set()};
 let panes = [], active = 0, layout = 2;
 let forces = new Map(), reacts = new Map(), drifts = new Map();
-const res = {mode: "model", case: "", comp: "M3", scale: 50, fill: true, values: true, ghost: true, range: null, bands: 9, anim: false};
+const res = {mode: "model", case: "", comp: "M3", scale: 50, fill: true, values: true, ghost: true, range: null, bands: 9, anim: false, dfam: "", dshow: "", dvalues: true, dnames: true};
 const sel = new Set(); let hover = 0;
 let bg = "black", bgSaved = false;
 try { const b = localStorage.getItem("cpm-bg"); if (b === "white" || b === "black") { bg = b; bgSaved = true; } } catch (e) {}
@@ -413,18 +414,179 @@ function guessGrids() {
   gridsGuessed = true;
 }
 const allLines = () => grids.Y.concat(grids.X);
-function readRatios() {
-  ratio = new Map();
+// ---- design results: every kind the programs give (steel, concrete, composite, shear wall pier and spandrel, slab),
+// read from their design tables as they are. Nothing is designed here. ----
+const famInfo = {steel: "Steel Frame Design", concrete: "Concrete Frame Design", composite: "Composite Beam Design", compcol: "Composite Column Design", joist: "Steel Joist Design", connection: "Steel Connection Design", pier: "Shear Wall Pier Design", spandrel: "Shear Wall Spandrel Design", slab: "Concrete Slab Design", punching: "Punching Shear", otherframe: "Other Frame Design"};
+function famOf(name) {
+  // The same sorting as the pack's (DesignResults.FamilyOf).
+  const n = norm(name), has = (...w) => w.some(x => n.includes(x)), dw = ["design", "summary", "envelope", "pmm", "ratio", "capacity"];
+  if (has("preference", "overwrite", "assign", "definition", "propert", "forces", "sectiondesigner", "rebarpref", "rebarsize", "checklist")) return null;
+  if (has("punch")) return "punching";
+  if (!has(...dw) && !has("strip", "reinforc", "rebar")) return null;
+  if (has("pier")) return "pier";
+  if (has("spandrel")) return "spandrel";
+  if (has("joist")) return "joist";
+  if (has("composite") && has("column")) return "compcol";
+  if (has("composite", "compbeam")) return "composite";
+  if (has("connection", "baseplate")) return "connection";
+  if (has("slab", "strip")) return "slab";
+  if (has("steel") && has(...dw)) return "steel";
+  if (has("concrete") && (has("beam", "column", "joint", "frame") || has(...dw))) return "concrete";
+  if (has("aluminum", "coldformed", "coldform")) return "otherframe";
+  if (has("beam", "column") && has("design")) return "concrete";
+  if (has("design") && has("summary")) return "otherframe";
+  return null;
+}
+let design = [], dview = null;
+const isNum = v => v !== "" && v !== undefined && v !== null && !isNaN(parseFloat(v)) && isFinite(v);
+function readWallLabels() {
+  const fBy = new Map(frames.map(f => [f.name, f])), aBy = new Map(areas.map(a => [a.name, a]));
+  for (const o of frames.concat(areas)) { o.pier = ""; o.spandrel = ""; }
+  for (const l of P.model.wall_labels || []) { const o = (l[0] === "f" ? fBy : aBy).get(String(l[1])); if (o) { o.pier = l[2] || ""; o.spandrel = l[3] || ""; } }
+  const real = v => v && !/^none$/i.test(String(v).trim());
   for (const t of Object.values(P.tables)) {
-    if (!/summary/i.test(t.name)) continue;
-    const u = col(t.fields, "UniqueName", "Unique Name");
-    const rs = t.fields.map((f, i) => /ratio/.test(norm(f)) && !/combo|rebar/.test(norm(f)) ? i : -1).filter(i => i >= 0);
-    if (u < 0 || !rs.length) continue;
-    for (const r of t.rows) { const best = Math.max(...rs.map(i => parseFloat(r[i])).filter(x => !isNaN(x)), -1); if (best >= 0) ratio.set(String(r[u]), Math.max(best, ratio.get(String(r[u])) ?? 0)); }
+    const n = norm(t.name); if (!/pier|spandrel/.test(n) || !n.includes("label")) continue;
+    const u = col(t.fields, "UniqueName", "Unique Name"), pc = col(t.fields, "Pier Name", "PierName", "Pier", "Pier Label"), sc = col(t.fields, "Spandrel Name", "SpandrelName", "Spandrel", "Spandrel Label");
+    if (u < 0) continue;
+    const by = /area|wall|shell/.test(n) ? aBy : fBy;
+    for (const r of t.rows) { const o = by.get(String(r[u])); if (!o) continue; if (pc >= 0 && real(r[pc])) o.pier = String(r[pc]); if (sc >= 0 && real(r[sc])) o.spandrel = String(r[sc]); }
   }
+}
+function readRatios() {
+  readWallLabels();
+  ratio = new Map();
+  const fBy = new Map(frames.map(f => [f.name, f])), aBy = new Map(areas.map(a => [a.name, a]));
+  const walls = {pier: new Map(), spandrel: new Map()};
+  for (const o of frames.concat(areas)) for (const k of ["pier", "spandrel"]) if (o[k]) { const key = (o.story || "") + "|" + o[k]; if (!walls[k].has(key)) walls[k].set(key, []); walls[k].get(key).push(o); }
+  const fams = new Map();
+  for (const t of Object.values(P.tables)) {
+    const k = famOf(t.name); if (!k || !t.rows || !t.rows.length) continue;
+    const f = t.fields, c = {
+      u: col(f, "UniqueName", "Unique Name", "Frame", "Area"), label: col(f, "Label", "Beam", "Column", "Brace", "Point"), story: col(f, "Story"),
+      pier: col(f, "Pier", "Pier Label", "PierLabel", "Pier Name"), spandrel: col(f, "Spandrel", "Spandrel Label", "SpandrelLabel", "Spandrel Name"),
+      station: col(f, "Station", "Location", "Station Location", "StationLoc", "Station Loc", "Loc"),
+      status: col(f, "Status", "Error Summary", "Errors", "ErrMsg", "Error", "Warnings", "WarnMsg", "Messages", "Warning")};
+    const skip = new Set([c.u, c.label, c.story, c.pier, c.spandrel, c.station]);
+    const numeric = f.map((x, i) => { if (skip.has(i) || /combo|elev/.test(norm(x))) return false; let n = 0, m = 0; for (const r of t.rows.slice(0, 300)) { const v = r[i]; if (v === "" || v === undefined) continue; m++; if (isNum(v)) n++; } return m > 0 && n >= m * 0.6; });
+    const isR = i => numeric[i] && /ratio|^dc/.test(norm(f[i])) && !/combo|rebar|reinf|percent|mass/.test(norm(f[i]));
+    let fam = fams.get(k); if (!fam) fams.set(k, fam = {key: k, name: famInfo[k], items: new Map(), fields: [], tables: [], from: new Set()});
+    fam.tables.push(t.name); fam.from.add(t.from ? (t.from === "api" ? "the API's summary" : t.from.replace(/^file: /, "exported file ")) : "design tables");
+    f.forEach((x, i) => { if (numeric[i] && !fam.fields.some(y => y.name === x)) fam.fields.push({name: x, ratio: isR(i)}); });
+    const combos = f.map((x, i) => /combo/.test(norm(x)) ? i : -1).filter(i => i >= 0);
+    for (const r of t.rows) {
+      const story = c.story >= 0 ? String(r[c.story]) : "";
+      let key, objs, label;
+      if (k === "pier" || k === "spandrel") {
+        const li = k === "pier" ? (c.pier >= 0 ? c.pier : c.label) : (c.spandrel >= 0 ? c.spandrel : c.label); if (li < 0) continue;
+        label = String(r[li]); key = story + "|" + label; objs = walls[k].get(key) || [];
+      } else {
+        const u = c.u >= 0 ? String(r[c.u]) : "", l = c.label >= 0 ? String(r[c.label]) : "";
+        const o = fBy.get(u) || (k === "slab" ? aBy.get(u) : null) || fBy.get(l + "@" + story) || (c.u < 0 && l ? fBy.get(l) || aBy.get(l) : null);
+        if (!o && !u && !l) continue;
+        key = o ? o.type + ":" + o.name : u || l + "@" + story; objs = o ? [o] : []; label = l || (o ? o.name : u);
+      }
+      let it = fam.items.get(key); if (!it) fam.items.set(key, it = {key, label, story, objs, rows: [], ratio: undefined, ratioField: "", combo: "", status: "", fam: k});
+      const vals = {}; f.forEach((x, i) => { if (numeric[i] && isNum(r[i])) vals[x] = parseFloat(r[i]); });
+      it.rows.push({t: t.name, st: c.station >= 0 ? String(r[c.station]) : "", vals, raw: r, fields: f});
+      f.forEach((x, i) => { if (isR(i) && isNum(r[i])) { const v = parseFloat(r[i]); if (it.ratio === undefined || v > it.ratio) { it.ratio = v; it.ratioField = x; it.combo = combos.length ? String(r[combos.slice().sort((a, b) => Math.abs(a - i) - Math.abs(b - i))[0]]) : ""; } } });
+      if (c.status >= 0 && r[c.status] && !/^(no message|no messages|ok|none|)$/i.test(String(r[c.status]).trim())) it.status = String(r[c.status]);
+    }
+  }
+  const order = Object.keys(famInfo);
+  design = [...fams.values()].sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
+  for (const fam of design) { fam.list = [...fam.items.values()]; for (const it of fam.list) if (it.ratio !== undefined) for (const o of it.objs) ratio.set(o.id, Math.max(it.ratio, ratio.get(o.id) ?? 0)); }
   const o = $("colour").querySelector("[value=ratio]"); o.disabled = ratio.size === 0;
   if (o.disabled && $("colour").value === "ratio") $("colour").value = "kind";
   $("colour").querySelector("[value=material]").disabled = sectionMat.size === 0;
+  if (res.mode === "design" && !design.some(f => f.key === res.dfam)) res.mode = "model";
+}
+// What a design can be shown by: its ratio, and the reinforcing ETABS draws on members, then any number in its tables.
+function designShows(fam) {
+  const F = fam.fields, find = (re, not) => F.find(f => !f.ratio && re.test(norm(f.name)) && !(not || /ratio|percent|spacing|combo/).test(norm(f.name)));
+  const out = [];
+  if (F.some(f => f.ratio)) out.push({id: "dc", name: "Demand/capacity ratio", ratio: true});
+  const top = find(/top/), bot = find(/bot/);
+  if (top && bot) out.push({id: "long", name: `Longitudinal reinforcing (${top.name} above, ${bot.name} below)`, a: top.name, b: bot.name, area: areaField(top.name)});
+  const pmm = find(/pmmarea|longreinf|asreq|requiredreinf|reqreinf|reqdreinf|rebararea|asrequired|reinfarea|^as$|edgereinf/);
+  if (pmm) out.push({id: "pmm", name: (fam.key === "pier" ? "Required reinforcing" : "Longitudinal reinforcing") + ` (${pmm.name})`, a: pmm.name, area: areaField(pmm.name)});
+  const pct = find(/percent|rho|reinfratio|rebarratio|reinfpct|ratioreinf/, /combo|current|curr/) || find(/percent|rho|reinfratio|rebarratio|reinfpct|ratioreinf/, /combo/);
+  if (pct) out.push({id: "pct", name: `Reinforcing ratio (${pct.name})`, a: pct.name});
+  const shear = find(/^av|vrebar|shearrebar|shearreinf|avmajor|avreq|vmajorarea|shear.*area|^ash|avert|ahoriz/);
+  if (shear) out.push({id: "shear", name: `Shear reinforcing (${shear.name})`, a: shear.name, area: areaField(shear.name)});
+  const be = find(/boundary|bzlength|edgelength|belength/);
+  if (be) out.push({id: "be", name: `Boundary elements (${be.name})`, a: be.name});
+  return out;
+}
+const areaField = name => /^a[sv]|area|rebar|reinf|ast|asc|^al$|^at$/.test(norm(name)) && !/ratio|percent|spacing/.test(norm(name));
+function buildDesignView() {
+  dview = null;
+  if (res.mode !== "design") return;
+  const fam = design.find(f => f.key === res.dfam); if (!fam) return;
+  const shows = designShows(fam), show = shows.find(s => s.id === res.dshow) || (res.dshow && res.dshow.startsWith("field:") ? {id: res.dshow, name: res.dshow.slice(6), a: res.dshow.slice(6), ratio: (fam.fields.find(f => f.name === res.dshow.slice(6)) || {}).ratio, area: areaField(res.dshow.slice(6))} : shows[0]);
+  if (!show) return;
+  const rf = new Set(fam.fields.filter(f => f.ratio).map(f => f.name));
+  const valOf = (row, f) => { if (f) return row.vals[f]; let b; for (const k of rf) if (row.vals[k] !== undefined && (b === undefined || row.vals[k] > b)) b = row.vals[k]; return b; };
+  const big = (rows, f) => { let b; for (const r of rows) { const v = valOf(r, f); if (v !== undefined && (b === undefined || Math.abs(v) > Math.abs(b))) b = v; } return b; };
+  // Areas of steel in square metres read better in mm², as the programs show them.
+  const k = show.area && unit === "m" ? 1e6 : 1, suffix = show.area && unit === "m" ? " (mm²)" : "";
+  const byObj = new Map(), labels = [], fa = show.ratio ? null : show.a, fb = show.b || null;
+  for (const it of fam.list) {
+    if (!it.objs.length) continue;
+    const v = big(it.rows, fa); if (v === undefined && !fb) continue;
+    for (const o of it.objs) byObj.set(o.id, Math.max(v ?? -Infinity, byObj.get(o.id) ?? -Infinity));
+    if (!res.dvalues) continue;
+    const text = x => x === undefined ? "" : show.ratio ? x.toFixed(2) : k !== 1 ? String(Math.round(x * k)) : fmt(x);
+    const name = res.dnames && (fam.key === "pier" || fam.key === "spandrel") ? it.label + ": " : "";
+    if (it.objs.length === 1 && it.objs[0].type === "f") {
+      // Along the member at its stations: the first, the largest and the last, as the programs label them.
+      const o = it.objs[0], L = len(sub(o.b, o.a)) || 1, by = new Map();
+      for (const r of it.rows) { const s = isNum(r.st) ? parseFloat(r.st) : null; const key = s === null ? "" : s.toFixed(4); if (!by.has(key)) by.set(key, {s, rows: []}); by.get(key).rows.push(r); }
+      let st = [...by.values()].sort((a, b) => (a.s ?? 0) - (b.s ?? 0));
+      if (st.length > 3) { const m = st.reduce((bi, x, i) => Math.abs(big(x.rows, fa) ?? 0) > Math.abs(big(st[bi].rows, fa) ?? 0) ? i : bi, 0); st = [...new Set([0, m, st.length - 1])].map(i => st[i]); }
+      for (const g of st) {
+        const t = g.s === null ? 0.5 : Math.max(0.04, Math.min(0.96, g.s / L)), at = add(o.a, mul(sub(o.b, o.a), t));
+        const a = big(g.rows, fa), b = fb ? big(g.rows, fb) : undefined;
+        if (a !== undefined) labels.push({at, text: name + text(a), dy: fb ? -1 : 0, objs: it.objs, v: a, over: show.ratio && a > 1});
+        if (b !== undefined) labels.push({at, text: text(b), dy: 1, objs: it.objs, v: b});
+      }
+    } else {
+      // A pier or spandrel, or an area: at the top and bottom (piers) or the left and right (spandrels) of its walls.
+      const pts = it.objs.flatMap(o => o.type === "f" ? [o.a, o.b] : o.pts), lo3 = [0, 1, 2].map(i => Math.min(...pts.map(q => q[i]))), hi3 = [0, 1, 2].map(i => Math.max(...pts.map(q => q[i])));
+      const mid = [0, 1, 2].map(i => (lo3[i] + hi3[i]) / 2), h = hi3[2] - lo3[2], ax = hi3[0] - lo3[0] >= hi3[1] - lo3[1] ? 0 : 1;
+      const by = new Map(); for (const r of it.rows) { const key = String(r.st || ""); if (!by.has(key)) by.set(key, []); by.get(key).push(r); }
+      for (const [s, rows] of by) {
+        const at = mid.slice(), n = norm(s);
+        if (/top/.test(n)) at[2] = hi3[2] - h * 0.18; else if (/bot/.test(n)) at[2] = lo3[2] + h * 0.18;
+        else if (/left|^i$|start/.test(n)) at[ax] = lo3[ax] + (hi3[ax] - lo3[ax]) * 0.2; else if (/right|^j$|end/.test(n)) at[ax] = hi3[ax] - (hi3[ax] - lo3[ax]) * 0.2;
+        const a = big(rows, fa), b = fb ? big(rows, fb) : undefined;
+        if (a !== undefined) labels.push({at, text: name + text(a), dy: fb ? -1 : 0, objs: it.objs, v: a, over: show.ratio && a > 1});
+        if (b !== undefined) labels.push({at, text: text(b), dy: 1, objs: it.objs, v: b});
+      }
+    }
+  }
+  const vs = [...byObj.values()].filter(v => isFinite(v));
+  dview = {fam, show, byObj, labels, lo: vs.length ? Math.min(...vs) : 0, hi: vs.length ? Math.max(...vs) : 1, k, suffix,
+    title: fam.name + " · " + show.name.replace(/ \(.*\)$/, "") + (show.ratio ? "" : suffix)};
+}
+function designColour(v) {
+  if (v === undefined || !isFinite(v)) return null;
+  if (dview.show.ratio) return ratioColour(v);
+  const b = bandSet(), f = dview.hi > dview.lo ? (v - dview.lo) / (dview.hi - dview.lo) : 0.5;
+  return b[Math.max(0, Math.min(b.length - 1, Math.floor(f * b.length - 1e-9)))];
+}
+function drawDesign(p, g, to, T) {
+  if (!dview || !dview.labels.length) return;
+  g.font = "10.5px Segoe UI, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle";
+  const taken = [];
+  for (const l of dview.labels) {
+    if (!p.vis || !l.objs.some(o => p.vis[o.id])) continue;
+    const q = to(l.at); if (!q[3]) continue;
+    const tw = g.measureText(l.text).width, x = q[0], y = q[1] + l.dy * 9;
+    if (taken.some(r => x - tw / 2 < r[2] && x + tw / 2 > r[0] && y - 6 < r[3] && y + 6 > r[1])) continue;
+    taken.push([x - tw / 2 - 2, y - 6, x + tw / 2 + 2, y + 6]);
+    g.lineWidth = 3; g.strokeStyle = css(T.canvas); g.strokeText(l.text, x, y);
+    g.fillStyle = l.over ? (T.dark ? "#ff6a6a" : "#c62828") : T.text; g.fillText(l.text, x, y);
+  }
 }
 // SAFE: punching shear ratios and soil pressures, drawn as dots where the point or column is.
 function slabLevel() {
@@ -530,7 +692,7 @@ const resComps = mode => { mode = mode || res.mode; return mode === "forces" ? f
 const compName = () => (resComps().find(c => c[0] === res.comp) || ["", res.comp])[1];
 function syncResults() {
   if (!P) return;
-  const have = {deformed: disp.size, contour: disp.size, forces: forces.size, reactions: reacts.size, ratios: ratio.size, model: 1};
+  const have = {deformed: disp.size, contour: disp.size, forces: forces.size, reactions: reacts.size, ratios: ratio.size, design: design.length, model: 1};
   if (!have[res.mode] || res.mode === "ratios") res.mode = "model";
   document.querySelectorAll("[data-res]").forEach(b => { b.disabled = !have[b.dataset.res]; b.classList.toggle("on", b.dataset.res === "ratios" ? res.mode === "model" && $("colour").value === "ratio" : b.dataset.res === res.mode && !(res.mode === "model" && $("colour").value === "ratio")); });
   const cases = resCases(), comps = resComps();
@@ -865,13 +1027,15 @@ let legend = new Map();
 function buildColours() {
   const T = theme(), mode = $("colour").value, N = objCount(), out = new Uint8Array((N + 1) * 3), secs = sortedSections(), mats = [...new Set(sectionMat.values())].sort();
   legend = new Map();
+  buildDesignView();
   const put = (id, hex) => { const c = rgb(hex); out[id * 3] = c[0] * 255; out[id * 3 + 1] = c[1] * 255; out[id * 3 + 2] = c[2] * 255; };
   const kindName = {column: "Columns", beam: "Beams", brace: "Braces", floor: "Floors", wall: "Walls"};
   for (const o of frames.concat(areas)) {
     let c, label;
-    if (mode === "section") { c = palette[secs.indexOf(o.type + ":" + o.section) % palette.length]; label = o.section || "(none)"; }
+    if (dview) { const v = dview.byObj.get(o.id); c = designColour(v) || (o.type === "a" ? (T.dark ? "#3a4248" : "#dde2e5") : T.dark ? "#59636a" : "#b4bcc1"); label = null; }
+    else if (mode === "section") { c = palette[secs.indexOf(o.type + ":" + o.section) % palette.length]; label = o.section || "(none)"; }
     else if (mode === "material" && sectionMat.size) { const m = sectionMat.get(o.section) || ""; c = palette[(mats.indexOf(m) + 3) % palette.length]; label = m || "(not known)"; }
-    else if (mode === "ratio") { const r = ratio.get(o.name); c = ratioColour(r) || (o.type === "a" ? (o.kind === "wall" ? T.wall : T.floor) : T.dark ? "#59636a" : "#b4bcc1"); label = o.type === "a" ? null : ratioLabel(r); }
+    else if (mode === "ratio") { const r = ratio.get(o.id); c = ratioColour(r) || (o.type === "a" ? (o.kind === "wall" ? T.wall : T.floor) : T.dark ? "#59636a" : "#b4bcc1"); label = o.type === "a" && r === undefined ? null : ratioLabel(r); }
     else { c = o.type === "a" ? (o.kind === "wall" ? T.wall : T.floor) : T[o.kind] || T.other; label = kindName[o.kind] || o.kind; }
     put(o.id, c); if (label) legend.set(label, c);
   }
@@ -1216,6 +1380,7 @@ function overlay(p, g, M, T, w, h) {
   if (opt.names) drawNames(p, g, to, T);
   if (opt.supports && !gl) drawSupports(p, g, to, T);
   drawMarks(p, g, to, T);
+  drawDesign(p, g, to, T);
   if (res.mode === "reactions") drawReactions(p, g, to, T);
   if (p.diag && p.diag.labels) {
     font(10.5); g.textBaseline = "middle"; const taken = [];
@@ -1234,6 +1399,8 @@ function overlay(p, g, M, T, w, h) {
     g.fillStyle = "#f0a020"; g.fill(); g.strokeStyle = "#7a4a00"; g.lineWidth = 1; g.stroke();
   }
   if (res.mode === "contour" && contour) { const nb = bandSet().length, step = (contour.hi - contour.lo) / nb, dec = Math.max(0, Math.min(6, Math.ceil(-Math.log10(Math.abs(step) || 1)) + 1)); hScale(g, T, w, h, contour.title + " · " + res.case, bandSet(), k => (contour.lo + step * k).toFixed(dec)); }
+  else if (dview && dview.show.ratio) hScale(g, T, w, h, dview.title, ratioCols, k => ["0.00", "0.50", "0.70", "0.90", "1.00", ">1"][k]);
+  else if (dview) { const nb = bandSet().length, step = (dview.hi - dview.lo) / nb; hScale(g, T, w, h, dview.title, bandSet(), k => dview.hi <= dview.lo && k ? undefined : dview.k !== 1 ? String(Math.round((dview.lo + step * k) * dview.k)) : fmt(dview.lo + step * k)); }
   else if ($("colour").value === "ratio" && ratio.size) hScale(g, T, w, h, "Design ratio (demand / capacity)", ratioCols, k => ["0.00", "0.50", "0.70", "0.90", "1.00", ">1"][k]);
   if (opt.axes) drawAxes(p, g, M, T, h);
 }
@@ -1347,7 +1514,7 @@ function drawPlot(p, g, T, w, h) {
   g.fillStyle = T.text; g.textAlign = "center"; g.fillText("Maximum story drift · " + name, (L + w - R) / 2, h - 14);
 }
 function paneTitle(p) {
-  const what = res.mode === "deformed" ? `Deformed Shape (${res.case})` : res.mode === "forces" ? `${compName()} Diagram (${res.case})` : res.mode === "contour" ? `Joint Displacement Contours (${res.case})` : res.mode === "reactions" ? `Joint Reactions (${res.case})` : $("colour").value === "ratio" ? "Design Ratios" : "";
+  const what = res.mode === "design" && dview ? "Design: " + dview.title : res.mode === "deformed" ? `Deformed Shape (${res.case})` : res.mode === "forces" ? `${compName()} Diagram (${res.case})` : res.mode === "contour" ? `Joint Displacement Contours (${res.case})` : res.mode === "reactions" ? `Joint Reactions (${res.case})` : $("colour").value === "ratio" ? "Design Ratios" : "";
   let t;
   if (p.mode === "plan") { const z = elevationOf(p.story); t = "Plan View - " + (p.story || "no stories") + (z === null ? "" : " - Z = " + num(z) + (unit ? " (" + unit + ")" : "")); }
   else if (p.mode === "elev") t = "Elevation View - " + (p.line ? p.line.label + (gridsGuessed ? " (column line)" : "") : "whole model");
@@ -1606,7 +1773,9 @@ function describe(o) { return o ? `${kindWord(o)} ${o.name} · ${o.section || "n
 function tipText(o) {
   const lines = [describe(o)];
   if (o.type === "f") lines.push("Length " + num(len(sub(o.b, o.a))) + (unit ? " " + unit : ""));
-  if (ratio.has(o.name)) lines.push("Design ratio " + ratio.get(o.name).toFixed(3));
+  if (ratio.has(o.id)) lines.push("Design ratio " + ratio.get(o.id).toFixed(3));
+  if (o.pier || o.spandrel) lines.push([o.pier ? "Pier " + o.pier : "", o.spandrel ? "Spandrel " + o.spandrel : ""].filter(Boolean).join(" · "));
+  if (dview && dview.byObj.has(o.id) && !dview.show.ratio && isFinite(dview.byObj.get(o.id))) lines.push(dview.show.name.replace(/ \(.*\)$/, "") + " " + fmt(dview.byObj.get(o.id) * dview.k) + dview.suffix);
   if (res.mode === "forces" && o.type === "f") { const rows = (forces.get(res.case) || new Map()).get(o.name); if (rows) { const vals = rows.map(r => r[res.comp]); lines.push(`${compName()} ${res.case}: max ${fmt(Math.max(...vals))}, min ${fmt(Math.min(...vals))}`); } }
   if ((res.mode === "contour" || res.mode === "deformed") && disp.has(res.case)) { const idx = o.type === "f" ? [o.ia, o.ib] : o.idx; const ds = idx.filter(i => i >= 0).map(i => disp.get(res.case).get(String(points[i][0]))).filter(Boolean); if (ds.length) { const c = ["UX", "UY", "UZ"], best = ds.reduce((m, d) => Math.max(m, Math.hypot(...d)), 0); lines.push(`Largest movement ${fmt(best)}${unit ? " " + unit : ""} (${res.case})`); } }
   return lines.join("\n");
@@ -1727,7 +1896,7 @@ function stepStory(d) { const p = panes[active]; if (!p || p.mode !== "plan") re
 function stepLine(d) { const p = panes[active]; if (!p || p.mode !== "elev") return; const lines = p.line ? grids[p.line.dir] : allLines(), i = lines.indexOf(p.line), j = Math.max(0, Math.min(lines.length - 1, i + d)); if (lines[j]) setLine(lines[j]); }
 $("story").onchange = () => setStory($("story").value);
 $("line").onchange = () => { const g = allLines().find(g => g.dir + g.label === $("line").value); if (g) setLine(g); };
-$("colour").addEventListener("input", () => { colourDirty = true; syncResults(); draw(); });
+$("colour").addEventListener("input", () => { if (res.mode === "design") res.mode = "model"; colourDirty = true; syncResults(); syncTools(); draw(); });
 $("case").addEventListener("input", () => { res.case = $("case").value; pointsDirty = true; draw(); });
 $("comp").addEventListener("input", () => { res.comp = $("comp").value; pointsDirty = true; res.range = null; draw(); });
 $("scale").addEventListener("input", () => { res.scale = +$("scale").value; res.userScale = 0; draw(); });
@@ -1749,6 +1918,8 @@ function act(name) {
   if (name.startsWith("v:")) return setMode(p, name.slice(2));
   if (name.startsWith("cam:")) { if (p) setView3d(p, name.slice(4)); return; }
   if (name.startsWith("dlg:")) return dialogs[name.slice(4)]();
+  if (name.startsWith("des:")) return openDesign(name.slice(4));
+  if (name.startsWith("dshow:")) { const [, k, id] = name.split(":"); return showDesign(k, id); }
   if (name.startsWith("lay")) return document.querySelector(`[data-lay="${name.slice(3)}"]`).click();
   if (name.startsWith("story:")) return setStory(name.slice(6));
   if (name.startsWith("line:")) { const g = allLines().find(g => g.dir + g.label === name.slice(5)); if (g) setLine(g); return; }
@@ -1797,6 +1968,8 @@ const menus = () => {
     Select: [["All", "selAll", "Ctrl+A"], ["All on This Story", "selStory", "", !plan], ["By Section...", "dlg:bySection"], ["By Object Type...", "dlg:byType"], ["Invert", "selInvert"], 0, ["Clear Selection", "selNone", "Esc"]],
     Display: [["Undeformed Shape", "r:model", "F4"], ["Deformed Shape...", "dlg:deformed", "F6", !disp.size], ["Frame Forces and Moments...", "dlg:forces", "F8", !forces.size], ["Joint Displacement Contours...", "dlg:contour", "", !disp.size], ["Support Reactions...", "dlg:reactions", "", !reacts.size], ["Design Ratios", "r:ratios", "", !ratio.size], ["Animate Deformed Shape", "anim", "", res.mode !== "deformed"], 0,
       ["Story Response Plots", "plot", "", !drifts.size], ["Tables...", "tables", "Ctrl+T"]],
+    Design: design.length ? [...design.map(f => [f.name, [["Display Design Info...", "des:" + f.key], ...designShows(f).map(s => [s.name.replace(/ \(.*\)$/, ""), "dshow:" + f.key + ":" + s.id])]]), 0, ["All Design Ratios", "r:ratios", "", !ratio.size], ["Display Design Results...", "des:"], ["Summary of Design Results...", "dlg:designSummary"]]
+      : [["No design results in this pack", "", "", true], ["Summary of Design Results...", "dlg:designSummary"]],
     Options: [["Black Background", "bg"], 0, ["Grid Lines", "o:grid"], ["Extruded Sections", "o:extrude"], ["Floors and Walls", "o:fill"], ["See-through Floors and Walls", "o:see"], ["Object Edges", "o:edges"], ["Supports", "o:supports"], ["Joints", "o:joints"], ["Labels", "o:names"], ["Global Axes", "o:axes"]],
     Help: [["Mouse and Keys", "dlg:keys"], ["About", "about"]],
   };
@@ -1807,6 +1980,7 @@ function ticked(a) {
   if (a.startsWith("r:")) return a === "r:ratios" ? res.mode === "model" && $("colour").value === "ratio" : res.mode === a.slice(2) && !(a === "r:model" && $("colour").value === "ratio");
   if (a.startsWith("dlg:") && ["deformed", "forces", "contour", "reactions"].includes(a.slice(4))) return res.mode === a.slice(4);
   if (a.startsWith("lay")) return layout === +a.slice(3);
+  if (a.startsWith("dshow:")) { const [, k, id] = a.split(":"); return res.mode === "design" && res.dfam === k && res.dshow === id; }
   if (a.startsWith("t:")) return tool === a.slice(2);
   return {bg: bg === "black", tables: !$("dock").hidden, plot: !!p && p.mode === "plot", persp: !!p && !!p.cam.persp && p.mode === "3d", explorer: opt.explorer, side: opt.side, anim: res.anim}[a] || false;
 }
@@ -1965,6 +2139,22 @@ const dialogs = {
   keys() {
     dialog("Mouse and Keys", `<table class="list">${[["Left click", "Select or unselect an object"], ["Left drag, left to right", "Select what lies inside the box"], ["Left drag, right to left", "Select what the box touches"], ["Right drag", "Turn the 3-D view (pans plan and elevation)"], ["Middle drag", "Pan"], ["Shift + middle drag", "Turn the 3-D view"], ["Wheel", "Zoom about the pointer"], ["Double middle click", "Restore full view"], ["Double click an object", "Object information"], ["Right click", "Menu for the object or the window"], ["F3", "Restore full view"], ["F4 / F6 / F8", "Undeformed / deformed shape / frame forces"], ["Page Up / Page Down", "Story up or down in plan"], ["Ctrl+T", "Tables"], ["Ctrl+A / Esc", "Select all / clear selection"]].map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join("")}</table>`, [["Close"]], {width: 460});
   },
+  designSummary() {
+    const man = (P && P.manifest) || {}, md = man.design || {}, notRun = md.not_run || [];
+    const fams = design.map(f => { const r = f.list.filter(i => i.ratio !== undefined), top = r.length ? Math.max(...r.map(i => i.ratio)) : undefined;
+      return `<tr data-fam="${esc(f.key)}" style="cursor:pointer"><td>${esc(f.name)}</td><td class="r">${f.list.length}</td><td class="r">${r.length}</td><td class="r">${top === undefined ? "" : top.toFixed(3)}</td><td class="r">${r.length ? r.filter(i => i.ratio > 1).length : ""}</td><td>${esc([...f.from].join(", "))}</td></tr>`; }).join("");
+    const worst = design.flatMap(f => f.list.filter(i => i.ratio !== undefined)).sort((a, b) => b.ratio - a.ratio).slice(0, 200);
+    const unplaced = design.reduce((n, f) => n + f.list.filter(i => !i.objs.length && f.key !== "punching").length, 0);
+    dialog("Summary of Design Results", `${design.length ? `<table class="list"><tr><th>Design</th><th>Items</th><th>With D/C</th><th>Largest D/C</th><th>Over 1.0</th><th>From</th></tr>${fams}</table>
+      <p class="kv" style="margin:8px 0 3px">Largest demand/capacity ratios, worst first. Click one to select it and zoom to it.</p>
+      <div class="scroll" style="max-height:300px"><table class="list"><tr><th>Design</th><th>Story</th><th>Member, pier or spandrel</th><th>D/C</th><th>Combination</th><th>Status</th></tr>${worst.map((i, n) => `<tr data-w="${n}" style="cursor:pointer${i.ratio > 1 ? ";color:var(--bad, #c62828)" : ""}"><td>${esc(famInfo[i.fam])}</td><td>${esc(i.story)}</td><td>${esc(i.label)}</td><td class="r">${i.ratio.toFixed(3)}</td><td>${esc(i.combo)}</td><td>${esc(i.status || (i.ratio > 1 ? "Overstressed" : ""))}</td></tr>`).join("")}</table></div>
+      ${unplaced ? `<p class="kv">${unplaced} rows name members, piers or spandrels this pack's model does not have (or no pier and spandrel labels came with it), so they are in the tables but not drawn.</p>` : ""}` : `<p class="kv">This pack has no design results.</p>`}
+      ${notRun.length ? `<p class="kv">No results for: ${esc(notRun.join(", "))}. Run that design in the program (its Design menu), then make the pack again. If the program's tables stay empty, export the design tables to Excel into the model's folder, named after the model: the next pack takes them from that file.</p>` : ""}`,
+      [["Close"]], {width: 720, float: true});
+    const d = document.querySelector(".dlg:last-of-type");
+    d.querySelectorAll("[data-fam]").forEach(tr => tr.onclick = () => showDesign(tr.dataset.fam));
+    d.querySelectorAll("[data-w]").forEach(tr => tr.onclick = () => { const it = worst[+tr.dataset.w]; sel.clear(); it.objs.forEach(o => sel.add(o.id)); selChanged(); const p = panes[active]; if (p && it.objs.length) zoomTo(p, it.objs.map(o => o.id)); });
+  },
   about() {
     const man = (P && P.manifest) || {};
     dialog("About " + $("app").textContent, `<p><b>${esc($("app").textContent)}</b></p><p class="kv" style="max-width:380px">Opens a CSI ProMax review pack with no CSI program on this computer. The model, the result tables and the design tables in a pack are the ones the CSI program produced; nothing is analysed here. Nothing is uploaded.</p>${P ? `<table class="list"><tr><td>Model</td><td>${esc(man.model || "")}</td></tr><tr><td>Program</td><td>${esc((man.program || "") + " " + (man.etabs || ""))}</td></tr><tr><td>Packed</td><td>${esc(man.created || "")}</td></tr><tr><td>By</td><td>${esc(man.by || "")}</td></tr></table>` : ""}`, [["OK"]], {width: 420});
@@ -1996,7 +2186,7 @@ function applyDisplay(d) {
   d.querySelectorAll("[data-o]").forEach(x => { const k = x.dataset.o; if (opt[k] !== x.checked) { opt[k] = x.checked; if (k === "extrude") { geometryDirty = true; geometryStamp++; } if (k === "fill") hiddenVersion++; } });
   d.querySelectorAll("[data-k]").forEach(x => { x.checked ? hidden.kind.delete(x.dataset.k) : hidden.kind.add(x.dataset.k); });
   hiddenVersion++;
-  const c = q(d, "#dCol").value; if (c !== $("colour").value) { $("colour").value = c; syncResults(); }
+  const c = q(d, "#dCol").value; if (c !== $("colour").value) { $("colour").value = c; if (res.mode === "design") res.mode = "model"; syncResults(); }
   const b = q(d, "#dBg").value; if (b !== bg) act("bg");
   colourDirty = true; buildTree(); syncTools(); draw();
 }
@@ -2013,6 +2203,7 @@ function infoWindow(id) {
   if (s) asg.push(["Shape", s[0] || ""], ["Depth", num(s[1]) + u], ["Width", s[2] ? num(s[2]) + u : ""]);
   if (sectionMat.has(o.section)) asg.push(["Material", sectionMat.get(o.section)]);
   if (o.type === "a" && slabT[o.section]) asg.push(["Thickness", num(slabT[o.section]) + u]);
+  if (o.pier) asg.push(["Pier label", o.pier]); if (o.spandrel) asg.push(["Spandrel label", o.spandrel]);
   let resHtml = "";
   if (o.type === "f" && forces.size) {
     const cases = [...forces.keys()].filter(c => forces.get(c).has(o.name));
@@ -2023,16 +2214,14 @@ function infoWindow(id) {
     const dr = idx.filter(i => i >= 0).map(i => { const d = disp.get(c).get(String(points[i][0])); return d ? [points[i][0], ...d.map(fmt)] : null; }).filter(Boolean);
     if (dr.length) resHtml += `<p class="kv" style="margin:8px 0 3px">Joint displacements, ${esc(c)}${u ? " (" + unit + ")" : ""}</p><table class="list"><tr><th>Joint</th><th>UX</th><th>UY</th><th>UZ</th></tr>${dr.map(r => `<tr>${r.map((v, i) => `<td class="${i ? "r" : ""}">${esc(v)}</td>`).join("")}</tr>`).join("")}</table>`;
   }
-  const des = [];
-  if (ratio.has(o.name)) des.push(["Largest design ratio", ratio.get(o.name).toFixed(3)], ["Status", ratio.get(o.name) > 1 ? "Overstressed" : "No message"]);
-  for (const t of Object.values(P.tables)) { if (!/summary/i.test(t.name)) continue; const uc = col(t.fields, "UniqueName", "Unique Name"); if (uc < 0) continue; const r = t.rows.find(r => String(r[uc]) === o.name); if (r) { des.push(["", t.name]); t.fields.forEach((f, i) => { if (i !== uc && r[i] !== "" && r[i] !== undefined) des.push([f, r[i]]); }); } }
+  const des = designHtml(o);
   const notes = P.comments.filter(c => c.target && c.target.name === o.name);
   const w = dialog((o.type === "f" ? "Frame" : "Shell") + " Information - " + o.name, `<div class="itabs"><button data-page="geo" class="on">Geometry</button><button data-page="asg">Assignments</button><button data-page="res">Results</button><button data-page="des">Design</button><button data-page="com">Comments (${notes.length})</button></div>
     <div class="ipage on" data-page="geo">${rows(geo)}</div><div class="ipage" data-page="asg">${rows(asg)}</div>
     <div class="ipage" data-page="res">${resHtml || `<p class="kv">This pack has no results for it.</p>`}</div>
-    <div class="ipage" data-page="des">${des.length ? rows(des) : `<p class="kv">This pack has no design results for it.</p>`}</div>
+    <div class="ipage" data-page="des">${des || `<p class="kv">This pack has no design results for it.</p>`}</div>
     <div class="ipage" data-page="com">${notes.map(c => `<div class="card comment"><div class="who">${esc(c.by || "Reviewer")} · ${esc(String(c.at || "").replace("T", " ").slice(0, 16))}</div>${esc(c.text)}</div>`).join("") || `<p class="kv">No comments on it yet.</p>`}<div class="row"><textarea class="iText" placeholder="Write a review comment on ${esc(o.name)}"></textarea></div><button class="iAdd">Add comment</button></div>`,
-    [["Close"]], {float: true, width: 430});
+    [["Close"]], {float: true, width: des ? 560 : 430});
   const fill = () => {
     const box = w.querySelector(".iRes"); if (!box) return;
     const c = w.querySelector(".iCase").value, rs = forces.get(c).get(o.name) || [];
@@ -2040,6 +2229,62 @@ function infoWindow(id) {
   };
   if (w.querySelector(".iCase")) { w.querySelector(".iCase").onchange = fill; fill(); }
   w.querySelector(".iAdd").onclick = () => { const t = w.querySelector(".iText").value.trim(); if (!t) return; addComment(t, o); w.close(); infoWindow(id); w.remove(); };
+}
+
+// ---- the design windows: Display Design Info, the summary of every design, and a member's design ----
+function openDesign(key) {
+  if (!design.length) return dialogs.designSummary();
+  const cur = design.find(f => f.key === (key || res.dfam)) || design[0];
+  const showOpts = fam => { const s = designShows(fam), pick = res.dfam === fam.key && res.dshow ? res.dshow : (s[0] ? s[0].id : ""); return (s.length ? `<optgroup label="Design output">${opts(s.map(x => [x.id, x.name]), pick)}</optgroup>` : "") + `<optgroup label="Any number in the design tables">${opts(fam.fields.map(f => ["field:" + f.name, f.name]), pick)}</optgroup>`; };
+  const d = dialog("Display Design Results", `
+    <fieldset><legend>Design</legend><div class="g2"><span>Design type</span><select id="dFam">${opts(design.map(f => [f.key, f.name]), cur.key)}</select><span>Display</span><select id="dShow">${showOpts(cur)}</select></div></fieldset>
+    <fieldset><legend>Options</legend><div class="g3"><label><input type="checkbox" id="dVals" ${res.dvalues ? "checked" : ""}>Show values on the model</label><label><input type="checkbox" id="dNames" ${res.dnames ? "checked" : ""}>Pier and spandrel names</label></div></fieldset>
+    <p class="kv" id="dFrom"></p>`,
+    [["OK", d => applyDesign(d)], ["Apply", d => { applyDesign(d); return false; }, true], ["Cancel"]], {width: 500});
+  const from = () => { const f = design.find(x => x.key === q(d, "#dFam").value); q(d, "#dFrom").textContent = `${f.list.length} ${f.key === "pier" ? "piers" : f.key === "spandrel" ? "spandrels" : "items"} from ${[...f.from].join(", ")}: ${f.tables.join("; ")}.`; };
+  q(d, "#dFam").onchange = () => { const f = design.find(x => x.key === q(d, "#dFam").value); q(d, "#dShow").innerHTML = showOpts(f); from(); };
+  from();
+}
+function applyDesign(d) {
+  res.mode = "design"; res.dfam = q(d, "#dFam").value; res.dshow = q(d, "#dShow").value; res.dvalues = q(d, "#dVals").checked; res.dnames = q(d, "#dNames").checked;
+  if ($("colour").value === "ratio") $("colour").value = "kind";
+  colourDirty = true; syncResults(); panes.forEach(p => p.diagSig = ""); syncTools(); draw();
+}
+function showDesign(key, show) {
+  // Straight to one design shown by its first output, as the menu's own items do.
+  const fam = design.find(f => f.key === key); if (!fam) return;
+  res.mode = "design"; res.dfam = key; res.dshow = show || (designShows(fam)[0] || {}).id || ("field:" + (fam.fields[0] || {}).name);
+  if ($("colour").value === "ratio") $("colour").value = "kind";
+  colourDirty = true; syncResults(); syncTools(); draw();
+}
+function designOf(o) { const out = []; for (const fam of design) for (const it of fam.list) if (it.objs.includes(o)) out.push(it); return out; }
+function designHtml(o) {
+  const its = designOf(o); if (!its.length) return "";
+  return its.map(it => {
+    const fam = famInfo[it.fam], head = [[fam, (it.fam === "pier" ? "Pier " : it.fam === "spandrel" ? "Spandrel " : "") + it.label + (it.story ? " · " + it.story : "")]];
+    if (it.ratio !== undefined) head.push(["Demand/capacity", it.ratio.toFixed(3) + (it.ratioField ? " (" + it.ratioField + ")" : "")]);
+    if (it.combo) head.push(["Governing combination", it.combo]);
+    head.push(["Status", it.status || (it.ratio > 1 ? "Overstressed" : "No message")]);
+    const tbs = [...new Set(it.rows.map(r => r.t))].map(t => {
+      const rows = it.rows.filter(r => r.t === t), fields = rows[0].fields, keep = fields.map((f, i) => rows.some(r => r.raw[i] !== "" && r.raw[i] !== undefined) ? i : -1).filter(i => i >= 0);
+      return `<p class="kv" style="margin:8px 0 3px">${esc(t)}</p><div class="scroll" style="max-height:220px"><table class="list"><tr>${keep.map(i => `<th>${esc(fields[i])}</th>`).join("")}</tr>${rows.slice(0, 60).map(r => `<tr>${keep.map(i => `<td class="${isNum(r.raw[i]) ? "r" : ""}">${esc(r.raw[i])}</td>`).join("")}</tr>`).join("")}</table></div>`;
+    }).join("");
+    return `<table class="list">${head.map(x => `<tr><td style="color:var(--mute);width:42%">${esc(x[0])}</td><td>${esc(x[1])}</td></tr>`).join("")}</table>${tbs}`;
+  }).join("<hr>");
+}
+function designCard() {
+  // The side panel's summary of every design in the pack, beside the checks.
+  const man = (P && P.manifest) || {}, notRun = ((man.design || {}).not_run) || [];
+  if (!design.length && !notRun.length) return "";
+  const rows = design.map(f => { const r = f.list.filter(i => i.ratio !== undefined), top = r.length ? Math.max(...r.map(i => i.ratio)) : undefined, over = r.filter(i => i.ratio > 1).length;
+    return `<tr data-fam="${esc(f.key)}" style="cursor:pointer" title="Show it on the model"><td>${esc(f.name.replace(/ Design$/, ""))}</td><td class="r">${f.list.length}</td><td class="r">${top === undefined ? "" : top.toFixed(2)}</td><td class="r">${r.length ? over : ""}</td></tr>`; }).join("");
+  return `<div class="card"><h3><span>Design results</span>${design.length ? pill(design.some(f => f.list.some(i => i.ratio > 1)) ? "fail" : design.some(f => f.list.some(i => i.ratio !== undefined)) ? "pass" : "reported") : pill("not available")}</h3>
+    ${design.length ? `<table class="list"><tr><th>Design</th><th>Items</th><th>Max D/C</th><th>&gt;1.0</th></tr>${rows}</table><div class="row" style="margin-top:6px"><button data-do-design="summary">Summary...</button><button data-do-design="show">Display...</button></div>` : ""}
+    ${notRun.map(n => `<div class="kv">No results for ${esc(n)} in this pack: the design was not run, or was not kept, in the program.</div>`).join("")}</div>`;
+}
+function wireDesignCard(el) {
+  el.querySelectorAll("[data-fam]").forEach(tr => tr.onclick = () => showDesign(tr.dataset.fam));
+  el.querySelectorAll("[data-do-design]").forEach(b => b.onclick = () => b.dataset.doDesign === "summary" ? dialogs.designSummary() : openDesign());
 }
 
 // ---- model explorer ----
@@ -2108,12 +2353,14 @@ function showPick() {
   if (isFrame) {
     if (s) rows.push(["Shape", s[0] || ""], ["Depth x width", num(s[1]) + (s[2] ? " x " + num(s[2]) : "") + (unit ? " " + unit : "")]);
     rows.push(["Length", num(len(sub(f.b, f.a))) + (unit ? " " + unit : "")], ["Start X, Y, Z", f.a.map(num).join(", ")], ["End X, Y, Z", f.b.map(num).join(", ")]);
-    if (ratio.has(f.name)) rows.push(["Design ratio", ratio.get(f.name).toFixed(3)]);
+    if (ratio.has(f.id)) rows.push(["Design ratio", ratio.get(f.id).toFixed(3)]);
     const rs = res.mode === "forces" && (forces.get(res.case) || new Map()).get(f.name);
     if (rs) { const v = rs.map(r => r[res.comp]); rows.push([compName() + " max", fmt(Math.max(...v))], [compName() + " min", fmt(Math.min(...v))]); }
   } else {
     if (slabT[f.section]) rows.push(["Thickness", num(slabT[f.section]) + (unit ? " " + unit : "")]);
     rows.push(["Corners", f.pts.length], ["Elevation", [...new Set(f.pts.map(q => num(q[2])))].join(" to ")]);
+    if (f.pier) rows.push(["Pier", f.pier]); if (f.spandrel) rows.push(["Spandrel", f.spandrel]);
+    if (ratio.has(f.id)) rows.push(["Design ratio", ratio.get(f.id).toFixed(3)]);
   }
   el.innerHTML = table(rows) + `<div class="row" style="margin-top:8px"><button id="pInfo">Object information...</button><button id="pTable">Show in tables</button></div>`;
   $("pInfo").onclick = () => infoWindow(f.id); $("pTable").onclick = () => showInTable(f);
@@ -2139,8 +2386,9 @@ function section(title, o) {
 }
 function drawChecks() {
   const c = P.checks;
-  if (!c || !c.checks) { $("checks").innerHTML = `<p class="kv">This pack has no checks. The model was packed without results.</p>`; return; }
-  $("checks").innerHTML = `<p class="kv">${esc(c.note || "")}</p>` + Object.entries(c.checks).map(([k, v]) => section(k.replace(/_/g, " "), v)).join("");
+  if (!c || !c.checks) { $("checks").innerHTML = designCard() + `<p class="kv">This pack has no checks. The model was packed without results.</p>`; wireDesignCard($("checks")); return; }
+  $("checks").innerHTML = designCard() + `<p class="kv">${esc(c.note || "")}</p>` + Object.entries(c.checks).map(([k, v]) => section(k.replace(/_/g, " "), v)).join("");
+  wireDesignCard($("checks"));
 }
 
 // ---- tables ----

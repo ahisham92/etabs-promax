@@ -65,6 +65,15 @@ E4. **Checks against ETABS's own tables.** After the analysis, ask: "Check the d
 E5. **Check report and review pack.** Ask for the check report, then "export the review pack". Open the Viewer page
     it names. Expected: the model in 3D, the checks, and the results tables; both files (the `.cpmx` and the
     `viewer.html`) are in the model's own folder, beside the `.edb`.
+E5b. **Every design result in the Viewer.** On a model with steel, concrete frames and shear walls (piers and
+    spandrels labelled), run the analysis and every design in ETABS (Design > Steel Frame, Concrete Frame, Composite
+    Beam, Shear Wall Design > Start Design/Check), then "export the review pack". Expected: the chat's answer lists
+    where each design came from; in the Viewer, Design menu > each design > Display Design Info shows the D/C
+    colours, the concrete reinforcing at the stations, and the pier and spandrel values on the walls, matching ETABS's
+    own Display Design Info. Checks tab > Design results gives the largest D/C of each. If a design is missing, export
+    the design tables (File > Export > ETABS Tables to Excel) into the model's folder, named after the model, and
+    make the pack again: it should then take them from that file. The full field test labels its scratch wall as
+    a pier, runs run_design and reports every design table ETABS lists (with data or empty): send that report.
 E6. **The window.** Shrink the chat to one line and back, maximise the window, close it and open it again from
     Tools > CSI ProMax. Expected: the chat of this model is still there (Home > history).
 E7. **Bug report.** Help > Report a bug, write one line. Expected: a zip in `Documents\CSI ProMax\Bugs\Reports`.
