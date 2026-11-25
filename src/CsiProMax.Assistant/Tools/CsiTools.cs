@@ -608,6 +608,18 @@ public static class CsiTools
             f ??= []; data ??= [];
             var list = new List<string[]>();
             for (var r = 0; r < records && f.Length > 0; r++) list.Add(data.Skip(r * f.Length).Take(f.Length).Select(v => v ?? "").ToArray());
+            if (list.Count == 0 && f.Length > 0)
+            {
+                // SAP2000 26 gave "Load Pattern Definitions" for editing with no rows while the model had four patterns
+                // (0.4.17 field test): the same rows are read for display, field by field.
+                string[] ask = f.ToArray(), shown = [], rowsShown = []; int v2 = 0, n2 = 0;
+                if (Convert.ToInt32(m.DatabaseTables.GetTableForDisplayArray(table.Key, ref ask, "", ref v2, ref shown, ref n2, ref rowsShown)) == 0 && shown is { Length: > 0 } && rowsShown is not null)
+                    for (var r = 0; r < n2; r++)
+                    {
+                        var source = rowsShown.Skip(r * shown.Length).Take(shown.Length).ToArray();
+                        list.Add(f.Select(k => Array.FindIndex(shown, x => string.Equals(x, k, StringComparison.OrdinalIgnoreCase)) is var i and >= 0 && i < source.Length ? source[i] ?? "" : "").ToArray());
+                    }
+            }
             return (f, list);
         })!;
 
@@ -929,6 +941,17 @@ public static class CsiTools
         var patterns = e.LoadPatterns().Select(p => p.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var missing = loads.Where(x => !patterns.Contains(x.Pattern)).Select(x => x.Pattern).ToList();
         if (missing.Count > 0) throw new ToolInputException($"No load pattern named {string.Join(", ", missing)}. The patterns: {string.Join(", ", patterns)}.");
+        if (IsEtabs(e))
+        {
+            // ETABS 23 has no SourceMass: its one (default) mass source is set on PropMaterial.
+            var (elements, added, pats) = EtabsLateral.MassSource(e, a.Flag("from_elements", true), a.Flag("from_masses", true), loads);
+            return new JsonObject
+            {
+                ["mass_source"] = "the model's default", ["loads"] = new JsonArray(loads.Select(x => (JsonNode)$"{x.Pattern} x {x.Factor.ToString(CultureInfo.InvariantCulture)}").ToArray()),
+                ["from_elements"] = elements, ["from_masses"] = added, ["from_loads"] = Arr(pats), ["is_default"] = true,
+                ["note"] = $"{e.Program.Name}'s API sets only the default mass source, so the name {name} is not used.",
+            };
+        }
         Call(e, "set the mass source", "SourceMass.SetMassSource", D(("Name", name), ("MassFromElements", a.Flag("from_elements", true)), ("MassFromMasses", a.Flag("from_masses", true)),
             ("MassFromLoads", loads.Count > 0), ("IsDefault", true), ("NumberLoads", loads.Count), ("LoadPat", loads.Select(x => x.Pattern).ToArray()), ("SF", loads.Select(x => x.Factor).ToArray())));
         var result = new JsonObject { ["mass_source"] = name, ["loads"] = new JsonArray(loads.Select(x => (JsonNode)$"{x.Pattern} x {x.Factor.ToString(CultureInfo.InvariantCulture)}").ToArray()) };
@@ -1005,6 +1028,12 @@ public static class CsiTools
         {
             common["C"] = a.Number("coefficient");
             common["K"] = a.Number("k", 1);
+            if (IsEtabs(e))
+            {
+                var said = EtabsLateral.UserCoefficient(e, name, direction, a.Number("eccentricity", 0.05), a.Number("coefficient"), a.Number("k", 1));
+                return new JsonObject { ["pattern"] = name, ["method"] = method, ["direction"] = direction.ToLowerInvariant(), ["lateral"] = said, ["code"] = EtabsLateral.SeismicCode(e, name),
+                    ["note"] = $"{e.Program.Name} computes the loads when the analysis runs. Check them in its Load Patterns > Modify Lateral Load." };
+            }
             Call(e, $"set {name} to a user coefficient", "LoadPatterns.AutoSeismic.SetUserCoefficient", common);
             back = Try(e, $"read {name}", "LoadPatterns.AutoSeismic.GetUserCoefficient", D(("Name", name)));
         }
@@ -1027,8 +1056,28 @@ public static class CsiTools
             common["SiteClass"] = SiteNumber(site);
             common["Fa"] = a.Number("fa", Spectrum.Fa(site, ss));
             common["Fv"] = a.Number("fv", Spectrum.Fv(site, s1));
-            Call(e, $"set {name} to ASCE 7-16", "LoadPatterns.AutoSeismic.SetASCE716", common);
-            back = Try(e, $"read {name}", "LoadPatterns.AutoSeismic.GetASCE716", D(("Name", name)));
+            if (IsEtabs(e))
+            {
+                var took = EtabsLateral.Asce716(e, name, direction, a.Number("eccentricity", 0.05), (int)common["PeriodFlag"]!, (int)common["CtType"]!, (double)common["UserT"]!,
+                    (double)common["R"]!, (double)common["Omega"]!, (double)common["Cd"]!, (double)common["I"]!, ss, s1, (double)common["TL"]!, (int)common["SiteClass"]!, (double)common["Fa"]!, (double)common["Fv"]!);
+                return new JsonObject { ["pattern"] = name, ["method"] = method, ["direction"] = direction.ToLowerInvariant(), ["set_by"] = took, ["code"] = EtabsLateral.SeismicCode(e, name),
+                    ["note"] = $"{e.Program.Name} computes the loads when the analysis runs. Check them in its Load Patterns > Modify Lateral Load." };
+            }
+            // SAP2000 26's SetASCE716(_1) takes nDir, the directions X and Y, not a DirFlag (its help; 0.4.17 field test).
+            var x = direction.Equals("x", StringComparison.OrdinalIgnoreCase);
+            (string Path, bool[] Dirs)[] tries =
+            [
+                ("LoadPatterns.AutoSeismic.SetASCE716_1", [x, !x]), ("LoadPatterns.AutoSeismic.SetASCE716_1", [false, x, !x]),
+                ("LoadPatterns.AutoSeismic.SetASCE716", [false, x, !x]), ("LoadPatterns.AutoSeismic.SetASCE716", [x, !x]),
+            ];
+            var set = false;
+            for (var i = 0; i < tries.Length && !set; i++)
+            {
+                common["nDir"] = tries[i].Dirs;
+                if (i < tries.Length - 1) set = Try(e, $"set {name} to ASCE 7-16", tries[i].Path, common) is not null;
+                else { Call(e, $"set {name} to ASCE 7-16", tries[i].Path, common); set = true; }
+            }
+            back = Try(e, $"read {name}", "LoadPatterns.AutoSeismic.GetASCE716_1", D(("Name", name))) ?? Try(e, $"read {name}", "LoadPatterns.AutoSeismic.GetASCE716", D(("Name", name)));
         }
         else throw new ToolInputException("method is asce7-16 or user.");
         var result = new JsonObject { ["pattern"] = name, ["method"] = method, ["direction"] = direction.ToLowerInvariant(), ["dir_flag"] = dir };
@@ -1047,8 +1096,24 @@ public static class CsiTools
         var args = D(("Name", name), ("ExposureFrom", 1), ("DirAngle", a.Number("angle", 0)), ("Cpw", a.Number("cpw", 0.8)), ("Cpl", a.Number("cpl", 0.5)),
             ("UserZ", false), ("TopZ", topZ), ("BottomZ", bottomZ), ("OverStories", top.Length > 0), ("StoryTop", top), ("StoryBottom", bottom),
             ("WindSpeed", a.Number("speed")), ("ExposureType", exposure), ("Kzt", a.Number("kzt", 1)), ("GustFactor", a.Number("gust", 0.85)),
-            ("Kd", a.Number("kd", 0.85)), ("SolidGrossRatio", 0.2), ("UserExposure", false), ("Ke", 1.0));
-        var used = (JsonObject)e.Raw($"set {name} to ASCE 7-16 wind", m => ApiCall.First((object)m, ["LoadPatterns.AutoWind.SetASCE716", "LoadPatterns.AutoWind.SetASCE710"], args, $"set {name} to ASCE 7 wind"))!;
+            ("Kd", a.Number("kd", 0.85)), ("SolidGrossRatio", 0.2), ("UserExposure", false), ("Ke", 1.0),
+            // SAP2000 26's help: ASCECase 1 to 5 (5 is every case of ASCE 7-16 Fig. 27.3-8), e1 and e2 of that figure; ASCE 7-10 also takes the importance.
+            ("ASCECase", a.Whole("asce_case", 1)), ("ASCEe1", 0.15), ("ASCEe2", 0.15), ("ImportanceFactor", a.Number("importance", 1)));
+        if (IsEtabs(e))
+        {
+            // ETABS 23's cAutoWind has no methods: its table takes the wind.
+            EtabsLateral.Wind716(e, name, a.Number("angle", 0), a.Number("speed"), a.Text("exposure", "C").ToUpperInvariant(), a.Number("kzt", 1), a.Number("gust", 0.85), a.Number("kd", 0.85));
+            return new JsonObject { ["pattern"] = name, ["code"] = "ASCE 7-16", ["set_by"] = "the table Auto Wind - ASCE 7-16",
+                ["note"] = $"{e.Program.Name} computes the wind loads when the analysis runs, from the extents of the diaphragms." };
+        }
+        JsonObject used;
+        try { used = (JsonObject)e.Raw($"set {name} to ASCE 7-16 wind", m => ApiCall.First((object)m, ["LoadPatterns.AutoWind.SetASCE716", "LoadPatterns.AutoWind.SetASCE710"], args, $"set {name} to ASCE 7 wind"))!; }
+        catch (EtabsException)
+        {
+            // Exposure 1 needs rigid diaphragms; 2 takes it from the area objects.
+            args["ExposureFrom"] = 2;
+            used = (JsonObject)e.Raw($"set {name} to ASCE 7-16 wind", m => ApiCall.First((object)m, ["LoadPatterns.AutoWind.SetASCE716", "LoadPatterns.AutoWind.SetASCE710"], args, $"set {name} to ASCE 7 wind, exposure from the areas"))!;
+        }
         var getter = used["method"]!.ToString().Replace(".Set", ".Get", StringComparison.Ordinal);
         var back = Try(e, $"read {name}", "LoadPatterns.AutoWind." + getter.Split('.').Last(), D(("Name", name)));
         var result = new JsonObject { ["pattern"] = name, ["code"] = used["method"]!.ToString().EndsWith("716", StringComparison.Ordinal) ? "ASCE 7-16" : "ASCE 7-10" };
@@ -1071,7 +1136,8 @@ public static class CsiTools
         var (sds, sd1) = Spectrum.Design(ss, s1, fa, fv);
         var damping = a.Number("damping", 0.05);
         var (periods, values) = Spectrum.Points(sds, sd1, tl);
-        Call(e, $"add the spectrum {function}", "Func.FuncRS.SetUser", D(("Name", function), ("NumberItems", periods.Length), ("Period", periods), ("Value", values), ("DampRatio", damping)));
+        if (IsEtabs(e)) EtabsLateral.UserSpectrum(e, function, periods, values, damping); // ETABS 23's FuncRS has only NTC 2008/2018
+        else Call(e, $"add the spectrum {function}", "Func.FuncRS.SetUser", D(("Name", function), ("NumberItems", periods.Length), ("Period", periods), ("Value", values), ("DampRatio", damping)));
 
         var modal = a.Text("modal_case");
         if (modal.Length == 0)

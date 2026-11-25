@@ -162,6 +162,11 @@ static class CsiToolsTests
             var ms = Run(CsiProgram.Sap2000, "set_mass_source", """{"loads":[{"pattern":"Dead","factor":1},{"pattern":"Live","factor":0.25}]}""", link);
             Equal("mass CPM-MassSource elements True masses True loads True default True Dead*1,Live*0.25", api.Log.First(l => l.StartsWith("mass ", StringComparison.Ordinal)), "the mass source as given");
             Throws(() => Run(CsiProgram.Sap2000, "set_mass_source", """{"loads":[{"pattern":"Nope","factor":1}]}""", link), "a pattern that is not there");
+            // ETABS 23 has no SourceMass: its default mass source is set on PropMaterial (0.4.17 field test).
+            var (etabs, etabsApi, _) = Model(CsiProgram.Etabs);
+            var ems = Run(CsiProgram.Etabs, "set_mass_source", """{"loads":[{"pattern":"Dead","factor":1},{"pattern":"Live","factor":0.25}]}""", etabs);
+            Check(etabsApi.Mass.Loads && etabsApi.Mass.Patterns.SequenceEqual(["Dead", "Live"]) && etabsApi.Mass.Factors.SequenceEqual([1.0, 0.25]), "ETABS: PropMaterial.SetMassSource_1 with the loads");
+            Equal("Dead,Live", string.Join(",", ems["from_loads"]!.AsArray().Select(x => x!.GetValue<string>())), "read back: " + ems.ToJsonString());
             var modal = Run(CsiProgram.Sap2000, "set_modal_case", """{"name":"MODAL","max_modes":9}""", link);
             Equal(9, modal["max_modes"]!.GetValue<int>(), "read back: " + modal.ToJsonString());
             var codes = Run(CsiProgram.Sap2000, "design_codes", """{"set":{"concrete":"ACI 318-19"}}""", link);
@@ -178,15 +183,26 @@ static class CsiToolsTests
             var (link, api, inner) = Model(CsiProgram.Etabs);
             var eq = Run(CsiProgram.Etabs, "add_seismic_load", """{"name":"EQY","direction":"y","method":"user","coefficient":0.12,"k":1.5}""", link);
             Check(inner.LoadPatterns().Any(p => p.Name == "EQY" && p.Type == "Seismic"), "the pattern is made, as Seismic");
-            Equal("SetUserCoefficient EQY dir 4 ecc 0.05 top Story3 C 0.12 K 1.5", api.Log.Last(l => l.StartsWith("SetUserCoefficient", StringComparison.Ordinal)), "ETABS: Y is 4, over the stories");
+            // ETABS 23 has no SetUserCoefficient: its table takes it (0.4.17 field test).
+            var uc = api.Tables["Load Pattern Definitions - Auto Seismic - User Coefficient"];
+            string F(string[] row, string field) => row[Array.IndexOf(uc.Fields, field)];
+            var ucRow = uc.Rows.Single(r => F(r, "Name") == "EQY");
+            Equal("No|Yes|0.12|1.5|Base", string.Join("|", F(ucRow, "XDir"), F(ucRow, "YDir"), F(ucRow, "C"), F(ucRow, "K"), F(ucRow, "BotStory")), "ETABS: the user coefficient row, in Y, over the stories");
+            Check(F(ucRow, "TopStory").Length > 0 && eq["code"]!.GetValue<string>() == "User Coefficient", "read back by its code: " + eq.ToJsonString());
             var (sap, sapApi, _) = Model(CsiProgram.Sap2000);
             Run(CsiProgram.Sap2000, "add_seismic_load", """{"name":"EQY","direction":"y","method":"user","coefficient":0.12}""", sap);
             Check(sapApi.Log.Last(l => l.StartsWith("SetUserCoefficient", StringComparison.Ordinal)).Contains("dir 2"), "SAP2000: Y is 2");
             Run(CsiProgram.Etabs, "add_seismic_load", """{"name":"EQX","direction":"x","r":8,"omega":3,"cd":5.5,"ss":1.0,"s1":0.4,"site_class":"D"}""", link);
-            Equal("ASCE716 EQX dir 1 R 8 Ss 1 S1 0.4 site 4 Fa 1.1 Fv 1.9 TL 8", api.Log.Last(l => l.StartsWith("ASCE716", StringComparison.Ordinal)), "ASCE 7-16 with Fa and Fv from the tables");
+            Check(api.Log.Last(l => l.StartsWith("ASCE716", StringComparison.Ordinal)).StartsWith("ASCE716_1 EQX dirs 100000 R 8 Ss 1 S1 0.4 site 4 Fa 1.1 Fv 1.9 TL 8 Z ", StringComparison.Ordinal),
+                "ETABS: ASCE 7-16 by SetASCE716_1, X of six directions, Fa and Fv from the tables: " + api.Log.Last(l => l.StartsWith("ASCE716", StringComparison.Ordinal)));
+            Run(CsiProgram.Sap2000, "add_seismic_load", """{"name":"EQX","direction":"x","r":8,"ss":1.0,"s1":0.4,"site_class":"D"}""", sap);
+            Check(sapApi.Log.Last(l => l.StartsWith("ASCE716", StringComparison.Ordinal)).StartsWith("ASCE716_1 EQX dirs 10 ", StringComparison.Ordinal), "SAP2000: nDir is X and Y");
             Throws(() => Run(CsiProgram.Etabs, "add_seismic_load", """{"name":"Dead","direction":"x","method":"user","coefficient":0.1}""", link), "a pattern of another type");
             Run(CsiProgram.Etabs, "add_wind_load", """{"name":"WX","speed":110,"exposure":"D"}""", link);
-            Check(inner.LoadPatterns().Any(p => p.Name == "WX" && p.Type == "Wind") && api.Log.Any(l => l == "wind WX speed 110 exposure 3 angle 0"), "wind: " + string.Join(" | ", api.Log));
+            var wind = api.Tables["Load Pattern Definitions - Auto Wind - ASCE 7-16"];
+            var wx = wind.Rows.Single(r => r[0] == "WX");
+            Check(inner.LoadPatterns().Any(p => p.Name == "WX" && p.Type == "Wind") && wx[Array.IndexOf(wind.Fields, "WindSpeed")] == "110" && wx[Array.IndexOf(wind.Fields, "ExpType")] == "D",
+                "ETABS 23's cAutoWind has no methods: the wind goes through its table: " + string.Join(",", wx));
             var rs = Run(CsiProgram.Etabs, "add_response_spectrum", """{"ss":1.0,"s1":0.4,"site_class":"D","r":8,"importance":1.25}""", link);
             Near(9.80665 * 1.25 / 8, rs["scale_factor"]!.GetValue<double>(), "g Ie / R in m/s2");
             Equal("Modal", rs["modal_case"]!.GetValue<string>(), "on the model's modal case");
@@ -460,10 +476,14 @@ public sealed class FakeApi
         public int GetAssignments(string Name, ref int NumberItems, ref int[] ObjectType, ref string[] ObjectName) { ObjectName = o.Group.ToArray(); NumberItems = ObjectName.Length; ObjectType = new int[NumberItems]; return 0; }
     }
 
+    public Dictionary<string, string> SeismicCodes { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public (bool Elements, bool Added, bool Loads, string[] Patterns, double[] Factors) Mass;
+
     public sealed class PatternsApi(FakeApi o)
     {
         public SeismicApi AutoSeismic { get; } = new(o);
         public WindApi AutoWind { get; } = new(o);
+        public int GetAutoSeismicCode(string Name, ref string CodeName) { CodeName = o.SeismicCodes.GetValueOrDefault(Name, ""); return 0; }
     }
 
     public sealed class SeismicApi(FakeApi o)
@@ -479,6 +499,13 @@ public sealed class FakeApi
             o.Log.Add(FormattableString.Invariant($"ASCE716 {Name} dir {DirFlag} R {R} Ss {Ss} S1 {S1} site {SiteClass} Fa {Math.Round(Fa, 6)} Fv {Math.Round(Fv, 6)} TL {TL}")); return 0;
         }
         public int GetASCE716(string Name, ref double R) { R = 8; return 0; }
+        // ETABS 23 and SAP2000 26: the directions as nDir (ETABS 6 long, 0-based: X, Y, X+e, Y+e, X-e, Y-e; SAP2000 X, Y).
+        public int SetASCE716_1(string Name, ref bool[] nDir, double Eccen, int PeriodFlag, int CtType, double UserT, bool UserZ, double TopZ, double BottomZ, double R, double Omega, double Cd, double I, double Ss, double S1, double TL, int SiteClass, double Fa, double Fv)
+        {
+            if (nDir is null || !nDir.Any(d => d) || R <= 0) return 1;
+            o.SeismicCodes[Name] = "ASCE 7-16";
+            o.Log.Add(FormattableString.Invariant($"ASCE716_1 {Name} dirs {string.Join("", nDir.Select(d => d ? '1' : '0'))} R {R} Ss {Ss} S1 {S1} site {SiteClass} Fa {Math.Round(Fa, 6)} Fv {Math.Round(Fv, 6)} TL {TL} Z {TopZ}..{BottomZ}")); return 0;
+        }
     }
 
     public sealed class WindApi(FakeApi o)
@@ -521,7 +548,11 @@ public sealed class FakeApi
         public int SetDampConstant(string Name, double Damp) => 0;
     }
 
-    public sealed class FuncApi(FakeApi o) { public RsFuncApi FuncRS { get; } = new(o); }
+    public sealed class FuncApi(FakeApi o)
+    {
+        public RsFuncApi FuncRS { get; } = new(o);
+        public int GetNameList(ref int NumberNames, ref string[] MyName) { MyName = o.Functions.Keys.ToArray(); NumberNames = MyName.Length; return 0; }
+    }
 
     public sealed class RsFuncApi(FakeApi o)
     {
@@ -564,6 +595,14 @@ public sealed class FakeApi
         public int SetMPIsotropic(string Name, double E, double U, double A, double Temp = 0) { o.Moduli[Name] = E; return 0; }
         public int SetWeightAndMass(string Name, int MyOption, double Value, double Temp = 0) => 0;
         public int SetOConcrete_1(string Name, double Fc, bool IsLightweight, double FcsFactor, int SSType, int SSHysType, double StrainAtFc, double StrainUltimate, double FinalSlope, double FrictionAngle = 0, double DilatationalAngle = 0, double Temp = 0) => 0;
+        public int SetMassSource_1(ref bool IncludeElements, ref bool IncludeAddedMass, ref bool IncludeLoads, int NumberLoads, ref string[] LoadPat, ref double[] sf)
+        {
+            o.Mass = (IncludeElements, IncludeAddedMass, IncludeLoads, LoadPat, sf); return 0;
+        }
+        public int GetMassSource_1(ref bool IncludeElements, ref bool IncludeAddedMass, ref bool IncludeLoads, ref int NumberLoads, ref string[] LoadPat, ref double[] sf)
+        {
+            (IncludeElements, IncludeAddedMass, IncludeLoads, LoadPat, sf) = o.Mass; LoadPat ??= []; sf ??= []; NumberLoads = LoadPat.Length; return 0;
+        }
         public int SetOSteel_1(string Name, double Fy, double Fu, double EFy, double EFu, int SSType, int SSHysType, double StrainAtHardening, double StrainAtMaxStress, double StrainAtRupture, double FinalSlope, double Temp = 0) => 0;
     }
 
@@ -606,19 +645,57 @@ public sealed class FakeApi
         public int SetCode(string CodeName) { _code = CodeName; return 0; }
     }
 
+    /// <summary>The other editable tables, by key: their fields and rows (the patterns' table is <see cref="Table"/>).</summary>
+    public Dictionary<string, (string[] Fields, List<string[]> Rows)> Tables { get; } = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Load Pattern Definitions - Auto Seismic - User Coefficient"] = (["Name", "IsAuto", "XDir", "XDirPlusE", "XDirMinusE", "YDir", "YDirPlusE", "YDirMinusE", "EccRatio", "TopStory", "BotStory", "OverStory", "OverDiaph", "OverEcc", "C", "K"], []),
+        ["Load Pattern Definitions - Auto Wind - ASCE 7-16"] = (["Name", "IsAuto", "Exposure", "TopStory", "BotStory", "Parapet", "ParapetHt", "UserCp", "UserCpw", "UserCpl", "ASCECase", "e1", "e2", "WindSpeed", "ExpType", "GrdElevFact", "kzt", "GustFact", "Kd", "SolidGross", "Set", "WidthType", "Angle", "Story", "Diaphragm", "Width", "Depth", "X", "Y"], []),
+        ["Functions - Response Spectrum - User Defined"] = (["Name", "Period", "Value", "DampRatio", "GUID"], []),
+    };
+    private readonly Dictionary<string, (string[] Fields, List<string[]> Rows)> _pending = new(StringComparer.OrdinalIgnoreCase);
+
     public sealed class TablesApi(FakeApi o)
     {
+        private const string Patterns = "Load Pattern Definitions";
         public int GetTableForEditingArray(string TableKey, string GroupName, ref int TableVersion, ref string[] FieldsKeysIncluded, ref int NumberRecords, ref string[] TableData)
         {
-            FieldsKeysIncluded = ["Name", "Type", "SelfWtMult"]; NumberRecords = o.Table.Count; TableData = o.Table.SelectMany(r => r).ToArray(); return 0;
+            if (TableKey == Patterns) { FieldsKeysIncluded = ["Name", "Type", "SelfWtMult"]; NumberRecords = o.Table.Count; TableData = o.Table.SelectMany(r => r).ToArray(); return 0; }
+            if (!o.Tables.TryGetValue(TableKey, out var t)) return 1;
+            FieldsKeysIncluded = t.Fields; NumberRecords = t.Rows.Count; TableData = t.Rows.SelectMany(r => r).ToArray(); return 0;
+        }
+        public int GetAllFieldsInTable(string TableKey, ref int TableVersion, ref int NumberFields, ref string[] FieldKey, ref string[] FieldName, ref string[] Description, ref string[] UnitsString, ref bool[] IsImportable)
+        {
+            FieldKey = TableKey == Patterns ? ["Name", "IsAuto", "Type", "SelfWtMult", "AutoLoad", "GUID"] : o.Tables.TryGetValue(TableKey, out var t) ? t.Fields : [];
+            NumberFields = FieldKey.Length; FieldName = FieldKey; Description = FieldKey.Select(f => "about " + f).ToArray(); UnitsString = new string[NumberFields]; IsImportable = FieldKey.Select(_ => true).ToArray(); return 0;
         }
         public int SetTableForEditingArray(string TableKey, ref int TableVersion, ref string[] FieldsKeysIncluded, int NumberRecords, ref string[] TableData)
         {
-            o.Table.Clear();
-            for (var r = 0; r < NumberRecords; r++) o.Table.Add(TableData.Skip(r * FieldsKeysIncluded.Length).Take(FieldsKeysIncluded.Length).ToArray());
+            var rows = new List<string[]>();
+            for (var r = 0; r < NumberRecords; r++) rows.Add(TableData.Skip(r * FieldsKeysIncluded.Length).Take(FieldsKeysIncluded.Length).ToArray());
+            o._pending[TableKey] = (FieldsKeysIncluded, rows);
             return 0;
         }
-        public int ApplyEditedTables(bool FillImportLog, ref int NumFatalErrors, ref int NumErrorMsgs, ref int NumWarnMsgs, ref int NumInfoMsgs, ref string ImportLog) { ImportLog = "ok"; return 0; }
+        public int CancelTableEditing() { o._pending.Clear(); return 0; }
+        public int ApplyEditedTables(bool FillImportLog, ref int NumFatalErrors, ref int NumErrorMsgs, ref int NumWarnMsgs, ref int NumInfoMsgs, ref string ImportLog)
+        {
+            foreach (var (key, (fields, rows)) in o._pending)
+            {
+                if (key == Patterns)
+                {
+                    // Only the fields the patterns' table is read with are kept, as before.
+                    o.Table.Clear();
+                    foreach (var r in rows) o.Table.Add(new[] { "Name", "Type", "SelfWtMult" }.Select(f => Array.IndexOf(fields, f) is var i and >= 0 ? r[i] : "").ToArray());
+                    continue;
+                }
+                o.Tables[key] = (fields, rows);
+                int name = Array.IndexOf(fields, "Name");
+                if (key.Contains("User Coefficient")) foreach (var r in rows) o.SeismicCodes[r[name]] = "User Coefficient";
+                if (key.StartsWith("Functions")) foreach (var g in rows.GroupBy(r => r[name]))
+                        o.Functions[g.Key] = g.Select(r => double.Parse(r[Array.IndexOf(fields, "Value")], System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+            }
+            o._pending.Clear();
+            ImportLog = "ok"; return 0;
+        }
     }
 }
 

@@ -948,11 +948,13 @@ Test("field test: the ETABS scratch model gets a lateral load its checks can rea
 });
 Test("add_load_pattern: ETABS refusing ASCE 7-16 keeps the Seismic pattern and says how to set it, not an error", () =>
 {
-    var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Tools", "EtabsTools.cs"));
-    var at = source.IndexOf("private static JsonNode AddPattern(", StringComparison.Ordinal);
-    var body = source.Substring(at, source.IndexOf("private static JsonNode SetLoads(", at, StringComparison.Ordinal) - at);
-    Check(body.Contains("if (answer != 0 && other is null) throw") && body.Contains("refusedAsce = true") && body.Contains("Modify Lateral Load"),
-        "a refused ASCE 7-16 load still fails add_load_pattern (0.4.18 field test on ETABS 23)");
+    // 0.4.18 field test on ETABS 23: no user coefficient, and ASCE 7-16 refused; the pattern is kept with a note.
+    var model = new CpmFakes.EtabsSeismic();
+    model.AutoSeismic.Refuse = true;
+    using var link = new ComEtabs(CsiProgram.Etabs, () => model);
+    var a = EtabsTools.All.First(t => t.Name == "add_load_pattern").Run(JsonDocument.Parse("""{"name":"EQX","type":"Seismic","user_coefficient":{"c":0.05,"direction":"X"}}""").RootElement, link);
+    Check(a["lateral"] is null && a["note"]!.GetValue<string>().Contains("Modify Lateral Load", StringComparison.Ordinal), a.ToJsonString());
+    Check(model.LoadPatterns.Names.Contains("EQX"), "the Seismic pattern is kept");
 });
 foreach (var (name, body) in CdtSdkTests.All()) Test(name, body);
 foreach (var (name, body) in KeptPlugInsTests.All()) Test(name, body);
@@ -1921,9 +1923,12 @@ namespace CpmFakes
 {
     public sealed class Asce716
     {
-        public string Named = ""; public bool[] Flags = [];
+        public string Named = ""; public bool[] Flags = []; public bool Refuse;
+        // ETABS 23: 0-based, X, Y, X+e, Y+e, X-e, Y-e.
+        public int SetASCE716_1(string name, ref bool[] dir, double ecc, int period, int ct, double userT, bool userZ, double top, double bottom,
+            double r, double omega, double cd, double i, double ss, double s1, double tl, int site, double fa, double fv) { if (Refuse) return 1; Named = name; Flags = dir; return 0; }
         public int SetASCE716(string name, ref bool[] dir, double ecc, int period, int ct, double userT, bool userZ, double top, double bottom,
-            double r, double omega, double cd, double i, double ss, double s1, double tl, int site, double fa, double fv) { Named = name; Flags = dir; return 0; }
+            double r, double omega, double cd, double i, double ss, double s1, double tl, int site, double fa, double fv) { if (Refuse) return 1; Named = name; Flags = dir; return 0; }
     }
     public sealed class SeismicPatterns
     {
@@ -1933,9 +1938,18 @@ namespace CpmFakes
         public int GetNameList(ref int n, ref string[] names) { n = Names.Count; names = Names.ToArray(); return 0; }
         public int GetLoadType(string name, ref int type) { type = 5; return 0; }
         public int GetSelfWTMultiplier(string name, ref double self) { self = 0; return 0; }
+        public int GetAutoSeismicCode(string name, ref string code) { code = AutoSeismic.Named == name ? "ASCE 7-16" : ""; return 0; }
+    }
+    public sealed class StoryFake
+    {
+        public int GetStories_2(ref double baseElevation, ref int n, ref string[] names, ref double[] elevations, ref double[] heights, ref bool[] master, ref string[] similar, ref bool[] splice, ref double[] spliceHeight, ref int[] color)
+        {
+            n = 2; names = ["Story1", "Story2"]; elevations = [3, 6]; heights = [3, 3]; master = [false, true]; similar = ["", ""]; splice = [false, false]; spliceHeight = [0, 0]; color = [0, 0]; return 0;
+        }
     }
     public sealed class EtabsSeismic
     {
+        public StoryFake Story { get; } = new();
         public SeismicPatterns LoadPatterns { get; } = new();
         public Asce716 AutoSeismic => LoadPatterns.AutoSeismic;
         public int GetNameList(ref int n, ref string[] names) { n = 0; names = []; return 0; }
