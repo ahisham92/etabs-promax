@@ -891,7 +891,7 @@ Test("SAP2000: its tools replace the story tools and add its own", () =>
     var addColumns = tools.First(t => t.Name == "add_columns");
     try { addColumns.Run(JsonDocument.Parse("{}").RootElement, new MemoryEtabs()); throw new Exception("no error"); }
     catch (ToolInputException ex) { Check(ex.Message.Contains("add_frames"), ex.Message); }
-    Equal(0, ProgramTools.For(CsiProgram.Etabs).Count, "ETABS has only the shared tools");
+    Check(ProgramTools.For(CsiProgram.Etabs).All(t => GeoProMaxTools.All.Contains(t)), "ETABS adds only the link with GeoProMax to the shared tools");
     var always = ProgramTools.Every.Where(t => t.Ask == Ask.Always).Select(t => t.Name).ToHashSet();
     Check(always.IsSupersetOf(["delete_joints", "run_design", "save_model_s2k"]), "always asked");
     Check(ProgramTools.Modeler.Any(t => t.Name == "save_model_s2k"), "the Modeler writes .s2k");
