@@ -44,9 +44,9 @@ public sealed class ComEtabs : ICsiLink, IDisposable
             {
                 // ETABS was closed, or is closing: attach again on the next call.
                 _model = null;
-                done.SetException(new EtabsException($"ETABS did not answer ({what}). Is ETABS still open? {ex.Message}"));
+                done.SetException(new EtabsException($"{Program.Name} did not answer ({what}). Is {Program.Name} still open? {ex.Message}"));
             }
-            catch (Exception ex) { done.SetException(new EtabsException($"ETABS could not {what}: {ex.Message}")); }
+            catch (Exception ex) { done.SetException(new EtabsException($"{Program.Name} could not {what}: {ex.Message}")); }
         });
         try { return done.Task.GetAwaiter().GetResult(); }
         catch (EtabsException) { throw; }
@@ -60,14 +60,15 @@ public sealed class ComEtabs : ICsiLink, IDisposable
     private dynamic Model()
     {
         if (_model is not null) return _model;
-        if (!OperatingSystem.IsWindows()) throw new EtabsException("ETABS runs on Windows only.");
+        var app = Program.Name;
+        if (!OperatingSystem.IsWindows()) throw new EtabsException($"{app} runs on Windows only.");
         var apiFile = EtabsApi.FindApiFile(Program, _pid);
         if (!File.Exists(apiFile))
-            throw new EtabsException("ETABS is not installed on this PC, or its API is not registered. Open ETABS once as administrator to register it.");
+            throw new EtabsException($"{app} is not installed on this PC, or its API is not registered. Open {app} once as administrator to register it.");
         // Plain COM late binding fails on ETABS 23 ("Specified cast is not valid" for SapModel), so the calls go
         // through the API's own interfaces in ETABSv1.dll, still by name.
         dynamic etabs = EtabsApi.Attach(apiFile, Program, _pid)
-            ?? throw new EtabsException(_pid is null ? "ETABS is not open. Open ETABS and a model, then try again." : "The ETABS window this was started from is closed. Start CSI ProMax again from ETABS's Tools menu.");
+            ?? throw new EtabsException(_pid is null ? $"{app} is not open. Open {app} and a model, then try again." : $"The {app} window this was started from is closed. Start CSI ProMax again from {app}'s Tools menu.");
         _model = etabs.SapModel;
         return _model!;
     }

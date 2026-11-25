@@ -84,7 +84,7 @@ public static class Program
             if (!demo && etabsPid is { } asked && !EtabsIsOpen(asked))
             {
                 if (OperatingSystem.IsWindows())
-                    MessageBoxW(IntPtr.Zero, "The ETABS window CSI ProMax was started for is closed.\n\nOpen ETABS and start CSI ProMax from its Tools menu.", "CSI ProMax", 0x40);
+                    MessageBoxW(IntPtr.Zero, $"The {program.Name} window CSI ProMax was started for is closed.\n\nOpen {program.Name} and start CSI ProMax from its Tools menu.", "CSI ProMax", 0x40);
                 return 2;
             }
             using var com = new ComEtabs(etabsPid, program);
@@ -112,7 +112,7 @@ public static class Program
                         _ = window.Dispatcher.BeginInvoke(new Action(() =>
                         {
                             // The chats are saved as they go; the window says why it closes.
-                            CsiProMax.ETABS.TaskDialog.Show("CSI ProMax", "ETABS was closed, so CSI ProMax closes too. Your chats are saved: open ETABS and start CSI ProMax from its Tools menu to carry on.");
+                            CsiProMax.ETABS.TaskDialog.Show("CSI ProMax", $"{program.Name} was closed, so CSI ProMax closes too. Your chats are saved: open {program.Name} and start CSI ProMax from its Tools menu to carry on.");
                             window.Close();
                         }));
                 });

@@ -632,6 +632,8 @@ Test("plug-in: the assistant is started with the dotnet ETABS runs on", () =>
     Directory.Delete(root, true);
 });
 
+foreach (var (name, body) in SafeTests.All()) Test(name, body);
+
 var failed = 0;
 foreach (var (name, body) in tests)
 {

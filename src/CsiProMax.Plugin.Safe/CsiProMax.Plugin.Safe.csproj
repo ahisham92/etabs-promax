@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The SAFE plug-in: the entry in SAFE's Tools menu. SAFE loads this DLL itself (Tools > Add/Show Plugins); it starts
+       the assistant that lies beside it (CsiProMax.dll, the same as for ETABS) with the PC's .NET 8. Built for .NET
+       Standard 2.0, so SAFE on .NET 8 and older SAFE on .NET Framework can both load it. No .exe anywhere. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>CsiProMaxSafePlugin</AssemblyName>
+    <RootNamespace>CsiProMaxSafePlugin</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <Version>0.4.0</Version>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <NoWarn>IDE1006;CS8981</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- The same launcher as the ETABS plug-in, compiled in, not copied. -->
+    <Compile Include="../CsiProMax.Plugin/Launcher.cs" Link="Launcher.cs" />
+    <!-- Compile against the stand-in only: inside SAFE the real SAFEv1.dll is already loaded. -->
+    <ProjectReference Include="../SafeApiStub/SafeApiStub.csproj" Private="false" />
+  </ItemGroup>
+</Project>

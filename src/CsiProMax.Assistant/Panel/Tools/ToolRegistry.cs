@@ -23,7 +23,8 @@ public sealed class ToolRegistry
     public bool IsBuiltIn(string name) => _tools.ContainsKey(name);
 
     /// <param name="modeler">True in the Modeler (no ETABS): its file, story, grid and section tools are added.</param>
-    public static ToolRegistry CreateDefault(bool modeler = false)
+    /// <param name="program">The CSI program the window works in: its own tools are added (SAFE's slab tools). Left out: ETABS.</param>
+    public static ToolRegistry CreateDefault(bool modeler = false, CsiProMax.Assistant.Etabs.CsiProgram? program = null)
     {
         var registry = new ToolRegistry(
     [
@@ -51,7 +52,9 @@ public sealed class ToolRegistry
         // The ETABS model: read, build, load, analyse (Assistant/Tools/EtabsTools).
         foreach (var tool in CsiProMax.Assistant.Tools.EtabsTools.All) registry.Add(new ModelTool(tool));
         if (modeler)
-            foreach (var tool in CsiProMax.Assistant.Tools.ModelerTools.All) registry.Add(new ModelTool(tool));
+            foreach (var tool in CsiProMax.Assistant.Tools.ModelerTools.All.Concat(CsiProMax.Assistant.Tools.ProgramTools.Modeler)) registry.Add(new ModelTool(tool));
+        else
+            foreach (var tool in CsiProMax.Assistant.Tools.ProgramTools.For(program ?? CsiProMax.Assistant.Etabs.CsiProgram.Etabs)) registry.Add(new ModelTool(tool));
         // Recipes replay other tools, so they need the registry itself.
         registry.Add(new SaveRecipeTool(registry));
         registry.Add(new RunRecipeTool(registry));
