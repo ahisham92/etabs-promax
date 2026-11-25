@@ -1074,7 +1074,8 @@ Test("link: a call made from inside another call runs at once instead of waiting
 Test("link: a call the program does not come back from is given up on, later calls say so at once, and it recovers", () =>
 {
     using var link = new ComEtabs(CsiProgram.Sap2000, () => new object()) { CallLimit = TimeSpan.FromMilliseconds(300), AnalysisLimit = TimeSpan.FromMilliseconds(600) };
-    Check(ComEtabs.IsLong("run the analysis") && ComEtabs.IsLong("start the steel frame design") && !ComEtabs.IsLong("read the joints"), "analysis and design calls get the long limit");
+    Check(ComEtabs.IsLong("run the analysis") && ComEtabs.IsLong("start the steel frame design") && ComEtabs.IsLong("open the file") && ComEtabs.IsLong("save the model") && !ComEtabs.IsLong("read the joints"), "analysis, design, open and save get the long limit");
+    Equal(TimeSpan.FromMinutes(3), new ComEtabs(CsiProgram.Sap2000, () => new object()).CallLimit, "an ordinary call's limit");
     using var release = new ManualResetEventSlim();
     var clock = System.Diagnostics.Stopwatch.StartNew();
     try { link.Raw("run the analysis", _ => { release.Wait(); return null; }); throw new Exception("the stuck call returned"); }
