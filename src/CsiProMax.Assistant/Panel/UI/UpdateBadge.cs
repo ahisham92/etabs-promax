@@ -33,6 +33,20 @@ internal static class UpdateBadge
         return ($"Up to date\n(checked {Clock(last)})", Kind.UpToDate);
     }
 
+    /// <summary>
+    /// The button at the top of the window: shown only while a newer version is known and not running yet. Its text
+    /// names that version; null when this is the newest known (no button). One click installs it and the window
+    /// switches to it by itself, with the CSI program left open.
+    /// </summary>
+    public static string? TopButton(Version current, string? latest, string? downloaded)
+    {
+        Version? Newer(string? text) => Version.TryParse(text, out var v) && Plain(v) > Plain(current) ? Plain(v) : null;
+        var out_ = Newer(latest);
+        var ready = Newer(downloaded);
+        if (out_ is null && ready is null) return null;
+        return ready is not null && (out_ is null || ready >= out_) ? $"Switch to {ready} now" : $"Update to {out_}";
+    }
+
     /// <summary>The tooltip for a badge; <paramref name="describe"/> is the updater's one-line state.</summary>
     public static string Tip(Kind kind, string version, string? lastError, DateTime? lastCheck, string describe, string? restartNote, string? working) =>
         kind switch

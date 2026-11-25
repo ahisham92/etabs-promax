@@ -441,6 +441,19 @@ static class TesterBugTests
             finally { Updater.BehindProbe = null; }
         });
 
+        yield return ("update button: at the top only while a newer version is out or downloaded, and it names that version", () =>
+        {
+            var now = new Version(0, 4, 6);
+            Equal<string?>(null, CsiProMax.UI.UpdateBadge.TopButton(now, null, null), "nothing known");
+            Equal<string?>(null, CsiProMax.UI.UpdateBadge.TopButton(now, "0.4.6", "0.4.6"), "the newest is running");
+            Equal<string?>(null, CsiProMax.UI.UpdateBadge.TopButton(now, "0.4.5", null), "an older release");
+            Equal<string?>("Update to 0.4.7", CsiProMax.UI.UpdateBadge.TopButton(now, "0.4.7", null), "a newer release that is not downloaded");
+            Equal<string?>("Switch to 0.4.7 now", CsiProMax.UI.UpdateBadge.TopButton(now, "0.4.7", "0.4.7"), "a newer release that is downloaded");
+            Equal<string?>("Update to 0.4.8", CsiProMax.UI.UpdateBadge.TopButton(now, "0.4.8", "0.4.7"), "a release newer than the download");
+            var window = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Panel/Host/MainWindow.cs"));
+            Check(window.Contains("UpdateBadge.TopButton(") && window.Contains("CsiProMax.App.SwitchWhenIdle();"), "the window has no update button that installs and switches");
+        });
+
         yield return ("second SAFE run: a newer version is started with the same arguments, once, and told what to wait for", () =>
         {
             var info = CsiProMax.Assistant.Program.Start("dotnet", "/v/0.4.5", ["--etabs-pid", "7", "--program", "SAFE", "--this-version", "--installed-in", "/old", "--after-pid", "3", "--fieldtest"], 42);
