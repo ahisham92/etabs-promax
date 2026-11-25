@@ -136,8 +136,8 @@ internal static class Shortcuts
                 {
                     dynamic link = shell.CreateShortcut(viewer);
                     link.TargetPath = dotnet;
-                    link.Arguments = ViewerArguments(AppContext.BaseDirectory);
-                    link.WorkingDirectory = AppContext.BaseDirectory;
+                    link.Arguments = ViewerArguments(ProgramFolder());
+                    link.WorkingDirectory = ProgramFolder();
                     link.WindowStyle = 7; // minimised: dotnet's own console window stays out of the way
                     link.Description = "CSI ProMax Viewer: open a review pack (.cpmx) with no ETABS"; // ETABS itself
                     if (File.Exists(icon)) link.IconLocation = icon;
