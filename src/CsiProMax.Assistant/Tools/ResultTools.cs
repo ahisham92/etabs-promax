@@ -611,7 +611,9 @@ public static class ResultTools
                 if (check["max_drift"] is { } max) results["max_drift"] = new JsonObject { ["drift"] = max.GetValue<double>(), ["story"] = check["at_story"]!.GetValue<string>(), ["case"] = check["case"]!.GetValue<string>() };
             }
         }
-        catch (EtabsException) { }
+        // The results are a part the snapshot may go without: a table a program answers with no fields (SAP2000 26 before
+        // its analysis, field test 2026-11-25) must not cost the snapshot of the model.
+        catch (Exception ex) when (ex is EtabsException or ArgumentNullException or NullReferenceException or IndexOutOfRangeException or InvalidOperationException) { }
         if (results.Count > 0) snap["results"] = results;
         return snap;
     }

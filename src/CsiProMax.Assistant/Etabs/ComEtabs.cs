@@ -161,10 +161,26 @@ public sealed class ComEtabs : ICsiLink, IDisposable
         try { m.GetVersion(ref version, ref number); } catch (Exception ex) when (ex is not COMException) { }
         int force = 0, length = 0, temperature = 0;
         try { m.GetPresentUnits_2(ref force, ref length, ref temperature); } catch (Exception ex) when (ex is not COMException) { }
+        // SAP2000 26 left all three empty here (field test, 2026-11-25): the older call, one set of units by number, then.
+        if (force <= 0 || length <= 0)
+            try { int unitsNumber = Convert.ToInt32(m.GetPresentUnits()); (force, length, temperature) = Units(unitsNumber); } catch (Exception ex) when (ex is not COMException) { }
         string file = Convert.ToString(m.GetModelFilename(true)) ?? "";
         bool locked = Convert.ToBoolean(m.GetModelIsLocked());
         return new ModelInfo(file, version, Name(Forces, force), Name(Lengths, length), Name(Temperatures, temperature), locked);
     });
+
+    /// <summary>
+    /// The force, length and temperature of the API's eUnits number (GetPresentUnits), as GetPresentUnits_2 numbers them:
+    /// 1 lb_in_F, 2 lb_ft_F, 3 kip_in_F, 4 kip_ft_F, 5 kN_mm_C, 6 kN_m_C, 7 kgf_mm_C, 8 kgf_m_C, 9 N_mm_C, 10 N_m_C,
+    /// 11 Ton_mm_C, 12 Ton_m_C, 13 kN_cm_C, 14 kgf_cm_C, 15 N_cm_C, 16 Ton_cm_C. Zeros for a number it does not know.
+    /// </summary>
+    internal static (int Force, int Length, int Temperature) Units(int units) => units switch
+    {
+        1 => (1, 1, 1), 2 => (1, 2, 1), 3 => (2, 1, 1), 4 => (2, 2, 1),
+        5 => (4, 4, 2), 6 => (4, 6, 2), 7 => (5, 4, 2), 8 => (5, 6, 2), 9 => (3, 4, 2), 10 => (3, 6, 2),
+        11 => (6, 4, 2), 12 => (6, 6, 2), 13 => (4, 5, 2), 14 => (5, 5, 2), 15 => (3, 5, 2), 16 => (6, 5, 2),
+        _ => (0, 0, 0),
+    };
 
     private static readonly string[] Forces = ["", "lb", "kip", "N", "kN", "kgf", "tonf"];
     private static readonly string[] Lengths = ["", "in", "ft", "micron", "mm", "cm", "m"];

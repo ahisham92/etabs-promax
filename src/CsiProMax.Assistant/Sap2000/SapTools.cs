@@ -872,7 +872,9 @@ public static class SapTools
         var result = new JsonObject();
         e.Raw("read the design results", m =>
         {
-            var targets = frames.Count > 0 ? frames.Select(f => (f, 0)).ToList() : [("ALL", 2)];
+            // Design summaries take eItemType (0 object, 1 group, 2 the selection), not the results' eItemTypeElm, where 2
+            // is a group: "ALL" as 2 read the selection, which is empty after a selection is cleared (field test, 2026-11-25).
+            var targets = frames.Count > 0 ? frames.Select(f => (f, 0)).ToList() : [("ALL", 1)];
             var steel = new List<(string Frame, double Ratio, string Type, string Combo, string Error)>();
             var columns = new List<(string Frame, double Ratio, double Area, string Combo, string Error)>();
             var beams = new List<(string Frame, double Top, double Bottom, double Shear, string Error)>();
