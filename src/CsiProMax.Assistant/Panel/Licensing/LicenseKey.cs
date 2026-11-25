@@ -11,10 +11,21 @@ namespace CsiProMax.Licensing;
 ///
 /// Key: "CPM1." + base64url(payload) + "." + base64url(ECDSA P-256 signature, 64 bytes), where payload is
 /// "1|id|pc code|name|issued yyyy-MM-dd|ends yyyy-MM-dd or -".
+///
+/// Since 25 Nov 2026 (the owner: one License manager for every app) CSI ProMax also takes the keys Sketch ProMax's
+/// License manager makes, signed with the same signing key: "SPM1." keys naming the apps they unlock,
+/// "2|id|SPM pc code|name|issued|ends|sketch,csi,plaxis[|library]", bound to the Sketch ProMax PC code
+/// (<see cref="SketchPcCode"/>). Sketch ProMax and Plaxis ProMax have their copies of that format: change all three.
 /// </summary>
 internal static class LicenseKey
 {
     public const string Prefix = "CPM1.";
+
+    /// <summary>Keys from Sketch ProMax's License manager (one key for every app ticked).</summary>
+    public const string SharedPrefix = "SPM1.";
+
+    /// <summary>How CSI ProMax is named in a shared key's list of apps.</summary>
+    public const string Program = "csi";
 
     /// <summary>The public half of the owner's signing key (P-256 point). The private half is never in this repository.</summary>
     internal const string PublicX = "KcVQyBbKMn5vEbN8NTrmQDqYumNep0YUvj93keOPzYk=";
@@ -45,6 +56,19 @@ internal static class LicenseKey
         return $"CPM-{s.Substring(0, 4)}-{s.Substring(4, 4)}-{s.Substring(8, 4)}";
     }
 
+    /// <summary>The PC code Sketch ProMax shows ("SPM-XXXX-XXXX-XXXX"), which shared keys are made for; "" when there is none.</summary>
+    public static string SketchPcCode(string? machineId)
+    {
+        if (string.IsNullOrWhiteSpace(machineId)) return "";
+        var hash = Sha256("SketchProMax/pc/" + machineId!.Trim().ToLowerInvariant());
+        ulong bits = 0;
+        for (var i = 0; i < 8; i++) bits = (bits << 8) | hash[i];
+        var chars = new char[12];
+        for (var i = 0; i < 12; i++) chars[i] = Alphabet[(int)((bits >> (64 - 5 * (i + 1))) & 31)];
+        var s = new string(chars);
+        return $"SPM-{s.Substring(0, 4)}-{s.Substring(4, 4)}-{s.Substring(8, 4)}";
+    }
+
     /// <summary>A typed or pasted PC code in its standard form (spaces, case, missing dashes and look-alike letters forgiven), or null.</summary>
     public static string? NormalizeCode(string? text)
     {
@@ -68,9 +92,18 @@ internal static class LicenseKey
         Array.IndexOf(OwnerHashes, Hex(Sha256("SketchProMax/owner/" + machineId!.Trim().ToLowerInvariant()))) >= 0;
 
     /// <summary>What a key says. <see cref="Ends"/> null: no end date.</summary>
-    internal sealed record License(string Id, string PcCode, string Name, DateTime Issued, DateTime? Ends);
+    /// <summary>
+    /// What a key says. <see cref="Ends"/> null: no end date. <see cref="Shared"/>: a key from Sketch ProMax's License
+    /// manager, for the apps in <see cref="Programs"/>, bound to the Sketch ProMax PC code.
+    /// </summary>
+    internal sealed record License(string Id, string PcCode, string Name, DateTime Issued, DateTime? Ends, bool Shared = false, IReadOnlyList<string>? Programs = null)
+    {
+        /// <summary>A CSI ProMax key always does; a shared key when it names CSI ProMax.</summary>
+        public bool ForCsi => !Shared || (Programs?.Contains(Program, StringComparer.Ordinal) ?? false);
+    }
 
-    internal enum Check { Valid, Expired, WrongPc, Cancelled, Invalid }
+    /// <summary><see cref="Check.OtherProgram"/>: a good key for this PC that doesn't unlock CSI ProMax.</summary>
+    internal enum Check { Valid, Expired, WrongPc, Cancelled, OtherProgram, Invalid }
 
     /// <summary>A short random id per key ("K7Q2M9XA"), so a key can be found in the list or cancelled without naming anyone.</summary>
     public static string NewId()
@@ -92,7 +125,8 @@ internal static class LicenseKey
     {
         if (key is null) return null;
         var k = new string(key.Where(c => !char.IsWhiteSpace(c)).ToArray());
-        if (!k.StartsWith(Prefix, StringComparison.Ordinal)) return null;
+        var shared = k.StartsWith(SharedPrefix, StringComparison.Ordinal);
+        if (!shared && !k.StartsWith(Prefix, StringComparison.Ordinal)) return null;
         var parts = k.Substring(Prefix.Length).Split('.');
         if (parts.Length != 2) return null;
         byte[] payload, signature;
@@ -107,7 +141,7 @@ internal static class LicenseKey
         }
         catch (CryptographicException) { return null; }
         finally { if (owned) ecdsa.Dispose(); }
-        return Parse(Encoding.UTF8.GetString(payload));
+        return shared ? ParseShared(Encoding.UTF8.GetString(payload)) : Parse(Encoding.UTF8.GetString(payload));
     }
 
     /// <summary>Whether <paramref name="key"/> unlocks the PC with <paramref name="pcCode"/> on <paramref name="today"/>.</summary>
@@ -118,6 +152,7 @@ internal static class LicenseKey
     {
         if (license is null) return Check.Invalid;
         if (!string.Equals(license.PcCode, pcCode, StringComparison.Ordinal)) return Check.WrongPc;
+        if (!license.ForCsi) return Check.OtherProgram;
         if (changes?.IsCancelled(license.Id) == true) return Check.Cancelled;
         var ends = EndsOf(license, changes);
         if (ends is { } e && today.Date > e.Date) return Check.Expired;
@@ -148,6 +183,21 @@ internal static class LicenseKey
             ends = e;
         }
         return new License(f[1], f[2], f[3], issued, ends);
+    }
+
+    /// <summary>
+    /// A key from Sketch ProMax's License manager: "1|id|pc|name|issued|ends[|library]" (Sketch ProMax only) or
+    /// "2|id|pc|name|issued|ends|apps[|library]". Null when it isn't one.
+    /// </summary>
+    private static License? ParseShared(string text)
+    {
+        var f = text.Split('|');
+        if (!(f[0] == "1" && f.Length is 6 or 7 || f[0] == "2" && f.Length is 7 or 8)) return null;
+        var basic = Parse(string.Join("|", f.Take(6).Select((x, i) => i == 0 ? "1" : x)));
+        if (basic is null) return null;
+        var programs = f[0] == "1" ? new List<string> { "sketch" }
+            : f[6].Split(',').Select(p => p.Trim()).Where(p => p.Length > 0).Distinct(StringComparer.Ordinal).ToList();
+        return programs.Count == 0 ? null : basic with { Shared = true, Programs = programs };
     }
 
     /// <summary>A name as it goes into a key: one line, no field separator.</summary>
