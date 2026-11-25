@@ -1005,6 +1005,12 @@ Test("edit_table: a SAP2000 pattern's self weight is set through the API, never 
     Check(api > 0 && import > api, "SAP2000's self weight change does not go through LoadPatterns.SetSelfWTMultiplier before the table import");
     Check(source.Contains("e.Program.Key == CsiProgram.Sap2000.Key && string.Equals(table.Key, \"Load Pattern Definitions\""), "the API route is not for SAP2000's Load Pattern Definitions");
 });
+Test("scratch window: closing may take three minutes (SAP2000 26 took over one)", () =>
+{
+    Check(CsiProMax.Assistant.ScratchProgram.CloseTimeout >= TimeSpan.FromMinutes(3), "the scratch window is given less than three minutes to close");
+    var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Field", "ScratchProgram.cs"));
+    Check(source.Contains("Ask(CloseTimeout, \"close the window\""), "closing does not wait for CloseTimeout");
+});
 foreach (var (name, body) in CdtSdkTests.All()) Test(name, body);
 foreach (var (name, body) in HandModelTests.All()) Test(name, body);
 foreach (var (name, body) in AiModeTests.All()) Test(name, body);
