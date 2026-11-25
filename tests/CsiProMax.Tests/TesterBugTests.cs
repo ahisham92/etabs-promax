@@ -789,6 +789,22 @@ static class TesterBugTests
             var tool = ProgramTools.Chat(CsiProgram.Sap2000).First(x => x.Name == "edit_table");
             Check(tool.Description.Contains("first saves the model", StringComparison.Ordinal), "edit_table's description does not say that a change saves the model");
         });
+        yield return ("edit_table asks before it saves the model, each time and at every approval level", () =>
+        {
+            // Ahmed, 2026-11-25, on whether a table edit may save his model first: "Ask me before each save".
+            Dictionary<string, System.Text.Json.JsonElement> Args(string json) => System.Text.Json.JsonDocument.Parse(json).RootElement.EnumerateObject().ToDictionary(x => x.Name, x => x.Value.Clone());
+            foreach (var action in new[] { "add", "update", "delete" })
+                foreach (var level in Enum.GetValues<CsiProMax.Tools.ApprovalLevel>())
+                {
+                    var asked = CsiProMax.Tools.ApprovalPolicy.Decide("edit_table", true, false, Args($$"""{"table":"Load Pattern Definitions","action":"{{action}}"}"""), true, new CsiProMax.Tools.ApprovalFacts(),
+                        level, new List<string> { "edit_table" }, true, _ => CsiProMax.Tools.PathState.Missing, []);
+                    Check(asked.Ask && !asked.CanSilence, $"{action} at {level} is not asked, or can be silenced");
+                    Check(asked.Reason.Contains("saves the model", StringComparison.Ordinal) && asked.Reason.Contains("Load Pattern Definitions", StringComparison.Ordinal) && asked.Reason.Contains("If you say no", StringComparison.Ordinal), "the question does not say what is saved and what no means: " + asked.Reason);
+                }
+            foreach (var action in new[] { "fields", "read" })
+                Check(CsiProMax.Tools.OutputPaths.AlwaysAskReason("edit_table", Args($$"""{"table":"Load Pattern Definitions","action":"{{action}}"}""")) is null, $"reading a table ({action}) asks about a save it does not make");
+            Check(ProgramTools.Chat(CsiProgram.Etabs).First(x => x.Name == "edit_table").Description.Contains("always asked before that save", StringComparison.Ordinal), "edit_table's description does not say the engineer is asked");
+        });
         yield return ("ETABS 23 field test: a test copy an earlier run left open is closed by the next run, and nothing else is", () =>
         {
             // Seen on 2026-11-25: the 0.4.10 run gave up on ETABS with the story picker showing; the 0.4.14 run then failed
