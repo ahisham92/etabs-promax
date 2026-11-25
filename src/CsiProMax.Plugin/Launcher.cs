@@ -49,14 +49,28 @@ internal static class Launcher
         if (!File.Exists(assistant)) throw new IOException($"CsiProMax.dll is missing from {pluginFolder}. Copy the whole CSI ProMax folder, not only the plug-in file.");
         var file = Windows ? "dotnet.exe" : "dotnet";
         var tried = (folders ?? DotnetFolders(runtimeFolder)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        var dotnet = tried.Select(f => Path.Combine(f, file)).FirstOrDefault(File.Exists)
-            ?? throw new IOException("CSI ProMax needs the .NET 8 Desktop Runtime, and it was not found on this PC (looked in " + string.Join(", ", tried) + "). " +
+        // The first dotnet that has the Desktop Runtime 8 wins: a PC can have an older dotnet in Program Files and the
+        // Desktop Runtime 8 in the user's own folder (the one-line install puts it there when the PC has none).
+        var found = tried.Where(f => File.Exists(Path.Combine(f, file))).ToList();
+        var dotnet = (found.FirstOrDefault(HasDesktopRuntime8) ?? found.FirstOrDefault()) is { } home ? Path.Combine(home, file)
+            : throw new IOException("CSI ProMax needs the .NET 8 Desktop Runtime, and it was not found on this PC (looked in " + string.Join(", ", tried) + "). " +
                                      "It is free from Microsoft: install \".NET Desktop Runtime 8\" (x64) once, then start CSI ProMax again.");
         return new ProcessStartInfo(dotnet)
         {
             UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = pluginFolder,
             Arguments = Quote(assistant) + " --etabs-pid " + pid.ToString(System.Globalization.CultureInfo.InvariantCulture) + " --program " + program.ToLowerInvariant(),
         };
+    }
+
+    /// <summary>Whether this dotnet folder holds a .NET 8 Desktop Runtime (shared\Microsoft.WindowsDesktop.App\8.x), which the window needs.</summary>
+    internal static bool HasDesktopRuntime8(string dotnetFolder)
+    {
+        try
+        {
+            var shared = Path.Combine(dotnetFolder, "shared", "Microsoft.WindowsDesktop.App");
+            return Directory.Exists(shared) && Directory.GetDirectories(shared, "8.*").Length > 0;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
     }
 
     private static string Quote(string path) => "\"" + path.TrimEnd('\\') + "\"";
