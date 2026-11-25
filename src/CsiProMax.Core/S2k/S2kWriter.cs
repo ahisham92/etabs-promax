@@ -172,6 +172,7 @@ public static class S2kWriter
         var insertion = new List<IReadOnlyList<(string, string)>>();
         var offsets = new List<IReadOnlyList<(string, string)>>();
         var frameMods = new List<IReadOnlyList<(string, string)>>();
+        var hingeRows = new List<IReadOnlyList<(string, string)>>();
         var areaMods = new List<IReadOnlyList<(string, string)>>();
         var springs = new List<IReadOnlyList<(string, string)>>();
         var springDefs = PropertyDefs.Springs(m);
@@ -193,7 +194,9 @@ public static class S2kWriter
                 frameMods.Add(Row(("Frame", name), ("AMod", N(fm["AMOD"])), ("A2Mod", N(fm["A2MOD"])), ("A3Mod", N(fm["A3MOD"])), ("JMod", N(fm["JMOD"])), ("I2Mod", N(fm["I2MOD"])), ("I3Mod", N(fm["I3MOD"])), ("MMod", N(fm["MMOD"])), ("WMod", N(fm["WMOD"]))));
             if (PropertyDefs.Value(x.Extra, "SPRINGPROP") is { } sp) notes.Add($"Frame {name} has the line spring {sp}: assign it in SAP2000 (Assign > Frame > Line Springs).");
             var hinges = PropertyDefs.HingesOf(m, x.Label, x.Story);
-            if (hinges.Count > 0) notes.Add($"Frame {name} has {hinges.Count} auto hinge(s) ({string.Join(", ", hinges.Select(h => $"{h.Dof} at {N(h.At)}"))}): assign them in SAP2000 (Assign > Frame > Hinges).");
+            // Auto hinges (SAP2000's API cannot assign hinges, so they go in by the file). The table's name and fields are
+            // checked against SAP2000's own by the field test, which lists its hinge tables when they differ.
+            foreach (var h in hinges) hingeRows.Add(Row(("Frame", name), ("RelDist", N(h.At)), ("HingeType", "Auto"), ("DOF", h.Dof)));
         }
         foreach (var x in m.AreaAssigns)
         {
@@ -237,6 +240,7 @@ public static class S2kWriter
         Add(tables, "FRAME INSERTION POINT ASSIGNMENTS", insertion);
         Add(tables, "FRAME OFFSET ALONG LENGTH ASSIGNMENTS", offsets);
         Add(tables, "FRAME PROPERTY MODIFIERS", frameMods);
+        Add(tables, "FRAME HINGE ASSIGNS 01 - OVERVIEW", hingeRows);
         Add(tables, "AREA STIFFNESS MODIFIERS", areaMods);
 
         if (diaphragms.Count > 0)

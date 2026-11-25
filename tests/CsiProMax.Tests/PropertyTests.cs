@@ -188,7 +188,7 @@ static class PropertyTests
             Check(!PropertyDefs.Links(link.Model).Exists(x => x.Name == "L-GAP"), "deleted");
         });
 
-        yield return ("properties: auto hinges go on a frame, come back from the .e2k, are noted in the .s2k, and [] takes them off", () =>
+        yield return ("properties: auto hinges go on a frame, come back from the .e2k, are written in the .s2k, and [] takes them off", () =>
         {
             var link = Frame();
             var beam = Beam(link.Model); var at = beam.LastIndexOf('@');
@@ -197,7 +197,7 @@ static class PropertyTests
             Check(back.Count == 3 && back[0] == new PropertyDefs.HingeDef(0.05, "M3") && back[2].At == 0.95, "the hinges back, in order: " + string.Join(",", back));
             var shown = Run(link, "property_definitions", new { objects = new[] { beam } });
             Check(shown["objects"]![0]!["hinges"]!.AsArray().Count == 3 && shown["hinge_dofs"]!.AsArray().Count == PropertyDefs.HingeDofs.Length, "shown in the form");
-            Check(S2kWriter.Write(link.Model, "a.s2k").Notes.Any(n => n.Contains("auto hinge")), "noted for SAP2000");
+            Check(S2kWriter.Write(link.Model, "a.s2k").Text.Contains("FRAME HINGE ASSIGNS 01 - OVERVIEW"), "written for SAP2000");
             Run(link, "assign_frame_data", new { objects = new[] { beam }, hinges = new object[] { new { at = 0.5, dof = "P-M2-M3" } } });
             Check(PropertyDefs.HingesOf(link.Model, beam[..at], beam[(at + 1)..]).Single().Dof == "P-M2-M3", "a new list replaces the old");
             Refused(link, "assign_frame_data", new { objects = new[] { beam }, hinges = new object[] { new { at = 1.2, dof = "M3" } } }, "0 to 1");
