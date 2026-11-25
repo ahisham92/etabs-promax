@@ -47,6 +47,10 @@ public static class PackTables
         "loadstemperature", "temperature", "loadsstrain", "loadsdeformation", "loadsgravity", "loadsforce", "loadsnonuniform",
         "loadsrotate", "loadsporepressure", "loadssurfacepressure", "hingeoverwrite", "assignmentshinge", "linkpropert", "springpropert",
         "assignmentsspring", "assignmentslink",
+        // SAP2000's names for the same things.
+        "springassignment", "hingeassign", "functionresponsespectrum", "functiontimehistory", "functionplotfunction",
+        "casemodalhistory", "casedirecthistory", "caseresponsespectrum", "casestatic", "sectioncuts", "sectioncutdefinition",
+        "tendonsection", "cablesection",
     ];
 
     /// <summary>"result", "input" (a design or load input shown beside the results), or null for a table not taken.</summary>
