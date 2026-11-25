@@ -1082,7 +1082,7 @@ Test("plug-in: every program from the oldest on can create it (a plain cPlugin, 
     {
         var bytes = md.GetBlobBytes(key);
         // A whole public key is told by its token: the last eight bytes of its SHA-1, backwards.
-        if (bytes.Length > 8) bytes = System.Security.Cryptography.SHA1.HashData(bytes)[^8..].Reverse().ToArray();
+        if (bytes.Length > 8) bytes = Enumerable.Reverse(System.Security.Cryptography.SHA1.HashData(bytes)[^8..]).ToArray();
         return Convert.ToHexString(bytes).ToLowerInvariant();
     }
     foreach (var (project, plugin, stub, api) in new[]
