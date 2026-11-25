@@ -200,3 +200,29 @@ static class ModelTablesTests
         });
     }
 }
+
+/// <summary>
+/// The Modeler's window in a real browser (ModelerCheck), when this machine has one: the live page behind the
+/// Modeler's own server and edit route, every File, Assign, Define, Draw and Edit item run, with the AI chat on and off.
+/// </summary>
+static class ModelerWindowTests
+{
+    static void Check(bool condition, string what) { if (!condition) throw new Exception(what); }
+
+    public static IEnumerable<(string Name, Action Body)> All()
+    {
+        foreach (var chat in new[] { true, false })
+            yield return ($"modeler window: every menu item works in a browser, {(chat ? "with the AI chat" : "without the AI")}", () =>
+            {
+                if (CsiProMax.Assistant.ViewerCheck.FindBrowser() is null) return;
+                var seen = CsiProMax.Assistant.ModelerCheck.Run(chat, Path.Combine(Path.GetTempPath(), "cpm-modeler-check"));
+                Check(seen.NotRun is null, "the browser ran: " + seen.NotRun);
+                if (Environment.GetEnvironmentVariable("CPM_SHOW_VIEWER_CHECK") == "1")
+                    foreach (var i in seen.Items) Console.WriteLine($"   {(i.Skipped ? "skip" : i.Ok ? "ok  " : "FAIL")} {i.Name}: {i.Detail}");
+                Check(seen.Items.Count(i => i.Name.StartsWith("menu: ", StringComparison.Ordinal) && i.Ok && !i.Skipped) > 30, "most menu items ran: " + seen.Items.Count(i => i.Name.StartsWith("menu: ", StringComparison.Ordinal) && !i.Skipped));
+                Check(seen.Items.All(i => i.Ok || i.Skipped), "the Modeler's window: " + string.Join("; ", seen.Items.Where(i => !i.Ok).Select(i => i.Name + ": " + i.Detail)));
+                var skipped = seen.Items.Where(i => i.Skipped && !i.Detail.Contains("a file or a printer", StringComparison.Ordinal)).Select(i => i.Name).ToList();
+                Check(skipped.Count == 0, "items left out although they could run: " + string.Join(", ", skipped));
+            });
+    }
+}

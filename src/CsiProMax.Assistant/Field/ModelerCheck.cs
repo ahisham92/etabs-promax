@@ -1,0 +1,228 @@
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using CsiProMax.Assistant.Etabs;
+using CsiProMax.Assistant.Tools;
+using CsiProMax.Bridge;
+using CsiProMax.Model;
+
+namespace CsiProMax.Assistant;
+
+/// <summary>
+/// The Modeler's window, checked as an engineer uses it: the live page is served the way the Modeler serves it (the
+/// same server, secret address and edit route, with HandModel behind it) on a scratch model of its own, and opened in a
+/// browser without a window. A script on the page fills and applies a Define form, draws a column by a click and undoes
+/// it, then runs every item of the File, Assign, Define, Draw and Edit menus: an item ending in "..." must open its form
+/// and close it again, and no item may make the page report an error. It runs with the AI chat on and off, so modelling
+/// without the AI is checked on the page too. The user's own model and its undo history are never touched.
+/// </summary>
+public static class ModelerCheck
+{
+    /// <summary>The scratch model: two bays, one way, two stories, built by the Modeler's own template.</summary>
+    public static StructuralModel Scratch() => Templates.ConcreteFrame("CPM Modeler window check", [6, 6], [5], 2, 3.0);
+
+    private static readonly string[] ModelerTables = ["Grid Definitions", "Frame Assignments - Section Properties", "Area Assignments - Section Properties", "Model Checks", "Quantities"];
+
+    /// <summary>Menu items not run: they ask the PC for a file or for a printer, which a browser without a window can't show.</summary>
+    public static readonly string[] NotRun = ["m:open", "m:xlsxIn", "print"];
+
+    public const string Script = """
+    (function () {
+      const CHAT = __CHAT__;
+      const errors = [];
+      window.addEventListener("error", e => errors.push(String(e.message || e.error || e)));
+      window.addEventListener("unhandledrejection", e => errors.push("promise: " + String(e.reason && e.reason.message || e.reason)));
+      const wait = ms => new Promise(r => setTimeout(r, ms));
+      const items = [];
+      const add = (name, ok, detail, skipped) => items.push({name, ok: !!ok, detail: String(detail == null ? "" : detail).slice(0, 400), skipped: !!skipped});
+      const dialogsOpen = () => document.querySelectorAll(".dlg").length;
+      const closeDialogs = () => document.querySelectorAll(".dlg").forEach(d => { const x = d.querySelector(".dt .x"); if (x) x.click(); else d.remove(); });
+      async function step(name, body) {
+        const before = errors.length;
+        try {
+          const said = await body();
+          const fresh = errors.slice(before);
+          if (said && said.skipped) add(name, true, said.skipped, true);
+          else if (fresh.length) add(name, false, "the page reported: " + fresh.join("; "));
+          else if (said && said.fail) add(name, false, said.fail);
+          else add(name, true, said && said.ok || "");
+        } catch (e) { add(name, false, "it threw: " + (e && e.message || e)); }
+        try { closeDialogs(); hideMenus(); if (typeof tool === "string" && tool !== "select") act("t:select"); } catch (e) { }
+        await wait(60);
+      }
+      const NOT_RUN = __NOTRUN__;
+      function flat(list, path, out) {
+        for (const it of list || []) {
+          if (!it) continue;
+          if (Array.isArray(it[1])) flat(it[1], path + " > " + it[0], out);
+          else out.push({path: path + " > " + it[0], label: it[0], act: it[1]});
+        }
+        return out;
+      }
+      // Whether an item is greyed out now (the menus are made again each time they open).
+      function offNow(a) {
+        const all = []; const m = modelerMenus(viewerMenus());
+        for (const k of Object.keys(m)) (function walk(list) { for (const it of list || []) { if (!it) continue; if (Array.isArray(it[1])) walk(it[1]); else all.push(it); } })(m[k]);
+        const hit = all.find(it => it[1] === a);
+        return !hit || !!hit[3];
+      }
+      async function run() {
+        await wait(1500);
+        await step("the Modeler page opens live on the scratch model", async () => {
+          if (!window.cpmLive) return {fail: "the page is not in live mode (no Draw, Assign or Define by hand)"};
+          if (errors.length) return {fail: "errors while opening: " + errors.join("; ")};
+          return frames.length > 0 ? {ok: `${frames.length} frames, ${areas.length} areas`} : {fail: "the page shows no frames"};
+        });
+        await step(CHAT ? "the chat tab is there (AI chat on)" : "no chat tab (AI chat off)", async () => {
+          await wait(400);
+          const b = document.querySelector('[data-tab="chat"]'), shown = !!b && !b.hidden;
+          return shown === CHAT ? {ok: shown ? "shown" : "hidden"} : {fail: shown ? "the chat tab shows with the AI off" : "the chat tab is missing with the AI on"};
+        });
+        await step("Define > Frame Sections: a section is added through the form", async () => {
+          await act("m:frameSections"); await wait(500);
+          const addNew = document.querySelector('.dlg button[data-a="0"]');
+          if (!addNew) return {fail: "the Frame Sections form has no Add button"};
+          addNew.click(); await wait(400);
+          const set = (sel, v) => { const e = document.querySelector(sel); if (!e) throw new Error("the form has no " + sel); e.value = v; e.dispatchEvent(new Event("input", {bubbles: true})); e.dispatchEvent(new Event("change", {bubbles: true})); };
+          set("#sN", "CPM-CHK450"); set("#sD", "0.45"); set("#sB", "0.3");
+          const forms = document.querySelectorAll(".dlg"); forms[forms.length - 1].querySelector(".df button.primary").click();
+          await wait(1500);
+          const defs = await hmDefs();
+          return (defs.frame_sections || []).some(s => s.name === "CPM-CHK450") ? {ok: "CPM-CHK450 is in the model"} : {fail: "the section did not reach the model: " + (hm.lastError || document.getElementById("hint").textContent)};
+        });
+        await step("Draw > Draw Columns: a column is drawn by a click, and Edit > Undo takes it back", async () => {
+          const p = panes.find(x => x.mode === "plan");
+          if (!p) return {fail: "no plan view is open"};
+          active = panes.indexOf(p);
+          const before = frames.length;
+          act("d:column"); await wait(200);
+          const z = elevationOf(p.story) ?? 0, s = p.M.to([3, 2.5, z]);
+          await drawClick(p, s[0], s[1], false); await wait(1500);
+          if (frames.length !== before + 1) return {fail: `the click made ${frames.length - before} frames, not 1: ` + document.getElementById("hint").textContent};
+          act("t:select");
+          await act("m:undo"); await wait(1500);
+          return frames.length === before ? {ok: "drawn, then undone"} : {fail: `after Undo there are ${frames.length} frames, not ${before}`};
+        });
+        // A beam and a floor selected before each item, so the items that act on a selection are on (Delete empties it).
+        const pick = () => { try { sel.clear(); const b = frames.findIndex(f => f.kind === "beam"); if (b >= 0) sel.add(b + 1); if (areas.length) sel.add(frames.length + 1); selChanged(); } catch (e) { } };
+        const menus = modelerMenus(viewerMenus()), list = [];
+        for (const name of ["File", "Assign", "Define", "Draw", "Edit"]) flat(menus[name], name, list);
+        for (const it of list) {
+          await step("menu: " + it.path, async () => {
+            if (NOT_RUN.includes(it.act)) return {skipped: "skipped: it asks the PC for a file or a printer, which a browser without a window can't show"};
+            pick();
+            if (offNow(it.act)) return {skipped: "skipped: greyed out at this point of the check"};
+            const before = dialogsOpen();
+            await act(it.act); await wait(700);
+            if (it.label.endsWith("...")) {
+              if (dialogsOpen() <= before) return {fail: "its form did not open: " + document.getElementById("hint").textContent};
+              closeDialogs(); await wait(150);
+              return dialogsOpen() === 0 ? {ok: "its form opened and closed"} : {fail: "its form did not close"};
+            }
+            return {ok: document.getElementById("hint").textContent.slice(0, 200)};
+          });
+        }
+        add("no errors on the page during the whole check", errors.length === 0, errors.slice(0, 5).join("; "));
+      }
+      run().catch(e => add("the check itself", false, String(e && e.message || e))).finally(() => {
+        const out = document.createElement("script"); out.type = "application/json"; out.id = "cpm-selfcheck";
+        out.textContent = JSON.stringify({items}).replace(/</g, "\\u003c");
+        document.body.appendChild(out); document.title = "cpm-selfcheck-done";
+      });
+    })();
+    """;
+
+    private static string PageScript(bool chat) =>
+        Script.Replace("__CHAT__", chat ? "true" : "false", StringComparison.Ordinal)
+              .Replace("__NOTRUN__", JsonSerializer.Serialize(NotRun), StringComparison.Ordinal);
+
+    /// <summary>
+    /// Serves the live Modeler page on a scratch model and checks it in <paramref name="browser"/> (Edge or Chrome when
+    /// null). <paramref name="chat"/>: the page as a window with the AI chat on serves it (a chat with nothing in it), or off.
+    /// </summary>
+    public static ViewerCheck.Result Run(bool chat, string folder, string? browser = null, int seconds = 240)
+    {
+        browser ??= ViewerCheck.FindBrowser();
+        if (browser is null) return new ViewerCheck.Result([], [], "no Edge or Chrome was found on this PC to open the Modeler's window in");
+        Directory.CreateDirectory(folder);
+        var link = new OfflineEtabs(Scratch());
+        var gate = new object();
+        var endpoint = new McpEndpoint("CSI ProMax Modeler check", "1", () => "", _ => [], (_, _, _, _) => throw new InvalidOperationException("no tools here"));
+        using var server = new McpHttpServer(endpoint);
+        server.ViewHandler = (path, query) =>
+        {
+            lock (gate)
+            {
+                var content = Pack.Build(link, ModelerTables, [], [], null, null).Content;
+                switch (path)
+                {
+                    case "":
+                        var html = Pack.LiveViewerHtml(content, link.Revision, chat).Replace("</body>", "<script>" + PageScript(chat) + "</script></body>", StringComparison.Ordinal);
+                        return (Encoding.UTF8.GetBytes(html), "text/html; charset=utf-8");
+                    case "model":
+                        if (query == "rev=" + link.Revision.ToString(System.Globalization.CultureInfo.InvariantCulture)) return ([], "application/json");
+                        return (Encoding.UTF8.GetBytes(new JsonObject { ["rev"] = link.Revision, ["pack"] = content }.ToJsonString()), "application/json");
+                    default:
+                        return null;
+                }
+            }
+        };
+        server.ViewPost = (path, body) =>
+        {
+            (byte[], string)? answer = null;
+            if (path == "edit")
+                lock (gate)
+                {
+                    using var request = JsonDocument.Parse(body);
+                    answer = (Encoding.UTF8.GetBytes(HandModel.Handle(link, request.RootElement.Clone()).ToJsonString()), "application/json");
+                }
+            else if (path == "chat")
+                answer = (Encoding.UTF8.GetBytes(chat ? """{"conv":"check","count":0,"items":[],"busy":false,"ready":true,"status":""}""" : """{"off":true}"""), "application/json");
+            return Task.FromResult(answer);
+        };
+        var profile = Path.Combine(folder, "browser profile " + Guid.NewGuid().ToString("N")[..6]);
+        try
+        {
+            HandModel.Reset();
+            server.Start();
+            var (dom, error) = ViewerCheck.Browse(browser, profile, seconds, "--dump-dom", "--virtual-time-budget=180000", "--window-size=1400,900", server.ViewUrl);
+            if (dom is null) return new ViewerCheck.Result([], [], "the browser could not be run: " + error);
+            if (ViewerCheck.Read(dom) is not { } items)
+                return new ViewerCheck.Result([new ViewerCheck.Item("the Modeler page ran its check", false, "the page did not finish its check within the time the browser gave it")], [], null);
+            return new ViewerCheck.Result(items, [], null);
+        }
+        finally
+        {
+            HandModel.Reset();
+            try { if (Directory.Exists(profile)) Directory.Delete(profile, true); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* the test's work folder says where it is */ }
+        }
+    }
+
+    /// <summary>
+    /// The field test's steps for the Modeler's window, with the AI chat on and off: each menu item and each check is a
+    /// step of its own, so a failure names the item. A PC with no usable browser records them as not tested.
+    /// </summary>
+    public static void FieldSteps(FieldContext ctx, string? browser = null)
+    {
+        foreach (var chat in new[] { true, false })
+        {
+            var label = chat ? "with the AI chat" : "without the AI";
+            ViewerCheck.Result? seen = null;
+            var ran = ctx.Step($"the Modeler's window opens on a scratch model, {label}", () =>
+            {
+                seen = Run(chat, Path.Combine(ctx.Folder, "Modeler window"), browser);
+                if (seen.NotRun is not null) throw new FieldSkipException(seen.NotRun);
+                return new { checked_items = seen.Items.Count };
+            }) is not null;
+            if (!ran || seen is null) continue;
+            foreach (var item in seen.Items)
+            {
+                var name = $"Modeler window {label}, {item.Name}";
+                if (item.Skipped) ctx.Skip(name, item.Detail.StartsWith("skipped: ", StringComparison.Ordinal) ? item.Detail["skipped: ".Length..] : item.Detail);
+                else if (item.Ok) ctx.Step(name, () => item.Detail.Length > 0 ? item.Detail : "ok");
+                else ctx.Fail(name, item.Detail);
+            }
+        }
+    }
+}

@@ -202,6 +202,7 @@ public static class ModelerFieldSteps
 
         Defining(ctx, modeler);
         Tables(ctx, modeler);
+        ModelerCheck.FieldSteps(ctx);
 
         // The checks and the quantities.
         ctx.Tool("check_model", "{}", a => FieldContext.Expect(Int(a["errors"]) == 0, "the model the test built has errors: " + a["findings"]!.ToJsonString()));
