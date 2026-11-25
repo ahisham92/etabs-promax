@@ -1,3 +1,4 @@
+using CsiProMax.Assistant;
 using System.IO;
 using System.Windows.Threading;
 using CsiProMax.Assistant.Etabs;
@@ -174,6 +175,41 @@ public static class App
 
     private static string? _offered;
 
+    /// <summary>
+    /// How the open window gives way to a downloaded version (Program sets it): the newer version is started beside the
+    /// same program window and this one closes. The CSI program itself stays open, like Sketch ProMax in Revit.
+    /// </summary>
+    internal static Action<string>? SwitchTo { get; set; }
+
+    private static int _switching;
+
+    /// <summary>
+    /// Switches this window to the newest downloaded version as soon as no work is running (a chat answering, a tool,
+    /// a test). An update is not left "downloaded" for someone to close and reopen a window: it is put to use.
+    /// </summary>
+    internal static void SwitchWhenIdle()
+    {
+        if (SwitchTo is null || Updater.NewestDownloaded(Updater.Current) is null) return;
+        if (Interlocked.Exchange(ref _switching, 1) == 1) return;
+        var stop = _life?.Token ?? CancellationToken.None;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                while (IsBusy || FieldTest.IsRunning || SelfTest.IsRunning) await Task.Delay(1000, stop).ConfigureAwait(false);
+                if (Updater.NewestDownloaded(Updater.Current) is { } folder && SwitchTo is { } go && Ui is { } ui)
+                    _ = ui.BeginInvoke(new Action(() =>
+                    {
+                        // Work that started in the last moment keeps this version; the next round tries again.
+                        if (IsBusy) { Volatile.Write(ref _switching, 0); return; }
+                        go(folder);
+                    }));
+                else Volatile.Write(ref _switching, 0);
+            }
+            catch (OperationCanceledException) { Volatile.Write(ref _switching, 0); }
+        });
+    }
+
     internal static async Task UpdateLoopAsync(CancellationToken stop)
     {
         var first = true;
@@ -195,6 +231,8 @@ public static class App
                 }
             }
             catch (Exception) { first = false; /* a failed check is retried at the next round */ }
+            // A version this or another window downloaded, and work that was running then: switched to now.
+            if (_switching == 0) SwitchWhenIdle();
             try { await Task.Delay(LoopTick, stop).ConfigureAwait(false); }
             catch (OperationCanceledException) { return; }
         }
@@ -234,6 +272,7 @@ public static class App
             };
         try { await Updater.CheckAsync(force, progress, stop, install).ConfigureAwait(false); }
         finally { await SyncBugLogAsync(stop).ConfigureAwait(false); }
+        SwitchWhenIdle();
     }
 
     private static async Task SyncBugLogAsync(CancellationToken stop)

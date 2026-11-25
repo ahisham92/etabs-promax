@@ -12,7 +12,7 @@ internal static class RestartNote
 
     /// <summary>The note, or null when this is the newest version on this PC.</summary>
     public static string? Text => Updater.Staged is { } staged
-        ? $"CSI ProMax {staged} is downloaded. Close this window and open CSI ProMax again from {Csi.Name}'s Tools menu to use it."
+        ? $"This window runs CSI ProMax {Updater.CurrentText}. {staged} is downloaded: the window switches to it by itself as soon as no work is running ({Csi.Name} stays open)."
         : null;
 
     /// <summary>An update was just downloaded (or the check found nothing new): show or clear the note.</summary>

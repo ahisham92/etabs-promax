@@ -320,6 +320,7 @@ public static class FieldTest
                 ? "- Changes to the model: a test column, a slab, the load pattern CPM-TEST, loads and the combination CPM-TEST-COMBO were added; the column and the slab were deleted again"
                 : "- Changes to the model: none (reading only)");
         sb.AppendLine($"- CSI ProMax: {Update.Updater.CurrentText}, in {o.InstallFolder ?? AppContext.BaseDirectory}");
+        if (Update.Updater.Behind() is { } behind) sb.AppendLine("- NOT THE NEWEST VERSION: " + behind);
         sb.AppendLine("- " + ProgramLine(link));
         // Only the plug-in passes --etabs-pid, so this says whether the Tools menu entry works on this PC.
         sb.AppendLine(Environment.GetCommandLineArgs().Contains("--etabs-pid")
