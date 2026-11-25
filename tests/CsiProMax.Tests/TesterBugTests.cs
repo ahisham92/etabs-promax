@@ -529,6 +529,13 @@ static class TesterBugTests
             Check(bad.Count == 0, "these update texts tell the user to restart or reopen the program: " + string.Join(", ", bad));
         });
 
+        yield return ("update: looked for within seconds of opening the window, so close and open updates", () =>
+        {
+            Check(CsiProMax.App.UpdateDelay <= TimeSpan.FromSeconds(5), $"the first update check waits {CsiProMax.App.UpdateDelay.TotalSeconds:0} s after the window opens");
+            var app = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Panel/Host/App.cs"));
+            Check(app.IndexOf("Task.Delay(UpdateDelay, stop)", StringComparison.Ordinal) is var first and > 0 && first < app.IndexOf("Task.Delay(BackgroundDelay, stop)", StringComparison.Ordinal), "the update check waits for the other background work again");
+        });
+
         yield return ("update: the file list refuses paths outside the package, and the changed zip can never be taken for the whole package", () =>
         {
             foreach (var bad in new[] { "../x.dll", "/x.dll", "a/../../x.dll", "C:/x.dll", "a\\b.dll", "" })
