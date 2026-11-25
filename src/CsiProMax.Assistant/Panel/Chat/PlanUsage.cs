@@ -149,20 +149,21 @@ internal sealed class PlanUsage
     /// </summary>
     public string Meter(DateTimeOffset now, bool timeLeft, bool narrow)
     {
-        var parts = new List<string>();
-        foreach (var key in new[] { FiveHour, Weekly })
-            if (Windows.FirstOrDefault(w => w.Key == key) is { } w)
-                parts.Add(Part(w, now, timeLeft, narrow));
-        if (parts.Count == 0 && Windows.FirstOrDefault() is { } first)
-            parts.Add(Part(first, now, timeLeft, narrow));
-        return string.Join(" · ", parts);
+        var shown = new[] { FiveHour, Weekly }.Select(key => Windows.FirstOrDefault(w => w.Key == key)).OfType<UsageWindow>().ToList();
+        if (shown.Count == 0 && Windows.FirstOrDefault() is { } first) shown.Add(first);
+        // Every limit shown has reset since the last answer: say that in words, not a bare "Week reset".
+        if (shown.Count > 0 && shown.All(w => HasReset(w, now))) return narrow ? "limit reset" : AllReset;
+        return string.Join(" · ", shown.Select(w => Part(w, now, timeLeft, narrow)));
     }
+
+    /// <summary>The meter's words when every limit it shows has reset since the last answer.</summary>
+    public const string AllReset = "limit has reset · the new figures show after the next answer";
 
     private static string Part(UsageWindow w, DateTimeOffset now, bool timeLeft, bool narrow)
     {
         var name = narrow && w.Key == Weekly ? "Wk" : Short(w.Key);
         if (HasReset(w, now)) return name + " reset";
-        var text = name + " " + (w.Used is { } used ? Percent(used) : "—");
+        var text = name + " " + (w.Used is { } used ? Percent(used) : narrow ? "—" : "no figure yet");
         if (timeLeft && w.Key == FiveHour && w.ResetsAt is { } at) text += ", " + Left(at - now) + " left";
         return text;
     }

@@ -632,6 +632,18 @@ static class TesterBugTests
             Equal(said.Count, File.ReadAllLines(Path.Combine(folder, "work", FieldContext.LiveFile)).Length, "lines in the work folder's live file");
         });
 
+        yield return ("usage line: a limit that reset since the last answer is said in words, never a bare 'Week reset'", () =>
+        {
+            var now = DateTimeOffset.FromUnixTimeSeconds(1795620000);
+            var past = now.AddHours(-3).ToUnixTimeSeconds();
+            var old = CsiProMax.Chat.PlanUsage.ParseLine("{\"type\":\"rate_limit_event\",\"rate_limit_info\":{\"status\":\"allowed\",\"rateLimitType\":\"seven_day\",\"resetsAt\":" + past + "}}", now.AddDays(-1))!;
+            Equal(CsiProMax.Chat.PlanUsage.AllReset, old.Meter(now, timeLeft: true, narrow: false), "all reset");
+            Check(!old.Meter(now).Contains("Week reset"), "the line still reads 'Week reset'");
+            var fresh = CsiProMax.Chat.PlanUsage.ParseLine("{\"type\":\"rate_limit_event\",\"rate_limit_info\":{\"status\":\"allowed\",\"rateLimitType\":\"five_hour\",\"resetsAt\":" + now.AddHours(2).ToUnixTimeSeconds() + ",\"unifiedWindows\":{\"five_hour\":{\"utilization\":0.43,\"resetsAt\":" + now.AddHours(2).ToUnixTimeSeconds() + "},\"seven_day\":{\"utilization\":0.05,\"resetsAt\":" + now.AddDays(3).ToUnixTimeSeconds() + "}}}}", now)!;
+            Equal("5h 43%, 2h 0m left · Week 5%", CsiProMax.Chat.PlanUsage.Merge(old, fresh).Meter(now), "fresh figures");
+            var bare = CsiProMax.Chat.PlanUsage.ParseLine("{\"type\":\"rate_limit_event\",\"rate_limit_info\":{\"status\":\"allowed\",\"rateLimitType\":\"seven_day\",\"resetsAt\":" + now.AddDays(3).ToUnixTimeSeconds() + "}}", now)!;
+            Equal("Week no figure yet", bare.Meter(now), "no figure");
+        });
         yield return ("ETABS 20 tester: the field test tries what Tools > CSI ProMax does in each program, and fails where the plug-in cannot be created", () =>
         {
             // What the check answered on that PC (in its own words), and a PC where all is well.
