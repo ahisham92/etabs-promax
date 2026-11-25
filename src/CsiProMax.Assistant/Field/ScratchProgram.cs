@@ -57,6 +57,18 @@ public static class ScratchDialogs
         return closed;
     }
 
+    /// <summary>What Windows says of a window: " (cannot be clicked: another window of the program holds it)", " (not answering)", or nothing.</summary>
+    public static string State(IntPtr window)
+    {
+        if (!OperatingSystem.IsWindows()) return "";
+        var said = new List<string>();
+        if (!IsWindowEnabled(window)) said.Add("cannot be clicked: the program has it disabled");
+        if (IsHungAppWindow(window)) said.Add("not answering");
+        return said.Count == 0 ? "" : " (" + string.Join(", ", said) + ")";
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool IsWindowEnabled(IntPtr window);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool IsHungAppWindow(IntPtr window);
     private delegate bool Each(IntPtr window, IntPtr data);
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool EnumWindows(Each each, IntPtr data);
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
@@ -91,9 +103,9 @@ public sealed class ScratchProgram : IScratchWindow
     private Timer? _watch;
     private readonly List<string> _noticesClosed = [];
 
-    /// <summary>The titles of the windows the scratch program has open now, the main one left out.</summary>
+    /// <summary>The titles of the windows the scratch program has open now, each with whether it can be clicked and whether it answers.</summary>
     public IReadOnlyList<string> OpenWindows() =>
-        ScratchDialogs.Of(ProcessId).Select(w => w.Title).Where(t => !t.Contains("cpm-field-test", StringComparison.OrdinalIgnoreCase) || ScratchDialogs.MayClose(t)).ToList();
+        ScratchDialogs.Of(ProcessId).Select(w => w.Title + ScratchDialogs.State(w.Window)).ToList();
 
     public ICsiLink Link { get; private set; } = null!;
 
