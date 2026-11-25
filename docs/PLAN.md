@@ -1,4 +1,4 @@
-# ETABS ProMax: plan
+# CSI ProMax: plan
 
 Decided with Ahmed on 25 Nov 2026. The longer write-up, with the tool list per phase, is the project's plan document.
 
@@ -11,15 +11,15 @@ Sketch ProMax rebuilt for ETABS: one shared core, three front doors.
                                |  MCP tools, the same set for all three
         +----------------------+-----------------------+--------------------------+
         |                      |                       |
-  ETABS ProMax for ETABS   ETABS ProMax Modeler    ETABS ProMax Viewer
-  host + pane + plugin     our own model editor    opens .epmx packs
+  CSI ProMax for ETABS   CSI ProMax Modeler    CSI ProMax Viewer
+  host + pane + plugin     our own model editor    opens .cpmx packs
   needs licensed ETABS     no ETABS license        reviewer needs no ETABS
         |                      |                       ^
-        | CSI API, live        | saves .e2k            | .epmx: model + results
+        | CSI API, live        | saves .e2k            | .cpmx: model + results
         v                      v                       |
                  Licensed ETABS 23 (existing install) -+
 
-  Shared core (this repository today): model, .e2k reader/writer, .epm, checks, quantities
+  Shared core (this repository today): model, .e2k reader/writer, .cpm, checks, quantities
 ```
 
 ## Decisions
@@ -38,7 +38,7 @@ Each ends with something to try, and the next starts after it has been tried.
 1. **Foundation** (in progress). Shared core, .e2k reader and writer. Gate: ETABS 23 imports our .e2k with no warnings, and three real models exported from ETABS read and write back unchanged.
 2. **Assistant in ETABS.** Host, plugin, pane, chat; context, tables, modeling, loading and run tools; run-ETABS-code; recipes and learned tools. Gate: Claude builds and runs a small frame building in ETABS from a chat.
 3. **Results and checks.** Results tools, drift, torsion and irregularity checks, design ratios, snapshots and compare, self-test. Gate: a check report on a live project that Ahmed agrees with.
-4. **Pack and Viewer.** export_pack, the .epmx format, the Viewer with model, deformed shapes, force diagrams, contours, tables and review comments. Gate: a colleague without ETABS reviews a real model with it.
+4. **Pack and Viewer.** export_pack, the .cpmx format, the Viewer with model, deformed shapes, force diagrams, contours, tables and review comments. Gate: a colleague without ETABS reviews a real model with it.
 5. **Standalone Modeler.** Editing UI on the Viewer's 3D engine, the same Claude tools on the offline model, save to .e2k. Gate: a model drawn with no ETABS open imports and runs cleanly in ETABS.
 
 ## The core's model

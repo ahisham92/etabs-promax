@@ -1,0 +1,64 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{552E2993-9393-4A6A-B267-2AB8266F3952}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CsiProMax.Core", "src\CsiProMax.Core\CsiProMax.Core.csproj", "{ED389592-5347-4B19-BC7B-521EF17C94E7}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CsiProMax.Cli", "src\CsiProMax.Cli\CsiProMax.Cli.csproj", "{43C7170E-E499-4388-9C3E-8B008990DA48}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{687E1391-91AF-4070-9CB0-54AAEEB0BC3D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CsiProMax.Tests", "tests\CsiProMax.Tests\CsiProMax.Tests.csproj", "{BEBA0808-6BCF-4C8A-9BA2-5D2B4FB7DDCD}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CsiProMax.Assistant", "src\CsiProMax.Assistant\CsiProMax.Assistant.csproj", "{123D0A3B-D3B3-42B9-8EFD-967146C58784}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EtabsApiStub", "src\EtabsApiStub\EtabsApiStub.csproj", "{F3A804F6-B9E8-4604-8012-8C41BE6FCC80}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CsiProMax.Plugin", "src\CsiProMax.Plugin\CsiProMax.Plugin.csproj", "{295CE069-F6E4-445F-BF81-9324C1C05C6B}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{ED389592-5347-4B19-BC7B-521EF17C94E7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{ED389592-5347-4B19-BC7B-521EF17C94E7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{ED389592-5347-4B19-BC7B-521EF17C94E7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{ED389592-5347-4B19-BC7B-521EF17C94E7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{43C7170E-E499-4388-9C3E-8B008990DA48}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{43C7170E-E499-4388-9C3E-8B008990DA48}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{43C7170E-E499-4388-9C3E-8B008990DA48}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{43C7170E-E499-4388-9C3E-8B008990DA48}.Release|Any CPU.Build.0 = Release|Any CPU
+		{BEBA0808-6BCF-4C8A-9BA2-5D2B4FB7DDCD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BEBA0808-6BCF-4C8A-9BA2-5D2B4FB7DDCD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{BEBA0808-6BCF-4C8A-9BA2-5D2B4FB7DDCD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{BEBA0808-6BCF-4C8A-9BA2-5D2B4FB7DDCD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{123D0A3B-D3B3-42B9-8EFD-967146C58784}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{123D0A3B-D3B3-42B9-8EFD-967146C58784}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{123D0A3B-D3B3-42B9-8EFD-967146C58784}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{123D0A3B-D3B3-42B9-8EFD-967146C58784}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F3A804F6-B9E8-4604-8012-8C41BE6FCC80}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F3A804F6-B9E8-4604-8012-8C41BE6FCC80}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F3A804F6-B9E8-4604-8012-8C41BE6FCC80}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F3A804F6-B9E8-4604-8012-8C41BE6FCC80}.Release|Any CPU.Build.0 = Release|Any CPU
+		{295CE069-F6E4-445F-BF81-9324C1C05C6B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{295CE069-F6E4-445F-BF81-9324C1C05C6B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{295CE069-F6E4-445F-BF81-9324C1C05C6B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{295CE069-F6E4-445F-BF81-9324C1C05C6B}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{ED389592-5347-4B19-BC7B-521EF17C94E7} = {552E2993-9393-4A6A-B267-2AB8266F3952}
+		{43C7170E-E499-4388-9C3E-8B008990DA48} = {552E2993-9393-4A6A-B267-2AB8266F3952}
+		{BEBA0808-6BCF-4C8A-9BA2-5D2B4FB7DDCD} = {687E1391-91AF-4070-9CB0-54AAEEB0BC3D}
+		{123D0A3B-D3B3-42B9-8EFD-967146C58784} = {552E2993-9393-4A6A-B267-2AB8266F3952}
+		{F3A804F6-B9E8-4604-8012-8C41BE6FCC80} = {552E2993-9393-4A6A-B267-2AB8266F3952}
+		{295CE069-F6E4-445F-BF81-9324C1C05C6B} = {552E2993-9393-4A6A-B267-2AB8266F3952}
+	EndGlobalSection
+EndGlobal

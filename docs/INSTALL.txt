@@ -1,12 +1,24 @@
-ETABS ProMax: first install
+CSI ProMax: first install
 
-Nothing here is an .exe and nothing needs administrator rights. It runs on the .NET 8 that ETABS 23 itself uses.
+Nothing here is an .exe and nothing needs administrator rights for ETABS 23.
 
-1. Copy the "dist" folder from this zip to your Documents folder and rename it "ETABS ProMax".
-2. In ETABS: Tools > Add/Show Plugins. Browse to Documents\ETABS ProMax\EtabsProMaxPlugin.dll and add it with the
-   menu text "ETABS ProMax".
-3. Open a model, then Tools > ETABS ProMax. The window opens beside ETABS.
+ETABS 23
+1. Copy the "dist" folder from this zip to your Documents folder and rename it "CSI ProMax".
+2. In ETABS: Tools > Add/Show Plugins. Browse to Documents\CSI ProMax\CsiProMaxPlugin.dll and add it with the
+   menu text "CSI ProMax".
+3. Open a model, then Tools > CSI ProMax. The window opens beside ETABS.
+
+Older ETABS (18 to 22). Not yet confirmed on these versions: please report what happens.
+1. Install Microsoft's ".NET Desktop Runtime 8" (x64) once. It is free:
+   https://dotnet.microsoft.com/download/dotnet/8.0  (choose ".NET Desktop Runtime", Windows x64).
+   ETABS 23 brings .NET 8 with it; older ETABS does not, and CSI ProMax's window needs it.
+2. Then the three steps above.
+If the window does not open, CSI ProMax shows a message that says what is missing.
 
 The chat runs on Claude Code on your own Claude plan. The window offers to install it or sign in when needed.
-Later versions download by themselves (ETABS ProMax > Check for updates). ETABS must be open and licensed on this PC:
-ETABS ProMax never starts, unlocks or stands in for ETABS.
+A PC other than the owner's needs a licence key: the Licence window shows this PC's code (CPM-....); send it to the
+owner and paste the key you get back.
+Later versions download by themselves (CSI ProMax > Check for updates). The CSI program must be open and licensed on
+this PC: CSI ProMax never starts, unlocks or stands in for it.
+
+The Modeler (no ETABS needed): in the window, View > Put a Modeler shortcut on the desktop.

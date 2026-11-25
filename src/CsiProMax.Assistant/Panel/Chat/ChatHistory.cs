@@ -1,0 +1,250 @@
+using System.Text;
+using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
+
+namespace CsiProMax.Chat;
+
+/// <summary>One line of a saved conversation, as the pane shows it.</summary>
+internal sealed class ChatItem
+{
+    /// <summary>user, assistant, tool, note, error, brief, job or pjob (a parallel job's card: Name is the job's number).</summary>
+    public string Kind { get; set; } = "";
+    public string Text { get; set; } = "";
+    /// <summary>Tools: the short tool name. User: attachment names.</summary>
+    public string Name { get; set; } = "";
+    /// <summary>Tools: running, done or failed. Briefs: pending, run, edited, typed, stale or failed.</summary>
+    public string State { get; set; } = "";
+    /// <summary>When it was added (UTC); default for items saved before 0.31, which then show no time.</summary>
+    public DateTime Time { get; set; }
+    /// <summary>Tools: the input, indented JSON (shortened), for the step's details.</summary>
+    public string Input { get; set; } = "";
+    /// <summary>Tools: the start of the result, for the step's details and its element ids.</summary>
+    public string Result { get; set; } = "";
+    /// <summary>User: the full paths of the attached files, for thumbnails.</summary>
+    public List<string> Files { get; set; } = [];
+    /// <summary>Briefs: the PromptBrief as JSON, with the one-tap answers.</summary>
+    public string Brief { get; set; } = "";
+    /// <summary>Jobs: the live job card (JobCardModel) as JSON: its steps, how each ended, and the summary.</summary>
+    public string Job { get; set; } = "";
+}
+
+/// <summary>A saved conversation: the Claude Code session to resume and what the pane showed.</summary>
+internal sealed class Conversation
+{
+    /// <summary>The model it belongs to (ChatPane.ModelKey).</summary>
+    public string Key { get; set; } = "";
+    /// <summary>The model's title.</summary>
+    public string Title { get; set; } = "";
+    /// <summary>The other models it (or its jobs) worked on, by title: a documentation model in another ETABS window, say.</summary>
+    public List<string> Models { get; set; } = [];
+    /// <summary>This chat among the model's chats; empty in a file saved before 0.31 (one chat per model).</summary>
+    public string Id { get; set; } = "";
+    /// <summary>The chat's name: made from the first request, or what the user renamed it to.</summary>
+    public string Name { get; set; } = "";
+    public bool Pinned { get; set; }
+    public string SessionId { get; set; } = "";
+    public DateTime Updated { get; set; }
+    public List<ChatItem> Items { get; set; } = [];
+    /// <summary>What this chat remembered (ChatRecall): a few Markdown bullets that later chats start with; "" until written.</summary>
+    public string Recall { get; set; } = "";
+    /// <summary>How many items the chat had when <see cref="Recall"/> was written, so only a chat with new messages is summarised again.</summary>
+    public int RecallCount { get; set; }
+    /// <summary>The least any request of this chat sent to Claude (tokens): what the chat costs empty, so it shrinks on growth.</summary>
+    public long ContextFloor { get; set; }
+    /// <summary>
+    /// What this chat's Claude Code session carries as attachments, sent with every message: raw bytes of PDFs and
+    /// pictures, and PDF pages (PdfAttachment's limits). <see cref="AttachedSession"/> is the session they were counted
+    /// for ("" while it had no id yet); a shrink empties them.
+    /// </summary>
+    public long AttachedBytes { get; set; }
+    public int AttachedPages { get; set; }
+    public string AttachedSession { get; set; } = "";
+    /// <summary>The chat's parallel jobs (JobBoard): each its own hidden session, shown as a card ("pjob" item) in the chat.</summary>
+    public List<ChatJob> Jobs { get; set; } = [];
+    /// <summary>The Questions tab's questions (ChatQuestions): numbered, answered ones leave the tab but stay here.</summary>
+    public List<UserAsk> Questions { get; set; } = [];
+    /// <summary>
+    /// What kind of chat it is (<see cref="ChatTypes"/>): "coordinator" (it hands work to parallel jobs) or "simple" (it
+    /// does everything itself). "" in a chat saved before 0.34.33: <see cref="ChatTypes.Of"/> decides.
+    /// </summary>
+    public string Type { get; set; } = "";
+    /// <summary>
+    /// The chat's model (ChatAuto): "auto" picks one per request and per job by the kind of work; an alias (haiku,
+    /// sonnet, opus, fable) picked by hand sticks for this chat and its new jobs. "" (saved before the pickers) is auto.
+    /// </summary>
+    public string Model { get; set; } = "";
+    /// <summary>The chat's effort (ChatAuto): "auto", or a level picked by hand that sticks. "" is auto.</summary>
+    public string Effort { get; set; } = "";
+    /// <summary>An autopilot chat's run (Autopilot): its goal, plan, state and log; null in any other chat.</summary>
+    public AutopilotRun? Autopilot { get; set; }
+    /// <summary>A Simple chat: the worker's desk it talks to directly (CrewStats.NextWorker); -1 until its first request.</summary>
+    public int Worker { get; set; } = -1;
+    /// <summary>The advice already given in this chat (DirectAdvice: overloaded, mixed, several), so each shows once.</summary>
+    public List<string> Advised { get; set; } = [];
+
+    /// <summary>The file it was read from (not saved).</summary>
+    [JsonIgnore] public string File { get; set; } = "";
+    /// <summary>The messages as last read or saved (not saved): a save moves <see cref="Updated"/> only when they changed.</summary>
+    [JsonIgnore] public string? SavedItems { get; set; }
+    /// <summary>The whole chat as last read or saved (not saved): an unchanged chat isn't written again.</summary>
+    [JsonIgnore] public string? SavedJson { get; set; }
+}
+
+/// <summary>A saved chat as the history drawer lists it, without its messages.</summary>
+internal sealed record ChatSummary(string File, string Key, string ModelTitle, string Name, bool Pinned, DateTime Updated, int Count, string Search, string Type = ChatTypes.Simple);
+
+/// <summary>
+/// The two kinds of chat. With coordinator: the chat can split work into parallel jobs (chat_jobs), each with its own
+/// view. Simple chat: one chat does everything itself, as before jobs existed; it never gets chat_jobs or the
+/// coordinator's instructions. Each chat keeps its kind; it can be switched while none of its jobs is open.
+/// </summary>
+internal static class ChatTypes
+{
+    public const string Coordinator = "coordinator", Simple = "simple";
+    public static readonly string[] All = [Coordinator, Simple];
+
+    /// <summary>
+    /// The chat's kind. A chat saved before kinds existed is a Simple chat (how chats worked until jobs came), unless it
+    /// already has jobs: then it stays With coordinator, so its jobs keep working.
+    /// </summary>
+    public static string Of(Conversation conv) =>
+        conv.Type is Coordinator or Simple ? conv.Type : conv.Jobs is { Count: > 0 } ? Coordinator : Simple;
+
+    /// <summary>A stored kind (the Settings default); anything unknown is With coordinator.</summary>
+    public static string Parse(string? type) => type == Simple ? Simple : Coordinator;
+
+    /// <summary>The kind's name as the pane shows it.</summary>
+    public static string Label(string type) => type == Simple ? "Simple chat" : "With coordinator";
+
+    /// <summary>One line on what the kind does.</summary>
+    public static string Hint(string type) => type == Simple
+        ? "One chat does all the work itself, step by step"
+        : "Splits bigger requests into jobs that work side by side; open a job to chat with it";
+
+    /// <summary>Why the chat's kind can't be switched now, or null when it can.</summary>
+    public static string? WhyNotSwitch(bool jobsOpen, bool answering) =>
+        jobsOpen ? "Jobs are still open in this chat. Stop them or wait until they finish, then switch."
+        : answering ? "CSI ProMax is still answering. Wait for it (or press Stop), then switch."
+        : null;
+}
+
+/// <summary>
+/// Which chats belong to an open model (ChatPane.ModelKey), so the history shows that model's chats and no other's. A
+/// workshared model's chats are its central model's: the central opened itself and every local copy of it share them. A
+/// saved model's are its file's. A model never saved (a new project, a detached copy) has chats of its own for as long
+/// as it is open, never those of another unsaved model with the same name ("Project1", "Tower_detached"); saving it
+/// takes them along to its file (ChatPane's Save As).
+/// </summary>
+internal static class ChatModelKeys
+{
+    public const string UnsavedPrefix = "unsaved:";
+
+    /// <param name="path">The model's file (Document.PathName; "" when never saved).</param>
+    /// <param name="central">The central model's path of a workshared model, else null.</param>
+    /// <param name="detached">A model detached from its central (it no longer belongs to it).</param>
+    /// <param name="unsavedId">Unique for this open, never-saved model.</param>
+    public static string For(string? path, string title, string? central, bool detached, string unsavedId)
+    {
+        if (!detached && !string.IsNullOrEmpty(central)) return central!;
+        if (!string.IsNullOrEmpty(path)) return path!;
+        return UnsavedPrefix + unsavedId + ":" + title;
+    }
+
+    public static bool IsUnsaved(string key) => key.StartsWith(UnsavedPrefix, StringComparison.Ordinal);
+
+    /// <summary>
+    /// The key this model's chats were kept under before 0.35.34 (its file, for a local copy of a central model), when it
+    /// differs from <paramref name="key"/>: they move to the central's key. Null when nothing moves.
+    /// </summary>
+    public static string? Legacy(string? path, string key) =>
+        !string.IsNullOrEmpty(path) && !IsUnsaved(key) && !string.Equals(path, key, StringComparison.OrdinalIgnoreCase) ? path : null;
+}
+
+/// <summary>
+/// The history drawer's rules, which need no WPF: chat names from the first request, the date groups, search, and the
+/// order (pinned first, then by date; the open model's chats first or only).
+/// </summary>
+internal static class ChatHistory
+{
+    public const string PinnedGroup = "Pinned", Week = "Last 7 days", Month = "Last 30 days", Older = "Older";
+    public static readonly string[] Groups = [PinnedGroup, Week, Month, Older];
+
+    private static readonly Regex Space = new(@"\s+", RegexOptions.CultureInvariant);
+    private static readonly Regex Markup = new(@"[`*_#>\[\]]+", RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// A chat's name from its first request: the first line, without Markdown marks, at most <paramref name="max"/>
+    /// characters, cut at a word. "New chat" when there is no text.
+    /// </summary>
+    public static string AutoTitle(string? request, int max = 48)
+    {
+        var line = (request ?? "").Replace("\r", "").Split('\n').Select(l => l.Trim()).FirstOrDefault(l => l.Length > 0) ?? "";
+        line = Space.Replace(Markup.Replace(line, ""), " ").Trim().TrimEnd('.', ':', ';', ',');
+        if (line.Length == 0) return "New chat";
+        if (line.Length <= max) return char.ToUpperInvariant(line[0]) + line.Substring(1);
+        var cut = line.LastIndexOf(' ', max - 1);
+        line = line.Substring(0, cut > max / 2 ? cut : max - 1).TrimEnd(' ', ',', ';', ':', '-');
+        return char.ToUpperInvariant(line[0]) + line.Substring(1) + "…";
+    }
+
+    /// <summary>
+    /// The name a chat keeps: its own, else one made from its first request, else "" while it has none yet. A chat saved
+    /// before its first request (a coordinator chat's session starts first) stays unnamed, so that request names it; one
+    /// an earlier version saved as "New chat" that way is named from its first request too.
+    /// </summary>
+    public static string NameFor(Conversation conv)
+    {
+        if (conv.Name.Length > 0 && conv.Name != Untitled) return conv.Name;
+        return conv.Items.FirstOrDefault(i => i.Kind == "user" && (i.Text.Trim().Length > 0 || i.Name.Length > 0)) is { } first
+            ? AutoTitle(first.Text.Trim().Length > 0 ? first.Text : first.Name) : "";
+    }
+
+    /// <summary>What an unnamed chat is called.</summary>
+    public const string Untitled = "New chat";
+
+    /// <summary>The date group of a chat last updated at <paramref name="updatedLocal"/>.</summary>
+    public static string GroupOf(DateTime updatedLocal, DateTime nowLocal)
+    {
+        var days = (nowLocal.Date - updatedLocal.Date).TotalDays;
+        return days < 7 ? Week : days < 30 ? Month : Older;
+    }
+
+    /// <summary>True when every word of <paramref name="query"/> is in the chat's name, model or messages (any case).</summary>
+    public static bool Matches(ChatSummary chat, string? query)
+    {
+        var words = Space.Split((query ?? "").Trim()).Where(w => w.Length > 0).ToList();
+        if (words.Count == 0) return true;
+        var hay = chat.Name + "\n" + chat.ModelTitle + "\n" + chat.Search;
+        return words.All(w => hay.IndexOf(w, StringComparison.OrdinalIgnoreCase) >= 0);
+    }
+
+    /// <summary>
+    /// The drawer's sections in order (Pinned, Last 7 days, Last 30 days, Older; empty ones left out), each newest first.
+    /// With <paramref name="allModels"/> off only <paramref name="modelKey"/>'s chats are listed; with it on, that model's
+    /// chats come first in each section.
+    /// </summary>
+    public static List<(string Group, List<ChatSummary> Chats)> Arrange(IEnumerable<ChatSummary> chats, string modelKey, bool allModels, string? query, DateTime nowLocal)
+    {
+        bool Mine(ChatSummary c) => string.Equals(c.Key, modelKey, StringComparison.OrdinalIgnoreCase);
+        var shown = chats.Where(c => (allModels || Mine(c)) && Matches(c, query)).ToList();
+        return Groups
+            .Select(g => (Group: g, Chats: shown
+                .Where(c => (c.Pinned ? PinnedGroup : GroupOf(c.Updated.ToLocalTime(), nowLocal)) == g)
+                .OrderByDescending(Mine).ThenByDescending(c => c.Updated).ToList()))
+            .Where(s => s.Chats.Count > 0)
+            .ToList();
+    }
+
+    /// <summary>The summary of a conversation: its name (made from the first request when it has none) and searchable text.</summary>
+    public static ChatSummary Summarize(Conversation conv)
+    {
+        var search = new StringBuilder(conv.Recall).Append('\n');
+        foreach (var item in conv.Items)
+        {
+            if (search.Length > 4000) break;
+            if (item.Kind is "user" or "assistant") search.Append(item.Text.Length > 600 ? item.Text.Substring(0, 600) : item.Text).Append('\n');
+        }
+        var name = NameFor(conv) is { Length: > 0 } named ? named : Untitled;
+        return new ChatSummary(conv.File, conv.Key, conv.Title, name, conv.Pinned, conv.Updated, conv.Items.Count, search.ToString(), ChatTypes.Of(conv));
+    }
+}
