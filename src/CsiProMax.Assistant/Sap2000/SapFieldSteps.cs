@@ -298,6 +298,9 @@ public static class SapFieldSteps
             return new { file = Path.GetFileName(file), kilobytes = pack.Zip.Length / 1024, frames = pack.Frames, areas = pack.Areas, tables = pack.Tables, notes = pack.Notes };
         });
 
+        // ---- the tools every program has through the same API (the whole API, lateral loads, checkpoints, a building) ----
+        CsiFieldSteps.Run(ctx);
+
         ctx.Coverage("every SAP2000 tool was run");
     }
 }

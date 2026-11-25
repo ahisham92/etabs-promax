@@ -56,7 +56,7 @@ public static class ToolsMenu
         public string Says => State switch
         {
             State.Added => $"{Label}: CSI ProMax was missing from the Tools menu and is added now. Open {Label} again to see it.",
-            State.Moved => $"{Label}: the Tools menu named a CSI ProMax file that is gone, or named CSI ProMax twice, and names this install now, once.",
+            State.Moved => $"{Label}: the Tools menu named a CSI ProMax file that is gone or a copy outside the installed folder, or named CSI ProMax twice, and names this install now, once.",
             State.Already => $"{Label}: CSI ProMax is in the Tools menu.",
             State.Missing => $"{Label}: CSI ProMax is not in the Tools menu, and can be added.",
             State.Open => $"{Label}: CSI ProMax is not in the Tools menu, and {Label} is open, so its plug-in list is left alone. Close {Label}, then open CSI ProMax again (from another program, or the Modeler): it adds itself.",
@@ -79,10 +79,27 @@ public static class ToolsMenu
     /// </summary>
     public static string? InstallFolder()
     {
-        foreach (var folder in new[] { InstalledIn, AppContext.BaseDirectory })
+        foreach (var folder in new[] { DefaultInstall(), InstalledIn, AppContext.BaseDirectory })
             if (!string.IsNullOrWhiteSpace(folder) && !IsDownloadedVersion(folder!) && PlugIns.All(p => File.Exists(System.IO.Path.Combine(folder!, p.Dll))))
                 return folder!.TrimEnd('\\', '/');
         return null;
+    }
+
+    /// <summary>
+    /// Documents\CSI ProMax, where the install line puts CSI ProMax, when the plug-in files are there. It comes before
+    /// the folder CSI ProMax happens to run from: a copy unpacked elsewhere to try a version (as the field test runs
+    /// are) once wrote its own folder into the Tools menus, so Tools > CSI ProMax started that copy (2026-11-25).
+    /// </summary>
+    public static string? DefaultInstall()
+    {
+        try
+        {
+            var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            if (string.IsNullOrEmpty(documents)) return null;
+            var folder = System.IO.Path.Combine(documents, "CSI ProMax");
+            return PlugIns.All(p => File.Exists(System.IO.Path.Combine(folder, p.Dll))) ? folder : null;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or IOException or UnauthorizedAccessException) { return null; }
     }
 
     private static bool IsDownloadedVersion(string folder)
@@ -99,10 +116,12 @@ public static class ToolsMenu
     /// <param name="settingsRoot">For tests: a folder that stands in for <see cref="SettingsRoot"/>.</param>
     /// <param name="isOpen">For tests: whether a version of a program is open. Left out: asked of Windows.</param>
     /// <param name="change">False: say what would be done, and change nothing.</param>
-    public static IReadOnlyList<Entry> Repair(string? installFolder = null, string? settingsRoot = null, Func<CsiProgram, int, bool>? isOpen = null, bool change = true)
+    /// <param name="prefer">An entry that names another folder's copy is made to name this folder. Left out: only when this folder is Documents\CSI ProMax.</param>
+    public static IReadOnlyList<Entry> Repair(string? installFolder = null, string? settingsRoot = null, Func<CsiProgram, int, bool>? isOpen = null, bool change = true, bool? prefer = null)
     {
         var found = new List<Entry>();
         installFolder ??= InstallFolder();
+        var mine = prefer ?? (installFolder is not null && DefaultInstall() is { } usual && string.Equals(usual.TrimEnd('\\', '/'), installFolder.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase));
         var root = settingsRoot ?? SettingsRoot;
         isOpen ??= IsOpen;
         string[] folders;
@@ -123,7 +142,7 @@ public static class ToolsMenu
                 var label = $"{plugIn.Program.Name} {number}";
                 var path = installFolder is null ? plugIn.Dll : System.IO.Path.Combine(installFolder, plugIn.Dll);
                 State state;
-                try { state = Register(ini, plugIn.Name, installFolder is null ? null : path, () => isOpen(plugIn.Program, number), change); }
+                try { state = Register(ini, plugIn.Name, installFolder is null ? null : path, () => isOpen(plugIn.Program, number), change, mine); }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or System.Security.SecurityException) { state = State.Unknown; }
                 found.Add(new Entry(label, plugIn.Program, number, ini, state, path));
             }
@@ -136,7 +155,7 @@ public static class ToolsMenu
     /// ends, and a copy of the file as it was beside it (once). <paramref name="path"/> null: the install folder is
     /// not known, so nothing can be added, and the answer only says whether it is listed.
     /// </summary>
-    internal static State Register(string ini, string name, string? path, Func<bool> open, bool change)
+    internal static State Register(string ini, string name, string? path, Func<bool> open, bool change, bool prefer = false)
     {
         var bytes = File.ReadAllBytes(ini);
         Encoding encoding;
@@ -147,7 +166,7 @@ public static class ToolsMenu
         else { encoding = Encoding.Latin1; plain = true; }   // no mark: every byte is kept as it is
         var text = encoding.GetString(bytes, skip, bytes.Length - skip);
         // The plug-in's file name is enough to see whether it is listed; the folder matters only for adding it.
-        var (state, edited) = Edit(text, name, path ?? name + ".dll", File.Exists);
+        var (state, edited) = Edit(text, name, path ?? name + ".dll", File.Exists, prefer && path is not null);
         if (edited is null) return state;
         if (path is null) return State.Missing;
         // A folder name with letters outside plain ASCII cannot be written safely into a file with no encoding mark.
@@ -171,7 +190,8 @@ public static class ToolsMenu
     /// another plug-in is never changed. The text is null when nothing is to be written.
     /// </summary>
     /// <param name="exists">Whether a listed plug-in file is there: an entry of ours that names a file that is gone is put right.</param>
-    internal static (State State, string? Text) Edit(string text, string name, string path, Func<string, bool>? exists = null)
+    /// <param name="prefer">An entry of ours that names a copy in another folder is made to name <paramref name="path"/>, though that copy is there.</param>
+    internal static (State State, string? Text) Edit(string text, string name, string path, Func<string, bool>? exists = null, bool prefer = false)
     {
         const RegexOptions Any = RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
         var newline = text.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
@@ -207,7 +227,7 @@ public static class ToolsMenu
         {
             // Listed once: left as it is, also from another folder, unless the file it names is gone. Listed more than
             // once (added by hand a second time, so the menu has two entries and one may be an old copy): made one.
-            if (ours == 1 && (oursPath.Equals(path, StringComparison.OrdinalIgnoreCase) || exists is null || exists(oursPath))) return (State.Already, null);
+            if (ours == 1 && (oursPath.Equals(path, StringComparison.OrdinalIgnoreCase) || !prefer && (exists is null || exists(oursPath)))) return (State.Already, null);
             if (paths == ours) state = State.Moved; else return (State.Others, null);
         }
         else if (count == 0 && entries.Count == 0) state = State.Added;
