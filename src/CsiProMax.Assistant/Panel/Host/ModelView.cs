@@ -14,7 +14,25 @@ namespace CsiProMax.Host;
 /// </summary>
 internal static class ModelView
 {
-    public static void Attach(McpHttpServer server) => server.ViewHandler = Handle;
+    public static void Attach(McpHttpServer server)
+    {
+        server.ViewHandler = Handle;
+        server.ViewPost = PostAsync;
+    }
+
+    /// <summary>
+    /// The Modeler's hand edits (HandModel): run on the window's thread, one at a time with the chat's own tool calls,
+    /// so the two never change the model at once.
+    /// </summary>
+    internal static async Task<(byte[] Body, string ContentType)?> PostAsync(string path, byte[] body)
+    {
+        if (path != "edit") return null;
+        var dispatcher = App.Dispatcher;
+        using var request = System.Text.Json.JsonDocument.Parse(body);
+        var element = request.RootElement.Clone();
+        var answer = await dispatcher.InvokeAsync(app => HandModel.Handle(app.Link, element)).ConfigureAwait(false);
+        return (Encoding.UTF8.GetBytes(answer.ToJsonString()), "application/json");
+    }
 
     private static int Revision(ICsiLink link) => link is OfflineEtabs offline ? offline.Revision : 0;
 

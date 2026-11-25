@@ -47,6 +47,7 @@ public static class ModelerFieldSteps
         ctx.Offer(EtabsTools.All);
         ctx.Offer(ModelerTools.All);
         ctx.Offer(ProgramTools.Modeler);
+        ctx.Offer(HandTools.All);
         var folder = Q(ctx.Folder);
 
         // A new model from the template: three stories, two bays each way.
@@ -198,6 +199,8 @@ public static class ModelerFieldSteps
         }, "tool read_table with where, fields, offset and limit");
         ctx.Refused("read_table", """{"table":"Story Drift"}""", "no table", "tool read_table says no to a table that is not there");
 
+        Defining(ctx, modeler);
+
         // The checks and the quantities.
         ctx.Tool("check_model", "{}", a => FieldContext.Expect(Int(a["errors"]) == 0, "the model the test built has errors: " + a["findings"]!.ToJsonString()));
         ctx.Tool("model_quantities", "{}", a =>
@@ -258,6 +261,58 @@ public static class ModelerFieldSteps
         ctx.Refused("open_model_file", $$"""{"path":{{Q(Path.Combine(ctx.Folder, "no such file.e2k"))}}}""", "no file", "tool open_model_file says no to a file that is not there");
 
         ctx.Coverage("every Modeler tool was run");
+    }
+
+    /// <summary>
+    /// The Define forms' tools (add, change, rename and delete, the way SAP2000's forms do) and the window's hand edits
+    /// with undo. What is added here is deleted again, so the files the programs open are the ones the steps above built.
+    /// </summary>
+    private static void Defining(FieldContext ctx, OfflineEtabs modeler)
+    {
+        string Done(JsonNode a) => a["done"]?.GetValue<string>() ?? "";
+        ctx.Tool("model_definitions", "{}", a =>
+        {
+            FieldContext.Expect(a["stories"]!.AsArray().Count == modeler.Stories().Count - 1, "the forms' story list does not match the model");
+            FieldContext.Expect(a["combinations"]!.AsArray().Any(c => c!["name"]!.GetValue<string>() == "CPM-ULS" && c["cases"]!.AsArray().Count > 0), "CPM-ULS and its cases are not in the definitions: " + a["combinations"]!.ToJsonString());
+            FieldContext.Expect(a["frame_sections"]!.AsArray().Any(x => x!["name"]!.GetValue<string>() == "CPM-C400" && x["used"]!.GetValue<int>() > 0), "CPM-C400 and its use are not in the definitions");
+        });
+        var stories = modeler.Model.Stories.Skip(1).Select(x => $$"""{"name":{{Q(x.Name)}},"height":{{CsiProMax.E2k.E2kText.Number(x.Height)}},"was":{{Q(x.Name)}}}""");
+        var frames = modeler.Frames().Count;
+        ctx.Tool("define_stories", $$"""{"stories":[{{string.Join(",", stories)}}]}""", a => FieldContext.Expect(modeler.Frames().Count == frames, $"the story data was sent back as it is, and {frames - modeler.Frames().Count} objects went missing"));
+        var grids = modeler.Model.Grids.Select(g => $$"""{"label":{{Q(g.Label)}},"direction":{{Q(g.Direction)}},"coordinate":{{CsiProMax.E2k.E2kText.Number(g.Coordinate)}}}""").ToList();
+        var gridCount = grids.Count;
+        ctx.Tool("define_grids", $$"""{"grids":[{{string.Join(",", grids.Append("""{"label":"CPM-G","direction":"X","coordinate":-3}"""))}}]}""", a => FieldContext.Expect(modeler.Model.Grids.Count == gridCount + 1, "the new grid line is not in the model"), "tool define_grids adds a grid line");
+        ctx.Tool("define_grids", $$"""{"grids":[{{string.Join(",", grids)}}]}""", a => FieldContext.Expect(modeler.Model.Grids.Count == gridCount && !modeler.Model.Grids.Exists(g => g.Label == "CPM-G"), "the grid line was not deleted again"), "tool define_grids deletes it again");
+        ctx.Tool("define_material", """{"name":"CPM-C40","fc":40000,"elastic_modulus":35000000}""", a => FieldContext.Expect(modeler.Materials().Contains("CPM-C40"), "CPM-C40 was not added: " + Done(a)), "tool define_material adds a concrete");
+        ctx.Tool("define_material", """{"name":"CPM-C45","was":"CPM-C40","fc":45000,"elastic_modulus":36000000}""", a => FieldContext.Expect(modeler.Model.Materials.Find(m => m.Name == "CPM-C45")?.Number("FC") == 45000, "CPM-C40 was not renamed and changed"), "tool define_material changes and renames it");
+        ctx.Tool("define_frame_section", """{"name":"CPM-B300","kind":"beam","depth":0.6,"width":0.3,"material":"CPM-C45"}""", a => FieldContext.Expect(modeler.FrameSections().Contains("CPM-B300"), "CPM-B300 was not added"), "tool define_frame_section adds a beam section");
+        ctx.Tool("define_frame_section", """{"name":"CPM-B350","was":"CPM-B300","kind":"beam","depth":0.65,"width":0.35,"material":"CPM-C45"}""", a => FieldContext.Expect(modeler.Model.FrameSections.Find(x => x.Name == "CPM-B350")?.Number("D") == 0.65, "CPM-B300 was not renamed and changed"), "tool define_frame_section changes and renames it");
+        ctx.Tool("define_shell_section", """{"name":"CPM-S170","kind":"slab","thickness":0.18}""", a => FieldContext.Expect(modeler.AreaSections().Contains("CPM-S170"), "CPM-S170 was not added"), "tool define_shell_section adds a slab section");
+        ctx.Tool("define_shell_section", """{"name":"CPM-S170","was":"CPM-S170","kind":"slab","thickness":0.19}""", a => FieldContext.Expect(modeler.Model.ShellSections.Find(x => x.Name == "CPM-S170")?.Thickness == 0.19, "CPM-S170's thickness did not change"), "tool define_shell_section changes it");
+        ctx.Tool("define_load_pattern", """{"name":"CPM-WIND","type":"Wind","self_weight":0}""", a => FieldContext.Expect(modeler.LoadPatterns().Any(p => p.Name == "CPM-WIND"), "CPM-WIND was not added"), "tool define_load_pattern adds a pattern");
+        ctx.Tool("define_load_pattern", """{"name":"CPM-W","was":"CPM-WIND","type":"Wind","self_weight":0}""", a => FieldContext.Expect(modeler.LoadPatterns().Any(p => p.Name == "CPM-W") && modeler.LoadCases().Contains("CPM-W"), "CPM-WIND and its case were not renamed"), "tool define_load_pattern renames it");
+        ctx.Tool("define_combination", """{"name":"CPM-SLS","type":"Linear Add","cases":[{"case":"Dead","factor":1},{"case":"CPM-W","factor":0.6}]}""", a => FieldContext.Expect(modeler.Combos().Contains("CPM-SLS"), "CPM-SLS was not added"), "tool define_combination adds a combination");
+        ctx.Tool("define_combination", """{"name":"CPM-ENV","type":"Envelope","cases":[{"case":"CPM-ULS","factor":1},{"case":"CPM-SLS","factor":1}]}""", a => FieldContext.Expect(modeler.Model.Combos.Find(c => c.Name == "CPM-ENV")?.Lines.Count(l => l[0] == "LOADCOMBO") == 2, "CPM-ENV does not hold the two combinations"), "tool define_combination makes an envelope of combinations");
+        ctx.Refused("delete_definition", """{"kind":"frame_section","name":"CPM-C400"}""", "used by", "tool delete_definition keeps a section in use");
+        foreach (var (kind, name) in new[] { ("combination", "CPM-ENV"), ("combination", "CPM-SLS"), ("load_pattern", "CPM-W"), ("frame_section", "CPM-B350"), ("shell_section", "CPM-S170"), ("material", "CPM-C45") })
+            ctx.Tool("delete_definition", $$"""{"kind":"{{kind}}","name":"{{name}}"}""", a => FieldContext.Expect(Done(a).StartsWith("deleted", StringComparison.Ordinal), $"{name} was not deleted: " + a.ToJsonString()), $"tool delete_definition deletes {name}");
+
+        // The window's own path: a hand edit and its undo, through HandModel as the window sends them.
+        ctx.Step("a hand edit in the Modeler's window is undone and redone", () =>
+        {
+            HandModel.Reset();
+            var before = modeler.LoadPatterns().Count;
+            var add = HandModel.Handle(modeler, JsonDocument.Parse("""{"tool":"define_load_pattern","args":{"name":"CPM-HAND","type":"Other"}}""").RootElement);
+            FieldContext.Expect(add["ok"]!.GetValue<bool>() && modeler.LoadPatterns().Count == before + 1, "the hand edit was not made: " + add.ToJsonString());
+            var undo = HandModel.Handle(modeler, JsonDocument.Parse("""{"undo":true}""").RootElement);
+            FieldContext.Expect(undo["ok"]!.GetValue<bool>() && modeler.LoadPatterns().Count == before, "undo did not take it back: " + undo.ToJsonString());
+            var redo = HandModel.Handle(modeler, JsonDocument.Parse("""{"redo":true}""").RootElement);
+            FieldContext.Expect(redo["ok"]!.GetValue<bool>() && modeler.LoadPatterns().Count == before + 1, "redo did not bring it back: " + redo.ToJsonString());
+            HandModel.Handle(modeler, JsonDocument.Parse("""{"undo":true}""").RootElement);
+            HandModel.Reset();
+            FieldContext.Expect(modeler.LoadPatterns().Count == before, "the test's pattern was left in the model");
+            return "made, undone, redone and undone again";
+        });
     }
 
     private static void Same(FieldContext ctx, JsonNode answer, string what) =>

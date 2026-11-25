@@ -42,6 +42,12 @@ public sealed class OfflineEtabs : ICsiLink, CsiProMax.Assistant.Tools.IModelDra
         Model = model; Path = path; _selected.Clear(); Revision++; Unsaved = false;
     }
 
+    /// <summary>Puts back a model from before a change (the Modeler's undo and redo): it counts as a change, so it is saved again.</summary>
+    public void Restore(StructuralModel model, string path)
+    {
+        Model = model; Path = path; _selected.Clear(); Changed();
+    }
+
     private void Changed() { Revision++; Unsaved = true; }
 
     private static T Try<T>(Func<T> work)

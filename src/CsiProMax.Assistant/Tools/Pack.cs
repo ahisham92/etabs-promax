@@ -257,8 +257,9 @@ public static class Pack
     public static string LiveViewerHtml(JsonObject content, int revision)
     {
         var html = ViewerHtml(content);
-        var live = "<script>window.cpmLive=true;(function(){let rev=" + revision.ToString(CultureInfo.InvariantCulture) + ";setInterval(async()=>{try{const r=await fetch('model?rev='+rev,{cache:'no-store'});" +
-                   "if(r.status!==200)return;const j=await r.json();rev=j.rev;cpmLoad(j.pack,true);}catch(e){}},1500);})();</script>";
+        // cpmPull asks at once (after a hand edit); otherwise every second and a half.
+        var live = "<script>window.cpmLive=true;(function(){let rev=" + revision.ToString(CultureInfo.InvariantCulture) + ";window.cpmPull=async()=>{try{const r=await fetch('model?rev='+rev,{cache:'no-store'});" +
+                   "if(r.status!==200)return;const j=await r.json();rev=j.rev;cpmLoad(j.pack,true);}catch(e){}};setInterval(window.cpmPull,1500);})();</script>";
         return html.Replace("</body>", live + "</body>", StringComparison.Ordinal);
     }
 
