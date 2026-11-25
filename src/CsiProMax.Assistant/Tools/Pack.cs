@@ -16,7 +16,12 @@ namespace CsiProMax.Assistant.Tools;
 public static class Pack
 {
     public const int Version = 1;
-    public const int DefaultMostRows = 60000;
+    /// <summary>
+    /// Rows a pack takes of one table. Ahmed wants every result in the Viewer, and real element tables run past 60,000
+    /// (0.4.33 field test: 44,000 shell rows and 139,000 SAP2000 frame stress rows on a small model), so a table is
+    /// taken whole up to this, within <see cref="PackTables.TotalMostRows"/> for the whole pack.
+    /// </summary>
+    public const int DefaultMostRows = 250000;
     /// <summary>Design tables are taken longer: a concrete beam table has a row per station of every beam.</summary>
     public const int DesignMostRows = 200000;
 
@@ -155,7 +160,7 @@ public static class Pack
             tables[t.Name] = TableJson(t.Name, data, most, notes, PackTables.Kind(t) == "input" ? "input" : null);
             budget -= Math.Min(data.Rows.Count, most);
         }
-        PackTables.AddSteps(e, known, cases, combos, tables, mostRows, notes, (name, data, most) => TableJson(name, data, most, notes, null));
+        if (PackTables.AddSteps(e, known, cases, combos, tables, mostRows, notes, (name, data, most) => TableJson(name, data, most, notes, null)) is { } steps) manifest["step_output"] = steps;
         if (left.Count > 0)
         {
             manifest["left_out_tables"] = left;
