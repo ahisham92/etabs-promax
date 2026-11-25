@@ -25,7 +25,20 @@ internal static class ModelView
     /// so the two never change the model at once.
     /// </summary>
     internal static Task<(byte[] Body, string ContentType)?> PostAsync(string path, byte[] body) =>
-        path == "chat" ? ChatAsync(body) : path == "edit" ? EditAsync(body) : Task.FromResult<(byte[] Body, string ContentType)?>(null);
+        path == "chat" ? ChatAsync(body) : path == "edit" ? EditAsync(body) : path == "check" ? CheckAsync(body) : Task.FromResult<(byte[] Body, string ContentType)?>(null);
+
+    /// <summary>
+    /// The instability checker from the 3D window (Analyze > Check Model for Instabilities): find_instabilities on the
+    /// model behind the window (the Modeler's, or the one open in the CSI program), on the window's thread like the
+    /// chat's own tool calls. It only reads.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static async Task<(byte[] Body, string ContentType)?> CheckAsync(byte[] body)
+    {
+        var dispatcher = App.Dispatcher;
+        var answer = await dispatcher.InvokeAsync(app => StabilityTools.Window(app.Link, body)).ConfigureAwait(false);
+        return (Encoding.UTF8.GetBytes(answer.ToJsonString()), "application/json");
+    }
 
     // Apart from PostAsync and ChatAsync, which are reached without WPF (the tests and the field test, chat off).
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]

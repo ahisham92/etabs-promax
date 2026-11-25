@@ -56,6 +56,22 @@ public static class StabilityTools
         return answer;
     }
 
+    /// <summary>The 3D window's request (POST check): the tool's answer with ok true, or {"ok":false,"error":...}.</summary>
+    public static JsonObject Window(ICsiLink link, byte[] body)
+    {
+        try
+        {
+            using var request = JsonDocument.Parse(body.Length == 0 ? "{}"u8.ToArray() : body);
+            var answer = (JsonObject)Run(request.RootElement.Clone(), link);
+            answer["ok"] = true;
+            return answer;
+        }
+        catch (Exception ex) when (ex is EtabsException or ToolInputException or JsonException or InvalidOperationException)
+        {
+            return new JsonObject { ["ok"] = false, ["error"] = ex.Message };
+        }
+    }
+
     /// <summary>The answer the chat, the Modeler and the Viewer all read.</summary>
     public static JsonObject Json(StabilityCheck.Report r, CsiProgram program, bool modeler)
     {
