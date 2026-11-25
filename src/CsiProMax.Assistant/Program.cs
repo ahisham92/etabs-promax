@@ -11,6 +11,7 @@ namespace CsiProMax.Assistant;
 ///   --etabs-pid N   the ETABS window this was started from (the plug-in passes it), when several are open
 ///   --demo          a small model in memory instead of ETABS, to see the window on a PC without ETABS
 ///   --modeler [file] the Modeler: CSI ProMax's own model with no ETABS, saved as .e2k for licensed ETABS to import
+///   --viewer [file] the Viewer in a CSI ProMax window of its own: a review pack (.cpmx) or a Viewer page, or empty
 ///   --selftest      check the link to ETABS call by call and print the result (--changes also adds and deletes objects)
 /// </summary>
 public static class Program
@@ -70,6 +71,7 @@ public static class Program
     public static int Main(string[] args)
     {
         DropOwnConsole();
+        NameForTaskbar();
         int? etabsPid = Array.IndexOf(args, "--etabs-pid") is var at and >= 0 && at + 1 < args.Length && int.TryParse(args[at + 1], out var pid) ? pid : null;
         // The CSI program this was started from: named by the plug-in, or told from the process. ETABS when neither says.
         var program = (Array.IndexOf(args, "--program") is var named and >= 0 && named + 1 < args.Length ? CsiProgram.Find(args[named + 1]) : null) ?? CsiProgram.OfProcess(etabsPid);
@@ -141,6 +143,8 @@ public static class Program
                 catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception) { /* already gone */ }
 
             CarryOver();
+            // The Viewer on its own (its shortcut, or a pack opened with CSI ProMax): one window, no CSI program, no chat.
+            if (args.Contains("--viewer")) return RunViewer(args);
             // One window per ETABS: started again from ETABS's menu, the open window comes forward.
             var name = "CsiProMax." + (modeler ? "modeler" : demo ? "demo" : etabsPid?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "any");
             using var one = new Mutex(true, name, out var first);
@@ -158,6 +162,8 @@ public static class Program
             ICsiLink link = modeler ? OpenModeler(args) : demo ? new MemoryEtabs() : CsiProMax.Assistant.Tools.ProgramTools.Live(com);
             var app = new System.Windows.Application { ShutdownMode = System.Windows.ShutdownMode.OnMainWindowClose };
             app.DispatcherUnhandledException += (_, e) => Note("window", e.Exception);
+            // The 3D view and the Viewer open in CSI ProMax windows of their own, not in the browser.
+            CsiProMax.Host.WebWindow.Install();
             AppDomain.CurrentDomain.UnhandledException += (_, e) => Note("unhandled", e.ExceptionObject as Exception);
             CsiProMax.App.Start(link, etabsPid, demo);
             var window = new CsiProMax.Host.MainWindow();
@@ -238,6 +244,56 @@ public static class Program
             return 1;
         }
     }
+
+    /// <summary>
+    /// The Viewer alone (--viewer [file]): the Viewer page in a CSI ProMax window, with the pack inside when one is
+    /// named. Closing the window ends it. With no WebView2 on this PC the page opens in Edge's app window instead.
+    /// </summary>
+    private static int RunViewer(string[] args)
+    {
+        var at = Array.IndexOf(args, "--viewer");
+        var file = at + 1 < args.Length && !args[at + 1].StartsWith("--", StringComparison.Ordinal) ? args[at + 1] : null;
+        string page;
+        try { page = CsiProMax.Host.WebPages.ViewerPageFor(file); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or System.Text.Json.JsonException or InvalidOperationException)
+        {
+            Note("viewer file", ex);
+            if (OperatingSystem.IsWindows()) MessageBoxW(IntPtr.Zero, $"{Path.GetFileName(file)} could not be opened:\n\n{ex.Message}\n\nThe Viewer opens empty: use File > Open.", "CSI ProMax Viewer", 0x30);
+            page = CsiProMax.Host.WebPages.ViewerPageFor(null);
+        }
+        var address = CsiProMax.Host.WebPages.Address(page);
+        if (!CsiProMax.Host.WebWindow.Available())
+        {
+            CsiProMax.Host.WebPages.OpenOutside(address);
+            return 0;
+        }
+        var app = new System.Windows.Application { ShutdownMode = System.Windows.ShutdownMode.OnLastWindowClose };
+        app.DispatcherUnhandledException += (_, e) => Note("viewer window", e.Exception);
+        CsiProMax.Host.WebWindow.Install();
+        app.Startup += (_, _) => app.MainWindow = CsiProMax.Host.WebWindow.ShowHere(address, CsiProMax.Host.WebPages.Kind.Viewer);
+        app.Run();
+        return 0;
+    }
+
+    /// <summary>
+    /// CSI ProMax's own name in the taskbar: its windows are grouped under CSI ProMax with its icon, not under dotnet
+    /// (the program that runs CsiProMax.dll), so the Modeler and the Viewer look like the programs they are.
+    /// </summary>
+    private static void NameForTaskbar()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        try { SetCurrentProcessExplicitAppUserModelID(AppId); }
+        catch (Exception ex) when (ex is EntryPointNotFoundException or DllNotFoundException) { }
+    }
+
+    /// <summary>The taskbar's name for CSI ProMax's windows (Windows' AppUserModelID).</summary>
+    internal const string AppId = "CsiProMax.CSIProMax";
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    private static extern int SetCurrentProcessExplicitAppUserModelID(string appId);
+
+    /// <summary>For the windows: an error kept in errors.txt, as the start's own are.</summary>
+    internal static void NoteFrom(string where, Exception? ex) => Note(where, ex);
 
     private static bool EtabsIsOpen(int pid)
     {

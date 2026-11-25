@@ -9,7 +9,7 @@ namespace CsiProMax.Host;
 /// The Modeler and Viewer shortcuts, on the desktop and in the Start menu (CSI ProMax folder). Made at the first
 /// start with no question asked, and pointed at the new version after an update. A shortcut the user deleted stays
 /// deleted. Both are .lnk files made by Windows' own shortcut object: the Modeler's runs the PC's dotnet with
-/// CsiProMax.dll --modeler, the Viewer's opens the Viewer page in the browser. No .exe of ours.
+/// CsiProMax.dll --modeler, the Viewer's runs it with --viewer, so both open in CSI ProMax windows of their own (WebWindow), never a browser tab. No .exe of ours.
 /// </summary>
 internal static class Shortcuts
 {
@@ -30,8 +30,8 @@ internal static class Shortcuts
     /// <summary>What the mark file holds: the program folder the shortcuts were last made for.</summary>
     internal static bool Due(string? marked, string folder) => !string.Equals(marked?.Trim(), folder + Mark2, StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>Added to the mark when the shortcuts themselves change (2: they have the icon), so they are made again once.</summary>
-    internal const string Mark2 = "|2";
+    /// <summary>Added to the mark when the shortcuts themselves change (2: they have the icon; 3: the Viewer's opens its own window), so they are made again once.</summary>
+    internal const string Mark2 = "|3";
 
     /// <summary>Called at every start, off the window's thread. Never throws: a PC that forbids shortcuts just has none.</summary>
     public static void Ensure()
@@ -102,6 +102,9 @@ internal static class Shortcuts
         return ViewerPage;
     }
 
+    /// <summary>The Viewer shortcut's arguments: CsiProMax.dll in its own window (--viewer), not the page in a browser.</summary>
+    internal static string ViewerArguments(string folder) => "\"" + Path.Combine(folder, "CsiProMax.dll") + "\" --viewer";
+
     private static List<string> Make(bool onlyExisting)
     {
         var dotnet = Environment.ProcessPath ?? throw new InvalidOperationException("This program's own path is not known.");
@@ -132,7 +135,10 @@ internal static class Shortcuts
                 if (!onlyExisting || File.Exists(viewer))
                 {
                     dynamic link = shell.CreateShortcut(viewer);
-                    link.TargetPath = ViewerPage;
+                    link.TargetPath = dotnet;
+                    link.Arguments = ViewerArguments(ProgramFolder());
+                    link.WorkingDirectory = ProgramFolder();
+                    link.WindowStyle = 7; // minimised: dotnet's own console window stays out of the way
                     link.Description = "CSI ProMax Viewer: open a review pack (.cpmx) with no ETABS"; // ETABS itself
                     if (File.Exists(icon)) link.IconLocation = icon;
                     link.Save();

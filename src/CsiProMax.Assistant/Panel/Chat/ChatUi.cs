@@ -402,6 +402,10 @@ internal static class ChatUi
     /// <summary>Opens a file or http(s) link with its default app; quietly does nothing when that fails.</summary>
     public static void Open(string target)
     {
+        // A Viewer page CSI ProMax made (a review pack's) opens in the CSI ProMax Viewer window, not a browser tab.
+        if (CsiProMax.Host.WebPages.IsViewerPage(target))
+            try { CsiProMax.Host.WebPages.Open(target, CsiProMax.Host.WebPages.Kind.Viewer); return; }
+            catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or IOException) { }
         try { Process.Start(new ProcessStartInfo(target) { UseShellExecute = true })?.Dispose(); }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or FileNotFoundException) { }
     }
