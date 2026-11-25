@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Documents;
 using System.Windows.Interop;
@@ -23,7 +24,7 @@ namespace CsiProMax.UI;
 internal static class Brand
 {
     /// <summary>The header band's gradient: the same in both themes (it is the brand, with white text on it).</summary>
-    public static readonly Color Blue = Color.FromRgb(0x1D, 0x4E, 0xD8);
+    public static readonly Color Blue = Color.FromRgb(0x1C, 0x63, 0xBC); // the CDT SDK accent
     public static readonly Color Navy = Color.FromRgb(0x0B, 0x1E, 0x4F);
 
     /// <summary>Resource keys of the palette. Use them with SetResourceReference so colours follow the theme.</summary>
@@ -43,76 +44,61 @@ internal static class Brand
         public const string ComposerField = "SpmComposerField";
         /// <summary>The chat's conversation area (cards and the message box sit raised on it) and the soft fills of its status badges.</summary>
         public const string Canvas = "SpmCanvas", SuccessSoft = "SpmSuccessSoft", DangerSoft = "SpmDangerSoft";
-        /// <summary>ETABS's chrome: toolbar and pane strips, the menu bar, window tabs, group box captions, button faces, table grids.</summary>
-        public const string Strip = "SpmStrip", MenuBar = "SpmMenuBar", StripBorder = "SpmStripBorder", TabOutline = "SpmTabOutline";
-        public const string TabActiveTop = "SpmTabActiveTop", TabActiveBottom = "SpmTabActiveBottom", TabActiveBorder = "SpmTabActiveBorder";
-        public const string GroupCaption = "SpmGroupCaption", ButtonFace = "SpmButtonFace", ButtonBorder = "SpmButtonBorder", ButtonPressed = "SpmButtonPressed";
-        public const string GridHeader = "SpmGridHeader", GridLine = "SpmGridLine";
     }
 
     /// <summary>
-    /// The palette: (key, light, dark). CSI ProMax looks like ETABS 23, which has one look, so both columns hold the same
-    /// ETABS colours (measured from the ETABS 23.2 manuals' screenshots: menu bar #F7F7F7, toolbars, pane strips and the
-    /// status bar #D8D8D8, forms #F0F0F0, button face #E1E1E1 on #ADADAD, list selection #0078D7, group box captions
-    /// #00008B). The dark column is kept so a later dark ETABS can be followed without touching every window.
-    /// Text pairs meet WCAG AA 4.5:1: Text on Bg 21:1, on Surface 18:1, on Strip 14:1; Muted on Surface 6.3:1; OnAccent on Accent 4.5:1.
+    /// The palette: (key, light, dark), taken from the CDT SDK's palette (CDT.Wpf Palette.Light / Palette.Dark: Surface0
+    /// for Bg, Surface2 for Field and Raised, Text0 / Text2 for Text / Muted, its accent, status and soft colours) so the
+    /// windows' own surfaces match the SDK's controls; InputBorder, SurfaceHover and light Muted are a shade off the SDK's
+    /// to keep the ratios below. Every text pair meets WCAG AA 4.5:1 in both themes, hover and disabled states
+    /// included (disabled text is Muted on Surface); the focus ring and input borders meet 3:1 against the background.
+    /// Recheck the ratios when changing a value.
     /// </summary>
-    public static readonly (string Key, uint Light, uint Dark)[] Tokens = Same(
+    public static readonly (string Key, uint Light, uint Dark)[] Tokens =
     [
-        (K.Bg, 0xFFFFFF),
-        (K.Surface, 0xF0F0F0),
-        (K.SurfaceHover, 0xE5F1FB),
-        (K.Border, 0xADADAD),
-        (K.Field, 0xFFFFFF),
-        (K.InputBorder, 0x7A7A7A),
-        (K.Text, 0x000000),
-        (K.Muted, 0x555555),
-        (K.Accent, 0x0078D7),
-        (K.AccentHover, 0x005A9E),
-        (K.AccentPressed, 0x004578),
-        (K.OnAccent, 0xFFFFFF),
-        (K.Link, 0x0066CC),
-        (K.Danger, 0xC42B1C),
-        (K.DangerHover, 0xA32317),
-        (K.DangerPressed, 0x7F1B12),
-        (K.OnDanger, 0xFFFFFF),
-        (K.DangerText, 0xA61B0F),
-        (K.SuccessText, 0x1D6B2E),
-        (K.WarningText, 0x8A5A00),
-        (K.Focus, 0x0078D7),
-        (K.NoticeBg, 0xFFF8DC),
-        (K.NoticeBorder, 0xD9B44A),
-        (K.BadgeOk, 0x1D6B2E),
-        (K.BadgeWarn, 0x8A5A00),
-        (K.BadgeMuted, 0x555555),
-        (K.BadgeError, 0xA61B0F),
-        (K.HeaderText, 0x000000),
-        (K.HeaderSub, 0x333333),
-        (K.Raised, 0xFFFFFF),
-        (K.BorderSubtle, 0xDCDCDC),
-        // Your messages: a grey band across the list, as in the design, not a blue bubble.
-        (K.AccentSoft, 0xF3F3F3),
-        (K.ComposerField, 0xFFFFFF),
-        (K.Canvas, 0xFFFFFF),
-        (K.SuccessSoft, 0xE8F5EA),
-        (K.DangerSoft, 0xFDE7E4),
-        // ETABS's own chrome.
-        (K.Strip, 0xD8D8D8),
-        (K.MenuBar, 0xF7F7F7),
-        (K.StripBorder, 0xB0B0B0),
-        (K.TabOutline, 0x696969),
-        (K.TabActiveTop, 0xB4CCE6),
-        (K.TabActiveBottom, 0x9EB9D5),
-        (K.TabActiveBorder, 0x99B4D1),
-        (K.GroupCaption, 0x00008B),
-        (K.ButtonFace, 0xE1E1E1),
-        (K.ButtonBorder, 0xADADAD),
-        (K.ButtonPressed, 0xCCE4F7),
-        (K.GridHeader, 0xF0F0F0),
-        (K.GridLine, 0xE1E1E1),
-    ]);
-
-    private static (string, uint, uint)[] Same((string Key, uint Value)[] list) => list.Select(t => (t.Key, t.Value, t.Value)).ToArray();
+        (K.Bg, 0xF2F0E8, 0x1B1B19),
+        (K.Surface, 0xE7E4DA, 0x2A2A27),
+        (K.SurfaceHover, 0xE2DFD4, 0x323230),
+        (K.Border, 0xDED9CC, 0x353532),
+        (K.Field, 0xFFFFFF, 0x232321),
+        (K.InputBorder, 0x7D786B, 0x7A766E),
+        (K.Text, 0x1E1D1A, 0xF2EFE9),
+        (K.Muted, 0x5F5C55, 0x9F9B92),
+        (K.Accent, 0x1C63BC, 0x4B9FF3),
+        (K.AccentHover, 0x1958A8, 0x3A96F2),
+        (K.AccentPressed, 0x164E94, 0x2A8DF1),
+        (K.OnAccent, 0xFFFFFF, 0x1B1B19),
+        (K.Link, 0x1C63BC, 0x84BEF7),
+        (K.Danger, 0xC42020, 0xF87171),
+        (K.DangerHover, 0xB01D1D, 0xF76060),
+        (K.DangerPressed, 0x9D1A1A, 0xF64F4F),
+        (K.OnDanger, 0xFFFFFF, 0x1B1B19),
+        (K.DangerText, 0xC42020, 0xFAA2A2),
+        (K.SuccessText, 0x207410, 0x6BDE4A),
+        (K.WarningText, 0x8D5918, 0xFB9B24),
+        (K.Focus, 0x1C63BC, 0x84BEF7),
+        (K.NoticeBg, 0xF4EEE8, 0x3D3121),
+        (K.NoticeBorder, 0x8D5918, 0xFB9B24),
+        (K.BadgeOk, 0x207410, 0x207410),
+        (K.BadgeWarn, 0x8D5918, 0x8D5918),
+        (K.BadgeMuted, 0x67645C, 0x67645C),
+        (K.BadgeError, 0xC42020, 0xC42020),
+        (K.HeaderText, 0xFFFFFF, 0xFFFFFF),
+        (K.HeaderSub, 0xE4ECF7, 0xE4ECF7),
+        // Core only (the loader's pane doesn't use them). Text and Muted on Raised and AccentSoft stay above 4.7:1 in
+        // both themes; BorderSubtle is decorative (a focused field turns to Focus).
+        (K.Raised, 0xFFFFFF, 0x2A2A27),
+        (K.BorderSubtle, 0xDED9CC, 0x353532),
+        (K.AccentSoft, 0xE4ECF7, 0x28323A),
+        // Text 16:1 / 14:1, Muted (the hint) 6.4:1 / 5.7:1, InputBorder 4.2:1 / 3.5:1, Focus 5.6:1 / 8.0:1 on it.
+        (K.ComposerField, 0xFBFAF6, 0x232321),
+        // The chat's conversation area: Text 15:1, Muted 5.8:1 / 6.2:1, Link, WarningText, SuccessText and DangerText 5.1:1
+        // or more on it. Badges: SuccessText on SuccessSoft 5.1:1 / 7.1:1, DangerText on DangerSoft 5.4:1 / 7.7:1, Link on
+        // AccentSoft 5.0:1 / 6.6:1.
+        (K.Canvas, 0xF2F0E8, 0x1B1B19),
+        (K.SuccessSoft, 0xE9F1E7, 0x2C3926),
+        (K.DangerSoft, 0xFDF3F3, 0x332321),
+    ];
 
     public enum Weight { Secondary, Primary, Danger }
 
@@ -139,13 +125,13 @@ internal static class Brand
         }
     }
 
-    /// <summary>ETABS 23 has one light look and CSI ProMax matches it, whatever Windows' app mode is.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static bool ReadDark() => false;
-
-    /// <summary>The ETABS font: Segoe UI 9 pt (12 px) everywhere.</summary>
-    public static readonly FontFamily Font = new("Segoe UI");
-    public const double FontSize = 12;
+    private static bool ReadDark()
+    {
+        // ETABS has one look, so the windows follow Windows' own app mode (Settings > Personalisation > Colours).
+        using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+        return key?.GetValue("AppsUseLightTheme") is int light && light == 0;
+    }
 
     private static readonly List<FrameworkElement> Themed = [];
     private static readonly ConditionalWeakTable<FrameworkElement, object> DarkShown = new();
@@ -159,15 +145,20 @@ internal static class Brand
     /// </summary>
     public static void UseTheme(FrameworkElement root)
     {
+        // The CDT SDK's style sheet first, then Sketch ProMax's (its implicit and Spm* button styles are based on the
+        // SDK's, see Styles), so a window gets every SDK style by key and the SDK look on plain controls.
+        var cdt = CdtTheme.Styles;
+        if (cdt is not null && !root.Resources.MergedDictionaries.Contains(cdt)) root.Resources.MergedDictionaries.Add(cdt);
         var styles = Styles();
         if (!root.Resources.MergedDictionaries.Contains(styles)) root.Resources.MergedDictionaries.Add(styles);
-        Apply(root, IsDark);
-        TextElement.SetFontFamily(root, Font);
-        TextElement.SetFontSize(root, FontSize);
+        var dark = IsDark;
+        Apply(root, dark);
+        CdtTheme.Follow(dark);
         if (root is Control control)
         {
             control.SetResourceReference(Control.BackgroundProperty, K.Bg);
             control.SetResourceReference(Control.ForegroundProperty, K.Text);
+            if (cdt is not null) control.SetResourceReference(Control.FontFamilyProperty, "CDT.UIFont");
         }
         if (Themed.Contains(root)) return;
         Themed.Add(root);
@@ -201,7 +192,33 @@ internal static class Brand
     private static void Recheck()
     {
         var dark = IsDark;
+        CdtTheme.Follow(dark);
         foreach (var root in Themed.ToList()) Apply(root, dark);
+    }
+
+    /// <summary>
+    /// Themes a root that something else themes too (the loader's pane, which writes its own older copy of the palette
+    /// when Revit's theme changes): applies the theme, and writes it again whenever the other writer has put its colours
+    /// back. Cheap enough for a timer: one brush is compared.
+    /// </summary>
+    public static void Claim(FrameworkElement root)
+    {
+        UseTheme(root);
+        var dark = IsDark;
+        var (_, light, darkValue) = Tokens[0];
+        var want = Rgb(dark ? darkValue : light);
+        if (root.Resources[K.Bg] is SolidColorBrush b && b.Color == want) return;
+        DarkShown.Remove(root);
+        Apply(root, dark);
+    }
+
+    /// <summary>Takes this core's styles back off a root it claimed (the core is being replaced).</summary>
+    public static void Unclaim(FrameworkElement root)
+    {
+        ReleaseTheme(root);
+        if (CdtTheme.Styles is { } cdt) root.Resources.MergedDictionaries.Remove(cdt);
+        if (_styles is not null) root.Resources.MergedDictionaries.Remove(_styles);
+        DarkShown.Remove(root);
     }
 
     private static void Apply(FrameworkElement root, bool dark)
@@ -210,6 +227,8 @@ internal static class Brand
         DarkShown.Remove(root);
         DarkShown.Add(root, dark);
         foreach (var (key, light, darkValue) in Tokens) root.Resources[key] = Brush(Rgb(dark ? darkValue : light));
+        CdtTheme.WritePalette(root.Resources, dark);
+        if (root is Window window) CdtTheme.TitleBar(window, dark);
     }
 
     /// <summary>
@@ -220,6 +239,11 @@ internal static class Brand
     {
         var dictionary = new ResourceDictionary();
         foreach (var (key, light, darkValue) in Tokens) dictionary[key] = Brush(Rgb(dark ? darkValue : light));
+        // The SDK's palette too, as frozen copies (the SDK's own brushes belong to this thread).
+        var cdt = new ResourceDictionary();
+        CdtTheme.WritePalette(cdt, dark);
+        foreach (System.Collections.DictionaryEntry e in cdt)
+            dictionary[e.Key] = e.Value is SolidColorBrush b ? Brush(b.Color) : e.Value;
         return dictionary;
     }
 
@@ -239,34 +263,30 @@ internal static class Brand
 
     // ---- Styles ------------------------------------------------------------------------------------------------
 
-    private static string ButtonStyle(string key, string fg, string border, double thickness) => $$"""
+    private static string ButtonStyle(string key, string bg, string hover, string pressed, string fg, string border, string pressedBorder) => $$"""
         <Style x:Key="{{key}}" TargetType="Button" BasedOn="{StaticResource SpmButtonBase}">
-          <Setter Property="Background" Value="{DynamicResource SpmButtonFace}"/>
+          <Setter Property="Background" Value="{DynamicResource {{bg}}}"/>
           <Setter Property="Foreground" Value="{DynamicResource {{fg}}}"/>
           <Setter Property="BorderBrush" Value="{DynamicResource {{border}}}"/>
-          <Setter Property="BorderThickness" Value="{{thickness}}"/>
           <Style.Triggers>
-            <Trigger Property="IsMouseOver" Value="True">
-              <Setter Property="Background" Value="{DynamicResource SpmSurfaceHover}"/>
-              <Setter Property="BorderBrush" Value="{DynamicResource SpmAccent}"/>
-            </Trigger>
+            <Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="{DynamicResource {{hover}}}"/></Trigger>
             <Trigger Property="IsPressed" Value="True">
-              <Setter Property="Background" Value="{DynamicResource SpmButtonPressed}"/>
-              <Setter Property="BorderBrush" Value="{DynamicResource SpmAccentPressed}"/>
+              <Setter Property="Background" Value="{DynamicResource {{pressed}}}"/>
+              <Setter Property="BorderBrush" Value="{DynamicResource {{pressedBorder}}}"/>
             </Trigger>
             <Trigger Property="IsEnabled" Value="False">
               <Setter Property="Background" Value="{DynamicResource SpmSurface}"/>
               <Setter Property="Foreground" Value="{DynamicResource SpmMuted}"/>
-              <Setter Property="BorderBrush" Value="{DynamicResource SpmBorderSubtle}"/>
+              <Setter Property="BorderBrush" Value="{DynamicResource SpmBorder}"/>
             </Trigger>
           </Style.Triggers>
         </Style>
         """;
 
     /// <summary>
-    /// Control styles in the ETABS 23 look: the square Windows controls ETABS's forms use (grey button faces with a blue
-    /// hover, white square fields, plain check boxes and radio buttons, group boxes with dark blue captions, flat tabs),
-    /// Segoe UI 9 pt. Templates are replaced so every state uses palette tokens only.
+    /// Control styles for both themes, built once. Templates are replaced (not just recoloured) because the stock
+    /// Windows templates paint fixed light colours on hover and press, which would put light text on a light fill in the
+    /// dark theme. Every state uses palette tokens only.
     /// </summary>
     private static ResourceDictionary Styles()
     {
@@ -276,21 +296,21 @@ internal static class Brand
                                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
               <Style x:Key="SpmFocusVisual">
                 <Setter Property="Control.Template"><Setter.Value><ControlTemplate>
-                  <Rectangle Margin="2" StrokeThickness="1" Stroke="{DynamicResource SpmText}" StrokeDashArray="1 2" SnapsToDevicePixels="True"/>
+                  <Rectangle Margin="-3" RadiusX="6" RadiusY="6" StrokeThickness="2" Stroke="{DynamicResource SpmFocus}" SnapsToDevicePixels="True"/>
                 </ControlTemplate></Setter.Value></Setter>
               </Style>
               <Style x:Key="SpmButtonBase" TargetType="Button">
                 <Setter Property="FocusVisualStyle" Value="{StaticResource SpmFocusVisual}"/>
-                <Setter Property="MinHeight" Value="23"/>
-                <Setter Property="MinWidth" Value="23"/>
-                <Setter Property="Padding" Value="10,2"/>
+                <Setter Property="MinHeight" Value="28"/>
+                <Setter Property="MinWidth" Value="28"/>
+                <Setter Property="Padding" Value="12,4"/>
                 <Setter Property="BorderThickness" Value="1"/>
                 <Setter Property="HorizontalContentAlignment" Value="Center"/>
                 <Setter Property="VerticalContentAlignment" Value="Center"/>
                 <Setter Property="Template"><Setter.Value>
                   <ControlTemplate TargetType="Button">
                     <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
-                            BorderThickness="{TemplateBinding BorderThickness}" SnapsToDevicePixels="True">
+                            BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="4" SnapsToDevicePixels="True">
                       <ContentPresenter Margin="{TemplateBinding Padding}" RecognizesAccessKey="True"
                                         HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
                                         VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
@@ -298,9 +318,9 @@ internal static class Brand
                   </ControlTemplate>
                 </Setter.Value></Setter>
               </Style>
-              {{{ButtonStyle("SpmSecondaryButton", K.Text, K.ButtonBorder, 1)}}}
-              {{{ButtonStyle("SpmPrimaryButton", K.Text, K.Accent, 2)}}}
-              {{{ButtonStyle("SpmDangerButton", K.DangerText, K.ButtonBorder, 1)}}}
+              {{{ButtonStyle("SpmSecondaryButton", K.Surface, K.SurfaceHover, K.SurfaceHover, K.Text, K.InputBorder, K.Accent)}}}
+              {{{ButtonStyle("SpmPrimaryButton", K.Accent, K.AccentHover, K.AccentPressed, K.OnAccent, K.Accent, K.AccentPressed)}}}
+              {{{ButtonStyle("SpmDangerButton", K.Danger, K.DangerHover, K.DangerPressed, K.OnDanger, K.Danger, K.DangerPressed)}}}
               <Style TargetType="Button" BasedOn="{StaticResource SpmSecondaryButton}"/>
 
               <Style TargetType="TextBox">
@@ -310,19 +330,22 @@ internal static class Brand
                 <Setter Property="CaretBrush" Value="{DynamicResource SpmText}"/>
                 <Setter Property="SelectionBrush" Value="{DynamicResource SpmAccent}"/>
                 <Setter Property="BorderThickness" Value="1"/>
-                <Setter Property="Padding" Value="3,2"/>
-                <Setter Property="MinHeight" Value="22"/>
+                <Setter Property="Padding" Value="4,3"/>
+                <Setter Property="MinHeight" Value="26"/>
                 <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
                 <Setter Property="Template"><Setter.Value>
                   <ControlTemplate TargetType="TextBox">
                     <Border x:Name="bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
-                            BorderThickness="{TemplateBinding BorderThickness}" SnapsToDevicePixels="True">
+                            BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="3" SnapsToDevicePixels="True">
                       <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" Focusable="False"
                                     HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Hidden"/>
                     </Border>
                     <ControlTemplate.Triggers>
-                      <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource SpmText}"/></Trigger>
-                      <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource SpmFocus}"/></Trigger>
+                      <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource SpmAccent}"/></Trigger>
+                      <Trigger Property="IsKeyboardFocused" Value="True">
+                        <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource SpmFocus}"/>
+                        <Setter TargetName="bd" Property="BorderThickness" Value="2"/>
+                      </Trigger>
                       <Trigger Property="IsEnabled" Value="False">
                         <Setter TargetName="bd" Property="Background" Value="{DynamicResource SpmSurface}"/>
                         <Setter Property="Foreground" Value="{DynamicResource SpmMuted}"/>
@@ -334,50 +357,25 @@ internal static class Brand
 
               <Style TargetType="CheckBox">
                 <Setter Property="Foreground" Value="{DynamicResource SpmText}"/>
-                <Setter Property="MinHeight" Value="20"/>
+                <Setter Property="MinHeight" Value="24"/>
                 <Setter Property="FocusVisualStyle" Value="{StaticResource SpmFocusVisual}"/>
                 <Setter Property="Template"><Setter.Value>
                   <ControlTemplate TargetType="CheckBox">
                     <Grid Background="Transparent">
                       <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                      <Border x:Name="box" Width="13" Height="13" BorderThickness="1" VerticalAlignment="Center"
-                              BorderBrush="{DynamicResource SpmText}" Background="{DynamicResource SpmField}" SnapsToDevicePixels="True">
-                        <Path x:Name="mark" Data="M1.5,5.5 L4.5,8.5 L9.5,2" Stroke="{DynamicResource SpmText}" StrokeThickness="1.6" Visibility="Collapsed"/>
+                      <Border x:Name="box" Width="16" Height="16" CornerRadius="3" BorderThickness="1.5" VerticalAlignment="Center"
+                              BorderBrush="{DynamicResource SpmInputBorder}" Background="{DynamicResource SpmField}" SnapsToDevicePixels="True">
+                        <Path x:Name="mark" Data="M2.5,6.5 L5.5,9.5 L10.5,3.5" Stroke="{DynamicResource SpmOnAccent}" StrokeThickness="2" Visibility="Collapsed"/>
                       </Border>
-                      <ContentPresenter Grid.Column="1" Margin="6,0,0,0" VerticalAlignment="Center" RecognizesAccessKey="True"/>
+                      <ContentPresenter Grid.Column="1" Margin="8,0,0,0" VerticalAlignment="Center" RecognizesAccessKey="True"/>
                     </Grid>
                     <ControlTemplate.Triggers>
-                      <Trigger Property="IsMouseOver" Value="True">
+                      <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="box" Property="BorderBrush" Value="{DynamicResource SpmAccent}"/></Trigger>
+                      <Trigger Property="IsChecked" Value="True">
+                        <Setter TargetName="box" Property="Background" Value="{DynamicResource SpmAccent}"/>
                         <Setter TargetName="box" Property="BorderBrush" Value="{DynamicResource SpmAccent}"/>
-                        <Setter TargetName="box" Property="Background" Value="{DynamicResource SpmSurfaceHover}"/>
+                        <Setter TargetName="mark" Property="Visibility" Value="Visible"/>
                       </Trigger>
-                      <Trigger Property="IsChecked" Value="True"><Setter TargetName="mark" Property="Visibility" Value="Visible"/></Trigger>
-                      <Trigger Property="IsEnabled" Value="False">
-                        <Setter Property="Foreground" Value="{DynamicResource SpmMuted}"/>
-                        <Setter TargetName="box" Property="BorderBrush" Value="{DynamicResource SpmBorder}"/>
-                      </Trigger>
-                    </ControlTemplate.Triggers>
-                  </ControlTemplate>
-                </Setter.Value></Setter>
-              </Style>
-
-              <Style TargetType="RadioButton">
-                <Setter Property="Foreground" Value="{DynamicResource SpmText}"/>
-                <Setter Property="MinHeight" Value="20"/>
-                <Setter Property="FocusVisualStyle" Value="{StaticResource SpmFocusVisual}"/>
-                <Setter Property="Template"><Setter.Value>
-                  <ControlTemplate TargetType="RadioButton">
-                    <Grid Background="Transparent">
-                      <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                      <Grid Width="13" Height="13" VerticalAlignment="Center">
-                        <Ellipse x:Name="ring" Stroke="{DynamicResource SpmText}" StrokeThickness="1" Fill="{DynamicResource SpmField}"/>
-                        <Ellipse x:Name="dot" Width="5" Height="5" Fill="{DynamicResource SpmText}" Visibility="Collapsed"/>
-                      </Grid>
-                      <ContentPresenter Grid.Column="1" Margin="6,0,0,0" VerticalAlignment="Center" RecognizesAccessKey="True"/>
-                    </Grid>
-                    <ControlTemplate.Triggers>
-                      <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ring" Property="Stroke" Value="{DynamicResource SpmAccent}"/></Trigger>
-                      <Trigger Property="IsChecked" Value="True"><Setter TargetName="dot" Property="Visibility" Value="Visible"/></Trigger>
                       <Trigger Property="IsEnabled" Value="False"><Setter Property="Foreground" Value="{DynamicResource SpmMuted}"/></Trigger>
                     </ControlTemplate.Triggers>
                   </ControlTemplate>
@@ -386,14 +384,15 @@ internal static class Brand
 
               <Style TargetType="ComboBoxItem">
                 <Setter Property="Foreground" Value="{DynamicResource SpmText}"/>
-                <Setter Property="MinHeight" Value="20"/>
+                <Setter Property="MinHeight" Value="24"/>
                 <Setter Property="Template"><Setter.Value>
                   <ControlTemplate TargetType="ComboBoxItem">
-                    <Border x:Name="bd" Background="Transparent" Padding="4,2" SnapsToDevicePixels="True">
+                    <Border x:Name="bd" Background="Transparent" Padding="6,3" SnapsToDevicePixels="True">
                       <ContentPresenter VerticalAlignment="Center"/>
                     </Border>
                     <ControlTemplate.Triggers>
-                      <Trigger Property="IsHighlighted" Value="True">
+                      <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="bd" Property="Background" Value="{DynamicResource SpmSurfaceHover}"/></Trigger>
+                      <Trigger Property="IsSelected" Value="True">
                         <Setter TargetName="bd" Property="Background" Value="{DynamicResource SpmAccent}"/>
                         <Setter Property="Foreground" Value="{DynamicResource SpmOnAccent}"/>
                       </Trigger>
@@ -404,7 +403,7 @@ internal static class Brand
 
               <Style TargetType="ComboBox">
                 <Setter Property="Foreground" Value="{DynamicResource SpmText}"/>
-                <Setter Property="MinHeight" Value="22"/>
+                <Setter Property="MinHeight" Value="26"/>
                 <Setter Property="FocusVisualStyle" Value="{StaticResource SpmFocusVisual}"/>
                 <Setter Property="Template"><Setter.Value>
                   <ControlTemplate TargetType="ComboBox">
@@ -414,9 +413,9 @@ internal static class Brand
                         <ToggleButton.Template>
                           <ControlTemplate TargetType="ToggleButton">
                             <Border x:Name="bd" Background="{DynamicResource SpmField}" BorderBrush="{DynamicResource SpmInputBorder}"
-                                    BorderThickness="1" SnapsToDevicePixels="True">
-                              <Path HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,6,0" Data="M0,0 L3.5,3.5 L7,0"
-                                    Stroke="{DynamicResource SpmText}" StrokeThickness="1"/>
+                                    BorderThickness="1" CornerRadius="3" SnapsToDevicePixels="True">
+                              <Path HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,9,0" Data="M0,0 L4,4 L8,0"
+                                    Stroke="{DynamicResource SpmText}" StrokeThickness="1.5"/>
                             </Border>
                             <ControlTemplate.Triggers>
                               <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource SpmAccent}"/></Trigger>
@@ -424,13 +423,13 @@ internal static class Brand
                           </ControlTemplate>
                         </ToggleButton.Template>
                       </ToggleButton>
-                      <ContentPresenter IsHitTestVisible="False" Margin="4,2,20,2" VerticalAlignment="Center"
+                      <ContentPresenter IsHitTestVisible="False" Margin="7,3,26,3" VerticalAlignment="Center"
                                         Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"/>
                       <Popup x:Name="PART_Popup" Placement="Bottom" AllowsTransparency="True" Focusable="False"
                              IsOpen="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}}">
                         <Border MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}"
                                 MaxHeight="{TemplateBinding MaxDropDownHeight}" Background="{DynamicResource SpmField}"
-                                BorderBrush="{DynamicResource SpmText}" BorderThickness="1">
+                                BorderBrush="{DynamicResource SpmInputBorder}" BorderThickness="1">
                           <ScrollViewer><ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained"/></ScrollViewer>
                         </Border>
                       </Popup>
@@ -442,79 +441,9 @@ internal static class Brand
                 </Setter.Value></Setter>
               </Style>
 
-              <Style TargetType="GroupBox">
-                <Setter Property="Foreground" Value="{DynamicResource SpmText}"/>
-                <Setter Property="Background" Value="{DynamicResource SpmSurface}"/>
-                <Setter Property="Padding" Value="8,18,8,8"/>
-                <Setter Property="Margin" Value="0,0,0,8"/>
-                <Setter Property="Template"><Setter.Value>
-                  <ControlTemplate TargetType="GroupBox">
-                    <Grid>
-                      <Border Margin="0,7,0,0" BorderThickness="1" BorderBrush="{DynamicResource SpmBorderSubtle}" SnapsToDevicePixels="True"/>
-                      <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="7,0,0,0" Padding="3,0" Background="{TemplateBinding Background}">
-                        <ContentPresenter ContentSource="Header" TextElement.Foreground="{DynamicResource SpmGroupCaption}" RecognizesAccessKey="True"/>
-                      </Border>
-                      <ContentPresenter Margin="{TemplateBinding Padding}" ContentSource="Content"/>
-                    </Grid>
-                  </ControlTemplate>
-                </Setter.Value></Setter>
-              </Style>
-
-              <Style TargetType="TabControl">
-                <Setter Property="Background" Value="{DynamicResource SpmBg}"/>
-                <Setter Property="BorderBrush" Value="{DynamicResource SpmBorder}"/>
-                <Setter Property="BorderThickness" Value="0,1,0,0"/>
-                <Setter Property="Padding" Value="0"/>
-                <Setter Property="Template"><Setter.Value>
-                  <ControlTemplate TargetType="TabControl">
-                    <DockPanel>
-                      <Border DockPanel.Dock="Top" Background="{DynamicResource SpmSurface}" Padding="3,3,3,0">
-                        <TabPanel IsItemsHost="True" Panel.ZIndex="1" KeyboardNavigation.TabIndex="1"/>
-                      </Border>
-                      <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Margin="0,-1,0,0">
-                        <ContentPresenter ContentSource="SelectedContent" Margin="{TemplateBinding Padding}"/>
-                      </Border>
-                    </DockPanel>
-                  </ControlTemplate>
-                </Setter.Value></Setter>
-              </Style>
-              <Style TargetType="TabItem">
-                <Setter Property="Foreground" Value="{DynamicResource SpmText}"/>
-                <Setter Property="FocusVisualStyle" Value="{StaticResource SpmFocusVisual}"/>
-                <Setter Property="Template"><Setter.Value>
-                  <ControlTemplate TargetType="TabItem">
-                    <Border x:Name="bd" Background="Transparent" BorderBrush="Transparent" BorderThickness="1,1,1,0" Padding="9,2,9,3" Margin="0,0,1,0" SnapsToDevicePixels="True">
-                      <ContentPresenter ContentSource="Header" RecognizesAccessKey="True" VerticalAlignment="Center"/>
-                    </Border>
-                    <ControlTemplate.Triggers>
-                      <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="bd" Property="Background" Value="{DynamicResource SpmSurfaceHover}"/></Trigger>
-                      <Trigger Property="IsSelected" Value="True">
-                        <Setter TargetName="bd" Property="Background" Value="{DynamicResource SpmBg}"/>
-                        <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource SpmBorder}"/>
-                        <Setter TargetName="bd" Property="Margin" Value="0,0,1,-1"/>
-                      </Trigger>
-                    </ControlTemplate.Triggers>
-                  </ControlTemplate>
-                </Setter.Value></Setter>
-              </Style>
-
-              <Style TargetType="DataGrid">
-                <Setter Property="Background" Value="{DynamicResource SpmBg}"/>
-                <Setter Property="BorderBrush" Value="{DynamicResource SpmBorder}"/>
-                <Setter Property="HorizontalGridLinesBrush" Value="{DynamicResource SpmGridLine}"/>
-                <Setter Property="VerticalGridLinesBrush" Value="{DynamicResource SpmGridLine}"/>
-                <Setter Property="RowHeaderWidth" Value="0"/>
-              </Style>
-              <Style TargetType="DataGridColumnHeader">
-                <Setter Property="Background" Value="{DynamicResource SpmGridHeader}"/>
-                <Setter Property="BorderBrush" Value="{DynamicResource SpmBorder}"/>
-                <Setter Property="BorderThickness" Value="0,0,1,1"/>
-                <Setter Property="Padding" Value="5,2"/>
-              </Style>
-
               <Style TargetType="ProgressBar">
-                <Setter Property="Foreground" Value="{DynamicResource SpmSuccessText}"/>
-                <Setter Property="Background" Value="{DynamicResource SpmSurface}"/>
+                <Setter Property="Foreground" Value="{DynamicResource SpmAccent}"/>
+                <Setter Property="Background" Value="{DynamicResource SpmSurfaceHover}"/>
                 <Setter Property="BorderBrush" Value="{DynamicResource SpmBorder}"/>
               </Style>
               <Style TargetType="Hyperlink">
@@ -526,7 +455,69 @@ internal static class Brand
         // Never let a styling problem stop a window or the pane from opening: fall back to the plain WPF look.
         try { _styles = (ResourceDictionary)XamlReader.Parse(xaml); }
         catch (Exception) { _styles = new ResourceDictionary(); }
+        UseCdtStyles(_styles);
         return _styles;
+    }
+
+    /// <summary>
+    /// The plain controls and the Spm* button styles take the CDT SDK's styles (CDT.SecondaryButton, CDT.TextBox,
+    /// CDT.ComboBox, CDT.DataGrid, …): every state, the focus ring and the validation template come from the SDK, and the
+    /// colours from the palette each window carries. A style the SDK doesn't have keeps Sketch ProMax's own.
+    /// </summary>
+    private static void UseCdtStyles(ResourceDictionary styles)
+    {
+        if (CdtTheme.Styles is null) return;
+        void Base(object key, Type type, string cdt)
+        {
+            try { if (CdtTheme.Style(cdt) is { } basedOn && basedOn.TargetType.IsAssignableFrom(type)) styles[key] = new Style(type, basedOn); }
+            catch (Exception) { /* keep Sketch ProMax's style */ }
+        }
+        Base("SpmSecondaryButton", typeof(Button), "CDT.SecondaryButton");
+        Base("SpmPrimaryButton", typeof(Button), "CDT.PrimaryButton");
+        Base("SpmDangerButton", typeof(Button), "CDT.DangerButton");
+        Base("SpmGhostButton", typeof(Button), "CDT.GhostButton");
+        // Text boxes: the SDK's, without its one-line height cap (35 px). Boxes that hold several lines (AcceptsReturn or
+        // wrapping) keep Sketch ProMax's own template, which lays the text out from the top and scrolls.
+        try
+        {
+            var multiLine = (styles[typeof(TextBox)] as Style)?.Setters.OfType<Setter>().FirstOrDefault(x => x.Property == Control.TemplateProperty)?.Value;
+            if (CdtTheme.Style("CDT.TextBox") is { } cdtText)
+            {
+                var text = new Style(typeof(TextBox), cdtText);
+                text.Setters.Add(new Setter(FrameworkElement.MaxHeightProperty, double.PositiveInfinity));
+                text.Setters.Add(new Setter(Control.BorderBrushProperty, new DynamicResourceExtension(K.InputBorder)));
+                if (multiLine is ControlTemplate template)
+                {
+                    var returns = new Trigger { Property = TextBoxBase.AcceptsReturnProperty, Value = true };
+                    returns.Setters.Add(new Setter(Control.TemplateProperty, template));
+                    var wraps = new Trigger { Property = TextBox.TextWrappingProperty, Value = TextWrapping.Wrap };
+                    wraps.Setters.Add(new Setter(Control.TemplateProperty, template));
+                    text.Triggers.Add(returns);
+                    text.Triggers.Add(wraps);
+                }
+                styles[typeof(TextBox)] = text;
+            }
+        }
+        catch (Exception) { /* keep Sketch ProMax's text box */ }
+        foreach (var (type, cdt) in new (Type, string)[]
+        {
+            (typeof(Button), "CDT.SecondaryButton"),
+            (typeof(CheckBox), "CDT.CheckBox"), (typeof(RadioButton), "CDT.RadioButton"), (typeof(System.Windows.Controls.Primitives.ToggleButton), "CDT.ToggleButton"),
+            (typeof(ComboBox), "CDT.ComboBox"), (typeof(ComboBoxItem), "CDT.ComboBoxItem"), (typeof(ProgressBar), "CDT.ProgressBar"),
+            (typeof(Hyperlink), "CDT.Hyperlink"), (typeof(ListBox), "CDT.ListBox"), (typeof(ListBoxItem), "CDT.ListBoxItem"),
+            (typeof(ListView), "CDT.ListView"), (typeof(ListViewItem), "CDT.ListViewItem"), (typeof(GridViewColumnHeader), "CDT.GridViewColumnHeader"),
+            (typeof(TreeView), "CDT.TreeView"), (typeof(TreeViewItem), "CDT.TreeViewItem"), (typeof(TabControl), "CDT.TabControl"), (typeof(TabItem), "CDT.TabItem"),
+            (typeof(DataGrid), "CDT.DataGrid"), (typeof(System.Windows.Controls.Primitives.DataGridColumnHeader), "CDT.DataGridColumnHeader"), (typeof(DataGridRow), "CDT.DataGridRow"),
+            (typeof(DataGridCell), "CDT.DataGridCell"), (typeof(ToolTip), "CDT.ToolTip"), (typeof(ContextMenu), "CDT.ContextMenu"), (typeof(MenuItem), "CDT.MenuItem"),
+            (typeof(Expander), "CDT.Expander"), (typeof(GroupBox), "CDT.GroupBox"), (typeof(Slider), "CDT.Slider"), (typeof(DatePicker), "CDT.DatePicker"),
+            (typeof(GridSplitter), "CDT.GridSplitter"), (typeof(Menu), "CDT.Menu"), (typeof(System.Windows.Controls.Primitives.StatusBar), "CDT.StatusBar"), (typeof(RichTextBox), "CDT.RichTextBox"),
+        })
+            Base(type, type, cdt);
+        // Field outlines at 3:1 against the window (the UI rules): the SDK draws them in its hairline Stroke colour,
+        // which an unticked box or an empty field nearly loses in the dark theme.
+        foreach (var type in new[] { typeof(CheckBox), typeof(RadioButton), typeof(ComboBox) })
+            if (styles[type] is Style field && !field.IsSealed)
+                field.Setters.Add(new Setter(Control.BorderBrushProperty, new DynamicResourceExtension(K.InputBorder)));
     }
 
     // ---- Logo and window chrome --------------------------------------------------------------------------------
@@ -578,8 +569,7 @@ internal static class Brand
         if (Icon is { } icon) window.Icon = icon;
         window.ShowInTaskbar = false;
         UseTheme(window);
-        // ETABS's forms are grey (#F0F0F0), with white fields and lists on them.
-        window.SetResourceReference(Control.BackgroundProperty, K.Surface);
+        CdtTheme.Focus(window);
         // The CSI ProMax window owns its dialogs and tool windows, so they stay with it and never hide behind ETABS.
         var main = Host.MainWindow.Handle;
         if (main != IntPtr.Zero)
@@ -589,61 +579,24 @@ internal static class Brand
         }
     }
 
-    /// <summary>
-    /// The title of a CSI ProMax window, drawn like an ETABS docked pane: a grey strip with the title on an outlined tab,
-    /// and the subtitle as a plain line below it on the form's grey.
-    /// </summary>
+    /// <summary>The blue header band used at the top of CSI ProMax windows (the same in both themes).</summary>
     public static Border Header(string title, string? subtitle)
     {
-        var stack = new StackPanel();
-        stack.Children.Add(Strip(title));
-        if (subtitle is not null)
+        var gradient = new LinearGradientBrush(Blue, Navy, new Point(0, 0), new Point(1, 1));
+        gradient.Freeze();
+        var row = new DockPanel { LastChildFill = true };
+        if (Logo is { } logo)
         {
-            var sub = Text(subtitle, K.HeaderSub);
-            sub.Margin = new Thickness(10, 6, 10, 2);
-            stack.Children.Add(sub);
-        }
-        var band = new Border { Child = stack };
-        band.SetResourceReference(Border.BackgroundProperty, K.Surface);
-        return band;
-    }
-
-    /// <summary>An ETABS pane strip: #D8D8D8 with the title on a tab outlined in #696969 (the look of Model Explorer's own tab).</summary>
-    public static Border Strip(string title, UIElement? right = null)
-    {
-        var row = new DockPanel { LastChildFill = false, Height = 22 };
-        var tabRow = new StackPanel { Orientation = Orientation.Horizontal };
-        if (Icon is { } icon)
-        {
-            var image = new Image { Source = icon, Width = 14, Height = 14, Margin = new Thickness(0, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center };
+            var image = new Image { Source = logo, Width = 40, Height = 40, Margin = new Thickness(0, 0, 12, 0) };
             AutomationProperties.SetName(image, "CSI ProMax");
-            tabRow.Children.Add(image);
+            DockPanel.SetDock(image, Dock.Left);
+            row.Children.Add(image);
         }
-        tabRow.Children.Add(Text(title, K.Text));
-        var tab = new Border
-        {
-            Child = tabRow, BorderThickness = new Thickness(1, 1, 1, 0), CornerRadius = new CornerRadius(3, 3, 0, 0),
-            Padding = new Thickness(14, 1, 14, 2), Margin = new Thickness(4, 3, 0, 0), VerticalAlignment = VerticalAlignment.Bottom,
-        };
-        tab.SetResourceReference(Border.BorderBrushProperty, K.TabOutline);
-        row.Children.Add(tab);
-        if (right is not null)
-        {
-            DockPanel.SetDock(right, Dock.Right);
-            row.Children.Add(right);
-        }
-        var strip = new Border { Child = row, BorderThickness = new Thickness(0, 0, 0, 1) };
-        strip.SetResourceReference(Border.BackgroundProperty, K.Strip);
-        strip.SetResourceReference(Border.BorderBrushProperty, K.StripBorder);
-        return strip;
-    }
-
-    /// <summary>A group box as ETABS draws them in its forms: a thin frame with a dark blue caption.</summary>
-    public static GroupBox Group(string caption, UIElement content, string background = K.Surface)
-    {
-        var box = new GroupBox { Header = caption, Content = content };
-        box.SetResourceReference(Control.BackgroundProperty, background);
-        return box;
+        var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        text.Children.Add(Text(title, K.HeaderText, 16, bold: true));
+        if (subtitle is not null) text.Children.Add(Text(subtitle, K.HeaderSub));
+        row.Children.Add(text);
+        return new Border { Background = gradient, Padding = new Thickness(16, 12, 16, 12), Child = row };
     }
 
     /// <summary>
@@ -652,7 +605,7 @@ internal static class Brand
     /// </summary>
     public static Button Button(string text, Weight weight = Weight.Secondary)
     {
-        var button = new Button { Content = text, MinWidth = 80, Margin = new Thickness(4, 0, 4, 0) };
+        var button = new Button { Content = text, MinWidth = 88, Margin = new Thickness(8, 0, 0, 0) };
         button.SetResourceReference(FrameworkElement.StyleProperty, weight switch
         {
             Weight.Primary => "SpmPrimaryButton",
@@ -662,10 +615,10 @@ internal static class Brand
         return button;
     }
 
-    /// <summary>The button row at the foot of a form, centred as ETABS's forms have it (OK, Cancel).</summary>
+    /// <summary>The right-aligned button row at the foot of a dialog: secondary actions first, the primary one last.</summary>
     public static StackPanel ButtonRow(params Button[] buttons)
     {
-        var row = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 12, 0, 0) };
+        var row = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 16, 0, 0) };
         foreach (var b in buttons) row.Children.Add(b);
         return row;
     }
