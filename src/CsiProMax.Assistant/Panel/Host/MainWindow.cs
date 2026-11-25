@@ -25,7 +25,8 @@ internal sealed class MainWindow : Window
     public MainWindow()
     {
         _open = this;
-        Title = CsiProMax.App.Product;
+        // The version that is running, where it cannot be mistaken for one that is only out or downloaded.
+        Title = $"{CsiProMax.App.Product} {Update.Updater.CurrentText}";
         MinWidth = 340;
         MinHeight = 420;
         if (Brand.Icon is { } icon) Icon = icon;

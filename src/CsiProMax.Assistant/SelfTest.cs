@@ -62,6 +62,8 @@ public static class SelfTest
             catch (Exception ex) { done.Add(new StepResult(name, false, $"{ex.GetType().Name}: {ex.Message}")); }
         }
 
+        // First of all: a run on an old version reports what is already fixed, so the report itself says so.
+        Step("CSI ProMax is the newest version", () => Update.Updater.Behind() is { } behind ? throw new InvalidOperationException(behind) : (object)Update.Updater.CurrentText);
         // The model's file name without its folder: the report is sent on, and a folder can name a client or a person.
         Step("Info", () => { var info = etabs.Info(); return info with { File = info.File.Replace('\\', '/').Split('/').Last() }; });
         Step("Stories", () => etabs.Stories());

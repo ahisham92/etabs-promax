@@ -18,6 +18,7 @@ public sealed class RunSelfTestTool(ToolRegistry registry) : IEtabsTool
     public ToolResult Execute(EtabsApp app, ToolArgs args)
     {
         if (SelfTest.IsRunning) return ToolResult.Error("A self test is already running.");
+        if (Stale.Refusal() is { } old) return ToolResult.Error(old);
         var steps = SelfTest.Steps(app.Link, changes: false);
         return ToolResult.Ok(SelfTestStatusTool.Report(steps, DateTime.Now, registry.All.Count));
     }
@@ -54,6 +55,7 @@ public sealed class RunFieldTestTool : IEtabsTool
         var scope = (args.OptString("scope") ?? "full").Trim().ToLowerInvariant();
         if (scope == "status") return Status();
         if (scope is not ("full" or "quick")) return ToolResult.Error($"scope is full, quick or status, not '{scope}'.");
+        if (Stale.Refusal() is { } old) return ToolResult.Error(old);
         if (FieldTest.IsRunning || SelfTest.IsRunning)
             return ToolResult.Error("A test is already running. Call run_field_test with scope \"status\" to see where it is.");
         if (scope == "quick")
@@ -171,4 +173,11 @@ public sealed class SelfTestStatusTool : IEtabsTool
         tools_registered = tools,
         steps = steps.Select(s => new { step = s.Name, ok = s.Ok, detail = s.Ok ? null : s.Detail }),
     };
+}
+
+/// <summary>A test is not run by an old version when the new one is already on this PC: its report would name bugs that are fixed.</summary>
+internal static class Stale
+{
+    internal static string? Refusal() =>
+        Update.Updater.Behind() is { } behind && behind.Contains("is downloaded", StringComparison.Ordinal) ? behind + " Tell the user exactly this; do not report results from this version." : null;
 }

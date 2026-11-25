@@ -1,3 +1,4 @@
+using CsiProMax.Update;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
@@ -391,6 +392,67 @@ static class TesterBugTests
         });
 
         // ---- the second report: ETABS 20 answered "Cannot create plugin!" (CSI ProMax 0.4.4) ----
+
+        // ---- the rerun "on 0.4.5" that was made by 0.4.1: the window offered 0.4.5 and the old code still ran the test ----
+
+        yield return ("second SAFE run: one rule says when the running version is not the newest, and how to get onto it", () =>
+        {
+            var old = new Version(0, 4, 1);
+            Check(Updater.Behind(new Version(0, 4, 5), "0.4.5", "0.4.5", null) is null, "the newest version was called old");
+            Check(Updater.Behind(old, null, null, null) is null, "with nothing known, nothing is said");
+            var ready = Updater.Behind(old, "0.4.5", "0.4.5", "0.4.5") ?? throw new Exception("0.4.1 with 0.4.5 downloaded was not called old");
+            Check(ready.Contains("0.4.1") && ready.Contains("0.4.5") && ready.Contains("is downloaded") && ready.Contains("switches to it by itself"), ready);
+            // A download nobody recorded (the state file lost) still counts: the folder is there.
+            Check(Updater.Behind(old, null, null, "0.4.5")?.Contains("is downloaded") == true, "a downloaded folder alone was not seen");
+            var available = Updater.Behind(old, "0.4.5", null, null) ?? throw new Exception("0.4.1 with 0.4.5 out was not called old");
+            Check(available.Contains("0.4.5 is out") && available.Contains("install line"), available);
+            // A newer release than the one downloaded: the download is not the answer.
+            Check(Updater.Behind(old, "0.4.6", "0.4.5", "0.4.5")?.Contains("0.4.6 is out") == true, "a release newer than the download was not named");
+        });
+
+        yield return ("second SAFE run: a test on an old version fails its first check, and the report says so at the top", () =>
+        {
+            try
+            {
+                Updater.BehindProbe = () => Updater.Behind(new Version(0, 4, 1), "0.4.5", null, null);
+                var steps = SelfTest.Steps(new MemoryEtabs(), changes: false);
+                Check(steps[0].Name == "CSI ProMax is the newest version" && !steps[0].Ok && steps[0].Detail.Contains("0.4.5"), "the first check did not fail on the old version: " + steps[0]);
+                var folder = Path.Combine(Path.GetTempPath(), "cpm-stale-" + Guid.NewGuid().ToString("N"));
+                var outcome = FieldTest.Run(new MemoryEtabs(), changes: false, "a test", folder);
+                Check(outcome.Failed > 0, "the field test of an old version passed");
+                Check(File.ReadAllText(outcome.File).Contains("- NOT THE NEWEST VERSION: This is CSI ProMax 0.4.1"), "the report does not say at the top that it is from an old version");
+                Updater.BehindProbe = () => null;
+                var fresh = SelfTest.Steps(new MemoryEtabs(), changes: false);
+                Check(fresh[0].Ok, "the newest version failed the check: " + fresh[0]);
+            }
+            finally { Updater.BehindProbe = null; }
+        });
+
+        yield return ("second SAFE run: the chat's tests refuse to run on an old version when the new one is already on the PC", () =>
+        {
+            try
+            {
+                Updater.BehindProbe = () => Updater.Behind(new Version(0, 4, 1), "0.4.5", "0.4.5", "0.4.5");
+                var app = new CsiProMax.ETABS.EtabsApp(new MemoryEtabs());
+                var none = new CsiProMax.Tools.ToolArgs(new Dictionary<string, JsonElement>());
+                var field = new CsiProMax.Tools.RunFieldTestTool().Execute(app, none);
+                Check(field.IsError && field.Text.Contains("0.4.5 is downloaded"), "run_field_test ran on the old version: " + field.Text);
+            }
+            finally { Updater.BehindProbe = null; }
+        });
+
+        yield return ("second SAFE run: a newer version is started with the same arguments, once, and told what to wait for", () =>
+        {
+            var info = CsiProMax.Assistant.Program.Start("dotnet", "/v/0.4.5", ["--etabs-pid", "7", "--program", "SAFE", "--this-version", "--installed-in", "/old", "--after-pid", "3", "--fieldtest"], 42);
+            var args = info.ArgumentList.ToList();
+            Equal(Path.Combine("/v/0.4.5", "CsiProMax.dll"), args[0], "what is started");
+            Equal("--etabs-pid 7 --program SAFE --fieldtest --this-version --installed-in", string.Join(' ', args.Skip(1).Take(7)), "the arguments");
+            Equal(1, args.Count(a => a == "--this-version"), "--this-version");
+            Equal("42", args[^1], "the process to wait for");
+            // The tests from the command line go to the newest version before anything else (they used to run the installed one).
+            var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Program.cs"));
+            Check(source.IndexOf("Newer(args) is { } newerTest", StringComparison.Ordinal) is var at and > 0 && at < source.IndexOf("FieldTest.Run(link", StringComparison.Ordinal), "--fieldtest runs before a newer version is looked for");
+        });
 
         yield return ("ETABS 20 tester: the field test tries what Tools > CSI ProMax does in each program, and fails where the plug-in cannot be created", () =>
         {

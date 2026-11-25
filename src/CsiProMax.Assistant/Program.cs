@@ -41,6 +41,31 @@ public static class Program
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* the new folder starts empty */ }
     }
 
+    /// <summary>The folder of a newer downloaded version to run instead of this one, or null (also when this one was started as "this version").</summary>
+    private static string? Newer(string[] args) => args.Contains("--this-version") ? null : Updater.NewestDownloaded(Updater.Current);
+
+    /// <summary>
+    /// How a downloaded version is started in place of this one: the same arguments, told not to look for a newer one
+    /// again, where the installed files are (the Tools menus name the plug-in files there) and, when an open window
+    /// gives way to it, which process to wait for.
+    /// </summary>
+    internal static ProcessStartInfo Start(string dotnet, string folder, string[] args, int? afterPid)
+    {
+        var info = new ProcessStartInfo(dotnet) { UseShellExecute = false, WorkingDirectory = folder };
+        info.ArgumentList.Add(Path.Combine(folder, "CsiProMax.dll"));
+        for (var i = 0; i < args.Length; i++)
+        {
+            if (args[i] == "--this-version") continue;
+            if (args[i] is "--installed-in" or "--after-pid") { i++; continue; }
+            info.ArgumentList.Add(args[i]);
+        }
+        info.ArgumentList.Add("--this-version");
+        info.ArgumentList.Add("--installed-in");
+        info.ArgumentList.Add(ToolsMenu.InstalledIn ?? AppContext.BaseDirectory);
+        if (afterPid is { } pid) { info.ArgumentList.Add("--after-pid"); info.ArgumentList.Add(pid.ToString(System.Globalization.CultureInfo.InvariantCulture)); }
+        return info;
+    }
+
     [STAThread]
     public static int Main(string[] args)
     {
@@ -65,6 +90,17 @@ public static class Program
             var folder = sapTest + 2 < args.Length ? args[sapTest + 2] : Path.Combine(Path.GetTempPath(), "CsiProMax-sap-test");
             return CsiProMax.Assistant.Sap2000.SapScratchTest.Run(s2k, folder);
         }
+        // The tests from the command line run on the newest version this PC has, like the window: the installed folder
+        // keeps the version first installed, and a test of that one reports what is already fixed.
+        if ((args.Contains("--fieldtest") || args.Contains("--selftest")) && Newer(args) is { } newerTest && Environment.ProcessPath is { } host)
+        {
+            try
+            {
+                using var run = Process.Start(Start(host, newerTest, args, null));
+                if (run is not null) { run.WaitForExit(); return run.ExitCode; }
+            }
+            catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or InvalidOperationException) { /* this version runs, and its report says it is old */ }
+        }
         if (args.Contains("--fieldtest"))
         {
             // The field test without the window: prints the report and says where it was saved.
@@ -87,18 +123,17 @@ public static class Program
         try
         {
             // A newer version the updater downloaded is started instead of this one (once: it is told not to look again).
-            if (!args.Contains("--this-version") && Updater.NewestDownloaded(Updater.Current) is { } newer && Environment.ProcessPath is { } dotnet)
+            if (Newer(args) is { } newer && Environment.ProcessPath is { } dotnet)
             {
-                var info = new ProcessStartInfo(dotnet) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = newer };
-                info.ArgumentList.Add(Path.Combine(newer, "CsiProMax.dll"));
-                foreach (var a in args) info.ArgumentList.Add(a);
-                info.ArgumentList.Add("--this-version");
-                // The newer version is told where the installed one is: the Tools menus name the plug-in files there.
-                info.ArgumentList.Add("--installed-in");
-                info.ArgumentList.Add(AppContext.BaseDirectory);
+                var info = Start(dotnet, newer, args, null);
+                info.CreateNoWindow = true;
                 try { Process.Start(info)?.Dispose(); return 0; }
                 catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or InvalidOperationException) { /* this version runs */ }
             }
+            // Started by an older window that is closing to let this version take over: wait for it to be gone.
+            if (Array.IndexOf(args, "--after-pid") is var after and >= 0 && after + 1 < args.Length && int.TryParse(args[after + 1], out var before))
+                try { using var old = Process.GetProcessById(before); old.WaitForExit(20000); }
+                catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception) { /* already gone */ }
 
             CarryOver();
             // One window per ETABS: started again from ETABS's menu, the open window comes forward.
@@ -130,11 +165,31 @@ public static class Program
             };
             app.MainWindow = window;
 
+            CsiProMax.App.SwitchTo = folder =>
+            {
+                if (Environment.ProcessPath is not { } exe) return;
+                try
+                {
+                    var next = Start(exe, folder, args, Environment.ProcessId);
+                    next.CreateNoWindow = true;
+                    Process.Start(next)?.Dispose();
+                    window.Close();
+                }
+                catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or InvalidOperationException) { Note("switch to the newer version", ex); }
+            };
+            // A version downloaded while an older window was busy, or by another window: used as soon as this one is idle.
+            window.ContentRendered += (_, _) => CsiProMax.App.SwitchWhenIdle();
             using var life = new CancellationTokenSource();
             var surface = new Thread(() =>
             {
                 while (WaitHandle.WaitAny([show, life.Token.WaitHandle]) == 0)
-                    window.Dispatcher.BeginInvoke(new Action(window.Surface));
+                    window.Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        // Opened again from the Tools menu while a newer version is downloaded: this window gives way
+                        // to it, unless work is going on (then it comes forward, and switches when the work is done).
+                        if (!CsiProMax.App.IsBusy && Updater.NewestDownloaded(Updater.Current) is { } ready && CsiProMax.App.SwitchTo is { } go) go(ready);
+                        else window.Surface();
+                    }));
             }) { IsBackground = true, Name = "CsiProMax show" };
             surface.Start();
             // Started from an ETABS window: when that ETABS is closed, this closes too.
