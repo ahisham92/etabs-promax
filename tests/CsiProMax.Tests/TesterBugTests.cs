@@ -751,6 +751,8 @@ static class TesterBugTests
             PcFieldSteps.PlugIn(ctx, read);
             var steps = ctx.Steps.Where(s => s.Name.Contains("can create", StringComparison.Ordinal)).ToList();
             Check(steps.Count == 2 && steps[0] is { Ok: true, Skipped: false } && steps[1].Skipped, "ETABS 23 is tried here and ETABS 20 stays not tested: " + string.Join("; ", steps.Select(s => $"{s.Name}: {s.Ok} {s.Skipped} {s.Detail}")));
+            // Seen with 0.4.28: ETABS 20, ETABS 21 and SAP2000 24 said "could not be tried ... on .NET Framework" when the real reason was that their API file was not on the PC.
+            Check(steps[1].Detail.Contains("API file was not found", StringComparison.Ordinal), "a program whose API file is missing does not say so: " + steps[1].Detail);
             Check(File.ReadAllText(Path.Combine(root, "check.ps1")).Contains("$finding.ApiFile = $candidate", StringComparison.Ordinal), "check.ps1 no longer says where the program's API file is");
         });
         yield return ("field test: the real window is opened with the AI chat and without it", () =>
