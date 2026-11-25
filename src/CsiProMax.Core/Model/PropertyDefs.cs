@@ -312,6 +312,71 @@ public static class PropertyDefs
         m.Passthrough.RemoveAll(r => r.Heading == k.Heading && r.Lines.Count == 0);
     }
 
+    // ---- link properties ----
+
+    public const string LinkHeading = "LINK PROPERTIES";
+    public static readonly string[] LinkTypes = ["LINEAR", "DAMPER", "GAP", "HOOK", "PLASTIC (WEN)", "RUBBER ISOLATOR", "FRICTION ISOLATOR", "MULTILINEAR ELASTIC", "MULTILINEAR PLASTIC"];
+    public static readonly string[] LinkDofs = ["U1", "U2", "U3", "R1", "R2", "R3"];
+
+    /// <summary>A link property: its type, and per active direction its effective stiffness and damping (the linear
+    /// analysis uses these; a nonlinear type's own curve goes in by Edit > Model Text).</summary>
+    public sealed record LinkDef(string Name, string Type, Dictionary<string, (double Stiff, double Damp)> Dofs);
+
+    public static List<LinkDef> Links(StructuralModel m)
+    {
+        var list = new List<LinkDef>();
+        foreach (var line in m.Passthrough.Where(r => r.Heading == LinkHeading).SelectMany(r => r.Lines))
+        {
+            var t = Tokenize(line);
+            if (t.Count < 3 || t[0] != "LINKPROP") continue;
+            var name = Unquote(t[1]);
+            var at = list.FindIndex(x => x.Name == name);
+            if (at < 0) { list.Add(new LinkDef(name, "LINEAR", [])); at = list.Count - 1; }
+            var l = list[at];
+            for (var i = 2; i + 1 < t.Count; i += 2)
+            {
+                var k = t[i]; var v = Unquote(t[i + 1]);
+                if (k == "TYPE") list[at] = l = l with { Type = v };
+                else if (k == "DOF" && LinkDofs.Contains(v) && !l.Dofs.ContainsKey(v)) l.Dofs[v] = (0, 0);
+                else if (k.Length == 7 && k.EndsWith("STIFF", StringComparison.Ordinal) && LinkDofs.Contains(k[..2]) && TryNumber(v, out var st)) l.Dofs[k[..2]] = (st, l.Dofs.GetValueOrDefault(k[..2]).Damp);
+                else if (k.Length == 6 && k.EndsWith("DAMP", StringComparison.Ordinal) && LinkDofs.Contains(k[..2]) && TryNumber(v, out var dm)) l.Dofs[k[..2]] = (l.Dofs.GetValueOrDefault(k[..2]).Stiff, dm);
+            }
+        }
+        return list;
+    }
+
+    public static void SetLink(StructuralModel m, string name, string type, IReadOnlyDictionary<string, (double Stiff, double Damp)> dofs)
+    {
+        Name(name, "link property");
+        type = LinkTypes.FirstOrDefault(x => x.Equals(type, StringComparison.OrdinalIgnoreCase)) ?? throw new ArgumentException($"The link type is one of {string.Join(", ", LinkTypes)}.");
+        if (dofs.Count == 0) throw new ArgumentException("Give at least one direction (U1 to R3) with its stiffness.");
+        foreach (var (k, (st, dm)) in dofs)
+        {
+            if (!LinkDofs.Contains(k)) throw new ArgumentException($"A link's directions are {string.Join(", ", LinkDofs)}, not '{k}'.");
+            if (!double.IsFinite(st) || !double.IsFinite(dm) || st < 0 || dm < 0) throw new ArgumentException($"{k}: stiffness and damping are 0 or more.");
+        }
+        var raw = m.Passthrough.Find(r => r.Heading == LinkHeading);
+        if (raw is null) m.Passthrough.Add(raw = new RawSection { Heading = LinkHeading, After = "WALL PROPERTIES" });
+        var at = raw.Lines.FindIndex(l => Tokenize(l) is { Count: >= 2 } t && t[0] == "LINKPROP" && Unquote(t[1]) == name);
+        raw.Lines.RemoveAll(l => Tokenize(l) is { Count: >= 2 } t && t[0] == "LINKPROP" && Unquote(t[1]) == name);
+        var lines = new List<string> { "  " + Line(["LINKPROP", Quote(name), "TYPE", Quote(type)]) };
+        foreach (var k in LinkDofs.Where(dofs.ContainsKey))
+        {
+            lines.Add("  " + Line(["LINKPROP", Quote(name), "DOF", Quote(k)]));
+            lines.Add("  " + Line(["LINKPROP", Quote(name), k + "STIFF", Number(dofs[k].Stiff)]));
+            if (dofs[k].Damp > 0) lines.Add("  " + Line(["LINKPROP", Quote(name), k + "DAMP", Number(dofs[k].Damp)]));
+        }
+        raw.Lines.InsertRange(at < 0 ? raw.Lines.Count : Math.Min(at, raw.Lines.Count), lines);
+    }
+
+    public static void DeleteLink(StructuralModel m, string name)
+    {
+        if (!Links(m).Exists(x => x.Name == name)) throw new ArgumentException($"There is no link property '{name}'.");
+        foreach (var r in m.Passthrough.Where(r => r.Heading == LinkHeading))
+            r.Lines.RemoveAll(l => Tokenize(l) is { Count: >= 2 } t && t[0] == "LINKPROP" && Unquote(t[1]) == name);
+        m.Passthrough.RemoveAll(r => r.Heading == LinkHeading && r.Lines.Count == 0);
+    }
+
     private static void Name(string name, string what)
     {
         if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException($"Give the {what} a name.");

@@ -3233,7 +3233,7 @@ function modelerMenus(m) {
     ["Export", [["Tables to Excel (.xlsx)...", "m:xlsxOut"], 0, ["SAP2000 .s2k Text File...", "m:s2k"], ["SAFE .f2k Text File (one floor)...", "m:f2k"]]], 0, ["Print the active window...", "print", "Ctrl+P"]];
   m.Edit = [[s.undo ? "Undo " + s.undo : "Undo", "m:undo", "Ctrl+Z", !s.undo], [s.redo ? "Redo " + s.redo : "Redo", "m:redo", "Ctrl+Y", !s.redo], 0,
     ["Delete", "m:delete", "Del", !any], 0, ["Copy names of the selected objects", "copyNames", "Ctrl+C", !any], 0, ["Hide the selected objects", "hideSel", "", !any], ["Show all objects", "showAll"], 0, ["Model Text...", "m:text"]];
-  m.Define = [["Material Properties...", "m:materials"], ["Frame Sections...", "m:frameSections"], ["Slab and Wall Sections...", "m:shellSections"], ["Spring Properties", [["Point Springs...", "m:spr:point"], ["Line Springs...", "m:spr:line"], ["Area Springs...", "m:spr:area"]]], 0,
+  m.Define = [["Material Properties...", "m:materials"], ["Frame Sections...", "m:frameSections"], ["Slab and Wall Sections...", "m:shellSections"], ["Link/Support Properties...", "m:links"], ["Spring Properties", [["Point Springs...", "m:spr:point"], ["Line Springs...", "m:spr:line"], ["Area Springs...", "m:spr:area"]]], 0,
     ["Diaphragms...", "m:st:diaphragm"], ["Pier Labels...", "m:st:pier"], ["Spandrel Labels...", "m:st:spandrel"], ["Groups...", "m:st:group"], ["Section Cuts...", "m:st:cut"], 0,
     ["Story Data...", "m:stories"], ["Grid Data...", "m:grids"], 0, ["Functions", [["Response Spectrum...", "m:fnRS"], ["Time History...", "m:fnTH"]]],
     ["Load Patterns...", "m:patterns"], ["Load Cases...", "m:cases"], ["Load Combinations...", "m:combos"], 0, ["Mass Source...", "m:mass"], ["P-Delta Options...", "m:pdelta"]];
@@ -3284,6 +3284,7 @@ async function modelAct(a) {
     case "mass": return hmMass();
     case "pdelta": return hmPDelta();
     case "text": return hmText();
+    case "links": return hmLinks();
     case "asgFrameLoad": return hmAssignLoad("f");
     case "asgShellLoad": return hmAssignLoad("a");
     case "drawHelp": return hmDrawHelp();
@@ -3463,6 +3464,26 @@ async function hmShellSection(s, after, copy) {
   const modText = () => { const m = mods || {}; const o = Object.entries(m).filter(([, v]) => Math.abs(v - 1) > 1e-12); q(d, "#aModT").textContent = o.length ? o.map(([k, v]) => k + " " + v).join(", ") : "none"; };
   q(d, "#aK").onchange = show; show(); modText();
   q(d, "#aMod").onclick = () => hmModifiers((pd && pd.shell_modifiers) || [], mods, o => { mods = o; modText(); });
+}
+
+// ---- Define: link/support properties ----
+async function hmLinks() {
+  const pd = (await hmRun("property_definitions", {}, true)).result; if (!pd) return;
+  const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmLinks(); };
+  const find = n => pd.links.find(x => x.name === n);
+  listForm("Define Link/Support Properties", "Properties", pd.links.map(x => x.name), [
+    ["Add New Property...", () => hmLink(pd, null, again)],
+    ["Modify/Show Property...", n => n && hmLink(pd, find(n), again)],
+    ["Delete Property", n => n && hmRun("define_link", {name: n, delete: true}, true).then(j => j.ok ? again() : hmSay(j.error, true))],
+  ], n => hmLink(pd, find(n), again));
+}
+function hmLink(pd, l, after) {
+  const u = hmU(), dofs = ["U1", "U2", "U3", "R1", "R2", "R3"];
+  const row = k => { const v = l && l.dofs[k]; return `<tr><td><label><input type="checkbox" data-on="${k}" ${v ? "checked" : ""}> ${k}</label></td><td><input data-s="${k}" type="number" step="any" value="${v ? v.stiffness : 0}"></td><td><input data-d="${k}" type="number" step="any" value="${v ? v.damping : 0}"></td></tr>`; };
+  return dialog("Link/Support Property Data", `<div class="g2"><span>Property Name</span><input id="lkN" value="${esc(l ? l.name : "Link" + (pd.links.length + 1))}" ${l ? "disabled" : ""}><span>Link Type</span><select id="lkT">${opts(pd.link_types, l ? l.type : "LINEAR")}</select></div>
+    <fieldset><legend>Directional Properties (effective, for linear analysis)</legend><table class="list hmgrid"><tr><th>Direction</th><th>Stiffness (${u.f}/${u.l}, ${u.f}-${u.l}/rad)</th><th>Damping</th></tr>${dofs.map(row).join("")}</table></fieldset>
+    <p class="kv">A nonlinear type's own curve (yield, gap opening, friction) goes in by Edit > Model Text.</p>`,
+    [["OK", d => { const o = {}; dofs.forEach(k => { if (q(d, `[data-on="${k}"]`).checked) o[k] = {stiffness: parseFloat(q(d, `[data-s="${k}"]`).value) || 0, damping: parseFloat(q(d, `[data-d="${k}"]`).value) || 0}; }); return submit(d, "define_link", {name: q(d, "#lkN").value.trim(), type: q(d, "#lkT").value, dofs: o}, after); }, true], ["Cancel"]], {width: 520});
 }
 
 // ---- Define: spring properties ----

@@ -432,6 +432,18 @@ public static class S2kWriter
                 ("AMod", N(fm["AMOD"])), ("A2Mod", N(fm["A2MOD"])), ("A3Mod", N(fm["A3MOD"])), ("JMod", N(fm["JMOD"])), ("I2Mod", N(fm["I2MOD"])), ("I3Mod", N(fm["I3MOD"])), ("MMod", N(fm["MMOD"])), ("WMod", N(fm["WMOD"]))));
         }
         Add(tables, "FRAME SECTION PROPERTIES 01 - GENERAL", rows);
+
+        // Link properties: their type and each direction's effective (linear) stiffness and damping.
+        var links = PropertyDefs.Links(m);
+        static string LinkType(string t) => t switch
+        {
+            "PLASTIC (WEN)" => "Plastic (Wen)", "MULTILINEAR ELASTIC" => "MultiLinear Elastic", "MULTILINEAR PLASTIC" => "MultiLinear Plastic",
+            _ => CultureInfo.InvariantCulture.TextInfo.ToTitleCase(t.ToLowerInvariant()),
+        };
+        Add(tables, "LINK PROPERTY DEFINITIONS 01 - GENERAL", links.Select(l => Row(("Link", l.Name), ("LinkType", LinkType(l.Type)), ("Mass", "0"), ("Weight", "0"),
+            ("RotInert1", "0"), ("RotInert2", "0"), ("RotInert3", "0"), ("DefLength", "1"), ("DefArea", "1"), ("PDM2I", "0"), ("PDM2J", "0"), ("PDM3I", "0"), ("PDM3J", "0"))));
+        Add(tables, "LINK PROPERTY DEFINITIONS 02 - LINEAR", links.SelectMany(l => l.Dofs.Select(d => Row(("Link", l.Name), ("DOF", d.Key), ("Fixed", "No"),
+            (d.Key[0] == 'U' ? "TransKE" : "RotKE", N(d.Value.Stiff)), (d.Key[0] == 'U' ? "TransCE" : "RotCE", N(d.Value.Damp))))));
         return shapes;
     }
 

@@ -80,6 +80,21 @@ public static class PropertyTools
                 Core(() => link.Edit(m => { PropertyDefs.SetSpring(m, kind, name, values); return 0; }));
                 return new JsonObject { ["spring"] = name, ["kind"] = kind };
             }, a => a.Flag("delete") ? $"Delete the spring {a.Text("name")}" : $"Define the spring {a.Text("name")}"),
+        new("define_link",
+            "Adds, changes or deletes a link property (Define > Section Properties > Link/Support Properties): type LINEAR, DAMPER, GAP, HOOK, PLASTIC (WEN), RUBBER ISOLATOR, FRICTION ISOLATOR, MULTILINEAR ELASTIC or MULTILINEAR PLASTIC, and per direction (U1 U2 U3 R1 R2 R3) its effective stiffness and damping, which the linear analysis uses. A nonlinear type's own curve goes in by Edit > Model Text.",
+            """{"type":"object","required":["name"],"properties":{"name":{"type":"string"},"type":{"type":"string"},"dofs":{"type":"object","additionalProperties":{"type":"object","properties":{"stiffness":{"type":"number"},"damping":{"type":"number"}}}},"delete":{"type":"boolean"}}}""",
+            Ask.Changes, (a, e) =>
+            {
+                var link = Offline(e);
+                var name = a.Need("name");
+                if (a.Flag("delete")) { Core(() => link.Edit(m => { PropertyDefs.DeleteLink(m, name); return 0; })); return new JsonObject { ["deleted"] = name }; }
+                var dofs = new Dictionary<string, (double, double)>();
+                if (a.TryGetProperty("dofs", out var d) && d.ValueKind == JsonValueKind.Object)
+                    foreach (var x in d.EnumerateObject())
+                        dofs[x.Name.ToUpperInvariant()] = (x.Value.Number("stiffness", 0), x.Value.Number("damping", 0));
+                Core(() => link.Edit(m => { PropertyDefs.SetLink(m, name, a.Text("type", "LINEAR"), dofs); return 0; }));
+                return new JsonObject { ["link"] = name, ["directions"] = dofs.Count };
+            }, a => a.Flag("delete") ? $"Delete the link {a.Text("name")}" : $"Define the link {a.Text("name")}"),
         new("assign_frame_data",
             "Assigns to frames (label@story) what Assign > Frame offers: release_i and release_j (any of P V2 V3 T M2 M3; [] takes them off), angle (local axis 2 rotation, degrees), cardinal (insertion point 1 to 11: 10 centroid, 8 top center), offset_i, offset_j and rigid_zone (end length offsets, rigid zone factor 0 to 1), modifiers (AMOD A2MOD A3MOD JMOD I2MOD I3MOD MMOD WMOD) and spring (a line spring property; \"\" takes it off). Only what is given changes.",
             """{"type":"object","required":["objects"],"properties":{"objects":{"type":"array","items":{"type":"string"}},"release_i":{"type":"array","items":{"type":"string"}},"release_j":{"type":"array","items":{"type":"string"}},"angle":{"type":"number"},"cardinal":{"type":"integer"},"offset_i":{"type":"number"},"offset_j":{"type":"number"},"rigid_zone":{"type":"number"},"modifiers":""" + Numbers + ""","spring":{"type":"string"}}}""",
@@ -264,6 +279,12 @@ public static class PropertyTools
             ["modeling_types"] = new JsonArray(PropertyDefs.ModelingTypes.Select(t => (JsonNode)t).ToArray()),
             ["frame_modifiers"] = new JsonArray(PropertyDefs.FrameModifiers.Select(t => (JsonNode)t).ToArray()),
             ["shell_modifiers"] = new JsonArray(PropertyDefs.ShellModifiers.Select(t => (JsonNode)t).ToArray()),
+            ["link_types"] = new JsonArray(PropertyDefs.LinkTypes.Select(t => (JsonNode)t).ToArray()),
+            ["links"] = new JsonArray(PropertyDefs.Links(m).Select(l => (JsonNode)new JsonObject
+            {
+                ["name"] = l.Name, ["type"] = l.Type,
+                ["dofs"] = new JsonObject(l.Dofs.Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)new JsonObject { ["stiffness"] = kv.Value.Stiff, ["damping"] = kv.Value.Damp }))),
+            }).ToArray()),
             ["springs"] = new JsonArray(springs.Select(s => (JsonNode)new JsonObject
             {
                 ["kind"] = s.Kind, ["name"] = s.Name, ["values"] = Numbers_(s.Values), ["used_by"] = PropertyDefs.SpringUsers(m, s.Kind, s.Name).Count(),
