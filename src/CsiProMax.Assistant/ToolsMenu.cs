@@ -258,9 +258,14 @@ public static class ToolsMenu
     internal static bool LeftBehind(bool? hasWindow, DateTime? started, DateTime now) =>
         hasWindow == false && started is { } at && now - at > TimeSpan.FromMinutes(10);
 
+    /// <summary>True when the process shows a window of its own: a main window with a title.</summary>
+    internal static bool HasWindow(bool handle, string? title) => handle && !string.IsNullOrWhiteSpace(title);
+
     private static bool? Window(Process process)
     {
-        try { return process.MainWindowHandle != IntPtr.Zero; }
+        // A window a person can see has a title. SAP2000 26 left behind keeps a hidden helper window with none
+        // ("Internet Explorer_Hidden", size 0), which Windows still names as its main window (seen 2026-11-25).
+        try { return HasWindow(process.MainWindowHandle != IntPtr.Zero, process.MainWindowTitle); }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or NotSupportedException) { return null; }
     }
 

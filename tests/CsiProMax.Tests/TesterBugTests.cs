@@ -660,7 +660,10 @@ static class TesterBugTests
             Check(!ToolsMenu.LeftBehind(false, now.AddSeconds(-20), now), "a program that is starting (no window yet) is open");
             Check(!ToolsMenu.LeftBehind(null, now.AddHours(-8), now) && !ToolsMenu.LeftBehind(false, null, now), "a process that cannot be read counts as open");
             var install = File.ReadAllText(Path.Combine(SourceText.Root(), "install.ps1"));
-            Check(install.Contains("MainWindowHandle -ne 0") && install.Contains("TotalMinutes -le 10"), "install.ps1 follows the same rule");
+            Check(install.Contains("($_.MainWindowHandle -ne 0 -and $_.MainWindowTitle)") && install.Contains("TotalMinutes -le 10"), "install.ps1 follows the same rule");
+            // The three left on Ahmed's PC had a main window after all: SAP2000's hidden helper, with no title and no size.
+            Check(!ToolsMenu.HasWindow(true, "") && !ToolsMenu.HasWindow(true, null) && !ToolsMenu.HasWindow(false, "SAP2000"), "a hidden helper window with no title is taken for the program's window");
+            Check(ToolsMenu.HasWindow(true, "SAP2000 26.3.0 Ultimate - (Untitled)"), "a titled main window is the program being open");
         });
         yield return ("ETABS 23 field test: the test never makes ETABS ask to close, and answers that question itself", () =>
         {
@@ -689,6 +692,50 @@ static class TesterBugTests
             var scratch = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));
             var notices = scratch[scratch.IndexOf("public static List<string> CloseNotices", StringComparison.Ordinal)..scratch.IndexOf("public static bool IsStoryPicker", StringComparison.Ordinal)];
             Check(notices.Contains("IsStoryPicker(title)", StringComparison.Ordinal) && notices.IndexOf("\"Select All\"", StringComparison.Ordinal) is var all and > 0 && all < notices.LastIndexOf("PostMessageW(go", StringComparison.Ordinal) && !notices.Contains("0x0010", StringComparison.Ordinal), "all stories are picked before OK, and the window is never closed");
+        });
+        yield return ("ETABS 23 field test: a check whose table has no rows for the scratch model is not tested; a table that cannot be read still fails", () =>
+        {
+            // Seen on 2026-11-25 with 0.4.11: "1 of 5 checks had nothing to read. check_story_irregularity: no reason given".
+            JsonNode Answer(string json) => JsonNode.Parse(json)!;
+            var ctx = new FieldContext(CsiProgram.Etabs, Path.GetTempPath(), new MemoryEtabs());
+            FieldParts.Verdicts(ctx, "checks", [("check_drift", Answer("""{"status":"pass"}""")), ("check_story_irregularity", Answer("""{"status":"not available","no_data":true,"note":"ETABS's 'Story Stiffness' table has no data"}"""))]);
+            var step = ctx.Steps.Last();
+            Check(step.Skipped && step.Detail.Contains("Story Stiffness", StringComparison.Ordinal), $"no data is not 'not tested' with its reason: {step.Ok} {step.Skipped} {step.Detail}");
+            ctx = new FieldContext(CsiProgram.Etabs, Path.GetTempPath(), new MemoryEtabs());
+            FieldParts.Verdicts(ctx, "checks", [("check_drift", Answer("""{"status":"not available","note":"The 'Story Drifts' table has no 'Drift' field in this version."}"""))]);
+            step = ctx.Steps.Last();
+            Check(!step.Ok && !step.Skipped, "a table that cannot be read no longer fails");
+            // What run_design says of a design it could not start is the reason given for the empty pier tables.
+            var designed = Answer("""{"ran":["concrete"],"not_designed":[],"run_in_program":[{"kind":"shear_wall","menu":"Design > Shear Wall Design","why":"ETABS's API has no call to start this design"}]}""");
+            Equal("ETABS's API has no call to start this design", FieldParts.WhyNot(designed, "shear_wall"), "why the shear wall design did not run");
+            var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Tools/ResultTools.cs"));
+            Check(source.Contains("result[\"note\"] = string.Join(\" \", parts.Select", StringComparison.Ordinal), "check_story_irregularity may say 'not available' with no reason");
+        });
+        yield return ("ETABS 23 field test: the Viewer is checked while the model still has its results, once", () =>
+        {
+            // Seen on 2026-11-25 with 0.4.11: every result button of the Viewer was greyed out for ETABS, because the
+            // ETABS steps unlock the model at their end and the Viewer's check came after them.
+            var steps = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/EtabsFieldSteps.cs"));
+            Check(steps.IndexOf("ctx.WithResults()", StringComparison.Ordinal) is var at and > 0 && at < steps.IndexOf("m.SetModelIsLocked(false)", StringComparison.Ordinal), "the Viewer's check does not come before the model is unlocked");
+            var ctx = new FieldContext(CsiProgram.Etabs, Path.GetTempPath(), new MemoryEtabs());
+            var runs = 0;
+            ctx.WhileAnalysed = () => runs++;
+            ctx.WithResults(); ctx.WithResults();
+            Equal(1, runs, "times the Viewer's check ran");
+        });
+        yield return ("ETABS 23 field test: a test copy an earlier run left open is closed by the next run, and nothing else is", () =>
+        {
+            // Seen on 2026-11-25: the 0.4.10 run gave up on ETABS with the story picker showing; the 0.4.14 run then failed
+            // "Tools > CSI ProMax in ETABS 23: ... ETABS 23 is open" because of that leftover.
+            Check(ScratchProgram.IsLeftCopy(["ETABS Plus v23.2.0 - cpm-field-test-400277", "Select Stories for Slab Design"]), "the leftover with the story picker is not known");
+            Check(ScratchProgram.IsLeftCopy(["SAP2000 26.3.0 Ultimate - cpm-field-test-1ff9a4", "", "Analysis Complete - cpm-field-test-1ff9a4"]), "a leftover with the analysis notice is not known");
+            Check(!ScratchProgram.IsLeftCopy(["ETABS Plus v23.2.0 - Tower A"]), "an engineer's own model would be closed");
+            Check(!ScratchProgram.IsLeftCopy(["ETABS Plus v23.2.0 - cpm-field-test-400277", "License"]), "a copy showing a licence message would be closed");
+            Check(!ScratchProgram.IsLeftCopy([]) && !ScratchProgram.IsLeftCopy([""]) && !ScratchProgram.IsLeftCopy(["Select Stories for Slab Design"]), "a process with no scratch model would be closed");
+            Check(!ScratchProgram.IsLeftCopy(["ETABS Plus v23.2.0 - cpm-field-test"]), "the Modeler's own model name is taken for a scratch copy");
+            var runner = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/FieldTest.cs"));
+            Check(runner.IndexOf("o.EndLeftCopies()", StringComparison.Ordinal) is var at and > 0 && at < runner.IndexOf("menus = ToolsMenu.Repair(", StringComparison.Ordinal), "leftovers are not closed before the Tools menu is looked at");
+            Check(runner.Contains("Tools > CSI ProMax is still in each program after the test", StringComparison.Ordinal), "the Tools menu is not looked at again after the scratch windows closed");
         });
         yield return ("ETABS 20 tester: the field test tries what Tools > CSI ProMax does in each program, and fails where the plug-in cannot be created", () =>
         {

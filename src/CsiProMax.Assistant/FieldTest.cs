@@ -56,6 +56,8 @@ public static class FieldTest
 
         /// <summary>Opens a scratch window (for tests, a stand-in): null when it could not, with its steps in the report.</summary>
         public Func<CsiProgram, FieldContext, string, IScratchWindow?> StartScratch { get; init; } = ScratchProgram.Start;
+        /// <summary>Ends the test copies an earlier run left open, and says which. For tests: a stand-in.</summary>
+        public Func<List<string>> EndLeftCopies { get; init; } = ScratchProgram.EndLeftCopies;
         /// <summary>For the tests: the file that says a full test is running, instead of this PC's own.</summary>
         public string? LockFile { get; init; }
 
@@ -180,6 +182,11 @@ public static class FieldTest
         var work = o.WorkFolder ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CsiProMax", "Field test", $"{link.Program.Name} {now:yyyy-MM-dd HHmmss}");
         if (o.Full) Directory.CreateDirectory(work);
         var ctx = new FieldContext(link.Program, work, link) { Progress = o.Progress, Outcome = o.Outcome };
+        // Test copies an earlier run left open go first: they would count as the program being open below.
+        var left = new List<string>();
+        if (o.Full && o.SettingsRoot is null)
+            try { left = o.EndLeftCopies(); }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { left.Add($"could not be looked for ({ex.Message})"); }
         // Tools > CSI ProMax in each program: put right where it may be, as at every start, then read as it stands.
         IReadOnlyList<ToolsMenu.Entry> menus = [];
         try { menus = ToolsMenu.Repair(o.InstallFolder, o.SettingsRoot); }
@@ -187,6 +194,7 @@ public static class FieldTest
         var plugIns = PlugInLists(o.SettingsRoot);
 
         PcFieldSteps.Run(ctx, o.InstallFolder ?? AppContext.BaseDirectory, plugIns, o.Full ? [target, work] : [target], menus);
+        if (left.Count > 0) ctx.Step("test copies an earlier run left open are closed", () => string.Join("; ", left));
 
         ctx.Section(OpenSection);
         o.Progress?.Invoke("reading the open model");
@@ -211,6 +219,26 @@ public static class FieldTest
                 try { ctx.Fail("the full test stopped before its end", $"{real.GetType().Name}: {real.Message} The steps after this one were not run. Where: {Where(real)}"); }
                 catch (OperationCanceledException) { }
             }
+        }
+
+        // The scratch programs rewrite their settings file when they close: CSI ProMax must still be in each Tools menu.
+        if (o.Full)
+        {
+            try
+            {
+                var after = ToolsMenu.Repair(o.InstallFolder, o.SettingsRoot);
+                var lost = after.Where(e => e.State is ToolsMenu.State.Added or ToolsMenu.State.Moved).Select(e => e.Label).ToList();
+                var missing = after.Where(e => !e.Listed).ToList();
+                ctx.Section(PcFieldSteps.Section);
+                if (after.Count > 0)
+                    ctx.Step("Tools > CSI ProMax is still in each program after the test", () =>
+                    {
+                        FieldContext.Expect(missing.Count == 0, string.Join(" ", missing.Select(e => e.Says)));
+                        return lost.Count == 0 ? "unchanged: " + string.Join(", ", after.Select(e => e.Label))
+                            : $"the test's own scratch window emptied the plug-in list of {string.Join(", ", lost)} when it closed, and CSI ProMax was added again";
+                    });
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or OperationCanceledException) { /* the first check of the lists stands */ }
         }
 
         var steps = ctx.Steps.ToList();
@@ -252,6 +280,9 @@ public static class FieldTest
                 if (window is null) return;
                 ctx.Link = window.Link;
                 ctx.Watched = window.Link;
+                // The Viewer's own screen on this program's model: one check, the same for every program. It runs while
+                // the model has its results (the program's steps say when), or after them if they never did.
+                ctx.WhileAnalysed = o.Viewer ? () => { var at = ctx.Watched; ctx.Watched = null; try { ViewerCheck.FieldSteps(ctx, window.Link, program.Name); } finally { ctx.Watched = at; } } : null;
                 try { ScratchSteps(program)(ctx); }
                 catch (Exception ex) when (ex is not (OperationCanceledException or OutOfMemoryException))
                 {
@@ -264,7 +295,7 @@ public static class FieldTest
                 finally { ctx.Watched = null; }
                 // The Viewer's own screen on this program's model: one check, the same for every program.
                 ctx.Section(FieldParts.ScratchSection(program));
-                if (o.Viewer) ViewerCheck.FieldSteps(ctx, window.Link, program.Name);
+                ctx.WithResults();
                 if (panelDone) return;
                 // CSI ProMax's own features need a window that still answers: one that stopped (a call that never came
                 // back) is left out, and the next program's window, or the open model, takes that part instead.
@@ -305,6 +336,12 @@ public static class FieldTest
                     ScratchProgram.CloseStep(ctx, open, program);
                     // A window that stopped answering is left as it is: letting go of it could wait for ever too.
                     if (finished) open.Dispose();
+                    // Tools > CSI ProMax stays where it was: a scratch window started through the API empties the plug-in list.
+                    ctx.Step($"{program.Name}'s plug-in lists are as they were before the scratch window", () =>
+                    {
+                        var back = open.PutBackPlugIns();
+                        return back.Count == 0 ? "unchanged" : "the scratch window had emptied them; put back: " + string.Join(", ", back.Select(Path.GetFileName));
+                    });
                 }
                 catch (Exception ex) when (ex is not (OutOfMemoryException or OperationCanceledException))
                 {

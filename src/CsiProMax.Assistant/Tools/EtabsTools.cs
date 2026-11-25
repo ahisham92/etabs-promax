@@ -112,7 +112,10 @@ public static class EtabsTools
             {"type":"object","required":["name","type"],"properties":{
               "name":{"type":"string"},
               "type":{"type":"string","description":"Dead, Super Dead, Live, Reducible Live, Roof Live, Seismic, Wind, Snow, Temperature, Notional or Other."},
-              "self_weight":{"type":"number","description":"Self weight multiplier. Default 0."}}}
+              "self_weight":{"type":"number","description":"Self weight multiplier. Default 0."},
+              "user_coefficient":{"type":"object","description":"Seismic only: an automatic lateral load by a base shear coefficient, V = C W, spread up the height with exponent K.",
+                "properties":{"c":{"type":"number","description":"Base shear coefficient, e.g. 0.05."},"k":{"type":"number","description":"Height exponent. Default 1."},
+                  "direction":{"type":"string","description":"X or Y. Default X."},"eccentricity":{"type":"number","description":"Accidental eccentricity ratio. Default 0.05."}}}}}
             """, Ask.Changes, AddPattern, a => $"Add load pattern {a.Text("name")} ({a.Text("type")})"),
 
         new("set_loads",
@@ -458,8 +461,34 @@ public static class EtabsTools
     {
         var name = a.Need("name");
         if (e.LoadPatterns().Any(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase))) throw new ToolInputException($"The load pattern '{name}' is already there.");
-        e.AddLoadPattern(name, a.Need("type"), a.Number("self_weight", 0));
-        return new JsonObject { ["added"] = name };
+        var type = a.Need("type");
+        JsonElement? coefficient = a.ValueKind == JsonValueKind.Object && a.TryGetProperty("user_coefficient", out var uc) && uc.ValueKind == JsonValueKind.Object ? uc : null;
+        if (coefficient is not null && !string.Equals(type, "Seismic", StringComparison.OrdinalIgnoreCase))
+            throw new ToolInputException("user_coefficient is for a Seismic pattern only.");
+        double c = 0, k = 1, ecc = 0.05; var dir = "X";
+        if (coefficient is { } co)
+        {
+            c = co.Number("c");
+            if (c <= 0) throw new ToolInputException("user_coefficient.c is the base shear coefficient, above 0 (e.g. 0.05).");
+            k = co.Number("k", 1); ecc = co.Number("eccentricity", 0.05); dir = co.Text("direction", "X").Trim().ToUpperInvariant();
+            if (dir is not ("X" or "Y")) throw new ToolInputException("user_coefficient.direction is X or Y.");
+        }
+        e.AddLoadPattern(name, type, a.Number("self_weight", 0));
+        var result = new JsonObject { ["added"] = name };
+        if (coefficient is not null && e is not (ComEtabs or Sap2000.SapLink))
+            result["note"] = "The automatic lateral load is set only in the running program: open the model there and add it again.";
+        else if (coefficient is not null)
+        {
+            // DirFlag 1 is global X, 4 is global Y; the load goes over the whole height (UserZ false).
+            e.Raw("define the seismic load", m =>
+            {
+                var answer = Convert.ToInt32(m.LoadPatterns.AutoSeismic.SetUserCoefficient(name, dir == "X" ? 1 : 4, ecc, false, 0.0, 0.0, c, k));
+                if (answer != 0) throw new EtabsException($"{e.Program.Name} refused the user coefficient for {name}.");
+                return null;
+            });
+            result["lateral"] = $"user coefficient C = {c.ToString(System.Globalization.CultureInfo.InvariantCulture)}, K = {k.ToString(System.Globalization.CultureInfo.InvariantCulture)}, direction {dir}, eccentricity {ecc.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+        }
+        return result;
     }
 
     private static JsonNode SetLoads(JsonElement a, ICsiLink e)

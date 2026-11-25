@@ -19,6 +19,9 @@ public interface IScratchWindow : IDisposable
 
     /// <summary>The titles of the windows the scratch program has open now (a message waiting for an answer is one of them).</summary>
     IReadOnlyList<string> OpenWindows() => [];
+
+    /// <summary>Puts back the program's plug-in lists the scratch window emptied. Returns the settings files put back.</summary>
+    IReadOnlyList<string> PutBackPlugIns() => [];
 }
 
 /// <summary>
@@ -181,6 +184,19 @@ public sealed class ScratchProgram : IScratchWindow
     /// <summary>The window stopped answering: its thread is still waiting on it, so nothing more can be asked of it.</summary>
     private bool _left;
     private bool _closed;
+    private Dictionary<string, string> _plugIns = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The settings files whose plug-in list the scratch window had emptied, and that were put back.</summary>
+    public IReadOnlyList<string> PlugInListsPutBack { get; private set; } = [];
+
+    public IReadOnlyList<string> PutBackPlugIns()
+    {
+        if (_plugIns.Count == 0) return PlugInListsPutBack;
+        var back = KeptPlugIns.PutBack(_plugIns);
+        if (back.Count > 0) PlugInListsPutBack = PlugInListsPutBack.Concat(back).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        return PlugInListsPutBack;
+    }
+
     /// <summary>The test is closing its own window: only then is the program's "really close?" question answered.</summary>
     private volatile bool _closing;
     private volatile bool _closeAnswered;
@@ -255,6 +271,8 @@ public sealed class ScratchProgram : IScratchWindow
             return $"{ApiFile}: {loaded.FullName}";
         }) is null || loaded is not { } api) return false;
 
+        // The program's plug-in lists as they are before the scratch window: put back when it has closed (KeptPlugIns).
+        _plugIns = KeptPlugIns.Take(_program);
         var before = Process.GetProcessesByName(_program.ProcessName).Select(p => p.Id).ToHashSet();
         _startedAt = DateTime.Now;
         var com = _com = new ComEtabs(_program, () =>
@@ -442,6 +460,48 @@ public sealed class ScratchProgram : IScratchWindow
         testAsked != default && processStarted >= testAsked.AddSeconds(-2)
         && titles.All(t => t.Contains("cpm-field-test", StringComparison.OrdinalIgnoreCase));
 
+    /// <summary>
+    /// True when the windows of a process show it is a test copy an earlier run left open: one of them names a scratch
+    /// model ("cpm-field-test-" and its six characters), and every other one is a window the test answers itself (the
+    /// analysis notice, the story picker). A window that names anything else keeps the process alive.
+    /// </summary>
+    public static bool IsLeftCopy(IEnumerable<string> titles)
+    {
+        var all = titles.Where(t => !string.IsNullOrWhiteSpace(t)).ToList();
+        return all.Any(t => t.Contains("cpm-field-test-", StringComparison.OrdinalIgnoreCase))
+            && all.All(t => t.Contains("cpm-field-test-", StringComparison.OrdinalIgnoreCase) || ScratchDialogs.MayClose(t) || ScratchDialogs.IsStoryPicker(t));
+    }
+
+    /// <summary>
+    /// Ends the test copies an earlier run left open (a run that gave up on a window, as the 0.4.10 run did on ETABS 23
+    /// with the story picker showing): they hold a licence, and they keep CSI ProMax out of that program's Tools menu
+    /// ("ETABS 23 is open"). Only a process <see cref="IsLeftCopy"/> names; it is ended without saving (Ahmed's choice,
+    /// 2026-11-25: the test may end "only its own test copy"). Returns one line for each.
+    /// </summary>
+    public static List<string> EndLeftCopies()
+    {
+        var said = new List<string>();
+        if (!OperatingSystem.IsWindows()) return said;
+        foreach (var program in CsiProgram.All)
+        {
+            Process[] running;
+            try { running = Process.GetProcessesByName(program.ProcessName); }
+            catch (InvalidOperationException) { continue; }
+            foreach (var process in running)
+                using (process)
+                    try
+                    {
+                        var titles = ScratchDialogs.Of(process.Id).Select(w => w.Title).ToList();
+                        if (!IsLeftCopy(titles)) continue;
+                        var name = titles.First(t => t.Contains("cpm-field-test-", StringComparison.OrdinalIgnoreCase));
+                        process.Kill();
+                        said.Add(process.WaitForExit(15000) ? $"'{name}' (process id {process.Id}) was closed without saving" : $"'{name}' (process id {process.Id}) was told to end and is still there");
+                    }
+                    catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException) { /* not ours to end, or already gone */ }
+        }
+        return said;
+    }
+
     public static string LeftRunning(string name, string processName, int processId, bool hasWindow) =>
         $". Its process is still running ({processName}.exe, process id {processId}, {(hasWindow ? "with a window" : "with no window on the screen")}) and holds a {name} licence until it ends: " +
         $"{(hasWindow ? "close that window without saving, or " : "")}end the {processName}.exe with process id {processId} in Task Manager (Details tab). It is the test's own scratch model; nothing of yours is in it";
@@ -451,6 +511,69 @@ public sealed class ScratchProgram : IScratchWindow
         // Letting go never throws: the report is written after it.
         try { if (_app is not null && !_closed && !_left) Close(); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
         try { _watch?.Dispose(); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
+        try { PutBackPlugIns(); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
         try { _com?.Dispose(); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
+    }
+}
+
+/// <summary>
+/// A scratch window must leave the program's plug-in lists as it found them. ETABS 23 and SAP2000 26, started through
+/// the API, rewrite their settings file with an empty [PlugIn] section (NumberPlugIns=0): the field test of 0.4.14 on
+/// Ahmed's PC emptied SAP2000 26's list as its scratch window started (19:29:42), and a scratch ETABS 23 closed with
+/// ApplicationExit emptied ETABS 23's (19:18:05), so Tools &gt; CSI ProMax was gone from both. The lists are read before
+/// the window starts and put back, the [PlugIn] section only, once it has closed.
+/// </summary>
+public static class KeptPlugIns
+{
+    /// <summary>Each settings file of the program (every version on the PC) with its [PlugIn] section as it is now.</summary>
+    public static Dictionary<string, string> Take(CsiProgram program, string? settingsRoot = null)
+    {
+        var kept = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var root = settingsRoot ?? ToolsMenu.SettingsRoot;
+        try
+        {
+            if (!Directory.Exists(root)) return kept;
+            foreach (var folder in Directory.GetDirectories(root, program.Name + " *"))
+                foreach (var ini in Directory.GetFiles(folder, "*.ini"))
+                    if (FieldTest.PlugInSection(File.ReadAllText(ini, System.Text.Encoding.Latin1)) is { } section)
+                        kept[ini] = section;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        return kept;
+    }
+
+    /// <summary>Puts back each [PlugIn] section that changed since <see cref="Take"/>. Returns the files put back.</summary>
+    public static List<string> PutBack(IReadOnlyDictionary<string, string> kept)
+    {
+        var back = new List<string>();
+        foreach (var (ini, section) in kept)
+            try
+            {
+                if (!File.Exists(ini)) continue;
+                var text = File.ReadAllText(ini, System.Text.Encoding.Latin1);
+                if (FieldTest.PlugInSection(text) is not { } now || now == section) continue;
+                if (Replace(text, section) is not { } fixedText) continue;
+                File.WriteAllText(ini, fixedText, System.Text.Encoding.Latin1);
+                back.Add(ini);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        return back;
+    }
+
+    /// <summary>The settings text with its [PlugIn] section replaced by <paramref name="section"/>, in the file's own line ends.</summary>
+    internal static string? Replace(string text, string section)
+    {
+        var crlf = text.Contains("\r\n", StringComparison.Ordinal);
+        var lines = text.Replace("\r\n", "\n").Split('\n').ToList();
+        var start = lines.FindIndex(l => l.Trim().Equals("[PlugIn]", StringComparison.OrdinalIgnoreCase));
+        if (start < 0) return null;
+        var end = lines.FindIndex(start + 1, l => l.TrimStart().StartsWith('['));
+        if (end < 0) end = lines.Count;
+        // The section ends with its last line of text: blank lines after it stay where they were.
+        while (end - 1 > start && lines[end - 1].Trim().Length == 0) end--;
+        lines.RemoveRange(start, end - start);
+        lines.InsertRange(start, section.Split('\n'));
+        var joined = string.Join("\n", lines);
+        return crlf ? joined.Replace("\n", "\r\n") : joined;
     }
 }

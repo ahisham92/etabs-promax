@@ -930,6 +930,7 @@ Test("set_section: a frame or area that is not in the model is reported as faile
     Check(areas["failed"]!.AsArray().Count == 1, "the missing area is not reported: " + areas.ToJsonString());
 });
 foreach (var (name, body) in CdtSdkTests.All()) Test(name, body);
+foreach (var (name, body) in KeptPlugInsTests.All()) Test(name, body);
 foreach (var (name, body) in FieldRun048Tests.All()) Test(name, body);
 foreach (var (name, body) in FieldQuietTests.All()) Test(name, body);
 
@@ -1127,6 +1128,26 @@ Test("pack: SAP2000's steel design summary comes from its API, as ETABS's does",
     var steel = made.FirstOrDefault(m => m.Name.StartsWith("Steel", StringComparison.Ordinal));
     Check(steel.Data is not null, "no steel design table: " + string.Join(", ", made.Select(m => m.Name)));
     Equal("0.75", steel.Data!.Rows[0][2], "B1's ratio");
+});
+
+Test("link: a table the program lists reads as empty when the program refuses to read it", () =>
+{
+    // ETABS 23 field test (0.4.11): "refused to read the table 'Story Stiffness'" with no seismic case, and
+    // 'Element Forces - Braces' with no braces.
+    using var link = new ComEtabs(CsiProgram.Etabs, () => new CpmFakes.TablesModel());
+    Equal(0, link.ReadTable("Story Stiffness", ["DEAD"], null).Rows.Count, "a listed empty table");
+    Equal(0, link.ReadTable("Steel Column Envelope - AISC 360-16", null, null).Rows.Count, "a listed table marked with data that ETABS refuses");
+    Equal(1, link.ReadTable("Story Definitions", null, null).Rows.Count, "a table with data");
+    Throws<EtabsException>(() => link.ReadTable("No Such Table", null, null), "a table that is not there");
+});
+
+Test("tool: add_load_pattern refuses a user coefficient that is not for a seismic pattern, or not above 0", () =>
+{
+    var link = new MemoryEtabs();
+    var tool = EtabsTools.All.First(t => t.Name == "add_load_pattern");
+    Throws<ToolInputException>(() => tool.Run(JsonDocument.Parse("""{"name":"W","type":"Wind","user_coefficient":{"c":0.05}}""").RootElement, link), "wind");
+    Throws<ToolInputException>(() => tool.Run(JsonDocument.Parse("""{"name":"E","type":"Seismic","user_coefficient":{"c":0}}""").RootElement, link), "zero");
+    Throws<ToolInputException>(() => tool.Run(JsonDocument.Parse("""{"name":"E","type":"Seismic","user_coefficient":{"c":0.05,"direction":"Z"}}""").RootElement, link), "direction Z");
 });
 
 Test("link: units from the older one-value call, by name or number", () =>
@@ -1816,4 +1837,21 @@ namespace CpmFakes
         }
     }
     public sealed class SapDesigned { public SteelDesign DesignSteel { get; } = new(); }
+}
+
+namespace CpmFakes
+{
+    public sealed class Tables
+    {
+        public int GetAllTables(ref int n, ref string[] keys, ref string[] names, ref int[] import, ref bool[] empty)
+        { n = 3; keys = ["Story Definitions", "Story Stiffness", "Steel Column Envelope - AISC 360-16"]; names = keys; import = [0, 0, 0]; empty = [false, true, false]; return 0; }
+        public int SetLoadCasesSelectedForDisplay(ref string[] list) => 0;
+        public int SetLoadCombinationsSelectedForDisplay(ref string[] list) => 0;
+        public int GetTableForDisplayArray(string key, ref string[] ask, string group, ref int version, ref string[]? fields, ref int records, ref string[]? data)
+        {
+            if (key != "Story Definitions") { fields = null; data = null; return 1; }
+            fields = ["Story", "Height"]; records = 1; data = ["Story1", "3"]; return 0;
+        }
+    }
+    public sealed class TablesModel { public Tables DatabaseTables { get; } = new(); }
 }
