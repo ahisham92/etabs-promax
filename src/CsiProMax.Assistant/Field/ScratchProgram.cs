@@ -32,14 +32,6 @@ public static class ScratchDialogs
     /// <summary>True for a window the test may close itself: only the notice that an analysis has finished.</summary>
     public static bool MayClose(string title) => title.TrimStart().StartsWith("Analysis Complete", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>
-    /// Whether the "analysis complete" notice of this program is closed by the test at all. SAP2000 leaves that notice
-    /// waiting and nothing goes on until it is closed (seen on SAP2000 26). ETABS and SAFE show their analysis window
-    /// under the same title while they still work, and closing it makes them ask "Program is active. Do you really want
-    /// to close the program?" (seen on ETABS 23, 2026-11-25): theirs is left alone.
-    /// </summary>
-    public static bool ClosesNotices(CsiProgram? program) => program is null || program.Key == "sap2000";
-
     /// <summary>The visible titled windows of one process.</summary>
     public static List<(IntPtr Window, string Title)> Of(int processId)
     {
@@ -56,14 +48,44 @@ public static class ScratchDialogs
         return found;
     }
 
-    /// <summary>Asks each "analysis complete" notice of the process to close, as its own X button does. Returns their titles.</summary>
+    /// <summary>
+    /// Answers each "analysis complete" notice of the process the way a person does: by its own OK button, and only
+    /// when the program lets that button be pressed. Returns their titles.
+    /// </summary>
+    /// <remarks>
+    /// Never by closing the window (its X): the analysis windows of ETABS and SAP2000 carry the same title while the
+    /// program still works, and closing one made ETABS ask "Program is active. Do you really want to close the
+    /// program?" in the middle of its analysis, and left SAP2000 with no analysis window ("Invoke or BeginInvoke cannot
+    /// be called on a control until the window handle has been created") in the second full field test of 0.4.9
+    /// (2026-11-25). A notice with no OK button to press yet is left alone and looked at again a second later.
+    /// </remarks>
     public static List<string> CloseNotices(int processId, CsiProgram? program = null)
     {
         var closed = new List<string>();
-        if (!ClosesNotices(program)) return closed;
         foreach (var (window, title) in Of(processId))
-            if (MayClose(title) && PostMessageW(window, 0x0010 /* WM_CLOSE */, IntPtr.Zero, IntPtr.Zero)) closed.Add(title);
+            if (MayClose(title) && Button(window, "OK") is { } ok && IsWindowEnabled(ok) && PostMessageW(ok, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero)) closed.Add(title);
         return closed;
+    }
+
+    /// <summary>The label of a button as a person reads it: without the "&amp;" of its access key.</summary>
+    public static bool IsButton(string label, string text) => string.Equals(label.Replace("&", "").Trim(), text, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The window's own visible button with this text, or null.</summary>
+    private static IntPtr? Button(IntPtr window, string text)
+    {
+        IntPtr? found = null;
+        if (!OperatingSystem.IsWindows() || window == IntPtr.Zero) return null;
+        EnumChildWindows(window, (child, _) =>
+        {
+            var label = new System.Text.StringBuilder(64);
+            if (GetWindowTextW(child, label, label.Capacity) > 0 && IsButton(label.ToString(), text) && IsWindowVisible(child))
+            {
+                found = child;
+                return false;
+            }
+            return true;
+        }, IntPtr.Zero);
+        return found;
     }
 
     /// <summary>

@@ -666,8 +666,12 @@ static class TesterBugTests
         {
             // Seen on Ahmed's PC on 2026-11-25: "Program is active. Do you really want to close the program?" (Yes / No)
             // in the scratch ETABS during its analysis, waiting for a person.
-            Check(ScratchDialogs.ClosesNotices(CsiProgram.Sap2000), "SAP2000's 'analysis complete' notice is closed, as before");
-            Check(!ScratchDialogs.ClosesNotices(CsiProgram.Etabs) && !ScratchDialogs.ClosesNotices(CsiProgram.Safe), "the analysis window of ETABS and SAFE is left alone");
+            // The notice is answered by its own OK button, never by closing the window: closing it is what made ETABS ask,
+            // and what took SAP2000's analysis window away in the second full run of 0.4.9.
+            var scratch = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));
+            var notices = scratch[scratch.IndexOf("public static List<string> CloseNotices", StringComparison.Ordinal)..scratch.IndexOf("public static bool IsButton", StringComparison.Ordinal)];
+            Check(!notices.Contains("0x0010", StringComparison.Ordinal) && notices.Contains("BM_CLICK", StringComparison.Ordinal) && notices.Contains("IsWindowEnabled(ok)", StringComparison.Ordinal), "the notice is answered by its enabled OK button and its window is never closed");
+            Check(ScratchDialogs.IsButton("&OK", "OK") && ScratchDialogs.IsButton(" ok ", "OK") && !ScratchDialogs.IsButton("Cancel", "OK") && !ScratchDialogs.IsButton("OK to all", "OK"), "the OK button is known by its label");
             Check(ScratchDialogs.IsCloseQuestion(["&Yes", "&No", "Program is active. Do you really want to close the program?"]), "the close question is known by its words");
             foreach (var other in new[] { "License Message", "Your license will expire in 5 days.", "Do you want to save changes to the model?", "Analysis Complete", "" })
                 Check(!ScratchDialogs.IsCloseQuestion(["OK", other]), $"'{other}' is taken for the close question");
