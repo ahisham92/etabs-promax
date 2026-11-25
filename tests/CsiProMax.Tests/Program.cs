@@ -1050,6 +1050,15 @@ Test("SAP2000: results through the analysis results", () =>
     Check(!modal["passes"]!.GetValue<bool>(), "85% in UY is under 90%");
 });
 
+Test("link: a call made from inside another call runs at once instead of waiting for itself", () =>
+{
+    using var link = new ComEtabs(CsiProgram.Sap2000, () => new object()) { CallLimit = TimeSpan.FromSeconds(5) };
+    var clock = System.Diagnostics.Stopwatch.StartNew();
+    var answer = (int)link.Raw("read joint displacements", _ => (int)link.Raw("list the load cases", _ => 3)! + 4)!;
+    Equal(7, answer, "the inner call's answer");
+    Check(clock.ElapsedMilliseconds < 2000, $"it took {clock.ElapsedMilliseconds} ms: the inner call waited behind the outer one");
+});
+
 Test("link: a call the program does not come back from is given up on, later calls say so at once, and it recovers", () =>
 {
     using var link = new ComEtabs(CsiProgram.Sap2000, () => new object()) { CallLimit = TimeSpan.FromMilliseconds(300), AnalysisLimit = TimeSpan.FromMilliseconds(600) };
