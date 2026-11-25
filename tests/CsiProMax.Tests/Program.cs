@@ -11,6 +11,7 @@ using CsiProMax.Model;
 var tests = new List<(string Name, Action Body)>();
 void Test(string name, Action body) => tests.Add((name, body));
 static void Check(bool condition, string what) { if (!condition) throw new Exception(what); }
+static void Throws<T>(Action act, string what) where T : Exception { try { act(); } catch (T) { return; } throw new Exception(what + ": nothing was thrown"); }
 static void Equal<T>(T expected, T actual, string what)
 {
     if (!EqualityComparer<T>.Default.Equals(expected, actual)) throw new Exception($"{what}: expected {expected}, got {actual}");
@@ -1074,6 +1075,16 @@ Test("link: SAP2000 that answers an empty list with no list at all, and units on
     Equal("kN", info.Force, "force"); Equal("m", info.Length, "length"); Equal("C", info.Temperature, "temperature");
 });
 
+Test("link: a section given to a frame or area that is not there is reported, though the program says done", () =>
+{
+    // ETABS 23 field test (0.4.9): SetSection on a missing frame answered 0, so set_section said done 1, failed none.
+    using var link = new ComEtabs(CsiProgram.Etabs, () => new CpmFakes.SectionModel());
+    link.SetFrameSection("B1", "W12");
+    link.SetAreaSection("F1", "S200");
+    Throws<EtabsException>(() => link.SetFrameSection("no such frame", "W12"), "a missing frame");
+    Throws<EtabsException>(() => link.SetAreaSection("no such area", "S200"), "a missing area");
+});
+
 Test("link: units from the older one-value call, by name or number", () =>
 {
     Equal(("kN", "m", "C"), ComEtabs.Units("kN_m_C"), "by name");
@@ -1695,5 +1706,23 @@ namespace CpmFakes
         public int GetPresentUnits() => 6;
         public string GetModelFilename(bool path) => @"C:\x\cpm.sdb";
         public bool GetModelIsLocked() => false;
+    }
+}
+
+namespace CpmFakes
+{
+    // Like ETABS 23: setting a section always answers 0, and only the objects that are there keep it.
+    public sealed class SectionObjects(string have)
+    {
+        private readonly Dictionary<string, string> _now = new() { [have] = "" };
+        public int SetSection(string name, string section, int item, double a, double b) { if (_now.ContainsKey(name)) _now[name] = section; return 0; }
+        public int GetSection(string name, ref string section, ref string auto) { section = _now.GetValueOrDefault(name, ""); return 0; }
+        public int SetProperty(string name, string section, int item) { if (_now.ContainsKey(name)) _now[name] = section; return 0; }
+        public int GetProperty(string name, ref string section) { section = _now.GetValueOrDefault(name, ""); return 0; }
+    }
+    public sealed class SectionModel
+    {
+        public SectionObjects FrameObj { get; } = new("B1");
+        public SectionObjects AreaObj { get; } = new("F1");
     }
 }

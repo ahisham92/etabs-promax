@@ -318,8 +318,31 @@ public sealed class ComEtabs : ICsiLink, IDisposable
         return name;
     });
 
-    public void SetFrameSection(string name, string section) => Do("change a section", m => { Ok(m.FrameObj.SetSection(name, section, 0, 0.0, 0.0), $"give frame {name} the section {section}"); });
-    public void SetAreaSection(string name, string section) => Do("change a section", m => { Ok(m.AreaObj.SetProperty(name, section, 0), $"give area {name} the section {section}"); });
+    // ETABS 23 answers SetSection for a frame that is not there with 0 (done), as if it had worked (0.4.9 field test,
+    // Ahmed's PC): the section is read back, so a missing object or a change the program did not make is reported.
+    public void SetFrameSection(string name, string section) => Do("change a section", m =>
+    {
+        Ok(m.FrameObj.SetSection(name, section, 0, 0.0, 0.0), $"give frame {name} the section {section}");
+        string now = "", auto = "";
+        try { m.FrameObj.GetSection(name, ref now, ref auto); } catch (Exception ex) when (ex is not COMException) { now = section; }
+        Given("frame", name, section, now);
+    });
+    public void SetAreaSection(string name, string section) => Do("change a section", m =>
+    {
+        Ok(m.AreaObj.SetProperty(name, section, 0), $"give area {name} the section {section}");
+        string now = "";
+        try { m.AreaObj.GetProperty(name, ref now); } catch (Exception ex) when (ex is not COMException) { now = section; }
+        Given("area", name, section, now);
+    });
+
+    /// <summary>Throws when the section read back is not the one given: the object is not there, or the program kept its old section.</summary>
+    internal void Given(string kind, string name, string section, string? now)
+    {
+        if (string.Equals(now ?? "", section, StringComparison.OrdinalIgnoreCase)) return;
+        throw new EtabsException(string.IsNullOrEmpty(now)
+            ? $"{Program.Name} has no {kind} named {name}, so it was not given {section}."
+            : $"{Program.Name} kept {kind} {name} on {now}, not {section}.");
+    }
 
     public void Delete(string kind, string name) => Do("delete", m =>
     {
