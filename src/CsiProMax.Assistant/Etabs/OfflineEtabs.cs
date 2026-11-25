@@ -45,7 +45,9 @@ public sealed class OfflineEtabs : ICsiLink, CsiProMax.Assistant.Tools.IModelDra
     /// <summary>Puts back a model from before a change (the Modeler's undo and redo): it counts as a change, so it is saved again.</summary>
     public void Restore(StructuralModel model, string path)
     {
-        Model = model; Path = path; _selected.Clear(); Changed();
+        Model = model; Path = path; _selected.Clear();
+        CsiProMax.Lateral.LateralLoads.Refresh(Model);
+        Changed();
     }
 
     private void Changed() { Revision++; Unsaved = true; }
@@ -59,6 +61,8 @@ public sealed class OfflineEtabs : ICsiLink, CsiProMax.Assistant.Tools.IModelDra
     public T Edit<T>(Func<StructuralModel, T> work)
     {
         var result = Try(() => work(Model));
+        // A seismic or wind load by a code follows the model: its story forces are worked out again.
+        CsiProMax.Lateral.LateralLoads.Refresh(Model);
         Changed();
         return result;
     }

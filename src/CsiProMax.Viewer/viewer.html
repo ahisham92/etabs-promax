@@ -3277,21 +3277,65 @@ async function hmPatterns() {
   const defs = await hmDefs();
   let pick = defs.load_patterns.length ? 0 : -1;
   const d = dialog("Define Load Patterns", `<div style="display:flex;gap:10px"><fieldset style="flex:1;margin:0"><legend>Load Patterns</legend>
-      <div class="scroll" style="max-height:46vh"><table class="list hmgrid"><thead><tr><th>Load Pattern Name</th><th>Type</th><th>Self Weight Multiplier</th><th>Loads on</th></tr>
-      <tr class="edit"><td><input id="pN"></td><td><select id="pT">${opts(defs.pattern_types, "Dead")}</select></td><td><input id="pS" type="number" step="any" value="0"></td><td></td></tr></thead><tbody id="pL"></tbody></table></div></fieldset>
-    <fieldset style="width:180px;margin:0"><legend>Click To:</legend><div style="display:flex;flex-direction:column;gap:6px"><button id="pAdd">Add New Load Pattern</button><button id="pMod">Modify Load Pattern</button><button id="pDel">Delete Load Pattern</button></div></fieldset></div>`,
+      <div class="scroll" style="max-height:46vh"><table class="list hmgrid"><thead><tr><th>Load Pattern Name</th><th>Type</th><th>Self Weight Multiplier</th><th>Auto Lateral Load</th><th>Loads on</th></tr>
+      <tr class="edit"><td><input id="pN"></td><td><select id="pT">${opts(defs.pattern_types, "Dead")}</select></td><td><input id="pS" type="number" step="any" value="0"></td><td></td><td></td></tr></thead><tbody id="pL"></tbody></table></div></fieldset>
+    <fieldset style="width:180px;margin:0"><legend>Click To:</legend><div style="display:flex;flex-direction:column;gap:6px"><button id="pAdd">Add New Load Pattern</button><button id="pMod">Modify Load Pattern</button><button id="pDel">Delete Load Pattern</button><button id="pLat">Modify Lateral Load Pattern...</button></div></fieldset></div>`,
     [["OK"]], {width: 700});
   const L = () => hm.defs ? hm.defs.load_patterns : defs.load_patterns;
   const fill = () => { const p = L()[pick]; if (!p) return; q(d, "#pN").value = p.name; q(d, "#pT").value = p.type; q(d, "#pS").value = p.self_weight; };
   const paint = () => {
-    q(d, "#pL").innerHTML = L().map((p, i) => `<tr data-i="${i}" class="${i === pick ? "on" : ""}"><td>${esc(p.name)}</td><td>${esc(p.type)}</td><td class="r">${num(p.self_weight)}</td><td class="r">${p.loads}</td></tr>`).join("");
+    q(d, "#pL").innerHTML = L().map((p, i) => `<tr data-i="${i}" class="${i === pick ? "on" : ""}"><td>${esc(p.name)}</td><td>${esc(p.type)}</td><td class="r">${num(p.self_weight)}</td><td>${p.lateral ? esc(p.lateral.code) + (p.lateral.error ? " (not computed)" : "") : ["Seismic", "Wind"].includes(p.type) ? "None" : ""}</td><td class="r">${p.loads}</td></tr>`).join("");
+    const p = L()[pick]; q(d, "#pLat").disabled = !p || !["Seismic", "Wind"].includes(p.type);
     d.querySelectorAll("#pL [data-i]").forEach(tr => tr.onclick = () => { pick = +tr.dataset.i; paint(); fill(); });
   };
   const go = async (tool, args) => { formError(d, ""); const j = await hmRun(tool, args, true); if (!j.ok) return formError(d, j.error); await hmDefs(); pick = Math.min(pick, L().length - 1); paint(); };
   q(d, "#pAdd").onclick = () => { const name = q(d, "#pN").value.trim(); go("define_load_pattern", {name, type: q(d, "#pT").value, self_weight: fnum(d, "#pS")}).then(() => { pick = L().findIndex(p => p.name === name); paint(); }); };
   q(d, "#pMod").onclick = () => { const p = L()[pick]; if (p) go("define_load_pattern", {name: q(d, "#pN").value.trim(), was: p.name, type: q(d, "#pT").value, self_weight: fnum(d, "#pS")}); };
   q(d, "#pDel").onclick = () => { const p = L()[pick]; if (p) go("delete_definition", {kind: "load_pattern", name: p.name}); };
+  q(d, "#pLat").onclick = () => { const p = L()[pick]; if (p) hmLateral(p, () => { pick = Math.min(pick, L().length - 1); paint(); }); };
   paint(); fill();
+}
+
+// ---- Define: a seismic or wind load by a code (the programs' Modify Lateral Load Pattern form) ----
+// The Modeler works the story forces out itself, by the code's method, and gives them to the model as joint loads.
+async function hmLateral(p, after) {
+  const kind = p.type === "Wind" ? "wind" : "seismic";
+  const list = await hmPost({tool: "lateral_codes", args: {kind}}).catch(() => null);
+  if (!list || !list.ok) return hmSay("The codes could not be read: " + ((list && list.error) || "no answer"), true);
+  const codes = list.result.codes, now = p.lateral || null;
+  let code = now ? now.code : (kind === "wind" ? "ASCE 7-16" : "ASCE 7-16"), values = Object.assign({}, now ? now.values : {});
+  const d = dialog(`${kind === "wind" ? "Wind" : "Seismic"} Load Pattern: ${p.name}`, `<div class="g2" style="margin-bottom:6px"><span>Auto Lateral Load</span><select id="lCode">${opts([["None", "None"], ...codes.map(c => [c.code, c.code])], code)}</select></div>
+      <p class="kv" id="lAbout" style="margin:0 0 6px"></p><fieldset style="margin:0"><legend>Parameters</legend><div class="scroll" style="max-height:38vh"><div class="g2" id="lIn"></div></div></fieldset>
+      <fieldset style="margin:8px 0 0"><legend>Story forces (worked out by the Modeler)</legend><div class="scroll" style="max-height:26vh"><table class="list" id="lOut"></table></div><p class="kv" id="lSum" style="margin:4px 0 0"></p></fieldset>`,
+    [["OK", d => { apply(true); return false; }, true], ["Apply", d => { apply(false); return false; }], ["Cancel"]], {width: 620});
+  const u = hmU();
+  const paintIn = () => {
+    const c = codes.find(x => x.code === code);
+    q(d, "#lAbout").textContent = c ? c.method + (c.programs === "Modeler" ? " Worked out by the Modeler; the CSI programs get its story forces." : "") : "No code load: the pattern keeps only the loads you assign.";
+    q(d, "#lIn").innerHTML = !c ? "" : c.inputs.map(i => `<span title="${esc(i.about || "")}">${esc(i.name)}</span>` + (i.choices
+      ? `<select data-k="${esc(i.key)}">${opts([...(i.type === "story" ? [["", i.key === "TopStory" ? "(top story)" : "(base)"]] : []), ...i.choices.map(x => [x, x])], values[i.key] ?? i.default)}</select>`
+      : i.type === "text" ? `<textarea data-k="${esc(i.key)}" rows="2" placeholder="${esc(i.about || "")}">${esc(values[i.key] ?? i.default)}</textarea>`
+      : `<input data-k="${esc(i.key)}" value="${esc(values[i.key] ?? i.default)}" placeholder="${esc(i.about || "")}">`)).join("");
+    d.querySelectorAll("#lIn [data-k]").forEach(x => x.onchange = () => { values[x.dataset.k] = x.value; });
+  };
+  const paintOut = lat => {
+    const f = (lat && lat.story_forces) || [];
+    q(d, "#lOut").innerHTML = f.length ? `<tr><th>Story</th><th>Elevation (${u.l})</th><th>Weight (${u.f})</th><th>Fx (${u.f})</th><th>Fy (${u.f})</th><th>Mz (${u.f}-${u.l})</th></tr>` +
+      f.slice().reverse().map(s => `<tr><td>${esc(s.story)}</td><td class="r">${num(s.elevation)}</td><td class="r">${num(s.weight)}</td><td class="r">${num(s.fx)}</td><td class="r">${num(s.fy)}</td><td class="r">${num(s.mz)}</td></tr>`).join("") : "";
+    const r = (lat && lat.results) || {};
+    q(d, "#lSum").textContent = lat && lat.error ? "Not worked out yet: " + lat.error : Object.keys(r).map(k => `${k} = ${num(r[k])}`).join(",  ");
+  };
+  const apply = async close => {
+    formError(d, "");
+    if (code === "None" && !p.lateral) { if (close) d.close(); return; }
+    const j = await hmRun("set_lateral_load", {name: p.name, kind, code, values: code === "None" ? {} : values}, true);
+    if (!j.ok) return formError(d, j.error);
+    paintOut(j.result && j.result.story_forces ? j.result : null);
+    if (after) after();
+    if (close) { d.close(); hmSay("Done: " + p.name + (code === "None" ? " has no code load." : " takes " + code + ". Edit > Undo steps back.")); }
+  };
+  q(d, "#lCode").onchange = () => { code = q(d, "#lCode").value; values = {}; paintIn(); paintOut(null); };
+  paintIn(); paintOut(now);
 }
 
 // ---- Define: load combinations (SAP2000's Define Load Combinations, then Load Combination Data) ----

@@ -30,6 +30,8 @@ public static class ProgramTools
     {
         var byName = new Dictionary<string, Tool>(StringComparer.Ordinal);
         foreach (var tool in EtabsTools.All.Concat(CsiTools.For(program)).Concat(For(program))) byName[tool.Name] = tool;
+        // Seismic and wind by any code the program lists (its auto lateral tables): ETABS and SAP2000.
+        if (program.Key != "safe") foreach (var tool in LateralTools.All) byName.TryAdd(tool.Name, tool);
         return [.. byName.Values];
     }
 
@@ -37,7 +39,7 @@ public static class ProgramTools
     public static IReadOnlyList<Tool> Modeler { get; } = [.. Safe.SafeModelerTools.All, .. Sap2000.SapModelerTools.All];
 
     /// <summary>Every program's own tools, for lists that must know them all (which tools always ask first).</summary>
-    public static IEnumerable<Tool> Every => CsiProgram.All.SelectMany(For).Concat(CsiTools.Every).Concat(Modeler).DistinctBy(t => t.Name);
+    public static IEnumerable<Tool> Every => CsiProgram.All.SelectMany(For).Concat(CsiTools.Every).Concat(Modeler).Concat(LateralTools.All).DistinctBy(t => t.Name);
 
     /// <summary>The check report a review pack carries: the program's own checks, or the shared ETABS ones.</summary>
     public static JsonNode Report(JsonElement a, ICsiLink e) => e.Program.Key switch

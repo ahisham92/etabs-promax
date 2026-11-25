@@ -1028,6 +1028,7 @@ foreach (var (name, body) in AiModeTests.All()) Test(name, body);
 foreach (var (name, body) in WebWindowTests.All()) Test(name, body);
 foreach (var (name, body) in ModelTablesTests.All()) Test(name, body);
 foreach (var (name, body) in ModelerWindowTests.All()) Test(name, body);
+foreach (var (name, body) in LateralTests.All()) Test(name, body);
 foreach (var (name, body) in KeptPlugInsTests.All()) Test(name, body);
 foreach (var (name, body) in FieldRun048Tests.All()) Test(name, body);
 foreach (var (name, body) in FieldQuietTests.All()) Test(name, body);
