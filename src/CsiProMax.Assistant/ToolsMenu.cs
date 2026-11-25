@@ -59,7 +59,7 @@ public static class ToolsMenu
             State.Moved => $"{Label}: the Tools menu named a CSI ProMax file that is gone, or named CSI ProMax twice, and names this install now, once.",
             State.Already => $"{Label}: CSI ProMax is in the Tools menu.",
             State.Missing => $"{Label}: CSI ProMax is not in the Tools menu, and can be added.",
-            State.Open => $"{Label}: CSI ProMax is not in the Tools menu, and {Label} is open (or one is still running with no window on the screen: Task Manager, Details tab), so its plug-in list is left alone. Close {Label}, then open CSI ProMax again (from another program, or the Modeler): it adds itself.",
+            State.Open => $"{Label}: CSI ProMax is not in the Tools menu, and {Label} is open, so its plug-in list is left alone. Close {Label}, then open CSI ProMax again (from another program, or the Modeler): it adds itself.",
             State.Others => $"{Label}: CSI ProMax is not in the Tools menu, and {Label} has other plug-ins, so its list is left alone. Add it in {Label}: Tools > Add/Show Plugins, plug-in name {Name(Program)}, menu text {MenuText}, file {Path}.",
             _ => $"{Label}: its settings file was not understood, so it is left alone. Add CSI ProMax in {Label}: Tools > Add/Show Plugins, plug-in name {Name(Program)}, menu text {MenuText}, file {Path}.",
         };
@@ -236,6 +236,9 @@ public static class ToolsMenu
         {
             foreach (var process in running)
             {
+                // A process left behind with no window (the program hung on closing, hours ago) never writes its
+                // settings again, and its user cannot find it to close it: it does not count as the program being open.
+                if (LeftBehind(Window(process), Started(process), DateTime.Now)) continue;
                 string file;
                 try { file = process.MainModule?.FileName ?? ""; }
                 catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or NotSupportedException) { return true; }
@@ -245,6 +248,26 @@ public static class ToolsMenu
             return false;
         }
         finally { foreach (var process in running) process.Dispose(); }
+    }
+
+    /// <summary>
+    /// True for a process of the program that is not the program being open: it has no window and started more than
+    /// ten minutes ago (a program that is starting has no window for some seconds, and counts as open). A process whose
+    /// window or start time cannot be read counts as open.
+    /// </summary>
+    internal static bool LeftBehind(bool? hasWindow, DateTime? started, DateTime now) =>
+        hasWindow == false && started is { } at && now - at > TimeSpan.FromMinutes(10);
+
+    private static bool? Window(Process process)
+    {
+        try { return process.MainWindowHandle != IntPtr.Zero; }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or NotSupportedException) { return null; }
+    }
+
+    private static DateTime? Started(Process process)
+    {
+        try { return process.StartTime; }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or NotSupportedException) { return null; }
     }
 
     /// <summary>What a look at the lists found, in lines for a message: the ones that need the engineer first.</summary>

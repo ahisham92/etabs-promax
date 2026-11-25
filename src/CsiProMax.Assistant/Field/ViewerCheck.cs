@@ -103,7 +103,7 @@ public static class ViewerCheck
           if (a === "open" || a === "saveComments" || a === "copyNames") continue;
           await step(`button: ${title}`, async () => {
             const said = await press(a);
-            if (said === "off") return {skipped: "skipped: this pack has no results for it"};
+            if (said === "off") return {skipped: "skipped: the button is greyed out, this model has nothing for it (no such results, stories or grid lines)"};
             if (said) return {fail: said};
             await wait(150);
             const share = drawn();

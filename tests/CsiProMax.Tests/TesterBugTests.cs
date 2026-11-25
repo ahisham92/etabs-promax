@@ -652,6 +652,16 @@ static class TesterBugTests
             Check(!ScratchProgram.SameName(@"C:\t\cpm-field-test-111111.$et", @"C:\t\cpm-field-test-949e09.edb"), "another run's scratch model is not this one's");
             Check(!ScratchProgram.SameName("", @"C:\t\cpm-field-test-949e09.edb"), "no model open is not the scratch model");
         });
+        yield return ("SAP2000 field test: a process left behind with no window does not keep CSI ProMax out of the Tools menu", () =>
+        {
+            var now = new DateTime(2026, 11, 25, 18, 40, 0);
+            Check(ToolsMenu.LeftBehind(false, now.AddHours(-8), now), "a windowless process from the morning is not the program being open");
+            Check(!ToolsMenu.LeftBehind(true, now.AddHours(-8), now), "a program with a window is open");
+            Check(!ToolsMenu.LeftBehind(false, now.AddSeconds(-20), now), "a program that is starting (no window yet) is open");
+            Check(!ToolsMenu.LeftBehind(null, now.AddHours(-8), now) && !ToolsMenu.LeftBehind(false, null, now), "a process that cannot be read counts as open");
+            var install = File.ReadAllText(Path.Combine(SourceText.Root(), "install.ps1"));
+            Check(install.Contains("MainWindowHandle -ne 0") && install.Contains("TotalMinutes -le 10"), "install.ps1 follows the same rule");
+        });
         yield return ("ETABS 20 tester: the field test tries what Tools > CSI ProMax does in each program, and fails where the plug-in cannot be created", () =>
         {
             // What the check answered on that PC (in its own words), and a PC where all is well.

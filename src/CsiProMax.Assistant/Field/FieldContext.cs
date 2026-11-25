@@ -84,6 +84,13 @@ public sealed class FieldContext(CsiProgram program, string folder, ICsiLink lin
     public T? Step<T>(string name, Func<T> body)
     {
         StillWanted();
+        if (_gone is { } why && Watched is not null)
+        {
+            // The window stopped answering earlier in this part: what is left is not tested, said once per step with
+            // the step it stopped at, instead of failing each with the same message.
+            Skip(name, why);
+            return default;
+        }
         lock (_gate) { _doing = name; _moved = DateTime.UtcNow; }
         Progress?.Invoke(name);
         var clock = System.Diagnostics.Stopwatch.StartNew();
@@ -105,7 +112,34 @@ public sealed class FieldContext(CsiProgram program, string folder, ICsiLink lin
         {
             var real = ex is System.Reflection.TargetInvocationException { InnerException: { } inner } ? inner : ex;
             Add(name, false, $"{real.GetType().Name}: {real.Message}", clock.Elapsed.TotalSeconds);
+            StoppedAnswering(name);
             return default;
+        }
+    }
+
+    /// <summary>
+    /// The program window this part of the test works in (set by the runner for a scratch window's own steps, null
+    /// otherwise). When a step fails and that window no longer gives its model, the steps left in the part are
+    /// recorded as not tested: one hang is one failure in the report, not fifty.
+    /// </summary>
+    public ICsiLink? Watched
+    {
+        get => _watched;
+        set { _watched = value; _gone = null; }
+    }
+
+    private ICsiLink? _watched;
+    private string? _gone;
+
+    private void StoppedAnswering(string at)
+    {
+        if (_watched is not { } window || _gone is not null) return;
+        try { window.Info(); }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            var real = ex is AggregateException { InnerException: { } inner } ? inner : ex;
+            _gone = $"the program's window stopped answering at the step '{at}' ({real.Message}), so this step was not run";
         }
     }
 
