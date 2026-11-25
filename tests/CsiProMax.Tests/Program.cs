@@ -11,6 +11,7 @@ using CsiProMax.Model;
 var tests = new List<(string Name, Action Body)>();
 void Test(string name, Action body) => tests.Add((name, body));
 static void Check(bool condition, string what) { if (!condition) throw new Exception(what); }
+static void Throws<T>(Action act, string what) where T : Exception { try { act(); } catch (T) { return; } throw new Exception(what + ": nothing was thrown"); }
 static void Equal<T>(T expected, T actual, string what)
 {
     if (!EqualityComparer<T>.Default.Equals(expected, actual)) throw new Exception($"{what}: expected {expected}, got {actual}");
@@ -1074,6 +1075,46 @@ Test("link: SAP2000 that answers an empty list with no list at all, and units on
     Equal("kN", info.Force, "force"); Equal("m", info.Length, "length"); Equal("C", info.Temperature, "temperature");
 });
 
+Test("link: a section given to a frame or area that is not there is reported, though the program says done", () =>
+{
+    // ETABS 23 field test (0.4.9): SetSection on a missing frame answered 0, so set_section said done 1, failed none.
+    using var link = new ComEtabs(CsiProgram.Etabs, () => new CpmFakes.SectionModel());
+    link.SetFrameSection("B1", "W12");
+    link.SetAreaSection("F1", "S200");
+    Throws<EtabsException>(() => link.SetFrameSection("no such frame", "W12"), "a missing frame");
+    Throws<EtabsException>(() => link.SetAreaSection("no such area", "S200"), "a missing area");
+});
+
+Test("link: a redraw the program does not come back from never fails the tool, and is not asked for again", () =>
+{
+    // ETABS 23 field test (0.4.9): View.RefreshView after a selection never came back; the link waited 3 minutes,
+    // then failed every later call. A redraw is waited for briefly, never throws, and after one hang is skipped.
+    var model = new CpmFakes.HangingView();
+    using var link = new ComEtabs(CsiProgram.Etabs, () => model) { RefreshLimit = TimeSpan.FromMilliseconds(300) };
+    link.Refresh();
+    Equal(1, model.Redraws, "the first redraw is asked for and comes back");
+    model.Hang.Reset();
+    var clock = System.Diagnostics.Stopwatch.StartNew();
+    link.Refresh();
+    Check(clock.ElapsedMilliseconds < 2000, $"the tool waited {clock.ElapsedMilliseconds} ms for a redraw that hangs");
+    clock.Restart();
+    link.Refresh();
+    Check(clock.ElapsedMilliseconds < 100, "after a hang, a redraw is not waited for again");
+    model.Hang.Set();
+    Equal(7, (int)link.Raw("read joint displacements", _ => 7)!, "once the program answers, the link works");
+    Equal(2, model.Redraws, "no redraw was asked for after the hang");
+});
+
+Test("pack: SAP2000's steel design summary comes from its API, as ETABS's does", () =>
+{
+    // 0.4.9 field test: the SAP2000 pack had no design ratios, so the Viewer's "Show design ratios" had nothing.
+    using var com = new ComEtabs(CsiProgram.Sap2000, () => new CpmFakes.SapDesigned());
+    var made = DesignResults.FromApi(new CsiProMax.Assistant.Sap2000.SapLink(com), new HashSet<string>(), []);
+    var steel = made.FirstOrDefault(m => m.Name.StartsWith("Steel", StringComparison.Ordinal));
+    Check(steel.Data is not null, "no steel design table: " + string.Join(", ", made.Select(m => m.Name)));
+    Equal("0.75", steel.Data!.Rows[0][2], "B1's ratio");
+});
+
 Test("link: units from the older one-value call, by name or number", () =>
 {
     Equal(("kN", "m", "C"), ComEtabs.Units("kN_m_C"), "by name");
@@ -1696,4 +1737,46 @@ namespace CpmFakes
         public string GetModelFilename(bool path) => @"C:\x\cpm.sdb";
         public bool GetModelIsLocked() => false;
     }
+}
+
+namespace CpmFakes
+{
+    // Like ETABS 23: setting a section always answers 0, and only the objects that are there keep it.
+    public sealed class SectionObjects(string have)
+    {
+        private readonly Dictionary<string, string> _now = new() { [have] = "" };
+        public int SetSection(string name, string section, int item, double a, double b) { if (_now.ContainsKey(name)) _now[name] = section; return 0; }
+        public int GetSection(string name, ref string section, ref string auto) { section = _now.GetValueOrDefault(name, ""); return 0; }
+        public int SetProperty(string name, string section, int item) { if (_now.ContainsKey(name)) _now[name] = section; return 0; }
+        public int GetProperty(string name, ref string section) { section = _now.GetValueOrDefault(name, ""); return 0; }
+    }
+    public sealed class SectionModel
+    {
+        public SectionObjects FrameObj { get; } = new("B1");
+        public SectionObjects AreaObj { get; } = new("F1");
+    }
+}
+
+namespace CpmFakes
+{
+    public sealed class HangingView
+    {
+        public readonly System.Threading.ManualResetEventSlim Hang = new(true);
+        public int Redraws;
+        public HangingView View => this;
+        public int RefreshView(int window, bool zoom) { Redraws++; Hang.Wait(); return 0; }
+    }
+}
+
+namespace CpmFakes
+{
+    public sealed class SteelDesign
+    {
+        public int GetSummaryResults(string name, ref int n, ref string[] frame, ref double[] ratio, ref int[] type, ref double[] loc, ref string[] combo, ref string[] err, ref string[] warn, int item)
+        {
+            if (name != "ALL" || item != 1) return 1;
+            n = 1; frame = ["B1"]; ratio = [0.75]; type = [1]; loc = [0]; combo = ["COMB1"]; err = [""]; warn = [""]; return 0;
+        }
+    }
+    public sealed class SapDesigned { public SteelDesign DesignSteel { get; } = new(); }
 }

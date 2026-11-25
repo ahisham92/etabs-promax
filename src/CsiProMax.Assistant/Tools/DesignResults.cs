@@ -141,7 +141,7 @@ public static class DesignResults
     public static List<(string Name, TableData Data)> FromApi(ICsiLink e, ISet<string> have, List<string> notes)
     {
         var made = new List<(string, TableData)>();
-        if (e is not ComEtabs) return made;
+        if (e is not (ComEtabs or Sap2000.SapLink)) return made; // SAP2000's link wraps ComEtabs: its design summaries are the same calls
         var stories = new Dictionary<string, string>(StringComparer.Ordinal);
         try { foreach (var f in e.Frames()) stories[f.Name] = f.Story; }
         catch (EtabsException) { }
