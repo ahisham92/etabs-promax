@@ -59,5 +59,9 @@ A menu item added later is tested by the same rule. Items greyed out for the pac
 - The names of the step by step output parameters of `SetTableOutputOptionsForDisplay` in ETABS 23, SAP2000 26 and
   SAFE: the pack looks for names with History, Multistep, NonlinearStatic or Staged and sets them to 2 (step by step).
   If the program refuses, the pack says so in its notes and keeps the envelopes.
-- The joint column of ETABS's shell force table (the Viewer accepts Joint, Point, ElemJoint, Node and global X Y Z, and
-  falls back to the shell's own corners).
+- 0.4.33 field test (ETABS 23, SAP2000 26): every Display and Design item with data drew. ETABS 23's "Element Forces -
+  Area Shells" fields are Story, AreaObject, UniqueName, Type, ShellElm, Joint, OutputCase, CaseType, StepType,
+  StepNumber, F11 ... VMax: the Viewer reads Joint and UniqueName, as built. The field test packs take 20,000 rows a
+  table on purpose (speed); a pack made in the program takes 250,000 a table, 1.5 million in all.
+- No step table came in that run, and no note said why. Every outcome of the step output is now said in a note and in
+  the manifest's "step_output" (the options the program gave, what was set, which tables gave steps).

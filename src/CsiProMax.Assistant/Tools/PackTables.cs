@@ -92,12 +92,16 @@ public static class PackTables
     /// by step, then the output is set back as it was. Best effort: a program whose API has no such setting, or that
     /// refuses it, leaves the pack with the envelopes and says so in a note.
     /// </summary>
-    public static void AddSteps(ICsiLink e, IReadOnlyList<TableName> known, IReadOnlyList<string> cases, IReadOnlyList<string> combos,
+    /// <returns>What happened, for the manifest ("step_output") and a note: the 0.4.33 field test could not tell
+    /// why a pack had no step tables, so every outcome is now said.</returns>
+    public static JsonObject? AddSteps(ICsiLink e, IReadOnlyList<TableName> known, IReadOnlyList<string> cases, IReadOnlyList<string> combos,
         JsonObject tables, int mostRows, List<string> notes, Func<string, TableData, int, JsonObject> json)
     {
-        if (e is MemoryEtabs or OfflineEtabs) return;
+        if (e is MemoryEtabs or OfflineEtabs) return null;
+        var status = new JsonObject();
+        JsonObject? Say(string outcome) { status["outcome"] = outcome; notes.Add("Time history steps: " + outcome); return status; }
         var wanted = HistoryTables.Select(h => known.FirstOrDefault(t => !t.Empty && ResultTools.Norm(t.Name) == ResultTools.Norm(h))).OfType<TableName>().ToList();
-        if (wanted.Count == 0) return;
+        if (wanted.Count == 0) return Say("none of the history tables (" + string.Join(", ", HistoryTables.Take(4)) + "...) has data.");
         JsonObject? before;
         try
         {
@@ -106,10 +110,10 @@ public static class PackTables
         catch (Exception ex) when (ex is EtabsException or MissingMethodException or ToolInputException or InvalidOperationException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
         {
             // No program behind the link (a stand-in), or an API without this setting: the envelopes are what there is.
-            if (ex is MissingMethodException) notes.Add($"Time history steps were not taken: this {e.Program.Name} has no step by step table output in its API.");
-            return;
+            return Say($"not taken: {e.Program.Name} did not give its table output options ({ex.GetType().Name}: {ex.Message}).");
         }
-        if (before?["values"] is not JsonObject old) return;
+        if (before?["values"] is not JsonObject old) return Say($"not taken: {e.Program.Name} gave no table output options ({before?.ToJsonString()}).");
+        status["options_before"] = old.DeepClone();
         var steps = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         foreach (var (k, v) in old) steps[k] = v?.DeepClone();
         // 2 is "step by step" for each kind of case that has steps.
@@ -117,11 +121,12 @@ public static class PackTables
         foreach (var k in old.Select(kv => kv.Key).ToList())
             if (k.Contains("History", StringComparison.OrdinalIgnoreCase) || k.Contains("Multistep", StringComparison.OrdinalIgnoreCase) || k.Contains("NonlinearStatic", StringComparison.OrdinalIgnoreCase) || k.Contains("Staged", StringComparison.OrdinalIgnoreCase))
             { steps[k] = 2; any = true; }
-        if (!any) return;
+        if (!any) return Say("not taken: none of the table output options is for time history, multi-step or nonlinear cases: " + string.Join(", ", old.Select(kv => kv.Key)) + ".");
         try
         {
             var set = e.Raw("set the table output to step by step", m => ApiCall.Invoke((object)m, "DatabaseTables.SetTableOutputOptionsForDisplay", steps)) as JsonObject;
-            if (set is null || !ApiCall.Worked(set)) { notes.Add($"Time history steps were not taken: {e.Program.Name} refused step by step table output."); return; }
+            if (set is null || !ApiCall.Worked(set)) return Say($"not taken: {e.Program.Name} refused step by step table output ({set?["return"]?.ToJsonString()}).");
+            var taken = new JsonArray();
             foreach (var t in wanted)
             {
                 TableData data;
@@ -132,11 +137,15 @@ public static class PackTables
                 var rows = data.Rows.Where(r => st < r.Length && r[st].Contains("step", StringComparison.OrdinalIgnoreCase)).ToList();
                 if (rows.Count == 0) continue;
                 tables[t.Name + StepSuffix] = json(t.Name + StepSuffix, new TableData(data.Fields, rows), mostRows);
+                taken.Add((JsonNode)(t.Name + StepSuffix));
             }
+            status["tables"] = taken;
+            return Say(taken.Count > 0 ? $"taken in {taken.Count} tables ({string.Join(", ", taken.Select(n => n!.GetValue<string>()))})."
+                : "the step by step output was set, and no table gave step rows: the model has no time history, multi-step static or nonlinear case that was run.");
         }
-        catch (Exception ex) when (ex is EtabsException or MissingMethodException or ToolInputException or InvalidOperationException)
+        catch (Exception ex) when (ex is EtabsException or MissingMethodException or ToolInputException or InvalidOperationException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
         {
-            notes.Add($"Time history steps were not taken ({ex.Message}).");
+            return Say($"not taken ({ex.GetType().Name}: {ex.Message}).");
         }
         finally
         {

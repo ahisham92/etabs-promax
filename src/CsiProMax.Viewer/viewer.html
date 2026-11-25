@@ -459,7 +459,7 @@ function load(pack, keep) {
   $("units").textContent = u.force && u.length ? u.force + ", " + u.length + (u.temperature ? ", " + u.temperature : "") : "";
   $("story").innerHTML = stories.slice().reverse().map(s => `<option value="${esc(s.name)}">${esc(s.name)}</option>`).join("");
   $("line").innerHTML = allLines().map(g => `<option value="${esc(g.dir + g.label)}">${esc(g.label)}</option>`).join("");
-  readRatios(); readDisplacements(); readMarks(); readForces(); readReactions(); readDrifts(); readShells(); if (plotSpec && !P.tables[plotSpec.table]) plotSpec = null; syncResults();
+  readRatios(); readDisplacements(); readMarks(); readForces(); readReactions(); readDrifts(); readShells(); derivePushover(); if (plotSpec && !P.tables[plotSpec.table]) plotSpec = null; syncResults();
   $("drop").style.display = "none";
   sel.clear(); hover = 0;
   for (const k of selNames) { const o = (k[0] === "f" ? frames : areas).find(x => x.name === k.slice(2)); if (o) sel.add(o.id); }
@@ -1115,6 +1115,28 @@ function applyPlotFunctions(d, title) {
   const ys = [...d.querySelectorAll("[data-y]:checked")].map(x => x.dataset.y); if (!ys.length) return false;
   showPlot({kind: "xy", table: q(d, "#xT").value, x: q(d, "#xX").value, ys, case: q(d, "#xC").value, filterCol: q(d, "#xFc").value, filter: q(d, "#xFc").value ? q(d, "#xFv").value : "", sort: q(d, "#xSort").checked, title: title.replace(/^Plot Functions - /, "")});
 }
+// ETABS 23 has no pushover curve table (0.4.36 field test): its curve is the base shear of a nonlinear static case
+// against the displacement of the joint that moves most, step by step, as ETABS's own Static Pushover Curve plots it.
+function derivePushover() {
+  for (const k of Object.keys(P.tables)) if (P.tables[k].from === "derived") delete P.tables[k];
+  if (Object.values(P.tables).some(t => t.rows && t.rows.length && /pushover|capacitycurve/.test(norm(t.name)))) return;
+  const br = Object.values(P.tables).find(t => /^basereactionsstepbystep$/.test(norm(t.name))), jd = Object.values(P.tables).find(t => /^jointdisplacementsstepbystep$/.test(norm(t.name)));
+  if (!br || !jd) return;
+  const bc = caseCol(br.fields), bt = col(br.fields, "CaseType", "Case Type"), bs = stepNumCol(br.fields), fx = col(br.fields, "FX"), fy = col(br.fields, "FY");
+  const jc = caseCol(jd.fields), js = stepNumCol(jd.fields), ju = col(jd.fields, "UniqueName", "Unique Name", "Joint", "Label"), ux = col(jd.fields, "Ux", "UX", "U1"), uy = col(jd.fields, "Uy", "UY", "U2");
+  if ([bc, bs, fx, fy, jc, js, ju, ux, uy].some(i => i < 0)) return;
+  const rows = [];
+  for (const c of new Set(br.rows.filter(r => bt < 0 || /non/i.test(r[bt]) && /static/i.test(r[bt])).map(r => String(r[bc])))) {
+    const jr = jd.rows.filter(r => String(r[jc]) === c); if (!jr.length) continue;
+    const last = Math.max(...jr.map(r => +r[js] || 0));
+    let top = null, dir = 0, big = 0;
+    for (const r of jr) if ((+r[js] || 0) === last) for (const [i, d] of [[ux, 0], [uy, 1]]) { const v = Math.abs(parseFloat(r[i]) || 0); if (v > big) { big = v; top = String(r[ju]); dir = d; } }
+    if (!top) continue;
+    const disp = new Map(jr.filter(r => String(r[ju]) === top).map(r => [+r[js] || 0, parseFloat(r[dir ? uy : ux]) || 0]));
+    for (const r of br.rows) if (String(r[bc]) === c && disp.has(+r[bs] || 0)) rows.push([c, String(+r[bs] || 0), top, dir ? "Y" : "X", String(disp.get(+r[bs] || 0)), String(-(parseFloat(r[dir ? fy : fx]) || 0))]);
+  }
+  if (rows.length > 1) P.tables["Pushover Curve (from base reactions)"] = {name: "Pushover Curve (from base reactions)", fields: ["Output Case", "Step", "Monitored Joint", "Direction", "Displacement", "Base Shear"], rows, from: "derived"};
+}
 // ---- mode shapes: the deformed shape of each mode, with its period ----
 const modeCases = () => [...disp.keys()].filter(c => / · Mode \d+$/.test(c));
 function periodOf(c) {
@@ -1154,7 +1176,7 @@ function coverage() {
     ["Support and spring reactions", "Display > Support Reactions", reacts.size > 0],
     ["Frame forces and moments (P V2 V3 T M2 M3)", "Display > Frame Forces and Moments", forces.size > 0],
     ["Shell forces and stresses (F11 ... M22, S11 ... SVM)", "Display > Shell Forces/Stresses", shellRes.size > 0],
-    ["Pier and spandrel forces", "Display > Pier and Spandrel Forces", has(/pierforces|spandrelforces/)],
+    ...(program === "sap2000" ? [] : [["Pier and spandrel forces", "Display > Pier and Spandrel Forces", has(/pierforces|spandrelforces/)]]),
     ["Link and spring forces and deformations", "Display > Link Forces", has(/link|spring/)],
     ["Hinge results", "Display > Hinge Results", has(/hinge/)],
     ["Section cut forces", "Display > Section Cut Forces", has(/sectioncut/)],
@@ -2444,7 +2466,7 @@ const viewerMenus = () => {
       const has = re => Object.values(P ? P.tables : {}).some(t => t.rows && t.rows.length && re.test(norm(t.name))), plots = P ? Object.values(P.tables).some(t => t.rows && t.rows.length > 1) : false;
       return [["Undeformed Shape", "r:model", "F4"], ["Deformed Shape...", "dlg:deformed", "F6", !disp.size], ["Mode Shapes...", "dlg:modes", "", !P || !modeCases().length], ["Animate Deformed Shape", "anim", "", res.mode !== "deformed"], 0,
         ["Force/Stress Diagrams", [["Support/Spring Reactions...", "dlg:reactions", "", !reacts.size], ["Frame Forces and Moments...", "dlg:forces", "F8", !forces.size], ["Shell Forces/Stresses...", "dlg:shells", "", !shellRes.size],
-          ["Pier and Spandrel Forces...", "vals:pier", "", !has(/pierforces|spandrelforces/)], ["Link Forces and Deformations...", "vals:link", "", !has(/link/)], ["Spring Forces and Soil Pressures...", "vals:spring", "", !has(/spring|soilpressure/)],
+          ...(program === "sap2000" ? [] : [["Pier and Spandrel Forces...", "vals:pier", "", !has(/pierforces|spandrelforces/)]]), ["Link Forces and Deformations...", "vals:link", "", !has(/link/)], ["Spring Forces and Soil Pressures...", "vals:spring", "", !has(/spring|soilpressure/)],
           ["Hinge Results...", "vals:hinge", "", !has(/hinge/)], ["Section Cut Forces...", "vals:cut", "", !has(/sectioncut/)], ["Tendon and Cable Results...", "vals:tendon", "", !has(/tendon|cable/)]]],
         ["Joint Displacement Contours...", "dlg:contour", "", !disp.size], ["Table Values on Model...", "vals:", "", !P || !valueTables().length], ["Design Ratios", "r:ratios", "", !ratio.size], 0,
         ["Story Response Plots...", "dlg:storyPlot", "", !P || !storyTables().length], ["Plot Functions...", "xy:history", "", !plots], ["Static Pushover Curve...", "xy:pushover", "", !has(/pushover|capacitycurve/)],
