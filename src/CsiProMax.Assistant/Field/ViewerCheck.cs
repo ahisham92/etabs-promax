@@ -99,9 +99,14 @@ public static class ViewerCheck
         });
         // Every button of the two toolbars, as an engineer would press them (not "open", which asks for a file).
         const acts = [...document.querySelectorAll("#icons [data-act], #strip [data-act]")].map(b => [b.dataset.act, b.title, !!b.dataset.res]);
+        const needs = {storyUp: "v:plan", storyDown: "v:plan", linePrev: "v:elev", lineNext: "v:elev", anim: "dlg:deformed"};
         for (const [a, title, isResult] of acts) {
           if (a === "open" || a === "saveComments" || a === "copyNames") continue;
           await step(`button: ${title}`, async () => {
+            // A button that only works in one kind of view is pressed in that view: the story buttons in a plan,
+            // the grid line buttons in an elevation, the animation on the deformed shape.
+            const first = needs[a];
+            if (first) { const lead = await press(first); if (lead === "off") return {skipped: `skipped: it needs "${first}" first, and that button is greyed out for this model`}; await wait(150); }
             const said = await press(a);
             if (said === "off") return {skipped: "skipped: the button is greyed out, this model has nothing for it (no such results, stories or grid lines)"};
             if (said) return {fail: said};
@@ -111,7 +116,7 @@ public static class ViewerCheck
             return share > 0.002 ? {ok: `drawn (${(share * 100).toFixed(1)}%)`} : {fail: `nothing is drawn after it (${share})`};
           });
           // Back to the plain model in a 3-D view before the next button.
-          try { if (isResult) { const m = document.querySelector('[data-act="r:model"]'); if (m && !m.disabled) m.click(); } if (a === "plot") { const p = document.querySelector('[data-act="plot"].on'); if (p) p.click(); } await wait(60); } catch (e) { }
+          try { if (a === "anim") { const on = document.querySelector('[data-act="anim"].on'); if (on) on.click(); } if (needs[a]) { const back = document.querySelector(needs[a].startsWith("v:") ? '[data-act="v:3d"]' : '[data-act="r:model"]'); if (back && !back.disabled) back.click(); } if (isResult) { const m = document.querySelector('[data-act="r:model"]'); if (m && !m.disabled) m.click(); } if (a === "plot") { const p = document.querySelector('[data-act="plot"].on'); if (p) p.click(); } await wait(60); } catch (e) { }
         }
         // Every table the pack holds, opened in the tables window.
         const tableNames = [...document.querySelectorAll("#tree [data-table]")].map(e => e.dataset.table);
