@@ -1493,6 +1493,17 @@ Test("field test: the full test runs every part, closes its window, and leaves t
         Check(thrown.Steps.Any(s => !s.Ok && s.Name == "let go of the scratch ETABS window" && s.Detail.Contains("no longer there")), "the report says what letting go threw");
         Check(thrown.Steps.Any(s => s.Name == "every tool of the panel was run, or is listed as not tested"), "the parts after it still ran");
 
+        // Seen on a real ETABS 23 on 2026-11-25: the scratch window stopped answering, and CSI ProMax's own features were
+        // then run on that same window, so every one failed with the same message. They run on a link that answers.
+        var dead = FieldTest.Run(open, options with
+        {
+            At = at.AddMinutes(4), Viewer = false,
+            StartScratch = (program, ctx, file) => new CsiProMax.Tests.StandInWindow(System.Reflection.DispatchProxy.Create<ICsiLink, CsiProMax.Tests.DeadLink>(), Path.Combine(ctx.Folder, "cpm-field-test.edb")),
+        });
+        Check(dead.Steps.Any(s => s.Skipped && s.Name == "CSI ProMax's own features on the scratch ETABS window" && s.Detail.Contains("no longer answers")), "the window that stopped answering is left out of CSI ProMax's own features, and the report says so");
+        var own = dead.Steps.Where(s => s.Section == PanelFieldSteps.Section).ToList();
+        Check(own.Count > 20 && own.All(s => !s.Detail.Contains("stopped answering")), "CSI ProMax's own features ran on a link that answers: " + string.Join("; ", own.Where(s => s.Detail.Contains("stopped answering")).Take(3).Select(s => s.Name)));
+
         // A program window that never comes back is given up on; the rest of the test still runs and the report is saved.
         using var hold = new ManualResetEventSlim(false);
         var stuck = FieldTest.Run(open, options with
@@ -1521,6 +1532,13 @@ return failed == 0 ? 0 : 1;
 namespace CsiProMax.Tests
 {
     /// <summary>Stands in for the field test's own window of a CSI program.</summary>
+    /// <summary>A link whose every call fails the way a program that stopped answering does.</summary>
+    public class DeadLink : System.Reflection.DispatchProxy
+    {
+        protected override object? Invoke(System.Reflection.MethodInfo? method, object?[]? args) =>
+            method?.Name == "get_Program" ? CsiProgram.Etabs : throw new EtabsException("the program stopped answering (a call did not come back)");
+    }
+
     sealed class StandInWindow(ICsiLink link, string path) : IScratchWindow
     {
         public bool Closed, Disposed;

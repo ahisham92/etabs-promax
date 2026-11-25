@@ -264,6 +264,14 @@ public static class FieldTest
                 ctx.Section(FieldParts.ScratchSection(program));
                 if (o.Viewer) ViewerCheck.FieldSteps(ctx, window.Link, program.Name);
                 if (panelDone) return;
+                // CSI ProMax's own features need a window that still answers: one that stopped (a call that never came
+                // back) is left out, and the next program's window, or the open model, takes that part instead.
+                try { window.Link.Info(); }
+                catch (Exception ex) when (ex is not (OperationCanceledException or OutOfMemoryException))
+                {
+                    ctx.Skip($"CSI ProMax's own features on the scratch {program.Name} window", $"that window no longer answers ({(ex is AggregateException { InnerException: { } inner } ? inner : ex).Message}), so they run on the next window that does");
+                    return;
+                }
                 panelDone = true;
                 // CSI ProMax's own tools change the model too (code): only while this window still has the test's model.
                 var mine = ctx.Step($"the scratch {program.Name} window still has the scratch model open", () =>
