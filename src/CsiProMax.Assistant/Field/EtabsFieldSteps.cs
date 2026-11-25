@@ -270,6 +270,14 @@ public static class EtabsFieldSteps
         else ctx.Skip("the scratch wall is made pier CPM-P1 (for the shear wall design)", "the wall was not added");
 
         // ---- ETABS's own analysis and design ----
+        // A lateral load, so Story Stiffness, the drifts and the torsion check have results to check (0.4.11 run).
+        ctx.Tool("add_load_pattern", """{"name":"CPM-EQX","type":"Seismic","user_coefficient":{"c":0.05,"k":1,"direction":"X"}}""",
+            a =>
+            {
+                if (a["note"] is not null) throw new FieldSkipException("this ETABS stand-in has no automatic lateral loads");
+                FieldContext.Expect(a["lateral"] is not null && link.LoadPatterns().Any(p => p.Name == "CPM-EQX"), "the seismic pattern or its coefficient is not in ETABS: " + a.ToJsonString());
+            },
+            "tool add_load_pattern, seismic by a user coefficient");
         NoVerdictBeforeAnalysis(ctx);
         ctx.Tool("run_analysis", "{}", _ => FieldContext.Expect(link.Info().Locked, "the analysis answered, but ETABS does not say the model is analysed (locked)"));
         var analysed = false;

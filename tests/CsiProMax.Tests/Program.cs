@@ -1138,6 +1138,15 @@ Test("link: a table the program lists reads as empty when the program refuses to
     Throws<EtabsException>(() => link.ReadTable("No Such Table", null, null), "a table that is not there");
 });
 
+Test("tool: add_load_pattern refuses a user coefficient that is not for a seismic pattern, or not above 0", () =>
+{
+    var link = new MemoryEtabs();
+    var tool = EtabsTools.All.First(t => t.Name == "add_load_pattern");
+    Throws<ToolInputException>(() => tool.Run(JsonDocument.Parse("""{"name":"W","type":"Wind","user_coefficient":{"c":0.05}}""").RootElement, link), "wind");
+    Throws<ToolInputException>(() => tool.Run(JsonDocument.Parse("""{"name":"E","type":"Seismic","user_coefficient":{"c":0}}""").RootElement, link), "zero");
+    Throws<ToolInputException>(() => tool.Run(JsonDocument.Parse("""{"name":"E","type":"Seismic","user_coefficient":{"c":0.05,"direction":"Z"}}""").RootElement, link), "direction Z");
+});
+
 Test("link: units from the older one-value call, by name or number", () =>
 {
     Equal(("kN", "m", "C"), ComEtabs.Units("kN_m_C"), "by name");
