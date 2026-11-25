@@ -73,6 +73,19 @@ public static class SelfTest
             Step("SAFE list_design_strips", () => Safe.SafeTools.All.First(t => t.Name == "list_design_strips").Run(none, etabs).ToJsonString());
             Step("SAFE area spring properties", () => etabs.Raw("list the soil properties", m => { int n = 0; string[] a = []; m.PropAreaSpring.GetNameList(ref n, ref a); return a; }));
             Step("SAFE safe_results_overview", () => Safe.SafeTools.All.First(t => t.Name == "safe_results_overview").Run(none, etabs).ToJsonString());
+            Step("SAFE API file", () => EtabsApi.FindApiFile(CsiProgram.Safe));
+            Step("SAFE slab properties", () => etabs.Raw("read the slab properties", m =>
+            {
+                int n = 0; string[] names = [];
+                m.PropArea.GetNameList(ref n, ref names);
+                return names.Take(n).Take(10).Select(name =>
+                {
+                    int type = 0, shell = 0, color = 0; string mat = "", notes = "", guid = ""; double t = 0;
+                    try { m.PropArea.GetSlab(name, ref type, ref shell, ref mat, ref t, ref color, ref notes, ref guid); return $"{name}: type {type}, shell {shell}, {mat}, {t}"; }
+                    catch (Exception ex) { return $"{name}: {ex.Message}"; }
+                }).ToList();
+            }));
+            Step("SAFE safe_check_report", () => Safe.SafeTools.Report(none, etabs)["summary"]?.ToJsonString());
         }
 
         var sap = etabs.Program.Key == CsiProgram.Sap2000.Key;
