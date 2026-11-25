@@ -42,7 +42,7 @@ public static class SafeFieldSteps
         var link = ctx.Link;
         ctx.ClearTools();
         ctx.Offer(EtabsTools.All);
-        ctx.Offer(SafeTools.All);
+        ctx.Offer(ProgramTools.For(CsiProgram.Safe));
 
         // ---- what SAFE read from the file the Modeler wrote ----
         ctx.Step("SAFE read the slabs and beams the Modeler wrote", () =>
@@ -214,6 +214,9 @@ public static class SafeFieldSteps
             FieldContext.Expect(pack.Areas == link.Areas().Count, $"the pack holds {pack.Areas} areas, the model has {link.Areas().Count}");
             return new { file = Path.GetFileName(file), kilobytes = pack.Zip.Length / 1024, frames = pack.Frames, areas = pack.Areas, tables = pack.Tables, notes = pack.Notes };
         });
+
+        // ---- the link with GeoProMax: the pressures out, the springs back in (the model is unlocked for them) ----
+        GeoProMaxFieldSteps.Run(ctx);
 
         ctx.Coverage("every SAFE tool was run");
     }

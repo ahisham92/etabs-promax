@@ -398,6 +398,9 @@ public static class EtabsFieldSteps
                 FieldContext.Expect(back is not null && back.Type == type, $"the pattern {name} was added as {type}; ETABS says {(back is null ? "it is not there" : "it is " + back.Type)}");
             }, $"tool add_load_pattern of type {type}");
 
+        // ---- the link with GeoProMax ----
+        GeoProMaxFieldSteps.Run(ctx);
+
         ctx.Coverage("every ETABS tool was run");
     }
 

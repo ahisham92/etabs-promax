@@ -10,13 +10,15 @@ namespace CsiProMax.Assistant.Tools;
 /// </summary>
 public static class ProgramTools
 {
-    /// <summary>The program's own tools on a live model (none for ETABS: its tools are the shared ones).</summary>
+    /// <summary>The program's own tools on a live model. ETABS and SAFE share the link with GeoProMax (springs under a raft).</summary>
     public static IReadOnlyList<Tool> For(CsiProgram program) => program.Key switch
     {
-        "safe" => Safe.SafeTools.All,
+        "safe" => SafeAll,
         "sap2000" => Sap2000.SapTools.All,
-        _ => [],
+        _ => GeoProMaxTools.All,
     };
+
+    private static readonly IReadOnlyList<Tool> SafeAll = [.. Safe.SafeTools.All, .. GeoProMaxTools.All];
 
     /// <summary>
     /// The model tools the chat is given in this program, each once by its name: the shared tools, then the program's
@@ -34,7 +36,7 @@ public static class ProgramTools
     public static IReadOnlyList<Tool> Modeler { get; } = [.. Safe.SafeModelerTools.All, .. Sap2000.SapModelerTools.All];
 
     /// <summary>Every program's own tools, for lists that must know them all (which tools always ask first).</summary>
-    public static IEnumerable<Tool> Every => CsiProgram.All.SelectMany(For).Concat(Modeler);
+    public static IEnumerable<Tool> Every => CsiProgram.All.SelectMany(For).Concat(Modeler).DistinctBy(t => t.Name);
 
     /// <summary>The check report a review pack carries: the program's own checks, or the shared ETABS ones.</summary>
     public static JsonNode Report(JsonElement a, ICsiLink e) => e.Program.Key switch

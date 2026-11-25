@@ -54,6 +54,17 @@ static class SafeTests
         return new SafeMemory(m);
     }
 
+    /// <summary>A raft 12 m by 6 m in 3 m cells as GeoProMax writes it: soft at the ends (1000 kN/m3), stiff inside (2000).</summary>
+    const string SpringsFile = """
+        {"format":"geopromax-springs","version":1,"project":"Raft","round":1,"converged":false,"time_years":50,"founding_depth":1,
+         "units":{"length":"m","force":"kN","pressure":"kN/m2","modulus":"kN/m3"},"cell_size":3,
+         "zones":[{"name":"GPM-K1","modulus":1000,"from":900,"to":1100,"cells":4},{"name":"GPM-K2","modulus":2000,"from":1900,"to":2100,"cells":4}],
+         "cells":[{"x":1.5,"y":1.5,"pressure":100,"settlement":0.1,"modulus":1000,"zone":"GPM-K1"},{"x":4.5,"y":1.5,"pressure":100,"settlement":0.05,"modulus":2000,"zone":"GPM-K2"},
+                  {"x":7.5,"y":1.5,"pressure":100,"settlement":0.05,"modulus":2000,"zone":"GPM-K2"},{"x":10.5,"y":1.5,"pressure":100,"settlement":0.1,"modulus":1000,"zone":"GPM-K1"},
+                  {"x":1.5,"y":4.5,"pressure":100,"settlement":0.1,"modulus":1000,"zone":"GPM-K1"},{"x":4.5,"y":4.5,"pressure":100,"settlement":0.05,"modulus":2000,"zone":"GPM-K2"},
+                  {"x":7.5,"y":4.5,"pressure":100,"settlement":0.05,"modulus":2000,"zone":"GPM-K2"},{"x":10.5,"y":4.5,"pressure":100,"settlement":0.1,"modulus":1000,"zone":"GPM-K1"}]}
+        """;
+
     public static IEnumerable<(string Name, Action Body)> All()
     {
         yield return ("SAFE: table text writes and reads back, quotes and continuations", () =>
@@ -193,8 +204,9 @@ static class SafeTests
             Check(CsiProgram.Safe.Ready, "SAFE is switched on");
             Equal(CsiProgram.Safe, CsiProgram.Find("SAFE"), "found by its key");
             Check(ProgramTools.For(CsiProgram.Safe).Any(t => t.Name == "check_punching"), "SAFE's tools");
-            Equal(0, ProgramTools.For(CsiProgram.Etabs).Count, "ETABS has only the shared ones");
-            var names = SafeTools.All.Select(t => t.Name).Concat(SafeModelerTools.All.Select(t => t.Name)).ToList();
+            Check(ProgramTools.For(CsiProgram.Etabs).SequenceEqual(GeoProMaxTools.All) && GeoProMaxTools.All.All(t => ProgramTools.For(CsiProgram.Safe).Contains(t)), "ETABS adds only the link with GeoProMax, and SAFE has it too");
+            Check(!ProgramTools.For(CsiProgram.Sap2000).Any(t => t.Name == "apply_geopromax_springs"), "not in SAP2000");
+            var names = ProgramTools.For(CsiProgram.Safe).Select(t => t.Name).Concat(SafeModelerTools.All.Select(t => t.Name)).ToList();
             Check(names.Distinct().Count() == names.Count, "no tool named twice");
             Check(!names.Intersect(EtabsTools.All.Select(t => t.Name)).Any() && !names.Intersect(ModelerTools.All.Select(t => t.Name)).Any(), "no clash with the shared tools");
             var registry = CsiProMax.Tools.ToolRegistry.CreateDefault(false, CsiProgram.Safe);
@@ -205,7 +217,7 @@ static class SafeTests
             Equal("SAFE", (string)ProgramTools.Report(Args("{}"), new SafeMemory(new MemoryEtabs()))["program"]!, "SAFE's report in the pack");
             Check(ProgramTools.Report(Args("{}"), new MemoryEtabs())["checks"]!["drift"] is not null, "ETABS's report in ETABS");
             Check(SafePrompt.Text.Contains("check_punching") && SafePrompt.Text.Contains("not ETABS"), "SAFE's prompt");
-            foreach (var tool in SafeTools.All.Concat(SafeModelerTools.All)) JsonDocument.Parse(tool.Schema);
+            foreach (var tool in ProgramTools.For(CsiProgram.Safe).Concat(SafeModelerTools.All)) JsonDocument.Parse(tool.Schema);
         });
 
         yield return ("SAFE: the review pack says SAFE and takes SAFE's tables", () =>
@@ -217,6 +229,101 @@ static class SafeTests
             var html = Pack.ViewerHtml(built.Content);
             if (Environment.GetEnvironmentVariable("CPM_VIEWER_OUT") is { Length: > 0 } output) File.WriteAllText(output, html);
             Check(html.Contains("value=\"punching\"") && html.Contains("readMarks"), "the Viewer draws punching ratios and soil pressure");
+        });
+
+        yield return ("GeoProMax: the springs file becomes soil zones under the raft's panels, in the model's units", () =>
+        {
+            var folder = Directory.CreateTempSubdirectory("gpm").FullName;
+            var file = Path.Combine(folder, "raft.gpmsprings.json");
+            File.WriteAllText(file, SpringsFile);
+            var args = JsonSerializer.Serialize(new { file });
+            string With(string more) => args[..^1] + "," + more + "}";
+            JsonNode Go(string json, ICsiLink e) => GeoProMaxTools.All.First(t => t.Name == "apply_geopromax_springs").Run(Args(json), e);
+
+            // SAFE in kN and m, the raft drawn as eight 3 m panels, and a slab that is not on the ground's cells.
+            var m = new MemoryEtabs();
+            var names = new List<string>();
+            foreach (var y in new[] { 0.0, 3 }) foreach (var x in new[] { 0.0, 3, 6, 9 }) names.Add(m.AddArea([(x, y, 0), (x + 3, y, 0), (x + 3, y + 3, 0), (x, y + 3, 0)], "S200"));
+            var far = m.AddArea([(40, 0, 0), (43, 0, 0), (43, 3, 0), (40, 3, 0)], "S200");
+            var model = new SpringModel(m);
+            var a = Go(args, new SafeMemory(m, model));
+            Equal(8, (int)a["areas"]!, "eight panels"); Equal(0, (int)a["mixed"]!["count"]!, "one zone each"); Equal(1, (int)a["outside"]!["count"]!, "the far slab is left");
+            Equal("GPM-K1", model.AreaSoil[names[0]], "corner panel"); Equal("GPM-K2", model.AreaSoil[names[1]], "inner panel"); Equal("GPM-K1", model.AreaSoil[names[7]], "far corner");
+            Check(!model.AreaSoil.ContainsKey(far), "nothing under the far slab");
+            Equal((1000.0, 1), model.Soils["GPM-K1"], "kN/m3, compression only"); Equal(2000.0, model.Soils["GPM-K2"].K, "inner zone");
+            Check(((string)a["note"]!).Contains("export_soil_pressures"), "what to do next");
+
+            // The same raft in N and mm: 1000 kN/m3 is 0.001 N/mm3; and in kip and ft.
+            var mm = new MemoryEtabs();
+            foreach (var x in new[] { 0.0, 3000, 6000, 9000 }) mm.AddArea([(x, 0, 0), (x + 3000, 0, 0), (x + 3000, 6000, 0), (x, 6000, 0)], "S200");
+            var inMm = new SpringModel(mm);
+            Go(args, new SafeMemory(mm, inMm, null, "mm", "N"));
+            Check(Math.Abs(inMm.Soils["GPM-K1"].K - 1e-3) < 1e-9 && inMm.AreaSoil.Count == 4, "N/mm3: " + inMm.Soils["GPM-K1"].K);
+            var (kip, ft) = GeoProMaxTools.Units(new ModelInfo("", "", "kip", "ft", "F", false));
+            Check(Math.Abs(1000 * kip / (ft * ft * ft) - 6.3659) < 1e-3, "1000 kN/m3 is 6.366 kip/ft3");
+
+            // ETABS: the raft is the lowest slab, the floors above are left; a locked model says what to do.
+            var et = new MemoryEtabs();
+            var raft = et.AddArea([(0, 0, 0), (12, 0, 0), (12, 6, 0), (0, 6, 0)], "S200");
+            var floor = et.AddArea([(0, 0, 3.2), (12, 0, 3.2), (12, 6, 3.2), (0, 6, 3.2)], "S200");
+            var inEt = new SpringModel(et);
+            var etabs = new SafeMemory(et, inEt, CsiProgram.Etabs);
+            et.Locked = true;
+            try { Go(args, etabs); throw new Exception("no error"); }
+            catch (EtabsException ex) { Check(ex.Message.Contains("unlock") && ex.Message.Contains("ETABS") && inEt.Soils.Count == 0, ex.Message); }
+            var one = Go(With("\"unlock\":true,\"compression_only\":false"), etabs);
+            Check(!et.Locked && (bool)one["unlocked"]!, "unlocked when told to");
+            Equal(1, (int)one["areas"]!, "the raft only"); Check(!inEt.AreaSoil.ContainsKey(floor), "the floor above has no soil");
+            Equal(1, (int)one["mixed"]!["count"]!, "one area over both zones is reported");
+            Equal("GPM-K2", inEt.AreaSoil[raft], "the zone nearest the average (1500)"); Equal(0, inEt.Soils["GPM-K2"].Nonlinear, "linear when asked");
+            try { Go(With("\"as\":\"points\""), etabs); throw new Exception("no error"); }
+            catch (ToolInputException ex) { Check(ex.Message.Contains("SAFE"), ex.Message); }
+
+            // SAFE, one area for the whole raft: point springs at the cell centres, the area's own soil taken off.
+            var sm = new MemoryEtabs();
+            var mat = sm.AddArea([(0, 0, 0), (12, 0, 0), (12, 6, 0), (0, 6, 0)], "S200");
+            var inSafe = new SpringModel(sm);
+            inSafe.Soils["SOIL1"] = (20000, 1); inSafe.AreaSoil[mat] = "SOIL1";
+            var pts = Go(With("\"as\":\"points\""), new SafeMemory(sm, inSafe));
+            Equal(8, (int)pts["points"]!, "a point per cell"); Equal(8, inSafe.Added.Count, "added on the slab");
+            Equal(9000.0, inSafe.PointSprings["GPM-K1-PT"], "1000 kN/m3 on a 3 m cell"); Equal(18000.0, inSafe.PointSprings["GPM-K2-PT"], "inner cells");
+            Equal(4, inSafe.PointSpring.Values.Count(v => v == "GPM-K1-PT"), "four edge cells");
+            Check(!inSafe.AreaSoil.ContainsKey(mat) && (bool)pts["area_soil_removed"]!, "the area's soil is taken off");
+
+            // Files that are not GeoProMax's, and a raft somewhere else.
+            File.WriteAllText(Path.Combine(folder, "other.json"), "{\"format\":\"something\"}");
+            try { Go(JsonSerializer.Serialize(new { file = Path.Combine(folder, "other.json") }), new SafeMemory(sm, inSafe)); throw new Exception("no error"); }
+            catch (ToolInputException ex) { Check(ex.Message.Contains("not a GeoProMax springs file"), ex.Message); }
+            try { Go(With("\"offset\":[500,0]"), new SafeMemory(sm, inSafe)); throw new Exception("no error"); }
+            catch (ToolInputException ex) { Check(ex.Message.Contains("offset"), ex.Message); }
+            try { Go(args, new MemoryEtabs()); throw new Exception("no error"); }
+            catch (Exception ex) when (ex is ToolInputException or EtabsException) { }
+            Directory.Delete(folder, true);
+        });
+
+        yield return ("GeoProMax: the soil pressures are written in kN and m, with the coordinates", () =>
+        {
+            var folder = Directory.CreateTempSubdirectory("gpm").FullName;
+            JsonNode Go(string json, ICsiLink e) => GeoProMaxTools.All.First(t => t.Name == "export_soil_pressures").Run(Args(json), e);
+            var a = Go(JsonSerializer.Serialize(new { folder }), Safe());
+            Equal("written", (string)a["status"]!, a.ToJsonString()); Equal(4, (int)a["rows"]!, "every row");
+            var lines = File.ReadAllLines((string)a["file"]!);
+            Equal("Point,GlobalX,GlobalY,OutputCase,StepType,Pressure", lines[0], "headings"); Equal(",m,m,,,kN/m2", lines[1], "units");
+            Equal("2,6,0,SLS,,-182.25", lines[3], "a row");
+            Check(Path.GetFileName((string)a["file"]!) == "mat soil pressures.csv" && ((JsonArray)a["cases"]!).Count == 2, a.ToJsonString());
+            var again = Go(JsonSerializer.Serialize(new { folder }), Safe());
+            Check(((string)again["file"]!).EndsWith("mat soil pressures (2).csv"), "never overwritten");
+
+            // A table without coordinates takes them from the points, and N and mm become kN and m.
+            var m = new MemoryEtabs();
+            m.AddArea([(0, 0, 0), (6000, 0, 0), (6000, 5000, 0), (0, 5000, 0)], "S200");
+            var third = m.Points().First(p => p.X == 6000 && p.Y == 5000).Name;
+            m.ResultTables["Soil Pressures"] = new(["UniqueName", "OutputCase", "StepType", "SoilPressure"], [[third, "SLS", "Max", "-0.15"], ["nowhere", "SLS", "Max", "-0.1"]]);
+            var b = Go(JsonSerializer.Serialize(new { folder, name = "r2" }), new SafeMemory(m, null, null, "mm", "N"));
+            Equal(1, (int)b["rows"]!, "one placed"); Equal(1, (int)b["skipped"]!, "one without a place");
+            Equal($"{third},6,5,SLS,Max,-150", File.ReadAllLines((string)b["file"]!)[2], "kN/m2 at metres");
+            Equal("not available", (string)Go(JsonSerializer.Serialize(new { folder }), new SafeMemory(new MemoryEtabs()))["status"]!, "no table yet");
+            Directory.Delete(folder, true);
         });
 
         yield return ("SAFE: the plug-in starts the assistant for SAFE", () =>
@@ -235,14 +342,14 @@ static class SafeTests
 }
 
 /// <summary>A link that is the demo model but says it is SAFE.</summary>
-sealed class SafeMemory(MemoryEtabs inner) : ICsiLink
+sealed class SafeMemory(MemoryEtabs inner, object? model = null, CsiProgram? program = null, string length = "m", string force = "kN") : ICsiLink
 {
-    public CsiProgram Program => CsiProgram.Safe;
+    public CsiProgram Program => program ?? CsiProgram.Safe;
     /// <summary>Given: the only tables this SAFE lists, and any other is refused as SAFE refuses a table it does not have.</summary>
     public IReadOnlyList<TableName>? Listed { get; init; }
     /// <summary>Given: what stands in for SAFE's own API in the calls made through Raw.</summary>
     public object? Api { get; init; }
-    public ModelInfo Info() => inner.Info() with { File = @"C:\Models\mat.FDB", Version = "22.0.0" };
+    public ModelInfo Info() => inner.Info() with { File = @"C:\Models\mat.FDB", Version = "22.0.0", Length = length, Force = force };
     public IReadOnlyList<StoryRow> Stories() => inner.Stories();
     public IReadOnlyList<FrameRow> Frames() => inner.Frames();
     public IReadOnlyList<AreaRow> Areas() => inner.Areas();
@@ -271,8 +378,48 @@ sealed class SafeMemory(MemoryEtabs inner) : ICsiLink
     public TableData ReadTable(string key, IReadOnlyList<string>? cases, IReadOnlyList<string>? combos) =>
         Listed is null || Listed.Any(t => t.Key == key) ? inner.ReadTable(key, cases, combos)
             : throw new EtabsException($"SAFE refused to read the table '{key}' (check its name with the table list).");
-    public object? Raw(string what, Func<dynamic, object?> work) => Api is null ? inner.Raw(what, work) : work(Api);
+    public object? Raw(string what, Func<dynamic, object?> work) => (Api ?? model) is { } api ? work(api) : inner.Raw(what, work);
     public void RunAnalysis() => inner.RunAnalysis();
     public void Save() => inner.Save();
     public void Refresh() => inner.Refresh();
+}
+
+/// <summary>The few calls of SAFE's and ETABS's API the springs tools make, kept in lists the tests read.</summary>
+public sealed class SpringModel(MemoryEtabs inner)
+{
+    public Dictionary<string, (double K, int Nonlinear)> Soils { get; } = [];
+    public Dictionary<string, string> AreaSoil { get; } = [];
+    public Dictionary<string, double> PointSprings { get; } = [];
+    public Dictionary<string, string> PointSpring { get; } = [];
+    public List<(double X, double Y, double Z)> Added { get; } = [];
+    public PropAreaSpringApi PropAreaSpring => new(this);
+    public AreaApi AreaObj => new(this);
+    public PropPointSpringApi PropPointSpring => new(this);
+    public PointApi PointObj => new(this);
+    public int SetModelIsLocked(bool locked) { inner.Locked = locked; return 0; }
+
+    public sealed class PropAreaSpringApi(SpringModel o)
+    {
+        public int SetAreaSpringProp(string name, double u1, double u2, double u3, int nonlinear, int option, string profile, double endRatio, double period, int color, string notes, string guid)
+        { o.Soils[name] = (u3, nonlinear); return 0; }
+    }
+
+    public sealed class AreaApi(SpringModel o)
+    {
+        public int SetSpringAssignment(string name, string prop, int item) { if (!o.Soils.ContainsKey(prop)) return 1; o.AreaSoil[name] = prop; return 0; }
+        public int DeleteSpring(string name, int item) { o.AreaSoil.Remove(name); return 0; }
+    }
+
+    public sealed class PropPointSpringApi(SpringModel o)
+    {
+        public int SetPointSpringProp(string name, int option, ref double[] k, string csys, string profile, string footing, double period, int color, string notes, string guid)
+        { o.PointSprings[name] = k[2]; return 0; }
+    }
+
+    public sealed class PointApi(SpringModel o)
+    {
+        public int AddCartesian(double x, double y, double z, ref string name, string user, string csys, bool merge, int number)
+        { o.Added.Add((x, y, z)); name = "P" + o.Added.Count; return 0; }
+        public int SetSpringAssignment(string name, string prop, int item) { if (!o.PointSprings.ContainsKey(prop)) return 1; o.PointSpring[name] = prop; return 0; }
+    }
 }

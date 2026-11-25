@@ -26,6 +26,11 @@ public static class SafePrompt
           A and B, each as wide as the panel it designs.
         - A mat or footing needs soil (or springs) under it, or the analysis has nothing to stand on: check before
           running. Mats and footings are usually thick plates.
+        - Settlement of the ground is not SAFE's work: GeoProMax does it. For a raft on real ground, export the soil
+          pressures of the service combination with export_soil_pressures, let the engineer load the file in GeoProMax
+          (its SAFE link), and put the springs file it saves under the raft with apply_geopromax_springs; run again and
+          repeat until GeoProMax says the springs have converged. The springs change with the pressures, so one round
+          is not enough.
         - Units: soil modulus is force per length cubed and bearing pressure force per area, in the model's present
           units from get_model_context. Say which unit each number is in.
         - The model is a SAFE model (.fdb). It came from ETABS when the engineer exported a story to SAFE: changes here
