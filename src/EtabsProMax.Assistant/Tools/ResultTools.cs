@@ -475,7 +475,7 @@ public static class ResultTools
 
     // ---- report ----
 
-    private static JsonNode Report(JsonElement a, IEtabsLink e)
+    internal static JsonNode Report(JsonElement a, IEtabsLink e)
     {
         var info = e.Info();
         var parts = new (string Name, Func<JsonNode> Run)[]

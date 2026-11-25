@@ -13,7 +13,7 @@ namespace EtabsProMax.Chat;
 internal static class ChatFiles
 {
     /// <summary>The file types shown as a card.</summary>
-    public static readonly string[] Kinds = [".xlsx", ".xlsm", ".xls", ".csv", ".docx", ".pptx", ".pdf", ".dxf", ".dwg", ".txt", ".md", ".json", ".e2k", ".zip"];
+    public static readonly string[] Kinds = [".xlsx", ".xlsm", ".xls", ".csv", ".docx", ".pptx", ".pdf", ".dxf", ".dwg", ".txt", ".md", ".json", ".e2k", ".zip", ".epmx", ".epm", ".html"];
 
     /// <summary>At most this many files per step; the rest are in the same folder (Show in folder).</summary>
     public const int Most = 6;
@@ -67,6 +67,9 @@ internal static class ChatFiles
         ".md" => "Markdown file",
         ".json" => "JSON file",
         ".e2k" => "ETABS text file",
+        ".epmx" => "ETABS ProMax review pack",
+        ".epm" => "ETABS ProMax model",
+        ".html" => "Web page (opens in the browser)",
         ".zip" => "Zip folder",
         ".csv" => "CSV table (opens in Excel)",
         ".docx" => "Word document",
