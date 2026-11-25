@@ -252,6 +252,9 @@ public static class FieldTest
                 if (window is null) return;
                 ctx.Link = window.Link;
                 ctx.Watched = window.Link;
+                // The Viewer's own screen on this program's model: one check, the same for every program. It runs while
+                // the model has its results (the program's steps say when), or after them if they never did.
+                ctx.WhileAnalysed = o.Viewer ? () => { var at = ctx.Watched; ctx.Watched = null; try { ViewerCheck.FieldSteps(ctx, window.Link, program.Name); } finally { ctx.Watched = at; } } : null;
                 try { ScratchSteps(program)(ctx); }
                 catch (Exception ex) when (ex is not (OperationCanceledException or OutOfMemoryException))
                 {
@@ -264,7 +267,7 @@ public static class FieldTest
                 finally { ctx.Watched = null; }
                 // The Viewer's own screen on this program's model: one check, the same for every program.
                 ctx.Section(FieldParts.ScratchSection(program));
-                if (o.Viewer) ViewerCheck.FieldSteps(ctx, window.Link, program.Name);
+                ctx.WithResults();
                 if (panelDone) return;
                 // CSI ProMax's own features need a window that still answers: one that stopped (a call that never came
                 // back) is left out, and the next program's window, or the open model, takes that part instead.

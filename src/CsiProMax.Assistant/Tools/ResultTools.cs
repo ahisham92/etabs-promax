@@ -160,6 +160,7 @@ public static class ResultTools
     {
         ["status"] = Verdict.NotAvailable,
         ["note"] = $"{e.Program.Name}'s '{table}' table has no data, so {what} could not be checked. Run the analysis (and the design, for design ratios) in {e.Program.Name} first, with the lateral load cases defined.",
+        ["no_data"] = true,
     };
 
     // ---- overview and modal ----
@@ -358,6 +359,13 @@ public static class ResultTools
         };
         var states = new[] { result["soft_story"]!["status"]!.GetValue<string>(), result["mass"]!["status"]!.GetValue<string>() };
         result["status"] = states.Contains(Verdict.Fail) ? Verdict.Fail : states.All(s => s == Verdict.Pass) ? Verdict.Pass : Verdict.NotAvailable;
+        if (result["status"]!.GetValue<string>() == Verdict.NotAvailable)
+        {
+            // The reason of each part that could not be checked, so the answer never says "not available" with no why.
+            var parts = new[] { result["soft_story"]!, result["mass"]! }.Where(p => p["status"]!.GetValue<string>() == Verdict.NotAvailable).ToList();
+            result["note"] = string.Join(" ", parts.Select(p => p["note"]?.GetValue<string>()).Where(n => !string.IsNullOrEmpty(n)));
+            if (parts.All(p => p["no_data"]?.GetValue<bool>() == true)) result["no_data"] = true;
+        }
         return result;
     }
 
