@@ -1085,6 +1085,26 @@ Test("link: a section given to a frame or area that is not there is reported, th
     Throws<EtabsException>(() => link.SetAreaSection("no such area", "S200"), "a missing area");
 });
 
+Test("link: a redraw the program does not come back from never fails the tool, and is not asked for again", () =>
+{
+    // ETABS 23 field test (0.4.9): View.RefreshView after a selection never came back; the link waited 3 minutes,
+    // then failed every later call. A redraw is waited for briefly, never throws, and after one hang is skipped.
+    var model = new CpmFakes.HangingView();
+    using var link = new ComEtabs(CsiProgram.Etabs, () => model) { RefreshLimit = TimeSpan.FromMilliseconds(300) };
+    link.Refresh();
+    Equal(1, model.Redraws, "the first redraw is asked for and comes back");
+    model.Hang.Reset();
+    var clock = System.Diagnostics.Stopwatch.StartNew();
+    link.Refresh();
+    Check(clock.ElapsedMilliseconds < 2000, $"the tool waited {clock.ElapsedMilliseconds} ms for a redraw that hangs");
+    clock.Restart();
+    link.Refresh();
+    Check(clock.ElapsedMilliseconds < 100, "after a hang, a redraw is not waited for again");
+    model.Hang.Set();
+    Equal(7, (int)link.Raw("read joint displacements", _ => 7)!, "once the program answers, the link works");
+    Equal(2, model.Redraws, "no redraw was asked for after the hang");
+});
+
 Test("link: units from the older one-value call, by name or number", () =>
 {
     Equal(("kN", "m", "C"), ComEtabs.Units("kN_m_C"), "by name");
@@ -1724,5 +1744,16 @@ namespace CpmFakes
     {
         public SectionObjects FrameObj { get; } = new("B1");
         public SectionObjects AreaObj { get; } = new("F1");
+    }
+}
+
+namespace CpmFakes
+{
+    public sealed class HangingView
+    {
+        public readonly System.Threading.ManualResetEventSlim Hang = new(true);
+        public int Redraws;
+        public HangingView View => this;
+        public int RefreshView(int window, bool zoom) { Redraws++; Hang.Wait(); return 0; }
     }
 }
