@@ -50,6 +50,8 @@ public sealed class ComEtabs : IEtabsLink, IDisposable
     }
 
     /// <summary>The same for work that gives nothing back. Its own name, so a call can never be mistaken for one that does.</summary>
+    public object? Raw(string what, Func<dynamic, object?> work) => On<object?>(what, m => work(m));
+
     private void Do(string what, Action<dynamic> body) => On<bool>(what, m => { body(m); return true; });
 
     private dynamic Model()

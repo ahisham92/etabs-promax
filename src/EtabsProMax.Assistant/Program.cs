@@ -1,134 +1,105 @@
-using System.Reflection;
-using System.Security.Cryptography;
-using System.Text.Json;
-using System.Text.Json.Nodes;
-using EtabsProMax.Assistant;
-using EtabsProMax.Assistant.Chat;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
 using EtabsProMax.Assistant.Etabs;
-using EtabsProMax.Assistant.Mcp;
-using EtabsProMax.Assistant.Tools;
+using EtabsProMax.Update;
 
-// ETABS ProMax, the assistant: a small window beside ETABS. This program serves that window and the ETABS tools on
-// this PC only (127.0.0.1, a free port, a secret made at each start) and runs the chat on the Claude Code installed here.
-// It runs on the .NET 8 that ETABS 23 itself needs: dotnet EtabsProMax.dll, or from ETABS's Tools menu (the plug-in).
+namespace EtabsProMax.Assistant;
 
-// --demo: a small model in memory instead of ETABS, to see the window on a PC without ETABS.
-// --etabs-pid: the ETABS window this was started from (the plug-in passes it), when several are open.
-int? etabsPid = Array.IndexOf(args, "--etabs-pid") is var pidAt and >= 0 && pidAt + 1 < args.Length && int.TryParse(args[pidAt + 1], out var pidValue) ? pidValue : null;
-using var com = new ComEtabs(etabsPid);
-IEtabsLink etabs = args.Contains("--demo") ? new MemoryEtabs() : com;
-if (args.Contains("--selftest")) return SelfTest.Run(etabs, args.Contains("--changes"));
-
-// Already running (started again from ETABS's menu): show its window again and leave.
-if (!args.Contains("--no-window") && Running.Find(etabsPid) is { } running) { AppWindow.Open(running); return 0; }
-
-var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(24)).ToLowerInvariant();
-var address = "";
-ChatHub? hub = null;
-hub = new ChatHub(etabs, () => (address + "/mcp", token));
-var endpoint = new McpEndpoint(etabs, EtabsTools.All, (tool, summary) => hub.ApproveAsync(tool, summary), () => hub.AskBeforeChanges);
-endpoint.ToolRan += hub.ToolRan;
-var ended = new TaskCompletionSource();
-
-using var server = new MiniHttp(async call =>
+/// <summary>
+/// ETABS ProMax: Sketch ProMax's panel in a window of its own beside ETABS. Started without an .exe of its own, with the
+/// .NET 8 that ETABS 23 itself runs on: dotnet EtabsProMax.dll, or from ETABS's Tools menu (the plug-in).
+///   --etabs-pid N   the ETABS window this was started from (the plug-in passes it), when several are open
+///   --demo          a small model in memory instead of ETABS, to see the window on a PC without ETABS
+///   --selftest      check the link to ETABS call by call and print the result (--changes also adds and deletes objects)
+/// </summary>
+public static class Program
 {
-    // Every request carries the secret: the window in its address or a header, Claude Code as a bearer token.
-    if (call.Query("k") != token && call.Header("X-EtabsProMax") != token && call.Header("Authorization") != "Bearer " + token)
+    [STAThread]
+    public static int Main(string[] args)
     {
-        await call.SendAsync(401);
-        return;
-    }
-    JsonElement Body() => call.Body.Length == 0 ? JsonDocument.Parse("{}").RootElement : JsonDocument.Parse(call.Body).RootElement;
-    try
-    {
-        switch (call.Method + " " + call.Path)
+        int? etabsPid = Array.IndexOf(args, "--etabs-pid") is var at and >= 0 && at + 1 < args.Length && int.TryParse(args[at + 1], out var pid) ? pid : null;
+        var demo = args.Contains("--demo");
+        if (args.Contains("--selftest"))
         {
-            case "GET /":
-                await using (var page = Assembly.GetExecutingAssembly().GetManifestResourceStream("index.html")!)
+            using var check = new ComEtabs(etabsPid);
+            return SelfTest.Run(demo ? new MemoryEtabs() : check, args.Contains("--changes"));
+        }
+        try
+        {
+            // A newer version the updater downloaded is started instead of this one (once: it is told not to look again).
+            if (!args.Contains("--this-version") && Updater.NewestDownloaded(Updater.Current) is { } newer && Environment.ProcessPath is { } dotnet)
+            {
+                var info = new ProcessStartInfo(dotnet) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = newer };
+                info.ArgumentList.Add(Path.Combine(newer, "EtabsProMax.dll"));
+                foreach (var a in args) info.ArgumentList.Add(a);
+                info.ArgumentList.Add("--this-version");
+                try { Process.Start(info)?.Dispose(); return 0; }
+                catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or InvalidOperationException) { /* this version runs */ }
+            }
+
+            // One window per ETABS: started again from ETABS's menu, the open window comes forward.
+            var name = "EtabsProMax." + (demo ? "demo" : etabsPid?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "any");
+            using var one = new Mutex(true, name, out var first);
+            using var show = new EventWaitHandle(false, EventResetMode.AutoReset, name + ".show");
+            if (!first) { show.Set(); return 0; }
+
+            using var com = new ComEtabs(etabsPid);
+            IEtabsLink link = demo ? new MemoryEtabs() : com;
+            var app = new System.Windows.Application { ShutdownMode = System.Windows.ShutdownMode.OnMainWindowClose };
+            app.DispatcherUnhandledException += (_, e) => Note("window", e.Exception);
+            AppDomain.CurrentDomain.UnhandledException += (_, e) => Note("unhandled", e.ExceptionObject as Exception);
+            EtabsProMax.App.Start(link, etabsPid, demo);
+            var window = new EtabsProMax.Host.MainWindow();
+            app.MainWindow = window;
+
+            using var life = new CancellationTokenSource();
+            var surface = new Thread(() =>
+            {
+                while (WaitHandle.WaitAny([show, life.Token.WaitHandle]) == 0)
+                    window.Dispatcher.BeginInvoke(new Action(window.Surface));
+            }) { IsBackground = true, Name = "EtabsProMax show" };
+            surface.Start();
+            // Started from an ETABS window: when that ETABS is closed, this closes too.
+            if (etabsPid is { } watched)
+                _ = Task.Run(async () =>
                 {
-                    using var copy = new MemoryStream();
-                    await page.CopyToAsync(copy);
-                    await call.SendAsync(200, "text/html; charset=utf-8", copy.ToArray());
-                }
-                break;
-            case "GET /api/ping": await call.JsonAsync("{\"app\":\"etabs-promax\"}"); break;
-            case "GET /api/state": await call.JsonAsync(hub.State().ToJsonString()); break;
-            case "POST /api/send":
-                try { hub.Send(Body().TryGetProperty("text", out var t) ? t.GetString() ?? "" : ""); await call.JsonAsync("{}"); }
-                catch (InvalidOperationException ex) { await call.JsonAsync(new JsonObject { ["error"] = ex.Message }.ToJsonString(), 409); }
-                break;
-            case "POST /api/stop": hub.Stop(); await call.JsonAsync("{}"); break;
-            case "POST /api/new": hub.NewChat(); await call.JsonAsync("{}"); break;
-            case "POST /api/approve":
-                hub.Answer(Body().GetProperty("id").GetString() ?? "", Body().GetProperty("allow").GetBoolean());
-                await call.JsonAsync("{}");
-                break;
-            case "POST /api/settings":
-                if (Body().TryGetProperty("askBeforeChanges", out var ask)) hub.AskBeforeChanges = ask.GetBoolean();
-                await call.JsonAsync("{}");
-                break;
-            case "POST /api/claude/install": ClaudeCli.StartInstall(); await call.JsonAsync("{}"); break;
-            case "POST /api/claude/signin": hub.CheckClaude(); if (hub.Install is { } install) ClaudeCli.StartSignIn(install); await call.JsonAsync("{}"); break;
-            case "POST /api/claude/check": hub.CheckClaude(); await call.JsonAsync(hub.State().ToJsonString()); break;
-            case "POST /api/quit": await call.JsonAsync("{}"); ended.TrySetResult(); break;
-            case "GET /api/events":
-                var (id, events) = hub.Listen();
-                try
-                {
-                    await call.StartEventsAsync();
-                    while (true)
-                    {
-                        using var wait = CancellationTokenSource.CreateLinkedTokenSource(call.Gone);
-                        wait.CancelAfter(15000);
-                        string? line = null;
-                        try { line = await events.ReadAsync(wait.Token); }
-                        catch (OperationCanceledException) when (!call.Gone.IsCancellationRequested) { }
-                        await call.EventAsync(line);
-                    }
-                }
-                finally { hub.StopListening(id); }
-            case "POST /mcp":
-                var answer = await endpoint.HandleAsync(Body());
-                if (answer is null) await call.SendAsync(202); else await call.JsonAsync(answer.ToJsonString());
-                break;
-            case "GET /mcp" or "DELETE /mcp": await call.SendAsync(405); break;
-            default: await call.SendAsync(404); break;
+                    while (!life.IsCancellationRequested && EtabsIsOpen(watched)) await Task.Delay(3000).ConfigureAwait(false);
+                    if (!life.IsCancellationRequested) _ = window.Dispatcher.BeginInvoke(new Action(window.Close));
+                });
+
+            app.Run(window);
+            life.Cancel();
+            EtabsProMax.App.Stop();
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            // Started without a console, so a failed start would show nothing: say it, and keep it for a bug report.
+            Note("start", ex);
+            if (OperatingSystem.IsWindows())
+                MessageBoxW(IntPtr.Zero, "ETABS ProMax could not start.\n\n" + ex.Message + "\n\nThe details are in " + NoteFile, "ETABS ProMax", 0x30);
+            return 1;
         }
     }
-    catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException)
+
+    private static bool EtabsIsOpen(int pid)
     {
-        await call.JsonAsync(new JsonObject { ["error"] = "The request could not be read: " + ex.Message }.ToJsonString(), 400);
+        try { using var process = Process.GetProcessById(pid); return !process.HasExited; }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException) { return false; }
     }
-});
 
-var port = Array.IndexOf(args, "--port") is var at and >= 0 && at + 1 < args.Length && int.TryParse(args[at + 1], out var asked) ? asked : 0;
-server.Start(port);
-address = server.Address;
-var window = address + "/?k=" + token;
-Console.WriteLine("ETABS ProMax is running. Its window: " + window);
-_ = Task.Run(hub.CheckClaude);
+    internal static string NoteFile => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "EtabsProMax", "errors.txt");
 
-if (!args.Contains("--no-window"))
-{
-    Running.Write(etabsPid, window);
-    AppWindow.Open(window);
-    // The program ends a little after its window is closed.
-    _ = Task.Run(async () =>
+    private static void Note(string where, Exception? ex)
     {
-        await Task.Delay(TimeSpan.FromSeconds(60));
-        while ((hub.Listeners > 0 || DateTime.UtcNow - hub.LastListener < TimeSpan.FromSeconds(20)) && EtabsIsOpen()) await Task.Delay(2000);
-        ended.TrySetResult();
-    });
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(NoteFile)!);
+            File.AppendAllText(NoteFile, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} [{where}] {ex}\n\n");
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+    }
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int MessageBoxW(IntPtr owner, string text, string caption, uint type);
 }
-// Started from an ETABS window: when that ETABS is closed, this ends too.
-bool EtabsIsOpen()
-{
-    if (etabsPid is null) return true;
-    try { using var process = System.Diagnostics.Process.GetProcessById(etabsPid.Value); return !process.HasExited; }
-    catch (ArgumentException) { return false; }
-}
-Console.CancelKeyPress += (_, e) => { e.Cancel = true; ended.TrySetResult(); };
-await ended.Task;
-if (!args.Contains("--no-window")) Running.Clear(etabsPid);
-hub.Dispose();
-return 0;

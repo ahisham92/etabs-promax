@@ -134,6 +134,9 @@ public sealed class MemoryEtabs : IEtabsLink
         _ => new(["Story", "Output Case", "Drift"], []),
     };
 
+    public object? Raw(string what, Func<dynamic, object?> work) =>
+        throw new EtabsException("Code runs in ETABS itself, and this is the demo model with no ETABS behind it.");
+
     public void RunAnalysis() { Runs++; Locked = true; }
     public void Save() => Saves++;
     public void Refresh() { }

@@ -11,17 +11,41 @@ namespace EtabsProMax.Assistant;
 /// </summary>
 public static class SelfTest
 {
+    /// <summary>One checked call: its name, whether it worked, and what it gave or why it failed.</summary>
+    public sealed record StepResult(string Name, bool Ok, string Detail);
+
+    /// <summary>The last run in this session, for the self_test_status tool; null before the first.</summary>
+    public static (DateTime At, List<StepResult> Steps)? Last { get; private set; }
+
+    public static bool IsRunning { get; private set; }
+
     public static int Run(IEtabsLink etabs, bool changes)
     {
-        var failed = 0;
+        var steps = Steps(etabs, changes);
+        foreach (var s in steps) Console.WriteLine($"{(s.Ok ? "ok   " : "FAIL ")} {s.Name}: {s.Detail}");
+        var bad = steps.Count(s => !s.Ok);
+        Console.WriteLine(bad == 0 ? "All steps passed." : $"{bad} steps failed.");
+        return bad == 0 ? 0 : 1;
+    }
+
+    public static List<StepResult> Steps(IEtabsLink etabs, bool changes)
+    {
+        IsRunning = true;
+        try { var r = StepsCore(etabs, changes); Last = (DateTime.Now, r); return r; }
+        finally { IsRunning = false; }
+    }
+
+    private static List<StepResult> StepsCore(IEtabsLink etabs, bool changes)
+    {
+        var done = new List<StepResult>();
         void Step(string name, Func<object?> body)
         {
             try
             {
                 var text = JsonSerializer.Serialize(body(), new JsonSerializerOptions { IncludeFields = true });
-                Console.WriteLine($"ok    {name}: {(text.Length > 300 ? text[..300] + "..." : text)}");
+                done.Add(new StepResult(name, true, text.Length > 300 ? text[..300] + "..." : text));
             }
-            catch (Exception ex) { failed++; Console.WriteLine($"FAIL  {name}: {ex.GetType().Name}: {ex.Message}"); }
+            catch (Exception ex) { done.Add(new StepResult(name, false, $"{ex.GetType().Name}: {ex.Message}")); }
         }
 
         Step("Info", () => etabs.Info());
@@ -59,7 +83,6 @@ public static class SelfTest
             Step("Delete", () => { etabs.Delete("frame", frame); etabs.Delete("area", area); return null; });
             Step("Refresh", () => { etabs.Refresh(); return null; });
         }
-        Console.WriteLine(failed == 0 ? "All steps passed." : $"{failed} steps failed.");
-        return failed == 0 ? 0 : 1;
+        return done;
     }
 }

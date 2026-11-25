@@ -41,6 +41,9 @@ public interface IEtabsLink
     IReadOnlyList<TableName> Tables();
     TableData ReadTable(string key, IReadOnlyList<string>? cases, IReadOnlyList<string>? combos);
 
+    /// <summary>Runs code against ETABS's own model object (cSapModel, by name), on the thread that talks to ETABS.</summary>
+    object? Raw(string what, Func<dynamic, object?> work);
+
     void RunAnalysis();
     void Save();
     void Refresh();

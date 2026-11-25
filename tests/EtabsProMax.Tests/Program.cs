@@ -1,9 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using EtabsProMax.Assistant;
-using EtabsProMax.Assistant.Chat;
 using EtabsProMax.Assistant.Etabs;
-using EtabsProMax.Assistant.Mcp;
 using EtabsProMax.Assistant.Tools;
 using EtabsProMax.Checks;
 using EtabsProMax.E2k;
@@ -264,17 +262,18 @@ Test("a file that is not an ETABS text file", () =>
 
 // The assistant, on a model kept in memory (no ETABS).
 JsonElement J(string json) => JsonDocument.Parse(json).RootElement;
-McpEndpoint Endpoint(MemoryEtabs e, bool allow = true, bool ask = false, List<string>? asked = null) =>
-    new(e, EtabsTools.All, (_, summary) => { asked?.Add(summary); return Task.FromResult(allow); }, () => ask);
-JsonNode Call(McpEndpoint mcp, string tool, string args)
+// The tools as the panel runs them (ModelTool), with the asking the approvals do: always for deletes, saves and
+// analysis runs, and for every change when the engineer set it so.
+Harness Endpoint(MemoryEtabs e, bool allow = true, bool ask = false, List<string>? asked = null) => new(e, allow, ask, asked);
+JsonNode Call(Harness mcp, string tool, string args)
 {
-    var (text, failed) = mcp.CallAsync(tool, J(args)).GetAwaiter().GetResult();
+    var (text, failed) = mcp.Call(tool, J(args));
     if (failed) throw new Exception(text);
     return JsonNode.Parse(text)!;
 }
-string Refused(McpEndpoint mcp, string tool, string args)
+string Refused(Harness mcp, string tool, string args)
 {
-    var (text, failed) = mcp.CallAsync(tool, J(args)).GetAwaiter().GetResult();
+    var (text, failed) = mcp.Call(tool, J(args));
     Check(failed, $"{tool} should have been refused, but gave {text}");
     return text;
 }
@@ -351,40 +350,54 @@ Test("assistant: the engineer is asked before deletes, saves and runs", () =>
     Check(Refused(yes, "add_load_pattern", """{"name":"W","type":"Wind"}""").Contains("locked"), "a locked model says so");
 });
 
-Test("assistant: the MCP messages Claude Code sends", () =>
+Test("assistant: every tool has a name of its own and a schema", () =>
 {
-    var mcp = Endpoint(new MemoryEtabs());
-    JsonObject? Send(string json) => mcp.HandleAsync(J(json)).GetAwaiter().GetResult();
-    var init = Send("""{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{}}}""")!;
-    Equal("2025-06-18", (string)init["result"]!["protocolVersion"]!, "the asked version is answered");
-    Check(Send("""{"jsonrpc":"2.0","method":"notifications/initialized"}""") is null, "a notification gets no answer");
-    var list = Send("""{"jsonrpc":"2.0","id":2,"method":"tools/list"}""")!["result"]!["tools"]!.AsArray();
-    Equal(EtabsTools.All.Count, list.Count, "every tool is listed");
-    foreach (var tool in list) Equal("object", (string)tool!["inputSchema"]!["type"]!, $"schema of {tool["name"]}");
     Equal(EtabsTools.All.Count, EtabsTools.All.Select(t => t.Name).Distinct().Count(), "tool names are unique");
-    var call = Send("""{"jsonrpc":"2.0","id":"a","method":"tools/call","params":{"name":"get_model_context","arguments":{}}}""")!;
-    Equal("a", (string)call["id"]!, "the id comes back"); Equal(false, (bool)call["result"]!["isError"]!, "not an error");
-    Check(((string)call["result"]!["content"]![0]!["text"]!).Contains("Story3"), "the result is text");
-    Equal(-32601, (int)Send("""{"jsonrpc":"2.0","id":3,"method":"resources/list"}""")!["error"]!["code"]!, "unknown method");
+    foreach (var tool in EtabsTools.All)
+    {
+        var wrapped = new EtabsProMax.Tools.ModelTool(tool);
+        Check(JsonDocument.Parse(wrapped.PropertiesJson).RootElement.ValueKind == JsonValueKind.Object, $"schema of {tool.Name}");
+    }
 });
 
-Test("assistant: Claude Code's command line and stream", () =>
+Test("files: a drawing is written as DXF and DWG and read back", () =>
 {
-    Equal("\"a b\"", ClaudeCli.Quote("a b"), "spaces are quoted"); Equal("\"mcp__x__*\"", ClaudeCli.Quote("mcp__x__*"), "so are stars");
-    Equal("\"C:\\dir with space\\\\\"", ClaudeCli.Quote("C:\\dir with space\\"), "a trailing backslash is doubled");
-    var start = ClaudeCli.EngineStart(new ClaudeCli.Install("claude.exe", "2.0.0"), "http://127.0.0.1:1/mcp", "secret", "abc");
-    Check(start.Arguments.Contains("--permission-mode dontAsk") && start.Arguments.Contains("--strict-mcp-config") && start.Arguments.Contains("--resume abc"), start.Arguments);
-    Check(!start.Arguments.Contains("Bash") && !start.Arguments.Contains("Write"), "no shell or file editing");
-    Check(!start.Environment.ContainsKey("ANTHROPIC_API_KEY"), "the chat runs on the plan, not an API key");
-    using var hub = new ChatHub(new MemoryEtabs(), () => ("", ""));
-    var (id, events) = hub.Listen();
-    hub.Read("""{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"12 columns"}}}""");
-    hub.Read("not json"); hub.Read("""{"type":"assistant","message":{}}""");
-    hub.Read("""{"type":"result","subtype":"success","is_error":false,"result":"12 columns."}""");
-    Check(events.TryRead(out var first) && first.Contains("\"text\"") && first.Contains("12 columns"), "text is passed on as it arrives");
-    Check(events.TryRead(out var done) && done.Contains("\"done\"") && done.Contains("\"failed\":false"), "the result ends the turn");
-    Equal("assistant", (string)hub.State()["history"]![0]!["role"]!, "the answer is kept for the window");
-    hub.StopListening(id);
+    var folder = Directory.CreateTempSubdirectory("epm").FullName;
+    var entities = J("""[{"type":"line","x1":0,"y1":0,"x2":6,"y2":0,"layer":"Grid A"},{"type":"polyline","points":[[0,0],[6,0],[6,5],[0,5]],"closed":true,"layer":"slab"},{"type":"circle","x":3,"y":2.5,"r":0.3,"layer":"columns"},{"type":"text","x":3,"y":3,"height":0.25,"text":"C1","layer":"columns"},{"type":"nope"}]""").EnumerateArray().ToList();
+    var (drawn, skipped) = EtabsProMax.Tools.CadOut.Write(Path.Combine(folder, "a.dxf"), entities);
+    Equal(4, drawn, "four drawn"); Equal(1, skipped, "one skipped");
+    var back = JsonNode.Parse(EtabsProMax.Tools.ReadCadDrawingTool.Read(Path.Combine(folder, "a.dxf"), [], [], 0, 0).Text)!;
+    Equal(4, (int)back["objects"]!, "the DXF reads back");
+    Check(back["layers"]!.AsArray().Any(l => (string)l!["layer"]! == "GRID_A"), "layer names are made safe");
+    var (dwgDrawn, _) = EtabsProMax.Tools.CadOut.Write(Path.Combine(folder, "a.dwg"), entities);
+    Equal(4, dwgDrawn, "four in the DWG");
+    var overview = JsonNode.Parse(EtabsProMax.Tools.ReadCadDrawingTool.Read(Path.Combine(folder, "a.dwg"), [], [], 0, 0).Text)!;
+    Equal(4, (int)overview["objects"]!, "the DWG reads back"); Near(6, (double)overview["extents"]!["width"]!, "its extents");
+    var columns = JsonNode.Parse(EtabsProMax.Tools.ReadCadDrawingTool.Read(Path.Combine(folder, "a.dwg"), ["COLUMNS"], ["text"], 0, 0).Text)!;
+    Equal("C1", (string)columns["objects"]![0]!["text"]!, "text on a layer");
+    Directory.Delete(folder, true);
+});
+
+Test("files: the kinds of file the chat makes", () =>
+{
+    var folder = Directory.CreateTempSubdirectory("epm").FullName;
+    EtabsProMax.Tools.ToolResult Make(string json) => EtabsProMax.Tools.MakeDocumentTool.Make(new EtabsProMax.Tools.ToolArgs(JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json)!), folder);
+    foreach (var (format, ext) in new[] { ("csv", ".csv"), ("text", ".txt"), ("markdown", ".md"), ("word", ".docx"), ("pdf", ".pdf") })
+    {
+        var made = Make($$"""{"format":"{{format}}","title":"Reactions","content":"# Reactions\n\nA,B\n1,2"}""");
+        Check(!made.IsError, format + ": " + made.Text);
+        Check(File.Exists(Path.Combine(folder, "Reactions" + ext)), format + " file is there");
+    }
+    var excel = Make("""{"format":"excel","title":"Sections","sheets":[{"name":"S","columns":["Section","Count"],"rows":[["C500x500",12]]}]}""");
+    Check(!excel.IsError && EtabsProMax.Chat.ChatFiles.Find(excel.Text).Count == 1, "the Excel file shows as a card: " + excel.Text);
+    var dwg = Make("""{"format":"dwg","title":"Layout","entities":[{"type":"line","x1":0,"y1":0,"x2":1,"y2":1}]}""");
+    Check(!dwg.IsError && EtabsProMax.Chat.ChatFiles.Find(dwg.Text).Single().EndsWith(".dwg"), "a DWG shows as a card: " + dwg.Text);
+    Directory.Delete(folder, true);
+});
+
+Test("licensing: ETABS ProMax keys are its own", () =>
+{
+    Check(EtabsProMax.Licensing.LicenseKey.Prefix.StartsWith("EPM"), "the key prefix");
 });
 
 Test("assistant: ETABS's API is called by name, with numbers for its enums", () =>
@@ -398,25 +411,6 @@ Test("assistant: ETABS's API is called by name, with numbers for its enums", () 
     Equal(7, (int)model.Add("x", 7), "a left-out value takes its default");
     try { model.Nope(); throw new Exception("accepted a method ETABS doesn't have"); }
     catch (MissingMethodException ex) { Check(ex.Message.Contains("cFakeModel has no Nope"), ex.Message); }
-});
-
-Test("assistant: the small server answers the window and Claude Code", () =>
-{
-    using var server = new MiniHttp(async call =>
-    {
-        if (call.Path == "/events") { await call.StartEventsAsync(); await call.EventAsync("{\"n\":1}"); await call.EventAsync(null); return; }
-        await call.JsonAsync($"{{\"method\":\"{call.Method}\",\"k\":\"{call.Query("k")}\",\"auth\":\"{call.Header("authorization")}\",\"body\":{call.Body.Length}}}");
-    });
-    server.Start();
-    using var http = new HttpClient();
-    var get = http.GetStringAsync(server.Address + "/x?k=a%20b").GetAwaiter().GetResult();
-    Check(get.Contains("\"method\":\"GET\"") && get.Contains("\"k\":\"a b\""), get);
-    var request = new HttpRequestMessage(HttpMethod.Post, server.Address + "/mcp") { Content = new StringContent(new string('x', 200_000)) };
-    request.Headers.Add("Authorization", "Bearer t");
-    var post = http.Send(request).Content.ReadAsStringAsync().GetAwaiter().GetResult();
-    Check(post.Contains("\"auth\":\"Bearer t\"") && post.Contains("\"body\":200000"), post);
-    var events = http.GetStringAsync(server.Address + "/events").GetAwaiter().GetResult();
-    Check(events.Contains("data: {\"n\":1}\n\n") && events.Contains(": keep-alive"), events);
 });
 
 Test("plug-in: the assistant is started with the dotnet ETABS runs on", () =>
@@ -463,4 +457,24 @@ namespace ETABSv1
         public int Add(string name, eFakeLength unit, double factor = 1) => (int)unit * (int)factor;
     }
     public sealed class FakeApp : cFakeApp { public cFakeModel SapModel { get; } = new FakeModel(); }
+}
+
+
+/// <summary>Runs a tool as the panel does, with the approvals' asking.</summary>
+sealed class Harness(MemoryEtabs etabs, bool allow, bool ask, List<string>? asked)
+{
+    public (string Text, bool Failed) Call(string name, JsonElement args)
+    {
+        var found = EtabsTools.All.FirstOrDefault(t => t.Name == name);
+        if (found is null) return ($"There is no tool '{name}'.", true);
+        var tool = new EtabsProMax.Tools.ModelTool(found);
+        var input = new EtabsProMax.Tools.ToolArgs(JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(args.GetRawText())!);
+        if (tool.AlwaysAsks || tool.ModifiesModel && ask)
+        {
+            asked?.Add(tool.Summary(input) ?? name);
+            if (!allow) return ("The engineer declined this. Nothing was changed.", true);
+        }
+        var result = tool.Execute(new EtabsProMax.ETABS.EtabsApp(etabs), input);
+        return (result.Text, result.IsError);
+    }
 }
