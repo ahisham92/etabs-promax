@@ -72,18 +72,25 @@ internal sealed class ChildProcess : IDisposable
     public static ChildProcess Start(ProcessStartInfo info)
     {
         if (info.UseShellExecute) throw new InvalidOperationException("ChildProcess starts programs directly, not through the shell.");
-        if (!IsWindows)
-        {
-            LastStartIsolated = false;
-            var plain = Process.Start(info) ?? throw new InvalidOperationException(info.FileName + " didn't start.");
-            return new ChildProcess(plain,
-                info.RedirectStandardInput ? new StreamWriter(plain.StandardInput.BaseStream, new UTF8Encoding(false)) { AutoFlush = true } : null,
-                info.RedirectStandardOutput ? plain.StandardOutput : null,
-                info.RedirectStandardError ? plain.StandardError : null);
-        }
+        if (!IsWindows) return StartPlain(info);
         var started = StartIsolated(info);
         LastStartIsolated = true;
         return started;
+    }
+
+    /// <summary>
+    /// Plain Process.Start: the program inherits every inheritable handle of this one. Off Windows, and for a run of a
+    /// few seconds (claude --version) on a PC that refuses the start with a handle list.
+    /// </summary>
+    internal static ChildProcess StartPlain(ProcessStartInfo info)
+    {
+        if (info.UseShellExecute) throw new InvalidOperationException("ChildProcess starts programs directly, not through the shell.");
+        LastStartIsolated = false;
+        var plain = Process.Start(info) ?? throw new InvalidOperationException(info.FileName + " didn't start.");
+        return new ChildProcess(plain,
+            info.RedirectStandardInput ? new StreamWriter(plain.StandardInput.BaseStream, new UTF8Encoding(false)) { AutoFlush = true } : null,
+            info.RedirectStandardOutput ? plain.StandardOutput : null,
+            info.RedirectStandardError ? plain.StandardError : null);
     }
 
     private static bool IsWindows => Environment.OSVersion.Platform == PlatformID.Win32NT;

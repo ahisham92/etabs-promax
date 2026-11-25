@@ -25,8 +25,6 @@ internal static class ClaudeCli
     /// <summary>The name the chat registers our MCP server under: its tools are mcp__csi-promax__&lt;tool&gt;.</summary>
     public const string ServerName = "csi-promax";
 
-    private static readonly Regex VersionText = new(@"\d+\.\d+\.\d+", RegexOptions.CultureInvariant);
-
     public static string Folder => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CsiProMax", "chat");
 
     /// <summary>The chat engine's working folder: per user, holds nothing but what Claude writes there.</summary>
@@ -39,54 +37,83 @@ internal static class ClaudeCli
 
     internal enum SignIn { SignedIn, SignedOut, Unknown }
 
-    /// <summary>Every place Claude Code is installed to on Windows, most likely first.</summary>
-    public static IEnumerable<string> Candidates()
+    /// <summary>Every place Claude Code is looked for on this PC, the most likely first (ClaudeFinder).</summary>
+    public static IEnumerable<string> Candidates() => ClaudeFinder.Candidates(PlacesNow());
+
+    /// <summary>Finds a working Claude Code (it answers --version). Null when there is none.</summary>
+    public static Install? Find() => Search().Install;
+
+    /// <summary>
+    /// Looks for a working Claude Code and says what it saw on the way: the file that answered, or every file that was
+    /// there and why it was not used, and each place looked at. The pane shows that when nothing was found.
+    /// </summary>
+    public static ClaudeFinder.Result Search()
+    {
+        var found = ClaudeFinder.Search(PlacesNow(), (path, ms) => Run(path, "--version", ms));
+        LastSearch = found;
+        return found;
+    }
+
+    /// <summary>What the last search on this PC saw (null before the first).</summary>
+    internal static volatile ClaudeFinder.Result? LastSearch;
+
+    /// <summary>This PC's folders, PATH and settings, as the search needs them.</summary>
+    internal static ClaudeFinder.Places PlacesNow()
     {
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var homes = Several(home, Variable("USERPROFILE").FirstOrDefault() ?? "");
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         var roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        yield return Path.Combine(home, ".local", "bin", "claude.exe");                // native installer
-        yield return Path.Combine(local, "Programs", "claude", "claude.exe");
-        yield return Path.Combine(local, "Microsoft", "WinGet", "Links", "claude.exe"); // WinGet
+        var programs = Several(new[]
+        {
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+            Environment.GetEnvironmentVariable("ProgramW6432") ?? "",
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+        });
         // PATH as the user has it now (ETABS's own copy is from when it started, before an install).
-        var paths = new List<string>();
+        var paths = Several(Variable("PATH").SelectMany(v => v.Split(';')).ToArray());
+
+        // Folders a package manager was told to put programs in.
+        var prefixes = new List<string>();
+        foreach (var folder in homes)
+            try
+            {
+                var npmrc = Path.Combine(folder, ".npmrc");
+                if (File.Exists(npmrc)) prefixes.Add(ClaudeFinder.NpmPrefix(File.ReadAllText(npmrc)));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { }
+        prefixes.AddRange(Variable("NPM_CONFIG_PREFIX"));
+        prefixes.AddRange(Variable("NVM_SYMLINK"));
+        prefixes.AddRange(Variable("PNPM_HOME"));
+        prefixes.AddRange(Variable("VOLTA_HOME").Select(v => v.TrimEnd('\\', '/') + "\\bin"));
+        prefixes.AddRange(Variable("BUN_INSTALL").Select(v => v.TrimEnd('\\', '/') + "\\bin"));
+        prefixes.AddRange(Variable("SCOOP").Select(v => v.TrimEnd('\\', '/') + "\\shims"));
+
+        var chosen = "";
+        try { chosen = AgentSettings.Load().ClaudePath ?? ""; }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or NotSupportedException) { }
+        var user = "";
+        try { user = Environment.UserDomainName + "\\" + Environment.UserName; }
+        catch (Exception ex) when (ex is InvalidOperationException or PlatformNotSupportedException) { user = Environment.UserName; }
+        return new ClaudeFinder.Places(homes, local, roaming, programs, paths, chosen, Several(prefixes.ToArray()), user);
+    }
+
+    /// <summary>A variable as this program has it and as Windows keeps it for the user and for the PC (those two are current).</summary>
+    private static IEnumerable<string> Variable(string name)
+    {
         foreach (var target in new[] { EnvironmentVariableTarget.Process, EnvironmentVariableTarget.User, EnvironmentVariableTarget.Machine })
         {
             string? value = null;
-            try { value = Environment.GetEnvironmentVariable("PATH", target); }
+            try { value = Environment.GetEnvironmentVariable(name, target); }
             catch (Exception ex) when (ex is System.Security.SecurityException or ArgumentException) { }
-            if (value is not null) paths.AddRange(value.Split(';'));
+            if (!string.IsNullOrWhiteSpace(value)) yield return value!;
         }
-        foreach (var dir in paths.Select(p => Environment.ExpandEnvironmentVariables(p.Trim().Trim('"'))).Where(p => p.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase))
-        {
-            string exe, cmd;
-            try
-            {
-                exe = Path.Combine(dir, "claude.exe");
-                cmd = Path.Combine(dir, "claude.cmd");
-            }
-            catch (ArgumentException) { continue; }
-            yield return exe;
-            yield return cmd;
-        }
-        yield return Path.Combine(roaming, "npm", "claude.cmd");                        // npm install -g
     }
 
-    /// <summary>Finds a working Claude Code (it answers --version). Null when there is none.</summary>
-    public static Install? Find()
-    {
-        foreach (var path in Candidates().Distinct(StringComparer.OrdinalIgnoreCase))
-        {
-            // The Claude desktop app is also "claude.exe"; never start it by mistake.
-            if (path.IndexOf("AnthropicClaude", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                path.IndexOf("WindowsApps", StringComparison.OrdinalIgnoreCase) >= 0) continue;
-            if (!File.Exists(path)) continue;
-            var (code, output) = Run(path, "--version", 20000);
-            var match = VersionText.Match(output);
-            if (code == 0 && match.Success) return new Install(path, match.Value);
-        }
-        return null;
-    }
+    /// <summary>Folders as written in a variable: %NAMES% filled in, quotes and blanks off, each once.</summary>
+    private static List<string> Several(params string[] folders) =>
+        folders.Select(f => Environment.ExpandEnvironmentVariables((f ?? "").Trim().Trim('"'))).Where(f => f.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
     /// <summary>
     /// Whether Claude Code is signed in: `claude auth status` exits 0 when signed in and 1 when not. An older Claude Code
@@ -733,7 +760,7 @@ internal static class ClaudeCli
             info.StandardErrorEncoding = Encoding.UTF8;
             info.WorkingDirectory = Directory.Exists(WorkFolder) ? WorkFolder : Path.GetTempPath();
             info.EnvironmentVariables.Remove("ANTHROPIC_API_KEY");
-            using var process = ChildProcess.Start(info); // inherits none of ETABS's open files (bug 72)
+            using var process = StartHelper(info);
             process.StandardInput!.Close();
             var stdout = process.StandardOutput!.ReadToEndAsync();
             var stderr = process.StandardError!.ReadToEndAsync();
@@ -751,7 +778,25 @@ internal static class ClaudeCli
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or IOException or AggregateException)
         {
-            return (-1, ex.Message);
+            return (-1, ex.Message.Trim().Length > 0 ? ex.Message : ex.GetType().Name);
+        }
+    }
+
+    /// <summary>
+    /// Starts a short helper run so that it inherits none of ETABS's open files (bug 72). When Windows refuses that kind
+    /// of start on this PC (not: the file is missing), it is started the plain way: the run lasts seconds, and a Claude
+    /// Code that is there must not be reported as missing.
+    /// </summary>
+    private static ChildProcess StartHelper(ProcessStartInfo info)
+    {
+        try { return ChildProcess.Start(info); }
+        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode is not (2 or 3))
+        {
+            try { return ChildProcess.StartPlain(info); }
+            catch (Exception again) when (again is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
+            {
+                throw new System.ComponentModel.Win32Exception(ex.NativeErrorCode, ex.Message);
+            }
         }
     }
 

@@ -52,6 +52,10 @@ may not load the plug-in yet: then, with SAP2000 open, run  dotnet CsiProMax.dll
 Not yet confirmed in SAP2000: please report what happens.
 
 The chat runs on Claude Code on your own Claude plan. The window offers to install it or sign in when needed.
+If the window says Claude Code isn't installed although it is: the card says where it looked, and names any file it
+found but could not start. "Choose the file" lets you point at claude.exe yourself, and "Copy details" copies what it
+saw, to send back. To check by hand, run this in PowerShell:  where.exe claude; claude --version; whoami
+("not recognized" means Claude Code is not installed for this Windows user; the Claude desktop app is another program.)
 A PC other than the owner's needs a licence key: the Licence window shows this PC's code (SPM-....); send it to the
 owner and paste the key you get back.
 Later versions download by themselves (CSI ProMax > Check for updates). The CSI program must be open and licensed on

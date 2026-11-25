@@ -40,6 +40,12 @@ public sealed class AgentSettings
     /// <summary>Firm standards in plain English (naming, sheet numbering, tag styles...), given to Claude.</summary>
     public string FirmStandards { get; set; } = "";
 
+    /// <summary>
+    /// Where Claude Code is on this PC, when the user pointed at it (the chat's card, Choose the file): claude.exe or
+    /// claude.cmd. Looked at before the usual places (Chat.ClaudeFinder). Empty: not set.
+    /// </summary>
+    public string ClaudePath { get; set; } = "";
+
     /// <summary>Download new versions from GitHub when ETABS starts; they take effect the next time ETABS opens.</summary>
     public bool AutoUpdate { get; set; } = true;
 
