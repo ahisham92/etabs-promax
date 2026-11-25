@@ -148,6 +148,8 @@ public static class EtabsTools
             "Saves the model in ETABS under its current file name. The engineer is always asked first.",
             """{"type":"object","properties":{}}""", Ask.Always,
             (_, e) => { e.Save(); return new JsonObject { ["saved"] = e.Info().File }; }, _ => "Save the model"),
+
+        .. ResultTools.All,
     ];
 
     private static string Plural(int count, string word) => count == 0 ? "" : count == 1 ? "1 " + word : $"{count} {word}s";

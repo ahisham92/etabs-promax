@@ -151,6 +151,26 @@
   },
   {
    "group": "Check",
+   "title": "Full check report",
+   "prompt": "Run the full check report on the results: modes, drift against {limit}, torsion, soft story and mass, and the design ratios. One line per check, then the members that fail."
+  },
+  {
+   "group": "Check",
+   "title": "Torsion and irregularity",
+   "prompt": "Check torsional irregularity and soft or heavy stories from the results, and tell me which stories and load cases govern."
+  },
+  {
+   "group": "Check",
+   "title": "Design ratios",
+   "prompt": "Read ETABS's design summaries and list every member with a ratio above {limit}, with its story, section and governing combination."
+  },
+  {
+   "group": "Check",
+   "title": "Snapshot and compare",
+   "prompt": "Take a snapshot of the model now called {name}. After my changes I will ask you to compare, and you tell me what changed in the model and in the results."
+  },
+  {
+   "group": "Check",
    "title": "Quantities",
    "prompt": "Give me concrete volume and member counts per story for columns, beams, walls and slabs, as a table."
   },

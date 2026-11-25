@@ -329,6 +329,83 @@ Test("assistant: loads, combinations and tables", () =>
     Equal(1, (int)selected["selected"]!, "one selected"); Equal(1, selected["failed"]!.AsArray().Count, "one reported");
 });
 
+Test("results: drift, torsion, modal, soft story, mass and design ratios from ETABS's tables", () =>
+{
+    var e = new MemoryEtabs();
+    var mcp = Endpoint(e);
+    Equal("not available", (string)Call(mcp, "check_drift", "{}")["status"]!, "no analysis yet");
+    e.ResultTables["Story Drifts"] = new(["Story", "Output Case", "Case Type", "Direction", "Drift", "Label"],
+    [
+        ["Story3", "EQX", "LinStatic", "X", "0.0011", "5"], ["Story2", "EQX", "LinStatic", "X", "0.0024", "5"], ["Story1", "EQX", "LinStatic", "X", "0.0019", "7"],
+        ["Story2", "EQY", "LinStatic", "Y", "0.0009", "5"], ["Story2", "WX", "LinStatic", "X", "-0.0004", "5"],
+    ]);
+    var drift = Call(mcp, "check_drift", """{"limit":0.002}""");
+    Equal("fail", (string)drift["status"]!, "over the limit"); Equal("Story2", (string)drift["at_story"]!, "governing story"); Equal("EQX", (string)drift["case"]!, "governing case");
+    Near(0.0024, (double)drift["max_drift"]!, "largest drift"); Equal(1, drift["stories_over_limit"]!.AsArray().Count, "one story over");
+    Equal("Story3", (string)drift["by_story"]![0]!["story"]!, "top story first");
+    Equal("reported", (string)Call(mcp, "check_drift", "{}")["status"]!, "no limit, no verdict");
+    Equal("pass", (string)Call(mcp, "check_drift", """{"limit":0.0025}""")["status"]!, "within a looser limit");
+
+    e.ResultTables["Story Max Over Avg Displacements"] = new(["Story", "Output Case", "Direction", "Maximum", "Average", "Ratio"],
+        [["Story3", "EQX", "X", "0.012", "0.010", "1.2"], ["Story2", "EQX", "X", "0.009", "0.0068", "1.32"], ["Story1", "EQY", "Y", "0.004", "0.004", "1.0"]]);
+    var torsion = Call(mcp, "check_torsion", "{}");
+    Equal("torsional irregularity", (string)torsion["verdict"]!, "between 1.2 and 1.4"); Equal("Story2", (string)torsion["at_story"]!, "where");
+    Equal("extreme torsional irregularity", (string)Call(mcp, "check_torsion", """{"extreme":1.3}""")["verdict"]!, "the engineer's own limit");
+
+    e.ResultTables["Modal Participating Mass Ratios"] = new(["Case", "Mode", "Period", "UX", "UY", "RZ", "SumUX", "SumUY"],
+        [["Modal", "1", "0.82", "0.71", "0.01", "0.02", "0.71", "0.01"], ["Modal", "2", "0.64", "0.02", "0.69", "0.05", "0.73", "0.70"], ["Modal", "3", "0.5", "0.01", "0.03", "0.7", "0.74", "0.73"]]);
+    var modal = Call(mcp, "check_modal", "{}");
+    Equal("fail", (string)modal["status"]!, "74% is below 90%"); Equal("X", (string)modal["modes"]![0]!["mainly"]!, "first mode"); Equal("torsion", (string)modal["modes"]![2]!["mainly"]!, "third mode");
+    Equal("pass", (string)Call(mcp, "check_modal", """{"min_mass":0.7}""")["status"]!, "a lower target");
+
+    e.ResultTables["Story Stiffness"] = new(["Story", "Output Case", "Stiff X", "Stiff Y"],
+        [["Story3", "EQX", "100000", "0"], ["Story2", "EQX", "120000", "0"], ["Story1", "EQX", "60000", "0"]]);
+    e.ResultTables["Mass Summary by Story"] = new(["Story", "UX", "UY"], [["Story3", "200", "200"], ["Story2", "700", "700"], ["Story1", "400", "400"], ["Base", "50", "50"]]);
+    var irregular = Call(mcp, "check_story_irregularity", "{}");
+    Equal("fail", (string)irregular["status"]!, "both fail");
+    Equal("Story1", (string)irregular["soft_story"]!["soft_stories"]![0]!["story"]!, "Story1 has half the stiffness of Story2");
+    Near(0.5, (double)irregular["soft_story"]!["soft_stories"]![0]!["ratio_to_story_above"]!, "ratio");
+    Equal("Story2", (string)irregular["mass"]!["heavy_stories"]![0]!["story"]!, "Story2 is 1.75 times Story1");
+
+    e.ResultTables["Concrete Column Summary - ACI 318-19"] = new(["Story", "Label", "UniqueName", "DesignSect", "PMM Combo", "PMM Ratio", "V Major Ratio"],
+        [["Story1", "C1", "11", "C500x500", "ULS1", "0.82", "0.3"], ["Story1", "C2", "12", "C500x500", "ULS2", "1.15", "0.4"], ["Story2", "C1", "21", "C500x500", "ULS1", "0.4", "1.02"]]);
+    var design = Call(mcp, "design_ratios", "{}");
+    Equal("fail", (string)design["status"]!, "two members over 1"); Equal(2, (int)design["members_over_limit"]!, "count"); Near(1.15, (double)design["max_ratio"]!, "largest");
+    var worst = design["tables"]![0]!["worst"]!;
+    Equal("12", (string)worst["name"]!, "which member"); Equal("ULS2", (string)worst["combination"]!, "its combination"); Equal("PMM Ratio", (string)worst["governs"]!, "which ratio");
+    Equal("pass", (string)Call(mcp, "design_ratios", """{"limit":1.2}""")["status"]!, "a looser limit");
+
+    var report = Call(mcp, "check_report", """{"drift_limit":0.002}""");
+    Equal(5, report["summary"]!.AsArray().Count, "five checks"); Equal("fail", (string)report["checks"]!["drift"]!["status"]!, "the drift limit is passed on");
+    Check(((string)report["summary"]![4]!).StartsWith("design ratios: fail"), "summary lines");
+    Check(Call(mcp, "results_overview", "{}")["design_tables_with_data"]!.AsArray().Count == 1, "the overview names the design table");
+});
+
+Test("results: a snapshot is kept and compared with the model later", () =>
+{
+    ResultTools.SnapshotRoot = Path.Combine(Path.GetTempPath(), "epm-snap-" + Guid.NewGuid().ToString("N"));
+    try
+    {
+        var e = new MemoryEtabs();
+        var mcp = Endpoint(e);
+        Call(mcp, "add_columns", """{"points":[[0,0],[6,0]],"stories":["Story1"],"section":"C500x500"}""");
+        var beam = (string)Call(mcp, "add_beams", """{"lines":[[0,0,6,0]],"stories":["Story1"],"section":"B300x600"}""")["names"]![0]!;
+        Equal(3, (int)Call(mcp, "model_snapshot", """{"name":"before change"}""")["frames"]!, "three frames kept");
+        Equal(0, (int)Call(mcp, "compare_snapshots", """{"from":"before change"}""")["changes"]!, "nothing changed yet");
+        e.FrameSectionNames.Add("B300x700");
+        Call(mcp, "set_section", $$"""{"frames":["{{beam}}"],"section":"B300x700"}""");
+        Call(mcp, "add_beams", """{"lines":[[0,5,6,5]],"stories":["Story1"],"section":"B300x600"}""");
+        Call(mcp, "add_load_pattern", """{"name":"SDL","type":"Super Dead"}""");
+        var diff = Call(mcp, "compare_snapshots", """{"from":"before-change"}""");
+        Equal(1, (int)diff["frames"]!["added"]!, "one beam added"); Equal(1, (int)diff["frames"]!["section_changed"]!, "one section changed");
+        Check(((string)diff["frames"]!["section_changes"]![0]!).EndsWith("B300x600 to B300x700"), "which section");
+        Check(diff["definitions"]!["frame_sections"]!["added"]!.AsArray().Count == 1 && diff["definitions"]!["load_patterns"] is not null, "definitions that changed");
+        Equal(1, (int)Call(mcp, "list_snapshots", "{}")["count"]!, "one snapshot");
+        Check(Refused(mcp, "compare_snapshots", """{"from":"nope"}""").Contains("before-change"), "an unknown snapshot lists the real ones");
+    }
+    finally { if (Directory.Exists(ResultTools.SnapshotRoot)) Directory.Delete(ResultTools.SnapshotRoot, true); }
+});
+
 Test("assistant: the engineer is asked before deletes, saves and runs", () =>
 {
     var e = new MemoryEtabs();

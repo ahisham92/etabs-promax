@@ -124,10 +124,14 @@ public sealed class MemoryEtabs : IEtabsLink
 
     public void AddCombo(string name, IReadOnlyList<(string Case, double Factor)> cases) { Changing(); _combos.Add(name); }
 
-    public IReadOnlyList<TableName> Tables() =>
-        [new("Story Definitions", "Story Definitions", false), new("Story Drifts", "Story Drifts", true), new("Frame Assignments - Section Properties", "Frame Assignments - Section Properties", _frames.Count == 0)];
+    /// <summary>Result tables a test or the demo gives the stand-in model, by table name.</summary>
+    public Dictionary<string, TableData> ResultTables { get; } = new(StringComparer.OrdinalIgnoreCase);
 
-    public TableData ReadTable(string key, IReadOnlyList<string>? cases, IReadOnlyList<string>? combos) => key switch
+    public IReadOnlyList<TableName> Tables() =>
+        [new("Story Definitions", "Story Definitions", false), new("Story Drifts", "Story Drifts", !ResultTables.ContainsKey("Story Drifts")), new("Frame Assignments - Section Properties", "Frame Assignments - Section Properties", _frames.Count == 0),
+         .. ResultTables.Keys.Where(k => k != "Story Drifts").Select(k => new TableName(k, k, false))];
+
+    public TableData ReadTable(string key, IReadOnlyList<string>? cases, IReadOnlyList<string>? combos) => ResultTables.TryGetValue(key, out var given) ? given : key switch
     {
         "Story Definitions" => new(["Tower", "Story", "Height"], _stories.Skip(1).Reverse().Select(s => new[] { "T1", s.Name, s.Height.ToString(System.Globalization.CultureInfo.InvariantCulture) }).ToList()),
         "Frame Assignments - Section Properties" => new(["Story", "UniqueName", "Section Property"], _frames.Select(f => new[] { f.Story, f.Name, f.Section }).ToList()),
