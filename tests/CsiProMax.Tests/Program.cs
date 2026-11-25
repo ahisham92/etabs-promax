@@ -946,6 +946,16 @@ Test("field test: the ETABS scratch model gets a lateral load its checks can rea
     var analysis = steps.IndexOf("ctx.Tool(\"run_analysis\"", load > 0 ? load : 0, StringComparison.Ordinal);
     Check(load > 0 && analysis > load && steps.Contains("m.PointObj.SetLoadForce(p, \"CPM-EQX\""), "the seismic pattern has no load before the analysis when ETABS cannot take a user coefficient");
 });
+Test("add_load_pattern: ETABS refusing ASCE 7-16 keeps the Seismic pattern and says how to set it, not an error", () =>
+{
+    // 0.4.18 field test on ETABS 23: no user coefficient, and ASCE 7-16 refused; the pattern is kept with a note.
+    var model = new CpmFakes.EtabsSeismic();
+    model.AutoSeismic.Refuse = true;
+    using var link = new ComEtabs(CsiProgram.Etabs, () => model);
+    var a = EtabsTools.All.First(t => t.Name == "add_load_pattern").Run(JsonDocument.Parse("""{"name":"EQX","type":"Seismic","user_coefficient":{"c":0.05,"direction":"X"}}""").RootElement, link);
+    Check(a["lateral"] is null && a["note"]!.GetValue<string>().Contains("Modify Lateral Load", StringComparison.Ordinal), a.ToJsonString());
+    Check(model.LoadPatterns.Names.Contains("EQX"), "the Seismic pattern is kept");
+});
 foreach (var (name, body) in CdtSdkTests.All()) Test(name, body);
 foreach (var (name, body) in KeptPlugInsTests.All()) Test(name, body);
 foreach (var (name, body) in FieldRun048Tests.All()) Test(name, body);
@@ -1913,12 +1923,12 @@ namespace CpmFakes
 {
     public sealed class Asce716
     {
-        public string Named = ""; public bool[] Flags = [];
+        public string Named = ""; public bool[] Flags = []; public bool Refuse;
         // ETABS 23: 0-based, X, Y, X+e, Y+e, X-e, Y-e.
         public int SetASCE716_1(string name, ref bool[] dir, double ecc, int period, int ct, double userT, bool userZ, double top, double bottom,
-            double r, double omega, double cd, double i, double ss, double s1, double tl, int site, double fa, double fv) { Named = name; Flags = dir; return 0; }
+            double r, double omega, double cd, double i, double ss, double s1, double tl, int site, double fa, double fv) { if (Refuse) return 1; Named = name; Flags = dir; return 0; }
         public int SetASCE716(string name, ref bool[] dir, double ecc, int period, int ct, double userT, bool userZ, double top, double bottom,
-            double r, double omega, double cd, double i, double ss, double s1, double tl, int site, double fa, double fv) { Named = name; Flags = dir; return 0; }
+            double r, double omega, double cd, double i, double ss, double s1, double tl, int site, double fa, double fv) { if (Refuse) return 1; Named = name; Flags = dir; return 0; }
     }
     public sealed class SeismicPatterns
     {

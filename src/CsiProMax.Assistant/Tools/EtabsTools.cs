@@ -508,7 +508,13 @@ public static class EtabsTools
             {
                 string took;
                 try { took = EtabsLateral.Asce716(e, name, dir, ecc, 2, 1, 0, 8, 3, 5.5, 1, 1.0, 0.4, 8, 4, 1, 1); }
-                catch (EtabsException second) { throw new EtabsException($"{e.Program.Name} took neither a user coefficient nor ASCE 7-16 for {name}. {first.Message} | {second.Message}"); }
+                catch (EtabsException second)
+                {
+                    // Neither was taken: the pattern is kept with no automatic load (0.4.18), and the answer says why and how to set it.
+                    result["note"] = $"{e.Program.Name} added {name} as a Seismic pattern but took no automatic seismic load ({first.Message} | {second.Message}). " +
+                                     $"Set it in {e.Program.Name}: Define > Load Patterns, select {name}, Modify Lateral Load, User Coefficient (C = {c.ToString(System.Globalization.CultureInfo.InvariantCulture)}, K = {k.ToString(System.Globalization.CultureInfo.InvariantCulture)}, direction {dir}), or give its load with joint forces.";
+                    return result;
+                }
                 result["lateral"] = $"ASCE 7-16 ({e.Program.Name} did not take the user coefficient): direction {dir}, eccentricity {ecc.ToString(System.Globalization.CultureInfo.InvariantCulture)}, R 8, Omega 3, Cd 5.5, Ie 1, Ss 1.0, S1 0.4, TL 8 s, site class D, program period. " +
                     $"For a user coefficient (C = {c.ToString(System.Globalization.CultureInfo.InvariantCulture)}, K = {k.ToString(System.Globalization.CultureInfo.InvariantCulture)}): Define > Load Patterns, select {name}, Modify Lateral Load, User Coefficient";
                 result["set_by"] = took;

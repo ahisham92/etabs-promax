@@ -350,8 +350,11 @@ public sealed class ComEtabs : ICsiLink, IDisposable
         {
             "frame" => m.FrameObj.Delete(name, 0),
             "area" => m.AreaObj.Delete(name, 0),
-            _ => throw new EtabsException($"'{kind}' can't be deleted here: use frame or area."),
-        }, $"delete {kind} {name}");
+            // A joint nothing is drawn to: the program keeps it as a "special point" and lets only such a one go.
+            // (delete_joints left its test joints in the model on ETABS 23, 2026-11-25: this kind was not known here.)
+            "point" => m.PointObj.DeleteSpecialPoint(name, 0),
+            _ => throw new EtabsException($"'{kind}' can't be deleted here: use frame, area or point."),
+        }, kind == "point" ? $"delete joint {name} (a joint that frames or areas use cannot be deleted)" : $"delete {kind} {name}");
     });
 
     public void SetRestraint(string point, bool[] restraint) => Do("set a support", m =>
