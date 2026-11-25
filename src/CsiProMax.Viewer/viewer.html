@@ -2015,7 +2015,13 @@ function act(name) {
     case "about": return dialogs.about();
   }
 }
-function copyText(t) { try { navigator.clipboard.writeText(t); } catch (e) { const a = document.createElement("textarea"); a.value = t; document.body.appendChild(a); a.select(); document.execCommand("copy"); a.remove(); } $("hint").textContent = "Copied."; }
+// The browser may refuse the clipboard (no permission, the page not in front): then the old way, and if that fails too, say so.
+function copyText(t) {
+  const old = () => { let done = false; try { const a = document.createElement("textarea"); a.value = t; document.body.appendChild(a); a.select(); done = document.execCommand("copy"); a.remove(); } catch (e) { } $("hint").textContent = done ? "Copied." : "The browser did not allow copying here."; };
+  let p = null;
+  try { p = navigator.clipboard && navigator.clipboard.writeText(t); } catch (e) { p = null; }
+  if (p && p.then) p.then(() => { $("hint").textContent = "Copied."; }, old); else old();
+}
 
 // ---- menus ----
 const menus = () => window.cpmLive ? modelerMenus(viewerMenus()) : viewerMenus();

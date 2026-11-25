@@ -222,7 +222,7 @@ public static class ViewerCheck
 
     private static string Short(string text) => text.Length > 300 ? text[..300] + "..." : text;
 
-    private static (string? Out, string? Error) Browse(string browser, string profile, int seconds, params string[] arguments)
+    internal static (string? Out, string? Error) Browse(string browser, string profile, int seconds, params string[] arguments)
     {
         var info = new ProcessStartInfo(browser) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true, StandardOutputEncoding = Encoding.UTF8 };
         foreach (var a in new[] { "--headless=new", "--no-first-run", "--no-default-browser-check", "--disable-extensions", "--hide-scrollbars", "--enable-unsafe-swiftshader", "--user-data-dir=" + profile })
