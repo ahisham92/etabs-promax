@@ -38,13 +38,45 @@ public sealed class ComEtabs : ICsiLink, IDisposable
     /// model comes from <paramref name="start"/>, called once on this link's own thread. It never attaches to a
     /// window the engineer has open, and when its window is gone it says so instead of looking for another.
     /// </summary>
-    internal ComEtabs(CsiProgram program, Func<dynamic> start) : this(null, program) => _start = start;
+    internal ComEtabs(CsiProgram program, Func<dynamic> start) : this(null, program)
+    {
+        _start = start;
+        // The scratch model is small: its analysis takes seconds, so a long wait means a window is waiting.
+        AnalysisLimit = TimeSpan.FromMinutes(10);
+    }
 
     public void Dispose() => _work.CompleteAdding();
 
-    /// <summary>Runs one piece of work on the ETABS thread and waits for it.</summary>
+    /// <summary>
+    /// How long an ordinary call may take before the link stops waiting for it: reading a large table can take
+    /// minutes, but never this long.
+    /// </summary>
+    public TimeSpan CallLimit { get; set; } = TimeSpan.FromMinutes(15);
+
+    /// <summary>
+    /// How long an analysis or a design may take (the calls whose purpose starts with "run " or "start "). A large
+    /// model's analysis can take hours, so the engineer's own window gets hours; a scratch window's model is small.
+    /// </summary>
+    public TimeSpan AnalysisLimit { get; set; } = TimeSpan.FromHours(4);
+
+    /// <summary>The call the program has not come back from, while it is still out ("" when none).</summary>
+    private volatile string _stuck = "";
+
+    internal static bool IsLong(string what) =>
+        what.StartsWith("run ", StringComparison.OrdinalIgnoreCase) || what.StartsWith("start ", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Runs one piece of work on the program's thread and waits for it, for at most <see cref="CallLimit"/>
+    /// (<see cref="AnalysisLimit"/> for an analysis or design). A call the program does not come back from (a message
+    /// waiting in its window, such as "Analysis Complete") is given up on with a message that says so, and every
+    /// later call says the same at once instead of waiting behind it, until the program answers that call.
+    /// </summary>
     private T On<T>(string what, Func<dynamic, T> body)
     {
+        var app = Program.Name;
+        if (_stuck is { Length: > 0 } stuck)
+            throw new EtabsException($"{app} has still not come back from the last call ({stuck}). A message may be waiting in {app}'s window " +
+                "(such as \"Analysis Complete\" or a licence notice): answer or close it there, then try again.");
         var done = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
         _work.Add(() =>
         {
@@ -54,13 +86,24 @@ public sealed class ComEtabs : ICsiLink, IDisposable
             {
                 // ETABS was closed, or is closing: attach again on the next call.
                 _model = null;
-                done.SetException(new EtabsException($"{Program.Name} did not answer ({what}). Is {Program.Name} still open? {ex.Message}"));
+                done.SetException(new EtabsException($"{app} did not answer ({what}). Is {app} still open? {ex.Message}"));
             }
-            catch (Exception ex) { done.SetException(new EtabsException($"{Program.Name} could not {what}: {ex.Message}")); }
+            catch (Exception ex) { done.SetException(new EtabsException($"{app} could not {what}: {ex.Message}")); }
+            finally { _stuck = ""; }
         });
+        var limit = IsLong(what) ? AnalysisLimit : CallLimit;
+        if (!done.Task.Wait(limit))
+        {
+            _stuck = what;
+            // The call may still come back later; the next call works again from then on.
+            throw new EtabsException($"{app} did not come back from \"{what}\" within {Span(limit)}. A message may be waiting in {app}'s window " +
+                "(such as \"Analysis Complete\" or a licence notice): answer or close it there, then try again.");
+        }
         try { return done.Task.GetAwaiter().GetResult(); }
         catch (EtabsException) { throw; }
     }
+
+    private static string Span(TimeSpan t) => t.TotalHours >= 1 ? $"{t.TotalHours:0.#} hours" : t.TotalMinutes >= 1 ? $"{t.TotalMinutes:0} minutes" : $"{t.TotalSeconds:0} seconds";
 
     /// <summary>The same for work that gives nothing back. Its own name, so a call can never be mistaken for one that does.</summary>
     public object? Raw(string what, Func<dynamic, object?> work) => On<object?>(what, m => work(m));
