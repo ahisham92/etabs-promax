@@ -169,12 +169,8 @@ internal sealed class MainWindow : Window
             return;
         }
         var text = on
-            ? $"Turn the AI chat on?
-
-CSI ProMax starts again with the chat, which runs on Claude Code on your own Claude plan (it offers to install it or sign in). {Csi.Name} and your model stay open."
-            : $"Turn the AI chat off on this PC?
-
-CSI ProMax starts again without it: the Modeler, the 3D view, review packs, the Viewer and updates all stay. Your chats are kept and come back when you turn it on again. {Csi.Name} and your model stay open.";
+            ? $"Turn the AI chat on?\n\nCSI ProMax starts again with the chat, which runs on Claude Code on your own Claude plan (it offers to install it or sign in). {Csi.Name} and your model stay open."
+            : $"Turn the AI chat off on this PC?\n\nCSI ProMax starts again without it: the Modeler, the 3D view, review packs, the Viewer and updates all stay. Your chats are kept and come back when you turn it on again. {Csi.Name} and your model stay open.";
         if (TaskDialog.Show("CSI ProMax", text, TaskDialogCommonButtons.Yes | TaskDialogCommonButtons.No, TaskDialogResult.No) != TaskDialogResult.Yes) return;
         try { CsiProMax.AiMode.Save(on); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { TaskDialog.Show("CSI ProMax", "The choice could not be saved: " + ex.Message); return; }
