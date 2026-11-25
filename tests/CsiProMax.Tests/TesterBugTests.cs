@@ -468,6 +468,31 @@ static class TesterBugTests
             Check(source.Contains("ScratchDialogs.CloseNotices(ProcessId)"), "the scratch window no longer watches for the notice");
         });
 
+        yield return ("SAP2000 field test: a scratch process left running is named with its process id, and counts as a failure", () =>
+        {
+            var said = "the scratch SAP2000 window stopped answering, so it was left as it is; close it yourself without saving" + ScratchProgram.LeftRunning("SAP2000", "SAP2000", 47136, hasWindow: false);
+            Check(said.Contains("process id 47136") && said.Contains("no window on the screen") && said.Contains("Task Manager") && said.Contains("licence"), said);
+            Check(ScratchProgram.LeftRunning("SAFE", "SAFE", 7, hasWindow: true).Contains("close that window without saving, or end"), "a window that is there is not offered to be closed");
+            // The close step fails on any answer that asks the engineer to do something.
+            Check(said.Contains("yourself"), "a process left running would pass the close step");
+        });
+
+        yield return ("SAP2000 field test: the test ends only a process that can be no one's but its own scratch program", () =>
+        {
+            var asked = new DateTime(2026, 11, 25, 16, 48, 0);
+            Check(ScratchProgram.MayEnd(asked.AddSeconds(5), asked, []), "its own process with no window left is not ended");
+            Check(ScratchProgram.MayEnd(asked.AddSeconds(5), asked, ["SAP2000 26.3.0 Ultimate - cpm-field-test", "Analysis Complete - cpm-field-test"]), "its own process on the scratch model is not ended");
+            Check(!ScratchProgram.MayEnd(asked.AddHours(-3), asked, []), "a process that was running before the test asked would be ended");
+            Check(!ScratchProgram.MayEnd(asked.AddSeconds(5), asked, ["SAP2000 26.3.0 Ultimate - Tower B"]), "a window with another model would be ended");
+            Check(!ScratchProgram.MayEnd(asked.AddSeconds(5), asked, ["SAP2000 26.3.0 Ultimate - cpm-field-test", "Maintenance Expiring"]), "a process with a message that is not the scratch model's would be ended");
+            Check(!ScratchProgram.MayEnd(asked.AddSeconds(5), default, []), "a process would be ended although the test never asked for one");
+            // Ending a process is written in one place only, behind that rule.
+            var kills = SourceText.Files("src").Where(f => f.Text.Contains(".Kill(", StringComparison.Ordinal)).Select(f => f.Path).ToList();
+            var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));
+            Check(source.Contains("MayEnd(process.StartTime, _startedAt, titles))\n            {\n                process.Kill();".Replace("\n", "\n")) || System.Text.RegularExpressions.Regex.IsMatch(source, @"MayEnd\(process\.StartTime, _startedAt, titles\)\)\s*\{\s*process\.Kill\(\);"), "the scratch process is ended without asking MayEnd first");
+            Check(kills.Contains("src/CsiProMax.Assistant/Field/ScratchProgram.cs"), "the rule is not used");
+        });
+
         yield return ("ETABS 20 tester: the field test tries what Tools > CSI ProMax does in each program, and fails where the plug-in cannot be created", () =>
         {
             // What the check answered on that PC (in its own words), and a PC where all is well.
