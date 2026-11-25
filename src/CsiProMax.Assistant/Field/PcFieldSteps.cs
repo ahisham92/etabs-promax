@@ -34,6 +34,10 @@ public static class PcFieldSteps
                 if (found.Loads is null)
                 {
                     // No PowerShell on this program's .NET here. A program on .NET 8 is tried in this process, which runs on it too.
+                    // Settings of a program that is no longer installed (or whose folder was not found): its API file is
+                    // not there to create the plug-in against. Said as it is (ETABS 20, ETABS 21 and SAP2000 24 on Ahmed's PC, 0.4.28).
+                    if (found.Runtime != ".NET" && found.ApiFile.Length == 0)
+                        throw new FieldSkipException($"{found.Program}'s own API file was not found on this PC (the program may no longer be installed; only its settings are left), so creating the plug-in against it could not be tried");
                     if (found.Runtime != ".NET" || found.Path.Length == 0 || !File.Exists(found.Path))
                         throw new FieldSkipException($"it could not be tried on this PC for a program on {found.Runtime}");
                     if (found.ApiFile.Length == 0 || !File.Exists(found.ApiFile))
