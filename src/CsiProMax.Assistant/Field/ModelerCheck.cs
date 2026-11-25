@@ -108,6 +108,24 @@ public static class ModelerCheck
           const back = await hmRun("property_definitions", {objects: [name]}, true);
           return (back.result.objects[0].release_i || []).length ? {fail: "undo did not take the releases off"} : {ok: "M3 released at both ends of " + name + ", then undone"};
         });
+        await step("Assign > Frame > Hinges: auto hinges at both ends of a beam through the form, and undo takes them off", async () => {
+          const b = frames.findIndex(f => f.kind === "beam");
+          if (b < 0) return {fail: "the model has no beam"};
+          sel.clear(); sel.add(b + 1); selChanged();
+          await act("m:ad:hinges"); await wait(900);
+          const ends = document.querySelector(".dlg #hEnds");
+          if (!ends) return {fail: "the hinges form did not open"};
+          ends.click(); await wait(150);
+          const forms = document.querySelectorAll(".dlg"); forms[forms.length - 1].querySelector(".df button.primary").click();
+          await wait(1200);
+          const name = frames[b].name, pd = await hmRun("property_definitions", {objects: [name]}, true);
+          const o = pd.ok && pd.result.objects && pd.result.objects[0];
+          closeDialogs(); await wait(150);
+          if (!o || (o.hinges || []).length < 2) return {fail: "the hinges did not reach the beam: " + (hm.lastError || JSON.stringify(o))};
+          await hmRun("undo"); await wait(800);
+          const back = await hmRun("property_definitions", {objects: [name]}, true);
+          return (back.result.objects[0].hinges || []).length ? {fail: "undo did not take the hinges off"} : {ok: "hinges at 0.05 and 0.95 of " + name + ", then undone"};
+        });
         await step("Assign > Joint > Springs: a point spring goes on the joints of a selected beam, and undo takes it off", async () => {
           const made = await hmRun("define_spring", {kind: "point", name: "CPM-CHKPS", values: {UZ: 1000}}, true);
           if (!made.ok) return {fail: "the spring was not defined: " + made.error};

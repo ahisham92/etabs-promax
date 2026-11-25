@@ -96,8 +96,8 @@ public static class PropertyTools
                 return new JsonObject { ["link"] = name, ["directions"] = dofs.Count };
             }, a => a.Flag("delete") ? $"Delete the link {a.Text("name")}" : $"Define the link {a.Text("name")}"),
         new("assign_frame_data",
-            "Assigns to frames (label@story) what Assign > Frame offers: release_i and release_j (any of P V2 V3 T M2 M3; [] takes them off), angle (local axis 2 rotation, degrees), cardinal (insertion point 1 to 11: 10 centroid, 8 top center), offset_i, offset_j and rigid_zone (end length offsets, rigid zone factor 0 to 1), modifiers (AMOD A2MOD A3MOD JMOD I2MOD I3MOD MMOD WMOD) and spring (a line spring property; \"\" takes it off). Only what is given changes.",
-            """{"type":"object","required":["objects"],"properties":{"objects":{"type":"array","items":{"type":"string"}},"release_i":{"type":"array","items":{"type":"string"}},"release_j":{"type":"array","items":{"type":"string"}},"angle":{"type":"number"},"cardinal":{"type":"integer"},"offset_i":{"type":"number"},"offset_j":{"type":"number"},"rigid_zone":{"type":"number"},"modifiers":""" + Numbers + ""","spring":{"type":"string"}}}""",
+            "Assigns to frames (label@story) what Assign > Frame offers: release_i and release_j (any of P V2 V3 T M2 M3; [] takes them off), angle (local axis 2 rotation, degrees), cardinal (insertion point 1 to 11: 10 centroid, 8 top center), offset_i, offset_j and rigid_zone (end length offsets, rigid zone factor 0 to 1), modifiers (AMOD A2MOD A3MOD JMOD I2MOD I3MOD MMOD WMOD), spring (a line spring property; \"\" takes it off) and hinges (Assign > Frame > Hinges: auto hinges from the code's tables, each {at: relative distance 0 to 1, dof: M3 M2 P V2 V3 T P-M2-M3 P-M3 M3-V2}; [] takes them off; for a pushover). Only what is given changes.",
+            """{"type":"object","required":["objects"],"properties":{"objects":{"type":"array","items":{"type":"string"}},"release_i":{"type":"array","items":{"type":"string"}},"release_j":{"type":"array","items":{"type":"string"}},"angle":{"type":"number"},"cardinal":{"type":"integer"},"offset_i":{"type":"number"},"offset_j":{"type":"number"},"rigid_zone":{"type":"number"},"modifiers":""" + Numbers + ""","spring":{"type":"string"},"hinges":{"type":"array","items":{"type":"object","required":["at","dof"],"properties":{"at":{"type":"number"},"dof":{"type":"string"}}}}}}""",
             Ask.Changes, AssignFrames, a => "Assign frame data"),
         new("assign_shell_data",
             "Assigns to slabs and walls (label@story) what Assign > Shell offers: modifiers (F11MOD F22MOD F12MOD M11MOD M22MOD M12MOD V13MOD V23MOD MMOD WMOD) and spring (an area spring property, e.g. soil under a mat; \"\" takes it off).",
@@ -169,9 +169,10 @@ public static class PropertyTools
         if (rz is < 0 or > 1) throw new ToolInputException("The rigid zone factor is from 0 to 1.");
         var mods = Values(a, "modifiers", true);
         var spring = Spring(a, m0, "line");
-        if (ri is null && rj is null && angle is null && cardinal is null && oi is null && oj is null && rz is null && mods.Count == 0 && spring is null)
-            throw new ToolInputException("Give what to assign: release_i, release_j, angle, cardinal, offset_i, offset_j, rigid_zone, modifiers or spring.");
-        Core(() => { PropertyDefs.CheckModifiers(PropertyDefs.FrameModifiers, mods); return 0; });
+        var hinges = Hinges(a);
+        if (ri is null && rj is null && angle is null && cardinal is null && oi is null && oj is null && rz is null && mods.Count == 0 && spring is null && hinges is null)
+            throw new ToolInputException("Give what to assign: release_i, release_j, angle, cardinal, offset_i, offset_j, rigid_zone, modifiers, spring or hinges.");
+        Core(() => { PropertyDefs.CheckModifiers(PropertyDefs.FrameModifiers, mods); if (hinges is not null) PropertyDefs.CheckHinges(hinges); return 0; });
         foreach (var (label, story) in objects)
         {
             var (i0, j0) = PropertyDefs.ReleasesOf(m0.LineAssigns.First(y => y.Label == label && y.Story == story));
@@ -198,9 +199,24 @@ public static class PropertyTools
                 if (rz is { } r) PropertyDefs.Put(x.Extra, "RIGIDZONE", E2k.E2kText.Number(r));
                 if (mods.Count > 0) PropertyDefs.SetModifiers(x.Extra, PropertyDefs.FrameModifiers, mods);
                 if (spring is not null) PropertyDefs.Put(x.Extra, "SPRINGPROP", spring.Length == 0 ? null : E2k.E2kText.Quote(spring));
+                if (hinges is not null) PropertyDefs.SetHinges(m, label, story, hinges);
             }
             return (JsonNode)new JsonObject { ["assigned"] = objects.Count };
         }));
+    }
+
+    private static List<PropertyDefs.HingeDef>? Hinges(JsonElement a)
+    {
+        if (!a.TryGetProperty("hinges", out var h) || h.ValueKind == JsonValueKind.Null) return null;
+        if (h.ValueKind != JsonValueKind.Array) throw new ToolInputException("hinges is a list of {at, dof}.");
+        var list = new List<PropertyDefs.HingeDef>();
+        foreach (var x in h.EnumerateArray())
+        {
+            if (x.ValueKind != JsonValueKind.Object || !x.TryGetProperty("at", out var at) || at.ValueKind != JsonValueKind.Number || !x.TryGetProperty("dof", out var dof) || dof.ValueKind != JsonValueKind.String)
+                throw new ToolInputException("Each hinge is {at: 0 to 1, dof: e.g. M3}.");
+            list.Add(new PropertyDefs.HingeDef(at.GetDouble(), dof.GetString()!.Trim().ToUpperInvariant()));
+        }
+        return list;
     }
 
     private static JsonNode AssignShells(JsonElement a, ICsiLink e)
@@ -279,6 +295,7 @@ public static class PropertyTools
             ["modeling_types"] = new JsonArray(PropertyDefs.ModelingTypes.Select(t => (JsonNode)t).ToArray()),
             ["frame_modifiers"] = new JsonArray(PropertyDefs.FrameModifiers.Select(t => (JsonNode)t).ToArray()),
             ["shell_modifiers"] = new JsonArray(PropertyDefs.ShellModifiers.Select(t => (JsonNode)t).ToArray()),
+            ["hinge_dofs"] = new JsonArray(PropertyDefs.HingeDofs.Select(t => (JsonNode)t).ToArray()),
             ["link_types"] = new JsonArray(PropertyDefs.LinkTypes.Select(t => (JsonNode)t).ToArray()),
             ["links"] = new JsonArray(PropertyDefs.Links(m).Select(l => (JsonNode)new JsonObject
             {
@@ -308,6 +325,7 @@ public static class PropertyTools
                         ["cardinal"] = int.TryParse(PropertyDefs.Value(l.Extra, "CARDINALPT"), out var c) ? c : 10,
                         ["offset_i"] = Num(PropertyDefs.Value(l.Extra, "LENGTHOFFI")), ["offset_j"] = Num(PropertyDefs.Value(l.Extra, "LENGTHOFFJ")), ["rigid_zone"] = Num(PropertyDefs.Value(l.Extra, "RIGIDZONE")),
                         ["modifiers"] = Numbers_(PropertyDefs.Modifiers(l.Extra, PropertyDefs.FrameModifiers)), ["spring"] = PropertyDefs.Value(l.Extra, "SPRINGPROP") ?? "",
+                        ["hinges"] = new JsonArray(PropertyDefs.HingesOf(m, label, story).Select(h => (JsonNode)new JsonObject { ["at"] = h.At, ["dof"] = h.Dof }).ToArray()),
                     });
                 }
                 else if (m.AreaAssigns.Find(y => y.Label == label && y.Story == story) is { } ar)
