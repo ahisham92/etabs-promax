@@ -753,6 +753,33 @@ static class TesterBugTests
             Check(steps.Count == 2 && steps[0] is { Ok: true, Skipped: false } && steps[1].Skipped, "ETABS 23 is tried here and ETABS 20 stays not tested: " + string.Join("; ", steps.Select(s => $"{s.Name}: {s.Ok} {s.Skipped} {s.Detail}")));
             Check(File.ReadAllText(Path.Combine(root, "check.ps1")).Contains("$finding.ApiFile = $candidate", StringComparison.Ordinal), "check.ps1 no longer says where the program's API file is");
         });
+        yield return ("field test: the real window is opened with the AI chat and without it", () =>
+        {
+            // Asked on 2026-11-25: "are we testing for every single option we have I mean the modelling and viewing
+            // without AI". The window itself was only opened on release builds, never by the test on a PC.
+            Check(WindowFieldSteps.Arguments("x.dll", ai: false).Contains("--no-ai") && !WindowFieldSteps.Arguments("x.dll", ai: true).Contains("--no-ai"), "only the start without the chat passes --no-ai");
+            Check(WindowFieldSteps.Arguments("x.dll", ai: true).Contains("--demo") && WindowFieldSteps.Arguments("x.dll", ai: true).Contains("--no-update"), "the second start is on the demo model and does not update itself away");
+            var ctx = new FieldContext(CsiProgram.Etabs, Path.GetTempPath(), new MemoryEtabs());
+            var asked = new List<bool>();
+            WindowFieldSteps.Run(ctx, ai => { asked.Add(ai); return ai ? new WindowFieldSteps.Seen(true, "'CSI ProMax' opened") : new WindowFieldSteps.Seen(false, "it ended by itself with code 1"); });
+            Equal("True, False", string.Join(", ", asked), "both ways are started");
+            Check(ctx.Steps.Count == 2 && ctx.Steps[0].Ok && !ctx.Steps[1].Ok && ctx.Steps[1].Name.Contains("without the AI chat", StringComparison.Ordinal), "a window that does not open without the chat is a failure of its own");
+            var busy = new FieldContext(CsiProgram.Etabs, Path.GetTempPath(), new MemoryEtabs());
+            WindowFieldSteps.Run(busy, _ => new WindowFieldSteps.Seen(false, "a demo window is already open", NotTried: true));
+            Check(busy.Steps.All(s => s.Skipped), "a start that could not be tried is not tested, not a failure");
+            var notes = Path.Combine(Path.GetTempPath(), "cpm-notes-" + Guid.NewGuid().ToString("N")[..8] + ".txt");
+            try
+            {
+                File.WriteAllText(notes, "old\n");
+                var before = new FileInfo(notes).Length;
+                Equal("", WindowFieldSteps.Wrote(notes, before), "nothing new in errors.txt");
+                File.AppendAllText(notes, "[window] boom\n");
+                Check(WindowFieldSteps.Wrote(notes, before).Contains("boom", StringComparison.Ordinal) && !WindowFieldSteps.Wrote(notes, before).Contains("old", StringComparison.Ordinal), "only what the new window wrote is reported");
+            }
+            finally { File.Delete(notes); }
+            var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/FieldTest.cs"));
+            Check(source.Contains("WindowFieldSteps.Run(ctx, o.OpenWindow)", StringComparison.Ordinal), "the full test no longer opens the window");
+        });
         yield return ("ETABS 23 field test: a test copy an earlier run left open is closed by the next run, and nothing else is", () =>
         {
             // Seen on 2026-11-25: the 0.4.10 run gave up on ETABS with the story picker showing; the 0.4.14 run then failed

@@ -70,6 +70,9 @@ public static class FieldTest
         /// <summary>For the tests: the file that says a full test is running, instead of this PC's own.</summary>
         public string? LockFile { get; init; }
 
+        /// <summary>For tests: stands in for starting CSI ProMax a second time (true: with the AI chat). Left out: the real start, in the full test on a real PC.</summary>
+        public Func<bool, WindowFieldSteps.Seen>? OpenWindow { get; init; }
+
         /// <summary>True when a CSI program is behind the scratch windows, so code is run against its API (tests: false).</summary>
         public bool LiveScratch { get; init; } = true;
 
@@ -205,6 +208,8 @@ public static class FieldTest
         PcFieldSteps.Run(ctx, o.InstallFolder ?? AppContext.BaseDirectory, plugIns, o.Full ? [target, work] : [target], menus);
         // With the AI chat and without it (install-no-ai.ps1): both ways, whichever this PC has.
         AiModeFieldSteps.Run(ctx);
+        // The real window, opened a second time on the demo model, with the chat and without it (the full test on a real PC).
+        if (o.Full && (o.OpenWindow is not null || (o.LiveScratch && o.SettingsRoot is null))) WindowFieldSteps.Run(ctx, o.OpenWindow);
         if (left.Count > 0) ctx.Step("test copies an earlier run left open are closed", () => string.Join("; ", left));
 
         ctx.Section(OpenSection);
