@@ -731,6 +731,28 @@ static class TesterBugTests
             var steps = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/CsiFieldSteps.cs"));
             Check(steps.IndexOf("ctx.WithResults()", StringComparison.Ordinal) is var at and > 0 && at < steps.IndexOf("\"unlock_model\"", StringComparison.Ordinal), "the shared steps unlock the model before the Viewer is checked");
         });
+        yield return ("field test: a program on .NET 8 has its plug-in created in the test itself when this PC has no PowerShell for it", () =>
+        {
+            // Seen on 2026-11-25, 0.4.21 on Ahmed's PC: 5 steps "can create the CSI ProMax plug-in" were not tested,
+            // because Windows PowerShell runs on the .NET Framework and ETABS 23 and SAP2000 26 run on .NET 8.
+            var root = SourceText.Root();
+            var plugIn = Path.Combine(root, "src/CsiProMax.Plugin/bin/Release/netstandard2.0/CsiProMaxPlugin.dll");
+            var api = Path.Combine(AppContext.BaseDirectory, "ETABSv1.dll");
+            if (!File.Exists(plugIn)) plugIn = Path.Combine(root, "src/CsiProMax.Plugin/bin/Debug/netstandard2.0/CsiProMaxPlugin.dll");
+            Check(File.Exists(plugIn) && File.Exists(api), $"the built plug-in and API file are there: {plugIn}, {api}");
+            var (ok, detail) = PlugInCheck.TryHere(plugIn, api);
+            Check(ok && detail.Contains("cSapModel", StringComparison.Ordinal), "the plug-in is created against the API file: " + detail);
+            var (bad, why) = PlugInCheck.TryHere(api, api);
+            Check(!bad && why.Contains("cPlugin", StringComparison.Ordinal), "a file with no plug-in class in it is refused with the reason: " + why);
+            using (File.Open(plugIn, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { }   // not kept open by the try
+
+            var read = PlugInCheck.Read($$"""{"Text":"x","Programs":[{"Program":"ETABS 23","Listed":true,"Loads":null,"Runtime":".NET","Reasons":[],"Path":{{System.Text.Json.JsonSerializer.Serialize(plugIn)}},"ApiFile":{{System.Text.Json.JsonSerializer.Serialize(api)}}},{"Program":"ETABS 20","Listed":true,"Loads":null,"Runtime":".NET Framework","Reasons":[],"Path":"","ApiFile":""}]}""");
+            var ctx = new FieldContext(CsiProgram.Etabs, Path.GetTempPath(), new MemoryEtabs());
+            PcFieldSteps.PlugIn(ctx, read);
+            var steps = ctx.Steps.Where(s => s.Name.Contains("can create", StringComparison.Ordinal)).ToList();
+            Check(steps.Count == 2 && steps[0] is { Ok: true, Skipped: false } && steps[1].Skipped, "ETABS 23 is tried here and ETABS 20 stays not tested: " + string.Join("; ", steps.Select(s => $"{s.Name}: {s.Ok} {s.Skipped} {s.Detail}")));
+            Check(File.ReadAllText(Path.Combine(root, "check.ps1")).Contains("$finding.ApiFile = $candidate", StringComparison.Ordinal), "check.ps1 no longer says where the program's API file is");
+        });
         yield return ("ETABS 23 field test: a test copy an earlier run left open is closed by the next run, and nothing else is", () =>
         {
             // Seen on 2026-11-25: the 0.4.10 run gave up on ETABS with the story picker showing; the 0.4.14 run then failed

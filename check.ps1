@@ -324,7 +324,7 @@ catch {
             $plugin = $program.Plugin
             $finding = [pscustomobject]@{
                 Program = $program.Label; Ini = $program.Ini; Listed = $false; Name = ''; Path = ''; Exists = $false; OnlineOnly = $false; Blocked = $false
-                Place = ''; Runtime = ''; Api = ''; Loads = $null; Reasons = @()
+                Place = ''; Runtime = ''; Api = ''; ApiFile = ''; Loads = $null; Reasons = @()
             }
             $findings.Add($finding)
             $report.Add('')
@@ -339,7 +339,7 @@ catch {
                 $version = ''
                 try { $version = (Get-Item -LiteralPath (Join-Path $folder "$($plugin.Program).exe")).VersionInfo.FileVersion } catch { }
                 $candidate = Join-Path $folder "$($plugin.Api).dll"
-                if (Test-Path -LiteralPath $candidate) { $apiFile = $candidate; $finding.Api = Get-Identity $candidate }
+                if (Test-Path -LiteralPath $candidate) { $apiFile = $candidate; $finding.ApiFile = $candidate; $finding.Api = Get-Identity $candidate }
                 $report.Add("  Program: $folder" + $(if ($version) { ", version $version" } else { '' }))
                 if ($apiFile) { $report.Add("  Its API file: $($finding.Api)") } else { $report.Add("  Its API file $($plugin.Api).dll was not found in that folder.") }
             }
