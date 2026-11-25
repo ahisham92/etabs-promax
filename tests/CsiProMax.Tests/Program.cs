@@ -958,6 +958,7 @@ Test("add_load_pattern: ETABS refusing ASCE 7-16 keeps the Seismic pattern and s
 });
 foreach (var (name, body) in CdtSdkTests.All()) Test(name, body);
 foreach (var (name, body) in HandModelTests.All()) Test(name, body);
+foreach (var (name, body) in AiModeTests.All()) Test(name, body);
 foreach (var (name, body) in KeptPlugInsTests.All()) Test(name, body);
 foreach (var (name, body) in FieldRun048Tests.All()) Test(name, body);
 foreach (var (name, body) in FieldQuietTests.All()) Test(name, body);

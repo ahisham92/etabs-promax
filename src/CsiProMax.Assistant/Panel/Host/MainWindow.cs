@@ -62,7 +62,8 @@ internal sealed class MainWindow : Window
         top.Children.Add(menu);
         DockPanel.SetDock(top, Dock.Top);
         layout.Children.Add(top);
-        layout.Children.Add(Chat.ChatPane.Get());
+        // With the AI chat off on this PC (AiMode): the Modeler, the 3D view and the review pack by hand, and no chat at all.
+        layout.Children.Add(CsiProMax.AiMode.On ? Chat.ChatPane.Get() : NoAiPane.Build(CsiProMax.App.Reopened));
         Content = layout;
         SourceInitialized += (_, _) => Handle = new WindowInteropHelper(this).Handle;
         Closing += (_, _) => Remember();
@@ -106,16 +107,21 @@ internal sealed class MainWindow : Window
         if (Licensing.LicenseState.IsOwnerPc) Add(app, "License _manager…", () => LicenseManagerWindow.Open());
         Add(app, "_Settings…", () => Dialog(new SettingsWindow()));
         Add(app, "Check for _updates", CsiProMax.App.CheckForUpdatesInteractive);
+        if (!CsiProMax.AiMode.Forced)
+            Add(app, CsiProMax.AiMode.On ? "Turn the AI chat _off…" : "Turn the AI chat _on…", () => SwitchAi(!CsiProMax.AiMode.On));
         Add(app, "_About", () => TaskDialog.Show("CSI ProMax",
             $"CSI ProMax {Update.Updater.CurrentText}\n{Csi.Name} {(CsiProMax.App.ETABSYear.Length > 0 ? CsiProMax.App.ETABSYear : "not answering yet")}\n" +
             $"Model: {ModelWatch.Current?.Title ?? "none"}\n\n{Update.Updater.Describe()}"));
         app.Items.Add(new Separator());
         Add(app, "_Close CSI ProMax", Close);
 
-        var chat = Top("_Chat");
-        Add(chat, "_Notes…", OpenNotes);
-        Add(chat, "_Routines…", Chat.ChatPane.OpenRoutinesWindow);
-        Add(chat, "_Team performance…", () => { var w = new CrewPerformanceWindow(); Brand.Prepare(w); w.Show(); });
+        if (CsiProMax.AiMode.On)
+        {
+            var chat = Top("_Chat");
+            Add(chat, "_Notes…", OpenNotes);
+            Add(chat, "_Routines…", Chat.ChatPane.OpenRoutinesWindow);
+            Add(chat, "_Team performance…", () => { var w = new CrewPerformanceWindow(); Brand.Prepare(w); w.Show(); });
+        }
 
         var view = Top("_View");
         Add(view, "Open the _3D view", ModelView.Open);
@@ -135,7 +141,7 @@ internal sealed class MainWindow : Window
         var help = Top("_Help");
         Add(help, "_Report a bug…", () => { if (CsiProMax.App.Etabs is { } etabs) Bugs.BugReport.Command(etabs); });
         Add(help, "Open the _Bugs folder", () => Bugs.BugReport.OpenFolder());
-        Add(help, "_Export chats and bugs", ExportChatsAndBugs);
+        if (CsiProMax.AiMode.On) Add(help, "_Export chats and bugs", ExportChatsAndBugs);
         Add(help, "Open _folders…", () => UserFoldersWindow.Open());
         Add(help, "Self _test", RunSelfTest);
         Add(help, "_Tools menu of each CSI program: check and repair", CheckToolsMenus);
@@ -144,6 +150,36 @@ internal sealed class MainWindow : Window
         Add(help, "Field test: only what is _new, changed or failed…", () => RunFieldTest(full: true, retest: true));
         Add(help, "Field test, _quick: this PC and the open model", () => RunFieldTest(full: false));
         return menu;
+    }
+
+    /// <summary>
+    /// Turns the AI chat on or off on this PC (AiMode) and starts this version again with it. The CSI program and the
+    /// model stay open; the chats are kept and come back when the chat is turned on again.
+    /// </summary>
+    internal static void SwitchAi(bool on)
+    {
+        if (CsiProMax.App.IsBusy)
+        {
+            TaskDialog.Show("CSI ProMax", "CSI ProMax is working on something. Wait for it to finish (or stop it), then switch the AI chat.");
+            return;
+        }
+        if (CsiProMax.App.Etabs?.Link is CsiProMax.Assistant.Etabs.OfflineEtabs { Unsaved: true })
+        {
+            TaskDialog.Show("CSI ProMax", "The Modeler's model has changes that are not saved. Save it first (File > Save in the 3D view), then switch the AI chat.");
+            return;
+        }
+        var text = on
+            ? $"Turn the AI chat on?
+
+CSI ProMax starts again with the chat, which runs on Claude Code on your own Claude plan (it offers to install it or sign in). {Csi.Name} and your model stay open."
+            : $"Turn the AI chat off on this PC?
+
+CSI ProMax starts again without it: the Modeler, the 3D view, review packs, the Viewer and updates all stay. Your chats are kept and come back when you turn it on again. {Csi.Name} and your model stay open.";
+        if (TaskDialog.Show("CSI ProMax", text, TaskDialogCommonButtons.Yes | TaskDialogCommonButtons.No, TaskDialogResult.No) != TaskDialogResult.Yes) return;
+        try { CsiProMax.AiMode.Save(on); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { TaskDialog.Show("CSI ProMax", "The choice could not be saved: " + ex.Message); return; }
+        if (CsiProMax.App.Restart is { } restart) restart();
+        else TaskDialog.Show("CSI ProMax", $"Saved. Close CSI ProMax and open it again from {Csi.Name}'s Tools menu to use it.");
     }
 
     private static Window? _notes;

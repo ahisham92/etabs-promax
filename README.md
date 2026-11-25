@@ -26,6 +26,14 @@ Nothing is an .exe and nothing needs administrator rights. It runs on the .NET 8
 irm https://raw.githubusercontent.com/ahisham92/etabs-promax/main/install.ps1 | iex
 ```
 
+Without the AI chat (the Modeler, modelling by hand, the 3D view, review packs and the Viewer, and no Claude Code), use this line instead. The chat can be turned on or off later in the window's CSI ProMax menu, without closing the program:
+
+```powershell
+irm https://raw.githubusercontent.com/ahisham92/etabs-promax/main/install-no-ai.ps1 | iex
+```
+
+With the chat on, the 3D view in the browser (View > Open the 3D view, and the Modeler's own view) has a Chat tab: the same conversation as the window.
+
 It works with ETABS 18 and later, SAFE 20 and later and SAP2000 20 and later. When it is done, the installer tries for each program what Tools > CSI ProMax does, and says yes or no. If a program does not open CSI ProMax, this line looks at why and prints a text to send back (it changes nothing):
 
 ```powershell

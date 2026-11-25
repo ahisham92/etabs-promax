@@ -72,9 +72,14 @@ public static class App
         Bridge = new BridgeServer(registry, Dispatcher, ETABSYear);
         Bridge.Start();
         _started = true;
+        // The local server carries the 3D view and hand modelling too, so it runs with the AI chat off as well.
         try { ChatMcp.Start(Bridge); } catch (Exception) { /* the chat says what is wrong when a message is sent */ }
-        try { Chat.ChatPane.Start(Etabs); } catch (Exception) { /* the chat still works, with one conversation */ }
-        Chat.Autopilot.ModelTitle = () => Chat.ChatPane.CurrentModelTitle;
+        // With the AI chat off (AiMode) nothing of the chat is started: no Claude Code is looked for, offered or run.
+        if (AiMode.On)
+        {
+            try { Chat.ChatPane.Start(Etabs); } catch (Exception) { /* the chat still works, with one conversation */ }
+            Chat.Autopilot.ModelTitle = () => Chat.ChatPane.CurrentModelTitle;
+        }
         try { CrashGuard.Start(Ui); } catch (Exception) { }
         // This PC's license (Licensing/LicenseState): without a valid key the License window opens at the first idle moment.
         try
@@ -97,8 +102,11 @@ public static class App
         if (!_started) return;
         _started = false;
         try { _life?.Cancel(); } catch (ObjectDisposedException) { }
-        try { Chat.ChatPane.Shutdown(); } catch (Exception) { }
-        try { if (Etabs is { } app) Chat.ChatPane.Stop(app); } catch (Exception) { }
+        if (AiMode.On)
+        {
+            try { Chat.ChatPane.Shutdown(); } catch (Exception) { }
+            try { if (Etabs is { } app) Chat.ChatPane.Stop(app); } catch (Exception) { }
+        }
         try { ChatMcp.Stop(); } catch (Exception) { }
         try { Bridge?.Stop(); } catch (Exception) { }
         Host.ModelWatch.Stop();
@@ -190,6 +198,15 @@ public static class App
     /// same program window and this one closes. The CSI program itself stays open, like Sketch ProMax in Revit.
     /// </summary>
     internal static Action<string>? SwitchTo { get; set; }
+
+    /// <summary>
+    /// Starts this version again in place of this window (Program sets it), beside the same program window: after the
+    /// AI chat is switched on or off. The CSI program and the model stay open.
+    /// </summary>
+    internal static Action? Restart { get; set; }
+
+    /// <summary>True when this window took over from one that was open (an update, or the AI chat switched): it opens nothing by itself again.</summary>
+    internal static bool Reopened { get; set; }
 
     private static int _switching;
 

@@ -164,9 +164,12 @@ public sealed class SettingsWindow : Window
             };
             AutomationProperties.SetName(item, tab.Name);
             AutomationProperties.SetHelpText(item, tab.Intro);
+            // With the AI chat off (AiMode) only Updates is shown: the other pages are about the chat. They are still
+            // made, so saving keeps what they hold.
+            if (!CsiProMax.AiMode.On && tab.Key != SettingsLayout.Updates) continue;
             _tabs.Items.Add(item);
         }
-        _tabs.SelectedIndex = SettingsLayout.StartIndex(openTab ?? ReadLastTab());
+        _tabs.SelectedIndex = CsiProMax.AiMode.On ? SettingsLayout.StartIndex(openTab ?? ReadLastTab()) : 0;
         Closed += (_, _) => WriteLastTab((_tabs.SelectedItem as TabItem)?.Tag as string);
 
         // The bar at the foot: always visible, whatever the size of the window or the page.

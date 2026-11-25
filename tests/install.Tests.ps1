@@ -106,6 +106,25 @@ Check ((Get-Content -Raw -LiteralPath (Join-Path $folder 'CsiProMax.dll')) -eq '
 $output = (& $script -Zip $zip2 -Folder $folder -SettingsRoot $settings -NoRuntime *>&1 | Out-String)
 Check ((Get-Content -Raw -LiteralPath $plugin) -eq 'second CsiProMaxPlugin.dll' -and $output -match '2 files added or replaced') 'once it is free, only the changed files are replaced'
 
+# With the AI chat or without it: -NoAI writes "off", a plain run keeps the choice, -WithAI turns it on again.
+$aiFile = Join-Path $root 'state' 'ai.txt'
+$output = (& $script -Zip $zip2 -Folder $folder -SettingsRoot $settings -NoRuntime -NoPlugins -AiFile $aiFile *>&1 | Out-String)
+Check (-not (Test-Path -LiteralPath $aiFile) -and $output -match 'The AI chat is on') 'a first install has the AI chat on, and writes no choice'
+$output = (& $script -Zip $zip2 -Folder $folder -SettingsRoot $settings -NoRuntime -NoPlugins -AiFile $aiFile -NoAI *>&1 | Out-String)
+Check ((Get-Content -Raw -LiteralPath $aiFile) -eq 'off' -and $output -match 'The AI chat is off') '-NoAI: the choice "off" is kept for every version to read'
+Check ($output -match 'Without the AI chat' -and $output -notmatch 'Claude Code on your own Claude plan') '-NoAI: the next steps say nothing of Claude Code'
+Check ((Get-Content -Raw -LiteralPath $plugin) -eq 'second CsiProMaxPlugin.dll' -and $output -notmatch 'not installed') '-NoAI: the same package is installed'
+$output = (& $script -Zip $zip2 -Folder $folder -SettingsRoot $settings -NoRuntime -NoPlugins -AiFile $aiFile *>&1 | Out-String)
+Check ((Get-Content -Raw -LiteralPath $aiFile) -eq 'off' -and $output -match 'The AI chat is off') 'a plain run again keeps the choice (an update does not turn the chat back on)'
+$output = (& $script -Zip $zip2 -Folder $folder -SettingsRoot $settings -NoRuntime -NoPlugins -AiFile $aiFile -WithAI *>&1 | Out-String)
+Check ((Get-Content -Raw -LiteralPath $aiFile) -eq 'on' -and $output -match 'The AI chat is on') '-WithAI turns the chat on again'
+$output = (& $script -Zip $zip2 -Folder $folder -SettingsRoot $settings -NoRuntime -NoPlugins -AiFile $aiFile -WithAI -NoAI *>&1 | Out-String)
+Check ($output -match 'not installed' -and $output -match 'not both') '-NoAI and -WithAI together are refused'
+# install-no-ai.ps1 is the same install with -NoAI: it downloads install.ps1, so here only its text is checked.
+$noAi = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '..' 'install-no-ai.ps1')
+Check ($noAi -match 'raw\.githubusercontent\.com/ahisham92/etabs-promax/main/install\.ps1' -and $noAi -match '-NoAI' -and $null -ne [scriptblock]::Create($noAi)) 'install-no-ai.ps1 runs install.ps1 with -NoAI'
+Check (-not ($noAi -match '[^\x09\x0A\x0D\x20-\x7E]')) 'install-no-ai.ps1 is plain ASCII'
+
 # What is not a package says so.
 $wrong = Join-Path $root 'CsiProMax-0.0.0.zip'
 Compress-Archive -Path (Join-Path $package.FullName 'INSTALL.txt') -DestinationPath $wrong
