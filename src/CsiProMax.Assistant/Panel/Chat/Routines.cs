@@ -68,7 +68,7 @@ internal static class Routines
             "stories with no loads, points with no restraint at the base, and load patterns nothing uses. Don't change the model. " +
             "Report what you found, worst first, with counts and how to fix each.", "02:00"),
         ("Results summary", "If the open model has analysis results, read the base reactions, the periods and the largest story drift per " +
-            "direction from ETABS's tables and write them to an Excel file. Don't run the analysis and don't change the model. " +
+            $"direction from {Csi.Name}'s tables and write them to an Excel file. Don't run the analysis and don't change the model. " +
             "If there are no results, say so.", "03:00"),
     ];
 
@@ -161,7 +161,7 @@ internal static class Routines
     /// <summary>The task as the routine's job gets it: what to do, and that nobody may be there to answer.</summary>
     public static string JobTask(Routine routine, DateTime due, bool catchUp) =>
         $"This is the scheduled routine \"{routine.Name}\" ({Schedule(routine).ToLowerInvariant()}), " +
-        (catchUp ? $"catching up the run of {due:ddd d MMM HH:mm} that was missed while ETABS was closed or busy" : $"the run of {due:ddd d MMM HH:mm}") +
+        (catchUp ? $"catching up the run of {due:ddd d MMM HH:mm} that was missed while {Csi.Name} was closed or busy" : $"the run of {due:ddd d MMM HH:mm}") +
         ". The user may be away, so don't ask questions: do the work and report what you found.\n\n" + routine.Task.Trim();
 
     /// <summary>A run starts: it goes first in the history (the oldest go past <see cref="MaxRuns"/>) and the routine is up to date.</summary>

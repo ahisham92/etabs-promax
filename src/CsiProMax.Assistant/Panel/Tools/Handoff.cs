@@ -105,7 +105,7 @@ public static class Handoff
                 {
                     status = "already with the user",
                     steps = items.Select(i => i.Step.Text).Take(20).ToList(),
-                    next = "The same step is already open in ETABS (a window or a card in the chat) from an earlier run; it carries on there when the user answers. " +
+                    next = $"The same step is already open in {Csi.Name} (a window or a card in the chat) from an earlier run; it carries on there when the user answers. " +
                            "Don't ask again; tell the user to finish it there.",
                 });
             foreach (var key in keys) Holding.Add(key);
@@ -120,7 +120,7 @@ public static class Handoff
             {
                 status = "waiting for the user",
                 steps = items.Select(i => i.Step.Text).Take(20).ToList(),
-                next = $"The user is doing {(items.Count == 1 ? "a step" : $"{items.Count} steps")} in ETABS that only they can do (a window or a card in the chat). " +
+                next = $"The user is doing {(items.Count == 1 ? "a step" : $"{items.Count} steps")} in {Csi.Name} that only they can do (a window or a card in the chat). " +
                        $"Call wait_for_job (job_id {job.Id}) for the result; don't repeat this request or send other model work meanwhile.",
             });
         }
@@ -131,7 +131,7 @@ public static class Handoff
         {
             status = "handed to the user",
             steps = items.Select(i => i.Step.Text).Take(20).ToList(),
-            next = "A window in ETABS shows each step with Continue, Skip this item and Stop; it shows the result when done.",
+            next = $"A window in {Csi.Name} shows each step with Continue, Skip this item and Stop; it shows the result when done.",
         });
     }
 
@@ -153,7 +153,7 @@ public static class Handoff
         // An autopilot: no card that waits for a click; the call comes back as not run, and the worker tries again later.
         if (Chat.Autopilot.Unattended || Chat.Away.On)
         {
-            var line = "ETABS couldn't take a step (" + Chat.JobBoard.OneLine(step.Text, 160) + "); it was tried again later instead of waiting for you.";
+            var line = $"{Csi.Name} couldn't take a step (" + Chat.JobBoard.OneLine(step.Text, 160) + "); it was tried again later instead of waiting for you.";
             if (Chat.Autopilot.Unattended) Chat.Autopilot.Log(Chat.AutopilotEntry.Note, line);
             else Chat.Away.Note(line);
             return false;

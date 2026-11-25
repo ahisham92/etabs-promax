@@ -136,7 +136,7 @@ public static class App
                 using var etabs = System.Diagnostics.Process.GetProcessById(id);
                 return etabs.MainWindowHandle;
             }
-            foreach (var p in System.Diagnostics.Process.GetProcessesByName("ETABS"))
+            foreach (var p in System.Diagnostics.Process.GetProcessesByName(Csi.Program.ProcessName))
                 using (p)
                     if (p.MainWindowHandle != IntPtr.Zero) return p.MainWindowHandle;
         }
@@ -153,6 +153,14 @@ public static class App
         try { ETABSYear = link.Info().Version; } catch (Exception) { }
         try { await Task.Delay(BackgroundDelay, stop).ConfigureAwait(false); }
         catch (OperationCanceledException) { return; }
+        // Tools > CSI ProMax in every CSI program of this user: added where it is missing (a program that had no
+        // settings yet, or was open, when CSI ProMax was installed). What it did goes in the activity log.
+        try
+        {
+            foreach (var entry in CsiProMax.Assistant.ToolsMenu.Repair().Where(e => e.State is not CsiProMax.Assistant.ToolsMenu.State.Already))
+                ActivityLog.Note("tools_menu", entry.Says);
+        }
+        catch (Exception) { /* Help > Tools menu says what is wrong when asked */ }
         // The owner's changes to keys given out (a shorter date, a cancelled key), kept for offline days.
         try { await Licensing.LicenseState.RefreshChangesAsync(stop).ConfigureAwait(false); } catch (Exception) { }
         if (stop.IsCancellationRequested) return;

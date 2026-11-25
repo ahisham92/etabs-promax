@@ -57,7 +57,7 @@ internal static class CrashGuard
         try
         {
             if (e.ExceptionObject is not Exception ex || !Bugs.BugReport.Ours(ex)) return;
-            var line = "ETABS is closing on an unhandled exception from CSI ProMax on a background thread: " + Describe(ex);
+            var line = $"{Csi.Name} is closing on an unhandled exception from CSI ProMax on a background thread: " + Describe(ex);
             Tools.ActivityLog.Note("etabs_closing", line);
         }
         catch (Exception) { }

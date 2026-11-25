@@ -186,7 +186,7 @@ public static class SapTools
             """, Ask.Never, DesignRatios),
 
         new("check_report",
-            "Runs SAP2000's checks in one go and gives one report: modal mass participation, lateral and vertical displacement, base reactions and design ratios. Each part says passes, fails or not available (and why). Reads SAP2000's results only.",
+            "Runs SAP2000's checks in one go and gives one report: modal mass participation, lateral and vertical displacement, base reactions and design ratios. Each part says pass, fail, reported (values with no limit to hold them against) or not available (and why). Reads SAP2000's results only.",
             """
             {"type":"object","properties":{
               "cases":{"type":"array","items":{"type":"string"}},"combinations":{"type":"array","items":{"type":"string"}},
@@ -209,10 +209,10 @@ public static class SapTools
         var info = e.Info();
         var parts = new (string Name, Func<JsonNode> Run, Func<JsonNode, string> Status)[]
         {
-            ("modal", () => ModalResults(default, e), n => n["passes"]?.GetValue<bool>() == true ? "passes" : "fails"),
-            ("displacement", () => CheckDisplacement(a, e), n => n["lateral"]?["passes"]?.GetValue<bool>() == false || n["vertical"]?["passes"]?.GetValue<bool>() == false ? "fails" : "passes"),
-            ("base_reactions", () => BaseReactions(a, e), _ => "reported"),
-            ("design_ratios", () => DesignRatios(default, e), n => n["steel"]?["over_1"] is JsonArray { Count: > 0 } ? "fails" : "reported"),
+            ("modal", () => ModalResults(default, e), n => n["passes"]?.GetValue<bool>() == true ? Verdict.Pass : Verdict.Fail),
+            ("displacement", () => CheckDisplacement(a, e), DisplacementStatus),
+            ("base_reactions", () => BaseReactions(a, e), _ => Verdict.Reported),
+            ("design_ratios", () => DesignRatios(default, e), n => n["steel"]?["over_1"] is JsonArray { Count: > 0 } ? Verdict.Fail : Verdict.Reported),
         };
         var checks = new JsonObject();
         var summary = new JsonArray();
@@ -220,8 +220,12 @@ public static class SapTools
         {
             JsonNode node;
             string state;
-            try { node = run(); state = status(node); node["status"] = state; }
-            catch (Exception ex) when (ex is EtabsException or ToolInputException) { state = "not available"; node = new JsonObject { ["status"] = state, ["note"] = ex.Message }; }
+            // The one rule (Verdict): nothing passes or fails on a model that has not been analysed.
+            if (Verdict.NotAnalysed(e, name.Replace('_', ' ')) is { } notRun) { node = notRun; state = Verdict.NotAvailable; }
+            else
+                try { node = run(); state = status(node); node["status"] = state; }
+                // One check that cannot be made (also a call this version of the API does not have) is said in its place; the others still answer.
+                catch (Exception ex) when (ex is EtabsException or ToolInputException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException) { state = Verdict.NotAvailable; node = new JsonObject { ["status"] = state, ["note"] = ex.Message }; }
             checks[name] = node;
             summary.Add($"{name.Replace('_', ' ')}: {state}");
         }
@@ -231,6 +235,19 @@ public static class SapTools
             ["summary"] = summary, ["checks"] = checks,
             ["note"] = "Every value is read from SAP2000's own analysis and design results. Limits that were not given are the defaults named in each check; confirm them against the project's code.",
         };
+    }
+
+    /// <summary>
+    /// The displacement check's verdict: fail when a limit is passed, pass when a limit was there to hold it against
+    /// and held, and reported (no verdict) when there was no limit at all (a level model has no height for H/500, and
+    /// the vertical limit is only checked when it is given).
+    /// </summary>
+    internal static string DisplacementStatus(JsonNode n)
+    {
+        bool? lateral = n["lateral"]?["allowed"] is null ? null : n["lateral"]?["passes"]?.GetValue<bool>();
+        bool? vertical = n["vertical"]?["allowed"] is null ? null : n["vertical"]?["passes"]?.GetValue<bool>();
+        if (lateral == false || vertical == false) return Verdict.Fail;
+        return lateral == true || vertical == true ? Verdict.Pass : Verdict.Reported;
     }
 
     // ---- Helpers ----

@@ -196,16 +196,16 @@ internal static class PromptBriefs
     // ---- Asking the planner --------------------------------------------------------------------------------------------
 
     /// <summary>The planning run's instructions (added to Claude Code's own system prompt).</summary>
-    public const string PlannerInstructions = """
-        You prepare a brief before CSI ProMax works on an ETABS model, so the user can check it before anything runs.
+    public static string PlannerInstructions => $$"""
+        You prepare a brief before CSI ProMax works on {{Csi.AName}} model, so the user can check it before anything runs.
         You can only read the model now. Nothing you do may change it, and you must not do the task itself.
 
         1. Start from what the message already gives you: the conversation so far, what this chat remembers, and the
            model note (the model's file and the selected objects with their names). Don't read again what they already
-           say. Read only what is missing with the read-only ETABS tools (get_model_context, query_objects, list_tables,
+           say. Read only what is missing with the read-only {{Csi.Name}} tools (get_model_context, query_objects, list_tables,
            read_table) to find the exact stories, sections, load patterns and object counts the request is about: at
            most three calls, none for a follow-up that only finishes or repeats earlier work, and none for a request
-           that is not about the model (a note to remember, a file to read). The ETABS tools are listed by name only:
+           that is not about the model (a note to remember, a file to read). The {{Csi.Name}} tools are listed by name only:
            load the ones you use with ToolSearch in one call
            (select:mcp__csi-promax__get_model_context,mcp__csi-promax__query_objects).
         2. Answer with ONE JSON object and nothing else (no prose, no code fence):
@@ -486,7 +486,7 @@ internal static class PromptBriefs
     {
         var (removed, added) = Diff(brief, edited);
         var sb = new StringBuilder();
-        sb.Append("An ETABS user asked: ").Append(Shorten(request, 500)).Append('\n');
+        sb.Append($"{Csi.ANameCap} user asked: ").Append(Shorten(request, 500)).Append('\n');
         sb.Append("Before running it, they edited the brief that was written for it.\n");
         if (removed.Count > 0) sb.Append("Lines they removed or changed:\n").Append(string.Join("\n", removed.Take(12).Select(l => "- " + Shorten(l, 200)))).Append('\n');
         if (added.Count > 0) sb.Append("Lines they wrote instead:\n").Append(string.Join("\n", added.Take(12).Select(l => "- " + Shorten(l, 200)))).Append('\n');

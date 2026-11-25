@@ -26,6 +26,12 @@ Nothing is an .exe and nothing needs administrator rights. It runs on the .NET 8
 irm https://raw.githubusercontent.com/ahisham92/etabs-promax/main/install.ps1 | iex
 ```
 
+It works with ETABS 18 and later, SAFE 20 and later and SAP2000 20 and later. When it is done, the installer tries for each program what Tools > CSI ProMax does, and says yes or no. If a program does not open CSI ProMax, this line looks at why and prints a text to send back (it changes nothing):
+
+```powershell
+irm https://raw.githubusercontent.com/ahisham92/etabs-promax/main/check.ps1 | iex
+```
+
 By hand, see [docs/INSTALL.txt](docs/INSTALL.txt): copy the folder, add `CsiProMaxPlugin.dll` in ETABS under Tools > Add/Show Plugins, then Tools > CSI ProMax. SAP2000 takes `CsiProMaxSapPlugin.dll` from the same folder (plug-in name `CsiProMaxSapPlugin`). Later versions download by themselves from this repository's releases.
 
 The Modeler starts from the window's View menu, or from a desktop shortcut that the same menu makes.

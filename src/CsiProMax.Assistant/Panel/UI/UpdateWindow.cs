@@ -91,13 +91,13 @@ internal sealed class UpdateWindow : Window
         {
             Chat.ChatPane.PauseForUpdate();
             _pauseJobs.Visibility = Visibility.Collapsed;
-            _next.Text = "The jobs pause once their current step in ETABS is done, the update goes in, and they carry on by themselves.";
+            _next.Text = $"The jobs pause once their current step in {Csi.Name} is done, the update goes in, and they carry on by themselves.";
             _next.Visibility = Visibility.Visible;
         };
         body.Children.Add(Brand.ButtonRow(_cancel, _pauseJobs, _hide, _retry));
 
         var root = new DockPanel();
-        var header = Brand.Header(Product + " update", $"Installed: {Updater.CurrentText}. ETABS stays usable while this runs.");
+        var header = Brand.Header(Product + " update", $"Installed: {Updater.CurrentText}. {Csi.Name} stays usable while this runs.");
         DockPanel.SetDock(header, Dock.Top);
         root.Children.Add(header);
         root.Children.Add(body);
@@ -203,7 +203,7 @@ internal sealed class UpdateWindow : Window
             // A detail on "updated" is the restart note: what of the new version shows only after ETABS restarts.
             UpdateStage.Updated => s.Detail is { } note ? $"Updated to {s.Version}. {note}" : $"Updated to {s.Version}. You can keep working; no restart needed.",
             UpdateStage.UpToDate => s.Detail ?? $"{Product} {Updater.CurrentText} is up to date.",
-            UpdateStage.RestartNeeded => s.Detail ?? "Restart ETABS to finish (your work is not interrupted until then).",
+            UpdateStage.RestartNeeded => s.Detail ?? $"Restart {Csi.Name} to finish (your work is not interrupted until then).",
             UpdateStage.Failed => s.Detail ?? "The update didn't finish. Nothing changed; it is tried again later.",
             UpdateStage.Cancelled => s.Detail ?? "The update was cancelled.",
             UpdateStage.Available => $"{Product} {s.Version} is available. Use Update on the ribbon to install it now.",
@@ -229,8 +229,8 @@ internal sealed class UpdateWindow : Window
                   "and install the release by hand."
                 : "Use Check now in the Updates panel to try again.",
             UpdateStage.Cancelled => canRetry ? "Press Try again to update now, or Close to keep this version." : "",
-            UpdateStage.RestartNeeded => "Save your work, then close and reopen ETABS when it suits you.",
-            UpdateStage.Updated when s.Detail is not null => "You can keep working now. Save your work and restart ETABS when it suits you.",
+            UpdateStage.RestartNeeded => $"Save your work, then close and reopen {Csi.Name} when it suits you.",
+            UpdateStage.Updated when s.Detail is not null => $"You can keep working now. Save your work and restart {Csi.Name} when it suits you.",
             UpdateStage.Downloading or UpdateStage.Checking when _progress is not null =>
                 App.Shared
                 ? "You can keep working. Hide keeps the update running; the Update button brings this window back."

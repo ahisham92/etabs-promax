@@ -20,7 +20,7 @@ public static class ResultTools
             Ask.Never, Overview),
 
         new("check_drift",
-            "Story drift check from ETABS's Story Drifts table: the largest drift ratio per story and direction with its load case, the governing story, and pass or fail against 'limit' when one is given (for example 0.002 or 1/500 as 0.002). Without a limit it reports the values only. The limit depends on the code and the load case, so ask the engineer when it is not known.",
+            $"Story drift check from {Csi.Name}'s Story Drifts table: the largest drift ratio per story and direction with its load case, the governing story, and pass or fail against 'limit' when one is given (for example 0.002 or 1/500 as 0.002). Without a limit it reports the values only. The limit depends on the code and the load case, so ask the engineer when it is not known.",
             """
             {"type":"object","properties":{
               "limit":{"type":"number","description":"Allowed drift ratio, e.g. 0.002. Leave out to report without a verdict."},
@@ -29,7 +29,7 @@ public static class ResultTools
             """, Ask.Never, Drift),
 
         new("check_torsion",
-            "Torsional irregularity check from ETABS's Story Max Over Avg Displacements (or Drifts) table: the largest ratio of maximum to average per story and direction. Above 'irregular' (default 1.2) is torsional irregularity and above 'extreme' (default 1.4) is extreme, the limits most seismic codes use; pass others when the project's code differs.",
+            $"Torsional irregularity check from {Csi.Name}'s Story Max Over Avg Displacements (or Drifts) table: the largest ratio of maximum to average per story and direction. Above 'irregular' (default 1.2) is torsional irregularity and above 'extreme' (default 1.4) is extreme, the limits most seismic codes use; pass others when the project's code differs.",
             """
             {"type":"object","properties":{
               "irregular":{"type":"number"},"extreme":{"type":"number"},
@@ -39,7 +39,7 @@ public static class ResultTools
             """, Ask.Never, Torsion),
 
         new("check_story_irregularity",
-            "Vertical irregularity checks from ETABS's tables. Soft story: a story's lateral stiffness below 'soft' (default 0.7) of the story above or below 'soft_average' (default 0.8) of the average of the three above, from Story Stiffness. Mass: a story's mass above 'mass' (default 1.5) times an adjacent story's, from Mass Summary by Story (the roof is left out). Pass other ratios when the project's code differs.",
+            $"Vertical irregularity checks from {Csi.Name}'s tables. Soft story: a story's lateral stiffness below 'soft' (default 0.7) of the story above or below 'soft_average' (default 0.8) of the average of the three above, from Story Stiffness. Mass: a story's mass above 'mass' (default 1.5) times an adjacent story's, from Mass Summary by Story (the roof is left out). Pass other ratios when the project's code differs.",
             """
             {"type":"object","properties":{
               "soft":{"type":"number"},"soft_average":{"type":"number"},"mass":{"type":"number"},
@@ -47,12 +47,12 @@ public static class ResultTools
             """, Ask.Never, Irregularity),
 
         new("check_modal",
-            "Modal check from ETABS's Modal Participating Mass Ratios table: the periods of the first modes, which direction each moves, and whether the summed mass participation reaches 'min_mass' (default 0.9) in X and Y.",
+            $"Modal check from {Csi.Name}'s Modal Participating Mass Ratios table: the periods of the first modes, which direction each moves, and whether the summed mass participation reaches 'min_mass' (default 0.9) in X and Y.",
             """{"type":"object","properties":{"min_mass":{"type":"number"},"modes":{"type":"integer","description":"How many modes to list (default 6)."}}}""",
             Ask.Never, Modal),
 
         new("design_ratios",
-            "Design check from ETABS's own design summary tables (steel frame, concrete column and beam, shear wall, composite, as the model has them, for the design code set in ETABS): how many members, the largest demand over capacity ratio, and every member above 'limit' (default 1.0) with its story, ratio and governing combination. The design must have been run in ETABS first. Give 'table' to read one summary table only.",
+            $"Design check from {Csi.Name}'s own design summary tables (steel frame, concrete column and beam, shear wall, composite, as the model has them, for the design code set in {Csi.Name}): how many members, the largest demand over capacity ratio, and every member above 'limit' (default 1.0) with its story, ratio and governing combination. The design must have been run in {Csi.Name} first. Give 'table' to read one summary table only.",
             """
             {"type":"object","properties":{
               "limit":{"type":"number"},"table":{"type":"string"},
@@ -156,10 +156,10 @@ public static class ResultTools
         return new { key = table.Key, name = table.Name, empty = table.Empty, fields = data.Fields, rows = data.Rows.Count, first_rows = data.Rows.Take(2).ToList() };
     }
 
-    private static JsonObject Missing(string what, string table) => new()
+    private static JsonObject Missing(ICsiLink e, string what, string table) => new()
     {
-        ["status"] = "not available",
-        ["note"] = $"ETABS's '{table}' table has no data, so {what} could not be checked. Run the analysis (and the design, for design ratios) in ETABS first, with the lateral load cases defined.",
+        ["status"] = Verdict.NotAvailable,
+        ["note"] = $"{e.Program.Name}'s '{table}' table has no data, so {what} could not be checked. Run the analysis (and the design, for design ratios) in {e.Program.Name} first, with the lateral load cases defined.",
     };
 
     // ---- overview and modal ----
@@ -169,8 +169,8 @@ public static class ResultTools
         var known = e.Tables();
         var result = new JsonObject { ["locked"] = e.Info().Locked };
         result["modal"] = ModalCore(e, known, a, 0.9, 3);
-        var reactions = Read(e, known, a, true, "Base Reactions");
-        if (reactions is null) result["base_reactions"] = Missing("the base reactions", "Base Reactions");
+        var reactions = e.Info().Locked ? Read(e, known, a, true, "Base Reactions") : null;
+        if (reactions is null) result["base_reactions"] = Verdict.NotAnalysed(e, "the base reactions") ?? Missing(e, "the base reactions", "Base Reactions");
         else
         {
             var f = reactions.Fields;
@@ -188,7 +188,7 @@ public static class ResultTools
             result["base_reactions"] = rows;
         }
         var withData = known.Where(t => !t.Empty).Select(t => t.Name).ToList();
-        result["result_tables_with_data"] = new JsonArray(withData.Where(n => IsResultTable(n)).Take(60).Select(n => (JsonNode)n).ToArray());
+        result["result_tables_with_data"] = new JsonArray(withData.Where(n => IsResultTable(n) && !Verdict.IsInputTable(n)).Take(60).Select(n => (JsonNode)n).ToArray());
         result["design_tables_with_data"] = new JsonArray(withData.Where(IsDesignSummary).Take(40).Select(n => (JsonNode)n).ToArray());
         var info = e.Info();
         result["units"] = $"{info.Force}, {info.Length}";
@@ -207,8 +207,9 @@ public static class ResultTools
     private static JsonObject ModalCore(ICsiLink e, IReadOnlyList<TableName> known, JsonElement a, double minMass, int list)
     {
         const string table = "Modal Participating Mass Ratios";
+        if (Verdict.NotAnalysed(e, "the modes") is { } notRun) return notRun;
         var data = Read(e, known, default, false, table);
-        if (data is null) return Missing("the modes", table);
+        if (data is null) return Missing(e, "the modes", table);
         return ModalCheck(data, minMass, list);
     }
 
@@ -234,7 +235,7 @@ public static class ResultTools
         var ok = sumX >= minMass && sumY >= minMass;
         var result = new JsonObject
         {
-            ["status"] = ok ? "pass" : "fail",
+            ["status"] = Verdict.From(count, ok ? 0 : 1),
             ["modes_in_table"] = count,
             ["sum_mass_x"] = R(sumX, 4), ["sum_mass_y"] = R(sumY, 4), ["min_mass"] = minMass,
             ["modes"] = modes,
@@ -246,16 +247,17 @@ public static class ResultTools
 
     private static JsonObject Unreadable(TableData data, string table, string field) => new()
     {
-        ["status"] = "not available",
-        ["note"] = $"ETABS's '{table}' table has no '{field}' field in this version. Its fields: {string.Join(", ", data.Fields)}. Read it with read_table instead.",
+        ["status"] = Verdict.NotAvailable,
+        ["note"] = $"The '{table}' table has no '{field}' field in this version. Its fields: {string.Join(", ", data.Fields)}. Read it with read_table instead.",
     };
 
     // ---- drift ----
 
     private static JsonNode Drift(JsonElement a, ICsiLink e)
     {
+        if (Verdict.NotAnalysed(e, "the drift") is { } notRun) return notRun;
         var data = Read(e, e.Tables(), a, true, "Story Drifts");
-        if (data is null) return Missing("the drift", "Story Drifts");
+        if (data is null) return Missing(e, "the drift", "Story Drifts");
         double? limit = a.ValueKind == JsonValueKind.Object && a.TryGetProperty("limit", out var l) && l.ValueKind == JsonValueKind.Number ? l.GetDouble() : null;
         if (limit is <= 0) throw new ToolInputException("'limit' is a drift ratio above 0, e.g. 0.002.");
         return DriftCheck(data, limit, e.Stories().Select(s => s.Name).ToList());
@@ -305,8 +307,9 @@ public static class ResultTools
     {
         var drifts = a.Text("use", "displacements") == "drifts";
         var names = drifts ? new[] { "Story Max Over Avg Drifts", "Story Max/Avg Drifts" } : new[] { "Story Max Over Avg Displacements", "Story Max/Avg Displacements" };
+        if (Verdict.NotAnalysed(e, "torsion") is { } notRun) return notRun;
         var data = Read(e, e.Tables(), a, true, names);
-        if (data is null) return Missing("torsion", names[0]);
+        if (data is null) return Missing(e, "torsion", names[0]);
         return TorsionCheck(data, a.Number("irregular", 1.2), a.Number("extreme", 1.4), names[0]);
     }
 
@@ -343,17 +346,18 @@ public static class ResultTools
 
     private static JsonNode Irregularity(JsonElement a, ICsiLink e)
     {
+        if (Verdict.NotAnalysed(e, "the story stiffness and mass") is { } notRun) return notRun;
         var known = e.Tables();
         var order = e.Stories().Skip(1).Select(s => s.Name).Reverse().ToList(); // top first
         var stiffness = Read(e, known, a, true, "Story Stiffness");
         var mass = Read(e, known, default, false, "Mass Summary by Story", "Mass Summary By Story");
         var result = new JsonObject
         {
-            ["soft_story"] = stiffness is null ? Missing("the story stiffness", "Story Stiffness") : SoftStoryCheck(stiffness, order, a.Number("soft", 0.7), a.Number("soft_average", 0.8)),
-            ["mass"] = mass is null ? Missing("the story masses", "Mass Summary by Story") : MassCheck(mass, order, a.Number("mass", 1.5)),
+            ["soft_story"] = stiffness is null ? Missing(e, "the story stiffness", "Story Stiffness") : SoftStoryCheck(stiffness, order, a.Number("soft", 0.7), a.Number("soft_average", 0.8)),
+            ["mass"] = mass is null ? Missing(e, "the story masses", "Mass Summary by Story") : MassCheck(mass, order, a.Number("mass", 1.5)),
         };
         var states = new[] { result["soft_story"]!["status"]!.GetValue<string>(), result["mass"]!["status"]!.GetValue<string>() };
-        result["status"] = states.Contains("fail") ? "fail" : states.All(s => s == "pass") ? "pass" : "not available";
+        result["status"] = states.Contains(Verdict.Fail) ? Verdict.Fail : states.All(s => s == Verdict.Pass) ? Verdict.Pass : Verdict.NotAvailable;
         return result;
     }
 
@@ -430,6 +434,7 @@ public static class ResultTools
 
     private static JsonNode DesignRatios(JsonElement a, ICsiLink e)
     {
+        if (Verdict.NotAnalysed(e, "the design") is { } notRun) return notRun;
         var known = e.Tables();
         var asked = a.Text("table");
         var limit = a.Number("limit", 1.0);
@@ -454,8 +459,8 @@ public static class ResultTools
             over += one["over_limit"]!.GetValue<int>();
         }
         if (results.Count == 0)
-            return new JsonObject { ["status"] = "not available", ["note"] = "No design summary table has ratios. Run the design in ETABS first (Design menu), then ask again. list_tables with contains 'Summary' shows what exists." };
-        return new JsonObject { ["status"] = over == 0 ? "pass" : "fail", ["limit"] = limit, ["max_ratio"] = R(top, 3), ["members_over_limit"] = over, ["tables"] = results };
+            return new JsonObject { ["status"] = Verdict.NotAvailable, ["note"] = $"No design summary table has ratios. Run the design in {e.Program.Name} first (Design menu), then ask again. list_tables with contains 'Summary' shows what exists." };
+        return new JsonObject { ["status"] = Verdict.From(results.Count, over), ["limit"] = limit, ["max_ratio"] = R(top, 3), ["members_over_limit"] = over, ["tables"] = results };
     }
 
     /// <summary>One design summary table: null when it has no ratio field.</summary>
@@ -517,15 +522,15 @@ public static class ResultTools
         {
             JsonNode node;
             try { node = run(); }
-            catch (Exception ex) when (ex is EtabsException or ToolInputException) { node = new JsonObject { ["status"] = "not available", ["note"] = ex.Message }; }
+            catch (Exception ex) when (ex is EtabsException or ToolInputException) { node = new JsonObject { ["status"] = Verdict.NotAvailable, ["note"] = ex.Message }; }
             checks[name] = node;
-            summary.Add($"{name.Replace('_', ' ')}: {node["status"]?.GetValue<string>() ?? "reported"}");
+            summary.Add($"{name.Replace('_', ' ')}: {node["status"]?.GetValue<string>() ?? Verdict.Reported}");
         }
         return new JsonObject
         {
-            ["model"] = info.File, ["units"] = $"{info.Force}, {info.Length}", ["analysis_run"] = info.Locked,
+            ["program"] = e.Program.Name, ["model"] = info.File, ["units"] = $"{info.Force}, {info.Length}", ["analysis_run"] = info.Locked,
             ["summary"] = summary, ["checks"] = checks,
-            ["note"] = "Every value is read from ETABS's own result tables. Limits that were not given are the defaults named in each check; confirm them against the project's code.",
+            ["note"] = $"Every value is read from {e.Program.Name}'s own result tables. Limits that were not given are the defaults named in each check; confirm them against the project's code.",
         };
     }
 

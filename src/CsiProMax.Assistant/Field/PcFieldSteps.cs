@@ -21,7 +21,23 @@ public static class PcFieldSteps
     /// <param name="install">The folder CsiProMax.dll is in.</param>
     /// <param name="plugInLists">The [PlugIn] part of each CSI program's settings file (FieldTest.PlugInLists).</param>
     /// <param name="writes">Folders the test itself writes to (the report's, the work folder), checked with the rest.</param>
-    public static void Run(FieldContext ctx, string install, IReadOnlyList<(string File, string Section)> plugInLists, IReadOnlyList<string> writes)
+    /// <param name="menus">What ToolsMenu.Repair found in each program's plug-in list, after putting right what it may.</param>
+    /// <summary>One step for each program that lists CSI ProMax: its plug-in can be created, or why not.</summary>
+    internal static void PlugIn(FieldContext ctx, PlugInCheck.Result? check)
+    {
+        if (check is null) { ctx.Skip("each program can create its CSI ProMax plug-in", $"{PlugInCheck.FileName} is not beside CsiProMax.dll, or this PC has no Windows PowerShell, so it was not tried. Run the install line again to get it."); return; }
+        if (check.Programs.Count == 0) { ctx.Note("each program can create its CSI ProMax plug-in", check.Text.Length > 0 ? check.Text : "no program was found to try"); return; }
+        foreach (var found in check.Programs.Where(p => p.Listed))
+            ctx.Step($"{found.Program} can create the CSI ProMax plug-in (what Tools > CSI ProMax does)", () =>
+            {
+                FieldContext.Expect(found.Reasons.Count == 0 && found.Loads != false, $"{found.Program} cannot open CSI ProMax: {string.Join(" ", found.Reasons)}");
+                if (found.Loads is null) throw new FieldSkipException($"it could not be tried on this PC for a program on {found.Runtime}");
+                return $"created, on {found.Runtime}";
+            });
+        ctx.Note("the plug-in check's own report", check.Text);
+    }
+
+    public static void Run(FieldContext ctx, string install, IReadOnlyList<(string File, string Section)> plugInLists, IReadOnlyList<string> writes, IReadOnlyList<ToolsMenu.Entry>? menus = null)
     {
         ctx.Section(Section);
         var windows = OperatingSystem.IsWindows();
@@ -59,10 +75,23 @@ public static class PcFieldSteps
                 });
         }
 
+        // Tools > CSI ProMax in every program of this user, each version by itself: one that is missing is a failure
+        // that says why it could not be added (the program is open, or it has other plug-ins) and what to do.
+        foreach (var entry in menus ?? [])
+            ctx.Step($"Tools > CSI ProMax in {entry.Label}", () =>
+            {
+                FieldContext.Expect(entry.Listed, entry.Says);
+                return entry.Says;
+            });
+
+        // The entry being there is not enough: the program must be able to create the plug-in when it is picked
+        // (0.4.4 was listed in ETABS 20 and could not be created). Tried here as the program does it.
+        PlugIn(ctx, PlugInCheck.Run(install));
+
         // The plug-in lists: what makes Tools > CSI ProMax appear in each program.
-        var ours = plugInLists.Where(l => Regex.IsMatch(l.File, @"^(ETABS|SAFE|SAP2000) ", RegexOptions.IgnoreCase)).ToList();
+        var ours = plugInLists.Where(l => Regex.IsMatch(l.File, @"^(ETABS|SAFE|SAP2000) ", RegexOptions.IgnoreCase)).ToList(); // ETABS itself
         if (ours.Count == 0)
-            ctx.Skip("the programs' plug-in lists", "No ETABS, SAFE or SAP2000 has kept a plug-in list for this Windows user yet. Open the program once, close it, and run the install line again; or add the plug-in in the program under Tools > Add/Show Plugins.");
+            ctx.Skip("the programs' plug-in lists", "No ETABS, SAFE or SAP2000 has kept a plug-in list for this Windows user yet. Open the program once, close it, and run the install line again; or add the plug-in in the program under Tools > Add/Show Plugins."); // ETABS itself
         foreach (var (file, section) in ours)
             ctx.Step($"plug-in list {file}", () =>
             {
@@ -70,7 +99,8 @@ public static class PcFieldSteps
                 var wanted = PlugIns[program.Key];
                 var paths = Regex.Matches(section, @"(?im)^\s*PlugInPath\w*\s*=\s*(.+?)\s*$").Select(m => m.Groups[1].Value.Trim().Trim('"')).ToList();
                 var mine = paths.Where(p => p.Contains("CsiProMax", StringComparison.OrdinalIgnoreCase)).ToList();
-                FieldContext.Expect(mine.Count > 0, $"CSI ProMax is not in {program.Name}'s plug-in list ({paths.Count} plug-ins are). With {program.Name} closed, run the install line again; or add it in {program.Name}: Tools > Add/Show Plugins, file {wanted}.");
+                if (mine.Count == 0 && menus is { Count: > 0 }) throw new FieldSkipException($"CSI ProMax is not in this list: the step 'Tools > CSI ProMax in {file.Split('\\')[0]}' says why and what to do");
+                FieldContext.Expect(mine.Count > 0, $"CSI ProMax is not in {program.Name}'s plug-in list ({paths.Count} plug-ins are). With {program.Name} closed, open CSI ProMax again (it adds itself); or add it in {program.Name}: Tools > Add/Show Plugins, file {wanted}.");
                 var wrong = mine.Where(p => !Path.GetFileName(p.Replace('\\', '/')).Equals(wanted, StringComparison.OrdinalIgnoreCase)).ToList();
                 FieldContext.Expect(wrong.Count == 0, $"{program.Name} needs {wanted}, and its list names {string.Join(", ", wrong)}");
                 var gone = mine.Where(p => !File.Exists(p)).ToList();

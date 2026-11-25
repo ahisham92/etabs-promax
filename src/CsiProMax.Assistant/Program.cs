@@ -48,10 +48,13 @@ public static class Program
         int? etabsPid = Array.IndexOf(args, "--etabs-pid") is var at and >= 0 && at + 1 < args.Length && int.TryParse(args[at + 1], out var pid) ? pid : null;
         // The CSI program this was started from: named by the plug-in, or told from the process. ETABS when neither says.
         var program = (Array.IndexOf(args, "--program") is var named and >= 0 && named + 1 < args.Length ? CsiProgram.Find(args[named + 1]) : null) ?? CsiProgram.OfProcess(etabsPid);
+        // Every text names the program the window works beside (Csi.Name), so it is told before anything else is made.
+        Csi.Program = program;
+        if (Array.IndexOf(args, "--installed-in") is var origin and >= 0 && origin + 1 < args.Length) ToolsMenu.InstalledIn = args[origin + 1];
         if (!program.Ready)
         {
             if (OperatingSystem.IsWindows())
-                MessageBoxW(IntPtr.Zero, $"CSI ProMax for {program.Name} is not built yet. It works with ETABS today; {program.Name} is planned.", "CSI ProMax", 0x40);
+                MessageBoxW(IntPtr.Zero, $"CSI ProMax for {program.Name} is not built yet. It works with {CsiProgram.Etabs.Name} today; {program.Name} is planned.", "CSI ProMax", 0x40);
             return 3;
         }
         var modeler = args.Contains("--modeler");
@@ -90,6 +93,9 @@ public static class Program
                 info.ArgumentList.Add(Path.Combine(newer, "CsiProMax.dll"));
                 foreach (var a in args) info.ArgumentList.Add(a);
                 info.ArgumentList.Add("--this-version");
+                // The newer version is told where the installed one is: the Tools menus name the plug-in files there.
+                info.ArgumentList.Add("--installed-in");
+                info.ArgumentList.Add(AppContext.BaseDirectory);
                 try { Process.Start(info)?.Dispose(); return 0; }
                 catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or InvalidOperationException) { /* this version runs */ }
             }

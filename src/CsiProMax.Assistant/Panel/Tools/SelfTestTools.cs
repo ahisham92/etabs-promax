@@ -7,7 +7,7 @@ public sealed class RunSelfTestTool(ToolRegistry registry) : IEtabsTool
 {
     public string Name => "run_self_test";
     public string Description =>
-        "Check that CSI ProMax can talk to the open ETABS model: runs each reading call once (stories, frames, " +
+        $"Check that CSI ProMax can talk to the open {Csi.Name} model: runs each reading call once (stories, frames, " +
         "areas, points, sections, materials, load patterns, cases, combinations, tables, selection) and reports " +
         "which worked. Changes nothing in the model. Use it when something seems broken, or when the user asks " +
         "whether everything works.";
@@ -34,7 +34,7 @@ public sealed class RunFieldTestTool : IEtabsTool
     public string Description =>
         "Run the field test and save its report for the user to send to whoever gave them CSI ProMax. scope \"full\" " +
         "(the default) tests everything: this PC and the install, the open model (reading only), every Modeler tool, then " +
-        "a second window of each CSI program on this PC (ETABS, SAP2000, SAFE) opened by the test on its own scratch " +
+        "a second window of each CSI program on this PC (ETABS, SAP2000, SAFE) opened by the test on its own scratch " + // ETABS itself
         "model, where every tool and check is run with each change read back (the analysis and design too), CSI " +
         "ProMax's own features, and each window is closed without saving. It never changes the open model. It can take " +
         "up to an hour and runs in the background: it answers at once, a message on the screen says when it is done, " +

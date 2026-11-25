@@ -20,5 +20,5 @@ internal static class ProgramPrompt
 
     /// <summary>The shared prompt in the program's own words: "SAFE" where it says "ETABS", for a program that is not ETABS.</summary>
     public static string Reword(string text, CsiProgram program) =>
-        program.Key == CsiProgram.Etabs.Key ? text : text.Replace("CSI ETABS", "CSI " + program.Name, StringComparison.Ordinal).Replace("ETABS", program.Name, StringComparison.Ordinal);
+        program.Key == CsiProgram.Etabs.Key ? text : text.Replace("CSI ETABS", "CSI " + program.Name, StringComparison.Ordinal).Replace("ETABS", program.Name, StringComparison.Ordinal); // ETABS itself
 }

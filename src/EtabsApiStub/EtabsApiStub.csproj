@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- Build-time stand-in for ETABS's API file, ETABSv1.dll: only the three types a plug-in must name, with the same
+  <!-- Build-time stand-in for ETABS's API file, ETABSv1.dll: only the two types a plug-in may name (what the oldest version has), with the same
        assembly name, version and public key (the public half only, which anyone can read from ETABSv1.dll), so the
        plug-in binds to the real ETABSv1.dll inside ETABS. This file is never shipped and holds no code of CSI's. -->
   <PropertyGroup>

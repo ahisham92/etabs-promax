@@ -64,7 +64,7 @@ internal sealed record CrewNames(string You, string Coordinator, IReadOnlyList<s
     public string Line() =>
         $"Your crew (the names on the crew strip the user sees, and uses when talking to you): you are {Coordinator}, the coordinator; " +
         $"{You} is the user; the workers {string.Join(", ", Workers)} each take one of your jobs (a job keeps its worker, and " +
-        $"chat_jobs list names the worker of each job); {Applier} applies the jobs' changes in ETABS, one at a time. When the user " +
+        $"chat_jobs list names the worker of each job); {Applier} applies the jobs' changes in {Csi.Name}, one at a time. When the user " +
         "names one of them, they mean that worker and the job it holds or held.";
 }
 
@@ -442,7 +442,7 @@ internal sealed class CrewPlan
     {
         var text = (now ?? "").Trim();
         if (text.StartsWith("Running: ", StringComparison.Ordinal)) text = text.Substring("Running: ".Length);
-        var cut = text.IndexOf(" If ETABS asks", StringComparison.Ordinal);
+        var cut = text.IndexOf($" If {Csi.Name} asks", StringComparison.Ordinal);
         if (cut > 0) text = text.Substring(0, cut);
         text = text.TrimEnd('…', '.', ' ');
         if (text.Length == 0 || text == "Starting") return text.Length == 0 ? "" : "Getting started";

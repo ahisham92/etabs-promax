@@ -99,8 +99,8 @@ internal sealed class CrewPerformanceWindow : Window
         var together = used <= 0 ? 0 : used / Math.Max(1, used - saved);
         _body.Children.Add(Table("Coordinator", ["", "Turns", "Jobs handed out", "Workers at once", "Tokens", "Cost"],
             [[names.Coordinator, coordinator.Turns.ToString(), coordinator.JobsHandedOut.ToString(), together.ToString("0.0"), CrewStats.Tokens(coordinator.In + coordinator.Out), CrewStats.Dollars(coordinator.Usd)]]));
-        _body.Children.Add(Heading($"{names.Applier} (applies changes in ETABS)"));
-        _body.Children.Add(Table("Applier", ["", "Changes applied", "Time in ETABS", "Per change"],
+        _body.Children.Add(Heading($"{names.Applier} (applies changes in {Csi.Name})"));
+        _body.Children.Add(Table("Applier", ["", "Changes applied", $"Time in {Csi.Name}", "Per change"],
             [[names.Applier, applier.Changes.ToString(), CrewStats.Duration(applier.Seconds), applier.Changes == 0 ? "-" : CrewStats.Duration(applier.Seconds / applier.Changes)]]));
         var note = Brand.Text("Workers at once: how many worked side by side on average while any of them worked. Costs are the API equivalent Claude Code reports; on your plan you pay the plan, not these.", Brand.K.Muted, size: 11);
         note.Margin = new Thickness(0, 12, 0, 0);

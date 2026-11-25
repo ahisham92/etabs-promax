@@ -242,7 +242,7 @@ internal sealed partial class ChatPane
             }
             else if (pending)
             {
-                row.Children.Add(Pill("Run this", true, "Runs the brief above, with your answers. Running it approves the task: its steps don't ask again in ETABS, except risky ones.", () => Choose(item, brief, BriefChoice.RunBrief, null, Render)));
+                row.Children.Add(Pill("Run this", true, $"Runs the brief above, with your answers. Running it approves the task: its steps don't ask again in {Csi.Name}, except risky ones.", () => Choose(item, brief, BriefChoice.RunBrief, null, Render)));
                 row.Children.Add(Pill("Edit", false, "Opens the brief as text to change before running it.", () => { editing = true; Render(); }));
                 row.Children.Add(Pill("Run as I typed", false, "Runs your message exactly as you typed it, without the brief.", () => Choose(item, brief, BriefChoice.RunAsTyped, null, Render)));
             }

@@ -206,7 +206,7 @@ public static class Jobs
         if (j.Task is null)
         {
             if (now - j.Queued < LostAfter) return true;
-            j.FailBeforeStart("The call never reached ETABS (it was cut off, for example by an update switch).");
+            j.FailBeforeStart($"The call never reached {Csi.Name} (it was cut off, for example by an update switch).");
             return false;
         }
         return !j.Task.IsCompleted;
@@ -255,7 +255,7 @@ public static class Jobs
 
     internal static string Describe(Job job)
     {
-        var state = job.Task?.IsCompleted == true ? "finished" : job.Started is null ? "waiting for ETABS" : "running";
+        var state = job.Task?.IsCompleted == true ? "finished" : job.Started is null ? $"waiting for {Csi.Name}" : "running";
         return $"job {job.Id} ({job.Tool}, {state}, {Duration(job.Elapsed)})";
     }
 
@@ -265,8 +265,8 @@ public static class Jobs
     /// <summary>The answer for a call that can't run because another job is: what is running and what to do.</summary>
     internal static ToolResult Busy(Job? running) => ToolResult.Error(
         (running is null
-            ? "ETABS is busy finishing an earlier request."
-            : $"ETABS is still running {Describe(running)}.{(running.Progress() is { } p ? $" Progress: {p}" : "")}") +
+            ? $"{Csi.Name} is busy finishing an earlier request."
+            : $"{Csi.Name} is still running {Describe(running)}.{(running.Progress() is { } p ? $" Progress: {p}" : "")}") +
         " Call wait_for_job to wait for it and get its result, or cancel_job to ask it to stop. Don't send other model work meanwhile.");
 
     /// <summary>A job's state as a tool result: its own result once finished, otherwise how it is getting on.</summary>
@@ -274,21 +274,21 @@ public static class Jobs
     {
         if (job.Task is { IsCompleted: true } done)
         {
-            if (done.IsCanceled) return ToolResult.Error($"Job {job.Id} ({job.Tool}) was {(job.DropReason is { } reason ? "dropped before ETABS started it: " + reason : "cancelled before ETABS started it.")} Nothing was changed; call it again if it is still needed.");
+            if (done.IsCanceled) return ToolResult.Error($"Job {job.Id} ({job.Tool}) was {(job.DropReason is { } reason ? $"dropped before {Csi.Name} started it: " + reason : $"cancelled before {Csi.Name} started it.")} Nothing was changed; call it again if it is still needed.");
             if (done.IsFaulted) return ToolResult.Error($"Job {job.Id} ({job.Tool}) failed: {done.Exception?.GetBaseException().Message}");
             var r = done.Result;
             return r with { Text = $"Job {job.Id} ({job.Tool}) finished after {Duration(job.Elapsed)}{(job.CancelRequested ? " (stop was requested)" : "")}:\n{r.Text}" };
         }
         if (job.Abandoned)
-            return ToolResult.Error($"Job {job.Id} ({job.Tool}) was dropped before ETABS started it{(job.DropReason is { } why ? ": " + why : ".")} Nothing was changed; call it again if it is still needed.");
+            return ToolResult.Error($"Job {job.Id} ({job.Tool}) was dropped before {Csi.Name} started it{(job.DropReason is { } why ? ": " + why : ".")} Nothing was changed; call it again if it is still needed.");
         return ToolResult.Ok(new
         {
             job = job.Id, tool = job.Tool,
-            status = job.Started is null ? "waiting for ETABS to start it" : "running",
+            status = job.Started is null ? $"waiting for {Csi.Name} to start it" : "running",
             elapsed = Duration(job.Elapsed),
             stopRequested = job.CancelRequested ? true : (bool?)null,
             progress = job.Progress(),
-            next = "Call wait_for_job again to keep waiting. ETABS can't take other model work until it finishes.",
+            next = $"Call wait_for_job again to keep waiting. {Csi.Name} can't take other model work until it finishes.",
         });
     }
 }
@@ -299,7 +299,7 @@ public sealed class WaitForJobTool : IEtabsTool
     public string Name => "wait_for_job";
     public string Description =>
         "Get the result of a long tool call that was still running when its call returned (it said 'still running as job N'), " +
-        "or see what ETABS is busy with. Waits up to wait_seconds for the job to finish, then returns its result, or its " +
+        $"or see what {Csi.Name} is busy with. Waits up to wait_seconds for the job to finish, then returns its result, or its " +
         "progress so far if it is still running. Call again to keep waiting.";
     public string PropertiesJson => """
     {
@@ -315,7 +315,7 @@ public sealed class WaitForJobTool : IEtabsTool
     internal static ToolResult Answer(ToolArgs args, bool waited)
     {
         var job = Jobs.Find(args.OptLong("job_id") is { } id ? (int)id : null);
-        if (job is null) return ToolResult.Ok(new { status = "no jobs", note = "No tool call has run in this ETABS session yet (or that job number is too old)." });
+        if (job is null) return ToolResult.Ok(new { status = "no jobs", note = $"No tool call has run in this {Csi.Name} session yet (or that job number is too old)." });
         return Jobs.Status(job);
     }
 
@@ -337,9 +337,9 @@ public sealed class CancelJobTool : IEtabsTool
 {
     public string Name => "cancel_job";
     public string Description =>
-        "Ask a long-running tool call to stop. A job still waiting for ETABS is dropped. A running one stops at its next " +
+        $"Ask a long-running tool call to stop. A job still waiting for {Csi.Name} is dropped. A running one stops at its next " +
         "check: batch tools stop between items (what is done so far is kept as one Undo step), and run_etabs_code / " +
-        "run_etabs_query_code stop at the next step of any loop or lambda (checks are added to the code by themselves). ETABS itself can't be interrupted in the middle of " +
+        $"run_etabs_query_code stop at the next step of any loop or lambda (checks are added to the code by themselves). {Csi.Name} itself can't be interrupted in the middle of " +
         "one API call (a regeneration, a big boolean), so that part always runs to the end.";
     public string PropertiesJson => """
     {

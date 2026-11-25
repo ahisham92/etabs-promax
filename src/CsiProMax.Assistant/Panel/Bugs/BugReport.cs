@@ -61,9 +61,9 @@ internal static class BugReport
         md.AppendLine();
         md.AppendLine($"- Reported: {now:yyyy-MM-dd HH:mm} (local time), from {from}");
         md.AppendLine($"- CSI ProMax: {Update.Updater.CurrentText}");
-        md.AppendLine($"- ETABS: {(App.ETABSYear.Length > 0 ? App.ETABSYear : "version not read")}{(App.Demo ? " (demo model, no ETABS)" : "")}");
+        md.AppendLine($"- {Csi.Name}: {(App.ETABSYear.Length > 0 ? App.ETABSYear : "version not read")}{(App.Demo ? $" (demo model, no {Csi.Name})" : "")}");
         md.AppendLine($"- Model: {model}" + (view.Length > 0 ? $", view: {view}" : ""));
-        md.AppendLine($"- Screenshot: {(shot.Jpeg is not null ? "screenshot.jpg (ETABS's main window)" : "none (" + shot.Error + ")")}");
+        md.AppendLine($"- Screenshot: {(shot.Jpeg is not null ? $"screenshot.jpg ({Csi.Name}'s main window)" : "none (" + shot.Error + ")")}");
         md.AppendLine($"- Activity: the last {activity.Count} tool calls in activity.jsonl ({failed} did not work), oldest first");
         md.AppendLine();
         string assemblies;
@@ -211,7 +211,7 @@ internal static class BugReport
             : "Documents\\CSI ProMax\\Bugs\\Reports";
         var window = new InputsWindow(App.Shared ? "Report a problem" : "Report bug",
             App.Shared ? "One small zip for the person who shared these tools." : "One small zip for the CSI ProMax developer.",
-            "Say in one line what went wrong. The report also holds a picture of the ETABS window, the versions, the model's name, " +
+            $"Say in one line what went wrong. The report also holds a picture of the {Csi.Name} window, the versions, the model's name, " +
             "the last tool calls and their errors. Nothing goes over the internet: the zip is saved in " + where + "." +
             (App.Shared ? " A copy also goes to the shared tools' update folder when this PC can reach it." : ""),
             [],
@@ -256,8 +256,8 @@ public sealed class ReportBugTool : IEtabsTool
     public string Name => "report_bug";
     public string Description =>
         "File a CSI ProMax bug report when the user says something is a bug (\"that's a bug\", \"report this\"). Writes ONE " +
-        "small zip to Documents\\CSI ProMax\\Bugs\\Reports with the description, a picture of the ETABS window, add-in and " +
-        "ETABS versions, the model name, the last 50 tool calls with their errors and the loaded-assemblies report. Nothing is " +
+        $"small zip to Documents\\CSI ProMax\\Bugs\\Reports with the description, a picture of the {Csi.Name} window, add-in and " +
+        $"{Csi.Name} versions, the model name, the last 50 tool calls with their errors and the loaded-assemblies report. Nothing is " +
         "sent anywhere; the user sends the zip. Write the description yourself from the conversation: one plain line saying " +
         "what the user did, what happened and what they expected, with the tool name. Read-only on the model.";
     public string PropertiesJson => """

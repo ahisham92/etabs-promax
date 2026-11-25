@@ -212,7 +212,7 @@ internal sealed class LicenseManagerWindow : Window
         var pending = e.PendingChange.Length > 0;
         var token = ChangesPublisher.HasToken;
         _pending.Text = !pending ? "" : token
-            ? "This key still works on that PC until the change is published. Click Publish now (their PC picks it up at its next ETABS start)."
+            ? $"This key still works on that PC until the change is published. Click Publish now (their PC picks it up at its next {Csi.Name} start)."
             : $"This key still works on that PC until the change is published. Add your GitHub token below to publish from here, or send this line in the CSI ProMax project: license change: {e.PendingChange}";
         _pending.Visibility = _published.Visibility = pending ? Visibility.Visible : Visibility.Collapsed;
         _copyLine.Visibility = pending && !token ? Visibility.Visible : Visibility.Collapsed;
@@ -270,13 +270,13 @@ internal sealed class LicenseManagerWindow : Window
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Error($"The list couldn't be saved ({ex.Message})."); return; }
         Fill(e.Id);
         if (!ChangesPublisher.HasToken) { Info("Cancelled here. Copy the line below and send it in the CSI ProMax project to publish it."); return; }
-        if (await PublishEntry(e)) Info($"{e.Name}'s key is cancelled and published. It stops working the next time ETABS starts on their PC.");
+        if (await PublishEntry(e)) Info($"{e.Name}'s key is cancelled and published. It stops working the next time {Csi.Name} starts on their PC.");
     }
 
     private async Task Publish()
     {
         if (Current() is not { } e || e.PendingChange.Length == 0) return;
-        if (await PublishEntry(e)) Info("Published. Their PC applies it the next time ETABS starts there.");
+        if (await PublishEntry(e)) Info($"Published. Their PC applies it the next time {Csi.Name} starts there.");
     }
 
     /// <summary>Publishes <paramref name="e"/>'s pending change; true when done (an error is shown otherwise).</summary>

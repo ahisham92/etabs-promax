@@ -1140,7 +1140,7 @@ internal sealed partial class ChatPane
         }
         _recoverChecked = true;
         if (Run is not { Active: true } run) return;
-        var why = orphan.Why.Length > 0 ? orphan.Why + "." : "ETABS closed unexpectedly and was started again.";
+        var why = orphan.Why.Length > 0 ? orphan.Why + "." : $"{Csi.Name} closed unexpectedly and was started again.";
         AutopilotShare.Beat(Autopilot.RunId(_conv.Id, run), DateTime.UtcNow); // this ETABS runs it now
         TakeSharedLog(run);
         if (!orphan.Relaunched && run.State == AutopilotRun.Running)
@@ -1148,9 +1148,9 @@ internal sealed partial class ChatPane
             // The user opened ETABS (no restart they said yes to): they are at the computer, so the run waits for them.
             run.State = AutopilotRun.Paused;
             run.PausedUntil = null;
-            run.PauseWhy = "ETABS was opened again by you.";
-            AutopilotLog(AutopilotEntry.Paused, "ETABS closed unexpectedly and you opened it again: paused until you press Resume.");
-            Note("Autopilot paused: ETABS closed unexpectedly and you opened it again. Press Resume, or type \"continue\", to carry on, or Stop to end it.");
+            run.PauseWhy = $"{Csi.Name} was opened again by you.";
+            AutopilotLog(AutopilotEntry.Paused, $"{Csi.Name} closed unexpectedly and you opened it again: paused until you press Resume.");
+            Note($"Autopilot paused: {Csi.Name} closed unexpectedly and you opened it again. Press Resume, or type \"continue\", to carry on, or Stop to end it.");
             Save();
             ShowAutopilot();
             return;
@@ -1161,7 +1161,7 @@ internal sealed partial class ChatPane
         // The jobs that were working when ETABS went (stopped when the chat reopened) carry on.
         foreach (var job in _board?.Snapshot().Where(j => j.Number > run.JobsBefore && j.State == JobBoard.Stopped && !j.OverBudget
                                                           && j.Ended >= orphan.Beat.AddMinutes(-1)).ToList() ?? [])
-            _board!.Message(job.Number, "ETABS was restarted while you worked. Carry on with your task where you left off: first check in the " +
+            _board!.Message(job.Number, $"{Csi.Name} was restarted while you worked. Carry on with your task where you left off: first check in the " +
                                         "model what is already done (a change that was being applied may be missing).", DateTime.UtcNow);
         JobsChanged();
         Save();

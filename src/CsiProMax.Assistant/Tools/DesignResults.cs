@@ -41,7 +41,8 @@ public static class DesignResults
     public static Family? FamilyOf(string table)
     {
         var n = ResultTools.Norm(table);
-        if (NotDesign.Any(w => n.Contains(w, StringComparison.Ordinal))) return null;
+        // What the engineer entered (design load combinations, overwrites, preferences) is not a result: one rule, Verdict's.
+        if (Verdict.IsInputTable(table) || NotDesign.Any(w => n.Contains(w, StringComparison.Ordinal))) return null;
         bool Has(params string[] words) => words.Any(w => n.Contains(w, StringComparison.Ordinal));
         if (Has("punch")) return Punching;
         if (!Has(DesignWords) && !Has("strip", "reinforc", "rebar")) return null;

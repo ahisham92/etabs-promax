@@ -99,12 +99,12 @@ public static class GeoProMaxTools
     private static JsonNode Apply(JsonElement a, ICsiLink e)
     {
         if (e.Program.Key is not ("safe" or "etabs") || e is OfflineEtabs)
-            throw new ToolInputException("apply_geopromax_springs works on a model open in SAFE or ETABS, not in the Modeler.");
+            throw new ToolInputException("apply_geopromax_springs works on a model open in SAFE or ETABS, not in the Modeler."); // ETABS itself
         var springs = ReadSprings(a.Need("file").Trim().Trim('"'));
         var mode = a.Text("as", "areas").ToLowerInvariant();
         if (mode is not ("areas" or "points")) throw new ToolInputException("'as' is areas or points.");
         if (mode == "points" && e.Program.Key != "safe")
-            throw new ToolInputException("Point springs at the cell centres are for SAFE, where the slab mesh takes in every point. In ETABS, divide the raft into panels and use areas.");
+            throw new ToolInputException("Point springs at the cell centres are for SAFE, where the slab mesh takes in every point. In ETABS, divide the raft into panels and use areas."); // ETABS itself
         var info = e.Info();
         var (force, length) = Units(info);
         var modulus = force / (length * length * length);   // model units per kN/m3

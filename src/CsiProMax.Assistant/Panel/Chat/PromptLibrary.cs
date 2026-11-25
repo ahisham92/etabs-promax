@@ -80,7 +80,8 @@ internal sealed class PromptLibrary
             if (stream is not null)
             {
                 using var reader = new StreamReader(stream);
-                json = reader.ReadToEnd();
+                // The file was written about ETABS: in SAFE and SAP2000 its prompts name that program (Csi.Words).
+                json = Csi.Words(reader.ReadToEnd());
             }
         }
         catch (IOException) { }

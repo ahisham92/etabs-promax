@@ -31,7 +31,7 @@ public static class Updater
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CsiProMax");
 
     private static string UpdatesFolder => Path.Combine(LocalRoot, "updates");
-    private static string VersionsFolder => Path.Combine(LocalRoot, "versions");
+    internal static string VersionsFolder => Path.Combine(LocalRoot, "versions");
     private static string McpFolder => Path.Combine(LocalRoot, "mcp");
     private static string StateFile => Path.Combine(LocalRoot, "update-state.json");
 
@@ -77,9 +77,9 @@ public static class Updater
     {
         var state = LoadState();
         if (Latest is { } latest && Staged is null)
-            return $"CSI ProMax {latest} is available (this is {CurrentText}). Check for updates in Settings to install it; ETABS stays open.";
+            return $"CSI ProMax {latest} is available (this is {CurrentText}). Check for updates in Settings to install it; {Csi.Name} stays open.";
         if (Staged is { } staged)
-            return $"CSI ProMax {staged} is downloaded. Close the CSI ProMax window and open it again from ETABS's Tools menu to start using it.";
+            return $"CSI ProMax {staged} is downloaded. Close the CSI ProMax window and open it again from {Csi.Name}'s Tools menu to start using it.";
         if (state.LastError is { } error)
             return $"CSI ProMax {CurrentText}. The last update check failed: {error}";
         return state.LastCheck is { } last
@@ -121,7 +121,7 @@ public static class Updater
         {
             // The click shows the background run's progress instead of saying another window is updating.
             if (_runningProgress is { } running && !ReferenceEquals(running, progress)) Follow(running, progress);
-            else progress.Report(UpdateStage.Applying, "Already updating in the background. It switches over by itself when ETABS is idle.");
+            else progress.Report(UpdateStage.Applying, $"Already updating in the background. It switches over by itself when {Csi.Name} is idle.");
             return null;
         }
         _runningProgress = progress;
@@ -136,7 +136,7 @@ public static class Updater
         {
             _runningProgress = null;
             Interlocked.Exchange(ref _running, 0);
-            progress.Report(UpdateStage.Failed, "Another open ETABS is updating right now. This one follows it when it is done (or after a restart of ETABS).");
+            progress.Report(UpdateStage.Failed, $"Another open {Csi.Name} is updating right now. This one follows it when it is done (or after a restart of {Csi.Name}).");
             return null;
         }
 
@@ -216,8 +216,8 @@ public static class Updater
     /// <summary>A downloaded version is used the next time the CSI ProMax window is opened.</summary>
     private static void Apply(string versionFolder, string version, UpdateProgress progress) =>
         progress.Report(UpdateStage.RestartNeeded,
-            $"CSI ProMax {version} is downloaded. Close this window and open CSI ProMax again from ETABS's Tools menu to use it " +
-            "(ETABS itself stays open, and your model is not touched).", version);
+            $"CSI ProMax {version} is downloaded. Close this window and open CSI ProMax again from {Csi.Name}'s Tools menu to use it " +
+            $"({Csi.Name} itself stays open, and your model is not touched).", version);
 
     /// <summary>Nothing to settle: CSI ProMax has no add-in manifest (ETABS keeps the plug-in's path itself).</summary>
     public static int SettleInstall(string? packageFolder = null) => 1;

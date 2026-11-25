@@ -355,7 +355,7 @@ internal static class FreeWorkers
         $"[CSI ProMax, not typed by the user] {free} worker(s) are free while job {job.Number} (\"{job.Title}\") still has " +
         $"{job.Plan.Values.Count(v => v == JobPlan.ToDo)} steps it hasn't started. Nobody should wait while there is work: hand the " +
         "steps that don't depend on its current one to new jobs now (chat_jobs start, with the facts it found), and tell job " +
-        $"{job.Number} (chat_jobs message) which steps moved so it leaves them. Changes still go into ETABS one at a time by " +
+        $"{job.Number} (chat_jobs message) which steps moved so it leaves them. Changes still go into {Csi.Name} one at a time by " +
         "themselves. If nothing can be split off, answer only \"No split.\" and carry on: the user doesn't need the reason " +
         "(this answer is never shown to them).";
 

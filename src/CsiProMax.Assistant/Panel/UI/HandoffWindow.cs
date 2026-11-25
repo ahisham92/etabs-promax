@@ -39,7 +39,7 @@ internal sealed class HandoffWindow : Window
 
         _view = new HandoffView(request, compact: false);
         var root = new DockPanel();
-        var header = Brand.Header("Over to you", request.Count > 1 ? $"Step {request.Index} of {request.Count}" : "One step only you can do in ETABS");
+        var header = Brand.Header("Over to you", request.Count > 1 ? $"Step {request.Index} of {request.Count}" : $"One step only you can do in {Csi.Name}");
         DockPanel.SetDock(header, Dock.Top);
         root.Children.Add(header);
         root.Children.Add(new ScrollViewer
@@ -101,7 +101,7 @@ internal sealed class HandoffView : StackPanel
 
         if (!string.IsNullOrWhiteSpace(step.Item)) Children.Add(Label("Item", step.Item!, Brand.K.Muted, size));
         Children.Add(Label("What to do", step.What, Brand.K.Text, size + 0.5, bold: true));
-        Children.Add(Label("Where in ETABS", step.Where, Brand.K.Text, size));
+        Children.Add(Label($"Where in {Csi.Name}", step.Where, Brand.K.Text, size));
         Children.Add(Label("Why", step.Why, Brand.K.Muted, size));
 
         if (step.Guide is { } guide && HelpGuides.Read(guide) is { } markdown)

@@ -19,32 +19,32 @@ internal static class ConnectorTools
     public const string OpenTool = "open_etabs_model";
 
     /// <summary>Listed alone when ETABS has never written its catalogue (CSI ProMax hasn't run in ETABS yet).</summary>
-    public static readonly Def Status = new(StatusTool, "CSI ProMax has not run in ETABS yet. Call this to get setup help.",
+    public static readonly Def Status = new(StatusTool, $"CSI ProMax has not run in {Csi.Name} yet. Call this to get setup help.",
         Schema("""{"type":"object","properties":{}}"""));
 
     public static readonly Def[] ConnectionTools =
     [
         new("list_etabs_models",
-            "Lists every ETABS window connected to CSI ProMax (ETABS version and open models), and which one Claude is working on. Call this when the user mentions a model by name or has several ETABS windows open.",
+            $"Lists every {Csi.Name} window connected to CSI ProMax ({Csi.Name} version and open models), and which one Claude is working on. Call this when the user mentions a model by name or has several {Csi.Name} windows open.",
             Schema("""{"type":"object","properties":{}}""")),
         new("use_etabs_model",
-            "Chooses which open ETABS model the other tools act on, by its name (part of the name is enough). Optionally narrow by ETABS version when the same model is open in two versions. " +
-            "With etabsVersion alone it chooses that ETABS window, also one with no model open yet (then open one with open_etabs_model).",
-            Schema("""
+            $"Chooses which open {Csi.Name} model the other tools act on, by its name (part of the name is enough). Optionally narrow by {Csi.Name} version when the same model is open in two versions. " +
+            $"With etabsVersion alone it chooses that {Csi.Name} window, also one with no model open yet (then open one with open_etabs_model).",
+            Schema($$$$"""
                 {"type":"object","properties":{
-                  "model":{"type":"string","description":"Model name as shown in ETABS's title bar, or part of it. Left out: the ETABS window itself (etabsVersion), with whichever model is active in it."},
+                  "model":{"type":"string","description":"Model name as shown in {{{{Csi.Name}}}}'s title bar, or part of it. Left out: the {{{{Csi.Name}}}} window itself (etabsVersion), with whichever model is active in it."},
                   "etabsVersion":{"type":"string","description":"Optional, e.g. 2024"}}}
                 """)),
         new(OpenTool,
-            "Opens an ETABS model from its file path in a connected ETABS window and makes it the model the other tools act on. " +
+            $"Opens {Csi.AName} model from its file path in a connected {Csi.Name} window and makes it the model the other tools act on. " +
             "A workshared model (a central or local file) is always opened as a detached copy with its worksets kept, so the " +
             "central model is never touched; the copy is named '<name>_detached' and is not saved unless the user asks. " +
-            "A model that is already open is switched to. Works in an ETABS window with no model open. Opening a large model " +
+            $"A model that is already open is switched to. Works in {Csi.AName} window with no model open. Opening a large model " +
             "takes minutes: when the call says it is still opening, call list_etabs_models after a while to see it.",
-            Schema("""
+            Schema($$$"""
                 {"type":"object","properties":{
                   "path":{"type":"string","description":"Full path of the .rvt file on the user's computer"},
-                  "etabsVersion":{"type":"string","description":"The ETABS window to open it in, e.g. 2024, when several are connected. Left out: the window being worked in."}},
+                  "etabsVersion":{"type":"string","description":"The {{{Csi.Name}}} window to open it in, e.g. 2024, when several are connected. Left out: the window being worked in."}},
                  "required":["path"]}
                 """)),
     ];
@@ -58,7 +58,7 @@ internal static class ConnectorTools
     [
         new("wait_for_job",
             "Get the result of a long tool call that was still running when its call returned (it said 'still running as job N'), " +
-            "or see what ETABS is busy with. Waits up to wait_seconds for the job to finish, then returns its result, or its " +
+            $"or see what {Csi.Name} is busy with. Waits up to wait_seconds for the job to finish, then returns its result, or its " +
             "progress so far if it is still running. Call again to keep waiting.",
             Schema("""
                 {"type":"object","properties":{
@@ -66,7 +66,7 @@ internal static class ConnectorTools
                   "wait_seconds":{"type":"integer","description":"How long to wait for it to finish, 0-50 (default 40)."}}}
                 """)),
         new("cancel_job",
-            "Ask a long-running tool call to stop. A job still waiting for ETABS is dropped; a running one stops at its next check.",
+            $"Ask a long-running tool call to stop. A job still waiting for {Csi.Name} is dropped; a running one stops at its next check.",
             Schema("""
                 {"type":"object","properties":{"job_id":{"type":"integer","description":"Default: the running job."}}}
                 """)),

@@ -20,9 +20,9 @@ public abstract class ETABSCodeToolBase : IEtabsTool
     public abstract string Description { get; }
     public abstract bool ModifiesModel { get; }
 
-    public virtual string PropertiesJson => """
+    public virtual string PropertiesJson => $$"""
     {
-      "code": {"type": "string", "description": "C# method body. Variables available: sap (the open model: ETABS's cSapModel, used as dynamic, for example sap.FrameObj.GetNameList(ref n, ref names)), log (StringBuilder for notes), args. Every API call returns 0 when it worked: wrap calls as Ok(sap.X.Y(...), \"what it does\") so a refusal stops the code with its reason. Declare ref and out arguments as typed locals first (int n = 0; string[] names = null;). Must end with a return statement; return counts, names or small anonymous objects. Namespaces imported: System, System.Linq, System.Collections.Generic."},
+      "code": {"type": "string", "description": "C# method body. Variables available: sap (the open model: {{Csi.Name}}'s cSapModel, used as dynamic, for example sap.FrameObj.GetNameList(ref n, ref names)), log (StringBuilder for notes), args. Every API call returns 0 when it worked: wrap calls as Ok(sap.X.Y(...), \"what it does\") so a refusal stops the code with its reason. Declare ref and out arguments as typed locals first (int n = 0; string[] names = null;). Must end with a return statement; return counts, names or small anonymous objects. Namespaces imported: System, System.Linq, System.Collections.Generic."},
       "description": {"type": "string", "description": "What the code does, in a few words. Shown to the user before it runs."}
     }
     """;
@@ -30,9 +30,9 @@ public abstract class ETABSCodeToolBase : IEtabsTool
     public string[] Required => ["code", "description"];
 
     protected static readonly string CodeGuidance =
-        " Write a C# method body using ETABS's API (the cSapModel of the running ETABS, as the dynamic variable sap). Use dedicated tools " +
+        $" Write a C# method body using {Csi.Name}'s API (the cSapModel of the running {Csi.Name}, as the dynamic variable sap). Use dedicated tools " +
         "first when one fits; use this for anything they can't do. If compilation fails, the errors come back with line numbers so you can " +
-        "fix and retry. ETABS has no undo for what the API changes: nothing is rolled back when the code fails part way, so check " +
+        $"fix and retry. {Csi.Name} has no undo for what the API changes: nothing is rolled back when the code fails part way, so check " +
         "inputs before the first change and return what was changed. Units are the model's present units (get_model_context says which). " +
         $"Keep each call short: a call still running after {CapSeconds} s is stopped at its next loop step. Do big work in batches, one " +
         "call after another. log.AppendLine progress or partial results: wait_for_job shows the end of the log while it runs, and the log " +
@@ -47,7 +47,7 @@ public abstract class ETABSCodeToolBase : IEtabsTool
     internal const int CapSeconds = 90;
 
     internal static string CapText(int seconds) =>
-        $"Stopped after {seconds} s. What it changed before that stays in the model (ETABS has no undo for API changes): read the " +
+        $"Stopped after {seconds} s. What it changed before that stays in the model ({Csi.Name} has no undo for API changes): read the " +
         "model back before carrying on. Do the work in smaller steps, one call after another, each finishing well under a minute.";
 
     public virtual ToolResult Execute(EtabsApp app, ToolArgs args) =>
@@ -155,14 +155,14 @@ public sealed class RunETABSQueryCodeTool : ETABSCodeToolBase
 {
     public override string Name => "run_etabs_query_code";
     public override string Description =>
-        "Run read-only C# against ETABS's API to answer a question the other tools can't (any object, property, " +
+        $"Run read-only C# against {Csi.Name}'s API to answer a question the other tools can't (any object, property, " +
         "assignment, load, result or setting). The code is checked first: a call that changes the model is refused here, " +
         "use run_etabs_code for it. Results (forces, reactions, drifts) need a finished analysis." + CodeGuidance;
     public override bool ModifiesModel => false;
 
-    public override string PropertiesJson => """
+    public override string PropertiesJson => $$"""
     {
-      "code": {"type": "string", "description": "C# method body. Variables available: sap (the open model: ETABS's cSapModel, used as dynamic, for example sap.FrameObj.GetNameList(ref n, ref names)), log (StringBuilder for notes), args. Every API call returns 0 when it worked: wrap calls as Ok(sap.X.Y(...), \"what it does\") so a refusal stops the code with its reason. Declare ref and out arguments as typed locals first (int n = 0; string[] names = null;). Must end with a return statement; return counts, names or small anonymous objects. Namespaces imported: System, System.Linq, System.Collections.Generic."},
+      "code": {"type": "string", "description": "C# method body. Variables available: sap (the open model: {{Csi.Name}}'s cSapModel, used as dynamic, for example sap.FrameObj.GetNameList(ref n, ref names)), log (StringBuilder for notes), args. Every API call returns 0 when it worked: wrap calls as Ok(sap.X.Y(...), \"what it does\") so a refusal stops the code with its reason. Declare ref and out arguments as typed locals first (int n = 0; string[] names = null;). Must end with a return statement; return counts, names or small anonymous objects. Namespaces imported: System, System.Linq, System.Collections.Generic."},
       "description": {"type": "string", "description": "What the code does, in a few words."}
     }
     """;
@@ -176,15 +176,15 @@ public sealed class RunETABSCodeTool : ETABSCodeToolBase
 {
     public override string Name => "run_etabs_code";
     public override string Description =>
-        "Run C# that changes the model through ETABS's API, for anything the other tools can't do (grids, stories, " +
+        $"Run C# that changes the model through {Csi.Name}'s API, for anything the other tools can't do (grids, stories, " +
         "materials, section properties, releases, diaphragms, mass source, load cases, response spectrum and wind " +
-        "definitions, design settings, bulk edits...). ETABS has no undo for it: the user sees the code before it runs, " +
+        $"definitions, design settings, bulk edits...). {Csi.Name} has no undo for it: the user sees the code before it runs, " +
         "and what it changed before a failure stays. A locked model (after analysis) must be unlocked first." + CodeGuidance;
     public override bool ModifiesModel => true;
 
-    public override string PropertiesJson => """
+    public override string PropertiesJson => $$"""
     {
-      "code": {"type": "string", "description": "C# method body. Variables available: sap (the open model: ETABS's cSapModel, used as dynamic, for example sap.FrameObj.GetNameList(ref n, ref names)), log (StringBuilder for notes), args. Every API call returns 0 when it worked: wrap calls as Ok(sap.X.Y(...), \"what it does\") so a refusal stops the code with its reason. Declare ref and out arguments as typed locals first (int n = 0; string[] names = null;). Must end with a return statement; return counts, names or small anonymous objects. Namespaces imported: System, System.Linq, System.Collections.Generic."},
+      "code": {"type": "string", "description": "C# method body. Variables available: sap (the open model: {{Csi.Name}}'s cSapModel, used as dynamic, for example sap.FrameObj.GetNameList(ref n, ref names)), log (StringBuilder for notes), args. Every API call returns 0 when it worked: wrap calls as Ok(sap.X.Y(...), \"what it does\") so a refusal stops the code with its reason. Declare ref and out arguments as typed locals first (int n = 0; string[] names = null;). Must end with a return statement; return counts, names or small anonymous objects. Namespaces imported: System, System.Linq, System.Collections.Generic."},
       "description": {"type": "string", "description": "What the code does, in a few words. Shown to the user before it runs."}
     }
     """;

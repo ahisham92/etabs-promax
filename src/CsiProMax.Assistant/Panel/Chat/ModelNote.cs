@@ -54,11 +54,11 @@ internal static class ModelNote
         if (facts.View.Length > 0) parts.Add($"active view: {facts.View}" + (facts.ViewId > 0 ? $" (id {facts.ViewId})" : ""));
         if (facts.SelectionKnown)
         {
-            if (facts.SelectedCount == 0) parts.Add("nothing is selected in ETABS");
+            if (facts.SelectedCount == 0) parts.Add($"nothing is selected in {Csi.Name}");
             else
             {
                 var ids = facts.SelectedIds.Take(MaxIds).ToList();
-                var sb = new StringBuilder("selected in ETABS: ").Append(facts.SelectedCount).Append(facts.SelectedCount == 1 ? " object" : " objects");
+                var sb = new StringBuilder($"selected in {Csi.Name}: ").Append(facts.SelectedCount).Append(facts.SelectedCount == 1 ? " object" : " objects");
                 if (facts.SelectedKinds.Count > 0) sb.Append(" (").Append(Kinds(facts.SelectedKinds)).Append(')');
                 if (ids.Count > 0)
                     sb.Append(", ids ").Append(string.Join(", ", ids)).Append(facts.SelectedCount > ids.Count ? $" and {facts.SelectedCount - ids.Count} more" : "");

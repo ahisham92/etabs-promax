@@ -201,7 +201,7 @@ internal static class WorkedCode
         if (OfType.Match(code ?? "") is { Success: true } t)
         {
             var c = t.Groups[1].Value;
-            return c switch { "FamilyInstance" => "Family Instances", "RoofBase" => "Roofs", "ImportInstance" => "CAD Imports", "ETABSLinkInstance" => "ETABS Links",
+            return c switch { "FamilyInstance" => "Family Instances", "RoofBase" => "Roofs", "ImportInstance" => "CAD Imports", "ETABSLinkInstance" => $"{Csi.Name} Links",
                 "Viewport" => "Viewports", _ when c.StartsWith("View", StringComparison.Ordinal) => "Views and Sheets", _ => Spaced(c) + "s" };
         }
         return "General";

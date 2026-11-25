@@ -152,7 +152,7 @@ internal sealed class ETABSTargets
         public async Task<ConnectorResult> CallAsync(string name, IDictionary<string, JsonElement>? arguments, CancellationToken ct)
     {
         if (name == ConnectorTools.StatusTool)
-            return Text("Install the CSI ProMax add-in, start ETABS and open a model, then restart this app so the ETABS tools load.", true);
+            return Text($"Install the CSI ProMax add-in, start {Csi.Name} and open a model, then restart this app so the {Csi.Name} tools load.", true);
 
         // Runs here, without ETABS: a part of a large PDF read by its own chat.
         if (name == PdfPartReader.ToolName) return await PdfPartReader.CallAsync(arguments, _caller.Claude, _caller.Model, ct).ConfigureAwait(false);
@@ -166,8 +166,8 @@ internal sealed class ETABSTargets
 
         if (sessions.Count == 0)
             return Text(_unresponsive > 0
-                ? "ETABS is running but not responding: it may be busy with a long operation or frozen. Ask the user to check ETABS, then try again."
-                : "ETABS is not reachable. Ask the user to start ETABS with the CSI ProMax add-in and open a model.", true);
+                ? $"{Csi.Name} is running but not responding: it may be busy with a long operation or frozen. Ask the user to check {Csi.Name}, then try again."
+                : $"{Csi.Name} is not reachable. Ask the user to start {Csi.Name} with the CSI ProMax add-in and open a model.", true);
 
         var chosen = _target;
         var target = sessions.FirstOrDefault(s => s.Pid == chosen?.Pid);
@@ -188,7 +188,7 @@ internal sealed class ETABSTargets
         if (target is null)
         {
             if (sessions.Count > 1)
-                return Text("Several ETABS windows are open. Ask the user which model to work on, then call use_etabs_model.\n" + Describe(sessions), true);
+                return Text($"Several {Csi.Name} windows are open. Ask the user which model to work on, then call use_etabs_model.\n" + Describe(sessions), true);
             target = sessions[0];
             chosen = _target = new Target(target.Pid, null);
         }
@@ -203,9 +203,9 @@ internal sealed class ETABSTargets
             // ETABS answers within about 12 s with the reason when it can't switch (a dialog, an edit mode); no answer at
             // all means even the add-in's connection thread didn't get to answer.
             if (activate is null)
-                return Text("The chosen ETABS window didn't answer within 20 s, so nothing was run. ETABS is probably showing a dialog " +
+                return Text($"The chosen {Csi.Name} window didn't answer within 20 s, so nothing was run. {Csi.Name} is probably showing a dialog " +
                             "(possibly behind another window), busy with a long operation of its own (a sync, loading, printing), or frozen. " +
-                            "Ask the user to look at ETABS: close the dialog or wait for the operation to end, then try again. " +
+                            $"Ask the user to look at {Csi.Name}: close the dialog or wait for the operation to end, then try again. " +
                             "list_etabs_models shows whether the window answers again." +
                             (target.Blocked is { } why ? $" Last seen: {why}." : ""), true);
             using var a = JsonDocument.Parse(activate);
@@ -231,7 +231,7 @@ internal sealed class ETABSTargets
         try { responseLine = await SendAsync(target.Pipe, request, 5000, ct).ConfigureAwait(false); }
         finally { if (remote) RemoteActivity?.Invoke(caller, ""); }
         if (responseLine is null)
-            return Text("ETABS is not reachable. Ask the user to start ETABS with the CSI ProMax add-in and open a model.", true);
+            return Text($"{Csi.Name} is not reachable. Ask the user to start {Csi.Name} with the CSI ProMax add-in and open a model.", true);
 
         using var doc = JsonDocument.Parse(responseLine);
         var root = doc.RootElement;
@@ -256,8 +256,8 @@ internal sealed class ETABSTargets
             _target = new Target(window.Pid, null);
             var active = window.Documents.FirstOrDefault(d => d.Active).Title ?? window.Documents.FirstOrDefault().Title;
             return Text(window.Documents.Count == 0
-                ? $"Now working in ETABS {window.ETABSVersion}. It has no model open: open one with {ConnectorTools.OpenTool} (its file path)."
-                : $"Now working in ETABS {window.ETABSVersion}, on the model active in it ('{active}').", false);
+                ? $"Now working in {Csi.Name} {window.ETABSVersion}. It has no model open: open one with {ConnectorTools.OpenTool} (its file path)."
+                : $"Now working in {Csi.Name} {window.ETABSVersion}, on the model active in it ('{active}').", false);
         }
 
         var matches = sessions
@@ -272,11 +272,11 @@ internal sealed class ETABSTargets
             return Text($"No open model matches '{wanted}'. A model that is not open yet: {ConnectorTools.OpenTool} with its file path.\n" + Describe(sessions), true);
         if (matches.Count > 1)
             return Text($"'{wanted}' matches more than one open model. Ask the user which one.\n" +
-                string.Join("\n", matches.Select(x => $"- {x.Title} (ETABS {x.Session.ETABSVersion})")), true);
+                string.Join("\n", matches.Select(x => $"- {x.Title} ({Csi.Name} {x.Session.ETABSVersion})")), true);
 
         _target = new Target(matches[0].Session.Pid, matches[0].Title);
         Touched?.Invoke(_caller.Job, matches[0].Title);
-        return Text($"Now working on '{matches[0].Title}' in ETABS {matches[0].Session.ETABSVersion}.", false);
+        return Text($"Now working on '{matches[0].Title}' in {Csi.Name} {matches[0].Session.ETABSVersion}.", false);
     }
 
     /// <summary>
@@ -285,16 +285,16 @@ internal sealed class ETABSTargets
     /// </summary>
     internal static (int Index, string Why) Window(IReadOnlyList<(string Version, int Pid)> windows, string? version, int? current)
     {
-        if (windows.Count == 0) return (-1, "No ETABS window with CSI ProMax is running. Ask the user to start ETABS.");
+        if (windows.Count == 0) return (-1, $"No {Csi.Name} window with CSI ProMax is running. Ask the user to start {Csi.Name}.");
         var asked = !string.IsNullOrWhiteSpace(version);
         var fit = Enumerable.Range(0, windows.Count).Where(i => !asked || windows[i].Version == version!.Trim()).ToList();
-        if (fit.Count == 0) return (-1, $"No connected ETABS window is ETABS {version!.Trim()}.");
+        if (fit.Count == 0) return (-1, $"No connected {Csi.Name} window is {Csi.Name} {version!.Trim()}.");
         if (fit.Count == 1) return (fit[0], "");
         var mine = fit.Where(i => windows[i].Pid == current).ToList();
         if (mine.Count == 1) return (mine[0], "");
         return (-1, asked
-            ? $"More than one ETABS {version!.Trim()} window is open. Ask the user to close one, or choose a model that is open in the one meant (use_etabs_model)."
-            : "Several ETABS windows are open. Give etabsVersion to say which one.");
+            ? $"More than one {Csi.Name} {version!.Trim()} window is open. Ask the user to close one, or choose a model that is open in the one meant (use_etabs_model)."
+            : $"Several {Csi.Name} windows are open. Give etabsVersion to say which one.");
     }
 
     /// <summary>Opens a model from its path in an ETABS window (a workshared one as a detached copy) and works on it.</summary>
@@ -303,18 +303,18 @@ internal sealed class ETABSTargets
         var path = arguments is not null && arguments.TryGetValue("path", out var p) && p.ValueKind == JsonValueKind.String ? (p.GetString() ?? "").Trim().Trim('"') : "";
         var version = arguments is not null && arguments.TryGetValue("etabsVersion", out var v) ? v.ToString() : null;
         if (path.Length == 0) return Text("Give the model's full file path (path).", true);
-        if (!path.EndsWith(".rvt", StringComparison.OrdinalIgnoreCase)) return Text("Only ETABS models (.rvt) can be opened this way.", true);
+        if (!path.EndsWith(".rvt", StringComparison.OrdinalIgnoreCase)) return Text($"Only {Csi.Name} models (.rvt) can be opened this way.", true);
         if (sessions.Count == 0)
             return Text(_unresponsive > 0
-                ? "ETABS is running but not responding: it may be busy with a long operation or frozen. Ask the user to check ETABS, then try again."
-                : "No ETABS window with CSI ProMax is running. Ask the user to start ETABS; a model need not be open.", true);
+                ? $"{Csi.Name} is running but not responding: it may be busy with a long operation or frozen. Ask the user to check {Csi.Name}, then try again."
+                : $"No {Csi.Name} window with CSI ProMax is running. Ask the user to start {Csi.Name}; a model need not be open.", true);
         var (index, why) = Window(sessions.Select(s => (s.ETABSVersion, s.Pid)).ToList(), version, _target?.Pid ?? _caller.PreferredPid);
         if (index < 0) return Text(why + "\n" + Describe(sessions), true);
         var window = sessions[index];
 
         var answer = await SendAsync(window.Pipe, JsonSerializer.Serialize(new { method = "open_document", path }), 5000, ct, readTimeoutMs: 75000).ConfigureAwait(false);
         if (answer is null)
-            return Text($"ETABS {window.ETABSVersion} didn't answer within about a minute. It may still be opening the model, or showing a dialog. " +
+            return Text($"{Csi.Name} {window.ETABSVersion} didn't answer within about a minute. It may still be opening the model, or showing a dialog. " +
                         "Call list_etabs_models in a moment: when the model is listed, choose it with use_etabs_model." +
                         (window.Blocked is { } held ? $" Last seen: {held}." : ""), true);
         using var doc = JsonDocument.Parse(answer);
@@ -332,20 +332,20 @@ internal sealed class ETABSTargets
     {
         if (sessions.Count == 0)
             return _unresponsive > 0
-                ? "ETABS is running but not responding: it may be busy with a long operation or frozen. Ask the user to check ETABS, then try again."
-                : "No ETABS window with CSI ProMax is running.";
+                ? $"{Csi.Name} is running but not responding: it may be busy with a long operation or frozen. Ask the user to check {Csi.Name}, then try again."
+                : $"No {Csi.Name} window with CSI ProMax is running.";
         var chosen = _target;
-        var sb = new StringBuilder("Connected ETABS windows:\n");
+        var sb = new StringBuilder($"Connected {Csi.Name} windows:\n");
         foreach (var s in sessions)
         {
             var current = s.Pid == chosen?.Pid ? " (current)" : "";
-            sb.AppendLine($"- ETABS {s.ETABSVersion}{current}{(s.Busy ? " (busy right now)" : "")}" +
-                          (s.Blocked is { } why ? $" (waiting: {why}; ask the user to deal with it in ETABS)" : ""));
+            sb.AppendLine($"- {Csi.Name} {s.ETABSVersion}{current}{(s.Busy ? " (busy right now)" : "")}" +
+                          (s.Blocked is { } why ? $" (waiting: {why}; ask the user to deal with it in {Csi.Name})" : ""));
             if (s.Documents.Count == 0) sb.AppendLine("    no model open");
             foreach (var d in s.Documents)
             {
                 var flags = new List<string>();
-                if (d.Active) flags.Add("active in ETABS");
+                if (d.Active) flags.Add($"active in {Csi.Name}");
                 if (s.Pid == chosen?.Pid && string.Equals(d.Title, chosen.Model, StringComparison.OrdinalIgnoreCase)) flags.Add("Claude is working on this");
                 sb.AppendLine($"    {d.Title}{(flags.Count > 0 ? " [" + string.Join(", ", flags) + "]" : "")}");
             }

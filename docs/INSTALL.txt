@@ -17,6 +17,15 @@ If that address cannot be reached, this line gets the same script from the relea
 
    irm https://github.com/ahisham92/etabs-promax/releases/latest/download/install.ps1 | iex
 
+When it is done it tries, for each program, what Tools > CSI ProMax does, and says yes or no for each.
+It works with ETABS 18 and later, SAFE 20 and later and SAP2000 20 and later.
+
+If Tools > CSI ProMax does not open ("Cannot create plugin!", or "Not Found" in the plug-in list)
+Paste this line into Windows PowerShell. It only looks: it changes nothing. It prints what it found for each program
+and copies that text, to paste into a message to the person who gave you CSI ProMax:
+
+   irm https://raw.githubusercontent.com/ahisham92/etabs-promax/main/check.ps1 | iex
+
 The rest of this file is the same install by hand.
 
 ETABS 23

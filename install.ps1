@@ -109,7 +109,9 @@ function Install-CsiProMax {
     # A program with no plug-in has "[PlugIn]" and " NumberPlugIns=0". With one plug-in it has NumberPlugIns=1 and
     # the lines PlugInName, PlugInMenuText and PlugInPath. How several plug-ins are written is not known here, so a
     # list that holds another plug-in is never changed.
-    # Status: added, already, moved (ours was listed from another folder), others, unknown.
+    # A list that holds only CSI ProMax, from another folder or more than once (a tester added it by hand a second
+    # time), is put right as a whole: one entry, for this folder.
+    # Status: added, already, moved (ours was listed from another folder, or twice), others, unknown.
     function Edit-PlugInSection([string]$text, [string]$name, [string]$path) {
         $newline = "`n"
         if ($text.Contains("`r`n")) { $newline = "`r`n" }
@@ -122,7 +124,7 @@ function Install-CsiProMax {
         $end = $lines.Count
         for ($i = $start + 1; $i -lt $lines.Count; $i++) { if ($lines[$i] -match '^\s*\[') { $end = $i; break } }
 
-        $countAt = -1; $count = -1; $indent = ' '; $entries = @(); $oursAt = -1; $oursPath = ''
+        $countAt = -1; $count = -1; $indent = ' '; $entries = @(); $oursAt = -1; $oursPath = ''; $paths = 0; $ours = 0
         for ($i = $start + 1; $i -lt $end; $i++) {
             if ($lines[$i] -match '^(\s*)NumberPlugIns\s*=\s*(\d+)\s*$') {
                 if ($countAt -ge 0) { return @{ Status = 'unknown' } }
@@ -132,7 +134,8 @@ function Install-CsiProMax {
                 $entries += $i
                 if ($lines[$i] -match '^\s*PlugInPath\w*\s*=\s*(.*?)\s*$') {
                     $value = $Matches[1].Trim('"')
-                    if ((($value -split '[\\/]')[-1]) -ieq (($path -split '[\\/]')[-1])) { $oursAt = $i; $oursPath = $value }
+                    $paths++
+                    if ((($value -split '[\\/]')[-1]) -ieq (($path -split '[\\/]')[-1])) { $oursAt = $i; $oursPath = $value; $ours++ }
                 }
             }
         }
@@ -140,8 +143,8 @@ function Install-CsiProMax {
 
         $status = $null
         if ($oursAt -ge 0) {
-            if ($oursPath -ieq $path) { return @{ Status = 'already' } }
-            if ($count -eq 1 -and $entries.Count -eq 3) { $status = 'moved' } else { return @{ Status = 'others' } }
+            if ($ours -eq 1 -and $oursPath -ieq $path) { return @{ Status = 'already' } }
+            if ($paths -eq $ours) { $status = 'moved' } else { return @{ Status = 'others' } }
         }
         elseif ($count -eq 0 -and $entries.Count -eq 0) { $status = 'added' }
         else { return @{ Status = 'others' } }
@@ -314,7 +317,7 @@ function Install-CsiProMax {
                 $label = $item.Label.PadRight(12)
                 switch ($status) {
                     'added'   { Say "  $label CSI ProMax is added to the Tools menu." 'Green' }
-                    'moved'   { Say "  $label CSI ProMax in the Tools menu now points to this folder." 'Green' }
+                    'moved'   { Say "  $label CSI ProMax in the Tools menu now points to this folder (once)." 'Green' }
                     'already' { Say "  $label CSI ProMax is already in the Tools menu." 'Green' }
                     'preview' { Say "  $label CSI ProMax would be added to the Tools menu (preview: nothing was changed)." }
                     'open'    { $byHand = $true; Say "  $label $program is open, so its plug-in list was left alone. Close it and run this line again, or add CSI ProMax by hand (below)." 'Yellow' }
@@ -322,6 +325,34 @@ function Install-CsiProMax {
                     default   { $byHand = $true; Say "  $label Its settings file was not understood, so it was left alone. Add CSI ProMax by hand (below)." 'Yellow' }
                 }
             }
+        }
+
+        # The entry being there is not enough: the program must be able to create the plug-in when it is picked.
+        # check.ps1 (installed with the rest) tries that as the program does it, for every program found.
+        $checkFile = Join-Path $Folder 'check.ps1'
+        if (-not $Preview -and -not $NoPlugins -and (Test-Path -LiteralPath $checkFile)) {
+            try {
+                $check = [scriptblock]::Create((Get-Content -Raw -LiteralPath $checkFile))
+                if ($SettingsRoot) { $answer = & $check -PassThru -NoClipboard -SettingsRoot $SettingsRoot } else { $answer = & $check -PassThru -NoClipboard }
+                $tried = @($answer.Programs)
+                if ($tried.Count -gt 0) {
+                    Say ''
+                    Say 'Checked: can each program open CSI ProMax?' 'Cyan'
+                    $cannot = $false
+                    foreach ($one in $tried) {
+                        $label = ([string]$one.Program).PadRight(12)
+                        if (@($one.Reasons).Count -gt 0 -and $one.Listed) { $cannot = $true; Say "  $label NO: $(@($one.Reasons) -join ' ')" 'Red' }
+                        elseif (@($one.Reasons).Count -gt 0) { Say "  $label not yet: $(@($one.Reasons) -join ' ')" 'Yellow' }
+                        elseif ($one.Loads -eq $true) { Say "  $label yes: its plug-in was created the way $($one.Program) does it." 'Green' }
+                        else { Say "  $label could not be tried on this PC." }
+                    }
+                    if ($cannot) {
+                        Say '  For the full findings, run this line and send its text to the person who gave you CSI ProMax:' 'Yellow'
+                        Say '    irm https://raw.githubusercontent.com/ahisham92/etabs-promax/main/check.ps1 | iex' 'Yellow'
+                    }
+                }
+            }
+            catch { Say "  (The check after installing could not run: $($_.Exception.Message))" }
         }
 
         Say ''

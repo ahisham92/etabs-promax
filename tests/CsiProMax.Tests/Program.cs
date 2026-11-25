@@ -334,6 +334,7 @@ Test("results: drift, torsion, modal, soft story, mass and design ratios from ET
     var e = new MemoryEtabs();
     var mcp = Endpoint(e);
     Equal("not available", (string)Call(mcp, "check_drift", "{}")["status"]!, "no analysis yet");
+    e.Locked = true;   // the analysis has run: only now may a check pass or fail
     e.ResultTables["Story Drifts"] = new(["Story", "Output Case", "Case Type", "Direction", "Drift", "Label"],
     [
         ["Story3", "EQX", "LinStatic", "X", "0.0011", "5"], ["Story2", "EQX", "LinStatic", "X", "0.0024", "5"], ["Story1", "EQX", "LinStatic", "X", "0.0019", "7"],
@@ -415,6 +416,7 @@ Test("pack: the model, ETABS's tables and the checks go into one file and the Vi
     Call(mcp, "add_slabs", """{"outlines":[[[0,0],[6,0],[6,5],[0,5]]],"section":"S200"}""");
     Call(mcp, "add_walls", """{"lines":[[0,0,0,5]],"section":"W250"}""");
     var top = e.Points().Where(p => p.Z > 9).ToList();
+    e.Locked = true;   // analysed: the checks answer from the result tables below
     e.ResultTables["Story Drifts"] = new(["Story", "Output Case", "Direction", "Drift"], [["Story3", "EQX", "X", "0.0011"], ["Story2", "EQX", "X", "0.0024"], ["Story1", "EQX", "X", "0.0019"]]);
     e.ResultTables["Joint Displacements"] = new(["Story", "UniqueName", "Output Case", "Ux", "Uy", "Uz"],
         e.Points().Select(p => new[] { "", p.Name, "EQX", (p.Z * 0.002).ToString(System.Globalization.CultureInfo.InvariantCulture), "0", "0" }).ToList());
@@ -652,7 +654,7 @@ Test("modeler: a building is modelled with no ETABS and saved as an ETABS text f
         Equal(2, (int)Call(mcp, "set_loads", $$"""{"pattern":"SDL","value":2.5,"areas":["{{slabs["names"]![0]}}","{{slabs["names"]![1]}}"]}""")["done"]!, "slab loads");
         Call(mcp, "add_combination", """{"name":"ULS","cases":[{"case":"Dead","factor":1.35},{"case":"SDL","factor":1.35},{"case":"Live","factor":1.5}]}""");
         var context = Call(mcp, "get_model_context", "{}");
-        Equal(8, (int)context["counts"]!["columns"]!, "columns"); Equal(2, (int)context["counts"]!["walls"]!, "walls"); Equal("Modeler (no ETABS)", (string)context["etabs"]!, "says it is not ETABS");
+        Equal(8, (int)context["counts"]!["columns"]!, "columns"); Equal(2, (int)context["counts"]!["walls"]!, "walls"); Equal("CSI ProMax Modeler", (string)context["program"]!, "says it is the Modeler"); Equal("Modeler (no ETABS)", (string)context["version"]!, "and that no ETABS is behind it");
         Near(7.2, (double)context["stories"]![2]!["elevation"]!, "story levels");
         Equal(0, (int)Call(mcp, "check_model", "{}")["errors"]!, "no errors");
         Check(Call(mcp, "model_quantities", "{}")["rows"]!.AsArray().Count >= 4, "quantities by section");
@@ -900,6 +902,7 @@ Test("plug-in: the assistant is started with the dotnet ETABS runs on", () =>
 });
 
 foreach (var (name, body) in SafeTests.All()) Test(name, body);
+foreach (var (name, body) in TesterBugTests.All()) Test(name, body);
 
 var failed = 0;
 // ---- SAP2000 ----
@@ -1061,6 +1064,88 @@ Test("plug-in: SAP2000 starts the assistant for SAP2000", () =>
         Check(CsiProgram.Sap2000.Ready, "SAP2000 is offered");
     }
     finally { Directory.Delete(root, true); }
+});
+
+Test("plug-in: every program from the oldest on can create it (a plain cPlugin, and from the API file only what the oldest one has)", () =>
+{
+    // The bug of 0.4.4: "class cPlugin : cPluginContract". Only the API files of the programs on .NET 8 have that
+    // interface, so ETABS 18 to 21, SAFE 20 and 21 and SAP2000 20 to 25 could not create the plug-in: ETABS 20 said
+    // "Cannot create plugin!" and listed it as "Not Found". What a plug-in may use from the API file is what the
+    // oldest one has (read from the API file of ETABS 18): the model, the callback, and the callback's Finish.
+    // Read from the files as built, by their metadata: this is what the program's .NET binds, whatever the source says.
+    string[] oldest = ["cPluginCallback", "cPluginCallback::Finish", "cSapModel"];
+    var root = AppContext.BaseDirectory;
+    while (!File.Exists(Path.Combine(root, "CsiProMax.sln"))) root = Path.GetDirectoryName(root.TrimEnd(Path.DirectorySeparatorChar)) ?? throw new Exception("CsiProMax.sln was not found above " + AppContext.BaseDirectory);
+    var configuration = new DirectoryInfo(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar)).Parent!.Name;
+    string Built(string project, string file) => Path.Combine(root, "src", project, "bin", configuration, "netstandard2.0", file + ".dll");
+    static string Token(System.Reflection.Metadata.MetadataReader md, System.Reflection.Metadata.BlobHandle key)
+    {
+        var bytes = md.GetBlobBytes(key);
+        // A whole public key is told by its token: the last eight bytes of its SHA-1, backwards.
+        if (bytes.Length > 8) bytes = Enumerable.Reverse(System.Security.Cryptography.SHA1.HashData(bytes)[^8..]).ToArray();
+        return Convert.ToHexString(bytes).ToLowerInvariant();
+    }
+    foreach (var (project, plugin, stub, api) in new[]
+             {
+                 ("CsiProMax.Plugin", "CsiProMaxPlugin", "EtabsApiStub", "ETABSv1"),
+                 ("CsiProMax.Plugin.Safe", "CsiProMaxSafePlugin", "SafeApiStub", "SAFEv1"),
+                 ("CsiProMax.Plugin.Sap", "CsiProMaxSapPlugin", "SapApiStub", "SAP2000v1"),
+             })
+    {
+        Check(File.Exists(Built(project, plugin)), $"{plugin}.dll is built ({Built(project, plugin)})");
+        using var pe = new System.Reflection.PortableExecutable.PEReader(File.OpenRead(Built(project, plugin)));
+        var md = System.Reflection.Metadata.PEReaderExtensions.GetMetadataReader(pe);
+        Equal(plugin, md.GetString(md.GetAssemblyDefinition().Name), "the file's name is the plug-in's name in the program's list");
+
+        // It needs two files only: .NET Standard 2.0 (every .NET the programs run on has it) and the program's API file,
+        // by the name, version and key the real file has in every version (the .NET Framework wants all three the same).
+        var references = md.AssemblyReferences.Select(h => md.GetAssemblyReference(h)).ToList();
+        Equal($"{api}, netstandard", string.Join(", ", references.Select(r => md.GetString(r.Name)).OrderBy(n => n, StringComparer.Ordinal)), $"what {plugin} needs");
+        var apiReference = references.Single(r => md.GetString(r.Name) == api);
+        Equal("1.0.0.0", apiReference.Version.ToString(), $"{api}'s version");
+        Equal("453d728ef24c6f5e", Token(md, apiReference.PublicKeyOrToken), $"{api}'s key");
+
+        // The class the program makes: <plug-in name>.cPlugin, public, with no interface, and its two methods.
+        var types = md.TypeDefinitions.Select(h => md.GetTypeDefinition(h)).ToList();
+        var made = types.Single(t => md.GetString(t.Name) == "cPlugin");
+        Equal(plugin, md.GetString(made.Namespace), "cPlugin's namespace is the plug-in's name");
+        Check((made.Attributes & System.Reflection.TypeAttributes.VisibilityMask) == System.Reflection.TypeAttributes.Public, $"{plugin}.cPlugin is public");
+        Equal(0, made.GetInterfaceImplementations().Count, $"{plugin}.cPlugin names no interface (not cPluginContract: ETABS 18 to 21 have none)");
+        var methods = made.GetMethods().Select(h => md.GetMethodDefinition(h))
+            .Where(m => (m.Attributes & System.Reflection.MethodAttributes.MemberAccessMask) == System.Reflection.MethodAttributes.Public)
+            .Select(m => md.GetString(m.Name)).ToList();
+        Check(methods.Contains("Main") && methods.Contains("Info") && methods.Contains(".ctor"), $"{plugin}.cPlugin has a public constructor, Main and Info ({string.Join(", ", methods)})");
+
+        // Everything it uses from the API file is in the oldest API file.
+        var used = new SortedSet<string>(StringComparer.Ordinal);
+        var names = new Dictionary<System.Reflection.Metadata.TypeReferenceHandle, string>();
+        foreach (var handle in md.TypeReferences)
+        {
+            var reference = md.GetTypeReference(handle);
+            if (reference.ResolutionScope.Kind != System.Reflection.Metadata.HandleKind.AssemblyReference) continue;
+            if (md.GetString(md.GetAssemblyReference((System.Reflection.Metadata.AssemblyReferenceHandle)reference.ResolutionScope).Name) != api) continue;
+            Equal(api, md.GetString(reference.Namespace), "the API's namespace");
+            names[handle] = md.GetString(reference.Name);
+            used.Add(names[handle]);
+        }
+        foreach (var handle in md.MemberReferences)
+        {
+            var member = md.GetMemberReference(handle);
+            if (member.Parent.Kind == System.Reflection.Metadata.HandleKind.TypeReference && names.TryGetValue((System.Reflection.Metadata.TypeReferenceHandle)member.Parent, out var owner))
+                used.Add(owner + "::" + md.GetString(member.Name));
+        }
+        Equal("", string.Join(", ", used.Except(oldest)), $"{plugin} uses from {api} what the oldest program's API file does not have");
+        Check(used.Contains("cSapModel") && used.Contains("cPluginCallback"), $"{plugin}'s Main takes the model and the callback");
+
+        // The stand-in the plug-in is built against holds no more than that, so naming anything newer does not compile,
+        // and it has the real file's name, version and key.
+        using var standIn = new System.Reflection.PortableExecutable.PEReader(File.OpenRead(Built(stub, api)));
+        var sd = System.Reflection.Metadata.PEReaderExtensions.GetMetadataReader(standIn);
+        var definition = sd.GetAssemblyDefinition();
+        Equal($"{api} 1.0.0.0 453d728ef24c6f5e", $"{sd.GetString(definition.Name)} {definition.Version} {Token(sd, definition.PublicKey)}", $"the stand-in for {api}");
+        var offered = sd.TypeDefinitions.Select(h => sd.GetTypeDefinition(h)).Where(t => sd.GetString(t.Namespace) == api).Select(t => sd.GetString(t.Name)).OrderBy(n => n, StringComparer.Ordinal);
+        Equal("cPluginCallback, cSapModel", string.Join(", ", offered), $"the stand-in for {api} offers only what the oldest program has");
+    }
 });
 
 Test("chat: Claude Code is looked for where each way of installing puts it, the most likely first", () =>
@@ -1430,6 +1515,12 @@ public sealed class SapStandIn : ICsiLink
         {
             n = 2; obj = ["2", "4"]; elm = obj; cases = ["DEAD", "DEAD"]; steps = ["", ""]; num = [0, 0];
             u1 = [0.004, 0.003]; u2 = [0, 0.001]; u3 = [-0.012, -0.002]; r1 = [0, 0]; r2 = [0, 0]; r3 = [0, 0];
+            return 0;
+        }
+        public int BaseReact(ref int n, ref string[] cases, ref string[] steps, ref double[] num, ref double[] fx, ref double[] fy, ref double[] fz,
+            ref double[] mx, ref double[] my, ref double[] mz, ref double gx, ref double gy, ref double gz)
+        {
+            n = 1; cases = ["DEAD"]; steps = [""]; num = [0]; fx = [0]; fy = [0]; fz = [120]; mx = [0]; my = [0]; mz = [0];
             return 0;
         }
         public int ModalParticipatingMassRatios(ref int n, ref string[] cases, ref string[] steps, ref double[] num, ref double[] period,

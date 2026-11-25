@@ -43,7 +43,7 @@ internal static class HandoffCard
                 "Skipped" => "Skipped.",
                 "Stopped" => "Stopped here.",
                 { Length: > 0 } other => other,
-                _ => "No longer waiting (the task ended or ETABS restarted).",
+                _ => $"No longer waiting (the task ended or {Csi.Name} restarted).",
             }, item.State == "Done" ? Brand.K.Text : Brand.K.Muted, ChatUi.SmallSize);
             ended.Margin = new Thickness(0, ChatUi.S2, 0, 0);
             body.Children.Add(ended);

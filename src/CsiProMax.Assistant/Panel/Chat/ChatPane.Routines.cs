@@ -85,7 +85,7 @@ internal sealed partial class ChatPane
         ChatJobs.Assign(job, null);
         Routines.Started(routine, due, DateTime.UtcNow, now, _conv.Id, ChatHistory.NameFor(_conv), job.Number, _modelTitle);
         Note($"Routine \"{routine.Name}\" started as job {job.Number}" +
-             (catchUp ? $", catching up the run of {due:ddd HH:mm} missed while ETABS was closed or busy." : "."));
+             (catchUp ? $", catching up the run of {due:ddd HH:mm} missed while {Csi.Name} was closed or busy." : "."));
         ShowJobCards();
         PumpJobs();
         Save();

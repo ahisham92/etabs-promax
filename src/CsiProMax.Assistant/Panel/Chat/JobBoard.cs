@@ -484,7 +484,7 @@ internal sealed class JobBoard
         model = (model ?? "").Trim();
         if (model.Length == 0 || job.HasSession) return;
         job.ETABSModel = model;
-        job.Task = $"Work on the model \"{model}\" (it may be open in another ETABS window: CSI ProMax sends your calls there).\n\n" + job.Task;
+        job.Task = $"Work on the model \"{model}\" (it may be open in another {Csi.Name} window: CSI ProMax sends your calls there).\n\n" + job.Task;
         if (job.Items.FirstOrDefault(i => i.Kind == "user") is { } first) first.Text = job.Task;
     }
 
@@ -1016,7 +1016,7 @@ internal sealed class JobBoard
     {
         Queued => "Waiting to start",
         Waiting => job.Ahead > 1 ? $"Waiting to apply ({job.Ahead - 1} ahead)" : "Waiting to apply",
-        Running => ActivityOf(job) switch { Reading => "Reading the model", Applying => "Applying changes", Syncing => "Synchronizing with central", Blocked => "Waiting for ETABS to be free", _ => "Thinking" },
+        Running => ActivityOf(job) switch { Reading => "Reading the model", Applying => "Applying changes", Syncing => "Synchronizing with central", Blocked => $"Waiting for {Csi.Name} to be free", _ => "Thinking" },
         Done => "Done",
         Failed => "Ended with a problem",
         Stopped => job.OverBudget ? "Paused at its budget" : job.Paused ? "Paused" : "Stopped",

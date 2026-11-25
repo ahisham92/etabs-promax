@@ -24,9 +24,9 @@ public sealed class SapLink : ICsiLink, IDisposable
 
     /// <summary>The ETABS link's messages, in SAP2000's words.</summary>
     internal static string Reword(string message) => message
-        .Replace("ETABS's Tools menu", "SAP2000's Tools menu", StringComparison.Ordinal)
+        .Replace("ETABS's Tools menu", "SAP2000's Tools menu", StringComparison.Ordinal) // ETABS itself
         .Replace("ETABSv1", "SAP2000v1", StringComparison.Ordinal)
-        .Replace("ETABS", "SAP2000", StringComparison.Ordinal);
+        .Replace("ETABS", "SAP2000", StringComparison.Ordinal); // ETABS itself
 
     private static T Say<T>(Func<T> call)
     {

@@ -1,6 +1,12 @@
 using System.Runtime.InteropServices;
 
-// The shapes of ETABS 23.2's plug-in types, as ETABSv1.dll declares them (read from the file on a PC with ETABS).
+// The shapes of ETABS's plug-in types, as ETABSv1.dll declares them: the model and the callback a plug-in's Main is
+// given. Only their names and members matter: nothing of ETABS is in this file.
+//
+// There is no cPluginContract here, on purpose. ETABSv1.dll has that interface only from ETABS 22 on (the versions that run
+// on .NET 8); the older versions, which run on the .NET Framework, have none (read from the API file of ETABS 18:
+// 279 types, cPluginCallback among them, no cPluginContract). A plug-in class that names it cannot be created in the
+// older versions at all, so the stand-in does not offer it and such a class does not compile.
 namespace ETABSv1
 {
     [Guid("f0db2843-bbd6-4482-b859-00fbe390077f")]
@@ -12,12 +18,5 @@ namespace ETABSv1
         void Finish(int iVal);
         int ErrorFlag { get; }
         bool Finished { get; }
-    }
-
-    [Guid("AB4B15AA-780A-4047-A814-3B1A83CBD26B")]
-    public interface cPluginContract
-    {
-        void Main(ref cSapModel SapModel, ref cPluginCallback ISapPlugin);
-        int Info(ref string Text);
     }
 }

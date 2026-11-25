@@ -82,7 +82,7 @@ internal static class BugLog
         {
             sb.AppendLine("# CSI ProMax bug log");
             sb.AppendLine();
-            sb.AppendLine("The published bug log has not been downloaded yet (it is fetched at every update check, at ETABS start and hourly).");
+            sb.AppendLine($"The published bug log has not been downloaded yet (it is fetched at every update check, at {Csi.Name} start and hourly).");
         }
         else
         {
@@ -98,7 +98,7 @@ internal static class BugLog
         sb.AppendLine();
         if (unsent.Count == 0)
         {
-            sb.AppendLine("No reports waiting. Use Report bug on the CSI ProMax tab or in the pane, or tell CSI ProMax in the ETABS chat \"that's a bug\".");
+            sb.AppendLine($"No reports waiting. Use Report bug on the CSI ProMax tab or in the pane, or tell CSI ProMax in the {Csi.Name} chat \"that's a bug\".");
             return sb.ToString();
         }
         sb.AppendLine("Bug reports on this PC that the log above doesn't list yet. Send the zips in the Reports folder (newest first):");

@@ -115,9 +115,9 @@ internal static class JobWindow
         bool? above = null;
 
         var panel = new StackPanel { Margin = new Thickness(ChatUi.S4) };
-        var head = Brand.Text("Task running in ETABS", Brand.K.Text, ChatUi.TitleSize, bold: true);
+        var head = Brand.Text($"Task running in {Csi.Name}", Brand.K.Text, ChatUi.TitleSize, bold: true);
         panel.Children.Add(head);
-        var why = Brand.Text("ETABS is busy with this step, so the chat waits. Pause, skip or stop it here.", Brand.K.Muted, ChatUi.SmallSize);
+        var why = Brand.Text($"{Csi.Name} is busy with this step, so the chat waits. Pause, skip or stop it here.", Brand.K.Muted, ChatUi.SmallSize);
         why.Margin = new Thickness(0, 2, 0, ChatUi.S3);
         panel.Children.Add(why);
         var now = Brand.Text("", Brand.K.Text, ChatUi.BodySize);
@@ -327,7 +327,7 @@ internal static class JobWindow
         panel.Children.Add(Brand.Header("Paused", what));
         var body = new StackPanel { Margin = new Thickness(16) };
         body.Children.Add(Brand.Text(
-            "The task is paused between two items. Finished items are kept; nothing is half done. ETABS waits here until you " +
+            $"The task is paused between two items. Finished items are kept; nothing is half done. {Csi.Name} waits here until you " +
             "choose, so the model can't be edited meanwhile.", Brand.K.Text));
         var resume = Brand.Button("Resume", Brand.Weight.Primary);
         resume.IsDefault = true;

@@ -44,7 +44,7 @@ internal static class ModelStorageMath
         new(Groups, "Groups", 0x7A7CF4, "Group types. A group type nobody placed still keeps its members' definitions."),
         new(Types, "Types and materials", 0xA67C5B, "System types, materials, fill patterns, line styles and other settings."),
         new(Ours, "CSI ProMax data", 0x0B8DB0, "What CSI ProMax keeps in the model: settings, checklist answers and the time-saved record."),
-        new(ETABS, "ETABS's own data", 0x8691A0, "History, worksharing data, previews and settings ETABS keeps for itself. It shrinks when the central model is compacted."),
+        new(ETABS, $"{Csi.Name}'s own data", 0x8691A0, $"History, worksharing data, previews and settings {Csi.Name} keeps for itself. It shrinks when the central model is compacted."),
     ];
 
     public static Kind KindOf(string key) => Kinds.FirstOrDefault(k => k.Key == key) ?? Kinds[^1];
@@ -126,7 +126,7 @@ internal static class ModelStorageMath
             if (left > 0)
                 list.Add(new Item
                 {
-                    Kind = ETABS, Name = "ETABS's own data", Bytes = left,
+                    Kind = ETABS, Name = $"{Csi.Name}'s own data", Bytes = left,
                     Detail = "History, worksharing data, previews and settings",
                 });
         }

@@ -27,7 +27,7 @@ public static class SafeModelerTools
 
     private static JsonNode SaveSafe(JsonElement a, ICsiLink e)
     {
-        if (e is not OfflineEtabs o) throw new ToolInputException("save_safe_file works in the Modeler. In ETABS, use File > Export > Story as SAFE .F2K file.");
+        if (e is not OfflineEtabs o) throw new ToolInputException("save_safe_file works in the Modeler. In ETABS, use File > Export > Story as SAFE .F2K file."); // ETABS itself
         var options = new F2kOptions(
             Story: a.Text("story") is { Length: > 0 } s ? s : null,
             Subgrade: a.TryGetProperty("subgrade", out var k) && k.ValueKind == JsonValueKind.Number ? k.GetDouble() : null,

@@ -21,9 +21,9 @@ internal static partial class UpdateNotice
         /// <summary>The next step, one line.</summary>
         public string Next => Kind switch
         {
-            Kind.Available => "Update now installs it while ETABS stays open. Your work is not interrupted.",
+            Kind.Available => $"Update now installs it while {Csi.Name} stays open. Your work is not interrupted.",
             Kind.Updated => Note ?? "You can keep working; no restart needed.",
-            _ => Note ?? "Save your work and restart ETABS when it suits you to start using it.",
+            _ => Note ?? $"Save your work and restart {Csi.Name} when it suits you to start using it.",
         };
     }
 

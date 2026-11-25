@@ -18,9 +18,9 @@ public sealed class ExportChatsAndBugsTool : IEtabsTool
 {
     public string Name => "export_chats_and_bugs";
     public string Description =>
-        "Export chats & bugs: write ONE zip to Documents\\CSI ProMax\\Bugs\\Exports with the in-ETABS chats of every model " +
+        $"Export chats & bugs: write ONE zip to Documents\\CSI ProMax\\Bugs\\Exports with the in-{Csi.Name} chats of every model " +
         "updated in the period (Markdown, tool calls and errors included), all bug report zips (sent and not sent), the " +
-        "activity log for the period (every tool call and whether it worked), Bug log.md, the add-in and ETABS versions and " +
+        $"activity log for the period (every tool call and whether it worked), Bug log.md, the add-in and {Csi.Name} versions and " +
         "the loaded-assemblies report. For the user to send to the developer so both the chats and the bugs can be learned " +
         "from. Read-only; nothing is sent anywhere.";
     public string PropertiesJson => """
@@ -129,11 +129,11 @@ internal static class ChatsAndBugsExport
         readme.AppendLine();
         readme.AppendLine($"- Period: {periodText} (local time)");
         readme.AppendLine($"- Add-in: CSI ProMax {Update.Updater.CurrentText}");
-        readme.AppendLine($"- ETABS: ETABS {App.ETABSYear}");
+        readme.AppendLine($"- {Csi.Name}: {Csi.Name} {App.ETABSYear}");
         readme.AppendLine();
         readme.AppendLine("| Part | What it is |");
         readme.AppendLine("|---|---|");
-        readme.AppendLine($"| chats/ | {chats.Count} in-ETABS chat(s) updated in the period, one per model, oldest message first, tool calls and errors included |");
+        readme.AppendLine($"| chats/ | {chats.Count} in-{Csi.Name} chat(s) updated in the period, one per model, oldest message first, tool calls and errors included |");
         readme.AppendLine($"| bugs/ | {bugCount} bug report zip(s), sent and not sent ({reports.Count(r => unsent.Contains(r.Path))} not in the published log yet); each has report.md, a screenshot, the last tool calls and the assemblies |");
         readme.AppendLine("| Bug log.md | The published bug log with this PC's reports not sent yet |");
         readme.AppendLine($"| field-tests/ | {fieldTests} field test report(s) made in the period (Help > Field test) |");

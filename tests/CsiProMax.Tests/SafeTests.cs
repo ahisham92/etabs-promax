@@ -21,7 +21,7 @@ static class SafeTests
     static JsonNode Run(string tool, string json, ICsiLink e) => SafeTools.All.First(t => t.Name == tool).Run(Args(json), e);
 
     /// <summary>The demo model, said to be SAFE, with SAFE's result tables.</summary>
-    static SafeMemory Safe()
+    internal static SafeMemory Safe()
     {
         var m = new MemoryEtabs();
         m.AddArea([(0, 0, 0), (12, 0, 0), (12, 5, 0), (0, 5, 0)], "S200");
@@ -345,6 +345,10 @@ static class SafeTests
 sealed class SafeMemory(MemoryEtabs inner, object? model = null, CsiProgram? program = null, string length = "m", string force = "kN") : ICsiLink
 {
     public CsiProgram Program => program ?? CsiProgram.Safe;
+    /// <summary>Given: the only tables this SAFE lists, and any other is refused as SAFE refuses a table it does not have.</summary>
+    public IReadOnlyList<TableName>? Listed { get; init; }
+    /// <summary>Given: what stands in for SAFE's own API in the calls made through Raw.</summary>
+    public object? Api { get; init; }
     public ModelInfo Info() => inner.Info() with { File = @"C:\Models\mat.FDB", Version = "22.0.0", Length = length, Force = force };
     public IReadOnlyList<StoryRow> Stories() => inner.Stories();
     public IReadOnlyList<FrameRow> Frames() => inner.Frames();
@@ -370,9 +374,11 @@ sealed class SafeMemory(MemoryEtabs inner, object? model = null, CsiProgram? pro
     public void SetFrameLoad(string frame, string pattern, double value, bool replace) => inner.SetFrameLoad(frame, pattern, value, replace);
     public void SetAreaLoad(string area, string pattern, double value, bool replace) => inner.SetAreaLoad(area, pattern, value, replace);
     public void AddCombo(string name, IReadOnlyList<(string Case, double Factor)> cases) => inner.AddCombo(name, cases);
-    public IReadOnlyList<TableName> Tables() => inner.Tables();
-    public TableData ReadTable(string key, IReadOnlyList<string>? cases, IReadOnlyList<string>? combos) => inner.ReadTable(key, cases, combos);
-    public object? Raw(string what, Func<dynamic, object?> work) => model is null ? inner.Raw(what, work) : work(model);
+    public IReadOnlyList<TableName> Tables() => Listed ?? inner.Tables();
+    public TableData ReadTable(string key, IReadOnlyList<string>? cases, IReadOnlyList<string>? combos) =>
+        Listed is null || Listed.Any(t => t.Key == key) ? inner.ReadTable(key, cases, combos)
+            : throw new EtabsException($"SAFE refused to read the table '{key}' (check its name with the table list).");
+    public object? Raw(string what, Func<dynamic, object?> work) => (Api ?? model) is { } api ? work(api) : inner.Raw(what, work);
     public void RunAnalysis() => inner.RunAnalysis();
     public void Save() => inner.Save();
     public void Refresh() => inner.Refresh();

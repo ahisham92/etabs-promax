@@ -185,6 +185,7 @@ public static class SapFieldSteps
         ctx.Tool("save_model", "{}", a => FieldContext.Expect(a["saved"]!.GetValue<string>().Replace('\\', '/').Split('/').Last().StartsWith(ModelerFieldSteps.ModelName, StringComparison.OrdinalIgnoreCase), $"it saved '{a["saved"]}', which is not the scratch model"));
 
         // ---- SAP2000's own analysis and design ----
+        NoVerdictBeforeAnalysis(ctx);
         ctx.Tool("run_analysis", "{}", _ => FieldContext.Expect(link.Info().Locked, "the analysis answered, but SAP2000 does not say the model is analysed (locked)"));
         var analysed = false;
         try { analysed = link.Info().Locked; }
@@ -198,8 +199,8 @@ public static class SapFieldSteps
         ctx.Tool("check_displacement", """{"lateral_limit":500,"vertical_limit":0.02}""", null, "tool check_displacement" + none);
         ctx.Tool("design_ratios", """{"limit":10}""", null, "tool design_ratios" + none);
         ctx.Tool("check_report", """{"lateral_limit":500}""", null, "tool check_report" + none);
-        ctx.Tool("results_overview", "{}", null, "tool results_overview (the ETABS tool, as SAP2000 answers it)");
-        ctx.Tool("check_modal", "{}", null, "tool check_modal (the ETABS tool, as SAP2000 answers it)");
+        ctx.Tool("results_overview", "{}", null, "tool results_overview (the ETABS tool, as SAP2000 answers it)"); // ETABS itself
+        ctx.Tool("check_modal", "{}", null, "tool check_modal (the ETABS tool, as SAP2000 answers it)"); // ETABS itself
         if (analysed) ctx.Step("SAP2000 tables with data after the analysis and design", () => link.Tables().Where(t => !t.Empty).Select(t => t.Name).ToList());
 
         // ---- snapshots and the review pack ----

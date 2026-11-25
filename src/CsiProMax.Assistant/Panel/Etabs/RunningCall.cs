@@ -134,17 +134,22 @@ internal static class RunningCall
 
     /// <summary>The activity log's line for a call ETABS closed during.</summary>
     internal static string Describe(Entry e) =>
-        $"ETABS closed by itself while {e.Tool} was running" + (e.Where.Length > 0 ? $" (from {e.Where})" : "") +
+        $"{Csi.Name} closed by itself while {e.Tool} was running" + (e.Where.Length > 0 ? $" (from {e.Where})" : "") +
         (e.Model.Length > 0 ? $" on '{e.Model}'" : "") + $", started {e.Time}" + (e.Version.Length > 0 ? $", CSI ProMax {e.Version}" : "") +
         ". Its arguments: " + (e.Arguments.Length > 0 ? e.Arguments : "(none)");
 
-    /// <summary>True when <paramref name="pid"/> is a running ETABS (the field test's journal uses the same check).</summary>
+    /// <summary>
+    /// True when <paramref name="pid"/> is a CSI ProMax that is still running: the files are kept per CSI ProMax
+    /// process, which runs beside the CSI program under the same process name as this one (dotnet). A second window
+    /// that is still open (CSI ProMax in ETABS and in SAFE at once) is not a program that closed.
+    /// </summary>
     internal static bool IsETABSRunning(int pid)
     {
         try
         {
             using var p = Process.GetProcessById(pid);
-            return !p.HasExited && p.ProcessName.IndexOf("ETABS", StringComparison.OrdinalIgnoreCase) >= 0;
+            using var me = Process.GetCurrentProcess();
+            return !p.HasExited && string.Equals(p.ProcessName, me.ProcessName, StringComparison.OrdinalIgnoreCase);
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception) { return false; }
     }

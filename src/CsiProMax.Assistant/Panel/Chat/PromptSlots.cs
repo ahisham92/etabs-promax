@@ -20,7 +20,7 @@ internal static class PromptSlots
         new("grid", "Which grid line?", "[grid]"),
         new("sheet_set", "Which sheet set?", "[sheet set]"),
         new("berth", "Which berth?", "[berth]"),
-        new(Selection, "", "the elements selected in ETABS"),
+        new(Selection, "", $"the elements selected in {Csi.Name}"),
     ];
 
     /// <summary>At most this many choices are offered for one blank (a model with hundreds of grids shows the first ones).</summary>

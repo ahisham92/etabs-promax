@@ -56,7 +56,7 @@ internal sealed partial class ChatPane
         var big = _big is not null;
         _bigButton.Content = ChatUi.Icon(big ? ChatUi.Paths.Collapse : ChatUi.Paths.Expand);
         _bigButton.ToolTip = big
-            ? "Back to the side: the chat returns to its pane on the right of ETABS (minimising or closing this window does the same)."
+            ? $"Back to the side: the chat returns to its pane on the right of {Csi.Name} (minimising or closing this window does the same)."
             : "Open the chat large: a big window with the jobs listed on the right. Minimise or close it to bring the chat back to the side.";
         AutomationProperties.SetName(_bigButton, big ? "Back to the side" : "Open the chat large");
         AutomationProperties.SetHelpText(_bigButton, (string)_bigButton.ToolTip);

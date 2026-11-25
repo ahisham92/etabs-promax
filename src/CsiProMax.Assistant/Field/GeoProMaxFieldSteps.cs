@@ -29,7 +29,7 @@ public static class GeoProMaxFieldSteps
         if (link is OfflineEtabs)
         {
             // The Modeler has no program behind it: the tool must say so and change nothing.
-            ctx.Refused("apply_geopromax_springs", $$"""{"file":{{JsonSerializer.Serialize(Path.Combine(ctx.Folder, "none.gpmsprings.json"))}}}""", "SAFE or ETABS");
+            ctx.Refused("apply_geopromax_springs", $$"""{"file":{{JsonSerializer.Serialize(Path.Combine(ctx.Folder, "none.gpmsprings.json"))}}}""", "SAFE or ETABS"); // ETABS itself
             return;
         }
 
