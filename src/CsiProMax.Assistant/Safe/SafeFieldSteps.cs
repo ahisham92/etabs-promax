@@ -218,6 +218,9 @@ public static class SafeFieldSteps
         // ---- the link with GeoProMax: the pressures out, the springs back in (the model is unlocked for them) ----
         GeoProMaxFieldSteps.Run(ctx);
 
+        // ---- the tools every program has through the same API (the whole API, lateral loads, checkpoints, a building) ----
+        CsiFieldSteps.Run(ctx);
+
         ctx.Coverage("every SAFE tool was run");
     }
 }

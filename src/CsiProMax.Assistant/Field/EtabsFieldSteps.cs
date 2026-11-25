@@ -425,6 +425,9 @@ public static class EtabsFieldSteps
         // ---- the link with GeoProMax ----
         GeoProMaxFieldSteps.Run(ctx);
 
+        // ---- the tools every program has through the same API (the whole API, lateral loads, checkpoints, a building) ----
+        CsiFieldSteps.Run(ctx);
+
         ctx.Coverage("every ETABS tool was run");
     }
 

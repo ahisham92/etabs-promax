@@ -29,6 +29,12 @@ namespace CsiProMax.Assistant.Etabs
             _type = type;
         }
 
+        /// <summary>The API object itself, for the calls made by name (ApiCall).</summary>
+        internal object Target { get { return _target; } }
+
+        /// <summary>The API interface it is called through (cSapModel, cFrameObj, ...).</summary>
+        internal Type ApiType { get { return _type; } }
+
         /// <summary>
         /// The API file of the running program (the one with this process id, when given), or of the program where it is
         /// usually installed. Each program has its own API file (ETABSv1.dll, SAP2000v1.dll, SAFEv1.dll); the newer
