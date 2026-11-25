@@ -18,6 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # the tags, for the notes when GitHub cannot write them
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
@@ -58,6 +60,17 @@ jobs:
           python3 scripts/changed-files.py package/dist "previous/unpacked/dist" files.json "changed-$NAME.zip"
         env:
           GH_TOKEN: ${{ github.token }}
-      - run: gh release create "$TAG" "CsiProMax-$NAME.zip" "changed-$NAME.zip" files.json install.ps1 check.ps1 --target "$GITHUB_SHA" --title "CSI ProMax $NAME" --generate-notes $PRERELEASE
+      # GitHub's note writer can fail with a 500 or 504 for a while (2026-11-25, v0.4.8): then it is tried again, and after
+      # that the release is made with the commit titles since the last release as its notes, so a version is never held up.
+      - run: |
+          files=("CsiProMax-$NAME.zip" "changed-$NAME.zip" files.json install.ps1 check.ps1)
+          for wait in 0 20 60; do
+            sleep "$wait"
+            if gh release create "$TAG" "${files[@]}" --target "$GITHUB_SHA" --title "CSI ProMax $NAME" --generate-notes $PRERELEASE; then exit 0; fi
+            gh release view "$TAG" >/dev/null 2>&1 && gh release delete "$TAG" --yes
+          done
+          last=$(git describe --tags --abbrev=0 --match 'v[0-9]*' "$GITHUB_SHA^" 2>/dev/null || true)
+          { echo "## What's in $NAME"; echo; git log --no-merges --format='- %s' ${last:+"$last..$GITHUB_SHA"} | head -n 60; } > notes.md
+          gh release create "$TAG" "${files[@]}" --target "$GITHUB_SHA" --title "CSI ProMax $NAME" --notes-file notes.md $PRERELEASE
         env:
           GH_TOKEN: ${{ github.token }}
