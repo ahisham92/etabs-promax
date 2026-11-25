@@ -75,6 +75,7 @@ public static class Program
         var program = (Array.IndexOf(args, "--program") is var named and >= 0 && named + 1 < args.Length ? CsiProgram.Find(args[named + 1]) : null) ?? CsiProgram.OfProcess(etabsPid);
         // Every text names the program the window works beside (Csi.Name), so it is told before anything else is made.
         Csi.Program = program;
+        CsiProMax.App.NoUpdate = args.Contains("--no-update");
         if (Array.IndexOf(args, "--installed-in") is var origin and >= 0 && origin + 1 < args.Length) ToolsMenu.InstalledIn = args[origin + 1];
         if (!program.Ready)
         {

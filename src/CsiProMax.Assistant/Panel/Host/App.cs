@@ -199,7 +199,7 @@ public static class App
     /// </summary>
     internal static void SwitchWhenIdle()
     {
-        if (SwitchTo is null || Updater.NewestDownloaded(Updater.Current) is null) return;
+        if (NoUpdate || SwitchTo is null || Updater.NewestDownloaded(Updater.Current) is null) return;
         if (Interlocked.Exchange(ref _switching, 1) == 1) return;
         var stop = _life?.Token ?? CancellationToken.None;
         _ = Task.Run(async () =>
@@ -261,8 +261,16 @@ public static class App
         _ = Task.Run(() => RunUpdateAsync(force: true, interactive: true, token));
     }
 
+    /// <summary>
+    /// Started with --no-update (the window check of a build, tests/window.Tests.ps1): this window neither looks for a
+    /// newer version by itself nor switches to one. Without it, a build older than the newest release updated itself
+    /// and its window was gone twelve seconds later, which failed the check of a pull request that had done nothing wrong.
+    /// </summary>
+    public static bool NoUpdate { get; set; }
+
     private static async Task RunUpdateAsync(bool force, bool interactive, CancellationToken stop, bool install = true)
     {
+        if (NoUpdate && !interactive) return;
         var progress = new UpdateProgress { Interactive = interactive };
         UpdateProgress.Current = progress;
         if (interactive) Surface(progress);

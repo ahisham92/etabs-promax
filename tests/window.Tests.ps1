@@ -19,7 +19,7 @@ function Errors { if (Test-Path -LiteralPath $notes) { (Get-Content -LiteralPath
 # A larger screen than the runner's default, so the whole window is in the picture. Not every Windows has this command.
 try { Set-DisplayResolution -Width 1920 -Height 1080 -Force | Out-Null } catch { }
 
-$process = Start-Process -FilePath 'dotnet' -ArgumentList ('"' + $dll + '"'), '--demo', '--this-version' -PassThru
+$process = Start-Process -FilePath 'dotnet' -ArgumentList ('"' + $dll + '"'), '--demo', '--this-version', '--no-update' -PassThru
 $title = ''
 try {
     $deadline = (Get-Date).AddSeconds(120)

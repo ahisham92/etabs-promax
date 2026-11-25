@@ -788,6 +788,16 @@ static class TesterBugTests
             var steps = ctx.Steps.ToList();
             Check(steps.Count == 2 && steps[0].Ok && !steps[0].Skipped && steps[0].Name.Contains("not run again", StringComparison.Ordinal) && steps[1].Skipped && steps[1].Detail.Contains("as in the run of version 0.4.16", StringComparison.Ordinal), string.Join(" | ", steps.Select(s => $"{s.Name}: {s.Detail}")));
         });
+        yield return ("build check: the window that is checked does not update itself away", () =>
+        {
+            // Seen on 2026-11-25: a pull request's windows job failed with "it is still running twelve seconds later"
+            // because a newer release existed and the checked window switched to it.
+            var check = File.ReadAllText(Path.Combine(SourceText.Root(), "tests/window.Tests.ps1"));
+            Check(check.Contains("'--no-update'", StringComparison.Ordinal), "the window check starts a window that may update itself");
+            var app = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Panel/Host/App.cs"));
+            Check(app.Contains("if (NoUpdate && !interactive) return;", StringComparison.Ordinal) && app.Contains("if (NoUpdate || SwitchTo is null", StringComparison.Ordinal), "--no-update does not stop the look for a version and the switch to it");
+            Check(File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Program.cs")).Contains("args.Contains(\"--no-update\")", StringComparison.Ordinal), "--no-update is not read");
+        });
         yield return ("ETABS 20 tester: the field test tries what Tools > CSI ProMax does in each program, and fails where the plug-in cannot be created", () =>
         {
             // What the check answered on that PC (in its own words), and a PC where all is well.
