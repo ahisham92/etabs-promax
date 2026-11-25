@@ -23,6 +23,36 @@ public sealed class RunSelfTestTool(ToolRegistry registry) : IEtabsTool
     }
 }
 
+/// <summary>The field test from the chat: the self test and the result checks, saved as a report file to send back.</summary>
+public sealed class RunFieldTestTool : IEtabsTool
+{
+    public string Name => "run_field_test";
+    public string Description =>
+        "Run the field test on the open model and save its report: every reading check of the self test, the result " +
+        "and design checks with the names of the program's own tables when the model has been analysed, the review " +
+        "pack, and what this PC and install are like (versions, the programs' plug-in lists). Changes nothing in the " +
+        "model. The report is one file in Documents\\CSI ProMax\\Bugs\\Field tests for the user to send to whoever " +
+        "gave them CSI ProMax. Use it when the user asks for the field test, or is asked to send one.";
+    public string PropertiesJson => "{}";
+    public string[] Required => [];
+    public bool ModifiesModel => false;
+
+    public ToolResult Execute(EtabsApp app, ToolArgs args)
+    {
+        if (SelfTest.IsRunning) return ToolResult.Error("A test is already running.");
+        var outcome = FieldTest.Run(app.Link, changes: false, "the chat");
+        return ToolResult.Ok(new
+        {
+            status = outcome.Failed == 0 ? "all passed" : "some failed",
+            passed = outcome.Steps.Count - outcome.Failed,
+            failed = outcome.Failed,
+            report_file = outcome.File,
+            failed_steps = outcome.Steps.Where(s => !s.Ok).Select(s => new { step = s.Name, detail = s.Detail }),
+            next = "Tell the user the counts and what failed, where the report file is, and ask them to send that file to whoever gave them CSI ProMax.",
+        });
+    }
+}
+
 /// <summary>What the last self test of this session found, without running it again.</summary>
 public sealed class SelfTestStatusTool : IEtabsTool
 {

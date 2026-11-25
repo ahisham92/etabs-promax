@@ -549,10 +549,70 @@ Test("assistant: every tool has a name of its own and a schema", () =>
     }
 });
 
+Test("field test: one report with the PC's plug-in lists, every check, and ETABS's own table names", () =>
+{
+    var root = Directory.CreateTempSubdirectory("cpm-field").FullName;
+    try
+    {
+        var settings = Path.Combine(root, "Computers and Structures");
+        Directory.CreateDirectory(Path.Combine(settings, "ETABS 23"));
+        Directory.CreateDirectory(Path.Combine(settings, "Other 1"));
+        File.WriteAllText(Path.Combine(settings, "ETABS 23", "ETABS.ini"),
+            "[Units]\r\n Force=kN\r\n[PlugIn]\r\n NumberPlugIns=1\r\n PlugInName=CsiProMaxPlugin\r\n PlugInMenuText=CSI ProMax\r\n PlugInPath=C:\\X\\CsiProMaxPlugin.dll\r\n\r\n[Graphics]\r\n Colour=1\r\n");
+        File.WriteAllText(Path.Combine(settings, "Other 1", "Other.ini"), "[PlugIn]\r\n NumberPlugIns=0\r\n");
+        var lists = FieldTest.PlugInLists(settings);
+        Equal(1, lists.Count, "only the CSI programs' settings are read");
+        Equal(@"ETABS 23\ETABS.ini", lists[0].File, "named by folder and file");
+        Check(lists[0].Section.StartsWith("[PlugIn]") && lists[0].Section.EndsWith("CsiProMaxPlugin.dll") && !lists[0].Section.Contains("Graphics"), "the plug-in list alone, as written");
+        Check(FieldTest.PlugInSection("[A]\nx=1\n") is null, "a file with no plug-in list has none");
+        Equal(0, FieldTest.PlugInLists(Path.Combine(root, "nowhere")).Count, "no CSI settings, no lists");
+
+        // A model that has not been analysed: the reading checks run and the result checks say why they were left out.
+        var e = new MemoryEtabs();
+        e.AddFrame(0, 0, 0, 0, 0, 3, e.FrameSections()[0]);
+        var at = new DateTime(2026, 11, 25, 14, 2, 0);
+        var first = FieldTest.Run(e, false, "the Help menu", Path.Combine(root, "out"), at, settings);
+        Equal(Path.Combine(root, "out", "Field test ETABS 2026-11-25 1402.md"), first.File, "the report's name says the program and when");
+        Equal(first.Report, File.ReadAllText(first.File), "the report is saved as returned");
+        Check(first.Steps.Any(s => s.Name == "ETABS results" && s.Detail.Contains("not been analysed")), "no analysis: the result checks are left out, and it says so");
+        Check(first.Steps.Any(s => s.Name == "ETABS review pack" && s.Ok), "the review pack is built from the model");
+        Check(first.Report.Contains("started from the Help menu") && first.Report.Contains("Changes to the model: none"), "how it was run");
+        Check(first.Report.Contains("### ETABS 23\\ETABS.ini") && first.Report.Contains(" PlugInName=CsiProMaxPlugin"), "the plug-in list is in the report");
+        Check(first.Report.Contains("analysed: no") && first.Report.Contains("model \"demo.EDB\"") && !first.Report.Contains("Models"), "the model's name without its folder, in every part of the report");
+        Check(first.Report.Contains("opened on its own"), "not started by the plug-in");
+        var again = FieldTest.Run(e, false, "the chat", Path.Combine(root, "out"), at, settings);
+        Check(again.File != first.File && File.Exists(first.File), "a second report in the same minute does not replace the first");
+
+        // Analysed, with ETABS's tables: each table the checks read is sampled with its fields, and the checks run.
+        e.RunAnalysis();
+        e.ResultTables["Story Drifts"] = new(["Story", "Output Case", "Direction", "Drift", "Label"], [["Story1", "EQX", "X", "0.0019", "7"], ["Story1", "EQY", "Y", "0.0009", "5"], ["Story1", "WX", "X", "0.0004", "5"]]);
+        e.ResultTables["Modal Participating Mass Ratios"] = new(["Case", "Mode", "Period", "UX", "UY", "RZ", "SumUX", "SumUY"], [["Modal", "1", "0.8", "0.7", "0", "0", "0.7", "0"], ["Modal", "2", "0.7", "0", "0.72", "0", "0.7", "0.72"]]);
+        var run = FieldTest.Run(e, false, "the command line", Path.Combine(root, "out"), at.AddMinutes(5), settings);
+        var drifts = run.Steps.Single(s => s.Name == "ETABS table Story Drifts");
+        Check(drifts.Ok && (drifts.Full ?? drifts.Detail).Contains("\"fields\":[\"Story\",\"Output Case\",\"Direction\",\"Drift\",\"Label\"]") && (drifts.Full ?? drifts.Detail).Contains("\"rows\":3"), "the table's own fields and row count");
+        Check(!(drifts.Full ?? drifts.Detail).Contains("WX"), "only the first rows are sampled");
+        var missing = run.Steps.Single(s => s.Name == "ETABS table Story Stiffness");
+        Check(!missing.Ok && missing.Detail.Contains("no table named 'Story Stiffness'") && missing.Detail.Contains("Story Drifts"), "a name ETABS does not have fails and lists the tables with a similar name");
+        Check(run.Steps.Any(s => s.Name == "ETABS check_drift" && s.Ok) && run.Steps.Any(s => s.Name == "ETABS check_report" && s.Ok), "the checks themselves are run");
+        Check(run.Failed > 0 && run.Report.Contains("## Not working") && run.Report.Contains("- ETABS table Story Stiffness:"), "what failed is listed first");
+        Check(run.Report.Contains("### FAIL: ETABS table Story Stiffness") && run.Report.Contains("### ok: ETABS table Story Drifts"), "every check has its own part");
+        Check(run.Summary().Contains("Not working:") && run.Summary().Contains(run.File), "the dialog says what failed and where the report is");
+        var long_ = run.Steps.Single(s => s.Name == "ETABS check_report");
+        Check(long_.Detail.Length <= 303 && (long_.Full is null || long_.Full.Length > long_.Detail.Length), "the dialog's text stays short; the report keeps the whole answer");
+
+        // With changes, on a scratch model.
+        var scratch = new MemoryEtabs();
+        scratch.AddFrame(0, 0, 0, 0, 0, 3, scratch.FrameSections()[0]);
+        var changed = FieldTest.Run(scratch, true, "the Help menu", Path.Combine(root, "out"), at.AddMinutes(9), settings);
+        Check(changed.Steps.Any(s => s.Name == "AddFrame" && s.Ok) && changed.Report.Contains("the load pattern CPM-TEST"), "with changes it says what it added");
+    }
+    finally { Directory.Delete(root, true); }
+});
+
 Test("assistant: the chat is given every tool, the drawing reader too", () =>
 {
     var registry = CsiProMax.Tools.ToolRegistry.CreateDefault();
-    foreach (var name in new[] { "read_cad_drawing", "read_drawing", "make_document", "run_self_test", "memory_note", "ask_user" })
+    foreach (var name in new[] { "read_cad_drawing", "read_drawing", "make_document", "run_self_test", "run_field_test", "memory_note", "ask_user" })
         Check(registry.Find(name) is not null && registry.IsBuiltIn(name), "the chat has no " + name);
     foreach (var tool in EtabsTools.All)
         Check(registry.IsBuiltIn(tool.Name), "the chat has no " + tool.Name);

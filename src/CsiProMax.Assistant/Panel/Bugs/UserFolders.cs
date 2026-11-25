@@ -16,7 +16,7 @@ internal static class UserFolders
 
     public static IReadOnlyList<Folder> List() =>
     [
-        new("Bugs", BugLog.Root, "Report bug zips (Reports), Export chats & bugs zips (Exports) and the bug log."),
+        new("Bugs", BugLog.Root, "Report bug zips (Reports), Export chats & bugs zips (Exports), field test reports (Field tests) and the bug log."),
         new("Learned tools", System.IO.Path.Combine(Roaming, "learned-tools"), "The tools saved from the chat, one .json file each."),
         new("Recipes", System.IO.Path.Combine(Roaming, "recipes"), "Saved recipes: steps the chat can run again."),
         new("Chats", System.IO.Path.Combine(Local, "chat", "conversations"), "The saved chats of every model."),

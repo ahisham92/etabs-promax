@@ -62,6 +62,15 @@ public static class Program
             var folder = sapTest + 2 < args.Length ? args[sapTest + 2] : Path.Combine(Path.GetTempPath(), "CsiProMax-sap-test");
             return CsiProMax.Assistant.Sap2000.SapScratchTest.Run(s2k, folder);
         }
+        if (args.Contains("--fieldtest"))
+        {
+            // The field test without the window: prints the report and says where it was saved.
+            using var check = new ComEtabs(etabsPid, program);
+            var outcome = FieldTest.Run(demo ? new MemoryEtabs() : CsiProMax.Assistant.Tools.ProgramTools.Live(check), args.Contains("--changes"), "the command line");
+            Console.WriteLine(outcome.Report);
+            Console.WriteLine("Saved: " + outcome.File);
+            return outcome.Failed == 0 ? 0 : 1;
+        }
         if (args.Contains("--selftest"))
         {
             using var check = new ComEtabs(etabsPid, program);
