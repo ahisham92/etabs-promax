@@ -1,4 +1,5 @@
 using CsiProMax.Assistant;
+using CsiProMax.Assistant.Etabs;
 
 /// <summary>
 /// A scratch window leaves the plug-in lists as it found them: on the field-test PC (2026-11-25) SAP2000 26 and ETABS 23,
