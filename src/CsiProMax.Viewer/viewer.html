@@ -3210,7 +3210,7 @@ function modelerMenus(m) {
     ["Import", [["Tables from Excel (.xlsx)...", "m:xlsxIn"]]],
     ["Export", [["Tables to Excel (.xlsx)...", "m:xlsxOut"], 0, ["SAP2000 .s2k Text File...", "m:s2k"], ["SAFE .f2k Text File (one floor)...", "m:f2k"]]], 0, ["Print the active window...", "print", "Ctrl+P"]];
   m.Edit = [[s.undo ? "Undo " + s.undo : "Undo", "m:undo", "Ctrl+Z", !s.undo], [s.redo ? "Redo " + s.redo : "Redo", "m:redo", "Ctrl+Y", !s.redo], 0,
-    ["Delete", "m:delete", "Del", !any], 0, ["Copy names of the selected objects", "copyNames", "Ctrl+C", !any], 0, ["Hide the selected objects", "hideSel", "", !any], ["Show all objects", "showAll"]];
+    ["Delete", "m:delete", "Del", !any], 0, ["Copy names of the selected objects", "copyNames", "Ctrl+C", !any], 0, ["Hide the selected objects", "hideSel", "", !any], ["Show all objects", "showAll"], 0, ["Model Text...", "m:text"]];
   m.Define = [["Material Properties...", "m:materials"], ["Frame Sections...", "m:frameSections"], ["Slab and Wall Sections...", "m:shellSections"], 0,
     ["Story Data...", "m:stories"], ["Grid Data...", "m:grids"], 0, ["Functions", [["Response Spectrum...", "m:fnRS"], ["Time History...", "m:fnTH"]]],
     ["Load Patterns...", "m:patterns"], ["Load Cases...", "m:cases"], ["Load Combinations...", "m:combos"], 0, ["Mass Source...", "m:mass"], ["P-Delta Options...", "m:pdelta"]];
@@ -3252,6 +3252,7 @@ async function modelAct(a) {
     case "cases": return hmCases();
     case "mass": return hmMass();
     case "pdelta": return hmPDelta();
+    case "text": return hmText();
     case "asgFrameLoad": return hmAssignLoad("f");
     case "asgShellLoad": return hmAssignLoad("a");
     case "drawHelp": return hmDrawHelp();
@@ -3711,6 +3712,36 @@ async function hmPDelta() {
   };
   q(d, "#pAdd").onclick = () => { loads.push({pattern: (defs.load_patterns[0] || {}).name, factor: 1}); paint(); };
   paint();
+}
+
+// ---- Edit > Model Text: the model in the program's own text, one section at a time (the safety net) ----
+async function hmText(pick) {
+  const list = await hmRun("model_text", {}, true); if (!list.ok) return hmSay(list.error, true);
+  const names = list.result.sections.map(x => x.section);
+  const d = dialog("Model Text", `<div class="g2"><span>Section</span><span style="display:flex;gap:6px"><select id="tS" style="flex:1">${opts(names.map(n => [n, n]), pick || "LOAD CASES")}</select><input id="tNew" placeholder="or a new section heading" style="flex:1"></span></div>
+    <textarea id="tX" spellcheck="false" wrap="off" style="width:100%;height:320px;font-family:Consolas,monospace;font-size:12px;margin-top:8px;white-space:pre;overflow:auto"></textarea>
+    <p class="kv" id="tInfo"></p>
+    <p class="kv">The lines of one section of the model's .e2k, in the program's own syntax. Anything no form offers yet can be written here. A change is taken only when the whole file still reads and the model stays whole; otherwise nothing changes and the reason is shown.</p>`,
+    [["Check", d => { go(true); return false; }], ["Apply", d => { go(false); return false; }], ["OK", d => { go(false, true); return false; }, true], ["Cancel"]], {width: 760});
+  const sec = () => (q(d, "#tNew").value.trim() || q(d, "#tS").value);
+  const load = async () => {
+    const j = await hmRun("model_text", {section: sec()}, true);
+    if (!j.ok) return formError(d, j.error);
+    q(d, "#tX").value = j.result.text; q(d, "#tInfo").textContent = j.result.exists === false ? "This section is not in the model yet: what is written here adds it." : j.result.lines + " lines.";
+    formError(d, "");
+  };
+  const go = async (only, close) => {
+    formError(d, "");
+    const j = await hmRun("edit_model_text", {section: sec(), text: q(d, "#tX").value, check_only: only}, true);
+    if (!j.ok) return formError(d, j.error);
+    const r = j.result, ch = Object.entries(r.changes || {}).map(([k, v]) => k.replace(/_/g, " ") + " " + v).join(", ");
+    q(d, "#tInfo").textContent = (only ? "Checked, nothing changed yet. " : "Applied. Edit > Undo steps back. ") + (ch ? "Counts: " + ch + ". " : "") + (r.kept_as_written || "");
+    if (!only && close) { d.close(); hmSay("Done: the model text of " + r.section + ". Edit > Undo steps back."); }
+    else if (!only) { const again = await hmRun("model_text", {}, true); if (again.ok) { const cur = sec(); q(d, "#tS").innerHTML = opts(again.result.sections.map(x => [x.section, x.section]), cur); q(d, "#tNew").value = ""; } }
+  };
+  q(d, "#tS").onchange = () => { q(d, "#tNew").value = ""; load(); };
+  q(d, "#tNew").onchange = load;
+  load();
 }
 
 // ---- Assign: joint, frame and shell loads of every kind ----
