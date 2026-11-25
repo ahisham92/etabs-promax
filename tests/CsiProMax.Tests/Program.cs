@@ -939,6 +939,13 @@ Test("add_load_pattern: a user coefficient the program's API cannot set keeps th
     var steps = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Field", "EtabsFieldSteps.cs"));
     Check(steps.Contains("its automatic load cannot be set through this ETABS's API"), "the field test still fails the seismic step on an ETABS with no user coefficient");
 });
+Test("field test: the ETABS scratch model gets a lateral load its checks can read, also on ETABS 23", () =>
+{
+    var steps = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Field", "EtabsFieldSteps.cs"));
+    var load = steps.IndexOf("joint forces in X in CPM-EQX", StringComparison.Ordinal);
+    var analysis = steps.IndexOf("ctx.Tool(\"run_analysis\"", load > 0 ? load : 0, StringComparison.Ordinal);
+    Check(load > 0 && analysis > load && steps.Contains("m.PointObj.SetLoadForce(p, \"CPM-EQX\""), "the seismic pattern has no load before the analysis when ETABS cannot take a user coefficient");
+});
 foreach (var (name, body) in CdtSdkTests.All()) Test(name, body);
 foreach (var (name, body) in KeptPlugInsTests.All()) Test(name, body);
 foreach (var (name, body) in FieldRun048Tests.All()) Test(name, body);
