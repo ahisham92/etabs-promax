@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- Build-time stand-in for SAP2000's API file, SAP2000v1.dll: only the three types a plug-in must name, with the
+  <!-- Build-time stand-in for SAP2000's API file, SAP2000v1.dll: only the two types a plug-in may name (what the oldest version has), with the
        same assembly name, version and public key (the public half only, read from SAP2000 26's SAP2000v1.dll: token
        453d728ef24c6f5e, the same key as ETABSv1), so the plug-in binds to the real SAP2000v1.dll inside SAP2000 on
        .NET 8 and on .NET Framework alike. Never shipped, and holds no code of CSI's. -->

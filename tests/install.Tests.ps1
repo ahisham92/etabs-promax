@@ -22,6 +22,8 @@ foreach ($name in 'CsiProMax.dll', 'CsiProMaxPlugin.dll', 'CsiProMaxSafePlugin.d
 }
 Set-Content -LiteralPath (Join-Path $dist.FullName 'viewer.html') -Value '<html></html>' -NoNewline
 Set-Content -LiteralPath (Join-Path $package.FullName 'INSTALL.txt') -Value 'notes' -NoNewline
+# The check that the installer runs when it is done, as the release packs it.
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..' 'check.ps1') -Destination (Join-Path $package.FullName 'dist' 'check.ps1')
 $zip = Join-Path $root 'CsiProMax-9.8.7.zip'
 Compress-Archive -Path (Join-Path $package.FullName '*') -DestinationPath $zip
 
@@ -38,6 +40,11 @@ $unix = Settings 'ETABS 20' 'ETABS.ini' "[PlugIn]`n NumberPlugIns=0`n`n[Graphics
 $safe16 = Settings 'SAFE 16' 'SAFE.ini' $fresh
 $bridge = Settings 'CSiBridge 26' 'CSiBridge.ini' $fresh
 $none = Settings 'ETABS 19' 'ETABS.ini' "[Graphics]`r`n Colour=1`r`n"
+# The ETABS 20 tester's list: CSI ProMax added by hand a second time, from another folder and under another menu text.
+$twice = Settings 'ETABS 18' 'ETABS.ini' "[PlugIn]`r`n NumberPlugIns=2`r`n PlugInName=CsiProMaxPlugin`r`n PlugInMenuText=CSI ProMax`r`n PlugInPath=C:\Users\x\OneDrive - Company\Documents\CSI ProMax\CsiProMaxPlugin.dll`r`n PlugInName=CsiProMaxPlugin`r`n PlugInMenuText=myCsiProMaxPlugin`r`n PlugInPath=C:\Users\x\Documents\CSI ProMax\CsiProMaxPlugin.dll`r`n`r`n[Graphics]`r`n"
+# Ours beside someone else's: never changed.
+$mixed = Settings 'SAP2000 23' 'SAP2000v23.ini' "[PlugIn]`r`n NumberPlugIns=2`r`n PlugInName=Someone.Else`r`n PlugInMenuText=Else`r`n PlugInPath=C:\Else\Else.dll`r`n PlugInName=CsiProMaxSapPlugin`r`n PlugInMenuText=CSI ProMax`r`n PlugInPath=C:\Old\CsiProMaxSapPlugin.dll`r`n"
+$mixedWas = Text $mixed
 $utf16 = Join-Path (New-Item -ItemType Directory -Force -Path (Join-Path $settings 'ETABS 22')).FullName 'ETABS.ini'
 [IO.File]::WriteAllBytes($utf16, [byte[]](0xFF, 0xFE) + [Text.Encoding]::Unicode.GetBytes($fresh))
 
@@ -67,6 +74,9 @@ Check ($output -match 'SAP2000 24\s+has other plug-ins') 'and the person is told
 Check ((Text $etabs21).Contains(" NumberPlugIns=1`r`n PlugInName=CsiProMaxPlugin`r`n PlugInMenuText=CSI ProMax`r`n PlugInPath=$plugin`r`n`r`n[Graphics]")) 'our own entry from another folder is pointed at this one'
 Check ((Text $unix) -eq "[PlugIn]`n NumberPlugIns=1`n PlugInName=CsiProMaxPlugin`n PlugInMenuText=CSI ProMax`n PlugInPath=$plugin`n`n[Graphics]`n") 'line ends are kept as they were'
 Check ((Text $safe16) -eq $fresh -and (Text $bridge) -eq $fresh) 'an old SAFE and another program are not touched'
+Check ((Text $twice) -eq "[PlugIn]`r`n NumberPlugIns=1`r`n PlugInName=CsiProMaxPlugin`r`n PlugInMenuText=CSI ProMax`r`n PlugInPath=$plugin`r`n`r`n[Graphics]`r`n") 'CSI ProMax listed twice by hand becomes one entry, for this folder'
+Check ((Text $mixed) -eq $mixedWas) 'CSI ProMax beside another plug-in is left alone'
+Check ($output -match 'Checked: can each program open CSI ProMax\?' -and $output -match 'ETABS 23\s+(yes|NO|could not be tried)') 'when it is done, the installer checks that each program can open CSI ProMax'
 Check ((Text $none) -eq "[Graphics]`r`n Colour=1`r`n" -and $output -match 'ETABS 19\s+Its settings file was not understood') 'a file with no plug-in list is left alone'
 $bytes = [IO.File]::ReadAllBytes($utf16)
 Check ($bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE -and [Text.Encoding]::Unicode.GetString($bytes, 2, $bytes.Length - 2).Contains(" PlugInPath=$plugin`r`n")) 'a UTF-16 file stays UTF-16'

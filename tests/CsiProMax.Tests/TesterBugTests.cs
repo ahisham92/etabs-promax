@@ -389,6 +389,56 @@ static class TesterBugTests
             }
             finally { Directory.Delete(root, true); }
         });
+
+        // ---- the second report: ETABS 20 answered "Cannot create plugin!" (CSI ProMax 0.4.4) ----
+
+        yield return ("ETABS 20 tester: the field test tries what Tools > CSI ProMax does in each program, and fails where the plug-in cannot be created", () =>
+        {
+            // What the check answered on that PC (in its own words), and a PC where all is well.
+            var broken = PlugInCheck.Read("""{"Text":"CSI ProMax check ...","Programs":{"Program":"ETABS 20","Listed":true,"Loads":false,"Runtime":".NET Framework","Reasons":"This CSI ProMax plug-in names cPluginContract, which the API file of ETABS 20 does not have."}}""");
+            Equal("ETABS 20|True|False|1", $"{broken.Programs[0].Program}|{broken.Programs[0].Listed}|{broken.Programs[0].Loads}|{broken.Programs[0].Reasons.Count}", "a list of one, as PowerShell writes it");
+            var ctx = new FieldContext(CsiProgram.Etabs, Path.GetTempPath(), new MemoryEtabs());
+            PcFieldSteps.PlugIn(ctx, broken);
+            var failed = ctx.Steps.First();
+            Check(!failed.Ok && failed.Name.StartsWith("ETABS 20 can create", StringComparison.Ordinal) && failed.Detail.Contains("names cPluginContract", StringComparison.Ordinal), $"{failed.Name}: {failed.Detail}");
+
+            var fine = PlugInCheck.Read("""{"Text":"ok","Programs":[{"Program":"ETABS 20","Listed":true,"Loads":true,"Runtime":".NET Framework","Reasons":[]},{"Program":"SAFE 21","Listed":false,"Loads":null,"Runtime":".NET Framework","Reasons":["CSI ProMax is not in this list."]},{"Program":"SAP2000 24","Listed":true,"Loads":null,"Runtime":".NET Framework","Reasons":[]}]}""");
+            ctx = new FieldContext(CsiProgram.Etabs, Path.GetTempPath(), new MemoryEtabs());
+            PcFieldSteps.PlugIn(ctx, fine);
+            Equal("ETABS 20 ok|SAP2000 24 skipped|report ok", string.Join("|", ctx.Steps.Select(s => (s.Name.StartsWith("the plug-in check", StringComparison.Ordinal) ? "report" : s.Name[..s.Name.IndexOf(" can", StringComparison.Ordinal)]) + (s.Skipped ? " skipped" : s.Ok ? " ok" : " FAILED"))), "one step for each program that lists it; one not in the list has its own step elsewhere");
+
+            // His list held CSI ProMax twice (added by hand a second time, from another folder): it becomes one entry, here.
+            var twice = "[PlugIn]\r\n NumberPlugIns=2\r\n PlugInName=CsiProMaxPlugin\r\n PlugInMenuText=CSI ProMax\r\n PlugInPath=C:\\Users\\x\\OneDrive - Company\\Documents\\CSI ProMax\\CsiProMaxPlugin.dll\r\n PlugInName=CsiProMaxPlugin\r\n PlugInMenuText=myCsiProMaxPlugin\r\n PlugInPath=C:\\Users\\x\\Documents\\CSI ProMax\\CsiProMaxPlugin.dll\r\n\r\n[Graphics]\r\n";
+            var (state, text) = ToolsMenu.Edit(twice, "CsiProMaxPlugin", @"D:\Here\CsiProMaxPlugin.dll", _ => true);
+            Equal(ToolsMenu.State.Moved, state, "listed twice");
+            Equal("[PlugIn]\r\n NumberPlugIns=1\r\n PlugInName=CsiProMaxPlugin\r\n PlugInMenuText=CSI ProMax\r\n PlugInPath=D:\\Here\\CsiProMaxPlugin.dll\r\n\r\n[Graphics]\r\n", text, "one entry, for this install");
+            var beside = "[PlugIn]\r\n NumberPlugIns=2\r\n PlugInName=Someone.Else\r\n PlugInMenuText=Else\r\n PlugInPath=C:\\Else\\Else.dll\r\n PlugInName=CsiProMaxPlugin\r\n PlugInMenuText=CSI ProMax\r\n PlugInPath=C:\\Gone\\CsiProMaxPlugin.dll\r\n";
+            Equal(ToolsMenu.State.Others, ToolsMenu.Edit(beside, "CsiProMaxPlugin", @"D:\Here\CsiProMaxPlugin.dll", _ => false).State, "beside another plug-in: left alone");
+
+            // Without the check file, it is said, not passed.
+            ctx = new FieldContext(CsiProgram.Etabs, Path.GetTempPath(), new MemoryEtabs());
+            PcFieldSteps.PlugIn(ctx, PlugInCheck.Run(Path.Combine(Path.GetTempPath(), "cpm-nothing-here")));
+            Check(ctx.Steps.Single().Skipped, "no check file: skipped");
+
+            // The real thing, where this machine has a PowerShell: check.ps1 beside CsiProMax.dll is run and read.
+            var shell = new[] { "pwsh", "powershell" }.SelectMany(n => (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator).Append(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".dotnet", "tools"))
+                .SelectMany(d => new[] { Path.Combine(d, n), Path.Combine(d, n + ".exe") })).FirstOrDefault(File.Exists);
+            if (shell is null) return;
+            var root = Path.Combine(Path.GetTempPath(), "cpm-plugin-check-" + Guid.NewGuid().ToString("N")[..8]);
+            try
+            {
+                var install = Directory.CreateDirectory(Path.Combine(root, "it's here")).FullName;
+                File.Copy(Path.Combine(SourceText.Root(), PlugInCheck.FileName), Path.Combine(install, PlugInCheck.FileName));
+                File.WriteAllText(Path.Combine(install, "CsiProMax.dll"), "");
+                File.WriteAllText(Path.Combine(install, "CsiProMaxPlugin.dll"), "");
+                var settings = Directory.CreateDirectory(Path.Combine(root, "Computers and Structures", "ETABS 20")).Parent!.FullName;
+                File.WriteAllText(Path.Combine(settings, "ETABS 20", "ETABS.ini"), $"[PlugIn]\r\n NumberPlugIns=1\r\n PlugInName=CsiProMaxPlugin\r\n PlugInMenuText=CSI ProMax\r\n PlugInPath={Path.Combine(install, "CsiProMaxPlugin.dll")}\r\n");
+                var real = PlugInCheck.Run(install, settings, shell) ?? throw new Exception("the check did not run");
+                Check(real.Text.StartsWith("CSI ProMax check", StringComparison.Ordinal), "its report is read: " + real.Text);
+                Equal("ETABS 20 True", string.Join(", ", real.Programs.Select(p => $"{p.Program} {p.Listed}")), "the program it found");
+            }
+            finally { Directory.Delete(root, true); }
+        });
     }
 
     /// <summary>The analysed SAFE stand-in with the tester's two input tables added.</summary>

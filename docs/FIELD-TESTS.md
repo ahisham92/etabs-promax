@@ -9,10 +9,13 @@ The field test is inside CSI ProMax. It checks what it can by itself and saves o
 
 1. **Install.** With the CSI program closed, paste this line into Windows PowerShell:
    `irm https://raw.githubusercontent.com/ahisham92/etabs-promax/main/install.ps1 | iex`
-   Expected: it ends with a line per program, such as "ETABS 23  CSI ProMax is added to the Tools menu."
+   Expected: it ends with a line per program, such as "ETABS 23  CSI ProMax is added to the Tools menu.", and then
+   "Checked: can each program open CSI ProMax?" with "yes" for each program.
 2. **Tools menu.** Open the program and a model. Expected: Tools > CSI ProMax is there and opens the CSI ProMax window
    beside the program. If the menu does not show it, add it by hand (the install line prints the plug-in name, menu
-   text and file) and say so: that tells us the automatic entry needs fixing.
+   text and file) and say so: that tells us the automatic entry needs fixing. If the program answers "Cannot create
+   plugin!", paste `irm https://raw.githubusercontent.com/ahisham92/etabs-promax/main/check.ps1 | iex` into Windows
+   PowerShell and send back the text it prints.
 3. **Run the full field test.** In the CSI ProMax window choose Help > Field test: everything (saves a report to
    send), or type "run the field test" in the chat. It asks first, then runs in the background (up to an hour):
    - this PC and the install: versions, the plug-in files and each program's plug-in list, the folders CSI ProMax

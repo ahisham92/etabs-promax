@@ -32,7 +32,7 @@ public static class ToolsMenu
     {
         /// <summary>It was missing and is added now.</summary>
         Added,
-        /// <summary>It named a file that is no longer there, and names this install now.</summary>
+        /// <summary>It named a file that is no longer there, or was listed more than once, and names this install now, once.</summary>
         Moved,
         /// <summary>It is listed.</summary>
         Already,
@@ -56,7 +56,7 @@ public static class ToolsMenu
         public string Says => State switch
         {
             State.Added => $"{Label}: CSI ProMax was missing from the Tools menu and is added now. Open {Label} again to see it.",
-            State.Moved => $"{Label}: the Tools menu named a CSI ProMax file that is gone, and names this install now.",
+            State.Moved => $"{Label}: the Tools menu named a CSI ProMax file that is gone, or named CSI ProMax twice, and names this install now, once.",
             State.Already => $"{Label}: CSI ProMax is in the Tools menu.",
             State.Missing => $"{Label}: CSI ProMax is not in the Tools menu, and can be added.",
             State.Open => $"{Label}: CSI ProMax is not in the Tools menu, and {Label} is open, so its plug-in list is left alone. Close {Label}, then open CSI ProMax again (from another program, or the Modeler): it adds itself.",
@@ -181,7 +181,7 @@ public static class ToolsMenu
         var end = lines.FindIndex(start + 1, l => Regex.IsMatch(l, @"^\s*\["));
         if (end < 0) end = lines.Count;
 
-        int countAt = -1, count = -1, oursAt = -1;
+        int countAt = -1, count = -1, oursAt = -1, paths = 0, ours = 0;
         string indent = " ", oursPath = "";
         var entries = new List<int>();
         for (var i = start + 1; i < end; i++)
@@ -196,7 +196,8 @@ public static class ToolsMenu
             {
                 entries.Add(i);
                 var listed = Regex.Match(lines[i], @"^\s*PlugInPath\w*\s*=\s*(.*?)\s*$", Any);
-                if (listed.Success && FileName(listed.Groups[1].Value.Trim('"')).Equals(FileName(path), StringComparison.OrdinalIgnoreCase)) { oursAt = i; oursPath = listed.Groups[1].Value.Trim('"'); }
+                if (listed.Success) paths++;
+                if (listed.Success && FileName(listed.Groups[1].Value.Trim('"')).Equals(FileName(path), StringComparison.OrdinalIgnoreCase)) { oursAt = i; oursPath = listed.Groups[1].Value.Trim('"'); ours++; }
             }
         }
         if (countAt < 0) return (State.Unknown, null);
@@ -204,9 +205,10 @@ public static class ToolsMenu
         State state;
         if (oursAt >= 0)
         {
-            // Listed. It is left as it is, also from another folder, unless the file it names is gone.
-            if (oursPath.Equals(path, StringComparison.OrdinalIgnoreCase) || exists is null || exists(oursPath)) return (State.Already, null);
-            if (count == 1 && entries.Count == 3) state = State.Moved; else return (State.Others, null);
+            // Listed once: left as it is, also from another folder, unless the file it names is gone. Listed more than
+            // once (added by hand a second time, so the menu has two entries and one may be an old copy): made one.
+            if (ours == 1 && (oursPath.Equals(path, StringComparison.OrdinalIgnoreCase) || exists is null || exists(oursPath))) return (State.Already, null);
+            if (paths == ours) state = State.Moved; else return (State.Others, null);
         }
         else if (count == 0 && entries.Count == 0) state = State.Added;
         else return (State.Others, null);

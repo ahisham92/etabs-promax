@@ -41,7 +41,10 @@ jobs:
       - run: test -e package/dist/CsiProMax.dll && test -e package/dist/CsiProMaxPlugin.dll && test -e package/dist/CsiProMaxSafePlugin.dll && test -e package/dist/CsiProMaxSapPlugin.dll
       - run: test ! -e package/dist/ETABSv1.dll && test ! -e package/dist/SAFEv1.dll && test ! -e package/dist/SAP2000v1.dll && ! find package -iname '*.exe' | grep .
       - run: pwsh -NoProfile -File tests/install.Tests.ps1
+      - run: pwsh -NoProfile -File tests/check.Tests.ps1
+      # The check goes into the package (the installer and the field test run it) and beside it as a file of its own.
+      - run: cp check.ps1 package/dist/
       - run: cp docs/INSTALL.txt package/ && cd package && zip -q -r "../CsiProMax-$NAME.zip" .
-      - run: gh release create "$TAG" "CsiProMax-$NAME.zip" install.ps1 --target "$GITHUB_SHA" --title "CSI ProMax $NAME" --generate-notes $PRERELEASE
+      - run: gh release create "$TAG" "CsiProMax-$NAME.zip" install.ps1 check.ps1 --target "$GITHUB_SHA" --title "CSI ProMax $NAME" --generate-notes $PRERELEASE
         env:
           GH_TOKEN: ${{ github.token }}

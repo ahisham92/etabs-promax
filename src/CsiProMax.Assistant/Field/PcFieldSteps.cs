@@ -22,6 +22,21 @@ public static class PcFieldSteps
     /// <param name="plugInLists">The [PlugIn] part of each CSI program's settings file (FieldTest.PlugInLists).</param>
     /// <param name="writes">Folders the test itself writes to (the report's, the work folder), checked with the rest.</param>
     /// <param name="menus">What ToolsMenu.Repair found in each program's plug-in list, after putting right what it may.</param>
+    /// <summary>One step for each program that lists CSI ProMax: its plug-in can be created, or why not.</summary>
+    internal static void PlugIn(FieldContext ctx, PlugInCheck.Result? check)
+    {
+        if (check is null) { ctx.Skip("each program can create its CSI ProMax plug-in", $"{PlugInCheck.FileName} is not beside CsiProMax.dll, or this PC has no Windows PowerShell, so it was not tried. Run the install line again to get it."); return; }
+        if (check.Programs.Count == 0) { ctx.Note("each program can create its CSI ProMax plug-in", check.Text.Length > 0 ? check.Text : "no program was found to try"); return; }
+        foreach (var found in check.Programs.Where(p => p.Listed))
+            ctx.Step($"{found.Program} can create the CSI ProMax plug-in (what Tools > CSI ProMax does)", () =>
+            {
+                FieldContext.Expect(found.Reasons.Count == 0 && found.Loads != false, $"{found.Program} cannot open CSI ProMax: {string.Join(" ", found.Reasons)}");
+                if (found.Loads is null) throw new FieldSkipException($"it could not be tried on this PC for a program on {found.Runtime}");
+                return $"created, on {found.Runtime}";
+            });
+        ctx.Note("the plug-in check's own report", check.Text);
+    }
+
     public static void Run(FieldContext ctx, string install, IReadOnlyList<(string File, string Section)> plugInLists, IReadOnlyList<string> writes, IReadOnlyList<ToolsMenu.Entry>? menus = null)
     {
         ctx.Section(Section);
@@ -68,6 +83,10 @@ public static class PcFieldSteps
                 FieldContext.Expect(entry.Listed, entry.Says);
                 return entry.Says;
             });
+
+        // The entry being there is not enough: the program must be able to create the plug-in when it is picked
+        // (0.4.4 was listed in ETABS 20 and could not be created). Tried here as the program does it.
+        PlugIn(ctx, PlugInCheck.Run(install));
 
         // The plug-in lists: what makes Tools > CSI ProMax appear in each program.
         var ours = plugInLists.Where(l => Regex.IsMatch(l.File, @"^(ETABS|SAFE|SAP2000) ", RegexOptions.IgnoreCase)).ToList(); // ETABS itself
