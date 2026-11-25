@@ -25,9 +25,6 @@ public sealed class ComEtabs : IEtabsLink, IDisposable
 
     public void Dispose() => _work.CompleteAdding();
 
-    [DllImport("ole32.dll")]
-    private static extern int CLSIDFromProgID([MarshalAs(UnmanagedType.LPWStr)] string progId, out Guid clsid);
-
     /// <summary>Runs one piece of work on the ETABS thread and waits for it.</summary>
     private T On<T>(string what, Func<dynamic, T> body)
     {
@@ -55,7 +52,7 @@ public sealed class ComEtabs : IEtabsLink, IDisposable
         if (_model is not null) return _model;
         if (!OperatingSystem.IsWindows()) throw new EtabsException("ETABS runs on Windows only.");
         var apiFile = EtabsApi.FindApiFile();
-        if (CLSIDFromProgID(ProgId, out _) != 0 || !File.Exists(apiFile))
+        if (!File.Exists(apiFile))
             throw new EtabsException("ETABS is not installed on this PC, or its API is not registered. Open ETABS once as administrator to register it.");
         // Plain COM late binding fails on ETABS 23 ("Specified cast is not valid" for SapModel), so the calls go
         // through the API's own interfaces in ETABSv1.dll, still by name.

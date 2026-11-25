@@ -386,6 +386,19 @@ Test("assistant: Claude Code's command line and stream", () =>
     hub.StopListening(id);
 });
 
+Test("assistant: ETABS's API is called by name, with numbers for its enums", () =>
+{
+    dynamic api = new EtabsApi(new ETABSv1.FakeApp(), typeof(ETABSv1.cFakeApp));
+    dynamic model = api.SapModel;
+    int n = 0; string[] names = []; int unit = 0;
+    Equal(0, (int)model.GetNames(ref n, ref names, ref unit), "the call's own answer");
+    Equal(2, n, "a number comes back"); Equal("B", names[1], "a list comes back"); Equal(6, unit, "an enum comes back as its number");
+    Equal(4, (int)model.Add("x", 4, 1), "a number goes in as the enum, a whole number as a decimal");
+    Equal(7, (int)model.Add("x", 7), "a left-out value takes its default");
+    try { model.Nope(); throw new Exception("accepted a method ETABS doesn't have"); }
+    catch (MissingMethodException ex) { Check(ex.Message.Contains("cFakeModel has no Nope"), ex.Message); }
+});
+
 var failed = 0;
 foreach (var (name, body) in tests)
 {
@@ -394,3 +407,21 @@ foreach (var (name, body) in tests)
 }
 Console.WriteLine($"\n{tests.Count - failed} of {tests.Count} passed.");
 return failed == 0 ? 0 : 1;
+
+namespace ETABSv1
+{
+    // A stand-in shaped like ETABS's API (interfaces in the ETABSv1 namespace, ref lists, enums), for the EtabsApi test.
+    public enum eFakeLength { mm = 4, m = 6 }
+    public interface cFakeModel
+    {
+        int GetNames(ref int count, ref string[] names, ref eFakeLength unit);
+        int Add(string name, eFakeLength unit, double factor = 1);
+    }
+    public interface cFakeApp { cFakeModel SapModel { get; } }
+    public sealed class FakeModel : cFakeModel
+    {
+        public int GetNames(ref int count, ref string[] names, ref eFakeLength unit) { count = 2; names = ["A", "B"]; unit = eFakeLength.m; return 0; }
+        public int Add(string name, eFakeLength unit, double factor = 1) => (int)unit * (int)factor;
+    }
+    public sealed class FakeApp : cFakeApp { public cFakeModel SapModel { get; } = new FakeModel(); }
+}
