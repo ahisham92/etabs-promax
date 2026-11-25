@@ -520,6 +520,84 @@ public static class LateralLoads
         return (fx, fy, mz);
     }
 
+    // ---- a code's spectrum as a function ----
+
+    /// <summary>
+    /// A code's response spectrum as (period, value in g) points from 0 to <paramref name="last"/> s, for a response
+    /// spectrum function: ASCE 7 / IBC design Sa (11.4.6), Eurocode 8 / ECP 201 design Sd (3.2.2.5, with q),
+    /// IS 1893 Sa/g, UBC 97 (Ca, Cv), NBCC S(T), or the user spectrum's points. Scale it in the load case by g
+    /// (and Ie/R where the code divides by them).
+    /// </summary>
+    public static List<(double T, double Sa)> SpectrumPoints(string codeName, Dictionary<string, string> values, double last = 8)
+    {
+        var code = LateralCodes.Find(LateralCodes.Seismic, codeName)
+            ?? throw new ArgumentException($"There is no seismic code '{codeName}'. The codes: {string.Join(", ", LateralCodes.Of(LateralCodes.Seismic).Where(c => c.Family is not ("user-coefficient" or "user-loads")).Select(c => c.Name))}.");
+        var def = new LateralDef { Code = code.Name, Values = values };
+        Check(new StructuralModel { Stories = [new Story { Name = "Base" }] }, def);
+        var a = new In(def, code);
+        Func<double, double> sa;
+        var marks = new List<double>();
+        switch (code.Family)
+        {
+            case "asce7":
+            {
+                var site = a.Text("SiteClass");
+                double ss = a.Num("Ss"), s1 = a.Num("S1"), tl = a.Num("TL");
+                var sds = a.Opt("SDS") ?? 2.0 / 3 * (a.Opt("Fa") ?? Asce.Fa(site, ss)) * ss;
+                var sd1 = a.Opt("SD1") ?? 2.0 / 3 * (a.Opt("Fv") ?? Asce.Fv(site, s1)) * s1;
+                double ts = sd1 / sds, t0 = 0.2 * ts;
+                marks.AddRange([t0, ts, tl]);
+                sa = t => t < t0 ? sds * (0.4 + 0.6 * t / t0) : t <= ts ? sds : t <= tl ? sd1 / t : sd1 * tl / (t * t);
+                break;
+            }
+            case "ec8":
+            {
+                var (s0, tb0, tc0, td0) = Ec8.Table(a.Text("Ground"), a.Text("SpectrumType") == "2");
+                double s = a.Opt("S") ?? s0, tb = a.Opt("TB") ?? tb0, tc = a.Opt("TC") ?? tc0, td = a.Opt("TD") ?? td0, ag = a.Num("ag") * a.Num("GammaI"), q = a.Num("q"), beta = a.Num("Beta");
+                marks.AddRange([tb, tc, td]);
+                sa = t => Ec8.Sd(t, ag, s, tb, tc, td, q, beta);
+                break;
+            }
+            case "is1893":
+            {
+                var soil = a.Text("Soil");
+                marks.AddRange([0.1, 0.4, 0.55, 0.67, 4]);
+                sa = t => Is.Sa(t, soil);
+                break;
+            }
+            case "ubc97":
+            {
+                double z = a.Num("Z");
+                var soil = a.Text("SoilType");
+                var ca = a.Opt("Ca") ?? Ubc.Ca(soil, z) * a.Num("Na");
+                var cv = a.Opt("Cv") ?? Ubc.Cv(soil, z) * a.Num("Nv");
+                double ts = cv / (2.5 * ca), t0 = 0.2 * ts;
+                marks.AddRange([t0, ts]);
+                sa = t => t < t0 ? ca + (2.5 * ca - ca) * t / t0 : t <= ts ? 2.5 * ca : cv / t;
+                break;
+            }
+            case "nbcc":
+            {
+                double[] at = [0.2, 0.5, 1.0, 2.0, 5.0, 10.0];
+                var v = new[] { a.Num("Sa02"), a.Num("Sa05"), a.Num("Sa10"), a.Num("Sa20"), a.Num("Sa50"), a.Num("Sa100") };
+                marks.AddRange(at);
+                sa = t => Interp(at, v, t);
+                break;
+            }
+            case "user-spectrum":
+            {
+                var pts = Numbers(a.Text("Spectrum"), "the spectrum points");
+                if (pts.Length < 4 || pts.Length % 2 != 0) throw new ArgumentException("The spectrum points are periods and Sa in pairs: T1 Sa1 T2 Sa2 ...");
+                return Enumerable.Range(0, pts.Length / 2).Select(i => (pts[2 * i], pts[2 * i + 1])).ToList();
+            }
+            default: throw new ArgumentException($"{code.Name} has no spectrum: choose a code, or give the points.");
+        }
+        var periods = new SortedSet<double> { 0, last };
+        foreach (var t in marks) if (t > 0 && t < last) periods.Add(Math.Round(t, 4));
+        for (var t = 0.05; t < last; t += t < 1 ? 0.05 : t < 4 ? 0.1 : 0.5) periods.Add(Math.Round(t, 4));
+        return periods.Select(t => (t, Math.Round(sa(t), 6))).ToList();
+    }
+
     // ---- code tables ----
 
     private static class Asce

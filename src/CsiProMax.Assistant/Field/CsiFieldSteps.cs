@@ -56,6 +56,40 @@ public static class CsiFieldSteps
             FieldContext.Expect(a["this_window_works_in"]!.GetValue<string>() == name, $"this part tests {name}; the tool says {a["this_window_works_in"]}");
         });
         ctx.Tool("refresh_view", "{}", a => FieldContext.Expect(a["refreshed"]?.GetValue<bool>() == true, "no redraw: " + a.ToJsonString()));
+
+        // ---- what the Modeler wrote into this program's file: its load cases, and for SAP2000 its table fields ----
+        if (live && !isSafe && ctx.Files.TryGetValue(program.Key, out var written) && File.Exists(written))
+        {
+            ctx.Step($"{name} opened the Modeler's response spectrum, history, nonlinear static and buckling cases", () =>
+            {
+                var have = link.LoadCases().ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var missing = ModelerFieldSteps.Cases.Where(c => !have.Contains(c)).ToList();
+                FieldContext.Expect(missing.Count == 0, $"{name} has no {string.Join(", ", missing)} from the Modeler's file; it has {string.Join(", ", have)}");
+                return "all there";
+            });
+            if (program.Key == CsiProgram.Sap2000.Key)
+                ctx.Step("SAP2000 knows every table and field the Modeler writes into the .s2k", () =>
+                {
+                    var tables = CsiProMax.CsiTables.CsiTableText.Parse(File.ReadAllText(written));
+                    var known = link.Tables().ToDictionary(t => t.Name.ToUpperInvariant(), t => t.Key);
+                    var wrong = new List<string>();
+                    foreach (var (table, rows) in tables)
+                    {
+                        if (!known.TryGetValue(table.ToUpperInvariant(), out var key)) { wrong.Add($"no table '{table}'"); continue; }
+                        var fields = (string[])link.Raw($"read the fields of {table}", m =>
+                        {
+                            int version = 0, n = 0; string[] keys = [], names = [], about = [], units = []; bool[] importable = [];
+                            m.DatabaseTables.GetAllFieldsInTable(key, ref version, ref n, ref keys, ref names, ref about, ref units, ref importable);
+                            return keys ?? [];
+                        })!;
+                        var set = fields.ToHashSet(StringComparer.OrdinalIgnoreCase);
+                        var bad = rows.SelectMany(r => r.Keys).Distinct().Where(f => !set.Contains(f)).ToList();
+                        if (bad.Count > 0) wrong.Add($"'{table}' has no {string.Join(", ", bad)} (its fields: {string.Join(", ", fields)})");
+                    }
+                    FieldContext.Expect(wrong.Count == 0, string.Join(" | ", wrong));
+                    return $"{tables.Count} tables, every field known";
+                });
+        }
         // ---- the model must be changeable for the rest (a locked SAP2000 refused the pattern added by hand, 0.4.17) ----
         var locked = Read(ctx, "whether the model is locked", () => link.Info().Locked, false);
         // The Viewer is checked first, while the results are still there (SAP2000's Viewer had no result to show, 0.4.20).
