@@ -16,7 +16,7 @@ namespace CsiProMax.Assistant;
 /// </summary>
 public static class ScratchExtras
 {
-    public const string LinkProperty = "CPM-LIN", Group = "CPM-CUT", SectionCut = "CPM-SC", Pushover = "CPM-PUSH", Function = "CPM-TH", History = "CPM-MHL";
+    public const string LinkProperty = "CPM-LIN", Group = "CPM-CUT", SectionCut = "CPM-SC", Pushover = "CPM-PUSH", Function = "CPM-TH", History = "CPM-MHL", Tendon = "CPM-TEN";
 
     private const string NoApi = "the stand-in has no program API behind it (a live program is needed)";
 
@@ -78,7 +78,13 @@ public static class ScratchExtras
 
         // A history case stands on a modal case; without one the program's analysis would stop on it.
         const string history = "a time history function and a linear modal history case (for the Viewer's plot functions)";
-        if (isEtabs) ctx.Skip(history, $"{name} 23's API has no call to define a time history function or the steps of a history case (cFunctionTH has no methods); they go in only through {name}'s tables, by hand");
+        if (isEtabs)
+        {
+            // ETABS 23's API cannot define a history function (cFunctionTH has no methods): the Modeler's file brings the case.
+            var there = Read(ctx, "the history cases", () => CasesOfType(link, "Hist"), []);
+            if (there.Count > 0) ctx.Step(history, () => $"already in the model from the Modeler's file: {string.Join(", ", there)}");
+            else ctx.Skip(history, $"{name} 23's API has no call to define a time history function or the steps of a history case, and the Modeler's file brought no history case");
+        }
         else
         {
             var modal = Read(ctx, "whether the model has a modal case", () => HasModalCase(link), false);
@@ -94,9 +100,75 @@ public static class ScratchExtras
                     return $"{History}: {Function} as ground acceleration in X, 20 steps of 0.02 s";
                 });
         }
-        ctx.Skip("hinges on a beam (for the Viewer's hinge results)", $"{name}'s API reads hinges and has no call to assign one; they are assigned only in {name}'s own forms or tables");
-        ctx.Skip("a tendon or a cable (for the Viewer's tendon and cable results)", isEtabs ? $"{name} 23's API has no call to draw a tendon, and {name} has no cables" : "not built into the scratch model yet: a cable needs a nonlinear case of its own to stand");
+        // Hinges: no API assigns them, so they come with the Modeler's file ("... opened the Modeler's frame hinges").
+        Try(ctx, "a tendon section (for the Viewer's tendon and cable results)", () =>
+        {
+            var material = link.Materials().FirstOrDefault(x => x.Contains("416", StringComparison.Ordinal) || x.Contains("Tendon", StringComparison.OrdinalIgnoreCase)) ?? link.Materials().First();
+            Must(link, "define a tendon section", "PropTendon.SetProp", ("Name", Tendon), ("MatProp", material), ("ModelingOption", 1), ("Area", 0.0001));
+            if (isEtabs) return $"{Tendon} of {material} (the API of {name} 23 cannot draw a tendon; the section is in its table)";
+            var pts = link.Points();
+            var i = pts.First(q => q.Name == top[0]); var j = pts.First(q => q.Name == top[1]);
+            var made = Must(link, "draw a tendon", "TendonObj.AddByCoord", ("XI", i.X), ("YI", i.Y), ("ZI", i.Z), ("XJ", j.X), ("YJ", j.Y), ("ZJ", j.Z), ("Name", ""), ("PropName", Tendon), ("UserName", ""), ("CSys", "Global"));
+            return $"tendon {ApiCall.Value(made, "Name")} with {Tendon} of {material}, modelled as loads";
+        });
+        Shapes(ctx);
     }
+
+    /// <summary>
+    /// A piece of the scratch model that is there only so the Viewer has something to show, by an API call nobody has
+    /// run on a real program yet: when the program refuses it, the step is not tested, with the program's own words,
+    /// and the model is as it was. A failure here would say CSI ProMax is wrong, and it is the test's setup that is.
+    /// </summary>
+    private static void Try(FieldContext ctx, string step, Func<string> body) => ctx.Step(step, () =>
+    {
+        try { return body(); }
+        catch (Exception ex) when (ex is EtabsException or MissingMethodException or ToolInputException or InvalidOperationException)
+        {
+            throw new FieldSkipException($"{ctx.Link.Program.Name} did not take it ({ex.Message})");
+        }
+    });
+
+    /// <summary>The tables a hinge, a history case and a tendon are written through, with their fields as the program
+    /// describes them, in a file beside the report: what the next change to this file is written from.</summary>
+    private static void Shapes(FieldContext ctx)
+    {
+        var link = ctx.Link;
+        string[] words = ["Hinge Assign", "Assignments - Hinge", "Time History", "Tendon", "Cable Section", "Section Cut"];
+        ctx.Step($"the fields of {link.Program.Name}'s hinge, history, tendon and section cut tables are written down", () =>
+        {
+            var text = new System.Text.StringBuilder();
+            foreach (var t in link.Tables().Where(t => words.Any(w => t.Name.Contains(w, StringComparison.OrdinalIgnoreCase))).Take(120))
+            {
+                text.AppendLine($"## {t.Name} (key {t.Key}, import {t.Import}, {(t.Empty ? "empty" : "has rows")})");
+                try
+                {
+                    text.AppendLine((string)link.Raw("read a table's fields", m =>
+                    {
+                        int version = 0, n = 0; string[] keys = [], names = [], about = [], units = []; bool[] importable = [];
+                        m.DatabaseTables.GetAllFieldsInTable(t.Key, ref version, ref n, ref keys, ref names, ref about, ref units, ref importable);
+                        keys ??= []; about ??= []; importable ??= [];
+                        return string.Join("\n", Enumerable.Range(0, keys.Length).Select(i => $"- {keys[i]}{(i < importable.Length && !importable[i] ? " (not importable)" : "")}: {(i < about.Length ? about[i]?.Trim() : "")}"));
+                    })!);
+                    if (!t.Empty)
+                    {
+                        var data = link.ReadTable(t.Key, null, null);
+                        foreach (var row in data.Rows.Take(2)) text.AppendLine("  row: " + string.Join(" | ", data.Fields.Zip(row, (f, v) => $"{f}={v}")));
+                    }
+                }
+                catch (Exception ex) when (ex is not (OperationCanceledException or OutOfMemoryException)) { text.AppendLine("  could not be read: " + ex.Message); }
+            }
+            var file = Path.Combine(Path.GetDirectoryName(FieldRetest.File)!, $"table-shapes-{link.Program.Key}.txt");
+            Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+            File.WriteAllText(file, text.ToString());
+            return file;
+        });
+    }
+
+    private static List<string> CasesOfType(ICsiLink link, string word) => link.LoadCases().Where(c => link.Raw("read a load case's type", m =>
+    {
+        var call = ApiCall.Invoke((object)m, "LoadCases.GetTypeOAPI", D(("Name", c)));
+        return ApiCall.Worked(call) && ApiCall.Value(call, "CaseType")?.ToString() is { } type && type.Contains(word, StringComparison.OrdinalIgnoreCase);
+    }) is true).ToList();
 
     private static bool HasModalCase(ICsiLink link) => link.LoadCases().Any(c => link.Raw("read a load case's type", m =>
     {
