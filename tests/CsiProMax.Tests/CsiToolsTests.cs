@@ -331,6 +331,15 @@ static class CsiToolsTests
             Equal("KDS 41 17 00-2019", api.SeismicCodes["CPM-AUTO-S"], "the pattern has the code, with another pattern's API code in the model");
             Equal("IBC2006", api.SeismicCodes.GetValueOrDefault(other, ""), $"{other} has its IBC2006 back: {parkedSet.ToJsonString()} | {string.Join(" | ", api.Log.TakeLast(6))}");
             Equal(1, api.Log.Count(l => l.StartsWith("IBC2006 " + other, StringComparison.Ordinal)), "kept by the import itself, with no second Set call: " + string.Join(" | ", api.Log.TakeLast(6)));
+            // 0.4.51: the model was locked by the analysis before the import, and a table staged by an earlier call is kept
+            // through File > Open: the import is made all the same, on an unlocked model with nothing else staged.
+            int sv = 0; string[] sf = ["LoadPat", "DesignType", "SelfWtMult", "AutoLoad"], sd = ["Dead", "Dead", "1", ""];
+            api.DatabaseTables.SetTableForEditingArray("Load Pattern Definitions", ref sv, ref sf, 1, ref sd);
+            inner.Locked = true;
+            var kept = string.Join(",", api.Table.Select(r => r[0]));
+            var lockedSet = Run(CsiProgram.Sap2000, "set_lateral_load", """{"name":"CPM-AUTO-S","kind":"seismic","code":"KDS 41 17 00-2019","values":{"R":"4"}}""", link);
+            Check(!inner.Locked && lockedSet["unlocked"]?.ToString().Contains("results are deleted", StringComparison.Ordinal) == true && lockedSet["read_back"]?["R"]?.ToString() == "4", "a locked model is unlocked for the import, and the answer says so: " + lockedSet.ToJsonString());
+            Equal(kept, string.Join(",", api.Table.Select(r => r[0])), "the stale one-row patterns table was not applied: every pattern is kept");
             // SAP2000 losing patterns in that import: the model is opened again from the file saved just before.
             api.WipeOnApply = 1;
             string wiped = "";
@@ -854,6 +863,9 @@ public sealed class FakeApi
         }
         public int SetTableForEditingArray(string TableKey, ref int TableVersion, ref string[] FieldsKeysIncluded, int NumberRecords, ref string[] TableData)
         {
+            // SAP2000 26 (experiments G and E on Ahmed's PC, 2026-11-26): a locked model refuses every table, and a table
+            // already staged and not applied (kept through File > Open) refuses new rows until CancelTableEditing.
+            if (o._m.Locked || o._pending.ContainsKey(TableKey)) return 1;
             if (TableKey == Patterns) o.PatternTableWrites++;
             var rows = new List<string[]>();
             for (var r = 0; r < NumberRecords; r++) rows.Add(TableData.Skip(r * FieldsKeysIncluded.Length).Take(FieldsKeysIncluded.Length).ToArray());
@@ -868,6 +880,7 @@ public sealed class FakeApi
         public int CancelTableEditing() { o._pending.Clear(); return 0; }
         public int ApplyEditedTables(bool FillImportLog, ref int NumFatalErrors, ref int NumErrorMsgs, ref int NumWarnMsgs, ref int NumInfoMsgs, ref string ImportLog)
         {
+            if (o._m.Locked) { ImportLog = ""; return 1; }
             if (o.WipeOnApply > 0)
             {
                 o.WipeOnApply--;

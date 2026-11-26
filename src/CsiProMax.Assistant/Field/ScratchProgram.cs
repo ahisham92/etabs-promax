@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Reflection;
 using CsiProMax.Assistant.Etabs;
+using CsiProMax.Assistant.Safe;
 using CsiProMax.Assistant.Tools;
 
 namespace CsiProMax.Assistant;
@@ -71,6 +72,7 @@ public static class ScratchDialogs
             else if (program is not null && IsProgramBox(title, program) && Button(window, "OK") is { } fine && IsWindowEnabled(fine)
                      && LongWords(window).FirstOrDefault(IsFileRefused) is { } said && PostMessageW(fine, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero))
                 closed.Add($"{title}: {said.Trim()} (OK)");
+            else if (IsMaintenanceReminder(title, Words(window))) closed.AddRange(AnswerMaintenanceReminder([processId]));
             else if (IsStoryPicker(title) && Button(window, "OK") is { } go && IsWindowEnabled(go))
             {
                 // All stories first, then OK: the two presses reach the window in this order.
@@ -103,6 +105,47 @@ public static class ScratchDialogs
     /// </summary>
     public static bool IsFileRefused(string text) =>
         text.Contains("Error decompressing file", StringComparison.OrdinalIgnoreCase) && !text.Contains("licen", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// SAP2000's "Maintenance Expiring" reminder ("License Available. Session Created. Maintenance expiring on
+    /// 5-Jul-2019."), shown at every start on Ahmed's PC. It says a licence WAS given, so the test answers it itself
+    /// (Ahmed, 2026-11-26: "find a way that this maintenance expiring not to wait for me please"): "Do not show this
+    /// message until next expiration period", then OK. Any other licence message (none free, an error) is never this.
+    /// </summary>
+    public static bool IsMaintenanceReminder(string title, IEnumerable<string> words)
+    {
+        var all = string.Join(" ", words);
+        return title.Trim().Equals("Maintenance Expiring", StringComparison.OrdinalIgnoreCase)
+            && all.Contains("License Available", StringComparison.OrdinalIgnoreCase) && all.Contains("Maintenance expiring on", StringComparison.OrdinalIgnoreCase)
+            && !all.Contains("in use", StringComparison.OrdinalIgnoreCase) && !all.Contains("not available", StringComparison.OrdinalIgnoreCase)
+            && !all.Contains("Status ", StringComparison.OrdinalIgnoreCase) && !all.Contains("error", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>The choice the test makes on the reminder: not again until the next expiration period.</summary>
+    public static bool IsNotUntilNextPeriod(string label) =>
+        label.Replace("&", "").Contains("until next expiration period", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Answers SAP2000's maintenance reminder in the given processes (the test's own): returns what it answered.</summary>
+    public static List<string> AnswerMaintenanceReminder(IEnumerable<int> processIds)
+    {
+        var answered = new List<string>();
+        foreach (var id in processIds)
+            foreach (var (window, title) in Of(id))
+            {
+                if (!IsMaintenanceReminder(title, Words(window)) || Button(window, "OK") is not { } ok || !IsWindowEnabled(ok)) continue;
+                IntPtr? later = null;
+                EnumChildWindows(window, (child, _) =>
+                {
+                    var label = new System.Text.StringBuilder(200);
+                    if (GetWindowTextW(child, label, label.Capacity) > 0 && IsNotUntilNextPeriod(label.ToString()) && IsWindowVisible(child)) { later = child; return false; }
+                    return true;
+                }, IntPtr.Zero);
+                if (later is { } choice) PostMessageW(choice, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero);
+                if (PostMessageW(ok, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero))
+                    answered.Add(title.Trim() + (later is null ? " (OK)" : " (not until the next expiration period, OK)"));
+            }
+        return answered;
+    }
 
     public static bool IsStoryPicker(string title) => title.TrimStart().StartsWith("Select Stories for Slab Design", StringComparison.OrdinalIgnoreCase);
 
@@ -336,8 +379,10 @@ public sealed class ScratchProgram : IScratchWindow
 
         // SAFE 20 and 21 (on the .NET Framework) open only their own .fdb through the API: given the Modeler's .f2k,
         // SAFE 20 showed "Error decompressing file. May not be a valid ETABS .EDB file." and waited for a person
-        // (tester's PC, 0.4.47, 2026-11-26). No window is started for a file it cannot open.
-        if (!OpensThroughApi(_program, modelFile, EtabsApi.RunsOnFramework(ApiFile)))
+        // (tester's PC, 0.4.47, 2026-11-26). Such a program starts a blank model instead, and the test builds the
+        // Modeler's model in it through the API (F2kRebuild), so the editing tools are still tried (Ahmed, 2026-11-26).
+        var build = !OpensThroughApi(_program, modelFile, EtabsApi.RunsOnFramework(ApiFile));
+        if (build && !BuildsThroughApi(_program, modelFile))
         {
             ctx.Skip($"start a second {name} window", $"{name} on this PC ({Path.GetFileName(Path.GetDirectoryName(ApiFile)) ?? name}) opens only its own {ModelExtension(_program)} files through its API, " +
                 $"and the Modeler writes {Path.GetExtension(modelFile)}. To check the Modeler's file by hand: in {name}, File > Import, pick {Path.GetFileName(modelFile)} from the zip.");
@@ -380,6 +425,17 @@ public sealed class ScratchProgram : IScratchWindow
         });
         if (ctx.Step($"start a second {name} window", () =>
         {
+            // While it starts, the maintenance reminder of a new process of this program (the test's own) is answered.
+            using var starting = new Timer(_ =>
+            {
+                try
+                {
+                    var fresh = Process.GetProcessesByName(_program.ProcessName).Select(p => p.Id).Where(id => !before.Contains(id)).ToList();
+                    var said = ScratchDialogs.AnswerMaintenanceReminder(fresh);
+                    if (said.Count > 0) lock (_noticesClosed) _noticesClosed.AddRange(said);
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException) { /* the next look tries again */ }
+            }, null, 1000, 1000);
             Ask(StartTimeout, "start", _ => null,
                 $"{name} did not start within {StartTimeout.TotalMinutes:0} minutes. A licence or start-up message may be waiting in its window: answer it yourself, close that window, and run the field test again.");
             var mine = Process.GetProcessesByName(_program.ProcessName).Select(p => p.Id).Where(id => !before.Contains(id)).ToList();
@@ -392,6 +448,22 @@ public sealed class ScratchProgram : IScratchWindow
 
         // A name of this run's own: two tests on one PC (it happened) must never take each other's window for theirs.
         var target = Path.Combine(ctx.Folder, ScratchName() + ModelExtension(_program));
+        var text = build ? File.ReadAllText(modelFile) : "";
+        if (build)
+        {
+            if (ctx.Step($"start a blank model in it ({name} on this PC opens only {ModelExtension(_program)} files through its API, so the Modeler's {Path.GetExtension(modelFile)} is built in it instead)", () =>
+            {
+                var units = F2kRebuild.UnitsOf(text);
+                Ask(FileTimeout, "start a blank model", m =>
+                {
+                    object model = m;
+                    ApiCall.Must(model, "InitializeNewModel", CsiTools.D(("Units", units)), "start a new model");
+                    return ApiCall.First(model, ["File.NewBlank", "File.NewGridOnly"], CsiTools.D(("NumberStorys", 1), ("TypicalStoryHeight", 3), ("BottomStoryHeight", 3), ("NumberLinesX", 2), ("NumberLinesY", 2), ("SpacingX", 6), ("SpacingY", 6)), "start a blank model");
+                }, $"{name} did not finish starting a blank model within {FileTimeout.TotalMinutes:0} minutes. A message may be waiting in its window.");
+                return $"blank, in {ComEtabs.UnitNames[units - 1]}";
+            }) is null) return false;
+        }
+        else
         if (ctx.Step($"open {Path.GetFileName(modelFile)} in it", () =>
         {
             var answer = Convert.ToInt32(Ask(FileTimeout, "open the file", m => m.File.OpenFile(Path.GetFullPath(modelFile)),
@@ -420,6 +492,17 @@ public sealed class ScratchProgram : IScratchWindow
             FieldContext.Expect(SameName(file, target), $"the window that answered has '{Path.GetFileName(file)}' open, not the scratch model, so the test stops here.");
             Link = link;
             return Path.GetFileName(file);
+        }) is null) return false;
+
+        // The Modeler's model, built in the blank model through the API, and saved: what the program's part then checks.
+        if (build && ctx.Step($"build the Modeler's model from {Path.GetFileName(modelFile)} in it through the API", () =>
+        {
+            var built = F2kRebuild.Build(Link, text);
+            ctx.Facts["safe.built"] = 1;
+            var answer = Convert.ToInt32(Ask(FileTimeout, "save the scratch model", m => m.File.Save(target),
+                $"{name} did not finish saving the scratch model within {FileTimeout.TotalMinutes:0} minutes. A message may be waiting in its window."));
+            if (answer != 0) throw new EtabsException($"{name} could not save the scratch model after building it (it answered {answer}).");
+            return built;
         }) is null) return false;
 
         // The way the Tools menu reaches a window: by its process id. Checked here, not relied on.
@@ -469,6 +552,13 @@ public sealed class ScratchProgram : IScratchWindow
     /// </summary>
     public static bool OpensThroughApi(CsiProgram program, string file, bool onFramework) =>
         !(program.Key == CsiProgram.Safe.Key && onFramework && !string.Equals(Path.GetExtension(file), ModelExtension(program), StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Whether the test can build <paramref name="file"/>'s model through the API in a blank model of a program that
+    /// cannot open it (<see cref="OpensThroughApi"/>): a SAFE text file (.f2k), by <see cref="F2kRebuild"/>.
+    /// </summary>
+    public static bool BuildsThroughApi(CsiProgram program, string file) =>
+        program.Key == CsiProgram.Safe.Key && string.Equals(Path.GetExtension(file), ".f2k", StringComparison.OrdinalIgnoreCase);
 
     public static string ModelExtension(CsiProgram program) => program.Key switch
     {
