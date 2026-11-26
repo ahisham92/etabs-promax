@@ -65,6 +65,8 @@ public static class ReferenceData
         new("what the program holds of the Modeler's file", null, Holds),
         new("the calls the program's API has", null, ApiCalls),
         new("SAP2000's own values for an area edge release and a joint panel zone", p => p.Key == "sap2000", EdgeReleaseAndPanelZone),
+        // Opens two small files of the Modeler's in the scratch window, then the scratch model again.
+        new("whether the program imports the Modeler's files that carry the model after END TABLE DATA", p => p.Key is "sap2000" or "safe", ImportsCarriedModel),
         // Last: it replaces the scratch model in the scratch window with a new blank one (never saved).
         new("the program's defaults, from a new blank model", null, BlankDefaults),
     ];
@@ -308,6 +310,47 @@ public static class ReferenceData
         var stem = Path.GetFileNameWithoutExtension(file);
         var texts = Directory.Exists(folder) ? Directory.EnumerateFiles(folder, stem + ".*").Where(f => TextModels.Contains(Path.GetExtension(f), StringComparer.OrdinalIgnoreCase)).Select(Path.GetFileName).ToList() : [];
         return $"the save answered {answer}; text copies beside the scratch model: {(texts.Count == 0 ? "none" : string.Join(", ", texts))}";
+    }
+
+    /// <summary>
+    /// The Modeler writes the whole model after END TABLE DATA as "$ " lines (EmbeddedModel), where SAP2000 and SAFE
+    /// are taken to stop reading. This opens the same small model twice, with those lines and without, in the scratch
+    /// window, and says what each import answered and holds, with any log the program wrote beside the file. Never
+    /// saves; the scratch model is opened again after.
+    /// </summary>
+    private static string ImportsCarriedModel(Gather g)
+    {
+        var safe = g.Program.Key == "safe";
+        var m = CsiProMax.Model.Templates.ConcreteFrame("Carried", [6, 6], [5], 1, 3.2);
+        m.Target = safe ? "safe" : "sap2000";
+        var text = safe ? CsiProMax.F2k.F2kWriter.Write(m).Text : CsiProMax.S2k.S2kWriter.Write(m).Text;
+        var ext = safe ? ".f2k" : ".s2k";
+        var dir = Path.Combine(g.Folder, "import check");
+        Directory.CreateDirectory(dir);
+        var with = Path.Combine(dir, "with model lines" + ext);
+        var without = Path.Combine(dir, "without model lines" + ext);
+        File.WriteAllText(with, CsiProMax.CsiTables.EmbeddedModel.Attach(text, m), new UTF8Encoding(false));
+        File.WriteAllText(without, text, new UTF8Encoding(false));
+        var c = System.Globalization.CultureInfo.InvariantCulture;
+        string Count(Func<dynamic, object> read) { try { return Convert.ToInt32(g.Link.Raw("count", read)).ToString(c); } catch (Exception ex) when (ex is not OutOfMemoryException) { return "?"; } }
+        string Try(string file)
+        {
+            var before = Directory.EnumerateFiles(dir).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            string answer;
+            try { answer = Convert.ToInt32(g.Link.Raw("import " + Path.GetFileName(file), x => x.File.OpenFile(file))).ToString(c); }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { answer = ex.GetType().Name + " " + Short(ex.Message); }
+            var held = $"frames {Count(x => x.FrameObj.Count())}, areas {Count(x => x.AreaObj.Count())}, points {Count(x => x.PointObj.Count())}";
+            // What the program wrote beside the file while importing it (its import log and the like).
+            var logs = Directory.EnumerateFiles(dir).Where(f => !before.Contains(f) && Path.GetExtension(f).ToUpperInvariant() is ".LOG" or ".TXT" or ".$2K" or ".$FK" or ".OUT").ToList();
+            var log = string.Join(" / ", logs.Select(f => { try { var t = File.ReadAllText(f); return Path.GetFileName(f) + ": " + Short(t.Replace("\r", " ").Replace("\n", " ")); } catch (IOException) { return Path.GetFileName(f); } }));
+            return $"{Path.GetFileName(file)}: OpenFile answered {answer}; {held}{(log.Length > 0 ? "; log " + log : "")}";
+        }
+        var a = Try(with);
+        var b = Try(without);
+        if (g.ModelPath.Length > 0 && File.Exists(g.ModelPath))
+            try { g.Link.Raw("open the scratch model again", x => x.File.OpenFile(g.ModelPath)); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
+        g.Write("import check.txt", a + Environment.NewLine + b + Environment.NewLine);
+        return a + " | " + b + $" | the Modeler's model: {m.LineAssigns.Count} frames, {m.AreaAssigns.Count} areas";
     }
 
     /// <summary>
