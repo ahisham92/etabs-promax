@@ -210,6 +210,11 @@ static class ExtrasTests
                 "thin(bufs.edges, 1, [1, 1, 1])", "function buildBars()", "function ddOpen(key)", "[\"t3d\", \"Set Default 3D View\", \"v:3d\"]", "[\"zprev\", \"Restore Previous Zoom\", \"zprev\"]", "[\"sall\", \"Select All (Ctrl+A)\", \"selAll\"]", "case \"selPrev\":", "case \"zprev\":",
                 "<button class=\"dd\" title=\"Window Position\">", "function ddMenu(btn, items)", ".menu[hidden]{display:none}" })
                 Check(html.Contains(part), "viewer.html lost " + part);
+            // The four ETABS tools that were greyed out are now real (Ahmed 2026-11-26 22:37: "Add please the tools that we don't have").
+            foreach (var part in new[] { "[\"reshape\", \"Reshape Object (click an end or corner, then its new place)\", \"d:reshape\"]", "[\"dqsec\", \"Quick Draw Secondary Beams (click in a bay)\", \"d:qsec\"]", "[\"dcirc\", \"Draw Circular Floor (click the centre, then a point on the edge)\", \"d:circ\"]",
+                "[\"sint\", \"Select Using Intersecting Line (drag a line across the objects)\", \"t:iline\"]", "hmRun(\"reshape_object\", {object: r.name, from: r.from, to})", "function lineSelect(p, a, b)", "const circleOutline = (c, r, n)", "[\"Using Intersecting Line\", \"t:iline\"]" })
+                Check(html.Contains(part), "viewer.html lost " + part);
+            Check(!html.Contains("(not in CSI ProMax yet)\", \"\", 0, 0, 1]"), "a strip button is still greyed out as not in CSI ProMax");
             // The old corner-only axes must not come back: the triad stands at the global origin when it is in view.
             Check(html.Contains("const o = inside ? [at[0], at[1]] : [38, h - 38]"), "the global axes are drawn at the origin");
         });
