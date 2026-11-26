@@ -149,6 +149,16 @@ public static class FieldTest
         finally { only?.Dispose(); Volatile.Write(ref _running, 0); }
     }
 
+    /// <summary>True while a full field test runs on this PC, in this window or any other process (it holds the lock file).</summary>
+    public static bool RunningOnThisPc(string? file = null)
+    {
+        if (IsRunning) return true;
+        file ??= DefaultLockFile;
+        if (!File.Exists(file)) return false;
+        try { using var free = new FileStream(file, FileMode.Open, FileAccess.ReadWrite, FileShare.None, 1, FileOptions.None); return false; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return true; }
+    }
+
     /// <summary>The file a full field test holds open while it runs, so a second one on the same PC is refused.</summary>
     public static string DefaultLockFile => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CsiProMax", "field-test.lock");
 

@@ -26,7 +26,8 @@ internal sealed class MainWindow : Window
     {
         _open = this;
         // The version that is running, where it cannot be mistaken for one that is only out or downloaded.
-        Title = $"{CsiProMax.App.Product} {Update.Updater.CurrentText}";
+        // And the program it works beside now: the window follows the program in use (ProgramFollow), so it says which.
+        Title = $"{CsiProMax.App.Product} {Update.Updater.CurrentText}" + (CsiProMax.App.Modeler || CsiProMax.App.Demo ? "" : " with " + Csi.Name);
         MinWidth = 340;
         MinHeight = 420;
         if (Brand.Icon is { } icon) Icon = icon;
