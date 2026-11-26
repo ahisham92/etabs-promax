@@ -125,6 +125,63 @@ public static class EditableTables
         })!;
     }
 
+    /// <summary>
+    /// SAP2000 26 only: gives one load pattern an auto lateral code that its API has no Set call for, by importing its
+    /// row of "Load Pattern Definitions" (type, self weight, AutoLoad = the code) together with its row of the code's
+    /// own table, in ONE apply. Tried on a hidden SAP2000 26 on Ahmed's PC (2026-11-26): the code's table alone is
+    /// taken silently and keeps nothing, and the patterns' table without the code's rows drops a pattern whose code has
+    /// no row (and with it the patterns of the 0.4.22 and 0.4.34 field tests); the two together set ASCE 7-22, KDS 41 17
+    /// 00-2019 and AASHTO 2020, with every load kept. Only the one pattern's row is sent, and the patterns are counted
+    /// before and after. Gives the import log.
+    /// </summary>
+    public static string PutAutoLoad(ICsiLink e, string pattern, string designType, string code, string codeKey, IReadOnlyDictionary<string, string> codeRow, string what)
+    {
+        var program = e.Program.Name;
+        if (e.Program.Key != CsiProgram.Sap2000.Key) throw new InvalidOperationException("PutAutoLoad is for SAP2000's tables.");
+        return (string)e.Raw(what, m =>
+        {
+            int n = 0; string[] before = [];
+            m.LoadPatterns.GetNameList(ref n, ref before);
+            before ??= [];
+            double self = 0;
+            try { m.LoadPatterns.GetSelfWTMultiplier(pattern, ref self); } catch { /* a new pattern weighs nothing */ }
+            int version = 0, count = 0; string[] keys = [], names = [], about = [], units = []; bool[] importable = [];
+            m.DatabaseTables.GetAllFieldsInTable(codeKey, ref version, ref count, ref keys, ref names, ref about, ref units, ref importable);
+            var known = (keys ?? []).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var row = new Dictionary<string, string>(codeRow, StringComparer.OrdinalIgnoreCase) { ["LoadPat"] = pattern };
+            if (known.Contains("Dir") && !row.ContainsKey("Dir")) row["Dir"] = "X";
+            var wrong = row.Keys.Where(k => known.Count > 0 && !known.Contains(k)).ToList();
+            if (wrong.Count > 0) throw new Tools.ToolInputException($"{program}'s table '{codeKey}' has no field {string.Join(", ", wrong)}. Its fields: {string.Join(", ", keys ?? [])}.");
+            var codeFields = row.Keys.ToArray();
+            var codeData = codeFields.Select(f => row[f]).ToArray();
+            string[] patternFields = ["LoadPat", "DesignType", "SelfWtMult", "AutoLoad"];
+            string[] patternData = [pattern, designType, self.ToString("R", System.Globalization.CultureInfo.InvariantCulture), code];
+            int v1 = 1, v2 = version;
+            try
+            {
+                if (Convert.ToInt32(m.DatabaseTables.SetTableForEditingArray("Load Pattern Definitions", ref v1, ref patternFields, 1, ref patternData)) != 0
+                    || Convert.ToInt32(m.DatabaseTables.SetTableForEditingArray(codeKey, ref v2, ref codeFields, 1, ref codeData)) != 0)
+                    throw new EtabsException($"{program} did not take the rows for {pattern}'s {code}, so it cannot {what}.");
+                int fatal = 0, errors = 0, warnings = 0, info = 0; string log = "";
+                int applied = Convert.ToInt32(m.DatabaseTables.ApplyEditedTables(true, ref fatal, ref errors, ref warnings, ref info, ref log));
+                log ??= "";
+                int n2 = 0; string[] after = [];
+                m.LoadPatterns.GetNameList(ref n2, ref after);
+                var lost = before.Except(after ?? [], StringComparer.OrdinalIgnoreCase).ToList();
+                if (lost.Count > 0)
+                    throw new EtabsException($"{program} lost the load patterns {string.Join(", ", lost)} when it was given {pattern}'s {code}: do not save the model; close it without saving and open it again. Its import log: {Cut(log)}");
+                if (applied != 0 || fatal > 0)
+                    throw new EtabsException($"{program} did not apply {pattern}'s {code} ({fatal} fatal, {errors} errors), so it cannot {what}. Its import log: {Cut(log)}" + About(m, codeKey, new List<IReadOnlyDictionary<string, string>> { row }));
+                return log;
+            }
+            catch
+            {
+                try { m.DatabaseTables.CancelTableEditing(); } catch { /* nothing more to undo */ }
+                throw;
+            }
+        })!;
+    }
+
     /// <summary>What the program says each given field holds, so a refused value can be put right from the message.</summary>
     private static string About(dynamic m, string key, IReadOnlyList<IReadOnlyDictionary<string, string>> rows)
     {

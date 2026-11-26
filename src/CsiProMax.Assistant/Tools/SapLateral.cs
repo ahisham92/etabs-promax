@@ -112,10 +112,13 @@ internal static class SapLateral
     }
 
     /// <summary>
-    /// Gives the pattern the code by SAP2000's own Set call. Returns the call that took it, or null when the code has
-    /// no Set call in this API. Throws when every Set call there is was refused.
+    /// Gives the pattern the code by SAP2000's own Set call, with the inputs given set through the same call (never
+    /// through the code's table: SAP2000 26 left 0 of 2 rows in "Auto Seismic - ASCE 7-16" after an import of one
+    /// field, 0.4.42 field test). What the pattern has now (its Get call) is kept, then plain starting values, then the
+    /// inputs given by the call's parameter names. Returns the call that took it and the Get call's values, or null
+    /// when the code has no Set call in this API. Throws when every Set call there is was refused.
     /// </summary>
-    public static string? SetCode(ICsiLink e, string pattern, string kind, string code)
+    public static (string Method, System.Text.Json.Nodes.JsonObject? Back)? SetCode(ICsiLink e, string pattern, string kind, string code, IReadOnlyDictionary<string, string>? values = null)
     {
         var holder = kind == CsiProMax.Lateral.LateralCodes.Wind ? "LoadPatterns.AutoWind." : "LoadPatterns.AutoSeismic.";
         var tried = new List<string>();
@@ -125,18 +128,89 @@ internal static class SapLateral
             ParameterInfo[] parameters;
             try { parameters = (ParameterInfo[])e.Raw("read " + path, m => ApiCall.Parameters((object)m, path))!; }
             catch (Exception ex) when (ex is MissingMethodException or ToolInputException or EtabsException) { tried.Add($"{method}: not in this version"); continue; }
-            // SAP2000 26's ASCE 7-16 seismic takes nDir (its help; 0.4.17 field test): X and Y, or the first three of six.
-            bool[][] directions = parameters.Any(p => (p.ParameterType.IsByRef ? p.ParameterType.GetElementType() : p.ParameterType) == typeof(bool[]))
-                ? [[true, false], [true, false, false, false, false, false], [false, true, false]] : [[true, false]];
-            foreach (var dirs in directions)
+            var getter = holder + "Get" + method[3..];
+            var had = CsiTools.Try(e, $"read {pattern}'s {code}", getter, CsiTools.D(("Name", pattern)));
+            var given = Given(parameters, values ?? new Dictionary<string, string>(), code);
+            var hasDirs = parameters.Any(p => (p.ParameterType.IsByRef ? p.ParameterType.GetElementType() : p.ParameterType) == typeof(bool[]));
+            bool[][] directions = hasDirs ? [[true, false], [true, false, false, false, false, false], [false, true, false]] : [[true, false]];
+            foreach (var args in Variants(parameters, pattern, directions, had, given))
             {
-                var args = Arguments(parameters, pattern, dirs);
-                if (CsiTools.Try(e, $"give {pattern} the code {code}", path, args) is not null) return method;
-                tried.Add($"{method} refused");
+                if (CsiTools.Try(e, $"give {pattern} the code {code}", path, args) is null) continue;
+                var back = CsiTools.Try(e, $"read {pattern}'s {code}", getter, CsiTools.D(("Name", pattern)));
+                return (method, back?["values"] as System.Text.Json.Nodes.JsonObject);
             }
+            tried.Add($"{method} refused");
         }
         if (tried.Count == 0) return null;
         throw new EtabsException($"{e.Program.Name} refused to give {pattern} the {kind.ToLowerInvariant()} code {code} ({string.Join("; ", tried)}). In {e.Program.Name}: Define > Load Patterns, choose {code} as {pattern}'s Auto Lateral Load.");
+    }
+
+    /// <summary>The inputs given, as the Set call's arguments by its parameter names (the table's names where they differ).</summary>
+    internal static Dictionary<string, object?> Given(ParameterInfo[] parameters, IReadOnlyDictionary<string, string> values, string code)
+    {
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        var args = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        var unknown = new List<string>();
+        foreach (var (key, text) in values)
+        {
+            var k = key.Trim();
+            var named = parameters.Where(p => string.Equals(p.Name, k, StringComparison.OrdinalIgnoreCase)).ToList();
+            // UBC97Z, NZS2004R, EURO2004Ag...: the code's own prefix in front of the table's name.
+            if (named.Count == 0) named = parameters.Where(p => p.Name is { } n && n.Length > k.Length && n.EndsWith(k, StringComparison.OrdinalIgnoreCase) && char.IsDigit(n[n.Length - k.Length - 1])).ToList();
+            if (k.Equals("Dir", StringComparison.OrdinalIgnoreCase) && parameters.FirstOrDefault(p => p.Name is "DirFlag") is { } dir)
+            {
+                args[dir.Name!] = text.Trim().ToUpperInvariant().StartsWith('Y') ? 2 : 1; continue;
+            }
+            if (named.Count != 1) { unknown.Add(k); continue; }
+            var p = named[0];
+            var t = p.ParameterType.IsByRef ? p.ParameterType.GetElementType()! : p.ParameterType;
+            object? v = null;
+            if (t == typeof(double) && double.TryParse(text, System.Globalization.NumberStyles.Float, inv, out var d)) v = d;
+            else if (t == typeof(int) && int.TryParse(text, System.Globalization.NumberStyles.Integer, inv, out var i)) v = i;
+            else if (t == typeof(int) && p.Name!.Contains("Site", StringComparison.OrdinalIgnoreCase) && text.Trim().Length == 1 && char.IsLetter(text.Trim()[0])) v = char.ToUpperInvariant(text.Trim()[0]) - 'A' + 1;
+            else if (t == typeof(bool)) v = text.Trim().ToLowerInvariant() is "yes" or "true" or "1";
+            else if (t == typeof(string)) v = text;
+            if (v is null) throw new ToolInputException($"{code}'s input {k} is a {(t == typeof(int) ? "whole number" : t == typeof(double) ? "number" : t.Name)}, not '{text}'.");
+            args[p.Name!] = v;
+        }
+        if (unknown.Count > 0)
+            throw new ToolInputException($"SAP2000's call for {code} has no input {string.Join(", ", unknown)}. Its inputs: {string.Join(", ", parameters.Select(p => p.Name).Where(n => n is not "Name"))}.");
+        return args;
+    }
+
+    /// <summary>
+    /// The argument lists to try, best first: what the pattern has (or the starting values) with the inputs given;
+    /// then, when SAP2000 refuses, each whole-number choice the inputs did not give, tried at 0, 2, 3 and 4 in turn
+    /// (an option such as IBC2006Option or JGJ32002SI whose 1 SAP2000 does not take: 0.4.42 field test).
+    /// </summary>
+    internal static IEnumerable<Dictionary<string, object?>> Variants(ParameterInfo[] parameters, string pattern, bool[][] directions, System.Text.Json.Nodes.JsonObject? had, Dictionary<string, object?> given)
+    {
+        foreach (var dirs in directions)
+        {
+            var args = Arguments(parameters, pattern, dirs);
+            if (had?["values"] is System.Text.Json.Nodes.JsonObject now)
+                foreach (var p in parameters)
+                    if (p.Name is { } n && now[n] is System.Text.Json.Nodes.JsonValue v && Convert(v, p) is { } value) args[n] = value;
+            foreach (var (k, v) in given) args[k] = v;
+            yield return args;
+            foreach (var p in parameters.Where(p => p.Name is { } n && !given.ContainsKey(n) && n is not ("Name" or "DirFlag") && (p.ParameterType.IsByRef ? p.ParameterType.GetElementType() : p.ParameterType) == typeof(int)))
+                foreach (var choice in new[] { 0, 2, 3, 4 })
+                {
+                    if (Equals(args[p.Name!], choice)) continue;
+                    var other = new Dictionary<string, object?>(args, StringComparer.OrdinalIgnoreCase) { [p.Name!] = choice };
+                    yield return other;
+                }
+        }
+    }
+
+    private static object? Convert(System.Text.Json.Nodes.JsonValue v, ParameterInfo p)
+    {
+        var t = p.ParameterType.IsByRef ? p.ParameterType.GetElementType()! : p.ParameterType;
+        if (t == typeof(double)) return v.TryGetValue<double>(out var d) ? d : v.TryGetValue<int>(out var i) ? i : null;
+        if (t == typeof(int)) return v.TryGetValue<int>(out var i2) ? i2 : v.TryGetValue<double>(out var d2) && d2 == Math.Floor(d2) ? (int)d2 : null;
+        if (t == typeof(bool)) return v.TryGetValue<bool>(out var b) ? b : null;
+        if (t == typeof(string)) return v.TryGetValue<string>(out var s) ? s : null;
+        return null;
     }
 
     /// <summary>Takes the code load off the pattern by SAP2000's SetNone.</summary>
