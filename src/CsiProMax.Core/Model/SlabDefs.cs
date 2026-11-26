@@ -795,6 +795,10 @@ public static class SlabDefs
         if (i.Length < 2 || j.Length < 2 || !double.IsFinite(i[0] + i[1] + j[0] + j[1])) throw new ArgumentException("A null line goes from [x, y] to [x, y].");
         if (Math.Abs(i[0] - j[0]) + Math.Abs(i[1] - j[1]) < 1e-9) throw new ArgumentException("The null line's two ends are at the same place.");
         if (m.Lines.Exists(l => l.Label == name)) throw new ArgumentException($"There is already a line '{name}' (a beam, column or brace); give the null line another name.");
+        // ETABS deletes a line drawn on top of another one, and stops opening the .e2k on a "Log" window to say so
+        // ("Following line(s) were duplicated and will be deleted in this model", 0.4.58 full field test).
+        if (OnTop(m, name, story, i, j) is { } under)
+            throw new ArgumentException($"There is already the line '{under}' from [{i[0]}, {i[1]}] to [{j[0]}, {j[1]}] on {story}; ETABS deletes a line drawn on top of another. Draw the null line where no beam or line is.");
         DeleteNullLine(m, name, quiet: true);
         var a = m.PointAt(i[0], i[1]).Name; var b = m.PointAt(j[0], j[1]).Name;
         if (!m.UnparsedLines.TryGetValue(LineConnect, out var lines)) m.UnparsedLines[LineConnect] = lines = [];
@@ -802,6 +806,23 @@ public static class SlabDefs
         m.LineAssigns.Add(new LineAssign { Label = name, Story = story, Section = "NONE" });
         return new NullLine(name, story, [i[0], i[1]], [j[0], j[1]]);
     }
+
+    /// <summary>The label of a beam or null line (other than <paramref name="name"/>) that already joins these two
+    /// plan points on this story, or null.</summary>
+    public static string? OnTop(StructuralModel m, string name, string story, double[] i, double[] j)
+    {
+        static bool At(PlanPoint? p, double[] xy) => p is not null && Math.Abs(p.X - xy[0]) < 1e-6 && Math.Abs(p.Y - xy[1]) < 1e-6;
+        bool Same(PlanPoint? p, PlanPoint? q) => (At(p, i) && At(q, j)) || (At(p, j) && At(q, i));
+        foreach (var l in m.Lines)
+            if (l.Label != name && l.StoriesBelowI == 0 && Same(m.Point(l.PointI), m.Point(l.PointJ)) && m.LineAssigns.Exists(x => x.Label == l.Label && x.Story == story))
+                return l.Label;
+        foreach (var n in NullLines(m))
+            if (n.Name != name && n.Story == story && ((Near(n.I, i) && Near(n.J, j)) || (Near(n.I, j) && Near(n.J, i))))
+                return n.Name;
+        return null;
+    }
+
+    private static bool Near(double[] p, double[] q) => Math.Abs(p[0] - q[0]) < 1e-6 && Math.Abs(p[1] - q[1]) < 1e-6;
 
     public static void DeleteNullLine(StructuralModel m, string name, bool quiet = false)
     {

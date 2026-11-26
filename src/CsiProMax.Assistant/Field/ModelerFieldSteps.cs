@@ -614,9 +614,11 @@ public static class ModelerFieldSteps
         ctx.Refused("draw_opening", """{"name":"CPM-BADO","story":""" + Q(slabStory) + ""","points":[[4,1],[5,1]]}""", "3 corners", "tool draw_opening says no to two corners");
         // ETABS 23.2 (Ahmed's PC, the J export): a slab line release has no .e2k keyword, only its table, and ETABS Plus
         // refuses slab rebar; both are kept in the Modeler's file and written into the .f2k.
-        ctx.Tool("set_slab_line_release", """{"name":"CPM-LR","story":""" + Q(slabStory) + ""","points":[[6,0],[6,5]],"shear_left":true,"moment_left":true}""",
+        ctx.Tool("set_slab_line_release", """{"name":"CPM-LR","story":""" + Q(slabStory) + ""","points":[[3,0],[3,5]],"shear_left":true,"moment_left":true}""",
             a => FieldContext.Expect((string?)a["released"] == "shear left, moment left", "not the release asked for: " + a.ToJsonString()), "tool set_slab_line_release, on a null line it draws");
-        ctx.Refused("set_slab_line_release", """{"name":"CPM-LR2","story":""" + Q(slabStory) + ""","points":[[6,0],[6,5]]}""", "at least one", "tool set_slab_line_release says no to a release of nothing");
+        ctx.Refused("set_slab_line_release", """{"name":"CPM-LR"}""", "at least one", "tool set_slab_line_release says no to a release of nothing");
+        // 0.4.58 full field test: a null line drawn on the beam at x = 6 made ETABS stop opening the .e2k on its "Log".
+        ctx.Refused("set_slab_line_release", """{"name":"CPM-LR3","story":""" + Q(slabStory) + ""","points":[[6,0],[6,5]],"shear_left":true}""", "on top of another", "tool set_slab_line_release says no to a null line on top of a beam");
         ctx.Tool("define_material_data", """{"name":"CPM-REBAR","type":"Rebar","values":{"E":200000000,"FY":420000,"FU":620000}}""", null, "tool define_material_data, a rebar material");
         var bar = CsiProMax.Model.DefineTables.RebarSizes(modeler.Model).Select(x => x.Name).FirstOrDefault() ?? "16";
         ctx.Tool("draw_slab_rebar", """{"name":"CPM-SR","story":""" + Q(slabStory) + ""","from":[1,1.5],"to":[11,1.5],"width_left":0.5,"width_right":0.5,"vertical_offset":0.03,"layer":"A","bar_size":""" + Q(bar) + ""","material":"CPM-REBAR","total_bars":6}""",

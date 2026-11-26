@@ -205,6 +205,13 @@ static class SlabTests
             Check(SlabDefs.LineReleases(back).Single() == r, "and comes back with the Modeler's own file");
             Refused(link, "set_slab_line_release", new { name = "NOPE" }, "null line");
             Refused(link, "set_slab_line_release", new { name = "L2", shear_left = false }, "at least one");
+            // 0.4.58 full field test: a null line on top of another line made ETABS stop opening the .e2k on its "Log".
+            Refused(link, "set_slab_line_release", new { name = "L3", story = "Story1", points = new[] { new[] { 288.0, 36 }, new[] { 288.0, 0 } }, shear_left = true }, "on top of another");
+            Run(link, "set_slab_line_release", new { name = "L2", story = "Story1", points = new[] { new[] { 96.0, 0 }, new[] { 96.0, 36 } }, shear_left = true, moment_left = true });
+            m.Lines.Add(new CsiProMax.Model.LineObject { Label = "CPM-B", Kind = CsiProMax.Model.LineKind.Beam, PointI = m.PointAt(0, 0).Name, PointJ = m.PointAt(0, 36).Name });
+            m.LineAssigns.Add(new CsiProMax.Model.LineAssign { Label = "CPM-B", Story = "Story1", Section = "NONE" });
+            Refused(link, "set_slab_line_release", new { name = "L4", story = "Story1", points = new[] { new[] { 0.0, 36 }, new[] { 0.0, 0 } }, shear_left = true }, "on top of another");
+            m.Lines.RemoveAll(x => x.Label == "CPM-B"); m.LineAssigns.RemoveAll(x => x.Label == "CPM-B");
 
             Run(link, "define_material_data", new { name = "Gr60", type = "Rebar", values = new { E = 29000, FY = 60, FU = 90 } });
             Refused(link, "draw_slab_rebar", new { name = "SR1", story = "Story1", from = new[] { 24.0, 6 }, to = new[] { 360.0, 6 }, width_left = 6, bar_size = "#99", material = "Gr60", total_bars = 4 }, "bar size");
