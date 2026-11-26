@@ -241,7 +241,7 @@ public static class LateralTools
             if (SapLateral.SetCode(e, name, kind, table.Code, values) is { } made)
             {
                 setBy = made.Method;
-                var read = made.Back ?? (EditableTables.Read(e, table.Key, key, name) is { } r ? new JsonObject(r.Where(kv => kv.Key is not "GUID").Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))) : null)
+                var read = (made.Back?.DeepClone() as JsonObject) ?? (EditableTables.Read(e, table.Key, key, name) is { } r ? new JsonObject(r.Where(kv => kv.Key is not "GUID").Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))) : null)
                     ?? throw new EtabsException($"{e.Program.Name} took {table.Code} for {name} (by {setBy}), but neither its Get call nor its table '{table.Name}' gives it back.");
                 return new JsonObject
                 {
