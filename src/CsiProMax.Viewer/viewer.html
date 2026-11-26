@@ -5093,7 +5093,7 @@ function caseTypesFor(types, now) {
   return program === "safe" ? types.filter(t => safe.includes(t) || t === now) : types;
 }
 function hmOpen() {
-  dialog("Open Model", `<div class="g2"><span>File</span><input id="oP" placeholder="C:\\Users\\...\\Models\\Tower.e2k" style="min-width:380px"></div><p class="kv" style="max-width:480px">Type or paste the full path of an ETABS text file (.e2k, .$et) or a Modeler file (.cpm). A browser can't hand over a file's place on the PC, so the path is typed here; the Modeler reads it.</p>`,
+  dialog("Open Model", `<div class="g2"><span>File</span><input id="oP" placeholder="C:\\Users\\...\\Models\\Tower.e2k" style="min-width:380px"></div><p class="kv" style="max-width:480px">Type or paste the full path of an ETABS (.e2k), SAP2000 (.s2k) or SAFE (.f2k) text file, or a Modeler file (.cpm). A browser can't hand over a file's place on the PC, so the path is typed here; the Modeler reads it.</p>`,
     [["Open", d => submit(d, "open_model_file", {path: q(d, "#oP").value.trim().replace(/^"|"$/g, "")}, () => hmSay("Opened.")), true], ["Cancel"]], {width: 560});
 }
 function hmSave(as) {
@@ -5346,9 +5346,17 @@ function start() {
   }
   $("hint").textContent = hintText();
   const built = $("pack").textContent.trim();
-  if (built) { try { load(JSON.parse(built)); } catch (ex) { console.error(ex); $("drop").firstElementChild.innerHTML = `<b>The pack in this page could not be read</b><br>${esc(ex.message)}`; } }
+  if (built) { try { load(withRows(JSON.parse(built))); } catch (ex) { console.error(ex); $("drop").firstElementChild.innerHTML = `<b>The pack in this page could not be read</b><br>${esc(ex.message)}`; } }
   else { layout = savedLayout || 2; buildPanes(null); syncTools(); draw(); }
   if (!gl) $("hint").textContent = "This browser has 3-D drawing (WebGL 2) turned off, so the model is drawn as lines only.";
+}
+// A long table's rows past its first part are in script elements of their own (pack-rows): joined back here.
+function withRows(p) {
+  for (const s of document.querySelectorAll("script.pack-rows")) {
+    const part = JSON.parse(s.textContent), t = p.tables && p.tables[part.table];
+    if (t && Array.isArray(t.rows)) for (const r of part.rows) t.rows.push(r);
+  }
+  return p;
 }
 // The Modeler adds its own script after this one, which is where it says the page is live.
 addEventListener("DOMContentLoaded", start);

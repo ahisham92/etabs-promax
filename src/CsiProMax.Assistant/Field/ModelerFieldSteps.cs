@@ -299,6 +299,17 @@ public static class ModelerFieldSteps
                     "the material, the sections, the load pattern or the combination did not come back from the .e2k");
             }, "tool open_model_file reads the .e2k back");
         }
+        // The SAP2000 and SAFE files the Modeler wrote open again just as they were (Ahmed 2026-11-26: "to and from the
+        // csi promax ... the user does not feel anything"): the whole model, nothing to say about them.
+        foreach (var (key, ext) in new[] { (CsiProgram.Sap2000.Key, ".s2k"), (CsiProgram.Safe.Key, ".f2k") })
+            if (ctx.Files.TryGetValue(key, out var file) && File.Exists(file))
+                ctx.Tool("open_model_file", $$"""{"path":{{Q(file)}}}""", a =>
+                {
+                    Same(ctx, a, "the " + ext);
+                    FieldContext.Expect(a["not_read"] is null, $"the {ext} the Modeler wrote should open with nothing left out: " + a["not_read"]?.ToJsonString());
+                }, $"tool open_model_file reads the {ext} back, the whole model");
+        if (ctx.Files.TryGetValue(CsiProgram.Etabs.Key, out var e2kAgain))
+            ctx.Tool("open_model_file", $$"""{"path":{{Q(e2kAgain)}}}""", a => Same(ctx, a, "the .e2k"), "tool open_model_file opens the .e2k again for the steps after");
         ctx.Refused("open_model_file", $$"""{"path":{{Q(Path.Combine(ctx.Folder, "no such file.e2k"))}}}""", "no file", "tool open_model_file says no to a file that is not there");
 
         ctx.Coverage("every Modeler tool was run");

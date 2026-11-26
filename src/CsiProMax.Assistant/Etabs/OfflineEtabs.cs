@@ -423,7 +423,16 @@ public sealed class OfflineEtabs : ICsiLink, CsiProMax.Assistant.Tools.IModelDra
                 try
                 {
                     var f2k = System.IO.Path.ChangeExtension(e2k, ".f2k");
-                    File.WriteAllText(f2k, CsiProMax.F2k.F2kWriter.Write(Model, new CsiProMax.F2k.F2kOptions()).Text, new System.Text.UTF8Encoding(false));
+                    // SAFE takes one floor to a file: the busiest floor is the model's .f2k, and every other floor
+                    // with slabs goes beside it as "<model> <story>.f2k", so no floor is left out.
+                    var floors = CsiProMax.F2k.F2kWriter.WriteEveryFloor(Model, new CsiProMax.F2k.F2kOptions());
+                    // Each floor's file carries the whole model, so opening any of them in the Modeler loses nothing.
+                    File.WriteAllText(f2k, CsiProMax.CsiTables.EmbeddedModel.Attach(floors[0].Text, Model), new System.Text.UTF8Encoding(false));
+                    foreach (var floor in floors.Skip(1))
+                    {
+                        var name = System.IO.Path.GetFileNameWithoutExtension(e2k) + " " + string.Concat(floor.Story.Select(c => System.IO.Path.GetInvalidFileNameChars().Contains(c) ? '_' : c)) + ".f2k";
+                        File.WriteAllText(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(f2k) ?? "", name), CsiProMax.CsiTables.EmbeddedModel.Attach(floor.Text, Model), new System.Text.UTF8Encoding(false));
+                    }
                     return f2k;
                 }
                 catch (ArgumentException) { return ""; }
@@ -438,9 +447,44 @@ public sealed class OfflineEtabs : ICsiLink, CsiProMax.Assistant.Tools.IModelDra
         return clean.Length > 0 ? clean : "Untitled";
     }
 
-    /// <summary>Opens an ETABS text file (.e2k, .$et) or a Modeler file (.cpm).</summary>
-    public static StructuralModel Load(string path) =>
-        path.EndsWith(ModelFile.Extension, StringComparison.OrdinalIgnoreCase) ? ModelFile.Load(path) : E2kReader.ReadFile(path);
+    /// <summary>Opens an ETABS text file (.e2k, .$et), a SAP2000 one (.s2k, .$2k), a SAFE one (.f2k, .$fk) or a Modeler file (.cpm).</summary>
+    public static StructuralModel Load(string path) => Open(path).Model;
+
+    /// <summary>What a file opens as: the model, whether it is exactly the model CSI ProMax saved (a .cpm, an .e2k, or a
+    /// .s2k or .f2k it wrote), and what of another program's file has no place in the Modeler yet.</summary>
+    public sealed record Opened(StructuralModel Model, bool Exact, IReadOnlyList<string> Notes);
+
+    public static Opened Open(string path)
+    {
+        var ext = System.IO.Path.GetExtension(path).ToLowerInvariant();
+        switch (ext)
+        {
+            case ".cpm": return new Opened(ModelFile.Load(path), true, []);
+            case ".s2k" or ".$2k": { var r = CsiProMax.S2k.S2kReader.ReadFile(path); return new Opened(r.Model, r.Exact, r.Notes); }
+            case ".f2k" or ".$fk": { var r = CsiProMax.F2k.F2kReader.ReadFile(path); return new Opened(r.Model, r.Exact, r.Notes); }
+            default:
+                // A program's text file saved under another extension: told apart by its first table.
+                var head = File.ReadLines(path).Take(40).ToList();
+                if (head.Exists(l => l.StartsWith("TABLE:", StringComparison.OrdinalIgnoreCase)))
+                {
+                    var text = File.ReadAllText(path);
+                    var r = text.Contains("ProgramName=SAFE", StringComparison.OrdinalIgnoreCase) ? CsiProMax.F2k.F2kReader.Read(text, System.IO.Path.GetFileNameWithoutExtension(path)) : CsiProMax.S2k.S2kReader.Read(text, System.IO.Path.GetFileNameWithoutExtension(path));
+                    return new Opened(r.Model, r.Exact, r.Notes);
+                }
+                return new Opened(E2kReader.ReadFile(path), true, []);
+        }
+    }
+
+    /// <summary>The .e2k a model opened from this file saves to: the file itself for an .e2k; for a .s2k or .f2k the
+    /// Modeler saved (its .cpm beside it, the model carried in it), that model's .e2k, so Save writes the same files
+    /// again; "" otherwise (a file another program wrote, a single floor's file), so it is never written over.</summary>
+    public static string SavesTo(string path, Opened opened)
+    {
+        var ext = System.IO.Path.GetExtension(path).ToLowerInvariant();
+        if (ext is ".e2k" or ".$et") return path;
+        if (opened.Exact && ext is ".s2k" or ".f2k" && File.Exists(System.IO.Path.ChangeExtension(path, ModelFile.Extension))) return System.IO.Path.ChangeExtension(path, ".e2k");
+        return "";
+    }
 
     public void Refresh() { }
 }
