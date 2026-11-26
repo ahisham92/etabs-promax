@@ -222,7 +222,7 @@ static class SlabTests
             var geo = f["SLAB REBAR OBJECT GEOMETRY"].Single(); var bars = f["SLAB REBAR PROPERTY ASSIGNMENTS"].Single();
             Check(geo["X1"] == "24" && geo["X2"] == "360" && geo["Vertical Offset"] == "1.5" && geo["Width Left"] == "6" && geo["Layer"] == "A", "the rebar's geometry");
             Check(bars["Rebar Size"] == "#5" && bars["Material"] == "Gr60" && bars["Bar Number Type"] == "Total Bars" && bars["Total Bars"] == "4", "and its bars");
-            var keys = File.ReadAllLines("/mnt/project-files/field/table-keys/etabs-23.2-field-names.txt") is var lines && lines.Length > 0 ? lines : [];
+            // The fields as ETABS 23.2's Table and Field Keys name them (Slab Rebar Object Geometry: VertOffset=Vertical Offset, WidthLeft=Width Left...).
             foreach (var (table, fields) in new[] { ("Null Line Object Connectivity", new[] { "Unique Name", "UniquePtI", "UniquePtJ" }), ("Area Assignments - Slab Line Releases", new[] { "UniqueName", "Shear Left", "Moment Left", "Shear Right", "Moment Right" }),
                          ("Slab Rebar Object Geometry", new[] { "Name", "X1", "Y1", "X2", "Y2", "Vertical Offset", "Width Left", "Width Right", "Layer" }), ("Slab Rebar Property Assignments", new[] { "Name", "Rebar Size", "Material", "Bar Number Type", "Total Bars", "Max Spacing" }) })
                 foreach (var row in f[table.ToUpperInvariant()])
