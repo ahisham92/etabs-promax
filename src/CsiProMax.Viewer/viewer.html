@@ -1122,8 +1122,8 @@ function derivePushover() {
   if (Object.values(P.tables).some(t => t.rows && t.rows.length && /pushover|capacitycurve/.test(norm(t.name)))) return;
   const br = Object.values(P.tables).find(t => /^basereactionsstepbystep$/.test(norm(t.name))), jd = Object.values(P.tables).find(t => /^jointdisplacementsstepbystep$/.test(norm(t.name)));
   if (!br || !jd) return;
-  const bc = caseCol(br.fields), bt = col(br.fields, "CaseType", "Case Type"), bs = stepNumCol(br.fields), fx = col(br.fields, "FX"), fy = col(br.fields, "FY");
-  const jc = caseCol(jd.fields), js = stepNumCol(jd.fields), ju = col(jd.fields, "UniqueName", "Unique Name", "Joint", "Label"), ux = col(jd.fields, "Ux", "UX", "U1"), uy = col(jd.fields, "Uy", "UY", "U2");
+  const bc = caseCol(br.fields), bt = col(br.fields, "CaseType", "Case Type"), bs = stepNumCol(br.fields), fx = col(br.fields, "FX", "GlobalFX", "F1"), fy = col(br.fields, "FY", "GlobalFY", "F2"); // SAP2000 names them GlobalFX GlobalFY (0.4.40 field test)
+  const jc = caseCol(jd.fields), js = stepNumCol(jd.fields), ju = col(jd.fields, "UniqueName", "Unique Name", "Joint", "Label", "Point"), ux = col(jd.fields, "Ux", "UX", "U1"), uy = col(jd.fields, "Uy", "UY", "U2");
   if ([bc, bs, fx, fy, jc, js, ju, ux, uy].some(i => i < 0)) return;
   const rows = [];
   for (const c of new Set(br.rows.filter(r => bt < 0 || /non/i.test(r[bt]) && /static/i.test(r[bt])).map(r => String(r[bc])))) {
@@ -1133,7 +1133,7 @@ function derivePushover() {
     for (const r of jr) if ((+r[js] || 0) === last) for (const [i, d] of [[ux, 0], [uy, 1]]) { const v = Math.abs(parseFloat(r[i]) || 0); if (v > big) { big = v; top = String(r[ju]); dir = d; } }
     if (!top) continue;
     const disp = new Map(jr.filter(r => String(r[ju]) === top).map(r => [+r[js] || 0, parseFloat(r[dir ? uy : ux]) || 0]));
-    for (const r of br.rows) if (String(r[bc]) === c && disp.has(+r[bs] || 0)) rows.push([c, String(+r[bs] || 0), top, dir ? "Y" : "X", String(disp.get(+r[bs] || 0)), String(-(parseFloat(r[dir ? fy : fx]) || 0))]);
+    for (const r of br.rows) if (String(r[bc]) === c && disp.has(+r[bs] || 0)) rows.push([c, String(+r[bs] || 0), top, dir ? "Y" : "X", String(Math.abs(disp.get(+r[bs] || 0))), String(Math.abs(parseFloat(r[dir ? fy : fx]) || 0))]);
   }
   if (rows.length > 1) P.tables["Pushover Curve (from base reactions)"] = {name: "Pushover Curve (from base reactions)", fields: ["Output Case", "Step", "Monitored Joint", "Direction", "Displacement", "Base Shear"], rows, from: "derived"};
 }
