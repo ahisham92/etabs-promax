@@ -1052,6 +1052,74 @@ static class TesterBugTests
             Check(SkipAudit.Allowed(SkipAudit.Why.ProgramNotHere) && SkipAudit.Allowed(SkipAudit.Why.Licence) && !SkipAudit.Allowed(SkipAudit.Why.NeedsAPerson) && !SkipAudit.Allowed(SkipAudit.Why.ProgramCannot) && !SkipAudit.Allowed(SkipAudit.Why.Unjustified), "the allowed reasons are not Ahmed's");
         });
 
+        // Ahmed, 2026-11-26: "whatever I opened the CSI Promax where it is floating either opened in safe and then I went
+        // to etabs or whatever to be smooth not depending from where it started".
+        yield return ("the window follows the CSI program in use, whichever program it was opened from", () =>
+        {
+            var (safe, etabs, sap) = (CsiProgram.Safe, CsiProgram.Etabs, CsiProgram.Sap2000);
+            var t0 = new DateTime(2026, 11, 26, 14, 0, 0, DateTimeKind.Utc);
+            CsiProMax.Host.ProgramFollow.Front F(int pid, string name, string title = "model") => new(pid, name, title);
+            var settle = CsiProMax.Host.ProgramFollow.Settle;
+
+            // Opened from SAFE (process 10); he goes to ETABS (process 20) and stays there.
+            var follow = new CsiProMax.Host.ProgramFollow.Tracker();
+            Check(follow.Tick(F(10, "SAFE"), 10, safe, false, t0) is null, "its own program in front: nothing to follow");
+            Check(follow.Tick(F(20, "ETABS"), 10, safe, false, t0) is null, "followed at the first glance");
+            var to = follow.Tick(F(20, "ETABS"), 10, safe, false, t0 + settle);
+            Check(to is { Pid: 20 } && to.Value.Program == etabs, "ETABS stayed in front and was not followed");
+
+            // Work running here keeps the window where it is, and it follows when the work ends.
+            follow = new CsiProMax.Host.ProgramFollow.Tracker();
+            follow.Tick(F(20, "ETABS"), 10, safe, true, t0);
+            Check(follow.Tick(F(20, "ETABS"), 10, safe, true, t0 + settle + settle) is null, "followed while a chat or a test was working");
+            Check(follow.Tick(F(20, "ETABS"), 10, safe, false, t0 + settle + settle) is null, "followed in the moment the work ended");
+            Check(follow.Tick(F(20, "ETABS"), 10, safe, false, t0 + settle + settle + settle) is { Pid: 20 }, "not followed after the work ended");
+
+            // He comes to the CSI ProMax window itself (or to Excel) after ETABS: ETABS is still the program in use.
+            follow = new CsiProMax.Host.ProgramFollow.Tracker();
+            follow.Tick(F(20, "ETABS"), 10, safe, false, t0);
+            Check(follow.Tick(F(99, "dotnet", "CSI ProMax 0.4.56 with SAFE"), 10, safe, false, t0 + settle) is { Pid: 20 }, "clicking into CSI ProMax forgot the program he came from");
+            follow = new CsiProMax.Host.ProgramFollow.Tracker();
+            follow.Tick(F(20, "ETABS"), 10, safe, false, t0);
+            Check(follow.Tick(F(77, "EXCEL"), 10, safe, false, t0 + settle) is { Pid: 20 }, "another application in front forgot the program he came from");
+            // Back in SAFE before it followed: it stays with SAFE.
+            follow = new CsiProMax.Host.ProgramFollow.Tracker();
+            follow.Tick(F(20, "ETABS"), 10, safe, false, t0);
+            follow.Tick(F(10, "SAFE"), 10, safe, false, t0 + TimeSpan.FromSeconds(1));
+            Check(follow.Tick(F(99, "dotnet"), 10, safe, false, t0 + settle + settle) is null, "he went back to SAFE and the window still left it");
+
+            // A second window of the same program is followed too; other applications and a test's scratch copy never are.
+            Check(CsiProMax.Host.ProgramFollow.Followable(F(11, "SAFE"), 10, safe) == safe, "another SAFE window is not followed");
+            Check(CsiProMax.Host.ProgramFollow.Followable(F(30, "SAP2000"), 10, safe) == sap, "SAP2000 is not followed");
+            Check(CsiProMax.Host.ProgramFollow.Followable(F(77, "EXCEL"), 10, safe) is null, "Excel is followed");
+            Check(CsiProMax.Host.ProgramFollow.Followable(F(31, "SAP2000", "SAP2000 v26 - cpm-field-test-3e8eba"), 10, safe) is null, "a field test's scratch copy is followed");
+            // Opened beside no window in particular (a shortcut): the same program is not a reason to start again.
+            Check(CsiProMax.Host.ProgramFollow.Followable(F(20, "ETABS"), null, etabs) is null && CsiProMax.Host.ProgramFollow.Followable(F(10, "SAFE"), null, etabs) == safe, "a window beside no program window in particular");
+
+            // It starts again with the same arguments, beside the other program window.
+            var args = CsiProMax.Host.ProgramFollow.Args(["CsiProMax.dll", "--etabs-pid", "10", "--program", "safe", "--no-ai"], 20, etabs);
+            Equal("CsiProMax.dll --no-ai --etabs-pid 20 --program etabs", string.Join(" ", args), "the arguments it starts again with");
+            var program = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Program.cs"));
+            Check(program.Contains("ProgramFollow.Tracker()") && program.Contains("ProgramFollow.Another(watched)") && program.Contains("FieldTest.RunningOnThisPc()") && program.Contains("ProgramFollow.HasWindow(to.Pid)"),
+                "the window does not follow the program in use, or follows during a test, or into a program that has its own window");
+            Check(program.Contains("\"--no-focus\"") && program.Contains("window.ShowActivated = false"), "following takes the keyboard away from the program he is working in");
+
+            // A full test is named for what it covered, not for the window it was started from (the tester's 'SAFE' report of an ETABS 20 run).
+            Equal("all programs", FieldTest.ReportName(safe, new FieldTest.Options { Full = true }), "the full test's report");
+            Equal("ETABS", FieldTest.ReportName(safe, new FieldTest.Options { Full = true, OnlyProgram = etabs }), "the report of a test of one program"); // ETABS itself
+            Equal("SAFE", FieldTest.ReportName(safe, new FieldTest.Options()), "the quick test reads the open model");
+            var folder = Path.Combine(Path.GetTempPath(), "cpm-follow-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(folder);
+            try
+            {
+                var lockFile = Path.Combine(folder, "field-test.lock");
+                Check(!FieldTest.RunningOnThisPc(lockFile), "no lock file, yet a test is said to run");
+                using (FieldTest.OnlyOne(lockFile)) Check(FieldTest.RunningOnThisPc(lockFile), "a full test holds the lock and is not seen");
+                Check(!FieldTest.RunningOnThisPc(lockFile), "the test ended and is still seen as running");
+            }
+            finally { Directory.Delete(folder, true); }
+        });
+
         yield return ("ETABS 23 field test: a test copy an earlier run left open is closed by the next run, and nothing else is", () =>
         {
             // Seen on 2026-11-25: the 0.4.10 run gave up on ETABS with the story picker showing; the 0.4.14 run then failed

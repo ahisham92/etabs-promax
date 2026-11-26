@@ -149,6 +149,24 @@ public static class FieldTest
         finally { only?.Dispose(); Volatile.Write(ref _running, 0); }
     }
 
+    /// <summary>
+    /// What a report is named for: what the test covered, never the window it was started from. The full test covers
+    /// every installed program ("all programs"), or the one it was asked for; the quick test reads the open model, so
+    /// it is named for that model's program. (A tester's full test, started from SAFE's window, tested ETABS 20 and
+    /// was named SAFE: 2026-11-26.)
+    /// </summary>
+    internal static string ReportName(CsiProgram opened, Options o) => !o.Full ? opened.Name : o.OnlyProgram is { } only ? only.Name : "all programs";
+
+    /// <summary>True while a full field test runs on this PC, in this window or any other process (it holds the lock file).</summary>
+    public static bool RunningOnThisPc(string? file = null)
+    {
+        if (IsRunning) return true;
+        file ??= DefaultLockFile;
+        if (!File.Exists(file)) return false;
+        try { using var free = new FileStream(file, FileMode.Open, FileAccess.ReadWrite, FileShare.None, 1, FileOptions.None); return false; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return true; }
+    }
+
     /// <summary>The file a full field test holds open while it runs, so a second one on the same PC is refused.</summary>
     public static string DefaultLockFile => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CsiProMax", "field-test.lock");
 
@@ -366,8 +384,9 @@ public static class FieldTest
             FieldRetest.Save(ranParts.ToDictionary(r => r.Key, r => FieldRetest.Of(steps.Where(s => s.Section == r.Value), Update.Updater.CurrentText, PrintOf(o, r.Key))), results);
         var report = Render(link, steps, o, now, plugIns, o.Full ? work : null);
         Directory.CreateDirectory(target);
-        var file = Path.Combine(target, $"Field test {link.Program.Name} {now:yyyy-MM-dd HHmm}.md");
-        if (File.Exists(file)) file = Path.Combine(target, $"Field test {link.Program.Name} {now:yyyy-MM-dd HHmmss}.md");
+        var named = ReportName(link.Program, o);
+        var file = Path.Combine(target, $"Field test {named} {now:yyyy-MM-dd HHmm}.md");
+        if (File.Exists(file)) file = Path.Combine(target, $"Field test {named} {now:yyyy-MM-dd HHmmss}.md");
         File.WriteAllText(file, report, new UTF8Encoding(false));
         return new Outcome(file, steps, report, o.Full ? Pack(file, report, work) : null, o.Full ? work : null);
     }
