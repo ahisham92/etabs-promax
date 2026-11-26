@@ -424,13 +424,16 @@ function Install-CsiProMax {
                     Say ''
                     Say 'Checked: can each program open CSI ProMax?' 'Cyan'
                     $cannot = $false
+                    $unsure = $false
                     foreach ($one in $tried) {
                         $label = ([string]$one.Program).PadRight(12)
                         if (@($one.Reasons).Count -gt 0 -and $one.Listed) { $cannot = $true; Say "  $label NO: $(@($one.Reasons) -join ' ')" 'Red' }
                         elseif (@($one.Reasons).Count -gt 0) { Say "  $label not yet: $(@($one.Reasons) -join ' ')" 'Yellow' }
                         elseif ($one.Loads -eq $true) { Say "  $label yes: its plug-in was created the way $($one.Program) does it." 'Green' }
-                        else { Say "  $label could not be tried on this PC." }
+                        elseif ($one.Why) { $unsure = $true; Say "  $label not tried (not an error): $($one.Why)." }
+                        else { $unsure = $true; Say "  $label not tried (not an error): this PC could not run the self-test for it." }
                     }
+                    if ($unsure -and -not $cannot) { Say '  "Not tried" only means this extra self-test could not run here. CSI ProMax is in the Tools menu above, which is what each program uses to open it.' }
                     if ($cannot) {
                         Say '  For the full findings, run this line and send its text to the person who gave you CSI ProMax:' 'Yellow'
                         Say '    irm https://raw.githubusercontent.com/ahisham92/etabs-promax/main/check.ps1 | iex' 'Yellow'
