@@ -975,7 +975,9 @@ static class TesterBugTests
                     Check(CsiProMax.Assistant.Tools.PackTables.Kind(new CsiProMax.Assistant.Etabs.TableName(table, table, false, import)) == "result", $"'{table}' (import {import}) is not taken by the pack for the mesh");
             // 0.4.49 SAP2000 run: Load Assigns greyed out. Every program's load tables are inputs the pack takes, with a
             // total of their own so that the results cannot crowd them out.
-            foreach (var table in new[] { "Frame Loads - Distributed", "Frame Loads - Point", "Frame Loads - Temperature", "Area Loads - Uniform", "Area Loads - Temperature", "Joint Loads - Force", "Shell Loads - Uniform", "Shell Loads - Temperature" })
+            foreach (var table in new[] { "Frame Loads - Distributed", "Frame Loads - Point", "Frame Loads - Temperature", "Area Loads - Uniform", "Area Loads - Temperature", "Joint Loads - Force", "Shell Loads - Uniform", "Shell Loads - Temperature",
+                         // ETABS 23's names (0.4.55 ETABS run: "the pack has no Frame Loads Assignments - Distributed (taken as nothing)").
+                         "Frame Loads Assignments - Distributed", "Frame Loads Assignments - Point", "Frame Loads Assignments - Open Structure Wind Parameters", "Joint Loads Assignments - Force", "Shell Loads Assignments - Uniform" })
             {
                 Check(CsiProMax.Assistant.Tools.PackTables.IsLoadTable(table), $"'{table}' is not seen as a load table");
                 Check(CsiProMax.Assistant.Tools.PackTables.Kind(new CsiProMax.Assistant.Etabs.TableName(table, table, false, 1)) == "input", $"'{table}' is not taken by the pack as an input");

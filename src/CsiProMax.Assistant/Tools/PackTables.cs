@@ -57,6 +57,8 @@ public static class PackTables
         "loadstemperature", "temperature", "loadsstrain", "loadsdeformation", "loadsgravity", "loadsforce", "loadsnonuniform",
         "loadsrotate", "loadsporepressure", "loadssurfacepressure", "hingeoverwrite", "assignmentshinge", "linkpropert", "springpropert",
         "assignmentsspring", "assignmentslink",
+        // ETABS 23's load tables: "Frame Loads Assignments - Distributed", "Joint Loads Assignments - Force" (0.4.55).
+        "loadsassignments",
         // SAP2000's names for the same things.
         "springassignment", "hingeassign", "functionresponsespectrum", "functiontimehistory", "functionplotfunction",
         "casemodalhistory", "casedirecthistory", "caseresponsespectrum", "casestatic", "sectioncuts", "sectioncutdefinition",
