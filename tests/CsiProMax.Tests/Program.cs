@@ -1088,6 +1088,7 @@ foreach (var (name, body) in ModelTextTests.All()) Test(name, body);
 foreach (var (name, body) in PropertyTests.All()) Test(name, body);
 foreach (var (name, body) in StructureTests.All()) Test(name, body);
 foreach (var (name, body) in ExtrasTests.All()) Test(name, body);
+foreach (var (name, body) in SlabTests.All()) Test(name, body);
 foreach (var (name, body) in FuzzTests.All()) Test(name, body);
 foreach (var (name, body) in KeptPlugInsTests.All()) Test(name, body);
 foreach (var (name, body) in StabilityTests.All()) Test(name, body);
@@ -1802,6 +1803,9 @@ Test("field test: the full test runs every part, closes its window, and leaves t
 
 // CPM_TESTS=words runs only the tests whose name holds those words (while fixing one part).
 if (Environment.GetEnvironmentVariable("CPM_TESTS") is { Length: > 0 } only) tests.RemoveAll(t => !t.Name.Contains(only, StringComparison.OrdinalIgnoreCase));
+// CPM_ONLY=words runs only the tests whose name has those words in it (while fixing; the full run is the default).
+var onlyTests = Environment.GetEnvironmentVariable("CPM_ONLY");
+if (!string.IsNullOrEmpty(onlyTests)) tests = tests.Where(t => t.Name.Contains(onlyTests, StringComparison.OrdinalIgnoreCase)).ToList();
 foreach (var (name, body) in tests)
 {
     try { body(); Console.WriteLine($"ok    {name}"); }

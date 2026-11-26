@@ -49,8 +49,38 @@ public static class Drawing
         }
         if (slabs is { Count: > 0 })
             model["area_sizes"] = new JsonObject(slabs.DistinctBy(s => s.Name).Select(s => KeyValuePair.Create(s.Name, (JsonNode?)JsonValue.Create(R(s.Thickness)))));
+        // Post-tensioning tendons in 3D and design strips in plan, as the programs draw them over the slab.
+        var tendons = Try(() => e is OfflineEtabs o ? o.Model is var mm ? CsiProMax.Model.SlabDefs.Tendons(mm).Select(t => (t.Name, t.Story, t.Shape())).ToList() : null : TendonsFromTables(e));
+        if (tendons is { Count: > 0 })
+            model["tendons"] = new JsonArray(tendons.Take(MostSupports).Select(t => (JsonNode)new JsonArray(t.Name, t.Story,
+                new JsonArray(t.Item3.Select(p => (JsonNode)new JsonArray(R(p[0]), R(p[1]), R(p[2]))).ToArray()))).ToArray());
+        var strips = Try(() => e is OfflineEtabs o ? o.Model is var mm ? CsiProMax.Model.SlabDefs.Strips(mm).Select(s => (s.Name, s.Layer, s.WidthLeft, s.WidthRight, Z: StripZ(mm, s.Story), s.Plan)).ToList() : null : null);
+        if (strips is { Count: > 0 })
+            model["strips"] = new JsonArray(strips.Select(s => (JsonNode)new JsonArray(s.Name, s.Layer, R(s.WidthLeft), R(s.WidthRight),
+                new JsonArray(s.Plan.Select(p => (JsonNode)new JsonArray(R(p[0]), R(p[1]), R(s.Z))).ToArray()))).ToArray());
         if (supports is { Count: > 0 })
             model["supports"] = new JsonArray(supports.Take(MostSupports).Select(s => (JsonNode)new JsonArray(R(s.X), R(s.Y), R(s.Z), Kind(s.Restraint))).ToArray());
+    }
+
+    private static double StripZ(CsiProMax.Model.StructuralModel m, string story)
+    {
+        var i = story.Length == 0 ? -1 : m.StoryIndex(story);
+        if (i < 0 && m.Areas.Exists(a => a.Kind == CsiProMax.Model.AreaKind.Floor)) i = m.StoryIndex(F2k.F2kWriter.BusiestStory(m));
+        return i < 0 ? 0 : m.Elevation(i);
+    }
+
+    /// <summary>A live program's tendons from its "Tendon Discretized Points" table (ETABS and SAFE: Name, Story, PointNum, GlobalX/Y/Z).</summary>
+    private static List<(string Name, string Story, List<double[]>)> TendonsFromTables(ICsiLink e)
+    {
+        var table = e.Tables().FirstOrDefault(t => !t.Empty && ResultTools.Norm(t.Name) == "tendondiscretizedpoints");
+        if (table is null) return [];
+        var data = e.ReadTable(table.Key, null, null);
+        int name = ResultTools.Col(data.Fields, "Name", "Tendon"), story = ResultTools.Col(data.Fields, "Story"), n = ResultTools.Col(data.Fields, "PointNum", "Point Number"),
+            x = ResultTools.Col(data.Fields, "GlobalX", "Global X"), y = ResultTools.Col(data.Fields, "GlobalY", "Global Y"), z = ResultTools.Col(data.Fields, "GlobalZ", "Global Z");
+        if (name < 0 || x < 0 || y < 0 || z < 0) return [];
+        static double D(string v) => double.TryParse(v, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : 0;
+        return data.Rows.GroupBy(r => (r[name], story < 0 ? "" : r[story]))
+            .Select(g => (g.Key.Item1, g.Key.Item2, g.OrderBy(r => n < 0 ? 0 : D(r[n])).Select(r => new[] { D(r[x]), D(r[y]), D(r[z]) }).ToList())).ToList();
     }
 
     /// <summary>fixed, pinned, roller or other: what the support symbol shows.</summary>
