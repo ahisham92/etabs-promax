@@ -58,7 +58,7 @@ public static class PackTables
         "loadsrotate", "loadsporepressure", "loadssurfacepressure", "hingeoverwrite", "assignmentshinge", "linkpropert", "springpropert",
         "assignmentsspring", "assignmentslink",
         // ETABS 23's load tables: "Frame Loads Assignments - Distributed", "Joint Loads Assignments - Force" (0.4.55).
-        "loadsassignments",
+        "loadsassignments", "loadassignments",
         // SAP2000's names for the same things.
         "springassignment", "hingeassign", "functionresponsespectrum", "functiontimehistory", "functionplotfunction",
         "casemodalhistory", "casedirecthistory", "caseresponsespectrum", "casestatic", "sectioncuts", "sectioncutdefinition",
@@ -94,6 +94,15 @@ public static class PackTables
             || normalized.EndsWith("areas", StringComparison.Ordinal) || normalized.EndsWith("slabs", StringComparison.Ordinal) || normalized.EndsWith("walls", StringComparison.Ordinal));
 
     /// <summary>
+    /// A load assignment table ("Shell Loads - Uniform", "Frame Loads Assignments - Distributed", "Joint Loads
+    /// Assignments - Force"): read first among the inputs, so that the Viewer's Load Assigns always have them. ETABS 23's
+    /// shell loads were left out for size behind the combinations and wind parameters (main 4eabf46 run: Display > Load
+    /// Assigns > Shell... greyed out, 25 rows in the model).
+    /// </summary>
+    public static bool IsLoadAssignment(string name) =>
+        System.Text.RegularExpressions.Regex.IsMatch(ResultTools.Norm(name), "^(joint|point|frame|line|beam|shell|area|slab|wall|surface|floor|tendon)loads?");
+
+    /// <summary>
     /// The tables to take beyond <paramref name="already"/>, in the order they are read: results first (smaller kinds
     /// before element tables, which are the big ones), then the inputs.
     /// </summary>
@@ -107,7 +116,7 @@ public static class PackTables
             _ => 1,
         };
         return known.Where(t => !t.Empty && !have.Contains(t.Key) && Kind(t) is not null)
-            .OrderBy(t => Kind(t) == "input" ? 1 : 0).ThenBy(Weight).ThenBy(t => t.Name, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(t => Kind(t) == "input" ? 1 : 0).ThenBy(t => IsLoadAssignment(t.Name) ? 0 : 1).ThenBy(Weight).ThenBy(t => t.Name, StringComparer.OrdinalIgnoreCase)
             .DistinctBy(t => t.Key).ToList();
     }
 

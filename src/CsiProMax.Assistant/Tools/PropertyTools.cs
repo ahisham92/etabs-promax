@@ -52,8 +52,8 @@ public static class PropertyTools
                 return new JsonObject { ["section"] = s.Name, ["shape"] = s.Shape, ["area"] = s.Area };
             }, a => $"Define the frame section {a.Text("name")}"),
         new("define_shell_type",
-            "Adds or changes a slab or wall section with its type (Define > Section Properties > Slab or Wall Sections): kind slab or wall; slab_type Slab, Drop, Stiff, Ribbed, Waffle, Mat, Footing; modeling ShellThin, ShellThick, Membrane, Layered; one_way load distribution; modifiers F11MOD F22MOD F12MOD M11MOD M22MOD M12MOD V13MOD V23MOD MMOD WMOD (e.g. cracked slabs M11MOD 0.25).",
-            """{"type":"object","required":["name","kind","thickness","material"],"properties":{"name":{"type":"string"},"was":{"type":"string"},"kind":{"type":"string","enum":["slab","wall"]},"slab_type":{"type":"string"},"modeling":{"type":"string"},"thickness":{"type":"number"},"material":{"type":"string"},"one_way":{"type":"boolean"},"modifiers":""" + Numbers + "}}",
+            "Adds or changes a slab or wall section with its type (Define > Section Properties > Slab or Wall Sections): kind slab or wall; slab_type Slab, Drop, Stiff, Ribbed, Waffle, Mat, Footing; modeling ShellThin, ShellThick, Membrane, Layered; one_way load distribution; a Ribbed slab also takes overall_depth, rib_width_top, rib_width_bottom, rib_spacing and rib_direction (local axis 1 or 2 the ribs run along); modifiers F11MOD F22MOD F12MOD M11MOD M22MOD M12MOD V13MOD V23MOD MMOD WMOD (e.g. cracked slabs M11MOD 0.25).",
+            """{"type":"object","required":["name","kind","thickness","material"],"properties":{"name":{"type":"string"},"was":{"type":"string"},"kind":{"type":"string","enum":["slab","wall"]},"slab_type":{"type":"string"},"modeling":{"type":"string"},"thickness":{"type":"number"},"material":{"type":"string"},"one_way":{"type":"boolean"},"overall_depth":{"type":"number"},"rib_width_top":{"type":"number"},"rib_width_bottom":{"type":"number"},"rib_spacing":{"type":"number"},"rib_direction":{"type":"integer"},"modifiers":""" + Numbers + "}}",
             Ask.Changes, (a, e) =>
             {
                 var link = Offline(e);
@@ -62,7 +62,8 @@ public static class PropertyTools
                 var wall = a.Need("kind").Equals("wall", StringComparison.OrdinalIgnoreCase);
                 var s = Core(() => link.Edit(m =>
                 {
-                    var sec = PropertyDefs.SetShellType(m, a.Need("name"), Was(a), wall, a.Text("slab_type", "Slab"), a.Text("modeling", wall ? "ShellThin" : "ShellThin"), a.Number("thickness"), a.Need("material"), a.Flag("one_way"));
+                    var sec = PropertyDefs.SetShellType(m, a.Need("name"), Was(a), wall, a.Text("slab_type", "Slab"), a.Text("modeling", wall ? "ShellThin" : "ShellThin"), a.Number("thickness"), a.Need("material"), a.Flag("one_way"),
+                        a.TryGetProperty("overall_depth", out _) ? new PropertyDefs.Ribs(a.Number("overall_depth"), a.Number("rib_width_top"), a.Number("rib_width_bottom", a.Number("rib_width_top")), a.Number("rib_spacing"), a.Whole("rib_direction", 1)) : null);
                     if (mods.Count > 0) PropertyDefs.SetModifiers(sec.Lines, PropertyDefs.ShellModifiers, mods);
                     return sec;
                 }));
@@ -282,7 +283,7 @@ public static class PropertyTools
     }
 
     /// <summary>The tables argument: rows by table name; true and false become Yes and No, as the tables hold them.</summary>
-    private static Dictionary<string, List<Dictionary<string, string>>>? AssignRows(JsonElement a)
+    internal static Dictionary<string, List<Dictionary<string, string>>>? AssignRows(JsonElement a)
     {
         if (!a.TryGetProperty("tables", out var t) || t.ValueKind == JsonValueKind.Null) return null;
         if (t.ValueKind != JsonValueKind.Object) throw new ToolInputException("tables is {table name: [rows]}.");
@@ -345,7 +346,8 @@ public static class PropertyTools
         var springs = PropertyDefs.Springs(m);
         var o = new JsonObject
         {
-            ["material_types"] = new JsonArray(PropertyDefs.MaterialTypes.Select(t => (JsonNode)t).ToArray()),
+            ["program"] = m.Target,
+            ["material_types"] = new JsonArray(ProgramOptions.MaterialTypes(m.Target).Select(t => (JsonNode)t).ToArray()),
             ["material_values"] = new JsonArray(PropertyDefs.MaterialValues.Select(v => (JsonNode)new JsonObject { ["key"] = v.Key, ["label"] = v.Label }).ToArray()),
             ["material_texts"] = JsonSerializer.SerializeToNode(PropertyDefs.MaterialTexts),
             ["material_nonlinear"] = new JsonObject(PropertyDefs.MaterialTypes.Select(t => KeyValuePair.Create(t, (JsonNode?)new JsonObject
@@ -354,7 +356,7 @@ public static class PropertyTools
                 ["defaults"] = JsonSerializer.SerializeToNode(PropertyDefs.NonlinearKeys(t).Length > 0 ? PropertyDefs.NonlinearDefaults(t) : new()),
             }))),
             ["material_tables"] = JsonSerializer.SerializeToNode(ProgramTables.MaterialTables),
-            ["assign_tables"] = new JsonObject(AssignTables.Tables.Select(t => KeyValuePair.Create(t.Key, (JsonNode?)new JsonObject
+            ["assign_tables"] = new JsonObject(AssignTables.Tables.Where(t => ProgramOptions.HasAssignTable(m.Target, t.Key)).Select(t => KeyValuePair.Create(t.Key, (JsonNode?)new JsonObject
             {
                 ["kind"] = t.Value.Kind, ["many"] = AssignTables.ManyRows.Contains(t.Key),
                 ["fields"] = new JsonArray(t.Value.Fields.Select(f => (JsonNode)new JsonArray(f.Key, f.Label)).ToArray()),
@@ -366,7 +368,7 @@ public static class PropertyTools
                 ["texts"] = new JsonObject(PropertyDefs.MaterialTexts.Keys.Where(k => x.Get(k) is not null).Select(k => KeyValuePair.Create(k, (JsonNode?)x.Get(k)))),
                 ["tables"] = JsonSerializer.SerializeToNode(x.Tables ?? new()),
             }).ToArray()),
-            ["shapes"] = new JsonArray(PropertyDefs.Shapes.Select(s => (JsonNode)new JsonObject { ["shape"] = s.Name, ["dims"] = new JsonArray(s.Dims.Select(d => (JsonNode)d).ToArray()), ["concrete"] = s.Concrete, ["about"] = s.About }).ToArray()),
+            ["shapes"] = new JsonArray(PropertyDefs.Shapes.Where(s => ProgramOptions.HasShape(m.Target, s)).Select(s => (JsonNode)new JsonObject { ["shape"] = s.Name, ["dims"] = new JsonArray(s.Dims.Select(d => (JsonNode)d).ToArray()), ["concrete"] = s.Concrete, ["about"] = s.About }).ToArray()),
             ["frame_sections"] = new JsonArray(m.FrameSections.Select(s => (JsonNode)new JsonObject
             {
                 ["name"] = s.Name, ["shape"] = s.Shape, ["material"] = s.Material,
@@ -377,10 +379,12 @@ public static class PropertyTools
             {
                 ["name"] = s.Name, ["wall"] = s.IsWall, ["material"] = s.Material, ["thickness"] = s.Thickness,
                 ["slab_type"] = s.Get("SLABTYPE"), ["modeling"] = s.Get("MODELINGTYPE"), ["one_way"] = s.Get("ONEWAYLOADDIST") == "Yes",
+                ["overall_depth"] = s.Number("OVERALLDEPTH"), ["rib_width_top"] = s.Number("SLABRIBWIDTHTOP"), ["rib_width_bottom"] = s.Number("SLABRIBWIDTHBOTTOM"),
+                ["rib_spacing"] = s.Number("SLABRIBSPACING"), ["rib_direction"] = s.Number("SLABRIBPARALLELTOAXIS"),
                 ["modifiers"] = Numbers_(PropertyDefs.Modifiers(s.Lines, PropertyDefs.ShellModifiers)),
             }).ToArray()),
-            ["slab_types"] = new JsonArray(PropertyDefs.SlabTypes.Select(t => (JsonNode)t).ToArray()),
-            ["modeling_types"] = new JsonArray(PropertyDefs.ModelingTypes.Select(t => (JsonNode)t).ToArray()),
+            ["slab_types"] = new JsonArray(ProgramOptions.SlabTypes(m.Target).Select(t => (JsonNode)t).ToArray()),
+            ["modeling_types"] = new JsonArray(ProgramOptions.ModelingTypes(m.Target).Select(t => (JsonNode)t).ToArray()),
             ["frame_modifiers"] = new JsonArray(PropertyDefs.FrameModifiers.Select(t => (JsonNode)t).ToArray()),
             ["shell_modifiers"] = new JsonArray(PropertyDefs.ShellModifiers.Select(t => (JsonNode)t).ToArray()),
             ["hinge_dofs"] = new JsonArray(PropertyDefs.HingeDofs.Select(t => (JsonNode)t).ToArray()),

@@ -35,6 +35,16 @@ public static class ModelerTables
             }
             catch (EtabsException ex) { refused.Add($"{table}: {ex.Message}"); }
         }
+        // The definitions the .e2k has no keyword for (generalized displacements, hinges, layers, ...), by name.
+        foreach (var (table, rows) in (model.DefinitionTables ?? []).OrderBy(t => t.Key, StringComparer.Ordinal))
+        {
+            try
+            {
+                EditableTables.Put(e, table, "Name", rows.Select(r => (IReadOnlyDictionary<string, string>)r).ToList(), $"put the Modeler's '{table}' in");
+                done.Add($"{table}: {rows.Count} row{(rows.Count == 1 ? "" : "s")}");
+            }
+            catch (EtabsException ex) { refused.Add($"{table}: {ex.Message}"); }
+        }
         // The objects' assignments the .e2k has no keyword for, by story and label (AssignTables). A new row names its
         // object's UniqueName too, read from the program's summary of that kind of object.
         var unique = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
@@ -70,7 +80,7 @@ public static class ModelerTables
     public static bool HasRows(string cpm, CsiProgram program)
     {
         var model = ModelFile.Load(cpm);
-        return AssignTables.Rows(model).Count > 0 || (program.Key == CsiProgram.Etabs.Key && model.Materials.Any(x => x.Tables is not null));
+        return AssignTables.Rows(model).Count > 0 || (program.Key == CsiProgram.Etabs.Key && (model.Materials.Any(x => x.Tables is not null) || model.DefinitionTables is { Count: > 0 }));
     }
 
     private static bool Yes(IReadOnlyDictionary<string, string> r, string k) => r.TryGetValue(k, out var v) && v.Equals("Yes", StringComparison.OrdinalIgnoreCase);

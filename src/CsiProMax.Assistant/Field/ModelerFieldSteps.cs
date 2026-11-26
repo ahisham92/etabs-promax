@@ -81,6 +81,7 @@ public static class ModelerFieldSteps
         ctx.Offer(StructureTools.All);
         ctx.Offer(ExtraTools.All);
         ctx.Offer(EditTools.All);
+        ctx.Offer(DefineTools.All);
         var folder = Q(ctx.Folder);
 
         // A new model from the template: three stories, two bays each way.
@@ -234,6 +235,7 @@ public static class ModelerFieldSteps
 
         Defining(ctx, modeler);
         Editing(ctx, modeler);
+        DefineItems(ctx, modeler);
         Tables(ctx, modeler);
         ModelerCheck.FieldSteps(ctx);
         Lateral(ctx, modeler);
@@ -375,6 +377,33 @@ public static class ModelerFieldSteps
     /// Draw Braces, Draw Joints and Edit > Replicate, Move and Divide Frames (Ahmed 2026-11-26: every button). Each is
     /// checked on the model, and the model is put back as it was afterwards, so the later counts still hold.
     /// </summary>
+    /// <summary>Define > Reinforcing Bar Sizes and Modify/Show Rebar stay in the model (the .e2k has keywords for them, and
+    /// the program opens them); the definitions kept as table rows are tried and taken back.</summary>
+    private static void DefineItems(FieldContext ctx, OfflineEtabs modeler)
+    {
+        var m = modeler.Model;
+        ctx.Tool("define_rebar_size", """{"name":"CPM16","area":0.000201,"diameter":0.016}""",
+            a => FieldContext.Expect(CsiProMax.Model.DefineTables.RebarSizes(m).Exists(x => x.Name == "CPM16"), "no bar CPM16: " + a.ToJsonString()), "tool define_rebar_size, Define > Reinforcing Bar Sizes");
+        ctx.Refused("define_rebar_size", """{"name":"CPM20","area":0.0003}""", "diameter", "tool define_rebar_size says no to a bar with no diameter");
+        var concrete = m.FrameSections.FirstOrDefault(x => CsiProMax.Model.DefineTables.Rebar(m, x.Name) is { } r && r.GetValueOrDefault("TYPE") == "Column");
+        if (concrete is not null)
+        {
+            ctx.Tool("define_frame_rebar", $$$"""{"section":{{{Q(concrete.Name)}}},"values":{"COVER":0.045}}""",
+                a => FieldContext.Expect(CsiProMax.Model.DefineTables.Rebar(m, concrete.Name)!["COVER"] == "0.045", "the cover did not change: " + a.ToJsonString()), "tool define_frame_rebar, Frame Section > Modify/Show Rebar");
+            ctx.Refused("define_frame_rebar", $$$"""{"section":{{{Q(concrete.Name)}}},"values":{"PATTERN":"many"}}""", "PATTERN", "tool define_frame_rebar says no to a wrong bar pattern");
+        }
+        var before = CsiProMax.Model.ModelFile.ToJson(m);
+        var unsaved = modeler.Unsaved;
+        try
+        {
+            ctx.Tool("define_table_rows", """{"table":"Hinge Definitions - Moment M3","name":"CPM-H1","rows":[{"IsSymmetric":true}]}""",
+                a => FieldContext.Expect(m.DefinitionTables?.GetValueOrDefault("Hinge Definitions - Moment M3")?.Exists(r => r["Name"] == "CPM-H1") == true, "no hinge row: " + a.ToJsonString()), "tool define_table_rows, a hinge definition kept as the program's table rows");
+            ctx.Refused("define_table_rows", """{"table":"Hinge Definitions - Moment M3","name":"CPM-H2","rows":[{"Nope":1}]}""", "no field", "tool define_table_rows says no to a field the table does not have");
+            ctx.Tool("definition_data", "{}", a => FieldContext.Expect(a["rebar_sizes"]!.AsArray().Count > 0 && a["tables"]!.AsObject().Count > 0, "definition_data is empty: " + a.ToJsonString()), "tool definition_data reads the Define items");
+        }
+        finally { modeler.Rollback(CsiProMax.Model.ModelFile.FromJson(before), unsaved); }
+    }
+
     private static void Editing(FieldContext ctx, OfflineEtabs modeler)
     {
         var before = CsiProMax.Model.ModelFile.ToJson(modeler.Model);
@@ -560,9 +589,23 @@ public static class ModelerFieldSteps
             a => FieldContext.Expect((int?)a["spans"] == 1 && (int?)a["strands"] == 4, "not the tendon asked for: " + a.ToJsonString()), "tool draw_tendon, a draped tendon jacked from both ends");
         ctx.Refused("draw_tendon", """{"name":"CPM-BADT","points":[[0,2.5],[12,2.5]],"spans":[{"depth_left":0.05,"depth_low":5,"depth_right":0.05}],"section":"CPM-T15"}""", "below the slab", "tool draw_tendon says no to a tendon below the slab");
         ctx.Tool("define_hyperstatic_case", """{"name":"CPM-PTF-HP","base_case":"CPM-PTF"}""", null, "tool define_hyperstatic_case, of the final prestress case");
+        // ETABS 23.2's own export (2026-11-26): percentage and detailed losses, a punching overwrite with a user perimeter and
+        // stud rails, an opening and a ribbed slab, as ETABS writes them.
+        ctx.Tool("draw_tendon", """{"name":"CPM-TEN2","points":[[0,3.5],[12,3.5]],"spans":[{"depth_left":0.05,"depth_low":0.1,"depth_right":0.05,"a":0,"b":0}],"section":"CPM-T15","strands":2,""" +
+            """ "jacking":{"transfer_pattern":"CPM-PTT","final_pattern":"CPM-PTF","stress":1400000,"end":"I"},"losses":{"method":"Detailed","curvature":0.07,"wobble":0.0003,"anchor_slip":0.006,"elastic_shortening":7000,"creep":48000,"shrinkage":41000,"relaxation":21000}}""",
+            a => FieldContext.Expect(((string?)a["losses"])?.StartsWith("Detailed", StringComparison.Ordinal) == true, "not detailed losses: " + a.ToJsonString()), "tool draw_tendon, a parabola with detailed losses");
+        var slabStory = CsiProMax.Model.SlabDefs.Tendons(modeler.Model).Find(t => t.Name == "CPM-TEN")?.Story ?? "";
+        var at = modeler.Model.Points.Find(p => p.Below == 0 && Math.Abs(p.X) < 1e-6 && Math.Abs(p.Y - 2.5) < 1e-6)?.Name ?? "";
+        ctx.Tool("set_punching_overwrite", """{"point":""" + Q(at) + ""","story":""" + Q(slabStory) + ""","location":"Edge","perimeter":[[-0.3,-0.3],[0.3,-0.3],[0.3,0.3],[-0.3,0.3]],""" +
+            """ "reinforcement":{"type":"Stud Rails","pattern":"Radial","fy":420000,"diameter":0.01,"spacing":0.08}}""",
+            a => FieldContext.Expect((string?)a["perimeter"] == "4 corners", "not the user perimeter: " + a.ToJsonString()), "tool set_punching_overwrite, a user perimeter with stud rails");
+        ctx.Refused("set_punching_overwrite", """{"point":""" + Q(at) + ""","story":""" + Q(slabStory) + ""","reinforcement":{"type":"Stud Rails"}}""", "yield stress", "tool set_punching_overwrite says no to studs with no size");
+        ctx.Tool("draw_opening", """{"name":"CPM-OPEN","story":""" + Q(slabStory) + ""","points":[[4,1],[5,1],[5,2],[4,2]]}""", null, "tool draw_opening");
+        ctx.Refused("draw_opening", """{"name":"CPM-BADO","story":""" + Q(slabStory) + ""","points":[[4,1],[5,1]]}""", "3 corners", "tool draw_opening says no to two corners");
         ctx.Tool("extra_definitions", "{}", a =>
         {
-            FieldContext.Expect(a["constraints"]!.AsArray().Count == 2 && a["vehicles"]!.AsArray().Count == 2 && a["strips"]!.AsArray().Count == 1 && a["tendons"]!.AsArray().Count == 1 && a["tendons"]![0]!["shape"]!.AsArray().Count > 2, "not all listed: " + a.ToJsonString());
+            FieldContext.Expect(a["constraints"]!.AsArray().Count == 2 && a["vehicles"]!.AsArray().Count == 2 && a["strips"]!.AsArray().Count == 1 && a["tendons"]!.AsArray().Count == 2 && a["tendons"]![0]!["shape"]!.AsArray().Count > 2
+                && a["punching_overwrites"]!.AsArray().Count == 1 && a["openings"]!.AsArray().Count == 1, "not all listed: " + a.ToJsonString());
             if (joints.Count == 2) FieldContext.Expect(a["constraints"]![0]!["joints"]!.AsArray().Count == 2, "CPM-BODY's joints are not listed");
         });
     }
@@ -602,6 +645,8 @@ public static class ModelerFieldSteps
         ctx.Refused("define_frame_shape", """{"name":"CPM-BAD","shape":"Steel Pipe","material":"CPM-S355","dims":{"D":0.3}}""", "needs TW", "tool define_frame_shape says no to a missing dimension");
         var conc = modeler.Model.Materials.FirstOrDefault(m => m.IsConcrete)?.Name ?? "";
         ctx.Tool("define_shell_type", """{"name":"CPM-DROP","kind":"slab","slab_type":"Drop","modeling":"ShellThick","thickness":0.3,"material":""" + Q(conc) + ""","modifiers":{"M11MOD":0.25,"M22MOD":0.25}}""", null, "tool define_shell_type, a cracked drop panel");
+        ctx.Tool("define_shell_type", """{"name":"CPM-RIB","kind":"slab","slab_type":"Ribbed","modeling":"ShellThin","thickness":0.1,"material":""" + Q(conc) + ""","overall_depth":0.4,"rib_width_top":0.15,"rib_width_bottom":0.125,"rib_spacing":0.9,"rib_direction":1}""", null, "tool define_shell_type, a ribbed slab");
+        ctx.Refused("define_shell_type", """{"name":"CPM-RIB2","kind":"slab","slab_type":"Ribbed","thickness":0.1,"material":""" + Q(conc) + """}""", "ribs", "tool define_shell_type says no to a ribbed slab with no ribs");
         ctx.Tool("define_spring", """{"kind":"point","name":"CPM-PS","values":{"UX":1000,"UY":1000,"UZ":50000}}""", null, "tool define_spring, a point spring");
         ctx.Tool("define_spring", """{"kind":"area","name":"CPM-AS","values":{"U3":20000}}""", null, "tool define_spring, an area spring");
         ctx.Refused("define_spring", """{"kind":"line","name":"CPM-BAD","values":{"UX":5}}""", "not 'UX'", "tool define_spring says no to a value the kind does not have");

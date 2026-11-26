@@ -25,6 +25,7 @@ public static class SlabDefs
     public const string StripOverwrites = "CONCRETE SLAB DESIGN OVERWRITES - STRIP BASED";
     public const string FemOverwrites = "CONCRETE SLAB DESIGN OVERWRITES - FEM BASED";
     public const string PunchingOverwrites = "CONCRETE SLAB DESIGN PUNCHING OVERWRITES - GENERAL";
+    public const string PunchingPerimeter = "CONCRETE SLAB DESIGN PUNCHING OVERWRITES - USER PERIMETER";
 
     /// <summary>ETABS 20's own order of the sections around these (from its export), so a new section goes where ETABS puts it.</summary>
     public static readonly string[] FileOrder =
@@ -36,11 +37,11 @@ public static class SlabDefs
         "LOAD PATTERNS", "POINT OBJECT LOADS", "FRAME OBJECT LOADS", "SHELL OBJECT LOADS", TendonLoads, "ANALYSIS OPTIONS", "MASS SOURCE",
         "FUNCTIONS", "GENERALIZED DISPLACEMENTS", "LOAD CASES", "LOAD COMBINATIONS", "GENERAL DESIGN PREFERENCES", "STEEL DESIGN PREFERENCES",
         "CONCRETE DESIGN PREFERENCES", "COMPOSITE DESIGN PREFERENCES", "COMPOSITE COLUMN DESIGN PREFERENCES", "WALL DESIGN PREFERENCES",
-        SlabPreferences, StripOverwrites, FemOverwrites, PunchingOverwrites,
+        SlabPreferences, StripOverwrites, FemOverwrites, PunchingOverwrites, PunchingPerimeter,
     ];
 
     /// <summary>Where the jack is, as the tools name it, and as ETABS's .e2k and SAFE's .f2k write it. "End" and "J End" are
-    /// from ETABS 20 and SAFE 20; the other two follow the same pattern and are checked by the field test.</summary>
+    /// from ETABS 20 and SAFE 20, "Both" from ETABS 23.2; the rest follow the same pattern and are checked by the field test.</summary>
     public static readonly (string Key, string E2k, string F2k)[] JackEnds = [("I", "Start", "I End"), ("J", "End", "J End"), ("Both", "Both", "Both Ends")];
 
     public static readonly string[] StripDesignTypes = ["Column", "Middle", "No Design"];
@@ -119,8 +120,40 @@ public static class SlabDefs
 
     public sealed record TendonJack(string TransferPattern, string FinalPattern, double Stress, string End);
 
-    /// <summary>The losses: "Fixed" (stresses lost at stressing and in the long term), or "Percent" (fractions of the jacking stress).</summary>
-    public sealed record TendonLoss(string Method, double Stressing, double LongTerm);
+    /// <summary>The losses (Assign > Tendon Loads > Tendon Losses): "Fixed" (stresses lost at stressing and in the long term),
+    /// "Percent" (percentages of the jacking stress), or "Detailed": friction (curvature and wobble coefficients), anchorage
+    /// set slip, and the long-term stresses lost to elastic shortening, creep, shrinkage and steel relaxation. As ETABS 23.2
+    /// writes them (its export of PT-SL Ex001 with both, 2026-11-26).</summary>
+    public sealed record TendonLoss(string Method, double Stressing, double LongTerm, double Curvature = 0, double Wobble = 0, double AnchorSlip = 0,
+        double ElasticShortening = 0, double Creep = 0, double Shrinkage = 0, double Relaxation = 0);
+
+    public static readonly string[] LossMethods = ["Fixed", "Percent", "Detailed"];
+
+    private static TendonLoss ReadLoss(IReadOnlyList<string> l) => (Value(l, "LOSSTYPE") ?? "Fixed").ToUpperInvariant() switch
+    {
+        "PERCENT" => new TendonLoss("Percent", D(l, "LOSSPERCENTST"), D(l, "LOSSPERCENTLT")),
+        "DETAILED" => new TendonLoss("Detailed", 0, 0, D(l, "CURVCOEFF"), D(l, "WOBBLECOEFF"), D(l, "ANCHORSLIP"), D(l, "ELASTICSHORT"), D(l, "CREEPSTRESS"), D(l, "SHRINKSTRESS"), D(l, "STEELRELAX")),
+        _ => new TendonLoss("Fixed", D(l, "LOSSFIXEDST"), D(l, "LOSSFIXEDLT")),
+    };
+
+    private static List<string> LossLine(string name, string story, TendonLoss loss)
+    {
+        List<string> t = ["TENDONLOAD", Quote(name), Quote(story), "TYPE", Quote("Losses"), "LOSSTYPE", Quote(loss.Method)];
+        if (loss.Method == "Percent") t.AddRange(["LOSSPERCENTST", N(loss.Stressing), "LOSSPERCENTLT", N(loss.LongTerm)]);
+        else if (loss.Method == "Detailed")
+            t.AddRange(["CURVCOEFF", N(loss.Curvature), "WOBBLECOEFF", N(loss.Wobble), "ANCHORSLIP", N(loss.AnchorSlip), "ELASTICSHORT", N(loss.ElasticShortening),
+                "CREEPSTRESS", N(loss.Creep), "SHRINKSTRESS", N(loss.Shrinkage), "STEELRELAX", N(loss.Relaxation)]);
+        else t.AddRange(["LOSSFIXEDST", N(loss.Stressing), "LOSSFIXEDLT", N(loss.LongTerm)]);
+        return t;
+    }
+
+    /// <summary>A short description of the losses, for answers.</summary>
+    public static string Describe(TendonLoss l) => l.Method switch
+    {
+        "Percent" => $"{l.Stressing}% at stressing, {l.LongTerm}% long term",
+        "Detailed" => $"friction {l.Curvature}/{l.Wobble}, anchor set {l.AnchorSlip}; long term: shortening {l.ElasticShortening}, creep {l.Creep}, shrinkage {l.Shrinkage}, relaxation {l.Relaxation}",
+        _ => $"{l.Stressing} at stressing, {l.LongTerm} long term",
+    };
 
     public sealed record Tendon(string Name, string Story, List<string> Points, List<double[]> Plan, double Datum,
         List<TendonSpan> Spans, string Section, int Strands, bool Bonded, TendonJack? Jack, TendonLoss? Loss)
@@ -317,7 +350,7 @@ public static class SlabDefs
                     jack = new TendonJack(Value(l, "TRANSFERLOADPAT") ?? "", Value(l, "FINALLOADPAT") ?? "", D(l, "JACKSTRESS"), end);
                 }
                 else if (string.Equals(Value(l, "TYPE"), "Losses", StringComparison.OrdinalIgnoreCase))
-                    loss = new TendonLoss(Value(l, "LOSSTYPE") ?? "Fixed", D(l, "LOSSFIXEDST"), D(l, "LOSSFIXEDLT"));
+                    loss = ReadLoss(l);
             }
             list.Add(new Tendon(name, story, points, plan, datum, spans, asg is null ? "" : Value(asg, "PROPERTY") ?? "",
                 asg is null ? 1 : (int)D(asg, "NUMSTRANDS", 1), asg is not null && string.Equals(Value(asg, "BONDED"), "YES", StringComparison.OrdinalIgnoreCase), jack, loss));
@@ -385,17 +418,17 @@ public static class SlabDefs
         }
         if (loss is not null)
         {
-            if (loss.Stressing < 0 || loss.LongTerm < 0 || !double.IsFinite(loss.Stressing + loss.LongTerm)) throw new ArgumentException("The losses are 0 or more.");
-            if (loss.Method.Equals("Percent", StringComparison.OrdinalIgnoreCase))
-            {
-                // ETABS's percentage losses are a share of the jacking stress, the same as fixed losses of that size.
-                if (jack is null) throw new ArgumentException("Percentage losses are a share of the jacking stress: give the jacking too.");
-                if (loss.Stressing + loss.LongTerm >= 100) throw new ArgumentException("The losses add up to 100% or more of the jacking stress.");
-                loss = new TendonLoss("Fixed", jack.Stress * loss.Stressing / 100, jack.Stress * loss.LongTerm / 100);
-            }
-            else if (!loss.Method.Equals("Fixed", StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("The losses are 'Fixed' (stresses) or 'Percent' (of the jacking stress).");
-            else loss = loss with { Method = "Fixed" };
-            if (jack is not null && loss.Stressing + loss.LongTerm >= jack.Stress) throw new ArgumentException("The losses add up to the jacking stress or more.");
+            // ETABS writes a tendon's losses with its jacking load (TYPE "Loads" then TYPE "Losses"); losses with no jacking load nothing.
+            if (jack is null) throw new ArgumentException("Losses go with the jacking: give the jacking (patterns and stress) too.");
+            var method = LossMethods.FirstOrDefault(x => x.Equals(loss.Method, StringComparison.OrdinalIgnoreCase))
+                ?? throw new ArgumentException("The losses are 'Fixed' (stresses), 'Percent' (of the jacking stress) or 'Detailed' (friction, anchor set and long-term stresses).");
+            loss = loss with { Method = method };
+            double[] all = [loss.Stressing, loss.LongTerm, loss.Curvature, loss.Wobble, loss.AnchorSlip, loss.ElasticShortening, loss.Creep, loss.Shrinkage, loss.Relaxation];
+            if (all.Any(v => v < 0 || !double.IsFinite(v))) throw new ArgumentException("The losses are 0 or more.");
+            if (method == "Percent" && loss.Stressing + loss.LongTerm >= 100) throw new ArgumentException("The losses add up to 100% or more of the jacking stress.");
+            if (method == "Detailed" && jack is not null && loss.ElasticShortening + loss.Creep + loss.Shrinkage + loss.Relaxation >= jack.Stress)
+                throw new ArgumentException("The long-term losses add up to the jacking stress or more.");
+            if (method == "Fixed" && jack is not null && loss.Stressing + loss.LongTerm >= jack.Stress) throw new ArgumentException("The losses add up to the jacking stress or more.");
         }
 
         DeleteTendonRows(m, name, story);
@@ -424,7 +457,7 @@ public static class SlabDefs
             Section(m, TendonLoads).Lines.Add(Line(["TENDONLOAD", Quote(name), Quote(story), "TYPE", Quote("Loads"), "TRANSFERLOADPAT", Quote(jack.TransferPattern), "FINALLOADPAT", Quote(jack.FinalPattern),
                 "JACKLOC", Quote(JackEnds.First(j => j.Key == jack.End).E2k), "JACKSTRESS", N(jack.Stress)]));
         if (loss is not null)
-            Section(m, TendonLoads).Lines.Add(Line(["TENDONLOAD", Quote(name), Quote(story), "TYPE", Quote("Losses"), "LOSSTYPE", Quote("Fixed"), "LOSSFIXEDST", N(loss.Stressing), "LOSSFIXEDLT", N(loss.LongTerm)]));
+            Section(m, TendonLoads).Lines.Add(Line(LossLine(name, story, loss)));
         return Tendons(m).First(t => t.Name == name && t.Story == story);
     }
 
@@ -597,5 +630,130 @@ public static class SlabDefs
     {
         if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException($"Give the {what} a name.");
         if (name.Contains('"')) throw new ArgumentException("A name cannot have a double quote in it.");
+    }
+    // ---- punching shear overwrites (Design > Concrete Slab Design > Punching Shear Overwrites) ----
+
+    public static readonly string[] PunchingChecks = ["Program Determined", "Yes", "No"];
+    public static readonly string[] PunchingLocations = ["Auto", "Interior", "Edge", "Corner"];
+    public static readonly string[] PunchingReinforcements = ["None", "Ties", "Stud Rails"];
+    public static readonly string[] PunchingPatterns = ["Radial", "Orthogonal"];
+
+    /// <summary>A punching shear overwrite at a point (a column or a point load): whether it is checked, the location type, the
+    /// critical perimeter (ETABS's own, or one given by its corners about the point: x, y and the corner radius) and the shear
+    /// reinforcement (ties or stud rails, their pattern, yield stress, bar diameter and spacing). As ETABS 23.2 writes it.</summary>
+    public sealed record Punching(string Point, string Story, string Check = "Program Determined", string Location = "Auto", List<double[]>? Perimeter = null,
+        string Reinforcement = "None", string Pattern = "Radial", double Fy = 0, double Diameter = 0, double Spacing = 0)
+    {
+        public string Name => Point + "@" + Story;
+    }
+
+    public static List<Punching> PunchingList(StructuralModel m)
+    {
+        var list = new List<Punching>();
+        foreach (var t in Rows(m, PunchingOverwrites, "PUNCHINGSHEAROVERWRITES"))
+        {
+            if (t.Count < 3) continue;
+            var point = Unquote(t[1]); var story = Unquote(t[2]);
+            var corners = Rows(m, PunchingPerimeter, "PUNCHINGSHEARPERIMETER").Where(r => Is(r, point, story)).OrderBy(r => D(r, "POINTNUM"))
+                .Select(r => new[] { D(r, "X"), D(r, "Y"), D(r, "RADIUS") }).ToList();
+            var user = string.Equals(Value(t, "PERIMETER"), "User Perimeter", StringComparison.OrdinalIgnoreCase);
+            list.Add(new Punching(point, story, Value(t, "CHECK") ?? "Program Determined", Value(t, "LOCTYPE") ?? "Auto", user ? corners : null,
+                Value(t, "REINFTYPE") ?? "None", Value(t, "REINFPAT") ?? "Radial", D(t, "REINFFY"), D(t, "REINFDIA"), D(t, "REINFSPCG")));
+        }
+        return list;
+    }
+
+    private static string OneOf(string[] options, string value, string what) =>
+        options.FirstOrDefault(o => o.Equals(value.Trim(), StringComparison.OrdinalIgnoreCase)) ?? throw new ArgumentException($"The {what} is one of {string.Join(", ", options)}; not '{value}'.");
+
+    public static Punching SetPunching(StructuralModel m, Punching p)
+    {
+        var level = m.StoryIndex(p.Story);
+        if (level < 0) throw new ArgumentException($"There is no story '{p.Story}'.");
+        if (level == 0) throw new ArgumentException("Punching is checked in a slab: pick the slab's story, not the base.");
+        if (m.Point(p.Point) is null) throw new ArgumentException($"There is no point '{p.Point}'.");
+        p = p with
+        {
+            Story = m.Stories[level].Name, Check = OneOf(PunchingChecks, p.Check, "punching check"), Location = OneOf(PunchingLocations, p.Location, "location type"),
+            Reinforcement = OneOf(PunchingReinforcements, p.Reinforcement, "shear reinforcement"), Pattern = OneOf(PunchingPatterns, p.Pattern, "reinforcement pattern"),
+        };
+        if (p.Perimeter is { } c)
+        {
+            if (c.Count < 3) throw new ArgumentException("A user perimeter has 3 corners or more, about the point: [[x, y], ...] (with a third number, the corner radius, if it is rounded).");
+            if (c.Any(k => k.Length < 2 || k.Take(3).Any(v => !double.IsFinite(v)) || (k.Length > 2 && k[2] < 0))) throw new ArgumentException("Each corner of the perimeter is x, y and, if it is rounded, its radius (0 or more).");
+            p = p with { Perimeter = c.Select(k => new[] { k[0], k[1], k.Length > 2 ? k[2] : 0 }).ToList() };
+        }
+        if (p.Reinforcement != "None" && (!(p.Fy > 0) || !(p.Diameter > 0) || !(p.Spacing > 0)))
+            throw new ArgumentException("Shear reinforcement needs its yield stress (fy), bar diameter and spacing, each more than 0.");
+        DeletePunching(m, p.Point, p.Story, quiet: true);
+        List<string> t = ["PUNCHINGSHEAROVERWRITES", Quote(p.Point), Quote(p.Story), "CHECK", Quote(p.Check), "LOCTYPE", Quote(p.Location),
+            "PERIMETER", Quote(p.Perimeter is null ? "Auto" : "User Perimeter"), "EFFDEPTH", Quote("Auto"), "REINFTYPE", Quote(p.Reinforcement)];
+        if (p.Reinforcement != "None") t.AddRange(["REINFPAT", Quote(p.Pattern), "REINFFY", N(p.Fy), "REINFDIA", N(p.Diameter), "REINFSPCG", N(p.Spacing)]);
+        Section(m, PunchingOverwrites).Lines.Add(Line(t));
+        if (p.Perimeter is { } corners)
+        {
+            var lines = Section(m, PunchingPerimeter).Lines;
+            for (var i = 0; i < corners.Count; i++)
+                lines.Add(Line(["PUNCHINGSHEARPERIMETER", Quote(p.Point), Quote(p.Story), "POINTNUM", (i + 1).ToString(CultureInfo.InvariantCulture),
+                    "X", N(corners[i][0]), "Y", N(corners[i][1]), "RADIUS", N(corners[i][2]), "ISNULL", Quote("No")]));
+        }
+        return p;
+    }
+
+    public static void DeletePunching(StructuralModel m, string point, string story, bool quiet = false)
+    {
+        if (!quiet && !PunchingList(m).Exists(x => x.Point == point && string.Equals(x.Story, story, StringComparison.OrdinalIgnoreCase)))
+            throw new ArgumentException($"There is no punching overwrite at point {point} on {story}.");
+        RemoveRows(m, PunchingOverwrites, t => t[0] == "PUNCHINGSHEAROVERWRITES" && Is(t, point, story));
+        RemoveRows(m, PunchingPerimeter, t => t[0] == "PUNCHINGSHEARPERIMETER" && Is(t, point, story));
+    }
+    // ---- openings in slabs (Draw > Draw Floor/Wall Openings) ----
+
+    private const string AreaConnect = "AREA CONNECTIVITIES";
+
+    /// <summary>An opening: an area object of type AREA assigned OPENING "Yes", as ETABS 23.2 writes it, on its story.</summary>
+    public sealed record Opening(string Name, string Story, List<double[]> Plan);
+
+    private static IEnumerable<(string Line, List<string> Tokens)> OpeningLines(StructuralModel m) =>
+        (m.UnparsedLines.GetValueOrDefault(AreaConnect) ?? []).Select(l => (l, Tokenize(l))).Where(x => x.Item2.Count > 3 && x.Item2[0] == "AREA" && x.Item2[2] == "AREA");
+
+    public static List<Opening> Openings(StructuralModel m)
+    {
+        var list = new List<Opening>();
+        foreach (var (_, t) in OpeningLines(m))
+        {
+            var name = Unquote(t[1]);
+            if (!int.TryParse(t[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) || t.Count < 4 + n) continue;
+            var plan = t.Skip(4).Take(n).Select(pn => m.Point(Unquote(pn))).Where(p => p is not null).Select(p => new[] { p!.X, p.Y }).ToList();
+            foreach (var a in m.AreaAssigns.Where(a => a.Label == name && a.Extra.Any(e => Value(e, "OPENING") is { } v && Unquote(v).Equals("Yes", StringComparison.OrdinalIgnoreCase))))
+                list.Add(new Opening(name, a.Story, plan));
+        }
+        return list;
+    }
+
+    public static Opening SetOpening(StructuralModel m, string name, string story, IReadOnlyList<double[]> plan)
+    {
+        Named(name, "opening");
+        var level = m.StoryIndex(story);
+        if (level <= 0) throw new ArgumentException(level < 0 ? $"There is no story '{story}'." : "An opening is in a floor: pick the slab's story, not the base.");
+        story = m.Stories[level].Name;
+        if (plan.Count < 3 || plan.Any(p => p.Length < 2 || !double.IsFinite(p[0]) || !double.IsFinite(p[1]))) throw new ArgumentException("An opening has 3 corners or more in plan: [[x, y], ...].");
+        var area = 0.0;
+        for (var i = 0; i < plan.Count; i++) { var a = plan[i]; var b = plan[(i + 1) % plan.Count]; area += a[0] * b[1] - b[0] * a[1]; }
+        if (Math.Abs(area) < 1e-12) throw new ArgumentException("The opening's corners enclose no area.");
+        if (m.Areas.Exists(a => a.Label == name) && !OpeningLines(m).Any(x => Unquote(x.Tokens[1]) == name)) throw new ArgumentException($"There is already an area '{name}'; give the opening another name.");
+        DeleteOpening(m, name, quiet: true);
+        var names = plan.Select(p => m.PointAt(p[0], p[1]).Name).ToList();
+        if (!m.UnparsedLines.TryGetValue(AreaConnect, out var lines)) m.UnparsedLines[AreaConnect] = lines = [];
+        lines.Add(Line(new List<string> { "AREA", Quote(name), "AREA", names.Count.ToString(CultureInfo.InvariantCulture) }.Concat(names.Select(Quote)).Concat(names.Select(_ => "0"))));
+        m.AreaAssigns.Add(new AreaAssign { Label = name, Story = story, Extra = [["OPENING", Quote("Yes")]] });
+        return new Opening(name, story, plan.Select(p => new[] { p[0], p[1] }).ToList());
+    }
+
+    public static void DeleteOpening(StructuralModel m, string name, bool quiet = false)
+    {
+        var had = m.UnparsedLines.TryGetValue(AreaConnect, out var lines) && lines.RemoveAll(l => Tokenize(l) is { Count: > 3 } t && t[0] == "AREA" && t[2] == "AREA" && Unquote(t[1]) == name) > 0;
+        if (!had && !quiet) throw new ArgumentException($"There is no opening '{name}'.");
+        m.AreaAssigns.RemoveAll(a => a.Label == name && a.Extra.Any(e => Value(e, "OPENING") is not null));
     }
 }

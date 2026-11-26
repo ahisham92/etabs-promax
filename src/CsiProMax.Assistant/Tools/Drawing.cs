@@ -58,6 +58,9 @@ public static class Drawing
         if (strips is { Count: > 0 })
             model["strips"] = new JsonArray(strips.Select(s => (JsonNode)new JsonArray(s.Name, s.Layer, R(s.WidthLeft), R(s.WidthRight),
                 new JsonArray(s.Plan.Select(p => (JsonNode)new JsonArray(R(p[0]), R(p[1]), R(s.Z))).ToArray()))).ToArray());
+        var openings = Try(() => e is OfflineEtabs o ? o.Model is var mm ? CsiProMax.Model.SlabDefs.Openings(mm).Select(x => (x.Name, Z: StripZ(mm, x.Story), x.Plan)).ToList() : null : null);
+        if (openings is { Count: > 0 })
+            model["openings"] = new JsonArray(openings.Select(x => (JsonNode)new JsonArray(x.Name, new JsonArray(x.Plan.Select(p => (JsonNode)new JsonArray(R(p[0]), R(p[1]), R(x.Z))).ToArray()))).ToArray());
         if (supports is { Count: > 0 })
             model["supports"] = new JsonArray(supports.Take(MostSupports).Select(s => (JsonNode)new JsonArray(R(s.X), R(s.Y), R(s.Z), Kind(s.Restraint))).ToArray());
     }

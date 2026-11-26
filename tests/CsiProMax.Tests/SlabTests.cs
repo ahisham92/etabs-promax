@@ -39,6 +39,17 @@ static class SlabTests
         return lines.Skip(at + 1).TakeWhile(l => !l.StartsWith('$')).Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
     }
 
+    /// <summary>Two e2k lines say the same: the same words, and the same numbers however written (8.3E-06 is 0.0000083).</summary>
+    static bool SameLine(string a, string b)
+    {
+        var x = E2kText.Tokenize(a); var y = E2kText.Tokenize(b);
+        return x.Count == y.Count && x.Zip(y).All(p => p.First == p.Second
+            || (double.TryParse(p.First, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var u)
+                && double.TryParse(p.Second, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) && Math.Abs(u - v) <= 1e-12 * Math.Max(1, Math.Abs(u))));
+    }
+
+    static bool SameLines(List<string> a, List<string> b) => a.Count == b.Count && a.Zip(b).All(p => SameLine(p.First, p.Second));
+
     static List<string> Headings(string text) => text.Replace("\r", "").Split('\n').Where(l => l.StartsWith("$ ") && !l.StartsWith("$ File")).Select(l => l[2..].Trim()).ToList();
 
     /// <summary>A two-bay concrete frame with a tendon material and section and the two prestress patterns.</summary>
@@ -91,17 +102,85 @@ static class SlabTests
 
         yield return ("slabs: ETABS's PT and punching examples go out again word for word through read and write", () =>
         {
-            foreach (var file in new[] { "etabs-PT-SL-v20.e2k", "etabs-RC-PN-v20.e2k" })
+            foreach (var file in new[] { "etabs-PT-SL-v20.e2k", "etabs-RC-PN-v20.e2k", "etabs-PT-SL-v23-edited.e2k" })
             {
                 var text = Sample(file);
                 var back = E2kWriter.Write(E2kReader.Read(text));
                 foreach (var h in new[] { SlabDefs.TendonSections, SlabDefs.TendonConnect, SlabDefs.TendonLayout, SlabDefs.TendonProfile, SlabDefs.StripGeometry, SlabDefs.TendonAssigns,
-                             SlabDefs.TendonLoads, SlabDefs.SlabPreferences, SlabDefs.StripOverwrites, SlabDefs.FemOverwrites, SlabDefs.PunchingOverwrites })
-                    Check(SectionOf(text, h).SequenceEqual(SectionOf(back, h)), $"{file}: section {h} kept word for word");
+                             SlabDefs.TendonLoads, SlabDefs.SlabPreferences, SlabDefs.StripOverwrites, SlabDefs.FemOverwrites, SlabDefs.PunchingOverwrites, SlabDefs.PunchingPerimeter,
+                             "TENDON SUPPORT POINTS" })
+                    // ETABS 23.2 spaces its words one way, ETABS 20 another: the 20 files go out byte for byte, the 23 one word for word.
+                    Check(file.Contains("v23") ? SameLines(SectionOf(text, h), SectionOf(back, h)) : SectionOf(text, h).SequenceEqual(SectionOf(back, h)), $"{file}: section {h} kept word for word: {string.Join(" / ", SectionOf(text, h).Except(SectionOf(back, h)))} became {string.Join(" / ", SectionOf(back, h).Except(SectionOf(text, h)))}");
+                // Sections the Modeler writes from its own model: the same words and numbers, spaced its own way.
+                foreach (var h in new[] { "SLAB PROPERTIES", "AREA CONNECTIVITIES", "AREA ASSIGNS", "LINE CONNECTIVITIES" })
+                    Check(SameLines(SectionOf(text, h), SectionOf(back, h)), $"{file}: section {h} kept: {string.Join(" / ", SectionOf(text, h))} became {string.Join(" / ", SectionOf(back, h))}");
                 var order = Headings(back);
                 var src = Headings(text).Where(order.Contains).ToList();
                 Check(src.SequenceEqual(order.Where(src.Contains)), $"{file}: the sections keep ETABS's order");
             }
+        });
+
+        yield return ("slabs: ETABS 23.2's export with detailed and percent losses, both-end jacking, a parabola, a user punching perimeter with stud rails, an opening and a ribbed slab reads as ETABS has it", () =>
+        {
+            var m = E2kReader.Read(Sample("etabs-PT-SL-v23-edited.e2k"));
+            var t = SlabDefs.Tendons(m);
+            var t1 = t.Single(x => x.Name == "2"); var t2 = t.Single(x => x.Name == "T2");
+            Check(t1.Jack is { End: "Both" } && t2.Jack is { End: "Both" }, "jacking from both ends");
+            Check(t1.Loss is { Method: "Detailed" } l && Math.Abs(l.Curvature - 0.07) < 1e-9 && Math.Abs(l.Wobble - 8.3e-6) < 1e-12 && Math.Abs(l.AnchorSlip - 0.25) < 1e-9
+                  && l.ElasticShortening == 1000 && l.Creep == 7000 && l.Shrinkage == 6000 && l.Relaxation == 3000, "the detailed losses");
+            Check(t2.Loss is { Method: "Percent", Stressing: 5, LongTerm: 10 }, "the percent losses");
+            Check(t2.Spans.Single().Type == "Parabola" && t1.Spans.Single().Type == "Reverse Parabola", "the span types");
+            var p = SlabDefs.PunchingList(m).Single();
+            Check(p is { Point: "17", Story: "Story1", Check: "Program Determined", Location: "Interior", Reinforcement: "Stud Rails", Pattern: "Radial", Fy: 60000, Diameter: 0.375, Spacing: 3 }, "the punching overwrite");
+            Check(p.Perimeter is { Count: 4 } c && c[0].SequenceEqual(new[] { -12.0, -12, 0 }) && c[2].SequenceEqual(new[] { 12.0, 12, 0 }), "the user perimeter's corners");
+            var o = SlabDefs.Openings(m).Single();
+            Check(o is { Name: "A1", Story: "Story1" } && o.Plan.Count == 4 && o.Plan[0].SequenceEqual(new[] { 100.0, 20 }) && o.Plan[2].SequenceEqual(new[] { 124.0, 32 }), "the opening");
+            var rib = m.ShellSections.Single(x => x.Name == "RIB16");
+            Check(rib.Number("OVERALLDEPTH") == 16 && rib.Number("SLABRIBWIDTHTOP") == 6 && rib.Number("SLABRIBWIDTHBOTTOM") == 5 && rib.Number("SLABRIBSPACING") == 36, "the ribbed slab");
+
+            // The Modeler's forms make the same lines from the same input, so what ETABS reads is what it wrote.
+            var link = new OfflineEtabs(m);
+            Run(link, "draw_tendon", new { name = "T9", story = "Story1", points = new[] { new[] { 0.0, 24 }, new[] { 384.0, 24 } },
+                spans = new object[] { new { length = 384, depth_left = 5, depth_low = 9, depth_right = 5, a = 0, b = 0 } }, section = "Tendon1", strands = 2,
+                jacking = new { transfer_pattern = "PT-TRANSFER", final_pattern = "PT-FINAL", stress = 216000, end = "Both" },
+                losses = new { method = "Detailed", curvature = 0.07, wobble = 8.3e-6, anchor_slip = 0.25, elastic_shortening = 1000, creep = 7000, shrinkage = 6000, relaxation = 3000 } });
+            var text = E2kWriter.Write(m);
+            var loads = SectionOf(text, SlabDefs.TendonLoads);
+            Check(SameLine(loads.Single(x => x.StartsWith("TENDONLOAD  \"T9\"") && x.Contains("Losses")).Replace("\"T9\"", "\"2\""), loads.Single(x => x.StartsWith("TENDONLOAD  \"2\"") && x.Contains("Losses"))),
+                "the Modeler's detailed losses line is ETABS 23.2's");
+            Run(link, "set_punching_overwrite", new { point = "17", story = "Story1", location = "Interior", perimeter = new[] { new[] { -12.0, -12 }, new[] { 12.0, -12 }, new[] { 12.0, 12 }, new[] { -12.0, 12 } },
+                reinforcement = new { type = "Stud Rails", pattern = "Radial", fy = 60000, diameter = 0.375, spacing = 3 } });
+            var src = Sample("etabs-PT-SL-v23-edited.e2k");
+            var again = E2kWriter.Write(m);
+            Check(SectionOf(again, SlabDefs.PunchingOverwrites)is var po && SameLines(po, SectionOf(src, SlabDefs.PunchingOverwrites)), "the Modeler's punching line is ETABS 23.2's");
+            Check(SameLines(SectionOf(again, SlabDefs.PunchingPerimeter), SectionOf(src, SlabDefs.PunchingPerimeter)), "the Modeler's perimeter lines are ETABS 23.2's");
+            Run(link, "draw_opening", new { name = "A1", story = "Story1", points = new[] { new[] { 100.0, 20 }, new[] { 124.0, 20 }, new[] { 124.0, 32 }, new[] { 100.0, 32 } } });
+            again = E2kWriter.Write(m);
+            Check(SameLines(SectionOf(again, "AREA CONNECTIVITIES"), SectionOf(src, "AREA CONNECTIVITIES")), "the Modeler's opening is ETABS 23.2's area line");
+            Check(SectionOf(again, "AREA ASSIGNS").Count(x => x.Contains("OPENING")) == 1 && SameLine(SectionOf(again, "AREA ASSIGNS").Single(x => x.Contains("OPENING")), SectionOf(src, "AREA ASSIGNS").Single(x => x.Contains("OPENING"))), "and its assignment");
+            Run(link, "define_shell_type", new { kind = "slab", name = "RIB16", slab_type = "Ribbed", modeling = "ShellThin", thickness = 4, material = "4000Psi", overall_depth = 16, rib_width_top = 6, rib_width_bottom = 5, rib_spacing = 36, rib_direction = 1 });
+            again = E2kWriter.Write(m);
+            Check(SameLine(SectionOf(again, "SLAB PROPERTIES").Single(x => x.Contains("RIB16")), SectionOf(src, "SLAB PROPERTIES").Single(x => x.Contains("RIB16"))), "the Modeler's ribbed slab is ETABS 23.2's line");
+            Refused(link, "set_punching_overwrite", new { point = "17", story = "Story1", reinforcement = new { type = "Ties" } }, "yield stress");
+            Refused(link, "draw_opening", new { name = "A9", story = "Story1", points = new[] { new[] { 0.0, 0 }, new[] { 1.0, 1 } } }, "3 corners");
+            Refused(link, "define_shell_type", new { kind = "slab", name = "RIB2", slab_type = "Ribbed", thickness = 4, material = "4000Psi" }, "ribs");
+            Refused(link, "draw_tendon", new { name = "T8", story = "Story1", points = new[] { new[] { 0.0, 30 }, new[] { 384.0, 30 } }, spans = new object[] { new { length = 384, depth_left = 5, depth_low = 9, depth_right = 5 } },
+                section = "Tendon1", jacking = new { transfer_pattern = "PT-TRANSFER", final_pattern = "PT-FINAL", stress = 216000 }, losses = new { method = "Percent", stressing = 60, long_term = 50 } }, "100");
+
+            // The .f2k: SAFE's own tables for the punching overwrite, its perimeter, the opening, the ribs and the losses.
+            m.AreaAssigns.Single(a => a.Label == "F5").Section = "RIB16"; // SAFE gets the slab properties its slabs use
+            var f = CsiProMax.CsiTables.CsiTableText.Parse(CsiProMax.F2k.F2kWriter.Write(m, new CsiProMax.F2k.F2kOptions(Story: "Story1")).Text);
+            var g = f["CONCRETE SLAB DESIGN OVERWRITES - PUNCHING SHEAR - GENERAL"].Single();
+            Check(g["Location Type"] == "Interior" && g["Perimeter Type"] == "User Perimeter" && g["Reinforcement Type"] == "Stud Rails"
+                  && g["Reinforcement Diameter"] == "60000" && g["Reinforcement Fy"] == "0.375", $"the punching row ({string.Join(", ", g.Select(kv => kv.Key + "=" + kv.Value))}), fy and diameter under the names SAFE's keys give them");
+            Check(f["CONCRETE SLAB DESIGN OVERWRITES - PUNCHING SHEAR - PERIMETER"].Count == 4, "the perimeter's 4 corners");
+            var op = f["NULL AREA OBJECT CONNECTIVITY"].Single()["Unique Name"];
+            Check(op.Length > 0, "the opening");
+            Check(f["AREA ASSIGNMENTS - SECTION PROPERTIES"].Any(x => x["UniqueName"] == op && x["Section Property"] == "Opening"), "the opening's assignment");
+            var slab = f["SLAB PROPERTY DEFINITIONS"].SingleOrDefault(x => x["Name"] == "RIB16") ?? throw new Exception("no RIB16 in " + string.Join(" / ", f["SLAB PROPERTY DEFINITIONS"].Select(x => x["Name"])));
+            Check(slab["Overall Depth"] == "16" && slab["Rib Width at Top"] == "6" && slab["Rib Width at Bottom"] == "5" && slab["Rib Spacing 1"] == "36", "the ribs");
+            var loss = f["TENDON LOAD ASSIGNMENTS - LOSS OPTIONS"];
+            Check(loss.Any(x => x["Loss Method"] == "Detailed" && x["Curvature Coefficient"] == "0.07") && loss.Any(x => x["Loss Method"] == "Percent" && x["Stressing Loss"] == "5"), "detailed and percent losses: " + string.Join(" / ", loss.Select(x => string.Join(",", x.Values))));
         });
 
         yield return ("slabs: the Modeler draws a two-span tendon with jacking from both ends and percentage losses; the .e2k has it as ETABS writes it, and reads back the same", () =>
@@ -120,7 +199,7 @@ static class SlabTests
             var t = SlabDefs.Tendons(m).Single();
             var top = m.Elevation(m.StoryIndex("Story2"));
             Near(top - 0.1, t.Spans[0].ZL, "ZL is the slab top less the depth"); Near(top - 0.04, t.Spans[1].ZL, "continuous over the support"); Near(8, t.Spans[1].Length, "the second span takes the rest");
-            Check(t.Loss is { Method: "Fixed" } && Math.Abs(t.Loss.Stressing - 70000) < 1e-6 && Math.Abs(t.Loss.LongTerm - 140000) < 1e-6, "percentages become the same fixed losses");
+            Check(t.Loss is { Method: "Percent" } && Math.Abs(t.Loss.Stressing - 5) < 1e-6 && Math.Abs(t.Loss.LongTerm - 10) < 1e-6, "percentages stay percentages, as ETABS 23.2 keeps them");
             Check(t.Jack!.End == "Both", "both ends");
             var text = E2kWriter.Write(m);
             var hl = SectionOf(text, SlabDefs.TendonLayout);
@@ -129,7 +208,7 @@ static class SlabTests
             Check(SectionOf(text, SlabDefs.TendonProfile).Count == 2, "a profile line per span");
             Check(SectionOf(text, SlabDefs.TendonAssigns).Single().Contains("NUMSTRANDS  4  BONDED  \"NO\""), "strands and bonding");
             var loads = SectionOf(text, SlabDefs.TendonLoads);
-            Check(loads.Count == 2 && loads[0].Contains("JACKLOC  \"Both\"") && loads[1].Contains("LOSSTYPE  \"Fixed\"  LOSSFIXEDST  70000"), "jacking and losses");
+            Check(loads.Count == 2 && loads[0].Contains("JACKLOC  \"Both\"") && loads[1].Contains("LOSSTYPE  \"Percent\"  LOSSPERCENTST  5  LOSSPERCENTLT  10"), "jacking and losses");
             Check(SectionOf(text, SlabDefs.TendonSections).Contains("TENDONSECTION  \"T15\"  MATERIAL  \"A416Gr270\"  STRANDAREA  0.00014"), "the tendon section line");
             var h = Headings(text);
             int I(string x) => h.IndexOf(x);
@@ -291,13 +370,17 @@ static class SlabTests
                 ["JOINT LOADS ASSIGNMENTS - FORCE"] = ["UniqueName", "Load Pattern", "FX", "FY", "FZ", "MX", "MY", "MZ"],
                 ["SPRING PROPERTY DEFINITIONS - AREA SPRINGS"] = ["Name", "Stiffness Option", "Stiffnes U1", "Stiffnes U2", "Stiffnes U3", "Nonlinear Option for U3"],
                 ["AREA ASSIGNMENTS - AREA SPRINGS"] = ["UniqueName", "Spring Property"],
+                ["NULL AREA OBJECT CONNECTIVITY"] = ["Unique Name", "UniquePt1", "UniquePt2", "UniquePt3", "UniquePt4"],
+                ["CONCRETE SLAB DESIGN OVERWRITES - PUNCHING SHEAR - PERIMETER"] = ["Unique Name", "Point Number", "X Coord", "Y Coord", "Radius", "Is Null?"],
             };
             foreach (var (k, v) in keys) seen.TryAdd(k, [.. v]);
             // The fields of the material tables SAFE has, as ETABS 23.2's keys name them (the forms' design, nonlinear and rupture data).
             foreach (var (k, v) in CsiProMax.Model.ProgramTables.MaterialTables)
                 if (seen.TryGetValue("MATERIAL PROPERTIES - " + k.ToUpperInvariant(), out var have)) have.UnionWith(v);
             seen["FRAME SECTION PROPERTY DEFINITIONS - STEEL I/WIDE FLANGE"].UnionWith(["File Name", "Section in File"]);
-            seen["TENDON LOAD ASSIGNMENTS - LOSS OPTIONS"].UnionWith(["Stressing Loss", "Long Term Loss"]);
+            seen["TENDON LOAD ASSIGNMENTS - LOSS OPTIONS"].UnionWith(["Stressing Loss", "Long Term Loss", "Curvature Coefficient", "Wobble Coefficient", "Anchorage Set Slip", "Shortening Stress", "Creep Stress", "Shrinkage Stress", "Relaxation Stress"]);
+            seen["CONCRETE SLAB DESIGN OVERWRITES - PUNCHING SHEAR - GENERAL"].UnionWith(["Reinforcement Pattern", "Reinforcement Fy", "Reinforcement Diameter", "Reinforcement Spacing"]);
+            seen["SLAB PROPERTY DEFINITIONS"].UnionWith(["Overall Depth", "Rib Width at Top", "Rib Width at Bottom", "Rib Spacing 1", "Rib Spacing 2"]);
             seen["STRIP OBJECT CONNECTIVITY"].UnionWith(["Segment End Point", "End Width Left", "End Width Right"]);
 
             // Everything the writer can write: a frame with a wall, a circle column, soil, line and point loads, strips, a two-span PT tendon.
@@ -309,6 +392,11 @@ static class SlabTests
             Run(link, "define_strip", new { name = "CSA1", story = "Story2", layer = "A", points = new[] { new[] { 0.0, 3.0 }, new[] { 8.0, 3.0 }, new[] { 16.0, 3.0 } }, width_left = 3, width_right = 3, design_type = "Middle" });
             Run(link, "define_hyperstatic_case", new { name = "PTF-HP", base_case = "PT-FINAL" });
             Run(link, "define_spring", new { kind = "area", name = "SOIL-K", values = new { U3 = 20000 } });
+            Run(link, "set_punching_overwrite", new { point = m.Points[0].Name, story = "Story2", location = "Edge", perimeter = new[] { new[] { -0.3, -0.3 }, new[] { 0.3, -0.3 }, new[] { 0.3, 0.3, 0.05 } },
+                reinforcement = new { type = "Stud Rails", pattern = "Orthogonal", fy = 420000, diameter = 0.012, spacing = 0.1 } });
+            Run(link, "draw_opening", new { name = "OP1", story = "Story2", points = new[] { new[] { 1.0, 1 }, new[] { 2.0, 1 }, new[] { 2.0, 2 }, new[] { 1.0, 2 } } });
+            Run(link, "define_shell_type", new { kind = "slab", name = "RIB-X", slab_type = "Ribbed", thickness = 0.1, material = m.Materials.First(x => x.Type.Equals("Concrete", StringComparison.OrdinalIgnoreCase)).Name,
+                overall_depth = 0.4, rib_width_top = 0.15, rib_width_bottom = 0.12, rib_spacing = 0.8, rib_direction = 2 });
             var floor = m.AreaAssigns.First(x => m.Area(x.Label)!.Kind == AreaKind.Floor && x.Story == "Story2");
             Run(link, "assign_shell_data", new { objects = new[] { floor.Label + "@Story2" }, spring = "SOIL-K" });
             var beam = link.Frames().First(f => f.Kind == "beam" && f.Story == "Story2").Name;
@@ -324,7 +412,8 @@ static class SlabTests
             }
             foreach (var table in new[] { "TENDON OBJECT CONNECTIVITY", "TENDON ASSIGNMENTS - PROPERTIES", "TENDON LOAD ASSIGNMENTS - JACKING STRESS", "TENDON LOAD ASSIGNMENTS - LOSS OPTIONS",
                 "TENDON SECTION PROPERTIES", "LOAD CASE DEFINITIONS - HYPERSTATIC", "STRIP OBJECT CONNECTIVITY", "CONCRETE SLAB DESIGN OVERWRITES - STRIP BASED", "SPRING PROPERTY DEFINITIONS - AREA SPRINGS",
-                "FRAME LOADS ASSIGNMENTS - DISTRIBUTED", "JOINT LOADS ASSIGNMENTS - FORCE", "MATERIAL PROPERTIES - TENDON DATA" })
+                "FRAME LOADS ASSIGNMENTS - DISTRIBUTED", "JOINT LOADS ASSIGNMENTS - FORCE", "MATERIAL PROPERTIES - TENDON DATA", "NULL AREA OBJECT CONNECTIVITY",
+                "CONCRETE SLAB DESIGN OVERWRITES - PUNCHING SHEAR - GENERAL", "CONCRETE SLAB DESIGN OVERWRITES - PUNCHING SHEAR - PERIMETER" })
                 Check(t.ContainsKey(table), $"the file has '{table}'");
             Check(r.Tendons == 1, "the tendon is counted");
             var tendon = t["TENDON OBJECT CONNECTIVITY"];
