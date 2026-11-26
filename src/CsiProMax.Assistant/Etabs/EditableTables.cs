@@ -174,14 +174,23 @@ public static class EditableTables
             foreach (var other in rows.Where(r => r != row && r[auto].Trim() is { Length: > 0 } c && !c.Equals("None", StringComparison.OrdinalIgnoreCase)))
             {
                 var marker = other[type].Contains("Wind", StringComparison.OrdinalIgnoreCase) ? "Auto Wind - " : "Auto Seismic - ";
-                var key = tableKeys.FirstOrDefault(k => k.StartsWith(marker, StringComparison.OrdinalIgnoreCase) && Norm(k[marker.Length..]) == Norm(other[auto]))
+                var key = (tableKeys.FirstOrDefault(k => k.StartsWith(marker, StringComparison.OrdinalIgnoreCase) && Norm(k[marker.Length..]) == Norm(other[auto])) ?? tableKeys.FirstOrDefault(k => k.StartsWith(marker, StringComparison.OrdinalIgnoreCase) && SameCode(k[marker.Length..], other[auto])))
                     ?? throw new EtabsException($"{program}'s pattern {other[pat]} has the code {other[auto]}, whose table is not found, so its rows could not go back with the patterns' table: {what} is not done, to keep {other[pat]} as it is.");
-                if (tables.Any(t => t.Key == key)) continue;
-                int v = 0, n = 0; string[] f = [], d = [];
-                ShowEveryPattern(m);
-                m.DatabaseTables.GetTableForEditingArray(key, "", ref v, ref f, ref n, ref d);
-                if ((f ?? []).Length > 0 && n > 0) tables.Add((key, f!, d ?? [], n));
+                if (!tables.Any(t => t.Key == key))
+                {
+                    int v = 0, n = 0; string[] f = [], d = [];
+                    ShowEveryPattern(m);
+                    m.DatabaseTables.GetTableForEditingArray(key, "", ref v, ref f, ref n, ref d);
+                    tables.Add((key, f ?? [], d ?? [], (f ?? []).Length > 0 ? n : 0));
+                }
+                // SAP2000 drops a pattern whose code has no row in its code's table: one whose row cannot be read (a code
+                // given through the API is not in the tables) is not sent, and nothing is imported.
+                var t = tables.First(x => x.Key == key);
+                var lp = Array.FindIndex(t.Fields, x => x.Equals("LoadPat", StringComparison.OrdinalIgnoreCase));
+                if (lp < 0 || !Enumerable.Range(0, t.Count).Any(r => string.Equals(t.Data.ElementAtOrDefault(r * t.Fields.Length + lp), other[pat], StringComparison.OrdinalIgnoreCase)))
+                    throw new EtabsException($"{program}'s pattern {other[pat]} has the code {other[auto]}, but its table '{key}' gives no row for it, so it could not go back with the patterns' table: {what} is not done, to keep {other[pat]} as it is. Nothing was imported.");
             }
+            tables.RemoveAll(t => t.Count == 0);
 
             // The code's own row: the pattern, its direction, and the inputs given; SAP2000 fills in the rest.
             int cv = 0, count = 0; string[] keys = [], names = [], about = [], units = []; bool[] importable = [];
@@ -222,12 +231,12 @@ public static class EditableTables
                 int applied = Convert.ToInt32(m.DatabaseTables.ApplyEditedTables(true, ref fatal, ref errors, ref warnings, ref info, ref log));
                 log ??= "";
                 Dictionary<string, string> after = Codes(m);
-                var changed = before.Where(kv => kv.Key != pattern && (!after.TryGetValue(kv.Key, out var now) || Norm(now) != Norm(kv.Value))).Select(kv => kv.Key).ToList();
+                var changed = before.Where(kv => kv.Key != pattern && (!after.TryGetValue(kv.Key, out var now) || !SameCode(now, kv.Value, empty: true))).Select(kv => kv.Key).ToList();
                 if (changed.Count > 0)
                     throw new EtabsException($"{program} changed or lost the load patterns {string.Join(", ", changed)} when it was given {pattern}'s {code}: do not save the model; close it without saving and open it again. Its import log: {Cut(log)}");
                 if (applied != 0 || fatal > 0)
                     throw new EtabsException($"{program} did not apply {pattern}'s {code} ({fatal} fatal, {errors} errors), so it cannot {what}. Its import log: {Cut(log)}" + About(m, codeKey, new List<IReadOnlyDictionary<string, string>> { given }));
-                if (!after.TryGetValue(pattern, out string? took) || Norm(took) != Norm(code))
+                if (!after.TryGetValue(pattern, out string? took) || !SameCode(took, code))
                     throw new EtabsException($"{program} took the rows but {pattern}'s code is '{took}', not {code}, so it cannot {what}. Its import log: {Cut(log)}");
                 return log;
             }
@@ -257,6 +266,18 @@ public static class EditableTables
 
     /// <summary>A code's name with only its letters and digits ("ASCE7-16" and "ASCE 7-16" are one code).</summary>
     internal static string Norm(string s) => new(s.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+
+    /// <summary>
+    /// One code by two of SAP2000's names: the table's ("User Coefficient", "ASCE 7-16") and the one GetAutoSeismicCode
+    /// and the AutoLoad field give ("USER COEFF", "ASCE7-16"): the same letters and digits, or one the start of the other
+    /// (0.4.44 field test: CPM-ELFX's USER COEFF found no table). <paramref name="empty"/>: two empty names are one.
+    /// </summary>
+    internal static bool SameCode(string? a, string? b, bool empty = false)
+    {
+        var (x, y) = (Norm(a ?? ""), Norm(b ?? ""));
+        if (x.Length == 0 || y.Length == 0) return empty && x.Length == 0 && y.Length == 0;
+        return x == y || x.StartsWith(y, StringComparison.Ordinal) || y.StartsWith(x, StringComparison.Ordinal);
+    }
 
     /// <summary>What the program says each given field holds, so a refused value can be put right from the message.</summary>
     private static string About(dynamic m, string key, IReadOnlyList<IReadOnlyDictionary<string, string>> rows)

@@ -310,6 +310,9 @@ static class CsiToolsTests
             Check(kdsSet["saved_before_edit"]?.ToString().Contains("scratch.sdb", StringComparison.Ordinal) == true, "the engineer is told the model was saved first: " + kdsSet.ToJsonString());
             Check(api.Tables[kds].Rows.Count == 1 && api.Tables[kds].Rows[0].Contains("X"), "the code's row, with its direction X: " + string.Join("|", api.Tables[kds].Rows.SelectMany(r => r)));
             Check(api.Table.Select(r => r[0]).Take(patternsBefore.Split(',').Length).SequenceEqual(patternsBefore.Split(',')), "every pattern is kept");
+            // SAP2000's two names of one code: the AutoLoad field's and GetAutoSeismicCode's, and its table's (0.4.44 field test).
+            Check(EditableTables.SameCode("USER COEFF", "User Coefficient") && EditableTables.SameCode("ASCE7-16", "ASCE 7-16") && EditableTables.SameCode("NBCC2020", "NBCC 2020")
+                && !EditableTables.SameCode("IBC2006", "IBC2009") && !EditableTables.SameCode("", "IBC2006") && EditableTables.SameCode("", "", empty: true), "SAP2000's code names are not matched to its tables' names");
             Check(SapLateral.Setters("Seismic", "ASCE 7-22").Count == 0 && SapLateral.Setters("Seismic", "KDS 41 17 00-2019").Count == 0 && SapLateral.Setters("Wind", "AASHTO 2020").Count == 0, "codes with no Set call in SAP2000 26");
             Check(SapLateral.Setters("Seismic", "UBC97 Isolated").SequenceEqual(["SetUBC97Iso"]) && SapLateral.Setters("Wind", "Eurocode1 2005")[0] == "SetEurocode12005_1", "codes are found by SAP2000's table name");
             var none = Run(CsiProgram.Sap2000, "set_lateral_load", """{"name":"CPM-AUTO-S","kind":"seismic","code":"None"}""", link);
@@ -653,8 +656,11 @@ public sealed class FakeApi
             const string key = "Load Pattern Definitions - Auto Seismic - IBC2006";
             if (o.Tables.TryGetValue(key, out var t)) t.Rows.RemoveAll(r => r[0] == Name);
             if (o.Tables.TryGetValue(key, out t)) t.Rows.Add(t.Fields.Select(f => f == "LoadPat" ? Name : f == "R" ? R.ToString(System.Globalization.CultureInfo.InvariantCulture) : "1").ToArray());
-            o.Log.Add(FormattableString.Invariant($"IBC2006 {Name} R {R} site {SiteClass}")); return 0;
+            o.Log.Add(FormattableString.Invariant($"IBC2006 {Name} R {R} site {SiteClass}")); _ibcR[Name] = R; return 0;
         }
+        private readonly Dictionary<string, double> _ibcR = new();
+        // SAP2000 26's Get call answers the values the pattern has (0.4.44 field test: its answer went into the reply twice).
+        public int GetIBC2006(string Name, ref double R, ref int SiteClass) { if (!_ibcR.TryGetValue(Name, out R)) return 1; SiteClass = 4; return 0; }
         public int SetNone(string Name) { o.SeismicCodes.Remove(Name); o.Log.Add("seismic none " + Name); return 0; }
         public int SetASCE716(string Name, int DirFlag, double Eccen, int PeriodFlag, int CtType, double UserT, bool UserZ, double TopZ, double BottomZ, double R, double Omega, double Cd, double I, double Ss, double S1, double TL, int SiteClass, double Fa, double Fv)
         {
