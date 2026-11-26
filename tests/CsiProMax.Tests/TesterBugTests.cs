@@ -747,6 +747,42 @@ static class TesterBugTests
                 && log.IndexOf("ImportErrors(", StringComparison.Ordinal) < log.IndexOf("PostMessageW(done", StringComparison.Ordinal) && !notices.Contains("0x0010", StringComparison.Ordinal), "the log is answered by its Done button after its errors are read, and never closed");
             static bool SandboxedLeftCopy() => ScratchProgram.IsLeftCopy(["SAP2000 - cpm-field-test-ab12cd", "Access Database Import Log"]);
         });
+        yield return ("field test: it shows its progress live, with step X of about N, passed / failed / not tested and the time (Ahmed, 2026-11-26)", () =>
+        {
+            // The counts come from the outcome lines as they are recorded.
+            var run = new CsiProMax.Assistant.FieldTest.Running(true, "a test");
+            run.Counted("ok          [SAP2000 on a scratch model] tool run_analysis");
+            run.Counted("FAIL        [SAP2000 on a scratch model] tool set_lateral_load, seismic KDS: why");
+            run.Counted("not tested  [CSI ProMax's own features] export_pack: why");
+            Check(run.Ok == 1 && run.Failed == 1 && run.NotTested == 1 && run.Done == 3 && run.Part == "CSI ProMax's own features", $"counted {run.Ok}/{run.Failed}/{run.NotTested}, part '{run.Part}'");
+            // How many steps to expect: the last run of the same kind on this PC.
+            var file = Path.Combine(Path.GetTempPath(), "cpm-steps-" + Guid.NewGuid().ToString("N") + ".txt");
+            try
+            {
+                Check(CsiProMax.Assistant.FieldTest.ExpectedSteps(true, false, file) == 0, "a first run has no estimate");
+                CsiProMax.Assistant.FieldTest.SaveExpected(true, false, 915, file);
+                CsiProMax.Assistant.FieldTest.SaveExpected(true, true, 400, file);
+                CsiProMax.Assistant.FieldTest.SaveExpected(true, false, 920, file);
+                Check(CsiProMax.Assistant.FieldTest.ExpectedSteps(true, false, file) == 920 && CsiProMax.Assistant.FieldTest.ExpectedSteps(true, true, file) == 400, "the last count of each kind is kept");
+                // One program alone keeps its own count.
+                CsiProMax.Assistant.FieldTest.SaveExpected(true, false, 310, file, CsiProMax.Assistant.Etabs.CsiProgram.Sap2000);
+                Check(CsiProMax.Assistant.FieldTest.ExpectedSteps(true, false, file, CsiProMax.Assistant.Etabs.CsiProgram.Sap2000) == 310 && CsiProMax.Assistant.FieldTest.ExpectedSteps(true, false, file) == 920, "one program alone has its own estimate");
+            }
+            finally { try { File.Delete(file); } catch (IOException) { } }
+            // The window's lines.
+            var p = CsiProMax.Assistant.FieldTest.ProgressLines.Of("SAP2000 on a scratch model", "tool run_analysis", 460, 920, 450, 6, 4, TimeSpan.FromSeconds(754), false);
+            Check(p.Count == "Step 460 of about 920" && p.Percent == 50 && p.Tally == "Passed 450   Failed 6   Not tested 4" && p.Time == "Running for 12:34" && p.Step == "Now: tool run_analysis", "the lines: " + p);
+            Check(CsiProMax.Assistant.FieldTest.ProgressLines.Of("x", "y", 2000, 920, 0, 0, 0, TimeSpan.Zero, false).Percent == 99, "never 100% before it is done");
+            Check(CsiProMax.Assistant.FieldTest.ProgressLines.Of("", "starting", 3, 0, 3, 0, 0, TimeSpan.Zero, false) is { Percent: null, Part: "Starting" } first && first.Count.Contains("first run", StringComparison.Ordinal), "a first run shows a moving bar");
+            // Started from the Help menu or the chat, it opens.
+            Check(File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Panel/Tools/SelfTestTools.cs")).Contains("FieldProgressWindow.Show(run)", StringComparison.Ordinal), "the full field test does not show its progress window");
+            // One program at a time, from the Help menu and the chat; the chat's status answers from the live counts.
+            var tools = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Panel/Tools/SelfTestTools.cs"));
+            var menu = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Panel/Host/MainWindow.cs"));
+            Check(tools.Contains("OnlyProgram = only", StringComparison.Ordinal) && tools.Contains("\"program\"", StringComparison.Ordinal), "the chat cannot test one program alone");
+            Check(menu.Contains("Field test: {program.Name} only", StringComparison.Ordinal), "the Help menu has no one-program field test");
+            Check(tools.Contains("live_file = run.LiveFile", StringComparison.Ordinal) && tools.Contains("passed = run.Ok", StringComparison.Ordinal), "the chat's status does not give the live counts");
+        });
         yield return ("field test: a file error says where it came from, and the team library's file calls try again for a moment (0.4.40: 'Access to the path is denied.')", () =>
         {
             // Seen on Ahmed's PC on 2026-11-26: the team library's check failed with only "Access to the path is denied."
