@@ -282,11 +282,28 @@ static class CsiToolsTests
             try { EditableTables.Put(link, "Load Pattern Definitions", "LoadPat", [EditableTables.Row(("LoadPat", "Dead"), ("AutoLoad", "None"))], "test it"); }
             catch (EtabsException ex) { said = ex.Message; }
             Check(said.Contains("does not take its 'Load Pattern Definitions' table back", StringComparison.Ordinal), "Put refuses SAP2000's patterns' table: " + said);
-            // set_lateral_load writes the code's own table only.
-            var set = Run(CsiProgram.Sap2000, "set_lateral_load", """{"name":"CPM-AUTO-S","kind":"seismic","code":"User Coefficient"}""", link);
-            Check(set["read_back"] is JsonObject { Count: > 0 }, "the code's row is read back: " + set.ToJsonString());
-            Check(api.Tables[uc].Rows.Any(r => r[0] == "CPM-AUTO-S"), "the code's table has the pattern's row");
-            Throws(() => Run(CsiProgram.Sap2000, "set_lateral_load", """{"name":"CPM-AUTO-S","kind":"seismic","code":"None"}""", link), "taking the code off through the patterns' table");
+            // set_lateral_load gives the code by SAP2000's own Set call, then writes the inputs into the code's own table.
+            const string ibc = "Load Pattern Definitions - Auto Seismic - IBC2006";
+            inner.ResultTables[ibc] = new(["LoadPat"], []);
+            api.Tables[ibc] = (["LoadPat", "R", "Ss"], []);
+            var set = Run(CsiProgram.Sap2000, "set_lateral_load", """{"name":"CPM-AUTO-S","kind":"seismic","code":"IBC2006"}""", link);
+            Check(set["read_back"] is JsonObject { Count: > 0 } && set["set_by"]?.ToString() == "LoadPatterns.AutoSeismic.SetIBC2006", "the code is set by its call and its row read back: " + set.ToJsonString());
+            Check(api.Log.Any(l => l == "IBC2006 CPM-AUTO-S R 8 site 4"), "the call had plain starting values: " + string.Join(" | ", api.Log));
+            set = Run(CsiProgram.Sap2000, "set_lateral_load", """{"name":"CPM-AUTO-S","kind":"seismic","code":"IBC2006","values":{"R":"6"}}""", link);
+            Equal("6", set["read_back"]?["R"]?.ToString(), "an input given goes into the row the call made: " + set.ToJsonString());
+            // A code SAP2000's API has no call for, on a pattern without it: the tool says how to choose it by hand, and nothing is written.
+            const string kds = "Load Pattern Definitions - Auto Seismic - KDS 41 17 00-2019";
+            inner.ResultTables[kds] = new(["LoadPat"], []);
+            api.Tables[kds] = (["LoadPat", "R"], []);
+            var said2 = "";
+            try { Run(CsiProgram.Sap2000, "set_lateral_load", """{"name":"CPM-AUTO-S","kind":"seismic","code":"KDS 41 17 00-2019"}""", link); }
+            catch (ToolInputException ex) { said2 = ex.Message; }
+            Check(said2.Contains("has no call", StringComparison.Ordinal) && said2.Contains("Define > Load Patterns", StringComparison.Ordinal), "a code with no call says how to choose it: " + said2);
+            Equal(0, api.Tables[kds].Rows.Count, "nothing was written for it");
+            Check(SapLateral.Setters("Seismic", "ASCE 7-22").Count == 0 && SapLateral.Setters("Seismic", "KDS 41 17 00-2019").Count == 0 && SapLateral.Setters("Wind", "AASHTO 2020").Count == 0, "codes with no Set call in SAP2000 26");
+            Check(SapLateral.Setters("Seismic", "UBC97 Isolated").SequenceEqual(["SetUBC97Iso"]) && SapLateral.Setters("Wind", "Eurocode1 2005")[0] == "SetEurocode12005_1", "codes are found by SAP2000's table name");
+            var none = Run(CsiProgram.Sap2000, "set_lateral_load", """{"name":"CPM-AUTO-S","kind":"seismic","code":"None"}""", link);
+            Check(api.Log.Contains("seismic none CPM-AUTO-S") && none["set_by"]?.ToString() == "LoadPatterns.AutoSeismic.SetNone", "the code is taken off by SetNone: " + none.ToJsonString());
             Equal(0, api.PatternTableWrites, "nothing was written to SAP2000's patterns' table");
             Equal(before, string.Join(";", api.Table.Select(r => string.Join("|", r))), "SAP2000's patterns are as they were");
             // Every direct import call in the program is one of the guarded ones.
@@ -605,6 +622,16 @@ public sealed class FakeApi
             o.Log.Add(FormattableString.Invariant($"SetUserCoefficient {Name} dir {DirFlag} ecc {Eccen} top {StoryTop} C {C} K {K}")); return 0;
         }
         public int GetUserCoefficient(string Name, ref int DirFlag, ref double C) { C = 0.1; return 0; }
+        // SAP2000 26: the code goes on by its Set call, which makes the pattern's row in the code's table; SetNone takes it off.
+        public int SetIBC2006(string Name, int DirFlag, double Eccen, int PeriodFlag, int CtType, double UserT, bool UserZ, double TopZ, double BottomZ, double R, double Omega, double Cd, double I, int IBC2006Option, double Latitude, double Longitude, string ZipCode, double Ss, double S1, double Tl, int SiteClass, double Fa, double Fv)
+        {
+            if (R <= 0 || Ss <= 0 || SiteClass <= 0) return 1;
+            o.SeismicCodes[Name] = "IBC2006";
+            const string key = "Load Pattern Definitions - Auto Seismic - IBC2006";
+            if (o.Tables.TryGetValue(key, out var t)) t.Rows.Add(t.Fields.Select(f => f == "LoadPat" ? Name : f == "R" ? R.ToString(System.Globalization.CultureInfo.InvariantCulture) : "1").ToArray());
+            o.Log.Add(FormattableString.Invariant($"IBC2006 {Name} R {R} site {SiteClass}")); return 0;
+        }
+        public int SetNone(string Name) { o.SeismicCodes.Remove(Name); o.Log.Add("seismic none " + Name); return 0; }
         public int SetASCE716(string Name, int DirFlag, double Eccen, int PeriodFlag, int CtType, double UserT, bool UserZ, double TopZ, double BottomZ, double R, double Omega, double Cd, double I, double Ss, double S1, double TL, int SiteClass, double Fa, double Fv)
         {
             o.Log.Add(FormattableString.Invariant($"ASCE716 {Name} dir {DirFlag} R {R} Ss {Ss} S1 {S1} site {SiteClass} Fa {Math.Round(Fa, 6)} Fv {Math.Round(Fv, 6)} TL {TL}")); return 0;
@@ -809,6 +836,16 @@ public sealed class FakeApi
                     // Only the fields the patterns' table is read with are kept, as before.
                     o.Table.Clear();
                     foreach (var r in rows) o.Table.Add(new[] { o.PatternName, "Type", "SelfWtMult" }.Select(f => Array.IndexOf(fields, f) is var i and >= 0 ? r[i] : "").ToArray());
+                    continue;
+                }
+                if (o.PatternName == "LoadPat" && key.Contains("Auto Seismic - ", StringComparison.Ordinal))
+                {
+                    // SAP2000 26 (0.4.40 field test): a code's table keeps no row for a pattern that does not have that code.
+                    var code = key[(key.IndexOf("Auto Seismic - ", StringComparison.Ordinal) + 15)..];
+                    var at = Math.Max(0, Array.IndexOf(fields, "LoadPat"));
+                    var kept = rows.Where(r => o.SeismicCodes.GetValueOrDefault(r[at], "") == code).ToList();
+                    var old = o.Tables.TryGetValue(key, out var had) ? had.Rows.Where(r => !kept.Any(k => k[at] == r[at])).ToList() : [];
+                    o.Tables[key] = (fields, old.Concat(kept).ToList());
                     continue;
                 }
                 o.Tables[key] = (fields, rows);
