@@ -1041,7 +1041,8 @@ function applyLoads(d) {
 // For the field test: what the display chosen last shows of its results, "" when it shows none (null: not judged).
 function resultShown() {
   if (res.mode === "loads") return loadMap && loadMap.size ? `load diagrams on ${loadMap.size} members` : jointLoads && jointLoads.size ? `load arrows at ${jointLoads.size} joints` : dview && dview.byObj.size + dview.labels.length ? `loads on ${dview.byObj.size} objects` : "";
-  if (res.mode === "shell") return contour ? (meshDrawn ? `contours on the program's mesh (${meshOf.size} areas)` : "contours at the area corners (the pack has no mesh tables)") : "";
+  // Read from the results, not from what the 3-D drawing last uploaded: a browser without WebGL draws lines only.
+  if (res.mode === "shell") return contourOf() ? (meshOf.size ? `contours on the program's mesh (${meshOf.size} areas)` : "contours at the area corners (the pack has no mesh tables)") : "";
   return null;
 }
 // ---- the shell forces and stresses window ----
