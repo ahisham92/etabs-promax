@@ -394,6 +394,90 @@ static class OldProgramTests
             Check(scratch.Contains("ctx.Fail($\"start a second {name} window\"", StringComparison.Ordinal), "a file the program can neither open nor have built is a failure, not a skip");
         });
 
+        yield return ("tester (0.4.53): an ETABS-only field test started from the SAFE window is named and headed ETABS, not SAFE; for all three programs", () =>
+        {
+            foreach (var window in CsiProgram.All)
+            {
+                foreach (var only in CsiProgram.All)
+                {
+                    Equal(only.Name, FieldTest.ReportName(window, only), $"{only.Name} alone from the {window.Name} window");
+                    var line = FieldTest.TestedLine(window, only)!;
+                    Check(line.StartsWith($"Program tested: {only.Name} alone", StringComparison.Ordinal), line);
+                    Check(window.Key == only.Key || line.Contains($"started from the CSI ProMax window of {window.Name}", StringComparison.Ordinal), "the window it ran from is said: " + line);
+                }
+                Equal(window.Name, FieldTest.ReportName(window, null), "every program tested: named for the window");
+                Equal(null, FieldTest.TestedLine(window, null), "no line when every program was tested");
+            }
+            var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/FieldTest.cs"));
+            Check(!source.Contains("$\"Field test {link.Program.Name}", StringComparison.Ordinal) && source.Contains("$\"Field test {ReportName(link.Program, o.OnlyProgram)}", StringComparison.Ordinal), "the report file is named by ReportName");
+            Check(source.Contains("\"Field test\", $\"{ReportName(link.Program, o.OnlyProgram)}", StringComparison.Ordinal), "the work folder too");
+        });
+
+        yield return ("ETABS 20 tester (0.4.53): results tools answer 'no analysis' on a model that is not analysed, in every program", () =>
+        {
+            foreach (var program in CsiProgram.All)
+            {
+                var link = new MemoryEtabs { Program = program };
+                foreach (var (tool, key) in new[] { ("joint_displacements", "list"), ("frame_forces", "list"), ("base_reactions", "base_reactions"), ("modal_results", "modes") })
+                {
+                    var t = CsiProMax.Assistant.Sap2000.SapTools.All.Single(x => x.Name == tool);
+                    var answer = t.Invoke(JsonDocument.Parse("{}").RootElement, link);
+                    Check(answer["analysed"]?.GetValue<bool>() == false && answer[key] is JsonArray { Count: 0 } && answer["note"]!.GetValue<string>().Contains("run_analysis", StringComparison.Ordinal), $"{program.Name} {tool}: " + answer.ToJsonString());
+                }
+            }
+        });
+
+        yield return ("ETABS 20 tester (0.4.53): an analysis the program did not finish is a failure that quotes its analysis log", () =>
+        {
+            var lines = new[] { "BEGIN ANALYSIS", "  NUMBER OF JOINTS = 40", "* * * E R R O R * * *", "STRUCTURE IS UNSTABLE OR ILL-CONDITIONED", "ANALYSIS TERMINATED", "" };
+            var said = CsiProMax.Assistant.Tools.EtabsTools.AnalysisTrouble(lines);
+            Check(said.Contains("STRUCTURE IS UNSTABLE OR ILL-CONDITIONED") && said.Contains("ANALYSIS TERMINATED") && !said.Contains("BEGIN ANALYSIS"), string.Join(" | ", said));
+            Equal(2, CsiProMax.Assistant.Tools.EtabsTools.AnalysisTrouble(["a", "b"]).Count, "a log with no problem gives its last lines");
+            var folder = Path.Combine(Path.GetTempPath(), "cpm-log-" + Guid.NewGuid().ToString("N")[..8]);
+            Directory.CreateDirectory(folder);
+            try
+            {
+                File.WriteAllLines(Path.Combine(folder, "scratch.LOG"), lines);
+                var text = CsiProMax.Assistant.Tools.EtabsTools.AnalysisLog(Path.Combine(folder, "scratch.EDB"));
+                Check(text.Contains("scratch.LOG says", StringComparison.Ordinal) && text.Contains("UNSTABLE", StringComparison.Ordinal), text);
+                Check(CsiProMax.Assistant.Tools.EtabsTools.AnalysisLog(Path.Combine(folder, "other.EDB")).Contains("No analysis log", StringComparison.Ordinal), "no log is said");
+            }
+            finally { Directory.Delete(folder, true); }
+            var tools = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Tools/EtabsTools.cs"));
+            Check(tools.Contains("(_, e) => RunAnalysis(e)", StringComparison.Ordinal), "run_analysis checks that the model is analysed");
+        });
+
+        yield return ("ETABS 20 tester (0.4.53): a table import's log is quoted from its error lines, not cut off in its options", () =>
+        {
+            var log = "********** DATABASE IMPORT DEFINITION DATA **********\nETABS Version 20.0.0 Interactive Database Import\nImport Type and Options:\n" + string.Concat(Enumerable.Repeat("  Elements Deleted from DB:  Delete object from model\n", 20))
+                + "TABLE:  \"Load Pattern Definitions - Auto Seismic - UBC 97\"\n  ERROR: Field 'Ct' is not valid for this table\nNumber of errors: 1\n";
+            var cut = CsiProMax.Assistant.Etabs.EditableTables.LogCut(log);
+            Check(cut.StartsWith("ERROR: Field 'Ct' is not valid", StringComparison.Ordinal), cut);
+            Equal("", CsiProMax.Assistant.Etabs.EditableTables.Trouble("all fine\nNumber of errors: 0"), "a clean log has no trouble lines");
+        });
+
+        yield return ("ETABS 20 tester (0.4.53): no SetNumberModes and no SectCut in its API: the modal case and section cut tables take them", () =>
+        {
+            var api = new CpmFakes.OldEtabsApi();
+            var link = new SafeMemory(new MemoryEtabs { Program = CsiProgram.Etabs }, program: CsiProgram.Etabs)
+            {
+                Api = api,
+                Listed = [new("Modal Case Definitions - Eigen", "Modal Case Definitions - Eigen", false), new("Section Cut Definitions", "Section Cut Definitions", false), new("Modal Participating Mass Ratios", "Modal Participating Mass Ratios", true)],
+            };
+            var how = CsiProMax.Assistant.Tools.ApiWorkarounds.SetNumberModes(link, "ModalEigen", "CPM-MODAL", 12, 1);
+            Check(how.Contains("Modal Case Definitions - Eigen", StringComparison.Ordinal), how);
+            var row = api.Rows["Modal Case Definitions - Eigen"].Single();
+            Check(row.Contains("CPM-MODAL") && row.Contains("12") && row.Contains("1"), "the modes went into the table: " + string.Join(",", row));
+            how = CsiProMax.Assistant.Tools.ApiWorkarounds.SectionCutByGroup(link, "CPM-CUT", "CPM-GROUP");
+            Check(how.Contains("Section Cut Definitions", StringComparison.Ordinal), how);
+            var cut = api.Rows["Section Cut Definitions"].Single();
+            Check(cut.Contains("CPM-CUT") && cut.Contains("Group") && cut.Contains("CPM-GROUP"), string.Join(",", cut));
+            Check(CsiProMax.Assistant.Tools.ApiWorkarounds.IsMissing(new EtabsException("ETABS could not define a section cut by the group: cSapModel has no 'SectCut'. Its parts: ...")), "ETABS 20's own words for a missing part");
+            Check(!CsiProMax.Assistant.Tools.ApiWorkarounds.IsMissing(new EtabsException("ETABS refused to set the modes (answered 1).")), "a refusal is not a missing call");
+            var grab = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Panel/Tools/ScreenGrab.cs"));
+            Check(grab.Contains("WhileShown(main", StringComparison.Ordinal) && !grab.Contains("restore its window first.\");", StringComparison.Ordinal), "a minimized window is shown for its picture, not refused");
+        });
+
         yield return ("SAFE 20 tester (0.4.47): SAFE 20 is never given the Modeler's .f2k, which it read as a packed model ('Error decompressing file')", () =>
         {
             Check(!CsiProMax.Assistant.ScratchProgram.OpensThroughApi(CsiProgram.Safe, @"C:\t\cpm-field-test.f2k", onFramework: true), "SAFE 20/21 and a .f2k: it is not opened (the model is built instead)");
@@ -567,4 +651,31 @@ namespace CpmFakes
                 }
             }
         }
+
+    /// <summary>ETABS 20's API as the tester's run showed it: no SectCut, a ModalEigen with no SetNumberModes; its tables take rows.</summary>
+    public sealed class OldEtabsApi
+    {
+        public Dictionary<string, List<string[]>> Rows { get; } = [];
+        public Cases LoadCases { get; } = new();
+        public Tables DatabaseTables => new(this);
+        public sealed class Cases { public Eigen ModalEigen { get; } = new(); }
+        public sealed class Eigen { public int SetCase(string Name) => 0; }
+        public sealed class Tables(OldEtabsApi a)
+        {
+            private static string[] FieldsOf(string key) => key.StartsWith("Modal", StringComparison.Ordinal) ? ["Name", "MassSource", "MaxModes", "MinModes", "GUID"] : ["Name", "DefinedBy", "Group", "ResultType", "GUID"];
+            public int GetTableForEditingArray(string TableKey, string GroupName, ref int TableVersion, ref string[] FieldsKeysIncluded, ref int NumberRecords, ref string[] TableData)
+            { FieldsKeysIncluded = FieldsOf(TableKey); NumberRecords = 0; TableData = []; return 0; }
+            public int GetAllFieldsInTable(string TableKey, ref int TableVersion, ref int NumberFields, ref string[] FieldKey, ref string[] FieldName, ref string[] Description, ref string[] UnitsString, ref bool[] IsImportable)
+            { FieldKey = FieldsOf(TableKey); FieldName = FieldKey; NumberFields = FieldKey.Length; return 0; }
+            public int SetTableForEditingArray(string TableKey, ref int TableVersion, ref string[] FieldsKeysIncluded, int NumberRecords, ref string[] TableData)
+            {
+                var f = FieldsKeysIncluded.Length;
+                var data = TableData;
+                a.Rows[TableKey] = Enumerable.Range(0, NumberRecords).Select(r => data.Skip(r * f).Take(f).ToArray()).ToList();
+                return 0;
+            }
+            public int ApplyEditedTables(bool FillImportLog, ref int NumFatalErrors, ref int NumErrorMsgs, ref int NumWarnMsgs, ref int NumInfoMsgs, ref string ImportLog) { ImportLog = ""; return 0; }
+            public int CancelTableEditing() => 0;
+        }
+    }
 }

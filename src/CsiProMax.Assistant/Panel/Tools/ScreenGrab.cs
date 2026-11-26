@@ -14,6 +14,7 @@ internal static class ScreenGrab
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern IntPtr GetWindowDC(IntPtr hWnd);
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr hWnd, IntPtr hdc);
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool IsIconic(IntPtr hWnd);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hWnd, int command);
     [System.Runtime.InteropServices.DllImport("gdi32.dll")] private static extern IntPtr CreateCompatibleDC(IntPtr hdc);
     [System.Runtime.InteropServices.DllImport("gdi32.dll")] private static extern IntPtr CreateCompatibleBitmap(IntPtr hdc, int w, int h);
     [System.Runtime.InteropServices.DllImport("gdi32.dll")] private static extern IntPtr SelectObject(IntPtr hdc, IntPtr obj);
@@ -27,7 +28,7 @@ internal static class ScreenGrab
     public static byte[] Capture(IntPtr main, int maxWidth)
     {
         if (main == IntPtr.Zero) throw new InvalidOperationException($"{Csi.Name}'s main window was not found.");
-        if (IsIconic(main)) throw new InvalidOperationException($"{Csi.Name} is minimized; restore its window first.");
+        if (IsIconic(main)) return WhileShown(main, () => Capture(main, maxWidth));
         if (!GetWindowRect(main, out var w)) throw new InvalidOperationException($"Could not read {Csi.Name}'s window position.");
         int width = w.Right - w.Left, height = w.Bottom - w.Top;
         if (width < 50 || height < 50) throw new InvalidOperationException($"{Csi.Name}'s window is too small to capture.");
@@ -38,11 +39,28 @@ internal static class ScreenGrab
     public static byte[] Window(IntPtr main, int maxWidth)
     {
         if (main == IntPtr.Zero) throw new InvalidOperationException($"{Csi.Name}'s main window was not found.");
-        if (IsIconic(main)) throw new InvalidOperationException($"{Csi.Name} is minimized.");
+        if (IsIconic(main)) return WhileShown(main, () => Window(main, maxWidth));
         if (!GetWindowRect(main, out var w)) throw new InvalidOperationException($"Could not read {Csi.Name}'s window position.");
         int width = w.Right - w.Left, height = w.Bottom - w.Top;
         if (width < 50 || height < 50) throw new InvalidOperationException($"{Csi.Name}'s window is too small to capture.");
         return Grab(main, width, height, 0, 0, width, height, maxWidth, new System.Windows.Media.Imaging.JpegBitmapEncoder { QualityLevel = 70 });
+    }
+
+    /// <summary>
+    /// A minimized window has no picture to take: it is shown without taking the focus, taken, and minimized again
+    /// (SAFE 20 was minimized on the tester's PC and capture_view_image failed, 0.4.53, 2026-11-26).
+    /// </summary>
+    private static byte[] WhileShown(IntPtr main, Func<byte[]> take)
+    {
+        ShowWindow(main, 4 /* SW_SHOWNOACTIVATE */);
+        try
+        {
+            for (var i = 0; i < 20 && IsIconic(main); i++) Thread.Sleep(100);
+            if (IsIconic(main)) throw new InvalidOperationException($"{Csi.Name} is minimized and did not come up to be pictured; restore its window and try again.");
+            Thread.Sleep(400); // its views redraw
+            return take();
+        }
+        finally { ShowWindow(main, 7 /* SW_SHOWMINNOACTIVE */); }
     }
 
     private static byte[] Grab(IntPtr main, int width, int height, int x, int y, int cw, int ch, int maxWidth, System.Windows.Media.Imaging.BitmapEncoder encoder)

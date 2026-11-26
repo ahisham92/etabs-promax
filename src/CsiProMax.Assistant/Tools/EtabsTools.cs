@@ -145,7 +145,7 @@ public static class EtabsTools
         new("run_analysis",
             $"Runs the analysis in {Csi.Name} ({Csi.Name}'s own solver, on its license). The model must be saved. The engineer is always asked first. It can take a while.",
             """{"type":"object","properties":{}}""", Ask.Always,
-            (_, e) => { e.RunAnalysis(); return new JsonObject { ["done"] = true, ["note"] = "The analysis ran. Read results with read_table." }; }, _ => "Run the analysis"),
+            (_, e) => RunAnalysis(e), _ => "Run the analysis"),
 
         new("run_design",
             "Runs the design in the program after the analysis (the program's own design, on its licence): steel frame, concrete frame, composite beam, shear wall, as the model has them, or the ones in 'kinds'. The engineer is always asked first. A kind whose design the API cannot start is listed with the menu to use instead. Then design_ratios and export_pack read the results.",
@@ -160,6 +160,48 @@ public static class EtabsTools
         .. ResultTools.All,
         .. StabilityTools.All,
     ];
+
+    /// <summary>
+    /// Runs the analysis and checks that the program finished it: an analysis that stops (an unstable model, a case that
+    /// cannot run) leaves the model unlocked, and the program's API still answers 0 (ETABS 20 on the tester's PC, 0.4.53,
+    /// 2026-11-26). Then what the program wrote in its analysis log beside the model is said.
+    /// </summary>
+    internal static JsonNode RunAnalysis(ICsiLink e)
+    {
+        e.RunAnalysis();
+        ModelInfo info;
+        try { info = e.Info(); }
+        catch (EtabsException) { return new JsonObject { ["done"] = true, ["note"] = "The analysis ran. Read results with read_table." }; }
+        if (info.Locked || e is MemoryEtabs or OfflineEtabs) return new JsonObject { ["done"] = true, ["note"] = "The analysis ran. Read results with read_table." };
+        throw new EtabsException($"{e.Program.Name} was asked to run the analysis and answered, but did not finish it: the model is not analysed (not locked). " + AnalysisLog(info.File));
+    }
+
+    /// <summary>The lines of the program's analysis log (name.LOG or name.OUT beside the model) that say what went wrong, or where to look.</summary>
+    internal static string AnalysisLog(string modelFile)
+    {
+        if (modelFile.Length == 0) return "The model has no file, so the analysis log could not be read.";
+        var stem = Path.Combine(Path.GetDirectoryName(modelFile) ?? "", Path.GetFileNameWithoutExtension(modelFile));
+        foreach (var ext in new[] { ".LOG", ".log", ".OUT", ".out" })
+        {
+            var file = stem + ext;
+            if (!File.Exists(file)) continue;
+            string[] lines;
+            try { using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete); using var reader = new StreamReader(stream); lines = reader.ReadToEnd().Split('\n'); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return $"Its analysis log {Path.GetFileName(file)} could not be read ({ex.Message})."; }
+            var said = AnalysisTrouble(lines);
+            return $"Its analysis log {Path.GetFileName(file)} says: " + string.Join(" | ", said);
+        }
+        return $"No analysis log ({Path.GetFileName(stem)}.LOG) was found beside the model.";
+    }
+
+    /// <summary>The log lines that name a problem (error, warning, unstable, terminated...), else its last lines.</summary>
+    internal static List<string> AnalysisTrouble(IReadOnlyList<string> lines)
+    {
+        string[] words = ["error", "warning", "unstable", "instabilit", "terminat", "abort", "not run", "singular", "failed", "cannot", "negative"];
+        var trimmed = lines.Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
+        var bad = trimmed.Where(l => words.Any(w => l.Contains(w, StringComparison.OrdinalIgnoreCase))).Distinct().Take(15).ToList();
+        return bad.Count > 0 ? bad : trimmed.TakeLast(8).ToList();
+    }
 
     private static string Plural(int count, string word) => count == 0 ? "" : count == 1 ? "1 " + word : $"{count} {word}s";
 

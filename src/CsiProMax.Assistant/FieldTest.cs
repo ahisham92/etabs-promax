@@ -286,7 +286,7 @@ public static class FieldTest
         var now = o.At ?? DateTime.Now;
         // The report's folder is fixed first: the test points the bug folder at its own while it checks the bug report.
         var target = o.Folder ?? Folder;
-        var work = o.WorkFolder ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CsiProMax", "Field test", $"{link.Program.Name} {now:yyyy-MM-dd HHmmss}");
+        var work = o.WorkFolder ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CsiProMax", "Field test", $"{ReportName(link.Program, o.OnlyProgram)} {now:yyyy-MM-dd HHmmss}");
         if (o.Full) Directory.CreateDirectory(work);
         var ctx = new FieldContext(link.Program, work, link) { Progress = o.Progress, Outcome = o.Outcome };
         try { o.OnWorkFolder?.Invoke(work); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
@@ -366,8 +366,8 @@ public static class FieldTest
             FieldRetest.Save(ranParts.ToDictionary(r => r.Key, r => FieldRetest.Of(steps.Where(s => s.Section == r.Value), Update.Updater.CurrentText, PrintOf(o, r.Key))), results);
         var report = Render(link, steps, o, now, plugIns, o.Full ? work : null);
         Directory.CreateDirectory(target);
-        var file = Path.Combine(target, $"Field test {link.Program.Name} {now:yyyy-MM-dd HHmm}.md");
-        if (File.Exists(file)) file = Path.Combine(target, $"Field test {link.Program.Name} {now:yyyy-MM-dd HHmmss}.md");
+        var file = Path.Combine(target, $"Field test {ReportName(link.Program, o.OnlyProgram)} {now:yyyy-MM-dd HHmm}.md");
+        if (File.Exists(file)) file = Path.Combine(target, $"Field test {ReportName(link.Program, o.OnlyProgram)} {now:yyyy-MM-dd HHmmss}.md");
         File.WriteAllText(file, report, new UTF8Encoding(false));
         return new Outcome(file, steps, report, o.Full ? Pack(file, report, work) : null, o.Full ? work : null);
     }
@@ -468,12 +468,13 @@ public static class FieldTest
             // ctx.Link stays on the scratch window: a part that was given up on must never reach the engineer's model.
             ctx.Section(FieldParts.ScratchSection(program));
             // Given up on: the windows waiting in the scratch program are named, so the engineer knows which to answer.
-            if (!finished && window is { } stuck)
+            // A window that stopped answering inside the part (a call that never came back) is named the same way.
+            if (window is { } stuck && (!finished || ctx.Steps.Any(st => st.Section == FieldParts.ScratchSection(program) && !st.Ok && st.Detail.Contains("not come back", StringComparison.Ordinal))))
             {
                 IReadOnlyList<string> waiting;
                 try { waiting = stuck.OpenWindows(); } catch (Exception ex) when (ex is not OutOfMemoryException) { waiting = []; }
                 if (waiting.Count > 0)
-                    ctx.Fail($"windows waiting in the scratch {program.Name}", "These were open in it when the test gave up: " + string.Join("; ", waiting.Select(t => $"'{t}'")) + ". Answer them yourself, close that window without saving, and run the field test again.");
+                    ctx.Fail($"windows waiting in the scratch {program.Name}", (finished ? "These were open in it when a call to it did not come back: " : "These were open in it when the test gave up: ") + string.Join("; ", waiting.Select(t => $"'{t}'")) + ". Answer them yourself, close that window without saving, and run the field test again.");
             }
             if (window is { } open)
             {
@@ -582,6 +583,7 @@ public static class FieldTest
                 : "- Changes to the model: none (reading only)");
         sb.AppendLine($"- CSI ProMax: {Update.Updater.CurrentText}, in {o.InstallFolder ?? AppContext.BaseDirectory}");
         if (Update.Updater.Behind() is { } behind) sb.AppendLine("- NOT THE NEWEST VERSION: " + behind);
+        if (TestedLine(link.Program, o.Full ? o.OnlyProgram : null) is { } tested) sb.AppendLine("- " + tested);
         sb.AppendLine("- " + ProgramLine(link));
         // Only the plug-in passes --etabs-pid, so this says whether the Tools menu entry works on this PC.
         sb.AppendLine(Environment.GetCommandLineArgs().Contains("--etabs-pid")
@@ -712,6 +714,19 @@ public static class FieldTest
             return null;
         }
     }
+
+    /// <summary>
+    /// The program a report and its folder are named for: the one program tested when the test was asked for one alone,
+    /// else the window's. An ETABS-only test started from the SAFE window was saved as "Field test SAFE ..." (tester's
+    /// PC, 0.4.53, 2026-11-26), and read as a SAFE test.
+    /// </summary>
+    public static string ReportName(CsiProgram window, CsiProgram? only) => (only ?? window).Name;
+
+    /// <summary>What a one-program test covered, and which window it ran from when that is another program's; null otherwise.</summary>
+    public static string? TestedLine(CsiProgram window, CsiProgram? only) =>
+        only is null ? null
+        : only.Key == window.Key ? $"Program tested: {only.Name} alone (its scratch window; the other programs were not tested in this run)"
+        : $"Program tested: {only.Name} alone, on a scratch {only.Name} window. The test was started from the CSI ProMax window of {window.Name}, so the open model below is {window.Name}'s (read only)";
 
     private static string ProgramLine(ICsiLink link)
     {

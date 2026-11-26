@@ -5,8 +5,10 @@ namespace CsiProMax.Assistant.Etabs;
 /// some definitions (a user coefficient seismic load, ASCE 7-16 wind, a user response spectrum, a named mass source:
 /// read from its ETABSv1.dll and its "Table and Field Keys.xml", 0.4.17 field test), and its tables take them.
 /// </summary>
-public static class EditableTables
-{
+public static class EditableTables
+
+{
+
     /// <summary>
     /// Selects every load pattern for display before a table is read. SAP2000 26 shows only the patterns selected for
     /// display in its database tables (DEAD alone in a new model, none in a model imported from .s2k), so a pattern added
@@ -114,7 +116,7 @@ public static class EditableTables
                 {
                     try { m.DatabaseTables.CancelTableEditing(); } catch { /* nothing more to undo */ }
                     string restored = Tools.CsiTools.RestoreRows(m, key, readFields, readRows);
-                    throw new EtabsException($"{program} did not apply '{key}' ({fatal} fatal, {errors} errors), so it cannot {what}. {restored} Its import log: {Cut(log)}" + About(m, key, rows));
+                    throw new EtabsException($"{program} did not apply '{key}' ({fatal} fatal, {errors} errors), so it cannot {what}. {restored} Its import log: {LogCut(log)}" + About(m, key, rows));
                 }
                 return log;
             }
@@ -259,11 +261,11 @@ public static class EditableTables
                 if (changed.Count > 0)
                     throw new EtabsException($"{program} changed or lost the load patterns {string.Join(", ", changed)} when it was given {pattern}'s {code}: do not save the model; close it without saving and open it again. " +
                         $"The import answered {applied} ({fatal} fatal, {errors} errors, {warnings} warnings); patterns before {before.Count}, after {after.Count} ({Cut(string.Join(", ", after.Select(kv => kv.Value.Length == 0 ? kv.Key : $"{kv.Key}={kv.Value}")), 400)}); " +
-                        $"sent: the patterns' table ({rows.Count} rows: {Cut(string.Join(", ", rows.Select(r => r[auto].Length == 0 ? r[pat] : $"{r[pat]}={r[auto]}")), 400)}) and {string.Join(", ", tables.Select(t => $"'{t.Key}' ({t.Count})"))}. Its import log: {Cut(log)}");
+                        $"sent: the patterns' table ({rows.Count} rows: {Cut(string.Join(", ", rows.Select(r => r[auto].Length == 0 ? r[pat] : $"{r[pat]}={r[auto]}")), 400)}) and {string.Join(", ", tables.Select(t => $"'{t.Key}' ({t.Count})"))}. Its import log: {LogCut(log)}");
                 if (applied != 0 || fatal > 0)
-                    throw new EtabsException($"{program} did not apply {pattern}'s {code} ({fatal} fatal, {errors} errors), so it cannot {what}. Its import log: {Cut(log)}" + About(m, codeKey, new List<IReadOnlyDictionary<string, string>> { given }));
+                    throw new EtabsException($"{program} did not apply {pattern}'s {code} ({fatal} fatal, {errors} errors), so it cannot {what}. Its import log: {LogCut(log)}" + About(m, codeKey, new List<IReadOnlyDictionary<string, string>> { given }));
                 if (!after.TryGetValue(pattern, out string? took) || !SameCode(took, code))
-                    throw new EtabsException($"{program} took the rows but {pattern}'s code is '{took}', not {code}, so it cannot {what}. Its import log: {Cut(log)}");
+                    throw new EtabsException($"{program} took the rows but {pattern}'s code is '{took}', not {code}, so it cannot {what}. Its import log: {LogCut(log)}");
                 return log;
             }
             catch
@@ -379,5 +381,27 @@ public static class EditableTables
     {
         text = text.Replace("\r", " ").Replace("\n", " ").Trim();
         return text.Length > most ? text[..most] + "..." : text;
+    }
+
+    internal static string LogCut(string text, int most = 600)
+    {
+        // An import log opens with many lines of options: its error and warning lines come first, so the reason is
+        // never cut off (ETABS 20's logs ended at the options, 0.4.53 field test).
+        var trouble = Trouble(text);
+        if (trouble.Length > 0) text = trouble + " || " + text;
+        text = text.Replace("\r", " ").Replace("\n", " ").Trim();
+        most = trouble.Length > 0 ? Math.Max(most, trouble.Length + 200) : most;
+        return text.Length > most ? text[..most] + "..." : text;
+    }
+
+    /// <summary>The lines of an import log that say what went wrong (error, warning, not found, invalid...), joined; empty when none does.</summary>
+    public static string Trouble(string log)
+    {
+        string[] words = ["error", "warning", "not found", "invalid", "not valid", "not allowed", "does not exist", "cannot", "could not", "unknown", "failed", "must be", "out of range"];
+        var lines = log.Replace("\r", "").Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0)
+            .Where(l => words.Any(w => l.Contains(w, StringComparison.OrdinalIgnoreCase)) && !l.Contains("Elements Deleted", StringComparison.OrdinalIgnoreCase) && !l.StartsWith("Import Type", StringComparison.OrdinalIgnoreCase))
+            .Where(l => !System.Text.RegularExpressions.Regex.IsMatch(l, @"^(Number of )?(errors?|warnings?)\s*[:=]?\s*0\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+            .Distinct().Take(12);
+        return string.Join(" | ", lines);
     }
 }

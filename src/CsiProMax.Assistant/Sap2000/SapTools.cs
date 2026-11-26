@@ -653,8 +653,27 @@ public static class SapTools
         })!;
     }
 
+    /// <summary>
+    /// The answer of a results tool on a model that is not analysed: none, said as such. ETABS 23 and SAP2000 answer
+    /// such a read with no rows; ETABS 20 refuses it (tester's PC, 0.4.53, 2026-11-26), and the tool failed. So the model
+    /// is asked first, in every program. Null when it is analysed, or when the program cannot say.
+    /// </summary>
+    internal static JsonObject? NotAnalysed(ICsiLink e, string listKey)
+    {
+        bool locked;
+        try { locked = e.Info().Locked; }
+        catch (EtabsException) { return null; }
+        if (locked) return null;
+        return new JsonObject
+        {
+            ["analysed"] = false, ["rows"] = 0, [listKey] = new JsonArray(),
+            ["note"] = $"{e.Program.Name} has no results: the analysis has not run (the model is not locked). Run it with run_analysis, then ask again.",
+        };
+    }
+
     private static JsonNode JointDisplacements(JsonElement a, ICsiLink e)
     {
+        if (NotAnalysed(e, "list") is { } none) return none;
         var rows = Displacements(e, a);
         if (rows.Count == 0) throw new ToolInputException("SAP2000 has no displacements for these cases: run the analysis first (run_analysis), or check the case names.");
         var limit = a.Whole("limit", 50);
@@ -688,6 +707,7 @@ public static class SapTools
 
     private static JsonNode FrameForces(JsonElement a, ICsiLink e)
     {
+        if (NotAnalysed(e, "list") is { } none) return none;
         var frames = a.Texts("frames");
         var rows = (List<ForceRow>)e.Raw("read frame forces", m =>
         {
@@ -737,6 +757,7 @@ public static class SapTools
 
     private static JsonNode BaseReactions(JsonElement a, ICsiLink e)
     {
+        if (NotAnalysed(e, "base_reactions") is { } none) return none;
         var result = (JsonObject)e.Raw("read base reactions", m =>
         {
             Output(m, e, a);
@@ -779,6 +800,7 @@ public static class SapTools
 
     private static JsonNode ModalResults(JsonElement a, ICsiLink e)
     {
+        if (NotAnalysed(e, "modes") is { } none) return none;
         var target = a.Number("target", 0.9);
         var only = a.Text("case");
         return (JsonNode)e.Raw("read the modal results", m =>
