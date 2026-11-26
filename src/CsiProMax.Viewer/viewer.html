@@ -4256,7 +4256,7 @@ const asgTables = {
   Area: [["Local Axes...", "Local Axes", ES], ["Insertion Point...", "Insertion Point", ES, "Joint Offsets..."], ["Additional Mass...", "Additional Mass", ES, "Area Mass..."], ["Edge Releases...", "Edge Releases"], ["Edge Releases...", "@Area Edge Release Assignments", ["sap2000"]], ["Auto Edge Constraints...", "Auto Edge Constraints", ES, "Edge Constraints..."],
     ["Floor Auto Mesh Options...", "Floor Auto Mesh Options", ES, "Automatic Area Mesh..."], ["Wall Auto Mesh Options...", "Wall Auto Mesh Options", ES, "Automatic Area Mesh (vertical areas)..."], ["Thickness Overwrites...", "Thickness Overwrites", ES, "Area Thickness Overwrites..."], ["Material Overwrites...", "Material Overwrites", ES, "Material Property Overwrites..."],
     ["Slab Rib Locations...", "Slab Rib Locations"], ["Floor Cracking...", "Floor Cracking"], ["Rebar Ratio for Creep Analysis...", "Wall Rebar Ratio for Creep Analysis"]],
->>>>>>> origin/main
+  Joint: [["Additional Mass...", "Additional Mass", ES, "Masses..."], ["Panel Zone...", "Panel Zone"], ["Panel Zone...", "@Joint Panel Zone Assignments", ["sap2000"]], ["Floor Meshing Option...", "Floor Meshing Option"]],
 };
 function hmTableItems(kind, off) { return asgTables[kind].map(([label, t, progs, sap]) => only(progs || ["etabs"], [program === "sap2000" && sap || label, "m:at:" + (t[0] === "@" ? t.slice(1) : kind + " Assignments - " + t), "", off])); }
 // Fields that take Yes or No, and fields with the programs' own choices.
