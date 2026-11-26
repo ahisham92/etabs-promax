@@ -34,34 +34,18 @@ internal sealed class MainWindow : Window
         Place();
         var layout = new DockPanel();
         var menu = BuildMenu();
-        // The menu, and at its right the Update button: there only while a newer version is out or downloaded.
-        var top = new DockPanel { LastChildFill = true };
-        var update = new Button { Visibility = Visibility.Collapsed, Margin = new Thickness(4, 2, 6, 2), Padding = new Thickness(10, 2, 10, 2), FontWeight = FontWeights.SemiBold, Cursor = System.Windows.Input.Cursors.Hand };
-        System.Windows.Automation.AutomationProperties.SetName(update, "Update CSI ProMax");
-        update.Click += (_, _) =>
+        DockPanel.SetDock(menu, Dock.Top);
+        layout.Children.Add(menu);
+        // Under the menu, across the whole window: the Update bar, there only while a newer version is out or downloaded.
+        // One click downloads when needed (the update window shows it), then this window switches by itself when no
+        // work is running.
+        _updateBar = UpdateBar.Build(() =>
         {
-            // Downloads when needed (the update window shows it), then this window switches by itself when no work is running.
             CsiProMax.App.CheckForUpdatesInteractive();
             CsiProMax.App.SwitchWhenIdle();
-        };
-        void ShowUpdate()
-        {
-            string? text;
-            try { text = UpdateBadge.TopButton(Update.Updater.Current, Update.Updater.Latest, Update.Updater.Staged ?? (Update.Updater.NewestDownloaded(Update.Updater.Current) is { } f ? Path.GetFileName(f) : null)); }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { text = null; }
-            update.Content = text;
-            update.ToolTip = text is null ? null : $"This window runs CSI ProMax {Update.Updater.CurrentText}. Click to move to the newer version now; {Csi.Name} stays open and your model is not touched.";
-            update.Visibility = text is null ? Visibility.Collapsed : Visibility.Visible;
-        }
-        var watch = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(15) };
-        watch.Tick += (_, _) => ShowUpdate();
-        Loaded += (_, _) => { ShowUpdate(); watch.Start(); };
-        Closed += (_, _) => watch.Stop();
-        DockPanel.SetDock(update, Dock.Right);
-        top.Children.Add(update);
-        top.Children.Add(menu);
-        DockPanel.SetDock(top, Dock.Top);
-        layout.Children.Add(top);
+        });
+        DockPanel.SetDock(_updateBar, Dock.Top);
+        layout.Children.Add(_updateBar);
         // The Modeler is one program window: its model (3D view, plan, Draw/Define/Assign menus) fills it, and the chat,
         // when it is on, sits on its right and can be closed (Ahmed, 2026-11-26: the Modeler opened as the chat alone).
         // Beside a CSI program the window is the chat (or, with the chat off, what CSI ProMax does by hand).
@@ -72,6 +56,11 @@ internal sealed class MainWindow : Window
         Closing += (_, _) => Remember();
         Closed += (_, _) => { Handle = IntPtr.Zero; _open = null; };
     }
+
+    private readonly Button _updateBar;
+
+    /// <summary>The Update bar at the top of this window: whether it shows, and its text (the field test reads it).</summary>
+    internal (bool Shown, string Text) UpdateBarState() => UpdateBar.State(_updateBar);
 
     private WebPane? _view;
     private ColumnDefinition? _chatColumn, _splitColumn;
