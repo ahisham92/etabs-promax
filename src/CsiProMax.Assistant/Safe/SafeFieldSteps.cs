@@ -231,6 +231,7 @@ public static class SafeFieldSteps
                 FieldContext.Expect(!link.Areas().Any(x => gone.Contains(x.Name)) && !link.Frames().Any(f => members.Contains(f.Name)), "a deleted object is still in SAFE");
             });
         else ctx.Fail("tool delete_objects", "the objects to delete were not added");
+        ScratchExtras.AddSafe(ctx);
         ctx.Tool("model_snapshot", """{"name":"cpm-before-analysis"}""");
         ctx.Tool("save_model", "{}", a => FieldContext.Expect(a["saved"]!.GetValue<string>().Replace('\\', '/').Split('/').Last().StartsWith(ModelerFieldSteps.ModelName, StringComparison.OrdinalIgnoreCase), $"it saved '{a["saved"]}', which is not the scratch model"));
 
@@ -248,6 +249,7 @@ public static class SafeFieldSteps
                 return "the design ran";
             });
         else ctx.Fail("SAFE's slab design runs", "the analysis did not run (see run_analysis above), so the design could not");
+        if (analysed) ScratchExtras.CheckSafe(ctx);
         if (analysed) ctx.Tool("run_design", """{"kinds":["slab"]}""", null, "tool run_design (slab design, or the menu to run it)");
         else ctx.Refused("run_design", """{"kinds":["slab"]}""", "design", "tool run_design says the analysis must run first");
 
