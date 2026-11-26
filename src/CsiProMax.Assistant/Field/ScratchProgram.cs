@@ -70,7 +70,7 @@ public static class ScratchDialogs
         foreach (var (window, title) in Of(processId))
         {
             if (MayClose(title) && Button(window, "OK") is { } ok && IsWindowEnabled(ok) && PostMessageW(ok, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero)) closed.Add(title);
-            else if (program is not null && IsProgramBox(title, program) && Button(window, "OK") is { } fine && IsWindowEnabled(fine)
+            else if (program is not null && IsProgramBox(title, program) && IsDialog(window) && Button(window, "OK") is { } fine && IsWindowEnabled(fine)
                      && LongWords(window).ToList() is var words && !words.Any(w => w.Contains("licen", StringComparison.OrdinalIgnoreCase))
                      && PostMessageW(fine, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero))
                 // Every message box of the program itself is answered OK and said (Ahmed, 2026-11-26: "please handle the
@@ -276,6 +276,10 @@ public static class ScratchDialogs
     }
 
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool IsWindowEnabled(IntPtr window);
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] private static extern int GetClassNameW(IntPtr window, System.Text.StringBuilder name, int most);
+
+    /// <summary>A dialog box (class #32770), such as a message box: never the program's main window, whose title is its name alone while it starts or opens a file.</summary>
+    public static bool IsDialog(IntPtr window) { var name = new System.Text.StringBuilder(64); return GetClassNameW(window, name, name.Capacity) > 0 && name.ToString() == "#32770"; }
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool IsHungAppWindow(IntPtr window);
     private delegate bool Each(IntPtr window, IntPtr data);
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool EnumWindows(Each each, IntPtr data);

@@ -699,6 +699,9 @@ static class OldProgramTests
             var notices = scratch[scratch.IndexOf("public static List<string> CloseNotices", StringComparison.Ordinal)..scratch.IndexOf("public static bool IsProgramBox", StringComparison.Ordinal)];
             var box = notices[notices.IndexOf("IsProgramBox(title, program)", StringComparison.Ordinal)..];
             Check(box.IndexOf("\"licen\"", StringComparison.Ordinal) is var lic and > 0 && lic < box.IndexOf("PostMessageW(fine", StringComparison.Ordinal), "a licence message is never answered");
+            // SAP2000's main window is titled "SAP2000" alone while it starts or opens a file: only a dialog box is answered.
+            Check(box.IndexOf("IsDialog(window)", StringComparison.Ordinal) is var dlg and > 0 && dlg < box.IndexOf("PostMessageW(fine", StringComparison.Ordinal), "the program's main window could be taken for its message box");
+            if (OperatingSystem.IsWindows()) Check(!ScratchDialogs.IsDialog(IntPtr.Zero), "no window is no dialog");
             Check(!box[..box.IndexOf("PostMessageW(fine", StringComparison.Ordinal)].Contains("FirstOrDefault(IsFileRefused) is { } said", StringComparison.Ordinal), "only 'Error decompressing file' boxes were answered: 'Error getting text file version!' waited for Ahmed");
             var fresh = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Tools/SapFreshProcess.cs"));
             Check(fresh.Contains("ScratchDialogs.CloseNotices(id, program)", StringComparison.Ordinal), "the hidden second SAP2000's pop-ups are answered too");
