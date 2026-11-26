@@ -104,9 +104,11 @@ static class AssignTablesTests
                 ["Frame Assignments - Column Splice Overwrites"] = new[] { new { SpliceOpt = "Splice at Height", SpliceHt = "1.2" } },
                 ["Frame Assignments - Floor Cracking"] = new[] { new { Consider = "Yes" } },
                 ["Frame Assignments - Moment Frame Beam Connection Type"] = new[] { new { Type = "Pinned" } },
+                // On a line (a null line in ETABS), not an area (ETABS 23.2, the J export).
+                ["Area Assignments - Slab Line Releases"] = new[] { new { ShearL = "Yes" } },
             };
             Run(link, "assign_frame_data", new { objects = new[] { beam.Label + "@Story1" }, tables = etabsOnly });
-            Run(link, "assign_shell_data", new { objects = new[] { slab.Label + "@Story1" }, tables = new Dictionary<string, object> { ["Area Assignments - Slab Rib Locations"] = new[] { new { X = "1", Y = "2" } }, ["Area Assignments - Slab Line Releases"] = new[] { new { ShearL = "Yes" } } } });
+            Run(link, "assign_shell_data", new { objects = new[] { slab.Label + "@Story1" }, tables = new Dictionary<string, object> { ["Area Assignments - Slab Rib Locations"] = new[] { new { X = "1", Y = "2" } } } });
             string Rows(StructuralModel x) => JsonSerializer.Serialize(AssignTables.Rows(x).OrderBy(t => t.Key, StringComparer.Ordinal).ToDictionary(t => t.Key, t => t.Value));
             var before = Rows(m);
             var program = ModelerTools.All.Single(x => x.Name == "set_model_program");

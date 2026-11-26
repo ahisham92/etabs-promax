@@ -61,6 +61,13 @@ public static class Drawing
         var openings = Try(() => e is OfflineEtabs o ? o.Model is var mm ? CsiProMax.Model.SlabDefs.Openings(mm).Select(x => (x.Name, Z: StripZ(mm, x.Story), x.Plan)).ToList() : null : null);
         if (openings is { Count: > 0 })
             model["openings"] = new JsonArray(openings.Select(x => (JsonNode)new JsonArray(x.Name, new JsonArray(x.Plan.Select(p => (JsonNode)new JsonArray(R(p[0]), R(p[1]), R(x.Z))).ToArray()))).ToArray());
+        // Slab line releases (on their null lines) and slab rebar bands: [name, [[x, y, z], [x, y, z]], what].
+        var slabLines = Try(() => e is OfflineEtabs o2 ? o2.Model is var m2 ? CsiProMax.Model.SlabDefs.LineReleases(m2).Select(r => (r, l: CsiProMax.Model.SlabDefs.NullLines(m2).Find(x => x.Name == r.Line)))
+            .Where(x => x.l is not null).Select(x => (JsonNode)new JsonArray(x.r.Line, new JsonArray(new JsonArray(R(x.l!.I[0]), R(x.l.I[1]), R(StripZ(m2, x.l.Story))), new JsonArray(R(x.l.J[0]), R(x.l.J[1]), R(StripZ(m2, x.l.Story)))),
+                string.Join(" ", new[] { (x.r.ShearLeft, "VL"), (x.r.MomentLeft, "ML"), (x.r.ShearRight, "VR"), (x.r.MomentRight, "MR") }.Where(k => k.Item1).Select(k => k.Item2))))
+            .Concat(CsiProMax.Model.SlabDefs.SlabRebars(m2).Select(b => (JsonNode)new JsonArray(b.Name, new JsonArray(new JsonArray(R(b.From[0]), R(b.From[1]), R(StripZ(m2, b.Story))), new JsonArray(R(b.To[0]), R(b.To[1]), R(StripZ(m2, b.Story)))),
+                "rebar", R(b.WidthLeft), R(b.WidthRight)))).ToList() : null : null);
+        if (slabLines is { Count: > 0 }) model["slab_lines"] = new JsonArray(slabLines.ToArray());
         if (supports is { Count: > 0 })
             model["supports"] = new JsonArray(supports.Take(MostSupports).Select(s => (JsonNode)new JsonArray(R(s.X), R(s.Y), R(s.Z), Kind(s.Restraint))).ToArray());
     }

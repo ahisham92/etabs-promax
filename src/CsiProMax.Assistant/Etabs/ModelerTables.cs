@@ -68,11 +68,19 @@ public static class ModelerTables
             {
                 var names = UniqueOf(table);
                 foreach (var r in rows) if (names.TryGetValue(r["Story"] + "@" + r["Label"], out var u)) r["UniqueName"] = u;
+                // A slab line release is on a null line, which no summary lists: the program's line where the Modeler drew it.
+                if (table.Equals(SlabDefs.LineReleaseTable, StringComparison.OrdinalIgnoreCase))
+                    foreach (var r in rows.Where(r => !r.ContainsKey("UniqueName")))
+                        if (Tools.SlabTables.LineIn(e, model, r["Label"]) is { } line) r["UniqueName"] = line;
                 EditableTables.Put(e, table, "Story|Label", rows.Select(r => (IReadOnlyDictionary<string, string>)r).ToList(), $"put the Modeler's '{table}' in");
                 done.Add($"{table}: {rows.Count} row{(rows.Count == 1 ? "" : "s")}");
             }
             catch (EtabsException ex) { refused.Add($"{table}: {ex.Message}"); }
         }
+        // Slab rebar: objects of their own, which the .e2k has no keyword for either.
+        var (bars, no) = Tools.SlabTables.PutRebar(e, model);
+        done.AddRange(bars.Select(b => $"slab rebar {b}"));
+        refused.AddRange(no);
         return (done, refused);
     }
 
@@ -80,7 +88,8 @@ public static class ModelerTables
     public static bool HasRows(string cpm, CsiProgram program)
     {
         var model = ModelFile.Load(cpm);
-        return AssignTables.Rows(model).Count > 0 || (program.Key == CsiProgram.Etabs.Key && (model.Materials.Any(x => x.Tables is not null) || model.DefinitionTables is { Count: > 0 }));
+        return AssignTables.Rows(model).Count > 0 || (program.Key == CsiProgram.Etabs.Key && (model.Materials.Any(x => x.Tables is not null) || model.DefinitionTables is { Count: > 0 }))
+            || (program.Key != CsiProgram.Sap2000.Key && SlabDefs.SlabRebars(model).Count > 0);
     }
 
     private static bool Yes(IReadOnlyDictionary<string, string> r, string k) => r.TryGetValue(k, out var v) && v.Equals("Yes", StringComparison.OrdinalIgnoreCase);

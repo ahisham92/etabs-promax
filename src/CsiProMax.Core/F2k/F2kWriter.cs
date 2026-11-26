@@ -149,6 +149,12 @@ public static class F2kWriter
         strips.AddRange(own);
         var stripPoints = strips.Select(st => st.Plan.Select(p => Point(p[0], p[1], z)).ToList()).ToList();
 
+        // ---- null lines with their slab line releases, and slab rebar, of the story ----
+        var nullLines = SlabDefs.NullLines(m).Where(l => string.Equals(l.Story, story, StringComparison.OrdinalIgnoreCase))
+            .Select(l => (Line: l, Name: FrameName(l.Name), I: Point(l.I[0], l.I[1], z), J: Point(l.J[0], l.J[1], z))).ToList();
+        var releases = SlabDefs.LineReleases(m).Select(r => (R: r, Line: nullLines.FirstOrDefault(n => n.Line.Name == r.Line).Name)).Where(x => x.Line is not null).ToList();
+        var rebars = SlabDefs.SlabRebars(m).Where(b => string.Equals(b.Story, story, StringComparison.OrdinalIgnoreCase)).ToList();
+
         // ---- tendons of the story ----
         var tendons = SlabDefs.Tendons(m).Where(t => string.Equals(t.Story, story, StringComparison.OrdinalIgnoreCase) && t.Plan.Count >= 2).ToList();
         var tendonPoints = tendons.Select(t => t.Plan.Select(p => Point(p[0], p[1], z)).ToList()).ToList();
@@ -406,6 +412,8 @@ public static class F2kWriter
                 for (var i = 0; i < w.Points.Count; i++) row.Add(("UniquePt" + I(i + 1), w.Points[i]));
                 return (IReadOnlyList<(string, string)>)row;
             })));
+        if (nullLines.Count > 0)
+            tables.Add(CsiTableText.Table("NULL LINE OBJECT CONNECTIVITY", nullLines.Select(l => (IReadOnlyList<(string, string)>)Row(("Unique Name", l.Name), ("UniquePtI", l.I), ("UniquePtJ", l.J)))));
         if (openings.Count > 0)
             tables.Add(CsiTableText.Table("NULL AREA OBJECT CONNECTIVITY", openings.Select(o =>
             {
@@ -498,6 +506,20 @@ public static class F2kWriter
                 row.Add(("LLRF", N(st.Llrf)));
                 return (IReadOnlyList<(string, string)>)row;
             })));
+
+        // Slab line releases on their null lines, and slab rebar, in the fields "Table and Field Keys.xml" names them
+        // (ETABS 23.2; SAFE shares the tables). ETABS keeps neither in its .e2k: they go in through these tables.
+        if (releases.Count > 0)
+            tables.Add(CsiTableText.Table("AREA ASSIGNMENTS - SLAB LINE RELEASES", releases.Select(x => (IReadOnlyList<(string, string)>)Row(("UniqueName", x.Line!),
+                ("Shear Left", x.R.ShearLeft ? "Yes" : "No"), ("Moment Left", x.R.MomentLeft ? "Yes" : "No"), ("Shear Right", x.R.ShearRight ? "Yes" : "No"), ("Moment Right", x.R.MomentRight ? "Yes" : "No")))));
+        if (rebars.Count > 0)
+        {
+            tables.Add(CsiTableText.Table("SLAB REBAR OBJECT GEOMETRY", rebars.Select(b => (IReadOnlyList<(string, string)>)Row(("Name", b.Name), ("X1", N(b.From[0])), ("Y1", N(b.From[1])),
+                ("X2", N(b.To[0])), ("Y2", N(b.To[1])), ("Vertical Offset", N(b.VerticalOffset)), ("Width Left", N(b.WidthLeft)), ("Width Right", N(b.WidthRight)), ("Layer", b.Layer)))));
+            tables.Add(CsiTableText.Table("SLAB REBAR PROPERTY ASSIGNMENTS", rebars.Select(b => (IReadOnlyList<(string, string)>)(b.TotalBars > 0
+                ? Row(("Name", b.Name), ("Rebar Size", b.BarSize), ("Material", b.Material), ("Bar Number Type", "Total Bars"), ("Total Bars", I(b.TotalBars)))
+                : Row(("Name", b.Name), ("Rebar Size", b.BarSize), ("Material", b.Material), ("Bar Number Type", "Max Spacing"), ("Max Spacing", N(b.MaxSpacing)))))));
+        }
 
         // Punching shear overwrites, with a user perimeter's corners about the point.
         if (punching.Count > 0)

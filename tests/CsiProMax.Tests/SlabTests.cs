@@ -48,6 +48,8 @@ static class SlabTests
                 && double.TryParse(p.Second, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) && Math.Abs(u - v) <= 1e-12 * Math.Max(1, Math.Abs(u))));
     }
 
+    static List<string> Tokens(string line) => E2kText.Tokenize(line);
+
     static bool SameLines(List<string> a, List<string> b) => a.Count == b.Count && a.Zip(b).All(p => SameLine(p.First, p.Second));
 
     static List<string> Headings(string text) => text.Replace("\r", "").Split('\n').Where(l => l.StartsWith("$ ") && !l.StartsWith("$ File")).Select(l => l[2..].Trim()).ToList();
@@ -181,6 +183,69 @@ static class SlabTests
             Check(slab["Overall Depth"] == "16" && slab["Rib Width at Top"] == "6" && slab["Rib Width at Bottom"] == "5" && slab["Rib Spacing 1"] == "36", "the ribs");
             var loss = f["TENDON LOAD ASSIGNMENTS - LOSS OPTIONS"];
             Check(loss.Any(x => x["Loss Method"] == "Detailed" && x["Curvature Coefficient"] == "0.07") && loss.Any(x => x["Loss Method"] == "Percent" && x["Stressing Loss"] == "5"), "detailed and percent losses: " + string.Join(" / ", loss.Select(x => string.Join(",", x.Values))));
+        });
+
+        yield return ("slabs, ETABS 23.2 (the J export, 2026-11-26): a slab line release sits on a null line ETABS writes as LINE ... LINE, has no .e2k keyword of its own, and goes into the .f2k and the program's table; slab rebar too", () =>
+        {
+            var src = Sample("etabs-PT-SL-v23-edited.e2k");
+            var m = E2kReader.Read(src);
+            var l1 = SlabDefs.NullLines(m).Single();
+            Check(l1 is { Name: "L1", Story: "Story1" } && l1.I.SequenceEqual(new[] { 288.0, 0 }) && l1.J.SequenceEqual(new[] { 288.0, 36 }), "ETABS's null line reads");
+            Check(!CsiProMax.Checks.ModelChecks.Run(m).Any(f => f.Object == "L1" || f.Object == "A1"), "check_model takes ETABS's null line and opening as they are");
+            var link = new OfflineEtabs(m);
+            Run(link, "set_slab_line_release", new { name = "L2", story = "Story1", points = new[] { new[] { 96.0, 0 }, new[] { 96.0, 36 } }, shear_left = true, moment_left = true });
+            var text = E2kWriter.Write(m);
+            var line = SectionOf(text, "LINE CONNECTIVITIES").Single(x => x.Contains("\"L2\""));
+            Check(SameLine(line.Replace("\"L2\"", "\"L1\""), SectionOf(src, "LINE CONNECTIVITIES").Single(x => x.Contains("\"L1\"")).Replace("\"15\"", Tokens(line)[3]).Replace("\"16\"", Tokens(line)[4])), "the null line as ETABS 23.2 writes it: " + line);
+            Check(SectionOf(text, "LINE ASSIGNS").Any(x => x.StartsWith("LINEASSIGN  \"L2\"  \"Story1\"") && x.Contains("SECTION  \"NONE\"")), "its assignment, section NONE");
+            Check(!text.Contains("RELEASE", StringComparison.OrdinalIgnoreCase) || SectionOf(src, "LINE ASSIGNS").Any(x => x.Contains("RELEASE")), "no line release keyword is made up: ETABS writes none");
+            var r = SlabDefs.LineReleases(m).Single();
+            Check(r is { Line: "L2", Story: "Story1", ShearLeft: true, MomentLeft: true, ShearRight: false, MomentRight: false }, "the release is kept");
+            var back = CsiProMax.Model.ModelFile.FromJson(CsiProMax.Model.ModelFile.ToJson(m));
+            Check(SlabDefs.LineReleases(back).Single() == r, "and comes back with the Modeler's own file");
+            Refused(link, "set_slab_line_release", new { name = "NOPE" }, "null line");
+            Refused(link, "set_slab_line_release", new { name = "L2", shear_left = false }, "at least one");
+
+            Run(link, "define_material_data", new { name = "Gr60", type = "Rebar", values = new { E = 29000, FY = 60, FU = 90 } });
+            Refused(link, "draw_slab_rebar", new { name = "SR1", story = "Story1", from = new[] { 24.0, 6 }, to = new[] { 360.0, 6 }, width_left = 6, bar_size = "#99", material = "Gr60", total_bars = 4 }, "bar size");
+            Run(link, "draw_slab_rebar", new { name = "SR1", story = "Story1", from = new[] { 24.0, 6 }, to = new[] { 360.0, 6 }, width_left = 6, width_right = 6, vertical_offset = 1.5, layer = "A", bar_size = "#5", material = "Gr60", total_bars = 4 });
+            Refused(link, "draw_slab_rebar", new { name = "SR2", story = "Story1", from = new[] { 24.0, 6 }, to = new[] { 360.0, 6 }, width_left = 6, bar_size = "#5", material = "Gr60" }, "not both");
+            Check(SlabDefs.SlabRebars(back = CsiProMax.Model.ModelFile.FromJson(CsiProMax.Model.ModelFile.ToJson(m))).Single() is { Name: "SR1", TotalBars: 4, BarSize: "#5", VerticalOffset: 1.5 }, "the rebar comes back with the Modeler's own file");
+            Check(E2kWriter.Write(m) == E2kWriter.Write(back), "the .e2k is the same either way");
+
+            // The .f2k: SAFE's tables for the null line, the release and the rebar, in the fields the keys name.
+            var f = CsiProMax.CsiTables.CsiTableText.Parse(CsiProMax.F2k.F2kWriter.Write(m, new CsiProMax.F2k.F2kOptions(Story: "Story1")).Text);
+            var nl = f["NULL LINE OBJECT CONNECTIVITY"];
+            Check(nl.Count == 2, "both null lines");
+            var rel = f["AREA ASSIGNMENTS - SLAB LINE RELEASES"].Single();
+            Check(nl.Any(x => x["Unique Name"] == rel["UniqueName"]) && rel["Shear Left"] == "Yes" && rel["Moment Left"] == "Yes" && rel["Shear Right"] == "No" && rel["Moment Right"] == "No", "the release on its null line");
+            var geo = f["SLAB REBAR OBJECT GEOMETRY"].Single(); var bars = f["SLAB REBAR PROPERTY ASSIGNMENTS"].Single();
+            Check(geo["X1"] == "24" && geo["X2"] == "360" && geo["Vertical Offset"] == "1.5" && geo["Width Left"] == "6" && geo["Layer"] == "A", "the rebar's geometry");
+            Check(bars["Rebar Size"] == "#5" && bars["Material"] == "Gr60" && bars["Bar Number Type"] == "Total Bars" && bars["Total Bars"] == "4", "and its bars");
+            var keys = File.ReadAllLines("/mnt/project-files/field/table-keys/etabs-23.2-field-names.txt") is var lines && lines.Length > 0 ? lines : [];
+            foreach (var (table, fields) in new[] { ("Null Line Object Connectivity", new[] { "Unique Name", "UniquePtI", "UniquePtJ" }), ("Area Assignments - Slab Line Releases", new[] { "UniqueName", "Shear Left", "Moment Left", "Shear Right", "Moment Right" }),
+                         ("Slab Rebar Object Geometry", new[] { "Name", "X1", "Y1", "X2", "Y2", "Vertical Offset", "Width Left", "Width Right", "Layer" }), ("Slab Rebar Property Assignments", new[] { "Name", "Rebar Size", "Material", "Bar Number Type", "Total Bars", "Max Spacing" }) })
+                foreach (var row in f[table.ToUpperInvariant()])
+                    Check(row.Keys.All(fields.Contains), $"'{table}' has only the fields the keys name: {string.Join(", ", row.Keys)}");
+
+            // A run in ETABS or SAFE: the release goes into the program's table on the line found where the Modeler drew it, and the rebar into its two tables.
+            var (live, api, inner) = CsiToolsTests.Model(CsiProgram.Etabs);
+            var z = inner.Stories()[1].Elevation;
+            var mm = new StructuralModel();
+            mm.Stories.AddRange([new Story { Name = "Base" }, new Story { Name = inner.Stories()[1].Name, Height = z }]);
+            var name = inner.AddFrame(3, 0, z, 3, 5, z, "None");
+            SlabDefs.SetNullLine(mm, "N1", mm.Stories[1].Name, [3, 0], [3, 5]);
+            SlabDefs.SetLineRelease(mm, new SlabDefs.LineRelease("N1", "", false, true, false, true));
+            mm.Materials.Add(new Material { Name = "R", Lines = [["TYPE", "\"Rebar\""]] });
+            api.Tables[SlabDefs.LineReleaseTable] = (["UniqueName", "ShearL", "MomentL", "ShearR", "MomentR"], []);
+            api.Tables[SlabDefs.SlabRebarGeometryTable] = (["Name", "Story", "X1", "Y1", "X2", "Y2", "VertOffset", "WidthLeft", "WidthRight", "Layer"], []);
+            api.Tables[SlabDefs.SlabRebarPropertyTable] = (["Name", "RebarSize", "Material", "BarNumType", "TotalBars", "MaxSpacing"], []);
+            SlabDefs.SetSlabRebar(mm, new SlabDefs.SlabRebar("B1", mm.Stories[1].Name, [0, 1], [6, 1], 0.5, 0.5, 0.03, "A", "16", "R", 0, 0.2));
+            var said = SlabTables.PutInto(live, mm);
+            Check(said.Count == 2 && said[0].Contains("went into") && said[1].Contains("went into"), "both go in: " + string.Join(" | ", said));
+            Check(api.Tables[SlabDefs.LineReleaseTable].Rows.Single().SequenceEqual(new[] { name, "No", "Yes", "No", "Yes" }), "the release row names the program's line: " + string.Join(",", api.Tables[SlabDefs.LineReleaseTable].Rows.Single()));
+            Check(api.Tables[SlabDefs.SlabRebarPropertyTable].Rows.Single()[3] == "Max Spacing", "the rebar by its spacing");
+            Check(SlabTables.PutInto(new SafeMemory(inner, program: CsiProgram.Sap2000), mm).Count == 0, "SAP2000 has no slab line releases or slab rebar");
         });
 
         yield return ("slabs: the Modeler draws a two-span tendon with jacking from both ends and percentage losses; the .e2k has it as ETABS writes it, and reads back the same", () =>

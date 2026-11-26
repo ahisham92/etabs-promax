@@ -602,10 +602,20 @@ public static class ModelerFieldSteps
         ctx.Refused("set_punching_overwrite", """{"point":""" + Q(at) + ""","story":""" + Q(slabStory) + ""","reinforcement":{"type":"Stud Rails"}}""", "yield stress", "tool set_punching_overwrite says no to studs with no size");
         ctx.Tool("draw_opening", """{"name":"CPM-OPEN","story":""" + Q(slabStory) + ""","points":[[4,1],[5,1],[5,2],[4,2]]}""", null, "tool draw_opening");
         ctx.Refused("draw_opening", """{"name":"CPM-BADO","story":""" + Q(slabStory) + ""","points":[[4,1],[5,1]]}""", "3 corners", "tool draw_opening says no to two corners");
+        // ETABS 23.2 (Ahmed's PC, the J export): a slab line release has no .e2k keyword, only its table, and ETABS Plus
+        // refuses slab rebar; both are kept in the Modeler's file and written into the .f2k.
+        ctx.Tool("set_slab_line_release", """{"name":"CPM-LR","story":""" + Q(slabStory) + ""","points":[[6,0],[6,5]],"shear_left":true,"moment_left":true}""",
+            a => FieldContext.Expect((string?)a["released"] == "shear left, moment left", "not the release asked for: " + a.ToJsonString()), "tool set_slab_line_release, on a null line it draws");
+        ctx.Refused("set_slab_line_release", """{"name":"CPM-LR2","story":""" + Q(slabStory) + ""","points":[[6,0],[6,5]]}""", "at least one", "tool set_slab_line_release says no to a release of nothing");
+        ctx.Tool("define_material_data", """{"name":"CPM-REBAR","type":"Rebar","values":{"E":200000000,"FY":420000,"FU":620000}}""", null, "tool define_material_data, a rebar material");
+        var bar = CsiProMax.Model.DefineTables.RebarSizes(modeler.Model).Select(x => x.Name).FirstOrDefault() ?? "16";
+        ctx.Tool("draw_slab_rebar", """{"name":"CPM-SR","story":""" + Q(slabStory) + ""","from":[1,1.5],"to":[11,1.5],"width_left":0.5,"width_right":0.5,"vertical_offset":0.03,"layer":"A","bar_size":""" + Q(bar) + ""","material":"CPM-REBAR","total_bars":6}""",
+            a => FieldContext.Expect(((string?)a["bars"])?.StartsWith("6 x", StringComparison.Ordinal) == true, "not 6 bars: " + a.ToJsonString()), "tool draw_slab_rebar, six bars in a band");
+        ctx.Refused("draw_slab_rebar", """{"name":"CPM-SR2","story":""" + Q(slabStory) + ""","from":[1,1.5],"to":[11,1.5],"width_left":0.5,"bar_size":""" + Q(bar) + ""","material":"CPM-REBAR","total_bars":6,"max_spacing":0.2}""", "not both", "tool draw_slab_rebar says no to both a number of bars and a spacing");
         ctx.Tool("extra_definitions", "{}", a =>
         {
             FieldContext.Expect(a["constraints"]!.AsArray().Count == 2 && a["vehicles"]!.AsArray().Count == 2 && a["strips"]!.AsArray().Count == 1 && a["tendons"]!.AsArray().Count == 2 && a["tendons"]![0]!["shape"]!.AsArray().Count > 2
-                && a["punching_overwrites"]!.AsArray().Count == 1 && a["openings"]!.AsArray().Count == 1, "not all listed: " + a.ToJsonString());
+                && a["punching_overwrites"]!.AsArray().Count == 1 && a["openings"]!.AsArray().Count == 1 && a["slab_line_releases"]!.AsArray().Count == 1 && a["slab_rebar"]!.AsArray().Count == 1, "not all listed: " + a.ToJsonString());
             if (joints.Count == 2) FieldContext.Expect(a["constraints"]![0]!["joints"]!.AsArray().Count == 2, "CPM-BODY's joints are not listed");
         });
     }

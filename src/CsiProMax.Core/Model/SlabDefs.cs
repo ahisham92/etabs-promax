@@ -756,4 +756,171 @@ public static class SlabDefs
         if (!had && !quiet) throw new ArgumentException($"There is no opening '{name}'.");
         m.AreaAssigns.RemoveAll(a => a.Label == name && a.Extra.Any(e => Value(e, "OPENING") is not null));
     }
+
+    // ---- null lines, slab line releases and slab rebar ----
+    // Taken from ETABS 23.2 on Ahmed's PC (2026-11-26, the "J" export of PT-SL Ex001): a null line is LINE "L1" LINE
+    // "i" "j" 0 with LINEASSIGN SECTION "NONE"; a slab line release is NOT in the .e2k at all, only in the table "Area
+    // Assignments - Slab Line Releases" (UniqueName of the line, ShearL, MomentL, ShearR, MomentR, Yes or No), with no
+    // API call; ETABS Plus 23.2 refuses every slab rebar object ("Slab Rebar Object Geometry" and "Slab Rebar Property
+    // Assignments" answered 1 with an empty log). So releases and rebar live in the Modeler's own file (.cpm), go into
+    // the .f2k in SAFE's tables, and into a running program through its tables.
+
+    private const string LineConnect = "LINE CONNECTIVITIES";
+
+    /// <summary>A null line (Draw > Draw Null Lines): a line with no section, which a slab line release sits on.</summary>
+    public sealed record NullLine(string Name, string Story, double[] I, double[] J);
+
+    private static IEnumerable<List<string>> NullLineTokens(StructuralModel m) =>
+        (m.UnparsedLines.GetValueOrDefault(LineConnect) ?? []).Select(Tokenize).Where(t => t.Count >= 5 && t[0] == "LINE" && t[2] == "LINE");
+
+    public static List<NullLine> NullLines(StructuralModel m)
+    {
+        var list = new List<NullLine>();
+        foreach (var t in NullLineTokens(m))
+        {
+            var name = Unquote(t[1]);
+            if (m.Point(Unquote(t[3])) is not { } i || m.Point(Unquote(t[4])) is not { } j) continue;
+            foreach (var a in m.LineAssigns.Where(a => a.Label == name))
+                list.Add(new NullLine(name, a.Story, [i.X, i.Y], [j.X, j.Y]));
+        }
+        return list;
+    }
+
+    public static NullLine SetNullLine(StructuralModel m, string name, string story, double[] i, double[] j)
+    {
+        Named(name, "null line");
+        var level = m.StoryIndex(story);
+        if (level <= 0) throw new ArgumentException(level < 0 ? $"There is no story '{story}'." : "A null line for a slab is on the slab's story, not the base.");
+        story = m.Stories[level].Name;
+        if (i.Length < 2 || j.Length < 2 || !double.IsFinite(i[0] + i[1] + j[0] + j[1])) throw new ArgumentException("A null line goes from [x, y] to [x, y].");
+        if (Math.Abs(i[0] - j[0]) + Math.Abs(i[1] - j[1]) < 1e-9) throw new ArgumentException("The null line's two ends are at the same place.");
+        if (m.Lines.Exists(l => l.Label == name)) throw new ArgumentException($"There is already a line '{name}' (a beam, column or brace); give the null line another name.");
+        DeleteNullLine(m, name, quiet: true);
+        var a = m.PointAt(i[0], i[1]).Name; var b = m.PointAt(j[0], j[1]).Name;
+        if (!m.UnparsedLines.TryGetValue(LineConnect, out var lines)) m.UnparsedLines[LineConnect] = lines = [];
+        lines.Add(Line(["LINE", Quote(name), "LINE", Quote(a), Quote(b), "0"]));
+        m.LineAssigns.Add(new LineAssign { Label = name, Story = story, Section = "NONE" });
+        return new NullLine(name, story, [i[0], i[1]], [j[0], j[1]]);
+    }
+
+    public static void DeleteNullLine(StructuralModel m, string name, bool quiet = false)
+    {
+        var had = m.UnparsedLines.TryGetValue(LineConnect, out var lines) && lines.RemoveAll(l => Tokenize(l) is { Count: >= 5 } t && t[0] == "LINE" && t[2] == "LINE" && Unquote(t[1]) == name) > 0;
+        if (!had && !quiet) throw new ArgumentException($"There is no null line '{name}'.");
+        if (had) m.LineAssigns.RemoveAll(a => a.Label == name);
+        DeleteLineRelease(m, name, quiet: true);
+    }
+
+    /// <summary>Which of a slab line release's four actions are released, on the line's left and right.</summary>
+    public sealed record LineRelease(string Line, string Story, bool ShearLeft, bool MomentLeft, bool ShearRight, bool MomentRight);
+
+    /// <summary>The table a running ETABS or SAFE takes slab line releases in (ETABS 23.2's field keys). The Modeler keeps
+    /// the row on the null line's assignment (<see cref="AssignTables"/>), so the .cpm, Excel and the program's tables carry it.</summary>
+    public const string LineReleaseTable = "Area Assignments - Slab Line Releases";
+
+    private static bool Yes(IReadOnlyDictionary<string, string> r, string k) => r.TryGetValue(k, out var v) && v.Equals("Yes", StringComparison.OrdinalIgnoreCase);
+
+    public static List<LineRelease> LineReleases(StructuralModel m) =>
+        m.LineAssigns.Where(a => a.Tables?.ContainsKey(LineReleaseTable) == true).Select(a => AssignTables.Row(a, LineReleaseTable) is var r
+            ? new LineRelease(a.Label, a.Story, Yes(r, "ShearL"), Yes(r, "MomentL"), Yes(r, "ShearR"), Yes(r, "MomentR")) : null!).ToList();
+
+    /// <summary>The row of a release as the program's table takes it.</summary>
+    public static Dictionary<string, string> LineReleaseRow(LineRelease r, string uniqueName) => new(StringComparer.Ordinal)
+    {
+        ["UniqueName"] = uniqueName, ["ShearL"] = YesNo(r.ShearLeft), ["MomentL"] = YesNo(r.MomentLeft), ["ShearR"] = YesNo(r.ShearRight), ["MomentR"] = YesNo(r.MomentRight),
+    };
+
+    private static string YesNo(bool b) => b ? "Yes" : "No";
+
+    public static LineRelease SetLineRelease(StructuralModel m, LineRelease r)
+    {
+        var line = NullLines(m).Find(l => l.Name == r.Line) ?? throw new ArgumentException($"There is no null line '{r.Line}'. A slab line release sits on a null line: draw one first (points from and to).");
+        if (!(r.ShearLeft || r.MomentLeft || r.ShearRight || r.MomentRight)) throw new ArgumentException("Release at least one of shear or moment, on the left or the right.");
+        r = r with { Story = line.Story };
+        var row = LineReleaseRow(r, "");
+        row.Remove("UniqueName");
+        AssignTables.Set(m.LineAssigns.First(a => a.Label == r.Line && a.Story == r.Story), new Dictionary<string, List<Dictionary<string, string>>> { [LineReleaseTable] = [row] });
+        return r;
+    }
+
+    public static void DeleteLineRelease(StructuralModel m, string line, bool quiet = false)
+    {
+        var had = false;
+        foreach (var a in m.LineAssigns.Where(a => a.Label == line && a.Tables?.ContainsKey(LineReleaseTable) == true))
+        {
+            a.Tables!.Remove(LineReleaseTable);
+            if (a.Tables.Count == 0) a.Tables = null;
+            had = true;
+        }
+        if (!had && !quiet) throw new ArgumentException($"There is no slab line release on '{line}'.");
+    }
+
+    private static List<Dictionary<string, string>> KeptRows(StructuralModel m, string key, bool make)
+    {
+        m.Kept ??= new(StringComparer.OrdinalIgnoreCase);
+        if (m.Kept.TryGetValue(key, out var rows)) return rows;
+        rows = [];
+        if (make) m.Kept[key] = rows;
+        return rows;
+    }
+
+    /// <summary>
+    /// A slab rebar object (Draw > Draw Slab Rebar): a band of bars from (X1, Y1) to (X2, Y2) on a story, its widths
+    /// left and right of that line, its depth below the slab top (vertical offset) and its layer, with the bar size,
+    /// rebar material and either a number of bars or a most spacing. As ETABS 23.2's table keys name the fields.
+    /// </summary>
+    public sealed record SlabRebar(string Name, string Story, double[] From, double[] To, double WidthLeft, double WidthRight, double VerticalOffset, string Layer,
+        string BarSize, string Material, int TotalBars, double MaxSpacing);
+
+    public const string SlabRebarKept = "model|SLAB REBAR";
+    public const string SlabRebarGeometryTable = "Slab Rebar Object Geometry";
+    public const string SlabRebarPropertyTable = "Slab Rebar Property Assignments";
+
+    private static double Num(Dictionary<string, string> r, string k) => TryNumber(r.GetValueOrDefault(k), out var d) ? d : 0;
+
+    public static List<SlabRebar> SlabRebars(StructuralModel m) =>
+        KeptRows(m, SlabRebarKept, false).Select(r => new SlabRebar(r.GetValueOrDefault("Name", ""), r.GetValueOrDefault("Story", ""), [Num(r, "X1"), Num(r, "Y1")], [Num(r, "X2"), Num(r, "Y2")],
+            Num(r, "WidthLeft"), Num(r, "WidthRight"), Num(r, "VertOffset"), r.GetValueOrDefault("Layer", ""), r.GetValueOrDefault("RebarSize", ""), r.GetValueOrDefault("Material", ""),
+            (int)Num(r, "TotalBars"), Num(r, "MaxSpacing"))).ToList();
+
+    /// <summary>The two rows of a slab rebar object as the program's tables take them (geometry, then bars), by field key.</summary>
+    public static (Dictionary<string, string> Geometry, Dictionary<string, string> Bars) SlabRebarRows(SlabRebar b) =>
+        (new(StringComparer.Ordinal)
+        {
+            ["Name"] = b.Name, ["Story"] = b.Story, ["X1"] = N(b.From[0]), ["Y1"] = N(b.From[1]), ["X2"] = N(b.To[0]), ["Y2"] = N(b.To[1]),
+            ["VertOffset"] = N(b.VerticalOffset), ["WidthLeft"] = N(b.WidthLeft), ["WidthRight"] = N(b.WidthRight), ["Layer"] = b.Layer,
+        },
+        b.TotalBars > 0
+            ? new(StringComparer.Ordinal) { ["Name"] = b.Name, ["RebarSize"] = b.BarSize, ["Material"] = b.Material, ["BarNumType"] = "Total Bars", ["TotalBars"] = b.TotalBars.ToString(CultureInfo.InvariantCulture) }
+            : new(StringComparer.Ordinal) { ["Name"] = b.Name, ["RebarSize"] = b.BarSize, ["Material"] = b.Material, ["BarNumType"] = "Max Spacing", ["MaxSpacing"] = N(b.MaxSpacing) });
+
+    public static SlabRebar SetSlabRebar(StructuralModel m, SlabRebar b)
+    {
+        Named(b.Name, "slab rebar");
+        var level = m.StoryIndex(b.Story);
+        if (level <= 0) throw new ArgumentException(level < 0 ? $"There is no story '{b.Story}'." : "Slab rebar is in a slab: pick the slab's story, not the base.");
+        b = b with { Story = m.Stories[level].Name };
+        if (b.From.Length < 2 || b.To.Length < 2 || !double.IsFinite(b.From[0] + b.From[1] + b.To[0] + b.To[1]) || Math.Abs(b.From[0] - b.To[0]) + Math.Abs(b.From[1] - b.To[1]) < 1e-9)
+            throw new ArgumentException("Slab rebar goes from [x, y] to another [x, y].");
+        if (!(b.WidthLeft >= 0) || !(b.WidthRight >= 0) || b.WidthLeft + b.WidthRight <= 0) throw new ArgumentException("The band's widths left and right are 0 or more, and not both 0.");
+        if (!(b.VerticalOffset >= 0)) throw new ArgumentException("The vertical offset (the bars' depth below the slab top) is 0 or more.");
+        if (b.BarSize.Length == 0) throw new ArgumentException("Give the bar size (a rebar of Define > Reinforcing Bar Sizes).");
+        if (DefineTables.RebarSizes(m) is { Count: > 0 } sizes && !sizes.Exists(x => x.Name == b.BarSize))
+            throw new ArgumentException($"There is no bar size '{b.BarSize}'. The model's: {string.Join(", ", sizes.Select(x => x.Name))}.");
+        if (!m.Materials.Exists(x => x.Name == b.Material && x.Type.Equals("Rebar", StringComparison.OrdinalIgnoreCase)))
+            throw new ArgumentException($"There is no rebar material '{b.Material}'. The model's: {string.Join(", ", m.Materials.Where(x => x.Type.Equals("Rebar", StringComparison.OrdinalIgnoreCase)).Select(x => x.Name))}.");
+        if ((b.TotalBars > 0) == (b.MaxSpacing > 0)) throw new ArgumentException("Give either the number of bars (total_bars) or their most spacing (max_spacing), not both.");
+        DeleteSlabRebar(m, b.Name, quiet: true);
+        var (g, bars) = SlabRebarRows(b);
+        foreach (var (k, v) in bars) if (k != "Name") g[k] = v;
+        KeptRows(m, SlabRebarKept, true).Add(g);
+        return b;
+    }
+
+    public static void DeleteSlabRebar(StructuralModel m, string name, bool quiet = false)
+    {
+        var rows = KeptRows(m, SlabRebarKept, false);
+        if (rows.RemoveAll(r => r.GetValueOrDefault("Name") == name) == 0 && !quiet) throw new ArgumentException($"There is no slab rebar '{name}'.");
+        if (rows.Count == 0) m.Kept?.Remove(SlabRebarKept);
+    }
 }

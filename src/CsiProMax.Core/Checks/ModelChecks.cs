@@ -77,8 +77,11 @@ public static class ModelChecks
             foreach (var p in a.PointNames.Where(p => !points.Contains(p)).Distinct())
                 f.Add(new(Severity.Error, "references", $"Area '{a.Label}' uses point '{p}', which does not exist.", a.Label));
 
+        // A null line (Draw Null Lines) is a LINE-type object ETABS keeps apart from frames, with section NONE.
+        var nullLines = SlabDefs.NullLines(m).Select(l => l.Name).ToHashSet(StringComparer.Ordinal);
         foreach (var a in m.LineAssigns)
         {
+            if (nullLines.Contains(a.Label)) continue;
             if (!lines.Contains(a.Label)) f.Add(new(Severity.Error, "references", $"An assignment names line '{a.Label}', which does not exist.", a.Label, a.Story));
             if (!Story(a.Story)) f.Add(new(Severity.Error, "references", $"Line '{a.Label}' is assigned to story '{a.Story}', which does not exist.", a.Label, a.Story));
             if (a.Section is null) f.Add(new(Severity.Error, "sections", $"Line '{a.Label}' has no section on '{a.Story}'.", a.Label, a.Story));

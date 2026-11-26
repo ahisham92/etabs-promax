@@ -231,8 +231,13 @@ back word for word. What only a licensed program can confirm:
      follows the keys. If SAFE shows fy 0.012 and diameter 420000, the two names go the other way.
    - An .f2k rebuilt in SAFE 23.1 through the API (the empty-open fallback) leaves openings and punching
      overwrites out and says so in its notes.
-15. **Slab line releases and slab rebar.** ETABS 23.2 wrote no line release keyword in its .e2k (the line stayed a
-   null line), and refused the slab rebar object on that PC, perhaps because of a licence level. So neither is in the
-   .e2k the Modeler writes yet. In a running program they go in through edit_table on "Area Assignments - Slab Line
-   Releases", "Slab Rebar Object Geometry" and "Slab Rebar Property Assignments". The field test's reference data
-   asks for an export of a scratch model that has both, so the .e2k syntax can follow.
+15. **Slab line releases and slab rebar.** ETABS 23.2's J export (Ahmed's PC, 2026-11-26) showed that a slab line
+   release is not in the .e2k at all. It exists only in the table "Area Assignments - Slab Line Releases": UniqueName
+   (the null line), ShearL, MomentL, ShearR and MomentR, each Yes or No, and the API has no call for it. ETABS Plus
+   23.2 refused every slab rebar object: both tables answered 1 with an empty log and no licence box. The Modeler
+   draws the null line as ETABS writes it (LINE ... LINE, SECTION "NONE") and keeps the release on the line's
+   assignment, the same way it keeps the other rows the .e2k has no keyword for. Slab rebar is kept in its own file.
+   Both go into the .f2k in SAFE's tables. When CSI ProMax opens the Modeler's .e2k in ETABS, or runs the model there,
+   they go in through the program's tables, with the release on the line found where the Modeler drew it. Still to
+   confirm: that ETABS takes a release row put in on a null line it just opened, and that SAFE and ETABS Ultimate
+   take slab rebar from these tables.
