@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using CsiProMax.Assistant;
 using CsiProMax.Assistant.Etabs;
 using CsiProMax.Assistant.Tools;
 using CsiProMax.CsiTables;
@@ -151,6 +152,36 @@ static class ExtrasTests
             Refused(link, "define_strip", new { name = "X", points = new[] { new[] { 0.0, 0.0 }, new[] { 1.0, 0.0 } } }, "a width");
         });
 
+        yield return ("extras: the Modeler gives its loads as the programs' load tables, so Properties and the information window show them (Ahmed 2026-11-26)", () =>
+        {
+            var link = Frame();
+            var frame = link.Frames().First().Name;
+            link.SetFrameLoad(frame, "Dead", 5, false);
+            var point = link.Points().First();
+            var (label, story) = (point.Name.Split('@')[0], point.Name.Split('@')[1]);
+            link.Model.PointLoads.Add(new PointLoad { Object = label, Story = story, Tokens = ["TYPE", "\"FORCE\"", "LC", "\"Dead\"", "FZ", "-80"] });
+            var names = link.Tables();
+            foreach (var t in new[] { "Frame Loads - Distributed", "Joint Loads - Force" })
+                Check(names.Any(n => n.Name == t && !n.Empty), t + " is listed with rows: " + string.Join(", ", names.Select(n => n.Name)));
+            var dist = link.ReadTable("Frame Loads - Distributed", null, null);
+            int U(string f) => Array.IndexOf(dist.Fields.ToArray(), f);
+            Check(dist.Rows.Any(r => r[U("UniqueName")] == frame && r[U("LoadPattern")] == "Dead" && r[U("FOverLA")] == "5" && r[U("Direction")] == "Gravity"), "the frame's load is a row named as the Modeler names the frame");
+            var joint = link.ReadTable("Joint Loads - Force", null, null);
+            Check(joint.Rows.Any(r => r[Array.IndexOf(joint.Fields.ToArray(), "UniqueName")] == point.Name && r[Array.IndexOf(joint.Fields.ToArray(), "FZ")] == "-80"), "the joint load is a row named as the Modeler names the joint");
+            var tables = (JsonObject)Pack.Build(link, ["Grid Definitions", .. OfflineEtabs.LoadTables], [], [], null, null).Content["tables"]!;
+            Check(tables.ContainsKey("Frame Loads - Distributed") && tables.ContainsKey("Joint Loads - Force"), "the Modeler page's pack carries them: " + string.Join(", ", tables.Select(t => t.Key)));
+            foreach (var file in new[] { "src/CsiProMax.Assistant/Panel/Host/ModelView.cs", "src/CsiProMax.Assistant/Field/ModelerCheck.cs" })
+                Check(File.ReadAllText(Path.Combine(SourceText.Root(), file)).Contains(".. OfflineEtabs.LoadTables]"), file + " does not give the Modeler page its load tables");
+        });
+        yield return ("extras: the Viewer and Modeler select joints and supports, open information on a right click, and filter the selection (Ahmed 2026-11-26)", () =>
+        {
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var part in new[] { "function jointsIn(p)", "function jointAt(p, x, y, r)", "function jointInfo(name)", "function rightClick(p, x, y, shift, cx, cy)", "function selFilter()", "function loadRowsOf(o)", "gotJ.forEach(n => selJ.add(n))", "data-page=\"lds\">Loads (", "[\"filter\", \"Filter the selection" })
+                Check(html.Contains(part), "viewer.html lost " + part);
+            var check = ViewerCheck.Script;
+            foreach (var step in new[] { "selection: a left-to-right window round a support selects the support joint", "selection: right click on an object opens its information, with a Loads tab holding its loads", "selection: the Filter keeps only the checked kinds of the selection" })
+                Check(check.Contains(step), "the field test lost the step " + step);
+        });
         yield return ("extras: Edit > Model Text keeps them, and Undo in the Modeler window takes one back", () =>
         {
             var link = Frame();

@@ -21,7 +21,7 @@ public static class ModelerCheck
     /// <summary>The scratch model: two bays, one way, two stories, built by the Modeler's own template.</summary>
     public static StructuralModel Scratch() => Templates.ConcreteFrame("CPM Modeler window check", [6, 6], [5], 2, 3.0);
 
-    private static readonly string[] ModelerTables = ["Grid Definitions", "Frame Assignments - Section Properties", "Area Assignments - Section Properties", "Model Checks", "Quantities"];
+    private static readonly string[] ModelerTables = ["Grid Definitions", "Frame Assignments - Section Properties", "Area Assignments - Section Properties", "Model Checks", "Quantities", .. OfflineEtabs.LoadTables];
 
     public const string Script = """
     (function () {

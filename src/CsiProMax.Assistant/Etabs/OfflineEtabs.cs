@@ -301,7 +301,49 @@ public sealed class OfflineEtabs : ICsiLink, CsiProMax.Assistant.Tools.IModelDra
         new("Area Assignments - Section Properties", "Area Assignments - Section Properties", Model.AreaAssigns.Count == 0),
         new("Model Checks", "Model Checks", false),
         new("Quantities", "Quantities", Model.LineAssigns.Count + Model.AreaAssigns.Count == 0),
+        .. LoadTables.Select(t => new TableName(t, t, LoadRows(t).Count == 0)),
     ];
+
+    // ---- the loads, as the programs' own load assignment tables, so the Modeler's windows show them like the
+    // Viewer's (Ahmed 2026-11-26: "the loads are still not seen in properties or assignments") ----
+
+    /// <summary>The load assignment tables the Modeler gives, in ETABS's names and fields.</summary>
+    public static readonly string[] LoadTables =
+        ["Frame Loads - Distributed", "Frame Loads - Point", "Frame Loads - Temperature", "Shell Loads - Uniform", "Shell Loads - Temperature", "Joint Loads - Force", "Joint Loads - Temperature"];
+
+    private static readonly Dictionary<string, string[]> LoadFields = new()
+    {
+        ["Frame Loads - Distributed"] = ["Story", "Label", "UniqueName", "LoadPattern", "LoadType", "Direction", "DistType", "RelDistA", "RelDistB", "FOverLA", "FOverLB"],
+        ["Frame Loads - Point"] = ["Story", "Label", "UniqueName", "LoadPattern", "LoadType", "Direction", "RelDist", "Force"],
+        ["Frame Loads - Temperature"] = ["Story", "Label", "UniqueName", "LoadPattern", "Type", "Temperature", "TempGradient"],
+        ["Shell Loads - Uniform"] = ["Story", "Label", "UniqueName", "LoadPattern", "Direction", "Load"],
+        ["Shell Loads - Temperature"] = ["Story", "Label", "UniqueName", "LoadPattern", "Type", "Temperature", "TempGradient"],
+        ["Joint Loads - Force"] = ["Story", "Label", "UniqueName", "LoadPattern", "FX", "FY", "FZ", "MX", "MY", "MZ"],
+        ["Joint Loads - Temperature"] = ["Story", "Label", "UniqueName", "LoadPattern", "Temperature"],
+    };
+
+    private List<string[]> LoadRows(string table)
+    {
+        static string T(ObjectLoad l, string key) => E2kText.Unquote(E2kText.Value(l.Tokens, key) ?? "");
+        static string V(ObjectLoad l, string key, string fallback = "0") => E2kText.Value(l.Tokens, key) is { } v ? E2kText.Unquote(v) : fallback;
+        static string Dir(ObjectLoad l) => T(l, "DIR") switch { "" or "GRAV" => "Gravity", var d => d };
+        static string[] Who(ObjectLoad l) => [l.Story, l.Object, Name(l.Object, l.Story), l.Pattern];
+        bool Is(ObjectLoad l, params string[] types) => types.Contains(T(l, "TYPE").ToUpperInvariant());
+        static string[] Row(ObjectLoad l, params string[] rest) => [.. Who(l), .. rest];
+        return table switch
+        {
+            "Frame Loads - Distributed" => Model.LineLoads.Where(l => Is(l, "UNIFF", "TRAPF")).Select(l => Is(l, "UNIFF")
+                ? Row(l, "Force", Dir(l), "RelDist", "0", "1", V(l, "FVAL"), V(l, "FVAL"))
+                : Row(l, "Force", Dir(l), "RelDist", V(l, "RDSTART"), V(l, "RDEND", "1"), V(l, "FSTART"), V(l, "FEND"))).ToList(),
+            "Frame Loads - Point" => Model.LineLoads.Where(l => Is(l, "POINTF", "POINTM")).Select(l => Row(l, Is(l, "POINTM") ? "Moment" : "Force", Dir(l), V(l, "RDIST", "0.5"), V(l, "FVAL"))).ToList(),
+            "Frame Loads - Temperature" => Model.LineLoads.Where(l => Is(l, "TEMP")).Select(l => Row(l, "Temperature", V(l, "TEMP"), V(l, "TEMPGRAD", ""))).ToList(),
+            "Shell Loads - Uniform" => Model.AreaLoads.Where(l => Is(l, "UNIFF")).Select(l => Row(l, Dir(l), V(l, "FVAL"))).ToList(),
+            "Shell Loads - Temperature" => Model.AreaLoads.Where(l => Is(l, "TEMP")).Select(l => Row(l, "Temperature", V(l, "TEMP"), V(l, "TEMPGRAD", ""))).ToList(),
+            "Joint Loads - Force" => Model.PointLoads.Where(l => T(l, "TYPE") is "" || Is(l, "FORCE")).Select(l => Row(l, V(l, "FX"), V(l, "FY"), V(l, "FZ"), V(l, "MX"), V(l, "MY"), V(l, "MZ"))).ToList(),
+            "Joint Loads - Temperature" => Model.PointLoads.Where(l => Is(l, "TEMP")).Select(l => Row(l, V(l, "TEMP"))).ToList(),
+            _ => [],
+        };
+    }
 
     public TableData ReadTable(string key, IReadOnlyList<string>? cases, IReadOnlyList<string>? combos) => key switch
     {
@@ -315,6 +357,7 @@ public sealed class OfflineEtabs : ICsiLink, CsiProMax.Assistant.Tools.IModelDra
             ModelChecks.Run(Model).Select(f => new[] { f.Severity.ToString(), f.Check, f.Message, f.Object ?? "", f.Story ?? "" }).ToList()),
         "Quantities" => new(["Kind", "Section", "Material", "Count", "Length", "Area", "Volume"],
             Quantities.Run(Model).Select(q => new[] { q.Kind, q.Section, q.Material, q.Count.ToString(CultureInfo.InvariantCulture), N(q.Length), N(q.Area), q.Volume is { } v ? N(v) : "" }).ToList()),
+        _ when LoadFields.TryGetValue(key, out var fields) => new(fields, LoadRows(key)),
         _ => throw new EtabsException("The Modeler has no such table. Result tables exist only in ETABS after its analysis. " + NoAnalysis),
     };
 
