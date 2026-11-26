@@ -693,6 +693,24 @@ static class TesterBugTests
             var notices = scratch[scratch.IndexOf("public static List<string> CloseNotices", StringComparison.Ordinal)..scratch.IndexOf("public static bool IsStoryPicker", StringComparison.Ordinal)];
             Check(notices.Contains("IsStoryPicker(title)", StringComparison.Ordinal) && notices.IndexOf("\"Select All\"", StringComparison.Ordinal) is var all and > 0 && all < notices.LastIndexOf("PostMessageW(go", StringComparison.Ordinal) && !notices.Contains("0x0010", StringComparison.Ordinal), "all stories are picked before OK, and the window is never closed");
         });
+        yield return ("SAP2000 26 field test: the import log of the scratch .s2k is answered by the test (its errors read, Done), nothing else is", () =>
+        {
+            // Seen on Ahmed's PC on 2026-11-26: the 0.4.36 run opened cpm-field-test.s2k, SAP2000 showed
+            // "Access Database Import Log" (1 error, 13 warnings, Done) and the open waited all night for a person.
+            Check(ScratchDialogs.IsImportLog("Access Database Import Log") && ScratchDialogs.IsImportLog(" Access Database Import Log "), "the import log is not known");
+            foreach (var other in new[] { "License Message", "Licence Import Log", "Analysis Complete", "Select Stories for Slab Design", "Import", "SAP2000 26.3.0 Ultimate - (Untitled)", "" })
+                Check(!ScratchDialogs.IsImportLog(other), $"'{other}' is taken for the import log");
+            var errors = ScratchDialogs.ImportErrors(["Number of errors = 1\nNumber of warnings = 13", "Error\n1 errors\nImport Control for Errors", "ERROR: Frame section \"FSEC1\" not found, line 212\nWARNING: default material used"]);
+            Equal(1, errors.Count, "error lines of the log: " + string.Join(" | ", errors));
+            Check(errors[0].Contains("FSEC1", StringComparison.Ordinal), "the error line is not kept whole");
+            Check(SandboxedLeftCopy(), "a left copy showing only its import log is not known as the test's own");
+            var scratch = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));
+            var notices = scratch[scratch.IndexOf("public static List<string> CloseNotices", StringComparison.Ordinal)..scratch.IndexOf("public static bool IsStoryPicker", StringComparison.Ordinal)];
+            var log = notices[notices.IndexOf("IsImportLog(title)", StringComparison.Ordinal)..];
+            Check(log.Contains("Button(window, \"Done\")", StringComparison.Ordinal) && log.Contains("IsWindowEnabled(done)", StringComparison.Ordinal) && log.Contains("PostMessageW(done, 0x00F5 /* BM_CLICK */", StringComparison.Ordinal)
+                && log.IndexOf("ImportErrors(", StringComparison.Ordinal) < log.IndexOf("PostMessageW(done", StringComparison.Ordinal) && !notices.Contains("0x0010", StringComparison.Ordinal), "the log is answered by its Done button after its errors are read, and never closed");
+            static bool SandboxedLeftCopy() => ScratchProgram.IsLeftCopy(["SAP2000 - cpm-field-test-ab12cd", "Access Database Import Log"]);
+        });
         yield return ("ETABS 23 field test: a check whose table has no rows for the scratch model is not tested; a table that cannot be read still fails", () =>
         {
             // Seen on 2026-11-25 with 0.4.11: "1 of 5 checks had nothing to read. check_story_irregularity: no reason given".
