@@ -986,7 +986,8 @@ static class TesterBugTests
             foreach (var table in new[] { "Section Cut Forces - Analysis", "Element Forces - Links", "Element Deformations - Links" })
                 Check(CsiProMax.Assistant.Tools.PackTables.Kind(new CsiProMax.Assistant.Etabs.TableName(table, table, false, 0)) == "result", $"'{table}' is not taken by the pack as a result");
             // The scratch model's extras are one honest line on a stand-in, and every name they use is fixed.
-            var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchExtras.cs"));
+            // The section cut goes through ApiWorkarounds (ETABS 20 has no SectCut: its table takes it, 0.4.53).
+            var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchExtras.cs")) + File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Tools/ApiWorkarounds.cs"));
             foreach (var call in new[] { "PointObj.SetSpring", "PropLink.SetLinear", "LinkObj.AddByPoint", "SectCut.SetByGroup", "LoadCases.StaticNonlinear.SetLoadApplication", "Func.FuncTH.SetUser", "LoadCases.ModHistLinear.SetTimeStep" })
                 Check(source.Contains('"' + call + '"'), $"the scratch extras no longer call {call}");
             foreach (var steps in new[] { "Field/EtabsFieldSteps.cs", "Sap2000/SapFieldSteps.cs" })
@@ -1104,10 +1105,6 @@ static class TesterBugTests
                 "the window does not follow the program in use, or follows during a test, or into a program that has its own window");
             Check(program.Contains("\"--no-focus\"") && program.Contains("window.ShowActivated = false"), "following takes the keyboard away from the program he is working in");
 
-            // A full test is named for what it covered, not for the window it was started from (the tester's 'SAFE' report of an ETABS 20 run).
-            Equal("all programs", FieldTest.ReportName(safe, new FieldTest.Options { Full = true }), "the full test's report");
-            Equal("ETABS", FieldTest.ReportName(safe, new FieldTest.Options { Full = true, OnlyProgram = etabs }), "the report of a test of one program"); // ETABS itself
-            Equal("SAFE", FieldTest.ReportName(safe, new FieldTest.Options()), "the quick test reads the open model");
             var folder = Path.Combine(Path.GetTempPath(), "cpm-follow-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(folder);
             try

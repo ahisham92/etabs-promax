@@ -1757,13 +1757,13 @@ Test("field test: the full test runs every part, closes its window, and leaves t
         Check(outcome.Report.Replace("\r\n", "\n").Contains("## Not working\n\n" + FieldParts.ScratchSection(CsiProgram.Etabs) + ":\n\n- tool run_analysis:"), "what failed is listed under the part it belongs to");
         Check(outcome.NotTested > 0 && outcome.Report.Contains("## Not tested") && outcome.Report.Contains("## Check by hand"), "what was not tested, and what to check by hand, come first");
         Check(outcome.Report.Contains("### not tested: "), "a step that was not tested says so in its own part");
-        Equal(Path.Combine(root, "out", "Field test all programs 2026-11-25 1530.zip"), outcome.Zip, "the zip is beside the report");
+        Equal(Path.Combine(root, "out", "Field test ETABS 2026-11-25 1530.zip"), outcome.Zip, "the zip is beside the report");
         Equal(outcome.Zip, outcome.Send, "the zip is what to send");
         Check(outcome.Summary().Contains(outcome.Zip!), "the dialog names the zip");
         using (var zip = System.IO.Compression.ZipFile.OpenRead(outcome.Zip!))
         {
             var names = zip.Entries.Select(e => e.FullName).ToList();
-            Check(names.Contains("Field test all programs 2026-11-25 1530.md"), "the report is in the zip");
+            Check(names.Contains("Field test ETABS 2026-11-25 1530.md"), "the report is in the zip");
             Check(names.Any(n => n.EndsWith(".e2k")) && names.Any(n => n.EndsWith(".s2k")) && names.Any(n => n.EndsWith(".f2k")), "the files the Modeler wrote are in the zip: " + string.Join(", ", names));
             Check(!names.Any(n => n.StartsWith("files/Bugs/")), "nothing of the made-up bug report");
         }

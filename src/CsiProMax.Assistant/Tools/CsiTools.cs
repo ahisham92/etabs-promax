@@ -1200,11 +1200,11 @@ public static class CsiTools
         var max = Math.Max(1, a.Whole("max_modes", 12));
         var min = Math.Clamp(a.Whole("min_modes", 1), 1, max);
         Call(e, $"set the modal case {name}", $"LoadCases.{api}.SetCase", D(("Name", name)));
-        Call(e, $"set the modes of {name}", $"LoadCases.{api}.SetNumberModes", D(("Name", name), ("MaxModes", max), ("MinModes", min)));
+        var how = ApiWorkarounds.SetNumberModes(e, api, name, max, min);
         var back = Try(e, $"read the modes of {name}", $"LoadCases.{api}.GetNumberModes", D(("Name", name)));
         return new JsonObject
         {
-            ["case"] = name, ["type"] = api == "ModalRitz" ? "ritz" : "eigen",
+            ["case"] = name, ["type"] = api == "ModalRitz" ? "ritz" : "eigen", ["set"] = how,
             ["max_modes"] = back is null ? max : (int)ApiCall.Number(back, "MaxModes"), ["min_modes"] = back is null ? min : (int)ApiCall.Number(back, "MinModes"),
         };
     }

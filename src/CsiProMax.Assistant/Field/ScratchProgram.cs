@@ -318,8 +318,20 @@ public sealed class ScratchProgram : IScratchWindow
     private readonly List<string> _noticesClosed = [];
 
     /// <summary>The titles of the windows the scratch program has open now, each with whether it can be clicked and whether it answers.</summary>
+    /// A window other than the program's main one also gives its words (what a message box says), so a box that held the
+    /// scratch window (ETABS 20 opening a checkpoint, 0.4.53) can be answered by the test next time.
     public IReadOnlyList<string> OpenWindows() =>
-        ScratchDialogs.Of(ProcessId).Select(w => w.Title + ScratchDialogs.State(w.Window)).ToList();
+        ScratchDialogs.Of(ProcessId).Select(w => w.Title + ScratchDialogs.State(w.Window) + Said(w.Window)).ToList();
+
+    private static string Said(IntPtr window)
+    {
+        try
+        {
+            var words = string.Join(" / ", ScratchDialogs.Words(window).Where(x => x.Trim().Length > 0).Take(8));
+            return words.Length == 0 ? "" : " saying: " + (words.Length > 300 ? words[..300] + "..." : words);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return ""; }
+    }
 
     public ICsiLink Link { get; private set; } = null!;
 

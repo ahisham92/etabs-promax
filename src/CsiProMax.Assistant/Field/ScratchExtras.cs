@@ -62,8 +62,8 @@ public static class ScratchExtras
             Must(link, "make a group", "GroupDef.SetGroup", ("Name", Group));
             foreach (var column in columns)
                 Must(link, "put a column in the group", "FrameObj.SetGroupAssign", ("Name", column), ("GroupName", Group), ("Remove", false), ("ItemType", 0));
-            Must(link, "define a section cut by the group", "SectCut.SetByGroup", ("Name", SectionCut), ("GroupName", Group), ("MyType", 1));
-            return $"{SectionCut} by group {Group}";
+            var how = ApiWorkarounds.SectionCutByGroup(link, SectionCut, Group);
+            return $"{SectionCut} by group {Group}, {how}";
         });
         if (isEtabs)
         {
@@ -131,7 +131,7 @@ public static class ScratchExtras
                     if (!modal)
                     {
                         Must(link, "add a modal case for the history case", "LoadCases.ModalEigen.SetCase", ("Name", ModalForHistory));
-                        Must(link, "give the modal case its modes", "LoadCases.ModalEigen.SetNumberModes", ("Name", ModalForHistory), ("MaxModes", 6), ("MinModes", 1));
+                        ApiWorkarounds.SetNumberModes(link, "ModalEigen", ModalForHistory, 6, 1);
                     }
                     Must(link, "define a time history function", "Func.FuncTH.SetUser", ("Name", Function), ("NumberItems", 5), ("MyTime", new[] { 0.0, 0.1, 0.2, 0.3, 0.4 }), ("Value", new[] { 0.0, 1.0, 0.0, -1.0, 0.0 }));
                     Must(link, "add a linear modal history case", "LoadCases.ModHistLinear.SetCase", ("Name", History));
