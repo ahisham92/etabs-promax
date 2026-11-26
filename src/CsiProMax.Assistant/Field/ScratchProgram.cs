@@ -523,6 +523,14 @@ public sealed class ScratchProgram : IScratchWindow
         {
             var answer = Convert.ToInt32(Ask(FileTimeout, "open the file", m => m.File.OpenFile(Path.GetFullPath(modelFile)),
                 $"{name} did not finish opening the file within {FileTimeout.TotalMinutes:0} minutes. A message may be waiting in its window."));
+            // The .sdb the first SAP2000 saved from the Modeler's .s2k may still be held for a moment after that SAP2000
+            // closed (0.4.57 candidate run, 2026-11-26: answer 1 once, the run before took it): it is tried again.
+            for (var again = 0; answer != 0 && again < 3 && string.Equals(Path.GetExtension(modelFile), ModelExtension(_program), StringComparison.OrdinalIgnoreCase); again++)
+            {
+                Thread.Sleep(TimeSpan.FromSeconds(5));
+                answer = Convert.ToInt32(Ask(FileTimeout, "open the file", m => m.File.OpenFile(Path.GetFullPath(modelFile)),
+                    $"{name} did not finish opening the file within {FileTimeout.TotalMinutes:0} minutes. A message may be waiting in its window."));
+            }
             string[] refused;
             lock (_noticesClosed) refused = _noticesClosed.Where(n => ScratchDialogs.IsFileRefused(n)).ToArray();
             if (answer != 0 || refused.Length > 0)
