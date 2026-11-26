@@ -138,7 +138,13 @@ public static class CsiFieldSteps
                     var wrong = new List<string>();
                     foreach (var (table, rows) in tables)
                     {
-                        if (!known.TryGetValue(table.ToUpperInvariant(), out var key)) { wrong.Add($"no table '{table}'"); continue; }
+                        if (!known.TryGetValue(table.ToUpperInvariant(), out var key))
+                        {
+                            // The program's own tables that share the first word, so the right name can be put in.
+                            var word = table.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0];
+                            wrong.Add($"no table '{table}' (its tables starting '{word}': {string.Join(", ", known.Keys.Where(k => k.StartsWith(word, StringComparison.OrdinalIgnoreCase)).Take(40))})");
+                            continue;
+                        }
                         var fields = (string[])link.Raw($"read the fields of {table}", m =>
                         {
                             int version = 0, n = 0; string[] keys = [], names = [], about = [], units = []; bool[] importable = [];

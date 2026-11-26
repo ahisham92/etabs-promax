@@ -203,7 +203,7 @@ public static class S2kWriter
             {
                 if (concreteBeam && h.Dof is "M3" or "M2")
                     hingeRows.Add(Row(("Frame", name), ("CompType", "Primary"), ("DOF", h.Dof), ("VFrom", "User"), ("VUser", "0"), ("Conforming", "Yes"), ("RatioFrom", "Design"), ("RatioUser", "0"),
-                        ("BeyondE", "Zero"), ("SaveFibResp", "No"), ("DistType", "RelDist"), ("RelDist", N(h.At)), ("AbsDist", "0"), ("LenOWType", "None"), ("LenOWRel", "0"), ("LenOWAbs", "0")));
+                        ("SaveFibResp", "No"), ("DistType", "RelDist"), ("RelDist", N(h.At)), ("AbsDist", "0"), ("LenOWType", "None"), ("LenOWRel", "0"), ("LenOWAbs", "0")));
                 else notes.Add($"Frame {name} has an auto {h.Dof} hinge at {N(h.At)}: assign it in SAP2000 (Assign > Frame > Hinges); only concrete beams' M2 and M3 hinges go across by the file so far.");
             }
         }
@@ -300,7 +300,7 @@ public static class S2kWriter
         // Groups, one per story, and the model's own.
         if (groups.Count > 0)
         {
-            Add(tables, "GROUPS 1 - DEFINITIONS", groups.Keys.Select(name => Row(("GroupName", name), ("Selection", "Yes"),
+            Add(tables, "GROUPS 1 - DEFINITIONS", groups.Keys.Select(name => Row(("GroupName", name), ("Selection", "Yes"), ("Color", "Yellow"),
                 ("SectionCut", "Yes"), ("Steel", "Yes"), ("Concrete", "Yes"), ("Aluminum", "Yes"), ("ColdFormed", "Yes"), ("Stage", "Yes"), ("Bridge", "Yes"),
                 ("AutoSeismic", "No"), ("AutoWind", "No"), ("SelDesSteel", "No"), ("SelDesAlum", "No"), ("SelDesCold", "No"), ("MassWeight", "Yes"))));
             Add(tables, "GROUPS 2 - ASSIGNMENTS", groups.SelectMany(g => g.Value.Distinct().Select(o => Row(("GroupName", g.Key), ("ObjectType", o.Type), ("ObjectLabel", o.Label)))));
@@ -337,8 +337,8 @@ public static class S2kWriter
                     continue;
                 }
                 case "TEMP":
-                    frameTemps.Add(Row(("Frame", frame), ("LoadPat", load.Pattern), ("Type", "Temperature"), ("Value", N(T("TEMP")))));
-                    if (T("TEMPGRAD") != 0) frameTemps.Add(Row(("Frame", frame), ("LoadPat", load.Pattern), ("Type", "Gradient2"), ("Value", N(T("TEMPGRAD")))));
+                    frameTemps.Add(Row(("Frame", frame), ("LoadPat", load.Pattern), ("Type", "Temperature"), ("Temp", N(T("TEMP")))));
+                    if (T("TEMPGRAD") != 0) frameTemps.Add(Row(("Frame", frame), ("LoadPat", load.Pattern), ("Type", "Gradient2"), ("Temp", N(T("TEMPGRAD")))));
                     continue;
                 case "STRAIN":
                     frameStrains.Add(Row(("Frame", frame), ("LoadPat", load.Pattern), ("Component", "Strain" + (E2kText.Value(load.Tokens, "COMPONENT") ?? "11")), ("Value", N(T("STRAIN")))));
@@ -365,8 +365,8 @@ public static class S2kWriter
             double T(string key) => E2kText.TryNumber(E2kText.Value(load.Tokens, key), out var v) ? v : 0;
             if (type.Equals("TEMP", StringComparison.OrdinalIgnoreCase))
             {
-                areaTemps.Add(Row(("Area", area), ("LoadPat", load.Pattern), ("Type", "Temperature"), ("Value", N(T("TEMP")))));
-                if (T("TEMPGRAD") != 0) areaTemps.Add(Row(("Area", area), ("LoadPat", load.Pattern), ("Type", "Gradient3"), ("Value", N(T("TEMPGRAD")))));
+                areaTemps.Add(Row(("Area", area), ("LoadPat", load.Pattern), ("Type", "Temperature"), ("Temp", N(T("TEMP")))));
+                if (T("TEMPGRAD") != 0) areaTemps.Add(Row(("Area", area), ("LoadPat", load.Pattern), ("Type", "Gradient3"), ("Temp", N(T("TEMPGRAD")))));
                 continue;
             }
             if (type.Equals("STRAIN", StringComparison.OrdinalIgnoreCase))
@@ -477,7 +477,7 @@ public static class S2kWriter
             var isBeam = m.Passthrough.Find(r => r.Heading == "CONCRETE SECTIONS")?.Lines.Any(l => l.Contains(E2kText.Quote(s.Name)) && l.Contains("\"Beam\"")) ?? false;
             shapes[s.Name] = name;
             rows.Add(Row(("SectionName", s.Name), ("Material", s.Material), ("Shape", name), ("t3", N(d)), ("t2", N(name == "Circle" || name == "Pipe" ? 0 : b)),
-                ("tf", N(name is "I/Wide Flange" or "Box/Tube" ? tf : name == "Pipe" ? tw : 0)), ("tw", N(name is "I/Wide Flange" or "Box/Tube" ? tw : 0)),
+                ("tf", N(name is "I/Wide Flange" or "Box/Tube" or "Pipe" ? (name == "Pipe" ? tw : tf) : 0)), ("tw", N(name is "I/Wide Flange" or "Box/Tube" or "Pipe" ? tw : 0)),
                 ("t2b", N(name == "I/Wide Flange" ? bb : 0)), ("tfb", N(name == "I/Wide Flange" ? tfb : 0)),
                 ("Area", N(p.Value.A)), ("TorsConst", N(p.Value.J)), ("I33", N(p.Value.I33)), ("I22", N(p.Value.I22)), ("I23", "0"),
                 ("AS2", N(p.Value.As2)), ("AS3", N(p.Value.As3)), ("S33", N(p.Value.S33)), ("S22", N(p.Value.S22)), ("Z33", N(p.Value.Z33)), ("Z22", N(p.Value.Z22)),
@@ -496,7 +496,11 @@ public static class S2kWriter
         };
         Add(tables, "LINK PROPERTY DEFINITIONS 01 - GENERAL", links.Select(l => Row(("Link", l.Name), ("LinkType", LinkType(l.Type)), ("Mass", "0"), ("Weight", "0"),
             ("RotInert1", "0"), ("RotInert2", "0"), ("RotInert3", "0"), ("DefLength", "1"), ("DefArea", "1"), ("PDM2I", "0"), ("PDM2J", "0"), ("PDM3I", "0"), ("PDM3J", "0"))));
-        Add(tables, "LINK PROPERTY DEFINITIONS 02 - LINEAR", links.SelectMany(l => l.Dofs.Select(d => Row(("Link", l.Name), ("DOF", d.Key), ("Fixed", "No"),
+        // "02 - Linear" takes only linear links (SAP2000 26 skipped a rubber isolator's rows there, 0.4.39): the other
+        // types' stiffness goes in their own table, not known yet, so it is said in a note.
+        foreach (var l in links.Where(l => LinkType(l.Type) != "Linear" && l.Dofs.Count > 0))
+            notes.Add($"Link property {l.Name} ({LinkType(l.Type)}) goes across with its type only: set its stiffness and damping in SAP2000 (Define > Section Properties > Link/Support Properties).");
+        Add(tables, "LINK PROPERTY DEFINITIONS 02 - LINEAR", links.Where(l => LinkType(l.Type) == "Linear").SelectMany(l => l.Dofs.Select(d => Row(("Link", l.Name), ("DOF", d.Key), ("Fixed", "No"),
             (d.Key[0] == 'U' ? "TransKE" : "RotKE", N(d.Value.Stiff)), (d.Key[0] == 'U' ? "TransCE" : "RotCE", N(d.Value.Damp))))));
         return shapes;
     }
@@ -610,8 +614,8 @@ public static class S2kWriter
                 var prefix = modalHist ? "CASE - MODAL HISTORY" : "CASE - DIRECT HISTORY";
                 defs.Add(Row(("Case", c.Name), ("Type", sapType), ("InitialCond", initial), ("DesignType", "Quake"), ("RunCase", "Yes")));
                 To(prefix + " 1 - GENERAL", modalHist
-                    ? Row(("Case", c.Name), ("ModalCase", d.ModalCase), ("Motion", "Transient"), ("OutSteps", d.Steps.ToString(CultureInfo.InvariantCulture)), ("StepSize", N(d.StepSize)), ("ConstDamp", N(d.Damping)))
-                    : Row(("Case", c.Name), ("Motion", "Transient"), ("OutSteps", d.Steps.ToString(CultureInfo.InvariantCulture)), ("StepSize", N(d.StepSize))));
+                    ? Row(("Case", c.Name), ("ModalCase", d.ModalCase), ("HistoryType", sapType.StartsWith("Lin", StringComparison.Ordinal) ? "Linear" : "Nonlinear"), ("Motion", "Transient"), ("OutSteps", d.Steps.ToString(CultureInfo.InvariantCulture)), ("StepSize", N(d.StepSize)), ("ConstDamp", N(d.Damping)))
+                    : Row(("Case", c.Name), ("HistoryType", sapType.StartsWith("Lin", StringComparison.Ordinal) ? "Linear" : "Nonlinear"), ("Motion", "Transient"), ("OutSteps", d.Steps.ToString(CultureInfo.InvariantCulture)), ("StepSize", N(d.StepSize))));
                 foreach (var l in d.Loads)
                     To(prefix + " 2 - LOAD ASSIGNMENTS", l.Kind == "accel"
                         ? Row(("Case", c.Name), ("LoadType", "Accel"), ("LoadName", Dir(l.Name)), ("Function", l.Function ?? ""), ("LoadSF", N(l.Factor)), ("TimeFactor", "1"), ("ArrivalTime", N(l.Arrival)), ("CoordSys", "GLOBAL"), ("Angle", N(l.Angle)))

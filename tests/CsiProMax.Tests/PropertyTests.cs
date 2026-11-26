@@ -19,7 +19,7 @@ static class PropertyTests
 
     static JsonObject Run(ICsiLink link, string tool, object args)
     {
-        var t = PropertyTools.All.Single(x => x.Name == tool);
+        var t = PropertyTools.All.Concat(CaseTools.All).Concat(HandTools.All).First(x => x.Name == tool);
         return (JsonObject)t.Run(JsonDocument.Parse(JsonSerializer.Serialize(args)).RootElement, link);
     }
 
@@ -207,6 +207,31 @@ static class PropertyTests
             Refused(link, "assign_frame_data", new { objects = new[] { beam }, hinges = new object[] { new { at = 0.2, dof = "M3" }, new { at = 0.2, dof = "M3" } } }, "the same");
             Run(link, "assign_frame_data", new { objects = new[] { beam }, hinges = Array.Empty<object>() });
             Check(PropertyDefs.Hinges(link.Model).Count == 0 && !link.Model.Passthrough.Exists(r => r.Heading == PropertyDefs.HingeHeading), "taken off, no empty section left");
+        });
+
+        yield return ("properties: the .s2k has none of what SAP2000 26 refused in the 0.4.39 field run", () =>
+        {
+            var link = Frame();
+            var beam = Beam(link.Model);
+            Run(link, "define_material_data", new { name = "S355", type = "Steel", values = new { E = 2.1e8, FY = 355000, FU = 510000, WEIGHTPERVOLUME = 77 } });
+            Run(link, "define_frame_shape", new { name = "X-Pipe", shape = "Steel Pipe", material = "S355", dims = new { D = 0.4, TW = 0.01 } });
+            Run(link, "define_link", new { name = "L-ISO", type = "RUBBER ISOLATOR", dofs = new Dictionary<string, object> { ["U1"] = new { stiffness = 1000 } } });
+            Run(link, "define_link", new { name = "L-LIN", type = "LINEAR", dofs = new Dictionary<string, object> { ["U1"] = new { stiffness = 1000 } } });
+            Run(link, "assign_frame_data", new { objects = new[] { beam }, hinges = new object[] { new { at = 0.05, dof = "M3" } } });
+            link.AddLoadPattern("TEMP", "Temperature", 0);
+            Run(link, "assign_object_loads", new { kind = "frame_temperature", pattern = "TEMP", objects = new[] { beam }, values = new { temperature = 25 } });
+            Run(link, "define_function", new { name = "TH1", kind = "history", from = "ramp", period = 1, cycles = 2 });
+            if (!link.Model.LoadCases.Exists(c => c.Name == "Modal")) Run(link, "define_load_case", new { name = "Modal", type = "Modal - Eigen", max_modes = 12 });
+            Run(link, "define_load_case", new { name = "THX", type = "Linear Modal History", modal_case = "Modal", steps = 20, step_size = 0.01, loads = new object[] { new { accel = "U1", factor = 1, function = "TH1" } } });
+            var s2k = S2kWriter.Write(link.Model, "a.s2k");
+            var tables = CsiProMax.CsiTables.CsiTableText.Parse(s2k.Text);
+            Check(tables["FRAME SECTION PROPERTIES 01 - GENERAL"].All(r => r["Shape"] != "Pipe" || double.Parse(r["tw"], System.Globalization.CultureInfo.InvariantCulture) > 0), "a pipe's wall goes in tw (tw cannot be zero)");
+            Check(tables["LINK PROPERTY DEFINITIONS 02 - LINEAR"].All(r => r["Link"] != "L-ISO"), "only linear links in 02 - Linear: " + string.Join(",", tables["LINK PROPERTY DEFINITIONS 02 - LINEAR"].Select(r => r["Link"])));
+            Check(s2k.Notes.Any(n => n.Contains("L-ISO")), "the isolator's stiffness is named in a note");
+            Check(tables["FRAME HINGE ASSIGNS 04 - AUTO FEMA 356 - CONCRETE BEAM"].All(r => !r.ContainsKey("BeyondE")), "no BeyondE value SAP2000 does not know");
+            Check(tables["FRAME LOADS - TEMPERATURE"].Single()["Temp"] == "25", "the temperature is in Temp");
+            Check(tables["CASE - MODAL HISTORY 1 - GENERAL"].Single()["HistoryType"] == "Linear", "the modal history has its HistoryType");
+            Check(tables["GROUPS 1 - DEFINITIONS"].All(r => r.ContainsKey("Color")), "groups have a colour");
         });
 
         yield return ("properties: every edit is one undo step in the Modeler window", () =>
