@@ -219,17 +219,41 @@ public static class LateralTools
         string? setBy = null;
         if (sap)
         {
-            setBy = SapLateral.SetCode(e, name, kind, table.Code);
-            if (setBy is null && EditableTables.Read(e, table.Key, key, name) is null)
-                throw new ToolInputException($"{e.Program.Name}'s API has no call that gives a pattern the {kind.ToLowerInvariant()} code {table.Code}, and its table '{table.Name}' only changes a pattern that has that code already. In {e.Program.Name}: Define > Load Patterns, choose {table.Code} as {name}'s Auto Lateral Load; then set_lateral_load sets its inputs.");
+            if (SapLateral.SetCode(e, name, kind, table.Code, values) is { } made)
+            {
+                setBy = made.Method;
+                var read = made.Back ?? (EditableTables.Read(e, table.Key, key, name) is { } r ? new JsonObject(r.Where(kv => kv.Key is not "GUID").Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))) : null)
+                    ?? throw new EtabsException($"{e.Program.Name} took {table.Code} for {name} (by {setBy}), but neither its Get call nor its table '{table.Name}' gives it back.");
+                return new JsonObject
+                {
+                    ["pattern"] = name, ["kind"] = kind, ["code"] = table.Code, ["table"] = table.Name,
+                    ["set_by"] = "LoadPatterns.Auto" + (kind == LateralCodes.Wind ? "Wind." : "Seismic.") + setBy,
+                    ["read_back"] = read,
+                    ["note"] = $"{e.Program.Name} computes the story forces when the analysis runs. They show in its Load Patterns > Modify Lateral Load, and in the table '{table.Name}'.",
+                };
+            }
+            // No Set call for this code (ASCE 7-22, KDS, AASHTO...): the pattern's row and the code's row go in together.
+            var log = EditableTables.PutAutoLoad(e, name, kind == LateralCodes.Wind ? "Wind" : "Quake", table.KeyCode, table.Key, values, $"give {name} the {kind.ToLowerInvariant()} code {table.Code}");
+            var got = EditableTables.Read(e, table.Key, key, name)
+                ?? throw new EtabsException($"{e.Program.Name} took {name}'s rows for {table.Code}, but its table '{table.Name}' has no row for {name} when read back. Its import log: {log}");
+            foreach (var (field, value) in values)
+                if (got.TryGetValue(field, out var now) && !Same(now, value))
+                    throw new EtabsException($"{e.Program.Name} kept {field} = '{now}' for {name}, not '{value}': check the value against lateral_codes for {table.Code}. Its import log: {log}");
+            return new JsonObject
+            {
+                ["pattern"] = name, ["kind"] = kind, ["code"] = table.Code, ["table"] = table.Name,
+                ["set_by"] = $"the tables 'Load Pattern Definitions' and '{table.Name}', in one import ({e.Program.Name}'s API has no call for this code)",
+                ["read_back"] = new JsonObject(got.Where(kv => kv.Key is not "GUID").Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))),
+                ["note"] = $"{e.Program.Name} filled in its own defaults for the inputs not given. It computes the story forces when the analysis runs.",
+            };
         }
-        if (!sap || values.Count > 0)
+        else
         {
             var row = new Dictionary<string, string>(values, StringComparer.OrdinalIgnoreCase) { [key] = name };
             EditableTables.Put(e, table.Key, key, [row], $"give {name} its {table.Code} inputs");
         }
         var back = EditableTables.Read(e, table.Key, key, name)
-            ?? throw new EtabsException($"{e.Program.Name} took {table.Code} for {name}" + (setBy is null ? "" : $" (by {setBy})") + $", but its table '{table.Name}' has no row for {name} when read back.");
+            ?? throw new EtabsException($"{e.Program.Name} took {table.Code} for {name}, but its table '{table.Name}' has no row for {name} when read back.");
         foreach (var (field, value) in values)
             if (back.TryGetValue(field, out var got) && !Same(got, value))
                 throw new EtabsException($"{e.Program.Name} kept {field} = '{got}' for {name}, not '{value}': check the value against lateral_codes for {table.Code}.");

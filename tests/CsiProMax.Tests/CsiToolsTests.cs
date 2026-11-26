@@ -294,18 +294,19 @@ static class CsiToolsTests
             // A code SAP2000's API has no call for, on a pattern without it: the tool says how to choose it by hand, and nothing is written.
             const string kds = "Load Pattern Definitions - Auto Seismic - KDS 41 17 00-2019";
             inner.ResultTables[kds] = new(["LoadPat"], []);
-            api.Tables[kds] = (["LoadPat", "R"], []);
-            var said2 = "";
-            try { Run(CsiProgram.Sap2000, "set_lateral_load", """{"name":"CPM-AUTO-S","kind":"seismic","code":"KDS 41 17 00-2019"}""", link); }
-            catch (ToolInputException ex) { said2 = ex.Message; }
-            Check(said2.Contains("has no call", StringComparison.Ordinal) && said2.Contains("Define > Load Patterns", StringComparison.Ordinal), "a code with no call says how to choose it: " + said2);
-            Equal(0, api.Tables[kds].Rows.Count, "nothing was written for it");
+            api.Tables[kds] = (["LoadPat", "Dir", "R"], []);
+            // A code SAP2000's API has no call for: the pattern's row and the code's row in one import, every pattern kept.
+            var patternsBefore = string.Join(",", api.Table.Select(r => r[0]));
+            var kdsSet = Run(CsiProgram.Sap2000, "set_lateral_load", """{"name":"CPM-AUTO-S","kind":"seismic","code":"KDS 41 17 00-2019","values":{"R":"5"}}""", link);
+            Check(kdsSet["set_by"]?.ToString().Contains("in one import", StringComparison.Ordinal) == true && kdsSet["read_back"]?["R"]?.ToString() == "5", "KDS by the two tables at once: " + kdsSet.ToJsonString());
+            Equal("KDS 41 17 00-2019", api.SeismicCodes["CPM-AUTO-S"], "the pattern has the code");
+            Check(api.Tables[kds].Rows.Count == 1 && api.Tables[kds].Rows[0].Contains("X"), "the code's row, with its direction X: " + string.Join("|", api.Tables[kds].Rows.SelectMany(r => r)));
+            Check(api.Table.Select(r => r[0]).Take(patternsBefore.Split(',').Length).SequenceEqual(patternsBefore.Split(',')), "every pattern is kept");
             Check(SapLateral.Setters("Seismic", "ASCE 7-22").Count == 0 && SapLateral.Setters("Seismic", "KDS 41 17 00-2019").Count == 0 && SapLateral.Setters("Wind", "AASHTO 2020").Count == 0, "codes with no Set call in SAP2000 26");
             Check(SapLateral.Setters("Seismic", "UBC97 Isolated").SequenceEqual(["SetUBC97Iso"]) && SapLateral.Setters("Wind", "Eurocode1 2005")[0] == "SetEurocode12005_1", "codes are found by SAP2000's table name");
             var none = Run(CsiProgram.Sap2000, "set_lateral_load", """{"name":"CPM-AUTO-S","kind":"seismic","code":"None"}""", link);
             Check(api.Log.Contains("seismic none CPM-AUTO-S") && none["set_by"]?.ToString() == "LoadPatterns.AutoSeismic.SetNone", "the code is taken off by SetNone: " + none.ToJsonString());
-            Equal(0, api.PatternTableWrites, "nothing was written to SAP2000's patterns' table");
-            Equal(before, string.Join(";", api.Table.Select(r => string.Join("|", r))), "SAP2000's patterns are as they were");
+            Equal(1, api.PatternTableWrites, "SAP2000's patterns' table was written once, with the code's table (KDS)");
             // Every direct import call in the program is one of the guarded ones.
             var root = Path.Combine(SourceText.Root(), "src");
             var direct = Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)
@@ -606,6 +607,13 @@ public sealed class FakeApi
         public SeismicApi AutoSeismic { get; } = new(o);
         public WindApi AutoWind { get; } = new(o);
         public int GetAutoSeismicCode(string Name, ref string CodeName) { CodeName = o.SeismicCodes.GetValueOrDefault(Name, ""); return 0; }
+        public int GetNameList(ref int NumberNames, ref string[] MyName) { MyName = o.Table.Select(r => r[0]).ToArray(); NumberNames = MyName.Length; return 0; }
+        public int GetSelfWTMultiplier(string Name, ref double Value)
+        {
+            var row = o.Table.FirstOrDefault(r => r[0] == Name);
+            if (row is null) return 1;
+            Value = double.Parse(row[2], System.Globalization.CultureInfo.InvariantCulture); return 0;
+        }
         public int SetSelfWTMultiplier(string Name, double Value)
         {
             var row = o.Table.FirstOrDefault(r => r[0] == Name);
@@ -628,7 +636,8 @@ public sealed class FakeApi
             if (R <= 0 || Ss <= 0 || SiteClass <= 0) return 1;
             o.SeismicCodes[Name] = "IBC2006";
             const string key = "Load Pattern Definitions - Auto Seismic - IBC2006";
-            if (o.Tables.TryGetValue(key, out var t)) t.Rows.Add(t.Fields.Select(f => f == "LoadPat" ? Name : f == "R" ? R.ToString(System.Globalization.CultureInfo.InvariantCulture) : "1").ToArray());
+            if (o.Tables.TryGetValue(key, out var t)) t.Rows.RemoveAll(r => r[0] == Name);
+            if (o.Tables.TryGetValue(key, out t)) t.Rows.Add(t.Fields.Select(f => f == "LoadPat" ? Name : f == "R" ? R.ToString(System.Globalization.CultureInfo.InvariantCulture) : "1").ToArray());
             o.Log.Add(FormattableString.Invariant($"IBC2006 {Name} R {R} site {SiteClass}")); return 0;
         }
         public int SetNone(string Name) { o.SeismicCodes.Remove(Name); o.Log.Add("seismic none " + Name); return 0; }
@@ -831,6 +840,19 @@ public sealed class FakeApi
             }
             foreach (var (key, (fields, rows)) in o._pending)
             {
+                if (key == Patterns && o.PatternName == "LoadPat" && fields.Contains("AutoLoad"))
+                {
+                    // SAP2000 26 with the code's table in the same import (the probe on Ahmed's PC, 2026-11-26): the
+                    // pattern takes the code, and the other patterns are kept.
+                    foreach (var r in rows)
+                    {
+                        var at = o.Table.FindIndex(t => t[0] == r[0]);
+                        var self = r[Array.IndexOf(fields, "SelfWtMult")];
+                        if (at < 0) o.Table.Add([r[0], r[Array.IndexOf(fields, "DesignType") is >= 0 and var dt ? dt : Array.IndexOf(fields, "Type")], self]); else o.Table[at][2] = self;
+                        if (r[Array.IndexOf(fields, "AutoLoad")] is { Length: > 0 } code) o.SeismicCodes[r[0]] = code; else o.SeismicCodes.Remove(r[0]);
+                    }
+                    continue;
+                }
                 if (key == Patterns)
                 {
                     // Only the fields the patterns' table is read with are kept, as before.
