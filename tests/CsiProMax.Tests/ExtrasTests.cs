@@ -203,6 +203,16 @@ static class ExtrasTests
                 Check(html.Contains(part), "viewer.html lost " + part);
             Check(html.Contains("det.hidden = program === \"sap2000\""), "SAP2000 has no Detailing menu");
         });
+        yield return ("extras: the Engine is one window laid out as the program: no window menu bar above it (its items in Tools and Help), white views, collapsed Model Explorer, plan dimensions, Ready (Ahmed 2026-11-26 22:11)", () =>
+        {
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var part in new[] { "function appMenuLoad()", "fetch(\"app-menu\"", "function drawDims(g, to, T, bub)", "#tools{display:none!important}", "if (!bgSaved) bg = \"white\";", "const model = node(\"model\", \"Model\", null,", ": \"Ready\";", "<option>Global</option>", "[\"eng:run\", \"Run Analysis (F5)\", \"run\"]" })
+                Check(html.Contains(part), "viewer.html lost " + part);
+            var main = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Panel", "Host", "MainWindow.cs"));
+            Check(main.Contains("if (!CsiProMax.App.Modeler) layout.Children.Add(top);") && main.Contains("internal static bool RunAppMenu(string id)"), "the Engine window has no menu bar of its own; its items run from the page");
+            var view = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Panel", "Host", "ModelView.cs"));
+            Check(view.Contains("case \"app-menu\":") && view.Contains("path == \"app\" ? AppAsync(body)"), "the page reaches the window's items");
+        });
         yield return ("extras: right click opens ETABS's Object Information: Object ID, property-grid tabs, a description, OK and Cancel; no browser menu (Ahmed 2026-11-26)", () =>
         {
             var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));

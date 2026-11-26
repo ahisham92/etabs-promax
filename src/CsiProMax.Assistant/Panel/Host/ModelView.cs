@@ -25,7 +25,7 @@ internal static class ModelView
     /// so the two never change the model at once.
     /// </summary>
     internal static Task<(byte[] Body, string ContentType)?> PostAsync(string path, byte[] body) =>
-        path == "chat" ? ChatAsync(body) : path == "edit" ? EditAsync(body) : path == "check" ? CheckAsync(body) : path == "run" ? RunAsync(body) : Task.FromResult<(byte[] Body, string ContentType)?>(null);
+        path == "chat" ? ChatAsync(body) : path == "edit" ? EditAsync(body) : path == "check" ? CheckAsync(body) : path == "run" ? RunAsync(body) : path == "app" ? AppAsync(body) : Task.FromResult<(byte[] Body, string ContentType)?>(null);
 
     /// <summary>
     /// CSI ProMax Engine's Analyze > Run (EngineRun): the Run form's {"analyse","kinds","selected"} (or {"design":bool}) starts it, on the window's thread for the model;
@@ -127,6 +127,15 @@ internal static class ModelView
         ? Pack.Build(link, ModelerTables, [], [], null, null).Content
         : Pack.Build(link, [], [], [], null, null, withTables: false).Content;
 
+    /// <summary>One of the window's own menu items, chosen in the Engine's Tools or Help menu: {"id":"Help/Self test"}.</summary>
+    private static Task<(byte[] Body, string ContentType)?> AppAsync(byte[] body)
+    {
+        string id = "";
+        try { id = JsonNode.Parse(body)?["id"]?.GetValue<string>() ?? ""; } catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidOperationException or FormatException) { }
+        var ok = id.Length > 0 && MainWindow.RunAppMenu(id);
+        return Task.FromResult<(byte[] Body, string ContentType)?>((Encoding.UTF8.GetBytes(new JsonObject { ["ok"] = ok }.ToJsonString()), "application/json"));
+    }
+
     internal static (byte[] Body, string ContentType)? Handle(string path, string query)
     {
         if (App.Etabs?.Link is not { } link) return null;
@@ -135,6 +144,8 @@ internal static class ModelView
         {
             case "":
                 return (Encoding.UTF8.GetBytes(Pack.LiveViewerHtml(Content(link), revision, chat: AiMode.On)), "text/html; charset=utf-8");
+            case "app-menu":
+                return (Encoding.UTF8.GetBytes(MainWindow.AppMenu().ToJsonString()), "application/json");
             case "model":
                 if (query == "rev=" + revision.ToString(System.Globalization.CultureInfo.InvariantCulture)) return ([], "application/json");
                 // The model moved on (a hand edit, the chat, Undo): a run's pack of it is removed, as its results are gone.

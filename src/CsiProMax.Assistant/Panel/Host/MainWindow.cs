@@ -66,7 +66,10 @@ internal sealed class MainWindow : Window
         top.Children.Add(update);
         top.Children.Add(menu);
         DockPanel.SetDock(top, Dock.Top);
-        layout.Children.Add(top);
+        // CSI ProMax Engine is one window laid out as the CSI program (Ahmed 2026-11-26: "its front end is still the
+        // same"): no menu bar of this window above the Engine's own. Its items are in the Engine's Tools and Help menus
+        // (AppMenu, RunAppMenu); the Update bar below still shows whenever a newer version is out.
+        if (!CsiProMax.App.Modeler) layout.Children.Add(top);
         // Under the menu, across the whole window: the Update bar, there only while a newer version is out or downloaded
         // (Ahmed: "at the top very clear so that it is a one click"). One click downloads when needed, then this window
         // switches by itself when no work is running. The small button above stays for "Check for updates".
@@ -194,6 +197,49 @@ internal sealed class MainWindow : Window
     /// What Sketch ProMax has on Revit's ribbon and ETABS has no place for: the license, settings, notes, routines,
     /// folders, bug reports, the self test and updates, in one menu above the chat.
     /// </summary>
+    /// <summary>This window's menu items by menu, for the Engine's own Tools and Help menus: (menu, id, label).</summary>
+    private static readonly List<(string Menu, string Id, string Label)> _appMenu = [];
+    private static readonly Dictionary<string, Action> _appActions = new(StringComparer.Ordinal);
+
+    private static void Register(string menu, string header, Action run)
+    {
+        var label = header.Replace("_", "").Replace("…", "...");
+        var id = menu + "/" + label;
+        lock (_appMenu)
+        {
+            if (!_appActions.ContainsKey(id)) _appMenu.Add((menu, id, label));
+            _appActions[id] = run;
+        }
+    }
+
+    /// <summary>The menus of this window as the Engine's page lists them: [{menu, items:[{id,label}]}].</summary>
+    internal static System.Text.Json.Nodes.JsonArray AppMenu()
+    {
+        var all = new System.Text.Json.Nodes.JsonArray();
+        lock (_appMenu)
+            foreach (var group in _appMenu.GroupBy(m => m.Menu))
+                all.Add(new System.Text.Json.Nodes.JsonObject
+                {
+                    ["menu"] = group.Key,
+                    ["items"] = new System.Text.Json.Nodes.JsonArray([.. group.Select(i => (System.Text.Json.Nodes.JsonNode)new System.Text.Json.Nodes.JsonObject { ["id"] = i.Id, ["label"] = i.Label })]),
+                });
+        return all;
+    }
+
+    /// <summary>Runs one of this window's menu items (from the Engine's page), on the window's thread. False when there is no such item.</summary>
+    internal static bool RunAppMenu(string id)
+    {
+        Action? run;
+        lock (_appMenu) _appActions.TryGetValue(id, out run);
+        if (run is null || System.Windows.Application.Current is not { } app) return false;
+        app.Dispatcher.InvokeAsync(() =>
+        {
+            try { run(); }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { TaskDialog.Show("CSI ProMax", $"That didn't work: {ex.Message}"); }
+        });
+        return true;
+    }
+
     private Menu BuildMenu()
     {
         var menu = new Menu { Background = System.Windows.Media.Brushes.Transparent, Padding = new Thickness(4, 2, 4, 2) };
@@ -208,6 +254,7 @@ internal sealed class MainWindow : Window
         }
         void Add(MenuItem parent, string header, Action run)
         {
+            Register(((string)parent.Header).Replace("_", ""), header, run);
             var item = new MenuItem { Header = header, Foreground = SystemColors.MenuTextBrush };
             System.Windows.Automation.AutomationProperties.SetName(item, header.Replace("_", "").TrimEnd('…'));
             item.Click += (_, _) =>
@@ -249,6 +296,7 @@ internal sealed class MainWindow : Window
             _chatToggle = new MenuItem { Header = "Show the _chat", IsCheckable = true, IsChecked = true };
             _chatToggle.Click += (_, _) => ShowChat(_chatToggle.IsChecked);
             view.Items.Add(_chatToggle);
+            Register("View", "Show or hide the _chat", () => ShowChat(!ChatShown));
         }
         if (CsiProMax.App.Modeler) Add(view, "_Reload the model view", () => { if (_view is { } pane) pane.Reload(); else ModelView.Open(); });
         else Add(view, "Open the _3D view", ModelView.Open);
