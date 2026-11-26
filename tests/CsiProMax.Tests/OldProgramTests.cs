@@ -632,6 +632,10 @@ static class OldProgramTests
             Check(LateralTools.IsWindOnLiveLoad("Wind - Live Load") && LateralTools.IsWindOnLiveLoad("WindOnLiveLoad") && !LateralTools.IsWindOnLiveLoad("Wind"), "a wind on live load pattern is still a wind pattern for the next wind code");
             var tables = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Etabs/EditableTables.cs"));
             Check(tables.Contains("HasRow(m, codeKey, pattern)) took = code;", StringComparison.Ordinal), "a pattern with no AutoLoad name (wind on live load) took the code when the code's table has its row");
+            // KDS straight after KBC 2016: SAP2000 took the rows, then deleted "1 KBC 2016 auto seismic loads" and left None.
+            Check(tables.IndexOf("m.LoadPatterns.AutoSeismic.SetNone(pattern)", StringComparison.Ordinal) is var none and > 0
+                  && none < tables.IndexOf("SetTableForEditingArray(\"Load Pattern Definitions\"", tables.IndexOf("public static string PutAutoLoad(", StringComparison.Ordinal), StringComparison.Ordinal)
+                  && tables.Contains("m.LoadPatterns.AutoWind.SetNone(pattern)", StringComparison.Ordinal), "the pattern's own other code is taken off before the import");
             var lateral = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Tools/LateralTools.cs"));
             Check(!lateral.Contains("PutAutoLoad(e, name, kind == LateralCodes.Wind ? \"Wind\" : \"Quake\", table.KeyCode", StringComparison.Ordinal)
                   && lateral.Contains("PutAutoLoad(e, name, SapDesignType(kind, table.Code), SapAutoLoad(table)", StringComparison.Ordinal)

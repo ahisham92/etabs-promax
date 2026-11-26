@@ -234,6 +234,20 @@ public static class EditableTables
                 }
                 catch (Exception ex) when (ex is EtabsException or Tools.ToolInputException) { /* not held: a change to it is said after the import */ }
             }
+            // The pattern's own code is taken off first: given KDS 41 17 00-2019 straight after KBC 2016, SAP2000 26 took
+            // the rows and then deleted "1 KBC 2016 auto seismic loads", leaving the pattern with None; after SetNone it
+            // takes KDS (experiment M on Ahmed's PC, 2026-11-26; the last code of the 0.4.56 field test that failed).
+            var mineNow = before.TryGetValue(pattern, out var c0) && c0.Length > 0 ? c0 : TableCode(m, pattern) ?? "";
+            if (mineNow.Length > 0 && !mineNow.Equals("None", StringComparison.OrdinalIgnoreCase) && !SameCode(mineNow, code))
+            {
+                try
+                {
+                    if (designType.StartsWith("Wind", StringComparison.OrdinalIgnoreCase)) m.LoadPatterns.AutoWind.SetNone(pattern);
+                    else m.LoadPatterns.AutoSeismic.SetNone(pattern);
+                    trace.Add($"took {mineNow} off {pattern} first");
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException) { trace.Add($"taking {mineNow} off first failed: {ex.GetType().Name}"); }
+            }
             double self = 0;
             try { m.LoadPatterns.GetSelfWTMultiplier(pattern, ref self); } catch { /* a new pattern weighs nothing */ }
 
