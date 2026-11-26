@@ -183,6 +183,8 @@ public static class S2kWriter
         var frameMass = new List<IReadOnlyList<(string, string)>>();
         var tcLimits = new List<IReadOnlyList<(string, string)>>();
         var areaMass = new List<IReadOnlyList<(string, string)>>();
+        var edgeReleases = new List<IReadOnlyList<(string, string)>>();
+        var panelZones = new List<IReadOnlyList<(string, string)>>();
         var areaAxes = new List<IReadOnlyList<(string, string)>>();
         var jointMass = new List<IReadOnlyList<(string, string)>>();
         foreach (var x in m.LineAssigns)
@@ -235,6 +237,13 @@ public static class S2kWriter
             if (am.Values.Any(v => Math.Abs(v - 1) > 1e-12))
                 areaMods.Add(Row(("Area", name), ("f11", N(am["F11MOD"])), ("f22", N(am["F22MOD"])), ("f12", N(am["F12MOD"])), ("m11", N(am["M11MOD"])), ("m22", N(am["M22MOD"])), ("m12", N(am["M12MOD"])), ("v13", N(am["V13MOD"])), ("v23", N(am["V23MOD"])), ("MassMod", N(am["MMOD"])), ("WeightMod", N(am["WMOD"]))));
             if (PropertyDefs.Value(x.Extra, "SPRINGPROP") is { } sp) notes.Add($"Area {name} has the area spring {sp}: assign it in SAP2000 (Assign > Area > Area Springs).");
+            // Edge releases: SAP2000's own rows, or ETABS's (a row per edge, Yes for each released direction) a row per direction.
+            foreach (var r in x.Tables?.GetValueOrDefault("Area Edge Release Assignments") ?? [])
+                edgeReleases.Add(Row(("Area", name), ("Edge", r.GetValueOrDefault("Edge", "1")), ("ReleasedDOF", r.GetValueOrDefault("ReleasedDOF", "Moment")), ("StiffTrans", r.GetValueOrDefault("StiffTrans", "0")), ("StiffRot", r.GetValueOrDefault("StiffRot", "0"))));
+            foreach (var r in x.Tables?.GetValueOrDefault("Area Assignments - Edge Releases") ?? [])
+                foreach (var (released, spring, dof, rot) in new[] { ("RInShear", "SInShear", "In-plane", false), ("RDirForce", "SDirForce", "Direct", false), ("ROutShear", "SOutShear", "Out-of-plane", false), ("RBending", "SBending", "Moment", true), ("RTwisting", "STwisting", "Twisting", true) })
+                    if (r.GetValueOrDefault(released) == "Yes")
+                        edgeReleases.Add(Row(("Area", name), ("Edge", r.GetValueOrDefault("EdgeNumber", "1")), ("ReleasedDOF", dof), ("StiffTrans", rot ? "0" : r.GetValueOrDefault(spring, "0")), ("StiffRot", rot ? r.GetValueOrDefault(spring, "0") : "0")));
         }
         foreach (var pa in m.PointAssigns)
         {
@@ -243,6 +252,25 @@ public static class S2kWriter
             if (jm.Count > 0)
                 jointMass.Add(Row(("Joint", Joint(Physical.At(m, p0, si0))), ("CoordSys", "GLOBAL"), ("Mass1", jm.GetValueOrDefault("MassXY", "0")), ("Mass2", jm.GetValueOrDefault("MassXY", "0")), ("Mass3", jm.GetValueOrDefault("MassZ", "0")),
                     ("MMI1", jm.GetValueOrDefault("MMIX", "0")), ("MMI2", jm.GetValueOrDefault("MMIY", "0")), ("MMI3", jm.GetValueOrDefault("MMIZ", "0"))));
+            // Panel zones: SAP2000's own row, or ETABS's panel zone property the joint names.
+            var pz = new Dictionary<string, string>(AssignTables.Row(pa, "Joint Panel Zone Assignments"), StringComparer.Ordinal);
+            if (pz.Count == 0 && AssignTables.Row(pa, "Joint Assignments - Panel Zone").GetValueOrDefault("PanelZone") is { Length: > 0 } pzName
+                && (m.DefinitionTables?.GetValueOrDefault("Panel Zone Property Definitions") ?? []).Find(r => r.GetValueOrDefault("Name") == pzName) is { } def)
+            {
+                var src = def.GetValueOrDefault("Source") ?? "";
+                pz["PZFrom"] = src.Contains("Link", StringComparison.OrdinalIgnoreCase) ? "Link" : src.Contains("Spring", StringComparison.OrdinalIgnoreCase) || src.Contains("User", StringComparison.OrdinalIgnoreCase) ? "User" : "Elastic";
+                foreach (var (from, to) in new[] { ("DblPlThick", "DoublerPl"), ("SpringMajor", "MajorStiff"), ("SpringMinor", "MinorStiff"), ("LinkProp", "PZLink") })
+                    if (def.GetValueOrDefault(from) is { Length: > 0 } v0) pz[to] = v0;
+                pz["PZConnect"] = (def.GetValueOrDefault("Connect") ?? "").Contains("Brace", StringComparison.OrdinalIgnoreCase) ? "Braces to Other Objects" : "Beams to Other Objects";
+                pz["AxesFrom"] = (def.GetValueOrDefault("AxisSource") ?? "").Contains("User", StringComparison.OrdinalIgnoreCase) ? "User" : "Column";
+                if (def.GetValueOrDefault("Axis2Angle") is { Length: > 0 } ang) pz["PZAxesAngle"] = ang;
+            }
+            if (pz.Count > 0)
+            {
+                var row = new List<(string, string)> { ("Joint", Joint(Physical.At(m, p0, si0))), ("PZFrom", pz.GetValueOrDefault("PZFrom", "Elastic")) };
+                foreach (var f in new[] { "DoublerPl", "MajorStiff", "MinorStiff", "PZLink", "PZConnect", "AxesFrom", "PZAxesAngle" }) if (pz.GetValueOrDefault(f) is { Length: > 0 } v) row.Add((f, v));
+                panelZones.Add(row);
+            }
         }
         foreach (var pa in m.PointAssigns)
         {
@@ -302,6 +330,10 @@ public static class S2kWriter
         Add(tables, "AREA ADDED MASS ASSIGNMENTS", areaMass);
         Add(tables, "AREA LOCAL AXES ASSIGNMENTS 1 - TYPICAL", areaAxes);
         Add(tables, "JOINT ADDED MASS ASSIGNMENTS", jointMass);
+        // Before any edge constraint: SAP2000 puts an area's edge constraints back to their default on every edge
+        // release it imports (SAP2000 26.3, 2026-11-26); the constraints are set after the file opens.
+        Add(tables, "AREA EDGE RELEASE ASSIGNMENTS", edgeReleases);
+        Add(tables, "JOINT PANEL ZONE ASSIGNMENTS", panelZones);
         Add(tables, "GENERALIZED DISPLACEMENT DEFINITIONS 1 - TRANSLATIONAL", genTrans);
         Add(tables, "GENERALIZED DISPLACEMENT DEFINITIONS 2 - ROTATIONAL", genRot);
 
@@ -456,6 +488,9 @@ public static class S2kWriter
 
 
         // The tables of a SAP2000 file the Modeler opened that it has no form for, as the file had them.
+        // SAP2000's own hinge definitions, kept as its table rows.
+        foreach (var (t, rows) in (m.DefinitionTables ?? []).Where(x => DefineTables.IsSap(x.Key)).OrderBy(x => x.Key, StringComparer.Ordinal))
+            Add(tables, t.ToUpperInvariant(), rows.Select(r => (IReadOnlyList<(string, string)>)DefineTables.SapHinges[t].Where(r.ContainsKey).Select(f => (f, r[f])).ToList()));
         KeptTables.WriteInto(m, "sap2000", tables);
 
         var at = SavedAt ?? DateTime.Now;
