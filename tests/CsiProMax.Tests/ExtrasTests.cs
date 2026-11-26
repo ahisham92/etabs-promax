@@ -16,7 +16,7 @@ static class ExtrasTests
     static OfflineEtabs Frame() => new(Templates.ConcreteFrame("Extras", [6, 5], [4], 3, 3.2));
 
     static JsonObject Run(ICsiLink link, string tool, object args) =>
-        (JsonObject)ExtraTools.All.Concat(PropertyTools.All).Single(x => x.Name == tool).Run(JsonDocument.Parse(JsonSerializer.Serialize(args)).RootElement, link);
+        (JsonObject)ExtraTools.All.Concat(PropertyTools.All).Concat(ModelerTools.All).Single(x => x.Name == tool).Run(JsonDocument.Parse(JsonSerializer.Serialize(args)).RootElement, link);
 
     static void Refused(OfflineEtabs link, string tool, object args, string says)
     {
@@ -37,6 +37,31 @@ static class ExtrasTests
 
     public static IEnumerable<(string Name, Action Body)> All()
     {
+        yield return ("extras: a Modeler model is made for one program, chosen at New Model; it is kept in the .cpm, and saving writes that program's file", () =>
+        {
+            var link = new OfflineEtabs();
+            Run(link, "new_model", new { title = "P", program = "sap2000", template = "concrete_frame", x_spans = new[] { 6.0 }, y_spans = new[] { 5.0 }, stories = 2, story_height = 3.0 });
+            Check(link.Model.Target == "sap2000", "made for SAP2000");
+            Check(ModelFile.FromJson(ModelFile.ToJson(link.Model)).Target == "sap2000", "kept in the .cpm");
+            var folder = Path.Combine(Path.GetTempPath(), "cpm-target-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                var saved = Run(link, "save_model_as", new { name = "P", folder });
+                Check(saved["program"]!.GetValue<string>() == "SAP2000" && File.Exists(Path.Combine(folder, "P.s2k")) && saved["file"]!.GetValue<string>().EndsWith(".s2k"), "saving writes the .s2k: " + saved.ToJsonString());
+                Check(File.Exists(Path.Combine(folder, "P.cpm")), "and the .cpm");
+                Check(OfflineEtabs.Load(Path.Combine(folder, "P.cpm")).Target == "sap2000", "the .cpm opens as a SAP2000 model again");
+                var changed = Run(link, "set_model_program", new { program = "safe" });
+                Check(changed["program"]!.GetValue<string>() == "SAFE" && changed["was"]!.GetValue<string>() == "SAP2000" && link.Model.Target == "safe", "changed to SAFE");
+                Run(link, "save_model_as", new { name = "P2", folder });
+                Check(File.Exists(Path.Combine(folder, "P2.f2k")), "a SAFE model saves its .f2k");
+            }
+            finally { try { Directory.Delete(folder, true); } catch (IOException) { } }
+            Refused(link, "set_model_program", new { program = "revit" }, "one of");
+            var etabs = new OfflineEtabs();
+            Run(etabs, "new_model", new { title = "E" });
+            Check(etabs.Model.Target == "etabs", "ETABS when none is given");
+        });
+
         yield return ("extras: joint constraints of every type go into the .s2k with their joints, beside the floors' diaphragms, and stay out of the .e2k", () =>
         {
             var link = Frame();

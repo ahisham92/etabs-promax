@@ -42,6 +42,15 @@ public sealed class StructuralModel
     /// <summary>What ETABS's .e2k has no place for (SAP2000 joint constraints and moving loads, SAFE design strips):
     /// kept in the .cpm and written into the .s2k and .f2k. Null until one is defined.</summary>
     public ProgramExtras? Extras { get; set; }
+    /// <summary>The CSI program the model is made for in the Modeler: "etabs", "sap2000" or "safe" (Ahmed 2026-11-26:
+    /// chosen at New Model; the Modeler then offers only what that program has, and saves its file). Kept in the .cpm.</summary>
+    public string Target { get; set; } = Targets[0];
+
+    /// <summary>The programs a Modeler model can be made for, by key.</summary>
+    public static readonly string[] Targets = ["etabs", "sap2000", "safe"];
+
+    /// <summary>The program's name for a target key.</summary>
+    public static string TargetName(string target) => target switch { "sap2000" => "SAP2000", "safe" => "SAFE", _ => "ETABS" };
     /// <summary>The headings this version understands that the file the model came from had, in its order. A section
     /// the file did not have (combinations added later, say) is written straight after the one before it, ahead of
     /// the kept sections that followed that one.</summary>

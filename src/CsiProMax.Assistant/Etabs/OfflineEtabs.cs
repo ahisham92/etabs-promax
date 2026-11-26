@@ -334,10 +334,40 @@ public sealed class OfflineEtabs : ICsiLink, CsiProMax.Assistant.Tools.IModelDra
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
             E2kWriter.WriteFile(Model, path);
             ModelFile.Save(Model, System.IO.Path.ChangeExtension(path, ModelFile.Extension));
+            ProgramFile = WriteProgramFile(path);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { throw new EtabsException($"The model could not be saved to {path}: {ex.Message}"); }
         Path = path; Unsaved = false; Revision++;
         return path;
+    }
+
+    /// <summary>The model's file for its own program, written beside the .e2k on every save: the .s2k for SAP2000, the
+    /// .f2k (the floor with the most slab) for SAFE; "" for ETABS, whose file is the .e2k.</summary>
+    public string ProgramFile { get; private set; } = "";
+
+    private string WriteProgramFile(string e2k)
+    {
+        switch (Model.Target)
+        {
+            case "sap2000":
+            {
+                var s2k = System.IO.Path.ChangeExtension(e2k, ".s2k");
+                CsiProMax.S2k.S2kWriter.WriteFile(Model, s2k);
+                return s2k;
+            }
+            case "safe":
+            {
+                // A model with no floor SAFE can take is saved without the .f2k: its .cpm and .e2k still hold it.
+                try
+                {
+                    var f2k = System.IO.Path.ChangeExtension(e2k, ".f2k");
+                    File.WriteAllText(f2k, CsiProMax.F2k.F2kWriter.Write(Model, new CsiProMax.F2k.F2kOptions()).Text, new System.Text.UTF8Encoding(false));
+                    return f2k;
+                }
+                catch (ArgumentException) { return ""; }
+            }
+            default: return "";
+        }
     }
 
     private static string FileName(string title)
