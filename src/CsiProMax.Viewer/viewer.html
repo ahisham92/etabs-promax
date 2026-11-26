@@ -460,7 +460,7 @@ function load(pack, keep) {
   $("units").textContent = u.force && u.length ? u.force + ", " + u.length + (u.temperature ? ", " + u.temperature : "") : "";
   $("story").innerHTML = stories.slice().reverse().map(s => `<option value="${esc(s.name)}">${esc(s.name)}</option>`).join("");
   $("line").innerHTML = allLines().map(g => `<option value="${esc(g.dir + g.label)}">${esc(g.label)}</option>`).join("");
-  readRatios(); readDisplacements(); readMarks(); readForces(); readReactions(); readDrifts(); readShells(); derivePushover(); if (plotSpec && !P.tables[plotSpec.table]) plotSpec = null; syncResults();
+  readRatios(); readDisplacements(); readMarks(); readForces(); readReactions(); readDrifts(); readMesh(); readShells(); derivePushover(); if (plotSpec && !P.tables[plotSpec.table]) plotSpec = null; syncResults();
   $("drop").style.display = "none";
   sel.clear(); hover = 0;
   for (const k of selNames) { const o = (k[0] === "f" ? frames : areas).find(x => x.name === k.slice(2)); if (o) sel.add(o.id); }
@@ -592,6 +592,7 @@ const areaField = name => /^a[sv]|area|rebar|reinf|ast|asc|^al$|^at$/.test(norm(
 function buildDesignView() {
   dview = null;
   if (res.mode === "values") return buildValuesView();
+  if (res.mode === "loads") return buildLoadsView();
   if (res.mode !== "design") return;
   const fam = design.find(f => f.key === res.dfam); if (!fam) return;
   const shows = designShows(fam), show = shows.find(s => s.id === res.dshow) || (res.dshow && res.dshow.startsWith("field:") ? {id: res.dshow, name: res.dshow.slice(6), a: res.dshow.slice(6), ratio: (fam.fields.find(f => f.name === res.dshow.slice(6)) || {}).ratio, area: areaField(res.dshow.slice(6))} : shows[0]);
@@ -764,7 +765,7 @@ const resComps = mode => { mode = mode || res.mode; return mode === "shell" ? sh
 const compName = () => (resComps().find(c => c[0] === res.comp) || ["", res.comp])[1];
 function syncResults() {
   if (!P) return;
-  const have = {deformed: disp.size, contour: disp.size, forces: forces.size, reactions: reacts.size, ratios: ratio.size, design: design.length, shell: shellRes.size, values: P.tables[res.vt] ? 1 : 0, model: 1};
+  const have = {deformed: disp.size, contour: disp.size, forces: forces.size, reactions: reacts.size, ratios: ratio.size, design: design.length, shell: shellRes.size, values: P.tables[res.vt] ? 1 : 0, loads: P.tables[res.lt] ? 1 : 0, model: 1};
   if (!have[res.mode] || res.mode === "ratios") res.mode = "model";
   document.querySelectorAll("[data-res]").forEach(b => { b.disabled = !have[b.dataset.res]; b.classList.toggle("on", b.dataset.res === "ratios" ? res.mode === "model" && $("colour").value === "ratio" : b.dataset.res === res.mode && !(res.mode === "model" && $("colour").value === "ratio")); });
   const cases = resCases(), comps = resComps();
@@ -772,7 +773,7 @@ function syncResults() {
   if (!comps.some(c => c[0] === res.comp)) res.comp = comps.length ? (comps.find(c => c[0] === "M3") || comps[0])[0] : "";
   $("case").innerHTML = cases.map(c => `<option>${esc(c)}</option>`).join(""); $("case").value = res.case; $("case").disabled = !cases.length || res.mode === "model";
   $("comp").innerHTML = comps.map(c => `<option value="${c[0]}">${c[1]}</option>`).join(""); $("comp").value = res.comp; $("comp").disabled = !comps.length;
-  $("scale").disabled = !(res.mode === "deformed" || res.mode === "forces");
+  $("scale").disabled = !(res.mode === "deformed" || res.mode === "forces" || res.mode === "loads" && loadMap);
   const anim = document.querySelector('[data-act="anim"]'); if (anim) { anim.disabled = res.mode !== "deformed"; anim.classList.toggle("on", res.anim && res.mode === "deformed"); }
   pointsDirty = true;
 }
@@ -795,6 +796,34 @@ function numericCols(t, skip, all) {
   return out;
 }
 const isShellTable = n => /(forces|stresses|strains)/.test(n) && /(area|shell|slab|plane|solid|wall)/.test(n) && !/(frame|beam|column|brace|link|design|pier|spandrel|strip|cut|summary|definition|assign)/.test(n);
+// The analysis mesh: the programs divide each floor and wall into shell elements and give their forces at the element
+// joints, most of which are not joints of the model ("~123"). With the pack's "Objects and Elements" tables the
+// contours are drawn on that mesh, element by element, as the programs draw them; without them, at the corners.
+let meshPts = new Map(), meshOf = new Map(), meshList = [];
+function readMesh() {
+  meshPts = new Map(); meshOf = new Map(); meshList = [];
+  const jt = tablesLike(n => /^objectsandelements(joints|points)$/.test(n))[0];
+  if (jt) {
+    const f = jt.fields, e = col(f, "ElmName", "ElemName", "ElmJoint", "JointElem", "Element", "Elem", "Name"), x = col(f, "GlobalX", "X"), y = col(f, "GlobalY", "Y"), z = col(f, "GlobalZ", "Z");
+    if (e >= 0 && x >= 0 && y >= 0 && z >= 0) for (const r of jt.rows) { const n = String(r[e]); if (!pointXyz.has(n)) meshPts.set(n, [+r[x], +r[y], +r[z]]); }
+  }
+  const at = n => pointXyz.has(n) ? pointXyz.get(n) : meshPts.get(n);
+  for (const t of tablesLike(n => /^objectsandelements(shells|areas|slabs|walls|floors)$/.test(n))) {
+    const f = t.fields, o = col(f, "ObjName", "AreaObject", "Area Object", "ObjLabel", "Object", "UniqueName", "Area", "Shell"), js = f.map((x, i) => /^(elm|elem)?(joint|jt|pt|point|node)\s*-?\s*\d$/.test(norm(x).replace(/[^a-z0-9]/g, "")) ? i : -1).filter(i => i >= 0);
+    if (o < 0 || js.length < 3) continue;
+    for (const r of t.rows) {
+      const names = js.map(i => String(r[i] ?? "")).filter(n => n && n !== "None");
+      if (names.length < 3 || !names.every(n => at(n))) continue;
+      const a = String(r[o]); let l = meshOf.get(a); if (!l) meshOf.set(a, l = []); l.push(names);
+    }
+  }
+  meshList = [...meshPts.keys()];
+}
+// The model's points and then the mesh's own joints, in the order the point texture holds them.
+const meshIdx = new Map();
+function meshIndex() { meshIdx.clear(); meshList.forEach((n, i) => meshIdx.set(n, points.length + i)); }
+let meshDrawn = false;
+const meshWanted = () => res.mode === "shell" && meshOf.size > 0;
 function readShells() {
   // The force or stress at each joint of each shell, averaged over the shells that meet at the joint, as the programs
   // draw their shell contours.
@@ -813,7 +842,7 @@ function readShells() {
       if (st >= 0 && /min/i.test(r[st])) continue;
       const k = caseKey(t, r, c, st, sn);
       let names = [];
-      if (j >= 0 && pointXyz.has(String(r[j]))) names = [String(r[j])];
+      if (j >= 0 && (pointXyz.has(String(r[j])) || meshPts.has(String(r[j])))) names = [String(r[j])];
       else if (gx >= 0 && gy >= 0 && gz >= 0) { const n = pointAt.get(key(+r[gx], +r[gy], +r[gz])); if (n !== undefined) names = [String(n)]; }
       if (!names.length && u >= 0 && aBy.has(String(r[u]))) names = aBy.get(String(r[u])).idx.filter(i => i >= 0).map(i => String(points[i][0]));
       if (!names.length) continue;
@@ -853,14 +882,14 @@ function rowPlacer(t) {
 }
 const valueTables = () => Object.values(P.tables).filter(t => t.rows && t.rows.length && numericCols(t, new Set()).length);
 const tableCases = t => { const c = caseCol(t.fields); if (c < 0) return []; const st = stepCol(t.fields), sn = stepNumCol(t.fields); return [...new Set(t.rows.map(r => caseKey(t, r, c, st, sn)))]; };
-function buildValuesView() {
+function buildValuesView(spec) {
   // Any number of any table on the model: on each member, wall, pier, spandrel, joint or story the row names, the
   // value of largest size for the chosen case, coloured on the model and written beside it.
-  const t = P.tables[res.vt]; if (!t) return;
-  const ci = t.fields.indexOf(res.vf); if (ci < 0) return;
+  const t = spec ? spec.t : P.tables[res.vt]; if (!t) return;
+  const vf = spec ? spec.f : res.vf, ci = t.fields.indexOf(vf); if (ci < 0) return;
   const c = caseCol(t.fields), st = stepCol(t.fields), sn = stepNumCol(t.fields), place = rowPlacer(t), items = new Map();
   for (const r of t.rows) {
-    if (c >= 0 && res.vcase && caseKey(t, r, c, st, sn) !== res.vcase) continue;
+    if (spec ? !spec.keep(r) : c >= 0 && res.vcase && caseKey(t, r, c, st, sn) !== res.vcase) continue;
     if (!isNum(r[ci])) continue;
     const at = place(r); if (!at) continue;
     const v = parseFloat(r[ci]);
@@ -868,7 +897,7 @@ function buildValuesView() {
     if (Math.abs(v) > Math.abs(it.v)) it.v = v;
     const s = at.st || ""; if (!it.by.has(s) || Math.abs(v) > Math.abs(it.by.get(s))) it.by.set(s, v);
   }
-  const byObj = new Map(), labels = [], ratio = /ratio|^dc/.test(norm(res.vf));
+  const byObj = new Map(), labels = [], ratio = !spec && /ratio|^dc/.test(norm(vf));
   for (const it of items.values()) {
     for (const o of it.objs) byObj.set(o.id, Math.abs(it.v) > Math.abs(byObj.get(o.id) ?? 0) ? it.v : byObj.get(o.id));
     if (!res.dvalues) continue;
@@ -892,8 +921,8 @@ function buildValuesView() {
     }
   }
   const vs = [...byObj.values()].filter(v => isFinite(v)).concat(labels.filter(l => l.pt).map(l => l.v));
-  dview = {fam: {key: "values", name: t.name}, show: {id: "values", name: res.vf, ratio}, byObj, labels, items: items.size, lo: vs.length ? Math.min(...vs) : 0, hi: vs.length ? Math.max(...vs) : 1, k: 1, suffix: "",
-    title: t.name + " · " + res.vf + (res.vcase ? " · " + res.vcase : "")};
+  dview = {fam: {key: "values", name: t.name}, show: {id: "values", name: vf, ratio}, byObj, labels, items: items.size, lo: vs.length ? Math.min(...vs) : 0, hi: vs.length ? Math.max(...vs) : 1, k: 1, suffix: "",
+    title: spec ? spec.title : t.name + " · " + vf + (res.vcase ? " · " + res.vcase : "")};
 }
 function ptShown(p, at) {
   if (p.mode === "plan") { const z = elevationOf(p.story); return z === null || Math.abs(at[2] - z) <= Math.max(tol() * 10, 1e-3); }
@@ -925,7 +954,96 @@ function openValues(kind) {
 function applyValues(d) {
   res.mode = "values"; res.vt = q(d, "#vT").value; res.vf = q(d, "#vF").value; res.vcase = q(d, "#vC").value; res.dvalues = q(d, "#vVals").checked; res.dnames = q(d, "#vNames").checked;
   if ($("colour").value === "ratio") $("colour").value = "kind";
-  colourDirty = true; syncResults(); panes.forEach(p => p.diagSig = ""); syncTools(); draw();
+  colourDirty = true; syncResults(); panes.forEach(p => p.diagSig = null); syncTools(); draw();
+}
+// ---- Display > Load Assigns: the loads on joints, frames and shells, of one load pattern, as the programs show them:
+// distributed frame loads as diagrams along the members, everything else (point, uniform, temperature, strain...) as
+// values on the object, coloured. Read from the load assignment tables the pack takes beside the results. ----
+let loadMap = null, jointLoads = null;
+const loadKinds = {joint: /^(joint|point)loads/, frame: /^(frame|line|beam)loads/, shell: /^(shell|area|slab|wall|surface|floor)loads/};
+const loadTables = kind => P ? Object.values(P.tables).filter(t => t.rows && t.rows.length && loadKinds[kind].test(norm(t.name))) : [];
+const patCol = f => col(f, "LoadPattern", "Load Pattern", "LoadPat", "Load Pat", "Pattern");
+const isDistributed = t => /distributed|trapezoid/.test(norm(t.name));
+const loadWord = kind => kind === "shell" && program === "sap2000" ? "Area" : kind === "shell" && program === "safe" ? "Slab" : {joint: "Joint", frame: "Frame", shell: "Shell"}[kind];
+const loadTypeName = t => t.name.replace(/^[^-]*-\s*/, "") || t.name;
+function loadValueCols(t) {
+  return numericCols(t, new Set([patCol(t.fields)])).filter(n => !/^(reldist|absdist|dist|reldista|reldistb|absdista|absdistb|elev|x|y|z|globalx|globaly|globalz)/.test(norm(n.name)));
+}
+function loadPatterns(kind) { const out = new Set(); for (const t of loadTables(kind)) { const c = patCol(t.fields); if (c >= 0) for (const r of t.rows) out.add(String(r[c])); } return [...out]; }
+function loadDir(d, f) {
+  const n = norm(d || "");
+  if (!n || /grav/.test(n)) return [0, 0, -1];
+  const ax = memberAxes(f);
+  if (/^(local)?1$|local1/.test(n)) return ax.a; if (/^(local)?2$|local2/.test(n)) return ax.e2; if (/^(local)?3$|local3/.test(n)) return ax.e3;
+  if (/x/.test(n)) return [1, 0, 0]; if (/y/.test(n)) return [0, 1, 0]; return [0, 0, 1];
+}
+function frameLoadMap(t, keep) {
+  // member -> the load along it, summed where loads overlap, with the step at each start and end.
+  const f = t.fields, u = col(f, "UniqueName", "Unique Name", "Frame", "Line", "Beam", "Label"), ra = col(f, "RelDistA", "RelDist A"), rb = col(f, "RelDistB", "RelDist B"), aa = col(f, "AbsDistA", "AbsDist A", "DistA"), ab = col(f, "AbsDistB", "AbsDist B", "DistB");
+  const wa = col(f, "FOverLA", "FOverL A", "ForceA", "LoadA", "ValueA", "MOverLA"), wb = col(f, "FOverLB", "FOverL B", "ForceB", "LoadB", "ValueB", "MOverLB"), dc = col(f, "Direction", "Dir");
+  if (u < 0 || wa < 0) return null;
+  const fBy = new Map(frames.map(x => [x.name, x])), segs = new Map();
+  for (const r of t.rows) {
+    if (!keep(r)) continue;
+    const fr = fBy.get(String(r[u])); if (!fr) continue;
+    const L = len(sub(fr.b, fr.a)) || 1, A = ra >= 0 && isNum(r[ra]) ? +r[ra] * L : aa >= 0 && isNum(r[aa]) ? +r[aa] : 0, B = rb >= 0 && isNum(r[rb]) ? +r[rb] * L : ab >= 0 && isNum(r[ab]) ? +r[ab] : L;
+    const va = parseFloat(r[wa]) || 0, vb = wb >= 0 ? parseFloat(r[wb]) || 0 : va;
+    let l = segs.get(fr.name); if (!l) segs.set(fr.name, l = {fr, L, dir: loadDir(dc >= 0 ? r[dc] : "", fr), list: []});
+    if (B > A) l.list.push([A, B, va, vb]);
+  }
+  const map = new Map();
+  for (const [name, {fr, L, dir, list}] of segs) {
+    if (!list.length) continue;
+    const xs = [...new Set([0, L, ...list.flatMap(x => [x[0], x[1]])])].sort((a, b) => a - b);
+    const at = (x, side) => list.reduce((s, [A, B, va, vb]) => (side < 0 ? x > A && x <= B : x >= A && x < B) ? s + va + (vb - va) * (x - A) / (B - A) : s, 0);
+    const rows = [];
+    for (const x of xs) { const l = x > 0 ? at(x, -1) : null, rr = x < L ? at(x, 1) : null; if (l !== null) rows.push({s: x, w: l}); if (rr !== null && rr !== l) rows.push({s: x, w: rr}); }
+    rows.dirv = dir; map.set(name, rows);
+  }
+  return map;
+}
+function buildLoadsView() {
+  loadMap = jointLoads = null;
+  const t = P.tables[res.lt]; if (!t) return;
+  const pc = patCol(t.fields), keep = r => pc < 0 || !res.lpat || String(r[pc]) === res.lpat;
+  if (loadKinds.joint.test(norm(t.name)) && /force/.test(norm(t.name))) {
+    // Joint forces as arrows at the joints, FX FY FZ (SAP2000: F1 F2 F3).
+    const f = t.fields, u = col(f, "UniqueName", "Unique Name", "Joint", "Point", "Label"), ix = [["FX", "F1"], ["FY", "F2"], ["FZ", "F3"]].map(k => col(f, ...k));
+    if (u >= 0 && ix.some(i => i >= 0)) {
+      jointLoads = new Map();
+      for (const r of t.rows) { if (!keep(r)) continue; const n = String(r[u]), a = jointLoads.get(n) || [0, 0, 0]; ix.forEach((i, k) => { if (i >= 0) a[k] += parseFloat(r[i]) || 0; }); jointLoads.set(n, a); }
+      return;
+    }
+  }
+  if (isDistributed(t) && loadKinds.frame.test(norm(t.name))) { loadMap = frameLoadMap(t, keep); if (loadMap) return; }
+  buildValuesView({t, f: res.lf, keep, title: loadTitle()});
+}
+const loadTitle = () => { const t = P && P.tables[res.lt]; return t ? `${loadTypeName(t)} Loads (${res.lpat || "all patterns"})` + (loadMap || jointLoads ? "" : " · " + res.lf) : ""; };
+function openLoads(kind) {
+  const list = loadTables(kind); if (!list.length) return;
+  const pats = loadPatterns(kind);
+  let cur = list.find(t => t.name === res.lt) || list.find(t => isDistributed(t)) || list[0];
+  // The value shown first: the load itself where the table names it, else the column with the largest loads.
+  const big = (t, n) => t.rows.reduce((m, r) => Math.max(m, Math.abs(parseFloat(r[n.i]) || 0)), 0);
+  const fieldOpts = t => { const ns = loadValueCols(t); const want = ns.find(n => /^(foverla|unifload|load|value|temp|temperature|force)$/.test(norm(n.name)) && big(t, n) > 0) || ns.slice().sort((x, y) => big(t, y) - big(t, x))[0]; return opts(ns.map(n => n.name), t.name === res.lt && ns.some(n => n.name === res.lf) ? res.lf : (want || ns[0] || {}).name); };
+  const patOpts = t => { const c = patCol(t.fields), have = c >= 0 ? new Set(t.rows.map(r => String(r[c]))) : null; const ps = have ? pats.filter(p => have.has(p)) : []; return ps.length ? opts(ps, ps.includes(res.lpat) ? res.lpat : ps[0]) : `<option value="">(all)</option>`; };
+  const d = dialog(`Show ${loadWord(kind)} Load Assignments`, `
+    <fieldset><legend>Load Type</legend><div class="g2"><span>Load type</span><select id="lT">${list.map(t => `<option value="${esc(t.name)}" ${t === cur ? "selected" : ""}>${esc(loadTypeName(t))}</option>`).join("")}</select><span>Load pattern</span><select id="lPat">${patOpts(cur)}</select><span>Value</span><select id="lF">${fieldOpts(cur)}</select></div></fieldset>
+    <fieldset><legend>Options</legend><div class="g3"><label><input type="checkbox" id="lVals" ${res.dvalues !== false ? "checked" : ""}>Show loading values</label></div></fieldset>`,
+    [["OK", d => applyLoads(d)], ["Apply", d => { applyLoads(d); return false; }, true], ["Cancel"]], {width: 480});
+  q(d, "#lT").onchange = () => { const t = P.tables[q(d, "#lT").value]; q(d, "#lF").innerHTML = fieldOpts(t); q(d, "#lPat").innerHTML = patOpts(t); };
+}
+function applyLoads(d) {
+  res.mode = "loads"; res.lt = q(d, "#lT").value; res.lpat = q(d, "#lPat").value; res.lf = q(d, "#lF").value; res.dvalues = res.values = q(d, "#lVals").checked;
+  if ($("colour").value === "ratio") $("colour").value = "kind";
+  colourDirty = true; buildLoadsView(); syncResults(); panes.forEach(p => p.diagSig = null); syncTools(); draw();
+}
+// For the field test: what the display chosen last shows of its results, "" when it shows none (null: not judged).
+function resultShown() {
+  if (res.mode === "loads") return loadMap && loadMap.size ? `load diagrams on ${loadMap.size} members` : jointLoads && jointLoads.size ? `load arrows at ${jointLoads.size} joints` : dview && dview.byObj.size + dview.labels.length ? `loads on ${dview.byObj.size} objects` : "";
+  // Read from the results, not from what the 3-D drawing last uploaded: a browser without WebGL draws lines only.
+  if (res.mode === "shell") return contourOf() ? (meshOf.size ? `contours on the program's mesh (${meshOf.size} areas)` : "contours at the area corners (the pack has no mesh tables)") : "";
+  return null;
 }
 // ---- the shell forces and stresses window ----
 function openShells() {
@@ -1171,12 +1289,14 @@ function rowsHtml(t, rows, most) {
 function coverage() {
   const has = re => Object.values(P.tables).some(t => t.rows && t.rows.length && re.test(norm(t.name)));
   return [
+    ["Load assignments: joint, frame and shell loads of each pattern, temperature among them", "Display > Load Assigns", ["joint", "frame", "shell"].some(k => loadTables(k).length)],
     ["Deformed shape, every case and combination", "Display > Deformed Shape", disp.size > 0],
     ["Mode shapes with periods", "Display > Mode Shapes", modeCases().length > 0],
     ["Joint displacement contours", "Display > Joint Displacement Contours", disp.size > 0],
     ["Support and spring reactions", "Display > Support Reactions", reacts.size > 0],
     ["Frame forces and moments (P V2 V3 T M2 M3)", "Display > Frame Forces and Moments", forces.size > 0],
     ["Shell forces and stresses (F11 ... M22, S11 ... SVM)", "Display > Shell Forces/Stresses", shellRes.size > 0],
+    ["Shell contours on the program's own analysis mesh", "Display > Shell Forces/Stresses", meshOf.size > 0],
     ...(program === "sap2000" ? [] : [["Pier and spandrel forces", "Display > Pier and Spandrel Forces", has(/pierforces|spandrelforces/)]]),
     ["Link and spring forces and deformations", "Display > Link Forces", has(/link|spring/)],
     ["Hinge results", "Display > Hinge Results", has(/hinge/)],
@@ -1466,14 +1586,26 @@ function buildGeometry() {
     for (const k of sh.long) edge(A[k], f.ia, B[k], f.ib, f.id);
   }
   const fine = areas.length > 6000 ? 1 : areas.length > 2000 ? 3 : 5;
+  meshDrawn = meshWanted(); if (meshDrawn) meshIndex();
+  const mxyz = n => pointXyz.has(n) ? pointXyz.get(n) : meshPts.get(n), midx = n => pointIdx.has(n) ? pointIdx.get(n) : meshIdx.has(n) ? meshIdx.get(n) : -1;
   for (const a of areas) {
     const pts = a.pts, n0 = newell(pts), n = a.kind === "wall" ? n0 : (n0[2] < 0 ? mul(n0, -1) : n0), m = pts.length;
     if (m < 3) continue;
     const t = extrude ? (slabT[a.section] || 0) : 0, shift = a.kind === "wall" ? -t / 2 : -t;
     const top = pts.map(q => a.kind === "wall" && t ? add(q, mul(n, t / 2)) : q), bot = pts.map((q, i) => add(top[i], mul(n, a.kind === "wall" ? -t : shift)));
     const idx4 = k => [a.idx[k] ?? -1, -1, -1, -1];
-    // The face, finely divided where it is a four-cornered panel so that contours bend as the program draws them.
-    if (m === 4 && fine > 1) {
+    // The face: on the program's own mesh when the shell contours are shown and the pack has it; otherwise finely
+    // divided where it is a four-cornered panel so that contours bend as the program draws them.
+    const mesh = meshDrawn && meshOf.get(a.name);
+    if (mesh) {
+      for (const el of mesh) {
+        const q = el.map(mxyz), ii = el.map(midx);
+        for (const tr of el.length === 4 ? [[0, 1, 2], [0, 2, 3]] : [[0, 1, 2]]) {
+          const pi = [ii[tr[0]], ii[tr[1]], ii[tr[2]], -1];
+          tri(solidA, q[tr[0]], n, a.id, pi, [1, 0, 0, 0]); tri(solidA, q[tr[1]], n, a.id, pi, [0, 1, 0, 0]); tri(solidA, q[tr[2]], n, a.id, pi, [0, 0, 1, 0]);
+        }
+      }
+    } else if (m === 4 && fine > 1) {
       const N = fine, P = (s, u) => { const w = [(1 - s) * (1 - u), s * (1 - u), s * u, (1 - s) * u]; let q = [0, 0, 0]; for (let k = 0; k < 4; k++) q = add(q, mul(top[k], w[k])); return {q, w}; };
       const pi = a.idx.map(v => v ?? -1);
       for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
@@ -1590,13 +1722,14 @@ function deformK() {
   return max > 0 ? size * 0.07 * Math.pow(res.scale / 50, 2) / max : 0;
 }
 function uploadPoints() {
-  const n = points.length, rows = Math.max(1, Math.ceil((n + 1) / TEXW)), data = new Float32Array(TEXW * rows * 4);
+  const n = points.length + meshList.length, rows = Math.max(1, Math.ceil((n + 1) / TEXW)), data = new Float32Array(TEXW * rows * 4);
   contour = contourOf();
   const dm = (res.mode === "deformed" || res.mode === "contour") && disp.get(res.case);
   for (let i = 0; i < n; i++) {
-    const d = dm && dm.get(String(points[i][0]));
+    const pn = i < points.length ? String(points[i][0]) : meshList[i - points.length];
+    const d = dm && dm.get(pn);
     if (d) { data[i * 4] = d[0]; data[i * 4 + 1] = d[1]; data[i * 4 + 2] = d[2]; }
-    const cv = contour ? contour.at(String(points[i][0])) : undefined;
+    const cv = contour ? contour.at(pn) : undefined;
     data[i * 4 + 3] = cv === undefined ? -1e30 : cv;
   }
   gl.bindTexture(gl.TEXTURE_2D, ptsTex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, TEXW, rows, 0, gl.RGBA, gl.FLOAT, data);
@@ -1643,8 +1776,8 @@ function auxLines(p) {
 function diagram(p, M) {
   // Filled diagrams along each member shown, from the stations the program reported, drawn on the tension side for
   // moments. In plan and elevation they are turned into the window's plane, as the programs draw them.
-  const map = forces.get(res.case), T = theme(); if (!map) return null;
-  const comp = res.comp, moment = comp[0] === "M";
+  const isLoad = res.mode === "loads", map = isLoad ? loadMap : forces.get(res.case), T = theme(); if (!map) return null;
+  const comp = isLoad ? "w" : res.comp, moment = !isLoad && comp[0] === "M";
   let max = 0; map.forEach((a, name) => a.forEach(o => max = Math.max(max, Math.abs(o[comp]))));
   if (!(max > 0)) return null;
   const lens = frames.filter(f => map.has(f.name)).map(f => len(sub(f.b, f.a))).sort((a, b) => a - b), typical = lens.length ? lens[lens.length >> 1] : size * 0.1;
@@ -1658,14 +1791,15 @@ function diagram(p, M) {
     if (!vis || !vis[f.id]) continue;
     const rows = map.get(f.name); if (!rows || rows.length < 2) continue;
     const ax = memberAxes(f);
-    let dir = comp === "M2" || comp === "V3" ? ax.e3 : ax.e2;
+    // A load is drawn on the side it comes from, pointing at the member: a gravity load above the beam.
+    let dir = isLoad && rows.dirv ? mul(rows.dirv, -1) : comp === "M2" || comp === "V3" ? ax.e3 : ax.e2;
     if (p.mode !== "3d") {
       // Seen nearly edge on, the diagram is laid into the window's plane instead.
       const inPlane = unitv(cross(ax.a, M.d)), seen = Math.abs(dot(dir, M.right)) + Math.abs(dot(dir, M.up));
       if (Math.abs(dot(ax.a, M.d)) > 0.95) continue;
       if (seen < 0.35) dir = dot(inPlane, dir) < 0 && dot(inPlane, M.up) < 0 ? mul(inPlane, -1) : inPlane;
     }
-    const sign = moment ? -1 : 1;
+    const sign = moment ? -1 : 1, k0 = k * sign;
     const base = rows.map(o => { const s = Math.max(0, Math.min(ax.len, o.s)); return add(f.a, mul(ax.a, s)); });
     const tip = rows.map((o, i) => add(base[i], mul(dir, o[comp] * k * sign)));
     for (let i = 0; i + 1 < rows.length; i++) {
@@ -1682,6 +1816,13 @@ function diagram(p, M) {
       }
     }
     for (const i of [0, rows.length - 1]) { const e = rows[i][comp] >= 0 ? pe : ne; V(outl, base[i], e); V(outl, tip[i], e); }
+    if (isLoad) for (let k = 1; k < 10; k++) { // the arrows inside a load diagram
+      const s = ax.len * k / 10; let i = 0; while (i + 1 < rows.length - 1 && rows[i + 1].s < s) i++;
+      const r0 = rows[i], r1 = rows[i + 1] || r0, w = r1.s > r0.s ? r0[comp] + (r1[comp] - r0[comp]) * (s - r0.s) / (r1.s - r0.s) : r0[comp];
+      if (!w) continue;
+      const b = add(f.a, mul(ax.a, s)), tp = add(b, mul(dir, w * k0)), e = w >= 0 ? pe : ne, head = mul(sub(tp, b), 0.18), side = mul(unitv(cross(dir, M.d)), Math.abs(w * k0) * 0.08);
+      V(outl, tp, e); V(outl, b, e); V(outl, b, e); V(outl, add(add(b, head), side), e); V(outl, b, e); V(outl, sub(add(b, head), side), e);
+    }
     if (res.values && (shownCount <= 400 || sel.has(f.id) || hover === f.id)) {
       let m = 0; rows.forEach((o, i) => { if (Math.abs(o[comp]) > Math.abs(rows[m][comp])) m = i; });
       if (Math.abs(rows[m][comp]) > max * 0.015) labels.push({at: tip[m], base: base[m], v: rows[m][comp]});
@@ -1709,6 +1850,7 @@ function lerpCam(a, b, t) {
 function render(now) {
   const views = $("views"), vr = views.getBoundingClientRect(), dpr = window.devicePixelRatio || 1, T = theme();
   if (gl && !glLost) {
+    if (meshDrawn !== meshWanted()) geometryDirty = true;
     if (geometryDirty) buildGeometry();
     if (colourDirty) buildColours();
     if (pointsDirty) uploadPoints();
@@ -1819,7 +1961,7 @@ function drawPane(p, n, vr, dpr, T, now) {
   if (gl) {
     uploadObjects(p); // every window shares one object texture, so each fills it before it draws
     if (p.auxSig !== auxSig) { const a = auxLines(p); p.auxInfo = a; p.aux = {grid: makeBuf(prog.line, a.grid, LINE_L, p.aux && p.aux.grid), level: makeBuf(prog.line, a.level, LINE_L, p.aux && p.aux.level), sup: makeBuf(prog.line, a.sup, LINE_L, p.aux && p.aux.sup)}; p.auxSig = auxSig; }
-    const dSig = res.mode === "forces" ? [res.case, res.comp, res.scale, res.userScale, res.fill, res.values, p.visSig, p.mode === "3d" ? "3d" : M.d.map(v => v.toFixed(3)).join(), selVersion, hover].join("|") : "";
+    const dSig = res.mode === "forces" || res.mode === "loads" && loadMap ? [res.mode, res.lt, res.lpat, res.case, res.comp, res.scale, res.userScale, res.fill, res.values, p.visSig, p.mode === "3d" ? "3d" : M.d.map(v => v.toFixed(3)).join(), selVersion, hover].join("|") : "";
     if (dSig !== p.diagSig) {
       const d = dSig ? diagram(p, M) : null;
       if (p.diag) { for (const b of [p.diag.tris, p.diag.outl]) { gl.deleteBuffer(b.b); gl.deleteVertexArray(b.vao); } }
@@ -1833,7 +1975,7 @@ function drawPane(p, n, vr, dpr, T, now) {
     if (!p.vis || p.visSig !== visSig(p)) { p.vis = new Uint8Array(objCount() + 1); for (const o of frames.concat(areas)) p.vis[o.id] = shown(o, p) ? 1 : 0; p.visSig = visSig(p); }
     if (colourDirty) buildColours();
     g.fillStyle = css(T.canvas); g.fillRect(0, 0, R.w, R.h); drawWire2D(p, g, M, T);
-    if (res.mode === "forces") { const d = diagram(p, M); p.diag = d ? {labels: d.labels, raw: d} : null; if (d) drawDiag2D(g, M, d); } else p.diag = null;
+    if (res.mode === "forces" || res.mode === "loads" && loadMap) { const d = diagram(p, M); p.diag = d ? {labels: d.labels, raw: d} : null; if (d) drawDiag2D(g, M, d); } else p.diag = null;
   }
   for (const [k, c] of legend) legendSeen.set(k, c);
   overlay(p, g, M, T, R.w, R.h);
@@ -1882,6 +2024,7 @@ function overlay(p, g, M, T, w, h) {
   drawInst(p, g, to, T);
   drawDesign(p, g, to, T);
   if (res.mode === "reactions") drawReactions(p, g, to, T);
+  if (res.mode === "loads" && jointLoads) drawReactions(p, g, to, T, jointLoads);
   if (p.diag && p.diag.labels) {
     font(10.5); g.textBaseline = "middle"; const taken = [];
     for (const l of p.diag.labels) {
@@ -1960,10 +2103,10 @@ function drawSupports(p, g, to, T) {
   }
 }
 function arrow(g, a, b) { const dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1, ux = dx / l, uy = dy / l; g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.moveTo(b[0], b[1]); g.lineTo(b[0] - ux * 7 - uy * 3.5, b[1] - uy * 7 + ux * 3.5); g.moveTo(b[0], b[1]); g.lineTo(b[0] - ux * 7 + uy * 3.5, b[1] - uy * 7 - ux * 3.5); g.stroke(); }
-function drawReactions(p, g, to, T) {
-  // Reactions as the programs show them: an arrow per component at each support, with its value.
-  const map = reacts.get(res.case); if (!map) return;
-  const comps = res.comp === "ALL" ? [0, 1, 2] : [{FX: 0, FY: 1, FZ: 2}[res.comp] ?? 2];
+function drawReactions(p, g, to, T, given) {
+  // Reactions as the programs show them: an arrow per component at each support, with its value. Joint loads the same.
+  const map = given || reacts.get(res.case); if (!map) return;
+  const comps = given || res.comp === "ALL" ? [0, 1, 2] : [{FX: 0, FY: 1, FZ: 2}[res.comp] ?? 2];
   let max = 0; map.forEach(r => comps.forEach(i => max = Math.max(max, Math.abs(r[i]))));
   const L = size * 0.06;
   g.lineWidth = 1.6; g.font = "10.5px Segoe UI, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle";
@@ -1992,7 +2135,7 @@ function drawAxes(p, g, M, T, h) {
   }
 }
 function paneTitle(p) {
-  const what = res.mode === "design" && dview ? "Design: " + dview.title : res.mode === "deformed" ? (periodOf(res.case) ? `Mode Shape (${res.case} · ${periodOf(res.case)})` : `Deformed Shape (${res.case})`) : res.mode === "forces" ? `${compName()} Diagram (${res.case})` : res.mode === "shell" ? `Shell ${res.comp} (${res.case})` : res.mode === "values" && dview ? dview.title : res.mode === "contour" ? `Joint Displacement Contours (${res.case})` : res.mode === "reactions" ? `Joint Reactions (${res.case})` : $("colour").value === "ratio" ? "Design Ratios" : "";
+  const what = res.mode === "design" && dview ? "Design: " + dview.title : res.mode === "deformed" ? (periodOf(res.case) ? `Mode Shape (${res.case} · ${periodOf(res.case)})` : `Deformed Shape (${res.case})`) : res.mode === "forces" ? `${compName()} Diagram (${res.case})` : res.mode === "shell" ? `Shell ${res.comp} (${res.case})` : res.mode === "values" && dview ? dview.title : res.mode === "loads" ? loadTitle() : res.mode === "contour" ? `Joint Displacement Contours (${res.case})` : res.mode === "reactions" ? `Joint Reactions (${res.case})` : $("colour").value === "ratio" ? "Design Ratios" : "";
   let t;
   if (p.mode === "plan") { const z = elevationOf(p.story); t = "Plan View - " + (p.story || "no stories") + (z === null ? "" : " - Z = " + num(z) + (unit ? " (" + unit + ")" : "")); }
   else if (p.mode === "elev") t = "Elevation View - " + (p.line ? p.line.label + (gridsGuessed ? " (column line)" : "") : "whole model");
@@ -2351,7 +2494,7 @@ function syncNav() {
 }
 function setMode(p, mode) {
   if (!p) return;
-  p.mode = mode; p.sig = ""; p.diagSig = "";
+  p.mode = mode; p.sig = ""; p.diagSig = null;
   if (mode === "elev" && !p.line) p.line = grids.Y[0] || allLines()[0] || null;
   if (mode !== "plot") { p.cam = {...p.cam, ...planeCam(p), persp: mode === "3d" ? p.cam.persp : false}; p.vis = null; p.cam = fitCam(p, p.cam); }
   syncTools(); draw();
@@ -2378,7 +2521,7 @@ function stepStory(d) { const p = panes[active]; if (!p || p.mode !== "plan") re
 function stepLine(d) { const p = panes[active]; if (!p || p.mode !== "elev") return; const lines = p.line ? grids[p.line.dir] : allLines(), i = lines.indexOf(p.line), j = Math.max(0, Math.min(lines.length - 1, i + d)); if (lines[j]) setLine(lines[j]); }
 $("story").onchange = () => setStory($("story").value);
 $("line").onchange = () => { const g = allLines().find(g => g.dir + g.label === $("line").value); if (g) setLine(g); };
-$("colour").addEventListener("input", () => { if (res.mode === "design" || res.mode === "values") res.mode = "model"; colourDirty = true; syncResults(); syncTools(); draw(); });
+$("colour").addEventListener("input", () => { if (res.mode === "design" || res.mode === "values" || res.mode === "loads") res.mode = "model"; colourDirty = true; syncResults(); syncTools(); draw(); });
 $("case").addEventListener("input", () => { res.case = $("case").value; pointsDirty = true; draw(); });
 $("comp").addEventListener("input", () => { res.comp = $("comp").value; pointsDirty = true; res.range = null; draw(); });
 $("scale").addEventListener("input", () => { res.scale = +$("scale").value; res.userScale = 0; draw(); });
@@ -2387,7 +2530,7 @@ function setRes(mode) {
   if (mode === "ratios") { res.mode = "model"; $("colour").value = "ratio"; }
   else { res.mode = mode; if ($("colour").value === "ratio" && mode !== "model") $("colour").value = "kind"; }
   if (mode !== "deformed") res.anim = false;
-  colourDirty = true; syncResults(); panes.forEach(p => p.diagSig = ""); syncTools(); draw();
+  colourDirty = true; syncResults(); panes.forEach(p => p.diagSig = null); syncTools(); draw();
 }
 function zoomAll(k) { const p = panes[active]; if (!p || !p.M) return; go(p, {...p.cam, hh: p.cam.hh * k}); }
 function hideObjs(ids) { ids.forEach(id => hidden.objs.add(id)); hiddenVersion++; sel.clear(); selChanged(); }
@@ -2403,6 +2546,7 @@ function act(name) {
   if (name.startsWith("dlg:")) return dialogs[name.slice(4)]();
   if (name.startsWith("des:")) return openDesign(name.slice(4));
   if (name.startsWith("vals:")) return openValues(name.slice(5));
+  if (name.startsWith("loads:")) return openLoads(name.slice(6));
   if (name.startsWith("xy:")) return openPlotFunctions(name.slice(3));
   if (name.startsWith("dshow:")) { const [, k, id] = name.split(":"); return showDesign(k, id); }
   if (name.startsWith("lay")) return document.querySelector(`[data-lay="${name.slice(3)}"]`).click();
@@ -2485,7 +2629,7 @@ const viewerMenus = () => {
     Analyze: [["Check Model for Instabilities...", "inst", "F7"], ["Show the Last Check's Marks", "instMarks", "", !inst.answer], 0, ["What the check looks for", "instHelp"]],
     Display: (() => {
       const has = re => Object.values(P ? P.tables : {}).some(t => t.rows && t.rows.length && re.test(norm(t.name))), plots = P ? Object.values(P.tables).some(t => t.rows && t.rows.length > 1) : false;
-      return [["Undeformed Shape", "r:model", "F4"], ["Deformed Shape...", "dlg:deformed", "F6", !disp.size], ["Mode Shapes...", "dlg:modes", "", !P || !modeCases().length], ["Animate Deformed Shape", "anim", "", res.mode !== "deformed"], 0,
+      return [["Undeformed Shape", "r:model", "F4"], [program === "sap2000" ? "Show Load Assigns" : "Load Assigns", ["joint", "frame", "shell"].map(k => [loadWord(k) + "...", "loads:" + k, "", !loadTables(k).length])], 0, ["Deformed Shape...", "dlg:deformed", "F6", !disp.size], ["Mode Shapes...", "dlg:modes", "", !P || !modeCases().length], ["Animate Deformed Shape", "anim", "", res.mode !== "deformed"], 0,
         ["Force/Stress Diagrams", [["Support/Spring Reactions...", "dlg:reactions", "", !reacts.size], ["Frame Forces and Moments...", "dlg:forces", "F8", !forces.size], ["Shell Forces/Stresses...", "dlg:shells", "", !shellRes.size],
           ...(program === "sap2000" ? [] : [["Pier and Spandrel Forces...", "vals:pier", "", !has(/pierforces|spandrelforces/)]]), ["Link Forces and Deformations...", "vals:link", "", !has(/link/)], ["Spring Forces and Soil Pressures...", "vals:spring", "", !has(/spring|soilpressure/)],
           ["Hinge Results...", "vals:hinge", "", !has(/hinge/)], ["Section Cut Forces...", "vals:cut", "", !has(/sectioncut/)], ["Tendon and Cable Results...", "vals:tendon", "", !has(/tendon|cable/)]]],
@@ -2704,7 +2848,7 @@ function applyForces(d) {
   res.userScale = q(d, "[name=sc]:checked").value === "user" ? Math.abs(parseFloat(q(d, "#dScale").value)) || 0 : 0;
   res.fill = q(d, "#dFill").checked; res.values = q(d, "#dVals").checked;
   if ($("colour").value === "ratio") $("colour").value = "kind";
-  colourDirty = true; syncResults(); res.case = q(d, "#dCase").value; $("case").value = res.case; $("comp").value = res.comp; panes.forEach(p => p.diagSig = ""); syncTools(); draw();
+  colourDirty = true; syncResults(); res.case = q(d, "#dCase").value; $("case").value = res.case; $("comp").value = res.comp; panes.forEach(p => p.diagSig = null); syncTools(); draw();
 }
 function applyDeformed(d) {
   res.mode = "deformed"; res.userScale = q(d, "[name=sc]:checked").value === "user" ? Math.abs(parseFloat(q(d, "#dScale").value)) || 0 : 0;
@@ -2722,7 +2866,7 @@ function applyDisplay(d) {
   d.querySelectorAll("[data-o]").forEach(x => { const k = x.dataset.o; if (opt[k] !== x.checked) { opt[k] = x.checked; if (k === "extrude") { geometryDirty = true; geometryStamp++; } if (k === "fill") hiddenVersion++; } });
   d.querySelectorAll("[data-k]").forEach(x => { x.checked ? hidden.kind.delete(x.dataset.k) : hidden.kind.add(x.dataset.k); });
   hiddenVersion++;
-  const c = q(d, "#dCol").value; if (c !== $("colour").value) { $("colour").value = c; if (res.mode === "design" || res.mode === "values") res.mode = "model"; syncResults(); }
+  const c = q(d, "#dCol").value; if (c !== $("colour").value) { $("colour").value = c; if (res.mode === "design" || res.mode === "values" || res.mode === "loads") res.mode = "model"; syncResults(); }
   const b = q(d, "#dBg").value; if (b !== bg) act("bg");
   colourDirty = true; buildTree(); syncTools(); draw();
 }
@@ -2786,7 +2930,7 @@ function openDesign(key) {
 function applyDesign(d) {
   res.mode = "design"; res.dfam = q(d, "#dFam").value; res.dshow = q(d, "#dShow").value; res.dvalues = q(d, "#dVals").checked; res.dnames = q(d, "#dNames").checked;
   if ($("colour").value === "ratio") $("colour").value = "kind";
-  colourDirty = true; syncResults(); panes.forEach(p => p.diagSig = ""); syncTools(); draw();
+  colourDirty = true; syncResults(); panes.forEach(p => p.diagSig = null); syncTools(); draw();
 }
 function showDesign(key, show) {
   // Straight to one design shown by its first output, as the menu's own items do.

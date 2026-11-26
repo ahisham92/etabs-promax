@@ -26,6 +26,7 @@ movement ... make sure they're covered, and make sure temperature and these thin
 
 | In the CSI program | In the Viewer | From |
 |---|---|---|
+| Display > Load Assigns / Show Load Assigns > Joint, Frame, Shell (Area in SAP2000): distributed frame loads as diagrams, joint forces as arrows, uniform, point, temperature and other loads as values | Display > Load Assigns (same three, pattern and load type chosen in the window) | Frame Loads - Distributed/Point/Temperature, Joint Loads - Force, Shell (Area) Loads - Uniform/Temperature |
 | Display > Deformed Shape, every load case and combination (dead, live, wind, seismic, temperature, spectrum, time history envelope, nonlinear) | Display > Deformed Shape | Joint Displacements |
 | Display > Mode Shape, with each mode's period | Display > Mode Shapes (title shows T) | Joint Displacements (mode rows), Modal Periods And Frequencies |
 | Display > Force/Stress Diagrams > Support/Spring Reactions | Display > Force/Stress Diagrams > Support/Spring Reactions | Joint Reactions |
@@ -33,7 +34,7 @@ movement ... make sure they're covered, and make sure temperature and these thin
 | Pier and spandrel forces | Pier and Spandrel Forces (on the walls of each pier and spandrel) | Pier Forces, Spandrel Forces |
 | Link forces and deformations | Link Forces and Deformations | Element Forces - Links, link deformation tables |
 | Spring forces, soil pressures (SAFE, mat foundations) | Spring Forces and Soil Pressures; SAFE: colour by soil pressure | spring and soil pressure tables |
-| Shell Stresses/Forces: F11 F22 F12 FMax FMin FVM M11 M22 M12 MMax MMin V13 V23 VMax, S11 S22 S12 SVM ... | Shell Forces/Stresses (contours averaged at joints) | Element Forces/Stresses - Area Shells (SAFE slabs, SAP2000 planes and solids alike) |
+| Shell Stresses/Forces: F11 F22 F12 FMax FMin FVM M11 M22 M12 MMax MMin V13 V23 VMax, S11 S22 S12 SVM ... | Shell Forces/Stresses (contours averaged at joints, drawn on the program's own analysis mesh from "Objects and Elements - Joints/Shells", SAP2000 "Objects And Elements - Joints/Areas") | Element Forces/Stresses - Area Shells (SAFE slabs, SAP2000 planes and solids alike) |
 | Hinge results, section cut forces, tendon and cable forces | Hinge Results, Section Cut Forces, Tendon and Cable Results | their tables |
 | Joint displacement contours | Joint Displacement Contours | Joint Displacements |
 | Story Response Plots: max story displacement, drifts, story shears, overturning moments, axial, torsion, stiffness, accelerations, max/avg drifts | Display > Story Response Plots (same display types, X and Y lines, top and bottom of each story) | Story Max Over Avg Displacements, Story Drifts, Story Forces, Story Stiffness, Story Accelerations, Diaphragm Center Of Mass Displacements, Story Max Over Avg Drifts |
@@ -65,3 +66,7 @@ A menu item added later is tested by the same rule. Items greyed out for the pac
   table on purpose (speed); a pack made in the program takes 250,000 a table, 1.5 million in all.
 - No step table came in that run, and no note said why. Every outcome of the step output is now said in a note and in
   the manifest's "step_output" (the options the program gave, what was set, which tables gave steps).
+- 2026-11-26 (Ahmed: "exactly the same way"): the field test now says, for Display > Load Assigns and Shell
+  Forces/Stresses, what is drawn ("load diagrams on N members", "contours on the program's mesh" or "at the area
+  corners (the pack has no mesh tables)"). The names of the "Objects and Elements" fields are not yet seen from a real
+  program: the Viewer reads ElmName/ObjName/Joint1..4 and close spellings. Check the Shell item's note in the next run.

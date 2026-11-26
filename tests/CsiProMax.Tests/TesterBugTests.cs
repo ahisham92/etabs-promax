@@ -894,6 +894,12 @@ static class TesterBugTests
             foreach (var table in new[] { "Joint Spring Assignments 1 - Uncoupled", "Frame Hinge Assigns 04 - Auto FEMA 356 - Concrete Beam", "Function - Response Spectrum - User", "Function - Time History - User",
                          "Case - Modal History 1 - General", "Case - Static 2 - Nonlinear Load Application", "Section Cuts 1 - General", "Section Cut Definitions", "Joint Assignments - Springs" })
                 Check(CsiProMax.Assistant.Tools.PackTables.Kind(new CsiProMax.Assistant.Etabs.TableName(table, table, false, 1)) == "input", $"'{table}' is not taken by the pack as an input");
+            // 2026-11-26 (Ahmed: "exactly the same way"): the analysis mesh, for shell contours on the program's elements,
+            // whatever the program says about importing it.
+            foreach (var table in new[] { "Objects and Elements - Joints", "Objects and Elements - Shells", "Objects And Elements - Joints", "Objects And Elements - Areas" })
+                foreach (var import in new[] { -1, 0, 1 })
+                    Check(CsiProMax.Assistant.Tools.PackTables.Kind(new CsiProMax.Assistant.Etabs.TableName(table, table, false, import)) == "result", $"'{table}' (import {import}) is not taken by the pack for the mesh");
+            Check(CsiProMax.Assistant.Tools.PackTables.Kind(new CsiProMax.Assistant.Etabs.TableName("Objects and Elements - Frames", "Objects and Elements - Frames", false, 1)) is null, "the frame mesh is taken, which the Viewer does not use");
             foreach (var table in new[] { "Section Cut Forces - Analysis", "Element Forces - Links", "Element Deformations - Links" })
                 Check(CsiProMax.Assistant.Tools.PackTables.Kind(new CsiProMax.Assistant.Etabs.TableName(table, table, false, 0)) == "result", $"'{table}' is not taken by the pack as a result");
             // The scratch model's extras are one honest line on a stand-in, and every name they use is fixed.
