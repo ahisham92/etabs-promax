@@ -99,6 +99,22 @@ public static class PcFieldSteps
             return text + (downloadedRun || here ? "" : " (this run is a copy unpacked to try a version, and is not compared)");
         });
 
+        // The Update bar (Ahmed, 2026-11-26): across the top of the window, there exactly while a newer version is out
+        // or downloaded, naming it, one click.
+        ctx.Step("the Update bar at the top of the window: there exactly while a newer version is known, and it names it", () =>
+        {
+            var now = new Version(0, 4, 6);
+            FieldContext.Expect(UI.UpdateBar.Text(now, "0.4.6", "0.4.6") is null && UI.UpdateBar.Text(now, "0.4.7", null) is { } named && named.StartsWith("Update to 0.4.7 now", StringComparison.Ordinal),
+                "the bar's text is wrong for a newer version, or it shows for the running one");
+            var expected = UI.UpdateBar.Now();
+            // The window's own bar is read in a method of its own: off Windows (the tests) there are no window types to load.
+            var state = OperatingSystem.IsWindows() ? WindowUpdateBar() : null;
+            if (state is not { } bar) return "no window is open in this run, so only the bar's text was checked: " + (expected ?? "this is the newest version known, no bar");
+            FieldContext.Expect(bar.Shown == (expected is not null) && (expected is null || bar.Text == expected),
+                $"the bar shows \"{(bar.Shown ? bar.Text : "nothing")}\" but should show \"{expected ?? "nothing"}\"");
+            return bar.Shown ? "shown: " + bar.Text : $"CSI ProMax {Update.Updater.CurrentText} is the newest version known, so the bar is hidden";
+        });
+
         // Each program: installed or not. A program that is not there is not a failure: its part is listed as not tested.
         foreach (var program in CsiProgram.All)
         {
@@ -209,5 +225,13 @@ public static class PcFieldSteps
                 FieldContext.Expect(state == Chat.ClaudeCli.SignIn.SignedIn, "Claude Code is signed out. Open Chat and press Sign in.");
                 return "signed in" + (method.Length > 0 ? " (" + method + ")" : "");
             });
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static (bool Shown, string Text)? WindowUpdateBar()
+    {
+        (bool Shown, string Text)? state = null;
+        CsiProMax.App.Ui?.Invoke(() => { if (Host.MainWindow.Current is { } window) state = window.UpdateBarState(); });
+        return state;
     }
 }

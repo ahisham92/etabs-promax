@@ -42,7 +42,6 @@ internal sealed class MainWindow : Window
         System.Windows.Automation.AutomationProperties.SetName(update, "Update CSI ProMax");
         update.Click += (_, _) =>
         {
-            // Downloads when needed (the update window shows it), then this window switches by itself when no work is running.
             CsiProMax.App.CheckForUpdatesInteractive();
             CsiProMax.App.SwitchWhenIdle();
         };
@@ -67,6 +66,16 @@ internal sealed class MainWindow : Window
         top.Children.Add(menu);
         DockPanel.SetDock(top, Dock.Top);
         layout.Children.Add(top);
+        // Under the menu, across the whole window: the Update bar, there only while a newer version is out or downloaded
+        // (Ahmed: "at the top very clear so that it is a one click"). One click downloads when needed, then this window
+        // switches by itself when no work is running. The small button above stays for "Check for updates".
+        _updateBar = UpdateBar.Build(() =>
+        {
+            CsiProMax.App.CheckForUpdatesInteractive();
+            CsiProMax.App.SwitchWhenIdle();
+        });
+        DockPanel.SetDock(_updateBar, Dock.Top);
+        layout.Children.Add(_updateBar);
         // The Modeler is one program window: its model (3D view, plan, Draw/Define/Assign menus) fills it, and the chat,
         // when it is on, sits on its right and can be closed (Ahmed, 2026-11-26: the Modeler opened as the chat alone).
         // Beside a CSI program the window is the chat (or, with the chat off, what CSI ProMax does by hand).
@@ -77,6 +86,11 @@ internal sealed class MainWindow : Window
         Closing += (_, _) => Remember();
         Closed += (_, _) => { Handle = IntPtr.Zero; _open = null; };
     }
+
+    private readonly Button _updateBar;
+
+    /// <summary>The Update bar at the top of this window: whether it shows, and its text (the field test reads it).</summary>
+    internal (bool Shown, string Text) UpdateBarState() => UpdateBar.State(_updateBar);
 
     private WebPane? _view;
     private ColumnDefinition? _chatColumn, _splitColumn;

@@ -18,6 +18,9 @@ internal sealed class WebWindow : Window
     private static readonly Dictionary<string, WebWindow> Open = new(StringComparer.OrdinalIgnoreCase);
     private static bool? _available;
 
+    /// <summary>What a click on the Update bar of a page's window does in this process; null for no bar.</summary>
+    internal static Action? UpdateClick { get; set; }
+
     private readonly string _address;
     private readonly WebPages.Kind _kind;
 
@@ -92,7 +95,17 @@ internal sealed class WebWindow : Window
         Background = new SolidColorBrush(Color.FromRgb(0xF0, 0xF0, 0xF0));
         var pane = new WebPane(address, kind);
         pane.Failed += () => Close();
-        Content = pane;
+        // The same Update bar as the chat's window, across the top: one click, and the page's window is not lost.
+        if (UpdateClick is { } click)
+        {
+            var layout = new DockPanel();
+            var bar = CsiProMax.UI.UpdateBar.Build(click);
+            DockPanel.SetDock(bar, Dock.Top);
+            layout.Children.Add(bar);
+            layout.Children.Add(pane);
+            Content = layout;
+        }
+        else Content = pane;
         Closed += (_, _) =>
         {
             Open.Remove(_address);

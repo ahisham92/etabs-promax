@@ -451,7 +451,18 @@ static class TesterBugTests
             Equal<string?>("Switch to 0.4.7 now", CsiProMax.UI.UpdateBadge.TopButton(now, "0.4.7", "0.4.7"), "a newer release that is downloaded");
             Equal<string?>("Update to 0.4.8", CsiProMax.UI.UpdateBadge.TopButton(now, "0.4.8", "0.4.7"), "a release newer than the download");
             var window = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Panel/Host/MainWindow.cs"));
-            Check(window.Contains("UpdateBadge.TopButton(") && window.Contains("CsiProMax.App.SwitchWhenIdle();"), "the window has no update button that installs and switches");
+            Check(window.Contains("UpdateBar.Build(") && window.Contains("CsiProMax.App.SwitchWhenIdle();"), "the window has no update button that installs and switches");
+            // Ahmed, 2026-11-26: "I need the button of update in the chat at the top very clear so that it is a one click".
+            Equal<string?>(null, CsiProMax.UI.UpdateBar.Text(now, "0.4.6", "0.4.6"), "no bar on the newest version");
+            Equal<string?>("Update to 0.4.7 now  (one click, nothing is closed)", CsiProMax.UI.UpdateBar.Text(now, "0.4.7", null), "the bar for a release");
+            Equal<string?>("Switch to 0.4.7 now  (one click, nothing is closed)", CsiProMax.UI.UpdateBar.Text(now, "0.4.7", "0.4.7"), "the bar for a download");
+            Check(window.Contains("DockPanel.SetDock(_updateBar, Dock.Top);"), "the Update bar is not across the top of the window");
+            var bar = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Panel/UI/UpdateBar.cs"));
+            Check(bar.Contains("HorizontalAlignment = HorizontalAlignment.Stretch") && bar.Contains("Background = Accent"), "the Update bar is not a wide bar in the accent colour");
+            var pages = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Panel/Host/WebWindow.cs"));
+            var program = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Program.cs"));
+            Check(pages.Contains("UpdateBar.Build(click)") && program.Split("WebWindow.UpdateClick =").Length == 3, "the Viewer's and the 3D view's windows have no Update bar (in a CSI program's window process and in the Viewer on its own)");
+            Check(File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/PcFieldSteps.cs")).Contains("the Update bar at the top of the window"), "the field test does not check the Update bar");
         });
 
         // ---- Ahmed: "no need to download everything let it be just the updated things only" ----
