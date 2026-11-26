@@ -420,6 +420,28 @@ public static class ModelerFieldSteps
         Properties(ctx, modeler);
         Structure(ctx, modeler);
         Extras(ctx, modeler);
+        Robustness(ctx);
+    }
+
+    /// <summary>The standalone never crashes or corrupts the model (Ahmed 2026-11-25): every Modeler tool with bent input,
+    /// on a model of its own (the test's model is left alone), then tools at random one after the other.</summary>
+    private static void Robustness(FieldContext ctx)
+    {
+        static OfflineEtabs Fresh() => new(CsiProMax.Model.Templates.ConcreteFrame("Robustness", [6, 5], [4], 2, 3.2));
+        static string Say(List<ModelFuzz.Finding> f) => $"{f.Count} finding(s): " + string.Join(" | ", f.Take(5).Select(x => $"{x.Tool} {(x.Args.Length > 160 ? x.Args[..160] + "..." : x.Args)} -> {x.What}"));
+        var seed = Environment.TickCount;
+        ctx.Step("the Modeler takes bent input to every tool (20 calls each) without crashing or a half-done edit", () =>
+        {
+            var found = ModelFuzz.Run(Fresh, HandModel.Tools.Values, 20, seed, TimeSpan.FromMinutes(3));
+            FieldContext.Expect(found.Count == 0, $"seed {seed}: " + Say(found));
+            return $"{HandModel.Tools.Values.Count(ModelFuzz.Fuzzed)} tools, seed {seed}";
+        });
+        ctx.Step("the Modeler takes 600 tool calls at random in a row and its model still saves and writes", () =>
+        {
+            var found = ModelFuzz.RunMixed(Fresh, HandModel.Tools.Values, 600, seed, TimeSpan.FromMinutes(3));
+            FieldContext.Expect(found.Count == 0, $"seed {seed}: " + Say(found));
+            return $"seed {seed}";
+        });
     }
 
     /// <summary>SAP2000's joint constraints and moving loads and SAFE's own strips, named CPM- for the program checks:
