@@ -151,6 +151,54 @@ public static class ViewerCheck
             return {ok: `${shown}: ${grid.querySelectorAll("tr").length || grid.children.length} rows shown`};
           });
         }
+        // Selection as the programs do it (Ahmed 2026-11-26): a left-to-right window round a support selects that joint,
+        // a right click opens the object's information with its loads, and the Filter keeps only the checked kinds.
+        const view3d = async () => { const b = document.querySelector('[data-act="v:3d"]'); if (b && !b.disabled) b.click(); await wait(150); const p = panes[active]; fit(p); draw(); await wait(120); return p; };
+        await step("selection: a left-to-right window round a support selects the support joint", async () => {
+          if (!supports.length) return {skipped: "skipped: the model has no supports"};
+          const p = await view3d(), s = supports.find(x => supportShown(p, x) && p.M.to(x.p)[3]);
+          if (!s) return {fail: "no support is in the 3-D view"};
+          const q = p.M.to(s.p); boxSelect(p, {x0: q[0] - 10, x1: q[0] + 10, y0: q[1] - 10, y1: q[1] + 10}, false, false);
+          if (!selJ.has(s.name)) return {fail: `the window round support ${s.name} left it unselected`};
+          const said = document.getElementById("sel").textContent;
+          if (!/Joint/.test(said)) return {fail: "the joint is selected but the status bar does not count it: " + said};
+          rightClick(p, q[0], q[1], false); await wait(120);
+          const d = [...document.querySelectorAll(".dlg")].pop();
+          return d && /Joint Information/.test(d.textContent) ? {ok: `support ${s.name} selected (${said}); its right click opens Joint Information`} : {fail: "a right click on the support opened no Joint Information"};
+        });
+        await step("selection: right click on an object opens its information, with a Loads tab holding its loads", async () => {
+          const p = await view3d(), shown = frames.concat(areas).filter(o => p.vis && p.vis[o.id]);
+          if (!shown.length) return {skipped: "skipped: nothing is drawn"};
+          sel.clear(); selJ.clear(); selChanged();
+          const span = o => o.type === "f" ? Math.hypot(...[0, 1].map(i => p.M.to(o.a)[i] - p.M.to(o.b)[i])) : 0;
+          const o = shown.filter(o => o.type === "f").sort((a, b) => span(b) - span(a))[0] || shown[0], mid = [0, 1, 2].map(i => o.type === "f" ? (o.a[i] + o.b[i]) / 2 : o.pts.reduce((t, c) => t + c[i], 0) / o.pts.length), q = p.M.to(mid);
+          rightClick(p, q[0], q[1], false); await wait(150);
+          let d = [...document.querySelectorAll(".dlg")].pop();
+          if (!d || !/Information/.test(d.textContent)) return {fail: `a right click on ${o.name} opened no information window (${JSON.stringify(pickAt(p, q[0], q[1]))} at ${q.slice(0, 2).map(Math.round)}; ${document.querySelectorAll(".dlg").length} windows)`};
+          if (!d.querySelector('.itabs [data-page="lds"]')) return {fail: "the information window has no Loads tab"};
+          closeDialogs();
+          const loaded = shown.find(x => loadRowsOf(x).length);
+          if (!loaded) return {ok: "information window with a Loads tab opened; no object in this pack has loads assigned"};
+          infoWindow(loaded.id); await wait(120); d = [...document.querySelectorAll(".dlg")].pop();
+          const n = loadRowsOf(loaded).reduce((k, x) => k + x.rows.length, 0), tab = d.querySelector('.itabs [data-page="lds"]').textContent;
+          if (!tab.includes("(" + n + ")")) return {fail: `${loaded.name} has ${n} load rows but its Loads tab says ${tab}`};
+          sel.clear(); sel.add(loaded.id); selChanged();
+          const props = document.getElementById("props").textContent;
+          return /Loads/.test(props) ? {ok: `${kindWord(loaded)} ${loaded.name}: ${tab}, and Properties lists them`} : {fail: `Properties of ${loaded.name} do not list its ${n} loads`};
+        });
+        await step("selection: the Filter keeps only the checked kinds of the selection", async () => {
+          const p = await view3d(); act("selAll"); act("selSupports"); await wait(80);
+          const cats = selCats(); if (cats.length < 2) return {skipped: "skipped: the selection has only one kind of object"};
+          const before = sel.size + selJ.size; selFilter(); await wait(120);
+          const d = [...document.querySelectorAll(".dlg")].pop(), g = d && d.querySelector("[data-g]");
+          if (!g) return {fail: "the Filter window did not open"};
+          g.checked = false; g.dispatchEvent(new Event("change")); d.querySelector('[data-b="0"]').click(); await wait(80);
+          const after = sel.size + selJ.size, left = selCats().map(c => c.label);
+          if (!(after < before)) return {fail: `unchecking ${g.dataset.g} left ${after} of ${before} selected`};
+          if (selCats().some(c => (c.k.startsWith("j:") ? "Joints" : c.label.split(" · ")[0]) === g.dataset.g)) return {fail: `${g.dataset.g} are still selected after unchecking them`};
+          act("selNone");
+          return {ok: `${before} selected, ${g.dataset.g} unchecked, ${after} kept (${left.slice(0, 4).join(", ")})`};
+        });
         for (const tab of ["props", "checks", "comments"]) {
           await step(`side tab: ${tab}`, async () => {
             const b = document.querySelector(`[data-tab="${tab}"]`);
