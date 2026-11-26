@@ -190,7 +190,7 @@ public static class ViewerCheck
           infoWindow(loaded.id); await wait(120); d = [...document.querySelectorAll(".dlg")].pop();
           const n = loadRowsOf(loaded).reduce((k, x) => k + x.rows.length, 0), tab = d.querySelector('.itabs [data-page="lds"]').textContent;
           if (!tab.includes("(" + n + ")")) return {fail: `${loaded.name} has ${n} load rows but its Loads tab says ${tab}`};
-          sel.clear(); sel.add(loaded.id); selChanged();
+          sel.clear(); selJ.clear(); sel.add(loaded.id); selChanged();
           const props = document.getElementById("props").textContent;
           return /Loads/.test(props) ? {ok: `${kindWord(loaded)} ${loaded.name}: ${tab}, and Properties lists them`} : {fail: `Properties of ${loaded.name} do not list its ${n} loads`};
         });
@@ -313,6 +313,8 @@ public static class ViewerCheck
         return (virtualMs, real, 60 + (int)Math.Ceiling(megabytes * 4));
     }
 
+    private sealed class Disposer(Action done) : IDisposable { public void Dispose() => done(); }
+
     private static string Short(string text) => text.Length > 300 ? text[..300] + "..." : text;
 
     internal static (string? Out, string? Error) Browse(string browser, string profile, int seconds, params string[] arguments)
@@ -326,6 +328,9 @@ public static class ViewerCheck
         {
             using var process = Process.Start(info);
             if (process is null) return (null, "it did not start");
+            var clock = Stopwatch.StartNew();
+            // On a build machine each browser run says how long it took, so a slow or stuck one is seen in the log.
+            using var said = Environment.GetEnvironmentVariable("CI") == "true" ? new Disposer(() => Console.Error.WriteLine($"   [browser {clock.Elapsed.TotalSeconds:0.0} s of {seconds} s] {string.Join(" ", arguments.Select(x => x.Length > 90 ? "..." + x[^60..] : x))}")) : null;
             var output = process.StandardOutput.ReadToEndAsync();
             var error = process.StandardError.ReadToEndAsync();
             if (!process.WaitForExit(seconds * 1000))
