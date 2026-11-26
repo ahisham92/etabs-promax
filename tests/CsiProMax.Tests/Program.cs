@@ -1016,6 +1016,10 @@ Test("tables for editing: every load pattern is selected for display first (SAP2
         var shown = System.Text.RegularExpressions.Regex.Matches(text, @"ShowEveryPattern\(m\);").Count;
         Check(reads > 0 && shown >= reads, $"{file}: {reads} table reads for editing, {shown} with every load pattern selected for display first");
     }
+    // 0.4.51 field test: the pack's reads for display too, or SAP2000 26 gives no load assignment rows (Load Assigns greyed out).
+    var com = File.ReadAllText(Path.Combine(root, "src", "CsiProMax.Assistant", "Etabs", "ComEtabs.cs"));
+    var display = com.IndexOf("GetTableForDisplayArray(key", StringComparison.Ordinal);
+    Check(display > 0 && com.LastIndexOf("EditableTables.ShowEveryPattern(m);", display, StringComparison.Ordinal) > com.LastIndexOf("public TableData ReadTable", display, StringComparison.Ordinal), "ReadTable does not select every load pattern before it reads a table for display");
     var helper = File.ReadAllText(Path.Combine(root, "src", "CsiProMax.Assistant", "Etabs", "EditableTables.cs"));
     Check(helper.Contains("m.DatabaseTables.SetLoadPatternsSelectedForDisplay(ref names)") && helper.Contains("m.LoadPatterns.GetNameList(ref n, ref names)"), "ShowEveryPattern does not select the model's own patterns");
 });
