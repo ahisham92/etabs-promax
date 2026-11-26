@@ -23,6 +23,7 @@
 #     -NoRuntime      do not look for or install the .NET 8 Desktop Runtime
 #     -Preview        say what would be added to the Tools menus, and change none of them
 #     -Zip <file>     a CsiProMax-<version>.zip you already have, instead of downloading
+#     -From <address> with -Tag: where that release's files are, instead of this repository's releases (for tests)
 #     -NoAI           CSI ProMax without the AI chat: the Modeler, the 3D view, review packs and the Viewer only, with
 #                     no Claude Code used or installed. The same as this line:
 #                       irm https://raw.githubusercontent.com/ahisham92/etabs-promax/main/install-no-ai.ps1 | iex
@@ -38,6 +39,7 @@ function Install-CsiProMax {
         [string]$Tag,
         [string]$Folder,
         [string]$Zip,
+        [string]$From,
         # For tests: a folder that stands in for %LOCALAPPDATA%\Computers and Structures. The files in it are copies,
         # so whether a program is open is not looked at.
         [string]$SettingsRoot,
@@ -81,6 +83,100 @@ function Install-CsiProMax {
             catch { }
         }
         return $false
+    }
+
+    # A download that says how far it is (Ahmed, 2026-11-26, at "Downloading CSI ProMax 0.4.49..." with nothing moving:
+    # "why is it taking so long ?"). PowerShell's own progress bar is off because it slows 5.1 down many times, so the
+    # megabytes are written on one line, once a second. When this way fails, PowerShell's own download is used.
+    function Get-File([string]$address, [string]$file, [string]$what) {
+        try {
+            $request = [Net.WebRequest]::Create($address)
+            if ($request -is [Net.HttpWebRequest]) { $request.UserAgent = 'CsiProMax-install'; $request.ReadWriteTimeout = 120000 }
+            $response = $request.GetResponse()
+            try {
+                $total = [long]$response.ContentLength
+                $source = $response.GetResponseStream()
+                $sink = [IO.File]::Create($file)
+                try {
+                    $buffer = New-Object byte[] 81920
+                    $done = [long]0
+                    $shown = [DateTime]::UtcNow
+                    while ($true) {
+                        $read = $source.Read($buffer, 0, $buffer.Length)
+                        if ($read -le 0) { break }
+                        $sink.Write($buffer, 0, $read)
+                        $done += $read
+                        if ($what -and (([DateTime]::UtcNow - $shown).TotalSeconds -ge 1)) {
+                            $shown = [DateTime]::UtcNow
+                            $line = if ($total -gt 0) { '{0}: {1:0.0} of {2:0.0} MB ({3:0}%)' -f $what, ($done / 1MB), ($total / 1MB), (100.0 * $done / $total) } else { '{0}: {1:0.0} MB' -f $what, ($done / 1MB) }
+                            Write-Host -NoNewline ("`r  " + $line + '      ')
+                        }
+                    }
+                }
+                finally { $sink.Close(); $source.Close() }
+                if ($total -gt 0 -and $done -ne $total) { throw "only $done of $total bytes arrived" }
+                if ($what) { Write-Host ("`r  " + ('{0}: {1:0.0} MB, done.' -f $what, ($done / 1MB)) + '              ') }
+            }
+            finally { $response.Close() }
+        }
+        catch {
+            if ($what) { Write-Host '' }
+            Invoke-WebRequest -UseBasicParsing -Uri $address -OutFile $file
+        }
+    }
+
+    # An install over a CSI ProMax that is already on the PC downloads only what changed: the release's file list
+    # (files.json) says each file's SHA-256, the files this PC already has with that content are taken from where they
+    # are, and the rest come from the release's small changed-<version>.zip. True when $unpacked\dist then holds the
+    # whole package, every file checked against the list; false when the whole package has to be downloaded instead.
+    function Get-ChangedOnly([string]$base, [string]$version, [string]$work, [string]$unpacked, [string[]]$have) {
+        try {
+            $listFile = Join-Path $work 'files.json'
+            Get-File "$base/files.json" $listFile ''
+            $list = Get-Content -Raw -LiteralPath $listFile | ConvertFrom-Json
+            if ($list.format -ne 1 -or -not $list.files) { return $false }
+            $plan = @()
+            $fromZip = 0
+            foreach ($entry in $list.files) {
+                $path = [string]$entry.path
+                if (-not $path -or $path -match '(^|[\\/])\.\.([\\/]|$)' -or $path -match '^[\\/]' -or $path -match ':') { return $false }
+                $relative = $path -replace '[\\/]', [string][IO.Path]::DirectorySeparatorChar
+                $found = $null
+                foreach ($folder in $have) {
+                    $candidate = Join-Path $folder $relative
+                    if ((Test-Path -LiteralPath $candidate -PathType Leaf) -and ((Get-Item -LiteralPath $candidate).Length -eq [long]$entry.size) -and
+                        ((Get-FileHash -LiteralPath $candidate -Algorithm SHA256).Hash -eq [string]$entry.sha256)) { $found = $candidate; break }
+                }
+                if (-not $found) {
+                    if (-not $entry.changed) { return $false }
+                    $fromZip++
+                }
+                $plan += [pscustomobject]@{ Relative = $relative; Found = $found; Sha = [string]$entry.sha256 }
+            }
+            if ($fromZip -eq $plan.Count) { return $false }
+            $changed = Join-Path $work 'changed'
+            if ($fromZip -gt 0) {
+                Say "  This PC already has $($plan.Count - $fromZip) of its $($plan.Count) files. Downloading only the $fromZip that changed..."
+                $changedZip = Join-Path $work "changed-$version.zip"
+                Get-File "$base/changed-$version.zip" $changedZip 'Downloaded'
+                Expand-Archive -LiteralPath $changedZip -DestinationPath $changed -Force
+            }
+            else { Say "  This PC already has every file of CSI ProMax $version. Nothing more to download." }
+            $dist = Join-Path $unpacked 'dist'
+            foreach ($item in $plan) {
+                $from = if ($item.Found) { $item.Found } else { Join-Path (Join-Path $changed 'dist') $item.Relative }
+                $to = Join-Path $dist $item.Relative
+                $parent = Split-Path -Parent $to
+                if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+                Copy-Item -LiteralPath $from -Destination $to -Force
+                if ((Get-FileHash -LiteralPath $to -Algorithm SHA256).Hash -ne $item.Sha) { throw "$($item.Relative) is not the published file" }
+            }
+            return $true
+        }
+        catch {
+            if (Test-Path -LiteralPath $unpacked) { Remove-Item -LiteralPath $unpacked -Recurse -Force -ErrorAction SilentlyContinue }
+            return $false
+        }
     }
 
     function Say([string]$text, [string]$color) {
@@ -254,13 +350,30 @@ function Install-CsiProMax {
             }
             $versionText = $Tag -replace '^[vV]', ''
             $package = Join-Path $work "CsiProMax-$versionText.zip"
-            $address = "https://github.com/$repository/releases/download/$Tag/CsiProMax-$versionText.zip"
-            Say "  Downloading CSI ProMax $versionText..."
-            try { Invoke-WebRequest -UseBasicParsing -Uri $address -OutFile $package }
-            catch { throw "The download failed ($address): $($_.Exception.Message)" }
+            $base = if ($From) { $From.TrimEnd('/') } else { "https://github.com/$repository/releases/download/$Tag" }
         }
         $unpacked = Join-Path $work 'unpacked'
-        Expand-Archive -LiteralPath $package -DestinationPath $unpacked -Force
+        $assembled = $false
+        if (-not $Zip) {
+            # What this PC already has: the installed folder, and the versions the window has downloaded by itself.
+            $have = @()
+            if (Test-Path -LiteralPath $Folder -PathType Container) { $have += $Folder }
+            if ($onWindows -and -not $From -and $env:LOCALAPPDATA) {
+                $versions = Join-Path $env:LOCALAPPDATA 'CsiProMax\versions'
+                if (Test-Path -LiteralPath $versions -PathType Container) {
+                    $have += @(Get-ChildItem -LiteralPath $versions -Directory | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName '.complete') } |
+                               Sort-Object LastWriteTime -Descending | Select-Object -First 3 | ForEach-Object { $_.FullName })
+                }
+            }
+            if ($have.Count -gt 0) { $assembled = [bool](Get-ChangedOnly $base $versionText $work $unpacked $have) }
+            if (-not $assembled) {
+                $address = "$base/CsiProMax-$versionText.zip"
+                Say "  Downloading CSI ProMax $versionText..."
+                try { Get-File $address $package 'Downloaded' }
+                catch { throw "The download failed ($address): $($_.Exception.Message)" }
+            }
+        }
+        if (-not $assembled) { Expand-Archive -LiteralPath $package -DestinationPath $unpacked -Force }
         $dist = Join-Path $unpacked 'dist'
         if (-not (Test-Path -LiteralPath (Join-Path $dist 'CsiProMax.dll'))) { throw 'The package is not a CSI ProMax package (dist\CsiProMax.dll is missing).' }
 
