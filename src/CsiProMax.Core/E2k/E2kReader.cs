@@ -169,6 +169,7 @@ public static class E2kReader
                 var assign = model.LineAssigns.Find(a => a.Label == Name(0) && a.Story == Name(1));
                 if (assign is null) model.LineAssigns.Add(assign = new LineAssign { Label = Name(0), Story = Name(1) });
                 assign.Section = Take(extra, "SECTION") ?? assign.Section;
+                EtabsModifiers.FromEtabs(extra, EtabsModifiers.Frame);
                 if (extra.Count > 0) assign.Extra.Add(extra);
                 return true;
             }
@@ -178,6 +179,7 @@ public static class E2kReader
                 var assign = model.AreaAssigns.Find(a => a.Label == Name(0) && a.Story == Name(1));
                 if (assign is null) model.AreaAssigns.Add(assign = new AreaAssign { Label = Name(0), Story = Name(1) });
                 assign.Section = Take(extra, "SECTION") ?? assign.Section;
+                EtabsModifiers.FromEtabs(extra, EtabsModifiers.Area);
                 assign.Diaphragm = Take(extra, "DIAPH") ?? assign.Diaphragm;
                 if (extra.Count > 0) assign.Extra.Add(extra);
                 return true;

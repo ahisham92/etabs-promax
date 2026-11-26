@@ -135,8 +135,9 @@ public static class CsiFieldSteps
                     // table lists them, so that is read too.
                     if (hinges == 0 && link.Tables().FirstOrDefault(t => t.Name.StartsWith("Frame Hinge Assigns 01", StringComparison.OrdinalIgnoreCase)) is { } overview)
                         try { hinges = link.ReadTable(overview.Key, null, null).Rows.Count; } catch (EtabsException) { }
-                    // The .s2k carries the concrete beam's two flexural hinges; the .e2k all three.
-                    var written = program.Key == CsiProgram.Sap2000.Key ? 2 : 3;
+                    // The .s2k and the .e2k carry the concrete beam's two flexural hinges: neither program has an auto
+                    // table for its shear hinge (ETABS 23's ASCE 41-17 concrete beam takes M2 and M3 only, 2026-11-26).
+                    var written = 2;
                     FieldContext.Expect(hinges >= written, $"{name} has {hinges} hinges from the Modeler's file, {written} were written (a frame's answer: {last?.ToJsonString()}; its hinge tables: {HingeTables()})");
                     return $"{hinges} hinges";
                 });
@@ -290,8 +291,10 @@ public static class CsiFieldSteps
         {
             T("add_material", """{"name":"CPM-STEEL","type":"steel","elastic_modulus":200000000,"fy":345000,"unit_weight":77}""", _ => FieldContext.Expect(link.Materials().Contains("CPM-STEEL"), "CPM-STEEL is not in the model"));
             T("add_frame_section", """{"name":"CPM-I300","shape":"i_section","material":"CPM-STEEL","depth":0.3,"width":0.15,"flange_thickness":0.01,"web_thickness":0.007}""", _ => FieldContext.Expect(link.FrameSections().Contains("CPM-I300"), "CPM-I300 is not in the model"));
-            var joints = Names(T("add_joints", """{"points":[[60,0,0],[60,0,3]]}""", a => FieldContext.Expect(Int(a["added"]) == 2, "two joints were asked for: " + a.ToJsonString())), "joints");
-            var made = Names(T("add_frames", """{"lines":[[60,0,0,60,0,3],[60,0,0,63,0,3]],"section":"CPM-I300"}""", a =>
+            // Above the base level: ETABS gives a joint there the model's base restraint and reuses it (0.4.55 ETABS run: a
+            // pinned joint at 60,0,0 left by an earlier run, so the two stood on a pin and were not floating).
+            var joints = Names(T("add_joints", """{"points":[[60,0,0.5],[60,0,2.5]]}""", a => FieldContext.Expect(Int(a["added"]) == 2, "two joints were asked for: " + a.ToJsonString())), "joints");
+            var made = Names(T("add_frames", """{"lines":[[60,0,0.5,60,0,2.5],[60,0,0.5,63,0,2.5]],"section":"CPM-I300"}""", a =>
             {
                 var names = Names(a, "frames");
                 var kinds = link.Frames().Where(f => names.Contains(f.Name)).Select(f => f.Kind).OrderBy(k => k).ToList();

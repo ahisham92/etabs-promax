@@ -397,10 +397,11 @@ public static class PropertyDefs
             var t = Tokenize(line);
             if (t.Count < 7 || t[0] != "HINGEASSIGN") continue;
             string? dof = null; double? at = null;
-            for (var i = 3; i + 1 < t.Count; i += 2)
+            // The Modeler's form (AUTO "M3" RELDIST 0.05) and ETABS 23's own (DOF "PM2M3" ... RDISTANCE 0.05).
+            for (var i = 3; i + 1 < t.Count; i++)
             {
-                if (t[i] == "AUTO") dof = Unquote(t[i + 1]);
-                else if (t[i] == "RELDIST" && TryNumber(t[i + 1], out var d)) at = d;
+                if (t[i] is "AUTO" or "DOF") { var d0 = Unquote(t[i + 1]); dof = HingeDofs.FirstOrDefault(h => h.Replace("-", "") == d0.Replace("-", "")) ?? d0; }
+                else if (t[i] is "RELDIST" or "RDISTANCE" && TryNumber(t[i + 1], out var d)) at = d;
             }
             if (dof is not null && at is { } a) list.Add((Unquote(t[1]), Unquote(t[2]), new HingeDef(a, dof)));
         }

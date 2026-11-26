@@ -176,8 +176,10 @@ public static class LateralTools
     private static List<CodeTable> CodeTables(ICsiLink e, string kind)
     {
         var marker = kind == LateralCodes.Wind ? "Auto Wind - " : "Auto Seismic - ";
+        // "Loads to Diaphragms" and "Loads to Stories" are ETABS's worked-out auto loads, read only, not codes (0.4.55
+        // ETABS run: every field "importable False", so their rows were refused).
         return e.Tables().Select(t => (t, at: t.Name.IndexOf(marker, StringComparison.OrdinalIgnoreCase)))
-            .Where(x => x.at >= 0).Select(x => new CodeTable(x.t.Name[(x.at + marker.Length)..].Trim(), x.t.Key, x.t.Name,
+            .Where(x => x.at >= 0 && x.t.Import != 0 && !x.t.Name.EndsWith("Loads to Diaphragms", StringComparison.OrdinalIgnoreCase) && !x.t.Name.EndsWith("Loads to Stories", StringComparison.OrdinalIgnoreCase)).Select(x => new CodeTable(x.t.Name[(x.at + marker.Length)..].Trim(), x.t.Key, x.t.Name,
                 x.t.Key.IndexOf(marker, StringComparison.OrdinalIgnoreCase) is var k and >= 0 ? x.t.Key[(k + marker.Length)..].Trim() : x.t.Name[(x.at + marker.Length)..].Trim()))
             .GroupBy(c => c.Code, StringComparer.OrdinalIgnoreCase).Select(g => g.First()).ToList();
     }
@@ -305,6 +307,11 @@ public static class LateralTools
         else
         {
             var row = new Dictionary<string, string>(values, StringComparer.OrdinalIgnoreCase) { [key] = name };
+            // ETABS 23's User Loads row needs its load set ("Field name: LOAD SET NUMBER ... record skipped" with the
+            // name alone, 0.4.55 ETABS run): one set, at the mass center, unless given.
+            if (table.Code.Equals("User Loads", StringComparison.OrdinalIgnoreCase))
+                foreach (var (f, v) in new[] { ("NumberSets", "1"), ("SetNumber", "1"), ("LoadAtCM", "Yes") })
+                    row.TryAdd(f, v);
             EditableTables.Put(e, table.Key, key, [row], $"give {name} its {table.Code} inputs");
         }
         var back = EditableTables.Read(e, table.Key, key, name)

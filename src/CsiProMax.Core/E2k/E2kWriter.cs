@@ -22,7 +22,9 @@ public static class E2kWriter
             .Append((SavedAt ?? DateTime.Now).ToString("M/d/yyyy h:mm:ss tt", System.Globalization.CultureInfo.InvariantCulture)).Append("\r\n");
         // The log closes the file (its last line is END, and ETABS reads nothing after it): always written last.
         var log = model.Passthrough.Where(p => p.Heading == "LOG").ToList();
-        var passthrough = model.Passthrough.Except(log).ToList();
+        // The Modeler's auto hinges go as ETABS writes them (it reads no other form).
+        var passthrough = model.Passthrough.Except(log).Select(r => r.Heading == PropertyDefs.HingeHeading
+            ? new RawSection { Heading = r.Heading, After = r.After, Lines = EtabsHinges.ToEtabs(model, r.Lines) } : r).ToList();
         EmitPassthroughAfter(text, passthrough, "");
 
         var anchors = new List<string>();
@@ -138,13 +140,13 @@ public static class E2kWriter
                 break;
             case S.LineAssigns:
                 foreach (var a in m.LineAssigns)
-                    foreach (var line in AssignLines(["LINEASSIGN", Quote(a.Label), Quote(a.Story)], [.. Pair("SECTION", a.Section)], a.Extra))
+                    foreach (var line in AssignLines(["LINEASSIGN", Quote(a.Label), Quote(a.Story)], [.. Pair("SECTION", a.Section)], EtabsModifiers.ToEtabs(a.Extra, EtabsModifiers.Frame)))
                         yield return line;
                 break;
             case S.AreaAssigns:
                 foreach (var a in m.AreaAssigns)
                     foreach (var line in AssignLines(["AREAASSIGN", Quote(a.Label), Quote(a.Story)],
-                                 [.. Pair("SECTION", a.Section), .. Pair("DIAPH", a.Diaphragm)], a.Extra))
+                                 [.. Pair("SECTION", a.Section), .. Pair("DIAPH", a.Diaphragm)], EtabsModifiers.ToEtabs(a.Extra, EtabsModifiers.Area)))
                         yield return line;
                 break;
             case S.LoadPatterns:

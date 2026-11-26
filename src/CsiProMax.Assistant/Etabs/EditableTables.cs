@@ -100,6 +100,24 @@ public static class EditableTables
                 kept.Add(row);
             }
 
+            // Fields the table shows but does not import (ETABS 23's KDS table: TL, Fa, Fv, SDS, SD1, worked out by ETABS)
+            // are left out: sent back, each is an error ("Error reading field TL; field ignored"), and the import was taken
+            // as refused although its record was read (0.4.55 ETABS run).
+            {
+                int n = 0, v2 = 0; string[] keys = [], names = [], about = [], units = []; bool[] importable = [];
+                try { m.DatabaseTables.GetAllFieldsInTable(key, ref v2, ref n, ref keys, ref names, ref about, ref units, ref importable); } catch { keys = []; }
+                keys ??= []; importable ??= [];
+                var shown = keys.Select((k, i) => (k, ok: i < importable.Length && importable[i])).ToList();
+                var drop = Enumerable.Range(0, fields.Length).Where(i => !fields[i].Equals(keyField, StringComparison.OrdinalIgnoreCase)
+                    && shown.Any(s => s.k.Equals(fields[i], StringComparison.OrdinalIgnoreCase) && !s.ok)).ToHashSet();
+                // Only when the program says which ones it imports (an answer with none importable says nothing).
+                if (drop.Count > 0 && drop.Count < fields.Length && importable.Any(x => x))
+                {
+                    var keep = Enumerable.Range(0, fields.Length).Where(i => !drop.Contains(i)).ToArray();
+                    kept = kept.Select(r => keep.Select(i => r[i]).ToArray()).ToList();
+                    fields = keep.Select(i => fields[i]).ToArray();
+                }
+            }
             var all = kept.SelectMany(r => r).ToArray();
             var f2 = fields.ToArray();
             try
@@ -405,10 +423,18 @@ public static class EditableTables
     public static string Trouble(string log)
     {
         string[] words = ["error", "warning", "not found", "invalid", "not valid", "not allowed", "does not exist", "cannot", "could not", "unknown", "failed", "must be", "out of range"];
-        var lines = log.Replace("\r", "").Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0)
+        var all = log.Replace("\r", "").Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
+        // ETABS and SAP2000 put "*** Error Message ***" on a line of its own and say what is wrong on the lines after it
+        // (0.4.55 ETABS run: the reason was cut off), so each such header goes with the lines that follow it.
+        var detailed = new List<string>();
+        for (var i = 0; i < all.Count; i++)
+            if (System.Text.RegularExpressions.Regex.IsMatch(all[i], @"^\*+\s*(error|warning)", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                detailed.Add(string.Join(" ", all.Skip(i + 1).TakeWhile(l => !l.StartsWith('*')).Take(4)));
+        var lines = detailed.Where(l => l.Length > 0).Concat(all
+            .Where(l => !System.Text.RegularExpressions.Regex.IsMatch(l, @"^\*+\s*(error|warning)", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
             .Where(l => words.Any(w => l.Contains(w, StringComparison.OrdinalIgnoreCase)) && !l.Contains("Elements Deleted", StringComparison.OrdinalIgnoreCase) && !l.StartsWith("Import Type", StringComparison.OrdinalIgnoreCase))
             .Where(l => !System.Text.RegularExpressions.Regex.IsMatch(l, @"^(Number of )?(errors?|warnings?)\s*[:=]?\s*0\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
-            .Distinct().Take(12);
+            ).Distinct().Take(12);
         return string.Join(" | ", lines);
     }
 }
