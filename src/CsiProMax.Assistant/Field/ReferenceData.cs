@@ -64,6 +64,7 @@ public static class ReferenceData
         new("the files of the scratch folder", null, ScratchFiles),
         new("what the program holds of the Modeler's file", null, Holds),
         new("the calls the program's API has", null, ApiCalls),
+        new("SAP2000's own values for an area edge release and a joint panel zone", p => p.Key == "sap2000", EdgeReleaseAndPanelZone),
         // Last: it replaces the scratch model in the scratch window with a new blank one (never saved).
         new("the program's defaults, from a new blank model", null, BlankDefaults),
     ];
@@ -307,6 +308,56 @@ public static class ReferenceData
         var stem = Path.GetFileNameWithoutExtension(file);
         var texts = Directory.Exists(folder) ? Directory.EnumerateFiles(folder, stem + ".*").Where(f => TextModels.Contains(Path.GetExtension(f), StringComparer.OrdinalIgnoreCase)).Select(Path.GetFileName).ToList() : [];
         return $"the save answered {answer}; text copies beside the scratch model: {(texts.Count == 0 ? "none" : string.Join(", ", texts))}";
+    }
+
+    /// <summary>
+    /// SAP2000: an edge release on one area edge and a panel zone on one joint of the scratch model, set by the API, and
+    /// the rows SAP2000 then shows in "Area Edge Release Assignments" and "Joint Panel Zone Assignments": its own field
+    /// values, for the Modeler to carry those two assignments. Only on the test's own scratch model, never saved after.
+    /// </summary>
+    private static string EdgeReleaseAndPanelZone(Gather g)
+    {
+        var said = new List<string>();
+        string First(string kind) => (string)g.Link.Raw($"list the {kind}s", m =>
+        {
+            int n = 0; string[] names = [];
+            var answer = kind == "area" ? m.AreaObj.GetNameList(ref n, ref names) : m.PointObj.GetNameList(ref n, ref names);
+            return n > 0 && names is { Length: > 0 } ? names[0] : "";
+        });
+        try
+        {
+            var area = First("area");
+            if (area.Length == 0) said.Add("no area");
+            else
+            {
+                // SAP2000 26's API: SetEdgeRelease is not in every version; each try is said with its answer.
+                foreach (var (what, call) in new (string, Func<dynamic, object>)[]
+                {
+                    ("AreaObj.SetEdgeRelease", m => { var r = new bool[] { true, false, false, false }; return m.AreaObj.SetEdgeRelease(area, 1, ref r, 0); }),
+                })
+                    try { said.Add($"{what}: {g.Link.Raw(what, call)}"); }
+                    catch (Exception ex) when (ex is not OutOfMemoryException) { said.Add($"{what}: {ex.GetType().Name} {ex.Message}"); }
+            }
+            var joint = First("point");
+            if (joint.Length == 0) said.Add("no joint");
+            else
+                try { said.Add("PointObj.SetPanelZone: " + g.Link.Raw("set a panel zone", m => m.PointObj.SetPanelZone(joint, 1, 0.0, 0.0, 0.0, "", 1, 1, 0.0, 0))); }
+                catch (Exception ex) when (ex is not OutOfMemoryException) { said.Add($"PointObj.SetPanelZone: {ex.GetType().Name} {ex.Message}"); }
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { said.Add($"{ex.GetType().Name} {ex.Message}"); }
+        var sb = new StringBuilder();
+        foreach (var key in new[] { "Area Edge Release Assignments", "Joint Panel Zone Assignments" })
+        {
+            sb.AppendLine(Csv("table", key));
+            try
+            {
+                var t = g.Link.ReadTable(key, null, null);
+                sb.AppendLine(Csv([.. t.Fields]));
+                foreach (var r in t.Rows.Take(50)) sb.AppendLine(Csv([.. r]));
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { sb.AppendLine(Csv("not read", ex.Message)); }
+        }
+        return g.Write("sap2000 edge release and panel zone.csv", sb.ToString()) + " (" + string.Join("; ", said) + ")";
     }
 
     private static string ScratchFiles(Gather g)

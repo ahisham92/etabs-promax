@@ -92,5 +92,33 @@ static class AssignTablesTests
             Refused(link, "assign_frame_data", new { objects = new[] { b }, tables = new Dictionary<string, object> { ["Area Assignments - Additional Mass"] = new[] { new { AddedMass = "1" } } } }, "no frame assignment table");
             Refused(link, "assign_shell_data", new { objects = new[] { s }, tables = new Dictionary<string, object> { ["Area Assignments - Additional Mass"] = new[] { new { AddedMass = "1" }, new { AddedMass = "2" } } } }, "one row");
         });
+
+        yield return ("assign tables: ETABS-only assignments survive the model going to SAP2000 and back to ETABS, in the model and its .cpm", () =>
+        {
+            var link = Frame();
+            var m = link.Model;
+            var beam = m.LineAssigns.First(a => m.Line(a.Label)!.Kind == LineKind.Beam && a.Story == "Story1");
+            var slab = m.AreaAssigns.First(a => a.Story == "Story1");
+            var etabsOnly = new Dictionary<string, object>
+            {
+                ["Frame Assignments - Column Splice Overwrites"] = new[] { new { SpliceOpt = "Splice at Height", SpliceHt = "1.2" } },
+                ["Frame Assignments - Floor Cracking"] = new[] { new { Consider = "Yes" } },
+                ["Frame Assignments - Moment Frame Beam Connection Type"] = new[] { new { Type = "Pinned" } },
+            };
+            Run(link, "assign_frame_data", new { objects = new[] { beam.Label + "@Story1" }, tables = etabsOnly });
+            Run(link, "assign_shell_data", new { objects = new[] { slab.Label + "@Story1" }, tables = new Dictionary<string, object> { ["Area Assignments - Slab Rib Locations"] = new[] { new { X = "1", Y = "2" } }, ["Area Assignments - Slab Line Releases"] = new[] { new { ShearL = "Yes" } } } });
+            string Rows(StructuralModel x) => JsonSerializer.Serialize(AssignTables.Rows(x).OrderBy(t => t.Key, StringComparer.Ordinal).ToDictionary(t => t.Key, t => t.Value));
+            var before = Rows(m);
+            var program = ModelerTools.All.Single(x => x.Name == "set_model_program");
+            program.Invoke(JsonDocument.Parse("""{"program":"sap2000"}""").RootElement, link);
+            Check(link.Model.Target == "sap2000", "the model is for SAP2000 now");
+            S2kWriter.Write(link.Model, "a.s2k");
+            var viaFile = ModelFile.FromJson(ModelFile.ToJson(link.Model));
+            Check(Rows(viaFile) == before, "the SAP2000 model's .cpm keeps the ETABS-only rows");
+            program.Invoke(JsonDocument.Parse("""{"program":"etabs"}""").RootElement, link);
+            Check(link.Model.Target is null or "etabs", "back to ETABS: " + link.Model.Target);
+            Check(Rows(link.Model) == before, "back in ETABS the rows are all there, as they were");
+            Check(AssignTables.Rows(link.Model)["Frame Assignments - Column Splice Overwrites"].Single()["SpliceHt"] == "1.2", "the splice height is intact");
+        });
     }
 }
