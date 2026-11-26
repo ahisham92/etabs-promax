@@ -66,8 +66,6 @@ public static class ReferenceData
         new("the files of the scratch folder", null, ScratchFiles),
         new("what the program holds of the Modeler's file", null, Holds),
         new("the calls the program's API has", null, ApiCalls),
-        // This one and the last replace the scratch model in the scratch window (the text copy above saved it).
-        new("the slab, post-tensioning and punching examples, opened from their copies, with their tables and text copies", p => p.Key is "etabs" or "safe", OpenedExamples),
         // Last: it replaces the scratch model in the scratch window with a new blank one (never saved).
         new("the program's defaults, from a new blank model", null, BlankDefaults),
     ];
@@ -401,7 +399,10 @@ public static class ReferenceData
         return g.Write("api calls.txt", sb.ToString()) + $" ({n} interfaces, names only: a .NET Framework file)";
     }
 
-    // ---- slab line releases, slab rebar and the examples (the slabs thread) -------------------------------------------
+    // ---- slab line releases and slab rebar (the slabs thread) ------------------------------------------------------
+    // Not here on purpose: opening the example models in the scratch window. An older example can put up a message box
+    // (upgrade, save changes) that no one answers, which would hold the window past its close and turn a needed thing
+    // into a failure. The examples' own files are copied by CopyExamples instead.
 
     /// <summary>
     /// One slab line release (on a null line drawn across the first floor) and one slab rebar object, put into the
@@ -509,33 +510,6 @@ public static class ReferenceData
             return data;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException) { sb.AppendLine("not read: " + ex.GetType().Name + ": " + Short(ex.Message)); return new TableData([], []); }
-    }
-
-    /// <summary>
-    /// Each slab, post-tensioning and punching example model that <see cref="CopyExamples"/> copied into the test's
-    /// folder, opened in the scratch window (the copy, never the original), with every table it has data in, and saved
-    /// once under the copy's name so the program writes its own text copy beside it (its .e2k words for them).
-    /// </summary>
-    private static string OpenedExamples(Gather g)
-    {
-        if (g.ModelPath.Length == 0) return "not opened: only in the test's own scratch window";
-        var copies = Path.Combine(g.Folder, "Verification");
-        var ext = g.Program.Key == "safe" ? ".fdb" : ".edb";
-        var models = Directory.Exists(copies) ? Directory.EnumerateFiles(copies, "*" + ext, SearchOption.AllDirectories).Take(3).ToList() : [];
-        if (models.Count == 0) return "no example model was copied to open";
-        var said = new List<string>();
-        foreach (var model in models)
-        {
-            var stem = Path.GetFileNameWithoutExtension(model);
-            // The same open the test's checkpoints use (a new model first when the program says no with a model open).
-            try { Tools.CsiTools.OpenFile(g.Link, "open a copy of an example", model); g.Link.Refresh(); }
-            catch (Exception ex) when (ex is not OutOfMemoryException) { said.Add($"{stem}: not opened ({ex.GetType().Name}: {Short(ex.Message)})"); continue; }
-            var saved = Convert.ToInt32(g.Link.Raw("save the example's copy", m => m.File.Save(model)));
-            var tables = ScratchTables(new Gather(g.Program, g.Link, Path.Combine(g.Folder, "examples", SafeName(stem)), ""));
-            var texts = Directory.EnumerateFiles(Path.GetDirectoryName(model)!, stem + ".*").Where(f => TextModels.Contains(Path.GetExtension(f), StringComparer.OrdinalIgnoreCase)).Select(Path.GetFileName).ToList();
-            said.Add($"{stem}: examples/{SafeName(stem)}/{tables}; saved {saved}, text copies {(texts.Count == 0 ? "none" : string.Join(", ", texts))}");
-        }
-        return string.Join("; ", said);
     }
 
     /// <summary>
