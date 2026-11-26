@@ -315,6 +315,10 @@ public static class ModelerFieldSteps
             FieldContext.Expect(a["combinations"]!.AsArray().Any(c => c!["name"]!.GetValue<string>() == "CPM-ULS" && c["cases"]!.AsArray().Count > 0), "CPM-ULS and its cases are not in the definitions: " + a["combinations"]!.ToJsonString());
             FieldContext.Expect(a["frame_sections"]!.AsArray().Any(x => x!["name"]!.GetValue<string>() == "CPM-C400" && x["used"]!.GetValue<int>() > 0), "CPM-C400 and its use are not in the definitions");
         });
+        // The program the model is for (Ahmed 2026-11-26): changed and changed back, the model otherwise as it was.
+        var target = modeler.Model.Target;
+        ctx.Tool("set_model_program", """{"program":"sap2000"}""", a => FieldContext.Expect(modeler.Model.Target == "sap2000" && a["was"]?.GetValue<string>() == CsiProMax.Model.StructuralModel.TargetName(target), "the model is not made for SAP2000 now: " + a.ToJsonString()), "tool set_model_program, to SAP2000");
+        ctx.Tool("set_model_program", $$"""{"program":{{Q(target)}}}""", a => FieldContext.Expect(modeler.Model.Target == target, "the model's program did not come back: " + a.ToJsonString()), "tool set_model_program, back");
         var stories = modeler.Model.Stories.Skip(1).Select(x => $$"""{"name":{{Q(x.Name)}},"height":{{CsiProMax.E2k.E2kText.Number(x.Height)}},"was":{{Q(x.Name)}}}""");
         var frames = modeler.Frames().Count;
         ctx.Tool("define_stories", $$"""{"stories":[{{string.Join(",", stories)}}]}""", a => FieldContext.Expect(modeler.Frames().Count == frames, $"the story data was sent back as it is, and {frames - modeler.Frames().Count} objects went missing"));

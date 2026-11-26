@@ -61,7 +61,7 @@ public static class ModelerCheck
       }
       // Whether an item is greyed out now (the menus are made again each time they open).
       function offNow(a) {
-        const all = []; const m = modelerMenus(viewerMenus());
+        const all = []; const m = (typeof forProgram === "function" ? forProgram : x => x)(modelerMenus(viewerMenus()));
         for (const k of Object.keys(m)) (function walk(list) { for (const it of list || []) { if (!it) continue; if (Array.isArray(it[1])) walk(it[1]); else all.push(it); } })(m[k]);
         const hit = all.find(it => it[1] === a);
         return !hit || !!hit[3];
@@ -235,11 +235,32 @@ public static class ModelerCheck
         });
         // A beam and a floor selected before each item, so the items that act on a selection are on (Delete empties it).
         const pick = () => { try { sel.clear(); const b = frames.findIndex(f => f.kind === "beam"); if (b >= 0) sel.add(b + 1); if (areas.length) sel.add(frames.length + 1); selChanged(); } catch (e) { } };
-        const menus = modelerMenus(viewerMenus()), list = [];
-        for (const name of ["File", "Assign", "Define", "Draw", "Edit", "Analyze"]) flat(menus[name], name, list);
+        const programMenus = () => (typeof forProgram === "function" ? forProgram : x => x)(modelerMenus(viewerMenus()));
+        const listNow = () => { const m = programMenus(), out = []; for (const name of ["File", "Assign", "Define", "Draw", "Edit", "Analyze"]) flat(m[name], name, out); return out; };
+        const list = listNow();
+        // The menus follow the program the model is for (Ahmed 2026-11-26): the items only SAP2000 or SAFE has are run
+        // with the model made for that program, after the first program's.
+        const seen = new Set(list.map(it => it.act));
+        for (const target of typeof forProgram === "function" ? ["sap2000", "safe"] : []) {
+          let extra = [];
+          await step(`the menus follow the program: the model made for ${target}`, async () => {
+            const j = await hmRun("set_model_program", {program: target}, true);
+            if (!j.ok) return {fail: "set_model_program: " + j.error};
+            for (let i = 0; i < 30 && program !== target; i++) { if (window.cpmPull) await window.cpmPull(); await wait(200); }
+            if (program !== target) return {fail: `the page still shows ${program}`};
+            const now = listNow(), acts = now.map(it => it.act);
+            const wrong = target === "safe" ? acts.filter(x => ["m:st:pier", "m:ex:lanes", "m:ex:constraints", "m:ad:hinges"].includes(x)) : acts.filter(x => ["m:st:pier", "m:ex:strips"].includes(x));
+            if (wrong.length) return {fail: "it offers what " + target + " does not have: " + wrong.join(", ")};
+            extra = now.filter(it => !seen.has(it.act)); extra.forEach(it => seen.add(it.act));
+            return {ok: `${now.length} items, ${extra.length} only here`};
+          });
+          list.push(...extra.map(it => ({...it, path: it.path + " (" + target + ")", target})));
+        }
+        if (typeof forProgram === "function") { await hmRun("set_model_program", {program: "etabs"}, true); if (window.cpmPull) await window.cpmPull(); await wait(400); }
         for (const it of list) {
           await step("menu: " + it.path, async () => {
             if (NOT_RUN.includes(it.act)) return {skipped: "skipped: it asks the PC for a file or a printer, which a browser without a window can't show"};
+            if (it.target && program !== it.target) { await hmRun("set_model_program", {program: it.target}, true); for (let i = 0; i < 30 && program !== it.target; i++) { if (window.cpmPull) await window.cpmPull(); await wait(200); } }
             pick();
             if (offNow(it.act)) return {skipped: "skipped: greyed out at this point of the check"};
             const before = dialogsOpen();

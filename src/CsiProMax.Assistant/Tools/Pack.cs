@@ -71,6 +71,8 @@ public static class Pack
             ["format"] = "cpmx", ["version"] = Version,
             ["model"] = file.Length > 0 ? Path.GetFileNameWithoutExtension(file) : e is OfflineEtabs { Model.Title.Length: > 0 } own ? own.Model.Title : "Unsaved model",
             ["file"] = info.File, ["etabs"] = info.Version, ["program"] = e.Program.Name,
+            // The Modeler's model is made for one program (Ahmed 2026-11-26): the page offers what that one has.
+            ["target"] = e is OfflineEtabs { Model: var tm } ? tm.Target : null,
             ["units"] = new JsonObject { ["force"] = info.Force, ["length"] = info.Length, ["temperature"] = info.Temperature },
             ["analysis_run"] = info.Locked,
             ["created"] = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture),

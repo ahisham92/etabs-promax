@@ -416,7 +416,8 @@ function load(pack, keep) {
   const selNames = keep ? [...sel].map(objOf).filter(Boolean).map(o => o.type + ":" + o.name) : [];
   P = pack; P.comments = P.comments || []; P.tables = P.tables || {};
   const m = P.model, man = P.manifest || {};
-  program = /safe/i.test(man.program || "") ? "safe" : /sap/i.test(man.program || "") ? "sap2000" : "etabs";
+  // In the Modeler the model is made for one program, chosen at New Model (Ahmed 2026-11-26): the page offers what it has.
+  program = window.cpmLive && /^(etabs|sap2000|safe)$/.test(man.target || "") ? man.target : /safe/i.test(man.program || "") ? "safe" : /sap/i.test(man.program || "") ? "sap2000" : "etabs";
   document.body.dataset.prog = program;
   if (!bgSaved) bg = program === "etabs" ? "black" : "white";
   points = m.points || [];
@@ -2449,7 +2450,27 @@ function copyText(t) {
 }
 
 // ---- menus ----
-const menus = () => window.cpmLive ? modelerMenus(viewerMenus()) : viewerMenus();
+const menus = () => window.cpmLive ? forProgram(modelerMenus(viewerMenus())) : viewerMenus();
+// The Modeler's menus for the model's program: an item marked {only: [...]} is left out for the others, and a
+// separator left at an end or next to another goes too.
+function forProgram(m) {
+  const tidy = list => {
+    const out = [];
+    for (const it of list) {
+      if (it && it.only) { if (!it.only.includes(program)) continue; }
+      const item = it && it.only ? it.item : it;
+      if (Array.isArray(item) && Array.isArray(item[1])) { const sub = tidy(item[1]); if (!sub.some(Boolean)) continue; out.push([item[0], sub, ...item.slice(2)]); continue; }
+      if (item === 0 && (!out.length || out[out.length - 1] === 0)) continue;
+      out.push(item);
+    }
+    while (out.length && out[out.length - 1] === 0) out.pop();
+    return out;
+  };
+  for (const k of Object.keys(m)) if (Array.isArray(m[k])) m[k] = tidy(m[k]);
+  return m;
+}
+const only = (programs, item) => ({only: programs, item});
+const progLabel = k => ({etabs: "ETABS", sap2000: "SAP2000", safe: "SAFE"})[k] || "ETABS";
 const viewerMenus = () => {
   const p = panes[active], plan = p && p.mode === "plan", elev = p && p.mode === "elev";
   return {
@@ -3229,21 +3250,22 @@ const hmU = () => { const u = (hm.defs && hm.defs.units) || {}; return {f: (u.fo
 function modelerMenus(m) {
   const s = hm.state || {}, any = sel.size > 0, fr = [...sel].some(id => (objOf(id) || {}).type === "f"), ar = [...sel].some(id => (objOf(id) || {}).type === "a");
   m.File = [["New Model...", "m:new", "Ctrl+N"], ["Open...", "m:open", "Ctrl+O"], 0, ["Save", "m:save", "Ctrl+S"], ["Save As...", "m:saveAs"], 0,
+    ["Model for " + progLabel(program) + " (change)...", "m:program"], 0,
     ["Import", [["Tables from Excel (.xlsx)...", "m:xlsxIn"]]],
-    ["Export", [["Tables to Excel (.xlsx)...", "m:xlsxOut"], 0, ["SAP2000 .s2k Text File...", "m:s2k"], ["SAFE .f2k Text File (one floor)...", "m:f2k"]]], 0, ["Print the active window...", "print", "Ctrl+P"]];
+    ["Export", [["Tables to Excel (.xlsx)...", "m:xlsxOut"], 0, only(["etabs", "sap2000"], ["SAP2000 .s2k Text File...", "m:s2k"]), only(["etabs", "safe"], ["SAFE .f2k Text File (one floor)...", "m:f2k"])]], 0, ["Print the active window...", "print", "Ctrl+P"]];
   m.Edit = [[s.undo ? "Undo " + s.undo : "Undo", "m:undo", "Ctrl+Z", !s.undo], [s.redo ? "Redo " + s.redo : "Redo", "m:redo", "Ctrl+Y", !s.redo], 0,
     ["Delete", "m:delete", "Del", !any], 0, ["Copy names of the selected objects", "copyNames", "Ctrl+C", !any], 0, ["Hide the selected objects", "hideSel", "", !any], ["Show all objects", "showAll"], 0, ["Model Text...", "m:text"]];
-  m.Define = [["Material Properties...", "m:materials"], ["Frame Sections...", "m:frameSections"], ["Slab and Wall Sections...", "m:shellSections"], ["Link/Support Properties...", "m:links"], ["Spring Properties", [["Point Springs...", "m:spr:point"], ["Line Springs...", "m:spr:line"], ["Area Springs...", "m:spr:area"]]], 0,
-    ["Diaphragms...", "m:st:diaphragm"], ["Pier Labels...", "m:st:pier"], ["Spandrel Labels...", "m:st:spandrel"], ["Groups...", "m:st:group"], ["Section Cuts...", "m:st:cut"], ["Joint Constraints (SAP2000)...", "m:ex:constraints"], ["Design Strips (SAFE)...", "m:ex:strips"], 0,
+  m.Define = [["Material Properties...", "m:materials"], ["Frame Sections...", "m:frameSections"], ["Slab and Wall Sections...", "m:shellSections"], only(["etabs", "sap2000"], ["Link/Support Properties...", "m:links"]), ["Spring Properties", [["Point Springs...", "m:spr:point"], ["Line Springs...", "m:spr:line"], ["Area Springs...", "m:spr:area"]]], 0,
+    only(["etabs", "sap2000"], ["Diaphragms...", "m:st:diaphragm"]), only(["etabs"], ["Pier Labels...", "m:st:pier"]), only(["etabs"], ["Spandrel Labels...", "m:st:spandrel"]), ["Groups...", "m:st:group"], ["Section Cuts...", "m:st:cut"], only(["sap2000"], ["Joint Constraints...", "m:ex:constraints"]), only(["safe"], ["Design Strips...", "m:ex:strips"]), 0,
     ["Story Data...", "m:stories"], ["Grid Data...", "m:grids"], 0, ["Functions", [["Response Spectrum...", "m:fnRS"], ["Time History...", "m:fnTH"]]],
-    ["Load Patterns...", "m:patterns"], ["Load Cases...", "m:cases"], ["Moving Loads (SAP2000)", [["Lanes...", "m:ex:lanes"], ["Vehicles...", "m:ex:vehicles"], ["Vehicle Classes...", "m:ex:classes"], ["Moving Load Cases...", "m:ex:mcases"]]], ["Load Combinations...", "m:combos"], 0, ["Mass Source...", "m:mass"], ["P-Delta Options...", "m:pdelta"]];
+    ["Load Patterns...", "m:patterns"], ["Load Cases...", "m:cases"], only(["sap2000"], ["Moving Loads", [["Lanes...", "m:ex:lanes"], ["Vehicles...", "m:ex:vehicles"], ["Vehicle Classes...", "m:ex:classes"], ["Moving Load Cases...", "m:ex:mcases"]]]), ["Load Combinations...", "m:combos"], 0, ["Mass Source...", "m:mass"], only(["etabs", "sap2000"], ["P-Delta Options...", "m:pdelta"])];
   m.Draw = [["Select Object", "t:select", "Esc"], 0, ["Draw Columns (click a point)", "d:column"], ["Draw Beams (click start and end)", "d:beam"], ["Quick Draw Beams (click a grid line)", "d:qbeam"], 0,
     ["Draw Floors (click corners)", "d:floor"], ["Draw Rectangular Floors (two corners)", "d:rect"], ["Quick Draw Floors (click in a bay)", "d:qfloor"], 0,
     ["Draw Walls (click start and end)", "d:wall"], ["Quick Draw Walls (click a grid line)", "d:qwall"], 0, ["Snap and Story Options...", "m:drawHelp"]];
   m.Assign = [["Frame Section...", "m:asgFrame", "", !fr], ["Slab or Wall Section...", "m:asgShell", "", !ar], 0, ["Joint Restraints (Supports)...", "m:asgSupport"], 0,
-    ["Joint", [["Springs...", "m:ad:joint", "", !any], ["Diaphragms...", "m:sa:jdiaph", "", !any], ["Constraints (SAP2000)...", "m:ex:jconstraint", "", !any]]],
-    ["Frame", [["Releases...", "m:ad:releases", "", !fr], ["Local Axes...", "m:ad:axes", "", !fr], ["Insertion Point...", "m:ad:insertion", "", !fr], ["End Length Offsets...", "m:ad:offsets", "", !fr], ["Property Modifiers...", "m:ad:fmods", "", !fr], ["Line Springs...", "m:ad:lspring", "", !fr], ["Hinges...", "m:ad:hinges", "", !fr]]],
-    ["Shell", [["Property Modifiers...", "m:ad:smods", "", !ar], ["Area Springs...", "m:ad:aspring", "", !ar], ["Diaphragms...", "m:sa:diaph", "", !ar], ["Pier Label...", "m:sa:pier", "", !any], ["Spandrel Label...", "m:sa:spandrel", "", !any]]],
+    ["Joint", [["Springs...", "m:ad:joint", "", !any], only(["etabs", "sap2000"], ["Diaphragms...", "m:sa:jdiaph", "", !any]), only(["sap2000"], ["Constraints...", "m:ex:jconstraint", "", !any])]],
+    ["Frame", [["Releases...", "m:ad:releases", "", !fr], ["Local Axes...", "m:ad:axes", "", !fr], ["Insertion Point...", "m:ad:insertion", "", !fr], ["End Length Offsets...", "m:ad:offsets", "", !fr], ["Property Modifiers...", "m:ad:fmods", "", !fr], ["Line Springs...", "m:ad:lspring", "", !fr], only(["etabs", "sap2000"], ["Hinges...", "m:ad:hinges", "", !fr])]],
+    ["Shell", [["Property Modifiers...", "m:ad:smods", "", !ar], ["Area Springs...", "m:ad:aspring", "", !ar], only(["etabs", "sap2000"], ["Diaphragms...", "m:sa:diaph", "", !ar]), only(["etabs"], ["Pier Label...", "m:sa:pier", "", !any]), only(["etabs"], ["Spandrel Label...", "m:sa:spandrel", "", !any])]],
     ["Assign Objects to Group...", "m:sa:group", "", !any], 0,
     ["Joint Loads", [["Forces...", "m:ld:joint_force", "", !any], ["Ground Displacements...", "m:ld:joint_displacement", "", !any], ["Temperature...", "m:ld:joint_temperature", "", !any]]],
     ["Frame Loads", [["Distributed...", "m:asgFrameLoad", "", !fr], ["Uniform in any direction...", "m:ld:frame_uniform", "", !fr], ["Point...", "m:ld:frame_point", "", !fr], ["Trapezoidal...", "m:ld:frame_trapezoid", "", !fr], ["Temperature...", "m:ld:frame_temperature", "", !fr], ["Strain...", "m:ld:frame_strain", "", !fr]]],
@@ -3268,6 +3290,7 @@ async function modelAct(a) {
     case "xlsxOut": return hmTablesOut();
     case "xlsxIn": return hmTablesIn();
     case "new": return hmNew();
+    case "program": return hmProgram();
     case "open": return hmOpen();
     case "materials": return hmMaterials();
     case "frameSections": return hmFrameSections();
@@ -3743,7 +3766,8 @@ async function hmLateral(p, after) {
   const kind = p.type === "Wind" ? "wind" : "seismic";
   const list = await hmPost({tool: "lateral_codes", args: {kind}}).catch(() => null);
   if (!list || !list.ok) return hmSay("The codes could not be read: " + ((list && list.error) || "no answer"), true);
-  const codes = list.result.codes, now = p.lateral || null;
+  // Only the codes the model's program lists (and the Modeler's own, which go in as joint loads in any program).
+  const codes = list.result.codes.filter(c => !c.programs || /Modeler/.test(c.programs) || c.programs.includes(progLabel(program))), now = p.lateral || null;
   let code = now ? now.code : (kind === "wind" ? "ASCE 7-16" : "ASCE 7-16"), values = Object.assign({}, now ? now.values : {});
   const d = dialog(`${kind === "wind" ? "Wind" : "Seismic"} Load Pattern: ${p.name}`, `<div class="g2" style="margin-bottom:6px"><span>Auto Lateral Load</span><select id="lCode">${opts([["None", "None"], ...codes.map(c => [c.code, c.code])], code)}</select></div>
       <p class="kv" id="lAbout" style="margin:0 0 6px"></p><fieldset style="margin:0"><legend>Parameters</legend><div class="scroll" style="max-height:38vh"><div class="g2" id="lIn"></div></div></fieldset>
@@ -3916,7 +3940,7 @@ async function hmCase(c, a, after, copy) {
   let loads = c ? c.loads.map(l => ({...l})) : [];
   const fns = k => a.functions.filter(f => f.kind === k).map(f => f.name);
   const modals = a.load_cases.filter(x => x.type.startsWith("Modal")).map(x => x.name), nonlinear = a.load_cases.filter(x => x.type.startsWith("Nonlinear") && (!c || x.name !== c.name)).map(x => x.name);
-  const d = dialog("Load Case Data", `<div class="g2"><span>Load Case Name</span><input id="cN" value="${esc(c ? (copy ? c.name + " copy" : c.name) : "LCase1")}"><span>Load Case Type</span><select id="cT">${opts(a.case_types.map(t => [t, t]), type)}</select></div>
+  const d = dialog("Load Case Data", `<div class="g2"><span>Load Case Name</span><input id="cN" value="${esc(c ? (copy ? c.name + " copy" : c.name) : "LCase1")}"><span>Load Case Type</span><select id="cT">${opts(caseTypesFor(a.case_types, type).map(t => [t, t]), type)}</select></div>
     <fieldset id="cInit"><legend>Initial Conditions</legend><select id="cI">${opts([["", "Zero initial conditions (unstressed state)"], ...nonlinear.map(n => [n, "Continue from the end of " + n])], c && c.initial_case || "")}</select></fieldset>
     <fieldset id="cModal"><legend>Modes</legend><div class="g2"><span>Maximum number of modes</span><input id="cMx" type="number" value="${c ? c.max_modes : 12}"><span>Minimum number of modes</span><input id="cMn" type="number" value="${c ? c.min_modes : 1}"></div></fieldset>
     <fieldset id="cRS"><legend>Response Spectrum and History Options</legend><div class="g2"><span>Modal case</span><select id="cMc">${opts(modals.map(m => [m, m]), c ? c.modal_case : modals[0])}</select>
@@ -4076,7 +4100,8 @@ async function hmObjectLoad(kind) {
 
 // ---- File ----
 function hmNew() {
-  const d = dialog("New Model Quick Templates", `<div class="g2" style="margin-bottom:8px"><span>Model title</span><input id="nT" value="Model"></div>
+  const d = dialog("New Model Quick Templates", `<fieldset style="margin:0 0 8px"><legend>Program the model is for</legend>${["etabs", "sap2000", "safe"].map(k => `<label style="margin-right:14px"><input type="radio" name="nP" value="${k}"${k === program ? " checked" : ""}>${progLabel(k)}</label>`).join("")}<div class="kv">The Modeler then offers what that program has, and Save writes its file (.e2k, .s2k or .f2k) beside the .cpm.</div></fieldset>
+    <div class="g2" style="margin-bottom:8px"><span>Model title</span><input id="nT" value="Model"></div>
     <div style="display:flex;gap:10px"><fieldset style="flex:1"><legend>Grid Dimensions (Plan)</legend><div class="g2">
       <span>Number of Grid Lines in X Direction</span><input id="nXn" type="number" value="4" min="1"><span>Number of Grid Lines in Y Direction</span><input id="nYn" type="number" value="4" min="1">
       <span>Spacing of Grids in X Direction</span><input id="nXs" type="number" step="any" value="6"><span>Spacing of Grids in Y Direction</span><input id="nYs" type="number" step="any" value="6"></div></fieldset>
@@ -4088,13 +4113,13 @@ function hmNew() {
 }
 async function hmNewGo(d) {
   {
-      const t = q(d, "#nT").value.trim() || "Model", k = q(d, "[name=nK]:checked").value, nx = Math.max(1, parseInt(q(d, "#nXn").value) || 1), ny = Math.max(1, parseInt(q(d, "#nYn").value) || 1), sx = fnum(d, "#nXs"), sy = fnum(d, "#nYs"), ns = Math.max(1, parseInt(q(d, "#nS").value) || 1), h = fnum(d, "#nH"), hb = fnum(d, "#nB");
+      const prog = q(d, "[name=nP]:checked").value, t = q(d, "#nT").value.trim() || "Model", k = q(d, "[name=nK]:checked").value, nx = Math.max(1, parseInt(q(d, "#nXn").value) || 1), ny = Math.max(1, parseInt(q(d, "#nYn").value) || 1), sx = fnum(d, "#nXs"), sy = fnum(d, "#nYs"), ns = Math.max(1, parseInt(q(d, "#nS").value) || 1), h = fnum(d, "#nH"), hb = fnum(d, "#nB");
       formError(d, "");
       if (k === "frame") {
         if (Math.abs(hb - h) > 1e-9) return formError(d, "The concrete frame template has one story height: make the bottom story the same height, or start from Grid Only.");
-        return submit(d, "new_model", {title: t, template: "concrete_frame", x_spans: Array(Math.max(1, nx - 1)).fill(sx), y_spans: Array(Math.max(1, ny - 1)).fill(sy), stories: ns, story_height: h});
+        return submit(d, "new_model", {title: t, program: prog, template: "concrete_frame", x_spans: Array(Math.max(1, nx - 1)).fill(sx), y_spans: Array(Math.max(1, ny - 1)).fill(sy), stories: ns, story_height: h});
       }
-      let j = await hmRun("new_model", {title: t, template: "empty"}, true); if (!j.ok) return formError(d, j.error);
+      let j = await hmRun("new_model", {title: t, program: prog, template: "empty"}, true); if (!j.ok) return formError(d, j.error);
       const stories_ = k === "blank" ? [{name: "Story1", height: h}] : Array.from({length: ns}, (_, i) => ({name: "Story" + (i + 1), height: i === 0 ? hb : h}));
       j = await hmRun("define_stories", {stories: stories_}, true); if (!j.ok) return formError(d, j.error);
       if (k === "grid") {
@@ -4102,8 +4127,18 @@ async function hmNewGo(d) {
         j = await hmRun("define_grids", {grids: Array.from({length: nx}, (_, i) => ({label: letters(i), direction: "X", coordinate: +(i * sx).toFixed(6)})).concat(Array.from({length: ny}, (_, i) => ({label: String(i + 1), direction: "Y", coordinate: +(i * sy).toFixed(6)})))}, true);
         if (!j.ok) return formError(d, j.error);
       }
-      d.close(); hmSay("New model ready. Draw > Draw Columns, then beams and floors; or ask the chat.");
+      d.close(); hmSay(`New ${progLabel(prog)} model ready. Draw > Draw Columns, then beams and floors; or ask the chat.`);
   }
+}
+// File > Model for...: the program the model is made for, changed later (nothing in the model is removed).
+function hmProgram() {
+  dialog("Model For", `<p class="kv" style="max-width:420px;margin-top:0">The menus, load case types and codes follow this program, and Save writes its file beside the .cpm. Nothing in the model is removed by a change.</p>${["etabs", "sap2000", "safe"].map(k => `<label style="display:block"><input type="radio" name="pP" value="${k}"${k === program ? " checked" : ""}>${progLabel(k)}</label>`).join("")}`,
+    [["OK", d => submit(d, "set_model_program", {program: q(d, "[name=pP]:checked").value}, j => hmSay(`The model is for ${j.result.program} now.` + (j.result.kept_but_not_used.length ? " Kept in the .cpm but not used there: " + j.result.kept_but_not_used.join("; ") + "." : ""))), true], ["Cancel"]], {width: 440});
+}
+// The load case types the model's program has (SAFE: static, modal and response spectrum).
+function caseTypesFor(types, now) {
+  const safe = ["Linear Static", "Nonlinear Static", "Modal - Eigen", "Modal - Ritz", "Response Spectrum"];
+  return program === "safe" ? types.filter(t => safe.includes(t) || t === now) : types;
 }
 function hmOpen() {
   dialog("Open Model", `<div class="g2"><span>File</span><input id="oP" placeholder="C:\\Users\\...\\Models\\Tower.e2k" style="min-width:380px"></div><p class="kv" style="max-width:480px">Type or paste the full path of an ETABS text file (.e2k, .$et) or a Modeler file (.cpm). A browser can't hand over a file's place on the PC, so the path is typed here; the Modeler reads it.</p>`,
@@ -4112,7 +4147,7 @@ function hmOpen() {
 function hmSave(as) {
   const file = (hm.state && hm.state.file) || "";
   if (!as && file) return hmRun("save_model", {}).then(j => j.ok && hmSay("Saved " + file));
-  dialog("Save Model As", `<div class="g2"><span>File name</span><input id="sv" value="${esc(file ? file.split(/[\\/]/).pop().replace(/\.e2k$/i, "") : ((P && P.manifest && P.manifest.model) || "Model"))}"><span>Folder</span><input id="sf" placeholder="Documents\\CSI ProMax\\Models" value="${esc(file ? file.replace(/[\\/][^\\/]*$/, "") : "")}"></div><p class="kv">Saves an ETABS text file (.e2k, for File > Import in ETABS) and the Modeler's .cpm beside it. An empty folder means Documents\\CSI ProMax\\Models.</p>`,
+  dialog("Save Model As", `<div class="g2"><span>File name</span><input id="sv" value="${esc(file ? file.split(/[\\/]/).pop().replace(/\.e2k$/i, "") : ((P && P.manifest && P.manifest.model) || "Model"))}"><span>Folder</span><input id="sf" placeholder="Documents\\CSI ProMax\\Models" value="${esc(file ? file.replace(/[\\/][^\\/]*$/, "") : "")}"></div><p class="kv">${{etabs: "Saves an ETABS text file (.e2k, for File > Import in ETABS)", sap2000: "Saves a SAP2000 text file (.s2k, for File > Import in SAP2000) and an .e2k", safe: "Saves a SAFE text file (.f2k of the floor with the most slab, for File > Import in SAFE) and an .e2k"}[program]} with the Modeler's .cpm beside it. An empty folder means Documents\\CSI ProMax\\Models.</p>`,
     [["Save", d => submit(d, "save_model_as", {name: q(d, "#sv").value.trim(), folder: q(d, "#sf").value.trim() || undefined}, j => hmSay("Saved " + ((j.result && (j.result.path || j.result.file)) || ""))), true], ["Cancel"]], {width: 500});
 }
 function hmExport(kind) {

@@ -23,6 +23,7 @@ public static class ModelerTools
             """
             {"type":"object","required":["title"],"properties":{
               "title":{"type":"string"},
+              "program":{"type":"string","enum":["etabs","sap2000","safe"],"description":"The CSI program the model is for (default etabs): the Modeler then offers what that program has, and saving writes its file (.e2k, .s2k or .f2k) beside the .cpm."},
               "template":{"type":"string","enum":["empty","concrete_frame"]},
               "x_spans":{"type":"array","items":{"type":"number"},"description":"Bay sizes along X, in m."},
               "y_spans":{"type":"array","items":{"type":"number"}},
@@ -30,6 +31,11 @@ public static class ModelerTools
               "sdl":{"type":"number","description":"Superimposed dead load on the slabs, kN/m2 (default 2)."},
               "live":{"type":"number","description":"Live load on the slabs, kN/m2 (default 3)."}}}
             """, Ask.Always, NewModel, a => $"Start a new model '{a.Text("title")}' (replaces the one open in the Modeler)"),
+
+        new("set_model_program",
+            "Changes the CSI program the Modeler's model is for (etabs, sap2000 or safe): the Modeler then offers what that program has, and saving writes its file beside the .cpm. Nothing in the model is removed: what the new program has no place for stays in the .cpm and is said in the answer.",
+            """{"type":"object","required":["program"],"properties":{"program":{"type":"string","enum":["etabs","sap2000","safe"]}}}""",
+            Ask.Changes, SetProgram, a => $"Make the model for {StructuralModel.TargetName(a.Text("program"))}"),
 
         new("open_model_file",
             "Opens an ETABS text file (.e2k or .$et, as ETABS exports) or a Modeler file (.cpm) in the Modeler. Everything in the file is kept, also what the Modeler does not show, and is written back on save. The model in the Modeler now is replaced.",
@@ -78,7 +84,7 @@ public static class ModelerTools
         var m = o.Model;
         return new JsonObject
         {
-            ["title"] = m.Title, ["file"] = o.Path, ["stories"] = m.Stories.Count - 1, ["grids"] = m.Grids.Count,
+            ["title"] = m.Title, ["program"] = StructuralModel.TargetName(m.Target), ["file"] = o.Path, ["stories"] = m.Stories.Count - 1, ["grids"] = m.Grids.Count,
             ["frames"] = m.LineAssigns.Count, ["areas"] = m.AreaAssigns.Count,
             ["frame_sections"] = m.FrameSections.Count, ["slab_and_wall_sections"] = m.ShellSections.Count,
         };
@@ -100,8 +106,30 @@ public static class ModelerTools
             else model = ModelEdit.New(title);
         }
         catch (ArgumentException ex) { throw new ToolInputException(ex.Message); }
+        model.Target = Target(a.Text("program", "etabs"));
         o.Replace(model, "");
         return Summary(o);
+    }
+
+    private static string Target(string program) => StructuralModel.Targets.Contains(program.ToLowerInvariant())
+        ? program.ToLowerInvariant() : throw new ToolInputException($"'program' is one of {string.Join(", ", StructuralModel.Targets)}, not '{program}'.");
+
+    private static JsonNode SetProgram(JsonElement a, ICsiLink e)
+    {
+        var o = Offline(e);
+        var target = Target(a.Need("program"));
+        var was = o.Model.Target;
+        o.Edit(m => m.Target = target);
+        var kept = new List<string>();
+        var x = o.Model.Extras;
+        if (target != "sap2000" && x is not null && (x.Constraints.Count + x.Lanes.Count + x.Vehicles.Count + x.MovingCases.Count) > 0) kept.Add("joint constraints and moving loads (SAP2000 only)");
+        if (target != "safe" && x is { Strips.Count: > 0 }) kept.Add("design strips (SAFE only)");
+        return new JsonObject
+        {
+            ["program"] = StructuralModel.TargetName(target), ["was"] = StructuralModel.TargetName(was),
+            ["kept_but_not_used"] = new JsonArray(kept.Select(k => (JsonNode)k).ToArray()),
+            ["saves"] = target switch { "sap2000" => ".cpm, .e2k and .s2k", "safe" => ".cpm, .e2k and .f2k", _ => ".cpm and .e2k" },
+        };
     }
 
     private static JsonNode Open(JsonElement a, ICsiLink e)
@@ -127,12 +155,19 @@ public static class ModelerTools
         var path = Path.Combine(folder.Length > 0 ? folder.Trim().Trim('"') : OfflineEtabs.DefaultFolder, (name.Length > 0 ? name : o.Model.Title.Length > 0 ? o.Model.Title : "Untitled") + ".e2k");
         var findings = ModelChecks.Run(o.Model);
         var saved = o.SaveAs(path);
+        var program = o.Model.Target;
         return new JsonObject
         {
-            ["file"] = saved, ["modeler_file"] = Path.ChangeExtension(saved, ModelFile.Extension),
+            ["file"] = o.ProgramFile.Length > 0 ? o.ProgramFile : saved, ["e2k"] = saved, ["modeler_file"] = Path.ChangeExtension(saved, ModelFile.Extension),
+            ["program"] = StructuralModel.TargetName(program),
             ["errors"] = findings.Count(f => f.Severity == Severity.Error), ["warnings"] = findings.Count(f => f.Severity == Severity.Warning),
             ["findings"] = new JsonArray(findings.Take(30).Select(f => (JsonNode)$"{f.Severity}: {f.Message}").ToArray()),
-            ["next"] = "In licensed ETABS: File > Import > ETABS .e2k text file, then run the analysis there. The Modeler does not analyse.",
+            ["next"] = program switch
+            {
+                "sap2000" => o.ProgramFile.Length > 0 ? "In licensed SAP2000: File > Import > SAP2000 .s2k Text File, then run the analysis there. The Modeler does not analyse." : "The .s2k could not be written; the .cpm and .e2k hold the model.",
+                "safe" => o.ProgramFile.Length > 0 ? "In licensed SAFE: File > Import > SAFE .F2K file, then run the analysis and design there. The Modeler does not analyse." : "No floor here has slabs SAFE can take, so no .f2k was written; the .cpm and .e2k hold the model.",
+                _ => "In licensed ETABS: File > Import > ETABS .e2k text file, then run the analysis there. The Modeler does not analyse.",
+            },
         };
     }
 
