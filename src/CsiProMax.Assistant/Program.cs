@@ -151,7 +151,9 @@ public static class Program
             var name = "CsiProMax." + (modeler ? "modeler" : demo ? "demo" : etabsPid?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "any");
             using var one = new Mutex(true, name, out var first);
             using var show = new EventWaitHandle(false, EventResetMode.AutoReset, name + ".show");
-            if (!first) { show.Set(); return 0; }
+            using var shown = new EventWaitHandle(false, EventResetMode.AutoReset, name + ".shown");
+            if (!first && !Handover(one, show, shown, name, args)) return 0;
+            Holder.Write(name);
 
             // Started for an ETABS that is no longer open: say so, instead of a window that closes by itself.
             if (!demo && etabsPid is { } asked && !EtabsIsOpen(asked))
@@ -214,7 +216,16 @@ public static class Program
                         // Opened again from the Tools menu while a newer version is downloaded: this window gives way
                         // to it, unless work is going on (then it comes forward, and switches when the work is done).
                         if (!CsiProMax.App.IsBusy && Updater.NewestDownloaded(Updater.Current) is { } ready && CsiProMax.App.SwitchTo is { } go) go(ready);
-                        else window.Surface();
+                        else
+                        {
+                            window.Surface();
+                            // The Modeler is its 3D view: double-clicked again, that window opens (or comes forward) too.
+                            if (CsiProMax.App.Modeler)
+                                try { CsiProMax.Host.ModelView.Open(); }
+                                catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { Note("modeler view", ex); }
+                        }
+                        // Told to the start that asked: it ends, knowing a window answered.
+                        try { shown.Set(); } catch (ObjectDisposedException) { }
                     }));
             }) { IsBackground = true, Name = "CsiProMax show" };
             surface.Start();
@@ -234,7 +245,12 @@ public static class Program
 
             app.Run(window);
             life.Cancel();
-            CsiProMax.App.Stop();
+            // The window is closed: this process ends within seconds, whatever is still winding down, so it never
+            // stays behind with no window and keeps the next start of the Modeler (or this program's window) from opening.
+            var stopped = Task.Run(CsiProMax.App.Stop);
+            if (!stopped.Wait(TimeSpan.FromSeconds(15))) Note("close", new TimeoutException("CSI ProMax was still stopping 15 seconds after its window closed; it ends now."));
+            Holder.Clear(name);
+            Environment.Exit(0);
             return 0;
         }
         catch (Exception ex)
@@ -296,6 +312,126 @@ public static class Program
 
     /// <summary>For the windows: an error kept in errors.txt, as the start's own are.</summary>
     internal static void NoteFrom(string where, Exception? ex) => Note(where, ex);
+
+    /// <summary>
+    /// Started while another CSI ProMax holds this window's name (the Modeler, the demo, or the window of one CSI
+    /// program window). Usually that one is open: it is asked to come forward, and this start ends. But a double-click on
+    /// the Modeler once did nothing at all (2026-11-26): the one holding the name had no window (it was closing after an
+    /// update, or was left behind). So: a start that gives way to an older version waits for it to end; one that gets
+    /// no answer within 8 seconds ends the holder if it has no window, and opens itself. A holder with a window that does
+    /// not answer is left alone (it may hold an unsaved model) and the user is told. True: this start takes the name.
+    /// </summary>
+    internal static bool Handover(Mutex one, EventWaitHandle show, EventWaitHandle shown, string name, string[] args)
+    {
+        // Started by an older window that gave way to this version: it is closing, so wait for the name.
+        if (args.Contains("--after-pid") && Take(one, TimeSpan.FromSeconds(60))) return true;
+        show.Set();
+        if (shown.WaitOne(TimeSpan.FromSeconds(8))) return false;
+        // A version from before 0.4.43 writes no holder file: it is looked for by its command line instead.
+        var holder = Holder.Read(name) ?? Holder.Find(name);
+        if (holder is { } stale && stale.HasExited is false)
+        {
+            stale.Refresh();
+            if (stale.MainWindowHandle != IntPtr.Zero)
+            {
+                if (OperatingSystem.IsWindows())
+                    MessageBoxW(IntPtr.Zero, "CSI ProMax is open but not answering (it may be busy with a long step).\n\nWait a little and try again, or close it from the taskbar.", "CSI ProMax", 0x40);
+                stale.Dispose();
+                return false;
+            }
+            Note("start", new InvalidOperationException($"CSI ProMax (process {stale.Id}) held '{name}' with no window and did not answer; it is ended so this start can open."));
+            try { stale.Kill(true); stale.WaitForExit(10000); }
+            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException) { }
+            stale.Dispose();
+        }
+        if (Take(one, TimeSpan.FromSeconds(15))) return true;
+        if (OperatingSystem.IsWindows())
+            MessageBoxW(IntPtr.Zero, "CSI ProMax could not open: another copy of it is still closing.\n\nTry again in a minute. The details are in " + NoteFile, "CSI ProMax", 0x30);
+        Note("start", new TimeoutException($"'{name}' was still held after the copy holding it was asked to end."));
+        return false;
+    }
+
+    private static bool Take(Mutex one, TimeSpan wait)
+    {
+        try { return one.WaitOne(wait); }
+        catch (AbandonedMutexException) { return true; } // its holder ended without letting go: the name is this one's now
+    }
+
+    /// <summary>Which process holds a window's name: written beside errors.txt, with its start time so a reused process id is never taken for it.</summary>
+    internal static class Holder
+    {
+        internal static string File(string name) => Path.Combine(Path.GetDirectoryName(NoteFile)!, name + ".pid");
+
+        internal static void Write(string name)
+        {
+            try
+            {
+                using var me = Process.GetCurrentProcess();
+                Directory.CreateDirectory(Path.GetDirectoryName(NoteFile)!);
+                System.IO.File.WriteAllText(File(name), Line(me.Id, me.StartTime));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception) { }
+        }
+
+        internal static void Clear(string name)
+        {
+            try
+            {
+                if (Parse(System.IO.File.Exists(File(name)) ? System.IO.File.ReadAllText(File(name)) : null) is { } held && held.Pid == Environment.ProcessId)
+                    System.IO.File.Delete(File(name));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        }
+
+        internal static string Line(int pid, DateTime started) => pid.ToString(System.Globalization.CultureInfo.InvariantCulture) + "|" + started.ToUniversalTime().Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        internal static (int Pid, long Ticks)? Parse(string? text)
+        {
+            var parts = text?.Trim().Split('|');
+            return parts is { Length: 2 } && int.TryParse(parts[0], out var pid) && long.TryParse(parts[1], out var ticks) ? (pid, ticks) : null;
+        }
+
+        /// <summary>
+        /// The dotnet that runs CsiProMax.dll with this name's flag (--modeler, --demo), from Windows' own process list,
+        /// for a holder that wrote no file (an older version). Only the Modeler's and the demo's: one per PC.
+        /// </summary>
+        internal static Process? Find(string name)
+        {
+            var flag = name switch { "CsiProMax.modeler" => "--modeler", "CsiProMax.demo" => "--demo", _ => null };
+            if (flag is null || !OperatingSystem.IsWindows()) return null;
+            try
+            {
+                var info = new ProcessStartInfo("powershell.exe") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true };
+                foreach (var a in new[] { "-NoProfile", "-NonInteractive", "-Command",
+                             "Get-CimInstance Win32_Process -Filter \"Name='dotnet.exe'\" | Where-Object { $_.CommandLine -like '*CsiProMax.dll*' -and $_.CommandLine -like '*" + flag + "*' -and $_.CommandLine -notlike '*--viewer*' } | ForEach-Object { $_.ProcessId }" })
+                    info.ArgumentList.Add(a);
+                using var ps = Process.Start(info);
+                if (ps is null) return null;
+                var output = ps.StandardOutput.ReadToEnd();
+                ps.WaitForExit(15000);
+                foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    if (int.TryParse(line, out var pid) && pid != Environment.ProcessId)
+                        try { return Process.GetProcessById(pid); }
+                        catch (ArgumentException) { }
+            }
+            catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or IOException) { }
+            return null;
+        }
+
+        /// <summary>The process that holds <paramref name="name"/>, when it is still the one that wrote the file (same id and start time); otherwise null.</summary>
+        internal static Process? Read(string name)
+        {
+            try
+            {
+                if (Parse(System.IO.File.Exists(File(name)) ? System.IO.File.ReadAllText(File(name)) : null) is not { } held || held.Pid == Environment.ProcessId) return null;
+                var process = Process.GetProcessById(held.Pid);
+                if (Math.Abs(process.StartTime.ToUniversalTime().Ticks - held.Ticks) < TimeSpan.TicksPerSecond) return process;
+                process.Dispose();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception) { }
+            return null;
+        }
+    }
 
     private static bool EtabsIsOpen(int pid)
     {

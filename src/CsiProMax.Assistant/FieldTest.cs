@@ -210,6 +210,8 @@ public static class FieldTest
         AiModeFieldSteps.Run(ctx);
         // The Modeler and the Viewer in CSI ProMax windows of their own, never a browser tab.
         WebWindowFieldSteps.Run(ctx);
+        // The Modeler from its desktop shortcut: it opens, and a second double-click is answered (2026-11-26).
+        ModelerStartFieldSteps.Run(ctx, o.Full && (o.LiveScratch && o.SettingsRoot is null));
         // The real window, opened a second time on the demo model, with the chat and without it (the full test on a real PC).
         if (o.Full && (o.OpenWindow is not null || (o.LiveScratch && o.SettingsRoot is null))) WindowFieldSteps.Run(ctx, o.OpenWindow);
         if (left.Count > 0) ctx.Step("test copies an earlier run left open are closed", () => string.Join("; ", left));

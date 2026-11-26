@@ -41,8 +41,22 @@ internal sealed partial class ChatPane
         _bigButton.Margin = new Thickness(ChatUi.S1, 0, 0, 0);
         _bigButton.Click += (_, _) =>
         {
+            // In CSI ProMax's own window the pane is the window's content, not a dock's: the window itself is made
+            // full size, and the same button puts it back (2026-11-26: the button did nothing there).
+            if (_big is null && Parent is not ContentControl && Window.GetWindow(this) is { } own)
+            {
+                own.WindowState = OwnWindowBig(own.WindowState) ? WindowState.Normal : WindowState.Maximized;
+                return;
+            }
             if (_big is null) OpenBig();
             else CloseBig();
+        };
+        Loaded += (_, _) =>
+        {
+            if (Parent is ContentControl || Window.GetWindow(this) is not { } own || _ownWatched == own) return;
+            _ownWatched = own;
+            own.StateChanged += (_, _) => ShowBigButton();
+            ShowBigButton();
         };
         ShowBigButton();
         SizeChanged += (_, e) =>
@@ -51,8 +65,22 @@ internal sealed partial class ChatPane
         };
     }
 
+    private Window? _ownWatched;
+
+    /// <summary>True when CSI ProMax's own window is full size (the button then takes it back).</summary>
+    internal static bool OwnWindowBig(WindowState state) => state == WindowState.Maximized;
+
     private void ShowBigButton()
     {
+        if (_big is null && _ownWatched is { } own && Parent is not ContentControl)
+        {
+            var full = OwnWindowBig(own.WindowState);
+            _bigButton.Content = ChatUi.Icon(full ? ChatUi.Paths.Collapse : ChatUi.Paths.Expand);
+            _bigButton.ToolTip = full ? "Back to its size: the CSI ProMax window returns to the side." : "Full size: the CSI ProMax window fills the screen.";
+            AutomationProperties.SetName(_bigButton, full ? "Back to its size" : "Full size");
+            AutomationProperties.SetHelpText(_bigButton, (string)_bigButton.ToolTip);
+            return;
+        }
         var big = _big is not null;
         _bigButton.Content = ChatUi.Icon(big ? ChatUi.Paths.Collapse : ChatUi.Paths.Expand);
         _bigButton.ToolTip = big
