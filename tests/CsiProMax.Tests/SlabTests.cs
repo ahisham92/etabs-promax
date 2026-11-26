@@ -188,7 +188,7 @@ static class SlabTests
             var s = SlabDefs.Strips(E2kReader.Read(text)).Single();
             Check(s is { Name: "CSA9", Story: "Story1", Layer: "A", DesignType: "Middle", IgnorePT: true } && s.Plan.Count == 3, "reads back");
             var f2k = CsiProMax.F2k.F2kWriter.Write(link.Model, new CsiProMax.F2k.F2kOptions(Story: "Story1", Strips: false));
-            Check(f2k.Strips == 1 && f2k.Text.Contains("Strip=CSA9"), "in the .f2k for the strip's story");
+            Check(f2k.Strips == 1 && f2k.Text.Contains("Name=CSA9"), "in the .f2k for the strip's story");
             Check(CsiProMax.F2k.F2kWriter.Write(link.Model, new CsiProMax.F2k.F2kOptions(Story: "Story2", Strips: false)).Strips == 0, "not on another story");
             var old = new OfflineEtabs(Templates.ConcreteFrame("Old", [6], [5], 1, 3));
             old.Edit(m => ExtrasDefs.SetStrip(m, "OLD1", "B", [[0, 0], [0, 5]], 1, 1));
@@ -214,6 +214,105 @@ static class SlabTests
             Check(model["strips"]!.AsArray().Count == 2, "both strips");
             var out_ = Environment.GetEnvironmentVariable("CPM_VIEWER_OUT");
             if (!string.IsNullOrEmpty(out_)) File.WriteAllText(out_, Pack.ViewerHtml(built.Content));
+        });
+
+        yield return ("slabs: the .f2k is in SAFE 20's own tables and fields, each one as SAFE 20.1 or 23.1 writes it, or as the programs' table keys name it", () =>
+        {
+            var seen = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var file in new[] { "safe-PT-SL-v20.f2k", "safe-RC-PN-v20.f2k", "safe-PT-SL-v23.f2k", "safe-RC-PN-v23.f2k" })
+                foreach (var (table, rows) in CsiProMax.CsiTables.CsiTableText.Parse(Sample(file)))
+                {
+                    if (!seen.TryGetValue(table, out var fields)) seen[table] = fields = new HashSet<string>(StringComparer.Ordinal);
+                    foreach (var row in rows) fields.UnionWith(row.Keys);
+                }
+            // Tables the two examples do not have: their fields as "Table and Field Keys.xml" of ETABS 23.2 names them (SAFE 20+ shares them).
+            var keys = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["BEAM OBJECT CONNECTIVITY"] = ["Unique Name", "UniquePtI", "UniquePtJ", "Length"],
+                ["WALL OBJECT CONNECTIVITY"] = ["UniqueName", "UniquePt1", "UniquePt2", "UniquePt3", "UniquePt4"],
+                ["FRAME SECTION PROPERTY DEFINITIONS - CONCRETE CIRCLE"] = ["Name", "Material", "From File?", "Diameter", "Design Type"],
+                ["FRAME LOADS ASSIGNMENTS - DISTRIBUTED"] = ["UniqueName", "Load Pattern", "Load Type", "Direction", "Distance Type", "Relative Distance A", "Relative Distance B", "Force A", "Force B"],
+                ["JOINT LOADS ASSIGNMENTS - FORCE"] = ["UniqueName", "Load Pattern", "FX", "FY", "FZ", "MX", "MY", "MZ"],
+                ["SPRING PROPERTY DEFINITIONS - AREA SPRINGS"] = ["Name", "Stiffness Option", "Stiffnes U1", "Stiffnes U2", "Stiffnes U3", "Nonlinear Option for U3"],
+                ["AREA ASSIGNMENTS - AREA SPRINGS"] = ["UniqueName", "Spring Property"],
+            };
+            foreach (var (k, v) in keys) seen.TryAdd(k, [.. v]);
+            seen["FRAME SECTION PROPERTY DEFINITIONS - STEEL I/WIDE FLANGE"].UnionWith(["File Name", "Section in File"]);
+            seen["TENDON LOAD ASSIGNMENTS - LOSS OPTIONS"].UnionWith(["Stressing Loss", "Long Term Loss"]);
+            seen["STRIP OBJECT CONNECTIVITY"].UnionWith(["Segment End Point", "End Width Left", "End Width Right"]);
+
+            // Everything the writer can write: a frame with a wall, a circle column, soil, line and point loads, strips, a two-span PT tendon.
+            var link = PtFrame();
+            var m = link.Model;
+            Run(link, "draw_tendon", new { name = "T1", story = "Story2", points = new[] { new[] { 0.0, 3.0 }, new[] { 8.0, 3.0 }, new[] { 16.0, 3.5 } },
+                spans = new object[] { new { length = 8, depth_left = 0.1, depth_low = 0.16, depth_right = 0.04 }, new { depth_left = 0.04, depth_low = 0.16, depth_right = 0.1 } }, section = "T15", strands = 4,
+                jacking = new { transfer_pattern = "PT-TRANSFER", final_pattern = "PT-FINAL", stress = 1300000, end = "Both" }, losses = new { method = "Fixed", stressing = 100000, long_term = 150000 } });
+            Run(link, "define_strip", new { name = "CSA1", story = "Story2", layer = "A", points = new[] { new[] { 0.0, 3.0 }, new[] { 8.0, 3.0 }, new[] { 16.0, 3.0 } }, width_left = 3, width_right = 3, design_type = "Middle" });
+            Run(link, "define_hyperstatic_case", new { name = "PTF-HP", base_case = "PT-FINAL" });
+            Run(link, "define_spring", new { kind = "area", name = "SOIL-K", values = new { U3 = 20000 } });
+            var floor = m.AreaAssigns.First(x => m.Area(x.Label)!.Kind == AreaKind.Floor && x.Story == "Story2");
+            Run(link, "assign_shell_data", new { objects = new[] { floor.Label + "@Story2" }, spring = "SOIL-K" });
+            var beam = link.Frames().First(f => f.Kind == "beam" && f.Story == "Story2").Name;
+            link.SetFrameLoad(beam, "Dead", 5, false);
+            m.PointLoads.Add(new PointLoad { Object = m.PointAssigns.FirstOrDefault()?.Point ?? m.Points[0].Name, Story = "Story2", Tokens = ["TYPE", "\"FORCE\"", "LC", "\"Live\"", "FZ", "-10"] });
+            var r = CsiProMax.F2k.F2kWriter.Write(m, new CsiProMax.F2k.F2kOptions(Story: "Story2"));
+            var t = CsiProMax.CsiTables.CsiTableText.Parse(r.Text);
+            foreach (var (table, rows) in t)
+            {
+                Check(seen.TryGetValue(table, out var fields), $"SAFE 20 has no table '{table}'");
+                var unknown = rows.SelectMany(x => x.Keys).Distinct().Where(f => !fields!.Contains(f)).ToList();
+                Check(unknown.Count == 0, $"'{table}': SAFE 20 has no field {string.Join(", ", unknown)}");
+            }
+            foreach (var table in new[] { "TENDON OBJECT CONNECTIVITY", "TENDON ASSIGNMENTS - PROPERTIES", "TENDON LOAD ASSIGNMENTS - JACKING STRESS", "TENDON LOAD ASSIGNMENTS - LOSS OPTIONS",
+                "TENDON SECTION PROPERTIES", "LOAD CASE DEFINITIONS - HYPERSTATIC", "STRIP OBJECT CONNECTIVITY", "CONCRETE SLAB DESIGN OVERWRITES - STRIP BASED", "SPRING PROPERTY DEFINITIONS - AREA SPRINGS",
+                "FRAME LOADS ASSIGNMENTS - DISTRIBUTED", "JOINT LOADS ASSIGNMENTS - FORCE", "MATERIAL PROPERTIES - TENDON DATA" })
+                Check(t.ContainsKey(table), $"the file has '{table}'");
+            Check(r.Tendons == 1, "the tendon is counted");
+            var tendon = t["TENDON OBJECT CONNECTIVITY"];
+            Check(tendon[0]["Number Points"] == "3" && tendon[0]["Number Vertical Spans"] == "2" && tendon.Any(x => x.GetValueOrDefault("Span Number") == "2"), "three points and two spans");
+            Check(t["TENDON LOAD ASSIGNMENTS - JACKING STRESS"].Single()["Jacking Location"] == "Both Ends", "jacked from both ends");
+            Check(t["STRIP OBJECT CONNECTIVITY"].Count(x => x["Name"] == "CSA1") == 2 && t["CONCRETE SLAB DESIGN OVERWRITES - STRIP BASED"].Single(x => x["Strip Name"] == "CSA1")["Strip Design Type"] == "Middle Strip", "the strip of two segments and its overwrites");
+            Check(!r.Text.Contains("OBJECT GEOMETRY", StringComparison.Ordinal) && !r.Text.Contains("16.0.0", StringComparison.Ordinal), "nothing of SAFE 16's format is left");
+        });
+
+        yield return ("slabs: ETABS 20's PT example written as a .f2k gives the tendon, its profile, jacking, losses, strip and hyperstatic case that SAFE 20 itself exports for it", () =>
+        {
+            var m = E2kReader.Read(Sample("etabs-PT-SL-v20.e2k"));
+            var r = CsiProMax.F2k.F2kWriter.Write(m, new CsiProMax.F2k.F2kOptions(Story: "Story1", Strips: false));
+            var ours = CsiProMax.CsiTables.CsiTableText.Parse(r.Text);
+            var safe = CsiProMax.CsiTables.CsiTableText.Parse(Sample("safe-PT-SL-v20.f2k"));
+            void Same(string table, string field, Func<Dictionary<string, string>, bool>? which = null)
+            {
+                var a = ours[table].First(x => which?.Invoke(x) ?? true);
+                var b = safe[table].First(x => which?.Invoke(x) ?? true);
+                var (va, vb) = (a.GetValueOrDefault(field), b.GetValueOrDefault(field));
+                if (double.TryParse(va, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var na) && double.TryParse(vb, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var nb))
+                    Near(nb, na, $"{table} {field}", 1e-6);
+                else Check(va == vb, $"{table} {field}: SAFE writes '{vb}', ours '{va}'");
+            }
+            foreach (var f in new[] { "Number Points", "Horizontal Curve Type", "Global X", "Global Y", "Number Vertical Spans", "Datum Offset", "Span ID", "Span Profile", "L", "A", "B", "C", "ZL", "ZC", "ZR" })
+                Same("TENDON OBJECT CONNECTIVITY", f);
+            Same("TENDON OBJECT CONNECTIVITY", "Global X", x => x.GetValueOrDefault("Curve Point Number") == "2");
+            foreach (var f in new[] { "Tendon Property", "Number Strands", "Bonding Options" }) Same("TENDON ASSIGNMENTS - PROPERTIES", f);
+            foreach (var f in new[] { "Transfer Load Pattern", "Final Load Pattern", "Jacking Stress", "Jacking Location" }) Same("TENDON LOAD ASSIGNMENTS - JACKING STRESS", f);
+            foreach (var f in new[] { "Loss Method", "Stressing Loss Fixed", "Long Term Loss Fixed" }) Same("TENDON LOAD ASSIGNMENTS - LOSS OPTIONS", f);
+            foreach (var f in new[] { "Material", "StrandArea" }) Same("TENDON SECTION PROPERTIES", f);
+            foreach (var f in new[] { "Base Case", "Support Type", "Relative SF" }) Same("LOAD CASE DEFINITIONS - HYPERSTATIC", f);
+            foreach (var f in new[] { "Number Segments", "Start Width Left", "Start Width Right", "End Width Left", "End Width Right", "Auto Widen", "Layer" }) Same("STRIP OBJECT CONNECTIVITY", f);
+            foreach (var f in new[] { "Strip Layer", "Strip Design Type", "Design?", "Ignote PT?", "Rebar Material", "Cover Specification Type", "LLRF" }) Same("CONCRETE SLAB DESIGN OVERWRITES - STRIP BASED", f);
+            foreach (var f in new[] { "Type", "Self Weight Multiplier" }) Same("LOAD PATTERN DEFINITIONS", f, x => x["Name"] == "PT-FINAL");
+            Same("PROGRAM CONTROL", "ConcSlbCode");
+            Same("GRID DEFINITIONS - GENERAL", "Model Datum");
+            Check(ours["LOAD COMBINATION DEFINITIONS"].Count(x => x["Name"] == "Ultimate") == 3, "the combination and its three cases");
+            Check(ours["CONCRETE SLAB DESIGN LOAD COMBINATION DATA"].Select(x => x["Combo Type"] + ":" + x["Combo Name"]).OrderBy(x => x).SequenceEqual(
+                safe["CONCRETE SLAB DESIGN LOAD COMBINATION DATA"].Select(x => x["Combo Type"] + ":" + x["Combo Name"]).OrderBy(x => x)), "the slab design combinations with their kinds");
+            var points = ours["POINT OBJECT CONNECTIVITY"].ToDictionary(x => x["UniqueName"]);
+            var strip = ours["STRIP OBJECT CONNECTIVITY"].Single();
+            Check(points[strip["Strip Start Point"]]["Y"] == "18" && points[strip["Segment End Point"]]["X"] == "384", "the strip runs between its point objects");
+
+            // and SAFE 20 and 21, which cannot open the file through their API, rebuild it from the same tables
+            var rows = CsiProMax.Assistant.Safe.F2kRebuild.StripPoints(ours);
+            Check(rows.Count == 2 && rows[1]["GlobalX"] == "384" && rows[0]["WBLeft"] == "18", "the strip's points for SAFE's strip table");
         });
     }
 }

@@ -172,3 +172,11 @@ back word for word. What only a licensed program can confirm:
    an export: if ETABS refuses it, the import log names the line). Run the analysis: the hyperstatic case runs.
 12. **Strips with several segments.** A strip through three points writes a middle point with the end widths of
    one segment and the start widths of the next. ETABS's own export of such a strip has not been seen yet.
+13. **Import a Modeler .f2k into SAFE 20 or later.** From 2026-11-26 the Modeler's SAFE file is in SAFE 20's own
+   tables (POINT/COLUMN/BEAM/FLOOR/WALL/TENDON/STRIP OBJECT CONNECTIVITY, ... with the fields named as SAFE 20.1
+   and 23.1 write them), no longer SAFE 16's. Save the field-test model as .f2k from the Modeler, then in SAFE use
+   File > Import > SAFE .F2K. Expected: no import warnings; the slab, columns, tendon drape (Display > Tendons),
+   strips (layer A and B) and the hyperstatic case are there. Not yet seen in an export, so they may need a fix:
+   a tendon of more than one plan segment or span (its further rows), a strip of more than one segment (its
+   further rows), "Both Ends" and "I End" for the jack, beams (BEAM OBJECT CONNECTIVITY), walls (WALL OBJECT
+   CONNECTIVITY), soil as area springs ("Stiffness Option"="User Specified"), frame and point loads.
