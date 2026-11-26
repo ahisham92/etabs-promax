@@ -42,6 +42,20 @@ public sealed class FieldContext(CsiProgram program, string folder, ICsiLink lin
     private string _section = "";
 
     /// <summary>The CSI program under test now.</summary>
+    /// <summary>
+    /// Where a file error came from (its first frames in CSI ProMax): .NET's "Access to the path is denied." names no
+    /// path when the denied call was a replace or a delete (0.4.40 field test, the team library's check).
+    /// </summary>
+    internal static string Where(Exception ex)
+    {
+        if (ex is not (IOException or UnauthorizedAccessException)) return "";
+        var frames = new System.Diagnostics.StackTrace(ex, false).GetFrames()
+            .Select(f => f.GetMethod()).Where(m => m?.DeclaringType?.Namespace?.StartsWith("CsiProMax", StringComparison.Ordinal) == true)
+            .Select(m => $"{m!.DeclaringType!.Name}.{m.Name}").Distinct().Take(3).ToList();
+        var first = new System.Diagnostics.StackTrace(ex, false).GetFrames().FirstOrDefault()?.GetMethod();
+        return frames.Count == 0 && first is null ? "" : $" (at {string.Join(" < ", frames.Count > 0 ? frames : [$"{first!.DeclaringType?.Name}.{first.Name}"])}{(first is not null && frames.Count > 0 ? $"; in {first.DeclaringType?.Name}.{first.Name}" : "")})";
+    }
+
     public CsiProgram Program { get; set; } = program;
 
     /// <summary>Where the test puts the files it makes (the scratch model, packs, documents). Made by the runner.</summary>
@@ -111,7 +125,7 @@ public sealed class FieldContext(CsiProgram program, string folder, ICsiLink lin
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             var real = ex is System.Reflection.TargetInvocationException { InnerException: { } inner } ? inner : ex;
-            Add(name, false, $"{real.GetType().Name}: {real.Message}", clock.Elapsed.TotalSeconds);
+            Add(name, false, $"{real.GetType().Name}: {real.Message}{Where(real)}", clock.Elapsed.TotalSeconds);
             StoppedAnswering(name);
             return default;
         }

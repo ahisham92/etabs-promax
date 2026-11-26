@@ -72,6 +72,10 @@ public static class ApiCall
         return result;
     }
 
+    /// <summary>The parameters of the method a path reaches (the overload <see cref="Invoke"/> would pick for these names).</summary>
+    public static ParameterInfo[] Parameters(object model, string path, IReadOnlyDictionary<string, object?>? named = null) =>
+        Resolve(model, path, named).Method.GetParameters();
+
     /// <summary>True when the method's answer is the API's "it worked" (0, or a method that returns nothing).</summary>
     public static bool Worked(JsonObject call) => call["return"] is not JsonValue v || v.TryGetValue<int>(out var code) && code == 0 || v.TryGetValue<long>(out var l) && l == 0;
 

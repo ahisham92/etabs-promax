@@ -114,7 +114,21 @@ internal static class TeamSync
         Directory.CreateDirectory(Path.GetDirectoryName(file)!);
         var temp = file + ".tmp";
         File.WriteAllText(temp, JsonSerializer.Serialize(state, new JsonSerializerOptions { WriteIndented = true }));
-        File.Move(temp, file, overwrite: true);
+        Retry(() => File.Move(temp, file, overwrite: true));
+    }
+
+    /// <summary>
+    /// A file call tried again for a moment: on Windows a file just written can be held by the virus scanner or the
+    /// search indexer, and replacing or deleting it then says "Access to the path is denied." (0.4.40 field test on
+    /// Ahmed's PC, the team library's check).
+    /// </summary>
+    internal static void Retry(Action io)
+    {
+        for (var i = 0; ; i++)
+        {
+            try { io(); return; }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException && i < 20) { Thread.Sleep(50 + 25 * i); }
+        }
     }
 
     /// <param name="folder">This PC's learned-tools folder.</param>
@@ -178,7 +192,7 @@ internal static class TeamSync
                 {
                     // A teammate took it out of the library, and it was not changed here since: it goes from this PC too.
                     Backup(mine, "removed from the library");
-                    File.Delete(LearnedTools.PathFor(folder, name));
+                    Retry(() => File.Delete(LearnedTools.PathFor(folder, name)));
                     state.Tools.Remove(name);
                     report.RemovedThere.Add(name);
                     return;
@@ -214,7 +228,7 @@ internal static class TeamSync
             {
                 // The same code; only the programs it has run in (or the wording) differ: both lists, published once.
                 var merged = (theirs.Saved >= mine.Saved ? theirs : mine).WithPrograms(theirs.Programs.Union(mine.Programs)).WithUses(mine.Uses);
-                File.WriteAllText(LearnedTools.PathFor(folder, name), merged.ToJson());
+                Retry(() => File.WriteAllText(LearnedTools.PathFor(folder, name), merged.ToJson()));
                 await PublishAsync(name, merged, HashOf(merged), theirSha).ConfigureAwait(false);
                 return;
             }
@@ -268,7 +282,7 @@ internal static class TeamSync
         {
             var kept = theirs.WithUses(mine?.Uses ?? 0);
             Directory.CreateDirectory(folder);
-            File.WriteAllText(LearnedTools.PathFor(folder, name), kept.ToJson());
+            Retry(() => File.WriteAllText(LearnedTools.PathFor(folder, name), kept.ToJson()));
             Remember(name, sha, HashOf(kept));
             report.Received.Add(name);
         }
@@ -281,7 +295,7 @@ internal static class TeamSync
             {
                 Directory.CreateDirectory(backups);
                 var file = Path.Combine(backups, $"{tool.Name} {DateTime.Now:yyyy-MM-dd HHmmss}.json");
-                File.WriteAllText(file, tool.ToJson());
+                Retry(() => File.WriteAllText(file, tool.ToJson()));
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { report.Errors.Add($"{tool.Name}: could not keep a backup ({why}): {ex.Message}"); }
         }
@@ -380,7 +394,7 @@ internal static class TeamSyncCheck
         Expect(!library.Files.ContainsKey("cpm_field_test_tool"), "the field test's own tool was published");
 
         // 8. Deleted on A: out of the library, then off B (kept in B's backups).
-        File.Delete(LearnedTools.PathFor(a.Folder, "count_team_frames"));
+        TeamSync.Retry(() => File.Delete(LearnedTools.PathFor(a.Folder, "count_team_frames")));
         r = a.Sync();
         Expect(r.RemovedHere.Contains("count_team_frames") && !library.Files.ContainsKey("count_team_frames"), "a tool deleted on one PC stayed in the library: " + r.Summary());
         r = b.Sync();
@@ -409,7 +423,7 @@ internal static class TeamSyncCheck
         public void Save(LearnedTool tool)
         {
             Directory.CreateDirectory(Folder);
-            File.WriteAllText(LearnedTools.PathFor(Folder, tool.Name), tool.ToJson());
+            TeamSync.Retry(() => File.WriteAllText(LearnedTools.PathFor(Folder, tool.Name), tool.ToJson()));
         }
 
         public bool Has(string name) => File.Exists(LearnedTools.PathFor(Folder, name));

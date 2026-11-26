@@ -197,7 +197,11 @@ public static class LateralTools
         if (code.Equals("None", StringComparison.OrdinalIgnoreCase))
         {
             if (sap)
-                throw new ToolInputException($"{e.Program.Name} does not take its 'Load Pattern Definitions' table back, which is where a code load is taken off. In {e.Program.Name}: Define > Load Patterns, set {name}'s Auto Lateral Load to None.");
+            {
+                // SAP2000's own call (0.4.40 field test: its patterns' table cannot take the None).
+                SapLateral.SetNone(e, name, kind);
+                return new JsonObject { ["pattern"] = name, ["code"] = "None", ["set_by"] = $"LoadPatterns.Auto{(kind == LateralCodes.Wind ? "Wind" : "Seismic")}.SetNone", ["done"] = $"{name} has no auto {kind.ToLowerInvariant()} load now." };
+            }
             EditableTables.Put(e, patterns.Key, patternKey, [EditableTables.Row((patternKey, name), ("AutoLoad", "None"))], $"take the code load off {name}");
             return new JsonObject { ["pattern"] = name, ["code"] = "None", ["done"] = $"{name} has no auto {kind.ToLowerInvariant()} load now." };
         }
@@ -209,16 +213,29 @@ public static class LateralTools
         // empty, except where inputs were given): the row is always written to the code's table too, with the inputs given.
         if (!sap)
             EditableTables.Put(e, patterns.Key, patternKey, [EditableTables.Row((patternKey, name), ("AutoLoad", table.KeyCode))], $"make {name} a {table.Code} load");
-        var row = new Dictionary<string, string>(values, StringComparer.OrdinalIgnoreCase) { [key] = name };
-        EditableTables.Put(e, table.Key, key, [row], $"give {name} its {table.Code} inputs");
+        // SAP2000 26 takes a code only by its own Set call: a code's table takes no row for a pattern that does not have
+        // the code yet (0.4.40 field test: 0 errors and nothing kept, for 70 codes). The call sets plain starting values;
+        // the inputs given then go into the row it made.
+        string? setBy = null;
+        if (sap)
+        {
+            setBy = SapLateral.SetCode(e, name, kind, table.Code);
+            if (setBy is null && EditableTables.Read(e, table.Key, key, name) is null)
+                throw new ToolInputException($"{e.Program.Name}'s API has no call that gives a pattern the {kind.ToLowerInvariant()} code {table.Code}, and its table '{table.Name}' only changes a pattern that has that code already. In {e.Program.Name}: Define > Load Patterns, choose {table.Code} as {name}'s Auto Lateral Load; then set_lateral_load sets its inputs.");
+        }
+        if (!sap || values.Count > 0)
+        {
+            var row = new Dictionary<string, string>(values, StringComparer.OrdinalIgnoreCase) { [key] = name };
+            EditableTables.Put(e, table.Key, key, [row], $"give {name} its {table.Code} inputs");
+        }
         var back = EditableTables.Read(e, table.Key, key, name)
-            ?? throw new EtabsException($"{e.Program.Name} took {table.Code} for {name}, but its table '{table.Name}' has no row for {name} when read back.");
+            ?? throw new EtabsException($"{e.Program.Name} took {table.Code} for {name}" + (setBy is null ? "" : $" (by {setBy})") + $", but its table '{table.Name}' has no row for {name} when read back.");
         foreach (var (field, value) in values)
             if (back.TryGetValue(field, out var got) && !Same(got, value))
                 throw new EtabsException($"{e.Program.Name} kept {field} = '{got}' for {name}, not '{value}': check the value against lateral_codes for {table.Code}.");
         return new JsonObject
         {
-            ["pattern"] = name, ["kind"] = kind, ["code"] = table.Code, ["table"] = table.Name,
+            ["pattern"] = name, ["kind"] = kind, ["code"] = table.Code, ["table"] = table.Name, ["set_by"] = setBy is null ? "the table" : "LoadPatterns.Auto" + (kind == LateralCodes.Wind ? "Wind." : "Seismic.") + setBy,
             ["read_back"] = new JsonObject(back.Where(kv => kv.Key is not ("GUID")).Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))),
             ["note"] = $"{e.Program.Name} computes the story forces when the analysis runs. They show in its Load Patterns > Modify Lateral Load, and in the table '{table.Name}'.",
         };

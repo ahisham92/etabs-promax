@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using CsiProMax.Assistant.Etabs;
 using CsiProMax.Assistant.Tools;
+using CsiProMax.Lateral;
 using static CsiProMax.Assistant.FieldParts;
 
 namespace CsiProMax.Assistant;
@@ -381,6 +382,11 @@ public static class CsiFieldSteps
                 if (codes.Count > 0)
                     T("lateral_codes", $$"""{"kind":"{{kind}}","code":{{Q(codes[0])}},"pattern":"{{pattern}}"}""", a => FieldContext.Expect(a["inputs"] is JsonArray { Count: > 0 }, $"{codes[0]} has no inputs: " + a.ToJsonString()), $"tool lateral_codes gives the inputs of {kind} {codes[0]}");
                 foreach (var code in codes)
+                    // SAP2000 26 sets a code only by its own Set call; for a code its API has none for, the tool says so
+                    // and how to choose it by hand (0.4.40 field test).
+                    if (program.Key == CsiProgram.Sap2000.Key && SapLateral.Setters(kind == "wind" ? LateralCodes.Wind : LateralCodes.Seismic, code).Count == 0)
+                        No("set_lateral_load", $$"""{"name":"{{pattern}}","kind":"{{kind}}","code":{{Q(code)}}}""", "Define > Load Patterns", $"tool set_lateral_load, {kind} {code} (no API call: says how to choose it in SAP2000)");
+                    else
                     T("set_lateral_load", $$"""{"name":"{{pattern}}","kind":"{{kind}}","code":{{Q(code)}}}""", a =>
                         FieldContext.Expect(a["read_back"] is JsonObject { Count: > 0 }, $"{code} was not read back from its table: " + a.ToJsonString()), $"tool set_lateral_load, {kind} {code}");
                 if (codes.Count > 0)

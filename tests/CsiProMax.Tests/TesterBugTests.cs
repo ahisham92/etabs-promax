@@ -736,6 +736,22 @@ static class TesterBugTests
                 && log.IndexOf("ImportErrors(", StringComparison.Ordinal) < log.IndexOf("PostMessageW(done", StringComparison.Ordinal) && !notices.Contains("0x0010", StringComparison.Ordinal), "the log is answered by its Done button after its errors are read, and never closed");
             static bool SandboxedLeftCopy() => ScratchProgram.IsLeftCopy(["SAP2000 - cpm-field-test-ab12cd", "Access Database Import Log"]);
         });
+        yield return ("field test: a file error says where it came from, and the team library's file calls try again for a moment (0.4.40: 'Access to the path is denied.')", () =>
+        {
+            // Seen on Ahmed's PC on 2026-11-26: the team library's check failed with only "Access to the path is denied."
+            string where = "";
+            try { CsiProMax.Tools.TeamSync.Retry(() => throw new ArgumentException("not a file error")); }
+            catch (ArgumentException) { where = "other errors are not tried again"; }
+            Equal("other errors are not tried again", where, "an error that is not a file error");
+            var tries = 0;
+            CsiProMax.Tools.TeamSync.Retry(() => { if (++tries < 4) throw new UnauthorizedAccessException("Access to the path is denied."); });
+            Equal(4, tries, "a denied file call is tried again until it works");
+            try { DeniedHere(); }
+            catch (UnauthorizedAccessException ex) { where = FieldContext.Where(ex); }
+            Check(where.Contains("DeniedHere", StringComparison.Ordinal), "the step's detail names where the denial came from: " + where);
+            Equal("", FieldContext.Where(new InvalidOperationException("x")), "other errors keep their message alone");
+            static void DeniedHere() => throw new UnauthorizedAccessException("Access to the path is denied.");
+        });
         yield return ("ETABS 23 field test: a check whose table has no rows for the scratch model is not tested; a table that cannot be read still fails", () =>
         {
             // Seen on 2026-11-25 with 0.4.11: "1 of 5 checks had nothing to read. check_story_irregularity: no reason given".
