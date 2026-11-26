@@ -55,7 +55,33 @@ public static class ModelerCheck
       const FOLDER = __FOLDER__;
       const formOk = label => { const forms = document.querySelectorAll(".dlg"), f = forms[forms.length - 1]; const b = f && [...f.querySelectorAll(".df button")].find(x => x.textContent === label); if (!b) throw new Error("the form has no " + label + " button"); b.click(); };
       const formErr = () => { const e = document.querySelector(".dlg .ferr:not([hidden])"); return e ? e.textContent : ""; };
+      // The Engine's results on the model: a small pack of the open model with one result table, read as a dropped file
+      // would be (the file picker needs a person's click). The run itself is the field test's Engine run step, never
+      // started from here, as it would start the CSI program.
+      const engineFile = () => new File([JSON.stringify({manifest: {}, model: P.model, tables: {"Joint Displacements": {name: "Joint Displacements", fields: ["Label", "Story", "OutputCase", "Ux", "Uy", "Uz"], rows: [["CPM-CHK", "", "Dead", "0.001", "0", "0"]]}}})], "CPM engine check.cpmx", {type: "application/json"});
+      const engineIn = async () => {
+        await engineImport(engineFile()); await wait(600);
+        if (!engine.res || !P.tables["Joint Displacements"]) return "the results were not put on the model: " + document.getElementById("hint").textContent;
+        return "";
+      };
+      const engineImportCheck = async () => {
+        const bad = await engineIn(); if (bad) return {fail: bad};
+        engineClear(); await wait(400);
+        return {ok: "a pack's results were shown on the model, then cleared"};
+      };
       const OTHER_WAY = {
+        "eng:import": engineImportCheck,
+        "eng:clear": async () => {
+          if (!engine.res) { const bad = await engineIn(); if (bad) return {fail: bad}; }
+          if (offNow("eng:clear")) return {fail: "greyed out, although results are on the model"};
+          await act("eng:clear"); await wait(400);
+          return engine.res || P.tables["Joint Displacements"] ? {fail: "the results are still on the model"} : {ok: "the results were cleared; the model is unlocked"};
+        },
+        "eng:runDesign": async () => OTHER_WAY["eng:run"](),
+        "eng:run": async () => {
+          const r = await fetch("run", {method: "POST", headers: {"Content-Type": "application/json", "X-CPM-View": "1"}, body: JSON.stringify({status: true}), cache: "no-store"}).then(x => x.json()).catch(e => ({error: e.message}));
+          return r.running !== undefined || r.ok !== undefined ? {ok: "the run answers (" + (r.running ? "running" : "idle") + "); the run itself is the Engine run step"} : {fail: "the run does not answer: " + (r.error || JSON.stringify(r))};
+        },
         "m:open": async () => {
           const saved = await hmRun("save_model_as", {name: "CPM open check", folder: FOLDER}, true);
           if (!saved.ok) return {fail: "the check could not save a model to open: " + saved.error};
@@ -319,7 +345,7 @@ public static class ModelerCheck
             if (it.target && program !== it.target) { await hmRun("set_model_program", {program: it.target}, true); for (let i = 0; i < 30 && program !== it.target; i++) { if (window.cpmPull) await window.cpmPull(); await wait(200); } }
             pick();
             if (it.act === "m:redo" && offNow(it.act)) { await hmRun("define_load_pattern", {name: "CPM-CHKREDO", type: "Other", self_weight: 0}, true); await hmRun("undo"); await wait(400); }
-            if (offNow(it.act)) return {fail: "greyed out, although the check selected a beam and a floor for it first"};
+            if (offNow(it.act) && it.act !== "eng:clear") return {fail: "greyed out, although the check selected a beam and a floor for it first"};
             if (OTHER_WAY[it.act]) return await OTHER_WAY[it.act](it);
             const before = dialogsOpen();
             await act(it.act); await wait(700);
@@ -395,6 +421,9 @@ public static class ModelerCheck
                 }
             else if (path == "check")
                 lock (gate) answer = (Encoding.UTF8.GetBytes(StabilityTools.Window(link, body).ToJsonString()), "application/json");
+            else if (path == "run")
+                // Status only: the check never starts a run (that would start the CSI program); the Engine run step does.
+                answer = (Encoding.UTF8.GetBytes(EngineRun.Status(false).ToJsonString()), "application/json");
             else if (path == "chat")
                 answer = (Encoding.UTF8.GetBytes(chat ? """{"conv":"check","count":0,"items":[],"busy":false,"ready":true,"status":""}""" : """{"off":true}"""), "application/json");
             return Task.FromResult(answer);
