@@ -480,7 +480,9 @@ public static class S2kWriter
             else if (shape.Contains("i/wide flange") && d > 0 && b > 0 && tf > 0 && tw > 0) { name = "I/Wide Flange"; p = ISection(d, b, tf, tw, bb, tfb); }
             else if ((shape.Contains("tube") || shape.Contains("box")) && d > 0 && b > 0 && tf > 0 && tw > 0) { name = "Box/Tube"; p = Tube(d, b, tf, tw); }
             else if (shape.Contains("pipe") && d > 0 && tw > 0) { name = "Pipe"; p = Pipe(d, tw); }
-            else if (OpenName(shape) is { } open && OpenShape(open, d, b, tf, tw, s.Number("DIS") ?? 0) is { } parts) { name = open; p = Composite(parts); }
+            // SAP2000 26 has no concrete tee or L in this table ("Error reading section shape; record skipped" for
+            // Shape="Concrete Tee", 0.4.54 field run): they go across as its General shape, with their own properties.
+            else if (OpenName(shape) is { } open && OpenShape(open, d, b, tf, tw, s.Number("DIS") ?? 0) is { } parts) { name = open is "Concrete Tee" or "Concrete L" ? "General" : open; p = Composite(parts); }
             else
             {
                 if (m.LineAssigns.Exists(x => x.Section == s.Name))
