@@ -456,6 +456,9 @@ public sealed class ComEtabs : ICsiLink, IDisposable
     {
         if (cases is { Count: > 0 }) { string[] list = cases.ToArray(); m.DatabaseTables.SetLoadCasesSelectedForDisplay(ref list); }
         if (combos is { Count: > 0 }) { string[] list = combos.ToArray(); m.DatabaseTables.SetLoadCombinationsSelectedForDisplay(ref list); }
+        // Load assignment and pattern tables list only the patterns selected for display: SAP2000 26 gave a pack none of
+        // its frame, area or joint loads (0.4.51 field test, Display > Load Assigns greyed out). Every pattern, then.
+        EditableTables.ShowEveryPattern(m);
         // Section cut forces are given only for the cuts selected for display; none is selected at first (ETABS 23
         // answered no rows for a cut that was defined and analysed), so every cut is selected. Best effort.
         if (key.Contains("Section Cut Forces", StringComparison.OrdinalIgnoreCase))
