@@ -150,5 +150,30 @@ static class DefineTablesTests
             Check(!s2k.Contains("GenDispl=GD2"), "GD2 names no point, so it is left out");
             Check(s2k.Contains("AREA SECTION PROPERTY LAYERS") && s2k.Contains("LayerName=Top") && s2k.Contains("Shell-Layered/Nonlinear"), "the layers and a layered shell");
         });
+        yield return ("round trip: a model for ETABS with every kept row goes to a SAP2000 file and back, and comes back the same (ETABS-only items are not lost)", () =>
+        {
+            var link = Frame();
+            var m = link.Model;
+            DefineTables.SetRebarSize(m, "T16", 0.000201, 0.016);
+            DefineTables.SetRebar(m, "C500x500", new Dictionary<string, string> { ["PATTERN"] = "R-4-4" });
+            DefineTables.Set(m, "Hinge Definitions - Moment M3", "H1", [new() { ["IsSymmetric"] = "Yes" }]);
+            DefineTables.Set(m, "Walking Vibration Definitions", "W1", [new() { ["Story"] = "Story1", ["X"] = "1" }]);
+            var beam = m.LineAssigns.First(a => m.Line(a.Label)!.Kind == LineKind.Beam);
+            AssignTables.Set(beam, new Dictionary<string, List<Dictionary<string, string>>> { ["Frame Assignments - Floor Cracking"] = [new() { ["Consider"] = "Yes" }] });
+            ProgramTables.SetMaterialTables(m.Materials.First(x => x.IsConcrete), new Dictionary<string, List<Dictionary<string, string>>> { ["Time Dependence - CEB-FIP 90"] = [new() { ["RelHumid"] = "50" }] });
+            var before = ModelFile.ToJson(m);
+            m.Target = "sap2000";
+            var path = Path.Combine(Path.GetTempPath(), "cpm-trip-" + Guid.NewGuid().ToString("N") + ".s2k");
+            try
+            {
+                CsiProMax.S2k.S2kWriter.WriteFile(m, path);
+                var back = CsiProMax.S2k.S2kReader.Read(File.ReadAllText(path), "Trip");
+                Check(back.Exact, "the SAP2000 file carries the whole model: " + string.Join(" | ", back.Notes));
+                back.Model.Target = "etabs";
+                Check(ModelFile.ToJson(back.Model) == before, "back for ETABS it is the same model");
+                Check(DefineTables.RebarSizes(back.Model).Exists(x => x.Name == "T16") && back.Model.DefinitionTables!.ContainsKey("Walking Vibration Definitions"), "the bar size and the ETABS-only walking vibration came back");
+            }
+            finally { File.Delete(path); }
+        });
     }
 }
