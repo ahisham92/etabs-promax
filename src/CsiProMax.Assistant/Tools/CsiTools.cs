@@ -156,7 +156,7 @@ public static class CsiTools
             Ask.Always, RestoreCheckpoint, a => $"Go back to checkpoint '{a.Text("name")}' (later changes are lost)"),
 
         new("open_model",
-            "Opens a model file in the program window CSI ProMax works beside: the program's own model (ETABS .edb, SAP2000 .sdb, SAFE .fdb) or its text file (.e2k, .s2k, .f2k), " + // ETABS itself
+            "Opens a model file in the program window CSI ProMax works beside: the program's own model (ETABS .edb, SAP2000 .sdb, SAFE .fdb) or, in ETABS and SAP2000, its text file (.e2k, .s2k; a SAFE .f2k is imported by hand in SAFE), " + // ETABS itself
             "and every tool works on it from then on. The model open there now is closed: changes to it that were not saved are lost, so ask the engineer first whether to save it. The engineer is always asked first.",
             """{"type":"object","required":["path"],"properties":{"path":{"type":"string","description":"The model file's full path on this PC."}}}""",
             Ask.Always, OpenModel, a => $"Open {Path.GetFileName(a.Text("path"))} (the model open now is closed; changes not saved are lost)"),
@@ -1071,7 +1071,8 @@ public static class CsiTools
     internal static string[] ModelFiles(CsiProgram program) => program.Key switch
     {
         "sap2000" => [".sdb", ".s2k", ".$2k"],
-        "safe" => [".fdb", ".f2k", ".$fd"],
+        // Only its own model: SAFE 20 reads every file it is given as a packed .fdb ("Error decompressing file", 2026-11-26).
+        "safe" => [".fdb"],
         _ => [".edb", ".e2k", ".$et"],
     };
 
@@ -1095,6 +1096,9 @@ public static class CsiTools
         var name = e.Program.Name;
         var path = a.Need("path").Trim().Trim('"');
         var kinds = ModelFiles(e.Program);
+        if (e.Program.Key == CsiProgram.Safe.Key && Path.GetExtension(path).Equals(".f2k", StringComparison.OrdinalIgnoreCase))
+            throw new ToolInputException($"SAFE opens only .fdb models this way (SAFE 20 reads any other file as a packed .fdb and stops on \"Error decompressing file\"). " +
+                $"Ask the engineer to import {Path.GetFileName(path)} in SAFE: File > Import > SAFE .F2K file, and save it as an .fdb.");
         if (!kinds.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
             throw new ToolInputException($"{name} opens {string.Join(", ", kinds)} files; '{Path.GetFileName(path)}' is not one." +
                 (CsiProgram.All.FirstOrDefault(p => p.Key != e.Program.Key && ModelFiles(p).Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase)) is { } other
