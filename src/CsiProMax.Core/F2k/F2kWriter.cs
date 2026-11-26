@@ -11,23 +11,31 @@ namespace CsiProMax.F2k;
 /// <param name="CompressionOnly">The soil springs push only (no tension), as soil does.</param>
 /// <param name="Strips">Design strips along the grid lines, layer A along X grids and layer B along Y grids.</param>
 /// <param name="Version">The SAFE version written into the header.</param>
-public sealed record F2kOptions(string? Story = null, double? Subgrade = null, bool CompressionOnly = true, bool Strips = true, string Version = "16.0.0");
+public sealed record F2kOptions(string? Story = null, double? Subgrade = null, bool CompressionOnly = true, bool Strips = true, string Version = "20.1.0");
 
 /// <summary>What was written, for the answer to the engineer.</summary>
-public sealed record F2kResult(string Text, string Story, int Slabs, int Beams, int Columns, int Walls, int Supports, int Strips, int Loads, IReadOnlyList<string> Notes);
+public sealed record F2kResult(string Text, string Story, int Slabs, int Beams, int Columns, int Walls, int Supports, int Strips, int Loads, IReadOnlyList<string> Notes)
+{
+    /// <summary>The tendons of the story that went in.</summary>
+    public int Tendons { get; init; }
+}
 
 /// <summary>
-/// Writes one floor of a model as a SAFE text file (.f2k), the table text SAFE imports with File > Import > SAFE .F2K
-/// file (and ETABS's own "Export story as SAFE .F2K" writes). SAFE models one level: slabs, beams and drops on it,
-/// the columns and walls below and above it as its supports, point supports, soil under a mat, design strips,
-/// loads and combinations. Z is 0 at the slab; columns and walls reach down (and up) by their story heights.
-/// Nothing is analysed here: SAFE does that after the import.
+/// Writes one floor of a model as a SAFE text file (.f2k) in the tables SAFE 20 and later read and write (File >
+/// Import > SAFE .F2K), table for table and field for field as SAFE 20.1 and 23.1 export them (their own exports of
+/// the ACI 318-19 PT-SL and RC-PN examples, 2026-11-26), with the fields named as the programs' "Table and Field
+/// Keys.xml" names them. SAFE models one level: slabs, beams and drops on it, the columns and walls below and above it
+/// as its supports, point supports, soil under a mat (area springs), design strips with their design overwrites,
+/// post-tensioning tendons with their jacking and losses, loads, load cases (hyperstatic too) and combinations.
+/// Coordinates are the model's own (the slab at its elevation), as SAFE writes them. Nothing is analysed here.
 /// </summary>
 public static class F2kWriter
 {
     private static string N(double v) => CsiTableText.Number(v);
 
     private static List<(string, string)> Row(params (string Key, string Value)[] pairs) => [.. pairs];
+
+    private static string I(int v) => v.ToString(CultureInfo.InvariantCulture);
 
     public static F2kResult Write(StructuralModel m, F2kOptions? options = null)
     {
@@ -51,220 +59,427 @@ public static class F2kWriter
         var wallsAbove = areas.Where(a => a.Kind == AreaKind.Wall && At(a.Corners.Min(c => c.Z))).ToList();
         if (slabs.Count == 0) notes.Add($"Story {story} has no slabs, so the SAFE file has no slab areas.");
 
-        // ---- points: every corner and end on the level (z = 0), and the far ends of columns (z = -h or +h) ----
+        // ---- point objects: every corner and end, at its own place (the slab at the story's elevation) ----
         var points = new List<(string Name, double X, double Y, double Z)>();
         var index = new Dictionary<string, string>(StringComparer.Ordinal);
-        string Point(double x, double y, double dz)
+        string Point(double x, double y, double pz)
         {
-            var key = string.Create(CultureInfo.InvariantCulture, $"{Math.Round(x, 6)},{Math.Round(y, 6)},{Math.Round(dz, 6)}");
+            var key = string.Create(CultureInfo.InvariantCulture, $"{Math.Round(x, 6)},{Math.Round(y, 6)},{Math.Round(pz, 6)}");
             if (index.TryGetValue(key, out var name)) return name;
-            name = (points.Count + 1).ToString(CultureInfo.InvariantCulture);
-            points.Add((name, x, y, dz));
+            name = I(points.Count + 1);
+            points.Add((name, x, y, pz));
             index[key] = name;
             return name;
         }
 
-        var areaRows = new List<(string Label, string Section, List<string> Points)>();
-        foreach (var s in slabs) areaRows.Add((Unique(areaRows.Select(r => r.Label), s.Label), s.Section ?? "", s.Corners.Select(c => Point(c.X, c.Y, 0)).ToList()));
-        var lineRows = new List<(string Label, string Type, string Section, string I, string J)>();
-        foreach (var b in beams) lineRows.Add((Unique(lineRows.Select(r => r.Label), b.Label), "Beam", b.Section ?? "", Point(b.I.X, b.I.Y, 0), Point(b.J.X, b.J.Y, 0)));
+        // Floors and walls share SAFE's area names; beams and columns share its frame names.
+        var areaNames = new List<string>();
+        string AreaName(string wanted) { var n = Unique(areaNames, wanted); areaNames.Add(n); return n; }
+        var frameNames = new List<string>();
+        string FrameName(string wanted) { var n = Unique(frameNames, wanted); frameNames.Add(n); return n; }
+
+        var areaRows = new List<(string Label, string Section, List<string> Points, PhysicalArea Source)>();
+        foreach (var s in slabs) areaRows.Add((AreaName(s.Label), s.Section ?? "", s.Corners.Select(c => Point(c.X, c.Y, z)).ToList(), s));
+        var lineRows = new List<(string Label, string Type, string Section, string I, string J, double Length, PhysicalFrame Source)>();
+        foreach (var b in beams) lineRows.Add((FrameName(b.Label), "Beam", b.Section ?? "", Point(b.I.X, b.I.Y, z), Point(b.J.X, b.J.Y, z), Dist(b.I.X, b.I.Y, b.J.X, b.J.Y), b));
         var farEnds = new List<string>();
         foreach (var c in below)
         {
             var bottom = c.I.Z < c.J.Z ? c.I : c.J;
-            var far = Point(bottom.X, bottom.Y, bottom.Z - z);
+            var far = Point(bottom.X, bottom.Y, bottom.Z);
             farEnds.Add(far);
-            lineRows.Add((Unique(lineRows.Select(r => r.Label), c.Label), "Column", c.Section ?? "", far, Point(bottom.X, bottom.Y, 0)));
+            lineRows.Add((FrameName(c.Label), "Column", c.Section ?? "", far, Point(bottom.X, bottom.Y, z), z - bottom.Z, c));
         }
         foreach (var c in above)
         {
             var top = c.I.Z > c.J.Z ? c.I : c.J;
-            var far = Point(top.X, top.Y, top.Z - z);
+            var far = Point(top.X, top.Y, top.Z);
             farEnds.Add(far);
-            lineRows.Add((Unique(lineRows.Select(r => r.Label), c.Label + "A"), "Column", c.Section ?? "", Point(top.X, top.Y, 0), far));
+            lineRows.Add((FrameName(c.Label + "A"), "Column", c.Section ?? "", Point(top.X, top.Y, z), far, top.Z - z, c));
         }
-        // Walls become wall lines along their trace on the level.
-        var wallRows = new List<(string Label, string Section, string I, string J, double Height)>();
+        // Walls below and above the level, by their four corners.
+        var wallRows = new List<(string Label, string Section, List<string> Points)>();
         foreach (var (w, up) in wallsBelow.Select(w => (w, false)).Concat(wallsAbove.Select(w => (w, true))))
         {
-            var onLevel = w.Corners.Where(c => At(c.Z)).ToList();
-            if (onLevel.Count < 2) continue;
-            var height = w.Corners.Max(c => c.Z) - w.Corners.Min(c => c.Z);
-            wallRows.Add((Unique(wallRows.Select(r => r.Label), w.Label + (up ? "A" : "")), w.Section ?? "", Point(onLevel[0].X, onLevel[0].Y, 0), Point(onLevel[1].X, onLevel[1].Y, 0), up ? height : -height));
+            if (w.Corners.Count < 3) continue;
+            var farZ = up ? w.Corners.Max(c => c.Z) : w.Corners.Min(c => c.Z);
+            wallRows.Add((AreaName(w.Label + (up ? "A" : "")), w.Section ?? "", w.Corners.Select(c => Point(c.X, c.Y, c.Z)).ToList()));
+            foreach (var c in w.Corners.Where(c => Math.Abs(c.Z - farZ) < tol)) farEnds.Add(Point(c.X, c.Y, c.Z));
         }
 
-        // ---- supports: restraints on the level, and the far ends of the columns ----
+        // ---- supports: restraints on the level, and the far ends of the columns and walls ----
         var supports = new List<(string Point, string Restraint)>();
         foreach (var pa in m.PointAssigns.Where(p => p.Restraint is { Length: > 0 } && string.Equals(p.Story, story, StringComparison.OrdinalIgnoreCase)))
-            if (m.Point(pa.Point) is { } pp) supports.Add((Point(pp.X, pp.Y, 0), pa.Restraint!));
+            if (m.Point(pa.Point) is { } pp) supports.Add((Point(pp.X, pp.Y, z - pp.Below), pa.Restraint!));
         foreach (var far in farEnds.Distinct()) supports.Add((far, "UX UY UZ RX RY RZ"));
         if (below.Count + above.Count + wallRows.Count + supports.Count == 0 && options.Subgrade is null && !slabs.Any(sl => m.AreaAssigns.Find(x => x.Label == sl.Label && x.Story == sl.Story) is { } aa && PropertyDefs.Value(aa.Extra, "SPRINGPROP") is not null))
             notes.Add("Nothing holds the slab up: no columns, walls, supports or soil. Add supports or give a subgrade modulus before analysing in SAFE.");
+
+        // ---- design strips: along the grid lines, and the ones drawn by hand (Define > Design Strips), which replace
+        // grid strips of the same name. Each strip point is a point object, as SAFE keeps them. ----
+        var own = SlabDefs.Strips(m).Where(x => x.Story.Length == 0 || string.Equals(x.Story, story, StringComparison.OrdinalIgnoreCase)).ToList();
+        var strips = new List<SlabDefs.Strip>();
+        if (options.Strips && points.Count > 0)
+        {
+            strips = GridStrips(m, points.Where(p => Math.Abs(p.Z - z) < tol).ToList());
+            if (strips.Count == 0 && own.Count == 0) notes.Add("The model has no grid lines, so no design strips were made. Draw strips in SAFE, or add grids first.");
+            var mine = own.Select(x => x.Name).ToHashSet();
+            strips.RemoveAll(x => mine.Contains(x.Name));
+        }
+        var grid = strips.Count;
+        strips.AddRange(own);
+        var stripPoints = strips.Select(st => st.Plan.Select(p => Point(p[0], p[1], z)).ToList()).ToList();
+
+        // ---- tendons of the story ----
+        var tendons = SlabDefs.Tendons(m).Where(t => string.Equals(t.Story, story, StringComparison.OrdinalIgnoreCase) && t.Plan.Count >= 2).ToList();
+        var tendonPoints = tendons.Select(t => t.Plan.Select(p => Point(p[0], p[1], z)).ToList()).ToList();
+
+        // ---- point loads, on point objects of the level ----
+        var pointLoads = new List<(string Point, string Pattern, double[] Values)>();
+        foreach (var l in m.PointLoads.Where(l => string.Equals(l.Story, story, StringComparison.OrdinalIgnoreCase)))
+        {
+            if (!(E2kText.Value(l.Tokens, "TYPE") ?? "FORCE").Equals("FORCE", StringComparison.OrdinalIgnoreCase) || m.Point(l.Object) is not { } pp) continue;
+            var values = new[] { "FX", "FY", "FZ", "MX", "MY", "MZ" }.Select(k => Num(E2kText.Value(l.Tokens, k)) ?? 0).ToArray();
+            if (values.All(v => v == 0)) continue;
+            pointLoads.Add((Point(pp.X, pp.Y, z - pp.Below), l.Pattern, values));
+        }
 
         // ---- what is used ----
         var usedSlab = areaRows.Select(r => r.Section).Where(s => s.Length > 0).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var usedBeam = lineRows.Where(r => r.Type == "Beam").Select(r => r.Section).Where(s => s.Length > 0).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var usedColumn = lineRows.Where(r => r.Type == "Column").Select(r => r.Section).Where(s => s.Length > 0).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var usedWall = wallRows.Select(r => r.Section).Where(s => s.Length > 0).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var tendonSections = SlabDefs.TendonSectionList(m).Where(s => tendons.Exists(t => string.Equals(t.Section, s.Name, StringComparison.OrdinalIgnoreCase))).ToList();
 
         var tables = new List<string>();
         var units = $"{m.Units.Force}, {m.Units.Length.ToLowerInvariant()}, {m.Units.Temperature}";
-        tables.Add(CsiTableText.Table("PROGRAM CONTROL", [Row(("ProgramName", "SAFE"), ("Version", options.Version), ("ProgLevel", "PostTensioning"), ("CurrUnits", units), ("MergeTol", "0.001"), ("ModelDatum", N(z)), ("StHtAbove", N(StoryHeight(m, level + 1))), ("StHtBelow", N(StoryHeight(m, level))))]));
+        var control = Row(("ProgramName", "SAFE"), ("Version", options.Version), ("ProgLevel", "Post Tensioning"), ("CurrUnits", units));
+        var slabCode = PreferenceCode(m);
+        if (slabCode is not null) control.Add(("ConcSlbCode", slabCode));
+        tables.Add(CsiTableText.Table("PROGRAM CONTROL", [control]));
 
-        // Materials: the ones the used sections name, plus every concrete (SAFE designs with them).
+        // Grids, with the level as the model's datum.
+        var belowName = level > 0 ? m.Stories[level - 1].Name : "Base";
+        tables.Add(CsiTableText.Table("GRID DEFINITIONS - GENERAL", [Row(("Name", "G1"), ("Type", "Cartesian"), ("Ux", "0"), ("Uy", "0"), ("Rz", "0"),
+            ("Datum Name", story), ("Story Name Below", belowName), ("Model Datum", N(z)), ("Story Height Below", N(StoryHeight(m, level))))]));
+        if (m.Grids.Count > 0)
+            tables.Add(CsiTableText.Table("GRID DEFINITIONS - GRID LINES", m.Grids.OrderBy(g => g.Direction).ThenBy(g => g.Coordinate).Select(g => (IReadOnlyList<(string, string)>)Row(
+                ("Name", "G1"), ("Grid Line Type", g.Direction == "Y" ? "Y (Cartesian)" : "X (Cartesian)"), ("ID", g.Label), ("Ordinate", N(g.Coordinate)),
+                ("Bubble Location", g.Direction == "Y" ? "Start" : "End"), ("Visible", "Yes")))));
+
+        // Materials: the ones the used sections name, plus every concrete and rebar (SAFE designs with them) and tendon steel.
         var sectionMaterials = m.FrameSections.Where(s => usedBeam.Contains(s.Name) || usedColumn.Contains(s.Name)).Select(s => s.Material)
-            .Concat(m.ShellSections.Where(s => usedSlab.Contains(s.Name) || usedWall.Contains(s.Name)).Select(s => s.Material)).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var materials = m.Materials.Where(x => x.IsConcrete || sectionMaterials.Contains(x.Name) || x.Type.Equals("Rebar", StringComparison.OrdinalIgnoreCase)).ToList();
-        tables.Add(CsiTableText.Table("MATERIAL PROPERTIES 01 - GENERAL", materials.Select(x => (IReadOnlyList<(string, string)>)Row(("Material", x.Name), ("Type", x.Type.Length > 0 ? x.Type : "Concrete"), ("SymType", x.Get("SYMTYPE") ?? "Isotropic")))));
-        tables.Add(CsiTableText.Table("MATERIAL PROPERTIES 02 - BASIC MECHANICAL PROPERTIES", materials.Select(x => (IReadOnlyList<(string, string)>)Row(("Material", x.Name), ("UnitWeight", N(x.Number("WEIGHTPERVOLUME") ?? 0)), ("E1", N(x.Number("E") ?? 0)), ("U12", N(x.Number("U") ?? 0.2)), ("A1", N(x.Number("A") ?? 1e-5))))));
-        var concretes = materials.Where(x => x.IsConcrete).ToList();
-        if (concretes.Count > 0)
-            tables.Add(CsiTableText.Table("MATERIAL PROPERTIES 03 - CONCRETE", concretes.Select(x => (IReadOnlyList<(string, string)>)Row(("Material", x.Name), ("Fc", N(x.Number("FC") ?? 0)), ("LtWtConc", "No")))));
-        var rebars = materials.Where(x => x.Type.Equals("Rebar", StringComparison.OrdinalIgnoreCase)).ToList();
-        if (rebars.Count > 0)
-            tables.Add(CsiTableText.Table("MATERIAL PROPERTIES 04 - REBAR", rebars.Select(x => (IReadOnlyList<(string, string)>)Row(("Material", x.Name), ("Fy", N(x.Number("FY") ?? 0)), ("Fu", N(x.Number("FU") ?? 0))))));
+            .Concat(m.ShellSections.Where(s => usedSlab.Contains(s.Name) || usedWall.Contains(s.Name)).Select(s => s.Material))
+            .Concat(tendonSections.Select(s => s.Material)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        bool Is(Material x, string type) => x.Type.Equals(type, StringComparison.OrdinalIgnoreCase);
+        var materials = m.Materials.Where(x => x.IsConcrete || sectionMaterials.Contains(x.Name) || Is(x, "Rebar")).ToList();
+        tables.Add(CsiTableText.Table("MATERIAL PROPERTIES - GENERAL", materials.Select(x => (IReadOnlyList<(string, string)>)Row(("Material", x.Name), ("Type", x.Type.Length > 0 ? x.Type : "Concrete"),
+            ("SymType", x.Get("SYMTYPE") ?? (Is(x, "Rebar") || Is(x, "Tendon") ? "Uniaxial" : "Isotropic"))))));
+        tables.Add(CsiTableText.Table("MATERIAL PROPERTIES - BASIC MECHANICAL PROPERTIES", materials.Select(x => (IReadOnlyList<(string, string)>)Row(("Material", x.Name), ("DensityType", "Weight"),
+            ("UnitWeight", N(x.Number("WEIGHTPERVOLUME") ?? 0)), ("E1", N(x.Number("E") ?? 0)), ("U12", N(x.Number("U") ?? (x.IsConcrete ? 0.2 : 0.3))), ("A1", N(x.Number("A") ?? 1e-5))))));
+        void MaterialData(string table, Func<Material, bool> which, Func<Material, List<(string, string)>> row)
+        {
+            var list = materials.Where(which).ToList();
+            if (list.Count > 0) tables.Add(CsiTableText.Table(table, list.Select(x => (IReadOnlyList<(string, string)>)row(x))));
+        }
+        MaterialData("MATERIAL PROPERTIES - STEEL DATA", x => Is(x, "Steel"), x => Row(("Material", x.Name), ("Fy", N(x.Number("FY") ?? 0)), ("Fu", N(x.Number("FU") ?? 0))));
+        MaterialData("MATERIAL PROPERTIES - CONCRETE DATA", x => x.IsConcrete, x => Row(("Material", x.Name), ("Fc", N(x.Number("FC") ?? 0)), ("LtWtConc", "No")));
+        MaterialData("MATERIAL PROPERTIES - REBAR DATA", x => Is(x, "Rebar"), x => Row(("Material", x.Name), ("Fy", N(x.Number("FY") ?? 0)), ("Fu", N(x.Number("FU") ?? 0))));
+        MaterialData("MATERIAL PROPERTIES - TENDON DATA", x => Is(x, "Tendon"), x => Row(("Material", x.Name), ("Fy", N(x.Number("FY") ?? 0)), ("Fu", N(x.Number("FU") ?? 0))));
 
-        // Slab properties: slabs, drops, mats and footings by the slab type ETABS gives them.
+        // Frame sections, by their shape.
+        var frameProps = m.FrameSections.Where(s => usedBeam.Contains(s.Name) || usedColumn.Contains(s.Name)).ToList();
+        var shapeOf = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (frameProps.Count > 0)
+        {
+            var rect = new List<IReadOnlyList<(string, string)>>();
+            var circle = new List<IReadOnlyList<(string, string)>>();
+            var steel = new List<IReadOnlyList<(string, string)>>();
+            foreach (var s in frameProps)
+            {
+                var design = usedColumn.Contains(s.Name) ? "Column" : "Beam";
+                if (s.Shape.Contains("Circle", StringComparison.OrdinalIgnoreCase))
+                {
+                    shapeOf[s.Name] = "Concrete Circle";
+                    circle.Add(Row(("Name", s.Name), ("Material", s.Material), ("From File?", "No"), ("Diameter", N(s.Number("D") ?? 0)), ("Design Type", design)));
+                }
+                else if (s.Get("FILE") is { Length: > 0 } file)
+                {
+                    shapeOf[s.Name] = "Steel I/Wide Flange";
+                    steel.Add(Row(("Name", s.Name), ("Material", s.Material), ("From File?", "Yes"), ("File Name", file), ("Section in File", s.Shape)));
+                }
+                else if (s.Shape.Contains("Steel I", StringComparison.OrdinalIgnoreCase))
+                {
+                    shapeOf[s.Name] = "Steel I/Wide Flange";
+                    double b = s.Number("B") ?? 0, tf = s.Number("TF") ?? 0;
+                    steel.Add(Row(("Name", s.Name), ("Material", s.Material), ("From File?", "No"), ("Total Depth", N(s.Number("D") ?? 0)), ("Top Flange Width", N(b)), ("Top Flange Thickness", N(tf)),
+                        ("Web Thickness", N(s.Number("TW") ?? 0)), ("Bottom Flange Width", N(s.Number("BBOTTOM") ?? b)), ("Bottom Flange Thickness", N(s.Number("TFBOTTOM") ?? tf))));
+                }
+                else
+                {
+                    if (!s.Shape.Contains("Rectangular", StringComparison.OrdinalIgnoreCase))
+                        notes.Add($"The frame section {s.Name} ({s.Shape}) went in as a concrete rectangle of its depth and width; give it its own shape in SAFE.");
+                    shapeOf[s.Name] = "Concrete Rectangular";
+                    rect.Add(Row(("Name", s.Name), ("Material", s.Material), ("From File?", "No"), ("Depth", N(s.Number("D") ?? 0)), ("Width", N(s.Number("B") ?? s.Number("D") ?? 0)), ("Design Type", design)));
+                }
+            }
+            tables.Add(CsiTableText.Table("FRAME SECTION PROPERTY DEFINITIONS - SUMMARY", frameProps.Select(s => (IReadOnlyList<(string, string)>)Row(("Name", s.Name), ("Shape", shapeOf[s.Name])))));
+            if (steel.Count > 0) tables.Add(CsiTableText.Table("FRAME SECTION PROPERTY DEFINITIONS - STEEL I/WIDE FLANGE", steel));
+            if (rect.Count > 0) tables.Add(CsiTableText.Table("FRAME SECTION PROPERTY DEFINITIONS - CONCRETE RECTANGULAR", rect));
+            if (circle.Count > 0) tables.Add(CsiTableText.Table("FRAME SECTION PROPERTY DEFINITIONS - CONCRETE CIRCLE", circle));
+        }
+        if (tendonSections.Count > 0)
+            tables.Add(CsiTableText.Table("TENDON SECTION PROPERTIES", tendonSections.Select(s => (IReadOnlyList<(string, string)>)Row(("Name", s.Name), ("Material", s.Material), ("StrandArea", N(s.StrandArea))))));
+
+        // Slab and wall properties: slabs, drops, mats and footings by the slab type ETABS gives them.
         var slabProps = m.ShellSections.Where(s => usedSlab.Contains(s.Name)).ToList();
-        if (slabProps.Count > 0)
-            tables.Add(CsiTableText.Table("SLAB PROPERTIES 01 - GENERAL", slabProps.Select(s => (IReadOnlyList<(string, string)>)Row(
-                ("Slab", s.Name), ("Type", SlabType(s)), ("MatProp", s.Material), ("Thickness", N(s.Thickness ?? 0)), ("ThickPlate", s.Get("MODELINGTYPE") is "ShellThick" ? "Yes" : "No"), ("Ortho", "No")))));
-        var beamProps = m.FrameSections.Where(s => usedBeam.Contains(s.Name)).ToList();
-        if (beamProps.Count > 0)
-            tables.Add(CsiTableText.Table("BEAM PROPERTIES 01 - GENERAL", beamProps.Select(s => (IReadOnlyList<(string, string)>)Row(
-                ("Beam", s.Name), ("Type", "Rectangular"), ("MatProp", s.Material), ("Depth", N(s.Number("D") ?? 0)), ("WidthTop", N(s.Number("B") ?? 0)), ("WidthBot", N(s.Number("B") ?? 0))))));
-        var columnProps = m.FrameSections.Where(s => usedColumn.Contains(s.Name)).ToList();
-        if (columnProps.Count > 0)
-            tables.Add(CsiTableText.Table("COLUMN PROPERTIES 01 - GENERAL", columnProps.Select(s => (IReadOnlyList<(string, string)>)Row(
-                ("Column", s.Name), ("Type", s.Shape.Contains("Circle", StringComparison.OrdinalIgnoreCase) ? "Circular" : "Rectangular"), ("MatProp", s.Material),
-                ("SecDim2", N(s.Number("B") ?? s.Number("D") ?? 0)), ("SecDim3", N(s.Number("D") ?? 0)), ("AutoRigid", "No"), ("AutoDrop", "No"), ("IncludeCap", "No")))));
         var wallProps = m.ShellSections.Where(s => usedWall.Contains(s.Name)).ToList();
+        if (slabProps.Count + wallProps.Count > 0)
+            tables.Add(CsiTableText.Table("AREA SECTION PROPERTY DEFINITIONS - SUMMARY", slabProps.Select(s => (IReadOnlyList<(string, string)>)Row(("Name", s.Name), ("Type", "Slab"), ("Element Type", ElementType(s, "Shell-Thick")), ("Material", s.Material), ("Total Thickness", N(s.Thickness ?? 0))))
+                .Concat(wallProps.Select(s => (IReadOnlyList<(string, string)>)Row(("Name", s.Name), ("Type", "Wall"), ("Element Type", ElementType(s, "Shell-Thin")), ("Material", s.Material), ("Total Thickness", N(s.Thickness ?? 0)))))));
+        if (slabProps.Count > 0)
+            tables.Add(CsiTableText.Table("SLAB PROPERTY DEFINITIONS", slabProps.Select(s => (IReadOnlyList<(string, string)>)Row(
+                ("Name", s.Name), ("Modeling Type", ElementType(s, "Shell-Thick")), ("Property Type", SlabType(s)), ("Material", s.Material), ("Slab Thickness", N(s.Thickness ?? 0))))));
         if (wallProps.Count > 0)
-            tables.Add(CsiTableText.Table("WALL PROPERTIES", wallProps.Select(s => (IReadOnlyList<(string, string)>)Row(("Wall", s.Name), ("MatProp", s.Material), ("Thickness", N(s.Thickness ?? 0)), ("AutoRigid", "No")))));
+            tables.Add(CsiTableText.Table("WALL PROPERTY DEFINITIONS - SPECIFIED", wallProps.Select(s => (IReadOnlyList<(string, string)>)Row(
+                ("Name", s.Name), ("Modeling Type", ElementType(s, "Shell-Thin")), ("Material", s.Material), ("Wall Thickness", N(s.Thickness ?? 0)), ("Include Auto Rigid Zone?", "No")))));
+
         // Soil: one subgrade modulus under every slab when asked for, else each slab's own area spring (Assign > Shell >
-        // Area Springs, its U3 as the modulus), as SAFE's soil properties.
+        // Area Springs, its U3 as the modulus). SAFE 20 keeps soil as area springs.
         var soilOf = new Dictionary<string, string>(StringComparer.Ordinal);
         var soils = new List<IReadOnlyList<(string, string)>>();
-        if (options.Subgrade is { } k)
+        var nonlinear = options.CompressionOnly ? "Compression Only" : "Linear";
+        IReadOnlyList<(string, string)> Soil(string name, double k) => Row(("Name", name), ("Stiffness Option", "User Specified"), ("Stiffnes U1", "0"), ("Stiffnes U2", "0"), ("Stiffnes U3", N(k)), ("Nonlinear Option for U3", nonlinear));
+        if (options.Subgrade is { } subgrade)
         {
-            soils.Add(Row(("Soil", "SOIL1"), ("Subgrade", N(k)), ("NonlinOpt", options.CompressionOnly ? "Compression Only" : "None")));
+            soils.Add(Soil("SOIL1", subgrade));
             foreach (var a in areaRows) soilOf[a.Label] = "SOIL1";
         }
         else
         {
             var springDefs = PropertyDefs.Springs(m).Where(d => d.Kind == "area").ToList();
-            foreach (var (s, row) in slabs.Zip(areaRows))
+            foreach (var row in areaRows)
             {
+                var s = row.Source;
                 var assign = m.AreaAssigns.Find(x => x.Label == s.Label && x.Story == s.Story);
                 if (assign is null || PropertyDefs.Value(assign.Extra, "SPRINGPROP") is not { } sp) continue;
                 sp = E2kText.Unquote(sp);
                 var def = springDefs.Find(d => d.Name == sp);
                 if (def is null || def.Values.GetValueOrDefault("U3") <= 0) { notes.Add($"Slab {s.Label} has the area spring {sp} with no vertical stiffness (U3); no soil was put under it."); continue; }
-                if (!soils.Exists(r => r[0].Item2 == sp)) soils.Add(Row(("Soil", sp), ("Subgrade", N(def.Values["U3"])), ("NonlinOpt", options.CompressionOnly ? "Compression Only" : "None")));
+                if (!soils.Exists(r => r[0].Item2 == sp)) soils.Add(Soil(sp, def.Values["U3"]));
                 soilOf[row.Label] = sp;
             }
         }
-        if (soils.Count > 0) tables.Add(CsiTableText.Table("SOIL PROPERTIES", soils));
+        if (soils.Count > 0) tables.Add(CsiTableText.Table("SPRING PROPERTY DEFINITIONS - AREA SPRINGS", soils));
 
-        // Geometry
-        tables.Add(CsiTableText.Table("OBJECT GEOMETRY - POINT COORDINATES", points.Select(p => (IReadOnlyList<(string, string)>)Row(("Point", p.Name), ("GlobalX", N(p.X)), ("GlobalY", N(p.Y)), ("GlobalZ", N(p.Z)), ("SpecialPt", "No")))));
-        if (lineRows.Count + wallRows.Count > 0)
-            tables.Add(CsiTableText.Table("OBJECT GEOMETRY - LINES 01 - GENERAL", lineRows.Select(l => (IReadOnlyList<(string, string)>)Row(("Line", l.Label), ("PointI", l.I), ("PointJ", l.J), ("LineType", l.Type)))
-                .Concat(wallRows.Select(w => (IReadOnlyList<(string, string)>)Row(("Line", w.Label), ("PointI", w.I), ("PointJ", w.J), ("LineType", "Wall"), ("Height", N(w.Height)))))));
+        // Loads: patterns, their cases (linear static and hyperstatic) and the combinations.
+        var patternNames = m.LoadPatterns.Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
+        tables.Add(CsiTableText.Table("LOAD PATTERN DEFINITIONS", m.LoadPatterns.Select(p => (IReadOnlyList<(string, string)>)Row(("Name", p.Name), ("Is Auto Load", "No"), ("Type", PatternType(p.Type)), ("Self Weight Multiplier", N(p.SelfWeight))))));
+        var statics = new List<(string Name, List<(string Pattern, double Sf)> Loads)>();
+        var hyper = new List<(string Name, string Base, string Support, double Sf)>();
+        foreach (var c in m.LoadCases)
+        {
+            var type = AnalysisDefs.CaseType(c);
+            if (type == "Linear Static")
+                statics.Add((c.Name, c.Lines.Where(l => E2kText.Value(l, "LOADPAT") is not null).Select(l => (E2kText.Value(l, "LOADPAT")!, Num(E2kText.Value(l, "SF")) ?? 1)).ToList()));
+            else if (type == "Hyperstatic")
+                hyper.Add((c.Name, c.Lines.Select(l => E2kText.Value(l, "HYPERSTATICCASE")).FirstOrDefault(v => v is not null) ?? "",
+                    c.Lines.Select(l => E2kText.Value(l, "HYPERSTATICSUPPORT")).FirstOrDefault(v => v is not null) ?? "Springs", c.Lines.Select(l => Num(E2kText.Value(l, "HYPERSTATICSF"))).FirstOrDefault(v => v is not null) ?? 1));
+        }
+        // A pattern with no case of its own (an older model) still gets its linear static case, as SAFE makes one.
+        foreach (var p in m.LoadPatterns.Where(p => !m.LoadCases.Exists(c => c.Name == p.Name))) statics.Add((p.Name, [(p.Name, 1)]));
+        var otherCases = m.LoadCases.Count(c => AnalysisDefs.CaseType(c) is not ("Linear Static" or "Hyperstatic"));
+        if (otherCases > 0) notes.Add($"{otherCases} load case(s) that are not linear static or hyperstatic (modal, response spectrum, nonlinear...) were left out; SAFE makes its own modal case.");
+        var caseNames = statics.Select(c => c.Name).Concat(hyper.Select(h => h.Name)).ToHashSet(StringComparer.Ordinal);
+        if (statics.Count + hyper.Count > 0)
+            tables.Add(CsiTableText.Table("LOAD CASE DEFINITIONS - SUMMARY", statics.Select(c => (IReadOnlyList<(string, string)>)Row(("Name", c.Name), ("Type", "Linear Static")))
+                .Concat(hyper.Select(h => (IReadOnlyList<(string, string)>)Row(("Name", h.Name), ("Type", "Hyperstatic"))))));
+        if (statics.Count > 0)
+            tables.Add(CsiTableText.Table("LOAD CASE DEFINITIONS - LINEAR STATIC", statics.SelectMany(c => c.Loads.Select((l, n) => (IReadOnlyList<(string, string)>)(n == 0
+                ? Row(("Name", c.Name), ("Exclude Group", "None"), ("Initial Condition", "Unstressed"), ("Load Type", "Load"), ("Load Name", l.Pattern), ("Load SF", N(l.Sf)), ("Design Type", "Program Determined"))
+                : Row(("Name", c.Name), ("Load Type", "Load"), ("Load Name", l.Pattern), ("Load SF", N(l.Sf))))))));
+        if (hyper.Count > 0)
+            tables.Add(CsiTableText.Table("LOAD CASE DEFINITIONS - HYPERSTATIC", hyper.Select(h => (IReadOnlyList<(string, string)>)Row(("Name", h.Name), ("Base Case", h.Base), ("Support Type", h.Support), ("Relative SF", N(h.Sf)), ("Design Type", "Program Determined")))));
+
+        var combos = m.Combos.Select(c => (c.Name, Type: c.Lines.Select(l => E2kText.Value(l, "TYPE")).FirstOrDefault(t => t is not null) ?? "Linear Add",
+            Slab: c.Lines.Select(l => E2kText.Value(l, "COMBOTYPE")).FirstOrDefault(t => t is not null),
+            Items: c.Lines.Select(l => (Case: E2kText.Value(l, "LOADCASE") ?? E2kText.Value(l, "LOADCOMBO"), Sf: Num(E2kText.Value(l, "SF")))).Where(i => i.Case is not null && i.Sf is not null).ToList())).Where(c => c.Items.Count > 0).ToList();
+        var comboNames = combos.Select(c => c.Name).ToHashSet(StringComparer.Ordinal);
+        foreach (var c in combos)
+            foreach (var i in c.Items.Where(i => !caseNames.Contains(i.Case!) && !comboNames.Contains(i.Case!)))
+                notes.Add($"The combination {c.Name} names {i.Case}, a load case the SAFE file does not have; SAFE will leave it out or refuse the combination.");
+        if (combos.Count > 0)
+        {
+            tables.Add(CsiTableText.Table("LOAD COMBINATION DEFINITIONS", combos.SelectMany(c => c.Items.Select((i, n) => (IReadOnlyList<(string, string)>)(n == 0
+                ? Row(("Name", c.Name), ("Type", c.Type), ("Is Auto", "No"), ("Load Name", i.Case!), ("SF", N(i.Sf!.Value)))
+                : Row(("Name", c.Name), ("Load Name", i.Case!), ("SF", N(i.Sf!.Value))))))));
+            // Slab design takes the combinations ETABS marked for it with their kind; with none marked, every one as strength.
+            var marked = combos.Where(c => c.Slab is not null).ToList();
+            tables.Add(CsiTableText.Table("CONCRETE SLAB DESIGN LOAD COMBINATION DATA", (marked.Count > 0 ? marked : combos).Select(c => (IReadOnlyList<(string, string)>)Row(("Combo Type", c.Slab ?? "Strength"), ("Combo Name", c.Name)))));
+        }
+
+        // Objects
+        tables.Add(CsiTableText.Table("POINT OBJECT CONNECTIVITY", points.Select(p => (IReadOnlyList<(string, string)>)Row(("UniqueName", p.Name), ("Is Auto Point", "No"), ("IsSpecial", "No"), ("X", N(p.X)), ("Y", N(p.Y)), ("Z", N(p.Z))))));
+        var columns = lineRows.Where(l => l.Type == "Column").ToList();
+        if (columns.Count > 0)
+            tables.Add(CsiTableText.Table("COLUMN OBJECT CONNECTIVITY", columns.Select(l => (IReadOnlyList<(string, string)>)Row(("Unique Name", l.Label), ("UniquePtI", l.I), ("UniquePtJ", l.J), ("Length", N(l.Length))))));
+        var beamRows = lineRows.Where(l => l.Type == "Beam").ToList();
+        if (beamRows.Count > 0)
+            tables.Add(CsiTableText.Table("BEAM OBJECT CONNECTIVITY", beamRows.Select(l => (IReadOnlyList<(string, string)>)Row(("Unique Name", l.Label), ("UniquePtI", l.I), ("UniquePtJ", l.J), ("Length", N(l.Length))))));
         if (areaRows.Count > 0)
-            tables.Add(CsiTableText.Table("OBJECT GEOMETRY - AREAS 01 - GENERAL", areaRows.Select(a =>
+            tables.Add(CsiTableText.Table("FLOOR OBJECT CONNECTIVITY", areaRows.Select(a =>
             {
-                var row = Row(("Area", a.Label), ("NumPoints", a.Points.Count.ToString(CultureInfo.InvariantCulture)));
-                for (var i = 0; i < a.Points.Count; i++) row.Add(("Point" + (i + 1).ToString(CultureInfo.InvariantCulture), a.Points[i]));
-                row.Add(("AreaType", "Slab"));
+                var row = Row(("Unique Name", a.Label));
+                for (var i = 0; i < a.Points.Count; i++) row.Add(("UniquePt" + I(i + 1), a.Points[i]));
+                return (IReadOnlyList<(string, string)>)row;
+            })));
+        if (wallRows.Count > 0)
+            tables.Add(CsiTableText.Table("WALL OBJECT CONNECTIVITY", wallRows.Select(w =>
+            {
+                var row = Row(("UniqueName", w.Label));
+                for (var i = 0; i < w.Points.Count; i++) row.Add(("UniquePt" + I(i + 1), w.Points[i]));
+                return (IReadOnlyList<(string, string)>)row;
+            })));
+        if (tendons.Count > 0)
+            tables.Add(CsiTableText.Table("TENDON OBJECT CONNECTIVITY", tendons.SelectMany((t, k) => TendonRows(t, tendonPoints[k], z))));
+        if (strips.Count > 0)
+            tables.Add(CsiTableText.Table("STRIP OBJECT CONNECTIVITY", strips.SelectMany((st, k) =>
+            {
+                var pts = stripPoints[k];
+                var rows = new List<IReadOnlyList<(string, string)>>
+                {
+                    Row(("Name", st.Name), ("Number Segments", I(pts.Count - 1)), ("Strip Start Point", pts[0]), ("Segment End Point", pts[1]),
+                        ("Start Width Left", N(st.WidthLeft)), ("Start Width Right", N(st.WidthRight)), ("End Width Left", N(st.WidthLeft)), ("End Width Right", N(st.WidthRight)), ("Auto Widen", "No"), ("Layer", st.Layer)),
+                };
+                // A strip of more segments: a row for each further segment end, with its widths.
+                for (var n = 2; n < pts.Count; n++)
+                    rows.Add(Row(("Name", st.Name), ("Segment End Point", pts[n]), ("End Width Left", N(st.WidthLeft)), ("End Width Right", N(st.WidthRight))));
+                return rows;
+            })));
+
+        // Assignments
+        if (supports.Count > 0)
+            tables.Add(CsiTableText.Table("JOINT ASSIGNMENTS - RESTRAINTS", supports.DistinctBy(s => s.Point).Select(s =>
+            {
+                var dofs = s.Restraint.Split(' ', StringSplitOptions.RemoveEmptyEntries).Select(d => d.ToUpperInvariant()).ToHashSet();
+                return (IReadOnlyList<(string, string)>)Row(("UniqueName", s.Point), ("UX", Yes(dofs, "UX")), ("UY", Yes(dofs, "UY")), ("UZ", Yes(dofs, "UZ")), ("RX", Yes(dofs, "RX")), ("RY", Yes(dofs, "RY")), ("RZ", Yes(dofs, "RZ")));
+            })));
+        if (lineRows.Count > 0)
+            tables.Add(CsiTableText.Table("FRAME ASSIGNMENTS - SECTION PROPERTIES", lineRows.Where(l => l.Section.Length > 0).Select(l => (IReadOnlyList<(string, string)>)Row(
+                ("UniqueName", l.Label), ("Shape", shapeOf.GetValueOrDefault(l.Section, "Concrete Rectangular")), ("Auto Select List", "N.A."), ("Section Property", l.Section)))));
+        if (areaRows.Count + wallRows.Count > 0)
+            tables.Add(CsiTableText.Table("AREA ASSIGNMENTS - SECTION PROPERTIES", areaRows.Where(a => a.Section.Length > 0).Select(a => (IReadOnlyList<(string, string)>)Row(("UniqueName", a.Label), ("Section Property", a.Section), ("Property Type", "Slab")))
+                .Concat(wallRows.Where(w => w.Section.Length > 0).Select(w => (IReadOnlyList<(string, string)>)Row(("UniqueName", w.Label), ("Section Property", w.Section), ("Property Type", "Wall"))))));
+        if (soilOf.Count > 0)
+            tables.Add(CsiTableText.Table("AREA ASSIGNMENTS - AREA SPRINGS", areaRows.Where(a => soilOf.ContainsKey(a.Label)).Select(a => (IReadOnlyList<(string, string)>)Row(("UniqueName", a.Label), ("Spring Property", soilOf[a.Label])))));
+        if (tendons.Count > 0)
+        {
+            tables.Add(CsiTableText.Table("TENDON ASSIGNMENTS - PROPERTIES", tendons.Select(t => (IReadOnlyList<(string, string)>)Row(("Name", t.Name), ("Tendon Property", t.Section), ("Number Strands", I(t.Strands)), ("Bonding Options", t.Bonded ? "Bonded" : "Unbonded")))));
+            var jacked = tendons.Where(t => t.Jack is not null).ToList();
+            if (jacked.Count > 0)
+                tables.Add(CsiTableText.Table("TENDON LOAD ASSIGNMENTS - JACKING STRESS", jacked.Select(t => (IReadOnlyList<(string, string)>)Row(("Name", t.Name), ("Transfer Load Pattern", t.Jack!.TransferPattern),
+                    ("Final Load Pattern", t.Jack.FinalPattern), ("Jacking Stress", N(t.Jack.Stress)), ("Jacking Location", SlabDefs.JackEnds.FirstOrDefault(j => j.Key == t.Jack.End || j.E2k == t.Jack.End).F2k ?? "J End")))));
+            var lost = tendons.Where(t => t.Loss is not null).ToList();
+            if (lost.Count > 0)
+                tables.Add(CsiTableText.Table("TENDON LOAD ASSIGNMENTS - LOSS OPTIONS", lost.Select(t => (IReadOnlyList<(string, string)>)(t.Loss!.Method.Equals("Percent", StringComparison.OrdinalIgnoreCase)
+                    ? Row(("Name", t.Name), ("Loss Method", "Percent"), ("Stressing Loss", N(t.Loss.Stressing)), ("Long Term Loss", N(t.Loss.LongTerm)))
+                    : Row(("Name", t.Name), ("Loss Method", "Fixed"), ("Stressing Loss Fixed", N(t.Loss.Stressing)), ("Long Term Loss Fixed", N(t.Loss.LongTerm)))))));
+        }
+
+        // Loads on objects
+        var loads = 0;
+        var areaOf = areaRows.ToDictionary(a => a.Source.Label, a => a.Label, StringComparer.Ordinal);
+        var surface = m.AreaLoads.Where(l => string.Equals(l.Story, story, StringComparison.OrdinalIgnoreCase) && areaOf.ContainsKey(l.Object))
+            .Select(l => (Area: areaOf[l.Object], l.Pattern, Value: Num(E2kText.Value(l.Tokens, "FVAL")), Type: E2kText.Value(l.Tokens, "TYPE") ?? "")).Where(l => l.Value is not null && l.Type.Equals("UNIFF", StringComparison.OrdinalIgnoreCase)).ToList();
+        if (surface.Count > 0)
+            tables.Add(CsiTableText.Table("AREA LOAD ASSIGNMENTS - UNIFORM", surface.Select(l => (IReadOnlyList<(string, string)>)Row(("UniqueName", l.Area), ("Load Pattern", l.Pattern), ("Direction", "Gravity"), ("Load", N(l.Value!.Value))))));
+        loads += surface.Count;
+        var beamOf = lineRows.Where(l => l.Type == "Beam").ToDictionary(l => l.Source.Label, l => l.Label, StringComparer.Ordinal);
+        var lineLoads = m.LineLoads.Where(l => string.Equals(l.Story, story, StringComparison.OrdinalIgnoreCase) && beamOf.ContainsKey(l.Object))
+            .Select(l => (Beam: beamOf[l.Object], l.Pattern, Value: Num(E2kText.Value(l.Tokens, "FVAL")), Type: E2kText.Value(l.Tokens, "TYPE") ?? "")).Where(l => l.Value is not null && l.Type.Equals("UNIFF", StringComparison.OrdinalIgnoreCase)).ToList();
+        if (lineLoads.Count > 0)
+            tables.Add(CsiTableText.Table("FRAME LOADS ASSIGNMENTS - DISTRIBUTED", lineLoads.Select(l => (IReadOnlyList<(string, string)>)Row(("UniqueName", l.Beam), ("Load Pattern", l.Pattern), ("Load Type", "Force"), ("Direction", "Gravity"),
+                ("Distance Type", "Relative"), ("Relative Distance A", "0"), ("Relative Distance B", "1"), ("Force A", N(l.Value!.Value)), ("Force B", N(l.Value!.Value))))));
+        loads += lineLoads.Count;
+        if (pointLoads.Count > 0)
+            tables.Add(CsiTableText.Table("JOINT LOADS ASSIGNMENTS - FORCE", pointLoads.Select(l => (IReadOnlyList<(string, string)>)Row(("UniqueName", l.Point), ("Load Pattern", l.Pattern),
+                ("FX", N(l.Values[0])), ("FY", N(l.Values[1])), ("FZ", N(l.Values[2])), ("MX", N(l.Values[3])), ("MY", N(l.Values[4])), ("MZ", N(l.Values[5]))))));
+        loads += pointLoads.Count;
+        var skipped = m.AreaLoads.Count(l => string.Equals(l.Story, story, StringComparison.OrdinalIgnoreCase)) + m.LineLoads.Count(l => string.Equals(l.Story, story, StringComparison.OrdinalIgnoreCase))
+            - surface.Count - lineLoads.Count;
+        if (skipped > 0) notes.Add($"{skipped} load(s) on {story} are not uniform gravity loads on slabs or beams and were left out; add them in SAFE.");
+
+        // Strip design overwrites, for the strips drawn by hand.
+        if (own.Count > 0)
+            tables.Add(CsiTableText.Table("CONCRETE SLAB DESIGN OVERWRITES - STRIP BASED", own.Select(st =>
+            {
+                var row = Row(("Strip Name", st.Name), ("Strip Layer", st.Layer), ("Strip Design Type", StripType(st.DesignType)), ("Design?", st.Design ? "Yes" : "No"), ("Ignote PT?", st.IgnorePT ? "Yes" : "No"));
+                if (st.RebarMaterial.Length > 0) row.Add(("Rebar Material", st.RebarMaterial));
+                row.Add(("Cover Specification Type", "From Preferences"));
+                row.Add(("LLRF", N(st.Llrf)));
                 return (IReadOnlyList<(string, string)>)row;
             })));
 
-        // Design strips along the grid lines.
-        // and the strips drawn by hand (Define > Design Strips in the Modeler), which replace grid strips of the same name.
-        var stripCount = 0;
-        var stripRows = new List<IReadOnlyList<(string, string)>>();
-        var own = m.Extras?.Strips ?? [];
-        if (options.Strips && points.Count > 0)
-        {
-            stripRows = Strips(m, points.Where(p => Math.Abs(p.Z) < tol).ToList(), out stripCount);
-            if (stripRows.Count == 0 && own.Count == 0) notes.Add("The model has no grid lines, so no design strips were made. Draw strips in SAFE, or add grids first.");
-            var mine = own.Select(x => x.Name).ToHashSet();
-            var before = stripRows.Select(r => r[0].Item2).Distinct().Count();
-            stripRows.RemoveAll(r => mine.Contains(r[0].Item2));
-            stripCount -= before - stripRows.Select(r => r[0].Item2).Distinct().Count();
-        }
-        foreach (var st in own)
-        {
-            stripCount++;
-            for (var n = 0; n < st.Points.Count; n++)
-                stripRows.Add(Row(("Strip", st.Name), ("Point", (n + 1).ToString(CultureInfo.InvariantCulture)), ("GlobalX", N(st.Points[n][0])), ("GlobalY", N(st.Points[n][1])),
-                    ("WBLeft", N(st.WidthLeft)), ("WBRight", N(st.WidthRight)), ("WALeft", N(st.WidthLeft)), ("WARight", N(st.WidthRight)), ("AutoWiden", "No"), ("Layer", st.Layer)));
-        }
-        if (stripRows.Count > 0) tables.Add(CsiTableText.Table("OBJECT GEOMETRY - DESIGN STRIPS", stripRows));
-
-        // Assignments
-        if (areaRows.Count > 0)
-            tables.Add(CsiTableText.Table("SLAB PROPERTY ASSIGNMENTS", areaRows.Select(a => (IReadOnlyList<(string, string)>)Row(("Area", a.Label), ("SlabProp", a.Section)))));
-        if (lineRows.Any(l => l.Type == "Beam"))
-            tables.Add(CsiTableText.Table("BEAM PROPERTY ASSIGNMENTS", lineRows.Where(l => l.Type == "Beam").Select(l => (IReadOnlyList<(string, string)>)Row(("Line", l.Label), ("BeamProp", l.Section)))));
-        if (lineRows.Any(l => l.Type == "Column"))
-            tables.Add(CsiTableText.Table("COLUMN PROPERTY ASSIGNMENTS", lineRows.Where(l => l.Type == "Column").Select(l => (IReadOnlyList<(string, string)>)Row(("Line", l.Label), ("ColProp", l.Section)))));
-        if (wallRows.Count > 0)
-            tables.Add(CsiTableText.Table("WALL PROPERTY ASSIGNMENTS", wallRows.Select(w => (IReadOnlyList<(string, string)>)Row(("Line", w.Label), ("WallProp", w.Section)))));
-        if (soilOf.Count > 0)
-            tables.Add(CsiTableText.Table("SOIL PROPERTY ASSIGNMENTS", areaRows.Where(a => soilOf.ContainsKey(a.Label)).Select(a => (IReadOnlyList<(string, string)>)Row(("Area", a.Label), ("SoilProp", soilOf[a.Label])))));
-        if (supports.Count > 0)
-            tables.Add(CsiTableText.Table("RESTRAINT ASSIGNMENTS", supports.DistinctBy(s => s.Point).Select(s =>
-            {
-                var dofs = s.Restraint.Split(' ', StringSplitOptions.RemoveEmptyEntries).Select(d => d.ToUpperInvariant()).ToHashSet();
-                return (IReadOnlyList<(string, string)>)Row(("Point", s.Point), ("UX", Yes(dofs, "UX")), ("UY", Yes(dofs, "UY")), ("UZ", Yes(dofs, "UZ")), ("RX", Yes(dofs, "RX")), ("RY", Yes(dofs, "RY")), ("RZ", Yes(dofs, "RZ")));
-            })));
-
-        // Loads
-        tables.Add(CsiTableText.Table("LOAD PATTERNS", m.LoadPatterns.Select(p => (IReadOnlyList<(string, string)>)Row(("LoadPat", p.Name), ("Type", PatternType(p.Type)), ("SelfWtMult", N(p.SelfWeight))))));
-        var caseRows = new List<IReadOnlyList<(string, string)>>();
-        var caseLoads = new List<IReadOnlyList<(string, string)>>();
-        foreach (var p in m.LoadPatterns)
-        {
-            caseRows.Add(Row(("LoadCase", p.Name), ("Type", "LinStatic"), ("InitialCond", "Zero")));
-            caseLoads.Add(Row(("LoadCase", p.Name), ("LoadType", "Load Pattern"), ("LoadName", p.Name), ("LoadSF", "1")));
-        }
-        if (caseRows.Count > 0)
-        {
-            tables.Add(CsiTableText.Table("LOAD CASES 01 - GENERAL", caseRows));
-            tables.Add(CsiTableText.Table("LOAD CASES 02 - STATIC", caseLoads));
-        }
-
-        var loads = 0;
-        var slabLabels = slabs.Select(s => s.Label).ToHashSet(StringComparer.Ordinal);
-        var surface = m.AreaLoads.Where(l => string.Equals(l.Story, story, StringComparison.OrdinalIgnoreCase) && slabLabels.Contains(l.Object))
-            .Select(l => (l.Object, l.Pattern, Value: Num(E2kText.Value(l.Tokens, "FVAL")), Type: E2kText.Value(l.Tokens, "TYPE") ?? "")).Where(l => l.Value is not null && l.Type.Equals("UNIFF", StringComparison.OrdinalIgnoreCase)).ToList();
-        if (surface.Count > 0)
-            tables.Add(CsiTableText.Table("LOAD ASSIGNMENTS - SURFACE LOADS", surface.Select(l => (IReadOnlyList<(string, string)>)Row(("Area", l.Object), ("LoadPat", l.Pattern), ("Dir", "Gravity"), ("UnifLoad", N(l.Value!.Value))))));
-        loads += surface.Count;
-        var beamLabels = beams.Select(b => b.Label).ToHashSet(StringComparer.Ordinal);
-        var lineLoads = m.LineLoads.Where(l => string.Equals(l.Story, story, StringComparison.OrdinalIgnoreCase) && beamLabels.Contains(l.Object))
-            .Select(l => (l.Object, l.Pattern, Value: Num(E2kText.Value(l.Tokens, "FVAL")), Type: E2kText.Value(l.Tokens, "TYPE") ?? "")).Where(l => l.Value is not null && l.Type.Equals("UNIFF", StringComparison.OrdinalIgnoreCase)).ToList();
-        if (lineLoads.Count > 0)
-            tables.Add(CsiTableText.Table("LOAD ASSIGNMENTS - DISTRIBUTED LOADS", lineLoads.Select(l => (IReadOnlyList<(string, string)>)Row(("Line", l.Object), ("LoadPat", l.Pattern), ("Type", "Force"), ("Dir", "Gravity"), ("DistType", "RelDist"), ("RelDistA", "0"), ("RelDistB", "1"), ("FOverLA", N(l.Value!.Value)), ("FOverLB", N(l.Value!.Value))))));
-        loads += lineLoads.Count;
-        var skipped = m.AreaLoads.Count(l => string.Equals(l.Story, story, StringComparison.OrdinalIgnoreCase)) + m.LineLoads.Count(l => string.Equals(l.Story, story, StringComparison.OrdinalIgnoreCase)) - loads;
-        if (skipped > 0) notes.Add($"{skipped} load(s) on {story} are not uniform gravity loads on slabs or beams and were left out; add them in SAFE.");
-        if (m.PointLoads.Count > 0) notes.Add("Point loads are not written to the SAFE file yet; add them in SAFE.");
-
-        var combos = m.Combos.Select(c => (c.Name, Type: c.Lines.Select(l => E2kText.Value(l, "TYPE")).FirstOrDefault(t => t is not null) ?? "Linear Add",
-            Items: c.Lines.Select(l => (Case: E2kText.Value(l, "LOADCASE") ?? E2kText.Value(l, "LOADCOMBO"), Sf: Num(E2kText.Value(l, "SF")))).Where(i => i.Case is not null && i.Sf is not null).ToList())).ToList();
-        if (combos.Any(c => c.Items.Count > 0))
-            tables.Add(CsiTableText.Table("LOAD COMBINATIONS", combos.SelectMany(c => c.Items.Select((i, n) => (IReadOnlyList<(string, string)>)(n == 0
-                ? Row(("Combo", c.Name), ("Load", i.Case!), ("SF", N(i.Sf!.Value)), ("Type", c.Type), ("DSStrength", "Yes"), ("DSServInit", "No"), ("DSServNorm", "No"), ("DSServLong", "No"))
-                : Row(("Combo", c.Name), ("Load", i.Case!), ("SF", N(i.Sf!.Value))))))));
-
         var header = $"File written by CSI ProMax Modeler on {DateTime.Now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)}: story {story} of {(m.Title.Length > 0 ? m.Title : "the model")}";
-        notes.Add("This SAFE file has not been checked against an import in SAFE on this PC yet: if SAFE reports a table it does not know, say which, and it will be fixed.");
-        return new F2kResult(CsiTableText.Document(header, tables), story, areaRows.Count, lineRows.Count(l => l.Type == "Beam"), lineRows.Count(l => l.Type == "Column"), wallRows.Count,
-            supports.DistinctBy(s => s.Point).Count(), stripCount, loads, notes);
+        return new F2kResult(CsiTableText.Document(header, tables), story, areaRows.Count, beamRows.Count, columns.Count, wallRows.Count,
+            supports.DistinctBy(s => s.Point).Count(), strips.Count, loads, notes) { Tendons = tendons.Count };
     }
+
+    /// <summary>
+    /// A tendon's rows of "Tendon Object Connectivity", as SAFE 20 writes them: the first row has the first point and the
+    /// first span, a row per further plan point, and a row per further span. A, B and C are lengths and the heights
+    /// are below the slab top (the level), where the e2k gives fractions of the span and heights.
+    /// </summary>
+    private static IEnumerable<IReadOnlyList<(string, string)>> TendonRows(SlabDefs.Tendon t, List<string> pts, double z)
+    {
+        List<(string, string)> Span(SlabDefs.TendonSpan s) =>
+        [
+            ("Span ID", s.Label.Length > 0 ? s.Label : "Span"), ("End Support Type", "None"), ("Span Profile", s.Type), ("RD", "1"), ("L", N(s.Length)),
+            ("A", N(s.A * s.Length)), ("B", N(s.B * s.Length)), ("C", N(s.C * s.Length)), ("ZL", N(s.ZL - z)), ("ZC", N(s.ZC - z)), ("ZR", N(s.ZR - z)),
+        ];
+        var first = Row(("Name", t.Name), ("Number Points", I(pts.Count)), ("Point Name", pts[0]), ("Horizontal Segment Number", "1"), ("Horizontal Curve Type", "Straight"),
+            ("Number Control Points", "2"), ("Curve Point Number", "1"), ("Global X", N(t.Plan[0][0])), ("Global Y", N(t.Plan[0][1])),
+            ("Number Vertical Spans", I(t.Spans.Count)), ("Datum Offset", "0"), ("First Support Type", "None"), ("Span Number", "1"));
+        if (t.Spans.Count > 0) first.AddRange(Span(t.Spans[0]));
+        first.Add(("Layer", "Other"));
+        yield return first;
+        for (var i = 1; i < pts.Count; i++)
+        {
+            // A plan point ends segment i; the next segment starts there (its first curve point).
+            yield return Row(("Name", t.Name), ("Point Name", pts[i]), ("Horizontal Segment Number", I(i)), ("Curve Point Number", "2"), ("Global X", N(t.Plan[i][0])), ("Global Y", N(t.Plan[i][1])));
+            if (i < pts.Count - 1)
+                yield return Row(("Name", t.Name), ("Horizontal Segment Number", I(i + 1)), ("Horizontal Curve Type", "Straight"), ("Number Control Points", "2"), ("Curve Point Number", "1"),
+                    ("Global X", N(t.Plan[i][0])), ("Global Y", N(t.Plan[i][1])));
+        }
+        for (var n = 1; n < t.Spans.Count; n++)
+        {
+            var row = Row(("Name", t.Name), ("Span Number", I(n + 1)));
+            row.AddRange(Span(t.Spans[n]));
+            yield return row;
+        }
+    }
+
+    private static string StripType(string designType) => designType switch
+    {
+        "Column" => "Column Strip",
+        "Middle" => "Middle Strip",
+        _ => designType,
+    };
+
+    /// <summary>The code of the model's concrete slab design preferences (Design > Concrete Slab Design > View/Revise Preferences).</summary>
+    private static string? PreferenceCode(StructuralModel m) =>
+        m.Passthrough.Find(r => r.Heading == SlabDefs.SlabPreferences)?.Lines.Select(l => E2kText.Value(E2kText.Tokenize(l), "CODE")).FirstOrDefault(c => c is not null);
+
+    private static double Dist(double x0, double y0, double x1, double y1) => Math.Sqrt((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0));
+
+    /// <summary>SAFE's element type: thick or thin shell, or membrane.</summary>
+    private static string ElementType(ShellSection s, string fallback) => s.Get("MODELINGTYPE") switch
+    {
+        "ShellThick" => "Shell-Thick",
+        "ShellThin" => "Shell-Thin",
+        "Membrane" => "Membrane",
+        _ => fallback,
+    };
 
     /// <summary>The story with the most slab area: the floor an engineer most likely means.</summary>
     public static string BusiestStory(StructuralModel m, IReadOnlyList<PhysicalArea>? areas = null)
@@ -297,27 +512,15 @@ public static class F2kWriter
         _ => "Slab",
     };
 
-    /// <summary>SAFE's load pattern types: ETABS's names, upper case, with the ones SAFE lacks as OTHER.</summary>
-    private static string PatternType(string etabs) => etabs.ToUpperInvariant() switch
-    {
-        "DEAD" => "DEAD",
-        "SUPER DEAD" => "SUPER DEAD",
-        "LIVE" => "LIVE",
-        "REDUCIBLE LIVE" => "REDUCE LIVE",
-        "ROOF LIVE" => "ROOF LIVE",
-        "SNOW" => "SNOW",
-        "WIND" => "WIND",
-        "SEISMIC" or "QUAKE" => "QUAKE",
-        "TEMPERATURE" => "TEMPERATURE",
-        _ => "OTHER",
-    };
+    /// <summary>SAFE 20's load pattern types are ETABS's own; a pattern with none is Other.</summary>
+    private static string PatternType(string etabs) =>
+        ModelEdit.LoadPatternTypes.FirstOrDefault(t => t.Equals(etabs, StringComparison.OrdinalIgnoreCase)) ?? (etabs.Equals("Quake", StringComparison.OrdinalIgnoreCase) ? "Seismic" : "Other");
 
     /// <summary>One strip per grid line, across the extent of the level, as wide as halfway to the neighbouring grids.</summary>
-    private static List<IReadOnlyList<(string, string)>> Strips(StructuralModel m, IReadOnlyList<(string Name, double X, double Y, double Z)> level, out int count)
+    private static List<SlabDefs.Strip> GridStrips(StructuralModel m, IReadOnlyList<(string Name, double X, double Y, double Z)> level)
     {
-        var rows = new List<IReadOnlyList<(string, string)>>();
-        count = 0;
-        if (level.Count == 0) return rows;
+        var list = new List<SlabDefs.Strip>();
+        if (level.Count == 0) return list;
         double x0 = level.Min(p => p.X), x1 = level.Max(p => p.X), y0 = level.Min(p => p.Y), y1 = level.Max(p => p.Y);
         foreach (var direction in new[] { "Y", "X" })
         {
@@ -332,14 +535,10 @@ public static class F2kWriter
                 if (right == 0) right = left;
                 var alongX = direction == "Y";
                 if (alongX ? c < y0 - 1e-6 || c > y1 + 1e-6 : c < x0 - 1e-6 || c > x1 + 1e-6) continue;
-                var name = (alongX ? "CSA" : "CSB") + grids[i].Label;
-                count++;
-                var ends = alongX ? new[] { (x0, c), (x1, c) } : new[] { (c, y0), (c, y1) };
-                for (var n = 0; n < 2; n++)
-                    rows.Add(Row(("Strip", name), ("Point", (n + 1).ToString(CultureInfo.InvariantCulture)), ("GlobalX", N(ends[n].Item1)), ("GlobalY", N(ends[n].Item2)),
-                        ("WBLeft", N(left)), ("WBRight", N(right)), ("WALeft", N(left)), ("WARight", N(right)), ("AutoWiden", "No"), ("Layer", alongX ? "A" : "B")));
+                List<double[]> ends = alongX ? [[x0, c], [x1, c]] : [[c, y0], [c, y1]];
+                list.Add(new SlabDefs.Strip((alongX ? "CSA" : "CSB") + grids[i].Label, "", alongX ? "A" : "B", ends, left, right));
             }
         }
-        return rows;
+        return list;
     }
 }

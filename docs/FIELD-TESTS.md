@@ -158,3 +158,25 @@ Install: run the one-line install, or copy the CSI ProMax folder to Documents. T
    then File > Export > Story as SAFE V12/14/16 .F2K text file, for one story. Send that .f2k file. It is compared
    with what the Modeler's `save_safe_file` writes for the same story, and the table and field names are made to
    match.
+
+## Slabs and post-tensioning (2026-11-26)
+
+The format is taken from ETABS 20's and SAFE 20/23's own exports of their "ACI 318-19 PT-SL Ex001" and "RC-PN Ex001"
+examples (tests/CsiProMax.Tests/samples/*-v20.e2k, *-v20.f2k, *-v23.f2k). The unit tests read them and write them
+back word for word. What only a licensed program can confirm:
+
+11. **Import a Modeler PT model into ETABS.** The field test's Modeler part draws a tendon section, the two prestress
+   patterns, a draped tendon jacked from both ends with fixed losses, a hyperstatic case and a strip. Import its
+   .e2k (File > Import > ETABS .e2k text file). Expected: no import warnings; Display > Tendons shows the drape;
+   Assign > Tendon Loads shows "Both" ends (the e2k word for both ends and for the I end, "Start", is not yet seen in
+   an export: if ETABS refuses it, the import log names the line). Run the analysis: the hyperstatic case runs.
+12. **Strips with several segments.** A strip through three points writes a middle point with the end widths of
+   one segment and the start widths of the next. ETABS's own export of such a strip has not been seen yet.
+13. **Import a Modeler .f2k into SAFE 20 or later.** From 2026-11-26 the Modeler's SAFE file is in SAFE 20's own
+   tables (POINT/COLUMN/BEAM/FLOOR/WALL/TENDON/STRIP OBJECT CONNECTIVITY, ... with the fields named as SAFE 20.1
+   and 23.1 write them), no longer SAFE 16's. Save the field-test model as .f2k from the Modeler, then in SAFE use
+   File > Import > SAFE .F2K. Expected: no import warnings; the slab, columns, tendon drape (Display > Tendons),
+   strips (layer A and B) and the hyperstatic case are there. Not yet seen in an export, so they may need a fix:
+   a tendon of more than one plan segment or span (its further rows), a strip of more than one segment (its
+   further rows), "Both Ends" and "I End" for the jack, beams (BEAM OBJECT CONNECTIVITY), walls (WALL OBJECT
+   CONNECTIVITY), soil as area springs ("Stiffness Option"="User Specified"), frame and point loads.

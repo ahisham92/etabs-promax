@@ -24,6 +24,9 @@ public static class CsiTableText
         return value.ToString("0.##########", CultureInfo.InvariantCulture);
     }
 
+    /// <summary>A field name as the table text writes it: in double quotes when it has a space ("Unique Name"), as SAFE 20 writes them.</summary>
+    public static string Key(string key) => key.IndexOfAny([' ', '\t']) >= 0 ? "\"" + key + "\"" : key;
+
     /// <summary>One table: its heading and one line per row.</summary>
     public static string Table(string name, IEnumerable<IReadOnlyList<(string Key, string Value)>> rows)
     {
@@ -32,7 +35,7 @@ public static class CsiTableText
         foreach (var row in rows)
         {
             text.Append("   ");
-            text.Append(string.Join("   ", row.Select(p => p.Key + "=" + Value(p.Value))));
+            text.Append(string.Join("   ", row.Select(p => Key(p.Key) + "=" + Value(p.Value))));
             text.Append("\r\n");
         }
         return text.Append("\r\n").ToString();
@@ -85,7 +88,7 @@ public static class CsiTableText
             while (i < line.Length && char.IsWhiteSpace(line[i])) i++;
             var eq = line.IndexOf('=', i);
             if (eq < 0) break;
-            var key = line[i..eq].Trim();
+            var key = line[i..eq].Trim().Trim('"');
             i = eq + 1;
             string value;
             if (i < line.Length && line[i] == '"')

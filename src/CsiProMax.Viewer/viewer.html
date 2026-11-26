@@ -339,7 +339,7 @@ const num = v => { const r = Math.round(v * 1000) / 1000; return String(Object.i
 function fmt(v) { const a = Math.abs(v); return a === 0 ? "0" : a >= 1000 ? v.toFixed(0) : a >= 100 ? v.toFixed(1) : a >= 1 ? v.toFixed(2) : a >= 0.001 ? v.toFixed(4) : v.toExponential(2); }
 // The instability checker's last answer and what of it is shown (its code is further down).
 const inst = {answer: null, cur: -1, show: false, busy: false, dlg: null, only: "all"};
-let P = null, frames = [], areas = [], stories = [], grids = {X: [], Y: []}, gridsGuessed = false, sizes = {}, slabT = {}, supports = [], points = [];
+let P = null, frames = [], areas = [], stories = [], grids = {X: [], Y: []}, gridsGuessed = false, sizes = {}, slabT = {}, supports = [], points = [], tendons = [], dstrips = [];
 let supportOf = new Map(), ratio = new Map(), marks = {punching: [], soil: []}, pointXyz = new Map(), pointIdx = new Map(), disp = new Map(), pointAt = new Map(), newComments = [], lit = null;
 let lo = [0, 0, 0], hi = [1, 1, 1], size = 1, unit = "", program = "etabs", sectionMat = new Map();
 const opt = {grid: true, extrude: true, fill: true, supports: true, names: false, axes: true, joints: false, edges: true, see: false, sections: true, explorer: true, side: true};
@@ -436,6 +436,9 @@ function load(pack, keep) {
   // Each support is a joint: by its name where the model has the point, else by where it stands.
   for (const s of supports) { const n = pointAt.get(key(...s.p)); s.name = n === undefined ? "(" + s.p.map(v => +v.toFixed(3)).join(", ") + ")" : String(n); if (n === undefined) pointXyz.set(s.name, s.p); }
   supportOf = new Map(supports.map(s => [s.name, s]));
+  // Post-tensioning tendons (their 3D profile) and design strips (centre line and width), drawn over the slabs as the programs do.
+  tendons = (m.tendons || []).map(t => ({name: String(t[0]), story: t[1], pts: t[2] || []}));
+  dstrips = (m.strips || []).map(s => ({name: String(s[0]), layer: s[1], wl: s[2], wr: s[3], pts: s[4] || []}));
   lo = [1e30, 1e30, 1e30]; hi = [-1e30, -1e30, -1e30];
   const grow = p => { for (let i = 0; i < 3; i++) { lo[i] = Math.min(lo[i], p[i]); hi[i] = Math.max(hi[i], p[i]); } };
   frames.forEach(f => { grow(f.a); grow(f.b); }); areas.forEach(a => a.pts.forEach(grow));
@@ -2030,6 +2033,7 @@ function overlay(p, g, M, T, w, h) {
   if (opt.joints) drawJoints(p, g, to, T);
   if (opt.names) drawNames(p, g, to, T);
   if (opt.supports && !gl) drawSupports(p, g, to, T);
+  if (opt.pt !== false) drawPT(p, g, to, T);
   drawMarks(p, g, to, T);
   drawSelJoints(p, g, to, T);
   drawInst(p, g, to, T);
@@ -2101,6 +2105,31 @@ function drawMarks(p, g, to, T) {
     if (mode === "punching") { g.strokeStyle = css(T.canvas); g.lineWidth = 1.5; g.stroke(); }
     if (opt.names || mode === "punching" && m.v > 1) { g.fillStyle = T.text; g.fillText((m.name ? m.name + " " : "") + (mode === "punching" ? m.v.toFixed(2) : num(m.v)), x + 8, y - 6); }
   }
+}
+function drawPT(p, g, to, T) {
+  if (!tendons.length && !dstrips.length) return;
+  const z0 = p.mode === "plan" ? elevationOf(p.story) : null;
+  const near = (pts, slack) => p.mode === "plan" ? z0 !== null && pts.every(q => Math.abs(q[2] - z0) <= slack) : p.mode === "elev" && p.line ? pts.every(q => onLine(q, p.line)) : true;
+  const line = (pts, close) => { let first = true; g.beginPath(); for (const q of pts) { const [x, y, , ok] = to(q); if (!ok) { first = true; continue; } if (first) g.moveTo(x, y); else g.lineTo(x, y); first = false; } if (close) g.closePath(); g.stroke(); };
+  // Strips: the centre line dashed and the band outlined, layer A in one colour and B in another (as SAFE colours its layers).
+  g.lineWidth = 1; g.font = "10px Segoe UI, sans-serif"; g.textBaseline = "bottom"; g.textAlign = "left";
+  for (const s of dstrips) {
+    if (s.pts.length < 2 || !near(s.pts, tol() * 10)) continue;
+    const c = s.layer === "B" ? "#d9822b" : "#2f9e44";
+    const off = (q, i, w) => { const a = s.pts[Math.max(0, i - 1)], b = s.pts[Math.min(s.pts.length - 1, i + 1)], dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1; return [q[0] - dy / l * w, q[1] + dx / l * w, q[2]]; };
+    g.strokeStyle = c; g.setLineDash([6, 4]); line(s.pts); g.setLineDash([]);
+    g.globalAlpha = 0.85; line(s.pts.map((q, i) => off(q, i, s.wl)).concat(s.pts.map((q, i) => off(q, i, -s.wr)).reverse()), true); g.globalAlpha = 1;
+    if (opt.names) { const [x, y, , ok] = to(s.pts[0]); if (ok) { g.fillStyle = c; g.fillText(s.name, x + 3, y - 3); } }
+  }
+  // Tendons: their true profile in 3D and elevation; in plan, the tendons of the story's slab.
+  g.strokeStyle = "#0fa3b1"; g.lineWidth = 2;
+  for (const t of tendons) {
+    if (t.pts.length < 2) continue;
+    if (p.mode === "plan" ? t.story !== p.story : !near(t.pts, 0)) continue;
+    line(t.pts);
+    if (opt.names) { const [x, y, , ok] = to(t.pts[0]); if (ok) { g.fillStyle = "#0fa3b1"; g.fillText(t.name, x + 3, y - 3); } }
+  }
+  g.lineWidth = 1;
 }
 function drawSupports(p, g, to, T) {
   g.strokeStyle = T.support; g.fillStyle = T.support; g.lineWidth = 1.4; g.setLineDash([]);
@@ -3572,7 +3601,7 @@ function modelerMenus(m) {
   m.Edit = [[s.undo ? "Undo " + s.undo : "Undo", "m:undo", "Ctrl+Z", !s.undo], [s.redo ? "Redo " + s.redo : "Redo", "m:redo", "Ctrl+Y", !s.redo], 0,
     ["Delete", "m:delete", "Del", !any], 0, ["Copy names of the selected objects", "copyNames", "Ctrl+C", !any], 0, ["Hide the selected objects", "hideSel", "", !any], ["Show all objects", "showAll"], 0, ["Model Text...", "m:text"]];
   m.Define = [["Material Properties...", "m:materials"], ["Frame Sections...", "m:frameSections"], ["Slab and Wall Sections...", "m:shellSections"], only(["etabs", "sap2000"], ["Link/Support Properties...", "m:links"]), ["Spring Properties", [["Point Springs...", "m:spr:point"], ["Line Springs...", "m:spr:line"], ["Area Springs...", "m:spr:area"]]], 0,
-    only(["etabs", "sap2000"], ["Diaphragms...", "m:st:diaphragm"]), only(["etabs"], ["Pier Labels...", "m:st:pier"]), only(["etabs"], ["Spandrel Labels...", "m:st:spandrel"]), ["Groups...", "m:st:group"], ["Section Cuts...", "m:st:cut"], only(["sap2000"], ["Joint Constraints...", "m:ex:constraints"]), only(["safe"], ["Design Strips...", "m:ex:strips"]), 0,
+    only(["etabs", "sap2000"], ["Diaphragms...", "m:st:diaphragm"]), only(["etabs"], ["Pier Labels...", "m:st:pier"]), only(["etabs"], ["Spandrel Labels...", "m:st:spandrel"]), ["Groups...", "m:st:group"], ["Section Cuts...", "m:st:cut"], only(["sap2000"], ["Joint Constraints...", "m:ex:constraints"]), only(["etabs", "safe"], ["Design Strips...", "m:ex:strips"]), ["Tendon Sections...", "m:ex:tendonsections"], ["Tendons...", "m:ex:tendons"], only(["etabs", "safe"], ["Hyperstatic Load Cases...", "m:ex:hyperstatic"]), 0,
     ["Story Data...", "m:stories"], ["Grid Data...", "m:grids"], 0, ["Functions", [["Response Spectrum...", "m:fnRS"], ["Time History...", "m:fnTH"]]],
     ["Load Patterns...", "m:patterns"], ["Load Cases...", "m:cases"], only(["sap2000"], ["Moving Loads", [["Lanes...", "m:ex:lanes"], ["Vehicles...", "m:ex:vehicles"], ["Vehicle Classes...", "m:ex:classes"], ["Moving Load Cases...", "m:ex:mcases"]]]), ["Load Combinations...", "m:combos"], 0, ["Mass Source...", "m:mass"], only(["etabs", "sap2000"], ["P-Delta Options...", "m:pdelta"])];
   m.Draw = [["Select Object", "t:select", "Esc"], 0, ["Draw Columns (click a point)", "d:column"], ["Draw Beams (click start and end)", "d:beam"], ["Quick Draw Beams (click a grid line)", "d:qbeam"], 0,
@@ -3874,11 +3903,35 @@ async function hmExtras(what) {
       return dialog("Moving Load Case Data", `<div class="g2"><span>Case Name</span><input id="xN" value="${esc(c ? c.name : "MOVE" + (xd.moving_cases.length + 1))}" ${c ? "disabled" : ""}><span>Vehicle class</span><select id="xC">${opts(xd.vehicle_classes.map(v => v.name), a.class)}</select><span>Scale factor</span><input id="xK" type="number" step="any" value="${a.scale}"><span>Fewest lanes loaded</span><input id="xMin" type="number" value="${a.min_loaded}"><span>Most lanes loaded (0: all)</span><input id="xMax" type="number" value="${a.max_loaded}"></div>
         <fieldset><legend>Lanes</legend>${xd.lanes.map(l => `<label style="margin-right:10px"><input type="checkbox" data-l="${esc(l.name)}" ${a.lanes.includes(l.name) ? "checked" : ""}> ${esc(l.name)}</label>`).join("") || '<span class="kv">Define a lane first.</span>'}</fieldset>`,
         [["OK", d => submit(d, "define_moving_case", {name: q(d, "#xN").value.trim(), assignments: [{class: q(d, "#xC").value, lanes: [...d.querySelectorAll("[data-l]:checked")].map(x => x.dataset.l), scale: fnum(d, "#xK"), min_loaded: parseInt(q(d, "#xMin").value) || 0, max_loaded: parseInt(q(d, "#xMax").value) || 0}]}, after), true], ["Cancel"]], {width: 460}); }},
-    strips: {title: "Define Design Strips (SAFE)", list: xd.strips, tool: "define_strip", form: (c, after) =>
-      dialog("Design Strip Data", `<div class="g2"><span>Strip Name</span><input id="xN" value="${esc(c ? c.name : "STRIP" + (xd.strips.length + 1))}" ${c ? "disabled" : ""}><span>Layer</span><select id="xY">${opts(["A", "B"], c ? c.layer : "A")}</select><span>Width to the left, ${u.l}</span><input id="xWL" type="number" step="any" value="${c ? c.width_left : 1}"><span>Width to the right, ${u.l}</span><input id="xWR" type="number" step="any" value="${c ? c.width_right : 1}"></div>
-        <fieldset><legend>Through the points (x y, one per line)</legend><textarea id="xP" rows="4" style="width:100%">${c ? c.points.map(p => p.join(" ")).join("\n") : "0 0\n6 0"}</textarea></fieldset><p class="kv">Goes into the SAFE file beside the strips along the grid lines.</p>`,
-        [["OK", d => submit(d, "define_strip", {name: q(d, "#xN").value.trim(), layer: q(d, "#xY").value, width_left: fnum(d, "#xWL"), width_right: fnum(d, "#xWR"),
-          points: q(d, "#xP").value.split("\n").map(l => l.trim().split(/[\s,;]+/).map(parseFloat)).filter(p => p.length === 2 && p.every(isFinite))}, after), true], ["Cancel"]], {width: 440})},
+    strips: {title: "Define Design Strips", list: xd.strips, tool: "define_strip", form: (c, after) =>
+      dialog("Design Strip Data", `<div class="g2"><span>Strip Name</span><input id="xN" value="${esc(c ? c.name : "CSA" + (xd.strips.length + 1))}" ${c ? "disabled" : ""}><span>Story</span><select id="xSt">${opts(xd.stories, c && c.story ? c.story : xd.slab_story)}</select><span>Layer</span><select id="xY">${opts(["A", "B"], c ? c.layer : "A")}</select><span>Width to the left, ${u.l}</span><input id="xWL" type="number" step="any" value="${c ? c.width_left : 1}"><span>Width to the right, ${u.l}</span><input id="xWR" type="number" step="any" value="${c ? c.width_right : 1}"></div>
+        <fieldset><legend>Through the points (x y, one per line)</legend><textarea id="xP" rows="4" style="width:100%">${c ? c.points.map(p => p.join(" ")).join("\n") : "0 0\n6 0"}</textarea></fieldset>
+        <fieldset><legend>Strip design overwrites</legend><div class="g2"><span>Strip design type</span><select id="xDT">${opts(["Column", "Middle", "No Design"], c ? c.design_type : "Column")}</select><span>Design</span><input id="xDo" type="checkbox" ${!c || c.design ? "checked" : ""}><span>Ignore PT</span><input id="xIg" type="checkbox" ${c && c.ignore_pt ? "checked" : ""}><span>Rebar material</span><select id="xRM">${opts([["", "First rebar material"]].concat(xd.rebar_materials.map(r => [r, r])), c ? c.rebar_material : "")}</select><span>LLRF</span><input id="xLL" type="number" step="any" value="${c ? c.llrf : 1}"></div></fieldset>`,
+        [["OK", d => submit(d, "define_strip", {name: q(d, "#xN").value.trim(), story: q(d, "#xSt").value, layer: q(d, "#xY").value, width_left: fnum(d, "#xWL"), width_right: fnum(d, "#xWR"),
+          design_type: q(d, "#xDT").value, design: q(d, "#xDo").checked, ignore_pt: q(d, "#xIg").checked, rebar_material: q(d, "#xRM").value, llrf: fnum(d, "#xLL"),
+          points: q(d, "#xP").value.split("\n").map(l => l.trim().split(/[\s,;]+/).map(parseFloat)).filter(p => p.length === 2 && p.every(isFinite))}, after), true], ["Cancel"]], {width: 460})},
+    tendonsections: {title: "Define Tendon Sections", list: xd.tendon_sections, tool: "define_tendon_section", form: (c, after) =>
+      dialog("Tendon Section Data", `<div class="g2"><span>Section Name</span><input id="xN" value="${esc(c ? c.name : "Tendon" + (xd.tendon_sections.length + 1))}" ${c ? "disabled" : ""}><span>Material</span><select id="xM">${opts(xd.tendon_materials, c ? c.material : xd.tendon_materials[0])}</select><span>Strand area, ${u.l}²</span><input id="xA" type="number" step="any" value="${c ? c.strand_area : ""}"></div>${xd.tendon_materials.length ? "" : '<p class="kv">Define a Tendon material first (Define > Material Properties).</p>'}`,
+        [["OK", d => submit(d, "define_tendon_section", {name: q(d, "#xN").value.trim(), material: q(d, "#xM").value, strand_area: fnum(d, "#xA")}, after), true], ["Cancel"]], {width: 400})},
+    tendons: {title: "Draw Tendons", list: xd.tendons, tool: "draw_tendon", form: (c, after) => {
+      const sp = c ? c.spans : [{length: 0, depth_left: 0, depth_low: 0, depth_right: 0, a: 0.1, b: 0.1, c: 0.5}], j = c && c.jacking, l = c && c.losses;
+      const dd = dialog("Tendon Data", `<div class="g2"><span>Tendon Name</span><input id="xN" value="${esc(c ? c.name : "T" + (xd.tendons.length + 1))}" ${c ? "disabled" : ""}><span>Story (slab)</span><select id="xSt">${opts(xd.stories, c ? c.story : xd.slab_story)}</select><span>Tendon section</span><select id="xS">${opts(xd.tendon_sections.map(t => t.name), c ? c.section : "")}</select><span>Number of strands</span><input id="xK" type="number" value="${c ? c.strands : 1}"><span>Bonded</span><input id="xB" type="checkbox" ${c && c.bonded ? "checked" : ""}></div>
+        <fieldset><legend>Plan, through the points (x y, one per line)</legend><textarea id="xP" rows="3" style="width:100%">${c ? c.points.map(p => p.join(" ")).join("\n") : "0 0\n8 0"}</textarea></fieldset>
+        <fieldset><legend>Vertical profile, span by span (depth of the tendon below the slab top, ${u.l}; length 0: the rest)</legend><table class="list hmgrid" id="xV"><tr><th>Length</th><th>Depth left</th><th>Depth low point</th><th>Depth right</th><th>A</th><th>B</th><th>C</th></tr>${sp.map(s => `<tr>${["length", "depth_left", "depth_low", "depth_right", "a", "b", "c"].map(k => `<td><input data-k="${k}" type="number" step="any" value="${s[k]}"></td>`).join("")}</tr>`).join("")}</table><button type="button" id="xAdd">Add span</button></fieldset>
+        <fieldset><legend>Jacking</legend><div class="g2"><span>Transfer load pattern</span><select id="xJT">${opts([["", "None (no jacking load)"]].concat(xd.prestress_transfer_patterns.map(p => [p, p])), j ? j.transfer_pattern : (xd.prestress_transfer_patterns[0] || ""))}</select><span>Final load pattern</span><select id="xJF">${opts(xd.prestress_final_patterns, j ? j.final_pattern : xd.prestress_final_patterns[0])}</select><span>Jacking stress, ${u.f}/${u.l}²</span><input id="xJS" type="number" step="any" value="${j ? j.stress : ""}"><span>Jack from</span><select id="xJE">${opts([["I", "I end"], ["J", "J end"], ["Both", "Both ends"]], j ? j.end : "Both")}</select></div></fieldset>
+        <fieldset><legend>Losses</legend><div class="g2"><span>Method</span><select id="xLM">${opts([["", "None"], ["Fixed", "Fixed stress"], ["Percent", "Percentage of the jacking stress"]], l ? l.method : "")}</select><span>Stressing losses</span><input id="xLS" type="number" step="any" value="${l ? l.stressing : 0}"><span>Long-term losses</span><input id="xLT" type="number" step="any" value="${l ? l.long_term : 0}"></div></fieldset>`,
+        [["OK", d => {
+          const spans = [...d.querySelectorAll("#xV tr")].slice(1).map(r => { const o = {}; r.querySelectorAll("[data-k]").forEach(x => o[x.dataset.k] = parseFloat(x.value) || 0); return o; });
+          const args = {name: q(d, "#xN").value.trim(), story: q(d, "#xSt").value, section: q(d, "#xS").value, strands: parseInt(q(d, "#xK").value) || 1, bonded: q(d, "#xB").checked, spans,
+            points: q(d, "#xP").value.split("\n").map(l => l.trim().split(/[\s,;]+/).map(parseFloat)).filter(p => p.length === 2 && p.every(isFinite))};
+          if (q(d, "#xJT").value) args.jacking = {transfer_pattern: q(d, "#xJT").value, final_pattern: q(d, "#xJF").value, stress: fnum(d, "#xJS"), end: q(d, "#xJE").value};
+          if (q(d, "#xLM").value) args.losses = {method: q(d, "#xLM").value, stressing: fnum(d, "#xLS"), long_term: fnum(d, "#xLT")};
+          return submit(d, "draw_tendon", args, after); }, true], ["Cancel"]], {width: 620});
+      q(dd, "#xAdd").onclick = () => { const rows = dd.querySelectorAll("#xV tr"), last = rows[rows.length - 1], row = last.cloneNode(true); row.querySelector('[data-k="length"]').value = 0; last.after(row); };
+      return dd; }},
+    hyperstatic: {title: "Hyperstatic Load Cases", list: xd.hyperstatic_cases, tool: "define_hyperstatic_case", form: (c, after) =>
+      dialog("Hyperstatic Load Case Data", `<div class="g2"><span>Load Case Name</span><input id="xN" value="${esc(c ? c.name : (xd.prestress_cases[0] || "PT") + "-HP")}" ${c ? "disabled" : ""}><span>Linear static case (prestress)</span><select id="xBC">${opts(xd.prestress_cases, c ? c.base_case : xd.prestress_cases[0])}</select><span>Scale factor</span><input id="xSF" type="number" step="any" value="${c ? c.scale : 1}"></div>${xd.prestress_cases.length ? "" : '<p class="kv">Add a load pattern of type Prestress-Final first: its linear static case is the base case.</p>'}`,
+        [["OK", d => submit(d, "define_hyperstatic_case", {name: q(d, "#xN").value.trim(), base_case: q(d, "#xBC").value, scale: fnum(d, "#xSF")}, after), true], ["Cancel"]], {width: 420})},
   };
   if (what === "jconstraint") {
     const names = hmJoints(); if (!names.length) return hmSay("Select the members whose joints go in the constraint first.", true);
