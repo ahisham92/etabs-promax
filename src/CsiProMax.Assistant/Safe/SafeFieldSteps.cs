@@ -46,8 +46,9 @@ public static class SafeFieldSteps
         ctx.Offer(EtabsTools.All);
         ctx.Offer(ProgramTools.For(CsiProgram.Safe));
 
-        // ---- what SAFE read from the file the Modeler wrote ----
-        ctx.Step("SAFE read the slabs and beams the Modeler wrote", () =>
+        // ---- what SAFE read from the file the Modeler wrote (or, in SAFE 20 and 21, what the test built from it) ----
+        var built = ctx.Facts.GetValueOrDefault("safe.built") > 0;
+        ctx.Step(built ? "SAFE has the slabs and beams of the Modeler's file, built through the API" : "SAFE read the slabs and beams the Modeler wrote", () =>
         {
             var (slabs, beams) = (link.Areas().Count(a => a.Kind == "floor"), link.Frames().Count(f => f.Kind == "beam"));
             var (s, b) = ((int)ctx.Facts.GetValueOrDefault("safe.slabs"), (int)ctx.Facts.GetValueOrDefault("safe.beams"));
@@ -60,7 +61,8 @@ public static class SafeFieldSteps
             FieldContext.Expect(have.area_sections.Count > 0 && have.materials.Count > 0 && have.patterns.Count >= 2, "slab sections, materials and the Dead and Live patterns were expected");
             return have;
         });
-        ctx.Step("the design strips came across", () =>
+        if (built) ctx.Skip("the design strips came across", "this SAFE cannot open the Modeler's .f2k through its API, and its API cannot draw design strips, so the model was built without them. To check them by hand: in SAFE, File > Import, pick cpm-field-test.f2k from the zip.");
+        else ctx.Step("the design strips came across", () =>
         {
             var strips = Int(ctx.Call("list_design_strips", "{}")["count"]);
             var written = (int)ctx.Facts.GetValueOrDefault("safe.strips");

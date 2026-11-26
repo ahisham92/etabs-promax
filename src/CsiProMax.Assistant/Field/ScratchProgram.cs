@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Reflection;
 using CsiProMax.Assistant.Etabs;
+using CsiProMax.Assistant.Safe;
 using CsiProMax.Assistant.Tools;
 
 namespace CsiProMax.Assistant;
@@ -336,8 +337,10 @@ public sealed class ScratchProgram : IScratchWindow
 
         // SAFE 20 and 21 (on the .NET Framework) open only their own .fdb through the API: given the Modeler's .f2k,
         // SAFE 20 showed "Error decompressing file. May not be a valid ETABS .EDB file." and waited for a person
-        // (tester's PC, 0.4.47, 2026-11-26). No window is started for a file it cannot open.
-        if (!OpensThroughApi(_program, modelFile, EtabsApi.RunsOnFramework(ApiFile)))
+        // (tester's PC, 0.4.47, 2026-11-26). Such a program starts a blank model instead, and the test builds the
+        // Modeler's model in it through the API (F2kRebuild), so the editing tools are still tried (Ahmed, 2026-11-26).
+        var build = !OpensThroughApi(_program, modelFile, EtabsApi.RunsOnFramework(ApiFile));
+        if (build && !BuildsThroughApi(_program, modelFile))
         {
             ctx.Skip($"start a second {name} window", $"{name} on this PC ({Path.GetFileName(Path.GetDirectoryName(ApiFile)) ?? name}) opens only its own {ModelExtension(_program)} files through its API, " +
                 $"and the Modeler writes {Path.GetExtension(modelFile)}. To check the Modeler's file by hand: in {name}, File > Import, pick {Path.GetFileName(modelFile)} from the zip.");
@@ -392,6 +395,22 @@ public sealed class ScratchProgram : IScratchWindow
 
         // A name of this run's own: two tests on one PC (it happened) must never take each other's window for theirs.
         var target = Path.Combine(ctx.Folder, ScratchName() + ModelExtension(_program));
+        var text = build ? File.ReadAllText(modelFile) : "";
+        if (build)
+        {
+            if (ctx.Step($"start a blank model in it ({name} on this PC opens only {ModelExtension(_program)} files through its API, so the Modeler's {Path.GetExtension(modelFile)} is built in it instead)", () =>
+            {
+                var units = F2kRebuild.UnitsOf(text);
+                Ask(FileTimeout, "start a blank model", m =>
+                {
+                    object model = m;
+                    ApiCall.Must(model, "InitializeNewModel", CsiTools.D(("Units", units)), "start a new model");
+                    return ApiCall.First(model, ["File.NewBlank", "File.NewGridOnly"], CsiTools.D(("NumberStorys", 1), ("TypicalStoryHeight", 3), ("BottomStoryHeight", 3), ("NumberLinesX", 2), ("NumberLinesY", 2), ("SpacingX", 6), ("SpacingY", 6)), "start a blank model");
+                }, $"{name} did not finish starting a blank model within {FileTimeout.TotalMinutes:0} minutes. A message may be waiting in its window.");
+                return $"blank, in {ComEtabs.UnitNames[units - 1]}";
+            }) is null) return false;
+        }
+        else
         if (ctx.Step($"open {Path.GetFileName(modelFile)} in it", () =>
         {
             var answer = Convert.ToInt32(Ask(FileTimeout, "open the file", m => m.File.OpenFile(Path.GetFullPath(modelFile)),
@@ -420,6 +439,17 @@ public sealed class ScratchProgram : IScratchWindow
             FieldContext.Expect(SameName(file, target), $"the window that answered has '{Path.GetFileName(file)}' open, not the scratch model, so the test stops here.");
             Link = link;
             return Path.GetFileName(file);
+        }) is null) return false;
+
+        // The Modeler's model, built in the blank model through the API, and saved: what the program's part then checks.
+        if (build && ctx.Step($"build the Modeler's model from {Path.GetFileName(modelFile)} in it through the API", () =>
+        {
+            var built = F2kRebuild.Build(Link, text);
+            ctx.Facts["safe.built"] = 1;
+            var answer = Convert.ToInt32(Ask(FileTimeout, "save the scratch model", m => m.File.Save(target),
+                $"{name} did not finish saving the scratch model within {FileTimeout.TotalMinutes:0} minutes. A message may be waiting in its window."));
+            if (answer != 0) throw new EtabsException($"{name} could not save the scratch model after building it (it answered {answer}).");
+            return built;
         }) is null) return false;
 
         // The way the Tools menu reaches a window: by its process id. Checked here, not relied on.
@@ -469,6 +499,13 @@ public sealed class ScratchProgram : IScratchWindow
     /// </summary>
     public static bool OpensThroughApi(CsiProgram program, string file, bool onFramework) =>
         !(program.Key == CsiProgram.Safe.Key && onFramework && !string.Equals(Path.GetExtension(file), ModelExtension(program), StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Whether the test can build <paramref name="file"/>'s model through the API in a blank model of a program that
+    /// cannot open it (<see cref="OpensThroughApi"/>): a SAFE text file (.f2k), by <see cref="F2kRebuild"/>.
+    /// </summary>
+    public static bool BuildsThroughApi(CsiProgram program, string file) =>
+        program.Key == CsiProgram.Safe.Key && string.Equals(Path.GetExtension(file), ".f2k", StringComparison.OrdinalIgnoreCase);
 
     public static string ModelExtension(CsiProgram program) => program.Key switch
     {
