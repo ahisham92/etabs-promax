@@ -557,7 +557,7 @@ static class OldProgramTests
             var scratch = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));
             var start = scratch.IndexOf("public static IScratchWindow? Start(", StringComparison.Ordinal);
             var turn = scratch.IndexOf("OpensTextInOwnProcess(program, modelFile)", start, StringComparison.Ordinal);
-            var second = scratch.IndexOf("var scratch = new ScratchProgram(program);", start, StringComparison.Ordinal);
+            var second = scratch.IndexOf("var scratch = new ScratchProgram(program)", start, StringComparison.Ordinal);
             Check(start > 0 && turn > start && second > turn, "the text file is turned into a model file before the test's own window starts");
             Check(scratch.IndexOf("convertOnly: true", turn, StringComparison.Ordinal) is var c and > 0 && c < second && scratch.IndexOf("first.Close()", turn, StringComparison.Ordinal) is var closed and > 0 && closed < second
                   && scratch.IndexOf("modelFile = converted;", turn, StringComparison.Ordinal) is var swap and > 0 && swap < second, "the first SAP2000 only saves the .sdb, is closed, and the second opens that .sdb");
@@ -620,6 +620,22 @@ static class OldProgramTests
             Check(text.Contains("fields Name | NumberSets | Story") && text.Contains("[EQX | 1 | Story1]") && text.Contains("line 80 of the import log") && text.Contains("record skipped"), "rows and the uncut log: " + text);
             var ctx = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/FieldContext.cs"));
             Check(ctx.Contains("Import sent and its whole log: ") && ctx.Contains("EditableTables.Refusals != refusedBefore"), "the failing step's detail carries it");
+        });
+
+        yield return ("ETABS run on main 4eabf46: the Engine's hidden run offers run_analysis; shell loads come first among the pack's inputs; a Modeler already open counts as answered; a section cut's group holds joints", () =>
+        {
+            string Src(string f) => File.ReadAllText(Path.Combine(SourceText.Root(), f));
+            var engine = Src("src/CsiProMax.Assistant/Tools/EngineRun.cs");
+            Check(engine.Contains("ctx.Offer(ProgramTools.Chat(program))"), "the chat's whole tool set, shared tools included");
+            Check(ProgramTools.Chat(CsiProgram.Sap2000).Any(t => t.Name == "run_analysis") && ProgramTools.Chat(CsiProgram.Sap2000).Any(t => t.Name == "run_design"), "run_analysis and run_design offered");
+            Check(EtabsTools.All.Any(t => t.Name == "run_analysis"), "run_analysis is a shared tool");
+            Check(CsiProMax.Assistant.Tools.PackTables.IsLoadAssignment("Shell Loads - Uniform") && CsiProMax.Assistant.Tools.PackTables.IsLoadAssignment("Frame Loads Assignments - Distributed")
+                && CsiProMax.Assistant.Tools.PackTables.IsLoadAssignment("Joint Loads Assignments - Force") && !CsiProMax.Assistant.Tools.PackTables.IsLoadAssignment("Load Combination Definitions"), "load assignment tables");
+            TableName T(string n) => new(n, n, false);
+            var order = CsiProMax.Assistant.Tools.PackTables.More([T("Load Combination Definitions"), T("Frame Loads Assignments - Open Structure Wind Parameters"), T("Shell Loads - Uniform")], []).Select(x => x.Name).ToList();
+            Check(order.IndexOf("Shell Loads - Uniform") < order.IndexOf("Load Combination Definitions"), "shell loads before the combinations: " + string.Join(", ", order));
+            Check(Src("src/CsiProMax.Assistant/Field/ModelerStartFieldSteps.cs").Contains("first.ExitCode == 0 && OpenElsewhere() is { } other"), "a start handed to the open Modeler passes");
+            Check(Src("src/CsiProMax.Assistant/Field/ScratchExtras.cs").Contains("\"PointObj.SetGroupAssign\", (\"Name\", bottom), (\"GroupName\", Group)"), "the cut's group holds the columns' bottom joints");
         });
 
         yield return ("kind: a program's 'could not read this file' box in a scratch window is answered OK and said, never a licence box", () =>

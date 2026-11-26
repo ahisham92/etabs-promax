@@ -209,6 +209,75 @@ static class ExtrasTests
             var install = File.ReadAllText(Path.Combine(SourceText.Root(), "install.ps1"));
             Check(install.Contains("'CSI ProMax Engine.lnk'") && !install.Contains("'CSI ProMax Modeler.lnk'"), "the installer does not make the one Engine shortcut");
         });
+        yield return ("extras: CSI ProMax Engine works with no AI: Run, the forms and the review pack are CSI ProMax's own code, never the chat's (Ahmed 2026-11-26)", () =>
+        {
+            var root = SourceText.Root();
+            string Src(params string[] parts) => File.ReadAllText(Path.Combine([root, "src", "CsiProMax.Assistant", .. parts]));
+            foreach (var (name, text) in new[] { ("EngineRun.cs", Src("Tools", "EngineRun.cs")), ("HandModel.cs", Src("Tools", "HandModel.cs")), ("HandTools.cs", Src("Tools", "HandTools.cs")), ("Pack.cs", Src("Tools", "Pack.cs")) })
+                foreach (var chat in new[] { "ChatPane", "ChatEngine", "ChatMcp", "ChatAuto", "AiMode.On", "CsiProMax.Chat." })
+                    Check(!text.Contains(chat, StringComparison.Ordinal), $"{name} uses the chat ({chat}); the Engine must work without the AI");
+            var engine = Src("Tools", "EngineRun.cs");
+            Check(engine.Contains("ProgramTools.Chat(program)", StringComparison.Ordinal), "the Run does not use the same tools the chat runs");
+            var view = Src("Panel", "Host", "ModelView.cs");
+            Check(view.Contains("path == \"run\" ? RunAsync(body)", StringComparison.Ordinal) && view.Contains("path == \"edit\" ? EditAsync(body)", StringComparison.Ordinal), "the window's Run or forms are not served whatever the AI choice");
+            var steps = Src("Field", "AiModeFieldSteps.cs");
+            Check(steps.Contains("without the AI chat: the Engine's Run, forms and results are there", StringComparison.Ordinal), "the field test does not check the Engine without the chat");
+        });
+        yield return ("extras: CSI ProMax Engine's pack lives as the model's results do: written beside the model, removed with its comments kept, replaced while another window reads it (Ahmed 2026-11-26)", () =>
+        {
+            var folder = Path.Combine(Path.GetTempPath(), "cpm-life-" + Guid.NewGuid().ToString("N")[..6]);
+            Directory.CreateDirectory(folder);
+            var oldTries = CsiProMax.Assistant.Packs.PackLife.Tries;
+            try
+            {
+                CsiProMax.Assistant.Packs.PackLife.Tries = 3;
+                var link = Frame();
+                link.SaveAs(Path.Combine(folder, "Tower.e2k"));
+                var (pack, page) = EngineRun.PackFiles(link);
+                Check(pack == Path.Combine(folder, "Tower.cpmx") && page == Path.Combine(folder, "Tower viewer.html"), $"the Engine's pack is not beside the model, named as the pack written after a run in the program: {pack} | {page}");
+                var comment = new JsonObject { ["id"] = "c1", ["text"] = "check this beam" };
+                var built = Pack.Build(link, [], [], [], null, new JsonArray(comment.DeepClone()));
+                CsiProMax.Assistant.Packs.PackLife.Write(pack, page, built.Zip, Pack.ViewerHtml(built.Content));
+                Check(File.Exists(pack) && File.Exists(page), "the pack and its page were not written");
+                // Another window reading the pack (as the Viewer does) while it is replaced.
+                using (var reader = new FileStream(pack, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                    CsiProMax.Assistant.Packs.PackLife.Write(pack, page, built.Zip, Pack.ViewerHtml(built.Content));
+                Check(Pack.ReadComments(pack).Comments.Count == 1, "the pack replaced while it was read is not whole");
+                var left = CsiProMax.Assistant.Packs.PackLife.Remove(pack, page);
+                Check(left.Count == 0 && !File.Exists(pack) && !File.Exists(page), "the pack was not removed: " + string.Join(", ", left));
+                var kept = CsiProMax.Assistant.Packs.PackLife.Comments(pack);
+                Check(kept.Count == 1 && kept[0]!["id"]!.GetValue<string>() == "c1" && File.Exists(CsiProMax.Assistant.Packs.PackLife.CommentsFile(pack)), "the comments were lost with the pack");
+                // The next pack takes them back, each once (also when the sidecar and the pack both hold one).
+                var again = Pack.Build(link, [], [], [], null, CsiProMax.Assistant.Packs.PackLife.Comments(pack));
+                CsiProMax.Assistant.Packs.PackLife.Write(pack, page, again.Zip, Pack.ViewerHtml(again.Content));
+                Check(CsiProMax.Assistant.Packs.PackLife.Comments(pack).Count == 1 && Pack.ReadComments(pack).Comments.Count == 1, "the comments did not come back once into the next pack");
+                Check(CsiProMax.Assistant.Packs.PackLife.Remove(Path.Combine(folder, "none.cpmx"), "").Count == 0, "removing a pack that is not there is not quiet");
+                Check(!Directory.EnumerateFiles(folder, "*.writing").Any(), "a half-written file was left behind");
+            }
+            finally { CsiProMax.Assistant.Packs.PackLife.Tries = oldTries; try { Directory.Delete(folder, true); } catch (IOException) { } }
+        });
+        yield return ("extras: CSI ProMax Engine's Run form asks each program for its own designs, and finds the selected objects in the program by where they are", () =>
+        {
+            Check(EngineRun.Kinds["etabs"].Select(k => k.Kind).SequenceEqual(["steel", "concrete", "composite", "shear_wall", "slab"]) && EngineRun.Kinds["sap2000"].Length == 2 && EngineRun.Kinds["safe"].Single().Kind == "slab", "the design kinds per program are not ETABS's, SAP2000's and SAFE's");
+            Check(EngineRun.DesignArgs(CsiProgram.Sap2000, ["steel"]) == """{"steel":true,"concrete":false}""", "SAP2000's design arguments: " + EngineRun.DesignArgs(CsiProgram.Sap2000, ["steel"]));
+            Check(EngineRun.DesignArgs(CsiProgram.Etabs, ["concrete", "slab"]) == """{"kinds":["concrete","slab"]}""", "ETABS's design arguments: " + EngineRun.DesignArgs(CsiProgram.Etabs, ["concrete", "slab"]));
+            var link = Frame();
+            var names = link.Frames().Take(2).Select(f => f.Name).Concat(link.Areas().Take(1).Select(a => a.Name)).ToList();
+            var at = EngineRun.Places(link, names);
+            var (frames, areas) = EngineRun.Find(link, at);
+            Check(frames.SequenceEqual(link.Frames().Take(2).Select(f => f.Name)) && areas.Count == Math.Min(1, link.Areas().Count), $"the selected objects were not found by where they are: {string.Join(", ", frames)} | {string.Join(", ", areas)}");
+            var refused = EngineRun.Start(link, analyse: false, kinds: [], apiFile: _ => Path.Combine(Path.GetTempPath(), "none.dll"));
+            Check(refused["ok"]?.GetValue<bool>() == false && (refused["error"]?.GetValue<string>() ?? "").Contains("Nothing was asked", StringComparison.Ordinal), "a run with nothing ticked was not refused: " + refused.ToJsonString());
+            var wrong = EngineRun.Start(link, analyse: true, kinds: ["punching"], apiFile: _ => Path.Combine(Path.GetTempPath(), "none.dll"));
+            Check(wrong["ok"]?.GetValue<bool>() == false, "a design kind the program does not have was not refused");
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var marker in new[] { "dialog(\"Run Options\"", "Selected objects only", "\"eng:design\"", "enginePost({unlock: true})", "enginePost({changed: true})" })
+                Check(html.Contains(marker, StringComparison.Ordinal), "the page has no " + marker);
+            var view = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Panel", "Host", "ModelView.cs"));
+            Check(view.Contains("EngineRun.Changed(moved)", StringComparison.Ordinal) && view.Contains("EngineRun.Changed(edited)", StringComparison.Ordinal), "a change to the model does not remove the run's pack");
+            var program = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Program.cs"));
+            Check(program.Contains("WebPages.RemovedPageFor(file)", StringComparison.Ordinal), "a Viewer window on a removed pack does not say it was removed");
+        });
         yield return ("extras: CSI ProMax Engine's Run writes the model for its program beside the model, says plainly when the program is not on this PC, and never touches the model's own file (Ahmed 2026-11-26)", () =>
         {
             var link = Frame();
@@ -230,7 +299,7 @@ static class ExtrasTests
                 var view = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Panel", "Host", "ModelView.cs"));
                 Check(view.Contains("path == \"run\" ? RunAsync(body)") && view.Contains("EngineRun.Start(offline, design)"), "the Engine window cannot start a run");
                 var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
-                Check(html.Contains("[\"Run Analysis\", \"eng:run\", \"F5\"]") && html.Contains("async function engineRun(design)"), "Analyze > Run Analysis is not in the Engine");
+                Check(html.Contains("[\"Run Analysis...\", \"eng:run\", \"F5\"]") && html.Contains("async function engineRun(mode)"), "Analyze > Run Analysis is not in the Engine");
                 var scratch = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Field", "ScratchProgram.cs"));
                 Check(scratch.Contains("_app.Hide();"), "the program is not hidden while it runs");
             }

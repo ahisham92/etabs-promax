@@ -175,6 +175,7 @@ footer span{padding:0 10px;border-left:1px solid var(--line2);display:flex;align
 footer #hint{flex:1;overflow:hidden;text-overflow:ellipsis;color:var(--mute)}footer #vname{border-left:0}footer #vname:empty{display:none}
 footer #coords{font-variant-numeric:tabular-nums;min-width:230px}
 footer select{height:19px;font-size:11.5px;border-radius:0;margin:0 -4px}
+footer #fbFilter{display:flex;align-items:center;gap:4px;border:0;border-left:1px solid var(--line2);background:transparent;color:var(--ink);padding:0 10px;height:100%;border-radius:0;cursor:pointer}footer #fbFilter:hover:not(:disabled){background:var(--hot)}footer #fbFilter:disabled{color:var(--mute);cursor:default}footer #fbFilter b{font-weight:600;min-width:1ch}
 #drop{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:24px;color:#cfd8dc;z-index:4;background:#0b0d0f}
 #drop div{max-width:440px;line-height:1.6}
 #drop b{font-size:14px;color:#fff}
@@ -337,7 +338,7 @@ body.chaton #right{width:380px;max-width:42%}
     </div>
   </div>
 </main>
-<footer><span id="vname"></span><span id="hint">Ready</span><span id="sel"></span><span id="coords"></span><span id="similarWrap" hidden><select id="similar" title="Draw on one story or on all stories" style="height:19px;padding:0 2px"><option value="one">One Story</option><option value="all">All Stories</option></select></span><span>Global</span><span id="units"></span></footer>
+<footer><span id="vname"></span><span id="hint">Ready</span><span id="sel"></span><span id="coords"></span><span id="similarWrap" hidden><select id="similar" title="Draw on one story or on all stories" style="height:19px;padding:0 2px"><option value="one">One Story</option><option value="all">All Stories</option></select></span><span>Global</span><span id="units"></span><button id="fbFilter" disabled title="Filter: the selected objects by kind (Check All / Check None)"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M1.5 2h13l-5 6v5l-3 1.5V8z" fill="currentColor"/></svg><b id="fbN">0</b></button></footer>
 <div id="rubber"></div><div id="tip"></div>
 <script id="pack" type="application/json"></script>
 <script>
@@ -349,7 +350,7 @@ const num = v => { const r = Math.round(v * 1000) / 1000; return String(Object.i
 function fmt(v) { const a = Math.abs(v); return a === 0 ? "0" : a >= 1000 ? v.toFixed(0) : a >= 100 ? v.toFixed(1) : a >= 1 ? v.toFixed(2) : a >= 0.001 ? v.toFixed(4) : v.toExponential(2); }
 // The instability checker's last answer and what of it is shown (its code is further down).
 const inst = {answer: null, cur: -1, show: false, busy: false, dlg: null, only: "all"};
-let P = null, frames = [], areas = [], stories = [], grids = {X: [], Y: []}, gridsGuessed = false, sizes = {}, slabT = {}, supports = [], points = [], tendons = [], dstrips = [];
+let P = null, frames = [], areas = [], stories = [], grids = {X: [], Y: []}, gridsGuessed = false, sizes = {}, slabT = {}, supports = [], points = [], tendons = [], dstrips = [], openings = [];
 let supportOf = new Map(), ratio = new Map(), marks = {punching: [], soil: []}, pointXyz = new Map(), pointIdx = new Map(), disp = new Map(), pointAt = new Map(), newComments = [], lit = null;
 let lo = [0, 0, 0], hi = [1, 1, 1], size = 1, unit = "", program = "etabs", sectionMat = new Map();
 const opt = {grid: true, extrude: true, fill: true, supports: true, names: false, axes: true, joints: false, edges: true, see: false, sections: true, explorer: true, side: true};
@@ -403,7 +404,8 @@ function engineWith(pack, keep) {
   if (!pack || pack.engine) return pack;
   if (keep && engine.res && engine.base && engine.base !== pack) {
     // The live model moved on (a hand edit or the chat): its results no longer belong to it.
-    engine.res = null; setTimeout(() => { if (typeof hmSay === "function") hmSay("The model changed, so its results were cleared, as ETABS does when a model is unlocked. Run the analysis again to see them."); buildTree(); }, 0);
+    engine.res = null; setTimeout(() => { if (typeof hmSay === "function") hmSay("The model changed, so its results and their review pack were removed, as ETABS does when a model is unlocked. Run the analysis again to see them."); buildTree(); }, 0);
+    enginePost({changed: true}).catch(() => {});
   }
   engine.base = pack;
   if (!engine.res) return pack;
@@ -423,25 +425,56 @@ async function engineImport(file) {
     hmSay(`Results of ${file.name} are shown on the model (${Object.values(pack.tables).filter(engineKinds).length} result and design tables${match < 0.9 ? `; only ${Math.round(match * 100)}% of its objects have the same labels as this model, so some results have no object to sit on` : ""}).`, match < 0.5);
   } catch (ex) { hmSay("That file could not be read: " + ex.message, true); }
 }
-async function engineRun(design) {
-  // Analyze > Run: the model's program runs it in the background and is closed again; its results come back here.
-  const post = b => fetch("run", {method: "POST", headers: {"Content-Type": "application/json", "X-CPM-View": "1"}, body: JSON.stringify(b), cache: "no-store"}).then(r => r.json());
-  let j; try { j = await post({design}); } catch (e) { return hmSay("The Engine could not be reached: " + e.message, true); }
+function enginePost(b) { return fetch("run", {method: "POST", headers: {"Content-Type": "application/json", "X-CPM-View": "1"}, body: JSON.stringify(b), cache: "no-store"}).then(r => r.json()); }
+function engineSelected() {
+  // The objects selected on the model, by their names (frames first, then areas), for a design of the selection only.
+  return [...sel].map(i => i <= frames.length ? frames[i - 1] && frames[i - 1].name : areas[i - frames.length - 1] && areas[i - frames.length - 1].name).filter(Boolean);
+}
+async function engineRun(mode) {
+  // Analyze > Run Analysis (F5), Run Analysis and Design, Design > Start Design/Check: one form, as the programs ask
+  // before a run, for the analysis, the designs and whether the design is of the selection only. Each job starts the
+  // model's program hidden and closes it as soon as it is done (Ahmed 2026-11-26): its licence is used only meanwhile.
+  let st; try { st = await enginePost({status: true}); } catch (e) { return hmSay("The Engine could not be reached: " + e.message, true); }
+  const kinds = (st.kinds || {})[program] || [], picked = engineSelected(), name = {etabs: "ETABS", sap2000: "SAP2000", safe: "SAFE"}[program] || "the program";
+  const analysed = !!st.analysed, wantDesign = mode !== "analysis";
+  const body = `<fieldset><legend>Analysis</legend>
+      <label class="kv"><input type="checkbox" id="rA" ${mode === "design" ? "" : "checked"}> Run the analysis</label>
+      <p class="kv" style="margin:4px 0 0;max-width:460px">${analysed ? "The model is analysed as it is now, so it is not analysed again: a design runs on that analysis." : "A design needs the analysis: a model not analysed as it is now is analysed first."}</p></fieldset>
+    <fieldset><legend>Design</legend>
+      ${kinds.length ? kinds.map(k => `<label class="kv" style="display:block"><input type="checkbox" data-kind="${esc(k.kind)}" ${wantDesign ? "checked" : ""}> ${esc(k.name)}</label>`).join("") : `<p class="kv">${esc(name)} has no design to run from here.</p>`}
+      <div style="margin-top:6px"><label class="kv"><input type="radio" name="rS" value="all" checked> All objects</label>
+      <label class="kv" style="margin-left:12px"><input type="radio" name="rS" value="sel" ${picked.length ? "" : "disabled"}> Selected objects only (${picked.length})</label></div></fieldset>
+    <p class="kv" style="margin:6px 0 0;max-width:460px">${esc(name)} starts hidden in a window of its own (yours, if open, is not touched), runs the job, and is closed as soon as it is done; its licence is used only while it runs.</p>`;
+  dialog("Run Options", body, [["Run Now", d => {
+    const analyse = q(d, "#rA").checked, ks = [...d.querySelectorAll("[data-kind]")].filter(x => x.checked).map(x => x.dataset.kind);
+    if (!analyse && !ks.length) { hmSay("Tick the analysis or a design to run.", true); return false; }
+    const only = ks.length && (d.querySelector("input[name=rS]:checked") || {}).value === "sel" ? picked : [];
+    engineStart({analyse, kinds: ks, selected: only});
+  }], ["Cancel"]], {width: 520});
+}
+async function engineStart(ask) {
+  let j; try { j = await enginePost(ask); } catch (e) { return hmSay("The Engine could not be reached: " + e.message, true); }
   if (!j.ok) return dialog("Run Analysis", `<p style="max-width:460px">${esc(j.error)}</p>`, [["OK"]], {width: 500});
-  const d = dialog(`Run ${design ? "Analysis and Design" : "Analysis"} - ${j.program}`, `<div class="pgwrap" style="height:220px;padding:4px 6px" id="runLog"></div><p class="kv" id="runPhase" style="margin:6px 0 0"></p>`, [["Close"]], {float: true, width: 560});
+  const what = (ask.analyse || j.analyses ? "Analysis" : "") + (ask.kinds && ask.kinds.length ? (ask.analyse || j.analyses ? " and Design" : "Design") : "");
+  const d = dialog(`Run ${what} - ${j.program}`, `<div class="pgwrap" style="height:220px;padding:4px 6px" id="runLog"></div><p class="kv" id="runPhase" style="margin:6px 0 0"></p>`, [["Close"]], {float: true, width: 560});
   for (;;) {
     await new Promise(r => setTimeout(r, 1000));
-    let st; try { st = await post({take: true}); } catch (e) { continue; }
+    let st; try { st = await enginePost({take: true}); } catch (e) { continue; }
     const log = d.querySelector("#runLog"); if (log) { log.innerHTML = st.lines.map(l => `<div>${esc(l)}</div>`).join(""); log.scrollTop = 1e9; }
     const ph = d.querySelector("#runPhase"); if (ph) ph.textContent = st.running ? st.phase + "..." : st.error ? "Stopped." : "Done.";
     if (!st.done) continue;
     if (st.error) { hmSay(st.error, true); return; }
     if (st.model_changed) { hmSay("The model changed while it ran, so its results were not put on it. Run again.", true); return; }
-    if (st.pack) { engine.res = st.pack; engine.from = st.pack_file || "the run"; load(engine.base || P, true); hmSay(`Analysed in ${st.program}: the results are shown (Display menu)${st.pack_file ? "; review pack " + st.pack_file : ""}.`); buildTree(); }
+    if (st.pack) { engine.res = st.pack; engine.from = st.pack_file || "the run"; load(engine.base || P, true); hmSay(`${what} in ${st.program}: the results are shown (Display and Design menus); ${st.program} was closed${st.pack_file ? "; review pack " + st.pack_file : ""}.`); buildTree(); }
     return;
   }
 }
-function engineClear() { if (!engine.res) return; engine.res = null; load(engine.base || P, false); hmSay("The results were cleared; the model is unlocked."); }
+function engineClear() {
+  // Analyze > Unlock Model: the results go, and so does their review pack beside the model (comments kept), as ETABS
+  // deletes a model's results when it is unlocked.
+  if (!engine.res) return; engine.res = null; load(engine.base || P, false);
+  enginePost({unlock: true}).then(j => hmSay(j && j.said ? j.said : "The results were cleared; the model is unlocked.", !!(j && j.left && j.left.length))).catch(() => hmSay("The results were cleared; the model is unlocked."));
+}
 async function readPack(file) {
   const buffer = await file.arrayBuffer();
   const head = new Uint8Array(buffer, 0, 2);
@@ -498,6 +531,7 @@ function load(pack, keep) {
   // Post-tensioning tendons (their 3D profile) and design strips (centre line and width), drawn over the slabs as the programs do.
   tendons = (m.tendons || []).map(t => ({name: String(t[0]), story: t[1], pts: t[2] || []}));
   dstrips = (m.strips || []).map(s => ({name: String(s[0]), layer: s[1], wl: s[2], wr: s[3], pts: s[4] || []}));
+  openings = (m.openings || []).map(o => ({name: String(o[0]), pts: o[1] || []}));
   lo = [1e30, 1e30, 1e30]; hi = [-1e30, -1e30, -1e30];
   const grow = p => { for (let i = 0; i < 3; i++) { lo[i] = Math.min(lo[i], p[i]); hi[i] = Math.max(hi[i], p[i]); } };
   frames.forEach(f => { grow(f.a); grow(f.b); }); areas.forEach(a => a.pts.forEach(grow));
@@ -1035,7 +1069,7 @@ function applyValues(d) {
 // distributed frame loads as diagrams along the members, everything else (point, uniform, temperature, strain...) as
 // values on the object, coloured. Read from the load assignment tables the pack takes beside the results. ----
 let loadMap = null, jointLoads = null;
-const loadKinds = {joint: /^(joint|point)loads/, frame: /^(frame|line|beam)loads/, shell: /^(shell|area|slab|wall|surface|floor)loads/};
+const loadKinds = {joint: /^(joint|point)loads?(assign|$|[a-z])/, frame: /^(frame|line|beam)loads?(assign|$|[a-z])/, shell: /^(shell|area|slab|wall|surface|floor)loads?(assign|$|[a-z])/};
 const loadTables = kind => P ? Object.values(P.tables).filter(t => t.rows && t.rows.length && loadKinds[kind].test(norm(t.name))) : [];
 const patCol = f => col(f, "LoadPattern", "Load Pattern", "LoadPat", "Load Pat", "Pattern");
 const isDistributed = t => /distributed|trapezoid/.test(norm(t.name));
@@ -2176,7 +2210,7 @@ function drawMarks(p, g, to, T) {
   }
 }
 function drawPT(p, g, to, T) {
-  if (!tendons.length && !dstrips.length) return;
+  if (!tendons.length && !dstrips.length && !openings.length) return;
   const z0 = p.mode === "plan" ? elevationOf(p.story) : null;
   const near = (pts, slack) => p.mode === "plan" ? z0 !== null && pts.every(q => Math.abs(q[2] - z0) <= slack) : p.mode === "elev" && p.line ? pts.every(q => onLine(q, p.line)) : true;
   const line = (pts, close) => { let first = true; g.beginPath(); for (const q of pts) { const [x, y, , ok] = to(q); if (!ok) { first = true; continue; } if (first) g.moveTo(x, y); else g.lineTo(x, y); first = false; } if (close) g.closePath(); g.stroke(); };
@@ -2189,6 +2223,13 @@ function drawPT(p, g, to, T) {
     g.strokeStyle = c; g.setLineDash([6, 4]); line(s.pts); g.setLineDash([]);
     g.globalAlpha = 0.85; line(s.pts.map((q, i) => off(q, i, s.wl)).concat(s.pts.map((q, i) => off(q, i, -s.wr)).reverse()), true); g.globalAlpha = 1;
     if (opt.names) { const [x, y, , ok] = to(s.pts[0]); if (ok) { g.fillStyle = c; g.fillText(s.name, x + 3, y - 3); } }
+  }
+  // Openings: their outline crossed corner to corner, as ETABS draws an opening in a floor.
+  g.strokeStyle = "#6b7280"; g.lineWidth = 1;
+  for (const o of openings) {
+    if (o.pts.length < 3 || !near(o.pts, tol() * 10)) continue;
+    line(o.pts, true); line([o.pts[0], o.pts[Math.floor(o.pts.length / 2)]]);
+    if (o.pts.length >= 4) line([o.pts[1], o.pts[Math.min(o.pts.length - 1, Math.floor(o.pts.length / 2) + 1)]]);
   }
   // Tendons: their true profile in 3D and elevation; in plan, the tendons of the story's slab.
   g.strokeStyle = "#0fa3b1"; g.lineWidth = 2;
@@ -2696,7 +2737,7 @@ function act(name) {
   if (name.startsWith("m:")) return modelAct(name.slice(2));
   if (name === "eng:import") { const f = document.createElement("input"); f.type = "file"; f.accept = ".cpmx,.zip,.json"; f.onchange = () => { if (f.files[0]) engineImport(f.files[0]); }; return f.click(); }
   if (name === "eng:clear") return engineClear();
-  if (name === "eng:run" || name === "eng:runDesign") return engineRun(name === "eng:runDesign");
+  if (name === "eng:run" || name === "eng:runDesign" || name === "eng:design") return engineRun(name === "eng:run" ? "analysis" : name === "eng:design" ? "design" : "both");
   if (name.startsWith("t:") || name.startsWith("d:")) { tool = name.startsWith("t:") ? name.slice(2) : name; hm.chain = []; hm.hover = null; syncTools(); showObjBox(); draw(); return; }
   if (name.startsWith("v:")) return setMode(p, name.slice(2));
   if (name.startsWith("cam:")) { if (p) setView3d(p, name.slice(4)); return; }
@@ -2787,7 +2828,7 @@ const viewerMenus = () => {
     Define: [["Material Properties...", "dlg:materials"], ["Frame Sections...", "dlg:frameSections"], ["Slab and Wall Sections...", "dlg:areaSections"], 0, ["Story Data...", "dlg:stories"], ["Grid Data...", "dlg:grids"], 0, ["Load Patterns...", "dlg:patterns"], ["Load Cases...", "dlg:cases"], ["Load Combinations...", "dlg:combos"]],
     Select: [["All", "selAll", "Ctrl+A"], ["All on This Story", "selStory", "", !plan], ["By Section...", "dlg:bySection"], ["By Object Type...", "dlg:byType"], ["Joints", "selJoints"], ["Supports (Restraints and Springs)", "selSupports"], ["Invert", "selInvert"], 0, ["Filter Selection...", "selFilter", "", !sel.size && !selJ.size], 0, ["Clear Selection", "selNone", "Esc"]],
     Analyze: [["Check Model for Instabilities...", "inst", "F7"], ["Show the Last Check's Marks", "instMarks", "", !inst.answer], 0, ["What the check looks for", "instHelp"],
-      ...(window.cpmLive ? [0, ["Run Analysis", "eng:run", "F5"], ["Run Analysis and Design", "eng:runDesign"], 0, ["Show Results from a Review Pack (.cpmx)...", "eng:import"], ["Unlock Model (clear its results)", "eng:clear", "", !engine.res]] : [])],
+      ...(window.cpmLive ? [0, ["Run Analysis...", "eng:run", "F5"], ["Run Analysis and Design...", "eng:runDesign"], 0, ["Show Results from a Review Pack (.cpmx)...", "eng:import"], ["Unlock Model (clear its results)", "eng:clear", "", !engine.res]] : [])],
     Tools: [["Tables...", "tables", "Ctrl+T"], ["Model Explorer", "explorer"], ["Side Panel", "side"], ...(window.cpmChat ? [["Chat", "chat"]] : []), 0, ["Results Coverage...", "dlg:coverage", "", !P], ["Summary of Design Results...", "dlg:designSummary", "", !P]],
     Display: (() => {
       const has = re => Object.values(P ? P.tables : {}).some(t => t.rows && t.rows.length && re.test(norm(t.name))), plots = P ? Object.values(P.tables).some(t => t.rows && t.rows.length > 1) : false;
@@ -2800,8 +2841,8 @@ const viewerMenus = () => {
         ["Response Spectrum Curves...", "xy:spectrum", "", !has(/responsespectrum/)], ["Modal Results Plot...", "xy:modal", "", !has(/^modal/)], 0,
         ["Tables...", "tables", "Ctrl+T"], ["Results Coverage...", "dlg:coverage", "", !P]];
     })(),
-    Design: design.length ? [...design.map(f => [f.name, [["Display Design Info...", "des:" + f.key], ...designShows(f).map(s => [s.name.replace(/ \(.*\)$/, ""), "dshow:" + f.key + ":" + s.id])]]), 0, ["All Design Ratios", "r:ratios", "", !ratio.size], ["Display Design Results...", "des:"], ["Summary of Design Results...", "dlg:designSummary"]]
-      : [["No design results in this pack", "", "", true], ["Summary of Design Results...", "dlg:designSummary"]],
+    Design: [...(window.cpmLive ? [["Start Design/Check...", "eng:design", "Shift+F5"], 0] : []), ...(design.length ? [...design.map(f => [f.name, [["Display Design Info...", "des:" + f.key], ...designShows(f).map(s => [s.name.replace(/ \(.*\)$/, ""), "dshow:" + f.key + ":" + s.id])]]), 0, ["All Design Ratios", "r:ratios", "", !ratio.size], ["Display Design Results...", "des:"], ["Summary of Design Results...", "dlg:designSummary"]]
+      : [["No design results in this pack", "", "", true], ["Summary of Design Results...", "dlg:designSummary"]])],
     Options: [["Black Background", "bg"], 0, ["Grid Lines", "o:grid"], ["Extruded Sections", "o:extrude"], ["Floors and Walls", "o:fill"], ["See-through Floors and Walls", "o:see"], ["Object Edges", "o:edges"], ["Supports", "o:supports"], ["Joints", "o:joints"], ["Labels", "o:names"], ["Global Axes", "o:axes"]],
     Help: [["Mouse and Keys", "dlg:keys"], ["About", "about"]],
   };
@@ -2884,7 +2925,7 @@ function dialog(title, body, buttons, opts) {
   d.close = close;
   return d;
 }
-const opts = (list, v) => list.map(c => { const [val, label] = Array.isArray(c) ? c : [c, c]; return `<option value="${esc(val)}" ${val === v ? "selected" : ""}>${esc(label)}</option>`; }).join("");
+const opts = (list, v) => (typeof v === "string" && v && !list.some(c => (Array.isArray(c) ? c[0] : c) === v) ? [...list, v] : list).map(c => { const [val, label] = Array.isArray(c) ? c : [c, c]; return `<option value="${esc(val)}" ${val === v ? "selected" : ""}>${esc(label)}</option>`; }).join("");
 const caseGroups = list => {
   // Load cases and combinations apart, as the programs list them.
   const combos = new Set((P.model.combinations || []).map(String)), a = list.filter(c => !combos.has(c)), b = list.filter(c => combos.has(c));
@@ -3545,12 +3586,15 @@ document.querySelectorAll("[data-close]").forEach(b => b.onclick = () => act(b.d
 // ---- side panel ----
 function showTab(name) { document.querySelectorAll("[data-tab]").forEach(x => x.classList.toggle("on", x.dataset.tab === name)); document.querySelectorAll(".tab").forEach(t => t.classList.toggle("on", t.id === name)); }
 document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => showTab(b.dataset.tab));
+$("fbFilter").onclick = () => selFilter();
 function showPick() {
   const el = $("props");
   if (!P) return;
   const list = [...sel].map(objOf).filter(Boolean), table = rows => `<table class="props">${rows.map(r => `<tr><td>${r[0]}</td><td>${esc(r[1])}</td></tr>`).join("")}</table>`;
   const counts = {}; list.forEach(o => counts[o.type === "f" ? "Frames" : "Shells"] = (counts[o.type === "f" ? "Frames" : "Shells"] || 0) + 1);
   const joints = [...selJ].filter(n => pointXyz.has(n)); if (joints.length) counts.Joints = joints.length;
+  // The Filter at the bottom right, as Revit has it: the count of what is selected, on whenever something is.
+  const fb = $("fbFilter"); if (fb) { fb.disabled = !(list.length + joints.length); $("fbN").textContent = list.length + joints.length; }
   $("sel").textContent = list.length || joints.length ? Object.entries(counts).map(([k, n]) => n + " " + (n === 1 ? k.slice(0, -1) : k)).join(", ") + " selected" : "";
   const filterBtn = `<button id="pFilter" title="Keep only some kinds of the selected objects">Filter...</button>`, wireFilter = () => { const b = $("pFilter"); if (b) b.onclick = selFilter; };
   if (!list.length && joints.length === 1) {
@@ -3771,7 +3815,7 @@ document.addEventListener("drop", e => { e.preventDefault(); if (e.dataTransfer.
 document.addEventListener("keydown", e => {
   if (e.target.closest("input, textarea, select")) return;
   const k = e.key, ctrl = e.ctrlKey || e.metaKey, stop = () => e.preventDefault();
-  if (k === "F5" && window.cpmLive) { stop(); act("eng:run"); return; }
+  if (k === "F5" && window.cpmLive) { stop(); act(e.shiftKey ? "eng:design" : "eng:run"); return; }
   if (k === "F2") { stop(); act("t:zoom"); } else if (k === "F3") { stop(); act("fitActive"); } else if (k === "F4") { stop(); setRes("model"); } else if (k === "F6") { stop(); if (disp.size) dialogs.deformed(); } else if (k === "F8") { stop(); if (forces.size) dialogs.forces(); }
   else if (k === "PageUp") { stop(); act("storyUp"); } else if (k === "PageDown") { stop(); act("storyDown"); }
   else if (k === "Escape") { if (document.querySelector(".ctx")) hideMenus(); else if (tool !== "select") act("t:select"); else act("selNone"); }
@@ -3955,22 +3999,23 @@ function modelerMenus(m) {
     ["Export", [["Tables to Excel (.xlsx)...", "m:xlsxOut"], 0, only(["etabs", "sap2000"], ["SAP2000 .s2k Text File...", "m:s2k"]), only(["etabs", "safe"], ["SAFE .f2k Text File (one floor)...", "m:f2k"])]], 0, ["Print the active window...", "print", "Ctrl+P"]];
   m.Edit = [[s.undo ? "Undo " + s.undo : "Undo", "m:undo", "Ctrl+Z", !s.undo], [s.redo ? "Redo " + s.redo : "Redo", "m:redo", "Ctrl+Y", !s.redo], 0,
     ["Delete", "m:delete", "Del", !any], 0, ["Replicate...", "m:replicate", "", !any], ["Move...", "m:move", "", !any], ["Divide Frames...", "m:divide", "", !hmSelected("f").length], 0, ["Copy names of the selected objects", "copyNames", "Ctrl+C", !any], 0, ["Hide the selected objects", "hideSel", "", !any], ["Show all objects", "showAll"], 0, ["Model Text...", "m:text"]];
-  m.Define = [["Material Properties...", "m:materials"], ["Frame Sections...", "m:frameSections"], ["Slab and Wall Sections...", "m:shellSections"], only(["etabs", "sap2000"], ["Link/Support Properties...", "m:links"]), ["Spring Properties", [["Point Springs...", "m:spr:point"], ["Line Springs...", "m:spr:line"], ["Area Springs...", "m:spr:area"]]], 0,
-    only(["etabs", "sap2000"], ["Diaphragms...", "m:st:diaphragm"]), only(["etabs"], ["Pier Labels...", "m:st:pier"]), only(["etabs"], ["Spandrel Labels...", "m:st:spandrel"]), ["Groups...", "m:st:group"], ["Section Cuts...", "m:st:cut"], only(["sap2000"], ["Joint Constraints...", "m:ex:constraints"]), only(["etabs", "safe"], ["Design Strips...", "m:ex:strips"]), ["Tendon Sections...", "m:ex:tendonsections"], ["Tendons...", "m:ex:tendons"], only(["etabs", "safe"], ["Hyperstatic Load Cases...", "m:ex:hyperstatic"]), 0,
-    ["Story Data...", "m:stories"], ["Grid Data...", "m:grids"], 0, ["Functions", [["Response Spectrum...", "m:fnRS"], ["Time History...", "m:fnTH"]]],
+  m.Define = [["Material Properties...", "m:materials"], ["Frame Sections...", "m:frameSections"], [({sap2000: "Area Sections...", safe: "Slab and Wall Properties..."})[program] || "Slab and Wall Sections...", "m:shellSections"], ["Reinforcing Bar Sizes...", "m:rebarSizes"], ["Frame Section Rebar (Modify/Show Rebar)...", "m:frameRebar"], only(["etabs", "sap2000"], ["Link/Support Properties...", "m:links"]), ["Spring Properties", [["Point Springs...", "m:spr:point"], ["Line Springs...", "m:spr:line"], ["Area Springs...", "m:spr:area"]]], 0,
+    only(["etabs", "sap2000"], ["Diaphragms...", "m:st:diaphragm"]), only(["etabs"], ["Pier Labels...", "m:st:pier"]), only(["etabs"], ["Spandrel Labels...", "m:st:spandrel"]), ["Groups...", "m:st:group"], ["Section Cuts...", "m:st:cut"], only(["sap2000"], ["Joint Constraints...", "m:ex:constraints"]), only(["etabs", "safe"], ["Design Strips...", "m:ex:strips"]), ["Tendon Sections...", "m:ex:tendonsections"], ["Tendons...", "m:ex:tendons"], only(["etabs", "safe"], ["Hyperstatic Load Cases...", "m:ex:hyperstatic"]), only(["etabs", "safe"], ["Punching Shear Overwrites...", "m:ex:punching"]), only(["etabs", "safe"], ["Floor Openings...", "m:ex:openings"]), 0,
+    ...hmDefineTableItems(), 0,
+    [program === "sap2000" ? "Elevations (Z Grid Lines)..." : "Story Data...", "m:stories"], [program === "sap2000" ? "Coordinate Systems/Grids..." : "Grid Data...", "m:grids"], 0, ["Functions", [["Response Spectrum...", "m:fnRS"], only(ES, ["Time History...", "m:fnTH"])]],
     ["Load Patterns...", "m:patterns"], ["Load Cases...", "m:cases"], only(["sap2000"], ["Moving Loads", [["Lanes...", "m:ex:lanes"], ["Vehicles...", "m:ex:vehicles"], ["Vehicle Classes...", "m:ex:classes"], ["Moving Load Cases...", "m:ex:mcases"]]]), ["Load Combinations...", "m:combos"], 0, ["Mass Source...", "m:mass"], only(["etabs", "sap2000"], ["P-Delta Options...", "m:pdelta"])];
   m.Draw = [["Select Object", "t:select", "Esc"], 0, ["Draw Columns (click a point)", "d:column"], ["Draw Beams (click start and end)", "d:beam"], ["Quick Draw Beams (click a grid line)", "d:qbeam"], 0,
     ["Draw Floors (click corners)", "d:floor"], ["Draw Rectangular Floors (two corners)", "d:rect"], ["Quick Draw Floors (click in a bay)", "d:qfloor"], 0,
     ["Draw Walls (click start and end)", "d:wall"], ["Quick Draw Walls (click a grid line)", "d:qwall"], 0,
-    ["Draw Braces (click bottom and top)", "d:brace"], ["Draw Joints (click a point)", "d:joint"], 0, ["Snap and Story Options...", "m:drawHelp"]];
-  m.Assign = [["Frame Section...", "m:asgFrame", "", !fr], ["Slab or Wall Section...", "m:asgShell", "", !ar], 0, ["Joint Restraints (Supports)...", "m:asgSupport"], 0,
+    only(ES, ["Draw Braces (click bottom and top)", "d:brace"]), ["Draw Joints (click a point)", "d:joint"], 0, ["Snap and Story Options...", "m:drawHelp"]];
+  m.Assign = [["Frame Section...", "m:asgFrame", "", !fr], [program === "sap2000" ? "Area Section..." : "Slab or Wall Section...", "m:asgShell", "", !ar], 0, ["Joint Restraints (Supports)...", "m:asgSupport"], 0,
     ["Joint", [["Springs...", "m:ad:joint", "", !any], only(["etabs", "sap2000"], ["Diaphragms...", "m:sa:jdiaph", "", !any]), only(["sap2000"], ["Constraints...", "m:ex:jconstraint", "", !any]), 0, ...hmTableItems("Joint", !any)]],
     ["Frame", [["Releases...", "m:ad:releases", "", !fr], ["Local Axes...", "m:ad:axes", "", !fr], ["Insertion Point...", "m:ad:insertion", "", !fr], ["End Length Offsets...", "m:ad:offsets", "", !fr], ["Property Modifiers...", "m:ad:fmods", "", !fr], ["Line Springs...", "m:ad:lspring", "", !fr], only(["etabs", "sap2000"], ["Hinges...", "m:ad:hinges", "", !fr]), 0, ...hmTableItems("Frame", !fr)]],
-    ["Shell", [["Property Modifiers...", "m:ad:smods", "", !ar], ["Area Springs...", "m:ad:aspring", "", !ar], only(["etabs", "sap2000"], ["Diaphragms...", "m:sa:diaph", "", !ar]), only(["etabs"], ["Pier Label...", "m:sa:pier", "", !any]), only(["etabs"], ["Spandrel Label...", "m:sa:spandrel", "", !any]), 0, only(["etabs"], ["Opening...", "m:at:opening", "", !ar]), ...hmTableItems("Area", !ar)]],
+    [program === "sap2000" ? "Area" : "Shell", [["Property Modifiers...", "m:ad:smods", "", !ar], ["Area Springs...", "m:ad:aspring", "", !ar], only(["etabs", "sap2000"], ["Diaphragms...", "m:sa:diaph", "", !ar]), only(["etabs"], ["Pier Label...", "m:sa:pier", "", !any]), only(["etabs"], ["Spandrel Label...", "m:sa:spandrel", "", !any]), 0, only(["etabs"], ["Opening...", "m:at:opening", "", !ar]), ...hmTableItems("Area", !ar)]],
     ["Assign Objects to Group...", "m:sa:group", "", !any], 0,
-    ["Joint Loads", [["Forces...", "m:ld:joint_force", "", !any], ["Ground Displacements...", "m:ld:joint_displacement", "", !any], ["Temperature...", "m:ld:joint_temperature", "", !any]]],
-    ["Frame Loads", [["Distributed...", "m:asgFrameLoad", "", !fr], ["Uniform in any direction...", "m:ld:frame_uniform", "", !fr], ["Point...", "m:ld:frame_point", "", !fr], ["Trapezoidal...", "m:ld:frame_trapezoid", "", !fr], ["Temperature...", "m:ld:frame_temperature", "", !fr], ["Strain...", "m:ld:frame_strain", "", !fr]]],
-    ["Shell Loads", [["Uniform...", "m:asgShellLoad", "", !ar], ["Uniform in any direction...", "m:ld:shell_uniform", "", !ar], ["Temperature...", "m:ld:shell_temperature", "", !ar], ["Strain...", "m:ld:shell_strain", "", !ar]]]];
+    ["Joint Loads", [["Forces...", "m:ld:joint_force", "", !any], ["Ground Displacements...", "m:ld:joint_displacement", "", !any], only(ES, ["Temperature...", "m:ld:joint_temperature", "", !any])]],
+    ["Frame Loads", [["Distributed...", "m:asgFrameLoad", "", !fr], ["Uniform in any direction...", "m:ld:frame_uniform", "", !fr], ["Point...", "m:ld:frame_point", "", !fr], ["Trapezoidal...", "m:ld:frame_trapezoid", "", !fr], ["Temperature...", "m:ld:frame_temperature", "", !fr], only(ES, ["Strain...", "m:ld:frame_strain", "", !fr])]],
+    [({sap2000: "Area Loads", safe: "Slab Loads"})[program] || "Shell Loads", [["Uniform...", "m:asgShellLoad", "", !ar], ["Uniform in any direction...", "m:ld:shell_uniform", "", !ar], ["Temperature...", "m:ld:shell_temperature", "", !ar], only(ES, ["Strain...", "m:ld:shell_strain", "", !ar])]]];
   return m;
 }
 async function modelAct(a) {
@@ -3979,6 +4024,7 @@ async function modelAct(a) {
   if (a.startsWith("spr:")) return hmSprings(a.slice(4));
   if (a.startsWith("ad:")) return hmAssignData(a.slice(3));
   if (a.startsWith("at:")) return hmAssignTable(a.slice(3));
+  if (a.startsWith("dt:")) return hmDefineTable(a.slice(3));
   if (a.startsWith("st:")) return hmStructure(a.slice(3));
   if (a.startsWith("sa:")) return hmAssignStructure(a.slice(3));
   if (a.startsWith("ex:")) return hmExtras(a.slice(3));
@@ -4017,6 +4063,8 @@ async function modelAct(a) {
     case "replicate": return hmReplicate();
     case "move": return hmMove();
     case "divide": return hmDivide();
+    case "rebarSizes": return hmRebarSizes();
+    case "frameRebar": return hmFrameRebar();
   }
 }
 const hmSelected = t => [...sel].map(objOf).filter(o => o && o.type === t).map(o => o.name);
@@ -4055,16 +4103,18 @@ async function hmDivide() {
 // ---- Assign: the Frame, Shell and Joint items kept as rows of the program's own assignment tables (AssignTables) ----
 // Menu label, table name after "<Kind> Assignments - ", and the programs whose files carry it (SAP2000: added mass,
 // tension and compression limits, shell local axes; the rest go into ETABS through its tables).
+// Each item: label, table, the programs that have it (ETABS when left out), and SAP2000's own name for it.
+const ES = ["etabs", "sap2000"];
 const asgTables = {
-  Frame: [["Additional Mass...", "Additional Mass", ["etabs", "sap2000"]], ["Output Stations...", "Output Stations"], ["Auto Mesh Options...", "Frame Auto Mesh Options"], ["Floor Meshing Option...", "Frame Floor Meshing Option"],
-    ["Tension/Compression Limits...", "Tension and Compression Limits", ["etabs", "sap2000"]], ["Material Overwrites...", "Material Overwrites"], ["Column Splice Overwrites...", "Column Splice Overwrites"],
+  Frame: [["Additional Mass...", "Additional Mass", ES, "Line Mass..."], ["Output Stations...", "Output Stations", ES], ["Auto Mesh Options...", "Frame Auto Mesh Options", ES, "Automatic Frame Mesh..."], ["Floor Meshing Option...", "Frame Floor Meshing Option"],
+    ["Tension/Compression Limits...", "Tension and Compression Limits", ES], ["Material Overwrites...", "Material Overwrites", ES, "Material Property Overwrites..."], ["Column Splice Overwrites...", "Column Splice Overwrites"],
     ["Moment Frame Beam Connection Type...", "Moment Frame Beam Connection Type"], ["Nonprismatic Parameters...", "Advanced Nonprismatic Section Parameters"], ["Floor Cracking...", "Floor Cracking"], ["Rebar Ratio for Creep Analysis...", "Rebar Ratio For Creep Analysis"]],
-  Area: [["Local Axes...", "Local Axes", ["etabs", "sap2000"]], ["Insertion Point...", "Insertion Point"], ["Additional Mass...", "Additional Mass", ["etabs", "sap2000"]], ["Edge Releases...", "Edge Releases"], ["Auto Edge Constraints...", "Auto Edge Constraints"],
-    ["Floor Auto Mesh Options...", "Floor Auto Mesh Options"], ["Wall Auto Mesh Options...", "Wall Auto Mesh Options"], ["Thickness Overwrites...", "Thickness Overwrites"], ["Material Overwrites...", "Material Overwrites"],
+  Area: [["Local Axes...", "Local Axes", ES], ["Insertion Point...", "Insertion Point", ES, "Joint Offsets..."], ["Additional Mass...", "Additional Mass", ES, "Area Mass..."], ["Edge Releases...", "Edge Releases"], ["Auto Edge Constraints...", "Auto Edge Constraints", ES, "Edge Constraints..."],
+    ["Floor Auto Mesh Options...", "Floor Auto Mesh Options", ES, "Automatic Area Mesh..."], ["Wall Auto Mesh Options...", "Wall Auto Mesh Options", ES, "Automatic Area Mesh (vertical areas)..."], ["Thickness Overwrites...", "Thickness Overwrites", ES, "Area Thickness Overwrites..."], ["Material Overwrites...", "Material Overwrites", ES, "Material Property Overwrites..."],
     ["Slab Line Releases...", "Slab Line Releases"], ["Slab Rib Locations...", "Slab Rib Locations"], ["Floor Cracking...", "Floor Cracking"], ["Rebar Ratio for Creep Analysis...", "Wall Rebar Ratio for Creep Analysis"]],
-  Joint: [["Additional Mass...", "Additional Mass", ["etabs", "sap2000"]], ["Panel Zone...", "Panel Zone"], ["Floor Meshing Option...", "Floor Meshing Option"]],
+  Joint: [["Additional Mass...", "Additional Mass", ES, "Masses..."], ["Panel Zone...", "Panel Zone"], ["Floor Meshing Option...", "Floor Meshing Option"]],
 };
-function hmTableItems(kind, off) { return asgTables[kind].map(([label, t, progs]) => only(progs || ["etabs"], [label, "m:at:" + kind + " Assignments - " + t, "", off])); }
+function hmTableItems(kind, off) { return asgTables[kind].map(([label, t, progs, sap]) => only(progs || ["etabs"], [program === "sap2000" && sap || label, "m:at:" + kind + " Assignments - " + t, "", off])); }
 // Fields that take Yes or No, and fields with the programs' own choices.
 const asgYesNo = /^(Include|Consider|AtIntJoints|AtIntersect|AtBeams|AtWalls|AtGrids|Submesh|Restraints|Transform|IncludeInMesh|Mirror|R(InShear|DirForce|OutShear|Bending|Twisting)$|ShearL|MomentL|ShearR|MomentR|AutoMesh)/;
 const asgChoices = {StationOpt: ["Min Stations", "Max Spacing"], SpliceOpt: ["Story Default", "No Splice", "Splice at Height"], MeshOption: ["Default", "Auto Cookie Cut", "Auto Rectangular", "General Divide Tool", "No Auto Mesh", "Mesh N1 x N2"],
@@ -4095,6 +4145,92 @@ async function hmAssignTable(table) {
     d.querySelectorAll("#atB [data-del]").forEach(b => b.onclick = () => { read(); rows.splice(+b.dataset.del, 1); if (!rows.length) rows = [{}]; paint(); });
   };
   if (def.many) q(d, "#atAdd").onclick = () => { read(); rows.push({}); paint(); };
+  paint();
+}
+
+// ---- Define: the items kept as rows of the program's own definition tables, rebar sizes and a section's rebar ----
+// label, table(s), the programs that have it (ETABS when left out), SAP2000's own name.
+const defTables = [
+  ["Generalized Displacements...", ["Generalized Displacement Definitions"], ES],
+  ["Shell Uniform Load Sets...", ["Shell Uniform Load Sets"]],
+  ["Auto Construction Sequence...", ["Auto Construction Sequence Definition"]],
+  ["Walking Vibrations...", ["Walking Vibration Definitions"]],
+  ["Panel Zone Properties...", ["Panel Zone Property Definitions", "Panel Zone Property Definitions - User Nonlinear Data"]],
+  ["Frame Release Definitions...", ["Frame Release Definitions"]],
+  ["Slab Layers...", ["Slab Property Definitions - Layers"], ES, "Area Section Layers (slabs)..."],
+  ["Wall Layers...", ["Wall Property Definitions - Layers"], ES, "Area Section Layers (walls)..."],
+  ["Wall Auto Select Lists...", ["Wall Property Definitions - Auto Select List"]],
+];
+const hingeKinds = ["Axial P", "Moment M2", "Moment M3", "Shear V2", "Shear V3", "Torsion T", "Interacting M2M3", "Interacting PM2", "Interacting PM3", "Interacting PM2M3",
+  "Parametric - Concrete PM2M3", "Parametric - Steel PM2M3", "Fiber PM3", "Fiber PM2M3", "Force Controlled - Axial P", "Force Controlled - Moment M2", "Force Controlled - Moment M3",
+  "Force Controlled - Shear V2", "Force Controlled - Shear V3", "Force Controlled - Torsion T", "Force Controlled - Interacting M2M3", "Force Controlled - Interacting PM2",
+  "Force Controlled - Interacting PM3", "Force Controlled - Interacting PM2M3"];
+function hmDefineTableItems() {
+  return [...defTables.map(([label, tables, progs, sap]) => only(progs || ["etabs"], [program === "sap2000" && sap || label, "m:dt:" + tables.join("|")])),
+    only(ES, [program === "sap2000" ? "Hinge Properties" : "Hinge Definitions", hingeKinds.map(k => [k + "...", "m:dt:Hinge Definitions - " + k])])];
+}
+async function hmDefineTable(spec) {
+  const tables = spec.split("|"), dd = (await hmRun("definition_data", {}, true)).result; if (!dd) return;
+  const defs = tables.map(t => dd.tables[t]); if (defs.some(x => !x)) return hmSay("The " + progLabel(program) + " model has no " + tables[0] + ".", true);
+  const names = [...new Set(tables.flatMap(t => dd.tables[t].rows.map(r => r.Name)))];
+  let name = names[0] || "", rows = {};
+  const load = n => { rows = Object.fromEntries(tables.map(t => [t, dd.tables[t].rows.filter(r => r.Name === n).map(r => ({...r}))])); for (const t of tables) if (!rows[t].length) rows[t] = [{}]; };
+  load(name);
+  const cell = (k, v) => asgYesNo.test(k) || /\?$/.test(k) ? `<input data-k="${k}" type="checkbox" ${v === "Yes" ? "checked" : ""}>` : `<input data-k="${k}" value="${esc(v ?? "")}">`;
+  const d = dialog(tables[0].replace(/ Definitions?$/, ""), `<div class="g2"><span>Name</span><span><select id="dtN">${opts(names, name)}</select> <input id="dtNew" placeholder="new name" style="width:120px"> <button id="dtGo">New</button></span></div>
+    <div id="dtB"></div><p class="kv">The fields are as the program's own table holds them, in the model's units. Leave a row empty to drop it.</p>`,
+    [["OK", d => { read(); return dtSave(d, 0); }, true], ["Delete", d => name && submit(d, "define_table_rows", {table: tables[0], name, rows: []})], ["Cancel"]], {width: 820});
+  const read = () => d.querySelectorAll("#dtB [data-t]").forEach(tr => tr.querySelectorAll("[data-k]").forEach(x => rows[tables[+tr.dataset.t]][+tr.dataset.r][x.dataset.k] = x.type === "checkbox" ? (x.checked ? "Yes" : "No") : x.value.trim()));
+  const fieldsOf = t => dd.tables[t].fields.filter(f => f[0] !== "Name");
+  const paint = () => {
+    q(d, "#dtB").innerHTML = tables.map((t, ti) => `<fieldset><legend>${esc(t)}</legend><div class="scroll" style="max-height:40vh"><table class="list hmgrid"><tr>${fieldsOf(t).map(f => `<th>${esc(f[1])}</th>`).join("")}<th></th></tr>${rows[t].map((r, i) =>
+      `<tr data-t="${ti}" data-r="${i}">${fieldsOf(t).map(f => `<td>${cell(f[0], r[f[0]])}</td>`).join("")}<td><button data-del="${ti}:${i}">Delete</button></td></tr>`).join("")}</table></div><button data-add="${ti}">Add Row</button></fieldset>`).join("");
+    d.querySelectorAll("#dtB [data-del]").forEach(b => b.onclick = () => { read(); const [ti, i] = b.dataset.del.split(":").map(Number); rows[tables[ti]].splice(i, 1); if (!rows[tables[ti]].length) rows[tables[ti]] = [{}]; paint(); });
+    d.querySelectorAll("#dtB [data-add]").forEach(b => b.onclick = () => { read(); rows[tables[+b.dataset.add]].push({}); paint(); });
+  };
+  const dtSave = async (d, i) => {
+    if (!name) return formError(d, "Give the definition a name (New).");
+    if (i >= tables.length) return;
+    const kept = rows[tables[i]].filter(r => Object.values(r).some(v => v !== "" && v !== "No"));
+    if (i === tables.length - 1) return submit(d, "define_table_rows", {table: tables[i], name, rows: kept});
+    const j = await hmRun("define_table_rows", {table: tables[i], name, rows: kept}); if (!j.ok) return formError(d, j.error);
+    return dtSave(d, i + 1);
+  };
+  q(d, "#dtN").onchange = e => { read(); name = e.target.value; load(name); paint(); };
+  q(d, "#dtGo").onclick = () => { const n = q(d, "#dtNew").value.trim(); if (!n) return; read(); name = n; load(n); q(d, "#dtN").innerHTML = opts([...names, n], n); paint(); };
+  paint();
+}
+async function hmRebarSizes() {
+  const dd = (await hmRun("definition_data", {}, true)).result; if (!dd) return;
+  const u = hmU();
+  const d = dialog("Reinforcing Bar Sizes", `<table class="list hmgrid"><tr><th>Bar ID</th><th>Area${u.l ? " (" + esc(u.l) + "²)" : ""}</th><th>Diameter${u.l ? " (" + esc(u.l) + ")" : ""}</th><th></th></tr>
+    <tr class="edit"><td><input id="rbN"></td><td><input id="rbA" type="number" step="any"></td><td><input id="rbD" type="number" step="any"></td><td><button id="rbAdd">Add / Modify</button></td></tr>
+    ${dd.rebar_sizes.map(b => `<tr data-b="${esc(b.name)}"><td>${esc(b.name)}</td><td class="r">${esc(String(b.area))}</td><td class="r">${esc(String(b.diameter))}</td><td><button data-del="${esc(b.name)}">Delete</button></td></tr>`).join("")}</table>`,
+    [["OK"]], {width: 560});
+  const again = () => { d.close(); hmRebarSizes(); };
+  d.querySelectorAll("[data-b]").forEach(tr => tr.onclick = () => { const b = dd.rebar_sizes.find(x => x.name === tr.dataset.b); q(d, "#rbN").value = b.name; q(d, "#rbA").value = b.area; q(d, "#rbD").value = b.diameter; });
+  d.querySelectorAll("[data-del]").forEach(b => b.onclick = e => { e.stopPropagation(); hmRun("define_rebar_size", {name: b.dataset.del, delete: true}).then(j => j.ok ? again() : formError(d, j.error)); });
+  q(d, "#rbAdd").onclick = () => hmRun("define_rebar_size", {name: q(d, "#rbN").value.trim(), area: fnum(d, "#rbA"), diameter: fnum(d, "#rbD")}).then(j => j.ok ? again() : formError(d, j.error));
+}
+const rebarFields = {
+  Column: [["LONGBARMATERIAL", "Longitudinal Bars Material"], ["CONFINEBARMATERIAL", "Confinement Bars Material"], ["PATTERN", "Pattern (R-bars along 3-bars along 2, or C-bars)"], ["TRANSREINF", "Confinement Bars"], ["DESIGNCHECK", "Check/Design"],
+    ["COVER", "Clear Cover for Confinement Bars"], ["LONGBARAREA", "Longitudinal Bar Area"], ["CONFINEBARAREA", "Confinement Bar Area"], ["CONFINEBARSPACING", "Longitudinal Spacing of Confinement Bars"], ["NUMCONFINEBARS3", "Number of Confinement Bars in 3-dir"], ["NUMCONFINEBARS2", "Number of Confinement Bars in 2-dir"]],
+  Beam: [["LONGBARMATERIAL", "Longitudinal Bars Material"], ["CONFINEBARMATERIAL", "Confinement Bars Material"], ["COVERTOP", "Cover to Longitudinal Rebar Group Centroid, Top"], ["COVERBOTTOM", "Cover to Longitudinal Rebar Group Centroid, Bottom"],
+    ["ATI", "Top Bars at I-End (area)"], ["ABI", "Bottom Bars at I-End (area)"], ["ATJ", "Top Bars at J-End (area)"], ["ABJ", "Bottom Bars at J-End (area)"]],
+};
+const rebarChoices = {TRANSREINF: ["TIES", "SPIRAL"], DESIGNCHECK: ["DESIGN", "CHECK"]};
+async function hmFrameRebar(section) {
+  const [dd, defs] = [(await hmRun("definition_data", {}, true)).result, await hmDefs()]; if (!dd) return;
+  const concrete = defs.frame_sections.filter(s => defs.materials.some(m => m.name === s.material && /concrete/i.test(m.type))).map(s => s.name);
+  if (!concrete.length) return hmSay("There is no concrete frame section to give rebar.", true);
+  section = section && concrete.includes(section) ? section : concrete[0];
+  const now = dd.section_rebar[section] || {TYPE: "Column"}, rebars = defs.materials.filter(m => /rebar/i.test(m.type)).map(m => m.name);
+  const field = (k, v) => /MATERIAL$/.test(k) ? `<select data-k="${k}">${opts(rebars, v || rebars[0])}</select>` : rebarChoices[k] ? `<select data-k="${k}">${opts(rebarChoices[k], v || rebarChoices[k][0])}</select>` : `<input data-k="${k}" value="${esc(v ?? "")}">`;
+  const d = dialog("Frame Section Property Reinforcement Data", `<div class="g2"><span>Section</span><select id="frS">${opts(concrete, section)}</select><span>Design Type</span><select id="frT">${opts([["Column", "Column (P-M2-M3 Design)"], ["Beam", "Beam (M3 Design Only)"]], now.TYPE || "Column")}</select></div><div id="frB" class="g2"></div>`,
+    [["OK", d => { const values = {TYPE: q(d, "#frT").value}; d.querySelectorAll("#frB [data-k]").forEach(x => { if (x.value.trim() !== "") values[x.dataset.k] = x.value.trim(); }); return submit(d, "define_frame_rebar", {section, values}); }, true], ["Cancel"]], {width: 560});
+  const paint = () => { q(d, "#frB").innerHTML = rebarFields[q(d, "#frT").value].map(([k, l]) => `<span>${esc(l)}</span>${field(k, now[k])}`).join(""); };
+  q(d, "#frT").onchange = paint;
+  q(d, "#frS").onchange = e => { d.close(); hmFrameRebar(e.target.value); };
   paint();
 }
 
@@ -4405,11 +4541,13 @@ async function hmShellSection(s, after, copy) {
       <span>Material</span><select id="aM">${matOpts(defs, s ? s.material : "")}</select>
       <span>Thickness, ${u.l}</span><input id="aT" type="number" step="any" value="${s && s.thickness != null ? s.thickness : 0.2}"></div>
       <label data-slab style="display:block;margin-top:6px"><input type="checkbox" id="aO" ${cur && cur.one_way ? "checked" : ""}> Use special one-way load distribution</label></fieldset>
+    <fieldset data-slab id="aRib"><legend>Ribs (Ribbed slab)</legend><div class="g2"><span>Overall depth, ${u.l}</span><input id="aRD" type="number" step="any" value="${cur && cur.overall_depth || ""}"><span>Rib width at top, ${u.l}</span><input id="aRT" type="number" step="any" value="${cur && cur.rib_width_top || ""}"><span>Rib width at bottom, ${u.l}</span><input id="aRB" type="number" step="any" value="${cur && cur.rib_width_bottom || ""}"><span>Rib spacing, ${u.l}</span><input id="aRS" type="number" step="any" value="${cur && cur.rib_spacing || ""}"><span>Ribs parallel to local axis</span><select id="aRA">${opts(["1", "2"], String(cur && cur.rib_direction || 1))}</select></div></fieldset>
     <button id="aMod">Stiffness Modifiers...</button> <span class="kv" id="aModT"></span>`,
     [["OK", d => {
       const kind = q(d, "#aK").value, name = q(d, "#aN").value.trim();
       const args = {name, was, kind, thickness: fnum(d, "#aT"), material: q(d, "#aM").value, modeling: q(d, "#aG").value, modifiers: mods || undefined};
       if (kind === "slab") { args.slab_type = q(d, "#aY").value; args.one_way = q(d, "#aO").checked; }
+      if (kind === "slab" && args.slab_type === "Ribbed") Object.assign(args, {overall_depth: fnum(d, "#aRD"), rib_width_top: fnum(d, "#aRT"), rib_width_bottom: fnum(d, "#aRB"), rib_spacing: fnum(d, "#aRS"), rib_direction: parseInt(q(d, "#aRA").value) || 1});
       return submit(d, "define_shell_type", args, j => { hm.sec[kind] = name; if (after) after(j); });
     }, true], ["Cancel"]], {width: 440});
   const show = () => d.querySelectorAll("[data-slab]").forEach(x => x.hidden = q(d, "#aK").value === "wall");
@@ -4502,16 +4640,35 @@ async function hmExtras(what) {
         <fieldset><legend>Plan, through the points (x y, one per line)</legend><textarea id="xP" rows="3" style="width:100%">${c ? c.points.map(p => p.join(" ")).join("\n") : "0 0\n8 0"}</textarea></fieldset>
         <fieldset><legend>Vertical profile, span by span (depth of the tendon below the slab top, ${u.l}; length 0: the rest)</legend><table class="list hmgrid" id="xV"><tr><th>Length</th><th>Depth left</th><th>Depth low point</th><th>Depth right</th><th>A</th><th>B</th><th>C</th></tr>${sp.map(s => `<tr>${["length", "depth_left", "depth_low", "depth_right", "a", "b", "c"].map(k => `<td><input data-k="${k}" type="number" step="any" value="${s[k]}"></td>`).join("")}</tr>`).join("")}</table><button type="button" id="xAdd">Add span</button></fieldset>
         <fieldset><legend>Jacking</legend><div class="g2"><span>Transfer load pattern</span><select id="xJT">${opts([["", "None (no jacking load)"]].concat(xd.prestress_transfer_patterns.map(p => [p, p])), j ? j.transfer_pattern : (xd.prestress_transfer_patterns[0] || ""))}</select><span>Final load pattern</span><select id="xJF">${opts(xd.prestress_final_patterns, j ? j.final_pattern : xd.prestress_final_patterns[0])}</select><span>Jacking stress, ${u.f}/${u.l}²</span><input id="xJS" type="number" step="any" value="${j ? j.stress : ""}"><span>Jack from</span><select id="xJE">${opts([["I", "I end"], ["J", "J end"], ["Both", "Both ends"]], j ? j.end : "Both")}</select></div></fieldset>
-        <fieldset><legend>Losses</legend><div class="g2"><span>Method</span><select id="xLM">${opts([["", "None"], ["Fixed", "Fixed stress"], ["Percent", "Percentage of the jacking stress"]], l ? l.method : "")}</select><span>Stressing losses</span><input id="xLS" type="number" step="any" value="${l ? l.stressing : 0}"><span>Long-term losses</span><input id="xLT" type="number" step="any" value="${l ? l.long_term : 0}"></div></fieldset>`,
+        <fieldset><legend>Losses</legend><div class="g2"><span>Method</span><select id="xLM">${opts([["", "None"], ["Fixed", "Fixed stress"], ["Percent", "Percentage of the jacking stress"], ["Detailed", "Detailed calculation"]], l ? l.method : "")}</select><span>Stressing losses</span><input id="xLS" type="number" step="any" value="${l ? l.stressing : 0}"><span>Long-term losses</span><input id="xLT" type="number" step="any" value="${l ? l.long_term : 0}"></div>
+          <div class="g2" title="Detailed calculation only"><span>Curvature coefficient</span><input id="xLC" type="number" step="any" value="${l ? l.curvature || 0 : 0.07}"><span>Wobble coefficient</span><input id="xLW" type="number" step="any" value="${l ? l.wobble || 0 : 0}"><span>Anchorage set slip</span><input id="xLA" type="number" step="any" value="${l ? l.anchor_slip || 0 : 0}"><span>Elastic shortening stress</span><input id="xLE" type="number" step="any" value="${l ? l.elastic_shortening || 0 : 0}"><span>Creep stress</span><input id="xLCr" type="number" step="any" value="${l ? l.creep || 0 : 0}"><span>Shrinkage stress</span><input id="xLSh" type="number" step="any" value="${l ? l.shrinkage || 0 : 0}"><span>Steel relaxation stress</span><input id="xLR" type="number" step="any" value="${l ? l.relaxation || 0 : 0}"></div></fieldset>`,
         [["OK", d => {
           const spans = [...d.querySelectorAll("#xV tr")].slice(1).map(r => { const o = {}; r.querySelectorAll("[data-k]").forEach(x => o[x.dataset.k] = parseFloat(x.value) || 0); return o; });
           const args = {name: q(d, "#xN").value.trim(), story: q(d, "#xSt").value, section: q(d, "#xS").value, strands: parseInt(q(d, "#xK").value) || 1, bonded: q(d, "#xB").checked, spans,
             points: q(d, "#xP").value.split("\n").map(l => l.trim().split(/[\s,;]+/).map(parseFloat)).filter(p => p.length === 2 && p.every(isFinite))};
           if (q(d, "#xJT").value) args.jacking = {transfer_pattern: q(d, "#xJT").value, final_pattern: q(d, "#xJF").value, stress: fnum(d, "#xJS"), end: q(d, "#xJE").value};
-          if (q(d, "#xLM").value) args.losses = {method: q(d, "#xLM").value, stressing: fnum(d, "#xLS"), long_term: fnum(d, "#xLT")};
+          if (q(d, "#xLM").value) args.losses = q(d, "#xLM").value === "Detailed"
+            ? {method: "Detailed", curvature: fnum(d, "#xLC"), wobble: fnum(d, "#xLW"), anchor_slip: fnum(d, "#xLA"), elastic_shortening: fnum(d, "#xLE"), creep: fnum(d, "#xLCr"), shrinkage: fnum(d, "#xLSh"), relaxation: fnum(d, "#xLR")}
+            : {method: q(d, "#xLM").value, stressing: fnum(d, "#xLS"), long_term: fnum(d, "#xLT")};
           return submit(d, "draw_tendon", args, after); }, true], ["Cancel"]], {width: 620});
       q(dd, "#xAdd").onclick = () => { const rows = dd.querySelectorAll("#xV tr"), last = rows[rows.length - 1], row = last.cloneNode(true); row.querySelector('[data-k="length"]').value = 0; last.after(row); };
       return dd; }},
+    punching: {title: "Punching Shear Overwrites", list: xd.punching_overwrites, tool: "set_punching_overwrite", del: c => ({point: c.point, story: c.story, delete: true}), form: (c, after) => {
+      const r = c ? c.reinforcement : {type: "None", pattern: "Radial", fy: 0, diameter: 0, spacing: 0};
+      return dialog("Punching Shear Overwrite", `<div class="g2"><span>Point (column or load)</span><input id="xP" value="${esc(c ? c.point : "")}" ${c ? "disabled" : ""}><span>Story (slab)</span><select id="xSt" ${c ? "disabled" : ""}>${opts(xd.stories, c ? c.story : xd.slab_story)}</select><span>Check punching shear</span><select id="xC">${opts(xd.punching_checks, c ? c.check : "Program Determined")}</select><span>Location type</span><select id="xL">${opts(xd.punching_locations, c ? c.location : "Auto")}</select></div>
+        <fieldset><legend>Critical perimeter: corners about the point (x y [corner radius], one per line); empty: the program's own</legend><textarea id="xPer" rows="4" style="width:100%">${c && c.perimeter ? c.perimeter.map(k => k[2] ? k.join(" ") : k.slice(0, 2).join(" ")).join("\n") : ""}</textarea></fieldset>
+        <fieldset><legend>Shear reinforcement</legend><div class="g2"><span>Type</span><select id="xRT">${opts(xd.punching_reinforcements, r.type)}</select><span>Pattern</span><select id="xRP">${opts(xd.punching_patterns, r.pattern)}</select><span>Yield stress fy, ${u.f}/${u.l}²</span><input id="xRF" type="number" step="any" value="${r.fy}"><span>Bar diameter, ${u.l}</span><input id="xRD" type="number" step="any" value="${r.diameter}"><span>Spacing, ${u.l}</span><input id="xRS" type="number" step="any" value="${r.spacing}"></div></fieldset>`,
+        [["OK", d => {
+          const per = q(d, "#xPer").value.split("\n").map(l => l.trim().split(/[\s,;]+/).map(parseFloat)).filter(p => p.length >= 2 && p.every(isFinite));
+          const args = {point: q(d, "#xP").value.trim(), story: q(d, "#xSt").value, check: q(d, "#xC").value, location: q(d, "#xL").value,
+            reinforcement: {type: q(d, "#xRT").value, pattern: q(d, "#xRP").value, fy: fnum(d, "#xRF"), diameter: fnum(d, "#xRD"), spacing: fnum(d, "#xRS")}};
+          if (per.length) args.perimeter = per;
+          return submit(d, "set_punching_overwrite", args, after); }, true], ["Cancel"]], {width: 520}); }},
+    openings: {title: "Floor Openings", list: xd.openings, tool: "draw_opening", form: (c, after) =>
+      dialog("Opening Data", `<div class="g2"><span>Opening Name</span><input id="xN" value="${esc(c ? c.name : "OP" + (xd.openings.length + 1))}" ${c ? "disabled" : ""}><span>Story (slab)</span><select id="xSt">${opts(xd.stories, c ? c.story : xd.slab_story)}</select></div>
+        <fieldset><legend>Corners (x y, one per line)</legend><textarea id="xP" rows="5" style="width:100%">${c ? c.points.map(p => p.join(" ")).join("\n") : "1 1\n2 1\n2 2\n1 2"}</textarea></fieldset>`,
+        [["OK", d => submit(d, "draw_opening", {name: q(d, "#xN").value.trim(), story: q(d, "#xSt").value,
+          points: q(d, "#xP").value.split("\n").map(l => l.trim().split(/[\s,;]+/).map(parseFloat)).filter(p => p.length === 2 && p.every(isFinite))}, after), true], ["Cancel"]], {width: 420})},
     hyperstatic: {title: "Hyperstatic Load Cases", list: xd.hyperstatic_cases, tool: "define_hyperstatic_case", form: (c, after) =>
       dialog("Hyperstatic Load Case Data", `<div class="g2"><span>Load Case Name</span><input id="xN" value="${esc(c ? c.name : (xd.prestress_cases[0] || "PT") + "-HP")}" ${c ? "disabled" : ""}><span>Linear static case (prestress)</span><select id="xBC">${opts(xd.prestress_cases, c ? c.base_case : xd.prestress_cases[0])}</select><span>Scale factor</span><input id="xSF" type="number" step="any" value="${c ? c.scale : 1}"></div>${xd.prestress_cases.length ? "" : '<p class="kv">Add a load pattern of type Prestress-Final first: its linear static case is the base case.</p>'}`,
         [["OK", d => submit(d, "define_hyperstatic_case", {name: q(d, "#xN").value.trim(), base_case: q(d, "#xBC").value, scale: fnum(d, "#xSF")}, after), true], ["Cancel"]], {width: 420})},
@@ -4526,7 +4683,7 @@ async function hmExtras(what) {
   listForm(k.title, "Defined", k.list.map(x => x.name), [
     ["Add New...", () => k.form(null, again)],
     ["Modify/Show...", n => n && k.form(find(n), again)],
-    ["Delete", n => n && hmRun(k.tool, {name: n, delete: true}, true).then(j => j.ok ? again() : hmSay(j.error, true))],
+    ["Delete", n => n && hmRun(k.tool, k.del ? k.del(find(n)) : {name: n, delete: true}, true).then(j => j.ok ? again() : hmSay(j.error, true))],
   ], n => k.form(find(n), again));
   function hmConstraint(c, after) {
     const dofsFor = t => t === "Local" ? xd.local_dofs : xd.global_dofs, axisTypes = ["Diaphragm", "Plate", "Rod", "Beam"], dofTypes = ["Body", "Equal", "Local", "Weld"];
