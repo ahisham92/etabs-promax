@@ -393,7 +393,7 @@ public sealed class SettingsWindow : Window
                 {
                     Children =
                     {
-                        Brand.Text(Chat.ChatTypes.Label(type) + (type == Chat.ChatTypes.Coordinator ? " (recommended)" : "")),
+                        Brand.Text(Chat.ChatTypes.Label(type) + (type == Chat.ChatTypes.Simple ? " (default)" : "")),
                         Brand.Text(Chat.ChatTypes.Hint(type) + ".", Brand.K.Muted, size: 11),
                     },
                 },
@@ -1189,10 +1189,13 @@ public sealed class SettingsWindow : Window
         _settings.ChatJobBudget = (_jobBudget.SelectedItem as ComboBoxItem)?.Tag is int budget ? budget : Chat.JobBudget.DefaultPercent;
         _settings.ChatJobReview = (_jobReview.SelectedItem as ComboBoxItem)?.Tag as string ?? Chat.JobReview.Always;
         _settings.ChatCrewYou = _crewYou.Text.Trim();
-        _settings.ChatCrewCoordinator = _crewCoordinator.Text.Trim();
-        _settings.ChatCrewWorkers = _crewWorkers.Text.Trim();
-        _settings.ChatCrewApplier = _crewApplier.Text.Trim();
-        _settings.ChatTypeDefault = _chatTypes.FirstOrDefault(t => t.Button.IsChecked == true).Type ?? Chat.ChatTypes.Coordinator;
+        // A box left on its default is stored blank, so a later default reaches it (26 Nov 2026: Atlas, Nova, Echo and Pixel
+        // were stored as if typed by every Save, and the new names never showed).
+        _settings.ChatCrewCoordinator = Chat.CrewNames.Stored(_crewCoordinator.Text, Chat.CrewNames.DefaultCoordinator, Chat.CrewNames.OldCoordinator);
+        _settings.ChatCrewWorkers = Chat.CrewNames.Stored(_crewWorkers.Text, Chat.CrewNames.DefaultWorkers, Chat.CrewNames.OldWorkers);
+        _settings.ChatCrewApplier = Chat.CrewNames.Stored(_crewApplier.Text, Chat.CrewNames.DefaultApplier);
+        _settings.ChatTypeDefault = _chatTypes.FirstOrDefault(t => t.Button.IsChecked == true).Type ?? Chat.ChatTypes.Simple;
+        _settings.ChatTypeChosen = true;
         _settings.ChatModelDefault = Picked("ChatModelDefault", Chat.ChatAuto.Automatic);
         _settings.ChatEffortDefault = Picked("ChatEffortDefault", Chat.ChatAuto.Automatic);
         _settings.ChatModelSimple = Picked("ChatModelSimple", Chat.ChatAuto.DefaultModel(Chat.ChatAuto.Simple));

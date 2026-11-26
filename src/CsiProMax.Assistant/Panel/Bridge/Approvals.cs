@@ -140,6 +140,12 @@ internal static class Approvals
 
     internal enum Answer { No, Yes, RestOfTask, NeverAsk, AlwaysAllow }
 
+    /// <summary>
+    /// What the chat is told when the last <see cref="Show"/> on this thread sent the approval to the phone instead of a
+    /// dialog (Chat.PhoneApprovals); null when it didn't.
+    /// </summary>
+    [ThreadStatic] internal static string? PhoneLine;
+
     /// <summary>Test hook (the field test): answers instead of the dialog, and sees what would have been asked.</summary>
     internal static Func<string, ApprovalDecision, Answer>? TestAnswer;
 
@@ -160,6 +166,7 @@ internal static class Approvals
     public static bool Show(string tool, ApprovalDecision decision, string details, JobControl? chat, string? what = null)
     {
         var friendly = ApprovalPolicy.Friendly(tool);
+        PhoneLine = null;
         // An autopilot at work: the user approved the goal and a backup of the model was saved, so nothing waits on a click.
         if (Chat.Autopilot.Unattended && TestAnswer is null)
         {
@@ -175,6 +182,14 @@ internal static class Approvals
             return false;
         }
         var level = Level;
+        // The user drives the chat from the phone (Chat.PhoneApprovals): what would ask here asks there, Allow or Don't
+        // allow; the call is not made until they tap Allow, and then made when the chat calls it again.
+        if (Chat.PhoneApprovals.Active && TestAnswer is null && !(level == ApprovalLevel.AlwaysAllow && decision.Kind != AskKind.Always))
+        {
+            var (allowed, line) = Chat.PhoneApprovals.Decide(tool, friendly, decision.Reason, details, DateTime.UtcNow);
+            PhoneLine = line;
+            return allowed;
+        }
         // "Always allow": nothing asks (the bridge already decided so); this catches the dialogs tools and the ribbon
         // show themselves. Only the issue gate's sign-off (AskKind.Always at this level) is still shown.
         if (level == ApprovalLevel.AlwaysAllow && decision.Kind != AskKind.Always) return true;

@@ -81,7 +81,7 @@ public static class Handoff
 
         // An autopilot with nobody at the computer: a step only the user can do would wait all night. It is skipped, the
         // worker carries on another way, and the report lists it.
-        if (Chat.Autopilot.Unattended || Chat.Away.On)
+        if (Chat.Autopilot.Unattended || Chat.Away.On || Chat.PhoneApprovals.Active)
         {
             var skipped = $"Skipped a step only you can do ({tool}): {Chat.JobBoard.OneLine(items[0].Step.Text, 200)}";
             if (Chat.Autopilot.Unattended) Chat.Autopilot.Log(Chat.AutopilotEntry.Note, skipped);
@@ -151,7 +151,7 @@ public static class Handoff
         if (TestResponder is { } respond) return respond(step, null) == HandoffChoice.Continue;
         if (App.Ui is null) return false;
         // An autopilot: no card that waits for a click; the call comes back as not run, and the worker tries again later.
-        if (Chat.Autopilot.Unattended || Chat.Away.On)
+        if (Chat.Autopilot.Unattended || Chat.Away.On || Chat.PhoneApprovals.Active)
         {
             var line = $"{Csi.Name} couldn't take a step (" + Chat.JobBoard.OneLine(step.Text, 160) + "); it was tried again later instead of waiting for you.";
             if (Chat.Autopilot.Unattended) Chat.Autopilot.Log(Chat.AutopilotEntry.Note, line);
