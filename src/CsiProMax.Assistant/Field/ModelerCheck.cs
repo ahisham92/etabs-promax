@@ -77,10 +77,21 @@ public static class ModelerCheck
           await act("eng:clear"); await wait(400);
           return engine.res || P.tables["Joint Displacements"] ? {fail: "the results are still on the model"} : {ok: "the results were cleared; the model is unlocked"};
         },
-        "eng:runDesign": async () => OTHER_WAY["eng:run"](),
-        "eng:run": async () => {
-          const r = await fetch("run", {method: "POST", headers: {"Content-Type": "application/json", "X-CPM-View": "1"}, body: JSON.stringify({status: true}), cache: "no-store"}).then(x => x.json()).catch(e => ({error: e.message}));
-          return r.running !== undefined || r.ok !== undefined ? {ok: "the run answers (" + (r.running ? "running" : "idle") + "); the run itself is the Engine run step"} : {fail: "the run does not answer: " + (r.error || JSON.stringify(r))};
+        "eng:runDesign": async it => OTHER_WAY["eng:run"](it),
+        "eng:design": async it => OTHER_WAY["eng:run"](it),
+        "eng:run": async it => {
+          // The Run Options form opens with the analysis, the program's designs and all or selected; it is closed
+          // without Run Now: the run itself is the field test's Engine run steps, as it starts the CSI program.
+          const before = dialogsOpen();
+          await act(it ? it.act : "eng:run"); await wait(900);
+          const d = [...document.querySelectorAll(".dlg")].pop();
+          if (dialogsOpen() <= before || !d || !d.querySelector("#rA")) return {fail: "the Run Options form did not open: " + document.getElementById("hint").textContent};
+          const kinds = d.querySelectorAll("[data-kind]").length, scope = d.querySelectorAll("input[name=rS]").length;
+          const buttons = [...d.querySelectorAll(".df button")].map(b => b.textContent).join(", ");
+          closeDialogs(); await wait(150);
+          if (buttons !== "Run Now, Cancel") return {fail: "its buttons are " + buttons};
+          if (scope !== 2) return {fail: "it has no choice of all or selected objects"};
+          return {ok: `Run Options: the analysis, ${kinds} designs, all or selected; closed without running`};
         },
         "m:open": async () => {
           const saved = await hmRun("save_model_as", {name: "CPM open check", folder: FOLDER}, true);
