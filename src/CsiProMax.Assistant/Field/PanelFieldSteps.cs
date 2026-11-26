@@ -54,9 +54,11 @@ public static class PanelFieldSteps
 
         // The panel's look: the CDT SDK theme, as in Sketch ProMax. Without it every window falls back to CSI ProMax's own older styles.
         if (!windows) ctx.Skip("the panel's CDT SDK theme loaded", "the panel's windows are drawn on Windows only");
-        else if (!UI.CdtTheme.Tried) ctx.Skip("the panel's CDT SDK theme loaded", "no CSI ProMax window had opened before the test, so the theme was not loaded yet");
+        else if (!UI.CdtTheme.Tried && !HasWindow()) ctx.Skip("the panel's CDT SDK theme loaded", "this run has no CSI ProMax window, and the theme belongs to a window's thread (Help > Field test in the window checks it)");
         else ctx.Step("the panel's CDT SDK theme loaded", () =>
         {
+            // No window asked for the theme yet: the test asks for it itself, on the windows' own thread.
+            if (!UI.CdtTheme.Tried) LoadThemeOnTheWindowsThread();
             FieldContext.Expect(UI.CdtTheme.Error is null && UI.CdtTheme.Styles is not null,
                 "the CDT SDK theme didn't load, so windows show CSI ProMax's own older look: " + (UI.CdtTheme.Error ?? "not loaded") + ". Run the install line again (CDT.Wpf.dll and CDT.Core.dll belong beside CsiProMax.dll).");
             FieldContext.Expect(Chat.ChatUi.StylesError is null, "the chat's styles didn't load as designed, so it shows a plainer look: " + Chat.ChatUi.StylesError);
@@ -345,11 +347,27 @@ public static class PanelFieldSteps
                 handled.Add(name);
                 ToolResult result;
                 try { result = Execute(registry, app, name, json); }
-                catch (Exception ex) when (ex is InvalidOperationException or NullReferenceException) { throw new FieldSkipException($"it needs the chat pane ({ex.Message}). Check by hand: ask the chat to start a job, and to ask you a question."); }
-                if (result.IsError) throw new FieldSkipException($"it needs a chat that is running ({Short(result.Text)}). Check by hand: ask the chat to start a job, and to ask you a question.");
-                return result.Text + " (starting a job and asking a question need a person: check by hand)";
+                catch (Exception ex) when (ex is InvalidOperationException or NullReferenceException)
+                {
+                    // With a window open the chat is there, so this is a failure; a run without a window has no chat to list from.
+                    if (windows && HasWindow()) throw;
+                    throw new FieldSkipException($"this run has no CSI ProMax window, so there is no chat to list from ({ex.Message}); Help > Field test in the window checks it");
+                }
+                if (result.IsError && (!windows || !HasWindow())) throw new FieldSkipException($"this run has no CSI ProMax window, so there is no chat to list from ({Short(result.Text)}); Help > Field test in the window checks it");
+                FieldContext.Expect(!result.IsError, "it answered with an error: " + result.Text);
+                return result.Text;
             });
-        NotTested("ask_user", "it asks you on your phone and waits for the answer. Check by hand: connect the phone (Chat > Phone), then ask the chat to ask you something there.");
+        // ask_user waits for a person on a phone, which a test has not: what is tested is that outside an autopilot it
+        // refuses at once with a plain reason and never waits.
+        ctx.Step("tool ask_user refuses at once outside an autopilot, with a plain reason", () =>
+        {
+            handled.Add("ask_user");
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            var result = Execute(registry, app, "ask_user", """{"action":"ask","question":"field test"}""");
+            FieldContext.Expect(result.IsError && result.Text.Contains("autopilot", StringComparison.OrdinalIgnoreCase) && clock.Elapsed.TotalSeconds < 5,
+                $"it did not refuse at once with its reason (after {clock.Elapsed.TotalSeconds:0.0} s): {Short(result.Text)}");
+            return result.Text;
+        });
 
         ctx.Step("every tool of the panel was run, or is listed as not tested", () =>
         {
@@ -438,4 +456,14 @@ public static class PanelFieldSteps
     }
 
     private static string Short(string text) => text.Length > 300 ? text[..300] + "..." : text;
+
+    // In methods of their own: off Windows (the tests) the steps above must not need the window types to load.
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static bool HasWindow() => OperatingSystem.IsWindows() && HasUi();
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static bool HasUi() => CsiProMax.App.Ui is not null;
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static void LoadThemeOnTheWindowsThread() => CsiProMax.App.Ui?.Invoke(() => { _ = UI.CdtTheme.Styles; });
 }

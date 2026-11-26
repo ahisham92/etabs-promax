@@ -117,6 +117,8 @@ public sealed class FieldContext(CsiProgram program, string folder, ICsiLink lin
         catch (OperationCanceledException) { throw; }
         catch (FieldSkipException ex)
         {
+            // Left out without a reason that holds: a gap in the test or a bug, so a failure (SkipAudit).
+            if (!MayLeaveOut(ex.Message)) { Add(name, false, SkipAudit.Failure(ex.Message), clock.Elapsed.TotalSeconds); return default; }
             var left = new FieldStep(_section, name, true, "skipped: " + ex.Message, null, true);
             lock (_gate) Steps.Add(left);
             Live(left);
@@ -237,10 +239,19 @@ public sealed class FieldContext(CsiProgram program, string folder, ICsiLink lin
     /// <summary>The same for a check that gives nothing back. True when it worked.</summary>
     public bool Step(string name, Action body) => Step(name, () => { body(); return "done"; }) is not null;
 
+    /// <summary>
+    /// Whether a step may be listed as not tested for this reason (SkipAudit). In a program's scratch part run with no
+    /// program behind it (the tests' stand-in for ETABS, SAP2000 or SAFE) every such step is one the missing program
+    /// would have answered, so it may: that is "the program is not here".
+    /// </summary>
+    private bool MayLeaveOut(string why) =>
+        SkipAudit.Allowed(SkipAudit.Of(why)) || (_section.Contains("scratch model", StringComparison.OrdinalIgnoreCase) && !FieldTest.IsLive(Link));
+
     /// <summary>Records something left out on purpose, with the reason. It is listed as not tested.</summary>
     public void Skip(string name, string why)
     {
         StillWanted();
+        if (!MayLeaveOut(why)) { Add(name, false, SkipAudit.Failure(why)); return; }
         var skipped = new FieldStep(_section, name, true, "skipped: " + why, null, true);
         lock (_gate) Steps.Add(skipped);
         Live(skipped);

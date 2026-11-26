@@ -70,6 +70,10 @@ public static class FieldRetest
         // carried over as "not tested" from run to run, the part is tried again (0.4.46 run, 2026-11-26).
         if (last.NotTested.Count(n => Interrupted(n.Why)) is > 0 and var cut)
             return (true, $"{cut} step{(cut == 1 ? "" : "s")} of it {(cut == 1 ? "was" : "were")} not run in version {last.Version} because the program's window stopped answering");
+        // Steps an older version left out without a reason that holds are not carried over either: the part is run
+        // again, where such a step now passes or fails (SkipAudit).
+        if (last.NotTested.Count(n => !SkipAudit.Allowed(SkipAudit.Of(n.Why))) is > 0 and var loose)
+            return (true, $"{loose} step{(loose == 1 ? "" : "s")} of it {(loose == 1 ? "was" : "were")} left out in version {last.Version} without a reason that holds");
         if (print.Length == 0 || last.Print.Length == 0) return (true, "this build does not say which of its code changed");
         if (!string.Equals(print, last.Print, StringComparison.Ordinal)) return (true, $"its code changed since version {last.Version}");
         return (false, $"all {last.Passed} steps of it passed in version {last.Version} and its code is unchanged since");
