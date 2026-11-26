@@ -403,7 +403,8 @@ function engineWith(pack, keep) {
   if (!pack || pack.engine) return pack;
   if (keep && engine.res && engine.base && engine.base !== pack) {
     // The live model moved on (a hand edit or the chat): its results no longer belong to it.
-    engine.res = null; setTimeout(() => { if (typeof hmSay === "function") hmSay("The model changed, so its results were cleared, as ETABS does when a model is unlocked. Run the analysis again to see them."); buildTree(); }, 0);
+    engine.res = null; setTimeout(() => { if (typeof hmSay === "function") hmSay("The model changed, so its results and their review pack were removed, as ETABS does when a model is unlocked. Run the analysis again to see them."); buildTree(); }, 0);
+    enginePost({changed: true}).catch(() => {});
   }
   engine.base = pack;
   if (!engine.res) return pack;
@@ -423,7 +424,7 @@ async function engineImport(file) {
     hmSay(`Results of ${file.name} are shown on the model (${Object.values(pack.tables).filter(engineKinds).length} result and design tables${match < 0.9 ? `; only ${Math.round(match * 100)}% of its objects have the same labels as this model, so some results have no object to sit on` : ""}).`, match < 0.5);
   } catch (ex) { hmSay("That file could not be read: " + ex.message, true); }
 }
-const enginePost = b => fetch("run", {method: "POST", headers: {"Content-Type": "application/json", "X-CPM-View": "1"}, body: JSON.stringify(b), cache: "no-store"}).then(r => r.json());
+function enginePost(b) { return fetch("run", {method: "POST", headers: {"Content-Type": "application/json", "X-CPM-View": "1"}, body: JSON.stringify(b), cache: "no-store"}).then(r => r.json()); }
 function engineSelected() {
   // The objects selected on the model, by their names (frames first, then areas), for a design of the selection only.
   return [...sel].map(i => i <= frames.length ? frames[i - 1] && frames[i - 1].name : areas[i - frames.length - 1] && areas[i - frames.length - 1].name).filter(Boolean);
@@ -467,7 +468,12 @@ async function engineStart(ask) {
     return;
   }
 }
-function engineClear() { if (!engine.res) return; engine.res = null; load(engine.base || P, false); hmSay("The results were cleared; the model is unlocked."); }
+function engineClear() {
+  // Analyze > Unlock Model: the results go, and so does their review pack beside the model (comments kept), as ETABS
+  // deletes a model's results when it is unlocked.
+  if (!engine.res) return; engine.res = null; load(engine.base || P, false);
+  enginePost({unlock: true}).then(j => hmSay(j && j.said ? j.said : "The results were cleared; the model is unlocked.", !!(j && j.left && j.left.length))).catch(() => hmSay("The results were cleared; the model is unlocked."));
+}
 async function readPack(file) {
   const buffer = await file.arrayBuffer();
   const head = new Uint8Array(buffer, 0, 2);

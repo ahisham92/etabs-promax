@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using CsiProMax.Assistant.Tools;
 using System.IO.Compression;
@@ -528,27 +529,98 @@ public static class FieldTest
     /// The Engine's Analyze > Run on the Modeler's model in <paramref name="program"/>: the program starts hidden in a
     /// window of its own, analyses, gives every result table back and is closed; the results must have come back.
     /// </summary>
-    internal static void EngineRunStep(FieldContext ctx, CsiProgram program) =>
-        ctx.Step($"CSI ProMax Engine: Analyze > Run in {program.Name} (hidden, closed after) brings the results back to the model", () =>
+    /// <summary>
+    /// CSI ProMax Engine's Run in this program, in the order an engineer works (Ahmed 2026-11-26): run the analysis; a
+    /// design alone (not analysed again); a design of the selection only; a change to the model removes the pack at once
+    /// (comments kept); a run after the change analyses again and the pack comes back with the comments; Unlock
+    /// removes it. The program is started hidden for each job and closed after it.
+    /// </summary>
+    internal static void EngineRunStep(FieldContext ctx, CsiProgram program)
+    {
+        var e2k = ctx.Files.GetValueOrDefault(CsiProgram.Etabs.Key, "");
+        if (!File.Exists(e2k)) { ctx.Fail($"CSI ProMax Engine: Run in {program.Name}", "the Modeler wrote no model file to run"); return; }
+        var model = new OfflineEtabs(OfflineEtabs.Load(e2k), "");
+        model.Model.Target = program.Key;
+        model.SaveAs(Path.Combine(ctx.Folder, "engine", "cpm-engine-run.e2k"));
+        var (pack, _) = EngineRun.PackFiles(model);
+        JsonObject Wait(JsonObject started)
         {
-            var e2k = ctx.Files.GetValueOrDefault(CsiProgram.Etabs.Key, "");
-            FieldContext.Expect(File.Exists(e2k), "the Modeler wrote no model file to run");
-            var model = new OfflineEtabs(OfflineEtabs.Load(e2k), "");
-            model.Model.Target = program.Key;
-            model.SaveAs(Path.Combine(ctx.Folder, "engine", "cpm-engine-run.e2k"));
-            var started = EngineRun.Start(model, design: false);
             FieldContext.Expect(started["ok"]?.GetValue<bool>() == true, "the run did not start: " + started["error"]);
             var until = DateTime.UtcNow.AddMinutes(20);
-            JsonObject status;
-            while ((status = EngineRun.Status(false))["done"]?.GetValue<bool>() != true && DateTime.UtcNow < until) Thread.Sleep(2000);
-            status = EngineRun.Status(true);
+            while (EngineRun.Status(false)["done"]?.GetValue<bool>() != true && DateTime.UtcNow < until) Thread.Sleep(2000);
+            var status = EngineRun.Status(true);
             FieldContext.Expect(status["done"]?.GetValue<bool>() == true, "the run did not finish within 20 minutes: " + status["phase"]);
             FieldContext.Expect(string.IsNullOrEmpty(status["error"]?.GetValue<string>()), "the run stopped: " + status["error"]);
+            FieldContext.Expect(Said(status, "was closed; its licence is free"), $"{program.Name} was not closed after the job: " + Last(status));
+            return status;
+        }
+        static bool Said(JsonObject status, string words) => (status["lines"] as JsonArray ?? []).Any(l => (l?.GetValue<string>() ?? "").Contains(words, StringComparison.Ordinal));
+        static string Last(JsonObject status) => string.Join(" | ", (status["lines"] as JsonArray ?? []).Select(l => l?.GetValue<string>()).TakeLast(3));
+        var kinds = EngineRun.Kinds[program.Key].Select(k => k.Kind).ToList();
+        var steps = $"CSI ProMax Engine in {program.Name}: ";
+
+        var ran = ctx.Step(steps + "Run Analysis brings the results back, writes the pack beside the model, and closes the program", () =>
+        {
+            var status = Wait(EngineRun.Start(model, analyse: true, kinds: []));
             var tables = (status["pack"] as JsonObject)?["tables"] as JsonObject;
             var results = tables?.Select(t => t.Key).Where(n => ResultTools.Norm(n).Contains("displacement") || ResultTools.Norm(n).Contains("reaction") || ResultTools.Norm(n).Contains("forces")).ToList() ?? [];
             FieldContext.Expect(results.Count > 0, "no result table came back: " + string.Join(", ", tables?.Select(t => t.Key) ?? []));
-            return $"{results.Count} result tables came back ({string.Join(", ", results.Take(5))}); {string.Join(" | ", (status["lines"] as JsonArray ?? []).Select(l => l?.GetValue<string>()).TakeLast(2))}";
+            FieldContext.Expect(File.Exists(pack), "no review pack beside the model: " + pack);
+            return $"{results.Count} result tables; pack {Path.GetFileName(pack)}; {Last(status)}";
+        }) is not null;
+        if (!ran) return;
+
+        ctx.Step(steps + "a design alone on the unchanged model is not analysed again, and the program closes after it", () =>
+        {
+            var started = EngineRun.Start(model, analyse: false, kinds: kinds);
+            FieldContext.Expect(started["analyses"]?.GetValue<bool>() == false, "the design would analyse the unchanged model again");
+            var status = Wait(started);
+            FieldContext.Expect(!Said(status, "Running the analysis"), "the analysis ran again: " + Last(status));
+            return "designed: " + string.Join(", ", kinds) + "; " + Last(status);
         });
+
+        ctx.Step(steps + "a design of the selected objects selects them in the program first", () =>
+        {
+            var two = model.Frames().Take(2).Select(f => f.Name).Concat(model.Areas().Take(1).Select(a => a.Name)).ToList();
+            var status = Wait(EngineRun.Start(model, analyse: false, kinds: kinds, selected: two));
+            var line = (status["lines"] as JsonArray ?? []).Select(l => l?.GetValue<string>() ?? "").FirstOrDefault(l => l.StartsWith("Selected in ", StringComparison.Ordinal)) ?? "";
+            FieldContext.Expect(line.Length > 0, "the selection was not passed to the program: " + Last(status));
+            var frames = Math.Min(2, model.Frames().Count);
+            FieldContext.Expect(line.Contains($"{frames} of {frames} frames", StringComparison.Ordinal), "not every selected frame was found in the program: " + line);
+            return line;
+        });
+
+        var kept = new JsonObject { ["id"] = "cpm-engine-check", ["text"] = "field test: kept through the change" };
+        ctx.Step(steps + "a change to the model removes the pack at once, and its comments are kept beside the model", () =>
+        {
+            Packs.PackLife.Replace(Packs.PackLife.CommentsFile(pack), System.Text.Encoding.UTF8.GetBytes(new JsonObject { ["model"] = "cpm-engine-run", ["comments"] = new JsonArray(kept.DeepClone()) }.ToJsonString()));
+            var edit = HandModel.Handle(model, JsonDocument.Parse("""{"tool":"define_load_pattern","args":{"name":"CPM-ENGINE","type":"Other"}}""").RootElement);
+            FieldContext.Expect(edit["ok"]?.GetValue<bool>() == true, "the edit was refused: " + edit["error"]);
+            var removed = EngineRun.Changed(model);
+            FieldContext.Expect(!File.Exists(pack), "the pack is still there after the change: " + removed.ToJsonString());
+            FieldContext.Expect(Packs.PackLife.Comments(pack).Any(c => c?["id"]?.GetValue<string>() == "cpm-engine-check"), "the comment was lost");
+            return removed["said"]?.GetValue<string>() ?? "removed";
+        });
+
+        ctx.Step(steps + "Run again after the change analyses again, and the pack comes back with the comments", () =>
+        {
+            var started = EngineRun.Start(model, analyse: false, kinds: kinds.Take(1).ToList());
+            FieldContext.Expect(started["analyses"]?.GetValue<bool>() == true, "a design on the changed model would use the old analysis");
+            var status = Wait(started);
+            FieldContext.Expect(Said(status, "Running the analysis"), "the changed model was not analysed: " + Last(status));
+            FieldContext.Expect(File.Exists(pack), "the pack did not come back");
+            FieldContext.Expect(Pack.ReadComments(pack).Comments.Any(c => c?["id"]?.GetValue<string>() == "cpm-engine-check"), "the comment did not come back into the pack");
+            return Last(status);
+        });
+
+        ctx.Step(steps + "Unlock Model removes the pack, and the next design analyses again", () =>
+        {
+            var unlocked = EngineRun.Unlock(model);
+            FieldContext.Expect(!File.Exists(pack), "the pack is still there: " + unlocked.ToJsonString());
+            FieldContext.Expect(EngineRun.Status(false)["analysed"]?.GetValue<bool>() == false, "the Engine still counts the model as analysed");
+            return unlocked["said"]?.GetValue<string>() ?? "";
+        });
+    }
 
     /// <summary>The first calls of where an exception came from, for the report: enough to find the step.</summary>
     private static string Where(Exception ex) =>

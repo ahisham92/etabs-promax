@@ -21,7 +21,7 @@ namespace CsiProMax.Assistant.Tools;
 public static class EngineRun
 {
     /// <summary>The design kinds each program can run from the Run form, in its own words.</summary>
-    public static readonly IReadOnlyDictionary<string, (string Kind, string Name)[]> Kinds = new Dictionary<string, (string, string)[]>
+    public static readonly IReadOnlyDictionary<string, (string Kind, string Name)[]> Kinds = new Dictionary<string, (string Kind, string Name)[]>
     {
         ["etabs"] = [("steel", "Steel frames"), ("concrete", "Concrete frames"), ("composite", "Composite beams"), ("shear_wall", "Shear walls (piers and spandrels)"), ("slab", "Concrete slabs")],
         ["sap2000"] = [("steel", "Steel frames"), ("concrete", "Concrete frames")],
@@ -41,6 +41,11 @@ public static class EngineRun
     private static int _analysedRevision = -1;
     private static string _analysedFile = "", _analysedProgram = "";
     private static int _starts;
+
+    // The pack written by the last run: of which model, at which revision (removed when the model moves on).
+    private static OfflineEtabs? _packModel;
+    private static int _packRevision = -1;
+    private static string _packPage = "";
 
     private static readonly BlockingCollection<Action> Queue = new();
     private static readonly Thread Worker = MakeWorker();
@@ -85,14 +90,14 @@ public static class EngineRun
             if (!current)
                 try { file = model.WriteForRun(Path.Combine(folder, Safe(model.Model.Title) + ".e2k")); }
                 catch (EtabsException ex) { return new JsonObject { ["ok"] = false, ["error"] = ex.Message }; }
-            Lines.Clear(); _error = ""; _pack = null; _packFile = ""; _done = false; _running = true;
+            Lines.Clear(); _error = ""; _pack = null; _done = false; _running = true;
             _program = program.Name; _model = model; _startRevision = model.Revision;
             _phase = $"Starting {program.Name} in the background";
             if (file.Length > 0) Lines.Add($"The model was written for {program.Name}: {file}");
             // A design on its own still needs the analysis behind it: a model not analysed as it is now is analysed first.
             var mustAnalyse = !current;
             var analysed = _analysedFile;
-            var only = kinds.Count > 0 && selected is { Count: > 0 } ? Where(model, selected) : null;
+            var only = kinds.Count > 0 && selected is { Count: > 0 } ? Places(model, selected) : null;
             if (only is not null) Lines.Add($"The design is for the {selected!.Count} selected objects only.");
             Post(() => Work(program, folder, mustAnalyse ? file : analysed, mustAnalyse, analyse, kinds, only));
             return new JsonObject { ["ok"] = true, ["program"] = program.Name, ["file"] = file, ["analyses"] = mustAnalyse };
@@ -127,7 +132,7 @@ public static class EngineRun
         : JsonSerializer.Serialize(new { kinds });
 
     /// <summary>Where the selected objects are (frames by their ends, areas by their centre), to find them in the program, whose names may differ.</summary>
-    internal static Shapes Where(OfflineEtabs model, IReadOnlyList<string> names)
+    internal static Shapes Places(OfflineEtabs model, IReadOnlyList<string> names)
     {
         var wanted = names.ToHashSet(StringComparer.Ordinal);
         var frames = model.Frames().Where(f => wanted.Contains(f.Name)).Select(f => (f.X1, f.Y1, f.Z1, f.X2, f.Y2, f.Z2)).ToList();
@@ -195,11 +200,18 @@ public static class EngineRun
                 if (ctx.Tool("run_design", DesignArgs(program, kinds)) is null) lock (Gate) Lines.Add("The design did not run: " + Failed(ctx));
             }
             Say("Reading every result and design table");
-            var built = Pack.Build(window.Link, [], [], [], null, null, by: "CSI ProMax Engine", instabilities: true);
-            var packFile = Path.Combine(folder, Safe(_model!.Model.Title) + ".cpmx");
-            try { Directory.CreateDirectory(folder); File.WriteAllBytes(packFile, built.Zip); }
+            // The pack beside the model (the same file every run, as the pack written after a run in the program), with
+            // the comments a reviewer made on the last one carried in.
+            var (packFile, pageFile) = PackFiles(_model!);
+            var comments = Packs.PackLife.Comments(packFile);
+            var built = Pack.Build(window.Link, [], [], [], null, comments, by: "CSI ProMax Engine", instabilities: true);
+            try { Packs.PackLife.Write(packFile, pageFile, built.Zip, Pack.ViewerHtml(built.Content)); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { lock (Gate) Lines.Add($"The review pack could not be saved to {packFile}: {ex.Message}"); packFile = ""; }
-            lock (Gate) { _pack = built.Content; _packFile = packFile; Lines.Add($"{built.Tables.Count} tables read ({built.Frames} frames, {built.Areas} areas)" + (packFile.Length > 0 ? $"; review pack: {packFile}" : "")); }
+            lock (Gate)
+            {
+                _pack = built.Content; _packFile = packFile; _packPage = packFile.Length > 0 ? pageFile : ""; _packModel = _model; _packRevision = _startRevision;
+                Lines.Add($"{built.Tables.Count} tables read ({built.Frames} frames, {built.Areas} areas)" + (packFile.Length > 0 ? $"; review pack: {packFile}" + (comments.Count > 0 ? $" ({comments.Count} comments kept)" : "") : ""));
+            }
         }
         catch (Exception ex) when (ex is not OutOfMemoryException) { Fail($"The run stopped: {ex.Message} {Failed(ctx)}"); }
         finally
@@ -225,6 +237,44 @@ public static class EngineRun
         if (!stem.StartsWith("cpm-field-test-", StringComparison.Ordinal) || Path.GetDirectoryName(before) is not { } dir || !Directory.Exists(dir)) return;
         foreach (var f in Directory.EnumerateFiles(dir, stem + ".*"))
             try { File.Delete(f); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+    }
+
+    /// <summary>The pack and its Viewer page: beside the model's own file, named after it; in the run folder for a model never saved.</summary>
+    internal static (string Pack, string Page) PackFiles(OfflineEtabs model) => model.Path.Length > 0
+        ? (Packs.AutoPack.PackFile(model.Path), Packs.AutoPack.PageFile(model.Path))
+        : (Path.Combine(RunFolder(model), Safe(model.Model.Title) + ".cpmx"), Path.Combine(RunFolder(model), Safe(model.Model.Title) + " viewer.html"));
+
+    /// <summary>
+    /// The model changed after its run (a hand edit, the chat, Undo): it has no results any more, so its pack is removed at
+    /// once, as the program deletes its results when its model is unlocked. Nothing happens when the pack is of this
+    /// model as it is. Said in the run's lines; what could not be removed (held open elsewhere) is said too.
+    /// </summary>
+    public static JsonObject Changed(OfflineEtabs model)
+    {
+        lock (Gate)
+        {
+            if (_running || !ReferenceEquals(_packModel, model) || _packRevision == model.Revision || _packFile.Length == 0) return new JsonObject { ["removed"] = "" };
+        }
+        return Unlock(model, "the model changed");
+    }
+
+    /// <summary>Analyze > Unlock Model: the results are removed (the pack and page beside the model, comments kept), and the next design analyses again.</summary>
+    public static JsonObject Unlock(OfflineEtabs model, string why = "the model was unlocked")
+    {
+        string pack, page;
+        lock (Gate)
+        {
+            if (_running) return new JsonObject { ["ok"] = false, ["error"] = $"A run in {_program} is still going ({_phase})." };
+            (pack, page) = _packFile.Length > 0 && ReferenceEquals(_packModel, model) ? (_packFile, _packPage) : PackFiles(model);
+            _packFile = ""; _packPage = ""; _packModel = null; _packRevision = -1;
+            if (ReferenceEquals(_analysedModel, model)) { _analysedModel = null; _analysedRevision = -1; }
+        }
+        var had = File.Exists(pack);
+        var left = Packs.PackLife.Remove(pack, page);
+        var said = !had ? "" : left.Count == 0 ? $"The results were removed ({why}): {Path.GetFileName(pack)} is gone; its comments are kept in {Path.GetFileName(Packs.PackLife.CommentsFile(pack))} when it had any."
+            : $"The results were removed ({why}), but {string.Join(", ", left)} could not be.";
+        if (said.Length > 0) lock (Gate) Lines.Add(said);
+        return new JsonObject { ["ok"] = true, ["removed"] = had && left.Count == 0 ? pack : "", ["left"] = new JsonArray(left.Select(l => (JsonNode)l).ToArray()), ["said"] = said };
     }
 
     private static bool Locked(ICsiLink link)

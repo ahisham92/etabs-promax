@@ -39,6 +39,14 @@ internal static class ModelView
         bool Flag(string name) => root.ValueKind == System.Text.Json.JsonValueKind.Object && root.TryGetProperty(name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.True;
         JsonObject answer;
         if (Flag("status") || Flag("take")) answer = EngineRun.Status(Flag("take"));
+        else if (Flag("unlock") || Flag("changed"))
+        {
+            // Analyze > Unlock Model, or the page saw the model move on: the results and their pack are removed.
+            var unlock = Flag("unlock");
+            var model = await App.Dispatcher.InvokeAsync(app => app.Link as OfflineEtabs).ConfigureAwait(false);
+            answer = model is null ? new JsonObject { ["ok"] = false, ["error"] = "No Engine model is open." }
+                : await Task.Run(() => unlock ? EngineRun.Unlock(model) : EngineRun.Changed(model)).ConfigureAwait(false);
+        }
         else
         {
             // The Run form: {"analyse":bool, "kinds":[design kinds], "selected":[object names]}; {"design":true} is analysis and every design.
@@ -76,6 +84,8 @@ internal static class ModelView
         using var request = System.Text.Json.JsonDocument.Parse(body);
         var element = request.RootElement.Clone();
         var answer = await dispatcher.InvokeAsync(app => HandModel.Handle(app.Link, element)).ConfigureAwait(false);
+        // An edit unlocks the model: a run's pack of it is removed at once (EngineRun.Changed does nothing when it did not change).
+        if (await dispatcher.InvokeAsync(app => app.Link as OfflineEtabs).ConfigureAwait(false) is { } edited) _ = Task.Run(() => EngineRun.Changed(edited));
         return (Encoding.UTF8.GetBytes(answer.ToJsonString()), "application/json");
     }
 
@@ -127,6 +137,8 @@ internal static class ModelView
                 return (Encoding.UTF8.GetBytes(Pack.LiveViewerHtml(Content(link), revision, chat: AiMode.On)), "text/html; charset=utf-8");
             case "model":
                 if (query == "rev=" + revision.ToString(System.Globalization.CultureInfo.InvariantCulture)) return ([], "application/json");
+                // The model moved on (a hand edit, the chat, Undo): a run's pack of it is removed, as its results are gone.
+                if (link is OfflineEtabs moved) _ = Task.Run(() => EngineRun.Changed(moved));
                 return (Encoding.UTF8.GetBytes(new JsonObject { ["rev"] = revision, ["pack"] = Content(link) }.ToJsonString()), "application/json");
             default:
                 return null;
