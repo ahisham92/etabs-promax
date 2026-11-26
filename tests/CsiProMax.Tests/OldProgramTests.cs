@@ -276,6 +276,45 @@ static class OldProgramTests
             var connector = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Panel/Bridge/RevitTargets.cs"));
             Check(!connector.Contains("EndsWith(\".rvt\"", StringComparison.Ordinal), "the chat's open request takes the program's own model files, not Revit's");
         });
+
+        yield return ("SAFE 20 tester (0.4.47): SAFE 20 is never given the Modeler's .f2k, which it read as a packed model ('Error decompressing file')", () =>
+        {
+            Check(!CsiProMax.Assistant.ScratchProgram.OpensThroughApi(CsiProgram.Safe, @"C:\t\cpm-field-test.f2k", onFramework: true), "SAFE 20/21 and a .f2k: no window is started");
+            Check(CsiProMax.Assistant.ScratchProgram.OpensThroughApi(CsiProgram.Safe, @"C:\t\cpm-field-test.FDB", onFramework: true), "SAFE 20/21 and its own .fdb");
+            Check(CsiProMax.Assistant.ScratchProgram.OpensThroughApi(CsiProgram.Safe, @"C:\t\cpm-field-test.f2k", onFramework: false), "SAFE 22 and later keep opening the .f2k as before");
+            foreach (var p in new[] { CsiProgram.Etabs, CsiProgram.Sap2000 })
+                Check(CsiProMax.Assistant.ScratchProgram.OpensThroughApi(p, @"C:\t\cpm-field-test" + (p == CsiProgram.Etabs ? ".e2k" : ".s2k"), onFramework: true), $"{p.Name} on the .NET Framework still opens its text file");
+            var scratch = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));
+            Check(scratch.IndexOf("OpensThroughApi(_program, modelFile", StringComparison.Ordinal) is > 0 and var at && at < scratch.IndexOf("ApiPipe.ToPowerShell(_program, ApiFile, \"start\"", StringComparison.Ordinal),
+                "the check comes before any window is started");
+        });
+
+        yield return ("kind: a program's 'could not read this file' box in a scratch window is answered OK and said, never a licence box", () =>
+        {
+            var box = CsiProMax.Assistant.ScratchDialogs.IsFileRefused;
+            Check(box("Error decompressing file. May not be a valid ETABS .EDB file."), "SAFE 20's words"); // ETABS itself
+            Check(!box("Error decompressing file: no licence was found"), "a licence message is never answered");
+            Check(!box("Analysis Complete"), "another box");
+            foreach (var p in CsiProgram.All)
+                Check(CsiProMax.Assistant.ScratchDialogs.IsProgramBox(" " + p.Name + " ", p) && !CsiProMax.Assistant.ScratchDialogs.IsProgramBox(p.Name + " licence", p), $"{p.Name}'s own message box, by its title");
+        });
+
+        yield return ("SAFE 20 tester (0.4.47): the chat does not hand SAFE a .f2k to open; it says to import it", () =>
+        {
+            var tool = CsiTools.For(CsiProgram.Safe).Single(t => t.Name == "open_model");
+            var folder = Path.Combine(Path.GetTempPath(), "cpm-f2k-" + Guid.NewGuid().ToString("N")[..8]);
+            Directory.CreateDirectory(folder);
+            try
+            {
+                var f2k = Path.Combine(folder, "LEVEL 29.f2k");
+                File.WriteAllText(f2k, "");
+                var (link, api) = OpenProbe(CsiProgram.Safe, @"C:\Models\Untitled");
+                try { tool.Invoke(JsonDocument.Parse(JsonSerializer.Serialize(new { path = f2k })).RootElement, link); throw new Exception("the .f2k was handed to SAFE"); }
+                catch (ToolInputException ex) { Check(ex.Message.Contains("File > Import", StringComparison.Ordinal), ex.Message); }
+                Equal(null, api.Opened, "SAFE was asked to open nothing");
+            }
+            finally { Directory.Delete(folder, true); }
+        });
     }
 
     /// <summary>A link whose only work is the calls made by path, on the pipe's model.</summary>

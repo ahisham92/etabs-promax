@@ -68,6 +68,9 @@ public static class ScratchDialogs
         foreach (var (window, title) in Of(processId))
         {
             if (MayClose(title) && Button(window, "OK") is { } ok && IsWindowEnabled(ok) && PostMessageW(ok, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero)) closed.Add(title);
+            else if (program is not null && IsProgramBox(title, program) && Button(window, "OK") is { } fine && IsWindowEnabled(fine)
+                     && LongWords(window).FirstOrDefault(IsFileRefused) is { } said && PostMessageW(fine, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero))
+                closed.Add($"{title}: {said.Trim()} (OK)");
             else if (IsStoryPicker(title) && Button(window, "OK") is { } go && IsWindowEnabled(go))
             {
                 // All stories first, then OK: the two presses reach the window in this order.
@@ -90,6 +93,17 @@ public static class ScratchDialogs
     /// Slab Design", seen 2026-11-25: run_design waited on it for ten minutes). In the test's own scratch window the
     /// test answers it: all stories, OK.
     /// </summary>
+    /// <summary>A message box of the program itself: titled with its name alone ("SAFE").</summary>
+    public static bool IsProgramBox(string title, CsiProgram program) => string.Equals(title.Trim(), program.Name, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The program's word that it could not read a file it was given ("Error decompressing file. May not be a valid
+    /// ETABS .EDB file.", SAFE 20 given an .f2k, 2026-11-26). In the test's own scratch window it is answered OK, so
+    /// the call comes back and the step can say why. Never a licence message.
+    /// </summary>
+    public static bool IsFileRefused(string text) =>
+        text.Contains("Error decompressing file", StringComparison.OrdinalIgnoreCase) && !text.Contains("licen", StringComparison.OrdinalIgnoreCase);
+
     public static bool IsStoryPicker(string title) => title.TrimStart().StartsWith("Select Stories for Slab Design", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
@@ -320,6 +334,16 @@ public sealed class ScratchProgram : IScratchWindow
             return $"{ApiFile}: {loaded.FullName}";
         }) is null || loaded is not { } api) return false;
 
+        // SAFE 20 and 21 (on the .NET Framework) open only their own .fdb through the API: given the Modeler's .f2k,
+        // SAFE 20 showed "Error decompressing file. May not be a valid ETABS .EDB file." and waited for a person
+        // (tester's PC, 0.4.47, 2026-11-26). No window is started for a file it cannot open.
+        if (!OpensThroughApi(_program, modelFile, EtabsApi.RunsOnFramework(ApiFile)))
+        {
+            ctx.Skip($"start a second {name} window", $"{name} on this PC ({Path.GetFileName(Path.GetDirectoryName(ApiFile)) ?? name}) opens only its own {ModelExtension(_program)} files through its API, " +
+                $"and the Modeler writes {Path.GetExtension(modelFile)}. To check the Modeler's file by hand: in {name}, File > Import, pick {Path.GetFileName(modelFile)} from the zip.");
+            return false;
+        }
+
         // The program's plug-in lists as they are before the scratch window: put back when it has closed (KeptPlugIns).
         _plugIns = KeptPlugIns.Take(_program);
         var before = Process.GetProcessesByName(_program.ProcessName).Select(p => p.Id).ToHashSet();
@@ -372,7 +396,10 @@ public sealed class ScratchProgram : IScratchWindow
         {
             var answer = Convert.ToInt32(Ask(FileTimeout, "open the file", m => m.File.OpenFile(Path.GetFullPath(modelFile)),
                 $"{name} did not finish opening the file within {FileTimeout.TotalMinutes:0} minutes. A message may be waiting in its window."));
-            if (answer != 0) throw new EtabsException($"{name} could not open the file the Modeler wrote (it answered {answer}).");
+            string[] refused;
+            lock (_noticesClosed) refused = _noticesClosed.Where(n => ScratchDialogs.IsFileRefused(n)).ToArray();
+            if (answer != 0 || refused.Length > 0)
+                throw new EtabsException($"{name} could not open the file the Modeler wrote (it answered {answer})." + (refused.Length > 0 ? $" It said: {string.Join(" | ", refused)}; the test pressed OK." : ""));
             return "opened";
         }) is null) return false;
 
@@ -435,6 +462,14 @@ public sealed class ScratchProgram : IScratchWindow
         && a.Trim().Length > 0;
 
     /// <summary>The program's own model file type.</summary>
+    /// <summary>
+    /// Whether the program can open <paramref name="file"/> through its API's File.OpenFile. Its own model always;
+    /// a text file (.e2k, .s2k, .f2k) too, except in SAFE on the .NET Framework (SAFE 20 and 21), which reads every
+    /// file as a packed .fdb and stops on a message box.
+    /// </summary>
+    public static bool OpensThroughApi(CsiProgram program, string file, bool onFramework) =>
+        !(program.Key == CsiProgram.Safe.Key && onFramework && !string.Equals(Path.GetExtension(file), ModelExtension(program), StringComparison.OrdinalIgnoreCase));
+
     public static string ModelExtension(CsiProgram program) => program.Key switch
     {
         "sap2000" => ".sdb",
