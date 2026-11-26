@@ -1047,7 +1047,7 @@ Test("tables for editing: every load pattern is selected for display first (SAP2
 Test("edit_table: an analysed model is unlocked first, and a refused edit is cancelled", () =>
 {
     var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Tools", "CsiTools.cs"));
-    var at = source.IndexOf("var log = (JsonObject)e.Raw(\"apply the table edit\"", StringComparison.Ordinal);
+    var at = source.IndexOf("log = (JsonObject)e.Raw(\"apply the table edit\"", StringComparison.Ordinal);
     Check(at > 0, "the table edit's apply step is gone");
     var body = source.Substring(at, source.IndexOf("e.Refresh();", at, StringComparison.Ordinal) - at);
     var unlock = body.IndexOf("m.SetModelIsLocked(false)", StringComparison.Ordinal);
@@ -1059,7 +1059,7 @@ Test("edit_table: an analysed model is unlocked first, and a refused edit is can
 Test("edit_table: the model is saved before the edit and opened again when the program refuses it (SAP2000 lost its patterns)", () =>
 {
     var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Tools", "CsiTools.cs"));
-    var at = source.IndexOf("var log = (JsonObject)e.Raw(\"apply the table edit\"", StringComparison.Ordinal);
+    var at = source.IndexOf("log = (JsonObject)e.Raw(\"apply the table edit\"", StringComparison.Ordinal);
     var body = source.Substring(at, source.IndexOf("e.Refresh();", at, StringComparison.Ordinal) - at);
     var save = body.IndexOf("m.File.Save(saved)", StringComparison.Ordinal);
     var set = body.IndexOf("m.DatabaseTables.SetTableForEditingArray(", StringComparison.Ordinal);
@@ -1072,7 +1072,7 @@ Test("edit_table: a SAP2000 pattern's self weight is set through the API, never 
 {
     var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Tools", "CsiTools.cs"));
     var api = source.IndexOf("m.LoadPatterns.SetSelfWTMultiplier(row[nameAt], weight)", StringComparison.Ordinal);
-    var import = source.IndexOf("var log = (JsonObject)e.Raw(\"apply the table edit\"", StringComparison.Ordinal);
+    var import = source.IndexOf("log = (JsonObject)e.Raw(\"apply the table edit\"", StringComparison.Ordinal);
     Check(api > 0 && import > api, "SAP2000's self weight change does not go through LoadPatterns.SetSelfWTMultiplier before the table import");
     Check(source.Contains("e.Program.Key == CsiProgram.Sap2000.Key && string.Equals(table.Key, \"Load Pattern Definitions\""), "the API route is not for SAP2000's Load Pattern Definitions");
 });
@@ -1109,6 +1109,8 @@ foreach (var (name, body) in ModelTextTests.All()) Test(name, body);
 foreach (var (name, body) in PropertyTests.All()) Test(name, body);
 foreach (var (name, body) in StructureTests.All()) Test(name, body);
 foreach (var (name, body) in ExtrasTests.All()) Test(name, body);
+foreach (var (name, body) in EditTests.All()) Test(name, body);
+foreach (var (name, body) in ReadableTests.All()) Test(name, body);
 foreach (var (name, body) in SlabTests.All()) Test(name, body);
 foreach (var (name, body) in FuzzTests.All()) Test(name, body);
 foreach (var (name, body) in KeptPlugInsTests.All()) Test(name, body);

@@ -278,7 +278,7 @@ public static class ModelEdit
     }
 
     /// <summary>The next free name: prefix plus the smallest number above every name of that form in use.</summary>
-    private static string NextName(IEnumerable<string> used, string prefix)
+    internal static string NextName(IEnumerable<string> used, string prefix)
     {
         var max = 0;
         foreach (var name in used)

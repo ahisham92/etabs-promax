@@ -548,6 +548,57 @@ static class OldProgramTests
                 "the check comes before any window is started");
         });
 
+        yield return ("SAP2000 26 field test (0.4.54, experiment N): the Modeler's .s2k is turned into an .sdb in one SAP2000, and the test works in a new one (an .s2k opened in a process makes it refuse every table import)", () =>
+        {
+            var own = CsiProMax.Assistant.ScratchProgram.OpensTextInOwnProcess;
+            Check(own(CsiProgram.Sap2000, @"C:\t\cpm-field-test.s2k") && own(CsiProgram.Sap2000, @"C:\t\cpm-field-test.S2K") && own(CsiProgram.Sap2000, @"C:\t\cpm-field-test.$2k"), "SAP2000 and its text files");
+            Check(!own(CsiProgram.Sap2000, @"C:\t\cpm-field-test-1a2b3c.sdb"), "SAP2000's own .sdb opens in the window the test works in");
+            Check(!own(CsiProgram.Etabs, @"C:\t\cpm-field-test.e2k") && !own(CsiProgram.Safe, @"C:\t\cpm-field-test.f2k"), "ETABS and SAFE take table imports after their text files (their field tests' table steps pass)");
+            var scratch = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));
+            var start = scratch.IndexOf("public static IScratchWindow? Start(", StringComparison.Ordinal);
+            var turn = scratch.IndexOf("OpensTextInOwnProcess(program, modelFile)", start, StringComparison.Ordinal);
+            var second = scratch.IndexOf("var scratch = new ScratchProgram(program);", start, StringComparison.Ordinal);
+            Check(start > 0 && turn > start && second > turn, "the text file is turned into a model file before the test's own window starts");
+            Check(scratch.IndexOf("convertOnly: true", turn, StringComparison.Ordinal) is var c and > 0 && c < second && scratch.IndexOf("first.Close()", turn, StringComparison.Ordinal) is var closed and > 0 && closed < second
+                  && scratch.IndexOf("modelFile = converted;", turn, StringComparison.Ordinal) is var swap and > 0 && swap < second, "the first SAP2000 only saves the .sdb, is closed, and the second opens that .sdb");
+            Check(scratch.IndexOf("ModelPath = target;\r\n        if (convertOnly) return true;", StringComparison.Ordinal) > 0 || scratch.IndexOf("ModelPath = target;\n        if (convertOnly) return true;", StringComparison.Ordinal) > 0, "the first window stops once the .sdb is saved: no change is made in it");
+            // The engineer's own SAP2000: nothing to do for them (Ahmed: "the user does not feel anything"). Only when the
+            // second SAP2000 cannot do it either is the refusal said, with its cause and the way out.
+            Check(EditableTables.NoImportAfterText.Contains(".s2k", StringComparison.Ordinal) && EditableTables.NoImportAfterText.Contains("close SAP2000", StringComparison.Ordinal), "a refusal that could not be got round says the cause and the way out");
+            Check(SapFreshProcess.Said(@"C:\m\Tower.sdb").Contains("nothing is needed from the engineer", StringComparison.Ordinal), "a change made in a second SAP2000 asks nothing of the engineer");
+            var tables = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Etabs/EditableTables.cs"));
+            Check(tables.Contains("with no log), so it cannot {what}. {NoImportAfterText}", StringComparison.Ordinal), "set_lateral_load's refused import says it");
+            var tools = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Tools/CsiTools.cs"));
+            Check(tools.Contains("EditableTables.NoImportAfterText", StringComparison.Ordinal), "edit_table's refused import says it");
+
+            // The tools get round it themselves: the same import in a second SAP2000, on the file saved just before.
+            Check(SapFreshProcess.IsSessionRefusal(CsiProgram.Sap2000, "SAP2000 did not run the import of X's ASCE 7-22 (it answered 1, with no log), so it cannot give X it. " + EditableTables.NoImportAfterText + " Patterns after: 0 of 10"), "set_lateral_load's refusal is the one a second SAP2000 gets round");
+            Check(SapFreshProcess.IsSessionRefusal(CsiProgram.Sap2000, "SAP2000 refused to apply the edit of T (answer 1). " + EditableTables.NoImportAfterText.TrimEnd('.') + ". The model was opened again as it was saved just before the edit (m.sdb)"), "edit_table's refusal too");
+            Check(!SapFreshProcess.IsSessionRefusal(CsiProgram.Sap2000, "SAP2000 did not apply X's KDS (0 fatal, 2 errors). Its import log: ..."), "a refusal with a log is the rows' fault: no second SAP2000");
+            Check(!SapFreshProcess.IsSessionRefusal(CsiProgram.Etabs, EditableTables.NoImportAfterText), "never for ETABS");
+            var lateral = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Tools/LateralTools.cs"));
+            Check(lateral.IndexOf("SapFreshProcess.IsSessionRefusal(e.Program, ex.Message)", StringComparison.Ordinal) is var r and > 0
+                  && lateral.IndexOf("SapFreshProcess.Apply(e, saved, fresh => EditableTables.PutAutoLoad(fresh,", r, StringComparison.Ordinal) > r
+                  && lateral.Contains("[\"second_sap2000\"] = second", StringComparison.Ordinal), "set_lateral_load makes the change in a second SAP2000, after opening the saved file again, and says so");
+            Check(tools.IndexOf("SapFreshProcess.IsSessionRefusal(e.Program, ex.Message)", StringComparison.Ordinal) is var t and > 0
+                  && tools.IndexOf("SapFreshProcess.Apply(e, savedAs,", t, StringComparison.Ordinal) > t && tools.Contains("log[\"second_sap2000\"] = second", StringComparison.Ordinal), "edit_table too");
+            var fresh = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Tools/SapFreshProcess.cs"));
+            Check(fresh.IndexOf("m.File.NewBlank()", StringComparison.Ordinal) is var blank and > 0 && fresh.IndexOf("return Run(program, file, work);", StringComparison.Ordinal) > blank
+                  && fresh.IndexOf("m.File.OpenFile(file)) == 0", fresh.IndexOf("finally", blank, StringComparison.Ordinal), StringComparison.Ordinal) > 0, "the engineer's window lets go of the file first and always opens it again");
+            Check(fresh.Contains("KeptPlugIns.Take(program)", StringComparison.Ordinal) && fresh.Contains("KeptPlugIns.PutBack(plugIns)", StringComparison.Ordinal) && fresh.Contains("ApplicationExit(false)", StringComparison.Ordinal),
+                "the second SAP2000 leaves the plug-in lists as they were and closes without saving over the change");
+            Check(fresh.Contains("app.ApplicationStart(6, false, \"\")", StringComparison.Ordinal), "the second SAP2000 is started hidden: the engineer sees nothing of it");
+            // The field test with the fix (2026-11-26): ASCE 7-22 took CPM-ELFY's API-set ASCE 7-16 off; IS 1893:2016, KDS,
+            // IRC 6-2017 and Live Load were taken but GetAutoSeismicCode / GetAutoWindCode name them "".
+            Check(tables.IndexOf("Tools.SapLateral.Hold(e, other,", StringComparison.Ordinal) is var hold and > 0 && tables.IndexOf("ApplyEditedTables(true", hold, StringComparison.Ordinal) > hold
+                  && tables.IndexOf("Tools.SapLateral.Reapply(e, held[lost])", hold, StringComparison.Ordinal) > tables.IndexOf("ApplyEditedTables(true", hold, StringComparison.Ordinal),
+                "every other API-set code is held before the import and given back by its Set call when the import took it off");
+            Check(tables.IndexOf("TableCode(m, pattern)", StringComparison.Ordinal) > 0, "a code the API names \"\" is read from the patterns' table");
+            var steps = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Sap2000/SapFieldSteps.cs"));
+            Check(steps.Contains("the change is made in a second SAP2000", StringComparison.Ordinal) && steps.IndexOf("CsiFieldSteps.Run(ctx);", StringComparison.Ordinal) < steps.IndexOf("TinyS2k);", StringComparison.Ordinal),
+                "the field test tries it on a real SAP2000, last, after every other table step");
+        });
+
         yield return ("ETABS 23 (main 3cdc64d run): a field left at its default while the record is read is not a refusal; a skipped record is; wind User Loads gets no LoadAtCM", () =>
         {
             const string tl = "Table name:  LOAD PATTERN DEFINITIONS - AUTO SEISMIC - KDS 2019 Field name:  TL Record:  1 Error reading field TL; field ignored and default values will be used 1 of 1 records successfully read";
