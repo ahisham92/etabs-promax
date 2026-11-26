@@ -69,6 +69,17 @@ public static class WebWindowFieldSteps
             finally { try { Directory.Delete(folder, true); } catch (IOException) { } }
         });
 
+        ctx.Step("every close (X) button of the 3D view and the Viewer closes its panel", () =>
+        {
+            var html = Pack.ViewerHtml();
+            var closes = System.Text.RegularExpressions.Regex.Matches(html, "data-close=\"([^\"]+)\"").Select(m => m.Groups[1].Value).Distinct().ToList();
+            FieldContext.Expect(closes.Count >= 2, "the page's close buttons were not found");
+            var dead = closes.Where(c => !html.Contains("case \"" + c + "\":", StringComparison.Ordinal)).ToList();
+            // 2026-11-26: the X beside the Chat tab named "right", which the page has no action for, so it did nothing.
+            FieldContext.Expect(dead.Count == 0, "a close button does nothing (the page has no action for it): " + string.Join(", ", dead));
+            return "closes: " + string.Join(", ", closes);
+        });
+
         if (!OperatingSystem.IsWindows()) { ctx.Skip("this PC can draw CSI ProMax's own windows (WebView2 Runtime)", "Windows only"); return; }
         ctx.Step("this PC can draw CSI ProMax's own windows (WebView2 Runtime)", () => Runtime());
     }

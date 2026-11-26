@@ -16,6 +16,32 @@ static class WebWindowTests
 
     public static IEnumerable<(string Name, Action Body)> All()
     {
+        yield return ("Modeler shortcut: a double-click opens it, also when the copy holding its name has no window (2026-11-26)", () =>
+        {
+            // "When I double click the modeller it does not open": a second start only asked the holder of
+            // CsiProMax.modeler to come forward, and a holder with no window (closing after an update) answered nothing.
+            var program = Source("Program.cs");
+            Check(program.Contains("if (!first && !Handover(one, show, shown, name, args)) return 0;", StringComparison.Ordinal), "a second start ends again without checking that the open one answered");
+            Check(program.Contains("shown.Set();", StringComparison.Ordinal) && program.Contains("CsiProMax.Host.ModelView.Open();", StringComparison.Ordinal), "the open Modeler does not answer, or does not bring its 3D view back");
+            Check(program.Contains("stopped.Wait(TimeSpan.FromSeconds(15))", StringComparison.Ordinal) && program.Contains("Environment.Exit(0);", StringComparison.Ordinal), "a closed window can stay behind as a process with no window");
+            var now = DateTime.UtcNow;
+            Check(CsiProMax.Assistant.Program.Holder.Parse(CsiProMax.Assistant.Program.Holder.Line(77, now)) is { Pid: 77 } h && h.Ticks == now.Ticks, "the holder file is not read back");
+            Check(CsiProMax.Assistant.Program.Holder.Parse("garbage") is null, "a broken holder file is read as a process");
+            var ctx = new FieldContext(CsiProgram.Etabs, Path.GetTempPath(), new OfflineEtabs());
+            ModelerStartFieldSteps.Run(ctx, full: true, () => (new WindowFieldSteps.Seen(true, "'CSI ProMax Modeler' opened"), new WindowFieldSteps.Seen(false, "the second start did not end within 30 seconds")));
+            var step = ctx.Steps.Single(s => s.Name.Contains("second double-click", StringComparison.Ordinal));
+            Check(!step.Ok && !step.Skipped, "a second double-click nobody answers is a failure");
+            Check(File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "FieldTest.cs")).Contains("ModelerStartFieldSteps.Run(ctx,", StringComparison.Ordinal), "the field test does not start the Modeler");
+        });
+
+        yield return ("Modeler and Viewer: the X beside the Chat tab closes the side panel, and the chat's expand button fills the screen (2026-11-26)", () =>
+        {
+            var html = CsiProMax.Assistant.Tools.Pack.ViewerHtml();
+            Check(!html.Contains("data-close=\"right\"", StringComparison.Ordinal) && html.Contains("data-close=\"side\"", StringComparison.Ordinal), "the side panel's X names an action the page does not have");
+            var big = Source("Panel", "Chat", "ChatPane.Big.cs");
+            Check(big.Contains("Parent is not ContentControl && Window.GetWindow(this) is { } own", StringComparison.Ordinal), "the expand button does nothing in CSI ProMax's own window (it only knew a dock)");
+        });
+
         yield return ("own windows: nothing hands the 3D view or the Viewer page to the browser any more", () =>
         {
             var view = Source("Panel", "Host", "ModelView.cs");
