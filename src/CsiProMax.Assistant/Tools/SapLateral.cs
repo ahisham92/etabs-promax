@@ -94,8 +94,32 @@ internal static class SapLateral
         ["ModalCase"] = "MODAL", ["FirstValMode"] = 1,
     };
 
+    /// <summary>
+    /// Starting values one Set call needs other than the common ones, from SAP2000 26's API help and the calls a hidden
+    /// SAP2000 26 on Ahmed's PC took (2026-11-26): IBC's seismic coefficients are user defined (Option 2, not a zip code);
+    /// the Chinese seismic and NZS periods are program calculated (2); the Chinese wind's T1 is user defined.
+    /// </summary>
+    internal static readonly Dictionary<string, Dictionary<string, object>> MethodSeeds = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["SetIBC2006"] = new(StringComparer.OrdinalIgnoreCase) { ["IBC2006Option"] = 2, ["CtType"] = 1, ["Ss"] = 1.5, ["S1"] = 0.6, ["Tl"] = 8.0, ["SiteClass"] = 4 },
+        ["SetIBC2009"] = new(StringComparer.OrdinalIgnoreCase) { ["IBC2009Option"] = 2, ["CtType"] = 1, ["Ss"] = 1.5, ["S1"] = 0.6, ["Tl"] = 8.0, ["SiteClass"] = 4 },
+        ["SetIBC2012"] = new(StringComparer.OrdinalIgnoreCase) { ["IBC2012Option"] = 2, ["CtType"] = 1, ["Ss"] = 1.5, ["S1"] = 0.6, ["Tl"] = 8.0, ["SiteClass"] = 4 },
+        ["SetChinese2010"] = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["PeriodFlag"] = 2, ["JGJ32002AlphaMax"] = 0.16, ["JGJ32002SI"] = 4, ["JGJ32002DampRatio"] = 0.05, ["JGJ32002Tg"] = 0.4,
+            // the wind call of the same name
+            ["ExposureFrom"] = 1, ["BuildingWidth"] = 12.0, ["Us"] = 0.5, ["BHoverB0"] = 1.0, ["wzero"] = 0.48, ["Rt"] = 3, ["PhiZOpt"] = 1, ["T1Opt"] = 1, ["UserT"] = 0.6, ["DampRatio"] = 0.04,
+        },
+        ["SetChinese2002"] = new(StringComparer.OrdinalIgnoreCase) { ["PeriodFlag"] = 2, ["JGJ32002AlphaMax"] = 0.16, ["JGJ32002SI"] = 4, ["JGJ32002DampRatio"] = 0.05, ["JGJ32002Tg"] = 0.4, ["T1Opt"] = 1, ["UserT"] = 0.6 },
+        ["SetChinese2002_1"] = new(StringComparer.OrdinalIgnoreCase) { ["T1Opt"] = 1, ["UserT"] = 0.6, ["PhiZOpt"] = 1, ["Rt"] = 3 },
+        ["SetNZS11702004"] = new(StringComparer.OrdinalIgnoreCase) { ["PeriodFlag"] = 2, ["NZS2004R"] = 1.3, ["NZS2004Mu"] = 3.0 },
+        ["SetNZS11702004_1"] = new(StringComparer.OrdinalIgnoreCase) { ["PeriodFlag"] = 2, ["NZS2004R"] = 1.3, ["NZS2004Mu"] = 3.0 },
+        ["SetNZS11702004_2"] = new(StringComparer.OrdinalIgnoreCase) { ["PeriodFlag"] = 2, ["NZS2004R"] = 1.3, ["NZS2004Mu"] = 3.0 },
+        ["SetASCE716"] = new(StringComparer.OrdinalIgnoreCase) { ["ExposureFrom"] = 1, ["ASCECase"] = 1 },
+    };
+
     /// <summary>The arguments for one Set call: the seeds, and 1 / false / "" for anything not named.</summary>
-    internal static Dictionary<string, object?> Arguments(ParameterInfo[] parameters, string pattern, bool[]? directions)
+    internal static Dictionary<string, object?> Arguments(ParameterInfo[] parameters, string pattern, bool[]? directions, string? method = null)
     {
         var args = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         foreach (var p in parameters)
@@ -104,6 +128,7 @@ internal static class SapLateral
             var t = p.ParameterType.IsByRef ? p.ParameterType.GetElementType()! : p.ParameterType;
             if (name.Equals("Name", StringComparison.OrdinalIgnoreCase)) args[name] = pattern;
             else if (t == typeof(bool[])) args[name] = directions ?? [true, false];
+            else if (method is not null && MethodSeeds.TryGetValue(method, out var own) && own.TryGetValue(name, out var mine)) args[name] = mine;
             else if (Seeds.TryGetValue(name, out var seed)) args[name] = seed;
             else if (p.HasDefaultValue && p.DefaultValue is not DBNull and not null) continue;
             else args[name] = t == typeof(bool) ? false : t == typeof(string) ? "" : t == typeof(double) ? 1.0 : t.IsEnum ? Enum.GetValues(t).GetValue(0) : 1;
@@ -133,7 +158,7 @@ internal static class SapLateral
             var given = Given(parameters, values ?? new Dictionary<string, string>(), code);
             var hasDirs = parameters.Any(p => (p.ParameterType.IsByRef ? p.ParameterType.GetElementType() : p.ParameterType) == typeof(bool[]));
             bool[][] directions = hasDirs ? [[true, false], [true, false, false, false, false, false], [false, true, false]] : [[true, false]];
-            foreach (var args in Variants(parameters, pattern, directions, had, given))
+            foreach (var args in Variants(parameters, pattern, directions, had, given, method))
             {
                 if (CsiTools.Try(e, $"give {pattern} the code {code}", path, args) is null) continue;
                 var back = CsiTools.Try(e, $"read {pattern}'s {code}", getter, CsiTools.D(("Name", pattern)));
@@ -183,11 +208,11 @@ internal static class SapLateral
     /// then, when SAP2000 refuses, each whole-number choice the inputs did not give, tried at 0, 2, 3 and 4 in turn
     /// (an option such as IBC2006Option or JGJ32002SI whose 1 SAP2000 does not take: 0.4.42 field test).
     /// </summary>
-    internal static IEnumerable<Dictionary<string, object?>> Variants(ParameterInfo[] parameters, string pattern, bool[][] directions, System.Text.Json.Nodes.JsonObject? had, Dictionary<string, object?> given)
+    internal static IEnumerable<Dictionary<string, object?>> Variants(ParameterInfo[] parameters, string pattern, bool[][] directions, System.Text.Json.Nodes.JsonObject? had, Dictionary<string, object?> given, string? method = null)
     {
         foreach (var dirs in directions)
         {
-            var args = Arguments(parameters, pattern, dirs);
+            var args = Arguments(parameters, pattern, dirs, method);
             if (had?["values"] is System.Text.Json.Nodes.JsonObject now)
                 foreach (var p in parameters)
                     if (p.Name is { } n && now[n] is System.Text.Json.Nodes.JsonValue v && Convert(v, p) is { } value) args[n] = value;

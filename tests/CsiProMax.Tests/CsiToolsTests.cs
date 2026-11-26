@@ -848,8 +848,8 @@ public sealed class FakeApi
                     {
                         var at = o.Table.FindIndex(t => t[0] == r[0]);
                         var self = r[Array.IndexOf(fields, "SelfWtMult")];
-                        if (at < 0) o.Table.Add([r[0], r[Array.IndexOf(fields, "DesignType")], self]); else o.Table[at][2] = self;
-                        o.SeismicCodes[r[0]] = r[Array.IndexOf(fields, "AutoLoad")];
+                        if (at < 0) o.Table.Add([r[0], r[Array.IndexOf(fields, "DesignType") is >= 0 and var dt ? dt : Array.IndexOf(fields, "Type")], self]); else o.Table[at][2] = self;
+                        if (r[Array.IndexOf(fields, "AutoLoad")] is { Length: > 0 } code) o.SeismicCodes[r[0]] = code; else o.SeismicCodes.Remove(r[0]);
                     }
                     continue;
                 }
