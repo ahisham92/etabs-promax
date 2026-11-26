@@ -1178,7 +1178,7 @@ static class TesterBugTests
                 var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ReferenceData.cs"));
                 Check(!source.Contains("ctx.Step(") && !source.Contains("ctx.Fail("), "gathering reference data is recorded as a test step");
                 var test = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/FieldTest.cs"));
-                Check(test.Contains("if (finished && o.ReferenceData) ReferenceData.Run(ctx.Folder, program, open.Link, open.ModelPath);") && test.Contains("sb.Append(ReferenceData.Section(work));") && test.Contains("FailurePictures.Take(ctx.Folder, program, scratch.ProcessId, step.Name)"),
+                Check(test.Contains("if (finished && o.ReferenceData) ReferenceData.Run(ctx.Folder, program, open.Link, open.ModelPath, (open as ScratchProgram)?.ProcessId ?? 0);") && test.Contains("sb.Append(ReferenceData.Section(work));") && test.Contains("FailurePictures.Take(ctx.Folder, program, scratch.ProcessId, step.Name)"),
                     "the full test does not gather the needed things, list them, or picture a failure");
             }
             finally

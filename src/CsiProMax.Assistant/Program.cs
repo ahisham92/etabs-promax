@@ -389,6 +389,15 @@ public static class Program
         var timer = new System.Windows.Threading.DispatcherTimer(TimeSpan.FromSeconds(3), System.Windows.Threading.DispatcherPriority.Background, (_, _) =>
         {
             var now = Stamp();
+            // The pack was removed (its model was changed or unlocked, so it has no results): the window says so plainly
+            // instead of showing results that are gone; when a run writes it again, it is shown again.
+            if (now == DateTime.MinValue && shown != DateTime.MinValue && seen == DateTime.MinValue && !File.Exists(file))
+            {
+                shown = now;
+                try { CsiProMax.Host.WebPages.RemovedPageFor(file); window.ReloadPage(); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Note("viewer: the pack was removed", ex); }
+                return;
+            }
             if (now == DateTime.MinValue || now == shown) { seen = now; return; }
             if (now != seen) { seen = now; return; }
             shown = now;

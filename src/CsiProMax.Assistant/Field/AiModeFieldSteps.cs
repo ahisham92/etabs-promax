@@ -57,6 +57,19 @@ public static class AiModeFieldSteps
             });
         }
 
+        // Ahmed 2026-11-26: the Engine works fully without the AI. Its menus, forms, Run and review pack are CSI ProMax's
+        // own code, the same code the chat's tools run (HandModel, EngineRun, Pack), never something only the chat can do.
+        if (content is not null)
+            ctx.Step("without the AI chat: the Engine's Run, forms and results are there, as with the chat", () =>
+            {
+                var page = Pack.LiveViewerHtml(content, 1, chat: false);
+                foreach (var (marker, what) in new[] { ("\"eng:run\"", "Analyze > Run Analysis"), ("\"eng:runDesign\"", "Run Analysis and Design"), ("\"eng:import\"", "Import > Results from a Review Pack"), ("function hmPost(", "the Define/Assign/Draw forms") })
+                    FieldContext.Expect(page.Contains(marker, StringComparison.Ordinal), $"the page without the chat has no {what}");
+                var status = EngineRun.Status(false);
+                FieldContext.Expect(status["running"] is not null, "the Engine's Run does not answer without the chat");
+                return "Run, Run and Design, results from a pack and the forms are on the page without the chat; the Run answers (" + ((bool?)status["running"] == true ? "running" : "idle") + ")";
+            });
+
         ctx.Step("without the AI chat: the chat address of the 3D view says the chat is off", () =>
         {
             var answer = CsiProMax.Host.ModelView.ChatAsync(Encoding.UTF8.GetBytes("""{"after":0,"send":"field test: never sent"}"""), on: false).GetAwaiter().GetResult();

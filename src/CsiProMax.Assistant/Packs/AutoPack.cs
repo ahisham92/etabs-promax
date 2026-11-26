@@ -206,13 +206,16 @@ public static class AutoPack
         };
         var built = Pack.Build(link, [], [], [], checks, comments, by: why == "design" ? "CSI ProMax, by itself after the design" : "CSI ProMax, by itself after the analysis",
             instabilities: true, auto: auto);
-        Replace(pack, built.Zip);
-        Replace(page, new UTF8Encoding(false).GetBytes(Pack.ViewerHtml(built.Content)));
+        lock (LockFor(pack)) PackLife.Write(pack, page, built.Zip, Pack.ViewerHtml(built.Content));
         return new Written(pack, page, why, built.Frames, built.Areas, built.Tables.Count, comments.Count, watch.Elapsed, built.Notes);
     }
 
-    /// <summary>The reviewer's comments, kept beside the model for as long as the model is (a pack comes and goes with the results).</summary>
-    public static string CommentsFile(string modelFile)
+    /// <summary>The reviewer's comments, kept beside the model for as long as the model is (a pack comes and goes with
+    /// the results): PackLife's "&lt;model&gt; comments.json", the same file the Engine keeps.</summary>
+    public static string CommentsFile(string modelFile) => PackLife.CommentsFile(PackFile(modelFile));
+
+    /// <summary>The name this rule kept comments under before it shared PackLife's (2026-11-26): read once, then removed.</summary>
+    internal static string OldCommentsFile(string modelFile)
     {
         var file = modelFile.Trim().Trim('"');
         return Path.Combine(Path.GetDirectoryName(file)!, Path.GetFileNameWithoutExtension(file) + " review comments.json");
@@ -232,15 +235,17 @@ public static class AutoPack
                 if (c is not null && seen.Add(c["who"]?.ToString() + "\u0001" + c["at"]?.ToString() + "\u0001" + c["text"]?.ToString())) all.Add(c.DeepClone());
         }
         var kept = CommentsFile(modelFile);
-        try { if (File.Exists(kept)) Take(Pack.ReadComments(kept).Comments); }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or JsonException) { }
-        try { if (File.Exists(PackFile(modelFile))) Take(Pack.ReadComments(PackFile(modelFile)).Comments); }
+        var old = OldCommentsFile(modelFile);
+        Take(PackLife.Comments(PackFile(modelFile)));
+        try { if (File.Exists(old)) Take(Pack.ReadComments(old).Comments); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or JsonException) { }
         if (all.Count > 0)
         {
-            var o = new JsonObject { ["model"] = Path.GetFileName(modelFile.Trim().Trim('"')), ["comments"] = all.DeepClone() };
-            Replace(kept, new UTF8Encoding(false).GetBytes(o.ToJsonString(new JsonSerializerOptions { WriteIndented = true })));
+            var o = new JsonObject { ["model"] = Path.GetFileNameWithoutExtension(modelFile.Trim().Trim('"')), ["comments"] = all.DeepClone() };
+            PackLife.Replace(kept, new UTF8Encoding(false).GetBytes(o.ToJsonString(new JsonSerializerOptions { WriteIndented = true })));
         }
+        // The old name's comments are in the shared file now.
+        if (File.Exists(old) && File.Exists(kept)) try { File.Delete(old); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         return all;
     }
 
@@ -271,10 +276,9 @@ public static class AutoPack
         {
             if (!IsAuto(pack)) return false;
             KeepComments(modelFile);
-            File.Delete(pack);
-            var page = PageFile(modelFile);
-            try { if (File.Exists(page)) File.Delete(page); }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* the page goes at the next removal or is replaced by the next pack */ }
+            // PackLife keeps the comments, tries again while another program holds a file, and says what is left.
+            var left = PackLife.Remove(pack, PageFile(modelFile));
+            if (File.Exists(pack)) throw new IOException(string.Join("; ", left));
             return true;
         }
     }
@@ -296,14 +300,6 @@ public static class AutoPack
     /// <summary>Another window (looked at in the last few minutes) shows the same model with its results.</summary>
     internal static bool LockedElsewhere(string window, string packFile) =>
         Windows.Any(w => w.Key != window && w.Value.Locked && DateTime.UtcNow - w.Value.At < TimeSpan.FromMinutes(3) && string.Equals(w.Value.Pack, packFile, StringComparison.OrdinalIgnoreCase));
-
-    private static void Replace(string target, byte[] bytes)
-    {
-        var temp = target + ".writing";
-        File.WriteAllBytes(temp, bytes);
-        try { File.Move(temp, target, overwrite: true); }
-        catch (Exception) { try { File.Delete(temp); } catch (IOException) { } throw; }
-    }
 
     /// <summary>
     /// One look at one program and, when the rule says so, the pack written. What happened is given back as one line
