@@ -1119,6 +1119,75 @@ static class TesterBugTests
             finally { Directory.Delete(folder, true); }
         });
 
+        // Ahmed, 2026-11-26: "everything you need actually from the any program you can include it as part of the bugs ...
+        // but don't report it as bugs report it as needed things", and "Make sure that the bugs zip includes whatever you want".
+        yield return ("field test: the needed things are gathered from each program into the zip, and are never failures", () =>
+        {
+            var root = Path.Combine(Path.GetTempPath(), "cpm-reference-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            var items = ReferenceData.Items.ToList();
+            try
+            {
+                // The program's examples folder stands in: a PT text model, a plain one, a binary model and one too big.
+                var examples = Path.Combine(root, "install", "Verification");
+                Directory.CreateDirectory(Path.Combine(examples, "Design"));
+                File.WriteAllText(Path.Combine(examples, "Design", "ACI 318-19 PT-SL Ex001.e2k"), "$ PT example");
+                File.WriteAllText(Path.Combine(examples, "Frame.e2k"), "$ frame example");
+                File.WriteAllBytes(Path.Combine(examples, "Frame.EDB"), new byte[10]);
+                File.WriteAllBytes(Path.Combine(examples, "Huge.s2k"), new byte[ReferenceData.MostOne + 1]);
+                var work = Path.Combine(root, "work");
+                var link = new MemoryEtabs();
+                ReferenceData.Items.Add(new("an item that breaks", null, _ => throw new InvalidOperationException("no such thing here")));
+                ReferenceData.Items.Add(new("a SAFE-only item", p => p.Key == "safe", g => g.Write("safe only.txt", "x")));
+                ReferenceData.Items.Add(new("the examples of the stand-in folder", null, g => ReferenceData.CopyExamples(g, examples)));
+                var lines = ReferenceData.Run(work, CsiProgram.Etabs, link);
+                var folder = Path.Combine(work, ReferenceData.FolderName, "ETABS"); // ETABS itself
+                Check(File.Exists(Path.Combine(folder, "program.txt")) && File.ReadAllText(Path.Combine(folder, "program.txt")).Contains("version: "), "the program and its version are not written");
+                Check(File.Exists(Path.Combine(folder, "tables.csv")) && File.ReadAllLines(Path.Combine(folder, "tables.csv")).Length > 1, "the table list is not written");
+                Check(File.Exists(Path.Combine(folder, "table fields.csv")), "the fields of the tables are not written");
+                Check(File.Exists(Path.Combine(folder, "Verification", "Design", "ACI 318-19 PT-SL Ex001.e2k")) && File.Exists(Path.Combine(folder, "Verification", "Frame.e2k")), "the examples' text models are not copied");
+                Check(!File.Exists(Path.Combine(folder, "Verification", "Frame.EDB")) && !File.Exists(Path.Combine(folder, "Verification", "Huge.s2k")), "a binary or oversized example was copied");
+                Check(File.ReadAllText(Path.Combine(folder, "verification files.csv")).Contains("Frame.EDB"), "the examples are not all listed");
+                Check(File.Exists(Path.Combine(examples, "Design", "ACI 318-19 PT-SL Ex001.e2k")) && File.ReadAllText(Path.Combine(examples, "Frame.e2k")) == "$ frame example", "an original example was changed");
+                Check(lines.Any(l => l.Contains("an item that breaks: not gathered (InvalidOperationException: no such thing here)")), "an item that breaks is not noted: " + string.Join(" | ", lines));
+                Check(!File.Exists(Path.Combine(folder, "safe only.txt")), "an item for SAFE ran for another program");
+                Check(File.Exists(Path.Combine(folder, "gathered.md")), "what was gathered is not written down");
+                Check(Directory.GetFiles(Path.Combine(folder, "tables"), "*.csv").Length > 0, "the scratch model's tables with data are not written");
+                Check(File.Exists(Path.Combine(folder, "scratch folder files.csv")) is false && lines.Any(l => l.Contains("the scratch model's own file is not known, and no other file is ever saved")), "a model that is not the test's own was saved, or its folder listed: " + string.Join(" | ", lines));
+
+                // The report names them as needed things, and the zip takes them, the scratch model and the failure pictures.
+                var section = ReferenceData.Section(work);
+                Check(section.Contains("## Reference data (needed things, not bugs)") && section.Contains("- the program, its version and its files: program.txt"), "the report does not list the needed things: " + section);
+                Equal("", ReferenceData.Section(Path.Combine(root, "nothing")), "a run that gathered nothing");
+                File.WriteAllBytes(Path.Combine(work, "cpm-field-test-abc123.sdb"), new byte[100]);
+                Directory.CreateDirectory(Path.Combine(work, FailurePictures.FolderName));
+                File.WriteAllBytes(Path.Combine(work, FailurePictures.FolderName, FailurePictures.NameFor(3, CsiProgram.Sap2000, "tool set_lateral_load: KDS/2019?", 0)), new byte[50]);
+                var report = Path.Combine(root, "Field test ETABS 2026-11-26 1900.md"); // ETABS itself
+                var zip = FieldTest.Pack(report, "# report", work);
+                Check(zip is not null, "no zip was written");
+                using (var sent = System.IO.Compression.ZipFile.OpenRead(zip!))
+                {
+                    var names = sent.Entries.Select(x => x.FullName).ToList();
+                    Check(names.Contains("files/Reference data/ETABS/tables.csv") && names.Contains("files/Reference data/ETABS/Verification/Design/ACI 318-19 PT-SL Ex001.e2k"), "the needed things are not in the zip: " + string.Join(", ", names)); // ETABS itself
+                    Check(names.Contains("files/cpm-field-test-abc123.sdb"), "the scratch model is not in the zip");
+                    Check(names.Contains("files/Failure pictures/03 SAP2000 tool set_lateral_load_ KDS_2019_.jpg"), "the failure picture is not in the zip: " + string.Join(", ", names));
+                }
+                Equal<int>(0, FailurePictures.Take(work, CsiProgram.Etabs, 0, "x").Count, "a picture with no scratch process");
+
+                // Not a step: gathering adds nothing to the test's results, and the full test does it for each program.
+                var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ReferenceData.cs"));
+                Check(!source.Contains("ctx.Step(") && !source.Contains("ctx.Fail("), "gathering reference data is recorded as a test step");
+                var test = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/FieldTest.cs"));
+                Check(test.Contains("if (finished && o.ReferenceData) ReferenceData.Run(ctx.Folder, program, open.Link, open.ModelPath);") && test.Contains("sb.Append(ReferenceData.Section(work));") && test.Contains("FailurePictures.Take(ctx.Folder, program, scratch.ProcessId, step.Name)"),
+                    "the full test does not gather the needed things, list them, or picture a failure");
+            }
+            finally
+            {
+                ReferenceData.Items.Clear(); ReferenceData.Items.AddRange(items);
+                Directory.Delete(root, true);
+            }
+        });
+
         yield return ("ETABS 23 field test: a test copy an earlier run left open is closed by the next run, and nothing else is", () =>
         {
             // Seen on 2026-11-25: the 0.4.10 run gave up on ETABS with the story picker showing; the 0.4.14 run then failed
