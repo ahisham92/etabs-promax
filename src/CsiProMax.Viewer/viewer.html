@@ -1035,7 +1035,7 @@ function applyValues(d) {
 // distributed frame loads as diagrams along the members, everything else (point, uniform, temperature, strain...) as
 // values on the object, coloured. Read from the load assignment tables the pack takes beside the results. ----
 let loadMap = null, jointLoads = null;
-const loadKinds = {joint: /^(joint|point)loads/, frame: /^(frame|line|beam)loads/, shell: /^(shell|area|slab|wall|surface|floor)loads/};
+const loadKinds = {joint: /^(joint|point)loads?(assign|$|[a-z])/, frame: /^(frame|line|beam)loads?(assign|$|[a-z])/, shell: /^(shell|area|slab|wall|surface|floor)loads?(assign|$|[a-z])/};
 const loadTables = kind => P ? Object.values(P.tables).filter(t => t.rows && t.rows.length && loadKinds[kind].test(norm(t.name))) : [];
 const patCol = f => col(f, "LoadPattern", "Load Pattern", "LoadPat", "Load Pat", "Pattern");
 const isDistributed = t => /distributed|trapezoid/.test(norm(t.name));
