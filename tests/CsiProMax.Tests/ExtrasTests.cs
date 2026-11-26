@@ -194,6 +194,15 @@ static class ExtrasTests
                 Check(html.Contains(part), "viewer.html lost " + part);
             Check(html.Contains("[[\"OK\", d => applyDeformed(d)], [\"Close\"], [\"Apply\"") && html.Contains("[[\"OK\", d => applyForces(d)], [\"Close\"], [\"Apply\""), "OK, Close, Apply as the programs");
         });
+        yield return ("extras: Display Design Info as the programs (Design Output and Design Input lists by their names), the Detailing menu's schedules and the Units button (Ahmed 2026-11-26)", () =>
+        {
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var part in new[] { "function designOutputName(fam, s)", "\"P-M Ratio Colors & Values\"", "\"P-M Colors/No Values\"", "\"Column P-M-M Interaction Ratios\"", "\"Rebar Percentage\"", "<legend>Choose Display Type</legend>",
+                "Design Output</label>", "Design Input</label>", "function buildDesignInput(fam, field)", "\"Design Sections\"", "\"Live Load Red. Factors\"",
+                "data-menu=\"Detailing\"", "function detailingItems()", "\"Beam Schedule...\"", "\"Column Schedule...\"", "function openSchedule(what)", "dialogs.deformed(ms, \"Mode Shape\")", "<button id=\"units\"", "$(\"units\").onclick", "<legend>Consistent Units</legend>" })
+                Check(html.Contains(part), "viewer.html lost " + part);
+            Check(html.Contains("det.hidden = program === \"sap2000\""), "SAP2000 has no Detailing menu");
+        });
         yield return ("extras: right click opens ETABS's Object Information: Object ID, property-grid tabs, a description, OK and Cancel; no browser menu (Ahmed 2026-11-26)", () =>
         {
             var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
