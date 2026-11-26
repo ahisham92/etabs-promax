@@ -186,6 +186,19 @@ static class SlabTests
             Check(SectionOf(again, SlabDefs.TendonProfile).Single().Contains("ZL  -5  ZC  -9  ZR  -5"), "and its profile as it was");
         });
 
+        yield return ("slabs: ETABS 23.2's own export (PT-SL Ex001 edited on Ahmed's PC: both-end jacking, detailed and percent losses, a parabola) reads, and its support points and profile go out again as it wrote them", () =>
+        {
+            var text = Sample("etabs23-PT-SL-edited.e2k");
+            var m = E2kReader.Read(text);
+            var ts = SlabDefs.Tendons(m);
+            Check(ts.Count == 2 && ts.All(t => Math.Abs(t.Spans.Single().ZL - 43) < 1e-9 && Math.Abs(t.Spans.Single().ZC - 39) < 1e-9), "both tendons from 43 down to 39");
+            Check(ts.All(t => t.Jack?.End == "Both"), "jacked from both ends");
+            var back = E2kWriter.Write(m);
+            string Flat(string l) => string.Join(" ", E2kText.Tokenize(l));
+            foreach (var h in new[] { SlabDefs.TendonSupports, SlabDefs.TendonProfile, SlabDefs.TendonLayout, SlabDefs.TendonLoads })
+                Check(SectionOf(text, h).Select(Flat).SequenceEqual(SectionOf(back, h).Select(Flat)), $"{h} as ETABS 23 wrote it: " + string.Join(" | ", SectionOf(back, h)));
+        });
+
         yield return ("slabs: draw_tendon says no to what ETABS would not take, and changes nothing", () =>
         {
             var link = PtFrame();

@@ -504,6 +504,16 @@ static class OldProgramTests
                 "the check comes before any window is started");
         });
 
+        yield return ("ETABS 23 (main 3cdc64d run): a field left at its default while the record is read is not a refusal; a skipped record is; wind User Loads gets no LoadAtCM", () =>
+        {
+            const string tl = "Table name:  LOAD PATTERN DEFINITIONS - AUTO SEISMIC - KDS 2019 Field name:  TL Record:  1 Error reading field TL; field ignored and default values will be used 1 of 1 records successfully read";
+            Check(CsiProMax.Assistant.Etabs.EditableTables.OnlyFieldsIgnored(tl, 1), "KDS TL");
+            Check(!CsiProMax.Assistant.Etabs.EditableTables.OnlyFieldsIgnored("Field name:  STORY Record:  1 Error reading field; record skipped", 1), "a record skipped");
+            Check(!CsiProMax.Assistant.Etabs.EditableTables.OnlyFieldsIgnored(tl, 2), "more errors than fields ignored");
+            var lateral = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Tools/LateralTools.cs"));
+            Check(lateral.Contains("table.Key.Contains(\"Seismic\", StringComparison.OrdinalIgnoreCase) ? [(\"LoadAtCM\", \"Yes\")]"), "LoadAtCM only for the seismic User Loads table");
+        });
+
         yield return ("kind: a program's 'could not read this file' box in a scratch window is answered OK and said, never a licence box", () =>
         {
             var box = CsiProMax.Assistant.ScratchDialogs.IsFileRefused;
