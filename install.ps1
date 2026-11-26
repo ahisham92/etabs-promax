@@ -300,6 +300,17 @@ function Install-CsiProMax {
         $Folder = (Resolve-Path -LiteralPath $Folder).Path
         if ($changes.Count -gt 0) { Say "  CSI ProMax $versionText is in $Folder ($($changes.Count) files added or replaced)." 'Green' }
         else { Say "  CSI ProMax $versionText was already in $Folder. Nothing needed replacing." 'Green' }
+        # The Tools-menu plug-ins' own versions, read from the files now in the folder (Ahmed, 2026-11-26: "does this mean
+        # surely he updated well?"). A file in use stops the install above, so these are the files the programs will load.
+        $pluginVersions = @()
+        foreach ($plugin in $plugins) {
+            $file = Join-Path $Folder $plugin.Dll
+            if (-not (Test-Path -LiteralPath $file)) { continue }
+            $v = ''
+            try { $v = ([string](Get-Item -LiteralPath $file).VersionInfo.ProductVersion) -replace '\+.*$', '' } catch { }
+            if ($v) { $pluginVersions += "$($plugin.Program) $v" }
+        }
+        if ($pluginVersions.Count -gt 0) { Say "  Tools-menu plug-ins now in the folder: $($pluginVersions -join ', ')." 'Green' }
 
         # 2b. With the AI chat or without it: one word in a file every version of CSI ProMax reads (AiMode).
         if (-not $AiFile) {
