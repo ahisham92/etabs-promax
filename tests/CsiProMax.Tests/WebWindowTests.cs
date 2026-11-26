@@ -84,10 +84,12 @@ static class WebWindowTests
             Check(WebPages.Address("http://127.0.0.1:5/view/x/") == "http://127.0.0.1:5/view/x/", "a served address is changed");
         });
 
-        yield return ("own windows: the Viewer shortcut starts CsiProMax.dll --viewer, with no .exe and no browser", () =>
+        yield return ("own windows: one CSI ProMax Engine shortcut starts CsiProMax.dll --modeler; a pack opens with --viewer; no .exe and no browser", () =>
         {
             var arguments = Shortcuts.ViewerArguments("C:/CSI ProMax/");
             Check(arguments == "\"" + Path.Combine("C:/CSI ProMax/", "CsiProMax.dll") + "\" --viewer", arguments);
+            Check(Shortcuts.EngineArguments("C:/CSI ProMax/") == "\"" + Path.Combine("C:/CSI ProMax/", "CsiProMax.dll") + "\" --modeler", "the Engine shortcut does not start the Modeler window");
+            Check(Shortcuts.EngineName == "CSI ProMax Engine" && Shortcuts.Mark2 == "|4", "the shortcut is not named CSI ProMax Engine, or old shortcuts are not replaced once");
             var shortcuts = Source("Panel", "Host", "Shortcuts.cs");
             Check(!shortcuts.Contains("link.TargetPath = ViewerPage;", StringComparison.Ordinal), "the Viewer shortcut points at the page again (it opens in the browser)");
             Check(WindowFieldSteps.ViewerArguments("x.dll").SequenceEqual(["x.dll", "--viewer", "--this-version", "--no-update"]), "the field test does not start the Viewer as its shortcut does");

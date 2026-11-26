@@ -23,7 +23,7 @@ internal static class SkipAudit
         ("was not opened from a CSI program", Why.ProgramNotHere), ("there is no scratch model to change", Why.ProgramNotHere),
         ("not Windows", Why.NotWindows), ("Windows only", Why.NotWindows), ("needs Windows", Why.NotWindows),
         ("no WebView2 Runtime", Why.PcSetUpWithoutIt), ("is not beside CsiProMax.dll", Why.PcSetUpWithoutIt),
-        ("no installed copy was found", Why.PcSetUpWithoutIt), ("no Modeler shortcut", Why.PcSetUpWithoutIt),
+        ("no installed copy was found", Why.PcSetUpWithoutIt), ("no CSI ProMax Engine shortcut", Why.PcSetUpWithoutIt),
         ("shortcut reader is not available", Why.PcSetUpWithoutIt), ("no GitHub sign-in", Why.PcSetUpWithoutIt),
         ("team library is switched off", Why.PcSetUpWithoutIt), ("no Claude Code was found", Why.PcSetUpWithoutIt),
         ("the AI chat is off on this PC", Why.PcSetUpWithoutIt), ("the AI chat is on in this window", Why.PcSetUpWithoutIt),

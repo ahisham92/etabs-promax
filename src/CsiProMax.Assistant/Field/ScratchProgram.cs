@@ -733,6 +733,21 @@ public sealed class ScratchProgram : IScratchWindow
         $". Its process is still running ({processName}.exe, process id {processId}, {(hasWindow ? "with a window" : "with no window on the screen")}) and holds a {name} licence until it ends: " +
         $"{(hasWindow ? "close that window without saving, or " : "")}end the {processName}.exe with process id {processId} in Task Manager (Details tab). It is the test's own scratch model; nothing of yours is in it";
 
+    /// <summary>
+    /// Takes the program's window off the screen (its API's Hide), for CSI ProMax Engine's runs, which use the program
+    /// as a solver in the background (Ahmed 2026-11-26). False when the program does not hide; the run goes on either way.
+    /// </summary>
+    public bool Hide()
+    {
+        if (_app is null || _closed || _left) return false;
+        try
+        {
+            Ask(TimeSpan.FromSeconds(30), "hide the window", _ => { _app.Hide(); return null; }, $"the {_program.Name} window did not hide within 30 seconds");
+            return true;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return false; }
+    }
+
     public void Dispose()
     {
         // Letting go never throws: the report is written after it.

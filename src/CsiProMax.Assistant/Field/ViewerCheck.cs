@@ -183,6 +183,17 @@ public static class ViewerCheck
           if (!d.querySelector(".pgdesc b") || d.querySelector(".pgdesc b").textContent !== row.dataset.n) return "a click on a property does not show its description underneath";
           return "";
         };
+        await step("the Model Explorer is the program's: Model, Display, Tables and Reports tabs, the Model tree in the program's order", async () => {
+          const tabs = [...document.querySelectorAll("#tree .xtabs button")].map(b => b.textContent).join(", ");
+          if (tabs !== "Model, Display, Tables, Reports") return {fail: "the explorer's tabs are " + (tabs || "missing")};
+          const top = [...document.querySelectorAll('#tree .xpage[data-x="model"] > details > details > summary')].map(s => s.firstChild.textContent.trim());
+          const want = ["Project", "Structure Layout", "Properties", "Structural Objects", "Groups", "Loads", "Named Output Items", "Named Plots"];
+          if (top.join("|") !== want.join("|")) return {fail: "the Model tree reads " + top.join(", ")};
+          const menus = [...document.querySelectorAll("#menubar .menu:not([hidden])")].map(m => m.dataset.menu);
+          for (const m of ["File", "Edit", "View", "Define", "Select", "Analyze", "Display", "Design", "Options", "Tools", "Help"]) if (!menus.includes(m)) return {fail: "the menu bar has no " + m + " menu: " + menus.join(", ")};
+          if (!document.getElementById("vname").textContent) return {fail: "the status bar does not name the view"};
+          return {ok: tabs + "; " + top.join(", ") + "; menus " + menus.join(" ")};
+        });
         await step("selection: a left-to-right window round a support selects the support joint", async () => {
           if (!supports.length) return {skipped: "skipped: the model has no supports"};
           const p = await view3d(), s = supports.find(x => supportShown(p, x) && p.M.to(x.p)[3]);

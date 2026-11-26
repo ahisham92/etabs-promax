@@ -42,7 +42,7 @@ function Open-Window([string]$Label, [string[]]$Extra, [string]$Shot, [string]$M
         Check ($said.Length -eq 0) "$Label it wrote no error while starting and drawing $said"
         if ($Modeler) {
             # The Modeler is one window: its model view (WebView2) drawn inside it, noted by the window when the page loads.
-            Check ($title -like 'CSI ProMax Modeler*') "$Label the window is the Modeler: '$title'"
+            Check ($title -like 'CSI ProMax Engine*') "$Label the window is the Engine (the Modeler): '$title'"
             $shown = Join-Path $env:LOCALAPPDATA "CsiProMax\shown\$($process.Id).txt"
             $deadline = (Get-Date).AddSeconds(45)
             while ((Get-Date) -lt $deadline -and -not ((Test-Path -LiteralPath $shown) -and ((Get-Content -LiteralPath $shown -Raw) -match 'ModelerView'))) { Start-Sleep -Milliseconds 500 }

@@ -38,11 +38,12 @@ public static class WebWindowFieldSteps
             return string.Join("; ", names);
         });
 
-        ctx.Step("the Viewer shortcut starts CSI ProMax's own Viewer window, not a page in the browser", () =>
+        ctx.Step("the CSI ProMax Engine shortcut starts the one program (Modeler and Viewer in one window), not a page in the browser", () =>
         {
-            var arguments = Shortcuts.ViewerArguments(AppContext.BaseDirectory);
-            FieldContext.Expect(arguments.Contains("CsiProMax.dll", StringComparison.Ordinal) && arguments.EndsWith("--viewer", StringComparison.Ordinal), "the Viewer shortcut does not start CsiProMax.dll --viewer: " + arguments);
-            FieldContext.Expect(Shortcuts.Mark2 == "|3", "the shortcuts made by an older version are not made again once");
+            var arguments = Shortcuts.EngineArguments(AppContext.BaseDirectory);
+            FieldContext.Expect(arguments.Contains("CsiProMax.dll", StringComparison.Ordinal) && arguments.EndsWith("--modeler", StringComparison.Ordinal), "the Engine shortcut does not start CsiProMax.dll --modeler: " + arguments);
+            FieldContext.Expect(Shortcuts.Mark2 == "|4", "the Modeler and Viewer shortcuts of an older version are not replaced by the Engine's once");
+            FieldContext.Expect(WebPages.Title(WebPages.Kind.ModelerView, "") == "CSI ProMax Engine" && WebPages.Title(WebPages.Kind.Viewer, "") == "CSI ProMax Engine", "the windows are not named CSI ProMax Engine");
             return "dotnet " + arguments;
         });
 

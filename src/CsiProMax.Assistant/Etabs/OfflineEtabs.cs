@@ -384,6 +384,25 @@ public sealed class OfflineEtabs : ICsiLink, CsiProMax.Assistant.Tools.IModelDra
         return path;
     }
 
+    /// <summary>
+    /// The model written for a run in its program (CSI ProMax Engine's Analyze > Run): the .e2k at <paramref name="e2k"/>
+    /// and its program's file beside it. The model's own file, name and revision are left as they are. Returns the file
+    /// the program opens: the .e2k for ETABS, the .s2k for SAP2000, the .f2k for SAFE.
+    /// </summary>
+    public string WriteForRun(string e2k)
+    {
+        try
+        {
+            Directory.CreateDirectory(System.IO.Path.GetDirectoryName(e2k)!);
+            E2kWriter.WriteFile(Model, e2k);
+            var own = WriteProgramFile(e2k);
+            if (Model.Target is not ("sap2000" or "safe")) return e2k;
+            if (own.Length == 0) throw new EtabsException("SAFE takes one floor, and this model has no floor SAFE can take (slabs on one story).");
+            return own;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { throw new EtabsException($"The model could not be written for the run to {e2k}: {ex.Message}"); }
+    }
+
     /// <summary>The model's file for its own program, written beside the .e2k on every save: the .s2k for SAP2000, the
     /// .f2k (the floor with the most slab) for SAFE; "" for ETABS, whose file is the .e2k.</summary>
     public string ProgramFile { get; private set; } = "";

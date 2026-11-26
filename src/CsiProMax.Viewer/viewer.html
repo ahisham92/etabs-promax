@@ -78,7 +78,8 @@ main{flex:1;display:flex;min-height:0}
 #etabs{display:flex;border-bottom:1px solid var(--line);background:var(--chrome)}
 #etabs button{border:0;border-right:1px solid var(--line2);border-radius:0;background:none;padding:3px 10px}
 #etabs button.on{background:var(--field);font-weight:600;box-shadow:inset 0 2px 0 var(--accent)}
-#tree{flex:1;overflow:auto;padding:3px 0 8px 2px}
+#tree{flex:1;overflow:auto;padding:0 0 8px 2px}
+#tree .xtabs{display:flex;border-bottom:1px solid var(--line);margin:0 0 3px -2px;position:sticky;top:0;background:var(--field);z-index:1}#tree .xtabs button{border:1px solid transparent;border-bottom:0;background:none;padding:2px 9px;border-radius:2px 2px 0 0;margin-bottom:-1px}#tree .xtabs button.on{border-color:var(--line);background:var(--field);font-weight:600}#tree .xpage>details{margin-left:2px}
 #tree details>summary{list-style:none}
 #tree details>summary::-webkit-details-marker{display:none}
 #tree details{margin-left:13px}
@@ -171,7 +172,7 @@ textarea{width:100%;min-height:60px;resize:vertical}
 /* status bar */
 footer{display:flex;border-top:1px solid var(--line);background:var(--bars);color:var(--ink);white-space:nowrap;height:23px;align-items:stretch}
 footer span{padding:0 10px;border-left:1px solid var(--line2);display:flex;align-items:center}
-footer #hint{flex:1;overflow:hidden;text-overflow:ellipsis;color:var(--mute);border-left:0}
+footer #hint{flex:1;overflow:hidden;text-overflow:ellipsis;color:var(--mute)}footer #vname{border-left:0}footer #vname:empty{display:none}
 footer #coords{font-variant-numeric:tabular-nums;min-width:230px}
 footer select{height:19px;font-size:11.5px;border-radius:0;margin:0 -4px}
 #drop{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:24px;color:#cfd8dc;z-index:4;background:#0b0d0f}
@@ -263,7 +264,7 @@ body.chaton #right{width:380px;max-width:42%}
 </head>
 <body data-prog="etabs">
 <div id="menubar">
-  <span class="brand"><svg viewBox="0 0 16 16"><path d="M2 14V5l6-3l6 3v9M2 9.5h12M8 2v12" fill="none" stroke="currentColor" stroke-width="1.5"/></svg><span id="app">CSI ProMax Viewer</span></span>
+  <span class="brand"><svg viewBox="0 0 16 16"><path d="M2 14V5l6-3l6 3v9M2 9.5h12M8 2v12" fill="none" stroke="currentColor" stroke-width="1.5"/></svg><span id="app">CSI ProMax Engine</span></span>
   <div class="menu" data-menu="File">File<div class="drop"></div></div>
   <div class="menu" data-menu="Edit">Edit<div class="drop"></div></div>
   <div class="menu" data-menu="View">View<div class="drop"></div></div>
@@ -271,9 +272,11 @@ body.chaton #right{width:380px;max-width:42%}
   <div class="menu" data-menu="Draw" hidden>Draw<div class="drop"></div></div>
   <div class="menu" data-menu="Select">Select<div class="drop"></div></div>
   <div class="menu" data-menu="Assign" hidden>Assign<div class="drop"></div></div>
+  <div class="menu" data-menu="Analyze">Analyze<div class="drop"></div></div>
   <div class="menu" data-menu="Display">Display<div class="drop"></div></div>
   <div class="menu" data-menu="Design">Design<div class="drop"></div></div>
   <div class="menu" data-menu="Options">Options<div class="drop"></div></div>
+  <div class="menu" data-menu="Tools">Tools<div class="drop"></div></div>
   <div class="menu" data-menu="Help">Help<div class="drop"></div></div>
   <span class="meta" id="meta">No pack open</span>
   <input type="file" id="file" accept=".cpmx,.zip,.json" hidden>
@@ -334,7 +337,7 @@ body.chaton #right{width:380px;max-width:42%}
     </div>
   </div>
 </main>
-<footer><span id="hint">Ready</span><span id="sel"></span><span id="coords"></span><span id="similarWrap" hidden><select id="similar" title="Draw on one story or on all stories" style="height:19px;padding:0 2px"><option value="one">One Story</option><option value="all">All Stories</option></select></span><span>Global</span><span id="units"></span></footer>
+<footer><span id="vname"></span><span id="hint">Ready</span><span id="sel"></span><span id="coords"></span><span id="similarWrap" hidden><select id="similar" title="Draw on one story or on all stories" style="height:19px;padding:0 2px"><option value="one">One Story</option><option value="all">All Stories</option></select></span><span>Global</span><span id="units"></span></footer>
 <div id="rubber"></div><div id="tip"></div>
 <script id="pack" type="application/json"></script>
 <script>
@@ -391,6 +394,54 @@ async function unzip(buffer) {
   }
   return files;
 }
+// ---- CSI ProMax Engine: the model and its results in one window (Ahmed 2026-11-26). Results come from a review pack of
+// a run (File > Import > Results, or Analyze > Run Analysis) and lie on the model by Label and Story, as the programs
+// name objects. A change to the model clears them, as ETABS deletes its results when the model is unlocked. ----
+const engine = {res: null, from: "", base: null, rev: 0};
+const engineKinds = t => !(t.from === "input") && !/^(griddefinitions|frameassignmentssectionproperties|areaassignmentssectionproperties|modelchecks|quantities)$/.test(norm(t.name));
+function engineWith(pack, keep) {
+  if (!pack || pack.engine) return pack;
+  if (keep && engine.res && engine.base && engine.base !== pack) {
+    // The live model moved on (a hand edit or the chat): its results no longer belong to it.
+    engine.res = null; setTimeout(() => { if (typeof hmSay === "function") hmSay("The model changed, so its results were cleared, as ETABS does when a model is unlocked. Run the analysis again to see them."); buildTree(); }, 0);
+  }
+  engine.base = pack;
+  if (!engine.res) return pack;
+  const out = Object.assign({}, pack, {tables: Object.assign({}, pack.tables || {}), manifest: Object.assign({}, pack.manifest || {}, {analysis_run: true, results_from: engine.from}), engine: true});
+  for (const [n, t] of Object.entries(engine.res.tables || {})) if (engineKinds(t) || !out.tables[n]) out.tables[n] = t;
+  if (engine.res.instabilities) out.instabilities = engine.res.instabilities;
+  return out;
+}
+async function engineImport(file) {
+  // A review pack's results onto the open model: its result and design tables, the model kept as it is.
+  try {
+    const pack = await readPack(file); if (!pack) return;
+    const named = new Set(frames.map(f => f.name.replace(/@.*$/, "")).concat(areas.map(a => a.name.replace(/@.*$/, "")))), theirs = [...(pack.model.frames || []).map(f => String(f[0])), ...(pack.model.areas || []).map(a => String(a.n))];
+    const match = theirs.length ? theirs.filter(n => named.has(n.replace(/@.*$/, ""))).length / theirs.length : 0;
+    engine.res = pack; engine.from = file.name;
+    load(engine.base || P, true);
+    hmSay(`Results of ${file.name} are shown on the model (${Object.values(pack.tables).filter(engineKinds).length} result and design tables${match < 0.9 ? `; only ${Math.round(match * 100)}% of its objects have the same labels as this model, so some results have no object to sit on` : ""}).`, match < 0.5);
+  } catch (ex) { hmSay("That file could not be read: " + ex.message, true); }
+}
+async function engineRun(design) {
+  // Analyze > Run: the model's program runs it in the background and is closed again; its results come back here.
+  const post = b => fetch("run", {method: "POST", headers: {"Content-Type": "application/json", "X-CPM-View": "1"}, body: JSON.stringify(b), cache: "no-store"}).then(r => r.json());
+  let j; try { j = await post({design}); } catch (e) { return hmSay("The Engine could not be reached: " + e.message, true); }
+  if (!j.ok) return dialog("Run Analysis", `<p style="max-width:460px">${esc(j.error)}</p>`, [["OK"]], {width: 500});
+  const d = dialog(`Run ${design ? "Analysis and Design" : "Analysis"} - ${j.program}`, `<div class="pgwrap" style="height:220px;padding:4px 6px" id="runLog"></div><p class="kv" id="runPhase" style="margin:6px 0 0"></p>`, [["Close"]], {float: true, width: 560});
+  for (;;) {
+    await new Promise(r => setTimeout(r, 1000));
+    let st; try { st = await post({take: true}); } catch (e) { continue; }
+    const log = d.querySelector("#runLog"); if (log) { log.innerHTML = st.lines.map(l => `<div>${esc(l)}</div>`).join(""); log.scrollTop = 1e9; }
+    const ph = d.querySelector("#runPhase"); if (ph) ph.textContent = st.running ? st.phase + "..." : st.error ? "Stopped." : "Done.";
+    if (!st.done) continue;
+    if (st.error) { hmSay(st.error, true); return; }
+    if (st.model_changed) { hmSay("The model changed while it ran, so its results were not put on it. Run again.", true); return; }
+    if (st.pack) { engine.res = st.pack; engine.from = st.pack_file || "the run"; load(engine.base || P, true); hmSay(`Analysed in ${st.program}: the results are shown (Display menu)${st.pack_file ? "; review pack " + st.pack_file : ""}.`); buildTree(); }
+    return;
+  }
+}
+function engineClear() { if (!engine.res) return; engine.res = null; load(engine.base || P, false); hmSay("The results were cleared; the model is unlocked."); }
 async function readPack(file) {
   const buffer = await file.arrayBuffer();
   const head = new Uint8Array(buffer, 0, 2);
@@ -421,6 +472,7 @@ const objOf = id => id <= 0 ? null : id <= frames.length ? frames[id - 1] : area
 function load(pack, keep) {
   const before = keep && P ? panes.map(p => ({mode: p.mode, story: p.story, line: p.line && p.line.label + p.line.dir, cam: {...p.cam, target: p.cam.target.slice()}})) : null;
   const selNames = keep ? [...sel].map(objOf).filter(Boolean).map(o => o.type + ":" + o.name) : [], selJNames = keep ? [...selJ] : [];
+  if (window.cpmLive) pack = engineWith(pack, keep);
   P = pack; P.comments = P.comments || []; P.tables = P.tables || {};
   const m = P.model, man = P.manifest || {};
   // In the Modeler the model is made for one program, chosen at New Model (Ahmed 2026-11-26): the page offers what it has.
@@ -467,7 +519,7 @@ function load(pack, keep) {
   const u = man.units || {};
   unit = u.length || "";
   const progName = {etabs: "ETABS", sap2000: "SAP2000", safe: "SAFE"}[program];
-  $("app").textContent = (window.cpmLive ? "CSI ProMax Modeler" : "CSI ProMax Viewer") + " · " + progName;
+  $("app").textContent = "CSI ProMax Engine · " + progName;
   $("meta").textContent = [man.model || "Model", man.etabs ? (/modeler/i.test(man.etabs) ? man.etabs : (man.program || "ETABS") + " " + man.etabs) : "", !window.cpmLive && man.created ? "packed " + String(man.created).replace("T", " ").slice(0, 16) : "", man.by && /sample/i.test(man.by) ? man.by : ""].filter(Boolean).join(" · ");
   document.title = (man.model || "Model") + " · " + $("app").textContent;
   $("units").textContent = u.force && u.length ? u.force + ", " + u.length + (u.temperature ? ", " + u.temperature : "") : "";
@@ -717,19 +769,25 @@ function caseKey(t, r, c, stepType, stepNum) {
   if (/mode/i.test(st) && sn) return r[c] + " · Mode " + parseInt(sn, 10);
   return String(r[c]);
 }
+// A joint row's name on this model: the program's own (its unique name), or Label@Story where the model is the Engine's.
+function jointNamer(t, u) {
+  const lb = col(t.fields, "Label"), sc = col(t.fields, "Story");
+  return r => { const n = String(r[u]); if (pointIdx.has(n) || lb < 0 || sc < 0) return n; const m = String(r[lb]) + "@" + r[sc]; return pointIdx.has(m) ? m : n; };
+}
 function readDisplacements() {
   disp = new Map();
   const t = P.tables["Joint Displacements"];
   if (t) {
     const u = col(t.fields, "UniqueName", "Unique Name", "Joint", "Label"), c = col(t.fields, "OutputCase", "Output Case", "Load Case/Combo"), x = col(t.fields, "Ux", "UX", "U1"), y = col(t.fields, "Uy", "UY", "U2"), z = col(t.fields, "Uz", "UZ", "U3"); // SAP2000 names them U1 U2 U3
     const st = col(t.fields, "StepType", "Step Type"), sn = col(t.fields, "StepNum", "Step Num", "StepNumber");
+    const nm = u >= 0 ? jointNamer(t, u) : null;
     if (u >= 0 && c >= 0 && x >= 0 && y >= 0 && z >= 0)
       for (const r of t.rows) {
         const k = caseKey(t, r, c, st, sn);
         if (st >= 0 && /min/i.test(r[st])) continue;
         if (!disp.has(k)) disp.set(k, new Map());
-        const d = [parseFloat(r[x]) || 0, parseFloat(r[y]) || 0, parseFloat(r[z]) || 0], had = disp.get(k).get(String(r[u]));
-        if (!had || Math.hypot(...d) > Math.hypot(...had)) disp.get(k).set(String(r[u]), d);
+        const d = [parseFloat(r[x]) || 0, parseFloat(r[y]) || 0, parseFloat(r[z]) || 0], had = disp.get(k).get(nm(r));
+        if (!had || Math.hypot(...d) > Math.hypot(...had)) disp.get(k).set(nm(r), d);
       }
   }
 }
@@ -758,7 +816,8 @@ function readReactions() {
     const u = col(t.fields, "UniqueName", "Unique Name", "Joint"), c = col(t.fields, "OutputCase", "Output Case", "Load Case/Combo"), st = col(t.fields, "StepType", "Step Type"), sn = col(t.fields, "StepNum", "Step Num");
     if (u < 0 || c < 0) continue;
     const idx = [["FX", "F1"], ["FY", "F2"], ["FZ", "F3"], ["MX", "M1"], ["MY", "M2"], ["MZ", "M3"]].map(k => col(t.fields, ...k)); // SAP2000: F1..M3
-    for (const r of t.rows) { if (st >= 0 && /min/i.test(r[st])) continue; const k = caseKey(t, r, c, st, sn); let m = reacts.get(k); if (!m) reacts.set(k, m = new Map()); m.set(String(r[u]), idx.map(i => i >= 0 ? parseFloat(r[i]) || 0 : 0)); }
+    const nm = jointNamer(t, u);
+    for (const r of t.rows) { if (st >= 0 && /min/i.test(r[st])) continue; const k = caseKey(t, r, c, st, sn); let m = reacts.get(k); if (!m) reacts.set(k, m = new Map()); m.set(nm(r), idx.map(i => i >= 0 ? parseFloat(r[i]) || 0 : 0)); }
   }
 }
 function readDrifts() {
@@ -889,6 +948,8 @@ function rowPlacer(t) {
     const o = jointTable ? null : (areaFirst ? aBy.get(name) || fBy.get(name) : fBy.get(name) || aBy.get(name)) || (l && (fBy.get(l + "@" + sv) || (u < 0 ? (areaFirst ? aBy.get(l) || fBy.get(l) : fBy.get(l) || aBy.get(l)) : null)));
     if (o) return {key: o.type + ":" + o.name, label: o.name, objs: [o], st: station >= 0 ? String(r[station]) : ""};
     if (jt >= 0 && pointXyz.has(String(r[jt]))) return {key: "p:" + r[jt], label: String(r[jt]), objs: [], at: pointXyz.get(String(r[jt]))};
+    // A run's joint rows on the Engine's model: the program numbers its joints, the model names them Label@Story.
+    if (jointTable && lab >= 0 && sv && pointXyz.has(String(r[lab]) + "@" + sv)) { const n = String(r[lab]) + "@" + sv; return {key: "p:" + n, label: n, objs: [], at: pointXyz.get(n)}; }
     if (gx >= 0 && gy >= 0 && isNum(r[gx]) && isNum(r[gy])) { const z = gz >= 0 && isNum(r[gz]) ? +r[gz] : elevOf(sv) ?? slabLevel(); return {key: "x:" + r[gx] + "," + r[gy] + "," + z, label: "", objs: [], at: [+r[gx], +r[gy], z]}; }
     if (sv && elevOf(sv) !== null && u < 0 && jt < 0 && lab < 0) return {key: "s:" + sv, label: sv, objs: [], at: [hi[0] + size * 0.03, lo[1], elevOf(sv)]};
     return null;
@@ -1970,6 +2031,7 @@ function drawPane(p, n, vr, dpr, T, now) {
   const R = paneRect(p, vr, dpr), cv = p.cv, g = p.g;
   p.el.classList.toggle("act", n === active);
   p.title.firstChild.textContent = paneTitle(p);
+  if (n === active) { const v = $("vname"), t = paneTitle(p).split("  ·  ")[0]; if (v.textContent !== t) v.textContent = t; }
   if (cv.width !== R.W || cv.height !== R.H) { cv.width = R.W; cv.height = R.H; }
   g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, R.w, R.h);
   if (R.w < 4 || R.h < 4) return;
@@ -2632,6 +2694,9 @@ function act(name) {
   if (name.startsWith("r:")) return setRes(name.slice(2));
   if (name.startsWith("o:")) { const k = name.slice(2); opt[k] = !opt[k]; if (k === "extrude" || k === "sections") { geometryDirty = true; geometryStamp++; } if (k === "fill") hiddenVersion++; if (k === "explorer") $("explorer").hidden = !opt.explorer; if (k === "side") $("right").hidden = !opt.side; syncTools(); return draw(); }
   if (name.startsWith("m:")) return modelAct(name.slice(2));
+  if (name === "eng:import") { const f = document.createElement("input"); f.type = "file"; f.accept = ".cpmx,.zip,.json"; f.onchange = () => { if (f.files[0]) engineImport(f.files[0]); }; return f.click(); }
+  if (name === "eng:clear") return engineClear();
+  if (name === "eng:run" || name === "eng:runDesign") return engineRun(name === "eng:runDesign");
   if (name.startsWith("t:") || name.startsWith("d:")) { tool = name.startsWith("t:") ? name.slice(2) : name; hm.chain = []; hm.hover = null; syncTools(); showObjBox(); draw(); return; }
   if (name.startsWith("v:")) return setMode(p, name.slice(2));
   if (name.startsWith("cam:")) { if (p) setView3d(p, name.slice(4)); return; }
@@ -2721,7 +2786,9 @@ const viewerMenus = () => {
       ["Windows", [["One window", "lay1"], ["Two windows", "lay2"], ["Three windows", "lay3"], ["Four windows", "lay4"]]]],
     Define: [["Material Properties...", "dlg:materials"], ["Frame Sections...", "dlg:frameSections"], ["Slab and Wall Sections...", "dlg:areaSections"], 0, ["Story Data...", "dlg:stories"], ["Grid Data...", "dlg:grids"], 0, ["Load Patterns...", "dlg:patterns"], ["Load Cases...", "dlg:cases"], ["Load Combinations...", "dlg:combos"]],
     Select: [["All", "selAll", "Ctrl+A"], ["All on This Story", "selStory", "", !plan], ["By Section...", "dlg:bySection"], ["By Object Type...", "dlg:byType"], ["Joints", "selJoints"], ["Supports (Restraints and Springs)", "selSupports"], ["Invert", "selInvert"], 0, ["Filter Selection...", "selFilter", "", !sel.size && !selJ.size], 0, ["Clear Selection", "selNone", "Esc"]],
-    Analyze: [["Check Model for Instabilities...", "inst", "F7"], ["Show the Last Check's Marks", "instMarks", "", !inst.answer], 0, ["What the check looks for", "instHelp"]],
+    Analyze: [["Check Model for Instabilities...", "inst", "F7"], ["Show the Last Check's Marks", "instMarks", "", !inst.answer], 0, ["What the check looks for", "instHelp"],
+      ...(window.cpmLive ? [0, ["Run Analysis", "eng:run", "F5"], ["Run Analysis and Design", "eng:runDesign"], 0, ["Show Results from a Review Pack (.cpmx)...", "eng:import"], ["Unlock Model (clear its results)", "eng:clear", "", !engine.res]] : [])],
+    Tools: [["Tables...", "tables", "Ctrl+T"], ["Model Explorer", "explorer"], ["Side Panel", "side"], ...(window.cpmChat ? [["Chat", "chat"]] : []), 0, ["Results Coverage...", "dlg:coverage", "", !P], ["Summary of Design Results...", "dlg:designSummary", "", !P]],
     Display: (() => {
       const has = re => Object.values(P ? P.tables : {}).some(t => t.rows && t.rows.length && re.test(norm(t.name))), plots = P ? Object.values(P.tables).some(t => t.rows && t.rows.length > 1) : false;
       return [["Undeformed Shape", "r:model", "F4"], [program === "sap2000" ? "Show Load Assigns" : "Load Assigns", ["joint", "frame", "shell"].map(k => [loadWord(k) + "...", "loads:" + k, "", !loadTables(k).length])], 0, ["Deformed Shape...", "dlg:deformed", "F6", !disp.size], ["Mode Shapes...", "dlg:modes", "", !P || !modeCases().length], ["Animate Deformed Shape", "anim", "", res.mode !== "deformed"], 0,
@@ -3409,35 +3476,64 @@ function wireDesignCard(el) {
 }
 
 // ---- model explorer ----
+// The Model Explorer as ETABS has it (Ahmed 2026-11-26, "CSI ProMax Engine"): Model, Display, Tables and Reports tabs;
+// the Model tree in ETABS's order: Project, Structure Layout, Properties, Structural Objects, Groups, Loads, Named
+// Output Items, Named Plots.
+let xTab = "model";
 function buildTree() {
   const open = new Set([...document.querySelectorAll("#tree details[open]")].map(d => d.dataset.k)), first = !document.querySelector("#tree details");
   const node = (k, title, n, body, wide) => `<details data-k="${k}" ${first ? (wide ? "open" : "") : open.has(k) ? "open" : ""}><summary>${esc(title)}${n === null ? "" : ` <span class="n">(${n})</span>`}</summary>${body}</details>`;
   const plain = list => list.length ? list.map(x => `<div class="leaf">${esc(x)}</div>`).join("") : `<div class="leaf kv">none</div>`;
-  const T = theme(), m = P.model, count = (list, f) => list.filter(f).length;
-  const kinds = [["column", "Columns", frames], ["beam", "Beams", frames], ["brace", "Braces", frames], ["floor", "Floors", areas], ["wall", "Walls", areas]];
+  const T = theme(), m = P.model, man = P.manifest || {}, count = (list, f) => list.filter(f).length;
+  const kinds = [["column", "Columns", frames], ["beam", "Beams", frames], ["brace", "Braces", frames], ["floor", program === "sap2000" ? "Areas" : "Floors", areas], ["wall", "Walls", areas]];
   const kindLeaves = kinds.map(([k, title, list]) => { const n = count(list, o => o.kind === k); return n ? `<label class="leaf"><input type="checkbox" data-hide="kind" data-v="${k}" ${hidden.kind.has(k) ? "" : "checked"}><i style="background:${k === "floor" ? T.floor : k === "wall" ? T.wall : T[k]}"></i>${title}<span class="n">${n}</span></label>` : ""; }).join("");
   const secLeaves = (type, names, list) => names.map(s => { const n = count(list, o => o.section === s), z = type === "f" ? sizes[s] : slabT[s]; return `<div class="leaf go" data-sec="${type}" data-v="${esc(s)}" title="Click to light up its members"><input type="checkbox" data-hide="section" data-v="${esc(type + ":" + s)}" ${hidden.section.has(type + ":" + s) ? "" : "checked"}>${esc(s)}<span class="n">${z ? (type === "f" ? num(z[1]) + (z[2] ? "x" + num(z[2]) : "") : num(z)) + " · " : ""}${n}</span></div>`; }).join("") || `<div class="leaf kv">none</div>`;
   const fs = m.frame_sections || [...new Set(frames.map(f => f.section))], as = m.area_sections || [...new Set(areas.map(a => a.section))];
   const lines = dir => grids[dir].map(g => `<div class="leaf go" data-line="${esc(g.dir + g.label)}">${esc(g.label)}<span class="n">${dir} = ${num(g.at)}</span></div>`).join("");
-  const resultTables = Object.keys(P.tables).sort();
-  $("tree").innerHTML = node("model", (P.manifest || {}).model || "Model", null,
-    node("stories", "Stories", stories.length, stories.slice().reverse().map(s => `<div class="leaf go" data-story="${esc(s.name)}">${esc(s.name)}<span class="n">${num(s.elevation)}</span></div>`).join(""), true) +
-    node("grids", gridsGuessed ? "Column lines" : "Grid lines", grids.X.length + grids.Y.length, lines("X") + lines("Y")) +
-    node("objects", "Objects", frames.length + areas.length, kindLeaves || `<div class="leaf kv">nothing drawn yet</div>`, true) +
-    node("fsec", "Frame sections", fs.length, secLeaves("f", fs, frames)) +
-    node("asec", "Slab and wall sections", as.length, secLeaves("a", as, areas)) +
-    node("mat", "Materials", (m.materials || []).length, plain(m.materials || [])) +
-    node("pat", "Load patterns", (m.load_patterns || []).length, plain((m.load_patterns || []).map(p => p.name + " (" + p.type + ")"))) +
-    node("cases", "Load cases", (m.load_cases || []).length, plain(m.load_cases || [])) +
-    node("combos", "Load combinations", (m.combinations || []).length, plain(m.combinations || [])) +
-    node("tabs", "Tables", resultTables.length, resultTables.map(t => `<div class="leaf go" data-table="${esc(t)}">${esc(t)}</div>`).join("") || `<div class="leaf kv">no result tables</div>`), true);
+  const tableRows = name => { const t = P.tables[name]; return t && t.rows ? t.rows : []; }, firstCol = name => [...new Set(tableRows(name).map(r => String(r[0])))];
+  const groups = (m.groups || []).map(g => typeof g === "string" ? g : g.name).concat(firstCol("Group Definitions")).filter((g, i, a) => g && a.indexOf(g) === i);
+  const cuts = firstCol("Section Cut Definitions"), joints = jointsCount();
+  const tw = theWords();
+  const model = node("model", man.model || "Model", null,
+    node("project", "Project", null, `<div class="leaf">Program<span class="n">${esc(progLabel(program) + (man.etabs && !/modeler/i.test(man.etabs) ? " " + man.etabs : ""))}</span></div><div class="leaf">Units<span class="n">${esc($("units").textContent || "")}</span></div><div class="leaf">${esc(tw.analysed)}</div>`) +
+    node("layout", "Structure Layout", null,
+      node("stories", program === "sap2000" ? "Levels" : "Stories", stories.length, stories.slice().reverse().map(s => `<div class="leaf go" data-story="${esc(s.name)}">${esc(s.name)}<span class="n">${num(s.elevation)}</span></div>`).join(""), true) +
+      node("grids", gridsGuessed ? "Column lines" : "Grids", grids.X.length + grids.Y.length, lines("X") + lines("Y")), true) +
+    node("props", "Properties", null,
+      node("mat", "Materials", (m.materials || []).length, plain(m.materials || [])) +
+      node("fsec", "Frame Sections", fs.length, secLeaves("f", fs, frames)) +
+      node("asec", program === "sap2000" ? "Area Sections" : "Slab and Wall Sections", as.length, secLeaves("a", as, areas))) +
+    node("objects", "Structural Objects", frames.length + areas.length + joints, (kindLeaves || `<div class="leaf kv">nothing drawn yet</div>`) + `<div class="leaf go" data-act="selJoints">Joints<span class="n">${joints}</span></div><div class="leaf go" data-act="selSupports">Supports<span class="n">${supports.length}</span></div>`, true) +
+    node("groups", "Groups", groups.length, plain(groups)) +
+    node("loads", "Loads", null,
+      node("pat", "Load Patterns", (m.load_patterns || []).length, plain((m.load_patterns || []).map(p => p.name + " (" + p.type + ")"))) +
+      node("cases", "Load Cases", (m.load_cases || []).length, plain(m.load_cases || [])) +
+      node("combos", "Load Combinations", (m.combinations || []).length, plain(m.combinations || []))) +
+    node("named", "Named Output Items", cuts.length, cuts.length ? cuts.map(c => `<div class="leaf go" data-table="Section Cut Definitions">Section Cut ${esc(c)}</div>`).join("") : `<div class="leaf kv">none</div>`) +
+    node("plots", "Named Plots", null, `<div class="leaf go" data-act="dlg:storyPlot">Story Response Plots</div><div class="leaf go" data-act="xy:history">Plot Functions</div>`), true);
+  // Display: what the Display menu shows, one click each. Tables: by ETABS's three kinds. Reports: the summaries.
+  const flat = list => list.flatMap(i => !i ? [] : Array.isArray(i[1]) ? flat(i[1]) : [i]);
+  const display = flat(viewerMenus().Display).filter(i => i[1] && !i[3]).map(i => `<div class="leaf go" data-act="${esc(i[1])}">${esc(i[0].replace(/\.\.\.$/, ""))}</div>`).join("");
+  const kindOf = name => { const t = P.tables[name]; return famOf(name) !== null || /design|punch/.test(norm(name)) ? "design" : t.from === "input" || /definition|assign|propert|load(pattern|case|combo)|grid|story|material|section|^model|quantit|loads-/.test(norm(name)) ? "model" : "results"; };
+  const all = Object.keys(P.tables).sort(), leaf = t => `<div class="leaf go" data-table="${esc(t)}">${esc(t)}</div>`;
+  const tablesHtml = [["model", "Model Definition"], ["results", "Analysis Results"], ["design", "Design Results"]].map(([k, title]) => { const list = all.filter(t => kindOf(t) === k); return node("t" + k, title, list.length, list.map(leaf).join("") || `<div class="leaf kv">none</div>`, true); }).join("");
+  const reports = [["dlg:coverage", "Results Coverage"], ["dlg:designSummary", "Summary of Design Results"], ["inst", "Check Model for Instabilities"]].concat(P.tables["Model Checks"] ? [["table:Model Checks", "Model Checks"]] : []);
+  $("tree").innerHTML = `<div class="xtabs">${[["model", "Model"], ["display", "Display"], ["tables", "Tables"], ["reports", "Reports"]].map(([k, t]) => `<button data-x="${k}" class="${xTab === k ? "on" : ""}">${t}</button>`).join("")}</div>
+    <div class="xpage" data-x="model" ${xTab === "model" ? "" : "hidden"}>${model}</div>
+    <div class="xpage" data-x="display" ${xTab === "display" ? "" : "hidden"}>${display || `<div class="leaf kv">nothing to display</div>`}</div>
+    <div class="xpage" data-x="tables" ${xTab === "tables" ? "" : "hidden"}>${node("tabs", "Tables", all.length, tablesHtml, true)}</div>
+    <div class="xpage" data-x="reports" ${xTab === "reports" ? "" : "hidden"}>${reports.map(([a, t]) => `<div class="leaf go" data-act="${esc(a)}">${esc(t)}</div>`).join("")}</div>`;
+  $("tree").querySelectorAll(".xtabs button").forEach(b => b.onclick = () => { xTab = b.dataset.x; $("tree").querySelectorAll(".xtabs button").forEach(x => x.classList.toggle("on", x === b)); $("tree").querySelectorAll(".xpage").forEach(x => x.hidden = x.dataset.x !== xTab); });
   $("tree").querySelectorAll("[data-story]").forEach(el => el.onclick = () => setStory(el.dataset.story));
   $("tree").querySelectorAll("[data-line]").forEach(el => el.onclick = () => act("line:" + el.dataset.line));
   $("tree").querySelectorAll("[data-table]").forEach(el => el.onclick = () => { showTables(true); pickTable(el.dataset.table); });
+  $("tree").querySelectorAll("[data-act]").forEach(el => el.onclick = () => { const a = el.dataset.act; if (a.startsWith("table:")) { showTables(true); pickTable(a.slice(6)); } else act(a); });
   $("tree").querySelectorAll("[data-hide]").forEach(el => { el.onclick = e => e.stopPropagation(); el.onchange = () => { const set = hidden[el.dataset.hide]; el.checked ? set.delete(el.dataset.v) : set.add(el.dataset.v); hiddenVersion++; draw(); }; });
   $("tree").querySelectorAll("[data-sec]").forEach(el => el.onclick = () => { const same = lit && lit.type === el.dataset.sec && lit.name === el.dataset.v; lit = same ? null : {type: el.dataset.sec, name: el.dataset.v}; markTree(); panes.forEach(p => p.sig = ""); draw(); });
   markTree();
 }
+const jointsCount = () => { const k = new Set(); for (const o of frames.concat(areas)) for (const q of o.type === "f" ? [o.a, o.b] : o.pts) k.add(key(q[0], q[1], q[2])); for (const s of supports) k.add(key(...s.p)); return k.size; };
+const theWords = () => { const man = P.manifest || {}, any = Object.values(P.tables).some(t => t.from !== "input" && t.rows && t.rows.length && /forces|displacement|reaction|drift|modal/.test(norm(t.name))); return {analysed: any ? "Analysed: results are shown" : window.cpmLive ? "Not analysed yet (Analyze > Run Analysis)" : "No results in this pack"}; };
 function markTree() {
   const p = panes[active];
   document.querySelectorAll("#tree [data-story]").forEach(el => el.classList.toggle("cur", !!p && p.mode === "plan" && el.dataset.story === p.story));
@@ -3665,6 +3761,7 @@ try { $("who").value = localStorage.getItem("cpm-who") || ""; } catch (e) {}
 
 // ---- opening, keys and start ----
 async function openFile(file) {
+  if (window.cpmLive) return /\.(cpmx|zip|json)$/i.test(file.name) ? engineImport(file) : hmSay("Drop a review pack (.cpmx) here to show its results on the model; open a model with File > Open.", true);
   try { const pack = await readPack(file); if (pack) load(pack); }
   catch (ex) { $("drop").style.display = "flex"; $("drop").firstElementChild.innerHTML = `<b>That file could not be opened</b><br>${esc(ex.message)}`; }
 }
@@ -3674,6 +3771,7 @@ document.addEventListener("drop", e => { e.preventDefault(); if (e.dataTransfer.
 document.addEventListener("keydown", e => {
   if (e.target.closest("input, textarea, select")) return;
   const k = e.key, ctrl = e.ctrlKey || e.metaKey, stop = () => e.preventDefault();
+  if (k === "F5" && window.cpmLive) { stop(); act("eng:run"); return; }
   if (k === "F2") { stop(); act("t:zoom"); } else if (k === "F3") { stop(); act("fitActive"); } else if (k === "F4") { stop(); setRes("model"); } else if (k === "F6") { stop(); if (disp.size) dialogs.deformed(); } else if (k === "F8") { stop(); if (forces.size) dialogs.forces(); }
   else if (k === "PageUp") { stop(); act("storyUp"); } else if (k === "PageDown") { stop(); act("storyDown"); }
   else if (k === "Escape") { if (document.querySelector(".ctx")) hideMenus(); else if (tool !== "select") act("t:select"); else act("selNone"); }
@@ -3853,7 +3951,7 @@ function modelerMenus(m) {
   const s = hm.state || {}, any = sel.size > 0, fr = [...sel].some(id => (objOf(id) || {}).type === "f"), ar = [...sel].some(id => (objOf(id) || {}).type === "a");
   m.File = [["New Model...", "m:new", "Ctrl+N"], ["Open...", "m:open", "Ctrl+O"], 0, ["Save", "m:save", "Ctrl+S"], ["Save As...", "m:saveAs"], 0,
     ["Model for " + progLabel(program) + " (change)...", "m:program"], 0,
-    ["Import", [["Tables from Excel (.xlsx)...", "m:xlsxIn"]]],
+    ["Import", [["Tables from Excel (.xlsx)...", "m:xlsxIn"], ["Results from a Review Pack (.cpmx)...", "eng:import"]]],
     ["Export", [["Tables to Excel (.xlsx)...", "m:xlsxOut"], 0, only(["etabs", "sap2000"], ["SAP2000 .s2k Text File...", "m:s2k"]), only(["etabs", "safe"], ["SAFE .f2k Text File (one floor)...", "m:f2k"])]], 0, ["Print the active window...", "print", "Ctrl+P"]];
   m.Edit = [[s.undo ? "Undo " + s.undo : "Undo", "m:undo", "Ctrl+Z", !s.undo], [s.redo ? "Redo " + s.redo : "Redo", "m:redo", "Ctrl+Y", !s.redo], 0,
     ["Delete", "m:delete", "Del", !any], 0, ["Copy names of the selected objects", "copyNames", "Ctrl+C", !any], 0, ["Hide the selected objects", "hideSel", "", !any], ["Show all objects", "showAll"], 0, ["Model Text...", "m:text"]];
@@ -5155,7 +5253,7 @@ function start() {
   initGL();
   if (window.cpmLive) {
     // The Modeler's own view: it follows the model as the chat builds it. Review tools stay with the Viewer.
-    $("app").textContent = "CSI ProMax Modeler"; document.querySelector('[data-act="open"]').hidden = true;
+    $("app").textContent = "CSI ProMax Engine"; document.querySelector('[data-act="open"]').hidden = true;
     document.querySelector('[data-tab="comments"]').hidden = true; document.querySelector('[data-tab="checks"]').hidden = true;
     document.querySelector('[data-menu="File"]').hidden = true;
     modelerStart();

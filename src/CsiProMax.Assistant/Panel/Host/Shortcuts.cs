@@ -13,6 +13,9 @@ namespace CsiProMax.Host;
 /// </summary>
 internal static class Shortcuts
 {
+    public const string EngineName = CsiProMax.App.Engine;
+
+    /// <summary>The shortcuts of the versions before the Engine: replaced by the Engine's, and taken away.</summary>
     public const string ModelerName = "CSI ProMax Modeler", ViewerName = "CSI ProMax Viewer";
 
     private static string Root => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CsiProMax");
@@ -30,8 +33,8 @@ internal static class Shortcuts
     /// <summary>What the mark file holds: the program folder the shortcuts were last made for.</summary>
     internal static bool Due(string? marked, string folder) => !string.Equals(marked?.Trim(), folder + Mark2, StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>Added to the mark when the shortcuts themselves change (2: they have the icon; 3: the Viewer's opens its own window), so they are made again once.</summary>
-    internal const string Mark2 = "|3";
+    /// <summary>Added to the mark when the shortcuts themselves change (2: they have the icon; 3: the Viewer's opens its own window; 4: one CSI ProMax Engine shortcut in place of the Modeler and Viewer), so they are made again once.</summary>
+    internal const string Mark2 = "|4";
 
     /// <summary>Called at every start, off the window's thread. Never throws: a PC that forbids shortcuts just has none.</summary>
     public static void Ensure()
@@ -102,8 +105,11 @@ internal static class Shortcuts
         return ViewerPage;
     }
 
-    /// <summary>The Viewer shortcut's arguments: CsiProMax.dll in its own window (--viewer), not the page in a browser.</summary>
+    /// <summary>The Viewer's arguments: CsiProMax.dll in its own window (--viewer), not the page in a browser (a pack opened by itself).</summary>
     internal static string ViewerArguments(string folder) => "\"" + Path.Combine(folder, "CsiProMax.dll") + "\" --viewer";
+
+    /// <summary>The Engine shortcut's arguments: CsiProMax.dll --modeler, the Modeler window that shows results too.</summary>
+    internal static string EngineArguments(string folder) => "\"" + Path.Combine(folder, "CsiProMax.dll") + "\" --modeler";
 
     private static List<string> Make(bool onlyExisting)
     {
@@ -118,32 +124,25 @@ internal static class Shortcuts
             {
                 if (folder.Length == 0) continue;
                 Directory.CreateDirectory(folder);
-                var modeler = Path.Combine(folder, ModelerName + ".lnk");
-                if (!onlyExisting || File.Exists(modeler))
+                // One program, CSI ProMax Engine (Ahmed 2026-11-26): the Modeler with the results in it. It replaces the
+                // Modeler and Viewer shortcuts; one the person kept is made again as the Engine's, none deleted comes back.
+                var engine = Path.Combine(folder, EngineName + ".lnk");
+                string modeler = Path.Combine(folder, ModelerName + ".lnk"), viewer = Path.Combine(folder, ViewerName + ".lnk");
+                if (!onlyExisting || File.Exists(engine) || File.Exists(modeler) || File.Exists(viewer))
                 {
-                    dynamic link = shell.CreateShortcut(modeler);
+                    dynamic link = shell.CreateShortcut(engine);
                     link.TargetPath = dotnet;
-                    link.Arguments = "\"" + Path.Combine(ProgramFolder(), "CsiProMax.dll") + "\" --modeler";
+                    link.Arguments = EngineArguments(ProgramFolder());
                     link.WorkingDirectory = ProgramFolder();
                     link.WindowStyle = 7; // minimised: dotnet's own console window stays out of the way
-                    link.Description = "CSI ProMax Modeler: build ETABS models with no ETABS open"; // ETABS itself
+                    link.Description = "CSI ProMax Engine: model, run and see results and design, for ETABS, SAP2000 and SAFE"; // ETABS itself
                     if (File.Exists(icon)) link.IconLocation = icon;
                     link.Save();
-                    made.Add(modeler);
+                    made.Add(engine);
                 }
-                var viewer = Path.Combine(folder, ViewerName + ".lnk");
-                if (!onlyExisting || File.Exists(viewer))
-                {
-                    dynamic link = shell.CreateShortcut(viewer);
-                    link.TargetPath = dotnet;
-                    link.Arguments = ViewerArguments(ProgramFolder());
-                    link.WorkingDirectory = ProgramFolder();
-                    link.WindowStyle = 7; // minimised: dotnet's own console window stays out of the way
-                    link.Description = "CSI ProMax Viewer: open a review pack (.cpmx) with no ETABS"; // ETABS itself
-                    if (File.Exists(icon)) link.IconLocation = icon;
-                    link.Save();
-                    made.Add(viewer);
-                }
+                foreach (var old in new[] { modeler, viewer })
+                    try { if (File.Exists(old)) File.Delete(old); }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
             }
         }
         finally { Marshal.FinalReleaseComObject(shell); }
