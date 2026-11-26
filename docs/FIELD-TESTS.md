@@ -57,6 +57,29 @@ tested" (each with the reason), then the plug-in lists, then every check of ever
 the model and the Windows user's folder are left out. Without the window: `dotnet CsiProMax.dll --program etabs
 --fieldtest --full` (or `sap2000`, `safe`; leave out `--full` for the quick test) prints the same report.
 
+## Review pack written by itself after every run and design (2026-11-26)
+
+CSI ProMax keeps `<model>.cpmx` and `<model> viewer.html` beside the model up to date with no button: a background
+watcher (`dotnet CsiProMax.dll --packs`, no window) looks at each open ETABS, SAP2000 and SAFE window every 10 seconds
+and writes the pack again when the model got new results (its `.LOG`/`.OUT` beside the model is newer than the pack,
+or the model became analysed) or when a design ran (a design table got data, or the API says the design has results).
+It only reads: the model is never saved, unlocked or changed. It is started by the CSI ProMax window and at every
+sign-in by the Tools menu keeper; `-NoPacks` on the install line (or `packs-off.txt` in `%LOCALAPPDATA%\CsiProMax`)
+turns it off. What it did is in `%LOCALAPPDATA%\CsiProMax\packs.log`, what it watches in `packs.json`.
+
+The full field test checks it on each program's scratch model while it has results (steps "... review pack is written
+by itself after its analysis", "... writes nothing again when nothing changed", "... written again after a design,
+and keeps the reviewer's comments", "the watcher leaves the field test's own ... model to the field test").
+
+By hand, once per program (ETABS 23, SAP2000 26, SAFE; and ETABS 20 / SAFE 20 after opening Tools > CSI ProMax once):
+1. Open a saved model, run the analysis. Expected: within about 30 s of the analysis ending, `<model>.cpmx` and
+   `<model> viewer.html` appear beside the model, and `packs.log` says "pack written after the analysis".
+2. Open the pack in the CSI ProMax Viewer and leave it open. Run a design (Design > ... > Start Design/Check).
+   Expected: `packs.log` says "pack written after the design", and the open Viewer reloads by itself with the design.
+3. Run the analysis again without changing anything else. Expected: the pack is written again (after the analysis).
+4. From a command line: `dotnet "%USERPROFILE%\Documents\CSI ProMax\CsiProMax.dll" --packs --once` prints what it sees in
+   each open program and writes a pack where one is due. Send its text when step 1 did not work.
+
 The numbered checks below are what the field test does by itself, kept as a list to go through by hand when it
 cannot run, or to look closer at one that failed.
 

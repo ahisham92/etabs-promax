@@ -436,7 +436,12 @@ public static class FieldTest
                 ctx.Watched = window.Link;
                 // The Viewer's own screen on this program's model: one check, the same for every program. It runs while
                 // the model has its results (the program's steps say when), or after them if they never did.
-                ctx.WhileAnalysed = o.Viewer ? () => { var at = ctx.Watched; ctx.Watched = null; try { ViewerCheck.FieldSteps(ctx, window.Link, program.Name); } finally { ctx.Watched = at; } } : null;
+                ctx.WhileAnalysed = () =>
+                {
+                    if (o.Viewer) { var at = ctx.Watched; ctx.Watched = null; try { ViewerCheck.FieldSteps(ctx, window.Link, program.Name); } finally { ctx.Watched = at; } }
+                    // The pack beside the model written by itself after the run and the design (the watcher's rule).
+                    AutoPackFieldSteps.FieldSteps(ctx, window.Link, program.Name);
+                };
                 try { ScratchSteps(program)(ctx); }
                 catch (Exception ex) when (ex is not (OperationCanceledException or OutOfMemoryException))
                 {

@@ -94,6 +94,7 @@ internal sealed class WebWindow : Window
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         Background = new SolidColorBrush(Color.FromRgb(0xF0, 0xF0, 0xF0));
         var pane = new WebPane(address, kind);
+        _pane = pane;
         pane.Failed += () => Close();
         // The same Update bar as the chat's window, across the top: one click, and the page's window is not lost.
         if (UpdateClick is { } click)
@@ -112,6 +113,11 @@ internal sealed class WebWindow : Window
             pane.Dispose();
         };
     }
+
+    private readonly WebPane _pane;
+
+    /// <summary>Loads the page again from its file (the Viewer, when the pack it shows was written again).</summary>
+    internal void ReloadPage() => _pane.Reload();
 
     private void Surface()
     {
