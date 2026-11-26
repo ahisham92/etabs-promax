@@ -122,21 +122,26 @@ public static class EditableTables
                 }
             }
 
-            var at = Array.FindIndex(fields, f => string.Equals(f, keyField, StringComparison.OrdinalIgnoreCase));
-            var names2 = rows.Select(r => r.TryGetValue(keyField, out var v) ? v : "").ToHashSet(StringComparer.OrdinalIgnoreCase);
+            // A key of several fields ("Story|Label", an object's assignment rows) matches when all of them do.
+            var keyFields = keyField.Split('|');
+            var ats = keyFields.Select(k => Array.FindIndex(fields, f => string.Equals(f, k, StringComparison.OrdinalIgnoreCase))).ToArray();
+            var at = ats.All(i => i >= 0) ? 0 : -1;
+            string KeyOfRow(string[] row) => string.Join("\u0001", ats.Select(i => row[i]));
+            string KeyOfGiven(IReadOnlyDictionary<string, string> r) => string.Join("\u0001", keyFields.Select(k => r.TryGetValue(k, out var v) ? v : ""));
+            var names2 = rows.Select(KeyOfGiven).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var kept = new List<string[]>();
             var before = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
             for (var r = 0; r < records; r++)
             {
                 var row = data.Skip(r * fields.Length).Take(fields.Length).Select(v => v ?? "").ToArray();
                 if (row.Length != fields.Length) continue;
-                if (at >= 0 && names2.Contains(row[at])) before.TryAdd(row[at], row);
+                if (at >= 0 && names2.Contains(KeyOfRow(row))) before.TryAdd(KeyOfRow(row), row);
                 else kept.Add(row);
             }
             foreach (var given in rows)
             {
                 // A row already there for this name keeps the fields not given (its GUID, its self weight).
-                var row = given.TryGetValue(keyField, out var own) && before.Remove(own, out var old) ? old.ToArray() : Enumerable.Repeat("", fields.Length).ToArray();
+                var row = before.Remove(KeyOfGiven(given), out var old) ? old.ToArray() : Enumerable.Repeat("", fields.Length).ToArray();
                 foreach (var (field, value) in given)
                 {
                     var i = Array.FindIndex(fields, f => string.Equals(f, field, StringComparison.OrdinalIgnoreCase));
@@ -154,7 +159,7 @@ public static class EditableTables
                 try { m.DatabaseTables.GetAllFieldsInTable(key, ref v2, ref n, ref keys, ref names, ref about, ref units, ref importable); } catch { keys = []; }
                 keys ??= []; importable ??= [];
                 var shown = keys.Select((k, i) => (k, ok: i < importable.Length && importable[i])).ToList();
-                var drop = Enumerable.Range(0, fields.Length).Where(i => !fields[i].Equals(keyField, StringComparison.OrdinalIgnoreCase)
+                var drop = Enumerable.Range(0, fields.Length).Where(i => !keyFields.Contains(fields[i], StringComparer.OrdinalIgnoreCase)
                     && shown.Any(s => s.k.Equals(fields[i], StringComparison.OrdinalIgnoreCase) && !s.ok)).ToHashSet();
                 // Only when the program says which ones it imports (an answer with none importable says nothing).
                 if (drop.Count > 0 && drop.Count < fields.Length && importable.Any(x => x))
