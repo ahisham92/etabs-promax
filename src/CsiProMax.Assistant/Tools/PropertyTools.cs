@@ -52,8 +52,8 @@ public static class PropertyTools
                 return new JsonObject { ["section"] = s.Name, ["shape"] = s.Shape, ["area"] = s.Area };
             }, a => $"Define the frame section {a.Text("name")}"),
         new("define_shell_type",
-            "Adds or changes a slab or wall section with its type (Define > Section Properties > Slab or Wall Sections): kind slab or wall; slab_type Slab, Drop, Stiff, Ribbed, Waffle, Mat, Footing; modeling ShellThin, ShellThick, Membrane, Layered; one_way load distribution; modifiers F11MOD F22MOD F12MOD M11MOD M22MOD M12MOD V13MOD V23MOD MMOD WMOD (e.g. cracked slabs M11MOD 0.25).",
-            """{"type":"object","required":["name","kind","thickness","material"],"properties":{"name":{"type":"string"},"was":{"type":"string"},"kind":{"type":"string","enum":["slab","wall"]},"slab_type":{"type":"string"},"modeling":{"type":"string"},"thickness":{"type":"number"},"material":{"type":"string"},"one_way":{"type":"boolean"},"modifiers":""" + Numbers + "}}",
+            "Adds or changes a slab or wall section with its type (Define > Section Properties > Slab or Wall Sections): kind slab or wall; slab_type Slab, Drop, Stiff, Ribbed, Waffle, Mat, Footing; modeling ShellThin, ShellThick, Membrane, Layered; one_way load distribution; a Ribbed slab also takes overall_depth, rib_width_top, rib_width_bottom, rib_spacing and rib_direction (local axis 1 or 2 the ribs run along); modifiers F11MOD F22MOD F12MOD M11MOD M22MOD M12MOD V13MOD V23MOD MMOD WMOD (e.g. cracked slabs M11MOD 0.25).",
+            """{"type":"object","required":["name","kind","thickness","material"],"properties":{"name":{"type":"string"},"was":{"type":"string"},"kind":{"type":"string","enum":["slab","wall"]},"slab_type":{"type":"string"},"modeling":{"type":"string"},"thickness":{"type":"number"},"material":{"type":"string"},"one_way":{"type":"boolean"},"overall_depth":{"type":"number"},"rib_width_top":{"type":"number"},"rib_width_bottom":{"type":"number"},"rib_spacing":{"type":"number"},"rib_direction":{"type":"integer"},"modifiers":""" + Numbers + "}}",
             Ask.Changes, (a, e) =>
             {
                 var link = Offline(e);
@@ -62,7 +62,8 @@ public static class PropertyTools
                 var wall = a.Need("kind").Equals("wall", StringComparison.OrdinalIgnoreCase);
                 var s = Core(() => link.Edit(m =>
                 {
-                    var sec = PropertyDefs.SetShellType(m, a.Need("name"), Was(a), wall, a.Text("slab_type", "Slab"), a.Text("modeling", wall ? "ShellThin" : "ShellThin"), a.Number("thickness"), a.Need("material"), a.Flag("one_way"));
+                    var sec = PropertyDefs.SetShellType(m, a.Need("name"), Was(a), wall, a.Text("slab_type", "Slab"), a.Text("modeling", wall ? "ShellThin" : "ShellThin"), a.Number("thickness"), a.Need("material"), a.Flag("one_way"),
+                        a.TryGetProperty("overall_depth", out _) ? new PropertyDefs.Ribs(a.Number("overall_depth"), a.Number("rib_width_top"), a.Number("rib_width_bottom", a.Number("rib_width_top")), a.Number("rib_spacing"), a.Whole("rib_direction", 1)) : null);
                     if (mods.Count > 0) PropertyDefs.SetModifiers(sec.Lines, PropertyDefs.ShellModifiers, mods);
                     return sec;
                 }));
@@ -96,16 +97,17 @@ public static class PropertyTools
                 return new JsonObject { ["link"] = name, ["directions"] = dofs.Count };
             }, a => a.Flag("delete") ? $"Delete the link {a.Text("name")}" : $"Define the link {a.Text("name")}"),
         new("assign_frame_data",
-            "Assigns to frames (label@story) what Assign > Frame offers: release_i and release_j (any of P V2 V3 T M2 M3; [] takes them off), angle (local axis 2 rotation, degrees), cardinal (insertion point 1 to 11: 10 centroid, 8 top center), offset_i, offset_j and rigid_zone (end length offsets, rigid zone factor 0 to 1), modifiers (AMOD A2MOD A3MOD JMOD I2MOD I3MOD MMOD WMOD), spring (a line spring property; \"\" takes it off) and hinges (Assign > Frame > Hinges: auto hinges from the code's tables, each {at: relative distance 0 to 1, dof: M3 M2 P V2 V3 T P-M2-M3 P-M3 M3-V2}; [] takes them off; for a pushover). Only what is given changes.",
-            """{"type":"object","required":["objects"],"properties":{"objects":{"type":"array","items":{"type":"string"}},"release_i":{"type":"array","items":{"type":"string"}},"release_j":{"type":"array","items":{"type":"string"}},"angle":{"type":"number"},"cardinal":{"type":"integer"},"offset_i":{"type":"number"},"offset_j":{"type":"number"},"rigid_zone":{"type":"number"},"modifiers":""" + Numbers + ""","spring":{"type":"string"},"hinges":{"type":"array","items":{"type":"object","required":["at","dof"],"properties":{"at":{"type":"number"},"dof":{"type":"string"}}}}}}""",
+            "Assigns to frames (label@story) what Assign > Frame offers: release_i and release_j (any of P V2 V3 T M2 M3; [] takes them off), angle (local axis 2 rotation, degrees), cardinal (insertion point 1 to 11: 10 centroid, 8 top center), offset_i, offset_j and rigid_zone (end length offsets, rigid zone factor 0 to 1), modifiers (AMOD A2MOD A3MOD JMOD I2MOD I3MOD MMOD WMOD), spring (a line spring property; \"\" takes it off) and hinges (Assign > Frame > Hinges: auto hinges from the code's tables, each {at: relative distance 0 to 1, dof: M3 M2 P V2 V3 T P-M2-M3 P-M3 M3-V2}; [] takes them off; for a pushover)." +
+            " tables: rows of the program's own assignment tables the other fields do not cover, by full table name, e.g. {\"Frame Assignments - Output Stations\": [{\"StationOpt\": \"Min Stations\", \"MinStations\": \"5\"}]} (property_definitions lists them under assign_tables; [] takes a table off). Only what is given changes.",
+            """{"type":"object","required":["objects"],"properties":{"objects":{"type":"array","items":{"type":"string"}},"release_i":{"type":"array","items":{"type":"string"}},"release_j":{"type":"array","items":{"type":"string"}},"angle":{"type":"number"},"cardinal":{"type":"integer"},"offset_i":{"type":"number"},"offset_j":{"type":"number"},"rigid_zone":{"type":"number"},"modifiers":""" + Numbers + ""","spring":{"type":"string"},"hinges":{"type":"array","items":{"type":"object","required":["at","dof"],"properties":{"at":{"type":"number"},"dof":{"type":"string"}}}},"tables":{"type":"object"}}}""",
             Ask.Changes, AssignFrames, a => "Assign frame data"),
         new("assign_shell_data",
-            "Assigns to slabs and walls (label@story) what Assign > Shell offers: modifiers (F11MOD F22MOD F12MOD M11MOD M22MOD M12MOD V13MOD V23MOD MMOD WMOD) and spring (an area spring property, e.g. soil under a mat; \"\" takes it off).",
-            """{"type":"object","required":["objects"],"properties":{"objects":{"type":"array","items":{"type":"string"}},"modifiers":""" + Numbers + ""","spring":{"type":"string"}}}""",
+            "Assigns to slabs and walls (label@story) what Assign > Shell offers: modifiers (F11MOD F22MOD F12MOD M11MOD M22MOD M12MOD V13MOD V23MOD MMOD WMOD) and spring (an area spring property, e.g. soil under a mat; \"\" takes it off); opening (Assign > Shell > Opening: true makes the area an opening, false a slab or wall again); tables: rows of the program's own assignment tables the other fields do not cover, by full table name, e.g. {\"Area Assignments - Additional Mass\": [{\"AddedMass\": \"0.1\"}]} (property_definitions lists them under assign_tables; [] takes a table off).",
+            """{"type":"object","required":["objects"],"properties":{"objects":{"type":"array","items":{"type":"string"}},"modifiers":""" + Numbers + ""","spring":{"type":"string"},"opening":{"type":"boolean"},"tables":{"type":"object"}}}""",
             Ask.Changes, AssignShells, a => "Assign shell data"),
         new("assign_joint_data",
-            "Assigns to joints (point@story) what Assign > Joint offers: restraint (any of UX UY UZ RX RY RZ; [] frees the joint) and spring (a point spring property; \"\" takes it off).",
-            """{"type":"object","required":["objects"],"properties":{"objects":{"type":"array","items":{"type":"string"}},"restraint":{"type":"array","items":{"type":"string"}},"spring":{"type":"string"}}}""",
+            "Assigns to joints (point@story) what Assign > Joint offers: restraint (any of UX UY UZ RX RY RZ; [] frees the joint) and spring (a point spring property; \"\" takes it off); tables: rows of the program's own assignment tables the other fields do not cover, by full table name, e.g. {\"Joint Assignments - Additional Mass\": [{\"MassXY\": \"2\"}]} (property_definitions lists them under assign_tables; [] takes a table off).",
+            """{"type":"object","required":["objects"],"properties":{"objects":{"type":"array","items":{"type":"string"}},"restraint":{"type":"array","items":{"type":"string"}},"spring":{"type":"string"},"tables":{"type":"object"}}}""",
             Ask.Changes, AssignJoints, a => "Assign joint data"),
         new("property_definitions",
             "What the property forms show: material types and each material's values, every section shape with its dimensions, the frame and shell sections with their modifiers, slab and modeling types, the spring properties with where they are used; with objects (label@story), what is assigned to each.",
@@ -202,8 +204,10 @@ public static class PropertyTools
         var mods = Values(a, "modifiers", true);
         var spring = Spring(a, m0, "line");
         var hinges = Hinges(a);
-        if (ri is null && rj is null && angle is null && cardinal is null && oi is null && oj is null && rz is null && mods.Count == 0 && spring is null && hinges is null)
-            throw new ToolInputException("Give what to assign: release_i, release_j, angle, cardinal, offset_i, offset_j, rigid_zone, modifiers, spring or hinges.");
+        var tables = AssignRows(a);
+        if (ri is null && rj is null && angle is null && cardinal is null && oi is null && oj is null && rz is null && mods.Count == 0 && spring is null && hinges is null && tables is null)
+            throw new ToolInputException("Give what to assign: release_i, release_j, angle, cardinal, offset_i, offset_j, rigid_zone, modifiers, spring, hinges or tables.");
+        if (tables is not null) Core(() => { AssignTables.Set(new LineAssign(), tables); return 0; });
         Core(() => { PropertyDefs.CheckModifiers(PropertyDefs.FrameModifiers, mods); if (hinges is not null) PropertyDefs.CheckHinges(hinges); return 0; });
         foreach (var (label, story) in objects)
         {
@@ -232,6 +236,7 @@ public static class PropertyTools
                 if (mods.Count > 0) PropertyDefs.SetModifiers(x.Extra, PropertyDefs.FrameModifiers, mods);
                 if (spring is not null) PropertyDefs.Put(x.Extra, "SPRINGPROP", spring.Length == 0 ? null : E2k.E2kText.Quote(spring));
                 if (hinges is not null) PropertyDefs.SetHinges(m, label, story, hinges);
+                if (tables is not null) AssignTables.Set(x, tables);
             }
             return (JsonNode)new JsonObject { ["assigned"] = objects.Count };
         }));
@@ -258,7 +263,10 @@ public static class PropertyTools
         var objects = Objects(a, (l, s) => m0.AreaAssigns.Exists(x => x.Label == l && x.Story == s), "slab or wall");
         var mods = Values(a, "modifiers", true);
         var spring = Spring(a, m0, "area");
-        if (mods.Count == 0 && spring is null) throw new ToolInputException("Give what to assign: modifiers or spring.");
+        var tables = AssignRows(a);
+        bool? opening = Has(a, "opening") ? a.Flag("opening") : null;
+        if (mods.Count == 0 && spring is null && tables is null && opening is null) throw new ToolInputException("Give what to assign: modifiers, spring, opening or tables.");
+        if (tables is not null) Core(() => { AssignTables.Set(new AreaAssign(), tables); return 0; });
         Core(() => { PropertyDefs.CheckModifiers(PropertyDefs.ShellModifiers, mods); return 0; });
         return Core(() => link.Edit(m =>
         {
@@ -267,9 +275,35 @@ public static class PropertyTools
                 var x = m.AreaAssigns.First(y => y.Label == label && y.Story == story);
                 if (mods.Count > 0) PropertyDefs.SetModifiers(x.Extra, PropertyDefs.ShellModifiers, mods);
                 if (spring is not null) PropertyDefs.Put(x.Extra, "SPRINGPROP", spring.Length == 0 ? null : E2k.E2kText.Quote(spring));
+                if (opening is { } op) PropertyDefs.Put(x.Extra, "OPENING", op ? "\"Yes\"" : null);
+                if (tables is not null) AssignTables.Set(x, tables);
             }
             return (JsonNode)new JsonObject { ["assigned"] = objects.Count };
         }));
+    }
+
+    /// <summary>The tables argument: rows by table name; true and false become Yes and No, as the tables hold them.</summary>
+    private static Dictionary<string, List<Dictionary<string, string>>>? AssignRows(JsonElement a)
+    {
+        if (!a.TryGetProperty("tables", out var t) || t.ValueKind == JsonValueKind.Null) return null;
+        if (t.ValueKind != JsonValueKind.Object) throw new ToolInputException("tables is {table name: [rows]}.");
+        var all = new Dictionary<string, List<Dictionary<string, string>>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var table in t.EnumerateObject())
+        {
+            var rows = table.Value.ValueKind switch
+            {
+                JsonValueKind.Array => table.Value.EnumerateArray().ToList(),
+                JsonValueKind.Object => [table.Value],
+                _ => throw new ToolInputException($"'{table.Name}' is a list of rows, each {{field: value}}."),
+            };
+            all[table.Name] = rows.Select(r => r.ValueKind != JsonValueKind.Object ? throw new ToolInputException($"Each row of '{table.Name}' is {{field: value}}.")
+                : r.EnumerateObject().ToDictionary(f => f.Name, f => f.Value.ValueKind switch
+                {
+                    JsonValueKind.True => "Yes", JsonValueKind.False => "No", JsonValueKind.String => f.Value.GetString()!, JsonValueKind.Null => "",
+                    _ => f.Value.GetRawText(),
+                }, StringComparer.Ordinal)).ToList();
+        }
+        return all;
     }
 
     private static readonly string[] Dofs = ["UX", "UY", "UZ", "RX", "RY", "RZ"];
@@ -282,7 +316,9 @@ public static class PropertyTools
         List<string>? restraint = Has(a, "restraint") ? a.Texts("restraint").Select(x => x.ToUpperInvariant()).ToList() : null;
         if (restraint?.FirstOrDefault(r => !Dofs.Contains(r)) is { } bad) throw new ToolInputException($"'{bad}' is not one of {string.Join(", ", Dofs)}.");
         var spring = Spring(a, m0, "point");
-        if (restraint is null && spring is null) throw new ToolInputException("Give what to assign: restraint or spring.");
+        var tables = AssignRows(a);
+        if (restraint is null && spring is null && tables is null) throw new ToolInputException("Give what to assign: restraint, spring or tables.");
+        if (tables is not null) Core(() => { AssignTables.Set(new PointAssign(), tables); return 0; });
         return Core(() => link.Edit(m =>
         {
             foreach (var (point, story) in objects)
@@ -291,10 +327,13 @@ public static class PropertyTools
                 if (x is null) m.PointAssigns.Add(x = new PointAssign { Point = point, Story = story });
                 if (restraint is not null) x.Restraint = restraint.Count == 0 ? null : string.Join(" ", Dofs.Where(restraint.Contains));
                 if (spring is not null) PropertyDefs.Put(x.Extra, "SPRINGPROP", spring.Length == 0 ? null : E2k.E2kText.Quote(spring));
+                if (tables is not null) AssignTables.Set(x, tables);
             }
             return (JsonNode)new JsonObject { ["assigned"] = objects.Count };
         }));
     }
+
+    private static JsonNode TablesOf(Assign a) => JsonSerializer.SerializeToNode(a.Tables ?? new()) ?? new JsonObject();
 
     private static JsonObject Numbers_(Dictionary<string, double> d) => new(d.Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)JsonValue.Create(kv.Value))));
 
@@ -316,6 +355,11 @@ public static class PropertyTools
                 ["defaults"] = JsonSerializer.SerializeToNode(PropertyDefs.NonlinearKeys(t).Length > 0 ? PropertyDefs.NonlinearDefaults(t) : new()),
             }))),
             ["material_tables"] = JsonSerializer.SerializeToNode(ProgramTables.MaterialTables),
+            ["assign_tables"] = new JsonObject(AssignTables.Tables.Select(t => KeyValuePair.Create(t.Key, (JsonNode?)new JsonObject
+            {
+                ["kind"] = t.Value.Kind, ["many"] = AssignTables.ManyRows.Contains(t.Key),
+                ["fields"] = new JsonArray(t.Value.Fields.Select(f => (JsonNode)new JsonArray(f.Key, f.Label)).ToArray()),
+            }))),
             ["materials"] = new JsonArray(m.Materials.Select(x => (JsonNode)new JsonObject
             {
                 ["name"] = x.Name, ["type"] = x.Type, ["grade"] = x.Get("GRADE"),
@@ -334,6 +378,8 @@ public static class PropertyTools
             {
                 ["name"] = s.Name, ["wall"] = s.IsWall, ["material"] = s.Material, ["thickness"] = s.Thickness,
                 ["slab_type"] = s.Get("SLABTYPE"), ["modeling"] = s.Get("MODELINGTYPE"), ["one_way"] = s.Get("ONEWAYLOADDIST") == "Yes",
+                ["overall_depth"] = s.Number("OVERALLDEPTH"), ["rib_width_top"] = s.Number("SLABRIBWIDTHTOP"), ["rib_width_bottom"] = s.Number("SLABRIBWIDTHBOTTOM"),
+                ["rib_spacing"] = s.Number("SLABRIBSPACING"), ["rib_direction"] = s.Number("SLABRIBPARALLELTOAXIS"),
                 ["modifiers"] = Numbers_(PropertyDefs.Modifiers(s.Lines, PropertyDefs.ShellModifiers)),
             }).ToArray()),
             ["slab_types"] = new JsonArray(PropertyDefs.SlabTypes.Select(t => (JsonNode)t).ToArray()),
@@ -372,6 +418,7 @@ public static class PropertyTools
                         ["modifiers"] = Numbers_(PropertyDefs.Modifiers(l.Extra, PropertyDefs.FrameModifiers)), ["spring"] = PropertyDefs.Value(l.Extra, "SPRINGPROP") ?? "",
                         ["hinges"] = new JsonArray(PropertyDefs.HingesOf(m, label, story).Select(h => (JsonNode)new JsonObject { ["at"] = h.At, ["dof"] = h.Dof }).ToArray()),
                         ["pier"] = PropertyDefs.Value(l.Extra, "PIER")?.Trim('"') ?? "", ["spandrel"] = PropertyDefs.Value(l.Extra, "SPANDREL")?.Trim('"') ?? "", ["groups"] = GroupsOf(m, "LINE", label, story),
+                        ["tables"] = TablesOf(l),
                     });
                 }
                 else if (m.AreaAssigns.Find(y => y.Label == label && y.Story == story) is { } ar)
@@ -381,11 +428,12 @@ public static class PropertyTools
                         ["diaphragm"] = ar.Diaphragm ?? "", ["opening"] = PropertyDefs.Value(ar.Extra, "OPENING") is { } op && op.Trim('"').Equals("Yes", StringComparison.OrdinalIgnoreCase),
                         ["angle"] = Num(PropertyDefs.Value(ar.Extra, "ANG")), ["mesh"] = PropertyDefs.Value(ar.Extra, "OBJMESHTYPE")?.Trim('"') ?? "",
                         ["pier"] = PropertyDefs.Value(ar.Extra, "PIER")?.Trim('"') ?? "", ["spandrel"] = PropertyDefs.Value(ar.Extra, "SPANDREL")?.Trim('"') ?? "", ["groups"] = GroupsOf(m, "AREA", label, story),
+                        ["tables"] = TablesOf(ar),
                     });
                 else if (m.PointAssigns.Find(y => y.Point == label && y.Story == story) is { } p)
-                    list.Add(new JsonObject { ["object"] = x, ["kind"] = "joint", ["restraint"] = p.Restraint ?? "", ["spring"] = PropertyDefs.Value(p.Extra, "SPRINGPROP") ?? "", ["diaphragm"] = p.Diaphragm ?? "", ["groups"] = GroupsOf(m, "POINT", label, story) });
+                    list.Add(new JsonObject { ["object"] = x, ["kind"] = "joint", ["restraint"] = p.Restraint ?? "", ["spring"] = PropertyDefs.Value(p.Extra, "SPRINGPROP") ?? "", ["diaphragm"] = p.Diaphragm ?? "", ["groups"] = GroupsOf(m, "POINT", label, story), ["tables"] = TablesOf(p) });
                 else if (m.Point(label) is not null)
-                    list.Add(new JsonObject { ["object"] = x, ["kind"] = "joint", ["restraint"] = "", ["spring"] = "", ["diaphragm"] = "", ["groups"] = GroupsOf(m, "POINT", label, story) });
+                    list.Add(new JsonObject { ["object"] = x, ["kind"] = "joint", ["restraint"] = "", ["spring"] = "", ["diaphragm"] = "", ["groups"] = GroupsOf(m, "POINT", label, story), ["tables"] = new JsonObject() });
             }
             o["objects"] = list;
         }

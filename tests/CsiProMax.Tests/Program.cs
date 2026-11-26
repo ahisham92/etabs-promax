@@ -988,6 +988,7 @@ foreach (var (name, body) in TesterBugTests.All()) Test(name, body);
 foreach (var (name, body) in OldProgramTests.All()) Test(name, body);
 foreach (var (name, body) in AutoPackTests.All()) Test(name, body);
 foreach (var (name, body) in LargeModelTests.All()) Test(name, body);
+foreach (var (name, body) in OpenFileTests.All()) Test(name, body);
 Test("set_section: a frame or area that is not in the model is reported as failed (ETABS 23 says done to it)", () =>
 {
     var e = new MemoryEtabs();
@@ -1110,6 +1111,7 @@ foreach (var (name, body) in PropertyTests.All()) Test(name, body);
 foreach (var (name, body) in StructureTests.All()) Test(name, body);
 foreach (var (name, body) in ExtrasTests.All()) Test(name, body);
 foreach (var (name, body) in EditTests.All()) Test(name, body);
+foreach (var (name, body) in AssignTablesTests.All()) Test(name, body);
 foreach (var (name, body) in ReadableTests.All()) Test(name, body);
 foreach (var (name, body) in SlabTests.All()) Test(name, body);
 foreach (var (name, body) in FuzzTests.All()) Test(name, body);

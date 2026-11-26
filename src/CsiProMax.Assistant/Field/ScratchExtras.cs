@@ -60,8 +60,16 @@ public static class ScratchExtras
         ctx.Step($"a section cut through columns {columns[0]} and {columns[1]} (for the Viewer's section cut forces)", () =>
         {
             Must(link, "make a group", "GroupDef.SetGroup", ("Name", Group));
+            // A cut by group sums the forces of its elements at its joints: with no joint in the group ETABS gives the
+            // cut no rows ("'Section Cut Forces - Analysis' has no rows", ETABS run on main 4eabf46). Each column's
+            // bottom joint goes in too.
             foreach (var column in columns)
+            {
                 Must(link, "put a column in the group", "FrameObj.SetGroupAssign", ("Name", column), ("GroupName", Group), ("Remove", false), ("ItemType", 0));
+                var ends = Must(link, "read the column's joints", "FrameObj.GetPoints", ("Name", column), ("Point1", ""), ("Point2", ""));
+                if (ApiCall.Value(ends, "Point1")?.ToString() is { Length: > 0 } bottom)
+                    Must(link, "put the column's bottom joint in the group", "PointObj.SetGroupAssign", ("Name", bottom), ("GroupName", Group), ("Remove", false), ("ItemType", 0));
+            }
             var how = ApiWorkarounds.SectionCutByGroup(link, SectionCut, Group);
             return $"{SectionCut} by group {Group}, {how}";
         });

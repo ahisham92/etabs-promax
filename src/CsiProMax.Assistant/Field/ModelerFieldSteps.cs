@@ -299,6 +299,17 @@ public static class ModelerFieldSteps
                     "the material, the sections, the load pattern or the combination did not come back from the .e2k");
             }, "tool open_model_file reads the .e2k back");
         }
+        // The SAP2000 and SAFE files the Modeler wrote open again just as they were (Ahmed 2026-11-26: "to and from the
+        // csi promax ... the user does not feel anything"): the whole model, nothing to say about them.
+        foreach (var (key, ext) in new[] { (CsiProgram.Sap2000.Key, ".s2k"), (CsiProgram.Safe.Key, ".f2k") })
+            if (ctx.Files.TryGetValue(key, out var file) && File.Exists(file))
+                ctx.Tool("open_model_file", $$"""{"path":{{Q(file)}}}""", a =>
+                {
+                    Same(ctx, a, "the " + ext);
+                    FieldContext.Expect(a["not_read"] is null, $"the {ext} the Modeler wrote should open with nothing left out: " + a["not_read"]?.ToJsonString());
+                }, $"tool open_model_file reads the {ext} back, the whole model");
+        if (ctx.Files.TryGetValue(CsiProgram.Etabs.Key, out var e2kAgain))
+            ctx.Tool("open_model_file", $$"""{"path":{{Q(e2kAgain)}}}""", a => Same(ctx, a, "the .e2k"), "tool open_model_file opens the .e2k again for the steps after");
         ctx.Refused("open_model_file", $$"""{"path":{{Q(Path.Combine(ctx.Folder, "no such file.e2k"))}}}""", "no file", "tool open_model_file says no to a file that is not there");
 
         ctx.Coverage("every Modeler tool was run");
@@ -549,9 +560,23 @@ public static class ModelerFieldSteps
             a => FieldContext.Expect((int?)a["spans"] == 1 && (int?)a["strands"] == 4, "not the tendon asked for: " + a.ToJsonString()), "tool draw_tendon, a draped tendon jacked from both ends");
         ctx.Refused("draw_tendon", """{"name":"CPM-BADT","points":[[0,2.5],[12,2.5]],"spans":[{"depth_left":0.05,"depth_low":5,"depth_right":0.05}],"section":"CPM-T15"}""", "below the slab", "tool draw_tendon says no to a tendon below the slab");
         ctx.Tool("define_hyperstatic_case", """{"name":"CPM-PTF-HP","base_case":"CPM-PTF"}""", null, "tool define_hyperstatic_case, of the final prestress case");
+        // ETABS 23.2's own export (2026-11-26): percentage and detailed losses, a punching overwrite with a user perimeter and
+        // stud rails, an opening and a ribbed slab, as ETABS writes them.
+        ctx.Tool("draw_tendon", """{"name":"CPM-TEN2","points":[[0,3.5],[12,3.5]],"spans":[{"depth_left":0.05,"depth_low":0.1,"depth_right":0.05,"a":0,"b":0}],"section":"CPM-T15","strands":2,""" +
+            """ "jacking":{"transfer_pattern":"CPM-PTT","final_pattern":"CPM-PTF","stress":1400000,"end":"I"},"losses":{"method":"Detailed","curvature":0.07,"wobble":0.0003,"anchor_slip":0.006,"elastic_shortening":7000,"creep":48000,"shrinkage":41000,"relaxation":21000}}""",
+            a => FieldContext.Expect(((string?)a["losses"])?.StartsWith("Detailed", StringComparison.Ordinal) == true, "not detailed losses: " + a.ToJsonString()), "tool draw_tendon, a parabola with detailed losses");
+        var slabStory = CsiProMax.Model.SlabDefs.Tendons(modeler.Model).Find(t => t.Name == "CPM-TEN")?.Story ?? "";
+        var at = modeler.Model.Points.Find(p => p.Below == 0 && Math.Abs(p.X) < 1e-6 && Math.Abs(p.Y - 2.5) < 1e-6)?.Name ?? "";
+        ctx.Tool("set_punching_overwrite", """{"point":""" + Q(at) + ""","story":""" + Q(slabStory) + ""","location":"Edge","perimeter":[[-0.3,-0.3],[0.3,-0.3],[0.3,0.3],[-0.3,0.3]],""" +
+            """ "reinforcement":{"type":"Stud Rails","pattern":"Radial","fy":420000,"diameter":0.01,"spacing":0.08}}""",
+            a => FieldContext.Expect((string?)a["perimeter"] == "4 corners", "not the user perimeter: " + a.ToJsonString()), "tool set_punching_overwrite, a user perimeter with stud rails");
+        ctx.Refused("set_punching_overwrite", """{"point":""" + Q(at) + ""","story":""" + Q(slabStory) + ""","reinforcement":{"type":"Stud Rails"}}""", "yield stress", "tool set_punching_overwrite says no to studs with no size");
+        ctx.Tool("draw_opening", """{"name":"CPM-OPEN","story":""" + Q(slabStory) + ""","points":[[4,1],[5,1],[5,2],[4,2]]}""", null, "tool draw_opening");
+        ctx.Refused("draw_opening", """{"name":"CPM-BADO","story":""" + Q(slabStory) + ""","points":[[4,1],[5,1]]}""", "3 corners", "tool draw_opening says no to two corners");
         ctx.Tool("extra_definitions", "{}", a =>
         {
-            FieldContext.Expect(a["constraints"]!.AsArray().Count == 2 && a["vehicles"]!.AsArray().Count == 2 && a["strips"]!.AsArray().Count == 1 && a["tendons"]!.AsArray().Count == 1 && a["tendons"]![0]!["shape"]!.AsArray().Count > 2, "not all listed: " + a.ToJsonString());
+            FieldContext.Expect(a["constraints"]!.AsArray().Count == 2 && a["vehicles"]!.AsArray().Count == 2 && a["strips"]!.AsArray().Count == 1 && a["tendons"]!.AsArray().Count == 2 && a["tendons"]![0]!["shape"]!.AsArray().Count > 2
+                && a["punching_overwrites"]!.AsArray().Count == 1 && a["openings"]!.AsArray().Count == 1, "not all listed: " + a.ToJsonString());
             if (joints.Count == 2) FieldContext.Expect(a["constraints"]![0]!["joints"]!.AsArray().Count == 2, "CPM-BODY's joints are not listed");
         });
     }
@@ -591,6 +616,8 @@ public static class ModelerFieldSteps
         ctx.Refused("define_frame_shape", """{"name":"CPM-BAD","shape":"Steel Pipe","material":"CPM-S355","dims":{"D":0.3}}""", "needs TW", "tool define_frame_shape says no to a missing dimension");
         var conc = modeler.Model.Materials.FirstOrDefault(m => m.IsConcrete)?.Name ?? "";
         ctx.Tool("define_shell_type", """{"name":"CPM-DROP","kind":"slab","slab_type":"Drop","modeling":"ShellThick","thickness":0.3,"material":""" + Q(conc) + ""","modifiers":{"M11MOD":0.25,"M22MOD":0.25}}""", null, "tool define_shell_type, a cracked drop panel");
+        ctx.Tool("define_shell_type", """{"name":"CPM-RIB","kind":"slab","slab_type":"Ribbed","modeling":"ShellThin","thickness":0.1,"material":""" + Q(conc) + ""","overall_depth":0.4,"rib_width_top":0.15,"rib_width_bottom":0.125,"rib_spacing":0.9,"rib_direction":1}""", null, "tool define_shell_type, a ribbed slab");
+        ctx.Refused("define_shell_type", """{"name":"CPM-RIB2","kind":"slab","slab_type":"Ribbed","thickness":0.1,"material":""" + Q(conc) + """}""", "ribs", "tool define_shell_type says no to a ribbed slab with no ribs");
         ctx.Tool("define_spring", """{"kind":"point","name":"CPM-PS","values":{"UX":1000,"UY":1000,"UZ":50000}}""", null, "tool define_spring, a point spring");
         ctx.Tool("define_spring", """{"kind":"area","name":"CPM-AS","values":{"U3":20000}}""", null, "tool define_spring, an area spring");
         ctx.Refused("define_spring", """{"kind":"line","name":"CPM-BAD","values":{"UX":5}}""", "not 'UX'", "tool define_spring says no to a value the kind does not have");
@@ -604,11 +631,24 @@ public static class ModelerFieldSteps
             ctx.Refused("assign_frame_data", """{"objects":[""" + obj + """],"hinges":[{"at":1.5,"dof":"M3"}]}""", "0 to 1", "tool assign_frame_data says no to a hinge beyond the member");
             ctx.Tool("property_definitions", """{"objects":[""" + obj + """]}""", a =>
                 FieldContext.Expect(a["objects"]![0]!["hinges"]!.AsArray().Count == 3, "the beam does not show its 3 hinges: " + a["objects"]!.ToJsonString()), "tool property_definitions, the beam's hinges");
+            // Assign > Frame items the .e2k has no keyword for, as rows of ETABS's own tables (Ahmed 2026-11-26: every button).
+            ctx.Tool("assign_frame_data", """{"objects":[""" + obj + """],"tables":{"Frame Assignments - Additional Mass":[{"AddedMass":"0.05"}],"Frame Assignments - Output Stations":[{"StationOpt":"Min Stations","MinStations":"7"}]}}""",
+                _ => FieldContext.Expect(CsiProMax.Model.AssignTables.Row(beam, "Frame Assignments - Additional Mass").GetValueOrDefault("AddedMass") == "0.05", "the beam's added mass is not kept"),
+                "tool assign_frame_data, added mass and output stations by the program's assignment tables");
+            ctx.Refused("assign_frame_data", """{"objects":[""" + obj + """],"tables":{"Frame Assignments - Additional Mass":[{"Mass":"1"}]}}""", "no field", "tool assign_frame_data says no to a field the table does not have");
         }
         var floor = modeler.Model.AreaAssigns.FirstOrDefault(x => modeler.Model.Area(x.Label)?.Kind == CsiProMax.Model.AreaKind.Floor);
-        if (floor is not null) ctx.Tool("assign_shell_data", """{"objects":[""" + Q(floor.Label + "@" + floor.Story) + """],"modifiers":{"M11MOD":0.25,"M22MOD":0.25}}""", null, "tool assign_shell_data, cracked slab modifiers");
+        if (floor is not null)
+        {
+            ctx.Tool("assign_shell_data", """{"objects":[""" + Q(floor.Label + "@" + floor.Story) + """],"modifiers":{"M11MOD":0.25,"M22MOD":0.25}}""", null, "tool assign_shell_data, cracked slab modifiers");
+            ctx.Tool("assign_shell_data", """{"objects":[""" + Q(floor.Label + "@" + floor.Story) + """],"tables":{"Area Assignments - Additional Mass":[{"AddedMass":"0.02"}]}}""", null, "tool assign_shell_data, added mass by the program's assignment table");
+        }
         var support = modeler.Model.PointAssigns.FirstOrDefault(p => p.Restraint is not null);
-        if (support is not null) ctx.Tool("assign_joint_data", """{"objects":[""" + Q(support.Point + "@" + support.Story) + """],"spring":"CPM-PS"}""", null, "tool assign_joint_data, a spring under a support");
+        if (support is not null)
+        {
+            ctx.Tool("assign_joint_data", """{"objects":[""" + Q(support.Point + "@" + support.Story) + """],"spring":"CPM-PS"}""", null, "tool assign_joint_data, a spring under a support");
+            ctx.Tool("assign_joint_data", """{"objects":[""" + Q(support.Point + "@" + support.Story) + """],"tables":{"Joint Assignments - Additional Mass":[{"MassXY":"1.5","MassZ":"0"}]}}""", null, "tool assign_joint_data, added mass by the program's assignment table");
+        }
         ctx.Tool("define_link", """{"name":"CPM-LINK","type":"RUBBER ISOLATOR","dofs":{"U1":{"stiffness":500000},"U2":{"stiffness":1000,"damping":20},"U3":{"stiffness":1000,"damping":20}}}""", null, "tool define_link, a rubber isolator");
         ctx.Refused("define_link", """{"name":"CPM-BAD","type":"SPRINGY","dofs":{"U1":{"stiffness":1}}}""", "link type", "tool define_link says no to a type the programs do not have");
         ctx.Tool("property_definitions", "{}", a =>

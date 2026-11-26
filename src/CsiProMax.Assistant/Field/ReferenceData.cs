@@ -60,10 +60,13 @@ public static class ReferenceData
         new("the Verification examples the program came with", null, VerificationExamples),
         new("every table of the scratch model that has data", null, ScratchTables),
         new("the status of every load case after the analysis", null, CaseStatus),
+        // Before the text copy, so the program's own syntax for them is in it (their .e2k words are not known yet).
+        new("a slab line release and a slab rebar object, added to the scratch model through the program's tables", p => p.Key is "etabs" or "safe", SlabExtras),
         new("the program's own text copy of the scratch model", null, OwnTextCopy),
         new("the files of the scratch folder", null, ScratchFiles),
         new("what the program holds of the Modeler's file", null, Holds),
         new("the calls the program's API has", null, ApiCalls),
+        new("SAP2000's own values for an area edge release and a joint panel zone", p => p.Key == "sap2000", EdgeReleaseAndPanelZone),
         // Last: it replaces the scratch model in the scratch window with a new blank one (never saved).
         new("the program's defaults, from a new blank model", null, BlankDefaults),
     ];
@@ -309,6 +312,56 @@ public static class ReferenceData
         return $"the save answered {answer}; text copies beside the scratch model: {(texts.Count == 0 ? "none" : string.Join(", ", texts))}";
     }
 
+    /// <summary>
+    /// SAP2000: an edge release on one area edge and a panel zone on one joint of the scratch model, set by the API, and
+    /// the rows SAP2000 then shows in "Area Edge Release Assignments" and "Joint Panel Zone Assignments": its own field
+    /// values, for the Modeler to carry those two assignments. Only on the test's own scratch model, never saved after.
+    /// </summary>
+    private static string EdgeReleaseAndPanelZone(Gather g)
+    {
+        var said = new List<string>();
+        string First(string kind) => (string)g.Link.Raw($"list the {kind}s", m =>
+        {
+            int n = 0; string[] names = [];
+            var answer = kind == "area" ? m.AreaObj.GetNameList(ref n, ref names) : m.PointObj.GetNameList(ref n, ref names);
+            return n > 0 && names is { Length: > 0 } ? names[0] : "";
+        });
+        try
+        {
+            var area = First("area");
+            if (area.Length == 0) said.Add("no area");
+            else
+            {
+                // SAP2000 26's API: SetEdgeRelease is not in every version; each try is said with its answer.
+                foreach (var (what, call) in new (string, Func<dynamic, object>)[]
+                {
+                    ("AreaObj.SetEdgeRelease", m => { var r = new bool[] { true, false, false, false }; return m.AreaObj.SetEdgeRelease(area, 1, ref r, 0); }),
+                })
+                    try { said.Add($"{what}: {g.Link.Raw(what, call)}"); }
+                    catch (Exception ex) when (ex is not OutOfMemoryException) { said.Add($"{what}: {ex.GetType().Name} {ex.Message}"); }
+            }
+            var joint = First("point");
+            if (joint.Length == 0) said.Add("no joint");
+            else
+                try { said.Add("PointObj.SetPanelZone: " + g.Link.Raw("set a panel zone", m => m.PointObj.SetPanelZone(joint, 1, 0.0, 0.0, 0.0, "", 1, 1, 0.0, 0))); }
+                catch (Exception ex) when (ex is not OutOfMemoryException) { said.Add($"PointObj.SetPanelZone: {ex.GetType().Name} {ex.Message}"); }
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { said.Add($"{ex.GetType().Name} {ex.Message}"); }
+        var sb = new StringBuilder();
+        foreach (var key in new[] { "Area Edge Release Assignments", "Joint Panel Zone Assignments" })
+        {
+            sb.AppendLine(Csv("table", key));
+            try
+            {
+                var t = g.Link.ReadTable(key, null, null);
+                sb.AppendLine(Csv([.. t.Fields]));
+                foreach (var r in t.Rows.Take(50)) sb.AppendLine(Csv([.. r]));
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { sb.AppendLine(Csv("not read", ex.Message)); }
+        }
+        return g.Write("sap2000 edge release and panel zone.csv", sb.ToString()) + " (" + string.Join("; ", said) + ")";
+    }
+
     private static string ScratchFiles(Gather g)
     {
         var folder = Path.GetDirectoryName(g.ModelPath) ?? "";
@@ -395,6 +448,105 @@ public static class ReferenceData
             n++;
         }
         return g.Write("api calls.txt", sb.ToString()) + $" ({n} interfaces, names only: a .NET Framework file)";
+    }
+
+    // ---- slab line releases and slab rebar (the slabs thread) ------------------------------------------------------
+    // Not here on purpose: opening the example models in the scratch window. An older example can put up a message box
+    // (upgrade, save changes) that no one answers, which would hold the window past its close and turn a needed thing
+    // into a failure. The examples' own files are copied by CopyExamples instead.
+
+    /// <summary>
+    /// One slab line release (on a null line drawn across the first floor) and one slab rebar object, put into the
+    /// scratch model through "Area Assignments - Slab Line Releases", "Slab Rebar Object Geometry" and "Slab Rebar
+    /// Property Assignments". The fields the program edits, the rows sent, its apply log and the tables read back go to
+    /// slab extras.txt; the text copy that follows has the program's own syntax for both. Only the test's own model.
+    /// </summary>
+    private static string SlabExtras(Gather g)
+    {
+        if (g.ModelPath.Length == 0) return "not made: only in the test's own scratch window";
+        var sb = new StringBuilder();
+        var c = System.Globalization.CultureInfo.InvariantCulture;
+        string N(double v) => v.ToString("0.####", c);
+        var floor = g.Link.Areas().FirstOrDefault(a => a.Kind == "floor" && a.Corners.Count >= 3);
+        if (floor is null) return g.Write("slab extras.txt", "The scratch model has no floor to put them on.\n") + " (no floor)";
+        double x0 = floor.Corners.Min(p => p.X), x1 = floor.Corners.Max(p => p.X), y0 = floor.Corners.Min(p => p.Y), y1 = floor.Corners.Max(p => p.Y), z = floor.Corners.Average(p => p.Z);
+        double cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, w = x1 - x0, h = y1 - y0;
+        sb.AppendLine($"floor {floor.Name} ({floor.Section}): x {N(x0)} to {N(x1)}, y {N(y0)} to {N(y1)}, z {N(z)}");
+        var said = new List<string>();
+
+        // The line release goes on a null line across the floor.
+        var line = "";
+        try { line = g.Link.AddFrame(cx, y0 + 0.2 * h, z, cx, y1 - 0.2 * h, z, "None"); sb.AppendLine($"null line {line} drawn at x {N(cx)}"); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { sb.AppendLine("null line not drawn: " + ex.GetType().Name + ": " + Short(ex.Message)); }
+        var (label, story) = LabelOf(g, line);
+        if (line.Length > 0)
+            said.Add("line release " + Apply(g, sb, "Area Assignments - Slab Line Releases", "UniqueName", new()
+            {
+                ["UniqueName"] = line, ["Story"] = story, ["Label"] = label, ["ShearL"] = "Yes", ["MomentL"] = "Yes", ["ShearR"] = "No", ["MomentR"] = "Yes",
+            }));
+        if (story.Length == 0) story = g.Link.Stories().Skip(1).FirstOrDefault()?.Name ?? "";
+        said.Add("slab rebar " + Apply(g, sb, "Slab Rebar Object Geometry", "Name", new()
+        {
+            ["Name"] = "CPM-SR1", ["Story"] = story, ["X1"] = N(x0 + 0.25 * w), ["Y1"] = N(cy), ["X2"] = N(x1 - 0.25 * w), ["Y2"] = N(cy),
+            ["VertOffset"] = "0", ["WidthLeft"] = N(0.1 * h), ["WidthRight"] = N(0.1 * h), ["Layer"] = "A",
+        }));
+        // The program may make the rebar's property row by itself: read it first, and only add one when it did not.
+        var props = Read(g, sb, "Slab Rebar Property Assignments");
+        if (!props.Rows.Any(r => r.Contains("CPM-SR1")))
+        {
+            var bar = First(g, m => { int n = 0; string[] names = []; m.PropRebar.GetNameList(ref n, ref names); return names; });
+            var steel = First(g, m => { int n = 0; string[] names = []; m.PropMaterial.GetNameList(ref n, ref names, 6); return names; });
+            said.Add("its property " + Apply(g, sb, "Slab Rebar Property Assignments", "Name", new()
+            {
+                ["Name"] = "CPM-SR1", ["RebarSize"] = bar, ["Material"] = steel, ["BarNumType"] = "Total Bars", ["TotalBars"] = "4", ["MaxSpacing"] = "",
+            }));
+        }
+        foreach (var t in new[] { "Area Assignments - Slab Line Releases", "Slab Rebar Object Geometry", "Slab Rebar Property Assignments" }) Read(g, sb, t);
+        return g.Write("slab extras.txt", sb.ToString()) + " (" + string.Join("; ", said) + ")";
+    }
+
+    private static string First(Gather g, Func<dynamic, string[]?> read)
+    {
+        try { return ((string[]?)g.Link.Raw("read a list of names", m => read(m)))?.FirstOrDefault() ?? ""; }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return ""; }
+    }
+
+    private static (string Label, string Story) LabelOf(Gather g, string name)
+    {
+        if (name.Length == 0) return ("", "");
+        try
+        {
+            return ((string, string))g.Link.Raw("read the null line's label", m => { string label = "", story = ""; m.FrameObj.GetLabelFromName(name, ref label, ref story); return (label, story); })!;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return ("", ""); }
+    }
+
+    /// <summary>Adds one row to a table through the program's table editing (EditableTables.Put, with its guards); says what the program answered.</summary>
+    private static string Apply(Gather g, StringBuilder sb, string table, string keyField, Dictionary<string, string> values)
+    {
+        sb.AppendLine().AppendLine($"== {table}: add a row");
+        var row = values.Where(v => v.Value.Length > 0).ToDictionary(v => v.Key, v => v.Value);
+        sb.AppendLine("row: " + string.Join(", ", row.Select(v => v.Key + "=" + v.Value)));
+        try
+        {
+            var answer = EditableTables.Put(g.Link, table, keyField, [row], "add a row to " + table);
+            sb.AppendLine("taken: " + answer);
+            return "taken";
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { sb.AppendLine("not taken: " + ex.GetType().Name + ": " + ex.Message); return "not taken (" + ex.GetType().Name + ")"; }
+    }
+
+    private static TableData Read(Gather g, StringBuilder sb, string table)
+    {
+        sb.AppendLine().AppendLine($"== {table}: read back");
+        try
+        {
+            var data = g.Link.ReadTable(table, null, null);
+            sb.AppendLine(Csv([.. data.Fields]));
+            foreach (var row in data.Rows.Take(50)) sb.AppendLine(Csv(row));
+            return data;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { sb.AppendLine("not read: " + ex.GetType().Name + ": " + Short(ex.Message)); return new TableData([], []); }
     }
 
     /// <summary>

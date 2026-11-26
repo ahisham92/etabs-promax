@@ -40,6 +40,22 @@ public static class F2kWriter
 
     private static string I(int v) => v.ToString(CultureInfo.InvariantCulture);
 
+    /// <summary>
+    /// SAFE models one floor to a file (its own exports have no story table): every story with slabs, each as its own
+    /// .f2k, so a building of many floors loses none of them. Busiest first.
+    /// </summary>
+    public static IReadOnlyList<F2kResult> WriteEveryFloor(StructuralModel m, F2kOptions? options = null)
+    {
+        options ??= new F2kOptions();
+        var areas = Physical.Areas(m).ToList();
+        var busiest = BusiestStory(m, areas);
+        var floors = m.Stories.Select((s, i) => (s.Name, Z: m.Elevation(i)))
+            .Where(s => areas.Any(a => a.Kind == AreaKind.Floor && a.Corners.All(c => Math.Abs(c.Z - s.Z) < 1e-6)))
+            .Select(s => s.Name).OrderBy(n => n == busiest ? 0 : 1).ToList();
+        if (floors.Count == 0) floors.Add(busiest);
+        return floors.Select(f => Write(m, options with { Story = f })).ToList();
+    }
+
     public static F2kResult Write(StructuralModel m, F2kOptions? options = null)
     {
         options ??= new F2kOptions();
@@ -147,6 +163,13 @@ public static class F2kWriter
             pointLoads.Add((Point(pp.X, pp.Y, z - pp.Below), l.Pattern, values));
         }
 
+        // ---- openings in the slab, and punching overwrites at points of the level ----
+        var openings = SlabDefs.Openings(m).Where(o => string.Equals(o.Story, story, StringComparison.OrdinalIgnoreCase) && o.Plan.Count >= 3)
+            .Select(o => (Label: AreaName(o.Name), Points: o.Plan.Select(p => Point(p[0], p[1], z)).ToList())).ToList();
+        var punching = new List<(string Point, SlabDefs.Punching P)>();
+        foreach (var p in SlabDefs.PunchingList(m).Where(p => string.Equals(p.Story, story, StringComparison.OrdinalIgnoreCase)))
+            if (m.Point(p.Point) is { } pp) punching.Add((Point(pp.X, pp.Y, z - pp.Below), p));
+
         // ---- what is used ----
         var usedSlab = areaRows.Select(r => r.Section).Where(s => s.Length > 0).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var usedBeam = lineRows.Where(r => r.Type == "Beam").Select(r => r.Section).Where(s => s.Length > 0).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -242,14 +265,34 @@ public static class F2kWriter
             tables.Add(CsiTableText.Table("TENDON SECTION PROPERTIES", tendonSections.Select(s => (IReadOnlyList<(string, string)>)Row(("Name", s.Name), ("Material", s.Material), ("StrandArea", N(s.StrandArea))))));
 
         // Slab and wall properties: slabs, drops, mats and footings by the slab type ETABS gives them.
-        var slabProps = m.ShellSections.Where(s => usedSlab.Contains(s.Name)).ToList();
+        static bool IsDeck(ShellSection s) => string.Equals(s.Get("PROPTYPE"), "Deck", StringComparison.OrdinalIgnoreCase);
+        var deckProps = m.ShellSections.Where(s => usedSlab.Contains(s.Name) && IsDeck(s)).ToList();
+        var slabProps = m.ShellSections.Where(s => usedSlab.Contains(s.Name) && !IsDeck(s)).ToList();
+        // Decks, by SAFE's own fields (the .e2k's DECK keywords).
+        if (deckProps.Count > 0)
+            tables.Add(CsiTableText.Table("DECK PROPERTY DEFINITIONS", deckProps.Select(s => (IReadOnlyList<(string, string)>)Row(("Name", s.Name), ("Deck Type", s.Get("DECKTYPE") ?? "Filled"),
+                ("Slab Material", s.Get("CONCMATERIAL") ?? ""), ("Deck Material", s.Get("DECKMATERIAL") ?? ""), ("Slab Depth", N(s.Number("DECKSLABDEPTH") ?? 0)), ("Rib Depth", N(s.Number("DECKRIBDEPTH") ?? 0)),
+                ("Rib Width Top", N(s.Number("DECKRIBWIDTHTOP") ?? 0)), ("Rib Width Bottom", N(s.Number("DECKRIBWIDTHBOTTOM") ?? 0)), ("Rib Spacing", N(s.Number("DECKRIBSPACING") ?? 0)),
+                ("Deck Shear Thickness", N(s.Number("DECKSHEARTHICKNESS") ?? 0)), ("Deck Unit Weight", N(s.Number("DECKUNITWEIGHT") ?? 0)), ("Shear Stud Diameter", N(s.Number("SHEARSTUDDIAM") ?? 0)),
+                ("Shear Stud Height", N(s.Number("SHEARSTUDHEIGHT") ?? 0)), ("Shear Stud Tensile Strength", N(s.Number("SHEARSTUDFU") ?? 0))))));
         var wallProps = m.ShellSections.Where(s => usedWall.Contains(s.Name)).ToList();
         if (slabProps.Count + wallProps.Count > 0)
             tables.Add(CsiTableText.Table("AREA SECTION PROPERTY DEFINITIONS - SUMMARY", slabProps.Select(s => (IReadOnlyList<(string, string)>)Row(("Name", s.Name), ("Type", "Slab"), ("Element Type", ElementType(s, "Shell-Thick")), ("Material", s.Material), ("Total Thickness", N(s.Thickness ?? 0))))
                 .Concat(wallProps.Select(s => (IReadOnlyList<(string, string)>)Row(("Name", s.Name), ("Type", "Wall"), ("Element Type", ElementType(s, "Shell-Thin")), ("Material", s.Material), ("Total Thickness", N(s.Thickness ?? 0)))))));
         if (slabProps.Count > 0)
-            tables.Add(CsiTableText.Table("SLAB PROPERTY DEFINITIONS", slabProps.Select(s => (IReadOnlyList<(string, string)>)Row(
-                ("Name", s.Name), ("Modeling Type", ElementType(s, "Shell-Thick")), ("Property Type", SlabType(s)), ("Material", s.Material), ("Slab Thickness", N(s.Thickness ?? 0))))));
+            tables.Add(CsiTableText.Table("SLAB PROPERTY DEFINITIONS", slabProps.Select(s =>
+            {
+                var row = Row(("Name", s.Name), ("Modeling Type", ElementType(s, "Shell-Thick")), ("Property Type", SlabType(s)), ("Material", s.Material));
+                if (s.Number("OVERALLDEPTH") is { } depth) row.Add(("Overall Depth", N(depth)));
+                row.Add(("Slab Thickness", N(s.Thickness ?? 0)));
+                if (s.Number("SLABRIBSPACING") is { } spacing)
+                {
+                    row.Add(("Rib Width at Top", N(s.Number("SLABRIBWIDTHTOP") ?? 0)));
+                    row.Add(("Rib Width at Bottom", N(s.Number("SLABRIBWIDTHBOTTOM") ?? 0)));
+                    row.Add((s.Number("SLABRIBPARALLELTOAXIS") == 2 ? "Rib Spacing 2" : "Rib Spacing 1", N(spacing)));
+                }
+                return (IReadOnlyList<(string, string)>)row;
+            })));
         if (wallProps.Count > 0)
             tables.Add(CsiTableText.Table("WALL PROPERTY DEFINITIONS - SPECIFIED", wallProps.Select(s => (IReadOnlyList<(string, string)>)Row(
                 ("Name", s.Name), ("Modeling Type", ElementType(s, "Shell-Thin")), ("Material", s.Material), ("Wall Thickness", N(s.Thickness ?? 0)), ("Include Auto Rigid Zone?", "No")))));
@@ -287,23 +330,36 @@ public static class F2kWriter
         tables.Add(CsiTableText.Table("LOAD PATTERN DEFINITIONS", m.LoadPatterns.Select(p => (IReadOnlyList<(string, string)>)Row(("Name", p.Name), ("Is Auto Load", "No"), ("Type", PatternType(p.Type)), ("Self Weight Multiplier", N(p.SelfWeight))))));
         var statics = new List<(string Name, List<(string Pattern, double Sf)> Loads)>();
         var hyper = new List<(string Name, string Base, string Support, double Sf)>();
+        // Modal (eigen) cases, in SAFE 20's own table and fields (from SAFE 20's export, field/safe-etabs-exports).
+        var modal = new List<(string Name, int Max, int Min)>();
         foreach (var c in m.LoadCases)
         {
             var type = AnalysisDefs.CaseType(c);
             if (type == "Linear Static")
                 statics.Add((c.Name, c.Lines.Where(l => E2kText.Value(l, "LOADPAT") is not null).Select(l => (E2kText.Value(l, "LOADPAT")!, Num(E2kText.Value(l, "SF")) ?? 1)).ToList()));
+            else if (type == "Modal - Eigen")
+                modal.Add((c.Name, (int)(c.Lines.Select(l => Num(E2kText.Value(l, "MAXMODES"))).FirstOrDefault(v => v is not null) ?? 12),
+                    (int)(c.Lines.Select(l => Num(E2kText.Value(l, "MINMODES"))).FirstOrDefault(v => v is not null) ?? 1)));
             else if (type == "Hyperstatic")
                 hyper.Add((c.Name, c.Lines.Select(l => E2kText.Value(l, "HYPERSTATICCASE")).FirstOrDefault(v => v is not null) ?? "",
                     c.Lines.Select(l => E2kText.Value(l, "HYPERSTATICSUPPORT")).FirstOrDefault(v => v is not null) ?? "Springs", c.Lines.Select(l => Num(E2kText.Value(l, "HYPERSTATICSF"))).FirstOrDefault(v => v is not null) ?? 1));
         }
         // A pattern with no case of its own (an older model) still gets its linear static case, as SAFE makes one.
         foreach (var p in m.LoadPatterns.Where(p => !m.LoadCases.Exists(c => c.Name == p.Name))) statics.Add((p.Name, [(p.Name, 1)]));
-        var otherCases = m.LoadCases.Count(c => AnalysisDefs.CaseType(c) is not ("Linear Static" or "Hyperstatic"));
-        if (otherCases > 0) notes.Add($"{otherCases} load case(s) that are not linear static or hyperstatic (modal, response spectrum, nonlinear...) were left out; SAFE makes its own modal case.");
-        var caseNames = statics.Select(c => c.Name).Concat(hyper.Select(h => h.Name)).ToHashSet(StringComparer.Ordinal);
-        if (statics.Count + hyper.Count > 0)
+        var other = m.LoadCases.Where(c => AnalysisDefs.CaseType(c) is not ("Linear Static" or "Hyperstatic" or "Modal - Eigen")).ToList();
+        // Not yet in SAFE's own table and field names (no SAFE export with them to copy from): named, never dropped silently.
+        if (other.Count > 0) notes.Add($"{other.Count} load case(s) of a kind this .f2k does not write yet ({string.Join(", ", other.Select(c => $"{c.Name}: {AnalysisDefs.CaseType(c)}").Take(6))}{(other.Count > 6 ? ", ..." : "")}); they are in the .e2k and .cpm.");
+        var caseNames = statics.Select(c => c.Name).Concat(hyper.Select(h => h.Name)).Concat(modal.Select(c => c.Name)).ToHashSet(StringComparer.Ordinal);
+        if (modal.Count > 0)
+            tables.Add(CsiTableText.Table("MASS SOURCE DEFINITION", [Row(("Name", "MsSrc1"), ("Is Default", "Yes"), ("Include Lateral Mass?", "Yes"), ("Include Vertical Mass?", "No"),
+                ("Lump Mass?", "Yes"), ("Source Self Mass?", "Yes"), ("Source Added Mass?", "Yes"), ("Source Load Patterns?", "No"), ("Move Mass Centroid?", "No"))]));
+        if (statics.Count + hyper.Count + modal.Count > 0)
             tables.Add(CsiTableText.Table("LOAD CASE DEFINITIONS - SUMMARY", statics.Select(c => (IReadOnlyList<(string, string)>)Row(("Name", c.Name), ("Type", "Linear Static")))
+                .Concat(modal.Select(c => (IReadOnlyList<(string, string)>)Row(("Name", c.Name), ("Type", "Modal - Eigen"))))
                 .Concat(hyper.Select(h => (IReadOnlyList<(string, string)>)Row(("Name", h.Name), ("Type", "Hyperstatic"))))));
+        if (modal.Count > 0)
+            tables.Add(CsiTableText.Table("MODAL CASE DEFINITIONS - EIGEN", modal.Select(c => (IReadOnlyList<(string, string)>)Row(("Name", c.Name), ("Exclude Group", "None"), ("Mass Source", "MsSrc1"),
+                ("Initial Condition", "Unstressed"), ("Max Modes", I(c.Max)), ("Min Modes", I(c.Min)), ("Freq Shift", "0"), ("Cutoff Freq", "0"), ("Convergence Tol", "1E-09"), ("Auto Shift?", "Yes"), ("Design Type", "Program Determined")))));
         if (statics.Count > 0)
             tables.Add(CsiTableText.Table("LOAD CASE DEFINITIONS - LINEAR STATIC", statics.SelectMany(c => c.Loads.Select((l, n) => (IReadOnlyList<(string, string)>)(n == 0
                 ? Row(("Name", c.Name), ("Exclude Group", "None"), ("Initial Condition", "Unstressed"), ("Load Type", "Load"), ("Load Name", l.Pattern), ("Load SF", N(l.Sf)), ("Design Type", "Program Determined"))
@@ -350,6 +406,13 @@ public static class F2kWriter
                 for (var i = 0; i < w.Points.Count; i++) row.Add(("UniquePt" + I(i + 1), w.Points[i]));
                 return (IReadOnlyList<(string, string)>)row;
             })));
+        if (openings.Count > 0)
+            tables.Add(CsiTableText.Table("NULL AREA OBJECT CONNECTIVITY", openings.Select(o =>
+            {
+                var row = Row(("Unique Name", o.Label));
+                for (var i = 0; i < o.Points.Count; i++) row.Add(("UniquePt" + I(i + 1), o.Points[i]));
+                return (IReadOnlyList<(string, string)>)row;
+            })));
         if (tendons.Count > 0)
             tables.Add(CsiTableText.Table("TENDON OBJECT CONNECTIVITY", tendons.SelectMany((t, k) => TendonRows(t, tendonPoints[k], z))));
         if (strips.Count > 0)
@@ -377,9 +440,10 @@ public static class F2kWriter
         if (lineRows.Count > 0)
             tables.Add(CsiTableText.Table("FRAME ASSIGNMENTS - SECTION PROPERTIES", lineRows.Where(l => l.Section.Length > 0).Select(l => (IReadOnlyList<(string, string)>)Row(
                 ("UniqueName", l.Label), ("Shape", shapeOf.GetValueOrDefault(l.Section, "Concrete Rectangular")), ("Auto Select List", "N.A."), ("Section Property", l.Section)))));
-        if (areaRows.Count + wallRows.Count > 0)
+        if (areaRows.Count + wallRows.Count + openings.Count > 0)
             tables.Add(CsiTableText.Table("AREA ASSIGNMENTS - SECTION PROPERTIES", areaRows.Where(a => a.Section.Length > 0).Select(a => (IReadOnlyList<(string, string)>)Row(("UniqueName", a.Label), ("Section Property", a.Section), ("Property Type", "Slab")))
-                .Concat(wallRows.Where(w => w.Section.Length > 0).Select(w => (IReadOnlyList<(string, string)>)Row(("UniqueName", w.Label), ("Section Property", w.Section), ("Property Type", "Wall"))))));
+                .Concat(wallRows.Where(w => w.Section.Length > 0).Select(w => (IReadOnlyList<(string, string)>)Row(("UniqueName", w.Label), ("Section Property", w.Section), ("Property Type", "Wall"))))
+                .Concat(openings.Select(o => (IReadOnlyList<(string, string)>)Row(("UniqueName", o.Label), ("Section Property", "Opening"), ("Property Type", "Opening"))))));
         if (soilOf.Count > 0)
             tables.Add(CsiTableText.Table("AREA ASSIGNMENTS - AREA SPRINGS", areaRows.Where(a => soilOf.ContainsKey(a.Label)).Select(a => (IReadOnlyList<(string, string)>)Row(("UniqueName", a.Label), ("Spring Property", soilOf[a.Label])))));
         if (tendons.Count > 0)
@@ -391,9 +455,14 @@ public static class F2kWriter
                     ("Final Load Pattern", t.Jack.FinalPattern), ("Jacking Stress", N(t.Jack.Stress)), ("Jacking Location", SlabDefs.JackEnds.FirstOrDefault(j => j.Key == t.Jack.End || j.E2k == t.Jack.End).F2k ?? "J End")))));
             var lost = tendons.Where(t => t.Loss is not null).ToList();
             if (lost.Count > 0)
-                tables.Add(CsiTableText.Table("TENDON LOAD ASSIGNMENTS - LOSS OPTIONS", lost.Select(t => (IReadOnlyList<(string, string)>)(t.Loss!.Method.Equals("Percent", StringComparison.OrdinalIgnoreCase)
-                    ? Row(("Name", t.Name), ("Loss Method", "Percent"), ("Stressing Loss", N(t.Loss.Stressing)), ("Long Term Loss", N(t.Loss.LongTerm)))
-                    : Row(("Name", t.Name), ("Loss Method", "Fixed"), ("Stressing Loss Fixed", N(t.Loss.Stressing)), ("Long Term Loss Fixed", N(t.Loss.LongTerm)))))));
+                tables.Add(CsiTableText.Table("TENDON LOAD ASSIGNMENTS - LOSS OPTIONS", lost.Select(t => (IReadOnlyList<(string, string)>)(t.Loss!.Method switch
+                {
+                    "Percent" => Row(("Name", t.Name), ("Loss Method", "Percent"), ("Stressing Loss", N(t.Loss.Stressing)), ("Long Term Loss", N(t.Loss.LongTerm))),
+                    "Detailed" => Row(("Name", t.Name), ("Loss Method", "Detailed"), ("Curvature Coefficient", N(t.Loss.Curvature)), ("Wobble Coefficient", N(t.Loss.Wobble)),
+                        ("Anchorage Set Slip", N(t.Loss.AnchorSlip)), ("Shortening Stress", N(t.Loss.ElasticShortening)), ("Creep Stress", N(t.Loss.Creep)),
+                        ("Shrinkage Stress", N(t.Loss.Shrinkage)), ("Relaxation Stress", N(t.Loss.Relaxation))),
+                    _ => Row(("Name", t.Name), ("Loss Method", "Fixed"), ("Stressing Loss Fixed", N(t.Loss.Stressing)), ("Long Term Loss Fixed", N(t.Loss.LongTerm))),
+                }))));
         }
 
         // Loads on objects
@@ -429,6 +498,27 @@ public static class F2kWriter
                 row.Add(("LLRF", N(st.Llrf)));
                 return (IReadOnlyList<(string, string)>)row;
             })));
+
+        // Punching shear overwrites, with a user perimeter's corners about the point.
+        if (punching.Count > 0)
+        {
+            tables.Add(CsiTableText.Table("CONCRETE SLAB DESIGN OVERWRITES - PUNCHING SHEAR - GENERAL", punching.Select(x =>
+            {
+                var row = Row(("Unique Name", x.Point), ("Check Punching Shear?", x.P.Check), ("Location Type", x.P.Location), ("Perimeter Type", x.P.Perimeter is null ? "Auto" : "User Perimeter"),
+                    ("Effective Depth Type", "Auto"), ("Opening Definition", "Auto"), ("Reinforcement Type", x.P.Reinforcement));
+                if (x.P.Reinforcement != "None")
+                    // The programs' own table keys name RebarFy "Reinforcement Diameter" and RebarDia "Reinforcement Fy" (swapped in "Table and Field Keys.xml"
+                    // of ETABS 23.2), and SAFE matches the names to the keys, so the yield stress goes under "Reinforcement Diameter" as SAFE itself writes it.
+                    row.AddRange([("Reinforcement Pattern", x.P.Pattern), ("Reinforcement Diameter", N(x.P.Fy)), ("Reinforcement Fy", N(x.P.Diameter)), ("Reinforcement Spacing", N(x.P.Spacing))]);
+                return (IReadOnlyList<(string, string)>)row;
+            })));
+            var corners = punching.Where(x => x.P.Perimeter is not null).SelectMany(x => x.P.Perimeter!.Select((c, i) => (IReadOnlyList<(string, string)>)Row(("Unique Name", x.Point), ("Point Number", I(i + 1)),
+                ("X Coord", N(c[0])), ("Y Coord", N(c[1])), ("Radius", N(c[2])), ("Is Null?", "No")))).ToList();
+            if (corners.Count > 0) tables.Add(CsiTableText.Table("CONCRETE SLAB DESIGN OVERWRITES - PUNCHING SHEAR - PERIMETER", corners));
+        }
+
+        // The tables of a SAFE file the Modeler opened that it has no form for, as the file had them.
+        KeptTables.WriteInto(m, "safe", tables);
 
         var header = $"File written by CSI ProMax Modeler on {DateTime.Now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)}: story {story} of {(m.Title.Length > 0 ? m.Title : "the model")}";
         return new F2kResult(CsiTableText.Document(header, tables), story, areaRows.Count, beamRows.Count, columns.Count, wallRows.Count,
