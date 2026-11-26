@@ -384,8 +384,8 @@ public sealed class ScratchProgram : IScratchWindow
         var build = !OpensThroughApi(_program, modelFile, EtabsApi.RunsOnFramework(ApiFile));
         if (build && !BuildsThroughApi(_program, modelFile))
         {
-            ctx.Skip($"start a second {name} window", $"{name} on this PC ({Path.GetFileName(Path.GetDirectoryName(ApiFile)) ?? name}) opens only its own {ModelExtension(_program)} files through its API, " +
-                $"and the Modeler writes {Path.GetExtension(modelFile)}. To check the Modeler's file by hand: in {name}, File > Import, pick {Path.GetFileName(modelFile)} from the zip.");
+            ctx.Fail($"start a second {name} window", $"{name} on this PC ({Path.GetFileName(Path.GetDirectoryName(ApiFile)) ?? name}) opens only its own {ModelExtension(_program)} files through its API, " +
+                $"and the Modeler writes {Path.GetExtension(modelFile)}. To check the Modeler's file by hand: in {name}, File > Import, pick {Path.GetFileName(modelFile)} from the zip. The test has no way yet to build this file through the API.");
             return false;
         }
 
@@ -504,6 +504,18 @@ public sealed class ScratchProgram : IScratchWindow
             if (answer != 0) throw new EtabsException($"{name} could not save the scratch model after building it (it answered {answer}).");
             return built;
         }) is null) return false;
+
+        // SAFE's API reads design strips and has no call to draw them: they go in through its strip table. A strip
+        // table SAFE does not take fails this step only; the rest of SAFE's part still runs on the model built above.
+        if (build && ctx.Step($"put the Modeler's design strips in through {name}'s table '{F2kRebuild.StripTable}' (its API cannot draw strips)", () =>
+        {
+            var strips = F2kRebuild.BuildStrips(Link, text);
+            ctx.Facts["safe.strips_built"] = strips;
+            var answer = Convert.ToInt32(Ask(FileTimeout, "save the scratch model", m => m.File.Save(target),
+                $"{name} did not finish saving the scratch model within {FileTimeout.TotalMinutes:0} minutes. A message may be waiting in its window."));
+            if (answer != 0) throw new EtabsException($"{name} could not save the scratch model after the strips (it answered {answer}).");
+            return $"{name} lists {strips} design strips";
+        }) is null && _left) return false;
 
         // The way the Tools menu reaches a window: by its process id. Checked here, not relied on.
         if (ProcessId != 0)
