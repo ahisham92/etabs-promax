@@ -21,8 +21,16 @@ public class cPlugin
     {
         // First the pipe the window reads this program's model through: a program on the .NET Framework (ETABS 21,
         // SAP2000 25, SAFE 21 and older) can be reached no other way from the window's .NET 8 (ApiBridge).
-        ApiBridge.Serve(SapModel);
-        try { Launcher.Start(); }
+        // A newer copy of the plug-in that an update has downloaded does both instead, so a fix to the plug-in needs
+        // no reinstall and no closing of the program (Newest).
+        try
+        {
+            if (!Newest.Hand(SapModel, Path.GetDirectoryName(typeof(cPlugin).Assembly.Location) ?? ""))
+            {
+                ApiBridge.Serve(SapModel);
+                Launcher.Start();
+            }
+        }
         catch (Exception ex)   // whatever it is: a plug-in must never throw into the program that loaded it
         {
             if (Launcher.Windows) MessageBoxW(IntPtr.Zero, "CSI ProMax could not start.\n\n" + ex.Message, "CSI ProMax", 0x30);

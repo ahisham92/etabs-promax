@@ -65,11 +65,39 @@ internal sealed class ApiPipe : IDisposable
     /// </summary>
     public static ApiPipe? ToPlugin(int pid, string programName, int waitMs = 2000)
     {
-        var client = new NamedPipeClientStream(".", ApiWire.PipeName(pid), PipeDirection.InOut);
-        try { client.Connect(waitMs); }
-        catch (Exception ex) when (ex is TimeoutException or IOException or UnauthorizedAccessException) { client.Dispose(); return null; }
+        var client = Connect(pid, waitMs);
+        if (client is null) return null;
+        // An update may have downloaded a newer plug-in than the one the program loaded: it takes the pipe now, with
+        // the program open, and this window connects to it (CsiProMaxPlugin.Newest).
+        if (Renewed(client))
+        {
+            client.Dispose();
+            client = Connect(pid, Math.Max(waitMs, 5000));
+            if (client is null) return null;
+        }
         try { return new ApiPipe(client, null, $"the CSI ProMax plug-in in {programName}"); }
         catch { client.Dispose(); throw; }
+    }
+
+    private static NamedPipeClientStream? Connect(int pid, int waitMs)
+    {
+        var client = new NamedPipeClientStream(".", ApiWire.PipeName(pid), PipeDirection.InOut);
+        try { client.Connect(waitMs); return client; }
+        catch (Exception ex) when (ex is TimeoutException or IOException or UnauthorizedAccessException) { client.Dispose(); return null; }
+    }
+
+    /// <summary>
+    /// Asks the plug-in to hand the pipe to its newest downloaded copy. True when it did, and this connection is over;
+    /// false when it serves on (it is the newest, or it is older than the question and answers an error).
+    /// </summary>
+    internal static bool Renewed(Stream pipe)
+    {
+        try
+        {
+            ApiWire.Send(pipe, [ApiWire.Renew]);
+            return ApiWire.Receive(pipe) is { Length: >= 2 } answer && answer[0] == 0 && answer[1] != 0;
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException) { return false; }
     }
 
     /// <summary>

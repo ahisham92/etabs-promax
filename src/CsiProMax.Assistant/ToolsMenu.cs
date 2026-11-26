@@ -134,6 +134,9 @@ public static class ToolsMenu
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or IOException or UnauthorizedAccessException) { return null; }
     }
 
+    /// <summary>Whether this window runs a version the updater downloaded, not the installed files or a copy unpacked to try.</summary>
+    public static bool RunsDownloadedVersion => IsDownloadedVersion(AppContext.BaseDirectory);
+
     private static bool IsDownloadedVersion(string folder)
     {
         try { return System.IO.Path.GetFullPath(folder).StartsWith(System.IO.Path.GetFullPath(Update.Updater.VersionsFolder), StringComparison.OrdinalIgnoreCase); }

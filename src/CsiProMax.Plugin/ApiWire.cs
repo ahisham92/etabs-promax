@@ -18,6 +18,13 @@ internal static class ApiWire
     // The kinds of request.
     public const byte Hello = 1, Get = 2, Call = 3, Bye = 4;
 
+    /// <summary>
+    /// Asked by the window before its first call: "is a newer plug-in on this PC than the one serving me?". The
+    /// plug-in then hands the pipe to its newest downloaded copy and answers yes, and the window connects again. A
+    /// plug-in older than this request answers an error, and the window carries on with it.
+    /// </summary>
+    public const byte Renew = 5;
+
     // The tags of a value.
     private const byte Null = 0, Bool = 1, Int = 2, Long = 3, Double = 4, String = 5, Array = 6, Handle = 7, Float = 8, Short = 9, Byte = 10, Enum = 11;
 

@@ -9,7 +9,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
-    <Version>0.4.43</Version>
+    <Version>0.4.44</Version>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <GenerateDependencyFile>false</GenerateDependencyFile>
     <NoWarn>IDE1006;CS8981</NoWarn>
@@ -20,6 +20,9 @@
     <!-- The pipe the window reaches a .NET Framework program's API through. -->
     <Compile Include="../CsiProMax.Plugin/ApiBridge.cs" Link="ApiBridge.cs" />
     <Compile Include="../CsiProMax.Plugin/ApiWire.cs" Link="ApiWire.cs" />
+    <!-- The hand-over to a newer downloaded copy of the plug-in, so plug-in fixes arrive by the normal update. -->
+    <Compile Include="../CsiProMax.Plugin/Newest.cs" Link="Newest.cs" />
+    <Compile Include="../CsiProMax.Plugin/Live.cs" Link="Live.cs" />
     <!-- Compile against the stand-in only: inside SAFE the real SAFEv1.dll is already loaded. -->
     <ProjectReference Include="../SafeApiStub/SafeApiStub.csproj" Private="false" />
   </ItemGroup>

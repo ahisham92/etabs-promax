@@ -184,6 +184,15 @@ public static class App
                 ActivityLog.Note("tools_menu", entry.Says);
         }
         catch (Exception) { /* Help > Tools menu says what is wrong when asked */ }
+        // The installed plug-in files follow the version that runs, with the programs open (PlugInRefresh). Only a
+        // downloaded version does this: a copy unpacked elsewhere to try a version never writes into the installed folder.
+        try
+        {
+            if (CsiProMax.Assistant.ToolsMenu.RunsDownloadedVersion && CsiProMax.Assistant.ToolsMenu.InstallFolder() is { } installed)
+                foreach (var line in PlugInRefresh.Run(AppContext.BaseDirectory, installed, CsiProMax.Assistant.ToolsMenu.PlugIns.Select(p => p.Dll)))
+                    ActivityLog.Note("plug_in_update", line);
+        }
+        catch (Exception) { /* the loaded plug-in still hands over to the newest copy by itself */ }
         // The owner's changes to keys given out (a shorter date, a cancelled key), kept for offline days.
         try { await Licensing.LicenseState.RefreshChangesAsync(stop).ConfigureAwait(false); } catch (Exception) { }
         if (stop.IsCancellationRequested) return;
