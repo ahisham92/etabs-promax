@@ -456,13 +456,13 @@ Test("pack: the model, ETABS's tables and the checks go into one file and the Vi
         // the pushover curve made from them stayed greyed out. Made here from SAP2000's own field names.
         var steps = string.Join(",", Enumerable.Range(0, 8).Select(k => $"[\"PUSH\",\"NonStatic\",\"Step By Step\",\"{k}\",\"{-120 * k}\",\"0\",\"0\"]"));
         var moves = string.Join(",", Enumerable.Range(0, 8).SelectMany(k => new[] { $"[\"1\",\"PUSH\",\"NonStatic\",\"Step By Step\",\"{k}\",\"0\",\"0\",\"0\"]", $"[\"2\",\"PUSH\",\"NonStatic\",\"Step By Step\",\"{k}\",\"{(0.01 * k).ToString(System.Globalization.CultureInfo.InvariantCulture)}\",\"0\",\"0\"]" }));
-        var sap = JsonNode.Parse($$"""
+        var sap = JsonNode.Parse("""
             {"manifest":{"format":"cpmx","version":1,"model":"push","program":"SAP2000","etabs":"26","units":{"force":"kN","length":"m"}},
              "model":{"stories":[],"frames":[["F1","column","C1","",0,0,0,0,0,3]],"areas":[],"points":[["1",0,0,0],["2",0,0,3]],"supports":[[0,0,0,"fixed"]]},
              "comments":[],
-             "tables":{"Base Reactions (Step by Step)":{"name":"Base Reactions (Step by Step)","fields":["OutputCase","CaseType","StepType","StepNum","GlobalFX","GlobalFY","GlobalFZ"],"rows":[{{steps}}]},
-                       "Joint Displacements (Step by Step)":{"name":"Joint Displacements (Step by Step)","fields":["Joint","OutputCase","CaseType","StepType","StepNum","U1","U2","U3"],"rows":[{{moves}}]}}}
-            """)!.AsObject();
+             "tables":{"Base Reactions (Step by Step)":{"name":"Base Reactions (Step by Step)","fields":["OutputCase","CaseType","StepType","StepNum","GlobalFX","GlobalFY","GlobalFZ"],"rows":[STEPS]},
+                       "Joint Displacements (Step by Step)":{"name":"Joint Displacements (Step by Step)","fields":["Joint","OutputCase","CaseType","StepType","StepNum","U1","U2","U3"],"rows":[MOVES]}}}
+            """.Replace("STEPS", steps).Replace("MOVES", moves))!.AsObject();
         var push = CsiProMax.Assistant.ViewerCheck.Run(sap, shots, "sap2000 pushover").Items.FirstOrDefault(i => i.Name == "menu: Static Pushover Curve...");
         Check(push is { Ok: true, Skipped: false }, "SAP2000's pushover curve is drawn from its step by step tables: " + (push is null ? "no such menu item" : push.Detail));
     }
