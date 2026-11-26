@@ -465,6 +465,34 @@ Test("pack: the model, ETABS's tables and the checks go into one file and the Vi
             """.Replace("STEPS", steps).Replace("MOVES", moves))!.AsObject();
         var push = CsiProMax.Assistant.ViewerCheck.Run(sap, shots, "sap2000 pushover").Items.FirstOrDefault(i => i.Name == "menu: Static Pushover Curve...");
         Check(push is { Ok: true, Skipped: false }, "SAP2000's pushover curve is drawn from its step by step tables: " + (push is null ? "no such menu item" : push.Detail));
+
+        // 2026-11-26, Ahmed: the results "exactly the same way" as the programs show them. Display > Load Assigns draws
+        // distributed frame loads as diagrams and joint forces as arrows; shell contours are drawn on the program's own
+        // mesh ("~" joints) when the pack has the "Objects and Elements" tables.
+        var meshed = JsonNode.Parse("""
+            {"manifest":{"format":"cpmx","version":1,"model":"mesh","program":"ETABS","etabs":"23","units":{"force":"kN","length":"m"},"analysis_run":true},
+             "model":{"stories":[{"name":"Base","elevation":0,"height":0},{"name":"S1","elevation":3,"height":3}],
+                      "frames":[["B1","beam","B300","S1",0,0,3,4,0,3],["C1","column","C500","S1",0,0,0,0,0,3],["C2","column","C500","S1",4,0,0,4,0,3],["C3","column","C500","S1",4,4,0,4,4,3],["C4","column","C500","S1",0,4,0,0,4,3]],
+                      "areas":[{"n":"F1","k":"floor","s":"S200","story":"S1","c":[0,0,3,4,0,3,4,4,3,0,4,3]}],
+                      "points":[["1",0,0,0],["2",4,0,0],["3",4,4,0],["4",0,4,0],["5",0,0,3],["6",4,0,3],["7",4,4,3],["8",0,4,3]],"supports":[[0,0,0,"fixed"],[4,0,0,"fixed"],[4,4,0,"fixed"],[0,4,0,"fixed"]]},
+             "comments":[],
+             "tables":{
+               "Objects and Elements - Joints":{"name":"Objects and Elements - Joints","fields":["ElmName","ObjType","ObjName","GlobalX","GlobalY","GlobalZ"],"rows":[["~1","Shell","F1","2","0","3"],["~2","Shell","F1","4","2","3"],["~3","Shell","F1","2","4","3"],["~4","Shell","F1","0","2","3"],["~5","Shell","F1","2","2","3"]]},
+               "Objects and Elements - Shells":{"name":"Objects and Elements - Shells","fields":["ElmName","ObjName","Joint1","Joint2","Joint3","Joint4"],"rows":[["E1","F1","5","~1","~5","~4"],["E2","F1","~1","6","~2","~5"],["E3","F1","~5","~2","7","~3"],["E4","F1","~4","~5","~3","8"]]},
+               "Element Forces - Area Shells":{"name":"Element Forces - Area Shells","fields":["AreaObject","UniqueName","ShellElm","Joint","OutputCase","CaseType","M11"],"rows":[
+                 ["F1","F1","E1","5","DEAD","LinStatic","0"],["F1","F1","E1","~1","DEAD","LinStatic","2"],["F1","F1","E1","~5","DEAD","LinStatic","10"],["F1","F1","E1","~4","DEAD","LinStatic","2"],
+                 ["F1","F1","E2","~1","DEAD","LinStatic","2"],["F1","F1","E2","6","DEAD","LinStatic","0"],["F1","F1","E2","~2","DEAD","LinStatic","2"],["F1","F1","E2","~5","DEAD","LinStatic","10"],
+                 ["F1","F1","E3","~5","DEAD","LinStatic","10"],["F1","F1","E3","~2","DEAD","LinStatic","2"],["F1","F1","E3","7","DEAD","LinStatic","0"],["F1","F1","E3","~3","DEAD","LinStatic","2"],
+                 ["F1","F1","E4","~4","DEAD","LinStatic","2"],["F1","F1","E4","~5","DEAD","LinStatic","10"],["F1","F1","E4","~3","DEAD","LinStatic","2"],["F1","F1","E4","8","DEAD","LinStatic","0"]]},
+               "Frame Loads - Distributed":{"name":"Frame Loads - Distributed","from":"input","fields":["Story","Label","UniqueName","LoadPattern","LoadType","Direction","DistType","RelDistA","RelDistB","AbsDistA","AbsDistB","FOverLA","FOverLB"],"rows":[["S1","B1","B1","DEAD","Force","Gravity","RelDist","0","1","0","4","5","5"]]},
+               "Joint Loads - Force":{"name":"Joint Loads - Force","from":"input","fields":["Story","Label","UniqueName","LoadPattern","FX","FY","FZ","MX","MY","MZ"],"rows":[["S1","5","5","EQX","10","0","0","0","0","0"]]}}}
+            """)!.AsObject();
+        var meshSeen = CsiProMax.Assistant.ViewerCheck.Run(meshed, shots, "mesh and loads").Items;
+        foreach (var (item, says) in new[] { ("menu: Frame...", "load diagrams"), ("menu: Joint...", "load arrows"), ("menu: Shell Forces/Stresses...", "program's mesh") })
+        {
+            var it = meshSeen.FirstOrDefault(i => i.Name == item);
+            Check(it is { Ok: true, Skipped: false } && it.Detail.Contains(says, StringComparison.Ordinal), $"{item} shows {says}: " + (it is null ? "no such menu item" : it.Detail));
+        }
     }
 
     var folder = Path.Combine(Path.GetTempPath(), "cpm-pack-" + Guid.NewGuid().ToString("N"));

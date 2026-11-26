@@ -131,7 +131,10 @@ public static class ViewerCheck
             const d = document.querySelector(".dlg");
             if (d) { const go = d.querySelector('[data-b="0"]'); if (go) go.click(); await wait(300); }
             const share = drawn();
-            return share > 0.002 ? {ok: `drawn (${(share * 100).toFixed(1)}%)`} : {fail: `nothing is drawn after it (${share})`};
+            // A display the Viewer can judge (loads, shell contours) must show some of its results, not only the model.
+            const shows = typeof resultShown === "function" ? resultShown() : null;
+            if (shows === "") return {fail: "the model is drawn, but none of this display's results are on it"};
+            return share > 0.002 ? {ok: `drawn (${(share * 100).toFixed(1)}%)` + (shows ? ": " + shows : "")} : {fail: `nothing is drawn after it (${share})`};
           });
           try { closeDialogs(); const m = document.querySelector('[data-act="r:model"]'); if (m && !m.disabled) m.click(); const p = document.querySelector('[data-act="plot"].on'); if (p) p.click(); await wait(60); } catch (e) { }
         }
