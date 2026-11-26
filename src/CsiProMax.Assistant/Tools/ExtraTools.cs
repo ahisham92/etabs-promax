@@ -114,12 +114,14 @@ public static class ExtraTools
             "length (0 or left out: the rest of the tendon, shared out), depth_left, depth_low and depth_right (the tendon's centroid below the slab top at the span's left end, low point and right end), " +
             "and a, b, c (default 0.1, 0.1, 0.5: the inflection points from each end and the low point, as fractions of the span; a = b = 0 is a simple parabola). " +
             "section (a tendon section), strands (default 1), bonded (default false). jacking: {transfer_pattern, final_pattern (load patterns of type Prestress-Transfer and Prestress-Final), stress, end: I, J or Both}. " +
-            "losses: {method: Fixed (stressing and long_term are stresses lost) or Percent (of the jacking stress), stressing, long_term}.",
+            "losses: {method: Fixed (stressing and long_term are stresses lost), Percent (stressing and long_term in % of the jacking stress) or Detailed " +
+            "(curvature and wobble friction coefficients, anchor_slip, and the long-term stresses lost to elastic_shortening, creep, shrinkage and relaxation)}.",
             """{"type":"object","required":["name"],"properties":{"name":{"type":"string"},"story":{"type":"string"},"points":{"type":"array","items":{"type":"array","items":{"type":"number"}}},""" +
             """ "spans":{"type":"array","items":{"type":"object","properties":{"length":{"type":"number"},"depth_left":{"type":"number"},"depth_low":{"type":"number"},"depth_right":{"type":"number"},"a":{"type":"number"},"b":{"type":"number"},"c":{"type":"number"}}}},""" +
             """ "section":{"type":"string"},"strands":{"type":"integer"},"bonded":{"type":"boolean"},""" +
             """ "jacking":{"type":"object","properties":{"transfer_pattern":{"type":"string"},"final_pattern":{"type":"string"},"stress":{"type":"number"},"end":{"type":"string","enum":["I","J","Both"]}}},""" +
-            """ "losses":{"type":"object","properties":{"method":{"type":"string","enum":["Fixed","Percent"]},"stressing":{"type":"number"},"long_term":{"type":"number"}}}""" + Del + "}}",
+            """ "losses":{"type":"object","properties":{"method":{"type":"string","enum":["Fixed","Percent","Detailed"]},"stressing":{"type":"number"},"long_term":{"type":"number"},""" +
+            """ "curvature":{"type":"number"},"wobble":{"type":"number"},"anchor_slip":{"type":"number"},"elastic_shortening":{"type":"number"},"creep":{"type":"number"},"shrinkage":{"type":"number"},"relaxation":{"type":"number"}}}""" + Del + "}}",
             Ask.Changes, (a, e) => Core(e, m =>
             {
                 var name = a.Need("name");
@@ -137,7 +139,8 @@ public static class ExtraTools
                 if (Has(a, "losses"))
                 {
                     var l = a.GetProperty("losses");
-                    loss = new SlabDefs.TendonLoss(l.Text("method", "Fixed"), l.Number("stressing", 0), l.Number("long_term", 0));
+                    loss = new SlabDefs.TendonLoss(l.Text("method", "Fixed"), l.Number("stressing", 0), l.Number("long_term", 0), l.Number("curvature", 0), l.Number("wobble", 0),
+                        l.Number("anchor_slip", 0), l.Number("elastic_shortening", 0), l.Number("creep", 0), l.Number("shrinkage", 0), l.Number("relaxation", 0));
                 }
                 var story = a.Text("story");
                 if (story.Length == 0) story = SlabDefs.Tendons(m).Find(x => x.Name == name)?.Story ?? F2k.F2kWriter.BusiestStory(m);
@@ -145,7 +148,7 @@ public static class ExtraTools
                 return new JsonObject
                 {
                     ["tendon"] = t.Name, ["story"] = t.Story, ["length"] = Math.Round(t.Length, 6), ["spans"] = t.Spans.Count, ["strands"] = t.Strands,
-                    ["jacking"] = t.Jack is null ? "none" : $"{t.Jack.Stress} from {t.Jack.End}", ["losses"] = t.Loss is null ? "none" : $"{t.Loss.Stressing} at stressing, {t.Loss.LongTerm} long term",
+                    ["jacking"] = t.Jack is null ? "none" : $"{t.Jack.Stress} from {t.Jack.End}", ["losses"] = t.Loss is null ? "none" : t.Loss.Method + ": " + SlabDefs.Describe(t.Loss),
                 };
             }), a => $"{(a.Flag("delete") ? "Delete" : "Draw")} the tendon {a.Text("name")}"),
         new("define_hyperstatic_case",
@@ -165,8 +168,44 @@ public static class ExtraTools
                 var c = SlabDefs.SetHyperstatic(m, a.Need("name"), a.Need("base_case"), a.Number("scale", 1));
                 return new JsonObject { ["load_case"] = c.Name, ["type"] = "Hyperstatic", ["base_case"] = a.Need("base_case") };
             }), a => $"{(a.Flag("delete") ? "Delete" : "Define")} the hyperstatic case {a.Text("name")}"),
+        new("set_punching_overwrite",
+            "Adds, changes or deletes a punching shear overwrite at a point of a slab (Design > Concrete Slab Design > Punching Shear Overwrites), for ETABS and SAFE: " + // ETABS itself
+            "point and story (the column or load point on the slab's story); check: Program Determined, Yes or No; location: Auto, Interior, Edge or Corner; " +
+            "perimeter: the critical perimeter's corners about the point [[x, y] or [x, y, corner radius], ...], left out for the program's own; " +
+            "reinforcement: {type: None, Ties or Stud Rails, pattern: Radial or Orthogonal, fy, diameter, spacing}.",
+            """{"type":"object","required":["point","story"],"properties":{"point":{"type":"string"},"story":{"type":"string"},"check":{"type":"string","enum":["Program Determined","Yes","No"]},""" +
+            """ "location":{"type":"string","enum":["Auto","Interior","Edge","Corner"]},"perimeter":{"type":"array","items":{"type":"array","items":{"type":"number"}}},""" +
+            """ "reinforcement":{"type":"object","properties":{"type":{"type":"string","enum":["None","Ties","Stud Rails"]},"pattern":{"type":"string","enum":["Radial","Orthogonal"]},"fy":{"type":"number"},"diameter":{"type":"number"},"spacing":{"type":"number"}}}""" + Del + "}}",
+            Ask.Changes, (a, e) => Core(e, m =>
+            {
+                var point = a.Need("point"); var story = a.Need("story");
+                if (a.Flag("delete")) { SlabDefs.DeletePunching(m, point, story); return new JsonObject { ["deleted"] = point + "@" + story }; }
+                var r = Has(a, "reinforcement") ? a.GetProperty("reinforcement") : default;
+                var p = SlabDefs.SetPunching(m, new SlabDefs.Punching(point, story, a.Text("check", "Program Determined"), a.Text("location", "Auto"),
+                    Has(a, "perimeter") ? a.Items("perimeter").Select(c => c.EnumerateArray().Select(v => v.GetDouble()).ToArray()).ToList() : null,
+                    Has(a, "reinforcement") ? r.Text("type", "None") : "None", Has(a, "reinforcement") ? r.Text("pattern", "Radial") : "Radial",
+                    Has(a, "reinforcement") ? r.Number("fy", 0) : 0, Has(a, "reinforcement") ? r.Number("diameter", 0) : 0, Has(a, "reinforcement") ? r.Number("spacing", 0) : 0));
+                return new JsonObject
+                {
+                    ["punching_overwrite"] = p.Name, ["check"] = p.Check, ["location"] = p.Location, ["perimeter"] = p.Perimeter is null ? "program's own" : $"{p.Perimeter.Count} corners",
+                    ["reinforcement"] = p.Reinforcement == "None" ? "none" : $"{p.Reinforcement}, {p.Pattern}, fy {p.Fy}, diameter {p.Diameter} at {p.Spacing}",
+                };
+            }), a => $"{(a.Flag("delete") ? "Delete" : "Set")} the punching overwrite at {a.Text("point")}"),
+        new("draw_opening",
+            "Adds, changes or deletes an opening in a floor (Draw > Draw Floor/Wall Openings), for ETABS and SAFE: story (the slab's story) and its plan corners [[x, y], ...]. " + // ETABS itself
+            "The slab design and the punching check see it.",
+            """{"type":"object","required":["name"],"properties":{"name":{"type":"string"},"story":{"type":"string"},"points":{"type":"array","items":{"type":"array","items":{"type":"number"}}}""" + Del + "}}",
+            Ask.Changes, (a, e) => Core(e, m =>
+            {
+                var name = a.Need("name");
+                if (a.Flag("delete")) { SlabDefs.DeleteOpening(m, name); return new JsonObject { ["deleted"] = name }; }
+                var story = a.Text("story");
+                if (story.Length == 0) story = SlabDefs.Openings(m).Find(x => x.Name == name)?.Story ?? F2k.F2kWriter.BusiestStory(m);
+                var o = SlabDefs.SetOpening(m, name, story, Has(a, "points") ? a.Items("points").Select(p => { var (x, y) = p.Point(); return new[] { x, y }; }).ToList() : []);
+                return new JsonObject { ["opening"] = o.Name, ["story"] = o.Story, ["corners"] = o.Plan.Count };
+            }), a => $"{(a.Flag("delete") ? "Delete" : "Draw")} the opening {a.Text("name")}"),
         new("extra_definitions",
-            "What the joint constraint, moving load, design strip and tendon forms show: the constraint types, axes and standard vehicles, and the model's constraints (with their joints), lanes, vehicles, vehicle classes, moving load cases, strips, tendon sections and tendons (with each tendon's 3D shape).",
+            "What the joint constraint, moving load, design strip, tendon, punching and opening forms show: the constraint types, axes and standard vehicles, and the model's constraints (with their joints), lanes, vehicles, vehicle classes, moving load cases, strips, tendon sections, tendons (with each tendon's 3D shape), punching overwrites and openings.",
             """{"type":"object","properties":{}}""", Ask.Never, (_, e) => Definitions(Offline(e).Model)),
     ];
 
@@ -240,8 +279,24 @@ public static class ExtraTools
                     ["depth_left"] = Math.Round(t.Datum - sp.ZL, 6), ["depth_low"] = Math.Round(t.Datum - sp.ZC, 6), ["depth_right"] = Math.Round(t.Datum - sp.ZR, 6),
                 }).ToArray()),
                 ["jacking"] = t.Jack is null ? null : new JsonObject { ["transfer_pattern"] = t.Jack.TransferPattern, ["final_pattern"] = t.Jack.FinalPattern, ["stress"] = t.Jack.Stress, ["end"] = t.Jack.End },
-                ["losses"] = t.Loss is null ? null : new JsonObject { ["method"] = t.Loss.Method, ["stressing"] = t.Loss.Stressing, ["long_term"] = t.Loss.LongTerm },
+                ["losses"] = t.Loss is null ? null : new JsonObject
+                {
+                    ["method"] = t.Loss.Method, ["stressing"] = t.Loss.Stressing, ["long_term"] = t.Loss.LongTerm, ["curvature"] = t.Loss.Curvature, ["wobble"] = t.Loss.Wobble,
+                    ["anchor_slip"] = t.Loss.AnchorSlip, ["elastic_shortening"] = t.Loss.ElasticShortening, ["creep"] = t.Loss.Creep, ["shrinkage"] = t.Loss.Shrinkage, ["relaxation"] = t.Loss.Relaxation,
+                },
                 ["shape"] = new JsonArray(t.Shape().Select(p => (JsonNode)new JsonArray(Math.Round(p[0], 6), Math.Round(p[1], 6), Math.Round(p[2], 6))).ToArray()),
+            }).ToArray()),
+            ["punching_overwrites"] = new JsonArray(SlabDefs.PunchingList(m).Select(p => (JsonNode)new JsonObject
+            {
+                ["name"] = p.Name, ["point"] = p.Point, ["story"] = p.Story, ["check"] = p.Check, ["location"] = p.Location,
+                ["perimeter"] = p.Perimeter is null ? null : new JsonArray(p.Perimeter.Select(c => (JsonNode)new JsonArray(c[0], c[1], c[2])).ToArray()),
+                ["reinforcement"] = new JsonObject { ["type"] = p.Reinforcement, ["pattern"] = p.Pattern, ["fy"] = p.Fy, ["diameter"] = p.Diameter, ["spacing"] = p.Spacing },
+            }).ToArray()),
+            ["punching_checks"] = Strings(SlabDefs.PunchingChecks), ["punching_locations"] = Strings(SlabDefs.PunchingLocations),
+            ["punching_reinforcements"] = Strings(SlabDefs.PunchingReinforcements), ["punching_patterns"] = Strings(SlabDefs.PunchingPatterns),
+            ["openings"] = new JsonArray(SlabDefs.Openings(m).Select(o => (JsonNode)new JsonObject
+            {
+                ["name"] = o.Name, ["story"] = o.Story, ["points"] = new JsonArray(o.Plan.Select(p => (JsonNode)new JsonArray(p[0], p[1])).ToArray()),
             }).ToArray()),
         };
     }

@@ -215,7 +215,11 @@ public static class PropertyDefs
 
     // ---- slab and wall types ----
 
-    public static ShellSection SetShellType(StructuralModel m, string name, string? was, bool wall, string slabType, string modeling, double thickness, string material, bool oneWay)
+    /// <summary>A ribbed slab's ribs, as ETABS 23.2 writes them: the overall depth (slab and ribs), the rib width at its top and
+    /// bottom, the rib spacing, and the local axis (1 or 2) the ribs run along.</summary>
+    public sealed record Ribs(double OverallDepth, double WidthTop, double WidthBottom, double Spacing, int ParallelTo = 1);
+
+    public static ShellSection SetShellType(StructuralModel m, string name, string? was, bool wall, string slabType, string modeling, double thickness, string material, bool oneWay, Ribs? ribs = null)
     {
         Name(name, "slab or wall section");
         if (!m.Materials.Exists(x => x.Name == material)) throw new ArgumentException($"There is no material '{material}'.");
@@ -231,7 +235,17 @@ public static class PropertyDefs
         if (!wall)
         {
             if (oneWay) line.AddRange(["ONEWAYLOADDIST", Quote("Yes")]);
-            line.AddRange(["SLABTYPE", Quote(type), "SLABTHICKNESS", Number(thickness)]);
+            if (type == "Ribbed")
+            {
+                if (ribs is null) throw new ArgumentException("A ribbed slab needs its ribs: overall_depth, rib_width_top, rib_width_bottom, rib_spacing (and rib_direction 1 or 2).");
+                if (!(ribs.OverallDepth > thickness)) throw new ArgumentException("The overall depth of a ribbed slab is more than its slab thickness.");
+                if (!(ribs.WidthTop > 0) || !(ribs.WidthBottom > 0) || ribs.WidthBottom > ribs.WidthTop + 1e-12) throw new ArgumentException("The rib widths are more than 0, the bottom no wider than the top.");
+                if (!(ribs.Spacing > ribs.WidthTop)) throw new ArgumentException("The rib spacing is more than the rib width.");
+                if (ribs.ParallelTo is not (1 or 2)) throw new ArgumentException("The ribs run along local axis 1 or 2.");
+                line.AddRange(["SLABTYPE", Quote(type), "OVERALLDEPTH", Number(ribs.OverallDepth), "SLABTHICKNESS", Number(thickness), "SLABRIBWIDTHTOP", Number(ribs.WidthTop),
+                    "SLABRIBWIDTHBOTTOM", Number(ribs.WidthBottom), "SLABRIBSPACING", Number(ribs.Spacing), "SLABRIBPARALLELTOAXIS", ribs.ParallelTo.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
+            }
+            else line.AddRange(["SLABTYPE", Quote(type), "SLABTHICKNESS", Number(thickness)]);
         }
         var sec = old ?? new ShellSection();
         if (old is null) m.ShellSections.Add(sec);

@@ -144,6 +144,13 @@ public static class F2kWriter
             pointLoads.Add((Point(pp.X, pp.Y, z - pp.Below), l.Pattern, values));
         }
 
+        // ---- openings in the slab, and punching overwrites at points of the level ----
+        var openings = SlabDefs.Openings(m).Where(o => string.Equals(o.Story, story, StringComparison.OrdinalIgnoreCase) && o.Plan.Count >= 3)
+            .Select(o => (Label: AreaName(o.Name), Points: o.Plan.Select(p => Point(p[0], p[1], z)).ToList())).ToList();
+        var punching = new List<(string Point, SlabDefs.Punching P)>();
+        foreach (var p in SlabDefs.PunchingList(m).Where(p => string.Equals(p.Story, story, StringComparison.OrdinalIgnoreCase)))
+            if (m.Point(p.Point) is { } pp) punching.Add((Point(pp.X, pp.Y, z - pp.Below), p));
+
         // ---- what is used ----
         var usedSlab = areaRows.Select(r => r.Section).Where(s => s.Length > 0).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var usedBeam = lineRows.Where(r => r.Type == "Beam").Select(r => r.Section).Where(s => s.Length > 0).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -242,8 +249,19 @@ public static class F2kWriter
             tables.Add(CsiTableText.Table("AREA SECTION PROPERTY DEFINITIONS - SUMMARY", slabProps.Select(s => (IReadOnlyList<(string, string)>)Row(("Name", s.Name), ("Type", "Slab"), ("Element Type", ElementType(s, "Shell-Thick")), ("Material", s.Material), ("Total Thickness", N(s.Thickness ?? 0))))
                 .Concat(wallProps.Select(s => (IReadOnlyList<(string, string)>)Row(("Name", s.Name), ("Type", "Wall"), ("Element Type", ElementType(s, "Shell-Thin")), ("Material", s.Material), ("Total Thickness", N(s.Thickness ?? 0)))))));
         if (slabProps.Count > 0)
-            tables.Add(CsiTableText.Table("SLAB PROPERTY DEFINITIONS", slabProps.Select(s => (IReadOnlyList<(string, string)>)Row(
-                ("Name", s.Name), ("Modeling Type", ElementType(s, "Shell-Thick")), ("Property Type", SlabType(s)), ("Material", s.Material), ("Slab Thickness", N(s.Thickness ?? 0))))));
+            tables.Add(CsiTableText.Table("SLAB PROPERTY DEFINITIONS", slabProps.Select(s =>
+            {
+                var row = Row(("Name", s.Name), ("Modeling Type", ElementType(s, "Shell-Thick")), ("Property Type", SlabType(s)), ("Material", s.Material));
+                if (s.Number("OVERALLDEPTH") is { } depth) row.Add(("Overall Depth", N(depth)));
+                row.Add(("Slab Thickness", N(s.Thickness ?? 0)));
+                if (s.Number("SLABRIBSPACING") is { } spacing)
+                {
+                    row.Add(("Rib Width at Top", N(s.Number("SLABRIBWIDTHTOP") ?? 0)));
+                    row.Add(("Rib Width at Bottom", N(s.Number("SLABRIBWIDTHBOTTOM") ?? 0)));
+                    row.Add((s.Number("SLABRIBPARALLELTOAXIS") == 2 ? "Rib Spacing 2" : "Rib Spacing 1", N(spacing)));
+                }
+                return (IReadOnlyList<(string, string)>)row;
+            })));
         if (wallProps.Count > 0)
             tables.Add(CsiTableText.Table("WALL PROPERTY DEFINITIONS - SPECIFIED", wallProps.Select(s => (IReadOnlyList<(string, string)>)Row(
                 ("Name", s.Name), ("Modeling Type", ElementType(s, "Shell-Thin")), ("Material", s.Material), ("Wall Thickness", N(s.Thickness ?? 0)), ("Include Auto Rigid Zone?", "No")))));
@@ -344,6 +362,13 @@ public static class F2kWriter
                 for (var i = 0; i < w.Points.Count; i++) row.Add(("UniquePt" + I(i + 1), w.Points[i]));
                 return (IReadOnlyList<(string, string)>)row;
             })));
+        if (openings.Count > 0)
+            tables.Add(CsiTableText.Table("NULL AREA OBJECT CONNECTIVITY", openings.Select(o =>
+            {
+                var row = Row(("Unique Name", o.Label));
+                for (var i = 0; i < o.Points.Count; i++) row.Add(("UniquePt" + I(i + 1), o.Points[i]));
+                return (IReadOnlyList<(string, string)>)row;
+            })));
         if (tendons.Count > 0)
             tables.Add(CsiTableText.Table("TENDON OBJECT CONNECTIVITY", tendons.SelectMany((t, k) => TendonRows(t, tendonPoints[k], z))));
         if (strips.Count > 0)
@@ -371,9 +396,10 @@ public static class F2kWriter
         if (lineRows.Count > 0)
             tables.Add(CsiTableText.Table("FRAME ASSIGNMENTS - SECTION PROPERTIES", lineRows.Where(l => l.Section.Length > 0).Select(l => (IReadOnlyList<(string, string)>)Row(
                 ("UniqueName", l.Label), ("Shape", shapeOf.GetValueOrDefault(l.Section, "Concrete Rectangular")), ("Auto Select List", "N.A."), ("Section Property", l.Section)))));
-        if (areaRows.Count + wallRows.Count > 0)
+        if (areaRows.Count + wallRows.Count + openings.Count > 0)
             tables.Add(CsiTableText.Table("AREA ASSIGNMENTS - SECTION PROPERTIES", areaRows.Where(a => a.Section.Length > 0).Select(a => (IReadOnlyList<(string, string)>)Row(("UniqueName", a.Label), ("Section Property", a.Section), ("Property Type", "Slab")))
-                .Concat(wallRows.Where(w => w.Section.Length > 0).Select(w => (IReadOnlyList<(string, string)>)Row(("UniqueName", w.Label), ("Section Property", w.Section), ("Property Type", "Wall"))))));
+                .Concat(wallRows.Where(w => w.Section.Length > 0).Select(w => (IReadOnlyList<(string, string)>)Row(("UniqueName", w.Label), ("Section Property", w.Section), ("Property Type", "Wall"))))
+                .Concat(openings.Select(o => (IReadOnlyList<(string, string)>)Row(("UniqueName", o.Label), ("Section Property", "Opening"), ("Property Type", "Opening"))))));
         if (soilOf.Count > 0)
             tables.Add(CsiTableText.Table("AREA ASSIGNMENTS - AREA SPRINGS", areaRows.Where(a => soilOf.ContainsKey(a.Label)).Select(a => (IReadOnlyList<(string, string)>)Row(("UniqueName", a.Label), ("Spring Property", soilOf[a.Label])))));
         if (tendons.Count > 0)
@@ -385,9 +411,14 @@ public static class F2kWriter
                     ("Final Load Pattern", t.Jack.FinalPattern), ("Jacking Stress", N(t.Jack.Stress)), ("Jacking Location", SlabDefs.JackEnds.FirstOrDefault(j => j.Key == t.Jack.End || j.E2k == t.Jack.End).F2k ?? "J End")))));
             var lost = tendons.Where(t => t.Loss is not null).ToList();
             if (lost.Count > 0)
-                tables.Add(CsiTableText.Table("TENDON LOAD ASSIGNMENTS - LOSS OPTIONS", lost.Select(t => (IReadOnlyList<(string, string)>)(t.Loss!.Method.Equals("Percent", StringComparison.OrdinalIgnoreCase)
-                    ? Row(("Name", t.Name), ("Loss Method", "Percent"), ("Stressing Loss", N(t.Loss.Stressing)), ("Long Term Loss", N(t.Loss.LongTerm)))
-                    : Row(("Name", t.Name), ("Loss Method", "Fixed"), ("Stressing Loss Fixed", N(t.Loss.Stressing)), ("Long Term Loss Fixed", N(t.Loss.LongTerm)))))));
+                tables.Add(CsiTableText.Table("TENDON LOAD ASSIGNMENTS - LOSS OPTIONS", lost.Select(t => (IReadOnlyList<(string, string)>)(t.Loss!.Method switch
+                {
+                    "Percent" => Row(("Name", t.Name), ("Loss Method", "Percent"), ("Stressing Loss", N(t.Loss.Stressing)), ("Long Term Loss", N(t.Loss.LongTerm))),
+                    "Detailed" => Row(("Name", t.Name), ("Loss Method", "Detailed"), ("Curvature Coefficient", N(t.Loss.Curvature)), ("Wobble Coefficient", N(t.Loss.Wobble)),
+                        ("Anchorage Set Slip", N(t.Loss.AnchorSlip)), ("Shortening Stress", N(t.Loss.ElasticShortening)), ("Creep Stress", N(t.Loss.Creep)),
+                        ("Shrinkage Stress", N(t.Loss.Shrinkage)), ("Relaxation Stress", N(t.Loss.Relaxation))),
+                    _ => Row(("Name", t.Name), ("Loss Method", "Fixed"), ("Stressing Loss Fixed", N(t.Loss.Stressing)), ("Long Term Loss Fixed", N(t.Loss.LongTerm))),
+                }))));
         }
 
         // Loads on objects
@@ -423,6 +454,24 @@ public static class F2kWriter
                 row.Add(("LLRF", N(st.Llrf)));
                 return (IReadOnlyList<(string, string)>)row;
             })));
+
+        // Punching shear overwrites, with a user perimeter's corners about the point.
+        if (punching.Count > 0)
+        {
+            tables.Add(CsiTableText.Table("CONCRETE SLAB DESIGN OVERWRITES - PUNCHING SHEAR - GENERAL", punching.Select(x =>
+            {
+                var row = Row(("Unique Name", x.Point), ("Check Punching Shear?", x.P.Check), ("Location Type", x.P.Location), ("Perimeter Type", x.P.Perimeter is null ? "Auto" : "User Perimeter"),
+                    ("Effective Depth Type", "Auto"), ("Opening Definition", "Auto"), ("Reinforcement Type", x.P.Reinforcement));
+                if (x.P.Reinforcement != "None")
+                    // The programs' own table keys name RebarFy "Reinforcement Diameter" and RebarDia "Reinforcement Fy" (swapped in "Table and Field Keys.xml"
+                    // of ETABS 23.2), and SAFE matches the names to the keys, so the yield stress goes under "Reinforcement Diameter" as SAFE itself writes it.
+                    row.AddRange([("Reinforcement Pattern", x.P.Pattern), ("Reinforcement Diameter", N(x.P.Fy)), ("Reinforcement Fy", N(x.P.Diameter)), ("Reinforcement Spacing", N(x.P.Spacing))]);
+                return (IReadOnlyList<(string, string)>)row;
+            })));
+            var corners = punching.Where(x => x.P.Perimeter is not null).SelectMany(x => x.P.Perimeter!.Select((c, i) => (IReadOnlyList<(string, string)>)Row(("Unique Name", x.Point), ("Point Number", I(i + 1)),
+                ("X Coord", N(c[0])), ("Y Coord", N(c[1])), ("Radius", N(c[2])), ("Is Null?", "No")))).ToList();
+            if (corners.Count > 0) tables.Add(CsiTableText.Table("CONCRETE SLAB DESIGN OVERWRITES - PUNCHING SHEAR - PERIMETER", corners));
+        }
 
         var header = $"File written by CSI ProMax Modeler on {DateTime.Now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)}: story {story} of {(m.Title.Length > 0 ? m.Title : "the model")}";
         return new F2kResult(CsiTableText.Document(header, tables), story, areaRows.Count, beamRows.Count, columns.Count, wallRows.Count,
