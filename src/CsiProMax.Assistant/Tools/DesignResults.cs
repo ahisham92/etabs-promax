@@ -240,9 +240,11 @@ public static class DesignResults
                 })!;
             }
             catch (EtabsException ex) { outcome = "failed: " + ex.Message; }
+            // No API call for it (ETABS 23's shear walls): the program's own menu, picked as a person would.
+            if (outcome == "no api" && ProcessOf(e) is int pid) outcome = ByMenu(e, pid, menu);
             if (outcome == "ran") ran.Add(kind);
             else if (outcome == "nothing") nothing.Add(new JsonObject { ["kind"] = kind, ["note"] = $"{e.Program.Name} did not design (no members of this kind, or no design code set). If there are, run {menu} there." });
-            else manual.Add(new JsonObject { ["kind"] = kind, ["menu"] = menu, ["why"] = outcome == "no api" ? $"{e.Program.Name}'s API has no call to start this design" : outcome });
+            else manual.Add(new JsonObject { ["kind"] = kind, ["menu"] = menu, ["why"] = outcome == "no api" ? $"{e.Program.Name}'s API has no call to start this design" : outcome.StartsWith("no api; ", StringComparison.Ordinal) ? $"{e.Program.Name}'s API has no call to start this design, and " + outcome["no api; ".Length..] : outcome });
         }
         var result = new JsonObject { ["ran"] = ran, ["not_designed"] = nothing };
         if (manual.Count > 0)
@@ -251,6 +253,26 @@ public static class DesignResults
             result["note"] = "Ask the engineer to run these from the menu given, then export_pack takes their results from the design tables. If the tables stay empty, the engineer can export them (File > Export > tables to Excel) into the model's folder with the model's name, and the pack takes them from that file.";
         }
         return result;
+    }
+
+    /// <summary>The process of the program behind the link, when it is a running program (never a stand-in).</summary>
+    internal static Func<ICsiLink, int?> ProcessOf = e => e is ComEtabs c ? c.ProcessId : null;
+
+    /// <summary>Picks the design's menu (MenuCommand); given so a test stands in for the program's window.</summary>
+    internal static Func<int, IReadOnlyList<string>, string?> PickMenu = (pid, path) => MenuCommand.Pick(pid, path);
+
+    /// <summary>
+    /// Starts a design from the program's menu ("Design > Shear Wall Design > Start Design/Check") and waits for it: the
+    /// program answers its API again only once the design is done, since both run on its window's thread.
+    /// </summary>
+    internal static string ByMenu(ICsiLink e, int pid, string menu)
+    {
+        var path = menu.Split('>', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        var why = PickMenu(pid, path);
+        if (why is not null) return $"no api; the menu could not be picked either: {why}";
+        Thread.Sleep(1500);
+        try { e.Info(); } catch (EtabsException ex) { return "failed after the menu was picked: " + ex.Message; }
+        return "ran";
     }
 
     /// <summary>SAFE names it StartSlabDesign; ETABS, where it has one, StartDesign.</summary>

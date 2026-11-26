@@ -32,6 +32,29 @@ static class OldProgramTests
 
     public static IEnumerable<(string Name, Action Body)> All()
     {
+        yield return ("ETABS 23 shear wall design: no StartDesign in its API, so its own menu Design > Shear Wall Design > Start Design/Check is picked", () =>
+        {
+            Check(MenuCommand.Matches("&Start Design/Check...", "Start Design/Check") && MenuCommand.Matches("Shear &Wall Design", "Shear Wall Design") && !MenuCommand.Matches("Steel Frame Design", "Shear Wall Design"), "menu words without access keys or dots");
+            var (link, _, inner) = CsiToolsTests.Model(CsiProgram.Etabs);
+            inner.Locked = true;
+            var (oldPid, oldPick) = (DesignResults.ProcessOf, DesignResults.PickMenu);
+            var picked = new List<string>();
+            try
+            {
+                DesignResults.ProcessOf = _ => 4242;
+                DesignResults.PickMenu = (pid, path) => { picked.Add(pid + ": " + string.Join(" > ", path)); return null; };
+                var r = DesignResults.RunDesign(link, ["shear_wall"]);
+                Check(r["ran"]!.AsArray().Any(k => k!.GetValue<string>() == "shear_wall") && r["run_in_program"] is null, "ran by the menu: " + r.ToJsonString());
+                Equal("4242: Design > Shear Wall Design > Start Design/Check", picked.Single(), "the program's own menu, in its own window");
+                DesignResults.PickMenu = (_, _) => "the menu has no \"Shear Wall Design\" under \"Design\"";
+                var no = DesignResults.RunDesign(link, ["shear_wall"]);
+                Check(no["run_in_program"]!.ToJsonString().Contains("could not be picked either"), "why it could not: " + no.ToJsonString());
+                DesignResults.ProcessOf = _ => null;
+                Check(DesignResults.RunDesign(link, ["shear_wall"])["run_in_program"] is not null, "a stand-in has no window: listed with the menu");
+            }
+            finally { (DesignResults.ProcessOf, DesignResults.PickMenu) = (oldPid, oldPick); }
+        });
+
         yield return ("ETABS 23 pack: step by step output through SetOutputOptionsForDisplay (no GetTableOutputOptionsForDisplay there), and set back", () =>
         {
             var (link, api, _) = CsiToolsTests.Model(CsiProgram.Etabs);
@@ -696,6 +719,8 @@ static class OldProgramTests
             Check(box("Error in performing miOpen"), "ETABS 23's words, Ahmed's PC 2026-11-26");
             Check(CsiProMax.Assistant.ScratchDialogs.IsProgramBox("Warning", CsiProgram.Etabs), "ETABS 23 titles that box Warning");
             Check(!CsiProMax.Assistant.ScratchDialogs.IsProgramBox("Warning: licence", CsiProgram.Etabs), "never another title");
+            Check(CsiProMax.Assistant.ScratchDialogs.IsOpenFileBox(" Open Model File ") && !CsiProMax.Assistant.ScratchDialogs.IsOpenFileBox("Open Model File - licence"), "ETABS 23's Open Model File picker, by its title");
+            Check(box("Open Model File: ETABS asked for a file to open (Cancel)"), "a cancelled file picker fails its step");
             foreach (var p in CsiProgram.All)
                 Check(CsiProMax.Assistant.ScratchDialogs.IsProgramBox(" " + p.Name + " ", p) && !CsiProMax.Assistant.ScratchDialogs.IsProgramBox(p.Name + " licence", p), $"{p.Name}'s own message box, by its title");
         });
