@@ -507,6 +507,11 @@ public sealed class ScratchProgram : IScratchWindow
         }) is null) return false;
         if (openedEmpty)
         {
+            // An import bug for every engineer who opens the Modeler's file in this SAFE, so it fails here and stays
+            // failed until the writer is fixed. The model is still built, so the rest of SAFE's tools are tested on it.
+            ctx.Fail($"{name} opens the Modeler's {Path.GetExtension(modelFile)} with all its objects",
+                $"{name} answered that it opened {Path.GetFileName(modelFile)}, but it holds none of the file's {F2kRebuild.ObjectCount(File.ReadAllText(modelFile))} beams, columns, walls and floors: " +
+                $"an engineer opening this file in {name} gets an empty model. The rest of the test builds the model through the API.");
             build = true;
             text = File.ReadAllText(modelFile);
             if (!Blank($"{name} opened the Modeler's {Path.GetExtension(modelFile)} as an empty model, so the model is built in it instead")) return false;
