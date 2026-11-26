@@ -3964,9 +3964,9 @@ function modelerMenus(m) {
     ["Draw Walls (click start and end)", "d:wall"], ["Quick Draw Walls (click a grid line)", "d:qwall"], 0,
     ["Draw Braces (click bottom and top)", "d:brace"], ["Draw Joints (click a point)", "d:joint"], 0, ["Snap and Story Options...", "m:drawHelp"]];
   m.Assign = [["Frame Section...", "m:asgFrame", "", !fr], ["Slab or Wall Section...", "m:asgShell", "", !ar], 0, ["Joint Restraints (Supports)...", "m:asgSupport"], 0,
-    ["Joint", [["Springs...", "m:ad:joint", "", !any], only(["etabs", "sap2000"], ["Diaphragms...", "m:sa:jdiaph", "", !any]), only(["sap2000"], ["Constraints...", "m:ex:jconstraint", "", !any])]],
-    ["Frame", [["Releases...", "m:ad:releases", "", !fr], ["Local Axes...", "m:ad:axes", "", !fr], ["Insertion Point...", "m:ad:insertion", "", !fr], ["End Length Offsets...", "m:ad:offsets", "", !fr], ["Property Modifiers...", "m:ad:fmods", "", !fr], ["Line Springs...", "m:ad:lspring", "", !fr], only(["etabs", "sap2000"], ["Hinges...", "m:ad:hinges", "", !fr])]],
-    ["Shell", [["Property Modifiers...", "m:ad:smods", "", !ar], ["Area Springs...", "m:ad:aspring", "", !ar], only(["etabs", "sap2000"], ["Diaphragms...", "m:sa:diaph", "", !ar]), only(["etabs"], ["Pier Label...", "m:sa:pier", "", !any]), only(["etabs"], ["Spandrel Label...", "m:sa:spandrel", "", !any])]],
+    ["Joint", [["Springs...", "m:ad:joint", "", !any], only(["etabs", "sap2000"], ["Diaphragms...", "m:sa:jdiaph", "", !any]), only(["sap2000"], ["Constraints...", "m:ex:jconstraint", "", !any]), 0, ...hmTableItems("Joint", !any)]],
+    ["Frame", [["Releases...", "m:ad:releases", "", !fr], ["Local Axes...", "m:ad:axes", "", !fr], ["Insertion Point...", "m:ad:insertion", "", !fr], ["End Length Offsets...", "m:ad:offsets", "", !fr], ["Property Modifiers...", "m:ad:fmods", "", !fr], ["Line Springs...", "m:ad:lspring", "", !fr], only(["etabs", "sap2000"], ["Hinges...", "m:ad:hinges", "", !fr]), 0, ...hmTableItems("Frame", !fr)]],
+    ["Shell", [["Property Modifiers...", "m:ad:smods", "", !ar], ["Area Springs...", "m:ad:aspring", "", !ar], only(["etabs", "sap2000"], ["Diaphragms...", "m:sa:diaph", "", !ar]), only(["etabs"], ["Pier Label...", "m:sa:pier", "", !any]), only(["etabs"], ["Spandrel Label...", "m:sa:spandrel", "", !any]), 0, only(["etabs"], ["Opening...", "m:at:opening", "", !ar]), ...hmTableItems("Area", !ar)]],
     ["Assign Objects to Group...", "m:sa:group", "", !any], 0,
     ["Joint Loads", [["Forces...", "m:ld:joint_force", "", !any], ["Ground Displacements...", "m:ld:joint_displacement", "", !any], ["Temperature...", "m:ld:joint_temperature", "", !any]]],
     ["Frame Loads", [["Distributed...", "m:asgFrameLoad", "", !fr], ["Uniform in any direction...", "m:ld:frame_uniform", "", !fr], ["Point...", "m:ld:frame_point", "", !fr], ["Trapezoidal...", "m:ld:frame_trapezoid", "", !fr], ["Temperature...", "m:ld:frame_temperature", "", !fr], ["Strain...", "m:ld:frame_strain", "", !fr]]],
@@ -3978,6 +3978,7 @@ async function modelAct(a) {
   if (a.startsWith("ld:")) return hmObjectLoad(a.slice(3));
   if (a.startsWith("spr:")) return hmSprings(a.slice(4));
   if (a.startsWith("ad:")) return hmAssignData(a.slice(3));
+  if (a.startsWith("at:")) return hmAssignTable(a.slice(3));
   if (a.startsWith("st:")) return hmStructure(a.slice(3));
   if (a.startsWith("sa:")) return hmAssignStructure(a.slice(3));
   if (a.startsWith("ex:")) return hmExtras(a.slice(3));
@@ -4049,6 +4050,52 @@ async function hmDivide() {
   dialog("Divide Frames", `<fieldset><legend>Divide into</legend><div class="g2"><span>Number of frames</span><input id="dvN" type="number" min="2" max="20" value="2"></div></fieldset>
     <p class="kv">Each part keeps the section and assignments; uniform loads go on every part, end releases and offsets stay at the beam's ends.</p>`,
     [["OK", d => submit(d, "divide_frames", {objects, parts: parseInt(q(d, "#dvN").value) || 2}, () => { sel.clear(); selChanged(); }), true], ["Cancel"]], {width: 380});
+}
+
+// ---- Assign: the Frame, Shell and Joint items kept as rows of the program's own assignment tables (AssignTables) ----
+// Menu label, table name after "<Kind> Assignments - ", and the programs whose files carry it (SAP2000: added mass,
+// tension and compression limits, shell local axes; the rest go into ETABS through its tables).
+const asgTables = {
+  Frame: [["Additional Mass...", "Additional Mass", ["etabs", "sap2000"]], ["Output Stations...", "Output Stations"], ["Auto Mesh Options...", "Frame Auto Mesh Options"], ["Floor Meshing Option...", "Frame Floor Meshing Option"],
+    ["Tension/Compression Limits...", "Tension and Compression Limits", ["etabs", "sap2000"]], ["Material Overwrites...", "Material Overwrites"], ["Column Splice Overwrites...", "Column Splice Overwrites"],
+    ["Moment Frame Beam Connection Type...", "Moment Frame Beam Connection Type"], ["Nonprismatic Parameters...", "Advanced Nonprismatic Section Parameters"], ["Floor Cracking...", "Floor Cracking"], ["Rebar Ratio for Creep Analysis...", "Rebar Ratio For Creep Analysis"]],
+  Area: [["Local Axes...", "Local Axes", ["etabs", "sap2000"]], ["Insertion Point...", "Insertion Point"], ["Additional Mass...", "Additional Mass", ["etabs", "sap2000"]], ["Edge Releases...", "Edge Releases"], ["Auto Edge Constraints...", "Auto Edge Constraints"],
+    ["Floor Auto Mesh Options...", "Floor Auto Mesh Options"], ["Wall Auto Mesh Options...", "Wall Auto Mesh Options"], ["Thickness Overwrites...", "Thickness Overwrites"], ["Material Overwrites...", "Material Overwrites"],
+    ["Slab Line Releases...", "Slab Line Releases"], ["Slab Rib Locations...", "Slab Rib Locations"], ["Floor Cracking...", "Floor Cracking"], ["Rebar Ratio for Creep Analysis...", "Wall Rebar Ratio for Creep Analysis"]],
+  Joint: [["Additional Mass...", "Additional Mass", ["etabs", "sap2000"]], ["Panel Zone...", "Panel Zone"], ["Floor Meshing Option...", "Floor Meshing Option"]],
+};
+function hmTableItems(kind, off) { return asgTables[kind].map(([label, t, progs]) => only(progs || ["etabs"], [label, "m:at:" + kind + " Assignments - " + t, "", off])); }
+// Fields that take Yes or No, and fields with the programs' own choices.
+const asgYesNo = /^(Include|Consider|AtIntJoints|AtIntersect|AtBeams|AtWalls|AtGrids|Submesh|Restraints|Transform|IncludeInMesh|Mirror|R(InShear|DirForce|OutShear|Bending|Twisting)$|ShearL|MomentL|ShearR|MomentR|AutoMesh)/;
+const asgChoices = {StationOpt: ["Min Stations", "Max Spacing"], SpliceOpt: ["Story Default", "No Splice", "Splice at Height"], MeshOption: ["Default", "Auto Cookie Cut", "Auto Rectangular", "General Divide Tool", "No Auto Mesh", "Mesh N1 x N2"],
+  CoordSys: ["Local", "GLOBAL"], RebarOpt: ["From Section", "User"], RebarOption: ["From Section", "User"], Constraint: ["None", "Auto", "Auto (Cookie Cut)"]};
+async function hmAssignTable(table) {
+  if (table === "opening") {
+    const names = hmSelected("a"); if (!names.length) return hmSay("Select the floors or walls first.", true);
+    const pd = (await hmRun("property_definitions", {objects: names.slice(0, 1)}, true)).result; if (!pd) return;
+    return dialog("Assign Shell Opening", `<label><input id="opY" type="checkbox" ${(pd.objects[0] || {}).opening ? "checked" : ""}> Opening (the area is a hole, with no section)</label>`,
+      [["OK", d => submit(d, "assign_shell_data", {objects: names, opening: q(d, "#opY").checked}), true], ["Cancel"]], {width: 380});
+  }
+  const kind = table.split(" ")[0], names = kind === "Joint" ? hmJoints() : hmSelected(kind === "Frame" ? "f" : "a");
+  if (!names.length) return hmSay(kind === "Joint" ? "Select the joints first." : kind === "Frame" ? "Select the frames first." : "Select the floors or walls first.", true);
+  const pd = (await hmRun("property_definitions", {objects: names.slice(0, 1)}, true)).result; if (!pd) return;
+  const def = pd.assign_tables[table]; if (!def) return hmSay("There is no table " + table + ".", true);
+  const now = ((pd.objects || [])[0] || {}).tables || {};
+  let rows = (now[table] || []).map(r => ({...r})); if (!rows.length) rows = [{}];
+  const tool = kind === "Joint" ? "assign_joint_data" : kind === "Frame" ? "assign_frame_data" : "assign_shell_data";
+  const cell = (k, v) => asgYesNo.test(k) ? `<input data-k="${k}" type="checkbox" ${v === "Yes" ? "checked" : ""}>` : asgChoices[k] ? `<select data-k="${k}">${opts(["", ...asgChoices[k]], v || "")}</select>` : `<input data-k="${k}" value="${esc(v ?? "")}">`;
+  const title = "Assign " + ({Frame: "Frame", Area: "Shell", Joint: "Joint"})[kind] + " " + table.split(" - ").slice(1).join(" - ");
+  const d = dialog(title, `<div id="atB"></div>${def.many ? `<button id="atAdd" style="margin-top:6px">Add</button>` : ""}<p class="kv">${names.length} selected. The values are as the program's own table holds them, in the model's units; empty values take the table off.</p>`,
+    [["OK", d => { read(); return submit(d, tool, {objects: names, tables: {[table]: rows.filter(r => Object.values(r).some(v => v !== ""))}}); }, true], ["Cancel"]], {width: def.many ? 760 : 460});
+  const read = () => d.querySelectorAll("#atB [data-r]").forEach(tr => tr.querySelectorAll("[data-k]").forEach(x => rows[+tr.dataset.r][x.dataset.k] = x.type === "checkbox" ? (x.checked ? "Yes" : "No") : x.value.trim()));
+  const paint = () => {
+    q(d, "#atB").innerHTML = def.many
+      ? `<table class="list hmgrid"><tr>${def.fields.map(f => `<th>${esc(f[1])}</th>`).join("")}<th></th></tr>${rows.map((r, i) => `<tr data-r="${i}">${def.fields.map(f => `<td>${cell(f[0], r[f[0]])}</td>`).join("")}<td><button data-del="${i}">Delete</button></td></tr>`).join("")}</table>`
+      : `<div class="g2" data-r="0">${def.fields.map(f => `<span>${esc(f[1])}</span>${cell(f[0], rows[0][f[0]])}`).join("")}</div>`;
+    d.querySelectorAll("#atB [data-del]").forEach(b => b.onclick = () => { read(); rows.splice(+b.dataset.del, 1); if (!rows.length) rows = [{}]; paint(); });
+  };
+  if (def.many) q(d, "#atAdd").onclick = () => { read(); rows.push({}); paint(); };
+  paint();
 }
 
 // ---- forms: small helpers in the programs' own layout ----
@@ -5046,7 +5093,7 @@ function caseTypesFor(types, now) {
   return program === "safe" ? types.filter(t => safe.includes(t) || t === now) : types;
 }
 function hmOpen() {
-  dialog("Open Model", `<div class="g2"><span>File</span><input id="oP" placeholder="C:\\Users\\...\\Models\\Tower.e2k" style="min-width:380px"></div><p class="kv" style="max-width:480px">Type or paste the full path of an ETABS text file (.e2k, .$et) or a Modeler file (.cpm). A browser can't hand over a file's place on the PC, so the path is typed here; the Modeler reads it.</p>`,
+  dialog("Open Model", `<div class="g2"><span>File</span><input id="oP" placeholder="C:\\Users\\...\\Models\\Tower.e2k" style="min-width:380px"></div><p class="kv" style="max-width:480px">Type or paste the full path of an ETABS (.e2k), SAP2000 (.s2k) or SAFE (.f2k) text file, or a Modeler file (.cpm). A browser can't hand over a file's place on the PC, so the path is typed here; the Modeler reads it.</p>`,
     [["Open", d => submit(d, "open_model_file", {path: q(d, "#oP").value.trim().replace(/^"|"$/g, "")}, () => hmSay("Opened.")), true], ["Cancel"]], {width: 560});
 }
 function hmSave(as) {
@@ -5299,9 +5346,17 @@ function start() {
   }
   $("hint").textContent = hintText();
   const built = $("pack").textContent.trim();
-  if (built) { try { load(JSON.parse(built)); } catch (ex) { console.error(ex); $("drop").firstElementChild.innerHTML = `<b>The pack in this page could not be read</b><br>${esc(ex.message)}`; } }
+  if (built) { try { load(withRows(JSON.parse(built))); } catch (ex) { console.error(ex); $("drop").firstElementChild.innerHTML = `<b>The pack in this page could not be read</b><br>${esc(ex.message)}`; } }
   else { layout = savedLayout || 2; buildPanes(null); syncTools(); draw(); }
   if (!gl) $("hint").textContent = "This browser has 3-D drawing (WebGL 2) turned off, so the model is drawn as lines only.";
+}
+// A long table's rows past its first part are in script elements of their own (pack-rows): joined back here.
+function withRows(p) {
+  for (const s of document.querySelectorAll("script.pack-rows")) {
+    const part = JSON.parse(s.textContent), t = p.tables && p.tables[part.table];
+    if (t && Array.isArray(t.rows)) for (const r of part.rows) t.rows.push(r);
+  }
+  return p;
 }
 // The Modeler adds its own script after this one, which is where it says the page is live.
 addEventListener("DOMContentLoaded", start);

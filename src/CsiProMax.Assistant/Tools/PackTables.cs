@@ -19,10 +19,10 @@ namespace CsiProMax.Assistant.Tools;
 public static class PackTables
 {
     /// <summary>Rows a pack takes in all (beyond the usual and design tables), so that a big model's pack still opens.</summary>
-    public const int TotalMostRows = 1_500_000;
+    public const int TotalMostRows = int.MaxValue;
 
     /// <summary>Rows a pack takes of the design and load inputs, apart from the results' total.</summary>
-    public const int InputMostRows = 400_000;
+    public const int InputMostRows = int.MaxValue;
 
     /// <summary>A table of loads assigned to joints, frames or shells (areas, slabs): what Display > Load Assigns draws.</summary>
     public static bool IsLoadTable(string name)
