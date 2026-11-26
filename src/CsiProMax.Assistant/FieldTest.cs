@@ -609,7 +609,7 @@ public static class FieldTest
             var status = Wait(started);
             FieldContext.Expect(Said(status, "Running the analysis"), "the changed model was not analysed: " + Last(status));
             FieldContext.Expect(File.Exists(pack), "the pack did not come back");
-            FieldContext.Expect(Pack.ReadComments(pack).Comments.Any(c => c?["id"]?.GetValue<string>() == "cpm-engine-check"), "the comment did not come back into the pack");
+            FieldContext.Expect(Tools.Pack.ReadComments(pack).Comments.Any(c => c?["id"]?.GetValue<string>() == "cpm-engine-check"), "the comment did not come back into the pack");
             return Last(status);
         });
 
