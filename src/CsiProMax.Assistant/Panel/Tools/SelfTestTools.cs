@@ -40,11 +40,13 @@ public sealed class RunFieldTestTool : IEtabsTool
         "ProMax's own features, and each window is closed without saving. It never changes the open model. It can take " +
         "up to an hour and runs in the background: it answers at once, a message on the screen says when it is done, " +
         "and scope \"status\" says where it is and, when it is done, what failed and which file to send. scope " +
-        "\"changed\" is the full test without the parts that already passed on this PC and have not changed. scope \"quick\" checks this PC, the install and the open model in a minute or two. Use it when the user asks for " +
+        "\"changed\" is the full test without the parts that already passed on this PC and have not changed. program \"etabs\", " +
+        "\"sap2000\" or \"safe\" tests that one program alone (with full or changed), when the user asks for one program. scope \"quick\" checks this PC, the install and the open model in a minute or two. Use it when the user asks for " +
         "the field test, or is asked to send one.";
     public string PropertiesJson => """
     {
-      "scope": {"type": "string", "enum": ["full", "changed", "quick", "status"], "description": "full (default): everything, on scratch models, in the background. changed: like full, but a program's part or CSI ProMax's own features is left out when all of it passed on this PC and its code is unchanged since; use it after an update or a fix. quick: this PC, the install and the open model, reading only. status: how the field test started last is doing, or what it found."}
+      "scope": {"type": "string", "enum": ["full", "changed", "quick", "status"], "description": "full (default): everything, on scratch models, in the background. changed: like full, but a program's part or CSI ProMax's own features is left out when all of it passed on this PC and its code is unchanged since; use it after an update or a fix. quick: this PC, the install and the open model, reading only. status: how the field test started last is doing, or what it found."},
+      "program": {"type": "string", "enum": ["etabs", "sap2000", "safe"], "description": "Optional, with full or changed: test only this program (its window on the scratch model the Modeler writes), not the other programs."}
     }
     """;
     public string[] Required => [];
@@ -63,10 +65,16 @@ public sealed class RunFieldTestTool : IEtabsTool
             var outcome = FieldTest.Run(app.Link, changes: false, "the chat");
             return ToolResult.Ok(Found(outcome));
         }
+        CsiProMax.Assistant.Etabs.CsiProgram? only = null;
+        if (args.OptString("program") is { Length: > 0 } wanted)
+        {
+            only = FieldTest.Installed(app.Link.Program).FirstOrDefault(p => string.Equals(p.Key, wanted.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (only is null) return ToolResult.Error($"'{wanted}' is not a CSI program installed on this PC. Installed: {string.Join(", ", FieldTest.Installed(app.Link.Program).Select(p => p.Key))}.");
+        }
         try
         {
-            var programs = FieldTest.Installed(app.Link.Program);
-            FieldTestRuns.StartFull(app.Link, "the chat", retest: scope == "changed");
+            var programs = only is { } one ? [one] : FieldTest.Installed(app.Link.Program);
+            FieldTestRuns.StartFull(app.Link, "the chat", retest: scope == "changed", only);
             return ToolResult.Ok(new
             {
                 status = "started",
@@ -88,15 +96,27 @@ public sealed class RunFieldTestTool : IEtabsTool
         if (FieldTest.Last is not { } run)
             return ToolResult.Ok(new { status = FieldTest.IsRunning ? "running (the quick test)" : "not started in this session", hint = "Call run_field_test to start the full test." });
         if (!run.Task.IsCompleted)
+        {
+            var p = FieldTest.ProgressLines.Of(run);
             return ToolResult.Ok(new
             {
                 status = "running",
+                testing = run.Only?.Name ?? "everything",
                 started = run.Started.ToString("HH:mm"),
                 minutes_so_far = (int)(DateTime.Now - run.Started).TotalMinutes,
-                steps_so_far = run.StepsSoFar,
+                part = run.Part,
                 now_at = run.Doing,
-                next = "Tell the user where it is, and that it says when it is done.",
+                steps_done = run.Done,
+                expected_steps = run.Expected > 0 ? run.Expected : (int?)null,
+                percent = p.Percent,
+                passed = run.Ok,
+                failed = run.Failed,
+                not_tested = run.NotTested,
+                live_file = run.LiveFile,
+                next = "Tell the user the part and step it is at, step X of about N, passed / failed so far, and that a message says when it is done." +
+                       (run.LiveFile is null ? "" : " Each step is also written to live_file as it ends."),
             });
+        }
         if (run.Task.Exception is { } failed)
             return ToolResult.Error("The field test stopped with an error before it could save its report: " + (failed.InnerException ?? failed).Message);
         return ToolResult.Ok(Found(run.Task.Result));
@@ -123,10 +143,13 @@ public sealed class RunFieldTestTool : IEtabsTool
 /// </summary>
 public static class FieldTestRuns
 {
-    public static FieldTest.Running StartFull(CsiProMax.Assistant.Etabs.ICsiLink link, string from, bool retest = false)
+    public static FieldTest.Running StartFull(CsiProMax.Assistant.Etabs.ICsiLink link, string from, bool retest = false, CsiProMax.Assistant.Etabs.CsiProgram? only = null)
     {
-        var run = FieldTest.Start(link, new FieldTest.Options { Full = true, Retest = retest, StartedFrom = from });
+        // only: one program's part alone (Ahmed, 2026-11-26: "an option to just test sap etabs safe one by one").
+        var run = FieldTest.Start(link, new FieldTest.Options { Full = true, Retest = retest, StartedFrom = from, OnlyProgram = only });
         run.Task.ContinueWith(Announce, TaskScheduler.Default);
+        // Live progress while it runs (Ahmed, 2026-11-26: it "needs urgently to show progress").
+        CsiProMax.UI.FieldProgressWindow.Show(run);
         return run;
     }
 
