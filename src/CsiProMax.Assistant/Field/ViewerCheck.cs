@@ -164,14 +164,17 @@ public static class ViewerCheck
         const view3d = async () => {
           // A 3-D view, waited for until its camera has stopped moving and it is drawn, so its projection is the one shown.
           const b = document.querySelector('[data-act="v:3d"]'); if (b && !b.disabled) b.click(); await wait(150);
-          const p = panes[active]; if (p.mode !== "3d") setMode(p, "3d"); fit(p); draw();
+          const p = panes[active]; if (p.mode !== "3d") setMode(p, "3d");
           for (let i = 0; i < 40 && (p.anim || waiting); i++) await wait(100);
-          await wait(150); return p;
+          // No camera movement: the view is set at once, and its projection worked out here as the next drawing will.
+          fit(p, false); p.anim = null; draw(); await wait(200);
+          if (p.R) p.M = matrices(p, p.R.w, p.R.h);
+          return p;
         };
         await step("selection: a left-to-right window round a support selects the support joint", async () => {
           if (!supports.length) return {skipped: "skipped: the model has no supports"};
           const p = await view3d(), s = supports.find(x => supportShown(p, x) && p.M.to(x.p)[3]);
-          if (!s) return {fail: `no support is in the 3-D view (${supports.length} supports, view ${p.mode}, first at ${JSON.stringify(supports[0].p)} drawn at ${JSON.stringify(p.M.to(supports[0].p).map(v => typeof v === "number" ? Math.round(v) : v))})`};
+          if (!s) return {fail: `no support is in the 3-D view (${supports.length} supports, view ${p.mode}, first at ${JSON.stringify(supports[0].p)} drawn at ${JSON.stringify(p.M.to(supports[0].p).map(v => typeof v === "number" ? Math.round(v) : v))}, camera ${JSON.stringify(p.cam)}, window ${JSON.stringify(p.R)})`};
           const q = p.M.to(s.p); boxSelect(p, {x0: q[0] - 10, x1: q[0] + 10, y0: q[1] - 10, y1: q[1] + 10}, false, false);
           if (!selJ.has(s.name)) return {fail: `the window round support ${s.name} left it unselected`};
           const said = document.getElementById("sel").textContent;
