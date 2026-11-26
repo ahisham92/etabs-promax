@@ -544,6 +544,12 @@ static class OldProgramTests
             Check(fresh.Contains("KeptPlugIns.Take(program)", StringComparison.Ordinal) && fresh.Contains("KeptPlugIns.PutBack(plugIns)", StringComparison.Ordinal) && fresh.Contains("ApplicationExit(false)", StringComparison.Ordinal),
                 "the second SAP2000 leaves the plug-in lists as they were and closes without saving over the change");
             Check(fresh.Contains("app.ApplicationStart(6, false, \"\")", StringComparison.Ordinal), "the second SAP2000 is started hidden: the engineer sees nothing of it");
+            // The field test with the fix (2026-11-26): ASCE 7-22 took CPM-ELFY's API-set ASCE 7-16 off; IS 1893:2016, KDS,
+            // IRC 6-2017 and Live Load were taken but GetAutoSeismicCode / GetAutoWindCode name them "".
+            Check(tables.IndexOf("Tools.SapLateral.Hold(e, other,", StringComparison.Ordinal) is var hold and > 0 && tables.IndexOf("ApplyEditedTables(true", hold, StringComparison.Ordinal) > hold
+                  && tables.IndexOf("Tools.SapLateral.Reapply(e, held[lost])", hold, StringComparison.Ordinal) > tables.IndexOf("ApplyEditedTables(true", hold, StringComparison.Ordinal),
+                "every other API-set code is held before the import and given back by its Set call when the import took it off");
+            Check(tables.IndexOf("TableCode(m, pattern)", StringComparison.Ordinal) > 0, "a code the API names \"\" is read from the patterns' table");
             var steps = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Sap2000/SapFieldSteps.cs"));
             Check(steps.Contains("the change is made in a second SAP2000", StringComparison.Ordinal) && steps.IndexOf("CsiFieldSteps.Run(ctx);", StringComparison.Ordinal) < steps.IndexOf("TinyS2k);", StringComparison.Ordinal),
                 "the field test tries it on a real SAP2000, last, after every other table step");

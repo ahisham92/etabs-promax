@@ -186,6 +186,23 @@ public static class LateralTools
 
     private static string Norm(string s) => new(s.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
 
+    private static CodeTable? Listed(List<CodeTable> tables, string code) =>
+        tables.FirstOrDefault(t => t.Code.Equals(code, StringComparison.OrdinalIgnoreCase) || t.KeyCode.Equals(code, StringComparison.OrdinalIgnoreCase) || Norm(t.Code) == Norm(code) || Norm(t.KeyCode) == Norm(code));
+
+    /// <summary>The table's key when the program gives fields for it, else null.</summary>
+    private static string? Fields(ICsiLink e, string key)
+    {
+        try
+        {
+            return (string?)e.Raw("read a table's fields", m =>
+            {
+                int version = 0, n = 0; string[] keys = [], names = [], about = [], units = []; bool[] importable = [];
+                return Convert.ToInt32(m.DatabaseTables.GetAllFieldsInTable(key, ref version, ref n, ref keys, ref names, ref about, ref units, ref importable)) == 0 && (keys ?? []).Length > 0 ? key : null;
+            });
+        }
+        catch (EtabsException) { return null; }
+    }
+
     private static CodeTable Table(ICsiLink e, List<CodeTable> tables, string kind, string code) =>
         tables.FirstOrDefault(t => t.Code.Equals(code, StringComparison.OrdinalIgnoreCase)) ?? tables.FirstOrDefault(t => t.KeyCode.Equals(code, StringComparison.OrdinalIgnoreCase))
         ?? tables.FirstOrDefault(t => Norm(t.Code) == Norm(code)) ?? tables.FirstOrDefault(t => Norm(t.KeyCode) == Norm(code))
@@ -226,7 +243,12 @@ public static class LateralTools
             EditableTables.Put(e, patterns.Key, patternKey, [EditableTables.Row((patternKey, name), ("AutoLoad", "None"))], $"take the code load off {name}");
             return new JsonObject { ["pattern"] = name, ["code"] = "None", ["done"] = $"{name} has no auto {kind.ToLowerInvariant()} load now." };
         }
-        var table = Table(e, CodeTables(e, kind), kind, code);
+        var tables = CodeTables(e, kind);
+        // SAP2000 26 leaves a code's table out of GetAllTables now and then (field test with the 0.4.56 fix: TSC-2018 and
+        // Dominican Republic R-001 missing from one listing, back in the next): a code the program gives fields for is taken.
+        if (sap && Listed(tables, code) is null && Fields(e, (kind == LateralCodes.Wind ? "Auto Wind - " : "Auto Seismic - ") + code) is { } key2)
+            tables = [.. tables, new CodeTable(code, key2, key2, code)];
+        var table = Table(e, tables, kind, code);
         var key = KeyField(e, table.Key);
         // The pattern takes the code first, which makes its row in the code's table with the program's defaults;
         // then the given inputs go into that row, and the row's other fields keep the defaults.

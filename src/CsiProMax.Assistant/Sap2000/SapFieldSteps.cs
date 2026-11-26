@@ -324,9 +324,9 @@ public static class SapFieldSteps
                 FieldContext.Expect(ScratchProgram.SameName(link.Info().File, own), $"SAP2000 has {link.Info().File} open, not the scratch model");
                 return Path.GetFileName(own);
             }) is not null)
-                ctx.Tool("set_lateral_load", """{"name":"CPM-AUTO-S","kind":"seismic","code":"ASCE 7-22"}""", a =>
+                ctx.Tool("set_lateral_load", """{"name":"CPM-AUTO-S","kind":"seismic","code":"Dominican Republic R-001"}""", a =>
                     FieldContext.Expect(a["read_back"] is JsonObject { Count: > 0 } && a["second_sap2000"] is not null && link.LoadPatterns().Count > 1,
-                        "ASCE 7-22 should be given in a second SAP2000 and read back here, with the other patterns kept: " + a.ToJsonString()),
+                        "Dominican Republic R-001 should be given in a second SAP2000 and read back here, with the other patterns kept: " + a.ToJsonString()),
                     "tool set_lateral_load in a SAP2000 that opened an .s2k: the change is made in a second SAP2000");
         }
 
