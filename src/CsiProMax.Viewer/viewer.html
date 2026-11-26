@@ -4292,7 +4292,7 @@ async function hmMaterial(m, after, copy) {
   const show = () => {
     q(d, "#mSym").innerHTML = opts(syms(), syms()[0]);
     d.querySelectorAll("[data-r=U]").forEach(x => x.hidden = /Rebar|Tendon/.test(type()));
-    q(d, "#mRupF").hidden = type() !== "Concrete"; q(d, "#mTime").disabled = type() !== "Concrete";
+    q(d, "#mRupF").hidden = type() !== "Concrete" || program === "sap2000"; /* SAP2000 has no cracked slab deflections */ q(d, "#mTime").disabled = type() !== "Concrete";
     q(d, "#mNl").disabled = !(pd.material_nonlinear[type()] || {keys: []}).keys.length && !["Aluminum", "ColdFormed", "Masonry", "Other"].includes(type());
     const e = parseFloat(q(d, "#mE").value), nu = parseFloat(q(d, "#mU").value);
     q(d, "#mGm").value = isFinite(e) && isFinite(nu) ? +(e / (2 * (1 + nu))).toPrecision(6) : "";
@@ -4497,9 +4497,11 @@ async function hmShellSection(s, after, copy) {
   const defs = await hmDefs(), u = hmU(), pd = (await hmRun("property_definitions", {}, true)).result;
   const cur = s && pd ? pd.shell_sections.find(x => x.name === s.name) : null, was = s && !copy ? s.name : null;
   let mods = cur ? {...cur.modifiers} : null;
-  const d = dialog("Slab or Wall Property Data", `<fieldset><legend>General Data</legend><div class="g2">
+  // SAP2000's areas are shells by modelling type only (no slab type, one-way distribution or ribs).
+  const sap = program === "sap2000";
+  const d = dialog(sap ? "Shell Section Data" : program === "safe" ? "Slab Property Data" : "Slab or Wall Property Data", `<fieldset><legend>General Data</legend><div class="g2">
       <span>Property Name</span><input id="aN" value="${esc(s ? (copy ? s.name + " copy" : s.name) : "Slab200")}">
-      <span>Type</span><select id="aK" ${s && !copy ? "disabled" : ""}>${opts([["slab", "Slab"], ["wall", "Wall"]], s ? s.kind : "slab")}</select>
+      <span>Type</span><select id="aK" ${s && !copy ? "disabled" : ""}>${opts(sap ? [["slab", "Shell (floor)"], ["wall", "Shell (wall)"]] : [["slab", "Slab"], ["wall", "Wall"]], s ? s.kind : "slab")}</select>
       <span data-slab>Slab Type</span><select data-slab id="aY">${opts((pd && pd.slab_types) || ["Slab"], cur && cur.slab_type || "Slab")}</select>
       <span>Modeling Type</span><select id="aG">${opts((pd && pd.modeling_types) || ["ShellThin"], cur && cur.modeling || "ShellThin")}</select>
       <span>Material</span><select id="aM">${matOpts(defs, s ? s.material : "")}</select>
@@ -4510,11 +4512,11 @@ async function hmShellSection(s, after, copy) {
     [["OK", d => {
       const kind = q(d, "#aK").value, name = q(d, "#aN").value.trim();
       const args = {name, was, kind, thickness: fnum(d, "#aT"), material: q(d, "#aM").value, modeling: q(d, "#aG").value, modifiers: mods || undefined};
-      if (kind === "slab") { args.slab_type = q(d, "#aY").value; args.one_way = q(d, "#aO").checked; }
+      if (kind === "slab" && !sap) { args.slab_type = q(d, "#aY").value; args.one_way = q(d, "#aO").checked; }
       if (kind === "slab" && args.slab_type === "Ribbed") Object.assign(args, {overall_depth: fnum(d, "#aRD"), rib_width_top: fnum(d, "#aRT"), rib_width_bottom: fnum(d, "#aRB"), rib_spacing: fnum(d, "#aRS"), rib_direction: parseInt(q(d, "#aRA").value) || 1});
       return submit(d, "define_shell_type", args, j => { hm.sec[kind] = name; if (after) after(j); });
     }, true], ["Cancel"]], {width: 440});
-  const show = () => d.querySelectorAll("[data-slab]").forEach(x => x.hidden = q(d, "#aK").value === "wall");
+  const show = () => d.querySelectorAll("[data-slab]").forEach(x => x.hidden = sap || q(d, "#aK").value === "wall");
   const modText = () => { const m = mods || {}; const o = Object.entries(m).filter(([, v]) => Math.abs(v - 1) > 1e-12); q(d, "#aModT").textContent = o.length ? o.map(([k, v]) => k + " " + v).join(", ") : "none"; };
   q(d, "#aK").onchange = show; show(); modText();
   q(d, "#aMod").onclick = () => hmModifiers((pd && pd.shell_modifiers) || [], mods, o => { mods = o; modText(); });
@@ -4822,7 +4824,7 @@ async function hmPatterns() {
   const fill = () => { const p = L()[pick]; if (!p) return; q(d, "#pN").value = p.name; q(d, "#pT").value = p.type; q(d, "#pS").value = p.self_weight; };
   const paint = () => {
     q(d, "#pL").innerHTML = L().map((p, i) => `<tr data-i="${i}" class="${i === pick ? "on" : ""}"><td>${esc(p.name)}</td><td>${esc(p.type)}</td><td class="r">${num(p.self_weight)}</td><td>${p.lateral ? esc(p.lateral.code) + (p.lateral.error ? " (not computed)" : "") : ["Seismic", "Wind"].includes(p.type) ? "None" : ""}</td><td class="r">${p.loads}</td></tr>`).join("");
-    const p = L()[pick]; q(d, "#pLat").disabled = !p || !["Seismic", "Wind"].includes(p.type);
+    const p = L()[pick]; q(d, "#pLat").disabled = !p || !["Seismic", "Wind"].includes(p.type); q(d, "#pLat").hidden = program === "safe"; // SAFE makes no auto lateral loads
     d.querySelectorAll("#pL [data-i]").forEach(tr => tr.onclick = () => { pick = +tr.dataset.i; paint(); fill(); });
   };
   const go = async (tool, args) => { formError(d, ""); const j = await hmRun(tool, args, true); if (!j.ok) return formError(d, j.error); await hmDefs(); pick = Math.min(pick, L().length - 1); paint(); };
@@ -5035,6 +5037,8 @@ async function hmCase(c, a, after, copy) {
     q(d, "#cModal").hidden = !(modal || type === "Buckling"); q(d, "#cRS").hidden = !(rs || hist); q(d, "#cTH").hidden = !hist;
     q(d, "#cGeo").hidden = !(type === "Nonlinear Static" || type === "Nonlinear Direct History"); q(d, "#cInit").hidden = modal || rs;
     d.querySelectorAll(".rsOnly").forEach(x => x.hidden = !rs);
+    // The diaphragm eccentricity of a response spectrum is ETABS's own.
+    d.querySelectorAll("#cE, #cE + *, .rsOnly:has(+ #cE)").forEach(x => x.hidden = x.hidden || program !== "etabs");
     const fnKind = rs ? "spectrum" : hist ? "history" : null, canAccel = rs || hist || type === "Modal - Ritz";
     q(d, "#cL").innerHTML = `<tr><th>Load Type</th><th>Load Name</th>${fnKind ? "<th>Function</th>" : ""}<th>Scale Factor</th>${rs || hist ? "<th>Angle</th>" : ""}${hist ? "<th>Arrival (s)</th>" : ""}<th></th></tr>` +
       loads.map((l, i) => `<tr data-i="${i}"><td><select data-k="kind">${opts([...(rs ? [] : [["pattern", "Load Pattern"]]), ...(canAccel ? [["accel", "Acceleration"]] : [])], l.accel ? "accel" : "pattern")}</select></td>
