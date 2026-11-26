@@ -60,10 +60,14 @@ public static class ReferenceData
         new("the Verification examples the program came with", null, VerificationExamples),
         new("every table of the scratch model that has data", null, ScratchTables),
         new("the status of every load case after the analysis", null, CaseStatus),
+        // Before the text copy, so the program's own syntax for them is in it (their .e2k words are not known yet).
+        new("a slab line release and a slab rebar object, added to the scratch model through the program's tables", p => p.Key is "etabs" or "safe", SlabExtras),
         new("the program's own text copy of the scratch model", null, OwnTextCopy),
         new("the files of the scratch folder", null, ScratchFiles),
         new("what the program holds of the Modeler's file", null, Holds),
         new("the calls the program's API has", null, ApiCalls),
+        // This one and the last replace the scratch model in the scratch window (the text copy above saved it).
+        new("the slab, post-tensioning and punching examples, opened from their copies, with their tables and text copies", p => p.Key is "etabs" or "safe", OpenedExamples),
         // Last: it replaces the scratch model in the scratch window with a new blank one (never saved).
         new("the program's defaults, from a new blank model", null, BlankDefaults),
     ];
@@ -395,6 +399,143 @@ public static class ReferenceData
             n++;
         }
         return g.Write("api calls.txt", sb.ToString()) + $" ({n} interfaces, names only: a .NET Framework file)";
+    }
+
+    // ---- slab line releases, slab rebar and the examples (the slabs thread) -------------------------------------------
+
+    /// <summary>
+    /// One slab line release (on a null line drawn across the first floor) and one slab rebar object, put into the
+    /// scratch model through "Area Assignments - Slab Line Releases", "Slab Rebar Object Geometry" and "Slab Rebar
+    /// Property Assignments". The fields the program edits, the rows sent, its apply log and the tables read back go to
+    /// slab extras.txt; the text copy that follows has the program's own syntax for both. Only the test's own model.
+    /// </summary>
+    private static string SlabExtras(Gather g)
+    {
+        if (g.ModelPath.Length == 0) return "not made: only in the test's own scratch window";
+        var sb = new StringBuilder();
+        var c = System.Globalization.CultureInfo.InvariantCulture;
+        string N(double v) => v.ToString("0.####", c);
+        var floor = g.Link.Areas().FirstOrDefault(a => a.Kind == "floor" && a.Corners.Count >= 3);
+        if (floor is null) return g.Write("slab extras.txt", "The scratch model has no floor to put them on.\n") + " (no floor)";
+        double x0 = floor.Corners.Min(p => p.X), x1 = floor.Corners.Max(p => p.X), y0 = floor.Corners.Min(p => p.Y), y1 = floor.Corners.Max(p => p.Y), z = floor.Corners.Average(p => p.Z);
+        double cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, w = x1 - x0, h = y1 - y0;
+        sb.AppendLine($"floor {floor.Name} ({floor.Section}): x {N(x0)} to {N(x1)}, y {N(y0)} to {N(y1)}, z {N(z)}");
+        var said = new List<string>();
+
+        // The line release goes on a null line across the floor.
+        var line = "";
+        try { line = g.Link.AddFrame(cx, y0 + 0.2 * h, z, cx, y1 - 0.2 * h, z, "None"); sb.AppendLine($"null line {line} drawn at x {N(cx)}"); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { sb.AppendLine("null line not drawn: " + ex.GetType().Name + ": " + Short(ex.Message)); }
+        var (label, story) = LabelOf(g, line);
+        if (line.Length > 0)
+            said.Add("line release " + Apply(g, sb, "Area Assignments - Slab Line Releases", new()
+            {
+                ["UniqueName"] = line, ["Story"] = story, ["Label"] = label, ["ShearL"] = "Yes", ["MomentL"] = "Yes", ["ShearR"] = "No", ["MomentR"] = "Yes",
+            }));
+        if (story.Length == 0) story = g.Link.Stories().Skip(1).FirstOrDefault()?.Name ?? "";
+        said.Add("slab rebar " + Apply(g, sb, "Slab Rebar Object Geometry", new()
+        {
+            ["Name"] = "CPM-SR1", ["Story"] = story, ["X1"] = N(x0 + 0.25 * w), ["Y1"] = N(cy), ["X2"] = N(x1 - 0.25 * w), ["Y2"] = N(cy),
+            ["VertOffset"] = "0", ["WidthLeft"] = N(0.1 * h), ["WidthRight"] = N(0.1 * h), ["Layer"] = "A",
+        }));
+        // The program may make the rebar's property row by itself: read it first, and only add one when it did not.
+        var props = Read(g, sb, "Slab Rebar Property Assignments");
+        if (!props.Rows.Any(r => r.Contains("CPM-SR1")))
+        {
+            var bar = First(g, m => { int n = 0; string[] names = []; m.PropRebar.GetNameList(ref n, ref names); return names; });
+            var steel = First(g, m => { int n = 0; string[] names = []; m.PropMaterial.GetNameList(ref n, ref names, 6); return names; });
+            said.Add("its property " + Apply(g, sb, "Slab Rebar Property Assignments", new()
+            {
+                ["Name"] = "CPM-SR1", ["RebarSize"] = bar, ["Material"] = steel, ["BarNumType"] = "Total Bars", ["TotalBars"] = "4", ["MaxSpacing"] = "",
+            }));
+        }
+        foreach (var t in new[] { "Area Assignments - Slab Line Releases", "Slab Rebar Object Geometry", "Slab Rebar Property Assignments" }) Read(g, sb, t);
+        return g.Write("slab extras.txt", sb.ToString()) + " (" + string.Join("; ", said) + ")";
+    }
+
+    private static string First(Gather g, Func<dynamic, string[]?> read)
+    {
+        try { return ((string[]?)g.Link.Raw("read a list of names", m => read(m)))?.FirstOrDefault() ?? ""; }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return ""; }
+    }
+
+    private static (string Label, string Story) LabelOf(Gather g, string name)
+    {
+        if (name.Length == 0) return ("", "");
+        try
+        {
+            return ((string, string))g.Link.Raw("read the null line's label", m => { string label = "", story = ""; m.FrameObj.GetLabelFromName(name, ref label, ref story); return (label, story); })!;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return ("", ""); }
+    }
+
+    /// <summary>Adds one row to a table through the program's table editing, the fields it does not have left out; says what the apply answered.</summary>
+    private static string Apply(Gather g, StringBuilder sb, string table, Dictionary<string, string> values)
+    {
+        sb.AppendLine().AppendLine($"== {table}: add a row");
+        try
+        {
+            return (string)g.Link.Raw("add a row to " + table, m =>
+            {
+                try { m.DatabaseTables.CancelTableEditing(); } catch { /* nothing staged */ }
+                int version = 0, n = 0; string[] fields = [], data = [];
+                var got = Convert.ToInt32(m.DatabaseTables.GetTableForEditingArray(table, "", ref version, ref fields, ref n, ref data));
+                sb.AppendLine($"GetTableForEditingArray answered {got}; fields: {string.Join(", ", fields ?? [])}; {n} rows");
+                if (got != 0 || fields is null || fields.Length == 0) return $"not in this program (answered {got})";
+                var row = fields.Select(f => values.GetValueOrDefault(f, "")).ToArray();
+                sb.AppendLine("row: " + Csv(row));
+                var unknown = values.Keys.Where(k => !fields.Contains(k)).ToList();
+                if (unknown.Count > 0) sb.AppendLine("left out, the table has no such field: " + string.Join(", ", unknown));
+                string[] all = [.. data ?? [], .. row];
+                var set = Convert.ToInt32(m.DatabaseTables.SetTableForEditingArray(table, ref version, ref fields, n + 1, ref all));
+                int fatal = 0, errors = 0, warnings = 0, infos = 0; string log = "";
+                var applied = set == 0 ? Convert.ToInt32(m.DatabaseTables.ApplyEditedTables(true, ref fatal, ref errors, ref warnings, ref infos, ref log)) : -1;
+                sb.AppendLine($"SetTableForEditingArray answered {set}; ApplyEditedTables answered {applied}: {fatal} fatal, {errors} errors, {warnings} warnings").AppendLine("log: " + log);
+                if (set != 0 || applied != 0) try { m.DatabaseTables.CancelTableEditing(); } catch { /* nothing staged */ }
+                return applied == 0 && fatal == 0 && errors == 0 ? "taken" : $"not taken ({fatal} fatal, {errors} errors)";
+            })!;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { sb.AppendLine("refused: " + ex.GetType().Name + ": " + Short(ex.Message)); return "refused (" + ex.GetType().Name + ")"; }
+    }
+
+    private static TableData Read(Gather g, StringBuilder sb, string table)
+    {
+        sb.AppendLine().AppendLine($"== {table}: read back");
+        try
+        {
+            var data = g.Link.ReadTable(table, null, null);
+            sb.AppendLine(Csv([.. data.Fields]));
+            foreach (var row in data.Rows.Take(50)) sb.AppendLine(Csv(row));
+            return data;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { sb.AppendLine("not read: " + ex.GetType().Name + ": " + Short(ex.Message)); return new TableData([], []); }
+    }
+
+    /// <summary>
+    /// Each slab, post-tensioning and punching example model that <see cref="CopyExamples"/> copied into the test's
+    /// folder, opened in the scratch window (the copy, never the original), with every table it has data in, and saved
+    /// once under the copy's name so the program writes its own text copy beside it (its .e2k words for them).
+    /// </summary>
+    private static string OpenedExamples(Gather g)
+    {
+        if (g.ModelPath.Length == 0) return "not opened: only in the test's own scratch window";
+        var copies = Path.Combine(g.Folder, "Verification");
+        var ext = g.Program.Key == "safe" ? ".fdb" : ".edb";
+        var models = Directory.Exists(copies) ? Directory.EnumerateFiles(copies, "*" + ext, SearchOption.AllDirectories).Take(3).ToList() : [];
+        if (models.Count == 0) return "no example model was copied to open";
+        var said = new List<string>();
+        foreach (var model in models)
+        {
+            var stem = Path.GetFileNameWithoutExtension(model);
+            // The same open the test's checkpoints use (a new model first when the program says no with a model open).
+            try { Tools.CsiTools.OpenFile(g.Link, "open a copy of an example", model); g.Link.Refresh(); }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { said.Add($"{stem}: not opened ({ex.GetType().Name}: {Short(ex.Message)})"); continue; }
+            var saved = Convert.ToInt32(g.Link.Raw("save the example's copy", m => m.File.Save(model)));
+            var tables = ScratchTables(new Gather(g.Program, g.Link, Path.Combine(g.Folder, "examples", SafeName(stem)), ""));
+            var texts = Directory.EnumerateFiles(Path.GetDirectoryName(model)!, stem + ".*").Where(f => TextModels.Contains(Path.GetExtension(f), StringComparer.OrdinalIgnoreCase)).Select(Path.GetFileName).ToList();
+            said.Add($"{stem}: examples/{SafeName(stem)}/{tables}; saved {saved}, text copies {(texts.Count == 0 ? "none" : string.Join(", ", texts))}");
+        }
+        return string.Join("; ", said);
     }
 
     /// <summary>
