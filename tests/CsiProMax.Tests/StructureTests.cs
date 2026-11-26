@@ -84,7 +84,8 @@ static class StructureTests
             Run(link, "define_section_cut", new { name = "SC1", group = "G-CORE" });
             var back = ViaE2k(link.Model);
             var g = GroupDefs.Groups(back).Single(x => x.Name == "G-CORE");
-            Check(g.Color == "Blue" && g.Members.Count == 5, "the group back from the .e2k");
+            Check(g.Members.Count == 5, "the group back from the .e2k");
+            Check(!E2kWriter.Write(back).Contains("COLOR \"Blue\""), "no group COLOR in the .e2k (ETABS 23 says Line Ignored)");
             Check(E2kWriter.Write(back).Contains("SECTIONCUT  \"SC1\""), "the section cut back");
             var s2k = S2kWriter.Write(link.Model, "a.s2k").Text;
             Check(s2k.Contains("GroupName=G-CORE"), "the .s2k has the group");

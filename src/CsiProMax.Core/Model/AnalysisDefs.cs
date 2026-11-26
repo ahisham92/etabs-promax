@@ -161,7 +161,8 @@ public static class AnalysisDefs
         }
         if (type is "Nonlinear Static" or "Nonlinear Direct History" && !c.Geometric.Equals("None", StringComparison.OrdinalIgnoreCase))
             lines.Add(["GEONONLIN", Quote(c.Geometric.Equals("P-Delta", StringComparison.OrdinalIgnoreCase) ? "PDELTA" : "PDELTA LARGE DISP")]);
-        if (type == "Buckling") lines.Add(["NUMMODES", Math.Max(1, c.MaxModes).ToString()]);
+        // ETABS 23 reads NUMBUCKLINGMODES (it ignored NUMMODES and took 6, 2026-11-26 experiment F).
+        if (type == "Buckling") lines.Add(["NUMBUCKLINGMODES", Math.Max(1, c.MaxModes).ToString()]);
         foreach (var l in c.Loads)
         {
             var row = l.Kind == "accel"
@@ -202,7 +203,7 @@ public static class AnalysisDefs
         var geo = V("GEONONLIN");
         return new CaseDef(c.Name, CaseType(c), loads)
         {
-            InitialCase = init is null or "PRESET" ? null : init, MaxModes = I("MAXMODES", I("NUMMODES", 12)), MinModes = I("MINMODES", 1),
+            InitialCase = init is null or "PRESET" ? null : init, MaxModes = I("MAXMODES", I("NUMMODES", I("NUMBUCKLINGMODES", 12))), MinModes = I("MINMODES", 1),
             ModalCase = V("MODALCASE") ?? "Modal", ModalCombo = V("MODALCOMBO") ?? "CQC", DirCombo = V("DIRCOMBO") ?? "SRSS",
             Damping = D("DAMPING", 0.05), Eccentricity = D("ECCRATIO", 0), Steps = I("NUMSTEPS", 100), StepSize = D("STEPSIZE", 0.01),
             Geometric = geo is null ? "None" : geo.Contains("LARGE") ? "P-Delta and Large Displacements" : "P-Delta",

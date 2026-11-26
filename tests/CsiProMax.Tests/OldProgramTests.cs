@@ -32,6 +32,18 @@ static class OldProgramTests
 
     public static IEnumerable<(string Name, Action Body)> All()
     {
+        yield return ("ETABS 23 pack: step by step output through SetOutputOptionsForDisplay (no GetTableOutputOptionsForDisplay there), and set back", () =>
+        {
+            var (link, api, _) = CsiToolsTests.Model(CsiProgram.Etabs);
+            var notes = new List<string>();
+            var known = new List<TableName> { new("Base Reactions", "Base Reactions", false) };
+            var status = PackTables.AddSteps(link, known, ["CPM-PUSH"], [], new JsonObject(), 100, notes, (n, d, r) => new JsonObject());
+            var outcome = status?["outcome"]?.GetValue<string>() ?? "";
+            Check(!outcome.StartsWith("not taken"), "taken: " + outcome);
+            Check(api.Log.Contains("output options nonlinear static 2"), "nonlinear static set to step by step: " + string.Join(" | ", api.Log.TakeLast(4)));
+            Check(api.DatabaseTables.NonlinearStaticOutput == 1, "and set back to envelopes");
+        });
+
         yield return ("SAFE 20 tester: the model of a .NET Framework program is read through the plug-in's pipe, ref lists and enums included", () =>
         {
             var model = new CSiAPIv1.FakeModel();

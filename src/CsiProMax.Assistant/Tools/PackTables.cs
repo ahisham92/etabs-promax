@@ -128,6 +128,9 @@ public static class PackTables
     /// </summary>
     /// <returns>What happened, for the manifest ("step_output") and a note: the 0.4.33 field test could not tell
     /// why a pack had no step tables, so every outcome is now said.</returns>
+    /// <summary>The names the programs give the table output options, without Get/Set: SAP2000 and older ETABS, then ETABS 23.</summary>
+    internal static readonly string[] OutputOptionNames = ["TableOutputOptionsForDisplay", "OutputOptionsForDisplay"];
+
     public static JsonObject? AddSteps(ICsiLink e, IReadOnlyList<TableName> known, IReadOnlyList<string> cases, IReadOnlyList<string> combos,
         JsonObject tables, int mostRows, List<string> notes, Func<string, TableData, int, JsonObject> json)
     {
@@ -136,10 +139,18 @@ public static class PackTables
         JsonObject? Say(string outcome) { status["outcome"] = outcome; notes.Add("Time history steps: " + outcome); return status; }
         var wanted = HistoryTables.Select(h => known.FirstOrDefault(t => !t.Empty && ResultTools.Norm(t.Name) == ResultTools.Norm(h))).OfType<TableName>().ToList();
         if (wanted.Count == 0) return Say("none of the history tables (" + string.Join(", ", HistoryTables.Take(4)) + "...) has data.");
-        JsonObject? before;
+        JsonObject? before = null;
+        // ETABS 23 names it Get/SetOutputOptionsForDisplay (no "Table"): the 4eabf46 field run had no pushover
+        // curve because only the other name was tried.
+        var name = OutputOptionNames[0];
         try
         {
-            before = e.Raw("read the table output options", m => ApiCall.Invoke((object)m, "DatabaseTables.GetTableOutputOptionsForDisplay")) as JsonObject;
+            foreach (var n in OutputOptionNames)
+            {
+                name = n;
+                try { before = e.Raw("read the table output options", m => ApiCall.Invoke((object)m, "DatabaseTables.Get" + n)) as JsonObject; break; }
+                catch (Exception ex) when (n != OutputOptionNames[^1] && (ex is MissingMethodException || ex is EtabsException && ex.Message.Contains("no method", StringComparison.OrdinalIgnoreCase))) { }
+            }
         }
         catch (Exception ex) when (ex is EtabsException or MissingMethodException or ToolInputException or InvalidOperationException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
         {
@@ -158,7 +169,7 @@ public static class PackTables
         if (!any) return Say("not taken: none of the table output options is for time history, multi-step or nonlinear cases: " + string.Join(", ", old.Select(kv => kv.Key)) + ".");
         try
         {
-            var set = e.Raw("set the table output to step by step", m => ApiCall.Invoke((object)m, "DatabaseTables.SetTableOutputOptionsForDisplay", steps)) as JsonObject;
+            var set = e.Raw("set the table output to step by step", m => ApiCall.Invoke((object)m, "DatabaseTables.Set" + name, steps)) as JsonObject;
             if (set is null || !ApiCall.Worked(set)) return Say($"not taken: {e.Program.Name} refused step by step table output ({set?["return"]?.ToJsonString()}).");
             var taken = new JsonArray();
             foreach (var t in wanted)
@@ -185,7 +196,7 @@ public static class PackTables
         {
             var back = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
             foreach (var (k, v) in old) back[k] = v?.DeepClone();
-            try { e.Raw("set the table output back", m => ApiCall.Invoke((object)m, "DatabaseTables.SetTableOutputOptionsForDisplay", back)); }
+            try { e.Raw("set the table output back", m => ApiCall.Invoke((object)m, "DatabaseTables.Set" + name, back)); }
             catch (Exception ex) when (ex is EtabsException or MissingMethodException or ToolInputException or InvalidOperationException) { notes.Add($"The table output options could not be set back ({ex.Message})."); }
         }
     }
