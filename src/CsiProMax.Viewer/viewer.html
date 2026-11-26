@@ -177,6 +177,7 @@ footer span{padding:0 10px;border-left:1px solid var(--line2);display:flex;align
 footer #hint{flex:1;overflow:hidden;text-overflow:ellipsis;color:var(--mute)}footer #vname{border-left:0}footer #vname:empty{display:none}
 footer #coords{font-variant-numeric:tabular-nums;min-width:230px}
 footer select{height:19px;font-size:11.5px;border-radius:0;margin:0 -4px}
+#tools{display:none!important}footer #vname{display:none}
 footer #units{border:0;border-left:1px solid var(--line2);background:transparent;color:var(--ink);padding:0 10px;height:100%;border-radius:0;cursor:pointer}footer #units:hover{background:var(--hot)}
 footer #fbFilter{display:flex;align-items:center;gap:4px;border:0;border-left:1px solid var(--line2);background:transparent;color:var(--ink);padding:0 10px;height:100%;border-radius:0;cursor:pointer}footer #fbFilter:hover:not(:disabled){background:var(--hot)}footer #fbFilter:disabled{color:var(--mute);cursor:default}footer #fbFilter b{font-weight:600;min-width:1ch}
 #drop{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:24px;color:#cfd8dc;z-index:4;background:#0b0d0f}
@@ -342,7 +343,7 @@ body.chaton #right{width:380px;max-width:42%}
     </div>
   </div>
 </main>
-<footer><span id="vname"></span><span id="hint">Ready</span><span id="sel"></span><span id="coords"></span><span id="similarWrap" hidden><select id="similar" title="Draw on one story or on all stories" style="height:19px;padding:0 2px"><option value="one">One Story</option><option value="all">All Stories</option></select></span><span>Global</span><button id="units" title="Units"></button><button id="fbFilter" disabled title="Filter: the selected objects by kind (Check All / Check None)"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M1.5 2h13l-5 6v5l-3 1.5V8z" fill="currentColor"/></svg><b id="fbN">0</b></button></footer>
+<footer><span id="vname"></span><span id="hint">Ready</span><span id="sel"></span><span id="coords"></span><span id="similarWrap" hidden><select id="similar" title="Draw on one story or on all stories" style="height:19px;padding:0 2px"><option value="one">One Story</option><option value="all">All Stories</option></select></span><select id="csys" title="Coordinate system" style="height:19px;padding:0 2px"><option>Global</option></select><button id="units" title="Units"></button><button id="fbFilter" disabled title="Filter: the selected objects by kind (Check All / Check None)"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M1.5 2h13l-5 6v5l-3 1.5V8z" fill="currentColor"/></svg><b id="fbN">0</b></button></footer>
 <div id="rubber"></div><div id="tip"></div>
 <script id="pack" type="application/json"></script>
 <script>
@@ -356,8 +357,8 @@ function fmt(v) { const a = Math.abs(v); return a === 0 ? "0" : a >= 1000 ? v.to
 const inst = {answer: null, cur: -1, show: false, busy: false, dlg: null, only: "all"};
 let P = null, frames = [], areas = [], stories = [], grids = {X: [], Y: []}, gridsGuessed = false, sizes = {}, slabT = {}, supports = [], points = [], tendons = [], dstrips = [], openings = [], slabLines = [];
 let supportOf = new Map(), ratio = new Map(), marks = {punching: [], soil: []}, pointXyz = new Map(), pointIdx = new Map(), disp = new Map(), pointAt = new Map(), newComments = [], lit = null;
-let lo = [0, 0, 0], hi = [1, 1, 1], size = 1, unit = "", program = "etabs", sectionMat = new Map();
-const opt = {grid: true, extrude: true, fill: true, supports: true, names: false, axes: true, joints: false, edges: true, see: false, sections: true, explorer: true, side: true};
+let unitsText = "", lo = [0, 0, 0], hi = [1, 1, 1], size = 1, unit = "", program = "etabs", sectionMat = new Map();
+const opt = {grid: true, extrude: true, fill: true, supports: true, names: false, axes: true, joints: false, edges: true, see: true, sections: true, explorer: true, side: true};
 const hidden = {kind: new Set(), section: new Set(), objs: new Set()};
 let panes = [], active = 0, layout = 2;
 let forces = new Map(), reacts = new Map(), drifts = new Map();
@@ -429,6 +430,13 @@ async function engineImport(file) {
     hmSay(`Results of ${file.name} are shown on the model (${Object.values(pack.tables).filter(engineKinds).length} result and design tables${match < 0.9 ? `; only ${Math.round(match * 100)}% of its objects have the same labels as this model, so some results have no object to sit on` : ""}).`, match < 0.5);
   } catch (ex) { hmSay("That file could not be read: " + ex.message, true); }
 }
+// The CSI ProMax window's own menu items (License, Settings, Updates, Field test...): one program window, so they are
+// in the Engine's Tools and Help menus, and run in that window. Empty outside the Engine.
+let appMenu = [];
+function appMenuLoad() { if (!window.cpmLive) return; fetch("app-menu", {cache: "no-store"}).then(r => r.json()).then(j => { if (Array.isArray(j)) appMenu = j; }).catch(() => {}); }
+function appRun(id) { return fetch("app", {method: "POST", headers: {"Content-Type": "application/json", "X-CPM-View": "1"}, body: JSON.stringify({id}), cache: "no-store"}).then(r => r.json()).catch(() => ({ok: false})); }
+function appItems(names) { return appMenu.filter(m => names.includes(m.menu)).map(m => [m.menu === "CSI ProMax" ? "CSI ProMax" : m.menu === "View" ? "Windows and Shortcuts" : m.menu, m.items.map(i => [i.label, "app:" + i.id])]); }
+function appHelp() { const h = appMenu.find(m => m.menu === "Help"); return h ? h.items.map(i => [i.label, "app:" + i.id]) : []; }
 function enginePost(b) { return fetch("run", {method: "POST", headers: {"Content-Type": "application/json", "X-CPM-View": "1"}, body: JSON.stringify(b), cache: "no-store"}).then(r => r.json()); }
 function engineSelected() {
   // The objects selected on the model, by their names (frames first, then areas), for a design of the selection only.
@@ -515,7 +523,7 @@ function load(pack, keep) {
   // In the Modeler the model is made for one program, chosen at New Model (Ahmed 2026-11-26): the page offers what it has.
   program = window.cpmLive && /^(etabs|sap2000|safe)$/.test(man.target || "") ? man.target : /safe/i.test(man.program || "") ? "safe" : /sap/i.test(man.program || "") ? "sap2000" : "etabs";
   document.body.dataset.prog = program;
-  if (!bgSaved) bg = program === "etabs" ? "black" : "white";
+  if (!bgSaved) bg = "white"; // ETABS 23, SAP2000 and SAFE open on white
   points = m.points || [];
   pointIdx = new Map(points.map((p, i) => [String(p[0]), i]));
   pointAt = new Map(points.map(p => [key(p[1], p[2], p[3]), p[0]]));
@@ -562,7 +570,8 @@ function load(pack, keep) {
   programLook();
   $("meta").textContent = [man.model || "Model", man.etabs ? (/modeler/i.test(man.etabs) ? man.etabs : (man.program || "ETABS") + " " + man.etabs) : "", !window.cpmLive && man.created ? "packed " + String(man.created).replace("T", " ").slice(0, 16) : "", man.by && /sample/i.test(man.by) ? man.by : ""].filter(Boolean).join(" · ");
   document.title = (man.model || "Model") + " · " + $("app").textContent;
-  $("units").textContent = u.force && u.length ? u.force + ", " + u.length + (u.temperature ? ", " + u.temperature : "") : "";
+  unitsText = u.force && u.length ? u.force + ", " + u.length + (u.temperature ? ", " + u.temperature : "") : "";
+  $("units").textContent = "Units..."; $("units").title = unitsText ? "Units: " + unitsText : "Units";
   $("story").innerHTML = stories.slice().reverse().map(s => `<option value="${esc(s.name)}">${esc(s.name)}</option>`).join("");
   $("line").innerHTML = allLines().map(g => `<option value="${esc(g.dir + g.label)}">${esc(g.label)}</option>`).join("");
   readRatios(); readDisplacements(); readMarks(); readForces(); readReactions(); readDrifts(); readMesh(); readShells(); derivePushover(); if (plotSpec && !P.tables[plotSpec.table]) plotSpec = null; syncResults();
@@ -1905,8 +1914,8 @@ function auxLines(p) {
     for (const g of along) { seg(G, q(g.at, s.z0 - s.pad * 0.3), q(g.at, s.z1 + s.pad), dash); bub.push({at: q(g.at, s.z1 + s.pad), from: q(g.at, s.z0), label: g.label}); }
   } else if (p.mode === "plan" || p.mode === "3d") {
     const z = p.mode === "plan" ? (elevationOf(p.story) ?? lo[2]) : s.z0;
-    for (const g of grids.X) { seg(G, [g.at, s.y0, z], [g.at, s.y1, z], dash); bub.push({at: [g.at, s.y1, z], from: [g.at, s.y0, z], label: g.label}); }
-    for (const g of grids.Y) { seg(G, [s.x0, g.at, z], [s.x1, g.at, z], dash); bub.push({at: [s.x0, g.at, z], from: [s.x1, g.at, z], label: g.label}); }
+    for (const g of grids.X) { seg(G, [g.at, s.y0, z], [g.at, s.y1, z], dash); bub.push({at: [g.at, s.y1, z], from: [g.at, s.y0, z], label: g.label, dir: "X"}); }
+    for (const g of grids.Y) { seg(G, [s.x0, g.at, z], [s.x1, g.at, z], dash); bub.push({at: [s.x0, g.at, z], from: [s.x1, g.at, z], label: g.label, dir: "Y"}); }
   }
   return {grid: G.out(), level: L.out(), sup: S.out(), bub, lev};
 }
@@ -2144,6 +2153,24 @@ function bubble(g, T, x, y, label) {
   g.beginPath(); g.arc(x, y, r, 0, 7); g.fillStyle = T.bubble; g.fill(); g.strokeStyle = css(T.grid); g.lineWidth = 1; g.setLineDash([]); g.stroke();
   g.fillStyle = T.gridText; g.font = (label.length > 2 ? "9.5px" : "11px") + " Segoe UI, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(label.slice(0, 5), x, y + 0.5);
 }
+// The plan's dimension strings between grid lines, as the programs draw them: "8 (m)" along the top and the left.
+function drawDims(g, to, T, bub) {
+  g.save(); g.strokeStyle = css(T.grid); g.fillStyle = T.gridText; g.lineWidth = 1; g.setLineDash([]); g.font = "10px Segoe UI, sans-serif";
+  for (const dir of ["X", "Y"]) {
+    const list = bub.filter(b => b.dir === dir).map(b => { const a = to(b.at), c = to(b.from), dx = c[0] - a[0], dy = c[1] - a[1], l = Math.hypot(dx, dy) || 1; return {w: dir === "X" ? b.at[0] : b.at[1], s: [a[0] + dx / l * 22, a[1] + dy / l * 22], ok: a[3] && l > 4}; })
+      .filter(b => b.ok).sort((a, b) => a.w - b.w);
+    for (let i = 0; i + 1 < list.length; i++) {
+      const a = list[i].s, b = list[i + 1].s, d = list[i + 1].w - list[i].w; if (Math.hypot(b[0] - a[0], b[1] - a[1]) < 30) continue;
+      g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]);
+      for (const q of [a, b]) { if (dir === "X") { g.moveTo(q[0], q[1] - 4); g.lineTo(q[0], q[1] + 4); } else { g.moveTo(q[0] - 4, q[1]); g.lineTo(q[0] + 4, q[1]); } }
+      g.stroke();
+      const text = num(d) + (unit ? " (" + unit + ")" : ""), mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
+      g.textAlign = "center"; g.textBaseline = "bottom";
+      if (dir === "X") g.fillText(text, mx, my - 2); else { g.save(); g.translate(mx - 2, my); g.rotate(-Math.PI / 2); g.fillText(text, 0, 0); g.restore(); }
+    }
+  }
+  g.restore();
+}
 function overlay(p, g, M, T, w, h) {
   const to = M.to, font = s => g.font = s + "px Segoe UI, sans-serif";
   g.lineJoin = "round"; g.setLineDash([]);
@@ -2157,6 +2184,7 @@ function overlay(p, g, M, T, w, h) {
     const ys = p.auxInfo.lev.map(s => to(s.at)[1]), gap = ys.length > 1 ? Math.min(...ys.slice(1).map((y, i) => Math.abs(y - ys[i]))) : 99, every = gap < 13 ? Math.ceil(13 / Math.max(gap, 1)) : 1;
     p.auxInfo.lev.forEach((s, i) => { if (i % every && i !== p.auxInfo.lev.length - 1) return; const q = to(s.at); if (gap < 28) { g.fillText(s.name, q[0] - 6, q[1]); return; } g.fillText(s.name, q[0] - 6, q[1] - 7); g.fillStyle = T.dark ? "#8f9aa1" : "#6b7880"; g.fillText(num(s.z) + (unit ? " " + unit : ""), q[0] - 6, q[1] + 7); g.fillStyle = T.text; });
   }
+  if (opt.grid && p.auxInfo && p.mode === "plan") drawDims(g, to, T, p.auxInfo.bub);
   if (opt.joints) drawJoints(p, g, to, T);
   if (opt.names) drawNames(p, g, to, T);
   if (opt.supports && !gl) drawSupports(p, g, to, T);
@@ -2342,7 +2370,7 @@ function paneTitle(p) {
 }
 function drawLegend() {
   const el = $("legend"), list = [...legendSeen].sort((a, b) => a[0].localeCompare(b[0], undefined, {numeric: true}));
-  el.hidden = list.length === 0;
+  el.hidden = list.length === 0 || $("colour").value === "kind";
   el.innerHTML = list.slice(0, 40).map(([k, c]) => `<div><i style="background:${c}"></i>${esc(k)}</div>`).join("");
 }
 
@@ -2634,7 +2662,7 @@ function tipText(o) {
   if ((res.mode === "contour" || res.mode === "deformed") && disp.has(res.case)) { const idx = o.type === "f" ? [o.ia, o.ib] : o.idx; const ds = idx.filter(i => i >= 0).map(i => disp.get(res.case).get(String(points[i][0]))).filter(Boolean); if (ds.length) { const c = ["UX", "UY", "UZ"], best = ds.reduce((m, d) => Math.max(m, Math.hypot(...d)), 0); lines.push(`Largest movement ${fmt(best)}${unit ? " " + unit : ""} (${res.case})`); } }
   return lines.join("\n");
 }
-const hintText = () => tool.startsWith("d:") ? drawHint() : tool === "zoom" ? "Drag a box to zoom into it." : tool === "pan" ? "Drag to pan. Wheel zooms." : tool === "orbit" ? "Drag to turn the 3-D view. Wheel zooms." : "Click to select, drag a box to select (left to right: inside, right to left: touching). Joints and supports select too. Right click an object for its information (Shift + right click for the menu). Right drag turns 3-D, middle drag pans, wheel zooms.";
+const hintText = () => tool.startsWith("d:") ? drawHint() : tool === "zoom" ? "Drag a box to zoom into it." : tool === "pan" ? "Drag to pan. Wheel zooms." : tool === "orbit" ? "Drag to turn the 3-D view. Wheel zooms." : "Ready";
 
 // ---- toolbars ----
 const I = {
@@ -2684,8 +2712,9 @@ const I = {
   instab: '<path d="M2 13.5h12"/><path d="M4 13.5V6l4-3.5l4 3.5v7.5"/><path d="M8 7.2v3.1" class="c4"/><circle cx="8" cy="11.8" r=".8" class="f"/>',
 };
 const icon = k => `<svg viewBox="0 0 16 16">${I[k] || ""}</svg>`;
-const bar = [["open", "Open a pack (Ctrl+O)", "open"], 0, ["fit", "Restore full view", "fit"], ["zoom", "Rubber band zoom", "t:zoom"], ["zin", "Zoom in one step", "zin"], ["zout", "Zoom out one step", "zout"], ["pan", "Pan", "t:pan"], ["orbit", "Rotate the 3-D view", "t:orbit"], 0,
-  ["plan", "Set plan view", "v:plan"], ["elev", "Set elevation view", "v:elev"], ["3d", "Set 3-D view", "v:3d"], ["persp", "Perspective on or off", "persp"], 0,
+// In the programs' order: file, then zoom (window, full, in, out, pan), then the views (3-D, plan, elevation, rotate).
+const bar = [["open", "Open a pack (Ctrl+O)", "open"], 0, ["zoom", "Rubber band zoom", "t:zoom"], ["fit", "Restore full view", "fit"], ["zin", "Zoom in one step", "zin"], ["zout", "Zoom out one step", "zout"], ["pan", "Pan", "t:pan"], 0,
+  ["3d", "Set 3-D view", "v:3d"], ["plan", "Set plan view", "v:plan"], ["elev", "Set elevation view", "v:elev"], ["orbit", "Rotate the 3-D view", "t:orbit"], ["persp", "Perspective on or off", "persp"], 0,
   ["up", "Move up a story (Page Up)", "storyUp"], ["down", "Move down a story (Page Down)", "storyDown"], ["prev", "Previous grid line elevation", "linePrev"], ["next", "Next grid line elevation", "lineNext"], 0,
   ["display", "Set display options", "dlg:display"], ["grid", "Grid lines", "o:grid"], ["extrude", "Extruded sections", "o:extrude"], ["fill", "Floors and walls", "o:fill"], ["supports", "Supports", "o:supports"], ["names", "Labels", "o:names"], ["axes", "Global axes", "o:axes"], ["bg", "Black or white background", "bg"], 0,
   ["model", "Show undeformed shape (F4)", "r:model"], ["deformed", "Show deformed shape (F6)", "dlg:deformed", "deformed"], ["forces", "Show frame forces and moments (F8)", "dlg:forces", "forces"], ["contour", "Show joint displacement contours", "dlg:contour", "contour"], ["reactions", "Show support reactions", "dlg:reactions", "reactions"], ["ratios", "Show design ratios", "r:ratios", "ratios"], ["anim", "Animate the deformed shape", "anim"], 0,
@@ -2718,11 +2747,8 @@ function syncTools() {
   syncNav(); markTree();
 }
 function syncNav() {
-  for (const p of panes) {
-    const b = (t, a, title) => `<button data-nav="${a}" title="${title}">${t}</button>`;
-    p.nav.innerHTML = p.mode === "plan" ? b("&#9650;", "storyUp", "Up a story") + b("&#9660;", "storyDown", "Down a story") : p.mode === "elev" ? b("&#9664;", "linePrev", "Previous grid line") + b("&#9654;", "lineNext", "Next grid line") : p.mode === "3d" ? b("T", "cam:top", "Top") + b("F", "cam:front", "Front (X-Z)") + b("S", "cam:side", "Side (Y-Z)") + b("3D", "cam:iso", "3-D") : "";
-    p.nav.querySelectorAll("[data-nav]").forEach(x => x.onclick = e => { e.stopPropagation(); active = panes.indexOf(p); act(x.dataset.nav); });
-  }
+  // The programs put nothing over their views: story and grid line moves are on the toolbar and the View menu.
+  for (const p of panes) p.nav.innerHTML = "";
 }
 function setMode(p, mode) {
   if (!p) return;
@@ -2781,6 +2807,8 @@ function act(name) {
   if (name.startsWith("dlg:")) return dialogs[name.slice(4)]();
   if (name.startsWith("des:")) return openDesign(name.slice(4));
   if (name.startsWith("det:")) return openSchedule(name.slice(4));
+  if (name.startsWith("app:")) { appRun(name.slice(4)).then(j => { if (!j.ok) $("hint").textContent = "That item is not in this window."; }); return; }
+  if (name.startsWith("lay:")) { const b = document.querySelector(`[data-lay="${name.slice(4)}"]`); if (b) b.click(); return; }
   if (name.startsWith("vals:")) return openValues(name.slice(5));
   if (name.startsWith("loads:")) return openLoads(name.slice(6));
   if (name.startsWith("xy:")) return openPlotFunctions(name.slice(3));
@@ -2879,7 +2907,7 @@ const viewerMenus = () => {
     Select: [["All", "selAll", "Ctrl+A"], only(["etabs", "safe"], ["All on This Story", "selStory", "", !plan]), ["By Section...", "dlg:bySection"], ["By Object Type...", "dlg:byType"], ["Joints", "selJoints"], ["Supports (Restraints and Springs)", "selSupports"], ["Invert", "selInvert"], 0, ["Filter Selection...", "selFilter", "", !sel.size && !selJ.size], 0, ["Clear Selection", "selNone", "Esc"]],
     Analyze: [["Check Model for Instabilities...", "inst", "F7"], ["Show the Last Check's Marks", "instMarks", "", !inst.answer], 0, ["What the check looks for", "instHelp"],
       ...(window.cpmLive ? [0, ["Run Analysis...", "eng:run", "F5"], ["Run Analysis and Design...", "eng:runDesign"], 0, ["Show Results from a Review Pack (.cpmx)...", "eng:import"], ["Unlock Model (clear its results)", "eng:clear", "", !engine.res]] : [])],
-    Tools: [["Tables...", "tables", "Ctrl+T"], ["Model Explorer", "explorer"], ["Side Panel", "side"], ...(window.cpmChat ? [["Chat", "chat"]] : []), 0, ["Results Coverage...", "dlg:coverage", "", !P], ["Summary of Design Results...", "dlg:designSummary", "", !P]],
+    Tools: [["Tables...", "tables", "Ctrl+T"], ["Model Explorer", "explorer"], ["Side Panel", "side"], ...(window.cpmChat ? [["Chat", "chat"]] : []), 0, ["Results Coverage...", "dlg:coverage", "", !P], ["Summary of Design Results...", "dlg:designSummary", "", !P], ...(appMenu.length ? [0, ...appItems(["CSI ProMax", "Chat", "View"])] : [])],
     Display: (() => {
       const has = re => Object.values(P ? P.tables : {}).some(t => t.rows && t.rows.length && re.test(norm(t.name))), plots = P ? Object.values(P.tables).some(t => t.rows && t.rows.length > 1) : false;
       return [["Undeformed Shape", "r:model", "F4"], [program === "sap2000" ? "Show Load Assigns" : "Load Assigns", ["joint", "frame", "shell"].map(k => [loadWord(k) + "...", "loads:" + k, "", !loadTables(k).length])], 0, ["Deformed Shape...", "dlg:deformed", "F6", !disp.size], only(["etabs", "sap2000"], ["Mode Shapes...", "dlg:modes", "", !P || !modeCases().length]), ["Animate Deformed Shape", "anim", "", res.mode !== "deformed"], 0,
@@ -2894,11 +2922,12 @@ const viewerMenus = () => {
     Design: [...(window.cpmLive ? [["Start Design/Check...", "eng:design", "Shift+F5"], 0] : []), ...(design.length ? [...design.map(f => [f.name, [["Display Design Info...", "des:" + f.key], ...designShows(f).map(s => [designOutputName(f, s), "dshow:" + f.key + ":" + s.id])]]), 0, ["All Design Ratios", "r:ratios", "", !ratio.size], ["Display Design Results...", "des:"], ["Summary of Design Results...", "dlg:designSummary"]]
       : [["No design results in this pack", "", "", true], ["Summary of Design Results...", "dlg:designSummary"]])],
     Detailing: detailingItems(),
-    Options: [...(window.cpmLive ? [["Program: " + progLabel(program) + " (ETABS, SAP2000 or SAFE)...", "m:program"], 0] : []), ["Black Background", "bg"], 0, ["Grid Lines", "o:grid"], ["Extruded Sections", "o:extrude"], ["Floors and Walls", "o:fill"], ["See-through Floors and Walls", "o:see"], ["Object Edges", "o:edges"], ["Supports", "o:supports"], ["Joints", "o:joints"], ["Labels", "o:names"], ["Global Axes", "o:axes"]],
-    Help: [["Mouse and Keys", "dlg:keys"], ["About", "about"]],
+    Options: [["Windows", [1, 2, 3, 4].map(n => [["One", "Two", "Three", "Four"][n - 1] + (n === 1 ? " Window" : " Windows"), "lay:" + n])], 0, ...(window.cpmLive ? [["Program: " + progLabel(program) + " (ETABS, SAP2000 or SAFE)...", "m:program"], 0] : []), ["Black Background", "bg"], 0, ["Grid Lines", "o:grid"], ["Extruded Sections", "o:extrude"], ["Floors and Walls", "o:fill"], ["See-through Floors and Walls", "o:see"], ["Object Edges", "o:edges"], ["Supports", "o:supports"], ["Joints", "o:joints"], ["Labels", "o:names"], ["Global Axes", "o:axes"]],
+    Help: [["Mouse and Keys", "dlg:keys"], ["About", "about"], ...(appMenu.length ? [0, ...appHelp()] : [])],
   };
 };
 function ticked(a) {
+  if (a.startsWith("lay:")) return +a.slice(4) === layout;
   const p = panes[active];
   if (a.startsWith("o:")) return opt[a.slice(2)];
   if (a.startsWith("r:")) return a === "r:ratios" ? res.mode === "model" && $("colour").value === "ratio" : res.mode === a.slice(2) && !(a === "r:model" && $("colour").value === "ratio");
@@ -3656,7 +3685,8 @@ function wireDesignCard(el) {
 let xTab = "model";
 function buildTree() {
   const open = new Set([...document.querySelectorAll("#tree details[open]")].map(d => d.dataset.k)), first = !document.querySelector("#tree details");
-  const node = (k, title, n, body, wide) => `<details data-k="${k}" ${first ? (wide ? "open" : "") : open.has(k) ? "open" : ""}><summary>${esc(title)}${n === null ? "" : ` <span class="n">(${n})</span>`}</summary>${body}</details>`;
+  // As the programs' Model Explorer: no counts beside the names, and only the root open at first.
+  const node = (k, title, n, body, wide) => `<details data-k="${k}" ${first ? (wide && (k === "model" || k === "tabs") ? "open" : "") : open.has(k) ? "open" : ""}><summary>${esc(title)}</summary>${body}</details>`;
   const plain = list => list.length ? list.map(x => `<div class="leaf">${esc(x)}</div>`).join("") : `<div class="leaf kv">none</div>`;
   const T = theme(), m = P.model, man = P.manifest || {}, count = (list, f) => list.filter(f).length;
   // The Model Explorer names objects as the program does: SAP2000 has frames and areas (no stories), SAFE has slabs.
@@ -3671,8 +3701,8 @@ function buildTree() {
   const groups = (m.groups || []).map(g => typeof g === "string" ? g : g.name).concat(firstCol("Group Definitions")).filter((g, i, a) => g && a.indexOf(g) === i);
   const cuts = firstCol("Section Cut Definitions"), joints = jointsCount();
   const tw = theWords();
-  const model = node("model", man.model || "Model", null,
-    node("project", "Project", null, `<div class="leaf">Program<span class="n">${esc(progLabel(program) + (man.etabs && !/modeler/i.test(man.etabs) ? " " + man.etabs : ""))}</span></div><div class="leaf">Units<span class="n">${esc($("units").textContent || "")}</span></div><div class="leaf">${esc(tw.analysed)}</div>`) +
+  const model = node("model", "Model", null,
+    node("project", "Project", null, `<div class="leaf">Program<span class="n">${esc(progLabel(program) + (man.etabs && !/modeler/i.test(man.etabs) ? " " + man.etabs : ""))}</span></div><div class="leaf">Units<span class="n">${esc(unitsText)}</span></div><div class="leaf">${esc(tw.analysed)}</div>`) +
     node("layout", "Structure Layout", null,
       node("stories", program === "sap2000" ? "X-Y Planes" : "Stories", stories.length, stories.slice().reverse().map(s => `<div class="leaf go" data-story="${esc(s.name)}">${esc(s.name)}<span class="n">${num(s.elevation)}</span></div>`).join(""), true) +
       node("grids", gridsGuessed ? "Column lines" : program === "sap2000" ? "Grid Systems" : "Grids", grids.X.length + grids.Y.length, lines("X") + lines("Y")), true) +
@@ -3753,7 +3783,7 @@ function showPick() {
   }
   if (!list.length && !joints.length) {
     const man = P.manifest || {}, count = k => frames.filter(f => f.kind === k).length;
-    el.innerHTML = table([["Model", man.model || ""], ["Program", (man.program || "") + " " + (man.etabs || "")], ["Units", $("units").textContent], ["Stories", Math.max(stories.length - 1, 0)], ["Grid lines", gridsGuessed ? "none in the file (column lines shown)" : grids.X.length + grids.Y.length],
+    el.innerHTML = table([["Model", man.model || ""], ["Program", (man.program || "") + " " + (man.etabs || "")], ["Units", unitsText], ["Stories", Math.max(stories.length - 1, 0)], ["Grid lines", gridsGuessed ? "none in the file (column lines shown)" : grids.X.length + grids.Y.length],
       ["Columns", count("column")], ["Beams", count("beam")], ["Braces", count("brace")], ["Floors", areas.filter(a => a.kind !== "wall").length], ["Walls", areas.filter(a => a.kind === "wall").length], ["Joints", points.length], ["Supports", supports.length],
       ["Size X, Y, Z", [0, 1, 2].map(i => num(hi[i] - lo[i])).join(", ") + (unit ? " " + unit : "")], ["Result tables", Object.keys(P.tables).length]]) + `<p class="kv">Click an object in a view to see it here. Double click it, or right click it, for its full information.</p>`;
     $("target").textContent = "Comment on the whole model. Click a member in a view to comment on it.";
@@ -5644,19 +5674,24 @@ const drawIcons = {
   "d:qfloor": '<path d="M1.5 4.5h13M1.5 11.5h13M4.5 1.5v13M11.5 1.5v13" stroke-dasharray="2 1.2" opacity=".6"/><rect x="4.5" y="4.5" width="7" height="7" class="k5"/>',
   "d:brace": '<path d="M3 13L13 3" stroke-width="2.5"/><path d="M3 3v10M13 3v10" opacity=".5"/>', "d:joint": '<circle cx="8" cy="8" r="2.6" class="f"/><path d="M8 2v3M8 11v3M2 8h3M11 8h3" opacity=".6"/>',
   "d:wall": '<path d="M2 4h12v8H2z" class="k3"/>', "d:qwall": '<path d="M1.5 4.5h13M1.5 11.5h13M4.5 1.5v13M11.5 1.5v13" stroke-dasharray="2 1.2" opacity=".6"/><path d="M4.5 3.5h7v2h-7z" class="k3"/>',
+  lock: '<rect x="3.5" y="7" width="9" height="7" rx="1"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" class="c1"/>', run: '<path d="M4.5 2.5v11l9-5.5z" class="f"/>',
   undo: '<path d="M5 3L2 6l3 3"/><path d="M2 6h7.5a4 4 0 0 1 0 8H6"/>', redo: '<path d="M11 3l3 3l-3 3"/><path d="M14 6H6.5a4 4 0 0 0 0 8H10"/>',
   save: '<path d="M2 2h10l2 2v10H2z"/><path d="M5 2v4h6V2M4.5 14V9.5h7V14" class="c1"/>', del: '<path d="M3 4h10M6 4V2.5h4V4M4.5 4l.8 10h5.4l.8-10"/><path d="M7 6.5v5M9 6.5v5" class="c4"/>',
 };
 function modelerStart() {
+  appMenuLoad();
+  // One program window as the CSI programs: no side panel at first (the chat is on the window's right); View > Side Panel shows it.
+  opt.side = false; $("right").hidden = true;
   document.querySelectorAll('[data-menu="Draw"], [data-menu="Assign"]').forEach(m => m.hidden = false);
   document.querySelector('[data-menu="File"]').hidden = false;
   $("similarWrap").hidden = program === "sap2000";
   const sb = [["d:column", "Draw columns (click a point)"], ["d:beam", "Draw beams (click start and end)"], ["d:qbeam", "Quick draw beams (click a grid line)"], ["d:wall", "Draw walls"], ["d:qwall", "Quick draw walls (click a grid line)"], ["d:floor", "Draw floors (click corners)"], ["d:rect", "Draw rectangular floors (two corners)"], ["d:qfloor", "Quick draw floors (click in a bay)"], ["d:brace", "Draw braces (click bottom and top)"], ["d:joint", "Draw joints (click a point)"]];
   $("strip").insertAdjacentHTML("beforeend", `<span class="sep"></span>` + sb.map(b => `<button class="ib" data-act="${b[0]}" title="${b[1]}"><svg viewBox="0 0 16 16">${drawIcons[b[0]]}</svg></button>`).join(""));
-  const ib = [["m:undo", "Undo (Ctrl+Z)", "undo"], ["m:redo", "Redo (Ctrl+Y)", "redo"], ["m:save", "Save (Ctrl+S)", "save"], ["m:delete", "Delete the selected objects (Del)", "del"]];
+  // As the programs: Save, Undo, Redo, then the lock (Unlock Model) and Run Analysis.
+  const ib = [["m:save", "Save (Ctrl+S)", "save"], 0, ["m:undo", "Undo (Ctrl+Z)", "undo"], ["m:redo", "Redo (Ctrl+Y)", "redo"], 0, ["eng:clear", "Unlock Model (removes the results)", "lock"], ["eng:run", "Run Analysis (F5)", "run"]];
   const open = $("icons").querySelector('[data-act="open"]');
-  open.insertAdjacentHTML("afterend", ib.map(b => `<button class="ib" data-act="${b[0]}" title="${b[1]}"><svg viewBox="0 0 16 16">${drawIcons[b[2]]}</svg></button>`).join(""));
-  document.querySelectorAll("#strip [data-act^='d:'], #icons [data-act^='m:']").forEach(b => b.onclick = () => act(b.dataset.act));
+  open.insertAdjacentHTML("afterend", ib.map(b => b ? `<button class="ib" data-act="${b[0]}" title="${b[1]}"><svg viewBox="0 0 16 16">${drawIcons[b[2]]}</svg></button>` : `<span class="sep"></span>`).join(""));
+  document.querySelectorAll("#strip [data-act^='d:'], #icons [data-act^='m:'], #icons [data-act^='eng:']").forEach(b => b.onclick = () => act(b.dataset.act));
   $("similar").onchange = e => { hm.similar = e.target.value; showObjBox(); $("hint").textContent = hintText(); };
   document.addEventListener("keydown", e => {
     if (e.target.closest && e.target.closest("input, textarea, select") || document.querySelector(".veil")) return;
