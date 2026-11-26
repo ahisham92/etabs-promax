@@ -109,7 +109,8 @@ public static class EditTools
     {
         var names = a.Texts("objects");
         if (names.Count == 0) throw new ToolInputException("Name the objects, as label@story.");
-        return Core(() => names.Select(n => ModelOps.Find(m, n)).ToList());
+        // The same object named twice is one object: divide_frames with B1@Story1 twice crashed on the second (fuzz seed 2381598).
+        return Core(() => names.Distinct(StringComparer.OrdinalIgnoreCase).Select(n => ModelOps.Find(m, n)).Distinct().ToList());
     }
 
     private static JsonArray Names(IEnumerable<ModelOps.Obj> list) => new(list.Select(x => (JsonNode)x.ToString()).ToArray());

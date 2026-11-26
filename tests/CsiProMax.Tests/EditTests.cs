@@ -108,7 +108,8 @@ static class EditTests
             var (label, story) = Split(beam);
             PropertyDefs.SetReleases(m.LineAssigns.First(a => a.Label == label && a.Story == story), ["M3"], ["T"]);
             m.AddLineLoad(label, story, "Dead", 5);
-            var parts = Names(Run(link, "divide_frames", new { objects = new[] { beam }, parts = 3 }), "parts");
+            // The same beam named twice is divided once (fuzz seed 2381598 crashed: "Sequence contains no matching element").
+            var parts = Names(Run(link, "divide_frames", new { objects = new[] { beam, beam }, parts = 3 }), "parts");
             Check(parts.Count == 3, "three parts");
             Check(!m.LineAssigns.Exists(a => a.Label == label && a.Story == story), "the whole beam is gone");
             var xs = parts.Select(p => m.Line(Split(p).Label)!).Select(l => (m.Point(l.PointI)!.X, m.Point(l.PointJ)!.X)).ToList();
