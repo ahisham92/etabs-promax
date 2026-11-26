@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using CsiProMax.Assistant;
 using CsiProMax.Assistant.Etabs;
 using CsiProMax.Assistant.Tools;
+using CsiProMax.CsiTables;
 using CsiProMax.F2k;
 using CsiProMax.Model;
 
@@ -343,7 +344,7 @@ static class OldProgramTests
             Check(memory.Loads.Count > 0, "the loads reached the slabs");
             Check(api.Calls.Any(c => c.StartsWith("SetSlab(", StringComparison.Ordinal)) && api.Calls.Any(c => c.StartsWith("SetRectangle(", StringComparison.Ordinal)) && api.Calls.Any(c => c.StartsWith("SetMaterial(", StringComparison.Ordinal)),
                 "the materials, slab and frame properties are defined first: " + string.Join(", ", api.Calls.Take(8)));
-            Check(written.Strips == 0 || built["notes"]!.AsArray().Any(n => n!.GetValue<string>().Contains("design strips", StringComparison.Ordinal)), "strips left out are said");
+            Equal(written.Strips, built["strips_in_file"]!.GetValue<int>(), "the strips of the file are counted, to go in through the table");
             Equal("Super Dead", CsiProMax.Assistant.Safe.F2kRebuild.PatternType("SUPER DEAD"), "a .f2k pattern type");
             Equal("Other", CsiProMax.Assistant.Safe.F2kRebuild.PatternType("SOMETHING"), "an unknown one");
 
@@ -353,7 +354,44 @@ static class OldProgramTests
             Check(scratch.Contains("F2kRebuild.Build(Link, text)", StringComparison.Ordinal) && scratch.IndexOf("F2kRebuild.Build(Link, text)", StringComparison.Ordinal) > scratch.IndexOf("the link reads the scratch model, and no other", StringComparison.Ordinal),
                 "the model is built only once the link is checked to be the scratch model's");
             var steps = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Safe/SafeFieldSteps.cs"));
-            Check(steps.Contains("if (built) ctx.Skip(\"the design strips came across\"", StringComparison.Ordinal), "the strips are said as not tested, not passed, when the model was built");
+            Check(steps.Contains("if (built && !ctx.Facts.ContainsKey(\"safe.strips_built\"))", StringComparison.Ordinal), "the strips are compared when they went in, and said as not tested when they did not");
+        });
+
+        yield return ("SAFE 20 (0.4.51): the design strips its API cannot draw go in through its 'Strip Object Connectivity' table, in the fields SAFE lists", () =>
+        {
+            var m = Templates.ConcreteFrame("T", [6, 6], [5], 3, 3.5);
+            var written = F2kWriter.Write(m, new F2kOptions(Story: "Story2"));
+            var points = CsiTableText.Parse(written.Text)["OBJECT GEOMETRY - DESIGN STRIPS"];
+            Check(points.Count >= 2, "the file has strips");
+            string[] safe = ["Name", "Layer", "Point", "GlobalX", "GlobalY", "WB Left", "WB Right", "WA Left", "WA Right", "AutoWiden", "GUID"];
+            var rows = CsiProMax.Assistant.Safe.F2kRebuild.StripRows(written.Text, safe);
+            Equal(points.Count, rows.Count, "one row per strip point");
+            Equal(points[0]["Strip"], rows[0]["Name"], "the strip's name");
+            Equal(points[0]["GlobalX"], rows[0]["GlobalX"], "its place");
+            Equal(points[0]["WBLeft"], rows[0]["WB Left"], "a width, to a field named with a space");
+            Check(!rows[0].ContainsKey("GUID"), "a field the file has nothing for is left to SAFE");
+            var other = CsiProMax.Assistant.Safe.F2kRebuild.StripRows(written.Text, ["Strip", "X", "Y"]);
+            Equal(points[0]["GlobalY"], other[0]["Y"], "other names for the same fields");
+            try { CsiProMax.Assistant.Safe.F2kRebuild.StripRows(written.Text, ["Name", "Layer"]); throw new Exception("strips were written with no place"); }
+            catch (EtabsException ex) { Check(ex.Message.Contains("Its fields: Name, Layer", StringComparison.Ordinal), "SAFE's fields are named, for the next round: " + ex.Message); }
+
+            var api = new CpmFakes.StripTableApi(safe);
+            var link = new SafeMemory(new MemoryEtabs { Program = CsiProgram.Safe }, program: CsiProgram.Safe) { Api = api };
+            var listed = CsiProMax.Assistant.Safe.F2kRebuild.BuildStrips(link, written.Text);
+            Equal(points.Count, api.Written.Count, "every strip point went into the table");
+            Equal(points.Select(p => p["Strip"]).Distinct().Count(), listed, "SAFE lists each strip once");
+            Check(api.Applied, "the table edit was applied");
+            Equal(safe.Length, api.Fields.Length, "the rows carry SAFE's own fields");
+        });
+
+        yield return ("Ahmed 2026-11-26: SAFE's part leaves nothing as not tested: strips, table add and update, slab design and soil are checked or failed", () =>
+        {
+            var steps = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Safe/SafeFieldSteps.cs"));
+            Check(!steps.Contains("ctx.Skip(", StringComparison.Ordinal) && !steps.Contains("FieldSkipException", StringComparison.Ordinal), "no step of SAFE's part is said as not tested");
+            Check(steps.Contains("TableEdits(ctx, link, slabTable)", StringComparison.Ordinal) && steps.Contains("\"action\"] = \"update\"", StringComparison.Ordinal) && steps.Contains("\"action\":\"add\"", StringComparison.Ordinal), "edit_safe_table's add and update are run");
+            Check(steps.Contains("Spring Property Definitions - Area Springs", StringComparison.Ordinal), "the soil is read from SAFE's area spring table when its API does not list it");
+            var scratch = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));
+            Check(scratch.Contains("ctx.Fail($\"start a second {name} window\"", StringComparison.Ordinal), "a file the program can neither open nor have built is a failure, not a skip");
         });
 
         yield return ("SAFE 20 tester (0.4.47): SAFE 20 is never given the Modeler's .f2k, which it read as a packed model ('Error decompressing file')", () =>
@@ -486,4 +524,47 @@ namespace CSiAPIv1
             return 0;
         }
     }
+}
+
+namespace CpmFakes
+{
+        /// <summary>SAFE's database tables for the strip table: lists its fields, takes the rows and counts the strips they name.</summary>
+        public sealed class StripTableApi(string[] fields)
+        {
+            public List<string[]> Written { get; } = [];
+            public string[] Listed { get; } = fields;
+            public string[] Fields = [];
+            public bool Applied;
+            public TablesApi DatabaseTables => new(this);
+            public SlabApi DesignConcreteSlab => new(this);
+            public sealed class TablesApi(StripTableApi a)
+            {
+                public int GetAllFieldsInTable(string TableKey, ref int TableVersion, ref int NumberFields, ref string[] FieldKey, ref string[] FieldName, ref string[] Description, ref string[] UnitsString, ref bool[] IsImportable)
+                { FieldKey = a.Listed; FieldName = a.Listed; NumberFields = a.Listed.Length; return TableKey == CsiProMax.Assistant.Safe.F2kRebuild.StripTable ? 0 : 1; }
+                public int GetTableForEditingArray(string TableKey, string GroupName, ref int TableVersion, ref string[] FieldsKeysIncluded, ref int NumberRecords, ref string[] TableData)
+                { FieldsKeysIncluded = a.Listed; NumberRecords = 0; TableData = []; return 0; }
+                public int SetTableForEditingArray(string TableKey, ref int TableVersion, ref string[] FieldsKeysIncluded, int NumberRecords, ref string[] TableData)
+                {
+                    a.Fields = FieldsKeysIncluded;
+                    for (var r = 0; r < NumberRecords; r++) a.Written.Add(TableData.Skip(r * FieldsKeysIncluded.Length).Take(FieldsKeysIncluded.Length).ToArray());
+                    return 0;
+                }
+                public int ApplyEditedTables(bool FillImportLog, ref int NumFatalErrors, ref int NumErrorMsgs, ref int NumWarnMsgs, ref int NumInfoMsgs, ref string ImportLog) { a.Applied = true; ImportLog = ""; return 0; }
+                public int CancelTableEditing() => 0;
+            }
+            public sealed class SlabApi(StripTableApi a)
+            {
+                public StripApi DesignStrip => new(a);
+            }
+            public sealed class StripApi(StripTableApi a)
+            {
+                public int GetNameList(ref int NumberNames, ref string[] MyName)
+                {
+                    var at = Array.FindIndex(a.Fields, f => f == "Name");
+                    MyName = a.Written.Select(r => r[at]).Distinct().ToArray();
+                    NumberNames = MyName.Length;
+                    return 0;
+                }
+            }
+        }
 }

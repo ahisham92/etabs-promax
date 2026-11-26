@@ -23,9 +23,6 @@ public static class ModelerCheck
 
     private static readonly string[] ModelerTables = ["Grid Definitions", "Frame Assignments - Section Properties", "Area Assignments - Section Properties", "Model Checks", "Quantities", .. OfflineEtabs.LoadTables];
 
-    /// <summary>Menu items not run: they ask the PC for a file or for a printer, which a browser without a window can't show.</summary>
-    public static readonly string[] NotRun = ["m:open", "m:xlsxIn", "print"];
-
     public const string Script = """
     (function () {
       const CHAT = __CHAT__;
@@ -50,7 +47,67 @@ public static class ModelerCheck
         try { closeDialogs(); hideMenus(); if (typeof tool === "string" && tool !== "select") act("t:select"); } catch (e) { }
         await wait(60);
       }
-      const NOT_RUN = __NOTRUN__;
+      // The items that would ask the PC for a file or a printer are run another way (Ahmed 2026-11-26: nothing left
+      // out but a program that is not installed): File > Open opens a file the check saved, typed in the form as an
+      // engineer does; Import > Tables from Excel is handed a workbook the check wrote, through the form's own file box
+      // (as if picked, with no picker); Print runs from the menu with the printer dialog stubbed, and the window it
+      // prints must be drawn.
+      const FOLDER = __FOLDER__;
+      const formOk = label => { const forms = document.querySelectorAll(".dlg"), f = forms[forms.length - 1]; const b = f && [...f.querySelectorAll(".df button")].find(x => x.textContent === label); if (!b) throw new Error("the form has no " + label + " button"); b.click(); };
+      const formErr = () => { const e = document.querySelector(".dlg .ferr:not([hidden])"); return e ? e.textContent : ""; };
+      const OTHER_WAY = {
+        "m:open": async () => {
+          const saved = await hmRun("save_model_as", {name: "CPM open check", folder: FOLDER}, true);
+          if (!saved.ok) return {fail: "the check could not save a model to open: " + saved.error};
+          const file = (saved.result.modeler_file || "").endsWith(".cpm") ? saved.result.modeler_file : saved.result.e2k || saved.result.file;
+          const count = frames.length;
+          await act("m:open"); await wait(600);
+          const box = document.querySelector(".dlg #oP");
+          if (!box) return {fail: "the Open form did not open"};
+          box.value = file; formOk("Open"); await wait(1500);
+          const err = formErr();
+          for (let i = 0; i < 20 && hm.state && hm.state.file !== file && window.cpmPull; i++) { await window.cpmPull(); await wait(150); }
+          if (err) return {fail: "the file did not open: " + err};
+          if (frames.length !== count) return {fail: `the opened model has ${frames.length} frames, not ${count}`};
+          return {ok: "opened " + file.split(/[\\/]/).pop() + ` (${count} frames)`};
+        },
+        "m:xlsxIn": async () => {
+          const made = await hmRun("export_tables_excel", {name: "CPM import check", folder: FOLDER}, true);
+          if (!made.ok || !made.result.saved) return {fail: "the check could not write a workbook: " + made.error};
+          const name = made.result.saved.split(/[\\/]/).pop();
+          const r = await fetch("check-file?name=" + encodeURIComponent(name), {cache: "no-store"});
+          if (!r.ok) return {fail: "the check could not read back its workbook " + name};
+          const file = new File([await r.blob()], name, {type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+          await act("m:xlsxIn"); await wait(600);
+          const input = document.querySelector(".dlg #iF");
+          if (!input) return {fail: "the Import form did not open"};
+          const dt = new DataTransfer(); dt.items.add(file); input.files = dt.files;
+          input.dispatchEvent(new Event("change", {bubbles: true}));
+          const before = (await hmDefs()).frame_sections.length;
+          formOk("Import");
+          let said = "";
+          for (let i = 0; i < 40 && !/^Imported/.test(said); i++) { await wait(150); said = document.getElementById("hint").textContent; if (formErr()) break; }
+          const err = formErr();
+          if (err || !/^Imported/.test(said)) return {fail: "the workbook was not imported: " + (err || said || hm.lastError)};
+          const after = (await hmDefs()).frame_sections.length;
+          if (after !== before) return {fail: `reading back the model's own tables changed the frame sections from ${before} to ${after}`};
+          await hmRun("undo"); await wait(600);
+          return {ok: said.slice(0, 200)};
+        },
+        "print": async () => {
+          const real = window.print; let asked = 0, drawn = "";
+          window.print = () => { asked++; const p = panes[active], c = p && p.hold && p.hold.querySelector("canvas"); drawn = c ? `${c.width} x ${c.height}` : ""; };
+          try {
+            const file = document.querySelector('.menu[data-menu="File"]'); hideMenus(); file.click(); await wait(200);
+            const item = file.querySelector('[data-do="print"]');
+            if (!item) return {fail: "File has no Print item"};
+            item.click(); await wait(300);
+          } finally { window.print = real; }
+          if (asked !== 1) return {fail: `Print asked for the printer ${asked} times, not once`};
+          if (!drawn || /^0 x|x 0$/.test(drawn)) return {fail: "the window to print has no drawing: " + (drawn || "no canvas")};
+          return {ok: "the printer was asked for the active window, drawn at " + drawn};
+        },
+      };
       function flat(list, path, out) {
         for (const it of list || []) {
           if (!it) continue;
@@ -259,10 +316,11 @@ public static class ModelerCheck
         if (typeof forProgram === "function") { await hmRun("set_model_program", {program: "etabs"}, true); if (window.cpmPull) await window.cpmPull(); await wait(400); }
         for (const it of list) {
           await step("menu: " + it.path, async () => {
-            if (NOT_RUN.includes(it.act)) return {skipped: "skipped: it asks the PC for a file or a printer, which a browser without a window can't show"};
             if (it.target && program !== it.target) { await hmRun("set_model_program", {program: it.target}, true); for (let i = 0; i < 30 && program !== it.target; i++) { if (window.cpmPull) await window.cpmPull(); await wait(200); } }
             pick();
-            if (offNow(it.act)) return {skipped: "skipped: greyed out at this point of the check"};
+            if (it.act === "m:redo" && offNow(it.act)) { await hmRun("define_load_pattern", {name: "CPM-CHKREDO", type: "Other", self_weight: 0}, true); await hmRun("undo"); await wait(400); }
+            if (offNow(it.act)) return {fail: "greyed out, although the check selected a beam and a floor for it first"};
+            if (OTHER_WAY[it.act]) return await OTHER_WAY[it.act](it);
             const before = dialogsOpen();
             await act(it.act); await wait(700);
             if (it.label.endsWith("...")) {
@@ -283,9 +341,9 @@ public static class ModelerCheck
     })();
     """;
 
-    private static string PageScript(bool chat) =>
+    private static string PageScript(bool chat, string folder) =>
         Script.Replace("__CHAT__", chat ? "true" : "false", StringComparison.Ordinal)
-              .Replace("__NOTRUN__", JsonSerializer.Serialize(NotRun), StringComparison.Ordinal);
+              .Replace("__FOLDER__", JsonSerializer.Serialize(folder), StringComparison.Ordinal);
 
     /// <summary>
     /// Serves the live Modeler page on a scratch model and checks it in <paramref name="browser"/> (Edge or Chrome when
@@ -296,6 +354,9 @@ public static class ModelerCheck
         browser ??= ViewerCheck.FindBrowser();
         if (browser is null) return new ViewerCheck.Result([], [], "no Edge or Chrome was found on this PC to open the Modeler's window in");
         Directory.CreateDirectory(folder);
+        // Where the page saves the model it opens again and the workbook it imports (File > Open, Import > Excel).
+        var files = Path.Combine(folder, "files " + Guid.NewGuid().ToString("N")[..6]);
+        Directory.CreateDirectory(files);
         var link = new OfflineEtabs(Scratch());
         var gate = new object();
         var endpoint = new McpEndpoint("CSI ProMax Modeler check", "1", () => "", _ => [], (_, _, _, _) => throw new InvalidOperationException("no tools here"));
@@ -308,11 +369,16 @@ public static class ModelerCheck
                 switch (path)
                 {
                     case "":
-                        var html = Pack.LiveViewerHtml(content, link.Revision, chat).Replace("</body>", "<script>" + PageScript(chat) + "</script></body>", StringComparison.Ordinal);
+                        var html = Pack.LiveViewerHtml(content, link.Revision, chat).Replace("</body>", "<script>" + PageScript(chat, files) + "</script></body>", StringComparison.Ordinal);
                         return (Encoding.UTF8.GetBytes(html), "text/html; charset=utf-8");
                     case "model":
                         if (query == "rev=" + link.Revision.ToString(System.Globalization.CultureInfo.InvariantCulture)) return ([], "application/json");
                         return (Encoding.UTF8.GetBytes(new JsonObject { ["rev"] = link.Revision, ["pack"] = content }.ToJsonString()), "application/json");
+                    case "check-file":
+                        // Only a file the check itself wrote in its own folder: the page reads back its workbook.
+                        var asked = Uri.UnescapeDataString(query.StartsWith("name=", StringComparison.Ordinal) ? query[5..] : "");
+                        var file = Path.Combine(files, Path.GetFileName(asked));
+                        return asked.Length > 0 && File.Exists(file) ? (File.ReadAllBytes(file), "application/octet-stream") : null;
                     default:
                         return null;
                 }
@@ -347,7 +413,7 @@ public static class ModelerCheck
         finally
         {
             HandModel.Reset();
-            try { if (Directory.Exists(profile)) Directory.Delete(profile, true); }
+            try { if (Directory.Exists(profile)) Directory.Delete(profile, true); if (Directory.Exists(files)) Directory.Delete(files, true); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* the test's work folder says where it is */ }
         }
     }
