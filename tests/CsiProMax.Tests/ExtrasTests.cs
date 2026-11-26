@@ -295,7 +295,7 @@ static class ExtrasTests
                 var view = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Panel", "Host", "ModelView.cs"));
                 Check(view.Contains("path == \"run\" ? RunAsync(body)") && view.Contains("EngineRun.Start(offline, design)"), "the Engine window cannot start a run");
                 var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
-                Check(html.Contains("[\"Run Analysis\", \"eng:run\", \"F5\"]") && html.Contains("async function engineRun(design)"), "Analyze > Run Analysis is not in the Engine");
+                Check(html.Contains("[\"Run Analysis...\", \"eng:run\", \"F5\"]") && html.Contains("async function engineRun(mode)"), "Analyze > Run Analysis is not in the Engine");
                 var scratch = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Field", "ScratchProgram.cs"));
                 Check(scratch.Contains("_app.Hide();"), "the program is not hidden while it runs");
             }
