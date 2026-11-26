@@ -93,6 +93,19 @@ public static class ModelerStartFieldSteps
         return string.Join("; ", seen);
     }
 
+    /// <summary>The Modeler that holds the one window of this PC, when it is another process with a window: its id and title.</summary>
+    internal static string? OpenElsewhere()
+    {
+        try
+        {
+            var file = Program.Holder.File("CsiProMax.modeler");
+            if (!File.Exists(file) || Program.Holder.Parse(File.ReadAllText(file)) is not { } held || held.Pid == Environment.ProcessId) return null;
+            using var p = Process.GetProcessById(held.Pid);
+            return p.HasExited || p.MainWindowHandle == IntPtr.Zero ? null : $"process {held.Pid}, '{p.MainWindowTitle}'";
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception) { return null; }
+    }
+
     /// <summary>The Modeler started as its shortcut does, then started again while it is open; both closed afterwards.</summary>
     private static (WindowFieldSteps.Seen First, WindowFieldSteps.Seen Again) Twice()
     {
@@ -118,7 +131,14 @@ public static class ModelerStartFieldSteps
             {
                 Thread.Sleep(500);
                 first.Refresh();
-                if (first.HasExited) return (new WindowFieldSteps.Seen(false, $"it ended by itself with code {first.ExitCode} and no window. {WindowFieldSteps.Wrote(notes, before)}"), new WindowFieldSteps.Seen(false, "not started"));
+                if (first.HasExited)
+                {
+                    // One Engine per PC: a Modeler already open (an older one, named otherwise) took the start and came
+                    // forward, and this start ended as it should (ETABS run on main 4eabf46: "ended by itself with code 0").
+                    if (first.ExitCode == 0 && OpenElsewhere() is { } other)
+                        return (new WindowFieldSteps.Seen(true, $"the Modeler already open on this PC ({other}) came forward and this start ended, as one Engine per PC does"), new WindowFieldSteps.Seen(true, "answered by the open Modeler"));
+                    return (new WindowFieldSteps.Seen(false, $"it ended by itself with code {first.ExitCode} and no window. {WindowFieldSteps.Wrote(notes, before)}"), new WindowFieldSteps.Seen(false, "not started"));
+                }
                 if (first.MainWindowHandle != IntPtr.Zero) title = first.MainWindowTitle;
             }
             if (!title.StartsWith(CsiProMax.App.Engine, StringComparison.Ordinal))
