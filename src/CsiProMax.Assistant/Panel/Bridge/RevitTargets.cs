@@ -303,7 +303,10 @@ internal sealed class ETABSTargets
         var path = arguments is not null && arguments.TryGetValue("path", out var p) && p.ValueKind == JsonValueKind.String ? (p.GetString() ?? "").Trim().Trim('"') : "";
         var version = arguments is not null && arguments.TryGetValue("etabsVersion", out var v) ? v.ToString() : null;
         if (path.Length == 0) return Text("Give the model's full file path (path).", true);
-        if (!path.EndsWith(".rvt", StringComparison.OrdinalIgnoreCase)) return Text($"Only {Csi.Name} models (.rvt) can be opened this way.", true);
+        // The program's own model files: SAFE opens .fdb (a tester's LEVEL 29.FDB was refused as "not .rvt", 2026-11-26).
+        var kinds = CsiProMax.Assistant.Tools.CsiTools.ModelFiles(Csi.Program);
+        if (!kinds.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
+            return Text($"{Csi.Name} opens {string.Join(", ", kinds)} files; '{Path.GetFileName(path)}' is not one.", true);
         if (sessions.Count == 0)
             return Text(_unresponsive > 0
                 ? $"{Csi.Name} is running but not responding: it may be busy with a long operation or frozen. Ask the user to check {Csi.Name}, then try again."

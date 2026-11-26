@@ -19,6 +19,9 @@
     <ProjectReference Include="../SapApiStub/SapApiStub.csproj" Private="false" />
     <!-- The same launcher as the ETABS plug-in. -->
     <Compile Include="../CsiProMax.Plugin/Launcher.cs" />
+    <!-- The pipe the window reaches a .NET Framework program's API through. -->
+    <Compile Include="../CsiProMax.Plugin/ApiBridge.cs" Link="ApiBridge.cs" />
+    <Compile Include="../CsiProMax.Plugin/ApiWire.cs" Link="ApiWire.cs" />
     <InternalsVisibleTo Include="CsiProMax.Tests" />
   </ItemGroup>
 </Project>

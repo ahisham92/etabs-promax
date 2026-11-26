@@ -113,6 +113,37 @@ namespace CsiProMax.Assistant.Etabs
             catch (Exception ex) when (ex is TargetInvocationException || ex is MissingMethodException || ex is COMException || ex is NullReferenceException) { return null; }
         }
 
+        /// <summary>
+        /// A property of one of the program's objects: read here, or over the pipe for a program on the .NET Framework
+        /// (<see cref="ApiPipe"/>). Every read of the API goes through this or <see cref="Invoke"/>.
+        /// </summary>
+        internal static object GetValue(PropertyInfo property, object target) =>
+            target is ApiPipe.Remote remote ? remote.Pipe.Get(remote, property) : property.GetValue(target, null);
+
+        /// <summary>A method of one of the program's objects, as MethodInfo.Invoke calls it (ref values come back in <paramref name="values"/>).</summary>
+        internal static object Invoke(MethodInfo method, object target, object[] values) =>
+            target is ApiPipe.Remote remote ? remote.Pipe.Call(remote, method, values) : method.Invoke(target, values);
+
+        /// <summary>
+        /// True for an API file built for the .NET Framework (it names mscorlib): the API of ETABS 21, SAP2000 25 and
+        /// SAFE 21 and older. Those reach the program through .NET Remoting, which .NET 8 does not have, so CSI ProMax
+        /// calls them through the plug-in's pipe (<see cref="ApiPipe"/>), never through their Helper.
+        /// </summary>
+        public static bool RunsOnFramework(string apiFile)
+        {
+            try
+            {
+                using (var stream = File.OpenRead(apiFile))
+                using (var pe = new System.Reflection.PortableExecutable.PEReader(stream))
+                {
+                    var md = System.Reflection.Metadata.PEReaderExtensions.GetMetadataReader(pe);
+                    var names = md.AssemblyReferences.Select(h => md.GetString(md.GetAssemblyReference(h).Name)).ToList();
+                    return names.Contains("mscorlib") && !names.Contains("System.Runtime") && !names.Contains("netstandard");
+                }
+            }
+            catch (Exception) { return false; }
+        }
+
         private static object Wrap(object value, Type declared)
         {
             if (value == null) return null;
@@ -123,7 +154,7 @@ namespace CsiProMax.Assistant.Etabs
         {
             var property = _type.GetProperty(binder.Name);
             if (property == null) throw new MissingMemberException("The program's " + _type.Name + " has no " + binder.Name + ".");
-            result = Wrap(Call(() => property.GetValue(_target, null)), property.PropertyType);
+            result = Wrap(Call(() => GetValue(property, _target)), property.PropertyType);
             return true;
         }
 
@@ -143,7 +174,7 @@ namespace CsiProMax.Assistant.Etabs
                     else fits = TryConvert(parameters[i].DefaultValue, parameters[i].ParameterType, out values[i]);
                 }
                 if (!fits) continue;
-                var value = Call(() => method.Invoke(_target, values));
+                var value = Call(() => Invoke(method, _target, values));
                 for (var i = 0; i < args.Length; i++)
                     if (parameters[i].ParameterType.IsByRef) args[i] = Back(values[i], args[i]);
                 result = Wrap(value, method.ReturnType);

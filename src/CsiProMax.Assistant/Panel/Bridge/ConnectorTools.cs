@@ -36,14 +36,13 @@ internal static class ConnectorTools
                   "etabsVersion":{"type":"string","description":"Optional, e.g. 2024"}}}
                 """)),
         new(OpenTool,
-            $"Opens {Csi.AName} model from its file path in a connected {Csi.Name} window and makes it the model the other tools act on. " +
-            "A workshared model (a central or local file) is always opened as a detached copy with its worksets kept, so the " +
-            "central model is never touched; the copy is named '<name>_detached' and is not saved unless the user asks. " +
-            $"A model that is already open is switched to. Works in {Csi.AName} window with no model open. Opening a large model " +
+            $"Opens {Csi.AName} model from its file path ({string.Join(", ", CsiProMax.Assistant.Tools.CsiTools.ModelFiles(Csi.Program))}) in a connected {Csi.Name} window and makes it the model the other tools act on. " +
+            $"The model open in that window now is closed, and its changes that were not saved are lost: ask the user first whether to save it. The user is always asked before it opens. " +
+            "A model that is already open is switched to. Works in a window with no model open. Opening a large model " +
             "takes minutes: when the call says it is still opening, call list_etabs_models after a while to see it.",
             Schema($$$"""
                 {"type":"object","properties":{
-                  "path":{"type":"string","description":"Full path of the .rvt file on the user's computer"},
+                  "path":{"type":"string","description":"Full path of the model file on the user's computer"},
                   "etabsVersion":{"type":"string","description":"The {{{Csi.Name}}} window to open it in, e.g. 2024, when several are connected. Left out: the window being worked in."}},
                  "required":["path"]}
                 """)),

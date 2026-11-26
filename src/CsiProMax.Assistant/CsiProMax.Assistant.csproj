@@ -46,6 +46,8 @@
     <None Include="$(Pkgbblanchon_PDFium_Win32)/runtimes/win-x64/native/pdfium.dll" Link="CsiProMax.pdfium.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" />
     <ProjectReference Include="../CsiProMax.Core/CsiProMax.Core.csproj" />
     <InternalsVisibleTo Include="CsiProMax.Tests" />
+    <!-- How calls travel to a .NET Framework CSI program through the plug-in's pipe (Etabs/ApiPipe.cs): the plug-ins' own file. -->
+    <Compile Include="../CsiProMax.Plugin/ApiWire.cs" Link="Etabs/ApiWire.cs" />
   </ItemGroup>
   <!--
     CDT SDK (Dar Structural Computational Design, private repository): the theme, control styles and message boxes every

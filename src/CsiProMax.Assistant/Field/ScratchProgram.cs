@@ -228,6 +228,8 @@ public sealed class ScratchProgram : IScratchWindow
     private readonly CsiProgram _program;
     private ComEtabs? _com;
     private dynamic? _app;
+    /// <summary>The pipe to a .NET Framework program's scratch window (Windows PowerShell holds it), else null.</summary>
+    private ApiPipe? _pipe;
     /// <summary>The window stopped answering: its thread is still waiting on it, so nothing more can be asked of it.</summary>
     private bool _left;
     private bool _closed;
@@ -325,15 +327,28 @@ public sealed class ScratchProgram : IScratchWindow
         var com = _com = new ComEtabs(_program, () =>
         {
             var ns = EtabsApi.NamespaceOf(ApiFile);
-            var helper = Activator.CreateInstance(api.GetType(ns + ".Helper", true)!)!;
-            object app;
-            try
+            dynamic started;
+            if (EtabsApi.RunsOnFramework(ApiFile))
             {
-                app = api.GetType(ns + ".cHelper", true)!.GetMethod("CreateObjectProgID")!.Invoke(helper, [_program.ProgId])
-                    ?? throw new EtabsException($"{name} gave no application object.");
+                // ETABS 21, SAP2000 25, SAFE 21 and older: their Helper starts the program through .NET Remoting, which
+                // .NET 8 does not have ("gave no application object" for SAFE 20, ETABS 20 and SAP2000 24, 2026-11-26).
+                // Windows PowerShell starts it with the same Helper, and the calls go over the plug-in's pipe.
+                try { _pipe = ApiPipe.ToPowerShell(_program, ApiFile, "start", null); }
+                catch (TargetInvocationException ex) when (ex.InnerException is { } inner) { throw new EtabsException($"{name} could not be started ({inner.GetType().Name}: {inner.Message})."); }
+                started = _pipe.Root();
             }
-            catch (TargetInvocationException ex) when (ex.InnerException is { } inner) { throw new EtabsException($"{name} could not be started ({inner.GetType().Name}: {inner.Message})."); }
-            dynamic started = new EtabsApi(app, api.GetType(ns + ".cOAPI", true)!);
+            else
+            {
+                var helper = Activator.CreateInstance(api.GetType(ns + ".Helper", true)!)!;
+                object app;
+                try
+                {
+                    app = api.GetType(ns + ".cHelper", true)!.GetMethod("CreateObjectProgID")!.Invoke(helper, [_program.ProgId])
+                        ?? throw new EtabsException($"{name} gave no application object.");
+                }
+                catch (TargetInvocationException ex) when (ex.InnerException is { } inner) { throw new EtabsException($"{name} could not be started ({inner.GetType().Name}: {inner.Message})."); }
+                started = new EtabsApi(app, api.GetType(ns + ".cOAPI", true)!);
+            }
             _app = started;
             var answer = Convert.ToInt32(started.ApplicationStart());
             if (answer != 0) throw new EtabsException($"{name} refused to start (it answered {answer}).");
@@ -562,6 +577,7 @@ public sealed class ScratchProgram : IScratchWindow
         try { _watch?.Dispose(); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
         try { PutBackPlugIns(); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
         try { _com?.Dispose(); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
+        try { _pipe?.Dispose(); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
     }
 }
 

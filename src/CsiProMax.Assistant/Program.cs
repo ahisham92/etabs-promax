@@ -81,6 +81,8 @@ public static class Program
         // With the AI chat or without it (AiMode): read before anything is made, since the window is built for it.
         CsiProMax.AiMode.Load(args);
         CsiProMax.App.Reopened = args.Contains("--after-pid");
+        // The program version whose Tools menu started this window: its plug-in list may not be written yet (ToolsMenu.State.Running).
+        ToolsMenu.OpenedFrom = ToolsMenu.LabelOf(etabsPid);
         if (Array.IndexOf(args, "--installed-in") is var origin and >= 0 && origin + 1 < args.Length) ToolsMenu.InstalledIn = args[origin + 1];
         if (!program.Ready)
         {

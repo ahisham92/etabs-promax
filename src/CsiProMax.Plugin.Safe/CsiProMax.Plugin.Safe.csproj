@@ -17,6 +17,9 @@
   <ItemGroup>
     <!-- The same launcher as the ETABS plug-in, compiled in, not copied. -->
     <Compile Include="../CsiProMax.Plugin/Launcher.cs" Link="Launcher.cs" />
+    <!-- The pipe the window reaches a .NET Framework program's API through. -->
+    <Compile Include="../CsiProMax.Plugin/ApiBridge.cs" Link="ApiBridge.cs" />
+    <Compile Include="../CsiProMax.Plugin/ApiWire.cs" Link="ApiWire.cs" />
     <!-- Compile against the stand-in only: inside SAFE the real SAFEv1.dll is already loaded. -->
     <ProjectReference Include="../SafeApiStub/SafeApiStub.csproj" Private="false" />
   </ItemGroup>

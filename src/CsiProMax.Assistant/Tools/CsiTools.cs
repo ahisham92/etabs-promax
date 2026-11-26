@@ -155,6 +155,12 @@ public static class CsiTools
             """{"type":"object","required":["name"],"properties":{"name":{"type":"string"}}}""",
             Ask.Always, RestoreCheckpoint, a => $"Go back to checkpoint '{a.Text("name")}' (later changes are lost)"),
 
+        new("open_model",
+            "Opens a model file in the program window CSI ProMax works beside: the program's own model (ETABS .edb, SAP2000 .sdb, SAFE .fdb) or its text file (.e2k, .s2k, .f2k), " + // ETABS itself
+            "and every tool works on it from then on. The model open there now is closed: changes to it that were not saved are lost, so ask the engineer first whether to save it. The engineer is always asked first.",
+            """{"type":"object","required":["path"],"properties":{"path":{"type":"string","description":"The model file's full path on this PC."}}}""",
+            Ask.Always, OpenModel, a => $"Open {Path.GetFileName(a.Text("path"))} (the model open now is closed; changes not saved are lost)"),
+
         new("refresh_view",
             "Redraws the program's views, after changes made through the API.",
             """{"type":"object","properties":{}}""", Ask.Never, (_, e) => { e.Refresh(); return new JsonObject { ["refreshed"] = true }; }),
@@ -1057,6 +1063,56 @@ public static class CsiTools
         Call(e, "save it under the model's own name", "File.Save", D(("FileName", model)));
         e.Refresh();
         return new JsonObject { ["restored"] = name, ["model"] = e.Info().File, ["frames"] = e.Frames().Count, ["areas"] = e.Areas().Count };
+    }
+
+    // ---- opening a model ----
+
+    /// <summary>The model files each program opens: its own model, then its text files.</summary>
+    internal static string[] ModelFiles(CsiProgram program) => program.Key switch
+    {
+        "sap2000" => [".sdb", ".s2k", ".$2k"],
+        "safe" => [".fdb", ".f2k", ".$fd"],
+        _ => [".edb", ".e2k", ".$et"],
+    };
+
+    /// <summary>
+    /// The same model, whatever the file type: ETABS 23 answers its working file (name.$et) while name.edb is open.
+    /// The folder must be the same too.
+    /// </summary>
+    internal static bool SameModel(string a, string b)
+    {
+        static string Key(string f)
+        {
+            var t = f.Trim().Replace('\\', '/');
+            var dot = t.LastIndexOf('.');
+            return dot > t.LastIndexOf('/') ? t[..dot] : t;
+        }
+        return a.Trim().Length > 0 && string.Equals(Key(a), Key(b), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static JsonNode OpenModel(JsonElement a, ICsiLink e)
+    {
+        var name = e.Program.Name;
+        var path = a.Need("path").Trim().Trim('"');
+        var kinds = ModelFiles(e.Program);
+        if (!kinds.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
+            throw new ToolInputException($"{name} opens {string.Join(", ", kinds)} files; '{Path.GetFileName(path)}' is not one." +
+                (CsiProgram.All.FirstOrDefault(p => p.Key != e.Program.Key && ModelFiles(p).Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase)) is { } other
+                    ? $" It is {other.Name}'s: open it in {other.Name} and start CSI ProMax from {other.Name}'s Tools menu." : ""));
+        if (!Path.IsPathRooted(path)) throw new ToolInputException("Give the file's full path, such as E:\\Projects\\LEVEL 29.FDB.");
+        if (!File.Exists(path)) throw new ToolInputException($"There is no file {path}.");
+        var before = "";
+        try { before = e.Info().File; } catch (EtabsException) { /* no model was readable: open it all the same */ }
+        if (before.Length > 0 && SameModel(before, path))
+            return new JsonObject { ["opened"] = Path.GetFileName(path), ["model"] = before, ["note"] = $"{Path.GetFileName(path)} is already the model open in {name}." };
+        Call(e, $"open {Path.GetFileName(path)}", "File.OpenFile", D(("FileName", path)));
+        e.Refresh();
+        var now = e.Info();
+        return new JsonObject
+        {
+            ["opened"] = Path.GetFileName(path), ["model"] = now.File, ["closed"] = before.Length > 0 ? Path.GetFileName(before) : "an untitled model",
+            ["units"] = $"{now.Force}, {now.Length}", ["locked"] = now.Locked,
+        };
     }
 
     // ---- ETABS's stories and area sections ----

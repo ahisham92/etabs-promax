@@ -139,6 +139,17 @@ Install: run the one-line install, or copy the CSI ProMax folder to Documents. T
      the cell centres and the area's own soil is taken off. Send the answer if SAFE refuses any call.
    The same three steps in ETABS on a model with a raft at the base (areas only).
 
+9. **Older programs (SAFE 20/21, ETABS 18 to 21, SAP2000 20 to 25: they run on the .NET Framework).** Since
+   0.4.41 the window reaches them through the plug-in's pipe (Tools > CSI ProMax), and the field test's second
+   window through Windows PowerShell. Close the programs and run the one-line install first, so the Tools menu
+   has the new plug-in. Then open a model (an untitled one is fine), start CSI ProMax from Tools > CSI ProMax and run
+   Help > Field test. Expected: "read the open model" ok, "start a second SAFE window" ok, and the tools that read
+   the model (export_pack, run_recipe, run_learned_tool, run_etabs_query_code) ok. "Tools > CSI ProMax in SAFE 20"
+   is ok while SAFE 20 itself opened the window, though SAFE.ini does not list it until SAFE closes.
+10. **Open a SAFE model from the chat.** Ask "open E:\...\LEVEL 29.FDB" (open_model). Expected: it asks first (the
+   model open now is closed), then SAFE has that model and the header names it. An .edb is refused with "open it in
+   ETABS". The field test runs it on its scratch model (tool open_model).
+
 ## ETABS, for the SAFE file format (needs licensed ETABS 23)
 
 9. **Compare with ETABS's own SAFE export.** Open `etabs-promax/test-2-plain-frame.e2k` (project files) in ETABS,

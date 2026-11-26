@@ -58,7 +58,7 @@ public static class ApiCall
             values[i] = has ? Convert(given, t, p.Name ?? $"argument {i + 1}") : p.HasDefaultValue && p.DefaultValue is not DBNull && p.DefaultValue is not null ? Convert(p.DefaultValue, t, p.Name ?? "") : Default(t);
         }
         object? answer;
-        try { answer = method.Invoke(target, values); }
+        try { answer = EtabsApi.Invoke(method, target, values!); }
         catch (TargetInvocationException ex) when (ex.InnerException is { } inner)
         {
             throw new EtabsException($"The program's {where}.{method.Name} stopped with an error: {inner.Message}");
@@ -117,7 +117,7 @@ public static class ApiCall
         {
             var property = Property(type, parts[i]) ?? throw new ToolInputException($"{where} has no '{parts[i]}'. Its parts: {string.Join(", ", Properties(type).Select(p => p.Name).Take(80))}.");
             object? value;
-            try { value = property.GetValue(target); }
+            try { value = EtabsApi.GetValue(property, target); }
             catch (TargetInvocationException ex) { throw new EtabsException($"The program's {where}.{property.Name} could not be read: {ex.InnerException?.Message ?? ex.Message}"); }
             if (value is null) throw new EtabsException($"The program's {where}.{property.Name} is empty in this version.");
             if (value is EtabsApi inner) (target, type) = (inner.Target, inner.ApiType);
