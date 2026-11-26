@@ -73,6 +73,9 @@ public static class ScratchDialogs
             else if (program is not null && IsProgramBox(title, program) && Button(window, "OK") is { } fine && IsWindowEnabled(fine)
                      && LongWords(window).FirstOrDefault(IsFileRefused) is { } said && PostMessageW(fine, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero))
                 closed.Add($"{title}: {said.Trim()} (OK)");
+            else if (program is not null && IsOpenFileBox(title) && Button(window, "Cancel") is { } cancel && IsWindowEnabled(cancel)
+                     && PostMessageW(cancel, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero))
+                closed.Add($"{title}: {program.Name} asked for a file to open (Cancel)");
             else if (IsMaintenanceReminder(title, Words(window))) closed.AddRange(AnswerMaintenanceReminder([processId]));
             else if (IsStoryPicker(title) && Button(window, "OK") is { } go && IsWindowEnabled(go))
             {
@@ -96,6 +99,13 @@ public static class ScratchDialogs
     /// Slab Design", seen 2026-11-25: run_design waited on it for ten minutes). In the test's own scratch window the
     /// test answers it: all stories, OK.
     /// </summary>
+    /// <summary>
+    /// The program's own file picker ("Open Model File", ETABS 23, 2026-11-26: a scratch ETABS waited on it until Ahmed
+    /// pressed Cancel). In the test's own scratch window the test presses Cancel, and the step that caused it fails.
+    /// </summary>
+    public static bool IsOpenFileBox(string title) => title.Trim().Equals("Open Model File", StringComparison.OrdinalIgnoreCase)
+        || title.Trim().Equals("Open", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>A message box of the program itself: titled with its name alone ("SAFE").</summary>
     public static bool IsProgramBox(string title, CsiProgram program) => string.Equals(title.Trim(), program.Name, StringComparison.OrdinalIgnoreCase)
         // ETABS 23 titles its file errors "Warning" ("Error in performing miOpen", Ahmed's PC 2026-11-26).
@@ -110,7 +120,9 @@ public static class ScratchDialogs
     public static bool IsFileRefused(string text) =>
         (text.Contains("Error decompressing file", StringComparison.OrdinalIgnoreCase) || text.Contains("Error in performing miOpen", StringComparison.OrdinalIgnoreCase)
             // ETABS 23 on a line of a text file it cannot read: "Error reading line 348. Line Ignored." (2026-11-26).
-            || text.Contains("Line Ignored", StringComparison.OrdinalIgnoreCase))
+            || text.Contains("Line Ignored", StringComparison.OrdinalIgnoreCase)
+            // The file picker the test cancelled (IsOpenFileBox): the call that opened it did not get its file.
+            || text.Contains("asked for a file to open", StringComparison.OrdinalIgnoreCase))
         && !text.Contains("licen", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
@@ -504,6 +516,7 @@ public sealed class ScratchProgram : IScratchWindow
                 $"{name} did not start within {StartTimeout.TotalMinutes:0} minutes. A licence or start-up message may be waiting in its window: answer it yourself, close that window, and run the field test again.");
             var mine = Process.GetProcessesByName(_program.ProcessName).Select(p => p.Id).Where(id => !before.Contains(id)).ToList();
             ProcessId = mine.Count == 1 ? mine[0] : 0;
+            if (ProcessId != 0) com.Known = ProcessId;
             // From here to the window's end, an "analysis complete" notice of this process is closed as it appears.
             if (ProcessId != 0) _watch = new Timer(_ => { try { lock (_noticesClosed) _noticesClosed.AddRange(ScratchDialogs.CloseNotices(ProcessId, _program)); var closing = _closing; if (ScratchDialogs.AnswerCloseQuestion(ProcessId, closing) > 0) { if (closing) _closeAnswered = true; else Interlocked.Increment(ref _keptOpen); } } catch (Exception ex) when (ex is not OutOfMemoryException) { /* the next look tries again */ } }, null, 1000, 1000);
             return mine.Count == 1 ? $"{name} process {ProcessId}, through {Path.GetFileName(ApiFile)}"
