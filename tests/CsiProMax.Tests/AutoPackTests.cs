@@ -141,7 +141,7 @@ static class AutoPackTests
                 b.Locked = false;
                 var said = AutoPack.Once(b, ref beforeB, window: "b");
                 Check(said is not null && said.Contains("taken away") && !File.Exists(pack) && !File.Exists(page), "no window has results: the pack and its page are taken away: " + said);
-                var kept = Path.Combine(folder, "Tower review comments.json");
+                var kept = Path.Combine(folder, "Tower comments.json"); // PackLife's, shared with the Engine
                 Check(File.Exists(kept) && File.ReadAllText(kept).Contains("grid B"), "the reviewer's comment is kept beside the model");
                 Check(AutoPack.Once(b, ref beforeB, window: "b") is null, "and nothing again after that");
 
@@ -151,6 +151,12 @@ static class AutoPackTests
                 said = AutoPack.Once(a, ref beforeA, window: "a");
                 Check(said is not null && said.Contains("1 comments kept"), "the next run makes the pack again, with the comment: " + said);
                 Equal(1, (Pack.Read(File.ReadAllBytes(pack))["comments"] as JsonArray)!.Count, "the comment once, not twice");
+
+                // Comments kept under the old name ("<model> review comments.json") are read once into the shared file.
+                var old = Path.Combine(folder, "Tower review comments.json");
+                File.WriteAllText(old, new JsonObject { ["model"] = "Tower", ["comments"] = new JsonArray(new JsonObject { ["who"] = "R", ["at"] = "2026-11-26T10:00:00Z", ["text"] = "old note" }) }.ToJsonString());
+                var all = AutoPack.KeepComments(Path.Combine(folder, "Tower.EDB"));
+                Check(all.Count == 2 && !File.Exists(old) && File.ReadAllText(kept).Contains("old note"), "the old comments file is taken into the shared one and removed");
 
                 // A window that closed no longer holds the pack.
                 AutoPack.Forget("a");
