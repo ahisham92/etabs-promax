@@ -429,12 +429,12 @@ public static class ReferenceData
         catch (Exception ex) when (ex is not OutOfMemoryException) { sb.AppendLine("null line not drawn: " + ex.GetType().Name + ": " + Short(ex.Message)); }
         var (label, story) = LabelOf(g, line);
         if (line.Length > 0)
-            said.Add("line release " + Apply(g, sb, "Area Assignments - Slab Line Releases", new()
+            said.Add("line release " + Apply(g, sb, "Area Assignments - Slab Line Releases", "UniqueName", new()
             {
                 ["UniqueName"] = line, ["Story"] = story, ["Label"] = label, ["ShearL"] = "Yes", ["MomentL"] = "Yes", ["ShearR"] = "No", ["MomentR"] = "Yes",
             }));
         if (story.Length == 0) story = g.Link.Stories().Skip(1).FirstOrDefault()?.Name ?? "";
-        said.Add("slab rebar " + Apply(g, sb, "Slab Rebar Object Geometry", new()
+        said.Add("slab rebar " + Apply(g, sb, "Slab Rebar Object Geometry", "Name", new()
         {
             ["Name"] = "CPM-SR1", ["Story"] = story, ["X1"] = N(x0 + 0.25 * w), ["Y1"] = N(cy), ["X2"] = N(x1 - 0.25 * w), ["Y2"] = N(cy),
             ["VertOffset"] = "0", ["WidthLeft"] = N(0.1 * h), ["WidthRight"] = N(0.1 * h), ["Layer"] = "A",
@@ -445,7 +445,7 @@ public static class ReferenceData
         {
             var bar = First(g, m => { int n = 0; string[] names = []; m.PropRebar.GetNameList(ref n, ref names); return names; });
             var steel = First(g, m => { int n = 0; string[] names = []; m.PropMaterial.GetNameList(ref n, ref names, 6); return names; });
-            said.Add("its property " + Apply(g, sb, "Slab Rebar Property Assignments", new()
+            said.Add("its property " + Apply(g, sb, "Slab Rebar Property Assignments", "Name", new()
             {
                 ["Name"] = "CPM-SR1", ["RebarSize"] = bar, ["Material"] = steel, ["BarNumType"] = "Total Bars", ["TotalBars"] = "4", ["MaxSpacing"] = "",
             }));
@@ -470,33 +470,19 @@ public static class ReferenceData
         catch (Exception ex) when (ex is not OutOfMemoryException) { return ("", ""); }
     }
 
-    /// <summary>Adds one row to a table through the program's table editing, the fields it does not have left out; says what the apply answered.</summary>
-    private static string Apply(Gather g, StringBuilder sb, string table, Dictionary<string, string> values)
+    /// <summary>Adds one row to a table through the program's table editing (EditableTables.Put, with its guards); says what the program answered.</summary>
+    private static string Apply(Gather g, StringBuilder sb, string table, string keyField, Dictionary<string, string> values)
     {
         sb.AppendLine().AppendLine($"== {table}: add a row");
+        var row = values.Where(v => v.Value.Length > 0).ToDictionary(v => v.Key, v => v.Value);
+        sb.AppendLine("row: " + string.Join(", ", row.Select(v => v.Key + "=" + v.Value)));
         try
         {
-            return (string)g.Link.Raw("add a row to " + table, m =>
-            {
-                try { m.DatabaseTables.CancelTableEditing(); } catch { /* nothing staged */ }
-                int version = 0, n = 0; string[] fields = [], data = [];
-                var got = Convert.ToInt32(m.DatabaseTables.GetTableForEditingArray(table, "", ref version, ref fields, ref n, ref data));
-                sb.AppendLine($"GetTableForEditingArray answered {got}; fields: {string.Join(", ", fields ?? [])}; {n} rows");
-                if (got != 0 || fields is null || fields.Length == 0) return $"not in this program (answered {got})";
-                var row = fields.Select(f => values.GetValueOrDefault(f, "")).ToArray();
-                sb.AppendLine("row: " + Csv(row));
-                var unknown = values.Keys.Where(k => !fields.Contains(k)).ToList();
-                if (unknown.Count > 0) sb.AppendLine("left out, the table has no such field: " + string.Join(", ", unknown));
-                string[] all = [.. data ?? [], .. row];
-                var set = Convert.ToInt32(m.DatabaseTables.SetTableForEditingArray(table, ref version, ref fields, n + 1, ref all));
-                int fatal = 0, errors = 0, warnings = 0, infos = 0; string log = "";
-                var applied = set == 0 ? Convert.ToInt32(m.DatabaseTables.ApplyEditedTables(true, ref fatal, ref errors, ref warnings, ref infos, ref log)) : -1;
-                sb.AppendLine($"SetTableForEditingArray answered {set}; ApplyEditedTables answered {applied}: {fatal} fatal, {errors} errors, {warnings} warnings").AppendLine("log: " + log);
-                if (set != 0 || applied != 0) try { m.DatabaseTables.CancelTableEditing(); } catch { /* nothing staged */ }
-                return applied == 0 && fatal == 0 && errors == 0 ? "taken" : $"not taken ({fatal} fatal, {errors} errors)";
-            })!;
+            var answer = EditableTables.Put(g.Link, table, keyField, [row], "add a row to " + table);
+            sb.AppendLine("taken: " + answer);
+            return "taken";
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException) { sb.AppendLine("refused: " + ex.GetType().Name + ": " + Short(ex.Message)); return "refused (" + ex.GetType().Name + ")"; }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { sb.AppendLine("not taken: " + ex.GetType().Name + ": " + ex.Message); return "not taken (" + ex.GetType().Name + ")"; }
     }
 
     private static TableData Read(Gather g, StringBuilder sb, string table)
