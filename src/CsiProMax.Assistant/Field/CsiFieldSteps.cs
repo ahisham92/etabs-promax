@@ -79,7 +79,11 @@ public static class CsiFieldSteps
                 var tables = link.Tables();
                 foreach (var (what, words) in new[] { ("releases", new[] { "RELEASE" }), ("frame modifiers", new[] { "FRAME", "MODIFIER" }), ("area modifiers", new[] { "AREA", "MODIFIER" }), ("insertion points", new[] { "INSERTION" }), ("joint springs", new[] { "SPRING" }) })
                 {
-                    var found = tables.Where(t => words.All(w => t.Name.Contains(w, StringComparison.OrdinalIgnoreCase)) && t.Name.Contains("ASSIGN", StringComparison.OrdinalIgnoreCase)).ToList();
+                    // SAP2000 26's modifier assignment tables have no "Assign" in their names (0.4.42): "Frame Property
+                    // Modifiers" and "Area Stiffness Modifiers", the names its .s2k uses.
+                    string[] sapNames = ["Frame Property Modifiers", "Area Stiffness Modifiers"];
+                    var found = tables.Where(t => words.All(w => t.Name.Contains(w, StringComparison.OrdinalIgnoreCase))
+                        && (t.Name.Contains("ASSIGN", StringComparison.OrdinalIgnoreCase) || sapNames.Contains(t.Name, StringComparer.OrdinalIgnoreCase))).ToList();
                     var rows = 0;
                     foreach (var t in found) { try { rows += link.ReadTable(t.Key, null, null).Rows.Count; } catch (Exception) { /* the API's 0 stands */ } }
                     if (rows == 0) missing.Add($"{what} (no rows in {(found.Count == 0 ? "any table named like it" : string.Join(", ", found.Select(t => t.Name)))})");
