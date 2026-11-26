@@ -657,6 +657,17 @@ static class OldProgramTests
             Check(Src("src/CsiProMax.Assistant/Field/ScratchExtras.cs").Contains("\"PointObj.SetGroupAssign\", (\"Name\", bottom), (\"GroupName\", Group)"), "the cut's group holds the columns' bottom joints");
         });
 
+        yield return ("Ahmed 2026-11-26, 'please handle the pop ups': every box of the program in a window CSI ProMax started is answered OK and said, never a licence box", () =>
+        {
+            var scratch = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));
+            var notices = scratch[scratch.IndexOf("public static List<string> CloseNotices", StringComparison.Ordinal)..scratch.IndexOf("public static bool IsProgramBox", StringComparison.Ordinal)];
+            var box = notices[notices.IndexOf("IsProgramBox(title, program)", StringComparison.Ordinal)..];
+            Check(box.IndexOf("\"licen\"", StringComparison.Ordinal) is var lic and > 0 && lic < box.IndexOf("PostMessageW(fine", StringComparison.Ordinal), "a licence message is never answered");
+            Check(!box[..box.IndexOf("PostMessageW(fine", StringComparison.Ordinal)].Contains("FirstOrDefault(IsFileRefused) is { } said", StringComparison.Ordinal), "only 'Error decompressing file' boxes were answered: 'Error getting text file version!' waited for Ahmed");
+            var fresh = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Tools/SapFreshProcess.cs"));
+            Check(fresh.Contains("ScratchDialogs.CloseNotices(id, program)", StringComparison.Ordinal), "the hidden second SAP2000's pop-ups are answered too");
+        });
+
         yield return ("kind: a program's 'could not read this file' box in a scratch window is answered OK and said, never a licence box", () =>
         {
             var box = CsiProMax.Assistant.ScratchDialogs.IsFileRefused;

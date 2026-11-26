@@ -71,8 +71,11 @@ public static class ScratchDialogs
         {
             if (MayClose(title) && Button(window, "OK") is { } ok && IsWindowEnabled(ok) && PostMessageW(ok, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero)) closed.Add(title);
             else if (program is not null && IsProgramBox(title, program) && Button(window, "OK") is { } fine && IsWindowEnabled(fine)
-                     && LongWords(window).FirstOrDefault(IsFileRefused) is { } said && PostMessageW(fine, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero))
-                closed.Add($"{title}: {said.Trim()} (OK)");
+                     && LongWords(window).ToList() is var words && !words.Any(w => w.Contains("licen", StringComparison.OrdinalIgnoreCase))
+                     && PostMessageW(fine, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero))
+                // Every message box of the program itself is answered OK and said (Ahmed, 2026-11-26: "please handle the
+                // pop ups"; SAP2000's "Error getting text file version!", "Error reading line"): never a licence message.
+                closed.Add($"{title}: {(words.FirstOrDefault(IsFileRefused) ?? string.Join(" ", words.Where(w => w.Trim().Length > 0).Take(3))).Trim()} (OK)");
             else if (IsMaintenanceReminder(title, Words(window))) closed.AddRange(AnswerMaintenanceReminder([processId]));
             else if (IsStoryPicker(title) && Button(window, "OK") is { } go && IsWindowEnabled(go))
             {
