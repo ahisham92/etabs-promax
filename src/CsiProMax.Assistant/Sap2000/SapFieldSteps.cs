@@ -49,15 +49,17 @@ public static class SapFieldSteps
     }
 
     /// <summary>
-    /// Reads something back through SAP2000's own API. When the API cannot be called this way here, that says nothing
-    /// about the tool under test, so the check is listed as not tested; a call SAP2000 refuses is a failure.
+    /// Reads something back through SAP2000's own API. A read-back that cannot be made fails the check, as one SAP2000
+    /// refuses does: the change is not proved otherwise (Ahmed, 2026-11-26).
     /// </summary>
     private static T Back<T>(ICsiLink link, string what, Func<dynamic, object?> read)
     {
+        if (!FieldTest.IsLive(link)) throw new FieldSkipException("no CSI program is behind this stand-in, so there is no API to read the change back through");
         try { return (T)link.Raw(what, read)!; }
         catch (EtabsException ex) when (ex.Message.Contains("SAP2000 refused to", StringComparison.Ordinal)) { throw new FieldCheckException(ex.Message); }
-        catch (EtabsException ex) { throw new FieldSkipException($"the change could not be read back from SAP2000 ({ex.Message})"); }
-        catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException ex) { throw new FieldSkipException($"the change could not be read back from SAP2000 ({ex.Message})"); }
+        // A change that cannot be read back is not proved: a failure, by name (Ahmed, 2026-11-26: only a missing program or licence is not tested).
+        catch (EtabsException ex) { throw new FieldCheckException($"the change could not be read back from SAP2000 ({ex.Message})"); }
+        catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException ex) { throw new FieldCheckException($"the change could not be read back from SAP2000 ({ex.Message})"); }
     }
 
     private static void Ok(object result, string what) => FieldContext.Expect(Convert.ToInt32(result) == 0, $"SAP2000 refused to {what}");

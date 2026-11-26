@@ -747,6 +747,21 @@ static class TesterBugTests
                 && log.IndexOf("ImportErrors(", StringComparison.Ordinal) < log.IndexOf("PostMessageW(done", StringComparison.Ordinal) && !notices.Contains("0x0010", StringComparison.Ordinal), "the log is answered by its Done button after its errors are read, and never closed");
             static bool SandboxedLeftCopy() => ScratchProgram.IsLeftCopy(["SAP2000 - cpm-field-test-ab12cd", "Access Database Import Log"]);
         });
+        yield return ("field test: steps a workaround can test are tested, not left out (Ahmed, 2026-11-26: only a missing program or licence)", () =>
+        {
+            string Src(string f) => File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant", f));
+            var extras = Src("Field/ScratchExtras.cs");
+            // ETABS 23's history function and case through its own tables (keys from its Table and Field Keys.xml).
+            Equal("Functions - Time History - User Defined", CsiProMax.Assistant.ScratchExtras.HistoryFunctionTable, "ETABS's history function table");
+            Equal("Load Case Definitions - Time History - Linear Modal", CsiProMax.Assistant.ScratchExtras.HistoryCaseTable, "ETABS's linear modal history case table");
+            Check(extras.Contains("EditableTables.Put(link, HistoryFunctionTable", StringComparison.Ordinal) && !extras.Contains("API has no call to define a time history function", StringComparison.Ordinal), "ETABS's history case is still left out");
+            Check(extras.Contains("LoadCases.ModalEigen.SetCase\", (\"Name\", ModalForHistory)", StringComparison.Ordinal) && !extras.Contains("has no modal case for", StringComparison.Ordinal), "a model with no modal case still leaves the history case out");
+            Check(extras.Contains("\"FrameObj.AddByPoint\"", StringComparison.Ordinal) && extras.Contains("UserName\", Brace", StringComparison.Ordinal), "ETABS's scratch model has no brace for the brace forces table");
+            // A change that cannot be read back fails, by name.
+            Check(!Src("Sap2000/SapFieldSteps.cs").Contains("throw new FieldSkipException($\"the change could not be read back", StringComparison.Ordinal)
+                && !Src("Field/EtabsFieldSteps.cs").Contains("throw new FieldSkipException(\"the load could not be read back", StringComparison.Ordinal), "a read-back that cannot be made is still not tested");
+            Check(!Src("Field/EtabsFieldSteps.cs").Contains("its automatic load cannot be set through this ETABS's API", StringComparison.Ordinal), "ETABS's seismic coefficient is still left out (its table takes it)");
+        });
         yield return ("field test: SAP2000's 'Maintenance Expiring' reminder is answered by the test itself, no other licence message is (Ahmed, 2026-11-26)", () =>
         {
             var reminder = new[] { "License Available. Session Created. Maintenance expiring on 5-Jul-2019.", "Show this message at startup", "Do not show this message until next expiration period", "Never show this message again", "Contact CSI", "OK" };

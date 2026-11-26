@@ -987,7 +987,7 @@ Test("add_load_pattern: a user coefficient the program's API cannot set keeps th
     Check(body.Contains("ex is MissingMethodException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException") && body.Contains("Modify Lateral Load"),
         "a program with no SetUserCoefficient (ETABS 23) still fails add_load_pattern instead of keeping the pattern and saying how to set it");
     var steps = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Field", "EtabsFieldSteps.cs"));
-    Check(steps.Contains("its automatic load cannot be set through this ETABS's API"), "the field test still fails the seismic step on an ETABS with no user coefficient");
+    Check(steps.Contains("neither its user coefficient table nor ASCE 7-16 took its automatic load"), "the field test does not fail, by name, a seismic load neither the table nor ASCE 7-16 took (Ahmed, 2026-11-26: only a missing program or licence is not tested)");
 });
 Test("field test: the ETABS scratch model gets a lateral load its checks can read, also on ETABS 23", () =>
 {
