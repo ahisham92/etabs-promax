@@ -33,6 +33,9 @@ public static class F2kWriter
 {
     private static string N(double v) => CsiTableText.Number(v);
 
+    /// <summary>PROGRAM CONTROL's ProgLevel, as SAFE writes it: "Post Tensioning" for a model with tendons, else "Standard".</summary>
+    public static string ProgLevel(int tendons) => tendons > 0 ? "Post Tensioning" : "Standard";
+
     private static List<(string, string)> Row(params (string Key, string Value)[] pairs) => [.. pairs];
 
     private static string I(int v) => v.ToString(CultureInfo.InvariantCulture);
@@ -153,7 +156,10 @@ public static class F2kWriter
 
         var tables = new List<string>();
         var units = $"{m.Units.Force}, {m.Units.Length.ToLowerInvariant()}, {m.Units.Temperature}";
-        var control = Row(("ProgramName", "SAFE"), ("Version", options.Version), ("ProgLevel", "Post Tensioning"), ("CurrUnits", units));
+        // The licence level the file asks for: Post Tensioning only when it has tendons. SAFE 23.1 on a tester's PC
+        // exports at "Standard" (field/safe-etabs-exports, 2026-11-26), and a file asking for more than the licence has
+        // may not open in full there.
+        var control = Row(("ProgramName", "SAFE"), ("Version", options.Version), ("ProgLevel", ProgLevel(tendons.Count)), ("CurrUnits", units));
         var slabCode = PreferenceCode(m);
         if (slabCode is not null) control.Add(("ConcSlbCode", slabCode));
         tables.Add(CsiTableText.Table("PROGRAM CONTROL", [control]));

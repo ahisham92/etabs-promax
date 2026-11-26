@@ -186,6 +186,23 @@ public static class LateralTools
 
     private static string Norm(string s) => new(s.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
 
+    private static CodeTable? Listed(List<CodeTable> tables, string code) =>
+        tables.FirstOrDefault(t => t.Code.Equals(code, StringComparison.OrdinalIgnoreCase) || t.KeyCode.Equals(code, StringComparison.OrdinalIgnoreCase) || Norm(t.Code) == Norm(code) || Norm(t.KeyCode) == Norm(code));
+
+    /// <summary>The table's key when the program gives fields for it, else null.</summary>
+    private static string? Fields(ICsiLink e, string key)
+    {
+        try
+        {
+            return (string?)e.Raw("read a table's fields", m =>
+            {
+                int version = 0, n = 0; string[] keys = [], names = [], about = [], units = []; bool[] importable = [];
+                return Convert.ToInt32(m.DatabaseTables.GetAllFieldsInTable(key, ref version, ref n, ref keys, ref names, ref about, ref units, ref importable)) == 0 && (keys ?? []).Length > 0 ? key : null;
+            });
+        }
+        catch (EtabsException) { return null; }
+    }
+
     private static CodeTable Table(ICsiLink e, List<CodeTable> tables, string kind, string code) =>
         tables.FirstOrDefault(t => t.Code.Equals(code, StringComparison.OrdinalIgnoreCase)) ?? tables.FirstOrDefault(t => t.KeyCode.Equals(code, StringComparison.OrdinalIgnoreCase))
         ?? tables.FirstOrDefault(t => Norm(t.Code) == Norm(code)) ?? tables.FirstOrDefault(t => Norm(t.KeyCode) == Norm(code))
@@ -226,7 +243,12 @@ public static class LateralTools
             EditableTables.Put(e, patterns.Key, patternKey, [EditableTables.Row((patternKey, name), ("AutoLoad", "None"))], $"take the code load off {name}");
             return new JsonObject { ["pattern"] = name, ["code"] = "None", ["done"] = $"{name} has no auto {kind.ToLowerInvariant()} load now." };
         }
-        var table = Table(e, CodeTables(e, kind), kind, code);
+        var tables = CodeTables(e, kind);
+        // SAP2000 26 leaves a code's table out of GetAllTables now and then (field test with the 0.4.56 fix: TSC-2018 and
+        // Dominican Republic R-001 missing from one listing, back in the next): a code the program gives fields for is taken.
+        if (sap && Listed(tables, code) is null && Fields(e, (kind == LateralCodes.Wind ? "Auto Wind - " : "Auto Seismic - ") + code) is { } key2)
+            tables = [.. tables, new CodeTable(code, key2, key2, code)];
+        var table = Table(e, tables, kind, code);
         var key = KeyField(e, table.Key);
         // The pattern takes the code first, which makes its row in the code's table with the program's defaults;
         // then the given inputs go into that row, and the row's other fields keep the defaults.
@@ -260,16 +282,31 @@ public static class LateralTools
             var saved = SaveFirst(e, name, table.Code);
             var wasLocked = e.Info().Locked;
             string log;
+            string? second = null;
+            var what = $"give {name} the {kind.ToLowerInvariant()} code {table.Code}";
             try
             {
                 // The other patterns keep their codes, those given through the API too, by a blank AutoLoad (see PutAutoLoad).
-                log = EditableTables.PutAutoLoad(e, name, kind == LateralCodes.Wind ? "Wind" : "Quake", table.KeyCode, table.Key, values, $"give {name} the {kind.ToLowerInvariant()} code {table.Code}");
+                log = EditableTables.PutAutoLoad(e, name, kind == LateralCodes.Wind ? "Wind" : "Quake", table.KeyCode, table.Key, values, what);
             }
             catch (EtabsException ex)
             {
                 var reopened = (bool)e.Raw("open the model again as it was saved", m => { try { return Convert.ToInt32(m.File.OpenFile(saved)) == 0; } catch (Exception) { return false; } })!;
                 try { e.Refresh(); } catch (Exception rex) when (rex is EtabsException or InvalidOperationException) { /* the next call reads it */ }
-                throw new EtabsException(reopened
+                // A SAP2000 session that opened an .s2k takes no table import: the same import, in a second SAP2000 (SapFreshProcess).
+                if (reopened && SapFreshProcess.IsSessionRefusal(e.Program, ex.Message))
+                {
+                    try
+                    {
+                        log = SapFreshProcess.Apply(e, saved, fresh => EditableTables.PutAutoLoad(fresh, name, kind == LateralCodes.Wind ? "Wind" : "Quake", table.KeyCode, table.Key, values, what));
+                        second = SapFreshProcess.Said(saved);
+                    }
+                    catch (EtabsException ex2)
+                    {
+                        throw new EtabsException($"{ex.Message} The model was opened again as it was saved just before ({System.IO.Path.GetFileName(saved)}). Making the change in a second {e.Program.Name} did not work either: {ex2.Message}");
+                    }
+                }
+                else throw new EtabsException(reopened
                     ? $"{ex.Message} The model was opened again as it was saved just before ({System.IO.Path.GetFileName(saved)}), so nothing of the import is left in it and every pattern is as it was."
                     : $"{ex.Message} Opening {System.IO.Path.GetFileName(saved)} again was refused: open it yourself (File > Open), without saving the model first.");
             }
@@ -286,6 +323,7 @@ public static class LateralTools
                 ["note"] = $"{e.Program.Name} filled in its own defaults for the inputs not given. It computes the story forces when the analysis runs.",
                 ["saved_before_edit"] = $"The model was saved as {System.IO.Path.GetFileName(saved)} just before the import, so that it could be opened again if {e.Program.Name} lost a pattern. Tell the engineer that the file was saved.",
                 ["unlocked"] = wasLocked ? $"The model was locked (it held analysis results): it was unlocked for the import, so the results are deleted. Run the analysis again." : null,
+                ["second_sap2000"] = second,
             };
         }
         else

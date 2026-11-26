@@ -388,21 +388,24 @@ public static class ViewerCheck
     }
 
     /// <summary>
-    /// A Viewer display the program has nothing of its own for, so on its pack the item is rightly greyed out (the
-    /// Viewer shows what the program shows, nothing extra: Ahmed 2026-11-26). SAFE has no piers or spandrels, hinges,
-    /// pushover, response spectrum, modal or section cut results; 14 such items failed as "not tested" on SAFE 23.1
-    /// (0.4.56). Null for any other item, which is tested as usual.
+    /// A Viewer display the program keeps no table for, so on its pack the item is rightly greyed out (the Viewer shows
+    /// what the program shows, nothing extra: Ahmed 2026-11-26). Judged by the program's own table list, with the words
+    /// the Viewer itself looks for (viewer.html, the Display menu): SAFE 23.1 lists modal, section cut and imported
+    /// response spectrum tables, so those are tested; it lists no pier or spandrel forces, hinge or pushover tables
+    /// (0.4.56 tester run, 286 tables). Null when the program has such a table, or for any other item: tested as usual.
     /// </summary>
-    public static string? NotInProgram(string program, string item)
+    public static string? NotInProgram(IReadOnlyCollection<string> programTables, string program, string item)
     {
-        if (!string.Equals(program, CsiProgram.Safe.Name, StringComparison.OrdinalIgnoreCase)) return null;
-        foreach (var (words, what) in new[]
+        if (programTables.Count == 0) return null;
+        foreach (var (words, look, what) in new[]
         {
-            ("Pier and Spandrel", "pier and spandrel forces"), ("Hinge", "hinge results"), ("Pushover", "pushover cases"),
-            ("Response Spectrum", "response spectrum cases"), ("Mode Shape", "modal cases"), ("Modal Results", "modal cases"),
-            ("Section Cut", "section cut results"),
+            ("Pier and Spandrel", "pierforces|spandrelforces", "pier or spandrel forces"), ("Hinge", "hinge", "hinge results"),
+            ("Pushover", "pushover|capacitycurve", "pushover curves"), ("Response Spectrum", "responsespectrum", "response spectrum cases"),
+            ("Mode Shape", "modal", "modal results"), ("Modal Results", "modal", "modal results"), ("Section Cut", "sectioncut", "section cut forces"),
         })
-            if (item.Contains(words, StringComparison.OrdinalIgnoreCase)) return $"SAFE has no {what}";
+            if (item.Contains(words, StringComparison.OrdinalIgnoreCase))
+                return programTables.Any(t => System.Text.RegularExpressions.Regex.IsMatch(ResultTools.Norm(t), look)) ? null
+                    : $"{program} has no {what} (none of its {programTables.Count} tables holds them)";
         return null;
     }
 
@@ -439,10 +442,13 @@ public static class ViewerCheck
             FieldContext.Expect(missing.Count == 0, "the pack has no " + string.Join("; ", missing));
             return string.Join(", ", have.Select(t => t.Name));
         });
+        var programTables = Array.Empty<string>();
+        try { programTables = link.Tables().Select(t => t.Name).ToArray(); }
+        catch (Exception ex) when (ex is not (OperationCanceledException or OutOfMemoryException)) { /* then no greyed-out item is taken as right */ }
         foreach (var item in seen.Items)
         {
             var name = "Viewer, " + item.Name;
-            if (item.Skipped && NotInProgram(program, item.Name) is { } none) ctx.Step(name, () => $"greyed out, as it should be: {none}");
+            if (item.Skipped && NotInProgram(programTables, program, item.Name) is { } none) ctx.Step(name, () => $"greyed out, as it should be: {none}");
             else if (item.Skipped) ctx.Skip(name, item.Detail.StartsWith("skipped: ", StringComparison.Ordinal) ? item.Detail["skipped: ".Length..] : item.Detail);
             else if (item.Ok) ctx.Step(name, () => item.Detail.Length > 0 ? item.Detail : "ok");
             else ctx.Fail(name, item.Detail);

@@ -775,7 +775,11 @@ public static class CsiTools
 
         var unlocked = false;
         var savedAs = "";
-        var log = (JsonObject)e.Raw("apply the table edit", m =>
+        JsonObject log;
+        string? second = null;
+        try
+        {
+        log = (JsonObject)e.Raw("apply the table edit", m =>
         {
             // An analysed model is locked, and SAP2000 26 refuses a table edit then (SetTableForEditingArray answered 1 on
             // an analysed scratch model; 0.4.22 field test): it is unlocked first, as the program itself does when a
@@ -808,7 +812,8 @@ public static class CsiTools
                 {
                     int applied = Convert.ToInt32(m.DatabaseTables.ApplyEditedTables(true, ref fatal, ref errors, ref warnings, ref info, ref text));
                     text ??= "";
-                    if (applied != 0) refused = $"{program} refused to apply the edit of {table.Name} (answer {applied})";
+                    if (applied != 0) refused = $"{program} refused to apply the edit of {table.Name} (answer {applied})" +
+                        (e.Program.Key == CsiProgram.Sap2000.Key && string.IsNullOrWhiteSpace(text) ? ". " + CsiProMax.Assistant.Etabs.EditableTables.NoImportAfterText.TrimEnd('.') : "");
                     else if (fatal + errors > 0) refused = $"{program} did not take the edit of {table.Name} ({fatal} fatal, {errors} errors)";
                 }
             }
@@ -828,6 +833,37 @@ public static class CsiTools
             try { e.Refresh(); } catch (Exception ex) when (ex is EtabsException or InvalidOperationException) { /* the next call reads it */ }
             throw new EtabsException($"{refused}. {restored}" + (notSaved ? $" ({program} could not save the model before the edit, so it could not be opened again from its file.)" : "") + (cut.Length > 0 ? $" Its import log: {cut}" : ""));
         })!;
+        }
+        // A SAP2000 session that opened an .s2k takes no table import: the same edit, in a second SAP2000 (SapFreshProcess),
+        // on the file saved just before, which this window opened again above.
+        catch (EtabsException ex) when (savedAs.Length > 0 && SapFreshProcess.IsSessionRefusal(e.Program, ex.Message) && ex.Message.Contains("opened again as it was saved", StringComparison.Ordinal))
+        {
+            try
+            {
+                log = SapFreshProcess.Apply(e, savedAs, fresh => (JsonObject)fresh.Raw($"apply the edit of {table.Name} in a second {program}", m =>
+                {
+                    int version = readVersion; string[] f = fields.ToArray(); string[] data = rows.SelectMany(r => r).ToArray();
+                    try { m.DatabaseTables.CancelTableEditing(); } catch { /* nothing staged */ }
+                    if (Convert.ToBoolean(m.GetModelIsLocked())) m.SetModelIsLocked(false);
+                    if (Convert.ToInt32(m.DatabaseTables.SetTableForEditingArray(table.Key, ref version, ref f, rows.Count, ref data)) != 0)
+                        throw new EtabsException($"The second {program} refused to take the edit of {table.Name}.");
+                    int fatal = 0, errors = 0, warnings = 0, info = 0; string text = "";
+                    int applied = Convert.ToInt32(m.DatabaseTables.ApplyEditedTables(true, ref fatal, ref errors, ref warnings, ref info, ref text));
+                    if (applied != 0 || fatal + errors > 0)
+                    {
+                        try { m.DatabaseTables.CancelTableEditing(); } catch { /* nothing more to undo */ }
+                        throw new EtabsException($"The second {program} did not take the edit of {table.Name} either (answer {applied}, {fatal} fatal, {errors} errors): {CsiProMax.Assistant.Etabs.EditableTables.LogCut(text ?? "")}");
+                    }
+                    return new JsonObject { ["fatal_errors"] = fatal, ["errors"] = errors, ["warnings"] = warnings, ["import_log"] = text ?? "" };
+                })!);
+                second = SapFreshProcess.Said(savedAs);
+            }
+            catch (EtabsException ex2)
+            {
+                throw new EtabsException($"{ex.Message} Making the edit in a second {program} did not work either: {ex2.Message}");
+            }
+        }
+        if (second is not null) log["second_sap2000"] = second;
         // The engineer is always told that the model's file was written: a save nobody asked for must never be silent.
         if (savedAs.Length > 0) log["saved_before_edit"] = $"The model was saved as {Path.GetFileName(savedAs)} just before the edit, so that a refused edit could be undone. Tell the engineer that the file was saved.";
         if (unlocked) log["unlocked"] = $"The model was analysed: it was unlocked for the edit, so its analysis results are gone. Run the analysis again.";
@@ -1108,6 +1144,7 @@ public static class CsiTools
         }
         return a.Trim().Length > 0 && string.Equals(Key(a), Key(b), StringComparison.OrdinalIgnoreCase);
     }
+
 
     private static JsonNode OpenModel(JsonElement a, ICsiLink e)
     {

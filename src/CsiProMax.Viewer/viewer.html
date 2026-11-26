@@ -3954,14 +3954,15 @@ function modelerMenus(m) {
     ["Import", [["Tables from Excel (.xlsx)...", "m:xlsxIn"], ["Results from a Review Pack (.cpmx)...", "eng:import"]]],
     ["Export", [["Tables to Excel (.xlsx)...", "m:xlsxOut"], 0, only(["etabs", "sap2000"], ["SAP2000 .s2k Text File...", "m:s2k"]), only(["etabs", "safe"], ["SAFE .f2k Text File (one floor)...", "m:f2k"])]], 0, ["Print the active window...", "print", "Ctrl+P"]];
   m.Edit = [[s.undo ? "Undo " + s.undo : "Undo", "m:undo", "Ctrl+Z", !s.undo], [s.redo ? "Redo " + s.redo : "Redo", "m:redo", "Ctrl+Y", !s.redo], 0,
-    ["Delete", "m:delete", "Del", !any], 0, ["Copy names of the selected objects", "copyNames", "Ctrl+C", !any], 0, ["Hide the selected objects", "hideSel", "", !any], ["Show all objects", "showAll"], 0, ["Model Text...", "m:text"]];
+    ["Delete", "m:delete", "Del", !any], 0, ["Replicate...", "m:replicate", "", !any], ["Move...", "m:move", "", !any], ["Divide Frames...", "m:divide", "", !hmSelected("f").length], 0, ["Copy names of the selected objects", "copyNames", "Ctrl+C", !any], 0, ["Hide the selected objects", "hideSel", "", !any], ["Show all objects", "showAll"], 0, ["Model Text...", "m:text"]];
   m.Define = [["Material Properties...", "m:materials"], ["Frame Sections...", "m:frameSections"], ["Slab and Wall Sections...", "m:shellSections"], only(["etabs", "sap2000"], ["Link/Support Properties...", "m:links"]), ["Spring Properties", [["Point Springs...", "m:spr:point"], ["Line Springs...", "m:spr:line"], ["Area Springs...", "m:spr:area"]]], 0,
     only(["etabs", "sap2000"], ["Diaphragms...", "m:st:diaphragm"]), only(["etabs"], ["Pier Labels...", "m:st:pier"]), only(["etabs"], ["Spandrel Labels...", "m:st:spandrel"]), ["Groups...", "m:st:group"], ["Section Cuts...", "m:st:cut"], only(["sap2000"], ["Joint Constraints...", "m:ex:constraints"]), only(["etabs", "safe"], ["Design Strips...", "m:ex:strips"]), ["Tendon Sections...", "m:ex:tendonsections"], ["Tendons...", "m:ex:tendons"], only(["etabs", "safe"], ["Hyperstatic Load Cases...", "m:ex:hyperstatic"]), 0,
     ["Story Data...", "m:stories"], ["Grid Data...", "m:grids"], 0, ["Functions", [["Response Spectrum...", "m:fnRS"], ["Time History...", "m:fnTH"]]],
     ["Load Patterns...", "m:patterns"], ["Load Cases...", "m:cases"], only(["sap2000"], ["Moving Loads", [["Lanes...", "m:ex:lanes"], ["Vehicles...", "m:ex:vehicles"], ["Vehicle Classes...", "m:ex:classes"], ["Moving Load Cases...", "m:ex:mcases"]]]), ["Load Combinations...", "m:combos"], 0, ["Mass Source...", "m:mass"], only(["etabs", "sap2000"], ["P-Delta Options...", "m:pdelta"])];
   m.Draw = [["Select Object", "t:select", "Esc"], 0, ["Draw Columns (click a point)", "d:column"], ["Draw Beams (click start and end)", "d:beam"], ["Quick Draw Beams (click a grid line)", "d:qbeam"], 0,
     ["Draw Floors (click corners)", "d:floor"], ["Draw Rectangular Floors (two corners)", "d:rect"], ["Quick Draw Floors (click in a bay)", "d:qfloor"], 0,
-    ["Draw Walls (click start and end)", "d:wall"], ["Quick Draw Walls (click a grid line)", "d:qwall"], 0, ["Snap and Story Options...", "m:drawHelp"]];
+    ["Draw Walls (click start and end)", "d:wall"], ["Quick Draw Walls (click a grid line)", "d:qwall"], 0,
+    ["Draw Braces (click bottom and top)", "d:brace"], ["Draw Joints (click a point)", "d:joint"], 0, ["Snap and Story Options...", "m:drawHelp"]];
   m.Assign = [["Frame Section...", "m:asgFrame", "", !fr], ["Slab or Wall Section...", "m:asgShell", "", !ar], 0, ["Joint Restraints (Supports)...", "m:asgSupport"], 0,
     ["Joint", [["Springs...", "m:ad:joint", "", !any], only(["etabs", "sap2000"], ["Diaphragms...", "m:sa:jdiaph", "", !any]), only(["sap2000"], ["Constraints...", "m:ex:jconstraint", "", !any])]],
     ["Frame", [["Releases...", "m:ad:releases", "", !fr], ["Local Axes...", "m:ad:axes", "", !fr], ["Insertion Point...", "m:ad:insertion", "", !fr], ["End Length Offsets...", "m:ad:offsets", "", !fr], ["Property Modifiers...", "m:ad:fmods", "", !fr], ["Line Springs...", "m:ad:lspring", "", !fr], only(["etabs", "sap2000"], ["Hinges...", "m:ad:hinges", "", !fr])]],
@@ -4012,6 +4013,9 @@ async function modelAct(a) {
     case "asgFrameLoad": return hmAssignLoad("f");
     case "asgShellLoad": return hmAssignLoad("a");
     case "drawHelp": return hmDrawHelp();
+    case "replicate": return hmReplicate();
+    case "move": return hmMove();
+    case "divide": return hmDivide();
   }
 }
 const hmSelected = t => [...sel].map(objOf).filter(o => o && o.type === t).map(o => o.name);
@@ -4020,6 +4024,31 @@ async function hmDelete() {
   if (!frames_.length && !areas_.length) return hmSay("Select the objects to delete first.", true);
   const j = await hmRun("delete_objects", {frames: frames_, areas: areas_});
   if (j.ok) { sel.clear(); selChanged(); hmSay(`Deleted ${frames_.length + areas_.length} objects. Edit > Undo brings them back.`); }
+}
+
+// ---- Edit: Replicate, Move and Divide Frames, as ETABS's Edit menu has them, on the selected objects ----
+const hmEditObjects = () => [...hmSelected("f"), ...hmSelected("a")];
+async function hmReplicate() {
+  const objects = hmEditObjects(); if (!objects.length) return hmSay("Select the objects to replicate first.", true);
+  const all = stories.slice(1).map(s => s.name);
+  const d = dialog("Replicate", `<fieldset><legend>Replicate</legend>${[["linear", "Linear"], ["story", "Story"]].map(([k, t], i) => `<label style="margin-right:14px"><input type="radio" name="rM" value="${k}" ${i ? "" : "checked"}> ${t}</label>`).join("")}</fieldset>
+    <fieldset id="rLin"><legend>Increments</legend><div class="g2"><span>dx</span><input id="rX" type="number" step="any" value="0"><span>dy</span><input id="rY" type="number" step="any" value="0"><span>Number</span><input id="rN" type="number" min="1" max="100" value="1"></div></fieldset>
+    <fieldset id="rSt" hidden><legend>Replicate to Stories</legend><div style="max-height:220px;overflow:auto">${all.map(n => `<label style="display:block"><input type="checkbox" data-st="${esc(n)}"> ${esc(n)}</label>`).join("")}</div></fieldset>
+    <p class="kv">${objects.length} selected object${objects.length === 1 ? "" : "s"}. Each copy keeps its section, assignments, loads and hinges.</p>`,
+    [["OK", d => { const mode = q(d, "[name=rM]:checked").value; return submit(d, "replicate_objects", mode === "linear" ? {objects, mode, dx: fnum(d, "#rX") || 0, dy: fnum(d, "#rY") || 0, number: parseInt(q(d, "#rN").value) || 1} : {objects, mode, stories: [...d.querySelectorAll("[data-st]:checked")].map(c => c.dataset.st)}); }, true], ["Cancel"]], {width: 400});
+  d.querySelectorAll("[name=rM]").forEach(r => r.onchange = () => { const lin = q(d, "[name=rM]:checked").value === "linear"; q(d, "#rLin").hidden = !lin; q(d, "#rSt").hidden = lin; });
+}
+async function hmMove() {
+  const objects = hmEditObjects(); if (!objects.length) return hmSay("Select the objects to move first.", true);
+  dialog("Move", `<fieldset><legend>Move by</legend><div class="g2"><span>dx</span><input id="mvX" type="number" step="any" value="0"><span>dy</span><input id="mvY" type="number" step="any" value="0"></div></fieldset>
+    <p class="kv">${objects.length} selected object${objects.length === 1 ? "" : "s"} move with their sections, assignments, loads and hinges.</p>`,
+    [["OK", d => submit(d, "move_objects", {objects, dx: fnum(d, "#mvX") || 0, dy: fnum(d, "#mvY") || 0}, () => { sel.clear(); selChanged(); }), true], ["Cancel"]], {width: 360});
+}
+async function hmDivide() {
+  const objects = hmSelected("f"); if (!objects.length) return hmSay("Select the beams to divide first.", true);
+  dialog("Divide Frames", `<fieldset><legend>Divide into</legend><div class="g2"><span>Number of frames</span><input id="dvN" type="number" min="2" max="20" value="2"></div></fieldset>
+    <p class="kv">Each part keeps the section and assignments; uniform loads go on every part, end releases and offsets stay at the beam's ends.</p>`,
+    [["OK", d => submit(d, "divide_frames", {objects, parts: parseInt(q(d, "#dvN").value) || 2}, () => { sel.clear(); selChanged(); }), true], ["Cancel"]], {width: 380});
 }
 
 // ---- forms: small helpers in the programs' own layout ----
@@ -5082,7 +5111,7 @@ function hmImportReport(r) {
 }
 
 // ---- Draw: clicks in a plan view, snapped to grid crossings, joints and grid lines ----
-const drawKinds = {column: "column", beam: "beam", qbeam: "beam", wall: "wall", qwall: "wall", floor: "slab", rect: "slab", qfloor: "slab"};
+const drawKinds = {column: "column", beam: "beam", qbeam: "beam", wall: "wall", qwall: "wall", floor: "slab", rect: "slab", qfloor: "slab", brace: "brace", joint: "joint"};
 const drawing = () => tool.startsWith("d:");
 const drawKind = () => tool.slice(2);
 function drawHint() {
@@ -5091,7 +5120,8 @@ function drawHint() {
   const where = hm.similar === "all" ? "on every story" : "on " + p.story;
   return {column: `Click a grid crossing or a point to place a column ${where}.`, beam: `Click the start, then each next point of the beams ${where}. Right click or Esc ends the line.`, qbeam: `Click a grid line between two crossings: a beam fills that span ${where}.`,
     wall: `Click the start, then each next point of the walls ${where}. Right click or Esc ends the line.`, qwall: `Click a grid line between two crossings: a wall fills that span ${where}.`,
-    floor: `Click the floor's corners in order; click the first corner again (or double click) to close it, ${where}.`, rect: `Click two opposite corners of the floor ${where}.`, qfloor: `Click inside a grid bay: a floor fills it ${where}.`}[k] || "";
+    floor: `Click the floor's corners in order; click the first corner again (or double click) to close it, ${where}.`, rect: `Click two opposite corners of the floor ${where}.`, qfloor: `Click inside a grid bay: a floor fills it ${where}.`,
+    brace: `Click the brace's bottom end (on the story below), then its top end ${where}.`, joint: `Click a point to place a joint ${where}, for a support, spring, load or link where no member ends.`}[k] || "";
 }
 function drawStories(p) {
   if (hm.similar === "all") return stories.slice(1).map(s => s.name);
@@ -5134,10 +5164,11 @@ function bayAt(p, x, y) {
   return null;
 }
 async function drawSection(kind) {
+  if (kind === "joint") return {list: [], now: ""};
   const defs = await hmDefs(), list = kind === "slab" || kind === "wall" ? defs.shell_sections.filter(s => s.kind === kind).map(s => s.name) : defs.frame_sections.map(s => s.name);
   if (!hm.sec[kind] || !list.includes(hm.sec[kind])) {
     // A concrete section made for this kind first (ETABS's own ConcCol and ConcBm in a new model), then any.
-    const pref = kind === "column" || kind === "beam" ? defs.frame_sections.find(s => s.kind === kind && s.editable) || defs.frame_sections.find(s => s.kind === kind) : null;
+    const pref = kind === "column" || kind === "beam" || kind === "brace" ? defs.frame_sections.find(s => s.kind === kind && s.editable) || defs.frame_sections.find(s => s.kind === kind) || defs.frame_sections.find(s => s.kind === "column") : null;
     hm.sec[kind] = (pref && pref.name) || list[0] || "";
   }
   return {list, now: hm.sec[kind]};
@@ -5147,16 +5178,17 @@ async function showObjBox() {
   if (!window.cpmLive || !drawing()) { box.hidden = true; return; }
   const kind = drawKinds[drawKind()], s = await drawSection(kind);
   box.hidden = false; $("similar").value = hm.similar;
-  box.innerHTML = `<div class="dt"><b>Properties of Object</b></div><div class="g2" style="padding:6px 8px"><span>Type</span><b style="font-weight:400">${{column: "Column", beam: "Beam", wall: "Wall", slab: "Floor"}[kind]}</b>
-    <span>Section</span><select id="pobjS">${s.list.length ? opts(s.list, s.now) : `<option value="">(define one first)</option>`}</select>
+  box.innerHTML = `<div class="dt"><b>Properties of Object</b></div><div class="g2" style="padding:6px 8px"><span>Type</span><b style="font-weight:400">${{column: "Column", beam: "Beam", wall: "Wall", slab: "Floor", brace: "Brace", joint: "Joint"}[kind]}</b>
+    ${kind === "joint" ? "" : `<span>Section</span><select id="pobjS">${s.list.length ? opts(s.list, s.now) : `<option value="">(define one first)</option>`}</select>`}
     <span>Stories</span><select id="pobjW">${opts([["one", "One Story"], ["all", "All Stories"]], hm.similar)}</select></div>
-    ${s.list.length ? "" : `<p class="kv" style="padding:0 8px 6px">No ${kind === "slab" ? "slab" : kind} section yet: Define > ${kind === "slab" || kind === "wall" ? "Slab and Wall Sections" : "Frame Sections"}.</p>`}`;
-  q(box, "#pobjS").onchange = e => hm.sec[kind] = e.target.value;
+    ${s.list.length || kind === "joint" ? "" : `<p class="kv" style="padding:0 8px 6px">No ${kind === "slab" ? "slab" : kind} section yet: Define > ${kind === "slab" || kind === "wall" ? "Slab and Wall Sections" : "Frame Sections"}.</p>`}`;
+  if (q(box, "#pobjS")) q(box, "#pobjS").onchange = e => hm.sec[kind] = e.target.value;
   q(box, "#pobjW").onchange = e => { hm.similar = e.target.value; $("similar").value = hm.similar; $("hint").textContent = hintText(); };
 }
 async function drawClick(p, x, y, dbl) {
   if (p.mode !== "plan") { hmSay(drawHint(), true); return; }
   const k = drawKind(), kind = drawKinds[k], sec = (await drawSection(kind)).now, st = drawStories(p);
+  if (k === "joint") return hmRun("add_joints", {points: [snapAt(p, x, y).q], stories: st});
   if (!sec) return hmSay(`Define a ${kind === "slab" ? "slab" : kind} section first (Define menu).`, true);
   const s = snapAt(p, x, y);
   if (k === "column") return hmRun("add_columns", {points: [s.q], stories: st, section: sec});
@@ -5167,6 +5199,12 @@ async function drawClick(p, x, y, dbl) {
     const a = hm.chain[hm.chain.length - 1]; if (Math.hypot(a[0] - s.q[0], a[1] - s.q[1]) < 1e-6) return;
     const j = await hmRun(k === "beam" ? "add_beams" : "add_walls", {lines: [[a[0], a[1], s.q[0], s.q[1]]], stories: st, section: sec});
     if (j.ok) hm.chain = [s.q]; draw(); return;
+  }
+  if (k === "brace") {
+    if (!hm.chain.length) { hm.chain = [s.q]; draw(); return; }
+    const a = hm.chain[0]; hm.chain = [];
+    if (Math.hypot(a[0] - s.q[0], a[1] - s.q[1]) < 1e-6) { draw(); return hmSay("A brace's two ends are apart in plan; at one place it is a column (Draw Columns).", true); }
+    return hmRun("add_braces", {braces: [[a[0], a[1], s.q[0], s.q[1]]], stories: st, section: sec});
   }
   if (k === "rect") {
     if (!hm.chain.length) { hm.chain = [s.q]; draw(); return; }
@@ -5219,6 +5257,7 @@ const drawIcons = {
   "d:qbeam": '<path d="M1.5 4.5h13M1.5 11.5h13M4.5 1.5v13M11.5 1.5v13" stroke-dasharray="2 1.2" opacity=".6"/><path d="M4.5 4.5h7" stroke-width="3" class="c1"/>',
   "d:floor": '<path d="M2 11l3-7l9 1l-2 8z" class="k5"/>', "d:rect": '<rect x="2.5" y="3.5" width="11" height="9" class="k5"/>',
   "d:qfloor": '<path d="M1.5 4.5h13M1.5 11.5h13M4.5 1.5v13M11.5 1.5v13" stroke-dasharray="2 1.2" opacity=".6"/><rect x="4.5" y="4.5" width="7" height="7" class="k5"/>',
+  "d:brace": '<path d="M3 13L13 3" stroke-width="2.5"/><path d="M3 3v10M13 3v10" opacity=".5"/>', "d:joint": '<circle cx="8" cy="8" r="2.6" class="f"/><path d="M8 2v3M8 11v3M2 8h3M11 8h3" opacity=".6"/>',
   "d:wall": '<path d="M2 4h12v8H2z" class="k3"/>', "d:qwall": '<path d="M1.5 4.5h13M1.5 11.5h13M4.5 1.5v13M11.5 1.5v13" stroke-dasharray="2 1.2" opacity=".6"/><path d="M4.5 3.5h7v2h-7z" class="k3"/>',
   undo: '<path d="M5 3L2 6l3 3"/><path d="M2 6h7.5a4 4 0 0 1 0 8H6"/>', redo: '<path d="M11 3l3 3l-3 3"/><path d="M14 6H6.5a4 4 0 0 0 0 8H10"/>',
   save: '<path d="M2 2h10l2 2v10H2z"/><path d="M5 2v4h6V2M4.5 14V9.5h7V14" class="c1"/>', del: '<path d="M3 4h10M6 4V2.5h4V4M4.5 4l.8 10h5.4l.8-10"/><path d="M7 6.5v5M9 6.5v5" class="c4"/>',
@@ -5227,7 +5266,7 @@ function modelerStart() {
   document.querySelectorAll('[data-menu="Draw"], [data-menu="Assign"]').forEach(m => m.hidden = false);
   document.querySelector('[data-menu="File"]').hidden = false;
   $("similarWrap").hidden = false;
-  const sb = [["d:column", "Draw columns (click a point)"], ["d:beam", "Draw beams (click start and end)"], ["d:qbeam", "Quick draw beams (click a grid line)"], ["d:wall", "Draw walls"], ["d:qwall", "Quick draw walls (click a grid line)"], ["d:floor", "Draw floors (click corners)"], ["d:rect", "Draw rectangular floors (two corners)"], ["d:qfloor", "Quick draw floors (click in a bay)"]];
+  const sb = [["d:column", "Draw columns (click a point)"], ["d:beam", "Draw beams (click start and end)"], ["d:qbeam", "Quick draw beams (click a grid line)"], ["d:wall", "Draw walls"], ["d:qwall", "Quick draw walls (click a grid line)"], ["d:floor", "Draw floors (click corners)"], ["d:rect", "Draw rectangular floors (two corners)"], ["d:qfloor", "Quick draw floors (click in a bay)"], ["d:brace", "Draw braces (click bottom and top)"], ["d:joint", "Draw joints (click a point)"]];
   $("strip").insertAdjacentHTML("beforeend", `<span class="sep"></span>` + sb.map(b => `<button class="ib" data-act="${b[0]}" title="${b[1]}"><svg viewBox="0 0 16 16">${drawIcons[b[0]]}</svg></button>`).join(""));
   const ib = [["m:undo", "Undo (Ctrl+Z)", "undo"], ["m:redo", "Redo (Ctrl+Y)", "redo"], ["m:save", "Save (Ctrl+S)", "save"], ["m:delete", "Delete the selected objects (Del)", "del"]];
   const open = $("icons").querySelector('[data-act="open"]');
