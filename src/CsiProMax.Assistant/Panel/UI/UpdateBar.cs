@@ -32,8 +32,6 @@ internal static class UpdateBar
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
     }
 
-    private static readonly Brush Accent = Frozen(0x1C, 0x63, 0xBC), Hover = Frozen(0x19, 0x58, 0xA8);
-
     private static Brush Frozen(byte r, byte g, byte b)
     {
         var brush = new SolidColorBrush(Color.FromRgb(r, g, b));
@@ -47,6 +45,8 @@ internal static class UpdateBar
     /// </summary>
     public static Button Build(Action click)
     {
+        // Made here, not as fields: the bar's text is also asked where there are no window types (the tests off Windows).
+        Brush Accent = Frozen(0x1C, 0x63, 0xBC), Hover = Frozen(0x19, 0x58, 0xA8);
         var template = new ControlTemplate(typeof(Button));
         var border = new FrameworkElementFactory(typeof(Border));
         border.SetValue(Border.BackgroundProperty, new TemplateBindingExtension(Control.BackgroundProperty));
