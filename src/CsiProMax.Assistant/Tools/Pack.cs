@@ -158,18 +158,21 @@ public static class Pack
         IReadOnlyList<string> combos, JsonObject tables, int mostRows, List<string> notes, JsonObject manifest)
     {
         var left = new JsonArray();
-        var budget = PackTables.TotalMostRows;
+        // The results and the inputs beside them each have their own total, so that a model with many result rows
+        // still brings its load assignments and design inputs (0.4.49: SAP2000's Load Assigns were greyed out).
+        var budget = new Dictionary<string, int> { ["result"] = PackTables.TotalMostRows, ["input"] = PackTables.InputMostRows };
         foreach (var t in PackTables.More(known, wanted))
         {
             if (tables.ContainsKey(t.Name)) continue;
-            if (budget <= 0) { left.Add((JsonNode)t.Name); continue; }
+            var kind = PackTables.Kind(t) ?? "result";
+            if (budget[kind] <= 0) { left.Add((JsonNode)t.Name); continue; }
             TableData data;
             try { data = e.ReadTable(t.Key, cases, combos); }
             catch (EtabsException ex) { notes.Add($"'{t.Name}' could not be read ({ex.Message})."); continue; }
             if (data.Rows.Count == 0) continue;
-            var most = Math.Min(mostRows, budget);
-            tables[t.Name] = TableJson(t.Name, data, most, notes, PackTables.Kind(t) == "input" ? "input" : null);
-            budget -= Math.Min(data.Rows.Count, most);
+            var most = Math.Min(mostRows, budget[kind]);
+            tables[t.Name] = TableJson(t.Name, data, most, notes, kind == "input" ? "input" : null);
+            budget[kind] -= Math.Min(data.Rows.Count, most);
         }
         if (PackTables.AddSteps(e, known, cases, combos, tables, mostRows, notes, (name, data, most) => TableJson(name, data, most, notes, null)) is { } steps) manifest["step_output"] = steps;
         if (left.Count > 0)

@@ -21,6 +21,16 @@ public static class PackTables
     /// <summary>Rows a pack takes in all (beyond the usual and design tables), so that a big model's pack still opens.</summary>
     public const int TotalMostRows = 1_500_000;
 
+    /// <summary>Rows a pack takes of the design and load inputs, apart from the results' total.</summary>
+    public const int InputMostRows = 400_000;
+
+    /// <summary>A table of loads assigned to joints, frames or shells (areas, slabs): what Display > Load Assigns draws.</summary>
+    public static bool IsLoadTable(string name)
+    {
+        var n = ResultTools.Norm(name);
+        return new[] { "joint", "point", "frame", "line", "beam", "shell", "area", "slab", "wall", "surface", "floor" }.Any(w => n.StartsWith(w + "loads", StringComparison.Ordinal));
+    }
+
     /// <summary>The tables read a second time with every step of a time history, staged or nonlinear case.</summary>
     public static readonly string[] HistoryTables =
     [
