@@ -40,7 +40,15 @@ public static class ViewerCheck
       window.addEventListener("unhandledrejection", e => errors.push("promise: " + String(e.reason && e.reason.message || e.reason)));
       const wait = ms => new Promise(r => setTimeout(r, ms));
       const items = [];
-      const add = (name, ok, detail, skipped) => items.push({name, ok: !!ok, detail: String(detail == null ? "" : detail).slice(0, 400), skipped: !!skipped});
+      // The findings so far are on the page after every step, so a browser that stops early still hands back what ran
+      // and where it stopped (0.4.53 field test: a big SAP2000 pack ran out of the browser's time and nothing came back).
+      const flush = done => {
+        if (/#cpmshot=/.test(location.hash)) return;
+        let out = document.getElementById("cpm-selfcheck");
+        if (!out) { out = document.createElement("script"); out.type = "application/json"; out.id = "cpm-selfcheck"; document.body.appendChild(out); }
+        out.textContent = JSON.stringify({items, done, webgl: !document.getElementById("hint").textContent.includes("lines only")}).replace(/</g, "\\u003c");
+      };
+      const add = (name, ok, detail, skipped) => { items.push({name, ok: !!ok, detail: String(detail == null ? "" : detail).slice(0, 400), skipped: !!skipped}); try { flush(false); } catch (e) { } };
       // How much of a canvas is drawn on: the share of sampled pixels that differ from its corner.
       function ink(c) {
         try {
@@ -213,9 +221,7 @@ public static class ViewerCheck
       }
       run().catch(e => add("the check itself", false, String(e && e.message || e))).finally(() => {
         if (/#cpmshot=/.test(location.hash)) return;
-        const out = document.createElement("script"); out.type = "application/json"; out.id = "cpm-selfcheck";
-        out.textContent = JSON.stringify({items, webgl: !document.getElementById("hint").textContent.includes("lines only")}).replace(/</g, "\\u003c");
-        document.body.appendChild(out); document.title = "cpm-selfcheck-done";
+        flush(true); document.title = "cpm-selfcheck-done";
       });
     })();
     """;
@@ -231,8 +237,12 @@ public static class ViewerCheck
         try
         {
             using var doc = JsonDocument.Parse(dom[(at + open.Length)..end]);
-            return doc.RootElement.GetProperty("items").EnumerateArray().Select(i => new Item(i.GetProperty("name").GetString() ?? "", i.GetProperty("ok").GetBoolean(),
+            var items = doc.RootElement.GetProperty("items").EnumerateArray().Select(i => new Item(i.GetProperty("name").GetString() ?? "", i.GetProperty("ok").GetBoolean(),
                 i.GetProperty("detail").GetString() ?? "", i.GetProperty("skipped").GetBoolean())).ToList();
+            // A check the browser stopped part way: what ran stands, and the stop is a finding of its own.
+            if (doc.RootElement.TryGetProperty("done", out var done) && done.ValueKind == JsonValueKind.False)
+                items.Add(new Item("the Viewer page ran its check to the end", false, $"the browser stopped the page after {items.Count} items" + (items.Count > 0 ? $", the last being \"{items[^1].Name}\"" : "") + "; the rest were not checked"));
+            return items;
         }
         catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException) { return null; }
     }
@@ -268,15 +278,16 @@ public static class ViewerCheck
         var address = new Uri(page).AbsoluteUri;
         try
         {
-            var (dom, error) = Browse(browser, profile, seconds, "--dump-dom", "--virtual-time-budget=60000", address);
+            var (virtualMs, realSeconds, shotSeconds) = Allowance(content, seconds);
+            var (dom, error) = Browse(browser, profile, realSeconds, "--dump-dom", "--virtual-time-budget=" + virtualMs.ToString(System.Globalization.CultureInfo.InvariantCulture), address);
             if (dom is null) return new Result([], [], "the browser could not be run: " + error);
             if (Read(dom) is not { } items)
-                return new Result([new Item("the Viewer page ran its check", false, "the page did not finish its check within the time the browser gave it" + (error is { Length: > 0 } ? $" ({Short(error)})" : ""))], [], null);
+                return new Result([new Item("the Viewer page ran its check", false, $"the page did not finish its check within the time the browser gave it ({realSeconds} s, {virtualMs / 1000} s of page time, a page of {new FileInfo(page).Length / 1048576.0:0.0} MB)" + (error is { Length: > 0 } ? $" ({Short(error)})" : ""))], [], null);
             var pictures = new List<string>();
             foreach (var (name, act) in Shots)
             {
                 var picture = Path.Combine(folder, $"viewer {label} {name}.png");
-                Browse(browser, profile, 60, "--screenshot=" + picture, "--window-size=1400,900", "--virtual-time-budget=8000", address + "#cpmshot=" + Uri.EscapeDataString(act));
+                Browse(browser, profile, shotSeconds, "--screenshot=" + picture, "--window-size=1400,900", "--virtual-time-budget=8000", address + "#cpmshot=" + Uri.EscapeDataString(act));
                 if (File.Exists(picture) && new FileInfo(picture).Length > 2000) pictures.Add(picture);
             }
             return new Result(items, pictures, null);
@@ -286,6 +297,20 @@ public static class ViewerCheck
             try { if (Directory.Exists(profile)) Directory.Delete(profile, true); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* the test's work folder says where it is */ }
         }
+    }
+
+    /// <summary>
+    /// How long the browser may take on a pack: the page's own waits grow with the tables it opens one by one (about
+    /// half a second each) and the menu items, and loading grows with the page's size. 0.4.53: SAP2000's pack with
+    /// every pattern's load rows outgrew the old fixed 60 s of page time and 120 s, and no finding came back.
+    /// </summary>
+    public static (int VirtualMs, int RealSeconds, int ShotSeconds) Allowance(JsonObject content, int seconds = 120)
+    {
+        var tables = (content["tables"] as JsonObject)?.Count ?? 0;
+        var megabytes = content.ToJsonString().Length / 1048576.0;
+        var virtualMs = 90_000 + tables * 600;
+        var real = Math.Max(seconds, 60 + virtualMs / 1000 + (int)Math.Ceiling(megabytes * 6));
+        return (virtualMs, real, 60 + (int)Math.Ceiling(megabytes * 4));
     }
 
     private static string Short(string text) => text.Length > 300 ? text[..300] + "..." : text;
@@ -333,7 +358,8 @@ public static class ViewerCheck
             content = pack.Content;
             seen = Run(pack.Content, Path.Combine(ctx.Folder, "Viewer"), program, browser);
             if (seen.NotRun is not null) throw new FieldSkipException(seen.NotRun);
-            return new { checked_items = seen.Items.Count, pictures = seen.Pictures.Select(Path.GetFileName).ToArray() };
+            var (virtualMs, realSeconds, _) = Allowance(pack.Content);
+            return new { checked_items = seen.Items.Count, pictures = seen.Pictures.Select(Path.GetFileName).ToArray(), pack_tables = (pack.Content["tables"] as JsonObject)?.Count ?? 0, pack_mb = Math.Round(pack.Content.ToJsonString().Length / 1048576.0, 1), page_seconds = virtualMs / 1000, browser_seconds = realSeconds };
         }) is not null;
         if (!ran || seen is null) return;
         // Display > Load Assigns draws what the pack holds: every load table the model has rows in must be there.
