@@ -6,6 +6,8 @@
 <title>CSI ProMax Viewer</title>
 <style>
 :root{--bg:#7d8790;--chrome:#f0f0f0;--chrome2:#f7f7f7;--menu:#f7f7f7;--bars:#d8d8d8;--form:#f0f0f0;--group:#00008b;--formline:#6e8fb8;--ftitle:#ffffff;--fbtn:#e1e1e1;--fbtnline:#adadad;--fgroup:#d5d5d5;--fdef:#0078d7;--vcap:linear-gradient(#b4cce6,#9eb9d5);--vcap-ink:#1a1a1a;--vcap-off:#696969;--ink:#1a1a1a;--mute:#5c6770;--line:#c4c8cc;--line2:#dadde0;--accent:#1f5fa8;--accent2:#3a7bd0;--accent-ink:#fff;--hot:#e5f1fb;--hotline:#a8cdee;--press:#cce4f7;--pressline:#7fb4e3;--bad:#c0392b;--ok:#1e8449;--warn:#b9770e;--title:#e9ebed;--field:#fff;--sel:#cce4f7;--zebra:#f6f8fa;--shadow:0 6px 22px rgba(0,0,0,.28)}
+:root[data-program=sap2000]{--accent:#1d6a4a;--accent2:#2f8a63;--vcap:linear-gradient(#bfd9cb,#a3c6b3)}
+:root[data-program=safe]{--accent:#8a4a12;--accent2:#b0651f;--vcap:linear-gradient(#e6d2bc,#d4b998)}
 body[data-prog=sap2000]{--accent:#2f6b3a;--accent2:#3f8a4c}
 body[data-prog=safe]{--accent:#6a3f8f;--accent2:#8558ad}
 @media (prefers-color-scheme: dark){:root:not([data-theme=light]){--bg:#15191c;--chrome:#24292d;--chrome2:#1e2226;--menu:#2a2f34;--ink:#e6eaec;--mute:#9aa6ad;--line:#3c444a;--line2:#323a40;--hot:#2d3a46;--hotline:#4b6a86;--press:#29496a;--pressline:#4f86bd;--title:#2b3136;--field:#191d20;--bars:#24292d;--form:#24292d;--group:#8fb4ff;--formline:#4b6a86;--ftitle:#2a2f34;--fbtn:#2f353a;--fbtnline:#4a535a;--fgroup:#3c444a;--fdef:#4f9be8;--vcap:linear-gradient(#35506d,#2b4560);--vcap-ink:#e6eaec;--vcap-off:#5a636a;--sel:#244a6d;--zebra:#1d2125;--accent-ink:#fff}}
@@ -554,6 +556,7 @@ function load(pack, keep) {
   unit = u.length || "";
   const progName = {etabs: "ETABS", sap2000: "SAP2000", safe: "SAFE"}[program];
   $("app").textContent = "CSI ProMax Engine · " + progName;
+  programLook();
   $("meta").textContent = [man.model || "Model", man.etabs ? (/modeler/i.test(man.etabs) ? man.etabs : (man.program || "ETABS") + " " + man.etabs) : "", !window.cpmLive && man.created ? "packed " + String(man.created).replace("T", " ").slice(0, 16) : "", man.by && /sample/i.test(man.by) ? man.by : ""].filter(Boolean).join(" · ");
   document.title = (man.model || "Model") + " · " + $("app").textContent;
   $("units").textContent = u.force && u.length ? u.force + ", " + u.length + (u.temperature ? ", " + u.temperature : "") : "";
@@ -1159,13 +1162,16 @@ function openShells() {
   if (!shellRes.size) return;
   const cases = [...shellRes.keys()], cur = res.mode === "shell" ? res.comp : (shellFields.find(s => /^m11$/i.test(s.name)) || shellFields[0]).name;
   const group = (st) => shellFields.filter(s => s.stress === st).map(s => `<label><input type="radio" name="comp" value="${esc(s.name)}" ${s.name === cur ? "checked" : ""}>${esc(s.name)}</label>`).join("");
-  dialog("Shell Forces/Stresses", `
-    <fieldset><legend>Load Case/Load Combination</legend><div class="g2"><span>Case/Combo name</span><select id="dCase">${caseGroups(cases)}</select></div></fieldset>
-    ${shellFields.some(s => !s.stress) ? `<fieldset><legend>Forces and moments (per unit length)</legend><div class="g4">${group(false)}</div></fieldset>` : ""}
-    ${shellFields.some(s => s.stress) ? `<fieldset><legend>Stresses</legend><div class="g4">${group(true)}</div></fieldset>` : ""}
+  // As ETABS's Shell Forces/Stresses: the component type (forces or stresses), then that type's components.
+  const st = !!(shellFields.find(s => s.name === cur) || {}).stress, both = shellFields.some(s => !s.stress) && shellFields.some(s => s.stress);
+  const d = caseBoxWire(dialog("Shell Forces/Stresses", `${caseBox(cases)}
+    <fieldset><legend>Component Type</legend><div class="g2"><label><input type="radio" name="ct" value="f" ${st ? "" : "checked"} ${shellFields.some(s => !s.stress) ? "" : "disabled"}>Shell Forces</label><label><input type="radio" name="ct" value="s" ${st ? "checked" : ""} ${shellFields.some(s => s.stress) ? "" : "disabled"}>Shell Stresses</label></div></fieldset>
+    <fieldset><legend>Output Components</legend><div class="g4" data-ct="f" ${st ? "hidden" : ""}>${group(false)}</div><div class="g4" data-ct="s" ${st ? "" : "hidden"}>${group(true)}</div></fieldset>
     <fieldset><legend>Contour Range</legend><div class="g2"><label><input type="radio" name="rg" value="auto" ${res.range ? "" : "checked"}>Auto</label><span></span><label><input type="radio" name="rg" value="user" ${res.range ? "checked" : ""}>Minimum</label><input type="number" step="any" id="dMin" value="${res.range ? res.range[0] : ""}"><span style="padding-left:22px">Maximum</span><input type="number" step="any" id="dMax" value="${res.range ? res.range[1] : ""}"></div></fieldset>
-    <p class="kv">Values at each joint are averaged over the shells that meet there.</p>`,
-    [["OK", d => applyShells(d)], ["Apply", d => { applyShells(d); return false; }, true], ["Cancel"]], {width: 560});
+    <fieldset><legend>Stress Averaging</legend><div class="g2"><label><input type="radio" checked disabled>At All Joints</label></div></fieldset>`,
+    [["OK", d => applyShells(d)], ["Close"], ["Apply", d => { applyShells(d); return false; }, true]], {width: 560}), cases);
+  d.querySelectorAll("[name=ct]").forEach(r => r.onchange = () => { d.querySelectorAll("[data-ct]").forEach(g => g.hidden = g.dataset.ct !== r.value); const first = q(d, `[data-ct="${r.value}"] [name=comp]`); if (first) first.checked = true; });
+  if (!both) d.querySelector("[name=ct]").closest("fieldset").style.opacity = ".6";
 }
 function applyShells(d) {
   res.mode = "shell"; syncResults(); res.case = q(d, "#dCase").value; const c = q(d, "[name=comp]:checked"); if (c) res.comp = c.value;
@@ -2795,9 +2801,19 @@ function copyText(t) {
 }
 
 // ---- menus ----
-const menus = () => window.cpmLive ? forProgram(modelerMenus(viewerMenus())) : viewerMenus();
+const menus = () => forProgram(window.cpmLive ? modelerMenus(viewerMenus()) : viewerMenus());
 // The Modeler's menus for the model's program: an item marked {only: [...]} is left out for the others, and a
 // separator left at an end or next to another goes too.
+// The Engine looks and reads as the program the model is for (Ahmed 2026-11-26 19:40): its accent, the name of the
+// menu that runs the model (SAFE calls it Run), and no story controls in SAP2000, which has none. The menus, Model
+// Explorer and forms leave out what that program does not have (forProgram, only()).
+function programLook() {
+  document.documentElement.dataset.program = program;
+  const run = document.querySelector('[data-menu="Analyze"]'); if (run && run.firstChild) run.firstChild.textContent = program === "safe" ? "Run" : "Analyze";
+  // SAP2000 has no stories: its plan views are X-Y planes at a Z, so the same picker is named so.
+  const story = $("story"); if (story && story.parentElement && story.parentElement.firstChild) story.parentElement.firstChild.textContent = program === "sap2000" ? "X-Y Plane " : "Story ";
+  const similar = $("similarWrap"); if (similar && program === "sap2000") similar.hidden = true;
+}
 function forProgram(m) {
   const tidy = list => {
     const out = [];
@@ -2822,28 +2838,28 @@ const viewerMenus = () => {
     File: [["Open...", "open", "Ctrl+O"], ["Save comments to a file", "saveComments"], 0, ["Print the active window...", "print", "Ctrl+P"]],
     Edit: [["Copy names of the selected objects", "copyNames", "Ctrl+C"], 0, ["Hide the selected objects", "hideSel"], ["Show all objects", "showAll"]],
     View: [["Set 3-D View...", "dlg:view3d"], ["Set Plan View...", "dlg:plan"], ["Set Elevation View...", "dlg:elev"], 0, ["Restore Full View", "fitActive", "F3"], ["Rubber Band Zoom", "t:zoom", "F2"], ["Zoom In One Step", "zin"], ["Zoom Out One Step", "zout"], ["Pan", "t:pan"], ["Rotate 3-D View", "t:orbit"], ["Perspective", "persp"], 0,
-      ["Move Up a Story", "storyUp", "PgUp", !plan], ["Move Down a Story", "storyDown", "PgDn", !plan], ["Previous Elevation", "linePrev", "", !elev], ["Next Elevation", "lineNext", "", !elev], 0,
+      only(["etabs", "safe"], ["Move Up a Story", "storyUp", "PgUp", !plan]), only(["etabs", "safe"], ["Move Down a Story", "storyDown", "PgDn", !plan]), ["Previous Elevation", "linePrev", "", !elev], ["Next Elevation", "lineNext", "", !elev], 0,
       ["Set Display Options...", "dlg:display", "Ctrl+W"], ["Model Explorer", "explorer"], ["Side Panel", "side"], ...(window.cpmChat ? [["Chat", "chat"]] : []), 0,
       ["Windows", [["One window", "lay1"], ["Two windows", "lay2"], ["Three windows", "lay3"], ["Four windows", "lay4"]]]],
-    Define: [["Material Properties...", "dlg:materials"], ["Frame Sections...", "dlg:frameSections"], ["Slab and Wall Sections...", "dlg:areaSections"], 0, ["Story Data...", "dlg:stories"], ["Grid Data...", "dlg:grids"], 0, ["Load Patterns...", "dlg:patterns"], ["Load Cases...", "dlg:cases"], ["Load Combinations...", "dlg:combos"]],
-    Select: [["All", "selAll", "Ctrl+A"], ["All on This Story", "selStory", "", !plan], ["By Section...", "dlg:bySection"], ["By Object Type...", "dlg:byType"], ["Joints", "selJoints"], ["Supports (Restraints and Springs)", "selSupports"], ["Invert", "selInvert"], 0, ["Filter Selection...", "selFilter", "", !sel.size && !selJ.size], 0, ["Clear Selection", "selNone", "Esc"]],
+    Define: [["Material Properties...", "dlg:materials"], ["Frame Sections...", "dlg:frameSections"], ["Slab and Wall Sections...", "dlg:areaSections"], 0, only(["etabs", "safe"], ["Story Data...", "dlg:stories"]), ["Grid Data...", "dlg:grids"], 0, ["Load Patterns...", "dlg:patterns"], ["Load Cases...", "dlg:cases"], ["Load Combinations...", "dlg:combos"]],
+    Select: [["All", "selAll", "Ctrl+A"], only(["etabs", "safe"], ["All on This Story", "selStory", "", !plan]), ["By Section...", "dlg:bySection"], ["By Object Type...", "dlg:byType"], ["Joints", "selJoints"], ["Supports (Restraints and Springs)", "selSupports"], ["Invert", "selInvert"], 0, ["Filter Selection...", "selFilter", "", !sel.size && !selJ.size], 0, ["Clear Selection", "selNone", "Esc"]],
     Analyze: [["Check Model for Instabilities...", "inst", "F7"], ["Show the Last Check's Marks", "instMarks", "", !inst.answer], 0, ["What the check looks for", "instHelp"],
       ...(window.cpmLive ? [0, ["Run Analysis...", "eng:run", "F5"], ["Run Analysis and Design...", "eng:runDesign"], 0, ["Show Results from a Review Pack (.cpmx)...", "eng:import"], ["Unlock Model (clear its results)", "eng:clear", "", !engine.res]] : [])],
     Tools: [["Tables...", "tables", "Ctrl+T"], ["Model Explorer", "explorer"], ["Side Panel", "side"], ...(window.cpmChat ? [["Chat", "chat"]] : []), 0, ["Results Coverage...", "dlg:coverage", "", !P], ["Summary of Design Results...", "dlg:designSummary", "", !P]],
     Display: (() => {
       const has = re => Object.values(P ? P.tables : {}).some(t => t.rows && t.rows.length && re.test(norm(t.name))), plots = P ? Object.values(P.tables).some(t => t.rows && t.rows.length > 1) : false;
-      return [["Undeformed Shape", "r:model", "F4"], [program === "sap2000" ? "Show Load Assigns" : "Load Assigns", ["joint", "frame", "shell"].map(k => [loadWord(k) + "...", "loads:" + k, "", !loadTables(k).length])], 0, ["Deformed Shape...", "dlg:deformed", "F6", !disp.size], ["Mode Shapes...", "dlg:modes", "", !P || !modeCases().length], ["Animate Deformed Shape", "anim", "", res.mode !== "deformed"], 0,
+      return [["Undeformed Shape", "r:model", "F4"], [program === "sap2000" ? "Show Load Assigns" : "Load Assigns", ["joint", "frame", "shell"].map(k => [loadWord(k) + "...", "loads:" + k, "", !loadTables(k).length])], 0, ["Deformed Shape...", "dlg:deformed", "F6", !disp.size], only(["etabs", "sap2000"], ["Mode Shapes...", "dlg:modes", "", !P || !modeCases().length]), ["Animate Deformed Shape", "anim", "", res.mode !== "deformed"], 0,
         ["Force/Stress Diagrams", [["Support/Spring Reactions...", "dlg:reactions", "", !reacts.size], ["Frame Forces and Moments...", "dlg:forces", "F8", !forces.size], ["Shell Forces/Stresses...", "dlg:shells", "", !shellRes.size],
-          ...(program === "sap2000" ? [] : [["Pier and Spandrel Forces...", "vals:pier", "", !has(/pierforces|spandrelforces/)]]), ["Link Forces and Deformations...", "vals:link", "", !has(/link/)], ["Spring Forces and Soil Pressures...", "vals:spring", "", !has(/spring|soilpressure/)],
-          ["Hinge Results...", "vals:hinge", "", !has(/hinge/)], ["Section Cut Forces...", "vals:cut", "", !has(/sectioncut/)], ["Tendon and Cable Results...", "vals:tendon", "", !has(/tendon|cable/)]]],
+          ...(program === "sap2000" ? [] : [["Pier and Spandrel Forces...", "vals:pier", "", !has(/pierforces|spandrelforces/)]]), only(["etabs", "sap2000"], ["Link Forces and Deformations...", "vals:link", "", !has(/link/)]), ["Spring Forces and Soil Pressures...", "vals:spring", "", !has(/spring|soilpressure/)],
+          only(["etabs", "sap2000"], ["Hinge Results...", "vals:hinge", "", !has(/hinge/)]), ["Section Cut Forces...", "vals:cut", "", !has(/sectioncut/)], only(["etabs", "sap2000", "safe"], ["Tendon and Cable Results...", "vals:tendon", "", !has(/tendon|cable/)])]],
         ["Joint Displacement Contours...", "dlg:contour", "", !disp.size], ["Table Values on Model...", "vals:", "", !P || !valueTables().length], ["Design Ratios", "r:ratios", "", !ratio.size], 0,
-        ["Story Response Plots...", "dlg:storyPlot", "", !P || !storyTables().length], ["Plot Functions...", "xy:history", "", !plots], ["Static Pushover Curve...", "xy:pushover", "", !has(/pushover|capacitycurve/)],
-        ["Response Spectrum Curves...", "xy:spectrum", "", !has(/responsespectrum/)], ["Modal Results Plot...", "xy:modal", "", !has(/^modal/)], 0,
+        only(["etabs"], ["Story Response Plots...", "dlg:storyPlot", "", !P || !storyTables().length]), ["Plot Functions...", "xy:history", "", !plots], only(["etabs", "sap2000"], ["Static Pushover Curve...", "xy:pushover", "", !has(/pushover|capacitycurve/)]),
+        only(["etabs", "sap2000"], ["Response Spectrum Curves...", "xy:spectrum", "", !has(/responsespectrum/)]), only(["etabs", "sap2000"], ["Modal Results Plot...", "xy:modal", "", !has(/^modal/)]), 0,
         ["Tables...", "tables", "Ctrl+T"], ["Results Coverage...", "dlg:coverage", "", !P]];
     })(),
     Design: [...(window.cpmLive ? [["Start Design/Check...", "eng:design", "Shift+F5"], 0] : []), ...(design.length ? [...design.map(f => [f.name, [["Display Design Info...", "des:" + f.key], ...designShows(f).map(s => [s.name.replace(/ \(.*\)$/, ""), "dshow:" + f.key + ":" + s.id])]]), 0, ["All Design Ratios", "r:ratios", "", !ratio.size], ["Display Design Results...", "des:"], ["Summary of Design Results...", "dlg:designSummary"]]
       : [["No design results in this pack", "", "", true], ["Summary of Design Results...", "dlg:designSummary"]])],
-    Options: [["Black Background", "bg"], 0, ["Grid Lines", "o:grid"], ["Extruded Sections", "o:extrude"], ["Floors and Walls", "o:fill"], ["See-through Floors and Walls", "o:see"], ["Object Edges", "o:edges"], ["Supports", "o:supports"], ["Joints", "o:joints"], ["Labels", "o:names"], ["Global Axes", "o:axes"]],
+    Options: [...(window.cpmLive ? [["Program: " + progLabel(program) + " (ETABS, SAP2000 or SAFE)...", "m:program"], 0] : []), ["Black Background", "bg"], 0, ["Grid Lines", "o:grid"], ["Extruded Sections", "o:extrude"], ["Floors and Walls", "o:fill"], ["See-through Floors and Walls", "o:see"], ["Object Edges", "o:edges"], ["Supports", "o:supports"], ["Joints", "o:joints"], ["Labels", "o:names"], ["Global Axes", "o:axes"]],
     Help: [["Mouse and Keys", "dlg:keys"], ["About", "about"]],
   };
 };
@@ -2932,6 +2948,28 @@ const caseGroups = list => {
   return (a.length ? `<optgroup label="Load cases">${opts(a, res.case)}</optgroup>` : "") + (b.length ? `<optgroup label="Load combinations">${opts(b, res.case)}</optgroup>` : "");
 };
 const q = (d, s) => d.querySelector(s);
+// The programs' Load Case/Load Combination box, field by field: the type (Load Case or Load Combination), the
+// name, and for a case with several values its Multivalued Options (a mode number or a step), greyed for one value.
+const casePart = k => { const m = /^(.*) · (Mode|Step) (\d+)$/.exec(k); return m ? {base: m[1], by: m[2], n: m[3]} : {base: k, by: "", n: ""}; };
+function caseBox(list) {
+  const combos = new Set((P.model.combinations || []).map(String)), typeOf = c => combos.has(casePart(c).base) || combos.has(c) ? "combo" : "case";
+  const cur = list.includes(res.case) ? res.case : list[0] || "", t = typeOf(cur), types = [["case", "Load Case"], ["combo", "Load Combination"]].filter(([k]) => list.some(c => typeOf(c) === k));
+  const bases = k => [...new Set(list.filter(c => typeOf(c) === k).map(c => casePart(c).base))];
+  return `<fieldset class="cbox"><legend>Load Case/Load Combination</legend><div class="g2"><span>Case/Combo type</span><select id="dType">${opts(types, t)}</select><span>Case/Combo name</span><select id="dBase">${opts(bases(t), casePart(cur).base)}</select></div>
+    <div class="g2" id="dMulti"><span>Multivalued options</span><span></span><span id="dByL">Mode number</span><select id="dStep"></select></div><input type="hidden" id="dCase" value="${esc(cur)}"></fieldset>`;
+}
+function caseBoxWire(d, list) {
+  const combos = new Set((P.model.combinations || []).map(String)), typeOf = c => combos.has(casePart(c).base) || combos.has(c) ? "combo" : "case";
+  const steps = () => list.filter(c => casePart(c).base === q(d, "#dBase").value && casePart(c).by);
+  const pick = () => { const st = steps(), m = q(d, "#dMulti"); m.style.opacity = st.length ? "" : ".45"; q(d, "#dStep").disabled = !st.length;
+    q(d, "#dByL").textContent = st.length && casePart(st[0]).by === "Step" ? "Step number" : "Mode number";
+    const want = casePart(q(d, "#dCase").value), keep = st.find(c => casePart(c).n === want.n) || st[0];
+    q(d, "#dStep").innerHTML = st.length ? opts(st.map(c => [c, casePart(c).n]), keep) : "";
+    q(d, "#dCase").value = st.length ? keep : q(d, "#dBase").value; };
+  q(d, "#dType").onchange = () => { const b = [...new Set(list.filter(c => typeOf(c) === q(d, "#dType").value).map(c => casePart(c).base))]; q(d, "#dBase").innerHTML = opts(b, b[0]); pick(); };
+  q(d, "#dBase").onchange = pick; q(d, "#dStep").onchange = () => { q(d, "#dCase").value = q(d, "#dStep").value; };
+  pick(); return d;
+}
 const dialogs = {
   modes() { openModes(); },
   shells() { openShells(); },
@@ -2944,36 +2982,40 @@ const dialogs = {
   },
   forces() {
     if (!forces.size) return;
-    const comps = forceComps.map(([k, l]) => `<label><input type="radio" name="comp" value="${k}" ${(res.mode === "forces" ? res.comp : "M3") === k ? "checked" : ""}>${l}</label>`).join("");
-    dialog("Member Force Diagram for Frames", `
-      <fieldset><legend>Load Case/Load Combination</legend><div class="g2"><span>Case/Combo name</span><select id="dCase">${caseGroups(resCases("forces"))}</select></div></fieldset>
-      <fieldset><legend>Component</legend><div class="g4">${comps}</div></fieldset>
-      <fieldset><legend>Scaling</legend><div class="g2"><label><input type="radio" name="sc" value="auto" ${res.userScale ? "" : "checked"}>Auto</label><span></span><label><input type="radio" name="sc" value="user" ${res.userScale ? "checked" : ""}>Scale factor</label><input type="number" id="dScale" step="any" value="${res.userScale || ""}" placeholder="length per unit of force"></div></fieldset>
-      <fieldset><legend>Display Options</legend><div class="g3"><label><input type="checkbox" id="dFill" ${res.fill ? "checked" : ""}>Fill diagram</label><label><input type="checkbox" id="dVals" ${res.values ? "checked" : ""}>Show values on diagram</label></div></fieldset>`,
-      [["OK", d => applyForces(d)], ["Apply", d => { applyForces(d); return false; }, true], ["Cancel"]], {width: 470});
+    // As ETABS's and SAP2000's Member Force Diagram for Frames: the components in its order, two to a row.
+    const order = ["P", "T", "V2", "M2", "V3", "M3"], label = {P: "Axial Force", T: "Torsion", V2: "Shear 2-2", M2: "Moment 2-2", V3: "Shear 3-3", M3: "Moment 3-3"};
+    const comps = order.filter(k => forceComps.some(c => c[0] === k)).map(k => `<label><input type="radio" name="comp" value="${k}" ${(res.mode === "forces" ? res.comp : "M3") === k ? "checked" : ""}>${label[k]}</label>`).join("");
+    const list = resCases("forces");
+    caseBoxWire(dialog("Member Force Diagram for Frames", `${caseBox(list)}
+      <fieldset><legend>Component</legend><div class="g2">${comps}</div></fieldset>
+      <fieldset><legend>Scaling</legend><div class="g2"><label><input type="radio" name="sc" value="auto" ${res.userScale ? "" : "checked"}>Auto</label><span></span><label><input type="radio" name="sc" value="user" ${res.userScale ? "checked" : ""}>User Defined</label><input type="number" id="dScale" step="any" value="${res.userScale || ""}" placeholder="length per unit of force"></div></fieldset>
+      <fieldset><legend>Display Options</legend><div class="g2"><label><input type="checkbox" id="dFill" ${res.fill ? "checked" : ""}>Fill Diagram</label><label><input type="checkbox" id="dVals" ${res.values ? "checked" : ""}>Show Values on Diagram</label></div></fieldset>`,
+      [["OK", d => applyForces(d)], ["Close"], ["Apply", d => { applyForces(d); return false; }, true]], {width: 470}), list);
   },
   deformed() {
     if (!disp.size) return;
-    dialog("Deformed Shape", `
-      <fieldset><legend>Load Case/Load Combination</legend><div class="g2"><span>Case/Combo name</span><select id="dCase">${caseGroups(resCases("deformed"))}</select></div></fieldset>
-      <fieldset><legend>Scaling</legend><div class="g2"><label><input type="radio" name="sc" value="auto" ${res.userScale ? "" : "checked"}>Auto</label><span></span><label><input type="radio" name="sc" value="user" ${res.userScale ? "checked" : ""}>Scale factor</label><input type="number" id="dScale" step="any" value="${res.userScale || ""}"></div></fieldset>
-      <fieldset><legend>Options</legend><div class="g3"><label><input type="checkbox" id="dGhost" ${res.ghost ? "checked" : ""}>Wire shadow (undeformed)</label><label><input type="checkbox" id="dAnim" ${res.anim ? "checked" : ""}>Animate</label><label><input type="checkbox" id="dExt" ${opt.extrude ? "checked" : ""}>Extruded sections</label></div></fieldset>`,
-      [["OK", d => applyDeformed(d)], ["Apply", d => { applyDeformed(d); return false; }, true], ["Cancel"]], {width: 440});
+    // As ETABS's and SAP2000's Deformed Shape: case, scaling, contours drawn on the objects, wire shadow.
+    const list = resCases("deformed"), on = res.mode === "contour", comp = on ? res.comp : "U";
+    caseBoxWire(dialog("Deformed Shape", `${caseBox(list)}
+      <fieldset><legend>Scaling</legend><div class="g2"><label><input type="radio" name="sc" value="auto" ${res.userScale ? "" : "checked"}>Automatic</label><span></span><label><input type="radio" name="sc" value="user" ${res.userScale ? "checked" : ""}>Scale Factor</label><input type="number" id="dScale" step="any" value="${res.userScale || ""}"></div></fieldset>
+      <fieldset><legend>Contour Options</legend><div class="g2"><label><input type="checkbox" id="dCont" ${on ? "checked" : ""}>Draw Contours on Objects</label><span></span><span>Contour Component</span><select id="dComp">${opts([["UX", "Ux"], ["UY", "Uy"], ["UZ", "Uz"], ["U", "Resultant"]], comp)}</select></div></fieldset>
+      <fieldset><legend>Other Options</legend><div class="g2"><label><input type="checkbox" id="dGhost" ${res.ghost ? "checked" : ""}>Wire Shadow</label><label><input type="checkbox" id="dAnim" ${res.anim ? "checked" : ""}>Animate</label><label><input type="checkbox" id="dExt" ${opt.extrude ? "checked" : ""}>Extruded Sections</label></div></fieldset>`,
+      [["OK", d => applyDeformed(d)], ["Close"], ["Apply", d => { applyDeformed(d); return false; }, true]], {width: 440}), list);
   },
   contour() {
     if (!disp.size) return;
     const c = res.mode === "contour" ? res.comp : "UZ";
-    dialog("Joint Displacement Contours", `
-      <fieldset><legend>Load Case/Load Combination</legend><div class="g2"><span>Case/Combo name</span><select id="dCase">${caseGroups(resCases("contour"))}</select></div></fieldset>
+    caseBoxWire(dialog("Joint Displacement Contours", `
+      ${caseBox(resCases("contour"))}
       <fieldset><legend>Component</legend><div class="g4">${[["UX", "UX"], ["UY", "UY"], ["UZ", "UZ"], ["U", "Resultant"]].map(([k, l]) => `<label><input type="radio" name="comp" value="${k}" ${c === k ? "checked" : ""}>${l}</label>`).join("")}</div></fieldset>
       <fieldset><legend>Contour Range</legend><div class="g2"><label><input type="radio" name="rg" value="auto" ${res.range ? "" : "checked"}>Auto</label><span></span><label><input type="radio" name="rg" value="user" ${res.range ? "checked" : ""}>Minimum</label><input type="number" step="any" id="dMin" value="${res.range ? res.range[0] : ""}"><span style="padding-left:22px">Maximum</span><input type="number" step="any" id="dMax" value="${res.range ? res.range[1] : ""}"><span>Number of colours</span><select id="dBands">${opts(["6", "7", "8", "9", "10"], String(res.bands))}</select></div></fieldset>`,
-      [["OK", d => applyContour(d)], ["Apply", d => { applyContour(d); return false; }, true], ["Cancel"]], {width: 430});
+      [["OK", d => applyContour(d)], ["Close"], ["Apply", d => { applyContour(d); return false; }, true]], {width: 430}), resCases("contour"));
   },
   reactions() {
     if (!reacts.size) return;
-    dialog("Joint Reactions", `<fieldset><legend>Load Case/Load Combination</legend><div class="g2"><span>Case/Combo name</span><select id="dCase">${caseGroups(resCases("reactions"))}</select></div></fieldset>
+    caseBoxWire(dialog("Joint Reactions", `${caseBox(resCases("reactions"))}
       <fieldset><legend>Display Type</legend><div class="g3">${[["ALL", "Arrows, FX FY FZ"], ["FZ", "Vertical FZ only"], ["FX", "FX only"], ["FY", "FY only"]].map(([k, l]) => `<label><input type="radio" name="comp" value="${k}" ${(res.mode === "reactions" ? res.comp : "ALL") === k ? "checked" : ""}>${l}</label>`).join("")}</div></fieldset>`,
-      [["OK", d => { res.mode = "reactions"; syncResults(); res.case = q(d, "#dCase").value; res.comp = q(d, "[name=comp]:checked").value; syncResults(); syncTools(); draw(); }], ["Cancel"]], {width: 400});
+      [["OK", d => { res.mode = "reactions"; syncResults(); res.case = q(d, "#dCase").value; res.comp = q(d, "[name=comp]:checked").value; syncResults(); syncTools(); draw(); }], ["Close"]], {width: 400}), resCases("reactions"));
   },
   display() {
     const kinds = [["column", "Columns"], ["beam", "Beams"], ["brace", "Braces"], ["floor", "Floors"], ["wall", "Walls"]].filter(([k]) => frames.some(f => f.kind === k) || areas.some(a => a.kind === k));
@@ -3058,6 +3100,7 @@ function applyForces(d) {
   colourDirty = true; syncResults(); res.case = q(d, "#dCase").value; $("case").value = res.case; $("comp").value = res.comp; panes.forEach(p => p.diagSig = null); syncTools(); draw();
 }
 function applyDeformed(d) {
+  if (q(d, "#dCont") && q(d, "#dCont").checked) { res.mode = "contour"; syncResults(); res.case = q(d, "#dCase").value; res.comp = q(d, "#dComp").value; res.range = null; $("case").value = res.case; pointsDirty = true; colourDirty = true; syncResults(); syncTools(); return draw(); }
   res.mode = "deformed"; res.userScale = q(d, "[name=sc]:checked").value === "user" ? Math.abs(parseFloat(q(d, "#dScale").value)) || 0 : 0;
   res.ghost = q(d, "#dGhost").checked; res.anim = q(d, "#dAnim").checked;
   if (q(d, "#dExt").checked !== opt.extrude) { opt.extrude = q(d, "#dExt").checked; geometryDirty = true; geometryStamp++; }
@@ -3526,7 +3569,10 @@ function buildTree() {
   const node = (k, title, n, body, wide) => `<details data-k="${k}" ${first ? (wide ? "open" : "") : open.has(k) ? "open" : ""}><summary>${esc(title)}${n === null ? "" : ` <span class="n">(${n})</span>`}</summary>${body}</details>`;
   const plain = list => list.length ? list.map(x => `<div class="leaf">${esc(x)}</div>`).join("") : `<div class="leaf kv">none</div>`;
   const T = theme(), m = P.model, man = P.manifest || {}, count = (list, f) => list.filter(f).length;
-  const kinds = [["column", "Columns", frames], ["beam", "Beams", frames], ["brace", "Braces", frames], ["floor", program === "sap2000" ? "Areas" : "Floors", areas], ["wall", "Walls", areas]];
+  // The Model Explorer names objects as the program does: SAP2000 has frames and areas (no stories), SAFE has slabs.
+  const kinds = program === "sap2000" ? [["column", "Frames (vertical)", frames], ["beam", "Frames (horizontal)", frames], ["brace", "Frames (inclined)", frames], ["floor", "Areas (horizontal)", areas], ["wall", "Areas (vertical)", areas]]
+    : program === "safe" ? [["floor", "Slabs", areas], ["beam", "Beams", frames], ["column", "Columns", frames], ["wall", "Walls", areas], ["brace", "Braces", frames]]
+    : [["column", "Columns", frames], ["beam", "Beams", frames], ["brace", "Braces", frames], ["floor", "Floors", areas], ["wall", "Walls", areas]];
   const kindLeaves = kinds.map(([k, title, list]) => { const n = count(list, o => o.kind === k); return n ? `<label class="leaf"><input type="checkbox" data-hide="kind" data-v="${k}" ${hidden.kind.has(k) ? "" : "checked"}><i style="background:${k === "floor" ? T.floor : k === "wall" ? T.wall : T[k]}"></i>${title}<span class="n">${n}</span></label>` : ""; }).join("");
   const secLeaves = (type, names, list) => names.map(s => { const n = count(list, o => o.section === s), z = type === "f" ? sizes[s] : slabT[s]; return `<div class="leaf go" data-sec="${type}" data-v="${esc(s)}" title="Click to light up its members"><input type="checkbox" data-hide="section" data-v="${esc(type + ":" + s)}" ${hidden.section.has(type + ":" + s) ? "" : "checked"}>${esc(s)}<span class="n">${z ? (type === "f" ? num(z[1]) + (z[2] ? "x" + num(z[2]) : "") : num(z)) + " · " : ""}${n}</span></div>`; }).join("") || `<div class="leaf kv">none</div>`;
   const fs = m.frame_sections || [...new Set(frames.map(f => f.section))], as = m.area_sections || [...new Set(areas.map(a => a.section))];
@@ -3538,12 +3584,12 @@ function buildTree() {
   const model = node("model", man.model || "Model", null,
     node("project", "Project", null, `<div class="leaf">Program<span class="n">${esc(progLabel(program) + (man.etabs && !/modeler/i.test(man.etabs) ? " " + man.etabs : ""))}</span></div><div class="leaf">Units<span class="n">${esc($("units").textContent || "")}</span></div><div class="leaf">${esc(tw.analysed)}</div>`) +
     node("layout", "Structure Layout", null,
-      node("stories", program === "sap2000" ? "Levels" : "Stories", stories.length, stories.slice().reverse().map(s => `<div class="leaf go" data-story="${esc(s.name)}">${esc(s.name)}<span class="n">${num(s.elevation)}</span></div>`).join(""), true) +
-      node("grids", gridsGuessed ? "Column lines" : "Grids", grids.X.length + grids.Y.length, lines("X") + lines("Y")), true) +
+      node("stories", program === "sap2000" ? "X-Y Planes" : "Stories", stories.length, stories.slice().reverse().map(s => `<div class="leaf go" data-story="${esc(s.name)}">${esc(s.name)}<span class="n">${num(s.elevation)}</span></div>`).join(""), true) +
+      node("grids", gridsGuessed ? "Column lines" : program === "sap2000" ? "Grid Systems" : "Grids", grids.X.length + grids.Y.length, lines("X") + lines("Y")), true) +
     node("props", "Properties", null,
       node("mat", "Materials", (m.materials || []).length, plain(m.materials || [])) +
       node("fsec", "Frame Sections", fs.length, secLeaves("f", fs, frames)) +
-      node("asec", program === "sap2000" ? "Area Sections" : "Slab and Wall Sections", as.length, secLeaves("a", as, areas))) +
+      node("asec", program === "sap2000" ? "Area Sections" : program === "safe" ? "Slab Properties" : "Slab and Wall Sections", as.length, secLeaves("a", as, areas))) +
     node("objects", "Structural Objects", frames.length + areas.length + joints, (kindLeaves || `<div class="leaf kv">nothing drawn yet</div>`) + `<div class="leaf go" data-act="selJoints">Joints<span class="n">${joints}</span></div><div class="leaf go" data-act="selSupports">Supports<span class="n">${supports.length}</span></div>`, true) +
     node("groups", "Groups", groups.length, plain(groups)) +
     node("loads", "Loads", null,
@@ -5473,7 +5519,7 @@ const drawIcons = {
 function modelerStart() {
   document.querySelectorAll('[data-menu="Draw"], [data-menu="Assign"]').forEach(m => m.hidden = false);
   document.querySelector('[data-menu="File"]').hidden = false;
-  $("similarWrap").hidden = false;
+  $("similarWrap").hidden = program === "sap2000";
   const sb = [["d:column", "Draw columns (click a point)"], ["d:beam", "Draw beams (click start and end)"], ["d:qbeam", "Quick draw beams (click a grid line)"], ["d:wall", "Draw walls"], ["d:qwall", "Quick draw walls (click a grid line)"], ["d:floor", "Draw floors (click corners)"], ["d:rect", "Draw rectangular floors (two corners)"], ["d:qfloor", "Quick draw floors (click in a bay)"], ["d:brace", "Draw braces (click bottom and top)"], ["d:joint", "Draw joints (click a point)"]];
   $("strip").insertAdjacentHTML("beforeend", `<span class="sep"></span>` + sb.map(b => `<button class="ib" data-act="${b[0]}" title="${b[1]}"><svg viewBox="0 0 16 16">${drawIcons[b[0]]}</svg></button>`).join(""));
   const ib = [["m:undo", "Undo (Ctrl+Z)", "undo"], ["m:redo", "Redo (Ctrl+Y)", "redo"], ["m:save", "Save (Ctrl+S)", "save"], ["m:delete", "Delete the selected objects (Del)", "del"]];
