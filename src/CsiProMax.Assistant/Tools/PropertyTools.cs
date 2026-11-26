@@ -282,7 +282,7 @@ public static class PropertyTools
     }
 
     /// <summary>The tables argument: rows by table name; true and false become Yes and No, as the tables hold them.</summary>
-    private static Dictionary<string, List<Dictionary<string, string>>>? AssignRows(JsonElement a)
+    internal static Dictionary<string, List<Dictionary<string, string>>>? AssignRows(JsonElement a)
     {
         if (!a.TryGetProperty("tables", out var t) || t.ValueKind == JsonValueKind.Null) return null;
         if (t.ValueKind != JsonValueKind.Object) throw new ToolInputException("tables is {table name: [rows]}.");
@@ -345,7 +345,8 @@ public static class PropertyTools
         var springs = PropertyDefs.Springs(m);
         var o = new JsonObject
         {
-            ["material_types"] = new JsonArray(PropertyDefs.MaterialTypes.Select(t => (JsonNode)t).ToArray()),
+            ["program"] = m.Target,
+            ["material_types"] = new JsonArray(ProgramOptions.MaterialTypes(m.Target).Select(t => (JsonNode)t).ToArray()),
             ["material_values"] = new JsonArray(PropertyDefs.MaterialValues.Select(v => (JsonNode)new JsonObject { ["key"] = v.Key, ["label"] = v.Label }).ToArray()),
             ["material_texts"] = JsonSerializer.SerializeToNode(PropertyDefs.MaterialTexts),
             ["material_nonlinear"] = new JsonObject(PropertyDefs.MaterialTypes.Select(t => KeyValuePair.Create(t, (JsonNode?)new JsonObject
@@ -354,7 +355,7 @@ public static class PropertyTools
                 ["defaults"] = JsonSerializer.SerializeToNode(PropertyDefs.NonlinearKeys(t).Length > 0 ? PropertyDefs.NonlinearDefaults(t) : new()),
             }))),
             ["material_tables"] = JsonSerializer.SerializeToNode(ProgramTables.MaterialTables),
-            ["assign_tables"] = new JsonObject(AssignTables.Tables.Select(t => KeyValuePair.Create(t.Key, (JsonNode?)new JsonObject
+            ["assign_tables"] = new JsonObject(AssignTables.Tables.Where(t => ProgramOptions.HasAssignTable(m.Target, t.Key)).Select(t => KeyValuePair.Create(t.Key, (JsonNode?)new JsonObject
             {
                 ["kind"] = t.Value.Kind, ["many"] = AssignTables.ManyRows.Contains(t.Key),
                 ["fields"] = new JsonArray(t.Value.Fields.Select(f => (JsonNode)new JsonArray(f.Key, f.Label)).ToArray()),
@@ -366,7 +367,7 @@ public static class PropertyTools
                 ["texts"] = new JsonObject(PropertyDefs.MaterialTexts.Keys.Where(k => x.Get(k) is not null).Select(k => KeyValuePair.Create(k, (JsonNode?)x.Get(k)))),
                 ["tables"] = JsonSerializer.SerializeToNode(x.Tables ?? new()),
             }).ToArray()),
-            ["shapes"] = new JsonArray(PropertyDefs.Shapes.Select(s => (JsonNode)new JsonObject { ["shape"] = s.Name, ["dims"] = new JsonArray(s.Dims.Select(d => (JsonNode)d).ToArray()), ["concrete"] = s.Concrete, ["about"] = s.About }).ToArray()),
+            ["shapes"] = new JsonArray(PropertyDefs.Shapes.Where(s => ProgramOptions.HasShape(m.Target, s)).Select(s => (JsonNode)new JsonObject { ["shape"] = s.Name, ["dims"] = new JsonArray(s.Dims.Select(d => (JsonNode)d).ToArray()), ["concrete"] = s.Concrete, ["about"] = s.About }).ToArray()),
             ["frame_sections"] = new JsonArray(m.FrameSections.Select(s => (JsonNode)new JsonObject
             {
                 ["name"] = s.Name, ["shape"] = s.Shape, ["material"] = s.Material,
@@ -379,8 +380,8 @@ public static class PropertyTools
                 ["slab_type"] = s.Get("SLABTYPE"), ["modeling"] = s.Get("MODELINGTYPE"), ["one_way"] = s.Get("ONEWAYLOADDIST") == "Yes",
                 ["modifiers"] = Numbers_(PropertyDefs.Modifiers(s.Lines, PropertyDefs.ShellModifiers)),
             }).ToArray()),
-            ["slab_types"] = new JsonArray(PropertyDefs.SlabTypes.Select(t => (JsonNode)t).ToArray()),
-            ["modeling_types"] = new JsonArray(PropertyDefs.ModelingTypes.Select(t => (JsonNode)t).ToArray()),
+            ["slab_types"] = new JsonArray(ProgramOptions.SlabTypes(m.Target).Select(t => (JsonNode)t).ToArray()),
+            ["modeling_types"] = new JsonArray(ProgramOptions.ModelingTypes(m.Target).Select(t => (JsonNode)t).ToArray()),
             ["frame_modifiers"] = new JsonArray(PropertyDefs.FrameModifiers.Select(t => (JsonNode)t).ToArray()),
             ["shell_modifiers"] = new JsonArray(PropertyDefs.ShellModifiers.Select(t => (JsonNode)t).ToArray()),
             ["hinge_dofs"] = new JsonArray(PropertyDefs.HingeDofs.Select(t => (JsonNode)t).ToArray()),

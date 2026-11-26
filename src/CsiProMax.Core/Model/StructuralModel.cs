@@ -39,6 +39,8 @@ public sealed class StructuralModel
     public List<LoadCombo> Combos { get; set; } = [];
     /// <summary>Sections of an ETABS file this version doesn't understand, kept word for word and written back.</summary>
     public List<RawSection> Passthrough { get; set; } = [];
+    /// <summary>Rows of ETABS's own definition tables the .e2k has no keyword for, by table (<see cref="DefineTables"/>).</summary>
+    public Dictionary<string, List<Dictionary<string, string>>>? DefinitionTables { get; set; }
     /// <summary>What ETABS's .e2k has no place for (SAP2000 joint constraints and moving loads, SAFE design strips):
     /// kept in the .cpm and written into the .s2k and .f2k. Null until one is defined.</summary>
     public ProgramExtras? Extras { get; set; }
