@@ -107,6 +107,7 @@ public sealed class FieldContext(CsiProgram program, string folder, ICsiLink lin
         }
         lock (_gate) { _doing = name; _moved = DateTime.UtcNow; }
         Progress?.Invoke(name);
+        var refusedBefore = CsiProMax.Assistant.Etabs.EditableTables.Refusals;
         var clock = System.Diagnostics.Stopwatch.StartNew();
         try
         {
@@ -127,7 +128,9 @@ public sealed class FieldContext(CsiProgram program, string folder, ICsiLink lin
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             var real = ex is System.Reflection.TargetInvocationException { InnerException: { } inner } ? inner : ex;
-            Add(name, false, $"{real.GetType().Name}: {real.Message}{Where(real)}", clock.Elapsed.TotalSeconds);
+            // A table import the program refused in this step: what was sent and its whole log, so the report alone says why.
+            var import = CsiProMax.Assistant.Etabs.EditableTables.Refusals != refusedBefore ? " | Import sent and its whole log: " + CsiProMax.Assistant.Etabs.EditableTables.LastRefused : "";
+            Add(name, false, $"{real.GetType().Name}: {real.Message}{Where(real)}{import}", clock.Elapsed.TotalSeconds);
             StoppedAnswering(name);
             return default;
         }
