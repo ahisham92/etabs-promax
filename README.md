@@ -26,6 +26,8 @@ Nothing is an .exe and nothing needs administrator rights. It runs on the .NET 8
 irm https://raw.githubusercontent.com/ahisham92/etabs-promax/main/install.ps1 | iex
 ```
 
+CSI ProMax then keeps itself in those Tools menus: a hidden task at every Windows sign-in (`keep-plugins.ps1`) adds it back to any closed program that emptied its plug-in list. To uninstall: `irm https://raw.githubusercontent.com/ahisham92/etabs-promax/main/uninstall.ps1 | iex` (add `-Files` to delete the program files).
+
 Without the AI chat (the Modeler, modelling by hand, the 3D view, review packs and the Viewer, and no Claude Code), use this line instead. The chat can be turned on or off later in the window's CSI ProMax menu, without closing the program:
 
 ```powershell

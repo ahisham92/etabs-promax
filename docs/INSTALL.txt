@@ -13,6 +13,12 @@ SAP2000 that is closed and has no other plug-in. It keeps a copy of each setting
 closes or changes a CSI program or a model. Then open the program and a model, and choose Tools > CSI ProMax.
 For a program it could not add itself to, it prints the plug-in name and file to add by hand (the steps below).
 Run the same line again at any time: it only replaces what changed.
+CSI ProMax stays in the Tools menus by itself: a CSI program sometimes empties its own plug-in list (for example
+after it was started by a script or a test), so a small hidden task at every Windows sign-in (keep-plugins.ps1) adds
+CSI ProMax back to each closed program that lost it. What it did is in %LOCALAPPDATA%\CsiProMax\keep-plugins.log.
+To uninstall (Tools menu entries, that task and the shortcuts; add -Files to delete the program files too):
+
+   irm https://raw.githubusercontent.com/ahisham92/etabs-promax/main/uninstall.ps1 | iex
 Without the AI chat
 The same line, for CSI ProMax without the AI chat: the Modeler (modelling by hand in the 3D view, Define forms and
 Excel tables), the 3D view of an open model, review packs and the Viewer, with no Claude Code used or installed:
