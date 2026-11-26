@@ -192,9 +192,8 @@ public static class AutoPack
         var watch = Stopwatch.StartNew();
         var pack = PackFile(look.File);
         var page = PageFile(look.File);
-        JsonArray? comments = null;
-        try { if (File.Exists(pack)) comments = Pack.ReadComments(pack).Comments; }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or JsonException) { }
+        // The reviewer's comments: those in the pack there now and those kept beside the model when a pack was taken away.
+        var comments = KeepComments(look.File);
         JsonObject checks;
         try { checks = ProgramTools.Report(JsonDocument.Parse("{}").RootElement, link).AsObject(); }
         catch (Exception ex) when (ex is EtabsException or InvalidOperationException or ToolInputException) { checks = new JsonObject { ["note"] = "The checks could not be made: " + ex.Message }; }
@@ -209,8 +208,94 @@ public static class AutoPack
             instabilities: true, auto: auto);
         Replace(pack, built.Zip);
         Replace(page, new UTF8Encoding(false).GetBytes(Pack.ViewerHtml(built.Content)));
-        return new Written(pack, page, why, built.Frames, built.Areas, built.Tables.Count, comments?.Count ?? 0, watch.Elapsed, built.Notes);
+        return new Written(pack, page, why, built.Frames, built.Areas, built.Tables.Count, comments.Count, watch.Elapsed, built.Notes);
     }
+
+    /// <summary>The reviewer's comments, kept beside the model for as long as the model is (a pack comes and goes with the results).</summary>
+    public static string CommentsFile(string modelFile)
+    {
+        var file = modelFile.Trim().Trim('"');
+        return Path.Combine(Path.GetDirectoryName(file)!, Path.GetFileNameWithoutExtension(file) + " review comments.json");
+    }
+
+    /// <summary>
+    /// Every comment of the pack beside the model and of the comments file, each once, written to the comments file
+    /// (so no comment is lost when the pack is taken away or made again) and given back.
+    /// </summary>
+    public static JsonArray KeepComments(string modelFile)
+    {
+        var all = new JsonArray();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        void Take(JsonArray? list)
+        {
+            foreach (var c in list ?? [])
+                if (c is not null && seen.Add(c["who"]?.ToString() + "\u0001" + c["at"]?.ToString() + "\u0001" + c["text"]?.ToString())) all.Add(c.DeepClone());
+        }
+        var kept = CommentsFile(modelFile);
+        try { if (File.Exists(kept)) Take(Pack.ReadComments(kept).Comments); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or JsonException) { }
+        try { if (File.Exists(PackFile(modelFile))) Take(Pack.ReadComments(PackFile(modelFile)).Comments); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or JsonException) { }
+        if (all.Count > 0)
+        {
+            var o = new JsonObject { ["model"] = Path.GetFileName(modelFile.Trim().Trim('"')), ["comments"] = all.DeepClone() };
+            Replace(kept, new UTF8Encoding(false).GetBytes(o.ToJsonString(new JsonSerializerOptions { WriteIndented = true })));
+        }
+        return all;
+    }
+
+    /// <summary>Whether the pack beside the model is one this rule wrote (a pack made by hand with export_pack is the engineer's and is left alone).</summary>
+    public static bool IsAuto(string packFile)
+    {
+        try
+        {
+            if (!File.Exists(packFile)) return false;
+            using var zip = ZipFile.OpenRead(packFile);
+            if (zip.GetEntry("manifest.json") is not { } entry) return false;
+            using var reader = new StreamReader(entry.Open(), Encoding.UTF8);
+            return JsonNode.Parse(reader.ReadToEnd()) is JsonObject manifest && manifest["auto"] is JsonObject;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or JsonException) { return false; }
+    }
+
+    /// <summary>
+    /// The pack and its Viewer page taken away because the model has no results now (unlocked in the program, or
+    /// changed in the Engine): the comments are kept beside the model first, and come back in the next pack. Only a
+    /// pack this rule wrote is taken away. False when there was none. A pack open in a program that holds it is not
+    /// taken away now: the IOException says so, and the next look tries again.
+    /// </summary>
+    public static bool Remove(string modelFile)
+    {
+        var pack = PackFile(modelFile);
+        lock (LockFor(pack))
+        {
+            if (!IsAuto(pack)) return false;
+            KeepComments(modelFile);
+            File.Delete(pack);
+            var page = PageFile(modelFile);
+            try { if (File.Exists(page)) File.Delete(page); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* the page goes at the next removal or is replaced by the next pack */ }
+            return true;
+        }
+    }
+
+    // ---- several windows on one model ----
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, object> Locks = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string Pack, bool Locked, DateTime At)> Windows = new(StringComparer.Ordinal);
+
+    /// <summary>One pack is written or taken away at a time, whichever window asked.</summary>
+    internal static object LockFor(string packFile) => Locks.GetOrAdd(Path.GetFullPath(packFile), _ => new object());
+
+    /// <summary>A window's last look, so another window on the same model knows it still has results.</summary>
+    internal static void Seen(string window, string packFile, bool locked) => Windows[window] = (packFile, locked, DateTime.UtcNow);
+
+    /// <summary>A window that closed no longer counts.</summary>
+    public static void Forget(string window) => Windows.TryRemove(window, out _);
+
+    /// <summary>Another window (looked at in the last few minutes) shows the same model with its results.</summary>
+    internal static bool LockedElsewhere(string window, string packFile) =>
+        Windows.Any(w => w.Key != window && w.Value.Locked && DateTime.UtcNow - w.Value.At < TimeSpan.FromMinutes(3) && string.Equals(w.Value.Pack, packFile, StringComparison.OrdinalIgnoreCase));
 
     private static void Replace(string target, byte[] bytes)
     {
@@ -225,13 +310,30 @@ public static class AutoPack
     /// for the log (null when nothing happened). <paramref name="before"/> is this program's previous look and is
     /// moved on, except when writing failed (the next look tries again).
     /// </summary>
-    public static string? Once(ICsiLink link, ref PackLook? before, bool fieldTestModels = false, DateTime? nowUtc = null)
+    public static string? Once(ICsiLink link, ref PackLook? before, bool fieldTestModels = false, DateTime? nowUtc = null, string? window = null)
     {
         var now = Look(link);
         if (!fieldTestModels && FieldTestModel(now.File)) { before = now; return null; }
-        var why = Decide(before, now, Saved(now.File) && now.Locked ? MadeOf(PackFile(now.File)) : null, nowUtc ?? DateTime.UtcNow);
-        if (why is null) { before = now; return null; }
-        var written = Write(link, now, why);
+        if (!Saved(now.File)) { before = now; return null; }
+        var pack = PackFile(now.File);
+        window ??= link.Program.Key + ":" + link.GetHashCode().ToString(CultureInfo.InvariantCulture);
+        Seen(window, pack, now.Locked);
+        // No results now (unlocked to change the model, or a run starting): the pack goes, unless another window still
+        // shows this model with its results. The comments stay beside the model.
+        if (!now.Locked)
+        {
+            var gone = !LockedElsewhere(window, pack) && Remove(now.File);
+            before = now;
+            return gone ? $"{link.Program.Name}: {Path.GetFileName(now.File)} has no results now (unlocked) - its pack was taken away; the reviewer's comments are kept in {Path.GetFileName(CommentsFile(now.File))} and come back with the next run." : null;
+        }
+        string? why;
+        Written written;
+        lock (LockFor(pack))
+        {
+            why = Decide(before, now, MadeOf(pack), nowUtc ?? DateTime.UtcNow);
+            if (why is null) { before = now; return null; }
+            written = Write(link, now, why);
+        }
         before = now;
         return $"{link.Program.Name}: {Path.GetFileName(now.File)} - pack written after the {why} ({written.Frames} frames, {written.Areas} areas, {written.Tables} tables" +
                (written.Comments > 0 ? $", {written.Comments} comments kept" : "") + $", {written.Took.TotalSeconds:0} s): {written.Pack}";

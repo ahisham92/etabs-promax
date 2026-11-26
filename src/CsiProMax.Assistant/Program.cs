@@ -23,7 +23,7 @@ public static class Program
         var at = Array.IndexOf(args, "--modeler");
         var file = at + 1 < args.Length && !args[at + 1].StartsWith("--", StringComparison.Ordinal) ? args[at + 1] : null;
         if (file is not null && File.Exists(file))
-            try { return new OfflineEtabs(OfflineEtabs.Load(file), file.EndsWith(".e2k", StringComparison.OrdinalIgnoreCase) ? file : ""); }
+            try { var opened = OfflineEtabs.Open(file); return new OfflineEtabs(opened.Model, OfflineEtabs.SavesTo(file, opened)); }
             catch (Exception ex) when (ex is IOException or CsiProMax.E2k.E2kFormatException or System.Text.Json.JsonException or InvalidDataException) { Note("modeler file", ex); }
         return new OfflineEtabs();
     }

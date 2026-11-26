@@ -77,6 +77,8 @@ public static class PackWatcher
     private sealed class Follow(int pid, CsiProgram program) : IDisposable
     {
         public int Pid { get; } = pid;
+        /// <summary>This window, among every window on the same model (<see cref="AutoPack.LockedElsewhere"/>).</summary>
+        public string Key => Program.Key + ":" + Pid.ToString(CultureInfo.InvariantCulture);
         public CsiProgram Program { get; } = program;
         private ComEtabs? _com;
         private ICsiLink? _link;
@@ -110,7 +112,7 @@ public static class PackWatcher
         if (f.Before is { } b && AutoPack.RunStamp(b.File) is { } run && DateTime.UtcNow - run < AutoPack.Settle) return;
         try
         {
-            var done = AutoPack.Once(f.Link(), ref f.Before);
+            var done = AutoPack.Once(f.Link(), ref f.Before, window: f.Key);
             if (f.Problem is not null) Log($"{f.Program.Name} (process {f.Pid}) answers again.");
             f.Problem = null;
             if (done is not null) { f.LastPack = done; Log(done); }
@@ -151,7 +153,7 @@ public static class PackWatcher
                 foreach (var gone in follows.Keys.Where(k => open.All(o => o.Pid != k)).ToList())
                 {
                     Log($"{follows[gone].Program.Name} (process {gone}) is closed.");
-                    if (!workers.TryGetValue(gone, out var w) || w.IsCompleted) { follows[gone].Dispose(); follows.Remove(gone); workers.Remove(gone); }
+                    if (!workers.TryGetValue(gone, out var w) || w.IsCompleted) { AutoPack.Forget(follows[gone].Key); follows[gone].Dispose(); follows.Remove(gone); workers.Remove(gone); }
                 }
                 // Each program on its own: a long pack in ETABS does not hold SAP2000's back.
                 foreach (var f in follows.Values)

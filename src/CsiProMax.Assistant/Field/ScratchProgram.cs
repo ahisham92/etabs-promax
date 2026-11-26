@@ -363,6 +363,33 @@ public sealed class ScratchProgram : IScratchWindow
     /// </summary>
     public static IScratchWindow? Start(CsiProgram program, FieldContext ctx, string modelFile, bool asIs)
     {
+        // SAP2000 26 refuses every table import (ApplyEditedTables answers 1, with no log, and every load pattern is
+        // gone) in a process that has opened an .s2k, even a tiny one, and even after it opens an .sdb again; a new
+        // SAP2000 opening the same .sdb takes the same rows (experiment N on Ahmed's PC, 2026-11-26: the 20 table codes
+        // of the 0.4.54 field test). So one SAP2000 turns the Modeler's .s2k into a .sdb and closes, and the test
+        // works in a second one that opens that .sdb, as an engineer's SAP2000 opening its model file would be.
+        if (OpensTextInOwnProcess(program, modelFile))
+        {
+            var first = new ScratchProgram(program) { _pass = $" (turning {Path.GetFileName(modelFile)} into a {ModelExtension(program)} first)" };
+            string? converted = null;
+            try { if (first.Open(ctx, modelFile, convertOnly: true)) converted = first.ModelPath; }
+            finally
+            {
+                try
+                {
+                    if (first._app is not null)
+                        ctx.Step($"close the {program.Name} that opened {Path.GetFileName(modelFile)} ({program.Name} takes no table import in a process that opened a text file)", () =>
+                        {
+                            var said = first.Close();
+                            FieldContext.Expect(said.Contains("closed without saving", StringComparison.Ordinal) && !said.Contains("yourself", StringComparison.Ordinal), said);
+                            return said;
+                        });
+                }
+                finally { first.Dispose(); }
+            }
+            if (converted is null) return null;
+            modelFile = converted;
+        }
         var scratch = new ScratchProgram(program) { _asIs = asIs };
         var ok = false;
         try
@@ -390,7 +417,17 @@ public sealed class ScratchProgram : IScratchWindow
             return said;
         });
 
-    private bool Open(FieldContext ctx, string modelFile)
+    /// <summary>
+    /// True when the program must open <paramref name="file"/> in a process of its own and work in the model file it
+    /// saves from it, in a new process: SAP2000 and a text file (.s2k, .$2k). See <see cref="Start"/>.
+    /// </summary>
+    public static bool OpensTextInOwnProcess(CsiProgram program, string file) =>
+        program.Key == CsiProgram.Sap2000.Key && Path.GetExtension(file).ToLowerInvariant() is ".s2k" or ".$2k";
+
+    /// <summary>Said after the names of the steps of the window that only turns a text file into a model file.</summary>
+    private string _pass = "";
+
+    private bool Open(FieldContext ctx, string modelFile, bool convertOnly = false)
     {
         var name = _program.Name;
         Assembly? loaded = null;
@@ -448,7 +485,7 @@ public sealed class ScratchProgram : IScratchWindow
             if (answer != 0) throw new EtabsException($"{name} refused to start (it answered {answer}).");
             return started.SapModel;
         });
-        if (ctx.Step($"start a second {name} window", () =>
+        if (ctx.Step($"start a second {name} window{_pass}", () =>
         {
             // While it starts, the maintenance reminder of a new process of this program (the test's own) is answered.
             using var starting = new Timer(_ =>
@@ -487,7 +524,7 @@ public sealed class ScratchProgram : IScratchWindow
             }) is not null;
         if (build && !Blank($"{name} on this PC opens only {ModelExtension(_program)} files through its API, so the Modeler's {Path.GetExtension(modelFile)} is built in it instead")) return false;
         var openedEmpty = false;
-        if (!build && ctx.Step($"open {Path.GetFileName(modelFile)} in it", () =>
+        if (!build && ctx.Step($"open {Path.GetFileName(modelFile)} in it{_pass}", () =>
         {
             var answer = Convert.ToInt32(Ask(FileTimeout, "open the file", m => m.File.OpenFile(Path.GetFullPath(modelFile)),
                 $"{name} did not finish opening the file within {FileTimeout.TotalMinutes:0} minutes. A message may be waiting in its window."));
@@ -517,7 +554,7 @@ public sealed class ScratchProgram : IScratchWindow
             if (!Blank($"{name} opened the Modeler's {Path.GetExtension(modelFile)} as an empty model, so the model is built in it instead")) return false;
         }
 
-        if (!_asIs && ctx.Step("save it as the scratch model", () =>
+        if (!_asIs && ctx.Step($"save it as the scratch model{_pass}", () =>
         {
             var answer = Convert.ToInt32(Ask(FileTimeout, "save the scratch model", m => m.File.Save(target),
                 $"{name} did not finish saving the scratch model within {FileTimeout.TotalMinutes:0} minutes. A message may be waiting in its window."));
@@ -525,6 +562,7 @@ public sealed class ScratchProgram : IScratchWindow
             return target;
         }) is null) return false;
         ModelPath = target;
+        if (convertOnly) return true;
 
         // What the link reads is checked against the scratch file before any change is made through it.
         if (ctx.Step("the link reads the scratch model, and no other", () =>
@@ -538,9 +576,9 @@ public sealed class ScratchProgram : IScratchWindow
 
         // The Modeler's table data (material damping, notes, time dependence, ...) goes into ETABS through its tables, as
         // open_model does for a Modeler .e2k, and the model is saved again.
-        if (!build && !_asIs && _program.Key == CsiProgram.Etabs.Key && ModelerTables.ModelerFileBeside(modelFile) is { } cpm
-            && ModelFile.Load(cpm).Materials.Any(x => x.Tables is not null)
-            && ctx.Step("put the Modeler's material data that the .e2k has no keyword for in through ETABS's tables", () => // ETABS itself
+        if (!build && !_asIs && (_program.Key == CsiProgram.Etabs.Key || _program.Key == CsiProgram.Sap2000.Key) && ModelerTables.ModelerFileBeside(modelFile) is { } cpm
+            && ModelerTables.HasRows(cpm, _program)
+            && ctx.Step($"put the Modeler's data that {name}'s file has no place for in through {name}'s tables and API", () =>
             {
                 var (done, refused) = ModelerTables.Apply(Link, cpm);
                 var answer = Convert.ToInt32(Ask(FileTimeout, "save the scratch model", m => m.File.Save(target),

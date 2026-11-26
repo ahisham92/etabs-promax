@@ -80,6 +80,7 @@ public static class ModelerFieldSteps
         ctx.Offer(PropertyTools.All);
         ctx.Offer(StructureTools.All);
         ctx.Offer(ExtraTools.All);
+        ctx.Offer(EditTools.All);
         var folder = Q(ctx.Folder);
 
         // A new model from the template: three stories, two bays each way.
@@ -232,6 +233,7 @@ public static class ModelerFieldSteps
         ctx.Refused("read_table", """{"table":"Story Drift"}""", "no table", "tool read_table says no to a table that is not there");
 
         Defining(ctx, modeler);
+        Editing(ctx, modeler);
         Tables(ctx, modeler);
         ModelerCheck.FieldSteps(ctx);
         Lateral(ctx, modeler);
@@ -297,6 +299,17 @@ public static class ModelerFieldSteps
                     "the material, the sections, the load pattern or the combination did not come back from the .e2k");
             }, "tool open_model_file reads the .e2k back");
         }
+        // The SAP2000 and SAFE files the Modeler wrote open again just as they were (Ahmed 2026-11-26: "to and from the
+        // csi promax ... the user does not feel anything"): the whole model, nothing to say about them.
+        foreach (var (key, ext) in new[] { (CsiProgram.Sap2000.Key, ".s2k"), (CsiProgram.Safe.Key, ".f2k") })
+            if (ctx.Files.TryGetValue(key, out var file) && File.Exists(file))
+                ctx.Tool("open_model_file", $$"""{"path":{{Q(file)}}}""", a =>
+                {
+                    Same(ctx, a, "the " + ext);
+                    FieldContext.Expect(a["not_read"] is null, $"the {ext} the Modeler wrote should open with nothing left out: " + a["not_read"]?.ToJsonString());
+                }, $"tool open_model_file reads the {ext} back, the whole model");
+        if (ctx.Files.TryGetValue(CsiProgram.Etabs.Key, out var e2kAgain))
+            ctx.Tool("open_model_file", $$"""{"path":{{Q(e2kAgain)}}}""", a => Same(ctx, a, "the .e2k"), "tool open_model_file opens the .e2k again for the steps after");
         ctx.Refused("open_model_file", $$"""{"path":{{Q(Path.Combine(ctx.Folder, "no such file.e2k"))}}}""", "no file", "tool open_model_file says no to a file that is not there");
 
         ctx.Coverage("every Modeler tool was run");
@@ -356,6 +369,67 @@ public static class ModelerFieldSteps
             FieldContext.Expect(modeler.LoadPatterns().Count == before, "the test's pattern was left in the model");
             return "made, undone, redone and undone again";
         });
+    }
+
+    /// <summary>
+    /// Draw Braces, Draw Joints and Edit > Replicate, Move and Divide Frames (Ahmed 2026-11-26: every button). Each is
+    /// checked on the model, and the model is put back as it was afterwards, so the later counts still hold.
+    /// </summary>
+    private static void Editing(FieldContext ctx, OfflineEtabs modeler)
+    {
+        var before = CsiProMax.Model.ModelFile.ToJson(modeler.Model);
+        var unsaved = modeler.Unsaved;
+        try
+        {
+            var m = modeler.Model;
+            var stories = m.Stories.Select(s => s.Name).ToList();
+            var top = stories[^1];
+            var beam = m.LineAssigns.FirstOrDefault(x => x.Story == top && m.Line(x.Label)?.Kind == CsiProMax.Model.LineKind.Beam);
+            var column = m.LineAssigns.FirstOrDefault(x => m.Line(x.Label)?.Kind == CsiProMax.Model.LineKind.Column);
+            var section = column?.Section ?? m.FrameSections[0].Name;
+            var (minX, maxX) = (m.Points.Min(p => p.X), m.Points.Max(p => p.X));
+            var (minY, maxY) = (m.Points.Min(p => p.Y), m.Points.Max(p => p.Y));
+            var far = maxY - minY + 50;
+            ctx.Tool("add_braces", $$"""{"braces":[[{{minX}},{{minY}},{{maxX}},{{minY}}]],"stories":[{{Q(top)}}],"section":{{Q(section)}}}""",
+                a => FieldContext.Expect(a["braces"]!.AsArray().Count == 1 && m.Line(a["braces"]![0]!.GetValue<string>().Split('@')[0])?.Kind == CsiProMax.Model.LineKind.Brace, "no brace: " + a.ToJsonString()),
+                "tool add_braces, Draw > Draw Braces");
+            ctx.Refused("add_braces", $$"""{"braces":[[1,1,1,1]],"stories":[{{Q(top)}}],"section":{{Q(section)}}}""", "apart in plan", "tool add_braces says no to a brace with both ends at one place");
+            ctx.Tool("add_joints", $$"""{"points":[[{{minX - 5}},{{minY - 5}}]],"stories":[{{Q(top)}}]}""",
+                a => FieldContext.Expect(m.PointAssigns.Exists(p => p.Story == top && p.Point == a["joints"]![0]!.GetValue<string>().Split('@')[0]), "no joint: " + a.ToJsonString()),
+                "tool add_joints, Draw > Draw Joints");
+            if (beam is null) { ctx.Step("Edit > Replicate, Move and Divide Frames on a beam", () => throw new Exception("the Modeler's model has no beam on " + top)); return; }
+            var name = Q(beam.Label + "@" + top);
+            var loads = m.LineLoads.Count(l => l.Object == beam.Label && l.Story == top);
+            ctx.Tool("replicate_objects", $$"""{"objects":[{{name}}],"mode":"linear","dy":{{far}},"number":2}""", a =>
+            {
+                var made = a["made"]!.AsArray().Select(x => x!.GetValue<string>().Split('@')[0]).ToList();
+                FieldContext.Expect(made.Count == 2, "two copies were expected: " + a.ToJsonString());
+                foreach (var c in made)
+                {
+                    FieldContext.Expect(m.LineAssigns.Single(x => x.Label == c && x.Story == top).Section == beam.Section, $"{c} lost the section");
+                    FieldContext.Expect(m.LineLoads.Count(l => l.Object == c && l.Story == top) == loads, $"{c} lost its loads");
+                }
+            }, "tool replicate_objects, Edit > Replicate linear, with the section and loads");
+            ctx.Refused("replicate_objects", $$"""{"objects":[{{name}}],"mode":"story","stories":[{{Q(top)}}]}""", "already on", "tool replicate_objects says no to a copy onto the object itself");
+            ctx.Tool("move_objects", $$"""{"objects":[{{name}}],"dx":0,"dy":{{-far}}}""", a =>
+            {
+                var moved = a["moved"]![0]!.GetValue<string>().Split('@')[0];
+                FieldContext.Expect(!m.LineAssigns.Exists(x => x.Label == beam.Label && x.Story == top), "the beam is still where it was");
+                FieldContext.Expect(m.LineLoads.Count(l => l.Object == moved && l.Story == top) == loads, "its loads did not go with it");
+                name = Q(moved + "@" + top);
+            }, "tool move_objects, Edit > Move, with the section and loads");
+            var lineLoads = m.LineLoads.Where(l => l.Story == top && Q(l.Object + "@" + top) == name).ToList();
+            m.LineLoads.RemoveAll(l => lineLoads.Contains(l) && !string.Equals(CsiProMax.E2k.E2kText.Unquote(CsiProMax.E2k.E2kText.Value(l.Tokens, "TYPE") ?? ""), "UNIFF", StringComparison.OrdinalIgnoreCase));
+            ctx.Tool("divide_frames", $$"""{"objects":[{{name}}],"parts":3}""",
+                a => FieldContext.Expect(a["parts"]!.AsArray().Count == 3 && a["parts"]!.AsArray().All(p => m.LineAssigns.Exists(x => x.Label + "@" + x.Story == p!.GetValue<string>() && x.Section == beam.Section)), "three beams with the section were expected: " + a.ToJsonString()),
+                "tool divide_frames, Edit > Divide Frames into 3");
+            if (column is not null) ctx.Refused("divide_frames", $$"""{"objects":[{{Q(column.Label + "@" + column.Story)}}],"parts":2}""", "divides beams", "tool divide_frames says no to a column");
+        }
+        finally
+        {
+            modeler.Rollback(CsiProMax.Model.ModelFile.FromJson(before), unsaved);
+            ctx.Step("the Modeler's model is as it was after the Draw and Edit checks", () => FieldContext.Expect(CsiProMax.Model.ModelFile.ToJson(modeler.Model) == before, "the model was not put back"));
+        }
     }
 
     /// <summary>The model's tables to Excel and back, the way SAP2000 does it: the workbook the Modeler writes reads back
@@ -541,11 +615,24 @@ public static class ModelerFieldSteps
             ctx.Refused("assign_frame_data", """{"objects":[""" + obj + """],"hinges":[{"at":1.5,"dof":"M3"}]}""", "0 to 1", "tool assign_frame_data says no to a hinge beyond the member");
             ctx.Tool("property_definitions", """{"objects":[""" + obj + """]}""", a =>
                 FieldContext.Expect(a["objects"]![0]!["hinges"]!.AsArray().Count == 3, "the beam does not show its 3 hinges: " + a["objects"]!.ToJsonString()), "tool property_definitions, the beam's hinges");
+            // Assign > Frame items the .e2k has no keyword for, as rows of ETABS's own tables (Ahmed 2026-11-26: every button).
+            ctx.Tool("assign_frame_data", """{"objects":[""" + obj + """],"tables":{"Frame Assignments - Additional Mass":[{"AddedMass":"0.05"}],"Frame Assignments - Output Stations":[{"StationOpt":"Min Stations","MinStations":"7"}]}}""",
+                _ => FieldContext.Expect(CsiProMax.Model.AssignTables.Row(beam, "Frame Assignments - Additional Mass").GetValueOrDefault("AddedMass") == "0.05", "the beam's added mass is not kept"),
+                "tool assign_frame_data, added mass and output stations by the program's assignment tables");
+            ctx.Refused("assign_frame_data", """{"objects":[""" + obj + """],"tables":{"Frame Assignments - Additional Mass":[{"Mass":"1"}]}}""", "no field", "tool assign_frame_data says no to a field the table does not have");
         }
         var floor = modeler.Model.AreaAssigns.FirstOrDefault(x => modeler.Model.Area(x.Label)?.Kind == CsiProMax.Model.AreaKind.Floor);
-        if (floor is not null) ctx.Tool("assign_shell_data", """{"objects":[""" + Q(floor.Label + "@" + floor.Story) + """],"modifiers":{"M11MOD":0.25,"M22MOD":0.25}}""", null, "tool assign_shell_data, cracked slab modifiers");
+        if (floor is not null)
+        {
+            ctx.Tool("assign_shell_data", """{"objects":[""" + Q(floor.Label + "@" + floor.Story) + """],"modifiers":{"M11MOD":0.25,"M22MOD":0.25}}""", null, "tool assign_shell_data, cracked slab modifiers");
+            ctx.Tool("assign_shell_data", """{"objects":[""" + Q(floor.Label + "@" + floor.Story) + """],"tables":{"Area Assignments - Additional Mass":[{"AddedMass":"0.02"}]}}""", null, "tool assign_shell_data, added mass by the program's assignment table");
+        }
         var support = modeler.Model.PointAssigns.FirstOrDefault(p => p.Restraint is not null);
-        if (support is not null) ctx.Tool("assign_joint_data", """{"objects":[""" + Q(support.Point + "@" + support.Story) + """],"spring":"CPM-PS"}""", null, "tool assign_joint_data, a spring under a support");
+        if (support is not null)
+        {
+            ctx.Tool("assign_joint_data", """{"objects":[""" + Q(support.Point + "@" + support.Story) + """],"spring":"CPM-PS"}""", null, "tool assign_joint_data, a spring under a support");
+            ctx.Tool("assign_joint_data", """{"objects":[""" + Q(support.Point + "@" + support.Story) + """],"tables":{"Joint Assignments - Additional Mass":[{"MassXY":"1.5","MassZ":"0"}]}}""", null, "tool assign_joint_data, added mass by the program's assignment table");
+        }
         ctx.Tool("define_link", """{"name":"CPM-LINK","type":"RUBBER ISOLATOR","dofs":{"U1":{"stiffness":500000},"U2":{"stiffness":1000,"damping":20},"U3":{"stiffness":1000,"damping":20}}}""", null, "tool define_link, a rubber isolator");
         ctx.Refused("define_link", """{"name":"CPM-BAD","type":"SPRINGY","dofs":{"U1":{"stiffness":1}}}""", "link type", "tool define_link says no to a type the programs do not have");
         ctx.Tool("property_definitions", "{}", a =>

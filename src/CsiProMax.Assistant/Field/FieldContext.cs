@@ -107,6 +107,7 @@ public sealed class FieldContext(CsiProgram program, string folder, ICsiLink lin
         }
         lock (_gate) { _doing = name; _moved = DateTime.UtcNow; }
         Progress?.Invoke(name);
+        var refusedBefore = CsiProMax.Assistant.Etabs.EditableTables.Refusals;
         var clock = System.Diagnostics.Stopwatch.StartNew();
         try
         {
@@ -127,7 +128,9 @@ public sealed class FieldContext(CsiProgram program, string folder, ICsiLink lin
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             var real = ex is System.Reflection.TargetInvocationException { InnerException: { } inner } ? inner : ex;
-            Add(name, false, $"{real.GetType().Name}: {real.Message}{Where(real)}", clock.Elapsed.TotalSeconds);
+            // A table import the program refused in this step: what was sent and its whole log, so the report alone says why.
+            var import = CsiProMax.Assistant.Etabs.EditableTables.Refusals != refusedBefore ? " | Import sent and its whole log: " + CsiProMax.Assistant.Etabs.EditableTables.LastRefused : "";
+            Add(name, false, $"{real.GetType().Name}: {real.Message}{Where(real)}{import}", clock.Elapsed.TotalSeconds);
             StoppedAnswering(name);
             return default;
         }
@@ -413,10 +416,14 @@ public sealed class FieldContext(CsiProgram program, string folder, ICsiLink lin
     private void Live(FieldStep step)
     {
         var line = LiveLine(step);
+        if (!step.Ok) try { Failed?.Invoke(step); } catch (Exception ex) when (ex is not OutOfMemoryException) { /* a picture never stops the run */ }
         try { Outcome?.Invoke(line); } catch (Exception ex) when (ex is not OutOfMemoryException) { /* following the run never stops it */ }
         try { Directory.CreateDirectory(Folder); lock (_gate) File.AppendAllText(Path.Combine(Folder, LiveFile), $"{DateTime.Now:HH:mm:ss} {line}{Environment.NewLine}"); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException) { }
     }
+
+    /// <summary>Called with each step that failed, as it is recorded (the scratch window's picture is taken then).</summary>
+    public Action<FieldStep>? Failed { get; set; }
 
     /// <summary>Called with each step's outcome line as it is recorded.</summary>
     public Action<string>? Outcome { get; set; }
