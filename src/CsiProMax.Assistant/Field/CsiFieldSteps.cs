@@ -122,6 +122,28 @@ public static class CsiFieldSteps
                 FieldContext.Expect(wrong.Count == 0, string.Join(" | ", wrong));
                 return "all there";
             });
+            // Assign > Frame, Shell and Joint > Additional Mass, kept by the Modeler as rows of ETABS's assignment tables: in
+            // ETABS put in through its tables after opening the .e2k, in SAP2000 by the .s2k's added mass tables.
+            if (program.Key != CsiProgram.Safe.Key)
+                ctx.Step($"{name} opened the Modeler's added mass on a beam, a floor and a joint", () =>
+                {
+                    var tables = link.Tables();
+                    var etabs = program.Key == CsiProgram.Etabs.Key;
+                    var wrong = new List<string>();
+                    foreach (var (kind, sap, field, sapField, value) in new[] { ("Frame", "Frame Added Mass Assignments", "AddedMass", "MassPerLen", 0.05), ("Area", "Area Added Mass Assignments", "AddedMass", "MassPerArea", 0.02), ("Joint", "Joint Added Mass Assignments", "MassXY", "Mass1", 1.5) })
+                    {
+                        var want = etabs ? kind + " Assignments - Additional Mass" : sap;
+                        var t = tables.FirstOrDefault(x => x.Name.Equals(want, StringComparison.OrdinalIgnoreCase));
+                        if (t is null) { wrong.Add($"{name} has no table '{want}'"); continue; }
+                        var read = link.ReadTable(t.Key, null, null);
+                        var col = read.Fields.ToList().FindIndex(x => x.Equals(etabs ? field : sapField, StringComparison.OrdinalIgnoreCase));
+                        if (col < 0) { wrong.Add($"'{want}' has no field {(etabs ? field : sapField)}: {string.Join(", ", read.Fields)}"); continue; }
+                        if (!read.Rows.Any(r => col < r.Length && double.TryParse(r[col], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d) && Math.Abs(d - value) < 1e-6))
+                            wrong.Add($"'{want}' has no row with {value} ({read.Rows.Count} rows)");
+                    }
+                    FieldContext.Expect(wrong.Count == 0, string.Join(" | ", wrong));
+                    return "all there";
+                });
             ctx.Step($"{name} opened the Modeler's groups, links" + (program.Key == CsiProgram.Etabs.Key ? ", diaphragms and pier labels" : ""), () =>
             {
                 string[] Names(string what, Func<dynamic, string[]> read) => (string[])(link.Raw(what, m => read(m)) ?? Array.Empty<string>());

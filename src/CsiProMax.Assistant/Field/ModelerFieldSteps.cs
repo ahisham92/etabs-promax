@@ -604,11 +604,24 @@ public static class ModelerFieldSteps
             ctx.Refused("assign_frame_data", """{"objects":[""" + obj + """],"hinges":[{"at":1.5,"dof":"M3"}]}""", "0 to 1", "tool assign_frame_data says no to a hinge beyond the member");
             ctx.Tool("property_definitions", """{"objects":[""" + obj + """]}""", a =>
                 FieldContext.Expect(a["objects"]![0]!["hinges"]!.AsArray().Count == 3, "the beam does not show its 3 hinges: " + a["objects"]!.ToJsonString()), "tool property_definitions, the beam's hinges");
+            // Assign > Frame items the .e2k has no keyword for, as rows of ETABS's own tables (Ahmed 2026-11-26: every button).
+            ctx.Tool("assign_frame_data", """{"objects":[""" + obj + """],"tables":{"Frame Assignments - Additional Mass":[{"AddedMass":"0.05"}],"Frame Assignments - Output Stations":[{"StationOpt":"Min Stations","MinStations":"7"}]}}""",
+                _ => FieldContext.Expect(CsiProMax.Model.AssignTables.Row(beam, "Frame Assignments - Additional Mass").GetValueOrDefault("AddedMass") == "0.05", "the beam's added mass is not kept"),
+                "tool assign_frame_data, added mass and output stations by the program's assignment tables");
+            ctx.Refused("assign_frame_data", """{"objects":[""" + obj + """],"tables":{"Frame Assignments - Additional Mass":[{"Mass":"1"}]}}""", "no field", "tool assign_frame_data says no to a field the table does not have");
         }
         var floor = modeler.Model.AreaAssigns.FirstOrDefault(x => modeler.Model.Area(x.Label)?.Kind == CsiProMax.Model.AreaKind.Floor);
-        if (floor is not null) ctx.Tool("assign_shell_data", """{"objects":[""" + Q(floor.Label + "@" + floor.Story) + """],"modifiers":{"M11MOD":0.25,"M22MOD":0.25}}""", null, "tool assign_shell_data, cracked slab modifiers");
+        if (floor is not null)
+        {
+            ctx.Tool("assign_shell_data", """{"objects":[""" + Q(floor.Label + "@" + floor.Story) + """],"modifiers":{"M11MOD":0.25,"M22MOD":0.25}}""", null, "tool assign_shell_data, cracked slab modifiers");
+            ctx.Tool("assign_shell_data", """{"objects":[""" + Q(floor.Label + "@" + floor.Story) + """],"tables":{"Area Assignments - Additional Mass":[{"AddedMass":"0.02"}]}}""", null, "tool assign_shell_data, added mass by the program's assignment table");
+        }
         var support = modeler.Model.PointAssigns.FirstOrDefault(p => p.Restraint is not null);
-        if (support is not null) ctx.Tool("assign_joint_data", """{"objects":[""" + Q(support.Point + "@" + support.Story) + """],"spring":"CPM-PS"}""", null, "tool assign_joint_data, a spring under a support");
+        if (support is not null)
+        {
+            ctx.Tool("assign_joint_data", """{"objects":[""" + Q(support.Point + "@" + support.Story) + """],"spring":"CPM-PS"}""", null, "tool assign_joint_data, a spring under a support");
+            ctx.Tool("assign_joint_data", """{"objects":[""" + Q(support.Point + "@" + support.Story) + """],"tables":{"Joint Assignments - Additional Mass":[{"MassXY":"1.5","MassZ":"0"}]}}""", null, "tool assign_joint_data, added mass by the program's assignment table");
+        }
         ctx.Tool("define_link", """{"name":"CPM-LINK","type":"RUBBER ISOLATOR","dofs":{"U1":{"stiffness":500000},"U2":{"stiffness":1000,"damping":20},"U3":{"stiffness":1000,"damping":20}}}""", null, "tool define_link, a rubber isolator");
         ctx.Refused("define_link", """{"name":"CPM-BAD","type":"SPRINGY","dofs":{"U1":{"stiffness":1}}}""", "link type", "tool define_link says no to a type the programs do not have");
         ctx.Tool("property_definitions", "{}", a =>

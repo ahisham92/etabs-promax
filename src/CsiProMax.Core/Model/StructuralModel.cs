@@ -201,6 +201,8 @@ public abstract class Assign
     /// <summary>The rest of each assignment line, as read (releases, meshing, modifiers, ...). The first goes on
     /// the same line as the named properties when written.</summary>
     public List<List<string>> Extra { get; set; } = [];
+    /// <summary>Rows of the program's assignment tables that the .e2k has no keyword for (<see cref="AssignTables"/>).</summary>
+    public Dictionary<string, List<Dictionary<string, string>>>? Tables { get; set; }
 }
 
 public sealed class PointAssign : Assign
