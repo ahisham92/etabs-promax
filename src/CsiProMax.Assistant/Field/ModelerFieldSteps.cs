@@ -79,6 +79,7 @@ public static class ModelerFieldSteps
         ctx.Offer(ModelTextTools.All);
         ctx.Offer(PropertyTools.All);
         ctx.Offer(StructureTools.All);
+        ctx.Offer(ExtraTools.All);
         var folder = Q(ctx.Folder);
 
         // A new model from the template: three stories, two bays each way.
@@ -418,6 +419,40 @@ public static class ModelerFieldSteps
         ModelText(ctx, modeler);
         Properties(ctx, modeler);
         Structure(ctx, modeler);
+        Extras(ctx, modeler);
+    }
+
+    /// <summary>SAP2000's joint constraints and moving loads and SAFE's own strips, named CPM- for the program checks:
+    /// they stay in the model, so SAP2000's scratch part sees whether it knows their tables and fields.</summary>
+    private static void Extras(FieldContext ctx, OfflineEtabs modeler)
+    {
+        var m = modeler.Model;
+        var beams = m.LineAssigns.Where(x => m.Line(x.Label)?.Kind == CsiProMax.Model.LineKind.Beam).ToList();
+        var top = beams.Where(b => b.Story == beams[^1].Story).Select(b => b.Label + "@" + b.Story).Take(2).ToList();
+        var joints = beams.Count == 0 ? [] : new[] { m.Line(beams[0].Label)!.PointI, m.Line(beams[0].Label)!.PointJ }.Select(p => p + "@" + beams[0].Story).ToList();
+        ctx.Tool("define_constraint", """{"name":"CPM-BODY","type":"Body","dofs":["UX","UY","RZ"]}""", null, "tool define_constraint, a body constraint");
+        ctx.Tool("define_constraint", """{"name":"CPM-WELD","type":"Weld","tolerance":0.01}""", null, "tool define_constraint, a weld");
+        ctx.Refused("define_constraint", """{"name":"CPM-BAD","type":"Weld"}""", "tolerance", "tool define_constraint says no to a weld with no tolerance");
+        ctx.Refused("define_constraint", """{"name":"CPM-BAD","type":"Glue"}""", "constraint type", "tool define_constraint says no to a type SAP2000 does not have");
+        if (joints.Count == 2) ctx.Tool("assign_joint_constraint", """{"objects":""" + List(joints) + ""","constraint":"CPM-BODY"}""", a => FieldContext.Expect(Int(a["assigned"]) == 2, "2 joints: " + a.ToJsonString()), "tool assign_joint_constraint, a beam's two ends");
+        ctx.Refused("assign_joint_constraint", """{"objects":["NOPE@NOPE"],"constraint":"CPM-BODY"}""", "no point", "tool assign_joint_constraint says no to a joint that is not there");
+        if (top.Count > 0) ctx.Tool("define_lane", """{"name":"CPM-LANE","frames":""" + List(top) + ""","offset":0,"width":3}""", null, "tool define_lane, along beams");
+        ctx.Tool("define_vehicle", """{"name":"CPM-HL93","standard":"HL-93K"}""", null, "tool define_vehicle, a standard truck");
+        ctx.Tool("define_vehicle", """{"name":"CPM-TRUCK","axles":[{"load":35},{"load":145,"spacing":4.3},{"load":145,"spacing":4.3}]}""", null, "tool define_vehicle, a general truck by its axles");
+        ctx.Refused("define_vehicle", """{"name":"CPM-BAD"}""", "axles", "tool define_vehicle says no to a general vehicle with no load");
+        ctx.Tool("define_vehicle_class", """{"name":"CPM-CLASS","vehicles":[{"vehicle":"CPM-HL93"},{"vehicle":"CPM-TRUCK","scale":1.25}]}""", null, "tool define_vehicle_class");
+        if (top.Count > 0)
+        {
+            ctx.Tool("define_moving_case", """{"name":"CPM-MOVE","assignments":[{"class":"CPM-CLASS","lanes":["CPM-LANE"]}]}""", null, "tool define_moving_case");
+            ctx.Refused("define_vehicle_class", """{"name":"CPM-CLASS","delete":true}""", "CPM-MOVE", "tool define_vehicle_class says no to deleting a class a case uses");
+        }
+        ctx.Tool("define_strip", """{"name":"CPM-STRIP","layer":"A","points":[[0,2.5],[12,2.5]],"width_left":1,"width_right":1}""", null, "tool define_strip, a hand-drawn strip for SAFE");
+        ctx.Refused("define_strip", """{"name":"CPM-BAD","points":[[0,0]],"width_left":1}""", "two points", "tool define_strip says no to a strip of one point");
+        ctx.Tool("extra_definitions", "{}", a =>
+        {
+            FieldContext.Expect(a["constraints"]!.AsArray().Count == 2 && a["vehicles"]!.AsArray().Count == 2 && a["strips"]!.AsArray().Count == 1, "not all listed: " + a.ToJsonString());
+            if (joints.Count == 2) FieldContext.Expect(a["constraints"]![0]!["joints"]!.AsArray().Count == 2, "CPM-BODY's joints are not listed");
+        });
     }
 
     /// <summary>Diaphragms, pier and spandrel labels, groups and a section cut, named CPM- for the program checks.</summary>

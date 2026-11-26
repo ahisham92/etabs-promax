@@ -125,7 +125,9 @@ public static class CsiFieldSteps
                         last = call;
                         hinges += call.Where(kv => kv.Key != "return").Select(kv => kv.Value is JsonArray a ? a.Count : 0).DefaultIfEmpty(0).Max();
                     }
-                    FieldContext.Expect(hinges >= 3, $"{name} has {hinges} hinges from the Modeler's file, 3 were written (a frame's answer: {last?.ToJsonString()}; its hinge tables: {HingeTables()})");
+                    // The .s2k carries the concrete beam's two flexural hinges; the .e2k all three.
+                    var written = program.Key == CsiProgram.Sap2000.Key ? 2 : 3;
+                    FieldContext.Expect(hinges >= written, $"{name} has {hinges} hinges from the Modeler's file, {written} were written (a frame's answer: {last?.ToJsonString()}; its hinge tables: {HingeTables()})");
                     return $"{hinges} hinges";
                 });
             if (program.Key == CsiProgram.Sap2000.Key)

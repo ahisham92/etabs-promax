@@ -3234,14 +3234,14 @@ function modelerMenus(m) {
   m.Edit = [[s.undo ? "Undo " + s.undo : "Undo", "m:undo", "Ctrl+Z", !s.undo], [s.redo ? "Redo " + s.redo : "Redo", "m:redo", "Ctrl+Y", !s.redo], 0,
     ["Delete", "m:delete", "Del", !any], 0, ["Copy names of the selected objects", "copyNames", "Ctrl+C", !any], 0, ["Hide the selected objects", "hideSel", "", !any], ["Show all objects", "showAll"], 0, ["Model Text...", "m:text"]];
   m.Define = [["Material Properties...", "m:materials"], ["Frame Sections...", "m:frameSections"], ["Slab and Wall Sections...", "m:shellSections"], ["Link/Support Properties...", "m:links"], ["Spring Properties", [["Point Springs...", "m:spr:point"], ["Line Springs...", "m:spr:line"], ["Area Springs...", "m:spr:area"]]], 0,
-    ["Diaphragms...", "m:st:diaphragm"], ["Pier Labels...", "m:st:pier"], ["Spandrel Labels...", "m:st:spandrel"], ["Groups...", "m:st:group"], ["Section Cuts...", "m:st:cut"], 0,
+    ["Diaphragms...", "m:st:diaphragm"], ["Pier Labels...", "m:st:pier"], ["Spandrel Labels...", "m:st:spandrel"], ["Groups...", "m:st:group"], ["Section Cuts...", "m:st:cut"], ["Joint Constraints (SAP2000)...", "m:ex:constraints"], ["Design Strips (SAFE)...", "m:ex:strips"], 0,
     ["Story Data...", "m:stories"], ["Grid Data...", "m:grids"], 0, ["Functions", [["Response Spectrum...", "m:fnRS"], ["Time History...", "m:fnTH"]]],
-    ["Load Patterns...", "m:patterns"], ["Load Cases...", "m:cases"], ["Load Combinations...", "m:combos"], 0, ["Mass Source...", "m:mass"], ["P-Delta Options...", "m:pdelta"]];
+    ["Load Patterns...", "m:patterns"], ["Load Cases...", "m:cases"], ["Moving Loads (SAP2000)", [["Lanes...", "m:ex:lanes"], ["Vehicles...", "m:ex:vehicles"], ["Vehicle Classes...", "m:ex:classes"], ["Moving Load Cases...", "m:ex:mcases"]]], ["Load Combinations...", "m:combos"], 0, ["Mass Source...", "m:mass"], ["P-Delta Options...", "m:pdelta"]];
   m.Draw = [["Select Object", "t:select", "Esc"], 0, ["Draw Columns (click a point)", "d:column"], ["Draw Beams (click start and end)", "d:beam"], ["Quick Draw Beams (click a grid line)", "d:qbeam"], 0,
     ["Draw Floors (click corners)", "d:floor"], ["Draw Rectangular Floors (two corners)", "d:rect"], ["Quick Draw Floors (click in a bay)", "d:qfloor"], 0,
     ["Draw Walls (click start and end)", "d:wall"], ["Quick Draw Walls (click a grid line)", "d:qwall"], 0, ["Snap and Story Options...", "m:drawHelp"]];
   m.Assign = [["Frame Section...", "m:asgFrame", "", !fr], ["Slab or Wall Section...", "m:asgShell", "", !ar], 0, ["Joint Restraints (Supports)...", "m:asgSupport"], 0,
-    ["Joint", [["Springs...", "m:ad:joint", "", !any], ["Diaphragms...", "m:sa:jdiaph", "", !any]]],
+    ["Joint", [["Springs...", "m:ad:joint", "", !any], ["Diaphragms...", "m:sa:jdiaph", "", !any], ["Constraints (SAP2000)...", "m:ex:jconstraint", "", !any]]],
     ["Frame", [["Releases...", "m:ad:releases", "", !fr], ["Local Axes...", "m:ad:axes", "", !fr], ["Insertion Point...", "m:ad:insertion", "", !fr], ["End Length Offsets...", "m:ad:offsets", "", !fr], ["Property Modifiers...", "m:ad:fmods", "", !fr], ["Line Springs...", "m:ad:lspring", "", !fr], ["Hinges...", "m:ad:hinges", "", !fr]]],
     ["Shell", [["Property Modifiers...", "m:ad:smods", "", !ar], ["Area Springs...", "m:ad:aspring", "", !ar], ["Diaphragms...", "m:sa:diaph", "", !ar], ["Pier Label...", "m:sa:pier", "", !any], ["Spandrel Label...", "m:sa:spandrel", "", !any]]],
     ["Assign Objects to Group...", "m:sa:group", "", !any], 0,
@@ -3257,6 +3257,7 @@ async function modelAct(a) {
   if (a.startsWith("ad:")) return hmAssignData(a.slice(3));
   if (a.startsWith("st:")) return hmStructure(a.slice(3));
   if (a.startsWith("sa:")) return hmAssignStructure(a.slice(3));
+  if (a.startsWith("ex:")) return hmExtras(a.slice(3));
   switch (a) {
     case "undo": case "redo": { const j = await hmRun(a); if (j.ok) hmSay(j.did || "Done."); return; }
     case "delete": return hmDelete();
@@ -3504,6 +3505,64 @@ function hmSpring(kind, sp, after) {
   return dialog({point: "Point", line: "Line", area: "Area"}[kind] + " Spring Property Data", `<div class="g2"><span>Property Name</span><input id="kN" value="${esc(sp ? sp.name : kind[0].toUpperCase() + "Spr1")}" ${sp ? "disabled" : ""}></div>
     <fieldset><legend>Stiffness</legend><div class="g2" id="kV">${keys.map(k => `<span>${k} (${unit(k)})</span><input data-k="${k}" type="number" step="any" value="${sp ? sp.values[k] : 0}">`).join("")}</div></fieldset>`,
     [["OK", d => { const values = {}; d.querySelectorAll("#kV [data-k]").forEach(x => { const v = parseFloat(x.value); if (isFinite(v)) values[x.dataset.k] = v; }); return submit(d, "define_spring", {kind, name: q(d, "#kN").value.trim(), values}, after); }, true], ["Cancel"]], {width: 400});
+}
+
+// ---- What the .e2k has no place for: SAP2000 joint constraints and moving loads, SAFE design strips ----
+async function hmExtras(what) {
+  const xd = (await hmRun("extra_definitions", {}, true)).result; if (!xd) return;
+  const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmExtras(what); };
+  const u = hmU(), nums = (d, sel) => (q(d, sel).value || "").split(/[\s,;]+/).map(parseFloat).filter(isFinite);
+  const kinds = {
+    constraints: {title: "Define Joint Constraints", list: xd.constraints, tool: "define_constraint", form: hmConstraint},
+    lanes: {title: "Define Lanes", list: xd.lanes, tool: "define_lane", form: (c, after) => {
+      const fr = c ? c.frames : hmSelected("f");
+      return dialog("Lane Data", `<div class="g2"><span>Lane Name</span><input id="xN" value="${esc(c ? c.name : "LANE" + (xd.lanes.length + 1))}" ${c ? "disabled" : ""}><span>Offset from the frames, ${u.l}</span><input id="xO" type="number" step="any" value="${c ? c.offset : 0}"><span>Width, ${u.l}</span><input id="xW" type="number" step="any" value="${c ? c.width : 3.6}"></div>
+        <fieldset><legend>Along frames, in order</legend><textarea id="xF" rows="4" style="width:100%">${esc(fr.join("\n"))}</textarea><p class="kv">One frame per line, label@story. Select the frames first to have them here.</p></fieldset>`,
+        [["OK", d => submit(d, "define_lane", {name: q(d, "#xN").value.trim(), frames: q(d, "#xF").value.split(/\s+/).filter(Boolean), offset: fnum(d, "#xO"), width: fnum(d, "#xW")}, after), true], ["Cancel"]], {width: 460}); }},
+    vehicles: {title: "Define Vehicles", list: xd.vehicles, tool: "define_vehicle", form: (c, after) => {
+      const ax = c ? c.axles : [{load: 35, spacing: 0}, {load: 145, spacing: 4.3}, {load: 145, spacing: 4.3}];
+      return dialog("Vehicle Data", `<div class="g2"><span>Vehicle Name</span><input id="xN" value="${esc(c ? c.name : "VEH" + (xd.vehicles.length + 1))}" ${c ? "disabled" : ""}><span>Standard vehicle</span><select id="xS">${opts([["", "General (by its axles)"]].concat(xd.standard_vehicles.map(v => [v, v])), c ? c.standard : "")}</select><span>Scale factor</span><input id="xK" type="number" step="any" value="${c ? c.scale : 1}"></div>
+        <fieldset><legend>General vehicle, front to back</legend><div class="g2"><span>Axle loads, ${u.f}</span><input id="xL" value="${ax.map(a => a.load).join(", ")}"><span>Distance from the axle before, ${u.l}</span><input id="xD" value="${ax.slice(1).map(a => a.spacing).join(", ")}"><span>Uniform load, ${u.f}/${u.l}</span><input id="xU" type="number" step="any" value="${c ? c.uniform : 0}"></div></fieldset>`,
+        [["OK", d => { const std = q(d, "#xS").value, loads = nums(d, "#xL"), gaps = nums(d, "#xD");
+          return submit(d, "define_vehicle", Object.assign({name: q(d, "#xN").value.trim(), scale: fnum(d, "#xK")}, std ? {standard: std} : {axles: loads.map((l, i) => ({load: l, spacing: i ? gaps[i - 1] || 0 : 0})), uniform: fnum(d, "#xU")}), after); }, true], ["Cancel"]], {width: 480}); }},
+    classes: {title: "Define Vehicle Classes", list: xd.vehicle_classes, tool: "define_vehicle_class", form: (c, after) => {
+      const has = v => c && c.vehicles.find(x => x.vehicle === v);
+      return dialog("Vehicle Class Data", `<div class="g2"><span>Class Name</span><input id="xN" value="${esc(c ? c.name : "VECL" + (xd.vehicle_classes.length + 1))}" ${c ? "disabled" : ""}></div>
+        <table class="list hmgrid"><tr><th>Vehicle</th><th>In the class</th><th>Scale factor</th></tr>${xd.vehicles.map(v => `<tr><td>${esc(v.name)}</td><td><input type="checkbox" data-v="${esc(v.name)}" ${has(v.name) ? "checked" : ""}></td><td><input data-s="${esc(v.name)}" type="number" step="any" value="${has(v.name) ? has(v.name).scale : 1}"></td></tr>`).join("")}</table>`,
+        [["OK", d => submit(d, "define_vehicle_class", {name: q(d, "#xN").value.trim(), vehicles: [...d.querySelectorAll("[data-v]:checked")].map(x => ({vehicle: x.dataset.v, scale: parseFloat(d.querySelector(`[data-s="${CSS.escape(x.dataset.v)}"]`).value) || 1}))}, after), true], ["Cancel"]], {width: 440}); }},
+    mcases: {title: "Define Moving Load Cases", list: xd.moving_cases, tool: "define_moving_case", form: (c, after) => {
+      const a = (c && c.assignments[0]) || {class: (xd.vehicle_classes[0] || {}).name, lanes: xd.lanes.map(l => l.name), scale: 1, min_loaded: 1, max_loaded: 0};
+      return dialog("Moving Load Case Data", `<div class="g2"><span>Case Name</span><input id="xN" value="${esc(c ? c.name : "MOVE" + (xd.moving_cases.length + 1))}" ${c ? "disabled" : ""}><span>Vehicle class</span><select id="xC">${opts(xd.vehicle_classes.map(v => v.name), a.class)}</select><span>Scale factor</span><input id="xK" type="number" step="any" value="${a.scale}"><span>Fewest lanes loaded</span><input id="xMin" type="number" value="${a.min_loaded}"><span>Most lanes loaded (0: all)</span><input id="xMax" type="number" value="${a.max_loaded}"></div>
+        <fieldset><legend>Lanes</legend>${xd.lanes.map(l => `<label style="margin-right:10px"><input type="checkbox" data-l="${esc(l.name)}" ${a.lanes.includes(l.name) ? "checked" : ""}> ${esc(l.name)}</label>`).join("") || '<span class="kv">Define a lane first.</span>'}</fieldset>`,
+        [["OK", d => submit(d, "define_moving_case", {name: q(d, "#xN").value.trim(), assignments: [{class: q(d, "#xC").value, lanes: [...d.querySelectorAll("[data-l]:checked")].map(x => x.dataset.l), scale: fnum(d, "#xK"), min_loaded: parseInt(q(d, "#xMin").value) || 0, max_loaded: parseInt(q(d, "#xMax").value) || 0}]}, after), true], ["Cancel"]], {width: 460}); }},
+    strips: {title: "Define Design Strips (SAFE)", list: xd.strips, tool: "define_strip", form: (c, after) =>
+      dialog("Design Strip Data", `<div class="g2"><span>Strip Name</span><input id="xN" value="${esc(c ? c.name : "STRIP" + (xd.strips.length + 1))}" ${c ? "disabled" : ""}><span>Layer</span><select id="xY">${opts(["A", "B"], c ? c.layer : "A")}</select><span>Width to the left, ${u.l}</span><input id="xWL" type="number" step="any" value="${c ? c.width_left : 1}"><span>Width to the right, ${u.l}</span><input id="xWR" type="number" step="any" value="${c ? c.width_right : 1}"></div>
+        <fieldset><legend>Through the points (x y, one per line)</legend><textarea id="xP" rows="4" style="width:100%">${c ? c.points.map(p => p.join(" ")).join("\n") : "0 0\n6 0"}</textarea></fieldset><p class="kv">Goes into the SAFE file beside the strips along the grid lines.</p>`,
+        [["OK", d => submit(d, "define_strip", {name: q(d, "#xN").value.trim(), layer: q(d, "#xY").value, width_left: fnum(d, "#xWL"), width_right: fnum(d, "#xWR"),
+          points: q(d, "#xP").value.split("\n").map(l => l.trim().split(/[\s,;]+/).map(parseFloat)).filter(p => p.length === 2 && p.every(isFinite))}, after), true], ["Cancel"]], {width: 440})},
+  };
+  if (what === "jconstraint") {
+    const names = hmJoints(); if (!names.length) return hmSay("Select the members whose joints go in the constraint first.", true);
+    return dialog("Assign Joint Constraints", `<fieldset><legend>Constraint</legend><select id="zS">${opts([["", "None (take the joints out)"]].concat(xd.constraints.map(c => [c.name, `${c.name} (${c.type})`])), (xd.constraints[0] || {}).name || "")}</select></fieldset><p class="kv">${names.length} selected joints.</p>`,
+      [["OK", d => submit(d, "assign_joint_constraint", {objects: names, constraint: q(d, "#zS").value}), true], ["Cancel"]], {width: 400});
+  }
+  const k = kinds[what]; if (!k) return;
+  const find = n => k.list.find(x => x.name === n);
+  listForm(k.title, "Defined", k.list.map(x => x.name), [
+    ["Add New...", () => k.form(null, again)],
+    ["Modify/Show...", n => n && k.form(find(n), again)],
+    ["Delete", n => n && hmRun(k.tool, {name: n, delete: true}, true).then(j => j.ok ? again() : hmSay(j.error, true))],
+  ], n => k.form(find(n), again));
+  function hmConstraint(c, after) {
+    const dofsFor = t => t === "Local" ? xd.local_dofs : xd.global_dofs, axisTypes = ["Diaphragm", "Plate", "Rod", "Beam"], dofTypes = ["Body", "Equal", "Local", "Weld"];
+    const d = dialog("Joint Constraint Data", `<div class="g2"><span>Constraint Name</span><input id="xN" value="${esc(c ? c.name : "BODY" + (xd.constraints.length + 1))}" ${c ? "disabled" : ""}><span>Type</span><select id="xT">${opts(xd.constraint_types, c ? c.type : "Body")}</select><span>Axis</span><select id="xA">${opts(xd.axes, c && c.axis ? c.axis : "Z")}</select><span>Weld tolerance, ${u.l}</span><input id="xTol" type="number" step="any" value="${c ? c.tolerance : 0.01}"></div>
+      <fieldset><legend>Constrained degrees of freedom</legend><div id="xD"></div></fieldset>${c ? `<p class="kv">${c.joints.length} joints. Assign > Joint > Constraints adds more.</p>` : ""}`,
+      [["OK", d => { const t = q(d, "#xT").value; return submit(d, "define_constraint", Object.assign({name: q(d, "#xN").value.trim(), type: t}, axisTypes.includes(t) ? {axis: q(d, "#xA").value} : {}, dofTypes.includes(t) ? {dofs: [...d.querySelectorAll("#xD [data-d]:checked")].map(x => x.dataset.d)} : {}, t === "Weld" ? {tolerance: fnum(d, "#xTol")} : {}), after); }, true], ["Cancel"]], {width: 440});
+    const paint = () => { const t = q(d, "#xT").value, list = dofsFor(t); q(d, "#xA").disabled = !axisTypes.includes(t); q(d, "#xTol").disabled = t !== "Weld";
+      q(d, "#xD").innerHTML = dofTypes.includes(t) ? list.map(x => `<label style="margin-right:10px"><input type="checkbox" data-d="${x}" ${!c || c.type !== t || c.dofs.includes(x) ? "checked" : ""}> ${x}</label>`).join("") : '<span class="kv">This type ties every degree of freedom it has.</span>'; };
+    q(d, "#xT").onchange = paint; paint();
+    return d;
+  }
 }
 
 // ---- Define: diaphragms, pier and spandrel labels, groups, section cuts ----

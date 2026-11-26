@@ -25,8 +25,10 @@ public static class SafeFieldSteps
         if (answer?["file"]?.GetValue<string>() is not { } f2k) return;
         ctx.Files[CsiProgram.Safe.Key] = f2k;
         foreach (var key in new[] { "slabs", "beams", "columns", "walls", "supports", "strips", "loads" }) ctx.Facts["safe." + key] = Int(answer[key]);
+        // Strips drawn by hand (define_strip) go in either way; "strips": false leaves out the grid ones.
+        var own = (ctx.Link as OfflineEtabs)?.Model.Extras?.Strips.Count ?? 0;
         ctx.Tool("save_safe_file", $$"""{"story":"Story1","name":"{{ModelerFieldSteps.ModelName}} mat","folder":{{Q(ctx.Folder)}},"subgrade":20000,"compression_only":true,"strips":false}""", a =>
-            FieldContext.Expect(File.Exists(a["file"]!.GetValue<string>()) && Int(a["strips"]) == 0, "a file with soil and no strips was expected: " + a.ToJsonString()), "tool save_safe_file with soil under the slabs, no strips");
+            FieldContext.Expect(File.Exists(a["file"]!.GetValue<string>()) && Int(a["strips"]) == own, $"a file with soil and only the {own} hand-drawn strip(s) was expected: " + a.ToJsonString()), "tool save_safe_file with soil under the slabs, no grid strips");
     }
 
     public static void Scratch(FieldContext ctx)
