@@ -18,9 +18,9 @@ internal static class WebPages
 
     internal static string Title(Kind kind, string program) => kind switch
     {
-        Kind.ModelerView => "CSI ProMax Modeler",
+        Kind.ModelerView => CsiProMax.App.Engine,
         Kind.ProgramView => $"CSI ProMax: 3D view beside {program}",
-        _ => "CSI ProMax Viewer",
+        _ => CsiProMax.App.Engine,
     };
 
     internal static bool Maximised(Kind kind) => kind != Kind.ProgramView;

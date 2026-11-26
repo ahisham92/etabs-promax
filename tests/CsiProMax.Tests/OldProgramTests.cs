@@ -357,6 +357,50 @@ static class OldProgramTests
             Check(steps.Contains("if (built && !ctx.Facts.ContainsKey(\"safe.strips_built\"))", StringComparison.Ordinal), "the strips are compared when they went in, and said as not tested when they did not");
         });
 
+        yield return ("SAFE 23.1 tester (0.4.56): an .f2k SAFE says it opened but holds nothing of is built through the API; tables of an unsaved model; Viewer items SAFE has none of; chat_questions; failure kinds", () =>
+        {
+            var m = Templates.ConcreteFrame("T", [6, 6], [5], 3, 3.5);
+            var written = F2kWriter.Write(m, new F2kOptions(Story: "Story2"));
+            Check(CsiProMax.Assistant.Safe.F2kRebuild.ObjectCount(written.Text) > 0, "the Modeler's .f2k holds objects");
+            Check(CsiProMax.Assistant.ScratchProgram.OpenedEmpty(written.Text, 0), "SAFE holding none of them is an empty open");
+            var control = CsiTableText.Parse(written.Text)["PROGRAM CONTROL"].Single();
+            Equal("Standard", control["ProgLevel"], "a model with no tendons asks for SAFE Standard, as SAFE 23.1's own export does");
+            Equal("Post Tensioning", CsiProMax.F2k.F2kWriter.ProgLevel(1), "one with tendons for Post Tensioning");
+            Check(!written.Text.Contains("OBJECT GEOMETRY", StringComparison.Ordinal), "none of SAFE 16's tables, which SAFE 23.1 opened as an empty model");
+            Check(!CsiProMax.Assistant.ScratchProgram.OpenedEmpty(written.Text, 7), "SAFE holding some is not");
+            Check(!CsiProMax.Assistant.ScratchProgram.OpenedEmpty("TABLE:  \"PROGRAM CONTROL\"\n   ProgramName=SAFE\n", 0), "a file with no objects is not");
+            var scratch = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));
+            Check(scratch.Contains("if (openedEmpty)", StringComparison.Ordinal) && scratch.IndexOf("if (openedEmpty)", StringComparison.Ordinal) < scratch.IndexOf("F2kRebuild.Build(Link, text)", StringComparison.Ordinal),
+                "an empty open goes on to the blank model and the build");
+
+            // GetAllTables refused (an unsaved SAFE 23.1 model): the tables with data come from GetAvailableTables.
+            var listed = CsiProMax.Assistant.Etabs.ComEtabs.ListTables(new CpmFakes.TableListApi(1, 0), "SAFE");
+            Equal(2, listed.Count, "the tables with data are listed");
+            Equal("Joint Reactions", listed[1].Name, "by their names");
+            Check(listed.All(t => !t.Empty), "and they have data");
+            Equal(3, CsiProMax.Assistant.Etabs.ComEtabs.ListTables(new CpmFakes.TableListApi(0, 1), "SAFE").Count, "GetAllTables is used when it works");
+            try { CsiProMax.Assistant.Etabs.ComEtabs.ListTables(new CpmFakes.TableListApi(1, 2), "SAFE"); throw new Exception("no table list was refused"); }
+            catch (CsiProMax.Assistant.Etabs.EtabsException ex) { Check(ex.Message.Contains("GetAllTables answered 1, GetAvailableTables 2", StringComparison.Ordinal), ex.Message); }
+
+            // By the program's own table list (SAFE 23.1's, as the 0.4.56 run listed it): modal and section cuts are there, so they are tested.
+            string[] safe23 = ["Modal Case Definitions - Eigen", "Modal Periods And Frequencies", "Section Cut Definitions", "Section Cut Forces - Analysis", "Pier Section Properties", "Spandrel Section Properties", "Load Case Definitions - Nonlinear Static", "Imported Load Cases - Response Spectrum", "Joint Reactions"];
+            string? Not(string item, string[] tables) => CsiProMax.Assistant.ViewerCheck.NotInProgram(tables, "SAFE", item);
+            Check(Not("menu: Hinge Results...", safe23) is not null && Not("menu: Pier and Spandrel Forces...", safe23) is not null && Not("menu: Static Pushover Curve...", safe23) is not null, "SAFE 23 lists no hinge, pier force or pushover tables");
+            Check(Not("menu: Mode Shapes...", safe23) is null && Not("menu: Modal Results Plot...", safe23) is null && Not("menu: Section Cut Forces...", safe23) is null && Not("menu: Response Spectrum Curves...", safe23) is null, "SAFE 23's modal, section cut and spectrum tables are tested, never taken as absent");
+            Check(Not("menu: Frame Forces and Moments...", safe23) is null && Not("button: Show design ratios", safe23) is null, "what SAFE has is tested");
+            Check(Not("menu: Hinge Results...", []) is null, "with no table list nothing is taken as absent");
+            var extras = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Safe/SafeFieldSteps.cs"));
+            Check(extras.Contains("ScratchExtras.AddSafe(ctx)", StringComparison.Ordinal) && extras.Contains("ScratchExtras.CheckSafe(ctx)", StringComparison.Ordinal), "SAFE's scratch model gets a modal case and a section cut, checked after the analysis");
+            Check(scratch.Contains("opens the Modeler's {Path.GetExtension(modelFile)} with all its objects", StringComparison.Ordinal), "an empty open is a failure of its own, not hidden by the build");
+
+            var once = CsiProMax.Assistant.SkipAudit.Failure("the selection has only one kind of object");
+            Equal(CsiProMax.Assistant.SkipAudit.Why.Unjustified, CsiProMax.Assistant.SkipAudit.Of(once), "a failure is not taken for a licence one by its closing words");
+            Equal(CsiProMax.Assistant.SkipAudit.Why.Licence, CsiProMax.Assistant.SkipAudit.Of("no licence for SAFE"), "a real licence reason still holds");
+
+            var panel = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/PanelFieldSteps.cs"));
+            Check(panel.Contains("ChatQuestionsTool.Answer(Args(json), fromChat: true", StringComparison.Ordinal), "chat_questions is asked the chat's way when a window is open");
+        });
+
         yield return ("SAFE 20 (0.4.51): the design strips its API cannot draw go in through its 'Strip Object Connectivity' table, in the fields SAFE lists", () =>
         {
             var m = Templates.ConcreteFrame("T", [6, 6], [5], 3, 3.5);
@@ -555,12 +599,25 @@ static class OldProgramTests
                 "the field test tries it on a real SAP2000, last, after every other table step");
         });
 
+        yield return ("ETABS 23 (main 3cdc64d run): a field left at its default while the record is read is not a refusal; a skipped record is; wind User Loads gets no LoadAtCM", () =>
+        {
+            const string tl = "Table name:  LOAD PATTERN DEFINITIONS - AUTO SEISMIC - KDS 2019 Field name:  TL Record:  1 Error reading field TL; field ignored and default values will be used 1 of 1 records successfully read";
+            Check(CsiProMax.Assistant.Etabs.EditableTables.OnlyFieldsIgnored(tl, 1), "KDS TL");
+            Check(!CsiProMax.Assistant.Etabs.EditableTables.OnlyFieldsIgnored("Field name:  STORY Record:  1 Error reading field; record skipped", 1), "a record skipped");
+            Check(!CsiProMax.Assistant.Etabs.EditableTables.OnlyFieldsIgnored(tl, 2), "more errors than fields ignored");
+            var lateral = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Tools/LateralTools.cs"));
+            Check(lateral.Contains("table.Key.Contains(\"Seismic\", StringComparison.OrdinalIgnoreCase) ? [(\"LoadAtCM\", \"Yes\")]"), "LoadAtCM only for the seismic User Loads table");
+        });
+
         yield return ("kind: a program's 'could not read this file' box in a scratch window is answered OK and said, never a licence box", () =>
         {
             var box = CsiProMax.Assistant.ScratchDialogs.IsFileRefused;
             Check(box("Error decompressing file. May not be a valid ETABS .EDB file."), "SAFE 20's words"); // ETABS itself
             Check(!box("Error decompressing file: no licence was found"), "a licence message is never answered");
             Check(!box("Analysis Complete"), "another box");
+            Check(box("Error in performing miOpen"), "ETABS 23's words, Ahmed's PC 2026-11-26");
+            Check(CsiProMax.Assistant.ScratchDialogs.IsProgramBox("Warning", CsiProgram.Etabs), "ETABS 23 titles that box Warning");
+            Check(!CsiProMax.Assistant.ScratchDialogs.IsProgramBox("Warning: licence", CsiProgram.Etabs), "never another title");
             foreach (var p in CsiProgram.All)
                 Check(CsiProMax.Assistant.ScratchDialogs.IsProgramBox(" " + p.Name + " ", p) && !CsiProMax.Assistant.ScratchDialogs.IsProgramBox(p.Name + " licence", p), $"{p.Name}'s own message box, by its title");
         });
@@ -741,6 +798,24 @@ namespace CpmFakes
             }
             public int ApplyEditedTables(bool FillImportLog, ref int NumFatalErrors, ref int NumErrorMsgs, ref int NumWarnMsgs, ref int NumInfoMsgs, ref string ImportLog) { ImportLog = ""; return 0; }
             public int CancelTableEditing() => 0;
+        }
+    }
+}
+
+namespace CpmFakes
+{
+    /// <summary>DatabaseTables that answer GetAllTables and GetAvailableTables with the codes given.</summary>
+    public sealed class TableListApi(int all, int available)
+    {
+        public int GetAllTables(ref int NumberTables, ref string[] TableKey, ref string[] TableName, ref int[] ImportType, ref bool[] IsEmpty)
+        {
+            if (all != 0) return all;
+            TableKey = ["A", "B", "C"]; TableName = ["Analysis Messages", "Base Reactions", "Joint Reactions"]; ImportType = [0, 0, 0]; IsEmpty = [true, false, false]; NumberTables = 3; return 0;
+        }
+        public int GetAvailableTables(ref int NumberTables, ref string[] TableKey, ref string[] TableName, ref int[] ImportType)
+        {
+            if (available != 0) return available;
+            TableKey = ["B", "C"]; TableName = ["Base Reactions", "Joint Reactions"]; ImportType = [0, 0]; NumberTables = 2; return 0;
         }
     }
 }

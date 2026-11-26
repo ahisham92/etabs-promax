@@ -32,7 +32,7 @@ public static class SlabDefs
         "PROGRAM INFORMATION", "CONTROLS", "STORIES - IN SEQUENCE FROM TOP", "GRIDS", "DIAPHRAGM NAMES", "MATERIAL PROPERTIES", "REBAR DEFINITIONS",
         "FRAME SECTIONS", "AUTO SELECT SECTION LISTS", "CONCRETE SECTIONS", TendonSections, "SLAB PROPERTIES", "DECK PROPERTIES", "WALL PROPERTIES",
         "LINK PROPERTIES", "PANEL ZONE PROPERTIES", "PIER/SPANDREL NAMES", "POINT COORDINATES", "LINE CONNECTIVITIES", "AREA CONNECTIVITIES",
-        TendonConnect, TendonLayout, TendonProfile, StripGeometry, "GROUPS", "POINT ASSIGNS", "LINE ASSIGNS", "AREA ASSIGNS", TendonAssigns,
+        TendonConnect, TendonLayout, TendonSupports, TendonProfile, StripGeometry, "GROUPS", "POINT ASSIGNS", "LINE ASSIGNS", "AREA ASSIGNS", TendonAssigns,
         "LOAD PATTERNS", "POINT OBJECT LOADS", "FRAME OBJECT LOADS", "SHELL OBJECT LOADS", TendonLoads, "ANALYSIS OPTIONS", "MASS SOURCE",
         "FUNCTIONS", "GENERALIZED DISPLACEMENTS", "LOAD CASES", "LOAD COMBINATIONS", "GENERAL DESIGN PREFERENCES", "STEEL DESIGN PREFERENCES",
         "CONCRETE DESIGN PREFERENCES", "COMPOSITE DESIGN PREFERENCES", "COMPOSITE COLUMN DESIGN PREFERENCES", "WALL DESIGN PREFERENCES",
@@ -156,7 +156,7 @@ public static class SlabDefs
             return list;
         }
 
-        private (double X, double Y) PlanAt(double s)
+        public (double X, double Y) PlanAt(double s)
         {
             for (var i = 1; i < Plan.Count; i++)
             {
@@ -199,6 +199,88 @@ public static class SlabDefs
         var k = drop / (w * (w - r));
         var j = k * (w - r) / r;
         return u <= r ? zh - j * u * u : zl + k * (w - u) * (w - u);
+    }
+
+    public const string TendonSupports = "TENDON SUPPORT POINTS";
+
+    /// <summary>
+    /// Whether ETABS of this version writes a tendon's support points and its profile heights from the tendon's datum.
+    /// ETABS 23.2 does ("$ TENDON SUPPORT POINTS", ZL -5 ZC -9 ZR -5 in its export of PT-SL Ex001); ETABS 20 does neither
+    /// (ZL 43 ZC 39 ZR 43, the heights themselves). ETABS 23 drops the WHOLE .e2k, with no message, when a tendon has no
+    /// support points (bisected on Ahmed's PC, main 3cdc64d run, 2026-11-26: 4 stories, 0 frames, 0 areas).
+    /// </summary>
+    public static bool WritesSupportPoints(string? version) =>
+        int.TryParse((version ?? "").Split('.')[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var major) && major >= 23;
+
+    /// <summary>
+    /// The kept sections as ETABS of the model's version reads them: from ETABS 23 on, the tendons' support points
+    /// (one at each end of each span, with its distance along the tendon as a fraction and its height) and the profile
+    /// heights from the datum. The model keeps ETABS 20's form (heights themselves, no support points).
+    /// </summary>
+    public static List<RawSection> ForEtabs(StructuralModel m, List<RawSection> sections)
+    {
+        if (!WritesSupportPoints(m.ProgramVersion)) return sections.Where(r => r.Heading != TendonSupports).ToList();
+        var tendons = Tendons(m);
+        if (tendons.Count == 0) return sections.Where(r => r.Heading != TendonSupports).ToList();
+        var datum = tendons.ToDictionary(t => (t.Name, t.Story.ToUpperInvariant()), t => t.Datum);
+        var list = new List<RawSection>();
+        foreach (var r in sections)
+        {
+            if (r.Heading == TendonSupports) continue;
+            if (r.Heading != TendonProfile) { list.Add(r); continue; }
+            var lines = r.Lines.Select(l =>
+            {
+                var t = Tokenize(l);
+                if (t.Count < 3 || t[0] != "TENDONVP" || !datum.TryGetValue((Unquote(t[1]), Unquote(t[2]).ToUpperInvariant()), out var d)) return l;
+                for (var i = 3; i + 1 < t.Count; i++)
+                    if (t[i] is "ZL" or "ZC" or "ZR" && TryNumber(t[i + 1], out var z)) t[i + 1] = N(z - d);
+                return Line(t);
+            }).ToList();
+            list.Add(new RawSection { Heading = r.Heading, After = TendonSupports, Lines = lines });
+        }
+        var sp = new List<string>();
+        foreach (var t in tendons)
+        {
+            if (t.Spans.Count == 0 || t.Length <= 0) continue;
+            var q = Quote(t.Name); var st = Quote(t.Story);
+            sp.Add(Line(["TENDONSP", q, st, "NUMSUPPORTS", (t.Spans.Count + 1).ToString(CultureInfo.InvariantCulture)]));
+            var at = 0.0;
+            for (var k = 0; k <= t.Spans.Count; k++)
+            {
+                if (k > 0) at += t.Spans[k - 1].Length;
+                var s = Math.Min(at, t.Length);
+                var (x, y) = t.PlanAt(s);
+                var z = k == 0 ? t.Spans[0].ZL : t.Spans[k - 1].ZR;
+                sp.Add(Line(["TENDONSP", q, st, "SUPPNUM", (k + 1).ToString(CultureInfo.InvariantCulture), "SUPPORTTYPE", Quote("None"), "RD", N(s / t.Length),
+                    "GLOBALX", N(x), "GLOBALY", N(y), "GLOBALZ", N(z)]));
+            }
+        }
+        if (sp.Count > 0) list.Add(new RawSection { Heading = TendonSupports, After = TendonLayout, Lines = sp });
+        return list;
+    }
+
+    /// <summary>
+    /// A file in ETABS 23's form (with support points) back to the model's form: profile heights from the datum become
+    /// heights, and the support points are dropped (they are written again from the spans).
+    /// </summary>
+    public static void FromEtabs(StructuralModel m)
+    {
+        var sp = Find(m, TendonSupports);
+        if (sp is null) return;
+        m.Passthrough.Remove(sp);
+        var vp = Find(m, TendonProfile);
+        if (vp is null) return;
+        var datum = new Dictionary<(string, string), double>();
+        foreach (var h in Rows(m, TendonLayout, "TENDONHL").Where(h => h.Count > 2 && Value(h, "GLOBALZ") is not null))
+            datum.TryAdd((Unquote(h[1]), Unquote(h[2]).ToUpperInvariant()), D(h, "GLOBALZ"));
+        vp.Lines = vp.Lines.Select(l =>
+        {
+            var t = Tokenize(l);
+            if (t.Count < 3 || t[0] != "TENDONVP" || !datum.TryGetValue((Unquote(t[1]), Unquote(t[2]).ToUpperInvariant()), out var d)) return l;
+            for (var i = 3; i + 1 < t.Count; i++)
+                if (t[i] is "ZL" or "ZC" or "ZR" && TryNumber(t[i + 1], out var z)) t[i + 1] = N(z + d);
+            return Line(t);
+        }).ToList();
     }
 
     public static List<Tendon> Tendons(StructuralModel m)
@@ -351,6 +433,7 @@ public static class SlabDefs
         RemoveRows(m, TendonConnect, t => t[0] == "TENDON" && Is(t, name, story));
         RemoveRows(m, TendonLayout, t => t[0] == "TENDONHL" && Is(t, name, story));
         RemoveRows(m, TendonProfile, t => t[0] == "TENDONVP" && Is(t, name, story));
+        RemoveRows(m, TendonSupports, t => t[0] == "TENDONSP" && Is(t, name, story));
         RemoveRows(m, TendonAssigns, t => t[0] == "TENDONASSIGN" && Is(t, name, story));
         RemoveRows(m, TendonLoads, t => t[0] == "TENDONLOAD" && Is(t, name, story));
     }

@@ -25,7 +25,29 @@ internal static class ModelView
     /// so the two never change the model at once.
     /// </summary>
     internal static Task<(byte[] Body, string ContentType)?> PostAsync(string path, byte[] body) =>
-        path == "chat" ? ChatAsync(body) : path == "edit" ? EditAsync(body) : path == "check" ? CheckAsync(body) : Task.FromResult<(byte[] Body, string ContentType)?>(null);
+        path == "chat" ? ChatAsync(body) : path == "edit" ? EditAsync(body) : path == "check" ? CheckAsync(body) : path == "run" ? RunAsync(body) : Task.FromResult<(byte[] Body, string ContentType)?>(null);
+
+    /// <summary>
+    /// CSI ProMax Engine's Analyze > Run (EngineRun): {"design":bool} starts it, on the window's thread for the model;
+    /// {"status":true} (or {"take":true} once done, which hands over the results) says how it goes.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static async Task<(byte[] Body, string ContentType)?> RunAsync(byte[] body)
+    {
+        using var request = System.Text.Json.JsonDocument.Parse(body.Length == 0 ? "{}"u8.ToArray() : body);
+        var root = request.RootElement;
+        bool Flag(string name) => root.ValueKind == System.Text.Json.JsonValueKind.Object && root.TryGetProperty(name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.True;
+        JsonObject answer;
+        if (Flag("status") || Flag("take")) answer = EngineRun.Status(Flag("take"));
+        else
+        {
+            var design = Flag("design");
+            answer = await App.Dispatcher.InvokeAsync(app => app.Link is OfflineEtabs offline
+                ? EngineRun.Start(offline, design)
+                : new JsonObject { ["ok"] = false, ["error"] = "Run is the Engine's own: in a CSI program, run the analysis there." }).ConfigureAwait(false);
+        }
+        return (Encoding.UTF8.GetBytes(answer.ToJsonString()), "application/json");
+    }
 
     /// <summary>
     /// The instability checker from the 3D window (Analyze > Check Model for Instabilities): find_instabilities on the

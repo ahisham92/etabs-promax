@@ -1,3 +1,5 @@
+using System.Text.Json.Nodes;
+using CsiProMax.Assistant.Tools;
 using System.IO.Compression;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -436,7 +438,12 @@ public static class FieldTest
                 ctx.Watched = window.Link;
                 // The Viewer's own screen on this program's model: one check, the same for every program. It runs while
                 // the model has its results (the program's steps say when), or after them if they never did.
-                ctx.WhileAnalysed = o.Viewer ? () => { var at = ctx.Watched; ctx.Watched = null; try { ViewerCheck.FieldSteps(ctx, window.Link, program.Name); } finally { ctx.Watched = at; } } : null;
+                ctx.WhileAnalysed = () =>
+                {
+                    if (o.Viewer) { var at = ctx.Watched; ctx.Watched = null; try { ViewerCheck.FieldSteps(ctx, window.Link, program.Name); } finally { ctx.Watched = at; } }
+                    // The pack beside the model written by itself after the run and the design (the watcher's rule).
+                    AutoPackFieldSteps.FieldSteps(ctx, window.Link, program.Name);
+                };
                 try { ScratchSteps(program)(ctx); }
                 catch (Exception ex) when (ex is not (OperationCanceledException or OutOfMemoryException))
                 {
@@ -507,6 +514,8 @@ public static class FieldTest
                     ctx.Fail($"let go of the scratch {program.Name} window", $"{real.GetType().Name}: {real.Message}");
                 }
             }
+            // CSI ProMax Engine's Run (Ahmed 2026-11-26) in this program, on a real PC only (a test's stand-in window is no program).
+            if (finished && o.StartScratch.Method.DeclaringType == typeof(ScratchProgram)) EngineRunStep(ctx, program);
         }
         if (!panelDone)
         {
@@ -514,6 +523,32 @@ public static class FieldTest
             PanelFieldSteps.Run(ctx, link, scratch: false, live: IsLive(link));
         }
     }
+
+    /// <summary>
+    /// The Engine's Analyze > Run on the Modeler's model in <paramref name="program"/>: the program starts hidden in a
+    /// window of its own, analyses, gives every result table back and is closed; the results must have come back.
+    /// </summary>
+    internal static void EngineRunStep(FieldContext ctx, CsiProgram program) =>
+        ctx.Step($"CSI ProMax Engine: Analyze > Run in {program.Name} (hidden, closed after) brings the results back to the model", () =>
+        {
+            var e2k = ctx.Files.GetValueOrDefault(CsiProgram.Etabs.Key, "");
+            FieldContext.Expect(File.Exists(e2k), "the Modeler wrote no model file to run");
+            var model = new OfflineEtabs(OfflineEtabs.Load(e2k), "");
+            model.Model.Target = program.Key;
+            model.SaveAs(Path.Combine(ctx.Folder, "engine", "cpm-engine-run.e2k"));
+            var started = EngineRun.Start(model, design: false);
+            FieldContext.Expect(started["ok"]?.GetValue<bool>() == true, "the run did not start: " + started["error"]);
+            var until = DateTime.UtcNow.AddMinutes(20);
+            JsonObject status;
+            while ((status = EngineRun.Status(false))["done"]?.GetValue<bool>() != true && DateTime.UtcNow < until) Thread.Sleep(2000);
+            status = EngineRun.Status(true);
+            FieldContext.Expect(status["done"]?.GetValue<bool>() == true, "the run did not finish within 20 minutes: " + status["phase"]);
+            FieldContext.Expect(string.IsNullOrEmpty(status["error"]?.GetValue<string>()), "the run stopped: " + status["error"]);
+            var tables = (status["pack"] as JsonObject)?["tables"] as JsonObject;
+            var results = tables?.Select(t => t.Key).Where(n => ResultTools.Norm(n).Contains("displacement") || ResultTools.Norm(n).Contains("reaction") || ResultTools.Norm(n).Contains("forces")).ToList() ?? [];
+            FieldContext.Expect(results.Count > 0, "no result table came back: " + string.Join(", ", tables?.Select(t => t.Key) ?? []));
+            return $"{results.Count} result tables came back ({string.Join(", ", results.Take(5))}); {string.Join(" | ", (status["lines"] as JsonArray ?? []).Select(l => l?.GetValue<string>()).TakeLast(2))}";
+        });
 
     /// <summary>The first calls of where an exception came from, for the report: enough to find the step.</summary>
     private static string Where(Exception ex) =>

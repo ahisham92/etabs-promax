@@ -420,14 +420,19 @@ public static class S2kWriter
         var concrete = new List<IReadOnlyList<(string, string)>>();
         var rebar = new List<IReadOnlyList<(string, string)>>();
         var g = Gravity(lengthUnit);
+        var more = new Dictionary<string, List<IReadOnlyList<(string, string)>>>(StringComparer.OrdinalIgnoreCase);
         foreach (var mat in m.Materials)
         {
+            // What the material's forms hold beyond the .e2k keywords goes into SAP2000's own material tables.
+            var data = ProgramTables.MaterialData(mat);
+            Dictionary<string, string>? Of(string table) => data.TryGetValue(table, out var r) && r.Count > 0 ? r[0] : null;
             var type = mat.Type.ToLowerInvariant() switch
             {
                 "concrete" => "Concrete", "steel" => "Steel", "rebar" => "Rebar", "tendon" => "Tendon", "aluminum" => "Aluminum", "coldformed" => "ColdFormed", _ => "NoDesign",
             };
             var uniaxial = type is "Rebar" or "Tendon";
-            general.Add(Row(("Material", mat.Name), ("Type", type), ("SymType", uniaxial ? "Uniaxial" : "Isotropic"), ("TempDepend", "No"), ("Color", type == "Concrete" ? "Gray8Dark" : "Blue")));
+            general.Add(ProgramTables.With(Row(("Material", mat.Name), ("Type", type), ("SymType", uniaxial ? "Uniaxial" : "Isotropic"), ("TempDepend", "No"), ("Color", type == "Concrete" ? "Gray8Dark" : "Blue")),
+                Of("General") is { } gen ? gen.Where(kv => kv.Key is "Color" or "Notes").ToDictionary() : null));
             var weight = mat.Number("WEIGHTPERVOLUME") ?? 0;
             var e = mat.Number("E") ?? 0;
             var u = mat.Number("U") ?? 0.2;
@@ -438,22 +443,29 @@ public static class S2kWriter
             switch (type)
             {
                 case "Concrete":
-                    concrete.Add(Row(("Material", mat.Name), ("Fc", N(mat.Number("FC") ?? 0)), ("LtWtConc", "No"), ("SSCurveOpt", "Mander"), ("SSHysType", "Takeda"),
-                        ("SFc", "0.002"), ("SCap", "0.005"), ("FinalSlope", "-0.1"), ("FAngle", "0"), ("DAngle", "0")));
+                    concrete.Add(ProgramTables.With(Row(("Material", mat.Name), ("Fc", N(mat.Number("FC") ?? 0)), ("LtWtConc", "No"), ("SSCurveOpt", "Mander"), ("SSHysType", "Takeda"),
+                        ("SFc", "0.002"), ("SCap", "0.005"), ("FinalSlope", "-0.1"), ("FAngle", "0"), ("DAngle", "0")), SapOnly(Of("Concrete Data"), "IsUserFr", "UserFr")));
                     break;
                 case "Steel":
                     var fy = mat.Number("FY") ?? 0; var fu = mat.Number("FU") ?? 0;
-                    steel.Add(Row(("Material", mat.Name), ("Fy", N(fy)), ("Fu", N(fu)), ("EffFy", N(mat.Number("FYE") ?? fy)), ("EffFu", N(mat.Number("FUE") ?? fu)),
-                        ("SSCurveOpt", "Simple"), ("SSHysType", "Kinematic"), ("SHard", "0.015"), ("SMax", "0.11"), ("SRup", "0.17"), ("FinalSlope", "-0.1")));
+                    steel.Add(ProgramTables.With(Row(("Material", mat.Name), ("Fy", N(fy)), ("Fu", N(fu)), ("EffFy", N(mat.Number("FYE") ?? fy)), ("EffFu", N(mat.Number("FUE") ?? fu)),
+                        ("SSCurveOpt", "Simple"), ("SSHysType", "Kinematic"), ("SHard", "0.015"), ("SMax", "0.11"), ("SRup", "0.17"), ("FinalSlope", "-0.1")), Of("Steel Data"), ProgramTables.SapField));
                     break;
                 case "Rebar":
                     var ry = mat.Number("FY") ?? 0; var ru = mat.Number("FU") ?? 0;
-                    rebar.Add(Row(("Material", mat.Name), ("Fy", N(ry)), ("Fu", N(ru)), ("EffFy", N(mat.Number("FYE") ?? ry)), ("EffFu", N(mat.Number("FUE") ?? ru)),
-                        ("SSCurveOpt", "Simple"), ("SSHysType", "Kinematic"), ("SHard", "0.01"), ("SCap", "0.09"), ("FinalSlope", "-0.1"), ("UseCTDef", "No")));
+                    rebar.Add(ProgramTables.With(Row(("Material", mat.Name), ("Fy", N(ry)), ("Fu", N(ru)), ("EffFy", N(mat.Number("FYE") ?? ry)), ("EffFu", N(mat.Number("FUE") ?? ru)),
+                        ("SSCurveOpt", "Simple"), ("SSHysType", "Kinematic"), ("SHard", "0.01"), ("SCap", "0.09"), ("FinalSlope", "-0.1"), ("UseCTDef", "No")), Of("Rebar Data"), ProgramTables.SapField));
                     break;
                 case "NoDesign":
                     notes.Add($"Material {mat.Name} ({mat.Type}) goes across as a no-design material.");
                     break;
+            }
+            foreach (var (table, rows) in data)
+            {
+                if (table is "General" or "Basic Mechanical Properties" or "Steel Data" or "Concrete Data" or "Rebar Data") continue;
+                if (ProgramTables.SapMaterialTable(table) is not { } sap) { notes.Add($"Material {mat.Name}: SAP2000 has no table for its {table}; it stays in the .cpm."); continue; }
+                if (!more.TryGetValue(sap, out var list)) more[sap] = list = [];
+                list.AddRange(rows.Select(r => (IReadOnlyList<(string, string)>)ProgramTables.With(Row(("Material", mat.Name)), r, ProgramTables.SapField)));
             }
         }
         Add(tables, "MATERIAL PROPERTIES 01 - GENERAL", general);
@@ -461,7 +473,12 @@ public static class S2kWriter
         Add(tables, "MATERIAL PROPERTIES 03A - STEEL DATA", steel);
         Add(tables, "MATERIAL PROPERTIES 03B - CONCRETE DATA", concrete);
         Add(tables, "MATERIAL PROPERTIES 03E - REBAR DATA", rebar);
+        foreach (var (name, rows) in more.OrderBy(x => x.Key, StringComparer.Ordinal)) Add(tables, name, rows);
     }
+
+    /// <summary>The fields of an ETABS table row SAP2000's table has too (SAP2000 has no user modulus of rupture).</summary>
+    private static Dictionary<string, string>? SapOnly(Dictionary<string, string>? row, params string[] leave) =>
+        row?.Where(kv => !leave.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value);
 
     /// <summary>Writes the frame sections SAP2000 can take as they are, and gives each one's SAP2000 shape name.</summary>
     private static Dictionary<string, string> FrameSections(StructuralModel m, List<string> tables, List<string> notes)

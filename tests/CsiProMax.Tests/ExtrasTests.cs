@@ -176,11 +176,61 @@ static class ExtrasTests
         yield return ("extras: the Viewer and Modeler select joints and supports, open information on a right click, and filter the selection (Ahmed 2026-11-26)", () =>
         {
             var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
-            foreach (var part in new[] { "function jointsIn(p)", "function jointAt(p, x, y, r)", "function jointInfo(name)", "function rightClick(p, x, y, shift, cx, cy)", "function selFilter()", "function loadRowsOf(o)", "function showJointInTable(name, hit)", "addComment(t, {type: \"j\", kind: \"joint\"", "gotJ.forEach(n => selJ.add(n))", "data-page=\"lds\">Loads (", "[\"filter\", \"Filter the selection" })
+            foreach (var part in new[] { "function jointsIn(p)", "function jointAt(p, x, y, r)", "function jointInfo(name)", "function rightClick(p, x, y, shift, cx, cy)", "function selFilter()", "function loadRowsOf(o)", "function showJointInTable(name, hit)", "addComment(t, {type: \"j\", kind: \"joint\"", "gotJ.forEach(n => selJ.add(n))", "function loadGrid(loads)", "[\"filter\", \"Filter the selection" })
                 Check(html.Contains(part), "viewer.html lost " + part);
             var check = ViewerCheck.Script;
             foreach (var step in new[] { "selection: a left-to-right window round a support selects the support joint", "selection: right click on an object opens its information, with a Loads tab holding its loads", "selection: the Filter keeps only the checked kinds of the selection" })
                 Check(check.Contains(step), "the field test lost the step " + step);
+        });
+        yield return ("extras: right click opens ETABS's Object Information: Object ID, property-grid tabs, a description, OK and Cancel; no browser menu (Ahmed 2026-11-26)", () =>
+        {
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var part in new[] { "function infoDialog(spec)", "<legend>Object ID</legend>", "<legend>Object Data</legend>", "class=\"pgdesc\"", "[\"OK\", w => {", "[\"Cancel\"]], {float: true, info: true",
+                "[sap ? \"Location\" : \"Geometry\", geo], [\"Assignments\", asg], [\"Loads\", loadGrid(loads)]", "\"Opening\": \"Indicates if the shell object is an opening or not.\"", "\"Polar Inertia (Ix + Iy)\"",
+                "async function applyInfo(name, kind, c, L)", "document.addEventListener(\"contextmenu\", e => {", "pickAt(p, x, y, 8)", "if (n === undefined) { n = \"(\"" })
+                Check(html.Contains(part), "viewer.html lost " + part);
+            Check(!html.Contains("[[\"Show in Tables\", () => showInTable(o)], [\"Close\"]]"), "the old information window's buttons are back");
+            Check(ViewerCheck.Script.Contains("const objInfoProblem = d =>"), "the field test no longer checks the window's layout");
+            var tools = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Tools", "PropertyTools.cs"));
+            Check(tools.Contains("[\"groups\"] = GroupsOf(m, \"AREA\", label, story)") && tools.Contains("[\"opening\"] ="), "property_definitions no longer answers a shell's groups and opening");
+        });
+        yield return ("extras: CSI ProMax Engine: one program, ETABS's Model Explorer and menus, a run's results shown on the model and cleared by a change (Ahmed 2026-11-26)", () =>
+        {
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var part in new[] { "<span id=\"app\">CSI ProMax Engine</span>", "data-menu=\"Analyze\"", "data-menu=\"Tools\"", "[[\"model\", \"Model\"], [\"display\", \"Display\"], [\"tables\", \"Tables\"], [\"reports\", \"Reports\"]]",
+                "node(\"named\", \"Named Output Items\"", "function engineWith(pack, keep)", "async function engineImport(file)", "[\"Results from a Review Pack (.cpmx)...\", \"eng:import\"]", "function jointNamer(t, u)", "<span id=\"vname\"></span>" })
+                Check(html.Contains(part), "viewer.html lost " + part);
+            Check(ViewerCheck.Script.Contains("the Model Explorer is the program's"), "the field test no longer checks the explorer");
+            Check(CsiProMax.Host.WebPages.Title(CsiProMax.Host.WebPages.Kind.ModelerView, "") == "CSI ProMax Engine", "the window is not named CSI ProMax Engine");
+            var install = File.ReadAllText(Path.Combine(SourceText.Root(), "install.ps1"));
+            Check(install.Contains("'CSI ProMax Engine.lnk'") && !install.Contains("'CSI ProMax Modeler.lnk'"), "the installer does not make the one Engine shortcut");
+        });
+        yield return ("extras: CSI ProMax Engine's Run writes the model for its program beside the model, says plainly when the program is not on this PC, and never touches the model's own file (Ahmed 2026-11-26)", () =>
+        {
+            var link = Frame();
+            var folder = Path.Combine(Path.GetTempPath(), "cpm-engine-" + Guid.NewGuid().ToString("N")[..6]);
+            try
+            {
+                var own = link.SaveAs(Path.Combine(folder, "Tower.e2k"));
+                var revision = link.Revision;
+                Check(Path.GetDirectoryName(EngineRun.RunFolder(link)) == Path.GetDirectoryName(own) && EngineRun.RunFolder(link).EndsWith(" run", StringComparison.Ordinal), "the run's folder is not beside the model: " + EngineRun.RunFolder(link));
+                var written = link.WriteForRun(Path.Combine(folder, "run", "Tower.e2k"));
+                Check(File.Exists(written) && written.EndsWith(".e2k", StringComparison.Ordinal), "the ETABS model was not written for the run: " + written);
+                Check(link.Path == own && link.Revision == revision && !link.Unsaved, "writing for the run changed the model's own file or revision");
+                link.Model.Target = "sap2000";
+                var s2k = link.WriteForRun(Path.Combine(folder, "run2", "Tower.e2k"));
+                Check(s2k.EndsWith(".s2k", StringComparison.Ordinal) && File.Exists(s2k), "a SAP2000 model is not run from its .s2k: " + s2k);
+                var answer = EngineRun.Start(link, false, _ => Path.Combine(folder, "nothing-here.dll"));
+                Check(answer["ok"]!.GetValue<bool>() == false && answer["error"]!.GetValue<string>().Contains("SAP2000 is not installed on this PC", StringComparison.Ordinal), "no program on the PC is not said plainly: " + answer.ToJsonString());
+                Check(EngineRun.Status(false)["running"]!.GetValue<bool>() == false, "a run that could not start says it is running");
+                var view = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Panel", "Host", "ModelView.cs"));
+                Check(view.Contains("path == \"run\" ? RunAsync(body)") && view.Contains("EngineRun.Start(offline, design)"), "the Engine window cannot start a run");
+                var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+                Check(html.Contains("[\"Run Analysis\", \"eng:run\", \"F5\"]") && html.Contains("async function engineRun(design)"), "Analyze > Run Analysis is not in the Engine");
+                var scratch = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Field", "ScratchProgram.cs"));
+                Check(scratch.Contains("_app.Hide();"), "the program is not hidden while it runs");
+            }
+            finally { try { Directory.Delete(folder, true); } catch (IOException) { } }
         });
         yield return ("extras: Edit > Model Text keeps them, and Undo in the Modeler window takes one back", () =>
         {

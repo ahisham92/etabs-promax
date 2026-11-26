@@ -332,7 +332,9 @@ public static class LateralTools
             // ETABS 23's User Loads row needs its load set ("Field name: LOAD SET NUMBER ... record skipped" with the
             // name alone, 0.4.55 ETABS run): one set, at the mass center, unless given.
             if (table.Code.Equals("User Loads", StringComparison.OrdinalIgnoreCase))
-                foreach (var (f, v) in new[] { ("NumberSets", "1"), ("SetNumber", "1"), ("LoadAtCM", "Yes") })
+                // The wind User Loads table has no LoadAtCM (its fields: Name, NumberSets, Reversible, SetNumber, Story,
+                // Diaphragm, Fx, Fy, Mz, X, Y; main 3cdc64d ETABS run).
+                foreach (var (f, v) in new[] { ("NumberSets", "1"), ("SetNumber", "1") }.Concat(table.Key.Contains("Seismic", StringComparison.OrdinalIgnoreCase) ? [("LoadAtCM", "Yes")] : Array.Empty<(string, string)>()))
                     row.TryAdd(f, v);
             EditableTables.Put(e, table.Key, key, [row], $"give {name} its {table.Code} inputs");
         }

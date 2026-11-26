@@ -12,6 +12,7 @@ namespace CsiProMax.Assistant;
 ///   --demo          a small model in memory instead of ETABS, to see the window on a PC without ETABS
 ///   --modeler [file] the Modeler: CSI ProMax's own model with no ETABS, saved as .e2k for licensed ETABS to import
 ///   --viewer [file] the Viewer in a CSI ProMax window of its own: a review pack (.cpmx) or a Viewer page, or empty
+///   --packs         no window: the review pack beside each model written again after every analysis and design (--once: one look now)
 ///   --selftest      check the link to ETABS call by call and print the result (--changes also adds and deletes objects)
 /// </summary>
 public static class Program
@@ -101,7 +102,7 @@ public static class Program
         }
         // The tests from the command line run on the newest version this PC has, like the window: the installed folder
         // keeps the version first installed, and a test of that one reports what is already fixed.
-        if ((args.Contains("--fieldtest") || args.Contains("--selftest")) && Newer(args) is { } newerTest && Environment.ProcessPath is { } host)
+        if ((args.Contains("--fieldtest") || args.Contains("--selftest") || (args.Contains("--packs") && args.Contains("--once"))) && Newer(args) is { } newerTest && Environment.ProcessPath is { } host)
         {
             try
             {
@@ -145,6 +146,10 @@ public static class Program
                 catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception) { /* already gone */ }
 
             CarryOver();
+            // The review packs kept up to date after every run and design, with no window (AutoPack, PackWatcher).
+            if (args.Contains("--packs")) return CsiProMax.Assistant.Packs.PackWatcher.Run(args);
+            // Every window starts it when it is not running yet (on by default; packs-off.txt turns it off).
+            if (!args.Contains("--no-update") && !args.Contains("--demo")) CsiProMax.Assistant.Packs.PackWatcher.EnsureRunning();
             // The Viewer on its own (its shortcut, or a pack opened with CSI ProMax): one window, no CSI program, no chat.
             if (args.Contains("--viewer")) return RunViewer(args);
             // One window per ETABS: started again from ETABS's menu, the open window comes forward.
@@ -356,13 +361,42 @@ public static class Program
                     catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or InvalidOperationException) { Note("viewer: switch to the newer version", ex); }
                 }));
             });
-        app.Startup += (_, _) => app.MainWindow = CsiProMax.Host.WebWindow.ShowHere(address, CsiProMax.Host.WebPages.Kind.Viewer);
+        app.Startup += (_, _) =>
+        {
+            app.MainWindow = CsiProMax.Host.WebWindow.ShowHere(address, CsiProMax.Host.WebPages.Kind.Viewer);
+            // A pack opened from beside a model is written again after each run and design (PackWatcher): the open
+            // Viewer shows the new one by itself.
+            if (file is not null && app.MainWindow is CsiProMax.Host.WebWindow shown) FollowPack(file, shown, app.Dispatcher);
+        };
         // The Viewer on its own looks for updates too, so a PC where only the Viewer is used does not stay behind:
         // a newer version is downloaded while it is open and is the one that opens next time (Program picks the newest).
         if (!args.Contains("--no-update"))
             _ = Task.Run(async () => { try { await Updater.CheckAsync(force: false).ConfigureAwait(false); } catch (Exception ex) { Note("viewer update check", ex); } });
         app.Run();
         return 0;
+    }
+
+    /// <summary>
+    /// Looks at the opened pack's file every few seconds; when it was written again (and has stayed the same for one
+    /// look, so it is whole), the Viewer page is made from it again and the window loads it.
+    /// </summary>
+    private static void FollowPack(string file, CsiProMax.Host.WebWindow window, System.Windows.Threading.Dispatcher ui)
+    {
+        if (!file.EndsWith(".cpmx", StringComparison.OrdinalIgnoreCase)) return;
+        DateTime Stamp() { try { return File.GetLastWriteTimeUtc(file); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { return DateTime.MinValue; } }
+        var shown = Stamp();
+        var seen = shown;
+        var timer = new System.Windows.Threading.DispatcherTimer(TimeSpan.FromSeconds(3), System.Windows.Threading.DispatcherPriority.Background, (_, _) =>
+        {
+            var now = Stamp();
+            if (now == DateTime.MinValue || now == shown) { seen = now; return; }
+            if (now != seen) { seen = now; return; }
+            shown = now;
+            try { CsiProMax.Host.WebPages.ViewerPageFor(file); window.ReloadPage(); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or System.Text.Json.JsonException or InvalidOperationException) { Note("viewer: the pack was written again", ex); }
+        }, ui);
+        window.Closed += (_, _) => timer.Stop();
+        timer.Start();
     }
 
     /// <summary>

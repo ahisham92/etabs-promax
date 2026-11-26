@@ -28,6 +28,8 @@
 #                     no Claude Code used or installed. The same as this line:
 #                       irm https://raw.githubusercontent.com/ahisham92/etabs-promax/main/install-no-ai.ps1 | iex
 #     -WithAI         the AI chat on again (the default for a first install)
+#     -NoPacks        do not keep the review pack beside each model up to date after every analysis and design
+#                     (on by default; puts packs-off.txt in %LOCALAPPDATA%\CsiProMax). -Packs turns it on again.
 #   Without -NoAI or -WithAI, a PC keeps the choice it has. It can also be switched in the CSI ProMax window
 #   (CSI ProMax menu, Turn the AI chat on/off), without closing ETABS, SAFE or SAP2000.
 #
@@ -50,7 +52,9 @@ function Install-CsiProMax {
         [switch]$NoPlugins,
         [switch]$NoKeeper,
         [switch]$NoRuntime,
-        [switch]$Preview
+        [switch]$Preview,
+        [switch]$NoPacks,
+        [switch]$Packs
     )
 
     $ErrorActionPreference = 'Stop'
@@ -466,6 +470,24 @@ function Install-CsiProMax {
             }
         }
 
+        # 3a. The review pack beside each model, written again by itself after every analysis and design (dotnet
+        # CsiProMax.dll --packs, started at sign-in by the Tools menu keeper and by the CSI ProMax window). It only
+        # reads the programs: it never saves, unlocks or changes a model. packs.txt says where it is; packs-off.txt stops it.
+        if ($onWindows -and -not $SettingsRoot -and -not $Preview -and $env:LOCALAPPDATA) {
+            try {
+                $state = Join-Path $env:LOCALAPPDATA 'CsiProMax'
+                if (-not (Test-Path -LiteralPath $state)) { New-Item -ItemType Directory -Path $state -Force | Out-Null }
+                $offFile = Join-Path $state 'packs-off.txt'
+                if ($NoPacks) { [IO.File]::WriteAllText($offFile, 'off') }
+                elseif ($Packs -and (Test-Path -LiteralPath $offFile)) { Remove-Item -LiteralPath $offFile -Force }
+                $packRuntime = Find-DesktopRuntime
+                if ($packRuntime) { [IO.File]::WriteAllText((Join-Path $state 'packs.txt'), ('on|' + (Join-Path $packRuntime.Root 'dotnet.exe') + '|' + $Folder)) }
+                if (Test-Path -LiteralPath $offFile) { Say '  Review packs are not updated by themselves (packs-off.txt). To turn it on: run this line with -Packs.' }
+                else { Say '  After every analysis and design, the review pack (.cpmx) beside the model is written again by itself.' 'Green' }
+            }
+            catch { Say "  (The review pack watcher could not be set up: $($_.Exception.Message))" 'Yellow' }
+        }
+
         # 3b. The Modeler's shortcut, so a PC with no CSI program can start CSI ProMax at all. Only the first time:
         # CSI ProMax makes both shortcuts (Modeler and Viewer) at its first start and keeps them up to date, and one the
         # person deleted stays deleted. Not in the tests (they name a settings folder of their own).
@@ -479,15 +501,15 @@ function Install-CsiProMax {
                     foreach ($place in $places) {
                         if (-not $place) { continue }
                         if (-not (Test-Path -LiteralPath $place)) { New-Item -ItemType Directory -Path $place -Force | Out-Null }
-                        $link = $shell.CreateShortcut((Join-Path $place 'CSI ProMax Modeler.lnk'))
+                        $link = $shell.CreateShortcut((Join-Path $place 'CSI ProMax Engine.lnk'))
                         $link.TargetPath = Join-Path $dotnetRoot.Root 'dotnet.exe'
                         $link.Arguments = '"' + (Join-Path $Folder 'CsiProMax.dll') + '" --modeler'
                         $link.WorkingDirectory = $Folder
                         $link.WindowStyle = 7
-                        $link.Description = 'CSI ProMax Modeler: build models with no CSI program open'
+                        $link.Description = 'CSI ProMax Engine: model, run and see results and design, for ETABS, SAP2000 and SAFE'
                         $link.Save()
                     }
-                    Say '  The "CSI ProMax Modeler" shortcut is on your desktop and in the Start menu: it needs no CSI program.'
+                    Say '  The "CSI ProMax Engine" shortcut is on your desktop and in the Start menu: it needs no CSI program.'
                 }
             }
             catch { Say "  (The Modeler shortcut could not be made: $($_.Exception.Message) Double-click 'Open the Modeler.cmd' in $Folder instead.)" }
@@ -596,8 +618,8 @@ function Install-CsiProMax {
         Say '  1. Open ETABS, SAFE or SAP2000 and a model, then Tools > CSI ProMax. The window opens beside the program.'
         if ($aiOn) { Say '  2. The chat runs on Claude Code on your own Claude plan. The window offers to install it or sign in.' }
         else {
-            Say '  2. Without the AI chat. The "CSI ProMax Modeler" and "CSI ProMax Viewer" shortcuts (desktop and Start menu)'
-            Say '     work with no CSI program. To turn the chat on later: CSI ProMax menu, Turn the AI chat on.'
+            Say '  2. Without the AI chat. The "CSI ProMax Engine" shortcut (desktop and Start menu)'
+            Say '     works with no CSI program. To turn the chat on later: CSI ProMax menu, Turn the AI chat on.'
         }
         Say "  3. On a PC other than the owner's, the Licence window shows this PC's code (SPM-....). Send it to the owner"
         Say '     and paste the key you get back.'

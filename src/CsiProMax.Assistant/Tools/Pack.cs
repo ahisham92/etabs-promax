@@ -61,7 +61,7 @@ public static class Pack
     /// <param name="extraTables">More tables to take, by name or key (for example "Element Forces - Beams").</param>
     public static Built Build(ICsiLink e, IReadOnlyList<string> extraTables, IReadOnlyList<string> cases, IReadOnlyList<string> combos,
         JsonObject? checks, JsonArray? comments, int mostRows = DefaultMostRows, string by = "", bool withTables = true,
-        IReadOnlyList<string>? designFiles = null, bool instabilities = false)
+        IReadOnlyList<string>? designFiles = null, bool instabilities = false, JsonObject? auto = null)
     {
         var info = e.Info();
         var notes = new List<string>();
@@ -79,6 +79,8 @@ public static class Pack
             ["by"] = by,
             ["made_with"] = "CSI ProMax",
         };
+        // A pack the watcher wrote by itself after a run or a design (AutoPack): what it was made from.
+        if (auto is not null) manifest["auto"] = auto;
         var frames = e.Frames();
         var areas = e.Areas();
         var points = e.Points();

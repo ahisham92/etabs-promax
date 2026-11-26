@@ -70,8 +70,8 @@ public static class ModelerStartFieldSteps
     /// <summary>Each Modeler shortcut (desktop, Start menu): its program and its CsiProMax.dll must be there, and it must start the Modeler.</summary>
     private static string Shortcut()
     {
-        var links = Host.Shortcuts.Folders().Where(f => f.Length > 0).Select(f => Path.Combine(f, Host.Shortcuts.ModelerName + ".lnk")).Where(File.Exists).ToList();
-        if (links.Count == 0) throw new FieldSkipException("this PC has no Modeler shortcut (View > Make the Modeler and Viewer shortcuts again makes it)");
+        var links = Host.Shortcuts.Folders().Where(f => f.Length > 0).Select(f => Path.Combine(f, Host.Shortcuts.EngineName + ".lnk")).Where(File.Exists).ToList();
+        if (links.Count == 0) throw new FieldSkipException("this PC has no CSI ProMax Engine shortcut (View > Make the CSI ProMax Engine shortcut again makes it)");
         var type = Type.GetTypeFromProgID("WScript.Shell") ?? throw new FieldSkipException("Windows' shortcut reader is not available on this PC");
         dynamic shell = Activator.CreateInstance(type)!;
         var seen = new List<string>();
@@ -83,7 +83,7 @@ public static class ModelerStartFieldSteps
                 string target = link.TargetPath, arguments = link.Arguments, folder = link.WorkingDirectory;
                 FieldContext.Expect(File.Exists(target), $"{file} starts {target}, which is not on this PC");
                 var dll = arguments.Trim().StartsWith('"') ? arguments.Trim()[1..].Split('"')[0] : arguments.Trim().Split(' ')[0];
-                FieldContext.Expect(File.Exists(dll), $"{file} starts {dll}, which is not on this PC (reinstall, or View > Make the Modeler and Viewer shortcuts again)");
+                FieldContext.Expect(File.Exists(dll), $"{file} starts {dll}, which is not on this PC (reinstall, or View > Make the CSI ProMax Engine shortcut again)");
                 FieldContext.Expect(arguments.Contains("--modeler", StringComparison.Ordinal), $"{file} does not start the Modeler: {arguments}");
                 FieldContext.Expect(folder.Length == 0 || Directory.Exists(folder), $"{file} starts in {folder}, which is not on this PC");
                 seen.Add($"{Path.GetFileName(Path.GetDirectoryName(file))}: {target} {arguments}");
@@ -98,7 +98,7 @@ public static class ModelerStartFieldSteps
     {
         var dll = Path.Combine(AppContext.BaseDirectory, "CsiProMax.dll");
         if (!File.Exists(dll) || Environment.ProcessPath is not { } host) return (new WindowFieldSteps.Seen(false, $"CsiProMax.dll was not found in {AppContext.BaseDirectory}"), new WindowFieldSteps.Seen(false, "not started"));
-        if (CsiProMax.App.Modeler || Process.GetProcessesByName("dotnet").Any(p => { try { return p.Id != Environment.ProcessId && p.MainWindowTitle.StartsWith("CSI ProMax Modeler", StringComparison.Ordinal); } catch (InvalidOperationException) { return false; } finally { p.Dispose(); } }))
+        if (CsiProMax.App.Modeler || Process.GetProcessesByName("dotnet").Any(p => { try { return p.Id != Environment.ProcessId && p.MainWindowTitle.StartsWith(CsiProMax.App.Engine, StringComparison.Ordinal); } catch (InvalidOperationException) { return false; } finally { p.Dispose(); } }))
             return (new WindowFieldSteps.Seen(false, "a Modeler is open on this PC, so the test cannot start its own. Close it and run the test again.", NotTried: true), new WindowFieldSteps.Seen(false, "not started"));
         var notes = Program.NoteFile;
         var before = File.Exists(notes) ? new FileInfo(notes).Length : 0;
@@ -121,7 +121,7 @@ public static class ModelerStartFieldSteps
                 if (first.HasExited) return (new WindowFieldSteps.Seen(false, $"it ended by itself with code {first.ExitCode} and no window. {WindowFieldSteps.Wrote(notes, before)}"), new WindowFieldSteps.Seen(false, "not started"));
                 if (first.MainWindowHandle != IntPtr.Zero) title = first.MainWindowTitle;
             }
-            if (!title.StartsWith("CSI ProMax Modeler", StringComparison.Ordinal))
+            if (!title.StartsWith(CsiProMax.App.Engine, StringComparison.Ordinal))
                 return (new WindowFieldSteps.Seen(false, title.Length == 0 ? $"no window showed within 90 seconds. {WindowFieldSteps.Wrote(notes, before)}" : $"the window is named '{title}'"), new WindowFieldSteps.Seen(false, "not started"));
             // The window must be the Modeler itself: its model view drawn inside it, not the chat alone (2026-11-26).
             var drawn = DateTime.UtcNow.AddSeconds(60);

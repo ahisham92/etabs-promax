@@ -1086,6 +1086,23 @@ public static class CsiTools
         };
     }
 
+    /// <summary>
+    /// File.OpenFile, and once more after a new model when the program says no. ETABS 23 refused to open a model while
+    /// another saved model was open (Ahmed's PC, 2026-11-26: restore_checkpoint got "File.OpenFile answered 1", and
+    /// open_model of the scratch model's own .EDB stopped on "Error in performing miOpen"); from an empty window it opens.
+    /// File.OpenFile drops the open model's unsaved changes all the same, so starting a new model first loses nothing more.
+    /// </summary>
+    internal static void OpenFile(ICsiLink e, string what, string path)
+    {
+        try { Call(e, what, "File.OpenFile", D(("FileName", path))); }
+        catch (EtabsException first)
+        {
+            if (Try(e, "start an empty model so the file can open", "InitializeNewModel") is null) throw;
+            try { Call(e, what, "File.OpenFile", D(("FileName", path))); }
+            catch (EtabsException) { throw new EtabsException(first.Message + " It said no again from an empty model."); }
+        }
+    }
+
     private static JsonNode RestoreCheckpoint(JsonElement a, ICsiLink e)
     {
         var (model, folder) = CheckpointFolder(e);
@@ -1096,7 +1113,7 @@ public static class CsiTools
             var have = ListCheckpoints(e)["checkpoints"]!.AsArray().Select(c => c!["name"]!.GetValue<string>()).ToList();
             throw new ToolInputException($"There is no checkpoint '{name}'." + (have.Count > 0 ? " The checkpoints: " + string.Join(", ", have) + "." : " Take one with save_checkpoint first."));
         }
-        Call(e, "open the checkpoint", "File.OpenFile", D(("FileName", copy)));
+        OpenFile(e, "open the checkpoint", copy);
         Call(e, "save it under the model's own name", "File.Save", D(("FileName", model)));
         e.Refresh();
         return new JsonObject { ["restored"] = name, ["model"] = e.Info().File, ["frames"] = e.Frames().Count, ["areas"] = e.Areas().Count };
@@ -1147,14 +1164,22 @@ public static class CsiTools
         try { before = e.Info().File; } catch (EtabsException) { /* no model was readable: open it all the same */ }
         if (before.Length > 0 && SameModel(before, path))
             return new JsonObject { ["opened"] = Path.GetFileName(path), ["model"] = before, ["note"] = $"{Path.GetFileName(path)} is already the model open in {name}." };
-        Call(e, $"open {Path.GetFileName(path)}", "File.OpenFile", D(("FileName", path)));
+        OpenFile(e, $"open {Path.GetFileName(path)}", path);
         e.Refresh();
         var now = e.Info();
-        return new JsonObject
+        var answer = new JsonObject
         {
             ["opened"] = Path.GetFileName(path), ["model"] = now.File, ["closed"] = before.Length > 0 ? Path.GetFileName(before) : "an untitled model",
             ["units"] = $"{now.Force}, {now.Length}", ["locked"] = now.Locked,
         };
+        // A Modeler .e2k: what its forms hold beyond the .e2k's keywords is in the .cpm beside it, and goes in by the tables.
+        if (e.Program.Key == CsiProgram.Etabs.Key && Path.GetExtension(path).Equals(".e2k", StringComparison.OrdinalIgnoreCase) && ModelerTables.ModelerFileBeside(path) is { } cpm)
+        {
+            var (done, refused) = ModelerTables.Apply(e, cpm);
+            if (done.Count > 0) answer["modeler_tables"] = new JsonArray(done.Select(x => (JsonNode)x).ToArray());
+            if (refused.Count > 0) answer["modeler_tables_refused"] = new JsonArray(refused.Select(x => (JsonNode)x).ToArray());
+        }
+        return answer;
     }
 
     // ---- ETABS's stories and area sections ----

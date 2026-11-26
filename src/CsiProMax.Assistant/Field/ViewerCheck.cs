@@ -171,6 +171,29 @@ public static class ViewerCheck
           if (p.R) p.M = matrices(p, p.R.w, p.R.h);
           return p;
         };
+        const objInfoProblem = d => {
+          const tabs = [...d.querySelectorAll(".itabs button")].map(b => b.textContent), buttons = [...d.querySelectorAll(".df button")].map(b => b.textContent).join(", ");
+          const first = (program === "sap2000" ? "Location" : "Geometry") + ", Assignments, Loads";
+          if (tabs.slice(0, 3).join(", ") !== first) return `its tabs are ${tabs.join(", ")}, not ${first} as in ${program.toUpperCase()}`;
+          if (window.cpmLive ? tabs.length !== 3 : tabs.slice(3).some(t => !["Results", "Design", "Comments"].includes(t))) return "it has tabs the program does not: " + tabs.join(", ");
+          if (buttons !== "OK, Cancel") return "its buttons are " + buttons + ", not OK, Cancel";
+          if (!d.querySelector("fieldset.oid") || !/Label/.test(d.querySelector("fieldset.oid").textContent)) return "it has no Object ID box";
+          if (d.querySelectorAll("table.pg").length < 3) return "its tabs are not property grids";
+          const row = d.querySelector("table.pg tr[data-n]"); row.click();
+          if (!d.querySelector(".pgdesc b") || d.querySelector(".pgdesc b").textContent !== row.dataset.n) return "a click on a property does not show its description underneath";
+          return "";
+        };
+        await step("the Model Explorer is the program's: Model, Display, Tables and Reports tabs, the Model tree in the program's order", async () => {
+          const tabs = [...document.querySelectorAll("#tree .xtabs button")].map(b => b.textContent).join(", ");
+          if (tabs !== "Model, Display, Tables, Reports") return {fail: "the explorer's tabs are " + (tabs || "missing")};
+          const top = [...document.querySelectorAll('#tree .xpage[data-x="model"] > details > details > summary')].map(s => s.firstChild.textContent.trim());
+          const want = ["Project", "Structure Layout", "Properties", "Structural Objects", "Groups", "Loads", "Named Output Items", "Named Plots"];
+          if (top.join("|") !== want.join("|")) return {fail: "the Model tree reads " + top.join(", ")};
+          const menus = [...document.querySelectorAll("#menubar .menu:not([hidden])")].map(m => m.dataset.menu);
+          for (const m of ["File", "Edit", "View", "Define", "Select", "Analyze", "Display", "Design", "Options", "Tools", "Help"]) if (!menus.includes(m)) return {fail: "the menu bar has no " + m + " menu: " + menus.join(", ")};
+          if (!document.getElementById("vname").textContent) return {fail: "the status bar does not name the view"};
+          return {ok: tabs + "; " + top.join(", ") + "; menus " + menus.join(" ")};
+        });
         await step("selection: a left-to-right window round a support selects the support joint", async () => {
           if (!supports.length) return {skipped: "skipped: the model has no supports"};
           const p = await view3d(), s = supports.find(x => supportShown(p, x) && p.M.to(x.p)[3]);
@@ -182,10 +205,10 @@ public static class ViewerCheck
           rightClick(p, q[0], q[1], false); await wait(120);
           const d = [...document.querySelectorAll(".dlg")].pop();
           if (!d || !/Joint Information/.test(d.textContent)) return {fail: "a right click on the support opened no Joint Information"};
-          // The same window as a member's (Ahmed 2026-11-26): the same tabs and buttons.
-          const tabs = [...d.querySelectorAll(".itabs button")].map(b => b.textContent.replace(/ \(.*\)$/, "")).join(", "), buttons = [...d.querySelectorAll(".df button")].map(b => b.textContent).join(", ");
-          if (tabs !== "Geometry, Assignments, Loads, Results, Design, Comments" || buttons !== "Show in Tables, Close") return {fail: `Joint Information has tabs ${tabs} and buttons ${buttons}, not a member's`};
-          return {ok: `support ${s.name} selected (${said}); its right click opens Joint Information with the member's tabs`};
+          // The programs' Object Information (Ahmed 2026-11-26): Object ID, the programs' own tabs as property grids, OK and Cancel.
+          const bad = objInfoProblem(d); if (bad) return {fail: "Joint Information: " + bad};
+          if (!d.querySelector('tr[data-n="Restraints"]')) return {fail: "Joint Information has no Restraints row in Assignments"};
+          return {ok: `support ${s.name} selected (${said}); its right click opens Joint Information in the program's own layout`};
         });
         await step("selection: right click on an object opens its information, with a Loads tab holding its loads", async () => {
           const p = await view3d(), vis = visOf(p), shown = frames.concat(areas).filter(o => vis[o.id]);
@@ -196,15 +219,14 @@ public static class ViewerCheck
           rightClick(p, q[0], q[1], false); await wait(150);
           let d = [...document.querySelectorAll(".dlg")].pop();
           if (!d || !/Information/.test(d.textContent)) return {fail: `a right click on ${o.name} opened no information window (${JSON.stringify(pickAt(p, q[0], q[1]))} at ${q.slice(0, 2).map(Math.round)}; ${document.querySelectorAll(".dlg").length} windows)`};
-          if (!d.querySelector('.itabs [data-page="lds"]')) return {fail: "the information window has no Loads tab"};
-          const otabs = [...d.querySelectorAll(".itabs button")].map(b => b.textContent.replace(/ \(.*\)$/, "")).join(", ");
-          if (otabs !== "Geometry, Assignments, Loads, Results, Design, Comments") return {fail: "the information window's tabs are " + otabs};
+          const bad = objInfoProblem(d); if (bad) return {fail: `${o.name}'s information window: ${bad}`};
           closeDialogs();
           const loaded = shown.find(x => loadRowsOf(x).length);
           if (!loaded) return {ok: "information window with a Loads tab opened; no object in this pack has loads assigned"};
           infoWindow(loaded.id); await wait(120); d = [...document.querySelectorAll(".dlg")].pop();
-          const n = loadRowsOf(loaded).reduce((k, x) => k + x.rows.length, 0), tab = d.querySelector('.itabs [data-page="lds"]').textContent;
-          if (!tab.includes("(" + n + ")")) return {fail: `${loaded.name} has ${n} load rows but its Loads tab says ${tab}`};
+          const n = loadRowsOf(loaded).reduce((k, x) => k + x.rows.length, 0), page = d.querySelectorAll(".ipage")[2], heads = [...page.querySelectorAll("tr.pgh")].map(h => h.dataset.r);
+          const shownLoads = [...page.querySelectorAll("tr[data-p]")].filter(tr => heads.includes(tr.dataset.p)).length, tab = `Loads (${shownLoads} under ${heads.length} load patterns)`;
+          if (shownLoads !== n) return {fail: `${loaded.name} has ${n} load rows but its Loads tab lists ${shownLoads}`};
           // A second right click replaces the window, never a second one beside it (Ahmed 2026-11-26).
           const other = shown.find(x => x !== loaded) || loaded, oq = p.M.to([0, 1, 2].map(i => other.type === "f" ? (other.a[i] + other.b[i]) / 2 : other.pts.reduce((t, c) => t + c[i], 0) / other.pts.length));
           rightClick(p, oq[0], oq[1], false); await wait(120); if (supports.length) { jointInfo(supports[0].name); await wait(80); }
@@ -366,6 +388,28 @@ public static class ViewerCheck
     }
 
     /// <summary>
+    /// A Viewer display the program keeps no table for, so on its pack the item is rightly greyed out (the Viewer shows
+    /// what the program shows, nothing extra: Ahmed 2026-11-26). Judged by the program's own table list, with the words
+    /// the Viewer itself looks for (viewer.html, the Display menu): SAFE 23.1 lists modal, section cut and imported
+    /// response spectrum tables, so those are tested; it lists no pier or spandrel forces, hinge or pushover tables
+    /// (0.4.56 tester run, 286 tables). Null when the program has such a table, or for any other item: tested as usual.
+    /// </summary>
+    public static string? NotInProgram(IReadOnlyCollection<string> programTables, string program, string item)
+    {
+        if (programTables.Count == 0) return null;
+        foreach (var (words, look, what) in new[]
+        {
+            ("Pier and Spandrel", "pierforces|spandrelforces", "pier or spandrel forces"), ("Hinge", "hinge", "hinge results"),
+            ("Pushover", "pushover|capacitycurve", "pushover curves"), ("Response Spectrum", "responsespectrum", "response spectrum cases"),
+            ("Mode Shape", "modal", "modal results"), ("Modal Results", "modal", "modal results"), ("Section Cut", "sectioncut", "section cut forces"),
+        })
+            if (item.Contains(words, StringComparison.OrdinalIgnoreCase))
+                return programTables.Any(t => System.Text.RegularExpressions.Regex.IsMatch(ResultTools.Norm(t), look)) ? null
+                    : $"{program} has no {what} (none of its {programTables.Count} tables holds them)";
+        return null;
+    }
+
+    /// <summary>
     /// The field test's Viewer steps, the same for every program: a pack of the model <paramref name="link"/> has open
     /// is made, the Viewer is opened on it, and every item the page checked is recorded as its own step, with the
     /// pictures saved in the test's folder (they go into the zip). A PC with no usable browser records "not tested".
@@ -398,10 +442,14 @@ public static class ViewerCheck
             FieldContext.Expect(missing.Count == 0, "the pack has no " + string.Join("; ", missing));
             return string.Join(", ", have.Select(t => t.Name));
         });
+        var programTables = Array.Empty<string>();
+        try { programTables = link.Tables().Select(t => t.Name).ToArray(); }
+        catch (Exception ex) when (ex is not (OperationCanceledException or OutOfMemoryException)) { /* then no greyed-out item is taken as right */ }
         foreach (var item in seen.Items)
         {
             var name = "Viewer, " + item.Name;
-            if (item.Skipped) ctx.Skip(name, item.Detail.StartsWith("skipped: ", StringComparison.Ordinal) ? item.Detail["skipped: ".Length..] : item.Detail);
+            if (item.Skipped && NotInProgram(programTables, program, item.Name) is { } none) ctx.Step(name, () => $"greyed out, as it should be: {none}");
+            else if (item.Skipped) ctx.Skip(name, item.Detail.StartsWith("skipped: ", StringComparison.Ordinal) ? item.Detail["skipped: ".Length..] : item.Detail);
             else if (item.Ok) ctx.Step(name, () => item.Detail.Length > 0 ? item.Detail : "ok");
             else ctx.Fail(name, item.Detail);
         }

@@ -264,7 +264,7 @@ internal sealed class MainWindow : Window
             view.Items.Add(new Separator());
             Add(view, $"Open the _Modeler (no {Csi.Name} needed)", ModelView.StartModeler);
         }
-        Add(view, "Make the Modeler and Viewer _shortcuts again", () => TaskDialog.Show("CSI ProMax", "The Modeler and Viewer shortcuts are on your desktop and in the Start menu (CSI ProMax):\n" + string.Join("\n", Shortcuts.MakeAll())));
+        Add(view, "Make the CSI ProMax Engine _shortcut again", () => TaskDialog.Show("CSI ProMax", "The CSI ProMax Engine shortcut is on your desktop and in the Start menu (CSI ProMax):\n" + string.Join("\n", Shortcuts.MakeAll())));
 
         var help = Top("_Help");
         Add(help, "_Report a bug…", () => { if (CsiProMax.App.Etabs is { } etabs) Bugs.BugReport.Command(etabs); });
