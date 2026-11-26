@@ -250,6 +250,16 @@ public static class ViewerCheck
           act("selNone");
           return {ok: `${before} selected, ${g.dataset.g} unchecked, ${after} kept (${left.slice(0, 4).join(", ")})`};
         });
+        await step("the window reads as the model's program: its accent, its menu names and only its own Display items", async () => {
+          const root = document.documentElement.dataset.program, run = document.querySelector('[data-menu="Analyze"]').firstChild.textContent.trim();
+          const label = document.getElementById("story").parentElement.firstChild.textContent.trim();
+          const flat = l => l.flatMap(i => !i ? [] : Array.isArray(i[1]) ? flat(i[1]) : [i[0]]), shown = flat(menus().Display);
+          if (root !== program) return {fail: `the page is dressed as ${root}, the model is for ${program}`};
+          if (run !== (program === "safe" ? "Run" : "Analyze")) return {fail: `the run menu is named ${run}`};
+          if (label !== (program === "sap2000" ? "X-Y Plane" : "Story")) return {fail: `the plan picker is named ${label}`};
+          const foreign = program === "safe" ? shown.filter(x => /Mode Shapes|Story Response|Pushover|Response Spectrum|Modal Results|Hinge/.test(x)) : program === "sap2000" ? shown.filter(x => /Story Response|Pier and Spandrel/.test(x)) : [];
+          return foreign.length ? {fail: "Display offers what this program does not have: " + foreign.join(", ")} : {ok: `${program}: ${run} menu, ${label} picker, ${shown.length} Display items`};
+        });
         await step("selection: the Filter button sits at the bottom right with the count selected, as in Revit, and opens the Filter", async () => {
           await view3d(); act("selNone"); await wait(60);
           const b = document.getElementById("fbFilter"), foot = document.querySelector("footer");
