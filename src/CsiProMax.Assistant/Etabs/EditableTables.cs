@@ -7,6 +7,39 @@ namespace CsiProMax.Assistant.Etabs;
 /// </summary>
 public static class EditableTables
 {
+    private static long _refusals;
+    private static string _lastRefused = "";
+
+    /// <summary>How many table imports the program has refused so far (the field test compares it before and after a step).</summary>
+    public static long Refusals => Interlocked.Read(ref _refusals);
+
+    /// <summary>The last refused import, whole: the table, its fields, every row sent and the uncut import log.</summary>
+    public static string LastRefused { get { lock (_gate) return _lastRefused; } }
+
+    private static readonly object _gate = new();
+
+    /// <summary>
+    /// Keeps a refused import whole for the field test's report (Ahmed, 2026-11-26: one run must bring everything
+    /// needed to fix it, with no experiment on the PC afterwards).
+    /// </summary>
+    internal static void Refused(string answer, string log, IEnumerable<(string Key, string[] Fields, IReadOnlyList<string[]> Rows)> tables)
+    {
+        var text = new System.Text.StringBuilder();
+        text.Append(answer).Append('.');
+        foreach (var (key, fields, rows) in tables)
+        {
+            text.Append($" Table '{key}', fields {string.Join(" | ", fields)}; {rows.Count} rows sent:");
+            foreach (var r in rows) text.Append(" [").Append(string.Join(" | ", r)).Append(']');
+            text.Append('.');
+        }
+        text.Append(" Whole import log: ").Append((log ?? "").Replace("\r", "").Replace("\n", " / ").Trim());
+        lock (_gate) _lastRefused = text.ToString();
+        Interlocked.Increment(ref _refusals);
+    }
+
+    /// <summary>Rows of a flat array, <paramref name="width"/> values each.</summary>
+    private static List<string[]> Chunk(string[] all, int width) => width <= 0 ? [] : all.Chunk(width).Select(c => c.ToArray()).ToList();
+
     /// <summary>
     /// True when every error of an import log is a field the program left at its default while it read the record
     /// ("Error reading field TL; field ignored and default values will be used", ETABS 23 KDS table, 0.4.55 and main
@@ -143,6 +176,7 @@ public static class EditableTables
                 log ??= "";
                 if (applied != 0 || fatal > 0 || (errors > 0 && !OnlyFieldsIgnored(log, errors)))
                 {
+                    Refused($"ApplyEditedTables answered {applied} ({fatal} fatal, {errors} errors, {warnings} warnings)", log, [(key, fields, kept)]);
                     try { m.DatabaseTables.CancelTableEditing(); } catch { /* nothing more to undo */ }
                     string restored = Tools.CsiTools.RestoreRows(m, key, readFields, readRows);
                     throw new EtabsException($"{program} did not apply '{key}' ({fatal} fatal, {errors} errors), so it cannot {what}. {restored} Its import log: {LogCut(log)}" + About(m, key, rows));
@@ -296,6 +330,9 @@ public static class EditableTables
                 int applied = Convert.ToInt32(m.DatabaseTables.ApplyEditedTables(true, ref fatal, ref errors, ref warnings, ref info, ref log));
                 log ??= "";
                 Dictionary<string, string> after = Codes(m);
+                if (applied != 0 || fatal + errors > 0)
+                    Refused($"ApplyEditedTables answered {applied} ({fatal} fatal, {errors} errors, {warnings} warnings)", log,
+                        new[] { ("Load Pattern Definitions", pf, (IReadOnlyList<string[]>)Chunk(all, pf.Length)) }.Concat(tables.Select(t => (t.Key, t.Fields.ToArray(), (IReadOnlyList<string[]>)Chunk(t.Data.ToArray(), t.Fields.Length)))));
                 if (applied != 0 && fatal == 0 && errors == 0 && log.Trim().Length == 0)
                     throw new EtabsException($"{program} did not run the import of {pattern}'s {code} (it answered {applied}, with no log), so it cannot {what}. {NoImportAfterText} Patterns after: {after.Count} of {before.Count}; " +
                         $"locked now: {Locked(m)}; the windows of {program}: {OpenWindows(e.Program)}; thread {Thread.CurrentThread.GetApartmentState()}; steps: {string.Join("; ", trace)}.");
