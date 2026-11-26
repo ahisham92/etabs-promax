@@ -221,8 +221,12 @@ static class ModelerWindowTests
                     foreach (var i in seen.Items) Console.WriteLine($"   {(i.Skipped ? "skip" : i.Ok ? "ok  " : "FAIL")} {i.Name}: {i.Detail}");
                 Check(seen.Items.Count(i => i.Name.StartsWith("menu: ", StringComparison.Ordinal) && i.Ok && !i.Skipped) > 30, "most menu items ran: " + seen.Items.Count(i => i.Name.StartsWith("menu: ", StringComparison.Ordinal) && !i.Skipped));
                 Check(seen.Items.All(i => i.Ok || i.Skipped), "the Modeler's window: " + string.Join("; ", seen.Items.Where(i => !i.Ok).Select(i => i.Name + ": " + i.Detail)));
-                var skipped = seen.Items.Where(i => i.Skipped && !i.Detail.Contains("a file or a printer", StringComparison.Ordinal)).Select(i => i.Name).ToList();
-                Check(skipped.Count == 0, "items left out although they could run: " + string.Join(", ", skipped));
+                // Nothing is left out (Ahmed 2026-11-26): File > Open, Import > Excel and Print run another way, and an item
+                // greyed out where the check reaches it is a failure.
+                var skipped = seen.Items.Where(i => i.Skipped).Select(i => i.Name).ToList();
+                Check(skipped.Count == 0, "items left out: " + string.Join(", ", skipped));
+                foreach (var must in new[] { "File > Open...", "Tables from Excel (.xlsx)...", "Print the active window..." })
+                    Check(seen.Items.Any(i => i.Ok && !i.Skipped && i.Name.Contains(must, StringComparison.Ordinal)), must + " was not run");
             });
     }
 }

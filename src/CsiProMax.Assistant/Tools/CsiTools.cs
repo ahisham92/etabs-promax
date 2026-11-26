@@ -801,6 +801,7 @@ public static class CsiTools
             try
             {
                 int version = readVersion; string[] f = fields.ToArray(); string[] data = rows.SelectMany(r => r).ToArray();
+                try { m.DatabaseTables.CancelTableEditing(); } catch { /* nothing staged */ } // a table left staged by an earlier call would be applied instead (SAP2000, 2026-11-26)
                 int took = Convert.ToInt32(m.DatabaseTables.SetTableForEditingArray(table.Key, ref version, ref f, rows.Count, ref data));
                 if (took != 0) refused = $"{program} refused to take the edit of {table.Name} (answer {took})";
                 else
