@@ -234,6 +234,48 @@ public static class ScratchExtras
     /// After the analysis: the program's tables hold rows for what <see cref="Add"/> put in, by the names each
     /// program gives them. These are the tables the review pack takes for the Viewer's displays.
     /// </summary>
+    /// <summary>
+    /// SAFE's scratch model before its analysis: a modal case and a section cut, which SAFE 23.1 has tables for
+    /// ("Modal Periods And Frequencies", "Section Cut Forces - Analysis"), so the Viewer's mode shapes, modal plot and
+    /// section cut forces are tested on SAFE too (0.4.56 tester run: they were greyed out on an empty pack).
+    /// </summary>
+    public static void AddSafe(FieldContext ctx)
+    {
+        var link = ctx.Link;
+        if (link is OfflineEtabs or MemoryEtabs) { ctx.Skip("SAFE's scratch model gets a modal case and a section cut", NoApi); return; }
+        ctx.Step($"a modal case {SafeModal} of 6 modes (for the Viewer's mode shapes and modal plot)", () =>
+        {
+            Must(link, "add a modal case", "LoadCases.ModalEigen.SetCase", ("Name", SafeModal));
+            return $"{SafeModal}, {ApiWorkarounds.SetNumberModes(link, "ModalEigen", SafeModal, 6, 1)}";
+        });
+        ctx.Step($"a section cut through a floor (for the Viewer's section cut forces)", () =>
+        {
+            var floor = link.Areas().FirstOrDefault(a => a.Kind == "floor")?.Name ?? throw new FieldCheckException("the scratch model has no floor to cut");
+            Must(link, "make a group", "GroupDef.SetGroup", ("Name", Group));
+            Must(link, "put a floor in the group", "AreaObj.SetGroupAssign", ("Name", floor), ("GroupName", Group), ("Remove", false), ("ItemType", 0));
+            return $"{SectionCut} by group {Group} (floor {floor}), {ApiWorkarounds.SectionCutByGroup(link, SectionCut, Group)}";
+        });
+    }
+
+    public const string SafeModal = "CPM-MODAL";
+
+    /// <summary>After SAFE's analysis: its modal and section cut tables have rows for what <see cref="AddSafe"/> put in.</summary>
+    public static void CheckSafe(FieldContext ctx)
+    {
+        var link = ctx.Link;
+        if (link is OfflineEtabs or MemoryEtabs) return;
+        var known = Read(ctx, "the tables", link.Tables, []);
+        var cases = Read(ctx, "the load cases", link.LoadCases, []);
+        foreach (var (what, table) in new[] { ("the modal case", "Modal Periods And Frequencies"), ("the section cut's forces", "Section Cut Forces - Analysis") })
+            ctx.Step($"SAFE table {table} has rows for {what}", () =>
+            {
+                var found = known.FirstOrDefault(t => string.Equals(t.Name, table, StringComparison.OrdinalIgnoreCase)) ?? throw new EtabsException($"SAFE lists no table '{table}'.");
+                var data = link.ReadTable(found.Key, cases, []);
+                FieldContext.Expect(data.Rows.Count > 0, $"'{table}' has no rows after the analysis ({data.Fields.Count} fields)");
+                return $"{data.Rows.Count} rows";
+            });
+    }
+
     public static void Check(FieldContext ctx)
     {
         var link = ctx.Link;
