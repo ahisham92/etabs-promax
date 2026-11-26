@@ -416,10 +416,14 @@ public sealed class FieldContext(CsiProgram program, string folder, ICsiLink lin
     private void Live(FieldStep step)
     {
         var line = LiveLine(step);
+        if (!step.Ok) try { Failed?.Invoke(step); } catch (Exception ex) when (ex is not OutOfMemoryException) { /* a picture never stops the run */ }
         try { Outcome?.Invoke(line); } catch (Exception ex) when (ex is not OutOfMemoryException) { /* following the run never stops it */ }
         try { Directory.CreateDirectory(Folder); lock (_gate) File.AppendAllText(Path.Combine(Folder, LiveFile), $"{DateTime.Now:HH:mm:ss} {line}{Environment.NewLine}"); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException) { }
     }
+
+    /// <summary>Called with each step that failed, as it is recorded (the scratch window's picture is taken then).</summary>
+    public Action<FieldStep>? Failed { get; set; }
 
     /// <summary>Called with each step's outcome line as it is recorded.</summary>
     public Action<string>? Outcome { get; set; }
