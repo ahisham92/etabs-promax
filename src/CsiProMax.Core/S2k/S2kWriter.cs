@@ -173,6 +173,7 @@ public static class S2kWriter
         var offsets = new List<IReadOnlyList<(string, string)>>();
         var frameMods = new List<IReadOnlyList<(string, string)>>();
         var hingeRows = new List<IReadOnlyList<(string, string)>>();
+        var hingeTypes = new List<IReadOnlyList<(string, string)>>();
         var areaMods = new List<IReadOnlyList<(string, string)>>();
         var springs = new List<IReadOnlyList<(string, string)>>();
         var springDefs = PropertyDefs.Springs(m);
@@ -185,13 +186,13 @@ public static class S2kWriter
                     ("PJ", YesNo(rj.Contains("P"))), ("V2J", YesNo(rj.Contains("V2"))), ("V3J", YesNo(rj.Contains("V3"))), ("TJ", YesNo(rj.Contains("T"))), ("M2J", YesNo(rj.Contains("M2"))), ("M3J", YesNo(rj.Contains("M3"))), ("PartialFix", "No")));
             if (PropertyDefs.Value(x.Extra, "ANG") is { } ang) axes.Add(Row(("Frame", name), ("Angle", ang), ("AdvanceAxes", "No")));
             if (PropertyDefs.Value(x.Extra, "CARDINALPT") is { } cp && cp != "10")
-                insertion.Add(Row(("Frame", name), ("CardinalPt", Cardinal(cp)), ("Mirror2", "No"), ("Mirror3", "No"), ("StiffTransform", "Yes"), ("XI", "0"), ("YI", "0"), ("ZI", "0"), ("XJ", "0"), ("YJ", "0"), ("ZJ", "0"), ("CoordSys", "Local")));
+                insertion.Add(Row(("Frame", name), ("CardinalPt", Cardinal(cp)), ("CoordSys", "Local"), ("JtOffsetXI", "0"), ("JtOffsetYI", "0"), ("JtOffsetZI", "0"), ("JtOffsetXJ", "0"), ("JtOffsetYJ", "0"), ("JtOffsetZJ", "0"), ("Mirror2", "No"), ("Mirror3", "No"), ("Transform", "Yes")));
             var oi = PropertyDefs.Value(x.Extra, "LENGTHOFFI"); var oj = PropertyDefs.Value(x.Extra, "LENGTHOFFJ"); var rz = PropertyDefs.Value(x.Extra, "RIGIDZONE");
             if (oi is not null || oj is not null || rz is not null)
                 offsets.Add(Row(("Frame", name), ("LengthType", "User Defined"), ("Offset1", oi ?? "0"), ("Offset2", oj ?? "0"), ("RZ", rz ?? "0"), ("FixedRZ", "No")));
             var fm = PropertyDefs.Modifiers(x.Extra, PropertyDefs.FrameModifiers);
             if (fm.Values.Any(v => Math.Abs(v - 1) > 1e-12))
-                frameMods.Add(Row(("Frame", name), ("AMod", N(fm["AMOD"])), ("A2Mod", N(fm["A2MOD"])), ("A3Mod", N(fm["A3MOD"])), ("JMod", N(fm["JMOD"])), ("I2Mod", N(fm["I2MOD"])), ("I3Mod", N(fm["I3MOD"])), ("MMod", N(fm["MMOD"])), ("WMod", N(fm["WMOD"]))));
+                frameMods.Add(Row(("Frame", name), ("AMod", N(fm["AMOD"])), ("AS2Mod", N(fm["A2MOD"])), ("AS3Mod", N(fm["A3MOD"])), ("JMod", N(fm["JMOD"])), ("I22Mod", N(fm["I2MOD"])), ("I33Mod", N(fm["I3MOD"])), ("MassMod", N(fm["MMOD"])), ("WeightMod", N(fm["WMOD"]))));
             if (PropertyDefs.Value(x.Extra, "SPRINGPROP") is { } sp) notes.Add($"Frame {name} has the line spring {sp}: assign it in SAP2000 (Assign > Frame > Line Springs).");
             var hinges = PropertyDefs.HingesOf(m, x.Label, x.Story);
             // Auto hinges (SAP2000's API cannot assign hinges, so they go in by the file). "Frame Hinge Assigns 01 -
@@ -199,10 +200,14 @@ public static class S2kWriter
             // fields read from SAP2000 26 (field/extras-api-shapes.md). Only the concrete beam table's fields are known
             // so far: its flexural hinges go in, the others are named in a note.
             var concreteBeam = m.Line(x.Label)?.Kind == LineKind.Beam && m.FrameSections.Find(fs => fs.Name == x.Section)?.Material is { } mat && m.Materials.Find(mm => mm.Name == mat)?.IsConcrete == true;
+            // The frame's hinge distribution, as SAP2000 26 writes it for its own auto hinges (0.4.40: "00 - Hinge
+            // Distribution Type" row with HgeDistrTyp=Nonlinear Beam Column and an absolute hinge length).
+            if (concreteBeam && hinges.Exists(h => h.Dof is "M3" or "M2"))
+                hingeTypes.Add(Row(("Frame", name), ("HgeDistrTyp", "Nonlinear Beam Column"), ("IsHgeLenRel", "No"), ("HgeLenAbs", N(0.1 * lengths.GetValueOrDefault(name, 3)))));
             foreach (var h in hinges)
             {
                 if (concreteBeam && h.Dof is "M3" or "M2")
-                    hingeRows.Add(Row(("Frame", name), ("CompType", "Primary"), ("DOF", h.Dof), ("VFrom", "User"), ("VUser", "0"), ("Conforming", "Yes"), ("RatioFrom", "Design"), ("RatioUser", "0"),
+                    hingeRows.Add(Row(("Frame", name), ("HgeDistrTyp", "Nonlinear Beam Column"), ("CompType", "Primary"), ("DOF", h.Dof), ("VFrom", "User"), ("VUser", "0"), ("Conforming", "Yes"), ("RatioFrom", "Design"), ("RatioUser", "0"),
                         ("SaveFibResp", "No"), ("DistType", "RelDist"), ("RelDist", N(h.At)), ("AbsDist", "0"), ("LenOWType", "None"), ("LenOWRel", "0"), ("LenOWAbs", "0")));
                 else notes.Add($"Frame {name} has an auto {h.Dof} hinge at {N(h.At)}: assign it in SAP2000 (Assign > Frame > Hinges); only concrete beams' M2 and M3 hinges go across by the file so far.");
             }
@@ -212,7 +217,7 @@ public static class S2kWriter
             if (!areaNames.TryGetValue((x.Label, x.Story), out var name)) continue;
             var am = PropertyDefs.Modifiers(x.Extra, PropertyDefs.ShellModifiers);
             if (am.Values.Any(v => Math.Abs(v - 1) > 1e-12))
-                areaMods.Add(Row(("Area", name), ("f11", N(am["F11MOD"])), ("f22", N(am["F22MOD"])), ("f12", N(am["F12MOD"])), ("m11", N(am["M11MOD"])), ("m22", N(am["M22MOD"])), ("m12", N(am["M12MOD"])), ("v13", N(am["V13MOD"])), ("v23", N(am["V23MOD"])), ("MMod", N(am["MMOD"])), ("WMod", N(am["WMOD"]))));
+                areaMods.Add(Row(("Area", name), ("f11", N(am["F11MOD"])), ("f22", N(am["F22MOD"])), ("f12", N(am["F12MOD"])), ("m11", N(am["M11MOD"])), ("m22", N(am["M22MOD"])), ("m12", N(am["M12MOD"])), ("v13", N(am["V13MOD"])), ("v23", N(am["V23MOD"])), ("MassMod", N(am["MMOD"])), ("WeightMod", N(am["WMOD"]))));
             if (PropertyDefs.Value(x.Extra, "SPRINGPROP") is { } sp) notes.Add($"Area {name} has the area spring {sp}: assign it in SAP2000 (Assign > Area > Area Springs).");
         }
         foreach (var pa in m.PointAssigns)
@@ -249,6 +254,7 @@ public static class S2kWriter
         Add(tables, "FRAME INSERTION POINT ASSIGNMENTS", insertion);
         Add(tables, "FRAME OFFSET ALONG LENGTH ASSIGNMENTS", offsets);
         Add(tables, "FRAME PROPERTY MODIFIERS", frameMods);
+        Add(tables, "FRAME HINGE ASSIGNS 00 - HINGE DISTRIBUTION TYPE", hingeTypes);
         Add(tables, "FRAME HINGE ASSIGNS 04 - AUTO FEMA 356 - CONCRETE BEAM", hingeRows);
         Add(tables, "AREA STIFFNESS MODIFIERS", areaMods);
 
@@ -291,10 +297,18 @@ public static class S2kWriter
                     lanes.Add(Row(("Lane", lane.Name), ("Frame", frame), ("Offset", N(lane.Offset)), ("Width", N(lane.Width))));
                 }
             Add(tables, "LANE DEFINITION DATA", lanes);
-            Add(tables, "VEHICLES 1 - GENERAL", extras.Vehicles.Select(v => Row(("Vehicle", v.Name), ("VehType", v.Standard.Length > 0 ? v.Standard : "General"), ("ScaleFactor", N(v.Scale)))));
-            Add(tables, "VEHICLES 2 - LOADS", extras.Vehicles.Where(v => v.Standard.Length == 0).SelectMany(v =>
-                v.Axles.Select((a, i) => Row(("Vehicle", v.Name), ("LoadNum", (i + 1).ToString(CultureInfo.InvariantCulture)), ("LoadType", i == 0 ? "Leading Load" : "Fixed Length"), ("AxleLoad", N(a.Load)), ("MinDist", N(a.Spacing)), ("UnifLoad", N(v.Uniform))))));
-            Add(tables, "VEHICLE CLASSES", extras.VehicleClasses.SelectMany(c => c.Vehicles.Select(v => Row(("VehClass", c.Name), ("VehName", v.Vehicle), ("ScaleFactor", N(v.Scale))))));
+            // SAP2000 26's vehicle tables (0.4.40): standard vehicles, general vehicles and their loads, and classes.
+            Add(tables, "VEHICLES 1 - STANDARD VEHICLES", extras.Vehicles.Where(v => v.Standard.Length > 0).Select(v => Row(("VehName", v.Name), ("Type", v.Standard), ("ScaleFactor", N(v.Scale)))));
+            // A general vehicle as SAP2000's form has it: a leading load (the first axle), one row per further axle at its
+            // distance with the uniform load over that length, and a trailing load (0.4.40's field keys).
+            Add(tables, "VEHICLES 2 - GENERAL VEHICLES 1 - GENERAL", extras.Vehicles.Where(v => v.Standard.Length == 0).Select(v => Row(("VehName", v.Name),
+                ("NumInter", Math.Max(0, v.Axles.Count - 1).ToString(CultureInfo.InvariantCulture)), ("StayInLane", "Yes"))));
+            Add(tables, "VEHICLES 3 - GENERAL VEHICLES 2 - LOADS", extras.Vehicles.Where(v => v.Standard.Length == 0).SelectMany(v =>
+                v.Axles.Select((a, i) => i == 0
+                    ? Row(("VehName", v.Name), ("LoadType", "Leading Load"), ("InterUnif", "0"), ("InterAxle", N(a.Load)))
+                    : Row(("VehName", v.Name), ("LoadType", "Fixed Length"), ("InterUnif", N(v.Uniform)), ("InterAxle", N(a.Load)), ("InterMinD", N(a.Spacing)), ("InterMaxD", N(a.Spacing))))
+                .Append(Row(("VehName", v.Name), ("LoadType", "Trailing Load"), ("InterUnif", "0"), ("InterAxle", "0")))));
+            Add(tables, "VEHICLES 4 - VEHICLE CLASSES", extras.VehicleClasses.SelectMany(c => c.Vehicles.Select(v => Row(("VehClass", c.Name), ("VehName", v.Vehicle), ("ScaleFactor", N(v.Scale))))));
         }
 
         // Groups, one per story, and the model's own.
@@ -466,6 +480,7 @@ public static class S2kWriter
             else if (shape.Contains("i/wide flange") && d > 0 && b > 0 && tf > 0 && tw > 0) { name = "I/Wide Flange"; p = ISection(d, b, tf, tw, bb, tfb); }
             else if ((shape.Contains("tube") || shape.Contains("box")) && d > 0 && b > 0 && tf > 0 && tw > 0) { name = "Box/Tube"; p = Tube(d, b, tf, tw); }
             else if (shape.Contains("pipe") && d > 0 && tw > 0) { name = "Pipe"; p = Pipe(d, tw); }
+            else if (OpenName(shape) is { } open && OpenShape(open, d, b, tf, tw, s.Number("DIS") ?? 0) is { } parts) { name = open; p = Composite(parts); }
             else
             {
                 if (m.LineAssigns.Exists(x => x.Section == s.Name))
@@ -473,14 +488,17 @@ public static class S2kWriter
                 continue;
             }
             var fm = PropertyDefs.Modifiers(s.Lines, PropertyDefs.FrameModifiers);
+            var open2 = name is "Channel" or "Tee" or "Angle" or "Concrete Tee" or "Concrete L" or "Double Angle" or "Double Channel";
+            var pv = p.Value;
             var concrete = m.Materials.Find(x => x.Name == s.Material)?.IsConcrete ?? false;
             var isBeam = m.Passthrough.Find(r => r.Heading == "CONCRETE SECTIONS")?.Lines.Any(l => l.Contains(E2kText.Quote(s.Name)) && l.Contains("\"Beam\"")) ?? false;
             shapes[s.Name] = name;
             rows.Add(Row(("SectionName", s.Name), ("Material", s.Material), ("Shape", name), ("t3", N(d)), ("t2", N(name == "Circle" || name == "Pipe" ? 0 : b)),
-                ("tf", N(name is "I/Wide Flange" or "Box/Tube" or "Pipe" ? (name == "Pipe" ? tw : tf) : 0)), ("tw", N(name is "I/Wide Flange" or "Box/Tube" or "Pipe" ? tw : 0)),
+                ("tf", N(name is "I/Wide Flange" or "Box/Tube" or "Pipe" || open2 ? (name == "Pipe" ? tw : tf) : 0)), ("tw", N(name is "I/Wide Flange" or "Box/Tube" or "Pipe" || open2 ? tw : 0)),
+                ("dis", N(name is "Double Angle" or "Double Channel" ? s.Number("DIS") ?? 0 : 0)),
                 ("t2b", N(name == "I/Wide Flange" ? bb : 0)), ("tfb", N(name == "I/Wide Flange" ? tfb : 0)),
-                ("Area", N(p.Value.A)), ("TorsConst", N(p.Value.J)), ("I33", N(p.Value.I33)), ("I22", N(p.Value.I22)), ("I23", "0"),
-                ("AS2", N(p.Value.As2)), ("AS3", N(p.Value.As3)), ("S33", N(p.Value.S33)), ("S22", N(p.Value.S22)), ("Z33", N(p.Value.Z33)), ("Z22", N(p.Value.Z22)),
+                ("Area", N(p.Value.A)), ("TorsConst", N(p.Value.J)), ("I33", N(p.Value.I33)), ("I22", N(p.Value.I22)), ("I23", N(pv.I23)),
+                ("AS2", N(p.Value.As2)), ("AS3", N(p.Value.As3)), ("S33Top", N(pv.S33Top > 0 ? pv.S33Top : pv.S33)), ("S33Bot", N(pv.S33Bot > 0 ? pv.S33Bot : pv.S33)), ("S22Left", N(pv.S22Left > 0 ? pv.S22Left : pv.S22)), ("S22Right", N(pv.S22Right > 0 ? pv.S22Right : pv.S22)), ("Z33", N(p.Value.Z33)), ("Z22", N(p.Value.Z22)),
                 ("R33", N(Math.Sqrt(p.Value.I33 / p.Value.A))), ("R22", N(Math.Sqrt(p.Value.I22 / p.Value.A))),
                 ("ConcCol", YesNo(concrete && !isBeam)), ("ConcBeam", YesNo(concrete && isBeam)), ("Color", "Yellow"),
                 ("AMod", N(fm["AMOD"])), ("A2Mod", N(fm["A2MOD"])), ("A3Mod", N(fm["A3MOD"])), ("JMod", N(fm["JMOD"])), ("I2Mod", N(fm["I2MOD"])), ("I3Mod", N(fm["I3MOD"])), ("MMod", N(fm["MMOD"])), ("WMod", N(fm["WMOD"]))));
@@ -504,6 +522,13 @@ public static class S2kWriter
             (d.Key[0] == 'U' ? "TransKE" : "RotKE", N(d.Value.Stiff)), (d.Key[0] == 'U' ? "TransCE" : "RotCE", N(d.Value.Damp))))));
         return shapes;
     }
+
+    /// <summary>SAP2000's name for an open shape of the model's.</summary>
+    private static string? OpenName(string shape) => shape switch
+    {
+        "steel channel" => "Channel", "steel tee" => "Tee", "steel angle" => "Angle", "steel double angle" => "Double Angle", "steel double channel" => "Double Channel",
+        "concrete tee" => "Concrete Tee", "concrete l" => "Concrete L", _ => null,
+    };
 
     private static HashSet<string> AreaSections(StructuralModel m, List<string> tables, List<string> notes)
     {
@@ -560,19 +585,24 @@ public static class S2kWriter
         }
         // Moving load cases (SAP2000 Define > Load Cases > Moving Load): each assignment moves a vehicle class over lanes.
         var moving = new List<IReadOnlyList<(string, string)>>();
+        var movingLanes = new List<IReadOnlyList<(string, string)>>();
         foreach (var c in m.Extras?.MovingCases ?? [])
         {
             defs.Add(Row(("Case", c.Name), ("Type", "LinMoving"), ("InitialCond", "Zero"), ("DesignType", "Vehicle Live"), ("RunCase", "Yes")));
             for (var i = 0; i < c.Assignments.Count; i++)
             {
                 var a = c.Assignments[i];
+                // One row per assignment with its number of lanes (SAP2000 26 has no Lane field here, 0.4.40); the lanes
+                // themselves are listed in the case's lanes table.
+                moving.Add(Row(("Case", c.Name), ("AssignNum", (i + 1).ToString(CultureInfo.InvariantCulture)), ("VehClass", a.Class), ("ScaleFactor", N(a.Scale)),
+                    ("MinLoaded", a.MinLoaded.ToString(CultureInfo.InvariantCulture)), ("MaxLoaded", (a.MaxLoaded == 0 ? a.Lanes.Count : a.MaxLoaded).ToString(CultureInfo.InvariantCulture)), ("NumLanes", a.Lanes.Count.ToString(CultureInfo.InvariantCulture))));
                 foreach (var lane in a.Lanes)
-                    moving.Add(Row(("Case", c.Name), ("AssignNum", (i + 1).ToString(CultureInfo.InvariantCulture)), ("VehClass", a.Class), ("ScaleFactor", N(a.Scale)),
-                        ("MinLoaded", a.MinLoaded.ToString(CultureInfo.InvariantCulture)), ("MaxLoaded", (a.MaxLoaded == 0 ? a.Lanes.Count : a.MaxLoaded).ToString(CultureInfo.InvariantCulture)), ("Lane", lane)));
+                    movingLanes.Add(Row(("Case", c.Name), ("AssignNum", (i + 1).ToString(CultureInfo.InvariantCulture)), ("Lane", lane)));
             }
         }
         Add(tables, "LOAD CASE DEFINITIONS", defs);
         Add(tables, "CASE - MOVING LOAD 1 - LANE ASSIGNMENTS", moving);
+        Add(tables, "CASE - MOVING LOAD 2 - LANES LOADED", movingLanes);
         Add(tables, "CASE - STATIC 1 - LOAD ASSIGNMENTS", statics);
         Add(tables, "CASE - MODAL 1 - GENERAL", modal);
         foreach (var (table, rows) in more) Add(tables, table, rows);
@@ -602,8 +632,9 @@ public static class S2kWriter
                 To("CASE - STATIC 4 - NONLINEAR PARAMETERS", Row(("Case", c.Name), ("GeoNonLin", d.Geometric switch { "P-Delta" => "P-Delta", "None" => "None", _ => "P-Delta plus Large Displacements" })));
                 return true;
             case "Response Spectrum":
-                defs.Add(Row(("Case", c.Name), ("Type", "LinRespSpec"), ("InitialCond", "Zero"), ("DesignType", "Quake"), ("RunCase", "Yes")));
-                To("CASE - RESPONSE SPECTRUM 1 - GENERAL", Row(("Case", c.Name), ("ModalCase", d.ModalCase), ("ModalCombo", d.ModalCombo), ("DirCombo", d.DirCombo), ("DampingType", "Constant"), ("ConstDamp", N(d.Damping)), ("EccenRatio", N(d.Eccentricity))));
+                // SAP2000 26 keeps a case's modal case in "Load Case Definitions", not in the case's own table (0.4.40).
+                defs.Add(Row(("Case", c.Name), ("Type", "LinRespSpec"), ("InitialCond", "Zero"), ("ModalCase", d.ModalCase), ("DesignType", "Quake"), ("RunCase", "Yes")));
+                To("CASE - RESPONSE SPECTRUM 1 - GENERAL", Row(("Case", c.Name), ("ModalCombo", d.ModalCombo), ("DirCombo", d.DirCombo), ("DampingType", "Constant"), ("ConstDamp", N(d.Damping)), ("EccenRatio", N(d.Eccentricity))));
                 foreach (var l in d.Loads)
                     To("CASE - RESPONSE SPECTRUM 2 - LOAD ASSIGNMENTS", Row(("Case", c.Name), ("LoadType", "Acceleration"), ("LoadName", Dir(l.Name)), ("CoordSys", "GLOBAL"), ("Angle", N(l.Angle)), ("TransAccSF", N(l.Factor)), ("Function", l.Function ?? "")));
                 return true;
@@ -612,10 +643,12 @@ public static class S2kWriter
                 var modalHist = type.Contains("Modal");
                 var sapType = type switch { "Linear Modal History" => "LinModHist", "Nonlinear Modal History (FNA)" => "NonModHist", "Linear Direct History" => "LinDirHist", _ => "NonDirHist" };
                 var prefix = modalHist ? "CASE - MODAL HISTORY" : "CASE - DIRECT HISTORY";
-                defs.Add(Row(("Case", c.Name), ("Type", sapType), ("InitialCond", initial), ("DesignType", "Quake"), ("RunCase", "Yes")));
+                defs.Add(modalHist
+                    ? Row(("Case", c.Name), ("Type", sapType), ("InitialCond", initial), ("ModalCase", d.ModalCase), ("DesignType", "Quake"), ("RunCase", "Yes"))
+                    : Row(("Case", c.Name), ("Type", sapType), ("InitialCond", initial), ("DesignType", "Quake"), ("RunCase", "Yes")));
                 To(prefix + " 1 - GENERAL", modalHist
-                    ? Row(("Case", c.Name), ("ModalCase", d.ModalCase), ("HistoryType", sapType.StartsWith("Lin", StringComparison.Ordinal) ? "Linear" : "Nonlinear"), ("Motion", "Transient"), ("OutSteps", d.Steps.ToString(CultureInfo.InvariantCulture)), ("StepSize", N(d.StepSize)), ("ConstDamp", N(d.Damping)))
-                    : Row(("Case", c.Name), ("HistoryType", sapType.StartsWith("Lin", StringComparison.Ordinal) ? "Linear" : "Nonlinear"), ("Motion", "Transient"), ("OutSteps", d.Steps.ToString(CultureInfo.InvariantCulture)), ("StepSize", N(d.StepSize))));
+                    ? Row(("Case", c.Name), ("HistoryType", "Transient"), ("OutSteps", d.Steps.ToString(CultureInfo.InvariantCulture)), ("StepSize", N(d.StepSize)), ("DampingType", "Constant"), ("ConstDamp", N(d.Damping)))
+                    : Row(("Case", c.Name), ("OutSteps", d.Steps.ToString(CultureInfo.InvariantCulture)), ("StepSize", N(d.StepSize))));
                 foreach (var l in d.Loads)
                     To(prefix + " 2 - LOAD ASSIGNMENTS", l.Kind == "accel"
                         ? Row(("Case", c.Name), ("LoadType", "Accel"), ("LoadName", Dir(l.Name)), ("Function", l.Function ?? ""), ("LoadSF", N(l.Factor)), ("TimeFactor", "1"), ("ArrivalTime", N(l.Arrival)), ("CoordSys", "GLOBAL"), ("Angle", N(l.Angle)))
@@ -624,7 +657,7 @@ public static class S2kWriter
             }
             case "Buckling":
                 defs.Add(Row(("Case", c.Name), ("Type", "LinBuckling"), ("InitialCond", initial), ("DesignType", "Other"), ("RunCase", "Yes")));
-                To("CASE - BUCKLING 1 - GENERAL", Row(("Case", c.Name), ("NumBuckModes", d.MaxModes.ToString(CultureInfo.InvariantCulture)), ("EigenTol", "1E-09")));
+                To("CASE - BUCKLING 1 - GENERAL", Row(("Case", c.Name), ("NumBuckMode", d.MaxModes.ToString(CultureInfo.InvariantCulture)), ("EigenTol", "1E-09")));
                 foreach (var l in d.Loads) To("CASE - BUCKLING 2 - LOAD ASSIGNMENTS", Row(("Case", c.Name), ("LoadType", "Load pattern"), ("LoadName", l.Name), ("LoadSF", N(l.Factor))));
                 return true;
         }
@@ -658,7 +691,58 @@ public static class S2kWriter
         Add(tables, "COMBINATION DEFINITIONS", rows);
     }
 
-    public readonly record struct Props(double A, double J, double I33, double I22, double As2, double As3, double S33, double S22, double Z33, double Z22);
+    public readonly record struct Props(double A, double J, double I33, double I22, double As2, double As3, double S33, double S22, double Z33, double Z22)
+    {
+        // For a shape that is not symmetric: the section moduli on each side and the product of inertia (0 is "as S33/S22").
+        public double S33Top { get; init; }
+        public double S33Bot { get; init; }
+        public double S22Left { get; init; }
+        public double S22Right { get; init; }
+        public double I23 { get; init; }
+    }
+
+    /// <summary>A section made of rectangles (x along local 3, the width; y along local 2, the depth), as SAP2000's
+    /// angle, channel, tee and their doubles: thin-walled torsion, shear areas by the legs' direction, plastic moduli by slicing.</summary>
+    public static Props Composite(IReadOnlyList<(double X, double Y, double W, double H)> rects)
+    {
+        double area = rects.Sum(r => r.W * r.H);
+        double xc = rects.Sum(r => r.W * r.H * (r.X + r.W / 2)) / area, yc = rects.Sum(r => r.W * r.H * (r.Y + r.H / 2)) / area;
+        double i33 = rects.Sum(r => r.W * r.H * r.H * r.H / 12 + r.W * r.H * Math.Pow(r.Y + r.H / 2 - yc, 2));
+        double i22 = rects.Sum(r => r.H * r.W * r.W * r.W / 12 + r.W * r.H * Math.Pow(r.X + r.W / 2 - xc, 2));
+        double i23 = rects.Sum(r => r.W * r.H * (r.X + r.W / 2 - xc) * (r.Y + r.H / 2 - yc));
+        double j = rects.Sum(r => Math.Max(r.W, r.H) * Math.Pow(Math.Min(r.W, r.H), 3) / 3);
+        double as2 = rects.Where(r => r.H >= r.W).Sum(r => r.W * r.H), as3 = rects.Where(r => r.W > r.H).Sum(r => r.W * r.H) * 5 / 6;
+        double top = rects.Max(r => r.Y + r.H) - yc, bot = yc - rects.Min(r => r.Y), right = rects.Max(r => r.X + r.W) - xc, left = xc - rects.Min(r => r.X);
+        // Plastic modulus: slice across the axis, find the line halving the area, sum the first moments about it.
+        static double Plastic(IEnumerable<(double At, double Area)> strips)
+        {
+            var list = strips.OrderBy(x => x.At).ToList();
+            double half = list.Sum(x => x.Area) / 2, run = 0, pna = list[^1].At;
+            foreach (var x in list) { run += x.Area; if (run >= half) { pna = x.At; break; } }
+            return list.Sum(x => x.Area * Math.Abs(x.At - pna));
+        }
+        const int n = 200;
+        var z33 = Plastic(rects.SelectMany(r => Enumerable.Range(0, n).Select(k => (r.Y + (k + 0.5) * r.H / n, r.W * r.H / n))));
+        var z22 = Plastic(rects.SelectMany(r => Enumerable.Range(0, n).Select(k => (r.X + (k + 0.5) * r.W / n, r.W * r.H / n))));
+        return new Props(area, j, i33, i22, Math.Max(as2, 1e-9), Math.Max(as3, 1e-9), i33 / Math.Max(top, bot), i22 / Math.Max(left, right), z33, z22)
+        { S33Top = i33 / top, S33Bot = i33 / bot, S22Left = i22 / left, S22Right = i22 / right, I23 = Math.Abs(i23) < 1e-15 ? 0 : i23 };
+    }
+
+    /// <summary>The rectangles of SAP2000's open shapes, or null for another shape.</summary>
+    public static List<(double X, double Y, double W, double H)>? OpenShape(string sapShape, double d, double b, double tf, double tw, double dis)
+    {
+        if (d <= 0 || b <= 0 || tf <= 0 || tw <= 0 || tf >= d || tw >= b) return null;
+        return sapShape switch
+        {
+            "Channel" => [(0, 0, b, tf), (0, d - tf, b, tf), (0, tf, tw, d - 2 * tf)],
+            "Tee" or "Concrete Tee" => [(-b / 2, d - tf, b, tf), (-tw / 2, 0, tw, d - tf)],
+            "Angle" => [(0, 0, b, tf), (0, tf, tw, d - tf)],
+            "Concrete L" => [(0, d - tf, b, tf), (0, 0, tw, d - tf)],
+            "Double Angle" => [(dis / 2, 0, b, tf), (dis / 2, tf, tw, d - tf), (-dis / 2 - b, 0, b, tf), (-dis / 2 - tw, tf, tw, d - tf)],
+            "Double Channel" => [(dis / 2, 0, b, tf), (dis / 2, d - tf, b, tf), (dis / 2, tf, tw, d - 2 * tf), (-dis / 2 - b, 0, b, tf), (-dis / 2 - b, d - tf, b, tf), (-dis / 2 - tw, tf, tw, d - 2 * tf)],
+            _ => null,
+        };
+    }
 
     /// <summary>A solid rectangle, depth d (along local 2, the strong axis 3) and width b.</summary>
     public static Props Rectangle(double d, double b)
