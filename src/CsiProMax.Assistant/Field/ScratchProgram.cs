@@ -94,6 +94,15 @@ public static class ScratchDialogs
                 if (PostMessageW(shut, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero))
                     closed.Add($"{title}: {(said.Count > 0 ? string.Join(" | ", said) : "no message text")} (closed)");
             }
+            else if (program is not null && IsLineLog(title) && (Button(window, "OK") is { } logOk ? (logOk, "OK") : Button(window, "Cancel") is { } logCancel ? (logCancel, "Cancel") : default) is ({ } seen, { } pressed) && seen != IntPtr.Zero && IsWindowEnabled(seen))
+            {
+                // ETABS 23's "Log" window on opening a .e2k ("Following line(s) were duplicated and will be deleted in this
+                // model..."): it held both scratch ETABS of the 0.4.58 full test. Its text is read first, so the report says
+                // what ETABS found in the file.
+                var said = LongWords(window).Where(w => w.Trim().Length > 0 && !IsButton(w, "OK") && !IsButton(w, "Cancel")).Take(12).ToList();
+                if (PostMessageW(seen, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero))
+                    closed.Add($"{title}: {(said.Count > 0 ? string.Join(" | ", said) : "no text")} ({pressed})");
+            }
             else if (IsImportLog(title) && Button(window, "Done") is { } done && IsWindowEnabled(done))
             {
                 // Its errors are read before Done is pressed, so the report says what the import did not take.
@@ -118,6 +127,9 @@ public static class ScratchDialogs
         || title.Trim().Equals("Open", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>ETABS's "Analysis Messages" window (warnings while it makes auto lateral loads or runs).</summary>
+    /// <summary>ETABS's plain "Log" window, shown when it opens a .e2k it had to change (duplicated lines).</summary>
+    public static bool IsLineLog(string title) => title.Trim().Equals("Log", StringComparison.OrdinalIgnoreCase);
+
     public static bool IsAnalysisMessages(string title) => title.Trim().Equals("Analysis Messages", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>The window's own controls, left out of what it said.</summary>

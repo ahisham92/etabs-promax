@@ -1062,15 +1062,62 @@ public static class CsiTools
         var name = CheckpointName(a.Need("name"));
         Directory.CreateDirectory(folder);
         var copy = Path.Combine(folder, name + Path.GetExtension(model));
-        Call(e, "save the checkpoint's copy", "File.Save", D(("FileName", copy)));
-        // Back under its own name, so the work goes on in the model and not in the copy.
-        Call(e, "save the model under its own name again", "File.Save", D(("FileName", model)));
+        // The model is saved once under its own name and its file copied. Two saves one after the other (the copy, then
+        // the model again) crashed SAP2000 26.3 inside .NET a second later, while it still wrote the .$2k of the second
+        // save (0.4.58 full field test, Windows log: coreclr.dll 0xc0000005).
+        Call(e, "save the model", "File.Save", D(("FileName", model)));
+        Settle(model);
+        if (!CopyModelFile(model, copy))
+        {
+            Call(e, "save the checkpoint's copy", "File.Save", D(("FileName", copy)));
+            Settle(copy);
+            // Back under its own name, so the work goes on in the model and not in the copy.
+            Call(e, "save the model under its own name again", "File.Save", D(("FileName", model)));
+            Settle(model);
+        }
         var now = e.Info().File;
         return new JsonObject
         {
             ["checkpoint"] = name, ["file"] = copy, ["saved"] = File.Exists(copy) || !OperatingSystem.IsWindows(), ["model"] = now,
             ["note"] = string.Equals(Path.GetFullPath(now), Path.GetFullPath(model), StringComparison.OrdinalIgnoreCase) ? null : $"{e.Program.Name} now has {now} open: open {model} again.",
         };
+    }
+
+    /// <summary>Copies a saved model file while the program may hold it open (read with others writing allowed). False
+    /// when it cannot be read; the caller saves the copy through the program instead.</summary>
+    internal static bool CopyModelFile(string from, string to)
+    {
+        if (!OperatingSystem.IsWindows() && !File.Exists(from)) return false;
+        try
+        {
+            using var src = new FileStream(from, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var dst = new FileStream(to, FileMode.Create, FileAccess.Write, FileShare.None);
+            src.CopyTo(dst);
+            return true;
+        }
+        catch (IOException) { return false; }
+        catch (UnauthorizedAccessException) { return false; }
+    }
+
+    /// <summary>
+    /// Waits, at most 15 seconds, until a just-saved model and the text file the program writes beside it (SAP2000's
+    /// .$2k, ETABS's .$et) stop changing, so the next call does not reach the program while it is still writing.
+    /// </summary>
+    internal static void Settle(string saved, int maxMs = 15000)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var files = new[] { saved, Path.ChangeExtension(saved, ".$2k"), Path.ChangeExtension(saved, ".$et") };
+        string Stamp() => string.Join("|", files.Select(f => { var i = new FileInfo(f); return i.Exists ? i.Length + ":" + i.LastWriteTimeUtc.Ticks : "-"; }));
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var last = Stamp();
+        var still = 0;
+        while (watch.ElapsedMilliseconds < maxMs && still < 3)
+        {
+            Thread.Sleep(500);
+            var now = Stamp();
+            still = now == last ? still + 1 : 0;
+            last = now;
+        }
     }
 
     private static JsonNode ListCheckpoints(ICsiLink e)
@@ -1115,6 +1162,7 @@ public static class CsiTools
         }
         OpenFile(e, "open the checkpoint", copy);
         Call(e, "save it under the model's own name", "File.Save", D(("FileName", model)));
+        Settle(model);
         e.Refresh();
         return new JsonObject { ["restored"] = name, ["model"] = e.Info().File, ["frames"] = e.Frames().Count, ["areas"] = e.Areas().Count };
     }
