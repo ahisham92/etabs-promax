@@ -177,6 +177,7 @@ footer span{padding:0 10px;border-left:1px solid var(--line2);display:flex;align
 footer #hint{flex:1;overflow:hidden;text-overflow:ellipsis;color:var(--mute)}footer #vname{border-left:0}footer #vname:empty{display:none}
 footer #coords{font-variant-numeric:tabular-nums;min-width:230px}
 footer select{height:19px;font-size:11.5px;border-radius:0;margin:0 -4px}
+footer #units{border:0;border-left:1px solid var(--line2);background:transparent;color:var(--ink);padding:0 10px;height:100%;border-radius:0;cursor:pointer}footer #units:hover{background:var(--hot)}
 footer #fbFilter{display:flex;align-items:center;gap:4px;border:0;border-left:1px solid var(--line2);background:transparent;color:var(--ink);padding:0 10px;height:100%;border-radius:0;cursor:pointer}footer #fbFilter:hover:not(:disabled){background:var(--hot)}footer #fbFilter:disabled{color:var(--mute);cursor:default}footer #fbFilter b{font-weight:600;min-width:1ch}
 #drop{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:24px;color:#cfd8dc;z-index:4;background:#0b0d0f}
 #drop div{max-width:440px;line-height:1.6}
@@ -278,6 +279,7 @@ body.chaton #right{width:380px;max-width:42%}
   <div class="menu" data-menu="Analyze">Analyze<div class="drop"></div></div>
   <div class="menu" data-menu="Display">Display<div class="drop"></div></div>
   <div class="menu" data-menu="Design">Design<div class="drop"></div></div>
+  <div class="menu" data-menu="Detailing" hidden>Detailing<div class="drop"></div></div>
   <div class="menu" data-menu="Options">Options<div class="drop"></div></div>
   <div class="menu" data-menu="Tools">Tools<div class="drop"></div></div>
   <div class="menu" data-menu="Help">Help<div class="drop"></div></div>
@@ -340,7 +342,7 @@ body.chaton #right{width:380px;max-width:42%}
     </div>
   </div>
 </main>
-<footer><span id="vname"></span><span id="hint">Ready</span><span id="sel"></span><span id="coords"></span><span id="similarWrap" hidden><select id="similar" title="Draw on one story or on all stories" style="height:19px;padding:0 2px"><option value="one">One Story</option><option value="all">All Stories</option></select></span><span>Global</span><span id="units"></span><button id="fbFilter" disabled title="Filter: the selected objects by kind (Check All / Check None)"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M1.5 2h13l-5 6v5l-3 1.5V8z" fill="currentColor"/></svg><b id="fbN">0</b></button></footer>
+<footer><span id="vname"></span><span id="hint">Ready</span><span id="sel"></span><span id="coords"></span><span id="similarWrap" hidden><select id="similar" title="Draw on one story or on all stories" style="height:19px;padding:0 2px"><option value="one">One Story</option><option value="all">All Stories</option></select></span><span>Global</span><button id="units" title="Units"></button><button id="fbFilter" disabled title="Filter: the selected objects by kind (Check All / Check None)"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M1.5 2h13l-5 6v5l-3 1.5V8z" fill="currentColor"/></svg><b id="fbN">0</b></button></footer>
 <div id="rubber"></div><div id="tip"></div>
 <script id="pack" type="application/json"></script>
 <script>
@@ -698,6 +700,7 @@ function buildDesignView() {
   if (res.mode === "loads") return buildLoadsView();
   if (res.mode !== "design") return;
   const fam = design.find(f => f.key === res.dfam); if (!fam) return;
+  if (res.dshow && res.dshow.startsWith("in:")) return buildDesignInput(fam, res.dshow.slice(3));
   const shows = designShows(fam), show = shows.find(s => s.id === res.dshow) || (res.dshow && res.dshow.startsWith("field:") ? {id: res.dshow, name: res.dshow.slice(6), a: res.dshow.slice(6), ratio: (fam.fields.find(f => f.name === res.dshow.slice(6)) || {}).ratio, area: areaField(res.dshow.slice(6))} : shows[0]);
   if (!show) return;
   const rf = new Set(fam.fields.filter(f => f.ratio).map(f => f.name));
@@ -742,7 +745,21 @@ function buildDesignView() {
   }
   const vs = [...byObj.values()].filter(v => isFinite(v));
   dview = {fam, show, byObj, labels, lo: vs.length ? Math.min(...vs) : 0, hi: vs.length ? Math.max(...vs) : 1, k, suffix,
-    title: fam.name + " · " + show.name.replace(/ \(.*\)$/, "") + (show.ratio ? "" : suffix)};
+    title: fam.name + " · " + (show.id.startsWith("field:") ? show.name : designOutputName(fam, show)) + (show.ratio ? "" : suffix)};
+}
+// A Design Input shown on the members: the value the design used (its section, framing type, factors), as written.
+function buildDesignInput(fam, field) {
+  const byObj = new Map(), labels = [];
+  for (const it of fam.list) {
+    if (!it.objs.length) continue;
+    const row = it.rows.find(r => r.fields.includes(field) && String(r.raw[r.fields.indexOf(field)] ?? "") !== ""); if (!row) continue;
+    const text = String(row.raw[row.fields.indexOf(field)]), pts = it.objs.flatMap(o => o.type === "f" ? [o.a, o.b] : o.pts);
+    const at = [0, 1, 2].map(i => pts.reduce((m, q) => m + q[i], 0) / pts.length);
+    for (const o of it.objs) byObj.set(o.id, NaN);
+    labels.push({at, text, dy: 0, objs: it.objs});
+  }
+  const name = (designInputs(fam).find(i => i[0] === "in:" + field) || [0, field])[1];
+  dview = {fam, show: {id: "in:" + field, name, a: field}, byObj, labels, lo: 0, hi: 1, k: 1, suffix: "", title: fam.name + " · " + name};
 }
 function designColour(v) {
   if (v === undefined || !isFinite(v)) return null;
@@ -2749,6 +2766,7 @@ function act(name) {
   if (name.startsWith("cam:")) { if (p) setView3d(p, name.slice(4)); return; }
   if (name.startsWith("dlg:")) return dialogs[name.slice(4)]();
   if (name.startsWith("des:")) return openDesign(name.slice(4));
+  if (name.startsWith("det:")) return openSchedule(name.slice(4));
   if (name.startsWith("vals:")) return openValues(name.slice(5));
   if (name.startsWith("loads:")) return openLoads(name.slice(6));
   if (name.startsWith("xy:")) return openPlotFunctions(name.slice(3));
@@ -2813,6 +2831,8 @@ function programLook() {
   // SAP2000 has no stories: its plan views are X-Y planes at a Z, so the same picker is named so.
   const story = $("story"); if (story && story.parentElement && story.parentElement.firstChild) story.parentElement.firstChild.textContent = program === "sap2000" ? "X-Y Plane " : "Story ";
   const similar = $("similarWrap"); if (similar && program === "sap2000") similar.hidden = true;
+  // ETABS and SAFE have a Detailing menu (after Design); SAP2000 has none.
+  const det = document.querySelector('[data-menu="Detailing"]'); if (det) det.hidden = program === "sap2000";
 }
 function forProgram(m) {
   const tidy = list => {
@@ -2857,8 +2877,9 @@ const viewerMenus = () => {
         only(["etabs", "sap2000"], ["Response Spectrum Curves...", "xy:spectrum", "", !has(/responsespectrum/)]), only(["etabs", "sap2000"], ["Modal Results Plot...", "xy:modal", "", !has(/^modal/)]), 0,
         ["Tables...", "tables", "Ctrl+T"], ["Results Coverage...", "dlg:coverage", "", !P]];
     })(),
-    Design: [...(window.cpmLive ? [["Start Design/Check...", "eng:design", "Shift+F5"], 0] : []), ...(design.length ? [...design.map(f => [f.name, [["Display Design Info...", "des:" + f.key], ...designShows(f).map(s => [s.name.replace(/ \(.*\)$/, ""), "dshow:" + f.key + ":" + s.id])]]), 0, ["All Design Ratios", "r:ratios", "", !ratio.size], ["Display Design Results...", "des:"], ["Summary of Design Results...", "dlg:designSummary"]]
+    Design: [...(window.cpmLive ? [["Start Design/Check...", "eng:design", "Shift+F5"], 0] : []), ...(design.length ? [...design.map(f => [f.name, [["Display Design Info...", "des:" + f.key], ...designShows(f).map(s => [designOutputName(f, s), "dshow:" + f.key + ":" + s.id])]]), 0, ["All Design Ratios", "r:ratios", "", !ratio.size], ["Display Design Results...", "des:"], ["Summary of Design Results...", "dlg:designSummary"]]
       : [["No design results in this pack", "", "", true], ["Summary of Design Results...", "dlg:designSummary"]])],
+    Detailing: detailingItems(),
     Options: [...(window.cpmLive ? [["Program: " + progLabel(program) + " (ETABS, SAP2000 or SAFE)...", "m:program"], 0] : []), ["Black Background", "bg"], 0, ["Grid Lines", "o:grid"], ["Extruded Sections", "o:extrude"], ["Floors and Walls", "o:fill"], ["See-through Floors and Walls", "o:see"], ["Object Edges", "o:edges"], ["Supports", "o:supports"], ["Joints", "o:joints"], ["Labels", "o:names"], ["Global Axes", "o:axes"]],
     Help: [["Mouse and Keys", "dlg:keys"], ["About", "about"]],
   };
@@ -3504,21 +3525,76 @@ function selFilter() {
 const hmSayOr = t => typeof hmSay === "function" && window.cpmLive ? hmSay(t, true) : dialog("Filter", `<p>${esc(t)}</p>`, [["OK"]], {width: 320});
 
 // ---- the design windows: Display Design Info, the summary of every design, and a member's design ----
+// The program's own names for what a design is displayed by (its Display Design Info form).
+const frameFam = k => ["steel", "composite", "compcol", "joist", "otherframe", "connection"].includes(k);
+function designOutputName(fam, s) {
+  if (s.id === "dc") return frameFam(fam.key) ? "P-M Ratio Colors & Values" : fam.key === "concrete" ? "Column P-M-M Interaction Ratios" : fam.key === "punching" ? "Punching Shear Capacity Ratios" : "Demand/Capacity Ratios";
+  return ({long: "Longitudinal Reinforcing", pmm: fam.key === "pier" ? "Longitudinal Reinforcing" : "Longitudinal Reinforcing", pct: "Rebar Percentage", shear: "Shear Reinforcing", be: "Boundary Element Check"})[s.id] || s.name;
+}
+// Its Design Output list: the named outputs, and for steel the ratio colours without values; the table fields when the design has no named output.
+function designOutputs(fam) {
+  const s = designShows(fam), out = s.map(x => [x.id, designOutputName(fam, x)]);
+  if (s.some(x => x.id === "dc") && frameFam(fam.key)) out.splice(out.findIndex(o => o[0] === "dc") + 1, 0, ["dc:nov", "P-M Colors/No Values"]);
+  return out.length ? out : fam.fields.map(f => ["field:" + f.name, f.name]);
+}
+// Its Design Input list: the inputs the design tables carry (sections, framing type, live load reduction, unbraced lengths, K factors).
+function designInputs(fam) {
+  const name = f => { const n = norm(f.name); return /designsect|^section$|sectionname|^designsection$/.test(n) ? "Design Sections" : /framingtype|frametype/.test(n) ? "Design Framing Type" : /llrf|liveloadred|lldrf/.test(n) ? "Live Load Red. Factors" : /unbraced|^lmajor|^lminor|^ltb|^l22|^l33/.test(n) ? `Unbraced Length Ratios (${f.name})` : /^k(major|minor|ltb|22|33|1|2)|kfactor|effectivelength/.test(n) ? `Effective Length Factors (${f.name})` : ""; };
+  const all = [...new Set(fam.list.flatMap(it => it.rows.flatMap(r => r.fields)))];
+  const seen = new Set();
+  return all.filter(f => name({name: f}) && !seen.has(name({name: f})) && seen.add(name({name: f}))).map(f => ["in:" + f, name({name: f})]);
+}
+// The Detailing menu: the schedules the program's detailing draws, made from the design results in the pack
+// (members, their sections and the reinforcing the design asked for). Greyed where the pack has no such design.
+function detailingItems() {
+  const has = (k, kind) => design.some(f => f.key === k && f.list.some(i => !kind || i.objs.some(o => o.kind === kind)));
+  return [["Beam Schedule...", "det:beam", "", !has("concrete", "beam")], ["Column Schedule...", "det:column", "", !has("concrete", "column")],
+    only(["etabs"], ["Shear Wall Schedule...", "det:pier", "", !has("pier")]), ["Slab Reinforcing Schedule...", "det:slab", "", !has("slab")], 0,
+    ["Steel Member Schedule...", "det:steel", "", !has("steel")]];
+}
+function openSchedule(what) {
+  const famKey = {beam: "concrete", column: "concrete", pier: "pier", slab: "slab", steel: "steel"}[what], fam = design.find(f => f.key === famKey); if (!fam) return;
+  const items = fam.list.filter(i => what !== "beam" && what !== "column" || i.objs.some(o => o.kind === what));
+  const shows = designShows(fam).filter(x => x.a), k = unit === "m" ? 1e6 : 1;
+  const cols = shows.flatMap(x => x.b ? [[x.a, x], [x.b, x]] : [[x.a, x]]);
+  const big = (it, f) => { let b; for (const r of it.rows) { const v = r.vals[f]; if (v !== undefined && (b === undefined || Math.abs(v) > Math.abs(b))) b = v; } return b; };
+  // The section the design used (its Design Section), else the member's own.
+  const sec = it => { for (const r of it.rows) { const i = r.fields.findIndex(f => /^designsect|^designsection$/.test(norm(f))); if (i >= 0 && r.raw[i]) return String(r.raw[i]); } const o = it.objs[0]; return o ? o.section || "" : ""; };
+  const head = [what === "pier" ? "Pier" : what === "slab" ? "Strip or Slab" : "Label", "Story", "Section", ...cols.map(([f, x]) => f + (x.area && k !== 1 ? " (mm²)" : "")), ...(fam.fields.some(f => f.ratio) ? ["D/C"] : []), "Combination"];
+  const rows = items.slice().sort((a, b) => String(a.story).localeCompare(String(b.story)) || String(a.label).localeCompare(String(b.label), undefined, {numeric: true}))
+    .map(it => [it.label, it.story, sec(it), ...cols.map(([f, x]) => { const v = big(it, f); return v === undefined ? "" : x.area && k !== 1 ? String(Math.round(v * k)) : fmt(v); }), ...(fam.fields.some(f => f.ratio) ? [it.ratio === undefined ? "" : it.ratio.toFixed(3)] : []), it.combo]);
+  const title = {beam: "Beam Schedule", column: "Column Schedule", pier: "Shear Wall Schedule", slab: "Slab Reinforcing Schedule", steel: "Steel Member Schedule"}[what];
+  dialog(title, `<p class="kv" style="margin:0 0 6px">${esc(fam.name)}: ${rows.length} ${what === "pier" ? "piers" : "members"}, from ${esc(fam.tables.join("; "))}.</p><div class="scroll" style="max-height:60vh"><table class="list"><tr>${head.map(h => `<th>${esc(h)}</th>`).join("")}</tr>${rows.map(r => `<tr>${r.map(v => `<td class="${isNum(v) ? "r" : ""}">${esc(v)}</td>`).join("")}</tr>`).join("") || `<tr><td colspan="${head.length}" class="kv">None in this pack.</td></tr>`}</table></div>`,
+    [["Copy to Clipboard", () => { copyText([head, ...rows].map(r => r.join("\t")).join("\n")); return false; }, true], ["Close"]], {width: Math.min(900, 200 + head.length * 95), float: true});
+}
 function openDesign(key) {
   if (!design.length) return dialogs.designSummary();
   const cur = design.find(f => f.key === (key || res.dfam)) || design[0];
-  const showOpts = fam => { const s = designShows(fam), pick = res.dfam === fam.key && res.dshow ? res.dshow : (s[0] ? s[0].id : ""); return (s.length ? `<optgroup label="Design output">${opts(s.map(x => [x.id, x.name]), pick)}</optgroup>` : "") + `<optgroup label="Any number in the design tables">${opts(fam.fields.map(f => ["field:" + f.name, f.name]), pick)}</optgroup>`; };
-  const d = dialog("Display Design Results", `
-    <fieldset><legend>Design</legend><div class="g2"><span>Design type</span><select id="dFam">${opts(design.map(f => [f.key, f.name]), cur.key)}</select><span>Display</span><select id="dShow">${showOpts(cur)}</select></div></fieldset>
-    <fieldset><legend>Options</legend><div class="g3"><label><input type="checkbox" id="dVals" ${res.dvalues ? "checked" : ""}>Show values on the model</label><label><input type="checkbox" id="dNames" ${res.dnames ? "checked" : ""}>Pier and spandrel names</label></div></fieldset>
+  const pickOf = fam => res.dfam === fam.key && res.dshow ? (res.dshow === "dc" && res.dvalues === false && frameFam(fam.key) ? "dc:nov" : res.dshow) : (designOutputs(fam)[0] || [""])[0];
+  const isInput = fam => designInputs(fam).some(i => i[0] === pickOf(fam));
+  const d = dialog(key ? "Display " + cur.name + " Results" : "Display Design Results", `
+    ${key ? `<input type="hidden" id="dFam" value="${esc(cur.key)}">` : `<fieldset><legend>Design</legend><div class="g2"><span>Design type</span><select id="dFam">${opts(design.map(f => [f.key, f.name]), cur.key)}</select></div></fieldset>`}
+    <fieldset><legend>Choose Display Type</legend><div class="g2">
+      <label><input type="radio" name="dKind" value="out">Design Output</label><select id="dOut"></select>
+      <label><input type="radio" name="dKind" value="in">Design Input</label><select id="dIn"></select></div></fieldset>
+    <fieldset id="dPierBox"><legend>Options</legend><div class="g2"><label><input type="checkbox" id="dNames" ${res.dnames ? "checked" : ""}>Show Pier and Spandrel Labels</label></div></fieldset>
     <p class="kv" id="dFrom"></p>`,
-    [["OK", d => applyDesign(d)], ["Apply", d => { applyDesign(d); return false; }, true], ["Cancel"]], {width: 500});
-  const from = () => { const f = design.find(x => x.key === q(d, "#dFam").value); q(d, "#dFrom").textContent = `${f.list.length} ${f.key === "pier" ? "piers" : f.key === "spandrel" ? "spandrels" : "items"} from ${[...f.from].join(", ")}: ${f.tables.join("; ")}.`; };
-  q(d, "#dFam").onchange = () => { const f = design.find(x => x.key === q(d, "#dFam").value); q(d, "#dShow").innerHTML = showOpts(f); from(); };
-  from();
+    [["OK", d => applyDesign(d)], ["Close"], ["Apply", d => { applyDesign(d); return false; }, true]], {width: 500});
+  const fill = () => {
+    const f = design.find(x => x.key === q(d, "#dFam").value), outs = designOutputs(f), ins = designInputs(f), pick = pickOf(f), inNow = isInput(f) && ins.length;
+    q(d, "#dOut").innerHTML = opts(outs, inNow ? undefined : pick); q(d, "#dIn").innerHTML = ins.length ? opts(ins, inNow ? pick : undefined) : "";
+    q(d, "[name=dKind][value=in]").disabled = q(d, "#dIn").disabled = !ins.length;
+    q(d, `[name=dKind][value=${inNow ? "in" : "out"}]`).checked = true; q(d, "#dOut").disabled = !!inNow;
+    q(d, "#dPierBox").hidden = !(f.key === "pier" || f.key === "spandrel");
+    q(d, "#dFrom").textContent = `${f.list.length} ${f.key === "pier" ? "piers" : f.key === "spandrel" ? "spandrels" : "items"} from ${[...f.from].join(", ")}: ${f.tables.join("; ")}.`;
+  };
+  d.querySelectorAll("[name=dKind]").forEach(r => r.onchange = () => { q(d, "#dOut").disabled = r.value !== "out"; q(d, "#dIn").disabled = r.value !== "in"; });
+  if (!key) q(d, "#dFam").onchange = fill;
+  fill();
 }
 function applyDesign(d) {
-  res.mode = "design"; res.dfam = q(d, "#dFam").value; res.dshow = q(d, "#dShow").value; res.dvalues = q(d, "#dVals").checked; res.dnames = q(d, "#dNames").checked;
+  const inp = q(d, "[name=dKind]:checked").value === "in", v = inp ? q(d, "#dIn").value : q(d, "#dOut").value;
+  res.mode = "design"; res.dfam = q(d, "#dFam").value; res.dshow = v === "dc:nov" ? "dc" : v; res.dvalues = v !== "dc:nov"; res.dnames = q(d, "#dNames").checked;
   if ($("colour").value === "ratio") $("colour").value = "kind";
   colourDirty = true; syncResults(); panes.forEach(p => p.diagSig = null); syncTools(); draw();
 }
@@ -3633,6 +3709,14 @@ document.querySelectorAll("[data-close]").forEach(b => b.onclick = () => act(b.d
 function showTab(name) { document.querySelectorAll("[data-tab]").forEach(x => x.classList.toggle("on", x.dataset.tab === name)); document.querySelectorAll(".tab").forEach(t => t.classList.toggle("on", t.id === name)); }
 document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => showTab(b.dataset.tab));
 $("fbFilter").onclick = () => selFilter();
+// The units button at the bottom right, as in the programs: their Units form, here for the units the model is in.
+$("units").onclick = () => {
+  const u = (P && P.manifest && P.manifest.units) || {}, f = u.force || "", l = u.length || "", t = u.temperature || "";
+  if (!f && !l) return;
+  const rows = [["Length", l], ["Force", f], ["Temperature", t], ["Moment", f && l ? f + "-" + l : ""], ["Stress", f && l ? f + "/" + l + "²" : ""], ["Area", l ? l + "²" : ""], ["Section Dimensions", l], ["Displacement", l], ["Rotation", "rad"]].filter(r => r[1]);
+  dialog("Units", `<fieldset><legend>Consistent Units</legend><table class="list"><tr><th>Item</th><th>Unit</th></tr>${rows.map(r => `<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td></tr>`).join("")}</table></fieldset>
+    <p class="kv">The model is shown in the units it was saved in by ${esc({etabs: "ETABS", sap2000: "SAP2000", safe: "SAFE"}[program])}; every value here is in these units.</p>`, [["OK"]], {width: 340});
+};
 function showPick() {
   const el = $("props");
   if (!P) return;
