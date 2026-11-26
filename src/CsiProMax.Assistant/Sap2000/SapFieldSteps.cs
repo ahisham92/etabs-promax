@@ -306,6 +306,48 @@ public static class SapFieldSteps
         // ---- the tools every program has through the same API (the whole API, lateral loads, checkpoints, a building) ----
         CsiFieldSteps.Run(ctx);
 
+        // ---- an engineer's SAP2000 that opened an .s2k (last: from here on this window takes no table import itself) ----
+        // SAP2000 26 refuses every table import in a session that opened an .s2k (experiment N, 2026-11-26), as an
+        // engineer's window is after File > Open of the Modeler's .s2k: set_lateral_load must still give a code that has
+        // no API call, by making the change in a second SAP2000 (SapFreshProcess).
+        if (link is not OfflineEtabs and not MemoryEtabs)
+        {
+            var own = Read(ctx, "the scratch model's file", () => link.Info().File, "");
+            var tiny = Path.Combine(ctx.Folder, "cpm-field-test-text.s2k");
+            if (own.Length > 0 && ctx.Step("the scratch SAP2000 opens an .s2k, then the scratch model again (as an engineer's window that opened the Modeler's .s2k)", () =>
+            {
+                File.WriteAllText(tiny, TinyS2k);
+                link.Raw("save the scratch model", m => m.File.Save(own));
+                link.Raw("open an .s2k text file", m => m.File.OpenFile(tiny));
+                link.Raw("open the scratch model again", m => m.File.OpenFile(own));
+                link.Refresh();
+                FieldContext.Expect(ScratchProgram.SameName(link.Info().File, own), $"SAP2000 has {link.Info().File} open, not the scratch model");
+                return Path.GetFileName(own);
+            }) is not null)
+                ctx.Tool("set_lateral_load", """{"name":"CPM-AUTO-S","kind":"seismic","code":"ASCE 7-22"}""", a =>
+                    FieldContext.Expect(a["read_back"] is JsonObject { Count: > 0 } && a["second_sap2000"] is not null && link.LoadPatterns().Count > 1,
+                        "ASCE 7-22 should be given in a second SAP2000 and read back here, with the other patterns kept: " + a.ToJsonString()),
+                    "tool set_lateral_load in a SAP2000 that opened an .s2k: the change is made in a second SAP2000");
+        }
+
         ctx.Coverage("every SAP2000 tool was run");
     }
+
+    /// <summary>A two-joint, two-pattern .s2k: opening it is enough for SAP2000 26 to refuse every later table import (experiment N5).</summary>
+    internal const string TinyS2k = """
+        File cpm-field-test-text.s2k
+
+        TABLE:  "PROGRAM CONTROL"
+           ProgramName=SAP2000   Version=26.3.0   CurrUnits="KN, m, C"   SteelCode=AISC360-16   ConcCode="ACI 318-19"
+
+        TABLE:  "JOINT COORDINATES"
+           Joint=1   CoordSys=GLOBAL   CoordType=Cartesian   XorR=0   Y=0   Z=0   SpecialJt=No
+           Joint=2   CoordSys=GLOBAL   CoordType=Cartesian   XorR=0   Y=0   Z=3   SpecialJt=No
+
+        TABLE:  "LOAD PATTERN DEFINITIONS"
+           LoadPat=DEAD   DesignType=Dead   SelfWtMult=1
+           LoadPat=CPM-AUTO-S   DesignType=Quake   SelfWtMult=0
+
+        END TABLE DATA
+        """;
 }

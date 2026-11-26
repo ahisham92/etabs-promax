@@ -512,6 +512,26 @@ static class OldProgramTests
             Check(tables.Contains("with no log), so it cannot {what}. {NoImportAfterText}", StringComparison.Ordinal), "set_lateral_load's refused import says it");
             var tools = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Tools/CsiTools.cs"));
             Check(tools.Contains("EditableTables.NoImportAfterText", StringComparison.Ordinal), "edit_table's refused import says it");
+
+            // The tools get round it themselves: the same import in a second SAP2000, on the file saved just before.
+            Check(SapFreshProcess.IsSessionRefusal(CsiProgram.Sap2000, "SAP2000 did not run the import of X's ASCE 7-22 (it answered 1, with no log), so it cannot give X it. " + EditableTables.NoImportAfterText + " Patterns after: 0 of 10"), "set_lateral_load's refusal is the one a second SAP2000 gets round");
+            Check(SapFreshProcess.IsSessionRefusal(CsiProgram.Sap2000, "SAP2000 refused to apply the edit of T (answer 1). " + EditableTables.NoImportAfterText.TrimEnd('.') + ". The model was opened again as it was saved just before the edit (m.sdb)"), "edit_table's refusal too");
+            Check(!SapFreshProcess.IsSessionRefusal(CsiProgram.Sap2000, "SAP2000 did not apply X's KDS (0 fatal, 2 errors). Its import log: ..."), "a refusal with a log is the rows' fault: no second SAP2000");
+            Check(!SapFreshProcess.IsSessionRefusal(CsiProgram.Etabs, EditableTables.NoImportAfterText), "never for ETABS");
+            var lateral = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Tools/LateralTools.cs"));
+            Check(lateral.IndexOf("SapFreshProcess.IsSessionRefusal(e.Program, ex.Message)", StringComparison.Ordinal) is var r and > 0
+                  && lateral.IndexOf("SapFreshProcess.Apply(e, saved, fresh => EditableTables.PutAutoLoad(fresh,", r, StringComparison.Ordinal) > r
+                  && lateral.Contains("[\"second_sap2000\"] = second", StringComparison.Ordinal), "set_lateral_load makes the change in a second SAP2000, after opening the saved file again, and says so");
+            Check(tools.IndexOf("SapFreshProcess.IsSessionRefusal(e.Program, ex.Message)", StringComparison.Ordinal) is var t and > 0
+                  && tools.IndexOf("SapFreshProcess.Apply(e, savedAs,", t, StringComparison.Ordinal) > t && tools.Contains("log[\"second_sap2000\"] = second", StringComparison.Ordinal), "edit_table too");
+            var fresh = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Tools/SapFreshProcess.cs"));
+            Check(fresh.IndexOf("m.File.NewBlank()", StringComparison.Ordinal) is var blank and > 0 && fresh.IndexOf("return Run(program, file, work);", StringComparison.Ordinal) > blank
+                  && fresh.IndexOf("m.File.OpenFile(file)) == 0", fresh.IndexOf("finally", blank, StringComparison.Ordinal), StringComparison.Ordinal) > 0, "the engineer's window lets go of the file first and always opens it again");
+            Check(fresh.Contains("KeptPlugIns.Take(program)", StringComparison.Ordinal) && fresh.Contains("KeptPlugIns.PutBack(plugIns)", StringComparison.Ordinal) && fresh.Contains("ApplicationExit(false)", StringComparison.Ordinal),
+                "the second SAP2000 leaves the plug-in lists as they were and closes without saving over the change");
+            var steps = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Sap2000/SapFieldSteps.cs"));
+            Check(steps.Contains("the change is made in a second SAP2000", StringComparison.Ordinal) && steps.IndexOf("CsiFieldSteps.Run(ctx);", StringComparison.Ordinal) < steps.IndexOf("TinyS2k);", StringComparison.Ordinal),
+                "the field test tries it on a real SAP2000, last, after every other table step");
         });
 
         yield return ("kind: a program's 'could not read this file' box in a scratch window is answered OK and said, never a licence box", () =>

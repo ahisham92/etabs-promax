@@ -258,16 +258,31 @@ public static class LateralTools
             var saved = SaveFirst(e, name, table.Code);
             var wasLocked = e.Info().Locked;
             string log;
+            string? second = null;
+            var what = $"give {name} the {kind.ToLowerInvariant()} code {table.Code}";
             try
             {
                 // The other patterns keep their codes, those given through the API too, by a blank AutoLoad (see PutAutoLoad).
-                log = EditableTables.PutAutoLoad(e, name, kind == LateralCodes.Wind ? "Wind" : "Quake", table.KeyCode, table.Key, values, $"give {name} the {kind.ToLowerInvariant()} code {table.Code}");
+                log = EditableTables.PutAutoLoad(e, name, kind == LateralCodes.Wind ? "Wind" : "Quake", table.KeyCode, table.Key, values, what);
             }
             catch (EtabsException ex)
             {
                 var reopened = (bool)e.Raw("open the model again as it was saved", m => { try { return Convert.ToInt32(m.File.OpenFile(saved)) == 0; } catch (Exception) { return false; } })!;
                 try { e.Refresh(); } catch (Exception rex) when (rex is EtabsException or InvalidOperationException) { /* the next call reads it */ }
-                throw new EtabsException(reopened
+                // A SAP2000 session that opened an .s2k takes no table import: the same import, in a second SAP2000 (SapFreshProcess).
+                if (reopened && SapFreshProcess.IsSessionRefusal(e.Program, ex.Message))
+                {
+                    try
+                    {
+                        log = SapFreshProcess.Apply(e, saved, fresh => EditableTables.PutAutoLoad(fresh, name, kind == LateralCodes.Wind ? "Wind" : "Quake", table.KeyCode, table.Key, values, what));
+                        second = SapFreshProcess.Said(saved);
+                    }
+                    catch (EtabsException ex2)
+                    {
+                        throw new EtabsException($"{ex.Message} The model was opened again as it was saved just before ({System.IO.Path.GetFileName(saved)}). Making the change in a second {e.Program.Name} did not work either: {ex2.Message}");
+                    }
+                }
+                else throw new EtabsException(reopened
                     ? $"{ex.Message} The model was opened again as it was saved just before ({System.IO.Path.GetFileName(saved)}), so nothing of the import is left in it and every pattern is as it was."
                     : $"{ex.Message} Opening {System.IO.Path.GetFileName(saved)} again was refused: open it yourself (File > Open), without saving the model first.");
             }
@@ -284,6 +299,7 @@ public static class LateralTools
                 ["note"] = $"{e.Program.Name} filled in its own defaults for the inputs not given. It computes the story forces when the analysis runs.",
                 ["saved_before_edit"] = $"The model was saved as {System.IO.Path.GetFileName(saved)} just before the import, so that it could be opened again if {e.Program.Name} lost a pattern. Tell the engineer that the file was saved.",
                 ["unlocked"] = wasLocked ? $"The model was locked (it held analysis results): it was unlocked for the import, so the results are deleted. Run the analysis again." : null,
+                ["second_sap2000"] = second,
             };
         }
         else
