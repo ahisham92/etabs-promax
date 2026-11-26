@@ -183,6 +183,17 @@ public static class ViewerCheck
           if (!d.querySelector(".pgdesc b") || d.querySelector(".pgdesc b").textContent !== row.dataset.n) return "a click on a property does not show its description underneath";
           return "";
         };
+        await step("the Model Explorer is the program's: Model, Display, Tables and Reports tabs, the Model tree in the program's order", async () => {
+          const tabs = [...document.querySelectorAll("#tree .xtabs button")].map(b => b.textContent).join(", ");
+          if (tabs !== "Model, Display, Tables, Reports") return {fail: "the explorer's tabs are " + (tabs || "missing")};
+          const top = [...document.querySelectorAll('#tree .xpage[data-x="model"] > details > details > summary')].map(s => s.firstChild.textContent.trim());
+          const want = ["Project", "Structure Layout", "Properties", "Structural Objects", "Groups", "Loads", "Named Output Items", "Named Plots"];
+          if (top.join("|") !== want.join("|")) return {fail: "the Model tree reads " + top.join(", ")};
+          const menus = [...document.querySelectorAll("#menubar .menu:not([hidden])")].map(m => m.dataset.menu);
+          for (const m of ["File", "Edit", "View", "Define", "Select", "Analyze", "Display", "Design", "Options", "Tools", "Help"]) if (!menus.includes(m)) return {fail: "the menu bar has no " + m + " menu: " + menus.join(", ")};
+          if (!document.getElementById("vname").textContent) return {fail: "the status bar does not name the view"};
+          return {ok: tabs + "; " + top.join(", ") + "; menus " + menus.join(" ")};
+        });
         await step("selection: a left-to-right window round a support selects the support joint", async () => {
           if (!supports.length) return {skipped: "skipped: the model has no supports"};
           const p = await view3d(), s = supports.find(x => supportShown(p, x) && p.M.to(x.p)[3]);
@@ -377,6 +388,25 @@ public static class ViewerCheck
     }
 
     /// <summary>
+    /// A Viewer display the program has nothing of its own for, so on its pack the item is rightly greyed out (the
+    /// Viewer shows what the program shows, nothing extra: Ahmed 2026-11-26). SAFE has no piers or spandrels, hinges,
+    /// pushover, response spectrum, modal or section cut results; 14 such items failed as "not tested" on SAFE 23.1
+    /// (0.4.56). Null for any other item, which is tested as usual.
+    /// </summary>
+    public static string? NotInProgram(string program, string item)
+    {
+        if (!string.Equals(program, CsiProgram.Safe.Name, StringComparison.OrdinalIgnoreCase)) return null;
+        foreach (var (words, what) in new[]
+        {
+            ("Pier and Spandrel", "pier and spandrel forces"), ("Hinge", "hinge results"), ("Pushover", "pushover cases"),
+            ("Response Spectrum", "response spectrum cases"), ("Mode Shape", "modal cases"), ("Modal Results", "modal cases"),
+            ("Section Cut", "section cut results"),
+        })
+            if (item.Contains(words, StringComparison.OrdinalIgnoreCase)) return $"SAFE has no {what}";
+        return null;
+    }
+
+    /// <summary>
     /// The field test's Viewer steps, the same for every program: a pack of the model <paramref name="link"/> has open
     /// is made, the Viewer is opened on it, and every item the page checked is recorded as its own step, with the
     /// pictures saved in the test's folder (they go into the zip). A PC with no usable browser records "not tested".
@@ -412,7 +442,8 @@ public static class ViewerCheck
         foreach (var item in seen.Items)
         {
             var name = "Viewer, " + item.Name;
-            if (item.Skipped) ctx.Skip(name, item.Detail.StartsWith("skipped: ", StringComparison.Ordinal) ? item.Detail["skipped: ".Length..] : item.Detail);
+            if (item.Skipped && NotInProgram(program, item.Name) is { } none) ctx.Step(name, () => $"greyed out, as it should be: {none}");
+            else if (item.Skipped) ctx.Skip(name, item.Detail.StartsWith("skipped: ", StringComparison.Ordinal) ? item.Detail["skipped: ".Length..] : item.Detail);
             else if (item.Ok) ctx.Step(name, () => item.Detail.Length > 0 ? item.Detail : "ok");
             else ctx.Fail(name, item.Detail);
         }

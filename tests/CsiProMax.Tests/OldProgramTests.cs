@@ -357,6 +357,39 @@ static class OldProgramTests
             Check(steps.Contains("if (built && !ctx.Facts.ContainsKey(\"safe.strips_built\"))", StringComparison.Ordinal), "the strips are compared when they went in, and said as not tested when they did not");
         });
 
+        yield return ("SAFE 23.1 tester (0.4.56): an .f2k SAFE says it opened but holds nothing of is built through the API; tables of an unsaved model; Viewer items SAFE has none of; chat_questions; failure kinds", () =>
+        {
+            var m = Templates.ConcreteFrame("T", [6, 6], [5], 3, 3.5);
+            var written = F2kWriter.Write(m, new F2kOptions(Story: "Story2"));
+            Check(CsiProMax.Assistant.Safe.F2kRebuild.ObjectCount(written.Text) > 0, "the Modeler's .f2k holds objects");
+            Check(CsiProMax.Assistant.ScratchProgram.OpenedEmpty(written.Text, 0), "SAFE holding none of them is an empty open");
+            Check(!CsiProMax.Assistant.ScratchProgram.OpenedEmpty(written.Text, 7), "SAFE holding some is not");
+            Check(!CsiProMax.Assistant.ScratchProgram.OpenedEmpty("TABLE:  \"PROGRAM CONTROL\"\n   ProgramName=SAFE\n", 0), "a file with no objects is not");
+            var scratch = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));
+            Check(scratch.Contains("if (openedEmpty)", StringComparison.Ordinal) && scratch.IndexOf("if (openedEmpty)", StringComparison.Ordinal) < scratch.IndexOf("F2kRebuild.Build(Link, text)", StringComparison.Ordinal),
+                "an empty open goes on to the blank model and the build");
+
+            // GetAllTables refused (an unsaved SAFE 23.1 model): the tables with data come from GetAvailableTables.
+            var listed = CsiProMax.Assistant.Etabs.ComEtabs.ListTables(new CpmFakes.TableListApi(1, 0), "SAFE");
+            Equal(2, listed.Count, "the tables with data are listed");
+            Equal("Joint Reactions", listed[1].Name, "by their names");
+            Check(listed.All(t => !t.Empty), "and they have data");
+            Equal(3, CsiProMax.Assistant.Etabs.ComEtabs.ListTables(new CpmFakes.TableListApi(0, 1), "SAFE").Count, "GetAllTables is used when it works");
+            try { CsiProMax.Assistant.Etabs.ComEtabs.ListTables(new CpmFakes.TableListApi(1, 2), "SAFE"); throw new Exception("no table list was refused"); }
+            catch (CsiProMax.Assistant.Etabs.EtabsException ex) { Check(ex.Message.Contains("GetAllTables answered 1, GetAvailableTables 2", StringComparison.Ordinal), ex.Message); }
+
+            Check(CsiProMax.Assistant.ViewerCheck.NotInProgram("SAFE", "menu: Hinge Results...") is not null && CsiProMax.Assistant.ViewerCheck.NotInProgram("SAFE", "menu: Pier and Spandrel Forces...") is not null, "SAFE has no hinges or piers");
+            Check(CsiProMax.Assistant.ViewerCheck.NotInProgram("SAP2000", "menu: Hinge Results...") is null && CsiProMax.Assistant.ViewerCheck.NotInProgram("ETABS", "menu: Static Pushover Curve...") is null, "ETABS and SAP2000 test them in full"); // ETABS itself
+            Check(CsiProMax.Assistant.ViewerCheck.NotInProgram("SAFE", "menu: Frame Forces and Moments...") is null && CsiProMax.Assistant.ViewerCheck.NotInProgram("SAFE", "button: Show design ratios") is null, "what SAFE has is tested");
+
+            var once = CsiProMax.Assistant.SkipAudit.Failure("the selection has only one kind of object");
+            Equal(CsiProMax.Assistant.SkipAudit.Why.Unjustified, CsiProMax.Assistant.SkipAudit.Of(once), "a failure is not taken for a licence one by its closing words");
+            Equal(CsiProMax.Assistant.SkipAudit.Why.Licence, CsiProMax.Assistant.SkipAudit.Of("no licence for SAFE"), "a real licence reason still holds");
+
+            var panel = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/PanelFieldSteps.cs"));
+            Check(panel.Contains("ChatQuestionsTool.Answer(Args(json), fromChat: true", StringComparison.Ordinal), "chat_questions is asked the chat's way when a window is open");
+        });
+
         yield return ("SAFE 20 (0.4.51): the design strips its API cannot draw go in through its 'Strip Object Connectivity' table, in the fields SAFE lists", () =>
         {
             var m = Templates.ConcreteFrame("T", [6, 6], [5], 3, 3.5);
@@ -703,6 +736,24 @@ namespace CpmFakes
             }
             public int ApplyEditedTables(bool FillImportLog, ref int NumFatalErrors, ref int NumErrorMsgs, ref int NumWarnMsgs, ref int NumInfoMsgs, ref string ImportLog) { ImportLog = ""; return 0; }
             public int CancelTableEditing() => 0;
+        }
+    }
+}
+
+namespace CpmFakes
+{
+    /// <summary>DatabaseTables that answer GetAllTables and GetAvailableTables with the codes given.</summary>
+    public sealed class TableListApi(int all, int available)
+    {
+        public int GetAllTables(ref int NumberTables, ref string[] TableKey, ref string[] TableName, ref int[] ImportType, ref bool[] IsEmpty)
+        {
+            if (all != 0) return all;
+            TableKey = ["A", "B", "C"]; TableName = ["Analysis Messages", "Base Reactions", "Joint Reactions"]; ImportType = [0, 0, 0]; IsEmpty = [true, false, false]; NumberTables = 3; return 0;
+        }
+        public int GetAvailableTables(ref int NumberTables, ref string[] TableKey, ref string[] TableName, ref int[] ImportType)
+        {
+            if (available != 0) return available;
+            TableKey = ["B", "C"]; TableName = ["Base Reactions", "Joint Reactions"]; ImportType = [0, 0]; NumberTables = 2; return 0;
         }
     }
 }

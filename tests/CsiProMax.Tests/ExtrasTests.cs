@@ -194,6 +194,44 @@ static class ExtrasTests
             var tools = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Tools", "PropertyTools.cs"));
             Check(tools.Contains("[\"groups\"] = GroupsOf(m, \"AREA\", label, story)") && tools.Contains("[\"opening\"] ="), "property_definitions no longer answers a shell's groups and opening");
         });
+        yield return ("extras: CSI ProMax Engine: one program, ETABS's Model Explorer and menus, a run's results shown on the model and cleared by a change (Ahmed 2026-11-26)", () =>
+        {
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var part in new[] { "<span id=\"app\">CSI ProMax Engine</span>", "data-menu=\"Analyze\"", "data-menu=\"Tools\"", "[[\"model\", \"Model\"], [\"display\", \"Display\"], [\"tables\", \"Tables\"], [\"reports\", \"Reports\"]]",
+                "node(\"named\", \"Named Output Items\"", "function engineWith(pack, keep)", "async function engineImport(file)", "[\"Results from a Review Pack (.cpmx)...\", \"eng:import\"]", "function jointNamer(t, u)", "<span id=\"vname\"></span>" })
+                Check(html.Contains(part), "viewer.html lost " + part);
+            Check(ViewerCheck.Script.Contains("the Model Explorer is the program's"), "the field test no longer checks the explorer");
+            Check(CsiProMax.Host.WebPages.Title(CsiProMax.Host.WebPages.Kind.ModelerView, "") == "CSI ProMax Engine", "the window is not named CSI ProMax Engine");
+            var install = File.ReadAllText(Path.Combine(SourceText.Root(), "install.ps1"));
+            Check(install.Contains("'CSI ProMax Engine.lnk'") && !install.Contains("'CSI ProMax Modeler.lnk'"), "the installer does not make the one Engine shortcut");
+        });
+        yield return ("extras: CSI ProMax Engine's Run writes the model for its program beside the model, says plainly when the program is not on this PC, and never touches the model's own file (Ahmed 2026-11-26)", () =>
+        {
+            var link = Frame();
+            var folder = Path.Combine(Path.GetTempPath(), "cpm-engine-" + Guid.NewGuid().ToString("N")[..6]);
+            try
+            {
+                var own = link.SaveAs(Path.Combine(folder, "Tower.e2k"));
+                var revision = link.Revision;
+                Check(Path.GetDirectoryName(EngineRun.RunFolder(link)) == Path.GetDirectoryName(own) && EngineRun.RunFolder(link).EndsWith(" run", StringComparison.Ordinal), "the run's folder is not beside the model: " + EngineRun.RunFolder(link));
+                var written = link.WriteForRun(Path.Combine(folder, "run", "Tower.e2k"));
+                Check(File.Exists(written) && written.EndsWith(".e2k", StringComparison.Ordinal), "the ETABS model was not written for the run: " + written);
+                Check(link.Path == own && link.Revision == revision && !link.Unsaved, "writing for the run changed the model's own file or revision");
+                link.Model.Target = "sap2000";
+                var s2k = link.WriteForRun(Path.Combine(folder, "run2", "Tower.e2k"));
+                Check(s2k.EndsWith(".s2k", StringComparison.Ordinal) && File.Exists(s2k), "a SAP2000 model is not run from its .s2k: " + s2k);
+                var answer = EngineRun.Start(link, false, _ => Path.Combine(folder, "nothing-here.dll"));
+                Check(answer["ok"]!.GetValue<bool>() == false && answer["error"]!.GetValue<string>().Contains("SAP2000 is not installed on this PC", StringComparison.Ordinal), "no program on the PC is not said plainly: " + answer.ToJsonString());
+                Check(EngineRun.Status(false)["running"]!.GetValue<bool>() == false, "a run that could not start says it is running");
+                var view = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Panel", "Host", "ModelView.cs"));
+                Check(view.Contains("path == \"run\" ? RunAsync(body)") && view.Contains("EngineRun.Start(offline, design)"), "the Engine window cannot start a run");
+                var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+                Check(html.Contains("[\"Run Analysis\", \"eng:run\", \"F5\"]") && html.Contains("async function engineRun(design)"), "Analyze > Run Analysis is not in the Engine");
+                var scratch = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Field", "ScratchProgram.cs"));
+                Check(scratch.Contains("_app.Hide();"), "the program is not hidden while it runs");
+            }
+            finally { try { Directory.Delete(folder, true); } catch (IOException) { } }
+        });
         yield return ("extras: Edit > Model Text keeps them, and Undo in the Modeler window takes one back", () =>
         {
             var link = Frame();

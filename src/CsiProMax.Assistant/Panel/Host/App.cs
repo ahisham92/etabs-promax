@@ -42,7 +42,10 @@ public static class App
     internal static bool Modeler => Etabs?.Link is CsiProMax.Assistant.Etabs.OfflineEtabs;
 
     /// <summary>What the window and the chat call themselves.</summary>
-    internal static string Product => Modeler ? "CSI ProMax Modeler" : "CSI ProMax";
+    internal static string Product => Modeler ? Engine : "CSI ProMax";
+
+    /// <summary>The Modeler and the results Viewer are one program, named so (Ahmed 2026-11-26).</summary>
+    internal const string Engine = "CSI ProMax Engine";
 
     /// <summary>Sketch ProMax's shared-tools mode; never on here.</summary>
     internal static bool Shared => false;

@@ -443,14 +443,29 @@ public sealed class ComEtabs : ICsiLink, IDisposable
         }
     });
 
-    public IReadOnlyList<TableName> Tables() => On("list the tables", m =>
+    public IReadOnlyList<TableName> Tables() => On("list the tables", m => ListTables(m.DatabaseTables, Program.Name));
+
+    /// <summary>
+    /// The program's tables: GetAllTables, else GetAvailableTables (the tables with data). SAFE 23.1 refused
+    /// GetAllTables on a new model not saved yet (tester's PC, 0.4.56, 2026-11-26) and listed all 286 once saved;
+    /// the second call is the way round it, and both answers are named when neither works.
+    /// </summary>
+    internal static IReadOnlyList<TableName> ListTables(dynamic tables, string program)
     {
         int n = 0; string[] keys = None, names = None; int[] import = []; bool[] empty = [];
-        Ok(m.DatabaseTables.GetAllTables(ref n, ref keys, ref names, ref import, ref empty), "list the tables");
+        int all = Convert.ToInt32(tables.GetAllTables(ref n, ref keys, ref names, ref import, ref empty));
+        if (all != 0)
+        {
+            n = 0; keys = None; names = None; import = []; empty = [];
+            int available;
+            try { available = Convert.ToInt32(tables.GetAvailableTables(ref n, ref keys, ref names, ref import)); }
+            catch (Exception ex) when (ex is Microsoft.CSharp.RuntimeBinder.RuntimeBinderException or MissingMethodException) { available = -1; }
+            if (available != 0) throw new EtabsException($"{program} refused to list the tables (GetAllTables answered {all}, GetAvailableTables {available}).");
+        }
         keys ??= None; names ??= None; empty ??= []; import ??= [];
         n = Math.Min(n, Math.Min(keys.Length, names.Length));
-        return (IReadOnlyList<TableName>)Enumerable.Range(0, n).Select(i => new TableName(keys[i], names[i], i < empty.Length && empty[i], i < import.Length ? import[i] : -1)).ToList();
-    });
+        return Enumerable.Range(0, n).Select(i => new TableName(keys[i], names[i], i < empty.Length && empty[i], i < import.Length ? import[i] : -1)).ToList();
+    }
 
     public TableData ReadTable(string key, IReadOnlyList<string>? cases, IReadOnlyList<string>? combos) => On("read a table", m =>
     {
