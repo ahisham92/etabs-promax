@@ -273,8 +273,18 @@ public sealed class BridgeServer
                     return JsonSerializer.Serialize(new { ok = true, pid = SessionId, etabsVersion = _etabsVersion, busy, blocked, documents = _lastDocuments });
 
                 case "activate_document":
+                    return Error($"CSI ProMax works on the model open in the {Csi.Name} window it was started from. Ask the user to open the other model in {Csi.Name}, or open it with {ConnectorTools.OpenTool}.");
+
                 case "open_document":
-                    return Error($"CSI ProMax works on the model open in the {Csi.Name} window it was started from. Ask the user to open the other model in {Csi.Name}.");
+                {
+                    // Opened in this window by the open_model tool, so the user is asked first as for any tool that closes the model.
+                    var file = root.TryGetProperty("path", out var fp) && fp.ValueKind == JsonValueKind.String ? fp.GetString() ?? "" : "";
+                    var chatOpens = root.TryGetProperty("origin", out var o) && o.ValueKind == JsonValueKind.String && o.GetString() == "chat";
+                    var input = new Dictionary<string, JsonElement> { ["path"] = JsonSerializer.SerializeToElement(file) };
+                    var opened = await CallTool("open_model", input, chatOpens, ct).ConfigureAwait(false);
+                    if (opened.IsError) return JsonSerializer.Serialize(new { text = opened.Text, isError = true });
+                    return JsonSerializer.Serialize(new { ok = true, title = Path.GetFileNameWithoutExtension(file), text = opened.Text });
+                }
 
                 case "call_tool":
                     var name = root.GetProperty("name").GetString() ?? "";

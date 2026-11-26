@@ -20,6 +20,9 @@ public class cPlugin
 {
     public void Main(ref cSapModel SapModel, ref cPluginCallback ISapPlugin)
     {
+        // First the pipe the window reads this program's model through: a program on the .NET Framework (ETABS 21,
+        // SAP2000 25, SAFE 21 and older) can be reached no other way from the window's .NET 8 (ApiBridge).
+        ApiBridge.Serve(SapModel);
         try { Launcher.Start(); }
         catch (Exception ex)   // whatever it is: a plug-in must never throw into the program that loaded it
         {

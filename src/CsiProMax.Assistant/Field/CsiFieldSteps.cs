@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using CsiProMax.Assistant.Etabs;
 using CsiProMax.Assistant.Tools;
@@ -418,6 +419,21 @@ public static class CsiFieldSteps
         T("restore_checkpoint", """{"name":"cpm-cp1"}""", _ =>
             FieldContext.Expect(!after || !link.LoadPatterns().Any(p => p.Name == "CPM-AFTER-CP"), "the pattern added after the checkpoint is still there"));
         No("restore_checkpoint", """{"name":"no-such-checkpoint"}""", "no checkpoint", "tool restore_checkpoint says no to a checkpoint that is not there");
+
+        // ---- opening a model file in the program (a tester's SAFE 20 chat could not open E:\Pro max\LEVEL 29.FDB, 2026-11-26) ----
+        // The checkpoint's copy, then the scratch model's own file again: both through File.OpenFile, as the engineer's would be.
+        var ownFile = scratchFile.Length > 0 ? Path.ChangeExtension(scratchFile, CsiTools.ModelFiles(program)[0]) : "";
+        if (checkpoint is { } copyFile && ownFile.Length > 0 && File.Exists(ownFile))
+        {
+            T("open_model", JsonSerializer.Serialize(new { path = copyFile }), _ =>
+                FieldContext.Expect(ScratchProgram.SameName(link.Info().File, copyFile), $"{name} should have the checkpoint's copy open; it has {link.Info().File}"),
+                $"tool open_model opens a {CsiTools.ModelFiles(program)[0]} file in {name}");
+            T("open_model", JsonSerializer.Serialize(new { path = ownFile }), _ =>
+                FieldContext.Expect(ScratchProgram.SameName(link.Info().File, scratchFile), $"{name} should have the scratch model open again; it has {link.Info().File}"),
+                "tool open_model opens the scratch model's own file again");
+        }
+        else ctx.Skip($"tool open_model opens a {CsiTools.ModelFiles(program)[0]} file in {name}", live ? "the checkpoint's copy or the scratch model's file is not there to open" : NoApi);
+        ctx.Refused("open_model", JsonSerializer.Serialize(new { path = Path.Combine(ctx.Folder, "not a model.rvt") }), "opens", "tool open_model says no to a file that is not a model of this program");
 
         // ---- a model of its own: stories (ETABS), then a building in one call ----
         if (offered.Contains("set_stories"))

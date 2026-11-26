@@ -44,13 +44,19 @@ public static class ToolsMenu
         Others,
         /// <summary>The settings file was not understood, or could not be written.</summary>
         Unknown,
+        /// <summary>
+        /// The settings file does not list it, but this very window was started from that program's Tools menu, so the
+        /// program has it: the program writes its list when it closes (SAFE 20, 2026-11-26: NumberPlugIns=0 while
+        /// SAFE 20's Tools > CSI ProMax had opened the window that ran the test).
+        /// </summary>
+        Running,
     }
 
     /// <param name="Label">"ETABS 23".</param>
     public sealed record Entry(string Label, CsiProgram Program, int Number, string Ini, State State, string Path)
     {
         /// <summary>True when Tools > CSI ProMax is there the next time the program opens.</summary>
-        public bool Listed => State is State.Added or State.Moved or State.Already;
+        public bool Listed => State is State.Added or State.Moved or State.Already or State.Running;
 
         /// <summary>One line for the engineer.</summary>
         public string Says => State switch
@@ -59,6 +65,7 @@ public static class ToolsMenu
             State.Moved => $"{Label}: the Tools menu named a CSI ProMax file that is gone or a copy outside the installed folder, or named CSI ProMax twice, and names this install now, once.",
             State.Already => $"{Label}: CSI ProMax is in the Tools menu.",
             State.Missing => $"{Label}: CSI ProMax is not in the Tools menu, and can be added.",
+            State.Running => $"{Label}: CSI ProMax is in the Tools menu: this window was opened from it. {Label} writes its plug-in list to its settings file when it closes, so the file does not list it yet; if it is still missing after {Label} closes, CSI ProMax adds it then.",
             State.Open => $"{Label}: CSI ProMax is not in the Tools menu, and {Label} is open, so its plug-in list is left alone. Close {Label}, then open CSI ProMax again (from another program, or the Modeler): it adds itself.",
             State.Others => $"{Label}: CSI ProMax is not in the Tools menu, and {Label} has other plug-ins, so its list is left alone. Add it in {Label}: Tools > Add/Show Plugins, plug-in name {Name(Program)}, menu text {MenuText}, file {Path}.",
             _ => $"{Label}: its settings file was not understood, so it is left alone. Add CSI ProMax in {Label}: Tools > Add/Show Plugins, plug-in name {Name(Program)}, menu text {MenuText}, file {Path}.",
@@ -66,6 +73,31 @@ public static class ToolsMenu
     }
 
     private static string Name(CsiProgram program) => PlugIns.First(p => p.Program.Key == program.Key).Name;
+
+    /// <summary>
+    /// The program version this window was started from by its Tools menu ("SAFE 20"), told by Program from the
+    /// plug-in's process; null when the window was not started from a program.
+    /// </summary>
+    public static string? OpenedFrom { get; set; }
+
+    /// <summary>"SAFE 20" for a process started from C:\Program Files\Computers and Structures\SAFE 20\SAFE.exe; null when it can't be told.</summary>
+    public static string? LabelOf(int? pid)
+    {
+        if (pid is not { } id) return null;
+        try
+        {
+            using var process = Process.GetProcessById(id);
+            return LabelOfFolder(System.IO.Path.GetDirectoryName(process.MainModule?.FileName ?? ""));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException) { return null; }
+    }
+
+    /// <summary>"SAFE 20" for a program folder named "SAFE 20" (any case); null for any other folder.</summary>
+    public static string? LabelOfFolder(string? folder)
+    {
+        var match = Regex.Match((folder ?? "").Replace('\\', '/').TrimEnd('/').Split('/')[^1], @"^(ETABS|SAFE|SAP2000) (\d+)$", RegexOptions.IgnoreCase); // ETABS itself
+        return match.Success ? $"{CsiProgram.All.First(p => p.Name.Equals(match.Groups[1].Value, StringComparison.OrdinalIgnoreCase)).Name} {match.Groups[2].Value}" : null;
+    }
 
     /// <summary>Where the programs keep their settings for this Windows user.</summary>
     public static string SettingsRoot => System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Computers and Structures");
@@ -144,6 +176,8 @@ public static class ToolsMenu
                 State state;
                 try { state = Register(ini, plugIn.Name, installFolder is null ? null : path, () => isOpen(plugIn.Program, number), change, mine); }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or System.Security.SecurityException) { state = State.Unknown; }
+                // Missing from the file of the very program this window was started from: the program has it.
+                if (state is State.Open or State.Missing or State.Others or State.Unknown && string.Equals(label, OpenedFrom, StringComparison.OrdinalIgnoreCase)) state = State.Running;
                 found.Add(new Entry(label, plugIn.Program, number, ini, state, path));
             }
         }

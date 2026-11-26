@@ -924,6 +924,7 @@ foreach (var (name, body) in SafeTests.All()) Test(name, body);
 foreach (var (name, body) in CsiToolsTests.All()) Test(name, body);
 foreach (var (name, body) in CsiFieldStepsTests.All()) Test(name, body);
 foreach (var (name, body) in TesterBugTests.All()) Test(name, body);
+foreach (var (name, body) in OldProgramTests.All()) Test(name, body);
 Test("set_section: a frame or area that is not in the model is reported as failed (ETABS 23 says done to it)", () =>
 {
     var e = new MemoryEtabs();

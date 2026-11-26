@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace CsiProMax.Assistant.Etabs;
@@ -52,7 +53,11 @@ public sealed class ComEtabs : ICsiLink, IDisposable
         AnalysisLimit = TimeSpan.FromMinutes(10);
     }
 
-    public void Dispose() => _work.CompleteAdding();
+    public void Dispose()
+    {
+        _work.CompleteAdding();
+        try { _pipe?.Dispose(); } catch (Exception) { /* the program has gone already */ }
+    }
 
     /// <summary>
     /// How long an ordinary call (a read, a table, a definition, a change) may take before the link stops waiting
@@ -138,12 +143,65 @@ public sealed class ComEtabs : ICsiLink, IDisposable
         var apiFile = EtabsApi.FindApiFile(Program, _pid);
         if (!File.Exists(apiFile))
             throw new EtabsException($"{app} is not installed on this PC, or its API is not registered. Open {app} once as administrator to register it.");
+        // A program on the .NET Framework (ETABS 21, SAP2000 25, SAFE 21 and older): its API file reaches it through
+        // .NET Remoting, which this .NET 8 window does not have. Its Helper answered nothing on SAFE 20, ETABS 20 and
+        // SAP2000 24 (tester's field test, 2026-11-26), so every read said the window was closed. The calls go through
+        // the plug-in's pipe instead.
+        if (EtabsApi.RunsOnFramework(apiFile)) return _model = ThroughPipe(apiFile);
         // Plain COM late binding fails on ETABS 23 ("Specified cast is not valid" for SapModel), so the calls go
         // through the API's own interfaces in ETABSv1.dll, still by name.
-        dynamic etabs = EtabsApi.Attach(apiFile, Program, _pid)
-            ?? throw new EtabsException(_pid is null ? $"{app} is not open. Open {app} and a model, then try again." : $"The {app} window this was started from is closed. Start CSI ProMax again from {app}'s Tools menu.");
+        dynamic? etabs = EtabsApi.Attach(apiFile, Program, _pid);
+        // The plug-in's pipe as well, when the API did not find the window the plug-in was started from.
+        if (etabs is null && _pid is int pid && Running(pid) && ApiPipe.ToPlugin(pid, app) is { } plugin) return _model = Keep(plugin);
+        if (etabs is null)
+            throw new EtabsException(_pid is int gone && !Running(gone) ? $"The {app} window this was started from is closed. Start CSI ProMax again from {app}'s Tools menu."
+                : _pid is null ? $"{app} is not open. Open {app} and a model, then try again."
+                : $"{app} is open, but its API did not answer CSI ProMax. Close this window and start CSI ProMax again from {app}'s Tools menu.");
         _model = etabs.SapModel;
         return _model!;
+    }
+
+    /// <summary>The pipe to a .NET Framework program this link calls through (null: the program's API is called here).</summary>
+    private ApiPipe? _pipe;
+
+    /// <summary>How this link reaches the program, for the report: "the program's API", or the pipe's host.</summary>
+    public string Via => _pipe?.Via ?? "the program's API";
+
+    private dynamic Keep(ApiPipe pipe)
+    {
+        _pipe?.Dispose();
+        _pipe = pipe;
+        dynamic root = pipe.Root();
+        return pipe.RootType.Name == "cOAPI" ? root.SapModel : root;
+    }
+
+    /// <summary>
+    /// The model of a .NET Framework program: through the plug-in in the window this was started from, else through
+    /// Windows PowerShell (the program's running window).
+    /// </summary>
+    private dynamic ThroughPipe(string apiFile)
+    {
+        var app = Program.Name;
+        if (_pid is int pid)
+        {
+            if (!Running(pid)) throw new EtabsException($"The {app} window this was started from is closed. Start CSI ProMax again from {app}'s Tools menu.");
+            if (ApiPipe.ToPlugin(pid, app) is { } plugin) return Keep(plugin);
+        }
+        else if (Process.GetProcessesByName(Program.ProcessName).Length == 0)
+            throw new EtabsException($"{app} is not open. Open {app} and a model, then try again.");
+        try { return Keep(ApiPipe.ToPowerShell(Program, apiFile, "attach", _pid)); }
+        catch (Exception ex) when (ex is EtabsException or System.Reflection.TargetInvocationException or COMException)
+        {
+            var why = ex is System.Reflection.TargetInvocationException { InnerException: { } inner } ? inner.Message : ex.Message;
+            throw new EtabsException($"{app} on this PC runs on the .NET Framework, and CSI ProMax reaches it through its plug-in. Close this window and start CSI ProMax " +
+                $"from {app}'s Tools menu (if CSI ProMax is not in that menu, close {app} and run the install line again). ({why})");
+        }
+    }
+
+    private static bool Running(int pid)
+    {
+        try { using var p = Process.GetProcessById(pid); return !p.HasExited; }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception) { return false; }
     }
 
     /// <summary>The API answers 0 when a call worked. The refusal names the program this link drives, never another.</summary>
