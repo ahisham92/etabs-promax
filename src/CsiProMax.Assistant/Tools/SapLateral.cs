@@ -17,7 +17,45 @@ internal static class SapLateral
     public static IReadOnlyList<string> Setters(string kind, string code)
     {
         var map = kind == CsiProMax.Lateral.LateralCodes.Wind ? Wind : Seismic;
-        return map.TryGetValue(Norm(code), out var methods) ? methods : [];
+        var key = Norm(code);
+        // The name GetAutoSeismicCode and the AutoLoad field give, where it is not the table's (0.4.44 field test).
+        if (Aliases.TryGetValue(key, out var alias)) key = alias;
+        return map.TryGetValue(key, out var methods) ? methods : [];
+    }
+
+    private static readonly Dictionary<string, string> Aliases = new() { ["usercoeff"] = "usercoefficient" };
+
+    /// <summary>A pattern's code as its Get call gives it, to give it back by the Set call after an import that took it off.</summary>
+    public sealed record Held(string Pattern, string Kind, string Code, string Method, System.Text.Json.Nodes.JsonObject Values);
+
+    /// <summary>
+    /// Reads what a pattern's code holds by the code's Get call, or null when the code has no Set call in this API.
+    /// SAP2000 26 lists a pattern whose code was given by the API in "Load Pattern Definitions" but gives no row for it in
+    /// the code's table (0.4.46 field test: CPM-WX's ASCE 7-16 wind), so an import of the patterns' table cannot send
+    /// that code back: it is taken off for the import and given back by its Set call with these values.
+    /// </summary>
+    public static Held? Hold(ICsiLink e, string pattern, string kind, string code)
+    {
+        var holder = kind == CsiProMax.Lateral.LateralCodes.Wind ? "LoadPatterns.AutoWind." : "LoadPatterns.AutoSeismic.";
+        foreach (var method in Setters(kind, code))
+        {
+            var had = CsiTools.Try(e, $"read {pattern}'s {code}", holder + "Get" + method[3..], CsiTools.D(("Name", pattern)));
+            if (had?["values"] is System.Text.Json.Nodes.JsonObject values) return new Held(pattern, kind, code, method, (System.Text.Json.Nodes.JsonObject)values.DeepClone());
+        }
+        return null;
+    }
+
+    /// <summary>Gives a held pattern its code back by the Set call, with every value its Get call gave; throws when refused.</summary>
+    public static void Reapply(ICsiLink e, Held held)
+    {
+        var holder = held.Kind == CsiProMax.Lateral.LateralCodes.Wind ? "LoadPatterns.AutoWind." : "LoadPatterns.AutoSeismic.";
+        var path = holder + held.Method;
+        var parameters = (ParameterInfo[])e.Raw("read " + path, m => ApiCall.Parameters((object)m, path))!;
+        var had = new System.Text.Json.Nodes.JsonObject { ["values"] = held.Values.DeepClone() };
+        // Only the exact values it had: never another choice in its place.
+        var args = Variants(parameters, held.Pattern, [[true, false]], had, new Dictionary<string, object?>(), held.Method).First();
+        if (CsiTools.Try(e, $"give {held.Pattern} its {held.Code} back", path, args) is null)
+            throw new EtabsException($"{e.Program.Name} refused to give {held.Pattern} its {held.Code} back after the import.");
     }
 
     private static string Norm(string s) => new(s.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
@@ -94,8 +132,32 @@ internal static class SapLateral
         ["ModalCase"] = "MODAL", ["FirstValMode"] = 1,
     };
 
+    /// <summary>
+    /// Starting values one Set call needs other than the common ones, from SAP2000 26's API help and the calls a hidden
+    /// SAP2000 26 on Ahmed's PC took (2026-11-26): IBC's seismic coefficients are user defined (Option 2, not a zip code);
+    /// the Chinese seismic and NZS periods are program calculated (2); the Chinese wind's T1 is user defined.
+    /// </summary>
+    internal static readonly Dictionary<string, Dictionary<string, object>> MethodSeeds = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["SetIBC2006"] = new(StringComparer.OrdinalIgnoreCase) { ["IBC2006Option"] = 2, ["CtType"] = 1, ["Ss"] = 1.5, ["S1"] = 0.6, ["Tl"] = 8.0, ["SiteClass"] = 4 },
+        ["SetIBC2009"] = new(StringComparer.OrdinalIgnoreCase) { ["IBC2009Option"] = 2, ["CtType"] = 1, ["Ss"] = 1.5, ["S1"] = 0.6, ["Tl"] = 8.0, ["SiteClass"] = 4 },
+        ["SetIBC2012"] = new(StringComparer.OrdinalIgnoreCase) { ["IBC2012Option"] = 2, ["CtType"] = 1, ["Ss"] = 1.5, ["S1"] = 0.6, ["Tl"] = 8.0, ["SiteClass"] = 4 },
+        ["SetChinese2010"] = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["PeriodFlag"] = 2, ["JGJ32002AlphaMax"] = 0.16, ["JGJ32002SI"] = 4, ["JGJ32002DampRatio"] = 0.05, ["JGJ32002Tg"] = 0.4,
+            // the wind call of the same name
+            ["ExposureFrom"] = 1, ["BuildingWidth"] = 12.0, ["Us"] = 0.5, ["BHoverB0"] = 1.0, ["wzero"] = 0.48, ["Rt"] = 3, ["PhiZOpt"] = 1, ["T1Opt"] = 1, ["UserT"] = 0.6, ["DampRatio"] = 0.04,
+        },
+        ["SetChinese2002"] = new(StringComparer.OrdinalIgnoreCase) { ["PeriodFlag"] = 2, ["JGJ32002AlphaMax"] = 0.16, ["JGJ32002SI"] = 4, ["JGJ32002DampRatio"] = 0.05, ["JGJ32002Tg"] = 0.4, ["T1Opt"] = 1, ["UserT"] = 0.6 },
+        ["SetChinese2002_1"] = new(StringComparer.OrdinalIgnoreCase) { ["T1Opt"] = 1, ["UserT"] = 0.6, ["PhiZOpt"] = 1, ["Rt"] = 3 },
+        ["SetNZS11702004"] = new(StringComparer.OrdinalIgnoreCase) { ["PeriodFlag"] = 2, ["NZS2004R"] = 1.3, ["NZS2004Mu"] = 3.0 },
+        ["SetNZS11702004_1"] = new(StringComparer.OrdinalIgnoreCase) { ["PeriodFlag"] = 2, ["NZS2004R"] = 1.3, ["NZS2004Mu"] = 3.0 },
+        ["SetNZS11702004_2"] = new(StringComparer.OrdinalIgnoreCase) { ["PeriodFlag"] = 2, ["NZS2004R"] = 1.3, ["NZS2004Mu"] = 3.0 },
+        ["SetASCE716"] = new(StringComparer.OrdinalIgnoreCase) { ["ExposureFrom"] = 1, ["ASCECase"] = 1 },
+    };
+
     /// <summary>The arguments for one Set call: the seeds, and 1 / false / "" for anything not named.</summary>
-    internal static Dictionary<string, object?> Arguments(ParameterInfo[] parameters, string pattern, bool[]? directions)
+    internal static Dictionary<string, object?> Arguments(ParameterInfo[] parameters, string pattern, bool[]? directions, string? method = null)
     {
         var args = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         foreach (var p in parameters)
@@ -104,6 +166,7 @@ internal static class SapLateral
             var t = p.ParameterType.IsByRef ? p.ParameterType.GetElementType()! : p.ParameterType;
             if (name.Equals("Name", StringComparison.OrdinalIgnoreCase)) args[name] = pattern;
             else if (t == typeof(bool[])) args[name] = directions ?? [true, false];
+            else if (method is not null && MethodSeeds.TryGetValue(method, out var own) && own.TryGetValue(name, out var mine)) args[name] = mine;
             else if (Seeds.TryGetValue(name, out var seed)) args[name] = seed;
             else if (p.HasDefaultValue && p.DefaultValue is not DBNull and not null) continue;
             else args[name] = t == typeof(bool) ? false : t == typeof(string) ? "" : t == typeof(double) ? 1.0 : t.IsEnum ? Enum.GetValues(t).GetValue(0) : 1;
@@ -112,10 +175,13 @@ internal static class SapLateral
     }
 
     /// <summary>
-    /// Gives the pattern the code by SAP2000's own Set call. Returns the call that took it, or null when the code has
-    /// no Set call in this API. Throws when every Set call there is was refused.
+    /// Gives the pattern the code by SAP2000's own Set call, with the inputs given set through the same call (never
+    /// through the code's table: SAP2000 26 left 0 of 2 rows in "Auto Seismic - ASCE 7-16" after an import of one
+    /// field, 0.4.42 field test). What the pattern has now (its Get call) is kept, then plain starting values, then the
+    /// inputs given by the call's parameter names. Returns the call that took it and the Get call's values, or null
+    /// when the code has no Set call in this API. Throws when every Set call there is was refused.
     /// </summary>
-    public static string? SetCode(ICsiLink e, string pattern, string kind, string code)
+    public static (string Method, System.Text.Json.Nodes.JsonObject? Back)? SetCode(ICsiLink e, string pattern, string kind, string code, IReadOnlyDictionary<string, string>? values = null)
     {
         var holder = kind == CsiProMax.Lateral.LateralCodes.Wind ? "LoadPatterns.AutoWind." : "LoadPatterns.AutoSeismic.";
         var tried = new List<string>();
@@ -125,18 +191,95 @@ internal static class SapLateral
             ParameterInfo[] parameters;
             try { parameters = (ParameterInfo[])e.Raw("read " + path, m => ApiCall.Parameters((object)m, path))!; }
             catch (Exception ex) when (ex is MissingMethodException or ToolInputException or EtabsException) { tried.Add($"{method}: not in this version"); continue; }
-            // SAP2000 26's ASCE 7-16 seismic takes nDir (its help; 0.4.17 field test): X and Y, or the first three of six.
-            bool[][] directions = parameters.Any(p => (p.ParameterType.IsByRef ? p.ParameterType.GetElementType() : p.ParameterType) == typeof(bool[]))
-                ? [[true, false], [true, false, false, false, false, false], [false, true, false]] : [[true, false]];
-            foreach (var dirs in directions)
+            var getter = holder + "Get" + method[3..];
+            var had = CsiTools.Try(e, $"read {pattern}'s {code}", getter, CsiTools.D(("Name", pattern)));
+            var given = Given(parameters, values ?? new Dictionary<string, string>(), code);
+            var hasDirs = parameters.Any(p => (p.ParameterType.IsByRef ? p.ParameterType.GetElementType() : p.ParameterType) == typeof(bool[]));
+            bool[][] directions = hasDirs ? [[true, false], [true, false, false, false, false, false], [false, true, false]] : [[true, false]];
+            foreach (var args in Variants(parameters, pattern, directions, had, given, method))
             {
-                var args = Arguments(parameters, pattern, dirs);
-                if (CsiTools.Try(e, $"give {pattern} the code {code}", path, args) is not null) return method;
-                tried.Add($"{method} refused");
+                if (CsiTools.Try(e, $"give {pattern} the code {code}", path, args) is null) continue;
+                var back = CsiTools.Try(e, $"read {pattern}'s {code}", getter, CsiTools.D(("Name", pattern)));
+                return (method, back?["values"] as System.Text.Json.Nodes.JsonObject);
             }
+            tried.Add($"{method} refused");
         }
         if (tried.Count == 0) return null;
         throw new EtabsException($"{e.Program.Name} refused to give {pattern} the {kind.ToLowerInvariant()} code {code} ({string.Join("; ", tried)}). In {e.Program.Name}: Define > Load Patterns, choose {code} as {pattern}'s Auto Lateral Load.");
+    }
+
+    /// <summary>The inputs given, as the Set call's arguments by its parameter names (the table's names where they differ).</summary>
+    internal static Dictionary<string, object?> Given(ParameterInfo[] parameters, IReadOnlyDictionary<string, string> values, string code)
+    {
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        var args = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        var unknown = new List<string>();
+        foreach (var (key, text) in values)
+        {
+            var k = key.Trim();
+            var named = parameters.Where(p => string.Equals(p.Name, k, StringComparison.OrdinalIgnoreCase)).ToList();
+            // UBC97Z, NZS2004R, EURO2004Ag...: the code's own prefix in front of the table's name.
+            if (named.Count == 0) named = parameters.Where(p => p.Name is { } n && n.Length > k.Length && n.EndsWith(k, StringComparison.OrdinalIgnoreCase) && char.IsDigit(n[n.Length - k.Length - 1])).ToList();
+            if (k.Equals("Dir", StringComparison.OrdinalIgnoreCase) && parameters.FirstOrDefault(p => p.Name is "DirFlag") is { } dir)
+            {
+                args[dir.Name!] = text.Trim().ToUpperInvariant().StartsWith('Y') ? 2 : 1; continue;
+            }
+            if (named.Count != 1) { unknown.Add(k); continue; }
+            var p = named[0];
+            var t = p.ParameterType.IsByRef ? p.ParameterType.GetElementType()! : p.ParameterType;
+            object? v = null;
+            if (t == typeof(double) && double.TryParse(text, System.Globalization.NumberStyles.Float, inv, out var d)) v = d;
+            else if (t == typeof(int) && int.TryParse(text, System.Globalization.NumberStyles.Integer, inv, out var i)) v = i;
+            else if (t == typeof(int) && p.Name!.Contains("Site", StringComparison.OrdinalIgnoreCase) && text.Trim().Length == 1 && char.IsLetter(text.Trim()[0])) v = char.ToUpperInvariant(text.Trim()[0]) - 'A' + 1;
+            else if (t == typeof(bool)) v = text.Trim().ToLowerInvariant() is "yes" or "true" or "1";
+            else if (t == typeof(string)) v = text;
+            if (v is null) throw new ToolInputException($"{code}'s input {k} is a {(t == typeof(int) ? "whole number" : t == typeof(double) ? "number" : t.Name)}, not '{text}'.");
+            args[p.Name!] = v;
+        }
+        if (unknown.Count > 0)
+            throw new ToolInputException($"SAP2000's call for {code} has no input {string.Join(", ", unknown)}. Its inputs: {string.Join(", ", parameters.Select(p => p.Name).Where(n => n is not "Name"))}.");
+        return args;
+    }
+
+    /// <summary>
+    /// The argument lists to try, best first: what the pattern has (or the starting values) with the inputs given;
+    /// then, when SAP2000 refuses, each whole-number choice the inputs did not give, tried at 0, 2, 3 and 4 in turn
+    /// (an option such as IBC2006Option or JGJ32002SI whose 1 SAP2000 does not take: 0.4.42 field test).
+    /// </summary>
+    internal static IEnumerable<Dictionary<string, object?>> Variants(ParameterInfo[] parameters, string pattern, bool[][] directions, System.Text.Json.Nodes.JsonObject? had, Dictionary<string, object?> given, string? method = null)
+    {
+        foreach (var dirs in directions)
+        {
+            var args = Arguments(parameters, pattern, dirs, method);
+            if (had?["values"] is System.Text.Json.Nodes.JsonObject now)
+                foreach (var p in parameters)
+                {
+                    if (p.Name is { } n && now[n] is System.Text.Json.Nodes.JsonValue v && Convert(v, p) is { } value) args[n] = value;
+                    // The directions a pattern has (nDir), as its Get call gives them.
+                    else if (p.Name is { } n2 && now[n2] is System.Text.Json.Nodes.JsonArray list && (p.ParameterType.IsByRef ? p.ParameterType.GetElementType() : p.ParameterType) == typeof(bool[])
+                        && list.All(x => x is System.Text.Json.Nodes.JsonValue b && b.TryGetValue<bool>(out _)) && list.Count > 0)
+                        args[n2] = list.Select(x => x!.GetValue<bool>()).ToArray();
+                }
+            foreach (var (k, v) in given) args[k] = v;
+            yield return args;
+            foreach (var p in parameters.Where(p => p.Name is { } n && !given.ContainsKey(n) && n is not ("Name" or "DirFlag") && (p.ParameterType.IsByRef ? p.ParameterType.GetElementType() : p.ParameterType) == typeof(int)))
+                foreach (var choice in new[] { 0, 2, 3, 4 })
+                {
+                    if (Equals(args[p.Name!], choice)) continue;
+                    var other = new Dictionary<string, object?>(args, StringComparer.OrdinalIgnoreCase) { [p.Name!] = choice };
+                    yield return other;
+                }
+        }
+    }
+
+    private static object? Convert(System.Text.Json.Nodes.JsonValue v, ParameterInfo p)
+    {
+        var t = p.ParameterType.IsByRef ? p.ParameterType.GetElementType()! : p.ParameterType;
+        if (t == typeof(double)) return v.TryGetValue<double>(out var d) ? d : v.TryGetValue<int>(out var i) ? i : null;
+        if (t == typeof(int)) return v.TryGetValue<int>(out var i2) ? i2 : v.TryGetValue<double>(out var d2) && d2 == Math.Floor(d2) ? (int)d2 : null;
+        if (t == typeof(bool)) return v.TryGetValue<bool>(out var b) ? b : null;
+        if (t == typeof(string)) return v.TryGetValue<string>(out var s) ? s : null;
+        return null;
     }
 
     /// <summary>Takes the code load off the pattern by SAP2000's SetNone.</summary>

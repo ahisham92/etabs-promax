@@ -21,6 +21,16 @@ public static class PackTables
     /// <summary>Rows a pack takes in all (beyond the usual and design tables), so that a big model's pack still opens.</summary>
     public const int TotalMostRows = 1_500_000;
 
+    /// <summary>Rows a pack takes of the design and load inputs, apart from the results' total.</summary>
+    public const int InputMostRows = 400_000;
+
+    /// <summary>A table of loads assigned to joints, frames or shells (areas, slabs): what Display > Load Assigns draws.</summary>
+    public static bool IsLoadTable(string name)
+    {
+        var n = ResultTools.Norm(name);
+        return new[] { "joint", "point", "frame", "line", "beam", "shell", "area", "slab", "wall", "surface", "floor" }.Any(w => n.StartsWith(w + "loads", StringComparison.Ordinal));
+    }
+
     /// <summary>The tables read a second time with every step of a time history, staged or nonlinear case.</summary>
     public static readonly string[] HistoryTables =
     [
@@ -59,6 +69,7 @@ public static class PackTables
         var n = ResultTools.Norm(t.Name);
         if (n.Length == 0) return null;
         if (DesignResults.IsWallTable(t.Name)) return "result";
+        if (IsMeshTable(n)) return "result";
         var input = InputWords.Any(w => n.Contains(w, StringComparison.Ordinal));
         if (Verdict.IsInputTable(t.Name)) return input ? "input" : null;
         if (DesignResults.IsDesignTable(t.Name)) return "result";
@@ -67,6 +78,18 @@ public static class PackTables
         if (t.Import > 0) return null;
         return ResultWords.Any(w => n.Contains(w, StringComparison.Ordinal)) && !n.Contains("assign", StringComparison.Ordinal) && !n.Contains("definition", StringComparison.Ordinal) ? "result" : null;
     }
+
+    /// <summary>
+    /// The analysis mesh: the program divides each floor and wall into shell elements and gives their forces at the
+    /// element joints ("~123"), most of which are not joints of the model. With these the Viewer draws the shell
+    /// contours on the program's own elements, as ETABS, SAP2000 and SAFE draw them (Ahmed 2026-11-26: "exactly the same
+    /// way"). ETABS and SAFE: "Objects and Elements - Joints" and "- Shells"; SAP2000: "Objects And Elements - Joints"
+    /// and "- Areas".
+    /// </summary>
+    public static bool IsMeshTable(string normalized) =>
+        normalized.StartsWith("objectsandelements", StringComparison.Ordinal)
+        && (normalized.EndsWith("joints", StringComparison.Ordinal) || normalized.EndsWith("points", StringComparison.Ordinal) || normalized.EndsWith("shells", StringComparison.Ordinal)
+            || normalized.EndsWith("areas", StringComparison.Ordinal) || normalized.EndsWith("slabs", StringComparison.Ordinal) || normalized.EndsWith("walls", StringComparison.Ordinal));
 
     /// <summary>
     /// The tables to take beyond <paramref name="already"/>, in the order they are read: results first (smaller kinds

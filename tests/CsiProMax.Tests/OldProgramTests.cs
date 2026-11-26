@@ -3,6 +3,8 @@ using System.Text.Json.Nodes;
 using CsiProMax.Assistant;
 using CsiProMax.Assistant.Etabs;
 using CsiProMax.Assistant.Tools;
+using CsiProMax.F2k;
+using CsiProMax.Model;
 
 /// <summary>
 /// The SAFE 20 field test of a tester's PC (CSI ProMax 0.4.40, 2026-11-26; SAFE 20, ETABS 20 and SAP2000 24 there, all
@@ -84,6 +86,155 @@ static class OldProgramTests
                 "the field test's scratch window does the same before CreateObjectProgID");
         });
 
+        yield return ("SAFE plug-in still 0.4.5 under a 0.4.40 window: the loaded plug-in hands its work to the newest downloaded copy, on a Tools click and when a window asks", () =>
+        {
+            var built = typeof(CsiProMaxPlugin.Newest).Assembly.Location;
+            var root = Path.Combine(Path.GetTempPath(), "cpm-newest-" + Guid.NewGuid().ToString("N"));
+            string versions = Path.Combine(root, "versions"), installed = Path.Combine(root, "installed");
+            Directory.CreateDirectory(versions); Directory.CreateDirectory(installed);
+            void Downloaded(string version, bool complete = true)
+            {
+                var folder = Path.Combine(versions, version);
+                Directory.CreateDirectory(folder);
+                File.Copy(built, Path.Combine(folder, CsiProMaxPlugin.Newest.FileName), true);
+                if (complete) File.WriteAllText(Path.Combine(folder, ".complete"), version);
+            }
+            int Copies() => AppDomain.CurrentDomain.GetAssemblies().Count(a => a.GetName().Name == "CsiProMaxPlugin");
+            try
+            {
+                CsiProMaxPlugin.Newest.VersionsFolder = versions;
+                CsiProMaxPlugin.Newest.Reset();
+                var model = new CSiAPIv1.FakeModel();
+
+                // Nothing newer downloaded: the installed plug-in does its own work.
+                Downloaded("0.0.1"); Downloaded("98.0.0", complete: false); Directory.CreateDirectory(Path.Combine(versions, "97.0.0.del"));
+                Check(CsiProMaxPlugin.Newest.Find(versions, new Version(0, 4, 0)) is null, "an older version, a half unpacked one and a folder being deleted are not taken");
+                var before = Copies();
+                Check(!CsiProMaxPlugin.Newest.Hand(model, installed), "with nothing newer the installed plug-in serves and starts the window itself");
+                CsiProMaxPlugin.ApiBridge.Serve(model);
+                using (var own = ApiPipe.ToPlugin(Environment.ProcessId, "SAFE 20", 5000) ?? throw new Exception("the installed plug-in's pipe did not answer"))
+                    Equal(@"E:\Pro max\LEVEL 29.FDB", (string)((dynamic)own.Root()).GetModelFilename(true), "read through the installed plug-in");
+                Equal(before, Copies(), "no copy was loaded");
+
+                // An update arrives while the program is open and the window has switched to it: the window asks, the
+                // plug-in hands the pipe to the new copy, the window connects again. No Tools click, nothing closed.
+                Downloaded("99.0.0");
+                Equal(new Version(99, 0, 0), CsiProMaxPlugin.Newest.Find(versions, new Version(0, 4, 43))!.Value.Version, "the newest complete version is found");
+                using (var renewed = ApiPipe.ToPlugin(Environment.ProcessId, "SAFE 20", 5000) ?? throw new Exception("the renewed plug-in's pipe did not answer"))
+                    Equal(@"E:\Pro max\LEVEL 29.FDB", (string)((dynamic)renewed.Root()).GetModelFilename(true), "read through the newer copy");
+                Equal(before + 1, Copies(), "the newer copy of the plug-in was loaded into the open program");
+                using (var again = ApiPipe.ToPlugin(Environment.ProcessId, "SAFE 20", 5000) ?? throw new Exception("the pipe did not answer the second window"))
+                {
+                    int n = 0; string[] frames = [];
+                    Equal(0, (int)((dynamic)again.Root()).FrameObj.GetNameList(ref n, ref frames), "a second window is served by the same copy");
+                }
+                Equal(before + 1, Copies(), "the same version is not loaded twice");
+
+                // A newer one still, on the next Tools click: the copy serves and opens the window from the installed folder.
+                Downloaded("99.1.0");
+                string? said = null;
+                try { CsiProMaxPlugin.Newest.Hand(model, installed); } catch (IOException ex) { said = ex.Message; }
+                Check(said is not null && said.Contains("CsiProMax.dll is missing from " + installed, StringComparison.Ordinal), "the copy starts the window from the installed folder, and what goes wrong is said: " + said);
+                Equal(before + 2, Copies(), "the newest copy took over");
+                // The installed copy was 0.4.7 and handed over as 0.4.7 knew how: the plug-in now starts the newest
+                // downloaded version itself, and tells it where the installed files are.
+                File.WriteAllText(Path.Combine(installed, "CsiProMax.dll"), "not an assembly: as old as can be");
+                Check(CsiProMaxPlugin.Launcher.NewestApp(installed, versions) is null, "a version folder without CsiProMax.dll is not started");
+                File.WriteAllText(Path.Combine(versions, "99.1.0", "CsiProMax.dll"), "");
+                File.WriteAllText(Path.Combine(versions, "99.0.0", "CsiProMax.dll"), "");
+                var app = CsiProMaxPlugin.Launcher.NewestApp(installed, versions);
+                Equal(Path.Combine(versions, "99.1.0"), app, "the newest complete downloaded version is the one started");
+                var dotnet = Path.Combine(root, "dotnet");
+                Directory.CreateDirectory(dotnet);
+                File.WriteAllText(Path.Combine(dotnet, CsiProMaxPlugin.Launcher.Windows ? "dotnet.exe" : "dotnet"), "");
+                var start = CsiProMaxPlugin.Launcher.StartInfo(installed, "/x", 7, "SAFE", [dotnet], app);
+                Check(start.Arguments.StartsWith("\"" + Path.Combine(versions, "99.1.0", "CsiProMax.dll") + "\" --etabs-pid 7 --program safe", StringComparison.Ordinal), "the downloaded version's file is started: " + start.Arguments);
+                Check(start.Arguments.EndsWith(" --this-version --installed-in \"" + installed + "\"", StringComparison.Ordinal), "it is told it is the one to run, and where the installed files are: " + start.Arguments);
+                var plain = CsiProMaxPlugin.Launcher.StartInfo(installed, "/x", 7, "SAFE", [dotnet]);
+                Check(plain.Arguments.StartsWith("\"" + Path.Combine(installed, "CsiProMax.dll") + "\"", StringComparison.Ordinal) && !plain.Arguments.Contains("--this-version", StringComparison.Ordinal), "with nothing downloaded the installed copy starts as before");
+                using var last = ApiPipe.ToPlugin(Environment.ProcessId, "SAFE 20", 5000) ?? throw new Exception("the newest plug-in's pipe did not answer");
+                Equal(@"E:\Pro max\LEVEL 29.FDB", (string)((dynamic)last.Root()).GetModelFilename(true), "read through the newest copy");
+            }
+            finally
+            {
+                CsiProMaxPlugin.Newest.Reset();
+                CsiProMaxPlugin.Newest.VersionsFolder = Path.Combine(root, "none");
+                CsiProMaxPlugin.ApiBridge.Renewer = null;
+                try { Directory.Delete(root, true); } catch (IOException) { }
+            }
+        });
+
+        yield return ("SAFE plug-in still 0.4.5 under a 0.4.40 window: the installed plug-in files follow the running version, also while a program has them loaded", () =>
+        {
+            var root = Path.Combine(Path.GetTempPath(), "cpm-refresh-" + Guid.NewGuid().ToString("N"));
+            string from = Path.Combine(root, "versions", "0.4.43"), into = Path.Combine(root, "CSI ProMax");
+            Directory.CreateDirectory(from); Directory.CreateDirectory(into);
+            try
+            {
+                string[] names = ["CsiProMaxPlugin.dll", "CsiProMaxSafePlugin.dll", "CsiProMaxSapPlugin.dll"];
+                foreach (var n in names) { File.WriteAllText(Path.Combine(from, n), "new " + n); File.WriteAllText(Path.Combine(into, n), "old " + n); }
+                File.WriteAllText(Path.Combine(into, "CsiProMax.dll"), "installed window");
+                File.WriteAllText(Path.Combine(from, "CsiProMax.dll"), "new window");
+                Version Of(string file) => file.StartsWith(from, StringComparison.Ordinal) ? new Version(0, 4, 43) : new Version(0, 4, 5);
+                IReadOnlyList<string> said;
+                // As a program holds its plug-in file: readable, renamable, not writable.
+                using (new FileStream(Path.Combine(into, names[1]), FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete))
+                    said = CsiProMax.Update.PlugInRefresh.Run(from, into, names, Of);
+                Equal(3, said.Count(s => s.Contains("0.4.5 replaced by 0.4.43", StringComparison.Ordinal)), "all three are replaced: " + string.Join(" | ", said));
+                foreach (var n in names) Equal("new " + n, File.ReadAllText(Path.Combine(into, n)), n + " is the new one");
+                Equal("installed window", File.ReadAllText(Path.Combine(into, "CsiProMax.dll")), "nothing else in the installed folder is touched");
+                if (OperatingSystem.IsWindows()) Check(Directory.GetFiles(into, "*.old-*").Length == 1, "the loaded file was moved aside, not overwritten");
+                Equal(0, CsiProMax.Update.PlugInRefresh.Run(from, into, names, _ => new Version(0, 4, 43)).Count, "the same version is left alone");
+                Equal(0, Directory.GetFiles(into, "*.old-*").Length, "the file moved aside is removed once the program let go of it");
+                Equal(0, CsiProMax.Update.PlugInRefresh.Run(into, into, names, Of).Count, "the installed folder is never copied onto itself");
+                var app = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Panel/Host/App.cs"));
+                Check(app.Contains("RunsDownloadedVersion && CsiProMax.Assistant.ToolsMenu.InstallFolder()", StringComparison.Ordinal) && app.Contains("PlugInRefresh.Run(", StringComparison.Ordinal),
+                    "the window does it at its start, and only a downloaded version does");
+            }
+            finally { try { Directory.Delete(root, true); } catch (IOException) { } }
+        });
+
+        yield return ("one update, every part on one version: the installed copy the Modeler, the Viewer and the shortcuts start follows the running version, CsiProMax.dll last", () =>
+        {
+            var root = Path.Combine(Path.GetTempPath(), "cpm-align-" + Guid.NewGuid().ToString("N"));
+            string from = Path.Combine(root, "versions", "0.4.48"), into = Path.Combine(root, "CSI ProMax");
+            Directory.CreateDirectory(Path.Combine(from, "web")); Directory.CreateDirectory(into);
+            try
+            {
+                string[] plugIns = ["CsiProMaxPlugin.dll", "CsiProMaxSafePlugin.dll", "CsiProMaxSapPlugin.dll"];
+                foreach (var n in plugIns.Concat(["CsiProMax.dll", "CsiProMax.deps.json", "Same.dll"]))
+                {
+                    File.WriteAllText(Path.Combine(from, n), n == "Same.dll" ? "same" : "new " + n);
+                    File.WriteAllText(Path.Combine(into, n), n == "Same.dll" ? "same" : "old " + n);
+                }
+                File.WriteAllText(Path.Combine(from, "web", "viewer.html"), "new viewer");
+                File.WriteAllText(Path.Combine(from, ".complete"), "0.4.48");
+                File.WriteAllText(Path.Combine(into, "settings-of-mine.txt"), "kept");
+                Version Of(string file) => file.StartsWith(from, StringComparison.Ordinal) || File.ReadAllText(file).StartsWith("new", StringComparison.Ordinal) ? new Version(0, 4, 48) : new Version(0, 4, 45);
+                var before = CsiProMax.Update.PlugInRefresh.Aligned("0.4.48", into, null, plugIns, Of);
+                Check(!before.Same && before.Text.Contains("this run 0.4.48", StringComparison.Ordinal) && before.Text.Contains("installed CsiProMax.dll 0.4.45", StringComparison.Ordinal), "an installed copy left behind is seen: " + before.Text);
+                var stamp = File.GetLastWriteTimeUtc(Path.Combine(into, "Same.dll"));
+                var said = CsiProMax.Update.PlugInRefresh.Everything(from, into, Of);
+                Check(said is not null && said.Contains("is now 0.4.48 (was 0.4.45): 6 files written", StringComparison.Ordinal), "what was done is said: " + said);
+                foreach (var n in plugIns.Concat(["CsiProMax.dll", "CsiProMax.deps.json"])) Equal("new " + n, File.ReadAllText(Path.Combine(into, n)), n);
+                Equal("new viewer", File.ReadAllText(Path.Combine(into, "web", "viewer.html")), "files in folders too");
+                Equal(stamp, File.GetLastWriteTimeUtc(Path.Combine(into, "Same.dll")), "a file with the same content is not written again");
+                Check(!File.Exists(Path.Combine(into, ".complete")) && File.ReadAllText(Path.Combine(into, "settings-of-mine.txt")) == "kept", "the download mark is not copied, and what else is in the installed folder is kept");
+                var after = CsiProMax.Update.PlugInRefresh.Aligned("0.4.48", into, "0.4.48", plugIns, Of);
+                Check(after.Same, "every part is one version afterwards: " + after.Text);
+                Check(CsiProMax.Update.PlugInRefresh.Everything(from, into, Of) is null, "a second time there is nothing to do");
+                Check(CsiProMax.Update.PlugInRefresh.Everything(from, into, f => f.StartsWith(from, StringComparison.Ordinal) ? new Version(0, 4, 40) : new Version(0, 4, 48)) is null, "a newer installed copy is never put back");
+                Check(!CsiProMax.Update.PlugInRefresh.Aligned("0.4.48", into, "0.4.49", plugIns, Of).Same, "a newer version downloaded and not yet in use is seen");
+                var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Panel/Update/PlugInRefresh.cs"));
+                Check(source.Contains("private static readonly string[] Last = [\"CsiProMax.deps.json\", \"CsiProMax.runtimeconfig.json\", \"CsiProMax.dll\"]", StringComparison.Ordinal), "CsiProMax.dll is copied last");
+                var steps = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/PcFieldSteps.cs"));
+                Check(steps.Contains("every part of CSI ProMax on this PC is one version", StringComparison.Ordinal) && steps.Contains("PlugInRefresh.Aligned(", StringComparison.Ordinal), "the field test checks it on the PC");
+                var program = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Program.cs"));
+                Check(program[program.IndexOf("private static int RunViewer", StringComparison.Ordinal)..].Contains("Updater.CheckAsync(force: false)", StringComparison.Ordinal), "the Viewer on its own looks for updates too");
+            }
+            finally { try { Directory.Delete(root, true); } catch (IOException) { } }
+        });
+
         yield return ("kind: every plug-in serves its program's model on the pipe before it opens the window", () =>
         {
             foreach (var folder in new[] { "CsiProMax.Plugin", "CsiProMax.Plugin.Safe", "CsiProMax.Plugin.Sap" })
@@ -91,10 +242,13 @@ static class OldProgramTests
                 var text = File.ReadAllText(Path.Combine(SourceText.Root(), "src", folder, "cPlugin.cs"));
                 var serve = text.IndexOf("ApiBridge.Serve(SapModel)", StringComparison.Ordinal);
                 Check(serve > 0 && serve < text.IndexOf("Launcher.Start()", StringComparison.Ordinal), $"{folder}: ApiBridge.Serve(SapModel) before Launcher.Start()");
+                var hand = text.IndexOf("Newest.Hand(SapModel", StringComparison.Ordinal);
+                Check(hand > 0 && hand < serve, $"{folder}: a newer downloaded copy of the plug-in is asked first (Newest.Hand)");
                 if (folder != "CsiProMax.Plugin")
                 {
                     var project = File.ReadAllText(Path.Combine(SourceText.Root(), "src", folder, folder + ".csproj"));
                     Check(project.Contains("ApiBridge.cs", StringComparison.Ordinal) && project.Contains("ApiWire.cs", StringComparison.Ordinal), $"{folder} compiles the bridge in");
+                    Check(project.Contains("Newest.cs", StringComparison.Ordinal) && project.Contains("Live.cs", StringComparison.Ordinal), $"{folder} compiles the hand-over in");
                 }
             }
         });
@@ -165,6 +319,94 @@ static class OldProgramTests
             var connector = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Panel/Bridge/RevitTargets.cs"));
             Check(!connector.Contains("EndsWith(\".rvt\"", StringComparison.Ordinal), "the chat's open request takes the program's own model files, not Revit's");
         });
+
+        yield return ("SAFE 20 tester (0.4.51): SAFE 20 builds the Modeler's model from the .f2k through the API in a blank model, so its editing tools are tested too", () =>
+        {
+            var m = Templates.ConcreteFrame("T", [6, 6], [5], 3, 3.5);
+            m.AddCombo("1.2D+1.6L", ("Dead", 1.2), ("Live", 1.6));
+            var written = F2kWriter.Write(m, new F2kOptions(Story: "Story2"));
+            Equal(6, CsiProMax.Assistant.Safe.F2kRebuild.UnitsOf(written.Text), "the blank model takes the file's units (kN, m)");
+            var api = new ApiRecorder();
+            var memory = new MemoryEtabs { Program = CsiProgram.Safe };
+            var link = new SafeMemory(memory, program: CsiProgram.Safe) { Api = api };
+            var built = CsiProMax.Assistant.Safe.F2kRebuild.Build(link, written.Text);
+            Equal(written.Slabs, built["slabs"]!.GetValue<int>(), "every slab of the file");
+            Equal(written.Beams, built["beams"]!.GetValue<int>(), "every beam");
+            Equal(written.Columns, built["columns"]!.GetValue<int>(), "every column below and above");
+            Equal(written.Slabs, link.Areas().Count(a => a.Kind == "floor"), "the slabs are floors in SAFE");
+            Equal(written.Beams, link.Frames().Count(f => f.Kind == "beam"), "the beams are beams in SAFE");
+            Equal(written.Supports, built["supports"]!.GetValue<int>(), "the supports at the columns' far ends");
+            Check(link.Points().Count(p => link.Restraint(p.Name).Take(3).All(r => r)) == written.Supports, "the restrained points are held");
+            Check(link.LoadPatterns().Any(p => p.Name == "Dead") && link.LoadPatterns().Any(p => p.Name == "Live"), "Dead and Live");
+            Check(link.Combos().Contains("1.2D+1.6L"), "the combination");
+            Equal(written.Loads, built["loads"]!.GetValue<int>(), "every surface load");
+            Check(memory.Loads.Count > 0, "the loads reached the slabs");
+            Check(api.Calls.Any(c => c.StartsWith("SetSlab(", StringComparison.Ordinal)) && api.Calls.Any(c => c.StartsWith("SetRectangle(", StringComparison.Ordinal)) && api.Calls.Any(c => c.StartsWith("SetMaterial(", StringComparison.Ordinal)),
+                "the materials, slab and frame properties are defined first: " + string.Join(", ", api.Calls.Take(8)));
+            Check(written.Strips == 0 || built["notes"]!.AsArray().Any(n => n!.GetValue<string>().Contains("design strips", StringComparison.Ordinal)), "strips left out are said");
+            Equal("Super Dead", CsiProMax.Assistant.Safe.F2kRebuild.PatternType("SUPER DEAD"), "a .f2k pattern type");
+            Equal("Other", CsiProMax.Assistant.Safe.F2kRebuild.PatternType("SOMETHING"), "an unknown one");
+
+            Check(CsiProMax.Assistant.ScratchProgram.BuildsThroughApi(CsiProgram.Safe, @"C:\t\cpm-field-test.F2K"), "SAFE builds a .f2k");
+            Check(!CsiProMax.Assistant.ScratchProgram.BuildsThroughApi(CsiProgram.Etabs, @"C:\t\cpm-field-test.e2k"), "only SAFE's file is built");
+            var scratch = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));
+            Check(scratch.Contains("F2kRebuild.Build(Link, text)", StringComparison.Ordinal) && scratch.IndexOf("F2kRebuild.Build(Link, text)", StringComparison.Ordinal) > scratch.IndexOf("the link reads the scratch model, and no other", StringComparison.Ordinal),
+                "the model is built only once the link is checked to be the scratch model's");
+            var steps = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Safe/SafeFieldSteps.cs"));
+            Check(steps.Contains("if (built) ctx.Skip(\"the design strips came across\"", StringComparison.Ordinal), "the strips are said as not tested, not passed, when the model was built");
+        });
+
+        yield return ("SAFE 20 tester (0.4.47): SAFE 20 is never given the Modeler's .f2k, which it read as a packed model ('Error decompressing file')", () =>
+        {
+            Check(!CsiProMax.Assistant.ScratchProgram.OpensThroughApi(CsiProgram.Safe, @"C:\t\cpm-field-test.f2k", onFramework: true), "SAFE 20/21 and a .f2k: it is not opened (the model is built instead)");
+            Check(CsiProMax.Assistant.ScratchProgram.OpensThroughApi(CsiProgram.Safe, @"C:\t\cpm-field-test.FDB", onFramework: true), "SAFE 20/21 and its own .fdb");
+            Check(CsiProMax.Assistant.ScratchProgram.OpensThroughApi(CsiProgram.Safe, @"C:\t\cpm-field-test.f2k", onFramework: false), "SAFE 22 and later keep opening the .f2k as before");
+            foreach (var p in new[] { CsiProgram.Etabs, CsiProgram.Sap2000 })
+                Check(CsiProMax.Assistant.ScratchProgram.OpensThroughApi(p, @"C:\t\cpm-field-test" + (p == CsiProgram.Etabs ? ".e2k" : ".s2k"), onFramework: true), $"{p.Name} on the .NET Framework still opens its text file");
+            var scratch = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));
+            Check(scratch.IndexOf("OpensThroughApi(_program, modelFile", StringComparison.Ordinal) is > 0 and var at && at < scratch.IndexOf("ApiPipe.ToPowerShell(_program, ApiFile, \"start\"", StringComparison.Ordinal),
+                "the check comes before any window is started");
+        });
+
+        yield return ("kind: a program's 'could not read this file' box in a scratch window is answered OK and said, never a licence box", () =>
+        {
+            var box = CsiProMax.Assistant.ScratchDialogs.IsFileRefused;
+            Check(box("Error decompressing file. May not be a valid ETABS .EDB file."), "SAFE 20's words"); // ETABS itself
+            Check(!box("Error decompressing file: no licence was found"), "a licence message is never answered");
+            Check(!box("Analysis Complete"), "another box");
+            foreach (var p in CsiProgram.All)
+                Check(CsiProMax.Assistant.ScratchDialogs.IsProgramBox(" " + p.Name + " ", p) && !CsiProMax.Assistant.ScratchDialogs.IsProgramBox(p.Name + " licence", p), $"{p.Name}'s own message box, by its title");
+        });
+
+        yield return ("SAFE 20 tester (0.4.47): the chat does not hand SAFE a .f2k to open; it says to import it", () =>
+        {
+            var tool = CsiTools.For(CsiProgram.Safe).Single(t => t.Name == "open_model");
+            var folder = Path.Combine(Path.GetTempPath(), "cpm-f2k-" + Guid.NewGuid().ToString("N")[..8]);
+            Directory.CreateDirectory(folder);
+            try
+            {
+                var f2k = Path.Combine(folder, "LEVEL 29.f2k");
+                File.WriteAllText(f2k, "");
+                var (link, api) = OpenProbe(CsiProgram.Safe, @"C:\Models\Untitled");
+                try { tool.Invoke(JsonDocument.Parse(JsonSerializer.Serialize(new { path = f2k })).RootElement, link); throw new Exception("the .f2k was handed to SAFE"); }
+                catch (ToolInputException ex) { Check(ex.Message.Contains("File > Import", StringComparison.Ordinal), ex.Message); }
+                Equal(null, api.Opened, "SAFE was asked to open nothing");
+            }
+            finally { Directory.Delete(folder, true); }
+        });
+    }
+
+    /// <summary>SAFE's API as the rebuild calls it: every property is itself, every call is recorded and answers 0 (a rename answers 1, as a program that keeps its own names).</summary>
+    public sealed class ApiRecorder : System.Dynamic.DynamicObject
+    {
+        public List<string> Calls { get; } = [];
+        public override bool TryGetMember(System.Dynamic.GetMemberBinder binder, out object? result) { result = this; return true; }
+        public override bool TryInvokeMember(System.Dynamic.InvokeMemberBinder binder, object?[]? args, out object? result)
+        {
+            Calls.Add($"{binder.Name}({string.Join(", ", args ?? [])})");
+            result = binder.Name == "ChangeName" ? 1 : 0;
+            return true;
+        }
     }
 
     /// <summary>A link whose only work is the calls made by path, on the pipe's model.</summary>

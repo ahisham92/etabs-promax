@@ -54,6 +54,16 @@ public static class FieldTest
         /// <summary>The programs to open a scratch window of. Left out: every CSI program on this PC, the open one first.</summary>
         public IReadOnlyList<CsiProgram>? Programs { get; init; }
 
+        /// <summary>
+        /// One program only (Ahmed, 2026-11-26: "test sap etabs safe one by one"): this PC, the open model and that program's
+        /// scratch window with CSI ProMax's own features in it. The Modeler's part still runs: it writes the scratch model that
+        /// program opens. The other programs are left out.
+        /// </summary>
+        public CsiProgram? OnlyProgram { get; init; }
+
+        /// <summary>Told the test's own folder once it is known (its "results so far.txt" grows as the test goes).</summary>
+        public Action<string>? OnWorkFolder { get; init; }
+
         /// <summary>Opens a scratch window (for tests, a stand-in): null when it could not, with its steps in the report.</summary>
         public Func<CsiProgram, FieldContext, string, IScratchWindow?> StartScratch { get; init; } = ScratchProgram.Start;
         /// <summary>Ends the test copies an earlier run left open, and says which. For tests: a stand-in.</summary>
@@ -160,16 +170,91 @@ public static class FieldTest
     /// <summary>A field test that runs in the background (the full one takes a while): what it is at, and its outcome when done.</summary>
     public sealed class Running
     {
-        internal Running(bool full, string startedFrom) { Full = full; StartedFrom = startedFrom; }
+        internal Running(bool full, string startedFrom, bool retest = false, CsiProgram? only = null)
+        {
+            Full = full; StartedFrom = startedFrom; Retest = retest; Only = only;
+            Expected = ExpectedSteps(full, retest, only: only);
+        }
+        /// <summary>The one program it tests, or null for all of them.</summary>
+        public CsiProgram? Only { get; }
+        /// <summary>The live file the test appends each step's outcome to, as it goes ("results so far.txt").</summary>
+        public string? LiveFile { get; internal set; }
         public bool Full { get; }
+        public bool Retest { get; }
         public string StartedFrom { get; }
         public DateTime Started { get; } = DateTime.Now;
         public Task<Outcome> Task { get; internal set; } = null!;
         private volatile string _doing = "starting";
-        private int _steps;
+        private volatile string _part = "";
+        private int _steps, _ok, _failed, _notTested;
         public string Doing => _doing;
         public int StepsSoFar => Volatile.Read(ref _steps);
+        /// <summary>The part the last recorded step belongs to ("SAP2000 on a scratch model"...).</summary>
+        public string Part => _part;
+        /// <summary>Steps recorded so far, by outcome (Ahmed, 2026-11-26: the field test "needs urgently to show progress").</summary>
+        public int Ok => Volatile.Read(ref _ok);
+        public int Failed => Volatile.Read(ref _failed);
+        public int NotTested => Volatile.Read(ref _notTested);
+        public int Done => Ok + Failed + NotTested;
+        /// <summary>About how many steps this kind of run had last time on this PC; 0 when it never ran here.</summary>
+        public int Expected { get; }
         internal void Saw(string step) { _doing = step; Interlocked.Increment(ref _steps); }
+        /// <summary>Counts one outcome line ("ok          [part] step", "FAIL        [part] ...", "not tested  [part] ...").</summary>
+        internal void Counted(string line)
+        {
+            if (line.StartsWith("ok", StringComparison.Ordinal)) Interlocked.Increment(ref _ok);
+            else if (line.StartsWith("FAIL", StringComparison.Ordinal)) Interlocked.Increment(ref _failed);
+            else if (line.StartsWith("not tested", StringComparison.Ordinal)) Interlocked.Increment(ref _notTested);
+            var open = line.IndexOf('[');
+            var close = open < 0 ? -1 : line.IndexOf(']', open + 1);
+            if (close > open + 1) _part = line[(open + 1)..close];
+        }
+    }
+
+    /// <summary>A running test's progress as lines (the progress window and the chat both show them).</summary>
+    public sealed record ProgressLines(string Part, string Step, double? Percent, string Count, string Tally, string Time)
+    {
+        public static ProgressLines Of(string part, string doing, int done, int expected, int ok, int failed, int notTested, TimeSpan elapsed, bool finished)
+        {
+            // Never 100% before it is done: the last run's count is only an estimate.
+            double? percent = finished ? 100 : expected > 0 ? Math.Min(99, 100.0 * done / expected) : null;
+            var count = expected > 0 ? $"Step {done} of about {expected}" : $"Step {done} (the first run of this kind on this PC, so the total is not known yet)";
+            var tally = $"Passed {ok}   Failed {failed}   Not tested {notTested}";
+            var time = $"Running for {(int)elapsed.TotalMinutes}:{elapsed.Seconds:00}";
+            return new ProgressLines(part.Length > 0 ? part : "Starting", "Now: " + doing, percent, count, tally, time);
+        }
+
+        public static ProgressLines Of(Running run) =>
+            Of(run.Part, run.Doing, run.Done, run.Expected, run.Ok, run.Failed, run.NotTested, DateTime.Now - run.Started, run.Task?.IsCompleted == true);
+    }
+
+    /// <summary>The file with how many steps the last full run and the last retest had on this PC.</summary>
+    private static string ExpectedFile => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CsiProMax", "Field test", "steps.txt");
+
+    private static string ExpectedKey(bool full, bool retest, CsiProgram? only = null) => (!full ? "quick" : retest ? "retest" : "full") + (only is null ? "" : "-" + only.Key);
+
+    internal static int ExpectedSteps(bool full, bool retest, string? file = null, CsiProgram? only = null)
+    {
+        try
+        {
+            foreach (var line in File.ReadAllLines(file ?? ExpectedFile))
+                if (line.Split('=') is [var k, var v] && k.Trim() == ExpectedKey(full, retest, only) && int.TryParse(v.Trim(), out var n) && n > 0) return n;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or ArgumentException) { }
+        return 0;
+    }
+
+    internal static void SaveExpected(bool full, bool retest, int steps, string? file = null, CsiProgram? only = null)
+    {
+        try
+        {
+            var path = file ?? ExpectedFile;
+            var lines = File.Exists(path) ? File.ReadAllLines(path).Where(l => !l.StartsWith(ExpectedKey(full, retest, only) + "=", StringComparison.Ordinal)).ToList() : [];
+            lines.Add($"{ExpectedKey(full, retest, only)}={steps}");
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllLines(path, lines);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or ArgumentException) { }
     }
 
     /// <summary>The last field test started in the background in this session (the chat and the Help menu both see it).</summary>
@@ -179,9 +264,19 @@ public static class FieldTest
     public static Running Start(ICsiLink link, Options o)
     {
         if (IsRunning || Last is { Task.IsCompleted: false }) throw new InvalidOperationException("A field test is already running.");
-        var run = new Running(o.Full, o.StartedFrom);
-        var mine = o with { Progress = step => { run.Saw(step); o.Progress?.Invoke(step); } };
-        run.Task = System.Threading.Tasks.Task.Factory.StartNew(() => Run(link, mine), CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        var run = new Running(o.Full, o.StartedFrom, o.Retest, o.OnlyProgram);
+        var mine = o with
+        {
+            Progress = step => { run.Saw(step); o.Progress?.Invoke(step); },
+            Outcome = line => { run.Counted(line); o.Outcome?.Invoke(line); },
+            OnWorkFolder = folder => { run.LiveFile = Path.Combine(folder, FieldContext.LiveFile); o.OnWorkFolder?.Invoke(folder); },
+        };
+        run.Task = System.Threading.Tasks.Task.Factory.StartNew(() =>
+        {
+            var outcome = Run(link, mine);
+            if (o.ResultsFile is null) SaveExpected(o.Full, o.Retest, outcome.Steps.Count, only: o.OnlyProgram);
+            return outcome;
+        }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
         Last = run;
         return run;
     }
@@ -194,6 +289,7 @@ public static class FieldTest
         var work = o.WorkFolder ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CsiProMax", "Field test", $"{link.Program.Name} {now:yyyy-MM-dd HHmmss}");
         if (o.Full) Directory.CreateDirectory(work);
         var ctx = new FieldContext(link.Program, work, link) { Progress = o.Progress, Outcome = o.Outcome };
+        try { o.OnWorkFolder?.Invoke(work); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
         // Test copies an earlier run left open go first: they would count as the program being open below.
         var left = new List<string>();
         if (o.Full && o.SettingsRoot is null)
@@ -215,6 +311,8 @@ public static class FieldTest
         // The real window, opened a second time on the demo model, with the chat and without it (the full test on a real PC).
         if (o.Full && (o.OpenWindow is not null || (o.LiveScratch && o.SettingsRoot is null))) WindowFieldSteps.Run(ctx, o.OpenWindow);
         if (left.Count > 0) ctx.Step("test copies an earlier run left open are closed", () => string.Join("; ", left));
+        // The chat's defaults (Pitso and his workers, Simple chat), the autopilot's rules and the chat from the phone (2026-11-26).
+        ChatFieldSteps.Run(ctx);
 
         ctx.Section(OpenSection);
         o.Progress?.Invoke("reading the open model");
@@ -281,11 +379,11 @@ public static class FieldTest
 
     private static void Full(FieldContext ctx, ICsiLink link, Options o, Dictionary<string, string> ran)
     {
-        ModelerFieldSteps.Run(ctx);
+        ModelerFieldSteps.Run(ctx); // it writes the file each program's scratch window opens, one program alone too
         var last = o.Retest && ResultsFile(o) is { } kept ? FieldRetest.Load(kept) : [];
         (bool Run, string Why) Choice(string part) => o.Retest ? FieldRetest.Decide(last.GetValueOrDefault(part), PrintOf(o, part)) : (true, "");
 
-        var programs = o.Programs ?? Installed(link.Program);
+        var programs = o.OnlyProgram is { } only ? [only] : o.Programs ?? Installed(link.Program);
         if (programs.Count == 0)
         {
             ctx.Section(ScratchSection);

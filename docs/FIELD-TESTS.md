@@ -24,7 +24,9 @@ The field test is inside CSI ProMax. It checks what it can by itself and saves o
      something to read);
    - the Modeler: a test building made with every Modeler tool, each change read back, written as .e2k, .s2k and .f2k;
    - each CSI program on the PC (ETABS, SAP2000, SAFE): a second window that the test opens itself on that test
-     model, saved as a scratch model in the test's own folder. Every tool of that program is run there with each
+     model, saved as a scratch model in the test's own folder (SAFE 20 and 21 open only .fdb files through their API,
+     so there the test starts a blank model and builds the Modeler's .f2k in it through the API, all but the design
+     strips, which SAFE's API cannot draw). Every tool of that program is run there with each
      change read back through the program's API, then the analysis, the design, every result table and check, the
      snapshots and the review pack. Then the tools every program shares (the whole API searched, described and
      read; units; properties and load definitions in full; table edits; groups and piers; mass source, modal case,

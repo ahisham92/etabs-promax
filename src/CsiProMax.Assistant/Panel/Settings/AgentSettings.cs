@@ -105,10 +105,17 @@ public sealed class AgentSettings
     public string? ChatCrewApplier { get; set; }
 
     /// <summary>
-    /// The type a new chat starts as (Chat.ChatTypes): "coordinator" (it hands work to parallel jobs, the default) or
-    /// "simple" (one chat does everything itself). New chat's arrow picks the other type for one chat.
+    /// The type a new chat starts as (Chat.ChatTypes): "simple" (one chat does everything itself, the default since
+    /// 26 Nov 2026, Ahmed) or "coordinator" (it hands work to parallel jobs). New chat's arrow picks the other type for one
+    /// chat; New autopilot chat is always With coordinator.
     /// </summary>
-    public string ChatTypeDefault { get; set; } = "coordinator";
+    public string ChatTypeDefault { get; set; } = "simple";
+
+    /// <summary>
+    /// The user picked <see cref="ChatTypeDefault"/> in Settings since it became Simple chat by default. Before that every
+    /// Save wrote "coordinator", the old default, so a file without this reads as Simple chat (Load).
+    /// </summary>
+    public bool ChatTypeChosen { get; set; }
 
     /// <summary>
     /// The model and effort a new chat starts on (Chat.ChatAuto): "auto" (Automatic: picked per request and per job by
@@ -217,10 +224,24 @@ public sealed class AgentSettings
         try
         {
             if (File.Exists(FilePath))
-                return JsonSerializer.Deserialize<AgentSettings>(File.ReadAllText(FilePath)) ?? new();
+                return Upgraded(JsonSerializer.Deserialize<AgentSettings>(File.ReadAllText(FilePath)) ?? new());
         }
         catch (Exception ex) when (ex is IOException or JsonException) { }
         return new();
+    }
+
+    /// <summary>
+    /// A file written by an older version, read as this one means it (26 Nov 2026): the old default chat type and the old
+    /// default crew names were stored as if chosen; they read as the new defaults (Simple chat; Pitso, Ali, Carmen, Carla,
+    /// Dieng). Names the user typed, and a chat type picked since, are kept.
+    /// </summary>
+    internal static AgentSettings Upgraded(AgentSettings s)
+    {
+        if (!s.ChatTypeChosen) s.ChatTypeDefault = "simple";
+        s.ChatCrewCoordinator = Chat.CrewNames.Stored(s.ChatCrewCoordinator, Chat.CrewNames.DefaultCoordinator, Chat.CrewNames.OldCoordinator);
+        s.ChatCrewWorkers = Chat.CrewNames.Stored(s.ChatCrewWorkers, Chat.CrewNames.DefaultWorkers, Chat.CrewNames.OldWorkers);
+        s.ChatCrewApplier = Chat.CrewNames.Stored(s.ChatCrewApplier, Chat.CrewNames.DefaultApplier);
+        return s;
     }
 
     public void Save()

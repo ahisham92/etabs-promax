@@ -122,6 +122,34 @@ internal static class WebPages
         return page;
     }
 
+    /// <summary>Where a window notes that its page has loaded: one file per process, for the field test.</summary>
+    internal static string ShownFolder => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CsiProMax", "shown");
+
+    /// <summary>A page has loaded in this process's window (the Modeler's model view, the Viewer): noted for the field test.</summary>
+    internal static void NoteShown(string address, Kind kind)
+    {
+        try
+        {
+            Directory.CreateDirectory(ShownFolder);
+            File.AppendAllText(Path.Combine(ShownFolder, Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".txt"), kind + " " + address + "\n");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+    }
+
+    /// <summary>The kinds of page that have loaded in process <paramref name="pid"/>'s windows; the note is removed when <paramref name="remove"/>.</summary>
+    internal static IReadOnlyList<string> Shown(int pid, bool remove = false)
+    {
+        var file = Path.Combine(ShownFolder, pid.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".txt");
+        try
+        {
+            if (!File.Exists(file)) return [];
+            var kinds = File.ReadAllLines(file).Select(l => l.Split(' ')[0]).Where(k => k.Length > 0).Distinct().ToList();
+            if (remove) File.Delete(file);
+            return kinds;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return []; }
+    }
+
     /// <summary>The address of a page file, as the window loads it.</summary>
     internal static string Address(string pageOrUrl) =>
         pageOrUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || pageOrUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase)

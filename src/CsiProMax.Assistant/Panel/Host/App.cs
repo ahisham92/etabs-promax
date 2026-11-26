@@ -184,6 +184,20 @@ public static class App
                 ActivityLog.Note("tools_menu", entry.Says);
         }
         catch (Exception) { /* Help > Tools menu says what is wrong when asked */ }
+        // The installed plug-in files follow the version that runs, with the programs open (PlugInRefresh). Only a
+        // downloaded version does this: a copy unpacked elsewhere to try a version never writes into the installed folder.
+        try
+        {
+            if (CsiProMax.Assistant.ToolsMenu.RunsDownloadedVersion && CsiProMax.Assistant.ToolsMenu.InstallFolder() is { } installed)
+            {
+                foreach (var line in PlugInRefresh.Run(AppContext.BaseDirectory, installed, CsiProMax.Assistant.ToolsMenu.PlugIns.Select(p => p.Dll)))
+                    ActivityLog.Note("plug_in_update", line);
+                // And everything else there: the Modeler, the Viewer and the shortcuts start from the installed folder,
+                // so one update leaves every part on one version.
+                if (PlugInRefresh.Everything(AppContext.BaseDirectory, installed) is { } all) ActivityLog.Note("install_update", all);
+            }
+        }
+        catch (Exception) { /* the loaded plug-in still hands over to the newest copy by itself */ }
         // The owner's changes to keys given out (a shorter date, a cancelled key), kept for offline days.
         try { await Licensing.LicenseState.RefreshChangesAsync(stop).ConfigureAwait(false); } catch (Exception) { }
         if (stop.IsCancellationRequested) return;
@@ -244,6 +258,8 @@ public static class App
     internal static async Task UpdateLoopAsync(CancellationToken stop)
     {
         var first = true;
+        Updater.Said ??= line => { try { ActivityLog.Note("update_check", line); } catch (Exception) { } };
+        try { ActivityLog.Note("update_check", $"CSI ProMax {Updater.CurrentText} looks for updates now and every {CheckEvery.TotalMinutes:0} minutes" + (NoUpdate ? " (switched off for this window: --no-update)." : ".")); } catch (Exception) { }
         while (!stop.IsCancellationRequested)
         {
             try
@@ -261,7 +277,12 @@ public static class App
                     UI.UpdateNotice.Offer(new UI.UpdateNotice.Notice(UI.UpdateNotice.Kind.Available, latest, UI.UpdateNotice.TopLines(Updater.NotesFor(latest))));
                 }
             }
-            catch (Exception) { first = false; /* a failed check is retried at the next round */ }
+            catch (Exception ex)
+            {
+                // A failed check is retried at the next round, and never silent: the activity log says what stopped it.
+                first = false;
+                try { ActivityLog.Note("update_check", $"{ex.GetType().Name}: {ex.Message}"); } catch (Exception) { }
+            }
             // A version this or another window downloaded, and work that was running then: switched to now.
             if (_switching == 0) SwitchWhenIdle();
             try { await Task.Delay(LoopTick, stop).ConfigureAwait(false); }

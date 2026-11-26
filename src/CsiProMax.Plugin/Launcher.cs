@@ -7,12 +7,15 @@ internal static class Launcher
 {
     internal static bool Windows => Path.DirectorySeparatorChar == '\\';
 
-    public static void Start()
+    public static void Start() => Start(Path.GetDirectoryName(typeof(Launcher).Assembly.Location) ?? "");
+
+    /// <param name="pluginFolder">Where the installed plug-in lies (a newer copy of the plug-in is loaded from memory and has no folder of its own).</param>
+    public static void Start(string pluginFolder)
     {
         using var me = Process.GetCurrentProcess();
         Process.Start(StartInfo(
-            Path.GetDirectoryName(typeof(Launcher).Assembly.Location) ?? "",
-            Path.GetDirectoryName(typeof(object).Assembly.Location) ?? "", me.Id, me.ProcessName))?.Dispose();
+            pluginFolder,
+            Path.GetDirectoryName(typeof(object).Assembly.Location) ?? "", me.Id, me.ProcessName, appFolder: NewestApp(pluginFolder, Newest.Versions)))?.Dispose();
     }
 
     /// <summary>
@@ -38,14 +41,34 @@ internal static class Launcher
         }
     }
 
+    /// <summary>
+    /// The folder of the newest complete downloaded version above the installed one, or null. The window is started
+    /// from there at once: the installed copy is the one first installed and can be very old (0.4.7 on a PC whose
+    /// updates had reached 0.4.40, 2026-11-26), and its own hand-over to a newer version is as old as it is.
+    /// </summary>
+    internal static string? NewestApp(string pluginFolder, string versionsFolder)
+    {
+        var installed = new Version(0, 0, 0);
+        try
+        {
+            if (System.Reflection.AssemblyName.GetAssemblyName(Path.Combine(pluginFolder, "CsiProMax.dll")).Version is { } v)
+                installed = new Version(v.Major, v.Minor, Math.Max(v.Build, 0));
+        }
+        catch (Exception) { /* not readable: any complete downloaded version is newer than nothing */ }
+        return Newest.Find(versionsFolder, installed, "CsiProMax.dll") is { } pick ? Path.GetDirectoryName(pick.File) : null;
+    }
+
+    /// <param name="appFolder">The folder of a downloaded version to start instead of the installed one (<see cref="NewestApp"/>), or null.</param>
     /// <param name="pluginFolder">Where this plug-in lies.</param>
     /// <param name="runtimeFolder">The running .NET's own folder, such as C:\Program Files\dotnet\shared\Microsoft.NETCore.App\8.0.29.</param>
     /// <param name="pid">This program window's process id: the assistant works on this window, whichever others are open.</param>
     /// <param name="program">The process name of the CSI program (ETABS, SAP2000, SAFE), which the assistant is told.</param>
     /// <param name="folders">Where to look for dotnet. Left out: <see cref="DotnetFolders"/>.</param>
-    internal static ProcessStartInfo StartInfo(string pluginFolder, string runtimeFolder, int pid, string program = "ETABS", IEnumerable<string>? folders = null)
+    internal static ProcessStartInfo StartInfo(string pluginFolder, string runtimeFolder, int pid, string program = "ETABS", IEnumerable<string>? folders = null, string? appFolder = null)
     {
         var assistant = Path.Combine(pluginFolder, "CsiProMax.dll");
+        if (appFolder is not null && File.Exists(Path.Combine(appFolder, "CsiProMax.dll"))) assistant = Path.Combine(appFolder, "CsiProMax.dll");
+        else appFolder = null;
         if (!File.Exists(assistant)) throw new IOException($"CsiProMax.dll is missing from {pluginFolder}. Copy the whole CSI ProMax folder, not only the plug-in file.");
         var file = Windows ? "dotnet.exe" : "dotnet";
         var tried = (folders ?? DotnetFolders(runtimeFolder)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
@@ -57,8 +80,11 @@ internal static class Launcher
                                      "It is free from Microsoft: install \".NET Desktop Runtime 8\" (x64) once, then start CSI ProMax again.");
         return new ProcessStartInfo(dotnet)
         {
-            UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = pluginFolder,
-            Arguments = Quote(assistant) + " --etabs-pid " + pid.ToString(System.Globalization.CultureInfo.InvariantCulture) + " --program " + program.ToLowerInvariant(),
+            UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = appFolder ?? pluginFolder,
+            // A downloaded version is told it is the one to run and where the installed files are, as the installed
+            // copy tells it when it hands over (Program.Start).
+            Arguments = Quote(assistant) + " --etabs-pid " + pid.ToString(System.Globalization.CultureInfo.InvariantCulture) + " --program " + program.ToLowerInvariant() +
+                        (appFolder is null ? "" : " --this-version --installed-in " + Quote(pluginFolder)),
         };
     }
 

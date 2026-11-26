@@ -34,13 +34,14 @@ internal sealed class MainWindow : Window
         Place();
         var layout = new DockPanel();
         var menu = BuildMenu();
-        // The menu, and at its right the Update button: there only while a newer version is out or downloaded.
+        // The menu, and at its right the Update button, always there (Ahmed, 2026-11-26: "I need a button of the updating
+        // the CSI ProMax itself"): "Update to 0.4.50" or "Switch to 0.4.50 now" in bold when there is one, else "Check for
+        // updates", which looks for one and updates when there is.
         var top = new DockPanel { LastChildFill = true };
-        var update = new Button { Visibility = Visibility.Collapsed, Margin = new Thickness(4, 2, 6, 2), Padding = new Thickness(10, 2, 10, 2), FontWeight = FontWeights.SemiBold, Cursor = System.Windows.Input.Cursors.Hand };
+        var update = new Button { Visibility = Visibility.Visible, Margin = new Thickness(4, 2, 6, 2), Padding = new Thickness(10, 2, 10, 2), FontWeight = FontWeights.SemiBold, Cursor = System.Windows.Input.Cursors.Hand };
         System.Windows.Automation.AutomationProperties.SetName(update, "Update CSI ProMax");
         update.Click += (_, _) =>
         {
-            // Downloads when needed (the update window shows it), then this window switches by itself when no work is running.
             CsiProMax.App.CheckForUpdatesInteractive();
             CsiProMax.App.SwitchWhenIdle();
         };
@@ -49,9 +50,12 @@ internal sealed class MainWindow : Window
             string? text;
             try { text = UpdateBadge.TopButton(Update.Updater.Current, Update.Updater.Latest, Update.Updater.Staged ?? (Update.Updater.NewestDownloaded(Update.Updater.Current) is { } f ? Path.GetFileName(f) : null)); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { text = null; }
-            update.Content = text;
-            update.ToolTip = text is null ? null : $"This window runs CSI ProMax {Update.Updater.CurrentText}. Click to move to the newer version now; {Csi.Name} stays open and your model is not touched.";
-            update.Visibility = text is null ? Visibility.Collapsed : Visibility.Visible;
+            update.Content = text ?? "Check for updates";
+            update.FontWeight = text is null ? FontWeights.Normal : FontWeights.SemiBold;
+            update.ToolTip = text is null
+                ? $"This window runs CSI ProMax {Update.Updater.CurrentText}. Click to look for a newer version now: when there is one it is downloaded and this window moves to it; {Csi.Name} stays open and your model is not touched."
+                : $"This window runs CSI ProMax {Update.Updater.CurrentText}. Click to move to the newer version now; {Csi.Name} stays open and your model is not touched.";
+            update.Visibility = Visibility.Visible;
         }
         var watch = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(15) };
         watch.Tick += (_, _) => ShowUpdate();
@@ -62,25 +66,127 @@ internal sealed class MainWindow : Window
         top.Children.Add(menu);
         DockPanel.SetDock(top, Dock.Top);
         layout.Children.Add(top);
-        // With the AI chat off on this PC (AiMode): the Modeler, the 3D view and the review pack by hand, and no chat at all.
-        layout.Children.Add(CsiProMax.AiMode.On ? Chat.ChatPane.Get() : NoAiPane.Build(CsiProMax.App.Reopened));
-        Content = layout;
-        // The Modeler is its 3D view: with the chat on it opens in its own window at the first start too (the no-AI
-        // pane opens it itself), beside this window, which holds the chat. Not again after an update or a switch.
-        if (CsiProMax.AiMode.On && CsiProMax.App.Modeler && !CsiProMax.App.Reopened)
+        // Under the menu, across the whole window: the Update bar, there only while a newer version is out or downloaded
+        // (Ahmed: "at the top very clear so that it is a one click"). One click downloads when needed, then this window
+        // switches by itself when no work is running. The small button above stays for "Check for updates".
+        _updateBar = UpdateBar.Build(() =>
         {
-            var once = false;
-            ContentRendered += (_, _) =>
-            {
-                if (once) return;
-                once = true;
-                try { ModelView.Open(); }
-                catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { /* View > Open the 3D view opens it */ }
-            };
-        }
+            CsiProMax.App.CheckForUpdatesInteractive();
+            CsiProMax.App.SwitchWhenIdle();
+        });
+        DockPanel.SetDock(_updateBar, Dock.Top);
+        layout.Children.Add(_updateBar);
+        // The Modeler is one program window: its model (3D view, plan, Draw/Define/Assign menus) fills it, and the chat,
+        // when it is on, sits on its right and can be closed (Ahmed, 2026-11-26: the Modeler opened as the chat alone).
+        // Beside a CSI program the window is the chat (or, with the chat off, what CSI ProMax does by hand).
+        if (CsiProMax.App.Modeler) layout.Children.Add(ModelerBody());
+        else layout.Children.Add(CsiProMax.AiMode.On ? Chat.ChatPane.Get() : NoAiPane.Build(CsiProMax.App.Reopened));
+        Content = layout;
         SourceInitialized += (_, _) => Handle = new WindowInteropHelper(this).Handle;
         Closing += (_, _) => Remember();
         Closed += (_, _) => { Handle = IntPtr.Zero; _open = null; };
+    }
+
+    private readonly Button _updateBar;
+
+    /// <summary>The Update bar at the top of this window: whether it shows, and its text (the field test reads it).</summary>
+    internal (bool Shown, string Text) UpdateBarState() => UpdateBar.State(_updateBar);
+
+    private WebPane? _view;
+    private ColumnDefinition? _chatColumn, _splitColumn;
+    private FrameworkElement? _chatSide;
+    private MenuItem? _chatToggle;
+
+    /// <summary>True when the Modeler's model view is inside this window.</summary>
+    public bool HasModelView => _view is not null;
+
+    /// <summary>True when the chat is shown beside the Modeler's model (the field test and the menu read it).</summary>
+    public bool ChatShown => _chatSide is { Visibility: Visibility.Visible };
+
+    /// <summary>The chat's width beside the Modeler's model, the first time.</summary>
+    internal const double ModelerChatWidth = 420;
+
+    /// <summary>The Modeler's body: the model view, and the chat on its right (with the chat on).</summary>
+    private FrameworkElement ModelerBody()
+    {
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 300 });
+        FrameworkElement model;
+        try
+        {
+            var server = CsiProMax.Bridge.ChatMcp.Ensure() ?? throw new InvalidOperationException("The model view could not start on this PC (no local port).");
+            if (!WebWindow.Available()) throw new InvalidOperationException("this PC has no WebView2 Runtime");
+            _view = new WebPane(server.ViewUrl, WebPages.Kind.ModelerView);
+            _view.Failed += () => { _view = null; };
+            model = _view;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            // No WebView2 here: the model opens in Edge's app window, and this window says so with a button to open it again.
+            var note = new StackPanel { Margin = new Thickness(24), VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center };
+            note.Children.Add(Brand.Text("The model view could not be drawn inside this window (" + ex.Message + "). It opens in a window of its own instead.", Brand.K.Text, 13));
+            var again = Brand.Button("Open the model view", Brand.Weight.Primary);
+            again.Margin = new Thickness(0, 12, 0, 0);
+            again.HorizontalAlignment = HorizontalAlignment.Left;
+            again.Click += (_, _) => { try { ModelView.Open(); } catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { TaskDialog.Show("CSI ProMax", e.Message); } };
+            note.Children.Add(again);
+            model = note;
+            ContentRendered += (_, _) => { try { ModelView.Open(); } catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { } };
+        }
+        Grid.SetColumn(model, 0);
+        grid.Children.Add(model);
+        if (!CsiProMax.AiMode.On) return grid;
+
+        _splitColumn = new ColumnDefinition { Width = GridLength.Auto };
+        _chatColumn = new ColumnDefinition { Width = new GridLength(ModelerChatWidth), MinWidth = 300 };
+        grid.ColumnDefinitions.Add(_splitColumn);
+        grid.ColumnDefinitions.Add(_chatColumn);
+        var splitter = new GridSplitter { Width = 5, HorizontalAlignment = HorizontalAlignment.Stretch, ResizeBehavior = GridResizeBehavior.PreviousAndNext, Cursor = System.Windows.Input.Cursors.SizeWE };
+        splitter.SetResourceReference(BackgroundProperty, Brand.K.Border);
+        Grid.SetColumn(splitter, 1);
+        grid.Children.Add(splitter);
+
+        var side = new DockPanel();
+        var bar = new DockPanel { Margin = new Thickness(8, 4, 4, 4) };
+        var close = Brand.Button("\u2715", Brand.Weight.Secondary);
+        close.Padding = new Thickness(8, 1, 8, 1);
+        close.ToolTip = "Close the chat (View > Show the chat brings it back)";
+        System.Windows.Automation.AutomationProperties.SetName(close, "Close the chat");
+        close.Click += (_, _) => ShowChat(false);
+        DockPanel.SetDock(close, Dock.Right);
+        bar.Children.Add(close);
+        bar.Children.Add(Brand.Text("Chat", Brand.K.Text, 12.5, bold: true));
+        DockPanel.SetDock(bar, Dock.Top);
+        side.Children.Add(bar);
+        side.Children.Add(Chat.ChatPane.Get());
+        Grid.SetColumn(side, 2);
+        grid.Children.Add(side);
+        _chatSide = side;
+        splitter.Tag = side;
+        // Kept as the user left it.
+        if (File.Exists(ChatClosedFile)) ShowChat(false, remember: false);
+        return grid;
+    }
+
+    private static string ChatClosedFile => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CsiProMax", "modeler-chat-closed.txt");
+
+    /// <summary>Shows or closes the chat beside the Modeler's model; the model takes the room.</summary>
+    internal void ShowChat(bool show, bool remember = true)
+    {
+        if (_chatSide is null || _chatColumn is null || _splitColumn is null) return;
+        _chatSide.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        if (_chatSide.Parent is Grid grid)
+            foreach (var child in grid.Children.OfType<GridSplitter>()) child.Visibility = _chatSide.Visibility;
+        _chatColumn.MinWidth = show ? 300 : 0;
+        _chatColumn.Width = show ? new GridLength(ModelerChatWidth) : new GridLength(0);
+        if (_chatToggle is not null) _chatToggle.IsChecked = show;
+        if (!remember) return;
+        try
+        {
+            if (show) File.Delete(ChatClosedFile);
+            else { Directory.CreateDirectory(Path.GetDirectoryName(ChatClosedFile)!); File.WriteAllText(ChatClosedFile, "closed"); }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
 
     /// <summary>
@@ -137,7 +243,14 @@ internal sealed class MainWindow : Window
         }
 
         var view = Top("_View");
-        Add(view, "Open the _3D view", ModelView.Open);
+        if (CsiProMax.App.Modeler && CsiProMax.AiMode.On)
+        {
+            _chatToggle = new MenuItem { Header = "Show the _chat", IsCheckable = true, IsChecked = true };
+            _chatToggle.Click += (_, _) => ShowChat(_chatToggle.IsChecked);
+            view.Items.Add(_chatToggle);
+        }
+        if (CsiProMax.App.Modeler) Add(view, "_Reload the model view", () => { if (_view is { } pane) pane.Reload(); else ModelView.Open(); });
+        else Add(view, "Open the _3D view", ModelView.Open);
         Add(view, "Open the _Viewer (a pack someone sent)", () => WebPages.Open(Shortcuts.WriteViewerPage(), WebPages.Kind.Viewer));
         if (CsiProMax.App.Modeler)
             Add(view, "Open the _models folder", () =>
@@ -162,6 +275,9 @@ internal sealed class MainWindow : Window
         help.Items.Add(new Separator());
         Add(help, "_Field test: everything (saves a report to send)…", () => RunFieldTest(full: true));
         Add(help, "Field test: only what is _new, changed or failed…", () => RunFieldTest(full: true, retest: true));
+        // One program alone (Ahmed, 2026-11-26: "an option to just test sap etabs safe one by one").
+        foreach (var program in CsiProMax.Assistant.FieldTest.Installed(CsiProMax.App.Etabs?.Link.Program ?? CsiProMax.Assistant.Etabs.CsiProgram.Etabs))
+            Add(help, $"Field test: {program.Name} only…", () => RunFieldTest(full: true, only: program));
         Add(help, "Field test, _quick: this PC and the open model", () => RunFieldTest(full: false));
         return menu;
     }
@@ -246,7 +362,7 @@ internal sealed class MainWindow : Window
     /// Modeler builds, then in a second window of each CSI program on this PC that it opens on its own scratch model and
     /// closes again without saving. The open model is only read. It runs in the background; a message says when it is done.
     /// </summary>
-    private async void RunFieldTest(bool full, bool retest = false)
+    private async void RunFieldTest(bool full, bool retest = false, CsiProMax.Assistant.Etabs.CsiProgram? only = null)
     {
         if (CsiProMax.App.Etabs is not { } etabs) return;
         if (CsiProMax.Assistant.SelfTest.IsRunning || CsiProMax.Assistant.FieldTest.IsRunning)
@@ -257,19 +373,20 @@ internal sealed class MainWindow : Window
         }
         if (full)
         {
-            var programs = CsiProMax.Assistant.FieldTest.Installed(etabs.Link.Program);
+            var programs = only is { } one ? [one] : CsiProMax.Assistant.FieldTest.Installed(etabs.Link.Program);
             var which = programs.Count == 0
                 ? "No ETABS, SAP2000 or SAFE was found on this PC, so the tools inside the programs will be listed as not tested." // ETABS itself
                 : $"Then it opens a second window of {string.Join(", ", programs.Select(p => p.Name))} on that test model, runs every tool and check there " +
                   "(the analysis and design too), and closes each window again without saving. Each window takes a licence as usual.";
             if (TaskDialog.Show("CSI ProMax",
                     (retest ? "This field test runs only what is new, changed or failed: a program's part, or CSI ProMax's own features, is left out when all of it passed on this PC and its code is unchanged since. The report names what was left out. Otherwise it is the full test.\n\n" : "") +
-                    "The full field test checks everything CSI ProMax does. It checks this PC and the install, reads your open model, and builds a test model of its own with every Modeler tool. " +
+                    (only is { } alone ? $"This field test checks {alone.Name} alone: this PC and the install, your open model (reading only), builds the test model with the Modeler, then opens {alone.Name} on it. The other programs are left out. "
+                        : "The full field test checks everything CSI ProMax does. It checks this PC and the install, reads your open model, and builds a test model of its own with every Modeler tool. ") +
                     which + "\n\nYour open model is only read: nothing in it is changed. It can take up to an hour. While it runs, leave the windows it opens alone, " +
                     "and wait for it before you use the chat. A message says when the report is ready.\n\nStart it now?",
                     TaskDialogCommonButtons.Yes | TaskDialogCommonButtons.No, TaskDialogResult.No) != TaskDialogResult.Yes) return;
             // It says on the screen when it is done, the same way whether the menu or the chat started it.
-            try { CsiProMax.Tools.FieldTestRuns.StartFull(etabs.Link, "the Help menu", retest); }
+            try { CsiProMax.Tools.FieldTestRuns.StartFull(etabs.Link, "the Help menu", retest, only); }
             catch (InvalidOperationException ex) { TaskDialog.Show("CSI ProMax", ex.Message); }
             return;
         }
@@ -284,7 +401,7 @@ internal sealed class MainWindow : Window
     /// <summary>Brings the window forward (ETABS's menu was used again while it is open).</summary>
     public void Surface()
     {
-        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        if (WindowState == WindowState.Minimized) WindowState = CsiProMax.App.Modeler ? WindowState.Maximized : WindowState.Normal;
         Activate();
         Topmost = true;
         Topmost = false;
@@ -294,6 +411,17 @@ internal sealed class MainWindow : Window
     private void Place()
     {
         var area = SystemParameters.WorkArea;
+        // The Modeler is a program: it opens full screen, every time (its window is not the narrow chat column).
+        if (CsiProMax.App.Modeler)
+        {
+            WindowStartupLocation = WindowStartupLocation.Manual;
+            Width = Math.Min(1400, area.Width * 0.9);
+            Height = Math.Min(900, area.Height * 0.9);
+            Left = area.Left + (area.Width - Width) / 2;
+            Top = area.Top + (area.Height - Height) / 2;
+            WindowState = WindowState.Maximized;
+            return;
+        }
         try
         {
             if (File.Exists(PlaceFile))
@@ -326,6 +454,7 @@ internal sealed class MainWindow : Window
 
     private void Remember()
     {
+        if (CsiProMax.App.Modeler) return; // the Modeler always opens full screen; window.txt is the chat column beside a program
         try
         {
             var b = WindowState == WindowState.Normal ? new Rect(Left, Top, Width, Height) : RestoreBounds;

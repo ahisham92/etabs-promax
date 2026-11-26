@@ -168,6 +168,7 @@ public static class Program
             app.DispatcherUnhandledException += (_, e) => Note("window", e.Exception);
             // The 3D view and the Viewer open in CSI ProMax windows of their own, not in the browser.
             CsiProMax.Host.WebWindow.Install();
+            CsiProMax.Host.WebWindow.UpdateClick = () => { CsiProMax.App.CheckForUpdatesInteractive(); CsiProMax.App.SwitchWhenIdle(); };
             AppDomain.CurrentDomain.UnhandledException += (_, e) => Note("unhandled", e.ExceptionObject as Exception);
             CsiProMax.App.Start(link, etabsPid, demo);
             var window = new CsiProMax.Host.MainWindow();
@@ -175,7 +176,7 @@ public static class Program
             // the window comes up normal and in front.
             window.ContentRendered += (_, _) =>
             {
-                if (window.WindowState == System.Windows.WindowState.Minimized) window.WindowState = System.Windows.WindowState.Normal;
+                if (window.WindowState == System.Windows.WindowState.Minimized) window.WindowState = CsiProMax.App.Modeler ? System.Windows.WindowState.Maximized : System.Windows.WindowState.Normal;
                 window.Activate();
             };
             app.MainWindow = window;
@@ -288,7 +289,31 @@ public static class Program
         var app = new System.Windows.Application { ShutdownMode = System.Windows.ShutdownMode.OnLastWindowClose };
         app.DispatcherUnhandledException += (_, e) => Note("viewer window", e.Exception);
         CsiProMax.Host.WebWindow.Install();
+        // The Viewer on its own has the Update bar too: one click downloads the newer version and opens the same file
+        // in it, in place of this window.
+        if (!args.Contains("--no-update"))
+            CsiProMax.Host.WebWindow.UpdateClick = () => _ = Task.Run(async () =>
+            {
+                try { await Updater.CheckAsync(force: true).ConfigureAwait(false); }
+                catch (Exception ex) { Note("viewer update", ex); }
+                if (Updater.NewestDownloaded(Updater.Current) is not { } folder || Environment.ProcessPath is not { } exe) return;
+                _ = app.Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    try
+                    {
+                        var next = Start(exe, folder, args, Environment.ProcessId);
+                        next.CreateNoWindow = true;
+                        Process.Start(next)?.Dispose();
+                        app.Shutdown();
+                    }
+                    catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or InvalidOperationException) { Note("viewer: switch to the newer version", ex); }
+                }));
+            });
         app.Startup += (_, _) => app.MainWindow = CsiProMax.Host.WebWindow.ShowHere(address, CsiProMax.Host.WebPages.Kind.Viewer);
+        // The Viewer on its own looks for updates too, so a PC where only the Viewer is used does not stay behind:
+        // a newer version is downloaded while it is open and is the one that opens next time (Program picks the newest).
+        if (!args.Contains("--no-update"))
+            _ = Task.Run(async () => { try { await Updater.CheckAsync(force: false).ConfigureAwait(false); } catch (Exception ex) { Note("viewer update check", ex); } });
         app.Run();
         return 0;
     }

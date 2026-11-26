@@ -35,6 +35,9 @@ public static class Updater
     private static string McpFolder => Path.Combine(LocalRoot, "mcp");
     private static string StateFile => Path.Combine(LocalRoot, "update-state.json");
 
+    /// <summary>Where a check that could not run says why (the window's activity log), so it can be read on the PC afterwards.</summary>
+    public static Action<string>? Said { get; set; }
+
     public static Version Current { get; } = Normalize(typeof(Updater).Assembly.GetName().Version);
 
     public static string CurrentText => $"{Current.Major}.{Current.Minor}.{Current.Build}";
@@ -137,6 +140,7 @@ public static class Updater
             _runningProgress = null;
             Interlocked.Exchange(ref _running, 0);
             progress.Report(UpdateStage.Failed, $"Another open {Csi.Name} is updating right now. This one follows it by itself when it is done.");
+            Said?.Invoke($"The check for updates did not run: update.lock is held by another CSI ProMax ({ex.Message}).");
             return null;
         }
 
@@ -203,6 +207,22 @@ public static class Updater
             SaveState(state);
             progress.Report(UpdateStage.Failed, $"The update didn't finish: {state.LastError}. Nothing changed. " +
                                                 "Try again (or the next automatic check) continues from where it stopped.");
+            return null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Anything else: never silent. On one PC a window ran for an hour with no check written and no error to
+            // read (2026-11-26); whatever stops a check is now kept and said, and the next round tries again.
+            try
+            {
+                var state = LoadState();
+                state.LastCheck = DateTime.UtcNow;
+                state.LastError = $"{ex.GetType().Name}: {ex.Message}";
+                SaveState(state);
+            }
+            catch (Exception) { /* the note below still says it */ }
+            Said?.Invoke($"The check for updates failed ({ex.GetType().Name}: {ex.Message}).");
+            progress.Report(UpdateStage.Failed, $"The update didn't finish: {ex.Message}. Nothing changed; the next automatic check tries again.");
             return null;
         }
         finally

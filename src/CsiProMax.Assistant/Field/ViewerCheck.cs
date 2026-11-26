@@ -131,7 +131,10 @@ public static class ViewerCheck
             const d = document.querySelector(".dlg");
             if (d) { const go = d.querySelector('[data-b="0"]'); if (go) go.click(); await wait(300); }
             const share = drawn();
-            return share > 0.002 ? {ok: `drawn (${(share * 100).toFixed(1)}%)`} : {fail: `nothing is drawn after it (${share})`};
+            // A display the Viewer can judge (loads, shell contours) must show some of its results, not only the model.
+            const shows = typeof resultShown === "function" ? resultShown() : null;
+            if (shows === "") return {fail: "the model is drawn, but none of this display's results are on it"};
+            return share > 0.002 ? {ok: `drawn (${(share * 100).toFixed(1)}%)` + (shows ? ": " + shows : "")} : {fail: `nothing is drawn after it (${share})`};
           });
           try { closeDialogs(); const m = document.querySelector('[data-act="r:model"]'); if (m && !m.disabled) m.click(); const p = document.querySelector('[data-act="plot"].on'); if (p) p.click(); await wait(60); } catch (e) { }
         }
@@ -285,6 +288,16 @@ public static class ViewerCheck
             return new { checked_items = seen.Items.Count, pictures = seen.Pictures.Select(Path.GetFileName).ToArray() };
         }) is not null;
         if (!ran || seen is null) return;
+        // Display > Load Assigns draws what the pack holds: every load table the model has rows in must be there.
+        ctx.Step($"the {program} model's pack holds its load assignments, for Display > Load Assigns", () =>
+        {
+            var have = link.Tables().Where(t => !t.Empty && PackTables.IsLoadTable(t.Name)).ToList();
+            if (have.Count == 0) throw new FieldSkipException($"the scratch {program} model has no load assignment tables with rows (its tables: {string.Join(", ", link.Tables().Where(t => !t.Empty && ResultTools.Norm(t.Name).Contains("load", StringComparison.Ordinal)).Select(t => t.Name).Take(20))})");
+            var packed = content!["tables"]!.AsObject();
+            var missing = have.Where(t => !packed.ContainsKey(t.Name)).Select(t => $"{t.Name} (taken as {PackTables.Kind(t) ?? "nothing"}{((content["manifest"]?["left_out_tables"] as JsonArray)?.Any(x => (string?)x == t.Name) == true ? ", left out for size" : "")})").ToList();
+            FieldContext.Expect(missing.Count == 0, "the pack has no " + string.Join("; ", missing));
+            return string.Join(", ", have.Select(t => t.Name));
+        });
         foreach (var item in seen.Items)
         {
             var name = "Viewer, " + item.Name;

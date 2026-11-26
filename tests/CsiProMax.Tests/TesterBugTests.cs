@@ -451,7 +451,18 @@ static class TesterBugTests
             Equal<string?>("Switch to 0.4.7 now", CsiProMax.UI.UpdateBadge.TopButton(now, "0.4.7", "0.4.7"), "a newer release that is downloaded");
             Equal<string?>("Update to 0.4.8", CsiProMax.UI.UpdateBadge.TopButton(now, "0.4.8", "0.4.7"), "a release newer than the download");
             var window = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Panel/Host/MainWindow.cs"));
-            Check(window.Contains("UpdateBadge.TopButton(") && window.Contains("CsiProMax.App.SwitchWhenIdle();"), "the window has no update button that installs and switches");
+            Check(window.Contains("UpdateBar.Build(") && window.Contains("CsiProMax.App.SwitchWhenIdle();"), "the window has no update button that installs and switches");
+            // Ahmed, 2026-11-26: "I need the button of update in the chat at the top very clear so that it is a one click".
+            Equal<string?>(null, CsiProMax.UI.UpdateBar.Text(now, "0.4.6", "0.4.6"), "no bar on the newest version");
+            Equal<string?>("Update to 0.4.7 now  (one click, nothing is closed)", CsiProMax.UI.UpdateBar.Text(now, "0.4.7", null), "the bar for a release");
+            Equal<string?>("Switch to 0.4.7 now  (one click, nothing is closed)", CsiProMax.UI.UpdateBar.Text(now, "0.4.7", "0.4.7"), "the bar for a download");
+            Check(window.Contains("DockPanel.SetDock(_updateBar, Dock.Top);"), "the Update bar is not across the top of the window");
+            var bar = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Panel/UI/UpdateBar.cs"));
+            Check(bar.Contains("HorizontalAlignment = HorizontalAlignment.Stretch") && bar.Contains("Background = Accent"), "the Update bar is not a wide bar in the accent colour");
+            var pages = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Panel/Host/WebWindow.cs"));
+            var program = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Program.cs"));
+            Check(pages.Contains("UpdateBar.Build(click)") && program.Split("WebWindow.UpdateClick =").Length == 3, "the Viewer's and the 3D view's windows have no Update bar (in a CSI program's window process and in the Viewer on its own)");
+            Check(File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/PcFieldSteps.cs")).Contains("the Update bar at the top of the window"), "the field test does not check the Update bar");
         });
 
         // ---- Ahmed: "no need to download everything let it be just the updated things only" ----
@@ -736,6 +747,42 @@ static class TesterBugTests
                 && log.IndexOf("ImportErrors(", StringComparison.Ordinal) < log.IndexOf("PostMessageW(done", StringComparison.Ordinal) && !notices.Contains("0x0010", StringComparison.Ordinal), "the log is answered by its Done button after its errors are read, and never closed");
             static bool SandboxedLeftCopy() => ScratchProgram.IsLeftCopy(["SAP2000 - cpm-field-test-ab12cd", "Access Database Import Log"]);
         });
+        yield return ("field test: it shows its progress live, with step X of about N, passed / failed / not tested and the time (Ahmed, 2026-11-26)", () =>
+        {
+            // The counts come from the outcome lines as they are recorded.
+            var run = new CsiProMax.Assistant.FieldTest.Running(true, "a test");
+            run.Counted("ok          [SAP2000 on a scratch model] tool run_analysis");
+            run.Counted("FAIL        [SAP2000 on a scratch model] tool set_lateral_load, seismic KDS: why");
+            run.Counted("not tested  [CSI ProMax's own features] export_pack: why");
+            Check(run.Ok == 1 && run.Failed == 1 && run.NotTested == 1 && run.Done == 3 && run.Part == "CSI ProMax's own features", $"counted {run.Ok}/{run.Failed}/{run.NotTested}, part '{run.Part}'");
+            // How many steps to expect: the last run of the same kind on this PC.
+            var file = Path.Combine(Path.GetTempPath(), "cpm-steps-" + Guid.NewGuid().ToString("N") + ".txt");
+            try
+            {
+                Check(CsiProMax.Assistant.FieldTest.ExpectedSteps(true, false, file) == 0, "a first run has no estimate");
+                CsiProMax.Assistant.FieldTest.SaveExpected(true, false, 915, file);
+                CsiProMax.Assistant.FieldTest.SaveExpected(true, true, 400, file);
+                CsiProMax.Assistant.FieldTest.SaveExpected(true, false, 920, file);
+                Check(CsiProMax.Assistant.FieldTest.ExpectedSteps(true, false, file) == 920 && CsiProMax.Assistant.FieldTest.ExpectedSteps(true, true, file) == 400, "the last count of each kind is kept");
+                // One program alone keeps its own count.
+                CsiProMax.Assistant.FieldTest.SaveExpected(true, false, 310, file, CsiProMax.Assistant.Etabs.CsiProgram.Sap2000);
+                Check(CsiProMax.Assistant.FieldTest.ExpectedSteps(true, false, file, CsiProMax.Assistant.Etabs.CsiProgram.Sap2000) == 310 && CsiProMax.Assistant.FieldTest.ExpectedSteps(true, false, file) == 920, "one program alone has its own estimate");
+            }
+            finally { try { File.Delete(file); } catch (IOException) { } }
+            // The window's lines.
+            var p = CsiProMax.Assistant.FieldTest.ProgressLines.Of("SAP2000 on a scratch model", "tool run_analysis", 460, 920, 450, 6, 4, TimeSpan.FromSeconds(754), false);
+            Check(p.Count == "Step 460 of about 920" && p.Percent == 50 && p.Tally == "Passed 450   Failed 6   Not tested 4" && p.Time == "Running for 12:34" && p.Step == "Now: tool run_analysis", "the lines: " + p);
+            Check(CsiProMax.Assistant.FieldTest.ProgressLines.Of("x", "y", 2000, 920, 0, 0, 0, TimeSpan.Zero, false).Percent == 99, "never 100% before it is done");
+            Check(CsiProMax.Assistant.FieldTest.ProgressLines.Of("", "starting", 3, 0, 3, 0, 0, TimeSpan.Zero, false) is { Percent: null, Part: "Starting" } first && first.Count.Contains("first run", StringComparison.Ordinal), "a first run shows a moving bar");
+            // Started from the Help menu or the chat, it opens.
+            Check(File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Panel/Tools/SelfTestTools.cs")).Contains("FieldProgressWindow.Show(run)", StringComparison.Ordinal), "the full field test does not show its progress window");
+            // One program at a time, from the Help menu and the chat; the chat's status answers from the live counts.
+            var tools = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Panel/Tools/SelfTestTools.cs"));
+            var menu = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Panel/Host/MainWindow.cs"));
+            Check(tools.Contains("OnlyProgram = only", StringComparison.Ordinal) && tools.Contains("\"program\"", StringComparison.Ordinal), "the chat cannot test one program alone");
+            Check(menu.Contains("Field test: {program.Name} only", StringComparison.Ordinal), "the Help menu has no one-program field test");
+            Check(tools.Contains("live_file = run.LiveFile", StringComparison.Ordinal) && tools.Contains("passed = run.Ok", StringComparison.Ordinal), "the chat's status does not give the live counts");
+        });
         yield return ("field test: a file error says where it came from, and the team library's file calls try again for a moment (0.4.40: 'Access to the path is denied.')", () =>
         {
             // Seen on Ahmed's PC on 2026-11-26: the team library's check failed with only "Access to the path is denied."
@@ -866,11 +913,49 @@ static class TesterBugTests
                 Check(CsiProMax.Tools.OutputPaths.AlwaysAskReason("edit_table", Args($$"""{"table":"Load Pattern Definitions","action":"{{action}}"}""")) is null, $"reading a table ({action}) asks about a save it does not make");
             Check(ProgramTools.Chat(CsiProgram.Etabs).First(x => x.Name == "edit_table").Description.Contains("always asked before that save", StringComparison.Ordinal), "edit_table's description does not say the engineer is asked");
         });
+        yield return ("set_lateral_load in SAP2000 asks before it saves the model, each time, for a code its API has no call for (PR 137 review)", () =>
+        {
+            Dictionary<string, System.Text.Json.JsonElement> Args(string json) => System.Text.Json.JsonDocument.Parse(json).RootElement.EnumerateObject().ToDictionary(x => x.Name, x => x.Value.Clone());
+            var was = CsiProMax.Csi.Program;
+            try
+            {
+                CsiProMax.Csi.Program = CsiProgram.Sap2000;
+                foreach (var json in new[] { """{"name":"EQ","kind":"seismic","code":"ASCE 7-22"}""", """{"name":"EQ","code":"KDS 41 17 00-2019"}""", """{"name":"W","kind":"wind","code":"AASHTO 2020"}""" })
+                    foreach (var level in Enum.GetValues<CsiProMax.Tools.ApprovalLevel>())
+                    {
+                        var asked = CsiProMax.Tools.ApprovalPolicy.Decide("set_lateral_load", true, false, Args(json), true, new CsiProMax.Tools.ApprovalFacts(),
+                            level, new List<string> { "set_lateral_load" }, true, _ => CsiProMax.Tools.PathState.Missing, []);
+                        Check(asked.Ask && !asked.CanSilence, $"{json} at {level} is not asked, or can be silenced");
+                        Check(asked.Reason.Contains("saves the model", StringComparison.Ordinal) && asked.Reason.Contains("If you say no", StringComparison.Ordinal), "the question does not say what is saved: " + asked.Reason);
+                    }
+                // The direct Set calls and None save nothing: not asked about for a save.
+                foreach (var json in new[] { """{"name":"EQ","code":"IBC2006"}""", """{"name":"EQ","code":"None"}""", """{"name":"W","kind":"wind","code":"ASCE 7-16"}""" })
+                    Check(!CsiProMax.Tools.OutputPaths.SavesBeforeLateral("set_lateral_load", Args(json)), $"{json} is asked about a save it does not make");
+                CsiProMax.Csi.Program = CsiProgram.Etabs;
+                Check(!CsiProMax.Tools.OutputPaths.SavesBeforeLateral("set_lateral_load", Args("""{"name":"EQ","code":"ASCE 7-22"}""")), "ETABS is asked about SAP2000's save");
+            }
+            finally { CsiProMax.Csi.Program = was; }
+        });
         yield return ("0.4.33 run: the pack takes SAP2000's own names for springs, hinges, functions, cases and section cuts (13 Viewer items were greyed out)", () =>
         {
             foreach (var table in new[] { "Joint Spring Assignments 1 - Uncoupled", "Frame Hinge Assigns 04 - Auto FEMA 356 - Concrete Beam", "Function - Response Spectrum - User", "Function - Time History - User",
                          "Case - Modal History 1 - General", "Case - Static 2 - Nonlinear Load Application", "Section Cuts 1 - General", "Section Cut Definitions", "Joint Assignments - Springs" })
                 Check(CsiProMax.Assistant.Tools.PackTables.Kind(new CsiProMax.Assistant.Etabs.TableName(table, table, false, 1)) == "input", $"'{table}' is not taken by the pack as an input");
+            // 2026-11-26 (Ahmed: "exactly the same way"): the analysis mesh, for shell contours on the program's elements,
+            // whatever the program says about importing it.
+            foreach (var table in new[] { "Objects and Elements - Joints", "Objects and Elements - Shells", "Objects And Elements - Joints", "Objects And Elements - Areas" })
+                foreach (var import in new[] { -1, 0, 1 })
+                    Check(CsiProMax.Assistant.Tools.PackTables.Kind(new CsiProMax.Assistant.Etabs.TableName(table, table, false, import)) == "result", $"'{table}' (import {import}) is not taken by the pack for the mesh");
+            // 0.4.49 SAP2000 run: Load Assigns greyed out. Every program's load tables are inputs the pack takes, with a
+            // total of their own so that the results cannot crowd them out.
+            foreach (var table in new[] { "Frame Loads - Distributed", "Frame Loads - Point", "Frame Loads - Temperature", "Area Loads - Uniform", "Area Loads - Temperature", "Joint Loads - Force", "Shell Loads - Uniform", "Shell Loads - Temperature" })
+            {
+                Check(CsiProMax.Assistant.Tools.PackTables.IsLoadTable(table), $"'{table}' is not seen as a load table");
+                Check(CsiProMax.Assistant.Tools.PackTables.Kind(new CsiProMax.Assistant.Etabs.TableName(table, table, false, 1)) == "input", $"'{table}' is not taken by the pack as an input");
+            }
+            Check(!CsiProMax.Assistant.Tools.PackTables.IsLoadTable("Load Pattern Definitions") && !CsiProMax.Assistant.Tools.PackTables.IsLoadTable("Joint Displacements"), "a table that is not a load assignment is seen as one");
+            Check(CsiProMax.Assistant.Tools.PackTables.InputMostRows > 0, "the inputs have no total of their own");
+            Check(CsiProMax.Assistant.Tools.PackTables.Kind(new CsiProMax.Assistant.Etabs.TableName("Objects and Elements - Frames", "Objects and Elements - Frames", false, 1)) is null, "the frame mesh is taken, which the Viewer does not use");
             foreach (var table in new[] { "Section Cut Forces - Analysis", "Element Forces - Links", "Element Deformations - Links" })
                 Check(CsiProMax.Assistant.Tools.PackTables.Kind(new CsiProMax.Assistant.Etabs.TableName(table, table, false, 0)) == "result", $"'{table}' is not taken by the pack as a result");
             // The scratch model's extras are one honest line on a stand-in, and every name they use is fixed.
@@ -884,6 +969,32 @@ static class TesterBugTests
                 Check(text.Contains("ScratchExtras.Check(ctx)"), $"{steps} must check the extras' tables after the analysis");
             }
         });
+        yield return ("0.4.45 Modeler open for an hour with no update check written: a check that fails or cannot run always leaves a line to read", () =>
+        {
+            var updater = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Panel/Update/Updater.cs"));
+            var check = updater[updater.IndexOf("public static async Task<string?> CheckAsync", StringComparison.Ordinal)..updater.IndexOf("private static void Apply(", StringComparison.Ordinal)];
+            Check(check.Contains("catch (Exception ex) when (ex is not OperationCanceledException)", StringComparison.Ordinal), "CheckAsync keeps whatever stops a check, not only the failures it expects");
+            Check(check.Split("Said?.Invoke(").Length >= 3, "a held update.lock and an unexpected failure are both said");
+            var app = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Panel/Host/App.cs"));
+            var loop = app[app.IndexOf("internal static async Task UpdateLoopAsync", StringComparison.Ordinal)..app.IndexOf("internal static void CheckForUpdatesInteractive", StringComparison.Ordinal)];
+            Check(loop.Contains("Updater.Said ??=", StringComparison.Ordinal) && loop.Split("ActivityLog.Note(\"update_check\"").Length >= 4, "the loop says in the activity log that it started, and what failed");
+            Check(!loop.Contains("catch (Exception) { first = false;", StringComparison.Ordinal), "a failed round is not swallowed without a line");
+        });
+
+        yield return ("0.4.46 retest: steps left out because the program's window went away are tried again, not carried over as not tested", () =>
+        {
+            var cut = new FieldRetest.Part("0.4.46", "abc", 40, 0, [("set_lateral_load in SAP2000", "the program's window stopped answering at the step 'run_analysis' (The RPC server is unavailable), so this step was not run"), ("SAFE on this PC", "SAFE was not found on this PC")]);
+            var (run, why) = FieldRetest.Decide(cut, "abc");
+            Check(run && why.Contains("1 step of it was not run in version 0.4.46 because the program's window stopped answering", StringComparison.Ordinal), "the part is run again: " + why);
+            var own = new FieldRetest.Part("0.4.46", "abc", 40, 0, [("CSI ProMax's own features on the scratch SAP2000 window", "that window no longer answers (gone), so they were not run")]);
+            Check(FieldRetest.Decide(own, "abc").Run, "also when the window was gone before the part began");
+            var settled = new FieldRetest.Part("0.4.46", "abc", 40, 0, [("SAFE on this PC", "SAFE was not found on this PC")]);
+            Check(!FieldRetest.Decide(settled, "abc").Run, "a step that cannot be tested on this PC does not make the part run again");
+            var context = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/FieldContext.cs"));
+            var test = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/FieldTest.cs"));
+            Check(context.Contains("window stopped answering at the step", StringComparison.Ordinal) && test.Contains("that window no longer answers", StringComparison.Ordinal), "the words the rule looks for are the ones the test writes");
+        });
+
         yield return ("ETABS 23 field test: a test copy an earlier run left open is closed by the next run, and nothing else is", () =>
         {
             // Seen on 2026-11-25: the 0.4.10 run gave up on ETABS with the story picker showing; the 0.4.14 run then failed
