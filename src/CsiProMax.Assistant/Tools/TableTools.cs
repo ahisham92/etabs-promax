@@ -167,8 +167,8 @@ public static class TableTools
         var m = offline.Model;
         var sap = a.Text("format").Equals("sap2000", StringComparison.OrdinalIgnoreCase);
         var picked = a.TryGetProperty("tables", out var t) && t.ValueKind == JsonValueKind.Array ? t.EnumerateArray().Select(x => x.GetString() ?? "").Where(x => x.Length > 0).ToList() : [];
-        var unknown = sap ? [] : picked.Where(p => !ModelTables.Names.Contains(p, StringComparer.OrdinalIgnoreCase)).ToList();
-        if (unknown.Count > 0) throw new ToolInputException($"There is no table named {string.Join(", ", unknown.Select(u => "'" + u + "'"))}. Tables: {string.Join(", ", ModelTables.Names)}.");
+        var unknown = sap ? [] : picked.Where(p => !ModelTables.Names.Contains(p, StringComparer.OrdinalIgnoreCase) && ExtraTables.Known(p) is null).ToList();
+        if (unknown.Count > 0) throw new ToolInputException($"There is no table named {string.Join(", ", unknown.Select(u => "'" + u + "'"))}. Tables: {string.Join(", ", ModelTables.Names)}, and the program's own tables the model has rows of (a material's other data, assignments and definitions).");
         var tables = sap ? SapTables(m) : ModelTables.Export(m, picked);
         if (sap && picked.Count > 0) tables = tables.Where(x => picked.Contains(x.Name, StringComparer.OrdinalIgnoreCase)).ToList();
         if (tables.Count == 0) throw new ToolInputException("No table was picked.");

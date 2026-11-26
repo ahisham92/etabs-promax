@@ -110,5 +110,31 @@ static class DefineTablesTests
             Check(safe["assign_tables"]!.AsObject().Count == 0 && Run(link, "definition_data", new { })["tables"]!.AsObject().Count == 0, "SAFE: no ETABS table rows");
             Check(!Names(safe["modeling_types"]!).Contains("Layered") && !Names(safe["material_types"]!).Contains("Aluminum"), "SAFE: no layered shells or aluminum");
         });
+        yield return ("excel: a material's other data, the assignment rows and the definition rows go out to Excel and back with nothing lost; a row for a missing object is refused", () =>
+        {
+            var link = Frame();
+            var m = link.Model;
+            var beam = m.LineAssigns.First(a => m.Line(a.Label)!.Kind == LineKind.Beam);
+            AssignTables.Set(beam, new Dictionary<string, List<Dictionary<string, string>>> { ["Frame Assignments - Output Stations"] = [new() { ["StationOpt"] = "Min Stations", ["MinStations"] = "5" }] });
+            ProgramTables.SetMaterialTables(m.Materials.First(x => x.IsConcrete), new Dictionary<string, List<Dictionary<string, string>>> { ["Damping Parameters"] = [new() { ["ModalRatio"] = "0.05" }] });
+            DefineTables.Set(m, "Hinge Definitions - Moment M3", "H1", [new() { ["IsSymmetric"] = "Yes" }, new() { ["IsSymmetric"] = "No" }]);
+            var path = Path.Combine(Path.GetTempPath(), "cpm-extra-" + Guid.NewGuid().ToString("N") + ".xlsx");
+            try
+            {
+                TableTools.Write(path, CsiProMax.CsiTables.ModelTables.Export(m));
+                var tables = TableTools.Read(path);
+                Check(tables.Any(t => t.Name == "Frame Assignments - Output Stations") && tables.Any(t => t.Name == "Material Properties - Damping Parameters") && tables.Any(t => t.Name == "Hinge Definitions - Moment M3"), "the three tables are in the workbook: " + string.Join(", ", tables.Select(t => t.Name)));
+                var copy = ModelFile.FromJson(ModelFile.ToJson(m));
+                copy.LineAssigns.ForEach(a => a.Tables = null); copy.Materials.ForEach(x => x.Tables = null); copy.DefinitionTables = null;
+                var r = CsiProMax.CsiTables.ModelTables.Import(copy, tables);
+                string Extras(StructuralModel x) => JsonSerializer.Serialize(new { a = x.LineAssigns.Select(y => y.Tables), mt = x.Materials.Select(y => y.Tables), d = x.DefinitionTables });
+                Check(Extras(copy) == Extras(m), "the rows came back the same: " + Extras(copy) + " | " + string.Join("; ", r.Notes));
+                var bad = tables.Single(t => t.Name == "Frame Assignments - Output Stations");
+                bad.Rows[0][1] = "NOPE";
+                try { CsiProMax.CsiTables.ModelTables.Import(ModelFile.FromJson(ModelFile.ToJson(m)), tables); throw new Exception("a row for a missing frame was taken"); }
+                catch (ArgumentException ex) { Check(ex.Message.Contains("there is no frame NOPE"), ex.Message); }
+            }
+            finally { File.Delete(path); }
+        });
     }
 }
