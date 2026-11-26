@@ -175,7 +175,7 @@ public static class Program
             // the window comes up normal and in front.
             window.ContentRendered += (_, _) =>
             {
-                if (window.WindowState == System.Windows.WindowState.Minimized) window.WindowState = System.Windows.WindowState.Normal;
+                if (window.WindowState == System.Windows.WindowState.Minimized) window.WindowState = CsiProMax.App.Modeler ? System.Windows.WindowState.Maximized : System.Windows.WindowState.Normal;
                 window.Activate();
             };
             app.MainWindow = window;

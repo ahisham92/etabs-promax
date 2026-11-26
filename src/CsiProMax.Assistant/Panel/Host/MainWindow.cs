@@ -62,25 +62,112 @@ internal sealed class MainWindow : Window
         top.Children.Add(menu);
         DockPanel.SetDock(top, Dock.Top);
         layout.Children.Add(top);
-        // With the AI chat off on this PC (AiMode): the Modeler, the 3D view and the review pack by hand, and no chat at all.
-        layout.Children.Add(CsiProMax.AiMode.On ? Chat.ChatPane.Get() : NoAiPane.Build(CsiProMax.App.Reopened));
+        // The Modeler is one program window: its model (3D view, plan, Draw/Define/Assign menus) fills it, and the chat,
+        // when it is on, sits on its right and can be closed (Ahmed, 2026-11-26: the Modeler opened as the chat alone).
+        // Beside a CSI program the window is the chat (or, with the chat off, what CSI ProMax does by hand).
+        if (CsiProMax.App.Modeler) layout.Children.Add(ModelerBody());
+        else layout.Children.Add(CsiProMax.AiMode.On ? Chat.ChatPane.Get() : NoAiPane.Build(CsiProMax.App.Reopened));
         Content = layout;
-        // The Modeler is its 3D view: with the chat on it opens in its own window at the first start too (the no-AI
-        // pane opens it itself), beside this window, which holds the chat. Not again after an update or a switch.
-        if (CsiProMax.AiMode.On && CsiProMax.App.Modeler && !CsiProMax.App.Reopened)
-        {
-            var once = false;
-            ContentRendered += (_, _) =>
-            {
-                if (once) return;
-                once = true;
-                try { ModelView.Open(); }
-                catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { /* View > Open the 3D view opens it */ }
-            };
-        }
         SourceInitialized += (_, _) => Handle = new WindowInteropHelper(this).Handle;
         Closing += (_, _) => Remember();
         Closed += (_, _) => { Handle = IntPtr.Zero; _open = null; };
+    }
+
+    private WebPane? _view;
+    private ColumnDefinition? _chatColumn, _splitColumn;
+    private FrameworkElement? _chatSide;
+    private MenuItem? _chatToggle;
+
+    /// <summary>True when the Modeler's model view is inside this window.</summary>
+    public bool HasModelView => _view is not null;
+
+    /// <summary>True when the chat is shown beside the Modeler's model (the field test and the menu read it).</summary>
+    public bool ChatShown => _chatSide is { Visibility: Visibility.Visible };
+
+    /// <summary>The chat's width beside the Modeler's model, the first time.</summary>
+    internal const double ModelerChatWidth = 420;
+
+    /// <summary>The Modeler's body: the model view, and the chat on its right (with the chat on).</summary>
+    private FrameworkElement ModelerBody()
+    {
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 300 });
+        FrameworkElement model;
+        try
+        {
+            var server = CsiProMax.Bridge.ChatMcp.Ensure() ?? throw new InvalidOperationException("The model view could not start on this PC (no local port).");
+            if (!WebWindow.Available()) throw new InvalidOperationException("this PC has no WebView2 Runtime");
+            _view = new WebPane(server.ViewUrl, WebPages.Kind.ModelerView);
+            _view.Failed += () => { _view = null; };
+            model = _view;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            // No WebView2 here: the model opens in Edge's app window, and this window says so with a button to open it again.
+            var note = new StackPanel { Margin = new Thickness(24), VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center };
+            note.Children.Add(Brand.Text("The model view could not be drawn inside this window (" + ex.Message + "). It opens in a window of its own instead.", Brand.K.Text, 13));
+            var again = Brand.Button("Open the model view", Brand.Weight.Primary);
+            again.Margin = new Thickness(0, 12, 0, 0);
+            again.HorizontalAlignment = HorizontalAlignment.Left;
+            again.Click += (_, _) => { try { ModelView.Open(); } catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { TaskDialog.Show("CSI ProMax", e.Message); } };
+            note.Children.Add(again);
+            model = note;
+            ContentRendered += (_, _) => { try { ModelView.Open(); } catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { } };
+        }
+        Grid.SetColumn(model, 0);
+        grid.Children.Add(model);
+        if (!CsiProMax.AiMode.On) return grid;
+
+        _splitColumn = new ColumnDefinition { Width = GridLength.Auto };
+        _chatColumn = new ColumnDefinition { Width = new GridLength(ModelerChatWidth), MinWidth = 300 };
+        grid.ColumnDefinitions.Add(_splitColumn);
+        grid.ColumnDefinitions.Add(_chatColumn);
+        var splitter = new GridSplitter { Width = 5, HorizontalAlignment = HorizontalAlignment.Stretch, ResizeBehavior = GridResizeBehavior.PreviousAndNext, Cursor = System.Windows.Input.Cursors.SizeWE };
+        splitter.SetResourceReference(BackgroundProperty, Brand.K.Border);
+        Grid.SetColumn(splitter, 1);
+        grid.Children.Add(splitter);
+
+        var side = new DockPanel();
+        var bar = new DockPanel { Margin = new Thickness(8, 4, 4, 4) };
+        var close = Brand.Button("\u2715", Brand.Weight.Secondary);
+        close.Padding = new Thickness(8, 1, 8, 1);
+        close.ToolTip = "Close the chat (View > Show the chat brings it back)";
+        System.Windows.Automation.AutomationProperties.SetName(close, "Close the chat");
+        close.Click += (_, _) => ShowChat(false);
+        DockPanel.SetDock(close, Dock.Right);
+        bar.Children.Add(close);
+        bar.Children.Add(Brand.Text("Chat", Brand.K.Text, 12.5, bold: true));
+        DockPanel.SetDock(bar, Dock.Top);
+        side.Children.Add(bar);
+        side.Children.Add(Chat.ChatPane.Get());
+        Grid.SetColumn(side, 2);
+        grid.Children.Add(side);
+        _chatSide = side;
+        splitter.Tag = side;
+        // Kept as the user left it.
+        if (File.Exists(ChatClosedFile)) ShowChat(false, remember: false);
+        return grid;
+    }
+
+    private static string ChatClosedFile => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CsiProMax", "modeler-chat-closed.txt");
+
+    /// <summary>Shows or closes the chat beside the Modeler's model; the model takes the room.</summary>
+    internal void ShowChat(bool show, bool remember = true)
+    {
+        if (_chatSide is null || _chatColumn is null || _splitColumn is null) return;
+        _chatSide.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        if (_chatSide.Parent is Grid grid)
+            foreach (var child in grid.Children.OfType<GridSplitter>()) child.Visibility = _chatSide.Visibility;
+        _chatColumn.MinWidth = show ? 300 : 0;
+        _chatColumn.Width = show ? new GridLength(ModelerChatWidth) : new GridLength(0);
+        if (_chatToggle is not null) _chatToggle.IsChecked = show;
+        if (!remember) return;
+        try
+        {
+            if (show) File.Delete(ChatClosedFile);
+            else { Directory.CreateDirectory(Path.GetDirectoryName(ChatClosedFile)!); File.WriteAllText(ChatClosedFile, "closed"); }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
 
     /// <summary>
@@ -137,7 +224,14 @@ internal sealed class MainWindow : Window
         }
 
         var view = Top("_View");
-        Add(view, "Open the _3D view", ModelView.Open);
+        if (CsiProMax.App.Modeler && CsiProMax.AiMode.On)
+        {
+            _chatToggle = new MenuItem { Header = "Show the _chat", IsCheckable = true, IsChecked = true };
+            _chatToggle.Click += (_, _) => ShowChat(_chatToggle.IsChecked);
+            view.Items.Add(_chatToggle);
+        }
+        if (CsiProMax.App.Modeler) Add(view, "_Reload the model view", () => { if (_view is { } pane) pane.Reload(); else ModelView.Open(); });
+        else Add(view, "Open the _3D view", ModelView.Open);
         Add(view, "Open the _Viewer (a pack someone sent)", () => WebPages.Open(Shortcuts.WriteViewerPage(), WebPages.Kind.Viewer));
         if (CsiProMax.App.Modeler)
             Add(view, "Open the _models folder", () =>
@@ -284,7 +378,7 @@ internal sealed class MainWindow : Window
     /// <summary>Brings the window forward (ETABS's menu was used again while it is open).</summary>
     public void Surface()
     {
-        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        if (WindowState == WindowState.Minimized) WindowState = CsiProMax.App.Modeler ? WindowState.Maximized : WindowState.Normal;
         Activate();
         Topmost = true;
         Topmost = false;
@@ -294,6 +388,17 @@ internal sealed class MainWindow : Window
     private void Place()
     {
         var area = SystemParameters.WorkArea;
+        // The Modeler is a program: it opens full screen, every time (its window is not the narrow chat column).
+        if (CsiProMax.App.Modeler)
+        {
+            WindowStartupLocation = WindowStartupLocation.Manual;
+            Width = Math.Min(1400, area.Width * 0.9);
+            Height = Math.Min(900, area.Height * 0.9);
+            Left = area.Left + (area.Width - Width) / 2;
+            Top = area.Top + (area.Height - Height) / 2;
+            WindowState = WindowState.Maximized;
+            return;
+        }
         try
         {
             if (File.Exists(PlaceFile))
@@ -326,6 +431,7 @@ internal sealed class MainWindow : Window
 
     private void Remember()
     {
+        if (CsiProMax.App.Modeler) return; // the Modeler always opens full screen; window.txt is the chat column beside a program
         try
         {
             var b = WindowState == WindowState.Normal ? new Rect(Left, Top, Width, Height) : RestoreBounds;
