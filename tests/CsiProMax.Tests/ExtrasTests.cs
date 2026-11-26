@@ -203,10 +203,20 @@ static class ExtrasTests
                 Check(html.Contains(part), "viewer.html lost " + part);
             Check(html.Contains("det.hidden = program === \"sap2000\""), "SAP2000 has no Detailing menu");
         });
+        yield return ("extras: the views and toolbars are drawn as ETABS draws them: grey see-through slabs with white edges, thin columns, solid grid, light-blue ground grid with flat bubbles, the axes at the origin, column squares in plan, captions as tabs, the toolbar and strip in the program's order (Ahmed 2026-11-26 22:19)", () =>
+        {
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var part in new[] { "const opt = {grid: true, extrude: false,", "floor: \"#737373\"", "ground: [0.85, 0.925, 1]", "const dash = gridsGuessed ? 7 : 0;", "flat: bay * 0.09}", "function drawPlanColumns(p, g, to, T)", "const presetCam = {iso: {yaw: Math.PI / 4, pitch: 0.57}",
+                "thin(bufs.edges, 1, [1, 1, 1])", "function buildBars()", "function ddOpen(key)", "[\"t3d\", \"Set Default 3D View\", \"v:3d\"]", "[\"zprev\", \"Restore Previous Zoom\", \"zprev\"]", "[\"sall\", \"Select All (Ctrl+A)\", \"selAll\"]", "case \"selPrev\":", "case \"zprev\":",
+                "<button class=\"dd\" title=\"Window Position\">", "function ddMenu(btn, items)", ".menu[hidden]{display:none}" })
+                Check(html.Contains(part), "viewer.html lost " + part);
+            // The old corner-only axes must not come back: the triad stands at the global origin when it is in view.
+            Check(html.Contains("const o = inside ? [at[0], at[1]] : [38, h - 38]"), "the global axes are drawn at the origin");
+        });
         yield return ("extras: the Engine is one window laid out as the program: no window menu bar above it (its items in Tools and Help), white views, collapsed Model Explorer, plan dimensions, Ready (Ahmed 2026-11-26 22:11)", () =>
         {
             var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
-            foreach (var part in new[] { "function appMenuLoad()", "fetch(\"app-menu\"", "function drawDims(g, to, T, bub)", "#tools{display:none!important}", "if (!bgSaved) bg = \"white\";", "const model = node(\"model\", \"Model\", null,", ": \"Ready\";", "<option>Global</option>", "[\"eng:run\", \"Run Analysis (F5)\", \"run\"]" })
+            foreach (var part in new[] { "function appMenuLoad()", "fetch(\"app-menu\"", "function drawDims(g, to, T, bub)", "#tools{display:none!important}", "if (!bgSaved) bg = \"white\";", "const model = node(\"model\", \"Model\", null,", ": \"Ready\";", "<option>Global</option>", "[\"run\", \"Run Analysis (F5)\", \"eng:run\"]" })
                 Check(html.Contains(part), "viewer.html lost " + part);
             var main = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Panel", "Host", "MainWindow.cs"));
             Check(main.Contains("if (!CsiProMax.App.Modeler) layout.Children.Add(top);") && main.Contains("internal static bool RunAppMenu(string id)"), "the Engine window has no menu bar of its own; its items run from the page");

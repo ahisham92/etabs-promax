@@ -39,6 +39,7 @@ input[type=checkbox],input[type=radio]{margin:0 5px 0 0;vertical-align:-2px;acce
 #menubar .brand{display:flex;align-items:center;gap:6px;padding:0 12px 0 8px;font-weight:600;white-space:nowrap;color:var(--accent)}
 #menubar .brand svg{width:16px;height:16px}
 .menu{position:relative;padding:0 8px;display:flex;align-items:center;cursor:default}
+.menu[hidden]{display:none}
 .menu:hover,.menu.open{background:var(--hot)}
 .menu.open{background:var(--press)}
 .drop{display:none;position:absolute;left:0;top:23px;z-index:40;background:var(--menu);border:1px solid var(--line);box-shadow:var(--shadow);min-width:240px;padding:3px 0}
@@ -72,7 +73,7 @@ main{flex:1;display:flex;min-height:0}
 #strip{width:30px;display:flex;flex-direction:column;align-items:center;gap:1px;padding:3px 0;background:var(--bars);border-right:1px solid var(--line2)}
 #strip .sep{width:20px;height:1px;background:var(--line);margin:3px 0}
 /* explorer */
-#explorer{width:230px;min-width:150px;display:flex;flex-direction:column;border-right:1px solid var(--line);background:var(--field);min-height:0}
+#explorer{width:clamp(230px,21vw,420px);min-width:150px;display:flex;flex-direction:column;border-right:1px solid var(--line);background:var(--field);min-height:0}
 #explorer[hidden],#right[hidden]{display:none}
 .ptitle,.dock{background:var(--title);border-bottom:1px solid var(--line);padding:0 4px 0 7px;height:23px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;gap:6px;align-items:center;font-weight:600}
 .ptitle .x,.dock .x{margin-left:auto;width:18px;height:18px;border:0;background:none;padding:0;color:var(--mute);font-weight:400;line-height:18px;text-align:center}
@@ -110,6 +111,24 @@ main{flex:1;display:flex;min-height:0}
 .pane.act .ptitle{background:var(--vcap);color:var(--vcap-ink)}
 .pane.act .ptitle .x{color:var(--vcap-ink)}
 .pane .hold{flex:1;position:relative;min-height:0}
+/* The program's docked windows: a grey caption with the window's name on a tab, then the drop-down and close buttons. */
+.pane{border-color:#a0a0a0}.pane.act{border-color:#a0a0a0;box-shadow:none}
+.pane .ptitle,.pane.act .ptitle,#explorer>.dock{background:#d8d8d8;color:#000;border-bottom:1px solid #a0a0a0;height:27px;padding:0 6px 0 20px;align-items:flex-end;font-weight:400;font-size:12.5px}
+.pane .ptitle>span,#explorer>.dock>span{border:1px solid #a0a0a0;border-bottom:0;background:#e9e9e9;padding:3px 26px 4px;margin-bottom:-1px;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.pane.act .ptitle>span{background:#fff;font-weight:600;box-shadow:inset 0 -2px #3399ff}
+.ptitle .dd,.dock .dd{margin-left:auto;width:18px;height:18px;border:0;background:none;padding:0;color:#000;font-size:11px;line-height:18px;text-align:center;align-self:center}
+.ptitle .dd+.x,.dock .dd+.x{margin-left:0}
+.pane .ptitle .x,.pane.act .ptitle .x,#explorer>.dock .x{color:#000;align-self:center;font-size:13px}
+.ddm{position:fixed;z-index:60;background:var(--menu);border:1px solid var(--line);box-shadow:var(--shadow);padding:3px 0;min-width:150px}
+.ddm div{padding:3px 24px;white-space:nowrap}.ddm div:hover{background:var(--hot)}.ddm div.off{opacity:.45;pointer-events:none}
+/* The program's toolbar: one row of 16-pixel pictures, drop-down ones with a small arrow, the design ones on the right. */
+html.live #menubar .brand{display:none}
+#icons{flex-wrap:nowrap;overflow:hidden;background:#d8d8d8;padding:3px 4px}
+#icons .grow,#strip .grow{flex:1}
+.ib.ddb{width:33px;justify-content:flex-start;padding-left:3px}
+.ib.ddb::after{content:"";position:absolute;right:4px;top:11px;border:3.5px solid transparent;border-top:4px solid #000;border-bottom:0}
+.ib:disabled svg{opacity:.45}
+#strip{background:#d8d8d8;width:28px}
 .pane.max{position:absolute;inset:3px;z-index:3}
 .pane canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;display:block}
 .pane .nav{position:absolute;right:6px;top:6px;display:flex;gap:2px;opacity:.85}
@@ -302,7 +321,7 @@ body.chaton #right{width:380px;max-width:42%}
 <main>
   <div id="strip"></div>
   <div id="explorer">
-    <div class="dock">Model Explorer<button class="x" data-close="explorer" title="Close">&#10005;</button></div>
+    <div class="dock"><span>Model Explorer</span><button class="dd" id="explorerDD" title="Window Position">&#9660;</button><button class="x" data-close="explorer" title="Close">&#10005;</button></div>
     <div id="tree"></div>
     <div id="legend" hidden></div>
   </div>
@@ -358,12 +377,12 @@ const inst = {answer: null, cur: -1, show: false, busy: false, dlg: null, only: 
 let P = null, frames = [], areas = [], stories = [], grids = {X: [], Y: []}, gridsGuessed = false, sizes = {}, slabT = {}, supports = [], points = [], tendons = [], dstrips = [], openings = [], slabLines = [];
 let supportOf = new Map(), ratio = new Map(), marks = {punching: [], soil: []}, pointXyz = new Map(), pointIdx = new Map(), disp = new Map(), pointAt = new Map(), newComments = [], lit = null;
 let unitsText = "", lo = [0, 0, 0], hi = [1, 1, 1], size = 1, unit = "", program = "etabs", sectionMat = new Map();
-const opt = {grid: true, extrude: true, fill: true, supports: true, names: false, axes: true, joints: false, edges: true, see: true, sections: true, explorer: true, side: true};
+const opt = {grid: true, extrude: false, fill: true, supports: true, names: false, axes: true, joints: false, edges: true, see: true, sections: true, explorer: true, side: true};
 const hidden = {kind: new Set(), section: new Set(), objs: new Set()};
 let panes = [], active = 0, layout = 2;
 let forces = new Map(), reacts = new Map(), drifts = new Map();
 const res = {mode: "model", case: "", comp: "M3", scale: 50, fill: true, values: true, ghost: true, range: null, bands: 9, anim: false, dfam: "", dshow: "", dvalues: true, dnames: true, vt: "", vf: "", vcase: ""};
-const sel = new Set(), selJ = new Set(); let hover = 0; // selJ: the joints selected, by name
+const sel = new Set(), selJ = new Set(); let prevSel = {f: [], j: []}; let hover = 0; // selJ: the joints selected, by name
 let bg = "black", bgSaved = false;
 try { const b = localStorage.getItem("cpm-bg"); if (b === "white" || b === "black") { bg = b; bgSaved = true; } } catch (e) {}
 const bandsDef = ["#0f1fd1", "#1f6ff2", "#18b4ec", "#19d3b0", "#3bd34a", "#a9e22a", "#f1e51c", "#f7a31a", "#f2601b", "#e01f1f"];
@@ -372,7 +391,7 @@ function theme() {
   // The model windows: black as analysis programs draw them, or white for printing.
   return bg === "black"
     ? {canvas: [0, 0, 0], column: "#2f8ff7", beam: "#f0cf34", brace: "#ff8a3c", other: "#c79bff", floor: "#8d9aa4", wall: "#d4625c", grid: [0.42, 0.47, 0.52], gridText: "#c9d2d8", bubble: "#000000", level: [0.25, 0.29, 0.33], text: "#d5dde1", pick: "#ff4df0", support: "#35e06f", lit: "#ffffff", pos: [1, 0.84, 0.24, 0.55], neg: [1, 0.33, 0.33, 0.55], posEdge: "#ffd83c", negEdge: "#ff6a6a", ghost: [0.42, 0.46, 0.5], edge: 0.45, joint: "#d5dde1", dark: true}
-    : {canvas: [1, 1, 1], column: "#1c4fa8", beam: "#1f8a4c", brace: "#b86a12", other: "#6a55b0", floor: "#9aa9b3", wall: "#c4463c", grid: [0.62, 0.66, 0.69], gridText: "#3c4a51", bubble: "#ffffff", level: [0.8, 0.83, 0.85], text: "#2f3a40", pick: "#e6007a", support: "#0c7a66", lit: "#e2620d", pos: [0.16, 0.43, 0.86, 0.38], neg: [0.84, 0.2, 0.2, 0.38], posEdge: "#1c5fd0", negEdge: "#c62828", ghost: [0.7, 0.74, 0.77], edge: 0.55, joint: "#2f3a40", dark: false};
+    : {canvas: [1, 1, 1], column: "#4b57a6", beam: "#1f8a4c", brace: "#b86a12", other: "#6a55b0", floor: "#737373", wall: "#c4463c", grid: [0.78, 0.78, 0.78], gridText: "#9a9a9a", bubble: "#ffffff", ground: [0.85, 0.925, 1], support: "#7a7a7a", level: [0.8, 0.83, 0.85], text: "#2f3a40", pick: "#e6007a", lit: "#e2620d", pos: [0.16, 0.43, 0.86, 0.38], neg: [0.84, 0.2, 0.2, 0.38], posEdge: "#1c5fd0", negEdge: "#c62828", ghost: [0.7, 0.74, 0.77], edge: 0.55, joint: "#2f3a40", dark: false};
 }
 const rgb = hex => { const n = parseInt(hex.slice(1), 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; };
 const css = c => Array.isArray(c) ? `rgba(${Math.round(c[0] * 255)},${Math.round(c[1] * 255)},${Math.round(c[2] * 255)},${c[3] ?? 1})` : c;
@@ -1894,7 +1913,7 @@ function gridSpan() {
 }
 function auxLines(p) {
   // Grid lines dashed, story levels solid, in the window's own plane. Returned with where the bubbles go.
-  const G = new FL(2048), L = new FL(512), S = new FL(1024), bub = [], lev = [], s = gridSpan();
+  const G = new FL(2048), L = new FL(512), S = new FL(1024), D = new FL(4096), bub = [], lev = [], s = gridSpan();
   const seg = (Fl, A, B, dash, oa, ob) => { for (const [e, sd] of [[0, -1], [0, 1], [1, 1], [0, -1], [1, 1], [1, -1]]) Fl.push(A[0], A[1], A[2], B[0], B[1], B[2], -1, -1, e, sd, 1, -1, dash, ...(oa || [0, 0]), ...(ob || [0, 0])); };
   // Support symbols: drawn at a fixed size on the screen, but hidden behind the model like the model itself.
   const sym = (q, list) => { for (let i = 0; i + 1 < list.length; i += 2) seg(S, q, q, 0, list[i], list[i + 1]); };
@@ -1906,18 +1925,31 @@ function auxLines(p) {
     if (sp.kind === "fixed") { const h = [[-8, 0], [8, 0]]; for (let x = -7; x <= 9; x += 4) h.push([x, 0], [x - 4, -5]); sym(sp.p, h); }
     else { const b = sp.kind === "roller" ? -13 : -10; sym(sp.p, [[0, 0], [-6, -10], [-6, -10], [6, -10], [6, -10], [0, 0], [-9, b], [9, b]]); }
   }
-  const dash = gridsGuessed ? 7 : 16;
+  const dash = gridsGuessed ? 7 : 0;
   if (p.mode === "elev") {
     const along = p.line && p.line.dir === "X" ? grids.Y : grids.X, ax = p.line && p.line.dir === "X" ? 1 : 0, at = p.line ? p.line.at : 0;
     const q = (c, z) => { const v = [at, at, z]; v[ax] = c; return v; }, left = ax ? s.y0 : s.x0, right = ax ? s.y1 : s.x1;
     for (const st of stories) { seg(L, q(left, st.elevation), q(right, st.elevation), 0); lev.push({at: q(left, st.elevation), name: st.name, z: st.elevation}); }
     for (const g of along) { seg(G, q(g.at, s.z0 - s.pad * 0.3), q(g.at, s.z1 + s.pad), dash); bub.push({at: q(g.at, s.z1 + s.pad), from: q(g.at, s.z0), label: g.label}); }
+  } else if (p.mode === "3d" && grids.X.length && grids.Y.length) {
+    // As the program's 3-D view: the grid lies on the ground as a fine light-blue mesh reaching far past the model, its
+    // lines run out to bubbles lying flat on the ground at the near ends.
+    const sp = list => { const d = list.slice(1).map((g, i) => g.at - list[i].at).filter(v => v > 1e-6).sort((a, b) => a - b); return d.length ? d[d.length >> 1] : size / 3; };
+    const bay = Math.min(sp(grids.X), sp(grids.Y)), cell = bay / 4, ext = Math.max(bay * 3, size), z = s.z0, out = bay * 1.1;
+    const X0 = grids.X[0].at, X1 = grids.X[grids.X.length - 1].at, Y0 = grids.Y[0].at, Y1 = grids.Y[grids.Y.length - 1].at;
+    const gx0 = Math.floor((X0 - ext) / cell) * cell, gx1 = X1 + ext, gy0 = Math.floor((Y0 - ext) / cell) * cell, gy1 = Y1 + ext;
+    if ((gx1 - gx0) / cell + (gy1 - gy0) / cell < 1200) {
+      for (let x = gx0; x <= gx1 + 1e-9; x += cell) seg(D, [x, gy0, z], [x, gy1, z], 0);
+      for (let y = gy0; y <= gy1 + 1e-9; y += cell) seg(D, [gx0, y, z], [gx1, y, z], 0);
+    }
+    for (const g of grids.X) { seg(G, [g.at, Y0 - out, z], [g.at, Y1 + bay * 0.25, z], dash); bub.push({at: [g.at, Y0 - out, z], from: [g.at, Y1, z], label: g.label, dir: "X", flat: bay * 0.09}); }
+    for (const g of grids.Y) { seg(G, [X0 - out, g.at, z], [X1 + bay * 0.25, g.at, z], dash); bub.push({at: [X0 - out, g.at, z], from: [X1, g.at, z], label: g.label, dir: "Y", flat: bay * 0.09}); }
   } else if (p.mode === "plan" || p.mode === "3d") {
     const z = p.mode === "plan" ? (elevationOf(p.story) ?? lo[2]) : s.z0;
     for (const g of grids.X) { seg(G, [g.at, s.y0, z], [g.at, s.y1, z], dash); bub.push({at: [g.at, s.y1, z], from: [g.at, s.y0, z], label: g.label, dir: "X"}); }
     for (const g of grids.Y) { seg(G, [s.x0, g.at, z], [s.x1, g.at, z], dash); bub.push({at: [s.x0, g.at, z], from: [s.x1, g.at, z], label: g.label, dir: "Y"}); }
   }
-  return {grid: G.out(), level: L.out(), sup: S.out(), bub, lev};
+  return {grid: G.out(), level: L.out(), sup: S.out(), ground: D.out(), bub, lev};
 }
 
 // ---- force and moment diagrams ----
@@ -2067,22 +2099,26 @@ function drawScene(p, M, R, dpr, mode) {
     gl.enable(gl.DEPTH_TEST);
     return;
   }
+  // The ground grid first: everything stands on it.
+  if (p.aux && opt.grid && p.mode === "3d" && T.ground) { gl.depthMask(false); thick(p.aux.ground, 1, 1, T.ground, 1, 0); gl.depthMask(true); }
   const savedK = curDefK;
   // The shape before loading, faint behind the deformed one.
   if (curDefK && res.ghost) { curDefK = 0; thick(bufs.lines, 1, 1, T.ghost, 1, 0); curDefK = savedK; }
   // In plan and elevation the floors and walls lie under the members, faint, so every beam stays readable.
   const under = see && !contourOn && p.mode !== "3d";
-  if (under) { gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false); solids(bufs.solidA, T.dark ? 0.42 : 0.38); gl.depthMask(true); gl.disable(gl.BLEND); gl.clear(gl.DEPTH_BUFFER_BIT); }
+  if (under) { gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false); solids(bufs.solidA, T.dark ? 0.42 : 0.23); gl.depthMask(true); gl.disable(gl.BLEND); gl.clear(gl.DEPTH_BUFFER_BIT); }
   if (extrude) solids(bufs.solidF, 1, true);
   if (!see || contourOn) solids(bufs.solidA, 1);
   // Grid lines after the solids, so members hide them; they do not hide anything themselves.
-  if (p.aux) { gl.depthMask(false); if (opt.grid) { thick(p.aux.grid, 1, 1, T.grid, 1, 0); thick(p.aux.level, 1, 1, T.level, 1, 0); } if (opt.supports) thick(p.aux.sup, 1.4, 1, rgb(T.support), 1, 0.002); gl.depthMask(true); }
-  if (!extrude) thick(bufs.lines, p.mode === "3d" ? 1.6 : 2, 1); else thick(bufs.bare, 2, 1);
-  if (opt.edges) thin(bufs.edges, extrude ? T.edge : 0.75);
+  if (p.aux) { gl.depthMask(false); if (opt.grid) { thick(p.aux.grid, 1, 1, p.mode === "3d" && T.ground ? [0.62, 0.8, 0.96] : T.grid, 1, 0); thick(p.aux.level, 1, 1, T.level, 1, 0); } if (opt.supports) thick(p.aux.sup, 1.4, 1, rgb(T.support), 1, 0.002); gl.depthMask(true); }
+  if (!extrude) thick(bufs.lines, p.mode === "3d" ? (T.dark ? 1.6 : 0.75) : 2, 1); else thick(bufs.bare, 2, 1);
+  if (opt.edges) thin(bufs.edges, extrude ? T.edge : 0.75, !extrude && !T.dark ? [1, 1, 1] : undefined);
   if (see && !contourOn && !under) {
     gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false);
-    solids(bufs.solidA, T.dark ? 0.34 : 0.4);
+    solids(bufs.solidA, T.dark ? 0.34 : 0.55);
     gl.depthMask(true); gl.disable(gl.BLEND);
+    // The program draws the floors' and walls' edges white over their see-through faces.
+    if (opt.edges && !extrude && !T.dark) thin(bufs.edges, 1, [1, 1, 1]);
   }
   if (p.diag) {
     gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false);
@@ -2109,7 +2145,7 @@ function drawPane(p, n, vr, dpr, T, now) {
   const auxSig = [p.mode, p.story, p.line ? p.line.dir + p.line.label : "", grids.X.length + grids.Y.length, supports.length, geometryStamp, P ? P.manifest.created : ""].join("|");
   if (gl) {
     uploadObjects(p); // every window shares one object texture, so each fills it before it draws
-    if (p.auxSig !== auxSig) { const a = auxLines(p); p.auxInfo = a; p.aux = {grid: makeBuf(prog.line, a.grid, LINE_L, p.aux && p.aux.grid), level: makeBuf(prog.line, a.level, LINE_L, p.aux && p.aux.level), sup: makeBuf(prog.line, a.sup, LINE_L, p.aux && p.aux.sup)}; p.auxSig = auxSig; }
+    if (p.auxSig !== auxSig) { const a = auxLines(p); p.auxInfo = a; p.aux = {grid: makeBuf(prog.line, a.grid, LINE_L, p.aux && p.aux.grid), level: makeBuf(prog.line, a.level, LINE_L, p.aux && p.aux.level), sup: makeBuf(prog.line, a.sup, LINE_L, p.aux && p.aux.sup), ground: makeBuf(prog.line, a.ground, LINE_L, p.aux && p.aux.ground)}; p.auxSig = auxSig; }
     const dSig = res.mode === "forces" || res.mode === "loads" && loadMap ? [res.mode, res.lt, res.lpat, res.case, res.comp, res.scale, res.userScale, res.fill, res.values, p.visSig, p.mode === "3d" ? "3d" : M.d.map(v => v.toFixed(3)).join(), selVersion, hover].join("|") : "";
     if (dSig !== p.diagSig) {
       const d = dSig ? diagram(p, M) : null;
@@ -2148,21 +2184,25 @@ function drawDiag2D(g, M, d) {
 }
 
 // ---- what is drawn over the model: bubbles, labels, symbols, scales ----
-function bubble(g, T, x, y, label) {
-  const r = label.length > 2 ? 12 : 10;
-  g.beginPath(); g.arc(x, y, r, 0, 7); g.fillStyle = T.bubble; g.fill(); g.strokeStyle = css(T.grid); g.lineWidth = 1; g.setLineDash([]); g.stroke();
-  g.fillStyle = T.gridText; g.font = (label.length > 2 ? "9.5px" : "11px") + " Segoe UI, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(label.slice(0, 5), x, y + 0.5);
+const BUB = 14; // the grid bubble's radius on the screen, as the program draws it
+function bubble(g, T, x, y, label, ring) {
+  // A circle with the grid line's name; in the 3-D view it lies flat on the ground (ring: its outline on the screen).
+  g.beginPath(); if (ring) ring.forEach((q, i) => i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1])); else g.arc(x, y, BUB, 0, 7);
+  g.closePath(); g.fillStyle = T.bubble; g.fill(); g.strokeStyle = css(T.grid); g.lineWidth = 1; g.setLineDash([]); g.stroke();
+  const fs = ring ? Math.max(9, Math.min(13, Math.min(...[0, 1].map(k => Math.max(...ring.map(q => q[k])) - Math.min(...ring.map(q => q[k]))) ) * 0.5)) : label.length > 2 ? 10.5 : 13;
+  g.fillStyle = T.gridText; g.font = fs + "px Segoe UI, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(label.slice(0, 5), x, y + 0.5);
 }
 // The plan's dimension strings between grid lines, as the programs draw them: "8 (m)" along the top and the left.
 function drawDims(g, to, T, bub) {
   g.save(); g.strokeStyle = css(T.grid); g.fillStyle = T.gridText; g.lineWidth = 1; g.setLineDash([]); g.font = "10px Segoe UI, sans-serif";
   for (const dir of ["X", "Y"]) {
-    const list = bub.filter(b => b.dir === dir).map(b => { const a = to(b.at), c = to(b.from), dx = c[0] - a[0], dy = c[1] - a[1], l = Math.hypot(dx, dy) || 1; return {w: dir === "X" ? b.at[0] : b.at[1], s: [a[0] + dx / l * 22, a[1] + dy / l * 22], ok: a[3] && l > 4}; })
+    const list = bub.filter(b => b.dir === dir).map(b => { const a = to(b.at), c = to(b.from), dx = c[0] - a[0], dy = c[1] - a[1], l = Math.hypot(dx, dy) || 1; return {w: dir === "X" ? b.at[0] : b.at[1], s: [a[0] + dx / l * 10, a[1] + dy / l * 10], ok: a[3] && l > 4}; })
       .filter(b => b.ok).sort((a, b) => a.w - b.w);
     for (let i = 0; i + 1 < list.length; i++) {
       const a = list[i].s, b = list[i + 1].s, d = list[i + 1].w - list[i].w; if (Math.hypot(b[0] - a[0], b[1] - a[1]) < 30) continue;
       g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]);
-      for (const q of [a, b]) { if (dir === "X") { g.moveTo(q[0], q[1] - 4); g.lineTo(q[0], q[1] + 4); } else { g.moveTo(q[0] - 4, q[1]); g.lineTo(q[0] + 4, q[1]); } }
+      // The program's ticks: short slashes across the line at each grid line.
+      for (const q of [a, b]) { g.moveTo(q[0] - 4, q[1] + 4); g.lineTo(q[0] + 4, q[1] - 4); }
       g.stroke();
       const text = num(d) + (unit ? " (" + unit + ")" : ""), mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
       g.textAlign = "center"; g.textBaseline = "bottom";
@@ -2178,13 +2218,21 @@ function overlay(p, g, M, T, w, h) {
     for (const b of p.auxInfo.bub) {
       const a = to(b.at), c = to(b.from), dx = a[0] - c[0], dy = a[1] - c[1], l = Math.hypot(dx, dy);
       if (l < 4) continue;
-      bubble(g, T, a[0] + dx / l * 13, a[1] + dy / l * 13, b.label);
+      if (b.flat) {
+        // On the ground beyond the line's end, a circle seen at the view's angle.
+        const u = unitv(sub(b.at, b.from)), cen = add(b.at, mul(u, b.flat)), ring = [];
+        for (let i = 0; i < 28; i++) { const t = i / 28 * Math.PI * 2, q = to([cen[0] + Math.cos(t) * b.flat, cen[1] + Math.sin(t) * b.flat, cen[2]]); if (!q[3]) { ring.length = 0; break; } ring.push(q); }
+        const c0 = to(cen); if (ring.length && c0[3]) bubble(g, T, c0[0], c0[1], b.label, ring);
+        continue;
+      }
+      bubble(g, T, a[0] + dx / l * (BUB + 3), a[1] + dy / l * (BUB + 3), b.label);
     }
     font(11); g.fillStyle = T.text; g.textAlign = "right"; g.textBaseline = "middle";
     const ys = p.auxInfo.lev.map(s => to(s.at)[1]), gap = ys.length > 1 ? Math.min(...ys.slice(1).map((y, i) => Math.abs(y - ys[i]))) : 99, every = gap < 13 ? Math.ceil(13 / Math.max(gap, 1)) : 1;
     p.auxInfo.lev.forEach((s, i) => { if (i % every && i !== p.auxInfo.lev.length - 1) return; const q = to(s.at); if (gap < 28) { g.fillText(s.name, q[0] - 6, q[1]); return; } g.fillText(s.name, q[0] - 6, q[1] - 7); g.fillStyle = T.dark ? "#8f9aa1" : "#6b7880"; g.fillText(num(s.z) + (unit ? " " + unit : ""), q[0] - 6, q[1] + 7); g.fillStyle = T.text; });
   }
   if (opt.grid && p.auxInfo && p.mode === "plan") drawDims(g, to, T, p.auxInfo.bub);
+  if (p.mode === "plan" && !opt.extrude) drawPlanColumns(p, g, to, T);
   if (opt.joints) drawJoints(p, g, to, T);
   if (opt.names) drawNames(p, g, to, T);
   if (opt.supports && !gl) drawSupports(p, g, to, T);
@@ -2350,14 +2398,44 @@ function drawReactions(p, g, to, T, given) {
   });
 }
 function drawAxes(p, g, M, T, h) {
-  const o = [38, h - 38], L = 26;
-  g.lineWidth = 2; g.setLineDash([]); g.font = "bold 11px Segoe UI, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.lineCap = "round";
-  for (const [name, v, c] of [["X", [1, 0, 0], "#e0463c"], ["Y", [0, 1, 0], "#2eb35a"], ["Z", [0, 0, 1], "#3b7be0"]]) {
-    const dx = dot(v, M.right), dy = dot(v, M.up);
-    if (Math.hypot(dx, dy) < 0.08) continue;
-    g.strokeStyle = g.fillStyle = c; g.beginPath(); g.moveTo(o[0], o[1]); g.lineTo(o[0] + dx * L, o[1] - dy * L); g.stroke();
-    g.fillText(name, o[0] + dx * (L + 9), o[1] - dy * (L + 9));
+  // The global axes at the global origin, as the program draws them: red X, green Y and blue Z arrows, named in plan.
+  // When the origin is out of the window they stand in its corner instead.
+  const z = p.mode === "plan" ? (elevationOf(p.story) ?? 0) : stories.length ? stories[0].elevation : 0, at = M.to([0, 0, z]);
+  const w = p.R ? p.R.w : 1e9, inside = at[3] && at[0] > 4 && at[1] > 4 && at[0] < w - 4 && at[1] < h - 4;
+  const o = inside ? [at[0], at[1]] : [38, h - 38], L = p.mode === "3d" ? 30 : 38;
+  g.lineWidth = 1.6; g.setLineDash([]); g.font = "bold 13px Segoe UI, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.lineCap = "butt";
+  for (const [name, v, c] of [["X", [1, 0, 0], "#ff1a1a"], ["Y", [0, 1, 0], "#1fd41f"], ["Z", [0, 0, 1], "#1a3cff"]]) {
+    const dx = dot(v, M.right), dy = dot(v, M.up), l = Math.hypot(dx, dy);
+    if (l < 0.08) continue;
+    const ex = o[0] + dx * L, ey = o[1] - dy * L, ux = dx / l, uy = -dy / l;
+    g.strokeStyle = g.fillStyle = c; g.beginPath(); g.moveTo(o[0], o[1]); g.lineTo(ex, ey); g.stroke();
+    g.beginPath(); g.moveTo(ex + ux * 2, ey + uy * 2); g.lineTo(ex - ux * 7 - uy * 4, ey - uy * 7 + ux * 4); g.lineTo(ex - ux * 7 + uy * 4, ey - uy * 7 - ux * 4); g.closePath(); g.fill();
+    if (p.mode === "plan" || !inside) g.fillText(name, ex + ux * 10, ey + uy * 10);
   }
+}
+function drawPlanColumns(p, g, to, T) {
+  // In plan the program marks each column that reaches the story with a small filled square.
+  const z = elevationOf(p.story); if (z === null || !p.vis) return;
+  const e = tol() * 10, done = new Set();
+  g.setLineDash([]); g.lineWidth = 1;
+  for (const f of frames) {
+    if (f.kind !== "column" || !p.vis[f.id]) continue;
+    const q = Math.abs(f.b[2] - z) <= e ? f.b : Math.abs(f.a[2] - z) <= e ? f.a : null; if (!q) continue;
+    const k = Math.round(q[0] * 1000) + "," + Math.round(q[1] * 1000); if (done.has(k)) continue; done.add(k);
+    const c = to(q); if (!c[3]) continue;
+    const x = Math.round(c[0]) + 0.5, y = Math.round(c[1]) + 0.5;
+    g.fillStyle = sel.has(f.id) ? T.pick : T.column; g.fillRect(x - 5, y - 5, 10, 10);
+    g.strokeStyle = "rgba(255,255,255,.85)"; g.beginPath(); g.moveTo(x - 2.5, y); g.lineTo(x + 2.5, y); g.moveTo(x, y - 2.5); g.lineTo(x, y + 2.5); g.stroke();
+  }
+}
+function ddMenu(btn, items) {
+  // The small menu under a docked window's drop-down button.
+  document.querySelectorAll(".ddm").forEach(m => m.remove());
+  const m = document.createElement("div"), r = btn.getBoundingClientRect(); m.className = "ddm";
+  m.style.top = r.bottom + "px"; m.style.left = Math.max(0, r.right - 150) + "px";
+  for (const [t, f, off] of items) { const d = document.createElement("div"); d.textContent = t; if (off) d.className = "off"; d.onclick = () => { m.remove(); f(); }; m.appendChild(d); }
+  document.body.appendChild(m);
+  setTimeout(() => addEventListener("pointerdown", function off(e) { if (!m.contains(e.target)) { m.remove(); removeEventListener("pointerdown", off, true); } }, true));
 }
 function paneTitle(p) {
   const what = res.mode === "design" && dview ? "Design: " + dview.title : res.mode === "deformed" ? (periodOf(res.case) ? `Mode Shape (${res.case} · ${periodOf(res.case)})` : `Deformed Shape (${res.case})`) : res.mode === "forces" ? `${compName()} Diagram (${res.case})` : res.mode === "shell" ? `Shell ${res.comp} (${res.case})` : res.mode === "values" && dview ? dview.title : res.mode === "loads" ? loadTitle() : res.mode === "contour" ? `Joint Displacement Contours (${res.case})` : res.mode === "reactions" ? `Joint Reactions (${res.case})` : $("colour").value === "ratio" ? "Design Ratios" : "";
@@ -2383,7 +2461,7 @@ function topStory() {
   if (program === "safe") { const z = slabLevel(), s = stories.find(s => Math.abs(s.elevation - z) <= tol() * 10); if (s) return s.name; }
   return stories.length ? stories[stories.length - 1].name : "";
 }
-const presetCam = {iso: {yaw: 2.27, pitch: 0.5}, top: {yaw: Math.PI / 2, pitch: Math.PI / 2 - 1e-4}, front: {yaw: Math.PI / 2, pitch: 0}, side: {yaw: Math.PI, pitch: 0}};
+const presetCam = {iso: {yaw: Math.PI / 4, pitch: 0.57}, top: {yaw: Math.PI / 2, pitch: Math.PI / 2 - 1e-4}, front: {yaw: Math.PI / 2, pitch: 0}, side: {yaw: Math.PI, pitch: 0}};
 function planeCam(p) {
   if (p.mode === "plan") return {...presetCam.top};
   if (p.mode === "elev") return p.line && p.line.dir === "X" ? {...presetCam.side} : {...presetCam.front};
@@ -2399,7 +2477,7 @@ function newPane(mode, n) {
 function buildPanes(before) {
   const modes = layouts[layout] || layouts[1], host = $("views");
   host.querySelectorAll(".pane").forEach(e => e.remove());
-  for (const p of panes) if (gl && p.aux) for (const b of [p.aux.grid, p.aux.level, p.aux.sup]) { gl.deleteBuffer(b.b); gl.deleteVertexArray(b.vao); }
+  for (const p of panes) if (gl && p.aux) for (const b of [p.aux.grid, p.aux.level, p.aux.sup, p.aux.ground]) { gl.deleteBuffer(b.b); gl.deleteVertexArray(b.vao); }
   host.style.gridTemplateColumns = layout === 1 ? "1fr" : layout === 4 ? "1fr 1fr" : "repeat(" + layout + ",1fr)";
   host.style.gridTemplateRows = layout === 4 ? "1fr 1fr" : "1fr";
   panes = [];
@@ -2411,10 +2489,11 @@ function buildPanes(before) {
       p.line = allLines().find(g => g.label + g.dir === was.line) || p.line;
     }
     const el = document.createElement("div"); el.className = "pane";
-    el.innerHTML = `<div class="ptitle"><span></span><button class="x" title="Close this window">&#10005;</button></div><div class="hold"><canvas></canvas><div class="nav"></div></div>`;
+    el.innerHTML = `<div class="ptitle"><span></span><button class="dd" title="Window Position">&#9660;</button><button class="x" title="Close this window">&#10005;</button></div><div class="hold"><canvas></canvas><div class="nav"></div></div>`;
     host.appendChild(el);
     p.el = el; p.title = el.firstChild; p.hold = el.querySelector(".hold"); p.cv = el.querySelector("canvas"); p.g = p.cv.getContext("2d"); p.nav = el.querySelector(".nav");
     el.querySelector(".ptitle .x").onclick = e => { e.stopPropagation(); closePane(p); };
+    el.querySelector(".ptitle .dd").onclick = e => { e.stopPropagation(); ddMenu(e.currentTarget, [[el.classList.contains("max") ? "Restore" : "Maximize", () => { el.classList.toggle("max"); draw(); }], ["Close", () => closePane(p)]]); };
     p.title.ondblclick = () => { el.classList.toggle("max"); draw(); };
     wire(p); panes.push(p);
     if (!was) requestAnimationFrame(() => { fit(p, false); draw(); });
@@ -2617,7 +2696,7 @@ function wire(p) {
     }
     if (d.act === "box" || d.act === "rubberzoom") {
       const r = {x0: Math.min(x, d.x0), x1: Math.max(x, d.x0), y0: Math.min(y, d.y0), y1: Math.max(y, d.y0)};
-      if (d.act === "rubberzoom") { const M = p.M, c = M.back((r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2), k = Math.max((r.x1 - r.x0) / M.w, (r.y1 - r.y0) / M.h, 0.002); go(p, {...p.cam, target: c, hh: p.cam.hh * k}); }
+      if (d.act === "rubberzoom") { p.camPrev = {...p.cam}; const M = p.M, c = M.back((r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2), k = Math.max((r.x1 - r.x0) / M.w, (r.y1 - r.y0) / M.h, 0.002); go(p, {...p.cam, target: c, hh: p.cam.hh * k}); }
       else boxSelect(p, r, x < d.x0, true);
     }
   });
@@ -2636,7 +2715,7 @@ function showCoords(p, x, y) {
   const q = p.M.back(x, y);
   if (p.mode === "plan") { const z = elevationOf(p.story); q[2] = z ?? q[2]; }
   if (p.mode === "elev" && p.line) q[p.line.dir === "X" ? 0 : 1] = p.line.at;
-  $("coords").textContent = p.mode === "3d" ? "" : `X ${num(q[0])}   Y ${num(q[1])}   Z ${num(q[2])}` + (unit ? "  " + unit : "");
+  $("coords").textContent = p.mode === "3d" ? "" : `X ${num(q[0])}  Y ${num(q[1])}  Z ${num(q[2])}` + (unit ? " (" + unit + ")" : "");
 }
 function scheduleHover(p, x, y, cx, cy) {
   clearTimeout(tipTimer); hideTip();
@@ -2713,17 +2792,121 @@ const I = {
 };
 const icon = k => `<svg viewBox="0 0 16 16">${I[k] || ""}</svg>`;
 // In the programs' order: file, then zoom (window, full, in, out, pan), then the views (3-D, plan, elevation, rotate).
-const bar = [["open", "Open a pack (Ctrl+O)", "open"], 0, ["zoom", "Rubber band zoom", "t:zoom"], ["fit", "Restore full view", "fit"], ["zin", "Zoom in one step", "zin"], ["zout", "Zoom out one step", "zout"], ["pan", "Pan", "t:pan"], 0,
-  ["3d", "Set 3-D view", "v:3d"], ["plan", "Set plan view", "v:plan"], ["elev", "Set elevation view", "v:elev"], ["orbit", "Rotate the 3-D view", "t:orbit"], ["persp", "Perspective on or off", "persp"], 0,
-  ["up", "Move up a story (Page Up)", "storyUp"], ["down", "Move down a story (Page Down)", "storyDown"], ["prev", "Previous grid line elevation", "linePrev"], ["next", "Next grid line elevation", "lineNext"], 0,
-  ["display", "Set display options", "dlg:display"], ["grid", "Grid lines", "o:grid"], ["extrude", "Extruded sections", "o:extrude"], ["fill", "Floors and walls", "o:fill"], ["supports", "Supports", "o:supports"], ["names", "Labels", "o:names"], ["axes", "Global axes", "o:axes"], ["bg", "Black or white background", "bg"], 0,
-  ["model", "Show undeformed shape (F4)", "r:model"], ["deformed", "Show deformed shape (F6)", "dlg:deformed", "deformed"], ["forces", "Show frame forces and moments (F8)", "dlg:forces", "forces"], ["contour", "Show joint displacement contours", "dlg:contour", "contour"], ["reactions", "Show support reactions", "dlg:reactions", "reactions"], ["ratios", "Show design ratios", "r:ratios", "ratios"], ["anim", "Animate the deformed shape", "anim"], 0,
-  ["plot", "Story response plot", "plot"], ["tables", "Show tables (Ctrl+T)", "tables"], 0, ["instab", "Check the model for instabilities: what would stop the analysis (F7)", "inst"]];
-$("icons").innerHTML = bar.map(b => b ? `<button class="ib" data-act="${b[2]}" ${b[3] ? `data-res="${b[3]}"` : ""} title="${b[1]}">${icon(b[0])}</button>` : `<span class="sep"></span>`).join("");
-$("icons").querySelector('[data-act="r:model"]').dataset.res = "model";
-const strip = [["select", "Select (click, or drag a box)", "t:select"], ["zoom", "Rubber band zoom", "t:zoom"], ["pan", "Pan", "t:pan"], ["orbit", "Rotate the 3-D view", "t:orbit"], 0, ["iso", "3-D view from the corner", "cam:iso"], ["top", "View from the top", "cam:top"], ["front", "View along Y (the X-Z plane)", "cam:front"], ["side", "View along X (the Y-Z plane)", "cam:side"], 0, ["all", "Select all", "selAll"], ["clear", "Clear the selection (Esc)", "selNone"], ["filter", "Filter the selection: keep only some kinds of object", "selFilter"], ["hide", "Hide the selected objects", "hideSel"], ["show", "Show all objects", "showAll"], ["info", "Information on the selected object", "info"]];
-$("strip").innerHTML = strip.map(b => b ? `<button class="ib" data-act="${b[2]}" title="${b[1]}">${icon(b[0])}</button>` : `<span class="sep"></span>`).join("");
-document.querySelectorAll("#icons [data-act], #strip [data-act]").forEach(b => b.onclick = () => act(b.dataset.act));
+// ---- the toolbar and the left strip, in the program's order, with our own drawings of its icons ----
+const ink = "#1f1f1f", navy = "#2c3e66", steel = "#5f7398", red = "#e01f1f";
+const mag = inner => `<circle cx="6.5" cy="6.5" r="4.4" fill="#fff" stroke="${ink}" stroke-width="1.5"/><path d="M9.7 9.7L14.2 14.2" stroke="${ink}" stroke-width="2.6" stroke-linecap="round"/>${inner}`;
+const txt = (s, c, size) => `<text x="8" y="12.2" font-size="${size || 10.4}" text-anchor="middle" fill="${c || "#3d4a7a"}" stroke="none" font-family="Segoe UI, Arial, sans-serif" font-weight="600">${s}</text>`;
+const dashBox = inner => `<rect x="1.5" y="1.5" width="13" height="13" fill="none" stroke="${ink}" stroke-dasharray="2.2 1.4"/>${inner}<circle cx="8" cy="8" r="1.6" fill="${red}" stroke="none"/>`;
+const pointer = (x, y, c) => `<path d="M${x} ${y}l0 8.5 2-2 1.6 3.2 1.3-.6-1.6-3.1 2.9-.2z" fill="${c || "#4c5a78"}" stroke="${ink}" stroke-width=".6"/>`;
+const EI = {
+  new: `<path d="M3.5 1.5h6l3 3v10h-9z" fill="#fff" stroke="#4a4a4a"/><path d="M9.5 1.5v3h3" fill="none" stroke="#4a4a4a"/>`,
+  open: `<path d="M2 4.5l6-3 6 3-6 3z" fill="#9fb0cf" stroke="${navy}" stroke-width=".8"/><path d="M2 4.5v6.5l6 3.5V7.5z" fill="#3e5482" stroke="${navy}" stroke-width=".8"/><path d="M8 7.5l6-3V11l-6 3.5z" fill="#6a80ad" stroke="${navy}" stroke-width=".8"/>`,
+  save: `<path d="M1.8 1.8h10.6l1.8 1.8v10.6H1.8z" fill="#3e5482" stroke="${navy}"/><path d="M4.3 1.8h6.6v4.4H4.3z" fill="#e4e9f2" stroke="none"/><path d="M8.6 2.6h1.4v2.8H8.6z" fill="#3e5482" stroke="none"/><path d="M3.8 8.6h8.4v5.6H3.8z" fill="#f6f6f6" stroke="none"/>`,
+  undo: `<path d="M3.5 7.5a5 4.2 0 1 1 1.6 4.8" fill="none" stroke="#7d7d7d" stroke-width="1.7"/><path d="M1 5.2l4.6 0-1.4 4.4z" fill="#7d7d7d" stroke="none"/>`,
+  redo: `<path d="M12.5 7.5a5 4.2 0 1 0-1.6 4.8" fill="none" stroke="#7d7d7d" stroke-width="1.7"/><path d="M15 5.2l-4.6 0 1.4 4.4z" fill="#7d7d7d" stroke="none"/>`,
+  pencil: `<path d="M3.2 12.8l.9-3.2 7.6-7.6 2.3 2.3-7.6 7.6z" fill="#3a3a3a" stroke="${ink}" stroke-width=".6"/><path d="M3.2 12.8l.9-3.2 2.3 2.3z" fill="#e2c891" stroke="none"/><path d="M2.5 14h4" stroke="${ink}"/>`,
+  lock: `<path d="M9.5 7.5V4.6a2.6 2.6 0 0 1 5.2 0V6" fill="none" stroke="${ink}" stroke-width="1.6"/><rect x="1.8" y="7.3" width="9.4" height="7.2" rx="1" fill="#2a2a2a" stroke="none"/><path d="M6.5 9.6v2.6" stroke="#d8d8d8" stroke-width="1.3"/>`,
+  run: `<path d="M5 2.8v10.4l7.5-5.2z" fill="#1c1c1c" stroke="none"/>`,
+  zoom: mag(`<rect x="4.4" y="4.4" width="4.2" height="4.2" fill="none" stroke="${ink}" stroke-width=".8" stroke-dasharray="1.2 .8"/>`),
+  fit: mag(`<rect x="4.3" y="4.3" width="4.4" height="4.4" fill="${ink}" stroke="none"/>`),
+  zprev: mag(`<path d="M8.6 6.5H4.6M6.2 4.8L4.4 6.5l1.8 1.7" fill="none" stroke="${ink}" stroke-width="1.1"/>`),
+  zin: mag(`<path d="M4.3 6.5h4.4M6.5 4.3v4.4" stroke="${ink}" stroke-width="1.3"/>`),
+  zout: mag(`<path d="M4.3 6.5h4.4" stroke="${ink}" stroke-width="1.3"/>`),
+  pan: `<path d="M1 4V1h3M12 1h3v3M15 12v3h-3M4 15H1v-3" fill="none" stroke="${ink}" stroke-width="1.1"/><path d="M5.2 9.6V5.4a.85.85 0 0 1 1.7 0V8V4.1a.85.85 0 0 1 1.7 0V8V4.6a.85.85 0 0 1 1.7 0v3.8V6.1a.85.85 0 0 1 1.7 0v4.2c0 1.9-1.4 3.2-3.2 3.2H8.2c-1.2 0-1.9-.6-2.6-1.5L3.9 9.9a.85.85 0 0 1 1.3-1.1z" fill="#fff" stroke="${ink}" stroke-width=".8"/>`,
+  ptr: `<circle cx="2.6" cy="13.4" r="1.3" fill="${ink}"/><circle cx="5.4" cy="10.6" r="1.3" fill="${ink}"/>${pointer(8, 2.5, "#4c5a78")}`,
+  t3d: txt("3-d"), tpl: txt("Pl"), tel: txt("El"), txy: txt("xy"), txz: txt("xz"), tyz: txt("yz"), tnd: txt("nd", "#a8a8a8"),
+  rot: `<path d="M12.4 4.4A5.2 5.2 0 1 0 13 9.6" fill="none" stroke="${ink}" stroke-width="1.7"/><path d="M14.4 1.6v5h-5z" fill="${ink}" stroke="none"/>`,
+  persp: `<circle cx="4.4" cy="10.3" r="2.7" fill="#fff" stroke="${ink}" stroke-width="1.3"/><circle cx="11.6" cy="10.3" r="2.7" fill="#fff" stroke="${ink}" stroke-width="1.3"/><path d="M7.1 10.1c.6-.6 1.2-.6 1.8 0M1.7 10L3.4 4.6H5M14.3 10l-1.7-5.4H11" fill="none" stroke="${ink}" stroke-width="1.1"/>`,
+  up: `<path d="M8 1.6l5.6 6.2H10.4v6.6H5.6V7.8H2.4z" fill="#b5bccb" stroke="#6b7489" stroke-width=".9"/>`,
+  down: `<path d="M8 14.4l5.6-6.2H10.4V1.6H5.6v6.6H2.4z" fill="#b5bccb" stroke="#6b7489" stroke-width=".9"/>`,
+  showall: `<path d="M1.5 1.5h4.8v4.8H1.5zM9.7 9.7h4.8v4.8H9.7z" fill="#dbe3f0" stroke="${navy}"/><path d="M1.5 9.7h4.8v4.8H1.5z" fill="none" stroke="${navy}" stroke-dasharray="1.4 1"/><path d="M8 3.9h5.5M11.6 2l1.9 1.9-1.9 1.9M8 12.1H2.5M4.4 10.2l-1.9 1.9 1.9 1.9" fill="none" stroke="${navy}" stroke-width="1.1"/>`,
+  dispopt: `<rect x="1.8" y="1.8" width="12.4" height="12.4" fill="#fff" stroke="${navy}" stroke-width="1.4"/><path d="M4.3 8.2l2.5 2.6 4.9-5.6" fill="none" stroke="${navy}" stroke-width="1.9"/>`,
+  loads: `<path d="M2 5.2L6 2h7.5v9L9.5 14.2H2z" fill="#eef1f6" stroke="${navy}"/><path d="M2 5.2h7.5V14.2M9.5 5.2L13.5 2" fill="none" stroke="${navy}"/><path d="M5.8 6.6v5M4 10l1.8 1.8L7.6 10" fill="none" stroke="${red}" stroke-width="1.1"/>`,
+  defsolid: `<path d="M2 5l4.6-3 7.4 2.6v7L9.4 14.6 2 12z" fill="#6c7fa8" stroke="${navy}"/><path d="M2 5l7.4 2.6 4.6-3M9.4 7.6v7" fill="none" stroke="#c8d2e6" stroke-width=".9"/>`,
+  undef: `<path d="M2.2 14.5V2.5h11.6v12" fill="none" stroke="${ink}" stroke-width="1.8"/><path d="M.8 14.5h4M11.2 14.5h4" stroke="${ink}" stroke-width="1.2"/>`,
+  react: `<path d="M2 3.5l6 8 6-8" fill="none" stroke="${ink}" stroke-width="1.4"/><path d="M5.2 13.8h5.6" stroke="${ink}" stroke-width="1.4"/><circle cx="8" cy="11.5" r="2" fill="${red}" stroke="none"/>`,
+  frc: `<path d="M2.2 14.2V3.2M7 14.2V3.2M11.8 14.2V3.2M1 14.2h14" fill="none" stroke="${navy}" stroke-width="1.2"/><path d="M2.2 4.5L5.2 6 2.2 7.5M7 6l3 1.5L7 9M11.8 8.5l2.6 1.4-2.6 1.4" fill="none" stroke="${red}" stroke-width=".9"/>`,
+  story: `<path d="M2 14.2V2.5M1 14.2h14M2 11h9M2 7.5h9M2 4h9" fill="none" stroke="${navy}" stroke-width="1"/><path d="M2.5 13.5l2.6-2.4 2.8-3.4 3.6-3.6" fill="none" stroke="#1d9a3c" stroke-width="1.4"/><path d="M13 12.5l2-2-2-2" fill="none" stroke="${navy}"/>`,
+  tbl: `<path d="M2.5 3.5h11v11h-11z" fill="#fff" stroke="${navy}"/><path d="M2.5 3.5h11v3h-11z" fill="#93a6c8" stroke="${navy}"/><path d="M2.5 10h11M6.4 6.5v8M10 6.5v8" stroke="${navy}" stroke-width=".8"/><path d="M1.5 1.6h13" stroke="${ink}" stroke-width="1.2"/>`,
+  modes: `<path d="M8 1.5v11.5" stroke="#8d8d8d" stroke-width="1.2"/><path d="M8 13l-3.2-3.3 2-.1-1-5.3 2.2 1.6z" fill="#9a9a9a" stroke="none"/><path d="M4.5 14.4h7" stroke="#8d8d8d" stroke-width="1.6"/>`,
+  contour: `<path d="M1.5 4.5h13v9h-13z" fill="#c9c9c9" stroke="#8d8d8d"/><path d="M1.5 8.5c3-2 5.5 2 8 0s3.5-1 5 0" fill="none" stroke="#f2f2f2" stroke-width="1.4"/><path d="M3 2.5h10" stroke="#8d8d8d" stroke-width="1.6"/>`,
+  shellc: `<path d="M1.5 3h4v11h-4M10.5 3h4v11h-4" fill="none" stroke="#8d8d8d" stroke-width="1.2"/><path d="M5.5 5l2.5 3 2.5-3M5.5 11l2.5-3 2.5 3" fill="none" stroke="#8d8d8d" stroke-width="1.2"/>`,
+  ratios: `<rect x="2" y="2" width="12" height="12" fill="#cfcfcf" stroke="#9a9a9a"/><circle cx="8" cy="8" r="3.6" fill="none" stroke="#f2f2f2" stroke-width="1.2"/><circle cx="8" cy="8" r="1.4" fill="#f2f2f2"/>`,
+  inst: `<path d="M3.5 12.5l9-9M3.5 3.5l9 9" stroke="#8d8d8d" stroke-width="1.2"/><path d="M10.5 1.8h3.7v3.7M5.5 14.2H1.8v-3.7" fill="none" stroke="#8d8d8d" stroke-width="1.2"/>`,
+  anim: `<path d="M3 13.5c2-6 4-8 10-11" fill="none" stroke="#8d8d8d" stroke-width="1.3" stroke-dasharray="2 1.4"/><path d="M11 1.4l3 .8-1.2 2.8z" fill="#8d8d8d"/>`,
+  dsteel: `<path d="M3.6 2.8h8.8M3.6 13.2h8.8M8 2.8v10.4" stroke="${ink}" stroke-width="2.2"/>`,
+  dconc: `<rect x="2.8" y="2" width="10.4" height="12" fill="#c3d2e6" stroke="${ink}" stroke-width="1.4"/><rect x="4.4" y="3.6" width="7.2" height="8.8" fill="none" stroke="#5b6f93" stroke-width=".8"/>`,
+  dcomp: `<path d="M1.6 2.6h12.8" stroke="${ink}" stroke-width="2.6"/><path d="M4.2 6.4h7.6M4.2 13.4h7.6M8 6.4v7" stroke="${ink}" stroke-width="2"/>`,
+  dcol: `<rect x="2" y="2" width="12" height="12" fill="#fff" stroke="${ink}" stroke-width="1.6"/><path d="M5 4.6h6M5 11.4h6M8 4.6v6.8" stroke="${ink}" stroke-width="1.8"/>`,
+  dwall: `<path d="M1.2 5.5h13.6M1.2 10.5h13.6" stroke="${ink}" stroke-width="1.2"/><path d="M1.6 10.3l2.6-4.6 2.6 4.6 2.6-4.6 2.6 4.6 2.6-4.6" fill="none" stroke="${ink}" stroke-width=".9"/>`,
+  dconn: `<path d="M12.6 2.6H3.4v10.8h9.2" fill="none" stroke="${ink}" stroke-width="2.2"/><path d="M6.4 5.4h6.2v5.2H6.4z" fill="#c3d2e6" stroke="#5b6f93" stroke-width=".8"/>`,
+  // The left strip.
+  select: pointer(4, 1.8, "#4c5a78"),
+  reshape: `<path d="M1 4.6h3.6M8.4 4.6H15" stroke="${ink}"/><rect x="4.6" y="2.6" width="3.8" height="3.8" fill="#fff" stroke="${ink}"/>${pointer(8.4, 6.6, "#4c5a78")}`,
+  dframe: `<path d="M3 3l10 10" stroke="${navy}" stroke-width="1.5"/><circle cx="3" cy="3" r="1.1" fill="${navy}"/><circle cx="13" cy="13" r="1.1" fill="${navy}"/>`,
+  dqbeam: dashBox(`<path d="M4 4l8 8" stroke="${navy}" stroke-width="1.4"/>`),
+  dqcol: dashBox(`<path d="M5.6 4h4.8M5.6 12h4.8M8 4v8" stroke="${navy}" stroke-width="1.4"/>`),
+  dqsec: dashBox(`<path d="M4.5 3.5v9M11.5 3.5v9M4.5 5.5h7M4.5 8h7M4.5 10.5h7" stroke="${navy}" stroke-width="1"/>`),
+  dqbr: dashBox(`<path d="M3.5 3.5l9 9M12.5 3.5l-9 9" stroke="${navy}" stroke-width="1.3"/>`),
+  dfloor: `<path d="M2.5 3h6.5l4.5 4v6.5h-11z" fill="#dfe6f1" stroke="${navy}" stroke-width="1.1"/><circle cx="2.5" cy="3" r=".9" fill="${navy}"/><circle cx="9" cy="3" r=".9" fill="${navy}"/><circle cx="13.5" cy="7" r=".9" fill="${navy}"/><circle cx="13.5" cy="13.5" r=".9" fill="${navy}"/><circle cx="2.5" cy="13.5" r=".9" fill="${navy}"/>`,
+  drect: `<path d="M2 2.5h12v11H2z" fill="#dfe6f1" stroke="${navy}" stroke-width="1.1"/><circle cx="2" cy="2.5" r=".9" fill="${navy}"/><circle cx="14" cy="13.5" r=".9" fill="${navy}"/>`,
+  dqfloor: `<rect x="1.5" y="1.5" width="13" height="13" fill="none" stroke="${ink}" stroke-dasharray="2.2 1.4"/><rect x="3" y="3" width="10" height="10" fill="#dfe6f1" stroke="${navy}" stroke-width=".9"/><circle cx="8" cy="8" r="1.6" fill="${red}"/>`,
+  dcirc: `<rect x="2" y="2" width="12" height="12" fill="#e6e6e6" stroke="#a5a5a5"/><circle cx="8" cy="8" r="4.3" fill="none" stroke="#a5a5a5"/><circle cx="8" cy="8" r=".9" fill="#a5a5a5"/>`,
+  dwallL: `<path d="M3 2.5v11h10V10" fill="none" stroke="#7d8aa3" stroke-width="2.4"/>`,
+  dqwall: `<rect x="1.5" y="1.5" width="13" height="13" fill="none" stroke="${ink}" stroke-dasharray="2.2 1.4"/><path d="M4 3.5v8.5h8V9.5" fill="none" stroke="#7d8aa3" stroke-width="2.2"/><circle cx="8" cy="8" r="1.3" fill="${red}"/>`,
+  djoint: `<path d="M2.5 2.5l11 11" stroke="${navy}" stroke-width="1.2"/><path d="M8 4.5L11.5 8 8 11.5 4.5 8z" fill="#9fb0cf" stroke="${navy}"/>`,
+  dgrid: `<path d="M2 2h12v12H2z" fill="#dfe6f1" stroke="${navy}" stroke-width="1.1"/><path d="M2 6h12M2 10h12M6 2v12M10 2v12" stroke="${navy}" stroke-width="1.1"/>`,
+  sall: `<text x="0" y="14.5" font-size="8.5" fill="#3d4a7a" stroke="none" font-family="Segoe UI, Arial, sans-serif" font-weight="600">all</text>${pointer(9.5, 1.2, "#4c5a78")}`,
+  sps: `<text x="0" y="14.5" font-size="8.5" fill="#3d4a7a" stroke="none" font-family="Segoe UI, Arial, sans-serif" font-weight="600">ps</text>${pointer(9.5, 1.2, "#4c5a78")}`,
+  sclr: `<text x="0" y="14.5" font-size="8.5" fill="#3d4a7a" stroke="none" font-family="Segoe UI, Arial, sans-serif" font-weight="600">clr</text>${pointer(9.5, 1.2, "#4c5a78")}`,
+  sint: `<path d="M1.5 13.5l9-9" stroke="${navy}" stroke-width="1.4"/><path d="M2 3h.1M4.5 3h.1M2 5.5h.1M2 8h.1M7 11h.1M9.5 11h.1M12 11h.1M12 13.5h.1M9.5 13.5h.1" stroke="#8d97ad" stroke-width="1.6" stroke-linecap="round"/>${pointer(9.5, 1.2, "#4c5a78")}`,
+};
+const eicon = k => `<svg viewBox="0 0 16 16">${EI[k] || I[k] || ""}</svg>`;
+const designDrops = [["dsteel", "Steel Frame Design", "steel"], ["dconc", "Concrete Frame Design", "concrete"], ["dcomp", "Composite Beam Design", "composite"], ["dcol", "Composite Column Design", "compcol"], ["dwall", "Shear Wall Design", "pier"], ["dconn", "Steel Connection Design", "connection"]];
+function buildBars() {
+  const live = !!window.cpmLive, sap = program === "sap2000", safe = program === "safe";
+  const bar = [
+    ...(live ? [["new", "New Model... (Ctrl+N)", "m:new"], ["open", "Open... (Ctrl+O)", "m:open"], ["save", "Save (Ctrl+S)", "m:save"], 0, ["undo", "Undo (Ctrl+Z)", "m:undo"], ["redo", "Redo (Ctrl+Y)", "m:redo"], 0,
+      ["pencil", "Draw Frame/Cable", "d:beam"], 0, ["lock", "Lock/Unlock Model (unlocking removes the results)", "eng:clear"], 0, ["run", "Run Analysis (F5)", "eng:run"], 0] : [["open", "Open a pack (Ctrl+O)", "open"], 0]),
+    ["zoom", "Rubber Band Zoom", "t:zoom"], ["fit", "Restore Full View", "fit"], ["zprev", "Restore Previous Zoom", "zprev"], ["zin", "Zoom In One Step", "zin"], ["zout", "Zoom Out One Step", "zout"], 0,
+    ["pan", "Pan", "t:pan"], ["ptr", "Select Object (click, or drag a window)", "t:select"], 0,
+    ["t3d", "Set Default 3D View", "v:3d"], [sap ? "txy" : "tpl", sap ? "Set XY View" : "Set Plan View", "v:plan"], [sap ? "txz" : "tel", sap ? "Set XZ View" : "Set Elevation View", "v:elev"], ...(sap ? [["tyz", "Set YZ View", "cam:side"]] : []), ["tnd", "Set Named View (no named views in this model)", ""],
+    ["rot", "Rotate 3D View", "t:orbit"], ["persp", "Perspective Toggle", "persp"], 0,
+    ["up", "Move Up in List (Page Up)", "storyUp"], ["down", "Move Down in List (Page Down)", "storyDown"], 0,
+    ["showall", "Show All", "showAll"], ["dispopt", "Set Display Options (Ctrl+W)", "dlg:display"], ["loads", "Show Load Assigns", "dd:loads", "", 1], ["defsolid", "Show Deformed Shape (F6)", "dd:deformed", "", 1], 0,
+    ["undef", "Show Undeformed Shape (F4)", "r:model", "model"], ["react", "Show Joint Reactions", "dlg:reactions", "reactions"], ["frc", "Show Frame Forces/Stresses (F8)", "dlg:forces", "forces"], ["story", sap ? "Show Plot Functions" : "Story Response Plots", "plot"], 0,
+    ["tbl", "Show Tables (Ctrl+T)", "tables"], 0,
+    ["modes", "Show Mode Shape", "dlg:modes", "deformed"], ["contour", "Show Joint Displacement Contours", "dlg:contour", "contour"], ["shellc", "Show Shell Forces/Stresses", "dlg:shells", "shell"], ["ratios", "Show Design Ratios", "r:ratios", "ratios"], ["anim", "Animate the Deformed Shape", "anim"], ["inst", "Check the Model for Instabilities (F7)", "inst"],
+    "grow", ...designDrops.filter(d => safe ? false : sap ? ["steel", "concrete"].includes(d[2]) : true).map(d => [d[0], d[1], "dd:des:" + d[2], "", 1])];
+  const strip = [["select", "Select Object", "t:select"], ["reshape", "Reshape Object (not in CSI ProMax yet)", "", 0, 0, 1], 0,
+    ...(live ? [["dframe", "Draw Beam/Column/Brace (click start and end)", "d:beam"], ["dqbeam", "Quick Draw Beams/Columns (click a grid line)", "d:qbeam"], ["dqcol", "Quick Draw Columns (click a point)", "d:column"], ["dqsec", "Quick Draw Secondary Beams (not in CSI ProMax yet)", "", 0, 0, 1], ["dqbr", "Quick Draw Braces (click bottom and top)", "d:brace"], 0,
+      ["dfloor", "Draw Floor/Wall (click corners)", "d:floor"], ["drect", "Draw Rectangular Floor/Wall (two corners)", "d:rect"], ["dqfloor", "Quick Draw Floor/Wall (click in a bay)", "d:qfloor"], ["dcirc", "Draw Circular Floor (not in CSI ProMax yet)", "", 0, 0, 1], 0,
+      ["dwallL", "Draw Walls (click start and end)", "d:wall"], ["dqwall", "Quick Draw Walls (click a grid line)", "d:qwall"], 0,
+      ["djoint", "Draw Joints (click a point)", "d:joint"], 0, ["dgrid", "Edit Grid Data", "dlg:grids"]] : []),
+    "grow", ["sall", "Select All (Ctrl+A)", "selAll"], ["sps", "Get Previous Selection", "selPrev"], ["sclr", "Clear Selection (Esc)", "selNone"], ["sint", "Select Using Intersecting Line (not in CSI ProMax yet)", "", 0, 0, 1]];
+  const html = list => list.map(b => b === "grow" ? `<span class="grow"></span>` : !b ? `<span class="sep"></span>`
+    : `<button class="ib${b[4] ? " ddb" : ""}" ${b[2] ? `data-act="${b[2]}"` : ""} ${b[3] ? `data-res="${b[3]}"` : ""} ${b[5] || !b[2] ? "disabled" : ""} title="${esc(b[1])}">${eicon(b[0])}</button>`).join("");
+  $("icons").innerHTML = html(bar); $("strip").innerHTML = html(strip);
+  document.querySelectorAll("#icons [data-act], #strip [data-act]").forEach(b => b.onclick = e => { e.stopPropagation(); act(b.dataset.act); });
+  if (typeof syncTools === "function" && panes.length) syncTools();
+}
+function ddOpen(key) {
+  // The program's drop-down toolbar buttons: the same items as its menus.
+  const btn = document.querySelector(`[data-act="dd:${key}"]`), leaf = l => (l || []).filter(i => i && !Array.isArray(i[1])).map(i => [i[0], () => act(i[1]), !!i[3]]);
+  const find = (list, re) => { for (const i of list || []) { if (!i) continue; if (Array.isArray(i[1])) { if (re.test(i[0])) return i[1]; const r = find(i[1], re); if (r) return r; } } return null; };
+  const m = menus();
+  let items;
+  if (key === "loads") items = leaf(find(m.Display, /load assigns/i));
+  else if (key === "deformed") items = [["Deformed Shape...", () => act("dlg:deformed"), !disp.size], ["Mode Shapes...", () => act("dlg:modes"), !modeCases().length], ["Animate", () => act("anim"), res.mode !== "deformed"]];
+  else if (key.startsWith("des:")) {
+    const fam = key.slice(4), sub = find(m.Design, new RegExp("^" + (famInfo[fam] || fam).replace(/[^a-z ]/gi, ".") + "$", "i"));
+    items = sub ? leaf(sub) : [];
+    if (window.cpmLive) items.unshift(["Start Design/Check...", () => act("eng:design"), false]);
+    if (!sub) items.push(["No " + (famInfo[fam] || fam).toLowerCase() + " results in this model", () => {}, true]);
+  }
+  if (btn && items && items.length) ddMenu(btn, items);
+}
+buildBars();
 
 function syncTools() {
   const p = panes[active]; if (!p) return;
@@ -2798,6 +2981,7 @@ function act(name) {
   if (name.startsWith("r:")) return setRes(name.slice(2));
   if (name.startsWith("o:")) { const k = name.slice(2); opt[k] = !opt[k]; if (k === "extrude" || k === "sections") { geometryDirty = true; geometryStamp++; } if (k === "fill") hiddenVersion++; if (k === "explorer") $("explorer").hidden = !opt.explorer; if (k === "side") $("right").hidden = !opt.side; syncTools(); return draw(); }
   if (name.startsWith("m:")) return modelAct(name.slice(2));
+  if (name.startsWith("dd:")) return ddOpen(name.slice(3));
   if (name === "eng:import") { const f = document.createElement("input"); f.type = "file"; f.accept = ".cpmx,.zip,.json"; f.onchange = () => { if (f.files[0]) engineImport(f.files[0]); }; return f.click(); }
   if (name === "eng:clear") return engineClear();
   if (name === "eng:run" || name === "eng:runDesign" || name === "eng:design") return engineRun(name === "eng:run" ? "analysis" : name === "eng:design" ? "design" : "both");
@@ -2819,10 +3003,12 @@ function act(name) {
   switch (name) {
     case "open": return $("file").click();
     case "saveComments": return $("save").click();
-    case "fit": return panes.forEach(q => fit(q));
+    case "fit": panes.forEach(q => q.camPrev = {...q.cam}); return panes.forEach(q => fit(q));
+    case "zprev": if (p && p.camPrev) { const was = {...p.cam}; go(p, p.camPrev); p.camPrev = was; } return;
+    case "selPrev": for (const id of prevSel.f) sel.add(id); for (const n of prevSel.j) selJ.add(n); return selChanged();
     case "fitActive": return p && fit(p);
-    case "zin": return zoomAll(0.8);
-    case "zout": return zoomAll(1.25);
+    case "zin": panes.forEach(q => q.camPrev = {...q.cam}); return zoomAll(0.8);
+    case "zout": panes.forEach(q => q.camPrev = {...q.cam}); return zoomAll(1.25);
     case "persp": if (p && p.mode === "3d") { go(p, {...p.cam, persp: !p.cam.persp}, false); syncTools(); } return;
     case "storyUp": return stepStory(1);
     case "storyDown": return stepStory(-1);
@@ -2833,7 +3019,7 @@ function act(name) {
     case "tables": return showTables($("dock").hidden);
     case "anim": res.anim = !res.anim && res.mode === "deformed"; syncResults(); return draw();
     case "selAll": for (const o of frames.concat(areas)) if (!p || !p.vis || p.vis[o.id]) sel.add(o.id); return selChanged();
-    case "selNone": sel.clear(); selJ.clear(); return selChanged();
+    case "selNone": if (sel.size || selJ.size) prevSel = {f: [...sel], j: [...selJ]}; sel.clear(); selJ.clear(); return selChanged();
     case "selJoints": if (p) for (const j of jointsIn(p)) selJ.add(j.name); return selChanged();
     case "selSupports": if (p) for (const s of supports) if (supportShown(p, s)) selJ.add(s.name); return selChanged();
     case "selFilter": return selFilter();
@@ -2875,6 +3061,7 @@ function programLook() {
   const similar = $("similarWrap"); if (similar && program === "sap2000") similar.hidden = true;
   // ETABS and SAFE have a Detailing menu (after Design); SAP2000 has none.
   const det = document.querySelector('[data-menu="Detailing"]'); if (det) det.hidden = program === "sap2000";
+  buildBars();
 }
 function forProgram(m) {
   const tidy = list => {
@@ -3748,6 +3935,7 @@ function markTree() {
   document.querySelectorAll("#tree [data-sec]").forEach(el => el.classList.toggle("cur", !!lit && lit.type === el.dataset.sec && lit.name === el.dataset.v));
 }
 document.querySelectorAll("[data-close]").forEach(b => b.onclick = () => act(b.dataset.close));
+$("explorerDD").onclick = e => { e.stopPropagation(); ddMenu(e.currentTarget, [["Close", () => act("explorer")]]); };
 
 // ---- side panel ----
 function showTab(name) { document.querySelectorAll("[data-tab]").forEach(x => x.classList.toggle("on", x.dataset.tab === name)); document.querySelectorAll(".tab").forEach(t => t.classList.toggle("on", t.id === name)); }
@@ -5679,19 +5867,13 @@ const drawIcons = {
   save: '<path d="M2 2h10l2 2v10H2z"/><path d="M5 2v4h6V2M4.5 14V9.5h7V14" class="c1"/>', del: '<path d="M3 4h10M6 4V2.5h4V4M4.5 4l.8 10h5.4l.8-10"/><path d="M7 6.5v5M9 6.5v5" class="c4"/>',
 };
 function modelerStart() {
-  appMenuLoad();
+  appMenuLoad(); document.documentElement.classList.add("live");
   // One program window as the CSI programs: no side panel at first (the chat is on the window's right); View > Side Panel shows it.
   opt.side = false; $("right").hidden = true;
   document.querySelectorAll('[data-menu="Draw"], [data-menu="Assign"]').forEach(m => m.hidden = false);
   document.querySelector('[data-menu="File"]').hidden = false;
   $("similarWrap").hidden = program === "sap2000";
-  const sb = [["d:column", "Draw columns (click a point)"], ["d:beam", "Draw beams (click start and end)"], ["d:qbeam", "Quick draw beams (click a grid line)"], ["d:wall", "Draw walls"], ["d:qwall", "Quick draw walls (click a grid line)"], ["d:floor", "Draw floors (click corners)"], ["d:rect", "Draw rectangular floors (two corners)"], ["d:qfloor", "Quick draw floors (click in a bay)"], ["d:brace", "Draw braces (click bottom and top)"], ["d:joint", "Draw joints (click a point)"]];
-  $("strip").insertAdjacentHTML("beforeend", `<span class="sep"></span>` + sb.map(b => `<button class="ib" data-act="${b[0]}" title="${b[1]}"><svg viewBox="0 0 16 16">${drawIcons[b[0]]}</svg></button>`).join(""));
-  // As the programs: Save, Undo, Redo, then the lock (Unlock Model) and Run Analysis.
-  const ib = [["m:save", "Save (Ctrl+S)", "save"], 0, ["m:undo", "Undo (Ctrl+Z)", "undo"], ["m:redo", "Redo (Ctrl+Y)", "redo"], 0, ["eng:clear", "Unlock Model (removes the results)", "lock"], ["eng:run", "Run Analysis (F5)", "run"]];
-  const open = $("icons").querySelector('[data-act="open"]');
-  open.insertAdjacentHTML("afterend", ib.map(b => b ? `<button class="ib" data-act="${b[0]}" title="${b[1]}"><svg viewBox="0 0 16 16">${drawIcons[b[2]]}</svg></button>` : `<span class="sep"></span>`).join(""));
-  document.querySelectorAll("#strip [data-act^='d:'], #icons [data-act^='m:'], #icons [data-act^='eng:']").forEach(b => b.onclick = () => act(b.dataset.act));
+  buildBars();
   $("similar").onchange = e => { hm.similar = e.target.value; showObjBox(); $("hint").textContent = hintText(); };
   document.addEventListener("keydown", e => {
     if (e.target.closest && e.target.closest("input, textarea, select") || document.querySelector(".veil")) return;
@@ -5712,7 +5894,7 @@ function start() {
   initGL();
   if (window.cpmLive) {
     // The Modeler's own view: it follows the model as the chat builds it. Review tools stay with the Viewer.
-    $("app").textContent = "CSI ProMax Engine"; document.querySelector('[data-act="open"]').hidden = true;
+    $("app").textContent = "CSI ProMax Engine"; { const o = document.querySelector('#icons [data-act="open"]'); if (o) o.hidden = true; }
     document.querySelector('[data-tab="comments"]').hidden = true; document.querySelector('[data-tab="checks"]').hidden = true;
     document.querySelector('[data-menu="File"]').hidden = true;
     modelerStart();
