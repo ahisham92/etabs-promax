@@ -1397,10 +1397,10 @@ function periodOf(c) {
   const r = t.rows.find(r => +r[mi] === +m[1] && (ci < 0 || String(r[ci]) === name)); return r && pi >= 0 ? "T = " + fmt(parseFloat(r[pi])) + " sec" : "";
 }
 function openModes() {
+  // As the programs' Mode Shape form: the modal case and its mode number (with its period), then the Deformed Shape's own fields.
   const ms = modeCases(); if (!ms.length) return;
-  dialog("Mode Shape", `<fieldset><legend>Mode</legend><div class="g2"><span>Case and mode</span><select id="dCase">${ms.map(c => `<option ${c === res.case ? "selected" : ""} value="${esc(c)}">${esc(c)}${periodOf(c) ? "   " + esc(periodOf(c)) : ""}</option>`).join("")}</select></div></fieldset>
-    <fieldset><legend>Options</legend><div class="g3"><label><input type="checkbox" id="dAnim" ${res.anim ? "checked" : ""}>Animate</label><label><input type="checkbox" id="dGhost" ${res.ghost ? "checked" : ""}>Wire shadow (undeformed)</label></div></fieldset>`,
-    [["OK", d => { res.mode = "deformed"; res.ghost = q(d, "#dGhost").checked; res.anim = q(d, "#dAnim").checked; syncResults(); res.case = q(d, "#dCase").value; $("case").value = res.case; pointsDirty = true; syncResults(); syncTools(); draw(); }], ["Cancel"]], {width: 420});
+  if (!ms.includes(res.case)) res.case = ms[0];
+  dialogs.deformed(ms, "Mode Shape");
 }
 // ---- every table row about one object, for its information window ----
 function objectRows(o) {
@@ -2985,7 +2985,7 @@ function caseBoxWire(d, list) {
   const pick = () => { const st = steps(), m = q(d, "#dMulti"); m.style.opacity = st.length ? "" : ".45"; q(d, "#dStep").disabled = !st.length;
     q(d, "#dByL").textContent = st.length && casePart(st[0]).by === "Step" ? "Step number" : "Mode number";
     const want = casePart(q(d, "#dCase").value), keep = st.find(c => casePart(c).n === want.n) || st[0];
-    q(d, "#dStep").innerHTML = st.length ? opts(st.map(c => [c, casePart(c).n]), keep) : "";
+    q(d, "#dStep").innerHTML = st.length ? opts(st.map(c => [c, casePart(c).n + (periodOf(c) ? "   (" + periodOf(c) + ")" : "")]), keep) : "";
     q(d, "#dCase").value = st.length ? keep : q(d, "#dBase").value; };
   q(d, "#dType").onchange = () => { const b = [...new Set(list.filter(c => typeOf(c) === q(d, "#dType").value).map(c => casePart(c).base))]; q(d, "#dBase").innerHTML = opts(b, b[0]); pick(); };
   q(d, "#dBase").onchange = pick; q(d, "#dStep").onchange = () => { q(d, "#dCase").value = q(d, "#dStep").value; };
@@ -3013,11 +3013,11 @@ const dialogs = {
       <fieldset><legend>Display Options</legend><div class="g2"><label><input type="checkbox" id="dFill" ${res.fill ? "checked" : ""}>Fill Diagram</label><label><input type="checkbox" id="dVals" ${res.values ? "checked" : ""}>Show Values on Diagram</label></div></fieldset>`,
       [["OK", d => applyForces(d)], ["Close"], ["Apply", d => { applyForces(d); return false; }, true]], {width: 470}), list);
   },
-  deformed() {
+  deformed(only, title) {
     if (!disp.size) return;
     // As ETABS's and SAP2000's Deformed Shape: case, scaling, contours drawn on the objects, wire shadow.
-    const list = resCases("deformed"), on = res.mode === "contour", comp = on ? res.comp : "U";
-    caseBoxWire(dialog("Deformed Shape", `${caseBox(list)}
+    const list = Array.isArray(only) ? only : resCases("deformed"), on = res.mode === "contour", comp = on ? res.comp : "U";
+    caseBoxWire(dialog(title || "Deformed Shape", `${caseBox(list)}
       <fieldset><legend>Scaling</legend><div class="g2"><label><input type="radio" name="sc" value="auto" ${res.userScale ? "" : "checked"}>Automatic</label><span></span><label><input type="radio" name="sc" value="user" ${res.userScale ? "checked" : ""}>Scale Factor</label><input type="number" id="dScale" step="any" value="${res.userScale || ""}"></div></fieldset>
       <fieldset><legend>Contour Options</legend><div class="g2"><label><input type="checkbox" id="dCont" ${on ? "checked" : ""}>Draw Contours on Objects</label><span></span><span>Contour Component</span><select id="dComp">${opts([["UX", "Ux"], ["UY", "Uy"], ["UZ", "Uz"], ["U", "Resultant"]], comp)}</select></div></fieldset>
       <fieldset><legend>Other Options</legend><div class="g2"><label><input type="checkbox" id="dGhost" ${res.ghost ? "checked" : ""}>Wire Shadow</label><label><input type="checkbox" id="dAnim" ${res.anim ? "checked" : ""}>Animate</label><label><input type="checkbox" id="dExt" ${opt.extrude ? "checked" : ""}>Extruded Sections</label></div></fieldset>`,
