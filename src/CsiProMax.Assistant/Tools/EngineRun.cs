@@ -1,4 +1,6 @@
+using System.Collections.Concurrent;
 using System.IO;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using CsiProMax.Assistant.Etabs;
 
@@ -6,14 +8,26 @@ namespace CsiProMax.Assistant.Tools;
 
 /// <summary>
 /// CSI ProMax Engine's Analyze > Run (Ahmed 2026-11-26): the model is written for its program, the program is started
-/// in a window of its own (never the one the engineer has open), hidden, given the model, analysed (and designed when
-/// asked); every result and design table comes back as a review pack beside the model, and the program is closed at
-/// once. The program's licence is used only while it runs. The program's own notices (analysis complete, the
-/// maintenance reminder, "really close?") are answered as the field test answers them; a licence message is never
-/// answered, and the run says plainly that it is waiting on one.
+/// in a window of its own (never the one the engineer has open), hidden, given the model, analysed and designed as the
+/// Run form asks; every result and design table comes back as a review pack beside the model. The program's own notices
+/// (analysis complete, the maintenance reminder, "really close?") are answered as the field test answers them; a
+/// licence message is never answered, and the run says plainly that it is waiting on one.
+///
+/// Each job closes the program as soon as it is done (Ahmed 2026-11-26 18:59): the licence is used only while it
+/// runs. The Run form asks for the analysis, the design of the kinds ticked, or both. The analysed model the program
+/// saved is kept in the run folder: a design asked on a model that has not changed since is run on that saved model,
+/// opened as it is with its results, so the analysis is not run again; a changed model is analysed first.
 /// </summary>
 public static class EngineRun
 {
+    /// <summary>The design kinds each program can run from the Run form, in its own words.</summary>
+    public static readonly IReadOnlyDictionary<string, (string Kind, string Name)[]> Kinds = new Dictionary<string, (string, string)[]>
+    {
+        ["etabs"] = [("steel", "Steel frames"), ("concrete", "Concrete frames"), ("composite", "Composite beams"), ("shear_wall", "Shear walls (piers and spandrels)"), ("slab", "Concrete slabs")],
+        ["sap2000"] = [("steel", "Steel frames"), ("concrete", "Concrete frames")],
+        ["safe"] = [("slab", "Slabs, strips and punching")],
+    };
+
     private static readonly object Gate = new();
     private static readonly List<string> Lines = [];
     private static string _phase = "", _program = "", _error = "", _packFile = "";
@@ -22,28 +36,74 @@ public static class EngineRun
     private static JsonObject? _pack;
     private static OfflineEtabs? _model;
 
-    /// <summary>Starts a run on the Modeler's model. Called on the window's thread (it reads the model); the run goes on in the background.</summary>
+    // The last analysis: the model it was of, its revision, and the program's own file holding its results.
+    private static OfflineEtabs? _analysedModel;
+    private static int _analysedRevision = -1;
+    private static string _analysedFile = "", _analysedProgram = "";
+    private static int _starts;
+
+    private static readonly BlockingCollection<Action> Queue = new();
+    private static readonly Thread Worker = MakeWorker();
+
+    private static Thread MakeWorker()
+    {
+        var t = new Thread(() => { foreach (var job in Queue.GetConsumingEnumerable()) { try { job(); } catch (Exception ex) when (ex is not OutOfMemoryException) { } } }) { IsBackground = true, Name = "CSI ProMax Engine run" };
+        try { t.SetApartmentState(ApartmentState.STA); } catch (PlatformNotSupportedException) { }
+        t.Start();
+        return t;
+    }
+
+    private static void Post(Action job) { _ = Worker; Queue.Add(job); }
+
+    /// <summary>A run of the analysis (when <paramref name="design"/>, the design of every kind the program has too).</summary>
     public static JsonObject Start(OfflineEtabs model, bool design, Func<CsiProgram, string>? apiFile = null)
     {
-        var program = model.Model.Target switch { "sap2000" => CsiProgram.Sap2000, "safe" => CsiProgram.Safe, _ => CsiProgram.Etabs };
+        var program = ProgramOf(model);
+        return Start(model, analyse: true, design ? Kinds[program.Key].Select(k => k.Kind).ToList() : [], apiFile);
+    }
+
+    /// <summary>
+    /// Starts a run on the Modeler's model. Called on the window's thread (it reads the model); the run goes on in the
+    /// background. <paramref name="analyse"/>: run the analysis (skipped when the program holds this model unchanged
+    /// and analysed). <paramref name="kinds"/>: the designs to run after it.
+    /// </summary>
+    public static JsonObject Start(OfflineEtabs model, bool analyse, IReadOnlyList<string> kinds, Func<CsiProgram, string>? apiFile = null, IReadOnlyList<string>? selected = null)
+    {
+        var program = ProgramOf(model);
+        var unknown = kinds.Where(k => !Kinds[program.Key].Any(x => x.Kind == k)).ToList();
+        if (unknown.Count > 0) return new JsonObject { ["ok"] = false, ["error"] = $"{program.Name} has no {string.Join(", ", unknown)} design." };
+        if (!analyse && kinds.Count == 0) return new JsonObject { ["ok"] = false, ["error"] = "Nothing was asked: tick the analysis or a design." };
         lock (Gate)
         {
             if (_running) return new JsonObject { ["ok"] = false, ["error"] = $"A run in {_program} is still going ({_phase})." };
             var api = (apiFile ?? (p => EtabsApi.FindApiFile(p)))(program);
             if (!File.Exists(api))
                 return new JsonObject { ["ok"] = false, ["error"] = $"{program.Name} is not installed on this PC, so the model cannot be run here. Save it (File > Save) and open the {(program.Key == "etabs" ? ".e2k" : program.Key == "sap2000" ? ".s2k" : ".f2k")} on a PC with {program.Name}, or run it there and open its review pack with File > Import > Results." };
-            string file;
+            var current = AnalysedNow(model, program);
+            string file = "";
             var folder = RunFolder(model);
-            try { file = model.WriteForRun(Path.Combine(folder, Safe(model.Model.Title) + ".e2k")); }
-            catch (EtabsException ex) { return new JsonObject { ["ok"] = false, ["error"] = ex.Message }; }
+            if (!current)
+                try { file = model.WriteForRun(Path.Combine(folder, Safe(model.Model.Title) + ".e2k")); }
+                catch (EtabsException ex) { return new JsonObject { ["ok"] = false, ["error"] = ex.Message }; }
             Lines.Clear(); _error = ""; _pack = null; _packFile = ""; _done = false; _running = true;
             _program = program.Name; _model = model; _startRevision = model.Revision;
             _phase = $"Starting {program.Name} in the background";
-            Lines.Add($"The model was written for {program.Name}: {file}");
-            _ = Task.Run(() => Work(program, folder, file, design));
-            return new JsonObject { ["ok"] = true, ["program"] = program.Name, ["file"] = file };
+            if (file.Length > 0) Lines.Add($"The model was written for {program.Name}: {file}");
+            // A design on its own still needs the analysis behind it: a model not analysed as it is now is analysed first.
+            var mustAnalyse = !current;
+            var analysed = _analysedFile;
+            var only = kinds.Count > 0 && selected is { Count: > 0 } ? Where(model, selected) : null;
+            if (only is not null) Lines.Add($"The design is for the {selected!.Count} selected objects only.");
+            Post(() => Work(program, folder, mustAnalyse ? file : analysed, mustAnalyse, analyse, kinds, only));
+            return new JsonObject { ["ok"] = true, ["program"] = program.Name, ["file"] = file, ["analyses"] = mustAnalyse };
         }
     }
+
+    /// <summary>Whether the program's saved analysis is of this model as it is now (same model, same revision, file still there).</summary>
+    private static bool AnalysedNow(OfflineEtabs model, CsiProgram program) =>
+        ReferenceEquals(_analysedModel, model) && _analysedRevision == model.Revision && _analysedProgram == program.Key && File.Exists(_analysedFile);
+
+    private static CsiProgram ProgramOf(OfflineEtabs model) => model.Model.Target switch { "sap2000" => CsiProgram.Sap2000, "safe" => CsiProgram.Safe, _ => CsiProgram.Etabs };
 
     /// <summary>Where a run's files go: a folder beside the model's own file, named after it (Ahmed 2026-11-25: packs in the model's folder).</summary>
     internal static string RunFolder(OfflineEtabs model)
@@ -61,49 +121,119 @@ public static class EngineRun
 
     private static void Say(string phase) { lock (Gate) { _phase = phase; Lines.Add(phase + "..."); } }
 
-    private static void Work(CsiProgram program, string folder, string file, bool design)
+    /// <summary>The arguments of run_design for the kinds asked, in each program's own tool.</summary>
+    internal static string DesignArgs(CsiProgram program, IReadOnlyList<string> kinds) => program.Key == "sap2000"
+        ? JsonSerializer.Serialize(new { steel = kinds.Contains("steel"), concrete = kinds.Contains("concrete") })
+        : JsonSerializer.Serialize(new { kinds });
+
+    /// <summary>Where the selected objects are (frames by their ends, areas by their centre), to find them in the program, whose names may differ.</summary>
+    internal static Shapes Where(OfflineEtabs model, IReadOnlyList<string> names)
+    {
+        var wanted = names.ToHashSet(StringComparer.Ordinal);
+        var frames = model.Frames().Where(f => wanted.Contains(f.Name)).Select(f => (f.X1, f.Y1, f.Z1, f.X2, f.Y2, f.Z2)).ToList();
+        var areas = model.Areas().Where(a => wanted.Contains(a.Name) && a.Corners.Count > 0).Select(a => Centre(a.Corners)).ToList();
+        return new Shapes(frames, areas);
+    }
+
+    internal sealed record Shapes(List<(double X1, double Y1, double Z1, double X2, double Y2, double Z2)> Frames, List<(double X, double Y, double Z)> Areas);
+
+    private static (double X, double Y, double Z) Centre(IReadOnlyList<(double X, double Y, double Z)> c) => (c.Average(p => p.X), c.Average(p => p.Y), c.Average(p => p.Z));
+
+    /// <summary>The program's names of the frames and areas at the places given (to 1 mm in metres, or the same share of the model's units).</summary>
+    internal static (List<string> Frames, List<string> Areas) Find(ICsiLink link, Shapes at, double tolerance = 0.002)
+    {
+        bool Near(double a, double b) => Math.Abs(a - b) <= tolerance;
+        bool Same((double, double, double) p, (double, double, double) q) => Near(p.Item1, q.Item1) && Near(p.Item2, q.Item2) && Near(p.Item3, q.Item3);
+        var frames = link.Frames().Where(f => at.Frames.Any(w =>
+            (Same((f.X1, f.Y1, f.Z1), (w.X1, w.Y1, w.Z1)) && Same((f.X2, f.Y2, f.Z2), (w.X2, w.Y2, w.Z2))) ||
+            (Same((f.X1, f.Y1, f.Z1), (w.X2, w.Y2, w.Z2)) && Same((f.X2, f.Y2, f.Z2), (w.X1, w.Y1, w.Z1))))).Select(f => f.Name).ToList();
+        var areas = link.Areas().Where(a => a.Corners.Count > 0 && at.Areas.Any(w => Same(Centre(a.Corners), w))).Select(a => a.Name).ToList();
+        return (frames, areas);
+    }
+
+    private static void Work(CsiProgram program, string folder, string file, bool mustAnalyse, bool analyseAsked, IReadOnlyList<string> kinds, Shapes? only)
     {
         IScratchWindow? window = null;
         var ctx = new FieldContext(program, folder, _model!);
         ctx.Offer(ProgramTools.For(program));
-        string Failed() => string.Join(" ", ctx.Steps.Where(s => !s.Ok && !s.Skipped).Select(s => s.Name + ": " + s.Detail));
         try
         {
-            Say($"Starting {program.Name} in a window of its own, in the background (yours, if open, is not touched)");
-            window = ScratchProgram.Start(program, ctx, file);
-            if (window is null) { Fail($"{program.Name} could not be started with the model. {Failed()}"); return; }
+            Say(mustAnalyse
+                ? $"Starting {program.Name} in a window of its own, in the background (yours, if open, is not touched)"
+                : $"Starting {program.Name} on the model it analysed ({Path.GetFileName(file)}), in the background");
+            window = ScratchProgram.Start(program, ctx, file, asIs: !mustAnalyse);
+            if (window is null) { Fail($"{program.Name} could not be started with the model. {Failed(ctx)}"); return; }
+            lock (Gate) _starts++;
             if (window is ScratchProgram sp) Say(sp.Hide() ? $"{program.Name} is running hidden" : $"{program.Name} is running (it could not be hidden)");
             ctx.Link = window.Link;
-            Say("Running the analysis");
-            if (ctx.Tool("run_analysis") is null) { Fail($"The analysis did not run. {Failed()}"); return; }
-            if (design)
+            if (!mustAnalyse && !Locked(window.Link))
             {
-                Say("Running the design");
-                var kinds = program.Key == "safe" ? """{"kinds":["slab"]}""" : "{}";
-                if (program.Key == "sap2000") kinds = """{"steel":true,"concrete":true}""";
-                if (ctx.Tool("run_design", kinds) is null) lock (Gate) Lines.Add("The design did not run: " + Failed());
+                // The saved analysis did not come back with the file: it is run again rather than designing without one.
+                lock (Gate) Lines.Add($"{program.Name} opened the analysed model without its results, so the analysis runs again.");
+                mustAnalyse = true;
+            }
+            if (mustAnalyse)
+            {
+                Say("Running the analysis");
+                if (ctx.Tool("run_analysis") is null) { Fail($"The analysis did not run. {Failed(ctx)}"); return; }
+                var saved = window is ScratchProgram s2 ? s2.ModelPath : "";
+                string before;
+                lock (Gate) { before = _analysedFile; _analysedModel = _model; _analysedRevision = _startRevision; _analysedFile = saved; _analysedProgram = program.Key; }
+                Forget(before, saved);
+            }
+            else lock (Gate) Lines.Add(analyseAsked ? $"The model has not changed since its analysis in {program.Name}, so it is not analysed again." : $"The analysis in {program.Name} is kept; only the design runs.");
+            if (kinds.Count > 0)
+            {
+                if (only is not null)
+                {
+                    // The selected objects are selected in the program, as an engineer would before Start Design/Check.
+                    var (frames, areas) = Find(window.Link, only);
+                    ctx.Tool("select_objects", JsonSerializer.Serialize(new { frames, areas }));
+                    lock (Gate) Lines.Add($"Selected in {program.Name} for the design: {frames.Count} of {only.Frames.Count} frames, {areas.Count} of {only.Areas.Count} areas.");
+                }
+                Say("Running the design: " + string.Join(", ", kinds.Select(k => Kinds[program.Key].First(x => x.Kind == k).Name)) + (only is not null ? " (selected objects)" : ""));
+                if (ctx.Tool("run_design", DesignArgs(program, kinds)) is null) lock (Gate) Lines.Add("The design did not run: " + Failed(ctx));
             }
             Say("Reading every result and design table");
             var built = Pack.Build(window.Link, [], [], [], null, null, by: "CSI ProMax Engine", instabilities: true);
-            var packFile = Path.Combine(folder, Path.GetFileNameWithoutExtension(file) + ".cpmx");
-            try { File.WriteAllBytes(packFile, built.Zip); }
+            var packFile = Path.Combine(folder, Safe(_model!.Model.Title) + ".cpmx");
+            try { Directory.CreateDirectory(folder); File.WriteAllBytes(packFile, built.Zip); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { lock (Gate) Lines.Add($"The review pack could not be saved to {packFile}: {ex.Message}"); packFile = ""; }
             lock (Gate) { _pack = built.Content; _packFile = packFile; Lines.Add($"{built.Tables.Count} tables read ({built.Frames} frames, {built.Areas} areas)" + (packFile.Length > 0 ? $"; review pack: {packFile}" : "")); }
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException) { Fail($"The run stopped: {ex.Message} {Failed()}"); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { Fail($"The run stopped: {ex.Message} {Failed(ctx)}"); }
         finally
         {
+            // Closed at once, whatever happened: the licence is used only while the job runs.
             if (window is not null)
             {
                 Say($"Closing {program.Name}");
                 var said = "";
                 try { said = window.Close(); } catch (Exception ex) when (ex is not OutOfMemoryException) { said = ex.Message; }
                 try { window.Dispose(); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
-                lock (Gate) Lines.Add(char.ToUpperInvariant(said[0]) + said[1..] + ".");
+                lock (Gate) Lines.Add($"{program.Name} was closed; its licence is free." + (said.Length > 0 ? " " + char.ToUpperInvariant(said[0]) + said[1..] + "." : ""));
             }
             lock (Gate) { _running = false; _done = true; _phase = _error.Length > 0 ? "Stopped" : "Done"; }
         }
     }
+
+    /// <summary>The files of an earlier analysis this one replaces (the program's model and its result files, one name), in the run folder only.</summary>
+    private static void Forget(string before, string now)
+    {
+        if (before.Length == 0 || string.Equals(before, now, StringComparison.OrdinalIgnoreCase)) return;
+        var stem = Path.GetFileNameWithoutExtension(before);
+        if (!stem.StartsWith("cpm-field-test-", StringComparison.Ordinal) || Path.GetDirectoryName(before) is not { } dir || !Directory.Exists(dir)) return;
+        foreach (var f in Directory.EnumerateFiles(dir, stem + ".*"))
+            try { File.Delete(f); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+    }
+
+    private static bool Locked(ICsiLink link)
+    {
+        try { return link.Info().Locked; }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return false; }
+    }
+
+    private static string Failed(FieldContext ctx) => string.Join(" ", ctx.Steps.Where(s => !s.Ok && !s.Skipped).Select(s => s.Name + ": " + s.Detail));
 
     private static void Fail(string why)
     {
@@ -122,6 +252,10 @@ public static class EngineRun
                 ["running"] = _running, ["done"] = _done, ["program"] = _program, ["phase"] = _phase, ["error"] = _error,
                 ["lines"] = new JsonArray(Lines.Select(l => (JsonNode)l).ToArray()), ["pack_file"] = _packFile,
                 ["model_changed"] = _model is not null && _model.Revision != _startRevision,
+                // Whether the last analysis is of the model as it is now: a design then needs no new analysis.
+                ["analysed"] = _analysedModel is not null && _analysedRevision == _analysedModel.Revision && File.Exists(_analysedFile),
+                ["starts"] = _starts,
+                ["kinds"] = new JsonObject(Kinds.Select(p => KeyValuePair.Create(p.Key, (JsonNode?)new JsonArray(p.Value.Select(k => (JsonNode)new JsonObject { ["kind"] = k.Kind, ["name"] = k.Name }).ToArray())))),
             };
             if (take && _done && _pack is not null) { o["pack"] = _pack; _pack = null; }
             return o;

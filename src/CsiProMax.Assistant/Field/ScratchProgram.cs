@@ -316,6 +316,7 @@ public sealed class ScratchProgram : IScratchWindow
     public int KeptOpen => _keptOpen;
 
     private ScratchProgram(CsiProgram program) => _program = program;
+    private bool _asIs;
 
     /// <summary>When this test asked the program to start: a process older than that is never the test's.</summary>
     private DateTime _startedAt;
@@ -353,9 +354,16 @@ public sealed class ScratchProgram : IScratchWindow
     /// in the report. Null when a stage failed: then nothing else is tried, because a change must never reach a model
     /// that is not the test's.
     /// </summary>
-    public static IScratchWindow? Start(CsiProgram program, FieldContext ctx, string modelFile)
+    public static IScratchWindow? Start(CsiProgram program, FieldContext ctx, string modelFile) => Start(program, ctx, modelFile, asIs: false);
+
+    /// <summary>
+    /// <paramref name="asIs"/>: the file is the program's own model, saved by an earlier window of this kind with its
+    /// analysis (CSI ProMax Engine's design on its own): it is opened under its own name and not saved as a new scratch
+    /// model, so its results stay with it.
+    /// </summary>
+    public static IScratchWindow? Start(CsiProgram program, FieldContext ctx, string modelFile, bool asIs)
     {
-        var scratch = new ScratchProgram(program);
+        var scratch = new ScratchProgram(program) { _asIs = asIs };
         var ok = false;
         try
         {
@@ -464,7 +472,7 @@ public sealed class ScratchProgram : IScratchWindow
         }) is null) return false;
 
         // A name of this run's own: two tests on one PC (it happened) must never take each other's window for theirs.
-        var target = Path.Combine(ctx.Folder, ScratchName() + ModelExtension(_program));
+        var target = _asIs ? Path.GetFullPath(modelFile) : Path.Combine(ctx.Folder, ScratchName() + ModelExtension(_program));
         var text = build ? File.ReadAllText(modelFile) : "";
         bool Blank(string why) => ctx.Step($"start a blank model in it ({why})", () =>
             {
@@ -504,7 +512,7 @@ public sealed class ScratchProgram : IScratchWindow
             if (!Blank($"{name} opened the Modeler's {Path.GetExtension(modelFile)} as an empty model, so the model is built in it instead")) return false;
         }
 
-        if (ctx.Step("save it as the scratch model", () =>
+        if (!_asIs && ctx.Step("save it as the scratch model", () =>
         {
             var answer = Convert.ToInt32(Ask(FileTimeout, "save the scratch model", m => m.File.Save(target),
                 $"{name} did not finish saving the scratch model within {FileTimeout.TotalMinutes:0} minutes. A message may be waiting in its window."));
@@ -525,7 +533,7 @@ public sealed class ScratchProgram : IScratchWindow
 
         // The Modeler's table data (material damping, notes, time dependence, ...) goes into ETABS through its tables, as
         // open_model does for a Modeler .e2k, and the model is saved again.
-        if (!build && _program.Key == CsiProgram.Etabs.Key && ModelerTables.ModelerFileBeside(modelFile) is { } cpm
+        if (!build && !_asIs && _program.Key == CsiProgram.Etabs.Key && ModelerTables.ModelerFileBeside(modelFile) is { } cpm
             && ModelFile.Load(cpm).Materials.Any(x => x.Tables is not null)
             && ctx.Step("put the Modeler's material data that the .e2k has no keyword for in through ETABS's tables", () => // ETABS itself
             {

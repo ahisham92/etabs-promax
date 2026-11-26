@@ -423,21 +423,47 @@ async function engineImport(file) {
     hmSay(`Results of ${file.name} are shown on the model (${Object.values(pack.tables).filter(engineKinds).length} result and design tables${match < 0.9 ? `; only ${Math.round(match * 100)}% of its objects have the same labels as this model, so some results have no object to sit on` : ""}).`, match < 0.5);
   } catch (ex) { hmSay("That file could not be read: " + ex.message, true); }
 }
-async function engineRun(design) {
-  // Analyze > Run: the model's program runs it in the background and is closed again; its results come back here.
-  const post = b => fetch("run", {method: "POST", headers: {"Content-Type": "application/json", "X-CPM-View": "1"}, body: JSON.stringify(b), cache: "no-store"}).then(r => r.json());
-  let j; try { j = await post({design}); } catch (e) { return hmSay("The Engine could not be reached: " + e.message, true); }
+const enginePost = b => fetch("run", {method: "POST", headers: {"Content-Type": "application/json", "X-CPM-View": "1"}, body: JSON.stringify(b), cache: "no-store"}).then(r => r.json());
+function engineSelected() {
+  // The objects selected on the model, by their names (frames first, then areas), for a design of the selection only.
+  return [...sel].map(i => i <= frames.length ? frames[i - 1] && frames[i - 1].name : areas[i - frames.length - 1] && areas[i - frames.length - 1].name).filter(Boolean);
+}
+async function engineRun(mode) {
+  // Analyze > Run Analysis (F5), Run Analysis and Design, Design > Start Design/Check: one form, as the programs ask
+  // before a run, for the analysis, the designs and whether the design is of the selection only. Each job starts the
+  // model's program hidden and closes it as soon as it is done (Ahmed 2026-11-26): its licence is used only meanwhile.
+  let st; try { st = await enginePost({status: true}); } catch (e) { return hmSay("The Engine could not be reached: " + e.message, true); }
+  const kinds = (st.kinds || {})[program] || [], picked = engineSelected(), name = {etabs: "ETABS", sap2000: "SAP2000", safe: "SAFE"}[program] || "the program";
+  const analysed = !!st.analysed, wantDesign = mode !== "analysis";
+  const body = `<fieldset><legend>Analysis</legend>
+      <label class="kv"><input type="checkbox" id="rA" ${mode === "design" ? "" : "checked"}> Run the analysis</label>
+      <p class="kv" style="margin:4px 0 0;max-width:460px">${analysed ? "The model is analysed as it is now, so it is not analysed again: a design runs on that analysis." : "A design needs the analysis: a model not analysed as it is now is analysed first."}</p></fieldset>
+    <fieldset><legend>Design</legend>
+      ${kinds.length ? kinds.map(k => `<label class="kv" style="display:block"><input type="checkbox" data-kind="${esc(k.kind)}" ${wantDesign ? "checked" : ""}> ${esc(k.name)}</label>`).join("") : `<p class="kv">${esc(name)} has no design to run from here.</p>`}
+      <div style="margin-top:6px"><label class="kv"><input type="radio" name="rS" value="all" checked> All objects</label>
+      <label class="kv" style="margin-left:12px"><input type="radio" name="rS" value="sel" ${picked.length ? "" : "disabled"}> Selected objects only (${picked.length})</label></div></fieldset>
+    <p class="kv" style="margin:6px 0 0;max-width:460px">${esc(name)} starts hidden in a window of its own (yours, if open, is not touched), runs the job, and is closed as soon as it is done; its licence is used only while it runs.</p>`;
+  dialog("Run Options", body, [["Run Now", d => {
+    const analyse = q(d, "#rA").checked, ks = [...d.querySelectorAll("[data-kind]")].filter(x => x.checked).map(x => x.dataset.kind);
+    if (!analyse && !ks.length) { hmSay("Tick the analysis or a design to run.", true); return false; }
+    const only = ks.length && (d.querySelector("input[name=rS]:checked") || {}).value === "sel" ? picked : [];
+    engineStart({analyse, kinds: ks, selected: only});
+  }], ["Cancel"]], {width: 520});
+}
+async function engineStart(ask) {
+  let j; try { j = await enginePost(ask); } catch (e) { return hmSay("The Engine could not be reached: " + e.message, true); }
   if (!j.ok) return dialog("Run Analysis", `<p style="max-width:460px">${esc(j.error)}</p>`, [["OK"]], {width: 500});
-  const d = dialog(`Run ${design ? "Analysis and Design" : "Analysis"} - ${j.program}`, `<div class="pgwrap" style="height:220px;padding:4px 6px" id="runLog"></div><p class="kv" id="runPhase" style="margin:6px 0 0"></p>`, [["Close"]], {float: true, width: 560});
+  const what = (ask.analyse || j.analyses ? "Analysis" : "") + (ask.kinds && ask.kinds.length ? (ask.analyse || j.analyses ? " and Design" : "Design") : "");
+  const d = dialog(`Run ${what} - ${j.program}`, `<div class="pgwrap" style="height:220px;padding:4px 6px" id="runLog"></div><p class="kv" id="runPhase" style="margin:6px 0 0"></p>`, [["Close"]], {float: true, width: 560});
   for (;;) {
     await new Promise(r => setTimeout(r, 1000));
-    let st; try { st = await post({take: true}); } catch (e) { continue; }
+    let st; try { st = await enginePost({take: true}); } catch (e) { continue; }
     const log = d.querySelector("#runLog"); if (log) { log.innerHTML = st.lines.map(l => `<div>${esc(l)}</div>`).join(""); log.scrollTop = 1e9; }
     const ph = d.querySelector("#runPhase"); if (ph) ph.textContent = st.running ? st.phase + "..." : st.error ? "Stopped." : "Done.";
     if (!st.done) continue;
     if (st.error) { hmSay(st.error, true); return; }
     if (st.model_changed) { hmSay("The model changed while it ran, so its results were not put on it. Run again.", true); return; }
-    if (st.pack) { engine.res = st.pack; engine.from = st.pack_file || "the run"; load(engine.base || P, true); hmSay(`Analysed in ${st.program}: the results are shown (Display menu)${st.pack_file ? "; review pack " + st.pack_file : ""}.`); buildTree(); }
+    if (st.pack) { engine.res = st.pack; engine.from = st.pack_file || "the run"; load(engine.base || P, true); hmSay(`${what} in ${st.program}: the results are shown (Display and Design menus); ${st.program} was closed${st.pack_file ? "; review pack " + st.pack_file : ""}.`); buildTree(); }
     return;
   }
 }
@@ -2696,7 +2722,7 @@ function act(name) {
   if (name.startsWith("m:")) return modelAct(name.slice(2));
   if (name === "eng:import") { const f = document.createElement("input"); f.type = "file"; f.accept = ".cpmx,.zip,.json"; f.onchange = () => { if (f.files[0]) engineImport(f.files[0]); }; return f.click(); }
   if (name === "eng:clear") return engineClear();
-  if (name === "eng:run" || name === "eng:runDesign") return engineRun(name === "eng:runDesign");
+  if (name === "eng:run" || name === "eng:runDesign" || name === "eng:design") return engineRun(name === "eng:run" ? "analysis" : name === "eng:design" ? "design" : "both");
   if (name.startsWith("t:") || name.startsWith("d:")) { tool = name.startsWith("t:") ? name.slice(2) : name; hm.chain = []; hm.hover = null; syncTools(); showObjBox(); draw(); return; }
   if (name.startsWith("v:")) return setMode(p, name.slice(2));
   if (name.startsWith("cam:")) { if (p) setView3d(p, name.slice(4)); return; }
@@ -2787,7 +2813,7 @@ const viewerMenus = () => {
     Define: [["Material Properties...", "dlg:materials"], ["Frame Sections...", "dlg:frameSections"], ["Slab and Wall Sections...", "dlg:areaSections"], 0, ["Story Data...", "dlg:stories"], ["Grid Data...", "dlg:grids"], 0, ["Load Patterns...", "dlg:patterns"], ["Load Cases...", "dlg:cases"], ["Load Combinations...", "dlg:combos"]],
     Select: [["All", "selAll", "Ctrl+A"], ["All on This Story", "selStory", "", !plan], ["By Section...", "dlg:bySection"], ["By Object Type...", "dlg:byType"], ["Joints", "selJoints"], ["Supports (Restraints and Springs)", "selSupports"], ["Invert", "selInvert"], 0, ["Filter Selection...", "selFilter", "", !sel.size && !selJ.size], 0, ["Clear Selection", "selNone", "Esc"]],
     Analyze: [["Check Model for Instabilities...", "inst", "F7"], ["Show the Last Check's Marks", "instMarks", "", !inst.answer], 0, ["What the check looks for", "instHelp"],
-      ...(window.cpmLive ? [0, ["Run Analysis", "eng:run", "F5"], ["Run Analysis and Design", "eng:runDesign"], 0, ["Show Results from a Review Pack (.cpmx)...", "eng:import"], ["Unlock Model (clear its results)", "eng:clear", "", !engine.res]] : [])],
+      ...(window.cpmLive ? [0, ["Run Analysis...", "eng:run", "F5"], ["Run Analysis and Design...", "eng:runDesign"], 0, ["Show Results from a Review Pack (.cpmx)...", "eng:import"], ["Unlock Model (clear its results)", "eng:clear", "", !engine.res]] : [])],
     Tools: [["Tables...", "tables", "Ctrl+T"], ["Model Explorer", "explorer"], ["Side Panel", "side"], ...(window.cpmChat ? [["Chat", "chat"]] : []), 0, ["Results Coverage...", "dlg:coverage", "", !P], ["Summary of Design Results...", "dlg:designSummary", "", !P]],
     Display: (() => {
       const has = re => Object.values(P ? P.tables : {}).some(t => t.rows && t.rows.length && re.test(norm(t.name))), plots = P ? Object.values(P.tables).some(t => t.rows && t.rows.length > 1) : false;
@@ -2800,8 +2826,8 @@ const viewerMenus = () => {
         ["Response Spectrum Curves...", "xy:spectrum", "", !has(/responsespectrum/)], ["Modal Results Plot...", "xy:modal", "", !has(/^modal/)], 0,
         ["Tables...", "tables", "Ctrl+T"], ["Results Coverage...", "dlg:coverage", "", !P]];
     })(),
-    Design: design.length ? [...design.map(f => [f.name, [["Display Design Info...", "des:" + f.key], ...designShows(f).map(s => [s.name.replace(/ \(.*\)$/, ""), "dshow:" + f.key + ":" + s.id])]]), 0, ["All Design Ratios", "r:ratios", "", !ratio.size], ["Display Design Results...", "des:"], ["Summary of Design Results...", "dlg:designSummary"]]
-      : [["No design results in this pack", "", "", true], ["Summary of Design Results...", "dlg:designSummary"]],
+    Design: [...(window.cpmLive ? [["Start Design/Check...", "eng:design", "Shift+F5"], 0] : []), ...(design.length ? [...design.map(f => [f.name, [["Display Design Info...", "des:" + f.key], ...designShows(f).map(s => [s.name.replace(/ \(.*\)$/, ""), "dshow:" + f.key + ":" + s.id])]]), 0, ["All Design Ratios", "r:ratios", "", !ratio.size], ["Display Design Results...", "des:"], ["Summary of Design Results...", "dlg:designSummary"]]
+      : [["No design results in this pack", "", "", true], ["Summary of Design Results...", "dlg:designSummary"]])],
     Options: [["Black Background", "bg"], 0, ["Grid Lines", "o:grid"], ["Extruded Sections", "o:extrude"], ["Floors and Walls", "o:fill"], ["See-through Floors and Walls", "o:see"], ["Object Edges", "o:edges"], ["Supports", "o:supports"], ["Joints", "o:joints"], ["Labels", "o:names"], ["Global Axes", "o:axes"]],
     Help: [["Mouse and Keys", "dlg:keys"], ["About", "about"]],
   };
@@ -3771,7 +3797,7 @@ document.addEventListener("drop", e => { e.preventDefault(); if (e.dataTransfer.
 document.addEventListener("keydown", e => {
   if (e.target.closest("input, textarea, select")) return;
   const k = e.key, ctrl = e.ctrlKey || e.metaKey, stop = () => e.preventDefault();
-  if (k === "F5" && window.cpmLive) { stop(); act("eng:run"); return; }
+  if (k === "F5" && window.cpmLive) { stop(); act(e.shiftKey ? "eng:design" : "eng:run"); return; }
   if (k === "F2") { stop(); act("t:zoom"); } else if (k === "F3") { stop(); act("fitActive"); } else if (k === "F4") { stop(); setRes("model"); } else if (k === "F6") { stop(); if (disp.size) dialogs.deformed(); } else if (k === "F8") { stop(); if (forces.size) dialogs.forces(); }
   else if (k === "PageUp") { stop(); act("storyUp"); } else if (k === "PageDown") { stop(); act("storyDown"); }
   else if (k === "Escape") { if (document.querySelector(".ctx")) hideMenus(); else if (tool !== "select") act("t:select"); else act("selNone"); }
