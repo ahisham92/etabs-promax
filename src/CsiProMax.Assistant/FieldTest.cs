@@ -600,7 +600,7 @@ public static class FieldTest
             foreach (var part in which.GroupBy(s => s.Section))
             {
                 if (part.Key.Length > 0) sb.AppendLine(part.Key + ":").AppendLine();
-                foreach (var s in part) sb.AppendLine($"- {s.Name}: {Short(Regex.Replace(s.Detail, "^skipped: ", ""), 400)}");
+                foreach (var s in part) sb.AppendLine($"- {s.Name}: [{SkipAudit.Words(SkipAudit.Of(s.Detail))}] {Short(Regex.Replace(s.Detail, "^skipped: ", ""), 400)}");
                 sb.AppendLine();
             }
         }

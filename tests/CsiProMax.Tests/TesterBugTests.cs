@@ -810,14 +810,15 @@ static class TesterBugTests
             Equal("", FieldContext.Where(new InvalidOperationException("x")), "other errors keep their message alone");
             static void DeniedHere() => throw new UnauthorizedAccessException("Access to the path is denied.");
         });
-        yield return ("ETABS 23 field test: a check whose table has no rows for the scratch model is not tested; a table that cannot be read still fails", () =>
+        yield return ("ETABS 23 field test: a check whose table has no rows for the scratch model fails with the table's name; a table that cannot be read still fails", () =>
         {
             // Seen on 2026-11-25 with 0.4.11: "1 of 5 checks had nothing to read. check_story_irregularity: no reason given".
             JsonNode Answer(string json) => JsonNode.Parse(json)!;
             var ctx = new FieldContext(CsiProgram.Etabs, Path.GetTempPath(), new MemoryEtabs());
             FieldParts.Verdicts(ctx, "checks", [("check_drift", Answer("""{"status":"pass"}""")), ("check_story_irregularity", Answer("""{"status":"not available","no_data":true,"note":"ETABS's 'Story Stiffness' table has no data"}"""))]);
             var step = ctx.Steps.Last();
-            Check(step.Skipped && step.Detail.Contains("Story Stiffness", StringComparison.Ordinal), $"no data is not 'not tested' with its reason: {step.Ok} {step.Skipped} {step.Detail}");
+            // Since 2026-11-26 (Ahmed: skip only for a missing program or licence) a check with no data on a program that is there is a failure that names the table, so the scratch model is made to have it.
+            Check(!step.Ok && !step.Skipped && step.Detail.Contains("Story Stiffness", StringComparison.Ordinal), $"no data is not a failure with its reason: {step.Ok} {step.Skipped} {step.Detail}");
             ctx = new FieldContext(CsiProgram.Etabs, Path.GetTempPath(), new MemoryEtabs());
             FieldParts.Verdicts(ctx, "checks", [("check_drift", Answer("""{"status":"not available","note":"The 'Story Drifts' table has no 'Drift' field in this version."}"""))]);
             step = ctx.Steps.Last();
@@ -884,7 +885,7 @@ static class TesterBugTests
             Equal("True, False", string.Join(", ", asked), "both ways are started");
             Check(ctx.Steps.Count == 2 && ctx.Steps[0].Ok && !ctx.Steps[1].Ok && ctx.Steps[1].Name.Contains("without the AI chat", StringComparison.Ordinal), "a window that does not open without the chat is a failure of its own");
             var busy = new FieldContext(CsiProgram.Etabs, Path.GetTempPath(), new MemoryEtabs());
-            WindowFieldSteps.Run(busy, _ => new WindowFieldSteps.Seen(false, "a demo window is already open", NotTried: true));
+            WindowFieldSteps.Run(busy, _ => new WindowFieldSteps.Seen(false, "a CSI ProMax window on the demo model is already open on this PC, so a second one could not be started. Close it and run the test again.", NotTried: true));
             Check(busy.Steps.All(s => s.Skipped), "a start that could not be tried is not tested, not a failure");
             var notes = Path.Combine(Path.GetTempPath(), "cpm-notes-" + Guid.NewGuid().ToString("N")[..8] + ".txt");
             try
@@ -1006,6 +1007,36 @@ static class TesterBugTests
             Check(context.Contains("window stopped answering at the step", StringComparison.Ordinal) && test.Contains("that window no longer answers", StringComparison.Ordinal), "the words the rule looks for are the ones the test writes");
         });
 
+        // ---- Ahmed, 2026-11-26: "you can skip as long as no license and if the program is not installed but as long as it is there do detailed testing for everything" ----
+        yield return ("field test: a step is left out only for a missing program or licence; any other 'not tested' is a failure", () =>
+        {
+            var folder = Path.Combine(Path.GetTempPath(), "cpm-skip-" + Guid.NewGuid().ToString("N")[..8]);
+            Directory.CreateDirectory(folder);
+            try
+            {
+                var ctx = new FieldContext(CsiProgram.Sap2000, folder, new MemoryEtabs());
+                ctx.Section("skips");
+                ctx.Skip("SAFE on this PC", "SAFE was not found on this PC (looked for SAFEv1.dll), so nothing of it is tested here.");
+                ctx.Skip("ETABS starts", "ETABS has no licence on this PC");
+                ctx.Skip("menu: Static Pushover Curve...", "greyed out, this pack has nothing for it");
+                ctx.Skip("Modeler: File > Open", "it asks the PC for a file or a printer, which a browser without a window can't show");
+                ctx.Step<object?>("history case", () => throw new FieldSkipException("ETABS 23's API has no call to define a time history function"));
+                ctx.Step<object?>("slab design", () => throw new FieldSkipException("the analysis did not run"));
+                var left = ctx.Steps.Where(x => x.Skipped).Select(x => x.Name).ToList();
+                var failed = ctx.Steps.Where(x => !x.Ok).ToList();
+                Check(left.SequenceEqual(["SAFE on this PC", "ETABS starts"]), "left out: " + string.Join(", ", left));
+                Check(failed.Count == 4 && failed.All(x => x.Detail.Contains("counts as failed")), "failed: " + string.Join(" | ", failed.Select(x => x.Name + ": " + x.Detail)));
+            }
+            finally { Directory.Delete(folder, true); }
+            // The retest tries a part again when an older run left a step of it out for a reason that no longer counts.
+            var old = new FieldRetest.Part("0.4.52", "p", 10, 0, [("menu: Frame...", "greyed out, this pack has nothing for it")]);
+            Check(FieldRetest.Decide(old, "p").Run, "a part with a step left out for no allowed reason was not run again");
+            var fine = new FieldRetest.Part("0.4.52", "p", 10, 0, [("SAFE on this PC", "SAFE was not found on this PC")]);
+            Check(!FieldRetest.Decide(fine, "p").Run, "a part left out only for a missing program was run again");
+            // Every reason kind has its words, and the two Ahmed named are allowed.
+            Check(SkipAudit.Allowed(SkipAudit.Why.ProgramNotHere) && SkipAudit.Allowed(SkipAudit.Why.Licence) && !SkipAudit.Allowed(SkipAudit.Why.NeedsAPerson) && !SkipAudit.Allowed(SkipAudit.Why.ProgramCannot) && !SkipAudit.Allowed(SkipAudit.Why.Unjustified), "the allowed reasons are not Ahmed's");
+        });
+
         yield return ("ETABS 23 field test: a test copy an earlier run left open is closed by the next run, and nothing else is", () =>
         {
             // Seen on 2026-11-25: the 0.4.10 run gave up on ETABS with the story picker showing; the 0.4.14 run then failed
@@ -1038,7 +1069,7 @@ static class TesterBugTests
         yield return ("field test, only what changed or failed: a part that passed and is unchanged is not run again; a failed, new or changed one is", () =>
         {
             // Ahmed, 2026-11-25: "ignore for testing things that passed and just check the new things in addition to the things failed or not tested".
-            var passed = new FieldRetest.Part("0.4.16", "aaaa", 140, 0, [("ETABS table Element Forces - Braces", "ETABS does not list this table")]);
+            var passed = new FieldRetest.Part("0.4.16", "aaaa", 140, 0, [("SAFE on this PC", "SAFE was not found on this PC")]);
             Check(!FieldRetest.Decide(passed, "aaaa").Run && FieldRetest.Decide(passed, "aaaa").Why.Contains("0.4.16", StringComparison.Ordinal), "a part that passed and is unchanged would run again");
             Check(FieldRetest.Decide(passed, "bbbb").Run, "a part whose code changed is left out");
             Check(FieldRetest.Decide(passed with { Failed = 1 }, "aaaa").Run, "a part with a failed step is left out");
