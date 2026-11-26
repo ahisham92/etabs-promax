@@ -304,6 +304,9 @@ public sealed class ComEtabs : ICsiLink, IDisposable
         for (var i = 0; i < n; i++)
         {
             int count = 0; string[] corners = None; string section = "";
+            // An opening is an area object to the API (section "None"), not a floor or a wall: the Modeler keeps its
+            // openings apart, and ETABS 23 listed the Modeler's CPM-OPEN as a 15th area (0.4.57 field test).
+            if (IsOpening(m, names[i])) continue;
             Ok(m.AreaObj.GetPoints(names[i], ref count, ref corners), "read an area's corners");
             m.AreaObj.GetProperty(names[i], ref section);
             var at = corners.Take(count).Select(c => points.TryGetValue(c, out var p) ? p : (0, 0, 0)).ToList();
@@ -312,6 +315,13 @@ public sealed class ComEtabs : ICsiLink, IDisposable
         }
         return (IReadOnlyList<AreaRow>)rows;
     });
+
+    /// <summary>Whether the program marks the area an opening (AreaObj.GetOpening); a program without the call has none.</summary>
+    private static bool IsOpening(dynamic m, string name)
+    {
+        try { bool open = false; return Convert.ToInt32(m.AreaObj.GetOpening(name, ref open)) == 0 && open; }
+        catch (Exception ex) when (ex is Microsoft.CSharp.RuntimeBinder.RuntimeBinderException or MissingMethodException or ArgumentException) { return false; }
+    }
 
     public IReadOnlyList<PointRow> Points() => On("read the points", m =>
     {
@@ -501,6 +511,8 @@ public sealed class ComEtabs : ICsiLink, IDisposable
         string[] ask = None, fields = None, data = None; int version = 0, records = 0;
         int ret = Convert.ToInt32(m.DatabaseTables.GetTableForDisplayArray(key, ref ask, "", ref version, ref fields, ref records, ref data));
         fields ??= None; data ??= None;
+        // ETABS 23 can give an empty table's field list with empty entries: a null field name broke a check (0.4.57).
+        fields = fields.Select(f => f ?? "").ToArray();
         if (ret != 0)
         {
             // ETABS 23 lists tables it then refuses to read because there is nothing in them: Story Stiffness with no

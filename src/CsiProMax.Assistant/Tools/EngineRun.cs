@@ -163,6 +163,16 @@ public static class EngineRun
         ctx.Offer(ProgramTools.Chat(program));
         try
         {
+            // The analysed file can be gone by the time the job starts (0.4.57 full test: SAP2000 was given
+            // cpm-field-test-3795ee.sdb, which no longer existed, and waited on its "Open Model File" box). The model is
+            // then written again and analysed first, never handed to the program as a missing file.
+            if (!mustAnalyse && !File.Exists(file))
+            {
+                try { file = _model!.WriteForRun(Path.Combine(folder, Safe(_model.Model.Title) + ".e2k")); }
+                catch (EtabsException ex) { Fail($"The analysed {program.Name} model file is gone and the model could not be written again: {ex.Message}"); return; }
+                mustAnalyse = true;
+                Say($"The analysed model file is gone, so {program.Name} analyses the model again first");
+            }
             Say(mustAnalyse
                 ? $"Starting {program.Name} in a window of its own, in the background (yours, if open, is not touched)"
                 : $"Starting {program.Name} on the model it analysed ({Path.GetFileName(file)}), in the background");

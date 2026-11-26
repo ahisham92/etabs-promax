@@ -72,6 +72,7 @@ static class AssignTablesTests
             var s2k = S2kWriter.Write(m, "a.s2k");
             foreach (var t in new[] { "FRAME ADDED MASS ASSIGNMENTS", "FRAME TENSION AND COMPRESSION LIMITS", "AREA ADDED MASS ASSIGNMENTS", "JOINT ADDED MASS ASSIGNMENTS" })
                 Check(s2k.Text.Contains("TABLE:  \"" + t + "\"", StringComparison.Ordinal), $"the .s2k has {t}");
+            Check(!s2k.Text.Contains("Cable=", StringComparison.Ordinal), "SAP2000 26.3's frame added mass has no Cable field (0.4.57 full test)");
             Check(!s2k.Notes.Any(n => n.Contains("Assignments", StringComparison.Ordinal) || n.Contains("assign it in SAP2000", StringComparison.Ordinal) && n.Contains("Output", StringComparison.Ordinal)), "no note asks for the assignments by hand: " + string.Join(" | ", s2k.Notes));
             // An opening, by the .e2k's own keyword.
             Run(link, "assign_shell_data", new { objects = new[] { slab.Label + "@Story1" }, opening = true });

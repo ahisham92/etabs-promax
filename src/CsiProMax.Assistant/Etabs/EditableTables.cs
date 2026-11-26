@@ -159,10 +159,16 @@ public static class EditableTables
                 try { m.DatabaseTables.GetAllFieldsInTable(key, ref v2, ref n, ref keys, ref names, ref about, ref units, ref importable); } catch { keys = []; }
                 keys ??= []; importable ??= [];
                 var shown = keys.Select((k, i) => (k, ok: i < importable.Length && importable[i])).ToList();
-                var drop = Enumerable.Range(0, fields.Length).Where(i => !keyFields.Contains(fields[i], StringComparer.OrdinalIgnoreCase)
-                    && shown.Any(s => s.k.Equals(fields[i], StringComparison.OrdinalIgnoreCase) && !s.ok)).ToHashSet();
-                // Only when the program says which ones it imports (an answer with none importable says nothing).
-                if (drop.Count > 0 && drop.Count < fields.Length && importable.Any(x => x))
+                var drop = importable.Any(x => x) ? Enumerable.Range(0, fields.Length).Where(i => !keyFields.Contains(fields[i], StringComparer.OrdinalIgnoreCase)
+                    && shown.Any(s => s.k.Equals(fields[i], StringComparison.OrdinalIgnoreCase) && !s.ok)).ToHashSet() : [];
+                // A field blank in every row is left out too: ETABS 23 skipped the Modeler's joint mass row for its blank
+                // MMI X ("Field name: MMI X ... Error reading field; record skipped", 0.4.57 full test). Blank means the
+                // program's default, which leaving the field out gives as well.
+                if (e.Program.Key == CsiProgram.Etabs.Key)
+                foreach (var i in Enumerable.Range(0, fields.Length).Where(i => !keyFields.Contains(fields[i], StringComparer.OrdinalIgnoreCase)
+                             && !fields[i].Equals("UniqueName", StringComparison.OrdinalIgnoreCase) && kept.Count > 0 && kept.All(r => i < r.Length && r[i].Trim().Length == 0)))
+                    drop.Add(i);
+                if (drop.Count > 0 && drop.Count < fields.Length)
                 {
                     var keep = Enumerable.Range(0, fields.Length).Where(i => !drop.Contains(i)).ToArray();
                     kept = kept.Select(r => keep.Select(i => r[i]).ToArray()).ToList();
@@ -177,7 +183,9 @@ public static class EditableTables
                 if (Convert.ToInt32(m.DatabaseTables.SetTableForEditingArray(key, ref version, ref f2, kept.Count, ref all)) != 0)
                     throw new EtabsException($"{program} did not take the rows for '{key}', so it cannot {what}.");
                 int fatal = 0, errors = 0, warnings = 0, info = 0; string log = "";
+                var units = PresentUnits(m);
                 int applied = Convert.ToInt32(m.DatabaseTables.ApplyEditedTables(true, ref fatal, ref errors, ref warnings, ref info, ref log));
+                KeepUnits(m, units);
                 log ??= "";
                 if (applied != 0 || fatal > 0 || (errors > 0 && !OnlyFieldsIgnored(log, errors)))
                 {
@@ -194,6 +202,28 @@ public static class EditableTables
                 throw;
             }
         })!;
+    }
+
+    /// <summary>The program's present units (its eUnits value), or null when it does not say.</summary>
+    internal static object? PresentUnits(dynamic m)
+    {
+        try { return m.GetPresentUnits(); } catch (Exception ex) when (ex is not System.Runtime.InteropServices.COMException) { return null; }
+    }
+
+    /// <summary>
+    /// Puts the present units back as they were before a table import, when the import changed them: ETABS 23 showed
+    /// lb, in, F right after the Modeler's tables went into a kN, m model (0.4.57 full test, get_model_context), and every
+    /// tool after reads and writes in the present units.
+    /// </summary>
+    internal static void KeepUnits(dynamic m, object? before)
+    {
+        if (before is null) return;
+        try
+        {
+            object now = m.GetPresentUnits();
+            if (!Equals(Convert.ToInt32(now), Convert.ToInt32(before))) m.SetPresentUnits(before);
+        }
+        catch (Exception ex) when (ex is not System.Runtime.InteropServices.COMException) { /* best effort */ }
     }
 
     /// <summary>

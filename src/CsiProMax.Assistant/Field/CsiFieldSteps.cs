@@ -138,13 +138,32 @@ public static class CsiFieldSteps
                                  ("Joint Assignments - Additional Mass", "Joint Added Mass Assignments", "MassXY", "Mass1", 1.5), ("Frame Assignments - Output Stations", "Frame Output Station Assignments", "MinStations", "MinNumSta", 7.0) })
                     {
                         var want = etabs ? own : sap;
-                        var t = tables.FirstOrDefault(x => x.Name.Equals(want, StringComparison.OrdinalIgnoreCase));
+                        var t = tables.FirstOrDefault(x => string.Equals(x.Name, want, StringComparison.OrdinalIgnoreCase));
                         if (t is null) { wrong.Add($"{name} has no table '{want}'"); continue; }
                         var read = link.ReadTable(t.Key, null, null);
-                        var col = read.Fields.ToList().FindIndex(x => x.Equals(etabs ? field : sapField, StringComparison.OrdinalIgnoreCase));
+                        var col = (read.Fields ?? []).ToList().FindIndex(x => string.Equals(x, etabs ? field : sapField, StringComparison.OrdinalIgnoreCase));
                         if (col < 0) { wrong.Add($"'{want}' has no field {(etabs ? field : sapField)}: {string.Join(", ", read.Fields)}"); continue; }
-                        if (!read.Rows.Any(r => col < r.Length && double.TryParse(r[col], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d) && Math.Abs(d - value) < 1e-6))
+                        if (!(read.Rows ?? []).Any(r => r is not null && col < r.Length && double.TryParse(r[col], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d) && Math.Abs(d - value) < 1e-6))
                             wrong.Add($"'{want}' has no row with {value} ({read.Rows.Count} rows)");
+                    }
+                    FieldContext.Expect(wrong.Count == 0, string.Join(" | ", wrong));
+                    return "all there";
+                });
+            // SAP2000's shell edge release, the auto edge constraint set after it, and the joint panel zone (Ahmed 2026-11-26).
+            if (program.Key == CsiProgram.Sap2000.Key)
+                ctx.Step($"{name} opened the Modeler's shell edge release, edge constraint (after the release) and joint panel zone", () =>
+                {
+                    var tables = link.Tables();
+                    var wrong = new List<string>();
+                    foreach (var (table, field, value) in new[] { ("Area Edge Release Assignments", "ReleasedDOF", "Moment"), ("Area Edge Constraint Assignments", "Constrained", "Yes"), ("Joint Panel Zone Assignments", "PZConnect", "Beams to Other Objects") })
+                    {
+                        var t = tables.FirstOrDefault(x => string.Equals(x.Name, table, StringComparison.OrdinalIgnoreCase));
+                        if (t is null) { wrong.Add($"{name} has no table '{table}'"); continue; }
+                        var read = link.ReadTable(t.Key, null, null);
+                        var col = (read.Fields ?? []).ToList().FindIndex(x => string.Equals(x, field, StringComparison.OrdinalIgnoreCase));
+                        if (col < 0) { wrong.Add($"'{table}' has no field {field}: {string.Join(", ", read.Fields ?? [])}"); continue; }
+                        if (!(read.Rows ?? []).Any(r => r is not null && col < r.Length && string.Equals(r[col], value, StringComparison.OrdinalIgnoreCase)))
+                            wrong.Add($"'{table}' has no row with {field} {value} ({read.Rows?.Count ?? 0} rows)");
                     }
                     FieldContext.Expect(wrong.Count == 0, string.Join(" | ", wrong));
                     return "all there";
