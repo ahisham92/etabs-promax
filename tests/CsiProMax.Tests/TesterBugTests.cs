@@ -925,6 +925,20 @@ static class TesterBugTests
             Check(!loop.Contains("catch (Exception) { first = false;", StringComparison.Ordinal), "a failed round is not swallowed without a line");
         });
 
+        yield return ("0.4.46 retest: steps left out because the program's window went away are tried again, not carried over as not tested", () =>
+        {
+            var cut = new FieldRetest.Part("0.4.46", "abc", 40, 0, [("set_lateral_load in SAP2000", "the program's window stopped answering at the step 'run_analysis' (The RPC server is unavailable), so this step was not run"), ("SAFE on this PC", "SAFE was not found on this PC")]);
+            var (run, why) = FieldRetest.Decide(cut, "abc");
+            Check(run && why.Contains("1 step of it was not run in version 0.4.46 because the program's window stopped answering", StringComparison.Ordinal), "the part is run again: " + why);
+            var own = new FieldRetest.Part("0.4.46", "abc", 40, 0, [("CSI ProMax's own features on the scratch SAP2000 window", "that window no longer answers (gone), so they were not run")]);
+            Check(FieldRetest.Decide(own, "abc").Run, "also when the window was gone before the part began");
+            var settled = new FieldRetest.Part("0.4.46", "abc", 40, 0, [("SAFE on this PC", "SAFE was not found on this PC")]);
+            Check(!FieldRetest.Decide(settled, "abc").Run, "a step that cannot be tested on this PC does not make the part run again");
+            var context = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/FieldContext.cs"));
+            var test = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/FieldTest.cs"));
+            Check(context.Contains("window stopped answering at the step", StringComparison.Ordinal) && test.Contains("that window no longer answers", StringComparison.Ordinal), "the words the rule looks for are the ones the test writes");
+        });
+
         yield return ("ETABS 23 field test: a test copy an earlier run left open is closed by the next run, and nothing else is", () =>
         {
             // Seen on 2026-11-25: the 0.4.10 run gave up on ETABS with the story picker showing; the 0.4.14 run then failed

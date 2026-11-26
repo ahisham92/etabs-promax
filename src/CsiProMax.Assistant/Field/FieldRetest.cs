@@ -66,10 +66,18 @@ public static class FieldRetest
     {
         if (last is null) return (true, "it has not been run on this PC yet");
         if (last.Failed > 0) return (true, $"{last.Failed} step{(last.Failed == 1 ? "" : "s")} of it failed in the run of version {last.Version}");
+        // Steps left out only because the program's window went away (a crash, a hang) were never tried: they are not
+        // carried over as "not tested" from run to run, the part is tried again (0.4.46 run, 2026-11-26).
+        if (last.NotTested.Count(n => Interrupted(n.Why)) is > 0 and var cut)
+            return (true, $"{cut} step{(cut == 1 ? "" : "s")} of it {(cut == 1 ? "was" : "were")} not run in version {last.Version} because the program's window stopped answering");
         if (print.Length == 0 || last.Print.Length == 0) return (true, "this build does not say which of its code changed");
         if (!string.Equals(print, last.Print, StringComparison.Ordinal)) return (true, $"its code changed since version {last.Version}");
         return (false, $"all {last.Passed} steps of it passed in version {last.Version} and its code is unchanged since");
     }
+
+    /// <summary>Whether a step's "not tested" reason is that the program went away mid-run, in the words FieldContext and FieldTest use.</summary>
+    internal static bool Interrupted(string why) =>
+        why.Contains("stopped answering", StringComparison.OrdinalIgnoreCase) || why.Contains("no longer answers", StringComparison.OrdinalIgnoreCase);
 
     public static Dictionary<string, Part> Load(string? file = null)
     {
