@@ -207,7 +207,7 @@ static class ExtrasTests
         {
             var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
             foreach (var part in new[] { "const opt = {grid: true, extrude: false,", "floor: \"#737373\"", "ground: [0.85, 0.925, 1]", "const dash = gridsGuessed ? 7 : 0;", "flat: bay * 0.09}", "function drawPlanColumns(p, g, to, T)", "const presetCam = {iso: {yaw: Math.PI / 4, pitch: 0.57}",
-                "thin(bufs.edges, 1, [1, 1, 1])", "function buildBars()", "function ddOpen(key)", "[\"t3d\", \"Set Default 3D View\", \"v:3d\"]", "[\"zprev\", \"Restore Previous Zoom\", \"zprev\"]", "[\"sall\", \"Select All (Ctrl+A)\", \"selAll\"]", "case \"selPrev\":", "case \"zprev\":",
+                "thin(bufs.edges, 1, [1, 1, 1])", "function buildBars()", "function ddOpen(key, from)", "[\"t3d\", \"Set Default 3D View\", \"v:3d\"]", "[\"zprev\", \"Restore Previous Zoom\", \"zprev\"]", "[\"sall\", \"Select All (Ctrl+A)\", \"selAll\"]", "case \"selPrev\":", "case \"zprev\":",
                 "<button class=\"dd\" title=\"Window Position\">", "function ddMenu(btn, items)", ".menu[hidden]{display:none}" })
                 Check(html.Contains(part), "viewer.html lost " + part);
             // The four ETABS tools that were greyed out are now real (Ahmed 2026-11-26 22:37: "Add please the tools that we don't have").
