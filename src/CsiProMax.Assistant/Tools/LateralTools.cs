@@ -256,6 +256,7 @@ public static class LateralTools
             // own file name first (the engineer is always asked before, OutputPaths.SavesBeforeLateral) and opened again
             // from that file when SAP2000 lost or changed any pattern or code, as edit_table does.
             var saved = SaveFirst(e, name, table.Code);
+            var wasLocked = e.Info().Locked;
             string log;
             try
             {
@@ -282,6 +283,7 @@ public static class LateralTools
                 ["read_back"] = new JsonObject(got.Where(kv => kv.Key is not "GUID").Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))),
                 ["note"] = $"{e.Program.Name} filled in its own defaults for the inputs not given. It computes the story forces when the analysis runs.",
                 ["saved_before_edit"] = $"The model was saved as {System.IO.Path.GetFileName(saved)} just before the import, so that it could be opened again if {e.Program.Name} lost a pattern. Tell the engineer that the file was saved.",
+                ["unlocked"] = wasLocked ? $"The model was locked (it held analysis results): it was unlocked for the import, so the results are deleted. Run the analysis again." : null,
             };
         }
         else

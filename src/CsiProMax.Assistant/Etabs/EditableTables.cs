@@ -104,6 +104,7 @@ public static class EditableTables
             var f2 = fields.ToArray();
             try
             {
+                try { m.DatabaseTables.CancelTableEditing(); } catch { /* nothing staged */ } // a table left staged by an earlier call would be applied instead (SAP2000, 2026-11-26)
                 if (Convert.ToInt32(m.DatabaseTables.SetTableForEditingArray(key, ref version, ref f2, kept.Count, ref all)) != 0)
                     throw new EtabsException($"{program} did not take the rows for '{key}', so it cannot {what}.");
                 int fatal = 0, errors = 0, warnings = 0, info = 0; string log = "";
@@ -145,6 +146,13 @@ public static class EditableTables
         var tableKeys = e.Tables().Select(t => t.Key).ToList();
         return (string)e.Raw(what, m =>
         {
+            // Tables left staged by an earlier call go into the next import: SAP2000 keeps them through File > Open, then
+            // refuses the new rows and applies the old ones (experiment E, 2026-11-26: it tried to delete every other pattern).
+            try { m.DatabaseTables.CancelTableEditing(); } catch { /* nothing staged */ }
+            // A locked model (it holds analysis results) refuses every table: answer 1, no log (0.4.51, experiment G).
+            // Unlocked for the change, as edit_table does; the results are deleted, and the answer says so.
+            if (Convert.ToBoolean(m.GetModelIsLocked()) && Convert.ToInt32(m.SetModelIsLocked(false)) != 0)
+                throw new EtabsException($"{program}'s model is locked (it holds analysis results) and did not unlock, so it cannot {what}.");
             Dictionary<string, string> before = Codes(m);
             double self = 0;
             try { m.LoadPatterns.GetSelfWTMultiplier(pattern, ref self); } catch { /* a new pattern weighs nothing */ }
@@ -227,7 +235,8 @@ public static class EditableTables
                     throw new EtabsException($"{program} did not take the patterns' rows, so it cannot {what}.");
                 foreach (var t in tables)
                 {
-                    int tv = 0; var tf = t.Fields.ToArray(); var td = t.Data.ToArray();
+                    // The table's own version, as SAP2000 gave it (0.4.51: sent as 0, the import never ran: answer 1, no log).
+                    int tv = Math.Max(1, Math.Max(cv, sv)); var tf = t.Fields.ToArray(); var td = t.Data.ToArray();
                     if (Convert.ToInt32(m.DatabaseTables.SetTableForEditingArray(t.Key, ref tv, ref tf, t.Count, ref td)) != 0)
                         throw new EtabsException($"{program} did not take the rows for '{t.Key}', so it cannot {what}.");
                 }
@@ -235,6 +244,8 @@ public static class EditableTables
                 int applied = Convert.ToInt32(m.DatabaseTables.ApplyEditedTables(true, ref fatal, ref errors, ref warnings, ref info, ref log));
                 log ??= "";
                 Dictionary<string, string> after = Codes(m);
+                if (applied != 0 && fatal == 0 && errors == 0 && log.Trim().Length == 0)
+                    throw new EtabsException($"{program} did not run the import of {pattern}'s {code} (it answered {applied}, with no log), so it cannot {what}. Patterns after: {after.Count} of {before.Count}.");
                 var changed = before.Where(kv => kv.Key != pattern && (!after.TryGetValue(kv.Key, out var now) || !SameCode(now, kv.Value, empty: true))).Select(kv => kv.Key).ToList();
                 if (changed.Count > 0)
                     throw new EtabsException($"{program} changed or lost the load patterns {string.Join(", ", changed)} when it was given {pattern}'s {code}: do not save the model; close it without saving and open it again. " +
@@ -258,7 +269,7 @@ public static class EditableTables
     private static Dictionary<string, string> Codes(dynamic m)
     {
         int n = 0; string[] names = [];
-        m.LoadPatterns.GetNameList(ref n, ref names);
+        if (Convert.ToInt32(m.LoadPatterns.GetNameList(ref n, ref names)) != 0) throw new EtabsException("The load patterns could not be listed (GetNameList refused).");
         var codes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var name in names ?? [])
         {

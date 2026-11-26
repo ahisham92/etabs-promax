@@ -401,6 +401,7 @@ public static class SafeTools
         var log = (JsonObject)e.Raw("apply the table edit", m =>
         {
             int version = 0; string[] f = fields.ToArray(); string[] data = rows.SelectMany(r => r).ToArray();
+            try { m.DatabaseTables.CancelTableEditing(); } catch { /* nothing staged */ } // a table left staged by an earlier call would be applied instead (SAP2000, 2026-11-26)
             Ok(m.DatabaseTables.SetTableForEditingArray(table.Key, ref version, ref f, rows.Count, ref data), $"take the edit of {table.Name}");
             int fatal = 0, errors = 0, warnings = 0, infos = 0; string text = "";
             m.DatabaseTables.ApplyEditedTables(true, ref fatal, ref errors, ref warnings, ref infos, ref text);
