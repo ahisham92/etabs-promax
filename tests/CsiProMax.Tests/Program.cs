@@ -1750,7 +1750,7 @@ if (Environment.GetEnvironmentVariable("CPM_TESTS") is { Length: > 0 } only) tes
 foreach (var (name, body) in tests)
 {
     try { body(); Console.WriteLine($"ok    {name}"); }
-    catch (Exception ex) { failed++; Console.WriteLine($"FAIL  {name}\n      {ex.Message}"); }
+    catch (Exception ex) { failed++; Console.WriteLine($"FAIL  {name}\n      {ex.Message}" + (Environment.GetEnvironmentVariable("CPM_STACK") is null ? "" : "\n" + ex.StackTrace)); }
 }
 Console.WriteLine($"\n{tests.Count - failed} of {tests.Count} passed.");
 return failed == 0 ? 0 : 1;
