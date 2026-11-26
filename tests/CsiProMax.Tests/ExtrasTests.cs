@@ -186,6 +186,14 @@ static class ExtrasTests
             foreach (var step in new[] { "selection: a left-to-right window round a support selects the support joint", "selection: right click on an object opens its information, with a Loads tab holding its loads", "selection: the Filter keeps only the checked kinds of the selection" })
                 Check(check.Contains(step), "the field test lost the step " + step);
         });
+        yield return ("extras: the results forms match the programs field by field: Deformed Shape, Member Force Diagram for Frames, Shell Forces/Stresses, Joint Reactions (Ahmed 2026-11-26)", () =>
+        {
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var part in new[] { "function caseBox(list)", "function caseBoxWire(d, list)", "Case/Combo type", "Multivalued options", "<legend>Contour Options</legend>", "Draw Contours on Objects",
+                "<legend>Other Options</legend>", ">Wire Shadow<", "Moment 3-3\"", "Fill Diagram", "Show Values on Diagram", "<legend>Component Type</legend>", "<legend>Output Components</legend>", "<legend>Stress Averaging</legend>" })
+                Check(html.Contains(part), "viewer.html lost " + part);
+            Check(html.Contains("[[\"OK\", d => applyDeformed(d)], [\"Close\"], [\"Apply\"") && html.Contains("[[\"OK\", d => applyForces(d)], [\"Close\"], [\"Apply\""), "OK, Close, Apply as the programs");
+        });
         yield return ("extras: right click opens ETABS's Object Information: Object ID, property-grid tabs, a description, OK and Cancel; no browser menu (Ahmed 2026-11-26)", () =>
         {
             var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
