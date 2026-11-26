@@ -357,10 +357,21 @@ public static class LateralTools
             // ETABS 23's User Loads row needs its load set ("Field name: LOAD SET NUMBER ... record skipped" with the
             // name alone, 0.4.55 ETABS run): one set, at the mass center, unless given.
             if (table.Code.Equals("User Loads", StringComparison.OrdinalIgnoreCase))
+            {
                 // The wind User Loads table has no LoadAtCM (its fields: Name, NumberSets, Reversible, SetNumber, Story,
                 // Diaphragm, Fx, Fy, Mz, X, Y; main 3cdc64d ETABS run).
                 foreach (var (f, v) in new[] { ("NumberSets", "1"), ("SetNumber", "1") }.Concat(table.Key.Contains("Seismic", StringComparison.OrdinalIgnoreCase) ? [("LoadAtCM", "Yes")] : Array.Empty<(string, string)>()))
                     row.TryAdd(f, v);
+                // Each set is on a story's diaphragm: ETABS 23 skips a row with no Story or no Diaphragm ("Field name:
+                // STORY / DIAPHRAGM ... Error reading field; record skipped", 2026-11-26 experiment B). Unless given:
+                // the top story, and its first diaphragm.
+                if (!row.ContainsKey("Story") && e.Stories().Where(st => st.Elevation > 0).MaxBy(st => st.Elevation) is { } top) row["Story"] = top.Name;
+                if (!row.ContainsKey("Diaphragm"))
+                {
+                    var names = e.Raw("list the diaphragms", m => { int n = 0; string[] d = []; m.Diaphragm.GetNameList(ref n, ref d); return d ?? []; }) as string[] ?? [];
+                    if (names.Length > 0) row["Diaphragm"] = names[0];
+                }
+            }
             EditableTables.Put(e, table.Key, key, [row], $"give {name} its {table.Code} inputs");
         }
         var back = EditableTables.Read(e, table.Key, key, name)

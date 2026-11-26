@@ -170,6 +170,9 @@ public static class ModelTables
             if (wanted is { Count: > 0 } && !wanted.Contains(spec.Name)) continue;
             tables.Add(new ModelTable(spec.Name, spec.Fields.Select(f => f.Field).ToList(), spec.Fields.Select(f => UnitText(m, f.Kind)).ToList(), Rows(m, spec.Name)));
         }
+        // The rows of the programs' own tables the Modeler keeps (a material's other data, assignments and definitions
+        // the .e2k has no keyword for), so nothing is lost out to Excel and back.
+        tables.AddRange(ExtraTables.Export(m, wanted));
         return tables;
     }
 
@@ -328,7 +331,7 @@ public static class ModelTables
         var pending = new List<(string Kind, string Name, string Table)>();
         foreach (var t in tables)
         {
-            var known = Names.FirstOrDefault(n => n.Equals(t.Name.Trim(), StringComparison.OrdinalIgnoreCase));
+            var known = Names.FirstOrDefault(n => n.Equals(t.Name.Trim(), StringComparison.OrdinalIgnoreCase)) ?? ExtraTables.Known(t.Name);
             if (known is null) { notes.Add($"The table '{t.Name}' is not one the Modeler reads, so it was left out."); continue; }
             if (!byName.TryAdd(known, t)) notes.Add($"'{known}' is in the file twice; the first was read.");
         }
@@ -342,6 +345,12 @@ public static class ModelTables
             read.Add($"{spec.Name}: {count} row{(count == 1 ? "" : "s")}");
         }
         if (read.Count > 0) { Tidy(m, notes); Drop(m, pending, notes); }
+        // After the objects and materials, which the rows name.
+        foreach (var (name, table) in byName.Where(x => !Names.Contains(x.Key)))
+        {
+            var count = ExtraTables.Import(m, table, notes);
+            read.Add($"{name}: {count} row{(count == 1 ? "" : "s")}");
+        }
         return new ImportResult(read, notes.Distinct().ToList());
     }
 

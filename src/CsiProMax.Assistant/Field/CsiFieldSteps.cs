@@ -20,6 +20,9 @@ public static class CsiFieldSteps
     private const string NoApi = "the stand-in has no program API behind it (a live program is needed)";
 
     /// <summary>edit_table's arguments: rows whose field equals a value, and the field to set on them.</summary>
+    /// <summary>The program's answer to a call (its "return"), or -1 when it gave none.</summary>
+    private static int Answer(JsonObject call) => call["return"] is JsonValue r && r.TryGetValue<int>(out var v) ? v : -1;
+
     private static string Edit(string table, string action, string matchField, string matchValue, string? setField, string? setValue)
     {
         var a = new JsonObject { ["table"] = table, ["action"] = action, ["match"] = new JsonObject { [matchField] = matchValue } };
@@ -183,8 +186,16 @@ public static class CsiFieldSteps
                     foreach (var f in link.Frames())
                     {
                         var call = (JsonObject)link.Raw("read a frame's hinges", m => ApiCall.Invoke((object)m, "FrameObj.GetHingeAssigns", CsiTools.D(("Name", f.Name))))!;
+                        // ETABS answers 1 for a name it does not know (the label "B1" instead of its unique name "10": the
+                        // hinges were there, 2026-11-26 experiment A): ask again by the unique name of label and story.
+                        if (Answer(call) != 0 && f.Story.Length > 0
+                            && CsiTools.Try(link, "find the frame's unique name", "FrameObj.GetNameFromLabel", CsiTools.D(("Label", f.Name), ("Story", f.Story), ("Name", ""))) is { } named
+                            && ApiCall.Value(named, "Name")?.ToString() is { Length: > 0 } unique && unique != f.Name)
+                            call = (JsonObject)link.Raw("read a frame's hinges", m => ApiCall.Invoke((object)m, "FrameObj.GetHingeAssigns", CsiTools.D(("Name", unique))))!;
                         last = call;
-                        hinges += call.Where(kv => kv.Key != "return").Select(kv => kv.Value is JsonArray a ? a.Count : 0).DefaultIfEmpty(0).Max();
+                        if (Answer(call) is 0 or -1)
+                            hinges += ApiCall.Value(call, "NumberHinges") is JsonValue nh && nh.TryGetValue<int>(out var count) ? count
+                                : call.Where(kv => kv.Key != "return").Select(kv => kv.Value is JsonArray a ? a.Count : 0).DefaultIfEmpty(0).Max();
                     }
                     // SAP2000 26's GetHingeAssigns answers 0 even for hinges its own model has (0.4.40): its "01 - Overview"
                     // table lists them, so that is read too.

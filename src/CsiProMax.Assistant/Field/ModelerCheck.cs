@@ -77,10 +77,21 @@ public static class ModelerCheck
           await act("eng:clear"); await wait(400);
           return engine.res || P.tables["Joint Displacements"] ? {fail: "the results are still on the model"} : {ok: "the results were cleared; the model is unlocked"};
         },
-        "eng:runDesign": async () => OTHER_WAY["eng:run"](),
-        "eng:run": async () => {
-          const r = await fetch("run", {method: "POST", headers: {"Content-Type": "application/json", "X-CPM-View": "1"}, body: JSON.stringify({status: true}), cache: "no-store"}).then(x => x.json()).catch(e => ({error: e.message}));
-          return r.running !== undefined || r.ok !== undefined ? {ok: "the run answers (" + (r.running ? "running" : "idle") + "); the run itself is the Engine run step"} : {fail: "the run does not answer: " + (r.error || JSON.stringify(r))};
+        "eng:runDesign": async it => OTHER_WAY["eng:run"](it),
+        "eng:design": async it => OTHER_WAY["eng:run"](it),
+        "eng:run": async it => {
+          // The Run Options form opens with the analysis, the program's designs and all or selected; it is closed
+          // without Run Now: the run itself is the field test's Engine run steps, as it starts the CSI program.
+          const before = dialogsOpen();
+          await act(it ? it.act : "eng:run"); await wait(900);
+          const d = [...document.querySelectorAll(".dlg")].pop();
+          if (dialogsOpen() <= before || !d || !d.querySelector("#rA")) return {fail: "the Run Options form did not open: " + document.getElementById("hint").textContent};
+          const kinds = d.querySelectorAll("[data-kind]").length, scope = d.querySelectorAll("input[name=rS]").length;
+          const buttons = [...d.querySelectorAll(".df button")].map(b => b.textContent).join(", ");
+          closeDialogs(); await wait(150);
+          if (buttons !== "Run Now, Cancel") return {fail: "its buttons are " + buttons};
+          if (scope !== 2) return {fail: "it has no choice of all or selected objects"};
+          return {ok: `Run Options: the analysis, ${kinds} designs, all or selected; closed without running`};
         },
         "m:open": async () => {
           const saved = await hmRun("save_model_as", {name: "CPM open check", folder: FOLDER}, true);
@@ -343,6 +354,30 @@ public static class ModelerCheck
           if (e) return {fail: e};
           sel.clear(); selChanged();
           return {ok: "replicated twice, moved and divided in three, each undone"};
+        });
+        await step("Define > Reinforcing Bar Sizes and the definition table forms open and reach the model; the menus show only the model's program's items", async () => {
+          await act("m:rebarSizes"); await wait(900);
+          const n = document.querySelector(".dlg #rbN");
+          if (!n) return {fail: "the Reinforcing Bar Sizes form did not open"};
+          n.value = "CPMB"; document.querySelector(".dlg #rbA").value = 0.0001; document.querySelector(".dlg #rbD").value = 0.0113;
+          document.querySelector(".dlg #rbAdd").click(); await wait(1500);
+          const dd = (await hmRun("definition_data", {}, true)).result || {rebar_sizes: []};
+          closeDialogs(); await wait(150);
+          if (!dd.rebar_sizes.some(b => b.name === "CPMB")) return {fail: "the bar CPMB did not reach the model: " + (hm.lastError || "")};
+          await act("m:undo"); await wait(1200);
+          await act("m:dt:Generalized Displacement Definitions"); await wait(900);
+          const gd = document.querySelector(".dlg #dtB input");
+          closeDialogs(); await wait(150);
+          if (!gd) return {fail: "the Generalized Displacements form did not open"};
+          const labels = list => list.flatMap(i => !i ? [] : Array.isArray(i[1]) ? [i[0], ...labels(i[1])] : [i[0]]);
+          const was = program, seen = {};
+          try {
+            for (const k of ["etabs", "sap2000", "safe"]) { program = k; seen[k] = labels(menus().Assign).concat(labels(menus().Define), labels(menus().Draw)); }
+          } finally { program = was; }
+          if (!seen.etabs.includes("Floor Cracking...")) return {fail: "the Assign menu of a model for the building program has no Floor Cracking"};
+          if (seen.sap2000.includes("Floor Cracking...") || !seen.sap2000.includes("Output Stations...")) return {fail: "the Assign menu of a model for SAP2000 shows Floor Cracking, which SAP2000 does not have, or no Output Stations"};
+          if (seen.safe.some(x => /Brace|Hinge|Pier/.test(x))) return {fail: "SAFE's menus show braces, hinges or piers: " + seen.safe.filter(x => /Brace|Hinge|Pier/.test(x)).join(", ")};
+          return {ok: "a bar size added and undone; the Generalized Displacements form opened; each program's menus checked"};
         });
         await step("Analyze > Check Model for Instabilities: the checker behind the window answers, and lists nothing wrong in the sound model", async () => {
           await act("inst"); await wait(2500);

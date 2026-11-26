@@ -32,6 +32,18 @@ static class OldProgramTests
 
     public static IEnumerable<(string Name, Action Body)> All()
     {
+        yield return ("ETABS 23 pack: step by step output through SetOutputOptionsForDisplay (no GetTableOutputOptionsForDisplay there), and set back", () =>
+        {
+            var (link, api, _) = CsiToolsTests.Model(CsiProgram.Etabs);
+            var notes = new List<string>();
+            var known = new List<TableName> { new("Base Reactions", "Base Reactions", false) };
+            var status = PackTables.AddSteps(link, known, ["CPM-PUSH"], [], new JsonObject(), 100, notes, (n, d, r) => new JsonObject());
+            var outcome = status?["outcome"]?.GetValue<string>() ?? "";
+            Check(!outcome.StartsWith("not taken"), "taken: " + outcome);
+            Check(api.Log.Contains("output options nonlinear static 2"), "nonlinear static set to step by step: " + string.Join(" | ", api.Log.TakeLast(4)));
+            Check(api.DatabaseTables.NonlinearStaticOutput == 1, "and set back to envelopes");
+        });
+
         yield return ("SAFE 20 tester: the model of a .NET Framework program is read through the plug-in's pipe, ref lists and enums included", () =>
         {
             var model = new CSiAPIv1.FakeModel();
@@ -557,7 +569,7 @@ static class OldProgramTests
             var scratch = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));
             var start = scratch.IndexOf("public static IScratchWindow? Start(", StringComparison.Ordinal);
             var turn = scratch.IndexOf("OpensTextInOwnProcess(program, modelFile)", start, StringComparison.Ordinal);
-            var second = scratch.IndexOf("var scratch = new ScratchProgram(program);", start, StringComparison.Ordinal);
+            var second = scratch.IndexOf("var scratch = new ScratchProgram(program)", start, StringComparison.Ordinal);
             Check(start > 0 && turn > start && second > turn, "the text file is turned into a model file before the test's own window starts");
             Check(scratch.IndexOf("convertOnly: true", turn, StringComparison.Ordinal) is var c and > 0 && c < second && scratch.IndexOf("first.Close()", turn, StringComparison.Ordinal) is var closed and > 0 && closed < second
                   && scratch.IndexOf("modelFile = converted;", turn, StringComparison.Ordinal) is var swap and > 0 && swap < second, "the first SAP2000 only saves the .sdb, is closed, and the second opens that .sdb");
@@ -646,7 +658,8 @@ static class OldProgramTests
         {
             string Src(string f) => File.ReadAllText(Path.Combine(SourceText.Root(), f));
             var engine = Src("src/CsiProMax.Assistant/Tools/EngineRun.cs");
-            Check(engine.IndexOf("ctx.Offer(EtabsTools.All)", StringComparison.Ordinal) is > 0 and var at && at < engine.IndexOf("ctx.Offer(ProgramTools.For(program))", StringComparison.Ordinal), "shared tools offered first");
+            Check(engine.Contains("ctx.Offer(ProgramTools.Chat(program))"), "the chat's whole tool set, shared tools included");
+            Check(ProgramTools.Chat(CsiProgram.Sap2000).Any(t => t.Name == "run_analysis") && ProgramTools.Chat(CsiProgram.Sap2000).Any(t => t.Name == "run_design"), "run_analysis and run_design offered");
             Check(EtabsTools.All.Any(t => t.Name == "run_analysis"), "run_analysis is a shared tool");
             Check(CsiProMax.Assistant.Tools.PackTables.IsLoadAssignment("Shell Loads - Uniform") && CsiProMax.Assistant.Tools.PackTables.IsLoadAssignment("Frame Loads Assignments - Distributed")
                 && CsiProMax.Assistant.Tools.PackTables.IsLoadAssignment("Joint Loads Assignments - Force") && !CsiProMax.Assistant.Tools.PackTables.IsLoadAssignment("Load Combination Definitions"), "load assignment tables");
@@ -666,6 +679,12 @@ static class OldProgramTests
             Check(!box[..box.IndexOf("PostMessageW(fine", StringComparison.Ordinal)].Contains("FirstOrDefault(IsFileRefused) is { } said", StringComparison.Ordinal), "only 'Error decompressing file' boxes were answered: 'Error getting text file version!' waited for Ahmed");
             var fresh = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Tools/SapFreshProcess.cs"));
             Check(fresh.Contains("ScratchDialogs.CloseNotices(id, program)", StringComparison.Ordinal), "the hidden second SAP2000's pop-ups are answered too");
+        });
+
+        yield return ("ETABS Plus (Ahmed's PC, 2026-11-26): a new Modeler model does not ask for Model Hinges in Links, an Ultimate-only option that stops every open on a notice", () =>
+        {
+            var text = CsiProMax.E2k.E2kWriter.Write(CsiProMax.Model.Seed.Etabs23());
+            Check(text.Contains("MODELHINGESINLINKS \"No\"") && !text.Contains("MODELHINGESINLINKS \"Yes\""), "the seed's analysis options");
         });
 
         yield return ("kind: a program's 'could not read this file' box in a scratch window is answered OK and said, never a licence box", () =>

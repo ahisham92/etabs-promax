@@ -6,6 +6,8 @@
 <title>CSI ProMax Viewer</title>
 <style>
 :root{--bg:#7d8790;--chrome:#f0f0f0;--chrome2:#f7f7f7;--menu:#f7f7f7;--bars:#d8d8d8;--form:#f0f0f0;--group:#00008b;--formline:#6e8fb8;--ftitle:#ffffff;--fbtn:#e1e1e1;--fbtnline:#adadad;--fgroup:#d5d5d5;--fdef:#0078d7;--vcap:linear-gradient(#b4cce6,#9eb9d5);--vcap-ink:#1a1a1a;--vcap-off:#696969;--ink:#1a1a1a;--mute:#5c6770;--line:#c4c8cc;--line2:#dadde0;--accent:#1f5fa8;--accent2:#3a7bd0;--accent-ink:#fff;--hot:#e5f1fb;--hotline:#a8cdee;--press:#cce4f7;--pressline:#7fb4e3;--bad:#c0392b;--ok:#1e8449;--warn:#b9770e;--title:#e9ebed;--field:#fff;--sel:#cce4f7;--zebra:#f6f8fa;--shadow:0 6px 22px rgba(0,0,0,.28)}
+:root[data-program=sap2000]{--accent:#1d6a4a;--accent2:#2f8a63;--vcap:linear-gradient(#bfd9cb,#a3c6b3)}
+:root[data-program=safe]{--accent:#8a4a12;--accent2:#b0651f;--vcap:linear-gradient(#e6d2bc,#d4b998)}
 body[data-prog=sap2000]{--accent:#2f6b3a;--accent2:#3f8a4c}
 body[data-prog=safe]{--accent:#6a3f8f;--accent2:#8558ad}
 @media (prefers-color-scheme: dark){:root:not([data-theme=light]){--bg:#15191c;--chrome:#24292d;--chrome2:#1e2226;--menu:#2a2f34;--ink:#e6eaec;--mute:#9aa6ad;--line:#3c444a;--line2:#323a40;--hot:#2d3a46;--hotline:#4b6a86;--press:#29496a;--pressline:#4f86bd;--title:#2b3136;--field:#191d20;--bars:#24292d;--form:#24292d;--group:#8fb4ff;--formline:#4b6a86;--ftitle:#2a2f34;--fbtn:#2f353a;--fbtnline:#4a535a;--fgroup:#3c444a;--fdef:#4f9be8;--vcap:linear-gradient(#35506d,#2b4560);--vcap-ink:#e6eaec;--vcap-off:#5a636a;--sel:#244a6d;--zebra:#1d2125;--accent-ink:#fff}}
@@ -175,6 +177,7 @@ footer span{padding:0 10px;border-left:1px solid var(--line2);display:flex;align
 footer #hint{flex:1;overflow:hidden;text-overflow:ellipsis;color:var(--mute)}footer #vname{border-left:0}footer #vname:empty{display:none}
 footer #coords{font-variant-numeric:tabular-nums;min-width:230px}
 footer select{height:19px;font-size:11.5px;border-radius:0;margin:0 -4px}
+footer #fbFilter{display:flex;align-items:center;gap:4px;border:0;border-left:1px solid var(--line2);background:transparent;color:var(--ink);padding:0 10px;height:100%;border-radius:0;cursor:pointer}footer #fbFilter:hover:not(:disabled){background:var(--hot)}footer #fbFilter:disabled{color:var(--mute);cursor:default}footer #fbFilter b{font-weight:600;min-width:1ch}
 #drop{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:24px;color:#cfd8dc;z-index:4;background:#0b0d0f}
 #drop div{max-width:440px;line-height:1.6}
 #drop b{font-size:14px;color:#fff}
@@ -337,7 +340,7 @@ body.chaton #right{width:380px;max-width:42%}
     </div>
   </div>
 </main>
-<footer><span id="vname"></span><span id="hint">Ready</span><span id="sel"></span><span id="coords"></span><span id="similarWrap" hidden><select id="similar" title="Draw on one story or on all stories" style="height:19px;padding:0 2px"><option value="one">One Story</option><option value="all">All Stories</option></select></span><span>Global</span><span id="units"></span></footer>
+<footer><span id="vname"></span><span id="hint">Ready</span><span id="sel"></span><span id="coords"></span><span id="similarWrap" hidden><select id="similar" title="Draw on one story or on all stories" style="height:19px;padding:0 2px"><option value="one">One Story</option><option value="all">All Stories</option></select></span><span>Global</span><span id="units"></span><button id="fbFilter" disabled title="Filter: the selected objects by kind (Check All / Check None)"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M1.5 2h13l-5 6v5l-3 1.5V8z" fill="currentColor"/></svg><b id="fbN">0</b></button></footer>
 <div id="rubber"></div><div id="tip"></div>
 <script id="pack" type="application/json"></script>
 <script>
@@ -403,7 +406,8 @@ function engineWith(pack, keep) {
   if (!pack || pack.engine) return pack;
   if (keep && engine.res && engine.base && engine.base !== pack) {
     // The live model moved on (a hand edit or the chat): its results no longer belong to it.
-    engine.res = null; setTimeout(() => { if (typeof hmSay === "function") hmSay("The model changed, so its results were cleared, as ETABS does when a model is unlocked. Run the analysis again to see them."); buildTree(); }, 0);
+    engine.res = null; setTimeout(() => { if (typeof hmSay === "function") hmSay("The model changed, so its results and their review pack were removed, as ETABS does when a model is unlocked. Run the analysis again to see them."); buildTree(); }, 0);
+    enginePost({changed: true}).catch(() => {});
   }
   engine.base = pack;
   if (!engine.res) return pack;
@@ -423,25 +427,56 @@ async function engineImport(file) {
     hmSay(`Results of ${file.name} are shown on the model (${Object.values(pack.tables).filter(engineKinds).length} result and design tables${match < 0.9 ? `; only ${Math.round(match * 100)}% of its objects have the same labels as this model, so some results have no object to sit on` : ""}).`, match < 0.5);
   } catch (ex) { hmSay("That file could not be read: " + ex.message, true); }
 }
-async function engineRun(design) {
-  // Analyze > Run: the model's program runs it in the background and is closed again; its results come back here.
-  const post = b => fetch("run", {method: "POST", headers: {"Content-Type": "application/json", "X-CPM-View": "1"}, body: JSON.stringify(b), cache: "no-store"}).then(r => r.json());
-  let j; try { j = await post({design}); } catch (e) { return hmSay("The Engine could not be reached: " + e.message, true); }
+function enginePost(b) { return fetch("run", {method: "POST", headers: {"Content-Type": "application/json", "X-CPM-View": "1"}, body: JSON.stringify(b), cache: "no-store"}).then(r => r.json()); }
+function engineSelected() {
+  // The objects selected on the model, by their names (frames first, then areas), for a design of the selection only.
+  return [...sel].map(i => i <= frames.length ? frames[i - 1] && frames[i - 1].name : areas[i - frames.length - 1] && areas[i - frames.length - 1].name).filter(Boolean);
+}
+async function engineRun(mode) {
+  // Analyze > Run Analysis (F5), Run Analysis and Design, Design > Start Design/Check: one form, as the programs ask
+  // before a run, for the analysis, the designs and whether the design is of the selection only. Each job starts the
+  // model's program hidden and closes it as soon as it is done (Ahmed 2026-11-26): its licence is used only meanwhile.
+  let st; try { st = await enginePost({status: true}); } catch (e) { return hmSay("The Engine could not be reached: " + e.message, true); }
+  const kinds = (st.kinds || {})[program] || [], picked = engineSelected(), name = {etabs: "ETABS", sap2000: "SAP2000", safe: "SAFE"}[program] || "the program";
+  const analysed = !!st.analysed, wantDesign = mode !== "analysis";
+  const body = `<fieldset><legend>Analysis</legend>
+      <label class="kv"><input type="checkbox" id="rA" ${mode === "design" ? "" : "checked"}> Run the analysis</label>
+      <p class="kv" style="margin:4px 0 0;max-width:460px">${analysed ? "The model is analysed as it is now, so it is not analysed again: a design runs on that analysis." : "A design needs the analysis: a model not analysed as it is now is analysed first."}</p></fieldset>
+    <fieldset><legend>Design</legend>
+      ${kinds.length ? kinds.map(k => `<label class="kv" style="display:block"><input type="checkbox" data-kind="${esc(k.kind)}" ${wantDesign ? "checked" : ""}> ${esc(k.name)}</label>`).join("") : `<p class="kv">${esc(name)} has no design to run from here.</p>`}
+      <div style="margin-top:6px"><label class="kv"><input type="radio" name="rS" value="all" checked> All objects</label>
+      <label class="kv" style="margin-left:12px"><input type="radio" name="rS" value="sel" ${picked.length ? "" : "disabled"}> Selected objects only (${picked.length})</label></div></fieldset>
+    <p class="kv" style="margin:6px 0 0;max-width:460px">${esc(name)} starts hidden in a window of its own (yours, if open, is not touched), runs the job, and is closed as soon as it is done; its licence is used only while it runs.</p>`;
+  dialog("Run Options", body, [["Run Now", d => {
+    const analyse = q(d, "#rA").checked, ks = [...d.querySelectorAll("[data-kind]")].filter(x => x.checked).map(x => x.dataset.kind);
+    if (!analyse && !ks.length) { hmSay("Tick the analysis or a design to run.", true); return false; }
+    const only = ks.length && (d.querySelector("input[name=rS]:checked") || {}).value === "sel" ? picked : [];
+    engineStart({analyse, kinds: ks, selected: only});
+  }], ["Cancel"]], {width: 520});
+}
+async function engineStart(ask) {
+  let j; try { j = await enginePost(ask); } catch (e) { return hmSay("The Engine could not be reached: " + e.message, true); }
   if (!j.ok) return dialog("Run Analysis", `<p style="max-width:460px">${esc(j.error)}</p>`, [["OK"]], {width: 500});
-  const d = dialog(`Run ${design ? "Analysis and Design" : "Analysis"} - ${j.program}`, `<div class="pgwrap" style="height:220px;padding:4px 6px" id="runLog"></div><p class="kv" id="runPhase" style="margin:6px 0 0"></p>`, [["Close"]], {float: true, width: 560});
+  const what = (ask.analyse || j.analyses ? "Analysis" : "") + (ask.kinds && ask.kinds.length ? (ask.analyse || j.analyses ? " and Design" : "Design") : "");
+  const d = dialog(`Run ${what} - ${j.program}`, `<div class="pgwrap" style="height:220px;padding:4px 6px" id="runLog"></div><p class="kv" id="runPhase" style="margin:6px 0 0"></p>`, [["Close"]], {float: true, width: 560});
   for (;;) {
     await new Promise(r => setTimeout(r, 1000));
-    let st; try { st = await post({take: true}); } catch (e) { continue; }
+    let st; try { st = await enginePost({take: true}); } catch (e) { continue; }
     const log = d.querySelector("#runLog"); if (log) { log.innerHTML = st.lines.map(l => `<div>${esc(l)}</div>`).join(""); log.scrollTop = 1e9; }
     const ph = d.querySelector("#runPhase"); if (ph) ph.textContent = st.running ? st.phase + "..." : st.error ? "Stopped." : "Done.";
     if (!st.done) continue;
     if (st.error) { hmSay(st.error, true); return; }
     if (st.model_changed) { hmSay("The model changed while it ran, so its results were not put on it. Run again.", true); return; }
-    if (st.pack) { engine.res = st.pack; engine.from = st.pack_file || "the run"; load(engine.base || P, true); hmSay(`Analysed in ${st.program}: the results are shown (Display menu)${st.pack_file ? "; review pack " + st.pack_file : ""}.`); buildTree(); }
+    if (st.pack) { engine.res = st.pack; engine.from = st.pack_file || "the run"; load(engine.base || P, true); hmSay(`${what} in ${st.program}: the results are shown (Display and Design menus); ${st.program} was closed${st.pack_file ? "; review pack " + st.pack_file : ""}.`); buildTree(); }
     return;
   }
 }
-function engineClear() { if (!engine.res) return; engine.res = null; load(engine.base || P, false); hmSay("The results were cleared; the model is unlocked."); }
+function engineClear() {
+  // Analyze > Unlock Model: the results go, and so does their review pack beside the model (comments kept), as ETABS
+  // deletes a model's results when it is unlocked.
+  if (!engine.res) return; engine.res = null; load(engine.base || P, false);
+  enginePost({unlock: true}).then(j => hmSay(j && j.said ? j.said : "The results were cleared; the model is unlocked.", !!(j && j.left && j.left.length))).catch(() => hmSay("The results were cleared; the model is unlocked."));
+}
 async function readPack(file) {
   const buffer = await file.arrayBuffer();
   const head = new Uint8Array(buffer, 0, 2);
@@ -521,6 +556,7 @@ function load(pack, keep) {
   unit = u.length || "";
   const progName = {etabs: "ETABS", sap2000: "SAP2000", safe: "SAFE"}[program];
   $("app").textContent = "CSI ProMax Engine · " + progName;
+  programLook();
   $("meta").textContent = [man.model || "Model", man.etabs ? (/modeler/i.test(man.etabs) ? man.etabs : (man.program || "ETABS") + " " + man.etabs) : "", !window.cpmLive && man.created ? "packed " + String(man.created).replace("T", " ").slice(0, 16) : "", man.by && /sample/i.test(man.by) ? man.by : ""].filter(Boolean).join(" · ");
   document.title = (man.model || "Model") + " · " + $("app").textContent;
   $("units").textContent = u.force && u.length ? u.force + ", " + u.length + (u.temperature ? ", " + u.temperature : "") : "";
@@ -1126,13 +1162,16 @@ function openShells() {
   if (!shellRes.size) return;
   const cases = [...shellRes.keys()], cur = res.mode === "shell" ? res.comp : (shellFields.find(s => /^m11$/i.test(s.name)) || shellFields[0]).name;
   const group = (st) => shellFields.filter(s => s.stress === st).map(s => `<label><input type="radio" name="comp" value="${esc(s.name)}" ${s.name === cur ? "checked" : ""}>${esc(s.name)}</label>`).join("");
-  dialog("Shell Forces/Stresses", `
-    <fieldset><legend>Load Case/Load Combination</legend><div class="g2"><span>Case/Combo name</span><select id="dCase">${caseGroups(cases)}</select></div></fieldset>
-    ${shellFields.some(s => !s.stress) ? `<fieldset><legend>Forces and moments (per unit length)</legend><div class="g4">${group(false)}</div></fieldset>` : ""}
-    ${shellFields.some(s => s.stress) ? `<fieldset><legend>Stresses</legend><div class="g4">${group(true)}</div></fieldset>` : ""}
+  // As ETABS's Shell Forces/Stresses: the component type (forces or stresses), then that type's components.
+  const st = !!(shellFields.find(s => s.name === cur) || {}).stress, both = shellFields.some(s => !s.stress) && shellFields.some(s => s.stress);
+  const d = caseBoxWire(dialog("Shell Forces/Stresses", `${caseBox(cases)}
+    <fieldset><legend>Component Type</legend><div class="g2"><label><input type="radio" name="ct" value="f" ${st ? "" : "checked"} ${shellFields.some(s => !s.stress) ? "" : "disabled"}>Shell Forces</label><label><input type="radio" name="ct" value="s" ${st ? "checked" : ""} ${shellFields.some(s => s.stress) ? "" : "disabled"}>Shell Stresses</label></div></fieldset>
+    <fieldset><legend>Output Components</legend><div class="g4" data-ct="f" ${st ? "hidden" : ""}>${group(false)}</div><div class="g4" data-ct="s" ${st ? "" : "hidden"}>${group(true)}</div></fieldset>
     <fieldset><legend>Contour Range</legend><div class="g2"><label><input type="radio" name="rg" value="auto" ${res.range ? "" : "checked"}>Auto</label><span></span><label><input type="radio" name="rg" value="user" ${res.range ? "checked" : ""}>Minimum</label><input type="number" step="any" id="dMin" value="${res.range ? res.range[0] : ""}"><span style="padding-left:22px">Maximum</span><input type="number" step="any" id="dMax" value="${res.range ? res.range[1] : ""}"></div></fieldset>
-    <p class="kv">Values at each joint are averaged over the shells that meet there.</p>`,
-    [["OK", d => applyShells(d)], ["Apply", d => { applyShells(d); return false; }, true], ["Cancel"]], {width: 560});
+    <fieldset><legend>Stress Averaging</legend><div class="g2"><label><input type="radio" checked disabled>At All Joints</label></div></fieldset>`,
+    [["OK", d => applyShells(d)], ["Close"], ["Apply", d => { applyShells(d); return false; }, true]], {width: 560}), cases);
+  d.querySelectorAll("[name=ct]").forEach(r => r.onchange = () => { d.querySelectorAll("[data-ct]").forEach(g => g.hidden = g.dataset.ct !== r.value); const first = q(d, `[data-ct="${r.value}"] [name=comp]`); if (first) first.checked = true; });
+  if (!both) d.querySelector("[name=ct]").closest("fieldset").style.opacity = ".6";
 }
 function applyShells(d) {
   res.mode = "shell"; syncResults(); res.case = q(d, "#dCase").value; const c = q(d, "[name=comp]:checked"); if (c) res.comp = c.value;
@@ -2704,7 +2743,7 @@ function act(name) {
   if (name.startsWith("m:")) return modelAct(name.slice(2));
   if (name === "eng:import") { const f = document.createElement("input"); f.type = "file"; f.accept = ".cpmx,.zip,.json"; f.onchange = () => { if (f.files[0]) engineImport(f.files[0]); }; return f.click(); }
   if (name === "eng:clear") return engineClear();
-  if (name === "eng:run" || name === "eng:runDesign") return engineRun(name === "eng:runDesign");
+  if (name === "eng:run" || name === "eng:runDesign" || name === "eng:design") return engineRun(name === "eng:run" ? "analysis" : name === "eng:design" ? "design" : "both");
   if (name.startsWith("t:") || name.startsWith("d:")) { tool = name.startsWith("t:") ? name.slice(2) : name; hm.chain = []; hm.hover = null; syncTools(); showObjBox(); draw(); return; }
   if (name.startsWith("v:")) return setMode(p, name.slice(2));
   if (name.startsWith("cam:")) { if (p) setView3d(p, name.slice(4)); return; }
@@ -2762,9 +2801,19 @@ function copyText(t) {
 }
 
 // ---- menus ----
-const menus = () => window.cpmLive ? forProgram(modelerMenus(viewerMenus())) : viewerMenus();
+const menus = () => forProgram(window.cpmLive ? modelerMenus(viewerMenus()) : viewerMenus());
 // The Modeler's menus for the model's program: an item marked {only: [...]} is left out for the others, and a
 // separator left at an end or next to another goes too.
+// The Engine looks and reads as the program the model is for (Ahmed 2026-11-26 19:40): its accent, the name of the
+// menu that runs the model (SAFE calls it Run), and no story controls in SAP2000, which has none. The menus, Model
+// Explorer and forms leave out what that program does not have (forProgram, only()).
+function programLook() {
+  document.documentElement.dataset.program = program;
+  const run = document.querySelector('[data-menu="Analyze"]'); if (run && run.firstChild) run.firstChild.textContent = program === "safe" ? "Run" : "Analyze";
+  // SAP2000 has no stories: its plan views are X-Y planes at a Z, so the same picker is named so.
+  const story = $("story"); if (story && story.parentElement && story.parentElement.firstChild) story.parentElement.firstChild.textContent = program === "sap2000" ? "X-Y Plane " : "Story ";
+  const similar = $("similarWrap"); if (similar && program === "sap2000") similar.hidden = true;
+}
 function forProgram(m) {
   const tidy = list => {
     const out = [];
@@ -2789,28 +2838,28 @@ const viewerMenus = () => {
     File: [["Open...", "open", "Ctrl+O"], ["Save comments to a file", "saveComments"], 0, ["Print the active window...", "print", "Ctrl+P"]],
     Edit: [["Copy names of the selected objects", "copyNames", "Ctrl+C"], 0, ["Hide the selected objects", "hideSel"], ["Show all objects", "showAll"]],
     View: [["Set 3-D View...", "dlg:view3d"], ["Set Plan View...", "dlg:plan"], ["Set Elevation View...", "dlg:elev"], 0, ["Restore Full View", "fitActive", "F3"], ["Rubber Band Zoom", "t:zoom", "F2"], ["Zoom In One Step", "zin"], ["Zoom Out One Step", "zout"], ["Pan", "t:pan"], ["Rotate 3-D View", "t:orbit"], ["Perspective", "persp"], 0,
-      ["Move Up a Story", "storyUp", "PgUp", !plan], ["Move Down a Story", "storyDown", "PgDn", !plan], ["Previous Elevation", "linePrev", "", !elev], ["Next Elevation", "lineNext", "", !elev], 0,
+      only(["etabs", "safe"], ["Move Up a Story", "storyUp", "PgUp", !plan]), only(["etabs", "safe"], ["Move Down a Story", "storyDown", "PgDn", !plan]), ["Previous Elevation", "linePrev", "", !elev], ["Next Elevation", "lineNext", "", !elev], 0,
       ["Set Display Options...", "dlg:display", "Ctrl+W"], ["Model Explorer", "explorer"], ["Side Panel", "side"], ...(window.cpmChat ? [["Chat", "chat"]] : []), 0,
       ["Windows", [["One window", "lay1"], ["Two windows", "lay2"], ["Three windows", "lay3"], ["Four windows", "lay4"]]]],
-    Define: [["Material Properties...", "dlg:materials"], ["Frame Sections...", "dlg:frameSections"], ["Slab and Wall Sections...", "dlg:areaSections"], 0, ["Story Data...", "dlg:stories"], ["Grid Data...", "dlg:grids"], 0, ["Load Patterns...", "dlg:patterns"], ["Load Cases...", "dlg:cases"], ["Load Combinations...", "dlg:combos"]],
-    Select: [["All", "selAll", "Ctrl+A"], ["All on This Story", "selStory", "", !plan], ["By Section...", "dlg:bySection"], ["By Object Type...", "dlg:byType"], ["Joints", "selJoints"], ["Supports (Restraints and Springs)", "selSupports"], ["Invert", "selInvert"], 0, ["Filter Selection...", "selFilter", "", !sel.size && !selJ.size], 0, ["Clear Selection", "selNone", "Esc"]],
+    Define: [["Material Properties...", "dlg:materials"], ["Frame Sections...", "dlg:frameSections"], ["Slab and Wall Sections...", "dlg:areaSections"], 0, only(["etabs", "safe"], ["Story Data...", "dlg:stories"]), ["Grid Data...", "dlg:grids"], 0, ["Load Patterns...", "dlg:patterns"], ["Load Cases...", "dlg:cases"], ["Load Combinations...", "dlg:combos"]],
+    Select: [["All", "selAll", "Ctrl+A"], only(["etabs", "safe"], ["All on This Story", "selStory", "", !plan]), ["By Section...", "dlg:bySection"], ["By Object Type...", "dlg:byType"], ["Joints", "selJoints"], ["Supports (Restraints and Springs)", "selSupports"], ["Invert", "selInvert"], 0, ["Filter Selection...", "selFilter", "", !sel.size && !selJ.size], 0, ["Clear Selection", "selNone", "Esc"]],
     Analyze: [["Check Model for Instabilities...", "inst", "F7"], ["Show the Last Check's Marks", "instMarks", "", !inst.answer], 0, ["What the check looks for", "instHelp"],
-      ...(window.cpmLive ? [0, ["Run Analysis", "eng:run", "F5"], ["Run Analysis and Design", "eng:runDesign"], 0, ["Show Results from a Review Pack (.cpmx)...", "eng:import"], ["Unlock Model (clear its results)", "eng:clear", "", !engine.res]] : [])],
+      ...(window.cpmLive ? [0, ["Run Analysis...", "eng:run", "F5"], ["Run Analysis and Design...", "eng:runDesign"], 0, ["Show Results from a Review Pack (.cpmx)...", "eng:import"], ["Unlock Model (clear its results)", "eng:clear", "", !engine.res]] : [])],
     Tools: [["Tables...", "tables", "Ctrl+T"], ["Model Explorer", "explorer"], ["Side Panel", "side"], ...(window.cpmChat ? [["Chat", "chat"]] : []), 0, ["Results Coverage...", "dlg:coverage", "", !P], ["Summary of Design Results...", "dlg:designSummary", "", !P]],
     Display: (() => {
       const has = re => Object.values(P ? P.tables : {}).some(t => t.rows && t.rows.length && re.test(norm(t.name))), plots = P ? Object.values(P.tables).some(t => t.rows && t.rows.length > 1) : false;
-      return [["Undeformed Shape", "r:model", "F4"], [program === "sap2000" ? "Show Load Assigns" : "Load Assigns", ["joint", "frame", "shell"].map(k => [loadWord(k) + "...", "loads:" + k, "", !loadTables(k).length])], 0, ["Deformed Shape...", "dlg:deformed", "F6", !disp.size], ["Mode Shapes...", "dlg:modes", "", !P || !modeCases().length], ["Animate Deformed Shape", "anim", "", res.mode !== "deformed"], 0,
+      return [["Undeformed Shape", "r:model", "F4"], [program === "sap2000" ? "Show Load Assigns" : "Load Assigns", ["joint", "frame", "shell"].map(k => [loadWord(k) + "...", "loads:" + k, "", !loadTables(k).length])], 0, ["Deformed Shape...", "dlg:deformed", "F6", !disp.size], only(["etabs", "sap2000"], ["Mode Shapes...", "dlg:modes", "", !P || !modeCases().length]), ["Animate Deformed Shape", "anim", "", res.mode !== "deformed"], 0,
         ["Force/Stress Diagrams", [["Support/Spring Reactions...", "dlg:reactions", "", !reacts.size], ["Frame Forces and Moments...", "dlg:forces", "F8", !forces.size], ["Shell Forces/Stresses...", "dlg:shells", "", !shellRes.size],
-          ...(program === "sap2000" ? [] : [["Pier and Spandrel Forces...", "vals:pier", "", !has(/pierforces|spandrelforces/)]]), ["Link Forces and Deformations...", "vals:link", "", !has(/link/)], ["Spring Forces and Soil Pressures...", "vals:spring", "", !has(/spring|soilpressure/)],
-          ["Hinge Results...", "vals:hinge", "", !has(/hinge/)], ["Section Cut Forces...", "vals:cut", "", !has(/sectioncut/)], ["Tendon and Cable Results...", "vals:tendon", "", !has(/tendon|cable/)]]],
+          ...(program === "sap2000" ? [] : [["Pier and Spandrel Forces...", "vals:pier", "", !has(/pierforces|spandrelforces/)]]), only(["etabs", "sap2000"], ["Link Forces and Deformations...", "vals:link", "", !has(/link/)]), ["Spring Forces and Soil Pressures...", "vals:spring", "", !has(/spring|soilpressure/)],
+          only(["etabs", "sap2000"], ["Hinge Results...", "vals:hinge", "", !has(/hinge/)]), ["Section Cut Forces...", "vals:cut", "", !has(/sectioncut/)], only(["etabs", "sap2000", "safe"], ["Tendon and Cable Results...", "vals:tendon", "", !has(/tendon|cable/)])]],
         ["Joint Displacement Contours...", "dlg:contour", "", !disp.size], ["Table Values on Model...", "vals:", "", !P || !valueTables().length], ["Design Ratios", "r:ratios", "", !ratio.size], 0,
-        ["Story Response Plots...", "dlg:storyPlot", "", !P || !storyTables().length], ["Plot Functions...", "xy:history", "", !plots], ["Static Pushover Curve...", "xy:pushover", "", !has(/pushover|capacitycurve/)],
-        ["Response Spectrum Curves...", "xy:spectrum", "", !has(/responsespectrum/)], ["Modal Results Plot...", "xy:modal", "", !has(/^modal/)], 0,
+        only(["etabs"], ["Story Response Plots...", "dlg:storyPlot", "", !P || !storyTables().length]), ["Plot Functions...", "xy:history", "", !plots], only(["etabs", "sap2000"], ["Static Pushover Curve...", "xy:pushover", "", !has(/pushover|capacitycurve/)]),
+        only(["etabs", "sap2000"], ["Response Spectrum Curves...", "xy:spectrum", "", !has(/responsespectrum/)]), only(["etabs", "sap2000"], ["Modal Results Plot...", "xy:modal", "", !has(/^modal/)]), 0,
         ["Tables...", "tables", "Ctrl+T"], ["Results Coverage...", "dlg:coverage", "", !P]];
     })(),
-    Design: design.length ? [...design.map(f => [f.name, [["Display Design Info...", "des:" + f.key], ...designShows(f).map(s => [s.name.replace(/ \(.*\)$/, ""), "dshow:" + f.key + ":" + s.id])]]), 0, ["All Design Ratios", "r:ratios", "", !ratio.size], ["Display Design Results...", "des:"], ["Summary of Design Results...", "dlg:designSummary"]]
-      : [["No design results in this pack", "", "", true], ["Summary of Design Results...", "dlg:designSummary"]],
-    Options: [["Black Background", "bg"], 0, ["Grid Lines", "o:grid"], ["Extruded Sections", "o:extrude"], ["Floors and Walls", "o:fill"], ["See-through Floors and Walls", "o:see"], ["Object Edges", "o:edges"], ["Supports", "o:supports"], ["Joints", "o:joints"], ["Labels", "o:names"], ["Global Axes", "o:axes"]],
+    Design: [...(window.cpmLive ? [["Start Design/Check...", "eng:design", "Shift+F5"], 0] : []), ...(design.length ? [...design.map(f => [f.name, [["Display Design Info...", "des:" + f.key], ...designShows(f).map(s => [s.name.replace(/ \(.*\)$/, ""), "dshow:" + f.key + ":" + s.id])]]), 0, ["All Design Ratios", "r:ratios", "", !ratio.size], ["Display Design Results...", "des:"], ["Summary of Design Results...", "dlg:designSummary"]]
+      : [["No design results in this pack", "", "", true], ["Summary of Design Results...", "dlg:designSummary"]])],
+    Options: [...(window.cpmLive ? [["Program: " + progLabel(program) + " (ETABS, SAP2000 or SAFE)...", "m:program"], 0] : []), ["Black Background", "bg"], 0, ["Grid Lines", "o:grid"], ["Extruded Sections", "o:extrude"], ["Floors and Walls", "o:fill"], ["See-through Floors and Walls", "o:see"], ["Object Edges", "o:edges"], ["Supports", "o:supports"], ["Joints", "o:joints"], ["Labels", "o:names"], ["Global Axes", "o:axes"]],
     Help: [["Mouse and Keys", "dlg:keys"], ["About", "about"]],
   };
 };
@@ -2892,13 +2941,35 @@ function dialog(title, body, buttons, opts) {
   d.close = close;
   return d;
 }
-const opts = (list, v) => list.map(c => { const [val, label] = Array.isArray(c) ? c : [c, c]; return `<option value="${esc(val)}" ${val === v ? "selected" : ""}>${esc(label)}</option>`; }).join("");
+const opts = (list, v) => (typeof v === "string" && v && !list.some(c => (Array.isArray(c) ? c[0] : c) === v) ? [...list, v] : list).map(c => { const [val, label] = Array.isArray(c) ? c : [c, c]; return `<option value="${esc(val)}" ${val === v ? "selected" : ""}>${esc(label)}</option>`; }).join("");
 const caseGroups = list => {
   // Load cases and combinations apart, as the programs list them.
   const combos = new Set((P.model.combinations || []).map(String)), a = list.filter(c => !combos.has(c)), b = list.filter(c => combos.has(c));
   return (a.length ? `<optgroup label="Load cases">${opts(a, res.case)}</optgroup>` : "") + (b.length ? `<optgroup label="Load combinations">${opts(b, res.case)}</optgroup>` : "");
 };
 const q = (d, s) => d.querySelector(s);
+// The programs' Load Case/Load Combination box, field by field: the type (Load Case or Load Combination), the
+// name, and for a case with several values its Multivalued Options (a mode number or a step), greyed for one value.
+const casePart = k => { const m = /^(.*) · (Mode|Step) (\d+)$/.exec(k); return m ? {base: m[1], by: m[2], n: m[3]} : {base: k, by: "", n: ""}; };
+function caseBox(list) {
+  const combos = new Set((P.model.combinations || []).map(String)), typeOf = c => combos.has(casePart(c).base) || combos.has(c) ? "combo" : "case";
+  const cur = list.includes(res.case) ? res.case : list[0] || "", t = typeOf(cur), types = [["case", "Load Case"], ["combo", "Load Combination"]].filter(([k]) => list.some(c => typeOf(c) === k));
+  const bases = k => [...new Set(list.filter(c => typeOf(c) === k).map(c => casePart(c).base))];
+  return `<fieldset class="cbox"><legend>Load Case/Load Combination</legend><div class="g2"><span>Case/Combo type</span><select id="dType">${opts(types, t)}</select><span>Case/Combo name</span><select id="dBase">${opts(bases(t), casePart(cur).base)}</select></div>
+    <div class="g2" id="dMulti"><span>Multivalued options</span><span></span><span id="dByL">Mode number</span><select id="dStep"></select></div><input type="hidden" id="dCase" value="${esc(cur)}"></fieldset>`;
+}
+function caseBoxWire(d, list) {
+  const combos = new Set((P.model.combinations || []).map(String)), typeOf = c => combos.has(casePart(c).base) || combos.has(c) ? "combo" : "case";
+  const steps = () => list.filter(c => casePart(c).base === q(d, "#dBase").value && casePart(c).by);
+  const pick = () => { const st = steps(), m = q(d, "#dMulti"); m.style.opacity = st.length ? "" : ".45"; q(d, "#dStep").disabled = !st.length;
+    q(d, "#dByL").textContent = st.length && casePart(st[0]).by === "Step" ? "Step number" : "Mode number";
+    const want = casePart(q(d, "#dCase").value), keep = st.find(c => casePart(c).n === want.n) || st[0];
+    q(d, "#dStep").innerHTML = st.length ? opts(st.map(c => [c, casePart(c).n]), keep) : "";
+    q(d, "#dCase").value = st.length ? keep : q(d, "#dBase").value; };
+  q(d, "#dType").onchange = () => { const b = [...new Set(list.filter(c => typeOf(c) === q(d, "#dType").value).map(c => casePart(c).base))]; q(d, "#dBase").innerHTML = opts(b, b[0]); pick(); };
+  q(d, "#dBase").onchange = pick; q(d, "#dStep").onchange = () => { q(d, "#dCase").value = q(d, "#dStep").value; };
+  pick(); return d;
+}
 const dialogs = {
   modes() { openModes(); },
   shells() { openShells(); },
@@ -2911,36 +2982,40 @@ const dialogs = {
   },
   forces() {
     if (!forces.size) return;
-    const comps = forceComps.map(([k, l]) => `<label><input type="radio" name="comp" value="${k}" ${(res.mode === "forces" ? res.comp : "M3") === k ? "checked" : ""}>${l}</label>`).join("");
-    dialog("Member Force Diagram for Frames", `
-      <fieldset><legend>Load Case/Load Combination</legend><div class="g2"><span>Case/Combo name</span><select id="dCase">${caseGroups(resCases("forces"))}</select></div></fieldset>
-      <fieldset><legend>Component</legend><div class="g4">${comps}</div></fieldset>
-      <fieldset><legend>Scaling</legend><div class="g2"><label><input type="radio" name="sc" value="auto" ${res.userScale ? "" : "checked"}>Auto</label><span></span><label><input type="radio" name="sc" value="user" ${res.userScale ? "checked" : ""}>Scale factor</label><input type="number" id="dScale" step="any" value="${res.userScale || ""}" placeholder="length per unit of force"></div></fieldset>
-      <fieldset><legend>Display Options</legend><div class="g3"><label><input type="checkbox" id="dFill" ${res.fill ? "checked" : ""}>Fill diagram</label><label><input type="checkbox" id="dVals" ${res.values ? "checked" : ""}>Show values on diagram</label></div></fieldset>`,
-      [["OK", d => applyForces(d)], ["Apply", d => { applyForces(d); return false; }, true], ["Cancel"]], {width: 470});
+    // As ETABS's and SAP2000's Member Force Diagram for Frames: the components in its order, two to a row.
+    const order = ["P", "T", "V2", "M2", "V3", "M3"], label = {P: "Axial Force", T: "Torsion", V2: "Shear 2-2", M2: "Moment 2-2", V3: "Shear 3-3", M3: "Moment 3-3"};
+    const comps = order.filter(k => forceComps.some(c => c[0] === k)).map(k => `<label><input type="radio" name="comp" value="${k}" ${(res.mode === "forces" ? res.comp : "M3") === k ? "checked" : ""}>${label[k]}</label>`).join("");
+    const list = resCases("forces");
+    caseBoxWire(dialog("Member Force Diagram for Frames", `${caseBox(list)}
+      <fieldset><legend>Component</legend><div class="g2">${comps}</div></fieldset>
+      <fieldset><legend>Scaling</legend><div class="g2"><label><input type="radio" name="sc" value="auto" ${res.userScale ? "" : "checked"}>Auto</label><span></span><label><input type="radio" name="sc" value="user" ${res.userScale ? "checked" : ""}>User Defined</label><input type="number" id="dScale" step="any" value="${res.userScale || ""}" placeholder="length per unit of force"></div></fieldset>
+      <fieldset><legend>Display Options</legend><div class="g2"><label><input type="checkbox" id="dFill" ${res.fill ? "checked" : ""}>Fill Diagram</label><label><input type="checkbox" id="dVals" ${res.values ? "checked" : ""}>Show Values on Diagram</label></div></fieldset>`,
+      [["OK", d => applyForces(d)], ["Close"], ["Apply", d => { applyForces(d); return false; }, true]], {width: 470}), list);
   },
   deformed() {
     if (!disp.size) return;
-    dialog("Deformed Shape", `
-      <fieldset><legend>Load Case/Load Combination</legend><div class="g2"><span>Case/Combo name</span><select id="dCase">${caseGroups(resCases("deformed"))}</select></div></fieldset>
-      <fieldset><legend>Scaling</legend><div class="g2"><label><input type="radio" name="sc" value="auto" ${res.userScale ? "" : "checked"}>Auto</label><span></span><label><input type="radio" name="sc" value="user" ${res.userScale ? "checked" : ""}>Scale factor</label><input type="number" id="dScale" step="any" value="${res.userScale || ""}"></div></fieldset>
-      <fieldset><legend>Options</legend><div class="g3"><label><input type="checkbox" id="dGhost" ${res.ghost ? "checked" : ""}>Wire shadow (undeformed)</label><label><input type="checkbox" id="dAnim" ${res.anim ? "checked" : ""}>Animate</label><label><input type="checkbox" id="dExt" ${opt.extrude ? "checked" : ""}>Extruded sections</label></div></fieldset>`,
-      [["OK", d => applyDeformed(d)], ["Apply", d => { applyDeformed(d); return false; }, true], ["Cancel"]], {width: 440});
+    // As ETABS's and SAP2000's Deformed Shape: case, scaling, contours drawn on the objects, wire shadow.
+    const list = resCases("deformed"), on = res.mode === "contour", comp = on ? res.comp : "U";
+    caseBoxWire(dialog("Deformed Shape", `${caseBox(list)}
+      <fieldset><legend>Scaling</legend><div class="g2"><label><input type="radio" name="sc" value="auto" ${res.userScale ? "" : "checked"}>Automatic</label><span></span><label><input type="radio" name="sc" value="user" ${res.userScale ? "checked" : ""}>Scale Factor</label><input type="number" id="dScale" step="any" value="${res.userScale || ""}"></div></fieldset>
+      <fieldset><legend>Contour Options</legend><div class="g2"><label><input type="checkbox" id="dCont" ${on ? "checked" : ""}>Draw Contours on Objects</label><span></span><span>Contour Component</span><select id="dComp">${opts([["UX", "Ux"], ["UY", "Uy"], ["UZ", "Uz"], ["U", "Resultant"]], comp)}</select></div></fieldset>
+      <fieldset><legend>Other Options</legend><div class="g2"><label><input type="checkbox" id="dGhost" ${res.ghost ? "checked" : ""}>Wire Shadow</label><label><input type="checkbox" id="dAnim" ${res.anim ? "checked" : ""}>Animate</label><label><input type="checkbox" id="dExt" ${opt.extrude ? "checked" : ""}>Extruded Sections</label></div></fieldset>`,
+      [["OK", d => applyDeformed(d)], ["Close"], ["Apply", d => { applyDeformed(d); return false; }, true]], {width: 440}), list);
   },
   contour() {
     if (!disp.size) return;
     const c = res.mode === "contour" ? res.comp : "UZ";
-    dialog("Joint Displacement Contours", `
-      <fieldset><legend>Load Case/Load Combination</legend><div class="g2"><span>Case/Combo name</span><select id="dCase">${caseGroups(resCases("contour"))}</select></div></fieldset>
+    caseBoxWire(dialog("Joint Displacement Contours", `
+      ${caseBox(resCases("contour"))}
       <fieldset><legend>Component</legend><div class="g4">${[["UX", "UX"], ["UY", "UY"], ["UZ", "UZ"], ["U", "Resultant"]].map(([k, l]) => `<label><input type="radio" name="comp" value="${k}" ${c === k ? "checked" : ""}>${l}</label>`).join("")}</div></fieldset>
       <fieldset><legend>Contour Range</legend><div class="g2"><label><input type="radio" name="rg" value="auto" ${res.range ? "" : "checked"}>Auto</label><span></span><label><input type="radio" name="rg" value="user" ${res.range ? "checked" : ""}>Minimum</label><input type="number" step="any" id="dMin" value="${res.range ? res.range[0] : ""}"><span style="padding-left:22px">Maximum</span><input type="number" step="any" id="dMax" value="${res.range ? res.range[1] : ""}"><span>Number of colours</span><select id="dBands">${opts(["6", "7", "8", "9", "10"], String(res.bands))}</select></div></fieldset>`,
-      [["OK", d => applyContour(d)], ["Apply", d => { applyContour(d); return false; }, true], ["Cancel"]], {width: 430});
+      [["OK", d => applyContour(d)], ["Close"], ["Apply", d => { applyContour(d); return false; }, true]], {width: 430}), resCases("contour"));
   },
   reactions() {
     if (!reacts.size) return;
-    dialog("Joint Reactions", `<fieldset><legend>Load Case/Load Combination</legend><div class="g2"><span>Case/Combo name</span><select id="dCase">${caseGroups(resCases("reactions"))}</select></div></fieldset>
+    caseBoxWire(dialog("Joint Reactions", `${caseBox(resCases("reactions"))}
       <fieldset><legend>Display Type</legend><div class="g3">${[["ALL", "Arrows, FX FY FZ"], ["FZ", "Vertical FZ only"], ["FX", "FX only"], ["FY", "FY only"]].map(([k, l]) => `<label><input type="radio" name="comp" value="${k}" ${(res.mode === "reactions" ? res.comp : "ALL") === k ? "checked" : ""}>${l}</label>`).join("")}</div></fieldset>`,
-      [["OK", d => { res.mode = "reactions"; syncResults(); res.case = q(d, "#dCase").value; res.comp = q(d, "[name=comp]:checked").value; syncResults(); syncTools(); draw(); }], ["Cancel"]], {width: 400});
+      [["OK", d => { res.mode = "reactions"; syncResults(); res.case = q(d, "#dCase").value; res.comp = q(d, "[name=comp]:checked").value; syncResults(); syncTools(); draw(); }], ["Close"]], {width: 400}), resCases("reactions"));
   },
   display() {
     const kinds = [["column", "Columns"], ["beam", "Beams"], ["brace", "Braces"], ["floor", "Floors"], ["wall", "Walls"]].filter(([k]) => frames.some(f => f.kind === k) || areas.some(a => a.kind === k));
@@ -3025,6 +3100,7 @@ function applyForces(d) {
   colourDirty = true; syncResults(); res.case = q(d, "#dCase").value; $("case").value = res.case; $("comp").value = res.comp; panes.forEach(p => p.diagSig = null); syncTools(); draw();
 }
 function applyDeformed(d) {
+  if (q(d, "#dCont") && q(d, "#dCont").checked) { res.mode = "contour"; syncResults(); res.case = q(d, "#dCase").value; res.comp = q(d, "#dComp").value; res.range = null; $("case").value = res.case; pointsDirty = true; colourDirty = true; syncResults(); syncTools(); return draw(); }
   res.mode = "deformed"; res.userScale = q(d, "[name=sc]:checked").value === "user" ? Math.abs(parseFloat(q(d, "#dScale").value)) || 0 : 0;
   res.ghost = q(d, "#dGhost").checked; res.anim = q(d, "#dAnim").checked;
   if (q(d, "#dExt").checked !== opt.extrude) { opt.extrude = q(d, "#dExt").checked; geometryDirty = true; geometryStamp++; }
@@ -3493,7 +3569,10 @@ function buildTree() {
   const node = (k, title, n, body, wide) => `<details data-k="${k}" ${first ? (wide ? "open" : "") : open.has(k) ? "open" : ""}><summary>${esc(title)}${n === null ? "" : ` <span class="n">(${n})</span>`}</summary>${body}</details>`;
   const plain = list => list.length ? list.map(x => `<div class="leaf">${esc(x)}</div>`).join("") : `<div class="leaf kv">none</div>`;
   const T = theme(), m = P.model, man = P.manifest || {}, count = (list, f) => list.filter(f).length;
-  const kinds = [["column", "Columns", frames], ["beam", "Beams", frames], ["brace", "Braces", frames], ["floor", program === "sap2000" ? "Areas" : "Floors", areas], ["wall", "Walls", areas]];
+  // The Model Explorer names objects as the program does: SAP2000 has frames and areas (no stories), SAFE has slabs.
+  const kinds = program === "sap2000" ? [["column", "Frames (vertical)", frames], ["beam", "Frames (horizontal)", frames], ["brace", "Frames (inclined)", frames], ["floor", "Areas (horizontal)", areas], ["wall", "Areas (vertical)", areas]]
+    : program === "safe" ? [["floor", "Slabs", areas], ["beam", "Beams", frames], ["column", "Columns", frames], ["wall", "Walls", areas], ["brace", "Braces", frames]]
+    : [["column", "Columns", frames], ["beam", "Beams", frames], ["brace", "Braces", frames], ["floor", "Floors", areas], ["wall", "Walls", areas]];
   const kindLeaves = kinds.map(([k, title, list]) => { const n = count(list, o => o.kind === k); return n ? `<label class="leaf"><input type="checkbox" data-hide="kind" data-v="${k}" ${hidden.kind.has(k) ? "" : "checked"}><i style="background:${k === "floor" ? T.floor : k === "wall" ? T.wall : T[k]}"></i>${title}<span class="n">${n}</span></label>` : ""; }).join("");
   const secLeaves = (type, names, list) => names.map(s => { const n = count(list, o => o.section === s), z = type === "f" ? sizes[s] : slabT[s]; return `<div class="leaf go" data-sec="${type}" data-v="${esc(s)}" title="Click to light up its members"><input type="checkbox" data-hide="section" data-v="${esc(type + ":" + s)}" ${hidden.section.has(type + ":" + s) ? "" : "checked"}>${esc(s)}<span class="n">${z ? (type === "f" ? num(z[1]) + (z[2] ? "x" + num(z[2]) : "") : num(z)) + " · " : ""}${n}</span></div>`; }).join("") || `<div class="leaf kv">none</div>`;
   const fs = m.frame_sections || [...new Set(frames.map(f => f.section))], as = m.area_sections || [...new Set(areas.map(a => a.section))];
@@ -3505,12 +3584,12 @@ function buildTree() {
   const model = node("model", man.model || "Model", null,
     node("project", "Project", null, `<div class="leaf">Program<span class="n">${esc(progLabel(program) + (man.etabs && !/modeler/i.test(man.etabs) ? " " + man.etabs : ""))}</span></div><div class="leaf">Units<span class="n">${esc($("units").textContent || "")}</span></div><div class="leaf">${esc(tw.analysed)}</div>`) +
     node("layout", "Structure Layout", null,
-      node("stories", program === "sap2000" ? "Levels" : "Stories", stories.length, stories.slice().reverse().map(s => `<div class="leaf go" data-story="${esc(s.name)}">${esc(s.name)}<span class="n">${num(s.elevation)}</span></div>`).join(""), true) +
-      node("grids", gridsGuessed ? "Column lines" : "Grids", grids.X.length + grids.Y.length, lines("X") + lines("Y")), true) +
+      node("stories", program === "sap2000" ? "X-Y Planes" : "Stories", stories.length, stories.slice().reverse().map(s => `<div class="leaf go" data-story="${esc(s.name)}">${esc(s.name)}<span class="n">${num(s.elevation)}</span></div>`).join(""), true) +
+      node("grids", gridsGuessed ? "Column lines" : program === "sap2000" ? "Grid Systems" : "Grids", grids.X.length + grids.Y.length, lines("X") + lines("Y")), true) +
     node("props", "Properties", null,
       node("mat", "Materials", (m.materials || []).length, plain(m.materials || [])) +
       node("fsec", "Frame Sections", fs.length, secLeaves("f", fs, frames)) +
-      node("asec", program === "sap2000" ? "Area Sections" : "Slab and Wall Sections", as.length, secLeaves("a", as, areas))) +
+      node("asec", program === "sap2000" ? "Area Sections" : program === "safe" ? "Slab Properties" : "Slab and Wall Sections", as.length, secLeaves("a", as, areas))) +
     node("objects", "Structural Objects", frames.length + areas.length + joints, (kindLeaves || `<div class="leaf kv">nothing drawn yet</div>`) + `<div class="leaf go" data-act="selJoints">Joints<span class="n">${joints}</span></div><div class="leaf go" data-act="selSupports">Supports<span class="n">${supports.length}</span></div>`, true) +
     node("groups", "Groups", groups.length, plain(groups)) +
     node("loads", "Loads", null,
@@ -3553,12 +3632,15 @@ document.querySelectorAll("[data-close]").forEach(b => b.onclick = () => act(b.d
 // ---- side panel ----
 function showTab(name) { document.querySelectorAll("[data-tab]").forEach(x => x.classList.toggle("on", x.dataset.tab === name)); document.querySelectorAll(".tab").forEach(t => t.classList.toggle("on", t.id === name)); }
 document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => showTab(b.dataset.tab));
+$("fbFilter").onclick = () => selFilter();
 function showPick() {
   const el = $("props");
   if (!P) return;
   const list = [...sel].map(objOf).filter(Boolean), table = rows => `<table class="props">${rows.map(r => `<tr><td>${r[0]}</td><td>${esc(r[1])}</td></tr>`).join("")}</table>`;
   const counts = {}; list.forEach(o => counts[o.type === "f" ? "Frames" : "Shells"] = (counts[o.type === "f" ? "Frames" : "Shells"] || 0) + 1);
   const joints = [...selJ].filter(n => pointXyz.has(n)); if (joints.length) counts.Joints = joints.length;
+  // The Filter at the bottom right, as Revit has it: the count of what is selected, on whenever something is.
+  const fb = $("fbFilter"); if (fb) { fb.disabled = !(list.length + joints.length); $("fbN").textContent = list.length + joints.length; }
   $("sel").textContent = list.length || joints.length ? Object.entries(counts).map(([k, n]) => n + " " + (n === 1 ? k.slice(0, -1) : k)).join(", ") + " selected" : "";
   const filterBtn = `<button id="pFilter" title="Keep only some kinds of the selected objects">Filter...</button>`, wireFilter = () => { const b = $("pFilter"); if (b) b.onclick = selFilter; };
   if (!list.length && joints.length === 1) {
@@ -3779,7 +3861,7 @@ document.addEventListener("drop", e => { e.preventDefault(); if (e.dataTransfer.
 document.addEventListener("keydown", e => {
   if (e.target.closest("input, textarea, select")) return;
   const k = e.key, ctrl = e.ctrlKey || e.metaKey, stop = () => e.preventDefault();
-  if (k === "F5" && window.cpmLive) { stop(); act("eng:run"); return; }
+  if (k === "F5" && window.cpmLive) { stop(); act(e.shiftKey ? "eng:design" : "eng:run"); return; }
   if (k === "F2") { stop(); act("t:zoom"); } else if (k === "F3") { stop(); act("fitActive"); } else if (k === "F4") { stop(); setRes("model"); } else if (k === "F6") { stop(); if (disp.size) dialogs.deformed(); } else if (k === "F8") { stop(); if (forces.size) dialogs.forces(); }
   else if (k === "PageUp") { stop(); act("storyUp"); } else if (k === "PageDown") { stop(); act("storyDown"); }
   else if (k === "Escape") { if (document.querySelector(".ctx")) hideMenus(); else if (tool !== "select") act("t:select"); else act("selNone"); }
@@ -3963,22 +4045,23 @@ function modelerMenus(m) {
     ["Export", [["Tables to Excel (.xlsx)...", "m:xlsxOut"], 0, only(["etabs", "sap2000"], ["SAP2000 .s2k Text File...", "m:s2k"]), only(["etabs", "safe"], ["SAFE .f2k Text File (one floor)...", "m:f2k"])]], 0, ["Print the active window...", "print", "Ctrl+P"]];
   m.Edit = [[s.undo ? "Undo " + s.undo : "Undo", "m:undo", "Ctrl+Z", !s.undo], [s.redo ? "Redo " + s.redo : "Redo", "m:redo", "Ctrl+Y", !s.redo], 0,
     ["Delete", "m:delete", "Del", !any], 0, ["Replicate...", "m:replicate", "", !any], ["Move...", "m:move", "", !any], ["Divide Frames...", "m:divide", "", !hmSelected("f").length], 0, ["Copy names of the selected objects", "copyNames", "Ctrl+C", !any], 0, ["Hide the selected objects", "hideSel", "", !any], ["Show all objects", "showAll"], 0, ["Model Text...", "m:text"]];
-  m.Define = [["Material Properties...", "m:materials"], ["Frame Sections...", "m:frameSections"], ["Slab and Wall Sections...", "m:shellSections"], only(["etabs", "sap2000"], ["Link/Support Properties...", "m:links"]), ["Spring Properties", [["Point Springs...", "m:spr:point"], ["Line Springs...", "m:spr:line"], ["Area Springs...", "m:spr:area"]]], 0,
+  m.Define = [["Material Properties...", "m:materials"], ["Frame Sections...", "m:frameSections"], [({sap2000: "Area Sections...", safe: "Slab and Wall Properties..."})[program] || "Slab and Wall Sections...", "m:shellSections"], ["Reinforcing Bar Sizes...", "m:rebarSizes"], ["Frame Section Rebar (Modify/Show Rebar)...", "m:frameRebar"], only(["etabs", "sap2000"], ["Link/Support Properties...", "m:links"]), ["Spring Properties", [["Point Springs...", "m:spr:point"], ["Line Springs...", "m:spr:line"], ["Area Springs...", "m:spr:area"]]], 0,
     only(["etabs", "sap2000"], ["Diaphragms...", "m:st:diaphragm"]), only(["etabs"], ["Pier Labels...", "m:st:pier"]), only(["etabs"], ["Spandrel Labels...", "m:st:spandrel"]), ["Groups...", "m:st:group"], ["Section Cuts...", "m:st:cut"], only(["sap2000"], ["Joint Constraints...", "m:ex:constraints"]), only(["etabs", "safe"], ["Design Strips...", "m:ex:strips"]), ["Tendon Sections...", "m:ex:tendonsections"], ["Tendons...", "m:ex:tendons"], only(["etabs", "safe"], ["Hyperstatic Load Cases...", "m:ex:hyperstatic"]), only(["etabs", "safe"], ["Punching Shear Overwrites...", "m:ex:punching"]), only(["etabs", "safe"], ["Floor Openings...", "m:ex:openings"]), 0,
-    ["Story Data...", "m:stories"], ["Grid Data...", "m:grids"], 0, ["Functions", [["Response Spectrum...", "m:fnRS"], ["Time History...", "m:fnTH"]]],
+    ...hmDefineTableItems(), 0,
+    [program === "sap2000" ? "Elevations (Z Grid Lines)..." : "Story Data...", "m:stories"], [program === "sap2000" ? "Coordinate Systems/Grids..." : "Grid Data...", "m:grids"], 0, ["Functions", [["Response Spectrum...", "m:fnRS"], only(ES, ["Time History...", "m:fnTH"])]],
     ["Load Patterns...", "m:patterns"], ["Load Cases...", "m:cases"], only(["sap2000"], ["Moving Loads", [["Lanes...", "m:ex:lanes"], ["Vehicles...", "m:ex:vehicles"], ["Vehicle Classes...", "m:ex:classes"], ["Moving Load Cases...", "m:ex:mcases"]]]), ["Load Combinations...", "m:combos"], 0, ["Mass Source...", "m:mass"], only(["etabs", "sap2000"], ["P-Delta Options...", "m:pdelta"])];
   m.Draw = [["Select Object", "t:select", "Esc"], 0, ["Draw Columns (click a point)", "d:column"], ["Draw Beams (click start and end)", "d:beam"], ["Quick Draw Beams (click a grid line)", "d:qbeam"], 0,
     ["Draw Floors (click corners)", "d:floor"], ["Draw Rectangular Floors (two corners)", "d:rect"], ["Quick Draw Floors (click in a bay)", "d:qfloor"], 0,
     ["Draw Walls (click start and end)", "d:wall"], ["Quick Draw Walls (click a grid line)", "d:qwall"], 0,
-    ["Draw Braces (click bottom and top)", "d:brace"], ["Draw Joints (click a point)", "d:joint"], 0, ["Snap and Story Options...", "m:drawHelp"]];
-  m.Assign = [["Frame Section...", "m:asgFrame", "", !fr], ["Slab or Wall Section...", "m:asgShell", "", !ar], 0, ["Joint Restraints (Supports)...", "m:asgSupport"], 0,
+    only(ES, ["Draw Braces (click bottom and top)", "d:brace"]), ["Draw Joints (click a point)", "d:joint"], 0, ["Snap and Story Options...", "m:drawHelp"]];
+  m.Assign = [["Frame Section...", "m:asgFrame", "", !fr], [program === "sap2000" ? "Area Section..." : "Slab or Wall Section...", "m:asgShell", "", !ar], 0, ["Joint Restraints (Supports)...", "m:asgSupport"], 0,
     ["Joint", [["Springs...", "m:ad:joint", "", !any], only(["etabs", "sap2000"], ["Diaphragms...", "m:sa:jdiaph", "", !any]), only(["sap2000"], ["Constraints...", "m:ex:jconstraint", "", !any]), 0, ...hmTableItems("Joint", !any)]],
     ["Frame", [["Releases...", "m:ad:releases", "", !fr], ["Local Axes...", "m:ad:axes", "", !fr], ["Insertion Point...", "m:ad:insertion", "", !fr], ["End Length Offsets...", "m:ad:offsets", "", !fr], ["Property Modifiers...", "m:ad:fmods", "", !fr], ["Line Springs...", "m:ad:lspring", "", !fr], only(["etabs", "sap2000"], ["Hinges...", "m:ad:hinges", "", !fr]), 0, ...hmTableItems("Frame", !fr)]],
-    ["Shell", [["Property Modifiers...", "m:ad:smods", "", !ar], ["Area Springs...", "m:ad:aspring", "", !ar], only(["etabs", "sap2000"], ["Diaphragms...", "m:sa:diaph", "", !ar]), only(["etabs"], ["Pier Label...", "m:sa:pier", "", !any]), only(["etabs"], ["Spandrel Label...", "m:sa:spandrel", "", !any]), 0, only(["etabs"], ["Opening...", "m:at:opening", "", !ar]), ...hmTableItems("Area", !ar)]],
+    [program === "sap2000" ? "Area" : "Shell", [["Property Modifiers...", "m:ad:smods", "", !ar], ["Area Springs...", "m:ad:aspring", "", !ar], only(["etabs", "sap2000"], ["Diaphragms...", "m:sa:diaph", "", !ar]), only(["etabs"], ["Pier Label...", "m:sa:pier", "", !any]), only(["etabs"], ["Spandrel Label...", "m:sa:spandrel", "", !any]), 0, only(["etabs"], ["Opening...", "m:at:opening", "", !ar]), ...hmTableItems("Area", !ar)]],
     ["Assign Objects to Group...", "m:sa:group", "", !any], 0,
-    ["Joint Loads", [["Forces...", "m:ld:joint_force", "", !any], ["Ground Displacements...", "m:ld:joint_displacement", "", !any], ["Temperature...", "m:ld:joint_temperature", "", !any]]],
-    ["Frame Loads", [["Distributed...", "m:asgFrameLoad", "", !fr], ["Uniform in any direction...", "m:ld:frame_uniform", "", !fr], ["Point...", "m:ld:frame_point", "", !fr], ["Trapezoidal...", "m:ld:frame_trapezoid", "", !fr], ["Temperature...", "m:ld:frame_temperature", "", !fr], ["Strain...", "m:ld:frame_strain", "", !fr]]],
-    ["Shell Loads", [["Uniform...", "m:asgShellLoad", "", !ar], ["Uniform in any direction...", "m:ld:shell_uniform", "", !ar], ["Temperature...", "m:ld:shell_temperature", "", !ar], ["Strain...", "m:ld:shell_strain", "", !ar]]]];
+    ["Joint Loads", [["Forces...", "m:ld:joint_force", "", !any], ["Ground Displacements...", "m:ld:joint_displacement", "", !any], only(ES, ["Temperature...", "m:ld:joint_temperature", "", !any])]],
+    ["Frame Loads", [["Distributed...", "m:asgFrameLoad", "", !fr], ["Uniform in any direction...", "m:ld:frame_uniform", "", !fr], ["Point...", "m:ld:frame_point", "", !fr], ["Trapezoidal...", "m:ld:frame_trapezoid", "", !fr], ["Temperature...", "m:ld:frame_temperature", "", !fr], only(ES, ["Strain...", "m:ld:frame_strain", "", !fr])]],
+    [({sap2000: "Area Loads", safe: "Slab Loads"})[program] || "Shell Loads", [["Uniform...", "m:asgShellLoad", "", !ar], ["Uniform in any direction...", "m:ld:shell_uniform", "", !ar], ["Temperature...", "m:ld:shell_temperature", "", !ar], only(ES, ["Strain...", "m:ld:shell_strain", "", !ar])]]];
   return m;
 }
 async function modelAct(a) {
@@ -3987,6 +4070,7 @@ async function modelAct(a) {
   if (a.startsWith("spr:")) return hmSprings(a.slice(4));
   if (a.startsWith("ad:")) return hmAssignData(a.slice(3));
   if (a.startsWith("at:")) return hmAssignTable(a.slice(3));
+  if (a.startsWith("dt:")) return hmDefineTable(a.slice(3));
   if (a.startsWith("st:")) return hmStructure(a.slice(3));
   if (a.startsWith("sa:")) return hmAssignStructure(a.slice(3));
   if (a.startsWith("ex:")) return hmExtras(a.slice(3));
@@ -4025,6 +4109,8 @@ async function modelAct(a) {
     case "replicate": return hmReplicate();
     case "move": return hmMove();
     case "divide": return hmDivide();
+    case "rebarSizes": return hmRebarSizes();
+    case "frameRebar": return hmFrameRebar();
   }
 }
 const hmSelected = t => [...sel].map(objOf).filter(o => o && o.type === t).map(o => o.name);
@@ -4063,16 +4149,18 @@ async function hmDivide() {
 // ---- Assign: the Frame, Shell and Joint items kept as rows of the program's own assignment tables (AssignTables) ----
 // Menu label, table name after "<Kind> Assignments - ", and the programs whose files carry it (SAP2000: added mass,
 // tension and compression limits, shell local axes; the rest go into ETABS through its tables).
+// Each item: label, table, the programs that have it (ETABS when left out), and SAP2000's own name for it.
+const ES = ["etabs", "sap2000"];
 const asgTables = {
-  Frame: [["Additional Mass...", "Additional Mass", ["etabs", "sap2000"]], ["Output Stations...", "Output Stations"], ["Auto Mesh Options...", "Frame Auto Mesh Options"], ["Floor Meshing Option...", "Frame Floor Meshing Option"],
-    ["Tension/Compression Limits...", "Tension and Compression Limits", ["etabs", "sap2000"]], ["Material Overwrites...", "Material Overwrites"], ["Column Splice Overwrites...", "Column Splice Overwrites"],
+  Frame: [["Additional Mass...", "Additional Mass", ES, "Line Mass..."], ["Output Stations...", "Output Stations", ES], ["Auto Mesh Options...", "Frame Auto Mesh Options", ES, "Automatic Frame Mesh..."], ["Floor Meshing Option...", "Frame Floor Meshing Option"],
+    ["Tension/Compression Limits...", "Tension and Compression Limits", ES], ["Material Overwrites...", "Material Overwrites", ES, "Material Property Overwrites..."], ["Column Splice Overwrites...", "Column Splice Overwrites"],
     ["Moment Frame Beam Connection Type...", "Moment Frame Beam Connection Type"], ["Nonprismatic Parameters...", "Advanced Nonprismatic Section Parameters"], ["Floor Cracking...", "Floor Cracking"], ["Rebar Ratio for Creep Analysis...", "Rebar Ratio For Creep Analysis"]],
-  Area: [["Local Axes...", "Local Axes", ["etabs", "sap2000"]], ["Insertion Point...", "Insertion Point"], ["Additional Mass...", "Additional Mass", ["etabs", "sap2000"]], ["Edge Releases...", "Edge Releases"], ["Auto Edge Constraints...", "Auto Edge Constraints"],
-    ["Floor Auto Mesh Options...", "Floor Auto Mesh Options"], ["Wall Auto Mesh Options...", "Wall Auto Mesh Options"], ["Thickness Overwrites...", "Thickness Overwrites"], ["Material Overwrites...", "Material Overwrites"],
+  Area: [["Local Axes...", "Local Axes", ES], ["Insertion Point...", "Insertion Point", ES, "Joint Offsets..."], ["Additional Mass...", "Additional Mass", ES, "Area Mass..."], ["Edge Releases...", "Edge Releases"], ["Auto Edge Constraints...", "Auto Edge Constraints", ES, "Edge Constraints..."],
+    ["Floor Auto Mesh Options...", "Floor Auto Mesh Options", ES, "Automatic Area Mesh..."], ["Wall Auto Mesh Options...", "Wall Auto Mesh Options", ES, "Automatic Area Mesh (vertical areas)..."], ["Thickness Overwrites...", "Thickness Overwrites", ES, "Area Thickness Overwrites..."], ["Material Overwrites...", "Material Overwrites", ES, "Material Property Overwrites..."],
     ["Slab Line Releases...", "Slab Line Releases"], ["Slab Rib Locations...", "Slab Rib Locations"], ["Floor Cracking...", "Floor Cracking"], ["Rebar Ratio for Creep Analysis...", "Wall Rebar Ratio for Creep Analysis"]],
-  Joint: [["Additional Mass...", "Additional Mass", ["etabs", "sap2000"]], ["Panel Zone...", "Panel Zone"], ["Floor Meshing Option...", "Floor Meshing Option"]],
+  Joint: [["Additional Mass...", "Additional Mass", ES, "Masses..."], ["Panel Zone...", "Panel Zone"], ["Floor Meshing Option...", "Floor Meshing Option"]],
 };
-function hmTableItems(kind, off) { return asgTables[kind].map(([label, t, progs]) => only(progs || ["etabs"], [label, "m:at:" + kind + " Assignments - " + t, "", off])); }
+function hmTableItems(kind, off) { return asgTables[kind].map(([label, t, progs, sap]) => only(progs || ["etabs"], [program === "sap2000" && sap || label, "m:at:" + kind + " Assignments - " + t, "", off])); }
 // Fields that take Yes or No, and fields with the programs' own choices.
 const asgYesNo = /^(Include|Consider|AtIntJoints|AtIntersect|AtBeams|AtWalls|AtGrids|Submesh|Restraints|Transform|IncludeInMesh|Mirror|R(InShear|DirForce|OutShear|Bending|Twisting)$|ShearL|MomentL|ShearR|MomentR|AutoMesh)/;
 const asgChoices = {StationOpt: ["Min Stations", "Max Spacing"], SpliceOpt: ["Story Default", "No Splice", "Splice at Height"], MeshOption: ["Default", "Auto Cookie Cut", "Auto Rectangular", "General Divide Tool", "No Auto Mesh", "Mesh N1 x N2"],
@@ -4103,6 +4191,92 @@ async function hmAssignTable(table) {
     d.querySelectorAll("#atB [data-del]").forEach(b => b.onclick = () => { read(); rows.splice(+b.dataset.del, 1); if (!rows.length) rows = [{}]; paint(); });
   };
   if (def.many) q(d, "#atAdd").onclick = () => { read(); rows.push({}); paint(); };
+  paint();
+}
+
+// ---- Define: the items kept as rows of the program's own definition tables, rebar sizes and a section's rebar ----
+// label, table(s), the programs that have it (ETABS when left out), SAP2000's own name.
+const defTables = [
+  ["Generalized Displacements...", ["Generalized Displacement Definitions"], ES],
+  ["Shell Uniform Load Sets...", ["Shell Uniform Load Sets"]],
+  ["Auto Construction Sequence...", ["Auto Construction Sequence Definition"]],
+  ["Walking Vibrations...", ["Walking Vibration Definitions"]],
+  ["Panel Zone Properties...", ["Panel Zone Property Definitions", "Panel Zone Property Definitions - User Nonlinear Data"]],
+  ["Frame Release Definitions...", ["Frame Release Definitions"]],
+  ["Slab Layers...", ["Slab Property Definitions - Layers"], ES, "Area Section Layers (slabs)..."],
+  ["Wall Layers...", ["Wall Property Definitions - Layers"], ES, "Area Section Layers (walls)..."],
+  ["Wall Auto Select Lists...", ["Wall Property Definitions - Auto Select List"]],
+];
+const hingeKinds = ["Axial P", "Moment M2", "Moment M3", "Shear V2", "Shear V3", "Torsion T", "Interacting M2M3", "Interacting PM2", "Interacting PM3", "Interacting PM2M3",
+  "Parametric - Concrete PM2M3", "Parametric - Steel PM2M3", "Fiber PM3", "Fiber PM2M3", "Force Controlled - Axial P", "Force Controlled - Moment M2", "Force Controlled - Moment M3",
+  "Force Controlled - Shear V2", "Force Controlled - Shear V3", "Force Controlled - Torsion T", "Force Controlled - Interacting M2M3", "Force Controlled - Interacting PM2",
+  "Force Controlled - Interacting PM3", "Force Controlled - Interacting PM2M3"];
+function hmDefineTableItems() {
+  return [...defTables.map(([label, tables, progs, sap]) => only(progs || ["etabs"], [program === "sap2000" && sap || label, "m:dt:" + tables.join("|")])),
+    only(ES, [program === "sap2000" ? "Hinge Properties" : "Hinge Definitions", hingeKinds.map(k => [k + "...", "m:dt:Hinge Definitions - " + k])])];
+}
+async function hmDefineTable(spec) {
+  const tables = spec.split("|"), dd = (await hmRun("definition_data", {}, true)).result; if (!dd) return;
+  const defs = tables.map(t => dd.tables[t]); if (defs.some(x => !x)) return hmSay("The " + progLabel(program) + " model has no " + tables[0] + ".", true);
+  const names = [...new Set(tables.flatMap(t => dd.tables[t].rows.map(r => r.Name)))];
+  let name = names[0] || "", rows = {};
+  const load = n => { rows = Object.fromEntries(tables.map(t => [t, dd.tables[t].rows.filter(r => r.Name === n).map(r => ({...r}))])); for (const t of tables) if (!rows[t].length) rows[t] = [{}]; };
+  load(name);
+  const cell = (k, v) => asgYesNo.test(k) || /\?$/.test(k) ? `<input data-k="${k}" type="checkbox" ${v === "Yes" ? "checked" : ""}>` : `<input data-k="${k}" value="${esc(v ?? "")}">`;
+  const d = dialog(tables[0].replace(/ Definitions?$/, ""), `<div class="g2"><span>Name</span><span><select id="dtN">${opts(names, name)}</select> <input id="dtNew" placeholder="new name" style="width:120px"> <button id="dtGo">New</button></span></div>
+    <div id="dtB"></div><p class="kv">The fields are as the program's own table holds them, in the model's units. Leave a row empty to drop it.</p>`,
+    [["OK", d => { read(); return dtSave(d, 0); }, true], ["Delete", d => name && submit(d, "define_table_rows", {table: tables[0], name, rows: []})], ["Cancel"]], {width: 820});
+  const read = () => d.querySelectorAll("#dtB [data-t]").forEach(tr => tr.querySelectorAll("[data-k]").forEach(x => rows[tables[+tr.dataset.t]][+tr.dataset.r][x.dataset.k] = x.type === "checkbox" ? (x.checked ? "Yes" : "No") : x.value.trim()));
+  const fieldsOf = t => dd.tables[t].fields.filter(f => f[0] !== "Name");
+  const paint = () => {
+    q(d, "#dtB").innerHTML = tables.map((t, ti) => `<fieldset><legend>${esc(t)}</legend><div class="scroll" style="max-height:40vh"><table class="list hmgrid"><tr>${fieldsOf(t).map(f => `<th>${esc(f[1])}</th>`).join("")}<th></th></tr>${rows[t].map((r, i) =>
+      `<tr data-t="${ti}" data-r="${i}">${fieldsOf(t).map(f => `<td>${cell(f[0], r[f[0]])}</td>`).join("")}<td><button data-del="${ti}:${i}">Delete</button></td></tr>`).join("")}</table></div><button data-add="${ti}">Add Row</button></fieldset>`).join("");
+    d.querySelectorAll("#dtB [data-del]").forEach(b => b.onclick = () => { read(); const [ti, i] = b.dataset.del.split(":").map(Number); rows[tables[ti]].splice(i, 1); if (!rows[tables[ti]].length) rows[tables[ti]] = [{}]; paint(); });
+    d.querySelectorAll("#dtB [data-add]").forEach(b => b.onclick = () => { read(); rows[tables[+b.dataset.add]].push({}); paint(); });
+  };
+  const dtSave = async (d, i) => {
+    if (!name) return formError(d, "Give the definition a name (New).");
+    if (i >= tables.length) return;
+    const kept = rows[tables[i]].filter(r => Object.values(r).some(v => v !== "" && v !== "No"));
+    if (i === tables.length - 1) return submit(d, "define_table_rows", {table: tables[i], name, rows: kept});
+    const j = await hmRun("define_table_rows", {table: tables[i], name, rows: kept}); if (!j.ok) return formError(d, j.error);
+    return dtSave(d, i + 1);
+  };
+  q(d, "#dtN").onchange = e => { read(); name = e.target.value; load(name); paint(); };
+  q(d, "#dtGo").onclick = () => { const n = q(d, "#dtNew").value.trim(); if (!n) return; read(); name = n; load(n); q(d, "#dtN").innerHTML = opts([...names, n], n); paint(); };
+  paint();
+}
+async function hmRebarSizes() {
+  const dd = (await hmRun("definition_data", {}, true)).result; if (!dd) return;
+  const u = hmU();
+  const d = dialog("Reinforcing Bar Sizes", `<table class="list hmgrid"><tr><th>Bar ID</th><th>Area${u.l ? " (" + esc(u.l) + "²)" : ""}</th><th>Diameter${u.l ? " (" + esc(u.l) + ")" : ""}</th><th></th></tr>
+    <tr class="edit"><td><input id="rbN"></td><td><input id="rbA" type="number" step="any"></td><td><input id="rbD" type="number" step="any"></td><td><button id="rbAdd">Add / Modify</button></td></tr>
+    ${dd.rebar_sizes.map(b => `<tr data-b="${esc(b.name)}"><td>${esc(b.name)}</td><td class="r">${esc(String(b.area))}</td><td class="r">${esc(String(b.diameter))}</td><td><button data-del="${esc(b.name)}">Delete</button></td></tr>`).join("")}</table>`,
+    [["OK"]], {width: 560});
+  const again = () => { d.close(); hmRebarSizes(); };
+  d.querySelectorAll("[data-b]").forEach(tr => tr.onclick = () => { const b = dd.rebar_sizes.find(x => x.name === tr.dataset.b); q(d, "#rbN").value = b.name; q(d, "#rbA").value = b.area; q(d, "#rbD").value = b.diameter; });
+  d.querySelectorAll("[data-del]").forEach(b => b.onclick = e => { e.stopPropagation(); hmRun("define_rebar_size", {name: b.dataset.del, delete: true}).then(j => j.ok ? again() : formError(d, j.error)); });
+  q(d, "#rbAdd").onclick = () => hmRun("define_rebar_size", {name: q(d, "#rbN").value.trim(), area: fnum(d, "#rbA"), diameter: fnum(d, "#rbD")}).then(j => j.ok ? again() : formError(d, j.error));
+}
+const rebarFields = {
+  Column: [["LONGBARMATERIAL", "Longitudinal Bars Material"], ["CONFINEBARMATERIAL", "Confinement Bars Material"], ["PATTERN", "Pattern (R-bars along 3-bars along 2, or C-bars)"], ["TRANSREINF", "Confinement Bars"], ["DESIGNCHECK", "Check/Design"],
+    ["COVER", "Clear Cover for Confinement Bars"], ["LONGBARAREA", "Longitudinal Bar Area"], ["CONFINEBARAREA", "Confinement Bar Area"], ["CONFINEBARSPACING", "Longitudinal Spacing of Confinement Bars"], ["NUMCONFINEBARS3", "Number of Confinement Bars in 3-dir"], ["NUMCONFINEBARS2", "Number of Confinement Bars in 2-dir"]],
+  Beam: [["LONGBARMATERIAL", "Longitudinal Bars Material"], ["CONFINEBARMATERIAL", "Confinement Bars Material"], ["COVERTOP", "Cover to Longitudinal Rebar Group Centroid, Top"], ["COVERBOTTOM", "Cover to Longitudinal Rebar Group Centroid, Bottom"],
+    ["ATI", "Top Bars at I-End (area)"], ["ABI", "Bottom Bars at I-End (area)"], ["ATJ", "Top Bars at J-End (area)"], ["ABJ", "Bottom Bars at J-End (area)"]],
+};
+const rebarChoices = {TRANSREINF: ["TIES", "SPIRAL"], DESIGNCHECK: ["DESIGN", "CHECK"]};
+async function hmFrameRebar(section) {
+  const [dd, defs] = [(await hmRun("definition_data", {}, true)).result, await hmDefs()]; if (!dd) return;
+  const concrete = defs.frame_sections.filter(s => defs.materials.some(m => m.name === s.material && /concrete/i.test(m.type))).map(s => s.name);
+  if (!concrete.length) return hmSay("There is no concrete frame section to give rebar.", true);
+  section = section && concrete.includes(section) ? section : concrete[0];
+  const now = dd.section_rebar[section] || {TYPE: "Column"}, rebars = defs.materials.filter(m => /rebar/i.test(m.type)).map(m => m.name);
+  const field = (k, v) => /MATERIAL$/.test(k) ? `<select data-k="${k}">${opts(rebars, v || rebars[0])}</select>` : rebarChoices[k] ? `<select data-k="${k}">${opts(rebarChoices[k], v || rebarChoices[k][0])}</select>` : `<input data-k="${k}" value="${esc(v ?? "")}">`;
+  const d = dialog("Frame Section Property Reinforcement Data", `<div class="g2"><span>Section</span><select id="frS">${opts(concrete, section)}</select><span>Design Type</span><select id="frT">${opts([["Column", "Column (P-M2-M3 Design)"], ["Beam", "Beam (M3 Design Only)"]], now.TYPE || "Column")}</select></div><div id="frB" class="g2"></div>`,
+    [["OK", d => { const values = {TYPE: q(d, "#frT").value}; d.querySelectorAll("#frB [data-k]").forEach(x => { if (x.value.trim() !== "") values[x.dataset.k] = x.value.trim(); }); return submit(d, "define_frame_rebar", {section, values}); }, true], ["Cancel"]], {width: 560});
+  const paint = () => { q(d, "#frB").innerHTML = rebarFields[q(d, "#frT").value].map(([k, l]) => `<span>${esc(l)}</span>${field(k, now[k])}`).join(""); };
+  q(d, "#frT").onchange = paint;
+  q(d, "#frS").onchange = e => { d.close(); hmFrameRebar(e.target.value); };
   paint();
 }
 
@@ -4200,7 +4374,7 @@ async function hmMaterial(m, after, copy) {
   const show = () => {
     q(d, "#mSym").innerHTML = opts(syms(), syms()[0]);
     d.querySelectorAll("[data-r=U]").forEach(x => x.hidden = /Rebar|Tendon/.test(type()));
-    q(d, "#mRupF").hidden = type() !== "Concrete"; q(d, "#mTime").disabled = type() !== "Concrete";
+    q(d, "#mRupF").hidden = type() !== "Concrete" || program === "sap2000"; /* SAP2000 has no cracked slab deflections */ q(d, "#mTime").disabled = type() !== "Concrete";
     q(d, "#mNl").disabled = !(pd.material_nonlinear[type()] || {keys: []}).keys.length && !["Aluminum", "ColdFormed", "Masonry", "Other"].includes(type());
     const e = parseFloat(q(d, "#mE").value), nu = parseFloat(q(d, "#mU").value);
     q(d, "#mGm").value = isFinite(e) && isFinite(nu) ? +(e / (2 * (1 + nu))).toPrecision(6) : "";
@@ -4405,9 +4579,11 @@ async function hmShellSection(s, after, copy) {
   const defs = await hmDefs(), u = hmU(), pd = (await hmRun("property_definitions", {}, true)).result;
   const cur = s && pd ? pd.shell_sections.find(x => x.name === s.name) : null, was = s && !copy ? s.name : null;
   let mods = cur ? {...cur.modifiers} : null;
-  const d = dialog("Slab or Wall Property Data", `<fieldset><legend>General Data</legend><div class="g2">
+  // SAP2000's areas are shells by modelling type only (no slab type, one-way distribution or ribs).
+  const sap = program === "sap2000";
+  const d = dialog(sap ? "Shell Section Data" : program === "safe" ? "Slab Property Data" : "Slab or Wall Property Data", `<fieldset><legend>General Data</legend><div class="g2">
       <span>Property Name</span><input id="aN" value="${esc(s ? (copy ? s.name + " copy" : s.name) : "Slab200")}">
-      <span>Type</span><select id="aK" ${s && !copy ? "disabled" : ""}>${opts([["slab", "Slab"], ["wall", "Wall"]], s ? s.kind : "slab")}</select>
+      <span>Type</span><select id="aK" ${s && !copy ? "disabled" : ""}>${opts(sap ? [["slab", "Shell (floor)"], ["wall", "Shell (wall)"]] : [["slab", "Slab"], ["wall", "Wall"]], s ? s.kind : "slab")}</select>
       <span data-slab>Slab Type</span><select data-slab id="aY">${opts((pd && pd.slab_types) || ["Slab"], cur && cur.slab_type || "Slab")}</select>
       <span>Modeling Type</span><select id="aG">${opts((pd && pd.modeling_types) || ["ShellThin"], cur && cur.modeling || "ShellThin")}</select>
       <span>Material</span><select id="aM">${matOpts(defs, s ? s.material : "")}</select>
@@ -4418,11 +4594,11 @@ async function hmShellSection(s, after, copy) {
     [["OK", d => {
       const kind = q(d, "#aK").value, name = q(d, "#aN").value.trim();
       const args = {name, was, kind, thickness: fnum(d, "#aT"), material: q(d, "#aM").value, modeling: q(d, "#aG").value, modifiers: mods || undefined};
-      if (kind === "slab") { args.slab_type = q(d, "#aY").value; args.one_way = q(d, "#aO").checked; }
+      if (kind === "slab" && !sap) { args.slab_type = q(d, "#aY").value; args.one_way = q(d, "#aO").checked; }
       if (kind === "slab" && args.slab_type === "Ribbed") Object.assign(args, {overall_depth: fnum(d, "#aRD"), rib_width_top: fnum(d, "#aRT"), rib_width_bottom: fnum(d, "#aRB"), rib_spacing: fnum(d, "#aRS"), rib_direction: parseInt(q(d, "#aRA").value) || 1});
       return submit(d, "define_shell_type", args, j => { hm.sec[kind] = name; if (after) after(j); });
     }, true], ["Cancel"]], {width: 440});
-  const show = () => d.querySelectorAll("[data-slab]").forEach(x => x.hidden = q(d, "#aK").value === "wall");
+  const show = () => d.querySelectorAll("[data-slab]").forEach(x => x.hidden = sap || q(d, "#aK").value === "wall");
   const modText = () => { const m = mods || {}; const o = Object.entries(m).filter(([, v]) => Math.abs(v - 1) > 1e-12); q(d, "#aModT").textContent = o.length ? o.map(([k, v]) => k + " " + v).join(", ") : "none"; };
   q(d, "#aK").onchange = show; show(); modText();
   q(d, "#aMod").onclick = () => hmModifiers((pd && pd.shell_modifiers) || [], mods, o => { mods = o; modText(); });
@@ -4730,7 +4906,7 @@ async function hmPatterns() {
   const fill = () => { const p = L()[pick]; if (!p) return; q(d, "#pN").value = p.name; q(d, "#pT").value = p.type; q(d, "#pS").value = p.self_weight; };
   const paint = () => {
     q(d, "#pL").innerHTML = L().map((p, i) => `<tr data-i="${i}" class="${i === pick ? "on" : ""}"><td>${esc(p.name)}</td><td>${esc(p.type)}</td><td class="r">${num(p.self_weight)}</td><td>${p.lateral ? esc(p.lateral.code) + (p.lateral.error ? " (not computed)" : "") : ["Seismic", "Wind"].includes(p.type) ? "None" : ""}</td><td class="r">${p.loads}</td></tr>`).join("");
-    const p = L()[pick]; q(d, "#pLat").disabled = !p || !["Seismic", "Wind"].includes(p.type);
+    const p = L()[pick]; q(d, "#pLat").disabled = !p || !["Seismic", "Wind"].includes(p.type); q(d, "#pLat").hidden = program === "safe"; // SAFE makes no auto lateral loads
     d.querySelectorAll("#pL [data-i]").forEach(tr => tr.onclick = () => { pick = +tr.dataset.i; paint(); fill(); });
   };
   const go = async (tool, args) => { formError(d, ""); const j = await hmRun(tool, args, true); if (!j.ok) return formError(d, j.error); await hmDefs(); pick = Math.min(pick, L().length - 1); paint(); };
@@ -4943,6 +5119,8 @@ async function hmCase(c, a, after, copy) {
     q(d, "#cModal").hidden = !(modal || type === "Buckling"); q(d, "#cRS").hidden = !(rs || hist); q(d, "#cTH").hidden = !hist;
     q(d, "#cGeo").hidden = !(type === "Nonlinear Static" || type === "Nonlinear Direct History"); q(d, "#cInit").hidden = modal || rs;
     d.querySelectorAll(".rsOnly").forEach(x => x.hidden = !rs);
+    // The diaphragm eccentricity of a response spectrum is ETABS's own.
+    d.querySelectorAll("#cE, #cE + *, .rsOnly:has(+ #cE)").forEach(x => x.hidden = x.hidden || program !== "etabs");
     const fnKind = rs ? "spectrum" : hist ? "history" : null, canAccel = rs || hist || type === "Modal - Ritz";
     q(d, "#cL").innerHTML = `<tr><th>Load Type</th><th>Load Name</th>${fnKind ? "<th>Function</th>" : ""}<th>Scale Factor</th>${rs || hist ? "<th>Angle</th>" : ""}${hist ? "<th>Arrival (s)</th>" : ""}<th></th></tr>` +
       loads.map((l, i) => `<tr data-i="${i}"><td><select data-k="kind">${opts([...(rs ? [] : [["pattern", "Load Pattern"]]), ...(canAccel ? [["accel", "Acceleration"]] : [])], l.accel ? "accel" : "pattern")}</select></td>
@@ -5341,7 +5519,7 @@ const drawIcons = {
 function modelerStart() {
   document.querySelectorAll('[data-menu="Draw"], [data-menu="Assign"]').forEach(m => m.hidden = false);
   document.querySelector('[data-menu="File"]').hidden = false;
-  $("similarWrap").hidden = false;
+  $("similarWrap").hidden = program === "sap2000";
   const sb = [["d:column", "Draw columns (click a point)"], ["d:beam", "Draw beams (click start and end)"], ["d:qbeam", "Quick draw beams (click a grid line)"], ["d:wall", "Draw walls"], ["d:qwall", "Quick draw walls (click a grid line)"], ["d:floor", "Draw floors (click corners)"], ["d:rect", "Draw rectangular floors (two corners)"], ["d:qfloor", "Quick draw floors (click in a bay)"], ["d:brace", "Draw braces (click bottom and top)"], ["d:joint", "Draw joints (click a point)"]];
   $("strip").insertAdjacentHTML("beforeend", `<span class="sep"></span>` + sb.map(b => `<button class="ib" data-act="${b[0]}" title="${b[1]}"><svg viewBox="0 0 16 16">${drawIcons[b[0]]}</svg></button>`).join(""));
   const ib = [["m:undo", "Undo (Ctrl+Z)", "undo"], ["m:redo", "Redo (Ctrl+Y)", "redo"], ["m:save", "Save (Ctrl+S)", "save"], ["m:delete", "Delete the selected objects (Del)", "del"]];

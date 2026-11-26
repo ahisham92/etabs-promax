@@ -106,6 +106,23 @@ internal static class WebPages
     /// page is shown as it is; a pack (.cpmx, .zip or a pack saved as .json) is put inside the Viewer page first, in
     /// CSI ProMax's own folder, so it opens at once with no File > Open. No file: the empty Viewer page.
     /// </summary>
+    /// <summary>
+    /// The Viewer's page for a pack that was removed (its model was changed or unlocked): at the same place as the pack's
+    /// page, so the open window reloads into it, saying plainly that the results are gone and how they come back.
+    /// </summary>
+    internal static string RemovedPageFor(string file)
+    {
+        var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CsiProMax", "Viewer");
+        Directory.CreateDirectory(folder);
+        var page = Path.Combine(folder, Path.GetFileNameWithoutExtension(file) + " viewer.html");
+        var name = System.Net.WebUtility.HtmlEncode(Path.GetFileName(file));
+        File.WriteAllText(page, "<!doctype html><html><head><meta charset=\"utf-8\"><title>" + name + " - results removed</title>" +
+            "<style>body{font:14px Segoe UI,Arial,sans-serif;background:#f0f0f0;color:#1a1a1a;margin:0;display:grid;place-items:center;height:100vh}div{background:#fff;border:1px solid #adadad;padding:20px 24px;max-width:520px}</style></head>" +
+            "<body><div><b>The results in " + name + " were removed.</b><p>Its model was changed or unlocked, so it has no results now, as the CSI programs delete a model's results when it is unlocked. " +
+            "Run the analysis again and this window shows the new results by itself. Review comments are kept beside the model.</p></div></body></html>", new UTF8Encoding(false));
+        return page;
+    }
+
     internal static string ViewerPageFor(string? file)
     {
         if (string.IsNullOrWhiteSpace(file) || !File.Exists(file)) return Shortcuts.WriteViewerPage();

@@ -27,6 +27,10 @@ public static class E2kWriter
             ? new RawSection { Heading = r.Heading, After = r.After, Lines = EtabsHinges.ToEtabs(model, r.Lines) } : r).ToList();
         // Tendons as ETABS of this version reads them (ETABS 23 drops the whole file for a tendon with no support points).
         passthrough = SlabDefs.ForEtabs(model, passthrough);
+        // ETABS 23 cannot read a group's colour line ("Error reading line 348. Line Ignored. GROUP "CPM-G" COLOR "Blue"",
+        // a box that waits for OK on every open, 2026-11-26): its own export writes GROUP "name" alone. The model keeps the colour.
+        passthrough = passthrough.Select(r => r.Heading != GroupDefs.Heading ? r
+            : new RawSection { Heading = r.Heading, After = r.After, Lines = r.Lines.Select(l => Tokenize(l) is { Count: >= 3 } t && t[0] == "GROUP" && t[2] == "COLOR" ? "  GROUP " + t[1] : l).ToList() }).ToList();
         EmitPassthroughAfter(text, passthrough, "");
 
         var anchors = new List<string>();
