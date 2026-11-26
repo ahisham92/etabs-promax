@@ -74,6 +74,13 @@ public static class ScratchDialogs
                 if (Button(window, "Select All") is { } all && IsWindowEnabled(all)) PostMessageW(all, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero);
                 if (PostMessageW(go, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero)) closed.Add(title + " (all stories, OK)");
             }
+            else if (IsImportLog(title) && Button(window, "Done") is { } done && IsWindowEnabled(done))
+            {
+                // Its errors are read before Done is pressed, so the report says what the import did not take.
+                var errors = ImportErrors(LongWords(window));
+                if (PostMessageW(done, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero))
+                    closed.Add(title + " (Done" + (errors.Count > 0 ? "; its errors: " + string.Join(" | ", errors) : "") + ")");
+            }
         }
         return closed;
     }
@@ -84,6 +91,42 @@ public static class ScratchDialogs
     /// test answers it: all stories, OK.
     /// </summary>
     public static bool IsStoryPicker(string title) => title.TrimStart().StartsWith("Select Stories for Slab Design", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// True for the import log SAP2000 shows when it opens a .s2k it had something to say about ("Access Database Import
+    /// Log", with Done). Seen on Ahmed's PC on 2026-11-26: the 0.4.36 run opened the Modeler's cpm-field-test.s2k (1 error,
+    /// 13 warnings) and the log waited all night for a person. In the test's own scratch window the test reads its errors
+    /// and presses Done.
+    /// </summary>
+    public static bool IsImportLog(string title)
+    {
+        var t = title.Trim();
+        return t.EndsWith("Import Log", StringComparison.OrdinalIgnoreCase) && (t.Contains("Database", StringComparison.OrdinalIgnoreCase) || t.Contains("Import Log", StringComparison.OrdinalIgnoreCase))
+            && !t.Contains("licen", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>The error lines of an import log's text (not its counts), at most ten.</summary>
+    public static List<string> ImportErrors(IEnumerable<string> texts) =>
+        texts.SelectMany(t => t.Split('\n')).Select(l => l.Trim())
+            .Where(l => l.Contains("error", StringComparison.OrdinalIgnoreCase) && !l.StartsWith("Number of errors", StringComparison.OrdinalIgnoreCase)
+                && !l.StartsWith("Import Control for Errors", StringComparison.OrdinalIgnoreCase) && !System.Text.RegularExpressions.Regex.IsMatch(l, @"^\d+\s+errors?$", System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+                && !l.Equals("Error", StringComparison.OrdinalIgnoreCase) && !l.Equals("Error or Warning", StringComparison.OrdinalIgnoreCase))
+            .Distinct().Take(10).ToList();
+
+    /// <summary>The whole texts of a window's child controls, read with WM_GETTEXT so a long log comes whole.</summary>
+    private static List<string> LongWords(IntPtr window)
+    {
+        var words = new List<string>();
+        if (!OperatingSystem.IsWindows()) return words;
+        EnumChildWindows(window, (child, _) =>
+        {
+            var text = new System.Text.StringBuilder(200000);
+            if (SendMessageTimeoutW(child, 0x000D /* WM_GETTEXT */, new IntPtr(text.Capacity), text, 2 /* SMTO_ABORTIFHUNG */, 2000, out _) != IntPtr.Zero && text.Length > 0)
+                words.Add(text.ToString());
+            return true;
+        }, IntPtr.Zero);
+        return words;
+    }
 
     /// <summary>The label of a button as a person reads it: without the "&amp;" of its access key.</summary>
     public static bool IsButton(string label, string text) => string.Equals(label.Replace("&", "").Trim(), text, StringComparison.OrdinalIgnoreCase);
@@ -161,6 +204,7 @@ public static class ScratchDialogs
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr window);
     [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] private static extern int GetWindowTextW(IntPtr window, System.Text.StringBuilder text, int most);
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] private static extern IntPtr SendMessageTimeoutW(IntPtr window, uint message, IntPtr w, System.Text.StringBuilder l, uint flags, uint timeout, out IntPtr result);
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool PostMessageW(IntPtr window, uint message, IntPtr w, IntPtr l);
 }
 
@@ -468,13 +512,13 @@ public sealed class ScratchProgram : IScratchWindow
     /// <summary>
     /// True when the windows of a process show it is a test copy an earlier run left open: one of them names a scratch
     /// model ("cpm-field-test-" and its six characters), and every other one is a window the test answers itself (the
-    /// analysis notice, the story picker). A window that names anything else keeps the process alive.
+    /// analysis notice, the story picker, the import log). A window that names anything else keeps the process alive.
     /// </summary>
     public static bool IsLeftCopy(IEnumerable<string> titles)
     {
         var all = titles.Where(t => !string.IsNullOrWhiteSpace(t)).ToList();
         return all.Any(t => t.Contains("cpm-field-test-", StringComparison.OrdinalIgnoreCase))
-            && all.All(t => t.Contains("cpm-field-test-", StringComparison.OrdinalIgnoreCase) || ScratchDialogs.MayClose(t) || ScratchDialogs.IsStoryPicker(t));
+            && all.All(t => t.Contains("cpm-field-test-", StringComparison.OrdinalIgnoreCase) || ScratchDialogs.MayClose(t) || ScratchDialogs.IsStoryPicker(t) || ScratchDialogs.IsImportLog(t));
     }
 
     /// <summary>
