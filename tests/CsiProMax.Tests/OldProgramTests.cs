@@ -637,6 +637,12 @@ static class OldProgramTests
             Check(Src("src/CsiProMax.Assistant/Field/ScratchExtras.cs").Contains("\"PointObj.SetGroupAssign\", (\"Name\", bottom), (\"GroupName\", Group)"), "the cut's group holds the columns' bottom joints");
         });
 
+        yield return ("ETABS Plus (Ahmed's PC, 2026-11-26): a new Modeler model does not ask for Model Hinges in Links, an Ultimate-only option that stops every open on a notice", () =>
+        {
+            var text = CsiProMax.E2k.E2kWriter.Write(CsiProMax.Model.Seed.Etabs23());
+            Check(text.Contains("MODELHINGESINLINKS \"No\"") && !text.Contains("MODELHINGESINLINKS \"Yes\""), "the seed's analysis options");
+        });
+
         yield return ("kind: a program's 'could not read this file' box in a scratch window is answered OK and said, never a licence box", () =>
         {
             var box = CsiProMax.Assistant.ScratchDialogs.IsFileRefused;
