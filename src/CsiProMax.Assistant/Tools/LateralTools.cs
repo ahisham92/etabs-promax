@@ -50,30 +50,6 @@ public static class LateralTools
         })!;
     }
 
-    /// <summary>Every pattern but <paramref name="except"/> whose code has a Set call, held by its Get call (SAP2000).</summary>
-    private static Dictionary<string, SapLateral.Held> Held(ICsiLink e, string except)
-    {
-        var names = (string[])e.Raw("list the load patterns", m => { int n = 0; string[] list = []; m.LoadPatterns.GetNameList(ref n, ref list); return list ?? []; })!;
-        var held = new Dictionary<string, SapLateral.Held>(StringComparer.OrdinalIgnoreCase);
-        foreach (var name in names.Where(n => !n.Equals(except, StringComparison.OrdinalIgnoreCase)))
-            foreach (var kind in new[] { LateralCodes.Seismic, LateralCodes.Wind })
-                if (CodeOf(e, name, kind) is { Length: > 0 } code && SapLateral.Hold(e, name, kind, code) is { } h) { held[name] = h; break; }
-        return held;
-    }
-
-    /// <summary>A pattern's seismic or wind code by the API ("" for none).</summary>
-    private static string CodeOf(ICsiLink e, string pattern, string kind) =>
-        (string)e.Raw($"read {pattern}'s code", m =>
-        {
-            string code = "";
-            try
-            {
-                int answer = kind == LateralCodes.Wind ? Convert.ToInt32(m.LoadPatterns.GetAutoWindCode(pattern, ref code)) : Convert.ToInt32(m.LoadPatterns.GetAutoSeismicCode(pattern, ref code));
-                return answer == 0 ? code ?? "" : "";
-            }
-            catch (Exception) { return ""; }
-        })!;
-
     private static string Kind(JsonElement a) => a.Text("kind", "seismic").Equals("wind", StringComparison.OrdinalIgnoreCase) ? LateralCodes.Wind : LateralCodes.Seismic;
 
     private static Dictionary<string, string> Values(JsonElement a)
@@ -281,20 +257,10 @@ public static class LateralTools
             // from that file when SAP2000 lost or changed any pattern or code, as edit_table does.
             var saved = SaveFirst(e, name, table.Code);
             string log;
-            var parked = new List<string>();
             try
             {
-                // Each other pattern with a code that has a Set call is read by its Get call first: SAP2000 gives no table
-                // row for a code given through the API (0.4.46 field test), so the import takes it off and it is given back.
-                var held = Held(e, name);
-                log = EditableTables.PutAutoLoad(e, name, kind == LateralCodes.Wind ? "Wind" : "Quake", table.KeyCode, table.Key, values, $"give {name} the {kind.ToLowerInvariant()} code {table.Code}", held.Keys, parked);
-                foreach (var other in parked)
-                {
-                    SapLateral.Reapply(e, held[other]);
-                    var now = CodeOf(e, other, held[other].Kind);
-                    if (!EditableTables.SameCode(now, held[other].Code))
-                        throw new EtabsException($"{e.Program.Name} did not give {other} its {held[other].Code} back after the import (it has '{now}').");
-                }
+                // The other patterns keep their codes, those given through the API too, by a blank AutoLoad (see PutAutoLoad).
+                log = EditableTables.PutAutoLoad(e, name, kind == LateralCodes.Wind ? "Wind" : "Quake", table.KeyCode, table.Key, values, $"give {name} the {kind.ToLowerInvariant()} code {table.Code}");
             }
             catch (EtabsException ex)
             {

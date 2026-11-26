@@ -319,7 +319,8 @@ static class CsiToolsTests
             Check(api.Log.Contains("seismic none CPM-AUTO-S") && none["set_by"]?.ToString() == "LoadPatterns.AutoSeismic.SetNone", "the code is taken off by SetNone: " + none.ToJsonString());
             Equal(1, api.PatternTableWrites, "SAP2000's patterns' table was written once, with the code's table (KDS)");
             // Another pattern with a code given by the API (0.4.46 field test: CPM-WX's ASCE 7-16, with no row in its table):
-            // it is read by its Get call, taken off for the import and given back by its Set call with the same values.
+            // it goes in with a blank AutoLoad, which SAP2000 26 takes as "keep the code" (0.4.49: naming its code
+            // without a row cleared it, and every other pattern was reported lost).
             const string other = "CPM-HELD";
             Run(CsiProgram.Sap2000, "set_lateral_load", $$$"""{"name":"{{{other}}}","kind":"seismic","code":"IBC2006","values":{"R":"7"}}""", link);
             api.Tables["Load Pattern Definitions - Auto Seismic - IBC2006"].Rows.Clear();
@@ -329,7 +330,7 @@ static class CsiToolsTests
             api.ListCodes = false;
             Equal("KDS 41 17 00-2019", api.SeismicCodes["CPM-AUTO-S"], "the pattern has the code, with another pattern's API code in the model");
             Equal("IBC2006", api.SeismicCodes.GetValueOrDefault(other, ""), $"{other} has its IBC2006 back: {parkedSet.ToJsonString()} | {string.Join(" | ", api.Log.TakeLast(6))}");
-            Check(api.Log.Last(l => l.StartsWith("IBC2006 " + other, StringComparison.Ordinal)).Contains("R 7", StringComparison.Ordinal) && api.Log.Count(l => l.StartsWith("IBC2006 " + other, StringComparison.Ordinal)) == 2, "given back once more, with the R it had: " + string.Join(" | ", api.Log.TakeLast(6)));
+            Equal(1, api.Log.Count(l => l.StartsWith("IBC2006 " + other, StringComparison.Ordinal)), "kept by the import itself, with no second Set call: " + string.Join(" | ", api.Log.TakeLast(6)));
             // SAP2000 losing patterns in that import: the model is opened again from the file saved just before.
             api.WipeOnApply = 1;
             string wiped = "";
@@ -885,7 +886,15 @@ public sealed class FakeApi
                         var at = o.Table.FindIndex(t => t[0] == r[0]);
                         var self = r[Array.IndexOf(fields, "SelfWtMult")];
                         if (at < 0) o.Table.Add([r[0], r[Array.IndexOf(fields, "DesignType") is >= 0 and var dt ? dt : Array.IndexOf(fields, "Type")], self]); else o.Table[at][2] = self;
-                        if (r[Array.IndexOf(fields, "AutoLoad")] is { Length: > 0 } code) o.SeismicCodes[r[0]] = code; else o.SeismicCodes.Remove(r[0]);
+                        // SAP2000 26 (the pattern-import experiment on Ahmed's PC, 2026-11-26): a blank AutoLoad keeps the
+                        // pattern's code; a code with no row for the pattern in its table (in the import or the model)
+                        // clears it, as for a code set through the API.
+                        var code = r[Array.IndexOf(fields, "AutoLoad")];
+                        if (code.Length == 0) continue;
+                        if (code.Equals("None", StringComparison.OrdinalIgnoreCase)) { o.SeismicCodes.Remove(r[0]); continue; }
+                        bool Has((string[] Fields, List<string[]> Rows) t) => Array.IndexOf(t.Fields, "LoadPat") is >= 0 and var lp && t.Rows.Any(x => x[lp] == r[0]);
+                        bool Of(string k) => k.Contains("Auto ", StringComparison.Ordinal) && EditableTables.Norm(k).EndsWith(EditableTables.Norm(code), StringComparison.Ordinal);
+                        if (o._pending.Any(kv => Of(kv.Key) && Has(kv.Value)) || o.Tables.Any(kv => Of(kv.Key) && Has(kv.Value))) o.SeismicCodes[r[0]] = code; else o.SeismicCodes.Remove(r[0]);
                     }
                     continue;
                 }

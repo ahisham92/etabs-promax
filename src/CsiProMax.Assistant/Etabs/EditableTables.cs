@@ -134,8 +134,11 @@ public static class EditableTables
     /// (only a pattern a load case uses survived), and drops a pattern whose code has no row in its code's table (the
     /// wipes of the 0.4.22 and 0.4.34 field tests). So every row it lists goes back as read, each coded one with its
     /// code's rows as read, and the patterns and their codes are compared before and after. Gives the import log.
+    /// The pattern-import experiment (2026-11-26, Ahmed's PC) refined it: with every pattern selected for display the
+    /// table lists them all; a blank AutoLoad keeps a pattern's code, and naming a code with no row clears it (an API
+    /// wind code has no table), so every other pattern goes back blank except those on the code being given.
     /// </summary>
-    public static string PutAutoLoad(ICsiLink e, string pattern, string designType, string code, string codeKey, IReadOnlyDictionary<string, string> codeRow, string what, IReadOnlyCollection<string>? parkable = null, List<string>? parked = null)
+    public static string PutAutoLoad(ICsiLink e, string pattern, string designType, string code, string codeKey, IReadOnlyDictionary<string, string> codeRow, string what)
     {
         var program = e.Program.Name;
         if (e.Program.Key != CsiProgram.Sap2000.Key) throw new InvalidOperationException("PutAutoLoad is for SAP2000's tables.");
@@ -169,30 +172,27 @@ public static class EditableTables
             if (sw >= 0) row[sw] = self.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
             if (mine >= 0) rows[mine] = row; else rows.Add(row);
 
-            // Each other listed pattern with a code goes back with its code's rows, as read.
+            // The other patterns keep their codes by a blank AutoLoad: SAP2000 26 keeps a pattern's code when the field is
+            // blank ("AutoLoad field is blank; default value is used"), and clears it when the field names a code that has
+            // no row in the import, as a wind code set through the API never has (no 'Auto Wind - ASCE 7-16' table is
+            // offered). Their own code tables are not sent: sending one that still holds a moved pattern's row gave a
+            // second pattern the new code (the pattern-import experiment on Ahmed's PC, 2026-11-26). A pattern with the
+            // code being given goes back with its row of that code's table, as read, so that table keeps it.
             var tables = new List<(string Key, string[] Fields, string[] Data, int Count)>();
-            foreach (var other in rows.Where(r => r != row && r[auto].Trim() is { Length: > 0 } c && !c.Equals("None", StringComparison.OrdinalIgnoreCase)))
+            int sv = 0, sn = 0; string[] sf = [], sd = [];
+            var sameCode = rows.Any(r => r != row && SameCode(r[auto], code));
+            if (sameCode)
             {
-                var marker = other[type].Contains("Wind", StringComparison.OrdinalIgnoreCase) ? "Auto Wind - " : "Auto Seismic - ";
-                var key = (tableKeys.FirstOrDefault(k => After(k, marker) is { } c && Norm(c) == Norm(other[auto])) ?? tableKeys.FirstOrDefault(k => After(k, marker) is { } c && SameCode(c, other[auto])))
-                    ?? throw new EtabsException($"{program}'s pattern {other[pat]} has the code {other[auto]}, whose table is not found, so its rows could not go back with the patterns' table: {what} is not done, to keep {other[pat]} as it is.");
-                if (!tables.Any(t => t.Key == key))
-                {
-                    int v = 0, n = 0; string[] f = [], d = [];
-                    ShowEveryPattern(m);
-                    m.DatabaseTables.GetTableForEditingArray(key, "", ref v, ref f, ref n, ref d);
-                    tables.Add((key, f ?? [], d ?? [], (f ?? []).Length > 0 ? n : 0));
-                }
-                // SAP2000 drops a pattern whose code has no row in its code's table: one whose row cannot be read (a code
-                // given through the API is not in the tables) is not sent, and nothing is imported.
-                var t = tables.First(x => x.Key == key);
-                var lp = Array.FindIndex(t.Fields, x => x.Equals("LoadPat", StringComparison.OrdinalIgnoreCase));
-                if (lp < 0 || !Enumerable.Range(0, t.Count).Any(r => string.Equals(t.Data.ElementAtOrDefault(r * t.Fields.Length + lp), other[pat], StringComparison.OrdinalIgnoreCase)))
-                {
-                    // A code the caller holds (read by its Get call, given back by its Set call after): taken off for the import.
-                    if (parkable is not null && parked is not null && parkable.Contains(other[pat], StringComparer.OrdinalIgnoreCase)) { other[auto] = ""; parked.Add(other[pat]); continue; }
-                    throw new EtabsException($"{program}'s pattern {other[pat]} has the code {other[auto]}, but its table '{key}' gives no row for it, so it could not go back with the patterns' table: {what} is not done, to keep {other[pat]} as it is. Nothing was imported.");
-                }
+                ShowEveryPattern(m);
+                if (Convert.ToInt32(m.DatabaseTables.GetTableForEditingArray(codeKey, "", ref sv, ref sf, ref sn, ref sd)) != 0) { sf = []; sd = []; sn = 0; }
+                sf ??= []; sd ??= [];
+                if (sf.Length > 0 && sn > 0) tables.Add((codeKey, sf, sd, sn));
+            }
+            var slp = Array.FindIndex(sf, x => x.Equals("LoadPat", StringComparison.OrdinalIgnoreCase));
+            foreach (var other in rows.Where(r => r != row))
+            {
+                var hasRow = slp >= 0 && SameCode(other[auto], code) && Enumerable.Range(0, sn).Any(r => string.Equals(sd.ElementAtOrDefault(r * sf.Length + slp), other[pat], StringComparison.OrdinalIgnoreCase));
+                if (!hasRow) other[auto] = "";
             }
             tables.RemoveAll(t => t.Count == 0);
 
@@ -235,9 +235,11 @@ public static class EditableTables
                 int applied = Convert.ToInt32(m.DatabaseTables.ApplyEditedTables(true, ref fatal, ref errors, ref warnings, ref info, ref log));
                 log ??= "";
                 Dictionary<string, string> after = Codes(m);
-                var changed = before.Where(kv => kv.Key != pattern && (!after.TryGetValue(kv.Key, out var now) || !SameCode(now, parked?.Contains(kv.Key, StringComparer.OrdinalIgnoreCase) == true ? "" : kv.Value, empty: true))).Select(kv => kv.Key).ToList();
+                var changed = before.Where(kv => kv.Key != pattern && (!after.TryGetValue(kv.Key, out var now) || !SameCode(now, kv.Value, empty: true))).Select(kv => kv.Key).ToList();
                 if (changed.Count > 0)
-                    throw new EtabsException($"{program} changed or lost the load patterns {string.Join(", ", changed)} when it was given {pattern}'s {code}: do not save the model; close it without saving and open it again. Its import log: {Cut(log)}");
+                    throw new EtabsException($"{program} changed or lost the load patterns {string.Join(", ", changed)} when it was given {pattern}'s {code}: do not save the model; close it without saving and open it again. " +
+                        $"The import answered {applied} ({fatal} fatal, {errors} errors, {warnings} warnings); patterns before {before.Count}, after {after.Count} ({Cut(string.Join(", ", after.Select(kv => kv.Value.Length == 0 ? kv.Key : $"{kv.Key}={kv.Value}")), 400)}); " +
+                        $"sent: the patterns' table ({rows.Count} rows: {Cut(string.Join(", ", rows.Select(r => r[auto].Length == 0 ? r[pat] : $"{r[pat]}={r[auto]}")), 400)}) and {string.Join(", ", tables.Select(t => $"'{t.Key}' ({t.Count})"))}. Its import log: {Cut(log)}");
                 if (applied != 0 || fatal > 0)
                     throw new EtabsException($"{program} did not apply {pattern}'s {code} ({fatal} fatal, {errors} errors), so it cannot {what}. Its import log: {Cut(log)}" + About(m, codeKey, new List<IReadOnlyDictionary<string, string>> { given }));
                 if (!after.TryGetValue(pattern, out string? took) || !SameCode(took, code))
