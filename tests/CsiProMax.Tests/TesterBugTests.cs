@@ -747,6 +747,17 @@ static class TesterBugTests
                 && log.IndexOf("ImportErrors(", StringComparison.Ordinal) < log.IndexOf("PostMessageW(done", StringComparison.Ordinal) && !notices.Contains("0x0010", StringComparison.Ordinal), "the log is answered by its Done button after its errors are read, and never closed");
             static bool SandboxedLeftCopy() => ScratchProgram.IsLeftCopy(["SAP2000 - cpm-field-test-ab12cd", "Access Database Import Log"]);
         });
+        yield return ("field test: SAP2000's 'Maintenance Expiring' reminder is answered by the test itself, no other licence message is (Ahmed, 2026-11-26)", () =>
+        {
+            var reminder = new[] { "License Available. Session Created. Maintenance expiring on 5-Jul-2019.", "Show this message at startup", "Do not show this message until next expiration period", "Never show this message again", "Contact CSI", "OK" };
+            Check(CsiProMax.Assistant.ScratchDialogs.IsMaintenanceReminder("Maintenance Expiring", reminder), "the reminder seen on Ahmed's PC is answered");
+            Check(CsiProMax.Assistant.ScratchDialogs.IsNotUntilNextPeriod("Do not show this message until next &expiration period") && !CsiProMax.Assistant.ScratchDialogs.IsNotUntilNextPeriod("Never show this message again"), "the choice made: not until the next expiration period");
+            Check(!CsiProMax.Assistant.ScratchDialogs.IsMaintenanceReminder(" License Message", ["Status 485. All 40 licenses in your license group(s) are in use.", "OK"]), "a licence that is not free is left to the engineer");
+            Check(!CsiProMax.Assistant.ScratchDialogs.IsMaintenanceReminder("Maintenance Expiring", ["License not available. Maintenance expiring on 5-Jul-2019.", "OK"]), "no licence given: left to the engineer");
+            Check(!CsiProMax.Assistant.ScratchDialogs.IsMaintenanceReminder("Maintenance Expiring", ["License error -15. Maintenance expiring on 5-Jul-2019.", "OK"]), "a licence error is left to the engineer");
+            var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));
+            Check(source.Contains("ScratchDialogs.AnswerMaintenanceReminder(fresh)", StringComparison.Ordinal), "the reminder is not answered while the test's own window starts (it waited for Ahmed at every start)");
+        });
         yield return ("field test: it shows its progress live, with step X of about N, passed / failed / not tested and the time (Ahmed, 2026-11-26)", () =>
         {
             // The counts come from the outcome lines as they are recorded.

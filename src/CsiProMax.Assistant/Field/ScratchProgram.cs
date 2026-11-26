@@ -71,6 +71,7 @@ public static class ScratchDialogs
             else if (program is not null && IsProgramBox(title, program) && Button(window, "OK") is { } fine && IsWindowEnabled(fine)
                      && LongWords(window).FirstOrDefault(IsFileRefused) is { } said && PostMessageW(fine, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero))
                 closed.Add($"{title}: {said.Trim()} (OK)");
+            else if (IsMaintenanceReminder(title, Words(window))) closed.AddRange(AnswerMaintenanceReminder([processId]));
             else if (IsStoryPicker(title) && Button(window, "OK") is { } go && IsWindowEnabled(go))
             {
                 // All stories first, then OK: the two presses reach the window in this order.
@@ -103,6 +104,47 @@ public static class ScratchDialogs
     /// </summary>
     public static bool IsFileRefused(string text) =>
         text.Contains("Error decompressing file", StringComparison.OrdinalIgnoreCase) && !text.Contains("licen", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// SAP2000's "Maintenance Expiring" reminder ("License Available. Session Created. Maintenance expiring on
+    /// 5-Jul-2019."), shown at every start on Ahmed's PC. It says a licence WAS given, so the test answers it itself
+    /// (Ahmed, 2026-11-26: "find a way that this maintenance expiring not to wait for me please"): "Do not show this
+    /// message until next expiration period", then OK. Any other licence message (none free, an error) is never this.
+    /// </summary>
+    public static bool IsMaintenanceReminder(string title, IEnumerable<string> words)
+    {
+        var all = string.Join(" ", words);
+        return title.Trim().Equals("Maintenance Expiring", StringComparison.OrdinalIgnoreCase)
+            && all.Contains("License Available", StringComparison.OrdinalIgnoreCase) && all.Contains("Maintenance expiring on", StringComparison.OrdinalIgnoreCase)
+            && !all.Contains("in use", StringComparison.OrdinalIgnoreCase) && !all.Contains("not available", StringComparison.OrdinalIgnoreCase)
+            && !all.Contains("Status ", StringComparison.OrdinalIgnoreCase) && !all.Contains("error", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>The choice the test makes on the reminder: not again until the next expiration period.</summary>
+    public static bool IsNotUntilNextPeriod(string label) =>
+        label.Replace("&", "").Contains("until next expiration period", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Answers SAP2000's maintenance reminder in the given processes (the test's own): returns what it answered.</summary>
+    public static List<string> AnswerMaintenanceReminder(IEnumerable<int> processIds)
+    {
+        var answered = new List<string>();
+        foreach (var id in processIds)
+            foreach (var (window, title) in Of(id))
+            {
+                if (!IsMaintenanceReminder(title, Words(window)) || Button(window, "OK") is not { } ok || !IsWindowEnabled(ok)) continue;
+                IntPtr? later = null;
+                EnumChildWindows(window, (child, _) =>
+                {
+                    var label = new System.Text.StringBuilder(200);
+                    if (GetWindowTextW(child, label, label.Capacity) > 0 && IsNotUntilNextPeriod(label.ToString()) && IsWindowVisible(child)) { later = child; return false; }
+                    return true;
+                }, IntPtr.Zero);
+                if (later is { } choice) PostMessageW(choice, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero);
+                if (PostMessageW(ok, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero))
+                    answered.Add(title.Trim() + (later is null ? " (OK)" : " (not until the next expiration period, OK)"));
+            }
+        return answered;
+    }
 
     public static bool IsStoryPicker(string title) => title.TrimStart().StartsWith("Select Stories for Slab Design", StringComparison.OrdinalIgnoreCase);
 
@@ -380,6 +422,17 @@ public sealed class ScratchProgram : IScratchWindow
         });
         if (ctx.Step($"start a second {name} window", () =>
         {
+            // While it starts, the maintenance reminder of a new process of this program (the test's own) is answered.
+            using var starting = new Timer(_ =>
+            {
+                try
+                {
+                    var fresh = Process.GetProcessesByName(_program.ProcessName).Select(p => p.Id).Where(id => !before.Contains(id)).ToList();
+                    var said = ScratchDialogs.AnswerMaintenanceReminder(fresh);
+                    if (said.Count > 0) lock (_noticesClosed) _noticesClosed.AddRange(said);
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException) { /* the next look tries again */ }
+            }, null, 1000, 1000);
             Ask(StartTimeout, "start", _ => null,
                 $"{name} did not start within {StartTimeout.TotalMinutes:0} minutes. A licence or start-up message may be waiting in its window: answer it yourself, close that window, and run the field test again.");
             var mine = Process.GetProcessesByName(_program.ProcessName).Select(p => p.Id).Where(id => !before.Contains(id)).ToList();
