@@ -186,6 +186,31 @@ public static class LateralTools
 
     private static string Norm(string s) => new(s.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
 
+    /// <summary>
+    /// The name SAP2000 26 takes in the AutoLoad field for a code, where it is not the one in its table's name
+    /// (experiment M on Ahmed's PC, 2026-11-26: "IS 1893:2016" and "IS1893:2016" leave the pattern with no code, "IS
+    /// 1893-2016" gives it; IRC 6-2017's own log says "is not a IRC:6-2017 auto wind load", and "IRC:6-2017" gives it).
+    /// </summary>
+    internal static string SapAutoLoad(string tableCode) => Norm(tableCode) switch
+    {
+        "is18932016" => "IS 1893-2016",
+        "irc62017" => "IRC:6-2017",
+        _ => tableCode,
+    };
+
+    private static string SapAutoLoad(CodeTable table) => SapAutoLoad(table.KeyCode);
+
+    /// <summary>
+    /// The pattern type SAP2000 26 needs for a code: the wind on live load ("Auto Wind - Live Load") is only for a
+    /// "Wind - Live Load" pattern ("Load pattern CPM-AUTO-W is not a Wind-Live Load type load pattern; record skipped",
+    /// experiment M); every other wind code a Wind pattern, every seismic code a Quake pattern.
+    /// </summary>
+    internal static string SapDesignType(string kind, string tableCode) =>
+        kind != LateralCodes.Wind ? "Quake" : Norm(tableCode) == "liveload" ? "Wind - Live Load" : "Wind";
+
+    /// <summary>A pattern of SAP2000's "Wind - Live Load" type, as the API or a table names it.</summary>
+    internal static bool IsWindOnLiveLoad(string type) => Norm(type) is "windliveload" or "windonliveload";
+
     private static CodeTable? Listed(List<CodeTable> tables, string code) =>
         tables.FirstOrDefault(t => t.Code.Equals(code, StringComparison.OrdinalIgnoreCase) || t.KeyCode.Equals(code, StringComparison.OrdinalIgnoreCase) || Norm(t.Code) == Norm(code) || Norm(t.KeyCode) == Norm(code));
 
@@ -224,7 +249,7 @@ public static class LateralTools
     {
         var have = e.LoadPatterns().FirstOrDefault(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
         if (have is null) e.AddLoadPattern(name, kind, 0);
-        else if (!have.Type.Equals(kind, StringComparison.OrdinalIgnoreCase))
+        else if (!have.Type.Equals(kind, StringComparison.OrdinalIgnoreCase) && !(kind == LateralCodes.Wind && IsWindOnLiveLoad(have.Type)))
             throw new ToolInputException($"The load pattern {name} is a {have.Type} pattern: a {kind.ToLowerInvariant()} code load needs a {kind} pattern. Give another name.");
         var patterns = e.Tables().FirstOrDefault(t => t.Name.Equals("Load Pattern Definitions", StringComparison.OrdinalIgnoreCase))
             ?? throw new EtabsException($"{e.Program.Name} has no table 'Load Pattern Definitions' to give {name} its code.");
@@ -287,7 +312,7 @@ public static class LateralTools
             try
             {
                 // The other patterns keep their codes, those given through the API too, by a blank AutoLoad (see PutAutoLoad).
-                log = EditableTables.PutAutoLoad(e, name, kind == LateralCodes.Wind ? "Wind" : "Quake", table.KeyCode, table.Key, values, what);
+                log = EditableTables.PutAutoLoad(e, name, SapDesignType(kind, table.Code), SapAutoLoad(table), table.Key, values, what);
             }
             catch (EtabsException ex)
             {
@@ -298,7 +323,7 @@ public static class LateralTools
                 {
                     try
                     {
-                        log = SapFreshProcess.Apply(e, saved, fresh => EditableTables.PutAutoLoad(fresh, name, kind == LateralCodes.Wind ? "Wind" : "Quake", table.KeyCode, table.Key, values, what));
+                        log = SapFreshProcess.Apply(e, saved, fresh => EditableTables.PutAutoLoad(fresh, name, SapDesignType(kind, table.Code), SapAutoLoad(table), table.Key, values, what));
                         second = SapFreshProcess.Said(saved);
                     }
                     catch (EtabsException ex2)

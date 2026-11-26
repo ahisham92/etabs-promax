@@ -358,6 +358,9 @@ public static class EditableTables
                 // IRC 6-2017, Live Load: field test with 0.4.56's fix): then the patterns' table says which code it has.
                 if (!after.TryGetValue(pattern, out string? took) || !SameCode(took, code))
                     if (string.IsNullOrEmpty(took) && TableCode(m, pattern) is { } listed) took = listed;
+                // A "Wind - Live Load" pattern has no AutoLoad name at all, by the API or its table: its row in the code's
+                // own table is what says it took the code (experiment M, 2026-11-26: "Auto Wind - Live Load" kept the row).
+                if (!SameCode(took, code) && (string.IsNullOrEmpty(took) || took.Equals("None", StringComparison.OrdinalIgnoreCase)) && HasRow(m, codeKey, pattern)) took = code;
                 if (!SameCode(took, code))
                     throw new EtabsException($"{program} took the rows but {pattern}'s code is '{took}', not {code}, so it cannot {what}. Its import log: {LogCut(log)}");
                 return log;
@@ -378,6 +381,21 @@ public static class EditableTables
     /// </summary>
     public const string NoImportAfterText = "SAP2000 26 does this in a session that has opened an .s2k text file (File > Open or File > Import): it then refuses every table import until it is restarted. " +
         "Save the model as an .sdb, close SAP2000, open the .sdb in a new SAP2000 and try again.";
+
+    /// <summary>True when the table <paramref name="key"/> has a row whose LoadPat is <paramref name="pattern"/>.</summary>
+    private static bool HasRow(dynamic m, string key, string pattern)
+    {
+        try
+        {
+            int version = 0, records = 0; string[] fields = [], data = [];
+            ShowEveryPattern(m);
+            if (Convert.ToInt32(m.DatabaseTables.GetTableForEditingArray(key, "", ref version, ref fields, ref records, ref data)) != 0) return false;
+            fields ??= []; data ??= [];
+            int pat = Array.FindIndex(fields, f => f.Equals("LoadPat", StringComparison.OrdinalIgnoreCase));
+            return pat >= 0 && Enumerable.Range(0, records).Any(r => string.Equals(data.ElementAtOrDefault(r * fields.Length + pat), pattern, StringComparison.OrdinalIgnoreCase));
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return false; }
+    }
 
     /// <summary>A pattern's AutoLoad as "Load Pattern Definitions" lists it; null when it is not listed or the table is not read.</summary>
     private static string? TableCode(dynamic m, string pattern)

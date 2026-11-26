@@ -622,6 +622,22 @@ static class OldProgramTests
             Check(ctx.Contains("Import sent and its whole log: ") && ctx.Contains("EditableTables.Refusals != refusedBefore"), "the failing step's detail carries it");
         });
 
+        yield return ("SAP2000 26 (experiment M, 2026-11-26): IS 1893:2016, IRC 6-2017 and the wind on live load go in by SAP2000's own AutoLoad names and pattern type", () =>
+        {
+            Check(LateralTools.SapAutoLoad("IS 1893:2016") == "IS 1893-2016", "IS 1893:2016 and IS1893:2016 left the pattern with no code; IS 1893-2016 gave it");
+            Check(LateralTools.SapAutoLoad("IRC 6-2017") == "IRC:6-2017", "SAP2000's own log: 'is not a IRC:6-2017 auto wind load'");
+            Check(LateralTools.SapAutoLoad("KDS 41 17 00-2019") == "KDS 41 17 00-2019" && LateralTools.SapAutoLoad("Dominican Republic R-001") == "Dominican Republic R-001", "the codes that took their table's name keep it");
+            Check(LateralTools.SapDesignType(CsiProMax.Lateral.LateralCodes.Wind, "Live Load") == "Wind - Live Load", "'Load pattern CPM-AUTO-W is not a Wind-Live Load type load pattern; record skipped'");
+            Check(LateralTools.SapDesignType(CsiProMax.Lateral.LateralCodes.Wind, "IRC 6-2017") == "Wind" && LateralTools.SapDesignType(CsiProMax.Lateral.LateralCodes.Seismic, "IS 1893:2016") == "Quake", "every other code keeps its pattern's type");
+            Check(LateralTools.IsWindOnLiveLoad("Wind - Live Load") && LateralTools.IsWindOnLiveLoad("WindOnLiveLoad") && !LateralTools.IsWindOnLiveLoad("Wind"), "a wind on live load pattern is still a wind pattern for the next wind code");
+            var tables = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Etabs/EditableTables.cs"));
+            Check(tables.Contains("HasRow(m, codeKey, pattern)) took = code;", StringComparison.Ordinal), "a pattern with no AutoLoad name (wind on live load) took the code when the code's table has its row");
+            var lateral = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Tools/LateralTools.cs"));
+            Check(!lateral.Contains("PutAutoLoad(e, name, kind == LateralCodes.Wind ? \"Wind\" : \"Quake\", table.KeyCode", StringComparison.Ordinal)
+                  && lateral.Contains("PutAutoLoad(e, name, SapDesignType(kind, table.Code), SapAutoLoad(table)", StringComparison.Ordinal)
+                  && lateral.Contains("PutAutoLoad(fresh, name, SapDesignType(kind, table.Code), SapAutoLoad(table)", StringComparison.Ordinal), "both imports (here and in a second SAP2000) send SAP2000's names");
+        });
+
         yield return ("kind: a program's 'could not read this file' box in a scratch window is answered OK and said, never a licence box", () =>
         {
             var box = CsiProMax.Assistant.ScratchDialogs.IsFileRefused;
