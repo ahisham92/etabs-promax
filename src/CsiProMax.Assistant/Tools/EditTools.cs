@@ -42,6 +42,10 @@ public static class EditTools
             "Edit > Move: moves frames, slabs and walls by dx, dy in plan, with their sections, assignments, loads and hinges.",
             "{\"type\":\"object\",\"required\":[\"objects\"],\"properties\":{" + Objects + ",\"dx\":{\"type\":\"number\"},\"dy\":{\"type\":\"number\"}}}",
             Ask.Changes, MoveObjects, a => $"Move {a.Texts("objects").Count} objects"),
+        new("reshape_object",
+            "Draw > Reshape Object: moves the end or corner of one frame, slab or wall that stands at 'from' [x, y] in plan to 'to' [x, y], on its own story, keeping its section, assignments, loads and hinges. A column moves whole.",
+            "{\"type\":\"object\",\"required\":[\"object\",\"from\",\"to\"],\"properties\":{\"object\":{\"type\":\"string\",\"description\":\"label@story\"},\"from\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}},\"to\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}}}}",
+            Ask.Changes, Reshape, a => $"Reshape {a.Text("object")}"),
         new("divide_frames",
             "Edit > Edit Frames > Divide Frames: beams into 'parts' equal beams (2 to 20), each keeping the section and assignments; uniform loads go on every part, end releases and offsets stay at the beam's ends.",
             "{\"type\":\"object\",\"required\":[\"objects\",\"parts\"],\"properties\":{" + Objects + ",\"parts\":{\"type\":\"integer\"}}}",
@@ -135,6 +139,21 @@ public static class EditTools
         var link = Offline(e);
         var objects = Find(a, link.Model);
         return Core(() => link.Edit(m => (JsonNode)new JsonObject { ["moved"] = Names(ModelOps.Move(m, objects, a.Number("dx", 0), a.Number("dy", 0))) }));
+    }
+
+    private static JsonNode Reshape(JsonElement a, ICsiLink e)
+    {
+        var link = Offline(e);
+        var o = Core(() => ModelOps.Find(link.Model, a.Need("object")));
+        var f = Pair(a, "from"); var t = Pair(a, "to");
+        return Core(() => link.Edit(m => (JsonNode)new JsonObject { ["reshaped"] = ModelOps.Reshape(m, o, f[0], f[1], t[0], t[1]).ToString() }));
+    }
+
+    private static double[] Pair(JsonElement a, string name)
+    {
+        var v = a.Items(name).Select(x => x.ValueKind == JsonValueKind.Number ? x.GetDouble() : double.NaN).ToArray();
+        if (v.Length != 2 || v.Any(double.IsNaN)) throw new ToolInputException($"Give {name} as [x, y].");
+        return v;
     }
 
     private static JsonNode Divide(JsonElement a, ICsiLink e)
