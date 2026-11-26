@@ -184,7 +184,7 @@ public static class F2kWriter
         // and the strips drawn by hand (Define > Design Strips in the Modeler), which replace grid strips of the same name.
         var stripCount = 0;
         var stripRows = new List<IReadOnlyList<(string, string)>>();
-        var own = m.Extras?.Strips ?? [];
+        var own = SlabDefs.Strips(m).Where(x => x.Story.Length == 0 || string.Equals(x.Story, story, StringComparison.OrdinalIgnoreCase)).ToList();
         if (options.Strips && points.Count > 0)
         {
             stripRows = Strips(m, points.Where(p => Math.Abs(p.Z) < tol).ToList(), out stripCount);
@@ -197,8 +197,8 @@ public static class F2kWriter
         foreach (var st in own)
         {
             stripCount++;
-            for (var n = 0; n < st.Points.Count; n++)
-                stripRows.Add(Row(("Strip", st.Name), ("Point", (n + 1).ToString(CultureInfo.InvariantCulture)), ("GlobalX", N(st.Points[n][0])), ("GlobalY", N(st.Points[n][1])),
+            for (var n = 0; n < st.Plan.Count; n++)
+                stripRows.Add(Row(("Strip", st.Name), ("Point", (n + 1).ToString(CultureInfo.InvariantCulture)), ("GlobalX", N(st.Plan[n][0])), ("GlobalY", N(st.Plan[n][1])),
                     ("WBLeft", N(st.WidthLeft)), ("WBRight", N(st.WidthRight)), ("WALeft", N(st.WidthLeft)), ("WARight", N(st.WidthRight)), ("AutoWiden", "No"), ("Layer", st.Layer)));
         }
         if (stripRows.Count > 0) tables.Add(CsiTableText.Table("OBJECT GEOMETRY - DESIGN STRIPS", stripRows));

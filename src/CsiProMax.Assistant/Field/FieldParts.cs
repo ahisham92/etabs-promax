@@ -115,7 +115,8 @@ public static class FieldParts
         {
             var (patterns, cases, combos) = (link.LoadPatterns(), link.LoadCases(), link.Combos());
             FieldContext.Expect(patterns.Count > 0 && cases.Count > 0, $"{patterns.Count} load patterns and {cases.Count} load cases");
-            var known = EtabsWords.PatternTypes.Select(t => t.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            // The program's own types, and the Modeler's (its model keeps ETABS's text names, Prestress-Final and the like).
+            var known = EtabsWords.PatternTypes.Select(t => t.Name).Concat(CsiProMax.Model.ModelEdit.LoadPatternTypes).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var odd = patterns.Where(p => p.Name.Length == 0 || !known.Contains(p.Type)).ToList();
             FieldContext.Expect(odd.Count == 0, "a load pattern has no name or a type the tools do not know: " + string.Join("; ", odd.Select(p => $"{p.Name} '{p.Type}'")));
             return new { patterns, cases, combos };

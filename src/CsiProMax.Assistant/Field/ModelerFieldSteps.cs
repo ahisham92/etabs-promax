@@ -474,9 +474,21 @@ public static class ModelerFieldSteps
         }
         ctx.Tool("define_strip", """{"name":"CPM-STRIP","layer":"A","points":[[0,2.5],[12,2.5]],"width_left":1,"width_right":1}""", null, "tool define_strip, a hand-drawn strip for SAFE");
         ctx.Refused("define_strip", """{"name":"CPM-BAD","points":[[0,0]],"width_left":1}""", "two points", "tool define_strip says no to a strip of one point");
+        // Post-tensioning (Ahmed 2026-11-26): a tendon section of a tendon material, the two prestress patterns, a draped
+        // tendon jacked from both ends with fixed losses, and the hyperstatic case, written as ETABS 20 writes them.
+        ctx.Tool("define_material_data", """{"name":"CPM-A416","type":"Tendon","values":{"E":196500000,"FY":1675000,"FU":1862000}}""", null, "tool define_material_data, a tendon material");
+        ctx.Tool("define_tendon_section", """{"name":"CPM-T15","material":"CPM-A416","strand_area":0.00014}""", null, "tool define_tendon_section");
+        ctx.Refused("define_tendon_section", """{"name":"CPM-BADT","material":"CPM-S355","strand_area":0.00014}""", "Tendon material", "tool define_tendon_section says no to a steel material");
+        ctx.Tool("add_load_pattern", """{"name":"CPM-PTT","type":"Prestress-Transfer","self_weight":0}""", null, "tool add_load_pattern, the transfer prestress pattern");
+        ctx.Tool("add_load_pattern", """{"name":"CPM-PTF","type":"Prestress-Final","self_weight":0}""", null, "tool add_load_pattern, the final prestress pattern");
+        ctx.Tool("draw_tendon", """{"name":"CPM-TEN","points":[[0,2.5],[12,2.5]],"spans":[{"depth_left":0.05,"depth_low":0.1,"depth_right":0.05}],"section":"CPM-T15","strands":4,""" +
+            """ "jacking":{"transfer_pattern":"CPM-PTT","final_pattern":"CPM-PTF","stress":1400000,"end":"Both"},"losses":{"method":"Fixed","stressing":100000,"long_term":150000}}""",
+            a => FieldContext.Expect((int?)a["spans"] == 1 && (int?)a["strands"] == 4, "not the tendon asked for: " + a.ToJsonString()), "tool draw_tendon, a draped tendon jacked from both ends");
+        ctx.Refused("draw_tendon", """{"name":"CPM-BADT","points":[[0,2.5],[12,2.5]],"spans":[{"depth_left":0.05,"depth_low":5,"depth_right":0.05}],"section":"CPM-T15"}""", "below the slab", "tool draw_tendon says no to a tendon below the slab");
+        ctx.Tool("define_hyperstatic_case", """{"name":"CPM-PTF-HP","base_case":"CPM-PTF"}""", null, "tool define_hyperstatic_case, of the final prestress case");
         ctx.Tool("extra_definitions", "{}", a =>
         {
-            FieldContext.Expect(a["constraints"]!.AsArray().Count == 2 && a["vehicles"]!.AsArray().Count == 2 && a["strips"]!.AsArray().Count == 1, "not all listed: " + a.ToJsonString());
+            FieldContext.Expect(a["constraints"]!.AsArray().Count == 2 && a["vehicles"]!.AsArray().Count == 2 && a["strips"]!.AsArray().Count == 1 && a["tendons"]!.AsArray().Count == 1 && a["tendons"]![0]!["shape"]!.AsArray().Count > 2, "not all listed: " + a.ToJsonString());
             if (joints.Count == 2) FieldContext.Expect(a["constraints"]![0]!["joints"]!.AsArray().Count == 2, "CPM-BODY's joints are not listed");
         });
     }

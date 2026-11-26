@@ -158,3 +158,17 @@ Install: run the one-line install, or copy the CSI ProMax folder to Documents. T
    then File > Export > Story as SAFE V12/14/16 .F2K text file, for one story. Send that .f2k file. It is compared
    with what the Modeler's `save_safe_file` writes for the same story, and the table and field names are made to
    match.
+
+## Slabs and post-tensioning (2026-11-26)
+
+The format is taken from ETABS 20's and SAFE 20/23's own exports of their "ACI 318-19 PT-SL Ex001" and "RC-PN Ex001"
+examples (tests/CsiProMax.Tests/samples/*-v20.e2k, *-v20.f2k, *-v23.f2k). The unit tests read them and write them
+back word for word. What only a licensed program can confirm:
+
+11. **Import a Modeler PT model into ETABS.** The field test's Modeler part draws a tendon section, the two prestress
+   patterns, a draped tendon jacked from both ends with fixed losses, a hyperstatic case and a strip. Import its
+   .e2k (File > Import > ETABS .e2k text file). Expected: no import warnings; Display > Tendons shows the drape;
+   Assign > Tendon Loads shows "Both" ends (the e2k word for both ends and for the I end, "Start", is not yet seen in
+   an export: if ETABS refuses it, the import log names the line). Run the analysis: the hyperstatic case runs.
+12. **Strips with several segments.** A strip through three points writes a middle point with the end widths of
+   one segment and the start widths of the next. ETABS's own export of such a strip has not been seen yet.

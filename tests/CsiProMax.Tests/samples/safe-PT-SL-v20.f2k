@@ -1,0 +1,953 @@
+File (path removed) saved
+ 
+TABLE:  "PROGRAM CONTROL"
+   ProgramName=SAFE   Version=20.1.0   ProgLevel="Post Tensioning"   CurrUnits="lb, in, F"   CompBmCode="AISC 360-10"   ConcFrmCode="ACI 318-19"   ConcSlbCode="ACI 318-19"
+ 
+TABLE:  "GRID DEFINITIONS - GENERAL"
+   Name=G1   Type=Cartesian   Ux=0   Uy=0   Rz=0   "Datum Name"=Story1   "Story Name Below"=Base   "Model Datum"=48   "Story Height Below"=48   "Bubble Size"=60   Color=Gray6   GUID=8babf836-e39b-4ae8-be14-43333e375c76
+ 
+TABLE:  "GRID DEFINITIONS - GRID LINES"
+   Name=G1   "Grid Line Type"="X (Cartesian)"   ID=A   Ordinate=0   "Bubble Location"=End   Visible=Yes
+   Name=G1   "Grid Line Type"="X (Cartesian)"   ID=B   Ordinate=384   "Bubble Location"=End   Visible=Yes
+   Name=G1   "Grid Line Type"="Y (Cartesian)"   ID=1   Ordinate=0   "Bubble Location"=Start   Visible=Yes
+   Name=G1   "Grid Line Type"="Y (Cartesian)"   ID=2   Ordinate=36   "Bubble Location"=Start   Visible=Yes
+ 
+TABLE:  "MATERIAL PROPERTIES - GENERAL"
+   Material=4000Psi   Type=Concrete   SymType=Isotropic   Grade=Unknown   Color=Cyan   GUID=80e3193c-e3e3-4260-939e-b1a002f9e81f
+   Material=A416Gr270   Type=Tendon   SymType=Uniaxial   Grade=Unknown   Color=Magenta   GUID=b9d7ae30-bde4-40ed-a493-2b3dae80d682
+   Material=A615Gr60   Type=Rebar   SymType=Uniaxial   Grade=Unknown   Color=Red   GUID=4cdeabda-c18c-4ad9-8a64-d553fe462505
+   Material=A992Fy50   Type=Steel   SymType=Isotropic   Grade=Unknown   Color=Green   GUID=afc6fcc4-4f2e-47de-996c-3ca3611ff1a6
+ 
+TABLE:  "MATERIAL PROPERTIES - BASIC MECHANICAL PROPERTIES"
+   Material=4000Psi   DensityType=Weight   UnitWeight=0.08680555556   UnitMass=0.0002248332521   E1=3604996.5   G12=1502081.875   U12=0.2   A1=5.5E-06
+   Material=A416Gr270   DensityType=Weight   UnitWeight=0.283564814814815   UnitMass=0.000734455290352564   E1=28500000   A1=6.5E-06
+   Material=A615Gr60   DensityType=Weight   UnitWeight=0.283564814814815   UnitMass=0.000734455290352564   E1=29000000   A1=6.5E-06
+   Material=A992Fy50   DensityType=Weight   UnitWeight=0.283564814814815   UnitMass=0.000734455290352564   E1=29000000   G12=11153846.1538462   U12=0.3   A1=6.5E-06
+ 
+TABLE:  "MATERIAL PROPERTIES - STEEL DATA"
+   Material=A992Fy50   Fy=50000   Fu=65000   Fye=55000   Fue=71500   SSCurveOpt=Simple   SSHysType=Kinematic   SHard=0.015   SMax=0.11   SRup=0.17   FinalSlope=-0.1
+ 
+TABLE:  "MATERIAL PROPERTIES - CONCRETE DATA"
+   Material=4000Psi   Fc=4000   LtWtConc=No   IsUserFr=No   SSCurveOpt=Mander   SSHysType=Concrete   SFc=0.00221914   SCap=0.005   FinalSlope=-0.1   FAngle=0   DAngle=0
+ 
+TABLE:  "MATERIAL PROPERTIES - REBAR DATA"
+   Material=A615Gr60   Fy=60000   Fu=90000   Fye=66000   Fue=99000   SSCurveOpt=Simple   SSHysType=Kinematic   SHard=0.01   SCap=0.09   FinalSlope=-0.1
+ 
+TABLE:  "MATERIAL PROPERTIES - TENDON DATA"
+   Material=A416Gr270   Fy=245100   Fu=270000   SSCurveOpt="270 ksi"   SSHysType=Kinematic   FinalSlope=-0.1
+ 
+TABLE:  "FRAME SECTION PROPERTY DEFINITIONS - SUMMARY"
+   Name=A-CompBm   Shape="Auto Select"
+   Name=A-GravBm   Shape="Auto Select"
+   Name=A-GravCol   Shape="Auto Select"
+   Name=A-LatBm   Shape="Auto Select"
+   Name=A-LatCol   Shape="Auto Select"
+   Name=ConcBm   Material=4000Psi   Shape="Concrete Rectangular"   Color=Blue   Area=432   J=25192.30359375   I33=20736   I22=11664   As2=359.999949600012   As3=359.99994960001   S33Pos=1728   S33Neg=1728   S22Pos=1296   S22Neg=1296 _
+        Z33=2592   Z22=1944   R33=6.92820323027551   R22=5.19615242270663   "CG Offset 3"=0   "CG Offset 2"=0   "PNA Offset 3"=0   "PNA Offset 2"=0   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1 _
+        "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=ConcCol   Material=4000Psi   Shape="Concrete Rectangular"   Color=Gray8Dark   Area=324   J=14784.12   I33=8748   I22=8748   As2=269.999962200007   As3=269.999962200007   S33Pos=972   S33Neg=972   S22Pos=972   S22Neg=972   Z33=1458 _
+        Z22=1458   R33=5.19615242270663   R22=5.19615242270663   "CG Offset 3"=0   "CG Offset 2"=0   "PNA Offset 3"=0   "PNA Offset 2"=0   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1 _
+        "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=SteelBm   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Yellow   Area=10.25   J=0.591145833333333   I33=561.854166666666   I22=18.0221354166667   As2=4.49103869312462   As3=5.5788070068908   S33Pos=62.4282407407407 _
+        S33Neg=62.4282407407407   S22Pos=6.00737847222222   S22Neg=6.00737847222222   Z33=70.5625   Z22=9.265625   R33=7.40371802882893   R22=1.32599287849563   Cw=1378.125   "CG Offset 3"=4.44089209850063E-16 _
+        "CG Offset 2"=3.5527136788005E-15   "PNA Offset 3"=4.44089209850063E-16   "PNA Offset 2"=3.5527136788005E-15   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1 _
+        "Mass Modifier"=1   "Weight Modifier"=1
+   Name=SteelCol   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Magenta   Area=44   J=12.7083333333333   I33=2774.66666666667   I22=972.166666666666   As2=9.03903819362078   As3=32.0436292435194   S33Pos=308.296296296296 _
+        S33Neg=308.296296296296   S22Pos=108.018518518518   S22Neg=108.018518518518   Z33=338   Z22=163   R33=7.94107083840751   R22=4.7004996510687   Cw=70227   "CG Offset 3"=-1.77635683940025E-15   "CG Offset 2"=-1.77635683940025E-15 _
+        "PNA Offset 3"=-1.77635683940025E-15   "PNA Offset 2"=-1.77635683940025E-15   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W10X12   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Green   Area=3.54   J=0.0547   I33=53.8   I22=2.18   As2=1.8753   As3=1.386   S33Pos=10.90172   S33Neg=10.90172   S22Pos=1.10101   S22Neg=1.10101   Z33=12.6   Z22=1.74 _
+        R33=3.898428   R22=0.7847415   Cw=50.704658684064   "Fillet Radius"=0.3   "CG Offset 3"=2.22044604925031E-16   "CG Offset 2"=4.44089209850063E-15   "PNA Offset 3"=2.22044604925031E-16   "PNA Offset 2"=4.44089209850063E-15 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W10X15   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Blue   Area=4.41   J=0.104   I33=68.9   I22=2.89   As2=2.2977   As3=1.8   S33Pos=13.79379   S33Neg=13.79379   S22Pos=1.445   S22Neg=1.445   Z33=16   Z22=2.3 _
+        R33=3.952668   R22=0.8095238   Cw=68.024448   "Fillet Radius"=0.3   "CG Offset 3"=0   "CG Offset 2"=0   "PNA Offset 3"=0   "PNA Offset 2"=0   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1 _
+        "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W10X17   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Gray8Dark   Area=4.99   J=0.156   I33=81.9   I22=3.56   As2=2.424   As3=2.2055   S33Pos=16.21782   S33Neg=16.21782   S22Pos=1.775561   S22Neg=1.775561   Z33=18.7 _
+        Z22=2.8   R33=4.051275   R22=0.844646   Cw=84.6301174253273   "Fillet Radius"=0.3   "CG Offset 3"=4.44089209850063E-16   "CG Offset 2"=-8.88178419700125E-16   "PNA Offset 3"=4.44089209850063E-16 _
+        "PNA Offset 2"=-8.88178419700125E-16   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W10X19   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Yellow   Area=5.62   J=0.233   I33=96.3   I22=4.29   As2=2.55   As3=2.6465   S33Pos=18.88235   S33Neg=18.88235   S22Pos=2.134328   S22Neg=2.134328   Z33=21.6 _
+        Z22=3.35   R33=4.139472   R22=0.8736963   Cw=102.791974690482   "Fillet Radius"=0.3   "CG Offset 3"=8.88178419700125E-16   "CG Offset 2"=-1.77635683940025E-15   "PNA Offset 3"=8.88178419700125E-16 _
+        "PNA Offset 2"=-1.77635683940025E-15   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W10X33   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Gray8Dark   Area=9.71   J=0.583   I33=171   I22=36.6   As2=2.8217   As3=5.771   S33Pos=35.14902   S33Neg=35.14902   S22Pos=9.195979   S22Neg=9.195979   Z33=38.8 _
+        Z22=14   R33=4.196512   R22=1.941471   Cw=789.797958228851   "Fillet Radius"=0.5   "CG Offset 3"=-1.33226762955019E-15   "CG Offset 2"=2.66453525910038E-15   "PNA Offset 3"=-1.33226762955019E-15   "PNA Offset 2"=2.66453525910038E-15 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W10X39   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Yellow   Area=11.5   J=0.976   I33=209   I22=45   As2=3.1248   As3=7.057833   S33Pos=42.1371   S33Neg=42.1371   S22Pos=11.26408   S22Neg=11.26408   Z33=46.8   Z22=17.2 _
+        R33=4.263087   R22=1.978141   Cw=993.198718134167   "Fillet Radius"=0.5   "CG Offset 3"=-8.88178419700125E-16   "CG Offset 2"=-8.88178419700125E-16   "PNA Offset 3"=-8.88178419700125E-16   "PNA Offset 2"=-8.88178419700125E-16 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W10X45   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Magenta   Area=13.3   J=1.51   I33=248   I22=53.4   As2=3.535   As3=8.287333   S33Pos=49.10891   S33Neg=49.10891   S22Pos=13.31671   S22Neg=13.31671   Z33=54.9 _
+        Z22=20.3   R33=4.318173   R22=2.003756   Cw=1197.62327411242   "Fillet Radius"=0.5   "CG Offset 3"=-8.88178419700125E-16   "CG Offset 2"=-1.77635683940025E-15   "PNA Offset 3"=-8.88178419700125E-16 _
+        "PNA Offset 2"=-1.77635683940025E-15   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W10X60   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Red   Area=17.7   J=2.48   I33=341   I22=116   As2=4.284   As3=11.44667   S33Pos=66.86275   S33Neg=66.86275   S22Pos=22.9703   S22Neg=22.9703   Z33=74.6   Z22=35 _
+        R33=4.389252   R22=2.560014   Cw=2645.67009959467   "Fillet Radius"=0.5   "CG Offset 3"=8.88178419700125E-16   "CG Offset 2"=-8.88178419700125E-16   "PNA Offset 3"=8.88178419700125E-16   "PNA Offset 2"=-8.88178419700125E-16 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W12X106   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Gray8Dark   Area=31.2   J=9.13   I33=933   I22=301   As2=7.869   As3=20.13   S33Pos=144.6512   S33Neg=144.6512   S22Pos=49.34426   S22Neg=49.34426   Z33=164 _
+        Z22=75.1   R33=5.468441   R22=3.106032   Cw=10624.951783413   "Fillet Radius"=0.6   "CG Offset 3"=0   "CG Offset 2"=8.88178419700125E-16   "PNA Offset 3"=0   "PNA Offset 2"=8.88178419700125E-16   "Area Modifier"=1   "As2 Modifier"=1 _
+        "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W12X120   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Yellow   Area=35.2   J=12.9   I33=1070   I22=345   As2=9.301   As3=22.755   S33Pos=163.3588   S33Neg=163.3588   S22Pos=56.09756   S22Neg=56.09756   Z33=186   Z22=85.4 _
+        R33=5.513413   R22=3.130677   Cw=12372.7272028099   "Fillet Radius"=0.59   "CG Offset 3"=8.88178419700125E-16   "CG Offset 2"=-2.66453525910038E-15   "PNA Offset 3"=8.88178419700125E-16   "PNA Offset 2"=-2.66453525910038E-15 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W12X136   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Yellow   Area=39.9   J=18.5   I33=1240   I22=398   As2=10.586   As3=25.83333   S33Pos=185.0746   S33Neg=185.0746   S22Pos=64.19355   S22Neg=64.19355   Z33=214 _
+        Z22=98   R33=5.574737   R22=3.158312   Cw=14659.406325   "Fillet Radius"=0.6   "CG Offset 3"=-1.77635683940025E-15   "CG Offset 2"=-8.88178419700125E-16   "PNA Offset 3"=-1.77635683940025E-15   "PNA Offset 2"=-8.88178419700125E-16 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W12X14   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Magenta   Area=4.16   J=0.0704   I33=88.6   I22=2.36   As2=2.38   As3=1.48875   S33Pos=14.89076   S33Neg=14.89076   S22Pos=1.188917   S22Neg=1.188917   Z33=17.4 _
+        Z22=1.9   R33=4.614984   R22=0.7531983   Cw=79.95701550467   "Fillet Radius"=0.3   "CG Offset 3"=-4.44089209850063E-16   "CG Offset 2"=-8.88178419700125E-16   "PNA Offset 3"=-4.44089209850063E-16 _
+        "PNA Offset 2"=-8.88178419700125E-16   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W12X152   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Magenta   Area=44.7   J=25.8   I33=1430   I22=454   As2=11.919   As3=29.16667   S33Pos=208.7591   S33Neg=208.7591   S22Pos=72.64   S22Neg=72.64   Z33=243   Z22=111 _
+        R33=5.656063   R22=3.186942   Cw=17236.81640625   "Fillet Radius"=0.6   "CG Offset 3"=8.88178419700125E-16   "CG Offset 2"=0   "PNA Offset 3"=8.88178419700125E-16   "PNA Offset 2"=0   "Area Modifier"=1   "As2 Modifier"=1 _
+        "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W12X16   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Red   Area=4.71   J=0.103   I33=103   I22=2.82   As2=2.64   As3=1.76225   S33Pos=17.16667   S33Neg=17.16667   S22Pos=1.413534   S22Neg=1.413534   Z33=20.1   Z22=2.26 _
+        R33=4.676363   R22=0.7737739   Cw=96.5871846140975   "Fillet Radius"=0.3   "CG Offset 3"=0   "CG Offset 2"=1.77635683940025E-15   "PNA Offset 3"=0   "PNA Offset 2"=1.77635683940025E-15   "Area Modifier"=1   "As2 Modifier"=1 _
+        "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W12X170   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Red   Area=50   J=35.6   I33=1650   I22=517   As2=13.44   As3=32.76   S33Pos=235.7143   S33Neg=235.7143   S22Pos=82.06349   S22Neg=82.06349   Z33=275   Z22=126 _
+        R33=5.744563   R22=3.215587   Cw=20121.750177984   "Fillet Radius"=0.6   "CG Offset 3"=8.88178419700125E-16   "CG Offset 2"=-1.77635683940025E-15   "PNA Offset 3"=8.88178419700125E-16   "PNA Offset 2"=-1.77635683940025E-15 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W12X19   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Cyan   Area=5.57   J=0.18   I33=130   I22=3.76   As2=2.867   As3=2.339167   S33Pos=21.31148   S33Neg=21.31148   S22Pos=1.875312   S22Neg=1.875312   Z33=24.7   Z22=2.98 _
+        R33=4.831078   R22=0.8216112   Cw=132.046416941578   "Fillet Radius"=0.3   "CG Offset 3"=0   "CG Offset 2"=0   "PNA Offset 3"=0   "PNA Offset 2"=0   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1 _
+        "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W12X190   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Cyan   Area=56   J=48.8   I33=1890   I22=589   As2=15.264   As3=36.83   S33Pos=262.5   S33Neg=262.5   S22Pos=92.75591   S22Neg=92.75591   Z33=311   Z22=143 _
+        R33=5.809475   R22=3.243124   Cw=23802.171540723   "Fillet Radius"=0.59   "CG Offset 3"=-1.77635683940025E-15   "CG Offset 2"=3.5527136788005E-15   "PNA Offset 3"=-1.77635683940025E-15   "PNA Offset 2"=3.5527136788005E-15 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W12X210   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Green   Area=61.8   J=64.7   I33=2140   I22=664   As2=17.346   As3=40.53333   S33Pos=291.1565   S33Neg=291.1565   S22Pos=103.75   S22Neg=103.75   Z33=348   Z22=159 _
+        R33=5.884542   R22=3.277855   Cw=27201.4595413333   "Fillet Radius"=0.6   "CG Offset 3"=-8.88178419700125E-16   "CG Offset 2"=-1.77635683940025E-15   "PNA Offset 3"=-8.88178419700125E-16   "PNA Offset 2"=-1.77635683940025E-15 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W12X22   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Green   Area=6.48   J=0.293   I33=156   I22=4.66   As2=3.198   As3=2.854583   S33Pos=25.36585   S33Neg=25.36585   S22Pos=2.312655   S22Neg=2.312655   Z33=29.3 _
+        Z22=3.66   R33=4.906534   R22=0.8480188   Cw=163.44064343221   "Fillet Radius"=0.3   "CG Offset 3"=-4.44089209850063E-16   "CG Offset 2"=4.44089209850063E-15   "PNA Offset 3"=-4.44089209850063E-16 _
+        "PNA Offset 2"=4.44089209850063E-15   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W12X26   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Magenta   Area=7.65   J=0.3   I33=204   I22=17.3   As2=2.806   As3=4.110333   S33Pos=33.44262   S33Neg=33.44262   S22Pos=5.331279   S22Neg=5.331279   Z33=37.2 _
+        Z22=8.17   R33=5.163978   R22=1.503808   Cw=604.701990805737   "Fillet Radius"=0.3   "CG Offset 3"=1.33226762955019E-15   "CG Offset 2"=3.5527136788005E-15   "PNA Offset 3"=1.33226762955019E-15   "PNA Offset 2"=3.5527136788005E-15 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W12X30   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Red   Area=8.79   J=0.457   I33=238   I22=20.3   As2=3.198   As3=4.781333   S33Pos=38.69919   S33Neg=38.69919   S22Pos=6.226994   S22Neg=6.226994   Z33=43.1   Z22=9.56 _
+        R33=5.203482   R22=1.519685   Cw=714.749071779541   "Fillet Radius"=0.3   "CG Offset 3"=-8.88178419700125E-16   "CG Offset 2"=-8.88178419700125E-16   "PNA Offset 3"=-8.88178419700125E-16   "PNA Offset 2"=-8.88178419700125E-16 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W12X53   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Cyan   Area=15.6   J=1.58   I33=425   I22=95.8   As2=4.1745   As3=9.583333   S33Pos=70.24793   S33Neg=70.24793   S22Pos=19.16   S22Neg=19.16   Z33=77.9   Z22=29.1 _
+        R33=5.219539   R22=2.478109   Cw=3182.28059895833   "Fillet Radius"=0.605   "CG Offset 3"=-1.77635683940025E-15   "CG Offset 2"=1.77635683940025E-15   "PNA Offset 3"=-1.77635683940025E-15   "PNA Offset 2"=1.77635683940025E-15 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W12X58   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Green   Area=17   J=2.1   I33=475   I22=107   As2=4.392   As3=10.66667   S33Pos=77.86885   S33Neg=77.86885   S22Pos=21.4   S22Neg=21.4   Z33=86.4   Z22=32.5 _
+        R33=5.285942   R22=2.508808   Cw=3563.56266666667   "Fillet Radius"=0.6   "CG Offset 3"=0   "CG Offset 2"=0   "PNA Offset 3"=0   "PNA Offset 2"=0   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1 _
+        "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W12X72   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Green   Area=21.1   J=2.93   I33=597   I22=195   As2=5.289   As3=13.4   S33Pos=97.07317   S33Neg=97.07317   S22Pos=32.5   S22Neg=32.5   Z33=108   Z22=49.2 _
+        R33=5.319195   R22=3.040017   Cw=6524.792856   "Fillet Radius"=0.6   "CG Offset 3"=-8.88178419700125E-16   "CG Offset 2"=-8.88178419700125E-16   "PNA Offset 3"=-8.88178419700125E-16   "PNA Offset 2"=-8.88178419700125E-16 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W12X79   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Blue   Area=23.2   J=3.84   I33=662   I22=216   As2=5.828   As3=14.8225   S33Pos=106.7742   S33Neg=106.7742   S22Pos=35.70248   S22Neg=35.70248   Z33=119   Z22=54.3 _
+        R33=5.341768   R22=3.051286   Cw=7382.47006416752   "Fillet Radius"=0.595   "CG Offset 3"=-8.88178419700125E-16   "CG Offset 2"=-8.88178419700125E-16   "PNA Offset 3"=-8.88178419700125E-16   "PNA Offset 2"=-8.88178419700125E-16 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W12X87   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Gray8Dark   Area=25.6   J=5.1   I33=740   I22=241   As2=6.4375   As3=16.335   S33Pos=118.4   S33Neg=118.4   S22Pos=39.83471   S22Neg=39.83471   Z33=132   Z22=60.4 _
+        R33=5.376453   R22=3.068234   Cw=8170.69332955838   "Fillet Radius"=0.6   "CG Offset 3"=1.77635683940025E-15   "CG Offset 2"=8.88178419700125E-16   "PNA Offset 3"=1.77635683940025E-15   "PNA Offset 2"=8.88178419700125E-16 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W12X96   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Blue   Area=28.2   J=6.85   I33=833   I22=270   As2=6.985   As3=18.3   S33Pos=131.1811   S33Neg=131.1811   S22Pos=44.26229   S22Neg=44.26229   Z33=147   Z22=67.5 _
+        R33=5.43498   R22=3.094264   Cw=9481.450332   "Fillet Radius"=0.6   "CG Offset 3"=0   "CG Offset 2"=-1.77635683940025E-15   "PNA Offset 3"=0   "PNA Offset 2"=-1.77635683940025E-15   "Area Modifier"=1   "As2 Modifier"=1 _
+        "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W14X109   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Green   Area=32   J=7.12   I33=1240   I22=447   As2=7.5075   As3=20.92667   S33Pos=173.4266   S33Neg=173.4266   S22Pos=61.23288   S22Neg=61.23288   Z33=192   Z22=92.7 _
+        R33=6.22495   R22=3.737479   Cw=20143.935135744   "Fillet Radius"=0.6   "CG Offset 3"=1.77635683940025E-15   "CG Offset 2"=-3.5527136788005E-15   "PNA Offset 3"=1.77635683940025E-15   "PNA Offset 2"=-3.5527136788005E-15 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W14X120   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Blue   Area=35.3   J=9.37   I33=1380   I22=495   As2=8.555   As3=23.03   S33Pos=190.3448   S33Neg=190.3448   S22Pos=67.34694   S22Neg=67.34694   Z33=212   Z22=102 _
+        R33=6.252478   R22=3.744685   Cw=22876.416513468   "Fillet Radius"=0.6   "CG Offset 3"=0   "CG Offset 2"=1.77635683940025E-15   "PNA Offset 3"=0   "PNA Offset 2"=1.77635683940025E-15   "Area Modifier"=1   "As2 Modifier"=1 _
+        "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W14X132   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Blue   Area=38.8   J=12.3   I33=1530   I22=548   As2=9.4815   As3=25.235   S33Pos=208.1633   S33Neg=208.1633   S22Pos=74.55782   S22Neg=74.55782   Z33=234   Z22=113 _
+        R33=6.279569   R22=3.758153   Cw=25475.0483166559   "Fillet Radius"=0.6   "CG Offset 3"=-8.88178419700125E-16   "CG Offset 2"=-8.88178419700125E-16   "PNA Offset 3"=-8.88178419700125E-16   "PNA Offset 2"=-8.88178419700125E-16 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W14X145   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Gray8Dark   Area=42.7   J=15.2   I33=1710   I22=677   As2=10.064   As3=28.15833   S33Pos=231.0811   S33Neg=231.0811   S22Pos=87.35484   S22Neg=87.35484   Z33=260 _
+        Z22=133   R33=6.328257   R22=3.981809   Cw=31789.6144186406   "Fillet Radius"=0.6   "CG Offset 3"=-8.88178419700125E-16   "CG Offset 2"=-3.5527136788005E-15   "PNA Offset 3"=-8.88178419700125E-16 _
+        "PNA Offset 2"=-3.5527136788005E-15   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W14X159   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Yellow   Area=46.7   J=19.7   I33=1900   I22=748   As2=11.175   As3=30.94   S33Pos=253.3333   S33Neg=253.3333   S22Pos=95.89743   S22Neg=95.89743   Z33=287   Z22=146 _
+        R33=6.378497   R22=4.002141   Cw=35900.200319256   "Fillet Radius"=0.6   "CG Offset 3"=2.66453525910038E-15   "CG Offset 2"=-1.77635683940025E-15   "PNA Offset 3"=2.66453525910038E-15   "PNA Offset 2"=-1.77635683940025E-15 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W14X176   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Magenta   Area=51.8   J=26.5   I33=2140   I22=838   As2=12.616   As3=34.27833   S33Pos=281.5789   S33Neg=281.5789   S22Pos=106.7516   S22Neg=106.7516   Z33=320 _
+        Z22=163   R33=6.427499   R22=4.02214   Cw=40753.3676698976   "Fillet Radius"=0.6   "CG Offset 3"=1.77635683940025E-15   "CG Offset 2"=3.5527136788005E-15   "PNA Offset 3"=1.77635683940025E-15   "PNA Offset 2"=3.5527136788005E-15 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W14X193   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Red   Area=56.8   J=34.8   I33=2400   I22=931   As2=13.795   As3=37.68   S33Pos=309.6774   S33Neg=309.6774   S22Pos=118.5987   S22Neg=118.5987   Z33=355   Z22=180 _
+        R33=6.500271   R22=4.048561   Cw=45900.862791288   "Fillet Radius"=0.6   "CG Offset 3"=-8.88178419700125E-16   "CG Offset 2"=0   "PNA Offset 3"=-8.88178419700125E-16   "PNA Offset 2"=0   "Area Modifier"=1   "As2 Modifier"=1 _
+        "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W14X211   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Cyan   Area=62   J=44.6   I33=2660   I22=1030   As2=15.386   As3=41.08   S33Pos=338.8535   S33Neg=338.8535   S22Pos=130.3797   S22Neg=130.3797   Z33=390   Z22=198 _
+        R33=6.550056   R22=4.075893   Cw=51260.570631088   "Fillet Radius"=0.6   "CG Offset 3"=-1.77635683940025E-15   "CG Offset 2"=-8.88178419700125E-16   "PNA Offset 3"=-1.77635683940025E-15   "PNA Offset 2"=-8.88178419700125E-16 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W14X22   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Blue   Area=6.49   J=0.208   I33=199   I22=7   As2=3.151   As3=2.791667   S33Pos=29.0511   S33Neg=29.0511   S22Pos=2.8   S22Neg=2.8   Z33=33.2   Z22=4.39 _
+        R33=5.537378   R22=1.038548   Cw=311.660314453125   "Fillet Radius"=0.4   "CG Offset 3"=-4.44089209850063E-16   "CG Offset 2"=7.105427357601E-15   "PNA Offset 3"=-4.44089209850063E-16   "PNA Offset 2"=7.105427357601E-15 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W14X233   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Green   Area=68.5   J=59.5   I33=3010   I22=1150   As2=17.12   As3=45.58   S33Pos=376.25   S33Neg=376.25   S22Pos=144.6541   S22Neg=144.6541   Z33=436   Z22=221 _
+        R33=6.628847   R22=4.097355   Cw=58744.199897208   "Fillet Radius"=0.6   "CG Offset 3"=1.77635683940025E-15   "CG Offset 2"=0   "PNA Offset 3"=1.77635683940025E-15   "PNA Offset 2"=0   "Area Modifier"=1   "As2 Modifier"=1 _
+        "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W14X257   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Blue   Area=75.6   J=79.1   I33=3400   I22=1290   As2=19.352   As3=50.4   S33Pos=414.6342   S33Neg=414.6342   S22Pos=161.25   S22Neg=161.25   Z33=487   Z22=246 _
+        R33=6.706232   R22=4.130798   Cw=67911.814656   "Fillet Radius"=0.6   "CG Offset 3"=0   "CG Offset 2"=-1.77635683940025E-15   "PNA Offset 3"=0   "PNA Offset 2"=-1.77635683940025E-15   "Area Modifier"=1   "As2 Modifier"=1 _
+        "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W14X26   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Gray8Dark   Area=7.69   J=0.358   I33=245   I22=8.91   As2=3.5445   As3=3.521   S33Pos=35.2518   S33Neg=35.2518   S22Pos=3.542743   S22Neg=3.542743   Z33=40.2 _
+        Z22=5.54   R33=5.644427   R22=1.076405   Cw=404.689361940164   "Fillet Radius"=0.4   "CG Offset 3"=-1.33226762955019E-15   "CG Offset 2"=1.77635683940025E-15   "PNA Offset 3"=-1.33226762955019E-15 _
+        "PNA Offset 2"=1.77635683940025E-15   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W14X283   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Gray8Dark   Area=83.3   J=104   I33=3840   I22=1440   As2=21.543   As3=55.545   S33Pos=459.8802   S33Neg=459.8802   S22Pos=178.882   S22Neg=178.882   Z33=542 _
+        Z22=274   R33=6.789583   R22=4.157753   Cw=77041.6160459426   "Fillet Radius"=0.6   "CG Offset 3"=0   "CG Offset 2"=1.77635683940025E-15   "PNA Offset 3"=0   "PNA Offset 2"=1.77635683940025E-15   "Area Modifier"=1   "As2 Modifier"=1 _
+        "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W14X30   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Cyan   Area=8.85   J=0.38   I33=291   I22=19.6   As2=3.726   As3=4.318417   S33Pos=42.17391   S33Neg=42.17391   S22Pos=5.824666   S22Neg=5.824666   Z33=47.3   Z22=8.99 _
+        R33=5.734227   R22=1.488183   Cw=879.986550368051   "Fillet Radius"=0.4   "CG Offset 3"=-4.44089209850063E-16   "CG Offset 2"=-8.88178419700125E-16   "PNA Offset 3"=-4.44089209850063E-16   "PNA Offset 2"=-8.88178419700125E-16 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W14X311   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Yellow   Area=91.4   J=136   I33=4330   I22=1610   As2=24.111   As3=61.02   S33Pos=506.4327   S33Neg=506.4327   S22Pos=198.7654   S22Neg=198.7654   Z33=603   Z22=304 _
+        R33=6.88289   R22=4.197009   Cw=88167.807860832   "Fillet Radius"=0.6   "CG Offset 3"=1.77635683940025E-15   "CG Offset 2"=0   "PNA Offset 3"=1.77635683940025E-15   "PNA Offset 2"=0   "Area Modifier"=1   "As2 Modifier"=1 _
+        "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W14X34   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Green   Area=10   J=0.569   I33=340   I22=23.3   As2=3.99   As3=5.11875   S33Pos=48.57143   S33Neg=48.57143   S22Pos=6.903704   S22Neg=6.903704   Z33=54.6   Z22=10.6 _
+        R33=5.830952   R22=1.526434   Cw=1069.7184642898   "Fillet Radius"=0.4   "CG Offset 3"=4.44089209850063E-16   "CG Offset 2"=2.66453525910038E-15   "PNA Offset 3"=4.44089209850063E-16   "PNA Offset 2"=2.66453525910038E-15 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W14X342   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Magenta   Area=101   J=178   I33=4900   I22=1810   As2=26.95   As3=67.51334   S33Pos=560   S33Neg=560   S22Pos=220.7317   S22Neg=220.7317   Z33=672   Z22=338 _
+        R33=6.965261   R22=4.233295   Cw=102549.894251688   "Fillet Radius"=0.6   "CG Offset 3"=-1.77635683940025E-15   "CG Offset 2"=0   "PNA Offset 3"=-1.77635683940025E-15   "PNA Offset 2"=0   "Area Modifier"=1   "As2 Modifier"=1 _
+        "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W14X370   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Red   Area=109   J=222   I33=5440   I22=1990   As2=29.714   As3=73.15   S33Pos=607.8212   S33Neg=607.8212   S22Pos=241.2121   S22Neg=241.2121   Z33=736   Z22=370 _
+        R33=7.064578   R22=4.272807   Cw=115635.7606635   "Fillet Radius"=0.6   "CG Offset 3"=0   "CG Offset 2"=-1.77635683940025E-15   "PNA Offset 3"=0   "PNA Offset 2"=-1.77635683940025E-15   "Area Modifier"=1   "As2 Modifier"=1 _
+        "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W14X38   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Blue   Area=11.2   J=0.798   I33=385   I22=26.7   As2=4.371   As3=5.810917   S33Pos=54.60993   S33Neg=54.60993   S22Pos=7.88774   S22Neg=7.88774   Z33=61.5   Z22=12.1 _
+        R33=5.86302   R22=1.543998   Cw=1228.80021561684   "Fillet Radius"=0.4   "CG Offset 3"=-1.33226762955019E-15   "CG Offset 2"=8.88178419700125E-16   "PNA Offset 3"=-1.33226762955019E-15   "PNA Offset 2"=8.88178419700125E-16 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W14X398   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Cyan   Area=117   J=273   I33=6000   I22=2170   As2=32.391   As3=78.85   S33Pos=655.7377   S33Neg=655.7377   S22Pos=261.4458   S22Neg=261.4458   Z33=801   Z22=402 _
+        R33=7.161149   R22=4.306624   Cw=129662.637049125   "Fillet Radius"=0.59   "CG Offset 3"=1.77635683940025E-15   "CG Offset 2"=0   "PNA Offset 3"=1.77635683940025E-15   "PNA Offset 2"=0   "Area Modifier"=1   "As2 Modifier"=1 _
+        "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W14X426   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Green   Area=125   J=331   I33=6600   I22=2360   As2=35.156   As3=84.61333   S33Pos=705.8823   S33Neg=705.8823   S22Pos=282.6347   S22Neg=282.6347   Z33=869   Z22=434 _
+        R33=7.266361   R22=4.345112   Cw=144675.592882488   "Fillet Radius"=0.59   "CG Offset 3"=5.32907051820075E-15   "CG Offset 2"=-1.77635683940025E-15   "PNA Offset 3"=5.32907051820075E-15   "PNA Offset 2"=-1.77635683940025E-15 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W14X455   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Blue   Area=134   J=395   I33=7190   I22=2560   As2=38.38   As3=89.88   S33Pos=756.8421   S33Neg=756.8421   S22Pos=304.7619   S22Neg=304.7619   Z33=936   Z22=468 _
+        R33=7.325075   R22=4.370867   Cw=158119.668762048   "Fillet Radius"=0.6   "CG Offset 3"=3.5527136788005E-15   "CG Offset 2"=0   "PNA Offset 3"=3.5527136788005E-15   "PNA Offset 2"=0   "Area Modifier"=1   "As2 Modifier"=1 _
+        "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W14X500   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Gray8Dark   Area=147   J=514   I33=8210   I22=2880   As2=42.924   As3=99.16666   S33Pos=837.7551   S33Neg=837.7551   S22Pos=338.8235   S22Neg=338.8235   Z33=1050 _
+        Z22=522   R33=7.473309   R22=4.426267   Cw=185718.564791667   "Fillet Radius"=0.6   "CG Offset 3"=1.77635683940025E-15   "CG Offset 2"=0   "PNA Offset 3"=1.77635683940025E-15   "PNA Offset 2"=0   "Area Modifier"=1   "As2 Modifier"=1 _
+        "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W14X61   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Yellow   Area=17.9   J=2.19   I33=640   I22=107   As2=5.2125   As3=10.75   S33Pos=92.08633   S33Neg=92.08633   S22Pos=21.4   S22Neg=21.4   Z33=102   Z22=32.8 _
+        R33=5.979481   R22=2.444924   Cw=4721.803796875   "Fillet Radius"=0.595   "CG Offset 3"=-8.88178419700125E-16   "CG Offset 2"=-1.77635683940025E-15   "PNA Offset 3"=-8.88178419700125E-16   "PNA Offset 2"=-1.77635683940025E-15 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W14X68   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Magenta   Area=20   J=3.01   I33=722   I22=121   As2=5.81   As3=12   S33Pos=103.1429   S33Neg=103.1429   S22Pos=24.2   S22Neg=24.2   Z33=115   Z22=36.9   R33=6.008327 _
+        R22=2.459675   Cw=5290.752   "Fillet Radius"=0.59   "CG Offset 3"=0   "CG Offset 2"=0   "PNA Offset 3"=0   "PNA Offset 2"=0   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1 _
+        "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W14X74   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Red   Area=21.8   J=3.87   I33=795   I22=134   As2=6.39   As3=13.21417   S33Pos=111.9718   S33Neg=111.9718   S22Pos=26.53465   S22Neg=26.53465   Z33=126   Z22=40.5 _
+        R33=6.038865   R22=2.479272   Cw=6064.62414158684   "Fillet Radius"=0.595   "CG Offset 3"=1.77635683940025E-15   "CG Offset 2"=0   "PNA Offset 3"=1.77635683940025E-15   "PNA Offset 2"=0   "Area Modifier"=1   "As2 Modifier"=1 _
+        "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W14X82   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Cyan   Area=24   J=5.07   I33=881   I22=148   As2=7.293   As3=14.3925   S33Pos=123.2168   S33Neg=123.2168   S22Pos=29.30693   S22Neg=29.30693   Z33=139   Z22=44.8 _
+        R33=6.05874   R22=2.483277   Cw=6634.99511547183   "Fillet Radius"=0.595   "CG Offset 3"=0   "CG Offset 2"=-8.88178419700125E-16   "PNA Offset 3"=0   "PNA Offset 2"=-8.88178419700125E-16   "Area Modifier"=1   "As2 Modifier"=1 _
+        "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W16X26   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Gray8Dark   Area=7.68   J=0.262   I33=301   I22=9.59   As2=3.925   As3=3.1625   S33Pos=38.34395   S33Neg=38.34395   S22Pos=3.487273   S22Neg=3.487273   Z33=44.2 _
+        Z22=5.48   R33=6.260408   R22=1.117452   Cw=563.891519791016   "Fillet Radius"=0.402   "CG Offset 3"=0   "CG Offset 2"=-8.88178419700125E-16   "PNA Offset 3"=0   "PNA Offset 2"=-8.88178419700125E-16   "Area Modifier"=1 _
+        "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W16X31   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Gray8Dark   Area=9.13   J=0.461   I33=375   I22=12.4   As2=4.3725   As3=4.055333   S33Pos=47.16981   S33Neg=47.16981   S22Pos=4.484629   S22Neg=4.484629   Z33=54 _
+        Z22=7.03   R33=6.408852   R22=1.165401   Cw=741.030029787175   "Fillet Radius"=0.402   "CG Offset 3"=4.44089209850063E-16   "CG Offset 2"=-2.66453525910038E-15   "PNA Offset 3"=4.44089209850063E-16 _
+        "PNA Offset 2"=-2.66453525910038E-15   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W16X36   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Yellow   Area=10.6   J=0.545   I33=448   I22=24.5   As2=4.6905   As3=5.0095   S33Pos=56.3522   S33Neg=56.3522   S22Pos=7.010015   S22Neg=7.010015   Z33=64   Z22=10.8 _
+        R33=6.501088   R22=1.520303   Cw=1464.43253349895   "Fillet Radius"=0.402   "CG Offset 3"=-8.88178419700125E-16   "CG Offset 2"=8.88178419700125E-16   "PNA Offset 3"=-8.88178419700125E-16   "PNA Offset 2"=8.88178419700125E-16 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W18X35   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Magenta   Area=10.3   J=0.506   I33=510   I22=15.3   As2=5.31   As3=4.25   S33Pos=57.62712   S33Neg=57.62712   S22Pos=5.1   S22Neg=5.1   Z33=66.5   Z22=8.06 _
+        R33=7.036658   R22=1.218785   Cw=1141.478015625   "Fillet Radius"=0.402   "CG Offset 3"=1.33226762955019E-15   "CG Offset 2"=0   "PNA Offset 3"=1.33226762955019E-15   "PNA Offset 2"=0   "Area Modifier"=1   "As2 Modifier"=1 _
+        "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W18X40   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Red   Area=11.8   J=0.81   I33=612   I22=19.1   As2=5.6385   As3=5.2675   S33Pos=68.37989   S33Neg=68.37989   S22Pos=6.345515   S22Neg=6.345515   Z33=78.4   Z22=10 _
+        R33=7.201694   R22=1.272259   Cw=1440.74513576055   "Fillet Radius"=0.402   "CG Offset 3"=-8.88178419700125E-16   "CG Offset 2"=-5.32907051820075E-15   "PNA Offset 3"=-8.88178419700125E-16   "PNA Offset 2"=-5.32907051820075E-15 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W18X46   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Cyan   Area=13.5   J=1.22   I33=712   I22=22.5   As2=6.516   As3=6.1105   S33Pos=78.67403   S33Neg=78.67403   S22Pos=7.425743   S22Neg=7.425743   Z33=90.7   Z22=11.7 _
+        R33=7.262282   R22=1.290994   Cw=1717.0775065906   "Fillet Radius"=0.405   "CG Offset 3"=-8.88178419700125E-16   "CG Offset 2"=1.77635683940025E-15   "PNA Offset 3"=-8.88178419700125E-16   "PNA Offset 2"=1.77635683940025E-15 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W18X50   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Yellow   Area=14.7   J=1.24   I33=800   I22=40.1   As2=6.39   As3=7.125   S33Pos=88.88889   S33Neg=88.88889   S22Pos=10.69333   S22Neg=10.69333   Z33=101   Z22=16.6 _
+        R33=7.377111   R22=1.651633   Cw=3043.98268945312   "Fillet Radius"=0.402   "CG Offset 3"=8.88178419700125E-16   "CG Offset 2"=1.77635683940025E-15   "PNA Offset 3"=8.88178419700125E-16   "PNA Offset 2"=1.77635683940025E-15 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W18X55   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Magenta   Area=16.2   J=1.66   I33=890   I22=44.9   As2=7.059   As3=7.9065   S33Pos=98.34254   S33Neg=98.34254   S22Pos=11.92563   S22Neg=11.92563   Z33=112   Z22=18.5 _
+        R33=7.412035   R22=1.664814   Cw=3420.58231731298   "Fillet Radius"=0.4   "CG Offset 3"=-4.44089209850063E-16   "CG Offset 2"=-5.32907051820075E-15   "PNA Offset 3"=-4.44089209850063E-16   "PNA Offset 2"=-5.32907051820075E-15 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W18X60   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Red   Area=17.6   J=2.17   I33=984   I22=50.1   As2=7.553   As3=8.757   S33Pos=108.1319   S33Neg=108.1319   S22Pos=13.25397   S22Neg=13.25397   Z33=123   Z22=20.6 _
+        R33=7.477238   R22=1.687184   Cw=3834.0977376378   "Fillet Radius"=0.405   "CG Offset 3"=-8.88178419700125E-16   "CG Offset 2"=1.77635683940025E-15   "PNA Offset 3"=-8.88178419700125E-16   "PNA Offset 2"=1.77635683940025E-15 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W21X44   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Green   Area=13   J=0.77   I33=843   I22=20.7   As2=7.245   As3=4.875   S33Pos=81.44927   S33Neg=81.44927   S22Pos=6.369231   S22Neg=6.369231   Z33=95.4   Z22=10.2 _
+        R33=8.052711   R22=1.261867   Cw=2111.50151367188   "Fillet Radius"=0.5   "CG Offset 3"=4.44089209850063E-16   "CG Offset 2"=-7.105427357601E-15   "PNA Offset 3"=4.44089209850063E-16   "PNA Offset 2"=-7.105427357601E-15 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W21X50   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Blue   Area=14.7   J=1.14   I33=984   I22=24.9   As2=7.904   As3=5.822583   S33Pos=94.61539   S33Neg=94.61539   S22Pos=7.626339   S22Neg=7.626339   Z33=110   Z22=12.2 _
+        R33=8.181612   R22=1.301491   Cw=2549.03207481778   "Fillet Radius"=0.505   "CG Offset 3"=-8.88178419700125E-16   "CG Offset 2"=1.77635683940025E-15   "PNA Offset 3"=-8.88178419700125E-16   "PNA Offset 2"=1.77635683940025E-15 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W21X55   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Cyan   Area=16.2   J=1.24   I33=1140   I22=48.4   As2=7.8   As3=7.1514   S33Pos=109.6154   S33Neg=109.6154   S22Pos=11.77616   S22Neg=11.77616   Z33=126   Z22=18.4 _
+        R33=8.388704   R22=1.728483   Cw=4967.35217134508   "Fillet Radius"=0.498   "CG Offset 3"=-8.88178419700125E-16   "CG Offset 2"=-5.32907051820075E-15   "PNA Offset 3"=-8.88178419700125E-16   "PNA Offset 2"=-5.32907051820075E-15 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W21X57   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Green   Area=16.7   J=1.77   I33=1170   I22=30.6   As2=8.5455   As3=7.106667   S33Pos=110.9005   S33Neg=110.9005   S22Pos=9.329268   S22Neg=9.329268   Z33=129 _
+        Z22=14.8   R33=8.370178   R22=1.353638   Cw=3197.42420081067   "Fillet Radius"=0.5   "CG Offset 3"=0   "CG Offset 2"=-3.5527136788005E-15   "PNA Offset 3"=0   "PNA Offset 2"=-3.5527136788005E-15   "Area Modifier"=1 _
+        "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W21X62   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Blue   Area=18.3   J=1.83   I33=1330   I22=57.5   As2=8.4   As3=8.446   S33Pos=126.6667   S33Neg=126.6667   S22Pos=13.95631   S22Neg=13.95631   Z33=144   Z22=21.7 _
+        R33=8.525116   R22=1.77259   Cw=5957.53964020562   "Fillet Radius"=0.505   "CG Offset 3"=-8.88178419700125E-16   "CG Offset 2"=-1.77635683940025E-15   "PNA Offset 3"=-8.88178419700125E-16   "PNA Offset 2"=-1.77635683940025E-15 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W21X68   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Gray8Dark   Area=20   J=2.45   I33=1480   I22=64.7   As2=9.073   As3=9.441584   S33Pos=140.2844   S33Neg=140.2844   S22Pos=15.64692   S22Neg=15.64692   Z33=160 _
+        Z22=24.4   R33=8.602325   R22=1.798611   Cw=6728.13391496862   "Fillet Radius"=0.505   "CG Offset 3"=1.77635683940025E-15   "CG Offset 2"=-1.06581410364015E-14   "PNA Offset 3"=1.77635683940025E-15 _
+        "PNA Offset 2"=-1.06581410364015E-14   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W24X55   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Gray8Dark   Area=16.2   J=1.18   I33=1350   I22=29.1   As2=9.322   As3=5.900084   S33Pos=114.4068   S33Neg=114.4068   S22Pos=8.302425   S22Neg=8.302425   Z33=134 _
+        Z22=13.3   R33=9.128709   R22=1.34026   Cw=3866.07365218317   "Fillet Radius"=0.505   "CG Offset 3"=8.88178419700125E-16   "CG Offset 2"=-3.5527136788005E-15   "PNA Offset 3"=8.88178419700125E-16 _
+        "PNA Offset 2"=-3.5527136788005E-15   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W24X62   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Yellow   Area=18.2   J=1.71   I33=1550   I22=34.5   As2=10.191   As3=6.922667   S33Pos=130.8017   S33Neg=130.8017   S22Pos=9.801136   S22Neg=9.801136   Z33=153 _
+        Z22=15.7   R33=9.228479   R22=1.376809   Cw=4580.98255909137   "Fillet Radius"=0.5   "CG Offset 3"=4.44089209850063E-16   "CG Offset 2"=-3.5527136788005E-15   "PNA Offset 3"=4.44089209850063E-16   "PNA Offset 2"=-3.5527136788005E-15 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W24X68   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Yellow   Area=20.1   J=1.87   I33=1830   I22=70.4   As2=9.8355   As3=8.74575   S33Pos=154.4304   S33Neg=154.4304   S22Pos=15.69677   S22Neg=15.69677   Z33=177 _
+        Z22=24.5   R33=9.541739   R22=1.871493   Cw=9399.60814788768   "Fillet Radius"=0.505   "CG Offset 3"=0   "CG Offset 2"=3.5527136788005E-15   "PNA Offset 3"=0   "PNA Offset 2"=3.5527136788005E-15   "Area Modifier"=1 _
+        "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W24X76   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Magenta   Area=22.4   J=2.68   I33=2100   I22=82.5   As2=10.516   As3=10.18867   S33Pos=175.7322   S33Neg=175.7322   S22Pos=18.35373   S22Neg=18.35373   Z33=200 _
+        Z22=28.6   R33=9.682459   R22=1.919124   Cw=11099.4427887662   "Fillet Radius"=0.5   "CG Offset 3"=-8.88178419700125E-16   "CG Offset 2"=-3.5527136788005E-15   "PNA Offset 3"=-8.88178419700125E-16 _
+        "PNA Offset 2"=-3.5527136788005E-15   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W24X84   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Red   Area=24.7   J=3.7   I33=2370   I22=94.4   As2=11.327   As3=11.57567   S33Pos=196.6805   S33Neg=196.6805   S22Pos=20.93126   S22Neg=20.93126   Z33=224   Z22=32.6 _
+        R33=9.795479   R22=1.954958   Cw=12815.2939924122   "Fillet Radius"=0.5   "CG Offset 3"=-1.77635683940025E-15   "CG Offset 2"=1.77635683940025E-15   "PNA Offset 3"=-1.77635683940025E-15   "PNA Offset 2"=1.77635683940025E-15 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W24X94   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Red   Area=27.7   J=5.26   I33=2700   I22=109   As2=12.5145   As3=13.22708   S33Pos=222.2222   S33Neg=222.2222   S22Pos=24.03528   S22Neg=24.03528   Z33=254   Z22=37.5 _
+        R33=9.872838   R22=1.983688   Cw=14927.1834991031   "Fillet Radius"=0.505   "CG Offset 3"=0   "CG Offset 2"=0   "PNA Offset 3"=0   "PNA Offset 2"=0   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1 _
+        "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W27X102   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Green   Area=30   J=5.28   I33=3620   I22=139   As2=13.9565   As3=13.83333   S33Pos=267.1587   S33Neg=267.1587   S22Pos=27.8   S22Neg=27.8   Z33=305   Z22=43.4 _
+        R33=10.98484   R22=2.152518   Cw=23866.4044583333   "Fillet Radius"=0.6   "CG Offset 3"=-1.77635683940025E-15   "CG Offset 2"=-3.5527136788005E-15   "PNA Offset 3"=-1.77635683940025E-15   "PNA Offset 2"=-3.5527136788005E-15 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W27X114   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Blue   Area=33.6   J=7.33   I33=4080   I22=159   As2=15.561   As3=15.655   S33Pos=298.9011   S33Neg=298.9011   S22Pos=31.48515   S22Neg=31.48515   Z33=343   Z22=49.3 _
+        R33=11.01946   R22=2.175349   Cw=27762.3412235674   "Fillet Radius"=0.6   "CG Offset 3"=-1.77635683940025E-15   "CG Offset 2"=0   "PNA Offset 3"=-1.77635683940025E-15   "PNA Offset 2"=0   "Area Modifier"=1   "As2 Modifier"=1 _
+        "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W27X129   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Gray8Dark   Area=37.8   J=11.1   I33=4760   I22=184   As2=16.836   As3=18.33333   S33Pos=344.9275   S33Neg=344.9275   S22Pos=36.8   S22Neg=36.8   Z33=395   Z22=57.6 _
+        R33=11.22167   R22=2.206292   Cw=32186.4583333333   "Fillet Radius"=0.6   "CG Offset 3"=-8.88178419700125E-16   "CG Offset 2"=1.77635683940025E-15   "PNA Offset 3"=-8.88178419700125E-16   "PNA Offset 2"=1.77635683940025E-15 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W27X84   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Magenta   Area=24.7   J=2.81   I33=2850   I22=106   As2=12.282   As3=10.66667   S33Pos=213.4831   S33Neg=213.4831   S22Pos=21.2   S22Neg=21.2   Z33=244   Z22=33.2 _
+        R33=10.74172   R22=2.071593   Cw=18109.9626666667   "Fillet Radius"=0.6   "CG Offset 3"=1.77635683940025E-15   "CG Offset 2"=0   "PNA Offset 3"=1.77635683940025E-15   "PNA Offset 2"=0   "Area Modifier"=1   "As2 Modifier"=1 _
+        "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W27X94   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Cyan   Area=27.6   J=4.03   I33=3270   I22=124   As2=13.181   As3=12.41667   S33Pos=243.1227   S33Neg=243.1227   S22Pos=24.8   S22Neg=24.8   Z33=278   Z22=38.8 _
+        R33=10.88477   R22=2.119612   Cw=21235.1082760417   "Fillet Radius"=0.595   "CG Offset 3"=-8.88178419700125E-16   "CG Offset 2"=3.5527136788005E-15   "PNA Offset 3"=-8.88178419700125E-16   "PNA Offset 2"=3.5527136788005E-15 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W30X108   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Yellow   Area=31.7   J=4.99   I33=4470   I22=146   As2=16.241   As3=13.3   S33Pos=300   S33Neg=300   S22Pos=27.80952   S22Neg=27.80952   Z33=346   Z22=43.9 _
+        R33=11.87474   R22=2.146084   Cw=30914.588628   "Fillet Radius"=0.65   "CG Offset 3"=1.77635683940025E-15   "CG Offset 2"=5.32907051820075E-15   "PNA Offset 3"=1.77635683940025E-15   "PNA Offset 2"=5.32907051820075E-15 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W30X116   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Magenta   Area=34.2   J=6.43   I33=4930   I22=164   As2=16.95   As3=14.875   S33Pos=328.6667   S33Neg=328.6667   S22Pos=31.23809   S22Neg=31.23809   Z33=378 _
+        Z22=49.2   R33=12.00633   R22=2.189822   Cw=34837.9586542969   "Fillet Radius"=0.65   "CG Offset 3"=0   "CG Offset 2"=5.32907051820075E-15   "PNA Offset 3"=0   "PNA Offset 2"=5.32907051820075E-15   "Area Modifier"=1 _
+        "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W30X124   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Red   Area=36.5   J=7.99   I33=5360   I22=181   As2=17.667   As3=16.275   S33Pos=354.9669   S33Neg=354.9669   S22Pos=34.47619   S22Neg=34.47619   Z33=408   Z22=54 _
+        R33=12.11814   R22=2.22686   Cw=38431.2976552969   "Fillet Radius"=0.65   "CG Offset 3"=0   "CG Offset 2"=-3.5527136788005E-15   "PNA Offset 3"=0   "PNA Offset 2"=-3.5527136788005E-15   "Area Modifier"=1   "As2 Modifier"=1 _
+        "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W30X132   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Cyan   Area=38.8   J=9.72   I33=5770   I22=196   As2=18.6345   As3=17.5   S33Pos=380.8581   S33Neg=380.8581   S22Pos=37.33333   S22Neg=37.33333   Z33=437   Z22=58.4 _
+        R33=12.19473   R22=2.247565   Cw=41408.72859375   "Fillet Radius"=0.65   "CG Offset 3"=8.88178419700125E-16   "CG Offset 2"=-5.32907051820075E-15   "PNA Offset 3"=8.88178419700125E-16   "PNA Offset 2"=-5.32907051820075E-15 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W30X90   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Red   Area=26.3   J=2.84   I33=3610   I22=115   As2=13.865   As3=10.57333   S33Pos=244.7458   S33Neg=244.7458   S22Pos=22.11539   S22Neg=22.11539   Z33=283   Z22=34.7 _
+        R33=11.7159   R22=2.091082   Cw=23862.376564416   "Fillet Radius"=0.65   "CG Offset 3"=0   "CG Offset 2"=-7.105427357601E-15   "PNA Offset 3"=0   "PNA Offset 2"=-7.105427357601E-15   "Area Modifier"=1   "As2 Modifier"=1 _
+        "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W30X99   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Cyan   Area=29   J=3.77   I33=3990   I22=128   As2=15.444   As3=11.725   S33Pos=268.6869   S33Neg=268.6869   S22Pos=24.38095   S22Neg=24.38095   Z33=312   Z22=38.6 _
+        R33=11.72971   R22=2.100903   Cw=27234.8840009531   "Fillet Radius"=0.65   "CG Offset 3"=8.88178419700125E-16   "CG Offset 2"=3.5527136788005E-15   "PNA Offset 3"=8.88178419700125E-16   "PNA Offset 2"=3.5527136788005E-15 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W33X118   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Green   Area=34.7   J=5.3   I33=5900   I22=187   As2=18.095   As3=14.18333   S33Pos=358.6626   S33Neg=358.6626   S22Pos=32.52174   S22Neg=32.52174   Z33=415 _
+        Z22=51.3   R33=13.03951   R22=2.321433   Cw=48500.484744   "Fillet Radius"=0.7   "CG Offset 3"=8.88178419700125E-16   "CG Offset 2"=7.105427357601E-15   "PNA Offset 3"=8.88178419700125E-16   "PNA Offset 2"=7.105427357601E-15 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W33X130   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Green   Area=38.3   J=7.37   I33=6710   I22=218   As2=19.198   As3=16.3875   S33Pos=405.4381   S33Neg=405.4381   S22Pos=37.91304   S22Neg=37.91304   Z33=467 _
+        Z22=59.5   R33=13.23616   R22=2.385772   Cw=56334.3329998418   "Fillet Radius"=0.705   "CG Offset 3"=-8.88178419700125E-16   "CG Offset 2"=-1.77635683940025E-14   "PNA Offset 3"=-8.88178419700125E-16 _
+        "PNA Offset 2"=-1.77635683940025E-14   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W33X141   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Blue   Area=41.5   J=9.7   I33=7450   I22=246   As2=20.1465   As3=18.4   S33Pos=447.4474   S33Neg=447.4474   S22Pos=42.78261   S22Neg=42.78261   Z33=514   Z22=66.9 _
+        R33=13.39844   R22=2.434689   Cw=63625.842126   "Fillet Radius"=0.7   "CG Offset 3"=-8.88178419700125E-16   "CG Offset 2"=7.105427357601E-15   "PNA Offset 3"=-8.88178419700125E-16   "PNA Offset 2"=7.105427357601E-15 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W33X152   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Gray8Dark   Area=44.9   J=12.4   I33=8160   I22=273   As2=21.2725   As3=20.49333   S33Pos=487.1642   S33Neg=487.1642   S22Pos=47.06896   S22Neg=47.06896   Z33=559 _
+        Z22=73.9   R33=13.48099   R22=2.465802   Cw=72548.8081797973   "Fillet Radius"=0.7   "CG Offset 3"=-1.77635683940025E-15   "CG Offset 2"=1.4210854715202E-14   "PNA Offset 3"=-1.77635683940025E-15   "PNA Offset 2"=1.4210854715202E-14 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W36X150   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Yellow   Area=44.3   J=10.1   I33=9040   I22=270   As2=22.4375   As3=18.8   S33Pos=503.6212   S33Neg=503.6212   S22Pos=45   S22Neg=45   Z33=581   Z22=70.9 _
+        R33=14.28507   R22=2.468766   Cw=82718.604288   "Fillet Radius"=0.75   "CG Offset 3"=0   "CG Offset 2"=-1.06581410364015E-14   "PNA Offset 3"=0   "PNA Offset 2"=-1.06581410364015E-14   "Area Modifier"=1   "As2 Modifier"=1 _
+        "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W36X160   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Magenta   Area=47   J=12.4   I33=9760   I22=295   As2=23.4   As3=20.4   S33Pos=542.2222   S33Neg=542.2222   S22Pos=49.16667   S22Neg=49.16667   Z33=624   Z22=77.3 _
+        R33=14.4104   R22=2.505313   Cw=89861.213376   "Fillet Radius"=0.75   "CG Offset 3"=0   "CG Offset 2"=1.77635683940025E-14   "PNA Offset 3"=0   "PNA Offset 2"=1.77635683940025E-14   "Area Modifier"=1   "As2 Modifier"=1 _
+        "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W36X170   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Red   Area=50   J=15.1   I33=10500   I22=320   As2=24.616   As3=22   S33Pos=580.1105   S33Neg=580.1105   S22Pos=53.33333   S22Neg=53.33333   Z33=668   Z22=83.8 _
+        R33=14.49138   R22=2.529822   Cw=97575.192   "Fillet Radius"=0.75   "CG Offset 3"=-2.66453525910038E-15   "CG Offset 2"=3.5527136788005E-15   "PNA Offset 3"=-2.66453525910038E-15   "PNA Offset 2"=3.5527136788005E-15 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+   Name=W36X182   Material=A992Fy50   Shape="Steel I/Wide Flange"   Color=Cyan   Area=53.6   J=18.5   I33=11300   I22=347   As2=26.3175   As3=23.79667   S33Pos=622.5895   S33Neg=622.5895   S22Pos=57.35537   S22Neg=57.35537   Z33=718 _
+        Z22=90.7   R33=14.51967   R22=2.544382   Cw=107432.551687355   "Fillet Radius"=0.75   "CG Offset 3"=-1.77635683940025E-15   "CG Offset 2"=0   "PNA Offset 3"=-1.77635683940025E-15   "PNA Offset 2"=0   "Area Modifier"=1 _
+        "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I33 Modifier"=1   "I22 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1
+ 
+TABLE:  "FRAME SECTION PROPERTY DEFINITIONS - STEEL I/WIDE FLANGE"
+   Name=SteelBm   Material=A992Fy50   "From File?"=No   "Total Depth"=18   "Top Flange Width"=6   "Top Flange Thickness"=0.5   "Web Thickness"=0.25   "Bottom Flange Width"=6   "Bottom Flange Thickness"=0.5   "Fillet Radius"=0 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Yellow   GUID=f799b01b-edf1-4fbb-8111-880909d16256
+   Name=SteelCol   Material=A992Fy50   "From File?"=No   "Total Depth"=18   "Top Flange Width"=18   "Top Flange Thickness"=1   "Web Thickness"=0.5   "Bottom Flange Width"=18   "Bottom Flange Thickness"=1   "Fillet Radius"=0 _
+        "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Magenta   GUID=1360156f-1b31-4612-9787-b9a501b9968a
+   Name=W10X12   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W10X12   "Total Depth"=9.87   "Top Flange Width"=3.96   "Top Flange Thickness"=0.21   "Web Thickness"=0.19   "Bottom Flange Width"=3.96 _
+        "Bottom Flange Thickness"=0.21   "Fillet Radius"=0.3   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Green   GUID=3977a58f-fe60-45a3-a344-58d7431dfc76
+   Name=W10X15   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W10X15   "Total Depth"=9.99   "Top Flange Width"=4   "Top Flange Thickness"=0.27   "Web Thickness"=0.23   "Bottom Flange Width"=4 _
+        "Bottom Flange Thickness"=0.27   "Fillet Radius"=0.3   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Blue   GUID=902de01b-76ba-4cc7-b20c-4717bbe1cb21
+   Name=W10X17   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W10X17   "Total Depth"=10.1   "Top Flange Width"=4.01   "Top Flange Thickness"=0.33   "Web Thickness"=0.24   "Bottom Flange Width"=4.01 _
+        "Bottom Flange Thickness"=0.33   "Fillet Radius"=0.3   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Gray8Dark   GUID=95eedc95-0192-4fdb-b70f-c051b0472c80
+   Name=W10X19   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W10X19   "Total Depth"=10.2   "Top Flange Width"=4.02   "Top Flange Thickness"=0.395   "Web Thickness"=0.25   "Bottom Flange Width"=4.02 _
+        "Bottom Flange Thickness"=0.395   "Fillet Radius"=0.3   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Yellow   GUID=588dbe59-ed06-4d6c-b20e-9eb856bc9e7a
+   Name=W10X33   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W10X33   "Total Depth"=9.73   "Top Flange Width"=7.96   "Top Flange Thickness"=0.435   "Web Thickness"=0.29   "Bottom Flange Width"=7.96 _
+        "Bottom Flange Thickness"=0.435   "Fillet Radius"=0.5   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Gray8Dark   GUID=5de740d5-3ad3-4eb5-9e6e-6f5c2c133152
+   Name=W10X39   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W10X39   "Total Depth"=9.92   "Top Flange Width"=7.99   "Top Flange Thickness"=0.53   "Web Thickness"=0.315   "Bottom Flange Width"=7.99 _
+        "Bottom Flange Thickness"=0.53   "Fillet Radius"=0.5   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Yellow   GUID=2339b493-3fec-4d32-a71a-abb4f661b218
+   Name=W10X45   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W10X45   "Total Depth"=10.1   "Top Flange Width"=8.02   "Top Flange Thickness"=0.62   "Web Thickness"=0.35   "Bottom Flange Width"=8.02 _
+        "Bottom Flange Thickness"=0.62   "Fillet Radius"=0.5   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Magenta   GUID=a1675b97-44f1-4f14-a279-c922726cccad
+   Name=W10X60   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W10X60   "Total Depth"=10.2   "Top Flange Width"=10.1   "Top Flange Thickness"=0.68   "Web Thickness"=0.42   "Bottom Flange Width"=10.1 _
+        "Bottom Flange Thickness"=0.68   "Fillet Radius"=0.5   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Red   GUID=23bc014d-1127-4bd0-bb85-f5cec97bf158
+   Name=W12X106   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W12X106   "Total Depth"=12.9   "Top Flange Width"=12.2   "Top Flange Thickness"=0.99   "Web Thickness"=0.61   "Bottom Flange Width"=12.2 _
+        "Bottom Flange Thickness"=0.99   "Fillet Radius"=0.6   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Gray8Dark   GUID=1939d060-a408-4f37-9962-19d9f2607592
+   Name=W12X120   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W12X120   "Total Depth"=13.1   "Top Flange Width"=12.3   "Top Flange Thickness"=1.11   "Web Thickness"=0.71   "Bottom Flange Width"=12.3 _
+        "Bottom Flange Thickness"=1.11   "Fillet Radius"=0.59   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Yellow   GUID=182350fd-e84b-4e60-aac6-4281a2aff547
+   Name=W12X136   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W12X136   "Total Depth"=13.4   "Top Flange Width"=12.4   "Top Flange Thickness"=1.25   "Web Thickness"=0.79   "Bottom Flange Width"=12.4 _
+        "Bottom Flange Thickness"=1.25   "Fillet Radius"=0.6   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Yellow   GUID=edb3110a-4622-4419-b590-6aaf1819075c
+   Name=W12X14   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W12X14   "Total Depth"=11.9   "Top Flange Width"=3.97   "Top Flange Thickness"=0.225   "Web Thickness"=0.2   "Bottom Flange Width"=3.97 _
+        "Bottom Flange Thickness"=0.225   "Fillet Radius"=0.3   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Magenta   GUID=2e13cc60-ba96-4a69-8f9f-2b1e8f59e6e3
+   Name=W12X152   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W12X152   "Total Depth"=13.7   "Top Flange Width"=12.5   "Top Flange Thickness"=1.4   "Web Thickness"=0.87   "Bottom Flange Width"=12.5 _
+        "Bottom Flange Thickness"=1.4   "Fillet Radius"=0.6   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Magenta   GUID=5f49e1ba-fc74-4f9a-8f01-7a3e6e0e98b7
+   Name=W12X16   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W12X16   "Total Depth"=12   "Top Flange Width"=3.99   "Top Flange Thickness"=0.265   "Web Thickness"=0.22   "Bottom Flange Width"=3.99 _
+        "Bottom Flange Thickness"=0.265   "Fillet Radius"=0.3   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Red   GUID=19667fec-3b97-41a6-9533-b2e640cce8c2
+   Name=W12X170   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W12X170   "Total Depth"=14   "Top Flange Width"=12.6   "Top Flange Thickness"=1.56   "Web Thickness"=0.96   "Bottom Flange Width"=12.6 _
+        "Bottom Flange Thickness"=1.56   "Fillet Radius"=0.6   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Red   GUID=3e64c863-6db9-4274-9a38-a4227e19f36b
+   Name=W12X19   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W12X19   "Total Depth"=12.2   "Top Flange Width"=4.01   "Top Flange Thickness"=0.35   "Web Thickness"=0.235   "Bottom Flange Width"=4.01 _
+        "Bottom Flange Thickness"=0.35   "Fillet Radius"=0.3   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Cyan   GUID=82a3a3b2-e8b2-483e-a460-3d0fff90c0ee
+   Name=W12X190   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W12X190   "Total Depth"=14.4   "Top Flange Width"=12.7   "Top Flange Thickness"=1.74   "Web Thickness"=1.06   "Bottom Flange Width"=12.7 _
+        "Bottom Flange Thickness"=1.74   "Fillet Radius"=0.59   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Cyan   GUID=32d4d073-7a76-4ebe-bf45-3c61c28a5aaa
+   Name=W12X210   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W12X210   "Total Depth"=14.7   "Top Flange Width"=12.8   "Top Flange Thickness"=1.9   "Web Thickness"=1.18   "Bottom Flange Width"=12.8 _
+        "Bottom Flange Thickness"=1.9   "Fillet Radius"=0.6   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Green   GUID=08a9837e-a6f2-4a77-818e-cfda09548973
+   Name=W12X22   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W12X22   "Total Depth"=12.3   "Top Flange Width"=4.03   "Top Flange Thickness"=0.425   "Web Thickness"=0.26   "Bottom Flange Width"=4.03 _
+        "Bottom Flange Thickness"=0.425   "Fillet Radius"=0.3   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Green   GUID=dc5588b3-c530-4190-b7f6-c34ef5a607b9
+   Name=W12X26   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W12X26   "Total Depth"=12.2   "Top Flange Width"=6.49   "Top Flange Thickness"=0.38   "Web Thickness"=0.23   "Bottom Flange Width"=6.49 _
+        "Bottom Flange Thickness"=0.38   "Fillet Radius"=0.3   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Magenta   GUID=84a67a74-50a2-47f5-8239-7c4d3df83818
+   Name=W12X30   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W12X30   "Total Depth"=12.3   "Top Flange Width"=6.52   "Top Flange Thickness"=0.44   "Web Thickness"=0.26   "Bottom Flange Width"=6.52 _
+        "Bottom Flange Thickness"=0.44   "Fillet Radius"=0.3   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Red   GUID=92d6188c-fcf1-41b9-9913-f07345ab9b07
+   Name=W12X53   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W12X53   "Total Depth"=12.1   "Top Flange Width"=10   "Top Flange Thickness"=0.575   "Web Thickness"=0.345   "Bottom Flange Width"=10 _
+        "Bottom Flange Thickness"=0.575   "Fillet Radius"=0.605   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Cyan   GUID=d41f3ef5-064f-40d2-afed-2fc8a7fbb564
+   Name=W12X58   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W12X58   "Total Depth"=12.2   "Top Flange Width"=10   "Top Flange Thickness"=0.64   "Web Thickness"=0.36   "Bottom Flange Width"=10 _
+        "Bottom Flange Thickness"=0.64   "Fillet Radius"=0.6   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Green   GUID=97c6062f-ddc1-4386-a52a-cd9994df9682
+   Name=W12X72   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W12X72   "Total Depth"=12.3   "Top Flange Width"=12   "Top Flange Thickness"=0.67   "Web Thickness"=0.43   "Bottom Flange Width"=12 _
+        "Bottom Flange Thickness"=0.67   "Fillet Radius"=0.6   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Green   GUID=244e1a2a-803b-4f08-a820-439a9289ed16
+   Name=W12X79   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W12X79   "Total Depth"=12.4   "Top Flange Width"=12.1   "Top Flange Thickness"=0.735   "Web Thickness"=0.47   "Bottom Flange Width"=12.1 _
+        "Bottom Flange Thickness"=0.735   "Fillet Radius"=0.595   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Blue   GUID=2cc4c5d4-2ed5-44be-8ddb-08af7dd67baa
+   Name=W12X87   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W12X87   "Total Depth"=12.5   "Top Flange Width"=12.1   "Top Flange Thickness"=0.81   "Web Thickness"=0.515   "Bottom Flange Width"=12.1 _
+        "Bottom Flange Thickness"=0.81   "Fillet Radius"=0.6   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Gray8Dark   GUID=685a77a7-659f-42af-9b81-685516132433
+   Name=W12X96   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W12X96   "Total Depth"=12.7   "Top Flange Width"=12.2   "Top Flange Thickness"=0.9   "Web Thickness"=0.55   "Bottom Flange Width"=12.2 _
+        "Bottom Flange Thickness"=0.9   "Fillet Radius"=0.6   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Blue   GUID=e34aa365-0509-43ba-b3d5-a86174db5b83
+   Name=W14X109   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W14X109   "Total Depth"=14.3   "Top Flange Width"=14.6   "Top Flange Thickness"=0.86   "Web Thickness"=0.525   "Bottom Flange Width"=14.6 _
+        "Bottom Flange Thickness"=0.86   "Fillet Radius"=0.6   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Green   GUID=6987e07c-703c-4d25-9ced-45706cd79d44
+   Name=W14X120   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W14X120   "Total Depth"=14.5   "Top Flange Width"=14.7   "Top Flange Thickness"=0.94   "Web Thickness"=0.59   "Bottom Flange Width"=14.7 _
+        "Bottom Flange Thickness"=0.94   "Fillet Radius"=0.6   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Blue   GUID=7bb2d85f-e3a9-416e-afb9-d90026b74746
+   Name=W14X132   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W14X132   "Total Depth"=14.7   "Top Flange Width"=14.7   "Top Flange Thickness"=1.03   "Web Thickness"=0.645   "Bottom Flange Width"=14.7 _
+        "Bottom Flange Thickness"=1.03   "Fillet Radius"=0.6   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Blue   GUID=fdd0e168-b469-4305-a210-ba60a7a543ca
+   Name=W14X145   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W14X145   "Total Depth"=14.8   "Top Flange Width"=15.5   "Top Flange Thickness"=1.09   "Web Thickness"=0.68   "Bottom Flange Width"=15.5 _
+        "Bottom Flange Thickness"=1.09   "Fillet Radius"=0.6   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Gray8Dark   GUID=bc9398fe-efde-45c7-813a-6e641799be81
+   Name=W14X159   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W14X159   "Total Depth"=15   "Top Flange Width"=15.6   "Top Flange Thickness"=1.19   "Web Thickness"=0.745   "Bottom Flange Width"=15.6 _
+        "Bottom Flange Thickness"=1.19   "Fillet Radius"=0.6   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Yellow   GUID=45df7b22-ac53-4aab-b94a-14244b75f715
+   Name=W14X176   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W14X176   "Total Depth"=15.2   "Top Flange Width"=15.7   "Top Flange Thickness"=1.31   "Web Thickness"=0.83   "Bottom Flange Width"=15.7 _
+        "Bottom Flange Thickness"=1.31   "Fillet Radius"=0.6   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Magenta   GUID=26ef06a7-f16b-4e2e-a7f4-1a5fae6e01ce
+   Name=W14X193   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W14X193   "Total Depth"=15.5   "Top Flange Width"=15.7   "Top Flange Thickness"=1.44   "Web Thickness"=0.89   "Bottom Flange Width"=15.7 _
+        "Bottom Flange Thickness"=1.44   "Fillet Radius"=0.6   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Red   GUID=381bd021-a1bc-42d5-a4aa-7c8eda474598
+   Name=W14X211   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W14X211   "Total Depth"=15.7   "Top Flange Width"=15.8   "Top Flange Thickness"=1.56   "Web Thickness"=0.98   "Bottom Flange Width"=15.8 _
+        "Bottom Flange Thickness"=1.56   "Fillet Radius"=0.6   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Cyan   GUID=29f53eca-ea48-48d2-ae24-a8607bd365d0
+   Name=W14X22   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W14X22   "Total Depth"=13.7   "Top Flange Width"=5   "Top Flange Thickness"=0.335   "Web Thickness"=0.23   "Bottom Flange Width"=5 _
+        "Bottom Flange Thickness"=0.335   "Fillet Radius"=0.4   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Blue   GUID=9b323bd0-0842-4d63-b862-2c68e60a991b
+   Name=W14X233   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W14X233   "Total Depth"=16   "Top Flange Width"=15.9   "Top Flange Thickness"=1.72   "Web Thickness"=1.07   "Bottom Flange Width"=15.9 _
+        "Bottom Flange Thickness"=1.72   "Fillet Radius"=0.6   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Green   GUID=d55dbe8b-c603-417a-b3be-3ef4b81dcc2e
+   Name=W14X257   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W14X257   "Total Depth"=16.4   "Top Flange Width"=16   "Top Flange Thickness"=1.89   "Web Thickness"=1.18   "Bottom Flange Width"=16 _
+        "Bottom Flange Thickness"=1.89   "Fillet Radius"=0.6   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Blue   GUID=f430e573-5669-46c8-8697-869599a153f5
+   Name=W14X26   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W14X26   "Total Depth"=13.9   "Top Flange Width"=5.03   "Top Flange Thickness"=0.42   "Web Thickness"=0.255   "Bottom Flange Width"=5.03 _
+        "Bottom Flange Thickness"=0.42   "Fillet Radius"=0.4   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Gray8Dark   GUID=2d5bf72f-58ee-4412-82f3-31a49cd65470
+   Name=W14X283   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W14X283   "Total Depth"=16.7   "Top Flange Width"=16.1   "Top Flange Thickness"=2.07   "Web Thickness"=1.29   "Bottom Flange Width"=16.1 _
+        "Bottom Flange Thickness"=2.07   "Fillet Radius"=0.6   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Gray8Dark   GUID=b2834979-80a1-4667-8584-d3a14f72768a
+   Name=W14X30   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W14X30   "Total Depth"=13.8   "Top Flange Width"=6.73   "Top Flange Thickness"=0.385   "Web Thickness"=0.27   "Bottom Flange Width"=6.73 _
+        "Bottom Flange Thickness"=0.385   "Fillet Radius"=0.4   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Cyan   GUID=01938af5-84b6-46af-8b60-6d789db46ab0
+   Name=W14X311   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W14X311   "Total Depth"=17.1   "Top Flange Width"=16.2   "Top Flange Thickness"=2.26   "Web Thickness"=1.41   "Bottom Flange Width"=16.2 _
+        "Bottom Flange Thickness"=2.26   "Fillet Radius"=0.6   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Yellow   GUID=f5781ee5-1767-4048-be92-ab8e41b09040
+   Name=W14X34   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W14X34   "Total Depth"=14   "Top Flange Width"=6.75   "Top Flange Thickness"=0.455   "Web Thickness"=0.285   "Bottom Flange Width"=6.75 _
+        "Bottom Flange Thickness"=0.455   "Fillet Radius"=0.4   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Green   GUID=fb038e4d-3fa4-4dc1-ba5f-4cf9a48ddeba
+   Name=W14X342   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W14X342   "Total Depth"=17.5   "Top Flange Width"=16.4   "Top Flange Thickness"=2.47   "Web Thickness"=1.54   "Bottom Flange Width"=16.4 _
+        "Bottom Flange Thickness"=2.47   "Fillet Radius"=0.6   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Magenta   GUID=a7b51378-739c-41c8-8a1e-62fbd8aee35b
+   Name=W14X370   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W14X370   "Total Depth"=17.9   "Top Flange Width"=16.5   "Top Flange Thickness"=2.66   "Web Thickness"=1.66   "Bottom Flange Width"=16.5 _
+        "Bottom Flange Thickness"=2.66   "Fillet Radius"=0.6   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Red   GUID=5839b77d-3cf0-413a-b890-95ce00924459
+   Name=W14X38   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W14X38   "Total Depth"=14.1   "Top Flange Width"=6.77   "Top Flange Thickness"=0.515   "Web Thickness"=0.31   "Bottom Flange Width"=6.77 _
+        "Bottom Flange Thickness"=0.515   "Fillet Radius"=0.4   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Blue   GUID=583b18a7-328c-473c-984b-d05a4001a511
+   Name=W14X398   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W14X398   "Total Depth"=18.3   "Top Flange Width"=16.6   "Top Flange Thickness"=2.85   "Web Thickness"=1.77   "Bottom Flange Width"=16.6 _
+        "Bottom Flange Thickness"=2.85   "Fillet Radius"=0.59   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Cyan   GUID=debbab22-0726-4ba8-9053-e3c814b4c7fd
+   Name=W14X426   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W14X426   "Total Depth"=18.7   "Top Flange Width"=16.7   "Top Flange Thickness"=3.04   "Web Thickness"=1.88   "Bottom Flange Width"=16.7 _
+        "Bottom Flange Thickness"=3.04   "Fillet Radius"=0.59   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Green   GUID=c73c7b4d-6f8f-48e9-a863-93bd073d2a18
+   Name=W14X455   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W14X455   "Total Depth"=19   "Top Flange Width"=16.8   "Top Flange Thickness"=3.21   "Web Thickness"=2.02   "Bottom Flange Width"=16.8 _
+        "Bottom Flange Thickness"=3.21   "Fillet Radius"=0.6   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Blue   GUID=2da3d5da-36f8-4128-b585-74673f1c85b6
+   Name=W14X500   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W14X500   "Total Depth"=19.6   "Top Flange Width"=17   "Top Flange Thickness"=3.5   "Web Thickness"=2.19   "Bottom Flange Width"=17 _
+        "Bottom Flange Thickness"=3.5   "Fillet Radius"=0.6   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Gray8Dark   GUID=5fbd996e-b307-4e4e-9639-10b7c606d4b7
+   Name=W14X61   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W14X61   "Total Depth"=13.9   "Top Flange Width"=10   "Top Flange Thickness"=0.645   "Web Thickness"=0.375   "Bottom Flange Width"=10 _
+        "Bottom Flange Thickness"=0.645   "Fillet Radius"=0.595   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Yellow   GUID=3edebbbf-4450-484b-ae53-1ef15226b883
+   Name=W14X68   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W14X68   "Total Depth"=14   "Top Flange Width"=10   "Top Flange Thickness"=0.72   "Web Thickness"=0.415   "Bottom Flange Width"=10 _
+        "Bottom Flange Thickness"=0.72   "Fillet Radius"=0.59   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Magenta   GUID=5f6d659e-e586-4dd3-93c5-54cfa68865bb
+   Name=W14X74   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W14X74   "Total Depth"=14.2   "Top Flange Width"=10.1   "Top Flange Thickness"=0.785   "Web Thickness"=0.45   "Bottom Flange Width"=10.1 _
+        "Bottom Flange Thickness"=0.785   "Fillet Radius"=0.595   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Red   GUID=09c1d598-1b73-4a2e-b551-224e6cc23e54
+   Name=W14X82   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W14X82   "Total Depth"=14.3   "Top Flange Width"=10.1   "Top Flange Thickness"=0.855   "Web Thickness"=0.51   "Bottom Flange Width"=10.1 _
+        "Bottom Flange Thickness"=0.855   "Fillet Radius"=0.595   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Cyan   GUID=5dd57c6c-6016-404e-ba80-b5d1a03153e8
+   Name=W16X26   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W16X26   "Total Depth"=15.7   "Top Flange Width"=5.5   "Top Flange Thickness"=0.345   "Web Thickness"=0.25   "Bottom Flange Width"=5.5 _
+        "Bottom Flange Thickness"=0.345   "Fillet Radius"=0.402   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Gray8Dark   GUID=aeebd2bf-26ea-4b8b-aed8-1041cd4d3a79
+   Name=W16X31   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W16X31   "Total Depth"=15.9   "Top Flange Width"=5.53   "Top Flange Thickness"=0.44   "Web Thickness"=0.275   "Bottom Flange Width"=5.53 _
+        "Bottom Flange Thickness"=0.44   "Fillet Radius"=0.402   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Gray8Dark   GUID=c9692692-1f66-46de-86cd-baaefd169c28
+   Name=W16X36   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W16X36   "Total Depth"=15.9   "Top Flange Width"=6.99   "Top Flange Thickness"=0.43   "Web Thickness"=0.295   "Bottom Flange Width"=6.99 _
+        "Bottom Flange Thickness"=0.43   "Fillet Radius"=0.402   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Yellow   GUID=597c86a1-9c1a-4277-8e8c-a509c321f489
+   Name=W18X35   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W18X35   "Total Depth"=17.7   "Top Flange Width"=6   "Top Flange Thickness"=0.425   "Web Thickness"=0.3   "Bottom Flange Width"=6 _
+        "Bottom Flange Thickness"=0.425   "Fillet Radius"=0.402   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Magenta   GUID=c85a6523-39c4-4b81-8768-46fa3d0294b2
+   Name=W18X40   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W18X40   "Total Depth"=17.9   "Top Flange Width"=6.02   "Top Flange Thickness"=0.525   "Web Thickness"=0.315   "Bottom Flange Width"=6.02 _
+        "Bottom Flange Thickness"=0.525   "Fillet Radius"=0.402   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Red   GUID=93369ccd-d187-4cb7-8bd2-285e87c069b4
+   Name=W18X46   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W18X46   "Total Depth"=18.1   "Top Flange Width"=6.06   "Top Flange Thickness"=0.605   "Web Thickness"=0.36   "Bottom Flange Width"=6.06 _
+        "Bottom Flange Thickness"=0.605   "Fillet Radius"=0.405   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Cyan   GUID=e58a476d-b2ab-4a6f-a295-02792ae97e64
+   Name=W18X50   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W18X50   "Total Depth"=18   "Top Flange Width"=7.5   "Top Flange Thickness"=0.57   "Web Thickness"=0.355   "Bottom Flange Width"=7.5 _
+        "Bottom Flange Thickness"=0.57   "Fillet Radius"=0.402   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Yellow   GUID=a53c7276-e272-4500-80cf-9746b465ebb8
+   Name=W18X55   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W18X55   "Total Depth"=18.1   "Top Flange Width"=7.53   "Top Flange Thickness"=0.63   "Web Thickness"=0.39   "Bottom Flange Width"=7.53 _
+        "Bottom Flange Thickness"=0.63   "Fillet Radius"=0.4   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Magenta   GUID=8accb748-6172-4ba5-9853-eedbd5fc07df
+   Name=W18X60   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W18X60   "Total Depth"=18.2   "Top Flange Width"=7.56   "Top Flange Thickness"=0.695   "Web Thickness"=0.415   "Bottom Flange Width"=7.56 _
+        "Bottom Flange Thickness"=0.695   "Fillet Radius"=0.405   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Red   GUID=2b5824b4-2e19-4049-8354-8251fe9111a3
+   Name=W21X44   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W21X44   "Total Depth"=20.7   "Top Flange Width"=6.5   "Top Flange Thickness"=0.45   "Web Thickness"=0.35   "Bottom Flange Width"=6.5 _
+        "Bottom Flange Thickness"=0.45   "Fillet Radius"=0.5   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Green   GUID=e13c5065-cffa-438e-ba61-4bb13f95b08c
+   Name=W21X50   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W21X50   "Total Depth"=20.8   "Top Flange Width"=6.53   "Top Flange Thickness"=0.535   "Web Thickness"=0.38   "Bottom Flange Width"=6.53 _
+        "Bottom Flange Thickness"=0.535   "Fillet Radius"=0.505   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Blue   GUID=4c68b4f7-8abf-46ed-bb98-f8ae04a28044
+   Name=W21X55   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W21X55   "Total Depth"=20.8   "Top Flange Width"=8.22   "Top Flange Thickness"=0.522   "Web Thickness"=0.375   "Bottom Flange Width"=8.22 _
+        "Bottom Flange Thickness"=0.522   "Fillet Radius"=0.498   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Cyan   GUID=61a12bbe-a092-49b1-b0f3-7855d8be53bb
+   Name=W21X57   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W21X57   "Total Depth"=21.1   "Top Flange Width"=6.56   "Top Flange Thickness"=0.65   "Web Thickness"=0.405   "Bottom Flange Width"=6.56 _
+        "Bottom Flange Thickness"=0.65   "Fillet Radius"=0.5   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Green   GUID=04273993-b16e-4517-8871-fa2d8368dbdf
+   Name=W21X62   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W21X62   "Total Depth"=21   "Top Flange Width"=8.24   "Top Flange Thickness"=0.615   "Web Thickness"=0.4   "Bottom Flange Width"=8.24 _
+        "Bottom Flange Thickness"=0.615   "Fillet Radius"=0.505   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Blue   GUID=9b247920-9c68-4715-97c2-419b237bd5fa
+   Name=W21X68   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W21X68   "Total Depth"=21.1   "Top Flange Width"=8.27   "Top Flange Thickness"=0.685   "Web Thickness"=0.43   "Bottom Flange Width"=8.27 _
+        "Bottom Flange Thickness"=0.685   "Fillet Radius"=0.505   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Gray8Dark   GUID=734a08a3-c40b-4a52-b1b7-a1ebd89510a8
+   Name=W24X55   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W24X55   "Total Depth"=23.6   "Top Flange Width"=7.01   "Top Flange Thickness"=0.505   "Web Thickness"=0.395   "Bottom Flange Width"=7.01 _
+        "Bottom Flange Thickness"=0.505   "Fillet Radius"=0.505   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Gray8Dark   GUID=7b57b23b-6736-4612-82d1-0d3be830c74e
+   Name=W24X62   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W24X62   "Total Depth"=23.7   "Top Flange Width"=7.04   "Top Flange Thickness"=0.59   "Web Thickness"=0.43   "Bottom Flange Width"=7.04 _
+        "Bottom Flange Thickness"=0.59   "Fillet Radius"=0.5   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Yellow   GUID=afd793e7-e6ad-4827-a076-61a8f8c8649c
+   Name=W24X68   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W24X68   "Total Depth"=23.7   "Top Flange Width"=8.97   "Top Flange Thickness"=0.585   "Web Thickness"=0.415   "Bottom Flange Width"=8.97 _
+        "Bottom Flange Thickness"=0.585   "Fillet Radius"=0.505   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Yellow   GUID=a7336fb7-6071-4809-ada8-468167512498
+   Name=W24X76   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W24X76   "Total Depth"=23.9   "Top Flange Width"=8.99   "Top Flange Thickness"=0.68   "Web Thickness"=0.44   "Bottom Flange Width"=8.99 _
+        "Bottom Flange Thickness"=0.68   "Fillet Radius"=0.5   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Magenta   GUID=8ab1f682-3f45-4c1a-ab28-f1e32249907a
+   Name=W24X84   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W24X84   "Total Depth"=24.1   "Top Flange Width"=9.02   "Top Flange Thickness"=0.77   "Web Thickness"=0.47   "Bottom Flange Width"=9.02 _
+        "Bottom Flange Thickness"=0.77   "Fillet Radius"=0.5   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Red   GUID=701fd5eb-e5fd-48dd-93a2-a8d4e83c9f69
+   Name=W24X94   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W24X94   "Total Depth"=24.3   "Top Flange Width"=9.07   "Top Flange Thickness"=0.875   "Web Thickness"=0.515   "Bottom Flange Width"=9.07 _
+        "Bottom Flange Thickness"=0.875   "Fillet Radius"=0.505   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Red   GUID=d36bb5d8-4a21-45f3-803d-996681919ad5
+   Name=W27X102   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W27X102   "Total Depth"=27.1   "Top Flange Width"=10   "Top Flange Thickness"=0.83   "Web Thickness"=0.515   "Bottom Flange Width"=10 _
+        "Bottom Flange Thickness"=0.83   "Fillet Radius"=0.6   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Green   GUID=c59ac50a-dabc-4da0-8445-f00e47a1f4fd
+   Name=W27X114   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W27X114   "Total Depth"=27.3   "Top Flange Width"=10.1   "Top Flange Thickness"=0.93   "Web Thickness"=0.57   "Bottom Flange Width"=10.1 _
+        "Bottom Flange Thickness"=0.93   "Fillet Radius"=0.6   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Blue   GUID=7f71694c-1497-4f63-83da-e2aad22713d4
+   Name=W27X129   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W27X129   "Total Depth"=27.6   "Top Flange Width"=10   "Top Flange Thickness"=1.1   "Web Thickness"=0.61   "Bottom Flange Width"=10 _
+        "Bottom Flange Thickness"=1.1   "Fillet Radius"=0.6   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Gray8Dark   GUID=51b24b4c-9c7f-4fb4-9293-c60bafd948bb
+   Name=W27X84   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W27X84   "Total Depth"=26.7   "Top Flange Width"=10   "Top Flange Thickness"=0.64   "Web Thickness"=0.46   "Bottom Flange Width"=10 _
+        "Bottom Flange Thickness"=0.64   "Fillet Radius"=0.6   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Magenta   GUID=4f7487b7-421e-4f80-8dab-d24a73ff7c3d
+   Name=W27X94   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W27X94   "Total Depth"=26.9   "Top Flange Width"=10   "Top Flange Thickness"=0.745   "Web Thickness"=0.49   "Bottom Flange Width"=10 _
+        "Bottom Flange Thickness"=0.745   "Fillet Radius"=0.595   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Cyan   GUID=d5f41c77-da1c-44bf-b0e3-969d33ab57af
+   Name=W30X108   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W30X108   "Total Depth"=29.8   "Top Flange Width"=10.5   "Top Flange Thickness"=0.76   "Web Thickness"=0.545   "Bottom Flange Width"=10.5 _
+        "Bottom Flange Thickness"=0.76   "Fillet Radius"=0.65   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Yellow   GUID=89a2fc57-39e0-4511-afe0-3edc62143398
+   Name=W30X116   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W30X116   "Total Depth"=30   "Top Flange Width"=10.5   "Top Flange Thickness"=0.85   "Web Thickness"=0.565   "Bottom Flange Width"=10.5 _
+        "Bottom Flange Thickness"=0.85   "Fillet Radius"=0.65   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Magenta   GUID=f83f82ba-f744-4f7c-a371-88fb6ee63f6b
+   Name=W30X124   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W30X124   "Total Depth"=30.2   "Top Flange Width"=10.5   "Top Flange Thickness"=0.93   "Web Thickness"=0.585   "Bottom Flange Width"=10.5 _
+        "Bottom Flange Thickness"=0.93   "Fillet Radius"=0.65   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Red   GUID=20e371fa-7831-4f40-869c-df643b28b8e1
+   Name=W30X132   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W30X132   "Total Depth"=30.3   "Top Flange Width"=10.5   "Top Flange Thickness"=1   "Web Thickness"=0.615   "Bottom Flange Width"=10.5 _
+        "Bottom Flange Thickness"=1   "Fillet Radius"=0.65   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Cyan   GUID=afa2cd5d-398d-40f4-837f-77a8af08728c
+   Name=W30X90   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W30X90   "Total Depth"=29.5   "Top Flange Width"=10.4   "Top Flange Thickness"=0.61   "Web Thickness"=0.47   "Bottom Flange Width"=10.4 _
+        "Bottom Flange Thickness"=0.61   "Fillet Radius"=0.65   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Red   GUID=4337c92f-e240-4dc2-9b49-d55fac83c79c
+   Name=W30X99   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W30X99   "Total Depth"=29.7   "Top Flange Width"=10.5   "Top Flange Thickness"=0.67   "Web Thickness"=0.52   "Bottom Flange Width"=10.5 _
+        "Bottom Flange Thickness"=0.67   "Fillet Radius"=0.65   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Cyan   GUID=b776fc58-c10d-4a34-88d5-4c32118ba531
+   Name=W33X118   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W33X118   "Total Depth"=32.9   "Top Flange Width"=11.5   "Top Flange Thickness"=0.74   "Web Thickness"=0.55   "Bottom Flange Width"=11.5 _
+        "Bottom Flange Thickness"=0.74   "Fillet Radius"=0.7   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Green   GUID=82bdb14e-571a-4872-8aed-49f8d8f237b5
+   Name=W33X130   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W33X130   "Total Depth"=33.1   "Top Flange Width"=11.5   "Top Flange Thickness"=0.855   "Web Thickness"=0.58   "Bottom Flange Width"=11.5 _
+        "Bottom Flange Thickness"=0.855   "Fillet Radius"=0.705   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Green   GUID=dafc369c-5dad-42d9-aac1-704c20cfd369
+   Name=W33X141   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W33X141   "Total Depth"=33.3   "Top Flange Width"=11.5   "Top Flange Thickness"=0.96   "Web Thickness"=0.605   "Bottom Flange Width"=11.5 _
+        "Bottom Flange Thickness"=0.96   "Fillet Radius"=0.7   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Blue   GUID=7bc7590e-f591-469b-9493-d5d9c9d0b558
+   Name=W33X152   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W33X152   "Total Depth"=33.5   "Top Flange Width"=11.6   "Top Flange Thickness"=1.06   "Web Thickness"=0.635   "Bottom Flange Width"=11.6 _
+        "Bottom Flange Thickness"=1.06   "Fillet Radius"=0.7   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Gray8Dark   GUID=e5b8a8d5-8f55-4608-bc5f-1a918ab426c1
+   Name=W36X150   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W36X150   "Total Depth"=35.9   "Top Flange Width"=12   "Top Flange Thickness"=0.94   "Web Thickness"=0.625   "Bottom Flange Width"=12 _
+        "Bottom Flange Thickness"=0.94   "Fillet Radius"=0.75   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Yellow   GUID=46d07b03-e5c7-4464-912b-ce57db43cd97
+   Name=W36X160   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W36X160   "Total Depth"=36   "Top Flange Width"=12   "Top Flange Thickness"=1.02   "Web Thickness"=0.65   "Bottom Flange Width"=12 _
+        "Bottom Flange Thickness"=1.02   "Fillet Radius"=0.75   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Magenta   GUID=bedd1ce7-8868-4534-8d28-c90a06ecb69c
+   Name=W36X170   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W36X170   "Total Depth"=36.2   "Top Flange Width"=12   "Top Flange Thickness"=1.1   "Web Thickness"=0.68   "Bottom Flange Width"=12 _
+        "Bottom Flange Thickness"=1.1   "Fillet Radius"=0.75   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Red   GUID=03c6e837-3b26-47af-8f74-8840a35e0bed
+   Name=W36X182   Material=A992Fy50   "From File?"=Yes   "File Name"=AISC14   "Section in File"=W36X182   "Total Depth"=36.3   "Top Flange Width"=12.1   "Top Flange Thickness"=1.18   "Web Thickness"=0.725   "Bottom Flange Width"=12.1 _
+        "Bottom Flange Thickness"=1.18   "Fillet Radius"=0.75   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1   "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Cyan   GUID=99751167-30dd-4b75-9d4a-5f3811425336
+ 
+TABLE:  "FRAME SECTION PROPERTY DEFINITIONS - CONCRETE RECTANGULAR"
+   Name=ConcBm   Material=4000Psi   "From File?"=No   Depth=24   Width=18   "Rigid Zone?"=No   "Notional Size Type"=Auto   "Notional Auto Factor"=1   "Design Type"=Beam   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1 _
+        "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Blue   GUID=54453731-f33b-4b5b-817f-3a80a2d6481b
+   Name=ConcCol   Material=4000Psi   "From File?"=No   Depth=18   Width=18   "Rigid Zone?"=No   "Notional Size Type"=Auto   "Notional Auto Factor"=1   "Design Type"=Column   "Area Modifier"=1   "As2 Modifier"=1   "As3 Modifier"=1 _
+        "J Modifier"=1   "I22 Modifier"=1   "I33 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Gray8Dark   GUID=45e81b03-6f51-4bfe-88cb-26cc23c5987e
+ 
+TABLE:  "FRAME SECTION PROPERTY DEFINITIONS - AUTO SELECT LIST"
+   Name=A-CompBm   DesignType=Steel   "From File?"=Yes   "File Name"=AISC14   "Starting Section"=Median   "Included Section"=W27X84   GUID=00bd4afe-adde-46c1-89d7-b885123c800b
+   Name=A-CompBm   "Included Section"=W24X76
+   Name=A-CompBm   "Included Section"=W24X68
+   Name=A-CompBm   "Included Section"=W24X62
+   Name=A-CompBm   "Included Section"=W24X55
+   Name=A-CompBm   "Included Section"=W21X62
+   Name=A-CompBm   "Included Section"=W21X57
+   Name=A-CompBm   "Included Section"=W21X55
+   Name=A-CompBm   "Included Section"=W21X44
+   Name=A-CompBm   "Included Section"=W18X50
+   Name=A-CompBm   "Included Section"=W18X40
+   Name=A-CompBm   "Included Section"=W18X35
+   Name=A-CompBm   "Included Section"=W16X31
+   Name=A-CompBm   "Included Section"=W16X26
+   Name=A-CompBm   "Included Section"=W14X30
+   Name=A-CompBm   "Included Section"=W14X26
+   Name=A-CompBm   "Included Section"=W14X22
+   Name=A-CompBm   "Included Section"=W12X26
+   Name=A-CompBm   "Included Section"=W12X22
+   Name=A-CompBm   "Included Section"=W12X19
+   Name=A-CompBm   "Included Section"=W12X16
+   Name=A-CompBm   "Included Section"=W12X14
+   Name=A-CompBm   "Included Section"=W10X19
+   Name=A-CompBm   "Included Section"=W10X17
+   Name=A-CompBm   "Included Section"=W10X15
+   Name=A-CompBm   "Included Section"=W10X12
+   Name=A-GravBm   DesignType=Steel   "From File?"=Yes   "File Name"=AISC14   "Starting Section"=Median   "Included Section"=W33X118   GUID=d1ee0154-dded-40ca-8268-b166e65fe59b
+   Name=A-GravBm   "Included Section"=W30X116
+   Name=A-GravBm   "Included Section"=W30X108
+   Name=A-GravBm   "Included Section"=W30X99
+   Name=A-GravBm   "Included Section"=W30X90
+   Name=A-GravBm   "Included Section"=W27X94
+   Name=A-GravBm   "Included Section"=W27X84
+   Name=A-GravBm   "Included Section"=W24X76
+   Name=A-GravBm   "Included Section"=W24X68
+   Name=A-GravBm   "Included Section"=W24X62
+   Name=A-GravBm   "Included Section"=W24X55
+   Name=A-GravBm   "Included Section"=W21X57
+   Name=A-GravBm   "Included Section"=W21X50
+   Name=A-GravBm   "Included Section"=W21X44
+   Name=A-GravBm   "Included Section"=W18X46
+   Name=A-GravBm   "Included Section"=W18X40
+   Name=A-GravBm   "Included Section"=W18X35
+   Name=A-GravBm   "Included Section"=W16X36
+   Name=A-GravBm   "Included Section"=W16X31
+   Name=A-GravBm   "Included Section"=W16X26
+   Name=A-GravBm   "Included Section"=W14X38
+   Name=A-GravBm   "Included Section"=W14X34
+   Name=A-GravBm   "Included Section"=W14X30
+   Name=A-GravBm   "Included Section"=W12X30
+   Name=A-GravBm   "Included Section"=W12X26
+   Name=A-GravCol   DesignType=Steel   "From File?"=Yes   "File Name"=AISC14   "Starting Section"=Median   "Included Section"=W14X211   GUID=6ff58cf2-b217-4fc8-aef5-c10ad7e993fa
+   Name=A-GravCol   "Included Section"=W14X193
+   Name=A-GravCol   "Included Section"=W14X176
+   Name=A-GravCol   "Included Section"=W14X159
+   Name=A-GravCol   "Included Section"=W14X145
+   Name=A-GravCol   "Included Section"=W14X132
+   Name=A-GravCol   "Included Section"=W14X120
+   Name=A-GravCol   "Included Section"=W14X109
+   Name=A-GravCol   "Included Section"=W14X82
+   Name=A-GravCol   "Included Section"=W14X74
+   Name=A-GravCol   "Included Section"=W14X68
+   Name=A-GravCol   "Included Section"=W14X61
+   Name=A-GravCol   "Included Section"=W12X120
+   Name=A-GravCol   "Included Section"=W12X106
+   Name=A-GravCol   "Included Section"=W12X96
+   Name=A-GravCol   "Included Section"=W12X87
+   Name=A-GravCol   "Included Section"=W12X79
+   Name=A-GravCol   "Included Section"=W12X72
+   Name=A-GravCol   "Included Section"=W12X58
+   Name=A-GravCol   "Included Section"=W12X53
+   Name=A-GravCol   "Included Section"=W10X60
+   Name=A-GravCol   "Included Section"=W10X45
+   Name=A-GravCol   "Included Section"=W10X39
+   Name=A-GravCol   "Included Section"=W10X33
+   Name=A-LatBm   DesignType=Steel   "From File?"=Yes   "File Name"=AISC14   "Starting Section"=Median   "Included Section"=W36X182   GUID=4e478333-db72-44e4-8db2-22017e36acdc
+   Name=A-LatBm   "Included Section"=W36X170
+   Name=A-LatBm   "Included Section"=W36X160
+   Name=A-LatBm   "Included Section"=W36X150
+   Name=A-LatBm   "Included Section"=W33X152
+   Name=A-LatBm   "Included Section"=W33X141
+   Name=A-LatBm   "Included Section"=W33X130
+   Name=A-LatBm   "Included Section"=W30X132
+   Name=A-LatBm   "Included Section"=W30X124
+   Name=A-LatBm   "Included Section"=W30X116
+   Name=A-LatBm   "Included Section"=W30X108
+   Name=A-LatBm   "Included Section"=W27X129
+   Name=A-LatBm   "Included Section"=W27X114
+   Name=A-LatBm   "Included Section"=W27X102
+   Name=A-LatBm   "Included Section"=W27X94
+   Name=A-LatBm   "Included Section"=W24X94
+   Name=A-LatBm   "Included Section"=W24X84
+   Name=A-LatBm   "Included Section"=W24X76
+   Name=A-LatBm   "Included Section"=W24X62
+   Name=A-LatBm   "Included Section"=W21X68
+   Name=A-LatBm   "Included Section"=W21X62
+   Name=A-LatBm   "Included Section"=W21X57
+   Name=A-LatBm   "Included Section"=W21X55
+   Name=A-LatBm   "Included Section"=W18X60
+   Name=A-LatBm   "Included Section"=W18X55
+   Name=A-LatBm   "Included Section"=W18X50
+   Name=A-LatCol   DesignType=Steel   "From File?"=Yes   "File Name"=AISC14   "Starting Section"=Median   "Included Section"=W14X500   GUID=272918e5-6502-4eea-ac24-22e9ad5dfde0
+   Name=A-LatCol   "Included Section"=W14X455
+   Name=A-LatCol   "Included Section"=W14X426
+   Name=A-LatCol   "Included Section"=W14X398
+   Name=A-LatCol   "Included Section"=W14X370
+   Name=A-LatCol   "Included Section"=W14X342
+   Name=A-LatCol   "Included Section"=W14X311
+   Name=A-LatCol   "Included Section"=W14X283
+   Name=A-LatCol   "Included Section"=W14X257
+   Name=A-LatCol   "Included Section"=W14X233
+   Name=A-LatCol   "Included Section"=W14X211
+   Name=A-LatCol   "Included Section"=W14X193
+   Name=A-LatCol   "Included Section"=W14X176
+   Name=A-LatCol   "Included Section"=W14X159
+   Name=A-LatCol   "Included Section"=W14X145
+   Name=A-LatCol   "Included Section"=W14X132
+   Name=A-LatCol   "Included Section"=W12X210
+   Name=A-LatCol   "Included Section"=W12X190
+   Name=A-LatCol   "Included Section"=W12X170
+   Name=A-LatCol   "Included Section"=W12X152
+   Name=A-LatCol   "Included Section"=W12X136
+   Name=A-LatCol   "Included Section"=W12X120
+   Name=A-LatCol   "Included Section"=W12X106
+   Name=A-LatCol   "Included Section"=W12X96
+ 
+TABLE:  "TENDON SECTION PROPERTIES"
+   Name=Tendon1   Material=A416Gr270   StrandArea=0.153   Color=Cyan
+ 
+TABLE:  "AREA SECTION PROPERTY DEFINITIONS - SUMMARY"
+   Name=Deck1   Type=Deck   "Element Type"=Membrane   Material=4000Psi   "Total Thickness"=6.5   "Deck Material"=A992Fy50   "Deck Depth"=3
+   Name=Plank1   Type=Slab   "Element Type"=Membrane   Material=4000Psi   "Total Thickness"=8
+   Name=Slab1   Type=Slab   "Element Type"=Shell-Thick   Material=4000Psi   "Total Thickness"=10
+   Name=Wall1   Type=Wall   "Element Type"=Shell-Thin   Material=4000Psi   "Total Thickness"=12
+ 
+TABLE:  "SLAB PROPERTY DEFINITIONS"
+   Name=Plank1   "Modeling Type"=Membrane   "Property Type"=Slab   Material=4000Psi   "Slab Thickness"=8   "One Way Load Distribution?"=Yes   "Notional Size Type"=Auto   "Notional Auto Factor"=1   "f11 Modifier"=1   "f22 Modifier"=1 _
+        "f12 Modifier"=1   "m11 Modifier"=1   "m22 Modifier"=1   "m12 Modifier"=1   "v13 Modifier"=1   "v23 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Red   GUID=3cdd1529-930f-4b77-9a02-f798e8d90c8c
+   Name=Slab1   "Modeling Type"=Shell-Thick   "Property Type"=Slab   Material=4000Psi   "Slab Thickness"=10   "Notional Size Type"=Auto   "Notional Auto Factor"=1   "f11 Modifier"=1   "f22 Modifier"=1   "f12 Modifier"=1   "m11 Modifier"=1 _
+        "m22 Modifier"=1   "m12 Modifier"=1   "v13 Modifier"=1   "v23 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Blue   GUID=44260a13-c562-4a1d-9bd8-9014a826b88d
+ 
+TABLE:  "DECK PROPERTY DEFINITIONS"
+   Name=Deck1   "Deck Type"=Filled   "Slab Material"=4000Psi   "Deck Material"=A992Fy50   "Slab Depth"=3.5   "Rib Depth"=3   "Rib Width Top"=7   "Rib Width Bottom"=5   "Rib Spacing"=12   "Deck Shear Thickness"=0.035 _
+        "Deck Unit Weight"=0.0159722222222222   "Shear Stud Diameter"=0.75   "Shear Stud Height"=6   "Shear Stud Tensile Strength"=65000   "f11 Modifier"=1   "f22 Modifier"=1   "f12 Modifier"=1   "m11 Modifier"=1   "m22 Modifier"=1 _
+        "m12 Modifier"=1   "v13 Modifier"=1   "v23 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Green   GUID=f40b8a48-dcd2-4e1e-89d1-4595c7f2b1d1
+ 
+TABLE:  "WALL PROPERTY DEFINITIONS - SPECIFIED"
+   Name=Wall1   "Modeling Type"=Shell-Thin   Material=4000Psi   "Wall Thickness"=12   "Include Auto Rigid Zone?"=No   "Notional Size Type"=Auto   "Notional Auto Factor"=1   "f11 Modifier"=1   "f22 Modifier"=1   "f12 Modifier"=1 _
+        "m11 Modifier"=1   "m22 Modifier"=1   "m12 Modifier"=1   "v13 Modifier"=1   "v23 Modifier"=1   "Mass Modifier"=1   "Weight Modifier"=1   Color=Cyan   GUID=b048a77c-2ae4-4d68-b58b-5c70091c175c
+ 
+TABLE:  "REINFORCING BAR SIZES"
+   Name=#2   Diameter=0.25   Area=0.05   GUID=add7781b-a85d-4a9f-a3a0-4b2eb9c3ee93
+   Name=#3   Diameter=0.375   Area=0.109999999403954   GUID=750a4ab6-a0bf-4a72-be4f-a26d120957da
+   Name=#4   Diameter=0.5   Area=0.200000002980232   GUID=d3ef7fd1-c20f-4ae7-8a39-53f087f393ae
+   Name=#5   Diameter=0.625   Area=0.310000002384186   GUID=efbd0d4f-392d-4d45-a9ec-efd5893bbba9
+   Name=#6   Diameter=0.75   Area=0.439999997615814   GUID=42fd92c7-6438-4353-b1ea-3c265e1afd20
+   Name=#7   Diameter=0.875   Area=0.600000023841858   GUID=d55b5c9d-a605-4f1e-8bab-c80626e652da
+   Name=#8   Diameter=1   Area=0.790000021457672   GUID=e5301736-a135-4485-a6ac-c9a3d0029b68
+   Name=#9   Diameter=1.12800002098083   Area=1   GUID=62a4af79-05a9-4af5-9a58-728e18bd34c6
+   Name=#10   Diameter=1.26999998092651   Area=1.26999998092651   GUID=2d4ef60c-1915-4fc8-b2c9-dc242541171a
+   Name=#11   Diameter=1.4099999666214   Area=1.55999994277954   GUID=95e9a157-3a2f-4c8a-b42d-3c9227cdf635
+   Name=#14   Diameter=1.692999958992   Area=2.25   GUID=6ae2e23f-d574-41b3-87f8-ad64eff0b3d1
+   Name=#18   Diameter=2.25699996948242   Area=4   GUID=67872c56-94e9-4a3b-a065-8a77baf3cd43
+ 
+TABLE:  "LOAD PATTERN DEFINITIONS"
+   Name=Dead   "Is Auto Load"=No   Type=Dead   "Self Weight Multiplier"=1   GUID=bc60cc08-f57c-44f0-a1e4-e509c4d809f9
+   Name=Live   "Is Auto Load"=No   Type=Live   "Self Weight Multiplier"=0   GUID=9597b5cd-c081-479c-867f-3ec4a5321420
+   Name=PT-FINAL   "Is Auto Load"=No   Type=Prestress-Final   "Self Weight Multiplier"=0   GUID=f260a4a2-dd48-41e3-9e0a-5481cc618077
+   Name=PT-TRANSFER   "Is Auto Load"=No   Type=Prestress-Transfer   "Self Weight Multiplier"=0   GUID=5a155210-967a-4d70-96c2-64110f372db9
+ 
+TABLE:  "GROUP DEFINITIONS"
+   Name=All   Color=Yellow   "Steel Design?"=No   "Concrete Design?"=No   "Composite Design?"=No   GUID=645db173-4f98-414e-b898-1d129e276f8e
+ 
+TABLE:  "MASS SOURCE DEFINITION"
+   Name=MsSrc1   "Is Default"=Yes   "Include Lateral Mass?"=Yes   "Include Vertical Mass?"=No   "Lump Mass?"=Yes   "Source Self Mass?"=Yes   "Source Added Mass?"=Yes   "Source Load Patterns?"=No   "Move Mass Centroid?"=No   GUID=8d2e7cea-169b-4d85-8577-3db27b2f4c7a
+ 
+TABLE:  "DATABASE TABLE NAMED SET DEFINITIONS"
+   Name=DB1   "Table Key"="Element Stresses - Area Shells"   "Load Pattern"=Dead   "Load Case"=PT-FINAL   Combo=Ultimate   "Base Reaction Option"="Program Determined"   "Mode Option"=All   "Buckling Mode Option"=All   Multistep=Envelopes _
+        "Nonlinear Static"=Envelopes   "Modal History"=Envelopes   "Direct History"=Envelopes   "Load Combination"=Envelopes   "Show Unformatted"=No   "Expose All"=Yes   GUID=c9d8c342-e030-4d5c-9969-2b050009e296
+   Name=DB1   "Table Key"="Strip Forces Summary"   "Load Pattern"=Live   "Load Case"=PT-TRANSFER   Combo=D+0.5L+PTF(L)
+   Name=DB1   "Table Key"="Concrete Slab Design Summary - Flexure and Shear Data"   "Load Pattern"=PT-FINAL   "Load Case"=PT-FINAL-HP   Combo=D+LL+PTF
+   Name=DB1   "Table Key"="Program Control"   "Load Pattern"=PT-TRANSFER   Combo=D+PTi
+ 
+TABLE:  "LOAD CASE DEFINITIONS - SUMMARY"
+   Name=Dead   Type="Linear Static"   GUID=0a1fce4c-cfc9-4928-8415-fa1d78521788
+   Name=Live   Type="Linear Static"   GUID=3188505a-c269-41e8-b5cd-fb197156732d
+   Name=Modal   Type="Modal - Eigen"   GUID=9df2df4a-4a50-45c5-aa0e-0408fb24dbab
+   Name=PT-FINAL   Type="Linear Static"   GUID=cfb439c0-1535-42bc-bb62-02b8d12d414b
+   Name=PT-TRANSFER   Type="Linear Static"   GUID=4ca017ef-bc9f-4223-b540-ec1a639d232e
+   Name=PT-FINAL-HP   Type=Hyperstatic   GUID=b6d8b595-eac2-47c4-bcca-2ccb992d09c5
+ 
+TABLE:  "LOAD CASE DEFINITIONS - LINEAR STATIC"
+   Name=Dead   "Exclude Group"=None   "Mass Source"=MsSrc1   "Initial Condition"=Unstressed   "Load Type"=Load   "Load Name"=Dead   "Load SF"=1   "Design Type"="Program Determined"   GUID=0a1fce4c-cfc9-4928-8415-fa1d78521788
+   Name=Live   "Exclude Group"=None   "Mass Source"=MsSrc1   "Initial Condition"=Unstressed   "Load Type"=Load   "Load Name"=Live   "Load SF"=1   "Design Type"="Program Determined"   GUID=3188505a-c269-41e8-b5cd-fb197156732d
+   Name=PT-FINAL   "Exclude Group"=None   "Mass Source"=MsSrc1   "Initial Condition"=Unstressed   "Load Type"=Load   "Load Name"=PT-FINAL   "Load SF"=1   "Design Type"="Program Determined"   GUID=cfb439c0-1535-42bc-bb62-02b8d12d414b
+   Name=PT-TRANSFER   "Exclude Group"=None   "Mass Source"=MsSrc1   "Initial Condition"=Unstressed   "Load Type"=Load   "Load Name"=PT-TRANSFER   "Load SF"=1   "Design Type"="Program Determined"   GUID=4ca017ef-bc9f-4223-b540-ec1a639d232e
+ 
+TABLE:  "MODAL CASE DEFINITIONS - EIGEN"
+   Name=Modal   "Exclude Group"=None   "Mass Source"=MsSrc1   "Initial Condition"=Unstressed   "Max Modes"=12   "Min Modes"=1   "Freq Shift"=0   "Cutoff Freq"=0   "Convergence Tol"=1E-09   "Auto Shift?"=Yes _
+        "Design Type"="Program Determined"   GUID=9df2df4a-4a50-45c5-aa0e-0408fb24dbab
+ 
+TABLE:  "LOAD CASE DEFINITIONS - HYPERSTATIC"
+   Name=PT-FINAL-HP   "Mass Source"=MsSrc1   "Base Case"=PT-FINAL   "Support Type"=Springs   "Relative SF"=1   "Design Type"="Program Determined"   GUID=b6d8b595-eac2-47c4-bcca-2ccb992d09c5
+ 
+TABLE:  "LOAD COMBINATION DEFINITIONS"
+   Name=D+0.5L+PTF(L)   Type="Linear Add"   "Is Auto"=No   "Load Name"=Dead   SF=1   GUID=1567dc4f-5b14-4113-8b5c-e8f541993e58
+   Name=D+0.5L+PTF(L)   "Load Name"=Live   SF=0.5
+   Name=D+0.5L+PTF(L)   "Load Name"=PT-FINAL   SF=1
+   Name=D+LL+PTF   Type="Linear Add"   "Is Auto"=No   "Load Name"=Dead   SF=1   GUID=563ed9dd-c531-4ede-ade8-dd43cd475e10
+   Name=D+LL+PTF   "Load Name"=Live   SF=1
+   Name=D+LL+PTF   "Load Name"=PT-FINAL   SF=1
+   Name=D+PTi   Type="Linear Add"   "Is Auto"=No   "Load Name"=Dead   SF=1   GUID=9920467e-787c-4f27-ae33-a5c1eb39f62c
+   Name=D+PTi   "Load Name"=PT-TRANSFER   SF=1
+   Name=Ultimate   Type="Linear Add"   "Is Auto"=No   "Load Name"=Dead   SF=1.2   GUID=1c5a1080-d6c1-4bfe-8322-1ab8ec6b30f5
+   Name=Ultimate   "Load Name"=Live   SF=1.6
+   Name=Ultimate   "Load Name"=PT-FINAL-HP   SF=1
+ 
+TABLE:  "POINT OBJECT CONNECTIVITY"
+   UniqueName=1   "Is Auto Point"=No   IsSpecial=No   X=0   Y=0   Z=48   GUID=23cce3e1-bf15-4865-902e-acfe606ce64e
+   UniqueName=2   "Is Auto Point"=No   IsSpecial=No   X=384   Y=0   Z=48   GUID=6d87a0e5-93a5-49c8-947a-c7d1960ec0f2
+   UniqueName=3   "Is Auto Point"=No   IsSpecial=No   X=384   Y=36   Z=48   GUID=2ac9715b-1582-475a-8ee0-d47c05c6ce1a
+   UniqueName=4   "Is Auto Point"=No   IsSpecial=No   X=0   Y=36   Z=48   GUID=50c32641-42dd-498f-99dc-43c37d4e05cf
+   UniqueName=7   "Is Auto Point"=No   IsSpecial=No   X=0   Y=18   Z=48   GUID=411153d6-67b1-4fe8-8e74-42f6665c1d23
+   UniqueName=8   "Is Auto Point"=No   IsSpecial=No   X=384   Y=18   Z=48   GUID=aeb29663-fd93-4857-9d76-5f1ec7f13f24
+   UniqueName=5   "Is Auto Point"=No   IsSpecial=No   X=192   Y=0   Z=48   GUID=0253fc51-3b7e-461a-9112-8742ac960663
+   UniqueName=6   "Is Auto Point"=No   IsSpecial=No   X=192   Y=36   Z=48   GUID=5a942428-ba94-4dd5-8b82-73fa7c6da03b
+ 
+TABLE:  "FLOOR OBJECT CONNECTIVITY"
+   "Unique Name"=4   UniquePt1=1   UniquePt2=5   UniquePt3=6   UniquePt4=4   Perimeter=456   Area=6912   GUID=b7492d31-b853-43a5-8915-29dbf4b89671
+   "Unique Name"=5   UniquePt1=5   UniquePt2=2   UniquePt3=3   UniquePt4=6   Perimeter=456   Area=6912   GUID=fbed21d0-43da-4a1a-bab1-40fa9df16156
+ 
+TABLE:  "TENDON OBJECT CONNECTIVITY"
+   Name=2   "Number Points"=2   "Point Name"=7   "Horizontal Segment Number"=1   "Horizontal Curve Type"=Straight   "Number Control Points"=2   "Curve Point Number"=1   "Global X"=0   "Global Y"=18   "Number Vertical Spans"=1 _
+        "Datum Offset"=0   "First Support Type"=None   "Span Number"=1   "Span ID"="Right Cantilever"   "End Support Type"=None   "Span Profile"="Reverse Parabola"   RD=1   L=384   A=38.4   B=38.4   C=192   ZL=-5   ZC=-9   ZR=-5 _
+        Layer=Other   GUID=1d9154d5-a516-4e29-9ea1-1304836d3a76
+   Name=2   "Point Name"=8   "Horizontal Segment Number"=1   "Curve Point Number"=2   "Global X"=384   "Global Y"=18
+ 
+TABLE:  "TENDON DISCRETIZED POINTS"
+   Name=2   "Point Number"=1   "Global X"=0   "Global Y"=18   "Global Z"=43
+   Name=2   "Point Number"=2   "Global X"=19.2   "Global Y"=18   "Global Z"=42.8
+   Name=2   "Point Number"=3   "Global X"=38.4   "Global Y"=18   "Global Z"=42.2
+   Name=2   "Point Number"=4   "Global X"=60.3428571428571   "Global Y"=18   "Global Z"=41.3510204081633
+   Name=2   "Point Number"=5   "Global X"=82.2857142857143   "Global Y"=18   "Global Z"=40.6326530612245
+   Name=2   "Point Number"=6   "Global X"=104.228571428571   "Global Y"=18   "Global Z"=40.0448979591837
+   Name=2   "Point Number"=7   "Global X"=126.171428571429   "Global Y"=18   "Global Z"=39.5877551020408
+   Name=2   "Point Number"=8   "Global X"=148.114285714286   "Global Y"=18   "Global Z"=39.2612244897959
+   Name=2   "Point Number"=9   "Global X"=170.057142857143   "Global Y"=18   "Global Z"=39.065306122449
+   Name=2   "Point Number"=10   "Global X"=192   "Global Y"=18   "Global Z"=39
+   Name=2   "Point Number"=11   "Global X"=213.942857142857   "Global Y"=18   "Global Z"=39.065306122449
+   Name=2   "Point Number"=12   "Global X"=235.885714285714   "Global Y"=18   "Global Z"=39.2612244897959
+   Name=2   "Point Number"=13   "Global X"=257.828571428571   "Global Y"=18   "Global Z"=39.5877551020408
+   Name=2   "Point Number"=14   "Global X"=279.771428571429   "Global Y"=18   "Global Z"=40.0448979591837
+   Name=2   "Point Number"=15   "Global X"=301.714285714286   "Global Y"=18   "Global Z"=40.6326530612245
+   Name=2   "Point Number"=16   "Global X"=323.657142857143   "Global Y"=18   "Global Z"=41.3510204081633
+   Name=2   "Point Number"=17   "Global X"=345.6   "Global Y"=18   "Global Z"=42.2
+   Name=2   "Point Number"=18   "Global X"=364.8   "Global Y"=18   "Global Z"=42.8
+   Name=2   "Point Number"=19   "Global X"=384   "Global Y"=18   "Global Z"=43
+ 
+TABLE:  "STRIP OBJECT CONNECTIVITY"
+   Name=CSA1   "Number Segments"=1   "Strip Start Point"=7   "Segment End Point"=8   "Start Width Left"=18   "Start Width Right"=18   "End Width Left"=18   "End Width Right"=18   "Auto Widen"=No   Layer=A   GUID=eac7b1fc-5193-4e37-b028-21702829688f
+ 
+TABLE:  "DIMENSION LINE OBJECT GEOMETRY"
+   Type=Default   "Grid System"=G1   "Drawn X1"=0   "Drawn Y1"=0   "Drawn X2"=0   "Drawn Y2"=36   "Display X1"=-48   "Display Y1"=0   "Display X2"=-48   "Display Y2"=36   Length=36
+   Type=Default   "Grid System"=G1   "Drawn X1"=0   "Drawn Y1"=36   "Drawn X2"=384   "Drawn Y2"=36   "Display X1"=0   "Display Y1"=84   "Display X2"=384   "Display Y2"=84   Length=384
+ 
+TABLE:  "JOINT ASSIGNMENTS - SUMMARY"
+   UniqueName=1   Diaphragm="From Area"   Restraints="UX; UY; UZ"
+   UniqueName=2   Diaphragm="From Area"   Restraints="UY; UZ"
+   UniqueName=3   Diaphragm="From Area"   Restraints=UZ
+   UniqueName=4   Diaphragm="From Area"   Restraints=UZ
+   UniqueName=7   Diaphragm="From Area"
+   UniqueName=8   Diaphragm="From Area"
+   UniqueName=5   Diaphragm="From Area"
+   UniqueName=6   Diaphragm="From Area"
+ 
+TABLE:  "JOINT ASSIGNMENTS - RESTRAINTS"
+   UniqueName=1   UX=Yes   UY=Yes   UZ=Yes   RX=No   RY=No   RZ=No
+   UniqueName=2   UX=No   UY=Yes   UZ=Yes   RX=No   RY=No   RZ=No
+   UniqueName=3   UX=No   UY=No   UZ=Yes   RX=No   RY=No   RZ=No
+   UniqueName=4   UX=No   UY=No   UZ=Yes   RX=No   RY=No   RZ=No
+ 
+TABLE:  "TENDON ASSIGNMENTS - PROPERTIES"
+   Name=2   "Tendon Property"=Tendon1   "Number Strands"=2   "Bonding Options"=Unbonded
+ 
+TABLE:  "TENDON LOAD ASSIGNMENTS - JACKING STRESS"
+   Name=2   "Transfer Load Pattern"=PT-TRANSFER   "Final Load Pattern"=PT-FINAL   "Jacking Stress"=216000   "Jacking Location"="J End"
+ 
+TABLE:  "TENDON LOAD ASSIGNMENTS - LOSS OPTIONS"
+   Name=2   "Loss Method"=Fixed   "Stressing Loss Fixed"=27000   "Long Term Loss Fixed"=13500
+ 
+TABLE:  "TENDON - TOTAL ELONGATION"
+   Name=2   "Transfer Load Pattern"=PT-TRANSFER   "Jacking Location"="J End"   "Force - End J"=57834   "Elongation - End J"=2.54725075831707
+ 
+TABLE:  "AREA ASSIGNMENTS - SUMMARY"
+   UniqueName=4   "Section Property"=Slab1   "Property Type"=Slab
+   UniqueName=5   "Section Property"=Slab1   "Property Type"=Slab
+ 
+TABLE:  "AREA ASSIGNMENTS - SECTION PROPERTIES"
+   UniqueName=4   "Section Property"=Slab1   "Property Type"=Slab
+   UniqueName=5   "Section Property"=Slab1   "Property Type"=Slab
+ 
+TABLE:  "AREA ASSIGNMENTS - INSERTION POINT"
+   UniqueName=4   "Cardinal Point"=Top   Transform=Yes
+   UniqueName=5   "Cardinal Point"=Top   Transform=Yes
+ 
+TABLE:  "AREA ASSIGNMENTS - FLOOR AUTO MESH OPTIONS"
+   UniqueName=4   "Mesh Option"="Auto Cookie Cut"   "At Beams"=Yes   "At Walls"=Yes   "At Grids"=No   Submesh=Yes   "Submesh Size"=36   "Add Restraints"=No
+   UniqueName=5   "Mesh Option"="Auto Cookie Cut"   "At Beams"=Yes   "At Walls"=Yes   "At Grids"=No   Submesh=Yes   "Submesh Size"=36   "Add Restraints"=No
+ 
+TABLE:  "AREA ASSIGNMENTS - AUTO EDGE CONSTRAINTS"
+   UniqueName=4   Constraint=Yes
+   UniqueName=5   Constraint=Yes
+ 
+TABLE:  "AREA LOAD ASSIGNMENTS - UNIFORM"
+   UniqueName=4   "Load Pattern"=Live   Direction=Gravity   Load=0.694444444444444   GUID=9dad2258-25e7-44fe-9ec8-ef419fa63aec
+   UniqueName=5   "Load Pattern"=Live   Direction=Gravity   Load=0.694444444444444   GUID=ce7435cb-9704-482e-a132-f0de226e91af
+ 
+TABLE:  "ANALYSIS MODELING OPTIONS"
+   "Two Dimensional Only"=No   "Rigid Diaphragm At Top"=No   "Ignore Vertical Offsets"=No
+ 
+TABLE:  "ANALYSIS OPTIONS - SAPFIRE OPTIONS"
+   "Solver Option"=Advanced   "Analysis Process"=Auto   "Number Analysis Threads"=0   "Max File Size"=0
+ 
+TABLE:  "ANALYSIS OPTIONS - DESIGN AND RESPONSE RECOVERY OPTIONS"
+   "Number Design Threads"=0   "Number Recovery Threads"=0   "Use Memory Mapped Files"="Program Determined"   "Allow Model Differences"=No
+ 
+TABLE:  "ANALYSIS OPTIONS - AUTOMATIC MESH SETTINGS FOR FLOORS"
+   "Mesh Option"=Rectangular   "Use Localized Meshing"=Yes   "Merge Joints"=Yes   "Maximum Mesh Size"=36
+ 
+TABLE:  "ANALYSIS OPTIONS - AUTOMATIC RECTANGULAR MESH OPTIONS FOR WALLS"
+   "Maximum Mesh Size"=48
+ 
+TABLE:  "ANALYSIS OPTIONS - CRACKING ANALYSIS OPTIONS"
+   "Reinforcement Source"="User and Designed"   "Minimum Tension Ratio"=0.0018   "Minimum Compression Ratio"=0
+ 
+TABLE:  "PREFERENCES - TOLERANCE"
+   MergeTol=0.1   MaxInclVertCol=1   MaxInclHorzBmFlr=20
+ 
+TABLE:  "PREFERENCES - GRAPHICS"
+   MaxFontSize=6   MinFontSize=3   MinSLineThick=1   MinPLineThick=4   AntiAliasing?=Yes   ConstantLineThick?=Yes   ShadingWithinElement?=No   AutoZoomStep=10   ShrinkFactor=70
+ 
+TABLE:  "MISCELLANEOUS OPTIONS"
+   "Start Page"=Yes   "Value at Cursor"=Yes   "Frame Info"=Yes   "Bounding Plane"=Yes   "Architectural Dimensioning"=No   "Moments on Tension Side"=Yes   "Animation Sound"=Yes   "Auto Save"=No   Crosshairs=No   "Model Explorer"=Yes
+ 
+TABLE:  "OPTIONS - COLORS - DISPLAY"
+   "Device Type"=Screen   ColorColumns=10507331   ColorBeams=10507331   ColorBraces=10507331   ColorLinks=10507331   ColorSprings=Black   ColorTendons=DarkCyan   ColorSlabPanels=Green   ColorWalls=Red   ColorFloors=Gray4 _
+        ColorNullObjects=Gray8Dark   ColorOpenings=Black   ColorColStripA=Red   ColorColStripB=Blue   ColorMidStripA=Yellow   ColorMidStripB=Cyan   ColorStripEdge=16744703   ColorOtherStripFill=Green   ColorSupportLines=16744703 _
+        ColorDimLines=10461087   ColorText=Black   ColorGridLines=Gray6   ColorBackground=White   ColorUserMeshEdge=5065984   ColorStlDesign=DarkCyan   ColorCompDesign=Cyan   ColorConcDesign=4227327   ColorNoDesign=4227327 _
+        TransColumns=0.5   TransBeams=0.5   TransBraces=0.5   TransFloors=0.5   TransWalls=0.4   TransLinks=0.5   Darkness=0.3
+   "Device Type"=Printer   ColorColumns=Black   ColorBeams=Black   ColorBraces=Black   ColorLinks=Gray8Dark   ColorSprings=Gray8Dark   ColorTendons=DarkCyan   ColorSlabPanels=Green   ColorWalls=Gray4   ColorFloors=Gray4 _
+        ColorNullObjects=Gray4   ColorOpenings=Gray8Dark   ColorColStripA=Red   ColorColStripB=Blue   ColorMidStripA=Yellow   ColorMidStripB=Cyan   ColorStripEdge=16744703   ColorOtherStripFill=Green   ColorSupportLines=16744703 _
+        ColorDimLines=10461087   ColorText=Black   ColorGridLines=Gray4   ColorBackground=White   ColorUserMeshEdge=5065984   ColorStlDesign=Black   ColorCompDesign=Gray4   ColorConcDesign=Gray8Dark   ColorNoDesign=Gray4   TransColumns=0.5 _
+        TransBeams=0.5   TransBraces=0.5   TransFloors=0.5   TransWalls=0.4   TransLinks=0.5   Darkness=0.5
+   "Device Type"="Color Printer"   ColorColumns=10507331   ColorBeams=Blue   ColorBraces=Blue   ColorLinks=10507331   ColorSprings=Black   ColorTendons=DarkCyan   ColorSlabPanels=Green   ColorWalls=Blue   ColorFloors=Gray4 _
+        ColorNullObjects=Gray8Dark   ColorOpenings=Black   ColorColStripA=Red   ColorColStripB=Blue   ColorMidStripA=Yellow   ColorMidStripB=Cyan   ColorStripEdge=16744703   ColorOtherStripFill=Green   ColorSupportLines=16744703 _
+        ColorDimLines=10461087   ColorText=Black   ColorGridLines=Gray6   ColorBackground=White   ColorUserMeshEdge=5065984   ColorStlDesign=DarkCyan   ColorCompDesign=Cyan   ColorConcDesign=4227327   ColorNoDesign=4227327 _
+        TransColumns=0.5   TransBeams=0.5   TransBraces=0.5   TransFloors=0.5   TransWalls=0.4   TransLinks=0.5   Darkness=0.3
+ 
+TABLE:  "OPTIONS - COLORS - OUTPUT"
+   "Device Type"="Screen Classic"   Contour1=13107400   Contour2=6553828   Contour3=Red   Contour4=16639   Contour5=Orange   Contour6=43775   Contour7=54527   Contour8=Yellow   Contour9=65408   Contour10=Green   Contour11=8453888 _
+        Contour12=Cyan   Contour13=16755200   Contour14=16733440   Contour15=Blue   TransContours=0   Ratio1=Cyan   Ratio2=Green   Ratio3=Yellow   Ratio4=Magenta   Ratio5=Red   RatioNotD=Gray4   RatioVal1=0.5   RatioVal2=0.7   RatioVal3=0.9 _
+        RatioVal4=1   HState1=Black   HState2=Green   HState3=Cyan   HState4=Magenta   HState5=Red   HStatus1=Black   HStatus2=Green   HStatus3=Cyan   HStatus4=Red   DFillPos=Yellow   DFillNeg=Red   DFillRange=Blue   TransDiag=0.2
+   "Device Type"="Screen GrayScale"   Contour1=Black   Contour2=3158064   Contour3=4210752   Contour4=5263440   Contour5=6316128   Contour6=7368816   Contour7=Gray8Dark   Contour8=Gray7   Contour9=Gray6   Contour10=Gray5   Contour11=Gray4 _
+        Contour12=Gray3   Contour13=Gray2   Contour14=Gray1Light   Contour15=White   TransContours=0   Ratio1=Gray2   Ratio2=Gray4   Ratio3=Gray8Dark   Ratio4=4210752   Ratio5=Black   RatioNotD=Gray4   RatioVal1=0.5   RatioVal2=0.7 _
+        RatioVal3=0.9   RatioVal4=1   HState1=Black   HState2=Gray4   HState3=Gray8Dark   HState4=4210752   HState5=Black   HStatus1=Black   HStatus2=Gray4   HStatus3=Gray8Dark   HStatus4=4210752   DFillPos=Yellow   DFillNeg=Red _
+        DFillRange=Blue   TransDiag=0.2
+   "Device Type"=Printer   Contour1=Black   Contour2=3158064   Contour3=4210752   Contour4=5263440   Contour5=6316128   Contour6=7368816   Contour7=Gray8Dark   Contour8=Gray7   Contour9=Gray6   Contour10=Gray5   Contour11=Gray4 _
+        Contour12=Gray3   Contour13=Gray2   Contour14=Gray1Light   Contour15=White   TransContours=0   Ratio1=Gray2   Ratio2=Gray4   Ratio3=Gray8Dark   Ratio4=4210752   Ratio5=Black   RatioNotD=Gray4   RatioVal1=0.5   RatioVal2=0.7 _
+        RatioVal3=0.9   RatioVal4=1   HState1=Black   HState2=Gray4   HState3=Gray8Dark   HState4=4210752   HState5=Black   HStatus1=Black   HStatus2=Gray4   HStatus3=Gray8Dark   HStatus4=4210752   DFillPos=Gray8Dark   DFillNeg=Gray8Dark _
+        DFillRange=4210752   TransDiag=0.2
+   "Device Type"="Color Printer"   Contour1=13107400   Contour2=6553828   Contour3=Red   Contour4=16639   Contour5=Orange   Contour6=43775   Contour7=54527   Contour8=Yellow   Contour9=65408   Contour10=Green   Contour11=8453888 _
+        Contour12=Cyan   Contour13=16755200   Contour14=16733440   Contour15=Blue   TransContours=0   Ratio1=Cyan   Ratio2=Green   Ratio3=Yellow   Ratio4=Magenta   Ratio5=Red   RatioNotD=Gray4   RatioVal1=0.5   RatioVal2=0.7   RatioVal3=0.9 _
+        RatioVal4=1   HState1=Black   HState2=Green   HState3=Cyan   HState4=Magenta   HState5=Red   HStatus1=Black   HStatus2=Green   HStatus3=Cyan   HStatus4=Red   DFillPos=Yellow   DFillNeg=Red   DFillRange=Blue   TransDiag=0.2
+ 
+TABLE:  "PROJECT INFORMATION"
+   "Model Name"="ACI 318-08 PT-SL-001R"   "Revision Number"=0
+ 
+TABLE:  "MATERIAL LIST BY OBJECT TYPE"
+   "Object Type"=Floor   Material=4000Psi   Weight=12000.0000006144
+ 
+TABLE:  "MATERIAL LIST BY SECTION PROPERTY"
+   Section=Slab1   "Object Type"=Floor   Weight=12000.0000006144
+ 
+TABLE:  "COMPOSITE BEAM DESIGN PREFERENCES - AISC 360-10"
+   Shored?=No   "Middle Range"=70   "Pattern Live Load Factor"=0.75   "D/C Ratio Limit"=1   "Minimum PCC"=25   "Maximum PCC"=100   "Single Segment?"=No   "Min. Long. Spacing"=4.5   "Max. Long. Spacing"=36   "Min. Trans. Spacing"=3 _
+        "Max. Studs Per Row"=3   "Position of Studs"="Middle of the Ribs"   Camber?=Yes   "Camber DL"=80   "Min. Beam Depth"=13.5   "Min. Web Thick."=0.25   "Min. Beam Span"=288   "Min. Camber, abs"=0.75   "Minimum Camber, L/"=900 _
+        "Camber Abs. Max Limit"=6   "Camber Max Ratio"=180   "Camber Interval"=0.25   "Round Camber Down?"=Yes   "Pre-Comp DL Ratio"=0   "SDL+LL Ratio"=240   "LL Ratio"=360   "Net Ratio"=240   "Ieff reduction Factor"=0.75 _
+        "Vibration Criterion"=Walking   "Occupancy Category"="Paper Office"   "Walking Acceleration Limit, a0/g"=0.005   "Damping Ratio - Walking"=0.025   "Optimize Price?"=Yes   "Steel Price ($)"=1   "Stud Price ($)"=2 _
+        "Camber Price ($)"=0   phi-b=0.9   phi-bcpp=0.9   phi-v=0.9   "Reaction Factor"=1
+ 
+TABLE:  "CONCRETE FRAME DESIGN PREFERENCES - ACI 318-19"
+   "Multi-Response Design"="Step-by-Step - All"   "# Interaction Curves"=24   "# Interaction Points"=11   "Minimum Eccentricity?"=Yes   "Design for BCCR?"=Yes   "Ignore Beneficial Pu for Beam Design?"=No   "Seismic Design Category"=B _
+        "Design System Omega0"=2   "Design System Rho"=1   "Design System Sds"=0.5   "Phi (Tension)"=0.9   "Phi (Compression Tied)"=0.65   "Phi (Compression Spiral)"=0.75   "Phi (Shear and Torsion)"=0.75   "Phi (Shear Seismic)"=0.6 _
+        "Phi (Shear Joint)"=0.85   "Pattern Live Load Factor"=0.75   "Utlization Factor Limit"=1
+ 
+TABLE:  "CONCRETE SLAB DESIGN PREFERENCES - ACI 318-19"
+   PhiTen=0.9   PhiComp=0.65   PhiShear=0.75   CoverTop=0.75   CoverBot=0.75   BarSize=#6   InnerLayer="Layer B"   PTCGSTop=1   PTCGSBotExt=1.75   PTCGSBotInt=1   SlabType="One Way"   UserStress=No   InitConcRat=0.8   LLFraction=0.5
+ 
+TABLE:  "CONCRETE SLAB DESIGN OVERWRITES - FINITE ELEMENT BASED"
+   "Unique Name"=4   "Rebar Material"=A615Gr60   "Cover Specification Type"="From Preferences"   LLRF=1   Design?=No
+   "Unique Name"=5   "Rebar Material"=A615Gr60   "Cover Specification Type"="From Preferences"   LLRF=1   Design?=No
+ 
+TABLE:  "CONCRETE SLAB DESIGN OVERWRITES - STRIP BASED"
+   "Strip Name"=CSA1   "Strip Layer"=A   "Strip Design Type"="Column Strip"   Design?=Yes   "Ignote PT?"=No   "Rebar Material"=A615Gr60   "Cover Specification Type"="From Preferences"   LLRF=1
+ 
+TABLE:  "CONCRETE SLAB DESIGN LOAD COMBINATION DATA"
+   "Combo Type"=Strength   "Combo Name"=Ultimate
+   "Combo Type"="Service Initial"   "Combo Name"=D+PTi
+   "Combo Type"="Service Normal"   "Combo Name"=D+LL+PTF
+   "Combo Type"="Service Sustained"   "Combo Name"=D+0.5L+PTF(L)
+ 
+END TABLE DATA
