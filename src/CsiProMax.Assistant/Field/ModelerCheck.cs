@@ -355,6 +355,30 @@ public static class ModelerCheck
           sel.clear(); selChanged();
           return {ok: "replicated twice, moved and divided in three, each undone"};
         });
+        await step("Define > Reinforcing Bar Sizes and the definition table forms open and reach the model; the menus show only the model's program's items", async () => {
+          await act("m:rebarSizes"); await wait(900);
+          const n = document.querySelector(".dlg #rbN");
+          if (!n) return {fail: "the Reinforcing Bar Sizes form did not open"};
+          n.value = "CPMB"; document.querySelector(".dlg #rbA").value = 0.0001; document.querySelector(".dlg #rbD").value = 0.0113;
+          document.querySelector(".dlg #rbAdd").click(); await wait(1500);
+          const dd = (await hmRun("definition_data", {}, true)).result || {rebar_sizes: []};
+          closeDialogs(); await wait(150);
+          if (!dd.rebar_sizes.some(b => b.name === "CPMB")) return {fail: "the bar CPMB did not reach the model: " + (hm.lastError || "")};
+          await act("m:undo"); await wait(1200);
+          await act("m:dt:Generalized Displacement Definitions"); await wait(900);
+          const gd = document.querySelector(".dlg #dtB input");
+          closeDialogs(); await wait(150);
+          if (!gd) return {fail: "the Generalized Displacements form did not open"};
+          const labels = list => list.flatMap(i => !i ? [] : Array.isArray(i[1]) ? [i[0], ...labels(i[1])] : [i[0]]);
+          const was = program, seen = {};
+          try {
+            for (const k of ["etabs", "sap2000", "safe"]) { program = k; seen[k] = labels(menus().Assign).concat(labels(menus().Define), labels(menus().Draw)); }
+          } finally { program = was; }
+          if (!seen.etabs.includes("Floor Cracking...")) return {fail: "the Assign menu of a model for the building program has no Floor Cracking"};
+          if (seen.sap2000.includes("Floor Cracking...") || !seen.sap2000.includes("Output Stations...")) return {fail: "the Assign menu of a model for SAP2000 shows Floor Cracking, which SAP2000 does not have, or no Output Stations"};
+          if (seen.safe.some(x => /Brace|Hinge|Pier/.test(x))) return {fail: "SAFE's menus show braces, hinges or piers: " + seen.safe.filter(x => /Brace|Hinge|Pier/.test(x)).join(", ")};
+          return {ok: "a bar size added and undone; the Generalized Displacements form opened; each program's menus checked"};
+        });
         await step("Analyze > Check Model for Instabilities: the checker behind the window answers, and lists nothing wrong in the sound model", async () => {
           await act("inst"); await wait(2500);
           if (!inst.answer) return {fail: "no answer came: " + (document.querySelector("#instHead") || {}).textContent};

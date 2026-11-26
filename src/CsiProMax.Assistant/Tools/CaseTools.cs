@@ -284,7 +284,7 @@ public static class CaseTools
                     }).ToArray()),
                 };
             }).ToArray()),
-            ["case_types"] = new JsonArray(AnalysisDefs.CaseTypes.Select(t => (JsonNode)t).ToArray()),
+            ["case_types"] = new JsonArray(ProgramOptions.CaseTypes(m.Target).Select(t => (JsonNode)t).ToArray()),
             ["modal_combos"] = new JsonArray(AnalysisDefs.ModalCombos.Select(t => (JsonNode)t).ToArray()),
             ["dir_combos"] = new JsonArray(AnalysisDefs.DirCombos.Select(t => (JsonNode)t).ToArray()),
             ["mass_source"] = new JsonObject
