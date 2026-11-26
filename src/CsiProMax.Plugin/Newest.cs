@@ -29,14 +29,14 @@ public static class Newest
 
     private static Version Three(Version? v) => v is null ? new Version(0, 0, 0) : new Version(v.Major, v.Minor, Math.Max(v.Build, 0));
 
-    private static string Versions => VersionsFolder
+    internal static string Versions => VersionsFolder
         ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CsiProMax", "versions");
 
     /// <summary>
     /// The newest complete downloaded version above <paramref name="above"/> that holds the plug-in file, or null.
     /// Never throws: a folder that cannot be read is as good as none.
     /// </summary>
-    internal static (string File, Version Version)? Find(string versionsFolder, Version above)
+    internal static (string File, Version Version)? Find(string versionsFolder, Version above, string fileName = FileName)
     {
         try
         {
@@ -46,7 +46,7 @@ public static class Newest
             {
                 if (!Version.TryParse(Path.GetFileName(folder), out var named)) continue;
                 var version = Three(named);
-                var file = Path.Combine(folder, FileName);
+                var file = Path.Combine(folder, fileName);
                 if (version <= above || (best is { } b && version <= b.Item2)) continue;
                 if (!File.Exists(Path.Combine(folder, ".complete")) || !File.Exists(file)) continue;
                 best = (file, version);

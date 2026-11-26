@@ -134,6 +134,22 @@ static class OldProgramTests
                 try { CsiProMaxPlugin.Newest.Hand(model, installed); } catch (IOException ex) { said = ex.Message; }
                 Check(said is not null && said.Contains("CsiProMax.dll is missing from " + installed, StringComparison.Ordinal), "the copy starts the window from the installed folder, and what goes wrong is said: " + said);
                 Equal(before + 2, Copies(), "the newest copy took over");
+                // The installed copy was 0.4.7 and handed over as 0.4.7 knew how: the plug-in now starts the newest
+                // downloaded version itself, and tells it where the installed files are.
+                File.WriteAllText(Path.Combine(installed, "CsiProMax.dll"), "not an assembly: as old as can be");
+                Check(CsiProMaxPlugin.Launcher.NewestApp(installed, versions) is null, "a version folder without CsiProMax.dll is not started");
+                File.WriteAllText(Path.Combine(versions, "99.1.0", "CsiProMax.dll"), "");
+                File.WriteAllText(Path.Combine(versions, "99.0.0", "CsiProMax.dll"), "");
+                var app = CsiProMaxPlugin.Launcher.NewestApp(installed, versions);
+                Equal(Path.Combine(versions, "99.1.0"), app, "the newest complete downloaded version is the one started");
+                var dotnet = Path.Combine(root, "dotnet");
+                Directory.CreateDirectory(dotnet);
+                File.WriteAllText(Path.Combine(dotnet, CsiProMaxPlugin.Launcher.Windows ? "dotnet.exe" : "dotnet"), "");
+                var start = CsiProMaxPlugin.Launcher.StartInfo(installed, "/x", 7, "SAFE", [dotnet], app);
+                Check(start.Arguments.StartsWith("\"" + Path.Combine(versions, "99.1.0", "CsiProMax.dll") + "\" --etabs-pid 7 --program safe", StringComparison.Ordinal), "the downloaded version's file is started: " + start.Arguments);
+                Check(start.Arguments.EndsWith(" --this-version --installed-in \"" + installed + "\"", StringComparison.Ordinal), "it is told it is the one to run, and where the installed files are: " + start.Arguments);
+                var plain = CsiProMaxPlugin.Launcher.StartInfo(installed, "/x", 7, "SAFE", [dotnet]);
+                Check(plain.Arguments.StartsWith("\"" + Path.Combine(installed, "CsiProMax.dll") + "\"", StringComparison.Ordinal) && !plain.Arguments.Contains("--this-version", StringComparison.Ordinal), "with nothing downloaded the installed copy starts as before");
                 using var last = ApiPipe.ToPlugin(Environment.ProcessId, "SAFE 20", 5000) ?? throw new Exception("the newest plug-in's pipe did not answer");
                 Equal(@"E:\Pro max\LEVEL 29.FDB", (string)((dynamic)last.Root()).GetModelFilename(true), "read through the newest copy");
             }
