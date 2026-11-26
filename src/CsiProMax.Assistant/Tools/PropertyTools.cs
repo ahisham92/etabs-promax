@@ -266,6 +266,10 @@ public static class PropertyTools
 
     private static JsonObject Numbers_(Dictionary<string, double> d) => new(d.Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)JsonValue.Create(kv.Value))));
 
+    /// <summary>The groups an object is in, for its information window (Assignments > Groups).</summary>
+    private static JsonArray GroupsOf(StructuralModel m, string type, string label, string story) =>
+        new(GroupDefs.Groups(m).Where(g => g.Members.Contains((type, label, story))).Select(g => (JsonNode)g.Name).ToArray());
+
     private static JsonNode Definitions(StructuralModel m, List<string> objects)
     {
         var springs = PropertyDefs.Springs(m);
@@ -326,14 +330,21 @@ public static class PropertyTools
                         ["offset_i"] = Num(PropertyDefs.Value(l.Extra, "LENGTHOFFI")), ["offset_j"] = Num(PropertyDefs.Value(l.Extra, "LENGTHOFFJ")), ["rigid_zone"] = Num(PropertyDefs.Value(l.Extra, "RIGIDZONE")),
                         ["modifiers"] = Numbers_(PropertyDefs.Modifiers(l.Extra, PropertyDefs.FrameModifiers)), ["spring"] = PropertyDefs.Value(l.Extra, "SPRINGPROP") ?? "",
                         ["hinges"] = new JsonArray(PropertyDefs.HingesOf(m, label, story).Select(h => (JsonNode)new JsonObject { ["at"] = h.At, ["dof"] = h.Dof }).ToArray()),
+                        ["pier"] = PropertyDefs.Value(l.Extra, "PIER")?.Trim('"') ?? "", ["spandrel"] = PropertyDefs.Value(l.Extra, "SPANDREL")?.Trim('"') ?? "", ["groups"] = GroupsOf(m, "LINE", label, story),
                     });
                 }
                 else if (m.AreaAssigns.Find(y => y.Label == label && y.Story == story) is { } ar)
-                    list.Add(new JsonObject { ["object"] = x, ["kind"] = "shell", ["section"] = ar.Section, ["modifiers"] = Numbers_(PropertyDefs.Modifiers(ar.Extra, PropertyDefs.ShellModifiers)), ["spring"] = PropertyDefs.Value(ar.Extra, "SPRINGPROP") ?? "" });
+                    list.Add(new JsonObject
+                    {
+                        ["object"] = x, ["kind"] = "shell", ["section"] = ar.Section, ["modifiers"] = Numbers_(PropertyDefs.Modifiers(ar.Extra, PropertyDefs.ShellModifiers)), ["spring"] = PropertyDefs.Value(ar.Extra, "SPRINGPROP") ?? "",
+                        ["diaphragm"] = ar.Diaphragm ?? "", ["opening"] = PropertyDefs.Value(ar.Extra, "OPENING") is { } op && op.Trim('"').Equals("Yes", StringComparison.OrdinalIgnoreCase),
+                        ["angle"] = Num(PropertyDefs.Value(ar.Extra, "ANG")), ["mesh"] = PropertyDefs.Value(ar.Extra, "OBJMESHTYPE")?.Trim('"') ?? "",
+                        ["pier"] = PropertyDefs.Value(ar.Extra, "PIER")?.Trim('"') ?? "", ["spandrel"] = PropertyDefs.Value(ar.Extra, "SPANDREL")?.Trim('"') ?? "", ["groups"] = GroupsOf(m, "AREA", label, story),
+                    });
                 else if (m.PointAssigns.Find(y => y.Point == label && y.Story == story) is { } p)
-                    list.Add(new JsonObject { ["object"] = x, ["kind"] = "joint", ["restraint"] = p.Restraint ?? "", ["spring"] = PropertyDefs.Value(p.Extra, "SPRINGPROP") ?? "" });
+                    list.Add(new JsonObject { ["object"] = x, ["kind"] = "joint", ["restraint"] = p.Restraint ?? "", ["spring"] = PropertyDefs.Value(p.Extra, "SPRINGPROP") ?? "", ["diaphragm"] = p.Diaphragm ?? "", ["groups"] = GroupsOf(m, "POINT", label, story) });
                 else if (m.Point(label) is not null)
-                    list.Add(new JsonObject { ["object"] = x, ["kind"] = "joint", ["restraint"] = "", ["spring"] = "" });
+                    list.Add(new JsonObject { ["object"] = x, ["kind"] = "joint", ["restraint"] = "", ["spring"] = "", ["diaphragm"] = "", ["groups"] = GroupsOf(m, "POINT", label, story) });
             }
             o["objects"] = list;
         }
