@@ -231,6 +231,9 @@ public static class ModelEdit
         type = LoadPatternTypes.FirstOrDefault(t => t.Equals(type, StringComparison.OrdinalIgnoreCase))
                ?? throw new ArgumentException($"ETABS has no load pattern type '{type}'. Types: {string.Join(", ", LoadPatternTypes)}.");
         if (m.LoadPatterns.Exists(p => p.Name == name)) throw new ArgumentException($"There is already a load pattern named '{name}'.");
+        // The pattern brings its own load case of the same name: a case or combination named so already would make two.
+        if (m.LoadCases.Exists(c => c.Name == name)) throw new ArgumentException($"There is already a load case named '{name}'; give the pattern another name.");
+        if (m.Combos.Exists(c => c.Name == name)) throw new ArgumentException($"There is already a combination named '{name}'; give the pattern another name.");
         var pattern = new LoadPattern { Name = name, Type = type, SelfWeight = selfWeight };
         m.LoadPatterns.Add(pattern);
         m.LoadCases.Add(new LoadCase

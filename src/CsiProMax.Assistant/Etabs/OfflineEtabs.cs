@@ -52,6 +52,14 @@ public sealed class OfflineEtabs : ICsiLink, CsiProMax.Assistant.Tools.IModelDra
 
     private void Changed() { Revision++; Unsaved = true; }
 
+    /// <summary>Puts back the model as it was before a tool that failed part way (ToolCall.Invoke): a refused call never
+    /// leaves half an edit behind. The view redraws; the file's saved state is as it was.</summary>
+    public void Rollback(StructuralModel model, bool unsaved)
+    {
+        Model = model; Unsaved = unsaved; Revision++;
+        CsiProMax.Lateral.LateralLoads.Refresh(Model);
+    }
+
     private static T Try<T>(Func<T> work)
     {
         try { return work(); }

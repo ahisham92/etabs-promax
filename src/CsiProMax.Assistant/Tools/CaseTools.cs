@@ -101,8 +101,9 @@ public static class CaseTools
             double period = a.Number("period", 1), cycles = a.Number("cycles", 1), amp = a.Number("amplitude", 1);
             var steps = a.Whole("steps_per_cycle", 16);
             if (period <= 0 || cycles <= 0 || steps < 2) throw new ToolInputException("A wave needs a period and cycles above 0 and 2 steps a cycle at least.");
+            // Counted as a double first: cycles of 1e9 would wrap round an int (the robustness run found it).
+            if (cycles * steps > 100000) throw new ToolInputException("That wave has more than 100000 points.");
             var n = (int)Math.Round(cycles * steps);
-            if (n > 100000) throw new ToolInputException("That wave has more than 100000 points.");
             points = Enumerable.Range(0, n + 1).Select(i =>
             {
                 var t = i * period / steps;

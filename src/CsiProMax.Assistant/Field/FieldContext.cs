@@ -311,7 +311,7 @@ public sealed class FieldContext(CsiProgram program, string folder, ICsiLink lin
         _run.Add(name);
         using var document = JsonDocument.Parse(json);
         JsonNode answer;
-        try { answer = tool.Run(document.RootElement.Clone(), Link); }
+        try { answer = tool.Invoke(document.RootElement.Clone(), Link); }
         catch (Exception ex) when (ex is ToolInputException or EtabsException && NamesAnotherProgram(ex.Message) is { } other)
         {
             throw new FieldCheckException($"{name} answered in {other}'s words, and this is {Link.Program.Name}: {ex.Message}");

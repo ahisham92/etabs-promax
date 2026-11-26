@@ -105,7 +105,7 @@ public sealed class ModelTool : IEtabsTool
     {
         try
         {
-            return new ToolResult(_tool.Run(Json(args), app.Link).ToJsonString());
+            return new ToolResult(CsiProMax.Assistant.Tools.ToolCall.Invoke(_tool, Json(args), app.Link).ToJsonString());
         }
         catch (CsiProMax.Assistant.Tools.ToolInputException ex) { return ToolResult.Error(ex.Message); }
         catch (CsiProMax.Assistant.Etabs.EtabsException ex) { return ToolResult.Error(ex.Message); }

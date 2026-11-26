@@ -49,7 +49,7 @@ public static class HandModel
         var before = changes ? new Step(ModelFile.ToJson(model.Model), model.Path, Describe(tool, args)) : null;
         var revision = model.Revision;
         JsonNode result;
-        try { result = tool.Run(args, model); }
+        try { result = tool.Invoke(args, model); }
         catch (Exception ex) when (ex is ToolInputException or EtabsException or InvalidOperationException or FormatException or KeyNotFoundException or ArgumentException or IndexOutOfRangeException)
         {
             return Answer(false, ex.Message, model);
