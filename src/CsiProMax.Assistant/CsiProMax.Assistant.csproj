@@ -12,11 +12,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
-<<<<<<< HEAD
-    <Version>0.4.44</Version>
-=======
     <Version>0.4.52</Version>
->>>>>>> origin/main
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <NoWarn>$(NoWarn);CA1416</NoWarn>
     <UseAppHost>false</UseAppHost>
