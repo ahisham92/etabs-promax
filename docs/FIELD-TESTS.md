@@ -203,3 +203,20 @@ back word for word. What only a licensed program can confirm:
    a tendon of more than one plan segment or span (its further rows), a strip of more than one segment (its
    further rows), "Both Ends" and "I End" for the jack, beams (BEAM OBJECT CONNECTIVITY), walls (WALL OBJECT
    CONNECTIVITY), soil as area springs ("Stiffness Option"="User Specified"), frame and point loads.
+14. **Punching, losses, openings and ribs from ETABS 23.2.** Taken from ETABS 23.2's export of PT-SL Ex001
+   edited by hand (tests/CsiProMax.Tests/samples/etabs-PT-SL-v23-edited.e2k): detailed losses (CURVCOEFF, WOBBLECOEFF,
+   ANCHORSLIP, ELASTICSHORT, CREEPSTRESS, SHRINKSTRESS, STEELRELAX), percent losses (LOSSPERCENTST/LT, now kept as
+   percent, not turned into stresses), JACKLOC "Both", a Parabola span, a punching overwrite with a user perimeter
+   (PUNCHINGSHEARPERIMETER) and stud rails, an opening (an AREA-type area with OPENING "Yes") and a ribbed slab.
+   The Modeler's forms and the chat write the same lines (unit test). Still to confirm in a program:
+   - SAFE .f2k: an opening as NULL AREA OBJECT CONNECTIVITY with "Section Property"=Opening; and the punching
+     reinforcement's yield stress under "Reinforcement Diameter" and its diameter under "Reinforcement Fy". The
+     programs' table keys name the two fields swapped (RebarFy is named "Reinforcement Diameter"), and the file
+     follows the keys. If SAFE shows fy 0.012 and diameter 420000, the two names go the other way.
+   - An .f2k rebuilt in SAFE 23.1 through the API (the empty-open fallback) leaves openings and punching
+     overwrites out and says so in its notes.
+15. **Slab line releases and slab rebar.** ETABS 23.2 wrote no line release keyword in its .e2k (the line stayed a
+   null line), and refused the slab rebar object on that PC, perhaps because of a licence level. So neither is in the
+   .e2k the Modeler writes yet. In a running program they go in through edit_table on "Area Assignments - Slab Line
+   Releases", "Slab Rebar Object Geometry" and "Slab Rebar Property Assignments". The field test's reference data
+   asks for an export of a scratch model that has both, so the .e2k syntax can follow.
