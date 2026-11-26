@@ -82,10 +82,11 @@ public static class ModelerTools
     private static JsonNode Summary(OfflineEtabs o)
     {
         var m = o.Model;
+        var openings = SlabDefs.Openings(m).Count;
         return new JsonObject
         {
             ["title"] = m.Title, ["program"] = StructuralModel.TargetName(m.Target), ["file"] = o.Path, ["stories"] = m.Stories.Count - 1, ["grids"] = m.Grids.Count,
-            ["frames"] = m.LineAssigns.Count, ["areas"] = m.AreaAssigns.Count,
+            ["frames"] = m.LineAssigns.Count, ["areas"] = m.AreaAssigns.Count - openings, ["openings"] = openings,
             ["frame_sections"] = m.FrameSections.Count, ["slab_and_wall_sections"] = m.ShellSections.Count,
         };
     }

@@ -52,8 +52,8 @@ public static class PropertyTools
                 return new JsonObject { ["section"] = s.Name, ["shape"] = s.Shape, ["area"] = s.Area };
             }, a => $"Define the frame section {a.Text("name")}"),
         new("define_shell_type",
-            "Adds or changes a slab or wall section with its type (Define > Section Properties > Slab or Wall Sections): kind slab or wall; slab_type Slab, Drop, Stiff, Ribbed, Waffle, Mat, Footing; modeling ShellThin, ShellThick, Membrane, Layered; one_way load distribution; modifiers F11MOD F22MOD F12MOD M11MOD M22MOD M12MOD V13MOD V23MOD MMOD WMOD (e.g. cracked slabs M11MOD 0.25).",
-            """{"type":"object","required":["name","kind","thickness","material"],"properties":{"name":{"type":"string"},"was":{"type":"string"},"kind":{"type":"string","enum":["slab","wall"]},"slab_type":{"type":"string"},"modeling":{"type":"string"},"thickness":{"type":"number"},"material":{"type":"string"},"one_way":{"type":"boolean"},"modifiers":""" + Numbers + "}}",
+            "Adds or changes a slab or wall section with its type (Define > Section Properties > Slab or Wall Sections): kind slab or wall; slab_type Slab, Drop, Stiff, Ribbed, Waffle, Mat, Footing; modeling ShellThin, ShellThick, Membrane, Layered; one_way load distribution; a Ribbed slab also takes overall_depth, rib_width_top, rib_width_bottom, rib_spacing and rib_direction (local axis 1 or 2 the ribs run along); modifiers F11MOD F22MOD F12MOD M11MOD M22MOD M12MOD V13MOD V23MOD MMOD WMOD (e.g. cracked slabs M11MOD 0.25).",
+            """{"type":"object","required":["name","kind","thickness","material"],"properties":{"name":{"type":"string"},"was":{"type":"string"},"kind":{"type":"string","enum":["slab","wall"]},"slab_type":{"type":"string"},"modeling":{"type":"string"},"thickness":{"type":"number"},"material":{"type":"string"},"one_way":{"type":"boolean"},"overall_depth":{"type":"number"},"rib_width_top":{"type":"number"},"rib_width_bottom":{"type":"number"},"rib_spacing":{"type":"number"},"rib_direction":{"type":"integer"},"modifiers":""" + Numbers + "}}",
             Ask.Changes, (a, e) =>
             {
                 var link = Offline(e);
@@ -62,7 +62,8 @@ public static class PropertyTools
                 var wall = a.Need("kind").Equals("wall", StringComparison.OrdinalIgnoreCase);
                 var s = Core(() => link.Edit(m =>
                 {
-                    var sec = PropertyDefs.SetShellType(m, a.Need("name"), Was(a), wall, a.Text("slab_type", "Slab"), a.Text("modeling", wall ? "ShellThin" : "ShellThin"), a.Number("thickness"), a.Need("material"), a.Flag("one_way"));
+                    var sec = PropertyDefs.SetShellType(m, a.Need("name"), Was(a), wall, a.Text("slab_type", "Slab"), a.Text("modeling", wall ? "ShellThin" : "ShellThin"), a.Number("thickness"), a.Need("material"), a.Flag("one_way"),
+                        a.TryGetProperty("overall_depth", out _) ? new PropertyDefs.Ribs(a.Number("overall_depth"), a.Number("rib_width_top"), a.Number("rib_width_bottom", a.Number("rib_width_top")), a.Number("rib_spacing"), a.Whole("rib_direction", 1)) : null);
                     if (mods.Count > 0) PropertyDefs.SetModifiers(sec.Lines, PropertyDefs.ShellModifiers, mods);
                     return sec;
                 }));
@@ -377,6 +378,8 @@ public static class PropertyTools
             {
                 ["name"] = s.Name, ["wall"] = s.IsWall, ["material"] = s.Material, ["thickness"] = s.Thickness,
                 ["slab_type"] = s.Get("SLABTYPE"), ["modeling"] = s.Get("MODELINGTYPE"), ["one_way"] = s.Get("ONEWAYLOADDIST") == "Yes",
+                ["overall_depth"] = s.Number("OVERALLDEPTH"), ["rib_width_top"] = s.Number("SLABRIBWIDTHTOP"), ["rib_width_bottom"] = s.Number("SLABRIBWIDTHBOTTOM"),
+                ["rib_spacing"] = s.Number("SLABRIBSPACING"), ["rib_direction"] = s.Number("SLABRIBPARALLELTOAXIS"),
                 ["modifiers"] = Numbers_(PropertyDefs.Modifiers(s.Lines, PropertyDefs.ShellModifiers)),
             }).ToArray()),
             ["slab_types"] = new JsonArray(PropertyDefs.SlabTypes.Select(t => (JsonNode)t).ToArray()),

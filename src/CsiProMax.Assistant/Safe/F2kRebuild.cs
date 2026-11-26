@@ -192,6 +192,10 @@ public static class F2kRebuild
         var tendons = Rows(t, "TENDON OBJECT CONNECTIVITY").Select(r => r.GetValueOrDefault("Name")).Distinct(StringComparer.OrdinalIgnoreCase).Count();
         if (tendons > 0) notes.Add($"{tendons} tendon(s) of the file were left out: SAFE's API has no call to draw a tendon; they go in through SAFE's own import of the file.");
 
+        var openings = Rows(t, "NULL AREA OBJECT CONNECTIVITY").Count();
+        if (openings > 0) notes.Add($"{openings} floor opening(s) of the file were left out: they go in through SAFE's own import of the file.");
+        var punching = Rows(t, "CONCRETE SLAB DESIGN OVERWRITES - PUNCHING SHEAR - GENERAL").Count();
+        if (punching > 0) notes.Add($"{punching} punching shear overwrite(s) of the file were left out: they go in through SAFE's own import of the file, or edit_table on SAFE's punching shear overwrite tables.");
         var strips = Rows(t, "STRIP OBJECT CONNECTIVITY").Select(r => r.GetValueOrDefault("Name")).Distinct(StringComparer.OrdinalIgnoreCase).Count();
         e.Refresh();
         return new JsonObject
