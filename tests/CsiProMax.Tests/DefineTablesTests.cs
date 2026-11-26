@@ -103,7 +103,7 @@ static class DefineTablesTests
             Check(!sap["assign_tables"]!.AsObject().ContainsKey("Frame Assignments - Floor Cracking") && sap["assign_tables"]!.AsObject().ContainsKey("Frame Assignments - Output Stations"), "SAP2000: output stations but no floor cracking");
             Check(Names(sap["slab_types"]!).Length == 0, "SAP2000 has no slab types");
             Check(!Names(Run(link, "model_definitions", new { })["pattern_types"]!).Contains("Seismic (Drift)"), "SAP2000 has no drift seismic patterns");
-            Check(Run(link, "definition_data", new { })["tables"]!.AsObject().All(t => t.Key.EndsWith("Layers") || t.Key.StartsWith("Generalized")), "SAP2000's definition tables");
+            Check(Run(link, "definition_data", new { })["tables"]!.AsObject().All(t => t.Key.EndsWith("Layers") || t.Key.StartsWith("Generalized") || t.Key.StartsWith("Hinges Def")), "SAP2000's definition tables");
             link.Model.Target = "safe";
             var safe = Run(link, "property_definitions", new { });
             Check(Names(safe["shapes"]!).All(s => s.StartsWith("Concrete")), "SAFE: concrete shapes only");
@@ -174,6 +174,46 @@ static class DefineTablesTests
                 Check(DefineTables.RebarSizes(back.Model).Exists(x => x.Name == "T16") && back.Model.DefinitionTables!.ContainsKey("Walking Vibration Definitions"), "the bar size and the ETABS-only walking vibration came back");
             }
             finally { File.Delete(path); }
+        });
+        yield return ("sap2000: a hinge in SAP2000's own hinge tables goes into the .s2k and is read back from its tables; ETABS is never given them", () =>
+        {
+            var link = Frame();
+            var m = link.Model;
+            m.Target = "sap2000";
+            Run(link, "define_table_rows", new { table = "Hinges Def 01 - Overview", name = "PH1", rows = new[] { new Dictionary<string, object> { ["AssignHinge"] = "No", ["DOFType"] = "M3", ["Behavior"] = "Deformation Controlled" } } });
+            Run(link, "define_table_rows", new { table = "Hinges Def 03 - Noninteracting - Deform Control - Force-Deform", name = "PH1", rows = new[] { new Dictionary<string, object> { ["AssignHinge"] = "No", ["DOFType"] = "M3", ["FDPoint"] = "A", ["Force"] = 0, ["Displ"] = 0 }, new Dictionary<string, object> { ["AssignHinge"] = "No", ["DOFType"] = "M3", ["FDPoint"] = "B", ["Force"] = 1, ["Displ"] = 0 } } });
+            var data = Run(link, "definition_data", new { });
+            Check(data["tables"]!.AsObject().ContainsKey("Hinges Def 01 - Overview") && !data["tables"]!.AsObject().ContainsKey("Hinge Definitions - Moment M3"), "SAP2000 offers its own hinge tables, not ETABS's");
+            var text = CsiProMax.S2k.S2kWriter.Write(m, "a.s2k").Text;
+            Check(text.Contains("HINGES DEF 01 - OVERVIEW") && System.Text.RegularExpressions.Regex.IsMatch(text, @"HingeName=PH1\s+AssignHinge=No\s+DOFType=M3\s+FDPoint=B"), "the hinge's tables in the .s2k");
+            var tablesOnly = string.Join("\n", text.Split('\n').Where(l => !l.StartsWith("$ ")));
+            var back = CsiProMax.S2k.S2kReader.Read(tablesOnly, "Hinge");
+            Check(!back.Exact && back.Model.DefinitionTables?["Hinges Def 03 - Noninteracting - Deform Control - Force-Deform"].Count(r => r["HingeName"] == "PH1") == 2, "read back from SAP2000's tables: " + string.Join(" | ", back.Notes));
+            m.Target = "etabs";
+            Check(!ProgramOptions.HasDefinitionTable("etabs", "Hinges Def 01 - Overview"), "ETABS is not given SAP2000's hinge tables");
+        });
+        yield return ("sap2000: shell edge releases and joint panel zones go into SAP2000's own tables (releases before any edge constraint), from SAP2000's forms or from ETABS's", () =>
+        {
+            var link = Frame();
+            var m = link.Model;
+            var slab = m.AreaAssigns.First(a => a.Story == "Story1");
+            var slab2 = m.AreaAssigns.First(a => a.Story == "Story2");
+            AssignTables.Set(slab, new Dictionary<string, List<Dictionary<string, string>>> { ["Area Edge Release Assignments"] = [new() { ["Edge"] = "2", ["ReleasedDOF"] = "Moment" }] });
+            AssignTables.Set(slab2, new Dictionary<string, List<Dictionary<string, string>>> { ["Area Assignments - Edge Releases"] = [new() { ["EdgeNumber"] = "1", ["RBending"] = "Yes", ["RTwisting"] = "Yes", ["SBending"] = "5" }] });
+            var p1 = m.PointAssigns.FirstOrDefault() ?? new PointAssign { Point = m.Points[0].Name, Story = "Story1" };
+            if (!m.PointAssigns.Contains(p1)) m.PointAssigns.Add(p1);
+            AssignTables.Set(p1, new Dictionary<string, List<Dictionary<string, string>>> { ["Joint Panel Zone Assignments"] = [new() { ["PZFrom"] = "Elastic", ["DoublerPl"] = "0.01" }] });
+            var p2 = new PointAssign { Point = m.Points[1].Name, Story = "Story2" };
+            m.PointAssigns.Add(p2);
+            DefineTables.Set(m, "Panel Zone Property Definitions", "PZ1", [new() { ["Source"] = "From Link Property", ["LinkProp"] = "L1", ["Connect"] = "Braces to Other Objects" }]);
+            AssignTables.Set(p2, new Dictionary<string, List<Dictionary<string, string>>> { ["Joint Assignments - Panel Zone"] = [new() { ["PanelZone"] = "PZ1" }] });
+            var text = CsiProMax.S2k.S2kWriter.Write(m, "a.s2k").Text;
+            var er = CsiProMax.S2k.S2kWriter.Name(slab.Label, "Story1");
+            Check(System.Text.RegularExpressions.Regex.IsMatch(text, "Area=" + er + @"\s+Edge=2\s+ReleasedDOF=Moment"), "SAP2000's own edge release row");
+            Check(System.Text.RegularExpressions.Regex.Matches(text, "Area=" + CsiProMax.S2k.S2kWriter.Name(slab2.Label, "Story2") + @"\s+Edge=1\s+ReleasedDOF=(Moment|Twisting)").Count == 2, "ETABS's edge release, a row per released direction");
+            Check(text.Contains("StiffRot=5"), "the spring goes with the moment release");
+            Check(System.Text.RegularExpressions.Regex.IsMatch(text, @"PZFrom=Elastic\s+DoublerPl=0.01") && System.Text.RegularExpressions.Regex.IsMatch(text, @"PZFrom=Link\s+PZLink=L1\s+PZConnect=""?Braces to Other Objects"), "both panel zones: " + text[text.IndexOf("JOINT PANEL ZONE")..][..300]);
+            Check(!ProgramOptions.HasAssignTable("etabs", "Area Edge Release Assignments") && ProgramOptions.HasAssignTable("sap2000", "Joint Panel Zone Assignments"), "SAP2000's own tables are SAP2000's");
         });
     }
 }
