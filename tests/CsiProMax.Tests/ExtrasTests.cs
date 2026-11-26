@@ -180,7 +180,7 @@ static class ExtrasTests
         yield return ("extras: the Viewer and Modeler select joints and supports, open information on a right click, and filter the selection (Ahmed 2026-11-26)", () =>
         {
             var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
-            foreach (var part in new[] { "function jointsIn(p)", "function jointAt(p, x, y, r)", "function jointInfo(name)", "function rightClick(p, x, y, shift, cx, cy)", "function selFilter()", "function loadRowsOf(o)", "function showJointInTable(name, hit)", "addComment(t, {type: \"j\", kind: \"joint\"", "gotJ.forEach(n => selJ.add(n))", "function loadGrid(loads)", "[\"filter\", \"Filter the selection" })
+            foreach (var part in new[] { "function jointsIn(p)", "function jointAt(p, x, y, r)", "function jointInfo(name)", "function rightClick(p, x, y, shift, cx, cy)", "function selFilter()", "function loadRowsOf(o)", "function showJointInTable(name, hit)", "addComment(t, {type: \"j\", kind: \"joint\"", "gotJ.forEach(n => selJ.add(n))", "function loadGrid(loads)", "[\"Filter Selection...\", \"selFilter\"" })
                 Check(html.Contains(part), "viewer.html lost " + part);
             var check = ViewerCheck.Script;
             foreach (var step in new[] { "selection: a left-to-right window round a support selects the support joint", "selection: right click on an object opens its information, with a Loads tab holding its loads", "selection: the Filter keeps only the checked kinds of the selection" })
@@ -203,10 +203,25 @@ static class ExtrasTests
                 Check(html.Contains(part), "viewer.html lost " + part);
             Check(html.Contains("det.hidden = program === \"sap2000\""), "SAP2000 has no Detailing menu");
         });
+        yield return ("extras: the views and toolbars are drawn as ETABS draws them: grey see-through slabs with white edges, thin columns, solid grid, light-blue ground grid with flat bubbles, the axes at the origin, column squares in plan, captions as tabs, the toolbar and strip in the program's order (Ahmed 2026-11-26 22:19)", () =>
+        {
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var part in new[] { "const opt = {grid: true, extrude: false,", "floor: \"#737373\"", "ground: [0.85, 0.925, 1]", "const dash = gridsGuessed ? 7 : 0;", "flat: bay * 0.09}", "function drawPlanColumns(p, g, to, T)", "const presetCam = {iso: {yaw: Math.PI / 4, pitch: 0.57}",
+                "thin(bufs.edges, 1, [1, 1, 1])", "function buildBars()", "function ddOpen(key, from)", "[\"t3d\", \"Set Default 3D View\", \"v:3d\"]", "[\"zprev\", \"Restore Previous Zoom\", \"zprev\"]", "[\"sall\", \"Select All (Ctrl+A)\", \"selAll\"]", "case \"selPrev\":", "case \"zprev\":",
+                "<button class=\"dd\" title=\"Window Position\">", "function ddMenu(btn, items)", ".menu[hidden]{display:none}" })
+                Check(html.Contains(part), "viewer.html lost " + part);
+            // The four ETABS tools that were greyed out are now real (Ahmed 2026-11-26 22:37: "Add please the tools that we don't have").
+            foreach (var part in new[] { "[\"reshape\", \"Reshape Object (click an end or corner, then its new place)\", \"d:reshape\"]", "[\"dqsec\", \"Quick Draw Secondary Beams (click in a bay)\", \"d:qsec\"]", "[\"dcirc\", \"Draw Circular Floor (click the centre, then a point on the edge)\", \"d:circ\"]",
+                "[\"sint\", \"Select Using Intersecting Line (drag a line across the objects)\", \"t:iline\"]", "hmRun(\"reshape_object\", {object: r.name, from: r.from, to})", "function lineSelect(p, a, b)", "const circleOutline = (c, r, n)", "[\"Using Intersecting Line\", \"t:iline\"]" })
+                Check(html.Contains(part), "viewer.html lost " + part);
+            Check(!html.Contains("(not in CSI ProMax yet)\", \"\", 0, 0, 1]"), "a strip button is still greyed out as not in CSI ProMax");
+            // The old corner-only axes must not come back: the triad stands at the global origin when it is in view.
+            Check(html.Contains("const o = inside ? [at[0], at[1]] : [38, h - 38]"), "the global axes are drawn at the origin");
+        });
         yield return ("extras: the Engine is one window laid out as the program: no window menu bar above it (its items in Tools and Help), white views, collapsed Model Explorer, plan dimensions, Ready (Ahmed 2026-11-26 22:11)", () =>
         {
             var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
-            foreach (var part in new[] { "function appMenuLoad()", "fetch(\"app-menu\"", "function drawDims(g, to, T, bub)", "#tools{display:none!important}", "if (!bgSaved) bg = \"white\";", "const model = node(\"model\", \"Model\", null,", ": \"Ready\";", "<option>Global</option>", "[\"eng:run\", \"Run Analysis (F5)\", \"run\"]" })
+            foreach (var part in new[] { "function appMenuLoad()", "fetch(\"app-menu\"", "function drawDims(g, to, T, bub)", "#tools{display:none!important}", "if (!bgSaved) bg = \"white\";", "const model = node(\"model\", \"Model\", null,", ": \"Ready\";", "<option>Global</option>", "[\"run\", \"Run Analysis (F5)\", \"eng:run\"]" })
                 Check(html.Contains(part), "viewer.html lost " + part);
             var main = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Panel", "Host", "MainWindow.cs"));
             Check(main.Contains("if (!CsiProMax.App.Modeler) layout.Children.Add(top);") && main.Contains("internal static bool RunAppMenu(string id)"), "the Engine window has no menu bar of its own; its items run from the page");

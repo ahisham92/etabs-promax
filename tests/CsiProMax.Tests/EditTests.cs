@@ -129,6 +129,32 @@ static class EditTests
             Refused(link, "divide_frames", new { objects = new[] { other }, parts = 2 }, "cannot be shared out");
         });
 
+        yield return ("edit: Reshape Object moves one end of a beam or one corner of a slab on its own story only, keeping section and loads; a point it does not have is refused", () =>
+        {
+            var link = Frame();
+            var m = link.Model;
+            var beam = FirstBeam(m);
+            var (label, story) = Split(beam);
+            m.AddLineLoad(label, story, "Dead", 5);
+            var made = Run(link, "reshape_object", new { @object = beam, from = new[] { 6.0, 0 }, to = new[] { 6.0, 1.5 } })["reshaped"]!.GetValue<string>();
+            var (l2, s2) = Split(made);
+            Check(s2 == story && l2 != label, "a reshaped beam on the same story: " + made);
+            var line = m.Line(l2)!;
+            var ends = new[] { m.Point(line.PointI)!, m.Point(line.PointJ)! }.Select(p => (p.X, p.Y)).OrderBy(p => p.X).ToList();
+            Check(ends[0] == (0.0, 0.0) && ends[1] == (6.0, 1.5), "the end moved, the other stayed: " + string.Join(" ", ends));
+            Check(m.LineAssigns.Single(a => a.Label == l2 && a.Story == story).Section == "B300x600", "the section stayed");
+            Check(m.LineLoads.Count(l => l.Object == l2 && l.Story == story) == 1, "the load went with it");
+            Check(!m.LineAssigns.Exists(a => a.Label == label && a.Story == story), "the old beam is off Story1");
+            Check(m.LineAssigns.Exists(a => a.Label == label && a.Story == "Story2"), "the beam above is untouched");
+            var slab = m.AreaAssigns.First(a => a.Story == "Story1");
+            var corner = m.Area(slab.Label)!.PointNames.Select(n => m.Point(n)!).First();
+            var moved = Run(link, "reshape_object", new { @object = slab.Label + "@Story1", from = new[] { corner.X, corner.Y }, to = new[] { corner.X - 1, corner.Y - 1 } })["reshaped"]!.GetValue<string>();
+            Check(m.Area(Split(moved).Label)!.PointNames.Select(n => m.Point(n)!).Any(p => p.X == corner.X - 1 && p.Y == corner.Y - 1), "the slab corner moved");
+            Refused(link, "reshape_object", new { @object = made, from = new[] { 3.0, 3 }, to = new[] { 4.0, 4 } }, "no end or corner");
+            Refused(link, "reshape_object", new { @object = made, from = new[] { 6.0, 1.5 }, to = new[] { 6.0, 1.5 } }, "where it was");
+            Refused(link, "reshape_object", new { @object = made, from = new[] { 6.0, 1.5 }, to = new[] { 0.0, 0 } }, "both its ends");
+        });
+
         yield return ("edit: Draw Braces and Draw Joints add them on each story given", () =>
         {
             var link = Frame();

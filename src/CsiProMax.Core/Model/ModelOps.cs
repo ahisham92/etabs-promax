@@ -38,13 +38,40 @@ public static class ModelOps
         if (m.StoryIndex(story) < 0) throw new ArgumentException($"There is no story '{story}'.");
         var same = Math.Abs(dx) < ModelEdit.Tolerance && Math.Abs(dy) < ModelEdit.Tolerance;
         if (same && story == o.Story) throw new ArgumentException($"{o} would be copied onto itself: give dx, dy or another story.");
-        PlanPoint Moved(string name)
+        return CopyMapped(m, o, story, same, p =>
         {
-            var p = m.Point(name) ?? throw new ArgumentException($"{o} has a point {name} the model does not have.");
             if (same) return p;
-            if (p.Below != 0) throw new ArgumentException($"{o} has a point set below its story ({name}); move it in the program.");
+            if (p.Below != 0) throw new ArgumentException($"{o} has a point set below its story ({p.Name}); move it in the program.");
             return m.PointAt(p.X + dx, p.Y + dy);
-        }
+        });
+    }
+
+    /// <summary>
+    /// Draw > Reshape Object: moves the corners or ends of one object that stand at (fromX, fromY) in plan to
+    /// (toX, toY), on its own story only, keeping its section, assignments, loads and hinges. A column moves whole
+    /// (both its ends are at the one plan point).
+    /// </summary>
+    public static Obj Reshape(StructuralModel m, Obj o, double fromX, double fromY, double toX, double toY)
+    {
+        if (Math.Abs(fromX - toX) < ModelEdit.Tolerance && Math.Abs(fromY - toY) < ModelEdit.Tolerance) throw new ArgumentException("Give a new place for the point: it is where it was.");
+        var names = o.Line ? new List<string> { m.Line(o.Label)!.PointI, m.Line(o.Label)!.PointJ } : m.Area(o.Label)!.PointNames;
+        bool At(PlanPoint p) => Math.Abs(p.X - fromX) <= ModelEdit.Tolerance * 10 && Math.Abs(p.Y - fromY) <= ModelEdit.Tolerance * 10;
+        if (!names.Select(n => m.Point(n)).Any(p => p is not null && At(p))) throw new ArgumentException($"{o} has no end or corner at ({fromX}, {fromY}).");
+        var made = CopyMapped(m, o, o.Story, false, p =>
+        {
+            if (!At(p)) return p;
+            if (p.Below != 0) throw new ArgumentException($"{o} has a point set below its story ({p.Name}); reshape it in the program.");
+            return m.PointAt(toX, toY);
+        });
+        if (made.Line) { var l = m.Line(made.Label)!; if (l.Kind != LineKind.Column && l.PointI == l.PointJ && l.StoriesBelowI == 0) { Remove(m, made); throw new ArgumentException($"{o} would have both its ends at one point."); } }
+        else { var a = m.Area(made.Label)!; if (a.PointNames.Zip(a.StoriesBelow).Distinct().Count() < 3) { Remove(m, made); throw new ArgumentException($"{o} would have fewer than three corners."); } }
+        Remove(m, o);
+        return made;
+    }
+
+    private static Obj CopyMapped(StructuralModel m, Obj o, string story, bool same, Func<PlanPoint, PlanPoint> map)
+    {
+        PlanPoint Moved(string name) => map(m.Point(name) ?? throw new ArgumentException($"{o} has a point {name} the model does not have."));
         if (o.Line)
         {
             var line = m.Line(o.Label)!;

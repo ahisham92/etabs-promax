@@ -452,6 +452,16 @@ public static class ModelerFieldSteps
             ctx.Tool("divide_frames", $$"""{"objects":[{{name}}],"parts":3}""",
                 a => FieldContext.Expect(a["parts"]!.AsArray().Count == 3 && a["parts"]!.AsArray().All(p => m.LineAssigns.Exists(x => x.Label + "@" + x.Story == p!.GetValue<string>() && x.Section == beam.Section)), "three beams with the section were expected: " + a.ToJsonString()),
                 "tool divide_frames, Edit > Divide Frames into 3");
+            {
+                var first = modeler.Model.LineAssigns.Where(x => x.Story == top && modeler.Model.Line(x.Label)?.Kind == CsiProMax.Model.LineKind.Beam).Select(x => (x, l: modeler.Model.Line(x.Label)!)).FirstOrDefault();
+                if (first.l is not null)
+                {
+                    var pi = modeler.Model.Point(first.l.PointI)!;
+                    ctx.Tool("reshape_object", $$"""{"object":{{Q(first.x.Label + "@" + top)}},"from":[{{pi.X.ToString(System.Globalization.CultureInfo.InvariantCulture)}},{{pi.Y.ToString(System.Globalization.CultureInfo.InvariantCulture)}}],"to":[{{(pi.X + 0.25).ToString(System.Globalization.CultureInfo.InvariantCulture)}},{{pi.Y.ToString(System.Globalization.CultureInfo.InvariantCulture)}}]}""",
+                        a => FieldContext.Expect(m.LineAssigns.Exists(x => x.Label + "@" + x.Story == a["reshaped"]!.GetValue<string>() && x.Section == first.x.Section), "the reshaped beam lost its section: " + a.ToJsonString()),
+                        "tool reshape_object, Draw > Reshape Object moves a beam's end");
+                }
+            }
             if (column is not null) ctx.Refused("divide_frames", $$"""{"objects":[{{Q(column.Label + "@" + column.Story)}}],"parts":2}""", "divides beams", "tool divide_frames says no to a column");
         }
         finally
