@@ -22,7 +22,8 @@ The field test is inside CSI ProMax. It checks what it can by itself and saves o
      writes to, the licence, Claude Code and its sign-in;
    - the open model, reading only (run it on a model that has been analysed and designed, so the result checks have
      something to read);
-   - the Modeler: a test building made with every Modeler tool, each change read back, written as .e2k, .s2k and .f2k;
+   - the Modeler: a test building made with every Modeler tool, each change read back, written as .e2k, .s2k and .f2k,
+     and each of those opened again in the Modeler as the whole model;
    - each CSI program on the PC (ETABS, SAP2000, SAFE): a second window that the test opens itself on that test
      model, saved as a scratch model in the test's own folder (SAFE 20 and 21 open only .fdb files through their API,
      so there the test starts a blank model and builds the Modeler's .f2k in it through the API, all but the design
@@ -56,6 +57,21 @@ What the report holds: "Not working" first (each failure with what was expected 
 tested" (each with the reason), then the plug-in lists, then every check of every part with its answer. The folder of
 the model and the Windows user's folder are left out. Without the window: `dotnet CsiProMax.dll --program etabs
 --fieldtest --full` (or `sap2000`, `safe`; leave out `--full` for the quick test) prints the same report.
+
+## Opening SAP2000 and SAFE files in the Modeler (2026-11-26)
+
+The Modeler opens .s2k and .f2k as well as .e2k (File > Open, or `open_model_file`). A file the Modeler wrote carries
+the whole model after `END TABLE DATA`, where SAP2000 and SAFE stop reading, and opens exactly as it was saved; a file
+SAP2000 or SAFE wrote is read from its tables. The field test checks the first kind. By hand, for the second:
+
+1. In SAP2000 with a model open: File > Export > SAP2000 .s2k Text File, all tables. In the Modeler, File > Open that
+   .s2k. Expect the same joints, frames, areas, supports, load patterns, cases, combinations and loads as SAP2000
+   shows; members on the level of their top end, levels from the Z grid lines. Anything left out is listed quietly
+   in the answer's `not_read` (ask the chat), never as a message.
+2. In SAFE 20 or later: File > Export > SAFE .F2K Text File. In the Modeler, File > Open that .f2k. Expect its slabs,
+   beams, columns, walls, supports, soil, tendons, design strips, loads, cases (hyperstatic too) and combinations.
+3. Open the .s2k the Modeler saved in SAP2000 (File > Import). SAP2000 should import it with no message about the
+   lines after END TABLE DATA (UNVERIFIED on a real PC until this is done once).
 
 ## Review pack written by itself after every run and design (2026-11-26)
 

@@ -1173,7 +1173,9 @@ public static class CsiTools
             ["units"] = $"{now.Force}, {now.Length}", ["locked"] = now.Locked,
         };
         // A Modeler .e2k: what its forms hold beyond the .e2k's keywords is in the .cpm beside it, and goes in by the tables.
-        if (e.Program.Key == CsiProgram.Etabs.Key && Path.GetExtension(path).Equals(".e2k", StringComparison.OrdinalIgnoreCase) && ModelerTables.ModelerFileBeside(path) is { } cpm)
+        if ((e.Program.Key == CsiProgram.Etabs.Key && Path.GetExtension(path).Equals(".e2k", StringComparison.OrdinalIgnoreCase)
+             || e.Program.Key == CsiProgram.Sap2000.Key && Path.GetExtension(path).Equals(".s2k", StringComparison.OrdinalIgnoreCase))
+            && ModelerTables.ModelerFileBeside(path) is { } cpm && ModelerTables.HasRows(cpm, e.Program))
         {
             var (done, refused) = ModelerTables.Apply(e, cpm);
             if (done.Count > 0) answer["modeler_tables"] = new JsonArray(done.Select(x => (JsonNode)x).ToArray());

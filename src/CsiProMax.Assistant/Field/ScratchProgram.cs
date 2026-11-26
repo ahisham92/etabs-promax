@@ -568,9 +568,9 @@ public sealed class ScratchProgram : IScratchWindow
 
         // The Modeler's table data (material damping, notes, time dependence, ...) goes into ETABS through its tables, as
         // open_model does for a Modeler .e2k, and the model is saved again.
-        if (!build && _program.Key == CsiProgram.Etabs.Key && ModelerTables.ModelerFileBeside(modelFile) is { } cpm
-            && ModelFile.Load(cpm).Materials.Any(x => x.Tables is not null)
-            && ctx.Step("put the Modeler's material data that the .e2k has no keyword for in through ETABS's tables", () => // ETABS itself
+        if (!build && (_program.Key == CsiProgram.Etabs.Key || _program.Key == CsiProgram.Sap2000.Key) && ModelerTables.ModelerFileBeside(modelFile) is { } cpm
+            && ModelerTables.HasRows(cpm, _program)
+            && ctx.Step($"put the Modeler's data that {name}'s file has no place for in through {name}'s tables and API", () =>
             {
                 var (done, refused) = ModelerTables.Apply(Link, cpm);
                 var answer = Convert.ToInt32(Ask(FileTimeout, "save the scratch model", m => m.File.Save(target),

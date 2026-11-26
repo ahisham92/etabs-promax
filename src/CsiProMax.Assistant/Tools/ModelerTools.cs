@@ -38,7 +38,7 @@ public static class ModelerTools
             Ask.Changes, SetProgram, a => $"Make the model for {StructuralModel.TargetName(a.Text("program"))}"),
 
         new("open_model_file",
-            "Opens an ETABS text file (.e2k or .$et, as ETABS exports) or a Modeler file (.cpm) in the Modeler. Everything in the file is kept, also what the Modeler does not show, and is written back on save. The model in the Modeler now is replaced.",
+            "Opens a model file in the Modeler: an ETABS text file (.e2k, .$et), a SAP2000 text file (.s2k, .$2k), a SAFE text file (.f2k, .$fk) or a Modeler file (.cpm). A .s2k or .f2k the Modeler saved opens exactly as it was saved; one SAP2000 or SAFE wrote is read from its tables (levels from the Z grid lines, members on the level of their top end), and what has no place in the Modeler yet comes back in not_read. Everything in an .e2k is kept, also what the Modeler does not show, and is written back on save. The model in the Modeler now is replaced.",
             """{"type":"object","required":["path"],"properties":{"path":{"type":"string","description":"The file's full path."}}}""",
             Ask.Always, Open, a => $"Open {a.Text("path")} (replaces the model open in the Modeler)"),
 
@@ -138,12 +138,14 @@ public static class ModelerTools
         var o = Offline(e);
         var path = a.Need("path").Trim().Trim('"');
         if (!File.Exists(path)) throw new ToolInputException($"There is no file at {path}.");
-        StructuralModel model;
-        try { model = OfflineEtabs.Load(path); }
+        OfflineEtabs.Opened opened;
+        try { opened = OfflineEtabs.Open(path); }
         catch (Exception ex) when (ex is E2k.E2kFormatException or JsonException or IOException or InvalidDataException) { throw new ToolInputException($"The file could not be read: {ex.Message}"); }
-        o.Replace(model, path.EndsWith(".e2k", StringComparison.OrdinalIgnoreCase) ? path : "");
+        o.Replace(opened.Model, OfflineEtabs.SavesTo(path, opened));
         var result = Summary(o).AsObject();
         if (o.Path.Length == 0) result["note"] = "Opened as a copy: saving writes a new .e2k, the file you opened is not changed.";
+        // What another program's file had that the Modeler has no place for yet: for the chat to say if asked, never a pop-up.
+        if (opened.Notes.Count > 0) result["not_read"] = new JsonArray(opened.Notes.Take(40).Select(n => (JsonNode)n).ToArray());
         return result;
     }
 

@@ -66,6 +66,8 @@ static class ExtrasTests
         yield return ("extras: joint constraints of every type go into the .s2k with their joints, beside the floors' diaphragms, and stay out of the .e2k", () =>
         {
             var link = Frame();
+            // The .e2k's header carries the time it was written: fixed, so the two writes compare (CI flake, 2026-11-26).
+            E2kWriter.SavedAt = new DateTime(2026, 11, 26, 12, 0, 0);
             var e2kBefore = E2kWriter.Write(link.Model);
             foreach (var type in ExtrasDefs.ConstraintTypes)
                 Run(link, "define_constraint", new { name = "C-" + type, type, tolerance = 0.01 });
@@ -81,7 +83,9 @@ static class ExtrasTests
             Check(t["CONSTRAINT DEFINITIONS - LOCAL"].Single().ContainsKey("U1") && !t["CONSTRAINT DEFINITIONS - LOCAL"].Single().ContainsKey("CoordSys"), "the local constraint in local axes");
             Check(t["JOINT CONSTRAINT ASSIGNMENTS"].Count(r => r["Constraint"] == "C-Body") == 2, "its two joints");
             Check(t["CONSTRAINT DEFINITIONS - DIAPHRAGM"].Count >= 2, "the floors' diaphragms and the one defined, in one table");
-            Check(E2kWriter.Write(link.Model) == e2kBefore, "the .e2k does not change");
+            var e2kAfter = E2kWriter.Write(link.Model);
+            E2kWriter.SavedAt = null;
+            Check(e2kAfter == e2kBefore, "the .e2k does not change");
             var back = ModelFile.FromJson(ModelFile.ToJson(link.Model));
             Check(back.Extras!.Constraints.Count == ExtrasDefs.ConstraintTypes.Length, "kept in the .cpm");
             Refused(link, "define_constraint", new { name = "C-X", type = "Glue" }, "constraint type");
