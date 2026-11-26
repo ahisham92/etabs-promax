@@ -178,17 +178,12 @@ public static class S2kWriter
         var springs = new List<IReadOnlyList<(string, string)>>();
         var springDefs = PropertyDefs.Springs(m);
         // The assignments kept as rows of ETABS's tables (AssignTables) that SAP2000 has a table for, under its own
-        // names and fields; the others are named in a note, to assign in SAP2000.
+        // names and fields. Those SAP2000 takes only by its API are set after the file opens (ModelerTables.Apply).
         var frameMass = new List<IReadOnlyList<(string, string)>>();
         var tcLimits = new List<IReadOnlyList<(string, string)>>();
         var areaMass = new List<IReadOnlyList<(string, string)>>();
         var areaAxes = new List<IReadOnlyList<(string, string)>>();
         var jointMass = new List<IReadOnlyList<(string, string)>>();
-        void NotCarried(Assign a, string what, params string[] carried)
-        {
-            foreach (var table in (a.Tables ?? []).Keys.Where(t => !carried.Contains(t, StringComparer.OrdinalIgnoreCase)))
-                notes.Add($"{what} has '{table.Split(" - ", 2)[1]}' assigned, which SAP2000's text file has no table for: assign it in SAP2000.");
-        }
         foreach (var x in m.LineAssigns)
         {
             if (!frameNames.TryGetValue((x.Label, x.Story), out var name)) continue;
@@ -198,7 +193,6 @@ public static class S2kWriter
             if (tc.Count > 0)
                 tcLimits.Add(Row(("Frame", name), ("Tendon", "No"), ("TensLimit", tc.GetValueOrDefault("IncludeTens", "No")), ("CompLimit", tc.GetValueOrDefault("IncludeComp", "No")),
                     ("Tension", tc.GetValueOrDefault("TensLimit", "0")), ("Compression", tc.GetValueOrDefault("CompLimit", "0"))));
-            NotCarried(x, "Frame " + name, "Frame Assignments - Additional Mass", "Frame Assignments - Tension and Compression Limits");
             var (ri, rj) = PropertyDefs.ReleasesOf(x);
             if (ri.Count + rj.Count > 0)
                 releases.Add(Row(("Frame", name), ("PI", YesNo(ri.Contains("P"))), ("V2I", YesNo(ri.Contains("V2"))), ("V3I", YesNo(ri.Contains("V3"))), ("TI", YesNo(ri.Contains("T"))), ("M2I", YesNo(ri.Contains("M2"))), ("M3I", YesNo(ri.Contains("M3"))),
@@ -236,7 +230,6 @@ public static class S2kWriter
             if (!areaNames.TryGetValue((x.Label, x.Story), out var name)) continue;
             if (AssignTables.Row(x, "Area Assignments - Additional Mass").TryGetValue("AddedMass", out var mpa)) areaMass.Add(Row(("Area", name), ("MassPerArea", mpa)));
             if (AssignTables.Row(x, "Area Assignments - Local Axes").TryGetValue("Angle", out var aang)) areaAxes.Add(Row(("Area", name), ("Angle", aang), ("AdvanceAxes", "No")));
-            NotCarried(x, "Area " + name, "Area Assignments - Additional Mass", "Area Assignments - Local Axes");
             var am = PropertyDefs.Modifiers(x.Extra, PropertyDefs.ShellModifiers);
             if (am.Values.Any(v => Math.Abs(v - 1) > 1e-12))
                 areaMods.Add(Row(("Area", name), ("f11", N(am["F11MOD"])), ("f22", N(am["F22MOD"])), ("f12", N(am["F12MOD"])), ("m11", N(am["M11MOD"])), ("m22", N(am["M22MOD"])), ("m12", N(am["M12MOD"])), ("v13", N(am["V13MOD"])), ("v23", N(am["V23MOD"])), ("MassMod", N(am["MMOD"])), ("WeightMod", N(am["WMOD"]))));
@@ -249,7 +242,6 @@ public static class S2kWriter
             if (jm.Count > 0)
                 jointMass.Add(Row(("Joint", Joint(Physical.At(m, p0, si0))), ("CoordSys", "GLOBAL"), ("Mass1", jm.GetValueOrDefault("MassXY", "0")), ("Mass2", jm.GetValueOrDefault("MassXY", "0")), ("Mass3", jm.GetValueOrDefault("MassZ", "0")),
                     ("MMI1", jm.GetValueOrDefault("MMIX", "0")), ("MMI2", jm.GetValueOrDefault("MMIY", "0")), ("MMI3", jm.GetValueOrDefault("MMIZ", "0"))));
-            NotCarried(pa, $"Joint {pa.Point}@{pa.Story}", "Joint Assignments - Additional Mass");
         }
         foreach (var pa in m.PointAssigns)
         {
