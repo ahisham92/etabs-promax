@@ -56,6 +56,54 @@ static class OpenFileTests
             finally { File.Delete(path); E2kWriter.SavedAt = null; }
         });
 
+        yield return ("open: a SAP2000 file read from its tables keeps groups, constraints, springs, links, hinges, mass source and moving loads", () =>
+        {
+            var m = Templates.ConcreteFrame("Extras", [6, 6], [5], 2, 3.2);
+            m.Target = "sap2000";
+            var beam = m.LineAssigns.First(a => m.Line(a.Label)?.Kind == LineKind.Beam && m.FrameSections.Find(f => f.Name == a.Section)?.Material is { } mat && m.Materials.Find(x => x.Name == mat)?.IsConcrete == true);
+            var beam2 = m.LineAssigns.First(a => a != beam && a.Story == beam.Story && m.Line(a.Label)?.Kind == LineKind.Beam);
+            var support = m.PointAssigns.First(p => p.Restraint is not null);
+            var top = m.PointAssigns.Where(p => p.Story == m.Stories[^1].Name).Select(p => p.Point + "@" + p.Story).Take(2).ToList();
+            if (top.Count < 2) top = m.Points.Take(2).Select(p => p.Name + "@" + m.Stories[^1].Name).ToList();
+            m.Passthrough.Add(new RawSection { Heading = GroupDefs.Heading, After = "AREA ASSIGNS", Lines = ["  GROUP \"Core\" COLOR \"Blue\"", $"  GROUP \"Core\" LINE \"{beam.Label}\" \"{beam.Story}\""] });
+            ExtrasDefs.SetConstraint(m, "B1", "Body", null, ["UX", "UY", "RZ"], 0);
+            ExtrasDefs.AssignConstraint(m, top, "B1");
+            PropertyDefs.SetSpring(m, "point", "Soil", new Dictionary<string, double> { ["UZ"] = 5000, ["RX"] = 100 });
+            PropertyDefs.Put(support.Extra, "SPRINGPROP", E2kText.Quote("Soil"));
+            PropertyDefs.SetLink(m, "Pad", "LINEAR", new Dictionary<string, (double, double)> { ["U1"] = (2000, 5), ["U2"] = (300, 0) });
+            PropertyDefs.SetHinges(m, beam.Label, beam.Story, [new PropertyDefs.HingeDef(0.05, "M3"), new PropertyDefs.HingeDef(0.95, "M3")]);
+            new CsiProMax.Lateral.MassSource("MsSrc1", true, false, [("Dead", 1), ("Live", 0.25)]).WriteTo(m);
+            ExtrasDefs.SetLane(m, "L1", [beam.Label + "@" + beam.Story, beam2.Label + "@" + beam2.Story], 0.5, 3);
+            ExtrasDefs.SetVehicle(m, "Truck", "HL-93K", 1, [], 0);
+            ExtrasDefs.SetVehicle(m, "Cart", "", 1, [new Axle { Load = 50, Spacing = 0 }, new Axle { Load = 80, Spacing = 4 }], 2);
+            ExtrasDefs.SetVehicleClass(m, "VC", [new ClassVehicle { Vehicle = "Truck" }, new ClassVehicle { Vehicle = "Cart", Scale = 0.5 }]);
+            ExtrasDefs.SetMovingCase(m, "MOVE", [new MovingAssign { Class = "VC", Lanes = ["L1"] }]);
+
+            var read = S2kReader.Read(S2kWriter.Write(m).Text, "Extras");
+            Check(!read.Exact, "read from the tables");
+            var r = read.Model;
+            var g = GroupDefs.Groups(r).Find(x => x.Name == "Core");
+            Check(g is not null && g.Color == "Blue" && g.Members.Contains(("LINE", beam.Label, beam.Story)), "the group, its color and its member");
+            Check(!GroupDefs.Groups(r).Exists(x => r.Stories.Exists(s => s.Name == x.Name)), "the story groups CSI ProMax writes do not come back as groups");
+            var c = r.Extras?.Constraints.Find(x => x.Name == "B1");
+            Check(c is not null && c.Type == "Body" && c.Dofs.SequenceEqual(["UX", "UY", "RZ"]) && c.Joints.Count == 2, "the body constraint, its directions and its joints");
+            var sp = r.PointAssigns.Find(p => PropertyDefs.Value(p.Extra, "SPRINGPROP") is not null);
+            Check(sp is not null && PropertyDefs.Springs(r).Find(x => x.Name == PropertyDefs.Value(sp.Extra, "SPRINGPROP")) is { } k && k.Values["UZ"] == 5000 && k.Values["RX"] == 100, "the joint spring and its stiffness");
+            var link = PropertyDefs.Links(r).Find(x => x.Name == "Pad");
+            Check(link is not null && link.Type == "LINEAR" && link.Dofs["U1"] == (2000, 5) && link.Dofs["U2"] == (300, 0), "the link property, each direction's stiffness and damping");
+            var h = PropertyDefs.HingesOf(r, beam.Label, beam.Story);
+            Check(h.Count == 2 && h.TrueForAll(x => x.Dof == "M3"), "the beam's hinges");
+            var ms = CsiProMax.Lateral.MassSource.Of(r);
+            Check(ms.Elements && !ms.AddedMass && ms.Loads.Count == 2 && ms.Loads[1] == ("Live", 0.25), "the mass source");
+            var x = r.Extras!;
+            Check(x.Lanes.Find(l => l.Name == "L1") is { Frames.Count: 2, Offset: 0.5, Width: 3 }, "the lane");
+            Check(x.Vehicles.Find(v => v.Name == "Truck")?.Standard == "HL-93K", "the standard vehicle");
+            Check(x.Vehicles.Find(v => v.Name == "Cart") is { Axles.Count: 2, Uniform: 2 } cart && cart.Axles[1].Spacing == 4 && cart.Axles[1].Load == 80, "the general vehicle");
+            Check(x.VehicleClasses.Find(v => v.Name == "VC")?.Vehicles.Count == 2, "the vehicle class");
+            Check(x.MovingCases.Find(v => v.Name == "MOVE") is { } mv && mv.Assignments[0].Lanes.SequenceEqual(["L1"]) && !r.LoadCases.Exists(lc => lc.Name == "MOVE"), "the moving load case, kept with the moving loads");
+            Check(read.Notes.Count == 0, "nothing left unread: " + string.Join(" | ", read.Notes));
+        });
+
         yield return ("open: the large model's .s2k read from its tables gives every joint, member, support, load, case and combination back", () =>
         {
             var m = LargeModelTests.Large();
@@ -144,7 +192,18 @@ static class OpenFileTests
                 E2kReader.Read(E2kWriter.Write(m));
                 var again = F2kWriter.Write(m);
                 Equal(Physical.Areas(m).Count(a => a.Kind == AreaKind.Floor), again.Slabs, file + ": the .f2k written again has every slab");
+                // Nothing of SAFE's file is lost: decks are sections, groups are groups, and every table with no form
+                // yet (design preferences, slab overwrites, punching checks, insertion points) goes back as it was.
+                Check(r.Notes.Count == 0, file + ": nothing left unread: " + string.Join(" | ", r.Notes));
+                if (t.TryGetValue("DECK PROPERTY DEFINITIONS", out var decks))
+                    foreach (var d in decks) Check(m.ShellSections.Exists(x => x.Name == d["Name"] && x.Get("PROPTYPE") == "Deck" && x.Get("DECKMATERIAL") == d["Deck Material"]), file + ": deck " + d["Name"]);
+                if (t.TryGetValue("GROUP ASSIGNMENTS", out var ga))
+                    Equal(ga.Count, GroupDefs.Groups(m).Sum(g => g.Members.Count), file + ": every group member");
+                var written = CsiTableText.Parse(again.Text);
+                foreach (var name in t.Keys.Where(k => k.StartsWith("CONCRETE SLAB DESIGN", StringComparison.Ordinal) || k.Contains("PREFERENCES") || k.Contains("INSERTION POINT") || k == "DECK PROPERTY DEFINITIONS"))
+                    Check(written.TryGetValue(name, out var w) && w.Count >= t[name].Count, file + ": " + name + " goes back into the .f2k");
                 Console.WriteLine($"      {file}: {Physical.Areas(m).Count()} areas, {Physical.Frames(m).Count()} frames, {m.LoadCases.Count} cases, {m.Combos.Count} combinations, {tendons} tendons, {strips} strips; not read: {r.Notes.Count}");
+                if (Environment.GetEnvironmentVariable("CPM_SHOW_NOTES") == "1") foreach (var n in r.Notes) Console.WriteLine("        " + n);
             }
         });
 
@@ -179,6 +238,7 @@ static class OpenFileTests
             var before = TableTools.SheetRows;
             TableTools.SheetRows = 10;
             var path = Temp(".xlsx");
+            E2kWriter.SavedAt = new DateTime(2026, 11, 26, 12, 0, 0);
             try
             {
                 var m = LargeModelTests.Large();
@@ -192,7 +252,7 @@ static class OpenFileTests
                 ModelTables.Import(fromExcel, read);
                 Equal(E2kWriter.Write(m), E2kWriter.Write(fromExcel), "the model from the split workbook is the same model");
             }
-            finally { TableTools.SheetRows = before; File.Delete(path); }
+            finally { TableTools.SheetRows = before; File.Delete(path); E2kWriter.SavedAt = null; }
         });
     }
 }

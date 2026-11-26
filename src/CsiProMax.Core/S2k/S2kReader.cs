@@ -13,7 +13,7 @@ namespace CsiProMax.S2k;
 /// top end, and what is level is a beam or a floor, what is upright a column or a wall, the rest braces and ramps.
 /// What the Modeler has no place for is named in <see cref="Result.Notes"/>, quietly: nothing is asked.
 /// </summary>
-public static class S2kReader
+public static partial class S2kReader
 {
     public sealed record Result(StructuralModel Model, bool Exact, IReadOnlyList<string> Notes);
 
@@ -27,7 +27,7 @@ public static class S2kReader
         var tables = CsiTableText.Parse(text);
         if (tables.Count == 0) throw new E2kFormatException("This is not a SAP2000 text file: it has no tables.");
         var notes = new List<string>();
-        var m = Tables(tables, title, notes);
+        var m = Tables(tables, title, notes, keep: true);
         m.Target = "sap2000";
         return new Result(m, false, notes.Distinct().ToList());
     }
@@ -40,7 +40,7 @@ public static class S2kReader
         row.TryGetValue(key, out var v) && double.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out var d) ? d : fallback;
     private static bool Yes(Dictionary<string, string> row, string key) => S(row, key).Equals("Yes", StringComparison.OrdinalIgnoreCase);
 
-    internal static StructuralModel Tables(Dictionary<string, List<Dictionary<string, string>>> t, string title, List<string> notes)
+    internal static StructuralModel Tables(Dictionary<string, List<Dictionary<string, string>>> t, string title, List<string> notes, bool keep = false)
     {
         var m = ModelEdit.New(title);
         m.LoadPatterns.Clear(); m.LoadCases.Clear(); m.Combos.Clear();
@@ -205,13 +205,15 @@ public static class S2kReader
         Patterns(m, Use, notes);
         Functions(m, Use, notes);
         Cases(m, Use, notes);
+        // Groups, constraints, springs, links, hinges, the mass source and moving loads.
+        Extras(m, Use, t, joints, j => { var w = Where(j); return w.Point.Name + "@" + storyNames[w.Level]; }, frameAt, areaAt, storyNames, notes);
         Combos(m, Use, notes);
         Loads(m, Use, joints, frameAt, areaAt, Where, storyNames, notes);
 
-        // Groups that are not the stories CSI ProMax writes, and the tables the Modeler has no place for.
-        Use("GROUPS 1 - DEFINITIONS"); Use("GROUPS 2 - ASSIGNMENTS"); Use("MASS SOURCE");
+        // A table the Modeler has no form for is kept as the file has it, and goes back into the .s2k.
         foreach (var name in t.Keys.Where(k => !known.Contains(k)).OrderBy(k => k, StringComparer.Ordinal))
-            notes.Add($"The table \"{name}\" ({t[name].Count} rows) has no place in the Modeler yet; it was not read.");
+            if (keep) KeptTables.Keep(m, "sap2000", name, t[name]);
+            else notes.Add($"The table \"{name}\" ({t[name].Count} rows) has no place in the Modeler yet; it was not read.");
         return m;
     }
 
@@ -276,6 +278,24 @@ public static class S2kReader
             }
             try { PropertyDefs.SetMaterial(m, name, m.Materials.Exists(x => x.Name == name) ? name : null, type, null, values); }
             catch (ArgumentException ex) { notes.Add($"Material {name}: {ex.Message} It was kept as SAP2000 gives it, without its strengths."); m.Materials.RemoveAll(x => x.Name == name); m.Materials.Add(new Material { Name = name, Lines = [["TYPE", Quote(type), "WEIGHTPERVOLUME", Number(values.GetValueOrDefault("WEIGHTPERVOLUME"))], ["SYMTYPE", Quote("Isotropic"), "E", Number(values.GetValueOrDefault("E")), "U", Number(values.GetValueOrDefault("U", 0.2)), "A", Number(values.GetValueOrDefault("A"))]] }); }
+
+            // Everything else the material's forms hold (curves, hysteresis, damping, time dependence, acceptance
+            // criteria, its grade and notes), by ETABS 23's table and field names.
+            if (m.Materials.Find(x => x.Name == name) is { } mat)
+            {
+                var rows = new Dictionary<string, List<Dictionary<string, string>>>(StringComparer.OrdinalIgnoreCase);
+                foreach (var (table, fields) in ProgramTables.MaterialTables)
+                {
+                    if (ProgramTables.SapMaterialTable(table) is not { } sap) continue;
+                    var mine = use(sap).Where(x => S(x, "Material") == name)
+                        .Select(x => fields.Where(f => x.ContainsKey(ProgramTables.SapField(f)) && f is not "Type" and not "SymType" and not "GUID").ToDictionary(f => f, f => x[ProgramTables.SapField(f)], StringComparer.Ordinal))
+                        .Where(x => x.Count > 0).ToList();
+                    if (mine.Count == 0) continue;
+                    rows[table] = ProgramTables.ManyRows.Contains(table) ? mine : [mine[0]];
+                }
+                try { if (rows.Count > 0) ProgramTables.SetMaterialTables(mat, rows); }
+                catch (ArgumentException ex) { notes.Add($"Material {name}: {ex.Message}"); }
+            }
         }
     }
 
@@ -321,7 +341,7 @@ public static class S2kReader
                 sec = new FrameSection { Name = name, Lines = [["MATERIAL", Quote(material), "SHAPE", Quote("General"), "D", Number(d > 0 ? d : 1), "B", Number(b > 0 ? b : 1),
                     "AREA", Number(D(r, "Area")), "AS2", Number(D(r, "AS2")), "AS3", Number(D(r, "AS3")), "I33", Number(D(r, "I33")), "I22", Number(D(r, "I22")), "J", Number(D(r, "TorsConst"))]] };
                 m.FrameSections.Add(sec);
-                if (etabs is null) notes.Add($"Frame section {name} is SAP2000's {shape} shape: it opens as a general section with its area and inertias.");
+                if (etabs is null && shape != "General") notes.Add($"Frame section {name} is SAP2000's {shape} shape: it opens as a general section with its area and inertias.");
             }
             Modifiers(sec, r);
         }
@@ -374,8 +394,6 @@ public static class S2kReader
     {
         var members = use("JOINT CONSTRAINT ASSIGNMENTS").Where(r => S(r, "Type").Equals("Diaphragm", StringComparison.OrdinalIgnoreCase))
             .GroupBy(r => S(r, "Constraint")).ToDictionary(g => g.Key, g => g.Select(r => S(r, "Joint")).Where(joints.ContainsKey).ToHashSet(StringComparer.OrdinalIgnoreCase), StringComparer.Ordinal);
-        foreach (var other in T2(use, "JOINT CONSTRAINT ASSIGNMENTS").Where(r => !S(r, "Type").Equals("Diaphragm", StringComparison.OrdinalIgnoreCase)).Select(r => S(r, "Type")).Distinct())
-            notes.Add($"SAP2000's {other} constraints have no place in the Modeler's ETABS-style model yet; they were not read.");
         use("CONSTRAINT DEFINITIONS - DIAPHRAGM");
         var byJoint = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (constraint, set) in members)
@@ -531,6 +549,7 @@ public static class S2kReader
                 "LinBuckling" => new CaseDef(name, "Buckling", Patterns(bucklingLoads[name])) { InitialCase = init, MaxModes = (int)(buckling[name].FirstOrDefault() is { } bk ? D(bk, "NumBuckMode", 6) : 6) },
                 _ => null,
             };
+            if (S(r, "Type") == "LinMoving") continue; // read with the moving loads
             if (def is null) { notes.Add($"Load case {name} is SAP2000's {S(r, "Type")} case, which the Modeler has no form for yet; it was not read."); continue; }
             defs.Add(def);
         }

@@ -252,7 +252,16 @@ public static class F2kWriter
             tables.Add(CsiTableText.Table("TENDON SECTION PROPERTIES", tendonSections.Select(s => (IReadOnlyList<(string, string)>)Row(("Name", s.Name), ("Material", s.Material), ("StrandArea", N(s.StrandArea))))));
 
         // Slab and wall properties: slabs, drops, mats and footings by the slab type ETABS gives them.
-        var slabProps = m.ShellSections.Where(s => usedSlab.Contains(s.Name)).ToList();
+        static bool IsDeck(ShellSection s) => string.Equals(s.Get("PROPTYPE"), "Deck", StringComparison.OrdinalIgnoreCase);
+        var deckProps = m.ShellSections.Where(s => usedSlab.Contains(s.Name) && IsDeck(s)).ToList();
+        var slabProps = m.ShellSections.Where(s => usedSlab.Contains(s.Name) && !IsDeck(s)).ToList();
+        // Decks, by SAFE's own fields (the .e2k's DECK keywords).
+        if (deckProps.Count > 0)
+            tables.Add(CsiTableText.Table("DECK PROPERTY DEFINITIONS", deckProps.Select(s => (IReadOnlyList<(string, string)>)Row(("Name", s.Name), ("Deck Type", s.Get("DECKTYPE") ?? "Filled"),
+                ("Slab Material", s.Get("CONCMATERIAL") ?? ""), ("Deck Material", s.Get("DECKMATERIAL") ?? ""), ("Slab Depth", N(s.Number("DECKSLABDEPTH") ?? 0)), ("Rib Depth", N(s.Number("DECKRIBDEPTH") ?? 0)),
+                ("Rib Width Top", N(s.Number("DECKRIBWIDTHTOP") ?? 0)), ("Rib Width Bottom", N(s.Number("DECKRIBWIDTHBOTTOM") ?? 0)), ("Rib Spacing", N(s.Number("DECKRIBSPACING") ?? 0)),
+                ("Deck Shear Thickness", N(s.Number("DECKSHEARTHICKNESS") ?? 0)), ("Deck Unit Weight", N(s.Number("DECKUNITWEIGHT") ?? 0)), ("Shear Stud Diameter", N(s.Number("SHEARSTUDDIAM") ?? 0)),
+                ("Shear Stud Height", N(s.Number("SHEARSTUDHEIGHT") ?? 0)), ("Shear Stud Tensile Strength", N(s.Number("SHEARSTUDFU") ?? 0))))));
         var wallProps = m.ShellSections.Where(s => usedWall.Contains(s.Name)).ToList();
         if (slabProps.Count + wallProps.Count > 0)
             tables.Add(CsiTableText.Table("AREA SECTION PROPERTY DEFINITIONS - SUMMARY", slabProps.Select(s => (IReadOnlyList<(string, string)>)Row(("Name", s.Name), ("Type", "Slab"), ("Element Type", ElementType(s, "Shell-Thick")), ("Material", s.Material), ("Total Thickness", N(s.Thickness ?? 0))))
@@ -452,6 +461,9 @@ public static class F2kWriter
                 row.Add(("LLRF", N(st.Llrf)));
                 return (IReadOnlyList<(string, string)>)row;
             })));
+
+        // The tables of a SAFE file the Modeler opened that it has no form for, as the file had them.
+        KeptTables.WriteInto(m, "safe", tables);
 
         var header = $"File written by CSI ProMax Modeler on {DateTime.Now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)}: story {story} of {(m.Title.Length > 0 ? m.Title : "the model")}";
         return new F2kResult(CsiTableText.Document(header, tables), story, areaRows.Count, beamRows.Count, columns.Count, wallRows.Count,

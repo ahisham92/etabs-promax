@@ -33,10 +33,22 @@ public static class F2kReader
         SafeOnly(m, f, notes);
         used.UnionWith(SafeTables);
         m.Target = "safe";
-        foreach (var name in f.Keys.Where(k => !used.Contains(k) && !Quiet(k)).OrderBy(k => k, StringComparer.Ordinal))
-            notes.Add($"The table \"{name}\" ({f[name].Count} rows) has no place in the Modeler yet; it was not read.");
+        // Every other table (design preferences and overwrites, punching checks, insertion points, options, ...) is
+        // kept as the file has it and goes back into the .f2k: nothing of the file is lost, and nothing is asked.
+        foreach (var name in f.Keys.Where(k => !used.Contains(k) && !Derived(k)))
+            KeptTables.Keep(m, "safe", name, f[name]);
+        // Groups, offsets and insertion points were read for ETABS and SAP2000 too; SAFE gets them back as they were.
+        foreach (var name in BothWays.Where(f.ContainsKey)) KeptTables.Keep(m, "safe", name, f[name]);
         return new S2kReader.Result(m, false, notes.Distinct().ToList());
     }
+
+    /// <summary>What SAFE works out from the rest of the file each time it writes it (summaries, lists, discretized tendons).</summary>
+    private static bool Derived(string table) =>
+        table.EndsWith("SUMMARY", StringComparison.Ordinal) || table.StartsWith("MATERIAL LIST", StringComparison.Ordinal)
+        || table is "TENDON DISCRETIZED POINTS" or "TENDON - TOTAL ELONGATION";
+
+    /// <summary>Tables read into the model and also kept for the .f2k, which has no writer of its own for them yet.</summary>
+    private static readonly string[] BothWays = ["GROUP DEFINITIONS", "GROUP ASSIGNMENTS", "FRAME ASSIGNMENTS - END LENGTH OFFSETS", "FRAME ASSIGNMENTS - INSERTION POINT", "LINK PROPERTY DEFINITIONS - LINEAR"];
 
     /// <summary>What SAFE writes about its own screen, options and summaries: nothing of the model is in them.</summary>
     private static bool Quiet(string table) =>
@@ -121,7 +133,20 @@ public static class F2kReader
             ("Type", S(r, "Modeling Type", "Shell-Thick")), ("Thickness", S(r, "Slab Thickness")), ("SlabType", S(r, "Property Type", "Slab")), .. ShellMods(r)])));
         Put("AREA SECTION PROPERTIES", T("WALL PROPERTY DEFINITIONS - SPECIFIED").Select(r => R([("Section", S(r, "Name")), ("Material", S(r, "Material")), ("AreaType", "Shell"),
             ("Type", S(r, "Modeling Type", "Shell-Thin")), ("Thickness", S(r, "Wall Thickness")), .. ShellMods(r)])));
-        if (T("DECK PROPERTY DEFINITIONS").Count > 0) notes.Add("SAFE's deck properties have no Modeler form yet; slabs that use a deck open without a section.");
+
+        // Groups, frame end offsets and insertion points, and linear links, in SAP2000's tables.
+        Put("GROUPS 1 - DEFINITIONS", T("GROUP DEFINITIONS").Select(r => R(("GroupName", S(r, "Name")), ("Color", S(r, "Color")))));
+        Put("GROUPS 2 - ASSIGNMENTS", T("GROUP ASSIGNMENTS").Select(r => R(("GroupName", S(r, "Group Name")), ("ObjectType", S(r, "Object Type") switch { "Point" => "Joint", "Line" or "Beam" or "Column" or "Brace" => "Frame", "Floor" or "Wall" or "Area" => "Area", var o => o }),
+            ("ObjectLabel", S(r, "Object Unique Name", S(r, "Object Label"))))));
+        Put("FRAME OFFSET ALONG LENGTH ASSIGNMENTS", T("FRAME ASSIGNMENTS - END LENGTH OFFSETS")
+            .Where(r => !S(r, "Offset Option", "Auto").Equals("Auto", StringComparison.OrdinalIgnoreCase) || D(r, "Offset I") != 0 || D(r, "Offset J") != 0 || D(r, "Rigid Factor") != 0)
+            .Select(r => R(("Frame", Name(r)), ("LengthType", "User Defined"), ("Offset1", S(r, "Offset I", "0")), ("Offset2", S(r, "Offset J", "0")), ("RZ", S(r, "Rigid Factor", "0")))));
+        Put("FRAME INSERTION POINT ASSIGNMENTS", T("FRAME ASSIGNMENTS - INSERTION POINT").Select(r => R(("Frame", Name(r)), ("CardinalPt", S(r, "Cardinal Point", "10")))));
+        var links = T("LINK PROPERTY DEFINITIONS - LINEAR");
+        Put("LINK PROPERTY DEFINITIONS 01 - GENERAL", links.Select(r => R(("Link", S(r, "Name")), ("LinkType", "Linear"))));
+        Put("LINK PROPERTY DEFINITIONS 02 - LINEAR", links.SelectMany(r => new[] { "U1", "U2", "U3", "R1", "R2", "R3" }
+            .Where(d => S(r, d + " Status", S(r, d + "Status")).Equals("Active", StringComparison.OrdinalIgnoreCase))
+            .Select(d => R(("Link", S(r, "Name")), ("DOF", d), (d[0] == 'U' ? "TransKE" : "RotKE", S(r, "Stiffness " + d, "0")), (d[0] == 'U' ? "TransCE" : "RotCE", S(r, "Damping " + d, "0"))))));
 
         // Objects.
         Put("JOINT COORDINATES", points.Select(p => R(("Joint", Name(p)), ("XorR", S(p, "X")), ("Y", S(p, "Y")), ("Z", S(p, "Z")))));
@@ -188,6 +213,17 @@ public static class F2kReader
     private static void SafeOnly(StructuralModel m, Dictionary<string, List<Dictionary<string, string>>> f, List<string> notes)
     {
         List<Dictionary<string, string>> T(string name) => f.TryGetValue(name, out var rows) ? rows : [];
+        // Decks, as ETABS keeps them (SHELLPROP ... PROPTYPE "Deck"), so slabs that use one keep their section.
+        foreach (var r in T("DECK PROPERTY DEFINITIONS"))
+        {
+            var name = S(r, "Name");
+            m.ShellSections.RemoveAll(x => x.Name == name);
+            string Num(string key) => E2kText.Number(D(r, key));
+            m.ShellSections.Add(new ShellSection { Name = name, Lines = [["PROPTYPE", E2kText.Quote("Deck"), "DECKTYPE", E2kText.Quote(S(r, "Deck Type", "Filled")), "CONCMATERIAL", E2kText.Quote(S(r, "Slab Material")),
+                "DECKMATERIAL", E2kText.Quote(S(r, "Deck Material")), "DECKSLABDEPTH", Num("Slab Depth"), "DECKRIBDEPTH", Num("Rib Depth"), "DECKRIBWIDTHTOP", Num("Rib Width Top"),
+                "DECKRIBWIDTHBOTTOM", Num("Rib Width Bottom"), "DECKRIBSPACING", Num("Rib Spacing"), "DECKSHEARTHICKNESS", Num("Deck Shear Thickness"), "DECKUNITWEIGHT", Num("Deck Unit Weight"),
+                "SHEARSTUDDIAM", Num("Shear Stud Diameter"), "SHEARSTUDHEIGHT", Num("Shear Stud Height"), "SHEARSTUDFU", Num("Shear Stud Tensile Strength")]] });
+        }
         foreach (var r in T("LOAD CASE DEFINITIONS - HYPERSTATIC"))
             try { SlabDefs.SetHyperstatic(m, S(r, "Name"), S(r, "Base Case"), D(r, "Relative SF", 1)); }
             catch (ArgumentException ex) { notes.Add($"Hyperstatic case {S(r, "Name")}: {ex.Message}"); }
