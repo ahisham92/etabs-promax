@@ -101,7 +101,7 @@ internal sealed record ChatSummary(string File, string Key, string ModelTitle, s
 internal static class ChatTypes
 {
     public const string Coordinator = "coordinator", Simple = "simple";
-    public static readonly string[] All = [Coordinator, Simple];
+    public static readonly string[] All = [Simple, Coordinator];
 
     /// <summary>
     /// The chat's kind. A chat saved before kinds existed is a Simple chat (how chats worked until jobs came), unless it
@@ -110,8 +110,8 @@ internal static class ChatTypes
     public static string Of(Conversation conv) =>
         conv.Type is Coordinator or Simple ? conv.Type : conv.Jobs is { Count: > 0 } ? Coordinator : Simple;
 
-    /// <summary>A stored kind (the Settings default); anything unknown is With coordinator.</summary>
-    public static string Parse(string? type) => type == Simple ? Simple : Coordinator;
+    /// <summary>A stored kind (the Settings default); anything unknown is Simple chat, the default since 26 Nov 2026.</summary>
+    public static string Parse(string? type) => type == Coordinator ? Coordinator : Simple;
 
     /// <summary>The kind's name as the pane shows it.</summary>
     public static string Label(string type) => type == Simple ? "Simple chat" : "With coordinator";

@@ -128,6 +128,27 @@ internal static class AskUser
     }
 
     /// <summary>
+    /// A change waiting for the user's OK while they drive chat <paramref name="chatKey"/> from the phone (PhoneApprovals):
+    /// it goes at once, with Allow and Don't allow as buttons and no deadline (nothing is assumed: the change waits).
+    /// </summary>
+    public static UserQuestion AskApproval(string chatKey, string question, string approval, string topic)
+    {
+        UserQuestion q;
+        lock (Gate)
+        {
+            q = new UserQuestion
+            {
+                Id = ++_next, JobKey = chatKey, Asker = "", Question = question.Trim(), Topic = topic.Trim(), Approval = approval,
+                Options = [PhoneApprovals.Allow, PhoneApprovals.DontAllow], Recommended = -1, Cid = "ok-" + Guid.NewGuid().ToString("N"),
+                Asked = DateTime.UtcNow - AskRules.Gather, // the user is waiting for it: not held for others
+            };
+            Questions.Add(q);
+            _loop ??= Task.Run(Loop);
+        }
+        return q;
+    }
+
+    /// <summary>
     /// A question of a chat's Questions tab (chat_questions, or one caught in a reply) while the phone is on: it goes to the
     /// phone at once, with its answers as buttons, and the answer comes back to that chat's tab (<paramref name="chatKey"/>,
     /// JobBoard.ChatKey; through <see cref="Answered"/>). Asked again (written again): the one sent before is closed on the phone.
@@ -250,7 +271,7 @@ internal static class AskUser
             {
                 // A tab question has no deadline: the chat waits for its answer, from the phone or the PC.
                 var (id, error) = ByPhone
-                    ? await PhoneLink.AskAsync(AskRules.PhoneText(q), q.Assumed, q.TabNumber > 0 ? null : now.AddMinutes(wait), q.Topic, AskRules.PhoneOptions(q), q.Cid).ConfigureAwait(false)
+                    ? await PhoneLink.AskAsync(AskRules.PhoneText(q), q.Assumed, q.TabNumber > 0 || q.Approval.Length > 0 ? null : now.AddMinutes(wait), q.Topic, AskRules.PhoneOptions(q), q.Cid).ConfigureAwait(false)
                     : (0, "no phone is connected");
                 lock (Gate)
                 {

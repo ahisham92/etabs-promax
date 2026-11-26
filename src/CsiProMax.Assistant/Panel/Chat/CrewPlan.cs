@@ -28,7 +28,24 @@ internal sealed record CrewSeat(int Number, string Title, CrewMood Mood, int Slo
 /// </summary>
 internal sealed record CrewNames(string You, string Coordinator, IReadOnlyList<string> Workers, string Applier)
 {
-    public const string DefaultCoordinator = "Atlas", DefaultWorkers = "Nova, Echo, Pixel", DefaultApplier = "Bolt";
+    /// <summary>The names a new install starts with (Ahmed, 26 Nov 2026: coordinator Pitso, workers Ali, Carmen, Carla and Dieng).</summary>
+    public const string DefaultCoordinator = "Pitso", DefaultWorkers = "Ali, Carmen, Carla, Dieng", DefaultApplier = "Bolt";
+
+    /// <summary>
+    /// The defaults before 26 Nov 2026. Settings wrote the names shown in its boxes, so a PC that ever pressed Save has these
+    /// stored as if typed: read as blank (the new defaults), unless the user changed them.
+    /// </summary>
+    public const string OldCoordinator = "Atlas", OldWorkers = "Nova, Echo, Pixel";
+
+    /// <summary>A stored name that is only an old or the current default: kept as blank, so a later default reaches it too.</summary>
+    public static string? Stored(string? typed, string fallback, string? old = null)
+    {
+        var t = (typed ?? "").Trim();
+        static string Norm(string x) => string.Join(",", x.Split(new[] { ',', ';', '\n' }, StringSplitOptions.RemoveEmptyEntries).Select(w => w.Trim()).Where(w => w.Length > 0));
+        if (t.Length == 0 || string.Equals(Norm(t), Norm(fallback), StringComparison.OrdinalIgnoreCase)
+            || old is not null && string.Equals(Norm(t), Norm(old), StringComparison.OrdinalIgnoreCase)) return null;
+        return t;
+    }
 
     /// <summary>The settings' names, each blank one replaced by its default (you: the first part of the Windows account name).</summary>
     public static CrewNames From(string? you, string? coordinator, string? workers, string? applier, string? account)

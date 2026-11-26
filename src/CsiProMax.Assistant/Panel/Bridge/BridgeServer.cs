@@ -481,7 +481,7 @@ public sealed class BridgeServer
                 // A tool with its own approval dialog (the package plan, each redline) asks a normal change there instead.
                 var askHere = decision.Ask && !(decision.CanSilence && Approvals.OwnDialog(tool.Name));
                 Approvals.Call = new Approvals.CallState(decision, chat, askHere);
-                if (askHere && !Approvals.Ask(tool, args, decision, chat)) return Ended(ToolResult.Error($"The user rejected this change in {Csi.Name}. Ask them how to proceed."));
+                if (askHere && !Approvals.Ask(tool, args, decision, chat)) return Ended(ToolResult.Error(Approvals.PhoneLine ?? $"The user rejected this change in {Csi.Name}. Ask them how to proceed."));
                 RunningCall.Begin(fromChat ? "the chat" : "Claude", tool.Name, app.ActiveUIDocument.Document.Title, args);
                 ToolResult result;
                 try

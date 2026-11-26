@@ -32,7 +32,7 @@ internal static class ChatStore
         Path.Combine(Folder, Hash(conv.Key) + (conv.Id.Length > 0 ? "-" + conv.Id : "") + ".json");
 
     /// <summary>The kind a new chat gets (ChatTypes): the Settings default, which the pane keeps up to date.</summary>
-    internal static volatile string NewType = ChatTypes.Coordinator;
+    internal static volatile string NewType = ChatTypes.Simple;
 
     /// <summary>The model and effort a new chat starts on (ChatAuto; Settings, Chat tab): Automatic unless changed there.</summary>
     internal static volatile string NewModel = ChatAuto.Automatic, NewEffort = ChatAuto.Automatic;

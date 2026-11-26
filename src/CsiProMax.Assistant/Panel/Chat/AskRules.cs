@@ -43,6 +43,11 @@ internal sealed class UserQuestion
     /// <summary>A tab question's answers to tap on the phone, and the one suggested (-1 none).</summary>
     public List<string> Options { get; set; } = [];
     public int Recommended { get; set; } = -1;
+    /// <summary>
+    /// A change waiting for the user's OK while they drive the chat from the phone (PhoneApprovals): the call's key, with
+    /// Allow and Don't allow as its buttons, and no deadline. "" for any other question.
+    /// </summary>
+    public string Approval { get; set; } = "";
 }
 
 /// <summary>
@@ -135,14 +140,14 @@ internal static class AskRules
 
     /// <summary>The buttons the phone shows: a tab question's answers, else the assumed answer.</summary>
     public static List<string> PhoneOptions(UserQuestion q) =>
-        q.TabNumber > 0 ? q.Options.Where(o => o.Trim().Length > 0).ToList() : q.Assumed.Trim().Length > 0 ? [q.Assumed.Trim()] : [];
+        q.TabNumber > 0 || q.Approval.Length > 0 ? q.Options.Where(o => o.Trim().Length > 0).ToList() : q.Assumed.Trim().Length > 0 ? [q.Assumed.Trim()] : [];
 
     /// <summary>
     /// "ok", "yes", "fine", "go ahead" typed as the answer: the assumption stands, said in full so the job can't mistake it.
     /// A tab question's answer is kept as written (it has no assumption; the tab picks an option from "2" or "b").
     /// </summary>
     public static string Keep(string answer, UserQuestion q) =>
-        q.TabNumber == 0 && Regex.IsMatch(answer.Trim(), @"^(ok(ay)?|yes|yep|fine|agreed|go ahead|correct|good|as assumed|proceed)[.! ]*$", RegexOptions.IgnoreCase)
+        q.TabNumber == 0 && q.Approval.Length == 0 && Regex.IsMatch(answer.Trim(), @"^(ok(ay)?|yes|yep|fine|agreed|go ahead|correct|good|as assumed|proceed)[.! ]*$", RegexOptions.IgnoreCase)
             ? $"Keep your assumption ({q.Assumed.Trim()})." : answer.Trim();
 
     // ---- Progress updates ---------------------------------------------------------------------------------------------
@@ -221,14 +226,32 @@ internal static class AskRules
     /// asked, 31 Oct 2026: "I am talking to <coordinator>, so it should be way more friendly"). The name is the user's own, from
     /// Settings › Chat (crew names).
     /// </summary>
-    public static string PhoneVoice(string coordinator) =>
+    public static string PhoneVoice(string coordinator, bool crew = true) =>
         "Your answer is sent to their phone as a chat message" + (coordinator.Length > 0 ? $" from you, {coordinator}" : "") + ": write like a " +
         "friendly colleague texting back. Warm and short (a few sentences), first person, plain words, no headings or tables, at most one " +
-        "emoji. Say what you did or are doing and what the workers are on; the autopilot's jobs and workers are yours, never \"another chat\".";
+        "emoji. " + (crew
+            ? "Say what you did or are doing and what the workers are on; the autopilot's jobs and workers are yours, never \"another chat\"."
+            : "Say what you did or are doing; you do the work yourself in this chat (no workers).");
 
-    /// <summary>A message from the phone when no autopilot runs: done as if typed here, answered for the phone.</summary>
-    public static string PhoneTurn(string text, string coordinator = "", string history = "") =>
-        "[The user wrote this from their phone, away from the PC: do it as if typed here. " + PhoneVoice(coordinator) + "] " + text + Conversation(history);
+    /// <summary>
+    /// A message from the phone when no autopilot runs, in a chat With coordinator (<paramref name="crew"/>) or a Simple chat:
+    /// done as if typed here, answered for the phone. Nobody is at the PC, so a change that needs an OK asks on the phone
+    /// (PhoneApprovals) and the chat's own questions go there too (26 Nov 2026: a Simple chat must work from the phone).
+    /// </summary>
+    public static string PhoneTurn(string text, string coordinator = "", string history = "", bool crew = true) =>
+        "[The user wrote this from their phone, away from the PC: do it as if typed here. " + PhoneVoice(coordinator, crew) +
+        " Nobody is at the PC: never wait on something only the PC shows; a change that needs their OK is asked on their phone for you.] " + text + Conversation(history);
+
+    /// <summary>How often a long turn answering the phone says it is still on it (minutes).</summary>
+    public const int PhoneTurnUpdateMinutes = 5;
+
+    /// <summary>"Still on it (12 min so far): now Set lateral load." for the phone during a long turn.</summary>
+    public static string StillOn(TimeSpan working, string doing)
+    {
+        var m = Math.Max(1, (int)Math.Round(working.TotalMinutes));
+        var span = m < 60 ? $"{m} min" : $"{m / 60} h" + (m % 60 > 0 ? $" {m % 60} min" : "");
+        return $"Still on it ({span} so far)" + (doing.Trim().Length > 0 ? $": now {doing.Trim().TrimEnd('.')}." : ".") + " I'll send the answer here when it's done.";
+    }
 
     /// <summary>What ask_user answers once an answer came.</summary>
     public static string AnswerLine(UserQuestion q) => $"The user answered Q{q.Id} from their phone: \"{q.Answer}\". Go by it (you assumed: {q.Assumed}).";

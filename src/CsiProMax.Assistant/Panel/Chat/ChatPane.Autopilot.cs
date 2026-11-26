@@ -118,7 +118,7 @@ internal sealed partial class ChatPane
             _jobsTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher) { Interval = TimeSpan.FromMinutes(1) };
             _jobsTimer.Tick += (_, _) =>
             {
-                try { ClaimPhoneProjects(); PhoneRetry(); JobsProgress(); }
+                try { ClaimPhoneProjects(); PhoneRetry(); JobsProgress(); PhoneTurnProgress(); }
                 catch (Exception) { /* the next tick tries again */ }
             };
             _jobsTimer.Start();
@@ -674,6 +674,15 @@ internal sealed partial class ChatPane
     /// </summary>
     private void PhoneAnswered(UserQuestion q)
     {
+        // A change that waited for the user's OK while they drive this chat from the phone (PhoneApprovals): their tap
+        // comes to the chat as their message from the phone, so the chat makes the call again (Allow) or leaves it.
+        if (q.Approval.Length > 0)
+        {
+            if (Run is { Active: true }) return; // an autopilot allows its own calls; nothing waits on this
+            _phoneAsks.Add(PhoneApprovals.AnsweredLine(q));
+            NextPhoneAsk();
+            return;
+        }
         AutopilotLog(AutopilotEntry.Asked, $"You answered Q{q.Id} on your phone: {q.Answer}");
         if (q.JobKey.Length > 0 && _board?.FindKey(q.JobKey) is { } job)
         {
@@ -768,15 +777,23 @@ internal sealed partial class ChatPane
     private async Task RunPhoneTurn(string text, List<string>? files = null)
     {
         var attachments = (files ?? []).Select(f => new Attachment { Path = f, Name = System.IO.Path.GetFileName(f) }).ToList();
-        var run = RunTurn(AskRules.PhoneTurn(text, CrewStrip.Names.Coordinator, AskUser.History(PhoneTopic)), attachments, "");
+        // Nobody is at the PC: a change that would ask in a dialog asks on the phone (PhoneApprovals) until the turn ends.
+        // (Ended in PhoneTurnEnded when the answer is done: RunTurn returns once the message is sent.)
+        var phoneTurn = PhoneApprovals.TurnStarted(JobBoard.ChatKey(_conv.Id), PhoneTopic);
+        var run = RunTurn(AskRules.PhoneTurn(text, CrewStrip.Names.Coordinator, AskUser.History(PhoneTopic), crew: IsCoordinator), attachments, "");
         _phoneTurn = _turn; // set before RunTurn's first wait
+        _phoneTurnSaid = DateTime.UtcNow;
+        if (_phoneTurn is null) PhoneApprovals.TurnEnded(phoneTurn); // it never started (stopped, or no message went)
         await run;
+        if (_phoneTurn is null) PhoneApprovals.TurnEnded(phoneTurn); // it couldn't be sent: the dialogs are back at the PC
     }
 
     /// <summary>A turn ended: when it answered a message from the phone, the answer goes back there; then the next one waiting.</summary>
     private void PhoneTurnEnded(Turn? ended, bool stopped)
     {
         if (ended is null || ended.Planning || ended.Shrinking) return;
+        // A turn of the user's at the PC, or the phone's own, ended: approvals ask at the PC again.
+        if (_phoneTurn is null || ReferenceEquals(ended, _phoneTurn)) PhoneApprovals.TurnEnded();
         if (ReferenceEquals(ended, _phoneTurn))
         {
             _phoneTurn = null;
@@ -792,6 +809,23 @@ internal sealed partial class ChatPane
             });
         }
         if (_phoneAsks.Count > 0) Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(NextPhoneAsk));
+    }
+
+    private DateTime _phoneTurnSaid;
+
+    /// <summary>
+    /// A message from the phone answered by a long turn (a Simple chat doing the work itself): every
+    /// <see cref="AskRules.PhoneTurnUpdateMinutes"/> the phone hears that it is still on it and what it does now, so the user
+    /// away from the PC isn't left wondering (with workers, JobsProgress says what each one does).
+    /// </summary>
+    private void PhoneTurnProgress()
+    {
+        if (_sample || _phoneTurn is not { } turn || !ReferenceEquals(turn, _turn) || !Phone.PhoneLink.Active) return;
+        var now = DateTime.UtcNow;
+        if (now - _phoneTurnSaid < TimeSpan.FromMinutes(AskRules.PhoneTurnUpdateMinutes)) return;
+        _phoneTurnSaid = now;
+        var doing = _conv.Items.LastOrDefault(i => i.Kind == "tool")?.Name ?? "";
+        _ = AskUser.SendUpdateAsync(AskRules.StillOn(now - turn.Started, doing.Length > 0 ? StepNames.Title(doing) : ""), PhoneTopic);
     }
 
     /// <summary>Stop or Resume pressed on the phone (PhoneLink.Commands): as if pressed on the banner.</summary>

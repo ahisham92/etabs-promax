@@ -215,6 +215,8 @@ public static class FieldTest
         // The real window, opened a second time on the demo model, with the chat and without it (the full test on a real PC).
         if (o.Full && (o.OpenWindow is not null || (o.LiveScratch && o.SettingsRoot is null))) WindowFieldSteps.Run(ctx, o.OpenWindow);
         if (left.Count > 0) ctx.Step("test copies an earlier run left open are closed", () => string.Join("; ", left));
+        // The chat's defaults (Pitso and his workers, Simple chat), the autopilot's rules and the chat from the phone (2026-11-26).
+        ChatFieldSteps.Run(ctx);
 
         ctx.Section(OpenSection);
         o.Progress?.Invoke("reading the open model");
