@@ -149,7 +149,7 @@ function Publish([string]$version, [string]$compareWith, [switch]$NoWhole, [swit
     Set-Content -LiteralPath (Join-Path $out.FullName 'files.json') -Value (@{ format = 1; files = $entries } | ConvertTo-Json -Depth 4)
     Compress-Archive -Path (Join-Path (Split-Path -Parent $stage.FullName) '*') -DestinationPath (Join-Path $out.FullName "changed-$version.zip")
     if (-not $NoWhole) { Compress-Archive -Path (Join-Path $package.FullName '*') -DestinationPath (Join-Path $out.FullName "CsiProMax-$version.zip") }
-    ([Uri]$out.FullName).AbsoluteUri
+    'file:///' + ($out.FullName -replace '\\', '/').TrimStart('/')
 }
 $second = Join-Path $root 'Documents' 'Second'
 $from = Publish '9.9.0' ''
