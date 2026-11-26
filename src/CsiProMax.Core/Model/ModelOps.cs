@@ -54,7 +54,7 @@ public static class ModelOps
     public static Obj Reshape(StructuralModel m, Obj o, double fromX, double fromY, double toX, double toY)
     {
         if (Math.Abs(fromX - toX) < ModelEdit.Tolerance && Math.Abs(fromY - toY) < ModelEdit.Tolerance) throw new ArgumentException("Give a new place for the point: it is where it was.");
-        List<string> names = o.Line ? [m.Line(o.Label)!.PointI, m.Line(o.Label)!.PointJ] : m.Area(o.Label)!.PointNames;
+        var names = o.Line ? new List<string> { m.Line(o.Label)!.PointI, m.Line(o.Label)!.PointJ } : m.Area(o.Label)!.PointNames;
         bool At(PlanPoint p) => Math.Abs(p.X - fromX) <= ModelEdit.Tolerance * 10 && Math.Abs(p.Y - fromY) <= ModelEdit.Tolerance * 10;
         if (!names.Select(n => m.Point(n)).Any(p => p is not null && At(p))) throw new ArgumentException($"{o} has no end or corner at ({fromX}, {fromY}).");
         var made = CopyMapped(m, o, o.Story, false, p =>
