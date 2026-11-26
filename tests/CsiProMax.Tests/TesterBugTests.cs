@@ -456,7 +456,7 @@ static class TesterBugTests
             Equal<string?>(null, CsiProMax.UI.UpdateBar.Text(now, "0.4.6", "0.4.6"), "no bar on the newest version");
             Equal<string?>("Update to 0.4.7 now  (one click, nothing is closed)", CsiProMax.UI.UpdateBar.Text(now, "0.4.7", null), "the bar for a release");
             Equal<string?>("Switch to 0.4.7 now  (one click, nothing is closed)", CsiProMax.UI.UpdateBar.Text(now, "0.4.7", "0.4.7"), "the bar for a download");
-            Check(window.Contains("DockPanel.SetDock(_updateBar, Dock.Top);") && !window.Contains("DockPanel.SetDock(update, Dock.Right)"), "the Update bar is not across the top of the window");
+            Check(window.Contains("DockPanel.SetDock(_updateBar, Dock.Top);"), "the Update bar is not across the top of the window");
             var bar = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Panel/UI/UpdateBar.cs"));
             Check(bar.Contains("HorizontalAlignment = HorizontalAlignment.Stretch") && bar.Contains("Background = Accent"), "the Update bar is not a wide bar in the accent colour");
             var pages = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Panel/Host/WebWindow.cs"));

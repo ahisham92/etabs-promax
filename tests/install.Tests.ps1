@@ -127,6 +127,45 @@ $noAi = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '..' 'install-no-
 Check ($noAi -match 'raw\.githubusercontent\.com/ahisham92/etabs-promax/main/install\.ps1' -and $noAi -match '-NoAI' -and $null -ne [scriptblock]::Create($noAi)) 'install-no-ai.ps1 runs install.ps1 with -NoAI'
 Check (-not ($noAi -match '[^\x09\x0A\x0D\x20-\x7E]')) 'install-no-ai.ps1 is plain ASCII'
 
+# A download says how far it is, and an install over one already there downloads only what changed.
+function Publish([string]$version, [string]$compareWith, [switch]$NoWhole, [switch]$WrongList) {
+    $out = New-Item -ItemType Directory -Force -Path (Join-Path $root "release-$version")
+    $distNow = Join-Path $package.FullName 'dist'
+    $stage = New-Item -ItemType Directory -Force -Path (Join-Path $root "stage-$version" 'dist')
+    $entries = @()
+    foreach ($file in (Get-ChildItem -LiteralPath $distNow -Recurse -File)) {
+        $relative = $file.FullName.Substring($distNow.Length).TrimStart('\', '/')
+        $old = if ($compareWith) { Join-Path $compareWith $relative } else { $null }
+        $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        $changed = -not ($old -and (Test-Path -LiteralPath $old) -and ((Get-FileHash -LiteralPath $old -Algorithm SHA256).Hash -eq $hash))
+        if ($changed) {
+            $to = Join-Path $stage.FullName $relative
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $to) | Out-Null
+            Copy-Item -LiteralPath $file.FullName -Destination $to
+        }
+        if ($WrongList -and $changed) { $hash = '0' * 64 }
+        $entries += @{ path = ($relative -replace '\\', '/'); sha256 = $hash; size = $file.Length; changed = $changed }
+    }
+    Set-Content -LiteralPath (Join-Path $out.FullName 'files.json') -Value (@{ format = 1; files = $entries } | ConvertTo-Json -Depth 4)
+    Compress-Archive -Path (Join-Path (Split-Path -Parent $stage.FullName) '*') -DestinationPath (Join-Path $out.FullName "changed-$version.zip")
+    if (-not $NoWhole) { Compress-Archive -Path (Join-Path $package.FullName '*') -DestinationPath (Join-Path $out.FullName "CsiProMax-$version.zip") }
+    'file:///' + ($out.FullName -replace '\\', '/').TrimStart('/')
+}
+$second = Join-Path $root 'Documents' 'Second'
+$from = Publish '9.9.0' ''
+$output = (& $script -Tag v9.9.0 -From $from -Folder $second -SettingsRoot $settings -AiFile $aiFile -NoRuntime -NoPlugins *>&1 | Out-String)
+Check ($output -match 'Downloading CSI ProMax 9\.9\.0' -and $output -match 'Downloaded: \d+\.\d MB, done' -and (Test-Path -LiteralPath (Join-Path $second 'web' 'viewer.html'))) 'a first install downloads the whole package and says how many MB arrived'
+Set-Content -LiteralPath (Join-Path $package.FullName 'dist' 'CsiProMaxSapPlugin.dll') -Value 'third CsiProMaxSapPlugin.dll' -NoNewline
+$from = Publish '9.9.1' $second -NoWhole
+$output = (& $script -Tag v9.9.1 -From $from -Folder $second -SettingsRoot $settings -AiFile $aiFile -NoRuntime -NoPlugins *>&1 | Out-String)
+Check ($output -match 'Downloading only the 1 that changed' -and $output -notmatch 'not installed' -and (Get-Content -Raw -LiteralPath (Join-Path $second 'CsiProMaxSapPlugin.dll')) -eq 'third CsiProMaxSapPlugin.dll') 'an install over one already there downloads only the changed files (the whole package is not even published here)'
+$output = (& $script -Tag v9.9.1 -From $from -Folder $second -SettingsRoot $settings -AiFile $aiFile -NoRuntime -NoPlugins *>&1 | Out-String)
+Check ($output -match 'already has every file' -and $output -notmatch 'not installed') 'the same version again downloads nothing but the file list'
+Set-Content -LiteralPath (Join-Path $package.FullName 'dist' 'CsiProMaxSapPlugin.dll') -Value 'fourth CsiProMaxSapPlugin.dll' -NoNewline
+$from = Publish '9.9.2' $second -WrongList
+$output = (& $script -Tag v9.9.2 -From $from -Folder $second -SettingsRoot $settings -AiFile $aiFile -NoRuntime -NoPlugins *>&1 | Out-String)
+Check ($output -match 'Downloading CSI ProMax 9\.9\.2' -and (Get-Content -Raw -LiteralPath (Join-Path $second 'CsiProMaxSapPlugin.dll')) -eq 'fourth CsiProMaxSapPlugin.dll') 'a changed file that is not the listed one is not used: the whole package is downloaded instead'
+
 # What is not a package says so.
 $wrong = Join-Path $root 'CsiProMax-0.0.0.zip'
 Compress-Archive -Path (Join-Path $package.FullName 'INSTALL.txt') -DestinationPath $wrong
