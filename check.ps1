@@ -324,7 +324,7 @@ catch {
             $plugin = $program.Plugin
             $finding = [pscustomobject]@{
                 Program = $program.Label; Ini = $program.Ini; Listed = $false; Name = ''; Path = ''; Exists = $false; OnlineOnly = $false; Blocked = $false
-                Place = ''; Runtime = ''; Api = ''; ApiFile = ''; Loads = $null; Reasons = @()
+                Place = ''; Runtime = ''; Api = ''; ApiFile = ''; Loads = $null; Reasons = @(); Why = ''
             }
             $findings.Add($finding)
             $report.Add('')
@@ -395,6 +395,7 @@ catch {
             # The real try.
             if ($facts.Exists -and -not $facts.OnlineOnly -and $loaders.Count -gt 0) {
                 $decided = $false
+                $createdElsewhere = $false
                 foreach ($loader in $loaders) {
                     $api = ''
                     if ($apiFile) { $api = $apiFile }
@@ -409,7 +410,7 @@ catch {
                         foreach ($message in $attempt.Errors) { $report.Add("    $message") }
                         foreach ($need in $attempt.Needs) { $report.Add("    the plug-in asks for: $need") }
                     }
-                    if (-not $same) { continue }
+                    if (-not $same) { if ($attempt.Ok -and $apiFile) { $createdElsewhere = $true }; continue }
                     $decided = $true
                     if ($attempt.Ok -and $apiFile) { $finding.Loads = $true }
                     elseif (-not $attempt.Ok) {
@@ -424,7 +425,12 @@ catch {
                     }
                 }
                 if (-not $decided) { $report.Add("  Not tried on $($finding.Runtime): this PC has no PowerShell that runs on it.") }
+                # Why it could not be decided, in one line for the installer (Ahmed, 2026-11-26: "why are we seeing this").
+                if ($decided -and -not $apiFile) { $finding.Why = "its API file is not in its folder (the program may have been removed, with only its settings left), so only loading the plug-in file could be tried, and that worked" }
+                elseif (-not $decided -and $createdElsewhere) { $finding.Why = "it runs on .NET 8 and this PC has no PowerShell 7 to try it on that; tried on the .NET Framework instead, the plug-in was created against its own API file" }
+                elseif (-not $decided) { $finding.Why = "it runs on $($finding.Runtime) and this PC has no PowerShell 7 to try it on that" }
             }
+            elseif (-not $facts.Exists) { $finding.Why = 'the plug-in file is not there' }
             if ($finding.Reasons.Count -gt 0) { $finding.Loads = $false }
 
             if ($finding.Loads -eq $true) { $report.Add('  OK: this program can open CSI ProMax from its Tools menu.') }

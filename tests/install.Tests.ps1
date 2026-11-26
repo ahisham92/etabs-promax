@@ -76,7 +76,9 @@ Check ((Text $unix) -eq "[PlugIn]`n NumberPlugIns=1`n PlugInName=CsiProMaxPlugin
 Check ((Text $safe16) -eq $fresh -and (Text $bridge) -eq $fresh) 'an old SAFE and another program are not touched'
 Check ((Text $twice) -eq "[PlugIn]`r`n NumberPlugIns=1`r`n PlugInName=CsiProMaxPlugin`r`n PlugInMenuText=CSI ProMax`r`n PlugInPath=$plugin`r`n`r`n[Graphics]`r`n") 'CSI ProMax listed twice by hand becomes one entry, for this folder'
 Check ((Text $mixed) -eq $mixedWas) 'CSI ProMax beside another plug-in is left alone'
-Check ($output -match 'Checked: can each program open CSI ProMax\?' -and $output -match 'ETABS 23\s+(yes|NO|could not be tried)') 'when it is done, the installer checks that each program can open CSI ProMax'
+# Ahmed, 2026-11-26: only real problems are shown; a self-test that could not run here says nothing.
+$checked = [regex]::Match($output, 'Checked: can each program open CSI ProMax\?(?<rest>[\s\S]*?)(\r?\n\r?\n|$)')
+Check (-not ($output -match 'could not be tried|not tried') -and (-not $checked.Success -or $checked.Groups['rest'].Value -match '\s(NO|not yet):')) 'when it is done, the installer checks that each program can open CSI ProMax, and shows only real problems'
 Check ((Text $none) -eq "[Graphics]`r`n Colour=1`r`n" -and $output -match 'ETABS 19\s+Its settings file was not understood') 'a file with no plug-in list is left alone'
 $bytes = [IO.File]::ReadAllBytes($utf16)
 Check ($bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE -and [Text.Encoding]::Unicode.GetString($bytes, 2, $bytes.Length - 2).Contains(" PlugInPath=$plugin`r`n")) 'a UTF-16 file stays UTF-16'
