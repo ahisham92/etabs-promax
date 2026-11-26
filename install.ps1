@@ -479,15 +479,15 @@ function Install-CsiProMax {
                     foreach ($place in $places) {
                         if (-not $place) { continue }
                         if (-not (Test-Path -LiteralPath $place)) { New-Item -ItemType Directory -Path $place -Force | Out-Null }
-                        $link = $shell.CreateShortcut((Join-Path $place 'CSI ProMax Modeler.lnk'))
+                        $link = $shell.CreateShortcut((Join-Path $place 'CSI ProMax Engine.lnk'))
                         $link.TargetPath = Join-Path $dotnetRoot.Root 'dotnet.exe'
                         $link.Arguments = '"' + (Join-Path $Folder 'CsiProMax.dll') + '" --modeler'
                         $link.WorkingDirectory = $Folder
                         $link.WindowStyle = 7
-                        $link.Description = 'CSI ProMax Modeler: build models with no CSI program open'
+                        $link.Description = 'CSI ProMax Engine: model, run and see results and design, for ETABS, SAP2000 and SAFE'
                         $link.Save()
                     }
-                    Say '  The "CSI ProMax Modeler" shortcut is on your desktop and in the Start menu: it needs no CSI program.'
+                    Say '  The "CSI ProMax Engine" shortcut is on your desktop and in the Start menu: it needs no CSI program.'
                 }
             }
             catch { Say "  (The Modeler shortcut could not be made: $($_.Exception.Message) Double-click 'Open the Modeler.cmd' in $Folder instead.)" }
@@ -596,8 +596,8 @@ function Install-CsiProMax {
         Say '  1. Open ETABS, SAFE or SAP2000 and a model, then Tools > CSI ProMax. The window opens beside the program.'
         if ($aiOn) { Say '  2. The chat runs on Claude Code on your own Claude plan. The window offers to install it or sign in.' }
         else {
-            Say '  2. Without the AI chat. The "CSI ProMax Modeler" and "CSI ProMax Viewer" shortcuts (desktop and Start menu)'
-            Say '     work with no CSI program. To turn the chat on later: CSI ProMax menu, Turn the AI chat on.'
+            Say '  2. Without the AI chat. The "CSI ProMax Engine" shortcut (desktop and Start menu)'
+            Say '     works with no CSI program. To turn the chat on later: CSI ProMax menu, Turn the AI chat on.'
         }
         Say "  3. On a PC other than the owner's, the Licence window shows this PC's code (SPM-....). Send it to the owner"
         Say '     and paste the key you get back.'

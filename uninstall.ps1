@@ -6,7 +6,7 @@
 #   1. Stops the small sign-in task that keeps CSI ProMax in the Tools menus (keep-plugins.ps1), so nothing adds it back.
 #   2. Takes CSI ProMax out of the Tools menu of each ETABS, SAFE and SAP2000 that is closed (a list that also holds
 #      another vendor's plug-in is left alone and named). Run it again after closing a program that was open.
-#   3. Deletes the "CSI ProMax Modeler" and "CSI ProMax Viewer" shortcuts (desktop and Start menu).
+#   3. Deletes the "CSI ProMax Engine" shortcut, and the older Modeler and Viewer ones (desktop and Start menu).
 # Your models, review packs and the "Made in chat" folder are never deleted.
 #
 # With options:
@@ -59,7 +59,7 @@ function Uninstall-CsiProMax {
             try { $places += (Join-Path ([Environment]::GetFolderPath('Programs')) 'CSI ProMax') } catch { }
             foreach ($place in $places) {
                 if (-not $place) { continue }
-                foreach ($name in 'CSI ProMax Modeler.lnk', 'CSI ProMax Viewer.lnk') {
+                foreach ($name in 'CSI ProMax Engine.lnk', 'CSI ProMax Modeler.lnk', 'CSI ProMax Viewer.lnk') {
                     $link = Join-Path $place $name
                     if (Test-Path -LiteralPath $link) { try { Remove-Item -LiteralPath $link -Force } catch { } }
                 }
