@@ -609,6 +609,19 @@ static class OldProgramTests
             Check(lateral.Contains("table.Key.Contains(\"Seismic\", StringComparison.OrdinalIgnoreCase) ? [(\"LoadAtCM\", \"Yes\")]"), "LoadAtCM only for the seismic User Loads table");
         });
 
+        yield return ("field test (Ahmed, 2026-11-26: one run brings everything): a refused table import puts its rows and whole log in the failing step's detail", () =>
+        {
+            var before = CsiProMax.Assistant.Etabs.EditableTables.Refusals;
+            var log = string.Join("\n", Enumerable.Range(1, 80).Select(i => $"line {i} of the import log")) + "\nField name:  STORY Record:  1 Error reading field; record skipped";
+            CsiProMax.Assistant.Etabs.EditableTables.Refused("ApplyEditedTables answered 1 (0 fatal, 1 errors, 0 warnings)", log,
+                [("Load Pattern Definitions - Auto Seismic - User Loads", ["Name", "NumberSets", "Story"], [["EQX", "1", "Story1"]])]);
+            Check(CsiProMax.Assistant.Etabs.EditableTables.Refusals == before + 1, "counted");
+            var text = CsiProMax.Assistant.Etabs.EditableTables.LastRefused;
+            Check(text.Contains("fields Name | NumberSets | Story") && text.Contains("[EQX | 1 | Story1]") && text.Contains("line 80 of the import log") && text.Contains("record skipped"), "rows and the uncut log: " + text);
+            var ctx = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/FieldContext.cs"));
+            Check(ctx.Contains("Import sent and its whole log: ") && ctx.Contains("EditableTables.Refusals != refusedBefore"), "the failing step's detail carries it");
+        });
+
         yield return ("kind: a program's 'could not read this file' box in a scratch window is answered OK and said, never a licence box", () =>
         {
             var box = CsiProMax.Assistant.ScratchDialogs.IsFileRefused;
