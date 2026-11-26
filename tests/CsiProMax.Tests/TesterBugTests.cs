@@ -935,6 +935,15 @@ static class TesterBugTests
             foreach (var table in new[] { "Objects and Elements - Joints", "Objects and Elements - Shells", "Objects And Elements - Joints", "Objects And Elements - Areas" })
                 foreach (var import in new[] { -1, 0, 1 })
                     Check(CsiProMax.Assistant.Tools.PackTables.Kind(new CsiProMax.Assistant.Etabs.TableName(table, table, false, import)) == "result", $"'{table}' (import {import}) is not taken by the pack for the mesh");
+            // 0.4.49 SAP2000 run: Load Assigns greyed out. Every program's load tables are inputs the pack takes, with a
+            // total of their own so that the results cannot crowd them out.
+            foreach (var table in new[] { "Frame Loads - Distributed", "Frame Loads - Point", "Frame Loads - Temperature", "Area Loads - Uniform", "Area Loads - Temperature", "Joint Loads - Force", "Shell Loads - Uniform", "Shell Loads - Temperature" })
+            {
+                Check(CsiProMax.Assistant.Tools.PackTables.IsLoadTable(table), $"'{table}' is not seen as a load table");
+                Check(CsiProMax.Assistant.Tools.PackTables.Kind(new CsiProMax.Assistant.Etabs.TableName(table, table, false, 1)) == "input", $"'{table}' is not taken by the pack as an input");
+            }
+            Check(!CsiProMax.Assistant.Tools.PackTables.IsLoadTable("Load Pattern Definitions") && !CsiProMax.Assistant.Tools.PackTables.IsLoadTable("Joint Displacements"), "a table that is not a load assignment is seen as one");
+            Check(CsiProMax.Assistant.Tools.PackTables.InputMostRows > 0, "the inputs have no total of their own");
             Check(CsiProMax.Assistant.Tools.PackTables.Kind(new CsiProMax.Assistant.Etabs.TableName("Objects and Elements - Frames", "Objects and Elements - Frames", false, 1)) is null, "the frame mesh is taken, which the Viewer does not use");
             foreach (var table in new[] { "Section Cut Forces - Analysis", "Element Forces - Links", "Element Deformations - Links" })
                 Check(CsiProMax.Assistant.Tools.PackTables.Kind(new CsiProMax.Assistant.Etabs.TableName(table, table, false, 0)) == "result", $"'{table}' is not taken by the pack as a result");
