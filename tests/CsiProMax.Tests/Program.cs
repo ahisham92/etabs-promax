@@ -1824,7 +1824,7 @@ Test("field test: the full test runs every part, closes its window, and leaves t
 if (Environment.GetEnvironmentVariable("CPM_TESTS") is { Length: > 0 } only) tests.RemoveAll(t => !t.Name.Contains(only, StringComparison.OrdinalIgnoreCase));
 // CPM_ONLY=words runs only the tests whose name has those words in it (while fixing; the full run is the default).
 var onlyTests = Environment.GetEnvironmentVariable("CPM_ONLY");
-if (!string.IsNullOrEmpty(onlyTests)) tests = tests.Where(t => t.Name.Contains(onlyTests, StringComparison.OrdinalIgnoreCase)).ToList();
+if (!string.IsNullOrEmpty(onlyTests)) tests = tests.Where(t => onlyTests.Split("|").Any(w => t.Name.Contains(w, StringComparison.OrdinalIgnoreCase))).ToList();
 foreach (var (name, body) in tests)
 {
     try { body(); Console.WriteLine($"ok    {name}"); }

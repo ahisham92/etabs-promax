@@ -91,22 +91,27 @@ static class SafeTests
             Equal(2, r.Slabs, "slabs on the story");
             Equal(7, r.Beams, "beams on the story");
             Equal(12, r.Columns, "columns below and above as supports");
-            Equal(2, t["OBJECT GEOMETRY - AREAS 01 - GENERAL"].Count, "area rows");
-            Check(t["OBJECT GEOMETRY - AREAS 01 - GENERAL"].All(a => a["NumPoints"] == "4" && a.ContainsKey("Point4")), "each area names its corners");
-            var points = t["OBJECT GEOMETRY - POINT COORDINATES"].ToDictionary(p => p["Point"], p => double.Parse(p["GlobalZ"], System.Globalization.CultureInfo.InvariantCulture));
-            Check(points.Values.Contains(-3.5) && points.Values.Contains(3.5), "columns reach a story down and up");
-            var restrained = t["RESTRAINT ASSIGNMENTS"].Select(x => x["Point"]).ToHashSet();
-            Check(restrained.All(p => Math.Abs(points[p]) > 1), "the columns' far ends hold the slab");
+            Equal(2, t["FLOOR OBJECT CONNECTIVITY"].Count, "floor rows");
+            Check(t["FLOOR OBJECT CONNECTIVITY"].All(a => a.ContainsKey("Unique Name") && a.ContainsKey("UniquePt4")), "each floor names its corners");
+            var points = t["POINT OBJECT CONNECTIVITY"].ToDictionary(p => p["UniqueName"], p => double.Parse(p["Z"], System.Globalization.CultureInfo.InvariantCulture));
+            Check(points.Values.Contains(3.5) && points.Values.Contains(7) && points.Values.Contains(10.5), "the slab at its elevation, the columns reach a story down and up");
+            var restrained = t["JOINT ASSIGNMENTS - RESTRAINTS"].Select(x => x["UniqueName"]).ToHashSet();
+            Check(restrained.All(p => Math.Abs(points[p] - 7) > 1), "the columns' far ends hold the slab");
             Equal(12, restrained.Count, "every column end is restrained");
-            Equal(r.Strips, t["OBJECT GEOMETRY - DESIGN STRIPS"].Select(x => x["Strip"]).Distinct().Count(), "strips");
+            Equal(r.Strips, t["STRIP OBJECT CONNECTIVITY"].Select(x => x["Name"]).Distinct().Count(), "strips");
             Equal(5, r.Strips, "a strip per grid line (3 along X, 2 along Y)");
-            Check(t["OBJECT GEOMETRY - DESIGN STRIPS"].Any(x => x["Layer"] == "A") && t["OBJECT GEOMETRY - DESIGN STRIPS"].Any(x => x["Layer"] == "B"), "two layers");
-            Equal(2, t["LOAD PATTERNS"].Count, "patterns");
-            Equal(2, t["LOAD COMBINATIONS"].Count, "a combination row per case");
-            Equal("Linear Add", t["LOAD COMBINATIONS"][0]["Type"], "combination type");
-            Check(t.ContainsKey("SLAB PROPERTIES 01 - GENERAL") && t.ContainsKey("BEAM PROPERTIES 01 - GENERAL") && t.ContainsKey("COLUMN PROPERTIES 01 - GENERAL"), "properties");
-            Check(t["MATERIAL PROPERTIES 03 - CONCRETE"].Count >= 1, "concrete");
-            Check(!t.ContainsKey("SOIL PROPERTIES"), "no soil unless asked");
+            Check(t["STRIP OBJECT CONNECTIVITY"].Any(x => x["Layer"] == "A") && t["STRIP OBJECT CONNECTIVITY"].Any(x => x["Layer"] == "B"), "two layers");
+            Check(t["STRIP OBJECT CONNECTIVITY"].All(x => points.ContainsKey(x["Strip Start Point"]) && points.ContainsKey(x["Segment End Point"])), "strips run between point objects");
+            Equal(2, t["LOAD PATTERN DEFINITIONS"].Count, "patterns");
+            Equal(2, t["LOAD CASE DEFINITIONS - LINEAR STATIC"].Count, "a linear static case per pattern");
+            Equal(2, t["LOAD COMBINATION DEFINITIONS"].Count, "a combination row per case");
+            Equal("Linear Add", t["LOAD COMBINATION DEFINITIONS"][0]["Type"], "combination type");
+            Equal("Strength", t["CONCRETE SLAB DESIGN LOAD COMBINATION DATA"].Single()["Combo Type"], "the combination designs the slab for strength");
+            Check(t.ContainsKey("SLAB PROPERTY DEFINITIONS") && t.ContainsKey("FRAME SECTION PROPERTY DEFINITIONS - CONCRETE RECTANGULAR") && t.ContainsKey("FRAME ASSIGNMENTS - SECTION PROPERTIES"), "properties");
+            Check(t["COLUMN OBJECT CONNECTIVITY"].Count == 12 && t["BEAM OBJECT CONNECTIVITY"].Count == 7, "columns and beams");
+            Check(t["MATERIAL PROPERTIES - CONCRETE DATA"].Count >= 1, "concrete");
+            Equal("7", t["GRID DEFINITIONS - GENERAL"][0]["Model Datum"], "the level is the model's datum");
+            Check(!t.ContainsKey("SPRING PROPERTY DEFINITIONS - AREA SPRINGS"), "no soil unless asked");
         });
 
         yield return ("SAFE: .f2k of a mat has soil under every slab and says what it left out", () =>
@@ -114,13 +119,13 @@ static class SafeTests
             var m = Templates.ConcreteFrame("Mat", [6], [5], 1, 3);
             var r = F2kWriter.Write(m, new F2kOptions(Story: "Base", Subgrade: 20000));
             var t = CsiTableText.Parse(r.Text);
-            Equal("Compression Only", t["SOIL PROPERTIES"][0]["NonlinOpt"], "soil pushes only");
-            Equal("20000", t["SOIL PROPERTIES"][0]["Subgrade"], "subgrade");
+            Equal("Compression Only", t["SPRING PROPERTY DEFINITIONS - AREA SPRINGS"][0]["Nonlinear Option for U3"], "soil pushes only");
+            Equal("20000", t["SPRING PROPERTY DEFINITIONS - AREA SPRINGS"][0]["Stiffnes U3"], "subgrade");
             Check(r.Notes.Any(n => n.Contains("no slabs")), "the base has no slabs: said");
             var top = F2kWriter.Write(m, new F2kOptions(Subgrade: 20000, Strips: false));
             Equal("Story1", top.Story, "default: the story with most slab");
             Equal(0, top.Strips, "strips off");
-            Check(CsiTableText.Parse(top.Text)["SOIL PROPERTY ASSIGNMENTS"].Count == top.Slabs, "every slab gets the soil");
+            Check(CsiTableText.Parse(top.Text)["AREA ASSIGNMENTS - AREA SPRINGS"].Count == top.Slabs, "every slab gets the soil");
             try { F2kWriter.Write(m, new F2kOptions(Story: "Nope")); throw new Exception("a missing story was accepted"); }
             catch (ArgumentException ex) { Check(ex.Message.Contains("Stories:"), ex.Message); }
         });

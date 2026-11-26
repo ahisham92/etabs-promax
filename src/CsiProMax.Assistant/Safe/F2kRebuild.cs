@@ -34,11 +34,13 @@ public static class F2kRebuild
         var notes = new JsonArray();
 
         // ---- materials ----
-        var mechanical = Rows(t, "MATERIAL PROPERTIES 02 - BASIC MECHANICAL PROPERTIES").ToDictionary(r => r.GetValueOrDefault("Material") ?? "", StringComparer.OrdinalIgnoreCase);
-        var concrete = Rows(t, "MATERIAL PROPERTIES 03 - CONCRETE").ToDictionary(r => r.GetValueOrDefault("Material") ?? "", StringComparer.OrdinalIgnoreCase);
-        var rebar = Rows(t, "MATERIAL PROPERTIES 04 - REBAR").ToDictionary(r => r.GetValueOrDefault("Material") ?? "", StringComparer.OrdinalIgnoreCase);
+        var mechanical = ByName(t, "MATERIAL PROPERTIES - BASIC MECHANICAL PROPERTIES", "Material");
+        var concrete = ByName(t, "MATERIAL PROPERTIES - CONCRETE DATA", "Material");
+        var strength = ByName(t, "MATERIAL PROPERTIES - REBAR DATA", "Material");
+        foreach (var (k, v) in ByName(t, "MATERIAL PROPERTIES - TENDON DATA", "Material")) strength.TryAdd(k, v);
+        foreach (var (k, v) in ByName(t, "MATERIAL PROPERTIES - STEEL DATA", "Material")) strength.TryAdd(k, v);
         var have = e.Materials().ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (var row in Rows(t, "MATERIAL PROPERTIES 01 - GENERAL"))
+        foreach (var row in Rows(t, "MATERIAL PROPERTIES - GENERAL"))
         {
             var name = row.GetValueOrDefault("Material") ?? "";
             if (name.Length == 0 || have.Contains(name)) continue;
@@ -50,39 +52,36 @@ public static class F2kRebuild
                 ["poisson"] = N(m, "U12", type == "concrete" ? 0.2 : 0.3), ["thermal"] = N(m, "A1", 1e-5), ["unit_weight"] = N(m, "UnitWeight", 0),
             };
             if (concrete.TryGetValue(name, out var c)) args["fc"] = N(c, "Fc", 0);
-            if (rebar.TryGetValue(name, out var r)) { args["fy"] = N(r, "Fy", 0); args["fu"] = N(r, "Fu", 0); }
+            if (strength.TryGetValue(name, out var r)) { args["fy"] = N(r, "Fy", 0); args["fu"] = N(r, "Fu", 0); }
             Run(e, Sap2000.SapTools.All, "add_material", args);
         }
 
         // ---- properties ----
-        foreach (var row in Rows(t, "SLAB PROPERTIES 01 - GENERAL"))
+        foreach (var row in Rows(t, "SLAB PROPERTY DEFINITIONS"))
         {
-            var kind = (row.GetValueOrDefault("Type") ?? "slab").ToLowerInvariant() switch { "drop" => "drop", "mat" => "mat", "footing" => "footing", "ribbed" => "ribbed", "waffle" => "waffle", _ => "slab" };
+            var kind = (row.GetValueOrDefault("Property Type") ?? "slab").ToLowerInvariant() switch { "drop" => "drop", "mat" => "mat", "footing" => "footing", "ribbed" => "ribbed", "waffle" => "waffle", _ => "slab" };
             Run(e, SafeTools.All, "add_slab_section", new JsonObject
             {
-                ["name"] = row.GetValueOrDefault("Slab"), ["type"] = kind, ["material"] = row.GetValueOrDefault("MatProp"),
-                ["thickness"] = N(row, "Thickness", 0.2), ["thick_plate"] = Yes(row, "ThickPlate"),
+                ["name"] = row.GetValueOrDefault("Name"), ["type"] = kind, ["material"] = row.GetValueOrDefault("Material"),
+                ["thickness"] = N(row, "Slab Thickness", 0.2), ["thick_plate"] = string.Equals(row.GetValueOrDefault("Modeling Type"), "Shell-Thick", StringComparison.OrdinalIgnoreCase),
             });
         }
-        foreach (var row in Rows(t, "BEAM PROPERTIES 01 - GENERAL"))
+        foreach (var row in Rows(t, "FRAME SECTION PROPERTY DEFINITIONS - CONCRETE RECTANGULAR"))
             Run(e, Sap2000.SapTools.All, "add_frame_section", new JsonObject
             {
-                ["name"] = row.GetValueOrDefault("Beam"), ["shape"] = "rectangle", ["material"] = row.GetValueOrDefault("MatProp"),
-                ["depth"] = N(row, "Depth", 0.6), ["width"] = N(row, "WidthTop", N(row, "WidthBot", 0.3)),
+                ["name"] = row.GetValueOrDefault("Name"), ["shape"] = "rectangle", ["material"] = row.GetValueOrDefault("Material"),
+                ["depth"] = N(row, "Depth", 0.6), ["width"] = N(row, "Width", 0.3),
             });
-        foreach (var row in Rows(t, "COLUMN PROPERTIES 01 - GENERAL"))
-        {
-            var circle = string.Equals(row.GetValueOrDefault("Type"), "Circular", StringComparison.OrdinalIgnoreCase);
-            Run(e, Sap2000.SapTools.All, "add_frame_section", circle
-                ? new JsonObject { ["name"] = row.GetValueOrDefault("Column"), ["shape"] = "circle", ["material"] = row.GetValueOrDefault("MatProp"), ["diameter"] = N(row, "Diameter", N(row, "SecDim2", 0.5)) }
-                : new JsonObject { ["name"] = row.GetValueOrDefault("Column"), ["shape"] = "rectangle", ["material"] = row.GetValueOrDefault("MatProp"), ["depth"] = N(row, "SecDim3", 0.5), ["width"] = N(row, "SecDim2", 0.5) });
-        }
+        foreach (var row in Rows(t, "FRAME SECTION PROPERTY DEFINITIONS - CONCRETE CIRCLE"))
+            Run(e, Sap2000.SapTools.All, "add_frame_section", new JsonObject { ["name"] = row.GetValueOrDefault("Name"), ["shape"] = "circle", ["material"] = row.GetValueOrDefault("Material"), ["diameter"] = N(row, "Diameter", 0.5) });
+        foreach (var row in Rows(t, "FRAME SECTION PROPERTY DEFINITIONS - STEEL I/WIDE FLANGE"))
+            notes.Add($"The steel section {row.GetValueOrDefault("Name")} was not defined (only concrete rectangles and circles are built through the API); its frames take the first frame section.");
         var walls = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var row in Rows(t, "WALL PROPERTIES"))
+        foreach (var row in Rows(t, "WALL PROPERTY DEFINITIONS - SPECIFIED"))
         {
-            var name = row.GetValueOrDefault("Wall") ?? "";
-            var material = row.GetValueOrDefault("MatProp") ?? "";
-            var thickness = N(row, "Thickness", 0.2);
+            var name = row.GetValueOrDefault("Name") ?? "";
+            var material = row.GetValueOrDefault("Material") ?? "";
+            var thickness = N(row, "Wall Thickness", 0.2);
             try
             {
                 e.Raw("define a wall property", m => { Ok(m.PropArea.SetWall(name, 1, 1, material, thickness, -1, "", ""), $"define the wall property {name}"); return null; });
@@ -99,88 +98,89 @@ public static class F2kRebuild
         }
 
         // ---- objects ----
-        var points = Rows(t, "OBJECT GEOMETRY - POINT COORDINATES").ToDictionary(r => r.GetValueOrDefault("Point") ?? "",
-            r => (X: N(r, "GlobalX", 0), Y: N(r, "GlobalY", 0), Z: N(r, "GlobalZ", 0)), StringComparer.OrdinalIgnoreCase);
+        var points = Rows(t, "POINT OBJECT CONNECTIVITY").ToDictionary(r => r.GetValueOrDefault("UniqueName") ?? "",
+            r => (X: N(r, "X", 0), Y: N(r, "Y", 0), Z: N(r, "Z", 0)), StringComparer.OrdinalIgnoreCase);
         (double X, double Y, double Z) P(Dictionary<string, string> row, string key) =>
             points.TryGetValue(row.GetValueOrDefault(key) ?? "", out var p) ? p : throw new EtabsException($"The .f2k names point {row.GetValueOrDefault(key)}, which it does not list.");
-        var beamSection = Assignments(t, "BEAM PROPERTY ASSIGNMENTS", "Line", "BeamProp");
-        var columnSection = Assignments(t, "COLUMN PROPERTY ASSIGNMENTS", "Line", "ColProp");
-        var wallSection = Assignments(t, "WALL PROPERTY ASSIGNMENTS", "Line", "WallProp");
-        var slabSection = Assignments(t, "SLAB PROPERTY ASSIGNMENTS", "Area", "SlabProp");
+        var frameSection = Assignments(t, "FRAME ASSIGNMENTS - SECTION PROPERTIES", "UniqueName", "Section Property");
+        var areaSection = Assignments(t, "AREA ASSIGNMENTS - SECTION PROPERTIES", "UniqueName", "Section Property");
         var firstFrame = e.FrameSections().FirstOrDefault() ?? "";
         var names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         int beams = 0, columns = 0, wallCount = 0, slabs = 0;
-        foreach (var row in Rows(t, "OBJECT GEOMETRY - LINES 01 - GENERAL"))
-        {
-            var name = row.GetValueOrDefault("Line") ?? "";
-            var (i, j) = (P(row, "PointI"), P(row, "PointJ"));
-            switch ((row.GetValueOrDefault("LineType") ?? "").ToLowerInvariant())
+        foreach (var (table, isColumn) in new[] { ("BEAM OBJECT CONNECTIVITY", false), ("COLUMN OBJECT CONNECTIVITY", true) })
+            foreach (var row in Rows(t, table))
             {
-                case "beam":
-                    Rename(e, "FrameObj", e.AddFrame(i.X, i.Y, i.Z, j.X, j.Y, j.Z, beamSection.GetValueOrDefault(name, firstFrame)), name, names);
-                    beams++;
-                    break;
-                case "column":
-                    Rename(e, "FrameObj", e.AddFrame(i.X, i.Y, i.Z, j.X, j.Y, j.Z, columnSection.GetValueOrDefault(name, firstFrame)), name, names);
-                    columns++;
-                    break;
-                case "wall":
-                    var height = N(row, "Height", -3);
-                    var property = walls.GetValueOrDefault(wallSection.GetValueOrDefault(name, "")) ?? walls.Values.FirstOrDefault() ?? e.AreaSections().FirstOrDefault() ?? "";
-                    Rename(e, "AreaObj", e.AddArea([i, j, (j.X, j.Y, j.Z + height), (i.X, i.Y, i.Z + height)], property), name, names);
-                    wallCount++;
-                    break;
-                default:
-                    notes.Add($"The line {name} ({row.GetValueOrDefault("LineType")}) was left out: only beams, columns and walls are built.");
-                    break;
+                var name = row.GetValueOrDefault("Unique Name") ?? "";
+                var (i, j) = (P(row, "UniquePtI"), P(row, "UniquePtJ"));
+                Rename(e, "FrameObj", e.AddFrame(i.X, i.Y, i.Z, j.X, j.Y, j.Z, frameSection.GetValueOrDefault(name, firstFrame)), name, names);
+                if (isColumn) columns++; else beams++;
             }
+        List<(double X, double Y, double Z)> Corners(Dictionary<string, string> row) =>
+            Enumerable.Range(1, 64).Select(k => "UniquePt" + k.ToString(CultureInfo.InvariantCulture)).TakeWhile(row.ContainsKey).Select(k => P(row, k)).ToList();
+        foreach (var row in Rows(t, "WALL OBJECT CONNECTIVITY"))
+        {
+            var name = row.GetValueOrDefault("UniqueName") ?? "";
+            var corners = Corners(row);
+            if (corners.Count < 3) { notes.Add($"The wall {name} has fewer than 3 points and was left out."); continue; }
+            var property = walls.GetValueOrDefault(areaSection.GetValueOrDefault(name, "")) ?? walls.Values.FirstOrDefault() ?? e.AreaSections().FirstOrDefault() ?? "";
+            Rename(e, "AreaObj", e.AddArea(corners, property), name, names);
+            wallCount++;
         }
         var firstSlab = e.AreaSections().FirstOrDefault() ?? "";
-        foreach (var row in Rows(t, "OBJECT GEOMETRY - AREAS 01 - GENERAL"))
+        foreach (var row in Rows(t, "FLOOR OBJECT CONNECTIVITY"))
         {
-            var name = row.GetValueOrDefault("Area") ?? "";
-            var count = (int)N(row, "NumPoints", 0);
-            var corners = Enumerable.Range(1, count).Select(k => P(row, "Point" + k.ToString(CultureInfo.InvariantCulture))).ToList();
+            var name = row.GetValueOrDefault("Unique Name") ?? "";
+            var corners = Corners(row);
             if (corners.Count < 3) { notes.Add($"The area {name} has fewer than 3 points and was left out."); continue; }
-            Rename(e, "AreaObj", e.AddArea(corners, slabSection.GetValueOrDefault(name, firstSlab)), name, names);
+            Rename(e, "AreaObj", e.AddArea(corners, areaSection.GetValueOrDefault(name, firstSlab)), name, names);
             slabs++;
         }
 
         // ---- supports, by where the file's restrained points are ----
         var supports = 0;
         var built = e.Points();
-        foreach (var row in Rows(t, "RESTRAINT ASSIGNMENTS"))
+        foreach (var row in Rows(t, "JOINT ASSIGNMENTS - RESTRAINTS"))
         {
-            if (!points.TryGetValue(row.GetValueOrDefault("Point") ?? "", out var at)) continue;
+            if (!points.TryGetValue(row.GetValueOrDefault("UniqueName") ?? "", out var at)) continue;
             var point = built.FirstOrDefault(p => Math.Abs(p.X - at.X) < 1e-4 && Math.Abs(p.Y - at.Y) < 1e-4 && Math.Abs(p.Z - at.Z) < 1e-4);
-            if (point is null) { notes.Add($"No point of the model is at the support {row.GetValueOrDefault("Point")} ({at.X}, {at.Y}, {at.Z})."); continue; }
+            if (point is null) { notes.Add($"No point of the model is at the support {row.GetValueOrDefault("UniqueName")} ({at.X}, {at.Y}, {at.Z})."); continue; }
             e.SetRestraint(point.Name, new[] { "UX", "UY", "UZ", "RX", "RY", "RZ" }.Select(d => Yes(row, d)).ToArray());
             supports++;
         }
 
         // ---- loads ----
         var patterns = e.LoadPatterns().Select(p => p.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (var row in Rows(t, "LOAD PATTERNS"))
+        foreach (var row in Rows(t, "LOAD PATTERN DEFINITIONS"))
         {
-            var name = row.GetValueOrDefault("LoadPat") ?? "";
+            var name = row.GetValueOrDefault("Name") ?? "";
             if (name.Length == 0 || patterns.Contains(name)) continue;
-            e.AddLoadPattern(name, PatternType(row.GetValueOrDefault("Type") ?? ""), N(row, "SelfWtMult", 0));
+            e.AddLoadPattern(name, PatternType(row.GetValueOrDefault("Type") ?? ""), N(row, "Self Weight Multiplier", 0));
             patterns.Add(name);
         }
         var loads = 0;
-        foreach (var row in Rows(t, "LOAD ASSIGNMENTS - SURFACE LOADS"))
+        foreach (var row in Rows(t, "AREA LOAD ASSIGNMENTS - UNIFORM"))
         {
-            var area = row.GetValueOrDefault("Area") ?? "";
+            var area = row.GetValueOrDefault("UniqueName") ?? "";
             var named = names.GetValueOrDefault(area);
             if (named is null) { notes.Add($"The surface load on {area} was left out: the area was not built."); continue; }
-            e.SetAreaLoad(named, row.GetValueOrDefault("LoadPat") ?? "", N(row, "UnifLoad", 0), false);
+            e.SetAreaLoad(named, row.GetValueOrDefault("Load Pattern") ?? "", N(row, "Load", 0), false);
             loads++;
         }
+        foreach (var row in Rows(t, "FRAME LOADS ASSIGNMENTS - DISTRIBUTED"))
+        {
+            var frame = row.GetValueOrDefault("UniqueName") ?? "";
+            var named = names.GetValueOrDefault(frame);
+            if (named is null) { notes.Add($"The line load on {frame} was left out: the beam was not built."); continue; }
+            e.SetFrameLoad(named, row.GetValueOrDefault("Load Pattern") ?? "", N(row, "Force A", 0), false);
+            loads++;
+        }
+        var pointLoads = Rows(t, "JOINT LOADS ASSIGNMENTS - FORCE").Count();
+        if (pointLoads > 0) notes.Add($"{pointLoads} point load(s) of the file were left out: they go in through SAFE's own import of the file.");
         var cases = e.LoadCases().Concat(e.Combos()).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var combos = 0;
-        foreach (var combo in Rows(t, "LOAD COMBINATIONS").GroupBy(r => r.GetValueOrDefault("Combo") ?? "", StringComparer.OrdinalIgnoreCase).Where(g => g.Key.Length > 0))
+        foreach (var combo in Rows(t, "LOAD COMBINATION DEFINITIONS").GroupBy(r => r.GetValueOrDefault("Name") ?? "", StringComparer.OrdinalIgnoreCase).Where(g => g.Key.Length > 0))
         {
-            var items = combo.Select(r => (Case: r.GetValueOrDefault("Load") ?? "", Factor: N(r, "SF", 1))).ToList();
+            var items = combo.Select(r => (Case: r.GetValueOrDefault("Load Name") ?? "", Factor: N(r, "SF", 1))).ToList();
             var missing = items.Where(x => !cases.Contains(x.Case)).Select(x => x.Case).ToList();
             if (missing.Count > 0) notes.Add($"The combination {combo.Key} leaves out {string.Join(", ", missing)}: SAFE has no such case.");
             var kept = items.Where(x => cases.Contains(x.Case)).ToList();
@@ -189,13 +189,15 @@ public static class F2kRebuild
             cases.Add(combo.Key);
             combos++;
         }
+        var tendons = Rows(t, "TENDON OBJECT CONNECTIVITY").Select(r => r.GetValueOrDefault("Name")).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+        if (tendons > 0) notes.Add($"{tendons} tendon(s) of the file were left out: SAFE's API has no call to draw a tendon; they go in through SAFE's own import of the file.");
 
-        var strips = Rows(t, "OBJECT GEOMETRY - DESIGN STRIPS").Select(r => r.GetValueOrDefault("Strip")).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+        var strips = Rows(t, "STRIP OBJECT CONNECTIVITY").Select(r => r.GetValueOrDefault("Name")).Distinct(StringComparer.OrdinalIgnoreCase).Count();
         e.Refresh();
         return new JsonObject
         {
             ["slabs"] = slabs, ["beams"] = beams, ["columns"] = columns, ["walls"] = wallCount, ["supports"] = supports,
-            ["loads"] = loads, ["combinations"] = combos, ["strips_in_file"] = strips, ["notes"] = notes,
+            ["loads"] = loads, ["combinations"] = combos, ["strips_in_file"] = strips, ["tendons_in_file"] = tendons, ["notes"] = notes,
         };
     }
 
@@ -226,7 +228,7 @@ public static class F2kRebuild
             (Field("AutoWiden", "AutoWidening"), "AutoWiden"),
         };
         var rows = new List<Dictionary<string, string>>();
-        foreach (var row in Rows(CsiTableText.Parse(f2kText), "OBJECT GEOMETRY - DESIGN STRIPS"))
+        foreach (var row in StripPoints(CsiTableText.Parse(f2kText)))
         {
             var r = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var (field, from) in map)
@@ -235,6 +237,39 @@ public static class F2kRebuild
         }
         return rows;
     }
+
+    /// <summary>
+    /// The file's strips one row per strip point (Strip, Layer, Point, GlobalX, GlobalY, GlobalZ and the widths before and
+    /// after the point), from SAFE 20's "Strip Object Connectivity", whose rows name point objects.
+    /// </summary>
+    public static List<Dictionary<string, string>> StripPoints(Dictionary<string, List<Dictionary<string, string>>> t)
+    {
+        var points = Rows(t, "POINT OBJECT CONNECTIVITY").GroupBy(r => r.GetValueOrDefault("UniqueName") ?? "", StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+        var list = new List<Dictionary<string, string>>();
+        foreach (var strip in Rows(t, "STRIP OBJECT CONNECTIVITY").GroupBy(r => r.GetValueOrDefault("Name") ?? "", StringComparer.OrdinalIgnoreCase).Where(g => g.Key.Length > 0))
+        {
+            var first = strip.First();
+            var layer = first.GetValueOrDefault("Layer") ?? "A";
+            var places = new List<(string Point, string Left, string Right)> { (first.GetValueOrDefault("Strip Start Point") ?? "", first.GetValueOrDefault("Start Width Left") ?? "", first.GetValueOrDefault("Start Width Right") ?? "") };
+            places.AddRange(strip.Select(r => (r.GetValueOrDefault("Segment End Point") ?? "", r.GetValueOrDefault("End Width Left") ?? "", r.GetValueOrDefault("End Width Right") ?? "")));
+            var n = 0;
+            foreach (var (point, left, right) in places)
+            {
+                if (!points.TryGetValue(point, out var p)) throw new EtabsException($"The strip {strip.Key} names point {point}, which the file does not list.");
+                n++;
+                list.Add(new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["Strip"] = strip.Key, ["Layer"] = layer, ["Point"] = n.ToString(CultureInfo.InvariantCulture),
+                    ["GlobalX"] = p.GetValueOrDefault("X") ?? "0", ["GlobalY"] = p.GetValueOrDefault("Y") ?? "0", ["GlobalZ"] = p.GetValueOrDefault("Z") ?? "0",
+                    ["WBLeft"] = left, ["WBRight"] = right, ["WALeft"] = left, ["WARight"] = right, ["AutoWiden"] = first.GetValueOrDefault("Auto Widen") ?? "No",
+                });
+            }
+        }
+        return list;
+    }
+
+    private static Dictionary<string, Dictionary<string, string>> ByName(Dictionary<string, List<Dictionary<string, string>>> tables, string table, string key) =>
+        Rows(tables, table).Where(r => r.ContainsKey(key)).GroupBy(r => r[key], StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
     private static string? FieldOf(IReadOnlyList<string> fields, params string[] names) =>
         names.Select(n => fields.FirstOrDefault(f => string.Equals(Plain(f), Plain(n), StringComparison.OrdinalIgnoreCase))).FirstOrDefault(f => f is not null);

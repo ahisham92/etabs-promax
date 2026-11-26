@@ -361,7 +361,7 @@ static class OldProgramTests
         {
             var m = Templates.ConcreteFrame("T", [6, 6], [5], 3, 3.5);
             var written = F2kWriter.Write(m, new F2kOptions(Story: "Story2"));
-            var points = CsiTableText.Parse(written.Text)["OBJECT GEOMETRY - DESIGN STRIPS"];
+            var points = CsiProMax.Assistant.Safe.F2kRebuild.StripPoints(CsiTableText.Parse(written.Text));
             Check(points.Count >= 2, "the file has strips");
             string[] safe = ["Name", "Layer", "Point", "GlobalX", "GlobalY", "WB Left", "WB Right", "WA Left", "WA Right", "AutoWiden", "GUID"];
             var rows = CsiProMax.Assistant.Safe.F2kRebuild.StripRows(written.Text, safe);
