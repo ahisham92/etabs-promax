@@ -29,16 +29,20 @@ public static class ModelerStartFieldSteps
             return "a start that gets no answer finds the copy holding the Modeler, and ends it only when it has no window";
         });
 
+        // Run from the Modeler itself: its own window must hold the model, with the chat beside it (not the chat alone).
+        if (open is null && OperatingSystem.IsWindows() && CsiProMax.App.Modeler)
+            ctx.Step("this Modeler window holds its model view, with the chat on its right", () => ThisWindow());
+
         if (open is null && !OperatingSystem.IsWindows())
         {
             ctx.Skip("the Modeler shortcut names a CSI ProMax that is on this PC", "Windows only");
-            ctx.Skip("the Modeler opens from its shortcut, and a second double-click is answered", "Windows only");
+            ctx.Skip("the Modeler opens from its shortcut with its model view inside, and a second double-click is answered", "Windows only");
             return;
         }
         if (open is null)
             ctx.Step("the Modeler shortcut names a CSI ProMax that is on this PC", () => Shortcut());
         if (!full && open is null) return;
-        ctx.Step("the Modeler opens from its shortcut, and a second double-click is answered", () =>
+        ctx.Step("the Modeler opens from its shortcut with its model view inside, and a second double-click is answered", () =>
         {
             var (first, again) = (open ?? Twice)();
             if (first.NotTried) throw new FieldSkipException(first.Detail);
@@ -46,6 +50,21 @@ public static class ModelerStartFieldSteps
             FieldContext.Expect(again.Ok, "the second start: " + again.Detail);
             return first.Detail + "; " + again.Detail;
         });
+    }
+
+    // Apart, so that WPF's types are only reached on Windows, in the Modeler.
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static string ThisWindow()
+    {
+        var answer = "";
+        CsiProMax.App.Ui?.Invoke(() =>
+        {
+            var main = Host.MainWindow.Current;
+            FieldContext.Expect(main is not null, "the Modeler has no window");
+            FieldContext.Expect(main!.HasModelView, "the Modeler's window does not hold its model view (it shows the chat alone)");
+            answer = "the model fills the window" + (CsiProMax.AiMode.On ? main.ChatShown ? ", the chat is on its right" : ", the chat is closed (View > Show the chat)" : "; the AI chat is off");
+        });
+        return answer.Length > 0 ? answer : throw new FieldSkipException("the Modeler's window could not be asked");
     }
 
     /// <summary>Each Modeler shortcut (desktop, Start menu): its program and its CsiProMax.dll must be there, and it must start the Modeler.</summary>
@@ -104,8 +123,13 @@ public static class ModelerStartFieldSteps
             }
             if (!title.StartsWith("CSI ProMax Modeler", StringComparison.Ordinal))
                 return (new WindowFieldSteps.Seen(false, title.Length == 0 ? $"no window showed within 90 seconds. {WindowFieldSteps.Wrote(notes, before)}" : $"the window is named '{title}'"), new WindowFieldSteps.Seen(false, "not started"));
-            Thread.Sleep(5000);
-            var opened = new WindowFieldSteps.Seen(true, $"'{title}' opened");
+            // The window must be the Modeler itself: its model view drawn inside it, not the chat alone (2026-11-26).
+            var drawn = DateTime.UtcNow.AddSeconds(60);
+            while (DateTime.UtcNow < drawn && !Host.WebPages.Shown(first.Id).Contains(nameof(Host.WebPages.Kind.ModelerView))) Thread.Sleep(500);
+            if (!Host.WebPages.Shown(first.Id, remove: true).Contains(nameof(Host.WebPages.Kind.ModelerView)))
+                return (new WindowFieldSteps.Seen(false, $"'{title}' opened, but its model view (3D, plan, Draw/Define/Assign) was not drawn inside it within 60 seconds. {WindowFieldSteps.Wrote(notes, before)}"), new WindowFieldSteps.Seen(false, "not started"));
+            Thread.Sleep(3000);
+            var opened = new WindowFieldSteps.Seen(true, $"'{title}' opened with its model view inside");
             // The second double-click: the open Modeler answers, and the new start ends within seconds.
             var watch = Stopwatch.StartNew();
             using var again = Process.Start(Info());

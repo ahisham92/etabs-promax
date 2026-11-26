@@ -50,6 +50,8 @@ jobs:
           path: |
             window.png
             window-no-ai.png
+            window-modeler.png
+            window-modeler-no-ai.png
           if-no-files-found: ignore
   assistant:
     # The assistant and its ETABS plug-in as one folder of DLLs (no .exe), kept with the run so it can be tried.

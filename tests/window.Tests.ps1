@@ -20,9 +20,9 @@ function Errors { if (Test-Path -LiteralPath $notes) { (Get-Content -LiteralPath
 try { Set-DisplayResolution -Width 1920 -Height 1080 -Force | Out-Null } catch { }
 
 # One start: with the AI chat (as most testers have it), then without it (install-no-ai.ps1, or Turn the AI chat off).
-function Open-Window([string]$Label, [string[]]$Extra, [string]$Shot) {
+function Open-Window([string]$Label, [string[]]$Extra, [string]$Shot, [string]$Mode = '--demo', [switch]$Modeler) {
     if (Test-Path -LiteralPath $notes) { Remove-Item -LiteralPath $notes -Force }
-    $process = Start-Process -FilePath 'dotnet' -ArgumentList (@(('"' + $dll + '"'), '--demo', '--this-version', '--no-update') + $Extra) -PassThru
+    $process = Start-Process -FilePath 'dotnet' -ArgumentList (@(('"' + $dll + '"'), $Mode, '--this-version', '--no-update') + $Extra) -PassThru
     $title = ''
     try {
         $deadline = (Get-Date).AddSeconds(120)
@@ -40,6 +40,15 @@ function Open-Window([string]$Label, [string[]]$Extra, [string]$Shot) {
         Check (-not $process.HasExited) "$Label it is still running twelve seconds later"
         $said = Errors
         Check ($said.Length -eq 0) "$Label it wrote no error while starting and drawing $said"
+        if ($Modeler) {
+            # The Modeler is one window: its model view (WebView2) drawn inside it, noted by the window when the page loads.
+            Check ($title -like 'CSI ProMax Modeler*') "$Label the window is the Modeler: '$title'"
+            $shown = Join-Path $env:LOCALAPPDATA "CsiProMax\shown\$($process.Id).txt"
+            $deadline = (Get-Date).AddSeconds(45)
+            while ((Get-Date) -lt $deadline -and -not ((Test-Path -LiteralPath $shown) -and ((Get-Content -LiteralPath $shown -Raw) -match 'ModelerView'))) { Start-Sleep -Milliseconds 500 }
+            Check ((Test-Path -LiteralPath $shown) -and ((Get-Content -LiteralPath $shown -Raw) -match 'ModelerView')) "$Label its model view is drawn inside its own window"
+            Start-Sleep -Seconds 3
+        }
 
         if ($Shot) {
             try {
@@ -67,6 +76,11 @@ function Open-Window([string]$Label, [string[]]$Extra, [string]$Shot) {
 Open-Window '[with the AI chat]' @() $Picture
 $noAiPicture = if ($Picture) { [IO.Path]::ChangeExtension($Picture, $null).TrimEnd('.') + '-no-ai.png' } else { '' }
 Open-Window '[without the AI chat]' @('--no-ai') $noAiPicture
+# The Modeler, as its desktop shortcut starts it: one window with the model inside and the chat on its right.
+$modelerPicture = if ($Picture) { [IO.Path]::ChangeExtension($Picture, $null).TrimEnd('.') + '-modeler.png' } else { '' }
+Open-Window '[Modeler]' @() $modelerPicture '--modeler' -Modeler
+$modelerNoAi = if ($Picture) { [IO.Path]::ChangeExtension($Picture, $null).TrimEnd('.') + '-modeler-no-ai.png' } else { '' }
+Open-Window '[Modeler without the AI chat]' @('--no-ai') $modelerNoAi '--modeler' -Modeler
 
 if ($failed -gt 0) { Write-Host "`n$failed failed." -ForegroundColor Red; exit 1 }
 Write-Host "`nThe window opens, with the AI chat and without it."

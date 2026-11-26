@@ -34,6 +34,24 @@ static class WebWindowTests
             Check(File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "FieldTest.cs")).Contains("ModelerStartFieldSteps.Run(ctx,", StringComparison.Ordinal), "the field test does not start the Modeler");
         });
 
+        yield return ("Modeler: one program window, the model view inside it and the chat on its right, closable (2026-11-26)", () =>
+        {
+            // "when I open the modeller I see this": 0.4.45's Modeler window was the chat alone, full screen; the model
+            // was in a second window, behind it.
+            var main = Source("Panel", "Host", "MainWindow.cs");
+            Check(main.Contains("if (CsiProMax.App.Modeler) layout.Children.Add(ModelerBody());", StringComparison.Ordinal), "the Modeler's window is the chat alone again");
+            Check(main.Contains("_view = new WebPane(server.ViewUrl, WebPages.Kind.ModelerView);", StringComparison.Ordinal), "the Modeler's model view is not inside its window");
+            Check(main.Contains("close.Click += (_, _) => ShowChat(false);", StringComparison.Ordinal) && main.Contains("Show the _chat", StringComparison.Ordinal), "the chat beside the model cannot be closed and brought back");
+            Check(main.Contains("if (CsiProMax.App.Modeler) return; // the Modeler always opens full screen", StringComparison.Ordinal), "the Modeler takes the chat column's place on the screen");
+            Check(Source("Panel", "Host", "WebWindow.cs").Contains("kind == WebPages.Kind.ModelerView && MainWindow.Current is { HasModelView: true } main", StringComparison.Ordinal), "asking for the Modeler's 3D view opens a second window");
+            Check(Source("Field", "ModelerStartFieldSteps.cs").Contains("Kind.ModelerView", StringComparison.Ordinal), "the field test does not check that the Modeler's window draws its model");
+            var pid = 900000 + Random.Shared.Next(99999);
+            var file = Path.Combine(CsiProMax.Host.WebPages.ShownFolder, pid + ".txt");
+            Directory.CreateDirectory(CsiProMax.Host.WebPages.ShownFolder);
+            File.WriteAllText(file, "ModelerView http://127.0.0.1:1/view/x/\n");
+            Check(CsiProMax.Host.WebPages.Shown(pid, remove: true).SequenceEqual(["ModelerView"]) && !File.Exists(file), "the note that the model view was drawn is not read back");
+        });
+
         yield return ("Modeler and Viewer: the X beside the Chat tab closes the side panel, and the chat's expand button fills the screen (2026-11-26)", () =>
         {
             var html = CsiProMax.Assistant.Tools.Pack.ViewerHtml();
