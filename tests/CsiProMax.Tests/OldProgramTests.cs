@@ -490,6 +490,30 @@ static class OldProgramTests
                 "the check comes before any window is started");
         });
 
+        yield return ("SAP2000 26 field test (0.4.54, experiment N): the Modeler's .s2k is turned into an .sdb in one SAP2000, and the test works in a new one (an .s2k opened in a process makes it refuse every table import)", () =>
+        {
+            var own = CsiProMax.Assistant.ScratchProgram.OpensTextInOwnProcess;
+            Check(own(CsiProgram.Sap2000, @"C:\t\cpm-field-test.s2k") && own(CsiProgram.Sap2000, @"C:\t\cpm-field-test.S2K") && own(CsiProgram.Sap2000, @"C:\t\cpm-field-test.$2k"), "SAP2000 and its text files");
+            Check(!own(CsiProgram.Sap2000, @"C:\t\cpm-field-test-1a2b3c.sdb"), "SAP2000's own .sdb opens in the window the test works in");
+            Check(!own(CsiProgram.Etabs, @"C:\t\cpm-field-test.e2k") && !own(CsiProgram.Safe, @"C:\t\cpm-field-test.f2k"), "ETABS and SAFE take table imports after their text files (their field tests' table steps pass)");
+            var scratch = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));
+            var start = scratch.IndexOf("public static IScratchWindow? Start(", StringComparison.Ordinal);
+            var turn = scratch.IndexOf("OpensTextInOwnProcess(program, modelFile)", start, StringComparison.Ordinal);
+            var second = scratch.IndexOf("var scratch = new ScratchProgram(program);", start, StringComparison.Ordinal);
+            Check(start > 0 && turn > start && second > turn, "the text file is turned into a model file before the test's own window starts");
+            Check(scratch.IndexOf("convertOnly: true", turn, StringComparison.Ordinal) is var c and > 0 && c < second && scratch.IndexOf("first.Close()", turn, StringComparison.Ordinal) is var closed and > 0 && closed < second
+                  && scratch.IndexOf("modelFile = converted;", turn, StringComparison.Ordinal) is var swap and > 0 && swap < second, "the first SAP2000 only saves the .sdb, is closed, and the second opens that .sdb");
+            Check(scratch.IndexOf("ModelPath = target;\r\n        if (convertOnly) return true;", StringComparison.Ordinal) > 0 || scratch.IndexOf("ModelPath = target;\n        if (convertOnly) return true;", StringComparison.Ordinal) > 0, "the first window stops once the .sdb is saved: no change is made in it");
+            // The engineer's own SAP2000: told why, and what to do, instead of a bare refusal.
+            Check(CsiProMax.Assistant.Tools.CsiTools.TextOpenNote(CsiProgram.Sap2000, @"C:\m\Tower.s2k") is { } note && note.Contains("new SAP2000", StringComparison.Ordinal), "open_model of an .s2k in SAP2000 says table edits wait for a new SAP2000");
+            Check(CsiProMax.Assistant.Tools.CsiTools.TextOpenNote(CsiProgram.Sap2000, @"C:\m\Tower.sdb") is null && CsiProMax.Assistant.Tools.CsiTools.TextOpenNote(CsiProgram.Etabs, @"C:\m\Tower.e2k") is null, "nothing said for an .sdb, or for ETABS");
+            Check(EditableTables.NoImportAfterText.Contains(".s2k", StringComparison.Ordinal) && EditableTables.NoImportAfterText.Contains("close SAP2000", StringComparison.Ordinal), "the refusal says the cause and the way out");
+            var tables = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Etabs/EditableTables.cs"));
+            Check(tables.Contains("with no log), so it cannot {what}. {NoImportAfterText}", StringComparison.Ordinal), "set_lateral_load's refused import says it");
+            var tools = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Tools/CsiTools.cs"));
+            Check(tools.Contains("EditableTables.NoImportAfterText", StringComparison.Ordinal), "edit_table's refused import says it");
+        });
+
         yield return ("kind: a program's 'could not read this file' box in a scratch window is answered OK and said, never a licence box", () =>
         {
             var box = CsiProMax.Assistant.ScratchDialogs.IsFileRefused;

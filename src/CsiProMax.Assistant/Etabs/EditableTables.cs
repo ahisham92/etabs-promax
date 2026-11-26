@@ -5,8 +5,8 @@ namespace CsiProMax.Assistant.Etabs;
 /// some definitions (a user coefficient seismic load, ASCE 7-16 wind, a user response spectrum, a named mass source:
 /// read from its ETABSv1.dll and its "Table and Field Keys.xml", 0.4.17 field test), and its tables take them.
 /// </summary>
-public static class EditableTables
-{
+public static class EditableTables
+{
     /// <summary>
     /// Selects every load pattern for display before a table is read. SAP2000 26 shows only the patterns selected for
     /// display in its database tables (DEAD alone in a new model, none in a model imported from .s2k), so a pattern added
@@ -253,7 +253,7 @@ public static class EditableTables
                 log ??= "";
                 Dictionary<string, string> after = Codes(m);
                 if (applied != 0 && fatal == 0 && errors == 0 && log.Trim().Length == 0)
-                    throw new EtabsException($"{program} did not run the import of {pattern}'s {code} (it answered {applied}, with no log), so it cannot {what}. Patterns after: {after.Count} of {before.Count}; " +
+                    throw new EtabsException($"{program} did not run the import of {pattern}'s {code} (it answered {applied}, with no log), so it cannot {what}. {NoImportAfterText} Patterns after: {after.Count} of {before.Count}; " +
                         $"locked now: {Locked(m)}; the windows of {program}: {OpenWindows(e.Program)}; thread {Thread.CurrentThread.GetApartmentState()}; steps: {string.Join("; ", trace)}.");
                 var changed = before.Where(kv => kv.Key != pattern && (!after.TryGetValue(kv.Key, out var now) || !SameCode(now, kv.Value, empty: true))).Select(kv => kv.Key).ToList();
                 if (changed.Count > 0)
@@ -273,6 +273,15 @@ public static class EditableTables
             }
         })!;
     }
+
+    /// <summary>
+    /// Why SAP2000 26 answers 1 to ApplyEditedTables with no log and loses every load pattern: its process has opened an
+    /// .s2k (File > Open or File > Import of a text file) since it started. Then it refuses every table import, even after
+    /// the .sdb is opened again, and a new SAP2000 opening the same .sdb takes the same rows (experiment N on Ahmed's PC,
+    /// 2026-11-26: a tiny two-pattern .s2k was enough; the 20 table codes of the 0.4.54 field test).
+    /// </summary>
+    public const string NoImportAfterText = "SAP2000 26 does this in a session that has opened an .s2k text file (File > Open or File > Import): it then refuses every table import until it is restarted. " +
+        "Save the model as an .sdb, close SAP2000, open the .sdb in a new SAP2000 and try again.";
 
     /// <summary>Every load pattern with its auto lateral code ("" for none), by the API.</summary>
     private static Dictionary<string, string> Codes(dynamic m)

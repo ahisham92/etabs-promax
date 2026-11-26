@@ -808,7 +808,8 @@ public static class CsiTools
                 {
                     int applied = Convert.ToInt32(m.DatabaseTables.ApplyEditedTables(true, ref fatal, ref errors, ref warnings, ref info, ref text));
                     text ??= "";
-                    if (applied != 0) refused = $"{program} refused to apply the edit of {table.Name} (answer {applied})";
+                    if (applied != 0) refused = $"{program} refused to apply the edit of {table.Name} (answer {applied})" +
+                        (e.Program.Key == CsiProgram.Sap2000.Key && string.IsNullOrWhiteSpace(text) ? ". " + CsiProMax.Assistant.Etabs.EditableTables.NoImportAfterText.TrimEnd('.') : "");
                     else if (fatal + errors > 0) refused = $"{program} did not take the edit of {table.Name} ({fatal} fatal, {errors} errors)";
                 }
             }
@@ -1092,6 +1093,15 @@ public static class CsiTools
         return a.Trim().Length > 0 && string.Equals(Key(a), Key(b), StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// What the engineer is told after SAP2000 opened a text model (.s2k, .$2k): that SAP2000 session takes no table edit
+    /// any more (<see cref="CsiProMax.Assistant.Etabs.EditableTables.NoImportAfterText"/>). Null otherwise.
+    /// </summary>
+    internal static string? TextOpenNote(CsiProgram program, string path) =>
+        program.Key == CsiProgram.Sap2000.Key && Path.GetExtension(path).ToLowerInvariant() is ".s2k" or ".$2k"
+            ? $"{Path.GetFileName(path)} is a text file: this SAP2000 session will refuse table edits (edit_table, and the seismic and wind codes set through tables). Save it as an .sdb, close SAP2000 and open the .sdb in a new SAP2000 before such edits."
+            : null;
+
     private static JsonNode OpenModel(JsonElement a, ICsiLink e)
     {
         var name = e.Program.Name;
@@ -1117,6 +1127,7 @@ public static class CsiTools
         {
             ["opened"] = Path.GetFileName(path), ["model"] = now.File, ["closed"] = before.Length > 0 ? Path.GetFileName(before) : "an untitled model",
             ["units"] = $"{now.Force}, {now.Length}", ["locked"] = now.Locked,
+            ["note"] = TextOpenNote(e.Program, path),
         };
     }
 
