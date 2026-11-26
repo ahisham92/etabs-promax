@@ -7,11 +7,14 @@ internal static class Launcher
 {
     internal static bool Windows => Path.DirectorySeparatorChar == '\\';
 
-    public static void Start()
+    public static void Start() => Start(Path.GetDirectoryName(typeof(Launcher).Assembly.Location) ?? "");
+
+    /// <param name="pluginFolder">Where the installed plug-in lies (a newer copy of the plug-in is loaded from memory and has no folder of its own).</param>
+    public static void Start(string pluginFolder)
     {
         using var me = Process.GetCurrentProcess();
         Process.Start(StartInfo(
-            Path.GetDirectoryName(typeof(Launcher).Assembly.Location) ?? "",
+            pluginFolder,
             Path.GetDirectoryName(typeof(object).Assembly.Location) ?? "", me.Id, me.ProcessName))?.Dispose();
     }
 

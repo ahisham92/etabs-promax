@@ -25,6 +25,48 @@ public static class ApiBridge
     private static readonly object Gate = new();
     private static object? _model;
     private static bool _listening;
+    private static volatile bool _stopping;
+    private static Thread? _listener;
+    private static string? _name;
+
+    /// <summary>
+    /// Set by the plug-in: hands the pipe to a newer downloaded copy of the plug-in when there is one, and says whether
+    /// it did (<see cref="ApiWire.Renew"/>). Null in Windows PowerShell, whose copy is always the window's own.
+    /// </summary>
+    public static Func<bool>? Renewer { get; set; }
+
+    /// <summary>
+    /// Stops listening on the plug-in's pipe, so that a newer copy of the plug-in can serve it instead. Windows that
+    /// are connected keep their calls until they go. It never throws.
+    /// </summary>
+    public static void Stop()
+    {
+        Thread? listener;
+        string? name;
+        lock (Gate)
+        {
+            if (!_listening) return;
+            _stopping = true;
+            listener = _listener;
+            name = _name;
+        }
+        try
+        {
+            // The listener waits for a window: a connection of our own wakes it, and it sees it is to stop.
+            for (var i = 0; i < 5 && listener is { IsAlive: true } && name is not null; i++)
+            {
+                try
+                {
+                    using var wake = new NamedPipeClientStream(".", name, PipeDirection.InOut);
+                    wake.Connect(500);
+                }
+                catch (Exception) { /* no listener is waiting right now */ }
+                if (listener.Join(500)) break;
+            }
+        }
+        catch (Exception) { /* never into the program */ }
+        lock (Gate) { _listening = false; _stopping = false; _listener = null; _model = null; }
+    }
 
     /// <summary>
     /// Called by the plug-in each time Tools > CSI ProMax is picked: from then on the window reaches this program's model
@@ -44,7 +86,9 @@ public static class ApiBridge
             int pid;
             using (var me = Process.GetCurrentProcess()) pid = me.Id;
             var name = PipeName(pid);
-            new Thread(() => Listen(name, () => _model, once: false)) { IsBackground = true, Name = "CSI ProMax API pipe" }.Start();
+            var listener = new Thread(() => Listen(name, () => _model, once: false, stop: () => _stopping)) { IsBackground = true, Name = "CSI ProMax API pipe" };
+            lock (Gate) { _listener = listener; _name = name; }
+            listener.Start();
         }
         catch (Exception) { lock (Gate) _listening = false; }
     }
@@ -92,15 +136,17 @@ public static class ApiBridge
         return found ?? helperType.GetMethod("GetObject")!.Invoke(helper, new object[] { progId });
     }
 
-    private static void Listen(string name, Func<object?> root, bool once, Func<string?>? why = null, Func<(string, string)>? describe = null)
+    private static void Listen(string name, Func<object?> root, bool once, Func<string?>? why = null, Func<(string, string)>? describe = null, Func<bool>? stop = null)
     {
         while (true)
         {
+            if (stop?.Invoke() == true) return;
             NamedPipeServerStream server;
             try { server = new NamedPipeServerStream(name, PipeDirection.InOut, NamedPipeServerStream.MaxAllowedServerInstances, PipeTransmissionMode.Byte, PipeOptions.None); }
             catch (Exception) { if (once) return; Thread.Sleep(2000); continue; }
             try { server.WaitForConnection(); }
             catch (Exception) { server.Dispose(); if (once) return; continue; }
+            if (stop?.Invoke() == true) { server.Dispose(); return; }
             if (once) { Session(server, root, why, describe); return; }
             new Thread(() => Session(server, root, why, describe)) { IsBackground = true, Name = "CSI ProMax API call" }.Start();
         }
@@ -177,6 +223,15 @@ public static class ApiBridge
                                     ApiWire.Write(w, result, HandleOf);
                                     w.Write(values.Length);
                                     foreach (var value in values) ApiWire.Write(w, value == Type.Missing ? null : value, HandleOf);
+                                    break;
+                                }
+                                case ApiWire.Renew:
+                                {
+                                    // A newer copy of the plug-in takes the pipe: this window connects again, to it.
+                                    var renewed = Renewer?.Invoke() ?? false;
+                                    w.Write((byte)0);
+                                    w.Write(renewed);
+                                    bye = renewed;
                                     break;
                                 }
                                 case ApiWire.Bye:
