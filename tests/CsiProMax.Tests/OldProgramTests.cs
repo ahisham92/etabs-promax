@@ -32,6 +32,17 @@ static class OldProgramTests
 
     public static IEnumerable<(string Name, Action Body)> All()
     {
+        yield return ("ETABS 23 joint mass: a field blank in every row is left out of the import (MMI X blank skipped the record, 0.4.57)", () =>
+        {
+            var (link, api, _) = CsiToolsTests.Model(CsiProgram.Etabs);
+            const string key = "Joint Assignments - Additional Mass";
+            api.Tables[key] = (["Story", "Label", "UniqueName", "MassXY", "MassZ", "MMIX", "MMIY", "MMIZ"], []);
+            EditableTables.Put(link, key, "Story|Label", [new Dictionary<string, string> { ["Story"] = "Base", ["Label"] = "1", ["UniqueName"] = "3", ["MassXY"] = "1.5", ["MassZ"] = "0", ["MMIX"] = "", ["MMIY"] = "", ["MMIZ"] = "" }], "put the joint mass in");
+            var (fields, rows) = api.Tables[key];
+            Check(!fields.Contains("MMIX") && fields.Contains("MassXY") && fields.Contains("UniqueName"), "blank MMI fields left out: " + string.Join(",", fields));
+            Check(rows.Single()[Array.IndexOf(fields, "MassXY")] == "1.5", "the mass went in");
+        });
+
         yield return ("ETABS 23 shear wall design: no StartDesign in its API, so its own menu Design > Shear Wall Design > Start Design/Check is picked", () =>
         {
             Check(MenuCommand.Matches("&Start Design/Check...", "Start Design/Check") && MenuCommand.Matches("Shear &Wall Design", "Shear Wall Design") && !MenuCommand.Matches("Steel Frame Design", "Shear Wall Design"), "menu words without access keys or dots");

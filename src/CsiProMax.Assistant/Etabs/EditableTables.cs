@@ -159,10 +159,16 @@ public static class EditableTables
                 try { m.DatabaseTables.GetAllFieldsInTable(key, ref v2, ref n, ref keys, ref names, ref about, ref units, ref importable); } catch { keys = []; }
                 keys ??= []; importable ??= [];
                 var shown = keys.Select((k, i) => (k, ok: i < importable.Length && importable[i])).ToList();
-                var drop = Enumerable.Range(0, fields.Length).Where(i => !keyFields.Contains(fields[i], StringComparer.OrdinalIgnoreCase)
-                    && shown.Any(s => s.k.Equals(fields[i], StringComparison.OrdinalIgnoreCase) && !s.ok)).ToHashSet();
-                // Only when the program says which ones it imports (an answer with none importable says nothing).
-                if (drop.Count > 0 && drop.Count < fields.Length && importable.Any(x => x))
+                var drop = importable.Any(x => x) ? Enumerable.Range(0, fields.Length).Where(i => !keyFields.Contains(fields[i], StringComparer.OrdinalIgnoreCase)
+                    && shown.Any(s => s.k.Equals(fields[i], StringComparison.OrdinalIgnoreCase) && !s.ok)).ToHashSet() : [];
+                // A field blank in every row is left out too: ETABS 23 skipped the Modeler's joint mass row for its blank
+                // MMI X ("Field name: MMI X ... Error reading field; record skipped", 0.4.57 full test). Blank means the
+                // program's default, which leaving the field out gives as well.
+                if (e.Program.Key == CsiProgram.Etabs.Key)
+                foreach (var i in Enumerable.Range(0, fields.Length).Where(i => !keyFields.Contains(fields[i], StringComparer.OrdinalIgnoreCase)
+                             && !fields[i].Equals("UniqueName", StringComparison.OrdinalIgnoreCase) && kept.Count > 0 && kept.All(r => i < r.Length && r[i].Trim().Length == 0)))
+                    drop.Add(i);
+                if (drop.Count > 0 && drop.Count < fields.Length)
                 {
                     var keep = Enumerable.Range(0, fields.Length).Where(i => !drop.Contains(i)).ToArray();
                     kept = kept.Select(r => keep.Select(i => r[i]).ToArray()).ToList();

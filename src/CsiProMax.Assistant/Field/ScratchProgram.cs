@@ -568,6 +568,8 @@ public sealed class ScratchProgram : IScratchWindow
         var openedEmpty = false;
         if (!build && ctx.Step($"open {Path.GetFileName(modelFile)} in it{_pass}", () =>
         {
+            // A missing file makes the program ask for one in its own file box and wait there (SAP2000, 0.4.57 full test).
+            if (!File.Exists(modelFile)) throw new EtabsException($"{Path.GetFileName(modelFile)} is not there ({modelFile}), so it is not given to {name}.");
             var answer = Convert.ToInt32(Ask(FileTimeout, "open the file", m => m.File.OpenFile(Path.GetFullPath(modelFile)),
                 $"{name} did not finish opening the file within {FileTimeout.TotalMinutes:0} minutes. A message may be waiting in its window."));
             // The .sdb the first SAP2000 saved from the Modeler's .s2k may still be held for a moment after that SAP2000
