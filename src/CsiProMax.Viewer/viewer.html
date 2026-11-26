@@ -3018,14 +3018,28 @@ function jointInfo(name) {
   const sup = supportOf.get(name), on = jointLinks(name), st = stories.slice().reverse().find(s => Math.abs(s.elevation - at[2]) <= tol() * 10);
   const geo = [["Label", name], ["Story", st ? st.name : ""], ["X", num(at[0]) + u], ["Y", num(at[1]) + u], ["Z", num(at[2]) + u], ["Connected objects", on.length ? on.slice(0, 12).map(o => kindWord(o) + " " + o.name).join(", ") + (on.length > 12 ? " ..." : "") : "none"]];
   const mine = jointRows(name), loads = mine.filter(x => isLoadTable(x.t)), asgIn = mine.filter(x => !isLoadTable(x.t) && (isAssignTable(x.t) || x.t.from === "input"));
-  const results = mine.filter(x => !isLoadTable(x.t) && !isAssignTable(x.t) && x.t.from !== "input");
+  const isDes = t => famOf(t.name) !== null || /design|punch/.test(norm(t.name));
+  const results = mine.filter(x => !isLoadTable(x.t) && !isAssignTable(x.t) && x.t.from !== "input" && !isDes(x.t)), des = mine.filter(x => !isLoadTable(x.t) && x.t.from !== "input" && isDes(x.t));
+  const notes = P.comments.filter(c => c.target && c.target.kind === "joint" && c.target.name === name);
   const asg = [["Restraint", sup ? {fixed: "Fixed (all six)", pinned: "Pinned (U1 U2 U3)", roller: "Roller", spring: "Spring"}[sup.kind] || sup.kind : "None"]];
   const nLoads = loads.reduce((n, x) => n + x.rows.length, 0);
-  dialog("Joint Information - " + name, `<div class="itabs"><button data-page="geo" class="on">Geometry</button><button data-page="asg">Assignments</button><button data-page="lds">Loads (${nLoads})</button><button data-page="res">Results</button></div>
+  // The same window as a frame's or a shell's (Ahmed 2026-11-26: "right click to follow same format").
+  const w = dialog("Joint Information - " + name, `<div class="itabs"><button data-page="geo" class="on">Geometry</button><button data-page="asg">Assignments</button><button data-page="lds">Loads (${nLoads})</button><button data-page="res">Results</button><button data-page="des">Design</button><button data-page="com">Comments (${notes.length})</button></div>
     <div class="ipage on" data-page="geo">${rows(geo)}</div><div class="ipage" data-page="asg">${rows(asg)}${asgIn.map(x => rowsHtml(x.t, x.rows, 40)).join("")}</div>
     <div class="ipage" data-page="lds">${loadsHtml(loads, name)}</div>
-    <div class="ipage" data-page="res">${results.map(x => rowsHtml(x.t, x.rows, 40)).join("") || `<p class="kv">This pack has no results for it.</p>`}</div>`,
-    [["Close"]], {float: true, width: nLoads || results.length ? 560 : 430});
+    <div class="ipage" data-page="res">${results.map(x => rowsHtml(x.t, x.rows, 40)).join("") || `<p class="kv">This pack has no results for it.</p>`}</div>
+    <div class="ipage" data-page="des">${des.map(x => rowsHtml(x.t, x.rows, 40)).join("") || `<p class="kv">This pack has no design results for it.</p>`}</div>
+    <div class="ipage" data-page="com">${notes.map(c => `<div class="card comment"><div class="who">${esc(c.by || "Reviewer")} · ${esc(String(c.at || "").replace("T", " ").slice(0, 16))}</div>${esc(c.text)}</div>`).join("") || `<p class="kv">No comments on it yet.</p>`}<div class="row"><textarea class="iText" placeholder="Write a review comment on ${esc(name)}"></textarea></div><button class="iAdd">Add comment</button></div>`,
+    [["Show in Tables", () => showJointInTable(name, mine.find(x => !isLoadTable(x.t)) || mine[0])], ["Close"]], {float: true, width: nLoads || results.length || des.length ? 560 : 430});
+  w.querySelector(".iAdd").onclick = () => { const t = w.querySelector(".iText").value.trim(); if (!t) return; addComment(t, {type: "j", kind: "joint", name, story: st ? st.name : ""}); w.close(); jointInfo(name); };
+}
+function showJointInTable(name, hit) {
+  // The table that holds the joint, filtered to it, as Show in Tables does for a member.
+  const t = hit ? hit.t : null; showTables(true); if (!t) return;
+  pickTable(t.name);
+  const tt = tables[t.name]; if (!tt) return;
+  const nc = col(tt.fields, "UniqueName", "Unique Name", "Joint", "Point", "PointLabel", "Label"); if (nc < 0) return;
+  tFilt[nc] = "=" + (hit.rows[0] ? hit.rows[0][nc] : name); const inp = $("grid").querySelector(`[data-f="${nc}"]`); if (inp) inp.value = tFilt[nc]; drawTable();
 }
 function selCats() {
   // The selection in kinds, as Revit's Filter lists its categories: joints, supports, then each kind of object by section.
@@ -3349,7 +3363,7 @@ function drawComments() {
   draw();
 }
 function addComment(text, o) {
-  const c = {id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), by: $("who").value.trim() || "Reviewer", at: new Date().toISOString(), text, target: o ? {kind: o.type === "f" ? "frame" : "area", what: o.kind, name: o.name, story: o.story || ""} : null};
+  const c = {id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), by: $("who").value.trim() || "Reviewer", at: new Date().toISOString(), text, target: o ? {kind: o.type === "f" ? "frame" : o.type === "j" ? "joint" : "area", what: o.kind, name: o.name, story: o.story || ""} : null};
   P.comments.push(c); newComments.push(c); drawComments();
   try { localStorage.setItem("cpm-who", $("who").value); } catch (e) {}
 }

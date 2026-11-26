@@ -181,7 +181,11 @@ public static class ViewerCheck
           if (!/Joint/.test(said)) return {fail: "the joint is selected but the status bar does not count it: " + said};
           rightClick(p, q[0], q[1], false); await wait(120);
           const d = [...document.querySelectorAll(".dlg")].pop();
-          return d && /Joint Information/.test(d.textContent) ? {ok: `support ${s.name} selected (${said}); its right click opens Joint Information`} : {fail: "a right click on the support opened no Joint Information"};
+          if (!d || !/Joint Information/.test(d.textContent)) return {fail: "a right click on the support opened no Joint Information"};
+          // The same window as a member's (Ahmed 2026-11-26): the same tabs and buttons.
+          const tabs = [...d.querySelectorAll(".itabs button")].map(b => b.textContent.replace(/ \(.*\)$/, "")).join(", "), buttons = [...d.querySelectorAll(".df button")].map(b => b.textContent).join(", ");
+          if (tabs !== "Geometry, Assignments, Loads, Results, Design, Comments" || buttons !== "Show in Tables, Close") return {fail: `Joint Information has tabs ${tabs} and buttons ${buttons}, not a member's`};
+          return {ok: `support ${s.name} selected (${said}); its right click opens Joint Information with the member's tabs`};
         });
         await step("selection: right click on an object opens its information, with a Loads tab holding its loads", async () => {
           const p = await view3d(), vis = visOf(p), shown = frames.concat(areas).filter(o => vis[o.id]);
@@ -193,6 +197,8 @@ public static class ViewerCheck
           let d = [...document.querySelectorAll(".dlg")].pop();
           if (!d || !/Information/.test(d.textContent)) return {fail: `a right click on ${o.name} opened no information window (${JSON.stringify(pickAt(p, q[0], q[1]))} at ${q.slice(0, 2).map(Math.round)}; ${document.querySelectorAll(".dlg").length} windows)`};
           if (!d.querySelector('.itabs [data-page="lds"]')) return {fail: "the information window has no Loads tab"};
+          const otabs = [...d.querySelectorAll(".itabs button")].map(b => b.textContent.replace(/ \(.*\)$/, "")).join(", ");
+          if (otabs !== "Geometry, Assignments, Loads, Results, Design, Comments") return {fail: "the information window's tabs are " + otabs};
           closeDialogs();
           const loaded = shown.find(x => loadRowsOf(x).length);
           if (!loaded) return {ok: "information window with a Loads tab opened; no object in this pack has loads assigned"};
