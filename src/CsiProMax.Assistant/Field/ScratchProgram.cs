@@ -108,7 +108,9 @@ public static class ScratchDialogs
     /// the call comes back and the step can say why. Never a licence message.
     /// </summary>
     public static bool IsFileRefused(string text) =>
-        (text.Contains("Error decompressing file", StringComparison.OrdinalIgnoreCase) || text.Contains("Error in performing miOpen", StringComparison.OrdinalIgnoreCase))
+        (text.Contains("Error decompressing file", StringComparison.OrdinalIgnoreCase) || text.Contains("Error in performing miOpen", StringComparison.OrdinalIgnoreCase)
+            // ETABS 23 on a line of a text file it cannot read: "Error reading line 348. Line Ignored." (2026-11-26).
+            || text.Contains("Line Ignored", StringComparison.OrdinalIgnoreCase))
         && !text.Contains("licen", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
