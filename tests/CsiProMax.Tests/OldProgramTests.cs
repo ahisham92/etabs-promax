@@ -3,6 +3,8 @@ using System.Text.Json.Nodes;
 using CsiProMax.Assistant;
 using CsiProMax.Assistant.Etabs;
 using CsiProMax.Assistant.Tools;
+using CsiProMax.F2k;
+using CsiProMax.Model;
 
 /// <summary>
 /// The SAFE 20 field test of a tester's PC (CSI ProMax 0.4.40, 2026-11-26; SAFE 20, ETABS 20 and SAP2000 24 there, all
@@ -318,9 +320,45 @@ static class OldProgramTests
             Check(!connector.Contains("EndsWith(\".rvt\"", StringComparison.Ordinal), "the chat's open request takes the program's own model files, not Revit's");
         });
 
+        yield return ("SAFE 20 tester (0.4.51): SAFE 20 builds the Modeler's model from the .f2k through the API in a blank model, so its editing tools are tested too", () =>
+        {
+            var m = Templates.ConcreteFrame("T", [6, 6], [5], 3, 3.5);
+            m.AddCombo("1.2D+1.6L", ("Dead", 1.2), ("Live", 1.6));
+            var written = F2kWriter.Write(m, new F2kOptions(Story: "Story2"));
+            Equal(6, CsiProMax.Assistant.Safe.F2kRebuild.UnitsOf(written.Text), "the blank model takes the file's units (kN, m)");
+            var api = new ApiRecorder();
+            var memory = new MemoryEtabs { Program = CsiProgram.Safe };
+            var link = new SafeMemory(memory, program: CsiProgram.Safe) { Api = api };
+            var built = CsiProMax.Assistant.Safe.F2kRebuild.Build(link, written.Text);
+            Equal(written.Slabs, built["slabs"]!.GetValue<int>(), "every slab of the file");
+            Equal(written.Beams, built["beams"]!.GetValue<int>(), "every beam");
+            Equal(written.Columns, built["columns"]!.GetValue<int>(), "every column below and above");
+            Equal(written.Slabs, link.Areas().Count(a => a.Kind == "floor"), "the slabs are floors in SAFE");
+            Equal(written.Beams, link.Frames().Count(f => f.Kind == "beam"), "the beams are beams in SAFE");
+            Equal(written.Supports, built["supports"]!.GetValue<int>(), "the supports at the columns' far ends");
+            Check(link.Points().Count(p => link.Restraint(p.Name).Take(3).All(r => r)) == written.Supports, "the restrained points are held");
+            Check(link.LoadPatterns().Any(p => p.Name == "Dead") && link.LoadPatterns().Any(p => p.Name == "Live"), "Dead and Live");
+            Check(link.Combos().Contains("1.2D+1.6L"), "the combination");
+            Equal(written.Loads, built["loads"]!.GetValue<int>(), "every surface load");
+            Check(memory.Loads.Count > 0, "the loads reached the slabs");
+            Check(api.Calls.Any(c => c.StartsWith("SetSlab(", StringComparison.Ordinal)) && api.Calls.Any(c => c.StartsWith("SetRectangle(", StringComparison.Ordinal)) && api.Calls.Any(c => c.StartsWith("SetMaterial(", StringComparison.Ordinal)),
+                "the materials, slab and frame properties are defined first: " + string.Join(", ", api.Calls.Take(8)));
+            Check(written.Strips == 0 || built["notes"]!.AsArray().Any(n => n!.GetValue<string>().Contains("design strips", StringComparison.Ordinal)), "strips left out are said");
+            Equal("Super Dead", CsiProMax.Assistant.Safe.F2kRebuild.PatternType("SUPER DEAD"), "a .f2k pattern type");
+            Equal("Other", CsiProMax.Assistant.Safe.F2kRebuild.PatternType("SOMETHING"), "an unknown one");
+
+            Check(CsiProMax.Assistant.ScratchProgram.BuildsThroughApi(CsiProgram.Safe, @"C:\t\cpm-field-test.F2K"), "SAFE builds a .f2k");
+            Check(!CsiProMax.Assistant.ScratchProgram.BuildsThroughApi(CsiProgram.Etabs, @"C:\t\cpm-field-test.e2k"), "only SAFE's file is built");
+            var scratch = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));
+            Check(scratch.Contains("F2kRebuild.Build(Link, text)", StringComparison.Ordinal) && scratch.IndexOf("F2kRebuild.Build(Link, text)", StringComparison.Ordinal) > scratch.IndexOf("the link reads the scratch model, and no other", StringComparison.Ordinal),
+                "the model is built only once the link is checked to be the scratch model's");
+            var steps = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Safe/SafeFieldSteps.cs"));
+            Check(steps.Contains("if (built) ctx.Skip(\"the design strips came across\"", StringComparison.Ordinal), "the strips are said as not tested, not passed, when the model was built");
+        });
+
         yield return ("SAFE 20 tester (0.4.47): SAFE 20 is never given the Modeler's .f2k, which it read as a packed model ('Error decompressing file')", () =>
         {
-            Check(!CsiProMax.Assistant.ScratchProgram.OpensThroughApi(CsiProgram.Safe, @"C:\t\cpm-field-test.f2k", onFramework: true), "SAFE 20/21 and a .f2k: no window is started");
+            Check(!CsiProMax.Assistant.ScratchProgram.OpensThroughApi(CsiProgram.Safe, @"C:\t\cpm-field-test.f2k", onFramework: true), "SAFE 20/21 and a .f2k: it is not opened (the model is built instead)");
             Check(CsiProMax.Assistant.ScratchProgram.OpensThroughApi(CsiProgram.Safe, @"C:\t\cpm-field-test.FDB", onFramework: true), "SAFE 20/21 and its own .fdb");
             Check(CsiProMax.Assistant.ScratchProgram.OpensThroughApi(CsiProgram.Safe, @"C:\t\cpm-field-test.f2k", onFramework: false), "SAFE 22 and later keep opening the .f2k as before");
             foreach (var p in new[] { CsiProgram.Etabs, CsiProgram.Sap2000 })
@@ -356,6 +394,19 @@ static class OldProgramTests
             }
             finally { Directory.Delete(folder, true); }
         });
+    }
+
+    /// <summary>SAFE's API as the rebuild calls it: every property is itself, every call is recorded and answers 0 (a rename answers 1, as a program that keeps its own names).</summary>
+    public sealed class ApiRecorder : System.Dynamic.DynamicObject
+    {
+        public List<string> Calls { get; } = [];
+        public override bool TryGetMember(System.Dynamic.GetMemberBinder binder, out object? result) { result = this; return true; }
+        public override bool TryInvokeMember(System.Dynamic.InvokeMemberBinder binder, object?[]? args, out object? result)
+        {
+            Calls.Add($"{binder.Name}({string.Join(", ", args ?? [])})");
+            result = binder.Name == "ChangeName" ? 1 : 0;
+            return true;
+        }
     }
 
     /// <summary>A link whose only work is the calls made by path, on the pipe's model.</summary>
