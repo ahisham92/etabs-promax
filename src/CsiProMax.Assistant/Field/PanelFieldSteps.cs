@@ -346,7 +346,9 @@ public static class PanelFieldSteps
             {
                 handled.Add(name);
                 ToolResult result;
-                try { result = Execute(registry, app, name, json); }
+                // chat_questions answers only the chat's own calls (the bridge's route, BridgeServer.CallTool): with a
+                // window open it is asked the way the chat asks it (0.4.56 SAFE 23 run: the plain call failed by design).
+                try { result = name == ChatQuestionsTool.ToolName && windows && HasWindow() ? ChatQuestionsTool.Answer(Args(json), fromChat: true, jobKey: null) : Execute(registry, app, name, json); }
                 catch (Exception ex) when (ex is InvalidOperationException or NullReferenceException)
                 {
                     // With a window open the chat is there, so this is a failure; a run without a window has no chat to list from.

@@ -462,9 +462,7 @@ public sealed class ScratchProgram : IScratchWindow
         // A name of this run's own: two tests on one PC (it happened) must never take each other's window for theirs.
         var target = Path.Combine(ctx.Folder, ScratchName() + ModelExtension(_program));
         var text = build ? File.ReadAllText(modelFile) : "";
-        if (build)
-        {
-            if (ctx.Step($"start a blank model in it ({name} on this PC opens only {ModelExtension(_program)} files through its API, so the Modeler's {Path.GetExtension(modelFile)} is built in it instead)", () =>
+        bool Blank(string why) => ctx.Step($"start a blank model in it ({why})", () =>
             {
                 var units = F2kRebuild.UnitsOf(text);
                 Ask(FileTimeout, "start a blank model", m =>
@@ -474,10 +472,10 @@ public sealed class ScratchProgram : IScratchWindow
                     return ApiCall.First(model, ["File.NewBlank", "File.NewGridOnly"], CsiTools.D(("NumberStorys", 1), ("TypicalStoryHeight", 3), ("BottomStoryHeight", 3), ("NumberLinesX", 2), ("NumberLinesY", 2), ("SpacingX", 6), ("SpacingY", 6)), "start a blank model");
                 }, $"{name} did not finish starting a blank model within {FileTimeout.TotalMinutes:0} minutes. A message may be waiting in its window.");
                 return $"blank, in {ComEtabs.UnitNames[units - 1]}";
-            }) is null) return false;
-        }
-        else
-        if (ctx.Step($"open {Path.GetFileName(modelFile)} in it", () =>
+            }) is not null;
+        if (build && !Blank($"{name} on this PC opens only {ModelExtension(_program)} files through its API, so the Modeler's {Path.GetExtension(modelFile)} is built in it instead")) return false;
+        var openedEmpty = false;
+        if (!build && ctx.Step($"open {Path.GetFileName(modelFile)} in it", () =>
         {
             var answer = Convert.ToInt32(Ask(FileTimeout, "open the file", m => m.File.OpenFile(Path.GetFullPath(modelFile)),
                 $"{name} did not finish opening the file within {FileTimeout.TotalMinutes:0} minutes. A message may be waiting in its window."));
@@ -485,8 +483,22 @@ public sealed class ScratchProgram : IScratchWindow
             lock (_noticesClosed) refused = _noticesClosed.Where(n => ScratchDialogs.IsFileRefused(n)).ToArray();
             if (answer != 0 || refused.Length > 0)
                 throw new EtabsException($"{name} could not open the file the Modeler wrote (it answered {answer})." + (refused.Length > 0 ? $" It said: {string.Join(" | ", refused)}; the test pressed OK." : ""));
+            // SAFE 23.1 answered 0 to the Modeler's .f2k and held a new default model, with none of the file's slabs,
+            // beams or strips (tester's PC, 0.4.56, 2026-11-26). A file the test can build is then built instead.
+            if (BuildsThroughApi(_program, modelFile))
+            {
+                var held = Convert.ToInt32(Ask(FileTimeout, "count the objects", m => Count(m, "AreaObj.Count") + Count(m, "FrameObj.Count"), $"{name} did not answer within {FileTimeout.TotalMinutes:0} minutes."));
+                openedEmpty = OpenedEmpty(File.ReadAllText(modelFile), held);
+                if (openedEmpty) return $"{name} answered that it opened it, but holds none of its objects: the model is built through the API instead";
+            }
             return "opened";
         }) is null) return false;
+        if (openedEmpty)
+        {
+            build = true;
+            text = File.ReadAllText(modelFile);
+            if (!Blank($"{name} opened the Modeler's {Path.GetExtension(modelFile)} as an empty model, so the model is built in it instead")) return false;
+        }
 
         if (ctx.Step("save it as the scratch model", () =>
         {
@@ -595,6 +607,18 @@ public sealed class ScratchProgram : IScratchWindow
     /// Whether the test can build <paramref name="file"/>'s model through the API in a blank model of a program that
     /// cannot open it (<see cref="OpensThroughApi"/>): a SAFE text file (.f2k), by <see cref="F2kRebuild"/>.
     /// </summary>
+    /// <summary>
+    /// The program said it opened the text file but holds none of its objects (<paramref name="held"/>: its areas and
+    /// frames): SAFE 23.1 does so with the Modeler's .f2k (0.4.56, 2026-11-26).
+    /// </summary>
+    public static bool OpenedEmpty(string fileText, int held) => held == 0 && F2kRebuild.ObjectCount(fileText) > 0;
+
+    private static int Count(object model, string path)
+    {
+        var call = ApiCall.Invoke(model, path);
+        return (int)ApiCall.Number(call["return"]);
+    }
+
     public static bool BuildsThroughApi(CsiProgram program, string file) =>
         program.Key == CsiProgram.Safe.Key && string.Equals(Path.GetExtension(file), ".f2k", StringComparison.OrdinalIgnoreCase);
 
