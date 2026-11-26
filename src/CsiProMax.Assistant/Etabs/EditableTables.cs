@@ -148,7 +148,9 @@ public static class EditableTables
         {
             // Tables left staged by an earlier call go into the next import: SAP2000 keeps them through File > Open, then
             // refuses the new rows and applies the old ones (experiment E, 2026-11-26: it tried to delete every other pattern).
-            try { m.DatabaseTables.CancelTableEditing(); } catch { /* nothing staged */ }
+            var trace = new List<string>();
+            try { trace.Add("cancel " + Convert.ToInt32(m.DatabaseTables.CancelTableEditing())); } catch (Exception ex) { trace.Add("cancel threw " + ex.GetType().Name); }
+            trace.Add("locked at start " + Locked(m));
             // A locked model (it holds analysis results) refuses every table: answer 1, no log (0.4.51, experiment G).
             // Unlocked for the change, as edit_table does; the results are deleted, and the answer says so.
             if (Convert.ToBoolean(m.GetModelIsLocked()) && Convert.ToInt32(m.SetModelIsLocked(false)) != 0)
@@ -160,8 +162,9 @@ public static class EditableTables
             // The patterns' table as SAP2000 lists it (no display selection: what it lists is what it keeps).
             int version = 0, records = 0; string[] fields = [], data = [];
             ShowEveryPattern(m);
-            m.DatabaseTables.GetTableForEditingArray("Load Pattern Definitions", "", ref version, ref fields, ref records, ref data);
+            var read = Convert.ToInt32(m.DatabaseTables.GetTableForEditingArray("Load Pattern Definitions", "", ref version, ref fields, ref records, ref data));
             fields ??= []; data ??= [];
+            trace.Add($"read patterns {read}: v{version}, {records} rows, {data.Length} values, fields {string.Join("|", fields)}");
             if (fields.Length == 0) { fields = ["LoadPat", "DesignType", "SelfWtMult", "AutoLoad"]; records = 0; data = []; }
             int F(string f) => Array.FindIndex(fields, x => string.Equals(x, f, StringComparison.OrdinalIgnoreCase));
             var (pat, type, sw, auto) = (F("LoadPat"), F("DesignType") is >= 0 and var dt ? dt : F("Type"), F("SelfWtMult"), F("AutoLoad"));
@@ -231,13 +234,18 @@ public static class EditableTables
             var pf = fields.ToArray();
             try
             {
-                if (Convert.ToInt32(m.DatabaseTables.SetTableForEditingArray("Load Pattern Definitions", ref version, ref pf, rows.Count, ref all)) != 0)
+                trace.Add("locked before set " + Locked(m));
+                var setAnswer = Convert.ToInt32(m.DatabaseTables.SetTableForEditingArray("Load Pattern Definitions", ref version, ref pf, rows.Count, ref all));
+                trace.Add($"set patterns {setAnswer} (v{version}, {rows.Count} rows: {Cut(string.Join("; ", rows.Select(r => string.Join(",", r))), 300)})");
+                if (setAnswer != 0)
                     throw new EtabsException($"{program} did not take the patterns' rows, so it cannot {what}.");
                 foreach (var t in tables)
                 {
                     // The table's own version, as SAP2000 gave it (0.4.51: sent as 0, the import never ran: answer 1, no log).
                     int tv = Math.Max(1, Math.Max(cv, sv)); var tf = t.Fields.ToArray(); var td = t.Data.ToArray();
-                    if (Convert.ToInt32(m.DatabaseTables.SetTableForEditingArray(t.Key, ref tv, ref tf, t.Count, ref td)) != 0)
+                    var codeAnswer = Convert.ToInt32(m.DatabaseTables.SetTableForEditingArray(t.Key, ref tv, ref tf, t.Count, ref td));
+                    trace.Add($"set '{t.Key}' {codeAnswer} (v{tv}, {t.Count} rows, fields {string.Join("|", tf)})");
+                    if (codeAnswer != 0)
                         throw new EtabsException($"{program} did not take the rows for '{t.Key}', so it cannot {what}.");
                 }
                 int fatal = 0, errors = 0, warnings = 0, info = 0; string log = "";
@@ -245,7 +253,8 @@ public static class EditableTables
                 log ??= "";
                 Dictionary<string, string> after = Codes(m);
                 if (applied != 0 && fatal == 0 && errors == 0 && log.Trim().Length == 0)
-                    throw new EtabsException($"{program} did not run the import of {pattern}'s {code} (it answered {applied}, with no log), so it cannot {what}. Patterns after: {after.Count} of {before.Count}.");
+                    throw new EtabsException($"{program} did not run the import of {pattern}'s {code} (it answered {applied}, with no log), so it cannot {what}. Patterns after: {after.Count} of {before.Count}; " +
+                        $"locked now: {Locked(m)}; the windows of {program}: {OpenWindows(e.Program)}; thread {Thread.CurrentThread.GetApartmentState()}; steps: {string.Join("; ", trace)}.");
                 var changed = before.Where(kv => kv.Key != pattern && (!after.TryGetValue(kv.Key, out var now) || !SameCode(now, kv.Value, empty: true))).Select(kv => kv.Key).ToList();
                 if (changed.Count > 0)
                     throw new EtabsException($"{program} changed or lost the load patterns {string.Join(", ", changed)} when it was given {pattern}'s {code}: do not save the model; close it without saving and open it again. " +
@@ -279,6 +288,22 @@ public static class EditableTables
             codes[name] = (seismic ?? "") + (wind ?? "");
         }
         return codes;
+    }
+
+    private static string Locked(dynamic m)
+    {
+        try { return Convert.ToBoolean(m.GetModelIsLocked()) ? "yes" : "no"; } catch (Exception ex) { return "unknown (" + ex.GetType().Name + ")"; }
+    }
+
+    /// <summary>The visible windows of the program's processes, by title: a dialog left open there refuses an import.</summary>
+    private static string OpenWindows(CsiProgram program)
+    {
+        try
+        {
+            var titles = System.Diagnostics.Process.GetProcessesByName(program.ProcessName).SelectMany(p => ScratchDialogs.Of(p.Id).Select(w => $"{p.Id}: {w.Title}")).ToList();
+            return titles.Count == 0 ? "none seen" : string.Join(" | ", titles);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return "not read (" + ex.GetType().Name + ")"; }
     }
 
     /// <summary>A code's name with only its letters and digits ("ASCE7-16" and "ASCE 7-16" are one code).</summary>
