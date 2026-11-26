@@ -269,6 +269,55 @@ public static class ModelerCheck
           await act("m:undo"); await wait(1500);
           return frames.length === before ? {ok: "drawn, then undone"} : {fail: `after Undo there are ${frames.length} frames, not ${before}`};
         });
+        await step("Draw > Draw Braces and Draw Joints: a brace by two clicks and a joint by one, and Edit > Undo takes each back", async () => {
+          const p = panes.find(x => x.mode === "plan");
+          if (!p) return {fail: "no plan view is open"};
+          active = panes.indexOf(p); draw();
+          for (let i = 0; i < 20 && !(p.M && p.M.to); i++) await wait(100);
+          if (!(p.M && p.M.to)) { const r = p.hold.getBoundingClientRect(); if (r.width < 4 || r.height < 4) return {fail: `the plan view has no room (${r.width} x ${r.height})`}; p.M = matrices(p, r.width, r.height); }
+          const z = elevationOf(p.story) ?? 0, before = frames.length;
+          act("d:brace"); await wait(200);
+          const a = p.M.to([0, 0, z]), b = p.M.to([6, 0, z]);
+          await drawClick(p, a[0], a[1], false); await drawClick(p, b[0], b[1], false); await wait(1500);
+          const made = frames.length - before, kind = made === 1 ? frames[frames.length - 1].kind : "";
+          if (made !== 1) return {fail: `the two clicks made ${made} frames, not 1: ` + document.getElementById("hint").textContent + " " + (hm.lastError || "")};
+          await act("m:undo"); await wait(1200);
+          if (frames.length !== before) return {fail: "Undo did not take the brace back"};
+          act("d:joint"); await wait(200);
+          const jp = p.M.to([1.5, 1.25, z]), joints = points.length;
+          await drawClick(p, jp[0], jp[1], false); await wait(1500);
+          const had = points.some(x => Math.abs(x[1] - 1.5) < 1e-6 && Math.abs(x[2] - 1.25) < 1e-6 && Math.abs(x[3] - z) < 1e-6);
+          act("t:select");
+          if (!had) return {fail: `no joint at (1.5, 1.25) on ${p.story} after the click (${joints} points before, ${points.length} after): ` + (hm.lastError || "")};
+          await act("m:undo"); await wait(1200);
+          return {ok: `a ${kind} drawn and undone; a joint placed and undone`};
+        });
+        await step("Edit > Replicate, Move and Divide Frames: each form on a selected beam reaches the model, and Edit > Undo takes it back", async () => {
+          const b = frames.findIndex(f => f.kind === "beam");
+          if (b < 0) return {fail: "the model has no beam"};
+          const okOf = () => { const forms = document.querySelectorAll(".dlg"); return forms[forms.length - 1].querySelector(".df button.primary"); };
+          const run = async (item, fill, expect, what) => {
+            sel.clear(); sel.add(b + 1); selChanged();
+            const before = frames.length;
+            await act(item); await wait(700);
+            if (!fill()) return `the ${what} form did not open`;
+            okOf().click(); await wait(1500);
+            const got = frames.length - before;
+            closeDialogs(); await wait(150);
+            if (got !== expect) return `${what} made ${got} more frames, not ${expect}: ` + (hm.lastError || "");
+            await act("m:undo"); await wait(1200);
+            return frames.length === before ? "" : `Undo did not take ${what} back`;
+          };
+          const far = Math.max(...points.map(x => x[2])) + 50;
+          let e = await run("m:replicate", () => { const y = document.querySelector(".dlg #rY"), n = document.querySelector(".dlg #rN"); if (!y) return false; y.value = far; n.value = 2; return true; }, 2, "Replicate");
+          if (e) return {fail: e};
+          e = await run("m:move", () => { const y = document.querySelector(".dlg #mvY"); if (!y) return false; y.value = far; return true; }, 0, "Move");
+          if (e) return {fail: e};
+          e = await run("m:divide", () => { const n = document.querySelector(".dlg #dvN"); if (!n) return false; n.value = 3; return true; }, 2, "Divide Frames");
+          if (e) return {fail: e};
+          sel.clear(); selChanged();
+          return {ok: "replicated twice, moved and divided in three, each undone"};
+        });
         await step("Analyze > Check Model for Instabilities: the checker behind the window answers, and lists nothing wrong in the sound model", async () => {
           await act("inst"); await wait(2500);
           if (!inst.answer) return {fail: "no answer came: " + (document.querySelector("#instHead") || {}).textContent};

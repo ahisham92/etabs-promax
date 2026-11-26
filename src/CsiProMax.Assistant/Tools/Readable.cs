@@ -11,7 +11,9 @@ namespace CsiProMax.Assistant.Tools;
 /// </summary>
 public static class Readable
 {
-    private static readonly JsonSerializerOptions Options = new() { IncludeFields = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+    // The resolver is given: a JsonNode written with options that no JsonSerializer call has used yet has none, and a
+    // value put in with JsonArray.Add<T> (failed.Add("a text")) then threw on writing, when it was the first thing written.
+    private static readonly JsonSerializerOptions Options = new() { IncludeFields = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping, TypeInfoResolver = new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver() };
 
     public static string Text(object? value) => value switch
     {
