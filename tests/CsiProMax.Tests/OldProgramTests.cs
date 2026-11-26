@@ -518,10 +518,10 @@ static class OldProgramTests
             Check(scratch.IndexOf("convertOnly: true", turn, StringComparison.Ordinal) is var c and > 0 && c < second && scratch.IndexOf("first.Close()", turn, StringComparison.Ordinal) is var closed and > 0 && closed < second
                   && scratch.IndexOf("modelFile = converted;", turn, StringComparison.Ordinal) is var swap and > 0 && swap < second, "the first SAP2000 only saves the .sdb, is closed, and the second opens that .sdb");
             Check(scratch.IndexOf("ModelPath = target;\r\n        if (convertOnly) return true;", StringComparison.Ordinal) > 0 || scratch.IndexOf("ModelPath = target;\n        if (convertOnly) return true;", StringComparison.Ordinal) > 0, "the first window stops once the .sdb is saved: no change is made in it");
-            // The engineer's own SAP2000: told why, and what to do, instead of a bare refusal.
-            Check(CsiProMax.Assistant.Tools.CsiTools.TextOpenNote(CsiProgram.Sap2000, @"C:\m\Tower.s2k") is { } note && note.Contains("new SAP2000", StringComparison.Ordinal), "open_model of an .s2k in SAP2000 says table edits wait for a new SAP2000");
-            Check(CsiProMax.Assistant.Tools.CsiTools.TextOpenNote(CsiProgram.Sap2000, @"C:\m\Tower.sdb") is null && CsiProMax.Assistant.Tools.CsiTools.TextOpenNote(CsiProgram.Etabs, @"C:\m\Tower.e2k") is null, "nothing said for an .sdb, or for ETABS");
-            Check(EditableTables.NoImportAfterText.Contains(".s2k", StringComparison.Ordinal) && EditableTables.NoImportAfterText.Contains("close SAP2000", StringComparison.Ordinal), "the refusal says the cause and the way out");
+            // The engineer's own SAP2000: nothing to do for them (Ahmed: "the user does not feel anything"). Only when the
+            // second SAP2000 cannot do it either is the refusal said, with its cause and the way out.
+            Check(EditableTables.NoImportAfterText.Contains(".s2k", StringComparison.Ordinal) && EditableTables.NoImportAfterText.Contains("close SAP2000", StringComparison.Ordinal), "a refusal that could not be got round says the cause and the way out");
+            Check(SapFreshProcess.Said(@"C:\m\Tower.sdb").Contains("nothing is needed from the engineer", StringComparison.Ordinal), "a change made in a second SAP2000 asks nothing of the engineer");
             var tables = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Etabs/EditableTables.cs"));
             Check(tables.Contains("with no log), so it cannot {what}. {NoImportAfterText}", StringComparison.Ordinal), "set_lateral_load's refused import says it");
             var tools = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Tools/CsiTools.cs"));
@@ -543,6 +543,7 @@ static class OldProgramTests
                   && fresh.IndexOf("m.File.OpenFile(file)) == 0", fresh.IndexOf("finally", blank, StringComparison.Ordinal), StringComparison.Ordinal) > 0, "the engineer's window lets go of the file first and always opens it again");
             Check(fresh.Contains("KeptPlugIns.Take(program)", StringComparison.Ordinal) && fresh.Contains("KeptPlugIns.PutBack(plugIns)", StringComparison.Ordinal) && fresh.Contains("ApplicationExit(false)", StringComparison.Ordinal),
                 "the second SAP2000 leaves the plug-in lists as they were and closes without saving over the change");
+            Check(fresh.Contains("app.ApplicationStart(6, false, \"\")", StringComparison.Ordinal), "the second SAP2000 is started hidden: the engineer sees nothing of it");
             var steps = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Sap2000/SapFieldSteps.cs"));
             Check(steps.Contains("the change is made in a second SAP2000", StringComparison.Ordinal) && steps.IndexOf("CsiFieldSteps.Run(ctx);", StringComparison.Ordinal) < steps.IndexOf("TinyS2k);", StringComparison.Ordinal),
                 "the field test tries it on a real SAP2000, last, after every other table step");

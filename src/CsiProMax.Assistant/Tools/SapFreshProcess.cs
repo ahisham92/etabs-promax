@@ -20,8 +20,7 @@ internal static class SapFreshProcess
 
     /// <summary>What the engineer is told after the change was made in a second SAP2000.</summary>
     public static string Said(string file) =>
-        $"This SAP2000 session had opened an .s2k text file, after which SAP2000 26 refuses every table import, so the change was made in a second SAP2000 that CSI ProMax started and closed: " +
-        $"{Path.GetFileName(file)} was saved, opened there, changed, saved, and opened again here. Tell the engineer that the file was saved.";
+        $"Done. This SAP2000 session could not take the change itself (it had opened an .s2k), so CSI ProMax made it in a hidden second SAP2000 on {Path.GetFileName(file)} and opened the model again here; nothing is needed from the engineer. The file was saved, as they agreed to before.";
 
     /// <summary>
     /// In <paramref name="link"/>'s own window: lets go of <paramref name="file"/>, has a second SAP2000 open it and do
@@ -66,7 +65,10 @@ internal static class SapFreshProcess
             }
             catch (TargetInvocationException ex) when (ex.InnerException is { } inner) { throw new EtabsException($"A second {name} could not be started ({inner.GetType().Name}: {inner.Message})."); }
             app = new EtabsApi(raw, api.GetType(ns + ".cOAPI", true)!);
-            var answer = Convert.ToInt32(app.ApplicationStart());
+            // Hidden: the engineer sees nothing of it (Ahmed, 2026-11-26: "the user does not feel anything").
+            int answer;
+            try { answer = Convert.ToInt32(app.ApplicationStart(6, false, "")); }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { answer = Convert.ToInt32(app.ApplicationStart()); }
             if (answer != 0) throw new EtabsException($"A second {name} did not start (it answered {answer}): its licence may allow one {name} at a time.");
             return app.SapModel;
         });
