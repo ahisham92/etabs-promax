@@ -83,10 +83,11 @@ public static class ModelerTools
     {
         var m = o.Model;
         var openings = SlabDefs.Openings(m).Count;
+        var nullLines = SlabDefs.NullLines(m).Count;
         return new JsonObject
         {
             ["title"] = m.Title, ["program"] = StructuralModel.TargetName(m.Target), ["file"] = o.Path, ["stories"] = m.Stories.Count - 1, ["grids"] = m.Grids.Count,
-            ["frames"] = m.LineAssigns.Count, ["areas"] = m.AreaAssigns.Count - openings, ["openings"] = openings,
+            ["frames"] = m.LineAssigns.Count - nullLines, ["null_lines"] = nullLines, ["areas"] = m.AreaAssigns.Count - openings, ["openings"] = openings,
             ["frame_sections"] = m.FrameSections.Count, ["slab_and_wall_sections"] = m.ShellSections.Count,
         };
     }

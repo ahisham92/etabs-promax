@@ -33,7 +33,8 @@ public static class AssignTables
         ["Area Assignments - Insertion Point"] = ("area", [("CardinalPt", "Cardinal Point"), ("CoordSys", "Coordinate System"), ("PointNumber", "Point Number"), ("PointLabel", "Point Label"), ("PointName", "Point Unique Name"), ("Offset1", "Offset1"), ("Offset2", "Offset2"), ("Offset3", "Offset3"), ("Transform", "Transform")]),
         ["Area Assignments - Local Axes"] = ("area", [("Angle", "Angle")]),
         ["Area Assignments - Material Overwrites"] = ("area", [("Material", "Material")]),
-        ["Area Assignments - Slab Line Releases"] = ("area", [("ShearL", "Shear Left"), ("MomentL", "Moment Left"), ("ShearR", "Shear Right"), ("MomentR", "Moment Right")]),
+        // On a null line, not an area: its UniqueName is the line's (ETABS 23.2, the J export of 2026-11-26).
+        ["Area Assignments - Slab Line Releases"] = ("frame", [("ShearL", "Shear Left"), ("MomentL", "Moment Left"), ("ShearR", "Shear Right"), ("MomentR", "Moment Right")]),
         ["Area Assignments - Slab Rib Locations"] = ("area", [("X", "X"), ("Y", "Y")]),
         ["Area Assignments - Thickness Overwrites"] = ("area", [("PointNumber", "Point Number"), ("PointLabel", "Point Label"), ("PointName", "Point Unique Name"), ("Thickness", "Thickness Overwrite")]),
         ["Area Assignments - Wall Auto Mesh Options"] = ("area", [("MeshOption", "Mesh Option"), ("Nv", "Nv"), ("Nh", "Nh"), ("Restraints", "Add Restraints")]),

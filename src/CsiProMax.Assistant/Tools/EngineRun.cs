@@ -177,6 +177,12 @@ public static class EngineRun
                 lock (Gate) Lines.Add($"{program.Name} opened the analysed model without its results, so the analysis runs again.");
                 mustAnalyse = true;
             }
+            if (mustAnalyse && SlabTables.Any(_model!.Model))
+            {
+                // What the .e2k cannot carry (slab line releases, slab rebar) goes in through the program's tables first.
+                Say($"Putting the slab line releases and slab rebar into {program.Name} through its tables");
+                foreach (var line in SlabTables.PutInto(window.Link, _model!.Model)) lock (Gate) Lines.Add(line);
+            }
             if (mustAnalyse)
             {
                 Say("Running the analysis");

@@ -204,8 +204,56 @@ public static class ExtraTools
                 var o = SlabDefs.SetOpening(m, name, story, Has(a, "points") ? a.Items("points").Select(p => { var (x, y) = p.Point(); return new[] { x, y }; }).ToList() : []);
                 return new JsonObject { ["opening"] = o.Name, ["story"] = o.Story, ["corners"] = o.Plan.Count };
             }), a => $"{(a.Flag("delete") ? "Delete" : "Draw")} the opening {a.Text("name")}"),
+        new("set_slab_line_release",
+            "Adds, changes or deletes a slab line release (Assign > Shell > Slab Line Releases), for ETABS and SAFE: a null line on the slab's story from points[0] to points[1] " + // ETABS itself
+            "(drawn as Draw > Draw Null Lines does; left out to keep the line already there), and which of shear_left, moment_left, shear_right and moment_right are released. " +
+            "ETABS keeps no line release in its .e2k: the Modeler keeps it in its own file, writes it into the .f2k, and puts it into ETABS or SAFE through their table when it runs the model.", // ETABS itself
+            """{"type":"object","required":["name"],"properties":{"name":{"type":"string"},"story":{"type":"string"},"points":{"type":"array","items":{"type":"array","items":{"type":"number"}}},""" +
+            """ "shear_left":{"type":"boolean"},"moment_left":{"type":"boolean"},"shear_right":{"type":"boolean"},"moment_right":{"type":"boolean"}""" + Del + "}}",
+            Ask.Changes, (a, e) => Core(e, m =>
+            {
+                var name = a.Need("name");
+                if (a.Flag("delete")) { SlabDefs.DeleteNullLine(m, name); return new JsonObject { ["deleted"] = name }; }
+                if (Has(a, "points"))
+                {
+                    var pts = a.Items("points").Select(p => { var (x, y) = p.Point(); return new[] { x, y }; }).ToList();
+                    if (pts.Count != 2) throw new ArgumentException("A null line has two points: [[x, y], [x, y]].");
+                    var story = a.Text("story");
+                    if (story.Length == 0) story = SlabDefs.NullLines(m).Find(x => x.Name == name)?.Story ?? F2k.F2kWriter.BusiestStory(m);
+                    SlabDefs.SetNullLine(m, name, story, pts[0], pts[1]);
+                }
+                var r = SlabDefs.SetLineRelease(m, new SlabDefs.LineRelease(name, "", a.Flag("shear_left"), a.Flag("moment_left"), a.Flag("shear_right"), a.Flag("moment_right")));
+                var released = new[] { (r.ShearLeft, "shear left"), (r.MomentLeft, "moment left"), (r.ShearRight, "shear right"), (r.MomentRight, "moment right") }.Where(x => x.Item1).Select(x => x.Item2);
+                return new JsonObject
+                {
+                    ["slab_line_release"] = r.Line, ["story"] = r.Story, ["released"] = string.Join(", ", released),
+                    ["note"] = "Kept in the Modeler's file and the .f2k; ETABS's .e2k has no line release, so it goes into ETABS or SAFE through their table when the Modeler runs the model.", // ETABS itself
+                };
+            }), a => $"{(a.Flag("delete") ? "Delete" : "Set")} the slab line release {a.Text("name")}"),
+        new("draw_slab_rebar",
+            "Adds, changes or deletes a slab rebar object (Draw > Draw Slab Rebar), for SAFE and ETABS: a band of bars on the slab's story from from[x, y] to to[x, y], " + // ETABS itself
+            "width_left and width_right of that line, vertical_offset (the bars' depth below the slab top), layer, bar_size, material (a rebar material), and total_bars or max_spacing. " +
+            "It goes into the .f2k, and into SAFE or ETABS through their tables when the Modeler runs the model. " + SlabTables.RebarRefused, // ETABS itself
+            """{"type":"object","required":["name"],"properties":{"name":{"type":"string"},"story":{"type":"string"},"from":{"type":"array","items":{"type":"number"}},"to":{"type":"array","items":{"type":"number"}},""" +
+            """ "width_left":{"type":"number"},"width_right":{"type":"number"},"vertical_offset":{"type":"number"},"layer":{"type":"string"},"bar_size":{"type":"string"},"material":{"type":"string"},""" +
+            """ "total_bars":{"type":"integer"},"max_spacing":{"type":"number"}""" + Del + "}}",
+            Ask.Changes, (a, e) => Core(e, m =>
+            {
+                var name = a.Need("name");
+                if (a.Flag("delete")) { SlabDefs.DeleteSlabRebar(m, name); return new JsonObject { ["deleted"] = name }; }
+                double[] P(string k) => Has(a, k) ? a.GetProperty(k).EnumerateArray().Select(v => v.GetDouble()).ToArray() : [];
+                var story = a.Text("story");
+                if (story.Length == 0) story = SlabDefs.SlabRebars(m).Find(x => x.Name == name)?.Story ?? F2k.F2kWriter.BusiestStory(m);
+                var b = SlabDefs.SetSlabRebar(m, new SlabDefs.SlabRebar(name, story, P("from"), P("to"), a.Number("width_left", 0), a.Number("width_right", 0), a.Number("vertical_offset", 0),
+                    a.Text("layer", "A"), a.Text("bar_size"), a.Text("material"), (int)a.Number("total_bars", 0), a.Number("max_spacing", 0)));
+                return new JsonObject
+                {
+                    ["slab_rebar"] = b.Name, ["story"] = b.Story, ["bars"] = b.TotalBars > 0 ? $"{b.TotalBars} x {b.BarSize}" : $"{b.BarSize} at most {b.MaxSpacing} apart",
+                    ["note"] = SlabTables.RebarRefused,
+                };
+            }), a => $"{(a.Flag("delete") ? "Delete" : "Draw")} the slab rebar {a.Text("name")}"),
         new("extra_definitions",
-            "What the joint constraint, moving load, design strip, tendon, punching and opening forms show: the constraint types, axes and standard vehicles, and the model's constraints (with their joints), lanes, vehicles, vehicle classes, moving load cases, strips, tendon sections, tendons (with each tendon's 3D shape), punching overwrites and openings.",
+            "What the joint constraint, moving load, design strip, tendon, punching and opening forms show: the constraint types, axes and standard vehicles, and the model's constraints (with their joints), lanes, vehicles, vehicle classes, moving load cases, strips, tendon sections, tendons (with each tendon's 3D shape), punching overwrites, openings, slab line releases and slab rebar.",
             """{"type":"object","properties":{}}""", Ask.Never, (_, e) => Definitions(Offline(e).Model)),
     ];
 
@@ -257,6 +305,8 @@ public static class ExtraTools
                 ["points"] = new JsonArray(s.Plan.Select(p => (JsonNode)new JsonArray(p[0], p[1])).ToArray()),
             }).ToArray()),
             ["stories"] = Strings(m.Stories.Skip(1).Select(st => st.Name).Reverse()),
+            ["rebar_materials"] = Strings(m.Materials.Where(x => x.Type.Equals("Rebar", StringComparison.OrdinalIgnoreCase)).Select(x => x.Name)),
+            ["bar_sizes"] = Strings(DefineTables.RebarSizes(m).Select(x => x.Name)),
             ["slab_story"] = m.Areas.Exists(x => x.Kind == AreaKind.Floor) ? F2k.F2kWriter.BusiestStory(m) : m.Stories.Count > 1 ? m.Stories[^1].Name : "",
             ["tendon_materials"] = Strings(m.Materials.Where(x => x.Type.Equals("Tendon", StringComparison.OrdinalIgnoreCase)).Select(x => x.Name)),
             ["rebar_materials"] = Strings(m.Materials.Where(x => x.Type.Equals("Rebar", StringComparison.OrdinalIgnoreCase)).Select(x => x.Name)),
@@ -297,6 +347,16 @@ public static class ExtraTools
             ["openings"] = new JsonArray(SlabDefs.Openings(m).Select(o => (JsonNode)new JsonObject
             {
                 ["name"] = o.Name, ["story"] = o.Story, ["points"] = new JsonArray(o.Plan.Select(p => (JsonNode)new JsonArray(p[0], p[1])).ToArray()),
+            }).ToArray()),
+            ["slab_line_releases"] = new JsonArray(SlabDefs.LineReleases(m).Select(r => (JsonNode)new JsonObject
+            {
+                ["name"] = r.Line, ["story"] = r.Story, ["shear_left"] = r.ShearLeft, ["moment_left"] = r.MomentLeft, ["shear_right"] = r.ShearRight, ["moment_right"] = r.MomentRight,
+                ["points"] = SlabDefs.NullLines(m).Find(l => l.Name == r.Line) is { } l ? new JsonArray(new JsonArray(l.I[0], l.I[1]), new JsonArray(l.J[0], l.J[1])) : null,
+            }).ToArray()),
+            ["slab_rebar"] = new JsonArray(SlabDefs.SlabRebars(m).Select(b => (JsonNode)new JsonObject
+            {
+                ["name"] = b.Name, ["story"] = b.Story, ["from"] = new JsonArray(b.From[0], b.From[1]), ["to"] = new JsonArray(b.To[0], b.To[1]), ["width_left"] = b.WidthLeft, ["width_right"] = b.WidthRight,
+                ["vertical_offset"] = b.VerticalOffset, ["layer"] = b.Layer, ["bar_size"] = b.BarSize, ["material"] = b.Material, ["total_bars"] = b.TotalBars, ["max_spacing"] = b.MaxSpacing,
             }).ToArray()),
         };
     }
