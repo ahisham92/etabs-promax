@@ -24,7 +24,7 @@ static class CsiToolsTests
     static JsonNode Run(CsiProgram program, string tool, string json, ICsiLink e) =>
         ProgramTools.Chat(program).First(t => t.Name == tool).Run(Args(json), e);
 
-    static (SafeMemory Link, FakeApi Api, MemoryEtabs Inner) Model(CsiProgram program, bool withModel = true)
+    internal static (SafeMemory Link, FakeApi Api, MemoryEtabs Inner) Model(CsiProgram program, bool withModel = true)
     {
         var inner = new MemoryEtabs();
         if (withModel)
@@ -787,7 +787,7 @@ public sealed class FakeApi
         }
     }
 
-    public sealed class DiaphragmApi(FakeApi o) { public int SetDiaphragm(string Name, bool SemiRigid) { o.Log.Add("diaphragm " + Name); return 0; } }
+    public sealed class DiaphragmApi(FakeApi o) { public int SetDiaphragm(string Name, bool SemiRigid) { o.Log.Add("diaphragm " + Name); return 0; } public int GetNameList(ref int NumberNames, ref string[] MyName) { NumberNames = 1; MyName = ["D1"]; return 0; } }
 
     public sealed class ConstraintApi(FakeApi o) { public int SetDiaphragm(string Name, int Axis = 4, string CSys = "Global") { o.Log.Add($"constraint {Name} axis {Axis}"); return 0; } }
 
@@ -882,6 +882,12 @@ public sealed class FakeApi
     public sealed class TablesApi(FakeApi o)
     {
         private const string Patterns = "Load Pattern Definitions";
+        /// <summary>ETABS 23's names (the reflection on Ahmed's PC, 2026-11-26): no GetTableOutputOptionsForDisplay.</summary>
+        public int NonlinearStaticOutput = 1;
+        public int GetOutputOptionsForDisplay(ref bool IsUserBaseReactionLocation, ref double UserBaseReactionX, ref double UserBaseReactionY, ref double UserBaseReactionZ, ref bool IsAllModes, ref int StartMode, ref int EndMode, ref bool IsAllBucklingModes, ref int StartBucklingMode, ref int EndBucklingMode, ref int MultistepStatic, ref int NonlinearStatic, ref int ModalHistory, ref int DirectHistory, ref int Combo)
+        { NonlinearStatic = NonlinearStaticOutput; MultistepStatic = 1; ModalHistory = 1; DirectHistory = 1; Combo = 1; IsAllModes = true; return 0; }
+        public int SetOutputOptionsForDisplay(bool IsUserBaseReactionLocation, double UserBaseReactionX, double UserBaseReactionY, double UserBaseReactionZ, bool IsAllModes, int StartMode, int EndMode, bool IsAllBucklingModes, int StartBucklingMode, int EndBucklingMode, int MultistepStatic, int NonlinearStatic, int ModalHistory, int DirectHistory, int Combo)
+        { NonlinearStaticOutput = NonlinearStatic; o.Log.Add($"output options nonlinear static {NonlinearStatic}"); return 0; }
         public int GetTableForEditingArray(string TableKey, string GroupName, ref int TableVersion, ref string[] FieldsKeysIncluded, ref int NumberRecords, ref string[] TableData)
         {
             // SAP2000 26 lists each pattern with its type and its code (the probe on Ahmed's PC, 2026-11-26).
