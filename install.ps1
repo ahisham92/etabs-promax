@@ -62,6 +62,27 @@ function Install-CsiProMax {
         @{ Program = 'SAP2000'; Name = 'CsiProMaxSapPlugin';  Dll = 'CsiProMaxSapPlugin.dll';  Oldest = 20 }
     )
 
+    # Whether a CSI program is really installed, not only its settings left behind after it was removed (Ahmed,
+    # 2026-11-26: "if a computer have them it can be installed for them if not no need to mention that"): its program
+    # file or API file in its usual folder, or its entry in Windows' list of installed programs.
+    function Test-Installed([string]$program, [int]$number) {
+        $api = @{ ETABS = 'ETABSv1.dll'; SAFE = 'SAFEv1.dll'; SAP2000 = 'SAP2000v1.dll' }[$program]
+        foreach ($base in @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:ProgramW6432)) {
+            if (-not $base) { continue }
+            $folder = Join-Path $base "Computers and Structures\$program $number"
+            if ((Test-Path -LiteralPath (Join-Path $folder "$program.exe")) -or (Test-Path -LiteralPath (Join-Path $folder $api))) { return $true }
+        }
+        foreach ($key in @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*')) {
+            try {
+                foreach ($entry in (Get-ItemProperty -Path $key -ErrorAction SilentlyContinue)) {
+                    if ([string]$entry.DisplayName -match "^$program\s*v?$number(\b|\.)") { return $true }
+                }
+            }
+            catch { }
+        }
+        return $false
+    }
+
     function Say([string]$text, [string]$color) {
         if ($color) { Write-Host $text -ForegroundColor $color } else { Write-Host $text }
     }
@@ -361,6 +382,8 @@ function Install-CsiProMax {
                     $number = [int]$Matches[2]
                     $plugin = $plugins | Where-Object { $_.Program -ieq $programName } | Select-Object -First 1
                     if ($number -lt $plugin.Oldest -or $number -gt 99) { continue }
+                    # Settings left behind by a program that was removed: nothing to install into, and nothing to say.
+                    if (-not $SettingsRoot -and -not (Test-Installed $programName $number)) { continue }
                     foreach ($ini in (Get-ChildItem -LiteralPath $directory.FullName -File -Filter "$($plugin.Program)*.ini")) {
                         $found += [pscustomobject]@{ Label = "$($plugin.Program) $number"; Plugin = $plugin; Number = $number; Ini = $ini.FullName }
                     }
@@ -421,19 +444,20 @@ function Install-CsiProMax {
                 if ($SettingsRoot) { $answer = & $check -PassThru -NoClipboard -SettingsRoot $SettingsRoot } else { $answer = & $check -PassThru -NoClipboard }
                 $tried = @($answer.Programs)
                 if ($tried.Count -gt 0) {
-                    Say ''
-                    Say 'Checked: can each program open CSI ProMax?' 'Cyan'
+                    # Only real problems are shown (Ahmed, 2026-11-26): a program that cannot open CSI ProMax, or not yet.
+                    # A self-test that could not run here, and programs that are not installed, say nothing.
+                    $installed = @($found | ForEach-Object { $_.Label })
+                    $problems = @($tried | Where-Object { @($_.Reasons).Count -gt 0 -and ($SettingsRoot -or $installed -contains [string]$_.Program) })
                     $cannot = $false
-                    $unsure = $false
-                    foreach ($one in $tried) {
-                        $label = ([string]$one.Program).PadRight(12)
-                        if (@($one.Reasons).Count -gt 0 -and $one.Listed) { $cannot = $true; Say "  $label NO: $(@($one.Reasons) -join ' ')" 'Red' }
-                        elseif (@($one.Reasons).Count -gt 0) { Say "  $label not yet: $(@($one.Reasons) -join ' ')" 'Yellow' }
-                        elseif ($one.Loads -eq $true) { Say "  $label yes: its plug-in was created the way $($one.Program) does it." 'Green' }
-                        elseif ($one.Why) { $unsure = $true; Say "  $label not tried (not an error): $($one.Why)." }
-                        else { $unsure = $true; Say "  $label not tried (not an error): this PC could not run the self-test for it." }
+                    if ($problems.Count -gt 0) {
+                        Say ''
+                        Say 'Checked: can each program open CSI ProMax?' 'Cyan'
                     }
-                    if ($unsure -and -not $cannot) { Say '  "Not tried" only means this extra self-test could not run here. CSI ProMax is in the Tools menu above, which is what each program uses to open it.' }
+                    foreach ($one in $problems) {
+                        $label = ([string]$one.Program).PadRight(12)
+                        if ($one.Listed) { $cannot = $true; Say "  $label NO: $(@($one.Reasons) -join ' ')" 'Red' }
+                        else { Say "  $label not yet: $(@($one.Reasons) -join ' ')" 'Yellow' }
+                    }
                     if ($cannot) {
                         Say '  For the full findings, run this line and send its text to the person who gave you CSI ProMax:' 'Yellow'
                         Say '    irm https://raw.githubusercontent.com/ahisham92/etabs-promax/main/check.ps1 | iex' 'Yellow'
