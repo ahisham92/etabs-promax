@@ -81,6 +81,7 @@ public static class ModelerFieldSteps
         ctx.Offer(StructureTools.All);
         ctx.Offer(ExtraTools.All);
         ctx.Offer(EditTools.All);
+        ctx.Offer(DefineTools.All);
         var folder = Q(ctx.Folder);
 
         // A new model from the template: three stories, two bays each way.
@@ -234,6 +235,7 @@ public static class ModelerFieldSteps
 
         Defining(ctx, modeler);
         Editing(ctx, modeler);
+        DefineItems(ctx, modeler);
         Tables(ctx, modeler);
         ModelerCheck.FieldSteps(ctx);
         Lateral(ctx, modeler);
@@ -375,6 +377,33 @@ public static class ModelerFieldSteps
     /// Draw Braces, Draw Joints and Edit > Replicate, Move and Divide Frames (Ahmed 2026-11-26: every button). Each is
     /// checked on the model, and the model is put back as it was afterwards, so the later counts still hold.
     /// </summary>
+    /// <summary>Define > Reinforcing Bar Sizes and Modify/Show Rebar stay in the model (the .e2k has keywords for them, and
+    /// the program opens them); the definitions kept as table rows are tried and taken back.</summary>
+    private static void DefineItems(FieldContext ctx, OfflineEtabs modeler)
+    {
+        var m = modeler.Model;
+        ctx.Tool("define_rebar_size", """{"name":"CPM16","area":0.000201,"diameter":0.016}""",
+            a => FieldContext.Expect(CsiProMax.Model.DefineTables.RebarSizes(m).Exists(x => x.Name == "CPM16"), "no bar CPM16: " + a.ToJsonString()), "tool define_rebar_size, Define > Reinforcing Bar Sizes");
+        ctx.Refused("define_rebar_size", """{"name":"CPM20","area":0.0003}""", "diameter", "tool define_rebar_size says no to a bar with no diameter");
+        var concrete = m.FrameSections.FirstOrDefault(x => CsiProMax.Model.DefineTables.Rebar(m, x.Name) is { } r && r.GetValueOrDefault("TYPE") == "Column");
+        if (concrete is not null)
+        {
+            ctx.Tool("define_frame_rebar", $$$"""{"section":{{{Q(concrete.Name)}}},"values":{"COVER":0.045}}""",
+                a => FieldContext.Expect(CsiProMax.Model.DefineTables.Rebar(m, concrete.Name)!["COVER"] == "0.045", "the cover did not change: " + a.ToJsonString()), "tool define_frame_rebar, Frame Section > Modify/Show Rebar");
+            ctx.Refused("define_frame_rebar", $$$"""{"section":{{{Q(concrete.Name)}}},"values":{"PATTERN":"many"}}""", "PATTERN", "tool define_frame_rebar says no to a wrong bar pattern");
+        }
+        var before = CsiProMax.Model.ModelFile.ToJson(m);
+        var unsaved = modeler.Unsaved;
+        try
+        {
+            ctx.Tool("define_table_rows", """{"table":"Hinge Definitions - Moment M3","name":"CPM-H1","rows":[{"IsSymmetric":true}]}""",
+                a => FieldContext.Expect(m.DefinitionTables?.GetValueOrDefault("Hinge Definitions - Moment M3")?.Exists(r => r["Name"] == "CPM-H1") == true, "no hinge row: " + a.ToJsonString()), "tool define_table_rows, a hinge definition kept as the program's table rows");
+            ctx.Refused("define_table_rows", """{"table":"Hinge Definitions - Moment M3","name":"CPM-H2","rows":[{"Nope":1}]}""", "no field", "tool define_table_rows says no to a field the table does not have");
+            ctx.Tool("definition_data", "{}", a => FieldContext.Expect(a["rebar_sizes"]!.AsArray().Count > 0 && a["tables"]!.AsObject().Count > 0, "definition_data is empty: " + a.ToJsonString()), "tool definition_data reads the Define items");
+        }
+        finally { modeler.Rollback(CsiProMax.Model.ModelFile.FromJson(before), unsaved); }
+    }
+
     private static void Editing(FieldContext ctx, OfflineEtabs modeler)
     {
         var before = CsiProMax.Model.ModelFile.ToJson(modeler.Model);

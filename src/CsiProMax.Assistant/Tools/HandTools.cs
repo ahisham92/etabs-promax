@@ -100,7 +100,7 @@ public static class HandTools
                 ["name"] = p.Name, ["type"] = p.Type, ["self_weight"] = p.SelfWeight, ["auto_lateral"] = p.Extra.Count > 0 || p.Auto is not null, ["lateral"] = LateralTools.Lateral(p),
                 ["loads"] = m.LineLoads.Count(l => l.Pattern == p.Name) + m.AreaLoads.Count(l => l.Pattern == p.Name) + m.PointLoads.Count(l => l.Pattern == p.Name),
             }).ToArray()),
-            ["pattern_types"] = new JsonArray(ModelEdit.LoadPatternTypes.Select(t => (JsonNode)t).ToArray()),
+            ["pattern_types"] = new JsonArray(ProgramOptions.PatternTypes(m.Target).Select(t => (JsonNode)t).ToArray()),
             ["load_cases"] = new JsonArray(m.LoadCases.Select(c => (JsonNode)new JsonObject { ["name"] = c.Name, ["type"] = Value(c.Lines, "TYPE") ?? "" }).ToArray()),
             ["combinations"] = new JsonArray(m.Combos.Select(c => (JsonNode)new JsonObject
             {
