@@ -82,6 +82,9 @@ public static class FieldTest
         /// <summary>For the tests: the file that says a full test is running, instead of this PC's own.</summary>
         public string? LockFile { get; init; }
 
+        /// <summary>False: the full test gathers no reference data ("needed things") from the programs.</summary>
+        public bool ReferenceData { get; init; } = true;
+
         /// <summary>For tests: stands in for starting CSI ProMax a second time (true: with the AI chat). Left out: the real start, in the full test on a real PC.</summary>
         public Func<bool, WindowFieldSteps.Seen>? OpenWindow { get; init; }
 
@@ -436,6 +439,8 @@ public static class FieldTest
                 if (window is null) return;
                 ctx.Link = window.Link;
                 ctx.Watched = window.Link;
+                // What the scratch window showed when a step failed, for the zip (its own windows only).
+                ctx.Failed = window is ScratchProgram { ProcessId: > 0 } scratch ? step => FailurePictures.Take(ctx.Folder, program, scratch.ProcessId, step.Name) : null;
                 // The Viewer's own screen on this program's model: one check, the same for every program. It runs while
                 // the model has its results (the program's steps say when), or after them if they never did.
                 ctx.WhileAnalysed = () =>
@@ -496,6 +501,9 @@ public static class FieldTest
             if (window is { } open)
             {
                 // Closing and letting go never stop the test: the next program and the report still follow.
+                // The needed things from this program, gathered last, while its window is still open and answering:
+                // not steps, never failures (ReferenceData). After every step, since it saves the scratch model once more.
+                if (finished && o.ReferenceData) ReferenceData.Run(ctx.Folder, program, open.Link, open.ModelPath);
                 try
                 {
                     ScratchProgram.CloseStep(ctx, open, program);
@@ -653,6 +661,7 @@ public static class FieldTest
         }
         Listed("Not working", bad);
         Listed("Not tested", skipped);
+        sb.Append(ReferenceData.Section(work));
         if (o.Full)
         {
             sb.AppendLine("## Check by hand");
@@ -722,15 +731,31 @@ public static class FieldTest
     private static readonly HashSet<string> Small = new(StringComparer.OrdinalIgnoreCase)
     {
         ".md", ".txt", ".log", ".out", ".json", ".csv", ".e2k", ".$et", ".s2k", ".$2k", ".f2k", ".$fk", ".cpm", ".cpmx",
-        ".xlsx", ".docx", ".pptx", ".pdf", ".dxf", ".dwg", ".png",
+        ".xlsx", ".docx", ".pptx", ".pdf", ".dxf", ".dwg", ".png", ".jpg",
+        // The scratch models themselves and what the programs wrote beside them (Ahmed, 2026-11-26: one run must bring
+        // everything needed, with no second ask): only the test's own models are in the work folder.
+        ".edb", ".sdb", ".fdb", ".eko", ".ini", ".xml", ".html", ".$og", ".y", ".y$$", ".msh",
     };
 
-    private const long MostFile = 3 * 1024 * 1024, MostZip = 25 * 1024 * 1024;
+    private const long MostFile = 12 * 1024 * 1024, MostZip = 80 * 1024 * 1024;
+
+    /// <summary>CSI ProMax's own logs on this PC that go into the zip under logs/: the errors it noted and the update state. Not the activity log: that holds the engineer's own work.</summary>
+    internal static IEnumerable<string> OwnLogs()
+    {
+        var local = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CsiProMax");
+        var files = new List<string> { Path.Combine(local, "errors.txt") };
+        try
+        {
+            if (Directory.Exists(local)) files.AddRange(Directory.EnumerateFiles(local, "update*.json"));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* what was found */ }
+        return files.Where(File.Exists);
+    }
 
     /// <summary>
     /// The zip to send: the report, and the small files the test wrote and read back (the files the Modeler wrote for
-    /// each program, the packs, the documents, the programs' messages). Not the scratch models themselves, nothing over
-    /// 3 MB, nothing from the made-up bug report. Null when it could not be written (then the report is sent alone).
+    /// each program, the packs, the documents, the programs' messages), the scratch models, the reference data, the
+    /// pictures of failures and CSI ProMax's own error log. Nothing over 12 MB, nothing from the made-up bug report. Null when it could not be written (then the report is sent alone).
     /// </summary>
     internal static string? Pack(string reportFile, string report, string work)
     {
@@ -750,6 +775,20 @@ public static class FieldTest
                 if (size > MostFile || total + size > MostZip) continue;
                 archive.CreateEntryFromFile(path, "files/" + inside, CompressionLevel.Optimal);
                 total += size;
+            }
+            foreach (var log in OwnLogs())
+            {
+                try
+                {
+                    var size = new FileInfo(log).Length;
+                    if (size > MostFile || total + size > MostZip) continue;
+                    // Read with sharing: the window may be writing it.
+                    using var from = new FileStream(log, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                    using var to = archive.CreateEntry("logs/" + Path.GetFileName(log), CompressionLevel.Optimal).Open();
+                    from.CopyTo(to);
+                    total += size;
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* the next log */ }
             }
             return zip;
         }
