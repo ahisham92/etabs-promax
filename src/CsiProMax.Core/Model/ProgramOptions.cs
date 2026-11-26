@@ -58,13 +58,13 @@ public static class ProgramOptions
         "Joint Assignments - Additional Mass",
     ];
 
-    /// <summary>The definition tables (<see cref="DefineTables"/>) each program has: generalized displacements, layered
-    /// shells and hinges are ETABS and SAP2000; the rest are ETABS's own; SAFE has none of them.</summary>
+    /// <summary>The definition tables (<see cref="DefineTables"/>) each program takes: generalized displacements and layered
+    /// shells go into SAP2000's own tables too; the rest are ETABS's own; SAFE has none of them.</summary>
     public static bool HasDefinitionTable(string target, string table) => target switch
     {
         Etabs => true,
-        Sap2000 => table.StartsWith("Hinge Definitions", StringComparison.OrdinalIgnoreCase) || table.EndsWith("- Layers", StringComparison.OrdinalIgnoreCase)
-            || table.Equals("Generalized Displacement Definitions", StringComparison.OrdinalIgnoreCase),
+        // SAP2000's hinge definitions are tables of another shape ("Hinges Def ..."), not written from ETABS's yet.
+        Sap2000 => table.EndsWith("- Layers", StringComparison.OrdinalIgnoreCase) || table.Equals("Generalized Displacement Definitions", StringComparison.OrdinalIgnoreCase),
         _ => false,
     };
 }

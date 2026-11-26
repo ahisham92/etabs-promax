@@ -75,7 +75,12 @@ internal static class SapFreshProcess
         // The maintenance reminder of the new process is answered as the field test's is; a licence message never is.
         using var reminder = new Timer(_ =>
         {
-            try { ScratchDialogs.AnswerMaintenanceReminder(Process.GetProcessesByName(program.ProcessName).Select(p => p.Id).Where(id => !before.Contains(id)).ToList()); }
+            try
+            {
+                // Every non-licence pop-up of the second SAP2000 is answered by CSI ProMax, never left for the engineer.
+                foreach (var id in Process.GetProcessesByName(program.ProcessName).Select(p => p.Id).Where(id => !before.Contains(id)).ToList())
+                    ScratchDialogs.CloseNotices(id, program);
+            }
             catch (Exception ex) when (ex is not OutOfMemoryException) { /* the next look tries again */ }
         }, null, 1000, 1000);
         try

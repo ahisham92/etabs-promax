@@ -239,6 +239,20 @@ public static class EditableTables
                 }
                 catch (Exception ex) when (ex is EtabsException or Tools.ToolInputException) { /* not held: a change to it is said after the import */ }
             }
+            // The pattern's own code is taken off first: given KDS 41 17 00-2019 straight after KBC 2016, SAP2000 26 took
+            // the rows and then deleted "1 KBC 2016 auto seismic loads", leaving the pattern with None; after SetNone it
+            // takes KDS (experiment M on Ahmed's PC, 2026-11-26; the last code of the 0.4.56 field test that failed).
+            var mineNow = before.TryGetValue(pattern, out var c0) && c0.Length > 0 ? c0 : TableCode(m, pattern) ?? "";
+            if (mineNow.Length > 0 && !mineNow.Equals("None", StringComparison.OrdinalIgnoreCase) && !SameCode(mineNow, code))
+            {
+                try
+                {
+                    if (designType.StartsWith("Wind", StringComparison.OrdinalIgnoreCase)) m.LoadPatterns.AutoWind.SetNone(pattern);
+                    else m.LoadPatterns.AutoSeismic.SetNone(pattern);
+                    trace.Add($"took {mineNow} off {pattern} first");
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException) { trace.Add($"taking {mineNow} off first failed: {ex.GetType().Name}"); }
+            }
             double self = 0;
             try { m.LoadPatterns.GetSelfWTMultiplier(pattern, ref self); } catch { /* a new pattern weighs nothing */ }
 
@@ -363,6 +377,9 @@ public static class EditableTables
                 // IRC 6-2017, Live Load: field test with 0.4.56's fix): then the patterns' table says which code it has.
                 if (!after.TryGetValue(pattern, out string? took) || !SameCode(took, code))
                     if (string.IsNullOrEmpty(took) && TableCode(m, pattern) is { } listed) took = listed;
+                // A "Wind - Live Load" pattern has no AutoLoad name at all, by the API or its table: its row in the code's
+                // own table is what says it took the code (experiment M, 2026-11-26: "Auto Wind - Live Load" kept the row).
+                if (!SameCode(took, code) && (string.IsNullOrEmpty(took) || took.Equals("None", StringComparison.OrdinalIgnoreCase)) && HasRow(m, codeKey, pattern)) took = code;
                 if (!SameCode(took, code))
                     throw new EtabsException($"{program} took the rows but {pattern}'s code is '{took}', not {code}, so it cannot {what}. Its import log: {LogCut(log)}");
                 return log;
@@ -383,6 +400,21 @@ public static class EditableTables
     /// </summary>
     public const string NoImportAfterText = "SAP2000 26 does this in a session that has opened an .s2k text file (File > Open or File > Import): it then refuses every table import until it is restarted. " +
         "Save the model as an .sdb, close SAP2000, open the .sdb in a new SAP2000 and try again.";
+
+    /// <summary>True when the table <paramref name="key"/> has a row whose LoadPat is <paramref name="pattern"/>.</summary>
+    private static bool HasRow(dynamic m, string key, string pattern)
+    {
+        try
+        {
+            int version = 0, records = 0; string[] fields = [], data = [];
+            ShowEveryPattern(m);
+            if (Convert.ToInt32(m.DatabaseTables.GetTableForEditingArray(key, "", ref version, ref fields, ref records, ref data)) != 0) return false;
+            fields ??= []; data ??= [];
+            int pat = Array.FindIndex(fields, f => f.Equals("LoadPat", StringComparison.OrdinalIgnoreCase));
+            return pat >= 0 && Enumerable.Range(0, records).Any(r => string.Equals(data.ElementAtOrDefault(r * fields.Length + pat), pattern, StringComparison.OrdinalIgnoreCase));
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return false; }
+    }
 
     /// <summary>A pattern's AutoLoad as "Load Pattern Definitions" lists it; null when it is not listed or the table is not read.</summary>
     private static string? TableCode(dynamic m, string pattern)

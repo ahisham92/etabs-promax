@@ -103,7 +103,7 @@ static class DefineTablesTests
             Check(!sap["assign_tables"]!.AsObject().ContainsKey("Frame Assignments - Floor Cracking") && sap["assign_tables"]!.AsObject().ContainsKey("Frame Assignments - Output Stations"), "SAP2000: output stations but no floor cracking");
             Check(Names(sap["slab_types"]!).Length == 0, "SAP2000 has no slab types");
             Check(!Names(Run(link, "model_definitions", new { })["pattern_types"]!).Contains("Seismic (Drift)"), "SAP2000 has no drift seismic patterns");
-            Check(Run(link, "definition_data", new { })["tables"]!.AsObject().All(t => t.Key.StartsWith("Hinge") || t.Key.EndsWith("Layers") || t.Key.StartsWith("Generalized")), "SAP2000's definition tables");
+            Check(Run(link, "definition_data", new { })["tables"]!.AsObject().All(t => t.Key.EndsWith("Layers") || t.Key.StartsWith("Generalized")), "SAP2000's definition tables");
             link.Model.Target = "safe";
             var safe = Run(link, "property_definitions", new { });
             Check(Names(safe["shapes"]!).All(s => s.StartsWith("Concrete")), "SAFE: concrete shapes only");
@@ -135,6 +135,20 @@ static class DefineTablesTests
                 catch (ArgumentException ex) { Check(ex.Message.Contains("there is no frame NOPE"), ex.Message); }
             }
             finally { File.Delete(path); }
+        });
+        yield return ("sap2000: generalized displacements and a layered slab's layers go into SAP2000's own tables", () =>
+        {
+            var link = Frame();
+            var m = link.Model;
+            var pt = m.Points[0].Name;
+            DefineTables.Set(m, "Generalized Displacement Definitions", "GD1", [new() { ["Type"] = "Translational", ["PointName"] = pt + "@Story2", ["TransU1SF"] = "1" }]);
+            DefineTables.Set(m, "Generalized Displacement Definitions", "GD2", [new() { ["Type"] = "Rotational", ["PointName"] = "NOPE@Story2", ["RotR3SF"] = "1" }]);
+            var slab = m.ShellSections.First(x => !x.IsWall);
+            DefineTables.Set(m, "Slab Property Definitions - Layers", slab.Name, [new() { ["LayerName"] = "Top", ["Distance"] = "0.05", ["Thickness"] = "0.1", ["ModelType"] = "Shell", ["Material"] = slab.Material }]);
+            var s2k = CsiProMax.S2k.S2kWriter.Write(m, "a.s2k").Text;
+            Check(s2k.Contains("GENERALIZED DISPLACEMENT DEFINITIONS 1 - TRANSLATIONAL") && System.Text.RegularExpressions.Regex.IsMatch(s2k, @"GenDispl=GD1\s+Joint=\S+\s+U1SF=1"), "GD1 in SAP2000's table");
+            Check(!s2k.Contains("GenDispl=GD2"), "GD2 names no point, so it is left out");
+            Check(s2k.Contains("AREA SECTION PROPERTY LAYERS") && s2k.Contains("LayerName=Top") && s2k.Contains("Shell-Layered/Nonlinear"), "the layers and a layered shell");
         });
     }
 }
