@@ -205,6 +205,12 @@ public static class ViewerCheck
           infoWindow(loaded.id); await wait(120); d = [...document.querySelectorAll(".dlg")].pop();
           const n = loadRowsOf(loaded).reduce((k, x) => k + x.rows.length, 0), tab = d.querySelector('.itabs [data-page="lds"]').textContent;
           if (!tab.includes("(" + n + ")")) return {fail: `${loaded.name} has ${n} load rows but its Loads tab says ${tab}`};
+          // A second right click replaces the window, never a second one beside it (Ahmed 2026-11-26).
+          const other = shown.find(x => x !== loaded) || loaded, oq = p.M.to([0, 1, 2].map(i => other.type === "f" ? (other.a[i] + other.b[i]) / 2 : other.pts.reduce((t, c) => t + c[i], 0) / other.pts.length));
+          rightClick(p, oq[0], oq[1], false); await wait(120); if (supports.length) { jointInfo(supports[0].name); await wait(80); }
+          const open = document.querySelectorAll(".dlg.info").length;
+          if (open !== 1) return {fail: `after more right clicks ${open} information windows are open, not one`};
+          closeDialogs();
           sel.clear(); selJ.clear(); sel.add(loaded.id); selChanged();
           const props = document.getElementById("props").textContent;
           return /Loads/.test(props) ? {ok: `${kindWord(loaded)} ${loaded.name}: ${tab}, and Properties lists them`} : {fail: `Properties of ${loaded.name} do not list its ${n} loads`};
