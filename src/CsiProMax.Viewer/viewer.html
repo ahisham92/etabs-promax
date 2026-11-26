@@ -1162,13 +1162,16 @@ function openShells() {
   if (!shellRes.size) return;
   const cases = [...shellRes.keys()], cur = res.mode === "shell" ? res.comp : (shellFields.find(s => /^m11$/i.test(s.name)) || shellFields[0]).name;
   const group = (st) => shellFields.filter(s => s.stress === st).map(s => `<label><input type="radio" name="comp" value="${esc(s.name)}" ${s.name === cur ? "checked" : ""}>${esc(s.name)}</label>`).join("");
-  dialog("Shell Forces/Stresses", `
-    <fieldset><legend>Load Case/Load Combination</legend><div class="g2"><span>Case/Combo name</span><select id="dCase">${caseGroups(cases)}</select></div></fieldset>
-    ${shellFields.some(s => !s.stress) ? `<fieldset><legend>Forces and moments (per unit length)</legend><div class="g4">${group(false)}</div></fieldset>` : ""}
-    ${shellFields.some(s => s.stress) ? `<fieldset><legend>Stresses</legend><div class="g4">${group(true)}</div></fieldset>` : ""}
+  // As ETABS's Shell Forces/Stresses: the component type (forces or stresses), then that type's components.
+  const st = !!(shellFields.find(s => s.name === cur) || {}).stress, both = shellFields.some(s => !s.stress) && shellFields.some(s => s.stress);
+  const d = caseBoxWire(dialog("Shell Forces/Stresses", `${caseBox(cases)}
+    <fieldset><legend>Component Type</legend><div class="g2"><label><input type="radio" name="ct" value="f" ${st ? "" : "checked"} ${shellFields.some(s => !s.stress) ? "" : "disabled"}>Shell Forces</label><label><input type="radio" name="ct" value="s" ${st ? "checked" : ""} ${shellFields.some(s => s.stress) ? "" : "disabled"}>Shell Stresses</label></div></fieldset>
+    <fieldset><legend>Output Components</legend><div class="g4" data-ct="f" ${st ? "hidden" : ""}>${group(false)}</div><div class="g4" data-ct="s" ${st ? "" : "hidden"}>${group(true)}</div></fieldset>
     <fieldset><legend>Contour Range</legend><div class="g2"><label><input type="radio" name="rg" value="auto" ${res.range ? "" : "checked"}>Auto</label><span></span><label><input type="radio" name="rg" value="user" ${res.range ? "checked" : ""}>Minimum</label><input type="number" step="any" id="dMin" value="${res.range ? res.range[0] : ""}"><span style="padding-left:22px">Maximum</span><input type="number" step="any" id="dMax" value="${res.range ? res.range[1] : ""}"></div></fieldset>
-    <p class="kv">Values at each joint are averaged over the shells that meet there.</p>`,
-    [["OK", d => applyShells(d)], ["Apply", d => { applyShells(d); return false; }, true], ["Cancel"]], {width: 560});
+    <fieldset><legend>Stress Averaging</legend><div class="g2"><label><input type="radio" checked disabled>At All Joints</label></div></fieldset>`,
+    [["OK", d => applyShells(d)], ["Close"], ["Apply", d => { applyShells(d); return false; }, true]], {width: 560}), cases);
+  d.querySelectorAll("[name=ct]").forEach(r => r.onchange = () => { d.querySelectorAll("[data-ct]").forEach(g => g.hidden = g.dataset.ct !== r.value); const first = q(d, `[data-ct="${r.value}"] [name=comp]`); if (first) first.checked = true; });
+  if (!both) d.querySelector("[name=ct]").closest("fieldset").style.opacity = ".6";
 }
 function applyShells(d) {
   res.mode = "shell"; syncResults(); res.case = q(d, "#dCase").value; const c = q(d, "[name=comp]:checked"); if (c) res.comp = c.value;
@@ -2945,6 +2948,28 @@ const caseGroups = list => {
   return (a.length ? `<optgroup label="Load cases">${opts(a, res.case)}</optgroup>` : "") + (b.length ? `<optgroup label="Load combinations">${opts(b, res.case)}</optgroup>` : "");
 };
 const q = (d, s) => d.querySelector(s);
+// The programs' Load Case/Load Combination box, field by field: the type (Load Case or Load Combination), the
+// name, and for a case with several values its Multivalued Options (a mode number or a step), greyed for one value.
+const casePart = k => { const m = /^(.*) · (Mode|Step) (\d+)$/.exec(k); return m ? {base: m[1], by: m[2], n: m[3]} : {base: k, by: "", n: ""}; };
+function caseBox(list) {
+  const combos = new Set((P.model.combinations || []).map(String)), typeOf = c => combos.has(casePart(c).base) || combos.has(c) ? "combo" : "case";
+  const cur = list.includes(res.case) ? res.case : list[0] || "", t = typeOf(cur), types = [["case", "Load Case"], ["combo", "Load Combination"]].filter(([k]) => list.some(c => typeOf(c) === k));
+  const bases = k => [...new Set(list.filter(c => typeOf(c) === k).map(c => casePart(c).base))];
+  return `<fieldset class="cbox"><legend>Load Case/Load Combination</legend><div class="g2"><span>Case/Combo type</span><select id="dType">${opts(types, t)}</select><span>Case/Combo name</span><select id="dBase">${opts(bases(t), casePart(cur).base)}</select></div>
+    <div class="g2" id="dMulti"><span>Multivalued options</span><span></span><span id="dByL">Mode number</span><select id="dStep"></select></div><input type="hidden" id="dCase" value="${esc(cur)}"></fieldset>`;
+}
+function caseBoxWire(d, list) {
+  const combos = new Set((P.model.combinations || []).map(String)), typeOf = c => combos.has(casePart(c).base) || combos.has(c) ? "combo" : "case";
+  const steps = () => list.filter(c => casePart(c).base === q(d, "#dBase").value && casePart(c).by);
+  const pick = () => { const st = steps(), m = q(d, "#dMulti"); m.style.opacity = st.length ? "" : ".45"; q(d, "#dStep").disabled = !st.length;
+    q(d, "#dByL").textContent = st.length && casePart(st[0]).by === "Step" ? "Step number" : "Mode number";
+    const want = casePart(q(d, "#dCase").value), keep = st.find(c => casePart(c).n === want.n) || st[0];
+    q(d, "#dStep").innerHTML = st.length ? opts(st.map(c => [c, casePart(c).n]), keep) : "";
+    q(d, "#dCase").value = st.length ? keep : q(d, "#dBase").value; };
+  q(d, "#dType").onchange = () => { const b = [...new Set(list.filter(c => typeOf(c) === q(d, "#dType").value).map(c => casePart(c).base))]; q(d, "#dBase").innerHTML = opts(b, b[0]); pick(); };
+  q(d, "#dBase").onchange = pick; q(d, "#dStep").onchange = () => { q(d, "#dCase").value = q(d, "#dStep").value; };
+  pick(); return d;
+}
 const dialogs = {
   modes() { openModes(); },
   shells() { openShells(); },
@@ -2957,36 +2982,40 @@ const dialogs = {
   },
   forces() {
     if (!forces.size) return;
-    const comps = forceComps.map(([k, l]) => `<label><input type="radio" name="comp" value="${k}" ${(res.mode === "forces" ? res.comp : "M3") === k ? "checked" : ""}>${l}</label>`).join("");
-    dialog("Member Force Diagram for Frames", `
-      <fieldset><legend>Load Case/Load Combination</legend><div class="g2"><span>Case/Combo name</span><select id="dCase">${caseGroups(resCases("forces"))}</select></div></fieldset>
-      <fieldset><legend>Component</legend><div class="g4">${comps}</div></fieldset>
-      <fieldset><legend>Scaling</legend><div class="g2"><label><input type="radio" name="sc" value="auto" ${res.userScale ? "" : "checked"}>Auto</label><span></span><label><input type="radio" name="sc" value="user" ${res.userScale ? "checked" : ""}>Scale factor</label><input type="number" id="dScale" step="any" value="${res.userScale || ""}" placeholder="length per unit of force"></div></fieldset>
-      <fieldset><legend>Display Options</legend><div class="g3"><label><input type="checkbox" id="dFill" ${res.fill ? "checked" : ""}>Fill diagram</label><label><input type="checkbox" id="dVals" ${res.values ? "checked" : ""}>Show values on diagram</label></div></fieldset>`,
-      [["OK", d => applyForces(d)], ["Apply", d => { applyForces(d); return false; }, true], ["Cancel"]], {width: 470});
+    // As ETABS's and SAP2000's Member Force Diagram for Frames: the components in its order, two to a row.
+    const order = ["P", "T", "V2", "M2", "V3", "M3"], label = {P: "Axial Force", T: "Torsion", V2: "Shear 2-2", M2: "Moment 2-2", V3: "Shear 3-3", M3: "Moment 3-3"};
+    const comps = order.filter(k => forceComps.some(c => c[0] === k)).map(k => `<label><input type="radio" name="comp" value="${k}" ${(res.mode === "forces" ? res.comp : "M3") === k ? "checked" : ""}>${label[k]}</label>`).join("");
+    const list = resCases("forces");
+    caseBoxWire(dialog("Member Force Diagram for Frames", `${caseBox(list)}
+      <fieldset><legend>Component</legend><div class="g2">${comps}</div></fieldset>
+      <fieldset><legend>Scaling</legend><div class="g2"><label><input type="radio" name="sc" value="auto" ${res.userScale ? "" : "checked"}>Auto</label><span></span><label><input type="radio" name="sc" value="user" ${res.userScale ? "checked" : ""}>User Defined</label><input type="number" id="dScale" step="any" value="${res.userScale || ""}" placeholder="length per unit of force"></div></fieldset>
+      <fieldset><legend>Display Options</legend><div class="g2"><label><input type="checkbox" id="dFill" ${res.fill ? "checked" : ""}>Fill Diagram</label><label><input type="checkbox" id="dVals" ${res.values ? "checked" : ""}>Show Values on Diagram</label></div></fieldset>`,
+      [["OK", d => applyForces(d)], ["Close"], ["Apply", d => { applyForces(d); return false; }, true]], {width: 470}), list);
   },
   deformed() {
     if (!disp.size) return;
-    dialog("Deformed Shape", `
-      <fieldset><legend>Load Case/Load Combination</legend><div class="g2"><span>Case/Combo name</span><select id="dCase">${caseGroups(resCases("deformed"))}</select></div></fieldset>
-      <fieldset><legend>Scaling</legend><div class="g2"><label><input type="radio" name="sc" value="auto" ${res.userScale ? "" : "checked"}>Auto</label><span></span><label><input type="radio" name="sc" value="user" ${res.userScale ? "checked" : ""}>Scale factor</label><input type="number" id="dScale" step="any" value="${res.userScale || ""}"></div></fieldset>
-      <fieldset><legend>Options</legend><div class="g3"><label><input type="checkbox" id="dGhost" ${res.ghost ? "checked" : ""}>Wire shadow (undeformed)</label><label><input type="checkbox" id="dAnim" ${res.anim ? "checked" : ""}>Animate</label><label><input type="checkbox" id="dExt" ${opt.extrude ? "checked" : ""}>Extruded sections</label></div></fieldset>`,
-      [["OK", d => applyDeformed(d)], ["Apply", d => { applyDeformed(d); return false; }, true], ["Cancel"]], {width: 440});
+    // As ETABS's and SAP2000's Deformed Shape: case, scaling, contours drawn on the objects, wire shadow.
+    const list = resCases("deformed"), on = res.mode === "contour", comp = on ? res.comp : "U";
+    caseBoxWire(dialog("Deformed Shape", `${caseBox(list)}
+      <fieldset><legend>Scaling</legend><div class="g2"><label><input type="radio" name="sc" value="auto" ${res.userScale ? "" : "checked"}>Automatic</label><span></span><label><input type="radio" name="sc" value="user" ${res.userScale ? "checked" : ""}>Scale Factor</label><input type="number" id="dScale" step="any" value="${res.userScale || ""}"></div></fieldset>
+      <fieldset><legend>Contour Options</legend><div class="g2"><label><input type="checkbox" id="dCont" ${on ? "checked" : ""}>Draw Contours on Objects</label><span></span><span>Contour Component</span><select id="dComp">${opts([["UX", "Ux"], ["UY", "Uy"], ["UZ", "Uz"], ["U", "Resultant"]], comp)}</select></div></fieldset>
+      <fieldset><legend>Other Options</legend><div class="g2"><label><input type="checkbox" id="dGhost" ${res.ghost ? "checked" : ""}>Wire Shadow</label><label><input type="checkbox" id="dAnim" ${res.anim ? "checked" : ""}>Animate</label><label><input type="checkbox" id="dExt" ${opt.extrude ? "checked" : ""}>Extruded Sections</label></div></fieldset>`,
+      [["OK", d => applyDeformed(d)], ["Close"], ["Apply", d => { applyDeformed(d); return false; }, true]], {width: 440}), list);
   },
   contour() {
     if (!disp.size) return;
     const c = res.mode === "contour" ? res.comp : "UZ";
-    dialog("Joint Displacement Contours", `
-      <fieldset><legend>Load Case/Load Combination</legend><div class="g2"><span>Case/Combo name</span><select id="dCase">${caseGroups(resCases("contour"))}</select></div></fieldset>
+    caseBoxWire(dialog("Joint Displacement Contours", `
+      ${caseBox(resCases("contour"))}
       <fieldset><legend>Component</legend><div class="g4">${[["UX", "UX"], ["UY", "UY"], ["UZ", "UZ"], ["U", "Resultant"]].map(([k, l]) => `<label><input type="radio" name="comp" value="${k}" ${c === k ? "checked" : ""}>${l}</label>`).join("")}</div></fieldset>
       <fieldset><legend>Contour Range</legend><div class="g2"><label><input type="radio" name="rg" value="auto" ${res.range ? "" : "checked"}>Auto</label><span></span><label><input type="radio" name="rg" value="user" ${res.range ? "checked" : ""}>Minimum</label><input type="number" step="any" id="dMin" value="${res.range ? res.range[0] : ""}"><span style="padding-left:22px">Maximum</span><input type="number" step="any" id="dMax" value="${res.range ? res.range[1] : ""}"><span>Number of colours</span><select id="dBands">${opts(["6", "7", "8", "9", "10"], String(res.bands))}</select></div></fieldset>`,
-      [["OK", d => applyContour(d)], ["Apply", d => { applyContour(d); return false; }, true], ["Cancel"]], {width: 430});
+      [["OK", d => applyContour(d)], ["Close"], ["Apply", d => { applyContour(d); return false; }, true]], {width: 430}), resCases("contour"));
   },
   reactions() {
     if (!reacts.size) return;
-    dialog("Joint Reactions", `<fieldset><legend>Load Case/Load Combination</legend><div class="g2"><span>Case/Combo name</span><select id="dCase">${caseGroups(resCases("reactions"))}</select></div></fieldset>
+    caseBoxWire(dialog("Joint Reactions", `${caseBox(resCases("reactions"))}
       <fieldset><legend>Display Type</legend><div class="g3">${[["ALL", "Arrows, FX FY FZ"], ["FZ", "Vertical FZ only"], ["FX", "FX only"], ["FY", "FY only"]].map(([k, l]) => `<label><input type="radio" name="comp" value="${k}" ${(res.mode === "reactions" ? res.comp : "ALL") === k ? "checked" : ""}>${l}</label>`).join("")}</div></fieldset>`,
-      [["OK", d => { res.mode = "reactions"; syncResults(); res.case = q(d, "#dCase").value; res.comp = q(d, "[name=comp]:checked").value; syncResults(); syncTools(); draw(); }], ["Cancel"]], {width: 400});
+      [["OK", d => { res.mode = "reactions"; syncResults(); res.case = q(d, "#dCase").value; res.comp = q(d, "[name=comp]:checked").value; syncResults(); syncTools(); draw(); }], ["Close"]], {width: 400}), resCases("reactions"));
   },
   display() {
     const kinds = [["column", "Columns"], ["beam", "Beams"], ["brace", "Braces"], ["floor", "Floors"], ["wall", "Walls"]].filter(([k]) => frames.some(f => f.kind === k) || areas.some(a => a.kind === k));
@@ -3071,6 +3100,7 @@ function applyForces(d) {
   colourDirty = true; syncResults(); res.case = q(d, "#dCase").value; $("case").value = res.case; $("comp").value = res.comp; panes.forEach(p => p.diagSig = null); syncTools(); draw();
 }
 function applyDeformed(d) {
+  if (q(d, "#dCont") && q(d, "#dCont").checked) { res.mode = "contour"; syncResults(); res.case = q(d, "#dCase").value; res.comp = q(d, "#dComp").value; res.range = null; $("case").value = res.case; pointsDirty = true; colourDirty = true; syncResults(); syncTools(); return draw(); }
   res.mode = "deformed"; res.userScale = q(d, "[name=sc]:checked").value === "user" ? Math.abs(parseFloat(q(d, "#dScale").value)) || 0 : 0;
   res.ghost = q(d, "#dGhost").checked; res.anim = q(d, "#dAnim").checked;
   if (q(d, "#dExt").checked !== opt.extrude) { opt.extrude = q(d, "#dExt").checked; geometryDirty = true; geometryStamp++; }
