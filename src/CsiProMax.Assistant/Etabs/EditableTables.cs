@@ -177,7 +177,9 @@ public static class EditableTables
                 if (Convert.ToInt32(m.DatabaseTables.SetTableForEditingArray(key, ref version, ref f2, kept.Count, ref all)) != 0)
                     throw new EtabsException($"{program} did not take the rows for '{key}', so it cannot {what}.");
                 int fatal = 0, errors = 0, warnings = 0, info = 0; string log = "";
+                var units = PresentUnits(m);
                 int applied = Convert.ToInt32(m.DatabaseTables.ApplyEditedTables(true, ref fatal, ref errors, ref warnings, ref info, ref log));
+                KeepUnits(m, units);
                 log ??= "";
                 if (applied != 0 || fatal > 0 || (errors > 0 && !OnlyFieldsIgnored(log, errors)))
                 {
@@ -194,6 +196,28 @@ public static class EditableTables
                 throw;
             }
         })!;
+    }
+
+    /// <summary>The program's present units (its eUnits value), or null when it does not say.</summary>
+    internal static object? PresentUnits(dynamic m)
+    {
+        try { return m.GetPresentUnits(); } catch (Exception ex) when (ex is not System.Runtime.InteropServices.COMException) { return null; }
+    }
+
+    /// <summary>
+    /// Puts the present units back as they were before a table import, when the import changed them: ETABS 23 showed
+    /// lb, in, F right after the Modeler's tables went into a kN, m model (0.4.57 full test, get_model_context), and every
+    /// tool after reads and writes in the present units.
+    /// </summary>
+    internal static void KeepUnits(dynamic m, object? before)
+    {
+        if (before is null) return;
+        try
+        {
+            object now = m.GetPresentUnits();
+            if (!Equals(Convert.ToInt32(now), Convert.ToInt32(before))) m.SetPresentUnits(before);
+        }
+        catch (Exception ex) when (ex is not System.Runtime.InteropServices.COMException) { /* best effort */ }
     }
 
     /// <summary>

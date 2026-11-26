@@ -681,12 +681,21 @@ public static class ModelerFieldSteps
         {
             ctx.Tool("assign_shell_data", """{"objects":[""" + Q(floor.Label + "@" + floor.Story) + """],"modifiers":{"M11MOD":0.25,"M22MOD":0.25}}""", null, "tool assign_shell_data, cracked slab modifiers");
             ctx.Tool("assign_shell_data", """{"objects":[""" + Q(floor.Label + "@" + floor.Story) + """],"tables":{"Area Assignments - Additional Mass":[{"AddedMass":"0.02"}]}}""", null, "tool assign_shell_data, added mass by the program's assignment table");
+            // SAP2000's shell edge release (its own table, PR 207) and an auto edge constraint: SAP2000 resets an area's edge
+            // constraints on every edge-release import, so the release goes in by the .s2k and the constraint after it (Ahmed
+            // 2026-11-26: are they tested?). The SAP2000 part reads both back.
+            ctx.Tool("assign_shell_data", """{"objects":[""" + Q(floor.Label + "@" + floor.Story) + """],"tables":{"Area Edge Release Assignments":[{"Edge":"1","ReleasedDOF":"Moment","StiffRot":"0"}],"Area Assignments - Auto Edge Constraints":[{"Constraint":"Yes"}]}}""",
+                null, "tool assign_shell_data, a shell edge release and an auto edge constraint");
         }
         var support = modeler.Model.PointAssigns.FirstOrDefault(p => p.Restraint is not null);
         if (support is not null)
         {
             ctx.Tool("assign_joint_data", """{"objects":[""" + Q(support.Point + "@" + support.Story) + """],"spring":"CPM-PS"}""", null, "tool assign_joint_data, a spring under a support");
             ctx.Tool("assign_joint_data", """{"objects":[""" + Q(support.Point + "@" + support.Story) + """],"tables":{"Joint Assignments - Additional Mass":[{"MassXY":"1.5","MassZ":"0"}]}}""", null, "tool assign_joint_data, added mass by the program's assignment table");
+            // SAP2000's joint panel zone (its own table, PR 207), at the top of the support's column.
+            var above = modeler.Stories().Count > 1 ? modeler.Stories()[1].Name : support.Story;
+            ctx.Tool("assign_joint_data", """{"objects":[""" + Q(support.Point + "@" + above) + """],"tables":{"Joint Panel Zone Assignments":[{"PZFrom":"Elastic","DoublerPl":"0","PZConnect":"Beams to Other Objects","AxesFrom":"Column"}]}}""",
+                null, "tool assign_joint_data, a joint panel zone");
         }
         ctx.Tool("define_link", """{"name":"CPM-LINK","type":"RUBBER ISOLATOR","dofs":{"U1":{"stiffness":500000},"U2":{"stiffness":1000,"damping":20},"U3":{"stiffness":1000,"damping":20}}}""", null, "tool define_link, a rubber isolator");
         ctx.Refused("define_link", """{"name":"CPM-BAD","type":"SPRINGY","dofs":{"U1":{"stiffness":1}}}""", "link type", "tool define_link says no to a type the programs do not have");

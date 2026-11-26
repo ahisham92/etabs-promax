@@ -724,6 +724,7 @@ static class OldProgramTests
             Check(!CsiProMax.Assistant.ScratchDialogs.IsProgramBox("Warning: licence", CsiProgram.Etabs), "never another title");
             Check(CsiProMax.Assistant.ScratchDialogs.IsOpenFileBox(" Open Model File ") && !CsiProMax.Assistant.ScratchDialogs.IsOpenFileBox("Open Model File - licence"), "ETABS 23's Open Model File picker, by its title");
             Check(box("Open Model File: ETABS asked for a file to open (Cancel)"), "a cancelled file picker fails its step");
+            Check(CsiProMax.Assistant.ScratchDialogs.IsAnalysisMessages(" Analysis Messages ") && !CsiProMax.Assistant.ScratchDialogs.IsAnalysisMessages("Analysis Messages - licence"), "ETABS's Analysis Messages window, by its title (0.4.57: it held the test 10 minutes)");
             foreach (var p in CsiProgram.All)
                 Check(CsiProMax.Assistant.ScratchDialogs.IsProgramBox(" " + p.Name + " ", p) && !CsiProMax.Assistant.ScratchDialogs.IsProgramBox(p.Name + " licence", p), $"{p.Name}'s own message box, by its title");
         });

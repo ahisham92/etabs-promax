@@ -86,6 +86,14 @@ public static class ScratchDialogs
                 if (Button(window, "Select All") is { } all && IsWindowEnabled(all)) PostMessageW(all, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero);
                 if (PostMessageW(go, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero)) closed.Add(title + " (all stories, OK)");
             }
+            else if (IsAnalysisMessages(title) && (Button(window, "OK") ?? Button(window, "Close")) is { } shut && IsWindowEnabled(shut))
+            {
+                // ETABS 23's "Analysis Messages" window held the 0.4.57 full test for 10 minutes at the Italian NTC 2018 wind
+                // load. Its messages are read before it is closed, so the report says what ETABS warned of.
+                var said = LongWords(window).Where(w => w.Trim().Length > 0 && !IsAnalysisMessagesControl(w)).Take(12).ToList();
+                if (PostMessageW(shut, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero))
+                    closed.Add($"{title}: {(said.Count > 0 ? string.Join(" | ", said) : "no message text")} (closed)");
+            }
             else if (IsImportLog(title) && Button(window, "Done") is { } done && IsWindowEnabled(done))
             {
                 // Its errors are read before Done is pressed, so the report says what the import did not take.
@@ -108,6 +116,12 @@ public static class ScratchDialogs
     /// </summary>
     public static bool IsOpenFileBox(string title) => title.Trim().Equals("Open Model File", StringComparison.OrdinalIgnoreCase)
         || title.Trim().Equals("Open", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>ETABS's "Analysis Messages" window (warnings while it makes auto lateral loads or runs).</summary>
+    public static bool IsAnalysisMessages(string title) => title.Trim().Equals("Analysis Messages", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The window's own controls, left out of what it said.</summary>
+    private static bool IsAnalysisMessagesControl(string text) => text.Trim() is "Show Log" or "New Messages Only" or "errors" or "Information" or "Error or Warning" or "Warning" or "Error" or "Write to Text File" or "OK" or "Close";
 
     /// <summary>A message box of the program itself: titled with its name alone ("SAFE").</summary>
     public static bool IsProgramBox(string title, CsiProgram program) => string.Equals(title.Trim(), program.Name, StringComparison.OrdinalIgnoreCase)
@@ -365,6 +379,9 @@ public sealed class ScratchProgram : IScratchWindow
     /// <summary>The scratch window's process, 0 when it could not be told apart.</summary>
     public int ProcessId { get; private set; }
 
+    /// <summary>The Modeler's .cpm of the file this window was given, when it opens a converted copy of it.</summary>
+    private string? _modelerFile;
+
     public string ModelPath { get; private set; } = "";
 
     /// <summary>The API file the program was reached through.</summary>
@@ -389,6 +406,9 @@ public sealed class ScratchProgram : IScratchWindow
         // SAP2000 opening the same .sdb takes the same rows (experiment N on Ahmed's PC, 2026-11-26: the 20 table codes
         // of the 0.4.54 field test). So one SAP2000 turns the Modeler's .s2k into a .sdb and closes, and the test
         // works in a second one that opens that .sdb, as an engineer's SAP2000 opening its model file would be.
+        // The Modeler's .cpm beside the text file: the .sdb made from it has none beside it, and its rows (SAP2000's output
+        // stations, set by the API) were never put in (0.4.57 full test: "'Frame Output Station Assignments' has no row with 7").
+        var modelerFile = ModelerTables.ModelerFileBeside(modelFile);
         if (OpensTextInOwnProcess(program, modelFile))
         {
             var first = new ScratchProgram(program) { _pass = $" (turning {Path.GetFileName(modelFile)} into a {ModelExtension(program)} first)" };
@@ -411,7 +431,7 @@ public sealed class ScratchProgram : IScratchWindow
             if (converted is null) return null;
             modelFile = converted;
         }
-        var scratch = new ScratchProgram(program) { _asIs = asIs };
+        var scratch = new ScratchProgram(program) { _asIs = asIs, _modelerFile = modelerFile };
         var ok = false;
         try
         {
@@ -606,7 +626,7 @@ public sealed class ScratchProgram : IScratchWindow
 
         // The Modeler's table data (material damping, notes, time dependence, ...) goes into ETABS through its tables, as
         // open_model does for a Modeler .e2k, and the model is saved again.
-        if (!build && !_asIs && (_program.Key == CsiProgram.Etabs.Key || _program.Key == CsiProgram.Sap2000.Key) && ModelerTables.ModelerFileBeside(modelFile) is { } cpm
+        if (!build && !_asIs && (_program.Key == CsiProgram.Etabs.Key || _program.Key == CsiProgram.Sap2000.Key) && (_modelerFile ?? ModelerTables.ModelerFileBeside(modelFile)) is { } cpm
             && ModelerTables.HasRows(cpm, _program)
             && ctx.Step($"put the Modeler's data that {name}'s file has no place for in through {name}'s tables and API", () =>
             {

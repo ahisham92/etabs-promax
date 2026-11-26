@@ -191,7 +191,7 @@ public static class S2kWriter
         {
             if (!frameNames.TryGetValue((x.Label, x.Story), out var name)) continue;
             var fmass = AssignTables.Row(x, "Frame Assignments - Additional Mass");
-            if (fmass.TryGetValue("AddedMass", out var mpl)) frameMass.Add(Row(("Frame", name), ("Cable", "No"), ("MassPerLen", mpl)));
+            if (fmass.TryGetValue("AddedMass", out var mpl)) frameMass.Add(Row(("Frame", name), ("MassPerLen", mpl))); // SAP2000 26.3: fields Frame, MassPerLen (no Cable; 0.4.57 full test)
             var tc = AssignTables.Row(x, "Frame Assignments - Tension and Compression Limits");
             if (tc.Count > 0)
                 tcLimits.Add(Row(("Frame", name), ("Tendon", "No"), ("TensLimit", tc.GetValueOrDefault("IncludeTens", "No")), ("CompLimit", tc.GetValueOrDefault("IncludeComp", "No")),
