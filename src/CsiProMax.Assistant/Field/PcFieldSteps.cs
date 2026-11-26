@@ -74,6 +74,31 @@ public static class PcFieldSteps
             return string.Join(", ", PlugIns.Values) + " are there";
         });
 
+        // One update brings every part to one version (Ahmed, 2026-11-26): the window, the plug-ins, and the installed
+        // copy that the Modeler, the Viewer and the shortcuts start.
+        ctx.Step("every part of CSI ProMax on this PC is one version (window, plug-ins, Modeler, Viewer, shortcuts)", () =>
+        {
+            var installed = ToolsMenu.InstallFolder();
+            if (installed is null) throw new FieldSkipException("no installed copy was found on this PC (Documents\\CSI ProMax with the three plug-in files), so there is nothing to compare");
+            var plugIns = ToolsMenu.PlugIns.Select(p => p.Dll).ToList();
+            var downloadedRun = ToolsMenu.RunsDownloadedVersion;
+            // A downloaded version brings the installed copy up to itself, as its window does at its start.
+            if (downloadedRun)
+            {
+                Update.PlugInRefresh.Run(AppContext.BaseDirectory, installed, plugIns);
+                Update.PlugInRefresh.Everything(AppContext.BaseDirectory, installed);
+            }
+            var here = string.Equals(Path.GetFullPath(install).TrimEnd('\\', '/'), Path.GetFullPath(installed).TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase);
+            var installedVersion = new Version(0, 0, 0);
+            try { installedVersion = Update.Updater.Parse(System.Reflection.AssemblyName.GetAssemblyName(Path.Combine(installed, "CsiProMax.dll")).Version?.ToString(3) ?? ""); }
+            catch (Exception ex) when (ex is IOException or BadImageFormatException or ArgumentException) { /* said as unreadable below */ }
+            var newest = Update.Updater.NewestDownloaded(installedVersion) is { } folder ? Path.GetFileName(folder) : null;
+            // A copy unpacked elsewhere to try a version is not part of the install: the installed parts are compared with each other.
+            var (same, text) = Update.PlugInRefresh.Aligned(downloadedRun || here ? Update.Updater.CurrentText : null, installed, newest, plugIns);
+            FieldContext.Expect(same, $"the parts are not one version: {text}. Open CSI ProMax once from a Tools menu or a shortcut and leave it a minute: it brings every part to the newest version by itself.");
+            return text + (downloadedRun || here ? "" : " (this run is a copy unpacked to try a version, and is not compared)");
+        });
+
         // Each program: installed or not. A program that is not there is not a failure: its part is listed as not tested.
         foreach (var program in CsiProgram.All)
         {

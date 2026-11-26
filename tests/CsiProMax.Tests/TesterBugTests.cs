@@ -913,6 +913,18 @@ static class TesterBugTests
                 Check(text.Contains("ScratchExtras.Check(ctx)"), $"{steps} must check the extras' tables after the analysis");
             }
         });
+        yield return ("0.4.45 Modeler open for an hour with no update check written: a check that fails or cannot run always leaves a line to read", () =>
+        {
+            var updater = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Panel/Update/Updater.cs"));
+            var check = updater[updater.IndexOf("public static async Task<string?> CheckAsync", StringComparison.Ordinal)..updater.IndexOf("private static void Apply(", StringComparison.Ordinal)];
+            Check(check.Contains("catch (Exception ex) when (ex is not OperationCanceledException)", StringComparison.Ordinal), "CheckAsync keeps whatever stops a check, not only the failures it expects");
+            Check(check.Split("Said?.Invoke(").Length >= 3, "a held update.lock and an unexpected failure are both said");
+            var app = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Panel/Host/App.cs"));
+            var loop = app[app.IndexOf("internal static async Task UpdateLoopAsync", StringComparison.Ordinal)..app.IndexOf("internal static void CheckForUpdatesInteractive", StringComparison.Ordinal)];
+            Check(loop.Contains("Updater.Said ??=", StringComparison.Ordinal) && loop.Split("ActivityLog.Note(\"update_check\"").Length >= 4, "the loop says in the activity log that it started, and what failed");
+            Check(!loop.Contains("catch (Exception) { first = false;", StringComparison.Ordinal), "a failed round is not swallowed without a line");
+        });
+
         yield return ("ETABS 23 field test: a test copy an earlier run left open is closed by the next run, and nothing else is", () =>
         {
             // Seen on 2026-11-25: the 0.4.10 run gave up on ETABS with the story picker showing; the 0.4.14 run then failed
