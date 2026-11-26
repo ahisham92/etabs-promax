@@ -12,7 +12,8 @@ namespace CsiProMax.Assistant.Safe;
 /// open the file through its API: SAFE 20 and 21 read every file given to File.OpenFile as a packed .fdb, and their
 /// cFile has no import (tester's PC, 2026-11-26). The program must already hold a blank model in the file's units.
 /// Materials, slab, beam, column and wall properties, the points, beams, columns, walls and slabs, the supports, the
-/// load patterns, the surface loads and the combinations go in. Design strips do not: SAFE's API cannot draw them.
+/// load patterns, the surface loads and the combinations go in. Design strips go in
+/// apart (<see cref="BuildStrips"/>): SAFE's API reads them and has no call to draw them, so they go through its table.
 /// </summary>
 public static class F2kRebuild
 {
@@ -190,13 +191,77 @@ public static class F2kRebuild
         }
 
         var strips = Rows(t, "OBJECT GEOMETRY - DESIGN STRIPS").Select(r => r.GetValueOrDefault("Strip")).Distinct(StringComparer.OrdinalIgnoreCase).Count();
-        if (strips > 0) notes.Add($"The {strips} design strips of the file were left out: SAFE's API cannot draw strips (in SAFE: File > Import > SAFE .F2K file brings them).");
         e.Refresh();
         return new JsonObject
         {
             ["slabs"] = slabs, ["beams"] = beams, ["columns"] = columns, ["walls"] = wallCount, ["supports"] = supports,
-            ["loads"] = loads, ["combinations"] = combos, ["strips"] = 0, ["strips_left_out"] = strips, ["notes"] = notes,
+            ["loads"] = loads, ["combinations"] = combos, ["strips_in_file"] = strips, ["notes"] = notes,
         };
+    }
+
+    /// <summary>SAFE's table of design strips, which its API (cDesignStrip: read, rename, delete only) cannot draw.</summary>
+    public const string StripTable = "Strip Object Connectivity";
+
+    /// <summary>
+    /// The file's design strips, one row per strip point, in the fields SAFE's strip table has (<paramref name="fields"/>,
+    /// as SAFE lists them): each value goes to the first field named like it. Throws, naming SAFE's fields, when the
+    /// table has no field for the strip's name or for a point's place, so the report shows what to match next time.
+    /// </summary>
+    public static List<Dictionary<string, string>> StripRows(string f2kText, IReadOnlyList<string> fields)
+    {
+        string? Field(params string[] names) => FieldOf(fields, names);
+        var name = NameField(fields);
+        var x = Field("GlobalX", "X", "XCoord", "PointX");
+        var y = Field("GlobalY", "Y", "YCoord", "PointY");
+        if (name is null || x is null || y is null)
+            throw new EtabsException($"SAFE's table '{StripTable}' has no field for {(name is null ? "the strip's name" : "a point's X and Y")}, so the strips cannot be written. Its fields: {string.Join(", ", fields)}.");
+        var map = new (string? Field, string From)[]
+        {
+            (name, "Strip"), (Field("Layer", "StripLayer"), "Layer"), (Field("Point", "PointNumber", "PointNum", "PointOrder", "Order"), "Point"),
+            (x, "GlobalX"), (y, "GlobalY"), (Field("GlobalZ", "Z", "ZCoord", "PointZ"), "GlobalZ"),
+            (Field("WBLeft", "WidthBeforeLeft", "StartWidthLeft", "WidthLeftStart", "WidthLeft", "LeftWidth"), "WBLeft"),
+            (Field("WBRight", "WidthBeforeRight", "StartWidthRight", "WidthRightStart", "WidthRight", "RightWidth"), "WBRight"),
+            (Field("WALeft", "WidthAfterLeft", "EndWidthLeft", "WidthLeftEnd"), "WALeft"),
+            (Field("WARight", "WidthAfterRight", "EndWidthRight", "WidthRightEnd"), "WARight"),
+            (Field("AutoWiden", "AutoWidening"), "AutoWiden"),
+        };
+        var rows = new List<Dictionary<string, string>>();
+        foreach (var row in Rows(CsiTableText.Parse(f2kText), "OBJECT GEOMETRY - DESIGN STRIPS"))
+        {
+            var r = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (field, from) in map)
+                if (field is not null && !r.ContainsKey(field) && row.TryGetValue(from, out var v)) r[field] = from == "GlobalZ" && v.Length == 0 ? "0" : v;
+            rows.Add(r);
+        }
+        return rows;
+    }
+
+    private static string? FieldOf(IReadOnlyList<string> fields, params string[] names) =>
+        names.Select(n => fields.FirstOrDefault(f => string.Equals(Plain(f), Plain(n), StringComparison.OrdinalIgnoreCase))).FirstOrDefault(f => f is not null);
+
+    /// <summary>The strip table's field for the strip's name.</summary>
+    public static string? NameField(IReadOnlyList<string> fields) => FieldOf(fields, "Name", "Strip", "StripName", "Label");
+
+    /// <summary>A field name without spaces, dashes or the like, to match "WB Left" with "WBLeft".</summary>
+    private static string Plain(string field) => new(field.Where(char.IsLetterOrDigit).ToArray());
+
+    /// <summary>
+    /// Puts the file's design strips into SAFE through its strip table (<see cref="EditableTables.Put"/>), and gives how
+    /// many SAFE then lists. The table's fields are read from SAFE first: the names differ between versions.
+    /// </summary>
+    public static int BuildStrips(ICsiLink e, string f2kText)
+    {
+        var fields = (string[])(e.Raw($"read the fields of {StripTable}", m =>
+        {
+            int version = 0, n = 0; string[] keys = [], names = [], about = [], units = []; bool[] importable = [];
+            var answer = Convert.ToInt32(m.DatabaseTables.GetAllFieldsInTable(StripTable, ref version, ref n, ref keys, ref names, ref about, ref units, ref importable), CultureInfo.InvariantCulture);
+            if (answer != 0 || keys is not { Length: > 0 }) throw new EtabsException($"SAFE gave no fields for its table '{StripTable}' (it answered {answer}).");
+            return keys;
+        }) ?? Array.Empty<string>());
+        var rows = StripRows(f2kText, fields);
+        if (rows.Count == 0) return 0;
+        EditableTables.Put(e, StripTable, NameField(fields)!, rows, "put in the design strips");
+        return Convert.ToInt32(e.Raw("count the design strips", m => { int n = 0; string[] names = []; m.DesignConcreteSlab.DesignStrip.GetNameList(ref n, ref names); return n; }), CultureInfo.InvariantCulture);
     }
 
     private static IEnumerable<Dictionary<string, string>> Rows(Dictionary<string, List<Dictionary<string, string>>> tables, string name) =>
