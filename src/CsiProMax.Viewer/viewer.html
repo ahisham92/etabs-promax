@@ -175,6 +175,7 @@ footer span{padding:0 10px;border-left:1px solid var(--line2);display:flex;align
 footer #hint{flex:1;overflow:hidden;text-overflow:ellipsis;color:var(--mute)}footer #vname{border-left:0}footer #vname:empty{display:none}
 footer #coords{font-variant-numeric:tabular-nums;min-width:230px}
 footer select{height:19px;font-size:11.5px;border-radius:0;margin:0 -4px}
+footer #fbFilter{display:flex;align-items:center;gap:4px;border:0;border-left:1px solid var(--line2);background:transparent;color:var(--ink);padding:0 10px;height:100%;border-radius:0;cursor:pointer}footer #fbFilter:hover:not(:disabled){background:var(--hot)}footer #fbFilter:disabled{color:var(--mute);cursor:default}footer #fbFilter b{font-weight:600;min-width:1ch}
 #drop{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:24px;color:#cfd8dc;z-index:4;background:#0b0d0f}
 #drop div{max-width:440px;line-height:1.6}
 #drop b{font-size:14px;color:#fff}
@@ -337,7 +338,7 @@ body.chaton #right{width:380px;max-width:42%}
     </div>
   </div>
 </main>
-<footer><span id="vname"></span><span id="hint">Ready</span><span id="sel"></span><span id="coords"></span><span id="similarWrap" hidden><select id="similar" title="Draw on one story or on all stories" style="height:19px;padding:0 2px"><option value="one">One Story</option><option value="all">All Stories</option></select></span><span>Global</span><span id="units"></span></footer>
+<footer><span id="vname"></span><span id="hint">Ready</span><span id="sel"></span><span id="coords"></span><span id="similarWrap" hidden><select id="similar" title="Draw on one story or on all stories" style="height:19px;padding:0 2px"><option value="one">One Story</option><option value="all">All Stories</option></select></span><span>Global</span><span id="units"></span><button id="fbFilter" disabled title="Filter: the selected objects by kind (Check All / Check None)"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M1.5 2h13l-5 6v5l-3 1.5V8z" fill="currentColor"/></svg><b id="fbN">0</b></button></footer>
 <div id="rubber"></div><div id="tip"></div>
 <script id="pack" type="application/json"></script>
 <script>
@@ -3577,12 +3578,15 @@ document.querySelectorAll("[data-close]").forEach(b => b.onclick = () => act(b.d
 // ---- side panel ----
 function showTab(name) { document.querySelectorAll("[data-tab]").forEach(x => x.classList.toggle("on", x.dataset.tab === name)); document.querySelectorAll(".tab").forEach(t => t.classList.toggle("on", t.id === name)); }
 document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => showTab(b.dataset.tab));
+$("fbFilter").onclick = () => selFilter();
 function showPick() {
   const el = $("props");
   if (!P) return;
   const list = [...sel].map(objOf).filter(Boolean), table = rows => `<table class="props">${rows.map(r => `<tr><td>${r[0]}</td><td>${esc(r[1])}</td></tr>`).join("")}</table>`;
   const counts = {}; list.forEach(o => counts[o.type === "f" ? "Frames" : "Shells"] = (counts[o.type === "f" ? "Frames" : "Shells"] || 0) + 1);
   const joints = [...selJ].filter(n => pointXyz.has(n)); if (joints.length) counts.Joints = joints.length;
+  // The Filter at the bottom right, as Revit has it: the count of what is selected, on whenever something is.
+  const fb = $("fbFilter"); if (fb) { fb.disabled = !(list.length + joints.length); $("fbN").textContent = list.length + joints.length; }
   $("sel").textContent = list.length || joints.length ? Object.entries(counts).map(([k, n]) => n + " " + (n === 1 ? k.slice(0, -1) : k)).join(", ") + " selected" : "";
   const filterBtn = `<button id="pFilter" title="Keep only some kinds of the selected objects">Filter...</button>`, wireFilter = () => { const b = $("pFilter"); if (b) b.onclick = selFilter; };
   if (!list.length && joints.length === 1) {
