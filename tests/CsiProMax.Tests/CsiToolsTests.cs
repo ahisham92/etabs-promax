@@ -454,6 +454,33 @@ static class CsiToolsTests
             finally { Directory.Delete(folder, true); }
         });
 
+        yield return ("ETABS 23 (Ahmed's PC, 2026-11-26): a model that will not open over a saved model opens from an empty one (restore_checkpoint, open_model)", () =>
+        {
+            var (link, api, _) = Model(CsiProgram.Etabs);
+            var folder = Path.Combine(Path.GetTempPath(), "cpm-miopen-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(folder);
+            try
+            {
+                var file = Path.Combine(folder, "tower.EDB");
+                File.WriteAllText(file, "v1");
+                api.File.Current = file;
+                api.File.RefuseOverSavedModel = true;
+                var fm = new FileModel(link, () => api.File.Current);
+                Run(CsiProgram.Etabs, "save_checkpoint", """{"name":"cp1"}""", fm);
+                File.WriteAllText(file, "v2");
+                var cp = Path.Combine(folder, "tower checkpoints", "cp1.EDB");
+                Run(CsiProgram.Etabs, "restore_checkpoint", """{"name":"cp1"}""", fm);
+                Check(api.Log.Contains("refused " + cp) && api.Log.IndexOf("open " + cp) > api.Log.FindLastIndex(l => l.StartsWith("init ")) - 1, "opened after a new model: " + string.Join(" | ", api.Log.TakeLast(5)));
+                Equal("v1", File.ReadAllText(file), "the model is the checkpoint again");
+                var other = Path.Combine(folder, "other.EDB");
+                File.WriteAllText(other, "x");
+                Run(CsiProgram.Etabs, "open_model", System.Text.Json.JsonSerializer.Serialize(new { path = other }), fm);
+                Equal(other, api.File.Current, "open_model opened it from an empty model");
+                api.File.RefuseOverSavedModel = false;
+            }
+            finally { Directory.Delete(folder, true); }
+        });
+
         yield return ("CSI tools: a building in one call, on the program's stories, with sections, supports, diaphragms and loads", () =>
         {
             var (link, api, inner) = Model(CsiProgram.Etabs, withModel: false);
@@ -584,7 +611,7 @@ public sealed class FakeApi
     public string GetModelFilename(bool IncludePath = true) => File.Current;
     public int SetModelIsLocked(bool LockIt) { _m.Locked = LockIt; Log.Add("locked " + LockIt); return 0; }
     public bool GetModelIsLocked() => _m.Locked;
-    public int InitializeNewModel(eFakeUnits Units = eFakeUnits.kN_m_C) { Log.Add("init " + Units); return 0; }
+    public int InitializeNewModel(eFakeUnits Units = eFakeUnits.kN_m_C) { Log.Add("init " + Units); File.Empty = true; return 0; }
 
     public sealed class PointApi(FakeApi o)
     {
@@ -821,7 +848,14 @@ public sealed class FakeApi
             if (Current.Length > 0 && FileName != Current) System.IO.File.Copy(Current, FileName, true);
             Current = FileName; return 0;
         }
-        public int OpenFile(string FileName) { Current = FileName; o.Log.Add("open " + FileName); return 0; }
+        /// <summary>As ETABS 23 on Ahmed's PC (2026-11-26): no to a file while another saved model is open ("Error in performing miOpen").</summary>
+        public bool RefuseOverSavedModel;
+        public bool Empty;
+        public int OpenFile(string FileName)
+        {
+            if (RefuseOverSavedModel && !Empty && Current.Length > 0) { o.Log.Add("refused " + FileName); return 1; }
+            Current = FileName; Empty = false; o.Log.Add("open " + FileName); return 0;
+        }
     }
 
     public sealed class AnalyzeApi(FakeApi o)

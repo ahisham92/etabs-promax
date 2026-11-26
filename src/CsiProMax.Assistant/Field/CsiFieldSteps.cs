@@ -466,12 +466,8 @@ public static class CsiFieldSteps
         if (live && checkpoint is not null && scratchFile.Length > 0)
             ctx.Step($"the scratch model is open again in the scratch {name} window", () =>
             {
-                link.Raw("open the scratch model again", m =>
-                {
-                    object model = m;
-                    ApiCall.Must(model, "File.OpenFile", CsiTools.D(("FileName", checkpoint)), "open the checkpoint of the scratch model");
-                    return ApiCall.Must(model, "File.Save", CsiTools.D(("FileName", scratchFile)), "save it as the scratch model");
-                });
+                CsiTools.OpenFile(link, "open the checkpoint of the scratch model", checkpoint);
+                CsiTools.Call(link, "save it as the scratch model", "File.Save", CsiTools.D(("FileName", scratchFile)));
                 FieldContext.Expect(ScratchProgram.SameName(link.Info().File, scratchFile), $"{name} has {link.Info().File} open, not the scratch model");
                 return Path.GetFileName(scratchFile);
             });

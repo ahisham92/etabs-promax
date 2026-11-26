@@ -8,6 +8,19 @@ namespace CsiProMax.Assistant.Etabs;
 public static class EditableTables
 {
     /// <summary>
+    /// True when every error of an import log is a field the program left at its default while it read the record
+    /// ("Error reading field TL; field ignored and default values will be used", ETABS 23 KDS table, 0.4.55 and main
+    /// 3cdc64d runs): the rows were taken. A record skipped is never this.
+    /// </summary>
+    public static bool OnlyFieldsIgnored(string log, int errors)
+    {
+        log ??= "";
+        if (log.Contains("record skipped", StringComparison.OrdinalIgnoreCase) || log.Contains("fatal", StringComparison.OrdinalIgnoreCase)) return false;
+        var ignored = System.Text.RegularExpressions.Regex.Matches(log, "field ignored", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Count;
+        return errors > 0 && ignored >= errors;
+    }
+
+    /// <summary>
     /// Selects every load pattern for display before a table is read. SAP2000 26 shows only the patterns selected for
     /// display in its database tables (DEAD alone in a new model, none in a model imported from .s2k), so a pattern added
     /// through the API was not in "Load Pattern Definitions": edit_table found no rows (0.4.18 and 0.4.20 field tests;
@@ -128,7 +141,7 @@ public static class EditableTables
                 int fatal = 0, errors = 0, warnings = 0, info = 0; string log = "";
                 int applied = Convert.ToInt32(m.DatabaseTables.ApplyEditedTables(true, ref fatal, ref errors, ref warnings, ref info, ref log));
                 log ??= "";
-                if (applied != 0 || fatal + errors > 0)
+                if (applied != 0 || fatal > 0 || (errors > 0 && !OnlyFieldsIgnored(log, errors)))
                 {
                     try { m.DatabaseTables.CancelTableEditing(); } catch { /* nothing more to undo */ }
                     string restored = Tools.CsiTools.RestoreRows(m, key, readFields, readRows);

@@ -143,6 +143,49 @@ static class SlabTests
             Check(SlabDefs.Tendons(ModelFile.FromJson(ModelFile.ToJson(m))).Single().Spans.Count == 2, "kept in the .cpm");
         });
 
+        yield return ("slabs, ETABS 23 (main 3cdc64d run, 2026-11-26): a tendon goes out with its support points and its profile from the datum, or ETABS 23 drops the whole file; ETABS 20 keeps its own form", () =>
+        {
+            var link = PtFrame();
+            Run(link, "draw_tendon", new
+            {
+                name = "T1", story = "Story2", points = new[] { new[] { 0.0, 3.0 }, new[] { 16.0, 3.0 } },
+                spans = new object[] { new { length = 8, depth_left = 0.1, depth_low = 0.16, depth_right = 0.04 }, new { length = 0, depth_left = 0.04, depth_low = 0.16, depth_right = 0.1 } },
+                section = "T15", strands = 4,
+            });
+            var m = link.Model;
+            m.ProgramVersion = "23.2.0";
+            var top = m.Elevation(m.StoryIndex("Story2"));
+            var text = E2kWriter.Write(m);
+            var sp = SectionOf(text, SlabDefs.TendonSupports);
+            Check(sp.Count == 4 && sp[0] == "TENDONSP  \"T1\"  \"Story2\"  NUMSUPPORTS  3", "three supports: " + string.Join(" | ", sp));
+            Check(sp[1].Contains("SUPPNUM  1  SUPPORTTYPE  \"None\"  RD  0  GLOBALX  0  GLOBALY  3  GLOBALZ  " + E2kText.Number(Math.Round(top - 0.1, 9))), sp[1]);
+            Check(sp[2].Contains("RD  0.5  GLOBALX  8") && sp[3].Contains("RD  1  GLOBALX  16"), "the middle and far supports");
+            var vp = SectionOf(text, SlabDefs.TendonProfile);
+            Check(vp[0].Contains("ZL  -0.1  ZC  -0.16  ZR  -0.04"), "heights from the datum, as ETABS 23 writes them: " + vp[0]);
+            var h = Headings(text);
+            Check(h.IndexOf(SlabDefs.TendonLayout) < h.IndexOf(SlabDefs.TendonSupports) && h.IndexOf(SlabDefs.TendonSupports) < h.IndexOf(SlabDefs.TendonProfile), "support points between the layout and the profile");
+            var back = E2kReader.Read(text);
+            var t = SlabDefs.Tendons(back).Single();
+            Near(top - 0.1, t.Spans[0].ZL, "read back as heights"); Near(top - 0.16, t.Spans[1].ZC, "the second span too");
+            Check(SectionOf(E2kWriter.Write(back), SlabDefs.TendonSupports).Count == 4, "written once again, not twice");
+            m.ProgramVersion = "20.0.0";
+            var old = E2kWriter.Write(m);
+            Check(SectionOf(old, SlabDefs.TendonSupports).Count == 0 && SectionOf(old, SlabDefs.TendonProfile)[0].Contains("ZL  " + E2kText.Number(Math.Round(top - 0.1, 9))), "ETABS 20: no support points, the heights themselves");
+            // ETABS 23.2's own lines (its export of PT-SL Ex001, Ahmed's PC): ZL -5 from the datum at 48 is 43.
+            var own = E2kReader.Read("$ PROGRAM INFORMATION\n  PROGRAM  \"ETABS\"  VERSION \"23.2.0\"\n$ STORIES - IN SEQUENCE FROM TOP\n  STORY \"Story1\"  HEIGHT 48\n  STORY \"Base\"  ELEV 0\n"
+                + "$ POINT COORDINATES\n  POINT \"7\"  0 18\n  POINT \"8\"  384 18\n$ TENDON CONNECTIVITIES\n  TENDON \"2\"  \"Story1\"  NUMPTS 2  \"7\"  \"8\"    LAYER  \"OTHER\"    DATUMOFFSET -0    MINCRADIUS 36\n"
+                + "$ TENDON HORIZONTAL LAYOUT\n  TENDONHL  \"2\"  \"Story1\"  NUMSEGS  1\n  TENDONHL  \"2\"  \"Story1\"  SEGMENTNUM 1  CURVETYPE \"Straight\"  NUMCURVEPTS 2\n"
+                + "  TENDONHL  \"2\"  \"Story1\"  SEGMENTNUM 1  POINT 1  GLOBALX 0  GLOBALY 18  GLOBALZ 48\n  TENDONHL  \"2\"  \"Story1\"  SEGMENTNUM 1  POINT 2  GLOBALX 384  GLOBALY 18  GLOBALZ 48\n"
+                + "$ TENDON SUPPORT POINTS\n  TENDONSP  \"2\"  \"Story1\"  NUMSUPPORTS 2\n  TENDONSP  \"2\"  \"Story1\"  SUPPNUM 1  SUPPORTTYPE \"None\"  RD 0  GLOBALX 0  GLOBALY 18  GLOBALZ 43\n"
+                + "  TENDONSP  \"2\"  \"Story1\"  SUPPNUM 2  SUPPORTTYPE \"None\"  RD 1  GLOBALX 384  GLOBALY 18  GLOBALZ 43\n"
+                + "$ TENDON VERTICAL PROFILE\n  TENDONVP  \"2\"  \"Story1\"  SPANNUM 1  SPANLABEL \"Right Cantilever\"  SPANTYPE \"Reverse Parabola\"  L 384  A 0.1  B 0.1  C 0.5  ZL -5  ZC -9  ZR -5\n$ END OF MODEL FILE\n");
+            var e = SlabDefs.Tendons(own).Single();
+            Near(43, e.Spans[0].ZL, "ETABS 23's ZL -5 is at 43"); Near(39, e.Spans[0].ZC, "ZC -9 is at 39");
+            var again = E2kWriter.Write(own);
+            Check(SectionOf(again, SlabDefs.TendonSupports).Any(l => l.Contains("SUPPNUM  2") && l.Contains("RD  1  GLOBALX  384  GLOBALY  18  GLOBALZ  43")), "its support points written again: " + string.Join(" | ", SectionOf(again, SlabDefs.TendonSupports)));
+            Check(SectionOf(again, SlabDefs.TendonProfile).Single().Contains("ZL  -5  ZC  -9  ZR  -5"), "and its profile as it was");
+        });
+
         yield return ("slabs: draw_tendon says no to what ETABS would not take, and changes nothing", () =>
         {
             var link = PtFrame();

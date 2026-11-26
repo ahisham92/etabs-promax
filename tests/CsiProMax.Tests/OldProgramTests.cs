@@ -510,6 +510,9 @@ static class OldProgramTests
             Check(box("Error decompressing file. May not be a valid ETABS .EDB file."), "SAFE 20's words"); // ETABS itself
             Check(!box("Error decompressing file: no licence was found"), "a licence message is never answered");
             Check(!box("Analysis Complete"), "another box");
+            Check(box("Error in performing miOpen"), "ETABS 23's words, Ahmed's PC 2026-11-26");
+            Check(CsiProMax.Assistant.ScratchDialogs.IsProgramBox("Warning", CsiProgram.Etabs), "ETABS 23 titles that box Warning");
+            Check(!CsiProMax.Assistant.ScratchDialogs.IsProgramBox("Warning: licence", CsiProgram.Etabs), "never another title");
             foreach (var p in CsiProgram.All)
                 Check(CsiProMax.Assistant.ScratchDialogs.IsProgramBox(" " + p.Name + " ", p) && !CsiProMax.Assistant.ScratchDialogs.IsProgramBox(p.Name + " licence", p), $"{p.Name}'s own message box, by its title");
         });

@@ -50,6 +50,7 @@ public static class E2kReader
         }
 
         if (!sawHeading) throw new E2kFormatException("This is not an ETABS text file: it has no '$' section headings.");
+        SlabDefs.FromEtabs(model);
         storiesTopFirst.Reverse();
         model.Stories = storiesTopFirst;
         if (model.Stories.Count > 0 && model.Stories[0].Height != 0)
