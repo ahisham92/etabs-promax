@@ -652,6 +652,31 @@ static class TesterBugTests
             Check(!ScratchProgram.SameName(@"C:\t\cpm-field-test-111111.$et", @"C:\t\cpm-field-test-949e09.edb"), "another run's scratch model is not this one's");
             Check(!ScratchProgram.SameName("", @"C:\t\cpm-field-test-949e09.edb"), "no model open is not the scratch model");
         });
+        // A tester's PC, 2026-11-26: CSI ProMax gone from the Tools menu of the CSI programs. A program started through
+        // its API writes its settings back with an empty plug-in list, and CSI ProMax put itself back only once it was
+        // opened, which with the menu entry gone it could no longer be. tests/keep-plugins.Tests.ps1 tests the script itself.
+        yield return ("tester PC: CSI ProMax keeps itself in the Tools menus while it is closed, and is taken out on uninstall", () =>
+        {
+            var root = SourceText.Root();
+            var script = File.ReadAllText(Path.Combine(root, "keep-plugins.ps1"));
+            Check(MenuKeeper.ScriptText() is { } inside && inside.Replace("\r\n", "\n") == script.Replace("\r\n", "\n"), "the keeper inside CSI ProMax is not the repository's keep-plugins.ps1");
+            Check(script.Contains("-AtLogOn") && script.Contains("MultipleInstances IgnoreNew") && script.Contains("GetFolderPath('Startup')"), "the keeper does not start at every sign-in (task, or Startup shortcut where tasks are not allowed)");
+            Check(script.Contains("Local\\CsiProMax.KeepPlugins"), "two keepers could run at once");
+            var app = File.ReadAllText(Path.Combine(root, "src", "CsiProMax.Assistant", "Panel", "Host", "App.cs"));
+            Check(app.Contains("Task.Run(CsiProMax.Assistant.MenuKeeper.Ensure)"), "a PC updated by the updater only never gets the keeper");
+            Check(File.ReadAllText(Path.Combine(root, "install.ps1")).Contains("-File $keeper -Register -Folder $Folder"), "the install line does not set the keeper up");
+            Check(File.ReadAllText(Path.Combine(root, "uninstall.ps1")).Contains("Remove = $true"), "uninstall does not take CSI ProMax out of the Tools menus");
+            // Set up once per installed folder; again when the folder changes; never when turned off by hand.
+            Check(MenuKeeper.Due(null, @"C:\Users\m\Documents\CSI ProMax", false), "a PC with no keeper gets one");
+            Check(!MenuKeeper.Due(@"task|C:\Users\m\Documents\CSI ProMax", @"c:\users\m\documents\csi promax\", false), "the keeper is set up again at every start");
+            Check(MenuKeeper.Due(@"task|D:\Old\CSI ProMax", @"C:\Users\m\Documents\CSI ProMax", false), "a keeper for another folder is not moved");
+            Check(!MenuKeeper.Due(null, @"C:\Users\m\Documents\CSI ProMax", true), "keep-plugins-off.txt is not respected");
+            // Every place that starts a CSI program through its API keeps the plug-in lists as they were.
+            var sap = File.ReadAllText(Path.Combine(root, "src", "CsiProMax.Assistant", "Sap2000", "SapScratchTest.cs"));
+            Check(sap.Contains("KeptPlugIns.Take(program)") && sap.Contains("KeptPlugIns.PutBack(plugIns)"), "the SAP2000 PC check empties SAP2000's plug-in list");
+            foreach (var file in SourceText.Files("src/CsiProMax.Assistant").Where(f => f.Text.Contains(".ApplicationStart()")))
+                Check(file.Text.Contains("KeptPlugIns."), file.Path + " starts a CSI program through its API without keeping its plug-in lists");
+        });
         yield return ("SAP2000 field test: a process left behind with no window does not keep CSI ProMax out of the Tools menu", () =>
         {
             var now = new DateTime(2026, 11, 25, 18, 40, 0);

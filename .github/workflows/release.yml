@@ -45,8 +45,9 @@ jobs:
       - run: test ! -e package/dist/ETABSv1.dll && test ! -e package/dist/SAFEv1.dll && test ! -e package/dist/SAP2000v1.dll && ! find package -iname '*.exe' | grep .
       - run: pwsh -NoProfile -File tests/install.Tests.ps1
       - run: pwsh -NoProfile -File tests/check.Tests.ps1
+      - run: pwsh -NoProfile -File tests/keep-plugins.Tests.ps1
       # The check goes into the package (the installer and the field test run it) and beside it as a file of its own.
-      - run: cp check.ps1 package/dist/
+      - run: cp check.ps1 keep-plugins.ps1 package/dist/
       - run: cp docs/INSTALL.txt package/ && cd package && zip -q -r "../CsiProMax-$NAME.zip" .
       # What an update downloads instead of the whole package: the file list, and a zip of only the files that differ
       # from the latest release (scripts/changed-files.py). Its name must not start with CsiProMax-: older updaters take
@@ -63,7 +64,7 @@ jobs:
       # GitHub's note writer can fail with a 500 or 504 for a while (2026-11-25, v0.4.8): then it is tried again, and after
       # that the release is made with the commit titles since the last release as its notes, so a version is never held up.
       - run: |
-          files=("CsiProMax-$NAME.zip" "changed-$NAME.zip" files.json install.ps1 install-no-ai.ps1 check.ps1)
+          files=("CsiProMax-$NAME.zip" "changed-$NAME.zip" files.json install.ps1 install-no-ai.ps1 check.ps1 keep-plugins.ps1 uninstall.ps1)
           for wait in 0 20 60; do
             sleep "$wait"
             if gh release create "$TAG" "${files[@]}" --target "$GITHUB_SHA" --title "CSI ProMax $NAME" --generate-notes $PRERELEASE; then exit 0; fi

@@ -91,6 +91,8 @@ public static class App
         var token = _life.Token;
         _ = Task.Run(() => BackgroundStartAsync(link, token));
         _ = Task.Run(Host.Shortcuts.Ensure);
+        // Tools > CSI ProMax kept in every CSI program while CSI ProMax is closed, too (MenuKeeper, keep-plugins.ps1).
+        _ = Task.Run(CsiProMax.Assistant.MenuKeeper.Ensure);
         // The team's learned tools: published from here and received from the others, every hour (Tools/TeamLibrary).
         try { if (!Demo) TeamLibrary.Start(token); } catch (Exception) { /* team_library says what is wrong when asked */ }
         RunningCall.Version = Updater.CurrentText;

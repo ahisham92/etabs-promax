@@ -10,6 +10,8 @@
 #      it. When the PC has none, Microsoft's own install script puts it in your user folder (no administrator rights).
 #   4. Adds "CSI ProMax" to the Tools menu of each ETABS, SAFE and SAP2000 found for this Windows user, when that
 #      program is closed and has no other plug-in. A copy of the program's settings file is kept beside it first.
+#   5. Keeps it there: a small hidden task at every sign-in (keep-plugins.ps1) adds it back when a program has emptied
+#      its plug-in list. To remove CSI ProMax: irm https://raw.githubusercontent.com/ahisham92/etabs-promax/main/uninstall.ps1 | iex
 # It never starts, closes, licenses or changes a CSI program or a model. Running it again is safe.
 #
 # With options (all optional):
@@ -17,6 +19,7 @@
 #     -Tag v0.4.0     that version instead of the newest
 #     -Folder <path>  another folder than Documents\CSI ProMax
 #     -NoPlugins      leave the programs' Tools menus alone
+#     -NoKeeper       add CSI ProMax to the Tools menus once, but do not keep it there (no sign-in task, keep-plugins.ps1)
 #     -NoRuntime      do not look for or install the .NET 8 Desktop Runtime
 #     -Preview        say what would be added to the Tools menus, and change none of them
 #     -Zip <file>     a CsiProMax-<version>.zip you already have, instead of downloading
@@ -43,6 +46,7 @@ function Install-CsiProMax {
         [switch]$NoAI,
         [switch]$WithAI,
         [switch]$NoPlugins,
+        [switch]$NoKeeper,
         [switch]$NoRuntime,
         [switch]$Preview
     )
@@ -383,11 +387,29 @@ function Install-CsiProMax {
                     'moved'   { Say "  $label CSI ProMax in the Tools menu now points to this folder (once)." 'Green' }
                     'already' { Say "  $label CSI ProMax is already in the Tools menu." 'Green' }
                     'preview' { Say "  $label CSI ProMax would be added to the Tools menu (preview: nothing was changed)." }
-                    'open'    { $byHand = $true; Say "  $label $program is open, so its plug-in list was left alone. Close it and run this line again, or add CSI ProMax by hand (below)." 'Yellow' }
+                    'open'    { $byHand = $true; Say "  $label $program is open, so its plug-in list was left alone. CSI ProMax adds itself once it is closed (or close it and run this line again)." 'Yellow' }
                     'others'  { $byHand = $true; Say "  $label has other plug-ins, so its list was left alone. Add CSI ProMax by hand (below)." 'Yellow' }
                     default   { $byHand = $true; Say "  $label Its settings file was not understood, so it was left alone. Add CSI ProMax by hand (below)." 'Yellow' }
                 }
             }
+        }
+
+        # 4b. Kept there: a CSI program empties its own plug-in list now and then (started through its API by a test,
+        # a script or another tool, closed by force, reset by its own update), and with Tools > CSI ProMax gone there
+        # is no way left to open CSI ProMax so it can put itself back (a tester's PC, 2026-11-26). keep-plugins.ps1 runs
+        # hidden from every sign-in and adds CSI ProMax back to each closed program whose list lost it.
+        if ($onWindows -and -not $NoPlugins -and -not $NoKeeper -and -not $Preview -and -not $SettingsRoot) {
+            try {
+                $keeper = Join-Path $Folder 'keep-plugins.ps1'
+                if (-not (Test-Path -LiteralPath $keeper)) {
+                    $keeper = Join-Path $work 'keep-plugins.ps1'
+                    Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/$repository/main/keep-plugins.ps1" -OutFile $keeper
+                }
+                $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+                if (-not (Test-Path -LiteralPath $powershell)) { $powershell = 'powershell.exe' }
+                & $powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $keeper -Register -Folder $Folder
+            }
+            catch { Say "  (CSI ProMax could not set itself to stay in the Tools menus: $($_.Exception.Message) Run this line again if Tools > CSI ProMax goes missing.)" 'Yellow' }
         }
 
         # The entry being there is not enough: the program must be able to create the plug-in when it is picked.

@@ -19,6 +19,8 @@ jobs:
       - run: pwsh -NoProfile -File tests/install.Tests.ps1
       # The one-line check (check.ps1): each version of each program creates its plug-in, and the plug-in of 0.4.4 cannot be.
       - run: pwsh -NoProfile -File tests/check.Tests.ps1
+      # The Tools menu keeper (keep-plugins.ps1) and uninstall.ps1, on made-up settings files.
+      - run: pwsh -NoProfile -File tests/keep-plugins.Tests.ps1
   windows:
     # What only Windows can say. Windows PowerShell is the .NET Framework, which ETABS 18 to 21, SAFE 20 and 21 and
     # SAP2000 20 to 25 run on: here the plug-ins are created as those programs create them (0.4.4 could not be, and
@@ -34,6 +36,9 @@ jobs:
       - run: powershell -NoProfile -ExecutionPolicy Bypass -File tests/check.Tests.ps1
         shell: cmd
       - run: pwsh -NoProfile -File tests/install.Tests.ps1
+        shell: cmd
+      # Windows PowerShell 5.1 runs the keeper on the PCs: the same tests there.
+      - run: powershell -NoProfile -ExecutionPolicy Bypass -File tests/keep-plugins.Tests.ps1
         shell: cmd
       - run: dotnet publish src/CsiProMax.Assistant -c Release -p:DebugType=none -o "publish/CSI ProMax"
       - run: powershell -NoProfile -ExecutionPolicy Bypass -File tests/window.Tests.ps1 -Folder "publish/CSI ProMax" -Picture window.png
@@ -58,7 +63,7 @@ jobs:
       - run: dotnet publish src/CsiProMax.Plugin -c Release -p:DebugType=none -o "publish/CSI ProMax"
       - run: dotnet publish src/CsiProMax.Plugin.Safe -c Release -p:DebugType=none -o "publish/CSI ProMax"
       - run: dotnet publish src/CsiProMax.Plugin.Sap -c Release -p:DebugType=none -o "publish/CSI ProMax"
-      - run: cp check.ps1 "publish/CSI ProMax/"
+      - run: cp check.ps1 keep-plugins.ps1 "publish/CSI ProMax/"
       - run: test ! -e "publish/CSI ProMax/ETABSv1.dll" && test ! -e "publish/CSI ProMax/SAFEv1.dll" && test -e "publish/CSI ProMax/CsiProMaxSafePlugin.dll" && test ! -e "publish/CSI ProMax/SAP2000v1.dll" && test -e "publish/CSI ProMax/CsiProMaxSapPlugin.dll" && ! ls "publish/CSI ProMax" | grep -i '\.exe$'
       - uses: actions/upload-artifact@v4
         with:

@@ -41,6 +41,10 @@ public static class SapScratchTest
         if (!File.Exists(s2k)) { Say(false, "no file " + s2k); return 1; }
         Directory.CreateDirectory(folder);
         var before = Process.GetProcessesByName(program.ProcessName).Select(p => p.Id).ToHashSet();
+        // SAP2000 started through its API writes its settings back with an empty plug-in list, so Tools > CSI ProMax
+        // was gone after this check ran (the field test keeps the lists since 0.4.15; this check did not, 2026-11-26).
+        var plugIns = KeptPlugIns.Take(program);
+        var scratchPid = 0;
         dynamic? sap = null;
         try
         {
@@ -49,6 +53,7 @@ public static class SapScratchTest
             sap = new EtabsApi(app!, api.GetType("SAP2000v1.cOAPI", true)!);
             Say(Convert.ToInt32(sap.ApplicationStart()) == 0, "start a new SAP2000");
             var pid = Process.GetProcessesByName(program.ProcessName).Select(p => p.Id).FirstOrDefault(id => !before.Contains(id));
+            scratchPid = pid;
             Console.WriteLine("     scratch SAP2000 process " + pid);
             dynamic m = sap.SapModel;
             Say(Convert.ToInt32(m.File.OpenFile(Path.GetFullPath(s2k))) == 0, "import " + s2k);
@@ -73,6 +78,11 @@ public static class SapScratchTest
         {
             try { if (sap is not null) sap.ApplicationExit(false); Console.WriteLine("     scratch SAP2000 closed without saving"); }
             catch (Exception ex) { Console.WriteLine("     could not close the scratch SAP2000: " + ex.Message); }
+            // The program writes its settings as its process ends: the lists are put back after that.
+            try { if (scratchPid != 0) using (var gone = Process.GetProcessById(scratchPid)) gone.WaitForExit(60_000); }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception) { }
+            var back = KeptPlugIns.PutBack(plugIns);
+            if (back.Count > 0) Console.WriteLine("     the scratch SAP2000 had emptied the plug-in list; put back: " + string.Join(", ", back.Select(Path.GetFileName)));
         }
         Console.WriteLine(bad == 0 ? "SAP2000 PC check passed." : $"SAP2000 PC check: {bad} failed.");
         return bad == 0 ? 0 : 1;
