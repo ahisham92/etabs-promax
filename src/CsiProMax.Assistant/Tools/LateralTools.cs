@@ -31,6 +31,25 @@ public static class LateralTools
             Ask.Changes, Set, a => $"Set {a.Text("name")} to {a.Text("code")} {a.Text("kind", "seismic")}"),
     ];
 
+    /// <summary>
+    /// Saves the model under its own file name before an import of SAP2000's patterns' table, and gives that file. A model
+    /// with no file of its own is refused: if the import lost a pattern there would be nothing to open again.
+    /// </summary>
+    private static string SaveFirst(ICsiLink e, string pattern, string code)
+    {
+        var program = e.Program.Name;
+        return (string)e.Raw($"save the model before giving {pattern} the code {code}", m =>
+        {
+            string file;
+            try { file = Convert.ToString(m.GetModelFilename(true)) ?? ""; } catch (Exception) { file = ""; }
+            if (!new[] { ".sdb", ".edb", ".fdb" }.Contains(System.IO.Path.GetExtension(file), StringComparer.OrdinalIgnoreCase))
+                throw new EtabsException($"{program}'s API has no call for {code}, so it goes in through the table 'Load Pattern Definitions', and the model is saved first so that it can be opened again if {program} loses a pattern. This model has no file of its own yet: save it (File > Save As), then ask again.");
+            if (Convert.ToInt32(m.File.Save(file)) != 0)
+                throw new EtabsException($"{program} refused to save the model as {System.IO.Path.GetFileName(file)} before the import, so {pattern} was not given {code}: nothing was changed.");
+            return file;
+        })!;
+    }
+
     private static string Kind(JsonElement a) => a.Text("kind", "seismic").Equals("wind", StringComparison.OrdinalIgnoreCase) ? LateralCodes.Wind : LateralCodes.Seismic;
 
     private static Dictionary<string, string> Values(JsonElement a)
@@ -233,7 +252,20 @@ public static class LateralTools
                 };
             }
             // No Set call for this code (ASCE 7-22, KDS, AASHTO...): the pattern's row and the code's row go in together.
-            var log = EditableTables.PutAutoLoad(e, name, kind == LateralCodes.Wind ? "Wind" : "Quake", table.KeyCode, table.Key, values, $"give {name} the {kind.ToLowerInvariant()} code {table.Code}");
+            // That import is the one that lost patterns in the 0.4.22 and 0.4.34 field tests: the model is saved under its
+            // own file name first (the engineer is always asked before, OutputPaths.SavesBeforeLateral) and opened again
+            // from that file when SAP2000 lost or changed any pattern or code, as edit_table does.
+            var saved = SaveFirst(e, name, table.Code);
+            string log;
+            try { log = EditableTables.PutAutoLoad(e, name, kind == LateralCodes.Wind ? "Wind" : "Quake", table.KeyCode, table.Key, values, $"give {name} the {kind.ToLowerInvariant()} code {table.Code}"); }
+            catch (EtabsException ex)
+            {
+                var reopened = (bool)e.Raw("open the model again as it was saved", m => { try { return Convert.ToInt32(m.File.OpenFile(saved)) == 0; } catch (Exception) { return false; } })!;
+                try { e.Refresh(); } catch (Exception rex) when (rex is EtabsException or InvalidOperationException) { /* the next call reads it */ }
+                throw new EtabsException(reopened
+                    ? $"{ex.Message} The model was opened again as it was saved just before ({System.IO.Path.GetFileName(saved)}), so nothing of the import is left in it and every pattern is as it was."
+                    : $"{ex.Message} Opening {System.IO.Path.GetFileName(saved)} again was refused: open it yourself (File > Open), without saving the model first.");
+            }
             var got = EditableTables.Read(e, table.Key, key, name)
                 ?? throw new EtabsException($"{e.Program.Name} took {name}'s rows for {table.Code}, but its table '{table.Name}' has no row for {name} when read back. Its import log: {log}");
             foreach (var (field, value) in values)
@@ -245,6 +277,7 @@ public static class LateralTools
                 ["set_by"] = $"the tables 'Load Pattern Definitions' and '{table.Name}', in one import ({e.Program.Name}'s API has no call for this code)",
                 ["read_back"] = new JsonObject(got.Where(kv => kv.Key is not "GUID").Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))),
                 ["note"] = $"{e.Program.Name} filled in its own defaults for the inputs not given. It computes the story forces when the analysis runs.",
+                ["saved_before_edit"] = $"The model was saved as {System.IO.Path.GetFileName(saved)} just before the import, so that it could be opened again if {e.Program.Name} lost a pattern. Tell the engineer that the file was saved.",
             };
         }
         else

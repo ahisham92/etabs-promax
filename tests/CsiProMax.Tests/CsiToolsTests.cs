@@ -297,9 +297,17 @@ static class CsiToolsTests
             api.Tables[kds] = (["LoadPat", "Dir", "R"], []);
             // A code SAP2000's API has no call for: the pattern's row and the code's row in one import, every pattern kept.
             var patternsBefore = string.Join(",", api.Table.Select(r => r[0]));
+            // A model with no file of its own is refused: there would be nothing to open again if a pattern were lost.
+            api.File.Current = "";
+            string unsaved = "";
+            try { Run(CsiProgram.Sap2000, "set_lateral_load", """{"name":"CPM-AUTO-S","kind":"seismic","code":"KDS 41 17 00-2019","values":{"R":"5"}}""", link); }
+            catch (Exception ex) { unsaved = ex.Message; }
+            Check(unsaved.Contains("Save As", StringComparison.Ordinal) && api.PatternTableWrites == 0, "an unsaved model is refused before any import: " + unsaved);
+            api.File.Current = "C:/models/scratch.sdb";
             var kdsSet = Run(CsiProgram.Sap2000, "set_lateral_load", """{"name":"CPM-AUTO-S","kind":"seismic","code":"KDS 41 17 00-2019","values":{"R":"5"}}""", link);
             Check(kdsSet["set_by"]?.ToString().Contains("in one import", StringComparison.Ordinal) == true && kdsSet["read_back"]?["R"]?.ToString() == "5", "KDS by the two tables at once: " + kdsSet.ToJsonString());
             Equal("KDS 41 17 00-2019", api.SeismicCodes["CPM-AUTO-S"], "the pattern has the code");
+            Check(kdsSet["saved_before_edit"]?.ToString().Contains("scratch.sdb", StringComparison.Ordinal) == true, "the engineer is told the model was saved first: " + kdsSet.ToJsonString());
             Check(api.Tables[kds].Rows.Count == 1 && api.Tables[kds].Rows[0].Contains("X"), "the code's row, with its direction X: " + string.Join("|", api.Tables[kds].Rows.SelectMany(r => r)));
             Check(api.Table.Select(r => r[0]).Take(patternsBefore.Split(',').Length).SequenceEqual(patternsBefore.Split(',')), "every pattern is kept");
             Check(SapLateral.Setters("Seismic", "ASCE 7-22").Count == 0 && SapLateral.Setters("Seismic", "KDS 41 17 00-2019").Count == 0 && SapLateral.Setters("Wind", "AASHTO 2020").Count == 0, "codes with no Set call in SAP2000 26");
@@ -307,6 +315,12 @@ static class CsiToolsTests
             var none = Run(CsiProgram.Sap2000, "set_lateral_load", """{"name":"CPM-AUTO-S","kind":"seismic","code":"None"}""", link);
             Check(api.Log.Contains("seismic none CPM-AUTO-S") && none["set_by"]?.ToString() == "LoadPatterns.AutoSeismic.SetNone", "the code is taken off by SetNone: " + none.ToJsonString());
             Equal(1, api.PatternTableWrites, "SAP2000's patterns' table was written once, with the code's table (KDS)");
+            // SAP2000 losing patterns in that import: the model is opened again from the file saved just before.
+            api.WipeOnApply = 1;
+            string wiped = "";
+            try { Run(CsiProgram.Sap2000, "set_lateral_load", """{"name":"CPM-AUTO-S","kind":"seismic","code":"KDS 41 17 00-2019"}""", link); }
+            catch (Exception ex) { wiped = ex.Message; }
+            Check(wiped.Contains("opened again as it was saved just before (scratch.sdb)", StringComparison.Ordinal) && api.Log.Contains("open C:/models/scratch.sdb"), "a lost pattern opens the saved model again: " + wiped);
             // Every direct import call in the program is one of the guarded ones.
             var root = Path.Combine(SourceText.Root(), "src");
             var direct = Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)
@@ -542,6 +556,7 @@ public sealed class FakeApi
 
     public int SetPresentUnits(eFakeUnits Units) { this.Units = Units.ToString(); Log.Add("units " + Units); return 0; }
     public eFakeUnits GetPresentUnits() => Enum.Parse<eFakeUnits>(Units);
+    public string GetModelFilename(bool IncludePath = true) => File.Current;
     public int SetModelIsLocked(bool LockIt) { _m.Locked = LockIt; Log.Add("locked " + LockIt); return 0; }
     public bool GetModelIsLocked() => _m.Locked;
     public int InitializeNewModel(eFakeUnits Units = eFakeUnits.kN_m_C) { Log.Add("init " + Units); return 0; }
@@ -777,7 +792,7 @@ public sealed class FakeApi
             if (Current.Length > 0 && FileName != Current) System.IO.File.Copy(Current, FileName, true);
             Current = FileName; return 0;
         }
-        public int OpenFile(string FileName) { Current = FileName; return 0; }
+        public int OpenFile(string FileName) { Current = FileName; o.Log.Add("open " + FileName); return 0; }
     }
 
     public sealed class AnalyzeApi(FakeApi o)

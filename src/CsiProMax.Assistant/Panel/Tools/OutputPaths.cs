@@ -70,6 +70,12 @@ internal static class OutputPaths
             var table = args.TryGetValue("table", out var named) && named.ValueKind == JsonValueKind.String ? named.GetString() : "a table";
             return $"CSI ProMax asks to edit the table {table}. Before the edit it saves the model under its own file name, so that an edit the program refuses can be undone by opening that file again. If you say no, the model is not saved and the table is not edited.";
         }
+        if (SavesBeforeLateral(tool, args))
+        {
+            var code = args["code"].GetString();
+            var pattern = args.TryGetValue("name", out var n) && n.ValueKind == JsonValueKind.String ? n.GetString() : "the pattern";
+            return $"CSI ProMax asks to give {pattern} the code {code}. SAP2000's API has no call for this code, so it goes in through the table 'Load Pattern Definitions'. Before that it saves the model under its own file name, so that the model can be opened again as it was if SAP2000 loses or changes any load pattern. If you say no, the model is not saved and the code is not set.";
+        }
         if (tool != "what_if" || !(args.TryGetValue("confirm", out var c) && c.ValueKind == JsonValueKind.True)) return null;
         var option = args.TryGetValue("target", out var t) && t.ValueKind == JsonValueKind.String && t.GetString() == "design_option";
         return option
@@ -79,7 +85,21 @@ internal static class OutputPaths
 
     /// <summary>A table edit that changes the model (add, update, delete): it saves the model first, so it asks at every approval level.</summary>
     public static bool SavesBeforeEdit(string tool, IReadOnlyDictionary<string, JsonElement> args) =>
-        tool == "edit_table" && args.TryGetValue("action", out var action) && action.ValueKind == JsonValueKind.String && action.GetString() is "add" or "update" or "delete";
+        tool == "edit_table" && args.TryGetValue("action", out var action) && action.ValueKind == JsonValueKind.String && action.GetString() is "add" or "update" or "delete"
+        || SavesBeforeLateral(tool, args);
+
+    /// <summary>
+    /// set_lateral_load in SAP2000 with a code its API has no Set call for (ASCE 7-22, KDS...): it imports the patterns'
+    /// table, so it saves the model first and asks at every approval level, like a table edit. A code with a Set call
+    /// and "None" save nothing and are not asked about here.
+    /// </summary>
+    public static bool SavesBeforeLateral(string tool, IReadOnlyDictionary<string, JsonElement> args)
+    {
+        if (tool != "set_lateral_load" || CsiProMax.Csi.Program.Key != CsiProMax.Assistant.Etabs.CsiProgram.Sap2000.Key) return false;
+        if (!args.TryGetValue("code", out var c) || c.ValueKind != JsonValueKind.String || c.GetString() is not { Length: > 0 } code || code.Trim().Equals("None", StringComparison.OrdinalIgnoreCase)) return false;
+        var kind = args.TryGetValue("kind", out var k) && k.ValueKind == JsonValueKind.String && string.Equals(k.GetString(), "wind", StringComparison.OrdinalIgnoreCase) ? CsiProMax.Lateral.LateralCodes.Wind : CsiProMax.Lateral.LateralCodes.Seismic;
+        return CsiProMax.Assistant.Tools.SapLateral.Setters(kind, code).Count == 0;
+    }
 
     /// <summary>The path as Windows will resolve it, so the dialog shows where a relative name really lands; unchanged when it can't be resolved.</summary>
     public static string FullPath(string path)
