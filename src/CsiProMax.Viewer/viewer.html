@@ -207,6 +207,13 @@ footer select{height:19px;font-size:11.5px;border-radius:0;margin:0 -4px}
 .dlg .itabs button{white-space:nowrap;border:1px solid transparent;border-bottom:0;border-radius:2px 2px 0 0;background:none;padding:3px 12px;margin-bottom:-1px}
 .dlg .itabs button.on{background:var(--field);border-color:var(--line);font-weight:600}
 .dlg .ipage{display:none}.dlg .ipage.on{display:block}
+.dlg.objinfo fieldset{margin:0 0 6px}.dlg.objinfo .oid .g2{grid-template-columns:90px 1fr}.dlg.objinfo .oid input{width:100%}.dlg.objinfo input.pgg,.dlg.objinfo input[readonly]{background:var(--form);color:var(--mute)}
+.dlg .pgwrap{height:300px;overflow:auto;border:1px solid var(--line);background:var(--field)}
+table.pg{width:100%;border-collapse:collapse;table-layout:fixed}table.pg td{border-bottom:1px solid var(--line2);padding:1px 4px;height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+table.pg td:first-child{width:56%;border-right:1px solid var(--line2)}table.pg tr.on td{background:var(--sel)}table.pg tr.pgh td{background:var(--form);font-weight:600}
+table.pg tr.pgoff td{color:var(--mute)}table.pg .pgg{color:var(--mute)}table.pg .pgu{color:var(--mute)}table.pg input,table.pg select{width:100%;height:18px;padding:0 3px;border-color:transparent;background:transparent}table.pg input:focus,table.pg select:focus{border-color:var(--accent)}
+.pgx{border:0;background:none;padding:0;width:14px;font-size:10px;line-height:1;cursor:pointer;color:var(--ink)}.pgs{display:inline-block;width:14px}
+.dlg .pgdesc{min-height:52px;border:1px solid var(--line);background:var(--field);padding:4px 6px;font-size:12px}
 .dlg table.list td.r{text-align:right;font-variant-numeric:tabular-nums}
 .ferr{color:var(--bad);margin-top:6px;max-width:560px;white-space:normal}
 #hint.bad{color:var(--bad)}
@@ -2346,7 +2353,9 @@ function jointsIn(p) {
   // The joints a window shows: the ends and corners of the objects it draws, and its supports (a foundation joint
   // with nothing drawn on it among them), each once, by name.
   visOf(p);
-  const out = new Map(), put = (q, sup) => { const n = sup ? sup.name : pointAt.get(key(q[0], q[1], q[2])); if (n === undefined) return; const k = String(n); if (!out.has(k)) out.set(k, {name: k, at: q}); };
+  // An end the pack names no point for is still a joint (Ahmed 2026-11-26: "I can not right click on joints some
+  // times"): it goes by where it stands, as a support with no point does.
+  const out = new Map(), put = (q, sup) => { let n = sup ? sup.name : pointAt.get(key(q[0], q[1], q[2])); if (n === undefined) { n = "(" + q.map(v => +v.toFixed(3)).join(", ") + ")"; if (!pointXyz.has(n)) pointXyz.set(n, q); } const k = String(n); if (!out.has(k)) out.set(k, {name: k, at: q}); };
   for (const o of frames.concat(areas)) { if (!p.vis || !p.vis[o.id]) continue; for (const q of o.type === "f" ? [o.a, o.b] : o.pts) put(q); }
   for (const s of supports) if (supportShown(p, s)) put(s.p, s);
   return [...out.values()];
@@ -2382,7 +2391,7 @@ function boxSelect(p, r, crossing, add) {
 }
 function rightClick(p, x, y, shift, cx, cy) {
   // As ETABS: right click on an object gives its information; on a joint the joint's. Shift, or empty space, the menu.
-  const {j, id} = shift ? {j: null, id: idAt(p, x, y)} : pickAt(p, x, y);
+  const {j, id} = shift ? {j: null, id: idAt(p, x, y)} : pickAt(p, x, y, 8);
   if (j) { if (!selJ.has(j)) { sel.clear(); selJ.clear(); selJ.add(j); selChanged(); } return jointInfo(j); }
   if (id && !sel.has(id)) { sel.clear(); selJ.clear(); sel.add(id); selChanged(); }
   if (id && !shift) return infoWindow(id);
@@ -2961,48 +2970,316 @@ function applyDisplay(d) {
   colourDirty = true; buildTree(); syncTools(); draw();
 }
 
-// ---- the information window for one object ----
-function infoWindow(id) {
-  const o = objOf(id); if (!o) return;
-  const u = unit ? " " + unit : "", rows = r => `<table class="list">${r.map(x => `<tr><td style="color:var(--mute);width:42%">${esc(x[0])}</td><td>${esc(x[1])}</td></tr>`).join("")}</table>`;
-  const geo = o.type === "f"
-    ? [["Label", o.name], ["Object type", kindWord(o)], ["Story", o.story || ""], ["Length", num(len(sub(o.b, o.a))) + u], ["Start point", (o.ia >= 0 ? points[o.ia][0] + ": " : "") + o.a.map(num).join(", ")], ["End point", (o.ib >= 0 ? points[o.ib][0] + ": " : "") + o.b.map(num).join(", ")], ["Angle in plan", num(Math.atan2(o.b[1] - o.a[1], o.b[0] - o.a[0]) * 180 / Math.PI) + "°"]]
-    : [["Label", o.name], ["Object type", kindWord(o)], ["Story", o.story || ""], ["Corners", o.pts.length], ["Corner points", o.idx.map((i, k) => i >= 0 ? points[i][0] : "(" + o.pts[k].map(num).join(", ") + ")").join(", ")], ["Elevation", [...new Set(o.pts.map(q => num(q[2])))].join(" to ") + u]];
-  const s = o.type === "f" ? sizes[o.section] : null, sh = o.type === "f" ? shapeOf(o.section) : null;
-  const asg = [["Section", o.section || "(none)"]];
-  if (s) asg.push(["Shape", s[0] || ""], ["Depth", num(s[1]) + u], ["Width", s[2] ? num(s[2]) + u : ""]);
-  if (sectionMat.has(o.section)) asg.push(["Material", sectionMat.get(o.section)]);
-  if (o.type === "a" && slabT[o.section]) asg.push(["Thickness", num(slabT[o.section]) + u]);
-  if (o.pier) asg.push(["Pier label", o.pier]); if (o.spandrel) asg.push(["Spandrel label", o.spandrel]);
-  let resHtml = "";
-  if (o.type === "f" && forces.size) {
-    const cases = [...forces.keys()].filter(c => forces.get(c).has(o.name));
-    if (cases.length) resHtml += `<div class="g2" style="margin-bottom:6px"><span>Case/Combo</span><select class="iCase">${opts(cases, forces.has(res.case) && cases.includes(res.case) ? res.case : cases[0])}</select></div><div class="iRes"></div>`;
+// ---- the information window for one object: ETABS's Object Information (Ahmed 2026-11-26, from ETABS's own Slab
+// Information): an Object ID box (Story, Label, Unique Name, GUID), then Object Data in tabs of collapsible property
+// grids, a description of the picked property underneath, and OK / Cancel. SAP2000's Frame / Area / Joint Information
+// keeps its own tab names. In the Modeler the values a form of the Assign menu sets are edited in place, as in ETABS. ----
+const infoDesc = {
+  "Number of Joints/Edges": "The number of joints, and of edges, round the shell object.",
+  "Edge Type": "The type of each edge of the shell object: straight or curved.",
+  "Joints": "The joints the object connects, in order, with their global coordinates.",
+  "Total Area": "The area of the shell object, in its own plane.",
+  "Centroid X": "The global X coordinate of the centroid.", "Centroid Y": "The global Y coordinate of the centroid.", "Centroid Z": "The global Z coordinate of the centroid.",
+  "Perimeter": "The length of all the edges of the shell object.",
+  "Polar Inertia (Ix + Iy)": "The polar moment of inertia of the shell object's area about its centroid, in its own plane.",
+  "Line Type": "The line object is straight.", "Length": "The length of the line object, joint I to joint J.",
+  "Coordinates": "The joint's global coordinates.", "Connected Objects": "The frame and shell objects that meet at the joint.",
+  "Opening": "Indicates if the shell object is an opening or not.",
+  "Section Property": "The section property assigned to the object.",
+  "Diaphragm": "The diaphragm assigned to the object (none, or from the story).",
+  "Property Modifiers": "The factors that scale the section's stiffness, mass and weight for this object.",
+  "Local Axis 2 Angle": "The angle, in degrees, the object's local 2 axis is turned from its default orientation.",
+  "Cardinal Point": "The point of the section that lies on the object's line (insertion point).",
+  "Joint Offsets": "The offsets of the object's ends from its joints.",
+  "Transform Stiffness for Offsets": "Indicates if the stiffness is transformed for the joint offsets.",
+  "Thickness Overwrites": "A thickness that overwrites the section's for this object.",
+  "Springs": "The spring property assigned to the object.",
+  "Area Mass": "Additional mass per unit area assigned to the shell object.",
+  "Line Mass": "Additional mass per unit length assigned to the frame object.",
+  "Floor Meshing Options": "How the program meshes the floor for the analysis.",
+  "Create Auto Edge Constraints": "Indicates if the program constrains the edges of the meshed object to the objects next to it.",
+  "Edge Releases": "Releases along the edges of the shell object.",
+  "Material Overwrite": "A material that overwrites the section's for this object.",
+  "Groups": "The groups the object belongs to.",
+  "Consider for Floor Cracking": "Indicates if the slab is considered for cracking in a cracked-section analysis.",
+  "Releases": "The end releases and partial fixity at the object's I and J ends.",
+  "Insertion Point": "The cardinal point and end joint offsets of the frame object.",
+  "End Length Offsets": "The rigid end offsets at the I and J ends, and the rigid zone factor.",
+  "Hinges": "The nonlinear hinges assigned along the frame object.",
+  "Pier Label": "The pier label of the object, for pier forces and design.", "Spandrel Label": "The spandrel label of the object, for spandrel forces and design.",
+  "Restraints": "The joint's restrained degrees of freedom (a support).",
+  "Panel Zone": "The panel zone assigned to the joint.", "Additional Mass": "Additional mass assigned to the joint.",
+  "Uniform": "Shell uniform load.", "Distributed": "Frame distributed load.", "Point": "Frame point load.", "Temperature": "Temperature load.", "Force": "Joint force load.",
+  "Story": "The story the object is on.", "Label": "The object's label.", "Unique Name": "The object's unique name.", "GUID": "The object's globally unique identifier.",
+};
+const infoUnits = () => { const u = (P.manifest || {}).units || {}; return {f: u.force || "", l: u.length || unit || ""}; };
+function shellGeometry(pts) {
+  // In the object's own plane: area, centroid, perimeter and polar inertia about the centroid.
+  const n = pts.length, o = pts[0];
+  let nx = 0, ny = 0, nz = 0; for (let i = 0; i < n; i++) { const a = pts[i], b = pts[(i + 1) % n]; nx += (a[1] - b[1]) * (a[2] + b[2]); ny += (a[2] - b[2]) * (a[0] + b[0]); nz += (a[0] - b[0]) * (a[1] + b[1]); }
+  const N = unitv([nx, ny, nz]), ref = Math.abs(N[2]) > 0.9 ? [1, 0, 0] : [0, 0, 1];
+  const e1 = unitv([N[1] * ref[2] - N[2] * ref[1], N[2] * ref[0] - N[0] * ref[2], N[0] * ref[1] - N[1] * ref[0]]), e2 = [N[1] * e1[2] - N[2] * e1[1], N[2] * e1[0] - N[0] * e1[2], N[0] * e1[1] - N[1] * e1[0]];
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2], uv = pts.map(q => { const d = sub(q, o); return [dot(d, e1), dot(d, e2)]; });
+  let A = 0, cx = 0, cy = 0, ix = 0, iy = 0, per = 0;
+  for (let i = 0; i < n; i++) {
+    const [x0, y0] = uv[i], [x1, y1] = uv[(i + 1) % n], c = x0 * y1 - x1 * y0;
+    A += c / 2; cx += (x0 + x1) * c / 6; cy += (y0 + y1) * c / 6; ix += (y0 * y0 + y0 * y1 + y1 * y1) * c / 12; iy += (x0 * x0 + x0 * x1 + x1 * x1) * c / 12;
+    per += len(sub(pts[(i + 1) % n], pts[i]));
   }
-  if (disp.size) {
-    const idx = o.type === "f" ? [o.ia, o.ib] : o.idx, c = disp.has(res.case) ? res.case : [...disp.keys()][0];
-    const dr = idx.filter(i => i >= 0).map(i => { const d = disp.get(c).get(String(points[i][0])); return d ? [points[i][0], ...d.map(fmt)] : null; }).filter(Boolean);
-    if (dr.length) resHtml += `<p class="kv" style="margin:8px 0 3px">Joint displacements, ${esc(c)}${u ? " (" + unit + ")" : ""}</p><table class="list"><tr><th>Joint</th><th>UX</th><th>UY</th><th>UZ</th></tr>${dr.map(r => `<tr>${r.map((v, i) => `<td class="${i ? "r" : ""}">${esc(v)}</td>`).join("")}</tr>`).join("")}</table>`;
-  }
-  const mine = objectRows(o), loads = mine.filter(x => isLoadTable(x.t)), asgIn = mine.filter(x => !isLoadTable(x.t) && isAssignTable(x.t)), inputs = mine.filter(x => x.t.from === "input" && !isLoadTable(x.t) && !isAssignTable(x.t)), others = mine.filter(x => x.t.from !== "input" && !isLoadTable(x.t) && !isAssignTable(x.t) && famOf(x.t.name) === null);
-  if (others.length) resHtml += `<p class="kv" style="margin:8px 0 3px">Every result table row about ${esc(o.name)}:</p>` + others.map(x => rowsHtml(x.t, x.rows, 40)).join("");
-  const des = designHtml(o) + (inputs.length ? (designOf(o).length ? "<hr>" : "") + inputs.map(x => rowsHtml(x.t, x.rows, 40)).join("") : "");
-  const notes = P.comments.filter(c => c.target && c.target.name === o.name);
-  const nLoads = loads.reduce((n, x) => n + x.rows.length, 0);
-  const w = dialog((o.type === "f" ? "Frame" : "Shell") + " Information - " + o.name, `<div class="itabs"><button data-page="geo" class="on">Geometry</button><button data-page="asg">Assignments</button><button data-page="lds">Loads (${nLoads})</button><button data-page="res">Results</button><button data-page="des">Design</button><button data-page="com">Comments (${notes.length})</button></div>
-    <div class="ipage on" data-page="geo">${rows(geo)}</div><div class="ipage" data-page="asg">${rows(asg)}${asgIn.map(x => rowsHtml(x.t, x.rows, 40)).join("")}</div>
-    <div class="ipage" data-page="lds">${loadsHtml(loads, o.name)}</div>
-    <div class="ipage" data-page="res">${resHtml || `<p class="kv">This pack has no results for it.</p>`}</div>
-    <div class="ipage" data-page="des">${des || `<p class="kv">This pack has no design results for it.</p>`}</div>
-    <div class="ipage" data-page="com">${notes.map(c => `<div class="card comment"><div class="who">${esc(c.by || "Reviewer")} · ${esc(String(c.at || "").replace("T", " ").slice(0, 16))}</div>${esc(c.text)}</div>`).join("") || `<p class="kv">No comments on it yet.</p>`}<div class="row"><textarea class="iText" placeholder="Write a review comment on ${esc(o.name)}"></textarea></div><button class="iAdd">Add comment</button></div>`,
-    [["Show in Tables", () => showInTable(o)], ["Close"]], {float: true, info: true, width: des || nLoads ? 560 : 430});
-  const fill = () => {
-    const box = w.querySelector(".iRes"); if (!box) return;
-    const c = w.querySelector(".iCase").value, rs = forces.get(c).get(o.name) || [];
-    box.innerHTML = `<div class="scroll" style="max-height:260px"><table class="list"><tr><th>Station</th>${forceComps.map(k => `<th>${k[0]}</th>`).join("")}</tr>${rs.map(r => `<tr><td class="r">${num(r.s)}</td>${forceComps.map(k => `<td class="r">${fmt(r[k[0]])}</td>`).join("")}</tr>`).join("")}</table></div>`;
+  if (Math.abs(A) < 1e-12) return {area: 0, centroid: o, perimeter: per, polar: 0};
+  cx /= A; cy /= A; const s = Math.sign(A);
+  const polar = Math.abs(ix * s - Math.abs(A) * cy * cy) + Math.abs(iy * s - Math.abs(A) * cx * cx);
+  return {area: Math.abs(A), centroid: [o[0] + e1[0] * cx + e2[0] * cy, o[1] + e1[1] * cx + e2[1] * cy, o[2] + e1[2] * cx + e2[2] * cy], perimeter: per, polar};
+}
+const jointName = q => { const n = pointAt.get(key(q[0], q[1], q[2])); return n === undefined ? "(" + q.map(num).join(", ") + ")" : String(n); };
+const xyzText = (q, u) => q.map(num).join("; ") + (u ? " " + u : "");
+function infoTitle(o) {
+  // The programs' own window titles: ETABS and SAFE by kind of object, SAP2000 by Frame, Area and Joint.
+  if (!o) return program === "safe" ? "Point Information" : "Joint Information";
+  if (program === "sap2000") return o.type === "f" ? "Frame Information" : "Area Information";
+  if (o.type === "f") return ({column: "Column", beam: "Beam", brace: "Brace"}[o.kind] || "Frame") + " Information";
+  return ({floor: "Slab", wall: "Wall", ramp: "Ramp"}[o.kind] || "Shell") + " Information";
+}
+// One property row: n name, v value, kids (rows under its expander), edit {key, type: "num" | "text" | "select", options}.
+const pr = (n, v, kids, edit, more) => Object.assign({n, v: v ?? "", kids: kids && kids.length ? kids : null, edit}, more || {});
+function gridHtml(rows, live) {
+  let html = "", id = 0;
+  const put = (r, depth, parent) => {
+    const me = "r" + (id++), ed = live && r.edit, u = r.unit ? ` <span class="pgu">(${esc(r.unit)})</span>` : "";
+    const val = ed ? (r.edit.type === "select"
+      ? `<select data-ed="${esc(r.edit.key)}">${opts(r.edit.options, String(r.v))}</select>`
+      : `<input data-ed="${esc(r.edit.key)}" value="${esc(r.v)}" ${r.edit.type === "num" ? 'inputmode="decimal"' : ""}>`) : `<span class="${r.grey ? "pgg" : ""}">${esc(r.v)}</span>`;
+    if (r.head) html += `<tr class="pgh" data-r="${me}" data-p="${parent || ""}" data-n="${esc(r.n)}"><td colspan="2" style="padding-left:${4 + depth * 14}px">${r.kids ? `<button class="pgx" data-x="${me}">${r.open === false ? "▸" : "▾"}</button>` : ""}${esc(r.n)}</td></tr>`;
+    else html += `<tr data-r="${me}" data-p="${parent || ""}" data-n="${esc(r.n)}"${r.grey ? ' class="pgoff"' : ""}><td style="padding-left:${4 + depth * 14}px">${r.kids ? `<button class="pgx" data-x="${me}">${r.open ? "▾" : "▸"}</button>` : '<span class="pgs"></span>'}${esc(r.n)}${u}</td><td>${val}</td></tr>`;
+    for (const k of r.kids || []) put(k, depth + 1, me);
   };
-  if (w.querySelector(".iCase")) { w.querySelector(".iCase").onchange = fill; fill(); }
-  w.querySelector(".iAdd").onclick = () => { const t = w.querySelector(".iText").value.trim(); if (!t) return; addComment(t, o); w.close(); infoWindow(id); w.remove(); };
+  for (const r of rows) put(r, 0, "");
+  return `<table class="pg">${html || `<tr class="pgoff"><td colspan="2">None</td></tr>`}</table>`;
+}
+function wireGrid(d, rowsByTab, desc) {
+  // Expanders open and close their rows; a click on a row shows its description underneath, as ETABS does.
+  const all = new Map(); const walk = (list) => { for (const r of list) { all.set(r, r); if (r.kids) walk(r.kids); } };
+  Object.values(rowsByTab).forEach(walk);
+  const hideUnder = (tbl, rid, hide) => tbl.querySelectorAll(`tr[data-p="${rid}"]`).forEach(tr => { tr.hidden = hide; const x = tr.querySelector(".pgx"); if (x) hideUnder(tbl, tr.dataset.r, hide || x.textContent === "▸"); });
+  d.querySelectorAll("table.pg").forEach(tbl => {
+    tbl.querySelectorAll(".pgx").forEach(x => { hideUnder(tbl, x.dataset.x, x.textContent === "▸"); x.onclick = e => { e.stopPropagation(); x.textContent = x.textContent === "▸" ? "▾" : "▸"; hideUnder(tbl, x.dataset.x, x.textContent === "▸"); }; });
+    tbl.querySelectorAll("tr[data-n]").forEach(tr => tr.onclick = () => {
+      d.querySelectorAll("table.pg tr.on").forEach(x => x.classList.remove("on")); tr.classList.add("on");
+      const n = tr.dataset.n, base = n.replace(/^Load Pattern: .*/, "Load Pattern").replace(/^(Joint|Edge) \d+.*/, "$1");
+      q(d, ".pgdesc").innerHTML = `<b>${esc(n)}</b><br>${esc(desc[n] || desc[base] || (base === "Load Pattern" ? "The loads of this load pattern on the object." : base === "Joint" ? "A joint of the object and its global coordinates." : base === "Edge" ? "The type of this edge." : ""))}`;
+    });
+  });
+}
+function infoDialog(spec) {
+  // spec: {title, id: [[label, value, editable]], tabs: [[name, rows | html]], extra: [[name, html]], apply(changes) -> Promise<error|null>}
+  const live = !!window.cpmLive && !!spec.apply;
+  const idBox = `<fieldset class="oid"><legend>Object ID</legend><div class="g2">${spec.id.map(([l, v, ed]) => `<span>${esc(l)}</span><input value="${esc(v)}" ${ed && live ? `data-ed="${esc(ed)}"` : "readonly"} class="${l === "GUID" ? "pgg" : ""}">`).join("")}</div></fieldset>`;
+  const tabs = spec.tabs.concat(spec.extra || []);
+  const body = idBox + `<fieldset class="odata"><legend>Object Data</legend><div class="itabs">${tabs.map((t, i) => `<button data-page="t${i}" class="${i ? "" : "on"}">${esc(t[0])}</button>`).join("")}</div>
+    ${tabs.map((t, i) => `<div class="ipage${i ? "" : " on"}" data-page="t${i}"><div class="pgwrap">${typeof t[1] === "string" ? t[1] : gridHtml(t[1], live)}</div></div>`).join("")}</fieldset>
+    <div class="pgdesc"><b></b></div>`;
+  const before = {};
+  const w = dialog(spec.title, body, [["OK", w => {
+    if (!live) return w.close();
+    const changes = {}; w.querySelectorAll("[data-ed]").forEach(x => { if (String(x.value) !== String(before[x.dataset.ed])) changes[x.dataset.ed] = x.value; });
+    if (!Object.keys(changes).length) return w.close();
+    formError(w, "");
+    spec.apply(changes).then(err => { if (err) formError(w, err); else { w.close(); hmSay("Done. Edit > Undo steps back."); } });
+    return false;
+  }, true], ["Cancel"]], {float: true, info: true, width: spec.width || 400});
+  w.querySelectorAll("[data-ed]").forEach(x => before[x.dataset.ed] = x.value);
+  const byTab = {}; spec.tabs.forEach((t, i) => { if (typeof t[1] !== "string") byTab[i] = t[1]; });
+  wireGrid(w, byTab, infoDesc);
+  w.classList.add("objinfo");
+  return w;
+}
+// The loads on the object, as ETABS lists them: a group for each load pattern, a row for each load, its values under it.
+function loadGrid(loads) {
+  const U = infoUnits(), byPat = new Map();
+  for (const x of loads) {
+    const f = x.t.fields, pc = patCol(f), type = loadTypeName(x.t), shell = loadKinds.shell.test(norm(x.t.name)), joint = loadKinds.joint.test(norm(x.t.name));
+    for (const r of x.rows) {
+      const pat = pc >= 0 ? String(r[pc]) : "(no pattern)", vals = loadValueCols(x.t).filter(c => isNum(r[c.i]) && +r[c.i] !== 0);
+      const unitOf = name => /temp/i.test(name) ? "°" + (((P.manifest || {}).units || {}).temperature || "C") : joint ? (/^m[xyz]/i.test(name) ? `${U.f}-${U.l}` : U.f) : shell ? `${U.f}/${U.l}²` : /^(force|f)$/i.test(name) && /point/i.test(type) ? U.f : /moment/i.test(name) ? `${U.f}-${U.l}` : `${U.f}/${U.l}`;
+      const main = vals.length === 1 ? fmt(+r[vals[0].i]) + " " + unitOf(vals[0].name) : vals.map(c => c.name + " " + fmt(+r[c.i])).join(", ");
+      const kids = f.map((name, i) => [name, r[i]]).filter(([name, v], i) => i !== pc && v !== "" && v !== undefined && !/^(story|label|uniquename|unique name|guid|frame|area|shell|joint|point|line)$/i.test(name)).map(([name, v]) => pr(name, isNum(v) ? fmt(+v) : String(v)));
+      if (!byPat.has(pat)) byPat.set(pat, []);
+      byPat.get(pat).push(pr(type, main.trim(), kids));
+    }
+  }
+  return [...byPat].map(([pat, rows]) => pr("Load Pattern: " + pat, "", rows, null, {head: true}));
+}
+// What a pack's assignment tables say about the object, folded into the rows of the same name, or a row of their own.
+const asgSlots = [[/release/, "Releases"], [/modifier/, "Property Modifiers"], [/insertion|cardinal/, "Insertion Point"], [/endlength|lengthoffset|endoffset/, "End Length Offsets"], [/jointoffset/, "Joint Offsets"], [/spring/, "Springs"], [/diaphragm/, "Diaphragm"], [/localax/, "Local Axis 2 Angle"], [/restraint/, "Restraints"], [/pier/, "Pier Label"], [/spandrel/, "Spandrel Label"], [/group/, "Groups"], [/hinge/, "Hinges"], [/mass/, "Mass"], [/mesh/, "Floor Meshing Options"], [/edgerelease/, "Edge Releases"], [/opening/, "Opening"], [/materialover/, "Material Overwrite"], [/thicknessover/, "Thickness Overwrites"]];
+function foldTables(rows, asgIn) {
+  for (const x of asgIn) {
+    const nm = norm(x.t.name); if (/sectionprop|summary/.test(nm)) continue;
+    const slot = (asgSlots.find(s => s[0].test(nm)) || [null, x.t.name.replace(/^[^-]*-\s*/, "")])[1];
+    const kids = x.rows.slice(0, 4).flatMap(r => x.t.fields.map((name, i) => [name, r[i]]).filter(([name, v]) => v !== "" && v !== undefined && !/^(story|label|uniquename|unique name|guid)$/i.test(name)).map(([name, v]) => pr(name, isNum(v) ? fmt(+v) : String(v))));
+    let row = rows.find(r => r.n === slot);
+    if (!row) { row = pr(slot, ""); rows.push(row); }
+    row.kids = (row.kids || []).concat(kids);
+    if (!row.v && kids.length === 1) row.v = kids[0].v; else if (!row.v && slot === "Groups") row.v = x.rows.length + (x.rows.length === 1 ? " Group" : " Groups");
+  }
+  return rows;
+}
+const modTitle = {F11MOD: "Membrane f11 Direction", F22MOD: "Membrane f22 Direction", F12MOD: "Membrane f12 Direction", M11MOD: "Bending m11 Direction", M22MOD: "Bending m22 Direction", M12MOD: "Bending m12 Direction", V13MOD: "Shear v13 Direction", V23MOD: "Shear v23 Direction", MMOD: "Mass", WMOD: "Weight", AMOD: "Cross-section (axial) Area", A2MOD: "Shear Area in 2 direction", A3MOD: "Shear Area in 3 direction", JMOD: "Torsional Constant", I2MOD: "Moment of Inertia about 2 axis", I3MOD: "Moment of Inertia about 3 axis"};
+const cardinals = ["1 Bottom Left", "2 Bottom Center", "3 Bottom Right", "4 Middle Left", "5 Middle Center", "6 Middle Right", "7 Top Left", "8 Top Center", "9 Top Right", "10 Centroid", "11 Shear Center"];
+async function liveData(name) {
+  // The Modeler knows every assignment: ask it (the forms of the Assign menu read the same answer).
+  if (!window.cpmLive || !/@/.test(name)) return null;
+  const [pd, defs, sd] = await Promise.all([hmPost({tool: "property_definitions", args: {objects: [name]}}).catch(() => null), hmDefs(), hmPost({tool: "structure_definitions", args: {}}).catch(() => null)]);
+  if (!pd || !pd.ok) return null;
+  return {now: (pd.result.objects || [])[0] || null, pd: pd.result, defs, sd: sd && sd.ok ? sd.result : null};
+}
+async function applyInfo(name, kind, c, L) {
+  // Each changed value through the tool its Assign form uses, one undo step each.
+  const run = async (tool, args) => { const j = await hmRun(tool, args, true); return j.ok ? null : j.error || "That did not work."; };
+  const take = (re) => Object.keys(c).filter(k => re.test(k));
+  let err = null;
+  if ("section" in c) err = err || await run("set_section", {[kind === "f" ? "frames" : "areas"]: [name], section: c.section});
+  const mods = take(/^mod:/); if (mods.length) { const m = {}; for (const k of mods) { const v = parseFloat(c[k]); if (!isFinite(v)) return k.slice(4) + " needs a number."; m[k.slice(4)] = v; } err = err || await run(kind === "f" ? "assign_frame_data" : "assign_shell_data", {objects: [name], modifiers: Object.assign({}, (L.now || {}).modifiers || {}, m)}); }
+  if (kind === "f") {
+    const a = {}; for (const k of ["angle", "offset_i", "offset_j", "rigid_zone"]) if (k in c) { const v = parseFloat(c[k]); if (!isFinite(v)) return "That needs a number."; a[k] = v; }
+    if ("cardinal" in c) a.cardinal = parseInt(c.cardinal);
+    if ("spring" in c) a.spring = c.spring;
+    const rel = take(/^rel[ij]:/); if (rel.length) { a.release_i = ["P", "V2", "V3", "T", "M2", "M3"].filter(r => (("reli:" + r) in c ? c["reli:" + r] : ((L.now.release_i || []).includes(r) ? "Yes" : "No")) === "Yes"); a.release_j = ["P", "V2", "V3", "T", "M2", "M3"].filter(r => (("relj:" + r) in c ? c["relj:" + r] : ((L.now.release_j || []).includes(r) ? "Yes" : "No")) === "Yes"); }
+    if (Object.keys(a).length) err = err || await run("assign_frame_data", Object.assign({objects: [name]}, a));
+  }
+  if (kind === "a" && "spring" in c) err = err || await run("assign_shell_data", {objects: [name], spring: c.spring});
+  if (kind === "j") {
+    const r = take(/^res:/); if (r.length) err = err || await run("assign_joint_data", {objects: [name], restraint: ["UX", "UY", "UZ", "RX", "RY", "RZ"].filter(x => (("res:" + x) in c ? c["res:" + x] : ((L.now.restraint || "").split(/\s+/).includes(x) ? "Yes" : "No")) === "Yes")});
+    if ("spring" in c) err = err || await run("assign_joint_data", {objects: [name], spring: c.spring});
+  }
+  if ("diaphragm" in c) err = err || await run("assign_diaphragm_data", {objects: [name], joints: kind === "j", diaphragm: c.diaphragm});
+  if ("pier" in c || "spandrel" in c) err = err || await run("assign_pier_spandrel_data", Object.assign({objects: [name]}, "pier" in c ? {pier: c.pier.trim()} : {}, "spandrel" in c ? {spandrel: c.spandrel.trim()} : {}));
+  return err;
+}
+async function infoWindow(id) {
+  const o = objOf(id); if (!o) return;
+  const U = infoUnits(), l = U.l, L = await liveData(o.name), now = (L && L.now) || null, sap = program === "sap2000";
+  const ends = o.type === "f" ? [o.a, o.b] : o.pts, names = ends.map(jointName);
+  const at = o.name.lastIndexOf("@"), label = at > 0 ? o.name.slice(0, at) : o.name, story = at > 0 ? o.name.slice(at + 1) : o.story || "";
+  const mine = objectRows(o), loads = mine.filter(x => isLoadTable(x.t)), asgIn = mine.filter(x => !isLoadTable(x.t) && isAssignTable(x.t));
+  const guidCol = x => col(x.t.fields, "GUID"), gx = mine.find(x => guidCol(x) >= 0), guid = gx ? String(gx.rows[0][guidCol(gx)] || "") : "";
+  const jointKids = names.map((n, i) => pr((o.type === "f" ? "Joint " + (i ? "J" : "I") : "Joint " + (i + 1)) + ": " + n, xyzText(ends[i], l)));
+  let geo;
+  if (o.type === "f") {
+    const c = mul(add(o.a, o.b), 0.5);
+    geo = [pr("Line Type", "Straight"), pr("Joints", names.join("; "), jointKids), pr("Length", num(len(sub(o.b, o.a))), null, null, {unit: l}), pr("Centroid X", num(c[0]), null, null, {unit: l}), pr("Centroid Y", num(c[1]), null, null, {unit: l}), pr("Centroid Z", num(c[2]), null, null, {unit: l})];
+  } else {
+    const g = shellGeometry(o.pts), wall = o.kind === "wall" || Math.abs(Math.max(...o.pts.map(p => p[2])) - Math.min(...o.pts.map(p => p[2]))) > tol() * 10;
+    geo = [pr("Number of Joints/Edges", o.pts.length), pr("Edge Type", "Straight", o.pts.map((_, i) => pr("Edge " + (i + 1), "Straight"))), pr("Joints", names.join("; "), jointKids),
+      pr("Total Area", num(g.area), null, null, {unit: l + "²"}), pr("Centroid X", num(g.centroid[0]), null, null, {unit: l}), pr("Centroid Y", num(g.centroid[1]), null, null, {unit: l})];
+    if (wall) geo.push(pr("Centroid Z", num(g.centroid[2]), null, null, {unit: l}));
+    geo.push(pr("Perimeter", num(g.perimeter), null, null, {unit: l}), pr("Polar Inertia (Ix + Iy)", fmt(g.polar), null, null, {unit: l + "⁴"}));
+  }
+  const d = L ? L.defs : null, live = !!now, none = live ? "None" : "";
+  const sections = d ? (o.type === "f" ? d.frame_sections : d.shell_sections).map(s => s.name) : [];
+  const springList = k => L ? L.pd.springs.filter(x => x.kind === k).map(x => x.name) : [];
+  const diaphs = L && L.sd ? L.sd.diaphragms.map(x => x.name) : [];
+  const groups = now ? now.groups || [] : [];
+  const groupRow = pr("Groups", live ? groups.length + (groups.length === 1 ? " Group" : " Groups") : "", groups.map(g => pr(g, "")));
+  const modKeys = L ? (o.type === "f" ? L.pd.frame_modifiers : L.pd.shell_modifiers) : [];
+  const modRow = pr("Property Modifiers", live ? (modKeys.every(k => ((now.modifiers || {})[k] ?? 1) === 1) ? "Default" : "Modified") : "", modKeys.map(k => pr(modTitle[k] || k, (now.modifiers || {})[k] ?? 1, null, {key: "mod:" + k, type: "num"})));
+  const secRow = pr("Section Property", o.section || "None", null, sections.length ? {key: "section", type: "select", options: sections.includes(o.section) ? sections : [o.section].concat(sections)} : null);
+  let asg;
+  if (o.type === "f") {
+    const rel = ["P", "V2", "V3", "T", "M2", "M3"], relName = {P: "Axial", V2: "Shear 2", V3: "Shear 3", T: "Torsion", M2: "Moment 22", M3: "Moment 33"};
+    const relKids = live ? rel.flatMap(r => [pr(relName[r] + " Start", (now.release_i || []).includes(r) ? "Yes" : "No", null, {key: "reli:" + r, type: "select", options: ["No", "Yes"]}), pr(relName[r] + " End", (now.release_j || []).includes(r) ? "Yes" : "No", null, {key: "relj:" + r, type: "select", options: ["No", "Yes"]})]) : [];
+    const sp = springList("line");
+    asg = [secRow,
+      pr("Releases", live ? ((now.release_i || []).length || (now.release_j || []).length ? "Yes" : "No") : "", relKids),
+      pr("Local Axis 2 Angle", live ? num(now.angle || 0) : "", null, live ? {key: "angle", type: "num"} : null, {unit: "deg"}),
+      pr("Insertion Point", live ? cardinals[(now.cardinal || 10) - 1] : "", live ? [pr("Cardinal Point", cardinals[(now.cardinal || 10) - 1], null, {key: "cardinal", type: "select", options: cardinals.map((t, i) => [String(i + 1), t])}), pr("Mirror about Local 2", "No"), pr("Transform Stiffness for Offsets", "Yes")] : null),
+      pr("End Length Offsets", live ? (now.offset_i || now.offset_j ? "User" : "Automatic") : "", live ? [pr("Offset at Start", num(now.offset_i || 0), null, {key: "offset_i", type: "num"}, {unit: l}), pr("Offset at End", num(now.offset_j || 0), null, {key: "offset_j", type: "num"}, {unit: l}), pr("Rigid Zone Factor", num(now.rigid_zone || 0), null, {key: "rigid_zone", type: "num"})] : null),
+      modRow,
+      pr("Hinges", live ? ((now.hinges || []).length ? (now.hinges.length + " Hinges") : "None") : "", live ? now.hinges.map(h => pr(h.dof, num(h.at))) : null),
+      pr("Springs", live ? now.spring || "None" : "", null, live ? {key: "spring", type: "select", options: [["", "None"]].concat(sp)} : null),
+      pr("Line Mass", live ? "0" : "", null, null, {unit: live ? `${U.f === "kN" || /kn/i.test(U.f) ? "kg" : "mass"}/${l}` : ""}),
+      program === "etabs" ? pr("Pier Label", live ? now.pier || "None" : o.pier || "", null, live ? {key: "pier", type: "text"} : null) : null,
+      program === "etabs" ? pr("Spandrel Label", live ? now.spandrel || "None" : o.spandrel || "", null, live ? {key: "spandrel", type: "text"} : null) : null,
+      pr("Material Overwrite", none), groupRow].filter(Boolean);
+  } else {
+    const sp = springList("area"), wall = o.kind === "wall";
+    asg = [pr("Opening", live ? (now.opening ? "Yes" : "No") : "", null, null), secRow,
+      program !== "sap2000" ? pr("Diaphragm", live ? now.diaphragm || "From Story" : "", null, live && diaphs.length ? {key: "diaphragm", type: "select", options: [["", "From Story"]].concat(diaphs)} : null) : null,
+      modRow,
+      pr("Local Axis 2 Angle", live ? num(now.angle || 0) : "", null, null, {unit: "deg"}),
+      pr("Cardinal Point", live ? "Middle" : ""), pr("Joint Offsets", live ? "None" : "", live ? [pr("Offset at Joints", "0", null, null, {unit: l})] : null), pr("Transform Stiffness for Offsets", live ? "Yes" : ""),
+      pr("Thickness Overwrites", live ? "No" : ""),
+      pr("Springs", live ? now.spring || "None" : "", null, live ? {key: "spring", type: "select", options: [["", "None"]].concat(sp)} : null),
+      pr("Area Mass", live ? "0" : "", null, null, {unit: live ? `kg/${l}²` : ""}),
+      pr(wall ? "Wall Meshing Options" : "Floor Meshing Options", live ? now.mesh || "Default" : "", live ? [pr("Mesh Type", now.mesh || "Default")] : null),
+      pr("Create Auto Edge Constraints", live ? "Yes" : ""), pr("Edge Releases", live ? "No" : "", live ? o.pts.map((_, i) => pr("Edge " + (i + 1), "No")) : null),
+      wall && program === "etabs" ? pr("Pier Label", live ? now.pier || "None" : o.pier || "", null, live ? {key: "pier", type: "text"} : null) : null,
+      wall && program === "etabs" ? pr("Spandrel Label", live ? now.spandrel || "None" : o.spandrel || "", null, live ? {key: "spandrel", type: "text"} : null) : null,
+      pr("Material Overwrite", none), groupRow, !wall && program === "etabs" ? pr("Consider for Floor Cracking", live ? "No" : "", null, null, {grey: true}) : null].filter(Boolean);
+  }
+  foldTables(asg, asgIn);
+  // The Viewer of results keeps its Results, Design and Comments beside the three tabs the programs have.
+  const extra = [];
+  if (!window.cpmLive) {
+    let resHtml = "";
+    if (o.type === "f" && forces.size) { const cases = [...forces.keys()].filter(c => forces.get(c).has(o.name)); if (cases.length) resHtml += `<div class="g2" style="margin-bottom:6px"><span>Case/Combo</span><select class="iCase">${opts(cases, forces.has(res.case) && cases.includes(res.case) ? res.case : cases[0])}</select></div><div class="iRes"></div>`; }
+    if (disp.size) {
+      const idx = o.type === "f" ? [o.ia, o.ib] : o.idx, c = disp.has(res.case) ? res.case : [...disp.keys()][0];
+      const dr = idx.filter(i => i >= 0).map(i => { const dd = disp.get(c).get(String(points[i][0])); return dd ? [points[i][0], ...dd.map(fmt)] : null; }).filter(Boolean);
+      if (dr.length) resHtml += `<p class="kv" style="margin:8px 0 3px">Joint displacements, ${esc(c)}${l ? " (" + l + ")" : ""}</p><table class="list"><tr><th>Joint</th><th>UX</th><th>UY</th><th>UZ</th></tr>${dr.map(r => `<tr>${r.map((v, i) => `<td class="${i ? "r" : ""}">${esc(v)}</td>`).join("")}</tr>`).join("")}</table>`;
+    }
+    const inputs = mine.filter(x => x.t.from === "input" && !isLoadTable(x.t) && !isAssignTable(x.t)), others = mine.filter(x => x.t.from !== "input" && !isLoadTable(x.t) && !isAssignTable(x.t) && famOf(x.t.name) === null);
+    if (others.length) resHtml += others.map(x => rowsHtml(x.t, x.rows, 40)).join("");
+    const des = designHtml(o) + (inputs.length ? (designOf(o).length ? "<hr>" : "") + inputs.map(x => rowsHtml(x.t, x.rows, 40)).join("") : "");
+    const notes = P.comments.filter(c => c.target && c.target.name === o.name);
+    if (resHtml) extra.push(["Results", resHtml]);
+    if (des) extra.push(["Design", des]);
+    extra.push(["Comments", notes.map(c => `<div class="card comment"><div class="who">${esc(c.by || "Reviewer")} · ${esc(String(c.at || "").replace("T", " ").slice(0, 16))}</div>${esc(c.text)}</div>`).join("") + `<div class="row"><textarea class="iText" placeholder="Write a review comment on ${esc(o.name)}"></textarea></div><button class="iAdd">Add comment</button>`]);
+  }
+  const w = infoDialog({title: infoTitle(o), width: extra.length > 1 ? 520 : 400,
+    id: sap ? [["Label", label], ["GUID", guid]] : [["Story", story], ["Label", label], ["Unique Name", o.name], ["GUID", guid]],
+    tabs: [[sap ? "Location" : "Geometry", geo], ["Assignments", asg], ["Loads", loadGrid(loads)]], extra,
+    apply: live ? c => applyInfo(o.name, o.type, c, L) : null});
+  const box = w.querySelector(".iRes");
+  if (box) { const fill = () => { const c = w.querySelector(".iCase").value, rs = forces.get(c).get(o.name) || []; box.innerHTML = `<div class="scroll" style="max-height:260px"><table class="list"><tr><th>Station</th>${forceComps.map(k => `<th>${k[0]}</th>`).join("")}</tr>${rs.map(r => `<tr><td class="r">${num(r.s)}</td>${forceComps.map(k => `<td class="r">${fmt(r[k[0]])}</td>`).join("")}</tr>`).join("")}</table></div>`; }; w.querySelector(".iCase").onchange = fill; fill(); }
+  const ad = w.querySelector(".iAdd"); if (ad) ad.onclick = () => { const t = w.querySelector(".iText").value.trim(); if (!t) return; addComment(t, o); w.close(); infoWindow(id); };
+  return w;
+}
+async function jointInfo(name) {
+  // Joint Information, in the same window as a member's (Ahmed 2026-11-26: "right click to follow same format").
+  const xyz = pointXyz.get(name); if (!xyz) return;
+  const U = infoUnits(), l = U.l, sap = program === "sap2000";
+  const sup = supportOf.get(name), on = jointLinks(name), st = stories.slice().reverse().find(s => Math.abs(s.elevation - xyz[2]) <= tol() * 10);
+  const story = st ? st.name : "", full = window.cpmLive && story && !/@/.test(name) ? name + "@" + story : name;
+  const L = await liveData(full), now = (L && L.now) || null, live = !!now;
+  const mine = jointRows(name), loads = mine.filter(x => isLoadTable(x.t)), asgIn = mine.filter(x => !isLoadTable(x.t) && isAssignTable(x.t));
+  const geo = [pr("Coordinates", xyzText(xyz, l), [pr("Global X", num(xyz[0]), null, null, {unit: l}), pr("Global Y", num(xyz[1]), null, null, {unit: l}), pr("Global Z", num(xyz[2]), null, null, {unit: l})], null, {open: true}),
+    pr("Connected Objects", on.length + (on.length === 1 ? " Object" : " Objects"), on.slice(0, 40).map(o => pr(kindWord(o) + " " + o.name, o.section || "")))];
+  const dofs = ["UX", "UY", "UZ", "RX", "RY", "RZ"], fixedBy = {fixed: dofs, pinned: ["UX", "UY", "UZ"], roller: ["UZ"]};
+  const held = live ? (now.restraint || "").split(/\s+/).filter(Boolean) : sup ? fixedBy[sup.kind] || [] : [];
+  const sp = L ? L.pd.springs.filter(x => x.kind === "point").map(x => x.name) : [], diaphs = L && L.sd ? L.sd.diaphragms.map(x => x.name) : [];
+  const groups = now ? now.groups || [] : [];
+  const asg = [pr("Restraints", held.length === 6 ? "Fixed" : held.length === 3 && !held.some(x => x[0] === "R") ? "Pinned" : held.length ? held.join(" ") : "None", dofs.map(x => pr(x, held.includes(x) ? "Yes" : "No", null, live ? {key: "res:" + x, type: "select", options: ["No", "Yes"]} : null))),
+    pr("Springs", live ? now.spring || "None" : sup && sup.kind === "spring" ? "Spring" : "", null, live ? {key: "spring", type: "select", options: [["", "None"]].concat(sp)} : null),
+    !sap ? pr("Diaphragm", live ? now.diaphragm || "From Story" : "", null, live && diaphs.length ? {key: "diaphragm", type: "select", options: [["", "From Story"]].concat(diaphs)} : null) : null,
+    pr("Panel Zone", live ? "None" : ""), pr("Additional Mass", live ? "None" : ""),
+    pr("Groups", live ? groups.length + (groups.length === 1 ? " Group" : " Groups") : "", groups.map(g => pr(g, "")))].filter(Boolean);
+  foldTables(asg, asgIn);
+  const extra = [];
+  if (!window.cpmLive) {
+    const isDes = t => famOf(t.name) !== null || /design|punch/.test(norm(t.name));
+    const results = mine.filter(x => !isLoadTable(x.t) && !isAssignTable(x.t) && x.t.from !== "input" && !isDes(x.t)), des = mine.filter(x => !isLoadTable(x.t) && x.t.from !== "input" && isDes(x.t));
+    const notes = P.comments.filter(c => c.target && c.target.kind === "joint" && c.target.name === name);
+    if (results.length) extra.push(["Results", results.map(x => rowsHtml(x.t, x.rows, 40)).join("")]);
+    if (des.length) extra.push(["Design", des.map(x => rowsHtml(x.t, x.rows, 40)).join("")]);
+    extra.push(["Comments", notes.map(c => `<div class="card comment"><div class="who">${esc(c.by || "Reviewer")} · ${esc(String(c.at || "").replace("T", " ").slice(0, 16))}</div>${esc(c.text)}</div>`).join("") + `<div class="row"><textarea class="iText" placeholder="Write a review comment on ${esc(name)}"></textarea></div><button class="iAdd">Add comment</button>`]);
+  }
+  const label = /@/.test(name) ? name.slice(0, name.lastIndexOf("@")) : name;
+  const w = infoDialog({title: infoTitle(null), width: extra.length > 1 ? 520 : 400,
+    id: sap ? [["Label", label], ["GUID", ""]] : [["Story", story], ["Label", label], ["Unique Name", name], ["GUID", ""]],
+    tabs: [[sap ? "Location" : "Geometry", geo], ["Assignments", asg], ["Loads", loadGrid(loads)]], extra,
+    apply: live ? c => applyInfo(full, "j", c, L) : null});
+  const ad = w.querySelector(".iAdd"); if (ad) ad.onclick = () => { const t = w.querySelector(".iText").value.trim(); if (!t) return; addComment(t, {type: "j", kind: "joint", name, story}); w.close(); jointInfo(name); };
+  return w;
 }
 
 // ---- loads and assignments about one object or joint, for its information window and the Properties panel ----
@@ -3044,28 +3321,6 @@ function jointRows(name) {
   return out;
 }
 function jointLinks(name) { const xyz = pointXyz.get(name); if (!xyz) return []; const k = key(...xyz); return frames.concat(areas).filter(o => (o.type === "f" ? [o.a, o.b] : o.pts).some(q => key(...q) === k)); }
-function jointInfo(name) {
-  // Joint Information, as ETABS gives it on a right click: where it is, what holds it, its loads and its results.
-  const at = pointXyz.get(name); if (!at) return;
-  const u = unit ? " " + unit : "", rows = r => `<table class="list">${r.map(x => `<tr><td style="color:var(--mute);width:42%">${esc(x[0])}</td><td>${esc(x[1])}</td></tr>`).join("")}</table>`;
-  const sup = supportOf.get(name), on = jointLinks(name), st = stories.slice().reverse().find(s => Math.abs(s.elevation - at[2]) <= tol() * 10);
-  const geo = [["Label", name], ["Story", st ? st.name : ""], ["X", num(at[0]) + u], ["Y", num(at[1]) + u], ["Z", num(at[2]) + u], ["Connected objects", on.length ? on.slice(0, 12).map(o => kindWord(o) + " " + o.name).join(", ") + (on.length > 12 ? " ..." : "") : "none"]];
-  const mine = jointRows(name), loads = mine.filter(x => isLoadTable(x.t)), asgIn = mine.filter(x => !isLoadTable(x.t) && (isAssignTable(x.t) || x.t.from === "input"));
-  const isDes = t => famOf(t.name) !== null || /design|punch/.test(norm(t.name));
-  const results = mine.filter(x => !isLoadTable(x.t) && !isAssignTable(x.t) && x.t.from !== "input" && !isDes(x.t)), des = mine.filter(x => !isLoadTable(x.t) && x.t.from !== "input" && isDes(x.t));
-  const notes = P.comments.filter(c => c.target && c.target.kind === "joint" && c.target.name === name);
-  const asg = [["Restraint", sup ? {fixed: "Fixed (all six)", pinned: "Pinned (U1 U2 U3)", roller: "Roller", spring: "Spring"}[sup.kind] || sup.kind : "None"]];
-  const nLoads = loads.reduce((n, x) => n + x.rows.length, 0);
-  // The same window as a frame's or a shell's (Ahmed 2026-11-26: "right click to follow same format").
-  const w = dialog("Joint Information - " + name, `<div class="itabs"><button data-page="geo" class="on">Geometry</button><button data-page="asg">Assignments</button><button data-page="lds">Loads (${nLoads})</button><button data-page="res">Results</button><button data-page="des">Design</button><button data-page="com">Comments (${notes.length})</button></div>
-    <div class="ipage on" data-page="geo">${rows(geo)}</div><div class="ipage" data-page="asg">${rows(asg)}${asgIn.map(x => rowsHtml(x.t, x.rows, 40)).join("")}</div>
-    <div class="ipage" data-page="lds">${loadsHtml(loads, name)}</div>
-    <div class="ipage" data-page="res">${results.map(x => rowsHtml(x.t, x.rows, 40)).join("") || `<p class="kv">This pack has no results for it.</p>`}</div>
-    <div class="ipage" data-page="des">${des.map(x => rowsHtml(x.t, x.rows, 40)).join("") || `<p class="kv">This pack has no design results for it.</p>`}</div>
-    <div class="ipage" data-page="com">${notes.map(c => `<div class="card comment"><div class="who">${esc(c.by || "Reviewer")} · ${esc(String(c.at || "").replace("T", " ").slice(0, 16))}</div>${esc(c.text)}</div>`).join("") || `<p class="kv">No comments on it yet.</p>`}<div class="row"><textarea class="iText" placeholder="Write a review comment on ${esc(name)}"></textarea></div><button class="iAdd">Add comment</button></div>`,
-    [["Show in Tables", () => showJointInTable(name, mine.find(x => !isLoadTable(x.t)) || mine[0])], ["Close"]], {float: true, info: true, width: nLoads || results.length || des.length ? 560 : 430});
-  w.querySelector(".iAdd").onclick = () => { const t = w.querySelector(".iText").value.trim(); if (!t) return; addComment(t, {type: "j", kind: "joint", name, story: st ? st.name : ""}); w.close(); jointInfo(name); };
-}
 function showJointInTable(name, hit) {
   // The table that holds the joint, filtered to it, as Show in Tables does for a member.
   const t = hit ? hit.t : null; showTables(true); if (!t) return;
@@ -3552,6 +3807,8 @@ function instLocal() {
     notes: ["This pack was made before the full check: only supports, floating parts, members of no length and doubled members were looked at. Make the pack again with CSI ProMax, or open the model in the Modeler, for the full check (releases, sections, mechanisms, load cases and mass)."]};
 }
 document.addEventListener("keydown", e => { if (e.key === "F7" && !e.ctrlKey && !e.altKey && !(e.target.closest && e.target.closest("input, textarea, select"))) { e.preventDefault(); act("inst"); } });
+// No browser menu (Back, Refresh, Save as, Print) anywhere in the window, as in the programs; text boxes keep theirs.
+document.addEventListener("contextmenu", e => { if (!(e.target.closest && e.target.closest("textarea, input:not([type=checkbox]):not([type=radio]):not([readonly])"))) e.preventDefault(); });
 window.cpmLoad = load;
 // ---- the Modeler: modelling by hand. Its menus, forms and drawing clicks call the same tools the chat calls, through
 // the Modeler on this PC (POST edit), so the chat and the engineer work on one model. Only in the Modeler's own view. ----
@@ -3701,27 +3958,179 @@ async function hmMaterials() {
     ["Delete Material", n => n && hmRun("delete_definition", {kind: "material", name: n}).then(j => j.ok && again())],
   ], n => hmMaterial(defs.materials.find(m => m.name === n), again));
 }
+// Material Property Data, as ETABS shows it: General Data, Weight and Mass, Mechanical Property Data, and the Design,
+// Nonlinear, Damping and Time Dependent forms behind their buttons, with the Modulus of Rupture. What the .e2k has no
+// keyword for is held as rows of the program's own material tables (property_definitions lists them with their fields).
+const matColors = ["Black", "Blue", "Cyan", "Green", "Magenta", "Red", "White", "Yellow", "Gray8Dark", "Gray4", "Gray2Light", "Orange", "Brown"];
+const matColorCss = c => ({Gray8Dark: "#5a5a5a", Gray4: "#9a9a9a", Gray2Light: "#d6d6d6"}[c] || (/^#|^[a-z]+$/i.test(c || "") ? c : "#c0c0c0"));
+const matCurves = {Concrete: ["Simple", "Mander", "User"], Steel: ["Simple", "Park", "User"], Rebar: ["Simple", "Park", "User"], Tendon: ["250ksi", "270ksi", "User"], Masonry: ["Simple", "User"]};
+const matTimeCodes = ["CEB-FIP 90", "CEB-FIP 2010", "ACI 209R-92", "Eurocode 2-2004", "AS 3600-2009", "AS 3600-2018", "GL2000", "NZS 3101-2006", "User"];
+const matLabels = {STRAINATFC: "Strain at f'c", STRAINATULTIMATE: "Ultimate strain capacity", STRAINATHARDENING: "Strain at onset of strain hardening", STRAINATMAXSTRESS: "Strain at maximum stress", STRAINATRUPTURE: "Strain at rupture",
+  FINALSLOPE: "Final slope (multiplier on E)", ENERGYDEGFACT: "Energy degradation factor", IOTENSION: "Immediate Occupancy, tension", LSTENSION: "Life Safety, tension", CPTENSION: "Collapse Prevention, tension",
+  IOCOMPRESSION: "Immediate Occupancy, compression", LSCOMPRESSION: "Life Safety, compression", CPCOMPRESSION: "Collapse Prevention, compression"};
 async function hmMaterial(m, after, copy) {
-  const u = hmU(), pd = (await hmRun("property_definitions", {}, true)).result || {materials: [], material_types: ["Concrete"], material_values: []};
-  const cur = m ? pd.materials.find(x => x.name === m.name) || {name: m.name, type: m.type, values: {}} : {name: "", type: "Concrete", grade: "", values: {WEIGHTPERVOLUME: 25, E: 32836568, U: 0.2, FC: 30000}};
-  const was = m && !copy ? cur.name : null, V = cur.values || {};
-  const unit = {WEIGHTPERVOLUME: `${u.f}/${u.l}³`, E: `${u.f}/${u.l}²`, U: "", A: "1/°", FC: `${u.f}/${u.l}²`, FY: `${u.f}/${u.l}²`, FU: `${u.f}/${u.l}²`, FYE: `${u.f}/${u.l}²`, FUE: `${u.f}/${u.l}²`};
-  const d = dialog("Material Property Data", `<fieldset><legend>General Data</legend><div class="g2">
+  const u = hmU(), pd = (await hmRun("property_definitions", {}, true)).result || {materials: [], material_types: ["Concrete"], material_values: [], material_tables: {}, material_nonlinear: {}};
+  const cur = m ? pd.materials.find(x => x.name === m.name) || {name: m.name, type: m.type, values: {}} : {name: "", type: "Concrete", grade: "", values: {WEIGHTPERVOLUME: 25, E: 32836568, U: 0.2, A: 9.9e-6, FC: 30000}};
+  const was = m && !copy ? cur.name : null;
+  // The form's state: the .e2k values and texts, and the table rows; the sub-forms change it, OK sends it all.
+  const st = {values: {...(cur.values || {})}, texts: {...(cur.texts || {})}, tables: JSON.parse(JSON.stringify(cur.tables || {}))};
+  const row = t => (st.tables[t] && st.tables[t][0]) || {};
+  const setRow = (t, r) => { const clean = {}; for (const k in r) if (r[k] !== "" && r[k] != null) clean[k] = String(r[k]); st.tables[t] = Object.keys(clean).length ? [clean] : []; };
+  const stress = `${u.f}/${u.l}²`, g = {m: 9.80665, mm: 9806.65, cm: 980.665, in: 386.0886, ft: 32.174}[u.l] || 9.80665;
+  const gen = row("General"), basic = row("Basic Mechanical Properties"), conc = row("Concrete Data");
+  const V = st.values;
+  const d = dialog("Material Property Data", `
+    <fieldset><legend>General Data</legend><div class="g2">
       <span>Material Name</span><input id="mN" value="${esc(m ? (copy ? cur.name + " copy" : cur.name) : "Concrete")}">
       <span>Material Type</span><select id="mT">${opts(pd.material_types, cur.type)}</select>
-      <span>Grade</span><input id="mG" value="${esc(cur.grade || "")}"></div></fieldset>
-    <fieldset><legend>Material Property Data</legend><div class="g2" id="mV">${pd.material_values.map(v => `<span data-row="${v.key}">${esc(v.label)}${unit[v.key] ? ", " + unit[v.key] : ""}</span><input data-k="${v.key}" data-row="${v.key}" type="number" step="any" value="${V[v.key] != null ? V[v.key] : ""}">`).join("")}</div></fieldset>
-    <p class="kv">Blank values take the programs' defaults (the expected strengths 1.1 times the minimum).</p>`,
+      <span>Directional Symmetry Type</span><select id="mSym"></select>
+      <span>Material Grade</span><input id="mG" value="${esc(cur.grade || "")}">
+      <span>Material Display Color</span><span style="display:flex;gap:6px;align-items:center"><span id="mSw" style="width:46px;height:18px;border:1px solid #888;display:inline-block"></span><select id="mC">${opts(matColors, gen.Color || "")}</select></span>
+      <span>Material Notes</span><button id="mNotes">Modify/Show Notes...</button></div></fieldset>
+    <fieldset><legend>Material Weight and Mass</legend>
+      <div style="display:flex;gap:24px;margin-bottom:4px"><label><input type="radio" name="mDen" value="Weight" ${basic.DensityType !== "Mass" ? "checked" : ""}> Specify Weight Density</label><label><input type="radio" name="mDen" value="Mass" ${basic.DensityType === "Mass" ? "checked" : ""}> Specify Mass Density</label></div>
+      <div class="g2"><span>Weight per Unit Volume, ${u.f}/${u.l}³</span><input id="mW" type="number" step="any" value="${V.WEIGHTPERVOLUME ?? ""}">
+      <span>Mass per Unit Volume, ${u.f}-s²/${u.l}⁴</span><input id="mM" type="number" step="any"></div></fieldset>
+    <fieldset><legend>Mechanical Property Data</legend><div class="g2">
+      <span>Modulus of Elasticity, E, ${stress}</span><input id="mE" type="number" step="any" value="${V.E ?? ""}">
+      <span data-r="U">Poisson's Ratio, U</span><input data-r="U" id="mU" type="number" step="any" value="${V.U ?? ""}">
+      <span>Coefficient of Thermal Expansion, A, 1/°</span><input id="mA" type="number" step="any" value="${V.A ?? ""}">
+      <span data-r="U">Shear Modulus, G, ${stress}</span><input data-r="U" id="mGm" readonly></div></fieldset>
+    <fieldset><legend>Design Property Data</legend><button id="mDes" style="width:100%">Modify/Show Material Property Design Data...</button></fieldset>
+    <fieldset><legend>Advanced Material Property Data</legend><div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center">
+      <button id="mNl">Nonlinear Material Data...</button><button id="mDamp">Material Damping Properties...</button><button id="mTime">Time Dependent Properties...</button></div></fieldset>
+    <fieldset id="mRupF"><legend>Modulus of Rupture for Cracked Deflections</legend>
+      <label><input type="radio" name="mRup" value="No" ${conc.IsUserFr !== "Yes" ? "checked" : ""}> Program Default (Based on Concrete Slab Design Code)</label><br>
+      <label><input type="radio" name="mRup" value="Yes" ${conc.IsUserFr === "Yes" ? "checked" : ""}> User Specified</label> <input id="mFr" type="number" step="any" style="width:110px" value="${conc.UserFr || ""}"> ${stress}</fieldset>`,
     [["OK", d => {
-      const values = {}; d.querySelectorAll("#mV [data-k]").forEach(x => { if (x.closest("[hidden]") || x.hidden) return; const v = parseFloat(x.value); if (isFinite(v)) values[x.dataset.k] = v; });
-      return submit(d, "define_material_data", {name: q(d, "#mN").value.trim(), was, type: q(d, "#mT").value, grade: q(d, "#mG").value.trim() || undefined, values}, after);
-    }, true], ["Cancel"]], {width: 480});
+      const type = q(d, "#mT").value, num = id => { const v = parseFloat(q(d, id).value); return isFinite(v) ? v : undefined; };
+      Object.assign(V, {WEIGHTPERVOLUME: num("#mW"), E: num("#mE"), A: num("#mA")}); if (!/Rebar|Tendon/.test(type)) V.U = num("#mU"); else delete V.U;
+      for (const k in V) if (V[k] === undefined) delete V[k];
+      setRow("General", {...row("General"), Color: q(d, "#mC").value});
+      setRow("Basic Mechanical Properties", {...row("Basic Mechanical Properties"), DensityType: q(d, "input[name=mDen]:checked").value === "Mass" ? "Mass" : ""});
+      if (type === "Concrete") setRow("Concrete Data", {...row("Concrete Data"), IsUserFr: q(d, "input[name=mRup]:checked").value === "Yes" ? "Yes" : "", UserFr: q(d, "input[name=mRup]:checked").value === "Yes" ? q(d, "#mFr").value : ""});
+      // Only the tables this type has go: a table of another type the material once was is taken off.
+      const tables = {}; for (const t in st.tables) tables[t] = matTableFits(t, type) ? st.tables[t] : [];
+      return submit(d, "define_material_data", {name: q(d, "#mN").value.trim(), was, type, grade: q(d, "#mG").value.trim() || undefined, values: V, texts: st.texts, tables}, after);
+    }, true], ["Cancel"]], {width: 520});
+  const type = () => q(d, "#mT").value;
+  const syms = () => /Rebar|Tendon/.test(type()) ? ["Uniaxial"] : ["Isotropic"];
   const show = () => {
-    const t = q(d, "#mT").value, steel = /steel|rebar|tendon|coldformed|aluminum/i.test(t), conc = t === "Concrete", uni = t === "Rebar" || t === "Tendon";
-    d.querySelectorAll("#mV [data-row]").forEach(x => { const k = x.dataset.row; x.hidden = (k === "FC" && !conc) || (/^F[YU]/.test(k) && !steel) || (k === "U" && uni); });
+    q(d, "#mSym").innerHTML = opts(syms(), syms()[0]);
+    d.querySelectorAll("[data-r=U]").forEach(x => x.hidden = /Rebar|Tendon/.test(type()));
+    q(d, "#mRupF").hidden = type() !== "Concrete"; q(d, "#mTime").disabled = type() !== "Concrete";
+    q(d, "#mNl").disabled = !(pd.material_nonlinear[type()] || {keys: []}).keys.length && !["Aluminum", "ColdFormed", "Masonry", "Other"].includes(type());
+    const e = parseFloat(q(d, "#mE").value), nu = parseFloat(q(d, "#mU").value);
+    q(d, "#mGm").value = isFinite(e) && isFinite(nu) ? +(e / (2 * (1 + nu))).toPrecision(6) : "";
   };
-  q(d, "#mT").onchange = show; show();
+  const density = () => { const mass = q(d, "input[name=mDen]:checked").value === "Mass"; q(d, "#mW").readOnly = mass; q(d, "#mM").readOnly = !mass; };
+  const w2m = () => { const w = parseFloat(q(d, "#mW").value); q(d, "#mM").value = isFinite(w) ? +(w / g).toPrecision(6) : ""; };
+  const m2w = () => { const v = parseFloat(q(d, "#mM").value); if (isFinite(v)) q(d, "#mW").value = +(v * g).toPrecision(8); };
+  const swatch = () => q(d, "#mSw").style.background = matColorCss(q(d, "#mC").value);
+  q(d, "#mT").onchange = show; q(d, "#mE").oninput = show; q(d, "#mU").oninput = show; q(d, "#mC").onchange = swatch;
+  d.querySelectorAll("input[name=mDen]").forEach(r => r.onchange = density); q(d, "#mW").oninput = w2m; q(d, "#mM").oninput = m2w;
+  show(); density(); w2m(); swatch();
+  q(d, "#mNotes").onclick = () => {
+    const n = dialog("Material Notes", `<textarea id="nT" rows="8" style="width:100%;box-sizing:border-box">${esc(row("General").Notes || "")}</textarea>`,
+      [["OK", n => { setRow("General", {...row("General"), Notes: q(n, "#nT").value}); }], ["Cancel"]], {width: 420});
+  };
+  q(d, "#mDes").onclick = () => hmMaterialDesign(type(), st, V, row, setRow, stress);
+  q(d, "#mNl").onclick = () => hmMaterialNonlinear(type(), st, V, row, setRow, pd);
+  q(d, "#mDamp").onclick = () => hmTableForm("Material Damping Properties", "Damping Parameters", [["ModalRatio", "Modal Damping Ratio"], ["VisMass", "Viscous Proportional Damping, Mass Coefficient"], ["VisStiff", "Viscous Proportional Damping, Stiffness Coefficient"]], row, setRow);
+  q(d, "#mTime").onclick = () => hmMaterialTime(st, row, setRow, pd);
   return d;
+}
+// Which of the program's material tables a material type has.
+function matTableFits(t, type) {
+  const own = {Concrete: ["Concrete Data", "Time Dependence", "Hysteresis Parameters - Concrete"], Steel: ["Steel Data"], Rebar: ["Rebar Data"], Tendon: ["Tendon Data"], Aluminum: ["Aluminum Data"], ColdFormed: ["Coldformed Data"], Masonry: ["Masonry Data"], Other: ["Other Data"]};
+  const shared = ["General", "Basic Mechanical Properties", "Damping Parameters", "Acceptance Criteria", "User Stress-Strain Curves", "Hysteresis Parameters - Pivot", "Hysteresis Parameters - Degrading", "Hysteresis Parameters - BRB Hardening"];
+  return shared.includes(t) || (own[type] || []).some(x => t.startsWith(x));
+}
+// A form for one row of one of the program's tables: a label and a box per field.
+function hmTableForm(title, table, fields, row, setRow, extra) {
+  const r = row(table);
+  return dialog(title, `<div class="g2" id="tfV">${fields.map(([k, label, kind]) => `<span>${esc(label)}</span>` + (Array.isArray(kind) ? `<select data-k="${k}">${opts(["", ...kind], r[k] || "")}</select>` : kind === "check" ? `<input data-k="${k}" type="checkbox" ${r[k] === "Yes" ? "checked" : ""}>` : `<input data-k="${k}" ${kind === "text" ? "" : 'type="number" step="any"'} value="${esc(r[k] ?? "")}">`)).join("")}</div>${extra || ""}`,
+    [["OK", t => { const o = {...row(table)}; t.querySelectorAll("#tfV [data-k]").forEach(x => o[x.dataset.k] = x.type === "checkbox" ? (x.checked ? "Yes" : "") : x.value.trim()); setRow(table, o); }], ["Cancel"]], {width: 480});
+}
+function hmMaterialDesign(type, st, V, row, setRow, stress) {
+  const num = (k, label) => `<span>${esc(label)}, ${stress}</span><input data-v="${k}" type="number" step="any" value="${V[k] ?? ""}">`;
+  if (type === "Aluminum") return hmTableForm("Material Property Design Data", "Aluminum Data", [["AlumType", "Aluminum Type", ["Wrought", "Cast-Mold", "Cast-Sand"]], ["Alloy", "Alloy", "text"], ["Fcy", "Compressive Yield Strength, Fcy, " + stress], ["Fty", "Tensile Yield Strength, Fty, " + stress], ["Ftu", "Tensile Ultimate Strength, Ftu, " + stress], ["Fsu", "Shear Ultimate Strength, Fsu, " + stress]], row, setRow);
+  if (type === "Masonry") return hmTableForm("Material Property Design Data", "Masonry Data", [["Fm", "Specified Compressive Strength, f'm, " + stress]], row, setRow);
+  if (type === "Other") return dialog("Material Property Design Data", `<p class="kv">A material of type Other has no design data.</p>`, [["OK"]], {width: 360});
+  const body = type === "Concrete"
+    ? `<div class="g2">${num("FC", "Specified Concrete Compressive Strength, f'c")}<span>Lightweight Concrete</span><input id="dLw" type="checkbox" ${row("Concrete Data").LtWtConc === "Yes" ? "checked" : ""}>
+       <span>Shear Strength Reduction Factor</span><input id="dLf" type="number" step="any" value="${esc(row("Concrete Data").LtWtFact || "")}"></div>`
+    : `<div class="g2">${num("FY", "Minimum Yield Stress, Fy")}${num("FU", "Minimum Tensile Stress, Fu")}${/Steel|Rebar/.test(type) ? num("FYE", "Expected Yield Stress, Fye") + num("FUE", "Expected Tensile Stress, Fue") : ""}</div>`;
+  dialog("Material Property Design Data", body, [["OK", t => {
+    t.querySelectorAll("[data-v]").forEach(x => { const v = parseFloat(x.value); if (isFinite(v)) V[x.dataset.v] = v; else delete V[x.dataset.v]; });
+    if (type === "Concrete") setRow("Concrete Data", {...row("Concrete Data"), LtWtConc: q(t, "#dLw").checked ? "Yes" : "", LtWtFact: q(t, "#dLw").checked ? q(t, "#dLf").value : ""});
+  }], ["Cancel"]], {width: 480});
+}
+function hmMaterialNonlinear(type, st, V, row, setRow, pd) {
+  const nl = pd.material_nonlinear[type] || {keys: [], defaults: {}}, keys = nl.keys.filter(k => k !== "HYSTYPE" && k !== "SSTYPE"), def = nl.defaults || {};
+  const hys = pd.material_texts.HYSTYPE, curves = matCurves[type] || ["Simple", "User"];
+  const strains = keys.filter(k => !/TENSION|COMPRESSION/.test(k)), accept = keys.filter(k => /TENSION|COMPRESSION/.test(k));
+  const box = k => `<span>${esc(matLabels[k] || k)}</span><input data-v="${k}" type="number" step="any" value="${V[k] ?? def[k] ?? ""}">`;
+  const curve = (st.tables["User Stress-Strain Curves"] || []).map(r => [r.Strain, r.Stress]);
+  const other = !nl.keys.length; // Aluminum, ColdFormed, Masonry, Other: their curve and hysteresis are in their own tables
+  const ownTable = {Aluminum: "Aluminum Data", ColdFormed: "Coldformed Data", Masonry: "Masonry Data", Other: "Other Data"}[type];
+  const hysNow = other ? row(ownTable).SSHysType || "" : st.texts.HYSTYPE || def.HYSTYPE || "";
+  const t = dialog("Nonlinear Material Data", `
+    <fieldset><legend>Hysteresis Type and Stress-Strain Curve</legend><div class="g2"><span>Hysteresis Type</span><select id="nH">${opts(hys, hysNow)}</select>
+      ${other ? "" : `<span>Stress-Strain Curve</span><select id="nS">${opts(curves, st.texts.SSTYPE || def.SSTYPE || curves[0])}</select>`}</div></fieldset>
+    ${strains.length ? `<fieldset><legend>Stress-Strain Curve Parameters</legend><div class="g2" id="nV">${strains.map(box).join("")}</div></fieldset>` : ""}
+    ${other ? `<fieldset><legend>Drucker-Prager Parameters</legend><div class="g2"><span>Friction Angle</span><input id="nFa" type="number" step="any" value="${esc(row(ownTable).FAngle || "")}"><span>Dilatational Angle</span><input id="nDa" type="number" step="any" value="${esc(row(ownTable).DAngle || "")}"></div></fieldset>` : ""}
+    <fieldset id="nPivot"><legend>Pivot Hysteresis Parameters</legend><div class="g2">${["Alpha1", "Alpha2", "Beta1", "Beta2", "Eta"].map(k => `<span>${k}</span><input data-p="${k}" type="number" step="any" value="${esc(row("Hysteresis Parameters - Pivot")[k] || "")}">`).join("")}</div></fieldset>
+    <fieldset id="nDeg"><legend>Degrading Hysteresis Parameters</legend><div class="g2" style="grid-template-columns:repeat(4,auto)">${["f0", "f1", "f2", "x1", "x2", "ADWtFac"].map(k => `<span>Tension ${k}</span><input data-g="Tens${k}" type="number" step="any" value="${esc(row("Hysteresis Parameters - Degrading")["Tens" + k] || "")}"><span>Compression ${k}</span><input data-g="Comp${k}" type="number" step="any" value="${esc(row("Hysteresis Parameters - Degrading")["Comp" + k] || "")}">`).join("")}<span>Stiffness weight factor</span><input data-g="StiffWtFac" type="number" step="any" value="${esc(row("Hysteresis Parameters - Degrading").StiffWtFac || "")}"><span>Large/small weight factor</span><input data-g="LrgSmlWtFac" type="number" step="any" value="${esc(row("Hysteresis Parameters - Degrading").LrgSmlWtFac || "")}"></div></fieldset>
+    <fieldset id="nBrb"><legend>BRB Hardening Parameters</legend><div class="g2" style="grid-template-columns:repeat(4,auto)">${["HardFac", "MaxPDef", "AccPDef", "ProAcc"].map(k => `<span>Tension ${k}</span><input data-b="Tens${k}" type="number" step="any" value="${esc(row("Hysteresis Parameters - BRB Hardening")["Tens" + k] || "")}"><span>Compression ${k}</span><input data-b="Comp${k}" type="number" step="any" value="${esc(row("Hysteresis Parameters - BRB Hardening")["Comp" + k] || "")}">`).join("")}</div></fieldset>
+    <fieldset id="nUser"><legend>User Stress-Strain Curve (strain, stress)</legend><textarea id="nCurve" rows="6" style="width:100%;box-sizing:border-box" placeholder="-0.005, -30000&#10;0, 0&#10;0.002, 400000">${esc(curve.map(r => r.join(", ")).join("\n"))}</textarea></fieldset>
+    ${accept.length ? `<fieldset><legend>Acceptance Criteria Strains</legend><div class="g2" id="nA">${accept.map(box).join("")}</div></fieldset>` : ""}`,
+    [["OK", t => {
+      t.querySelectorAll("[data-v]").forEach(x => { const v = parseFloat(x.value); if (isFinite(v)) V[x.dataset.v] = v; else delete V[x.dataset.v]; });
+      if (other) setRow(ownTable, {...row(ownTable), SSHysType: q(t, "#nH").value, FAngle: q(t, "#nFa").value, DAngle: q(t, "#nDa").value});
+      else { st.texts.HYSTYPE = q(t, "#nH").value; st.texts.SSTYPE = q(t, "#nS").value; }
+      const h = q(t, "#nH").value, take = (sel, attr) => { const o = {}; t.querySelectorAll(sel).forEach(x => o[x.dataset[attr]] = x.value.trim()); return o; };
+      setRow("Hysteresis Parameters - Pivot", h === "Pivot" ? take("[data-p]", "p") : {});
+      setRow("Hysteresis Parameters - Degrading", h === "Degrading" ? take("[data-g]", "g") : {});
+      setRow("Hysteresis Parameters - BRB Hardening", h === "BRB Hardening" ? take("[data-b]", "b") : {});
+      const pts = q(t, "#nCurve").value.split(/\n/).map(l => l.split(/[,;\s]+/).filter(Boolean).map(Number)).filter(p => p.length === 2 && p.every(isFinite));
+      st.tables["User Stress-Strain Curves"] = !other && q(t, "#nS").value === "User" ? pts.map((p, i) => ({Point: String(i + 1), Strain: String(p[0]), Stress: String(p[1])})) : [];
+    }], ["Cancel"]], {width: 620});
+  const showH = () => { const h = q(t, "#nH").value; q(t, "#nPivot").hidden = h !== "Pivot"; q(t, "#nDeg").hidden = h !== "Degrading"; q(t, "#nBrb").hidden = h !== "BRB Hardening"; q(t, "#nUser").hidden = other || q(t, "#nS").value !== "User"; };
+  q(t, "#nH").onchange = showH; if (!other) q(t, "#nS").onchange = showH; showH();
+  return t;
+}
+function hmMaterialTime(st, row, setRow, pd) {
+  const c = row("Concrete Data"), now = c.TimeType || (st.texts.TIMEDEPCONCCODE === "CEBFIP90" ? "CEB-FIP 90" : "");
+  const fieldsOf = code => (pd.material_tables["Time Dependence - " + code] || []);
+  const t = dialog("Time Dependent Properties", `
+    <div class="g2"><span>Time Dependence Type</span><select id="tT">${opts(["", ...matTimeCodes], now)}</select></div>
+    <fieldset><legend>Consider</legend><div class="g2">
+      <span>Time Dependent Elasticity, modulus factor</span><span><input id="tE" type="checkbox" ${c.TimeE === "Yes" ? "checked" : ""}> <input id="tEf" type="number" step="any" style="width:90px" value="${esc(c.EFact || "1")}"></span>
+      <span>Creep, creep factor</span><span><input id="tC" type="checkbox" ${c.TimeCreep === "Yes" ? "checked" : ""}> <input id="tCf" type="number" step="any" style="width:90px" value="${esc(c.CreepFact || "1")}"></span>
+      <span>Shrinkage, shrinkage factor</span><span><input id="tS" type="checkbox" ${c.TimeShrink === "Yes" ? "checked" : ""}> <input id="tSf" type="number" step="any" style="width:90px" value="${esc(c.ShrinkFact || "1")}"></span>
+      <span>Creep analysis</span><select id="tCt">${opts(["", "Full Integration", "Dirichlet Series"], c.CreepType || "")}</select>
+      <span>Dirichlet series terms</span><input id="tCn" type="number" step="1" value="${esc(c.CreepTerms || "")}"></div></fieldset>
+    <fieldset><legend>Code Parameters</legend><div class="g2" id="tP"></div></fieldset>`,
+    [["OK", t => {
+      const code = q(t, "#tT").value, yes = id => q(t, id).checked ? "Yes" : "";
+      setRow("Concrete Data", {...row("Concrete Data"), TimeType: code, TimeE: yes("#tE"), EFact: q(t, "#tE").checked ? q(t, "#tEf").value : "", TimeCreep: yes("#tC"), CreepFact: q(t, "#tC").checked ? q(t, "#tCf").value : "",
+        TimeShrink: yes("#tS"), ShrinkFact: q(t, "#tS").checked ? q(t, "#tSf").value : "", CreepType: q(t, "#tCt").value, CreepTerms: q(t, "#tCn").value});
+      st.texts.TIMEDEPCONCCODE = code === "CEB-FIP 90" ? "CEBFIP90" : "";
+      for (const k of matTimeCodes) if (k !== "User") st.tables["Time Dependence - " + k] = [];
+      for (const k of users) st.tables["Time Dependence - " + k] = [];
+      if (code && code !== "User") { const o = {}; t.querySelectorAll("#tP [data-k]").forEach(x => o[x.dataset.k] = x.value.trim()); setRow("Time Dependence - " + code, o); }
+      if (code === "User") t.querySelectorAll("#tP [data-u]").forEach(x => { const f = fieldsOf(x.dataset.u); st.tables["Time Dependence - " + x.dataset.u] = x.value.split(/\n/).map(l => l.split(/[,;]+/).map(v => v.trim())).filter(v => v.some(Boolean)).map(v => Object.fromEntries(f.map((n, i) => [n, v[i] ?? ""]).filter(p => p[1] !== ""))); });
+    }], ["Cancel"]], {width: 540});
+  // The User type: its creep, shrinkage and stiffness curves, one row per line, the fields in the order shown.
+  const users = ["User Creep", "User Shrinkage", "User Stiffness"];
+  const params = () => {
+    const code = q(t, "#tT").value, r = row("Time Dependence - " + code);
+    q(t, "#tP").innerHTML = code === "User" ? users.map(k => { const f = fieldsOf(k); return `<span style="grid-column:1/-1">${esc(k)}: ${esc(f.join(", "))}</span><textarea data-u="${esc(k)}" rows="3" style="grid-column:1/-1;width:100%;box-sizing:border-box">${esc((st.tables["Time Dependence - " + k] || []).map(x => f.map(n => x[n] ?? "").join(", ")).join("\n"))}</textarea>`; }).join("")
+      : code ? fieldsOf(code).map(k => `<span>${esc(k)}</span><input data-k="${k}" value="${esc(r[k] || "")}">`).join("") : `<span class="kv">No time dependence.</span>`;
+  };
+  q(t, "#tT").onchange = params; params();
+  return t;
 }
 
 // ---- Define: frame sections ----

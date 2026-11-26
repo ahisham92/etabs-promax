@@ -26,6 +26,43 @@ public static class PropertyDefs
         ("FYE", "Expected yield stress Fye"), ("FUE", "Expected tensile stress Fue"),
     ];
 
+    /// <summary>The Nonlinear Material Data values the .e2k carries, by its keywords (strains and the acceptance criteria).</summary>
+    public static readonly string[] MaterialNonlinearValues =
+        ["STRAINATFC", "STRAINATULTIMATE", "STRAINATHARDENING", "STRAINATMAXSTRESS", "STRAINATRUPTURE", "FINALSLOPE", "ENERGYDEGFACT",
+         "IOTENSION", "LSTENSION", "CPTENSION", "IOCOMPRESSION", "LSCOMPRESSION", "CPCOMPRESSION"];
+
+    /// <summary>The material's choices the .e2k carries as text, with the values the program offers ([] when any text goes).</summary>
+    public static readonly Dictionary<string, string[]> MaterialTexts = new(StringComparer.Ordinal)
+    {
+        ["HYSTYPE"] = ["Elastic", "Kinematic", "Takeda", "Pivot", "Concrete", "BRB Hardening", "Degrading", "Isotropic"],
+        ["SSTYPE"] = ["Simple", "Mander", "Park", "User", "250ksi", "270ksi"],
+        ["TIMEDEPCONCCODE"] = [],
+    };
+
+    /// <summary>The keywords of the nonlinear line for a material type, in ETABS's order; [] where ETABS writes none.</summary>
+    public static string[] NonlinearKeys(string type) => type switch
+    {
+        "Concrete" => ["HYSTYPE", "ENERGYDEGFACT", "SSTYPE", "STRAINATFC", "STRAINATULTIMATE", "FINALSLOPE", .. Acceptance],
+        "Steel" => ["HYSTYPE", "SSTYPE", "STRAINATHARDENING", "STRAINATMAXSTRESS", "STRAINATRUPTURE", "FINALSLOPE", .. Acceptance],
+        "Rebar" => ["HYSTYPE", "SSTYPE", "STRAINATHARDENING", "STRAINATULTIMATE", "FINALSLOPE", .. Acceptance],
+        "Tendon" => ["HYSTYPE", "SSTYPE", "FINALSLOPE", .. Acceptance],
+        _ => [],
+    };
+
+    private static readonly string[] Acceptance = ["IOTENSION", "LSTENSION", "CPTENSION", "IOCOMPRESSION", "LSCOMPRESSION", "CPCOMPRESSION"];
+
+    /// <summary>ETABS's own values for a new material of the type (its .e2k files, 2026-11-26).</summary>
+    public static Dictionary<string, string> NonlinearDefaults(string type) => type switch
+    {
+        "Concrete" => new() { ["HYSTYPE"] = "Concrete", ["ENERGYDEGFACT"] = "0", ["SSTYPE"] = "Mander", ["STRAINATFC"] = "0.002", ["STRAINATULTIMATE"] = "0.005", ["FINALSLOPE"] = "-0.1",
+            ["IOTENSION"] = "0.01", ["LSTENSION"] = "0.02", ["CPTENSION"] = "0.05", ["IOCOMPRESSION"] = "0.003", ["LSCOMPRESSION"] = "0.006", ["CPCOMPRESSION"] = "0.015" },
+        "Tendon" => new() { ["HYSTYPE"] = "Kinematic", ["SSTYPE"] = "270ksi", ["FINALSLOPE"] = "-0.1",
+            ["IOTENSION"] = "0.015", ["LSTENSION"] = "0.023", ["CPTENSION"] = "0.03", ["IOCOMPRESSION"] = "0.015", ["LSCOMPRESSION"] = "0.023", ["CPCOMPRESSION"] = "0.03" },
+        _ => new() { ["HYSTYPE"] = "Kinematic", ["SSTYPE"] = "Simple", ["STRAINATHARDENING"] = type == "Rebar" ? "0.01" : "0.015", ["STRAINATMAXSTRESS"] = "0.11", ["STRAINATRUPTURE"] = "0.17",
+            ["STRAINATULTIMATE"] = "0.09", ["FINALSLOPE"] = "-0.1",
+            ["IOTENSION"] = "0.01", ["LSTENSION"] = "0.02", ["CPTENSION"] = "0.05", ["IOCOMPRESSION"] = "0.005", ["LSCOMPRESSION"] = "0.01", ["CPCOMPRESSION"] = "0.02" },
+    };
+
     public static readonly ShapeDef[] Shapes =
     [
         new("Concrete Rectangular", ["D", "B"], true, "depth D, width B"),
@@ -54,7 +91,8 @@ public static class PropertyDefs
 
     // ---- materials ----
 
-    public static Material SetMaterial(StructuralModel m, string name, string? was, string type, string? grade, IReadOnlyDictionary<string, double> values)
+    public static Material SetMaterial(StructuralModel m, string name, string? was, string type, string? grade, IReadOnlyDictionary<string, double> values,
+        IReadOnlyDictionary<string, string>? texts = null, IReadOnlyDictionary<string, List<Dictionary<string, string>>>? tables = null)
     {
         type = MaterialTypes.FirstOrDefault(t => t.Equals(type, StringComparison.OrdinalIgnoreCase))
             ?? throw new ArgumentException($"There is no material type '{type}'. Types: {string.Join(", ", MaterialTypes)}.");
@@ -64,8 +102,15 @@ public static class PropertyDefs
         if (was is not null && was != name && m.Materials.Exists(x => x.Name == name)) throw new ArgumentException($"A material is already named '{name}'.");
         foreach (var (k, v) in values)
         {
-            if (!MaterialValues.Any(x => x.Key == k)) throw new ArgumentException($"A material has no value '{k}'. Values: {string.Join(", ", MaterialValues.Select(x => x.Key))}.");
-            if (double.IsNaN(v) || double.IsInfinity(v) || (v < 0 && k != "A")) throw new ArgumentException($"{k} must be a number, 0 or more.");
+            var nonlinear = MaterialNonlinearValues.Contains(k);
+            if (!nonlinear && !MaterialValues.Any(x => x.Key == k)) throw new ArgumentException($"A material has no value '{k}'. Values: {string.Join(", ", MaterialValues.Select(x => x.Key).Concat(MaterialNonlinearValues))}.");
+            if (double.IsNaN(v) || double.IsInfinity(v) || (v < 0 && k != "A" && k != "FINALSLOPE")) throw new ArgumentException($"{k} must be a number, 0 or more.");
+        }
+        texts ??= new Dictionary<string, string>();
+        foreach (var (k, v) in texts)
+        {
+            if (!MaterialTexts.ContainsKey(k)) throw new ArgumentException($"A material has no '{k}'. It has: {string.Join(", ", MaterialTexts.Keys)}.");
+            if (v.Length > 0 && MaterialTexts[k].Length > 0 && !MaterialTexts[k].Contains(v)) throw new ArgumentException($"{k} is one of {string.Join(", ", MaterialTexts[k])}, not '{v}'.");
         }
         double Get(string k, double fallback) => values.TryGetValue(k, out var v) ? v : old?.Number(k) ?? fallback;
         var uniaxial = type is "Rebar" or "Tendon";
@@ -91,12 +136,36 @@ public static class PropertyDefs
             if (fy <= 0 || fu < fy) throw new ArgumentException($"A {type.ToLowerInvariant()} needs Fy above 0 and Fu at least Fy.");
             lines.Add(["FY", Number(fy), "FU", Number(fu), "FYE", Number(Get("FYE", fy * 1.1)), "FUE", Number(Get("FUE", fu * 1.1))]);
         }
+        // Time dependence (Define > Material > Time Dependent Properties): ETABS's .e2k names the CEB-FIP 90 code; the
+        // other codes and every code's values go in its tables (Concrete Data's TimeType and the code's own table).
+        var code = texts.TryGetValue("TIMEDEPCONCCODE", out var tc) ? tc : old?.Get("TIMEDEPCONCCODE");
+        if (type == "Concrete" && !string.IsNullOrEmpty(code)) lines.Add(["TIMEDEPCONCCODE", Quote(code)]);
+        // Nonlinear Material Data: the hysteresis, the stress-strain curve and its strains, and the acceptance criteria,
+        // in the keywords ETABS writes them with (its own .e2k files, 2026-11-26). Written when the material had them or
+        // the form gives them; ETABS fills in its defaults otherwise.
+        if (NonlinearKeys(type) is { Length: > 0 } keys)
+        {
+            var oldLine = old?.Lines.FirstOrDefault(l => l.Count > 0 && l[0] == "HYSTYPE");
+            var given = values.Keys.Any(MaterialNonlinearValues.Contains) || texts.ContainsKey("HYSTYPE") || texts.ContainsKey("SSTYPE");
+            if (oldLine is not null || given)
+            {
+                var defaults = NonlinearDefaults(type);
+                string Val(string k)
+                {
+                    if (k is "HYSTYPE" or "SSTYPE") return Quote(texts.TryGetValue(k, out var t) && t.Length > 0 ? t : old?.Get(k) ?? defaults[k]);
+                    if (values.TryGetValue(k, out var v)) return Number(v);
+                    var at = oldLine?.IndexOf(k) ?? -1;
+                    return at >= 0 && at + 1 < oldLine!.Count ? oldLine[at + 1] : defaults[k];
+                }
+                lines.Add([.. keys.SelectMany(k => new[] { k, Val(k) })]);
+            }
+        }
+        else if (old?.Lines.FirstOrDefault(l => l.Count > 0 && l[0] == "HYSTYPE") is { } keep) lines.Add(keep);
         var mat = old ?? new Material();
         if (old is null) m.Materials.Add(mat);
-        // The lines of the old material that the form does not set (its stress-strain curve, time dependence) stay.
-        var kept = old?.Lines.Where(l => l.Count > 0 && l[0] is "HYSTYPE" or "TIMEDEPCONCCODE" or "SSTYPE").ToList() ?? [];
         mat.Name = name;
-        mat.Lines = [.. lines, .. kept];
+        mat.Lines = lines;
+        if (tables is not null) ProgramTables.SetMaterialTables(mat, tables);
         if (was is not null && was != name)
         {
             foreach (var d in m.FrameSections.Cast<Definition>().Concat(m.ShellSections))

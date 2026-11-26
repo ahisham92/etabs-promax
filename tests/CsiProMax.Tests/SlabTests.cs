@@ -293,6 +293,9 @@ static class SlabTests
                 ["AREA ASSIGNMENTS - AREA SPRINGS"] = ["UniqueName", "Spring Property"],
             };
             foreach (var (k, v) in keys) seen.TryAdd(k, [.. v]);
+            // The fields of the material tables SAFE has, as ETABS 23.2's keys name them (the forms' design, nonlinear and rupture data).
+            foreach (var (k, v) in CsiProMax.Model.ProgramTables.MaterialTables)
+                if (seen.TryGetValue("MATERIAL PROPERTIES - " + k.ToUpperInvariant(), out var have)) have.UnionWith(v);
             seen["FRAME SECTION PROPERTY DEFINITIONS - STEEL I/WIDE FLANGE"].UnionWith(["File Name", "Section in File"]);
             seen["TENDON LOAD ASSIGNMENTS - LOSS OPTIONS"].UnionWith(["Stressing Loss", "Long Term Loss"]);
             seen["STRIP OBJECT CONNECTIVITY"].UnionWith(["Segment End Point", "End Width Left", "End Width Right"]);

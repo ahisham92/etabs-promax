@@ -294,6 +294,25 @@ function Invoke-Register {
     $how
 }
 
+# The review packs kept up to date after every analysis and design (CSI ProMax's watcher, dotnet CsiProMax.dll --packs):
+# started from here at sign-in when CSI ProMax turned it on (packs.txt in %LOCALAPPDATA%\CsiProMax: on|dotnet|folder),
+# none runs yet (its mutex Local\CsiProMax.Packs), and packs-off.txt is not there. It only reads the programs.
+function Invoke-Packs {
+    if (-not $onWindows -or -not $StateRoot) { return }
+    $on = Join-Path $StateRoot 'packs.txt'
+    if (-not (Test-Path -LiteralPath $on) -or (Test-Path -LiteralPath (Join-Path $StateRoot 'packs-off.txt'))) { return }
+    $parts = @(([IO.File]::ReadAllText($on)).Trim() -split '\|')
+    if ($parts.Count -lt 3 -or $parts[0] -ne 'on') { return }
+    $dotnet = $parts[1]; $folder = $parts[2]; $dll = Join-Path $folder 'CsiProMax.dll'
+    if (-not (Test-Path -LiteralPath $dotnet) -or -not (Test-Path -LiteralPath $dll)) { return }
+    $existing = $null
+    try { if ([Threading.Mutex]::TryOpenExisting('Local\CsiProMax.Packs', [ref]$existing)) { $existing.Dispose(); return } } catch { return }
+    try {
+        Start-Process -FilePath $dotnet -ArgumentList ('"' + $dll + '" --packs') -WorkingDirectory $folder -WindowStyle Hidden
+        Note 'The review pack watcher is started (packs beside each model after every run and design).'
+    } catch { Note "The review pack watcher could not start: $($_.Exception.Message)" }
+}
+
 function Invoke-Watch {
     $mutex = $null
     if ($onWindows) {
@@ -304,6 +323,7 @@ function Invoke-Watch {
     $stamp = if ($me -and (Test-Path -LiteralPath $me)) { (Get-Item -LiteralPath $me).LastWriteTimeUtc } else { $null }
     try {
         while ($true) {
+            try { Invoke-Packs } catch { }
             try { Invoke-Look | Out-Null } catch { }
             Start-Sleep -Seconds ([Math]::Max(5, $Every))
             # A newer CSI ProMax replaced this script: the new one takes over.

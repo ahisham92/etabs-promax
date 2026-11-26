@@ -91,6 +91,37 @@ public static class CsiFieldSteps
                 FieldContext.Expect(missing.Count == 0, $"{name} has no {string.Join("; ", missing)} from the Modeler's file");
                 return "all there";
             });
+            // Material Property Data in full: the nonlinear data came by the file's keywords (ETABS) or tables (SAP2000), the
+            // damping and notes by the program's tables (ETABS: put in by CSI ProMax after opening the .e2k).
+            ctx.Step($"{name} opened the Modeler's material damping, notes and nonlinear data", () =>
+            {
+                var tables = link.Tables();
+                string Field(string ending, string field)
+                {
+                    var t = tables.FirstOrDefault(x => x.Name.StartsWith("Material Properties", StringComparison.OrdinalIgnoreCase) && x.Name.EndsWith(ending, StringComparison.OrdinalIgnoreCase))
+                        ?? throw new EtabsException($"{name} has no material table ending '{ending}'");
+                    var read = link.ReadTable(t.Key, null, null);
+                    int Col(string f) => read.Fields.ToList().FindIndex(x => x.Equals(f, StringComparison.OrdinalIgnoreCase));
+                    var (mi, fi) = (Col("Material"), Col(field));
+                    if (fi < 0) throw new EtabsException($"'{t.Name}' has no field {field}: {string.Join(", ", read.Fields)}");
+                    var row = read.Rows.FirstOrDefault(r => mi >= 0 && mi < r.Length && r[mi] == "CPM-S355")
+                        ?? throw new EtabsException($"'{t.Name}' has no row for CPM-S355");
+                    return fi < row.Length ? row[fi] : "";
+                }
+                var wrong = new List<string>();
+                void Want(string ending, string field, Func<string, bool> ok, string what)
+                {
+                    try { var v = Field(ending, field); if (!ok(v)) wrong.Add($"{what}: {field} is '{v}'"); }
+                    catch (EtabsException ex) { wrong.Add($"{what}: {ex.Message}"); }
+                }
+                static bool Near(string v, double x) => double.TryParse(v, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d) && Math.Abs(d - x) < 1e-6;
+                Want("Damping Parameters", "ModalRatio", v => Near(v, 0.02), "damping");
+                Want("General", "Notes", v => v.Contains("CPM field test steel"), "notes");
+                Want("Steel Data", "SHard", v => Near(v, 0.02), "strain at hardening");
+                Want("Acceptance Criteria", "CPTens", v => Near(v, 0.06), "acceptance criteria");
+                FieldContext.Expect(wrong.Count == 0, string.Join(" | ", wrong));
+                return "all there";
+            });
             ctx.Step($"{name} opened the Modeler's groups, links" + (program.Key == CsiProgram.Etabs.Key ? ", diaphragms and pier labels" : ""), () =>
             {
                 string[] Names(string what, Func<dynamic, string[]> read) => (string[])(link.Raw(what, m => read(m)) ?? Array.Empty<string>());

@@ -3,6 +3,7 @@ using System.Reflection;
 using CsiProMax.Assistant.Etabs;
 using CsiProMax.Assistant.Safe;
 using CsiProMax.Assistant.Tools;
+using CsiProMax.Model;
 
 namespace CsiProMax.Assistant;
 
@@ -509,6 +510,19 @@ public sealed class ScratchProgram : IScratchWindow
             Link = link;
             return Path.GetFileName(file);
         }) is null) return false;
+
+        // The Modeler's table data (material damping, notes, time dependence, ...) goes into ETABS through its tables, as
+        // open_model does for a Modeler .e2k, and the model is saved again.
+        if (!build && _program.Key == CsiProgram.Etabs.Key && ModelerTables.ModelerFileBeside(modelFile) is { } cpm
+            && ModelFile.Load(cpm).Materials.Any(x => x.Tables is not null)
+            && ctx.Step("put the Modeler's material data that the .e2k has no keyword for in through ETABS's tables", () => // ETABS itself
+            {
+                var (done, refused) = ModelerTables.Apply(Link, cpm);
+                var answer = Convert.ToInt32(Ask(FileTimeout, "save the scratch model", m => m.File.Save(target),
+                    $"{name} did not finish saving the scratch model within {FileTimeout.TotalMinutes:0} minutes. A message may be waiting in its window."));
+                FieldContext.Expect(refused.Count == 0, "refused: " + string.Join(" | ", refused));
+                return string.Join("; ", done);
+            }) is null && _left) return false;
 
         // The Modeler's model, built in the blank model through the API, and saved: what the program's part then checks.
         if (build && ctx.Step($"build the Modeler's model from {Path.GetFileName(modelFile)} in it through the API", () =>

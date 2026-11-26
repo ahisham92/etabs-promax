@@ -517,8 +517,10 @@ public static class ModelerFieldSteps
 
     private static void Properties(FieldContext ctx, OfflineEtabs modeler)
     {
-        ctx.Tool("define_material_data", """{"name":"CPM-S355","type":"Steel","grade":"S355","values":{"WEIGHTPERVOLUME":77,"E":210000000,"U":0.3,"FY":355000,"FU":510000}}""",
-            _ => FieldContext.Expect(modeler.Model.Materials.Exists(m => m.Name == "CPM-S355" && m.Type == "Steel"), "CPM-S355 is not a steel in the model"));
+        // The whole Material Property Data form (Ahmed 2026-11-26): nonlinear data by the .e2k's keywords, and damping and
+        // notes as rows of the program's own tables, which each program must show after opening the Modeler's file.
+        ctx.Tool("define_material_data", """{"name":"CPM-S355","type":"Steel","grade":"S355","values":{"WEIGHTPERVOLUME":77,"E":210000000,"U":0.3,"FY":355000,"FU":510000,"STRAINATHARDENING":0.02,"CPTENSION":0.06},"texts":{"HYSTYPE":"Kinematic","SSTYPE":"Simple"},"tables":{"Damping Parameters":[{"ModalRatio":"0.02"}],"General":[{"Notes":"CPM field test steel"}]}}""",
+            _ => FieldContext.Expect(modeler.Model.Materials.Exists(m => m.Name == "CPM-S355" && m.Type == "Steel" && m.Tables is not null), "CPM-S355 is not a steel with its table rows in the model"));
         ctx.Refused("define_material_data", """{"name":"CPM-BAD","type":"Steel","values":{"E":200000000,"FY":355000,"FU":100}}""", "Fu at least Fy", "tool define_material_data says no to Fu below Fy");
         ctx.Tool("define_frame_shape", """{"name":"CPM-W","shape":"Steel I/Wide Flange","material":"CPM-S355","dims":{"D":0.5,"B":0.2,"TF":0.016,"TW":0.01},"modifiers":{"I3MOD":0.9}}""", null, "tool define_frame_shape, a steel I with a modifier");
         ctx.Tool("define_frame_shape", """{"name":"CPM-PIPE","shape":"Steel Pipe","material":"CPM-S355","dims":{"D":0.3,"TW":0.01}}""", null, "tool define_frame_shape, a pipe");

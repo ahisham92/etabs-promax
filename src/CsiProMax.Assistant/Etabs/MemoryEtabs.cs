@@ -25,7 +25,10 @@ public sealed class MemoryEtabs : ICsiLink
     public int Saves { get; private set; }
     public int Runs { get; private set; }
 
-    public ModelInfo Info() => new(@"C:\Models\demo.EDB", "23.2.0", "kN", "m", "C", Locked);
+    /// <summary>The model's file as the program would give it (the tests give a real path to see what is written beside it).</summary>
+    public string ModelFile { get; set; } = @"C:\Models\demo.EDB";
+
+    public ModelInfo Info() => new(ModelFile, "23.2.0", "kN", "m", "C", Locked);
     public IReadOnlyList<StoryRow> Stories() => _stories;
     public IReadOnlyList<FrameRow> Frames() => _frames.ToList();
     public IReadOnlyList<AreaRow> Areas() => _areas.ToList();

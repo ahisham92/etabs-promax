@@ -1130,11 +1130,19 @@ public static class CsiTools
         OpenFile(e, $"open {Path.GetFileName(path)}", path);
         e.Refresh();
         var now = e.Info();
-        return new JsonObject
+        var answer = new JsonObject
         {
             ["opened"] = Path.GetFileName(path), ["model"] = now.File, ["closed"] = before.Length > 0 ? Path.GetFileName(before) : "an untitled model",
             ["units"] = $"{now.Force}, {now.Length}", ["locked"] = now.Locked,
         };
+        // A Modeler .e2k: what its forms hold beyond the .e2k's keywords is in the .cpm beside it, and goes in by the tables.
+        if (e.Program.Key == CsiProgram.Etabs.Key && Path.GetExtension(path).Equals(".e2k", StringComparison.OrdinalIgnoreCase) && ModelerTables.ModelerFileBeside(path) is { } cpm)
+        {
+            var (done, refused) = ModelerTables.Apply(e, cpm);
+            if (done.Count > 0) answer["modeler_tables"] = new JsonArray(done.Select(x => (JsonNode)x).ToArray());
+            if (refused.Count > 0) answer["modeler_tables_refused"] = new JsonArray(refused.Select(x => (JsonNode)x).ToArray());
+        }
+        return answer;
     }
 
     // ---- ETABS's stories and area sections ----
