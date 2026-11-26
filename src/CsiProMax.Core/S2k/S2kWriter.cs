@@ -266,6 +266,22 @@ public static class S2kWriter
             }
         }
 
+        // Define > Generalized Displacements, kept as ETABS's table rows: SAP2000 has a table for each type. A point is
+        // named label@story (a label alone is the top story's).
+        var genTrans = new List<IReadOnlyList<(string, string)>>(); var genRot = new List<IReadOnlyList<(string, string)>>();
+        foreach (var r in m.DefinitionTables?.GetValueOrDefault("Generalized Displacement Definitions") ?? [])
+        {
+            var gat = r.GetValueOrDefault("PointName") ?? "";
+            var (label, story) = gat.Contains('@') ? (gat[..gat.IndexOf('@')], gat[(gat.IndexOf('@') + 1)..]) : (gat, m.Stories[^1].Name);
+            var si = m.StoryIndex(story);
+            if (si < 0 || !points.TryGetValue(label, out var gp)) { notes.Add($"Generalized displacement {r.GetValueOrDefault("Name")}: there is no point {gat}; that row was left out."); continue; }
+            var rot = (r.GetValueOrDefault("Type") ?? "").StartsWith("Rot", StringComparison.OrdinalIgnoreCase);
+            var pre = rot ? "Rot" : "Trans";
+            (rot ? genRot : genTrans).Add(Row(("GenDispl", r.GetValueOrDefault("Name") ?? ""), ("Joint", Joint(Physical.At(m, gp, si))),
+                ("U1SF", r.GetValueOrDefault(pre + "U1SF", "0")), ("U2SF", r.GetValueOrDefault(pre + "U2SF", "0")), ("U3SF", r.GetValueOrDefault(pre + "U3SF", "0")),
+                ("R1SF", r.GetValueOrDefault(pre + "R1SF", "0")), ("R2SF", r.GetValueOrDefault(pre + "R2SF", "0")), ("R3SF", r.GetValueOrDefault(pre + "R3SF", "0"))));
+        }
+
         Add(tables, "JOINT COORDINATES", jointRows);
         Add(tables, "CONNECTIVITY - FRAME", connect);
         Add(tables, "CONNECTIVITY - AREA", areaConnect);
@@ -286,6 +302,8 @@ public static class S2kWriter
         Add(tables, "AREA ADDED MASS ASSIGNMENTS", areaMass);
         Add(tables, "AREA LOCAL AXES ASSIGNMENTS 1 - TYPICAL", areaAxes);
         Add(tables, "JOINT ADDED MASS ASSIGNMENTS", jointMass);
+        Add(tables, "GENERALIZED DISPLACEMENT DEFINITIONS 1 - TRANSLATIONAL", genTrans);
+        Add(tables, "GENERALIZED DISPLACEMENT DEFINITIONS 2 - ROTATIONAL", genRot);
 
         // Joint constraints: the floors' diaphragms, and the model's own constraints of every type.
         var constraintDefs = new Dictionary<string, List<IReadOnlyList<(string, string)>>>();
@@ -586,6 +604,7 @@ public static class S2kWriter
     {
         var names = new HashSet<string>(StringComparer.Ordinal);
         var rows = new List<IReadOnlyList<(string, string)>>();
+        var layers = new List<IReadOnlyList<(string, string)>>();
         foreach (var s in m.ShellSections)
         {
             if (s.Thickness is not { } t || t <= 0 || s.Material.Length == 0)
@@ -594,10 +613,17 @@ public static class S2kWriter
                     notes.Add($"Slab or wall section {s.Name} has no plain SAP2000 equal here (a deck, say) and was left out.");
                 continue;
             }
-            var modelling = (s.Get("MODELINGTYPE") ?? "ShellThin").ToLowerInvariant() switch
+            // A layered section's layers, kept as ETABS's table rows, go into SAP2000's layer table, and the section is
+            // SAP2000's layered shell.
+            var layerRows = (m.DefinitionTables?.GetValueOrDefault(s.IsWall ? "Wall Property Definitions - Layers" : "Slab Property Definitions - Layers") ?? []).Where(r => r.GetValueOrDefault("Name") == s.Name).ToList();
+            var modelling = layerRows.Count > 0 ? "Shell-Layered/Nonlinear" : (s.Get("MODELINGTYPE") ?? "ShellThin").ToLowerInvariant() switch
             {
                 "membrane" => "Membrane", "shellthick" => "Shell-Thick", "layered" => "Shell-Thin", _ => "Shell-Thin",
             };
+            foreach (var r in layerRows)
+                layers.Add(Row(("Section", s.Name), ("LayerName", r.GetValueOrDefault("LayerName", "")), ("Distance", r.GetValueOrDefault("Distance", "0")), ("Thickness", r.GetValueOrDefault("Thickness", "0")),
+                    ("Type", r.GetValueOrDefault("ModelType", "Shell")), ("NumIntPts", r.GetValueOrDefault("NumIntPts", "2")), ("Material", r.GetValueOrDefault("Material", s.Material)), ("MatAngle", r.GetValueOrDefault("MatAng", "0")),
+                    ("MatBehave", r.GetValueOrDefault("Behavior", "Directional")), ("S11Opt", r.GetValueOrDefault("S11", "Nonlinear")), ("S22Opt", r.GetValueOrDefault("S22", "Nonlinear")), ("S12Opt", r.GetValueOrDefault("S12", "Linear"))));
             names.Add(s.Name);
             var sm = PropertyDefs.Modifiers(s.Lines, PropertyDefs.ShellModifiers);
             rows.Add(Row(("Section", s.Name), ("Material", s.Material), ("MatAngle", "0"), ("AreaType", "Shell"), ("Type", modelling), ("DrillDOF", "Yes"),
@@ -605,6 +631,7 @@ public static class S2kWriter
                 ("F11Mod", N(sm["F11MOD"])), ("F22Mod", N(sm["F22MOD"])), ("F12Mod", N(sm["F12MOD"])), ("M11Mod", N(sm["M11MOD"])), ("M22Mod", N(sm["M22MOD"])), ("M12Mod", N(sm["M12MOD"])), ("V13Mod", N(sm["V13MOD"])), ("V23Mod", N(sm["V23MOD"])), ("MMod", N(sm["MMOD"])), ("WMod", N(sm["WMOD"]))));
         }
         Add(tables, "AREA SECTION PROPERTIES", rows);
+        Add(tables, "AREA SECTION PROPERTY LAYERS", layers);
         return names;
     }
 
