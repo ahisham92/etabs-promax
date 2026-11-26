@@ -5,8 +5,8 @@ namespace CsiProMax.Assistant.Etabs;
 /// some definitions (a user coefficient seismic load, ASCE 7-16 wind, a user response spectrum, a named mass source:
 /// read from its ETABSv1.dll and its "Table and Field Keys.xml", 0.4.17 field test), and its tables take them.
 /// </summary>
-public static class EditableTables
-{
+public static class EditableTables
+{
     /// <summary>
     /// True when every error of an import log is a field the program left at its default while it read the record
     /// ("Error reading field TL; field ignored and default values will be used", ETABS 23 KDS table, 0.4.55 and main
@@ -187,6 +187,19 @@ public static class EditableTables
             if (Convert.ToBoolean(m.GetModelIsLocked()) && Convert.ToInt32(m.SetModelIsLocked(false)) != 0)
                 throw new EtabsException($"{program}'s model is locked (it holds analysis results) and did not unlock, so it cannot {what}.");
             Dictionary<string, string> before = Codes(m);
+            // Each other pattern's code that the API can set, as its Get call gives it now, to give back after the import.
+            var held = new Dictionary<string, Tools.SapLateral.Held>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (other, had) in before)
+            {
+                if (other.Equals(pattern, StringComparison.OrdinalIgnoreCase) || had.Length == 0) continue;
+                string seismic = "";
+                try { if (Convert.ToInt32(m.LoadPatterns.GetAutoSeismicCode(other, ref seismic)) != 0) seismic = ""; } catch { seismic = ""; }
+                try
+                {
+                    if (Tools.SapLateral.Hold(e, other, (seismic ?? "").Length > 0 ? CsiProMax.Lateral.LateralCodes.Seismic : CsiProMax.Lateral.LateralCodes.Wind, had) is { } h) held[other] = h;
+                }
+                catch (Exception ex) when (ex is EtabsException or Tools.ToolInputException) { /* not held: a change to it is said after the import */ }
+            }
             double self = 0;
             try { m.LoadPatterns.GetSelfWTMultiplier(pattern, ref self); } catch { /* a new pattern weighs nothing */ }
 
@@ -284,16 +297,31 @@ public static class EditableTables
                 log ??= "";
                 Dictionary<string, string> after = Codes(m);
                 if (applied != 0 && fatal == 0 && errors == 0 && log.Trim().Length == 0)
-                    throw new EtabsException($"{program} did not run the import of {pattern}'s {code} (it answered {applied}, with no log), so it cannot {what}. Patterns after: {after.Count} of {before.Count}; " +
+                    throw new EtabsException($"{program} did not run the import of {pattern}'s {code} (it answered {applied}, with no log), so it cannot {what}. {NoImportAfterText} Patterns after: {after.Count} of {before.Count}; " +
                         $"locked now: {Locked(m)}; the windows of {program}: {OpenWindows(e.Program)}; thread {Thread.CurrentThread.GetApartmentState()}; steps: {string.Join("; ", trace)}.");
                 var changed = before.Where(kv => kv.Key != pattern && (!after.TryGetValue(kv.Key, out var now) || !SameCode(now, kv.Value, empty: true))).Select(kv => kv.Key).ToList();
+                // A pattern whose code was given by the API and that the import took off (field test with 0.4.56's fix:
+                // ASCE 7-22 on CPM-AUTO-S took CPM-ELFY's ASCE 7-16) gets it back by its own Set call, with the values
+                // its Get call gave before the import.
+                var given2 = new List<string>();
+                foreach (var lost in changed.Where(p => after.ContainsKey(p) && held.ContainsKey(p)).ToList())
+                    try { Tools.SapLateral.Reapply(e, held[lost]); given2.Add(lost); } catch (EtabsException) { /* said below */ }
+                if (given2.Count > 0)
+                {
+                    after = Codes(m);
+                    changed = before.Where(kv => kv.Key != pattern && (!after.TryGetValue(kv.Key, out var now) || !SameCode(now, kv.Value, empty: true))).Select(kv => kv.Key).ToList();
+                }
                 if (changed.Count > 0)
                     throw new EtabsException($"{program} changed or lost the load patterns {string.Join(", ", changed)} when it was given {pattern}'s {code}: do not save the model; close it without saving and open it again. " +
                         $"The import answered {applied} ({fatal} fatal, {errors} errors, {warnings} warnings); patterns before {before.Count}, after {after.Count} ({Cut(string.Join(", ", after.Select(kv => kv.Value.Length == 0 ? kv.Key : $"{kv.Key}={kv.Value}")), 400)}); " +
                         $"sent: the patterns' table ({rows.Count} rows: {Cut(string.Join(", ", rows.Select(r => r[auto].Length == 0 ? r[pat] : $"{r[pat]}={r[auto]}")), 400)}) and {string.Join(", ", tables.Select(t => $"'{t.Key}' ({t.Count})"))}. Its import log: {LogCut(log)}");
                 if (applied != 0 || fatal > 0)
                     throw new EtabsException($"{program} did not apply {pattern}'s {code} ({fatal} fatal, {errors} errors), so it cannot {what}. Its import log: {LogCut(log)}" + About(m, codeKey, new List<IReadOnlyDictionary<string, string>> { given }));
+                // GetAutoSeismicCode / GetAutoWindCode answer "" for a code the API has no name for (IS 1893:2016, KDS,
+                // IRC 6-2017, Live Load: field test with 0.4.56's fix): then the patterns' table says which code it has.
                 if (!after.TryGetValue(pattern, out string? took) || !SameCode(took, code))
+                    if (string.IsNullOrEmpty(took) && TableCode(m, pattern) is { } listed) took = listed;
+                if (!SameCode(took, code))
                     throw new EtabsException($"{program} took the rows but {pattern}'s code is '{took}', not {code}, so it cannot {what}. Its import log: {LogCut(log)}");
                 return log;
             }
@@ -303,6 +331,34 @@ public static class EditableTables
                 throw;
             }
         })!;
+    }
+
+    /// <summary>
+    /// Why SAP2000 26 answers 1 to ApplyEditedTables with no log and loses every load pattern: its process has opened an
+    /// .s2k (File > Open or File > Import of a text file) since it started. Then it refuses every table import, even after
+    /// the .sdb is opened again, and a new SAP2000 opening the same .sdb takes the same rows (experiment N on Ahmed's PC,
+    /// 2026-11-26: a tiny two-pattern .s2k was enough; the 20 table codes of the 0.4.54 field test).
+    /// </summary>
+    public const string NoImportAfterText = "SAP2000 26 does this in a session that has opened an .s2k text file (File > Open or File > Import): it then refuses every table import until it is restarted. " +
+        "Save the model as an .sdb, close SAP2000, open the .sdb in a new SAP2000 and try again.";
+
+    /// <summary>A pattern's AutoLoad as "Load Pattern Definitions" lists it; null when it is not listed or the table is not read.</summary>
+    private static string? TableCode(dynamic m, string pattern)
+    {
+        try
+        {
+            int version = 0, records = 0; string[] fields = [], data = [];
+            ShowEveryPattern(m);
+            if (Convert.ToInt32(m.DatabaseTables.GetTableForEditingArray("Load Pattern Definitions", "", ref version, ref fields, ref records, ref data)) != 0) return null;
+            fields ??= []; data ??= [];
+            int pat = Array.FindIndex(fields, f => f.Equals("LoadPat", StringComparison.OrdinalIgnoreCase)), auto = Array.FindIndex(fields, f => f.Equals("AutoLoad", StringComparison.OrdinalIgnoreCase));
+            if (pat < 0 || auto < 0) return null;
+            for (var r = 0; r < records; r++)
+                if (string.Equals(data.ElementAtOrDefault(r * fields.Length + pat), pattern, StringComparison.OrdinalIgnoreCase))
+                    return data.ElementAtOrDefault(r * fields.Length + auto) ?? "";
+            return null;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return null; }
     }
 
     /// <summary>Every load pattern with its auto lateral code ("" for none), by the API.</summary>
