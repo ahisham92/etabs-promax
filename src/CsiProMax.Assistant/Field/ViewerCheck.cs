@@ -194,10 +194,10 @@ public static class ViewerCheck
           rightClick(p, q[0], q[1], false); await wait(120);
           const d = [...document.querySelectorAll(".dlg")].pop();
           if (!d || !/Joint Information/.test(d.textContent)) return {fail: "a right click on the support opened no Joint Information"};
-          // ETABS's Object Information (Ahmed 2026-11-26): Object ID, the programs' own tabs as property grids, OK and Cancel.
+          // The programs' Object Information (Ahmed 2026-11-26): Object ID, the programs' own tabs as property grids, OK and Cancel.
           const bad = objInfoProblem(d); if (bad) return {fail: "Joint Information: " + bad};
           if (!d.querySelector('tr[data-n="Restraints"]')) return {fail: "Joint Information has no Restraints row in Assignments"};
-          return {ok: `support ${s.name} selected (${said}); its right click opens Joint Information in ETABS's layout`};
+          return {ok: `support ${s.name} selected (${said}); its right click opens Joint Information in the program's own layout`};
         });
         await step("selection: right click on an object opens its information, with a Loads tab holding its loads", async () => {
           const p = await view3d(), vis = visOf(p), shown = frames.concat(areas).filter(o => vis[o.id]);
