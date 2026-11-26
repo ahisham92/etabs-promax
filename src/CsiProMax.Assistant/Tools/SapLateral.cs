@@ -17,7 +17,45 @@ internal static class SapLateral
     public static IReadOnlyList<string> Setters(string kind, string code)
     {
         var map = kind == CsiProMax.Lateral.LateralCodes.Wind ? Wind : Seismic;
-        return map.TryGetValue(Norm(code), out var methods) ? methods : [];
+        var key = Norm(code);
+        // The name GetAutoSeismicCode and the AutoLoad field give, where it is not the table's (0.4.44 field test).
+        if (Aliases.TryGetValue(key, out var alias)) key = alias;
+        return map.TryGetValue(key, out var methods) ? methods : [];
+    }
+
+    private static readonly Dictionary<string, string> Aliases = new() { ["usercoeff"] = "usercoefficient" };
+
+    /// <summary>A pattern's code as its Get call gives it, to give it back by the Set call after an import that took it off.</summary>
+    public sealed record Held(string Pattern, string Kind, string Code, string Method, System.Text.Json.Nodes.JsonObject Values);
+
+    /// <summary>
+    /// Reads what a pattern's code holds by the code's Get call, or null when the code has no Set call in this API.
+    /// SAP2000 26 lists a pattern whose code was given by the API in "Load Pattern Definitions" but gives no row for it in
+    /// the code's table (0.4.46 field test: CPM-WX's ASCE 7-16 wind), so an import of the patterns' table cannot send
+    /// that code back: it is taken off for the import and given back by its Set call with these values.
+    /// </summary>
+    public static Held? Hold(ICsiLink e, string pattern, string kind, string code)
+    {
+        var holder = kind == CsiProMax.Lateral.LateralCodes.Wind ? "LoadPatterns.AutoWind." : "LoadPatterns.AutoSeismic.";
+        foreach (var method in Setters(kind, code))
+        {
+            var had = CsiTools.Try(e, $"read {pattern}'s {code}", holder + "Get" + method[3..], CsiTools.D(("Name", pattern)));
+            if (had?["values"] is System.Text.Json.Nodes.JsonObject values) return new Held(pattern, kind, code, method, (System.Text.Json.Nodes.JsonObject)values.DeepClone());
+        }
+        return null;
+    }
+
+    /// <summary>Gives a held pattern its code back by the Set call, with every value its Get call gave; throws when refused.</summary>
+    public static void Reapply(ICsiLink e, Held held)
+    {
+        var holder = held.Kind == CsiProMax.Lateral.LateralCodes.Wind ? "LoadPatterns.AutoWind." : "LoadPatterns.AutoSeismic.";
+        var path = holder + held.Method;
+        var parameters = (ParameterInfo[])e.Raw("read " + path, m => ApiCall.Parameters((object)m, path))!;
+        var had = new System.Text.Json.Nodes.JsonObject { ["values"] = held.Values.DeepClone() };
+        // Only the exact values it had: never another choice in its place.
+        var args = Variants(parameters, held.Pattern, [[true, false]], had, new Dictionary<string, object?>(), held.Method).First();
+        if (CsiTools.Try(e, $"give {held.Pattern} its {held.Code} back", path, args) is null)
+            throw new EtabsException($"{e.Program.Name} refused to give {held.Pattern} its {held.Code} back after the import.");
     }
 
     private static string Norm(string s) => new(s.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
@@ -215,7 +253,13 @@ internal static class SapLateral
             var args = Arguments(parameters, pattern, dirs, method);
             if (had?["values"] is System.Text.Json.Nodes.JsonObject now)
                 foreach (var p in parameters)
+                {
                     if (p.Name is { } n && now[n] is System.Text.Json.Nodes.JsonValue v && Convert(v, p) is { } value) args[n] = value;
+                    // The directions a pattern has (nDir), as its Get call gives them.
+                    else if (p.Name is { } n2 && now[n2] is System.Text.Json.Nodes.JsonArray list && (p.ParameterType.IsByRef ? p.ParameterType.GetElementType() : p.ParameterType) == typeof(bool[])
+                        && list.All(x => x is System.Text.Json.Nodes.JsonValue b && b.TryGetValue<bool>(out _)) && list.Count > 0)
+                        args[n2] = list.Select(x => x!.GetValue<bool>()).ToArray();
+                }
             foreach (var (k, v) in given) args[k] = v;
             yield return args;
             foreach (var p in parameters.Where(p => p.Name is { } n && !given.ContainsKey(n) && n is not ("Name" or "DirFlag") && (p.ParameterType.IsByRef ? p.ParameterType.GetElementType() : p.ParameterType) == typeof(int)))

@@ -318,6 +318,18 @@ static class CsiToolsTests
             var none = Run(CsiProgram.Sap2000, "set_lateral_load", """{"name":"CPM-AUTO-S","kind":"seismic","code":"None"}""", link);
             Check(api.Log.Contains("seismic none CPM-AUTO-S") && none["set_by"]?.ToString() == "LoadPatterns.AutoSeismic.SetNone", "the code is taken off by SetNone: " + none.ToJsonString());
             Equal(1, api.PatternTableWrites, "SAP2000's patterns' table was written once, with the code's table (KDS)");
+            // Another pattern with a code given by the API (0.4.46 field test: CPM-WX's ASCE 7-16, with no row in its table):
+            // it is read by its Get call, taken off for the import and given back by its Set call with the same values.
+            const string other = "CPM-HELD";
+            Run(CsiProgram.Sap2000, "set_lateral_load", $$$"""{"name":"{{{other}}}","kind":"seismic","code":"IBC2006","values":{"R":"7"}}""", link);
+            api.Tables["Load Pattern Definitions - Auto Seismic - IBC2006"].Rows.Clear();
+            if (!api.Table.Any(r => r[0] == other)) api.Table.Add([other, "Quake", "0"]);
+            api.ListCodes = true;
+            var parkedSet = Run(CsiProgram.Sap2000, "set_lateral_load", """{"name":"CPM-AUTO-S","kind":"seismic","code":"KDS 41 17 00-2019","values":{"R":"5"}}""", link);
+            api.ListCodes = false;
+            Equal("KDS 41 17 00-2019", api.SeismicCodes["CPM-AUTO-S"], "the pattern has the code, with another pattern's API code in the model");
+            Equal("IBC2006", api.SeismicCodes.GetValueOrDefault(other, ""), $"{other} has its IBC2006 back: {parkedSet.ToJsonString()} | {string.Join(" | ", api.Log.TakeLast(6))}");
+            Check(api.Log.Last(l => l.StartsWith("IBC2006 " + other, StringComparison.Ordinal)).Contains("R 7", StringComparison.Ordinal) && api.Log.Count(l => l.StartsWith("IBC2006 " + other, StringComparison.Ordinal)) == 2, "given back once more, with the R it had: " + string.Join(" | ", api.Log.TakeLast(6)));
             // SAP2000 losing patterns in that import: the model is opened again from the file saved just before.
             api.WipeOnApply = 1;
             string wiped = "";
@@ -613,6 +625,7 @@ public sealed class FakeApi
     public bool EditingEmpty;
     /// <summary>The next applies that refuse and leave the patterns' table empty, as SAP2000 26 did (0.4.22 field test).</summary>
     public int WipeOnApply;
+    public bool ListCodes;
     /// <summary>The patterns' table's name field: "Name" in ETABS and SAFE, "LoadPat" in SAP2000.</summary>
     public string PatternName = "Name";
     /// <summary>Patterns whose SetSelfWTMultiplier is refused.</summary>
@@ -827,6 +840,8 @@ public sealed class FakeApi
         private const string Patterns = "Load Pattern Definitions";
         public int GetTableForEditingArray(string TableKey, string GroupName, ref int TableVersion, ref string[] FieldsKeysIncluded, ref int NumberRecords, ref string[] TableData)
         {
+            // SAP2000 26 lists each pattern with its type and its code (the probe on Ahmed's PC, 2026-11-26).
+            if (TableKey == Patterns && o.ListCodes) { FieldsKeysIncluded = ["LoadPat", "DesignType", "SelfWtMult", "AutoLoad"]; NumberRecords = o.Table.Count; TableData = o.Table.SelectMany(r => new[] { r[0], r[1], r[2], o.SeismicCodes.GetValueOrDefault(r[0], "") }).ToArray(); return 0; }
             if (TableKey == Patterns) { FieldsKeysIncluded = [o.PatternName, "Type", "SelfWtMult"]; NumberRecords = o.EditingEmpty ? 0 : o.Table.Count; TableData = o.EditingEmpty ? [] : o.Table.SelectMany(r => r).ToArray(); return 0; }
             if (!o.Tables.TryGetValue(TableKey, out var t)) return 1;
             FieldsKeysIncluded = t.Fields; NumberRecords = t.Rows.Count; TableData = t.Rows.SelectMany(r => r).ToArray(); return 0;

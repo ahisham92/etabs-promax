@@ -135,7 +135,7 @@ public static class EditableTables
     /// wipes of the 0.4.22 and 0.4.34 field tests). So every row it lists goes back as read, each coded one with its
     /// code's rows as read, and the patterns and their codes are compared before and after. Gives the import log.
     /// </summary>
-    public static string PutAutoLoad(ICsiLink e, string pattern, string designType, string code, string codeKey, IReadOnlyDictionary<string, string> codeRow, string what)
+    public static string PutAutoLoad(ICsiLink e, string pattern, string designType, string code, string codeKey, IReadOnlyDictionary<string, string> codeRow, string what, IReadOnlyCollection<string>? parkable = null, List<string>? parked = null)
     {
         var program = e.Program.Name;
         if (e.Program.Key != CsiProgram.Sap2000.Key) throw new InvalidOperationException("PutAutoLoad is for SAP2000's tables.");
@@ -174,7 +174,7 @@ public static class EditableTables
             foreach (var other in rows.Where(r => r != row && r[auto].Trim() is { Length: > 0 } c && !c.Equals("None", StringComparison.OrdinalIgnoreCase)))
             {
                 var marker = other[type].Contains("Wind", StringComparison.OrdinalIgnoreCase) ? "Auto Wind - " : "Auto Seismic - ";
-                var key = (tableKeys.FirstOrDefault(k => k.StartsWith(marker, StringComparison.OrdinalIgnoreCase) && Norm(k[marker.Length..]) == Norm(other[auto])) ?? tableKeys.FirstOrDefault(k => k.StartsWith(marker, StringComparison.OrdinalIgnoreCase) && SameCode(k[marker.Length..], other[auto])))
+                var key = (tableKeys.FirstOrDefault(k => After(k, marker) is { } c && Norm(c) == Norm(other[auto])) ?? tableKeys.FirstOrDefault(k => After(k, marker) is { } c && SameCode(c, other[auto])))
                     ?? throw new EtabsException($"{program}'s pattern {other[pat]} has the code {other[auto]}, whose table is not found, so its rows could not go back with the patterns' table: {what} is not done, to keep {other[pat]} as it is.");
                 if (!tables.Any(t => t.Key == key))
                 {
@@ -188,7 +188,11 @@ public static class EditableTables
                 var t = tables.First(x => x.Key == key);
                 var lp = Array.FindIndex(t.Fields, x => x.Equals("LoadPat", StringComparison.OrdinalIgnoreCase));
                 if (lp < 0 || !Enumerable.Range(0, t.Count).Any(r => string.Equals(t.Data.ElementAtOrDefault(r * t.Fields.Length + lp), other[pat], StringComparison.OrdinalIgnoreCase)))
+                {
+                    // A code the caller holds (read by its Get call, given back by its Set call after): taken off for the import.
+                    if (parkable is not null && parked is not null && parkable.Contains(other[pat], StringComparer.OrdinalIgnoreCase)) { other[auto] = ""; parked.Add(other[pat]); continue; }
                     throw new EtabsException($"{program}'s pattern {other[pat]} has the code {other[auto]}, but its table '{key}' gives no row for it, so it could not go back with the patterns' table: {what} is not done, to keep {other[pat]} as it is. Nothing was imported.");
+                }
             }
             tables.RemoveAll(t => t.Count == 0);
 
@@ -231,7 +235,7 @@ public static class EditableTables
                 int applied = Convert.ToInt32(m.DatabaseTables.ApplyEditedTables(true, ref fatal, ref errors, ref warnings, ref info, ref log));
                 log ??= "";
                 Dictionary<string, string> after = Codes(m);
-                var changed = before.Where(kv => kv.Key != pattern && (!after.TryGetValue(kv.Key, out var now) || !SameCode(now, kv.Value, empty: true))).Select(kv => kv.Key).ToList();
+                var changed = before.Where(kv => kv.Key != pattern && (!after.TryGetValue(kv.Key, out var now) || !SameCode(now, parked?.Contains(kv.Key, StringComparer.OrdinalIgnoreCase) == true ? "" : kv.Value, empty: true))).Select(kv => kv.Key).ToList();
                 if (changed.Count > 0)
                     throw new EtabsException($"{program} changed or lost the load patterns {string.Join(", ", changed)} when it was given {pattern}'s {code}: do not save the model; close it without saving and open it again. Its import log: {Cut(log)}");
                 if (applied != 0 || fatal > 0)
@@ -272,6 +276,13 @@ public static class EditableTables
     /// and the AutoLoad field give ("USER COEFF", "ASCE7-16"): the same letters and digits, or one the start of the other
     /// (0.4.44 field test: CPM-ELFX's USER COEFF found no table). <paramref name="empty"/>: two empty names are one.
     /// </summary>
+    /// <summary>The code in a table's key after "Auto Seismic - " or "Auto Wind - " (SAP2000 26: no "Load Pattern Definitions - " in front).</summary>
+    private static string? After(string key, string marker)
+    {
+        var at = key.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        return at < 0 ? null : key[(at + marker.Length)..];
+    }
+
     internal static bool SameCode(string? a, string? b, bool empty = false)
     {
         var (x, y) = (Norm(a ?? ""), Norm(b ?? ""));
