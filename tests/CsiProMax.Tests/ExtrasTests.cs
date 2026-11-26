@@ -80,11 +80,14 @@ static class ExtrasTests
             Run(link, "define_moving_case", new { name = "MOVE", assignments = new object[] { new { @class = "VC", lanes = new[] { "L1" } } } });
             var t = Tables(S2kWriter.Write(link.Model, "a.s2k").Text);
             Check(t["LANE DEFINITION DATA"].Count == 2 && t["LANE DEFINITION DATA"][0]["Width"] == "3", "the lane along its two frames");
-            Check(t["VEHICLES 1 - GENERAL"].Single(r => r["Vehicle"] == "HL")["VehType"] == "HL-93K", "the standard truck by its own name");
-            Check(t["VEHICLES 2 - LOADS"].Count == 2 && t["VEHICLES 2 - LOADS"][1]["MinDist"] == "4.3", "the general truck's axles");
-            Check(t["VEHICLE CLASSES"].Count == 2, "the class's two vehicles");
+            Check(t["VEHICLES 1 - STANDARD VEHICLES"].Single(r => r["VehName"] == "HL")["Type"] == "HL-93K", "the standard truck by its own name");
+            Check(t["VEHICLES 2 - GENERAL VEHICLES 1 - GENERAL"].Single()["NumInter"] == "1", "the general truck, one axle behind the first");
+            var loads = t["VEHICLES 3 - GENERAL VEHICLES 2 - LOADS"];
+            Check(loads.Count == 3 && loads[0]["LoadType"] == "Leading Load" && loads[1]["InterMinD"] == "4.3" && loads[1]["InterAxle"] == "145" && loads[2]["LoadType"] == "Trailing Load", "the general truck's axles");
+            Check(t["VEHICLES 4 - VEHICLE CLASSES"].Count == 2, "the class's two vehicles");
             Check(t["LOAD CASE DEFINITIONS"].Single(r => r["Case"] == "MOVE")["Type"] == "LinMoving", "the moving load case");
-            Check(t["CASE - MOVING LOAD 1 - LANE ASSIGNMENTS"].Single()["MaxLoaded"] == "1", "its lane assignment");
+            Check(t["CASE - MOVING LOAD 1 - LANE ASSIGNMENTS"].Single() is var asg && asg["MaxLoaded"] == "1" && asg["NumLanes"] == "1" && !asg.ContainsKey("Lane"), "its lane assignment");
+            Check(t["CASE - MOVING LOAD 2 - LANES LOADED"].Single()["Lane"] == "L1", "the lane it loads");
             Refused(link, "define_vehicle", new { name = "X" }, "axles");
             Refused(link, "define_vehicle", new { name = "X", standard = "Lorry" }, "standard vehicle");
             Refused(link, "define_lane", new { name = "X", frames = new[] { "NOPE@NOPE" }, width = 3 }, "no frame");

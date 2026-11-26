@@ -80,7 +80,7 @@ public static class CsiFieldSteps
                 {
                     var found = tables.Where(t => words.All(w => t.Name.Contains(w, StringComparison.OrdinalIgnoreCase)) && t.Name.Contains("ASSIGN", StringComparison.OrdinalIgnoreCase)).ToList();
                     var rows = 0;
-                    foreach (var t in found) { try { rows += link.ReadTable(t.Key, null, null).Rows.Count; } catch (EtabsException) { } }
+                    foreach (var t in found) { try { rows += link.ReadTable(t.Key, null, null).Rows.Count; } catch (Exception) { /* the API's 0 stands */ } }
                     if (rows == 0) missing.Add($"{what} (no rows in {(found.Count == 0 ? "any table named like it" : string.Join(", ", found.Select(t => t.Name)))})");
                 }
                 FieldContext.Expect(missing.Count == 0, $"{name} has no {string.Join("; ", missing)} from the Modeler's file");
@@ -126,6 +126,10 @@ public static class CsiFieldSteps
                         last = call;
                         hinges += call.Where(kv => kv.Key != "return").Select(kv => kv.Value is JsonArray a ? a.Count : 0).DefaultIfEmpty(0).Max();
                     }
+                    // SAP2000 26's GetHingeAssigns answers 0 even for hinges its own model has (0.4.40): its "01 - Overview"
+                    // table lists them, so that is read too.
+                    if (hinges == 0 && link.Tables().FirstOrDefault(t => t.Name.StartsWith("Frame Hinge Assigns 01", StringComparison.OrdinalIgnoreCase)) is { } overview)
+                        try { hinges = link.ReadTable(overview.Key, null, null).Rows.Count; } catch (EtabsException) { }
                     // The .s2k carries the concrete beam's two flexural hinges; the .e2k all three.
                     var written = program.Key == CsiProgram.Sap2000.Key ? 2 : 3;
                     FieldContext.Expect(hinges >= written, $"{name} has {hinges} hinges from the Modeler's file, {written} were written (a frame's answer: {last?.ToJsonString()}; its hinge tables: {HingeTables()})");
