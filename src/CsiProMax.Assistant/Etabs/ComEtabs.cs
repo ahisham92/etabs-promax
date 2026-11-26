@@ -198,6 +198,21 @@ public sealed class ComEtabs : ICsiLink, IDisposable
         }
     }
 
+    /// <summary>The process of the window this link started for itself (the scratch window), once it is known.</summary>
+    internal int? Known { get; set; }
+
+    /// <summary>The program's process: the window this link was started from, else the only one open (null: none or several).</summary>
+    public int? ProcessId
+    {
+        get
+        {
+            if ((_pid ?? Known) is int pid) return Running(pid) ? pid : null;
+            var all = Process.GetProcessesByName(Program.ProcessName);
+            try { return all.Length == 1 ? all[0].Id : null; }
+            finally { foreach (var p in all) p.Dispose(); }
+        }
+    }
+
     private static bool Running(int pid)
     {
         try { using var p = Process.GetProcessById(pid); return !p.HasExited; }
