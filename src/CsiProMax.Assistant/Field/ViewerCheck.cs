@@ -171,6 +171,18 @@ public static class ViewerCheck
           if (p.R) p.M = matrices(p, p.R.w, p.R.h);
           return p;
         };
+        const objInfoProblem = d => {
+          const tabs = [...d.querySelectorAll(".itabs button")].map(b => b.textContent), buttons = [...d.querySelectorAll(".df button")].map(b => b.textContent).join(", ");
+          const first = (program === "sap2000" ? "Location" : "Geometry") + ", Assignments, Loads";
+          if (tabs.slice(0, 3).join(", ") !== first) return `its tabs are ${tabs.join(", ")}, not ${first} as in ${program.toUpperCase()}`;
+          if (window.cpmLive ? tabs.length !== 3 : tabs.slice(3).some(t => !["Results", "Design", "Comments"].includes(t))) return "it has tabs the program does not: " + tabs.join(", ");
+          if (buttons !== "OK, Cancel") return "its buttons are " + buttons + ", not OK, Cancel";
+          if (!d.querySelector("fieldset.oid") || !/Label/.test(d.querySelector("fieldset.oid").textContent)) return "it has no Object ID box";
+          if (d.querySelectorAll("table.pg").length < 3) return "its tabs are not property grids";
+          const row = d.querySelector("table.pg tr[data-n]"); row.click();
+          if (!d.querySelector(".pgdesc b") || d.querySelector(".pgdesc b").textContent !== row.dataset.n) return "a click on a property does not show its description underneath";
+          return "";
+        };
         await step("selection: a left-to-right window round a support selects the support joint", async () => {
           if (!supports.length) return {skipped: "skipped: the model has no supports"};
           const p = await view3d(), s = supports.find(x => supportShown(p, x) && p.M.to(x.p)[3]);
@@ -182,10 +194,10 @@ public static class ViewerCheck
           rightClick(p, q[0], q[1], false); await wait(120);
           const d = [...document.querySelectorAll(".dlg")].pop();
           if (!d || !/Joint Information/.test(d.textContent)) return {fail: "a right click on the support opened no Joint Information"};
-          // The same window as a member's (Ahmed 2026-11-26): the same tabs and buttons.
-          const tabs = [...d.querySelectorAll(".itabs button")].map(b => b.textContent.replace(/ \(.*\)$/, "")).join(", "), buttons = [...d.querySelectorAll(".df button")].map(b => b.textContent).join(", ");
-          if (tabs !== "Geometry, Assignments, Loads, Results, Design, Comments" || buttons !== "Show in Tables, Close") return {fail: `Joint Information has tabs ${tabs} and buttons ${buttons}, not a member's`};
-          return {ok: `support ${s.name} selected (${said}); its right click opens Joint Information with the member's tabs`};
+          // ETABS's Object Information (Ahmed 2026-11-26): Object ID, the programs' own tabs as property grids, OK and Cancel.
+          const bad = objInfoProblem(d); if (bad) return {fail: "Joint Information: " + bad};
+          if (!d.querySelector('tr[data-n="Restraints"]')) return {fail: "Joint Information has no Restraints row in Assignments"};
+          return {ok: `support ${s.name} selected (${said}); its right click opens Joint Information in ETABS's layout`};
         });
         await step("selection: right click on an object opens its information, with a Loads tab holding its loads", async () => {
           const p = await view3d(), vis = visOf(p), shown = frames.concat(areas).filter(o => vis[o.id]);
@@ -196,15 +208,14 @@ public static class ViewerCheck
           rightClick(p, q[0], q[1], false); await wait(150);
           let d = [...document.querySelectorAll(".dlg")].pop();
           if (!d || !/Information/.test(d.textContent)) return {fail: `a right click on ${o.name} opened no information window (${JSON.stringify(pickAt(p, q[0], q[1]))} at ${q.slice(0, 2).map(Math.round)}; ${document.querySelectorAll(".dlg").length} windows)`};
-          if (!d.querySelector('.itabs [data-page="lds"]')) return {fail: "the information window has no Loads tab"};
-          const otabs = [...d.querySelectorAll(".itabs button")].map(b => b.textContent.replace(/ \(.*\)$/, "")).join(", ");
-          if (otabs !== "Geometry, Assignments, Loads, Results, Design, Comments") return {fail: "the information window's tabs are " + otabs};
+          const bad = objInfoProblem(d); if (bad) return {fail: `${o.name}'s information window: ${bad}`};
           closeDialogs();
           const loaded = shown.find(x => loadRowsOf(x).length);
           if (!loaded) return {ok: "information window with a Loads tab opened; no object in this pack has loads assigned"};
           infoWindow(loaded.id); await wait(120); d = [...document.querySelectorAll(".dlg")].pop();
-          const n = loadRowsOf(loaded).reduce((k, x) => k + x.rows.length, 0), tab = d.querySelector('.itabs [data-page="lds"]').textContent;
-          if (!tab.includes("(" + n + ")")) return {fail: `${loaded.name} has ${n} load rows but its Loads tab says ${tab}`};
+          const n = loadRowsOf(loaded).reduce((k, x) => k + x.rows.length, 0), page = d.querySelectorAll(".ipage")[2], heads = [...page.querySelectorAll("tr.pgh")].map(h => h.dataset.r);
+          const shownLoads = [...page.querySelectorAll("tr[data-p]")].filter(tr => heads.includes(tr.dataset.p)).length, tab = `Loads (${shownLoads} under ${heads.length} load patterns)`;
+          if (shownLoads !== n) return {fail: `${loaded.name} has ${n} load rows but its Loads tab lists ${shownLoads}`};
           // A second right click replaces the window, never a second one beside it (Ahmed 2026-11-26).
           const other = shown.find(x => x !== loaded) || loaded, oq = p.M.to([0, 1, 2].map(i => other.type === "f" ? (other.a[i] + other.b[i]) / 2 : other.pts.reduce((t, c) => t + c[i], 0) / other.pts.length));
           rightClick(p, oq[0], oq[1], false); await wait(120); if (supports.length) { jointInfo(supports[0].name); await wait(80); }
