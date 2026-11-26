@@ -28,7 +28,8 @@ public static class S2kWriter
     public static Result WriteFile(StructuralModel m, string path)
     {
         var result = Write(m, Path.GetFileName(path));
-        File.WriteAllText(path, result.Text, new UTF8Encoding(false));
+        // The whole model goes with the file, after the tables, so the Modeler opens it again with nothing lost.
+        File.WriteAllText(path, EmbeddedModel.Attach(result.Text, m), new UTF8Encoding(false));
         return result;
     }
 
