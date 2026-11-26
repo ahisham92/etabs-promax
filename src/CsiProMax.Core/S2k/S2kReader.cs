@@ -210,6 +210,18 @@ public static partial class S2kReader
         Combos(m, Use, notes);
         Loads(m, Use, joints, frameAt, areaAt, Where, storyNames, notes);
 
+        // SAP2000's hinge definitions go into the Modeler's own hinge forms (DefineTables.SapHinges).
+        foreach (var name in t.Keys.Where(k => !known.Contains(k) && DefineTables.IsSap(k)).ToList())
+        {
+            known.Add(name);
+            var full = DefineTables.SapHinges.Keys.First(k => k.Equals(name, StringComparison.OrdinalIgnoreCase));
+            var fields = DefineTables.SapHinges[full];
+            var rows = t[name].Select(r => r.Where(kv => fields.Contains(kv.Key, StringComparer.OrdinalIgnoreCase) && kv.Value.Length > 0)
+                .ToDictionary(kv => fields.First(f => f.Equals(kv.Key, StringComparison.OrdinalIgnoreCase)), kv => kv.Value, StringComparer.Ordinal)).Where(r => r.Count > 0).ToList();
+            if (rows.Count == 0) continue;
+            m.DefinitionTables ??= new(StringComparer.OrdinalIgnoreCase);
+            m.DefinitionTables[full] = rows;
+        }
         // A table the Modeler has no form for is kept as the file has it, and goes back into the .s2k.
         foreach (var name in t.Keys.Where(k => !known.Contains(k)).OrderBy(k => k, StringComparer.Ordinal))
             if (keep) KeptTables.Keep(m, "sap2000", name, t[name]);

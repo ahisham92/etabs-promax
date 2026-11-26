@@ -36,7 +36,7 @@ public static class ModelerTables
             catch (EtabsException ex) { refused.Add($"{table}: {ex.Message}"); }
         }
         // The definitions the .e2k has no keyword for (generalized displacements, hinges, layers, ...), by name.
-        foreach (var (table, rows) in (model.DefinitionTables ?? []).OrderBy(t => t.Key, StringComparer.Ordinal))
+        foreach (var (table, rows) in (model.DefinitionTables ?? []).Where(t => ProgramOptions.HasDefinitionTable(ProgramOptions.Etabs, t.Key)).OrderBy(t => t.Key, StringComparer.Ordinal))
         {
             try
             {
@@ -62,7 +62,7 @@ public static class ModelerTables
             catch (EtabsException) { }
             return unique[summary] = map;
         }
-        foreach (var (table, rows) in AssignTables.Rows(model).OrderBy(t => t.Key, StringComparer.Ordinal))
+        foreach (var (table, rows) in AssignTables.Rows(model).Where(t => ProgramOptions.HasAssignTable(ProgramOptions.Etabs, t.Key)).OrderBy(t => t.Key, StringComparer.Ordinal))
         {
             try
             {
@@ -88,7 +88,7 @@ public static class ModelerTables
     public static bool HasRows(string cpm, CsiProgram program)
     {
         var model = ModelFile.Load(cpm);
-        return AssignTables.Rows(model).Count > 0 || (program.Key == CsiProgram.Etabs.Key && (model.Materials.Any(x => x.Tables is not null) || model.DefinitionTables is { Count: > 0 }))
+        return AssignTables.Rows(model).Count > 0 || (program.Key == CsiProgram.Etabs.Key && (model.Materials.Any(x => x.Tables is not null) || (model.DefinitionTables ?? []).Keys.Any(k => ProgramOptions.HasDefinitionTable(ProgramOptions.Etabs, k))))
             || (program.Key != CsiProgram.Sap2000.Key && SlabDefs.SlabRebars(model).Count > 0);
     }
 

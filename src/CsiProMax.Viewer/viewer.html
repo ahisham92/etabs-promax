@@ -4253,15 +4253,16 @@ const asgTables = {
   Frame: [["Additional Mass...", "Additional Mass", ES, "Line Mass..."], ["Output Stations...", "Output Stations", ES], ["Auto Mesh Options...", "Frame Auto Mesh Options", ES, "Automatic Frame Mesh..."], ["Floor Meshing Option...", "Frame Floor Meshing Option"],
     ["Tension/Compression Limits...", "Tension and Compression Limits", ES], ["Material Overwrites...", "Material Overwrites", ES, "Material Property Overwrites..."], ["Column Splice Overwrites...", "Column Splice Overwrites"],
     ["Moment Frame Beam Connection Type...", "Moment Frame Beam Connection Type"], ["Nonprismatic Parameters...", "Advanced Nonprismatic Section Parameters"], ["Floor Cracking...", "Floor Cracking"], ["Rebar Ratio for Creep Analysis...", "Rebar Ratio For Creep Analysis"]],
-  Area: [["Local Axes...", "Local Axes", ES], ["Insertion Point...", "Insertion Point", ES, "Joint Offsets..."], ["Additional Mass...", "Additional Mass", ES, "Area Mass..."], ["Edge Releases...", "Edge Releases"], ["Auto Edge Constraints...", "Auto Edge Constraints", ES, "Edge Constraints..."],
+  Area: [["Local Axes...", "Local Axes", ES], ["Insertion Point...", "Insertion Point", ES, "Joint Offsets..."], ["Additional Mass...", "Additional Mass", ES, "Area Mass..."], ["Edge Releases...", "Edge Releases"], ["Edge Releases...", "@Area Edge Release Assignments", ["sap2000"]], ["Auto Edge Constraints...", "Auto Edge Constraints", ES, "Edge Constraints..."],
     ["Floor Auto Mesh Options...", "Floor Auto Mesh Options", ES, "Automatic Area Mesh..."], ["Wall Auto Mesh Options...", "Wall Auto Mesh Options", ES, "Automatic Area Mesh (vertical areas)..."], ["Thickness Overwrites...", "Thickness Overwrites", ES, "Area Thickness Overwrites..."], ["Material Overwrites...", "Material Overwrites", ES, "Material Property Overwrites..."],
     ["Slab Rib Locations...", "Slab Rib Locations"], ["Floor Cracking...", "Floor Cracking"], ["Rebar Ratio for Creep Analysis...", "Wall Rebar Ratio for Creep Analysis"]],
-  Joint: [["Additional Mass...", "Additional Mass", ES, "Masses..."], ["Panel Zone...", "Panel Zone"], ["Floor Meshing Option...", "Floor Meshing Option"]],
+>>>>>>> origin/main
 };
-function hmTableItems(kind, off) { return asgTables[kind].map(([label, t, progs, sap]) => only(progs || ["etabs"], [program === "sap2000" && sap || label, "m:at:" + kind + " Assignments - " + t, "", off])); }
+function hmTableItems(kind, off) { return asgTables[kind].map(([label, t, progs, sap]) => only(progs || ["etabs"], [program === "sap2000" && sap || label, "m:at:" + (t[0] === "@" ? t.slice(1) : kind + " Assignments - " + t), "", off])); }
 // Fields that take Yes or No, and fields with the programs' own choices.
 const asgYesNo = /^(Include|Consider|AtIntJoints|AtIntersect|AtBeams|AtWalls|AtGrids|Submesh|Restraints|Transform|IncludeInMesh|Mirror|R(InShear|DirForce|OutShear|Bending|Twisting)$|ShearL|MomentL|ShearR|MomentR|AutoMesh)/;
 const asgChoices = {StationOpt: ["Min Stations", "Max Spacing"], SpliceOpt: ["Story Default", "No Splice", "Splice at Height"], MeshOption: ["Default", "Auto Cookie Cut", "Auto Rectangular", "General Divide Tool", "No Auto Mesh", "Mesh N1 x N2"],
+  ReleasedDOF: ["In-plane", "Direct", "Out-of-plane", "Moment", "Twisting"], PZFrom: ["Elastic", "User", "Link"], PZConnect: ["Beams to Other Objects", "Braces to Other Objects"], AxesFrom: ["Column", "User"],
   CoordSys: ["Local", "GLOBAL"], RebarOpt: ["From Section", "User"], RebarOption: ["From Section", "User"], Constraint: ["None", "Auto", "Auto (Cookie Cut)"]};
 async function hmAssignTable(table) {
   if (table === "opening") {
@@ -4270,7 +4271,7 @@ async function hmAssignTable(table) {
     return dialog("Assign Shell Opening", `<label><input id="opY" type="checkbox" ${(pd.objects[0] || {}).opening ? "checked" : ""}> Opening (the area is a hole, with no section)</label>`,
       [["OK", d => submit(d, "assign_shell_data", {objects: names, opening: q(d, "#opY").checked}), true], ["Cancel"]], {width: 380});
   }
-  const kind = table.split(" ")[0], names = kind === "Joint" ? hmJoints() : hmSelected(kind === "Frame" ? "f" : "a");
+  const kind = /^Area /.test(table) ? "Area" : table.split(" ")[0], names = kind === "Joint" ? hmJoints() : hmSelected(kind === "Frame" ? "f" : "a");
   if (!names.length) return hmSay(kind === "Joint" ? "Select the joints first." : kind === "Frame" ? "Select the frames first." : "Select the floors or walls first.", true);
   const pd = (await hmRun("property_definitions", {objects: names.slice(0, 1)}, true)).result; if (!pd) return;
   const def = pd.assign_tables[table]; if (!def) return hmSay("There is no table " + table + ".", true);
@@ -4278,7 +4279,7 @@ async function hmAssignTable(table) {
   let rows = (now[table] || []).map(r => ({...r})); if (!rows.length) rows = [{}];
   const tool = kind === "Joint" ? "assign_joint_data" : kind === "Frame" ? "assign_frame_data" : "assign_shell_data";
   const cell = (k, v) => asgYesNo.test(k) ? `<input data-k="${k}" type="checkbox" ${v === "Yes" ? "checked" : ""}>` : asgChoices[k] ? `<select data-k="${k}">${opts(["", ...asgChoices[k]], v || "")}</select>` : `<input data-k="${k}" value="${esc(v ?? "")}">`;
-  const title = "Assign " + ({Frame: "Frame", Area: "Shell", Joint: "Joint"})[kind] + " " + table.split(" - ").slice(1).join(" - ");
+  const title = table.includes(" - ") ? "Assign " + ({Frame: "Frame", Area: "Shell", Joint: "Joint"})[kind] + " " + table.split(" - ").slice(1).join(" - ") : ({"Area Edge Release Assignments": "Assign Area Edge Releases", "Joint Panel Zone Assignments": "Assign Joint Panel Zone"})[table] || table;
   const d = dialog(title, `<div id="atB"></div>${def.many ? `<button id="atAdd" style="margin-top:6px">Add</button>` : ""}<p class="kv">${names.length} selected. The values are as the program's own table holds them, in the model's units; empty values take the table off.</p>`,
     [["OK", d => { read(); return submit(d, tool, {objects: names, tables: {[table]: rows.filter(r => Object.values(r).some(v => v !== ""))}}); }, true], ["Cancel"]], {width: def.many ? 760 : 460});
   const read = () => d.querySelectorAll("#atB [data-r]").forEach(tr => tr.querySelectorAll("[data-k]").forEach(x => rows[+tr.dataset.r][x.dataset.k] = x.type === "checkbox" ? (x.checked ? "Yes" : "No") : x.value.trim()));
@@ -4309,23 +4310,36 @@ const hingeKinds = ["Axial P", "Moment M2", "Moment M3", "Shear V2", "Shear V3",
   "Parametric - Concrete PM2M3", "Parametric - Steel PM2M3", "Fiber PM3", "Fiber PM2M3", "Force Controlled - Axial P", "Force Controlled - Moment M2", "Force Controlled - Moment M3",
   "Force Controlled - Shear V2", "Force Controlled - Shear V3", "Force Controlled - Torsion T", "Force Controlled - Interacting M2M3", "Force Controlled - Interacting PM2",
   "Force Controlled - Interacting PM3", "Force Controlled - Interacting PM2M3"];
+// SAP2000's own hinge forms, each the tables its Hinge Property Data form fills (SAP2000 26's table names).
+const sapHingeNames = {"01": "Overview", "02": "Noninteracting - Deform Control - General", "03": "Noninteracting - Deform Control - Force-Deform", "04": "Noninteracting - Deform Control - Acceptance",
+  "05": "Noninteracting - Force Control", "06": "Interacting - Deform Control - General", "07": "Interacting - Deform Control - Fs and Angs", "08": "Interacting - Deform Control - Force-Deform",
+  "09": "Interacting - Deform Control - Acceptance", "10": "Interacting - Force Control", "11": "Interacting - Interaction Surface - General", "12": "Interacting - Interaction Surface - Data",
+  "13": "Fiber - General", "14": "Fiber - Fiber Data", "15": "Hysteresis Parameters - Concrete", "16": "Hysteresis Parameters - BRB Hardening", "17": "Hysteresis Parameters - Degrading",
+  "18a": "Conc Parametric PM2M3 - Factors", "18b": "Conc Parametric PM2M3 - Yield Surface", "18c": "Conc Parametric PM2M3 - Force Deformation", "18d": "Conc Parametric PM2M3 - Cyclic Degradation", "18e": "Conc Parametric PM2M3 - Deformation Capacity",
+  "19a": "Steel Parametric PM2M3 - Factors", "19b": "Steel Parametric PM2M3 - Yield Surface", "19c": "Steel Parametric PM2M3 - Force Deformation", "19d": "Steel Parametric PM2M3 - Cyclic Degradation", "19e": "Steel Parametric PM2M3 - Deformation Capacity"};
+const sapHingeTable = n => "Hinges Def " + n + " - " + sapHingeNames[n];
+const sapHinges = [["Deformation Controlled (P, V, T, M)", ["01", "02", "03", "04"]], ["Force Controlled", ["01", "05"]], ["Interacting (P-M2-M3, M2-M3)", ["01", "06", "07", "08", "09"]],
+  ["Interacting, Force Controlled", ["01", "10"]], ["Interaction Surface", ["01", "11", "12"]], ["Fiber (P-M2-M3)", ["01", "13", "14"]], ["Hysteresis Parameters", ["01", "15", "16", "17"]],
+  ["Concrete Parametric P-M2-M3", ["01", "18a", "18b", "18c", "18d", "18e"]], ["Steel Parametric P-M2-M3", ["01", "19a", "19b", "19c", "19d", "19e"]]];
 function hmDefineTableItems() {
   return [...defTables.map(([label, tables, progs, sap]) => only(progs || ["etabs"], [program === "sap2000" && sap || label, "m:dt:" + tables.join("|")])),
-    only(["etabs"], ["Hinge Definitions", hingeKinds.map(k => [k + "...", "m:dt:Hinge Definitions - " + k])])];
+    only(["etabs"], ["Hinge Definitions", hingeKinds.map(k => [k + "...", "m:dt:Hinge Definitions - " + k])]),
+    only(["sap2000"], ["Hinge Properties", sapHinges.map(([label, nums]) => [label + "...", "m:dt:" + nums.map(n => sapHingeTable(n)).join("|")])])];
 }
 async function hmDefineTable(spec) {
   const tables = spec.split("|"), dd = (await hmRun("definition_data", {}, true)).result; if (!dd) return;
   const defs = tables.map(t => dd.tables[t]); if (defs.some(x => !x)) return hmSay("The " + progLabel(program) + " model has no " + tables[0] + ".", true);
-  const names = [...new Set(tables.flatMap(t => dd.tables[t].rows.map(r => r.Name)))];
+  const key = t => dd.tables[t].fields[0][0];
+  const names = [...new Set(tables.flatMap(t => dd.tables[t].rows.map(r => r[key(t)])))];
   let name = names[0] || "", rows = {};
-  const load = n => { rows = Object.fromEntries(tables.map(t => [t, dd.tables[t].rows.filter(r => r.Name === n).map(r => ({...r}))])); for (const t of tables) if (!rows[t].length) rows[t] = [{}]; };
+  const load = n => { rows = Object.fromEntries(tables.map(t => [t, dd.tables[t].rows.filter(r => r[key(t)] === n).map(r => ({...r}))])); for (const t of tables) if (!rows[t].length) rows[t] = [{}]; };
   load(name);
   const cell = (k, v) => asgYesNo.test(k) || /\?$/.test(k) ? `<input data-k="${k}" type="checkbox" ${v === "Yes" ? "checked" : ""}>` : `<input data-k="${k}" value="${esc(v ?? "")}">`;
-  const d = dialog(tables[0].replace(/ Definitions?$/, ""), `<div class="g2"><span>Name</span><span><select id="dtN">${opts(names, name)}</select> <input id="dtNew" placeholder="new name" style="width:120px"> <button id="dtGo">New</button></span></div>
+  const d = dialog(/^Hinges Def/.test(tables[0]) ? "Hinge Property Data" : tables[0].replace(/ Definitions?$/, ""), `<div class="g2"><span>Name</span><span><select id="dtN">${opts(names, name)}</select> <input id="dtNew" placeholder="new name" style="width:120px"> <button id="dtGo">New</button></span></div>
     <div id="dtB"></div><p class="kv">The fields are as the program's own table holds them, in the model's units. Leave a row empty to drop it.</p>`,
-    [["OK", d => { read(); return dtSave(d, 0); }, true], ["Delete", d => name && submit(d, "define_table_rows", {table: tables[0], name, rows: []})], ["Cancel"]], {width: 820});
+    [["OK", d => { read(); return dtSave(d, 0); }, true], ["Delete", async d => { if (!name) return; for (const t of tables.slice(0, -1)) { const j = await hmRun("define_table_rows", {table: t, name, rows: []}); if (!j.ok) return formError(d, j.error); } return submit(d, "define_table_rows", {table: tables[tables.length - 1], name, rows: []}); }], ["Cancel"]], {width: 820});
   const read = () => d.querySelectorAll("#dtB [data-t]").forEach(tr => tr.querySelectorAll("[data-k]").forEach(x => rows[tables[+tr.dataset.t]][+tr.dataset.r][x.dataset.k] = x.type === "checkbox" ? (x.checked ? "Yes" : "No") : x.value.trim()));
-  const fieldsOf = t => dd.tables[t].fields.filter(f => f[0] !== "Name");
+  const fieldsOf = t => dd.tables[t].fields.slice(1);
   const paint = () => {
     q(d, "#dtB").innerHTML = tables.map((t, ti) => `<fieldset><legend>${esc(t)}</legend><div class="scroll" style="max-height:40vh"><table class="list hmgrid"><tr>${fieldsOf(t).map(f => `<th>${esc(f[1])}</th>`).join("")}<th></th></tr>${rows[t].map((r, i) =>
       `<tr data-t="${ti}" data-r="${i}">${fieldsOf(t).map(f => `<td>${cell(f[0], r[f[0]])}</td>`).join("")}<td><button data-del="${ti}:${i}">Delete</button></td></tr>`).join("")}</table></div><button data-add="${ti}">Add Row</button></fieldset>`).join("");

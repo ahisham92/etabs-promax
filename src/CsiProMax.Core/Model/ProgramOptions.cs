@@ -44,10 +44,13 @@ public static class ProgramOptions
     /// .s2k or its API carries; SAFE none of them.</summary>
     public static bool HasAssignTable(string target, string table) => target switch
     {
-        Sap2000 => SapAssignTables.Contains(table),
+        Sap2000 => SapAssignTables.Contains(table) || SapOwnAssignTables.Contains(table),
         Safe => false,
-        _ => true,
+        _ => !SapOwnAssignTables.Contains(table),
     };
+
+    /// <summary>SAP2000's own assignment tables (no ETABS table has their shape).</summary>
+    public static readonly string[] SapOwnAssignTables = ["Area Edge Release Assignments", "Joint Panel Zone Assignments"];
 
     public static readonly string[] SapAssignTables =
     [
@@ -55,16 +58,16 @@ public static class ProgramOptions
         "Frame Assignments - Tension and Compression Limits", "Frame Assignments - Material Overwrites",
         "Area Assignments - Local Axes", "Area Assignments - Insertion Point", "Area Assignments - Additional Mass", "Area Assignments - Auto Edge Constraints",
         "Area Assignments - Floor Auto Mesh Options", "Area Assignments - Wall Auto Mesh Options", "Area Assignments - Thickness Overwrites", "Area Assignments - Material Overwrites",
-        "Joint Assignments - Additional Mass",
+        "Joint Assignments - Additional Mass", "Area Assignments - Edge Releases", "Joint Assignments - Panel Zone",
     ];
 
     /// <summary>The definition tables (<see cref="DefineTables"/>) each program takes: generalized displacements and layered
     /// shells go into SAP2000's own tables too; the rest are ETABS's own; SAFE has none of them.</summary>
     public static bool HasDefinitionTable(string target, string table) => target switch
     {
-        Etabs => true,
-        // SAP2000's hinge definitions are tables of another shape ("Hinges Def ..."), not written from ETABS's yet.
-        Sap2000 => table.EndsWith("- Layers", StringComparison.OrdinalIgnoreCase) || table.Equals("Generalized Displacement Definitions", StringComparison.OrdinalIgnoreCase),
+        Etabs => !DefineTables.IsSap(table),
+        // SAP2000's hinges are its own tables ("Hinges Def ..."); the layers and generalized displacements are written into its tables.
+        Sap2000 => DefineTables.IsSap(table) || table.EndsWith("- Layers", StringComparison.OrdinalIgnoreCase) || table.Equals("Generalized Displacement Definitions", StringComparison.OrdinalIgnoreCase),
         _ => false,
     };
 }

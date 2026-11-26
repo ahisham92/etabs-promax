@@ -41,11 +41,15 @@ public static class AssignTables
         ["Area Assignments - Wall Rebar Ratio for Creep Analysis"] = ("area", [("RebarOption", "Vertical Rebar Option"), ("UserRatio", "User Ratio")]),
         ["Joint Assignments - Additional Mass"] = ("joint", [("MassXY", "Mass X and Y"), ("MassZ", "MassZ"), ("MMIX", "MMI X"), ("MMIY", "MMI Y"), ("MMIZ", "MMI Z")]),
         ["Joint Assignments - Floor Meshing Option"] = ("joint", [("IncludeInMesh", "IncludeInMesh")]),
+        // SAP2000's own (SAP2000 26.3 export, 2026-11-26): an edge release is a row per released direction of an edge.
+        ["Area Edge Release Assignments"] = ("area", [("Edge", "Edge"), ("ReleasedDOF", "Released DOF"), ("StiffTrans", "Translational Stiffness"), ("StiffRot", "Rotational Stiffness")]),
+        ["Joint Panel Zone Assignments"] = ("joint", [("PZFrom", "Properties"), ("DoublerPl", "Doubler Plate Thickness"), ("MajorStiff", "Spring Major Stiffness"), ("MinorStiff", "Spring Minor Stiffness"),
+            ("PZLink", "Link Property"), ("PZConnect", "Connectivity"), ("AxesFrom", "Local Axes From"), ("PZAxesAngle", "Local Axis Angle")]),
         ["Joint Assignments - Panel Zone"] = ("joint", [("PanelZone", "Panel Zone Assignment"), ("GenPanelZone", "Generated PanelZone")]),
     };
 
     /// <summary>The tables with a row per edge or corner of the object, not one row.</summary>
-    public static readonly string[] ManyRows = ["Area Assignments - Edge Releases", "Area Assignments - Thickness Overwrites", "Area Assignments - Slab Rib Locations"];
+    public static readonly string[] ManyRows = ["Area Edge Release Assignments", "Area Assignments - Edge Releases", "Area Assignments - Thickness Overwrites", "Area Assignments - Slab Rib Locations"];
 
     /// <summary>The kind of objects an assignment is for.</summary>
     public static string KindOf(Assign a) => a switch { LineAssign => "frame", AreaAssign => "area", _ => "joint" };
