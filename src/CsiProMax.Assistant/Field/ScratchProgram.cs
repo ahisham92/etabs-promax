@@ -97,15 +97,19 @@ public static class ScratchDialogs
     /// test answers it: all stories, OK.
     /// </summary>
     /// <summary>A message box of the program itself: titled with its name alone ("SAFE").</summary>
-    public static bool IsProgramBox(string title, CsiProgram program) => string.Equals(title.Trim(), program.Name, StringComparison.OrdinalIgnoreCase);
+    public static bool IsProgramBox(string title, CsiProgram program) => string.Equals(title.Trim(), program.Name, StringComparison.OrdinalIgnoreCase)
+        // ETABS 23 titles its file errors "Warning" ("Error in performing miOpen", Ahmed's PC 2026-11-26).
+        || string.Equals(title.Trim(), "Warning", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// The program's word that it could not read a file it was given ("Error decompressing file. May not be a valid
-    /// ETABS .EDB file.", SAFE 20 given an .f2k, 2026-11-26). In the test's own scratch window it is answered OK, so
+    /// ETABS .EDB file.", SAFE 20 given an .f2k, 2026-11-26; "Error in performing miOpen", ETABS 23 in a box titled
+    /// "Warning", 2026-11-26). In the test's own scratch window it is answered OK, so
     /// the call comes back and the step can say why. Never a licence message.
     /// </summary>
     public static bool IsFileRefused(string text) =>
-        text.Contains("Error decompressing file", StringComparison.OrdinalIgnoreCase) && !text.Contains("licen", StringComparison.OrdinalIgnoreCase);
+        (text.Contains("Error decompressing file", StringComparison.OrdinalIgnoreCase) || text.Contains("Error in performing miOpen", StringComparison.OrdinalIgnoreCase))
+        && !text.Contains("licen", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// SAP2000's "Maintenance Expiring" reminder ("License Available. Session Created. Maintenance expiring on

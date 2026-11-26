@@ -25,6 +25,8 @@ public static class E2kWriter
         // The Modeler's auto hinges go as ETABS writes them (it reads no other form).
         var passthrough = model.Passthrough.Except(log).Select(r => r.Heading == PropertyDefs.HingeHeading
             ? new RawSection { Heading = r.Heading, After = r.After, Lines = EtabsHinges.ToEtabs(model, r.Lines) } : r).ToList();
+        // Tendons as ETABS of this version reads them (ETABS 23 drops the whole file for a tendon with no support points).
+        passthrough = SlabDefs.ForEtabs(model, passthrough);
         EmitPassthroughAfter(text, passthrough, "");
 
         var anchors = new List<string>();
