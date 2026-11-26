@@ -135,8 +135,9 @@ public static class CsiFieldSteps
                     // table lists them, so that is read too.
                     if (hinges == 0 && link.Tables().FirstOrDefault(t => t.Name.StartsWith("Frame Hinge Assigns 01", StringComparison.OrdinalIgnoreCase)) is { } overview)
                         try { hinges = link.ReadTable(overview.Key, null, null).Rows.Count; } catch (EtabsException) { }
-                    // The .s2k carries the concrete beam's two flexural hinges; the .e2k all three.
-                    var written = program.Key == CsiProgram.Sap2000.Key ? 2 : 3;
+                    // The .s2k and the .e2k carry the concrete beam's two flexural hinges: neither program has an auto
+                    // table for its shear hinge (ETABS 23's ASCE 41-17 concrete beam takes M2 and M3 only, 2026-11-26).
+                    var written = 2;
                     FieldContext.Expect(hinges >= written, $"{name} has {hinges} hinges from the Modeler's file, {written} were written (a frame's answer: {last?.ToJsonString()}; its hinge tables: {HingeTables()})");
                     return $"{hinges} hinges";
                 });

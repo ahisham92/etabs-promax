@@ -454,6 +454,20 @@ static class OldProgramTests
             var cut = CsiProMax.Assistant.Etabs.EditableTables.LogCut(log);
             Check(cut.StartsWith("ERROR: Field 'Ct' is not valid", StringComparison.Ordinal), cut);
             Equal("", CsiProMax.Assistant.Etabs.EditableTables.Trouble("all fine\nNumber of errors: 0"), "a clean log has no trouble lines");
+            // 0.4.55 ETABS run: the reason is on the lines after "*** Error Message ***", and was cut off.
+            var etabs = "********** DATABASE IMPORT DEFINITION DATA **********\nETABS Version 23.2.0 Interactive Database Import\n" + string.Concat(Enumerable.Repeat("  Option line that says nothing\n", 30))
+                + "*** Error Message ***\n  Table: Load Pattern Definitions - Auto Seismic - KDS 41 17 00:2019, Field name: SITE CLASS, Record: 1\n  Error reading field SiteClass; field ignored\n*** Summary ***\nNumber of errors: 1\n";
+            var etabsCut = CsiProMax.Assistant.Etabs.EditableTables.LogCut(etabs);
+            Check(etabsCut.StartsWith("Table: Load Pattern Definitions - Auto Seismic - KDS 41 17 00:2019, Field name: SITE CLASS, Record: 1 Error reading field SiteClass", StringComparison.Ordinal), etabsCut);
+        });
+
+        yield return ("ETABS 23 (0.4.55 run): a code's table goes back without the fields ETABS works out, User Loads has its load set, and Loads to Diaphragms/Stories are no codes", () =>
+        {
+            var tables = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Etabs/EditableTables.cs"));
+            Check(tables.Contains("!s.ok", StringComparison.Ordinal) && tables.Contains("importable.Any(x => x)", StringComparison.Ordinal), "Put leaves out the fields the table does not import (TL, Fa, Fv, SDS, SD1 of KDS)");
+            var lateral = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Tools/LateralTools.cs"));
+            Check(lateral.Contains("(\"NumberSets\", \"1\"), (\"SetNumber\", \"1\")", StringComparison.Ordinal), "User Loads gets one load set");
+            Check(lateral.Contains("x.t.Import != 0", StringComparison.Ordinal) && lateral.Contains("\"Loads to Diaphragms\"", StringComparison.Ordinal) && lateral.Contains("\"Loads to Stories\"", StringComparison.Ordinal), "the read-only tables are not offered as codes");
         });
 
         yield return ("ETABS 20 tester (0.4.53): no SetNumberModes and no SectCut in its API: the modal case and section cut tables take them", () =>

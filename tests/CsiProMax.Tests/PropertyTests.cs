@@ -194,7 +194,12 @@ static class PropertyTests
             var beam = Beam(link.Model); var at = beam.LastIndexOf('@');
             Run(link, "assign_frame_data", new { objects = new[] { beam }, hinges = new object[] { new { at = 0.95, dof = "m3" }, new { at = 0.05, dof = "M3" }, new { at = 0.5, dof = "V2" } } });
             var back = PropertyDefs.HingesOf(ViaE2k(link.Model), beam[..at], beam[(at + 1)..]);
-            Check(back.Count == 3 && back[0] == new PropertyDefs.HingeDef(0.05, "M3") && back[2].At == 0.95, "the hinges back, in order: " + string.Join(",", back));
+            // ETABS 23 has no auto table for a concrete beam's shear hinge: the two flexural ones go (0.4.55 ETABS run).
+            Check(back.Count == 2 && back[0] == new PropertyDefs.HingeDef(0.05, "M3") && back[1].At == 0.95, "the hinges back, in order: " + string.Join(",", back));
+            // In ETABS 23's own words, as its .$et has them: ETABS read none of AUTO "M3" RELDIST 0.05.
+            var e2k = CsiProMax.E2k.E2kWriter.Write(link.Model);
+            Check(e2k.Contains("HINGEDISTRTYPE \"User Defined\"") && e2k.Contains("AUTOHINGETYPE \"ASCE41-17\"  TABLEITEM \"Concrete Beams\"  DOF \"M3\"  STRLIMRATIO 1.1 LOCATIONTYPE \"RelDist\"  RDISTANCE 0.05")
+                && e2k.Contains("HYSTYPE \"Isotropic\"") && !e2k.Contains("AUTO  \"") && !e2k.Contains("RELDIST"), "the .e2k's hinges as ETABS writes them");
             var shown = Run(link, "property_definitions", new { objects = new[] { beam } });
             Check(shown["objects"]![0]!["hinges"]!.AsArray().Count == 3 && shown["hinge_dofs"]!.AsArray().Count == PropertyDefs.HingeDofs.Length, "shown in the form");
             var s2k = S2kWriter.Write(link.Model, "a.s2k");
@@ -207,6 +212,24 @@ static class PropertyTests
             Refused(link, "assign_frame_data", new { objects = new[] { beam }, hinges = new object[] { new { at = 0.2, dof = "M3" }, new { at = 0.2, dof = "M3" } } }, "the same");
             Run(link, "assign_frame_data", new { objects = new[] { beam }, hinges = Array.Empty<object>() });
             Check(PropertyDefs.Hinges(link.Model).Count == 0 && !link.Model.Passthrough.Exists(r => r.Heading == PropertyDefs.HingeHeading), "taken off, no empty section left");
+        });
+
+        yield return ("properties: a member's and a shell's own modifiers go in the .e2k as ETABS 23 writes them, PROPMODI33 (0.4.55: ETABS took none)", () =>
+        {
+            var link = Frame();
+            var beam = Beam(link.Model); var at = beam.LastIndexOf('@');
+            Run(link, "assign_frame_data", new { objects = new[] { beam }, modifiers = new { I3MOD = 0.35, JMOD = 0.01 } });
+            var e2k = CsiProMax.E2k.E2kWriter.Write(link.Model);
+            var line = string.Join(" | ", e2k.Split("\r\n").Where(l => l.StartsWith("  LINEASSIGN  " + CsiProMax.E2k.E2kText.Quote(beam[..at]) + "  " + CsiProMax.E2k.E2kText.Quote(beam[(at + 1)..]))));
+            line = System.Text.RegularExpressions.Regex.Replace(line, " +", " ");
+            Check(line.Contains("PROPMODT 0.01") && line.Contains("PROPMODI33 0.35") && !line.Contains("I3MOD") && !line.Contains("PROPMODA "), "ETABS's names, only those not 1: " + line);
+            var back = ViaE2k(link.Model).LineAssigns.Single(a => a.Label == beam[..at] && a.Story == beam[(at + 1)..]);
+            var mods = PropertyDefs.Modifiers(back.Extra, PropertyDefs.FrameModifiers);
+            Check(mods["I3MOD"] == 0.35 && mods["JMOD"] == 0.01 && mods["AMOD"] == 1, "read back as the model's own names");
+            var shell = new CsiProMax.Model.AreaAssign { Label = "F9", Story = "Story1" };
+            PropertyDefs.SetModifiers(shell.Extra, PropertyDefs.ShellModifiers, new Dictionary<string, double> { ["M11MOD"] = 0.25, ["WMOD"] = 0.5 });
+            var shellLines = CsiProMax.E2k.EtabsModifiers.ToEtabs(shell.Extra, CsiProMax.E2k.EtabsModifiers.Area);
+            Check(shellLines.Single().SequenceEqual(new[] { "PROPMODM11", "0.25", "PROPMODW", "0.5" }), "the shell's: " + string.Join(" ", shellLines.SelectMany(x => x)));
         });
 
         yield return ("properties: the .s2k has none of what SAP2000 26 refused in the 0.4.39 field run", () =>
