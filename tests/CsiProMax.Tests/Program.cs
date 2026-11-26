@@ -1065,6 +1065,13 @@ Test("shortcuts: the Modeler shortcut starts the installed copy, not a copy unpa
     Check(make > 0 && !source.Substring(make).Contains("AppContext.BaseDirectory"), "the Modeler shortcut still points at the folder this copy runs from");
     Check(CsiProMax.Host.Shortcuts.ProgramFolder().EndsWith(Path.DirectorySeparatorChar), "the program folder has no closing separator");
 });
+Test("update button: always at the top of the window, 'Check for updates' when no newer version is known", () =>
+{
+    var window = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Panel", "Host", "MainWindow.cs"));
+    Check(!window.Contains("update.Visibility = text is null ? Visibility.Collapsed"), "the Update button is still hidden when no newer version is known");
+    Check(window.Contains("update.Content = text ?? \"Check for updates\"") && window.Contains("update.Visibility = Visibility.Visible;"), "the Update button does not offer 'Check for updates'");
+    Check(window.Contains("CsiProMax.App.CheckForUpdatesInteractive();"), "the button does not run the update");
+});
 foreach (var (name, body) in CdtSdkTests.All()) Test(name, body);
 foreach (var (name, body) in HandModelTests.All()) Test(name, body);
 foreach (var (name, body) in AiModeTests.All()) Test(name, body);

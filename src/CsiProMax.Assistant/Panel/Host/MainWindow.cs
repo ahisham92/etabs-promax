@@ -34,9 +34,11 @@ internal sealed class MainWindow : Window
         Place();
         var layout = new DockPanel();
         var menu = BuildMenu();
-        // The menu, and at its right the Update button: there only while a newer version is out or downloaded.
+        // The menu, and at its right the Update button, always there (Ahmed, 2026-11-26: "I need a button of the updating
+        // the CSI ProMax itself"): "Update to 0.4.50" or "Switch to 0.4.50 now" in bold when there is one, else "Check for
+        // updates", which looks for one and updates when there is.
         var top = new DockPanel { LastChildFill = true };
-        var update = new Button { Visibility = Visibility.Collapsed, Margin = new Thickness(4, 2, 6, 2), Padding = new Thickness(10, 2, 10, 2), FontWeight = FontWeights.SemiBold, Cursor = System.Windows.Input.Cursors.Hand };
+        var update = new Button { Visibility = Visibility.Visible, Margin = new Thickness(4, 2, 6, 2), Padding = new Thickness(10, 2, 10, 2), FontWeight = FontWeights.SemiBold, Cursor = System.Windows.Input.Cursors.Hand };
         System.Windows.Automation.AutomationProperties.SetName(update, "Update CSI ProMax");
         update.Click += (_, _) =>
         {
@@ -49,9 +51,12 @@ internal sealed class MainWindow : Window
             string? text;
             try { text = UpdateBadge.TopButton(Update.Updater.Current, Update.Updater.Latest, Update.Updater.Staged ?? (Update.Updater.NewestDownloaded(Update.Updater.Current) is { } f ? Path.GetFileName(f) : null)); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { text = null; }
-            update.Content = text;
-            update.ToolTip = text is null ? null : $"This window runs CSI ProMax {Update.Updater.CurrentText}. Click to move to the newer version now; {Csi.Name} stays open and your model is not touched.";
-            update.Visibility = text is null ? Visibility.Collapsed : Visibility.Visible;
+            update.Content = text ?? "Check for updates";
+            update.FontWeight = text is null ? FontWeights.Normal : FontWeights.SemiBold;
+            update.ToolTip = text is null
+                ? $"This window runs CSI ProMax {Update.Updater.CurrentText}. Click to look for a newer version now: when there is one it is downloaded and this window moves to it; {Csi.Name} stays open and your model is not touched."
+                : $"This window runs CSI ProMax {Update.Updater.CurrentText}. Click to move to the newer version now; {Csi.Name} stays open and your model is not touched.";
+            update.Visibility = Visibility.Visible;
         }
         var watch = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(15) };
         watch.Tick += (_, _) => ShowUpdate();
