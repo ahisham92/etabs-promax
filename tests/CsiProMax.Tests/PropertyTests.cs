@@ -197,7 +197,9 @@ static class PropertyTests
             Check(back.Count == 3 && back[0] == new PropertyDefs.HingeDef(0.05, "M3") && back[2].At == 0.95, "the hinges back, in order: " + string.Join(",", back));
             var shown = Run(link, "property_definitions", new { objects = new[] { beam } });
             Check(shown["objects"]![0]!["hinges"]!.AsArray().Count == 3 && shown["hinge_dofs"]!.AsArray().Count == PropertyDefs.HingeDofs.Length, "shown in the form");
-            Check(S2kWriter.Write(link.Model, "a.s2k").Text.Contains("FRAME HINGE ASSIGNS 01 - OVERVIEW"), "written for SAP2000");
+            var s2k = S2kWriter.Write(link.Model, "a.s2k");
+            Check(s2k.Text.Contains("FRAME HINGE ASSIGNS 04 - AUTO FEMA 356 - CONCRETE BEAM") && s2k.Text.Split("DOF=M3").Length == 3, "the two flexural hinges written for SAP2000");
+            Check(s2k.Notes.Any(n => n.Contains("V2 hinge")), "the shear hinge named in a note");
             Run(link, "assign_frame_data", new { objects = new[] { beam }, hinges = new object[] { new { at = 0.5, dof = "P-M2-M3" } } });
             Check(PropertyDefs.HingesOf(link.Model, beam[..at], beam[(at + 1)..]).Single().Dof == "P-M2-M3", "a new list replaces the old");
             Refused(link, "assign_frame_data", new { objects = new[] { beam }, hinges = new object[] { new { at = 1.2, dof = "M3" } } }, "0 to 1");

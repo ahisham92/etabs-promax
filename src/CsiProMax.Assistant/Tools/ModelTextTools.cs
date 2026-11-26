@@ -198,6 +198,8 @@ public static class ModelTextTools
             if (from.LoadPatterns.FirstOrDefault(q => q.Name == p.Name) is { Auto: not null } q && string.Equals(q.Type, p.Type, StringComparison.OrdinalIgnoreCase))
                 p.Auto = q.Auto;
         if (to.Title.Length == 0) to.Title = from.Title;
+        // What the .e2k has no place for (SAP2000 constraints and moving loads, SAFE strips) is not in the text.
+        to.Extras ??= from.Extras;
     }
 
     private static JsonObject Changes(StructuralModel a, StructuralModel b)

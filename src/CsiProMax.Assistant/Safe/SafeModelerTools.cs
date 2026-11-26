@@ -13,7 +13,7 @@ public static class SafeModelerTools
     public static IReadOnlyList<Tool> All { get; } =
     [
         new("save_safe_file",
-            "Writes one floor (or the foundation) of the Modeler's model as a SAFE text file (.f2k), for licensed SAFE to import with File > Import > SAFE .F2K file. It takes the slabs, drops and beams on that story, the columns and walls below and above it as supports (their far ends fixed), the point supports there, the uniform loads on those slabs and beams, the load patterns and the combinations. 'subgrade' puts soil (modulus of subgrade reaction, force per length cubed) under every slab, for a mat; 'strips' (default true) makes design strips along the grid lines. Default story: the one with the most slab area. A file of the same name is never overwritten. The Modeler does not analyse or design: SAFE does that after the import.",
+            "Writes one floor (or the foundation) of the Modeler's model as a SAFE text file (.f2k), for licensed SAFE to import with File > Import > SAFE .F2K file. It takes the slabs, drops and beams on that story, the columns and walls below and above it as supports (their far ends fixed), the point supports there, the uniform loads on those slabs and beams, the load patterns and the combinations. 'subgrade' puts soil (modulus of subgrade reaction, force per length cubed) under every slab, for a mat; 'strips' (default true) makes design strips along the grid lines; strips drawn with define_strip go in either way. Default story: the one with the most slab area. A file of the same name is never overwritten. The Modeler does not analyse or design: SAFE does that after the import.",
             """
             {"type":"object","properties":{
               "story":{"type":"string"},

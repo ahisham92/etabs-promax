@@ -98,7 +98,7 @@ public static class F2kWriter
         foreach (var pa in m.PointAssigns.Where(p => p.Restraint is { Length: > 0 } && string.Equals(p.Story, story, StringComparison.OrdinalIgnoreCase)))
             if (m.Point(pa.Point) is { } pp) supports.Add((Point(pp.X, pp.Y, 0), pa.Restraint!));
         foreach (var far in farEnds.Distinct()) supports.Add((far, "UX UY UZ RX RY RZ"));
-        if (below.Count + above.Count + wallRows.Count + supports.Count == 0 && options.Subgrade is null)
+        if (below.Count + above.Count + wallRows.Count + supports.Count == 0 && options.Subgrade is null && !slabs.Any(sl => m.AreaAssigns.Find(x => x.Label == sl.Label && x.Story == sl.Story) is { } aa && PropertyDefs.Value(aa.Extra, "SPRINGPROP") is not null))
             notes.Add("Nothing holds the slab up: no columns, walls, supports or soil. Add supports or give a subgrade modulus before analysing in SAFE.");
 
         // ---- what is used ----
@@ -141,8 +141,30 @@ public static class F2kWriter
         var wallProps = m.ShellSections.Where(s => usedWall.Contains(s.Name)).ToList();
         if (wallProps.Count > 0)
             tables.Add(CsiTableText.Table("WALL PROPERTIES", wallProps.Select(s => (IReadOnlyList<(string, string)>)Row(("Wall", s.Name), ("MatProp", s.Material), ("Thickness", N(s.Thickness ?? 0)), ("AutoRigid", "No")))));
+        // Soil: one subgrade modulus under every slab when asked for, else each slab's own area spring (Assign > Shell >
+        // Area Springs, its U3 as the modulus), as SAFE's soil properties.
+        var soilOf = new Dictionary<string, string>(StringComparer.Ordinal);
+        var soils = new List<IReadOnlyList<(string, string)>>();
         if (options.Subgrade is { } k)
-            tables.Add(CsiTableText.Table("SOIL PROPERTIES", [Row(("Soil", "SOIL1"), ("Subgrade", N(k)), ("NonlinOpt", options.CompressionOnly ? "Compression Only" : "None"))]));
+        {
+            soils.Add(Row(("Soil", "SOIL1"), ("Subgrade", N(k)), ("NonlinOpt", options.CompressionOnly ? "Compression Only" : "None")));
+            foreach (var a in areaRows) soilOf[a.Label] = "SOIL1";
+        }
+        else
+        {
+            var springDefs = PropertyDefs.Springs(m).Where(d => d.Kind == "area").ToList();
+            foreach (var (s, row) in slabs.Zip(areaRows))
+            {
+                var assign = m.AreaAssigns.Find(x => x.Label == s.Label && x.Story == s.Story);
+                if (assign is null || PropertyDefs.Value(assign.Extra, "SPRINGPROP") is not { } sp) continue;
+                sp = E2kText.Unquote(sp);
+                var def = springDefs.Find(d => d.Name == sp);
+                if (def is null || def.Values.GetValueOrDefault("U3") <= 0) { notes.Add($"Slab {s.Label} has the area spring {sp} with no vertical stiffness (U3); no soil was put under it."); continue; }
+                if (!soils.Exists(r => r[0].Item2 == sp)) soils.Add(Row(("Soil", sp), ("Subgrade", N(def.Values["U3"])), ("NonlinOpt", options.CompressionOnly ? "Compression Only" : "None")));
+                soilOf[row.Label] = sp;
+            }
+        }
+        if (soils.Count > 0) tables.Add(CsiTableText.Table("SOIL PROPERTIES", soils));
 
         // Geometry
         tables.Add(CsiTableText.Table("OBJECT GEOMETRY - POINT COORDINATES", points.Select(p => (IReadOnlyList<(string, string)>)Row(("Point", p.Name), ("GlobalX", N(p.X)), ("GlobalY", N(p.Y)), ("GlobalZ", N(p.Z)), ("SpecialPt", "No")))));
@@ -159,13 +181,27 @@ public static class F2kWriter
             })));
 
         // Design strips along the grid lines.
+        // and the strips drawn by hand (Define > Design Strips in the Modeler), which replace grid strips of the same name.
         var stripCount = 0;
+        var stripRows = new List<IReadOnlyList<(string, string)>>();
+        var own = m.Extras?.Strips ?? [];
         if (options.Strips && points.Count > 0)
         {
-            var rows = Strips(m, points.Where(p => Math.Abs(p.Z) < tol).ToList(), out stripCount);
-            if (rows.Count > 0) tables.Add(CsiTableText.Table("OBJECT GEOMETRY - DESIGN STRIPS", rows));
-            else notes.Add("The model has no grid lines, so no design strips were made. Draw strips in SAFE, or add grids first.");
+            stripRows = Strips(m, points.Where(p => Math.Abs(p.Z) < tol).ToList(), out stripCount);
+            if (stripRows.Count == 0 && own.Count == 0) notes.Add("The model has no grid lines, so no design strips were made. Draw strips in SAFE, or add grids first.");
+            var mine = own.Select(x => x.Name).ToHashSet();
+            var before = stripRows.Select(r => r[0].Item2).Distinct().Count();
+            stripRows.RemoveAll(r => mine.Contains(r[0].Item2));
+            stripCount -= before - stripRows.Select(r => r[0].Item2).Distinct().Count();
         }
+        foreach (var st in own)
+        {
+            stripCount++;
+            for (var n = 0; n < st.Points.Count; n++)
+                stripRows.Add(Row(("Strip", st.Name), ("Point", (n + 1).ToString(CultureInfo.InvariantCulture)), ("GlobalX", N(st.Points[n][0])), ("GlobalY", N(st.Points[n][1])),
+                    ("WBLeft", N(st.WidthLeft)), ("WBRight", N(st.WidthRight)), ("WALeft", N(st.WidthLeft)), ("WARight", N(st.WidthRight)), ("AutoWiden", "No"), ("Layer", st.Layer)));
+        }
+        if (stripRows.Count > 0) tables.Add(CsiTableText.Table("OBJECT GEOMETRY - DESIGN STRIPS", stripRows));
 
         // Assignments
         if (areaRows.Count > 0)
@@ -176,8 +212,8 @@ public static class F2kWriter
             tables.Add(CsiTableText.Table("COLUMN PROPERTY ASSIGNMENTS", lineRows.Where(l => l.Type == "Column").Select(l => (IReadOnlyList<(string, string)>)Row(("Line", l.Label), ("ColProp", l.Section)))));
         if (wallRows.Count > 0)
             tables.Add(CsiTableText.Table("WALL PROPERTY ASSIGNMENTS", wallRows.Select(w => (IReadOnlyList<(string, string)>)Row(("Line", w.Label), ("WallProp", w.Section)))));
-        if (options.Subgrade is not null && areaRows.Count > 0)
-            tables.Add(CsiTableText.Table("SOIL PROPERTY ASSIGNMENTS", areaRows.Select(a => (IReadOnlyList<(string, string)>)Row(("Area", a.Label), ("SoilProp", "SOIL1")))));
+        if (soilOf.Count > 0)
+            tables.Add(CsiTableText.Table("SOIL PROPERTY ASSIGNMENTS", areaRows.Where(a => soilOf.ContainsKey(a.Label)).Select(a => (IReadOnlyList<(string, string)>)Row(("Area", a.Label), ("SoilProp", soilOf[a.Label])))));
         if (supports.Count > 0)
             tables.Add(CsiTableText.Table("RESTRAINT ASSIGNMENTS", supports.DistinctBy(s => s.Point).Select(s =>
             {

@@ -194,9 +194,18 @@ public static class S2kWriter
                 frameMods.Add(Row(("Frame", name), ("AMod", N(fm["AMOD"])), ("A2Mod", N(fm["A2MOD"])), ("A3Mod", N(fm["A3MOD"])), ("JMod", N(fm["JMOD"])), ("I2Mod", N(fm["I2MOD"])), ("I3Mod", N(fm["I3MOD"])), ("MMod", N(fm["MMOD"])), ("WMod", N(fm["WMOD"]))));
             if (PropertyDefs.Value(x.Extra, "SPRINGPROP") is { } sp) notes.Add($"Frame {name} has the line spring {sp}: assign it in SAP2000 (Assign > Frame > Line Springs).");
             var hinges = PropertyDefs.HingesOf(m, x.Label, x.Story);
-            // Auto hinges (SAP2000's API cannot assign hinges, so they go in by the file). The table's name and fields are
-            // checked against SAP2000's own by the field test, which lists its hinge tables when they differ.
-            foreach (var h in hinges) hingeRows.Add(Row(("Frame", name), ("RelDist", N(h.At)), ("HingeType", "Auto"), ("DOF", h.Dof)));
+            // Auto hinges (SAP2000's API cannot assign hinges, so they go in by the file). "Frame Hinge Assigns 01 -
+            // Overview" is not importable in SAP2000 26: an auto hinge goes in its code's table for the member, by the
+            // fields read from SAP2000 26 (field/extras-api-shapes.md). Only the concrete beam table's fields are known
+            // so far: its flexural hinges go in, the others are named in a note.
+            var concreteBeam = m.Line(x.Label)?.Kind == LineKind.Beam && m.FrameSections.Find(fs => fs.Name == x.Section)?.Material is { } mat && m.Materials.Find(mm => mm.Name == mat)?.IsConcrete == true;
+            foreach (var h in hinges)
+            {
+                if (concreteBeam && h.Dof is "M3" or "M2")
+                    hingeRows.Add(Row(("Frame", name), ("CompType", "Primary"), ("DOF", h.Dof), ("VFrom", "User"), ("VUser", "0"), ("Conforming", "Yes"), ("RatioFrom", "Design"), ("RatioUser", "0"),
+                        ("BeyondE", "Zero"), ("SaveFibResp", "No"), ("DistType", "RelDist"), ("RelDist", N(h.At)), ("AbsDist", "0"), ("LenOWType", "None"), ("LenOWRel", "0"), ("LenOWAbs", "0")));
+                else notes.Add($"Frame {name} has an auto {h.Dof} hinge at {N(h.At)}: assign it in SAP2000 (Assign > Frame > Hinges); only concrete beams' M2 and M3 hinges go across by the file so far.");
+            }
         }
         foreach (var x in m.AreaAssigns)
         {
@@ -240,13 +249,52 @@ public static class S2kWriter
         Add(tables, "FRAME INSERTION POINT ASSIGNMENTS", insertion);
         Add(tables, "FRAME OFFSET ALONG LENGTH ASSIGNMENTS", offsets);
         Add(tables, "FRAME PROPERTY MODIFIERS", frameMods);
-        Add(tables, "FRAME HINGE ASSIGNS 01 - OVERVIEW", hingeRows);
+        Add(tables, "FRAME HINGE ASSIGNS 04 - AUTO FEMA 356 - CONCRETE BEAM", hingeRows);
         Add(tables, "AREA STIFFNESS MODIFIERS", areaMods);
 
-        if (diaphragms.Count > 0)
+        // Joint constraints: the floors' diaphragms, and the model's own constraints of every type.
+        var constraintDefs = new Dictionary<string, List<IReadOnlyList<(string, string)>>>();
+        var constraintJoints = new List<IReadOnlyList<(string, string)>>();
+        void Def(string type, IReadOnlyList<(string, string)> row) { if (!constraintDefs.TryGetValue(type, out var l)) constraintDefs[type] = l = []; l.Add(row); }
+        foreach (var k in diaphragms.Keys) Def("Diaphragm", Row(("Name", k), ("CoordSys", "GLOBAL"), ("Axis", "Z"), ("MultiLevel", "No")));
+        constraintJoints.AddRange(diaphragms.SelectMany(d => d.Value.Select(j => Row(("Joint", j), ("Constraint", d.Key), ("Type", "Diaphragm")))));
+        foreach (var c in m.Extras?.Constraints ?? [])
         {
-            Add(tables, "CONSTRAINT DEFINITIONS - DIAPHRAGM", diaphragms.Keys.Select(k => Row(("Name", k), ("CoordSys", "GLOBAL"), ("Axis", "Z"), ("MultiLevel", "No"))));
-            Add(tables, "JOINT CONSTRAINT ASSIGNMENTS", diaphragms.SelectMany(d => d.Value.Select(j => Row(("Joint", j), ("Constraint", d.Key), ("Type", "Diaphragm")))));
+            var row = new List<(string, string)> { ("Name", c.Name) };
+            if (c.Type != "Local") row.Add(("CoordSys", "GLOBAL"));
+            if (ExtrasDefs.HasAxis(c.Type)) row.Add(("Axis", c.Axis));
+            if (c.Type == "Diaphragm") row.Add(("MultiLevel", "No"));
+            if (ExtrasDefs.HasDofs(c.Type))
+                foreach (var d in c.Type == "Local" ? ExtrasDefs.LocalDofs : ExtrasDefs.GlobalDofs) row.Add((d, c.Dofs.Contains(d) ? "Yes" : "No"));
+            if (c.Type == "Weld") row.Add(("Tolerance", N(c.Tolerance)));
+            Def(c.Type, row);
+            foreach (var j in c.Joints)
+            {
+                var jat = j.LastIndexOf('@');
+                var story = jat > 0 ? m.StoryIndex(j[(jat + 1)..]) : -1;
+                if (story < 0 || !points.TryGetValue(j[..jat], out var jp)) { notes.Add($"The constraint {c.Name} names the joint {j}, which is not in the model; left out."); continue; }
+                constraintJoints.Add(Row(("Joint", Joint(Physical.At(m, jp, story))), ("Constraint", c.Name), ("Type", c.Type)));
+            }
+        }
+        foreach (var (type, rows) in constraintDefs) Add(tables, "CONSTRAINT DEFINITIONS - " + type.ToUpperInvariant(), rows);
+        Add(tables, "JOINT CONSTRAINT ASSIGNMENTS", constraintJoints);
+
+        // Moving loads: lanes along frames, vehicles, vehicle classes (the moving load cases are with the load cases).
+        if (m.Extras is { } extras)
+        {
+            var lanes = new List<IReadOnlyList<(string, string)>>();
+            foreach (var lane in extras.Lanes)
+                foreach (var f in lane.Frames)
+                {
+                    var fat = f.LastIndexOf('@');
+                    if (fat <= 0 || !frameNames.TryGetValue((f[..fat], f[(fat + 1)..]), out var frame)) { notes.Add($"The lane {lane.Name} names the frame {f}, which is not in the model; left out."); continue; }
+                    lanes.Add(Row(("Lane", lane.Name), ("Frame", frame), ("Offset", N(lane.Offset)), ("Width", N(lane.Width))));
+                }
+            Add(tables, "LANE DEFINITION DATA", lanes);
+            Add(tables, "VEHICLES 1 - GENERAL", extras.Vehicles.Select(v => Row(("Vehicle", v.Name), ("VehType", v.Standard.Length > 0 ? v.Standard : "General"), ("ScaleFactor", N(v.Scale)))));
+            Add(tables, "VEHICLES 2 - LOADS", extras.Vehicles.Where(v => v.Standard.Length == 0).SelectMany(v =>
+                v.Axles.Select((a, i) => Row(("Vehicle", v.Name), ("LoadNum", (i + 1).ToString(CultureInfo.InvariantCulture)), ("LoadType", i == 0 ? "Leading Load" : "Fixed Length"), ("AxleLoad", N(a.Load)), ("MinDist", N(a.Spacing)), ("UnifLoad", N(v.Uniform))))));
+            Add(tables, "VEHICLE CLASSES", extras.VehicleClasses.SelectMany(c => c.Vehicles.Select(v => Row(("VehClass", c.Name), ("VehName", v.Vehicle), ("ScaleFactor", N(v.Scale))))));
         }
 
         // Groups, one per story, and the model's own.
@@ -506,7 +554,21 @@ public static class S2kWriter
             else if (Other(m, c, type, defs, statics, more, patternTypes)) { }
             else notes.Add($"Load case {c.Name} ({type}) has no plain SAP2000 equal here and was left out: define it in SAP2000 (Define > Load Cases).");
         }
+        // Moving load cases (SAP2000 Define > Load Cases > Moving Load): each assignment moves a vehicle class over lanes.
+        var moving = new List<IReadOnlyList<(string, string)>>();
+        foreach (var c in m.Extras?.MovingCases ?? [])
+        {
+            defs.Add(Row(("Case", c.Name), ("Type", "LinMoving"), ("InitialCond", "Zero"), ("DesignType", "Vehicle Live"), ("RunCase", "Yes")));
+            for (var i = 0; i < c.Assignments.Count; i++)
+            {
+                var a = c.Assignments[i];
+                foreach (var lane in a.Lanes)
+                    moving.Add(Row(("Case", c.Name), ("AssignNum", (i + 1).ToString(CultureInfo.InvariantCulture)), ("VehClass", a.Class), ("ScaleFactor", N(a.Scale)),
+                        ("MinLoaded", a.MinLoaded.ToString(CultureInfo.InvariantCulture)), ("MaxLoaded", (a.MaxLoaded == 0 ? a.Lanes.Count : a.MaxLoaded).ToString(CultureInfo.InvariantCulture)), ("Lane", lane)));
+            }
+        }
         Add(tables, "LOAD CASE DEFINITIONS", defs);
+        Add(tables, "CASE - MOVING LOAD 1 - LANE ASSIGNMENTS", moving);
         Add(tables, "CASE - STATIC 1 - LOAD ASSIGNMENTS", statics);
         Add(tables, "CASE - MODAL 1 - GENERAL", modal);
         foreach (var (table, rows) in more) Add(tables, table, rows);
