@@ -557,7 +557,7 @@ static class OldProgramTests
             var scratch = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));
             var start = scratch.IndexOf("public static IScratchWindow? Start(", StringComparison.Ordinal);
             var turn = scratch.IndexOf("OpensTextInOwnProcess(program, modelFile)", start, StringComparison.Ordinal);
-            var second = scratch.IndexOf("var scratch = new ScratchProgram(program);", start, StringComparison.Ordinal);
+            var second = scratch.IndexOf("var scratch = new ScratchProgram(program)", start, StringComparison.Ordinal);
             Check(start > 0 && turn > start && second > turn, "the text file is turned into a model file before the test's own window starts");
             Check(scratch.IndexOf("convertOnly: true", turn, StringComparison.Ordinal) is var c and > 0 && c < second && scratch.IndexOf("first.Close()", turn, StringComparison.Ordinal) is var closed and > 0 && closed < second
                   && scratch.IndexOf("modelFile = converted;", turn, StringComparison.Ordinal) is var swap and > 0 && swap < second, "the first SAP2000 only saves the .sdb, is closed, and the second opens that .sdb");
