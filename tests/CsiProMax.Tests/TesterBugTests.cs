@@ -723,6 +723,108 @@ static class TesterBugTests
             ctx.WithResults(); ctx.WithResults();
             Equal(1, runs, "times the Viewer's check ran");
         });
+        yield return ("SAP2000 26 field test: the shared steps check the Viewer before they unlock the analysed model", () =>
+        {
+            // Seen on 2026-11-25 with 0.4.20: the shared steps now unlock the model at their start (a locked SAP2000
+            // refused a pattern added by hand), and SAP2000's Viewer check came after them: 10 buttons greyed out and
+            // "the pack has no result tables".
+            var steps = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/CsiFieldSteps.cs"));
+            Check(steps.IndexOf("ctx.WithResults()", StringComparison.Ordinal) is var at and > 0 && at < steps.IndexOf("\"unlock_model\"", StringComparison.Ordinal), "the shared steps unlock the model before the Viewer is checked");
+        });
+        yield return ("field test: a program on .NET 8 has its plug-in created in the test itself when this PC has no PowerShell for it", () =>
+        {
+            // Seen on 2026-11-25, 0.4.21 on Ahmed's PC: 5 steps "can create the CSI ProMax plug-in" were not tested,
+            // because Windows PowerShell runs on the .NET Framework and ETABS 23 and SAP2000 26 run on .NET 8.
+            var root = SourceText.Root();
+            var plugIn = Path.Combine(root, "src/CsiProMax.Plugin/bin/Release/netstandard2.0/CsiProMaxPlugin.dll");
+            var api = Path.Combine(AppContext.BaseDirectory, "ETABSv1.dll");
+            if (!File.Exists(plugIn)) plugIn = Path.Combine(root, "src/CsiProMax.Plugin/bin/Debug/netstandard2.0/CsiProMaxPlugin.dll");
+            Check(File.Exists(plugIn) && File.Exists(api), $"the built plug-in and API file are there: {plugIn}, {api}");
+            var (ok, detail) = PlugInCheck.TryHere(plugIn, api);
+            Check(ok && detail.Contains("cSapModel", StringComparison.Ordinal), "the plug-in is created against the API file: " + detail);
+            var (bad, why) = PlugInCheck.TryHere(api, api);
+            Check(!bad && why.Contains("cPlugin", StringComparison.Ordinal), "a file with no plug-in class in it is refused with the reason: " + why);
+            using (File.Open(plugIn, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { }   // not kept open by the try
+
+            var read = PlugInCheck.Read($$"""{"Text":"x","Programs":[{"Program":"ETABS 23","Listed":true,"Loads":null,"Runtime":".NET","Reasons":[],"Path":{{System.Text.Json.JsonSerializer.Serialize(plugIn)}},"ApiFile":{{System.Text.Json.JsonSerializer.Serialize(api)}}},{"Program":"ETABS 20","Listed":true,"Loads":null,"Runtime":".NET Framework","Reasons":[],"Path":"","ApiFile":""}]}""");
+            var ctx = new FieldContext(CsiProgram.Etabs, Path.GetTempPath(), new MemoryEtabs());
+            PcFieldSteps.PlugIn(ctx, read);
+            var steps = ctx.Steps.Where(s => s.Name.Contains("can create", StringComparison.Ordinal)).ToList();
+            Check(steps.Count == 2 && steps[0] is { Ok: true, Skipped: false } && steps[1].Skipped, "ETABS 23 is tried here and ETABS 20 stays not tested: " + string.Join("; ", steps.Select(s => $"{s.Name}: {s.Ok} {s.Skipped} {s.Detail}")));
+            // Seen with 0.4.28: ETABS 20, ETABS 21 and SAP2000 24 said "could not be tried ... on .NET Framework" when the real reason was that their API file was not on the PC.
+            Check(steps[1].Detail.Contains("API file was not found", StringComparison.Ordinal), "a program whose API file is missing does not say so: " + steps[1].Detail);
+            Check(File.ReadAllText(Path.Combine(root, "check.ps1")).Contains("$finding.ApiFile = $candidate", StringComparison.Ordinal), "check.ps1 no longer says where the program's API file is");
+        });
+        yield return ("field test: the real window is opened with the AI chat and without it", () =>
+        {
+            // Asked on 2026-11-25: "are we testing for every single option we have I mean the modelling and viewing
+            // without AI". The window itself was only opened on release builds, never by the test on a PC.
+            Check(WindowFieldSteps.Arguments("x.dll", ai: false).Contains("--no-ai") && !WindowFieldSteps.Arguments("x.dll", ai: true).Contains("--no-ai"), "only the start without the chat passes --no-ai");
+            Check(WindowFieldSteps.Arguments("x.dll", ai: true).Contains("--demo") && WindowFieldSteps.Arguments("x.dll", ai: true).Contains("--no-update"), "the second start is on the demo model and does not update itself away");
+            var ctx = new FieldContext(CsiProgram.Etabs, Path.GetTempPath(), new MemoryEtabs());
+            var asked = new List<bool>();
+            WindowFieldSteps.Run(ctx, ai => { asked.Add(ai); return ai ? new WindowFieldSteps.Seen(true, "'CSI ProMax' opened") : new WindowFieldSteps.Seen(false, "it ended by itself with code 1"); });
+            Equal("True, False", string.Join(", ", asked), "both ways are started");
+            Check(ctx.Steps.Count == 2 && ctx.Steps[0].Ok && !ctx.Steps[1].Ok && ctx.Steps[1].Name.Contains("without the AI chat", StringComparison.Ordinal), "a window that does not open without the chat is a failure of its own");
+            var busy = new FieldContext(CsiProgram.Etabs, Path.GetTempPath(), new MemoryEtabs());
+            WindowFieldSteps.Run(busy, _ => new WindowFieldSteps.Seen(false, "a demo window is already open", NotTried: true));
+            Check(busy.Steps.All(s => s.Skipped), "a start that could not be tried is not tested, not a failure");
+            var notes = Path.Combine(Path.GetTempPath(), "cpm-notes-" + Guid.NewGuid().ToString("N")[..8] + ".txt");
+            try
+            {
+                File.WriteAllText(notes, "old\n");
+                var before = new FileInfo(notes).Length;
+                Equal("", WindowFieldSteps.Wrote(notes, before), "nothing new in errors.txt");
+                File.AppendAllText(notes, "[window] boom\n");
+                Check(WindowFieldSteps.Wrote(notes, before).Contains("boom", StringComparison.Ordinal) && !WindowFieldSteps.Wrote(notes, before).Contains("old", StringComparison.Ordinal), "only what the new window wrote is reported");
+            }
+            finally { File.Delete(notes); }
+            var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/FieldTest.cs"));
+            Check(source.Contains("WindowFieldSteps.Run(ctx, o.OpenWindow)", StringComparison.Ordinal), "the full test no longer opens the window");
+        });
+        yield return ("edit_table says that it saved the model before the edit", () =>
+        {
+            // 0.4.26 saves the model before every table edit (SAP2000 26 empties its load patterns on a refused edit).
+            // A save nobody asked for must be said: in the tool's description and in every answer.
+            var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Tools/CsiTools.cs"));
+            Check(source.Contains("log[\"saved_before_edit\"]", StringComparison.Ordinal), "the answer of an applied edit does not say the model was saved");
+            var tool = ProgramTools.Chat(CsiProgram.Sap2000).First(x => x.Name == "edit_table");
+            Check(tool.Description.Contains("first saves the model", StringComparison.Ordinal), "edit_table's description does not say that a change saves the model");
+        });
+        yield return ("edit_table asks before it saves the model, each time and at every approval level", () =>
+        {
+            // Ahmed, 2026-11-25, on whether a table edit may save his model first: "Ask me before each save".
+            Dictionary<string, System.Text.Json.JsonElement> Args(string json) => System.Text.Json.JsonDocument.Parse(json).RootElement.EnumerateObject().ToDictionary(x => x.Name, x => x.Value.Clone());
+            foreach (var action in new[] { "add", "update", "delete" })
+                foreach (var level in Enum.GetValues<CsiProMax.Tools.ApprovalLevel>())
+                {
+                    var asked = CsiProMax.Tools.ApprovalPolicy.Decide("edit_table", true, false, Args($$"""{"table":"Load Pattern Definitions","action":"{{action}}"}"""), true, new CsiProMax.Tools.ApprovalFacts(),
+                        level, new List<string> { "edit_table" }, true, _ => CsiProMax.Tools.PathState.Missing, []);
+                    Check(asked.Ask && !asked.CanSilence, $"{action} at {level} is not asked, or can be silenced");
+                    Check(asked.Reason.Contains("saves the model", StringComparison.Ordinal) && asked.Reason.Contains("Load Pattern Definitions", StringComparison.Ordinal) && asked.Reason.Contains("If you say no", StringComparison.Ordinal), "the question does not say what is saved and what no means: " + asked.Reason);
+                }
+            foreach (var action in new[] { "fields", "read" })
+                Check(CsiProMax.Tools.OutputPaths.AlwaysAskReason("edit_table", Args($$"""{"table":"Load Pattern Definitions","action":"{{action}}"}""")) is null, $"reading a table ({action}) asks about a save it does not make");
+            Check(ProgramTools.Chat(CsiProgram.Etabs).First(x => x.Name == "edit_table").Description.Contains("always asked before that save", StringComparison.Ordinal), "edit_table's description does not say the engineer is asked");
+        });
+        yield return ("0.4.33 run: the pack takes SAP2000's own names for springs, hinges, functions, cases and section cuts (13 Viewer items were greyed out)", () =>
+        {
+            foreach (var table in new[] { "Joint Spring Assignments 1 - Uncoupled", "Frame Hinge Assigns 04 - Auto FEMA 356 - Concrete Beam", "Function - Response Spectrum - User", "Function - Time History - User",
+                         "Case - Modal History 1 - General", "Case - Static 2 - Nonlinear Load Application", "Section Cuts 1 - General", "Section Cut Definitions", "Joint Assignments - Springs" })
+                Check(CsiProMax.Assistant.Tools.PackTables.Kind(new CsiProMax.Assistant.Etabs.TableName(table, table, false, 1)) == "input", $"'{table}' is not taken by the pack as an input");
+            foreach (var table in new[] { "Section Cut Forces - Analysis", "Element Forces - Links", "Element Deformations - Links" })
+                Check(CsiProMax.Assistant.Tools.PackTables.Kind(new CsiProMax.Assistant.Etabs.TableName(table, table, false, 0)) == "result", $"'{table}' is not taken by the pack as a result");
+            // The scratch model's extras are one honest line on a stand-in, and every name they use is fixed.
+            var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchExtras.cs"));
+            foreach (var call in new[] { "PointObj.SetSpring", "PropLink.SetLinear", "LinkObj.AddByPoint", "SectCut.SetByGroup", "LoadCases.StaticNonlinear.SetLoadApplication", "Func.FuncTH.SetUser", "LoadCases.ModHistLinear.SetTimeStep" })
+                Check(source.Contains('"' + call + '"'), $"the scratch extras no longer call {call}");
+            foreach (var steps in new[] { "Field/EtabsFieldSteps.cs", "Sap2000/SapFieldSteps.cs" })
+            {
+                var text = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant", steps));
+                Check(text.IndexOf("ScratchExtras.Add(ctx)", StringComparison.Ordinal) is var add and >= 0 && text.IndexOf("\"run_analysis\"", StringComparison.Ordinal) > add, $"{steps} must add the extras before its first analysis");
+                Check(text.Contains("ScratchExtras.Check(ctx)"), $"{steps} must check the extras' tables after the analysis");
+            }
+        });
         yield return ("ETABS 23 field test: a test copy an earlier run left open is closed by the next run, and nothing else is", () =>
         {
             // Seen on 2026-11-25: the 0.4.10 run gave up on ETABS with the story picker showing; the 0.4.14 run then failed
@@ -736,6 +838,77 @@ static class TesterBugTests
             var runner = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/FieldTest.cs"));
             Check(runner.IndexOf("o.EndLeftCopies()", StringComparison.Ordinal) is var at and > 0 && at < runner.IndexOf("menus = ToolsMenu.Repair(", StringComparison.Ordinal), "leftovers are not closed before the Tools menu is looked at");
             Check(runner.Contains("Tools > CSI ProMax is still in each program after the test", StringComparison.Ordinal), "the Tools menu is not looked at again after the scratch windows closed");
+        });
+        yield return ("Tools menu: an entry that names a copy outside the installed folder is made to name the installed one", () =>
+        {
+            // Seen on 2026-11-25 after the 0.4.15 run: both settings files named ...\etabs-promax-test\v0415\app\dist, so
+            // Tools > CSI ProMax would have started the test copy and not the one in Documents\CSI ProMax.
+            const string test = @"C:\Users\a\etabs-promax-test\v0415\app\dist\CsiProMaxPlugin.dll", installed = @"C:\Users\a\Documents\CSI ProMax\CsiProMaxPlugin.dll";
+            var ini = "[PlugIn]\r\n NumberPlugIns=1\r\n PlugInName=CsiProMaxPlugin\r\n PlugInMenuText=CSI ProMax\r\n PlugInPath=" + test + "\r\n[Other]\r\n A=1\r\n";
+            var (state, text) = ToolsMenu.Edit(ini, "CsiProMaxPlugin", installed, _ => true, prefer: true);
+            Equal(ToolsMenu.State.Moved, state, "the test copy's entry, seen from the installed folder");
+            Check(text!.Contains("PlugInPath=" + installed, StringComparison.Ordinal) && !text.Contains("etabs-promax-test", StringComparison.Ordinal) && text.Contains("NumberPlugIns=1", StringComparison.Ordinal) && text.Contains("[Other]\r\n A=1", StringComparison.Ordinal), text);
+            // Without that preference (CSI ProMax runs from a folder of its own choosing) a copy that is there is left alone, as before.
+            Equal(ToolsMenu.State.Already, ToolsMenu.Edit(ini, "CsiProMaxPlugin", installed, _ => true).State, "no preference: left alone");
+            Equal(ToolsMenu.State.Already, ToolsMenu.Edit(ini.Replace(test, installed), "CsiProMaxPlugin", installed, _ => true, prefer: true).State, "already the installed one");
+            var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/ToolsMenu.cs"));
+            Check(source.Contains("new[] { DefaultInstall(), InstalledIn, AppContext.BaseDirectory }", StringComparison.Ordinal), "Documents\\CSI ProMax no longer comes before the folder CSI ProMax runs from");
+        });
+        yield return ("field test, only what changed or failed: a part that passed and is unchanged is not run again; a failed, new or changed one is", () =>
+        {
+            // Ahmed, 2026-11-25: "ignore for testing things that passed and just check the new things in addition to the things failed or not tested".
+            var passed = new FieldRetest.Part("0.4.16", "aaaa", 140, 0, [("ETABS table Element Forces - Braces", "ETABS does not list this table")]);
+            Check(!FieldRetest.Decide(passed, "aaaa").Run && FieldRetest.Decide(passed, "aaaa").Why.Contains("0.4.16", StringComparison.Ordinal), "a part that passed and is unchanged would run again");
+            Check(FieldRetest.Decide(passed, "bbbb").Run, "a part whose code changed is left out");
+            Check(FieldRetest.Decide(passed with { Failed = 1 }, "aaaa").Run, "a part with a failed step is left out");
+            Check(FieldRetest.Decide(null, "aaaa").Run && FieldRetest.Decide(passed, "").Run && FieldRetest.Decide(passed with { Print = "" }, "aaaa").Run, "a part never run, or a build with no source hashes, is left out");
+            // The code of a part: its own files and the shared tools, not another program's.
+            var files = new Dictionary<string, string> { ["Etabs/ComEtabs.cs"] = "1", ["Tools/ResultTools.cs"] = "2", ["Sap2000/SapTools.cs"] = "3", ["Safe/SafeTools.cs"] = "4", ["Panel/Chat/ChatPane.cs"] = "5", ["FieldTest.cs"] = "6" };
+            string Print(string part, string file, string hash) => FieldRetest.Print(part, new Dictionary<string, string>(files) { [file] = hash });
+            Check(Print("sap2000", "Sap2000/SapTools.cs", "x") != FieldRetest.Print("sap2000", files), "a change in SAP2000's tools does not change SAP2000's part");
+            Check(Print("etabs", "Sap2000/SapTools.cs", "x") == FieldRetest.Print("etabs", files) && Print(FieldRetest.Panel, "Sap2000/SapTools.cs", "x") == FieldRetest.Print(FieldRetest.Panel, files), "a change in SAP2000's tools changes another part");
+            Check(new[] { "etabs", "sap2000", "safe" }.All(part => Print(part, "Tools/ResultTools.cs", "x") != FieldRetest.Print(part, files)), "a change in a shared tool does not change every program's part");
+            Check(Print(FieldRetest.Panel, "Panel/Chat/ChatPane.cs", "x") != FieldRetest.Print(FieldRetest.Panel, files) && Print("etabs", "FieldTest.cs", "x") == FieldRetest.Print("etabs", files), "the panel's part, or the runner itself, is not told apart");
+            Check(FieldRetest.Files().Count > 100 && FieldRetest.Print("etabs").Length == 16 && FieldRetest.Print(FieldRetest.Panel).Length == 16, $"this build carries no source hashes ({FieldRetest.Files().Count} files)");
+            // Kept on the PC and read back; a part that did not run keeps what it had.
+            var folder = Path.Combine(Path.GetTempPath(), "cpm-retest-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                var file = Path.Combine(folder, "last-results.json");
+                FieldRetest.Save(new Dictionary<string, FieldRetest.Part> { ["etabs"] = passed, ["sap2000"] = passed with { Failed = 2 } }, file);
+                FieldRetest.Save(new Dictionary<string, FieldRetest.Part> { ["sap2000"] = passed with { Version = "0.4.17" } }, file);
+                var back = FieldRetest.Load(file);
+                Equal("0.4.16|aaaa|140|0|1", $"{back["etabs"].Version}|{back["etabs"].Print}|{back["etabs"].Passed}|{back["etabs"].Failed}|{back["etabs"].NotTested.Count}", "ETABS's part read back");
+                Equal("0.4.17|0", $"{back["sap2000"].Version}|{back["sap2000"].Failed}", "SAP2000's part after its next run");
+                File.WriteAllText(file, "not json");
+                Equal(0, FieldRetest.Load(file).Count, "parts read from a file that is not understood");
+            }
+            finally { if (Directory.Exists(folder)) Directory.Delete(folder, true); }
+            // In the report: one line that says it was not run again, and what it could not test, with its reason.
+            var ctx = new FieldContext(CsiProgram.Etabs, Path.GetTempPath(), new MemoryEtabs());
+            FieldRetest.LeftOut(ctx, "ETABS on a scratch model", passed, "all 140 steps of it passed in version 0.4.16 and its code is unchanged since");
+            var steps = ctx.Steps.ToList();
+            Check(steps.Count == 2 && steps[0].Ok && !steps[0].Skipped && steps[0].Name.Contains("not run again", StringComparison.Ordinal) && steps[1].Skipped && steps[1].Detail.Contains("as in the run of version 0.4.16", StringComparison.Ordinal), string.Join(" | ", steps.Select(s => $"{s.Name}: {s.Detail}")));
+        });
+        yield return ("build check: the window that is checked does not update itself away", () =>
+        {
+            // Seen on 2026-11-25: a pull request's windows job failed with "it is still running twelve seconds later"
+            // because a newer release existed and the checked window switched to it.
+            var check = File.ReadAllText(Path.Combine(SourceText.Root(), "tests/window.Tests.ps1"));
+            Check(check.Contains("'--no-update'", StringComparison.Ordinal), "the window check starts a window that may update itself");
+            var app = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Panel/Host/App.cs"));
+            Check(app.Contains("if (NoUpdate && !interactive) return;", StringComparison.Ordinal) && app.Contains("if (NoUpdate || SwitchTo is null", StringComparison.Ordinal), "--no-update does not stop the look for a version and the switch to it");
+            Check(File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Program.cs")).Contains("args.Contains(\"--no-update\")", StringComparison.Ordinal), "--no-update is not read");
+        });
+        yield return ("ETABS 23 field test: delete_joints deletes a loose joint in ETABS and SAFE too", () =>
+        {
+            // Seen on 2026-11-25 with 0.4.17: "a test joint is still in the model". The ETABS link knew frames and areas only.
+            var link = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Etabs/ComEtabs.cs"));
+            Check(link.Contains("\"point\" => m.PointObj.DeleteSpecialPoint(name, 0)", StringComparison.Ordinal), "the ETABS link cannot delete a joint");
+            // Same run: "should have the scratch model open again after the checkpoint; it has ...cpm-field-test-xxxxxx.$et".
+            var steps = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/CsiFieldSteps.cs"));
+            Check(!steps.Contains("Path.GetFileName(link.Info().File), Path.GetFileName(scratchFile)", StringComparison.Ordinal) && steps.Contains("ScratchProgram.SameName(link.Info().File, scratchFile)", StringComparison.Ordinal), "the checkpoint steps compare the open model's name with its file type");
+            Check(ScratchProgram.SameName(@"C:\t\cpm-field-test-1ff9a4.$et", @"C:\t\cpm-field-test-1ff9a4.edb"), "ETABS's working file is not taken for the scratch model");
         });
         yield return ("ETABS 20 tester: the field test tries what Tools > CSI ProMax does in each program, and fails where the plug-in cannot be created", () =>
         {

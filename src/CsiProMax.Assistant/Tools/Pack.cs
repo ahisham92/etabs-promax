@@ -16,7 +16,14 @@ namespace CsiProMax.Assistant.Tools;
 public static class Pack
 {
     public const int Version = 1;
-    public const int DefaultMostRows = 60000;
+    /// <summary>
+    /// Rows a pack takes of one table. Ahmed wants every result in the Viewer, and real element tables run past 60,000
+    /// (0.4.33 field test: 44,000 shell rows and 139,000 SAP2000 frame stress rows on a small model), so a table is
+    /// taken whole up to this, within <see cref="PackTables.TotalMostRows"/> for the whole pack.
+    /// </summary>
+    public const int DefaultMostRows = 250000;
+    /// <summary>The largest model (frames and areas) whose instability check is made with the pack; a bigger one is checked with find_instabilities.</summary>
+    public const int StabilityPackLimit = 8000;
     /// <summary>Design tables are taken longer: a concrete beam table has a row per station of every beam.</summary>
     public const int DesignMostRows = 200000;
 
@@ -30,12 +37,31 @@ public static class Pack
         "Element Forces - Beams", "Element Forces - Columns", "Element Forces - Braces",
     ];
 
+    /// <summary>
+    /// The program's stories; for a program without stories (SAP2000), the levels its joints stand on, so the Viewer's
+    /// plan and elevation views have levels to step through (0.4.20 field test: the SAP2000 pack had none).
+    /// </summary>
+    internal static IReadOnlyList<StoryRow> Levels(ICsiLink e, IReadOnlyList<PointRow> points)
+    {
+        var stories = e.Stories();
+        if (stories.Count > 0 || e.Program.Key != CsiProgram.Sap2000.Key || points.Count == 0) return stories;
+        var span = points.Max(p => p.Z) - points.Min(p => p.Z);
+        var tolerance = Math.Max(1e-6, span * 1e-4);
+        var zs = new List<double>();
+        foreach (var z in points.Select(p => p.Z).OrderBy(z => z))
+            if (zs.Count == 0 || z - zs[^1] > tolerance) zs.Add(z);
+        if (zs.Count < 2 || zs.Count > 200) return [];
+        var rows = new List<StoryRow> { new("Base", zs[0], 0) };
+        for (var i = 1; i < zs.Count; i++) rows.Add(new StoryRow($"Z {Math.Round(zs[i], 3).ToString(CultureInfo.InvariantCulture)}", zs[i], zs[i] - zs[i - 1]));
+        return rows;
+    }
+
     public sealed record Built(byte[] Zip, JsonObject Content, int Frames, int Areas, IReadOnlyList<string> Tables, IReadOnlyList<string> Notes);
 
     /// <param name="extraTables">More tables to take, by name or key (for example "Element Forces - Beams").</param>
     public static Built Build(ICsiLink e, IReadOnlyList<string> extraTables, IReadOnlyList<string> cases, IReadOnlyList<string> combos,
         JsonObject? checks, JsonArray? comments, int mostRows = DefaultMostRows, string by = "", bool withTables = true,
-        IReadOnlyList<string>? designFiles = null)
+        IReadOnlyList<string>? designFiles = null, bool instabilities = false)
     {
         var info = e.Info();
         var notes = new List<string>();
@@ -56,7 +82,7 @@ public static class Pack
         var points = e.Points();
         var model = new JsonObject
         {
-            ["stories"] = new JsonArray(e.Stories().Select(s => (JsonNode)new JsonObject { ["name"] = s.Name, ["elevation"] = R(s.Elevation), ["height"] = R(s.Height) }).ToArray()),
+            ["stories"] = new JsonArray(Levels(e, points).Select(s => (JsonNode)new JsonObject { ["name"] = s.Name, ["elevation"] = R(s.Elevation), ["height"] = R(s.Height) }).ToArray()),
             ["frames"] = new JsonArray(frames.Select(f => (JsonNode)new JsonArray(f.Name, f.Kind, f.Section, f.Story, R(f.X1), R(f.Y1), R(f.Z1), R(f.X2), R(f.Y2), R(f.Z2))).ToArray()),
             ["areas"] = new JsonArray(areas.Select(a => (JsonNode)new JsonObject
             {
@@ -93,6 +119,7 @@ public static class Pack
             if (data.Rows.Count == 0) continue;
             tables[t.Name] = TableJson(t.Name, data, DesignResults.IsDesignTable(t.Name) ? Math.Max(mostRows, DesignMostRows) : mostRows, notes, null);
         }
+        if (withTables) AddEverything(e, known, wanted, cases, combos, tables, mostRows, notes, manifest);
         if (withTables && tables.Count <= 1 && !info.Locked) notes.Add("The analysis has not been run, so the pack holds the model without results.");
         if (withTables) manifest["design"] = AddDesign(e, info, known, tables, designFiles ?? [], Math.Max(mostRows, DesignMostRows), notes);
         if (withTables && (areas.Any(a => a.Kind == "wall") || tables.Select(t => t.Key).Any(n => DesignResults.FamilyOf(n) is { On: "pier" or "spandrel" })))
@@ -100,17 +127,54 @@ public static class Pack
         else if (e is OfflineEtabs) model["wall_labels"] = DesignResults.WallLabels(e, [], notes);
 
         var content = new JsonObject { ["manifest"] = manifest, ["model"] = model, ["checks"] = checks, ["comments"] = comments ?? [], ["tables"] = tables };
+        // What stops the analysis, as the checker found it when the pack was made: the Viewer lists and marks it.
+        if (instabilities && frames.Count + areas.Count <= StabilityPackLimit)
+        {
+            try { content["instabilities"] = StabilityTools.Json(CsiProMax.Checks.Stability.StabilityCheck.Run(StabilityTools.Read(e)), e.Program, e is OfflineEtabs); }
+            catch (Exception ex) when (ex is EtabsException or InvalidOperationException or ArgumentException) { notes.Add($"The instability check could not be made for the pack ({ex.Message})."); }
+        }
         using var stream = new MemoryStream();
         using (var zip = new ZipArchive(stream, ZipArchiveMode.Create, true))
         {
             Add(zip, "manifest.json", manifest);
             Add(zip, "model.json", model);
             if (checks is not null) Add(zip, "checks.json", checks);
+            if (content["instabilities"] is JsonObject found) Add(zip, "instabilities.json", found);
             Add(zip, "comments.json", comments ?? []);
             var n = 0;
             foreach (var (_, table) in tables) Add(zip, $"tables/{++n:000}.json", table!);
         }
         return new Built(stream.ToArray(), content, frames.Count, areas.Count, tables.Select(t => t.Key).ToList(), notes);
+    }
+
+    /// <summary>
+    /// Every other result, design and design-input table that has data (<see cref="PackTables"/>), within the pack's
+    /// total of rows, and the steps of time history and nonlinear cases. What did not fit is named in the manifest, so
+    /// the Viewer can say which tables to ask for.
+    /// </summary>
+    private static void AddEverything(ICsiLink e, IReadOnlyList<TableName> known, IReadOnlyList<TableName> wanted, IReadOnlyList<string> cases,
+        IReadOnlyList<string> combos, JsonObject tables, int mostRows, List<string> notes, JsonObject manifest)
+    {
+        var left = new JsonArray();
+        var budget = PackTables.TotalMostRows;
+        foreach (var t in PackTables.More(known, wanted))
+        {
+            if (tables.ContainsKey(t.Name)) continue;
+            if (budget <= 0) { left.Add((JsonNode)t.Name); continue; }
+            TableData data;
+            try { data = e.ReadTable(t.Key, cases, combos); }
+            catch (EtabsException ex) { notes.Add($"'{t.Name}' could not be read ({ex.Message})."); continue; }
+            if (data.Rows.Count == 0) continue;
+            var most = Math.Min(mostRows, budget);
+            tables[t.Name] = TableJson(t.Name, data, most, notes, PackTables.Kind(t) == "input" ? "input" : null);
+            budget -= Math.Min(data.Rows.Count, most);
+        }
+        if (PackTables.AddSteps(e, known, cases, combos, tables, mostRows, notes, (name, data, most) => TableJson(name, data, most, notes, null)) is { } steps) manifest["step_output"] = steps;
+        if (left.Count > 0)
+        {
+            manifest["left_out_tables"] = left;
+            notes.Add($"{left.Count} more result tables did not fit in the pack ({string.Join(", ", left.Take(8).Select(n => n!.GetValue<string>()))}{(left.Count > 8 ? ", ..." : "")}): make the pack again with those tables named, or with fewer load cases.");
+        }
     }
 
     private static JsonObject TableJson(string name, TableData data, int most, List<string> notes, string? from)
@@ -228,6 +292,7 @@ public static class Pack
             ["checks"] = Text("checks.json"),
             ["comments"] = Text("comments.json") ?? new JsonArray(),
         };
+        if (Text("instabilities.json") is { } found) content["instabilities"] = found;
         var tables = new JsonObject();
         foreach (var entry in zip.Entries.Where(en => en.FullName.StartsWith("tables/", StringComparison.Ordinal)).OrderBy(en => en.FullName, StringComparer.Ordinal))
             if (Text(entry.FullName) is JsonObject t && t["name"] is { } name) tables[name.GetValue<string>()] = t;
@@ -252,13 +317,15 @@ public static class Pack
 
     /// <summary>
     /// The Viewer page for the model that is open now, served on this PC: it asks for the model again whenever the
-    /// revision moves, and keeps the reader's view.
+    /// revision moves, and keeps the reader's view. With <paramref name="chat"/> (the AI chat is on in the window that
+    /// serves it) the page has a Chat tab: the window's own conversation.
     /// </summary>
-    public static string LiveViewerHtml(JsonObject content, int revision)
+    public static string LiveViewerHtml(JsonObject content, int revision, bool chat = false)
     {
         var html = ViewerHtml(content);
-        var live = "<script>window.cpmLive=true;(function(){let rev=" + revision.ToString(CultureInfo.InvariantCulture) + ";setInterval(async()=>{try{const r=await fetch('model?rev='+rev,{cache:'no-store'});" +
-                   "if(r.status!==200)return;const j=await r.json();rev=j.rev;cpmLoad(j.pack,true);}catch(e){}},1500);})();</script>";
+        // cpmPull asks at once (after a hand edit); otherwise every second and a half.
+        var live = "<script>window.cpmLive=true;" + (chat ? "window.cpmChat=true;" : "") + "(function(){let rev=" + revision.ToString(CultureInfo.InvariantCulture) + ";window.cpmPull=async()=>{try{const r=await fetch('model?rev='+rev,{cache:'no-store'});" +
+                   "if(r.status!==200)return;const j=await r.json();rev=j.rev;cpmLoad(j.pack,true);}catch(e){}};setInterval(window.cpmPull,1500);})();</script>";
         return html.Replace("</body>", live + "</body>", StringComparison.Ordinal);
     }
 

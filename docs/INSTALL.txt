@@ -13,6 +13,19 @@ SAP2000 that is closed and has no other plug-in. It keeps a copy of each setting
 closes or changes a CSI program or a model. Then open the program and a model, and choose Tools > CSI ProMax.
 For a program it could not add itself to, it prints the plug-in name and file to add by hand (the steps below).
 Run the same line again at any time: it only replaces what changed.
+Without the AI chat
+The same line, for CSI ProMax without the AI chat: the Modeler (modelling by hand in the 3D view, Define forms and
+Excel tables), the 3D view of an open model, review packs and the Viewer, with no Claude Code used or installed:
+
+   irm https://raw.githubusercontent.com/ahisham92/etabs-promax/main/install-no-ai.ps1 | iex
+
+Everything else is the same: the same files, Tools > CSI ProMax in each program, and updates that go in without closing
+the program. Running the plain line again later keeps the choice. To turn the chat on or off afterwards, use the
+CSI ProMax menu in the window (Turn the AI chat on / off): CSI ProMax starts again with it, and the program and the
+model stay open. With the chat on, the 3D view (its own CSI ProMax window) has a Chat tab too: the same conversation as the window.
+Modelling and viewing work with or without ETABS, SAFE or SAP2000 on the PC. Without one, start the "CSI ProMax
+Modeler" shortcut (the install makes it), or double-click "Open the Modeler.cmd" in Documents\CSI ProMax.
+
 If that address cannot be reached, this line gets the same script from the releases page:
 
    irm https://github.com/ahisham92/etabs-promax/releases/latest/download/install.ps1 | iex

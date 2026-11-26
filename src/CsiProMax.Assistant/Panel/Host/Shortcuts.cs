@@ -9,7 +9,7 @@ namespace CsiProMax.Host;
 /// The Modeler and Viewer shortcuts, on the desktop and in the Start menu (CSI ProMax folder). Made at the first
 /// start with no question asked, and pointed at the new version after an update. A shortcut the user deleted stays
 /// deleted. Both are .lnk files made by Windows' own shortcut object: the Modeler's runs the PC's dotnet with
-/// CsiProMax.dll --modeler, the Viewer's opens the Viewer page in the browser. No .exe of ours.
+/// CsiProMax.dll --modeler, the Viewer's runs it with --viewer, so both open in CSI ProMax windows of their own (WebWindow), never a browser tab. No .exe of ours.
 /// </summary>
 internal static class Shortcuts
 {
@@ -30,8 +30,8 @@ internal static class Shortcuts
     /// <summary>What the mark file holds: the program folder the shortcuts were last made for.</summary>
     internal static bool Due(string? marked, string folder) => !string.Equals(marked?.Trim(), folder + Mark2, StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>Added to the mark when the shortcuts themselves change (2: they have the icon), so they are made again once.</summary>
-    internal const string Mark2 = "|2";
+    /// <summary>Added to the mark when the shortcuts themselves change (2: they have the icon; 3: the Viewer's opens its own window), so they are made again once.</summary>
+    internal const string Mark2 = "|3";
 
     /// <summary>Called at every start, off the window's thread. Never throws: a PC that forbids shortcuts just has none.</summary>
     public static void Ensure()
@@ -39,7 +39,7 @@ internal static class Shortcuts
         if (!OperatingSystem.IsWindows()) return;
         try
         {
-            var folder = AppContext.BaseDirectory;
+            var folder = ProgramFolder();
             var first = !File.Exists(Mark);
             WriteViewerPage();
             if (!first && !Due(File.ReadAllText(Mark), folder)) return;
@@ -50,13 +50,27 @@ internal static class Shortcuts
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or COMException or InvalidOperationException or NotSupportedException) { }
     }
 
+    /// <summary>
+    /// The CSI ProMax the shortcuts start: the installed copy (Documents\CSI ProMax, as the Tools menus name it), and the
+    /// folder this copy runs from only when none is installed. A copy unpacked elsewhere to try a version (as the field
+    /// test runs are) once pointed the desktop and Start menu Modeler at itself, and the engineer then opened that test
+    /// copy from the desktop (2026-11-25).
+    /// </summary>
+    internal static string ProgramFolder()
+    {
+        string? installed = null;
+        try { installed = CsiProMax.Assistant.ToolsMenu.InstallFolder(); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        var folder = installed ?? AppContext.BaseDirectory;
+        return folder.EndsWith(Path.DirectorySeparatorChar) || folder.EndsWith(Path.AltDirectorySeparatorChar) ? folder : folder + Path.DirectorySeparatorChar;
+    }
+
     /// <summary>Makes all four again, whatever was deleted (the View menu's button). Gives back the files made.</summary>
     public static IReadOnlyList<string> MakeAll()
     {
         WriteViewerPage();
         var made = Make(onlyExisting: false);
         Directory.CreateDirectory(Root);
-        File.WriteAllText(Mark, AppContext.BaseDirectory + Mark2);
+        File.WriteAllText(Mark, ProgramFolder() + Mark2);
         return made;
     }
 
@@ -78,13 +92,18 @@ internal static class Shortcuts
         return file;
     }
 
-    private static void WriteViewerPage()
+    /// <summary>Writes the Viewer page when it is missing or another version's, and gives back its file.</summary>
+    internal static string WriteViewerPage()
     {
         var html = Pack.ViewerHtml();
         Directory.CreateDirectory(Root);
         if (!File.Exists(ViewerPage) || File.ReadAllText(ViewerPage, Encoding.UTF8) != html)
             File.WriteAllText(ViewerPage, html, new UTF8Encoding(false));
+        return ViewerPage;
     }
+
+    /// <summary>The Viewer shortcut's arguments: CsiProMax.dll in its own window (--viewer), not the page in a browser.</summary>
+    internal static string ViewerArguments(string folder) => "\"" + Path.Combine(folder, "CsiProMax.dll") + "\" --viewer";
 
     private static List<string> Make(bool onlyExisting)
     {
@@ -104,8 +123,8 @@ internal static class Shortcuts
                 {
                     dynamic link = shell.CreateShortcut(modeler);
                     link.TargetPath = dotnet;
-                    link.Arguments = "\"" + Path.Combine(AppContext.BaseDirectory, "CsiProMax.dll") + "\" --modeler";
-                    link.WorkingDirectory = AppContext.BaseDirectory;
+                    link.Arguments = "\"" + Path.Combine(ProgramFolder(), "CsiProMax.dll") + "\" --modeler";
+                    link.WorkingDirectory = ProgramFolder();
                     link.WindowStyle = 7; // minimised: dotnet's own console window stays out of the way
                     link.Description = "CSI ProMax Modeler: build ETABS models with no ETABS open"; // ETABS itself
                     if (File.Exists(icon)) link.IconLocation = icon;
@@ -116,7 +135,10 @@ internal static class Shortcuts
                 if (!onlyExisting || File.Exists(viewer))
                 {
                     dynamic link = shell.CreateShortcut(viewer);
-                    link.TargetPath = ViewerPage;
+                    link.TargetPath = dotnet;
+                    link.Arguments = ViewerArguments(ProgramFolder());
+                    link.WorkingDirectory = ProgramFolder();
+                    link.WindowStyle = 7; // minimised: dotnet's own console window stays out of the way
                     link.Description = "CSI ProMax Viewer: open a review pack (.cpmx) with no ETABS"; // ETABS itself
                     if (File.Exists(icon)) link.IconLocation = icon;
                     link.Save();

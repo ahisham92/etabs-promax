@@ -211,6 +211,10 @@ public sealed class LoadPattern
     public string Type { get; set; } = "Dead";
     public double SelfWeight { get; set; }
     public List<string> Extra { get; set; } = [];
+    /// <summary>A seismic or wind load the Modeler computes for this pattern, by a code's own method (Define > Load
+    /// Patterns > Modify Lateral Load). Its story forces are the pattern's point loads, made again after each change.
+    /// Kept in the model file (.cpm); the .e2k carries the forces.</summary>
+    public Lateral.LateralDef? Auto { get; set; }
 }
 
 /// <summary>A load on one object on one story. <see cref="Tokens"/> is the line after the story, as ETABS writes

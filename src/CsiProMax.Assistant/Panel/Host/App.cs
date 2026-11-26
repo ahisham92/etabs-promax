@@ -72,9 +72,14 @@ public static class App
         Bridge = new BridgeServer(registry, Dispatcher, ETABSYear);
         Bridge.Start();
         _started = true;
+        // The local server carries the 3D view and hand modelling too, so it runs with the AI chat off as well.
         try { ChatMcp.Start(Bridge); } catch (Exception) { /* the chat says what is wrong when a message is sent */ }
-        try { Chat.ChatPane.Start(Etabs); } catch (Exception) { /* the chat still works, with one conversation */ }
-        Chat.Autopilot.ModelTitle = () => Chat.ChatPane.CurrentModelTitle;
+        // With the AI chat off (AiMode) nothing of the chat is started: no Claude Code is looked for, offered or run.
+        if (AiMode.On)
+        {
+            try { Chat.ChatPane.Start(Etabs); } catch (Exception) { /* the chat still works, with one conversation */ }
+            Chat.Autopilot.ModelTitle = () => Chat.ChatPane.CurrentModelTitle;
+        }
         try { CrashGuard.Start(Ui); } catch (Exception) { }
         // This PC's license (Licensing/LicenseState): without a valid key the License window opens at the first idle moment.
         try
@@ -99,8 +104,11 @@ public static class App
         if (!_started) return;
         _started = false;
         try { _life?.Cancel(); } catch (ObjectDisposedException) { }
-        try { Chat.ChatPane.Shutdown(); } catch (Exception) { }
-        try { if (Etabs is { } app) Chat.ChatPane.Stop(app); } catch (Exception) { }
+        if (AiMode.On)
+        {
+            try { Chat.ChatPane.Shutdown(); } catch (Exception) { }
+            try { if (Etabs is { } app) Chat.ChatPane.Stop(app); } catch (Exception) { }
+        }
         try { ChatMcp.Stop(); } catch (Exception) { }
         try { Bridge?.Stop(); } catch (Exception) { }
         Host.ModelWatch.Stop();
@@ -193,6 +201,15 @@ public static class App
     /// </summary>
     internal static Action<string>? SwitchTo { get; set; }
 
+    /// <summary>
+    /// Starts this version again in place of this window (Program sets it), beside the same program window: after the
+    /// AI chat is switched on or off. The CSI program and the model stay open.
+    /// </summary>
+    internal static Action? Restart { get; set; }
+
+    /// <summary>True when this window took over from one that was open (an update, or the AI chat switched): it opens nothing by itself again.</summary>
+    internal static bool Reopened { get; set; }
+
     private static int _switching;
 
     /// <summary>
@@ -201,7 +218,7 @@ public static class App
     /// </summary>
     internal static void SwitchWhenIdle()
     {
-        if (SwitchTo is null || Updater.NewestDownloaded(Updater.Current) is null) return;
+        if (NoUpdate || SwitchTo is null || Updater.NewestDownloaded(Updater.Current) is null) return;
         if (Interlocked.Exchange(ref _switching, 1) == 1) return;
         var stop = _life?.Token ?? CancellationToken.None;
         _ = Task.Run(async () =>
@@ -263,8 +280,16 @@ public static class App
         _ = Task.Run(() => RunUpdateAsync(force: true, interactive: true, token));
     }
 
+    /// <summary>
+    /// Started with --no-update (the window check of a build, tests/window.Tests.ps1): this window neither looks for a
+    /// newer version by itself nor switches to one. Without it, a build older than the newest release updated itself
+    /// and its window was gone twelve seconds later, which failed the check of a pull request that had done nothing wrong.
+    /// </summary>
+    public static bool NoUpdate { get; set; }
+
     private static async Task RunUpdateAsync(bool force, bool interactive, CancellationToken stop, bool install = true)
     {
+        if (NoUpdate && !interactive) return;
         var progress = new UpdateProgress { Interactive = interactive };
         UpdateProgress.Current = progress;
         if (interactive) Surface(progress);

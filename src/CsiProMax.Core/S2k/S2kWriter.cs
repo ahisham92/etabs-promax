@@ -147,15 +147,85 @@ public static class S2kWriter
 
         // Point loads need their joints before the joint table is written.
         var jointLoads = new List<IReadOnlyList<(string, string)>>();
+        var jointDisps = new List<IReadOnlyList<(string, string)>>();
         foreach (var load in m.PointLoads)
         {
             var story = m.StoryIndex(load.Story);
             if (story < 0 || !points.TryGetValue(load.Object, out var p)) { notes.Add($"A point load on {load.Object} at {load.Story} points at nothing and was left out."); continue; }
             var type = E2kText.Unquote(E2kText.Value(load.Tokens, "TYPE") ?? "FORCE");
-            if (!type.Equals("FORCE", StringComparison.OrdinalIgnoreCase)) { notes.Add($"A {type} point load on {load.Object} at {load.Story} has no plain SAP2000 equal and was left out."); continue; }
             double V(string key) => E2kText.TryNumber(E2kText.Value(load.Tokens, key) is { } t ? E2kText.Unquote(t) : null, out var v) ? v : 0;
+            if (type.Equals("GROUNDDISP", StringComparison.OrdinalIgnoreCase))
+            {
+                jointDisps.Add(Row(("Joint", Joint(Physical.At(m, p, story))), ("LoadPat", load.Pattern), ("CoordSys", "GLOBAL"),
+                    ("U1", N(V("UX"))), ("U2", N(V("UY"))), ("U3", N(V("UZ"))), ("R1", N(V("RX"))), ("R2", N(V("RY"))), ("R3", N(V("RZ")))));
+                continue;
+            }
+            if (!type.Equals("FORCE", StringComparison.OrdinalIgnoreCase)) { notes.Add($"A {type} point load on {load.Object} at {load.Story} has no plain SAP2000 equal and was left out."); continue; }
             jointLoads.Add(Row(("Joint", Joint(Physical.At(m, p, story))), ("LoadPat", load.Pattern), ("CoordSys", "GLOBAL"),
                 ("F1", N(V("FX"))), ("F2", N(V("FY"))), ("F3", N(V("FZ"))), ("M1", N(V("MX"))), ("M2", N(V("MY"))), ("M3", N(V("MZ")))));
+        }
+
+        // What Assign > Frame, Shell and Joint set beyond sections: releases, local axes, insertion points, end offsets,
+        // modifiers and springs.
+        var releases = new List<IReadOnlyList<(string, string)>>();
+        var axes = new List<IReadOnlyList<(string, string)>>();
+        var insertion = new List<IReadOnlyList<(string, string)>>();
+        var offsets = new List<IReadOnlyList<(string, string)>>();
+        var frameMods = new List<IReadOnlyList<(string, string)>>();
+        var hingeRows = new List<IReadOnlyList<(string, string)>>();
+        var areaMods = new List<IReadOnlyList<(string, string)>>();
+        var springs = new List<IReadOnlyList<(string, string)>>();
+        var springDefs = PropertyDefs.Springs(m);
+        foreach (var x in m.LineAssigns)
+        {
+            if (!frameNames.TryGetValue((x.Label, x.Story), out var name)) continue;
+            var (ri, rj) = PropertyDefs.ReleasesOf(x);
+            if (ri.Count + rj.Count > 0)
+                releases.Add(Row(("Frame", name), ("PI", YesNo(ri.Contains("P"))), ("V2I", YesNo(ri.Contains("V2"))), ("V3I", YesNo(ri.Contains("V3"))), ("TI", YesNo(ri.Contains("T"))), ("M2I", YesNo(ri.Contains("M2"))), ("M3I", YesNo(ri.Contains("M3"))),
+                    ("PJ", YesNo(rj.Contains("P"))), ("V2J", YesNo(rj.Contains("V2"))), ("V3J", YesNo(rj.Contains("V3"))), ("TJ", YesNo(rj.Contains("T"))), ("M2J", YesNo(rj.Contains("M2"))), ("M3J", YesNo(rj.Contains("M3"))), ("PartialFix", "No")));
+            if (PropertyDefs.Value(x.Extra, "ANG") is { } ang) axes.Add(Row(("Frame", name), ("Angle", ang), ("AdvanceAxes", "No")));
+            if (PropertyDefs.Value(x.Extra, "CARDINALPT") is { } cp && cp != "10")
+                insertion.Add(Row(("Frame", name), ("CardinalPt", Cardinal(cp)), ("Mirror2", "No"), ("Mirror3", "No"), ("StiffTransform", "Yes"), ("XI", "0"), ("YI", "0"), ("ZI", "0"), ("XJ", "0"), ("YJ", "0"), ("ZJ", "0"), ("CoordSys", "Local")));
+            var oi = PropertyDefs.Value(x.Extra, "LENGTHOFFI"); var oj = PropertyDefs.Value(x.Extra, "LENGTHOFFJ"); var rz = PropertyDefs.Value(x.Extra, "RIGIDZONE");
+            if (oi is not null || oj is not null || rz is not null)
+                offsets.Add(Row(("Frame", name), ("LengthType", "User Defined"), ("Offset1", oi ?? "0"), ("Offset2", oj ?? "0"), ("RZ", rz ?? "0"), ("FixedRZ", "No")));
+            var fm = PropertyDefs.Modifiers(x.Extra, PropertyDefs.FrameModifiers);
+            if (fm.Values.Any(v => Math.Abs(v - 1) > 1e-12))
+                frameMods.Add(Row(("Frame", name), ("AMod", N(fm["AMOD"])), ("A2Mod", N(fm["A2MOD"])), ("A3Mod", N(fm["A3MOD"])), ("JMod", N(fm["JMOD"])), ("I2Mod", N(fm["I2MOD"])), ("I3Mod", N(fm["I3MOD"])), ("MMod", N(fm["MMOD"])), ("WMod", N(fm["WMOD"]))));
+            if (PropertyDefs.Value(x.Extra, "SPRINGPROP") is { } sp) notes.Add($"Frame {name} has the line spring {sp}: assign it in SAP2000 (Assign > Frame > Line Springs).");
+            var hinges = PropertyDefs.HingesOf(m, x.Label, x.Story);
+            // Auto hinges (SAP2000's API cannot assign hinges, so they go in by the file). The table's name and fields are
+            // checked against SAP2000's own by the field test, which lists its hinge tables when they differ.
+            foreach (var h in hinges) hingeRows.Add(Row(("Frame", name), ("RelDist", N(h.At)), ("HingeType", "Auto"), ("DOF", h.Dof)));
+        }
+        foreach (var x in m.AreaAssigns)
+        {
+            if (!areaNames.TryGetValue((x.Label, x.Story), out var name)) continue;
+            var am = PropertyDefs.Modifiers(x.Extra, PropertyDefs.ShellModifiers);
+            if (am.Values.Any(v => Math.Abs(v - 1) > 1e-12))
+                areaMods.Add(Row(("Area", name), ("f11", N(am["F11MOD"])), ("f22", N(am["F22MOD"])), ("f12", N(am["F12MOD"])), ("m11", N(am["M11MOD"])), ("m22", N(am["M22MOD"])), ("m12", N(am["M12MOD"])), ("v13", N(am["V13MOD"])), ("v23", N(am["V23MOD"])), ("MMod", N(am["MMOD"])), ("WMod", N(am["WMOD"]))));
+            if (PropertyDefs.Value(x.Extra, "SPRINGPROP") is { } sp) notes.Add($"Area {name} has the area spring {sp}: assign it in SAP2000 (Assign > Area > Area Springs).");
+        }
+        foreach (var pa in m.PointAssigns)
+        {
+            if (PropertyDefs.Value(pa.Extra, "SPRINGPROP") is not { } sp) continue;
+            var story = m.StoryIndex(pa.Story);
+            if (story < 0 || !points.TryGetValue(pa.Point, out var p)) continue;
+            var k = springDefs.Find(d => d.Kind == "point" && d.Name == sp);
+            if (k is null) { notes.Add($"Joint {pa.Point}@{pa.Story} has a spring {sp} that is not defined; left out."); continue; }
+            springs.Add(Row(("Joint", Joint(Physical.At(m, p, story))), ("CoordSys", "GLOBAL"), ("U1", N(k.Values["UX"])), ("U2", N(k.Values["UY"])), ("U3", N(k.Values["UZ"])), ("R1", N(k.Values["RX"])), ("R2", N(k.Values["RY"])), ("R3", N(k.Values["RZ"]))));
+        }
+
+        // The model's own groups (Define > Groups), by the SAP2000 names of their objects.
+        foreach (var g in GroupDefs.Groups(m))
+        {
+            if (!groups.ContainsKey(g.Name)) groups[g.Name] = [];
+            foreach (var (type, label, story) in g.Members)
+            {
+                if (type == "LINE" && frameNames.TryGetValue((label, story), out var f)) groups[g.Name].Add(("Frame", f));
+                else if (type == "AREA" && areaNames.TryGetValue((label, story), out var ar)) groups[g.Name].Add(("Area", ar));
+                else if (type == "POINT" && points.TryGetValue(label, out var pt) && m.StoryIndex(story) is var si && si >= 0) groups[g.Name].Add(("Joint", Joint(Physical.At(m, pt, si))));
+            }
         }
 
         Add(tables, "JOINT COORDINATES", jointRows);
@@ -164,6 +234,14 @@ public static class S2kWriter
         Add(tables, "FRAME SECTION ASSIGNMENTS", frameSections);
         Add(tables, "AREA SECTION ASSIGNMENTS", areaSections);
         Add(tables, "JOINT RESTRAINT ASSIGNMENTS", restraints);
+        Add(tables, "JOINT SPRING ASSIGNMENTS 1 - UNCOUPLED", springs);
+        Add(tables, "FRAME RELEASE ASSIGNMENTS 1 - GENERAL", releases);
+        Add(tables, "FRAME LOCAL AXES ASSIGNMENTS 1 - TYPICAL", axes);
+        Add(tables, "FRAME INSERTION POINT ASSIGNMENTS", insertion);
+        Add(tables, "FRAME OFFSET ALONG LENGTH ASSIGNMENTS", offsets);
+        Add(tables, "FRAME PROPERTY MODIFIERS", frameMods);
+        Add(tables, "FRAME HINGE ASSIGNS 01 - OVERVIEW", hingeRows);
+        Add(tables, "AREA STIFFNESS MODIFIERS", areaMods);
 
         if (diaphragms.Count > 0)
         {
@@ -171,10 +249,10 @@ public static class S2kWriter
             Add(tables, "JOINT CONSTRAINT ASSIGNMENTS", diaphragms.SelectMany(d => d.Value.Select(j => Row(("Joint", j), ("Constraint", d.Key), ("Type", "Diaphragm")))));
         }
 
-        // Groups, one per story.
+        // Groups, one per story, and the model's own.
         if (groups.Count > 0)
         {
-            Add(tables, "GROUPS 1 - DEFINITIONS", m.Stories.Where(s => groups.ContainsKey(s.Name)).Select(s => Row(("GroupName", s.Name), ("Selection", "Yes"),
+            Add(tables, "GROUPS 1 - DEFINITIONS", groups.Keys.Select(name => Row(("GroupName", name), ("Selection", "Yes"),
                 ("SectionCut", "Yes"), ("Steel", "Yes"), ("Concrete", "Yes"), ("Aluminum", "Yes"), ("ColdFormed", "Yes"), ("Stage", "Yes"), ("Bridge", "Yes"),
                 ("AutoSeismic", "No"), ("AutoWind", "No"), ("SelDesSteel", "No"), ("SelDesAlum", "No"), ("SelDesCold", "No"), ("MassWeight", "Yes"))));
             Add(tables, "GROUPS 2 - ASSIGNMENTS", groups.SelectMany(g => g.Value.Distinct().Select(o => Row(("GroupName", g.Key), ("ObjectType", o.Type), ("ObjectLabel", o.Label)))));
@@ -185,34 +263,86 @@ public static class S2kWriter
         Add(tables, "LOAD PATTERN DEFINITIONS", m.LoadPatterns.Select(p => Row(("LoadPat", p.Name), ("DesignType", DesignType(p.Type)), ("SelfWtMult", N(p.SelfWeight)))));
 
         var frameLoads = new List<IReadOnlyList<(string, string)>>();
+        var framePoints = new List<IReadOnlyList<(string, string)>>();
+        var frameTemps = new List<IReadOnlyList<(string, string)>>();
+        var frameStrains = new List<IReadOnlyList<(string, string)>>();
         foreach (var load in m.LineLoads)
         {
             if (!frameNames.TryGetValue((load.Object, load.Story), out var frame)) { notes.Add($"A line load on {load.Object} at {load.Story} points at nothing and was left out."); continue; }
             var type = E2kText.Unquote(E2kText.Value(load.Tokens, "TYPE") ?? "");
             var dir = E2kText.Unquote(E2kText.Value(load.Tokens, "DIR") ?? "GRAV");
+            double T(string key, double fallback = 0) => E2kText.TryNumber(E2kText.Value(load.Tokens, key), out var v) ? v : fallback;
+            switch (type.ToUpperInvariant())
+            {
+                case "POINTF" or "POINTM":
+                {
+                    var rel = T("RDIST", 0.5);
+                    framePoints.Add(Row(("Frame", frame), ("LoadPat", load.Pattern), ("CoordSys", "GLOBAL"), ("Type", type.Equals("POINTM", StringComparison.OrdinalIgnoreCase) ? "Moment" : "Force"),
+                        ("Dir", Direction(dir)), ("DistType", "RelDist"), ("RelDist", N(rel)), ("AbsDist", N(rel * lengths[frame])), ("Force", N(T("FVAL")))));
+                    continue;
+                }
+                case "TRAPF":
+                {
+                    double a0 = T("RDSTART", 0), b0 = T("RDEND", 1);
+                    frameLoads.Add(Row(("Frame", frame), ("LoadPat", load.Pattern), ("CoordSys", "GLOBAL"), ("Type", "Force"), ("Dir", Direction(dir)),
+                        ("DistType", "RelDist"), ("RelDistA", N(a0)), ("RelDistB", N(b0)), ("AbsDistA", N(a0 * lengths[frame])), ("AbsDistB", N(b0 * lengths[frame])), ("FOverLA", N(T("FSTART"))), ("FOverLB", N(T("FEND")))));
+                    continue;
+                }
+                case "TEMP":
+                    frameTemps.Add(Row(("Frame", frame), ("LoadPat", load.Pattern), ("Type", "Temperature"), ("Value", N(T("TEMP")))));
+                    if (T("TEMPGRAD") != 0) frameTemps.Add(Row(("Frame", frame), ("LoadPat", load.Pattern), ("Type", "Gradient2"), ("Value", N(T("TEMPGRAD")))));
+                    continue;
+                case "STRAIN":
+                    frameStrains.Add(Row(("Frame", frame), ("LoadPat", load.Pattern), ("Component", "Strain" + (E2kText.Value(load.Tokens, "COMPONENT") ?? "11")), ("Value", N(T("STRAIN")))));
+                    continue;
+            }
             if (!type.Equals("UNIFF", StringComparison.OrdinalIgnoreCase) || !E2kText.TryNumber(E2kText.Value(load.Tokens, "FVAL"), out var value))
             { notes.Add($"A {type} line load on {frame} has no plain SAP2000 equal here and was left out."); continue; }
             frameLoads.Add(Row(("Frame", frame), ("LoadPat", load.Pattern), ("CoordSys", "GLOBAL"), ("Type", "Force"), ("Dir", Direction(dir)),
                 ("DistType", "RelDist"), ("RelDistA", "0"), ("RelDistB", "1"), ("AbsDistA", "0"), ("AbsDistB", N(lengths[frame])), ("FOverLA", N(value)), ("FOverLB", N(value))));
         }
         Add(tables, "FRAME LOADS - DISTRIBUTED", frameLoads);
+        Add(tables, "FRAME LOADS - POINT", framePoints);
+        Add(tables, "FRAME LOADS - TEMPERATURE", frameTemps);
+        Add(tables, "FRAME LOADS - STRAIN", frameStrains);
 
         var areaLoads = new List<IReadOnlyList<(string, string)>>();
+        var areaTemps = new List<IReadOnlyList<(string, string)>>();
+        var areaStrains = new List<IReadOnlyList<(string, string)>>();
         foreach (var load in m.AreaLoads)
         {
             if (!areaNames.TryGetValue((load.Object, load.Story), out var area)) { notes.Add($"An area load on {load.Object} at {load.Story} points at nothing and was left out."); continue; }
             var type = E2kText.Unquote(E2kText.Value(load.Tokens, "TYPE") ?? "");
             var dir = E2kText.Unquote(E2kText.Value(load.Tokens, "DIR") ?? "GRAV");
+            double T(string key) => E2kText.TryNumber(E2kText.Value(load.Tokens, key), out var v) ? v : 0;
+            if (type.Equals("TEMP", StringComparison.OrdinalIgnoreCase))
+            {
+                areaTemps.Add(Row(("Area", area), ("LoadPat", load.Pattern), ("Type", "Temperature"), ("Value", N(T("TEMP")))));
+                if (T("TEMPGRAD") != 0) areaTemps.Add(Row(("Area", area), ("LoadPat", load.Pattern), ("Type", "Gradient3"), ("Value", N(T("TEMPGRAD")))));
+                continue;
+            }
+            if (type.Equals("STRAIN", StringComparison.OrdinalIgnoreCase))
+            {
+                areaStrains.Add(Row(("Area", area), ("LoadPat", load.Pattern), ("Component", "Strain" + (E2kText.Value(load.Tokens, "COMPONENT") ?? "11")), ("Value", N(T("STRAIN")))));
+                continue;
+            }
             if (!type.Equals("UNIFF", StringComparison.OrdinalIgnoreCase) || !E2kText.TryNumber(E2kText.Value(load.Tokens, "FVAL"), out var value))
             { notes.Add($"A {type} area load on {area} has no plain SAP2000 equal here and was left out."); continue; }
             areaLoads.Add(Row(("Area", area), ("LoadPat", load.Pattern), ("CoordSys", "GLOBAL"), ("Dir", Direction(dir)), ("UnifLoad", N(value))));
         }
         Add(tables, "AREA LOADS - UNIFORM", areaLoads);
+        Add(tables, "AREA LOADS - TEMPERATURE", areaTemps);
+        Add(tables, "AREA LOADS - STRAIN", areaStrains);
         Add(tables, "JOINT LOADS - FORCE", jointLoads);
+        Add(tables, "JOINT LOADS - GROUND DISPLACEMENT", jointDisps);
 
+        Functions(m, tables);
         LoadCases(m, tables, notes, patternTypes);
         Combinations(m, tables, notes);
-        Add(tables, "MASS SOURCE", Row(("MassSource", "MSSSRC1"), ("Elements", "Yes"), ("Masses", "Yes"), ("Loads", "No"), ("IsDefault", "Yes")));
+        var source = CsiProMax.Lateral.MassSource.Of(m);
+        Add(tables, "MASS SOURCE", source.Loads.Count == 0
+            ? [Row(("MassSource", "MSSSRC1"), ("Elements", source.Elements ? "Yes" : "No"), ("Masses", source.AddedMass ? "Yes" : "No"), ("Loads", "No"), ("IsDefault", "Yes"))]
+            : source.Loads.Select(l => Row(("MassSource", "MSSSRC1"), ("Elements", source.Elements ? "Yes" : "No"), ("Masses", source.AddedMass ? "Yes" : "No"), ("Loads", "Yes"), ("IsDefault", "Yes"), ("LoadPat", l.Pattern), ("Multiplier", N(l.Factor)))).ToList());
 
 
         var at = SavedAt ?? DateTime.Now;
@@ -284,7 +414,7 @@ public static class S2kWriter
             Props? p;
             string name;
             if (shape.Contains("rectangular") && d > 0 && b > 0) { name = "Rectangular"; p = Rectangle(d, b); }
-            else if (shape.Contains("circle") && d > 0) { name = "Circle"; p = Circle(d); }
+            else if ((shape.Contains("circle") || shape.Contains("rod")) && d > 0) { name = "Circle"; p = Circle(d); }
             else if (shape.Contains("i/wide flange") && d > 0 && b > 0 && tf > 0 && tw > 0) { name = "I/Wide Flange"; p = ISection(d, b, tf, tw, bb, tfb); }
             else if ((shape.Contains("tube") || shape.Contains("box")) && d > 0 && b > 0 && tf > 0 && tw > 0) { name = "Box/Tube"; p = Tube(d, b, tf, tw); }
             else if (shape.Contains("pipe") && d > 0 && tw > 0) { name = "Pipe"; p = Pipe(d, tw); }
@@ -294,6 +424,7 @@ public static class S2kWriter
                     notes.Add($"Frame section {s.Name} ({s.Shape}) has no plain SAP2000 shape here and was left out: define it in SAP2000 (Define > Section Properties > Frame Sections).");
                 continue;
             }
+            var fm = PropertyDefs.Modifiers(s.Lines, PropertyDefs.FrameModifiers);
             var concrete = m.Materials.Find(x => x.Name == s.Material)?.IsConcrete ?? false;
             var isBeam = m.Passthrough.Find(r => r.Heading == "CONCRETE SECTIONS")?.Lines.Any(l => l.Contains(E2kText.Quote(s.Name)) && l.Contains("\"Beam\"")) ?? false;
             shapes[s.Name] = name;
@@ -304,9 +435,21 @@ public static class S2kWriter
                 ("AS2", N(p.Value.As2)), ("AS3", N(p.Value.As3)), ("S33", N(p.Value.S33)), ("S22", N(p.Value.S22)), ("Z33", N(p.Value.Z33)), ("Z22", N(p.Value.Z22)),
                 ("R33", N(Math.Sqrt(p.Value.I33 / p.Value.A))), ("R22", N(Math.Sqrt(p.Value.I22 / p.Value.A))),
                 ("ConcCol", YesNo(concrete && !isBeam)), ("ConcBeam", YesNo(concrete && isBeam)), ("Color", "Yellow"),
-                ("AMod", "1"), ("A2Mod", "1"), ("A3Mod", "1"), ("JMod", "1"), ("I2Mod", "1"), ("I3Mod", "1"), ("MMod", "1"), ("WMod", "1")));
+                ("AMod", N(fm["AMOD"])), ("A2Mod", N(fm["A2MOD"])), ("A3Mod", N(fm["A3MOD"])), ("JMod", N(fm["JMOD"])), ("I2Mod", N(fm["I2MOD"])), ("I3Mod", N(fm["I3MOD"])), ("MMod", N(fm["MMOD"])), ("WMod", N(fm["WMOD"]))));
         }
         Add(tables, "FRAME SECTION PROPERTIES 01 - GENERAL", rows);
+
+        // Link properties: their type and each direction's effective (linear) stiffness and damping.
+        var links = PropertyDefs.Links(m);
+        static string LinkType(string t) => t switch
+        {
+            "PLASTIC (WEN)" => "Plastic (Wen)", "MULTILINEAR ELASTIC" => "MultiLinear Elastic", "MULTILINEAR PLASTIC" => "MultiLinear Plastic",
+            _ => CultureInfo.InvariantCulture.TextInfo.ToTitleCase(t.ToLowerInvariant()),
+        };
+        Add(tables, "LINK PROPERTY DEFINITIONS 01 - GENERAL", links.Select(l => Row(("Link", l.Name), ("LinkType", LinkType(l.Type)), ("Mass", "0"), ("Weight", "0"),
+            ("RotInert1", "0"), ("RotInert2", "0"), ("RotInert3", "0"), ("DefLength", "1"), ("DefArea", "1"), ("PDM2I", "0"), ("PDM2J", "0"), ("PDM3I", "0"), ("PDM3J", "0"))));
+        Add(tables, "LINK PROPERTY DEFINITIONS 02 - LINEAR", links.SelectMany(l => l.Dofs.Select(d => Row(("Link", l.Name), ("DOF", d.Key), ("Fixed", "No"),
+            (d.Key[0] == 'U' ? "TransKE" : "RotKE", N(d.Value.Stiff)), (d.Key[0] == 'U' ? "TransCE" : "RotCE", N(d.Value.Damp))))));
         return shapes;
     }
 
@@ -327,9 +470,10 @@ public static class S2kWriter
                 "membrane" => "Membrane", "shellthick" => "Shell-Thick", "layered" => "Shell-Thin", _ => "Shell-Thin",
             };
             names.Add(s.Name);
+            var sm = PropertyDefs.Modifiers(s.Lines, PropertyDefs.ShellModifiers);
             rows.Add(Row(("Section", s.Name), ("Material", s.Material), ("MatAngle", "0"), ("AreaType", "Shell"), ("Type", modelling), ("DrillDOF", "Yes"),
                 ("Thickness", N(t)), ("BendThick", N(t)), ("Color", s.IsWall ? "Red" : "Cyan"),
-                ("F11Mod", "1"), ("F22Mod", "1"), ("F12Mod", "1"), ("M11Mod", "1"), ("M22Mod", "1"), ("M12Mod", "1"), ("V13Mod", "1"), ("V23Mod", "1"), ("MMod", "1"), ("WMod", "1")));
+                ("F11Mod", N(sm["F11MOD"])), ("F22Mod", N(sm["F22MOD"])), ("F12Mod", N(sm["F12MOD"])), ("M11Mod", N(sm["M11MOD"])), ("M22Mod", N(sm["M22MOD"])), ("M12Mod", N(sm["M12MOD"])), ("V13Mod", N(sm["V13MOD"])), ("V23Mod", N(sm["V23MOD"])), ("MMod", N(sm["MMOD"])), ("WMod", N(sm["WMOD"]))));
         }
         Add(tables, "AREA SECTION PROPERTIES", rows);
         return names;
@@ -340,6 +484,7 @@ public static class S2kWriter
         var defs = new List<IReadOnlyList<(string, string)>>();
         var statics = new List<IReadOnlyList<(string, string)>>();
         var modal = new List<IReadOnlyList<(string, string)>>();
+        var more = new Dictionary<string, List<IReadOnlyList<(string, string)>>>();
         foreach (var c in m.LoadCases)
         {
             var type = Get(c.Lines, "TYPE") ?? "";
@@ -358,11 +503,66 @@ public static class S2kWriter
                     ("MaxNumModes", Get(c.Lines, "MAXMODES") ?? "12"), ("MinNumModes", Get(c.Lines, "MINMODES") ?? "1"),
                     ("EigenShift", "0"), ("EigenCutoff", "0"), ("EigenTol", "1E-09"), ("AutoShift", "Yes")));
             }
+            else if (Other(m, c, type, defs, statics, more, patternTypes)) { }
             else notes.Add($"Load case {c.Name} ({type}) has no plain SAP2000 equal here and was left out: define it in SAP2000 (Define > Load Cases).");
         }
         Add(tables, "LOAD CASE DEFINITIONS", defs);
         Add(tables, "CASE - STATIC 1 - LOAD ASSIGNMENTS", statics);
         Add(tables, "CASE - MODAL 1 - GENERAL", modal);
+        foreach (var (table, rows) in more) Add(tables, table, rows);
+    }
+
+    /// <summary>The functions as SAP2000's user function tables.</summary>
+    private static void Functions(StructuralModel m, List<string> tables)
+    {
+        var fs = AnalysisDefs.ListFunctions(m);
+        Add(tables, "FUNCTION - RESPONSE SPECTRUM - USER", fs.Where(f => f.Kind == "spectrum").SelectMany(f => f.Points.Select(p => Row(("Name", f.Name), ("Period", N(p.X)), ("Accel", N(p.Y)), ("FuncDamp", N(f.Damping))))));
+        Add(tables, "FUNCTION - TIME HISTORY - USER", fs.Where(f => f.Kind == "history").SelectMany(f => f.Points.Select(p => Row(("Name", f.Name), ("Time", N(p.X)), ("Value", N(p.Y))))));
+    }
+
+    /// <summary>The case types beyond linear static and modal: nonlinear static, response spectrum, histories, buckling.</summary>
+    private static bool Other(StructuralModel m, LoadCase c, string type, List<IReadOnlyList<(string, string)>> defs, List<IReadOnlyList<(string, string)>> statics,
+        Dictionary<string, List<IReadOnlyList<(string, string)>>> more, Dictionary<string, string> patternTypes)
+    {
+        var d = AnalysisDefs.ReadCase(c);
+        void To(string table, IReadOnlyList<(string, string)> row) { if (!more.TryGetValue(table, out var list)) more[table] = list = []; list.Add(row); }
+        string Dir(string u) => u switch { "U1" => "U1", "U2" => "U2", _ => "U3" };
+        var initial = d.InitialCase is { } i ? i : "Zero";
+        switch (type)
+        {
+            case "Nonlinear Static":
+                defs.Add(Row(("Case", c.Name), ("Type", "NonStatic"), ("InitialCond", initial), ("DesignType", patternTypes.GetValueOrDefault(d.Loads.FirstOrDefault()?.Name ?? "", "Other")), ("RunCase", "Yes")));
+                foreach (var l in d.Loads) statics.Add(Row(("Case", c.Name), ("LoadType", "Load pattern"), ("LoadName", l.Name), ("LoadSF", N(l.Factor))));
+                To("CASE - STATIC 4 - NONLINEAR PARAMETERS", Row(("Case", c.Name), ("GeoNonLin", d.Geometric switch { "P-Delta" => "P-Delta", "None" => "None", _ => "P-Delta plus Large Displacements" })));
+                return true;
+            case "Response Spectrum":
+                defs.Add(Row(("Case", c.Name), ("Type", "LinRespSpec"), ("InitialCond", "Zero"), ("DesignType", "Quake"), ("RunCase", "Yes")));
+                To("CASE - RESPONSE SPECTRUM 1 - GENERAL", Row(("Case", c.Name), ("ModalCase", d.ModalCase), ("ModalCombo", d.ModalCombo), ("DirCombo", d.DirCombo), ("DampingType", "Constant"), ("ConstDamp", N(d.Damping)), ("EccenRatio", N(d.Eccentricity))));
+                foreach (var l in d.Loads)
+                    To("CASE - RESPONSE SPECTRUM 2 - LOAD ASSIGNMENTS", Row(("Case", c.Name), ("LoadType", "Acceleration"), ("LoadName", Dir(l.Name)), ("CoordSys", "GLOBAL"), ("Angle", N(l.Angle)), ("TransAccSF", N(l.Factor)), ("Function", l.Function ?? "")));
+                return true;
+            case "Linear Modal History" or "Nonlinear Modal History (FNA)" or "Linear Direct History" or "Nonlinear Direct History":
+            {
+                var modalHist = type.Contains("Modal");
+                var sapType = type switch { "Linear Modal History" => "LinModHist", "Nonlinear Modal History (FNA)" => "NonModHist", "Linear Direct History" => "LinDirHist", _ => "NonDirHist" };
+                var prefix = modalHist ? "CASE - MODAL HISTORY" : "CASE - DIRECT HISTORY";
+                defs.Add(Row(("Case", c.Name), ("Type", sapType), ("InitialCond", initial), ("DesignType", "Quake"), ("RunCase", "Yes")));
+                To(prefix + " 1 - GENERAL", modalHist
+                    ? Row(("Case", c.Name), ("ModalCase", d.ModalCase), ("Motion", "Transient"), ("OutSteps", d.Steps.ToString(CultureInfo.InvariantCulture)), ("StepSize", N(d.StepSize)), ("ConstDamp", N(d.Damping)))
+                    : Row(("Case", c.Name), ("Motion", "Transient"), ("OutSteps", d.Steps.ToString(CultureInfo.InvariantCulture)), ("StepSize", N(d.StepSize))));
+                foreach (var l in d.Loads)
+                    To(prefix + " 2 - LOAD ASSIGNMENTS", l.Kind == "accel"
+                        ? Row(("Case", c.Name), ("LoadType", "Accel"), ("LoadName", Dir(l.Name)), ("Function", l.Function ?? ""), ("LoadSF", N(l.Factor)), ("TimeFactor", "1"), ("ArrivalTime", N(l.Arrival)), ("CoordSys", "GLOBAL"), ("Angle", N(l.Angle)))
+                        : Row(("Case", c.Name), ("LoadType", "Load pattern"), ("LoadName", l.Name), ("Function", l.Function ?? ""), ("LoadSF", N(l.Factor)), ("TimeFactor", "1"), ("ArrivalTime", N(l.Arrival))));
+                return true;
+            }
+            case "Buckling":
+                defs.Add(Row(("Case", c.Name), ("Type", "LinBuckling"), ("InitialCond", initial), ("DesignType", "Other"), ("RunCase", "Yes")));
+                To("CASE - BUCKLING 1 - GENERAL", Row(("Case", c.Name), ("NumBuckModes", d.MaxModes.ToString(CultureInfo.InvariantCulture)), ("EigenTol", "1E-09")));
+                foreach (var l in d.Loads) To("CASE - BUCKLING 2 - LOAD ASSIGNMENTS", Row(("Case", c.Name), ("LoadType", "Load pattern"), ("LoadName", l.Name), ("LoadSF", N(l.Factor))));
+                return true;
+        }
+        return false;
     }
 
     private static void Combinations(StructuralModel m, List<string> tables, List<string> notes)
@@ -487,6 +687,13 @@ public static class S2kWriter
     public static string Name(string label, string story) => label + "_" + story;
 
     private static long Key(double v) => (long)Math.Round(v / Tol);
+    /// <summary>ETABS's insertion point number as SAP2000 names it.</summary>
+    private static string Cardinal(string number) => number switch
+    {
+        "1" => "1 (Bottom left)", "2" => "2 (Bottom center)", "3" => "3 (Bottom right)", "4" => "4 (Middle left)", "5" => "5 (Middle center)",
+        "6" => "6 (Middle right)", "7" => "7 (Top left)", "8" => "8 (Top center)", "9" => "9 (Top right)", "11" => "11 (Shear center)", _ => "10 (Centroid)",
+    };
+
     private static string N(double v) => CsiTableText.Number(v);
     private static string YesNo(bool v) => v ? "Yes" : "No";
     private static IReadOnlyList<(string, string)> Row(params (string, string)[] pairs) => pairs;

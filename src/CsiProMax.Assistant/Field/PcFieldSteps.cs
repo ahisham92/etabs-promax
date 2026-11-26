@@ -31,7 +31,21 @@ public static class PcFieldSteps
             ctx.Step($"{found.Program} can create the CSI ProMax plug-in (what Tools > CSI ProMax does)", () =>
             {
                 FieldContext.Expect(found.Reasons.Count == 0 && found.Loads != false, $"{found.Program} cannot open CSI ProMax: {string.Join(" ", found.Reasons)}");
-                if (found.Loads is null) throw new FieldSkipException($"it could not be tried on this PC for a program on {found.Runtime}");
+                if (found.Loads is null)
+                {
+                    // No PowerShell on this program's .NET here. A program on .NET 8 is tried in this process, which runs on it too.
+                    // Settings of a program that is no longer installed (or whose folder was not found): its API file is
+                    // not there to create the plug-in against. Said as it is (ETABS 20, ETABS 21 and SAP2000 24 on Ahmed's PC, 0.4.28).
+                    if (found.Runtime != ".NET" && found.ApiFile.Length == 0)
+                        throw new FieldSkipException($"{found.Program}'s own API file was not found on this PC (the program may no longer be installed; only its settings are left), so creating the plug-in against it could not be tried");
+                    if (found.Runtime != ".NET" || found.Path.Length == 0 || !File.Exists(found.Path))
+                        throw new FieldSkipException($"it could not be tried on this PC for a program on {found.Runtime}");
+                    if (found.ApiFile.Length == 0 || !File.Exists(found.ApiFile))
+                        throw new FieldSkipException($"the program's own API file was not found on this PC, so creating the plug-in against it could not be tried");
+                    var (ok, detail) = PlugInCheck.TryHere(found.Path, found.ApiFile);
+                    FieldContext.Expect(ok, $"{found.Program} cannot create the CSI ProMax plug-in: {detail}");
+                    return detail;
+                }
                 return $"created, on {found.Runtime}";
             });
         ctx.Note("the plug-in check's own report", check.Text);
@@ -143,6 +157,14 @@ public static class PcFieldSteps
             return new { kind = status.Kind.ToString(), pc_code = status.PcCode, ends = status.Ends?.ToString("yyyy-MM-dd") ?? "no end date" };
         });
 
+        // Installed without the AI chat (install-no-ai.ps1, or turned off in the window): no Claude Code is needed.
+        if (!CsiProMax.AiMode.On)
+        {
+            const string off = "the AI chat is off on this PC (installed without AI, or turned off in the CSI ProMax menu), so no Claude Code is needed";
+            ctx.Skip("Claude Code on this PC", off);
+            ctx.Skip("Claude Code is signed in", off);
+            return;
+        }
         Chat.ClaudeCli.Install? claude = null;
         ctx.Step("Claude Code on this PC", () =>
         {

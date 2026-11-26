@@ -182,7 +182,7 @@ public sealed class ComEtabs : ICsiLink, IDisposable
         return (force, parts[1], parts[2]);
     }
 
-    private static readonly string[] UnitNames =
+    internal static readonly string[] UnitNames =
     [
         "lb_in_F", "lb_ft_F", "kip_in_F", "kip_ft_F", "kN_mm_C", "kN_m_C", "kgf_mm_C", "kgf_m_C",
         "N_mm_C", "N_m_C", "Ton_mm_C", "Ton_m_C", "kN_cm_C", "kgf_cm_C", "N_cm_C", "Ton_cm_C",
@@ -350,8 +350,11 @@ public sealed class ComEtabs : ICsiLink, IDisposable
         {
             "frame" => m.FrameObj.Delete(name, 0),
             "area" => m.AreaObj.Delete(name, 0),
-            _ => throw new EtabsException($"'{kind}' can't be deleted here: use frame or area."),
-        }, $"delete {kind} {name}");
+            // A joint nothing is drawn to: the program keeps it as a "special point" and lets only such a one go.
+            // (delete_joints left its test joints in the model on ETABS 23, 2026-11-25: this kind was not known here.)
+            "point" => m.PointObj.DeleteSpecialPoint(name, 0),
+            _ => throw new EtabsException($"'{kind}' can't be deleted here: use frame, area or point."),
+        }, kind == "point" ? $"delete joint {name} (a joint that frames or areas use cannot be deleted)" : $"delete {kind} {name}");
     });
 
     public void SetRestraint(string point, bool[] restraint) => Do("set a support", m =>
@@ -386,15 +389,24 @@ public sealed class ComEtabs : ICsiLink, IDisposable
     {
         int n = 0; string[] keys = None, names = None; int[] import = []; bool[] empty = [];
         Ok(m.DatabaseTables.GetAllTables(ref n, ref keys, ref names, ref import, ref empty), "list the tables");
-        keys ??= None; names ??= None; empty ??= [];
+        keys ??= None; names ??= None; empty ??= []; import ??= [];
         n = Math.Min(n, Math.Min(keys.Length, names.Length));
-        return (IReadOnlyList<TableName>)Enumerable.Range(0, n).Select(i => new TableName(keys[i], names[i], i < empty.Length && empty[i])).ToList();
+        return (IReadOnlyList<TableName>)Enumerable.Range(0, n).Select(i => new TableName(keys[i], names[i], i < empty.Length && empty[i], i < import.Length ? import[i] : -1)).ToList();
     });
 
     public TableData ReadTable(string key, IReadOnlyList<string>? cases, IReadOnlyList<string>? combos) => On("read a table", m =>
     {
         if (cases is { Count: > 0 }) { string[] list = cases.ToArray(); m.DatabaseTables.SetLoadCasesSelectedForDisplay(ref list); }
         if (combos is { Count: > 0 }) { string[] list = combos.ToArray(); m.DatabaseTables.SetLoadCombinationsSelectedForDisplay(ref list); }
+        // Section cut forces are given only for the cuts selected for display; none is selected at first (ETABS 23
+        // answered no rows for a cut that was defined and analysed), so every cut is selected. Best effort.
+        if (key.Contains("Section Cut Forces", StringComparison.OrdinalIgnoreCase))
+            try
+            {
+                int cutCount = 0; string[] cuts = None;
+                if (Convert.ToInt32(m.SectCut.GetNameList(ref cutCount, ref cuts)) == 0 && cuts is { Length: > 0 }) m.DatabaseTables.SetSectionCutsSelectedForDisplay(ref cuts);
+            }
+            catch (Exception ex) when (ex is Microsoft.CSharp.RuntimeBinder.RuntimeBinderException or MissingMethodException or System.Runtime.InteropServices.COMException or InvalidCastException or ArgumentException) { }
         string[] ask = None, fields = None, data = None; int version = 0, records = 0;
         int ret = Convert.ToInt32(m.DatabaseTables.GetTableForDisplayArray(key, ref ask, "", ref version, ref fields, ref records, ref data));
         fields ??= None; data ??= None;

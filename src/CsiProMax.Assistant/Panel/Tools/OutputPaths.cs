@@ -54,7 +54,7 @@ internal static class OutputPaths
     /// <summary>
     /// Calls that are asked about in ETABS whatever the settings say and wherever they come from (the chat, the Claude app
     /// or a recipe), and why: what_if with confirm, which copies the saved model and changes the copy (or a design option);
-    /// accepting issue check items, and issuing with open items.
+    /// accepting issue check items, issuing with open items, and a table edit, which saves the model first.
     /// </summary>
     public static string? AlwaysAskReason(string tool, IReadOnlyDictionary<string, JsonElement> args)
     {
@@ -63,12 +63,23 @@ internal static class OutputPaths
             return $"CSI ProMax asks to accept {acc.GetArrayLength()} open item(s) of the issue check with the reasons in the details; accepted items no longer block the issue.";
         if (tool == "issue_drawings" && args.TryGetValue("allow_open_items", out var allow) && allow.ValueKind == JsonValueKind.True)
             return "CSI ProMax asks to issue these drawings even though the issue check has open items (the reason in the details goes into the issue record).";
+        // A table edit saves the model under its own file name first, so that an edit the program refuses can be undone
+        // (SAP2000 26 emptied a model's load patterns on a refused edit). Ahmed, 2026-11-25: "Ask me before each save".
+        if (SavesBeforeEdit(tool, args))
+        {
+            var table = args.TryGetValue("table", out var named) && named.ValueKind == JsonValueKind.String ? named.GetString() : "a table";
+            return $"CSI ProMax asks to edit the table {table}. Before the edit it saves the model under its own file name, so that an edit the program refuses can be undone by opening that file again. If you say no, the model is not saved and the table is not edited.";
+        }
         if (tool != "what_if" || !(args.TryGetValue("confirm", out var c) && c.ValueKind == JsonValueKind.True)) return null;
         var option = args.TryGetValue("target", out var t) && t.ValueKind == JsonValueKind.String && t.GetString() == "design_option";
         return option
             ? "CSI ProMax asks to try a what-if in a design option of the open model: only the elements in that option change (Ctrl+Z undoes it)."
             : "CSI ProMax asks to try a what-if on a copy of the saved model: the copy is changed, measured, saved and closed; the open model is not changed.";
     }
+
+    /// <summary>A table edit that changes the model (add, update, delete): it saves the model first, so it asks at every approval level.</summary>
+    public static bool SavesBeforeEdit(string tool, IReadOnlyDictionary<string, JsonElement> args) =>
+        tool == "edit_table" && args.TryGetValue("action", out var action) && action.ValueKind == JsonValueKind.String && action.GetString() is "add" or "update" or "delete";
 
     /// <summary>The path as Windows will resolve it, so the dialog shows where a relative name really lands; unchanged when it can't be resolved.</summary>
     public static string FullPath(string path)

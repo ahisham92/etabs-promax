@@ -16,7 +16,7 @@ It was called ETABS ProMax until version 0.4.
 | **CSI ProMax in SAFE** | The same window from SAFE's Tools menu, working on slabs and foundations: slab, drop, mat and footing properties, soil under mats, point springs and supports, column loads, design strips and SAFE's editable tables. Checks read from SAFE's tables: punching shear, deflection, strip forces, soil pressure and uplift, slab design. The review pack shows punching ratios and soil pressure in the Viewer. | Licensed SAFE 20 or later |
 | **Link with GeoProMax** | Soil and structure solved in turn for a raft, in SAFE and in ETABS. `export_soil_pressures` writes the soil pressures as a file GeoProMax opens (kN and m, whatever the model's units). GeoProMax works out the settlement and the spring each part of the raft needs, and saves a springs file (`.gpmsprings.json`). `apply_geopromax_springs` puts those springs under the raft: one soil property per zone (GPM-K1, GPM-K2 ...) on the raft's panels, in the model's units, or in SAFE point springs at the cell centres when the raft is one area. Run the analysis again and repeat until GeoProMax says the springs have converged. | Licensed SAFE 20 or later, or ETABS; GeoProMax |
 | **CSI ProMax in SAP2000** | The same window from SAP2000's Tools menu. SAP2000 has no stories, so its tools build with joints, frames and areas in 3D, add materials and frame and area sections, support joints, load joints and members in any direction and release frame ends. Results come from SAP2000's analysis: joint displacements, frame forces, base reactions, modes and mass participation, a displacement check, and SAP2000's steel and concrete design ratios, in one check report for the pack. | Licensed SAP2000 (26 or later on .NET 8; older ones, see docs/INSTALL.txt) |
-| **Modeler** | The same window with no ETABS behind it. The chat builds a model (stories, grids, sections, members, loads, combinations), a 3D view follows it in the browser, and it saves `.e2k` for ETABS to import, one floor or mat as `.f2k` for SAFE, or the whole model as `.s2k` for SAP2000 (stories become Z grid lines and groups, each rigid diaphragm a diaphragm constraint per story). No analysis, no design. | Claude Code |
+| **Modeler** | The same window with no ETABS behind it. The chat builds a model (stories, grids, sections, members, loads, combinations), a 3D view follows it in a CSI ProMax window of its own (WebView2, no browser tab), and it saves `.e2k` for ETABS to import, one floor or mat as `.f2k` for SAFE, or the whole model as `.s2k` for SAP2000 (stories become Z grid lines and groups, each rigid diaphragm a diaphragm constraint per story). No analysis, no design. | Claude Code |
 
 ## Install
 
@@ -25,6 +25,14 @@ Nothing is an .exe and nothing needs administrator rights. It runs on the .NET 8
 ```powershell
 irm https://raw.githubusercontent.com/ahisham92/etabs-promax/main/install.ps1 | iex
 ```
+
+Without the AI chat (the Modeler, modelling by hand, the 3D view, review packs and the Viewer, and no Claude Code), use this line instead. The chat can be turned on or off later in the window's CSI ProMax menu, without closing the program:
+
+```powershell
+irm https://raw.githubusercontent.com/ahisham92/etabs-promax/main/install-no-ai.ps1 | iex
+```
+
+With the chat on, the 3D view (View > Open the 3D view, and the Modeler's own view, each in a CSI ProMax window of its own) has a Chat tab: the same conversation as the window.
 
 It works with ETABS 18 and later, SAFE 20 and later and SAP2000 20 and later. When it is done, the installer tries for each program what Tools > CSI ProMax does, and says yes or no. If a program does not open CSI ProMax, this line looks at why and prints a text to send back (it changes nothing):
 

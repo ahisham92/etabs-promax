@@ -447,6 +447,10 @@ Test("pack: the model, ETABS's tables and the checks go into one file and the Vi
             foreach (var i in seen.Items) Console.WriteLine($"   {(i.Skipped ? "skip" : i.Ok ? "ok  " : "FAIL")} {i.Name}: {i.Detail}");
         Check(seen.Items.Count > 10 && seen.Items.All(i => i.Ok || i.Skipped), "the Viewer's screen: " + string.Join("; ", seen.Items.Where(i => !i.Ok && !i.Skipped).Select(i => i.Name + ": " + i.Detail)));
         Check(seen.Pictures.Count == CsiProMax.Assistant.ViewerCheck.Shots.Length, $"a picture of each view: {seen.Pictures.Count}");
+        // Seen on 2026-11-25 with 0.4.20: the story, grid line and animation buttons were "not tested" on every
+        // model, because they only work in a plan, an elevation or on the deformed shape and were pressed in 3-D.
+        var left = seen.Items.Where(i => i.Skipped && (i.Name.Contains("story", StringComparison.OrdinalIgnoreCase) || i.Name.Contains("grid line", StringComparison.OrdinalIgnoreCase) || i.Name.Contains("Animate", StringComparison.Ordinal))).ToList();
+        Check(left.Count == 0, "buttons left untested on a model that has stories, grid lines and results: " + string.Join("; ", left.Select(i => i.Name + ": " + i.Detail)));
     }
 
     var folder = Path.Combine(Path.GetTempPath(), "cpm-pack-" + Guid.NewGuid().ToString("N"));
@@ -513,7 +517,10 @@ Test("design: shear wall piers and spandrels, concrete beams and columns all go 
     var built = Pack.Build(e, [], [], [], null, null);
     foreach (var t in new[] { "Shear Wall Pier Design Summary - ACI 318-19", "Shear Wall Spandrel Design Summary - ACI 318-19", "Concrete Beam Flexure Envelope - ACI 318-19", "Concrete Column PMM Envelope - ACI 318-19", "Area Assignments - Pier Labels", "Area Assignments - Spandrel Labels" })
         Check(built.Tables.Contains(t), "the pack takes " + t);
-    Check(!built.Tables.Contains("Shear Wall Pier Design Preferences"), "preferences are not results");
+    // Preferences and overwrites are taken beside the design (Ahmed: every design detail in the Viewer), marked as
+    // input, and are never a design of their own.
+    Check(built.Tables.Contains("Shear Wall Pier Design Preferences") && (string?)built.Content["tables"]!["Shear Wall Pier Design Preferences"]!["from"] == "input", "preferences are taken as design input");
+    Check(!built.Content["manifest"]!["design"]!.ToJsonString().Contains("Preferences", StringComparison.Ordinal), "preferences are not a design result");
     var design = built.Content["manifest"]!["design"]!.AsObject();
     foreach (var k in new[] { "pier", "spandrel", "concrete" }) Check(design.ContainsKey(k), "the manifest says where the " + k + " design came from");
     var labels = built.Content["model"]!["wall_labels"]!.AsArray();
@@ -694,7 +701,7 @@ Test("modeler: a building is modelled with no ETABS and saved as an ETABS text f
         Check(drawn["grids"] is JsonArray { Count: 5 } && drawn["frame_sizes"] is JsonObject { Count: > 0 } && drawn["supports"] is JsonArray { Count: 6 }, "the view gets grid lines, section sizes and supports");
         Check(page.Contains("Model Explorer") && page.Contains("window.cpmLive=true") && page.Contains("Elevation View"), "the view is the workbench: explorer, plan, elevation and 3-D");
         Equal("fixed", Drawing.Kind([true, true, true, true, true, true]), "a fixed support"); Equal("pinned", Drawing.Kind([true, true, true, false, false, false]), "a pinned support");
-        Check(CsiProMax.Host.Shortcuts.Due(null, "C:/a") && CsiProMax.Host.Shortcuts.Due("C:/old", "C:/a") && !CsiProMax.Host.Shortcuts.Due("c:/A|2\n", "C:/a") && CsiProMax.Host.Shortcuts.Due("C:/a", "C:/a"), "shortcuts are made once, and again when the program's folder changes");
+        Check(CsiProMax.Host.Shortcuts.Due(null, "C:/a") && CsiProMax.Host.Shortcuts.Due("C:/old", "C:/a") && !CsiProMax.Host.Shortcuts.Due("c:/A" + CsiProMax.Host.Shortcuts.Mark2 + "\n", "C:/a") && CsiProMax.Host.Shortcuts.Due("C:/a", "C:/a"), "shortcuts are made once, and again when the program's folder changes");
         Check(Refused(Endpoint(new MemoryEtabs()), "add_stories", """{"stories":[{"name":"L3","height":3}]}""").Contains("Modeler"), "Modeler tools say so when ETABS is behind");
         Check(CsiProMax.Tools.ToolRegistry.CreateDefault(true).IsBuiltIn("new_model") && !CsiProMax.Tools.ToolRegistry.CreateDefault().IsBuiltIn("new_model"), "Modeler tools are offered in the Modeler only");
     }
@@ -914,6 +921,8 @@ Test("plug-in: the assistant is started with the dotnet ETABS runs on", () =>
 });
 
 foreach (var (name, body) in SafeTests.All()) Test(name, body);
+foreach (var (name, body) in CsiToolsTests.All()) Test(name, body);
+foreach (var (name, body) in CsiFieldStepsTests.All()) Test(name, body);
 foreach (var (name, body) in TesterBugTests.All()) Test(name, body);
 Test("set_section: a frame or area that is not in the model is reported as failed (ETABS 23 says done to it)", () =>
 {
@@ -927,7 +936,105 @@ Test("set_section: a frame or area that is not in the model is reported as faile
     var areas = Call(mcp, "set_section", """{"areas":["no such slab"],"section":"S200"}""");
     Check(areas["failed"]!.AsArray().Count == 1, "the missing area is not reported: " + areas.ToJsonString());
 });
+Test("add_load_pattern: a user coefficient the program's API cannot set keeps the Seismic pattern and says how to set it (ETABS 23)", () =>
+{
+    var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Tools", "EtabsTools.cs"));
+    var at = source.IndexOf("private static JsonNode AddPattern(", StringComparison.Ordinal);
+    var body = source.Substring(at, source.IndexOf("private static JsonNode SetLoads(", at, StringComparison.Ordinal) - at);
+    Check(body.Contains("ex is MissingMethodException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException") && body.Contains("Modify Lateral Load"),
+        "a program with no SetUserCoefficient (ETABS 23) still fails add_load_pattern instead of keeping the pattern and saying how to set it");
+    var steps = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Field", "EtabsFieldSteps.cs"));
+    Check(steps.Contains("its automatic load cannot be set through this ETABS's API"), "the field test still fails the seismic step on an ETABS with no user coefficient");
+});
+Test("field test: the ETABS scratch model gets a lateral load its checks can read, also on ETABS 23", () =>
+{
+    var steps = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Field", "EtabsFieldSteps.cs"));
+    var load = steps.IndexOf("joint forces in X in CPM-EQX", StringComparison.Ordinal);
+    var analysis = steps.IndexOf("ctx.Tool(\"run_analysis\"", load > 0 ? load : 0, StringComparison.Ordinal);
+    Check(load > 0 && analysis > load && steps.Contains("m.PointObj.SetLoadForce(p, \"CPM-EQX\""), "the seismic pattern has no load before the analysis when ETABS cannot take a user coefficient");
+});
+Test("add_load_pattern: ETABS refusing ASCE 7-16 keeps the Seismic pattern and says how to set it, not an error", () =>
+{
+    // 0.4.18 field test on ETABS 23: no user coefficient, and ASCE 7-16 refused; the pattern is kept with a note.
+    var model = new CpmFakes.EtabsSeismic();
+    model.AutoSeismic.Refuse = true;
+    using var link = new ComEtabs(CsiProgram.Etabs, () => model);
+    var a = EtabsTools.All.First(t => t.Name == "add_load_pattern").Run(JsonDocument.Parse("""{"name":"EQX","type":"Seismic","user_coefficient":{"c":0.05,"direction":"X"}}""").RootElement, link);
+    Check(a["lateral"] is null && a["note"]!.GetValue<string>().Contains("Modify Lateral Load", StringComparison.Ordinal), a.ToJsonString());
+    Check(model.LoadPatterns.Names.Contains("EQX"), "the Seismic pattern is kept");
+});
+Test("tables for editing: every load pattern is selected for display first (SAP2000 26 hides the others)", () =>
+{
+    var root = SourceText.Root();
+    foreach (var file in new[] { "Etabs/EditableTables.cs", "Tools/CsiTools.cs", "Safe/SafeTools.cs" })
+    {
+        var text = File.ReadAllText(Path.Combine(root, "src", "CsiProMax.Assistant", file));
+        var reads = System.Text.RegularExpressions.Regex.Matches(text, @"GetTableForEditingArray\(").Count;
+        var shown = System.Text.RegularExpressions.Regex.Matches(text, @"ShowEveryPattern\(m\);").Count;
+        Check(reads > 0 && shown >= reads, $"{file}: {reads} table reads for editing, {shown} with every load pattern selected for display first");
+    }
+    var helper = File.ReadAllText(Path.Combine(root, "src", "CsiProMax.Assistant", "Etabs", "EditableTables.cs"));
+    Check(helper.Contains("m.DatabaseTables.SetLoadPatternsSelectedForDisplay(ref names)") && helper.Contains("m.LoadPatterns.GetNameList(ref n, ref names)"), "ShowEveryPattern does not select the model's own patterns");
+});
+Test("edit_table: an analysed model is unlocked first, and a refused edit is cancelled", () =>
+{
+    var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Tools", "CsiTools.cs"));
+    var at = source.IndexOf("var log = (JsonObject)e.Raw(\"apply the table edit\"", StringComparison.Ordinal);
+    Check(at > 0, "the table edit's apply step is gone");
+    var body = source.Substring(at, source.IndexOf("e.Refresh();", at, StringComparison.Ordinal) - at);
+    var unlock = body.IndexOf("m.SetModelIsLocked(false)", StringComparison.Ordinal);
+    var set = body.IndexOf("m.DatabaseTables.SetTableForEditingArray(", StringComparison.Ordinal);
+    Check(unlock > 0 && unlock < set, "an analysed (locked) model is not unlocked before the edit; SAP2000 26 refuses it then");
+    Check(body.Contains("m.DatabaseTables.CancelTableEditing()"), "a refused edit is not cancelled; SAP2000 then refused the table and listed no patterns");
+    Check(source.Contains("log[\"unlocked\"]"), "the answer does not say the results are gone");
+});
+Test("edit_table: the model is saved before the edit and opened again when the program refuses it (SAP2000 lost its patterns)", () =>
+{
+    var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Tools", "CsiTools.cs"));
+    var at = source.IndexOf("var log = (JsonObject)e.Raw(\"apply the table edit\"", StringComparison.Ordinal);
+    var body = source.Substring(at, source.IndexOf("e.Refresh();", at, StringComparison.Ordinal) - at);
+    var save = body.IndexOf("m.File.Save(saved)", StringComparison.Ordinal);
+    var set = body.IndexOf("m.DatabaseTables.SetTableForEditingArray(", StringComparison.Ordinal);
+    Check(save > 0 && save < set, "the model is not saved before the table edit");
+    Check(body.Contains("SafeOpen(m, saved)") && body.IndexOf("SafeOpen(m, saved)", StringComparison.Ordinal) > body.IndexOf("CancelTableEditing", StringComparison.Ordinal),
+        "a refused edit does not open the model again from the file saved just before it");
+    Check(body.Contains("\".sdb\", \".edb\", \".fdb\""), "a working file (ETABS's .$et) could be saved over");
+});
+Test("edit_table: a SAP2000 pattern's self weight is set through the API, never by importing the table back", () =>
+{
+    var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Tools", "CsiTools.cs"));
+    var api = source.IndexOf("m.LoadPatterns.SetSelfWTMultiplier(row[nameAt], weight)", StringComparison.Ordinal);
+    var import = source.IndexOf("var log = (JsonObject)e.Raw(\"apply the table edit\"", StringComparison.Ordinal);
+    Check(api > 0 && import > api, "SAP2000's self weight change does not go through LoadPatterns.SetSelfWTMultiplier before the table import");
+    Check(source.Contains("e.Program.Key == CsiProgram.Sap2000.Key && string.Equals(table.Key, \"Load Pattern Definitions\""), "the API route is not for SAP2000's Load Pattern Definitions");
+});
+Test("scratch window: closing may take three minutes (SAP2000 26 took over one)", () =>
+{
+    Check(CsiProMax.Assistant.ScratchProgram.CloseTimeout >= TimeSpan.FromMinutes(3), "the scratch window is given less than three minutes to close");
+    var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Field", "ScratchProgram.cs"));
+    Check(source.Contains("Ask(CloseTimeout, \"close the window\""), "closing does not wait for CloseTimeout");
+});
+Test("shortcuts: the Modeler shortcut starts the installed copy, not a copy unpacked to try a version", () =>
+{
+    var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Panel", "Host", "Shortcuts.cs"));
+    Check(source.Contains("CsiProMax.Assistant.ToolsMenu.InstallFolder()"), "the shortcuts do not ask for the installed copy");
+    var make = source.IndexOf("private static List<string> Make(", StringComparison.Ordinal);
+    Check(make > 0 && !source.Substring(make).Contains("AppContext.BaseDirectory"), "the Modeler shortcut still points at the folder this copy runs from");
+    Check(CsiProMax.Host.Shortcuts.ProgramFolder().EndsWith(Path.DirectorySeparatorChar), "the program folder has no closing separator");
+});
 foreach (var (name, body) in CdtSdkTests.All()) Test(name, body);
+foreach (var (name, body) in HandModelTests.All()) Test(name, body);
+foreach (var (name, body) in AiModeTests.All()) Test(name, body);
+foreach (var (name, body) in WebWindowTests.All()) Test(name, body);
+foreach (var (name, body) in ModelTablesTests.All()) Test(name, body);
+foreach (var (name, body) in ModelerWindowTests.All()) Test(name, body);
+foreach (var (name, body) in LateralTests.All()) Test(name, body);
+foreach (var (name, body) in AnalysisTests.All()) Test(name, body);
+foreach (var (name, body) in ModelTextTests.All()) Test(name, body);
+foreach (var (name, body) in PropertyTests.All()) Test(name, body);
+foreach (var (name, body) in StructureTests.All()) Test(name, body);
+foreach (var (name, body) in KeptPlugInsTests.All()) Test(name, body);
+foreach (var (name, body) in StabilityTests.All()) Test(name, body);
 foreach (var (name, body) in FieldRun048Tests.All()) Test(name, body);
 foreach (var (name, body) in FieldQuietTests.All()) Test(name, body);
 foreach (var (name, body) in TeamLibraryTests.All()) Test(name, body);
@@ -1146,6 +1253,18 @@ Test("tool: add_load_pattern refuses a user coefficient that is not for a seismi
     Throws<ToolInputException>(() => tool.Run(JsonDocument.Parse("""{"name":"W","type":"Wind","user_coefficient":{"c":0.05}}""").RootElement, link), "wind");
     Throws<ToolInputException>(() => tool.Run(JsonDocument.Parse("""{"name":"E","type":"Seismic","user_coefficient":{"c":0}}""").RootElement, link), "zero");
     Throws<ToolInputException>(() => tool.Run(JsonDocument.Parse("""{"name":"E","type":"Seismic","user_coefficient":{"c":0.05,"direction":"Z"}}""").RootElement, link), "direction Z");
+});
+
+Test("tool: a seismic pattern by coefficient in ETABS, whose API has only ASCE 7-16, uses ASCE 7-16 and says so", () =>
+{
+    // 0.4.15 field test: ETABS 23's cAutoSeismic has no SetUserCoefficient, only SetASCE716 and SetIBC2006.
+    var model = new CpmFakes.EtabsSeismic();
+    using var link = new ComEtabs(CsiProgram.Etabs, () => model);
+    var tool = EtabsTools.All.First(t => t.Name == "add_load_pattern");
+    var a = tool.Run(JsonDocument.Parse("""{"name":"EQX","type":"Seismic","user_coefficient":{"c":0.05,"direction":"X"}}""").RootElement, link);
+    Check(a["lateral"]!.GetValue<string>().StartsWith("ASCE 7-16", StringComparison.Ordinal), a.ToJsonString());
+    Equal("EQX", model.AutoSeismic.Named, "the pattern given ASCE 7-16");
+    Check(model.AutoSeismic.Flags is [true, false, false, false, false, false], "X only");
 });
 
 Test("link: units from the older one-value call, by name or number", () =>
@@ -1497,7 +1616,31 @@ Test("field test: the full test runs every part, closes its window, and leaves t
                 return window = new CsiProMax.Tests.StandInWindow(new OfflineEtabs(OfflineEtabs.Load(file), path), path);
             },
         };
+        var resultsFile = Path.Combine(root, "last-results.json");
+        options = options with { ResultsFile = resultsFile, Print = _ => "same" };
         var outcome = FieldTest.Run(open, options);
+        // Only what changed or failed: with every part passed and unchanged, no scratch window is reopened again.
+        {
+            var keptParts = FieldRetest.Load(resultsFile);
+            Check(keptParts.ContainsKey("etabs") && keptParts.ContainsKey(FieldRetest.Panel), "the full run did not keep its parts' results: " + string.Join(", ", keptParts.Keys));
+            var reopened = 0;
+            var again = options with { Retest = true, Folder = Path.Combine(root, "out2"), WorkFolder = Path.Combine(root, "work2"), At = at.AddMinutes(10),
+                StartScratch = (program, ctx, file) => { reopened++; return options.StartScratch(program, ctx, file); } };
+            var partsDue = keptParts["etabs"].Failed > 0 || keptParts[FieldRetest.Panel].Failed > 0;
+            var second = FieldTest.Run(open, again);
+            Equal(partsDue ? 1 : 0, reopened, "scratch windows reopened by the retest of an unchanged build");
+            if (!partsDue)
+            {
+                Check(second.Steps.Any(s => s.Name == "ETABS on a scratch model: not run again") && second.Steps.Any(s => s.Name == "CSI ProMax's own features: not run again"), "the report does not name the parts left out");
+                Check(second.Report.Contains("only what is new, changed or failed", StringComparison.Ordinal), "the report does not say what kind of run it was");
+                Equal(keptParts["etabs"].NotTested.Count + keptParts[FieldRetest.Panel].NotTested.Count, second.Steps.Count(s => s.Skipped && s.Detail.Contains("as in the run of version", StringComparison.Ordinal)), "steps listed again as not tested");
+            }
+            // Changed code of ETABS's part: its window opens again; the panel's part stays left out when it passed.
+            reopened = 0;
+            var changed = FieldTest.Run(open, again with { Print = part => part == "etabs" ? "new" : "same", Folder = Path.Combine(root, "out3"), WorkFolder = Path.Combine(root, "work3"), At = at.AddMinutes(20) });
+            Equal(1, reopened, "scratch windows reopened after ETABS's code changed");
+            Check(!changed.Steps.Any(s => s.Name == "ETABS on a scratch model: not run again"), "ETABS's part was left out though its code changed");
+        }
         if (Environment.GetEnvironmentVariable("CPM_FIELD_DUMP") == "1")
             foreach (var s in outcome.Steps) Console.WriteLine($"      {(s.Skipped ? "skip" : s.Ok ? "ok  " : "FAIL")} [{s.Section}] {s.Name}: {(s.Detail.Length > 160 ? s.Detail[..160] : s.Detail)}");
         var sections = outcome.Steps.Select(s => s.Section).Distinct().ToList();
@@ -1600,6 +1743,8 @@ Test("field test: the full test runs every part, closes its window, and leaves t
     finally { ResultTools.SnapshotRoot = snapshots; Directory.Delete(root, true); }
 });
 
+// CPM_TESTS=words runs only the tests whose name holds those words (while fixing one part).
+if (Environment.GetEnvironmentVariable("CPM_TESTS") is { Length: > 0 } only) tests.RemoveAll(t => !t.Name.Contains(only, StringComparison.OrdinalIgnoreCase));
 foreach (var (name, body) in tests)
 {
     try { body(); Console.WriteLine($"ok    {name}"); }
@@ -1852,4 +1997,41 @@ namespace CpmFakes
         }
     }
     public sealed class TablesModel { public Tables DatabaseTables { get; } = new(); }
+}
+
+namespace CpmFakes
+{
+    public sealed class Asce716
+    {
+        public string Named = ""; public bool[] Flags = []; public bool Refuse;
+        // ETABS 23: 0-based, X, Y, X+e, Y+e, X-e, Y-e.
+        public int SetASCE716_1(string name, ref bool[] dir, double ecc, int period, int ct, double userT, bool userZ, double top, double bottom,
+            double r, double omega, double cd, double i, double ss, double s1, double tl, int site, double fa, double fv) { if (Refuse) return 1; Named = name; Flags = dir; return 0; }
+        public int SetASCE716(string name, ref bool[] dir, double ecc, int period, int ct, double userT, bool userZ, double top, double bottom,
+            double r, double omega, double cd, double i, double ss, double s1, double tl, int site, double fa, double fv) { if (Refuse) return 1; Named = name; Flags = dir; return 0; }
+    }
+    public sealed class SeismicPatterns
+    {
+        public readonly List<string> Names = [];
+        public Asce716 AutoSeismic { get; } = new();
+        public int Add(string name, int type, double self, bool addCase) { Names.Add(name); return 0; }
+        public int GetNameList(ref int n, ref string[] names) { n = Names.Count; names = Names.ToArray(); return 0; }
+        public int GetLoadType(string name, ref int type) { type = 5; return 0; }
+        public int GetSelfWTMultiplier(string name, ref double self) { self = 0; return 0; }
+        public int GetAutoSeismicCode(string name, ref string code) { code = AutoSeismic.Named == name ? "ASCE 7-16" : ""; return 0; }
+    }
+    public sealed class StoryFake
+    {
+        public int GetStories_2(ref double baseElevation, ref int n, ref string[] names, ref double[] elevations, ref double[] heights, ref bool[] master, ref string[] similar, ref bool[] splice, ref double[] spliceHeight, ref int[] color)
+        {
+            n = 2; names = ["Story1", "Story2"]; elevations = [3, 6]; heights = [3, 3]; master = [false, true]; similar = ["", ""]; splice = [false, false]; spliceHeight = [0, 0]; color = [0, 0]; return 0;
+        }
+    }
+    public sealed class EtabsSeismic
+    {
+        public StoryFake Story { get; } = new();
+        public SeismicPatterns LoadPatterns { get; } = new();
+        public Asce716 AutoSeismic => LoadPatterns.AutoSeismic;
+        public int GetNameList(ref int n, ref string[] names) { n = 0; names = []; return 0; }
+    }
 }

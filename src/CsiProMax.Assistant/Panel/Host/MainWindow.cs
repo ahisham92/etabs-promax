@@ -62,8 +62,22 @@ internal sealed class MainWindow : Window
         top.Children.Add(menu);
         DockPanel.SetDock(top, Dock.Top);
         layout.Children.Add(top);
-        layout.Children.Add(Chat.ChatPane.Get());
+        // With the AI chat off on this PC (AiMode): the Modeler, the 3D view and the review pack by hand, and no chat at all.
+        layout.Children.Add(CsiProMax.AiMode.On ? Chat.ChatPane.Get() : NoAiPane.Build(CsiProMax.App.Reopened));
         Content = layout;
+        // The Modeler is its 3D view: with the chat on it opens in its own window at the first start too (the no-AI
+        // pane opens it itself), beside this window, which holds the chat. Not again after an update or a switch.
+        if (CsiProMax.AiMode.On && CsiProMax.App.Modeler && !CsiProMax.App.Reopened)
+        {
+            var once = false;
+            ContentRendered += (_, _) =>
+            {
+                if (once) return;
+                once = true;
+                try { ModelView.Open(); }
+                catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { /* View > Open the 3D view opens it */ }
+            };
+        }
         SourceInitialized += (_, _) => Handle = new WindowInteropHelper(this).Handle;
         Closing += (_, _) => Remember();
         Closed += (_, _) => { Handle = IntPtr.Zero; _open = null; };
@@ -106,19 +120,25 @@ internal sealed class MainWindow : Window
         if (Licensing.LicenseState.IsOwnerPc) Add(app, "License _manager…", () => LicenseManagerWindow.Open());
         Add(app, "_Settings…", () => Dialog(new SettingsWindow()));
         Add(app, "Check for _updates", CsiProMax.App.CheckForUpdatesInteractive);
+        if (!CsiProMax.AiMode.Forced)
+            Add(app, CsiProMax.AiMode.On ? "Turn the AI chat _off…" : "Turn the AI chat _on…", () => SwitchAi(!CsiProMax.AiMode.On));
         Add(app, "_About", () => TaskDialog.Show("CSI ProMax",
             $"CSI ProMax {Update.Updater.CurrentText}\n{Csi.Name} {(CsiProMax.App.ETABSYear.Length > 0 ? CsiProMax.App.ETABSYear : "not answering yet")}\n" +
             $"Model: {ModelWatch.Current?.Title ?? "none"}\n\n{Update.Updater.Describe()}"));
         app.Items.Add(new Separator());
         Add(app, "_Close CSI ProMax", Close);
 
-        var chat = Top("_Chat");
-        Add(chat, "_Notes…", OpenNotes);
-        Add(chat, "_Routines…", Chat.ChatPane.OpenRoutinesWindow);
-        Add(chat, "_Team performance…", () => { var w = new CrewPerformanceWindow(); Brand.Prepare(w); w.Show(); });
+        if (CsiProMax.AiMode.On)
+        {
+            var chat = Top("_Chat");
+            Add(chat, "_Notes…", OpenNotes);
+            Add(chat, "_Routines…", Chat.ChatPane.OpenRoutinesWindow);
+            Add(chat, "_Team performance…", () => { var w = new CrewPerformanceWindow(); Brand.Prepare(w); w.Show(); });
+        }
 
         var view = Top("_View");
         Add(view, "Open the _3D view", ModelView.Open);
+        Add(view, "Open the _Viewer (a pack someone sent)", () => WebPages.Open(Shortcuts.WriteViewerPage(), WebPages.Kind.Viewer));
         if (CsiProMax.App.Modeler)
             Add(view, "Open the _models folder", () =>
             {
@@ -135,14 +155,41 @@ internal sealed class MainWindow : Window
         var help = Top("_Help");
         Add(help, "_Report a bug…", () => { if (CsiProMax.App.Etabs is { } etabs) Bugs.BugReport.Command(etabs); });
         Add(help, "Open the _Bugs folder", () => Bugs.BugReport.OpenFolder());
-        Add(help, "_Export chats and bugs", ExportChatsAndBugs);
+        if (CsiProMax.AiMode.On) Add(help, "_Export chats and bugs", ExportChatsAndBugs);
         Add(help, "Open _folders…", () => UserFoldersWindow.Open());
         Add(help, "Self _test", RunSelfTest);
         Add(help, "_Tools menu of each CSI program: check and repair", CheckToolsMenus);
         help.Items.Add(new Separator());
         Add(help, "_Field test: everything (saves a report to send)…", () => RunFieldTest(full: true));
+        Add(help, "Field test: only what is _new, changed or failed…", () => RunFieldTest(full: true, retest: true));
         Add(help, "Field test, _quick: this PC and the open model", () => RunFieldTest(full: false));
         return menu;
+    }
+
+    /// <summary>
+    /// Turns the AI chat on or off on this PC (AiMode) and starts this version again with it. The CSI program and the
+    /// model stay open; the chats are kept and come back when the chat is turned on again.
+    /// </summary>
+    internal static void SwitchAi(bool on)
+    {
+        if (CsiProMax.App.IsBusy)
+        {
+            TaskDialog.Show("CSI ProMax", "CSI ProMax is working on something. Wait for it to finish (or stop it), then switch the AI chat.");
+            return;
+        }
+        if (CsiProMax.App.Etabs?.Link is CsiProMax.Assistant.Etabs.OfflineEtabs { Unsaved: true })
+        {
+            TaskDialog.Show("CSI ProMax", "The Modeler's model has changes that are not saved. Save it first (File > Save in the 3D view), then switch the AI chat.");
+            return;
+        }
+        var text = on
+            ? $"Turn the AI chat on?\n\nCSI ProMax starts again with the chat, which runs on Claude Code on your own Claude plan (it offers to install it or sign in). {Csi.Name} and your model stay open."
+            : $"Turn the AI chat off on this PC?\n\nCSI ProMax starts again without it: the Modeler, the 3D view, review packs, the Viewer and updates all stay. Your chats are kept and come back when you turn it on again. {Csi.Name} and your model stay open.";
+        if (TaskDialog.Show("CSI ProMax", text, TaskDialogCommonButtons.Yes | TaskDialogCommonButtons.No, TaskDialogResult.No) != TaskDialogResult.Yes) return;
+        try { CsiProMax.AiMode.Save(on); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { TaskDialog.Show("CSI ProMax", "The choice could not be saved: " + ex.Message); return; }
+        if (CsiProMax.App.Restart is { } restart) restart();
+        else TaskDialog.Show("CSI ProMax", $"Saved. Close CSI ProMax and open it again from {Csi.Name}'s Tools menu to use it.");
     }
 
     private static Window? _notes;
@@ -199,7 +246,7 @@ internal sealed class MainWindow : Window
     /// Modeler builds, then in a second window of each CSI program on this PC that it opens on its own scratch model and
     /// closes again without saving. The open model is only read. It runs in the background; a message says when it is done.
     /// </summary>
-    private async void RunFieldTest(bool full)
+    private async void RunFieldTest(bool full, bool retest = false)
     {
         if (CsiProMax.App.Etabs is not { } etabs) return;
         if (CsiProMax.Assistant.SelfTest.IsRunning || CsiProMax.Assistant.FieldTest.IsRunning)
@@ -216,12 +263,13 @@ internal sealed class MainWindow : Window
                 : $"Then it opens a second window of {string.Join(", ", programs.Select(p => p.Name))} on that test model, runs every tool and check there " +
                   "(the analysis and design too), and closes each window again without saving. Each window takes a licence as usual.";
             if (TaskDialog.Show("CSI ProMax",
+                    (retest ? "This field test runs only what is new, changed or failed: a program's part, or CSI ProMax's own features, is left out when all of it passed on this PC and its code is unchanged since. The report names what was left out. Otherwise it is the full test.\n\n" : "") +
                     "The full field test checks everything CSI ProMax does. It checks this PC and the install, reads your open model, and builds a test model of its own with every Modeler tool. " +
                     which + "\n\nYour open model is only read: nothing in it is changed. It can take up to an hour. While it runs, leave the windows it opens alone, " +
                     "and wait for it before you use the chat. A message says when the report is ready.\n\nStart it now?",
                     TaskDialogCommonButtons.Yes | TaskDialogCommonButtons.No, TaskDialogResult.No) != TaskDialogResult.Yes) return;
             // It says on the screen when it is done, the same way whether the menu or the chat started it.
-            try { CsiProMax.Tools.FieldTestRuns.StartFull(etabs.Link, "the Help menu"); }
+            try { CsiProMax.Tools.FieldTestRuns.StartFull(etabs.Link, "the Help menu", retest); }
             catch (InvalidOperationException ex) { TaskDialog.Show("CSI ProMax", ex.Message); }
             return;
         }

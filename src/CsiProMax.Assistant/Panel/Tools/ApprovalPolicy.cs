@@ -84,7 +84,7 @@ internal static class ApprovalPolicy
         // Whatever the level, wherever it comes from: what_if with confirm, accepting issue items, issuing with open items.
         // At "Always allow" only the issue gate's (a QA sign-off, not an approval) is left.
         if (OutputPaths.AlwaysAskReason(tool, args) is { } always)
-            return level != ApprovalLevel.AlwaysAllow || IsIssueGate(tool) ? new(true, AskKind.Always, always) : ApprovalDecision.No;
+            return level != ApprovalLevel.AlwaysAllow || IsIssueGate(tool) || OutputPaths.SavesBeforeEdit(tool, args) ? new(true, AskKind.Always, always) : ApprovalDecision.No;
         if (level == ApprovalLevel.AlwaysAllow) return ApprovalDecision.No;
 
         var risks = new List<string>();

@@ -26,8 +26,12 @@ The field test is inside CSI ProMax. It checks what it can by itself and saves o
    - each CSI program on the PC (ETABS, SAP2000, SAFE): a second window that the test opens itself on that test
      model, saved as a scratch model in the test's own folder. Every tool of that program is run there with each
      change read back through the program's API, then the analysis, the design, every result table and check, the
-     snapshots and the review pack, and a learned tool made in another program is run there. The window is closed
-     without saving at the end;
+     snapshots and the review pack. Then the tools every program shares (the whole API searched, described and
+     read; units; properties and load definitions in full; table edits; groups and piers; mass source, modal case,
+     seismic, wind and response spectrum loads with a second analysis, the spectrum scaled to the ELF base shear;
+     unlocking; a checkpoint saved and restored; a building made in one call), each change read back (see
+     docs/ETABS-MCP-GAPS.md), and a learned tool made in another program is run there. The window is closed without
+     saving at the end;
    - CSI ProMax's own features: every kind of file it writes and reads, the review pack, notes, recipes, learned
      tools, code, the self test, the bug report and the export. What it makes is taken away again;
    - the team library: its sync rules on two made-up PCs, then the real library on GitHub (sign in, write a test

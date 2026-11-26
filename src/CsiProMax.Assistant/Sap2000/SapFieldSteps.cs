@@ -258,6 +258,8 @@ public static class SapFieldSteps
         ctx.Tool("save_model", "{}", a => FieldContext.Expect(a["saved"]!.GetValue<string>().Replace('\\', '/').Split('/').Last().StartsWith(ModelerFieldSteps.ModelName, StringComparison.OrdinalIgnoreCase), $"it saved '{a["saved"]}', which is not the scratch model"));
 
         // ---- SAP2000's own analysis and design ----
+        // What the Viewer needs to show every display: a spring, a link, a section cut, a pushover and a history case.
+        ScratchExtras.Add(ctx);
         NoVerdictBeforeAnalysis(ctx);
         ctx.Tool("run_analysis", "{}", _ => FieldContext.Expect(link.Info().Locked, "the analysis answered, but SAP2000 does not say the model is analysed (locked)"));
         var analysed = false;
@@ -283,6 +285,7 @@ public static class SapFieldSteps
             Verdicts(ctx, "every SAP2000 check had its results to read", report.Select(c => (c.Key, c.Value)).ToList());
         ctx.Tool("results_overview", "{}", null, "tool results_overview (the ETABS tool, as SAP2000 answers it)"); // ETABS itself
         ctx.Tool("check_modal", "{}", null, "tool check_modal (the ETABS tool, as SAP2000 answers it)"); // ETABS itself
+        if (analysed) ScratchExtras.Check(ctx);
         if (analysed) ctx.Step("SAP2000 tables with data after the analysis and design", () => link.Tables().Where(t => !t.Empty).Select(t => t.Name).ToList());
 
         // ---- snapshots and the review pack ----
@@ -297,6 +300,9 @@ public static class SapFieldSteps
             FieldContext.Expect(pack.Frames == link.Frames().Count && pack.Areas == link.Areas().Count, $"the pack holds {pack.Frames} frames and {pack.Areas} areas, the model has {link.Frames().Count} and {link.Areas().Count}");
             return new { file = Path.GetFileName(file), kilobytes = pack.Zip.Length / 1024, frames = pack.Frames, areas = pack.Areas, tables = pack.Tables, notes = pack.Notes };
         });
+
+        // ---- the tools every program has through the same API (the whole API, lateral loads, checkpoints, a building) ----
+        CsiFieldSteps.Run(ctx);
 
         ctx.Coverage("every SAP2000 tool was run");
     }

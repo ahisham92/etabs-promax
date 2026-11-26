@@ -274,10 +274,35 @@ public static class EtabsFieldSteps
         ctx.Tool("add_load_pattern", """{"name":"CPM-EQX","type":"Seismic","user_coefficient":{"c":0.05,"k":1,"direction":"X"}}""",
             a =>
             {
-                if (a["note"] is not null) throw new FieldSkipException("this ETABS stand-in has no automatic lateral loads");
+                if (a["note"] is not null && a["lateral"] is null && link.LoadPatterns().Any(p => p.Name == "CPM-EQX"))
+                    throw new FieldSkipException("the Seismic pattern is added; its automatic load cannot be set through this ETABS's API: " + a["note"]!.GetValue<string>());
                 FieldContext.Expect(a["lateral"] is not null && link.LoadPatterns().Any(p => p.Name == "CPM-EQX"), "the seismic pattern or its coefficient is not in ETABS: " + a.ToJsonString());
             },
             "tool add_load_pattern, seismic by a user coefficient");
+        // ETABS 23 cannot take a user coefficient through its API (0.4.16 run): the seismic pattern also gets a load as
+        // joint forces in X above the base, which ETABS treats as an earthquake load for the story stiffness and the
+        // drifts (tried on a scratch ETABS 23 of the test model: Story Stiffness gives StiffX for every story).
+        ctx.Step("a lateral load for the checks: joint forces in X in CPM-EQX", () =>
+        {
+            if (!link.LoadPatterns().Any(p => p.Name == "CPM-EQX")) throw new FieldSkipException("the seismic pattern was not added");
+            if (!FieldTest.IsLive(link)) throw new FieldSkipException("no CSI program is behind this stand-in, so there is no API to load the joints through");
+            var bottom = link.Stories()[0].Elevation;
+            var above = link.Points().Where(p => p.Z > bottom + 0.1).Select(p => p.Name).ToList();
+            var loaded = Convert.ToInt32(link.Raw("load the seismic pattern", m =>
+            {
+                var n = 0;
+                foreach (var p in above)
+                {
+                    double[] force = [5, 0, 0, 0, 0, 0];
+                    if (Convert.ToInt32(m.PointObj.SetLoadForce(p, "CPM-EQX", ref force, true, "Global", 0)) == 0) n++;
+                }
+                return n;
+            }));
+            FieldContext.Expect(loaded > 0, $"no joint above the base took the load ({above.Count} tried)");
+            return $"{loaded} joints above the base carry 5 in X in CPM-EQX";
+        });
+        // What the Viewer needs to show every display: a spring, a link, a section cut, a pushover case.
+        ScratchExtras.Add(ctx);
         NoVerdictBeforeAnalysis(ctx);
         ctx.Tool("run_analysis", "{}", _ => FieldContext.Expect(link.Info().Locked, "the analysis answered, but ETABS does not say the model is analysed (locked)"));
         var analysed = false;
@@ -323,6 +348,7 @@ public static class EtabsFieldSteps
                     else ctx.Step($"ETABS table {names[0]}", () => ResultTools.Sample(link, names));
                 }
             var summaries = link.Tables().Where(t => ResultTools.IsDesignSummary(t.Name)).ToList();
+            ScratchExtras.Check(ctx);
             ctx.Step("ETABS design summary tables", () =>
             {
                 FieldContext.Expect(summaries.Any(t => !t.Empty), "no design summary table has data after the design: " + string.Join("; ", summaries.Select(t => t.Name)));
@@ -424,6 +450,9 @@ public static class EtabsFieldSteps
 
         // ---- the link with GeoProMax ----
         GeoProMaxFieldSteps.Run(ctx);
+
+        // ---- the tools every program has through the same API (the whole API, lateral loads, checkpoints, a building) ----
+        CsiFieldSteps.Run(ctx);
 
         ctx.Coverage("every ETABS tool was run");
     }
