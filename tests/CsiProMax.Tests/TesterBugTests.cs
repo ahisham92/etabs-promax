@@ -866,6 +866,29 @@ static class TesterBugTests
                 Check(CsiProMax.Tools.OutputPaths.AlwaysAskReason("edit_table", Args($$"""{"table":"Load Pattern Definitions","action":"{{action}}"}""")) is null, $"reading a table ({action}) asks about a save it does not make");
             Check(ProgramTools.Chat(CsiProgram.Etabs).First(x => x.Name == "edit_table").Description.Contains("always asked before that save", StringComparison.Ordinal), "edit_table's description does not say the engineer is asked");
         });
+        yield return ("set_lateral_load in SAP2000 asks before it saves the model, each time, for a code its API has no call for (PR 137 review)", () =>
+        {
+            Dictionary<string, System.Text.Json.JsonElement> Args(string json) => System.Text.Json.JsonDocument.Parse(json).RootElement.EnumerateObject().ToDictionary(x => x.Name, x => x.Value.Clone());
+            var was = CsiProMax.Csi.Program;
+            try
+            {
+                CsiProMax.Csi.Program = CsiProgram.Sap2000;
+                foreach (var json in new[] { """{"name":"EQ","kind":"seismic","code":"ASCE 7-22"}""", """{"name":"EQ","code":"KDS 41 17 00-2019"}""", """{"name":"W","kind":"wind","code":"AASHTO 2020"}""" })
+                    foreach (var level in Enum.GetValues<CsiProMax.Tools.ApprovalLevel>())
+                    {
+                        var asked = CsiProMax.Tools.ApprovalPolicy.Decide("set_lateral_load", true, false, Args(json), true, new CsiProMax.Tools.ApprovalFacts(),
+                            level, new List<string> { "set_lateral_load" }, true, _ => CsiProMax.Tools.PathState.Missing, []);
+                        Check(asked.Ask && !asked.CanSilence, $"{json} at {level} is not asked, or can be silenced");
+                        Check(asked.Reason.Contains("saves the model", StringComparison.Ordinal) && asked.Reason.Contains("If you say no", StringComparison.Ordinal), "the question does not say what is saved: " + asked.Reason);
+                    }
+                // The direct Set calls and None save nothing: not asked about for a save.
+                foreach (var json in new[] { """{"name":"EQ","code":"IBC2006"}""", """{"name":"EQ","code":"None"}""", """{"name":"W","kind":"wind","code":"ASCE 7-16"}""" })
+                    Check(!CsiProMax.Tools.OutputPaths.SavesBeforeLateral("set_lateral_load", Args(json)), $"{json} is asked about a save it does not make");
+                CsiProMax.Csi.Program = CsiProgram.Etabs;
+                Check(!CsiProMax.Tools.OutputPaths.SavesBeforeLateral("set_lateral_load", Args("""{"name":"EQ","code":"ASCE 7-22"}""")), "ETABS is asked about SAP2000's save");
+            }
+            finally { CsiProMax.Csi.Program = was; }
+        });
         yield return ("0.4.33 run: the pack takes SAP2000's own names for springs, hinges, functions, cases and section cuts (13 Viewer items were greyed out)", () =>
         {
             foreach (var table in new[] { "Joint Spring Assignments 1 - Uncoupled", "Frame Hinge Assigns 04 - Auto FEMA 356 - Concrete Beam", "Function - Response Spectrum - User", "Function - Time History - User",
