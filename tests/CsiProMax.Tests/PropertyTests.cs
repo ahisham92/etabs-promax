@@ -42,6 +42,54 @@ static class PropertyTests
 
     public static IEnumerable<(string Name, Action Body)> All()
     {
+        yield return ("properties: Material Property Data in full (design, nonlinear, damping, time dependence, notes, rupture) reaches the .e2k, .s2k, .f2k and .cpm (Ahmed 2026-11-26)", () =>
+        {
+            var link = Frame();
+            Run(link, "define_material_data", new
+            {
+                name = "C40", type = "Concrete", grade = "C40/50",
+                values = new { WEIGHTPERVOLUME = 25, E = 35000000, U = 0.2, A = 1e-5, FC = 40000, STRAINATFC = 0.0022, STRAINATULTIMATE = 0.0035, IOCOMPRESSION = 0.002 },
+                texts = new { HYSTYPE = "Takeda", SSTYPE = "Mander", TIMEDEPCONCCODE = "CEBFIP90" },
+                tables = new Dictionary<string, object>
+                {
+                    ["General"] = new[] { new { Color = "Yellow", Notes = "Cores and transfer slabs" } },
+                    ["Damping Parameters"] = new[] { new { ModalRatio = "0.03", VisMass = "0", VisStiff = "0.001" } },
+                    ["Concrete Data"] = new[] { new { LtWtConc = "Yes", LtWtFact = "0.85", IsUserFr = "Yes", UserFr = "4000", TimeType = "CEB-FIP 90", TimeCreep = "Yes", CreepFact = "1" } },
+                    ["Time Dependence - CEB-FIP 90"] = new[] { new { CementCoeff = "0.25", RelHumid = "70", BetaSC = "5", ShrinkStart = "3" } },
+                    ["User Stress-Strain Curves"] = new[] { new { Point = "1", Strain = "-0.0035", Stress = "-40000" }, new { Point = "2", Strain = "0", Stress = "0" } },
+                },
+            });
+            var c = link.Model.Materials.Single(x => x.Name == "C40");
+            var e2k = E2kWriter.Write(link.Model);
+            var flat = System.Text.RegularExpressions.Regex.Replace(e2k, " +", " ");
+            Check(flat.Contains("HYSTYPE \"Takeda\"") && flat.Contains("STRAINATFC 0.0022") && flat.Contains("IOCOMPRESSION 0.002") && flat.Contains("TIMEDEPCONCCODE \"CEBFIP90\""), "the .e2k has the nonlinear line and the code: " + string.Join(" | ", c.Lines.Select(l => string.Join(" ", l))));
+            var back = ViaE2k(link.Model).Materials.Single(x => x.Name == "C40");
+            Check(back.Get("SSTYPE") == "Mander" && back.Number("STRAINATULTIMATE") == 0.0035, "the nonlinear values come back from the .e2k");
+            var cpm = ModelFile.FromJson(ModelFile.ToJson(link.Model)).Materials.Single(x => x.Name == "C40");
+            Check(ProgramTables.Row(cpm, "Damping Parameters")["ModalRatio"] == "0.03" && cpm.Tables!["User Stress-Strain Curves"].Count == 2, "the .cpm keeps the table rows");
+            var s2k = S2kWriter.Write(link.Model, "a.s2k").Text;
+            Check(s2k.Contains("MATERIAL PROPERTIES 06 - DAMPING PARAMETERS") && s2k.Contains("ModalRatio=0.03"), "the .s2k has the damping");
+            Check(s2k.Contains("MATERIAL PROPERTIES 05A - TIME DEPENDENCE - CEB-FIP 90") && s2k.Contains("RelHumid=70"), "the .s2k has the time dependence");
+            Check(s2k.Contains("MATERIAL PROPERTIES 04 - USER STRESS-STRAIN CURVES") && s2k.Contains("Notes=\"Cores and transfer slabs\""), "the .s2k has the curve and the notes");
+            Check(s2k.Contains("SSHysType=Takeda") && s2k.Contains("LtWtConc=Yes") && !s2k.Contains("UserFr"), "SAP2000's concrete row takes the nonlinear and lightweight data, and no user rupture (SAP2000 has none)");
+            Check(s2k.Contains("MATERIAL PROPERTIES 09 - ACCEPTANCE CRITERIA") && s2k.Contains("IOComp=0.002"), "the .s2k has the acceptance criteria");
+            var f2k = CsiProMax.F2k.F2kWriter.Write(link.Model, new CsiProMax.F2k.F2kOptions()).Text;
+            Check(!f2k.Contains("MATERIAL PROPERTIES - DAMPING PARAMETERS") && f2k.Contains("UserFr=4000") && f2k.Contains("LtWtConc=Yes") && f2k.Contains("Color=Yellow"), "the .f2k has the rupture, the lightweight data and the color, in the tables SAFE has");
+            var rows = ProgramTables.MaterialRows(link.Model);
+            Check(rows.ContainsKey("Material Properties - Damping Parameters") && rows["Material Properties - Damping Parameters"][0]["Material"] == "C40", "ETABS gets its rows under its own table names");
+            // Renamed, the rows go with it; a new value keeps the others.
+            Run(link, "define_material_data", new { name = "C40B", was = "C40", type = "Concrete", values = new { CPCOMPRESSION = 0.02 } });
+            var r = link.Model.Materials.Single(x => x.Name == "C40B");
+            Check(r.Number("STRAINATFC") == 0.0022 && r.Number("CPCOMPRESSION") == 0.02 && r.Get("HYSTYPE") == "Takeda" && ProgramTables.Row(r, "Damping Parameters").Count == 3, "renamed: the nonlinear line and the rows are kept");
+            Run(link, "define_material_data", new { name = "C40B", was = "C40B", type = "Concrete", values = new { }, tables = new Dictionary<string, object> { ["Damping Parameters"] = Array.Empty<object>() } });
+            Check(ProgramTables.Row(link.Model.Materials.Single(x => x.Name == "C40B"), "Damping Parameters").Count == 0, "[] takes the damping off");
+            Refused(link, "define_material_data", new { name = "C40B", was = "C40B", type = "Concrete", values = new { }, tables = new Dictionary<string, object> { ["Damping Parameters"] = new[] { new { Nonsense = "1" } } } }, "has no field 'Nonsense'");
+            Refused(link, "define_material_data", new { name = "C40B", was = "C40B", type = "Concrete", values = new { }, tables = new Dictionary<string, object> { ["No Such Table"] = new[] { new { A = "1" } } } }, "no material table");
+            Refused(link, "define_material_data", new { name = "C40B", was = "C40B", type = "Concrete", values = new { }, texts = new { HYSTYPE = "Wobbly" } }, "HYSTYPE is one of");
+            var pd = Run(link, "property_definitions", new { });
+            Check(pd["material_tables"]!["Damping Parameters"]!.AsArray().Count == 3 && pd["material_nonlinear"]!["Steel"]!["keys"]!.AsArray().Count > 5, "property_definitions lists the tables and the nonlinear keys");
+            Check(pd["materials"]!.AsArray().First(x => x!["name"]!.GetValue<string>() == "C40B")!["tables"]!["General"] is not null, "property_definitions gives the material's rows");
+        });
         yield return ("properties: a steel, a rebar and a tendon material go in with their strengths, and come back from the .e2k and .s2k", () =>
         {
             var link = Frame();

@@ -27,12 +27,12 @@ public static class PropertyTools
     public static IReadOnlyList<Tool> All { get; } =
     [
         new("define_material_data",
-            "Adds or changes a material of any type (Define > Material Properties): Concrete, Steel, Rebar, Tendon, Aluminum, ColdFormed, Masonry or Other, with its grade and values in the model's units: WEIGHTPERVOLUME, E, U (Poisson), A (thermal), FC for concrete, FY FU FYE FUE for steel, rebar, tendon, cold formed and aluminum. 'was': its name now; sections keep it under a new name.",
-            """{"type":"object","required":["name","type","values"],"properties":{"name":{"type":"string"},"was":{"type":"string"},"type":{"type":"string"},"grade":{"type":"string"},"values":""" + Numbers + "}}",
+            "Adds or changes a material of any type (Define > Material Properties, with its Design, Nonlinear, Damping and Time Dependent forms): Concrete, Steel, Rebar, Tendon, Aluminum, ColdFormed, Masonry or Other, with its grade and values in the model's units: WEIGHTPERVOLUME, E, U (Poisson), A (thermal), FC for concrete, FY FU FYE FUE for steel, rebar, tendon, cold formed and aluminum; the nonlinear strains and acceptance criteria STRAINATFC STRAINATULTIMATE STRAINATHARDENING STRAINATMAXSTRESS STRAINATRUPTURE FINALSLOPE ENERGYDEGFACT IOTENSION LSTENSION CPTENSION IOCOMPRESSION LSCOMPRESSION CPCOMPRESSION. texts: HYSTYPE (hysteresis), SSTYPE (stress-strain curve), TIMEDEPCONCCODE. tables: everything else the forms hold, as rows of the program's own material tables by name (property_definitions lists them with their fields), e.g. {\"Damping Parameters\":[{\"ModalRatio\":\"0.05\"}], \"General\":[{\"Notes\":\"...\",\"Color\":\"Yellow\"}], \"Concrete Data\":[{\"LtWtConc\":\"Yes\",\"LtWtFact\":\"0.85\"}], \"Time Dependence - CEB-FIP 90\":[{...}]}; [] takes a table off. 'was': its name now; sections keep it under a new name.",
+            """{"type":"object","required":["name","type","values"],"properties":{"name":{"type":"string"},"was":{"type":"string"},"type":{"type":"string"},"grade":{"type":"string"},"values":""" + Numbers + ""","texts":{"type":"object","additionalProperties":{"type":"string"}},"tables":{"type":"object","additionalProperties":{"type":"array","items":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}}}}}}""",
             Ask.Changes, (a, e) =>
             {
                 var link = Offline(e);
-                var mat = Core(() => link.Edit(m => PropertyDefs.SetMaterial(m, a.Need("name"), Was(a), a.Need("type"), a.Text("grade") is { Length: > 0 } g ? g : null, Values(a, "values", true))));
+                var mat = Core(() => link.Edit(m => PropertyDefs.SetMaterial(m, a.Need("name"), Was(a), a.Need("type"), a.Text("grade") is { Length: > 0 } g ? g : null, Values(a, "values", true), Texts(a), RowsOf(a))));
                 return new JsonObject { ["material"] = mat.Name, ["type"] = mat.Type };
             }, a => $"Define the material {a.Text("name")}"),
         new("define_frame_shape",
@@ -112,6 +112,38 @@ public static class PropertyTools
             """{"type":"object","properties":{"objects":{"type":"array","items":{"type":"string"}}}}""",
             Ask.Never, (a, e) => Definitions(Offline(e).Model, a.Texts("objects"))),
     ];
+
+    private static Dictionary<string, string>? Texts(JsonElement a)
+    {
+        if (!a.TryGetProperty("texts", out var t) || t.ValueKind != JsonValueKind.Object) return null;
+        return t.EnumerateObject().ToDictionary(x => x.Name.Trim().ToUpperInvariant(), x => x.Value.ValueKind == JsonValueKind.String ? x.Value.GetString()!.Trim() : x.Value.ToString(), StringComparer.Ordinal);
+    }
+
+    /// <summary>The 'tables' argument: rows of the program's own tables, by table name; every value as the tables hold it (text).</summary>
+    private static Dictionary<string, List<Dictionary<string, string>>>? RowsOf(JsonElement a)
+    {
+        if (!a.TryGetProperty("tables", out var t) || t.ValueKind == JsonValueKind.Null) return null;
+        if (t.ValueKind != JsonValueKind.Object) throw new ToolInputException("tables is {table name: [rows]}.");
+        var o = new Dictionary<string, List<Dictionary<string, string>>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var table in t.EnumerateObject())
+        {
+            var rows = table.Value.ValueKind switch
+            {
+                JsonValueKind.Array => table.Value.EnumerateArray().ToList(),
+                JsonValueKind.Object => [table.Value],
+                _ => throw new ToolInputException($"The rows of '{table.Name}' are a list of {{field: value}}."),
+            };
+            o[table.Name.Trim()] = rows.Select(r => r.ValueKind != JsonValueKind.Object ? throw new ToolInputException($"A row of '{table.Name}' is {{field: value}}.")
+                : r.EnumerateObject().ToDictionary(f => f.Name.Trim(), f => f.Value.ValueKind switch
+                {
+                    JsonValueKind.String => f.Value.GetString() ?? "",
+                    JsonValueKind.True => "Yes", JsonValueKind.False => "No",
+                    JsonValueKind.Null => "",
+                    _ => f.Value.GetRawText(),
+                }, StringComparer.Ordinal)).ToList();
+        }
+        return o;
+    }
 
     private static string? Was(JsonElement a) => a.Text("was") is { Length: > 0 } w ? w : null;
 
@@ -277,10 +309,19 @@ public static class PropertyTools
         {
             ["material_types"] = new JsonArray(PropertyDefs.MaterialTypes.Select(t => (JsonNode)t).ToArray()),
             ["material_values"] = new JsonArray(PropertyDefs.MaterialValues.Select(v => (JsonNode)new JsonObject { ["key"] = v.Key, ["label"] = v.Label }).ToArray()),
+            ["material_texts"] = JsonSerializer.SerializeToNode(PropertyDefs.MaterialTexts),
+            ["material_nonlinear"] = new JsonObject(PropertyDefs.MaterialTypes.Select(t => KeyValuePair.Create(t, (JsonNode?)new JsonObject
+            {
+                ["keys"] = new JsonArray(PropertyDefs.NonlinearKeys(t).Select(k => (JsonNode)k).ToArray()),
+                ["defaults"] = JsonSerializer.SerializeToNode(PropertyDefs.NonlinearKeys(t).Length > 0 ? PropertyDefs.NonlinearDefaults(t) : new()),
+            }))),
+            ["material_tables"] = JsonSerializer.SerializeToNode(ProgramTables.MaterialTables),
             ["materials"] = new JsonArray(m.Materials.Select(x => (JsonNode)new JsonObject
             {
                 ["name"] = x.Name, ["type"] = x.Type, ["grade"] = x.Get("GRADE"),
-                ["values"] = new JsonObject(PropertyDefs.MaterialValues.Where(v => x.Number(v.Key) is not null).Select(v => KeyValuePair.Create(v.Key, (JsonNode?)JsonValue.Create(x.Number(v.Key)!.Value)))),
+                ["values"] = new JsonObject(PropertyDefs.MaterialValues.Select(v => v.Key).Concat(PropertyDefs.MaterialNonlinearValues).Where(k => x.Number(k) is not null).Select(k => KeyValuePair.Create(k, (JsonNode?)JsonValue.Create(x.Number(k)!.Value)))),
+                ["texts"] = new JsonObject(PropertyDefs.MaterialTexts.Keys.Where(k => x.Get(k) is not null).Select(k => KeyValuePair.Create(k, (JsonNode?)x.Get(k)))),
+                ["tables"] = JsonSerializer.SerializeToNode(x.Tables ?? new()),
             }).ToArray()),
             ["shapes"] = new JsonArray(PropertyDefs.Shapes.Select(s => (JsonNode)new JsonObject { ["shape"] = s.Name, ["dims"] = new JsonArray(s.Dims.Select(d => (JsonNode)d).ToArray()), ["concrete"] = s.Concrete, ["about"] = s.About }).ToArray()),
             ["frame_sections"] = new JsonArray(m.FrameSections.Select(s => (JsonNode)new JsonObject
