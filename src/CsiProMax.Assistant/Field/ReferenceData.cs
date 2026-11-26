@@ -22,8 +22,11 @@ public static class ReferenceData
     public const string FolderName = "Reference data";
 
     /// <summary>What one item works with: the program, the link to its scratch window, and where to write.</summary>
-    public sealed class Gather(CsiProgram program, ICsiLink link, string folder, string modelPath = "")
+    public sealed class Gather(CsiProgram program, ICsiLink link, string folder, string modelPath = "", int processId = 0)
     {
+        /// <summary>The scratch window's process (0 when not known): whose message windows an item may answer.</summary>
+        public int ProcessId { get; } = processId;
+
         /// <summary>The scratch model's own file in the test's folder ("" when not known).</summary>
         public string ModelPath { get; } = modelPath;
 
@@ -78,12 +81,12 @@ public static class ReferenceData
     /// Runs every item for one program and writes gathered.md. Never throws and adds no step: what could not be
     /// gathered is a line in gathered.md, not a failure of the test. Gives the lines back.
     /// </summary>
-    public static IReadOnlyList<string> Run(string workFolder, CsiProgram program, ICsiLink link, string modelPath = "")
+    public static IReadOnlyList<string> Run(string workFolder, CsiProgram program, ICsiLink link, string modelPath = "", int processId = 0)
     {
         var lines = new List<string>();
         try
         {
-            var gather = new Gather(program, link, Path.Combine(workFolder, FolderName, program.Name), modelPath);
+            var gather = new Gather(program, link, Path.Combine(workFolder, FolderName, program.Name), modelPath, processId);
             foreach (var item in Items.ToList())
             {
                 if (item.For is { } only && !only(program)) continue;
@@ -320,6 +323,9 @@ public static class ReferenceData
     /// </summary>
     private static string ImportsCarriedModel(Gather g)
     {
+        // An import can wait on its log ("Access Database Import Log") or a message box: only with the scratch window's
+        // own process known can those be answered while the import runs.
+        if (g.ProcessId == 0 || !OperatingSystem.IsWindows()) return "not tried: the scratch window's process is not known, and an import may wait for a person";
         var safe = g.Program.Key == "safe";
         var m = CsiProMax.Model.Templates.ConcreteFrame("Carried", [6, 6], [5], 1, 3.2);
         m.Target = safe ? "safe" : "sap2000";
@@ -337,8 +343,28 @@ public static class ReferenceData
         {
             var before = Directory.EnumerateFiles(dir).ToHashSet(StringComparer.OrdinalIgnoreCase);
             string answer;
+            // The program's windows are answered while the import runs, and what they said is kept: the import log's
+            // errors and any message SAFE or SAP2000 shows (the same answers the scratch window gets in its steps).
+            var said = new System.Collections.Concurrent.ConcurrentQueue<string>();
+            using var stop = new CancellationTokenSource();
+            var answering = Task.Run(async () =>
+            {
+                while (!stop.IsCancellationRequested)
+                {
+                    try { foreach (var w in ScratchDialogs.CloseNotices(g.ProcessId, g.Program)) said.Enqueue(w); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
+                    try { await Task.Delay(500, stop.Token); } catch (OperationCanceledException) { }
+                }
+            });
             try { answer = Convert.ToInt32(g.Link.Raw("import " + Path.GetFileName(file), x => x.File.OpenFile(file))).ToString(c); }
             catch (Exception ex) when (ex is not OutOfMemoryException) { answer = ex.GetType().Name + " " + Short(ex.Message); }
+            finally
+            {
+                // A last look for a window shown just as the import came back.
+                try { foreach (var w in ScratchDialogs.CloseNotices(g.ProcessId, g.Program)) said.Enqueue(w); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
+                stop.Cancel();
+                try { answering.Wait(2000); } catch (AggregateException) { }
+            }
+            if (!said.IsEmpty) answer += "; answered: " + Short(string.Join(" / ", said));
             var held = $"frames {Count(x => x.FrameObj.Count())}, areas {Count(x => x.AreaObj.Count())}, points {Count(x => x.PointObj.Count())}";
             // What the program wrote beside the file while importing it (its import log and the like).
             var logs = Directory.EnumerateFiles(dir).Where(f => !before.Contains(f) && Path.GetExtension(f).ToUpperInvariant() is ".LOG" or ".TXT" or ".$2K" or ".$FK" or ".OUT").ToList();

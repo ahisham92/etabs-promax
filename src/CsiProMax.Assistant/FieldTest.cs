@@ -503,7 +503,7 @@ public static class FieldTest
                 // Closing and letting go never stop the test: the next program and the report still follow.
                 // The needed things from this program, gathered last, while its window is still open and answering:
                 // not steps, never failures (ReferenceData). After every step, since it saves the scratch model once more.
-                if (finished && o.ReferenceData) ReferenceData.Run(ctx.Folder, program, open.Link, open.ModelPath);
+                if (finished && o.ReferenceData) ReferenceData.Run(ctx.Folder, program, open.Link, open.ModelPath, (open as ScratchProgram)?.ProcessId ?? 0);
                 try
                 {
                     ScratchProgram.CloseStep(ctx, open, program);
