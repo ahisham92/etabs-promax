@@ -205,6 +205,20 @@ static class ExtrasTests
             var install = File.ReadAllText(Path.Combine(SourceText.Root(), "install.ps1"));
             Check(install.Contains("'CSI ProMax Engine.lnk'") && !install.Contains("'CSI ProMax Modeler.lnk'"), "the installer does not make the one Engine shortcut");
         });
+        yield return ("extras: CSI ProMax Engine works with no AI: Run, the forms and the review pack are CSI ProMax's own code, never the chat's (Ahmed 2026-11-26)", () =>
+        {
+            var root = SourceText.Root();
+            string Src(params string[] parts) => File.ReadAllText(Path.Combine([root, "src", "CsiProMax.Assistant", .. parts]));
+            foreach (var (name, text) in new[] { ("EngineRun.cs", Src("Tools", "EngineRun.cs")), ("HandModel.cs", Src("Tools", "HandModel.cs")), ("HandTools.cs", Src("Tools", "HandTools.cs")), ("Pack.cs", Src("Tools", "Pack.cs")) })
+                foreach (var chat in new[] { "ChatPane", "ChatEngine", "ChatMcp", "ChatAuto", "AiMode.On", "CsiProMax.Chat." })
+                    Check(!text.Contains(chat, StringComparison.Ordinal), $"{name} uses the chat ({chat}); the Engine must work without the AI");
+            var engine = Src("Tools", "EngineRun.cs");
+            Check(engine.Contains("ProgramTools.For(program)", StringComparison.Ordinal), "the Run does not use the same tools the chat runs");
+            var view = Src("Panel", "Host", "ModelView.cs");
+            Check(view.Contains("path == \"run\" ? RunAsync(body)", StringComparison.Ordinal) && view.Contains("path == \"edit\" ? EditAsync(body)", StringComparison.Ordinal), "the window's Run or forms are not served whatever the AI choice");
+            var steps = Src("Field", "AiModeFieldSteps.cs");
+            Check(steps.Contains("without the AI chat: the Engine's Run, forms and results are there", StringComparison.Ordinal), "the field test does not check the Engine without the chat");
+        });
         yield return ("extras: CSI ProMax Engine's Run writes the model for its program beside the model, says plainly when the program is not on this PC, and never touches the model's own file (Ahmed 2026-11-26)", () =>
         {
             var link = Frame();
