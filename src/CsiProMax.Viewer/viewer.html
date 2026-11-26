@@ -2876,7 +2876,7 @@ function buildBars() {
     ["t3d", "Set Default 3D View", "v:3d"], [sap ? "txy" : "tpl", sap ? "Set XY View" : "Set Plan View", "v:plan"], [sap ? "txz" : "tel", sap ? "Set XZ View" : "Set Elevation View", "v:elev"], ...(sap ? [["tyz", "Set YZ View", "cam:side"]] : []), ["tnd", "Set Named View (no named views in this model)", ""],
     ["rot", "Rotate 3D View", "t:orbit"], ["persp", "Perspective Toggle", "persp"], 0,
     ["up", "Move Up in List (Page Up)", "storyUp"], ["down", "Move Down in List (Page Down)", "storyDown"], 0,
-    ["showall", "Show All", "showAll"], ["dispopt", "Set Display Options (Ctrl+W)", "dlg:display"], ["loads", "Show Load Assigns", "dd:loads", "", 1], ["defsolid", "Show Deformed Shape (F6)", "dd:deformed", "", 1], 0,
+    ["showall", "Show All", "showAll"], ["dispopt", "Set Display Options (Ctrl+W)", "dlg:display"], ["loads", "Show Load Assigns (the arrow: frame, shell or joint loads)", "dd:loads", "", 1], ["defsolid", "Show Deformed Shape (F6) (the arrow: mode shapes, animate)", "dlg:deformed", "deformed", "deformed"], 0,
     ["undef", "Show Undeformed Shape (F4)", "r:model", "model"], ["react", "Show Joint Reactions", "dlg:reactions", "reactions"], ["frc", "Show Frame Forces/Stresses (F8)", "dlg:forces", "forces"], ["story", sap ? "Show Plot Functions" : "Story Response Plots", "plot"], 0,
     ["tbl", "Show Tables (Ctrl+T)", "tables"], 0,
     ["modes", "Show Mode Shape", "dlg:modes", "deformed"], ["contour", "Show Joint Displacement Contours", "dlg:contour", "contour"], ["shellc", "Show Shell Forces/Stresses", "dlg:shells", "shell"], ["ratios", "Show Design Ratios", "r:ratios", "ratios"], ["anim", "Animate the Deformed Shape", "anim"], ["inst", "Check the Model for Instabilities (F7)", "inst"],
@@ -2888,14 +2888,15 @@ function buildBars() {
       ["djoint", "Draw Joints (click a point)", "d:joint"], 0, ["dgrid", "Edit Grid Data", "dlg:grids"]] : []),
     "grow", ["sall", "Select All (Ctrl+A)", "selAll"], ["sps", "Get Previous Selection", "selPrev"], ["sclr", "Clear Selection (Esc)", "selNone"], ["sint", "Select Using Intersecting Line (drag a line across the objects)", "t:iline"]];
   const html = list => list.map(b => b === "grow" ? `<span class="grow"></span>` : !b ? `<span class="sep"></span>`
-    : `<button class="ib${b[4] ? " ddb" : ""}" ${b[2] ? `data-act="${b[2]}"` : ""} ${b[3] ? `data-res="${b[3]}"` : ""} ${b[5] || !b[2] ? "disabled" : ""} title="${esc(b[1])}">${eicon(b[0])}</button>`).join("");
+    : `<button class="ib${b[4] ? " ddb" : ""}" ${b[2] ? `data-act="${b[2]}"` : ""} ${typeof b[4] === "string" ? `data-dd="${b[4]}"` : ""} ${b[3] ? `data-res="${b[3]}"` : ""} ${b[5] || !b[2] ? "disabled" : ""} title="${esc(b[1])}">${eicon(b[0])}</button>`).join("");
   $("icons").innerHTML = html(bar); $("strip").innerHTML = html(strip);
-  document.querySelectorAll("#icons [data-act], #strip [data-act]").forEach(b => b.onclick = e => { e.stopPropagation(); act(b.dataset.act); });
+  // A split button as the program's: the picture does its own action, the small arrow on its right opens the list.
+  document.querySelectorAll("#icons [data-act], #strip [data-act]").forEach(b => b.onclick = e => { e.stopPropagation(); const dd = b.dataset.dd; if (dd && e.offsetX > b.clientWidth - 11) return ddOpen(dd, b); act(b.dataset.act); });
   if (typeof syncTools === "function" && panes.length) syncTools();
 }
-function ddOpen(key) {
+function ddOpen(key, from) {
   // The program's drop-down toolbar buttons: the same items as its menus.
-  const btn = document.querySelector(`[data-act="dd:${key}"]`), leaf = l => (l || []).filter(i => i && !Array.isArray(i[1])).map(i => [i[0], () => act(i[1]), !!i[3]]);
+  const btn = from || document.querySelector(`[data-act="dd:${key}"]`), leaf = l => (l || []).filter(i => i && !Array.isArray(i[1])).map(i => [i[0], () => act(i[1]), !!i[3]]);
   const find = (list, re) => { for (const i of list || []) { if (!i) continue; if (Array.isArray(i[1])) { if (re.test(i[0])) return i[1]; const r = find(i[1], re); if (r) return r; } } return null; };
   const m = menus();
   let items;

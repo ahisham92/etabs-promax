@@ -180,7 +180,7 @@ static class ExtrasTests
         yield return ("extras: the Viewer and Modeler select joints and supports, open information on a right click, and filter the selection (Ahmed 2026-11-26)", () =>
         {
             var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
-            foreach (var part in new[] { "function jointsIn(p)", "function jointAt(p, x, y, r)", "function jointInfo(name)", "function rightClick(p, x, y, shift, cx, cy)", "function selFilter()", "function loadRowsOf(o)", "function showJointInTable(name, hit)", "addComment(t, {type: \"j\", kind: \"joint\"", "gotJ.forEach(n => selJ.add(n))", "function loadGrid(loads)", "[\"filter\", \"Filter the selection" })
+            foreach (var part in new[] { "function jointsIn(p)", "function jointAt(p, x, y, r)", "function jointInfo(name)", "function rightClick(p, x, y, shift, cx, cy)", "function selFilter()", "function loadRowsOf(o)", "function showJointInTable(name, hit)", "addComment(t, {type: \"j\", kind: \"joint\"", "gotJ.forEach(n => selJ.add(n))", "function loadGrid(loads)", "[\"Filter Selection...\", \"selFilter\"" })
                 Check(html.Contains(part), "viewer.html lost " + part);
             var check = ViewerCheck.Script;
             foreach (var step in new[] { "selection: a left-to-right window round a support selects the support joint", "selection: right click on an object opens its information, with a Loads tab holding its loads", "selection: the Filter keeps only the checked kinds of the selection" })
