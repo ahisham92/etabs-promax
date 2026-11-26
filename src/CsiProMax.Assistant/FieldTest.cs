@@ -340,6 +340,8 @@ public static class FieldTest
                 // The Viewer's own screen on this program's model: one check, the same for every program.
                 ctx.Section(FieldParts.ScratchSection(program));
                 ctx.WithResults();
+                // Learned tools are shared by the three programs (and the team): one made elsewhere must run here too.
+                PanelFieldSteps.InProgram(ctx, window.Link, program, o.LiveScratch);
                 if (panelDone) return;
                 // CSI ProMax's own features need a window that still answers: one that stopped (a call that never came
                 // back) is left out, and the next program's window, or the open model, takes that part instead.

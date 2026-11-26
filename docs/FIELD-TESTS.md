@@ -30,9 +30,12 @@ The field test is inside CSI ProMax. It checks what it can by itself and saves o
      read; units; properties and load definitions in full; table edits; groups and piers; mass source, modal case,
      seismic, wind and response spectrum loads with a second analysis, the spectrum scaled to the ELF base shear;
      unlocking; a checkpoint saved and restored; a building made in one call), each change read back (see
-     docs/ETABS-MCP-GAPS.md). The window is closed without saving at the end;
+     docs/ETABS-MCP-GAPS.md), and a learned tool made in another program is run there. The window is closed without
+     saving at the end;
    - CSI ProMax's own features: every kind of file it writes and reads, the review pack, notes, recipes, learned
-     tools, code, the self test, the bug report and the export. What it makes is taken away again.
+     tools, code, the self test, the bug report and the export. What it makes is taken away again;
+   - the team library: its sync rules on two made-up PCs, then the real library on GitHub (sign in, write a test
+     file in field-test/, read it back, remove it). No GitHub sign-in on the PC is "not tested", with how to sign in.
 
    Leave the windows it opens alone while it runs, and wait for it before using the chat. Your open model is only
    read, never changed. If a program shows a message of its own in the window the test opened (a licence message,

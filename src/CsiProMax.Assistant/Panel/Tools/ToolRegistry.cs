@@ -63,6 +63,7 @@ public sealed class ToolRegistry
         registry.Add(new WorkedCodeTool());
         registry.Add(new RunLearnedToolTool());
         registry.Add(new DeleteLearnedToolTool());
+        registry.Add(new TeamLibraryTool());
         registry.Add(new RunSelfTestTool(registry));
         registry.Add(new SelfTestStatusTool());
         registry.Add(new RunFieldTestTool());

@@ -134,11 +134,27 @@ internal static class ConnectorTools
                 using var doc = JsonDocument.Parse(File.ReadAllText(file));
                 var r = doc.RootElement;
                 var name = r.GetProperty("name").GetString()!;
-                if (taken.Add(name)) tool = new Def(name, r.GetProperty("description").GetString(), r.GetProperty("inputSchema").Clone());
+                var programs = r.TryGetProperty("programs", out var p) && p.ValueKind == JsonValueKind.Array
+                    ? p.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()!).ToArray() : [];
+                if (taken.Add(name)) tool = new Def(name, r.GetProperty("description").GetString() + ProgramNote(programs, Csi.Program.Key), r.GetProperty("inputSchema").Clone());
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or KeyNotFoundException or InvalidOperationException) { }
             if (tool is not null) yield return tool;
         }
+    }
+
+    /// <summary>
+    /// What a learned tool's description adds in a program it has not run in yet (made in ETABS, offered in SAP2000):
+    /// the three programs share most of their API, so it is offered, and Claude is told to check before relying on it.
+    /// "" when it has run here, or when nothing is known (a tool from before 0.4.16).
+    /// </summary>
+    public static string ProgramNote(IReadOnlyCollection<string> programs, string here)
+    {
+        if (programs.Count == 0 || programs.Contains(here, StringComparer.OrdinalIgnoreCase)) return "";
+        var names = programs.Select(k => CsiProMax.Assistant.Etabs.CsiProgram.Find(k)?.Name ?? k);
+        var name = CsiProMax.Assistant.Etabs.CsiProgram.Find(here)?.Name ?? here;
+        return $" (Made in {string.Join(" and ", names)}; not run in {name} yet. Most API calls are the same in ETABS, SAP2000 and SAFE: " + // ETABS itself
+               "if it fails here, fix it with run_etabs_code and save it again under the same name.)";
     }
 
     /// <summary>A learned tool was saved or deleted by this call: the client is told to read the list again.</summary>

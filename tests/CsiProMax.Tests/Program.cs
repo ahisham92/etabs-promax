@@ -1037,6 +1037,7 @@ foreach (var (name, body) in KeptPlugInsTests.All()) Test(name, body);
 foreach (var (name, body) in StabilityTests.All()) Test(name, body);
 foreach (var (name, body) in FieldRun048Tests.All()) Test(name, body);
 foreach (var (name, body) in FieldQuietTests.All()) Test(name, body);
+foreach (var (name, body) in TeamLibraryTests.All()) Test(name, body);
 
 var failed = 0;
 // ---- SAP2000 ----
