@@ -299,6 +299,13 @@ public static class F2kRebuild
         return Convert.ToInt32(e.Raw("count the design strips", m => { int n = 0; string[] names = []; m.DesignConcreteSlab.DesignStrip.GetNameList(ref n, ref names); return n; }), CultureInfo.InvariantCulture);
     }
 
+    /// <summary>The beams, columns, walls and floors the file holds (what Build would draw).</summary>
+    public static int ObjectCount(string f2kText)
+    {
+        var t = CsiTableText.Parse(f2kText);
+        return new[] { "BEAM OBJECT CONNECTIVITY", "COLUMN OBJECT CONNECTIVITY", "WALL OBJECT CONNECTIVITY", "FLOOR OBJECT CONNECTIVITY" }.Sum(x => Rows(t, x).Count());
+    }
+
     private static IEnumerable<Dictionary<string, string>> Rows(Dictionary<string, List<Dictionary<string, string>>> tables, string name) =>
         tables.TryGetValue(name, out var rows) ? rows : [];
 

@@ -46,6 +46,11 @@ internal static class SkipAudit
     /// <summary>The kind of a "not tested" reason; <see cref="Why.Unjustified"/> when it is none of the reasons that hold.</summary>
     public static Why Of(string why)
     {
+        // A failure already written by Failure says its kind in its own words: its closing rule names the licence, so
+        // reading it again took every such failure for a licence one (0.4.56 SAFE 23 report: "[the program's licence]").
+        if (why.StartsWith(FailureLead, StringComparison.Ordinal))
+            foreach (var kind in Enum.GetValues<Why>())
+                if (why.AsSpan(FailureLead.Length).StartsWith(Words(kind) + ")", StringComparison.Ordinal)) return kind;
         foreach (var (part, kind) in Known)
             if (why.Contains(part, StringComparison.OrdinalIgnoreCase)) return kind;
         return Why.Unjustified;
@@ -62,9 +67,11 @@ internal static class SkipAudit
     /// </summary>
     public static bool Allowed(Why kind) => kind is Why.ProgramNotHere or Why.Licence or Why.NotWindows or Why.PcSetUpWithoutIt or Why.YourOwnModel or Why.WindowWentAway or Why.NoWindowInThisRun;
 
+    private const string FailureLead = "not tested, and that is not allowed here (";
+
     /// <summary>What the report says for a step left out without a reason that holds.</summary>
     public static string Failure(string why) =>
-        $"not tested, and that is not allowed here ({Words(Of(why))}), so it counts as failed: {why}" +
+        $"{FailureLead}{Words(Of(why))}), so it counts as failed: {why}" +
         " (a step may be left out only when the program or its licence is not on this PC; anything else is tested another way)";
 
     /// <summary>In plain words, for the report's list of what was not tested.</summary>

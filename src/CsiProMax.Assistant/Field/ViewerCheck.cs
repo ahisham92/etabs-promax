@@ -388,6 +388,25 @@ public static class ViewerCheck
     }
 
     /// <summary>
+    /// A Viewer display the program has nothing of its own for, so on its pack the item is rightly greyed out (the
+    /// Viewer shows what the program shows, nothing extra: Ahmed 2026-11-26). SAFE has no piers or spandrels, hinges,
+    /// pushover, response spectrum, modal or section cut results; 14 such items failed as "not tested" on SAFE 23.1
+    /// (0.4.56). Null for any other item, which is tested as usual.
+    /// </summary>
+    public static string? NotInProgram(string program, string item)
+    {
+        if (!string.Equals(program, CsiProgram.Safe.Name, StringComparison.OrdinalIgnoreCase)) return null;
+        foreach (var (words, what) in new[]
+        {
+            ("Pier and Spandrel", "pier and spandrel forces"), ("Hinge", "hinge results"), ("Pushover", "pushover cases"),
+            ("Response Spectrum", "response spectrum cases"), ("Mode Shape", "modal cases"), ("Modal Results", "modal cases"),
+            ("Section Cut", "section cut results"),
+        })
+            if (item.Contains(words, StringComparison.OrdinalIgnoreCase)) return $"SAFE has no {what}";
+        return null;
+    }
+
+    /// <summary>
     /// The field test's Viewer steps, the same for every program: a pack of the model <paramref name="link"/> has open
     /// is made, the Viewer is opened on it, and every item the page checked is recorded as its own step, with the
     /// pictures saved in the test's folder (they go into the zip). A PC with no usable browser records "not tested".
@@ -423,7 +442,8 @@ public static class ViewerCheck
         foreach (var item in seen.Items)
         {
             var name = "Viewer, " + item.Name;
-            if (item.Skipped) ctx.Skip(name, item.Detail.StartsWith("skipped: ", StringComparison.Ordinal) ? item.Detail["skipped: ".Length..] : item.Detail);
+            if (item.Skipped && NotInProgram(program, item.Name) is { } none) ctx.Step(name, () => $"greyed out, as it should be: {none}");
+            else if (item.Skipped) ctx.Skip(name, item.Detail.StartsWith("skipped: ", StringComparison.Ordinal) ? item.Detail["skipped: ".Length..] : item.Detail);
             else if (item.Ok) ctx.Step(name, () => item.Detail.Length > 0 ? item.Detail : "ok");
             else ctx.Fail(name, item.Detail);
         }
