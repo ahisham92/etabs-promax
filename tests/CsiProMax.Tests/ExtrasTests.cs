@@ -213,7 +213,7 @@ static class ExtrasTests
                 foreach (var chat in new[] { "ChatPane", "ChatEngine", "ChatMcp", "ChatAuto", "AiMode.On", "CsiProMax.Chat." })
                     Check(!text.Contains(chat, StringComparison.Ordinal), $"{name} uses the chat ({chat}); the Engine must work without the AI");
             var engine = Src("Tools", "EngineRun.cs");
-            Check(engine.Contains("ProgramTools.For(program)", StringComparison.Ordinal), "the Run does not use the same tools the chat runs");
+            Check(engine.Contains("ProgramTools.Chat(program)", StringComparison.Ordinal), "the Run does not use the same tools the chat runs");
             var view = Src("Panel", "Host", "ModelView.cs");
             Check(view.Contains("path == \"run\" ? RunAsync(body)", StringComparison.Ordinal) && view.Contains("path == \"edit\" ? EditAsync(body)", StringComparison.Ordinal), "the window's Run or forms are not served whatever the AI choice");
             var steps = Src("Field", "AiModeFieldSteps.cs");

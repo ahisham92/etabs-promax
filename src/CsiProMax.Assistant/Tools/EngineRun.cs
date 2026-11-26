@@ -160,7 +160,7 @@ public static class EngineRun
     {
         IScratchWindow? window = null;
         var ctx = new FieldContext(program, folder, _model!);
-        ctx.Offer(ProgramTools.For(program));
+        ctx.Offer(ProgramTools.Chat(program));
         try
         {
             Say(mustAnalyse
