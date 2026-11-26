@@ -192,6 +192,47 @@ static class OldProgramTests
             finally { try { Directory.Delete(root, true); } catch (IOException) { } }
         });
 
+        yield return ("one update, every part on one version: the installed copy the Modeler, the Viewer and the shortcuts start follows the running version, CsiProMax.dll last", () =>
+        {
+            var root = Path.Combine(Path.GetTempPath(), "cpm-align-" + Guid.NewGuid().ToString("N"));
+            string from = Path.Combine(root, "versions", "0.4.48"), into = Path.Combine(root, "CSI ProMax");
+            Directory.CreateDirectory(Path.Combine(from, "web")); Directory.CreateDirectory(into);
+            try
+            {
+                string[] plugIns = ["CsiProMaxPlugin.dll", "CsiProMaxSafePlugin.dll", "CsiProMaxSapPlugin.dll"];
+                foreach (var n in plugIns.Concat(["CsiProMax.dll", "CsiProMax.deps.json", "Same.dll"]))
+                {
+                    File.WriteAllText(Path.Combine(from, n), n == "Same.dll" ? "same" : "new " + n);
+                    File.WriteAllText(Path.Combine(into, n), n == "Same.dll" ? "same" : "old " + n);
+                }
+                File.WriteAllText(Path.Combine(from, "web", "viewer.html"), "new viewer");
+                File.WriteAllText(Path.Combine(from, ".complete"), "0.4.48");
+                File.WriteAllText(Path.Combine(into, "settings-of-mine.txt"), "kept");
+                Version Of(string file) => file.StartsWith(from, StringComparison.Ordinal) || File.ReadAllText(file).StartsWith("new", StringComparison.Ordinal) ? new Version(0, 4, 48) : new Version(0, 4, 45);
+                var before = CsiProMax.Update.PlugInRefresh.Aligned("0.4.48", into, null, plugIns, Of);
+                Check(!before.Same && before.Text.Contains("this run 0.4.48", StringComparison.Ordinal) && before.Text.Contains("installed CsiProMax.dll 0.4.45", StringComparison.Ordinal), "an installed copy left behind is seen: " + before.Text);
+                var stamp = File.GetLastWriteTimeUtc(Path.Combine(into, "Same.dll"));
+                var said = CsiProMax.Update.PlugInRefresh.Everything(from, into, Of);
+                Check(said is not null && said.Contains("is now 0.4.48 (was 0.4.45): 6 files written", StringComparison.Ordinal), "what was done is said: " + said);
+                foreach (var n in plugIns.Concat(["CsiProMax.dll", "CsiProMax.deps.json"])) Equal("new " + n, File.ReadAllText(Path.Combine(into, n)), n);
+                Equal("new viewer", File.ReadAllText(Path.Combine(into, "web", "viewer.html")), "files in folders too");
+                Equal(stamp, File.GetLastWriteTimeUtc(Path.Combine(into, "Same.dll")), "a file with the same content is not written again");
+                Check(!File.Exists(Path.Combine(into, ".complete")) && File.ReadAllText(Path.Combine(into, "settings-of-mine.txt")) == "kept", "the download mark is not copied, and what else is in the installed folder is kept");
+                var after = CsiProMax.Update.PlugInRefresh.Aligned("0.4.48", into, "0.4.48", plugIns, Of);
+                Check(after.Same, "every part is one version afterwards: " + after.Text);
+                Check(CsiProMax.Update.PlugInRefresh.Everything(from, into, Of) is null, "a second time there is nothing to do");
+                Check(CsiProMax.Update.PlugInRefresh.Everything(from, into, f => f.StartsWith(from, StringComparison.Ordinal) ? new Version(0, 4, 40) : new Version(0, 4, 48)) is null, "a newer installed copy is never put back");
+                Check(!CsiProMax.Update.PlugInRefresh.Aligned("0.4.48", into, "0.4.49", plugIns, Of).Same, "a newer version downloaded and not yet in use is seen");
+                var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Panel/Update/PlugInRefresh.cs"));
+                Check(source.Contains("private static readonly string[] Last = [\"CsiProMax.deps.json\", \"CsiProMax.runtimeconfig.json\", \"CsiProMax.dll\"]", StringComparison.Ordinal), "CsiProMax.dll is copied last");
+                var steps = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/PcFieldSteps.cs"));
+                Check(steps.Contains("every part of CSI ProMax on this PC is one version", StringComparison.Ordinal) && steps.Contains("PlugInRefresh.Aligned(", StringComparison.Ordinal), "the field test checks it on the PC");
+                var program = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Program.cs"));
+                Check(program[program.IndexOf("private static int RunViewer", StringComparison.Ordinal)..].Contains("Updater.CheckAsync(force: false)", StringComparison.Ordinal), "the Viewer on its own looks for updates too");
+            }
+            finally { try { Directory.Delete(root, true); } catch (IOException) { } }
+        });
+
         yield return ("kind: every plug-in serves its program's model on the pipe before it opens the window", () =>
         {
             foreach (var folder in new[] { "CsiProMax.Plugin", "CsiProMax.Plugin.Safe", "CsiProMax.Plugin.Sap" })

@@ -289,6 +289,10 @@ public static class Program
         app.DispatcherUnhandledException += (_, e) => Note("viewer window", e.Exception);
         CsiProMax.Host.WebWindow.Install();
         app.Startup += (_, _) => app.MainWindow = CsiProMax.Host.WebWindow.ShowHere(address, CsiProMax.Host.WebPages.Kind.Viewer);
+        // The Viewer on its own looks for updates too, so a PC where only the Viewer is used does not stay behind:
+        // a newer version is downloaded while it is open and is the one that opens next time (Program picks the newest).
+        if (!args.Contains("--no-update"))
+            _ = Task.Run(async () => { try { await Updater.CheckAsync(force: false).ConfigureAwait(false); } catch (Exception ex) { Note("viewer update check", ex); } });
         app.Run();
         return 0;
     }
