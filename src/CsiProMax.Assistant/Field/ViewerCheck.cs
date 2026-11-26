@@ -40,7 +40,15 @@ public static class ViewerCheck
       window.addEventListener("unhandledrejection", e => errors.push("promise: " + String(e.reason && e.reason.message || e.reason)));
       const wait = ms => new Promise(r => setTimeout(r, ms));
       const items = [];
-      const add = (name, ok, detail, skipped) => items.push({name, ok: !!ok, detail: String(detail == null ? "" : detail).slice(0, 400), skipped: !!skipped});
+      // The findings so far are on the page after every step, so a browser that stops early still hands back what ran
+      // and where it stopped (0.4.53 field test: a big SAP2000 pack ran out of the browser's time and nothing came back).
+      const flush = done => {
+        if (/#cpmshot=/.test(location.hash)) return;
+        let out = document.getElementById("cpm-selfcheck");
+        if (!out) { out = document.createElement("script"); out.type = "application/json"; out.id = "cpm-selfcheck"; document.body.appendChild(out); }
+        out.textContent = JSON.stringify({items, done, webgl: !document.getElementById("hint").textContent.includes("lines only")}).replace(/</g, "\\u003c");
+      };
+      const add = (name, ok, detail, skipped) => { items.push({name, ok: !!ok, detail: String(detail == null ? "" : detail).slice(0, 400), skipped: !!skipped}); try { flush(false); } catch (e) { } };
       // How much of a canvas is drawn on: the share of sampled pixels that differ from its corner.
       function ink(c) {
         try {
@@ -151,6 +159,75 @@ public static class ViewerCheck
             return {ok: `${shown}: ${grid.querySelectorAll("tr").length || grid.children.length} rows shown`};
           });
         }
+        // Selection as the programs do it (Ahmed 2026-11-26): a left-to-right window round a support selects that joint,
+        // a right click opens the object's information with its loads, and the Filter keeps only the checked kinds.
+        const view3d = async () => {
+          // A 3-D view, waited for until its camera has stopped moving and it is drawn, so its projection is the one shown.
+          const b = document.querySelector('[data-act="v:3d"]'); if (b && !b.disabled) b.click(); await wait(150);
+          const p = panes[active]; if (p.mode !== "3d") setMode(p, "3d");
+          for (let i = 0; i < 40 && (p.anim || waiting); i++) await wait(100);
+          // No camera movement: the view is set at once, and its projection worked out here as the next drawing will.
+          fit(p, false); p.anim = null; draw(); await wait(200);
+          if (p.R) p.M = matrices(p, p.R.w, p.R.h);
+          return p;
+        };
+        await step("selection: a left-to-right window round a support selects the support joint", async () => {
+          if (!supports.length) return {skipped: "skipped: the model has no supports"};
+          const p = await view3d(), s = supports.find(x => supportShown(p, x) && p.M.to(x.p)[3]);
+          if (!s) return {fail: `no support is in the 3-D view (${supports.length} supports, view ${p.mode}, first at ${JSON.stringify(supports[0].p)} drawn at ${JSON.stringify(p.M.to(supports[0].p).map(v => typeof v === "number" ? Math.round(v) : v))}, camera ${JSON.stringify(p.cam)}, window ${JSON.stringify(p.R)})`};
+          const q = p.M.to(s.p); boxSelect(p, {x0: q[0] - 10, x1: q[0] + 10, y0: q[1] - 10, y1: q[1] + 10}, false, false);
+          if (!selJ.has(s.name)) return {fail: `the window round support ${s.name} left it unselected`};
+          const said = document.getElementById("sel").textContent;
+          if (!/Joint/.test(said)) return {fail: "the joint is selected but the status bar does not count it: " + said};
+          rightClick(p, q[0], q[1], false); await wait(120);
+          const d = [...document.querySelectorAll(".dlg")].pop();
+          if (!d || !/Joint Information/.test(d.textContent)) return {fail: "a right click on the support opened no Joint Information"};
+          // The same window as a member's (Ahmed 2026-11-26): the same tabs and buttons.
+          const tabs = [...d.querySelectorAll(".itabs button")].map(b => b.textContent.replace(/ \(.*\)$/, "")).join(", "), buttons = [...d.querySelectorAll(".df button")].map(b => b.textContent).join(", ");
+          if (tabs !== "Geometry, Assignments, Loads, Results, Design, Comments" || buttons !== "Show in Tables, Close") return {fail: `Joint Information has tabs ${tabs} and buttons ${buttons}, not a member's`};
+          return {ok: `support ${s.name} selected (${said}); its right click opens Joint Information with the member's tabs`};
+        });
+        await step("selection: right click on an object opens its information, with a Loads tab holding its loads", async () => {
+          const p = await view3d(), vis = visOf(p), shown = frames.concat(areas).filter(o => vis[o.id]);
+          if (!shown.length) return {fail: `nothing is drawn in the 3-D view (${p.mode}, ${p.vis ? p.vis.filter(Boolean).length : "no"} shown, ${frames.length + areas.length} objects, ${hidden.objs.size} hidden)`};
+          sel.clear(); selJ.clear(); selChanged();
+          const span = o => o.type === "f" ? Math.hypot(...[0, 1].map(i => p.M.to(o.a)[i] - p.M.to(o.b)[i])) : 0;
+          const o = shown.filter(o => o.type === "f").sort((a, b) => span(b) - span(a))[0] || shown[0], mid = [0, 1, 2].map(i => o.type === "f" ? (o.a[i] + o.b[i]) / 2 : o.pts.reduce((t, c) => t + c[i], 0) / o.pts.length), q = p.M.to(mid);
+          rightClick(p, q[0], q[1], false); await wait(150);
+          let d = [...document.querySelectorAll(".dlg")].pop();
+          if (!d || !/Information/.test(d.textContent)) return {fail: `a right click on ${o.name} opened no information window (${JSON.stringify(pickAt(p, q[0], q[1]))} at ${q.slice(0, 2).map(Math.round)}; ${document.querySelectorAll(".dlg").length} windows)`};
+          if (!d.querySelector('.itabs [data-page="lds"]')) return {fail: "the information window has no Loads tab"};
+          const otabs = [...d.querySelectorAll(".itabs button")].map(b => b.textContent.replace(/ \(.*\)$/, "")).join(", ");
+          if (otabs !== "Geometry, Assignments, Loads, Results, Design, Comments") return {fail: "the information window's tabs are " + otabs};
+          closeDialogs();
+          const loaded = shown.find(x => loadRowsOf(x).length);
+          if (!loaded) return {ok: "information window with a Loads tab opened; no object in this pack has loads assigned"};
+          infoWindow(loaded.id); await wait(120); d = [...document.querySelectorAll(".dlg")].pop();
+          const n = loadRowsOf(loaded).reduce((k, x) => k + x.rows.length, 0), tab = d.querySelector('.itabs [data-page="lds"]').textContent;
+          if (!tab.includes("(" + n + ")")) return {fail: `${loaded.name} has ${n} load rows but its Loads tab says ${tab}`};
+          // A second right click replaces the window, never a second one beside it (Ahmed 2026-11-26).
+          const other = shown.find(x => x !== loaded) || loaded, oq = p.M.to([0, 1, 2].map(i => other.type === "f" ? (other.a[i] + other.b[i]) / 2 : other.pts.reduce((t, c) => t + c[i], 0) / other.pts.length));
+          rightClick(p, oq[0], oq[1], false); await wait(120); if (supports.length) { jointInfo(supports[0].name); await wait(80); }
+          const open = document.querySelectorAll(".dlg.info").length;
+          if (open !== 1) return {fail: `after more right clicks ${open} information windows are open, not one`};
+          closeDialogs();
+          sel.clear(); selJ.clear(); sel.add(loaded.id); selChanged();
+          const props = document.getElementById("props").textContent;
+          return /Loads/.test(props) ? {ok: `${kindWord(loaded)} ${loaded.name}: ${tab}, and Properties lists them`} : {fail: `Properties of ${loaded.name} do not list its ${n} loads`};
+        });
+        await step("selection: the Filter keeps only the checked kinds of the selection", async () => {
+          const p = await view3d(); act("selAll"); act("selSupports"); await wait(80);
+          const cats = selCats(); if (cats.length < 2) return {skipped: "skipped: the selection has only one kind of object"};
+          const before = sel.size + selJ.size; selFilter(); await wait(120);
+          const d = [...document.querySelectorAll(".dlg")].pop(), g = d && d.querySelector("[data-g]");
+          if (!g) return {fail: "the Filter window did not open"};
+          g.checked = false; g.dispatchEvent(new Event("change")); d.querySelector('[data-b="0"]').click(); await wait(80);
+          const after = sel.size + selJ.size, left = selCats().map(c => c.label);
+          if (!(after < before)) return {fail: `unchecking ${g.dataset.g} left ${after} of ${before} selected`};
+          if (selCats().some(c => (c.k.startsWith("j:") ? "Joints" : c.label.split(" · ")[0]) === g.dataset.g)) return {fail: `${g.dataset.g} are still selected after unchecking them`};
+          act("selNone");
+          return {ok: `${before} selected, ${g.dataset.g} unchecked, ${after} kept (${left.slice(0, 4).join(", ")})`};
+        });
         for (const tab of ["props", "checks", "comments"]) {
           await step(`side tab: ${tab}`, async () => {
             const b = document.querySelector(`[data-tab="${tab}"]`);
@@ -165,9 +242,7 @@ public static class ViewerCheck
       }
       run().catch(e => add("the check itself", false, String(e && e.message || e))).finally(() => {
         if (/#cpmshot=/.test(location.hash)) return;
-        const out = document.createElement("script"); out.type = "application/json"; out.id = "cpm-selfcheck";
-        out.textContent = JSON.stringify({items, webgl: !document.getElementById("hint").textContent.includes("lines only")}).replace(/</g, "\\u003c");
-        document.body.appendChild(out); document.title = "cpm-selfcheck-done";
+        flush(true); document.title = "cpm-selfcheck-done";
       });
     })();
     """;
@@ -183,8 +258,12 @@ public static class ViewerCheck
         try
         {
             using var doc = JsonDocument.Parse(dom[(at + open.Length)..end]);
-            return doc.RootElement.GetProperty("items").EnumerateArray().Select(i => new Item(i.GetProperty("name").GetString() ?? "", i.GetProperty("ok").GetBoolean(),
+            var items = doc.RootElement.GetProperty("items").EnumerateArray().Select(i => new Item(i.GetProperty("name").GetString() ?? "", i.GetProperty("ok").GetBoolean(),
                 i.GetProperty("detail").GetString() ?? "", i.GetProperty("skipped").GetBoolean())).ToList();
+            // A check the browser stopped part way: what ran stands, and the stop is a finding of its own.
+            if (doc.RootElement.TryGetProperty("done", out var done) && done.ValueKind == JsonValueKind.False)
+                items.Add(new Item("the Viewer page ran its check to the end", false, $"the browser stopped the page after {items.Count} items" + (items.Count > 0 ? $", the last being \"{items[^1].Name}\"" : "") + "; the rest were not checked"));
+            return items;
         }
         catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException) { return null; }
     }
@@ -220,15 +299,16 @@ public static class ViewerCheck
         var address = new Uri(page).AbsoluteUri;
         try
         {
-            var (dom, error) = Browse(browser, profile, seconds, "--dump-dom", "--virtual-time-budget=60000", address);
+            var (virtualMs, realSeconds, shotSeconds) = Allowance(content, seconds);
+            var (dom, error) = Browse(browser, profile, realSeconds, "--dump-dom", "--virtual-time-budget=" + virtualMs.ToString(System.Globalization.CultureInfo.InvariantCulture), address);
             if (dom is null) return new Result([], [], "the browser could not be run: " + error);
             if (Read(dom) is not { } items)
-                return new Result([new Item("the Viewer page ran its check", false, "the page did not finish its check within the time the browser gave it" + (error is { Length: > 0 } ? $" ({Short(error)})" : ""))], [], null);
+                return new Result([new Item("the Viewer page ran its check", false, $"the page did not finish its check within the time the browser gave it ({realSeconds} s, {virtualMs / 1000} s of page time, a page of {new FileInfo(page).Length / 1048576.0:0.0} MB)" + (error is { Length: > 0 } ? $" ({Short(error)})" : ""))], [], null);
             var pictures = new List<string>();
             foreach (var (name, act) in Shots)
             {
                 var picture = Path.Combine(folder, $"viewer {label} {name}.png");
-                Browse(browser, profile, 60, "--screenshot=" + picture, "--window-size=1400,900", "--virtual-time-budget=8000", address + "#cpmshot=" + Uri.EscapeDataString(act));
+                Browse(browser, profile, shotSeconds, "--screenshot=" + picture, "--window-size=1400,900", "--virtual-time-budget=8000", address + "#cpmshot=" + Uri.EscapeDataString(act));
                 if (File.Exists(picture) && new FileInfo(picture).Length > 2000) pictures.Add(picture);
             }
             return new Result(items, pictures, null);
@@ -239,6 +319,22 @@ public static class ViewerCheck
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* the test's work folder says where it is */ }
         }
     }
+
+    /// <summary>
+    /// How long the browser may take on a pack: the page's own waits grow with the tables it opens one by one (about
+    /// half a second each) and the menu items, and loading grows with the page's size. 0.4.53: SAP2000's pack with
+    /// every pattern's load rows outgrew the old fixed 60 s of page time and 120 s, and no finding came back.
+    /// </summary>
+    public static (int VirtualMs, int RealSeconds, int ShotSeconds) Allowance(JsonObject content, int seconds = 120)
+    {
+        var tables = (content["tables"] as JsonObject)?.Count ?? 0;
+        var megabytes = content.ToJsonString().Length / 1048576.0;
+        var virtualMs = 90_000 + tables * 600;
+        var real = Math.Max(seconds, 60 + virtualMs / 1000 + (int)Math.Ceiling(megabytes * 6));
+        return (virtualMs, real, 60 + (int)Math.Ceiling(megabytes * 4));
+    }
+
+    private sealed class Disposer(Action done) : IDisposable { public void Dispose() => done(); }
 
     private static string Short(string text) => text.Length > 300 ? text[..300] + "..." : text;
 
@@ -253,6 +349,9 @@ public static class ViewerCheck
         {
             using var process = Process.Start(info);
             if (process is null) return (null, "it did not start");
+            var clock = Stopwatch.StartNew();
+            // On a build machine each browser run says how long it took, so a slow or stuck one is seen in the log.
+            using var said = Environment.GetEnvironmentVariable("CI") == "true" ? new Disposer(() => Console.Error.WriteLine($"   [browser {clock.Elapsed.TotalSeconds:0.0} s of {seconds} s] {string.Join(" ", arguments.Select(x => x.Length > 90 ? "..." + x[^60..] : x))}")) : null;
             var output = process.StandardOutput.ReadToEndAsync();
             var error = process.StandardError.ReadToEndAsync();
             if (!process.WaitForExit(seconds * 1000))
@@ -285,7 +384,8 @@ public static class ViewerCheck
             content = pack.Content;
             seen = Run(pack.Content, Path.Combine(ctx.Folder, "Viewer"), program, browser);
             if (seen.NotRun is not null) throw new FieldSkipException(seen.NotRun);
-            return new { checked_items = seen.Items.Count, pictures = seen.Pictures.Select(Path.GetFileName).ToArray() };
+            var (virtualMs, realSeconds, _) = Allowance(pack.Content);
+            return new { checked_items = seen.Items.Count, pictures = seen.Pictures.Select(Path.GetFileName).ToArray(), pack_tables = (pack.Content["tables"] as JsonObject)?.Count ?? 0, pack_mb = Math.Round(pack.Content.ToJsonString().Length / 1048576.0, 1), page_seconds = virtualMs / 1000, browser_seconds = realSeconds };
         }) is not null;
         if (!ran || seen is null) return;
         // Display > Load Assigns draws what the pack holds: every load table the model has rows in must be there.

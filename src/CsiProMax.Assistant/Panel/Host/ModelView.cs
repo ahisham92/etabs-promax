@@ -83,7 +83,7 @@ internal static class ModelView
     private static int Revision(ICsiLink link) => link is OfflineEtabs offline ? offline.Revision : 0;
 
     /// <summary>The Modeler's own tables come along (they cost nothing); a CSI program's result tables do not.</summary>
-    private static readonly string[] ModelerTables = ["Grid Definitions", "Frame Assignments - Section Properties", "Area Assignments - Section Properties", "Model Checks", "Quantities"];
+    private static readonly string[] ModelerTables = ["Grid Definitions", "Frame Assignments - Section Properties", "Area Assignments - Section Properties", "Model Checks", "Quantities", .. OfflineEtabs.LoadTables];
 
     private static JsonObject Content(ICsiLink link) => link is OfflineEtabs
         ? Pack.Build(link, ModelerTables, [], [], null, null).Content

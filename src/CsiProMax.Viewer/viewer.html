@@ -340,14 +340,14 @@ function fmt(v) { const a = Math.abs(v); return a === 0 ? "0" : a >= 1000 ? v.to
 // The instability checker's last answer and what of it is shown (its code is further down).
 const inst = {answer: null, cur: -1, show: false, busy: false, dlg: null, only: "all"};
 let P = null, frames = [], areas = [], stories = [], grids = {X: [], Y: []}, gridsGuessed = false, sizes = {}, slabT = {}, supports = [], points = [], tendons = [], dstrips = [];
-let ratio = new Map(), marks = {punching: [], soil: []}, pointXyz = new Map(), pointIdx = new Map(), disp = new Map(), pointAt = new Map(), newComments = [], lit = null;
+let supportOf = new Map(), ratio = new Map(), marks = {punching: [], soil: []}, pointXyz = new Map(), pointIdx = new Map(), disp = new Map(), pointAt = new Map(), newComments = [], lit = null;
 let lo = [0, 0, 0], hi = [1, 1, 1], size = 1, unit = "", program = "etabs", sectionMat = new Map();
 const opt = {grid: true, extrude: true, fill: true, supports: true, names: false, axes: true, joints: false, edges: true, see: false, sections: true, explorer: true, side: true};
 const hidden = {kind: new Set(), section: new Set(), objs: new Set()};
 let panes = [], active = 0, layout = 2;
 let forces = new Map(), reacts = new Map(), drifts = new Map();
 const res = {mode: "model", case: "", comp: "M3", scale: 50, fill: true, values: true, ghost: true, range: null, bands: 9, anim: false, dfam: "", dshow: "", dvalues: true, dnames: true, vt: "", vf: "", vcase: ""};
-const sel = new Set(); let hover = 0;
+const sel = new Set(), selJ = new Set(); let hover = 0; // selJ: the joints selected, by name
 let bg = "black", bgSaved = false;
 try { const b = localStorage.getItem("cpm-bg"); if (b === "white" || b === "black") { bg = b; bgSaved = true; } } catch (e) {}
 const bandsDef = ["#0f1fd1", "#1f6ff2", "#18b4ec", "#19d3b0", "#3bd34a", "#a9e22a", "#f1e51c", "#f7a31a", "#f2601b", "#e01f1f"];
@@ -413,7 +413,7 @@ const objCount = () => frames.length + areas.length;
 const objOf = id => id <= 0 ? null : id <= frames.length ? frames[id - 1] : areas[id - frames.length - 1] || null;
 function load(pack, keep) {
   const before = keep && P ? panes.map(p => ({mode: p.mode, story: p.story, line: p.line && p.line.label + p.line.dir, cam: {...p.cam, target: p.cam.target.slice()}})) : null;
-  const selNames = keep ? [...sel].map(objOf).filter(Boolean).map(o => o.type + ":" + o.name) : [];
+  const selNames = keep ? [...sel].map(objOf).filter(Boolean).map(o => o.type + ":" + o.name) : [], selJNames = keep ? [...selJ] : [];
   P = pack; P.comments = P.comments || []; P.tables = P.tables || {};
   const m = P.model, man = P.manifest || {};
   // In the Modeler the model is made for one program, chosen at New Model (Ahmed 2026-11-26): the page offers what it has.
@@ -433,6 +433,9 @@ function load(pack, keep) {
   sizes = m.frame_sizes || {}; slabT = m.area_sizes || {};
   sectionMat = new Map(Object.entries(m.section_materials || {}));
   supports = (m.supports || []).map(s => ({p: [s[0], s[1], s[2]], kind: s[3]}));
+  // Each support is a joint: by its name where the model has the point, else by where it stands.
+  for (const s of supports) { const n = pointAt.get(key(...s.p)); s.name = n === undefined ? "(" + s.p.map(v => +v.toFixed(3)).join(", ") + ")" : String(n); if (n === undefined) pointXyz.set(s.name, s.p); }
+  supportOf = new Map(supports.map(s => [s.name, s]));
   // Post-tensioning tendons (their 3D profile) and design strips (centre line and width), drawn over the slabs as the programs do.
   tendons = (m.tendons || []).map(t => ({name: String(t[0]), story: t[1], pts: t[2] || []}));
   dstrips = (m.strips || []).map(s => ({name: String(s[0]), layer: s[1], wl: s[2], wr: s[3], pts: s[4] || []}));
@@ -465,7 +468,8 @@ function load(pack, keep) {
   $("line").innerHTML = allLines().map(g => `<option value="${esc(g.dir + g.label)}">${esc(g.label)}</option>`).join("");
   readRatios(); readDisplacements(); readMarks(); readForces(); readReactions(); readDrifts(); readMesh(); readShells(); derivePushover(); if (plotSpec && !P.tables[plotSpec.table]) plotSpec = null; syncResults();
   $("drop").style.display = "none";
-  sel.clear(); hover = 0;
+  sel.clear(); selJ.clear(); hover = 0;
+  for (const n of selJNames) if (pointXyz.has(n)) selJ.add(n);
   for (const k of selNames) { const o = (k[0] === "f" ? frames : areas).find(x => x.name === k.slice(2)); if (o) sel.add(o.id); }
   if (!keep) { layout = savedLayout ?? (program === "safe" ? 2 : innerWidth < 760 ? 1 : 2); }
   geometryDirty = true; geometryStamp++; shapeCache.clear();
@@ -1694,6 +1698,12 @@ function uploadObjects(p) {
   }
   gl.bindTexture(gl.TEXTURE_2D, objTex); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, TEXW, objRows, gl.RGBA, gl.UNSIGNED_BYTE, objData);
 }
+function visOf(p) {
+  // Which objects a window shows, worked out now if it was not yet drawn since its view changed.
+  const N = objCount();
+  if (!p.vis || p.vis.length !== N + 1 || p.visSig !== visSig(p)) { p.vis = new Uint8Array(N + 1); for (const o of frames.concat(areas)) p.vis[o.id] = shown(o, p) ? 1 : 0; p.visSig = visSig(p); }
+  return p.vis;
+}
 const visSig = p => [p.mode, p.story, p.line ? p.line.dir + p.line.label : "", opt.fill, [...hidden.kind].join(), [...hidden.section].join(), hidden.objs.size, hiddenVersion].join("|");
 let hiddenVersion = 0;
 function litHas(id) { const o = objOf(id); return o && lit.type === o.type && lit.name === o.section; }
@@ -2025,6 +2035,7 @@ function overlay(p, g, M, T, w, h) {
   if (opt.supports && !gl) drawSupports(p, g, to, T);
   if (opt.pt !== false) drawPT(p, g, to, T);
   drawMarks(p, g, to, T);
+  drawSelJoints(p, g, to, T);
   drawInst(p, g, to, T);
   drawDesign(p, g, to, T);
   if (res.mode === "reactions") drawReactions(p, g, to, T);
@@ -2123,13 +2134,23 @@ function drawPT(p, g, to, T) {
 function drawSupports(p, g, to, T) {
   g.strokeStyle = T.support; g.fillStyle = T.support; g.lineWidth = 1.4; g.setLineDash([]);
   for (const s of supports) {
-    if (p.mode === "elev" && p.line && !onLine(s.p, p.line)) continue;
-    if (p.mode === "plan") { const z = elevationOf(p.story); if (z === null || Math.abs(s.p[2] - z) > tol() * 10) continue; }
+    if (!supportShown(p, s)) continue;
     const [x, y, , ok] = to(s.p); if (!ok) continue;
     if (p.mode === "plan") { g.strokeRect(x - 7, y - 7, 14, 14); if (s.kind === "fixed") { g.beginPath(); g.moveTo(x - 7, y - 7); g.lineTo(x + 7, y + 7); g.moveTo(x + 7, y - 7); g.lineTo(x - 7, y + 7); g.stroke(); } continue; }
     if (s.kind === "fixed") { g.fillRect(x - 8, y, 16, 2.5); g.beginPath(); for (let i = -7; i <= 8; i += 3.5) { g.moveTo(x + i, y + 2.5); g.lineTo(x + i - 3.5, y + 7); } g.stroke(); }
     else { g.beginPath(); g.moveTo(x, y); g.lineTo(x - 6, y + 9); g.lineTo(x + 6, y + 9); g.closePath(); g.stroke(); g.beginPath(); g.moveTo(x - 9, y + (s.kind === "roller" ? 13 : 9)); g.lineTo(x + 9, y + (s.kind === "roller" ? 13 : 9)); g.stroke(); }
   }
+}
+function supportShown(p, s) {
+  if (p.mode === "elev" && p.line && !onLine(s.p, p.line)) return false;
+  if (p.mode === "plan") { const z = elevationOf(p.story); if (z === null || Math.abs(s.p[2] - z) > tol() * 10) return false; }
+  return true;
+}
+function drawSelJoints(p, g, to, T) {
+  // A selected joint is marked as the programs do: a box round it in the selection colour.
+  if (!selJ.size) return;
+  g.strokeStyle = T.pick; g.lineWidth = 2; g.setLineDash([]);
+  for (const n of selJ) { const at = pointXyz.get(n); if (!at) continue; const q = to(at); if (!q[3]) continue; g.strokeRect(q[0] - 5, q[1] - 5, 10, 10); g.beginPath(); g.moveTo(q[0] - 8, q[1]); g.lineTo(q[0] + 8, q[1]); g.moveTo(q[0], q[1] - 8); g.lineTo(q[0], q[1] + 8); g.stroke(); }
 }
 function arrow(g, a, b) { const dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1, ux = dx / l, uy = dy / l; g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.moveTo(b[0], b[1]); g.lineTo(b[0] - ux * 7 - uy * 3.5, b[1] - uy * 7 + ux * 3.5); g.moveTo(b[0], b[1]); g.lineTo(b[0] - ux * 7 + uy * 3.5, b[1] - uy * 7 - ux * 3.5); g.stroke(); }
 function drawReactions(p, g, to, T, given) {
@@ -2321,9 +2342,30 @@ function segHitsRect(a, b, r) {
   for (let i = 0; i < 4; i++) { const p = c[i], q = c[(i + 1) % 4]; if (cr(a, b, p) * cr(a, b, q) <= 0 && cr(p, q, a) * cr(p, q, b) <= 0) return true; }
   return false;
 }
+function jointsIn(p) {
+  // The joints a window shows: the ends and corners of the objects it draws, and its supports (a foundation joint
+  // with nothing drawn on it among them), each once, by name.
+  visOf(p);
+  const out = new Map(), put = (q, sup) => { const n = sup ? sup.name : pointAt.get(key(q[0], q[1], q[2])); if (n === undefined) return; const k = String(n); if (!out.has(k)) out.set(k, {name: k, at: q}); };
+  for (const o of frames.concat(areas)) { if (!p.vis || !p.vis[o.id]) continue; for (const q of o.type === "f" ? [o.a, o.b] : o.pts) put(q); }
+  for (const s of supports) if (supportShown(p, s)) put(s.p, s);
+  return [...out.values()];
+}
+function jointAt(p, x, y, r) {
+  const to = p.M.to; let best = null, bd = r ?? 6;
+  for (const j of jointsIn(p)) { const q = to(j.at); if (!q[3]) continue; const d = Math.hypot(q[0] - x, q[1] - y); if (d < bd) { bd = d; best = j.name; } }
+  return best;
+}
+function pickAt(p, x, y, r) {
+  // A joint under the pointer wins over the object, as in the programs, except a frame seen end on (a column in a
+  // plan), which is the object the engineer means.
+  const j = jointAt(p, x, y, r), id = idAt(p, x, y), o = objOf(id);
+  if (j && o && o.type === "f") { const a = p.M.to(o.a), b = p.M.to(o.b); if (Math.hypot(a[0] - b[0], a[1] - b[1]) < 6) return {j: null, id}; }
+  return j ? {j, id: 0} : {j: null, id};
+}
 function boxSelect(p, r, crossing, add) {
   // Left to right: what lies wholly inside. Right to left: whatever it touches. As the programs do.
-  const to = p.M.to, got = [];
+  const to = p.M.to, got = []; visOf(p);
   for (const o of frames.concat(areas)) {
     if (!p.vis || !p.vis[o.id]) continue;
     const pts = (o.type === "f" ? [o.a, o.b] : o.pts).map(to);
@@ -2332,9 +2374,19 @@ function boxSelect(p, r, crossing, add) {
     if (!hit && crossing) { for (let i = 0; i < pts.length && !hit; i++) hit = segHitsRect(pts[i], pts[(i + 1) % pts.length], r); if (!hit && o.type === "a") hit = inside(pts, r.x0, r.y0); }
     if (hit) got.push(o.id);
   }
-  if (!add) sel.clear();
-  got.forEach(id => sel.add(id));
+  // Joints too, supports and springs among them: a joint is a point, so it is in either window or not.
+  const to2 = p.M.to, gotJ = jointsIn(p).filter(j => { const q = to2(j.at); return q[3] && q[0] >= r.x0 && q[0] <= r.x1 && q[1] >= r.y0 && q[1] <= r.y1; }).map(j => j.name);
+  if (!add) { sel.clear(); selJ.clear(); }
+  got.forEach(id => sel.add(id)); gotJ.forEach(n => selJ.add(n));
   selChanged();
+}
+function rightClick(p, x, y, shift, cx, cy) {
+  // As ETABS: right click on an object gives its information; on a joint the joint's. Shift, or empty space, the menu.
+  const {j, id} = shift ? {j: null, id: idAt(p, x, y)} : pickAt(p, x, y);
+  if (j) { if (!selJ.has(j)) { sel.clear(); selJ.clear(); selJ.add(j); selChanged(); } return jointInfo(j); }
+  if (id && !sel.has(id)) { sel.clear(); selJ.clear(); sel.add(id); selChanged(); }
+  if (id && !shift) return infoWindow(id);
+  contextMenu(p, cx ?? x, cy ?? y, id);
 }
 function selChanged() { selVersion++; showPick(); if (!$("dock").hidden) { if ($("tsel").checked) drawTable(); else markRows(); } draw(); }
 
@@ -2359,7 +2411,7 @@ function wire(p) {
     showCoords(p, x, y);
     if (!drag) { if (tool.startsWith("d:")) drawMove(p, x, y); else scheduleHover(p, x, y, e.clientX, e.clientY); return; }
     const dx = x - drag.x, dy = y - drag.y;
-    if (Math.abs(x - drag.x0) + Math.abs(y - drag.y0) > 3) drag.moved = true;
+    if (Math.abs(x - drag.x0) + Math.abs(y - drag.y0) > (drag.button === 2 ? 6 : 3)) drag.moved = true;
     if (!drag.moved) return;
     if (drag.act === "pan") panBy(p, dx, dy);
     else if (drag.act === "orbit") orbitBy(p, dx, dy);
@@ -2376,11 +2428,12 @@ function wire(p) {
     if (d.act === "draw") { if (!d.moved) drawClick(p, x, y, false); return; }
     if (!d.moved && d.button === 2 && tool.startsWith("d:") && hm.chain.length) { hm.chain = []; draw(); return; }
     if (!d.moved) {
-      if (d.button === 2) { const id = idAt(p, x, y); if (id && !sel.has(id)) { sel.clear(); sel.add(id); selChanged(); } contextMenu(p, e.clientX, e.clientY, id); return; }
+      if (d.button === 2) return rightClick(p, x, y, e.shiftKey, e.clientX, e.clientY);
       if (d.button === 0 && (d.act === "box" || d.act === "orbit" || d.act === "pan")) {
-        const id = idAt(p, x, y);
-        if (id) { if (sel.has(id)) sel.delete(id); else { if (!d.ctrl && tool !== "select") sel.clear(); sel.add(id); } }
-        else if (!d.ctrl) sel.clear();
+        const {j, id} = pickAt(p, x, y, 5);
+        if (j) { if (selJ.has(j)) selJ.delete(j); else { if (!d.ctrl && tool !== "select") { sel.clear(); selJ.clear(); } selJ.add(j); } }
+        else if (id) { if (sel.has(id)) sel.delete(id); else { if (!d.ctrl && tool !== "select") { sel.clear(); selJ.clear(); } sel.add(id); } }
+        else if (!d.ctrl) { sel.clear(); selJ.clear(); }
         lit = null; markTree(); selChanged();
       }
       return;
@@ -2391,7 +2444,7 @@ function wire(p) {
       else boxSelect(p, r, x < d.x0, true);
     }
   });
-  cv.addEventListener("dblclick", e => { const [x, y] = local(e); if (tool.startsWith("d:")) { if (drawKind() === "floor") drawClick(p, x, y, true); return; } const id = idAt(p, x, y); if (id) infoWindow(id); });
+  cv.addEventListener("dblclick", e => { const [x, y] = local(e); if (tool.startsWith("d:")) { if (drawKind() === "floor") drawClick(p, x, y, true); return; } const {j, id} = pickAt(p, x, y, 5); if (j) return jointInfo(j); if (id) infoWindow(id); });
   cv.addEventListener("pointerleave", () => { $("coords").textContent = ""; hideTip(); if (hover) { hover = 0; draw(); } });
   cv.addEventListener("contextmenu", e => e.preventDefault());
   cv.addEventListener("auxclick", e => e.preventDefault());
@@ -2432,7 +2485,7 @@ function tipText(o) {
   if ((res.mode === "contour" || res.mode === "deformed") && disp.has(res.case)) { const idx = o.type === "f" ? [o.ia, o.ib] : o.idx; const ds = idx.filter(i => i >= 0).map(i => disp.get(res.case).get(String(points[i][0]))).filter(Boolean); if (ds.length) { const c = ["UX", "UY", "UZ"], best = ds.reduce((m, d) => Math.max(m, Math.hypot(...d)), 0); lines.push(`Largest movement ${fmt(best)}${unit ? " " + unit : ""} (${res.case})`); } }
   return lines.join("\n");
 }
-const hintText = () => tool.startsWith("d:") ? drawHint() : tool === "zoom" ? "Drag a box to zoom into it." : tool === "pan" ? "Drag to pan. Wheel zooms." : tool === "orbit" ? "Drag to turn the 3-D view. Wheel zooms." : "Click to select, drag a box to select (left to right: inside, right to left: touching). Right drag turns 3-D, middle drag pans, wheel zooms, right click for more.";
+const hintText = () => tool.startsWith("d:") ? drawHint() : tool === "zoom" ? "Drag a box to zoom into it." : tool === "pan" ? "Drag to pan. Wheel zooms." : tool === "orbit" ? "Drag to turn the 3-D view. Wheel zooms." : "Click to select, drag a box to select (left to right: inside, right to left: touching). Joints and supports select too. Right click an object for its information (Shift + right click for the menu). Right drag turns 3-D, middle drag pans, wheel zooms.";
 
 // ---- toolbars ----
 const I = {
@@ -2475,6 +2528,7 @@ const I = {
   side: '<path d="M8 1.5l5.5 3v7L8 14.5l-5.5-3v-7z" opacity=".5"/><path d="M13.5 4.5L8 8v6.5l5.5-3z" class="k1" opacity=".8"/>',
   all: '<rect x="2" y="2" width="12" height="12" stroke-dasharray="2 1.4"/><path d="M5 8l2 2l4-4" class="c1"/>',
   clear: '<rect x="2" y="2" width="12" height="12" stroke-dasharray="2 1.4"/><path d="M5.5 5.5l5 5M10.5 5.5l-5 5" class="c4"/>',
+  filter: '<path d="M1.5 2.5h13l-5 6v5l-3 1.5v-6.5z"/>',
   hide: '<path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8s-2.5 4.5-6.5 4.5S1.5 8 1.5 8z"/><path d="M2.5 13.5l11-11" class="c4"/>',
   show: '<path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8s-2.5 4.5-6.5 4.5S1.5 8 1.5 8z"/><path d="M5.5 8l1.8 1.8L11 6.2" class="c3"/>',
   info: '<circle cx="8" cy="8" r="6.3"/><path d="M8 7v4.5" /><circle cx="8" cy="4.8" r=".9" class="f"/>',
@@ -2489,7 +2543,7 @@ const bar = [["open", "Open a pack (Ctrl+O)", "open"], 0, ["fit", "Restore full 
   ["plot", "Story response plot", "plot"], ["tables", "Show tables (Ctrl+T)", "tables"], 0, ["instab", "Check the model for instabilities: what would stop the analysis (F7)", "inst"]];
 $("icons").innerHTML = bar.map(b => b ? `<button class="ib" data-act="${b[2]}" ${b[3] ? `data-res="${b[3]}"` : ""} title="${b[1]}">${icon(b[0])}</button>` : `<span class="sep"></span>`).join("");
 $("icons").querySelector('[data-act="r:model"]').dataset.res = "model";
-const strip = [["select", "Select (click, or drag a box)", "t:select"], ["zoom", "Rubber band zoom", "t:zoom"], ["pan", "Pan", "t:pan"], ["orbit", "Rotate the 3-D view", "t:orbit"], 0, ["iso", "3-D view from the corner", "cam:iso"], ["top", "View from the top", "cam:top"], ["front", "View along Y (the X-Z plane)", "cam:front"], ["side", "View along X (the Y-Z plane)", "cam:side"], 0, ["all", "Select all", "selAll"], ["clear", "Clear the selection (Esc)", "selNone"], ["hide", "Hide the selected objects", "hideSel"], ["show", "Show all objects", "showAll"], ["info", "Information on the selected object", "info"]];
+const strip = [["select", "Select (click, or drag a box)", "t:select"], ["zoom", "Rubber band zoom", "t:zoom"], ["pan", "Pan", "t:pan"], ["orbit", "Rotate the 3-D view", "t:orbit"], 0, ["iso", "3-D view from the corner", "cam:iso"], ["top", "View from the top", "cam:top"], ["front", "View along Y (the X-Z plane)", "cam:front"], ["side", "View along X (the Y-Z plane)", "cam:side"], 0, ["all", "Select all", "selAll"], ["clear", "Clear the selection (Esc)", "selNone"], ["filter", "Filter the selection: keep only some kinds of object", "selFilter"], ["hide", "Hide the selected objects", "hideSel"], ["show", "Show all objects", "showAll"], ["info", "Information on the selected object", "info"]];
 $("strip").innerHTML = strip.map(b => b ? `<button class="ib" data-act="${b[2]}" title="${b[1]}">${icon(b[0])}</button>` : `<span class="sep"></span>`).join("");
 document.querySelectorAll("#icons [data-act], #strip [data-act]").forEach(b => b.onclick = () => act(b.dataset.act));
 
@@ -2598,13 +2652,16 @@ function act(name) {
     case "tables": return showTables($("dock").hidden);
     case "anim": res.anim = !res.anim && res.mode === "deformed"; syncResults(); return draw();
     case "selAll": for (const o of frames.concat(areas)) if (!p || !p.vis || p.vis[o.id]) sel.add(o.id); return selChanged();
-    case "selNone": sel.clear(); return selChanged();
+    case "selNone": sel.clear(); selJ.clear(); return selChanged();
+    case "selJoints": if (p) for (const j of jointsIn(p)) selJ.add(j.name); return selChanged();
+    case "selSupports": if (p) for (const s of supports) if (supportShown(p, s)) selJ.add(s.name); return selChanged();
+    case "selFilter": return selFilter();
     case "selInvert": { const was = new Set(sel); sel.clear(); for (const o of frames.concat(areas)) if ((!p || !p.vis || p.vis[o.id]) && !was.has(o.id)) sel.add(o.id); return selChanged(); }
     case "selStory": if (p && p.mode === "plan") { for (const o of frames.concat(areas)) if (p.vis && p.vis[o.id]) sel.add(o.id); selChanged(); } return;
     case "hideSel": return hideObjs([...sel]);
     case "showAll": hidden.objs.clear(); hidden.kind.clear(); hidden.section.clear(); hiddenVersion++; buildTree(); return selChanged();
-    case "info": if (sel.size) infoWindow([...sel][0]); return;
-    case "copyNames": { const t = [...sel].map(objOf).filter(Boolean).map(o => o.name).join("\n"); copyText(t); return; }
+    case "info": if (sel.size) infoWindow([...sel][0]); else if (selJ.size) jointInfo([...selJ][0]); return;
+    case "copyNames": { const t = [...sel].map(objOf).filter(Boolean).map(o => o.name).concat([...selJ]).join("\n"); copyText(t); return; }
     case "explorer": opt.explorer = !opt.explorer; $("explorer").hidden = !opt.explorer; return draw();
     case "side": opt.side = !opt.side; $("right").hidden = !opt.side; return draw();
     case "chat": return chatShow();
@@ -2654,7 +2711,7 @@ const viewerMenus = () => {
       ["Set Display Options...", "dlg:display", "Ctrl+W"], ["Model Explorer", "explorer"], ["Side Panel", "side"], ...(window.cpmChat ? [["Chat", "chat"]] : []), 0,
       ["Windows", [["One window", "lay1"], ["Two windows", "lay2"], ["Three windows", "lay3"], ["Four windows", "lay4"]]]],
     Define: [["Material Properties...", "dlg:materials"], ["Frame Sections...", "dlg:frameSections"], ["Slab and Wall Sections...", "dlg:areaSections"], 0, ["Story Data...", "dlg:stories"], ["Grid Data...", "dlg:grids"], 0, ["Load Patterns...", "dlg:patterns"], ["Load Cases...", "dlg:cases"], ["Load Combinations...", "dlg:combos"]],
-    Select: [["All", "selAll", "Ctrl+A"], ["All on This Story", "selStory", "", !plan], ["By Section...", "dlg:bySection"], ["By Object Type...", "dlg:byType"], ["Invert", "selInvert"], 0, ["Clear Selection", "selNone", "Esc"]],
+    Select: [["All", "selAll", "Ctrl+A"], ["All on This Story", "selStory", "", !plan], ["By Section...", "dlg:bySection"], ["By Object Type...", "dlg:byType"], ["Joints", "selJoints"], ["Supports (Restraints and Springs)", "selSupports"], ["Invert", "selInvert"], 0, ["Filter Selection...", "selFilter", "", !sel.size && !selJ.size], 0, ["Clear Selection", "selNone", "Esc"]],
     Analyze: [["Check Model for Instabilities...", "inst", "F7"], ["Show the Last Check's Marks", "instMarks", "", !inst.answer], 0, ["What the check looks for", "instHelp"]],
     Display: (() => {
       const has = re => Object.values(P ? P.tables : {}).some(t => t.rows && t.rows.length && re.test(norm(t.name))), plots = P ? Object.values(P.tables).some(t => t.rows && t.rows.length > 1) : false;
@@ -2729,12 +2786,16 @@ function dialog(title, body, buttons, opts) {
   // A window of its own: title bar to drag, a body, and buttons. Modal unless it floats.
   opts = opts || {};
   const veil = opts.float ? null : document.createElement("div"); if (veil) { veil.className = "veil"; document.body.appendChild(veil); }
-  const d = document.createElement("div"); d.className = "dlg" + (opts.float ? " float" : "");
+  // An information window replaces the one open, where it stood, as the programs keep one Object Information window.
+  const was = opts.info ? [...document.querySelectorAll(".dlg.info")] : [], at = was.length ? {left: was[0].style.left, top: was[0].style.top} : null;
+  was.forEach(w => w.close ? w.close() : w.remove());
+  const d = document.createElement("div"); d.className = "dlg" + (opts.float ? " float" : "") + (opts.info ? " info" : "");
   d.innerHTML = `<div class="dt"><b>${esc(title)}</b><button class="x" title="Close">&#10005;</button></div><div class="db">${body}</div>` + (buttons && buttons.length ? `<div class="df">${buttons.map((b, i) => `<button data-b="${i}" class="${i === 0 ? "primary" : ""}">${esc(b[0])}</button>`).join("")}</div>` : "");
   document.body.appendChild(d);
   if (opts.width) d.style.width = opts.width + "px";
   const r = d.getBoundingClientRect(); dlgTop = (dlgTop + 24) % 120;
   d.style.left = Math.max(8, (innerWidth - r.width) / 2 + (opts.float ? dlgTop : 0)) + "px"; d.style.top = Math.max(8, (innerHeight - r.height) / 2.6 + (opts.float ? dlgTop : 0)) + "px";
+  if (at) { d.style.left = at.left; d.style.top = at.top; }
   const close = () => { d.remove(); if (veil) veil.remove(); document.removeEventListener("keydown", key); };
   const key = e => { if (e.key === "Escape") { e.stopPropagation(); close(); } if (e.key === "Enter" && !opts.float && e.target.tagName !== "TEXTAREA" && buttons && buttons[0]) { e.preventDefault(); if (buttons[0][1](d) !== false) close(); } };
   if (!opts.float) document.addEventListener("keydown", key);
@@ -2846,7 +2907,7 @@ const dialogs = {
       [["Select", d => { const want = new Set([...d.querySelectorAll("[data-k]:checked")].map(x => x.dataset.k)), p = panes[active]; for (const o of frames.concat(areas)) if (want.has(o.kind) && (!p || !p.vis || p.vis[o.id])) sel.add(o.id); selChanged(); }], ["Close"]], {width: 260});
   },
   keys() {
-    dialog("Mouse and Keys", `<table class="list">${[["Left click", "Select or unselect an object"], ["Left drag, left to right", "Select what lies inside the box"], ["Left drag, right to left", "Select what the box touches"], ["Right drag", "Turn the 3-D view (pans plan and elevation)"], ["Middle drag", "Pan"], ["Shift + middle drag", "Turn the 3-D view"], ["Wheel", "Zoom about the pointer"], ["Double middle click", "Restore full view"], ["Double click an object", "Object information"], ["Right click", "Menu for the object or the window"], ["F3", "Restore full view"], ["F4 / F6 / F8", "Undeformed / deformed shape / frame forces"], ["Page Up / Page Down", "Story up or down in plan"], ["Ctrl+T", "Tables"], ["Ctrl+A / Esc", "Select all / clear selection"]].map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join("")}</table>`, [["Close"]], {width: 460});
+    dialog("Mouse and Keys", `<table class="list">${[["Left click", "Select or unselect an object"], ["Left drag, left to right", "Select what lies inside the box"], ["Left drag, right to left", "Select what the box touches"], ["Right drag", "Turn the 3-D view (pans plan and elevation)"], ["Middle drag", "Pan"], ["Shift + middle drag", "Turn the 3-D view"], ["Wheel", "Zoom about the pointer"], ["Double middle click", "Restore full view"], ["Click a joint or support", "Select or unselect the joint"], ["Double click or right click an object or joint", "Its information: geometry, assignments, loads, results, design"], ["Shift + right click", "Menu for the object"], ["Right click on empty space", "Menu for the window"], ["Filter button", "Keep only some kinds of the selected objects"], ["F3", "Restore full view"], ["F4 / F6 / F8", "Undeformed / deformed shape / frame forces"], ["Page Up / Page Down", "Story up or down in plan"], ["Ctrl+T", "Tables"], ["Ctrl+A / Esc", "Select all / clear selection"]].map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join("")}</table>`, [["Close"]], {width: 460});
   },
   designSummary() {
     const man = (P && P.manifest) || {}, md = man.design || {}, notRun = md.not_run || [];
@@ -2916,23 +2977,25 @@ function infoWindow(id) {
   let resHtml = "";
   if (o.type === "f" && forces.size) {
     const cases = [...forces.keys()].filter(c => forces.get(c).has(o.name));
-    resHtml += `<div class="g2" style="margin-bottom:6px"><span>Case/Combo</span><select class="iCase">${opts(cases, forces.has(res.case) && cases.includes(res.case) ? res.case : cases[0])}</select></div><div class="iRes"></div>`;
+    if (cases.length) resHtml += `<div class="g2" style="margin-bottom:6px"><span>Case/Combo</span><select class="iCase">${opts(cases, forces.has(res.case) && cases.includes(res.case) ? res.case : cases[0])}</select></div><div class="iRes"></div>`;
   }
   if (disp.size) {
     const idx = o.type === "f" ? [o.ia, o.ib] : o.idx, c = disp.has(res.case) ? res.case : [...disp.keys()][0];
     const dr = idx.filter(i => i >= 0).map(i => { const d = disp.get(c).get(String(points[i][0])); return d ? [points[i][0], ...d.map(fmt)] : null; }).filter(Boolean);
     if (dr.length) resHtml += `<p class="kv" style="margin:8px 0 3px">Joint displacements, ${esc(c)}${u ? " (" + unit + ")" : ""}</p><table class="list"><tr><th>Joint</th><th>UX</th><th>UY</th><th>UZ</th></tr>${dr.map(r => `<tr>${r.map((v, i) => `<td class="${i ? "r" : ""}">${esc(v)}</td>`).join("")}</tr>`).join("")}</table>`;
   }
-  const mine = objectRows(o), inputs = mine.filter(x => x.t.from === "input"), others = mine.filter(x => x.t.from !== "input" && famOf(x.t.name) === null);
+  const mine = objectRows(o), loads = mine.filter(x => isLoadTable(x.t)), asgIn = mine.filter(x => !isLoadTable(x.t) && isAssignTable(x.t)), inputs = mine.filter(x => x.t.from === "input" && !isLoadTable(x.t) && !isAssignTable(x.t)), others = mine.filter(x => x.t.from !== "input" && !isLoadTable(x.t) && !isAssignTable(x.t) && famOf(x.t.name) === null);
   if (others.length) resHtml += `<p class="kv" style="margin:8px 0 3px">Every result table row about ${esc(o.name)}:</p>` + others.map(x => rowsHtml(x.t, x.rows, 40)).join("");
   const des = designHtml(o) + (inputs.length ? (designOf(o).length ? "<hr>" : "") + inputs.map(x => rowsHtml(x.t, x.rows, 40)).join("") : "");
   const notes = P.comments.filter(c => c.target && c.target.name === o.name);
-  const w = dialog((o.type === "f" ? "Frame" : "Shell") + " Information - " + o.name, `<div class="itabs"><button data-page="geo" class="on">Geometry</button><button data-page="asg">Assignments</button><button data-page="res">Results</button><button data-page="des">Design</button><button data-page="com">Comments (${notes.length})</button></div>
-    <div class="ipage on" data-page="geo">${rows(geo)}</div><div class="ipage" data-page="asg">${rows(asg)}</div>
+  const nLoads = loads.reduce((n, x) => n + x.rows.length, 0);
+  const w = dialog((o.type === "f" ? "Frame" : "Shell") + " Information - " + o.name, `<div class="itabs"><button data-page="geo" class="on">Geometry</button><button data-page="asg">Assignments</button><button data-page="lds">Loads (${nLoads})</button><button data-page="res">Results</button><button data-page="des">Design</button><button data-page="com">Comments (${notes.length})</button></div>
+    <div class="ipage on" data-page="geo">${rows(geo)}</div><div class="ipage" data-page="asg">${rows(asg)}${asgIn.map(x => rowsHtml(x.t, x.rows, 40)).join("")}</div>
+    <div class="ipage" data-page="lds">${loadsHtml(loads, o.name)}</div>
     <div class="ipage" data-page="res">${resHtml || `<p class="kv">This pack has no results for it.</p>`}</div>
     <div class="ipage" data-page="des">${des || `<p class="kv">This pack has no design results for it.</p>`}</div>
     <div class="ipage" data-page="com">${notes.map(c => `<div class="card comment"><div class="who">${esc(c.by || "Reviewer")} · ${esc(String(c.at || "").replace("T", " ").slice(0, 16))}</div>${esc(c.text)}</div>`).join("") || `<p class="kv">No comments on it yet.</p>`}<div class="row"><textarea class="iText" placeholder="Write a review comment on ${esc(o.name)}"></textarea></div><button class="iAdd">Add comment</button></div>`,
-    [["Close"]], {float: true, width: des ? 560 : 430});
+    [["Show in Tables", () => showInTable(o)], ["Close"]], {float: true, info: true, width: des || nLoads ? 560 : 430});
   const fill = () => {
     const box = w.querySelector(".iRes"); if (!box) return;
     const c = w.querySelector(".iCase").value, rs = forces.get(c).get(o.name) || [];
@@ -2941,6 +3004,98 @@ function infoWindow(id) {
   if (w.querySelector(".iCase")) { w.querySelector(".iCase").onchange = fill; fill(); }
   w.querySelector(".iAdd").onclick = () => { const t = w.querySelector(".iText").value.trim(); if (!t) return; addComment(t, o); w.close(); infoWindow(id); w.remove(); };
 }
+
+// ---- loads and assignments about one object or joint, for its information window and the Properties panel ----
+const isLoadTable = t => ["joint", "frame", "shell"].some(k => loadKinds[k].test(norm(t.name)));
+const isAssignTable = t => /assign|restraint|spring|release|modifier|insertion|offset|localaxes|diaphragm|hinge|groupassign/.test(norm(t.name)) && !/definition|propert|^define/.test(norm(t.name));
+function jointMatch(at, name) {
+  if (!at) return false; if (at.key === "p:" + name) return true;
+  const xyz = pointXyz.get(name); return !!(xyz && at.at && !at.objs.length && key(...at.at) === key(...xyz));
+}
+function loadRowsOf(o) {
+  // The rows of the load assignment tables about one object (or joint name), table by table.
+  const out = [], kinds = typeof o === "string" ? ["joint"] : o.type === "f" ? ["frame"] : ["shell"];
+  for (const k of kinds) for (const t of loadTables(k)) {
+    const place = rowPlacer(t), mine = [];
+    for (const r of t.rows) { const at = place(r); if (typeof o === "string" ? jointMatch(at, o) : at && at.objs.includes(o)) mine.push(r); }
+    if (mine.length) out.push({t, rows: mine});
+  }
+  return out;
+}
+function loadLine(t, r) {
+  // One load as a line: its pattern, kind, direction and values, as the programs list it.
+  const f = t.fields, pc = patCol(f), dc = col(f, "Direction", "Dir"), tc = col(f, "LoadType", "Load Type", "Type", "DistType", "Dist Type");
+  const vals = loadValueCols(t).filter(c => isNum(r[c.i]) && +r[c.i] !== 0).map(c => c.name + " " + fmt(+r[c.i]));
+  return [...new Set([pc >= 0 ? String(r[pc]) : "", loadTypeName(t), tc >= 0 && r[tc] !== "" ? String(r[tc]) : "", dc >= 0 && r[dc] !== "" ? String(r[dc]) : ""].filter(Boolean))].join(" · ") + (vals.length ? ": " + vals.join(", ") : "");
+}
+function loadsHtml(loads, name) {
+  if (!loads.length) return `<p class="kv">No loads are assigned to ${esc(name)} in this model${loadTables("joint").length + loadTables("frame").length + loadTables("shell").length ? "" : " (the pack holds no load assignment tables)"}.</p>`;
+  const lines = loads.flatMap(x => x.rows.map(r => loadLine(x.t, r)));
+  return `<table class="list">${lines.slice(0, 60).map(l => `<tr><td>${esc(l)}</td></tr>`).join("")}</table>` + loads.map(x => rowsHtml(x.t, x.rows, 40)).join("");
+}
+function jointRows(name) {
+  const out = [];
+  for (const t of Object.values(P.tables)) {
+    if (!t.rows || !t.rows.length) continue;
+    const place = rowPlacer(t), mine = [];
+    for (const r of t.rows) { if (jointMatch(place(r), name)) { mine.push(r); if (mine.length >= 200) break; } }
+    if (mine.length) out.push({t, rows: mine});
+  }
+  return out;
+}
+function jointLinks(name) { const xyz = pointXyz.get(name); if (!xyz) return []; const k = key(...xyz); return frames.concat(areas).filter(o => (o.type === "f" ? [o.a, o.b] : o.pts).some(q => key(...q) === k)); }
+function jointInfo(name) {
+  // Joint Information, as ETABS gives it on a right click: where it is, what holds it, its loads and its results.
+  const at = pointXyz.get(name); if (!at) return;
+  const u = unit ? " " + unit : "", rows = r => `<table class="list">${r.map(x => `<tr><td style="color:var(--mute);width:42%">${esc(x[0])}</td><td>${esc(x[1])}</td></tr>`).join("")}</table>`;
+  const sup = supportOf.get(name), on = jointLinks(name), st = stories.slice().reverse().find(s => Math.abs(s.elevation - at[2]) <= tol() * 10);
+  const geo = [["Label", name], ["Story", st ? st.name : ""], ["X", num(at[0]) + u], ["Y", num(at[1]) + u], ["Z", num(at[2]) + u], ["Connected objects", on.length ? on.slice(0, 12).map(o => kindWord(o) + " " + o.name).join(", ") + (on.length > 12 ? " ..." : "") : "none"]];
+  const mine = jointRows(name), loads = mine.filter(x => isLoadTable(x.t)), asgIn = mine.filter(x => !isLoadTable(x.t) && (isAssignTable(x.t) || x.t.from === "input"));
+  const isDes = t => famOf(t.name) !== null || /design|punch/.test(norm(t.name));
+  const results = mine.filter(x => !isLoadTable(x.t) && !isAssignTable(x.t) && x.t.from !== "input" && !isDes(x.t)), des = mine.filter(x => !isLoadTable(x.t) && x.t.from !== "input" && isDes(x.t));
+  const notes = P.comments.filter(c => c.target && c.target.kind === "joint" && c.target.name === name);
+  const asg = [["Restraint", sup ? {fixed: "Fixed (all six)", pinned: "Pinned (U1 U2 U3)", roller: "Roller", spring: "Spring"}[sup.kind] || sup.kind : "None"]];
+  const nLoads = loads.reduce((n, x) => n + x.rows.length, 0);
+  // The same window as a frame's or a shell's (Ahmed 2026-11-26: "right click to follow same format").
+  const w = dialog("Joint Information - " + name, `<div class="itabs"><button data-page="geo" class="on">Geometry</button><button data-page="asg">Assignments</button><button data-page="lds">Loads (${nLoads})</button><button data-page="res">Results</button><button data-page="des">Design</button><button data-page="com">Comments (${notes.length})</button></div>
+    <div class="ipage on" data-page="geo">${rows(geo)}</div><div class="ipage" data-page="asg">${rows(asg)}${asgIn.map(x => rowsHtml(x.t, x.rows, 40)).join("")}</div>
+    <div class="ipage" data-page="lds">${loadsHtml(loads, name)}</div>
+    <div class="ipage" data-page="res">${results.map(x => rowsHtml(x.t, x.rows, 40)).join("") || `<p class="kv">This pack has no results for it.</p>`}</div>
+    <div class="ipage" data-page="des">${des.map(x => rowsHtml(x.t, x.rows, 40)).join("") || `<p class="kv">This pack has no design results for it.</p>`}</div>
+    <div class="ipage" data-page="com">${notes.map(c => `<div class="card comment"><div class="who">${esc(c.by || "Reviewer")} · ${esc(String(c.at || "").replace("T", " ").slice(0, 16))}</div>${esc(c.text)}</div>`).join("") || `<p class="kv">No comments on it yet.</p>`}<div class="row"><textarea class="iText" placeholder="Write a review comment on ${esc(name)}"></textarea></div><button class="iAdd">Add comment</button></div>`,
+    [["Show in Tables", () => showJointInTable(name, mine.find(x => !isLoadTable(x.t)) || mine[0])], ["Close"]], {float: true, info: true, width: nLoads || results.length || des.length ? 560 : 430});
+  w.querySelector(".iAdd").onclick = () => { const t = w.querySelector(".iText").value.trim(); if (!t) return; addComment(t, {type: "j", kind: "joint", name, story: st ? st.name : ""}); w.close(); jointInfo(name); };
+}
+function showJointInTable(name, hit) {
+  // The table that holds the joint, filtered to it, as Show in Tables does for a member.
+  const t = hit ? hit.t : null; showTables(true); if (!t) return;
+  pickTable(t.name);
+  const tt = tables[t.name]; if (!tt) return;
+  const nc = col(tt.fields, "UniqueName", "Unique Name", "Joint", "Point", "PointLabel", "Label"); if (nc < 0) return;
+  tFilt[nc] = "=" + (hit.rows[0] ? hit.rows[0][nc] : name); const inp = $("grid").querySelector(`[data-f="${nc}"]`); if (inp) inp.value = tFilt[nc]; drawTable();
+}
+function selCats() {
+  // The selection in kinds, as Revit's Filter lists its categories: joints, supports, then each kind of object by section.
+  const cats = new Map(), put = (k, label, item) => { if (!cats.has(k)) cats.set(k, {label, items: []}); cats.get(k).items.push(item); };
+  for (const n of selJ) supportOf.has(n) ? put("j:support", "Supports (" + (supportOf.get(n).kind || "restraint") + ")", {j: n}) : put("j:joint", "Joints", {j: n});
+  for (const id of sel) { const o = objOf(id); if (o) put("o:" + kindWord(o) + "|" + (o.section || ""), kindWord(o) + "s · " + (o.section || "no section"), {id}); }
+  return [...cats].map(([k, c]) => ({k, ...c})).sort((a, b) => a.k.localeCompare(b.k));
+}
+function selFilter() {
+  const cats = selCats(); if (!cats.length) return hmSayOr("Select some objects first, then filter them.");
+  const groups = new Map(); for (const c of cats) { const g = c.k.startsWith("j:") ? "Joints" : c.label.split(" · ")[0]; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(c); }
+  const total = () => cats.reduce((n, c) => n + c.items.length, 0);
+  const d = dialog("Filter", `<p class="kv" style="margin:0 0 6px">Keep the checked kinds in the selection.</p><div class="scroll" style="max-height:52vh"><table class="list" id="fT">${[...groups].map(([g, list]) => `<tr><td colspan="2"><label style="font-weight:600"><input type="checkbox" data-g="${esc(g)}" checked>${esc(g)}</label></td><td class="r">${list.reduce((n, c) => n + c.items.length, 0)}</td></tr>` + list.map(c => `<tr><td style="width:18px"></td><td><label><input type="checkbox" data-c="${esc(c.k)}" data-in="${esc(g)}" checked>${esc(c.label)}</label></td><td class="r">${c.items.length}</td></tr>`).join("")).join("")}</table></div>
+    <div style="display:flex;gap:6px;margin-top:6px;align-items:center"><button id="fAll">Check All</button><button id="fNone">Check None</button><span class="kv" id="fN" style="margin-left:auto"></span></div>`,
+    [["OK", d => { const keep = new Set([...d.querySelectorAll("[data-c]:checked")].map(x => x.dataset.c)); for (const c of cats) if (!keep.has(c.k)) for (const it of c.items) it.j ? selJ.delete(it.j) : sel.delete(it.id); selChanged(); }], ["Cancel"]], {width: 420});
+  const count = () => { const on = new Set([...d.querySelectorAll("[data-c]:checked")].map(x => x.dataset.c)); q(d, "#fN").textContent = "Total selected items: " + cats.filter(c => on.has(c.k)).reduce((n, c) => n + c.items.length, 0) + " of " + total(); };
+  d.querySelectorAll("[data-g]").forEach(x => x.onchange = () => { d.querySelectorAll(`[data-in="${CSS.escape(x.dataset.g)}"]`).forEach(c => c.checked = x.checked); count(); });
+  d.querySelectorAll("[data-c]").forEach(x => x.onchange = () => { const g = d.querySelector(`[data-g="${CSS.escape(x.dataset.in)}"]`), all = [...d.querySelectorAll(`[data-in="${CSS.escape(x.dataset.in)}"]`)]; g.checked = all.every(c => c.checked); g.indeterminate = !g.checked && all.some(c => c.checked); count(); });
+  q(d, "#fAll").onclick = () => { d.querySelectorAll("[data-c],[data-g]").forEach(x => { x.checked = true; x.indeterminate = false; }); count(); };
+  q(d, "#fNone").onclick = () => { d.querySelectorAll("[data-c],[data-g]").forEach(x => { x.checked = false; x.indeterminate = false; }); count(); };
+  count();
+}
+const hmSayOr = t => typeof hmSay === "function" && window.cpmLive ? hmSay(t, true) : dialog("Filter", `<p>${esc(t)}</p>`, [["OK"]], {width: 320});
 
 // ---- the design windows: Display Design Info, the summary of every design, and a member's design ----
 function openDesign(key) {
@@ -3044,8 +3199,20 @@ function showPick() {
   if (!P) return;
   const list = [...sel].map(objOf).filter(Boolean), table = rows => `<table class="props">${rows.map(r => `<tr><td>${r[0]}</td><td>${esc(r[1])}</td></tr>`).join("")}</table>`;
   const counts = {}; list.forEach(o => counts[o.type === "f" ? "Frames" : "Shells"] = (counts[o.type === "f" ? "Frames" : "Shells"] || 0) + 1);
-  $("sel").textContent = list.length ? Object.entries(counts).map(([k, n]) => n + " " + (n === 1 ? k.slice(0, -1) : k)).join(", ") + " selected" : "";
-  if (!list.length) {
+  const joints = [...selJ].filter(n => pointXyz.has(n)); if (joints.length) counts.Joints = joints.length;
+  $("sel").textContent = list.length || joints.length ? Object.entries(counts).map(([k, n]) => n + " " + (n === 1 ? k.slice(0, -1) : k)).join(", ") + " selected" : "";
+  const filterBtn = `<button id="pFilter" title="Keep only some kinds of the selected objects">Filter...</button>`, wireFilter = () => { const b = $("pFilter"); if (b) b.onclick = selFilter; };
+  if (!list.length && joints.length === 1) {
+    const n = joints[0], at = pointXyz.get(n), sup = supportOf.get(n), lds = loadRowsOf(n).flatMap(x => x.rows.map(r => loadLine(x.t, r)));
+    const rows = [["Label", n], ["Object", sup ? "Joint (support)" : "Joint"], ["X, Y, Z", at.map(num).join(", ") + (unit ? " " + unit : "")], ["Restraint", sup ? sup.kind : "none"], ["Connected objects", jointLinks(n).length]];
+    lds.slice(0, 8).forEach((l, i) => rows.push([i ? "" : "Loads", l])); if (lds.length > 8) rows.push(["", "... " + (lds.length - 8) + " more in its information"]);
+    const dc = disp.has(res.case) ? res.case : [...disp.keys()][0], dv = dc && disp.get(dc).get(n); if (dv) rows.push(["Displacement, " + dc, dv.map(fmt).join(", ")]);
+    el.innerHTML = table(rows) + `<div class="row" style="margin-top:8px"><button id="pInfo">Joint information...</button></div>`;
+    $("pInfo").onclick = () => jointInfo(n);
+    $("target").textContent = "Comment on the whole model. Click a member in a view to comment on it.";
+    return;
+  }
+  if (!list.length && !joints.length) {
     const man = P.manifest || {}, count = k => frames.filter(f => f.kind === k).length;
     el.innerHTML = table([["Model", man.model || ""], ["Program", (man.program || "") + " " + (man.etabs || "")], ["Units", $("units").textContent], ["Stories", Math.max(stories.length - 1, 0)], ["Grid lines", gridsGuessed ? "none in the file (column lines shown)" : grids.X.length + grids.Y.length],
       ["Columns", count("column")], ["Beams", count("beam")], ["Braces", count("brace")], ["Floors", areas.filter(a => a.kind !== "wall").length], ["Walls", areas.filter(a => a.kind === "wall").length], ["Joints", points.length], ["Supports", supports.length],
@@ -3053,10 +3220,12 @@ function showPick() {
     $("target").textContent = "Comment on the whole model. Click a member in a view to comment on it.";
     return;
   }
-  if (list.length > 1) {
+  if (list.length + joints.length > 1 || !list.length) {
     const bySec = new Map(); list.forEach(o => bySec.set(o.section, (bySec.get(o.section) || 0) + 1));
-    el.innerHTML = table([["Selected", $("sel").textContent], ...[...bySec].sort((a, b) => b[1] - a[1]).slice(0, 20).map(([s, n]) => ["Section " + s, n])]) + `<p class="kv">The comment goes on the first one: ${esc(describe(list[0]))}.</p>`;
-    $("target").textContent = "Comment on " + kindWord(list[0]).toLowerCase() + " " + list[0].name + ".";
+    const sup = joints.filter(n => supportOf.has(n)).length;
+    el.innerHTML = table([["Selected", $("sel").textContent], ...(joints.length ? [["Joints", joints.length - sup], ["Supports", sup]] : []), ...[...bySec].sort((a, b) => b[1] - a[1]).slice(0, 20).map(([s, n]) => ["Section " + s, n])]) + `<div class="row" style="margin-top:8px">${filterBtn}</div>` + (list.length ? `<p class="kv">The comment goes on the first one: ${esc(describe(list[0]))}.</p>` : "");
+    wireFilter();
+    $("target").textContent = list.length ? "Comment on " + kindWord(list[0]).toLowerCase() + " " + list[0].name + "." : "Comment on the whole model.";
     return;
   }
   const f = list[0], isFrame = f.type === "f", s = isFrame ? sizes[f.section] : null;
@@ -3073,6 +3242,9 @@ function showPick() {
     if (f.pier) rows.push(["Pier", f.pier]); if (f.spandrel) rows.push(["Spandrel", f.spandrel]);
     if (ratio.has(f.id)) rows.push(["Design ratio", ratio.get(f.id).toFixed(3)]);
   }
+  // Its loads, one line each, as the programs' Properties and Assignments show them.
+  const lds = loadRowsOf(f).flatMap(x => x.rows.map(r => loadLine(x.t, r)));
+  lds.slice(0, 8).forEach((l, i) => rows.push([i ? "" : "Loads", l])); if (lds.length > 8) rows.push(["", "... " + (lds.length - 8) + " more in its information"]);
   el.innerHTML = table(rows) + `<div class="row" style="margin-top:8px"><button id="pInfo">Object information...</button><button id="pTable">Show in tables</button></div>`;
   $("pInfo").onclick = () => infoWindow(f.id); $("pTable").onclick = () => showInTable(f);
   $("target").textContent = "Comment on " + kindWord(f).toLowerCase() + " " + f.name + ".";
@@ -3224,7 +3396,7 @@ function drawComments() {
   draw();
 }
 function addComment(text, o) {
-  const c = {id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), by: $("who").value.trim() || "Reviewer", at: new Date().toISOString(), text, target: o ? {kind: o.type === "f" ? "frame" : "area", what: o.kind, name: o.name, story: o.story || ""} : null};
+  const c = {id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), by: $("who").value.trim() || "Reviewer", at: new Date().toISOString(), text, target: o ? {kind: o.type === "f" ? "frame" : o.type === "j" ? "joint" : "area", what: o.kind, name: o.name, story: o.story || ""} : null};
   P.comments.push(c); newComments.push(c); drawComments();
   try { localStorage.setItem("cpm-who", $("who").value); } catch (e) {}
 }
@@ -3828,7 +4000,7 @@ async function hmAssignStructure(what) {
 async function hmAssignData(what) {
   const joint = what === "joint", shell = what === "smods" || what === "aspring";
   const names = joint ? hmJoints() : hmSelected(shell ? "a" : "f");
-  if (!names.length) return hmSay(joint ? "Select the members whose joints take the spring first." : shell ? "Select the floors or walls first." : "Select the frames first.", true);
+  if (!names.length) return hmSay(joint ? "Select the joints, or the members whose joints take the spring, first." : shell ? "Select the floors or walls first." : "Select the frames first.", true);
   const pd = (await hmRun("property_definitions", {objects: names.slice(0, 1)}, true)).result; if (!pd) return;
   const now = (pd.objects || [])[0] || {}, u = hmU();
   const springs = k => pd.springs.filter(x => x.kind === k).map(x => x.name);
@@ -4252,8 +4424,8 @@ async function hmText(pick) {
 
 // ---- Assign: joint, frame and shell loads of every kind ----
 function hmJoints() {
-  // The joints of the selected objects, above the base: where a joint load goes.
-  const out = new Set(), base = stories.length ? elevationOf(stories[0].name) : 0;
+  // The selected joints (a foundation joint among them), and the joints of the selected objects above the base.
+  const out = new Set([...selJ].filter(n => pointIdx.has(n))), base = stories.length ? elevationOf(stories[0].name) : 0;
   for (const id of sel) {
     const o = objOf(id); if (!o) continue;
     for (const e of o.type === "f" ? [o.a, o.b] : o.pts) { if (e[2] <= (base ?? 0) + 1e-6) continue; const n = pointAt.get(key(e[0], e[1], e[2])); if (n !== undefined) out.add(String(n)); }
@@ -4263,7 +4435,7 @@ function hmJoints() {
 async function hmObjectLoad(kind) {
   const defs = await hmDefs(), u = hmU(), t = kind.split("_")[0];
   const names = t === "joint" ? hmJoints() : hmSelected(t === "frame" ? "f" : "a");
-  if (!names.length) return hmSay(t === "joint" ? "Select the members whose joints take the load first." : t === "frame" ? "Select the frames to load first." : "Select the floors or walls to load first.", true);
+  if (!names.length) return hmSay(t === "joint" ? "Select the joints, or the members whose joints take the load, first." : t === "frame" ? "Select the frames to load first." : "Select the floors or walls to load first.", true);
   if (!defs.load_patterns.length) return hmSay("Define a load pattern first (Define > Load Patterns).", true);
   const F = u.f, L = u.l;
   const fields = {

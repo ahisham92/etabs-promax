@@ -16,7 +16,7 @@ namespace CsiProMax.Assistant;
 /// </summary>
 public static class ScratchExtras
 {
-    public const string LinkProperty = "CPM-LIN", Group = "CPM-CUT", SectionCut = "CPM-SC", Pushover = "CPM-PUSH", Function = "CPM-TH", History = "CPM-MHL", Tendon = "CPM-TEN";
+    public const string LinkProperty = "CPM-LIN", Group = "CPM-CUT", SectionCut = "CPM-SC", Pushover = "CPM-PUSH", Function = "CPM-TH", History = "CPM-MHL", Tendon = "CPM-TEN", ModalForHistory = "CPM-MODAL-H", Brace = "CPM-BR";
 
     private const string NoApi = "the stand-in has no program API behind it (a live program is needed)";
 
@@ -62,9 +62,24 @@ public static class ScratchExtras
             Must(link, "make a group", "GroupDef.SetGroup", ("Name", Group));
             foreach (var column in columns)
                 Must(link, "put a column in the group", "FrameObj.SetGroupAssign", ("Name", column), ("GroupName", Group), ("Remove", false), ("ItemType", 0));
-            Must(link, "define a section cut by the group", "SectCut.SetByGroup", ("Name", SectionCut), ("GroupName", Group), ("MyType", 1));
-            return $"{SectionCut} by group {Group}";
+            var how = ApiWorkarounds.SectionCutByGroup(link, SectionCut, Group);
+            return $"{SectionCut} by group {Group}, {how}";
         });
+        if (isEtabs)
+        {
+            // A diagonal member, so ETABS lists "Element Forces - Braces" for the scratch model (Ahmed, 2026-11-26: a table
+            // the Viewer takes must be tested, not left out because the model had no member of its kind).
+            var low = points.Count == 0 ? double.NaN : points.Min(p => p.Z);
+            var upper = points.First(p => p.Name == top[1]);
+            var foot = points.Where(p => Math.Abs(p.Z - low) < 1e-6 && (Math.Abs(p.X - upper.X) > 1e-6 || Math.Abs(p.Y - upper.Y) > 1e-6)).OrderBy(p => Math.Abs(p.X - upper.X) + Math.Abs(p.Y - upper.Y)).FirstOrDefault();
+            if (foot is null) ctx.Fail($"a brace from the base to joint {top[1]} (for the brace forces table)", "the model has no base joint away from that joint");
+            else ctx.Step($"a brace from base joint {foot.Name} to joint {top[1]} (for the brace forces table)", () =>
+            {
+                var section = Must(link, "read a column's section", "FrameObj.GetSection", ("Name", columns[0]), ("PropName", ""), ("SAuto", ""));
+                var made = Must(link, "draw a brace between two joints", "FrameObj.AddByPoint", ("Point1", foot.Name), ("Point2", top[1]), ("Name", ""), ("PropName", ApiCall.Value(section, "PropName")), ("UserName", Brace));
+                return $"brace {ApiCall.Value(made, "Name")} of {ApiCall.Value(section, "PropName")}";
+            });
+        }
         ctx.Step($"a nonlinear static case pushed to a displacement, every state saved (for the Viewer's pushover curve)", () =>
         {
             var patterns = link.LoadPatterns();
@@ -80,23 +95,50 @@ public static class ScratchExtras
         const string history = "a time history function and a linear modal history case (for the Viewer's plot functions)";
         if (isEtabs)
         {
-            // ETABS 23's API cannot define a history function (cFunctionTH has no methods): the Modeler's file brings the case.
+            // ETABS 23's API cannot define a history function (cFunctionTH has no methods), so the function and the case go
+            // in through ETABS's own tables, by the keys and fields of its "Table and Field Keys.xml" (read on Ahmed's PC,
+            // 2026-11-26), unless the Modeler's file brought a case already.
             var there = Read(ctx, "the history cases", () => CasesOfType(link, "Hist"), []);
             if (there.Count > 0) ctx.Step(history, () => $"already in the model from the Modeler's file: {string.Join(", ", there)}");
-            else ctx.Skip(history, $"{name} 23's API has no call to define a time history function or the steps of a history case, and the Modeler's file brought no history case");
+            else
+                ctx.Step(history, () =>
+                {
+                    var modalCase = ModalCaseOf(link);
+                    if (modalCase is null)
+                    {
+                        Must(link, "add a modal case for the history case", "LoadCases.ModalEigen.SetCase", ("Name", ModalForHistory));
+                        modalCase = ModalForHistory;
+                    }
+                    double[] times = [0.0, 0.1, 0.2, 0.3, 0.4], values = [0.0, 1.0, 0.0, -1.0, 0.0];
+                    EditableTables.Put(link, HistoryFunctionTable, "Name",
+                        times.Select((t, i) => (IReadOnlyDictionary<string, string>)new Dictionary<string, string> { ["Name"] = Function, ["Time"] = Num(t), ["Value"] = Num(values[i]) }).ToList(),
+                        "define a time history function through its table");
+                    EditableTables.Put(link, HistoryCaseTable, "Name",
+                        [new Dictionary<string, string> { ["Name"] = History, ["LoadType"] = "Acceleration", ["LoadName"] = "U1", ["Function"] = Function, ["LoadSF"] = "1", ["ModalCase"] = modalCase, ["MotionType"] = "Transient", ["NumSteps"] = "20", ["StepSize"] = "0.02" }],
+                        "add a linear modal history case through its table");
+                    var made = CasesOfType(link, "Hist");
+                    FieldContext.Expect(made.Contains(History, StringComparer.OrdinalIgnoreCase), $"{name} took the tables but lists no history case {History} (its history cases: {string.Join(", ", made)})");
+                    return $"{History}: {Function} as ground acceleration in X on {modalCase}, 20 steps of 0.02 s, through the tables '{HistoryFunctionTable}' and '{HistoryCaseTable}'";
+                });
         }
         else
         {
             var modal = Read(ctx, "whether the model has a modal case", () => HasModalCase(link), false);
-            if (!modal) ctx.Skip(history, $"the scratch model has no modal case for {name} to build the history on");
-            else
-                ctx.Step(history, () =>
+            ctx.Step(history, () =>
                 {
+                    // The history case stands on a modal case: one is added when the model has none (Ahmed, 2026-11-26:
+                    // only a missing program or licence leaves a step untested).
+                    if (!modal)
+                    {
+                        Must(link, "add a modal case for the history case", "LoadCases.ModalEigen.SetCase", ("Name", ModalForHistory));
+                        ApiWorkarounds.SetNumberModes(link, "ModalEigen", ModalForHistory, 6, 1);
+                    }
                     Must(link, "define a time history function", "Func.FuncTH.SetUser", ("Name", Function), ("NumberItems", 5), ("MyTime", new[] { 0.0, 0.1, 0.2, 0.3, 0.4 }), ("Value", new[] { 0.0, 1.0, 0.0, -1.0, 0.0 }));
                     Must(link, "add a linear modal history case", "LoadCases.ModHistLinear.SetCase", ("Name", History));
                     Must(link, "give the history case its load", "LoadCases.ModHistLinear.SetLoads", ("Name", History), ("NumberLoads", 1), ("LoadType", new[] { "Accel" }), ("LoadName", new[] { "U1" }),
                         ("Func", new[] { Function }), ("SF", new[] { 1.0 }), ("Tf", new[] { 1.0 }), ("At", new[] { 0.0 }), ("CSys", new[] { "Global" }), ("Ang", new[] { 0.0 }));
                     Must(link, "give the history case its steps", "LoadCases.ModHistLinear.SetTimeStep", ("Name", History), ("NStep", 20), ("Dt", 0.02));
+                    if (!modal) Must(link, "build the history case on that modal case", "LoadCases.ModHistLinear.SetModalCase", ("Name", History), ("ModalCase", ModalForHistory));
                     return $"{History}: {Function} as ground acceleration in X, 20 steps of 0.02 s";
                 });
         }
@@ -169,6 +211,18 @@ public static class ScratchExtras
         var call = ApiCall.Invoke((object)m, "LoadCases.GetTypeOAPI", D(("Name", c)));
         return ApiCall.Worked(call) && ApiCall.Value(call, "CaseType")?.ToString() is { } type && type.Contains(word, StringComparison.OrdinalIgnoreCase);
     }) is true).ToList();
+
+    /// <summary>ETABS 23's tables for a user time history function and a linear modal history case.</summary>
+    public const string HistoryFunctionTable = "Functions - Time History - User Defined", HistoryCaseTable = "Load Case Definitions - Time History - Linear Modal";
+
+    private static string Num(double v) => v.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>The first modal (not history) case of the model, or null.</summary>
+    private static string? ModalCaseOf(ICsiLink link) => link.LoadCases().FirstOrDefault(c => link.Raw("read a load case's type", m =>
+    {
+        var call = ApiCall.Invoke((object)m, "LoadCases.GetTypeOAPI", D(("Name", c)));
+        return ApiCall.Worked(call) && ApiCall.Value(call, "CaseType")?.ToString() is { } type && (type.Contains("Modal", StringComparison.OrdinalIgnoreCase) || type == "3") && !type.Contains("Hist", StringComparison.OrdinalIgnoreCase);
+    }) is true);
 
     private static bool HasModalCase(ICsiLink link) => link.LoadCases().Any(c => link.Raw("read a load case's type", m =>
     {

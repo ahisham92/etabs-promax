@@ -274,8 +274,10 @@ public static class EtabsFieldSteps
         ctx.Tool("add_load_pattern", """{"name":"CPM-EQX","type":"Seismic","user_coefficient":{"c":0.05,"k":1,"direction":"X"}}""",
             a =>
             {
+                if (a["note"] is not null && a["lateral"] is null && !FieldTest.IsLive(link))
+                    throw new FieldSkipException("no CSI program is behind this stand-in, so no automatic load can be set: " + a["note"]!.GetValue<string>());
                 if (a["note"] is not null && a["lateral"] is null && link.LoadPatterns().Any(p => p.Name == "CPM-EQX"))
-                    throw new FieldSkipException("the Seismic pattern is added; its automatic load cannot be set through this ETABS's API: " + a["note"]!.GetValue<string>());
+                    throw new FieldCheckException("the Seismic pattern is added, but neither its user coefficient table nor ASCE 7-16 took its automatic load: " + a["note"]!.GetValue<string>());
                 FieldContext.Expect(a["lateral"] is not null && link.LoadPatterns().Any(p => p.Name == "CPM-EQX"), "the seismic pattern or its coefficient is not in ETABS: " + a.ToJsonString());
             },
             "tool add_load_pattern, seismic by a user coefficient");
@@ -457,17 +459,19 @@ public static class EtabsFieldSteps
         ctx.Coverage("every ETABS tool was run");
     }
 
-    /// <summary>A read-back through ETABS's API that could not be made is not tested, not failed: it is the test's own call, not the tool's.</summary>
-    private static T Back<T>(Func<T> read)
+    /// <summary>A read-back through ETABS's API that could not be made fails the step: the change is not proved otherwise.</summary>
+    private static T Back<T>(ICsiLink link, Func<T> read)
     {
+        // No ETABS behind the link (a stand-in): there is no program to read back from, the one reason left to not test.
+        if (!FieldTest.IsLive(link)) throw new FieldSkipException("no CSI program is behind this stand-in, so there is no API to read the load back through");
         try { return read(); }
-        catch (EtabsException ex) { throw new FieldSkipException("the load could not be read back through ETABS's API (" + ex.Message + ")"); }
+        catch (EtabsException ex) { throw new FieldCheckException("the load could not be read back through ETABS's API (" + ex.Message + ")"); } // a change that cannot be read back is not proved (Ahmed, 2026-11-26)
     }
 
     /// <summary>The uniform load on a frame in a pattern, summed, as ETABS's API gives it; fails when it is not <paramref name="expected"/>.</summary>
     private static object FrameLoad(ICsiLink link, string frame, string pattern, double expected)
     {
-        var found = Back(() => (double[])link.Raw("read a frame's loads", m =>
+        var found = Back(link, () => (double[])link.Raw("read a frame's loads", m =>
         {
             int n = 0; string[] names = [], patterns = [], systems = []; int[] types = [], directions = [];
             double[] rd1 = [], rd2 = [], d1 = [], d2 = [], v1 = [], v2 = [];
@@ -481,7 +485,7 @@ public static class EtabsFieldSteps
 
     private static object AreaLoad(ICsiLink link, string area, string pattern, double expected)
     {
-        var found = Back(() => (double[])link.Raw("read an area's loads", m =>
+        var found = Back(link, () => (double[])link.Raw("read an area's loads", m =>
         {
             int n = 0; string[] names = [], patterns = [], systems = []; int[] directions = []; double[] values = [];
             var answer = Convert.ToInt32(m.AreaObj.GetLoadUniform(area, ref n, ref names, ref patterns, ref systems, ref directions, ref values, 0));

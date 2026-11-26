@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using CsiProMax.Assistant;
 using CsiProMax.Assistant.Etabs;
 using CsiProMax.Assistant.Tools;
+using CsiProMax.CsiTables;
 using CsiProMax.F2k;
 using CsiProMax.Model;
 
@@ -343,7 +344,7 @@ static class OldProgramTests
             Check(memory.Loads.Count > 0, "the loads reached the slabs");
             Check(api.Calls.Any(c => c.StartsWith("SetSlab(", StringComparison.Ordinal)) && api.Calls.Any(c => c.StartsWith("SetRectangle(", StringComparison.Ordinal)) && api.Calls.Any(c => c.StartsWith("SetMaterial(", StringComparison.Ordinal)),
                 "the materials, slab and frame properties are defined first: " + string.Join(", ", api.Calls.Take(8)));
-            Check(written.Strips == 0 || built["notes"]!.AsArray().Any(n => n!.GetValue<string>().Contains("design strips", StringComparison.Ordinal)), "strips left out are said");
+            Equal(written.Strips, built["strips_in_file"]!.GetValue<int>(), "the strips of the file are counted, to go in through the table");
             Equal("Super Dead", CsiProMax.Assistant.Safe.F2kRebuild.PatternType("SUPER DEAD"), "a .f2k pattern type");
             Equal("Other", CsiProMax.Assistant.Safe.F2kRebuild.PatternType("SOMETHING"), "an unknown one");
 
@@ -353,7 +354,128 @@ static class OldProgramTests
             Check(scratch.Contains("F2kRebuild.Build(Link, text)", StringComparison.Ordinal) && scratch.IndexOf("F2kRebuild.Build(Link, text)", StringComparison.Ordinal) > scratch.IndexOf("the link reads the scratch model, and no other", StringComparison.Ordinal),
                 "the model is built only once the link is checked to be the scratch model's");
             var steps = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Safe/SafeFieldSteps.cs"));
-            Check(steps.Contains("if (built) ctx.Skip(\"the design strips came across\"", StringComparison.Ordinal), "the strips are said as not tested, not passed, when the model was built");
+            Check(steps.Contains("if (built && !ctx.Facts.ContainsKey(\"safe.strips_built\"))", StringComparison.Ordinal), "the strips are compared when they went in, and said as not tested when they did not");
+        });
+
+        yield return ("SAFE 20 (0.4.51): the design strips its API cannot draw go in through its 'Strip Object Connectivity' table, in the fields SAFE lists", () =>
+        {
+            var m = Templates.ConcreteFrame("T", [6, 6], [5], 3, 3.5);
+            var written = F2kWriter.Write(m, new F2kOptions(Story: "Story2"));
+            var points = CsiTableText.Parse(written.Text)["OBJECT GEOMETRY - DESIGN STRIPS"];
+            Check(points.Count >= 2, "the file has strips");
+            string[] safe = ["Name", "Layer", "Point", "GlobalX", "GlobalY", "WB Left", "WB Right", "WA Left", "WA Right", "AutoWiden", "GUID"];
+            var rows = CsiProMax.Assistant.Safe.F2kRebuild.StripRows(written.Text, safe);
+            Equal(points.Count, rows.Count, "one row per strip point");
+            Equal(points[0]["Strip"], rows[0]["Name"], "the strip's name");
+            Equal(points[0]["GlobalX"], rows[0]["GlobalX"], "its place");
+            Equal(points[0]["WBLeft"], rows[0]["WB Left"], "a width, to a field named with a space");
+            Check(!rows[0].ContainsKey("GUID"), "a field the file has nothing for is left to SAFE");
+            var other = CsiProMax.Assistant.Safe.F2kRebuild.StripRows(written.Text, ["Strip", "X", "Y"]);
+            Equal(points[0]["GlobalY"], other[0]["Y"], "other names for the same fields");
+            try { CsiProMax.Assistant.Safe.F2kRebuild.StripRows(written.Text, ["Name", "Layer"]); throw new Exception("strips were written with no place"); }
+            catch (EtabsException ex) { Check(ex.Message.Contains("Its fields: Name, Layer", StringComparison.Ordinal), "SAFE's fields are named, for the next round: " + ex.Message); }
+
+            var api = new CpmFakes.StripTableApi(safe);
+            var link = new SafeMemory(new MemoryEtabs { Program = CsiProgram.Safe }, program: CsiProgram.Safe) { Api = api };
+            var listed = CsiProMax.Assistant.Safe.F2kRebuild.BuildStrips(link, written.Text);
+            Equal(points.Count, api.Written.Count, "every strip point went into the table");
+            Equal(points.Select(p => p["Strip"]).Distinct().Count(), listed, "SAFE lists each strip once");
+            Check(api.Applied, "the table edit was applied");
+            Equal(safe.Length, api.Fields.Length, "the rows carry SAFE's own fields");
+        });
+
+        yield return ("Ahmed 2026-11-26: SAFE's part leaves nothing as not tested: strips, table add and update, slab design and soil are checked or failed", () =>
+        {
+            var steps = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Safe/SafeFieldSteps.cs"));
+            Check(!steps.Contains("ctx.Skip(", StringComparison.Ordinal) && !steps.Contains("FieldSkipException", StringComparison.Ordinal), "no step of SAFE's part is said as not tested");
+            Check(steps.Contains("TableEdits(ctx, link, slabTable)", StringComparison.Ordinal) && steps.Contains("\"action\"] = \"update\"", StringComparison.Ordinal) && steps.Contains("\"action\":\"add\"", StringComparison.Ordinal), "edit_safe_table's add and update are run");
+            Check(steps.Contains("Spring Property Definitions - Area Springs", StringComparison.Ordinal), "the soil is read from SAFE's area spring table when its API does not list it");
+            var scratch = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));
+            Check(scratch.Contains("ctx.Fail($\"start a second {name} window\"", StringComparison.Ordinal), "a file the program can neither open nor have built is a failure, not a skip");
+        });
+
+        yield return ("tester (0.4.53): an ETABS-only field test started from the SAFE window is named and headed ETABS, not SAFE; for all three programs", () =>
+        {
+            foreach (var window in CsiProgram.All)
+            {
+                foreach (var only in CsiProgram.All)
+                {
+                    Equal(only.Name, FieldTest.ReportName(window, only), $"{only.Name} alone from the {window.Name} window");
+                    var line = FieldTest.TestedLine(window, only)!;
+                    Check(line.StartsWith($"Program tested: {only.Name} alone", StringComparison.Ordinal), line);
+                    Check(window.Key == only.Key || line.Contains($"started from the CSI ProMax window of {window.Name}", StringComparison.Ordinal), "the window it ran from is said: " + line);
+                }
+                Equal(window.Name, FieldTest.ReportName(window, null), "every program tested: named for the window");
+                Equal(null, FieldTest.TestedLine(window, null), "no line when every program was tested");
+            }
+            var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/FieldTest.cs"));
+            Check(!source.Contains("$\"Field test {link.Program.Name}", StringComparison.Ordinal) && source.Contains("$\"Field test {ReportName(link.Program, o.OnlyProgram)}", StringComparison.Ordinal), "the report file is named by ReportName");
+            Check(source.Contains("\"Field test\", $\"{ReportName(link.Program, o.OnlyProgram)}", StringComparison.Ordinal), "the work folder too");
+        });
+
+        yield return ("ETABS 20 tester (0.4.53): results tools answer 'no analysis' on a model that is not analysed, in every program", () =>
+        {
+            foreach (var program in CsiProgram.All)
+            {
+                var link = new MemoryEtabs { Program = program };
+                foreach (var (tool, key) in new[] { ("joint_displacements", "list"), ("frame_forces", "list"), ("base_reactions", "base_reactions"), ("modal_results", "modes") })
+                {
+                    var t = CsiProMax.Assistant.Sap2000.SapTools.All.Single(x => x.Name == tool);
+                    var answer = t.Invoke(JsonDocument.Parse("{}").RootElement, link);
+                    Check(answer["analysed"]?.GetValue<bool>() == false && answer[key] is JsonArray { Count: 0 } && answer["note"]!.GetValue<string>().Contains("run_analysis", StringComparison.Ordinal), $"{program.Name} {tool}: " + answer.ToJsonString());
+                }
+            }
+        });
+
+        yield return ("ETABS 20 tester (0.4.53): an analysis the program did not finish is a failure that quotes its analysis log", () =>
+        {
+            var lines = new[] { "BEGIN ANALYSIS", "  NUMBER OF JOINTS = 40", "* * * E R R O R * * *", "STRUCTURE IS UNSTABLE OR ILL-CONDITIONED", "ANALYSIS TERMINATED", "" };
+            var said = CsiProMax.Assistant.Tools.EtabsTools.AnalysisTrouble(lines);
+            Check(said.Contains("STRUCTURE IS UNSTABLE OR ILL-CONDITIONED") && said.Contains("ANALYSIS TERMINATED") && !said.Contains("BEGIN ANALYSIS"), string.Join(" | ", said));
+            Equal(2, CsiProMax.Assistant.Tools.EtabsTools.AnalysisTrouble(["a", "b"]).Count, "a log with no problem gives its last lines");
+            var folder = Path.Combine(Path.GetTempPath(), "cpm-log-" + Guid.NewGuid().ToString("N")[..8]);
+            Directory.CreateDirectory(folder);
+            try
+            {
+                File.WriteAllLines(Path.Combine(folder, "scratch.LOG"), lines);
+                var text = CsiProMax.Assistant.Tools.EtabsTools.AnalysisLog(Path.Combine(folder, "scratch.EDB"));
+                Check(text.Contains("scratch.LOG says", StringComparison.Ordinal) && text.Contains("UNSTABLE", StringComparison.Ordinal), text);
+                Check(CsiProMax.Assistant.Tools.EtabsTools.AnalysisLog(Path.Combine(folder, "other.EDB")).Contains("No analysis log", StringComparison.Ordinal), "no log is said");
+            }
+            finally { Directory.Delete(folder, true); }
+            var tools = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Tools/EtabsTools.cs"));
+            Check(tools.Contains("(_, e) => RunAnalysis(e)", StringComparison.Ordinal), "run_analysis checks that the model is analysed");
+        });
+
+        yield return ("ETABS 20 tester (0.4.53): a table import's log is quoted from its error lines, not cut off in its options", () =>
+        {
+            var log = "********** DATABASE IMPORT DEFINITION DATA **********\nETABS Version 20.0.0 Interactive Database Import\nImport Type and Options:\n" + string.Concat(Enumerable.Repeat("  Elements Deleted from DB:  Delete object from model\n", 20))
+                + "TABLE:  \"Load Pattern Definitions - Auto Seismic - UBC 97\"\n  ERROR: Field 'Ct' is not valid for this table\nNumber of errors: 1\n";
+            var cut = CsiProMax.Assistant.Etabs.EditableTables.LogCut(log);
+            Check(cut.StartsWith("ERROR: Field 'Ct' is not valid", StringComparison.Ordinal), cut);
+            Equal("", CsiProMax.Assistant.Etabs.EditableTables.Trouble("all fine\nNumber of errors: 0"), "a clean log has no trouble lines");
+        });
+
+        yield return ("ETABS 20 tester (0.4.53): no SetNumberModes and no SectCut in its API: the modal case and section cut tables take them", () =>
+        {
+            var api = new CpmFakes.OldEtabsApi();
+            var link = new SafeMemory(new MemoryEtabs { Program = CsiProgram.Etabs }, program: CsiProgram.Etabs)
+            {
+                Api = api,
+                Listed = [new("Modal Case Definitions - Eigen", "Modal Case Definitions - Eigen", false), new("Section Cut Definitions", "Section Cut Definitions", false), new("Modal Participating Mass Ratios", "Modal Participating Mass Ratios", true)],
+            };
+            var how = CsiProMax.Assistant.Tools.ApiWorkarounds.SetNumberModes(link, "ModalEigen", "CPM-MODAL", 12, 1);
+            Check(how.Contains("Modal Case Definitions - Eigen", StringComparison.Ordinal), how);
+            var row = api.Rows["Modal Case Definitions - Eigen"].Single();
+            Check(row.Contains("CPM-MODAL") && row.Contains("12") && row.Contains("1"), "the modes went into the table: " + string.Join(",", row));
+            how = CsiProMax.Assistant.Tools.ApiWorkarounds.SectionCutByGroup(link, "CPM-CUT", "CPM-GROUP");
+            Check(how.Contains("Section Cut Definitions", StringComparison.Ordinal), how);
+            var cut = api.Rows["Section Cut Definitions"].Single();
+            Check(cut.Contains("CPM-CUT") && cut.Contains("Group") && cut.Contains("CPM-GROUP"), string.Join(",", cut));
+            Check(CsiProMax.Assistant.Tools.ApiWorkarounds.IsMissing(new EtabsException("ETABS could not define a section cut by the group: cSapModel has no 'SectCut'. Its parts: ...")), "ETABS 20's own words for a missing part");
+            Check(!CsiProMax.Assistant.Tools.ApiWorkarounds.IsMissing(new EtabsException("ETABS refused to set the modes (answered 1).")), "a refusal is not a missing call");
+            var grab = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Panel/Tools/ScreenGrab.cs"));
+            Check(grab.Contains("WhileShown(main", StringComparison.Ordinal) && !grab.Contains("restore its window first.\");", StringComparison.Ordinal), "a minimized window is shown for its picture, not refused");
         });
 
         yield return ("SAFE 20 tester (0.4.47): SAFE 20 is never given the Modeler's .f2k, which it read as a packed model ('Error decompressing file')", () =>
@@ -484,6 +606,76 @@ namespace CSiAPIv1
             var picked = frames.LastSelected is null ? Array.Empty<string>() : [frames.LastSelected];
             NumberItems = picked.Length; ObjectName = picked; ObjectType = picked.Select(_ => eObjType.Frame).ToArray();
             return 0;
+        }
+    }
+}
+
+namespace CpmFakes
+{
+        /// <summary>SAFE's database tables for the strip table: lists its fields, takes the rows and counts the strips they name.</summary>
+        public sealed class StripTableApi(string[] fields)
+        {
+            public List<string[]> Written { get; } = [];
+            public string[] Listed { get; } = fields;
+            public string[] Fields = [];
+            public bool Applied;
+            public TablesApi DatabaseTables => new(this);
+            public SlabApi DesignConcreteSlab => new(this);
+            public sealed class TablesApi(StripTableApi a)
+            {
+                public int GetAllFieldsInTable(string TableKey, ref int TableVersion, ref int NumberFields, ref string[] FieldKey, ref string[] FieldName, ref string[] Description, ref string[] UnitsString, ref bool[] IsImportable)
+                { FieldKey = a.Listed; FieldName = a.Listed; NumberFields = a.Listed.Length; return TableKey == CsiProMax.Assistant.Safe.F2kRebuild.StripTable ? 0 : 1; }
+                public int GetTableForEditingArray(string TableKey, string GroupName, ref int TableVersion, ref string[] FieldsKeysIncluded, ref int NumberRecords, ref string[] TableData)
+                { FieldsKeysIncluded = a.Listed; NumberRecords = 0; TableData = []; return 0; }
+                public int SetTableForEditingArray(string TableKey, ref int TableVersion, ref string[] FieldsKeysIncluded, int NumberRecords, ref string[] TableData)
+                {
+                    a.Fields = FieldsKeysIncluded;
+                    for (var r = 0; r < NumberRecords; r++) a.Written.Add(TableData.Skip(r * FieldsKeysIncluded.Length).Take(FieldsKeysIncluded.Length).ToArray());
+                    return 0;
+                }
+                public int ApplyEditedTables(bool FillImportLog, ref int NumFatalErrors, ref int NumErrorMsgs, ref int NumWarnMsgs, ref int NumInfoMsgs, ref string ImportLog) { a.Applied = true; ImportLog = ""; return 0; }
+                public int CancelTableEditing() => 0;
+            }
+            public sealed class SlabApi(StripTableApi a)
+            {
+                public StripApi DesignStrip => new(a);
+            }
+            public sealed class StripApi(StripTableApi a)
+            {
+                public int GetNameList(ref int NumberNames, ref string[] MyName)
+                {
+                    var at = Array.FindIndex(a.Fields, f => f == "Name");
+                    MyName = a.Written.Select(r => r[at]).Distinct().ToArray();
+                    NumberNames = MyName.Length;
+                    return 0;
+                }
+            }
+        }
+
+    /// <summary>ETABS 20's API as the tester's run showed it: no SectCut, a ModalEigen with no SetNumberModes; its tables take rows.</summary>
+    public sealed class OldEtabsApi
+    {
+        public Dictionary<string, List<string[]>> Rows { get; } = [];
+        public Cases LoadCases { get; } = new();
+        public Tables DatabaseTables => new(this);
+        public sealed class Cases { public Eigen ModalEigen { get; } = new(); }
+        public sealed class Eigen { public int SetCase(string Name) => 0; }
+        public sealed class Tables(OldEtabsApi a)
+        {
+            private static string[] FieldsOf(string key) => key.StartsWith("Modal", StringComparison.Ordinal) ? ["Name", "MassSource", "MaxModes", "MinModes", "GUID"] : ["Name", "DefinedBy", "Group", "ResultType", "GUID"];
+            public int GetTableForEditingArray(string TableKey, string GroupName, ref int TableVersion, ref string[] FieldsKeysIncluded, ref int NumberRecords, ref string[] TableData)
+            { FieldsKeysIncluded = FieldsOf(TableKey); NumberRecords = 0; TableData = []; return 0; }
+            public int GetAllFieldsInTable(string TableKey, ref int TableVersion, ref int NumberFields, ref string[] FieldKey, ref string[] FieldName, ref string[] Description, ref string[] UnitsString, ref bool[] IsImportable)
+            { FieldKey = FieldsOf(TableKey); FieldName = FieldKey; NumberFields = FieldKey.Length; return 0; }
+            public int SetTableForEditingArray(string TableKey, ref int TableVersion, ref string[] FieldsKeysIncluded, int NumberRecords, ref string[] TableData)
+            {
+                var f = FieldsKeysIncluded.Length;
+                var data = TableData;
+                a.Rows[TableKey] = Enumerable.Range(0, NumberRecords).Select(r => data.Skip(r * f).Take(f).ToArray()).ToList();
+                return 0;
+            }
+            public int ApplyEditedTables(bool FillImportLog, ref int NumFatalErrors, ref int NumErrorMsgs, ref int NumWarnMsgs, ref int NumInfoMsgs, ref string ImportLog) { ImportLog = ""; return 0; }
+            public int CancelTableEditing() => 0;
         }
     }
 }

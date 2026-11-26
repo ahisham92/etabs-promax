@@ -56,7 +56,7 @@ public static class Program
         info.ArgumentList.Add(Path.Combine(folder, "CsiProMax.dll"));
         for (var i = 0; i < args.Length; i++)
         {
-            if (args[i] == "--this-version") continue;
+            if (args[i] is "--this-version" or "--no-focus") continue;
             if (args[i] is "--installed-in" or "--after-pid") { i++; continue; }
             info.ArgumentList.Add(args[i]);
         }
@@ -117,7 +117,7 @@ public static class Program
             // --full: every tool, on scratch models in windows of the programs the test opens itself (20 to 60 minutes).
             var link = demo ? new MemoryEtabs() : CsiProMax.Assistant.Tools.ProgramTools.Live(check);
             var outcome = args.Contains("--full")
-                ? FieldTest.Run(link, new FieldTest.Options { Full = true, Retest = args.Contains("--retest"), StartedFrom = "the command line", Progress = step => Console.Error.WriteLine("... " + step), Outcome = line => Console.Error.WriteLine(line) })
+                ? FieldTest.Run(link, new FieldTest.Options { Full = true, Retest = args.Contains("--retest"), OnlyProgram = Array.IndexOf(args, "--only") is var onlyAt and >= 0 && onlyAt + 1 < args.Length ? CsiProgram.Find(args[onlyAt + 1]) : null, StartedFrom = "the command line", Progress = step => Console.Error.WriteLine("... " + step), Outcome = line => Console.Error.WriteLine(line) })
                 : FieldTest.Run(link, args.Contains("--changes"), "the command line");
             Console.WriteLine(outcome.Report);
             Console.WriteLine("Saved: " + outcome.File);
@@ -172,12 +172,15 @@ public static class Program
             AppDomain.CurrentDomain.UnhandledException += (_, e) => Note("unhandled", e.ExceptionObject as Exception);
             CsiProMax.App.Start(link, etabsPid, demo);
             var window = new CsiProMax.Host.MainWindow();
+            // Started again to follow the program in use while the engineer works there: it shows without taking the keyboard from that program.
+            var quiet = args.Contains("--no-focus");
+            if (quiet) window.ShowActivated = false;
             // Started from a shortcut, Windows hands the window the shortcut's "minimised" (meant for dotnet's console):
             // the window comes up normal and in front.
             window.ContentRendered += (_, _) =>
             {
                 if (window.WindowState == System.Windows.WindowState.Minimized) window.WindowState = CsiProMax.App.Modeler ? System.Windows.WindowState.Maximized : System.Windows.WindowState.Normal;
-                window.Activate();
+                if (!quiet) window.Activate();
             };
             app.MainWindow = window;
 
@@ -230,7 +233,50 @@ public static class Program
                     }));
             }) { IsBackground = true, Name = "CsiProMax show" };
             surface.Start();
-            // Started from an ETABS window: when that ETABS is closed, this closes too.
+            // The window follows the CSI program in use (ProgramFollow): started again beside that program window,
+            // in the same place, the way it takes an update. Not the Modeler or the demo: they work beside no program.
+            Action<(int Pid, CsiProgram Program), bool> follow = (to, focus) =>
+            {
+                if (Environment.ProcessPath is not { } exe) return;
+                try
+                {
+                    var next = Start(exe, Updater.NewestDownloaded(Updater.Current) ?? AppContext.BaseDirectory, CsiProMax.Host.ProgramFollow.Args(args, to.Pid, to.Program), Environment.ProcessId);
+                    next.CreateNoWindow = true;
+                    if (!focus) next.ArgumentList.Add("--no-focus");
+                    Process.Start(next)?.Dispose();
+                    window.Close();
+                }
+                catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or InvalidOperationException) { Note("follow " + to.Program.Name, ex); }
+            };
+            if (!demo && !modeler)
+                _ = Task.Run(async () =>
+                {
+                    var tracker = new CsiProMax.Host.ProgramFollow.Tracker();
+                    while (!life.IsCancellationRequested)
+                    {
+                        await Task.Delay(500).ConfigureAwait(false);
+                        try
+                        {
+                            var busy = CsiProMax.App.IsBusy || FieldTest.IsRunning || SelfTest.IsRunning;
+                            var front = CsiProMax.Host.ProgramFollow.ReadFront();
+                            if (tracker.Tick(front, etabsPid, program, busy, DateTime.UtcNow) is not { } to) continue;
+                            // Gone, served by its own CSI ProMax window, or a full test is running somewhere on this PC: not followed.
+                            if (!EtabsIsOpen(to.Pid) || CsiProMax.Host.ProgramFollow.HasWindow(to.Pid)) { tracker.Forget(); continue; }
+                            if (FieldTest.RunningOnThisPc()) continue;
+                            var gone = false;
+                            await window.Dispatcher.InvokeAsync(() =>
+                            {
+                                // Work that started in the last moment keeps the window here; the next round tries again.
+                                if (CsiProMax.App.IsBusy || FieldTest.IsRunning || SelfTest.IsRunning) return;
+                                follow(to, front?.Pid == Environment.ProcessId); gone = true;
+                            });
+                            if (gone) return;
+                        }
+                        catch (Exception ex) when (ex is InvalidOperationException or TaskCanceledException or System.ComponentModel.Win32Exception) { /* the window is closing, or Windows did not say: the next round */ }
+                    }
+                });
+            // Started from a CSI program window: when that one is closed, this goes to another CSI program window
+            // that is open, and closes only when there is none.
             if (etabsPid is { } watched)
                 _ = Task.Run(async () =>
                 {
@@ -238,6 +284,7 @@ public static class Program
                     if (!life.IsCancellationRequested)
                         _ = window.Dispatcher.BeginInvoke(new Action(() =>
                         {
+                            if (!demo && !modeler && CsiProMax.Host.ProgramFollow.Another(watched) is { } other) { follow(other, true); return; }
                             // The chats are saved as they go; the window says why it closes.
                             CsiProMax.ETABS.TaskDialog.Show("CSI ProMax", $"{program.Name} was closed, so CSI ProMax closes too. Your chats are saved: open {program.Name} and start CSI ProMax from its Tools menu to carry on.");
                             window.Close();

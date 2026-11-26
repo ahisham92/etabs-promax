@@ -437,6 +437,16 @@ Test("pack: the model, ETABS's tables and the checks go into one file and the Vi
     var html = Pack.ViewerHtml(built.Content);
     Check(html.Contains("\"format\":\"cpmx\"") && html.Contains("CSI ProMax Viewer") && !html.Contains("<script id=\"pack\" type=\"application/json\"></script>"), "the page carries the pack");
     Check(Pack.ViewerHtml().Contains("<script id=\"pack\" type=\"application/json\"></script>"), "the empty page has none");
+    // A check the browser stops part way still hands back what ran, and says where it stopped (0.4.53 field test).
+    var partial = CsiProMax.Assistant.ViewerCheck.Read("<html><script type=\"application/json\" id=\"cpm-selfcheck\">{\"items\":[{\"name\":\"the model is drawn\",\"ok\":true,\"detail\":\"\",\"skipped\":false}],\"done\":false}</script></html>");
+    Check(partial is { Count: 2 } && partial[0].Ok && !partial[1].Ok && partial[1].Detail.Contains("the model is drawn", StringComparison.Ordinal), "a stopped check keeps its items and fails the stop: " + string.Join("; ", partial?.Select(i => i.Name + ": " + i.Detail) ?? []));
+    var whole = CsiProMax.Assistant.ViewerCheck.Read("<html><script type=\"application/json\" id=\"cpm-selfcheck\">{\"items\":[],\"done\":true}</script></html>");
+    Check(whole is { Count: 0 }, "a finished check adds nothing");
+    var few = CsiProMax.Assistant.ViewerCheck.Allowance(built.Content);
+    var many = JsonNode.Parse(built.Content.ToJsonString())!.AsObject();
+    for (var k = 0; k < 300; k++) many["tables"]![$"T{k}"] = new JsonObject { ["name"] = $"T{k}", ["fields"] = new JsonArray("A"), ["rows"] = new JsonArray() };
+    var more = CsiProMax.Assistant.ViewerCheck.Allowance(many);
+    Check(few.VirtualMs >= 90_000 && more.VirtualMs >= few.VirtualMs + 300 * 500 && more.RealSeconds > more.VirtualMs / 1000, $"the browser's time grows with the pack: {few} then {more}");
     // The Viewer's own screen, in a real browser when this machine has one.
     if (CsiProMax.Assistant.ViewerCheck.FindBrowser() is not null)
     {
@@ -493,6 +503,15 @@ Test("pack: the model, ETABS's tables and the checks go into one file and the Vi
             var it = meshSeen.FirstOrDefault(i => i.Name == item);
             Check(it is { Ok: true, Skipped: false } && it.Detail.Contains(says, StringComparison.Ordinal), $"{item} shows {says}: " + (it is null ? "no such menu item" : it.Detail));
         }
+
+        // 0.4.53 field test: SAP2000's pack with every pattern's load rows has many more tables, the page opens each one,
+        // and the check outgrew the browser's fixed 60 s of page time: nothing came back. The time now grows with the pack.
+        var big = JsonNode.Parse(meshed.ToJsonString())!.AsObject();
+        for (var k = 0; k < 200; k++)
+            big["tables"]![$"Extra Input Table {k:000}"] = JsonNode.Parse($$"""{"name":"Extra Input Table {{k:000}}","from":"input","fields":["Story","Label","Value"],"rows":[["S1","B1","{{k}}"],["S1","C1","1"]]}""");
+        var bigSeen = CsiProMax.Assistant.ViewerCheck.Run(big, shots, "many tables");
+        Check(bigSeen.Items.Any(i => i.Name == "side tab: props" && i.Ok) && bigSeen.Items.All(i => i.Ok || i.Skipped), "a pack of 200 tables is checked to the end: " + string.Join("; ", bigSeen.Items.Where(i => !i.Ok).Select(i => i.Name + ": " + i.Detail).Take(3)) + $" ({bigSeen.Items.Count} items)");
+        Check(bigSeen.Items.Count(i => i.Name.StartsWith("table: ", StringComparison.Ordinal)) >= 200, "every table was opened");
     }
 
     var folder = Path.Combine(Path.GetTempPath(), "cpm-pack-" + Guid.NewGuid().ToString("N"));
@@ -987,7 +1006,7 @@ Test("add_load_pattern: a user coefficient the program's API cannot set keeps th
     Check(body.Contains("ex is MissingMethodException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException") && body.Contains("Modify Lateral Load"),
         "a program with no SetUserCoefficient (ETABS 23) still fails add_load_pattern instead of keeping the pattern and saying how to set it");
     var steps = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Field", "EtabsFieldSteps.cs"));
-    Check(steps.Contains("its automatic load cannot be set through this ETABS's API"), "the field test still fails the seismic step on an ETABS with no user coefficient");
+    Check(steps.Contains("neither its user coefficient table nor ASCE 7-16 took its automatic load"), "the field test does not fail, by name, a seismic load neither the table nor ASCE 7-16 took (Ahmed, 2026-11-26: only a missing program or licence is not tested)");
 });
 Test("field test: the ETABS scratch model gets a lateral load its checks can read, also on ETABS 23", () =>
 {

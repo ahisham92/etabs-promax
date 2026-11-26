@@ -263,6 +263,25 @@ static class PropertyTests
             Check(!s2k.Notes.Any(n => n.Contains("no plain SAP2000 shape")), "no shape left out: " + string.Join("; ", s2k.Notes));
         });
 
+        yield return ("properties: a concrete tee or L goes to SAP2000 as its General shape with its own properties (0.4.54: SAP2000 skipped Shape=\"Concrete Tee\")", () =>
+        {
+            var link = Frame();
+            Run(link, "define_material_data", new { name = "C30", type = "Concrete", values = new { E = 3.3e7, FC = 30000, WEIGHTPERVOLUME = 25 } });
+            foreach (var shape in new[] { "Concrete Tee", "Concrete L" })
+                Run(link, "define_frame_shape", new { name = "X-" + shape, shape, material = "C30", dims = new { D = 0.6, B = 0.9, TF = 0.2, TW = 0.3 } });
+            var s2k = S2kWriter.Write(link.Model, "a.s2k");
+            var sections = CsiProMax.CsiTables.CsiTableText.Parse(s2k.Text)["FRAME SECTION PROPERTIES 01 - GENERAL"];
+            foreach (var shape in new[] { "Concrete Tee", "Concrete L" })
+            {
+                var r = sections.SingleOrDefault(x => x["SectionName"] == "X-" + shape);
+                double V(string k) => double.Parse(r![k], System.Globalization.CultureInfo.InvariantCulture);
+                Check(r is not null && r["Shape"] == "General", shape + " is written as General, not as a shape SAP2000 skips");
+                Check(Math.Abs(V("Area") - (0.9 * 0.2 + 0.3 * 0.4)) < 1e-9 && V("I33") > 0 && V("S33Top") > V("S33Bot"), shape + "'s area and moduli are its own (flange on top)");
+                Check(V("t3") == 0.6 && V("t2") == 0.9, shape + "'s depth and width");
+            }
+            Check(sections.All(r => r["Shape"] is not ("Concrete Tee" or "Concrete L")), "no Concrete Tee or Concrete L shape in the table");
+        });
+
         yield return ("properties: every edit is one undo step in the Modeler window", () =>
         {
             var link = Frame();

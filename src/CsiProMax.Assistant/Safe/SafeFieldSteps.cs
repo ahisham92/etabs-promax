@@ -39,6 +39,55 @@ public static class SafeFieldSteps
         finally { ResultTools.SnapshotRoot = snapshots; }
     }
 
+    /// <summary>
+    /// edit_safe_table's add and update on SAFE's slab property table, with the field names the table itself gives: the
+    /// row of CPM-SLAB250 (added by add_slab_section before) is copied as CPM-SLAB-T, then CPM-SLAB-T's thickness is set
+    /// to 0.27, and each is read back.
+    /// </summary>
+    internal static void TableEdits(FieldContext ctx, ICsiLink link, TableName table)
+    {
+        const string source = "CPM-SLAB250", copy = "CPM-SLAB-T";
+        string[] fields = [];
+        string[]? row = null;
+        var nameAt = -1;
+        if (ctx.Step($"the row of {source} in SAFE's table {table.Name}", () =>
+        {
+            var read = ctx.Call("edit_safe_table", $$"""{"table":{{Q(table.Key)}},"action":"read","limit":10000}""");
+            fields = read["fields"]!.AsArray().Select(f => f!.GetValue<string>()).ToArray();
+            foreach (var r in read["rows"]!.AsArray().Select(r => r!.AsArray().Select(v => v!.GetValue<string>()).ToArray()))
+                if (Array.FindIndex(r, v => string.Equals(v, source, StringComparison.OrdinalIgnoreCase)) is >= 0 and var at) { row = r; nameAt = at; break; }
+            FieldContext.Expect(row is not null, $"{source} has no row in {table.Name} (fields: {string.Join(", ", fields)})");
+            return string.Join(", ", fields.Zip(row!, (f, v) => $"{f}={v}"));
+        }) is null) { ctx.Covered("edit_safe_table"); ctx.Fail("tool edit_safe_table, add and update", $"there is no row of {source} to copy"); return; }
+
+        var added = new System.Text.Json.Nodes.JsonObject();
+        for (var i = 0; i < fields.Length; i++)
+            if (!fields[i].Contains("GUID", StringComparison.OrdinalIgnoreCase)) added[fields[i]] = i == nameAt ? copy : row![i];
+        static void Took(JsonNode a) => FieldContext.Expect(Int(a["fatal"]) == 0 && Int(a["errors"]) == 0, "SAFE did not take the edit: " + a["log"]);
+        ctx.Tool("edit_safe_table", $$"""{"table":{{Q(table.Key)}},"action":"add","rows":[{{added.ToJsonString()}}]}""", a =>
+        {
+            Took(a);
+            FieldContext.Expect(link.AreaSections().Contains(copy), $"{copy} is not among SAFE's slab properties after the add");
+        }, $"tool edit_safe_table add, a copy of {source} in {table.Name}");
+
+        var thick = Array.FindIndex(fields, f => ResultTools.Norm(f).Contains("thick", StringComparison.Ordinal));
+        if (thick < 0) { ctx.Fail("tool edit_safe_table update", $"{table.Name} has no thickness field to change (fields: {string.Join(", ", fields)})"); return; }
+        var update = new System.Text.Json.Nodes.JsonObject
+        {
+            ["table"] = table.Key, ["action"] = "update",
+            ["match"] = new System.Text.Json.Nodes.JsonObject { [fields[nameAt]] = copy },
+            ["set"] = new System.Text.Json.Nodes.JsonObject { [fields[thick]] = "0.27" },
+        };
+        ctx.Tool("edit_safe_table", update.ToJsonString(), a =>
+        {
+            Took(a);
+            var back = ctx.Call("edit_safe_table", $$"""{"table":{{Q(table.Key)}},"action":"read","limit":10000}""")["rows"]!.AsArray()
+                .Select(r => r!.AsArray().Select(v => v!.GetValue<string>()).ToArray()).FirstOrDefault(r => string.Equals(r[nameAt], copy, StringComparison.OrdinalIgnoreCase));
+            FieldContext.Expect(back is not null && double.TryParse(back[thick], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var t) && Math.Abs(t - 0.27) < 1e-6,
+                $"{copy}'s {fields[thick]} reads back as {back?[thick] ?? "no row"}, not 0.27");
+        }, $"tool edit_safe_table update, the thickness of {copy}");
+    }
+
     private static void Steps(FieldContext ctx)
     {
         var link = ctx.Link;
@@ -61,8 +110,9 @@ public static class SafeFieldSteps
             FieldContext.Expect(have.area_sections.Count > 0 && have.materials.Count > 0 && have.patterns.Count >= 2, "slab sections, materials and the Dead and Live patterns were expected");
             return have;
         });
-        if (built) ctx.Skip("the design strips came across", "this SAFE cannot open the Modeler's .f2k through its API, and its API cannot draw design strips, so the model was built without them. To check them by hand: in SAFE, File > Import, pick cpm-field-test.f2k from the zip.");
-        else ctx.Step("the design strips came across", () =>
+        if (built && !ctx.Facts.ContainsKey("safe.strips_built"))
+            ctx.Fail("the design strips came across", "SAFE did not take the strips through its strip table (see the step that put them in, which names its fields).");
+        else ctx.Step(built ? "the design strips came across (through SAFE's strip table)" : "the design strips came across", () =>
         {
             var strips = Int(ctx.Call("list_design_strips", "{}")["count"]);
             var written = (int)ctx.Facts.GetValueOrDefault("safe.strips");
@@ -105,9 +155,17 @@ public static class SafeFieldSteps
                 {
                     var names = (string[])link.Raw("list the soil properties", m => { int n = 0; string[] list = []; m.PropAreaSpring.GetNameList(ref n, ref list); return list; })!;
                     FieldContext.Expect(names.Contains("CPM-SOIL"), "SAFE's soil properties: " + string.Join(", ", names));
-                    return names;
+                    return (object)names;
                 }
-                catch (EtabsException ex) { throw new FieldSkipException("the soil properties could not be listed through SAFE's API (" + ex.Message + ")"); }
+                catch (Exception ex) when (ex is EtabsException or MissingMethodException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
+                {
+                    // SAFE's API may not list area springs (PropAreaSpring): its table "Spring Property Definitions - Area Springs" does.
+                    var table = link.Tables().FirstOrDefault(t => ResultTools.Norm(t.Name).Contains("areaspring", StringComparison.Ordinal) || ResultTools.Norm(t.Name).Contains("soilpropert", StringComparison.Ordinal))
+                        ?? throw new FieldCheckException("SAFE's API did not list its soil properties (" + ex.Message + "), and it lists no area spring or soil table");
+                    var data = link.ReadTable(table.Key, null, null);
+                    FieldContext.Expect(data.Rows.Any(r => r.Any(v => string.Equals(v, "CPM-SOIL", StringComparison.OrdinalIgnoreCase))), $"CPM-SOIL is not in SAFE's table {table.Name} ({data.Rows.Count} rows); its API said: {ex.Message}");
+                    return $"CPM-SOIL is in SAFE's table {table.Name} (its API does not list soil properties: {ex.Message})";
+                }
             });
             ctx.Tool("set_section", $$"""{"areas":{{List(slabs)}},"section":"CPM-FTG500"}""", _ => FieldContext.Expect(link.Areas().First(x => x.Name == slabs[0]).Section == "CPM-FTG500", "the area does not have CPM-FTG500 when read back from SAFE"), "tool set_section on a slab");
         }
@@ -146,7 +204,9 @@ public static class SafeFieldSteps
             ctx.Tool("edit_safe_table", $$"""{"table":{{Q(slabTable.Key)}},"action":"read","limit":3}""", null, $"tool edit_safe_table, the rows of {slabTable.Name}");
         }
         else ctx.Fail("tool edit_safe_table", "SAFE listed no table to read");
-        ctx.Skip("tool edit_safe_table, add and update", "changing SAFE's tables needs the table's own field names from a real SAFE; they are tried once this report shows them");
+        // Add and update with the table's own field names, read from it: the row of CPM-SLAB250 is copied under a new name,
+        // then the copy's thickness is changed, each read back (Ahmed 2026-11-26: nothing is left untested).
+        if (slabTable is not null) TableEdits(ctx, link, slabTable);
 
         // ---- reading ----
         if (slabs.Count > 0)
@@ -187,7 +247,7 @@ public static class SafeFieldSteps
                 FieldContext.Expect(answer == 0, $"SAFE answered {answer} to DesignConcreteSlab.StartSlabDesign");
                 return "the design ran";
             });
-        else ctx.Skip("SAFE's slab design runs", "the analysis did not run");
+        else ctx.Fail("SAFE's slab design runs", "the analysis did not run (see run_analysis above), so the design could not");
         if (analysed) ctx.Tool("run_design", """{"kinds":["slab"]}""", null, "tool run_design (slab design, or the menu to run it)");
         else ctx.Refused("run_design", """{"kinds":["slab"]}""", "design", "tool run_design says the analysis must run first");
 

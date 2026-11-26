@@ -747,6 +747,21 @@ static class TesterBugTests
                 && log.IndexOf("ImportErrors(", StringComparison.Ordinal) < log.IndexOf("PostMessageW(done", StringComparison.Ordinal) && !notices.Contains("0x0010", StringComparison.Ordinal), "the log is answered by its Done button after its errors are read, and never closed");
             static bool SandboxedLeftCopy() => ScratchProgram.IsLeftCopy(["SAP2000 - cpm-field-test-ab12cd", "Access Database Import Log"]);
         });
+        yield return ("field test: steps a workaround can test are tested, not left out (Ahmed, 2026-11-26: only a missing program or licence)", () =>
+        {
+            string Src(string f) => File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant", f));
+            var extras = Src("Field/ScratchExtras.cs");
+            // ETABS 23's history function and case through its own tables (keys from its Table and Field Keys.xml).
+            Equal("Functions - Time History - User Defined", CsiProMax.Assistant.ScratchExtras.HistoryFunctionTable, "ETABS's history function table");
+            Equal("Load Case Definitions - Time History - Linear Modal", CsiProMax.Assistant.ScratchExtras.HistoryCaseTable, "ETABS's linear modal history case table");
+            Check(extras.Contains("EditableTables.Put(link, HistoryFunctionTable", StringComparison.Ordinal) && !extras.Contains("API has no call to define a time history function", StringComparison.Ordinal), "ETABS's history case is still left out");
+            Check(extras.Contains("LoadCases.ModalEigen.SetCase\", (\"Name\", ModalForHistory)", StringComparison.Ordinal) && !extras.Contains("has no modal case for", StringComparison.Ordinal), "a model with no modal case still leaves the history case out");
+            Check(extras.Contains("\"FrameObj.AddByPoint\"", StringComparison.Ordinal) && extras.Contains("UserName\", Brace", StringComparison.Ordinal), "ETABS's scratch model has no brace for the brace forces table");
+            // A change that cannot be read back fails, by name.
+            Check(!Src("Sap2000/SapFieldSteps.cs").Contains("throw new FieldSkipException($\"the change could not be read back", StringComparison.Ordinal)
+                && !Src("Field/EtabsFieldSteps.cs").Contains("throw new FieldSkipException(\"the load could not be read back", StringComparison.Ordinal), "a read-back that cannot be made is still not tested");
+            Check(!Src("Field/EtabsFieldSteps.cs").Contains("its automatic load cannot be set through this ETABS's API", StringComparison.Ordinal), "ETABS's seismic coefficient is still left out (its table takes it)");
+        });
         yield return ("field test: SAP2000's 'Maintenance Expiring' reminder is answered by the test itself, no other licence message is (Ahmed, 2026-11-26)", () =>
         {
             var reminder = new[] { "License Available. Session Created. Maintenance expiring on 5-Jul-2019.", "Show this message at startup", "Do not show this message until next expiration period", "Never show this message again", "Contact CSI", "OK" };
@@ -810,14 +825,15 @@ static class TesterBugTests
             Equal("", FieldContext.Where(new InvalidOperationException("x")), "other errors keep their message alone");
             static void DeniedHere() => throw new UnauthorizedAccessException("Access to the path is denied.");
         });
-        yield return ("ETABS 23 field test: a check whose table has no rows for the scratch model is not tested; a table that cannot be read still fails", () =>
+        yield return ("ETABS 23 field test: a check whose table has no rows for the scratch model fails with the table's name; a table that cannot be read still fails", () =>
         {
             // Seen on 2026-11-25 with 0.4.11: "1 of 5 checks had nothing to read. check_story_irregularity: no reason given".
             JsonNode Answer(string json) => JsonNode.Parse(json)!;
             var ctx = new FieldContext(CsiProgram.Etabs, Path.GetTempPath(), new MemoryEtabs());
             FieldParts.Verdicts(ctx, "checks", [("check_drift", Answer("""{"status":"pass"}""")), ("check_story_irregularity", Answer("""{"status":"not available","no_data":true,"note":"ETABS's 'Story Stiffness' table has no data"}"""))]);
             var step = ctx.Steps.Last();
-            Check(step.Skipped && step.Detail.Contains("Story Stiffness", StringComparison.Ordinal), $"no data is not 'not tested' with its reason: {step.Ok} {step.Skipped} {step.Detail}");
+            // Since 2026-11-26 (Ahmed: skip only for a missing program or licence) a check with no data on a program that is there is a failure that names the table, so the scratch model is made to have it.
+            Check(!step.Ok && !step.Skipped && step.Detail.Contains("Story Stiffness", StringComparison.Ordinal), $"no data is not a failure with its reason: {step.Ok} {step.Skipped} {step.Detail}");
             ctx = new FieldContext(CsiProgram.Etabs, Path.GetTempPath(), new MemoryEtabs());
             FieldParts.Verdicts(ctx, "checks", [("check_drift", Answer("""{"status":"not available","note":"The 'Story Drifts' table has no 'Drift' field in this version."}"""))]);
             step = ctx.Steps.Last();
@@ -884,7 +900,7 @@ static class TesterBugTests
             Equal("True, False", string.Join(", ", asked), "both ways are started");
             Check(ctx.Steps.Count == 2 && ctx.Steps[0].Ok && !ctx.Steps[1].Ok && ctx.Steps[1].Name.Contains("without the AI chat", StringComparison.Ordinal), "a window that does not open without the chat is a failure of its own");
             var busy = new FieldContext(CsiProgram.Etabs, Path.GetTempPath(), new MemoryEtabs());
-            WindowFieldSteps.Run(busy, _ => new WindowFieldSteps.Seen(false, "a demo window is already open", NotTried: true));
+            WindowFieldSteps.Run(busy, _ => new WindowFieldSteps.Seen(false, "a CSI ProMax window on the demo model is already open on this PC, so a second one could not be started. Close it and run the test again.", NotTried: true));
             Check(busy.Steps.All(s => s.Skipped), "a start that could not be tried is not tested, not a failure");
             var notes = Path.Combine(Path.GetTempPath(), "cpm-notes-" + Guid.NewGuid().ToString("N")[..8] + ".txt");
             try
@@ -970,7 +986,8 @@ static class TesterBugTests
             foreach (var table in new[] { "Section Cut Forces - Analysis", "Element Forces - Links", "Element Deformations - Links" })
                 Check(CsiProMax.Assistant.Tools.PackTables.Kind(new CsiProMax.Assistant.Etabs.TableName(table, table, false, 0)) == "result", $"'{table}' is not taken by the pack as a result");
             // The scratch model's extras are one honest line on a stand-in, and every name they use is fixed.
-            var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchExtras.cs"));
+            // The section cut goes through ApiWorkarounds (ETABS 20 has no SectCut: its table takes it, 0.4.53).
+            var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchExtras.cs")) + File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Tools/ApiWorkarounds.cs"));
             foreach (var call in new[] { "PointObj.SetSpring", "PropLink.SetLinear", "LinkObj.AddByPoint", "SectCut.SetByGroup", "LoadCases.StaticNonlinear.SetLoadApplication", "Func.FuncTH.SetUser", "LoadCases.ModHistLinear.SetTimeStep" })
                 Check(source.Contains('"' + call + '"'), $"the scratch extras no longer call {call}");
             foreach (var steps in new[] { "Field/EtabsFieldSteps.cs", "Sap2000/SapFieldSteps.cs" })
@@ -1006,6 +1023,100 @@ static class TesterBugTests
             Check(context.Contains("window stopped answering at the step", StringComparison.Ordinal) && test.Contains("that window no longer answers", StringComparison.Ordinal), "the words the rule looks for are the ones the test writes");
         });
 
+        // ---- Ahmed, 2026-11-26: "you can skip as long as no license and if the program is not installed but as long as it is there do detailed testing for everything" ----
+        yield return ("field test: a step is left out only for a missing program or licence; any other 'not tested' is a failure", () =>
+        {
+            var folder = Path.Combine(Path.GetTempPath(), "cpm-skip-" + Guid.NewGuid().ToString("N")[..8]);
+            Directory.CreateDirectory(folder);
+            try
+            {
+                var ctx = new FieldContext(CsiProgram.Sap2000, folder, new MemoryEtabs());
+                ctx.Section("skips");
+                ctx.Skip("SAFE on this PC", "SAFE was not found on this PC (looked for SAFEv1.dll), so nothing of it is tested here.");
+                ctx.Skip("ETABS starts", "ETABS has no licence on this PC");
+                ctx.Skip("menu: Static Pushover Curve...", "greyed out, this pack has nothing for it");
+                ctx.Skip("Modeler: File > Open", "it asks the PC for a file or a printer, which a browser without a window can't show");
+                ctx.Step<object?>("history case", () => throw new FieldSkipException("ETABS 23's API has no call to define a time history function"));
+                ctx.Step<object?>("slab design", () => throw new FieldSkipException("the analysis did not run"));
+                var left = ctx.Steps.Where(x => x.Skipped).Select(x => x.Name).ToList();
+                var failed = ctx.Steps.Where(x => !x.Ok).ToList();
+                Check(left.SequenceEqual(["SAFE on this PC", "ETABS starts"]), "left out: " + string.Join(", ", left));
+                Check(failed.Count == 4 && failed.All(x => x.Detail.Contains("counts as failed")), "failed: " + string.Join(" | ", failed.Select(x => x.Name + ": " + x.Detail)));
+            }
+            finally { Directory.Delete(folder, true); }
+            // The retest tries a part again when an older run left a step of it out for a reason that no longer counts.
+            var old = new FieldRetest.Part("0.4.52", "p", 10, 0, [("menu: Frame...", "greyed out, this pack has nothing for it")]);
+            Check(FieldRetest.Decide(old, "p").Run, "a part with a step left out for no allowed reason was not run again");
+            var fine = new FieldRetest.Part("0.4.52", "p", 10, 0, [("SAFE on this PC", "SAFE was not found on this PC")]);
+            Check(!FieldRetest.Decide(fine, "p").Run, "a part left out only for a missing program was run again");
+            // Every reason kind has its words, and the two Ahmed named are allowed.
+            Check(SkipAudit.Allowed(SkipAudit.Why.ProgramNotHere) && SkipAudit.Allowed(SkipAudit.Why.Licence) && !SkipAudit.Allowed(SkipAudit.Why.NeedsAPerson) && !SkipAudit.Allowed(SkipAudit.Why.ProgramCannot) && !SkipAudit.Allowed(SkipAudit.Why.Unjustified), "the allowed reasons are not Ahmed's");
+        });
+
+        // Ahmed, 2026-11-26: "whatever I opened the CSI Promax where it is floating either opened in safe and then I went
+        // to etabs or whatever to be smooth not depending from where it started".
+        yield return ("the window follows the CSI program in use, whichever program it was opened from", () =>
+        {
+            var (safe, etabs, sap) = (CsiProgram.Safe, CsiProgram.Etabs, CsiProgram.Sap2000);
+            var t0 = new DateTime(2026, 11, 26, 14, 0, 0, DateTimeKind.Utc);
+            CsiProMax.Host.ProgramFollow.Front F(int pid, string name, string title = "model") => new(pid, name, title);
+            var settle = CsiProMax.Host.ProgramFollow.Settle;
+
+            // Opened from SAFE (process 10); he goes to ETABS (process 20) and stays there.
+            var follow = new CsiProMax.Host.ProgramFollow.Tracker();
+            Check(follow.Tick(F(10, "SAFE"), 10, safe, false, t0) is null, "its own program in front: nothing to follow");
+            Check(follow.Tick(F(20, "ETABS"), 10, safe, false, t0) is null, "followed at the first glance");
+            var to = follow.Tick(F(20, "ETABS"), 10, safe, false, t0 + settle);
+            Check(to is { Pid: 20 } && to.Value.Program == etabs, "ETABS stayed in front and was not followed");
+
+            // Work running here keeps the window where it is, and it follows when the work ends.
+            follow = new CsiProMax.Host.ProgramFollow.Tracker();
+            follow.Tick(F(20, "ETABS"), 10, safe, true, t0);
+            Check(follow.Tick(F(20, "ETABS"), 10, safe, true, t0 + settle + settle) is null, "followed while a chat or a test was working");
+            Check(follow.Tick(F(20, "ETABS"), 10, safe, false, t0 + settle + settle) is null, "followed in the moment the work ended");
+            Check(follow.Tick(F(20, "ETABS"), 10, safe, false, t0 + settle + settle + settle) is { Pid: 20 }, "not followed after the work ended");
+
+            // He comes to the CSI ProMax window itself (or to Excel) after ETABS: ETABS is still the program in use.
+            follow = new CsiProMax.Host.ProgramFollow.Tracker();
+            follow.Tick(F(20, "ETABS"), 10, safe, false, t0);
+            Check(follow.Tick(F(99, "dotnet", "CSI ProMax 0.4.56 with SAFE"), 10, safe, false, t0 + settle) is { Pid: 20 }, "clicking into CSI ProMax forgot the program he came from");
+            follow = new CsiProMax.Host.ProgramFollow.Tracker();
+            follow.Tick(F(20, "ETABS"), 10, safe, false, t0);
+            Check(follow.Tick(F(77, "EXCEL"), 10, safe, false, t0 + settle) is { Pid: 20 }, "another application in front forgot the program he came from");
+            // Back in SAFE before it followed: it stays with SAFE.
+            follow = new CsiProMax.Host.ProgramFollow.Tracker();
+            follow.Tick(F(20, "ETABS"), 10, safe, false, t0);
+            follow.Tick(F(10, "SAFE"), 10, safe, false, t0 + TimeSpan.FromSeconds(1));
+            Check(follow.Tick(F(99, "dotnet"), 10, safe, false, t0 + settle + settle) is null, "he went back to SAFE and the window still left it");
+
+            // A second window of the same program is followed too; other applications and a test's scratch copy never are.
+            Check(CsiProMax.Host.ProgramFollow.Followable(F(11, "SAFE"), 10, safe) == safe, "another SAFE window is not followed");
+            Check(CsiProMax.Host.ProgramFollow.Followable(F(30, "SAP2000"), 10, safe) == sap, "SAP2000 is not followed");
+            Check(CsiProMax.Host.ProgramFollow.Followable(F(77, "EXCEL"), 10, safe) is null, "Excel is followed");
+            Check(CsiProMax.Host.ProgramFollow.Followable(F(31, "SAP2000", "SAP2000 v26 - cpm-field-test-3e8eba"), 10, safe) is null, "a field test's scratch copy is followed");
+            // Opened beside no window in particular (a shortcut): the same program is not a reason to start again.
+            Check(CsiProMax.Host.ProgramFollow.Followable(F(20, "ETABS"), null, etabs) is null && CsiProMax.Host.ProgramFollow.Followable(F(10, "SAFE"), null, etabs) == safe, "a window beside no program window in particular");
+
+            // It starts again with the same arguments, beside the other program window.
+            var args = CsiProMax.Host.ProgramFollow.Args(["CsiProMax.dll", "--etabs-pid", "10", "--program", "safe", "--no-ai"], 20, etabs);
+            Equal("CsiProMax.dll --no-ai --etabs-pid 20 --program etabs", string.Join(" ", args), "the arguments it starts again with");
+            var program = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Program.cs"));
+            Check(program.Contains("ProgramFollow.Tracker()") && program.Contains("ProgramFollow.Another(watched)") && program.Contains("FieldTest.RunningOnThisPc()") && program.Contains("ProgramFollow.HasWindow(to.Pid)"),
+                "the window does not follow the program in use, or follows during a test, or into a program that has its own window");
+            Check(program.Contains("\"--no-focus\"") && program.Contains("window.ShowActivated = false"), "following takes the keyboard away from the program he is working in");
+
+            var folder = Path.Combine(Path.GetTempPath(), "cpm-follow-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(folder);
+            try
+            {
+                var lockFile = Path.Combine(folder, "field-test.lock");
+                Check(!FieldTest.RunningOnThisPc(lockFile), "no lock file, yet a test is said to run");
+                using (FieldTest.OnlyOne(lockFile)) Check(FieldTest.RunningOnThisPc(lockFile), "a full test holds the lock and is not seen");
+                Check(!FieldTest.RunningOnThisPc(lockFile), "the test ended and is still seen as running");
+            }
+            finally { Directory.Delete(folder, true); }
+        });
+
         yield return ("ETABS 23 field test: a test copy an earlier run left open is closed by the next run, and nothing else is", () =>
         {
             // Seen on 2026-11-25: the 0.4.10 run gave up on ETABS with the story picker showing; the 0.4.14 run then failed
@@ -1038,7 +1149,7 @@ static class TesterBugTests
         yield return ("field test, only what changed or failed: a part that passed and is unchanged is not run again; a failed, new or changed one is", () =>
         {
             // Ahmed, 2026-11-25: "ignore for testing things that passed and just check the new things in addition to the things failed or not tested".
-            var passed = new FieldRetest.Part("0.4.16", "aaaa", 140, 0, [("ETABS table Element Forces - Braces", "ETABS does not list this table")]);
+            var passed = new FieldRetest.Part("0.4.16", "aaaa", 140, 0, [("SAFE on this PC", "SAFE was not found on this PC")]);
             Check(!FieldRetest.Decide(passed, "aaaa").Run && FieldRetest.Decide(passed, "aaaa").Why.Contains("0.4.16", StringComparison.Ordinal), "a part that passed and is unchanged would run again");
             Check(FieldRetest.Decide(passed, "bbbb").Run, "a part whose code changed is left out");
             Check(FieldRetest.Decide(passed with { Failed = 1 }, "aaaa").Run, "a part with a failed step is left out");
