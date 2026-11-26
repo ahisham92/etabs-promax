@@ -451,6 +451,20 @@ Test("pack: the model, ETABS's tables and the checks go into one file and the Vi
         // model, because they only work in a plan, an elevation or on the deformed shape and were pressed in 3-D.
         var left = seen.Items.Where(i => i.Skipped && (i.Name.Contains("story", StringComparison.OrdinalIgnoreCase) || i.Name.Contains("grid line", StringComparison.OrdinalIgnoreCase) || i.Name.Contains("Animate", StringComparison.Ordinal))).ToList();
         Check(left.Count == 0, "buttons left untested on a model that has stories, grid lines and results: " + string.Join("; ", left.Select(i => i.Name + ": " + i.Detail)));
+
+        // 0.4.40 field test: SAP2000 names its base reactions GlobalFX and GlobalFY, its joints Joint and U1 U2, and
+        // the pushover curve made from them stayed greyed out. Made here from SAP2000's own field names.
+        var steps = string.Join(",", Enumerable.Range(0, 8).Select(k => $"[\"PUSH\",\"NonStatic\",\"Step By Step\",\"{k}\",\"{-120 * k}\",\"0\",\"0\"]"));
+        var moves = string.Join(",", Enumerable.Range(0, 8).SelectMany(k => new[] { $"[\"1\",\"PUSH\",\"NonStatic\",\"Step By Step\",\"{k}\",\"0\",\"0\",\"0\"]", $"[\"2\",\"PUSH\",\"NonStatic\",\"Step By Step\",\"{k}\",\"{(0.01 * k).ToString(System.Globalization.CultureInfo.InvariantCulture)}\",\"0\",\"0\"]" }));
+        var sap = JsonNode.Parse("""
+            {"manifest":{"format":"cpmx","version":1,"model":"push","program":"SAP2000","etabs":"26","units":{"force":"kN","length":"m"}},
+             "model":{"stories":[],"frames":[["F1","column","C1","",0,0,0,0,0,3]],"areas":[],"points":[["1",0,0,0],["2",0,0,3]],"supports":[[0,0,0,"fixed"]]},
+             "comments":[],
+             "tables":{"Base Reactions (Step by Step)":{"name":"Base Reactions (Step by Step)","fields":["OutputCase","CaseType","StepType","StepNum","GlobalFX","GlobalFY","GlobalFZ"],"rows":[STEPS]},
+                       "Joint Displacements (Step by Step)":{"name":"Joint Displacements (Step by Step)","fields":["Joint","OutputCase","CaseType","StepType","StepNum","U1","U2","U3"],"rows":[MOVES]}}}
+            """.Replace("STEPS", steps).Replace("MOVES", moves))!.AsObject();
+        var push = CsiProMax.Assistant.ViewerCheck.Run(sap, shots, "sap2000 pushover").Items.FirstOrDefault(i => i.Name == "menu: Static Pushover Curve...");
+        Check(push is { Ok: true, Skipped: false }, "SAP2000's pushover curve is drawn from its step by step tables: " + (push is null ? "no such menu item" : push.Detail));
     }
 
     var folder = Path.Combine(Path.GetTempPath(), "cpm-pack-" + Guid.NewGuid().ToString("N"));
