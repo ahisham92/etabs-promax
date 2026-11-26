@@ -56,7 +56,7 @@ static class ChatDefaultsTests
             PhoneApprovals.TestPhoneOn = () => true;
             PhoneApprovals.TestAsk = (chat, text, key, topic) =>
             {
-                var q = new UserQuestion { Id = asked.Count + 1, JobKey = chat, Question = text, Approval = key, Topic = topic, Options = [PhoneApprovals.Allow, PhoneApprovals.DontAllow] };
+                var q = new UserQuestion { Id = asked.Count + 1, JobKey = chat, Question = text, Approval = key, Topic = topic, Asked = new DateTime(2026, 11, 26, 9, 0, 0, DateTimeKind.Utc), Options = [PhoneApprovals.Allow, PhoneApprovals.DontAllow] };
                 asked.Add(q);
                 return q;
             };
