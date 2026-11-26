@@ -230,8 +230,37 @@ static class PropertyTests
             Check(s2k.Notes.Any(n => n.Contains("L-ISO")), "the isolator's stiffness is named in a note");
             Check(tables["FRAME HINGE ASSIGNS 04 - AUTO FEMA 356 - CONCRETE BEAM"].All(r => !r.ContainsKey("BeyondE")), "no BeyondE value SAP2000 does not know");
             Check(tables["FRAME LOADS - TEMPERATURE"].Single()["Temp"] == "25", "the temperature is in Temp");
-            Check(tables["CASE - MODAL HISTORY 1 - GENERAL"].Single()["HistoryType"] == "Linear", "the modal history has its HistoryType");
+            Check(tables["CASE - MODAL HISTORY 1 - GENERAL"].Single() is var th && th["HistoryType"] == "Transient" && !th.ContainsKey("ModalCase") && !th.ContainsKey("Motion"), "the modal history has its HistoryType, and no ModalCase or Motion");
+            Check(tables["LOAD CASE DEFINITIONS"].Single(r => r["Case"] == "THX")["ModalCase"] == "Modal", "its modal case is in the case definitions (0.4.40)");
+            Check(tables["FRAME HINGE ASSIGNS 00 - HINGE DISTRIBUTION TYPE"].Single()["HgeDistrTyp"] == "Nonlinear Beam Column", "the hinged frame's distribution type");
             Check(tables["GROUPS 1 - DEFINITIONS"].All(r => r.ContainsKey("Color")), "groups have a colour");
+        });
+
+        yield return ("properties: the .s2k uses SAP2000 26's own field names (0.4.40 field run): open shapes, modifiers, insertion point", () =>
+        {
+            var link = Frame();
+            Run(link, "define_material_data", new { name = "S355", type = "Steel", values = new { E = 2.1e8, FY = 355000, FU = 510000, WEIGHTPERVOLUME = 77 } });
+            foreach (var shape in new[] { "Steel Angle", "Steel Channel", "Steel Tee", "Steel Double Angle", "Steel Double Channel" })
+                Run(link, "define_frame_shape", new { name = "X-" + shape, shape, material = "S355", dims = shape.Contains("Double") ? (object)new { D = 0.2, B = 0.1, TF = 0.01, TW = 0.008, DIS = 0.01 } : new { D = 0.2, B = 0.1, TF = 0.01, TW = 0.008 } });
+            var beam = Beam(link.Model);
+            Run(link, "assign_frame_data", new { objects = new[] { beam }, modifiers = new { I3MOD = 0.35 }, cardinal = 8 });
+            var s2k = S2kWriter.Write(link.Model, "a.s2k");
+            var t = CsiProMax.CsiTables.CsiTableText.Parse(s2k.Text);
+            var sections = t["FRAME SECTION PROPERTIES 01 - GENERAL"];
+            foreach (var (shape, sap) in new[] { ("Steel Angle", "Angle"), ("Steel Channel", "Channel"), ("Steel Tee", "Tee"), ("Steel Double Angle", "Double Angle"), ("Steel Double Channel", "Double Channel") })
+            {
+                var r = sections.SingleOrDefault(x => x["SectionName"] == "X-" + shape);
+                Check(r is not null && r["Shape"] == sap && double.Parse(r["Area"], System.Globalization.CultureInfo.InvariantCulture) > 0, shape + " goes across as " + sap);
+            }
+            var angle = sections.Single(x => x["SectionName"] == "X-Steel Angle");
+            double A(string k) => double.Parse(angle[k], System.Globalization.CultureInfo.InvariantCulture);
+            Check(Math.Abs(A("Area") - (0.1 * 0.01 + 0.19 * 0.008)) < 1e-9 && A("I23") != 0 && A("S33Top") < A("S33Bot"), "the angle's area, product of inertia and unequal moduli");
+            Check(sections.All(r => !r.ContainsKey("S33") && !r.ContainsKey("S22") && r.ContainsKey("S33Top") && r.ContainsKey("S22Right")), "S33Top/S33Bot/S22Left/S22Right, not S33/S22");
+            Check(t["FRAME PROPERTY MODIFIERS"].Any(r => r["I33Mod"] == "0.35") && t["FRAME PROPERTY MODIFIERS"].All(r => r.ContainsKey("MassMod") && r.ContainsKey("I22Mod") && !r.ContainsKey("I3Mod")), "frame modifiers by SAP2000's names");
+            Check(t.TryGetValue("AREA STIFFNESS MODIFIERS", out var am) is false || am.All(r => r.ContainsKey("MassMod") && !r.ContainsKey("MMod")), "area modifiers by SAP2000's names");
+            var ins = t["FRAME INSERTION POINT ASSIGNMENTS"].First(r => r["CardinalPt"] != "10");
+            Check(ins.ContainsKey("JtOffsetXI") && ins.ContainsKey("Transform") && !ins.ContainsKey("XI") && !ins.ContainsKey("StiffTransform"), "insertion point by SAP2000's names");
+            Check(!s2k.Notes.Any(n => n.Contains("no plain SAP2000 shape")), "no shape left out: " + string.Join("; ", s2k.Notes));
         });
 
         yield return ("properties: every edit is one undo step in the Modeler window", () =>
