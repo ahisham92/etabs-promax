@@ -147,6 +147,40 @@ public static class ModelerCheck
           const defs = await hmDefs();
           return (defs.frame_sections || []).some(s => s.name === "CPM-CHK450") ? {ok: "CPM-CHK450 is in the model"} : {fail: "the section did not reach the model: " + (hm.lastError || document.getElementById("hint").textContent)};
         });
+        await step("Define > Material Properties: a concrete with its design, nonlinear, damping, time dependent and notes forms filled, and undo takes it out", async () => {
+          await act("m:materials"); await wait(500);
+          const addNew = document.querySelector('.dlg button[data-a="0"]');
+          if (!addNew) return {fail: "the Define Materials form has no Add button"};
+          addNew.click(); await wait(1000);
+          const top = () => { const f = document.querySelectorAll(".dlg"); return f[f.length - 1]; };
+          const set = (root, sel, v) => { const e = root.querySelector(sel); if (!e) throw new Error("the form has no " + sel); if (e.type === "checkbox" || e.type === "radio") e.checked = v; else e.value = v; e.dispatchEvent(new Event("input", {bubbles: true})); e.dispatchEvent(new Event("change", {bubbles: true})); };
+          const main = top();
+          set(main, "#mN", "CPM-CHKMAT"); set(main, "#mC", "Yellow");
+          for (const [btn, fill] of [
+            ["#mDes", f => { set(f, '[data-v="FC"]', "40000"); set(f, "#dLw", true); set(f, "#dLf", "0.85"); }],
+            ["#mNl", f => { set(f, "#nH", "Takeda"); set(f, '[data-v="STRAINATULTIMATE"]', "0.0035"); }],
+            ["#mDamp", f => set(f, '[data-k="ModalRatio"]', "0.03")],
+            ["#mTime", f => { set(f, "#tT", "CEB-FIP 90"); set(f, "#tC", true); set(f, '#tP [data-k="RelHumid"]', "70"); }],
+            ["#mNotes", f => set(f, "#nT", "check notes")],
+          ]) {
+            main.querySelector(btn).click(); await wait(500);
+            const f = top(); if (f === main) return {fail: btn + " opened no form"};
+            fill(f); f.querySelector(".df button.primary").click(); await wait(300);
+          }
+          set(main, 'input[name="mRup"][value="Yes"]', true); set(main, "#mFr", "4500");
+          main.querySelector(".df button.primary").click(); await wait(1500);
+          const pd = (await hmRun("property_definitions", {}, true)).result, m = pd.materials.find(x => x.name === "CPM-CHKMAT");
+          if (!m) return {fail: "the material did not reach the model: " + (hm.lastError || (main.querySelector(".ferr") || {}).textContent)};
+          const t = m.tables || {}, one = k => (t[k] || [{}])[0];
+          const got = {fc: m.values.FC, hys: m.texts.HYSTYPE, ult: m.values.STRAINATULTIMATE, damp: one("Damping Parameters").ModalRatio, lw: one("Concrete Data").LtWtConc, fr: one("Concrete Data").UserFr, time: one("Concrete Data").TimeType, rh: one("Time Dependence - CEB-FIP 90").RelHumid, notes: one("General").Notes, color: one("General").Color};
+          const want = {fc: 40000, hys: "Takeda", ult: 0.0035, damp: "0.03", lw: "Yes", fr: "4500", time: "CEB-FIP 90", rh: "70", notes: "check notes", color: "Yellow"};
+          const off = Object.keys(want).filter(k => String(got[k]) !== String(want[k]));
+          closeDialogs(); await wait(150);
+          if (off.length) return {fail: "not as filled in: " + off.map(k => `${k} ${got[k]} (wanted ${want[k]})`).join(", ")};
+          await hmRun("undo"); await wait(800);
+          const back = ((await hmRun("property_definitions", {}, true)).result.materials || []).some(x => x.name === "CPM-CHKMAT");
+          return back ? {fail: "undo did not take the material out"} : {ok: "every sub-form reached the model, then undone"};
+        });
         await step("Assign > Frame > Releases: a beam pinned at both ends through the form, and undo takes it off", async () => {
           const b = frames.findIndex(f => f.kind === "beam");
           if (b < 0) return {fail: "the model has no beam"};

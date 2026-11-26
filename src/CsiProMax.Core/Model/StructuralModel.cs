@@ -124,6 +124,13 @@ public abstract class Definition
     }
 
     public double? Number(string key) => E2k.E2kText.TryNumber(Get(key), out var d) ? d : null;
+
+    /// <summary>What the program's forms hold for this definition that its .e2k line has no keyword for (a material's
+    /// damping, notes, time dependence, user stress-strain curve, ...): rows of the program's own database tables, by
+    /// the table's name after its group ("Damping Parameters" for ETABS 23's "Material Properties - Damping Parameters"),
+    /// each row by field name, without the row's own name field. Kept in the .cpm; written into the .s2k and .f2k
+    /// tables, and put into ETABS through its tables when CSI ProMax opens the model there. Null when there is none.</summary>
+    public Dictionary<string, List<Dictionary<string, string>>>? Tables { get; set; }
 }
 
 public sealed class Material : Definition
