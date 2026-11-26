@@ -337,15 +337,10 @@ public sealed class ScratchProgram : IScratchWindow
 
         // SAFE 20 and 21 (on the .NET Framework) open only their own .fdb through the API: given the Modeler's .f2k,
         // SAFE 20 showed "Error decompressing file. May not be a valid ETABS .EDB file." and waited for a person
-<<<<<<< HEAD
         // (tester's PC, 0.4.47, 2026-11-26). Such a program starts a blank model instead, and the test builds the
         // Modeler's model in it through the API (F2kRebuild), so the editing tools are still tried (Ahmed, 2026-11-26).
         var build = !OpensThroughApi(_program, modelFile, EtabsApi.RunsOnFramework(ApiFile));
         if (build && !BuildsThroughApi(_program, modelFile))
-=======
-        // (tester's PC, 0.4.47, 2026-11-26). No window is started for a file it cannot open.
-        if (!OpensThroughApi(_program, modelFile, EtabsApi.RunsOnFramework(ApiFile)))
->>>>>>> f119e7edad4ed1b655f3a0c224d6ea8194093ad5
         {
             ctx.Skip($"start a second {name} window", $"{name} on this PC ({Path.GetFileName(Path.GetDirectoryName(ApiFile)) ?? name}) opens only its own {ModelExtension(_program)} files through its API, " +
                 $"and the Modeler writes {Path.GetExtension(modelFile)}. To check the Modeler's file by hand: in {name}, File > Import, pick {Path.GetFileName(modelFile)} from the zip.");
@@ -505,7 +500,6 @@ public sealed class ScratchProgram : IScratchWindow
     public static bool OpensThroughApi(CsiProgram program, string file, bool onFramework) =>
         !(program.Key == CsiProgram.Safe.Key && onFramework && !string.Equals(Path.GetExtension(file), ModelExtension(program), StringComparison.OrdinalIgnoreCase));
 
-<<<<<<< HEAD
     /// <summary>
     /// Whether the test can build <paramref name="file"/>'s model through the API in a blank model of a program that
     /// cannot open it (<see cref="OpensThroughApi"/>): a SAFE text file (.f2k), by <see cref="F2kRebuild"/>.
@@ -513,8 +507,6 @@ public sealed class ScratchProgram : IScratchWindow
     public static bool BuildsThroughApi(CsiProgram program, string file) =>
         program.Key == CsiProgram.Safe.Key && string.Equals(Path.GetExtension(file), ".f2k", StringComparison.OrdinalIgnoreCase);
 
-=======
->>>>>>> f119e7edad4ed1b655f3a0c224d6ea8194093ad5
     public static string ModelExtension(CsiProgram program) => program.Key switch
     {
         "sap2000" => ".sdb",
