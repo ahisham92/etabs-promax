@@ -161,11 +161,17 @@ public static class ViewerCheck
         }
         // Selection as the programs do it (Ahmed 2026-11-26): a left-to-right window round a support selects that joint,
         // a right click opens the object's information with its loads, and the Filter keeps only the checked kinds.
-        const view3d = async () => { const b = document.querySelector('[data-act="v:3d"]'); if (b && !b.disabled) b.click(); await wait(150); const p = panes[active]; fit(p); draw(); await wait(120); return p; };
+        const view3d = async () => {
+          // A 3-D view, waited for until its camera has stopped moving and it is drawn, so its projection is the one shown.
+          const b = document.querySelector('[data-act="v:3d"]'); if (b && !b.disabled) b.click(); await wait(150);
+          const p = panes[active]; if (p.mode !== "3d") setMode(p, "3d"); fit(p); draw();
+          for (let i = 0; i < 40 && (p.anim || waiting); i++) await wait(100);
+          await wait(150); return p;
+        };
         await step("selection: a left-to-right window round a support selects the support joint", async () => {
           if (!supports.length) return {skipped: "skipped: the model has no supports"};
           const p = await view3d(), s = supports.find(x => supportShown(p, x) && p.M.to(x.p)[3]);
-          if (!s) return {fail: "no support is in the 3-D view"};
+          if (!s) return {fail: `no support is in the 3-D view (${supports.length} supports, view ${p.mode}, first at ${JSON.stringify(supports[0].p)} drawn at ${JSON.stringify(p.M.to(supports[0].p).map(v => typeof v === "number" ? Math.round(v) : v))})`};
           const q = p.M.to(s.p); boxSelect(p, {x0: q[0] - 10, x1: q[0] + 10, y0: q[1] - 10, y1: q[1] + 10}, false, false);
           if (!selJ.has(s.name)) return {fail: `the window round support ${s.name} left it unselected`};
           const said = document.getElementById("sel").textContent;
@@ -175,8 +181,8 @@ public static class ViewerCheck
           return d && /Joint Information/.test(d.textContent) ? {ok: `support ${s.name} selected (${said}); its right click opens Joint Information`} : {fail: "a right click on the support opened no Joint Information"};
         });
         await step("selection: right click on an object opens its information, with a Loads tab holding its loads", async () => {
-          const p = await view3d(), shown = frames.concat(areas).filter(o => p.vis && p.vis[o.id]);
-          if (!shown.length) return {skipped: "skipped: nothing is drawn"};
+          const p = await view3d(), vis = visOf(p), shown = frames.concat(areas).filter(o => vis[o.id]);
+          if (!shown.length) return {fail: `nothing is drawn in the 3-D view (${p.mode}, ${p.vis ? p.vis.filter(Boolean).length : "no"} shown, ${frames.length + areas.length} objects, ${hidden.objs.size} hidden)`};
           sel.clear(); selJ.clear(); selChanged();
           const span = o => o.type === "f" ? Math.hypot(...[0, 1].map(i => p.M.to(o.a)[i] - p.M.to(o.b)[i])) : 0;
           const o = shown.filter(o => o.type === "f").sort((a, b) => span(b) - span(a))[0] || shown[0], mid = [0, 1, 2].map(i => o.type === "f" ? (o.a[i] + o.b[i]) / 2 : o.pts.reduce((t, c) => t + c[i], 0) / o.pts.length), q = p.M.to(mid);

@@ -1695,6 +1695,12 @@ function uploadObjects(p) {
   }
   gl.bindTexture(gl.TEXTURE_2D, objTex); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, TEXW, objRows, gl.RGBA, gl.UNSIGNED_BYTE, objData);
 }
+function visOf(p) {
+  // Which objects a window shows, worked out now if it was not yet drawn since its view changed.
+  const N = objCount();
+  if (!p.vis || p.vis.length !== N + 1 || p.visSig !== visSig(p)) { p.vis = new Uint8Array(N + 1); for (const o of frames.concat(areas)) p.vis[o.id] = shown(o, p) ? 1 : 0; p.visSig = visSig(p); }
+  return p.vis;
+}
 const visSig = p => [p.mode, p.story, p.line ? p.line.dir + p.line.label : "", opt.fill, [...hidden.kind].join(), [...hidden.section].join(), hidden.objs.size, hiddenVersion].join("|");
 let hiddenVersion = 0;
 function litHas(id) { const o = objOf(id); return o && lit.type === o.type && lit.name === o.section; }
@@ -2310,6 +2316,7 @@ function segHitsRect(a, b, r) {
 function jointsIn(p) {
   // The joints a window shows: the ends and corners of the objects it draws, and its supports (a foundation joint
   // with nothing drawn on it among them), each once, by name.
+  visOf(p);
   const out = new Map(), put = (q, sup) => { const n = sup ? sup.name : pointAt.get(key(q[0], q[1], q[2])); if (n === undefined) return; const k = String(n); if (!out.has(k)) out.set(k, {name: k, at: q}); };
   for (const o of frames.concat(areas)) { if (!p.vis || !p.vis[o.id]) continue; for (const q of o.type === "f" ? [o.a, o.b] : o.pts) put(q); }
   for (const s of supports) if (supportShown(p, s)) put(s.p, s);
@@ -2329,7 +2336,7 @@ function pickAt(p, x, y, r) {
 }
 function boxSelect(p, r, crossing, add) {
   // Left to right: what lies wholly inside. Right to left: whatever it touches. As the programs do.
-  const to = p.M.to, got = [];
+  const to = p.M.to, got = []; visOf(p);
   for (const o of frames.concat(areas)) {
     if (!p.vis || !p.vis[o.id]) continue;
     const pts = (o.type === "f" ? [o.a, o.b] : o.pts).map(to);
