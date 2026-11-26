@@ -65,6 +65,9 @@ public static class EngineRun
     {
         IScratchWindow? window = null;
         var ctx = new FieldContext(program, folder, _model!);
+        // The shared tools (run_analysis, run_design) first, then the program's own: as the field test offers them
+        // ("There is no tool named run_analysis here", ETABS run on main 4eabf46).
+        ctx.Offer(EtabsTools.All);
         ctx.Offer(ProgramTools.For(program));
         string Failed() => string.Join(" ", ctx.Steps.Where(s => !s.Ok && !s.Skipped).Select(s => s.Name + ": " + s.Detail));
         try

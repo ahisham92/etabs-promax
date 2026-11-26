@@ -28,7 +28,8 @@ public static class S2kWriter
     public static Result WriteFile(StructuralModel m, string path)
     {
         var result = Write(m, Path.GetFileName(path));
-        File.WriteAllText(path, result.Text, new UTF8Encoding(false));
+        // The whole model goes with the file, after the tables, so the Modeler opens it again with nothing lost.
+        File.WriteAllText(path, EmbeddedModel.Attach(result.Text, m), new UTF8Encoding(false));
         return result;
     }
 
@@ -342,7 +343,8 @@ public static class S2kWriter
         // Groups, one per story, and the model's own.
         if (groups.Count > 0)
         {
-            Add(tables, "GROUPS 1 - DEFINITIONS", groups.Keys.Select(name => Row(("GroupName", name), ("Selection", "Yes"), ("Color", "Yellow"),
+            var colors = GroupDefs.Groups(m).GroupBy(g => g.Name).ToDictionary(g => g.Key, g => g.First().Color);
+            Add(tables, "GROUPS 1 - DEFINITIONS", groups.Keys.Select(name => Row(("GroupName", name), ("Selection", "Yes"), ("Color", colors.GetValueOrDefault(name, "Yellow")),
                 ("SectionCut", "Yes"), ("Steel", "Yes"), ("Concrete", "Yes"), ("Aluminum", "Yes"), ("ColdFormed", "Yes"), ("Stage", "Yes"), ("Bridge", "Yes"),
                 ("AutoSeismic", "No"), ("AutoWind", "No"), ("SelDesSteel", "No"), ("SelDesAlum", "No"), ("SelDesCold", "No"), ("MassWeight", "Yes"))));
             Add(tables, "GROUPS 2 - ASSIGNMENTS", groups.SelectMany(g => g.Value.Distinct().Select(o => Row(("GroupName", g.Key), ("ObjectType", o.Type), ("ObjectLabel", o.Label)))));
@@ -434,6 +436,9 @@ public static class S2kWriter
             ? [Row(("MassSource", "MSSSRC1"), ("Elements", source.Elements ? "Yes" : "No"), ("Masses", source.AddedMass ? "Yes" : "No"), ("Loads", "No"), ("IsDefault", "Yes"))]
             : source.Loads.Select(l => Row(("MassSource", "MSSSRC1"), ("Elements", source.Elements ? "Yes" : "No"), ("Masses", source.AddedMass ? "Yes" : "No"), ("Loads", "Yes"), ("IsDefault", "Yes"), ("LoadPat", l.Pattern), ("Multiplier", N(l.Factor)))).ToList());
 
+
+        // The tables of a SAP2000 file the Modeler opened that it has no form for, as the file had them.
+        KeptTables.WriteInto(m, "sap2000", tables);
 
         var at = SavedAt ?? DateTime.Now;
         var header = $"File {fileName} was saved on {at.ToString("M/d/yy", CultureInfo.InvariantCulture)} at {at.ToString("H:mm:ss", CultureInfo.InvariantCulture)} by CSI ProMax";

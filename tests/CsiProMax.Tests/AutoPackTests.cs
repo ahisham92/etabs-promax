@@ -115,6 +115,56 @@ static class AutoPackTests
             finally { Directory.Delete(folder, true); }
         });
 
+        yield return ("auto pack: the pack follows the model's lock: taken away when it is unlocked (comments kept), made again by the next run, kept while another window still has results", () =>
+        {
+            var folder = Path.Combine(Path.GetTempPath(), "cpm-autopack-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(folder);
+            try
+            {
+                var file = Path.Combine(folder, "Tower.EDB");
+                var log = Path.Combine(folder, "Tower.LOG");
+                File.WriteAllText(log, "");
+                File.SetLastWriteTimeUtc(log, DateTime.UtcNow.AddMinutes(-2));
+                var a = Analysed(file);
+                var b = Analysed(file);
+                PackLook? beforeA = null, beforeB = null;
+                Check(AutoPack.Once(a, ref beforeA, window: "a") is not null, "the run makes the pack");
+                Check(AutoPack.Once(b, ref beforeB, window: "b") is null, "a second window on the same model finds it made");
+                var pack = Path.Combine(folder, "Tower.cpmx");
+                var page = Path.Combine(folder, "Tower viewer.html");
+                AutoPackFieldSteps.AddComment(pack, "check the beam at grid B");
+
+                // Unlocked in one window while the other still has the results: the pack stays.
+                a.Locked = false;
+                Check(AutoPack.Once(a, ref beforeA, window: "a") is null && File.Exists(pack), "the other window still shows the results: the pack stays");
+                // Unlocked in both: it goes, and the comment is kept beside the model.
+                b.Locked = false;
+                var said = AutoPack.Once(b, ref beforeB, window: "b");
+                Check(said is not null && said.Contains("taken away") && !File.Exists(pack) && !File.Exists(page), "no window has results: the pack and its page are taken away: " + said);
+                var kept = Path.Combine(folder, "Tower review comments.json");
+                Check(File.Exists(kept) && File.ReadAllText(kept).Contains("grid B"), "the reviewer's comment is kept beside the model");
+                Check(AutoPack.Once(b, ref beforeB, window: "b") is null, "and nothing again after that");
+
+                // The next run makes it again, with the comment back in it.
+                a.Locked = true;
+                File.SetLastWriteTimeUtc(log, DateTime.UtcNow.AddMinutes(-1));
+                said = AutoPack.Once(a, ref beforeA, window: "a");
+                Check(said is not null && said.Contains("1 comments kept"), "the next run makes the pack again, with the comment: " + said);
+                Equal(1, (Pack.Read(File.ReadAllBytes(pack))["comments"] as JsonArray)!.Count, "the comment once, not twice");
+
+                // A window that closed no longer holds the pack.
+                AutoPack.Forget("a");
+                b.Locked = false;
+                Check(AutoPack.Once(b, ref beforeB, window: "b") is not null && !File.Exists(pack), "with the window that had results closed, unlocking takes the pack away");
+
+                // A pack made by hand is the engineer's: it stays.
+                File.WriteAllBytes(pack, Pack.Build(Analysed(file), [], [], [], null, null).Zip);
+                Check(AutoPack.Once(b, ref beforeB, window: "b") is null && File.Exists(pack), "a pack made by hand is never taken away");
+                AutoPack.Forget("b");
+            }
+            finally { Directory.Delete(folder, true); }
+        });
+
         yield return ("auto pack: the watcher is started by the window, the keeper and the install line, and every program is watched", () =>
         {
             var program = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Program.cs"));

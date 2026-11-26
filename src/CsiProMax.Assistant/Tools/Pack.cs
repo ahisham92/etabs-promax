@@ -21,11 +21,16 @@ public static class Pack
     /// (0.4.33 field test: 44,000 shell rows and 139,000 SAP2000 frame stress rows on a small model), so a table is
     /// taken whole up to this, within <see cref="PackTables.TotalMostRows"/> for the whole pack.
     /// </summary>
-    public const int DefaultMostRows = 250000;
+    /// Ahmed 2026-11-26: lossless, no limits. Every row of every table is taken; a long table is stored in parts
+    /// (<see cref="PartRows"/>) so no single text in the pack or its Viewer page grows past what .NET or a browser holds.
+    public const int DefaultMostRows = int.MaxValue;
+
+    /// <summary>Rows in one part of a long table, in the pack (tables/NNN-pK.json) and in the Viewer page (a script element each).</summary>
+    public static int PartRows { get; set; } = 100_000;
     /// <summary>The largest model (frames and areas) whose instability check is made with the pack; a bigger one is checked with find_instabilities.</summary>
     public const int StabilityPackLimit = 8000;
     /// <summary>Design tables are taken longer: a concrete beam table has a row per station of every beam.</summary>
-    public const int DesignMostRows = 200000;
+    public const int DesignMostRows = int.MaxValue;
 
     /// <summary>The result tables a pack takes when they have data. Design summaries are added by name.</summary>
     public static readonly string[] UsualTables =
@@ -146,7 +151,7 @@ public static class Pack
             if (content["instabilities"] is JsonObject found) Add(zip, "instabilities.json", found);
             Add(zip, "comments.json", comments ?? []);
             var n = 0;
-            foreach (var (_, table) in tables) Add(zip, $"tables/{++n:000}.json", table!);
+            foreach (var (_, table) in tables) AddTable(zip, $"tables/{++n:000}", table!.AsObject());
         }
         return new Built(stream.ToArray(), content, frames.Count, areas.Count, tables.Select(t => t.Key).ToList(), notes);
     }
@@ -273,6 +278,24 @@ public static class Pack
     private static double R(double v) => Math.Round(v, 5);
     private static JsonArray Texts(IEnumerable<string> items) => new(items.Select(i => (JsonNode)i).ToArray());
 
+    /// <summary>A table into the pack: its first <see cref="PartRows"/> rows in NNN.json, the rest in NNN-p2.json, NNN-p3.json...</summary>
+    private static void AddTable(ZipArchive zip, string stem, JsonObject table)
+    {
+        if (table["rows"] is not JsonArray rows || rows.Count <= PartRows) { Add(zip, stem + ".json", table); return; }
+        var head = new JsonObject();
+        foreach (var (k, v) in table) head[k] = k == "rows" ? new JsonArray() : v?.DeepClone();
+        var first = (JsonArray)head["rows"]!;
+        for (var i = 0; i < PartRows; i++) first.Add(rows[i]!.DeepClone());
+        head["parts"] = (rows.Count + PartRows - 1) / PartRows;
+        Add(zip, stem + ".json", head);
+        for (int start = PartRows, part = 2; start < rows.Count; start += PartRows, part++)
+        {
+            var chunk = new JsonArray();
+            for (var i = start; i < Math.Min(rows.Count, start + PartRows); i++) chunk.Add(rows[i]!.DeepClone());
+            Add(zip, $"{stem}-p{part}.json", new JsonObject { ["name"] = table["name"]?.DeepClone(), ["part"] = part, ["rows"] = chunk });
+        }
+    }
+
     private static void Add(ZipArchive zip, string name, JsonNode node)
     {
         var entry = zip.CreateEntry(name, CompressionLevel.Optimal);
@@ -301,8 +324,20 @@ public static class Pack
         };
         if (Text("instabilities.json") is { } found) content["instabilities"] = found;
         var tables = new JsonObject();
+        var parts = new List<JsonObject>();
         foreach (var entry in zip.Entries.Where(en => en.FullName.StartsWith("tables/", StringComparison.Ordinal)).OrderBy(en => en.FullName, StringComparer.Ordinal))
-            if (Text(entry.FullName) is JsonObject t && t["name"] is { } name) tables[name.GetValue<string>()] = t;
+            if (Text(entry.FullName) is JsonObject t && t["name"] is { } name)
+            {
+                if (t["part"] is not null) parts.Add(t);
+                else tables[name.GetValue<string>()] = t;
+            }
+        // The rest of a long table, in its parts' order, joined to its first rows.
+        foreach (var part in parts.OrderBy(p => p["part"]!.GetValue<int>()))
+            if (tables[part["name"]!.GetValue<string>()] is JsonObject whole && whole["rows"] is JsonArray into && part["rows"] is JsonArray more)
+            {
+                foreach (var row in more.ToList()) { more.Remove(row); into.Add(row); }
+                whole.Remove("parts");
+            }
         content["tables"] = tables;
         return content;
     }
@@ -318,8 +353,32 @@ public static class Pack
         const string slot = "<script id=\"pack\" type=\"application/json\"></script>";
         if (!html.Contains(slot, StringComparison.Ordinal)) throw new InvalidOperationException("The Viewer page has no place for a pack.");
         // Inside a script element only "</" and "<!--" can end or confuse it.
-        var json = content.ToJsonString().Replace("</", "<\\/", StringComparison.Ordinal).Replace("<!--", "<\\u0021--", StringComparison.Ordinal);
-        return html.Replace(slot, "<script id=\"pack\" type=\"application/json\">" + json + "</script>", StringComparison.Ordinal);
+        static string Safe(string json) => json.Replace("</", "<\\/", StringComparison.Ordinal).Replace("<!--", "<\\u0021--", StringComparison.Ordinal);
+        // A long table's rows past the first part go in script elements of their own (pack-rows), which the page joins
+        // back: one text the size of the whole pack would pass what a browser holds in one string.
+        var rest = new StringBuilder();
+        var shown = content;
+        if (content["tables"] is JsonObject all && all.Any(t => t.Value?["rows"] is JsonArray { Count: var c } && c > PartRows))
+        {
+            shown = new JsonObject();
+            foreach (var (k, v) in content) if (k != "tables") shown[k] = v?.DeepClone();
+            var tables = new JsonObject();
+            foreach (var (name, node) in all)
+            {
+                if (node is not JsonObject t || t["rows"] is not JsonArray rows || rows.Count <= PartRows) { tables[name] = node?.DeepClone(); continue; }
+                var head = new JsonObject();
+                foreach (var (k, v) in t) if (k != "rows") head[k] = v?.DeepClone();
+                head["rows"] = new JsonArray(rows.Take(PartRows).Select(r => r?.DeepClone()).ToArray());
+                tables[name] = head;
+                for (var start = PartRows; start < rows.Count; start += PartRows)
+                {
+                    var chunk = new JsonObject { ["table"] = name, ["rows"] = new JsonArray(rows.Skip(start).Take(PartRows).Select(r => r?.DeepClone()).ToArray()) };
+                    rest.Append("<script class=\"pack-rows\" type=\"application/json\">").Append(Safe(chunk.ToJsonString())).Append("</script>\n");
+                }
+            }
+            shown["tables"] = tables;
+        }
+        return html.Replace(slot, "<script id=\"pack\" type=\"application/json\">" + Safe(shown.ToJsonString()) + "</script>\n" + rest, StringComparison.Ordinal);
     }
 
     /// <summary>

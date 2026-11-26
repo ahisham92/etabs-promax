@@ -85,8 +85,11 @@ public static class ModelChecks
             else if (!frameSections.Contains(a.Section) && a.Section != "None")
                 f.Add(new(Severity.Error, "sections", $"Line '{a.Label}' on '{a.Story}' uses section '{a.Section}', which is not defined.", a.Label, a.Story));
         }
+        // An opening (Draw Floor/Wall Openings) is an AREA-type object ETABS keeps apart from floors and walls, with no section.
+        var openings = SlabDefs.Openings(m).Select(o => o.Name).ToHashSet(StringComparer.Ordinal);
         foreach (var a in m.AreaAssigns)
         {
+            if (openings.Contains(a.Label) && a.Section is null) continue;
             if (!areas.Contains(a.Label)) f.Add(new(Severity.Error, "references", $"An assignment names area '{a.Label}', which does not exist.", a.Label, a.Story));
             if (!Story(a.Story)) f.Add(new(Severity.Error, "references", $"Area '{a.Label}' is assigned to story '{a.Story}', which does not exist.", a.Label, a.Story));
             if (a.Section is null) f.Add(new(Severity.Error, "sections", $"Area '{a.Label}' has no section on '{a.Story}'.", a.Label, a.Story));

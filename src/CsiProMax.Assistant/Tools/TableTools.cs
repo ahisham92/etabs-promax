@@ -51,14 +51,25 @@ public static class TableTools
     /// <summary>Writes the tables as SAP2000 lays them out in Excel. Numbers go in as numbers.</summary>
     public static void Write(string path, IReadOnlyList<ModelTable> tables)
     {
-        var sheets = tables.Select(t =>
+        // Excel holds 1,048,576 rows on a sheet: a longer table goes on as many sheets as it needs, each with the same
+        // TABLE title, fields and units, and reads back as one table (Read joins them). Nothing is left out.
+        var sheets = tables.SelectMany(t => Parts(t.Rows.Count).Select(part =>
         {
             var rows = new List<object?[]> { new object?[] { "TABLE:  " + t.Name }, t.Fields.Cast<object?>().ToArray(), t.Units.Cast<object?>().ToArray() };
-            foreach (var row in t.Rows)
+            foreach (var row in t.Rows.Skip(part.Start).Take(part.Count))
                 rows.Add(row.Select((cell, i) => (object?)(Numeric(t, i) && double.TryParse(cell, NumberStyles.Float, CultureInfo.InvariantCulture, out var d) ? d : cell)).ToArray());
-            return (t.Name, (IList<object?[]>)rows);
-        });
+            return (part.Index == 0 ? t.Name : $"{t.Name} ({part.Index + 1})", (IList<object?[]>)rows);
+        }));
         Xlsx.Write(path, sheets);
+    }
+
+    /// <summary>The most data rows on one sheet: Excel's 1,048,576 rows less the title, field and unit rows.</summary>
+    internal static int SheetRows { get; set; } = 1_048_576 - 3;
+
+    private static IEnumerable<(int Index, int Start, int Count)> Parts(int rows)
+    {
+        if (rows <= SheetRows) { yield return (0, 0, rows); yield break; }
+        for (int i = 0, start = 0; start < rows; i++, start += SheetRows) yield return (i, start, Math.Min(SheetRows, rows - start));
     }
 
     private static readonly HashSet<string> NumberFields = new(StringComparer.OrdinalIgnoreCase) { "SF", "SelfWtMult", "U", "NumPoints", "IStoriesBelow" };
@@ -106,7 +117,14 @@ public static class TableTools
                     if (row.FirstOrDefault(c => c.Trim().Length > 0)?.Trim().StartsWith("TABLE:", StringComparison.OrdinalIgnoreCase) == true) break;
                     data.Add(row);
                 }
-                tables.Add(new ModelTable(name, fields, units, data, at + 3));
+                // The rest of a table too long for one sheet (Write): joined to the part before it.
+                if (tables.FindLast(t => string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase)) is { } before && before.Fields.SequenceEqual(fields))
+                {
+                    var joined = before.Rows.ToList();
+                    joined.AddRange(data);
+                    tables[tables.IndexOf(before)] = before with { Rows = joined };
+                }
+                else tables.Add(new ModelTable(name, fields, units, data, at + 3));
             }
         }
         return tables;
