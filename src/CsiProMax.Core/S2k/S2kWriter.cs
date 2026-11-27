@@ -190,9 +190,13 @@ public static class S2kWriter
         var panelZones = new List<IReadOnlyList<(string, string)>>();
         var areaAxes = new List<IReadOnlyList<(string, string)>>();
         var jointMass = new List<IReadOnlyList<(string, string)>>();
+        var overwrites = new SortedDictionary<string, List<IReadOnlyList<(string, string)>>>(StringComparer.OrdinalIgnoreCase);
         foreach (var x in m.LineAssigns)
         {
             if (!frameNames.TryGetValue((x.Label, x.Story), out var name)) continue;
+            // Design > ... > View/Revise Overwrites: SAP2000's own overwrite tables, a row per frame.
+            foreach (var (owTable, owRows) in (x.Tables ?? []).Where(t => ProgramForms.IsSapOverwrite(t.Key) && t.Value.Count > 0))
+                (overwrites.TryGetValue(owTable, out var owList) ? owList : overwrites[owTable] = []).Add(new[] { ("Frame", name) }.Concat(ProgramForms.OverwriteCatalog(ProgramOptions.Sap2000)[owTable].Where(f => owRows[0].ContainsKey(f.Key)).Select(f => (f.Key, owRows[0][f.Key]))).ToList());
             var fmass = AssignTables.Row(x, "Frame Assignments - Additional Mass");
             if (fmass.TryGetValue("AddedMass", out var mpl)) frameMass.Add(Row(("Frame", name), ("MassPerLen", mpl))); // SAP2000 26.3: fields Frame, MassPerLen (no Cable; 0.4.57 full test)
             var tc = AssignTables.Row(x, "Frame Assignments - Tension and Compression Limits");
@@ -332,6 +336,7 @@ public static class S2kWriter
         Add(tables, "JOINT SPRING ASSIGNMENTS 1 - UNCOUPLED", springs);
         Add(tables, "FRAME RELEASE ASSIGNMENTS 1 - GENERAL", releases);
         Add(tables, "FRAME RELEASE ASSIGNMENTS 2 - PARTIAL FIXITY", partial);
+        foreach (var (owTable, owList) in overwrites) Add(tables, owTable.ToUpperInvariant(), owList);
         Add(tables, "FRAME LOCAL AXES ASSIGNMENTS 1 - TYPICAL", axes);
         Add(tables, "FRAME INSERTION POINT ASSIGNMENTS", insertion);
         Add(tables, "FRAME OFFSET ALONG LENGTH ASSIGNMENTS", offsets);

@@ -4415,7 +4415,7 @@ function modelerMenus(m) {
     of.forEach((f, i) => { const it = [f.item, "m:oform:" + i]; if (!f.group) return items.push(it); let g = groups.find(x => x[0] === f.group); if (!g) groups.push(g = [f.group, []]); g[1].push(it); });
     m.Options = [...groups, ...items, 0, ...(m.Options || [])];
   }
-  if (fm.designs.length) m.Design = [...fm.designs.map(d => [d.name, [["View/Revise Preferences...", "m:pref:" + d.design], ...(window.cpmLive ? [["Start Design/Check...", "eng:design"]] : [])]]), 0, ...(m.Design || [])];
+  if (fm.designs.length) m.Design = [...fm.designs.map(d => [d.name, [["View/Revise Preferences...", "m:pref:" + d.design], ...((d.overwrites || []).length ? [["View/Revise Overwrites...", "m:over:" + d.design, "", !hmSelected(d.design === "slab" ? "a" : "f").length]] : []), ...(window.cpmLive ? [["Start Design/Check...", "eng:design"]] : [])]]), 0, ...(m.Design || [])];
   return m;
 }
 // A design's View/Revise Preferences (ETABS: "Steel Frame Design Preferences for AISC 360-16"): Design Code first, then
@@ -4453,6 +4453,19 @@ const hmColorHex = v => { const n = Number(v); if (!(v !== "" && Number.isFinite
 const hmColorNumber = hex => { const x = parseInt(hex.slice(1), 16); return ((x >> 16) & 255) + ((x >> 8) & 255) * 256 + (x & 255) * 65536; };
 // An Analyze option form (Set Active Degrees of Freedom, Set Analysis Options, the mesh settings, SAPFire): the program's
 // items; the degrees of freedom as its check boxes with its Fast DOFs.
+// Design > ... > View/Revise Overwrites (ETABS: "Steel Frame Design Overwrites for AISC 360-16"): the selected frames'
+// (or slabs') rows of the overwrite table of the design's code, as the program has it. ETABS's concrete frames have
+// one table for beams and one for columns: the columns' when every selected frame is a column.
+async function hmOverwrites(kind) {
+  const d = ((hm.forms || {}).designs || []).find(x => x.design === kind); if (!d) return;
+  const slab = kind === "slab", objs = [...sel].map(objOf).filter(o => o && o.type === (slab ? "a" : "f"));
+  if (!objs.length) return hmSay(slab ? "Select the slabs first." : "Select the frames first.", true);
+  const t = d.overwrites || [];
+  if (!t.length) return hmSay(`${progLabel(program)} has no overwrites for ${d.name} with ${d.code || "this code"}.`, true);
+  const col = objs.every(o => (frames.find(f => f.name === o.name) || {}).kind === "column");
+  const table = t.length > 1 ? t.find(x => (col ? /Column/ : /Beam/).test(x)) || t[0] : t[0];
+  return hmAssignTable(table, slab ? "Area" : "Frame", `${table.replace(/ - .*$/, "").replace(/^Overwrites$/, d.name + " Overwrites")} for ${d.code || table.replace(/^.* - /, "")}`);
+}
 async function hmProgForm(i, list) {
   const f = ((hm.forms || {})[list || "analysis"] || [])[i]; if (!f) return;
   const j = await hmPost({tool: "program_forms", args: {table: f.table}});
@@ -4523,6 +4536,7 @@ async function modelAct(a) {
   if (a.startsWith("ex:")) return hmExtras(a.slice(3));
   if (a.startsWith("pref:")) { await hmDefs(); return hmPrefs(a.slice(5)); }
   if (a.startsWith("pform:")) { await hmDefs(); return hmProgForm(+a.slice(6)); }
+  if (a.startsWith("over:")) { await hmDefs(); return hmOverwrites(a.slice(5)); }
   if (a.startsWith("oform:")) { await hmDefs(); return hmProgForm(+a.slice(6), "options"); }
   switch (a) {
     case "undo": case "redo": { const j = await hmRun(a); if (j.ok) hmSay(j.did || "Done."); return; }
@@ -4619,14 +4633,14 @@ const asgYesNo = /^(Include|Consider|AtIntJoints|AtIntersect|AtBeams|AtWalls|AtG
 const asgChoices = {StationOpt: ["Min Stations", "Max Spacing"], SpliceOpt: ["Story Default", "No Splice", "Splice at Height"], MeshOption: ["Default", "Auto Cookie Cut", "Auto Rectangular", "General Divide Tool", "No Auto Mesh", "Mesh N1 x N2"],
   ReleasedDOF: ["In-plane", "Direct", "Out-of-plane", "Moment", "Twisting"], PZFrom: ["Elastic", "User", "Link"], PZConnect: ["Beams to Other Objects", "Braces to Other Objects"], AxesFrom: ["Column", "User"],
   CoordSys: ["Local", "GLOBAL"], RebarOpt: ["From Section", "User"], RebarOption: ["From Section", "User"], Constraint: ["None", "Auto", "Auto (Cookie Cut)"]};
-async function hmAssignTable(table) {
+async function hmAssignTable(table, as, title0) {
   if (table === "opening") {
     const names = hmSelected("a"); if (!names.length) return hmSay("Select the floors or walls first.", true);
     const pd = (await hmRun("property_definitions", {objects: names.slice(0, 1)}, true)).result; if (!pd) return;
     return dialog("Assign Shell Opening", `<label><input id="opY" type="checkbox" ${(pd.objects[0] || {}).opening ? "checked" : ""}> Opening (the area is a hole, with no section)</label>`,
       [["OK", d => submit(d, "assign_shell_data", {objects: names, opening: q(d, "#opY").checked}), true], ["Cancel"]], {width: 380});
   }
-  const kind = /^Area /.test(table) ? "Area" : table.split(" ")[0], names = kind === "Joint" ? hmJoints() : hmSelected(kind === "Frame" ? "f" : "a");
+  const kind = as || (/^Area /.test(table) ? "Area" : table.split(" ")[0]), names = kind === "Joint" ? hmJoints() : hmSelected(kind === "Frame" ? "f" : "a");
   if (!names.length) return hmSay(kind === "Joint" ? "Select the joints first." : kind === "Frame" ? "Select the frames first." : "Select the floors or walls first.", true);
   const pd = (await hmRun("property_definitions", {objects: names.slice(0, 1)}, true)).result; if (!pd) return;
   const def = pd.assign_tables[table]; if (!def) return hmSay("There is no table " + table + ".", true);
@@ -4634,7 +4648,7 @@ async function hmAssignTable(table) {
   let rows = (now[table] || []).map(r => ({...r})); if (!rows.length) rows = [{}];
   const tool = kind === "Joint" ? "assign_joint_data" : kind === "Frame" ? "assign_frame_data" : "assign_shell_data";
   const cell = (k, v) => asgYesNo.test(k) ? `<input data-k="${k}" type="checkbox" ${v === "Yes" ? "checked" : ""}>` : asgChoices[k] ? `<select data-k="${k}">${opts(["", ...asgChoices[k]], v || "")}</select>` : `<input data-k="${k}" value="${esc(v ?? "")}">`;
-  const title = table.includes(" - ") ? "Assign " + ({Frame: "Frame", Area: "Shell", Joint: "Joint"})[kind] + " " + table.split(" - ").slice(1).join(" - ") : ({"Area Edge Release Assignments": "Assign Area Edge Releases", "Joint Panel Zone Assignments": "Assign Joint Panel Zone"})[table] || table;
+  const title = title0 ? title0 : table.includes(" - ") ? "Assign " + ({Frame: "Frame", Area: "Shell", Joint: "Joint"})[kind] + " " + table.split(" - ").slice(1).join(" - ") : ({"Area Edge Release Assignments": "Assign Area Edge Releases", "Joint Panel Zone Assignments": "Assign Joint Panel Zone"})[table] || table;
   const d = dialog(title, `<div id="atB"></div>${def.many ? `<button id="atAdd" style="margin-top:6px">Add</button>` : ""}<p class="kv">${names.length} selected. The values are as the program's own table holds them, in the model's units; empty values take the table off.</p>`,
     [["OK", d => { read(); return submit(d, tool, {objects: names, tables: {[table]: rows.filter(r => Object.values(r).some(v => v !== ""))}}); }, true], ["Cancel"]], {width: def.many ? 760 : 460});
   const read = () => d.querySelectorAll("#atB [data-r]").forEach(tr => tr.querySelectorAll("[data-k]").forEach(x => rows[+tr.dataset.r][x.dataset.k] = x.type === "checkbox" ? (x.checked ? "Yes" : "No") : x.value.trim()));

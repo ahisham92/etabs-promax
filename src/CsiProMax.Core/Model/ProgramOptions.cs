@@ -44,9 +44,9 @@ public static class ProgramOptions
     /// .s2k or its API carries; SAFE none of them.</summary>
     public static bool HasAssignTable(string target, string table) => target switch
     {
-        Sap2000 => SapAssignTables.Contains(table) || SapOwnAssignTables.Contains(table),
+        Sap2000 => SapAssignTables.Contains(table) || SapOwnAssignTables.Contains(table) || ProgramForms.IsSapOverwrite(table),
         Safe => false,
-        _ => !SapOwnAssignTables.Contains(table),
+        _ => !SapOwnAssignTables.Contains(table) && !ProgramForms.IsSapOverwrite(table),
     };
 
     /// <summary>SAP2000's own assignment tables (no ETABS table has their shape).</summary>

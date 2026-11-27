@@ -74,6 +74,7 @@ public static class DefineTools
             {
                 ["design"] = d.Kind, ["name"] = d.Name, ["code"] = ProgramForms.Code(m, d.Kind), ["table_prefix"] = d.TablePrefix,
                 ["codes"] = new JsonArray(ProgramForms.Codes(m.Target, d.Kind).Select(c => (JsonNode)c).ToArray()),
+                ["overwrites"] = new JsonArray(ProgramForms.OverwriteTables(m.Target, d.Kind, ProgramForms.Code(m, d.Kind) is { Length: > 0 } oc ? oc : ProgramForms.Codes(m.Target, d.Kind).FirstOrDefault() ?? "").Select(t => (JsonNode)t).ToArray()),
             }).ToArray()),
             ["analysis"] = new JsonArray(ProgramForms.AnalysisForms(m.Target).Select(f => (JsonNode)new JsonObject { ["item"] = f.Item, ["table"] = f.Table, ["set"] = ProgramForms.Values(m, f.Table).Count(v => v.Value.Length > 0) }).ToArray()),
             ["options"] = new JsonArray(ProgramForms.OptionForms(m.Target).Select(f => (JsonNode)new JsonObject { ["group"] = f.Group, ["item"] = f.Item, ["table"] = f.Table, ["set"] = ProgramForms.Values(m, f.Table).Count(v => v.Value.Length > 0) }).ToArray()),

@@ -486,6 +486,14 @@ public static partial class S2kReader
             var pfSprings = new[] { "I", "J" }.SelectMany(pfEnd => PropertyDefs.Releases.Select(pfDof => pfDof + pfEnd)).ToDictionary(pfKey => pfKey, pfKey => D(r, pfKey), StringComparer.Ordinal);
             PropertyDefs.SetPartialFixity(a, pfSprings);
         }
+        // SAP2000's design overwrites, a row per frame, as the frame's rows of that table.
+        foreach (var (owTable, owFields) in ProgramForms.OverwriteCatalog(ProgramOptions.Sap2000))
+            foreach (var r in use(owTable.ToUpperInvariant()))
+            {
+                if (Of(r) is not { } a) continue;
+                var owRow = owFields.Where(f => S(r, f.Key).Length > 0).ToDictionary(f => f.Key, f => S(r, f.Key), StringComparer.Ordinal);
+                if (owRow.Count > 0) AssignTables.Set(a, new Dictionary<string, List<Dictionary<string, string>>> { [owTable] = [owRow] });
+            }
         foreach (var r in use("FRAME LOCAL AXES ASSIGNMENTS 1 - TYPICAL"))
             if (Of(r) is { } a && D(r, "Angle") != 0) PropertyDefs.Put(a.Extra, "ANG", Number(D(r, "Angle")));
         foreach (var r in use("FRAME INSERTION POINT ASSIGNMENTS"))

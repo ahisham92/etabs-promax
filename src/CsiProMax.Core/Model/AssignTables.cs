@@ -11,8 +11,7 @@ namespace CsiProMax.Model;
 public static class AssignTables
 {
     /// <summary>Each table: which objects it is for (frame, area, joint) and its fields with the names the program shows.</summary>
-    public static readonly IReadOnlyDictionary<string, (string Kind, (string Key, string Label)[] Fields)> Tables =
-        new Dictionary<string, (string, (string, string)[])>(StringComparer.OrdinalIgnoreCase)
+    public static readonly IReadOnlyDictionary<string, (string Kind, (string Key, string Label)[] Fields)> Tables = WithOverwrites(new Dictionary<string, (string, (string, string)[])>(StringComparer.OrdinalIgnoreCase)
     {
         ["Frame Assignments - Additional Mass"] = ("frame", [("AddedMass", "Added Mass")]),
         ["Frame Assignments - Advanced Nonprismatic Section Parameters"] = ("frame", [("ClearLength", "Clear Length"), ("RelDist", "Relative Distance")]),
@@ -50,7 +49,19 @@ public static class AssignTables
         ["Joint Panel Zone Assignments"] = ("joint", [("PZFrom", "Properties"), ("DoublerPl", "Doubler Plate Thickness"), ("MajorStiff", "Spring Major Stiffness"), ("MinorStiff", "Spring Minor Stiffness"),
             ("PZLink", "Link Property"), ("PZConnect", "Connectivity"), ("AxesFrom", "Local Axes From"), ("PZAxesAngle", "Local Axis Angle")]),
         ["Joint Assignments - Panel Zone"] = ("joint", [("PanelZone", "Panel Zone Assignment"), ("GenPanelZone", "Generated PanelZone")]),
-    };
+    });
+
+    /// <summary>
+    /// Design > ... > View/Revise Overwrites: each design code's overwrite table of the program (ETABS 23.2's and
+    /// SAP2000 26.3's), an object's rows like the other assignments (Ahmed 2026-11-27, every form).
+    /// </summary>
+    private static Dictionary<string, (string, (string, string)[])> WithOverwrites(Dictionary<string, (string, (string, string)[])> tables)
+    {
+        foreach (var target in new[] { ProgramOptions.Etabs, ProgramOptions.Sap2000 })
+            foreach (var (table, fields) in ProgramForms.OverwriteCatalog(target))
+                tables[table] = (table == ProgramForms.SlabOverwrites ? "area" : "frame", fields.Select(f => (f.Key, f.Label)).ToArray());
+        return tables;
+    }
 
     public const string PartialFixity = "Frame Assignments - Releases and Partial Fixity";
     public const string Insertion = "Frame Assignments - Insertion Point";
