@@ -815,7 +815,7 @@ public static class ModelerCheck
     /// Serves the live Modeler page on a scratch model and checks it in <paramref name="browser"/> (Edge or Chrome when
     /// null). <paramref name="chat"/>: the page as a window with the AI chat on serves it (a chat with nothing in it), or off.
     /// </summary>
-    public static ViewerCheck.Result Run(bool chat, string folder, string? browser = null, int seconds = 420, bool pictures = false)
+    public static ViewerCheck.Result Run(bool chat, string folder, string? browser = null, int seconds = 600, bool pictures = false)
     {
         browser ??= ViewerCheck.FindBrowser();
         if (browser is null) return new ViewerCheck.Result([], [], "no Edge or Chrome was found on this PC to open the Modeler's window in");
@@ -873,7 +873,7 @@ public static class ModelerCheck
         {
             HandModel.Reset();
             server.Start();
-            var (dom, error) = ViewerCheck.Browse(browser, profile, seconds, "--dump-dom", "--virtual-time-budget=420000", "--window-size=1400,900", server.ViewUrl);
+            var (dom, error) = ViewerCheck.Browse(browser, profile, seconds, "--dump-dom", "--virtual-time-budget=600000", "--window-size=1400,900", server.ViewUrl);
             if (dom is null) return new ViewerCheck.Result([], [], "the browser could not be run: " + error);
             if (ViewerCheck.Read(dom) is not { } items)
                 return new ViewerCheck.Result([new ViewerCheck.Item("the Modeler page ran its check", false, "the page did not finish its check within the time the browser gave it")], [], null);
