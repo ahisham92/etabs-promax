@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using System.Diagnostics;
 using System.Reflection;
 using CsiProMax.Assistant.Etabs;
@@ -788,16 +789,21 @@ public sealed class ScratchProgram : IScratchWindow
         }) is null) return false;
         if (openedEmpty)
         {
-            // An import bug for every engineer who opens the Modeler's file in this SAFE, so it fails here and stays
-            // failed until the writer is fixed. The model is still built, so the rest of SAFE's tools are tested on it.
-            ctx.Fail($"{name} opens the Modeler's {Path.GetExtension(modelFile)} with all its objects",
-                $"{name} answered that it opened {Path.GetFileName(modelFile)}, but it holds none of the file's {F2kRebuild.ObjectCount(File.ReadAllText(modelFile))} beams, columns, walls and floors: " +
-                $"an engineer opening this file in {name} gets an empty model. The rest of the test builds the model through the API.");
             build = true;
             text = File.ReadAllText(modelFile);
-            // Why, for the next report: the same file in other forms, and SAFE's own export as the control.
-            if (_program.Key == CsiProgram.Safe.Key)
-                ctx.Step($"find which .f2k {name} opens through its API (the Modeler's in other forms, and {name}'s own export)", () => Probe(ctx, name, text));
+            // Why: the same file in other forms, and SAFE's own export as the control. SAFE 23.1 held nothing of its own
+            // export either (tester's SAFE-only run, 0.4.68): its File.OpenFile takes no .f2k, and an engineer's
+            // File > Import is what the tables step below does. Only a SAFE that opens its own export and not the
+            // Modeler's says the Modeler's file is at fault.
+            var probe = _program.Key == CsiProgram.Safe.Key
+                ? ctx.Step($"find which .f2k {name} opens through its API (the Modeler's in other forms, and {name}'s own export)", () => Probe(ctx, name, text)) as string
+                : null;
+            if (probe is not null && ProbeControlEmpty(probe))
+                ctx.Step($"{name}'s File.OpenFile takes no .f2k (its own export came in empty too), so the Modeler's file goes in through {name}'s tables, as File > Import does", () => probe);
+            else
+                ctx.Fail($"{name} opens the Modeler's {Path.GetExtension(modelFile)} with all its objects",
+                    $"{name} answered that it opened {Path.GetFileName(modelFile)}, but it holds none of the file's {F2kRebuild.ObjectCount(text)} beams, columns, walls and floors" +
+                    (probe is null ? "" : $", while it opens its own export: {probe}") + ". The rest of the test builds the model in a blank model instead.");
             if (!Blank($"{name} opened the Modeler's {Path.GetExtension(modelFile)} as an empty model, so the model is built in it instead")) return false;
         }
 
@@ -845,7 +851,19 @@ public sealed class ScratchProgram : IScratchWindow
         // The Modeler's model, built in the blank model through the API, and saved: what the program's part then checks.
         if (build && ctx.Step($"build the Modeler's model from {Path.GetFileName(modelFile)} in it through the API", () =>
         {
-            var built = F2kRebuild.Build(Link, text);
+            // First as SAFE's own File > Import does it, table by table; the object calls only when that brought nothing in.
+            JsonNode built;
+            JsonObject? tables = null;
+            try { tables = F2kRebuild.ImportTables(Link, text); }
+            catch (EtabsException ex) { tables = new JsonObject { ["error"] = ex.Message }; }
+            var held = Convert.ToInt32(Ask(FileTimeout, "count the objects", m => Count(m, "AreaObj.Count") + Count(m, "FrameObj.Count"), $"{name} did not answer within {FileTimeout.TotalMinutes:0} minutes."));
+            if (held > 0) built = new JsonObject { ["through"] = $"{name}'s tables (as File > Import)", ["objects"] = held, ["import"] = tables };
+            else
+            {
+                try { built = F2kRebuild.Build(Link, text); }
+                catch (EtabsException ex) { throw new EtabsException($"{ex.Message} Before that, {name}'s tables brought in nothing: {tables?.ToJsonString()}"); }
+                if (built is JsonObject o) o["tables_first"] = tables;
+            }
             ctx.Facts["safe.built"] = 1;
             var answer = Convert.ToInt32(Ask(FileTimeout, "save the scratch model", m => m.File.Save(target),
                 $"{name} did not finish saving the scratch model within {FileTimeout.TotalMinutes:0} minutes. A message may be waiting in its window."));
@@ -906,6 +924,10 @@ public sealed class ScratchProgram : IScratchWindow
         }
         return $"{name} {version}: " + string.Join("; ", said);
     }
+
+    /// <summary>Whether the probe's first form, SAFE's own export (the control), came in empty.</summary>
+    internal static bool ProbeControlEmpty(string probe) =>
+        System.Text.RegularExpressions.Regex.IsMatch(probe, @"1\. [^;]*\(the control\): answered -?\d+, holds 0 objects");
 
     private object? Ask(TimeSpan most, string what, Func<dynamic, object?> work, string late)
     {

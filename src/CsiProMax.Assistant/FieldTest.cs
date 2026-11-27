@@ -360,6 +360,14 @@ public static class FieldTest
         {
             // Whatever a part throws, the report is written: a run that ends without one tells nobody what it found.
             try { Full(ctx, link, o, ranParts, standIn); }
+            catch (OutOfMemoryException)
+            {
+                // Outside any one step: the report is still written, naming the last table read.
+                var read = Etabs.ComEtabs.LastRead;
+                OutOfMemory.Free();
+                try { ctx.Fail("the full test stopped before its end", $"OutOfMemoryException: CSI ProMax ran out of memory, so the steps after this one were not run. The last table read from the program: {read}."); }
+                catch (OperationCanceledException) { }
+            }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 var real = ex is AggregateException { InnerException: { } inner } ? inner : ex;

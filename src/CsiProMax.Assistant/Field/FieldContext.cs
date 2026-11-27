@@ -125,6 +125,15 @@ public sealed class FieldContext(CsiProgram program, string folder, ICsiLink lin
             Live(left);
             return default;
         }
+        catch (OutOfMemoryException)
+        {
+            // One step that runs out of memory is one failure: what it held is let go of and the run goes on, so the
+            // report is always written (a tester's SAFE field test ended on "System.OutOfMemoryException" with no report).
+            var read = CsiProMax.Assistant.Etabs.ComEtabs.LastRead;
+            OutOfMemory.Free();
+            Add(name, false, $"OutOfMemoryException: this step ran out of memory and was stopped; the run went on. The last table read from the program: {read}.", clock.Elapsed.TotalSeconds);
+            return default;
+        }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             var real = ex is System.Reflection.TargetInvocationException { InnerException: { } inner } ? inner : ex;
@@ -446,4 +455,19 @@ public sealed class FieldContext(CsiProgram program, string folder, ICsiLink lin
     }
 
     private static string Text(object? value) => Readable.Text(value);
+}
+
+/// <summary>Lets go of what a step that ran out of memory held, so the steps after it and the report have room.</summary>
+public static class OutOfMemory
+{
+    public static void Free()
+    {
+        try
+        {
+            System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
+            GC.WaitForPendingFinalizers();
+        }
+        catch (Exception) { /* nothing more can be done */ }
+    }
 }
