@@ -6699,6 +6699,8 @@ function modelerMenus(m) {
     ["Draw Walls (click start and end)", "d:wall"], ["Quick Draw Walls (click a grid line)", "d:qwall"], 0,
     only(ES, ["Draw Braces (click bottom and top)", "d:brace"]), ["Draw Joints (click a point)", "d:joint"], 0, only(["etabs", "safe"], ["Design Strips...", "m:ex:strips"]), ["Tendons...", "m:ex:tendons"], only(["etabs", "safe"], ["Slab Rebar...", "m:ex:slabrebar"]), 0, ["Snap and Story Options...", "m:drawHelp"]];
   if (etnOn()) m.Draw = etnDrawMenu();
+  // ETABS 23.2's Detailing menu, item for item (etqDetailingMenu); the Engine's schedules under Engine Extras.
+  if (etnOn()) m.Detailing = etqDetailingMenu();
   if (etnOn()) m.Select = etsSelectMenu();
   if (etnOn()) m.View = etvViewMenu();
   // ETABS 23.2's own Assign menu, item for item (hmEtabsAssignMenu); SAP2000's and SAFE's below.
@@ -7500,6 +7502,544 @@ function etnDrawMenu() {
     ["Snap Options...", "m:drawHelp"], ["Draw Using Snap Only", "m:etn:snapOnly"], 0,
     ["Engine Extras", [["Draw Circular Floors (centre, then edge)", "d:circ"], 0, ["Design Strips...", "m:ex:strips"], ["Tendons...", "m:ex:tendons"], ["Slab Rebar...", "m:ex:slabrebar"]]]];
 }
+// ---- ETABS 23.2's Detailing menu and its Bar Selection and Curtailment Rule forms, from the pictures in
+// field/reference-forms/etabs/Detailing (thread 'Make ETABS Detailing rule forms identical', 2026-11-28): the menu in
+// ETABS's order and words; Beam, Slab/Mat/Footing, Column Stack and Wall Stack rules with every sub-form ETABS opens from
+// them (Bar Development Rules, Rebar Curtailment Rules, Rebar Selection Rules, Longitudinal Rebars in Sections, Rebar
+// Selection Rules for Strip and for Footing, Slab Rebar Curtailment Rules, Confinement, Bar Splices, Pier and Spandrel
+// Rebar Rules), with ETABS's defaults. ETABS keeps these rules in its model database only (no .e2k line, no database
+// table), so the Engine keeps them with the model (detailing_rules / set_detailing_rules). A sub-form's OK changes its
+// rule form; the rule form's OK keeps it, Cancel drops it, as in ETABS. Lengths are kept in metres and shown in the
+// model's length unit. Drawing Management > Drawing Sheet Setup and Drawing Format Properties are the drawing format
+// thread's forms: etlSheetSetupForm() and etlDrawingFormatForm() (PR 343, above openDesign).
+// UNVERIFIED (no picture yet, asked of the capture thread): the choices of drop-downs shown closed (hook types, % of bars,
+// bar numbers, coating and concrete types, hoop and tie types, splice options, skin bar placement); the Non Seismic beam
+// Rebar Selection Rules and Non Seismic Confinement values (the Seismic ones are used); the Middle Strip and Slabs On
+// Beams strip rules (the Column Strip values are used); the Mat tab's Edit Rebar Selection Rules form (the strip form);
+// Clear Detailing, Open/Clear Drawing Manager, Generate/Show Beam Groups, Detailing Comments and Log and the Show/Edit
+// forms (the Engine's schedules), which ETABS greys on a model without design. ----
+const etq = {rules: null, bars: [], done: {}, log: [], drawings: []};
+const etqL = x => +(x / 39.37008).toPrecision(12);
+const etqKinds = {beam: "Beam", slab: "Slab/Mat/Footing", column: "Column Stack", wall: "Wall Stack", sbeam: "Beam", scolumn: "Column Stack"};
+const etqHooks = ["Straight", "90 Deg", "135 Deg", "180 Deg"], etqPct = ["25%", "33%", "50%", "67%", "75%", "100%"], etqNums = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
+const etqUsBars = ["#3", "#4", "#5", "#6", "#7", "#8", "#9", "#10", "#11", "#14", "#18"];
+function etqBeamSel() {
+  const bar = {}; ["A", "B", "C", "D", "F", "G", "H", "J"].forEach((c, i) => bar[c] = {small: "#4", large: "#9", pref: "#6", minN: i % 2 ? 0 : 2, maxN: 100});
+  const z = (a, b, c) => [a, b, b, b, c], stir = {};
+  const rows = {small: z("#3", "#3", "#3"), large: z("#6", "#6", "#6"), pref: z("#4", "#4", "#4"), minSp: z(etqL(3), etqL(3), etqL(3)), maxSp: z(etqL(6), etqL(18), etqL(6)), maxSpD: z(0.25, 0.5, 0.25), maxSpM: z(6, null, 6), maxSpT: z(16, 48, 16),
+    minLeg: z(2, 2, 2), maxLeg: z(4, 4, 4), legSp: z(14, 28, 14), legSpW: z(1, 1, 1), legSpM: z(16, 16, 16), legSpT: z(48, null, 48), type: z("135 Deg", "135 Deg", "135 Deg"), zoneLen: z(2, null, 2)};
+  ["A", "B", "C", "D", "E"].forEach((c, i) => { stir[c] = {}; for (const [k, v] of Object.entries(rows)) if (v[i] !== null) stir[c][k] = v[i]; });
+  return {bar, stir};
+}
+function etqDev() { return {method: "ACI", coating: "Uncoated", concrete: "Normal Weight"}; }
+function etqTyp(top, bot) { return {detail: "all", typAll: true, topA: top, topB: top, topSpA: etqL(9), topSpB: etqL(9), botA: bot, botB: bot, botSpA: etqL(9), botSpB: etqL(9)}; }
+function etqSlabCurt(kind) {
+  const t = {t1: 6, t2: 6, t3: 6};
+  if (kind === "ms" || kind === "msd") return {hA: "90 Deg", hG: "Straight", hF: "90 Deg", ...t, a1: 0.22, a2: 0.22, a3: 0.2, p1: "100%", p2: "100%", p3: "100%", g1: 0, g2: 0.15, g3: 0.2, q1: "50%", q2: "50%", q3: "50%", f1: etqL(6), f2: etqL(6)};
+  const a = {cs: 0.3, csd: 0.33, sb: 0.25}[kind];
+  return {hA: "90 Deg", hB: "90 Deg", hG: "Straight", hF: "90 Deg", ...t, a1: a, a2: a, a3: a, p1: "50%", p2: "50%", p3: "50%", b1: 0.2, b2: 0.2, b3: 0.2, f1: etqL(6)};
+}
+function etqStrip(pref) { const o = {}; ["A", "B", "C", "D", "F", "G"].forEach(c => o[c] = {small: "#4", large: "#9", pref: pref || "#5", minSp: etqL(3), maxSp: etqL(18), fac: 2.5}); return o; }
+function etqDefaults(form) {
+  const L = etqL;
+  if (form === "beam") return {
+    main: {curt: "computed", checkDev: false, detail: "all", typAll: true, topSize: "#5", topNum: "2", botSize: "#5", botNum: "2", typWhere: "required", enforce: false, minTop: 0.5, minBot: 0.5, minWhere: "required"},
+    dev: etqDev(),
+    curt: {mode: "seismic",
+      seismic: {base: "clear", hA: "90 Deg", hB: "90 Deg", hG: "Straight", hF: "90 Deg", A: 0.5, pA: "50%", C: 0.5, pC: "50%", B: 0.25, D: 0.25, G: 0.25, J: 0.3, F: 0.5, pF: "50%", H: 0.5, pH: "50%", minLen: L(36), maxLen: L(480), minSplice: L(24), spliceFac: 36, minimize: false},
+      non: {base: "clear", hA: "90 Deg", hB: "90 Deg", hF: "90 Deg", A: 0.25, pA: "100%", C: 0.3, pC: "50%", B: 0.2, D: 0.2, Fl: 0.13, G: 0.13, pG: "100%", Fr: 0.13, pFr: "100%", minLen: L(36), maxLen: L(480), minSplice: L(18), spliceFac: 24, minimize: false}},
+    sel: {mode: "seismic", seismic: etqBeamSel(), non: etqBeamSel()},
+    long: {how: "abs", maxSp: L(6), minSp: L(1), layerSp: L(1), rMax: 0, rMin: 0, rLayer: 0, minBars: "2", maxLayers: "4", webH: L(30), webFac: 1, webBar: "#4", skin: "Full Length", webSp: L(12)}};
+  if (form === "slab") return {
+    slab: {curt: "computedRules", alt: false, addDev: false, checkDev: false, ...etqTyp("#5", "#4"), open: true, openBar: "#4", openN: 2, openExt: L(24),
+      enforce: false, csTop: 0.18, csBot: 0.18, msTop: 0.18, msBot: 0.18, sbTop: 0.18, sbBot: 0.18, integ: true, integN: "2", integBar: "#8", integFac: 0.25,
+      waffle: true, wTopBar: "#3", wTopSp: L(12), wRibTop: "#4", wRibTopN: 2, wRibBot: "#5", wRibBotN: 2, wStir: true, wStirBar: "#3", wStirSp: L(9), combine: false, combineLen: L(100), drop: true, dropBar: "#4", dropSp: L(9)},
+    mat: {alt: false, addDev: false, ...etqTyp("#4", "#5"), enforce: false, top: 0.18, bot: 0.18, open: true, openBar: "#4", openN: 2, openExt: L(24)},
+    footing: {alt: false, addDev: true, ...etqTyp("#4", "#5"), enforce: false, top: 0.18, bot: 0.18},
+    dev: {slab: etqDev(), mat: etqDev(), footing: etqDev()},
+    curt: {base: "clear", cs: etqSlabCurt("cs"), csd: etqSlabCurt("csd"), ms: etqSlabCurt("ms"), msd: etqSlabCurt("msd"), sb: etqSlabCurt("sb")},
+    strip: {mode: "cs", cs: etqStrip(), ms: etqStrip(), sb: etqStrip()},
+    matStrip: {mode: "cs", cs: etqStrip(), ms: etqStrip(), sb: etqStrip()},
+    footSel: {top: {small: "#4", large: "#9", pref: "#6", minSp: L(3), maxSp: L(18), fac: 2.5}, bot: {small: "#4", large: "#9", pref: "#6", minSp: L(3), maxSp: L(18), fac: 2.5}}};
+  if (form === "column") {
+    const tie = (a, b, c, d, e, f) => ({small: a, large: b, pref: c, minSp: L(d), maxSp: L(e), fac: f}), conf = {colH: 0.17, secSize: 1, minLen: L(18), hoop: "Rectangle-135", internal: true, tieType: "L-Ties", every: "alternate"};
+    return {main: {vert: "section", keep: "keep", prefer: "number", tie: "auto"},
+      sel: {mode: "non", non: {vert: {small: "#4", large: "#9", pref: "#6", minN: 4, maxN: "-", minSp: L(3), maxSp: L(12)}, A: tie("#3", "#6", "#3", 4, 18, 1)},
+        seismic: {vert: {small: "#5", large: "#10", pref: "#6", minN: 4, maxN: "-", minSp: L(3), maxSp: L(12)}, A: tie("#3", "#6", "#3", 3, 6, 0.25), B: tie("#3", "#6", "#3", 3, 18, 0.5), C: tie("#3", "#6", "#3", 3, 6, 0.5)}},
+      conf: {seismic: {...conf}, non: {...conf}},
+      splice: {every: "Every Story", where: "At Floor Level", type: "Lap Splice", fac: 40, kicker: L(4), minLen: L(24)}};
+  }
+  if (form === "wall") {
+    const v = (a, b, c, d, f) => ({small: a, large: b, corner: c, middle: d, minSp: L(3), maxSp: L(18), fac: f}), t = (a, b, c, f) => ({small: a, large: b, pref: c, minSp: L(3), maxSp: L(18), fac: f});
+    return {main: {pier: "specified", zone: "specified", useBZ: true, ratio: 0.15, useCZ: true},
+      pier: {uv: v("#4", "#10", "#8", "#6", 1), ut: t("#3", "#8", "#4", 3), cv: v("#4", "#10", "#8", "#6", 3), ct: t("#3", "#6", "#4", 1)},
+      spandrel: {hz: {small: "#5", large: "#10", pref: "#8", minN: 2}, dg: {small: "#5", large: "#10", pref: "#8"}, web: {bar: "#4", minSp: L(6), maxSp: L(8)}, tie: {bar: "#4", minSp: L(4), maxSp: L(6)}, vert: {bar: "#4", minSp: L(4), maxSp: L(6), legs: "2"}}};
+  }
+  return {};
+}
+// A rule as the model holds it, over ETABS's defaults (so a value ETABS adds later still has its default).
+const etqMerge = (a, b) => { if (!b || typeof b !== "object" || Array.isArray(b)) return b === undefined ? a : b; const o = {...a}; for (const [k, v] of Object.entries(b)) o[k] = a && typeof a[k] === "object" && a[k] ? etqMerge(a[k], v) : v; return o; };
+const etqClone = o => JSON.parse(JSON.stringify(o));
+const etqGet = (o, p) => p.split(".").reduce((x, k) => x == null ? x : x[k], o);
+const etqSet = (o, p, v) => { const k = p.split("."), last = k.pop(); let x = o; for (const s of k) x = x[s] = x[s] && typeof x[s] === "object" ? x[s] : {}; x[last] = v; };
+async function etqLoad() {
+  const [r, dd] = await Promise.all([hmPost({tool: "detailing_rules", args: {}}).catch(() => null), hmPost({tool: "definition_data", args: {}}).catch(() => null)]);
+  etq.rules = r && r.ok && r.result ? r.result.rules || {} : etq.rules || {};
+  etq.bars = dd && dd.ok && dd.result ? (dd.result.rebar_sizes || []).map(b => ({name: b.name, d: +b.diameter})) : etq.bars;
+}
+const etqRule = form => etqMerge(etqDefaults(form), (etq.rules || {})[form]);
+async function etqSave(form, w) {
+  const j = await hmRun("set_detailing_rules", {form, values: JSON.stringify(w) === JSON.stringify(etqDefaults(form)) ? null : w}, true);
+  if (!j.ok) return j.error || "The rule was not kept.";
+  etq.rules = etq.rules || {}; etq.rules[form] = w; return "";
+}
+// The model's bar sizes; a default ETABS names in US bars (#5) is the model's nearest bar where the model has others.
+const etqUnitF = () => uLen[hmU().l] || 1;
+const etqBarList = () => etq.bars.length ? etq.bars.map(b => b.name) : etqUsBars;
+function etqBar(v) {
+  const list = etqBarList(); if (list.includes(v)) return v;
+  const m = /^#(\d+)$/.exec(v || ""); if (!m || !etq.bars.length) return v;
+  const want = +m[1] / 8 / 39.37008 * etqUnitF();
+  return etq.bars.reduce((b, x) => Math.abs(x.d - want) < Math.abs(b.d - want) ? x : b).name;
+}
+const etqFmt = (v, dec) => v === "" || v === null || v === undefined || !isFinite(+v) ? String(v ?? "") : dec === undefined || dec === "" ? String(+(+v).toPrecision(6)) : (+v).toFixed(+dec);
+// Fields: a number box (u "l" in the model's length unit), a drop-down, a bar size, a check box, a radio button.
+const etqN = (p, dec, u, w) => `<span class="etqNum"><input type="number" step="any" data-p="${p}" data-dec="${dec ?? ""}" ${u ? `data-u="l"` : ""} style="width:${w || 70}px">${u === "l" ? `<span class="etqU">${esc(hmU().l)}</span>` : ""}</span>`;
+const etqT = (p, w) => `<input data-p="${p}" data-t="1" style="width:${w || 70}px">`;
+const etqS = (p, list, w) => `<select data-p="${p}" style="width:${w || 80}px">${list.map(x => `<option>${esc(x)}</option>`).join("")}</select>`;
+const etqB = (p, w) => `<select data-p="${p}" data-bar="1" style="width:${w || 80}px">${etqBarList().map(x => `<option>${esc(x)}</option>`).join("")}</select>`;
+const etqC = (p, label) => `<label class="etqCk"><input type="checkbox" data-p="${p}">${label}</label>`;
+const etqR = (p, v, label) => `<label class="etqCk"><input type="radio" name="etq_${p.replace(/\W/g, "_")}" data-p="${p}" value="${v}">${label}</label>`;
+function etqFill(d, w) {
+  const f = etqUnitF();
+  d.querySelectorAll("[data-p]").forEach(el => {
+    const v = etqGet(w, el.dataset.p);
+    if (el.type === "checkbox") el.checked = !!v;
+    else if (el.type === "radio") el.checked = el.value === v;
+    else if (el.dataset.bar) { const b = etqBar(v); if (![...el.options].some(o => o.value === b)) el.add(new Option(b, b)); el.value = b; }
+    else if (el.tagName === "SELECT") { if (![...el.options].some(o => o.value === String(v))) el.add(new Option(String(v), String(v))); el.value = String(v); }
+    else if (el.dataset.t) el.value = v ?? "";
+    // A length keeps ETABS's decimals in inches; in another unit as many as it needs (6 in = 152.4 mm = 0.1524 m).
+    else el.value = el.dataset.u === "l" ? etqFmt(+v * f, hmU().l === "in" ? el.dataset.dec : "") : etqFmt(v, el.dataset.dec);
+  });
+}
+function etqRead(d, w) {
+  const f = etqUnitF();
+  for (const el of d.querySelectorAll("[data-p]")) {
+    if (el.type === "radio") { if (el.checked) etqSet(w, el.dataset.p, el.value); continue; }
+    if (el.type === "checkbox") { etqSet(w, el.dataset.p, el.checked); continue; }
+    if (el.tagName === "SELECT" || el.dataset.t) { etqSet(w, el.dataset.p, el.value.trim()); continue; }
+    const v = parseFloat(el.value);
+    if (!isFinite(v) || v < 0) return "Each value must be a number of 0 or more.";
+    if (el.dataset.lo && (v < +el.dataset.lo * f || v > +el.dataset.hi * f)) return `Value must be in range ${etqFmt(el.dataset.lo * f)} ${hmU().l} & ${etqFmt(el.dataset.hi * f)} ${hmU().l}`;
+    etqSet(w, el.dataset.p, el.dataset.u === "l" ? +(v / f).toPrecision(12) : v);
+  }
+  return "";
+}
+function etqCss() {
+  if (document.getElementById("etqCss")) return;
+  const s = document.createElement("style"); s.id = "etqCss";
+  s.textContent = `.dlg .etqCk{display:flex;align-items:center;gap:5px;white-space:nowrap;margin:5px 0}.dlg fieldset button{white-space:nowrap}.dlg .etqNum{display:inline-flex;align-items:center;gap:5px}.dlg .etqU{color:var(--mute)}
+.dlg .etqG{display:grid;gap:6px 10px;align-items:center}.dlg .etqIn{padding-left:22px}.dlg .etqBox{border:1px solid var(--line);padding:8px;margin:4px 0}
+.dlg .etqPic{position:relative;font-size:12px}.dlg .etqPic > *{position:absolute}.dlg .etqPic > span,.dlg .etqPic > b{margin-top:-11px}.dlg .etqPic svg{left:0;top:0}.dlg .etqPic .etqNum input{width:52px}.dlg .etqPic select{width:68px}.dlg .etqBl{color:#1a1a9c}
+.dlg table.etqT{border-collapse:collapse;width:100%;font-size:12px}.dlg table.etqT th{background:#bcdcf4;color:#000;border:1px solid #444;font-weight:400;padding:3px}.dlg table.etqT td{border:1px solid #444;padding:0;height:22px;text-align:center;background:#fff;color:#000}
+.dlg table.etqT td.etqL{background:#d4d4d4;text-align:left;padding-left:14px}.dlg table.etqT tr.etqH td{background:#d4d4d4;font-weight:700;text-align:left;padding-left:3px}.dlg table.etqT tr.etlH1 td{background:#0a78d7;color:#fff;font-weight:700;text-align:left;padding-left:3px}
+.dlg table.etqT td.etqX{background:#d4d4d4}.dlg table.etqT input,.dlg table.etqT select{width:100%;border:0;background:transparent;text-align:center;text-align-last:center;color:#000;height:21px}
+.dlg .etqTabs{display:flex;gap:0;align-items:center}.dlg .etqTabs button{border:1px solid transparent;background:none;color:#1a1a9c;padding:2px 6px}.dlg .etqTabs button.on{border-color:#3a8ee6;background:#9fd0f5}.dlg .etqTabs i{border-left:1px solid #999;height:14px}
+.dlg .etqLink{color:#06c;text-decoration:underline;cursor:pointer;background:none;border:0;padding:0}.dlg .etqPrev{border:1px solid var(--line);background:#fff;margin-top:8px}.dlg .etqTool{display:flex;gap:6px;align-items:center;padding:4px;font-size:12px}.dlg .etqTool button{padding:0 4px}`;
+  document.head.appendChild(s);
+}
+// A rule form: its working copy w (all its sub-forms' values too); fill, the enabling of its parts, OK keeps it.
+function etqForm(title, html, w, sync, ok, opts) {
+  etqCss();
+  const d = dialog(title, html, [["OK", x => {
+    const e = etqRead(x, w); if (e) { formError(x, e); return false; }
+    const r = ok(x); if (r && r.then) { r.then(v => { if (v !== false) x.close(); }); return false; } return r;
+  }], ["Cancel"]], {width: opts.width});
+  if (opts.dfInto) dfInto(d, opts.dfInto, true);
+  d.etqW = w;
+  etqFill(d, w);
+  const run = () => { if (sync) sync(d); };
+  d.querySelectorAll("[data-p]").forEach(el => el.addEventListener("change", () => { if (el.type === "radio" || el.type === "checkbox") etqSet(w, el.dataset.p, el.type === "checkbox" ? el.checked : el.value); run(); }));
+  run();
+  return d;
+}
+const etqOff = (d, sel, off) => d.querySelectorAll(sel).forEach(el => { el.querySelectorAll("input,select,button").forEach(i => i.disabled = off); el.style.opacity = off ? 0.55 : ""; });
+// A sub-form: it edits the part of the rule form's copy it is given; OK puts its values back.
+function etqSub(title, html, w, sync, width, after) {
+  const part = etqClone(w);
+  return etqForm(title, html, part, sync, x => { Object.keys(w).forEach(k => delete w[k]); Object.assign(w, part); if (after) after(x); }, {width});
+}
+const etqRows = (pairs, cols) => `<div class="etqG" style="grid-template-columns:${cols || "1fr auto"}">${pairs.map(([a, b]) => `<span>${a}</span>${b}`).join("")}</div>`;
+// A table of rules, as ETABS's grids: a blue header row, grey item names, grey cells where the column has no value.
+function etqTable(w, cols, rows, base, colW) {
+  const head = `<tr><th>Item</th>${cols.map(c => `<th style="width:${colW || 40}px">${esc(c[1])}</th>`).join("")}</tr>`;
+  return `<table class="etqT">${head}${rows.map(r => {
+    if (typeof r === "string") return `<tr class="${r.startsWith("!") ? "etlH1" : "etqH"}"><td>${esc(r.replace(/^!/, ""))}</td>${cols.map(() => "<td></td>").join("")}</tr>`;
+    const [k, label, kind, dec] = r;
+    return `<tr><td class="etqL">${esc(label)}</td>${cols.map(([c]) => {
+      const p = base ? `${base}.${c}.${k}` : `${c}.${k}`; if (etqGet(w, p) === undefined) return `<td class="etqX"></td>`;
+      return `<td>${kind === "bar" ? etqB(p) : kind === "sel" ? etqS(p, r[4]) : kind === "text" ? etqT(p) : etqN(p, dec, kind === "l" ? "lt" : "")}</td>`;
+    }).join("")}</tr>`;
+  }).join("")}</table>`;
+}
+// In a table the unit is in the item's name, as ETABS writes "(in)": lengths there are data-u "lt", read as lengths.
+const etqUnitRows = s => s.replace(/data-u="lt"/g, 'data-u="l"');
+const etqUl = () => esc(hmU().l);
+
+// ---- the menu ----
+function etqDesignHas(k, kind) { return typeof design !== "undefined" && design.some(f => f.key === k && f.list.some(i => !kind || i.objs.some(o => o.kind === kind))); }
+function etqDesigned(kind) {
+  return {beam: etqDesignHas("concrete", "beam"), slab: etqDesignHas("slab"), column: etqDesignHas("concrete", "column"), wall: etqDesignHas("pier"), sbeam: etqDesignHas("steel", "beam"), scolumn: etqDesignHas("steel", "column")}[kind];
+}
+function etqDetailingMenu() {
+  const run = (k, w) => [`Run/Update ${w} Detailing/Check`, "m:etq:run:" + k, "", !etqDesigned(k)];
+  const show = (k, w) => [`Show/Edit ${w} Detailing...`, "m:etq:show:" + k, "", !etq.done[k]];
+  const clear = (k, w) => [`Clear ${w} Detailing...`, "m:etq:clear:" + k, "", !etq.done[k]];
+  const conc = [["beam", "Beam"], ["slab", "Slab/Mat/Footing"], ["column", "Column Stack"], ["wall", "Wall Stack"]], steel = [["sbeam", "Beam"], ["scolumn", "Column Stack"]];
+  const any = Object.keys(etq.done).length > 0;
+  return [["Bar Selection and Curtailment Rule", [["Beam Bar Selection and Curtailment Rule...", "m:etq:beam"], ["Slab/Mat/Footing Bar Selection and Curtailment Rule...", "m:etq:slab"], ["Column Stack Bar Selection and Curtailment Rule...", "m:etq:column"], ["Wall Stack Bar Selection and Curtailment Rule...", "m:etq:wall"]]], 0,
+    ["Clear Detailing...", "m:etq:clearAll"], 0,
+    ["Concrete Detailing", [...conc.map(([k, w]) => run(k, w)), 0, ...conc.map(([k, w]) => show(k, w)), 0, ...conc.map(([k, w]) => clear(k, w))]], 0,
+    ["Steel Detailing", [...steel.map(([k, w]) => run(k, w)), 0, ...steel.map(([k, w]) => show(k, w)), 0, ...steel.map(([k, w]) => clear(k, w))]], 0,
+    ["Drawing Management", [["Drawing Sheet Setup...", "m:etq:sheet"], ["Drawing Format Properties...", "m:etq:format"], 0, ["Open Drawing Manager...", "m:etq:manager"], 0, ["Clear Drawing Manager...", "m:etq:clearManager"]]], 0,
+    ["Generate/Show Beam Groups...", "m:etq:groups", "", !etq.done.beam], 0,
+    ["DetailingComments and Log...", "m:etq:log", "", !any],
+    0, ["Engine Extras", detailingItems()]];
+}
+async function etqAct(a) {
+  const [what, k] = a.split(":");
+  if (["beam", "slab", "column", "wall"].includes(what)) { await etqLoad(); return ({beam: etqBeamForm, slab: etqSlabForm, column: etqColumnForm, wall: etqWallForm})[what](); }
+  if (what === "sheet") return typeof etlSheetSetupForm === "function" ? etlSheetSetupForm() : hmSay("Drawing Sheet Setup is being made identical to ETABS's form.", true);
+  if (what === "format") return typeof etlDrawingFormatForm === "function" ? etlDrawingFormatForm() : hmSay("Drawing Format Properties is being made identical to ETABS's form.", true);
+  if (what === "run") return etqRun(k);
+  if (what === "show") { const s = {beam: "beam", slab: "slab", column: "column", wall: "pier", sbeam: "steel", scolumn: "steel"}[k]; return openSchedule(s); }
+  if (what === "clear") return etqConfirm(`Clear ${etqKinds[k]} Detailing`, `Clear the ${({sbeam: "steel beam", scolumn: "steel column stack"})[k] || "concrete " + etqKinds[k].toLowerCase()} detailing and its drawings?`, () => etqClear([k]));
+  if (what === "clearAll") return etqConfirm("Clear Detailing", "Clear all detailing and its drawings?", () => etqClear(Object.keys(etqKinds)));
+  if (what === "manager") return etqManager();
+  if (what === "clearManager") return etqConfirm("Clear Drawing Manager", "Clear all drawings from the drawing manager?", () => { etq.drawings = []; hmSay("The drawing manager is clear."); });
+  if (what === "groups") return etqGroups();
+  if (what === "log") return etqLogForm();
+}
+function etqConfirm(title, text, yes) { return dialog(title, `<p style="max-width:380px">${esc(text)}</p>`, [["OK", () => { yes(); }], ["Cancel"]], {width: 420}); }
+function etqRun(k) {
+  if (!etqDesigned(k)) return hmSay("Run the design first: detailing is made from the design results.", true);
+  const fam = {beam: "concrete", slab: "slab", column: "concrete", wall: "pier", sbeam: "steel", scolumn: "steel"}[k], kind = {beam: "beam", column: "column", sbeam: "beam", scolumn: "column"}[k];
+  const f = design.find(x => x.key === fam), n = f ? f.list.filter(i => !kind || i.objs.some(o => o.kind === kind)).length : 0;
+  const name = ({sbeam: "Steel Beam", scolumn: "Steel Column Stack"})[k] || "Concrete " + etqKinds[k];
+  etq.done[k] = {at: Date.now(), n};
+  etq.drawings = etq.drawings.filter(x => x.k !== k).concat([{k, name: name + " Schedule", n}]);
+  etq.log.push(`${new Date().toLocaleString("en-US")}  ${name} detailing: ${n} ${k === "wall" ? "piers" : "members"} from the design results, with the ${({sbeam: "beam", scolumn: "column"})[k] || k} bar selection and curtailment rule.`);
+  hmSay(`${name} detailing done: ${n} ${k === "wall" ? "piers" : "members"}.`);
+}
+function etqClear(kinds) { kinds.forEach(k => delete etq.done[k]); etq.drawings = etq.drawings.filter(x => !kinds.includes(x.k)); etq.log.push(`${new Date().toLocaleString("en-US")}  Cleared: ${kinds.map(k => etqKinds[k]).join(", ")}.`); hmSay("Detailing cleared."); }
+function etqManager() {
+  const d = dialog("Drawing Manager", `<div style="height:220px;overflow:auto;border:1px solid var(--line);background:var(--field)"><table class="list" style="width:100%"><tr><th>Drawing</th><th>Members</th></tr>${etq.drawings.map((x, i) => `<tr data-i="${i}"><td>${esc(x.name)}</td><td class="r">${x.n}</td></tr>`).join("") || `<tr><td colspan="2" class="kv">No drawings yet: run a detailing (Detailing &gt; Concrete Detailing or Steel Detailing).</td></tr>`}</table></div>`, [["Close"]], {width: 460});
+  d.querySelectorAll("[data-i]").forEach(tr => tr.ondblclick = () => etqAct("show:" + etq.drawings[+tr.dataset.i].k));
+  return d;
+}
+function etqGroups() {
+  const f = design.find(x => x.key === "concrete"), groups = new Map();
+  for (const it of (f ? f.list : []).filter(i => i.objs.some(o => o.kind === "beam"))) { const s = (it.objs[0] || {}).section || ""; if (!groups.has(s)) groups.set(s, []); groups.get(s).push(it.label + " (" + it.story + ")"); }
+  return dialog("Beam Groups", `<div style="max-height:320px;overflow:auto"><table class="list" style="width:100%"><tr><th>Group</th><th>Section</th><th>Beams</th></tr>${[...groups].map(([s, l], i) => `<tr><td>BG${i + 1}</td><td>${esc(s)}</td><td>${esc(l.join(", "))}</td></tr>`).join("")}</table></div>`, [["Close"]], {width: 620});
+}
+function etqLogForm() { return dialog("Detailing Comments and Log", `<textarea readonly style="width:100%;height:260px;font-family:Consolas,monospace;font-size:12px">${esc(etq.log.join("\n"))}</textarea>`, [["Close"]], {width: 640}); }
+
+// ---- Concrete Beam: Bar Selection and Curtailment Rule ----
+function etqBeamForm() {
+  const w = etqRule("beam"), m = "main";
+  const html = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+    <fieldset><legend>Rebar Curtailment Options</legend>
+      ${etqR(m + ".curt", "rules", "Use Curtailment Rules Only")}${etqR(m + ".curt", "computed", "Use Computed Reinforcement and Curtailment Rules")}<div class="etqIn" id="etqCD">${etqC(m + ".checkDev", "Check Development Length")}</div>
+      <div style="display:flex;gap:40px;margin:22px 0 40px 22px"><button id="etqDev" style="width:140px">Development Length...</button><button id="etqCur" style="width:140px">Curtailment Rules...</button></div></fieldset>
+    <fieldset><legend>Rebar Detail Options</legend>
+      <div style="display:flex;gap:16px">${etqR(m + ".detail", "all", "Detail All Bars")}${etqR(m + ".detail", "above", "Detail Bars Above Typical Bars ( For NonDuctile Only )")}</div>
+      <fieldset id="etqTyp" style="margin:6px 4px 0"><legend>Typical Bars</legend>${etqR(m + ".typAll", "true", "Apply to All Floors")}
+        <div class="etqBox" style="margin:6px 0">${etqRows([["Top Bars, Bar Size", etqB(m + ".topSize", 72)], ["Number", etqS(m + ".topNum", etqNums, 58)], ["Bottom Bars, Bar Size", etqB(m + ".botSize", 72)], ["Nubmer", etqS(m + ".botNum", etqNums, 58)]], "1fr auto 60px auto")}</div>
+        <div style="display:flex;gap:40px">${etqR(m + ".typWhere", "required", "Only Where Required")}${etqR(m + ".typWhere", "full", "Along Full Length")}</div></fieldset></fieldset>
+    <fieldset><legend>${etqC(m + ".enforce", "Enforce User Minimum Reinforcement")}</legend><div id="etqMin" style="display:grid;grid-template-columns:60px 120px 1fr;gap:6px 8px;align-items:center">
+      <span>Top</span><span>${etqN(m + ".minTop", 2)} %</span>${etqR(m + ".minWhere", "required", "Only Where Required")}<span>Bottom</span><span>${etqN(m + ".minBot", 2)} %</span>${etqR(m + ".minWhere", "full", "Along Full Length")}</div></fieldset>
+    <fieldset><legend>&nbsp;</legend><div style="display:flex;gap:24px;justify-content:center;margin-top:10px"><button id="etqSel" style="width:180px">Rebar Selection Rules...</button><button id="etqLong" style="width:180px">Longitudinal Rebars in Section ...</button></div></fieldset></div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:6px;margin-top:10px"><button id="etqDef" style="width:160px">Set to Default Values</button><div id="etqOk"></div></div>`;
+  // ETABS 23.2 sets the typical-bar "Apply to All Floors" radio as its one choice: kept as a string for the radio.
+  w.main.typAll = String(w.main.typAll);
+  const d = etqForm("Concrete Beam: Bar Selection and Curtailment Rule", html, w, d => {
+    etqOff(d, "#etqCD", w.main.curt !== "computed"); etqOff(d, "#etqTyp", w.main.detail !== "above"); etqOff(d, "#etqMin", !w.main.enforce);
+  }, async x => { w.main.typAll = true; const e = await etqSave("beam", w); if (e) { formError(x, e); return false; } hmSay("The beam bar selection and curtailment rule is set."); }, {width: 960, dfInto: "#etqOk"});
+  etqWire(d, "beam", w, {"#etqDev": () => etqDevForm(w.dev), "#etqCur": () => etqBeamCurt(w.curt), "#etqSel": () => etqBeamSelForm(w.sel), "#etqLong": () => etqLongForm(w.long)});
+  return d;
+}
+// The rule form's buttons; Set to Default Values puts ETABS's defaults in the form and in every sub-form.
+function etqWire(d, form, w, buttons) {
+  for (const [sel, f] of Object.entries(buttons)) { const b = q(d, sel); if (b) b.onclick = e => { e.preventDefault(); f(); }; }
+  const def = q(d, "#etqDef");
+  if (def) def.onclick = () => { const n = etqDefaults(form); Object.keys(w).forEach(k => delete w[k]); Object.assign(w, n); for (const x of Object.values(w)) if (x && "typAll" in x) x.typAll = String(x.typAll); etqFill(d, w); d.querySelectorAll("[data-p]")[0].dispatchEvent(new Event("change")); };
+}
+function etqDevForm(w) {
+  return etqSub("Bar Development Rules", `<div class="etqBox" style="padding:12px"><div style="display:grid;grid-template-columns:auto 110px auto 110px;gap:14px 18px;align-items:center">
+    <span>Method</span>${etqS("method", ["ACI"], 100)}<span></span><span></span><span>Bar Coating Type</span>${etqS("coating", ["Uncoated", "Epoxy Coated", "Zinc and Epoxy Dual Coated"], 100)}<span>Concrete Type</span>${etqS("concrete", ["Normal Weight", "Lightweight"], 100)}</div></div>`, w, null, 500);
+}
+const etqBeamNotes = {seismic: ["1. SEE BEAM SCHEDULE FOR STIRRUP TYPE AND SPACING.", "2. ZONE A LENGTH SHALL BE TWICE THE BEAM DEPTH, H.", "3. THE FIRST STIRRUP IN ZONE A SHALL BE LOCATED 2\" MAXIMUM FROM THE FACE OF THE SUPPORT.", "4. LAP SPLICES SHALL NOT BE LOCATED WITHIN THE BEAM/COLUMN JOINT, NOR WITHIN A DISTANCE OF 2H.", "5. LAP SPLICE LENGTH SHALL NOT BE LESS THAN 12\"."], non: ["1. SEE BEAM SCHEDULE FOR STIRRUP TYPE AND SPACING."]};
+// The Typical Beam Elevation ETABS draws under its curtailment rules: spans, bars, stirrup zones A to E, the notes.
+function etqBeamElev(spans, mode, v) {
+  const W = 360, x0 = 20, y = 50, h = 30, sw = W / spans, out = [];
+  out.push(`<line x1="${x0}" y1="10" x2="${x0 + W}" y2="10" stroke="#000"/><text x="${x0 + W / 2}" y="8" font-size="7" text-anchor="middle">${v.base === "cc" ? "Lc" : "Ln"}</text>`);
+  for (let s = 0; s <= spans; s++) { const x = x0 + s * sw; out.push(`<line x1="${x - 4}" y1="${y - 20}" x2="${x - 4}" y2="${y + h + 20}" stroke="#000" stroke-width=".6"/><line x1="${x + 4}" y1="${y - 20}" x2="${x + 4}" y2="${y + h + 20}" stroke="#000" stroke-width=".6"/>`); }
+  out.push(`<rect x="${x0}" y="${y}" width="${W}" height="${h}" fill="none" stroke="#00008b" stroke-width="1.4" rx="4"/>`);
+  for (let s = 0; s < spans; s++) {
+    const a = x0 + s * sw, zone = sw * 0.18;
+    for (let x = a + 6; x < a + sw - 4; x += (x < a + zone || x > a + sw - zone) ? 3 : 9) out.push(`<line x1="${x}" y1="${y + 2}" x2="${x}" y2="${y + h - 2}" stroke="#00008b" stroke-width=".7"/>`);
+    ["ZONE A", "ZONE B", "ZONE C", "ZONE D", "ZONE E"].forEach((z, i) => out.push(`<text x="${a + sw * [0.09, 0.26, 0.5, 0.74, 0.91][i]}" y="${y + h + 32}" font-size="5.5" text-anchor="middle">${z}</text>`));
+    const tl = (v.A || 0.25) * sw, tr = (v.C || 0.3) * sw;
+    out.push(`<line x1="${a + 2}" y1="${y + 6}" x2="${a + tl}" y2="${y + 6}" stroke="#00008b" stroke-width="1.6"/><line x1="${a + sw - tr}" y1="${y + 6}" x2="${a + sw - 2}" y2="${y + 6}" stroke="#00008b" stroke-width="1.6"/>`);
+  }
+  out.push(`<text x="${x0 + W / 2}" y="${y - 8}" font-size="5.5" text-anchor="middle">BEAM HEIGHT</text>`);
+  etqBeamNotes[mode].forEach((n, i) => out.push(`<text x="${x0}" y="${y + h + 48 + i * 7}" font-size="4.8">${i ? "" : "NOTES:  "}${esc(n)}</text>`));
+  out.push(`<circle cx="${x0 + 6}" cy="${y + h + 96}" r="6" fill="none" stroke="#000"/><text x="${x0 + 18}" y="${y + h + 96}" font-size="7" font-weight="700">Typical Beam Elevation 1</text><line x1="${x0 + 12}" y1="${y + h + 99}" x2="${x0 + W}" y2="${y + h + 99}" stroke="#000"/>`);
+  return `<svg viewBox="0 0 400 190" width="100%" height="100%">${out.join("")}</svg>`;
+}
+function etqPreview(id) {
+  return `<div class="etqPrev"><div class="etqTool"><button data-z="fit" title="Zoom to fit">&#x26F6;</button><button data-z="1.25" title="Zoom in">&#x2295;</button><button data-z="0.8" title="Zoom out">&#x2296;</button><button data-z="pan" title="Pan">&#x270B;</button>
+    ${id === "beam" ? `<button class="etqLink" data-sp="1" style="text-decoration:none;color:inherit">Single Span</button><button class="etqLink" data-sp="2" style="text-decoration:none;color:inherit">Double Span</button><button class="etqLink" data-sp="3" style="text-decoration:none;color:inherit">Multiple Span</button>` : ""}</div>
+    <div class="etqPv" style="height:260px;overflow:hidden;display:flex;justify-content:center"><div class="etqPvIn" style="width:560px;transform-origin:50% 0"></div></div></div>`;
+}
+function etqPreviewWire(d, draw) {
+  let z = 1, spans = 1;
+  const paint = () => { q(d, ".etqPvIn").innerHTML = draw(spans); q(d, ".etqPvIn").style.transform = `scale(${z})`; };
+  d.querySelectorAll("[data-z]").forEach(b => b.onclick = () => { if (b.dataset.z === "fit") z = 1; else if (b.dataset.z !== "pan") z = Math.max(0.4, Math.min(4, z * +b.dataset.z)); paint(); });
+  d.querySelectorAll("[data-sp]").forEach(b => b.onclick = () => { spans = +b.dataset.sp; paint(); });
+  d.addEventListener("change", paint); paint();
+}
+// Rebar Curtailment Rules: ETABS's drawing of the bars with each cut-off length beside its bar (pictures 1 seismic, 2 non seismic).
+function etqBeamCurt(w) {
+  const part = etqClone(w), seis = "seismic", non = "non";
+  const top = (p, x, y, label, unit) => `<span style="left:${x - 15}px;top:${y + 3}px">${label || ""}</span><span style="left:${x}px;top:${y}px">${etqN(p, 2)} <span class="etqBl" style="position:static">x ${unit || "Ln"}</span></span>`;
+  const sel = (p, list, x, y) => `<span style="left:${x}px;top:${y}px">${etqS(p, list)}</span>`;
+  const ln = (x1, y1, x2, y2, c) => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${c || "#00008b"}" stroke-width="${c ? 1 : 2}"/>`;
+  const sup = `${ln(124, 5, 124, 240, "#888")}${ln(137, 5, 137, 240, "#888")}${ln(150, 5, 150, 240, "#888")}<line x1="497" y1="5" x2="497" y2="240" stroke="#999" stroke-dasharray="4 3"/><line x1="512" y1="5" x2="512" y2="240" stroke="#999" stroke-dasharray="4 3"/><line x1="527" y1="5" x2="527" y2="240" stroke="#999" stroke-dasharray="4 3"/>`;
+  const s = "seismic.", n = "non.";
+  const seisPic = `<div class="etqPic" data-mode="seismic" style="height:240px;width:800px"><svg width="800" height="240">${sup}${ln(124, 32, 305, 32)}${ln(124, 32, 124, 60)}${ln(139, 100, 265, 100)}${ln(139, 100, 139, 125)}${ln(357, 32, 657, 32)}${ln(396, 100, 617, 100)}
+      ${ln(14, 107, 797, 107, "#888")}${ln(139, 153, 265, 153)}${ln(124, 181, 305, 181)}${ln(124, 155, 124, 181)}${ln(396, 153, 617, 153)}${ln(357, 181, 657, 181)}</svg>
+    <b style="left:24px;top:18px;font-weight:400">Top bars</b>${sel(s + "hA", etqHooks, 40, 43)}${sel(s + "hB", etqHooks, 40, 73)}
+    ${top(s + "A", 210, 16, "A")}${sel(s + "pA", etqPct, 212, 54)}${top(s + "B", 210, 84, "B")}${top(s + "C", 477, 16, "C")}${sel(s + "pC", etqPct, 477, 54)}${top(s + "D", 477, 84, "D")}
+    <b style="left:24px;top:128px;font-weight:400">Bottom bars</b>${sel(s + "hG", etqHooks, 40, 148)}${sel(s + "hF", etqHooks, 40, 180)}
+    ${top(s + "G", 210, 138, "G")}${top(s + "J", 477, 134, "J")}${top(s + "F", 210, 170, "F")}${top(s + "H", 477, 170, "H")}${sel(s + "pF", etqPct, 212, 206)}${sel(s + "pH", etqPct, 477, 206)}</div>`;
+  const nonPic = `<div class="etqPic" data-mode="non" style="height:250px;width:800px"><svg width="800" height="250">${sup}${ln(124, 56, 287, 56)}${ln(124, 56, 124, 84)}${ln(287, 62, 382, 62)}${ln(372, 56, 639, 56)}${ln(139, 121, 252, 121)}${ln(139, 121, 139, 148)}${ln(407, 121, 605, 121)}
+      ${ln(14, 134, 797, 134, "#888")}${ln(222, 166, 420, 166)}${ln(592, 166, 797, 166)}${ln(124, 193, 797, 193)}${ln(124, 166, 124, 193)}</svg>
+    <b style="left:24px;top:18px;font-weight:400">Top bars</b>${sel(n + "hA", etqHooks, 40, 39)}${sel(n + "hB", etqHooks, 40, 105)}
+    ${top(n + "A", 210, 39, "A")}${sel(n + "pA", etqPct, 212, 78)}<span class="etqBl" style="left:333px;top:52px">E</span>${top(n + "C", 477, 39, "C")}${sel(n + "pC", etqPct, 477, 78)}${top(n + "B", 210, 105, "B")}${top(n + "D", 477, 105, "D")}
+    <b style="left:24px;top:154px;font-weight:400">Bottom bars</b>${sel(n + "hF", etqHooks, 40, 200)}<span style="left:195px;top:184px">F</span>
+    ${top(n + "Fl", 210, 150, "", "Lc")}${top(n + "G", 477, 150, "G")}${top(n + "Fr", 647, 150, "", "Lc")}${sel(n + "pG", etqPct, 477, 183)}${sel(n + "pFr", etqPct, 647, 183)}</div>`;
+  const lengths = m => `<fieldset data-mode="${m}"><legend>Curtail based on</legend>${etqR(m + ".base", "clear", "Clear Span, Ln")}${etqR(m + ".base", "cc", "C/C Span, Lc")}
+    <fieldset style="margin-top:${m === seis ? 14 : 22}px"><legend>Bar Lengths</legend>${etqRows([[m === seis ? "Minimum Bar Length" : "Minimum Length", etqN(m + ".minLen", 1, "l", 80)], [m === seis ? "Maximum Bar Length" : "Maximum Length", etqN(m + ".maxLen", 1, "l", 80)], ["Minimum Splice Length", etqN(m + ".minSplice", 1, "l", 80)], ["Splice length, factor of Bar Dia", etqN(m + ".spliceFac", 2, "", 80)]])}
+    <div style="margin-top:6px">${etqC(m + ".minimize", "Minimize Splices")}</div></fieldset></fieldset>`;
+  const html = `<div style="display:flex;gap:16px;margin:0 0 8px 8px">${etqR("mode", seis, "Seismic Detailing")}${etqR("mode", non, "Non Seismic Detailing")}</div>
+    <div style="display:grid;grid-template-columns:820px 1fr;gap:10px"><fieldset><legend>Curtailment Rules</legend>${seisPic}${nonPic}</fieldset><div>${lengths(seis)}${lengths(non)}</div></div>${etqPreview("beam")}`;
+  const d = etqForm("Rebar Curtailment Rules", html, part, d => d.querySelectorAll("[data-mode]").forEach(x => x.style.display = x.dataset.mode === part.mode ? "" : "none"),
+    () => { Object.assign(w, part); }, {width: 1240});
+  etqPreviewWire(d, spans => { etqRead(d, part); return etqBeamElev(spans, part.mode, part[part.mode]); });
+  return d;
+}
+function etqBeamSelForm(w) {
+  const part = etqClone(w), barCols = ["A", "B", "C", "D", "F", "G", "H", "J"].map(c => [c, c]), zones = ["A", "B", "C", "D", "E"].map(c => [c, "Zone " + c]), U = etqUl();
+  const table = m => `<div data-mode="${m}"><fieldset><legend>Bar Size</legend>${etqTable(part, barCols, ["!Bar Sizes", ["small", "Smallest Bar Size", "bar"], ["large", "Largest Bar Size", "bar"], ["pref", "Preferred Bar Size", "bar"], "Bar Numbers", ["minN", "Minimum Number of Bars", "n"], ["maxN", "Maximum Number of Bars", "n"]], m + ".bar")}</fieldset>
+    <fieldset><legend>Stirrups Legs</legend><div style="max-height:330px;overflow-y:auto">${etqUnitRows(etqTable(part, zones, ["!Bar Sizes", ["small", "Smallest Bar Size", "bar"], ["large", "Largest Bar Size", "bar"], ["pref", "Preferred Bar Size", "bar"], "Spacing",
+      ["minSp", `Minimum Spacing (${U})`, "l"], ["maxSp", `Maximum Spacing (${U})`, "l"], ["maxSpD", "Maximum Spacing (Factor of beam depth)", "n"], ["maxSpM", "Maximum Spacing (Factor of main bar dia)", "n"], ["maxSpT", "Maximum Spacing (Factor of tie dia)", "n"], "Stirrups Legs",
+      ["minLeg", "Minimum Number of Legs", "n"], ["maxLeg", "Maximum Number of Legs", "n"], ["legSp", "Maximum Spacing of Legs", "n"], ["legSpW", "Maximum Spacing of Legs (Factor of beam web width)", "n", 1], ["legSpM", "Maximum Spacing of Legs (Factor of main bar dia)", "n"], ["legSpT", "Maximum Spacing of Legs (Factor of tie bar dia)", "n"], "Others",
+      ["type", "Stirrup Type", "sel", "", ["90 Deg", "135 Deg", "180 Deg"]], ["zoneLen", "Zone Length (Factor of beam height)", "n"]], m + ".stir", 60))}</div></fieldset></div>`;
+  const d = etqForm("Rebar Selection Rules", `<div style="display:flex;gap:16px;margin:0 0 6px 6px">${etqR("mode", "seismic", "Seismic Detailing")}${etqR("mode", "non", "Non Seismic Detailing")}</div>${table("seismic")}${table("non")}
+    <div style="margin-top:8px"><button class="etqLink" id="etqElev">Click to see Typical Beam Elevations</button></div>`, part,
+    d => d.querySelectorAll("[data-mode]").forEach(x => x.style.display = x.dataset.mode === part.mode ? "" : "none"), () => { Object.assign(w, part); }, {width: 860});
+  q(d, "#etqElev").onclick = () => { const e = dialog("Typical Beam Elevations", `<div style="width:640px;height:300px">${etqBeamElev(1, part.mode, {base: "clear", A: 0.25, C: 0.3})}</div>`, [["Close"]], {width: 680}); return e; };
+  return d;
+}
+function etqLongForm(w) {
+  return etqSub("Longitudinal Rebars in Sections", `<fieldset><legend>Longitudinal Rebar Layout in Section</legend><div style="display:grid;grid-template-columns:210px 190px 1fr;gap:8px 14px;align-items:center">
+      <span></span>${etqR("how", "abs", "Absolute")}${etqR("how", "rel", "Relative to Largest Bar Dia")}
+      <span>Maximum Bar Spacing, x</span><span class="etqA">${etqN("maxSp", 1, "l", 120)}</span><span class="etqRl">${etqN("rMax", "", "", 120)}</span>
+      <span>Minimum Bar Spacing, x</span><span class="etqA">${etqN("minSp", 1, "l", 120)}</span><span class="etqRl">${etqN("rMin", "", "", 120)}</span>
+      <span>Spacing Between Layers, y1</span><span class="etqA">${etqN("layerSp", 1, "l", 120)}</span><span class="etqRl">${etqN("rLayer", "", "", 120)}</span>
+      <span>Minimum Number of Bars in each Layer</span>${etqS("minBars", etqNums, 135)}<span></span><span>Maximum Number of Layers</span>${etqS("maxLayers", etqNums, 135)}<span></span></div></fieldset>
+    <fieldset><legend>Additional Bars in Beam Web</legend><div style="display:grid;grid-template-columns:210px 190px 140px 1fr;gap:8px 14px;align-items:center">
+      <span>Provided for Beam Depth Greater Than, h</span>${etqN("webH", 1, "l", 120)}<span>Factor of Beam Height, h</span>${etqN("webFac", 2, "", 120)}
+      <span>Bar Size</span>${etqB("webBar", 135)}<span>Placement of Skin Bars</span>${etqS("skin", ["Full Length", "Only Where Required"], 135)}
+      <span>Maximum Bar Spacing, s</span>${etqN("webSp", 1, "l", 120)}<span></span><span></span></div></fieldset><p style="margin:6px 0 0">Note: These rules may not be satisfied in all conditions</p>`, w,
+    d => { etqOff(d, ".etqA", q(d, "[data-p=how][value=rel]").checked); etqOff(d, ".etqRl", q(d, "[data-p=how][value=abs]").checked); }, 760);
+}
+
+// ---- Slab/Mat/Footing: Bar Selection and Curtailment Rule ----
+function etqTypBars(p) {
+  return `<fieldset style="margin-top:6px" class="etqTypB"><legend>Typical Bars</legend>${etqR(p + ".typAll", "true", "Apply to All Floors")}<div class="etqBox" style="display:grid;grid-template-columns:170px 100px 100px;gap:8px 4px;align-items:center;margin-top:6px">
+    <span></span><span>Along Layer-A</span><span>Along Layer-B</span><span>Top Bars, Bar Size</span>${etqB(p + ".topA", 60)}${etqB(p + ".topB", 60)}<span>Spacing</span>${etqN(p + ".topSpA", 1, "l", 62)}${etqN(p + ".topSpB", 1, "l", 62)}
+    <span>Bottom Bars, Bar Size</span>${etqB(p + ".botA", 60)}${etqB(p + ".botB", 60)}<span>Spacing</span>${etqN(p + ".botSpA", 1, "l", 62)}${etqN(p + ".botSpB", 1, "l", 62)}</div></fieldset>`;
+}
+function etqSlabForm() {
+  const w = etqRule("slab"), s = "slab", U = etqUl();
+  ["slab", "mat", "footing"].forEach(k => w[k].typAll = String(w[k].typAll));
+  const detail = p => `<fieldset><legend>Rebar Detail Options</legend>${etqR(p + ".detail", "all", "Detail All Bars")}${etqR(p + ".detail", "above", "Detail Bars Above Typical Bars")}${etqTypBars(p)}</fieldset>`;
+  const openings = p => `<fieldset><legend>${etqC(p + ".open", "Add Rebars around Openings")}</legend><div class="etqOpen">${etqRows([["Bar Size", etqB(p + ".openBar", 80)], ["No. of Bars on each Edge", etqN(p + ".openN", p === s ? 2 : "", "", 70)], ["Bar Extension into Slab", etqN(p + ".openExt", 1, "l", 70)]], "160px 1fr")}</div></fieldset>`;
+  const rulesBox = (id) => `<fieldset><legend>&nbsp;</legend><label class="etqCk" style="opacity:.55"><input type="checkbox" checked disabled>Use Bar Selection Rules for Strips</label><div style="text-align:center;margin:6px"><button id="${id}" style="width:240px">Edit Rebar Selection Rules...</button></div></fieldset>`;
+  const slabTab = `<div class="ipage on" data-page="Slab"><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+    <div><fieldset><legend>Rebar Curtailment Options</legend>${etqR(s + ".curt", "computed", "Use Computed Reinforcement Only")}<div class="etqIn" id="etqSA">${etqC(s + ".alt", "Curtail Alternate Bars")}${etqC(s + ".addDev", "Add Development Length")}</div>
+        ${etqR(s + ".curt", "rules", "Use Curtailment Rules Only")}${etqR(s + ".curt", "computedRules", "Use Computed Reinforcement and Rules")}<div class="etqIn" id="etqSC">${etqC(s + ".checkDev", "Check Development Length")}</div>
+        <div style="display:flex;gap:40px;margin:6px 0 0 14px"><button id="etqSDev" style="width:140px">Development Length...</button><button id="etqSCur" style="width:140px">Curtailment Rules...</button></div></fieldset>
+      ${detail(s)}${openings(s)}</div>
+    <div><fieldset><legend>${etqC(s + ".enforce", "Enforce User Minimum Reinforcement")}</legend><div id="etqSMin" style="display:grid;grid-template-columns:120px 100px 1fr 100px;gap:6px 8px;align-items:center">
+        <span>Column Strip, Top</span><span>${etqN(s + ".csTop", 2, "", 60)} %</span><span style="text-align:right">Bottom</span><span>${etqN(s + ".csBot", 2, "", 60)} %</span>
+        <span>Middle Strip, Top</span><span>${etqN(s + ".msTop", 2, "", 60)} %</span><span style="text-align:right">Bottom</span><span>${etqN(s + ".msBot", 2, "", 60)} %</span>
+        <span>Slab on Beams, Top</span><span>${etqN(s + ".sbTop", 2, "", 60)} %</span><span style="text-align:right">Bottom</span><span>${etqN(s + ".sbBot", 2, "", 60)} %</span></div></fieldset>
+      <fieldset><legend>Integrity Rebars on Columns for Flat Slabs</legend>${etqC(s + ".integ", "Provide Additional Bottom Bars Over Columns")}<div id="etqSI" style="display:grid;grid-template-columns:120px 90px 1fr 90px;gap:6px 8px;align-items:center;margin-top:4px">
+        <span>Number</span>${etqS(s + ".integN", etqNums, 80)}<span style="text-align:right">Bar Size</span>${etqB(s + ".integBar", 90)}<span>Factor of Span Length</span>${etqN(s + ".integFac", 2, "", 70)}</div></fieldset>
+      <fieldset><legend>${etqC(s + ".waffle", "User Minimum Reinforcement-Waffles and Ribs")}</legend><div id="etqSW" style="display:grid;grid-template-columns:110px 90px 1fr 110px;gap:5px 8px;align-items:center">
+        <b style="grid-column:1/5;font-weight:400">Top Slab Rebars</b><span class="etqIn" style="padding-left:10px">Bar Size</span>${etqB(s + ".wTopBar", 90)}<span style="text-align:right">Spacing</span>${etqN(s + ".wTopSp", 1, "l", 60)}
+        <b style="grid-column:1/5;font-weight:400">Rib Rebars</b><span style="padding-left:10px">Top Bar Size</span>${etqB(s + ".wRibTop", 90)}<span style="text-align:right">Min. Number</span>${etqN(s + ".wRibTopN", 2, "", 60)}
+        <span style="padding-left:10px">Bottom Bar Size</span>${etqB(s + ".wRibBot", 90)}<span style="text-align:right">Min. Number</span>${etqN(s + ".wRibBotN", 2, "", 60)}
+        <span style="padding-left:10px">${etqC(s + ".wStir", "Stirrups")}</span>${etqB(s + ".wStirBar", 90)}<span style="text-align:right">Spacing</span>${etqN(s + ".wStirSp", 1, "l", 60)}</div></fieldset>
+      <fieldset><legend>${etqC(s + ".combine", "Combine Adjacent Short Span Bottom Bars")}</legend><div id="etqSK">${etqRows([["Maximum Short Span Length to Combine", etqN(s + ".combineLen", 1, "l", 90)]])}</div></fieldset>
+      ${rulesBox("etqSSel")}
+      <fieldset><legend>${etqC(s + ".drop", "Add Bottom Bars in Drop Panels")}</legend><div id="etqSD">${etqRows([["Drop Panel Bot Bar Area", etqB(s + ".dropBar", 100)], ["Drop Panel Bot Bar Spacing", etqN(s + ".dropSp", 1, "l", 90)]], "200px 1fr")}</div></fieldset></div></div></div>`;
+  const other = p => `<div class="ipage" data-page="${p === "mat" ? "Mat" : "Footing"}"><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+    <div><fieldset><legend>Rebar Curtailment Options</legend><label class="etqCk"><input type="radio" checked>Use Computed Reinforcement</label><div class="etqIn">${etqC(p + ".alt", "Curtail Alternate Bars")}${etqC(p + ".addDev", "Add Development Length")}</div>
+      <div style="margin:6px 0 0 14px"><button data-dev="${p}" style="width:140px">Development Length...</button></div></fieldset>${detail(p)}</div>
+    <div><fieldset><legend>${etqC(p + ".enforce", "Enforce User Minimum Reinforcement")}</legend><div class="etqMin_${p}" style="display:grid;grid-template-columns:110px 1fr;gap:6px;align-items:center"><span>Top</span><span>${etqN(p + ".top", 2, "", 60)} %</span><span>Bottom</span><span>${etqN(p + ".bot", 2, "", 60)} %</span></div></fieldset>
+      ${p === "mat" ? openings(p) : ""}${rulesBox(p === "mat" ? "etqMSel" : "etqFSel")}</div></div></div>`;
+  const html = `<div class="itabs"><button class="on" data-page="Slab">Slab</button><button data-page="Mat">Mat</button><button data-page="Footing">Footing</button></div>${slabTab}${other("mat")}${other("footing")}
+    <div style="display:flex;flex-direction:column;align-items:center;gap:6px;margin-top:10px"><button id="etqDef" style="width:160px">Set to Default Values</button><div id="etqOk"></div></div>`;
+  const d = etqForm("Slab/Mat/Footing: Bar Selection and Curtailment Rule", html, w, d => {
+    const sl = w.slab;
+    etqOff(d, "#etqSA", sl.curt !== "computed"); etqOff(d, "#etqSC", sl.curt !== "computedRules"); q(d, "#etqSCur").disabled = sl.curt === "computed";
+    d.querySelectorAll(".ipage").forEach((pg, i) => { const k = ["slab", "mat", "footing"][i]; pg.querySelectorAll(".etqTypB").forEach(x => { x.querySelectorAll("input,select").forEach(e => e.disabled = w[k].detail !== "above"); x.style.opacity = w[k].detail !== "above" ? 0.55 : ""; }); });
+    etqOff(d, "#etqSMin", !sl.enforce); etqOff(d, "#etqSI", !sl.integ); etqOff(d, "#etqSW", !sl.waffle); etqOff(d, "#etqSK", !sl.combine); etqOff(d, "#etqSD", !sl.drop);
+    if (sl.waffle) q(d, `[data-p="slab.wStirBar"]`).disabled = q(d, `[data-p="slab.wStirSp"]`).disabled = !sl.wStir;
+    d.querySelectorAll(".ipage .etqOpen").forEach((x, i) => { const k = i ? "mat" : "slab"; x.querySelectorAll("input,select").forEach(e => e.disabled = !w[k].open); x.style.opacity = w[k].open ? "" : 0.55; });
+    etqOff(d, ".etqMin_mat", !w.mat.enforce); etqOff(d, ".etqMin_footing", !w.footing.enforce);
+  }, async x => { ["slab", "mat", "footing"].forEach(k => w[k].typAll = true); const e = await etqSave("slab", w); if (e) { formError(x, e); return false; } hmSay("The slab/mat/footing bar selection and curtailment rule is set."); }, {width: 1000, dfInto: "#etqOk"});
+  etqWire(d, "slab", w, {"#etqSDev": () => etqDevForm(w.dev.slab), "#etqSCur": () => etqSlabCurtForm(w.curt), "#etqSSel": () => etqStripForm(w.strip), "#etqMSel": () => etqStripForm(w.matStrip), "#etqFSel": () => etqFootSelForm(w.footSel)});
+  d.querySelectorAll("[data-dev]").forEach(b => b.onclick = () => etqDevForm(w.dev[b.dataset.dev]));
+  return d;
+}
+function etqStripForm(w) {
+  const part = etqClone(w), cols = ["A", "B", "C", "D", "F", "G"].map(c => [c, c]), U = etqUl();
+  const table = m => `<div data-mode="${m}">${etqUnitRows(etqTable(part, cols, ["!Bar Sizes", ["small", "Smallest Bar Size", "bar"], ["large", "Largest Bar Size", "bar"], ["pref", "Preferred Bar Size", "bar"], "Bar Numbers & Spacing",
+    ["minSp", `Minimum Spacing (${U})`, "l"], ["maxSp", `Maximum Spacing (${U})`, "l"], ["fac", "Maximum Spacing (Factor of d)", "n"]], m))}<div style="height:90px;background:#888;border:1px solid #444;border-top:0"></div></div>`;
+  return etqForm("Rebar Selection Rules for Strip", `<div style="display:flex;gap:16px;margin:0 0 6px 6px">${etqR("mode", "cs", "Column Strip")}${etqR("mode", "ms", "Middle Strip")}${etqR("mode", "sb", "Slabs On Beams")}</div>
+    <div style="border:1px solid #888;text-align:center;padding:3px;margin-bottom:4px">Longitudinal Bars</div>${table("cs")}${table("ms")}${table("sb")}`, part,
+    d => d.querySelectorAll("[data-mode]").forEach(x => x.style.display = x.dataset.mode === part.mode ? "" : "none"), () => { Object.assign(w, part); }, {width: 580});
+}
+function etqFootSelForm(w) {
+  const U = etqUl();
+  return etqSub("Rebar Selection Rules for Footing", `<div style="border:1px solid #888;text-align:center;padding:3px;margin-bottom:4px">Longitudinal Bars</div>${etqUnitRows(etqTable(w, [["top", "Top Bars"], ["bot", "BottomBars"]], ["!Bar Sizes", ["small", "Smallest Bar Size", "bar"], ["large", "Largest Bar Size", "bar"], ["pref", "Preferred Bar Size", "bar"], "Bar Numbers & Spacing",
+    ["minSp", `Minimum Spacing (${U})`, "l"], ["maxSp", `Maximum Spacing (${U})`, "l"], ["fac", "Maximum Spacing (Factor of d)", "n"]], "", 180))}`, w, null, 580);
+}
+// Slab Rebar Curtailment Rules: five strip kinds, each ETABS's drawing of the exterior and interior span with its lengths.
+function etqSlabCurtForm(w) {
+  const part = etqClone(w), kinds = [["cs", "Column Strip"], ["csd", "Column Strip With Drop Panels"], ["ms", "Middle Strip"], ["msd", "Middle Strip With Drop Panels"], ["sb", "Slabs With Beams"]];
+  let cur = "cs";
+  const ln = (x1, y1, x2, y2) => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#00008b" stroke-width="2"/>`, lab = (t, x, y) => `<span class="etqBl" style="left:${x}px;top:${y}px">${t}</span>`;
+  const num = (p, x, y, word, dec) => `<span style="left:${x}px;top:${y}px">${etqN(p, dec ?? 2, "")} <span class="etqBl" style="position:static">${word}</span></span>`;
+  const pct = (p, x, y, word) => `<span style="left:${x}px;top:${y}px">${etqS(p, etqPct, 64)} <span class="etqBl" style="position:static">${word}</span></span>`;
+  const hook = (p, x, y) => `<span style="left:${x}px;top:${y}px">${etqS(p, etqHooks, 84)}</span>`;
+  const len = (p, x, y) => `<span style="left:${x}px;top:${y}px">${etqN(p, 1, "l")}</span>`;
+  const frame = `<svg width="820" height="380">${[125, 133, 143, 425, 433, 443].map(x => `<line x1="${x}" y1="32" x2="${x}" y2="368" stroke="#777" stroke-dasharray="${x % 2 ? "" : "4 3"}"/>`).join("")}<line x1="0" y1="163" x2="810" y2="163" stroke="#888"/>
+    <line x1="145" y1="313" x2="423" y2="313" stroke="#333" marker-start="url(#etqAr)" marker-end="url(#etqAr)"/><line x1="445" y1="313" x2="810" y2="313" stroke="#333" marker-start="url(#etqAr)"/><line x1="135" y1="338" x2="433" y2="338" stroke="#333" marker-start="url(#etqAr)" marker-end="url(#etqAr)"/><line x1="433" y1="338" x2="810" y2="338" stroke="#333" marker-start="url(#etqAr)"/>
+    <defs><marker id="etqAr" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6" fill="none" stroke="#333"/></marker></defs>__BARS__</svg>
+    <b style="left:11px;top:16px" class="etqBl">Top Bars</b><b style="left:11px;top:172px" class="etqBl">Bottom Bars</b>
+    ${lab("Clear Span - Ln", 236, 285)}${lab("Clear Span - Ln", 477, 285)}${lab("C/C Span - Lc", 236, 310)}${lab("C/C Span - Lc", 477, 310)}${lab("Exterior Span", 236, 340)}${lab("Interior Span", 477, 340)}`;
+  const pic = k => {
+    const p = k + ".";
+    if (k === "ms" || k === "msd") return `<div class="etqPic" data-kind="${k}" style="height:380px;width:820px">${frame.replace("__BARS__", ln(125, 54, 235, 54) + ln(125, 54, 125, 73) + ln(340, 54, 525, 54) + ln(125, 193, 380, 193) + ln(485, 193, 810, 193) + ln(125, 250, 435, 250) + ln(125, 232, 125, 250) + ln(427, 245, 810, 245))}
+      ${hook(p + "hA", 22, 49)}${[1, 2, 3].map((i, j) => num(p + "t" + i, [150, 305, 450][j], 14, "x T") + num(p + "a" + i, [150, 305, 450][j], 39, "x L") + pct(p + "p" + i, [150, 305, 450][j], 69, "of Ast")).join("")}${lab("A", 229, 52)}${lab("C", 530, 52)}
+      ${hook(p + "hG", 22, 189)}${hook(p + "hF", 22, 249)}${[1, 2, 3].map((i, j) => num(p + "g" + i, [150, 305, 450][j], 178, "x L") + pct(p + "q" + i, [150, 305, 450][j], 209, "% of Ast")).join("")}${lab("G", 383, 190)}${lab("G", 803, 190)}${lab("F", 199, 244)}${lab("F", 803, 244)}
+      ${len(p + "f1", 150, 269)}${len(p + "f2", 425, 269)}</div>`;
+    return `<div class="etqPic" data-kind="${k}" style="height:380px;width:820px">${frame.replace("__BARS__", ln(125, 54, 235, 54) + ln(125, 54, 125, 73) + ln(340, 54, 525, 54) + ln(125, 124, 200, 124) + ln(125, 124, 125, 141) + ln(365, 124, 500, 124) + ln(125, 202, 810, 202) + ln(125, 250, 810, 250) + ln(125, 232, 125, 250))}
+      ${hook(p + "hA", 22, 49)}${hook(p + "hB", 22, 119)}${[1, 2, 3].map((i, j) => num(p + "t" + i, [150, 305, 450][j], 14, "x T") + num(p + "a" + i, [150, 305, 450][j], 39, "x L") + pct(p + "p" + i, [150, 305, 450][j], 69, "of Ast") + num(p + "b" + i, [150, 305, 450][j], 107, "x L")).join("")}
+      ${lab("A", 229, 52)}${lab("C", 530, 52)}${lab("B", 201, 124)}${lab("D", 501, 124)}${hook(p + "hG", 22, 189)}${hook(p + "hF", 22, 249)}${lab("G", 389, 190)}${lab("F", 389, 249)}${len(p + "f1", 150, 269)}</div>`;
+  };
+  const html = `<div style="display:grid;grid-template-columns:840px 1fr;gap:10px"><fieldset><legend>Curtailment Rules</legend><div class="etqTabs">${kinds.map(([k, t], i) => `${i ? "<i></i>" : ""}<button data-k="${k}" class="${k === cur ? "on" : ""}" title="${t}">${t}</button>`).join("")}</div>${kinds.map(([k]) => pic(k)).join("")}</fieldset>
+    <div style="display:flex;flex-direction:column"><fieldset><legend>Curtail based on</legend>${etqR("base", "clear", "Clear Span, Ln")}${etqR("base", "cc", "C/C Span, Lc")}</fieldset><p class="etqBl" style="margin:24px 12px">T= Slab Thickness</p><span style="flex:1"></span><div id="etqOk"></div></div></div>${etqPreview("slab")}`;
+  const d = etqForm("Slab Rebar Curtailment Rules", html, part, d => d.querySelectorAll("[data-kind]").forEach(x => x.style.display = x.dataset.kind === cur ? "" : "none"), () => { Object.assign(w, part); }, {width: 1100});
+  dfInto(d, "#etqOk");
+  d.querySelectorAll(".etqTabs button").forEach(b => b.onclick = () => { cur = b.dataset.k; d.querySelectorAll(".etqTabs button").forEach(x => x.classList.toggle("on", x === b)); d.querySelectorAll("[data-kind]").forEach(x => x.style.display = x.dataset.kind === cur ? "" : "none"); d.dispatchEvent(new Event("change")); });
+  etqPreviewWire(d, () => {
+    etqRead(d, part); const v = part[cur], t = kinds.find(k => k[0] === cur)[1], L = part.base === "cc" ? "Lc" : "Ln";
+    const rows = [["Top Bars", `${v.a1}x${L}`, `${v.a2}x${L}`, `${v.a3}x${L}`], ...(v.b1 !== undefined ? [["", `${v.b1}x${L}`, `${v.b2}x${L}`, `${v.b3}x${L}`]] : []), ["Bottom Bars", ...(v.g1 !== undefined ? [`${v.g1}x${L}`, `${v.g2}x${L}`, `${v.g3}x${L}`] : ["continuous", "", "continuous"])]];
+    return `<svg viewBox="0 0 400 190" width="100%" height="100%"><text x="200" y="14" font-size="9" font-weight="700" text-anchor="middle">${esc(t)}</text><rect x="110" y="22" width="200" height="${rows.length * 34}" fill="none" stroke="#000"/>
+      ${rows.map((r, i) => `<text x="105" y="${42 + i * 34}" font-size="6" text-anchor="end">${r[0]}</text>${r.slice(1).map((x, j) => `<text x="${140 + j * 62}" y="${36 + i * 34}" font-size="5.5">${esc(x)}</text><line x1="${130 + j * 62}" y1="${40 + i * 34}" x2="${170 + j * 62}" y2="${40 + i * 34}" stroke="#000"/>`).join("")}`).join("")}
+      <line x1="150" y1="22" x2="150" y2="${22 + rows.length * 34}" stroke="#000" stroke-dasharray="2 2"/><line x1="270" y1="22" x2="270" y2="${22 + rows.length * 34}" stroke="#000" stroke-dasharray="2 2"/></svg>`;
+  });
+  return d;
+}
+
+// ---- Concrete Column Stack: Bar Layout and Selection Rule ----
+function etqColumnForm() {
+  const w = etqRule("column"), m = "main";
+  const html = `<div style="display:grid;grid-template-columns:1.6fr 1fr;gap:12px"><div><fieldset><legend>Vertical Bars Layout</legend>
+      ${etqR(m + ".vert", "section", "Use Layout Specified in Section Definition")}<div class="etqIn" id="etqCK">${etqR(m + ".keep", "keep", "Keep Bar Sizes and Numbers same as in Section Definition")}${etqR(m + ".keep", "select", "Select Bar Sizes to Satisfy Required As/Ratio")}</div>
+      ${etqR(m + ".vert", "auto", "Automatically Select Bar Layout ( using Bar Selection Rules )")}<div class="etqIn" id="etqCP">${etqR(m + ".prefer", "number", "Prefer Larger Bar Number")}${etqR(m + ".prefer", "size", "Prefer Larger Bar Size")}</div></fieldset>
+    <fieldset><legend>Transverse Tie Layout</legend>${etqR(m + ".tie", "section", "Use Layout Specified in Section Definition")}${etqR(m + ".tie", "auto", "Automatically Select to Match Vertical Bars and Rules")}</fieldset></div>
+    <fieldset><legend>Rules</legend><div style="display:flex;flex-direction:column;gap:8px;align-items:center;margin-top:16px"><button id="etqCSel" style="width:190px">Rebar Selection Rules...</button><button id="etqCSpl" style="width:190px">Bar Splicing Rules...</button></div></fieldset></div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:6px;margin-top:10px"><button id="etqDef" style="width:160px">Set to Default Values</button><div id="etqOk"></div></div>`;
+  const d = etqForm("Concrete Column Stack: Bar Layout and Selection Rule", html, w, d => { etqOff(d, "#etqCK", w.main.vert !== "section"); etqOff(d, "#etqCP", w.main.vert !== "auto"); },
+    async x => { const e = await etqSave("column", w); if (e) { formError(x, e); return false; } hmSay("The column stack bar layout and selection rule is set."); }, {width: 700, dfInto: "#etqOk"});
+  etqWire(d, "column", w, {"#etqCSel": () => etqColSelForm(w), "#etqCSpl": () => etqSpliceForm(w.splice)});
+  return d;
+}
+function etqColSelForm(rule) {
+  const part = {sel: etqClone(rule.sel), conf: etqClone(rule.conf)}, U = etqUl();
+  const table = (m, cols) => `<div data-mode="${m}">${etqUnitRows(etqTable(part, cols, ["!Bar Sizes", ["small", "Smallest Bar Size", "bar"], ["large", "Largest Bar Size", "bar"], ["pref", "Preferred Bar Size", "bar"], "Bar Numbers & Spacing",
+    ["minN", "Minimum Number of Bars", "n"], ["maxN", "Maximum Number of Bars", "text"], ["minSp", `Minimum Spacing (${U})`, "l", 2], ["maxSp", `Maximum Spacing (${U})`, "l", 2], ["fac", "Maximum Spacing (Factor * d)", "n"]], "sel." + m, m === "non" ? 130 : 90))}<div style="height:52px;background:#888;border:1px solid #444;border-top:0"></div></div>`;
+  const d = etqForm("Rebar Selection Rules", `<div style="display:flex;gap:16px;margin:0 0 6px 6px">${etqR("sel.mode", "non", "Non Seismic Detailing")}${etqR("sel.mode", "seismic", "Seismic Detailing")}</div>
+    ${table("non", [["vert", "Vertical Bars"], ["A", "Tie Zone A"]])}${table("seismic", [["vert", "Vertical Bars"], ["A", "Tie Zone A"], ["B", "Tie Zone B"], ["C", "Tie Zone C"]])}
+    <div style="text-align:right;margin-top:6px"><button id="etqConf" style="width:150px">Confinement...</button></div>`, part,
+    d => d.querySelectorAll("[data-mode]").forEach(x => x.style.display = x.dataset.mode === part.sel.mode ? "" : "none"), () => { rule.sel = part.sel; rule.conf = part.conf; }, {width: 800});
+  q(d, "#etqConf").onclick = () => etqConfForm(part.conf[part.sel.mode], part.sel.mode);
+  return d;
+}
+function etqConfForm(w, mode) {
+  return etqSub("Confinement: " + (mode === "seismic" ? "Seismic Detailing" : "Non Seismic Detailing"), `<fieldset><legend>Confinement Zone</legend>${etqRows([["Factor of Column Height", etqN("colH", 2, "", 90)], ["Factor of Section Size", etqN("secSize", 2, "", 90)], ["Minimum Length", etqN("minLen", 1, "l", 90)]], "130px 1fr")}</fieldset>
+    <fieldset><legend>Outer Hoop</legend>${etqRows([["Hoop Type", etqS("hoop", ["Rectangle-135", "Rectangle-90"], 170)]], "70px 1fr")}</fieldset>
+    <fieldset><legend>Internal Ties</legend>${etqC("internal", "Provide Internal Ties")}<div class="etqIn" id="etqTi"><div class="etqG" style="grid-template-columns:90px 1fr">${"<span>Tie Type</span>" + etqS("tieType", ["L-Ties", "Cross-Ties"], 118)}</div>
+      ${etqR("every", "every", "Every Bar")}${etqR("every", "alternate", "Alternate Bar")}${etqR("every", "third", "Every Third Bar")}</div></fieldset>`, w, d => etqOff(d, "#etqTi", !q(d, "[data-p=internal]").checked), 340);
+}
+function etqSpliceForm(w) {
+  return etqSub("Bar Splices", `<fieldset><legend>Bar Splices</legend><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div class="etqBox">${etqRows([["Splice Bars at Every", etqS("every", ["Every Story", "Every Other Story"], 105)], ["Splice Location in Story", etqS("where", ["At Floor Level", "At Mid Height"], 105)], ["Bar Splice Type", etqS("type", ["Lap Splice", "Mechanical Splice"], 105)]])}</div>
+    <div class="etqBox">${etqRows([["Splice Length, Factor of Bar Dia", etqN("fac", 2, "", 90)], ["Kicker Height", etqN("kicker", 1, "l", 90)], ["Min Splice Length", etqN("minLen", 1, "l", 90)]])}</div></div></fieldset>`, w, null, 690);
+}
+
+// ---- Concrete Wall Stack: Detailing Rules ----
+function etqWallForm() {
+  const w = etqRule("wall"), m = "main";
+  const html = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><fieldset><legend>Pier Rebar Layout</legend>
+      <fieldset><legend>Bar Layout Based on</legend>${etqR(m + ".pier", "specified", "Specified Bar Size and Spacing")}${etqR(m + ".pier", "rules", "Satisfy Required As using Rules")}<div style="text-align:center;margin-top:4px"><button id="etqPier" style="width:140px">Pier Rebar Rules...</button></div></fieldset>
+      <fieldset><legend>Boundary Zone Options</legend>${etqR(m + ".zone", "specified", "Specified Boundary/Confinement")}${etqR(m + ".zone", "rules", "Based on Rules")}
+        <div class="etqBox" id="etqBZ">${etqC(m + ".useBZ", "Use Boundary Zones")}<div class="etqIn">${etqRows([["Default Boundary Length Ratio", etqN(m + ".ratio", 2, "", 50)]], "180px 1fr")}</div>${etqC(m + ".useCZ", "Use Confinement Zones")}</div></fieldset></fieldset>
+    <fieldset><legend>Spandrels Rebar Layout</legend><fieldset><legend>Layout Bars Based on</legend><label class="etqCk" style="opacity:.55"><input type="checkbox" checked disabled>Satisfy Required As using Rules</label>
+      <div style="text-align:center;margin:4px 0 160px"><button id="etqSpan" style="width:170px">Spandrel Rebar Rules...</button></div></fieldset></fieldset></div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:6px;margin-top:10px"><button id="etqDef" style="width:160px">Set to Default Values</button><div id="etqOk"></div></div>`;
+  const d = etqForm("Concrete Wall Stack: Detailing Rules", html, w, d => { q(d, "#etqPier").disabled = w.main.pier !== "rules"; etqOff(d, "#etqBZ", w.main.zone !== "rules"); if (w.main.zone === "rules") q(d, `[data-p="main.ratio"]`).disabled = !w.main.useBZ; },
+    async x => { const e = await etqSave("wall", w); if (e) { formError(x, e); return false; } hmSay("The wall stack detailing rules are set."); }, {width: 720, dfInto: "#etqOk"});
+  etqWire(d, "wall", w, {"#etqPier": () => etqPierForm(w.pier), "#etqSpan": () => etqSpandrelForm(w.spandrel)});
+  return d;
+}
+function etqPierForm(w) {
+  const v = (p, t) => `<fieldset><legend>${t}</legend>${etqRows([["Smallest Bar Size", etqB(p + ".small", 96)], ["Largest Bar Size", etqB(p + ".large", 96)], ["Preferred Corner/Joint Bar Size", etqB(p + ".corner", 96)], ["Preferred Middle Bar Size", etqB(p + ".middle", 96)],
+    ["Min. Spacing of Bars", etqN(p + ".minSp", 1, "l", 84)], ["Max. Spacing of Bars", etqN(p + ".maxSp", 1, "l", 84).replace("data-p=", 'data-lo="0.0254" data-hi="0.6096" data-p=')], ["Max. Spacing, Factor of T", etqN(p + ".fac", 2, "", 84)]], "200px 1fr")}</fieldset>`;
+  const t = (p, l) => `<fieldset><legend>${l}</legend>${etqRows([["Smallest Bar Size", etqB(p + ".small", 96)], ["Largest Bar Size", etqB(p + ".large", 96)], ["Preferred Bar Size", etqB(p + ".pref", 96)], ["&nbsp;", "<span></span>"],
+    ["Min. Spacing of Bars", etqN(p + ".minSp", 1, "l", 84)], ["Max. Spacing of Bars", etqN(p + ".maxSp", 1, "l", 84).replace("data-p=", 'data-lo="0.0254" data-hi="0.6096" data-p=')], ["Max. Spacing, Factor of T", etqN(p + ".fac", 2, "", 84)]], "200px 1fr")}</fieldset>`;
+  const d = etqSub("Pier Rebar Rules", `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">${v("uv", "Vertical Bars - Unconfined Zones")}${t("ut", "Transverse Bars - Unconfined Zones")}${v("cv", "Vertical Bars - Confined Zones")}${t("ct", "Transverse Bars - Confined Zones")}</div><p style="margin:6px 0 0">T = Wall Thickness</p>`, w, null, 780);
+  // ETABS's tooltip on its spacing boxes: the range it takes.
+  d.querySelectorAll("[data-lo]").forEach(i => i.title = `Value must be in range ${etqFmt(0.0254 * etqUnitF())} ${hmU().l} & ${etqFmt(0.6096 * etqUnitF())} ${hmU().l}`);
+  return d;
+}
+function etqSpandrelForm(w) {
+  const g = (t, rows) => `<fieldset><legend>${t}</legend>${etqRows(rows, "160px 1fr")}</fieldset>`;
+  return etqSub("Spandrel Rebar Rules", `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+    ${g("Horizontal Top/Bottom", [["Smallest Bar Size", etqB("hz.small", 96)], ["Largest Bar Size", etqB("hz.large", 96)], ["Preferred Bar Size", etqB("hz.pref", 96)], ["Minimum Number of Bars", etqN("hz.minN", 2, "", 84)]])}
+    ${g("Diagonal Bars", [["Smallest Bar Size", etqB("dg.small", 96)], ["Largest Bar Size", etqB("dg.large", 96)], ["Preferred Bar Size", etqB("dg.pref", 96)]])}
+    ${g("Horizontal Web Bars", [["Bar Size", etqB("web.bar", 96)], ["Min. Spacing of Bars", etqN("web.minSp", 1, "l", 84)], ["Max. Spacing of Bars", etqN("web.maxSp", 1, "l", 84)]])}
+    ${g("Diagonal Bar Ties", [["Stirrup Bar Size", etqB("tie.bar", 96)], ["Min. Spacing of Ties", etqN("tie.minSp", 1, "l", 84)], ["Max. Spacing of Ties", etqN("tie.maxSp", 1, "l", 84)]])}
+    <div style="grid-column:1/3">${g("Vertical Bars/Ties", [["Stirrup Bar Size", etqB("vert.bar", 96)], ["Min. Spacing of Bars", etqN("vert.minSp", 1, "l", 84)], ["Max. Spacing of Bars", etqN("vert.maxSp", 1, "l", 84)], ["Number of Legs", etqS("vert.legs", ["2", "3", "4"], 96)]])}</div></div>`, w, null, 680);
+}
 // ---- ETABS 23.2's Options menu and its forms, from the pictures in field/reference-forms/etabs/Options: Display
 // Units, Database, Tolerances, Arrange Windows, Graphics Preferences (with Set Line Thickness), Graphics Colors
 // (Set Display Colors, Set Output Colors), Graphics Mode (Video Card Information), the ticked options, Auto Save,
@@ -8141,6 +8681,7 @@ document.addEventListener("keydown", e => {
 async function modelAct(a) {
   hideMenus();
   if (a.startsWith("etn:")) return etnAct(a.slice(4));
+  if (a.startsWith("etq:")) return etqAct(a.slice(4));
   if (a.startsWith("etc:")) return etcAct(a.slice(4));
   if (a.startsWith("ets:")) return etsForm(a.slice(4));
   if (a.startsWith("etv:")) return etvAct(a.slice(4));

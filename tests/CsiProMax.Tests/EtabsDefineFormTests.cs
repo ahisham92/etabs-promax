@@ -34,6 +34,24 @@ static class EtabsDefineFormTests
 
     public static IEnumerable<(string, Action)> All()
     {
+        yield return ("ETABS Detailing rules: kept with the model (no .e2k line, as ETABS's .e2k has none), read back, undone, back to defaults", () =>
+        {
+            var link = Frame(); var m = link.Model;
+            JsonObject Do(string tool, object args) => (JsonObject)DetailingTools.All.Single(x => x.Name == tool).Invoke(JsonDocument.Parse(JsonSerializer.Serialize(args)).RootElement, link);
+            var before = E2kWriter.Write(m);
+            Do("set_detailing_rules", new { form = "column", values = new { main = new { vert = "auto" }, splice = new { kicker = 0.1 } } });
+            Do("set_detailing_rules", new { form = "beam", values = new { main = new { curt = "rules" } } });
+            var r = Do("detailing_rules", new { })["rules"]!;
+            Check(r["column"]?["main"]?["vert"]?.GetValue<string>() == "auto" && r["column"]?["splice"]?["kicker"]?.GetValue<double>() == 0.1, "column rule: " + r.ToJsonString());
+            Check(r["beam"]?["main"]?["curt"]?.GetValue<string>() == "rules", "beam rule: " + r.ToJsonString());
+            Check(m.Kept![DetailingTools.KeptName].Select(x => x["Form"]).SequenceEqual(["beam", "column"]), "rows in the menu's order");
+            Check(E2kWriter.Write(m) == before, "the .e2k does not change (ETABS keeps detailing rules in its database only)");
+            Do("set_detailing_rules", new { form = "beam", values = (object?)null });
+            Check(Do("detailing_rules", new { })["rules"]!["beam"] is null, "beam back to defaults");
+            var refused = false;
+            try { Do("set_detailing_rules", new { form = "slabs", values = new { } }); } catch (ToolInputException) { refused = true; }
+            Check(refused, "an unknown rule is refused");
+        });
         yield return ("ETABS Define: walking vibration, excitation set and construction sequence go out as ETABS's own .e2k lines, in ETABS's order", () =>
         {
             var link = Frame(); var m = link.Model;
