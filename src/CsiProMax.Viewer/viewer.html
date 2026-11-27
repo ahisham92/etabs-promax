@@ -235,6 +235,15 @@ footer #fbFilter{display:flex;align-items:center;gap:4px;border:0;border-left:1p
 .dlg .ipage{display:none}.dlg .ipage.on{display:block}
 .dlg.objinfo fieldset{margin:0 0 6px}.dlg.objinfo .oid .g2{grid-template-columns:90px 1fr}.dlg.objinfo .oid input{width:100%}.dlg.objinfo input.pgg,.dlg.objinfo input[readonly]{background:var(--form);color:var(--mute)}
 .dlg .pgwrap{height:300px;overflow:auto;border:1px solid var(--line);background:var(--field)}
+.rmon .rmHead{display:flex;justify-content:space-between;gap:8px;margin-bottom:4px}.rmon .rmBar{height:14px;border:1px solid var(--line);background:var(--field);overflow:hidden}
+.rmon .rmBar div{height:100%;width:0;background:var(--accent2);transition:width .6s}.rmon .rmBar div.ok{background:var(--ok)}.rmon .rmBar div.bad{background:var(--bad)}
+.rmon .rmSteps{margin-top:6px;border:1px solid var(--line);background:var(--field)}.rmon .rs{display:grid;grid-template-columns:20px 1fr auto;padding:2px 6px;border-bottom:1px solid var(--line2)}
+.rmon .rs .ri{font-weight:700;text-align:center}.rmon .rs .rt{color:var(--mute);font-variant-numeric:tabular-nums}.rmon .rs .rd{grid-column:2/4;color:var(--mute);font-size:11px;white-space:normal}
+.rmon .rs.done .ri{color:var(--ok)}.rmon .rs.warning .ri{color:var(--warn)}.rmon .rs.failed .ri,.rmon .rs.failed .rn{color:var(--bad)}.rmon .rs.running{background:var(--hot)}.rmon .rs.skipped,.rmon .rs.waiting{color:var(--mute)}
+.rmon .rmWait{margin-top:6px;padding:5px 8px;border:1px solid var(--warn);color:var(--warn);white-space:normal}
+.rmon .rmLog{height:220px;font-family:Consolas,monospace;font-size:11px;white-space:pre;padding:2px 4px}.rmon .rmLog .bad{color:var(--bad)}.rmon .rmLog .warn{color:var(--warn)}
+.rmon .rmFoot{display:flex;justify-content:space-between;margin-top:4px}
+.rrep h4{margin:10px 0 4px}.rrep .rsaid{font-family:Consolas,monospace;font-size:11px;color:var(--mute);margin:3px 0;white-space:normal}.rrep .inst .it button{margin-top:4px}
 table.pg{width:100%;border-collapse:collapse;table-layout:fixed}table.pg td{border-bottom:1px solid var(--line2);padding:1px 4px;height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 table.pg td:first-child{width:56%;border-right:1px solid var(--line2)}table.pg tr.on td{background:var(--sel)}table.pg tr.pgh td{background:var(--form);font-weight:600}
 table.pg tr.pgoff td{color:var(--mute)}table.pg .pgg{color:var(--mute)}table.pg .pgu{color:var(--mute)}table.pg input,table.pg select{width:100%;height:18px;padding:0 3px;border-color:transparent;background:transparent}table.pg input:focus,table.pg select:focus{border-color:var(--accent)}
@@ -480,6 +489,7 @@ async function engineRun(mode) {
       ${kinds.length ? kinds.map(k => `<label class="kv" style="display:block"><input type="checkbox" data-kind="${esc(k.kind)}" checked> ${esc(k.name)}</label>`).join("") + `<div style="margin:4px 0"><button type="button" id="rAll">Select All</button> <button type="button" id="rNone">Clear All</button></div>` : `<p class="kv">${esc(name)} has no design to run from here.</p>`}
       <div style="margin-top:6px"><label class="kv"><input type="radio" name="rS" value="all" checked> All objects</label>
       <label class="kv" style="margin-left:12px"><input type="radio" name="rS" value="sel" ${picked.length ? "" : "disabled"}> Selected objects only (${picked.length})</label></div></fieldset>
+    <fieldset><legend>Before the run</legend><label class="kv"><input type="checkbox" id="rChk" checked> Check the model for instabilities, and stop before ${esc(name)} starts if it finds errors</label></fieldset>
     <label class="kv" style="display:block;margin-top:6px"><input type="checkbox" id="rKeep" ${st.keep_open ? "checked" : ""}> Keep ${esc(name)} open with the analysed model after the run (Settings &gt; Runs)</label>
     <p class="kv" id="rKeepNote" style="margin:6px 0 0;max-width:460px"></p>`;
   const d = dialog("Run Options", body, [["Run Now", d => {
@@ -487,7 +497,7 @@ async function engineRun(mode) {
     const ks = m === "a" ? [] : [...d.querySelectorAll("[data-kind]")].filter(x => x.checked).map(x => x.dataset.kind);
     if (m !== "a" && !ks.length) { hmSay("Tick at least one design to run.", true); return false; }
     const only = ks.length && (d.querySelector("input[name=rS]:checked") || {}).value === "sel" ? picked : [];
-    engineStart({analyse: m !== "d", kinds: ks, selected: only, keep_open: !!(q(d, "#rKeep") || {}).checked});
+    engineStart({analyse: m !== "d", kinds: ks, selected: only, keep_open: !!(q(d, "#rKeep") || {}).checked, stop_on_errors: q(d, "#rChk").checked});
   }], ["Cancel"]], {width: 520});
   const sync = () => {
     const m = (d.querySelector("input[name=rM]:checked") || {}).value || "a";
@@ -509,18 +519,133 @@ async function engineStart(ask) {
   let j; try { j = await enginePost(ask); } catch (e) { return hmSay("The Engine could not be reached: " + e.message, true); }
   if (!j.ok) return dialog("Run Analysis", `<p style="max-width:460px">${esc(j.error)}</p>`, [["OK"]], {width: 500});
   const what = (ask.analyse || j.analyses ? "Analysis" : "") + (ask.kinds && ask.kinds.length ? (ask.analyse || j.analyses ? " and Design" : "Design") : "");
-  const d = dialog(`Run ${what} - ${j.program}`, `<div class="pgwrap" style="height:220px;padding:4px 6px" id="runLog"></div><p class="kv" id="runPhase" style="margin:6px 0 0"></p>`, [["Close"]], {float: true, width: 560});
+  engineMonitor(ask, what, j.program);
+}
+// ---- the Run Monitor (Ahmed 2026-11-27): like ETABS's Analysis Monitor, for ETABS, SAP2000 and SAFE alike: the steps of
+// the job with their times, the program's own analysis log as it writes it, the case it is on, how long since it was
+// last heard from, a box it waits on, and Cancel. When the job ends, the Run Report says what happened and what to do. ----
+const runIcons = {done: "✓", warning: "!", failed: "✕", running: "◐", skipped: "–", waiting: "○"};
+const runWeights = {check: 4, start: 16, analysis: 46, design: 20, results: 10, close: 4};
+function runTime(s) { s = Math.max(0, Math.round(s || 0)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60; return h ? `${h}:${String(m).padStart(2, "0")}:${String(x).padStart(2, "0")}` : `${m}:${String(x).padStart(2, "0")}`; }
+function runProgress(mon) {
+  // A share of the whole job: each step weighs what it usually takes; the analysis moves on case by case.
+  let all = 0, done = 0;
+  for (const s of mon.steps || []) {
+    if (s.state === "skipped") continue;
+    const w = runWeights[s.key] || 5; all += w;
+    if (s.state === "done" || s.state === "warning" || s.state === "failed") done += w;
+    else if (s.state === "running") done += w * (s.key === "analysis" && mon.case_count ? Math.min(0.95, (mon.case_number || 0) / mon.case_count) : 0.4);
+  }
+  return all ? Math.min(1, done / all) : 0;
+}
+async function engineMonitor(ask, what, prog) {
+  let follow = true, tab = "log", last = null, finished = false;
+  const d = dialog(`Analysis Monitor - ${prog}`, `<div class="rm">
+      <div class="rmHead"><b id="rmNow">Starting...</b><span id="rmTime"></span></div>
+      <div class="rmBar"><div id="rmFill"></div></div>
+      <div class="rmSteps" id="rmSteps"></div>
+      <div class="rmWait" id="rmWait" hidden></div>
+      <div class="itabs" style="margin-top:8px"><button data-t="log" class="on">${esc(prog)} log</button><button data-t="lines">Run messages</button></div>
+      <div class="pgwrap rmLog" id="rmLog"></div>
+      <div class="kv rmFoot"><label><input type="checkbox" id="rmFollow" checked> Follow the end</label><span id="rmHeard"></span></div></div>`,
+    [["Cancel", () => { if (finished) return false; enginePost({cancel: true}).then(j => hmSay(j.ok ? "Cancelling: " + j.said + "." : j.error, !j.ok)).catch(() => {}); return false; }, true],
+     ["Show program window", () => { enginePost({show_program: true}).then(j => hmSay(j.ok ? j.said : j.error, !j.ok)).catch(() => {}); return false; }, true],
+     ["Run Report", () => { if (last && last.monitor && last.monitor.report) engineReport(last.monitor.report, ask); else hmSay("The Run Report is made when the run ends."); return false; }, true],
+     ["Close"]], {float: true, width: 640});
+  d.classList.add("rmon");
+  d.querySelectorAll(".itabs button").forEach(b => b.onclick = () => { tab = b.dataset.t; d.querySelectorAll(".itabs button").forEach(x => x.classList.toggle("on", x === b)); paint(); });
+  q(d, "#rmFollow").onchange = e => { follow = e.target.checked; };
+  const btn = label => [...d.querySelectorAll(".df button")].find(b => b.textContent === label);
+  const paint = () => {
+    const st = last; if (!st || !d.isConnected) return;
+    const mon = st.monitor || {steps: [], log: []}, running = (mon.steps || []).find(s => s.state === "running");
+    q(d, "#rmNow").textContent = st.running ? (running ? running.name + (running.key === "analysis" && mon.case ? ` – case ${mon.case}${mon.case_count ? ` (${mon.case_number} of ${mon.case_count})` : ""}` : "") : st.phase) + "..." : mon.cancelled ? "Cancelled" : st.error ? "Stopped" : "Done";
+    q(d, "#rmTime").textContent = "Elapsed " + runTime(mon.elapsed);
+    const f = q(d, "#rmFill"); f.style.width = Math.round((st.running ? runProgress(mon) : 1) * 100) + "%"; f.className = st.running ? "" : st.error ? "bad" : (mon.report && !mon.report.ok) ? "bad" : "ok";
+    q(d, "#rmSteps").innerHTML = (mon.steps || []).map(s => `<div class="rs ${esc(s.state)}"><span class="ri">${runIcons[s.state] || ""}</span><span class="rn">${esc(s.name)}</span><span class="rt">${s.seconds ? runTime(s.seconds) : ""}</span>${s.detail ? `<div class="rd">${esc(s.detail)}</div>` : ""}</div>`).join("");
+    const w = q(d, "#rmWait"); w.hidden = !mon.waiting; w.textContent = mon.waiting || "";
+    q(d, "#rmHeard").textContent = st.running ? (mon.last_heard >= 5 ? `Last heard from ${prog} ${runTime(mon.last_heard)} ago` : `${prog} is working`) : "";
+    const log = q(d, "#rmLog"), lines = tab === "log" ? (mon.log || []) : (st.lines || []);
+    log.innerHTML = lines.length ? lines.map(l => `<div class="${/error|unstable|ill-condition|abort|terminat/i.test(l) ? "bad" : /warning|accuracy|negative/i.test(l) ? "warn" : ""}">${esc(l)}</div>`).join("")
+      : `<div class="kv">${tab === "log" ? `${esc(prog)}'s analysis log appears here while it runs${mon.log_file ? " (" + esc(mon.log_file) + ")" : ""}.` : "Nothing yet."}</div>`;
+    if (follow) log.scrollTop = 1e9;
+    const c = btn("Cancel"); if (c) c.disabled = !st.running;
+    const s = btn("Show program window"); if (s) s.disabled = !st.running;
+    const r = btn("Run Report"); if (r) r.disabled = st.running;
+  };
   for (;;) {
     await new Promise(r => setTimeout(r, 1000));
     let st; try { st = await enginePost({take: true}); } catch (e) { continue; }
-    const log = d.querySelector("#runLog"); if (log) { log.innerHTML = st.lines.map(l => `<div>${esc(l)}</div>`).join(""); log.scrollTop = 1e9; }
-    const ph = d.querySelector("#runPhase"); if (ph) ph.textContent = st.running ? st.phase + "..." : st.error ? "Stopped." : "Done.";
+    last = st; paint();
     if (!st.done) continue;
-    if (st.error) { hmSay(st.error, true); return; }
-    if (st.model_changed) { hmSay("The model changed while it ran, so its results were not put on it. Run again.", true); return; }
-    if (st.pack) { engine.res = st.pack; engine.from = st.pack_file || "the run"; load(engine.base || P, true); hmSay(`${what} in ${st.program}: the results are shown (Display and Design menus); ${st.program} ${st.kept_open ? "was left open with the analysed model" : "was closed"}${st.pack_file ? "; review pack " + st.pack_file : ""}.`); buildTree(); }
+    finished = true;
+    const rep = st.monitor && st.monitor.report;
+    if (st.pack && !st.model_changed) { engine.res = st.pack; engine.from = st.pack_file || "the run"; load(engine.base || P, true); buildTree(); }
+    if (st.model_changed) hmSay("The model changed while it ran, so its results were not put on it. Run again.", true);
+    else if (st.error) hmSay(rep ? rep.headline + " See the Run Report." : st.error, true);
+    else if (st.pack) hmSay(`${what} in ${st.program}: the results are shown (Display and Design menus); ${st.program} ${st.kept_open ? "was left open with the analysed model" : "was closed"}${st.pack_file ? "; review pack " + st.pack_file : ""}.` + (rep && runIssues(rep) ? " The Run Report lists things to look at." : ""));
+    // A run that stopped or has anything to look at opens its Run Report by itself: nobody is left wondering why.
+    if (rep && (!rep.ok || runIssues(rep))) engineReport(rep, ask);
     return;
   }
+}
+function runIssues(r) { return (r.trouble || []).length + (r.design || []).length + (r.notices || []).length + (r.instabilities ? (r.instabilities.errors || 0) + (r.instabilities.warnings || 0) : 0); }
+// The objects a message names (joints, frames, areas by the program's names or labels), selected and ringed on the model.
+function runShow(objs) {
+  const base = n => String(n).replace(/@.*$/, ""), at = [], ids = [];
+  for (const o of objs || []) {
+    if (o.kind === "joint") { const p = pointXyz.get(String(o.name)); if (p) at.push(p); continue; }
+    const list = o.kind === "shell" || o.kind === "area" ? areas : o.kind === "frame" ? frames : frames.concat(areas);
+    for (const x of list) if (x.name === String(o.name) || base(x.name) === String(o.name)) ids.push(x.id);
+  }
+  if (!ids.length && !at.length) return hmSay("None of the objects it names were found on this model (the program may number them its own way).", true);
+  inst.answer = {findings: [{level: "error", check: "run", message: "", fix: "", objects: [], at}]};
+  inst.show = true; inst.cur = 0;
+  sel.clear(); for (const id of ids) sel.add(id); selChanged();
+  const p = panes[active]; if (p) { if (p.mode !== "3d" && p.mode !== "plan" && p.mode !== "elev") setMode(p, "3d"); if (ids.length) zoomTo(p, ids); else { const c = mul(at.reduce(add, [0, 0, 0]), 1 / at.length); let r = 0; for (const q2 of at) r = Math.max(r, len(sub(q2, c))); go(p, {...p.cam, target: c, hh: Math.max(r * 2.2, size * 0.06)}); } }
+  draw();
+  hmSay(`${ids.length} objects selected${at.length ? `, ${at.length} joints ringed` : ""} on the model.`);
+}
+function engineReport(r, ask) {
+  // The Run Report: the step it stopped at, what the program said in plain words and what to do, the instability
+  // check's findings, the design's members that do not pass, the boxes answered on the way, and the files to open.
+  const lv = l => l === "error" ? "Error" : l === "warning" ? "Warning" : "Note";
+  const tr = (r.trouble || []).map((t, i) => `<div class="it" data-tr="${i}"><span class="lv ${esc(t.level)}">${lv(t.level)}</span> <b>${esc(t.meaning)}</b>
+      ${(t.said || []).length ? `<div class="rsaid">${esc(r.program)} said:${(t.said || []).map(s => `<div>${esc(s)}</div>`).join("")}</div>` : ""}
+      <div class="fx"><b>What to do:</b> ${esc(t.todo)}</div>${(t.objects || []).length ? `<button data-show="${i}">Show on model (${t.objects.length})</button>` : ""}</div>`).join("");
+  const ins = r.instabilities, insList = ins ? (ins.findings || []).slice(0, 40).map((f, i) => `<div class="it" data-in="${i}"><span class="lv ${esc(f.level)}">${lv(f.level)}</span><span class="ck">${esc(f.check)}</span><div>${esc(f.message)}</div><div class="fx"><b>Fix:</b> ${esc(f.fix)}</div></div>`).join("") : "";
+  const des = (r.design || []).map((t, i) => `<div class="it" data-de="${i}"><span class="lv ${t.failing || t.errors ? "error" : "warning"}">${t.failing || t.errors ? "Design" : "Note"}</span> <b>${esc(t.table)}</b>:
+      ${[t.failing ? t.failing + " do not pass" : "", t.errors ? t.errors + " with errors" : "", t.warnings ? t.warnings + " with warnings" : ""].filter(Boolean).join(", ")}
+      ${(t.examples || []).length ? `<div class="rsaid">${t.examples.map(x => `<div>${esc([x.object, x.status, x.message].filter(Boolean).join(" – "))}</div>`).join("")}</div>` : ""}
+      <div class="fx"><b>What to do:</b> ${esc(t.todo)}</div>${(t.examples || []).some(x => x.object) ? `<button data-dshow="${i}">Show on model</button>` : ""}</div>`).join("");
+  const stoppedByCheck = !r.ok && /instability check found/i.test(r.error || "");
+  const body = `<div class="rrep"><div class="instsum ${r.ok ? (runIssues(r) ? "" : "ok") : "bad"}">${esc(r.headline)}</div>
+    ${!r.ok && !r.cancelled && r.error ? `<p class="kv" style="margin:4px 0">${esc(r.error)}</p>` : ""}
+    ${tr ? `<h4>What ${esc(r.program)} said</h4><div class="inst">${tr}</div>` : !r.ok && !r.cancelled ? `<p class="kv">${esc(r.program)}'s log names no reason${r.log_file ? "" : " (it wrote no log)"}. Open in ${esc(r.program)} shows the model as it ran.</p>` : ""}
+    ${insList ? `<h4>Instability check before the run</h4><div class="kv">${esc(ins.summary || "")}</div><div class="inst">${insList}</div>` : ""}
+    ${des ? `<h4>Design</h4><div class="inst">${des}</div>` : ""}
+    ${(r.notices || []).length ? `<h4>Boxes ${esc(r.program)} showed, answered by the run</h4><div class="rsaid">${r.notices.map(n => `<div>${esc(n)}</div>`).join("")}</div>` : ""}
+    ${(r.log_tail || []).length ? `<details style="margin-top:6px"><summary>The end of ${esc(r.program)}'s log${r.log_file ? " (" + esc(r.log_file) + ")" : ""}</summary><div class="pgwrap" style="height:160px;font-family:Consolas,monospace;font-size:11px;white-space:pre">${r.log_tail.map(l => esc(l)).join("\n")}</div></details>` : ""}</div>`;
+  const buttons = [];
+  if (stoppedByCheck) buttons.push(["Run anyway", () => { engineStart({...ask, stop_on_errors: false}); }]);
+  if (r.can_open) buttons.push([`Open in ${r.program}`, () => { enginePost({open_in_program: true}).then(j => hmSay(j.ok ? j.said : j.error, !j.ok)).catch(e => hmSay(e.message, true)); return false; }, true]);
+  buttons.push(["Open run folder", () => { enginePost({open_folder: true}).then(j => { if (!j.ok) hmSay(j.error, true); }).catch(() => {}); return false; }, true]);
+  buttons.push(["Copy report", () => { copyText(runText(r)); hmSay("The Run Report was copied."); return false; }, true]);
+  buttons.push(["Close"]);
+  const d = dialog(`Run Report - ${r.program}`, body, buttons, {float: true, width: 640});
+  d.querySelectorAll("[data-show]").forEach(b => b.onclick = e => { e.stopPropagation(); runShow((r.trouble[+b.dataset.show] || {}).objects); });
+  d.querySelectorAll("[data-dshow]").forEach(b => b.onclick = e => { e.stopPropagation(); runShow(((r.design[+b.dataset.dshow] || {}).examples || []).filter(x => x.object).map(x => ({kind: "any", name: x.object}))); });
+  d.querySelectorAll("[data-in]").forEach(el => el.onclick = () => { inst.answer = r.instabilities; instGo(+el.dataset.in); });
+  return d;
+}
+function runText(r) {
+  const out = [r.headline]; if (!r.ok && r.error) out.push(r.error);
+  for (const t of r.trouble || []) out.push(`${t.level.toUpperCase()}: ${t.meaning}`, ...(t.said || []).map(s => "  " + s), "  What to do: " + t.todo);
+  if (r.instabilities) { out.push("Instability check: " + (r.instabilities.summary || "")); for (const f of (r.instabilities.findings || []).slice(0, 40)) out.push(`  ${f.level.toUpperCase()} ${f.check}: ${f.message} Fix: ${f.fix}`); }
+  for (const t of r.design || []) out.push(`DESIGN ${t.table}: ${t.failing} do not pass, ${t.errors} errors, ${t.warnings} warnings`, ...(t.examples || []).map(x => "  " + [x.object, x.status, x.message].filter(Boolean).join(" - ")));
+  for (const n of r.notices || []) out.push("Box answered: " + n);
+  if (r.log_file) out.push("Log: " + r.log_file); if (r.model_file) out.push("Model: " + r.model_file);
+  return out.join("\n");
 }
 function engineClear() {
   // Analyze > Unlock Model: the results go, and so does their review pack beside the model (comments kept), as ETABS

@@ -653,9 +653,11 @@ public static class FieldTest
         var kinds = EngineRun.Kinds[program.Key].Select(k => k.Kind).ToList();
         var steps = $"CSI ProMax Engine in {program.Name}: ";
 
+        JsonObject? firstRun = null;
         var ran = ctx.Step(steps + "Run Analysis brings the results back, writes the pack beside the model, and closes the program", () =>
         {
             var status = Wait(EngineRun.Start(model, analyse: true, kinds: [], keepOpen: false));
+            firstRun = status;
             var tables = (status["pack"] as JsonObject)?["tables"] as JsonObject;
             var results = tables?.Select(t => t.Key).Where(n => ResultTools.Norm(n).Contains("displacement") || ResultTools.Norm(n).Contains("reaction") || ResultTools.Norm(n).Contains("forces")).ToList() ?? [];
             FieldContext.Expect(results.Count > 0, "no result table came back: " + string.Join(", ", tables?.Select(t => t.Key) ?? []));
@@ -663,6 +665,26 @@ public static class FieldTest
             return $"{results.Count} result tables; pack {Path.GetFileName(pack)}; {Last(status)}";
         }) is not null;
         if (!ran) return;
+
+        // The Run Monitor (Ahmed 2026-11-27: see the run live, like ETABS's Analysis Monitor): every step of that run
+        // with its time, the program's own analysis log read as it was written, and a Run Report at the end.
+        ctx.Step(steps + "the Run Monitor showed every step with its time, the program's own analysis log, and a Run Report", () =>
+        {
+            var mon = firstRun?["monitor"] as JsonObject;
+            FieldContext.Expect(mon is not null, "the run had no monitor");
+            var stepStates = (mon!["steps"] as JsonArray ?? []).ToDictionary(x => x!["key"]!.GetValue<string>(), x => x!);
+            foreach (var key in new[] { "check", "start", "analysis", "results", "close" })
+            {
+                var st = stepStates.GetValueOrDefault(key)?["state"]?.GetValue<string>() ?? "";
+                FieldContext.Expect(st is "done" or "warning", $"the monitor's step '{key}' is {st}, not done: {stepStates.GetValueOrDefault(key)?["detail"]}");
+            }
+            FieldContext.Expect(stepStates["analysis"]["seconds"]!.GetValue<double>() > 0 && mon["elapsed"]!.GetValue<double>() > 0, "the monitor kept no time");
+            var log = (mon["log"] as JsonArray ?? []).Count;
+            FieldContext.Expect(log > 0, $"the monitor showed nothing of {program.Name}'s analysis log ({mon["log_file"]})");
+            var report = mon["report"] as JsonObject;
+            FieldContext.Expect(report?["ok"]?.GetValue<bool>() == true, "the Run Report does not say the run finished: " + report?["headline"]);
+            return $"{log} log lines from {Path.GetFileName(mon["log_file"]?.GetValue<string>() ?? "")}; {report!["headline"]}";
+        });
 
         ctx.Step(steps + "a design alone on the unchanged model is not analysed again, and the program closes after it", () =>
         {
@@ -745,6 +767,78 @@ public static class FieldTest
                 FieldContext.Expect(next["starts"]?.GetValue<int>() == status["starts"]?.GetValue<int>() + 1, "the next run did not start one program of its own");
                 return Last(status) + " | " + Last(next);
             });
+
+        EngineTroubleSteps(ctx, program, steps);
+    }
+
+    /// <summary>
+    /// A model with a problem in the CSI program (Ahmed 2026-11-27: "if the model is having an issue in ETABS ... we
+    /// are stuck with no way saying what is happening"): a model with no supports, deliberately unstable. Stopped
+    /// before the program starts when the Run form says so; run anyway, the program's own words come back in plain
+    /// terms in the Run Report, nothing hangs and the program is closed. And Cancel ends the program mid-run.
+    /// </summary>
+    internal static void EngineTroubleSteps(FieldContext ctx, CsiProgram program, string steps)
+    {
+        var broken = new OfflineEtabs(CsiProMax.Checks.Stability.BrokenModels.All.First(c => c.Name == "no-supports").Build(), "");
+        broken.Model.Target = program.Key;
+        broken.SaveAs(Path.Combine(ctx.Folder, "engine", "cpm-engine-unstable.e2k"));
+        static JsonObject Done(JsonObject started, int minutes = 20)
+        {
+            FieldContext.Expect(started["ok"]?.GetValue<bool>() == true, "the run did not start: " + started["error"]);
+            var until = DateTime.UtcNow.AddMinutes(minutes);
+            while (EngineRun.Status(false)["done"]?.GetValue<bool>() != true && DateTime.UtcNow < until) Thread.Sleep(1000);
+            var status = EngineRun.Status(true);
+            FieldContext.Expect(status["done"]?.GetValue<bool>() == true, $"the run hung: not done within {minutes} minutes, at " + status["phase"]);
+            return status;
+        }
+        static JsonObject Report(JsonObject status) => (status["monitor"]?["report"] as JsonObject) ?? throw new FieldCheckException("the run made no Run Report");
+
+        ctx.Step(steps + "a model the instability check finds errors in is stopped before the program starts, and the Run Report lists them", () =>
+        {
+            var before = EngineRun.Status(false)["starts"]?.GetValue<int>() ?? 0;
+            var status = Done(EngineRun.Start(broken, analyse: true, kinds: [], keepOpen: false, stopOnErrors: true), 5);
+            var report = Report(status);
+            FieldContext.Expect(report["ok"]?.GetValue<bool>() == false, "the unstable model was not stopped");
+            FieldContext.Expect((status["starts"]?.GetValue<int>() ?? 0) == before, $"{program.Name} was started although the check stopped the run");
+            FieldContext.Expect(report["instabilities"]?["findings"] is JsonArray f && f.Any(x => x?["check"]?.GetValue<string>() == "supports"), "the Run Report does not name the missing supports");
+            return report["headline"] + " " + report["error"];
+        });
+
+        ctx.Step(steps + $"Run anyway on the unstable model: {program.Name}'s own words come back in plain terms, nothing hangs, and it is closed", () =>
+        {
+            var status = Done(EngineRun.Start(broken, analyse: true, kinds: [], keepOpen: false, stopOnErrors: false));
+            var report = Report(status);
+            var trouble = (report["trouble"] as JsonArray ?? []).Select(t => t?["kind"]?.GetValue<string>() ?? "").ToList();
+            FieldContext.Expect(trouble.Count > 0 || report["ok"]?.GetValue<bool>() == false, $"{program.Name} ran a model with no supports and the Run Report says nothing is wrong: " + report["headline"]);
+            FieldContext.Expect(report["instabilities"] is JsonObject, "the Run Report does not carry the instability check's findings");
+            FieldContext.Expect(status["closed"]?.GetValue<bool>() == true, $"{program.Name} was not closed after the unstable run");
+            var said = (report["trouble"] as JsonArray ?? []).Select(t => t?["meaning"]?.GetValue<string>()).FirstOrDefault() ?? report["error"]?.GetValue<string>() ?? "";
+            return $"{report["headline"]} [{string.Join(", ", trouble)}] {said}";
+        });
+
+        ctx.Step(steps + "Cancel during a run ends the program at once, and the Run Report says it was cancelled", () =>
+        {
+            var started = EngineRun.Start(broken, analyse: true, kinds: [], keepOpen: false, stopOnErrors: false);
+            FieldContext.Expect(started["ok"]?.GetValue<bool>() == true, "the run did not start: " + started["error"]);
+            // As soon as the program is open: Cancel then has a program to end.
+            var until = DateTime.UtcNow.AddMinutes(10);
+            JsonObject? cancel = null;
+            while (DateTime.UtcNow < until)
+            {
+                var st = EngineRun.Status(false);
+                if (st["done"]?.GetValue<bool>() == true) break;
+                var start = (st["monitor"]?["steps"] as JsonArray ?? []).FirstOrDefault(x => x?["key"]?.GetValue<string>() == "start")?["state"]?.GetValue<string>();
+                if (start == "done") { cancel = EngineRun.Cancel(); break; }
+                Thread.Sleep(200);
+            }
+            FieldContext.Expect(cancel?["ok"]?.GetValue<bool>() == true, "the run ended before Cancel could be pressed, or Cancel was refused: " + cancel?.ToJsonString());
+            var status = Done(new JsonObject { ["ok"] = true }, 3);
+            var report = Report(status);
+            FieldContext.Expect(report["cancelled"]?.GetValue<bool>() == true, "the Run Report does not say it was cancelled: " + report["headline"]);
+            FieldContext.Expect(status["closed"]?.GetValue<bool>() == true, $"{program.Name}'s process is still there after Cancel");
+            FieldContext.Expect(status["pack"] is null, "a cancelled run put results on the model");
+            return cancel!["said"] + "; " + report["headline"];
+        });
     }
 
     /// <summary>The first calls of where an exception came from, for the report: enough to find the step.</summary>

@@ -1056,6 +1056,45 @@ public sealed class ScratchProgram : IScratchWindow
         catch (Exception ex) when (ex is not OutOfMemoryException) { return false; }
     }
 
+    /// <summary>
+    /// Puts the hidden program's window back on the screen while the run goes on (its API's Unhide), for the Run
+    /// Monitor's Show program window: a box the run does not answer itself (a licence message) is then there to read and
+    /// answer. The run keeps answering its own boxes. False when it cannot.
+    /// </summary>
+    public bool Show()
+    {
+        if (_app is null || _closed || _left) return false;
+        try
+        {
+            Ask(TimeSpan.FromSeconds(30), "show the window", _ => { _app.Unhide(); return null; }, $"the {_program.Name} window did not come back within 30 seconds");
+            return true;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return false; }
+    }
+
+    /// <summary>The boxes of the program the run answered itself so far, in order (the Run Monitor shows them as they come).</summary>
+    public IReadOnlyList<string> Answered() { lock (_noticesClosed) return _noticesClosed.ToList(); }
+
+    /// <summary>
+    /// The Run Monitor's Cancel: ends this object's own program process at once, without saving (the run's copy of the
+    /// model only; the engineer's model and windows are never this object's). Says what happened.
+    /// </summary>
+    public string Kill()
+    {
+        if (ProcessId == 0) return $"the {_program.Name} process could not be told apart, so it was not ended";
+        try
+        {
+            using var process = Process.GetProcessById(ProcessId);
+            if (!string.Equals(process.ProcessName, _program.ProcessName, StringComparison.OrdinalIgnoreCase) || (_startedAt != default && process.StartTime < _startedAt.AddSeconds(-2)))
+                return $"process {ProcessId} is not the run's own {_program.Name}, so it was not ended";
+            _left = true; _closed = true;
+            process.Kill();
+            return process.WaitForExit(20000) ? $"{_program.Name} was ended without saving; its licence is free" : $"{_program.Name} was told to end and has not yet (process id {ProcessId})";
+        }
+        catch (ArgumentException) { _closed = true; return $"{_program.Name} had already ended"; }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException) { return $"{_program.Name} could not be ended ({ex.Message})"; }
+    }
+
     /// <summary>True while the program's process is still running.</summary>
     public bool Running => ProcessId != 0 && !Gone(TimeSpan.Zero);
 
