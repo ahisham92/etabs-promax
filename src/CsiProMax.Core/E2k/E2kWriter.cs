@@ -99,8 +99,11 @@ public static class E2kWriter
                 }
                 break;
             case S.Grids:
-                if (m.Grids.Count == 0) break;
-                yield return Line(["GRIDSYSTEM", Quote(m.GridSystem)], m.GridSystemExtra);
+                // The grid system goes even with no grid lines: ETABS 23.2 writes it that way ("GRIDSYSTEM "G1"  TYPE "CARTESIAN"
+                // BUBBLESIZE 1.25" alone) and rejects a file with no $ GRIDS ("Error importing from file. May not be a valid ETABS
+                // 23.2.0 text file", Ahmed's real model in the Engine, 2026-11-27).
+                yield return Line(["GRIDSYSTEM", Quote(m.GridSystem.Length > 0 ? m.GridSystem : "G1")],
+                    m.GridSystemExtra.Count > 0 ? m.GridSystemExtra : ["TYPE", Quote("CARTESIAN"), "BUBBLESIZE", "1.25"]);
                 foreach (var g in m.Grids)
                     yield return Line(["GRID", Quote(m.GridSystem), "LABEL", Quote(g.Label), "DIR", Quote(g.Direction), "COORD", Number(g.Coordinate)], g.Extra);
                 break;

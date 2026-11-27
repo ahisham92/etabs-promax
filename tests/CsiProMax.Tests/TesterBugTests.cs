@@ -844,6 +844,35 @@ static class TesterBugTests
             var window = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Panel/UI/FieldProgressWindow.cs"));
             Check(window.Contains("ShowActivated = false", StringComparison.Ordinal), "the progress window takes the focus");
         });
+        yield return ("e2k: the grid system is written with no grid lines, as ETABS 23.2 needs (Ahmed's real model: \"May not be a valid ETABS 23.2.0 text file\")", () =>
+        {
+            var e2k = "$ PROGRAM INFORMATION\r\n  PROGRAM  \"ETABS\"  VERSION \"23.2.0\"\r\n$ STORIES - IN SEQUENCE FROM TOP\r\n  STORY \"S1\"  HEIGHT 3\r\n  STORY \"Base\"  ELEV 0\r\n"
+                + "$ GRIDS\r\n  GRIDSYSTEM \"G7\"  TYPE \"CARTESIAN\"  BUBBLESIZE 1.5\r\n$ DIAPHRAGM NAMES\r\n  DIAPHRAGM \"D1\"  TYPE RIGID\r\n$ END OF MODEL FILE\r\n";
+            var back = CsiProMax.E2k.E2kWriter.Write(CsiProMax.E2k.E2kReader.Read(e2k));
+            Check(back.Contains("$ GRIDS\r\n  GRIDSYSTEM  \"G7\"  TYPE  \"CARTESIAN\"  BUBBLESIZE  1.5", StringComparison.Ordinal) || back.Contains("GRIDSYSTEM") && back.Contains("\"G7\"") && back.Contains("BUBBLESIZE"), "the grid system with no grid lines is dropped:\n" + back);
+            Check(back.IndexOf("$ GRIDS", StringComparison.Ordinal) is var g and > 0 && g < back.IndexOf("$ DIAPHRAGM NAMES", StringComparison.Ordinal), "$ GRIDS is not between the stories and the diaphragms");
+            var blank = CsiProMax.E2k.E2kWriter.Write(new CsiProMax.Model.StructuralModel { GridSystemExtra = [] });
+            Check(blank.Contains("GRIDSYSTEM") && blank.Contains("CARTESIAN"), "a model with no grid system details writes no grid system");
+        });
+        yield return ("engine: a model file the program rejects stops the run with the program's own words, never runs its blank default model (Ahmed's real model, 2026-11-27)", () =>
+        {
+            Check(ScratchDialogs.IsFileRefused("Error importing from file.  May not be a valid ETABS 23.2.0 text file"), "ETABS's import error is not taken as a refused file");
+            var words = ScratchProgram.ImportRejected("ETABS", "MOD Template.e2k", 2401, ["Error importing from file. May not be a valid ETABS 23.2.0 text file"]);
+            Check(words.StartsWith("ETABS rejected MOD Template.e2k: Error importing from file", StringComparison.Ordinal) && words.Contains("2401"), words);
+            var dir = Path.Combine(Path.GetTempPath(), "cpm-import-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(dir);
+            try
+            {
+                var file = Path.Combine(dir, "m.e2k");
+                File.WriteAllText(file, "$ POINT COORDINATES\r\n  POINT \"1\"  0 0\r\n  POINT \"2\"  5 0\r\n$ LINE CONNECTIVITIES\r\n  LINE  \"B1\"  BEAM  \"1\"  \"2\"  0\r\n$ END OF MODEL FILE\r\n");
+                Check(ScratchProgram.TextObjectCount(CsiProMax.Assistant.Etabs.CsiProgram.Etabs, file) == 1, "the .e2k's objects are not counted");
+                var s2k = Path.Combine(dir, "m.s2k");
+                File.WriteAllText(s2k, "TABLE:  \"CONNECTIVITY - FRAME\"\r\n   Frame=1   JointI=1   JointJ=2\r\n   Frame=2   JointI=2   JointJ=3\r\n\r\nEND TABLE DATA\r\n");
+                Check(ScratchProgram.TextObjectCount(CsiProMax.Assistant.Etabs.CsiProgram.Sap2000, s2k) == 2, "the .s2k's objects are not counted");
+            }
+            finally { Directory.Delete(dir, true); }
+            var src = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Tools/EngineRun.cs"));
+            Check(src.Contains("could not open the model: {open.Detail}", StringComparison.Ordinal), "the Run Report does not lead with the rejected file");
+        });
         yield return ("field test: steps a workaround can test are tested, not left out (Ahmed, 2026-11-26: only a missing program or licence)", () =>
         {
             string Src(string f) => File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant", f));
