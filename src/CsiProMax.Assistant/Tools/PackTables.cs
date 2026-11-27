@@ -177,7 +177,10 @@ public static class PackTables
             foreach (var t in wanted)
             {
                 TableData data;
-                try { data = Pack.ReadTable(e, t.Key, cases, combos); }
+                // Straight from the program, never Pack.SameModel's reads: those hold the same table as read before the
+                // output was set to step by step (envelopes only), so the Viewer's pack of the 0.4.67-test4 SAP2000 run
+                // had no step tables and its Static Pushover Curve was greyed out.
+                try { data = e.ReadTable(t.Key, cases, combos); }
                 catch (EtabsException) { continue; }
                 var st = Col(data.Fields, "StepType", "Step Type");
                 if (st < 0) continue;
