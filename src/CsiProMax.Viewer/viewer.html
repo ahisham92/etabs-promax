@@ -5208,9 +5208,29 @@ function hmSapGenDispl(all) {
   const b = d.querySelectorAll("[data-a]"); b[1].disabled = b[2].disabled = !names.length;
   return d;
 }
+// SAP2000 26.3's Define Pattern Names: the name box over the Patterns list, Add New Pattern Name, Change Pattern Name and
+// Delete Pattern; "Default" is SAP2000's own. Kept as Joint Pattern Definitions rows.
+function hmSapJointPatterns(rows) {
+  const T = "Joint Pattern Definitions", names = ["Default", ...rows.map(r => r.Pattern).filter(n => n && n !== "Default")];
+  const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmDefineTable(T); };
+  const d = dialog("Define Pattern Names", `<div style="display:flex;gap:10px"><fieldset style="flex:1;margin:0"><legend>Patterns</legend><input id="jpN" style="width:100%;box-sizing:border-box" value="Default">
+      <select id="jpL" size="10" style="width:100%;height:auto">${names.map(n => `<option>${esc(n)}</option>`).join("")}</select></fieldset>
+    <fieldset style="width:170px;margin:0"><legend>Click to:</legend><div style="display:flex;flex-direction:column;gap:6px"><button id="jpAdd">Add New Pattern Name</button><button id="jpRen">Change Pattern Name</button><button id="jpDel">Delete Pattern</button></div></fieldset></div>`,
+    [["OK"], ["Cancel"]], {width: 420});
+  const L = q(d, "#jpL"); L.selectedIndex = 0;
+  const sync = () => { q(d, "#jpN").value = L.value; q(d, "#jpDel").disabled = q(d, "#jpRen").disabled = L.value === "Default"; };
+  L.onchange = sync; sync();
+  const put = (name, r) => hmRun("define_table_rows", {table: T, name, rows: r}, true);
+  q(d, "#jpAdd").onclick = () => { const n = q(d, "#jpN").value.trim(); if (!n || names.includes(n)) return formError(d, n ? "There is a pattern " + n + " already." : "Type the new name in the box."); put(n, [{Pattern: n}]).then(j => j.ok ? again() : formError(d, j.error)); };
+  q(d, "#jpRen").onclick = async () => { const was = L.value, n = q(d, "#jpN").value.trim(); if (!n || was === "Default" || n === was) return; if (names.includes(n)) return formError(d, "There is a pattern " + n + " already.");
+    const old = rows.filter(r => r.Pattern === was).map(r => ({...r, Pattern: n})); const j = await put(n, old.length ? old : [{Pattern: n}]); if (!j.ok) return formError(d, j.error); const j2 = await put(was, []); j2.ok ? again() : formError(d, j2.error); };
+  q(d, "#jpDel").onclick = () => { if (L.value === "Default") return; put(L.value, []).then(j => j.ok ? again() : formError(d, j.error)); };
+  return d;
+}
 async function hmDefineTable(spec) {
   const tables = spec.split("|"), dd = (await hmRun("definition_data", {}, true)).result; if (!dd) return;
   if (program === "sap2000" && spec === "Generalized Displacement Definitions" && dd.tables[spec]) return hmSapGenDispl(dd.tables[spec].rows);
+  if (program === "sap2000" && spec === "Joint Pattern Definitions" && dd.tables[spec]) return hmSapJointPatterns(dd.tables[spec].rows);
   const defs = tables.map(t => dd.tables[t]); if (defs.some(x => !x)) return hmSay("The " + progLabel(program) + " model has no " + tables[0] + ".", true);
   const key = t => dd.tables[t].fields[0][0];
   const names = [...new Set(tables.flatMap(t => dd.tables[t].rows.map(r => r[key(t)])))];
