@@ -27,6 +27,43 @@ public static class F2kRebuild
         catch (ToolInputException) { return 6; }
     }
 
+    /// <summary>
+    /// The height of the file's one story (GRID DEFINITIONS - GENERAL "Story Height Below", else "Model Datum"), for the
+    /// blank model it is built in: SAFE 22.7 refused every floor of the Modeler's file (slabs at 3.2 m) in a blank
+    /// model whose story was at 3 m ("SAFE refused to add an area with section S200", tester's SAFE-only run, 0.4.66).
+    /// 3 when the file names none.
+    /// </summary>
+    public static double StoryHeightOf(string f2kText)
+    {
+        var row = Rows(CsiTableText.Parse(f2kText), "GRID DEFINITIONS - GENERAL").FirstOrDefault();
+        var below = N(row, "Story Height Below", 0);
+        if (below > 0) return below;
+        var datum = N(row, "Model Datum", 0);
+        return datum > 0 ? datum : 3;
+    }
+
+    /// <summary>The level of the file's floors (their points' Z), or null when it has none.</summary>
+    public static double? FloorLevelOf(string f2kText)
+    {
+        var t = CsiTableText.Parse(f2kText);
+        var points = Rows(t, "POINT OBJECT CONNECTIVITY").GroupBy(r => r.GetValueOrDefault("UniqueName") ?? "", StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => N(g.First(), "Z", 0), StringComparer.OrdinalIgnoreCase);
+        foreach (var row in Rows(t, "FLOOR OBJECT CONNECTIVITY"))
+            if (points.TryGetValue(row.GetValueOrDefault("UniquePt1") ?? "", out var z)) return z;
+        return null;
+    }
+
+    /// <summary>
+    /// Why a floor may be refused: the model has no story at the file's floor level. "" when it has one, or when the
+    /// stories could not be read.
+    /// </summary>
+    internal static string LevelProblem(IReadOnlyList<StoryRow> stories, double? level)
+    {
+        if (level is not { } z || stories.Count == 0) return "";
+        if (stories.Any(s => Math.Abs(s.Elevation - z) < 1e-4)) return "";
+        return $" The file's floors are at Z = {CsiTableText.Number(z)}, and the model's stories are at {string.Join(", ", stories.Select(s => $"{s.Name} {CsiTableText.Number(s.Elevation)}"))}: no story is at the floors' level.";
+    }
+
     /// <summary>Builds what the file holds; the answer counts it the way save_safe_file does, with what was left out.</summary>
     public static JsonObject Build(ICsiLink e, string f2kText)
     {
@@ -132,7 +169,22 @@ public static class F2kRebuild
             var name = row.GetValueOrDefault("Unique Name") ?? "";
             var corners = Corners(row);
             if (corners.Count < 3) { notes.Add($"The area {name} has fewer than 3 points and was left out."); continue; }
-            Rename(e, "AreaObj", e.AddArea(corners, areaSection.GetValueOrDefault(name, firstSlab)), name, names);
+            var section = areaSection.GetValueOrDefault(name, firstSlab);
+            string made;
+            try { made = e.AddArea(corners, section); }
+            catch (EtabsException ex)
+            {
+                // Said with what the program has, so the next report shows why (the section, the story levels).
+                var why = "";
+                try
+                {
+                    if (!e.AreaSections().Contains(section, StringComparer.OrdinalIgnoreCase)) why += $" The model has no area section {section} (it has {string.Join(", ", e.AreaSections().Take(20))}).";
+                    why += LevelProblem(e.Stories(), corners[0].Z);
+                }
+                catch (EtabsException) { /* the first message is enough */ }
+                throw new EtabsException($"{ex.Message} (floor {name}, {corners.Count} corners at Z = {CsiTableText.Number(corners[0].Z)}).{why}");
+            }
+            Rename(e, "AreaObj", made, name, names);
             slabs++;
         }
 

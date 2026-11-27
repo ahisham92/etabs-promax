@@ -737,13 +737,20 @@ public sealed class ScratchProgram : IScratchWindow
         bool Blank(string why) => ctx.Step($"start a blank model in it ({why})", () =>
             {
                 var units = F2kRebuild.UnitsOf(text);
+                // The story at the file's own level: SAFE 22.7 refused every floor of the Modeler's file (at 3.2 m) in a
+                // blank model whose story was at 3 m (tester's SAFE-only run, 0.4.66).
+                var height = F2kRebuild.StoryHeightOf(text);
                 Ask(FileTimeout, "start a blank model", m =>
                 {
                     object model = m;
                     ApiCall.Must(model, "InitializeNewModel", CsiTools.D(("Units", units)), "start a new model");
-                    return ApiCall.First(model, ["File.NewBlank", "File.NewGridOnly"], CsiTools.D(("NumberStorys", 1), ("TypicalStoryHeight", 3), ("BottomStoryHeight", 3), ("NumberLinesX", 2), ("NumberLinesY", 2), ("SpacingX", 6), ("SpacingY", 6)), "start a blank model");
+                    return ApiCall.First(model, ["File.NewBlank", "File.NewGridOnly"], CsiTools.D(("NumberStorys", 1), ("TypicalStoryHeight", height), ("BottomStoryHeight", height), ("NumberLinesX", 2), ("NumberLinesY", 2), ("SpacingX", 6), ("SpacingY", 6)), "start a blank model");
                 }, $"{name} did not finish starting a blank model within {FileTimeout.TotalMinutes:0} minutes. A message may be waiting in its window.");
-                return $"blank, in {ComEtabs.UnitNames[units - 1]}";
+                // NewBlank takes no story height in SAFE: the one story is moved to the file's level when it is not there.
+                var level = F2kRebuild.FloorLevelOf(text);
+                var stories = level is null ? "" : Convert.ToString(Ask(FileTimeout, "put the story at the file's level", m => SafeStory.AtLevel(m, level.Value),
+                    $"{name} did not answer within {FileTimeout.TotalMinutes:0} minutes. A message may be waiting in its window.")) ?? "";
+                return $"blank, in {ComEtabs.UnitNames[units - 1]}, {stories}";
             }) is not null;
         if (build && !Blank($"{name} on this PC opens only {ModelExtension(_program)} files through its API, so the Modeler's {Path.GetExtension(modelFile)} is built in it instead")) return false;
         var openedEmpty = false;
@@ -788,6 +795,9 @@ public sealed class ScratchProgram : IScratchWindow
                 $"an engineer opening this file in {name} gets an empty model. The rest of the test builds the model through the API.");
             build = true;
             text = File.ReadAllText(modelFile);
+            // Why, for the next report: the same file in other forms, and SAFE's own export as the control.
+            if (_program.Key == CsiProgram.Safe.Key)
+                ctx.Step($"find which .f2k {name} opens through its API (the Modeler's in other forms, and {name}'s own export)", () => Probe(ctx, name, text));
             if (!Blank($"{name} opened the Modeler's {Path.GetExtension(modelFile)} as an empty model, so the model is built in it instead")) return false;
         }
 
@@ -872,6 +882,31 @@ public sealed class ScratchProgram : IScratchWindow
     public static string ScratchName() => "cpm-field-test-" + Guid.NewGuid().ToString("N")[..6];
 
     /// <summary>One call to the scratch window that may never come back (a message waiting in it): then it is left alone.</summary>
+    /// <summary>
+    /// Opens each form of the Modeler's .f2k (<see cref="F2kProbe"/>) and SAFE's own export in the scratch window and
+    /// says how many objects each held. A probe: it fails only when the window stops answering.
+    /// </summary>
+    private string Probe(FieldContext ctx, string name, string modelText)
+    {
+        var most = TimeSpan.FromSeconds(90);
+        var late = $"{name} did not answer within {most.TotalSeconds:0} s while the test opened the forms of the file. A message may be waiting in its window.";
+        var version = Convert.ToString(Ask(most, "read its version", m => { string v = ""; double n = 0; m.GetVersion(ref v, ref n); return v; }, late)) ?? "";
+        var dir = Path.Combine(ctx.Folder, "f2k probe");
+        Directory.CreateDirectory(dir);
+        var forms = F2kProbe.Forms(modelText, version).ToList();
+        if (F2kProbe.Control() is { } own) forms.Insert(0, ($"{name}'s own export of the RC-PN example (the control)", own));
+        var said = new List<string>();
+        for (var i = 0; i < forms.Count; i++)
+        {
+            var file = Path.Combine(dir, $"probe-{i + 1}.f2k");
+            File.WriteAllText(file, forms[i].Text);
+            var answer = Convert.ToInt32(Ask(most, "open the file", m => m.File.OpenFile(file), late));
+            var held = Convert.ToInt32(Ask(most, "count the objects", m => Count(m, "AreaObj.Count") + Count(m, "FrameObj.Count"), late));
+            said.Add($"{i + 1}. {forms[i].Name}: answered {answer}, holds {held} objects ({Path.GetFileName(file)})");
+        }
+        return $"{name} {version}: " + string.Join("; ", said);
+    }
+
     private object? Ask(TimeSpan most, string what, Func<dynamic, object?> work, string late)
     {
         if (_left || _com is not { } com) throw new EtabsException($"The scratch {_program.Name} window stopped answering earlier.");
