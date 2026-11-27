@@ -171,6 +171,8 @@ public static class DefineTables
         foreach (var (t, fields) in ProgramForms.WallOverwriteCatalog()) etabs[t] = fields.Select(f => (f.Key, f.Label)).ToArray();
         // ETABS's own load pattern (auto seismic, wind, notional) and load case tables (Ahmed 2026-11-27, every form).
         foreach (var (t, fields) in EtabsLoadTables.Fields) etabs[t] = fields;
+        // ETABS's Detailing > Drawing Management forms, kept by the Engine only (EtabsDetailingTables).
+        foreach (var (t, fields) in EtabsDetailingTables.Tables) etabs[t] = fields;
         return etabs;
     }
 

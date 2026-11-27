@@ -728,6 +728,17 @@ public static class ModelerFieldSteps
         // ETABS's Design > Live Load Reduction Factors, Steel Connection Design preferences and the design targets, as the
         // forms set them; the ETABS part reads the targets back (EtabsDesignRoundTrip.Check).
         EtabsDesignRoundTrip.Define(ctx, modeler);
+        // ETABS's Detailing > Drawing Management > Drawing Format Properties and Drawing Sheet Setup, as the forms keep them
+        // (the Engine's own tables: ETABS's .e2k and tables do not carry them); never put into the program's tables.
+        if (modeler.Model.Target == CsiProMax.Model.ProgramOptions.Etabs)
+        {
+            ctx.Tool("define_table_rows", """{"table":"Engine - Detailing Drawing Format Properties","name":"Drawing Format Properties","rows":[{"Group":"General","Tab":"Line","Item":"Grid Lines","Color":"#ff0000","Thickness":"2.0-Double"},{"Group":"Beams","Tab":"Text","Item":"Beam Number","Size":"12","Bold":"No"}]}""",
+                _ => FieldContext.Expect(modeler.Model.DefinitionTables?.GetValueOrDefault(CsiProMax.Model.EtabsDetailingTables.DrawingFormat)?.Count == 2, "the Drawing Format Properties form's 2 changed items are not in the model"),
+                "Detailing > Drawing Format Properties, two items changed");
+            ctx.Tool("define_table_rows", """{"table":"Engine - Detailing Drawing Sheet Setup","name":"Drawing Sheet Setup","rows":[{"SheetType":"ANSI Engineering","SheetSize":"E","SheetWidth":"40","SheetHeight":"30","MarginLeft":"1.5","Border":"Predefined","Position":"Right","TitleBlockSize":"4","SheetNoPrefix":"CPM-"}]}""",
+                _ => FieldContext.Expect(modeler.Model.DefinitionTables?.GetValueOrDefault(CsiProMax.Model.EtabsDetailingTables.SheetSetup)?.FirstOrDefault()?.GetValueOrDefault("SheetNoPrefix") == "CPM-", "the Drawing Sheet Setup form's row is not in the model"),
+                "Detailing > Drawing Sheet Setup");
+        }
         var conc = modeler.Model.Materials.FirstOrDefault(m => m.IsConcrete)?.Name ?? "";
         ctx.Tool("define_shell_type", """{"name":"CPM-DROP","kind":"slab","slab_type":"Drop","modeling":"ShellThick","thickness":0.3,"material":""" + Q(conc) + ""","modifiers":{"M11MOD":0.25,"M22MOD":0.25}}""", null, "tool define_shell_type, a cracked drop panel");
         ctx.Tool("define_shell_type", """{"name":"CPM-RIB","kind":"slab","slab_type":"Ribbed","modeling":"ShellThin","thickness":0.1,"material":""" + Q(conc) + ""","overall_depth":0.4,"rib_width_top":0.15,"rib_width_bottom":0.125,"rib_spacing":0.9,"rib_direction":1}""", null, "tool define_shell_type, a ribbed slab");
