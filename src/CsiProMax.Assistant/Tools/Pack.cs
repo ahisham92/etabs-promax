@@ -264,6 +264,41 @@ public static class Pack
     }
 
     /// <summary>
+    /// What the program has that the pack does not (Ahmed 2026-11-27: the results of an analysis or a design "complete,
+    /// no way to lose anything"): every result, design and design-input table the program lists for this model, read
+    /// from it (inside the pack's read session, so from what the pack read), against the pack's table of that name:
+    /// a table with rows that is not in the pack, a row or a field fewer, or rows left out. Empty when nothing is lost.
+    /// Call it while the program is still open, with the cases and combinations the pack was built with.
+    /// </summary>
+    public static List<string> Missing(ICsiLink e, JsonObject content, IReadOnlyList<string> cases, IReadOnlyList<string> combos)
+    {
+        if (cases.Count == 0 && combos.Count == 0) { cases = e.LoadCases(); combos = e.Combos(); }
+        var tables = content["tables"] as JsonObject ?? [];
+        var parts = (content["manifest"]?["notes"] as JsonArray ?? []).Select(n => n?.ToString() ?? "").Where(n => n.Contains("at a time", StringComparison.Ordinal)).ToList();
+        var lost = new List<string>();
+        foreach (var t in e.Tables().DistinctBy(t => t.Key))
+        {
+            var kind = PackTables.Kind(t);
+            if (kind is null && !DesignResults.IsDesignTable(t.Name) && !DesignResults.IsWallTable(t.Name)) continue;
+            var held = tables[t.Name] as JsonObject;
+            if (held is not null && held["left_out"] is { } cut) { lost.Add($"'{t.Name}': {cut} rows left out"); continue; }
+            // A table read a load case at a time is not read whole again to count it: its rows came from the program.
+            if (held is not null && parts.Any(n => n.Contains($"'{t.Name}'", StringComparison.Ordinal))) continue;
+            TableData data;
+            try { data = ReadTable(e, t.Key, cases, combos); }
+            catch (EtabsException) { if (held is null && !t.Empty) lost.Add($"'{t.Name}': not in the pack, and the program would not give it"); continue; }
+            if (data.Rows.Count == 0) continue;
+            if (held is null) { lost.Add($"'{t.Name}': {data.Rows.Count} rows, not in the pack"); continue; }
+            var rows = (held["rows"] as JsonArray)?.Count ?? 0;
+            if (rows < data.Rows.Count) lost.Add($"'{t.Name}': {rows} of {data.Rows.Count} rows");
+            var fields = (held["fields"] as JsonArray ?? []).Select(f => f?.ToString() ?? "").ToHashSet(StringComparer.Ordinal);
+            var gone = data.Fields.Where(f => f.Length > 0 && !fields.Contains(f)).ToList();
+            if (gone.Count > 0) lost.Add($"'{t.Name}': fields {string.Join(", ", gone)} not in the pack");
+        }
+        return lost;
+    }
+
+    /// <summary>
     /// The .cpmx of a pack's content. Build makes it at once unless asked not to (zip: false): a pack read from a copy
     /// in a hidden program is zipped after that program is closed, so it holds a licence only while it reads.
     /// </summary>
@@ -468,26 +503,57 @@ public static class Pack
     private static void AddTable(ZipArchive zip, string stem, JsonObject table)
     {
         if (table["rows"] is not JsonArray rows || rows.Count <= PartRows) { Add(zip, stem + ".json", table); return; }
-        var head = new JsonObject();
-        foreach (var (k, v) in table) head[k] = k == "rows" ? new JsonArray() : v?.DeepClone();
-        var first = (JsonArray)head["rows"]!;
-        for (var i = 0; i < PartRows; i++) first.Add(rows[i]!.DeepClone());
-        head["parts"] = (rows.Count + PartRows - 1) / PartRows;
-        Add(zip, stem + ".json", head);
+        var parts = (rows.Count + PartRows - 1) / PartRows;
+        void Entry(string name, Action<Utf8JsonWriter> write)
+        {
+            using var s = zip.CreateEntry(name, CompressionLevel.Optimal).Open();
+            using var w = new Utf8JsonWriter(s);
+            write(w);
+        }
+        Entry(stem + ".json", w => WriteSlice(w, table, rows, 0, PartRows, x => x.WriteNumber("parts", parts)));
         for (int start = PartRows, part = 2; start < rows.Count; start += PartRows, part++)
         {
-            var chunk = new JsonArray();
-            for (var i = start; i < Math.Min(rows.Count, start + PartRows); i++) chunk.Add(rows[i]!.DeepClone());
-            Add(zip, $"{stem}-p{part}.json", new JsonObject { ["name"] = table["name"]?.DeepClone(), ["part"] = part, ["rows"] = chunk });
+            var (from, to, n) = (start, Math.Min(rows.Count, start + PartRows), part);
+            Entry($"{stem}-p{part}.json", w =>
+            {
+                w.WriteStartObject();
+                w.WritePropertyName("name"); if (table["name"] is { } name) name.WriteTo(w); else w.WriteNullValue();
+                w.WriteNumber("part", n);
+                w.WritePropertyName("rows");
+                w.WriteStartArray();
+                for (var i = from; i < to; i++) { if (rows[i] is { } r) r.WriteTo(w); else w.WriteNullValue(); }
+                w.WriteEndArray();
+                w.WriteEndObject();
+            });
         }
     }
 
     private static void Add(ZipArchive zip, string name, JsonNode node)
     {
+        // Written straight into the entry: never one text of the whole node (0.4.68 full test: the large model's pack
+        // ran the test out of memory).
         var entry = zip.CreateEntry(name, CompressionLevel.Optimal);
         using var s = entry.Open();
-        var bytes = Encoding.UTF8.GetBytes(node.ToJsonString());
-        s.Write(bytes, 0, bytes.Length);
+        using var w = new Utf8JsonWriter(s);
+        node.WriteTo(w);
+    }
+
+    /// <summary>A table's head (everything but its rows) with rows [from, to) of it, written without copying a row.</summary>
+    private static void WriteSlice(Utf8JsonWriter w, JsonObject table, JsonArray rows, int from, int to, Action<Utf8JsonWriter>? more = null)
+    {
+        w.WriteStartObject();
+        foreach (var (k, v) in table)
+        {
+            if (k == "rows") continue;
+            w.WritePropertyName(k);
+            if (v is null) w.WriteNullValue(); else v.WriteTo(w);
+        }
+        more?.Invoke(w);
+        w.WritePropertyName("rows");
+        w.WriteStartArray();
+        for (var i = from; i < to; i++) { if (rows[i] is { } r) r.WriteTo(w); else w.WriteNullValue(); }
+        w.WriteEndArray();
+        w.WriteEndObject();
     }
 
     /// <summary>Reads a pack back: its content as the Viewer gets it.</summary>
@@ -531,40 +597,136 @@ public static class Pack
     /// <summary>The Viewer page. With <paramref name="content"/> the pack is inside it, so the reviewer opens one file.</summary>
     public static string ViewerHtml(JsonObject? content = null)
     {
+        if (content is null) return Page();
+        using var stream = new MemoryStream();
+        WriteViewerHtml(stream, content);
+        return Encoding.UTF8.GetString(stream.GetBuffer(), 0, (int)stream.Length);
+    }
+
+    private static string Page()
+    {
         using var stream = typeof(Pack).Assembly.GetManifestResourceStream("CsiProMax.viewer.html")
             ?? throw new InvalidOperationException("The Viewer page is missing from this build.");
         using var reader = new StreamReader(stream, Encoding.UTF8);
-        var html = reader.ReadToEnd();
-        if (content is null) return html;
+        return reader.ReadToEnd();
+    }
+
+    /// <summary>
+    /// The Viewer page with the pack inside, written straight to <paramref name="to"/>: never one text of the whole pack
+    /// (0.4.68 full test: the large model's page ran the test out of memory). A long table's rows past the first part go
+    /// in script elements of their own (pack-rows), which the page joins back. JSON written with the default encoder has
+    /// no "&lt;", so nothing in it can end or confuse the script element.
+    /// </summary>
+    public static void WriteViewerHtml(Stream to, JsonObject content)
+    {
+        var html = Page();
         const string slot = "<script id=\"pack\" type=\"application/json\"></script>";
-        if (!html.Contains(slot, StringComparison.Ordinal)) throw new InvalidOperationException("The Viewer page has no place for a pack.");
-        // Inside a script element only "</" and "<!--" can end or confuse it.
-        static string Safe(string json) => json.Replace("</", "<\\/", StringComparison.Ordinal).Replace("<!--", "<\\u0021--", StringComparison.Ordinal);
-        // A long table's rows past the first part go in script elements of their own (pack-rows), which the page joins
-        // back: one text the size of the whole pack would pass what a browser holds in one string.
-        var rest = new StringBuilder();
-        var shown = content;
-        if (content["tables"] is JsonObject all && all.Any(t => t.Value?["rows"] is JsonArray { Count: var c } && c > PartRows))
+        var at = html.IndexOf(slot, StringComparison.Ordinal);
+        if (at < 0) throw new InvalidOperationException("The Viewer page has no place for a pack.");
+        var utf8 = new UTF8Encoding(false);
+        void Text(string t) { var b = utf8.GetBytes(t); to.Write(b, 0, b.Length); }
+        Text(html[..at]);
+        Text("<script id=\"pack\" type=\"application/json\">");
+        var big = new List<(string Name, JsonObject Table, JsonArray Rows)>();
+        using (var w = new Utf8JsonWriter(to))
         {
-            shown = new JsonObject();
-            foreach (var (k, v) in content) if (k != "tables") shown[k] = v?.DeepClone();
-            var tables = new JsonObject();
-            foreach (var (name, node) in all)
+            w.WriteStartObject();
+            foreach (var (k, v) in content)
             {
-                if (node is not JsonObject t || t["rows"] is not JsonArray rows || rows.Count <= PartRows) { tables[name] = node?.DeepClone(); continue; }
-                var head = new JsonObject();
-                foreach (var (k, v) in t) if (k != "rows") head[k] = v?.DeepClone();
-                head["rows"] = new JsonArray(rows.Take(PartRows).Select(r => r?.DeepClone()).ToArray());
-                tables[name] = head;
-                for (var start = PartRows; start < rows.Count; start += PartRows)
+                w.WritePropertyName(k);
+                if (k != "tables" || v is not JsonObject tables) { if (v is null) w.WriteNullValue(); else v.WriteTo(w); continue; }
+                w.WriteStartObject();
+                foreach (var (name, node) in tables)
                 {
-                    var chunk = new JsonObject { ["table"] = name, ["rows"] = new JsonArray(rows.Skip(start).Take(PartRows).Select(r => r?.DeepClone()).ToArray()) };
-                    rest.Append("<script class=\"pack-rows\" type=\"application/json\">").Append(Safe(chunk.ToJsonString())).Append("</script>\n");
+                    w.WritePropertyName(name);
+                    if (node is JsonObject t && t["rows"] is JsonArray rows && rows.Count > PartRows) { WriteSlice(w, t, rows, 0, PartRows); big.Add((name, t, rows)); }
+                    else if (node is null) w.WriteNullValue();
+                    else node.WriteTo(w);
                 }
+                w.WriteEndObject();
             }
-            shown["tables"] = tables;
+            w.WriteEndObject();
         }
-        return html.Replace(slot, "<script id=\"pack\" type=\"application/json\">" + Safe(shown.ToJsonString()) + "</script>\n" + rest, StringComparison.Ordinal);
+        Text("</script>\n");
+        foreach (var (name, _, rows) in big)
+            for (var start = PartRows; start < rows.Count; start += PartRows)
+            {
+                Text("<script class=\"pack-rows\" type=\"application/json\">");
+                using (var w = new Utf8JsonWriter(to))
+                {
+                    w.WriteStartObject();
+                    w.WriteString("table", name);
+                    w.WritePropertyName("rows");
+                    w.WriteStartArray();
+                    for (var i = start; i < Math.Min(rows.Count, start + PartRows); i++) { if (rows[i] is { } r) r.WriteTo(w); else w.WriteNullValue(); }
+                    w.WriteEndArray();
+                    w.WriteEndObject();
+                }
+                Text("</script>\n");
+            }
+        Text(html[(at + slot.Length)..]);
+    }
+
+    /// <summary>How many bytes <paramref name="node"/> is as JSON, counted as it is written, never held.</summary>
+    public static long JsonSize(JsonNode node)
+    {
+        using var count = new CountingStream();
+        using (var w = new Utf8JsonWriter(count)) node.WriteTo(w);
+        return count.Length;
+    }
+
+    private sealed class CountingStream : Stream
+    {
+        private long _n;
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => _n;
+        public override long Position { get => _n; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => _n += count;
+        public override void Write(ReadOnlySpan<byte> buffer) => _n += buffer.Length;
+    }
+
+    /// <summary>
+    /// The most rows the Engine window is handed at once with a run's results (a browser holds about half a gigabyte of
+    /// text in one string). A pack with more is handed with each long table's first part, marked with its whole row
+    /// count and parts; the whole of it is in the .cpmx and its Viewer page beside the model.
+    /// </summary>
+    public static int WindowMostRows { get; set; } = 3_000_000;
+
+    /// <summary>The pack as the Engine window is given it (see <see cref="WindowMostRows"/>); the pack itself when it fits.</summary>
+    public static JsonObject ForWindow(JsonObject content)
+    {
+        if (content["tables"] is not JsonObject all) return content;
+        var total = all.Sum(t => (long)((t.Value?["rows"] as JsonArray)?.Count ?? 0));
+        if (total <= WindowMostRows) return content;
+        var shown = new JsonObject();
+        foreach (var (k, v) in content) if (k != "tables") shown[k] = v?.DeepClone();
+        var tables = new JsonObject();
+        foreach (var (name, node) in all)
+        {
+            if (node is not JsonObject t || t["rows"] is not JsonArray rows || rows.Count <= PartRows) { tables[name] = node?.DeepClone(); continue; }
+            var head = new JsonObject();
+            foreach (var (k, v) in t) if (k != "rows") head[k] = v?.DeepClone();
+            head["rows"] = new JsonArray(Enumerable.Range(0, PartRows).Select(i => rows[i]?.DeepClone()).ToArray());
+            head["rows_total"] = rows.Count;
+            head["parts"] = (rows.Count + PartRows - 1) / PartRows;
+            head["whole_in_pack"] = true;
+            tables[name] = head;
+        }
+        shown["tables"] = tables;
+        return shown;
+    }
+
+    /// <summary>Writes the Viewer page of <paramref name="content"/> to <paramref name="file"/>, streamed.</summary>
+    public static void WriteViewerHtml(string file, JsonObject content)
+    {
+        using var f = new FileStream(file, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16);
+        WriteViewerHtml(f, content);
     }
 
     /// <summary>
