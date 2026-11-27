@@ -6519,10 +6519,51 @@ function hmSpring(kind, sp, after) {
   return d;
 }
 
+// SAP2000 26.3's Define Constraints: the list, Choose Constraint Type to Add, Click to:, and each type's own form
+// (Body, Diaphragm, Plate, Rod, Beam, Equal, Local, Weld, Line) with Coordinate System, Constraint Axis or Constrained DOFs.
+function hmSapConstraints(xd, again) {
+  const types = ["Body", "Diaphragm", "Plate", "Rod", "Beam", "Equal", "Local", "Weld", "Line"], prefix = {Diaphragm: "DIAPH"};
+  const axisT = ["Diaphragm", "Plate", "Rod", "Beam"], u = hmU();
+  const one = (c, type) => {
+    const t = c ? c.type : type, names = xd.constraints.map(x => x.name);
+    let k = 1; const pre = prefix[t] || t.toUpperCase(); while (names.includes(pre + k)) k++;
+    const fs = (legend, body) => `<fieldset style="margin:0 0 8px"><legend>${legend}</legend>${body}</fieldset>`;
+    const line = (l, ctl) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 6px">${l}${ctl}</div>`;
+    const local = t === "Local", g = local ? ["1", "2", "3"] : ["X", "Y", "Z"], dk = local ? ["U1", "U2", "U3", "R1", "R2", "R3"] : ["UX", "UY", "UZ", "RX", "RY", "RZ"];
+    const on = x => !c || !c.dofs || !c.dofs.length || c.dofs.includes(x);
+    const dofs = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 10px">${[0, 1, 2].map(i => `<label><input type="checkbox" data-d="${dk[i]}" ${on(dk[i]) ? "checked" : ""}> Translation ${g[i]}</label><label><input type="checkbox" data-d="${dk[i + 3]}" ${on(dk[i + 3]) ? "checked" : ""}> Rotation ${g[i]}</label>`).join("")}</div>`;
+    const axis = c && c.axis ? c.axis : t === "Diaphragm" ? "Z" : "Auto", ax = a => `<label style="display:block;margin:3px 0"><input type="radio" name="kA" value="${a}" ${axis === a ? "checked" : ""}> ${a === "Auto" ? "Auto" : a + " Axis"}</label>`;
+    const body = fs("", line("Constraint Name", `<input id="kN" style="width:110px" value="${esc(c ? c.name : pre + k)}" ${c ? "disabled" : ""}>`))
+      + (local ? "" : fs("", line("Coordinate System", `<select id="kC" style="width:110px">${opts(["GLOBAL"], "GLOBAL")}</select>`)))
+      + (axisT.includes(t) ? fs("Constraint Axis", `<div style="display:grid;grid-template-columns:1fr 1fr">${`<div>${ax("X")}${ax("Y")}${ax("Z")}</div><div>${ax("Auto")}</div>`}</div>`) : fs("Constrained DOFs", dofs))
+      + (t === "Diaphragm" ? fs("Semi-rigid Diaphragm Option", `<label><input type="checkbox" id="kS" ${c && c.semi_rigid ? "checked" : ""}> Semi-rigid</label><p class="kv" style="margin:4px 0 0 20px;color:#888">Note:  Defined for application of seismic and wind loads. Option is only active when the Coordinate System is Global and the Constraint Axis is Z Axis.</p>`)
+          + `<label style="display:flex;gap:6px;margin:4px 0"><input type="checkbox" id="kM" ${c && c.multi_level ? "checked" : ""} style="flex:none"><span style="white-space:normal">Assign a different diaphragm constraint to each different selected Z level</span></label>` : "")
+      + (t === "Weld" ? fs("", line("Weld Tolerance", `<input id="kT" type="number" step="any" style="width:110px" value="${c ? c.tolerance : +(sapConv(0.01, {f: "kN", l: "m"}, u, 0, 1, 0)).toPrecision(4)}">`)) : "");
+    const d = dialog(t + " Constraint", body, [["OK", d => {
+      const args = {name: q(d, "#kN").value.trim(), type: t};
+      if (axisT.includes(t)) args.axis = q(d, "[name=kA]:checked").value; else args.dofs = [...d.querySelectorAll("[data-d]:checked")].map(x => x.dataset.d);
+      if (!axisT.includes(t) && !args.dofs.length) { formError(d, "Tick at least one degree of freedom."); return false; }
+      if (t === "Weld") args.tolerance = fnum(d, "#kT");
+      if (t === "Diaphragm") { args.semi_rigid = q(d, "#kS").checked && !q(d, "#kS").disabled; args.multi_level = q(d, "#kM").checked; }
+      return submit(d, "define_constraint", args, again);
+    }, true], ["Cancel"]], {width: t === "Diaphragm" ? 320 : 300});
+    if (t === "Diaphragm") { const sync = () => { const z = q(d, "[name=kA]:checked").value === "Z"; q(d, "#kS").disabled = !z; if (!z) q(d, "#kS").checked = false; }; d.querySelectorAll("[name=kA]").forEach(r => r.onchange = sync); sync(); }
+    return d;
+  };
+  const find = n => xd.constraints.find(c => c.name === n);
+  const extra = `<div style="margin-bottom:8px"><div style="color:var(--legend,#1a50b0);font-size:12px">Choose Constraint Type to Add</div><select id="kType" style="width:100%">${opts(types, "Body")}</select></div>`;
+  const d = listForm("Define Constraints", "Constraints", xd.constraints.map(c => c.name), [["Add New Constraint...", (n, d) => one(null, q(d, "#kType").value)], ["Modify/Show Constraint...", n => n && find(n) && one(find(n))], ["Delete Constraint", n => n && hmRun("define_constraint", {name: n, delete: true}, true).then(j => j.ok ? again() : hmSay(j.error, true))]], n => find(n) && one(find(n)));
+  // SAP2000 puts the type box above Click to:.
+  const box = d.querySelectorAll("fieldset")[1]; box.insertAdjacentHTML("beforebegin", `<div style="width:190px;display:flex;flex-direction:column">${extra}</div>`);
+  const wrap = box.previousElementSibling; wrap.appendChild(box);
+  const b = d.querySelectorAll("[data-a]"); b[1].disabled = b[2].disabled = !xd.constraints.length;
+  return d;
+}
 // ---- What the .e2k has no place for: SAP2000 joint constraints and moving loads, SAFE design strips ----
 async function hmExtras(what) {
   const xd = (await hmRun("extra_definitions", {}, true)).result; if (!xd) return;
   const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmExtras(what); };
+  if (what === "constraints" && program === "sap2000") return hmSapConstraints(xd, again);
   const u = hmU(), nums = (d, sel) => (q(d, sel).value || "").split(/[\s,;]+/).map(parseFloat).filter(isFinite);
   const kinds = {
     constraints: {title: "Define Joint Constraints", list: xd.constraints, tool: "define_constraint", form: hmConstraint},

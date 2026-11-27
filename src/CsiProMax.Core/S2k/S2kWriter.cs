@@ -375,7 +375,7 @@ public static class S2kWriter
             var row = new List<(string, string)> { ("Name", c.Name) };
             if (c.Type != "Local") row.Add(("CoordSys", "GLOBAL"));
             if (ExtrasDefs.HasAxis(c.Type)) row.Add(("Axis", c.Axis));
-            if (c.Type == "Diaphragm") row.Add(("MultiLevel", "No"));
+            if (c.Type == "Diaphragm") { row.Add(("MultiLevel", c.MultiLevel ? "Yes" : "No")); if (c.SemiRigid) row.Add(("SemiRigid", "Yes")); }
             if (ExtrasDefs.HasDofs(c.Type))
                 foreach (var d in c.Type == "Local" ? ExtrasDefs.LocalDofs : ExtrasDefs.GlobalDofs) row.Add((d, c.Dofs.Contains(d) ? "Yes" : "No"));
             if (c.Type == "Weld") row.Add(("Tolerance", N(c.Tolerance)));

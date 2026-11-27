@@ -20,13 +20,14 @@ public static class ExtraTools
     public static IReadOnlyList<Tool> All { get; } =
     [
         new("define_constraint",
-            "Adds, changes or deletes a joint constraint (SAP2000 Define > Joint Constraints): Body, Diaphragm, Plate, Rod, Beam, Equal, Local or Weld. axis (X, Y, Z or Auto) is for diaphragm, plate, rod and beam; dofs (UX..RZ, or U1..R3 for local; default all) for body, equal, local and weld; tolerance for weld. Goes into the .s2k.",
-            """{"type":"object","required":["name"],"properties":{"name":{"type":"string"},"type":{"type":"string"},"axis":{"type":"string"},"dofs":{"type":"array","items":{"type":"string"}},"tolerance":{"type":"number"}""" + Del + "}}",
+            "Adds, changes or deletes a joint constraint (SAP2000 Define > Joint Constraints): Body, Diaphragm, Plate, Rod, Beam, Equal, Local, Weld or Line. axis (X, Y, Z or Auto) is for diaphragm, plate, rod and beam; dofs (UX..RZ, or U1..R3 for local; default all) for body, equal, local and weld; tolerance for weld. Goes into the .s2k.",
+            """{"type":"object","required":["name"],"properties":{"name":{"type":"string"},"type":{"type":"string"},"axis":{"type":"string"},"dofs":{"type":"array","items":{"type":"string"}},"tolerance":{"type":"number"},"semi_rigid":{"type":"boolean","description":"Diaphragm: Semi-rigid."},"multi_level":{"type":"boolean","description":"Diaphragm: a different diaphragm constraint for each Z level."}""" + Del + "}}",
             Ask.Changes, (a, e) => Core(e, m =>
             {
                 var name = a.Need("name");
                 if (a.Flag("delete")) { ExtrasDefs.DeleteConstraint(m, name); return new JsonObject { ["deleted"] = name }; }
                 var c = ExtrasDefs.SetConstraint(m, name, a.Text("type", "Body"), a.Text("axis"), a.Texts("dofs"), a.Number("tolerance", 0));
+                if (c.Type == "Diaphragm") { c.SemiRigid = a.Flag("semi_rigid"); c.MultiLevel = a.Flag("multi_level"); }
                 return new JsonObject { ["constraint"] = c.Name, ["type"] = c.Type, ["joints"] = c.Joints.Count };
             }), a => $"{(a.Flag("delete") ? "Delete" : "Define")} the constraint {a.Text("name")}"),
         new("assign_joint_constraint",
@@ -281,7 +282,7 @@ public static class ExtraTools
             ["standard_vehicles"] = Strings(ExtrasDefs.StandardVehicles),
             ["constraints"] = new JsonArray(x.Constraints.Select(c => (JsonNode)new JsonObject
             {
-                ["name"] = c.Name, ["type"] = c.Type, ["axis"] = c.Axis, ["dofs"] = Strings(c.Dofs), ["tolerance"] = c.Tolerance, ["joints"] = Strings(c.Joints),
+                ["name"] = c.Name, ["type"] = c.Type, ["axis"] = c.Axis, ["dofs"] = Strings(c.Dofs), ["tolerance"] = c.Tolerance, ["semi_rigid"] = c.SemiRigid, ["multi_level"] = c.MultiLevel, ["joints"] = Strings(c.Joints),
             }).ToArray()),
             ["lanes"] = new JsonArray(x.Lanes.Select(l => (JsonNode)new JsonObject { ["name"] = l.Name, ["frames"] = Strings(l.Frames), ["offset"] = l.Offset, ["width"] = l.Width }).ToArray()),
             ["vehicles"] = new JsonArray(x.Vehicles.Select(v => (JsonNode)new JsonObject
