@@ -447,7 +447,7 @@ static class PropertyTests
             Run(link, "define_link", new { name = "L1", type = "LINEAR", dofs = new { U1 = new { stiffness = 1e6, damping = 0 } } });
             Check(StructureExtras.Get(link.Model, "Link Property Definitions - Linear", "L1")["Notes"] == "bearing" && StructureExtras.Get(link.Model, "Link Property Definitions - Gap", "L1").Count == 0, "the row moves with the type");
             var pd = Run(link, "property_definitions", new { });
-            Check(pd["links"]![0]!["extras"]!["Mass"]!.GetValue<string>() == "0.5" && pd["springs"]!.AsArray().Any(x => x!["name"]!.GetValue<string>() == "AS1" && x["extras"]!["Color"]!.GetValue<string>() == "#ff0000"), "the forms see them");
+            Check(pd["links"]!.AsArray().Single(x => x!["name"]!.GetValue<string>() == "L1")!["extras"]!["Mass"]?.GetValue<string>() == "0.5" && pd["springs"]!.AsArray().Any(x => x!["name"]!.GetValue<string>() == "AS1" && x["extras"]!["Color"]?.GetValue<string>() == "#ff0000"), "the forms see them: " + pd["links"]!.ToJsonString() + pd["springs"]!.ToJsonString());
             Run(link, "define_link", new { name = "L1", delete = true });
             Check(StructureExtras.Get(link.Model, "Link Property Definitions - Linear", "L1").Count == 0, "a deleted link leaves no row");
         });

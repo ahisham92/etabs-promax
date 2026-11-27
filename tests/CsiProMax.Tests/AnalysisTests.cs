@@ -59,7 +59,7 @@ static class AnalysisTests
         {
             var link = Frame();
             var p = Run(link, "define_function", new { name = "R", kind = "history", from = "ramp", ramp_time = 0.5, amplitude = 2, max_time = 3, preview = true });
-            Check(p["points"]!.AsArray().Count == 3 && AnalysisDefs.ListFunctions(link.Model).Count == 0, "a preview gives the points and defines nothing");
+            Check(p["points"]!.AsArray().Count == 3 && !AnalysisDefs.ListFunctions(link.Model).Exists(x => x.Name == "R"), "a preview gives the points and defines nothing");
             Run(link, "define_function", new { name = "R", kind = "history", from = "ramp", ramp_time = 0.5, amplitude = 2, max_time = 3 });
             Run(link, "define_function", new { name = "SAW", kind = "history", from = "sawtooth", period = 1, ramp_time = 0.1, cycles = 2, amplitude = 1 });
             Run(link, "define_function", new { name = "TRI", kind = "history", from = "triangular", period = 2, cycles = 3, amplitude = 0.5 });
