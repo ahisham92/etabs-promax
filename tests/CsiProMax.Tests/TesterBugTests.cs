@@ -441,6 +441,12 @@ static class TesterBugTests
             Check(!new CsiProMax.Settings.AgentSettings().TestBuilds, "test builds are on by default");
             var settings = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Panel/UI/SettingsWindow.cs"));
             Check(settings.Contains("Get test builds", StringComparison.Ordinal), "the switch is not in Settings > Updates");
+            // The first test6 build stamped -p:AssemblyVersion for the whole build, so the ETABS/SAFE/SAP2000 API stand-ins
+            // became 0.4.67.6 too and a .NET Framework program could not have created the plug-in. Only our files carry it.
+            var release = File.ReadAllText(Path.Combine(SourceText.Root(), ".github/workflows/release.yml"));
+            Check(!release.Contains("-p:AssemblyVersion", StringComparison.Ordinal) && release.Contains("-p:CsiTestBuild=", StringComparison.Ordinal), "a test build stamps every project, the API stand-ins too");
+            foreach (var project in new[] { "CsiProMax.Assistant/CsiProMax.Assistant", "CsiProMax.Plugin/CsiProMax.Plugin", "CsiProMax.Plugin.Safe/CsiProMax.Plugin.Safe", "CsiProMax.Plugin.Sap/CsiProMax.Plugin.Sap" })
+                Check(File.ReadAllText(Path.Combine(SourceText.Root(), "src", project + ".csproj")).Contains("$(Version).$(CsiTestBuild)", StringComparison.Ordinal), project + " does not carry the test build number");
         });
 
         yield return ("second SAFE run: a test on an old version fails its first check, and the report says so at the top", () =>

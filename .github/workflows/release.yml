@@ -39,7 +39,7 @@ jobs:
           # A test build (v0.4.67-test5) carries its number as the fourth part of the assembly version (0.4.67.5), so the
           # updater on a PC that takes test builds sees test5 as newer than test4. Every other tag builds as before.
           rev="$(echo "$tag" | sed -n 's/^[0-9.]*-test\([0-9][0-9]*\)$/\1/p')"
-          if [ -n "$rev" ]; then echo "STAMP=-p:AssemblyVersion=$version.$rev -p:FileVersion=$version.$rev" >> "$GITHUB_ENV"; else echo "STAMP=" >> "$GITHUB_ENV"; fi
+          if [ -n "$rev" ]; then echo "STAMP=-p:CsiTestBuild=$rev" >> "$GITHUB_ENV"; else echo "STAMP=" >> "$GITHUB_ENV"; fi
       - run: dotnet run -c Release --project tests/CsiProMax.Tests
       - run: dotnet publish src/CsiProMax.Assistant -c Release -p:DebugType=none $STAMP -o package/dist
       - run: dotnet publish src/CsiProMax.Plugin -c Release -p:DebugType=none $STAMP -o package/dist
