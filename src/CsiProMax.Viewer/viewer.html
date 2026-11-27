@@ -8089,7 +8089,8 @@ document.head.insertAdjacentHTML("beforeend", `<style>.sapx-l{display:flex;justi
 const sapXNum = v => { const x = parseFloat(v); return isFinite(x) ? x : null; };
 const sapXFmt = v => v === undefined || v === null || v === "" ? "" : String(v);
 const sapXErr = j => j && j.ok ? null : (j && j.error) || "The change was not made.";
-async function sapXRun(tool, args) { return sapXErr(await hmRun(tool, args, true)); }
+// With none of the objects selected, OK applies to nothing, as in SAP2000 26.3.
+async function sapXRun(tool, args) { if (args && Array.isArray(args.objects) && !args.objects.length) return null; return sapXErr(await hmRun(tool, args, true)); }
 function sapXForm(title, body, apply, o) {
   o = o || {};
   let d;
@@ -8114,7 +8115,8 @@ function sapXSelected(kind) { return typeof sapOtherSelected === "function" ? sa
 // The selected objects of a kind, with SAP2000's words when none is.
 function sapXPick(kind) {
   const names = kind === "area" ? hmSelected("a") : kind === "frame" ? hmSelected("f") : sapXSelected(kind);
-  if (!names.length) hmSay({area: "Select the area objects first.", cable: "Select the cable objects first.", tendon: "Select the tendon objects first.", solid: "Select the solid objects first.", link: "Select the link/support objects first."}[kind] || "Select the objects first.", true);
+  // SAP2000 26.3 keeps the cable, tendon, solid and link items enabled with none selected: the form opens and OK applies to nothing.
+  if (!names.length && !sapXOther(kind)) hmSay({area: "Select the area objects first.", cable: "Select the cable objects first.", tendon: "Select the tendon objects first.", solid: "Select the solid objects first.", link: "Select the link/support objects first."}[kind] || "Select the objects first.", true);
   return names;
 }
 // The first selected object's rows (and the property lists), and every selected object's rows by name.
@@ -8302,7 +8304,7 @@ async function hmSapAreaReverse() {
 const sapSpringResists = ["Tension and Compression", "Compression Only", "Tension Only"];
 async function hmSapAreaSprings() { return sapXFaceSprings("area"); }
 async function sapXFaceSprings(kind) {
-  const names = sapXPick(kind); if (!names.length) return;
+  const names = sapXPick(kind); if (!names.length && !sapXOther(kind)) return;
   const area = kind === "area", T = area ? "Area Spring Assignments" : "Solid Spring Assignments", u = sapXUnits();
   const pd0 = await sapXNow(names, kind), now = sapXRows(pd0.obj, T)[0] || {}, links = ((pd0.pd || {}).links || []).map(l => l.name);
   const csys = ["GLOBAL", ...(((hm.defs || {}).coordinate_systems) || []).filter(c => c !== "GLOBAL")];
@@ -8378,7 +8380,7 @@ async function hmSapAreaMass() {
 // Joint Pattern; SAP2000's "<Kind> Material Temperatures" rows).
 async function hmSapAreaTemperature() { return sapXTemperature("area"); }
 async function sapXTemperature(kind) {
-  const names = sapXPick(kind); if (!names.length) return;
+  const names = sapXPick(kind); if (!names.length && !sapXOther(kind)) return;
   const K = kind[0].toUpperCase() + kind.slice(1), T = K + " Material Temperatures", u = sapXUnits(), pats = ["None", ...(await sapXJointPatterns())];
   const {obj} = await sapXNow(names, kind), now = sapXRow(obj, T);
   const d = sapXForm(`Assign ${K} Material Temperature`, `<fieldset style="margin:0"><legend>Temperature Data</legend>${sapXLine("Temperature", sapXIn("sxT", now.Temp ?? 0), u.t)}${sapXLine("Joint Pattern", sapXPlus("sxTP", pats, now.JtPattern || "None"))}</fieldset>`,
@@ -8514,7 +8516,7 @@ Object.assign(hmSapAssignForms, {aSections: () => hmSapAreaSectionsAssign(), aMo
 
 // A SAP2000 "Assign <X> Properties" list form: the names (None first where SAP2000 lists it), Define <X>..., OK/Close/Apply.
 async function sapXListAssign(kind, title, list, now, defLabel, defOpen, rowOf, none) {
-  const names = sapXPick(kind); if (!names.length) return;
+  const names = sapXPick(kind); if (!names.length && !sapXOther(kind)) return;
   const all = none ? ["None", ...list] : list;
   const d = sapXForm(title, `<select id="sxL" size="14" style="width:100%;height:auto;min-width:240px">${opts(all, now || all[0] || "")}</select>
     <div style="text-align:center;margin-top:8px"><button id="sxDef" type="button">${esc(defLabel)}</button></div>`,
@@ -8531,14 +8533,14 @@ async function hmSapCableProperties() {
   return sapXListAssign("cable", "Assign Cable Properties", list, now, "Define Cable Properties...", () => hmSapRodSections("cable"), v => ({"Cable Section Assignments": [{CableSect: v}]}));
 }
 async function hmSapCableModifiers() {
-  const names = sapXPick("cable"); if (!names.length) return;
+  const names = sapXPick("cable");
   const T = "Cable Property Modifiers", {obj} = await sapXNow(names, "cable"), r = sapXRow(obj, T), f = [["AMod", "Cross-section (Axial) Area"], ["MassMod", "Mass"], ["WeightMod", "Weight"]];
   return sapXForm("Assign Cable Property Modifiers", `<fieldset style="margin:0"><legend>Property Modifiers for Analysis</legend>${f.map(([k, l]) => sapXLine(l, sapXIn("sxc" + k, r[k] ?? 1))).join("")}</fieldset>`,
     d => { const row = {}; for (const [k, l] of f) { const v = sapXNum(q(d, "#sxc" + k).value); if (v === null || v < 0) return l + " needs a number of 0 or more."; row[k] = String(v); } return sapXRun("assign_sap_object_data", {kind: "cable", objects: names, tables: {[T]: [row]}}); },
     {width: 360, reset: d => f.forEach(([k]) => q(d, "#sxc" + k).value = 1)});
 }
 async function hmSapCableMaterial() {
-  const names = sapXPick("cable"); if (!names.length) return;
+  const names = sapXPick("cable");
   const defs = await hmDefs(), T = "Cable Section Assignments", {obj} = await sapXNow(names, "cable"), m0 = sapXRow(obj, T).MatProp, now = m0 && m0 !== "Default" ? m0 : "";
   const d = sapXForm("Assign Cable Material Overwrites", `<fieldset style="margin:0"><legend>Options</legend>${sapXRadio("sxMo", "section", "Use Material Specified in Section Property", !now)}
     <div class="sapx-l"><span>${sapXRadio("sxMo", "over", "Overwrite Material", !!now)}</span><span class="sapx-b">${sapXPlus("sxMat", defs.materials.map(m => m.name), now)}</span></div></fieldset>`,
@@ -8548,12 +8550,12 @@ async function hmSapCableMaterial() {
   return d;
 }
 async function hmSapCableReverse() {
-  const names = sapXPick("cable"); if (!names.length) return;
+  const names = sapXPick("cable");
   return sapXForm("Assign Cable Reverse Connectivity", `<fieldset style="margin:0"><legend>Options</legend>${sapXRadio("sxRv", "global", "Keep Assigns in Same Global Orientation", true)}${sapXRadio("sxRv", "local", "Keep Assigns in Same Local Orientation", false)}</fieldset>`,
     d => sapXRun("reverse_objects", {kind: "cable", objects: names, keep: sapXRadioVal(d, "sxRv")}), {width: 340});
 }
 async function hmSapCableStations() {
-  const names = sapXPick("cable"); if (!names.length) return;
+  const names = sapXPick("cable");
   const T = "Cable Output Station Assignments", u = sapXUnits(), {obj} = await sapXNow(names, "cable"), r = sapXRow(obj, T), max = r.StationType === "MaxStaSpcg";
   return sapXForm("Assign Cable Output Stations", `<fieldset style="margin:0"><legend>Output Station Specification Options</legend>
       <div class="sapx-l"><span>${sapXRadio("sxOs", "MaxStaSpcg", "Maximum Station Spacing", max)}</span><span class="sapx-b">${sapXIn("sxOsS", r.MaxStaSpcg ?? "")}<span class="sapx-u">${u.l}</span></span></div>
@@ -8567,7 +8569,7 @@ async function hmSapCableStations() {
       sync: d => { const t = sapXRadioVal(d, "sxOs"); q(d, "#sxOsS").disabled = t !== "MaxStaSpcg"; q(d, "#sxOsN").disabled = t !== "MinNumSta"; }});
 }
 async function hmSapCableMass() {
-  const names = sapXPick("cable"); if (!names.length) return;
+  const names = sapXPick("cable");
   const u = sapXUnits(), T = "Cable Added Mass Assignments";
   return sapXForm("Assign Cable Mass", `<fieldset style="margin:0 0 6px"><legend>Mass</legend>${sapXLine("Mass per Unit Length", sapXIn("sxMass", 0), u.f + "-s²/" + u.l + "²")}</fieldset>
     <fieldset style="margin:0"><legend>Options</legend>${sapXRadio("sxMo", "add", "Add to Existing Masses", false)}${sapXRadio("sxMo", "replace", "Replace Existing Masses", true)}${sapXRadio("sxMo", "delete", "Delete Existing Masses", false)}</fieldset>`,
@@ -8589,7 +8591,7 @@ async function hmSapTendonProperties() {
   return sapXListAssign("tendon", "Assign Tendon Properties", list, now, "Define Tendon Properties...", () => hmSapRodSections("tendon"), v => ({"Tendon Section Assignments": v === "None" ? [] : [{TendonSect: v}]}), true);
 }
 async function hmSapTendonAxes() {
-  const names = sapXPick("tendon"); if (!names.length) return;
+  const names = sapXPick("tendon");
   const T = "Tendon Local Axes Assignments 1 - Typical", {obj} = await sapXNow(names, "tendon"), r = sapXRow(obj, T);
   return sapXForm("Assign Tendon Local Axes", `<fieldset style="margin:0 0 6px"><legend>Options</legend>${sapXRadio("sxAx", "std", "Specify Standard Local Axes", true)}${sapXRadio("sxAx", "reset", "Reset Local Axes to Default", false)}</fieldset>
     <fieldset style="margin:0"><legend>Angle from Default Orientation</legend>${sapXLine("Angle", sapXIn("sxAng", r.Angle ?? 0), "deg")}</fieldset>`,
@@ -8598,7 +8600,7 @@ async function hmSapTendonAxes() {
     {width: 400, sync: d => sapXEnable(d, ["sxAng"], sapXRadioVal(d, "sxAx") !== "reset")});
 }
 async function hmSapTendonLimits() {
-  const names = sapXPick("tendon"); if (!names.length) return;
+  const names = sapXPick("tendon");
   const T = "Tendon Tension And Compression Limits", u = sapXUnits(), {obj} = await sapXNow(names, "tendon"), r = sapXRow(obj, T);
   return sapXForm("Assign Tendon Tension/Compression Limits", `<fieldset style="margin:0"><legend>Limits Settings</legend>
       <div class="sapx-l"><label><input type="checkbox" id="sxTl" ${r.TensLimit === "Yes" ? "checked" : ""}> Include Tension Limit</label><span class="sapx-b">${sapXIn("sxTv", r.TensLimit === "Yes" ? r.Tension : "")}<span class="sapx-u">${u.f}</span></span></div>
@@ -8619,7 +8621,7 @@ async function hmSapSolidProperties() {
 }
 // Solid and Link Local Axes: Standard (rotations, or the link's angle), Advanced (Solid/Link Advanced Axes) or Reset to Default (Global).
 async function sapXAxes(kind) {
-  const names = sapXPick(kind); if (!names.length) return;
+  const names = sapXPick(kind); if (!names.length && !sapXOther(kind)) return;
   const K = kind === "solid" ? "Solid" : "Link", T1 = K + " Local Axes Assignments 1 - Typical", T2 = K + " Local Axes Assignments 2 - Advanced";
   const csys = await sapCsys(), {obj} = await sapXNow(names, kind), r1 = sapXRow(obj, T1), r2 = sapXRow(obj, T2);
   const dflt = kind === "solid" ? {...sapAdvDefault, LocalPlane: "31", AxCoordDir: "+Z", CoordDir1: "+X", CoordDir2: "+Y"} : {...sapAdvDefault, LocalPlane: "12", AxCoordDir: "+Z", CoordDir1: "+Z", CoordDir2: "+X"};
@@ -8643,7 +8645,7 @@ async function hmSapSolidSprings() { return sapXFaceSprings("solid"); }
 async function hmSapSolidTemperature() { return sapXTemperature("solid"); }
 // Assign > Solid > Switch Faces...: "Modify Solid Faces".
 async function hmSapSolidSwitch() {
-  const names = sapXPick("solid"); if (!names.length) return;
+  const names = sapXPick("solid");
   const faces = [1, 2, 3, 4, 5, 6].map(i => [String(i), "Face " + i]);
   return sapXForm("Modify Solid Faces", `<fieldset style="margin:0 0 6px"><legend>Select Faces to Switch</legend>${sapXLine("Switch Face", `<select id="sxF1" style="width:110px">${opts(faces, "1")}</select>`)}${sapXLine("With Face", `<select id="sxF2" style="width:110px">${opts(faces, "5")}</select>`)}</fieldset>
     <fieldset style="margin:0"><legend>Options</legend>${sapXRadio("sxMv", "move", "Move Assignments with Face", true)}${sapXRadio("sxMv", "stay", "Do Not Move Assignments with Face", false)}</fieldset>`,
@@ -8652,7 +8654,7 @@ async function hmSapSolidSwitch() {
 }
 // Assign > Solid > Automatic Solid Mesh...: "Assign Automatic Solid Mesh" (SAP2000's "Solid Auto Mesh Assignments").
 async function hmSapSolidMesh() {
-  const names = sapXPick("solid"); if (!names.length) return;
+  const names = sapXPick("solid");
   const T = "Solid Auto Mesh Assignments", u = sapXUnits(), {obj} = await sapXNow(names, "solid"), r = sapXRow(obj, T);
   const t0 = r.AutoMesh === "Yes" ? (r.MeshType === "Maximum Size" ? "Maximum Size" : "Number") : "None";
   const e = ["2", "3", "5"];
@@ -8677,7 +8679,7 @@ async function hmSapSolidMesh() {
   return d;
 }
 async function hmSapSolidEdgeConstraints() {
-  const names = sapXPick("solid"); if (!names.length) return;
+  const names = sapXPick("solid");
   const T = "Solid Edge Constraint Assignments", {obj} = await sapXNow(names, "solid"), on = sapXRows(obj, T).some(r => r.Constrained === "Yes");
   return sapXForm("Assign Solid Edge Constraints", `<fieldset style="margin:0"><legend>Options</legend>${sapXRadio("sxEc", "no", "Do NOT Create Edge Constraints", !on)}${sapXRadio("sxEc", "yes", "Create Constraints Around Solid Object Edges", on)}</fieldset>`,
     d => sapXRun("assign_sap_object_data", {kind: "solid", objects: names, tables: {[T]: sapXRadioVal(d, "sxEc") === "yes" ? Array.from({length: 12}, (x, i) => ({Edge: String(i + 1), Constrained: "Yes"})) : []}}),
@@ -8694,7 +8696,7 @@ async function hmSapLinkFreq() {
   return sapXListAssign("link", "Assign Link Frequency Dependent Properties", [...new Set(list)], now && now !== "None" ? now : "None", "Define Link Frequency Dependent Properties...", () => hmSapFreqLinks(), v => ({"Link Property Assignments": [{LinkFDProp: v}]}), true);
 }
 async function hmSapLinkModifier() {
-  const names = sapXPick("link"); if (!names.length) return;
+  const names = sapXPick("link");
   const T = "Link Property Assignments", {obj} = await sapXNow(names, "link"), now = sapXRow(obj, T).PropMod ?? 1;
   return sapXForm("Assign Link Property Modifier", `<fieldset style="margin:0"><legend>Property Modifier for Analysis</legend>${sapXLine("Property Modifier", sapXIn("sxPm", now))}</fieldset>`,
     d => { const v = sapXNum(q(d, "#sxPm").value); if (v === null || v < 0) return "Property Modifier needs a number of 0 or more."; return sapXRun("assign_sap_object_data", {kind: "link", objects: names, tables: {[T]: [{PropMod: String(v)}]}}); },
@@ -8704,7 +8706,8 @@ async function hmSapLinkAxes() { return sapXAxes("link"); }
 // Assign > Link/Support > Reverse Connectivity: SAP2000 opens no form ("NLLink Reverse Connectivity" picking); the links
 // picked (selected) change ends at once.
 async function hmSapLinkReverse() {
-  const names = sapXPick("link"); if (!names.length) return;
+  const names = sapXPick("link");
+  if (!names.length) return hmSay("NLLink Reverse Connectivity: no link/support objects are selected, so none was reversed.");
   const err = await sapXRun("reverse_objects", {kind: "link", objects: names});
   hmSay(err || `NLLink Reverse Connectivity: ${names.length} link${names.length === 1 ? "" : "s"} reversed. Edit > Undo steps back.`, !!err);
 }
