@@ -32,15 +32,22 @@ static class OldProgramTests
 
     public static IEnumerable<(string Name, Action Body)> All()
     {
-        yield return ("ETABS 23 joint mass: a field blank in every row is left out of the import (MMI X blank skipped the record, 0.4.57)", () =>
+        yield return ("ETABS 23 joint mass: blank mass moments of inertia go in as 0 (MMI X blank, and left out, skipped the record: 0.4.57, 0.4.59, 0.4.60)", () =>
         {
             var (link, api, _) = CsiToolsTests.Model(CsiProgram.Etabs);
             const string key = "Joint Assignments - Additional Mass";
             api.Tables[key] = (["Story", "Label", "UniqueName", "MassXY", "MassZ", "MMIX", "MMIY", "MMIZ"], []);
             EditableTables.Put(link, key, "Story|Label", [new Dictionary<string, string> { ["Story"] = "Base", ["Label"] = "1", ["UniqueName"] = "3", ["MassXY"] = "1.5", ["MassZ"] = "0", ["MMIX"] = "", ["MMIY"] = "", ["MMIZ"] = "" }], "put the joint mass in");
             var (fields, rows) = api.Tables[key];
-            Check(!fields.Contains("MMIX") && fields.Contains("MassXY") && fields.Contains("UniqueName"), "blank MMI fields left out: " + string.Join(",", fields));
+            Check(fields.Contains("MMIX") && fields.Contains("MassXY") && fields.Contains("UniqueName"), "the MMI fields are sent: " + string.Join(",", fields));
+            Check(new[] { "MMIX", "MMIY", "MMIZ" }.All(f => rows.Single()[Array.IndexOf(fields, f)] == "0"), "a blank MMI goes in as 0");
             Check(rows.Single()[Array.IndexOf(fields, "MassXY")] == "1.5", "the mass went in");
+        });
+
+        yield return ("ETABS 23 table list: tables GetAllTables leaves out but GetAvailableTables lists are added (Story Definitions, 0.4.59 and 0.4.60)", () =>
+        {
+            var list = CsiProMax.Assistant.Etabs.ComEtabs.ListTables(new TwoTableLists(), "ETABS");
+            Check(list.Any(t => t.Name == "Story Definitions") && list.Count(t => t.Key == "Load Pattern Definitions") == 1 && list.Count == 3, "the table list: " + string.Join(", ", list.Select(t => t.Name)));
         });
 
         yield return ("ETABS 23 shear wall design: no StartDesign in its API, so its own menu Design > Shear Wall Design > Start Design/Check is picked", () =>
@@ -938,5 +945,19 @@ namespace CpmFakes
             if (available != 0) return available;
             TableKey = ["B", "C"]; TableName = ["Base Reactions", "Joint Reactions"]; ImportType = [0, 0]; NumberTables = 2; return 0;
         }
+    }
+}
+
+/// <summary>ETABS 23's two table lists as the 0.4.60 run saw them: GetAllTables without the "Story ..." tables.</summary>
+public sealed class TwoTableLists
+{
+    public int GetAllTables(ref int n, ref string[] keys, ref string[] names, ref int[] import, ref bool[] empty)
+    {
+        keys = ["Load Pattern Definitions", "Functions - Time History - Sine"]; names = keys.ToArray(); import = [1, 1]; empty = [false, true]; n = 2; return 0;
+    }
+
+    public int GetAvailableTables(ref int n, ref string[] keys, ref string[] names, ref int[] import)
+    {
+        keys = ["Story Definitions", "Load Pattern Definitions"]; names = keys.ToArray(); import = [1, 1]; n = 2; return 0;
     }
 }

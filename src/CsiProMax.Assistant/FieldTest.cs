@@ -338,6 +338,10 @@ public static class FieldTest
         try { link.Info(); }
         catch (Exception ex) when (ex is not OutOfMemoryException) { unread = $"{ex.GetType().Name}: {ex.Message}"; }
         if (unread is null) foreach (var step in SelfTest.Steps(link, o.Changes && !o.Full)) ctx.Record(step);
+        else if (o.Full && o.SettingsRoot is null && OperatingSystem.IsWindows() && !CsiProgram.All.Any(p => { try { var r = System.Diagnostics.Process.GetProcessesByName(p.ProcessName); foreach (var x in r) x.Dispose(); return r.Length > 0; } catch (InvalidOperationException) { return false; } }))
+            // No CSI program is open on the PC at all (0.4.60 full test after the company closed ETABS at 4 AM): there is no
+            // engineer's model to read, which is not a fault of CSI ProMax.
+            ctx.Skip("the checks of the open model", "the open model could not be read: no ETABS, SAP2000 or SAFE is open on this PC"); // ETABS itself
         else
         {
             ctx.Fail("read the open model", unread + " Nothing of the open model could be read. Open a model in the program, start CSI ProMax from the program's Tools menu, and run the field test again.");

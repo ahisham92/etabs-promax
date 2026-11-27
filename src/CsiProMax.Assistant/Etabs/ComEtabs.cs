@@ -278,20 +278,24 @@ public sealed class ComEtabs : ICsiLink, IDisposable
     });
 
     public IReadOnlyList<FrameRow> Frames() => On("read the frames", m =>
+        // A null line (section "None", which the API answers as "") is no frame: ETABS 23 listed the Modeler's slab
+        // line release line CPM-LR as frame 72 with no section (0.4.59 full field test).
+        (IReadOnlyList<FrameRow>)((IReadOnlyList<FrameRow>)AllFrames(m)).Where(r => !IsNullLine(r.Section)).ToList());
+
+    /// <summary>Every line object the program has, null lines too (their section ""): FrameObj.GetAllFrames.</summary>
+    internal static IReadOnlyList<FrameRow> AllFrames(dynamic m)
     {
         int n = 0; string[] names = None, sections = None, stories = None, p1 = None, p2 = None;
         double[] x1 = NoNumbers, y1 = NoNumbers, z1 = NoNumbers, x2 = NoNumbers, y2 = NoNumbers, z2 = NoNumbers, angle = NoNumbers;
         double[] o1x = NoNumbers, o2x = NoNumbers, o1y = NoNumbers, o2y = NoNumbers, o1z = NoNumbers, o2z = NoNumbers; int[] cardinal = [];
-        Ok(m.FrameObj.GetAllFrames(ref n, ref names, ref sections, ref stories, ref p1, ref p2, ref x1, ref y1, ref z1, ref x2, ref y2, ref z2,
-            ref angle, ref o1x, ref o2x, ref o1y, ref o2y, ref o1z, ref o2z, ref cardinal, "Global"), "list the frames");
+        int answer = Convert.ToInt32(m.FrameObj.GetAllFrames(ref n, ref names, ref sections, ref stories, ref p1, ref p2, ref x1, ref y1, ref z1, ref x2, ref y2, ref z2,
+            ref angle, ref o1x, ref o2x, ref o1y, ref o2y, ref o1z, ref o2z, ref cardinal, "Global"));
+        if (answer != 0) throw new EtabsException("The program refused to list the frames.");
         var rows = new List<FrameRow>(n);
         for (var i = 0; i < n; i++)
-            // A null line (section "None", which the API answers as "") is no frame: ETABS 23 listed the Modeler's slab
-            // line release line CPM-LR as frame 72 with no section (0.4.59 full field test).
-            if (!IsNullLine(sections[i]))
-            rows.Add(new FrameRow(names[i], sections[i], stories[i], EtabsWords.FrameKind(x1[i], y1[i], z1[i], x2[i], y2[i], z2[i]), x1[i], y1[i], z1[i], x2[i], y2[i], z2[i]));
-        return (IReadOnlyList<FrameRow>)rows;
-    });
+            rows.Add(new FrameRow(names[i], sections[i] ?? "", stories[i] ?? "", EtabsWords.FrameKind(x1[i], y1[i], z1[i], x2[i], y2[i], z2[i]), x1[i], y1[i], z1[i], x2[i], y2[i], z2[i]));
+        return rows;
+    }
 
     public IReadOnlyList<AreaRow> Areas() => On("read the areas", m =>
     {
@@ -497,16 +501,50 @@ public sealed class ComEtabs : ICsiLink, IDisposable
         // The arrays are what the program filled; a count below them is not trusted (ETABS 23 listed no table from
         // "Story Definitions" on in the 0.4.59 full test, although it reads it).
         n = keys.Length == names.Length ? keys.Length : Math.Min(n, Math.Min(keys.Length, names.Length));
-        return Enumerable.Range(0, n).Select(i => new TableName(keys[i], names[i], i < empty.Length && empty[i], i < import.Length ? import[i] : -1)).ToList();
+        var list = Enumerable.Range(0, n).Select(i => new TableName(keys[i], names[i], i < empty.Length && empty[i], i < import.Length ? import[i] : -1)).ToList();
+        // ETABS 23's GetAllTables left out every "Story ..." table (Story Definitions, Story Drifts) that it reads and
+        // GetAvailableTables lists (0.4.59 and 0.4.60 full tests): the tables with data are added from there.
+        if (all == 0)
+            try
+            {
+                int an = 0; string[] ak = None, aname = None; int[] ai = [];
+                if (Convert.ToInt32(tables.GetAvailableTables(ref an, ref ak, ref aname, ref ai)) == 0 && ak is not null && aname is not null)
+                {
+                    var have = list.Select(t => t.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    for (var i = 0; i < Math.Min(ak.Length, aname.Length); i++)
+                        if (have.Add(ak[i])) list.Add(new TableName(ak[i], aname[i], false, ai is not null && i < ai.Length ? ai[i] : -1));
+                }
+            }
+            catch (Exception ex) when (ex is Microsoft.CSharp.RuntimeBinder.RuntimeBinderException or MissingMethodException or COMException or InvalidCastException) { /* GetAllTables' list stands */ }
+        return list;
     }
+
+    private static string ModelFileOf(dynamic m)
+    {
+        try { return Convert.ToString(m.GetModelFilename(true)) ?? ""; }
+        catch (Exception ex) when (ex is not COMException) { return ""; }
+    }
+
+    /// <summary>The cases, combinations, patterns and model the display selection was last set for (ReadTable).</summary>
+    private string? _shown;
 
     public TableData ReadTable(string key, IReadOnlyList<string>? cases, IReadOnlyList<string>? combos) => On("read a table", m =>
     {
-        if (cases is { Count: > 0 }) { string[] list = cases.ToArray(); m.DatabaseTables.SetLoadCasesSelectedForDisplay(ref list); }
-        if (combos is { Count: > 0 }) { string[] list = combos.ToArray(); m.DatabaseTables.SetLoadCombinationsSelectedForDisplay(ref list); }
-        // Load assignment and pattern tables list only the patterns selected for display: SAP2000 26 gave a pack none of
-        // its frame, area or joint loads (0.4.51 field test, Display > Load Assigns greyed out). Every pattern, then.
-        EditableTables.ShowEveryPattern(m);
+        // The display selection is set only when it changes: set before every one of a pack's 230 tables, ETABS 23 took
+        // 2.3 s a table and up to 11 minutes for one (0.4.60 full test, pack trace), and the ETABS part ran out of time.
+        int patternCount = 0; string[] patterns = None;
+        try { if (Convert.ToInt32(m.LoadPatterns.GetNameList(ref patternCount, ref patterns)) != 0) patterns = None; }
+        catch (Exception ex) when (ex is not COMException) { patterns = None; }
+        var shown = string.Join("\u0001", cases ?? []) + "\u0002" + string.Join("\u0001", combos ?? []) + "\u0002" + string.Join("\u0001", patterns ?? None) + "\u0002" + ModelFileOf(m);
+        if (!string.Equals(shown, _shown, StringComparison.Ordinal))
+        {
+            if (cases is { Count: > 0 }) { string[] list = cases.ToArray(); m.DatabaseTables.SetLoadCasesSelectedForDisplay(ref list); }
+            if (combos is { Count: > 0 }) { string[] list = combos.ToArray(); m.DatabaseTables.SetLoadCombinationsSelectedForDisplay(ref list); }
+            // Load assignment and pattern tables list only the patterns selected for display: SAP2000 26 gave a pack none of
+            // its frame, area or joint loads (0.4.51 field test, Display > Load Assigns greyed out). Every pattern, then.
+            EditableTables.ShowEveryPattern(m);
+            _shown = shown;
+        }
         // Section cut forces are given only for the cuts selected for display; none is selected at first (ETABS 23
         // answered no rows for a cut that was defined and analysed), so every cut is selected. Best effort.
         if (key.Contains("Section Cut Forces", StringComparison.OrdinalIgnoreCase))

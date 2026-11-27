@@ -45,7 +45,23 @@ public static class SlabTables
         var l = SlabDefs.NullLines(m).Find(x => x.Name == line);
         if (l is null) return null;
         var z = m.Elevation(m.StoryIndex(l.Story));
-        var (frames, _) = EngineRun.Find(link, new EngineRun.Shapes([(l.I[0], l.I[1], z, l.J[0], l.J[1], z)], []), Tolerance(m));
+        // The program's null lines are not frames to Frames() (0.4.60 full test: the release row went to ETABS with an
+        // empty UniqueName, "Frame object  is not defined"): every line object is read, null lines first.
+        var tolerance = Tolerance(m);
+        bool Near(double a, double b) => Math.Abs(a - b) <= tolerance;
+        try
+        {
+            if (link.Raw("list every line object", api => Etabs.ComEtabs.AllFrames(api)) is IReadOnlyList<FrameRow> all)
+            {
+                var at = all.Where(f => Near(f.Z1, z) && Near(f.Z2, z)
+                    && ((Near(f.X1, l.I[0]) && Near(f.Y1, l.I[1]) && Near(f.X2, l.J[0]) && Near(f.Y2, l.J[1]))
+                        || (Near(f.X1, l.J[0]) && Near(f.Y1, l.J[1]) && Near(f.X2, l.I[0]) && Near(f.Y2, l.I[1]))))
+                    .OrderBy(f => Etabs.ComEtabs.IsNullLine(f.Section) ? 0 : 1).ToList();
+                if (at.Count > 0) return at[0].Name;
+            }
+        }
+        catch (Exception ex) when (ex is EtabsException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException or InvalidOperationException or NotSupportedException) { /* a link without the program's API */ }
+        var (frames, _) = EngineRun.Find(link, new EngineRun.Shapes([(l.I[0], l.I[1], z, l.J[0], l.J[1], z)], []), tolerance);
         return frames.FirstOrDefault();
     }
 
