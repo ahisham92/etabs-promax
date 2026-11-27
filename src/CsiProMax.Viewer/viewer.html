@@ -144,6 +144,16 @@ html.live #menubar .brand{display:none}
 .ib:disabled svg{opacity:.45}
 #strip{background:var(--cap);width:28px}
 .pane.max{position:absolute;inset:3px;z-index:3}
+/* A maximised view window hides the others (render does not draw them either), splitters included. */
+#views:has(>.pane.max)>.pane:not(.max),#views:has(>.pane.max)>.vsplit{visibility:hidden}
+/* A floating view window (its caption dragged, or Window Position > Float): over the docked ones inside the views,
+   moved by its caption and sized from its corner. It is drawn last and opaque, so nothing of the others shows through. */
+.pane.floatv{position:absolute;z-index:5;overflow:hidden;resize:both;min-width:200px;min-height:150px;box-shadow:var(--shadow)}
+/* The windows' chrome is not text to select: captions, tabs, toolbars, menus, the tree and the status bar. */
+#menubar,.bar,#strip,.ptitle,.dock,#tabs,#tree,footer,.ddm,.drop,.pane .nav,#legend{user-select:none;-webkit-user-select:none}
+/* The dark theme: the ETABS-style toolbar pictures carry their own black lines and white fills, so they are drawn in
+   dark ink and turned over. Black lines come out light, and the colours keep their hue. */
+@media (prefers-color-scheme: dark){:root:not([data-theme=light]) .ib{color:#1a1a1a}:root:not([data-theme=light]) .ib svg{filter:invert(.9) hue-rotate(180deg)}}
 .pane canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;display:block}
 .pane .nav{position:absolute;right:6px;top:6px;display:flex;gap:2px;opacity:.85}
 .pane .nav button{width:22px;height:22px;padding:0;font-size:11px;line-height:20px;background:rgba(240,240,240,.9);color:#222;border-color:#8b949a}
@@ -530,18 +540,30 @@ let panes = [], active = 0, layout = 2;
 let forces = new Map(), reacts = new Map(), drifts = new Map();
 const res = {mode: "model", case: "", comp: "M3", scale: 50, fill: true, values: true, ghost: true, range: null, bands: 9, anim: false, dfam: "", dshow: "", dvalues: true, dnames: true, vt: "", vf: "", vcase: ""};
 const sel = new Set(), selJ = new Set(); let prevSel = {f: [], j: []}; let hover = 0; // selJ: the joints selected, by name
-let bg = "black", bgSaved = false;
-try { const b = localStorage.getItem("cpm-bg"); if (b === "white" || b === "black") { bg = b; bgSaved = true; } } catch (e) {}
+let bg = "white"; // the model windows' background: set from the theme below (bgForTheme)
 const bandsDef = ["#0f1fd1", "#1f6ff2", "#18b4ec", "#19d3b0", "#3bd34a", "#a9e22a", "#f1e51c", "#f7a31a", "#f2601b", "#e01f1f"];
 const palette = ["#3a8ee6","#e0703a","#8a6ad8","#36b06a","#d4a72c","#d4508f","#3fb6c9","#9aa63a","#b8673d","#6b7fe0","#a85fc7","#e08a2d","#4fb39a","#c94f4f"];
 // The window theme (Options > Theme): CSI ProMax keeps one theme for all its windows, light unless the engineer picks
-// dark, and hands it to this page as its colour scheme. The model windows' own background is Black Background, apart.
+// dark, and hands it to this page as its colour scheme.
 const darkTheme = () => document.documentElement.dataset.theme !== "light" && matchMedia("(prefers-color-scheme: dark)").matches;
 function setTheme(dark) {
   if (window.chrome && chrome.webview) { chrome.webview.postMessage({theme: dark ? "dark" : "light"}); return; }
   // Outside CSI ProMax's window (a browser), the page can only be held light; dark follows the browser's own.
   if (dark) delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = "light";
+  themeChanged();
 }
+// The model windows follow the theme too: black in the dark theme, white in the light one. Options > Black Background
+// changes it for the theme in use, and that choice is kept for that theme. The one choice kept before themes stays the
+// light theme's.
+const bgKey = () => "cpm-bg-" + (darkTheme() ? "dark" : "light");
+function bgForTheme() {
+  let b = null;
+  try { b = localStorage.getItem(bgKey()) || (darkTheme() ? null : localStorage.getItem("cpm-bg")); } catch (e) {}
+  return b === "white" || b === "black" ? b : darkTheme() ? "black" : "white";
+}
+bg = bgForTheme();
+function themeChanged() { bg = bgForTheme(); colourDirty = true; if (P) buildTree(); syncTools(); draw(); }
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", themeChanged);
 function theme() {
   // The model windows: black as analysis programs draw them, or white for printing.
   return bg === "black"
@@ -838,7 +860,7 @@ function load(pack, keep) {
   // In the Modeler the model is made for one program, chosen at New Model (Ahmed 2026-11-26): the page offers what it has.
   program = window.cpmLive && /^(etabs|sap2000|safe)$/.test(man.target || "") ? man.target : /safe/i.test(man.program || "") ? "safe" : /sap/i.test(man.program || "") ? "sap2000" : "etabs";
   document.body.dataset.prog = program;
-  if (!bgSaved) bg = "white"; // ETABS 23, SAP2000 and SAFE open on white
+  bg = bgForTheme(); // white in the light theme, as ETABS 23, SAP2000 and SAFE open; black in the dark one
   points = m.points || [];
   pointIdx = new Map(points.map((p, i) => [String(p[0]), i]));
   pointAt = new Map(points.map(p => [key(p[1], p[2], p[3]), p[0]]));
@@ -2385,7 +2407,11 @@ function render(now) {
     gl.clearColor(...cssColour(getComputedStyle(views).backgroundColor), 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
   }
   legendSeen = new Map();
-  panes.forEach((p, n) => drawPane(p, n, vr, dpr, T, now));
+  // All windows share one 3D canvas behind them. A maximised window is drawn alone (the others are hidden); otherwise
+  // the docked windows are drawn first and the floating ones last, over them.
+  const maxed = panes.find(p => p.el.classList.contains("max"));
+  const order = panes.map((p, n) => [p, n]).filter(([p]) => !maxed || p === maxed).sort((a, b) => !!a[0].fl - !!b[0].fl);
+  for (const [p, n] of order) drawPane(p, n, vr, dpr, T, now);
   drawLegend();
 }
 function cssColour(s) { const m = s.match(/[\d.]+/g); return m ? [m[0] / 255, m[1] / 255, m[2] / 255] : [0.5, 0.5, 0.5]; }
@@ -2485,6 +2511,7 @@ function drawPane(p, n, vr, dpr, T, now) {
   if (n === active) { const v = $("vname"), t = paneTitle(p).split("  ·  ")[0]; if (v.textContent !== t) v.textContent = t; }
   if (cv.width !== R.W || cv.height !== R.H) { cv.width = R.W; cv.height = R.H; }
   g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, R.w, R.h);
+  if (p.fl) { g.fillStyle = css(T.canvas); g.fillRect(0, 0, R.w, R.h); } // a floating window is opaque whatever it shows
   if (R.w < 4 || R.h < 4) return;
   const M = matrices(p, R.w, R.h); p.M = M; p.R = R;
   if (!P) { if (gl) { scissor(R); gl.clearColor(...T.canvas, 1); gl.clear(gl.COLOR_BUFFER_BIT); } else { g.fillStyle = css(T.canvas); g.fillRect(0, 0, R.w, R.h); } return; }
@@ -2503,6 +2530,9 @@ function drawPane(p, n, vr, dpr, T, now) {
     }
     scissor(R); gl.clearColor(...T.canvas, 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     drawScene(p, M, R, dpr, 0);
+    // A floating window is drawn last; its picture is copied onto its own canvas, which makes the window opaque, so the
+    // captions and labels of the windows under it don't show through.
+    if (p.fl) { g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.drawImage(glc, R.X, glc.height - R.Y - R.H, R.W, R.H, 0, 0, R.W, R.H); g.restore(); }
   } else {
     if (p.auxSig !== auxSig) { p.auxInfo = auxLines(p); p.auxSig = auxSig; }
     if (!p.vis || p.visSig !== visSig(p)) { p.vis = new Uint8Array(objCount() + 1); for (const o of frames.concat(areas)) p.vis[o.id] = shown(o, p) ? 1 : 0; p.visSig = visSig(p); }
@@ -2933,8 +2963,11 @@ function buildPanes(before) {
     host.appendChild(el);
     p.el = el; p.title = el.firstChild; p.hold = el.querySelector(".hold"); p.cv = el.querySelector("canvas"); p.g = p.cv.getContext("2d"); p.nav = el.querySelector(".nav");
     el.querySelector(".ptitle .x").onclick = e => { e.stopPropagation(); closePane(p); };
-    el.querySelector(".ptitle .dd").onclick = e => { e.stopPropagation(); ddMenu(e.currentTarget, [[el.classList.contains("max") ? "Restore" : "Maximize", () => { el.classList.toggle("max"); placeViewSplits(); draw(); }], ["Close", () => closePane(p)]]); };
-    p.title.ondblclick = () => { el.classList.toggle("max"); placeViewSplits(); draw(); };
+    const maximise = () => { if (p.fl) floatPane(p, false); el.classList.toggle("max"); placeViewSplits(); draw(); };
+    el.querySelector(".ptitle .dd").onclick = e => { e.stopPropagation(); ddMenu(e.currentTarget, [[el.classList.contains("max") ? "Restore" : "Maximize", maximise], [p.fl ? "Dock" : "Float", () => floatPane(p, !p.fl)], ["Close", () => closePane(p)]]); };
+    // A double-click on the caption docks a floating window, and maximises or restores a docked one.
+    p.title.ondblclick = e => { if (e.target.closest(".x, .dd")) return; if (p.fl) floatPane(p, false); else maximise(); };
+    wirePaneDrag(p); paneSizes.observe(el);
     wire(p); panes.push(p);
     if (!was) requestAnimationFrame(() => { fit(p, false); draw(); });
   });
@@ -2943,14 +2976,89 @@ function buildPanes(before) {
   syncNav();
 }
 // ---- view window splitters: between the view windows, dragged to share the room between them as wanted ----
-// The share of each column (and, with four windows, each row), per layout, kept between visits.
+// The share of each column (and, with four windows, each row), per number of docked windows, kept between visits.
 let viewFr = {};
 try { viewFr = JSON.parse(localStorage.getItem("cpm-view-fr") || "{}") || {}; } catch (e) { viewFr = {}; }
+// The docked view windows: a floating one has left the grid, and the docked ones share its room.
+const dockedPanes = () => panes.filter(p => !p.fl);
 function viewShares() {
-  const cols = layout === 1 ? 1 : layout === 4 ? 2 : layout, rows = layout === 4 ? 2 : 1, kept = viewFr[layout] || {};
-  const fit = (list, n) => Array.isArray(list) && list.length === n && list.every(x => x > 0) ? list : Array(n).fill(1);
-  return viewFr[layout] = {c: fit(kept.c, cols), r: fit(kept.r, rows)};
+  const n = panes.length ? Math.max(1, dockedPanes().length) : layout;
+  const cols = n === 4 ? 2 : n, rows = n === 4 ? 2 : 1, kept = viewFr[n] || {};
+  const fit = (list, k) => Array.isArray(list) && list.length === k && list.every(x => x > 0) ? list : Array(k).fill(1);
+  return viewFr[n] = {c: fit(kept.c, cols), r: fit(kept.r, rows)};
 }
+// ---- floating view windows: a view window floats over the others inside the views (its caption dragged off, or
+// Window Position > Float) and docks back into the grid (Window Position > Dock, a double-click on its caption, or
+// dropped near the views' edge). The others share its room while it floats.
+function floatPane(p, on) {
+  const vb = $("views").getBoundingClientRect();
+  if (on && !p.fl) {
+    const r = p.el.getBoundingClientRect(), w = Math.min(r.width, vb.width * 0.6), h = Math.min(r.height, vb.height * 0.7);
+    p.el.classList.remove("max");
+    p.fl = {w, h, x: (vb.width - w) / 2, y: (vb.height - h) / 2};
+  } else if (!on && p.fl) {
+    p.fl = null;
+    Object.assign(p.el.style, {left: "", top: "", width: "", height: ""});
+  }
+  p.el.classList.toggle("floatv", !!p.fl);
+  if (p.fl) placeFloat(p);
+  $("views").querySelectorAll(".vsplit").forEach(e => e.remove());
+  viewTemplate(); addViewSplits(); draw();
+}
+// A floating window stays wholly inside the views: the 3D canvas covers only them, so no part of it is left undrawn.
+function placeFloat(p) {
+  const vb = $("views").getBoundingClientRect(), f = p.fl;
+  f.w = Math.max(200, Math.min(f.w, vb.width)); f.h = Math.max(150, Math.min(f.h, vb.height));
+  f.x = Math.max(0, Math.min(f.x, vb.width - f.w)); f.y = Math.max(0, Math.min(f.y, vb.height - f.h));
+  Object.assign(p.el.style, {left: f.x + "px", top: f.y + "px", width: f.w + "px", height: f.h + "px"});
+}
+// Dropped within 30 px of the views' edge (or beyond it), a floating view window docks back.
+function nearViewsEdge(x, y) { const b = $("views").getBoundingClientRect(); return x < b.left + 30 || x > b.right - 30 || y < b.top + 30 || y > b.bottom - 30; }
+function showViewsHint(on) {
+  const h = $("dockHint"), b = $("views").getBoundingClientRect();
+  if (!on) { h.style.display = "none"; return; }
+  Object.assign(h.style, {display: "block", left: b.left + "px", top: b.top + "px", width: b.width + "px", height: b.height + "px"});
+}
+// A caption dragged more than a few pixels floats its window under the pointer; a click stays a click.
+function wirePaneDrag(p) {
+  p.title.addEventListener("pointerdown", e => {
+    if (e.button !== 0 || e.target.closest(".x, .dd")) return;
+    const x0 = e.clientX, y0 = e.clientY;
+    let moving = false, offX = 0, offY = 0;
+    const move = m => {
+      if (!moving) {
+        if (Math.hypot(m.clientX - x0, m.clientY - y0) < 6) return;
+        moving = true; document.body.classList.add("dragging");
+        const r = p.el.getBoundingClientRect();
+        if (!p.fl) floatPane(p, true);
+        offX = Math.max(10, Math.min(x0 - r.left, p.fl.w - 40)); offY = Math.max(5, Math.min(y0 - r.top, 20));
+      }
+      const vb = $("views").getBoundingClientRect();
+      p.fl.x = m.clientX - vb.left - offX; p.fl.y = m.clientY - vb.top - offY; placeFloat(p);
+      showViewsHint(nearViewsEdge(m.clientX, m.clientY)); draw();
+    };
+    const up = m => {
+      removeEventListener("pointermove", move); removeEventListener("pointerup", up);
+      if (!moving) return;
+      document.body.classList.remove("dragging"); showViewsHint(false);
+      const eat = ev => { ev.stopPropagation(); ev.preventDefault(); };
+      addEventListener("click", eat, true); setTimeout(() => removeEventListener("click", eat, true), 0);
+      if (nearViewsEdge(m.clientX, m.clientY)) floatPane(p, false); else draw();
+    };
+    addEventListener("pointermove", move); addEventListener("pointerup", up);
+  });
+}
+// A floating window resized from its corner keeps that size; every window redraws when its size changes.
+const paneSizes = new ResizeObserver(entries => {
+  const vb = $("views").getBoundingClientRect();
+  for (const en of entries) {
+    const p = panes.find(q => q.el === en.target);
+    if (!p || !p.fl || !en.target.offsetWidth) continue;
+    p.fl.w = en.target.offsetWidth; p.fl.h = en.target.offsetHeight;
+    if (p.fl.x + p.fl.w > vb.width || p.fl.y + p.fl.h > vb.height) placeFloat(p); // sized past the views: kept inside
+  }
+  draw();
+});
 function viewTemplate() {
   const s = viewShares(), host = $("views");
   host.style.gridTemplateColumns = s.c.map(f => f + "fr").join(" ");
@@ -2982,9 +3090,9 @@ function addViewSplits() {
 // Each splitter sits in the gap after its column (row), read from the windows as they are laid out.
 function placeViewSplits() {
   const host = $("views"), box = host.getBoundingClientRect(), maxed = !!host.querySelector(".pane.max");
-  const cols = layout === 4 ? 2 : layout;
+  const docked = dockedPanes(), cols = docked.length === 4 ? 2 : docked.length;
   host.querySelectorAll(".vsplit").forEach(d => {
-    const i = +d.dataset.i, pane = panes[d.classList.contains("c") ? i : i * cols];
+    const i = +d.dataset.i, pane = docked[d.classList.contains("c") ? i : i * cols];
     d.hidden = maxed || !pane || !pane.el;
     if (d.hidden) return;
     const r = pane.el.getBoundingClientRect();
@@ -3514,7 +3622,7 @@ function act(name) {
     case "linePrev": return stepLine(-1);
     case "lineNext": return stepLine(1);
     case "theme:light": case "theme:dark": return setTheme(name === "theme:dark");
-    case "bg": bg = bg === "black" ? "white" : "black"; bgSaved = true; try { localStorage.setItem("cpm-bg", bg); } catch (e) {} colourDirty = true; if (P) buildTree(); syncTools(); return draw();
+    case "bg": bg = bg === "black" ? "white" : "black"; try { localStorage.setItem(bgKey(), bg); } catch (e) {} colourDirty = true; if (P) buildTree(); syncTools(); return draw();
     case "plot": if (p) setMode(p, p.mode === "plot" ? "3d" : "plot"); return;
     case "tables": if (etrOn() && P) return etrChooseTables(); return showTables($("dock").hidden);
     case "anim": res.anim = !res.anim && res.mode === "deformed"; syncResults(); return draw();
