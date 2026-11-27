@@ -136,7 +136,7 @@ public static class SapTableValues
     {
         say("");
         say("==== " + source);
-        foreach (var table in link.Tables().Select(t => t.Name).Where(n => Prefixes.Any(p => n.StartsWith(p, StringComparison.OrdinalIgnoreCase))).OrderBy(n => n, StringComparer.Ordinal))
+        foreach (var table in link.Tables().Select(t => t.Key).Where(n => Prefixes.Any(p => n.StartsWith(p, StringComparison.OrdinalIgnoreCase))).OrderBy(n => n, StringComparer.Ordinal))
         {
             try
             {
