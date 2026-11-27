@@ -172,7 +172,12 @@ public static class LateralCodes
         foreach (var code in new[] { "ASCE 7-22", "ASCE 7-16", "ASCE 7-10", "ASCE 7-05", "IBC 2021", "IBC 2018", "IBC 2015", "IBC 2012", "SBC 301-2018" })
             list.Add(new(code, Wind, "asce7-wind", P(WindCommon(code.EndsWith("05") ? "90" : "115", "mph"), Range(),
                 [new("Exposure", "Exposure", "C", ParamKind.Choice, AsceExposure), new("Kzt", "Topographic Kzt", "1"), new("Kd", "Directionality Kd", "0.85"),
-                 new("Ke", "Ground elevation Ke", "1"), new("G", "Gust factor G", "0.85"), new("Iw", "Importance (ASCE 7-05)", "1")]),
+                 new("Ke", "Ground elevation Ke", "1"), new("G", "Gust factor G", "0.85"), new("Iw", "Importance (ASCE 7-05)", "1"),
+                 // Named as SAP2000's Set call names them, so a live program takes the same case.
+                 new("ASCECase", "Wind load case (Fig. 27.3-8)", "5", ParamKind.Choice, ["1", "2", "3", "4", "5"],
+                     "5: all four cases, as CSI makes them (the Modeler's pattern holds case 1 and lists the others' shear and torsion). 1 to 4: that case only, one pattern each."),
+                 new("ASCEe1", "Eccentricity e1 (of the width)", "0.15", Help: "Cases 2 and 4: ±0.15 of the width across the wind; give -0.15 for the other side."),
+                 new("ASCEe2", "Eccentricity e2 (of the 90° width)", "0.15", Help: "Case 4: ±0.15 of the width across the 90° wind.")]),
                 "MWFRS directional procedure (ASCE 7 27.3): qz = 0.613 Kz Kzt Kd Ke V², p = q G Cp, windward at qz, leeward at qh."));
         foreach (var code in new[] { "Eurocode 1 2005", "ECP 201-2012" })
             list.Add(new(code, Wind, "ec1-wind", P(WindCommon("28", "m/s"), Range(),

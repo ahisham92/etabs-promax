@@ -517,15 +517,54 @@ public static class LateralLoads
             default: throw new ArgumentException($"{a.Code.Name} is not a wind code the Modeler computes.");
         }
         var fx = new double[levels.Count]; var fy = new double[levels.Count]; var mz = new double[levels.Count];
+        var along = new double[levels.Count];
         var total = 0.0;
         for (var i = 0; i < levels.Count; i++)
         {
             var p = (windward(h[i] * g.LengthToM) + leeward(h[i] * g.LengthToM)) * toModel;
-            var f = p * width * trib[i];
-            fx[i] = f * dx; fy[i] = f * dy; total += f;
+            along[i] = p * width * trib[i];
+            fx[i] = along[i] * dx; fy[i] = along[i] * dy; total += along[i];
         }
         r["V"] = total;
+        if (a.Code.Family == "asce7-wind") AsceWindCase(a, joints, dx, dy, width, along, fx, fy, mz, r);
         return (fx, fy, mz);
+    }
+
+    /// <summary>
+    /// The design wind load cases of ASCE 7 (Fig. 27.3-8 in 7-16 and 7-22, Fig. 27.4-8 in 7-10, Fig. 6-9 in 7-05), on the
+    /// direction of the wind and the direction 90° from it. The pressures have no part that depends on the width, so the
+    /// other direction is the same pressures on the other width.
+    /// 1: the full pressures along the wind. 2: 0.75 of them with the torsion 0.75 F e1 B (e1 = ±0.15). 3: 0.75 along both
+    /// directions at once. 4: 0.563 along both with the torsion 0.563 (Fx e1 Bx + Fy e2 By). 5 (CSI's "all"): the pattern
+    /// holds case 1, and the base shear and torsion of every case are listed.
+    /// </summary>
+    private static void AsceWindCase(In a, List<(double X, double Y)> joints, double dx, double dy, double width, double[] along,
+        double[] fx, double[] fy, double[] mz, Dictionary<string, double> r)
+    {
+        var text = a.Text("ASCECase");
+        var c = text.Length == 0 ? 1 : int.TryParse(text, NumberStyles.Integer, Inv, out var n) && n is >= 1 and <= 5 ? n
+            : throw new ArgumentException("The ASCE wind case is 1, 2, 3, 4 or 5 (all).");
+        double e1 = a.Opt("ASCEe1") ?? 0.15, e2 = a.Opt("ASCEe2") ?? 0.15;
+        // The width of the face the 90° wind meets: the plan size along the wind.
+        var other = joints.Count == 0 ? 0 : joints.Max(j => j.X * dx + j.Y * dy) - joints.Min(j => j.X * dx + j.Y * dy);
+        var otherWidth = other > 0 ? other : width;
+        double v1 = along.Sum(), v2 = v1 * otherWidth / width;
+        r["ASCECase"] = c;
+        r["V case 1"] = v1; r["Mz case 2"] = 0.75 * v1 * e1 * width;
+        r["V case 3"] = 0.75 * Math.Sqrt(v1 * v1 + v2 * v2); r["Mz case 4"] = 0.563 * (v1 * e1 * width + v2 * e2 * otherWidth);
+        if (c is 1 or 5) return;
+        var k = c == 4 ? 0.563 : 0.75;
+        var total = 0.0;
+        for (var i = 0; i < along.Length; i++)
+        {
+            var f = along[i]; var f2 = f * otherWidth / width;
+            // The 90° direction (-dy, dx) for cases 3 and 4.
+            fx[i] = k * (f * dx + (c >= 3 ? -f2 * dy : 0));
+            fy[i] = k * (f * dy + (c >= 3 ? f2 * dx : 0));
+            mz[i] = c == 2 ? k * f * e1 * width : c == 4 ? k * (f * e1 * width + f2 * e2 * otherWidth) : 0;
+            total += k * f;
+        }
+        r["V"] = total;
     }
 
     // ---- a code's spectrum as a function ----

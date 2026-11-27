@@ -232,7 +232,8 @@ public static class CsiTools
               "angle":{"type":"number","description":"Direction in degrees. Default 0 (X)."},
               "exposure":{"type":"string","enum":["B","C","D"],"description":"Default C."},
               "cpw":{"type":"number","description":"Default 0.8."},"cpl":{"type":"number","description":"Default 0.5."},
-              "gust":{"type":"number","description":"Default 0.85."},"kzt":{"type":"number","description":"Default 1."},"kd":{"type":"number","description":"Default 0.85."}}}
+              "gust":{"type":"number","description":"Default 0.85."},"kzt":{"type":"number","description":"Default 1."},"kd":{"type":"number","description":"Default 0.85."},
+              "asce_case":{"type":"integer","enum":[1,2,3,4,5],"description":"ASCE 7-16 Fig. 27.3-8 load case; 5 (default) makes all four, as 27.3.5 asks."}}}
             """, Ask.Changes, AddWindLoad, a => $"Add the wind load {a.Text("name")}"),
 
         new("add_response_spectrum",
@@ -1455,7 +1456,7 @@ public static class CsiTools
             ("WindSpeed", a.Number("speed")), ("ExposureType", exposure), ("Kzt", a.Number("kzt", 1)), ("GustFactor", a.Number("gust", 0.85)),
             ("Kd", a.Number("kd", 0.85)), ("SolidGrossRatio", 0.2), ("UserExposure", false), ("Ke", 1.0),
             // SAP2000 26's help: ASCECase 1 to 5 (5 is every case of ASCE 7-16 Fig. 27.3-8), e1 and e2 of that figure; ASCE 7-10 also takes the importance.
-            ("ASCECase", a.Whole("asce_case", 1)), ("ASCEe1", 0.15), ("ASCEe2", 0.15), ("ImportanceFactor", a.Number("importance", 1)));
+            ("ASCECase", a.Whole("asce_case", 5)), ("ASCEe1", 0.15), ("ASCEe2", 0.15), ("ImportanceFactor", a.Number("importance", 1)));
         if (IsEtabs(e))
         {
             // ETABS 23's cAutoWind has no methods: its table takes the wind.

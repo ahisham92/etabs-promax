@@ -216,6 +216,32 @@ static class LateralTests
             Check(f[0].Fx < f[1].Fx, "the lower strip is at qp(b), below qp(h)");
         });
 
+        yield return ("lateral: ASCE 7 wind takes the load cases of Fig. 27.3-8: 5 (all, as CSI) by default, or one case per pattern", () =>
+        {
+            // The wind along X meets the 4 m face; the 90° wind meets the 11 m face.
+            var link = Frame();
+            var wind = new { Angle = "0", Speed = "115", SpeedUnit = "mph", Exposure = "C" };
+            Set(link, "W5", "ASCE 7-16", wind, "wind");
+            Set(link, "W1", "ASCE 7-16", new { wind.Angle, wind.Speed, wind.SpeedUnit, wind.Exposure, ASCECase = "1" }, "wind");
+            Set(link, "W2", "ASCE 7-16", new { wind.Angle, wind.Speed, wind.SpeedUnit, wind.Exposure, ASCECase = "2" }, "wind");
+            Set(link, "W3", "ASCE 7-16", new { wind.Angle, wind.Speed, wind.SpeedUnit, wind.Exposure, ASCECase = "3" }, "wind");
+            Set(link, "W4", "ASCE 7-16", new { wind.Angle, wind.Speed, wind.SpeedUnit, wind.Exposure, ASCECase = "4" }, "wind");
+            var m = link.Model;
+            LateralDef D(string n) => m.LoadPatterns.Single(p => p.Name == n).Auto!;
+            foreach (var n in new[] { "W5", "W1", "W2", "W3", "W4" }) Check(D(n).Error is null, n + ": " + D(n).Error);
+            var v1 = D("W1").Results["V"];
+            Near(5, D("W5").Results["ASCECase"], "the default is all cases");
+            Near(v1, Sum(m, "W5", "FX"), "case 5's pattern holds case 1", 1e-4);
+            Near(0, D("W1").Forces.Sum(f => f.Mz), "case 1 has no torsion", 1e-9);
+            Near(0.75 * v1, Sum(m, "W2", "FX"), "case 2: 0.75 along the wind", 1e-4);
+            Near(0.75 * v1 * 0.15 * 4, D("W2").Forces.Sum(f => f.Mz), "case 2: the torsion 0.75 F 0.15 B", 1e-4);
+            Near(D("W5").Results["Mz case 2"], D("W2").Forces.Sum(f => f.Mz), "case 5 lists case 2's torsion", 1e-4);
+            Near(0.75 * v1, Sum(m, "W3", "FX"), "case 3: 0.75 along X", 1e-4);
+            Near(0.75 * v1 * 11 / 4, Sum(m, "W3", "FY"), "case 3: 0.75 along Y on the 11 m face", 1e-4);
+            Near(0.563 * v1, Sum(m, "W4", "FX"), "case 4: 0.563 along X", 1e-4);
+            Near(0.563 * (v1 * 0.15 * 4 + v1 * 11 / 4 * 0.15 * 11), D("W4").Forces.Sum(f => f.Mz), "case 4: the torsion of both directions", 1e-4);
+        });
+
         yield return ("lateral: new concrete sections and materials take their covers, bars and unit weight in the model's units", () =>
         {
             var m = ModelEdit.New("mm");
