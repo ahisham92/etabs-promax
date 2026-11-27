@@ -1815,9 +1815,9 @@ function matrices(p, w, h) {
   const persp = c.persp && p.mode === "3d";
   let eye, proj;
   if (persp) {
-    const dist = c.hh / Math.tan(FOV / 2);
+    const fov = c.fov || FOV, dist = c.hh / Math.tan(fov / 2);
     eye = sub(c.target, mul(d, dist));
-    proj = perspM(FOV, asp, Math.max(R * 0.002, dist * 0.01), dist + R * 3 + off);
+    proj = perspM(fov, asp, Math.max(R * 0.002, dist * 0.01), dist + R * 3 + off);
   } else {
     const D = R * 3 + off + c.hh;
     eye = sub(c.target, mul(d, D));
@@ -2181,19 +2181,21 @@ function buildColours() {
 
 // ---- what each window shows ----
 const tol = () => Math.max(size * 1e-5, 1e-6);
-function elevationOf(name) { const s = stories.find(s => s.name === name); return s ? s.elevation : null; }
+function elevationOf(name) { const s = stories.find(s => s.name === name); return s ? s.elevation : typeof etv !== "undefined" && name in etv.zPlanes ? etv.zPlanes[name] : null; }
 function onLine(q, line) { return Math.abs((line.dir === "X" ? q[0] : q[1]) - line.at) <= tol() * 10; }
 function shown(o, p) {
   if (hidden.kind.has(o.kind) || hidden.section.has(o.type + ":" + o.section) || hidden.objs.has(o.id)) return false;
   if (o.type === "a" && !opt.fill) return false;
+  if (!etvInLimits(o) || !etvCutKeeps(p, o)) return false;
   if (p.mode === "plan") {
+    if (p.story in etv.zPlanes) { const z = etv.zPlanes[p.story], t = tol() * 10; return o.type === "f" ? Math.abs(Math.max(o.a[2], o.b[2]) - z) <= t : (o.pts || []).every(q => Math.abs(q[2] - z) <= t); }
     if (o.type === "f") { const z = elevationOf(p.story); return o.story ? o.story === p.story : z !== null && Math.abs(Math.max(o.a[2], o.b[2]) - z) <= tol() * 10; }
     return o.story === p.story;
   }
   if (p.mode === "elev") return !p.line || (o.type === "f" ? onLine(o.a, p.line) && onLine(o.b, p.line) : o.pts.every(q => onLine(q, p.line)));
   return true;
 }
-function paneSig(p) { return [p.mode, p.story, p.line ? p.line.dir + p.line.label : "", opt.fill, [...hidden.kind].join(), [...hidden.section].join(), hidden.objs.size, selVersion, hover, objRows].join("|"); }
+function paneSig(p) { return [p.mode, p.story, p.line ? p.line.dir + p.line.label : "", etvSig(), p.cut ? p.cut.dir + p.cut.at + p.cut.side : "", opt.fill, [...hidden.kind].join(), [...hidden.section].join(), hidden.objs.size, selVersion, hover, objRows].join("|"); }
 let selVersion = 0;
 function uploadObjects(p) {
   // The window's colours and flags: shown (1), selected (2), under the pointer (4).
@@ -2423,12 +2425,12 @@ function drawScene(p, M, R, dpr, mode) {
   // mode 0 draws for the eye, mode 1 draws object numbers for picking.
   const T = theme(), extrude = opt.extrude && opt.sections && (res.mode !== "forces" || res.fExtrude && etrOn()), see = !(extrude || opt.extrudeA && opt.sections) || opt.see || p.mode !== "3d";
   const contourOn = (res.mode === "contour" || res.mode === "shell") && contour;
-  const L = unitv(add(add(mul(M.d, -0.55), mul(M.up, 0.75)), mul(M.right, -0.35)));
+  const L = etvLight(M, unitv(add(add(mul(M.d, -0.55), mul(M.up, 0.75)), mul(M.right, -0.35))));
   gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.depthMask(true); gl.disable(gl.BLEND);
   const solids = (buf, alpha, noContour) => {
     if (!buf || !buf.count) return;
     const pr = prog.solid; setCommon(pr, M, R, dpr, mode);
-    gl.uniform3fv(pr.u.uLight, L); gl.uniform3fv(pr.u.uFwd, M.d); gl.uniform1f(pr.u.uAlpha, alpha); gl.uniform1f(pr.u.uAmb, T.dark ? 0.38 : 0.46);
+    gl.uniform3fv(pr.u.uLight, L); gl.uniform3fv(pr.u.uFwd, M.d); gl.uniform1f(pr.u.uAlpha, alpha); gl.uniform1f(pr.u.uAmb, etvAmbient(T.dark ? 0.38 : 0.46));
     gl.uniform1i(pr.u.uContour, contourOn && !(noContour && areas.length) ? 1 : 0);
     const eS = etrOn() && res.mode === "shell" && res.etrS; if (pr.u.uCLine) gl.uniform1f(pr.u.uCLine, eS && eS.lines ? eS.lw : 0); if (pr.u.uCFill) gl.uniform1i(pr.u.uCFill, eS && !eS.fill ? 0 : 1);
     if (contourOn) { const bands = bandSet(); gl.uniform2f(pr.u.uRange, contour.lo, contour.hi); gl.uniform1i(pr.u.uNB, bands.length); const flatB = new Float32Array(36); bands.forEach((c, i) => flatB.set(rgb(c), i * 3)); gl.uniform3fv(pr.u.uBands, flatB); }
@@ -2852,7 +2854,7 @@ function drawReactions(p, g, to, T, given) {
 function drawAxes(p, g, M, T, h) {
   // The global axes at the global origin, as the program draws them: red X, green Y and blue Z arrows, named in plan.
   // When the origin is out of the window they stand in its corner instead.
-  const z = p.mode === "plan" ? (elevationOf(p.story) ?? 0) : stories.length ? stories[0].elevation : 0, at = M.to([0, 0, z]);
+  const z = p.mode === "plan" ? (elevationOf(p.story) ?? 0) : stories.length ? stories[0].elevation : 0, A = p.axesAt, at = M.to(A ? [A[0], A[1], p.mode === "plan" ? z : A[2]] : [0, 0, z]);
   const w = p.R ? p.R.w : 1e9, inside = at[3] && at[0] > 4 && at[1] > 4 && at[0] < w - 4 && at[1] < h - 4;
   const o = inside ? [at[0], at[1]] : [38, h - 38], L = p.mode === "3d" ? 30 : 38;
   g.lineWidth = 1.6; g.setLineDash([]); g.font = "bold 13px Segoe UI, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.lineCap = "butt";
@@ -3161,7 +3163,7 @@ function wire(p) {
     let act;
     if (e.button === 1) { act = e.shiftKey ? "orbit" : "pan"; if (performance.now() - lastMid < 350) { fit(p); act = "none"; } lastMid = performance.now(); e.preventDefault(); }
     else if (e.button === 2) act = p.mode === "3d" && !e.shiftKey ? "orbit" : "pan";
-    else act = tool.startsWith("d:") ? "draw" : tool === "orbit" ? (p.mode === "3d" ? "orbit" : "pan") : tool === "pan" ? "pan" : tool === "zoom" ? "rubberzoom" : tool === "iline" ? "iline" : e.altKey && p.mode === "3d" ? "orbit" : "box";
+    else act = tool.startsWith("measure:") ? "measure" : tool === "walk" ? "walk" : tool.startsWith("d:") ? "draw" : tool === "orbit" ? (p.mode === "3d" ? "orbit" : "pan") : tool === "pan" ? "pan" : tool === "zoom" ? "rubberzoom" : tool === "iline" ? "iline" : e.altKey && p.mode === "3d" ? "orbit" : "box";
     drag = {x, y, x0: x, y0: y, sx: e.clientX, sy: e.clientY, moved: false, act, button: e.button, ctrl: e.ctrlKey || e.metaKey || e.shiftKey};
     hideTip();
   });
@@ -3174,6 +3176,7 @@ function wire(p) {
     if (!drag.moved) return;
     if (drag.act === "iline") { p.iline = [[drag.x0, drag.y0], [x, y]]; draw(); }
     else if (drag.act === "pan") panBy(p, dx, dy);
+    else if (drag.act === "walk") etvWalk(p, dx, dy);
     else if (drag.act === "orbit") orbitBy(p, dx, dy);
     else if (drag.act === "box" || drag.act === "rubberzoom") {
       const rb = $("rubber"), l = Math.min(e.clientX, drag.sx), t = Math.min(e.clientY, drag.sy);
@@ -3186,6 +3189,8 @@ function wire(p) {
     const [x, y] = local(e), d = drag; drag = null; $("rubber").style.display = "none";
     if (!d || !P) return;
     if (d.act === "draw") { if (!d.moved) drawClick(p, x, y, false); return; }
+    if (d.act === "measure") { if (!d.moved && d.button === 0) etvMeasureClick(p, x, y, false); else if (d.button === 2) etv.measure = null; return; }
+    if (d.act === "walk") return;
     if (d.act === "iline") { p.iline = null; if (d.moved) { const n = lineSelect(p, [d.x0, d.y0], [x, y]); $("hint").textContent = n + " objects crossed by the line selected."; } else draw(); return; }
     if (!d.moved && d.button === 2 && tool.startsWith("d:") && hm.chain.length) { hm.chain = []; draw(); return; }
     if (!d.moved) {
@@ -3205,7 +3210,7 @@ function wire(p) {
       else boxSelect(p, r, x < d.x0, true);
     }
   });
-  cv.addEventListener("dblclick", e => { const [x, y] = local(e); if (tool.startsWith("d:")) { if (drawKind() === "floor") drawClick(p, x, y, true); return; } const {j, id} = pickAt(p, x, y, 5); if (j) return jointInfo(j); if (id) infoWindow(id); });
+  cv.addEventListener("dblclick", e => { const [x, y] = local(e); if (tool.startsWith("measure:")) { if (etv.measure && etv.measure.kind === "area" && etv.measure.pts.length > 3) { etv.measure.pts.pop(); etvMeasureClick(p, x, y, true); } return; } if (tool === "walk") return; if (tool.startsWith("d:")) { if (drawKind() === "floor") drawClick(p, x, y, true); return; } const {j, id} = pickAt(p, x, y, 5); if (j) return jointInfo(j); if (id) infoWindow(id); });
   cv.addEventListener("pointerleave", () => { $("coords").textContent = ""; hideTip(); if (hover) { hover = 0; draw(); } });
   cv.addEventListener("contextmenu", e => e.preventDefault());
   cv.addEventListener("auxclick", e => e.preventDefault());
@@ -3441,7 +3446,7 @@ function syncNav() {
 }
 function setMode(p, mode) {
   if (!p) return;
-  p.mode = mode; p.sig = ""; p.diagSig = null;
+  p.mode = mode; p.sig = ""; p.diagSig = null; p.cut = null;
   if (mode === "elev" && !p.line) p.line = grids.Y[0] || allLines()[0] || null;
   if (mode !== "plot") { p.cam = {...p.cam, ...planeCam(p), persp: mode === "3d" ? p.cam.persp : false}; p.vis = null; p.cam = fitCam(p, p.cam); }
   syncTools(); draw();
@@ -3487,6 +3492,7 @@ function act(name) {
   if (name.startsWith("r:")) return setRes(name.slice(2));
   if (name.startsWith("o:")) { const k = name.slice(2); opt[k] = !opt[k]; if (k === "extrude") opt.extrudeA = opt.extrude; if (k === "extrude" || k === "sections") { geometryDirty = true; geometryStamp++; } if (k === "fill") hiddenVersion++; if (k === "explorer") $("explorer").hidden = !opt.explorer; if (k === "side") $("right").hidden = !opt.side; syncTools(); return draw(); }
   if (name.startsWith("m:")) return modelAct(name.slice(2));
+  if (name.startsWith("eto:")) return etoAct(name.slice(4));
   if (name === "u:consistent") return consistentUnits();
   if (name === "u:form") return unitsForm();
   if (name.startsWith("u:set:")) return setDispUnits(unitDefaults[name.slice(6)] || null);
@@ -3574,6 +3580,7 @@ function programLook() {
   const det = document.querySelector('[data-menu="Detailing"]'); if (det) det.hidden = program === "sap2000";
   try { syncUnits(); } catch (e) { /* before the page's footer is wired */ }
   buildBars();
+  try { etoBars(); etoCross(); } catch (e) { /* before the ETABS options are read */ }
 }
 function forProgram(m) {
   const tidy = list => {
@@ -3581,7 +3588,7 @@ function forProgram(m) {
     for (const it of list) {
       if (it && it.only) { if (!it.only.includes(program)) continue; }
       const item = it && it.only ? it.item : it;
-      if (Array.isArray(item) && Array.isArray(item[1])) { const sub = tidy(item[1]); if (!sub.some(Boolean)) continue; out.push([item[0], sub, ...item.slice(2)]); continue; }
+      if (Array.isArray(item) && Array.isArray(item[1])) { const sub = tidy(item[1]); if (!sub.some(Boolean) && !item[3]) continue; out.push([item[0], sub, ...item.slice(2)]); continue; }
       if (item === 0 && (!out.length || out[out.length - 1] === 0)) continue;
       out.push(item);
     }
@@ -3638,11 +3645,12 @@ function ticked(a) {
   if (a.startsWith("t:")) return tool === a.slice(2);
   if (a.startsWith("d:")) return tool === a;
   if (a === "m:etn:alive") return etn.alive;
+  if (a.startsWith("eto:")) return etoTicked(a);
   if (a === "m:etn:snapOnly") return !!hm.snapOnly;
   return {bg: bg === "black", tables: !$("dock").hidden, plot: !!p && p.mode === "plot", persp: !!p && !!p.cam.persp && p.mode === "3d", explorer: opt.explorer, side: opt.side, anim: res.anim}[a] || false;
 }
 function menuHtml(list) {
-  return list.map(i => !i ? "<hr>" : Array.isArray(i[1]) ? `<div class="mi sub">${i[0]}<div class="drop">${menuHtml(i[1])}</div></div>` : `<div class="mi ${ticked(i[1]) ? "tick" : ""} ${i[3] ? "off" : ""}" data-do="${esc(i[1])}"><span>${esc(i[0])}</span>${i[2] ? `<kbd>${i[2]}</kbd>` : ""}</div>`).join("");
+  return list.map(i => !i ? "<hr>" : Array.isArray(i[1]) ? `<div class="mi sub${i[3] ? " off" : ""}">${i[0]}<div class="drop">${menuHtml(i[1])}</div></div>` : `<div class="mi ${ticked(i[1]) ? "tick" : ""} ${i[3] ? "off" : ""}" data-do="${esc(i[1])}"><span>${esc(i[0])}</span>${i[2] ? `<kbd>${i[2]}</kbd>` : ""}</div>`).join("");
 }
 document.querySelectorAll(".menu").forEach(el => {
   el.addEventListener("click", e => {
@@ -6158,7 +6166,7 @@ async function hmPost(body) {
 }
 // One change: the answer, and the view and the forms' lists brought up to date. Errors go to the status bar.
 async function hmRun(tool, args, quiet) {
-  if (etnLocked(tool)) return {ok: false, error: "The model is locked (Analyze > Unlock Model)."};
+  if (etnLocked(tool, args)) return {ok: false, error: "The model is locked (Analyze > Unlock Model)."};
   if (hm.busy) return {ok: false, error: "The last change is still being made."};
   hm.busy = true; document.body.classList.add("hmbusy");
   let j;
@@ -6168,7 +6176,7 @@ async function hmRun(tool, args, quiet) {
   if ("rev" in j) hm.state = j;
   if (j.ok) {
     hm.lastError = ""; hm.defs = null; if (window.cpmPull) await window.cpmPull(); await hmDefs();
-    etnChanged(tool);
+    etnChanged(tool, args);
     // A new model, another file, or new stories and grids: the windows show all of it again, plans at the top story.
     if (["new_model", "open_model_file", "define_stories", "define_grids", "import_tables_excel"].includes(tool)) {
       const top = stories.length ? stories[stories.length - 1].name : "";
@@ -6201,6 +6209,7 @@ function modelerMenus(m) {
   m.Edit = [[s.undo ? "Undo " + s.undo : "Undo", "m:undo", "Ctrl+Z", !s.undo], [s.redo ? "Redo " + s.redo : "Redo", "m:redo", "Ctrl+Y", !s.redo], 0,
     ["Delete", "m:delete", "Del", !any], 0, ["Replicate...", "m:replicate", "", !any], ["Move...", "m:move", "", !any], ["Divide Frames...", "m:divide", "", !hmSelected("f").length], 0, only(["etabs", "safe"], ["Edit Stories and Grid Systems...", "m:storyGrid"]), 0, ["Copy names of the selected objects", "copyNames", "Ctrl+C", !any], 0, ["Hide the selected objects", "hideSel", "", !any], ["Show all objects", "showAll"], 0, ["Model Text...", "m:text"]];
   m.Define = hmDefineMenu();
+  if (etnOn()) m.File = etfFileMenu();
   m.Draw = [["Select Object", "t:select", "Esc"], ["Reshape Object", "d:reshape"], 0, ["Draw Columns (click a point)", "d:column"], ["Draw Beams (click start and end)", "d:beam"], ["Quick Draw Beams (click a grid line)", "d:qbeam"], only(ES, ["Quick Draw Secondary Beams (click in a bay)", "d:qsec"]), 0,
     ["Draw Floors (click corners)", "d:floor"], ["Draw Rectangular Floors (two corners)", "d:rect"], ["Quick Draw Floors (click in a bay)", "d:qfloor"], ["Draw Circular Floors (centre, then edge)", "d:circ"], 0,
     ["Draw Walls (click start and end)", "d:wall"], ["Quick Draw Walls (click a grid line)", "d:qwall"], 0,
@@ -6208,6 +6217,8 @@ function modelerMenus(m) {
   if (etnOn()) m.Draw = etnDrawMenu();
   // ETABS 23.2's Detailing menu, item for item (etqDetailingMenu); the Engine's schedules under Engine Extras.
   if (etnOn()) m.Detailing = etqDetailingMenu();
+  if (etnOn()) m.Select = etsSelectMenu();
+  if (etnOn()) m.View = etvViewMenu();
   // ETABS 23.2's own Assign menu, item for item (hmEtabsAssignMenu); SAP2000's and SAFE's below.
   if (program === "etabs") m.Assign = hmEtabsAssignMenu(); else
   // SAP2000's Assign menu has no top-level section or restraint items: they are in its Joint, Frame and Area submenus.
@@ -6231,6 +6242,8 @@ function modelerMenus(m) {
     of.forEach((f, i) => { const it = [f.item, "m:oform:" + i]; if (!f.group) return items.push(it); let g = groups.find(x => x[0] === f.group); if (!g) groups.push(g = [f.group, []]); g[1].push(it); });
     m.Options = [...groups, ...items, 0, ...(m.Options || [])];
   }
+  // ETABS 23.2's own Options menu; the Engine's view options under Engine Extras.
+  if (etnOn()) m.Options = etoOptionsMenu(viewerMenus().Options);
   if (program === "safe") m.Tools = [...(m.Tools || []), 0, ["SAFE Definition Tables...", "m:sf:"]];
   if (fm.designs.length) m.Design = [...fm.designs.map(d => [d.name, [["View/Revise Preferences...", "m:pref:" + d.design], ...(d.design === "shear_wall" ? (d.overwrites || []).map(t => [/Spandrel/.test(t) ? "View/Revise Spandrel Overwrites..." : "View/Revise Pier Overwrites...", "m:dt:" + t]) : (d.overwrites || []).length ? [["View/Revise Overwrites...", "m:over:" + d.design, "", !hmSelected(d.design === "slab" ? "a" : "f").length]] : []), ...(window.cpmLive ? [["Start Design/Check...", "eng:design"]] : [])]]), 0, ...(m.Design || [])];
   return m;
@@ -6451,6 +6464,381 @@ function hmStoryGrid() {
     [["OK"], ["Cancel"]], {width: 460});
   q(d, "#sgS").onclick = () => hmStories(); q(d, "#sgG").onclick = () => hmGrids();
 }
+// ---- ETABS 23.2's Design > Steel Connection Design (its submenu, View/Revise Preferences with Plate Depth Schedule and
+// Default Connection Type), Live Load Reduction Factors, Set Lateral Displacement Targets and Set Time Period Targets,
+// from the pictures field/reference-forms/etabs/Design/07, 70-99b (thread 'Make ETABS steel connection design forms
+// identical', 2026-11-27). Acts m:etc:*; the Design menu (thread 'Make ETABS Design, Detailing, Options and Tools forms
+// identical', etd*) calls etcConnectionMenu() and the acts m:etc:llrf, m:etc:dispTargets, m:etc:periodTargets.
+// Kept by the model tools set_connection_preferences, set_live_load_reduction and define_table_rows (EtabsDesignTools).
+// UNVERIFIED (no picture yet, asked of the capture thread): rows 11 on of Beam-Beam Partial Depth with Top, Full Depth and
+// Horizontal and of Beam-Column Shear Minor, Moment Major and Moment Minor (taken as the pictured types' rows); the value
+// lists of Bolt Types, Bolt Size, Hole Types, Weld Material, Anchor Rod Size/Material/Heads and Nuts (offered as
+// suggestions, any value typed is kept); the Description of the items the pictures do not show picked. ----
+const etc = {};
+const etcUS = () => /^(in|ft)$/i.test(hmU().l);
+// Lengths are kept in inches (as the AISC forms show them) and shown in mm in a metric model.
+const etcLen = () => etcUS() ? "in" : "mm", etcToShow = v => etcUS() ? v : +(Number(v) * 25.4).toPrecision(8), etcFromShow = v => etcUS() ? Number(v) : +(Number(v) / 25.4).toPrecision(10);
+const etcYes = ["Yes", "No"], etcCols = ["1 column", "2 columns"];
+const etcBoltTypes = ["A325-N", "A325-X", "A490-N", "A490-X"], etcBoltSizes = ["1/2", "5/8", "3/4", "7/8", "1", "1 1/8", "1 1/4", "1 3/8", "1 1/2"];
+const etcHoles = ["STD", "OVS", "SSL", "LSL"], etcWelds = ["E60XX", "E70XX", "E80XX", "E90XX", "E100XX", "E110XX"];
+const etcDesc = {
+  "Consider Eccentricity": "Consider eccentricity in the design when computing the strength of the bolt group.",
+  "Number of Bolt Column, N": "Number of vertical bolt lines", "Bolt Column Gap, g": "Gap between vertical bolt lines", "Plate Thickness, T": "Thickness of the plate.",
+};
+// One row: [label as the form shows it (" (in)" for a length), default, choices, greyed]. "mat:S" / "mat:C": the model's steel / concrete materials.
+const etcR = (label, def, list, grey) => ({label, def: String(def), list: list || null, grey: !!grey});
+const etcBBRows = () => [etcR("Consider Eccentricity", "Yes", etcYes), etcR("Length, Leh (in)", 1.5), etcR("Length, Lev (in)", 1.25), etcR("Bolt Spacing, S (in)", 3), etcR("Pref. Number of Bolts, n", 4), etcR("Length, a (in)", 2.5), etcR("Plate Offset, b (in)", 0),
+  etcR("Bolt Types", "A325-N", etcBoltTypes), etcR("Bolt Size", "7/8", etcBoltSizes), etcR("Hole Types", "STD", etcHoles), etcR("Weld Material", "E70XX", etcWelds), etcR("Weld Thickness, [1/16]D (in)", 4), etcR("Plate Material", "A992Fy50", "mat:S"), etcR("Plate Thickness, T (in)", 0.375),
+  etcR("Offset, Gt (in)", 1, null, true), etcR("Coping Depth, dct (in)", 2, null, true), etcR("Coping Depth, dcb (in)", 2, null, true), etcR("Offset, G (in)", 0.5, null, true)];
+const etcBCTail = () => [etcR("Bolt Column Gap, g (in)", 3), etcR("Length, Leh (in)", 1.5), etcR("Length, Lev (in)", 1.25), etcR("Bolt Spacing, S (in)", 3), etcR("Pref. Number of Bolts, n", 4), etcR("Length, a (in)", 2),
+  etcR("Bolt Types", "A325-N", etcBoltTypes), etcR("Bolt Size", "7/8", etcBoltSizes), etcR("Hole Types", "STD", etcHoles), etcR("Weld Material", "E70XX", etcWelds), etcR("Weld Thickness, [1/16]D (in)", 4), etcR("Plate Material", "A992Fy50", "mat:S"), etcR("Plate Thickness, T (in)", 0.5), etcR("Offset, G (in)", 0.5, null, true)];
+const etcN = () => etcR("Number of Bolt Column, N", "1 column", etcCols), etcEcc = () => etcR("Consider Eccentricity", "Yes", etcYes);
+const etcTabs = {
+  "Beam-Beam": {types: {"Partial Depth": ["Vertical Plate (Partial Depth)", etcBBRows()], "Partial Depth with Top": ["Vertical Plate (Partial Depth with Top)", etcBBRows()], "Full Depth": ["Vertical Plate (Full)", etcBBRows()], "Horizontal": ["Horizontal Plate", etcBBRows()]}, sched: true},
+  "Beam-Column": {types: {"Beam Column Shear Major Axis": ["Beam Column Shear Major Axis", [etcEcc(), etcN(), ...etcBCTail()]], "Beam Column Shear Minor Axis": ["Beam Column Shear Minor Axis", [etcN(), ...etcBCTail()]],
+    "Beam Column Moment Major Axis": ["Beam Column Moment Major Axis", etcBCTail()], "Beam Column Moment Minor Axis": ["Beam Column Moment Minor Axis", [etcN(), ...etcBCTail()]]}},
+  "Column-Footing": {types: {"": ["Column Footing Preferences", [etcR("Plate Thickness, T (in)", 1), etcR("Min Width, Nmin (in)", 10), etcR("Min Height, Bmin (in)", 10), etcR("Anchor Rod Size", "1", etcBoltSizes), etcR("Embedment Length, hef (in)", 20), etcR("Anchor Rod Material [ASTM]", "F1554 Gr36", ["F1554 Gr36", "F1554 Gr55", "F1554 Gr105"]), etcR("Anchor Rod Heads and Nuts", "Square", ["Square", "Heavy Hex"]), etcR("Pedestal Material", "4000Psi", "mat:C"),
+    etcR("Width Increment, dN (in)", 1), etcR("Height Increment, dB (in)", 1), etcR("Max Width, Nmax (in)", 100), etcR("Max Height, Bmax (in)", 100), etcR("Offset, Leh (in)", 2.5), etcR("Offset, Lev (in)", 2.5), etcR("Offset, a (in)", 2), etcR("Offset, b (in)", 2), etcR("Bolts Clearance, c (in)", 1.5), etcR("Bolt Size", "7/8", etcBoltSizes), etcR("Weld Material", "E70XX", etcWelds), etcR("Weld Thickness, [1/16]D (in)", 6), etcR("Plate Material", "A992Fy50", "mat:S")]]}},
+};
+const etcItem = label => label.replace(/ \(in\)$/, "");
+const etcIsLen = label => / \(in\)$/.test(label) && !/\[1\/16\]/.test(label);
+const etcShowLabel = label => etcIsLen(label) && !etcUS() ? label.replace(/ \(in\)$/, " (mm)") : label;
+const etcGroup = (tab, type) => type ? tab + "|" + type : tab;
+const etcSchedDef = {"Default Mode": "Auto", Horizontal: "10", Partial: "30"};
+// The preview: a sketch of each type, labelled as ETABS's preview labels it.
+function etcPreview(tab, type) {
+  const ink = "#222", plate = "#d9d9e6", t = (x, y, s, a) => `<text x="${x}" y="${y}" font-family="Times New Roman,serif" font-size="14" ${a ? `text-anchor="${a}"` : ""}>${s}</text>`;
+  const bolts = (x, y0, n, dy, cols) => Array.from({length: n * (cols || 1)}, (_, i) => `<circle cx="${x + Math.floor(i / n) * 22}" cy="${y0 + (i % n) * dy}" r="6" fill="#fff" stroke="${ink}"/>`).join("");
+  const beam = y => `<path d="M150 ${y}h220M150 ${y + 8}h220M150 ${y + 112}h220M150 ${y + 120}h220M370 ${y}v120" stroke="${ink}" fill="none"/>`;
+  let body = "";
+  if (tab === "Column-Footing") body = `<rect x="40" y="40" width="300" height="250" fill="#ccc" stroke="${ink}"/><rect x="80" y="80" width="220" height="170" fill="#fff" stroke="${ink}"/>${bolts(100, 100, 2, 130, 1)}${bolts(280, 100, 2, 130, 1)}
+    <path d="M150 150h80M150 180h80M186 150v30M150 140v50M230 140v50" stroke="${ink}" fill="#ddd"/>${t(190, 30, "N", "middle")}${t(55, 30, "b")}${t(320, 30, "b")}${t(20, 170, "B")}${t(20, 62, "a")}${t(20, 275, "a")}${t(100, 300, "L<tspan font-size='10'>eh</tspan>")}${t(190, 300, "S<tspan font-size='10'>1</tspan>", "middle")}${t(350, 170, "S<tspan font-size='10'>2</tspan>")}${t(350, 95, "L<tspan font-size='10'>ev</tspan>")}`;
+  else if (tab === "Beam-Beam") {
+    const hz = type === "Horizontal";
+    body = `<path d="M40 60h110M40 68h110M40 300h110M40 308h110M90 68v232" stroke="${ink}" fill="none"/>${beam(hz ? 60 : 60)}
+      ${hz ? `<rect x="100" y="76" width="110" height="34" fill="${plate}" stroke="${ink}"/>${bolts(150, 93, 1, 0, 2)}${t(130, 50, "a")}${t(160, 138, "s")}${t(190, 138, "L<tspan font-size='10'>eh</tspan>")}${t(220, 92, "L<tspan font-size='10'>ev</tspan>")}`
+        : `<rect x="96" y="${type === "Partial Depth" ? 92 : 76}" width="46" height="${type === "Partial Depth" ? 120 : 160}" fill="${plate}" stroke="${ink}"/>${bolts(124, type === "Partial Depth" ? 108 : 100, 4, 26)}${t(110, 50, "a")}${t(155, 120, "L<tspan font-size='10'>ev</tspan>")}${t(160, 160, "s")}${t(130, 240, "L<tspan font-size='10'>eh</tspan>")}${type === "Partial Depth" ? t(60, 250, "d/2") + t(70, 170, "b") : t(380, 192, "d<tspan font-size='10'>cb</tspan>")}`}
+      ${t(150, 50, "G<tspan font-size='10'>t</tspan>")}${t(380, 82, "d<tspan font-size='10'>ct</tspan>")}${t(390, 130, "d")}${t(96, 330, "G")}`;
+  } else {
+    const minor = /Minor/.test(type), moment = /Moment/.test(type), two = /Shear Minor/.test(type);
+    body = `<path d="M40 20v300M58 20v300M${minor ? "120 20v300" : "130 20v300M148 20v300"}" stroke="${ink}" fill="none" ${minor ? 'stroke-dasharray="6 4"' : ""}/>${beam(80)}
+      <rect x="${minor ? 58 : 150}" y="${moment ? 96 : 104}" width="${minor ? (two ? 150 : 110) : 46}" height="${moment ? 104 : 96}" fill="${plate}" stroke="${ink}"/>${bolts(minor ? (two ? 172 : 170) : 172, 116, 4, 24, two ? 2 : 1)}
+      ${t(minor ? 130 : 160, 50, "a")}${two ? t(170, 50, "g") : ""}${t(200, 50, "L<tspan font-size='10'>eh</tspan>")}${t(225, 112, "L<tspan font-size='10'>ev</tspan>")}${t(230, 160, "s")}${t(225, 206, "L<tspan font-size='10'>ev</tspan>")}${moment ? "" : t(160, 230, "G")}`;
+  }
+  return `<svg viewBox="0 0 420 340" style="width:100%;height:100%;background:#fff">${body}<path d="M${tab === "Column-Footing" ? "0 0" : "190 260l30 20h40"}" stroke="${ink}" fill="none"/></svg>`;
+}
+// Design > Steel Connection Design: ETABS 23.2's submenu (picture 07). The design items stay greyed until there are
+// analysis results, as ETABS greys them; Interactive Design, Display Design Info and Verify need connection results.
+function etcConnectionMenu() {
+  const res = !!engine.res, des = design.some(f => f.key === "connection");
+  return [["View/Revise Preferences...", "m:etc:prefs"], ["Select Design Combinations...", "m:etc:combos"], 0,
+    ["Start Design/Check", "m:etc:start", "Shift+F9", !res], ["Interactive Design", "m:etc:interactive", "", !des], 0,
+    ["Display Design Info...", "m:etc:info", "", !des], 0, ["Verify All Connections Passed...", "m:etc:verify", "", !des], 0,
+    ["Reset All Overwrites...", "m:etc:resetOw", "", !res], ["Delete Design Results...", "m:etc:delete", "", !des]];
+}
+async function etcAct(a) {
+  if (a === "prefs") return etcPrefs();
+  if (a === "llrf") return etcLiveLoadReduction();
+  if (a === "dispTargets") return etcDisplacementTargets();
+  if (a === "periodTargets") return etcPeriodTargets();
+  if (a === "combos") return typeof etdDesignCombos === "function" ? etdDesignCombos("connection") : etcCombos();
+  if (a === "start") return act("eng:design");
+  if (a === "interactive" || a === "info") return openDesign("connection");
+  if (a === "verify") {
+    const f = design.find(x => x.key === "connection"), items = f ? [...f.items.values()] : [], bad = items.filter(x => (x.ratio || 0) > 1 || /fail|error|o\/s|ng/i.test(String(x.status || ""))).length;
+    return dialog("ETABS", `<p style="max-width:380px">${items.length} connections were designed.<br>${bad ? `${bad} connection${bad === 1 ? "" : "s"} did not pass.` : "All connections passed."}</p>`, [["OK"]], {width: 420});
+  }
+  if (a === "resetOw") return dialog("ETABS", `<p style="max-width:380px">Reset all steel connection design overwrites to the program's defaults?</p>`, [["OK", async () => { const j = await hmRun("set_connection_preferences", {items: etcAllItems().map(([g, i]) => ({group: g, item: i, value: ""}))}); if (j.ok) hmSay("The steel connection design overwrites are back to the program's defaults."); }], ["Cancel"]], {width: 420});
+  if (a === "delete") return dialog("ETABS", `<p style="max-width:380px">Delete all steel connection design results?</p>`, [["OK", () => { design = design.filter(f => f.key !== "connection"); hmSay("The steel connection design results are deleted."); }], ["Cancel"]], {width: 420});
+}
+const etcAllItems = () => Object.entries(etcTabs).flatMap(([tab, x]) => Object.entries(x.types).flatMap(([type, [, rows]]) => rows.map(r => [etcGroup(tab, type), etcItem(r.label)])));
+async function etcRead() { const j = await hmPost({tool: "design_settings", args: {}}).catch(() => null); return j && j.ok ? j.result : {connection: [], live_load_reduction: [], displacement_targets: [], period_targets: []}; }
+// Design > Steel Connection Design > View/Revise Preferences: "Steel Connection Design Preferences for <code>" (pictures 70-84).
+async function etcPrefs() {
+  hm.defs = null;
+  const defs = await hmDefs(), st = await etcRead(), was = {};
+  for (const r of st.connection || []) was[(r.Group || "") + "|" + r.Item] = r.Value;
+  const mats = kind => (defs.materials || []).filter(m => kind === "C" ? /concrete/i.test(m.type || "") : /steel/i.test(m.type || "") && !/rebar|tendon/i.test(m.type || "")).map(m => m.name);
+  const cur = {...was}, start = {...was}, picked = new Set();
+  let tab = "Beam-Beam", type = "Partial Depth", code = was["|Design Code"] || "AISC 360-22", at = 0;
+  const val = (g, r) => { const k = g + "|" + etcItem(r.label); return k in cur ? cur[k] : r.def; };
+  const d = dialog("Steel Connection Design Preferences for " + code, `<style>.etcG td{height:26px;border:1px solid #c8c8c8;padding:0 4px}.etcG td:first-child{width:60px;background:#f3f3f3}.etcG td:last-child{width:62px;text-align:center}.etcG .b{color:#1d2fd6}.etcG .k{color:#000}.etcG .r{color:#e00000}.etcG .gy{color:#9a9a9a}.etcG tr.on td:nth-child(2){background:#0078d7;color:#fff}.etcG input,.etcG select{width:100%;border:0;background:transparent;text-align:center;color:inherit;font:inherit}</style>
+    <div style="display:grid;grid-template-columns:390px 400px;gap:10px">
+      <div><fieldset style="margin:0"><div class="itabs" id="etcT">${Object.keys(etcTabs).map(t => `<button data-t="${esc(t)}" class="${t === tab ? "on" : ""}">${esc(t)}</button>`).join("")}</div>
+        <div style="display:flex;gap:8px;margin:6px 0" id="etcTyRow"><select id="etcTy" style="flex:1"></select><button id="etcSch">Plate Depth Sched...</button></div>
+        <div style="height:300px;overflow-y:scroll;border:1px solid #444"><table class="etcG" style="width:100%;border-collapse:collapse"><thead><tr><th></th><th>Item</th><th>Value</th></tr></thead><tbody id="etcB"></tbody></table></div></fieldset>
+        <fieldset><legend>Explanation of Color Coding for Values</legend><div style="display:grid;grid-template-columns:80px 1fr;gap:4px"><span style="color:#1d2fd6">Blue:</span><span>All selected objects are program determined</span><span>Black:</span><span>Some selected objects are user defined</span><span style="color:#e00000">Red:</span><span>Value that has changed during the current session</span></div></fieldset></div>
+      <div><fieldset style="margin:0"><legend>Description</legend><textarea id="etcD" readonly rows="5" style="width:100%;box-sizing:border-box;resize:none"></textarea></fieldset>
+        <fieldset><legend id="etcPL"></legend><div id="etcP" style="height:330px;border:1px solid #888"></div></fieldset></div></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr auto auto;gap:8px;margin-top:6px">
+      <fieldset style="margin:0"><legend>Set to Default Values</legend><div style="display:flex;gap:8px"><button id="etcDA">All Items</button><button id="etcDS">Selected Items</button></div></fieldset>
+      <fieldset style="margin:0"><legend>Reset to Previous Values</legend><div style="display:flex;gap:8px"><button id="etcRA">All Items</button><button id="etcRS">Selected Items</button></div></fieldset>
+      <fieldset style="margin:0"><legend>Connection Type</legend><button id="etcCT">Set Default...</button></fieldset>
+      <fieldset style="margin:0"><legend>Design Code</legend><select id="etcC">${opts(etcConnCodes, code)}</select></fieldset></div>`,
+    [["OK", async () => {
+      const items = Object.keys(cur).concat(Object.keys(start)).filter((k, i, a) => a.indexOf(k) === i && !k.startsWith("|") && !k.startsWith("Schedule|") && (cur[k] ?? "") !== (start[k] ?? ""))
+        .map(k => { const i = k.lastIndexOf("|"); return {group: k.slice(0, i), item: k.slice(i + 1), value: cur[k] ?? ""}; });
+      const sch = {}; let schSet = false;
+      for (const [k, f] of [["Default Mode", "mode"], ["Horizontal", "horizontal"], ["Partial", "partial"]]) if ((cur["Schedule|" + k] ?? "") !== (start["Schedule|" + k] ?? "")) { sch[f] = f === "mode" ? cur["Schedule|" + k] : Number(cur["Schedule|" + k]); schSet = true; }
+      const args = {}; if (code !== (start["|Design Code"] || "AISC 360-22")) args.code = code; if (items.length) args.items = items; if (schSet) args.schedule = sch;
+      if (!Object.keys(args).length) return;
+      const j = await hmRun("set_connection_preferences", args); if (j.ok) hmSay("Steel connection design preferences set.");
+    }], ["Cancel"]], {width: 830});
+  const rowsNow = () => etcTabs[tab].types[type][1], g = () => etcGroup(tab, type);
+  const desc = r => etcDesc[etcItem(r.label)] || etcItem(r.label).replace(/,.*$/, "") + ".";
+  const paint = () => {
+    const rows = rowsNow(), grp = g();
+    q(d, "#etcTyRow").style.display = tab === "Column-Footing" ? "none" : "flex";
+    q(d, "#etcSch").style.display = etcTabs[tab].sched ? "" : "none";
+    q(d, "#etcTy").innerHTML = opts(Object.keys(etcTabs[tab].types), type);
+    q(d, "#etcPL").textContent = "Preview - " + etcTabs[tab].types[type][0];
+    q(d, "#etcP").innerHTML = etcPreview(tab, type);
+    q(d, "#etcB").innerHTML = rows.map((r, i) => {
+      const k = grp + "|" + etcItem(r.label), v = val(grp, r), shown = etcIsLen(r.label) ? String(etcToShow(v)) : v;
+      const cls = r.grey ? "gy" : (cur[k] ?? "") !== (start[k] ?? "") ? "r" : k in cur && cur[k] !== r.def ? "k" : "b";
+      const list = r.list === "mat:S" ? mats("S") : r.list === "mat:C" ? mats("C") : r.list;
+      const cell = r.grey ? esc(shown) : list && (list === etcYes || list === etcCols) ? `<select data-i="${i}">${opts(list, v)}</select>` : `<input data-i="${i}" value="${esc(shown)}" ${list ? `list="etcL${i}"` : ""}>${list ? `<datalist id="etcL${i}">${list.map(x => `<option value="${esc(x)}">`).join("")}</datalist>` : ""}`;
+      return `<tr data-r="${i}" class="${picked.has(k) || i === at ? "on" : ""}"><td>${i === at ? "&#9654; " : ""}${String(i + 1).padStart(2, "0")}</td><td class="${cls}">${esc(etcShowLabel(r.label))}</td><td class="${cls}">${cell}</td></tr>`;
+    }).join("");
+    q(d, "#etcD").value = rows[at] ? desc(rows[at]) : "";
+    d.querySelectorAll("#etcB tr").forEach(tr => tr.onclick = e => {
+      const i = +tr.dataset.r, k = grp + "|" + etcItem(rows[i].label);
+      if (e.ctrlKey) { picked.has(k) ? picked.delete(k) : picked.add(k); } else if (e.target.tagName !== "INPUT" && e.target.tagName !== "SELECT") { picked.clear(); picked.add(k); }
+      if (at !== i) { at = i; paint(); } else { d.querySelectorAll("#etcB tr").forEach(x => x.classList.toggle("on", picked.has(grp + "|" + etcItem(rows[+x.dataset.r].label)) || +x.dataset.r === at)); q(d, "#etcD").value = desc(rows[i]); }
+    });
+    d.querySelectorAll("#etcB [data-i]").forEach(x => x.onchange = () => {
+      const r = rows[+x.dataset.i], k = grp + "|" + etcItem(r.label);
+      let v = x.value.trim();
+      if (etcIsLen(r.label) || /Number of Bolts|Weld Thickness/.test(r.label)) { const n = Number(v); if (!v || !isFinite(n) || n < 0) { formError(d, etcItem(r.label) + " is a number, not negative."); x.value = etcIsLen(r.label) ? etcToShow(val(grp, r)) : val(grp, r); return; } v = String(etcIsLen(r.label) ? etcFromShow(n) : n); }
+      formError(d, ""); cur[k] = v; paint();
+    });
+  };
+  const setTo = (keys, from) => { for (const k of keys) { if (from === "def") { const r = rowsNow().find(x => g() + "|" + etcItem(x.label) === k); if (r && !r.grey) cur[k] = r.def; } else if (k in start) cur[k] = start[k]; else delete cur[k]; } paint(); };
+  const allKeys = () => rowsNow().filter(r => !r.grey).map(r => g() + "|" + etcItem(r.label)), selKeys = () => { const s = [...picked].filter(k => k.startsWith(g() + "|")); if (!s.length && rowsNow()[at]) s.push(g() + "|" + etcItem(rowsNow()[at].label)); return s; };
+  q(d, "#etcDA").onclick = () => setTo(allKeys(), "def"); q(d, "#etcDS").onclick = () => setTo(selKeys(), "def");
+  q(d, "#etcRA").onclick = () => setTo(allKeys(), "prev"); q(d, "#etcRS").onclick = () => setTo(selKeys(), "prev");
+  d.querySelectorAll("#etcT [data-t]").forEach(b => b.onclick = () => { tab = b.dataset.t; type = Object.keys(etcTabs[tab].types)[0]; at = 0; picked.clear(); d.querySelectorAll("#etcT [data-t]").forEach(x => x.classList.toggle("on", x === b)); paint(); });
+  q(d, "#etcTy").onchange = e => { type = e.target.value; at = 0; picked.clear(); paint(); };
+  q(d, "#etcC").onchange = e => { code = e.target.value; q(d, ".dt b").textContent = "Steel Connection Design Preferences for " + code; };
+  q(d, "#etcSch").onclick = () => etcSchedule(cur);
+  q(d, "#etcCT").onclick = () => etcDefaultType();
+  paint();
+  return d;
+}
+// Select Design Combinations: the combinations the connection design uses (no picture yet: the two lists of ETABS's other
+// designs' Design Load Combinations Selection; the Design thread's etdDesignCombos takes over when it has the picture).
+async function etcCombos() {
+  hm.defs = null;
+  const defs = await hmDefs(), st = await etcRead(), all = (defs.combinations || []).map(c => c.name);
+  let chosen = (st.connection || []).filter(r => r.Group === "Combinations" && r.Value === "Yes").map(r => r.Item).filter(n => all.includes(n));
+  const was = [...chosen];
+  const d = dialog("Design Load Combinations Selection", `<fieldset><legend>Strength</legend><div style="display:grid;grid-template-columns:1fr 90px 1fr;gap:8px;align-items:center">
+      <div><div>List of Load Combinations</div><select id="ecL" multiple size="10" style="width:100%"></select></div>
+      <div style="display:flex;flex-direction:column;gap:6px"><button id="ecAdd">Add &gt;&gt;</button><button id="ecRem">&lt;&lt; Remove</button></div>
+      <div><div>Design Load Combinations</div><select id="ecR" multiple size="10" style="width:100%"></select></div></div></fieldset>`,
+    [["OK", async () => {
+      const items = [...new Set([...was, ...chosen])].map(n => ({group: "Combinations", item: n, value: chosen.includes(n) ? "Yes" : ""}));
+      if (!items.length) return;
+      const j = await hmRun("set_connection_preferences", {items}); if (j.ok) hmSay(`${chosen.length} design combination${chosen.length === 1 ? "" : "s"} for steel connection design.`);
+    }], ["Cancel"]], {width: 520});
+  const paint = () => { q(d, "#ecL").innerHTML = opts(all.filter(n => !chosen.includes(n)), ""); q(d, "#ecR").innerHTML = opts(chosen, ""); };
+  q(d, "#ecAdd").onclick = () => { chosen = chosen.concat([...q(d, "#ecL").selectedOptions].map(o => o.value)); paint(); };
+  q(d, "#ecRem").onclick = () => { const out = [...q(d, "#ecR").selectedOptions].map(o => o.value); chosen = chosen.filter(n => !out.includes(n)); paint(); };
+  paint();
+  return d;
+}
+const etcConnCodes = ["AISC 360-10", "AISC 360-16", "AISC 360-22"];
+// Plate Depth Schedule (pictures 86-87): Default Mode and the beam depths of the auto mode; kept with the form's OK.
+function etcSchedule(cur) {
+  const v = k => cur["Schedule|" + k] ?? etcSchedDef[k], L = etcLen();
+  const d = dialog("Plate Depth Schedule", `<fieldset><legend>Default Mode</legend><div style="display:flex;gap:16px;align-items:center"><span style="flex:1">Auto mode uses the schedule below.</span><select id="psM" style="width:110px">${opts(["Auto", "Horizontal", "Partial Depth with Top", "Full Depth", "Partial Depth"], v("Default Mode"))}</select></div></fieldset>
+    <fieldset><legend>Plate Schedule for Auto Mode</legend><div style="display:grid;grid-template-columns:auto 80px auto;gap:8px 8px;align-items:center">
+      <span>Use horizontal plate for beam &lt;=</span><input id="psH" value="${esc(String(etcToShow(v("Horizontal"))))}"><span>${L}</span>
+      <span>Use partial plate for beam &lt;=</span><input id="psP" value="${esc(String(etcToShow(v("Partial"))))}"><span>${L}&nbsp;&nbsp;&nbsp; and &gt; above.</span>
+      <span style="grid-column:1/4">Use full plate for beam depth greater than the above value.</span></div></fieldset>`,
+    [["OK", x => {
+      const h = Number(q(x, "#psH").value), p = Number(q(x, "#psP").value);
+      if (!isFinite(h) || !isFinite(p) || h < 0 || p < 0) { formError(x, "The depths are numbers, not negative."); return false; }
+      if (p < h) { formError(x, "The partial plate depth is the horizontal plate's or more."); return false; }
+      cur["Schedule|Default Mode"] = q(x, "#psM").value; cur["Schedule|Horizontal"] = String(etcFromShow(h)); cur["Schedule|Partial"] = String(etcFromShow(p));
+    }], ["Cancel"]], {width: 360});
+  return d;
+}
+// Connection Type > Set Default... (picture 85): ETABS shows the three connection types at Auto, greyed.
+function etcDefaultType() {
+  return dialog("Default Connection Type", ["Beam-beam Connection", "Beam-column Connection", "Column-footing Connection"].map(t => `<fieldset><legend>${t}</legend><select disabled style="width:110px;display:block;margin:4px auto"><option>Auto</option></select></fieldset>`).join(""), [["OK"], ["Cancel"]], {width: 200});
+}
+// Design > Live Load Reduction Factors (pictures 90-96). Rates and areas are kept in m; shown per ft² / in² in a US model.
+const etcAreaU = () => etcUS() ? {big: "ft", small: "in", b: 0.3048, s: 0.0254} : {big: "m", small: "mm", b: 1, s: 0.001};
+async function etcLiveLoadReduction() {
+  const st = await etcRead(), rows = st.live_load_reduction || [], f = rows.find(r => r.Row === "Form") || {};
+  const line = st.rllf_line || [], lineCode = (() => { const i = line.indexOf("METHOD"); return i >= 0 ? String(line[i + 1] || "").replace(/^"|"$/g, "") : ""; })();
+  const U = etcAreaU(), b2 = U.b * U.b, s2 = U.s * U.s;
+  const s = {method: f.Method || "Code", code: f.Code || (lineCode && lineCode !== "NONE" ? lineCode : "ASCE7-10"), rate: +(f.Rate || 0.08 / 0.09290304), minA: +(f.MinArea || 21600 * 0.00064516),
+    defMin: f.DefaultMin ? f.DefaultMin === "Yes" : true, single: +(f.Single || 0.5), multiple: +(f.Multiple || 0.4), all: f.Columns === "All Forces/Components",
+    curves: [], stories: rows.filter(r => r.Row === "Stories").map(r => [+r.Number, +r.Reduction])};
+  for (const r of rows.filter(r => r.Row === "Curve")) { const n = +r.Curve - 1; (s.curves[n] = s.curves[n] || {dl_ll: +r.DLLL, points: []}).points.push([+r.Area, +r.Factor]); }
+  s.curves = s.curves.filter(Boolean);
+  const m = [["None", "No Live Load Reduction"], ["Code", "Tributary Area (Based on Design Code)"], ["User", "User Parameters (per Section 1607.5, UBC 1997)"], ["Curves", "User Defined Curves (By Tributary Area)"], ["Stories", "User Defined (By Stories Supported)"]];
+  const rd = (k, l) => `<label style="display:block;margin:10px 0"><input type="radio" name="llM" value="${k}" ${s.method === k ? "checked" : ""}> ${esc(l)}</label>`;
+  const d = dialog("Live Load Reduction Factor", `<div style="display:grid;grid-template-columns:430px 240px;gap:10px">
+    <fieldset style="margin:0"><legend>Live Load Reduction Method</legend>${rd(...m[0])}${rd(...m[1])}<select id="llC" style="margin-left:40px;width:160px">${opts(etcLlrfCodes, s.code)}</select>${rd(...m[2])}
+      <div style="display:grid;grid-template-columns:200px 96px auto;gap:6px 6px;align-items:center;margin-left:40px"><span>Rate of Live Load Reduction, r</span><input id="llR"><span>1/${U.big}²</span><span>Minimum Tributary Area, Amin</span><input id="llA"><span>${U.small}²</span></div>
+      <div style="display:grid;grid-template-columns:1fr 96px;gap:4px;align-items:center">${rd(...m[3])}<button id="llDC">Define...</button>${rd(...m[4])}<button id="llDS">Define...</button></div></fieldset>
+    <div><fieldset style="margin:0"><legend>Minimum Factor</legend><div style="display:grid;grid-template-columns:1fr 96px;gap:6px;align-items:center"><span>Single Story</span><input id="llS"><span>Multiple Stories</span><input id="llMu"></div><label style="display:block;margin-top:6px"><input type="checkbox" id="llDef"> Use default minimum factors</label></fieldset>
+      <fieldset><legend>Application</legend><label style="color:#888"><input type="checkbox" checked disabled> Design Forces</label></fieldset>
+      <fieldset><legend>Application to Columns</legend><label style="display:block"><input type="radio" name="llCol" value="ax" ${s.all ? "" : "checked"}> Apply to Axial Load Only</label><label style="display:block"><input type="radio" name="llCol" value="all" ${s.all ? "checked" : ""}> Apply to All Forces/Components</label></fieldset></div></div>`,
+    [["OK", async x => {
+      const meth = q(x, "input[name=llM]:checked").value;
+      const num = id => Number(q(x, id).value);
+      if (!q(x, "#llDef").checked && ["Code", "User"].includes(meth)) { s.single = num("#llS"); s.multiple = num("#llMu"); }
+      if ([s.single, s.multiple].some(v => !isFinite(v) || v < 0 || v > 1)) { formError(x, "The minimum factors are between 0 and 1."); return false; }
+      if (meth === "User") { s.rate = num("#llR") * b2; s.minA = num("#llA") * s2; if (![s.rate, s.minA].every(v => isFinite(v) && v >= 0)) { formError(x, "The rate and the minimum tributary area are numbers, not negative."); return false; } }
+      if (meth === "Curves" && !s.curves.some(c => c.points.length)) { formError(x, "Define a curve first (Define...)."); return false; }
+      if (meth === "Stories" && !s.stories.length) { formError(x, "Define the stories supported first (Define...)."); return false; }
+      const j = await hmRun("set_live_load_reduction", {method: meth, code: q(x, "#llC").value, rate: s.rate, min_area: s.minA, default_min: q(x, "#llDef").checked, single: s.single, multiple: s.multiple, all_forces: q(x, "input[name=llCol]:checked").value === "all",
+        curves: s.curves.map(c => ({dl_ll: c.dl_ll, points: c.points.map(p => [p[0] * b2, p[1]])})), stories: s.stories});
+      if (j.ok) hmSay("Live load reduction set.");
+    }], ["Cancel"]], {width: 720});
+  const sync = () => {
+    const meth = q(d, "input[name=llM]:checked").value, code = meth === "Code", user = meth === "User", mins = code || user;
+    const C = q(d, "#llC"); C.disabled = !code; if (!code) C.selectedIndex = -1; else if (C.selectedIndex < 0) C.value = s.code;
+    for (const [id, v] of [["#llR", +(s.rate / b2).toPrecision(6)], ["#llA", +(s.minA / s2).toPrecision(8)]]) { const e = q(d, id); e.disabled = !user; e.value = user ? v : ""; }
+    q(d, "#llDC").disabled = meth !== "Curves"; q(d, "#llDS").disabled = meth !== "Stories";
+    const def = q(d, "#llDef"); def.disabled = !mins; if (!mins) def.checked = false; else if (code && s.defMin && !def.dataset.touched) def.checked = true;
+    for (const [id, v] of [["#llS", s.single], ["#llMu", s.multiple]]) { const e = q(d, id); e.disabled = !mins || def.checked; e.value = mins ? v : ""; }
+    q(d, "#llS").closest("fieldset").style.color = mins ? "" : "#888";
+  };
+  d.querySelectorAll("input[name=llM]").forEach(r => r.onchange = () => { if (r.value === "User" && s.defMin) { s.single = 0.6; s.multiple = 0.4; } sync(); });
+  q(d, "#llDef").onchange = e => { e.target.dataset.touched = "1"; s.defMin = e.target.checked; if (e.target.checked) { s.single = 0.5; s.multiple = 0.4; } sync(); };
+  q(d, "#llS").onchange = e => s.single = Number(e.target.value); q(d, "#llMu").onchange = e => s.multiple = Number(e.target.value);
+  q(d, "#llR").onchange = e => s.rate = Number(e.target.value) * b2; q(d, "#llA").onchange = e => s.minA = Number(e.target.value) * s2;
+  q(d, "#llDC").onclick = () => etcLlrfCurves(s, U);
+  q(d, "#llDS").onclick = () => etcLlrfStories(s);
+  sync();
+  return d;
+}
+const etcLlrfCodes = ["ASCE7-95", "ASCE7-05", "ASCE7-10", "AS/NZS 1170.1-2002", "Chinese GB 50009-2012", "Eurocode 1991:2002", "Hong Kong COP 2011", "Indian IS 875-1987", "NBCC95", "NBCC2005", "NBCC2010", "UBC97", "KBC 2009"];
+// A two-column list with an entry row on top and Add / Modify / Delete, as ETABS's curve and stories forms have it.
+function etcPairList(d, host, rows, after) {
+  let at = rows.length ? 0 : -1;
+  const el = q(d, host), paint = () => {
+    el.querySelector(".pl").innerHTML = rows.map((r, i) => `<div data-i="${i}" style="display:grid;grid-template-columns:1fr 1fr;cursor:default;${i === at ? "background:#0078d7;color:#fff" : ""}"><span style="padding:0 4px">${esc(String(r[0]))}</span><span style="padding:0 4px;border-left:1px solid #888">${esc(String(r[1]))}</span></div>`).join("");
+    el.querySelectorAll(".pl [data-i]").forEach(x => x.onclick = () => { at = +x.dataset.i; el.querySelector(".a").value = rows[at][0]; el.querySelector(".b").value = rows[at][1]; paint(); });
+    if (after) after();
+  };
+  const entry = () => { const a = Number(el.querySelector(".a").value), b = Number(el.querySelector(".b").value); if (!isFinite(a) || !isFinite(b)) { formError(d, "Type two numbers."); return null; } formError(d, ""); return [a, b]; };
+  q(d, host + " .add").onclick = () => { const e = entry(); if (!e) return; rows.push(e); rows.sort((x, y) => x[0] - y[0]); at = rows.indexOf(e); paint(); };
+  q(d, host + " .mod").onclick = () => { const e = entry(); if (!e || at < 0) return; rows[at] = e; rows.sort((x, y) => x[0] - y[0]); at = rows.indexOf(e); paint(); };
+  q(d, host + " .del").onclick = () => { if (at < 0) return; rows.splice(at, 1); at = Math.min(at, rows.length - 1); paint(); };
+  paint();
+  return {paint};
+}
+const etcPairHtml = (h1, h2, w) => `<div style="display:grid;grid-template-columns:${w || 210}px 80px;gap:10px"><div><div style="display:grid;grid-template-columns:1fr 1fr;text-align:center;margin-bottom:4px"><span>${h1}</span><span>${h2}</span></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr"><input class="a" value="1"><input class="b" value="1"></div><div class="pl" style="height:100px;overflow:auto;border:1px solid #888;background:#fff;background-image:linear-gradient(#888,#888);background-size:1px 100%;background-position:50% 0;background-repeat:no-repeat"></div></div>
+  <div style="display:flex;flex-direction:column;gap:6px;justify-content:center"><button class="add">Add</button><button class="mod">Modify</button><button class="del">Delete</button></div></div>`;
+// Live Load Reduction Factor Curves (picture 94): curves by number, each a list of tributary area and factor with its DL/LL ratio, plotted.
+function etcLlrfCurves(s, U) {
+  const work = s.curves.length ? s.curves.map(c => ({dl_ll: c.dl_ll, points: c.points.map(p => [+(p[0] / (U.b * U.b)).toPrecision(8), p[1]])})) : [{dl_ll: 1, points: []}];
+  let n = 0;
+  const d = dialog("Live Load Reduction Factor Curves", `<div style="display:grid;grid-template-columns:370px 430px;gap:12px">
+    <div><fieldset style="margin:0"><div style="display:grid;grid-template-columns:auto 100px;gap:10px;align-items:center;justify-content:center"><span>Live Load Reduction Factor Curve #</span><select id="lcN"></select><button id="lcA">Add Curve</button><button id="lcD">Delete Curve</button></div></fieldset>
+      <fieldset id="lcF"><legend>Curve Data</legend><div style="display:flex;gap:10px">${etcPairHtml(`Trib. Area, ${U.big}²`, "Red. Factor")}</div><div style="display:grid;grid-template-columns:1fr 100px;margin-top:6px"><span></span><span>DL/LL Ratio<input id="lcR" style="width:100%"></span></div></fieldset></div>
+    <fieldset style="margin:0"><legend>Plots for Live Load Reduction Factor Curves</legend><div id="lcP" style="height:260px"></div><div style="border:1px solid #888;height:20px;margin-top:6px"></div></fieldset></div>`,
+    [["OK", () => { s.curves = work.filter(c => c.points.length).map(c => ({dl_ll: c.dl_ll, points: c.points.map(p => [p[0] * U.b * U.b, p[1]])})); }], ["Cancel"]], {width: 840});
+  let list;
+  const plot = () => {
+    const pts = (work[n] || {points: []}).points, xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+    const x0 = xs.length ? Math.min(...xs) : -6e-6, x1 = xs.length ? Math.max(...xs) : 6e-6, y0 = ys.length ? Math.min(0, ...ys) : -6e-6, y1 = ys.length ? Math.max(...ys) : 6e-6;
+    const X = v => 70 + (v - x0) / ((x1 - x0) || 1) * 300, Y = v => 200 - (v - y0) / ((y1 - y0) || 1) * 180;
+    const tx = Array.from({length: 11}, (_, i) => x0 + (x1 - x0) * i / 10), ty = Array.from({length: 11}, (_, i) => y0 + (y1 - y0) * i / 10), f = v => Math.abs(v) < 1e-3 && v ? v.toExponential(1) : +v.toFixed(2);
+    q(d, "#lcP").innerHTML = `<svg viewBox="0 0 400 260" style="width:100%;height:100%;font:9px Arial">${tx.map(v => `<path d="M${X(v)} 20V200" stroke="#ccc"/><text x="${X(v)}" y="214" text-anchor="middle">${f(v)}</text>`).join("")}${ty.map(v => `<path d="M70 ${Y(v)}H370" stroke="#ccc"/><text x="64" y="${Y(v) + 3}" text-anchor="end">${f(v)}</text>`).join("")}
+      <rect x="70" y="20" width="300" height="180" fill="none" stroke="#000"/>${pts.length ? `<polyline points="${pts.map(p => X(p[0]) + "," + Y(p[1])).join(" ")}" fill="none" stroke="#1d2fd6" stroke-width="1.5"/>` : ""}
+      <text x="220" y="232" text-anchor="middle" font-size="11">Tributary Area, ${U.big}²</text><text transform="translate(14 110) rotate(-90)" text-anchor="middle" font-size="11">Live Load Red. Factor</text></svg>`;
+  };
+  const show = () => {
+    q(d, "#lcN").innerHTML = work.map((_, i) => `<option value="${i}" ${i === n ? "selected" : ""}>${i + 1}</option>`).join("");
+    q(d, "#lcR").value = work[n].dl_ll;
+    list = etcPairList(d, "#lcF", work[n].points, plot);
+  };
+  q(d, "#lcN").onchange = e => { n = +e.target.value; show(); };
+  q(d, "#lcR").onchange = e => { const v = Number(e.target.value); if (isFinite(v) && v >= 0) work[n].dl_ll = v; };
+  q(d, "#lcA").onclick = () => { work.push({dl_ll: 1, points: []}); n = work.length - 1; show(); };
+  q(d, "#lcD").onclick = () => { if (work.length > 1) { work.splice(n, 1); n = Math.max(0, n - 1); } else work[0] = {dl_ll: 1, points: []}; show(); };
+  show();
+  return d;
+}
+// Live Load Reduction By Stories Supported (picture 96).
+function etcLlrfStories(s) {
+  const rows = s.stories.map(r => [...r]);
+  const d = dialog("Live Load Reduction By Stories Supported", `<fieldset id="lsF"><legend>Reduced Live Load Factor Data</legend>${etcPairHtml("Number of", "Reduction", 150)}</fieldset>`,
+    [["OK", x => { if (rows.some(r => r[0] < 0 || r[1] < 0 || r[1] > 1)) { formError(x, "The reduction is between 0 and 1, the number of stories not negative."); return false; } s.stories = rows; }], ["Cancel"]], {width: 290});
+  etcPairList(d, "#lsF", rows);
+  return d;
+}
+// Design > Set Lateral Displacement Targets (pictures 97-98): ETABS's "Design Optimization - Lateral Displacement Targets".
+async function etcDisplacementTargets() {
+  hm.defs = null;
+  const defs = await hmDefs(), st = await etcRead(), L = hmU().l;
+  const cases = (defs.load_cases || []).filter(c => !/^Modal/i.test(c.type || "")).map(c => c.name);
+  const stories = (defs.stories || []).map(s => s.name).reverse();
+  const was = st.displacement_targets || [], rows = was.map(r => ({c: r.StaticCase, s: r.Story, j: r.Label, v: r.MaxDispl, u: r.UniqueName || ""}));
+  let ignore = was.length > 0 && was.every(r => r.Active === "No");
+  const d = dialog("Lateral Displacement Targets", `<div style="display:grid;grid-template-columns:1fr 340px;gap:12px">
+    <fieldset style="margin:0"><legend>Targets</legend><div style="display:flex;gap:16px"><div id="dtG" style="width:520px;height:230px;overflow:auto;border:1px solid #444;background:#fff"></div>
+      <div style="display:flex;flex-direction:column;gap:6px;width:66px"><button id="dtA" style="margin-top:50px">Add</button><button id="dtD">Delete</button><button id="dtS" style="margin-top:auto">Sort</button></div></div></fieldset>
+    <div><fieldset id="dtAuto" style="margin:0"><legend>Automatic Target Data for Selected Point Objects</legend><div style="display:grid;grid-template-columns:1fr 150px;gap:6px;align-items:center"><span>Drift Ratio</span><input id="dtR"><span>Base Story for Drift</span><select id="dtB">${opts(["Base", ...stories.slice().reverse()], "Base")}</select></div><button id="dtAp" style="display:block;margin:8px auto 0">Apply Auto Targets</button></fieldset>
+      <label style="display:block;margin:16px 0"><input type="checkbox" id="dtI" ${ignore ? "checked" : ""}> Ignore Specified Target Displacements</label><div id="dtF"></div></div></div>`,
+    [["OK", async x => {
+      for (const r of rows) if (!isFinite(Number(r.v)) || Number(r.v) <= 0) { formError(x, "Each target's maximum displacement is a number above 0."); return false; }
+      ignore = q(x, "#dtI").checked;
+      const by = new Map(); for (const r of rows) { if (!by.has(r.c)) by.set(r.c, []); by.get(r.c).push({Story: r.s, Label: r.j, UniqueName: r.u, MaxDispl: String(r.v), Active: ignore ? "No" : "Yes"}); }
+      for (const c of new Set(was.map(r => r.StaticCase))) if (!by.has(c)) by.set(c, []);
+      for (const [c, list] of by) { const j = await hmRun("define_table_rows", {table: "Design Optimization - Lateral Displacement Targets", name: c, rows: list}); if (!j.ok) return; }
+      hmSay(`${rows.length} lateral displacement target${rows.length === 1 ? "" : "s"} set.`);
+    }], ["Cancel"]], {width: 980});
+  dfInto(d, "#dtF", true);
+  const g = etdGrid(d, "#dtG", [{head: "Load Case", key: "c", list: () => cases}, {head: "Story", key: "s", list: () => stories}, {head: "Joint Label", key: "j", list: () => [...new Set([...pointXyz.keys()])]}, {head: `Maximum<br>Displacement (${esc(L)})`, key: "v"}], rows,
+    () => ({c: cases[0] || "", s: stories[0] || "", j: [...pointXyz.keys()][0] || "1", v: +(0.0381 / (lenM(L) || 1)).toPrecision(6), u: ""}));
+  q(d, "#dtA").onclick = g.add; q(d, "#dtD").onclick = g.del;
+  q(d, "#dtS").onclick = () => { rows.sort((a, b) => cases.indexOf(a.c) - cases.indexOf(b.c) || stories.indexOf(a.s) - stories.indexOf(b.s) || String(a.j).localeCompare(String(b.j), undefined, {numeric: true})); g.paint(); };
+  // Greyed with no point selected, as ETABS greys it (picture 97).
+  const pts = [...selJ].filter(n => pointXyz.has(n)), auto = q(d, "#dtAuto");
+  auto.querySelectorAll("input,select,button").forEach(e => e.disabled = !pts.length); auto.style.color = pts.length ? "" : "#888";
+  q(d, "#dtAp").onclick = () => {
+    const r = Number(q(d, "#dtR").value); if (!isFinite(r) || r <= 0) return formError(d, "The drift ratio is a number above 0.");
+    let z = 0; const elev = new Map([["Base", (defs.base || {}).elevation || 0]]); (defs.stories || []).forEach(s => { z += Number(s.height) || 0; elev.set(s.name, ((defs.base || {}).elevation || 0) + z); });
+    const z0 = elev.get(q(d, "#dtB").value) || 0, near = h => { let best = stories[0], dz = Infinity; for (const [n, e] of elev) if (n !== "Base" && Math.abs(e - h) < dz) { dz = Math.abs(e - h); best = n; } return best; };
+    for (const p of pts) { const h = pointXyz.get(p)[2], s = near(h); if (h <= z0) continue; rows.push({c: cases[0] || "", s, j: p, v: +((h - z0) * r).toPrecision(6), u: ""}); }
+    formError(d, ""); g.paint();
+  };
+  return d;
+}
+// Design > Set Time Period Targets (pictures 99, 99b): ETABS's "Design Optimization - Time Period Targets"; Current Period
+// from the modal results when there are any.
+async function etcPeriodTargets() {
+  hm.defs = null;
+  const defs = await hmDefs(), st = await etcRead();
+  const cases = (defs.load_cases || []).filter(c => /^Modal/i.test(c.type || "")).map(c => c.name);
+  const was = st.period_targets || [], rows = was.map(r => ({c: r.ModalCase, n: r.ModeNum, t: r.TargetPeriod}));
+  const period = (c, n) => { for (const t of Object.values(P ? P.tables : {})) { if (!/modal.*period/i.test(norm(t.name)) || !t.rows) continue; const ci = col(t.fields, "Case", "OutputCase"), mi = col(t.fields, "Mode", "StepNum"), pi = col(t.fields, "Period"); if (pi < 0) continue; const r = t.rows.find(x => (ci < 0 || x[ci] === c) && mi >= 0 && +x[mi] === +n); if (r) return (+r[pi]).toFixed(3); } return "Not Available"; };
+  const d = dialog("Time Period Targets", `<fieldset style="margin:0"><legend>Targets</legend><div style="display:flex;gap:16px"><div id="ptG" style="width:560px;height:190px;overflow:auto;border:1px solid #444;background:#fff"></div>
+      <div style="display:flex;flex-direction:column;gap:6px;width:66px"><button id="ptA" style="margin-top:20px">Add</button><button id="ptD">Delete</button><button id="ptS" style="margin-top:auto">Sort</button></div></div>
+      <label style="display:block;margin-top:10px"><input type="checkbox" id="ptI" ${was.length && was.every(r => r.Active === "No") ? "checked" : ""}> Ignore Specified Time Period Targets</label></fieldset>`,
+    [["OK", async x => {
+      for (const r of rows) if (!(Number.isInteger(Number(r.n)) && Number(r.n) >= 1) || !(Number(r.t) > 0)) { formError(x, "Each target has a mode number of 1 or more and a target period above 0."); return false; }
+      const ignore = q(x, "#ptI").checked, by = new Map();
+      for (const r of rows) { if (!by.has(r.c)) by.set(r.c, []); by.get(r.c).push({ModeNum: String(r.n), TargetPeriod: String(r.t), Active: ignore ? "No" : "Yes"}); }
+      for (const c of new Set(was.map(r => r.ModalCase))) if (!by.has(c)) by.set(c, []);
+      for (const [c, list] of by) { const j = await hmRun("define_table_rows", {table: "Design Optimization - Time Period Targets", name: c, rows: list}); if (!j.ok) return; }
+      hmSay(`${rows.length} time period target${rows.length === 1 ? "" : "s"} set.`);
+    }], ["Cancel"]], {width: 700});
+  const g = etdGrid(d, "#ptG", [{head: "Modal Case", key: "c", list: () => cases}, {head: "Mode Number", key: "n"}, {head: "Target Period (sec)", key: "t"}, {head: "Current Period (sec)", key: "x", fixed: i => period(rows[i].c, rows[i].n)}], rows,
+    () => ({c: cases[0] || "", n: 1, t: 1}));
+  q(d, "#ptA").onclick = g.add; q(d, "#ptD").onclick = g.del;
+  q(d, "#ptS").onclick = () => { rows.sort((a, b) => cases.indexOf(a.c) - cases.indexOf(b.c) || a.n - b.n); g.paint(); };
+  return d;
+}
 // ---- ETABS 23.2's Analyze menu and its run windows, from the pictures in field/reference-forms/etabs/Analyze (thread
 // 'Make remaining ETABS menu forms identical', 2026-11-27): the menu in ETABS's order and words; Run Analysis shows
 // ETABS's "Analyzing" window (File Name, Start/Finish Time, Elapsed Time, Run Status, Cancel Run, the Run 1 log) and its
@@ -6491,15 +6879,15 @@ function etnAct(a) {
   }
 }
 // Lock Model: what would change the model is refused while it is locked, as ETABS does.
-const etnChanges = tool => /^(define_|assign_|add_|delete_|draw_|set_section|set_loads?|set_lateral|set_program_form|set_slab|set_punching|set_load_cases|reshape_|move_|replicate_|divide_|edit_model_text|import_tables|frame_section_to_sd|undo$|redo$)/.test(tool);
-function etnLocked(tool) {
-  if (!hm.userLock || !etnChanges(tool)) return false;
+const etnChanges = (tool, args) => !(tool === "set_program_form" && args && /^(Options - |Miscellaneous Options|Preferences - Graphics)/.test(args.table || "")) && /^(define_|assign_|add_|delete_|draw_|set_section|set_loads?|set_lateral|set_program_form|set_slab|set_punching|set_load_cases|reshape_|move_|replicate_|divide_|edit_model_text|import_tables|frame_section_to_sd|undo$|redo$)/.test(tool);
+function etnLocked(tool, args) {
+  if (!hm.userLock || !etnChanges(tool, args)) return false;
   dialog("ETABS", `<p style="max-width:380px">The model is locked. Unlock it first (Analyze &gt; Unlock Model) to change it.</p>`, [["OK"]], {width: 420});
   return true;
 }
 // Model Alive: after each change the model is analysed again (a run of the analysis only, as ETABS's Model Alive).
-function etnChanged(tool) {
-  if (!etn.alive || !etnOn() || !etnChanges(tool) || !window.cpmLive) return;
+function etnChanged(tool, args) {
+  if (!etn.alive || !etnOn() || !etnChanges(tool, args) || !window.cpmLive) return;
   clearTimeout(etn.aliveTimer);
   etn.aliveTimer = setTimeout(() => { if (!etn.running) engineStart({analyse: true, kinds: [], selected: [], keep_open: false, stop_on_errors: true}); }, 1500);
 }
@@ -7168,11 +7556,654 @@ function etqSpandrelForm(w) {
     ${g("Diagonal Bar Ties", [["Stirrup Bar Size", etqB("tie.bar", 96)], ["Min. Spacing of Ties", etqN("tie.minSp", 1, "l", 84)], ["Max. Spacing of Ties", etqN("tie.maxSp", 1, "l", 84)]])}
     <div style="grid-column:1/3">${g("Vertical Bars/Ties", [["Stirrup Bar Size", etqB("vert.bar", 96)], ["Min. Spacing of Bars", etqN("vert.minSp", 1, "l", 84)], ["Max. Spacing of Bars", etqN("vert.maxSp", 1, "l", 84)], ["Number of Legs", etqS("vert.legs", ["2", "3", "4"], 96)]])}</div></div>`, w, null, 680);
 }
+// ---- ETABS 23.2's Options menu and its forms, from the pictures in field/reference-forms/etabs/Options: Display
+// Units, Database, Tolerances, Arrange Windows, Graphics Preferences (with Set Line Thickness), Graphics Colors
+// (Set Display Colors, Set Output Colors), Graphics Mode (Video Card Information), the ticked options, Auto Save,
+// user default settings and Customize. Values that are ETABS tables go through set_program_form; the program's own
+// settings that no ETABS table holds (edge colours, font, line thickness, toolbars, keys) are kept on this computer,
+// as ETABS keeps them in its own settings. ----
+const etoLocal = (() => { let v = {}; try { v = JSON.parse(localStorage.getItem("cpm-etabs-options") || "{}"); } catch (e) { v = {}; } return v; })();
+const etoSave = () => { try { localStorage.setItem("cpm-etabs-options", JSON.stringify(etoLocal)); } catch (e) { } };
+const etoRgb = (r, g, b) => String(r + g * 256 + b * 65536);
+// Miscellaneous Options' ticks as ETABS 23.2 shows them on a new install (picture "00 Options menu").
+const etoMiscDefault = {StartPage: "Yes", CursorValue: "Yes", FrameInfo: "Yes", BoundPlane: "No", ArchDim: "No", MomentTens: "Yes", AniSound: "Yes", AutoSave: "No", AutoSaveInt: "10", Crosshairs: "No", ModelExp: "Yes"};
+const eto = {misc: null};
+async function etoItems(table) { const j = await hmPost({tool: "program_forms", args: {table}}).catch(() => null); return j && j.ok ? Object.fromEntries(j.result.items.map(i => [i.field, i.value])) : {}; }
+async function etoSet(table, values, quiet) {
+  const changed = Object.keys(values).length; if (!changed) return {ok: true};
+  const r = await hmRun("set_program_form", {table, values}, true);
+  if (!r.ok && !quiet) hmSay(r.error, true);
+  return r;
+}
+const etoYes = (v, d) => !/^(no|false|0)$/i.test(v === undefined || v === "" ? d : v);
+function etoMiscLoad() { if (eto.loading) return; eto.loading = true; etoItems("Miscellaneous Options").then(v => { eto.misc = v; eto.loading = false; }); }
+const etoMisc = k => etoYes((eto.misc || {})[k], etoMiscDefault[k]);
+function etoOptionsMenu(engine) {
+  if (!eto.misc) etoMiscLoad();
+  const t = k => ["eto:t:" + k];
+  return [["Display Units...", "u:form", "Ctrl+U"],
+    ["Database", [["Set Current Format File Source...", "m:eto:formatSource"], ["Edit Format File...", "m:eto:formatEdit"], 0, ["Write Table and Field Keys To XML File...", "m:eto:keysXml"], ["Set Table and Field Names...", "m:eto:names"], 0, ["Documentation to Word...", "m:eto:word"]]], 0,
+    ["Tolerances...", "m:eto:tolerances"], 0, ["Arrange Windows...", "eto:arrange"], 0,
+    ["Graphics Preferences...", "m:eto:graphics"], ["Architectural Plan Options...", "m:eto:archPlan", "", true],
+    ["Graphics Colors", [["Display...", "m:eto:colorsDisplay"], ["Output...", "m:eto:colorsOutput"]]],
+    ["Graphics Mode", [["Standard Graphics", "eto:std"], ["DirectX", "eto:dx", "", true], 0, ["Video Card(s) Information...", "m:eto:video"]]], 0,
+    ["Allow Multiple Towers", "eto:towers"], 0, ["Show Start Page at Startup", ...t("StartPage")], 0,
+    ["Show Value at Cursor for Assign/Design", ...t("CursorValue")], ["Show Frame Information in Local Plane", ...t("FrameInfo")], ["Show Bounding Plane", ...t("BoundPlane")], ["Architectural Dimensioning", ...t("ArchDim")], ["Moment Diagrams on Tension Side", ...t("MomentTens")], ["Animation Sound", ...t("AniSound")], 0,
+    ["Auto Save Model...", "m:eto:autosave"], ["Save User Default Settings", "eto:saveDefaults"], ["Reset User Default Settings", "eto:resetDefaults"], 0,
+    ["Customize Toolbars", "eto:customize"], ["Reset Default Toolbars", "eto:resetToolbars"], 0, ["Show Crosshairs", ...t("Crosshairs")], 0, ["Show Model Explorer", "explorer"], 0,
+    ["Engine Extras", engine || []]];
+}
+function etoTicked(a) {
+  if (a.startsWith("eto:t:")) return etoMisc(a.slice(6));
+  if (a === "eto:std") return true;
+  if (a === "eto:towers") return !!etoLocal.towers;
+  return false;
+}
+async function etoAct(a) {
+  if (a.startsWith("t:")) {
+    const k = a.slice(2), v = etoMisc(k) ? "No" : "Yes";
+    eto.misc = {...(eto.misc || {}), [k]: v};
+    if (k === "Crosshairs") etoCross();
+    await etoSet("Miscellaneous Options", {[k]: v});
+    return hmSay(`${k === "Crosshairs" ? "Show Crosshairs" : k}: ${v === "Yes" ? "on" : "off"}.`);
+  }
+  switch (a) {
+    case "arrange": { const n = typeof layout === "number" ? layout : 1; const b = document.querySelector(`[data-lay="${n}"]`); if (b) b.click(); panes.forEach(p => fit(p)); return hmSay("Windows arranged."); }
+    case "std": return hmSay("Standard Graphics is the graphics mode.");
+    case "towers": etoLocal.towers = !etoLocal.towers; etoSave(); return hmSay(etoLocal.towers ? "Multiple towers allowed." : "Multiple towers not allowed.");
+    case "saveDefaults": {
+      const keep = {}; for (const t of ["Preferences - Graphics", "Preferences - Tolerance", "Options - Colors - Display", "Options - Colors - Output", "Miscellaneous Options"]) keep[t] = await etoItems(t);
+      etoLocal.userDefaults = {tables: keep, local: {...etoLocal, userDefaults: undefined}}; etoSave(); return hmSay("The settings were saved as your defaults.");
+    }
+    case "resetDefaults": {
+      for (const t of ["Preferences - Graphics", "Options - Colors - Display", "Options - Colors - Output", "Miscellaneous Options"]) { const v = await etoItems(t); await etoSet(t, Object.fromEntries(Object.keys(v).filter(k => v[k] !== "").map(k => [k, ""])), true); }
+      for (const k of Object.keys(etoLocal)) delete etoLocal[k]; etoSave(); eto.misc = null; etoCross(); return hmSay("The settings are back to the program's defaults.");
+    }
+    case "customize": return etoCustomize();
+    case "resetToolbars": etoLocal.toolbars = null; etoSave(); etoBars(); return hmSay("The toolbars are back to their defaults.");
+  }
+}
+function etoCross() { document.querySelectorAll("canvas").forEach(c => { c.style.cursor = etoMisc("Crosshairs") ? "crosshair" : ""; }); }
+// The forms
+async function etoForm(a) {
+  const u = hmU();
+  if (a === "tolerances") {
+    const v = await etoItems("Preferences - Tolerance"), tol = {in: 0.1, ft: 0.1 / 12, mm: 2.54, cm: 0.254, m: 0.00254}[u.l] ?? 0.1;
+    const def = {MergeTol: String(+tol.toPrecision(6)), MaxInclVertCol: "1", MaxInclHorzBmFlr: "20"}, val = k => v[k] !== undefined && v[k] !== "" ? v[k] : def[k];
+    const d = dialog("Set Tolerances", `<fieldset><div class="gu" style="grid-template-columns:auto 120px auto;gap:6px 10px;align-items:center">
+        <label class="kv">Auto Merge Tolerance for Joints</label><input data-f="MergeTol" value="${esc(val("MergeTol"))}"><span>${esc(u.l)}</span>
+        <label class="kv">Maximum Inclination from Vertical for Columns</label><input data-f="MaxInclVertCol" value="${esc(val("MaxInclVertCol"))}"><span>deg</span>
+        <label class="kv">Maximum Inclination from Horizontal for Beams and Floors</label><input data-f="MaxInclHorzBmFlr" value="${esc(val("MaxInclHorzBmFlr"))}"><span>deg</span></div></fieldset>
+      <div style="text-align:center;margin-top:8px"><button id="toDef">Set to Default Values</button></div>`,
+      [["OK", x => { const out = {}; for (const b of x.querySelectorAll("[data-f]")) { if (!isFinite(+b.value) || b.value === "") { formError(x, "Each value must be a number."); return false; } if (b.value !== val(b.dataset.f)) out[b.dataset.f] = b.value; } etoSet("Preferences - Tolerance", out); }], ["Cancel"]], {width: 470});
+    q(d, "#toDef").onclick = () => d.querySelectorAll("[data-f]").forEach(b => { b.value = def[b.dataset.f]; });
+    return d;
+  }
+  if (a === "graphics") {
+    const v = await etoItems("Preferences - Graphics"), def = {MaxFontSize: "8", MinFontSize: "3", MinSLineThick: "1", MinPLineThick: "4", AntiAliasing: "Yes", ConstantLineThick: "Yes", ShadingWithinElement: "No", AutoZoomStep: "10", ShrinkFactor: "70"};
+    const val = k => v[k] !== undefined && v[k] !== "" ? v[k] : def[k], num = (k, label, unit) => `<label class="kv">${label}</label><input data-f="${k}" value="${esc(val(k))}" style="width:90px"><span>${unit}</span>`, cb = (k, label) => `<label class="kv" style="grid-column:1/4"><input type="checkbox" data-c="${k}" ${etoYes(val(k)) ? "checked" : ""}> ${label}</label>`;
+    let font = etoLocal.font || "Arial";
+    const d = dialog("Graphics Preferences", `<fieldset><legend>Font</legend><div class="gu" style="grid-template-columns:1fr auto auto;gap:5px 8px;align-items:center">
+        <span id="gpFont">${esc(font)}</span><button id="gpChange" style="grid-column:2/4">Change...</button>${num("MaxFontSize", "Maximum Graphic Font Size", "points")}${num("MinFontSize", "Minimum Graphic Font Size", "points")}</div></fieldset>
+      <fieldset><legend>Quality</legend><div class="gu" style="grid-template-columns:1fr auto auto;gap:5px 8px;align-items:center">${num("MinSLineThick", "Minimum Screen Line Thickness", "pixels")}${num("MinPLineThick", "Minimum Printer Line Thickness", "pixels")}
+        ${cb("AntiAliasing", "Anti Aliasing")}<label class="kv"><input type="checkbox" data-c="ConstantLineThick" ${etoYes(val("ConstantLineThick")) ? "checked" : ""}> Constant Line Thickness</label><button id="gpLine" style="grid-column:2/4">Set Line Thickness</button>${cb("ShadingWithinElement", "Shading within Element")}</div></fieldset>
+      <fieldset><legend>Size</legend><div class="gu" style="grid-template-columns:1fr auto auto;gap:5px 8px;align-items:center">${num("AutoZoomStep", "Auto Zoom Step", "percent")}${num("ShrinkFactor", "Shrink Factor for Line Objects", "percent")}</div></fieldset>`,
+      [["OK", x => {
+        const out = {}; for (const b of x.querySelectorAll("[data-f]")) { if (!isFinite(+b.value) || b.value === "") { formError(x, "Each value must be a number."); return false; } if (b.value !== val(b.dataset.f)) out[b.dataset.f] = b.value; }
+        for (const b of x.querySelectorAll("[data-c]")) { const y = b.checked ? "Yes" : "No"; if (y !== (etoYes(val(b.dataset.c)) ? "Yes" : "No")) out[b.dataset.c] = y; }
+        etoLocal.font = font; etoSave(); etoSet("Preferences - Graphics", out);
+      }], ["Cancel"]], {width: 400});
+    const line = () => { q(d, "#gpLine").disabled = q(d, '[data-c="ConstantLineThick"]').checked; };
+    q(d, '[data-c="ConstantLineThick"]').onchange = line; line();
+    q(d, "#gpLine").onclick = () => etoLineThickness();
+    q(d, "#gpChange").onclick = () => {
+      const f = dialog("Font", `<div class="g2"><span>Font</span><select id="ftN">${opts(["Arial", "Calibri", "Consolas", "Courier New", "Segoe UI", "Tahoma", "Times New Roman", "Verdana"], font)}</select></div>`,
+        [["OK", x => { font = q(x, "#ftN").value; q(d, "#gpFont").textContent = font; }], ["Cancel"]], {width: 300});
+      return f;
+    };
+    return d;
+  }
+  if (a === "colorsDisplay") return etoColors(false);
+  if (a === "colorsOutput") return etoColors(true);
+  if (a === "autosave") {
+    const v = await etoItems("Miscellaneous Options"), on = etoYes(v.AutoSave, "No"), n = v.AutoSaveInt || "10";
+    const d = dialog("Model Auto Save Options", `<fieldset><legend>Auto Save Options</legend><label class="kv" style="display:block"><input type="checkbox" id="asOn" ${on ? "checked" : ""}> Auto Save Model File at Specified Interval</label>
+        <div class="g2" style="margin-left:20px"><span>Interval in Minutes</span><input id="asN" value="${esc(on ? n : "")}"></div></fieldset>`,
+      [["OK", x => { const y = q(x, "#asOn").checked; if (y && !(+q(x, "#asN").value > 0)) { formError(x, "The interval must be a number of minutes above 0."); return false; } etoSet("Miscellaneous Options", {AutoSave: y ? "Yes" : "No", ...(y ? {AutoSaveInt: q(x, "#asN").value} : {})}).then(r => { if (r.ok) { eto.misc = null; hmSay(y ? `The model is saved every ${q(x, "#asN").value} minutes.` : "Auto save is off."); } }); }], ["Cancel"]], {width: 340});
+    const sync = () => { const y = q(d, "#asOn").checked, b = q(d, "#asN"); b.disabled = !y; if (y && !b.value) b.value = n; if (!y) b.value = ""; };
+    q(d, "#asOn").onchange = sync; sync();
+    return d;
+  }
+  if (a === "video") {
+    let r = "Unknown", vendor = "";
+    try { const gl = document.createElement("canvas").getContext("webgl"); const ext = gl && gl.getExtension("WEBGL_debug_renderer_info"); if (gl) { r = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER); vendor = ext ? gl.getParameter(ext.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR); } } catch (e) { }
+    return dialog("Video Card Information", `<fieldset><table class="list" style="width:100%"><tr><th>Video Card ID</th><th>Video Card Memory (MB)</th><th>Hardware Description</th><th>Compatible?</th></tr>
+        <tr style="color:#1a7a1a"><td>${esc(vendor)}</td><td>${navigator.deviceMemory ? navigator.deviceMemory * 1024 : ""}</td><td>${esc(r)}</td><td>Yes</td></tr></table></fieldset>
+      <p class="kv">Graphics card highlighted in green color will be used for DX rendering.</p><p class="kv">Graphics card can be selected/switched from Windows Settings &gt; System &gt; Display &gt; Graphics &gt; Custom options for apps.</p>`, [["OK"]], {width: 640});
+  }
+  if (a === "formatSource") {
+    const d = dialog("Set Database Table Format File", `<fieldset><legend>Format File</legend><label class="kv" style="display:block"><input type="radio" name="fsO" value="none" ${etoLocal.formatFile ? "" : "checked"}> None - Use Program Defaults</label>
+        <label class="kv" style="display:block"><input type="radio" name="fsO" value="user" ${etoLocal.formatFile ? "checked" : ""}> User Specified File</label>
+        <div style="display:flex;gap:6px"><input id="fsP" readonly style="flex:1" value="${esc((etoLocal.formatFile || {}).name || "")}"><button id="fsB">Browse</button></div></fieldset>`,
+      [["OK", x => { const u2 = q(x, "input[name=fsO]:checked").value; if (u2 === "none") etoLocal.formatFile = null; else if (!pick && !etoLocal.formatFile) { formError(x, "Browse for the format file first."); return false; } else if (pick) etoLocal.formatFile = pick; etoSave(); hmSay(etoLocal.formatFile ? "Tables use the format file " + etoLocal.formatFile.name + "." : "Tables use the program's default format."); }], ["Cancel"]], {width: 640});
+    let pick = null;
+    q(d, "#fsB").onclick = () => etoPickFile(".xml,.json,.txt,*", (name, text) => { pick = {name, text}; q(d, "#fsP").value = name; q(d, 'input[value="user"]').checked = true; });
+    return d;
+  }
+  if (a === "formatEdit") {
+    // ETABS asks for the format file to edit (Windows Open box), then opens it in an editor.
+    return dialog("Edit Format File", `<div class="g2"><span>File name</span><input id="feF" type="file" accept=".xml,.json,.txt"></div>`,
+      [["Open", x => {
+        const f = q(x, "#feF").files[0]; if (!f) { formError(x, "Choose the format file."); return false; }
+        const rd = new FileReader(); rd.onload = () => {
+          const name = f.name, text = String(rd.result);
+          dialog("Edit Format File - " + name, `<textarea id="feT" style="width:100%;height:340px;font-family:Consolas,monospace;font-size:11px">${esc(text)}</textarea>`,
+            [["Save", y => { etoDownload(name, q(y, "#feT").value, "text/plain"); if (etoLocal.formatFile && etoLocal.formatFile.name === name) { etoLocal.formatFile.text = q(y, "#feT").value; etoSave(); } }], ["Cancel"]], {width: 640});
+        }; rd.readAsText(f);
+      }], ["Cancel"]], {width: 440});
+  }
+  if (a === "keysXml") {
+    // ETABS asks where to save (Windows Save As box): the file name, then Save.
+    return dialog("Write Table and Field Keys To XML File", `<div class="g2"><span>File name</span><input id="kxN" value="${esc(etoJob())}.xml"><span>Save as type</span><select disabled><option>XML Files (*.xml)</option></select></div>`,
+      [["Save", x => {
+        const t = etoTables(), n = q(x, "#kxN").value.trim() || etoJob() + ".xml";
+        const xml = `<?xml version="1.0" encoding="utf-8"?>\n<Tables>\n${t.map(y => `  <Table Key="${etoX(y.name)}" Name="${etoX(etoName(y.name))}">\n${y.fields.map(f => `    <Field Key="${etoX(f)}" Name="${etoX(etoName(y.name, f))}"/>`).join("\n")}\n  </Table>`).join("\n")}\n</Tables>\n`;
+        etoDownload(/\.xml$/i.test(n) ? n : n + ".xml", xml, "application/xml"); hmSay(`Table and field keys of ${t.length} tables written to ${n}.`);
+      }], ["Cancel"]], {width: 460});
+  }
+  if (a === "names") {
+    const d = dialog("Set Table and Field Names", `<fieldset><legend>Table and Field Name Options</legend><div style="display:flex;flex-direction:column;gap:6px;align-items:center"><button id="tnD" style="width:220px">Set to Default</button><button id="tnX" style="width:220px">Import from XML File...</button></div></fieldset>`, [["Cancel"]], {width: 340});
+    q(d, "#tnD").onclick = () => { etoLocal.names = null; etoSave(); d.close(); hmSay("Table and field names are the program's own."); };
+    q(d, "#tnX").onclick = () => etoPickFile(".xml", (name, text) => {
+      const doc = new DOMParser().parseFromString(text, "application/xml"), map = {};
+      doc.querySelectorAll("Table").forEach(t => { const k = t.getAttribute("Key"); if (!k) return; map[k] = {name: t.getAttribute("Name") || k, fields: {}}; t.querySelectorAll("Field").forEach(f => { map[k].fields[f.getAttribute("Key")] = f.getAttribute("Name") || f.getAttribute("Key"); }); });
+      if (!Object.keys(map).length) return hmSay(name + " has no Table elements with a Key.", true);
+      etoLocal.names = map; etoSave(); d.close(); hmSay(`Names of ${Object.keys(map).length} tables read from ${name}.`);
+    });
+    return d;
+  }
+  if (a === "word") {
+    const all = etoTables();
+    const d = dialog("Database Documentation to Word", `<fieldset><legend>Select A Documentation Option</legend>
+        <label class="kv"><input type="radio" name="dwO" value="all" checked> Document All Tables</label><label class="kv" style="margin-left:24px"><input type="radio" name="dwO" value="sel"> Document Selected Tables</label>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:6px"><span class="kv">FileName</span><button id="dwF" style="margin-left:auto">Set FileName</button></div><input id="dwN" readonly style="width:100%" value="${esc(etoJob())}.rtf"></fieldset>
+      <fieldset id="dwT" hidden><legend>Select Tables</legend><select id="dwL" multiple size="10" style="width:100%">${all.map(t => `<option>${esc(t.name)}</option>`).join("")}</select></fieldset>
+      <label class="kv"><input type="checkbox" id="dwOpen" checked> Open Word File after Documentation is Created</label>`,
+      [["OK", x => {
+        const sel2 = q(x, "input[name=dwO]:checked").value === "sel" ? [...q(x, "#dwL").selectedOptions].map(o => o.value) : null;
+        if (sel2 && !sel2.length) { formError(x, "Select the tables to document."); return false; }
+        etoDownload(q(x, "#dwN").value || etoJob() + ".rtf", etoRtf(all.filter(t => !sel2 || sel2.includes(t.name))), "application/rtf");
+      }], ["Cancel"]], {width: 520});
+    d.querySelectorAll("input[name=dwO]").forEach(r => r.onchange = () => { q(d, "#dwT").hidden = q(d, "input[name=dwO]:checked").value !== "sel"; });
+    q(d, "#dwF").onclick = () => { const b = q(d, "#dwN"); b.readOnly = false; b.focus(); b.select(); };
+    q(d, "#dwN").onchange = e => { const n = e.target.value.trim(); e.target.value = n ? (/\.rtf$/i.test(n) ? n : n + ".rtf") : etoJob() + ".rtf"; };
+    return d;
+  }
+}
+const etoX = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+const etoJob = () => String((hm.state || {}).file || "Model").split(/[\\/]/).pop().replace(/\.[^.]*$/, "");
+const etoName = (t, f) => { const m = (etoLocal.names || {})[t]; return f === undefined ? (m && m.name) || t : (m && m.fields[f]) || f; };
+const etoTables = () => Object.values((P && P.tables) || {}).filter(t => t && t.name && t.fields).map(t => ({name: t.name, fields: t.fields})).sort((a, b) => a.name.localeCompare(b.name));
+function etoRtf(list) {
+  const r = s => String(s).replace(/[\\{}]/g, m => "\\" + m).replace(/[^\x00-\x7f]/g, c => `\\u${c.charCodeAt(0)}?`);
+  return `{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Arial;}}\\fs20\n` + list.map(t => `{\\b\\fs24 ${r(etoName(t.name))}\\par}\n` + t.fields.map(f => `\\tab ${r(f)}\\tab ${r(etoName(t.name, f))}\\par\n`).join("") + "\\par\n").join("") + "}";
+}
+function etoDownload(name, text, type) { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([text], {type})); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); }
+function etoPickFile(accept, then) { const f = document.createElement("input"); f.type = "file"; f.accept = accept; f.onchange = () => { const file = f.files[0]; if (!file) return; const rd = new FileReader(); rd.onload = () => then(file.name, String(rd.result)); rd.readAsText(file); }; f.click(); }
+function etoLineThickness() {
+  const items = [["Columns", "Openings"], ["Beams", "Rebars"], ["Braces", "Grid Lines"], ["Links", "Dimension Lines"], ["Springs", "User Mesh Edge"], ["Walls"], ["Floors"], ["Null Objects"]], lt = etoLocal.lines || {};
+  const cell = n => n ? `<label class="kv">${n}</label><input data-l="${n}" value="${esc(lt[n] || "1.0")}" style="width:70px"><span>pixels</span><span style="display:inline-block;width:50px;border-top:${Math.max(1, +(lt[n] || 1))}px solid currentColor;align-self:center"></span>` : "<span></span><span></span><span></span><span></span>";
+  return dialog("Set Line Thickness for Objects and Entities", `<fieldset><legend>Line Thickness for:</legend><div class="gu" style="grid-template-columns:auto 80px auto 60px 40px auto 80px auto 60px;gap:6px 8px;align-items:center">${items.map(([a, b]) => cell(a) + "<span></span>" + cell(b)).join("")}</div></fieldset>`,
+    [["OK", x => { const out = {}; for (const b of x.querySelectorAll("[data-l]")) { if (!(+b.value > 0)) { formError(x, "A thickness must be a number above 0."); return false; } out[b.dataset.l] = b.value; } etoLocal.lines = out; etoSave(); }], ["Cancel"]], {width: 760});
+}
+// Set Display Colors / Set Output Colors. A colour is ETABS's number (red + green*256 + blue*65536); the defaults are
+// the colours ETABS 23.2 shows (pictures "Set Display Colors", "Set Output Colors").
+const etoDisp = {ColorColumns: [64, 80, 160], ColorBeams: [64, 80, 160], ColorBraces: [64, 80, 160], ColorTendons: [0, 128, 128], ColorLinks: [64, 80, 160], ColorSprings: [0, 0, 0], ColorNullObjects: [128, 128, 128], ColorOpenings: [0, 0, 0], ColorStripEdge: [255, 128, 255], ColorOtherStripFill: [0, 255, 0], ColorDimLines: [160, 160, 160], ColorText: [32, 32, 32], ColorGridLines: [160, 160, 160], ColorBackground: [255, 255, 255], ColorColStripA: [255, 0, 0], ColorColStripB: [0, 0, 255], ColorUserMeshEdge: [0, 80, 80], ColorStlDesign: [0, 128, 128], ColorCompDesign: [0, 255, 255], ColorConcDesign: [255, 128, 64], ColorNoDesign: [255, 128, 64], ColorMidStripA: [255, 255, 0], ColorMidStripB: [0, 255, 255], ColorWalls: [255, 0, 0], ColorFloors: [192, 192, 192],
+  "~EdgeColumns": [64, 80, 160], "~EdgeBeams": [64, 80, 160], "~EdgeBraces": [64, 80, 160], "~EdgeTendons": [0, 128, 128], "~QuadGage": [0, 255, 0], "~LineGage": [0, 255, 0], "~Rebars": [0, 0, 255], "~TopRebars": [0, 255, 0], "~BottomRebars": [0, 0, 255], "~WallsNeg": [255, 0, 0], "~WallsEdge": [0, 0, 0], "~FloorsNeg": [192, 192, 192], "~FloorsEdge": [0, 0, 0]};
+const etoOut = {Contour1: [192, 0, 192], Contour2: [224, 0, 96], Contour3: [255, 0, 0], Contour4: [255, 64, 0], Contour5: [255, 128, 0], Contour6: [255, 165, 0], Contour7: [255, 200, 0], Contour8: [255, 255, 0], Contour9: [128, 255, 0], Contour10: [0, 224, 0], Contour11: [0, 255, 128], Contour12: [0, 255, 255], Contour13: [0, 160, 255], Contour14: [0, 80, 255], Contour15: [0, 0, 255],
+  DFillPos: [255, 255, 0], DFillNeg: [255, 0, 0], DFillRange: [0, 0, 255], Ratio1: [0, 255, 255], Ratio2: [0, 224, 0], Ratio3: [255, 255, 0], Ratio4: [255, 0, 255], Ratio5: [255, 0, 0], RatioNotD: [192, 192, 192],
+  HState1: [224, 224, 224], HState2: [0, 224, 0], HState3: [255, 255, 0], HState4: [0, 255, 255], HState5: [0, 0, 255], HStatus1: [224, 224, 224], HStatus2: [0, 224, 0], HStatus3: [0, 255, 255], HStatus4: [255, 0, 0],
+  "~RangeNeg": [0, 255, 255], "~NotCalculated": [255, 0, 0], "~HState6": [255, 0, 255], "~HState7": [255, 0, 0]};
+async function etoColors(output) {
+  const table = output ? "Options - Colors - Output" : "Options - Colors - Display", v = await etoItems(table), defs = output ? etoOut : etoDisp, store = etoLocal[output ? "outColors" : "dispColors"] || {};
+  const now = {}; for (const k of Object.keys(defs)) now[k] = k.startsWith("~") ? store[k] || etoRgb(...defs[k]) : v[k] !== undefined && v[k] !== "" ? v[k] : etoRgb(...defs[k]);
+  const sw = (k, w) => `<input type="color" data-k="${k}" value="${hmColorHex(now[k])}" style="width:${w || 76}px;height:22px;padding:0;border:1px solid #888">`;
+  const row = (label, k) => `<label class="kv" style="text-align:right">${label}</label>${sw(k)}`;
+  const tr = (label, k, list, d) => `<label class="kv">${label}</label><select data-t="${k}">${opts(list, v[k] !== undefined && v[k] !== "" ? String(+v[k]) : d)}</select>`;
+  const tenth = Array.from({length: 11}, (_, i) => String(i / 10)), bgs = ["White background", "Black Background", "Blue Scale", "Gray Scale", "Ocean", "Forest", "Desert"];
+  const dev = `<fieldset><legend>For Device Type:</legend><div class="gu" style="grid-template-columns:auto 1fr;gap:4px 8px;align-items:center">
+      <label class="kv"><input type="radio" name="ecD" value="Screen" ${(v.DeviceType || "Screen") === "Screen" ? "checked" : ""}> Screen</label><select id="ecBg">${opts(bgs, store.background || "White background")}</select>
+      <label class="kv"><input type="radio" name="ecD" value="Printer" ${v.DeviceType === "Printer" ? "checked" : ""}> Printer</label><span></span>
+      <label class="kv"><input type="radio" name="ecD" value="Color Printer" ${v.DeviceType === "Color Printer" ? "checked" : ""}> Color Printer</label><span></span></div></fieldset>`;
+  const cp = `<label class="kv"><input type="checkbox" id="ecCp" ${store.colorPrinter === false ? "" : "checked"}> Color Printer (Graphics)</label>`;
+  const body = output
+    ? `<div style="display:flex;gap:10px"><fieldset style="margin:0"><legend>Contours</legend><div style="display:flex;gap:8px"><div style="display:flex;flex-direction:column;justify-content:space-between"><span>Min</span><span>Max</span></div><div style="display:flex;flex-direction:column">${Array.from({length: 15}, (_, i) => sw("Contour" + (i + 1), 76)).join("")}</div></div></fieldset>
+        <div style="display:flex;flex-direction:column;gap:6px"><fieldset style="margin:0"><legend>Diagram Fill</legend><div class="gu" style="grid-template-columns:auto auto;gap:4px 10px">${row("Positive Region", "DFillPos")}${row("Negative Region", "DFillNeg")}${row("Range Pos", "DFillRange")}${row("Range Neg", "~RangeNeg")}</div></fieldset>
+          <fieldset style="margin:0"><legend>D/C Ratios</legend><div class="gu" style="grid-template-columns:auto auto;gap:2px 10px"><b class="kv">Colors</b><b class="kv">Values</b>${[1, 2, 3, 4, 5].map(i => `${sw("Ratio" + i)}${i === 1 ? `<input value="0" disabled style="width:70px">` : `<input data-r="RatioVal${i - 1}" value="${esc(v["RatioVal" + (i - 1)] || ["0.5", "0.7", "0.9", "1"][i - 2])}" style="width:70px">`}`).join("")}</div></fieldset>
+          <fieldset style="margin:0"><legend>Design Status</legend><div class="gu" style="grid-template-columns:auto auto;gap:4px 10px">${sw("RatioNotD")}<span class="kv">Not Yet Designed</span>${sw("~NotCalculated")}<span class="kv">Not Calculated</span></div></fieldset></div>
+        <div style="display:flex;flex-direction:column;gap:6px"><fieldset style="margin:0"><legend>Hinge States</legend><div class="gu" style="grid-template-columns:auto auto;gap:2px 10px">${["Point A", "Point B", "Point BC/U", "Point C", "Point CD", "Point D", "Point E"].map((n, i) => `${sw(i < 5 ? "HState" + (i + 1) : "~HState" + (i + 1))}<span class="kv">${n}</span>`).join("")}</div></fieldset>
+          <fieldset style="margin:0"><legend>Hinge Status</legend><div class="gu" style="grid-template-columns:auto auto;gap:2px 10px">${sw("HStatus1")}<span class="kv">Immediate Occupancy</span>${sw("HStatus2")}<span class="kv">Life Safety</span>${sw("HStatus3")}<span class="kv">Collapse Prevention</span>${sw("HStatus4")}<span></span></div></fieldset></div>
+        <div style="display:flex;flex-direction:column;gap:6px;width:240px"><fieldset style="margin:0"><legend>Transparency</legend><div class="gu" style="grid-template-columns:auto 1fr;gap:4px 8px">${tr("Contours", "TransContours", tenth, "0")}${tr("Diagram Fill", "TransDiag", tenth, "0.2")}</div></fieldset>${dev}${cp}<button id="ecReset">Reset Defaults</button></div></div>`
+    : `<fieldset><legend>Click to Change Color</legend><div style="display:flex;gap:14px;flex-wrap:wrap">
+        <div><div class="gu" style="grid-template-columns:auto 34px 34px;gap:0 6px;align-items:center"><span></span><b class="kv">Fill</b><b class="kv">Edge</b>${[["Columns", "ColorColumns", "~EdgeColumns"], ["Beams", "ColorBeams", "~EdgeBeams"], ["Braces", "ColorBraces", "~EdgeBraces"], ["Tendons", "ColorTendons", "~EdgeTendons"]].map(([n, a, b]) => `<label class="kv">${n}</label>${sw(a, 30)}${sw(b, 30)}`).join("")}</div>
+          <div class="gu" style="grid-template-columns:auto 34px 34px 34px;gap:0 6px;align-items:center;margin-top:14px"><span></span><b class="kv">Fill(+)</b><b class="kv">Fill(-)</b><b class="kv">Edge</b><label class="kv">Walls</label>${sw("ColorWalls", 30)}${sw("~WallsNeg", 30)}${sw("~WallsEdge", 30)}<label class="kv">Floors</label>${sw("ColorFloors", 30)}${sw("~FloorsNeg", 30)}${sw("~FloorsEdge", 30)}</div></div>
+        <div class="gu" style="grid-template-columns:auto auto;gap:3px 8px;align-content:start">${[["Links", "ColorLinks"], ["Springs", "ColorSprings"], ["Null Objects", "ColorNullObjects"], ["Openings", "ColorOpenings"], ["Design Strip Edge", "ColorStripEdge"], ["Other Strip Fill", "ColorOtherStripFill"], ["Quad Strain Gage", "~QuadGage"], ["Line Strain Gage", "~LineGage"]].map(([n, k]) => row(n, k)).join("")}</div>
+        <div class="gu" style="grid-template-columns:auto auto;gap:3px 8px;align-content:start">${[["Dimensions", "ColorDimLines"], ["Text", "ColorText"], ["Grid Lines", "ColorGridLines"], ["Background", "ColorBackground"], ["Column Strip Layer A", "ColorColStripA"], ["Column Strip Layer B", "ColorColStripB"], ["User Mesh Edge", "ColorUserMeshEdge"]].map(([n, k]) => row(n, k)).join("")}</div>
+        <div class="gu" style="grid-template-columns:auto auto;gap:3px 8px;align-content:start">${[["Steel Design", "ColorStlDesign"], ["Composite Design", "ColorCompDesign"], ["Concrete Design", "ColorConcDesign"], ["No Design", "ColorNoDesign"], ["Middle Strip Layer A", "ColorMidStripA"], ["Middle Strip Layer B", "ColorMidStripB"], ["Rebars", "~Rebars"], ["Top Rebars", "~TopRebars"], ["BottomRebars", "~BottomRebars"]].map(([n, k]) => row(n, k)).join("")}</div></div></fieldset>
+      <div style="display:flex;gap:10px"><fieldset style="flex:1;margin:0"><legend>Set Transparency</legend><div class="gu" style="grid-template-columns:auto 90px auto 90px;gap:4px 10px">${tr("Columns", "TransColumns", tenth, "0.5")}${tr("Floors", "TransFloors", tenth, "0.5")}${tr("Beams", "TransBeams", tenth, "0.5")}${tr("Walls", "TransWalls", tenth, "0.4")}${tr("Braces", "TransBraces", tenth, "0.5")}${tr("Links", "TransLinks", tenth, "0.5")}</div></fieldset><div style="width:250px">${dev}</div></div>
+      <div style="display:flex;gap:16px;align-items:center;margin-top:6px"><fieldset style="margin:0"><legend>Darkness</legend><select data-t="Darkness">${opts(tenth, v.Darkness !== undefined && v.Darkness !== "" ? String(+v.Darkness) : "0.3")}</select></fieldset><div style="display:flex;flex-direction:column;gap:4px"><button id="ecReset">Reset Defaults</button>${cp}</div></div>`;
+  const d = dialog(output ? "Set Output Colors" : "Set Display Colors", body, [["OK", x => {
+    const out = {}, loc = {...store};
+    for (const b of x.querySelectorAll("[data-k]")) { const n = String(hmColorNumber(b.value)); if (b.dataset.k.startsWith("~")) loc[b.dataset.k] = n; else if (n !== String(hmColorNumber(hmColorHex(now[b.dataset.k])))) out[b.dataset.k] = n; }
+    for (const b of x.querySelectorAll("[data-t]")) if (b.value !== (v[b.dataset.t] !== undefined && v[b.dataset.t] !== "" ? String(+v[b.dataset.t]) : null)) out[b.dataset.t] = b.value;
+    for (const b of x.querySelectorAll("[data-r]")) { if (!isFinite(+b.value) || b.value === "") { formError(x, "A ratio value must be a number."); return false; } if (b.value !== (v[b.dataset.r] || "")) out[b.dataset.r] = b.value; }
+    const devv = q(x, "input[name=ecD]:checked").value; if (devv !== (v.DeviceType || "Screen")) out.DeviceType = devv;
+    loc.background = q(x, "#ecBg").value; loc.colorPrinter = q(x, "#ecCp").checked;
+    etoLocal[output ? "outColors" : "dispColors"] = loc; etoSave();
+    etoSet(table, out).then(r => { if (r.ok) hmSay((output ? "Output" : "Display") + " colors set."); });
+  }], ["Cancel"]], {width: output ? 1000 : 900});
+  q(d, "#ecReset").onclick = () => { d.querySelectorAll("[data-k]").forEach(b => { b.value = hmColorHex(etoRgb(...defs[b.dataset.k])); }); };
+  return d;
+}
+// Customize: the Toolbars tab (which toolbars show) and the Keyboard tab (a key for any menu command), as ETABS 23.2.
+const etoBarNames = ["Draw", "Select", "Snap", "Assign Joint", "Assign Frame", "Assign Shell", "Edit", "View", "Define", "Standard", "Design"];
+const etoBarDefault = {Draw: true, Select: true, Snap: true, Standard: true, Design: true};
+function etoBars() { const on = etoLocal.toolbars || etoBarDefault, etabs = program === "etabs"; const side = document.getElementById("strip"); if (side) side.hidden = etabs && !on.Draw && !on.Select; const top = document.getElementById("icons"); if (top) top.hidden = etabs && !on.Standard; }
+function etoCommands() {
+  const out = [], walk = (list, path) => { for (const it of list || []) { if (!it) continue; if (Array.isArray(it[1])) walk(it[1], path + " > " + it[0]); else if (it[1] && !it[3]) out.push({cat: path, label: it[0], act: it[1], key: it[2] || ""}); } };
+  const m = menus(); for (const k of Object.keys(m)) walk(m[k], k);
+  return out;
+}
+function etoCustomize() {
+  const on = {...(etoLocal.toolbars || etoBarDefault)}, keys = {...(etoLocal.keys || {})}, cmds = etoCommands(), cats = [...new Set(cmds.map(c => c.cat))];
+  const d = dialog("Customize", `<div class="itabs"><button class="on" data-p="tb">Toolbars</button><button data-p="kb">Keyboard</button></div>
+      <div class="ipage on" data-pg="tb"><div style="display:flex;gap:10px"><div class="pgwrap" style="flex:1;height:200px">${etoBarNames.map(n => `<label class="kv" style="display:block"><input type="checkbox" data-b="${esc(n)}" ${on[n] ? "checked" : ""}> ${esc(n)}</label>`).join("")}</div><div><button id="cuR">Reset</button></div></div></div>
+      <div class="ipage" data-pg="kb"><div style="display:flex;gap:10px"><div style="flex:1"><b class="kv">Categories</b><select id="kcC" size="9" style="width:100%">${cats.map(c => `<option>${esc(c)}</option>`).join("")}</select>
+        <b class="kv">New Key</b><input id="kcN" placeholder="Press a key" style="width:100%"></div>
+        <div style="flex:1"><b class="kv">Commands</b><select id="kcM" size="9" style="width:100%"></select><b class="kv">Current Key</b><input id="kcK" disabled style="width:100%"></div>
+        <div style="display:flex;flex-direction:column;gap:6px;padding-top:16px"><button id="kcA">Assign</button><button id="kcX">Remove</button><button id="kcR">Reset</button><button id="kcRA">Reset All</button></div></div></div>`,
+    [["OK", x => { x.querySelectorAll("[data-b]").forEach(b => { on[b.dataset.b] = b.checked; }); etoLocal.toolbars = on; etoLocal.keys = keys; etoSave(); etoBars(); }]], {width: 620});
+  d.querySelectorAll(".itabs button").forEach(b => b.onclick = () => { d.querySelectorAll(".itabs button").forEach(y => y.classList.toggle("on", y === b)); d.querySelectorAll(".ipage").forEach(p => p.classList.toggle("on", p.dataset.pg === b.dataset.p)); });
+  const cmd = () => cmds.find(c => c.cat === q(d, "#kcC").value && c.act === q(d, "#kcM").value);
+  const showKey = () => { const c = cmd(); q(d, "#kcK").value = c ? (keys[c.act] !== undefined ? keys[c.act] : c.key) : ""; };
+  q(d, "#kcC").onchange = () => { q(d, "#kcM").innerHTML = cmds.filter(c => c.cat === q(d, "#kcC").value).map(c => `<option value="${esc(c.act)}">${esc(c.label)}</option>`).join(""); q(d, "#kcM").selectedIndex = 0; showKey(); };
+  q(d, "#kcM").onchange = showKey;
+  q(d, "#kcN").onkeydown = e => { e.preventDefault(); e.stopPropagation(); if (["Control", "Shift", "Alt", "Meta"].includes(e.key)) return; e.target.value = (e.ctrlKey ? "Ctrl+" : "") + (e.shiftKey ? "Shift+" : "") + (e.altKey ? "Alt+" : "") + (e.key.length === 1 ? e.key.toUpperCase() : e.key); };
+  q(d, "#kcA").onclick = () => { const c = cmd(), k = q(d, "#kcN").value; if (!c || !k) return hmSay("Pick a command and press its new key.", true); for (const a of Object.keys(keys)) if (keys[a] === k) delete keys[a]; keys[c.act] = k; showKey(); };
+  q(d, "#kcX").onclick = () => { const c = cmd(); if (c) { keys[c.act] = ""; showKey(); } };
+  q(d, "#kcR").onclick = () => { const c = cmd(); if (c) { delete keys[c.act]; showKey(); } };
+  q(d, "#kcRA").onclick = () => { for (const a of Object.keys(keys)) delete keys[a]; showKey(); };
+  q(d, "#cuR").onclick = () => d.querySelectorAll("[data-b]").forEach(b => { b.checked = !!etoBarDefault[b.dataset.b]; });
+  if (cats.length) { q(d, "#kcC").selectedIndex = 0; q(d, "#kcC").onchange(); }
+  return d;
+}
+// A key set in Customize > Keyboard runs its command.
+document.addEventListener("keydown", e => {
+  const keys = etoLocal.keys; if (!keys || !Object.keys(keys).length || (e.target.closest && e.target.closest("input, textarea, select")) || document.querySelector(".dlg:not(.float)")) return;
+  if (["Control", "Shift", "Alt", "Meta"].includes(e.key)) return;
+  const k = (e.ctrlKey ? "Ctrl+" : "") + (e.shiftKey ? "Shift+" : "") + (e.altKey ? "Alt+" : "") + (e.key.length === 1 ? e.key.toUpperCase() : e.key);
+  const a = Object.keys(keys).find(x => keys[x] === k); if (!a) return;
+  e.preventDefault(); e.stopImmediatePropagation(); act(a);
+}, true);
+// ---- ETABS 23.2's Select menu (pictures in field/reference-forms/etabs/Select): Select and Deselect with the same
+// submenus (Pointer/Window, Intersecting Line, Object Type, Properties, Labels, Groups, Stories, All), Invert
+// Selection, Get Previous Selection and Clear Selection. Each list form has Select, Deselect and Close; property and
+// unique-name lists have a Filter with Clear Filter, label lists a Story box ("All"). ----
+const etsObjs = () => frames.concat(areas).filter(o => !o.other || o.other === "link");
+const etsJointStory = n => { const q = pointXyz.get(String(n)); if (!q) return ""; const s = stories.find(x => Math.abs(x.elevation - q[2]) < 1e-6); return s ? s.name : ""; };
+const etsLabel = n => String(n).replace(/@.*$/, "");
+const etsKinds = [["Joints", "joint"], ["Columns", "column"], ["Beams", "beam"], ["Braces", "brace"], ["Null Lines", "nullframe"], ["Walls", "wall"], ["Floors", "floor"], ["Null Areas", "nullarea"], ["Openings", "opening"], ["Links", "link"], ["Null Links", "nulllink"]];
+function etsApply(on, objIds, jointNames) {
+  if (on && (sel.size || selJ.size)) prevSel = {f: [...sel], j: [...selJ]};
+  for (const id of objIds || []) on ? sel.add(id) : sel.delete(id);
+  for (const n of jointNames || []) on ? selJ.add(String(n)) : selJ.delete(String(n));
+  selChanged();
+  hmSay(`${sel.size} objects and ${selJ.size} joints selected.`);
+}
+// One list form: pick names, then Select or Deselect what they name; the form stays open (Close closes it).
+function etsList(title, legend, names, pick, o) {
+  o = o || {};
+  const storyBox = o.story ? `<fieldset><legend>Select at This Story Level</legend><div class="g2"><span>Story</span><select id="esS">${opts(["All", ...stories.slice().reverse().map(s => s.name)], "All")}</select></div></fieldset>` : "";
+  const filterBox = o.filter ? `<fieldset><legend>Filter</legend><div style="display:flex;gap:6px"><input id="esF" style="flex:1"><button id="esC">Clear Filter</button></div></fieldset>` : "";
+  const d = dialog(title, `${storyBox}${filterBox}<fieldset><legend>${esc(legend)}</legend><select id="esL" multiple size="16" style="width:100%;min-width:240px">${names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join("")}</select></fieldset>`,
+    [["Select", x => { go(x, true); return false; }, true], ["Deselect", x => { go(x, false); return false; }, true], ["Close"]], {width: 360, float: true});
+  const go = (x, on) => { const chosen = [...q(x, "#esL").selectedOptions].map(op => op.value); if (!chosen.length) return hmSay("Pick at least one in the list.", true); const st = o.story ? q(x, "#esS").value : "All"; Promise.resolve(pick(chosen, st)).then(r => etsApply(on, r.ids, r.joints)); };
+  if (o.filter) { const f = q(d, "#esF"), paint = () => { const t = f.value.toLowerCase(); q(d, "#esL").innerHTML = names.filter(n => n.toLowerCase().includes(t)).map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join(""); }; f.oninput = paint; q(d, "#esC").onclick = () => { f.value = ""; paint(); }; }
+  const l = q(d, "#esL"); if (l.options.length) l.options[0].selected = true;
+  return d;
+}
+const etsOnStory = (o, st) => st === "All" || o.story === st;
+// What an object's assignments say (pier, spandrel, groups, springs, panel zone), asked of the model once per form.
+async function etsInfo() {
+  const names = etsObjs().map(o => o.name).concat(points.map(p => { const s = etsJointStory(p[0]); return s ? etsLabel(p[0]) + "@" + s : ""; }).filter(Boolean));
+  const j = await hmPost({tool: "property_definitions", args: {objects: names}}).catch(() => null);
+  return new Map(((j && j.ok && j.result.objects) || []).map(x => [x.object, x]));
+}
+const etsJointsOf = info => (pred) => points.filter(p => { const s = etsJointStory(p[0]); const x = info.get(etsLabel(p[0]) + "@" + s); return x && pred(x); }).map(p => String(p[0]));
+async function etsForm(what) {
+  const defs = await hmDefs(), objs = etsObjs(), byKind = k => objs.filter(o => k === "floor" ? o.kind === "floor" || o.kind === "ramp" : o.kind === k);
+  const ids = list => list.map(o => o.id);
+  switch (what) {
+    case "type": return etsList("Select by Object Type", "Object Type", etsKinds.map(k => k[0]), chosen => {
+      const ks = chosen.map(c => etsKinds.find(k => k[0] === c)[1]);
+      return {ids: ids(objs.filter(o => ks.some(k => k === "floor" ? o.kind === "floor" || o.kind === "ramp" : o.kind === k))), joints: ks.includes("joint") ? points.map(p => String(p[0])) : []};
+    });
+    case "material": { const mats = (defs.materials || []).map(m => m.name || m); return etsList("Select by Material Property", "Material Properties", mats, chosen => ({ids: ids(objs.filter(o => chosen.includes(sectionMat.get(o.section) || ((defs.frame_sections || []).concat(defs.shell_sections || []).find(s => s.name === o.section) || {}).material)))}), {filter: true}); }
+    case "frame": return etsList("Select by Frame Property", "Frame Properties", ["None", ...(defs.frame_sections || []).map(s => s.name)].sort((a, b) => a.localeCompare(b)), chosen => ({ids: ids(frames.filter(o => chosen.includes(o.section || "None")))}), {filter: true});
+    case "slab": case "deck": case "wall": { const word = {slab: "Slab", deck: "Deck", wall: "Wall"}[what], list = (defs.shell_sections || []).filter(s => s.kind === what).map(s => s.name); return etsList(`Select by ${word} Property`, `${word} Properties`, list, chosen => ({ids: ids(areas.filter(o => chosen.includes(o.section)))}), {filter: true}); }
+    case "link": { const pd = (await hmRun("property_definitions", {}, true)).result || {links: []}; return etsList("Select by Link/Support Property", "Link/Support Properties", (pd.links || []).map(l => l.name), chosen => ({ids: ids(frames.filter(o => o.kind === "link" && chosen.includes(o.section)))}), {filter: true}); }
+    case "pspring": case "lspring": case "aspring": {
+      const kind = {pspring: "point", lspring: "line", aspring: "area"}[what], pd = (await hmRun("property_definitions", {}, true)).result || {springs: []}, list = (pd.springs || []).filter(s => !s.kind || s.kind === kind).map(s => s.name);
+      return etsList(`Select by ${{point: "Point", line: "Line", area: "Area"}[kind]} Spring Property`, `${{point: "Point", line: "Line", area: "Area"}[kind]} Springs`, list, async chosen => {
+        const info = await etsInfo();
+        if (kind === "point") return {joints: etsJointsOf(info)(x => x.kind === "joint" && chosen.includes(x.spring))};
+        return {ids: ids((kind === "line" ? frames : areas).filter(o => chosen.includes((info.get(o.name) || {}).spring)))};
+      }, {filter: true});
+    }
+    case "panel": {
+      const info = await etsInfo(), pz = x => { for (const [t, rows] of Object.entries(x.tables || {})) if (/panel zone/i.test(t)) for (const r of [].concat(rows)) { const v = r && (r.Property || r.PZProp || r.PanelZone); if (v) return String(v); } return ""; };
+      const list = [...new Set([...info.values()].filter(x => x.kind === "joint").map(pz).filter(Boolean))];
+      return etsList("Select by Panel Zone Property", "Panel Zones", list, chosen => ({joints: etsJointsOf(info)(x => x.kind === "joint" && chosen.includes(pz(x)))}), {filter: true});
+    }
+    case "pier": case "spandrel": {
+      const info = await etsInfo(), list = [...new Set([...info.values()].map(x => x[what]).filter(Boolean))].sort();
+      return etsList(`Select by ${what === "pier" ? "Pier" : "Spandrel"} Label`, `${what === "pier" ? "Pier" : "Spandrel"} Labels`, list, (chosen, st) => ({ids: ids(objs.filter(o => etsOnStory(o, st) && chosen.includes((info.get(o.name) || {})[what])))}), {story: true});
+    }
+    case "jlabel": return etsList("Select by Joint Label", "Joint Labels", [...new Set(points.map(p => etsLabel(p[0])))].sort((a, b) => a.localeCompare(b, undefined, {numeric: true})), (chosen, st) => ({joints: points.filter(p => chosen.includes(etsLabel(p[0])) && (st === "All" || etsJointStory(p[0]) === st)).map(p => String(p[0]))}), {story: true});
+    case "flabel": return etsList("Select by Frame Label", "Frame Labels", [...new Set(frames.map(o => etsLabel(o.name)))].sort((a, b) => a.localeCompare(b, undefined, {numeric: true})), (chosen, st) => ({ids: ids(frames.filter(o => etsOnStory(o, st) && chosen.includes(etsLabel(o.name))))}), {story: true});
+    case "slabel": return etsList("Select by Shell Label", "Shell Labels", [...new Set(areas.map(o => etsLabel(o.name)))].sort((a, b) => a.localeCompare(b, undefined, {numeric: true})), (chosen, st) => ({ids: ids(areas.filter(o => etsOnStory(o, st) && chosen.includes(etsLabel(o.name))))}), {story: true});
+    case "jname": return etsList("Select by Joint Unique Names", "Joint Unique Names", points.map(p => String(p[0])), chosen => ({joints: chosen}), {filter: true});
+    case "fname": return etsList("Select by Frame Unique Names", "Frame Unique Names", frames.filter(o => o.kind !== "link").map(o => o.name), chosen => ({ids: ids(frames.filter(o => chosen.includes(o.name)))}), {filter: true});
+    case "sname": return etsList("Select by Shell Unique Names", "Shell Unique Names", areas.map(o => o.name), chosen => ({ids: ids(areas.filter(o => chosen.includes(o.name)))}), {filter: true});
+    case "lname": return etsList("Select by Link Unique Names", "Link Unique Names", frames.filter(o => o.kind === "link").map(o => o.name), chosen => ({ids: ids(frames.filter(o => chosen.includes(o.name)))}), {filter: true});
+    case "groups": {
+      const sd = (await hmRun("structure_definitions", {}, true)).result || {groups: []}, list = ["All", ...(sd.groups || []).map(g => g.name).filter(n => !/^all$/i.test(n))];
+      return etsList("Select by Groups", "Groups", list, async chosen => {
+        if (chosen.includes("All")) return {ids: ids(objs), joints: points.map(p => String(p[0]))};
+        const info = await etsInfo(), inG = x => (x.groups || []).some(g => chosen.includes(g));
+        return {ids: ids(objs.filter(o => inG(info.get(o.name) || {}))), joints: etsJointsOf(info)(x => x.kind === "joint" && inG(x))};
+      });
+    }
+    case "stories": return etsList("Select by Stories", "Stories", stories.slice().reverse().map(s => s.name), chosen => ({ids: ids(objs.filter(o => chosen.includes(o.story))), joints: points.filter(p => chosen.includes(etsJointStory(p[0]))).map(p => String(p[0]))}));
+  }
+}
+function etsSub(de) {
+  const p = de ? "m:ets:" : "m:ets:";
+  const f = k => p + k;
+  return [["Pointer/Window", "t:select"], ["Intersecting Line", "t:iline", de ? "" : "Shift+Ctrl+L"], 0,
+    ["Object Type...", f("type")], 0,
+    ["Properties", [["Material Properties...", f("material")], 0, ["Frame Sections...", f("frame")], ["Slab Sections...", f("slab")], ["Deck Sections...", f("deck")], ["Wall Sections...", f("wall")], 0, ["Link/Support Properties...", f("link")], 0, ["Point Springs...", f("pspring")], ["Line Springs...", f("lspring")], ["Area Springs...", f("aspring")], 0, ["Panel Zones...", f("panel")]]], 0,
+    ["Labels", [["Pier Labels...", f("pier")], ["Spandrel Labels...", f("spandrel")], 0, ["Joint Labels...", f("jlabel")], ["Frame Labels...", f("flabel")], ["Shell Labels...", f("slabel")], 0, ["Joint Unique Names...", f("jname")], ["Frame Unique Names...", f("fname")], ["Shell Unique Names...", f("sname")], ["Link Unique Names...", f("lname")]]], 0,
+    ["Groups...", f("groups"), de ? "" : "Ctrl+G"], 0, ["Stories...", f("stories")], 0, ["All", de ? "selNone" : "selAll", de ? "" : "Ctrl+A"]];
+}
+function etsSelectMenu() {
+  return [["Select", etsSub(false)], ["Deselect", etsSub(true)], 0, ["Invert Selection", "selInvert", "Ctrl+K"], 0, ["Get Previous Selection", "selPrev", "Ctrl+J", !prevSel.f.length && !prevSel.j.length], 0, ["Clear Selection", "selNone", "Ctrl+Q", !sel.size && !selJ.size]];
+}
+// Ctrl+K, Ctrl+J, Ctrl+Q and Ctrl+G as ETABS has them.
+document.addEventListener("keydown", e => {
+  if (program !== "etabs" || !(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || (e.target.closest && e.target.closest("input, textarea, select"))) return;
+  const a = {k: "selInvert", j: "selPrev", q: "selNone", g: "m:ets:groups"}[e.key.toLowerCase()]; if (!a) return;
+  e.preventDefault(); act(a);
+});
+// ---- ETABS View menu, read from the 23.2 pictures (field/reference-forms/etabs/View) ----
+var etv = {limits: null, zPlanes: {}, lastHidden: [], measure: null, cutSide: "Left"};
+const etvKey = k => "cpm-etabs-" + k + ":" + ((P && P.manifest && (P.manifest.model || P.manifest.name)) || "model");
+function etvUserElev() { try { return JSON.parse(localStorage.getItem(etvKey("elevations")) || "[]"); } catch { return etvUserElev.mem || []; } }
+function etvUserElevSave(list) { etvUserElev.mem = list; try { localStorage.setItem(etvKey("elevations"), JSON.stringify(list)); } catch {} }
+function etvDx() { try { return JSON.parse(localStorage.getItem("cpm-etabs-directx") || "null"); } catch { return null; } }
+const etvDxDefault = {dir: true, dPlan: 0, dElev: 0, amb: 0.3, spec: true, sPlan: 0, sElev: 0, power: 10, aa: true, ms: true, nFrames: true, nShells: true, step: 0, near: 0.05, far: 0.95};
+const etvM = v => v / (L(1) || 1);
+function etvSig() { const l = etv.limits; return (l && !l.ignore ? [l.x0, l.x1, l.y0, l.y1, l.top, l.bot].join(",") : "") + "|" + Object.keys(etv.zPlanes).length; }
+function etvInLimits(o) {
+  // Set Building View Limits: an object shows when all of it lies inside the plan box and the story range.
+  const l = etv.limits; if (!l || l.ignore) return true;
+  const pts = o.type === "f" ? [o.a, o.b] : o.pts || [], t = tol() * 10, zt = elevationOf(l.top), zb = elevationOf(l.bot);
+  return pts.every(q => q[0] >= l.x0 - t && q[0] <= l.x1 + t && q[1] >= l.y0 - t && q[1] <= l.y1 + t && (zt === null || q[2] <= zt + t) && (zb === null || q[2] >= zb - t));
+}
+function etvCutKeeps(p, o) {
+  // Set Elevation View with 3D Section Cut: the 3-D view keeps the part on one side of the elevation.
+  const c = p.cut; if (!c || p.mode !== "3d") return true;
+  const i = c.dir === "X" ? 0 : 1, t = tol() * 10, pts = o.type === "f" ? [o.a, o.b] : o.pts || [];
+  return pts.every(q => c.side === "Left" ? q[i] >= c.at - t : q[i] <= c.at + t);
+}
+function etvViewMenu() {
+  const p = panes[active], anySel = sel.size || selJ.size, anyHidden = hidden.objs.size || hidden.kind.size || hidden.section.size;
+  return [["Set 3D View...", "m:etv:3d", "Shift+Ctrl+F3"], ["Set Plan View...", "m:etv:plan", "Shift+Ctrl+F1"], ["Set Elevation View...", "m:etv:elev", "Shift+Ctrl+F2"], 0,
+    ["Set Building View Limits...", "m:etv:limits"], 0,
+    ["Set Display Options...", "dlg:display", "Ctrl+W"], 0,
+    ["Rubber Band Zoom", "t:zoom", "F2"], ["Restore Full View", "fitActive", "F3"], ["Previous Zoom", "zprev"], ["Zoom In One Step", "zin", "Shift+F2"], ["Zoom Out One Step", "zout", "Shift+F3"], 0,
+    ["Pan", "t:pan", "F10", !(p && p.camPrev)], ["Walk", "t:walk"], 0,
+    ["Measure", [["Measure Line", "t:measure:line"], ["Measure Angle", "t:measure:angle"], ["Measure Area", "t:measure:area"]]], 0,
+    ["Set Grid System Visibility...", "o:grid", "Ctrl+D"], ["Show Axes", "o:axes"], ["Change Axes Location...", "m:etv:axes"], 0,
+    ["Show Selected Objects Only", "m:etv:only", "Shift+Ctrl+J", !anySel], ["Invert Visibility of Objects", "m:etv:invert", "", !anyHidden], ["Make Selected Objects Invisible", "m:etv:hide", "", !sel.size],
+    ["Restore Visibility of Previous Selection", "m:etv:restore", "", !etv.lastHidden.length], ["Show All Objects", "showAll", "Shift+Ctrl+A", !anyHidden], 0,
+    ["Refresh Window", "m:etv:refreshW", "Shift+Ctrl+W"], ["Refresh View", "m:etv:refreshV", "Shift+Ctrl+V"], 0,
+    ["Show Rendered View (Ray Tracing)", "m:etv:render", "", true], ["DirectX View Settings", "m:etv:dx"]];
+}
+function etvHide(ids) { if (!ids.length) return; etv.lastHidden = ids.slice(); ids.forEach(id => hidden.objs.add(id)); hiddenVersion++; sel.clear(); selJ.clear(); selChanged(); }
+function etvAct(a) {
+  const p = panes[active], all = frames.concat(areas);
+  if (a === "3d") return etvView3d();
+  if (a === "plan") return etvPlanView();
+  if (a === "elev") return etvElevView();
+  if (a === "limits") return etvLimits();
+  if (a === "axes") return etvAxes();
+  if (a === "dx") return etvDxForm();
+  if (a === "hide") return etvHide([...sel]);
+  if (a === "only") { const keep = new Set(sel); for (const f of frames) if (selJ.has(f.j1) && selJ.has(f.j2)) keep.add(f.id); return etvHide(all.filter(o => !keep.has(o.id) && !hidden.objs.has(o.id)).map(o => o.id)); }
+  if (a === "invert") { const was = new Set(hidden.objs), kind = new Set(hidden.kind), secs = new Set(hidden.section); hidden.objs.clear(); hidden.kind.clear(); hidden.section.clear(); for (const o of all) if (!(was.has(o.id) || kind.has(o.kind) || secs.has(o.type + ":" + o.section))) hidden.objs.add(o.id); hiddenVersion++; buildTree(); return selChanged(); }
+  if (a === "restore") { for (const id of etv.lastHidden) hidden.objs.delete(id); const ids = etv.lastHidden; etv.lastHidden = []; hiddenVersion++; ids.forEach(id => sel.add(id)); return selChanged(); }
+  if (a === "refreshW") { if (p) { p.sig = ""; p.vis = null; } return draw(); }
+  if (a === "refreshV") { geometryDirty = true; geometryStamp++; hiddenVersion++; colourDirty = true; panes.forEach(q => { q.sig = ""; q.vis = null; q.auxSig = ""; }); return draw(); }
+}
+function etvSpin(id, v, step) { return `<span style="display:inline-flex;align-items:center"><input id="${id}" value="${esc(String(v))}" style="width:64px"><span style="display:inline-flex;flex-direction:column;margin-left:2px"><button type="button" data-sp="${id}" data-d="${step}" style="padding:0 4px;line-height:9px;font-size:8px">&#9650;</button><button type="button" data-sp="${id}" data-d="${-step}" style="padding:0 4px;line-height:9px;font-size:8px">&#9660;</button></span></span>`; }
+function etvSpinWire(d, after) { d.querySelectorAll("[data-sp]").forEach(b => b.onclick = () => { const i = q(d, "#" + b.dataset.sp); i.value = String(Math.round(((+i.value || 0) + +b.dataset.d) * 1000) / 1000); if (after) after(); }); }
+function etvView3d() {
+  // Set 3D View: ETABS's plan angle is where the eye stands, measured from X; elevation is above the XY plane; aperture 0 is no perspective.
+  const p = panes[active]; if (!p) return;
+  const deg = r => Math.round(r * 1800 / Math.PI) / 10, plan = ((deg(p.cam.yaw) + 180) % 360 + 360) % 360, elev = Math.round(deg(p.cam.pitch)), ap = p.cam.ap ?? 60;
+  const d = dialog("Set 3D View", `<div style="display:flex;gap:10px;margin-bottom:8px"><canvas id="e3Box" width="150" height="120" style="border:1px solid var(--line);background:#fff"></canvas><canvas id="e3Ax" width="96" height="120" style="border:1px solid var(--line);background:#fff"></canvas></div>
+    <div style="display:flex;gap:8px"><fieldset style="flex:1"><legend>View Direction Angle</legend><div class="g2"><span>${etvSpin("e3P", plan === 0 ? 0 : plan, 5)}</span><span>Plan</span><span>${etvSpin("e3E", elev, 5)}</span><span>Elevation</span><span>${etvSpin("e3A", ap, 5)}</span><span>Aperture</span></div></fieldset>
+    <fieldset><legend>Fast View</legend><div style="display:grid;grid-template-columns:auto auto;gap:6px"><button type="button" data-fv="3d">3d</button><button type="button" data-fv="xy">xy</button><button type="button" data-fv="xz">xz</button><button type="button" data-fv="yz">yz</button></div></fieldset></div>`,
+    [["OK", d => {
+      const pl = fnum(d, "#e3P"), el = fnum(d, "#e3E"), a = fnum(d, "#e3A");
+      if (![pl, el, a].every(isFinite)) { formError(d, "Enter numbers for Plan, Elevation and Aperture."); return false; }
+      if (a < 0 || a >= 180) { formError(d, "Aperture must be from 0 to less than 180 degrees."); return false; }
+      if (p.mode !== "3d") setMode(p, "3d");
+      const cam = {...p.cam, yaw: (pl - 180) * Math.PI / 180, pitch: Math.max(-89.9, Math.min(89.99, el)) * Math.PI / 180, persp: a > 0, ap: a, fov: a > 0 ? a * Math.PI / 180 : p.cam.fov};
+      go(p, fitCam(p, cam)); syncTools();
+    }], ["Cancel"]], {width: 400});
+  const paint = () => {
+    const c = q(d, "#e3Ax"), g = c.getContext("2d"), pl = (+q(d, "#e3P").value || 0) * Math.PI / 180, el = (+q(d, "#e3E").value || 0) * Math.PI / 180;
+    const {right, up} = camAxes({yaw: pl - Math.PI, pitch: Math.min(el, Math.PI / 2 - 1e-4)});
+    g.clearRect(0, 0, c.width, c.height); g.font = "10px Segoe UI"; g.lineWidth = 1.4;
+    for (const [n, v, col] of [["X", [1, 0, 0], "#e00"], ["Y", [0, 1, 0], "#0a0"], ["Z", [0, 0, 1], "#00d"]]) { const x = dot(v, right), y = dot(v, up); if (Math.hypot(x, y) < 0.05) continue; g.strokeStyle = g.fillStyle = col; g.beginPath(); g.moveTo(48, 64); g.lineTo(48 + x * 34, 64 - y * 34); g.stroke(); g.fillText(n, 50 + x * 38, 66 - y * 38); }
+    const b = q(d, "#e3Box").getContext("2d"); b.fillStyle = "#c8ccd2"; b.fillRect(0, 0, 150, 120); b.fillStyle = "#e6e2a8"; b.fillRect(14, 10, 122, 100); b.fillStyle = "#a8d8d8"; b.fillRect(22, 14, 106, 92); b.fillStyle = "#b9bdc3"; b.fillRect(28, 18, 94, 84);
+  };
+  etvSpinWire(d, paint); d.querySelectorAll("#e3P,#e3E").forEach(i => i.oninput = paint);
+  const fast = {"3d": [315, 35], xy: [270, 90], xz: [270, 0], yz: [0, 0]};
+  d.querySelectorAll("[data-fv]").forEach(b => b.onclick = () => { const [pl, el] = fast[b.dataset.fv]; q(d, "#e3P").value = pl; q(d, "#e3E").value = el; paint(); });
+  paint();
+}
+function etvPlanView() {
+  // Select Plan View: a story level (or reference plane) from the list, or a plan at any global Z.
+  const p = panes[active], z0 = p && p.mode === "plan" ? elevationOf(p.story) : null, cur = p && p.mode === "plan" ? p.story : topStory();
+  const names = stories.slice().reverse().map(s => s.name);
+  const d = dialog("Select Plan View", `<fieldset><legend>Plan View Options</legend><label style="display:block"><input type="radio" name="spO" value="story" checked> Default Plan from Story Level or Reference Plane</label><label style="display:block"><input type="radio" name="spO" value="z"> At Specified Global Z Coordinate</label></fieldset>
+    <fieldset id="spS"><legend>Select a Story Level or Reference Plane</legend><div class="row" style="margin:0 0 4px"><span style="width:44px">Filter</span><input id="spF" style="flex:1"><button type="button" id="spC">Clear</button></div><select id="spL" size="12" style="width:100%;height:auto"></select></fieldset>
+    <fieldset id="spZ" hidden><legend>Set a Global Z Coordinate</legend><div class="row" style="margin:0"><span style="width:130px">Global Z Coordinate</span><input id="spZv" value="${num(L(z0 ?? 0))}" style="width:110px"><span>${esc(lu())}</span></div><label style="display:block;margin-top:4px"><input type="checkbox" id="spJ" ${selJ.size === 1 ? "" : "disabled"}> Set Coordinate at Selected Joint Object</label></fieldset>`,
+    [["OK", d => apply(d)], ["Close"], ["Apply", d => { apply(d); return false; }, true]], {width: 330});
+  const fill = () => { const f = q(d, "#spF").value.trim().toLowerCase(); q(d, "#spL").innerHTML = names.filter(n => !f || n.toLowerCase().includes(f)).map(n => `<option ${n === cur ? "selected" : ""}>${esc(n)}</option>`).join(""); if (q(d, "#spL").selectedIndex < 0 && q(d, "#spL").options.length) q(d, "#spL").selectedIndex = 0; };
+  q(d, "#spF").oninput = fill; q(d, "#spC").onclick = () => { q(d, "#spF").value = ""; fill(); };
+  d.querySelectorAll("[name=spO]").forEach(r => r.onchange = () => { const z = q(d, "[name=spO]:checked").value === "z"; q(d, "#spS").hidden = z; q(d, "#spZ").hidden = !z; });
+  q(d, "#spJ").onchange = () => { const at = q(d, "#spJ").checked && pointXyz.get(String([...selJ][0])); if (at) q(d, "#spZv").value = num(L(at[2])); };
+  q(d, "#spL").ondblclick = () => { apply(d); d.close(); };
+  fill();
+  function apply(d) {
+    if (q(d, "[name=spO]:checked").value === "story") { const n = q(d, "#spL").value; if (!n) { formError(d, "Select a story."); return false; } return setStory(n); }
+    const z = fnum(d, "#spZv"); if (!isFinite(z)) { formError(d, "Enter the global Z coordinate."); return false; }
+    const zm = etvM(z), at = stories.find(s => Math.abs(s.elevation - zm) <= tol() * 10);
+    if (at) return setStory(at.name);
+    const name = "Z = " + num(z) + (lu() ? " (" + lu() + ")" : ""); etv.zPlanes[name] = zm; setStory(name);
+  }
+}
+function etvElevView() {
+  // Set Elevation View: grid line elevations and the user's own ones, the user's added at an ordinate.
+  const p = panes[active];
+  const d = dialog("Set Elevation View", `<fieldset><legend>Elevations</legend><div style="display:grid;grid-template-columns:1fr 150px;gap:6px 12px">
+    <div><div style="display:flex;align-items:center;gap:6px"><span style="width:44px">Filter</span><input id="seF" style="flex:1"></div><label style="display:block;margin-left:48px"><input type="checkbox" id="seG" checked> Include Grid Line Elevations</label><label style="display:block;margin-left:48px"><input type="checkbox" id="seU" checked> Include User Elevations</label></div>
+    <div><button type="button" id="seC" style="width:100%">Clear Filter</button></div>
+    <select id="seL" size="14" style="width:100%;height:auto"></select>
+    <div style="display:flex;flex-direction:column;gap:6px"><button type="button" id="seAdd">Add at Ordinate...</button><button type="button" id="seBeam">Add at Selected Beam</button><button type="button" id="seRen">Change Name...</button><button type="button" id="seDel">Delete Elevation</button>
+      <div style="margin-top:auto"><label style="display:block"><input type="checkbox" id="seCut"> 3D Section Cut</label><label style="display:block;margin-top:6px"><input type="radio" name="seS" value="Left" ${etv.cutSide !== "Right" ? "checked" : ""} disabled> Left</label><label style="display:block;margin-top:6px"><input type="radio" name="seS" value="Right" ${etv.cutSide === "Right" ? "checked" : ""} disabled> Right</label></div></div></div></fieldset>`,
+    [["OK", d => apply(d)], ["Close"], ["Apply", d => { apply(d); return false; }, true]], {width: 420});
+  const list = () => { const f = q(d, "#seF").value.trim().toLowerCase(), out = []; if (q(d, "#seG").checked) for (const g of grids.X.concat(grids.Y)) out.push({...g, grid: true}); if (q(d, "#seU").checked) for (const u of etvUserElev()) out.push({...u, user: true}); return out.filter(g => !f || g.label.toLowerCase().includes(f)); };
+  let shown = [];
+  const fill = keep => { const was = keep ?? q(d, "#seL").value, cur = p && p.mode === "elev" && p.line ? p.line.dir + p.line.label : ""; shown = list(); q(d, "#seL").innerHTML = shown.map((g, i) => `<option value="${i}" ${g.dir + g.label === (was !== "" && shown[+was] ? shown[+was].dir + shown[+was].label : cur) ? "selected" : ""}>${esc(g.label)}</option>`).join(""); if (q(d, "#seL").selectedIndex < 0 && shown.length) q(d, "#seL").selectedIndex = 0; sync(); };
+  const pick = () => shown[+q(d, "#seL").value];
+  const beam = () => { const f = [...sel].map(objOf).find(o => o && o.type === "f" && Math.abs(o.a[2] - o.b[2]) <= tol() * 10 && (Math.abs(o.a[0] - o.b[0]) <= tol() * 10 || Math.abs(o.a[1] - o.b[1]) <= tol() * 10)); return f; };
+  const sync = () => { const g = pick(); q(d, "#seRen").disabled = q(d, "#seDel").disabled = !(g && g.user); q(d, "#seBeam").disabled = !beam(); const cut = q(d, "#seCut").checked; d.querySelectorAll("[name=seS]").forEach(r => r.disabled = !cut); };
+  q(d, "#seF").oninput = () => fill(""); q(d, "#seC").onclick = () => { q(d, "#seF").value = ""; fill(""); };
+  q(d, "#seG").onchange = q(d, "#seU").onchange = () => fill(""); q(d, "#seL").onchange = sync; q(d, "#seCut").onchange = sync;
+  q(d, "#seL").ondblclick = () => { apply(d); d.close(); };
+  const addUser = g => { const l = etvUserElev(); let n = g.label, i = 1; while (l.some(x => x.label === n) || allLines().some(x => x.label === n)) n = g.label + "-" + i++; l.push({...g, label: n}); etvUserElevSave(l); q(d, "#seU").checked = true; fill(""); const k = shown.findIndex(x => x.user && x.label === n); if (k >= 0) { q(d, "#seL").value = String(k); sync(); } };
+  q(d, "#seAdd").onclick = () => etvAddAtOrdinate(addUser);
+  q(d, "#seBeam").onclick = () => { const f = beam(); if (!f) return; const alongX = Math.abs(f.a[1] - f.b[1]) <= tol() * 10; addUser(alongX ? {dir: "Y", at: f.a[1], label: "Y = " + num(L(f.a[1]))} : {dir: "X", at: f.a[0], label: "X = " + num(L(f.a[0]))}); };
+  q(d, "#seRen").onclick = () => { const g = pick(); if (!g || !g.user) return; const r = dialog("Change Name", `<div class="row" style="margin:0"><span style="width:60px">Name</span><input id="cnN" value="${esc(g.label)}" style="flex:1"></div>`, [["OK", r => { const n = q(r, "#cnN").value.trim(); const l = etvUserElev(); if (!n) { formError(r, "Enter a name."); return false; } if (n !== g.label && (l.some(x => x.label === n) || allLines().some(x => x.label === n))) { formError(r, "That name is already used."); return false; } const it = l.find(x => x.label === g.label); if (it) it.label = n; etvUserElevSave(l); fill(""); }], ["Cancel"]], {width: 280}); };
+  q(d, "#seDel").onclick = () => { const g = pick(); if (!g || !g.user) return; etvUserElevSave(etvUserElev().filter(x => x.label !== g.label)); fill(""); };
+  fill();
+  function apply(d) {
+    const g = pick(); if (!g) { formError(d, "Select an elevation."); return false; }
+    const line = {dir: g.dir, label: g.label, at: g.at};
+    if (q(d, "#seCut").checked) {
+      // 3D Section Cut: a 3-D view of the model on one side of the elevation, seen from the cut.
+      const side = q(d, "[name=seS]:checked").value, pp = panes[active]; if (!pp) return; etv.cutSide = side;
+      setMode(pp, "3d"); pp.cut = {dir: g.dir, at: g.at, side, label: g.label};
+      const yaw = g.dir === "X" ? (side === "Left" ? Math.PI : 0) : (side === "Left" ? Math.PI / 2 : -Math.PI / 2);
+      pp.sig = ""; pp.vis = null; go(pp, fitCam(pp, {...pp.cam, yaw: yaw + (side === "Left" ? -0.35 : 0.35), pitch: 0.3})); syncTools(); return;
+    }
+    const pp = panes[active]; if (pp) pp.cut = null;
+    setLine(allLines().find(x => x.dir === line.dir && x.label === line.label) || line);
+  }
+}
+function etvAddAtOrdinate(done) {
+  const at1 = selJ.size === 1 ? pointXyz.get(String([...selJ][0])) : null, one = at1 ? {at: at1} : null;
+  const d = dialog("Add Elevation View At Ordinate", `<fieldset><legend>Add Options</legend><div class="row"><span style="width:110px">Grid System</span><select id="aoG" style="flex:1"><option>G1</option></select></div>
+    <div class="row"><label style="width:120px"><input type="radio" name="aoD" value="X" checked> X Ordinate</label><input id="aoX" value="0" style="width:110px"><span>${esc(lu())}</span></div>
+    <div class="row"><label style="width:120px"><input type="radio" name="aoD" value="Y"> Y Ordinate</label><input id="aoY" value="" disabled style="width:110px"></div>
+    <label style="display:block"><input type="checkbox" id="aoJ" ${one ? "" : "disabled"}> Set Ordinate to Selected Joint Coordinate</label></fieldset>`,
+    [["OK", d => { const dir = q(d, "[name=aoD]:checked").value, v = fnum(d, dir === "X" ? "#aoX" : "#aoY"); if (!isFinite(v)) { formError(d, "Enter the ordinate."); return false; } done({dir, at: etvM(v), label: dir + " = " + num(v)}); }], ["Cancel"]], {width: 360});
+  const sw = () => { const x = q(d, "[name=aoD]:checked").value === "X"; q(d, "#aoX").disabled = !x; q(d, "#aoY").disabled = x; if (x && q(d, "#aoX").value === "") q(d, "#aoX").value = "0"; if (!x && q(d, "#aoY").value === "") q(d, "#aoY").value = "0"; if (q(d, "#aoJ").checked) jt(); };
+  const jt = () => { if (!one || !q(d, "#aoJ").checked) return; q(d, "#aoX").value = num(L(one.at[0])); q(d, "#aoY").value = num(L(one.at[1])); };
+  d.querySelectorAll("[name=aoD]").forEach(r => r.onchange = sw); q(d, "#aoJ").onchange = jt;
+}
+function etvLimits() {
+  // Set Building View Limits: a plan box and a story range that every window draws inside, unless Ignore Limits is on.
+  if (!P) return;
+  const l = etv.limits || {x0: lo[0], x1: hi[0], y0: lo[1], y1: hi[1], top: topStory(), bot: stories.length ? stories[0].name : "", ignore: false};
+  const names = stories.slice().reverse().map(s => s.name), U = esc(lu());
+  const d = dialog("Set Building View Limits", `<div style="display:flex;gap:12px"><fieldset style="flex:1"><legend>Plan Limits</legend><div style="display:flex;gap:10px"><div style="flex:1">
+    <fieldset><legend>Set X Axis Limits</legend><div class="g2"><span>Min</span><span><input id="blX0" value="${num(L(l.x0))}" style="width:80px"> ${U}</span><span>Max</span><span><input id="blX1" value="${num(L(l.x1))}" style="width:80px"> ${U}</span></div><button type="button" data-all="x" style="margin-left:60px">Show All</button></fieldset>
+    <fieldset><legend>Set Y Axis Limits</legend><div class="g2"><span>Min</span><span><input id="blY0" value="${num(L(l.y0))}" style="width:80px"> ${U}</span><span>Max</span><span><input id="blY1" value="${num(L(l.y1))}" style="width:80px"> ${U}</span></div><button type="button" data-all="y" style="margin-left:60px">Show All</button></fieldset></div>
+    <div><canvas id="blC" width="160" height="160" style="border:1px solid var(--line);background:#fff"></canvas><label style="display:block;margin-top:8px"><input type="checkbox" id="blI" ${l.ignore ? "checked" : ""}> Ignore Limits</label></div></div></fieldset></div>
+    <div style="display:flex;gap:12px;align-items:flex-start"><fieldset style="flex:1"><legend>Set Story Range</legend><div class="g2"><span>Top Story</span><select id="blT">${opts(names, l.top)}</select><span>Bottom Story</span><select id="blB">${opts(names, l.bot)}</select></div><button type="button" data-all="s" style="margin-left:150px">Show All</button></fieldset>
+    <div style="display:flex;flex-direction:column;gap:8px;padding-top:14px"></div></div>`,
+    [["OK", d => {
+      const v = ["#blX0", "#blX1", "#blY0", "#blY1"].map(s => fnum(d, s)); if (!v.every(isFinite)) { formError(d, "Enter numbers for the limits."); return false; }
+      if (v[0] > v[1] || v[2] > v[3]) { formError(d, "Min must not be more than Max."); return false; }
+      const top = q(d, "#blT").value, bot = q(d, "#blB").value; if (elevationOf(top) < elevationOf(bot)) { formError(d, "The top story must be above the bottom story."); return false; }
+      etv.limits = {x0: etvM(v[0]), x1: etvM(v[1]), y0: etvM(v[2]), y1: etvM(v[3]), top, bot, ignore: q(d, "#blI").checked};
+      hiddenVersion++; panes.forEach(p => { p.sig = ""; p.vis = null; }); draw();
+    }], ["Cancel"]], {width: 470});
+  d.querySelectorAll("[data-all]").forEach(b => b.onclick = () => { const k = b.dataset.all; if (k === "x") { q(d, "#blX0").value = num(L(lo[0])); q(d, "#blX1").value = num(L(hi[0])); } else if (k === "y") { q(d, "#blY0").value = num(L(lo[1])); q(d, "#blY1").value = num(L(hi[1])); } else { q(d, "#blT").value = names[0] || ""; q(d, "#blB").value = names[names.length - 1] || ""; } paint(); });
+  d.querySelectorAll("#blX0,#blX1,#blY0,#blY1").forEach(i => i.oninput = paint);
+  function paint() {
+    // The plan with its columns as dots and the limits box, as the picture shows.
+    const c = q(d, "#blC"), g = c.getContext("2d"), w = hi[0] - lo[0] || 1, h = hi[1] - lo[1] || 1, s = 130 / Math.max(w, h), ox = 80 - w * s / 2, oy = 80 + h * s / 2, X = x => ox + (x - lo[0]) * s, Y = y => oy - (y - lo[1]) * s;
+    g.clearRect(0, 0, 160, 160); g.fillStyle = "#0000ff";
+    for (const f of frames) if (Math.abs(f.a[0] - f.b[0]) < 1e-6 && Math.abs(f.a[1] - f.b[1]) < 1e-6) g.fillRect(X(f.a[0]) - 2.5, Y(f.a[1]) - 2.5, 5, 5);
+    const v = ["#blX0", "#blX1", "#blY0", "#blY1"].map(s => etvM(+q(d, s).value || 0)); g.strokeStyle = "#555"; g.strokeRect(X(v[0]), Y(v[3]), (v[1] - v[0]) * s, (v[3] - v[2]) * s);
+  }
+  paint();
+}
+function etvAxes() {
+  const p = panes[active], a = (p && p.axesAt) || [0, 0, 0], U = esc(lu());
+  dialog("Axes Location", `<fieldset><legend>Change Location To</legend><div class="g2"><span>X-Ordinate</span><span><input id="axX" value="${num(L(a[0]))}" style="width:90px"> ${U}</span><span>Y-Ordinate</span><span><input id="axY" value="${num(L(a[1]))}" style="width:90px"> ${U}</span><span>Z-Ordinate</span><span><input id="axZ" value="${num(L(a[2]))}" style="width:90px"> ${U}</span></div></fieldset><label style="display:block;margin-top:6px"><input type="checkbox" id="axA"> Apply to All Windows</label>`,
+    [["OK", d => { const v = ["#axX", "#axY", "#axZ"].map(s => fnum(d, s)); if (!v.every(isFinite)) { formError(d, "Enter numbers for the ordinates."); return false; } const at = v.map(etvM), zero = at.every(x => Math.abs(x) < 1e-12); (q(d, "#axA").checked ? panes : [p]).forEach(w => { if (w) w.axesAt = zero ? null : at; }); opt.axes = true; syncTools(); draw(); }], ["Cancel"]], {width: 300});
+}
+function etvDxForm() {
+  // DirectX View Settings: the lights, the graphics device and normal averaging; OK keeps them and the 3-D view uses the lights.
+  const v = {...etvDxDefault, ...(etvDx() || {})}, step = v.step || Math.round(radius() * 2 / 3 * 1e4) / 1e4;
+  const chk = (id, on, t) => `<label style="display:block;margin:6px 0"><input type="checkbox" id="${id}" ${on ? "checked" : ""}> ${t}</label>`;
+  const row = (id, val, t, st) => `<div style="display:flex;align-items:center;gap:6px;margin:6px 0">${etvSpin(id, val, st)}<span>${t}</span></div>`;
+  const d = dialog("DirectX View Settings", `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+    <fieldset><legend>Directional Light</legend>${chk("dxD", v.dir, "Use Directional Light")}${row("dxDP", v.dPlan, "Plan", 5)}${row("dxDE", v.dElev, "Elevation", 5)}${row("dxAm", v.amb, "Ambient", 0.1)}</fieldset>
+    <fieldset><legend>Specular Light</legend>${chk("dxS", v.spec, "Use Specular Light")}${row("dxSP", v.sPlan, "Plan", 5)}${row("dxSE", v.sElev, "Elevation", 5)}${row("dxPw", v.power, "Power", 1)}</fieldset>
+    <fieldset style="grid-row:span 2"><legend>Viewing Volume</legend><div>Step Size</div><input id="dxSt" value="${num(L(step))}" style="width:100%;margin:4px 0 10px"><div style="text-align:center">Near Distance</div><input type="range" id="dxN" min="0" max="1" step="0.01" value="${v.near}" style="width:100%"><div style="display:flex;justify-content:space-between"><span>Min</span><span>Max</span></div><div style="text-align:center;margin-top:8px">Far Distance</div><input type="range" id="dxF" min="0" max="1" step="0.01" value="${v.far}" style="width:100%"><div style="display:flex;justify-content:space-between"><span>Min</span><span>Max</span></div></fieldset>
+    <fieldset><legend>Graphics Device</legend>${chk("dxAA", v.aa, "Use Antialiasing")}${chk("dxMS", v.ms, "Use Multisampling")}</fieldset>
+    <fieldset><legend>Normal Averaging</legend>${chk("dxNF", v.nFrames, "Frames (Extrude View)")}${chk("dxNS", v.nShells, "Shells")}</fieldset></div>`,
+    [["OK", d => {
+      const n = ["#dxDP", "#dxDE", "#dxAm", "#dxSP", "#dxSE", "#dxPw", "#dxSt"].map(s => fnum(d, s)); if (!n.every(isFinite)) { formError(d, "Enter numbers in every box."); return false; }
+      if (n[2] < 0 || n[2] > 1) { formError(d, "Ambient must be from 0 to 1."); return false; }
+      if (n[6] <= 0) { formError(d, "Step Size must be more than zero."); return false; }
+      const s = {dir: q(d, "#dxD").checked, dPlan: n[0], dElev: n[1], amb: n[2], spec: q(d, "#dxS").checked, sPlan: n[3], sElev: n[4], power: n[5], step: etvM(n[6]), near: +q(d, "#dxN").value, far: +q(d, "#dxF").value, aa: q(d, "#dxAA").checked, ms: q(d, "#dxMS").checked, nFrames: q(d, "#dxNF").checked, nShells: q(d, "#dxNS").checked};
+      try { localStorage.setItem("cpm-etabs-directx", JSON.stringify(s)); } catch {}
+      panes.forEach(p => p.sig = ""); draw(); hmSay("DirectX View Settings kept. Antialiasing and multisampling take effect when the window opens next.");
+    }], ["Cancel"]], {width: 620});
+  etvSpinWire(d);
+}
+function etvLight(M, def) {
+  // The 3-D light from DirectX View Settings once the user has set them: plan and elevation turn it away from the eye.
+  const v = program === "etabs" && etvDx(); if (!v) return def;
+  if (!v.dir) return mul(M.d, -1e-3);
+  const a = v.dPlan * Math.PI / 180, e = v.dElev * Math.PI / 180, b = mul(M.d, -1);
+  return unitv(add(add(mul(b, Math.cos(a) * Math.cos(e)), mul(M.right, Math.sin(a) * Math.cos(e))), mul(M.up, Math.sin(e))));
+}
+function etvAmbient(def) { const v = program === "etabs" && etvDx(); return v ? v.amb : def; }
+function etvPoint(p, x, y) {
+  // Measure: in a plan the click snaps as drawing does; elsewhere a joint under the pointer, else the view plane.
+  if (p.mode === "plan") { const s = snapAt(p, x, y), z = elevationOf(p.story) ?? 0; return s ? [s.q[0], s.q[1], z] : null; }
+  const j = jointAt(p, x, y, 8); if (j) { const jj = jointsIn(p).find(t => t.name === j); if (jj) return jj.at.slice(); }
+  return p.M ? p.M.back(x, y) : null;
+}
+function etvMeasureClick(p, x, y, dbl) {
+  const kind = tool.slice(8), m = etv.measure && etv.measure.kind === kind ? etv.measure : (etv.measure = {kind, pts: []}), q0 = etvPoint(p, x, y); if (!q0) return;
+  if (!dbl) m.pts.push(q0); const U = lu() ? " " + lu() : "", f = v => num(L(v));
+  if (kind === "line" && m.pts.length === 2) { const [a, b] = m.pts, dv = sub(b, a); hmSay(`Measure Line: length ${f(len(dv))}${U}  (dX ${f(dv[0])}, dY ${f(dv[1])}, dZ ${f(dv[2])})`); etv.measure = null; return; }
+  if (kind === "angle" && m.pts.length === 3) { const [a, o, b] = m.pts, u = sub(a, o), w = sub(b, o), c = dot(u, w) / ((len(u) * len(w)) || 1); hmSay(`Measure Angle: ${num(Math.acos(Math.max(-1, Math.min(1, c))) * 180 / Math.PI)} degrees`); etv.measure = null; return; }
+  if (kind === "area" && m.pts.length >= 3 && (dbl || len(sub(m.pts[m.pts.length - 1], m.pts[0])) <= tol() * 10)) {
+    const pts = dbl ? m.pts : m.pts.slice(0, -1); let n = [0, 0, 0], per = 0;
+    for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; n = add(n, cross(a, b)); per += len(sub(b, a)); }
+    hmSay(`Measure Area: area ${num(len(n) / 2 * L(1) * L(1))}${lu() ? " " + lu() + "²" : ""}, perimeter ${f(per)}${U}`); etv.measure = null; return;
+  }
+  hmSay({line: "Measure Line: click the second point.", angle: m.pts.length === 1 ? "Measure Angle: click the corner of the angle." : "Measure Angle: click the third point.", area: "Measure Area: click the next corner; click the first corner again or double-click to finish."}[kind]);
+}
+function etvWalk(p, dx, dy) {
+  // Walk: drag up or down to walk forward or back by the DirectX step size, left or right to turn.
+  if (p.mode !== "3d") { p.mode = "3d"; p.sig = ""; }
+  const v = etvDx(), step = (v && v.step) || radius() * 2 / 3, M = p.M; if (!M) return;
+  const fwd = unitv([M.d[0], M.d[1], 0]); p.anim = null;
+  p.cam = {...p.cam, persp: true, yaw: p.cam.yaw - dx * 0.004, target: add(p.cam.target, mul(fwd, -dy * step / 100))}; p.pickOk = false; draw();
+}
+// The View menu's keys as ETABS has them.
+document.addEventListener("keydown", e => {
+  if (program !== "etabs" || !P || e.altKey || (e.target.closest && e.target.closest("input, textarea, select, .dlg"))) return;
+  const c = e.ctrlKey || e.metaKey, s = e.shiftKey, k = e.key;
+  const a = c && s ? {F1: "m:etv:plan", F2: "m:etv:elev", F3: "m:etv:3d", J: "m:etv:only", A: "showAll", W: "m:etv:refreshW", V: "m:etv:refreshV"}[k.length === 1 ? k.toUpperCase() : k]
+    : c && !s ? (k.toLowerCase() === "d" ? "o:grid" : null)
+    : !c && s ? {F2: "zin", F3: "zout"}[k] : !c && !s && k === "F10" ? "t:pan" : null;
+  if (!a) return; e.preventDefault(); e.stopPropagation(); act(a);
+}, true);
 async function modelAct(a) {
   hideMenus();
   if (a.startsWith("etn:")) return etnAct(a.slice(4));
   if (a.startsWith("etq:")) return etqAct(a.slice(4));
+  if (a.startsWith("etc:")) return etcAct(a.slice(4));
+  if (a.startsWith("ets:")) return etsForm(a.slice(4));
+  if (a.startsWith("etv:")) return etvAct(a.slice(4));
+  if (a.startsWith("eto:")) { await hmDefs(); return etoForm(a.slice(4)); }
   if (a.startsWith("ld:")) return hmObjectLoad(a.slice(3));
+  if (a.startsWith("etf:")) return etfAct(a.slice(4));
   if (a.startsWith("spr:")) return hmSprings(a.slice(4));
   if (a.startsWith("sapa:")) return hmSapAssign(a.slice(5));
   if (a.startsWith("eta:")) return hmEtabsAssign(a.slice(4));
@@ -24867,7 +25898,7 @@ function modelFilter(prog) {
 }
 const modelFolder = () => { const f = (hm.state && hm.state.file) || ""; return f ? f.replace(/[\\/][^\\/]*$/, "") : ""; };
 async function hmOpen() {
-  const p = await hostPick({kind: "open", title: "Open Model", filter: modelFilter(program), folder: modelFolder()});
+  const p = await hostPick({kind: "open", title: "Open Model" + (program === "etabs" ? " File" : ""), filter: modelFilter(program), folder: modelFolder()});
   if (p) { if (!p.cancelled) await hmOpenFile(p.path); return; }
   hmOpenTyped();
 }
@@ -24879,7 +25910,7 @@ async function hmOpenFile(path, d) {
   if (!j.ok) { if (d) formError(d, j.error); return j; }
   if (d) d.close();
   const r = j.result || {};
-  if (!r.needs_choice) { hmSay("Opened " + path); return j; }
+  if (!r.needs_choice) { etfRemember(path); hmSay("Opened " + path); return j; }
   return new Promise(done => {
     const go = convert => { hmRun("open_model_file", {path, for_program: program, convert}).then(k => { if (k.ok) hmSay(convert ? `Opened ${path}, converted from ${r.file_program} to ${r.window_program}.` : `Opened ${path} for ${r.file_program}.`); done(k); }); };
     const f = dialog("Open Model", `<p class="kv" style="max-width:440px;margin-top:0"><b>${esc(path.split(/[\\/]/).pop())}</b> is a ${esc(r.file_program)} model, and this window works in ${esc(r.window_program)}.</p>
@@ -24935,12 +25966,12 @@ function hmOpenTyped() {
 }
 async function hmSave(as) {
   const file = (hm.state && hm.state.file) || "";
-  if (!as && file) return hmRun("save_model", {}).then(j => j.ok && hmSay("Saved " + file));
+  if (!as && file) return hmRun("save_model", {}).then(j => { if (j.ok) { etfRemember(file); hmSay("Saved " + file); } });
   // The program's own model extension (.cpme, .cpms, .cpmf); the program's text file is written beside it either way.
   const k = progExt[program] ? program : "etabs", ext = progExt[k], text = progText[k][0];
-  const p = await hostPick({kind: "save", title: "Save Model As", ext, folder: modelFolder(), name: file ? pickParts(file).name : ((P && P.manifest && P.manifest.model) || "Model"),
+  const p = await hostPick({kind: "save", title: "Save Model As".replace("Model", k === "etabs" ? "Model File" : "Model"), ext, folder: modelFolder(), name: file ? pickParts(file).name : ((P && P.manifest && P.manifest.model) || "Model"),
     filter: `${progLabel(k)} model (*.${ext})|*.${ext}|${progLabel(k)} text file (*.${text})|*.${text}`});
-  if (p) { if (!p.cancelled) { const x = pickParts(p.path); const j = await hmRun("save_model_as", {name: x.name, folder: x.folder}); if (j.ok) hmSay("Saved " + ((j.result && (j.result.path || j.result.file)) || p.path)); } return; }
+  if (p) { if (!p.cancelled) { const x = pickParts(p.path); const j = await hmRun("save_model_as", {name: x.name, folder: x.folder}); if (j.ok) { etfRemember((j.result && (j.result.modeler_file || j.result.file)) || p.path); hmSay("Saved " + ((j.result && (j.result.path || j.result.file)) || p.path)); } } return; }
   dialog("Save Model As", `<div class="g2"><span>File name</span><input id="sv" value="${esc(file ? file.split(/[\\/]/).pop().replace(/\.e2k$/i, "") : ((P && P.manifest && P.manifest.model) || "Model"))}"><span>Folder</span><input id="sf" placeholder="Documents\\CSI ProMax\\Models" value="${esc(file ? file.replace(/[\\/][^\\/]*$/, "") : "")}"></div><p class="kv">${{etabs: "Saves an ETABS text file (.e2k, for File > Import in ETABS)", sap2000: "Saves a SAP2000 text file (.s2k, for File > Import in SAP2000) and an .e2k", safe: "Saves a SAFE text file (.f2k of the floor with the most slab, for File > Import in SAFE) and an .e2k"}[program]} with the model's own file beside it (.${progExt[program] || "cpme"}). An empty folder means Documents\\CSI ProMax\\Models.</p>`,
     [["Save", d => submit(d, "save_model_as", {name: q(d, "#sv").value.trim(), folder: q(d, "#sf").value.trim() || undefined}, j => hmSay("Saved " + ((j.result && (j.result.path || j.result.file)) || ""))), true], ["Cancel"]], {width: 500});
 }
@@ -24965,6 +25996,372 @@ async function hmExport(kind) {
       });
       return false;
     }, true], ["Cancel"]], {width: 460});
+}
+
+// ---- ETABS 23.2's File menu, item for item (Ahmed 2026-11-27: every form identical to ETABS's, every button working
+// as there; pictures in field/reference-forms/etabs/File). etf* = ETABS File. The Engine's own file items that ETABS
+// has not got (Model for ETABS, the review pack's results, SAP2000 .s2k) sit under Engine Extras at the end. ----
+function etfFileMenu() {
+  const recent = etfRecent();
+  return [["New Model...", "m:new", "Ctrl+N"], ["Open...", "m:open", "Ctrl+O"], ["Close...", "m:etf:close", "Shift+Ctrl+E"], 0,
+    ["Save", "m:save", "Ctrl+S"], ["Save As...", "m:saveAs", "Shift+Ctrl+S"], 0,
+    ["Import", [["Tables from Excel (.xlsx)...", "m:xlsxIn"]]],
+    ["Export", [["ETABS .e2k Text File...", "m:etf:xE2k"], 0,
+      ["ETABS Database Tables to Excel...", "m:xlsxOut"], ["ETABS Database Tables to Text...", "m:etf:xTxt"], ["ETABS Database Tables to XML...", "m:etf:xXml"], 0,
+      ["Story as SAFE V12 .f2k File...", "m:f2k"], 0,
+      [".DXF/.DWG File...", "m:etf:xDxf"], 0,
+      ["IFC File...", "m:etf:xIfc"], ["IGES .igs File...", "m:etf:xIges"], ["3D Printing .stl File...", "m:etf:xStl"], ["3D Image .obj File...", "m:etf:xObj"], 0,
+      ["Perform3D Text File...", "m:etf:p3dTxt", "", true], ["Perform3D Structure File...", "m:etf:p3dStr", "", true]]], 0,
+    // ETABS greys Create Video until the model has a run to animate (pictured greyed on a model with no results).
+    ["Create Video...", [], "", true], 0,
+    ["Print Graphics...", "m:etf:print", "Ctrl+P"], 0,
+    ...recent.map((p, i) => [`${i + 1} ${etfShort(p)}`, "m:etf:recent:" + i]), ...(recent.length ? [0] : []),
+    ["Exit", "m:etf:exit"], 0,
+    ["Engine Extras", [["Model for ETABS (change)...", "m:program"], ["Results from a Review Pack (.cpmx)...", "eng:import"], ["SAP2000 .s2k Text File...", "m:s2k"]]]];
+}
+// ETABS's recent files: the last six opened or saved, newest first, shortened as ETABS shows them (C:\...\name.EDB).
+const etfRecentKey = "cpm.recent." + "etabs";
+function etfRecent() { try { const a = JSON.parse(localStorage.getItem(etfRecentKey) || "[]"); return Array.isArray(a) ? a.filter(x => typeof x === "string").slice(0, 6) : []; } catch (e) { return []; } }
+function etfRemember(path) {
+  if (!path || program !== "etabs") return;
+  try { localStorage.setItem(etfRecentKey, JSON.stringify([path, ...etfRecent().filter(p => p.toLowerCase() !== path.toLowerCase())].slice(0, 6))); } catch (e) { }
+}
+function etfShort(p) {
+  const parts = String(p).split(/[\\/]/);
+  if (parts.length <= 3) return p;
+  return parts[0] + "\\...\\" + parts[parts.length - 1];
+}
+// Not awaited by the menu: a form waiting for its answer (the save box, a Save As) does not hold the menu up.
+function etfAct(a) { etfDo(a).catch(e => hmSay(String(e && e.message || e), true)); }
+async function etfDo(a) {
+  if (a.startsWith("recent:")) { const p = etfRecent()[+a.slice(7)]; if (!p) return; if (await etfSaveFirst()) { const j = await hmOpenFile(p); if (!j || !j.ok) hmSay(`${p} could not be opened: ${(j && j.error) || "no answer"}`, true); } return; }
+  switch (a) {
+    case "close": return etfClose();
+    case "exit": return etfExit();
+    case "print": return etfPrintGraphics();
+    case "xE2k": return etfExportE2k();
+    case "xTxt": return etfExportTables("text");
+    case "xXml": return etfExportTables("xml");
+    case "xDxf": return etfExportGeometry("dxf");
+    case "xIfc": return etfExportGeometry("ifc");
+    case "xIges": return etfExportGeometry("iges");
+    case "xStl": return etfExportGeometry("stl");
+    case "xObj": return etfExportGeometry("obj");
+  }
+}
+const etfModelName = () => { const f = (hm.state && hm.state.file) || ""; return f ? f.split(/[\\/]/).pop().replace(/\.[^.]*$/, "") : ((P && P.manifest && P.manifest.model) || "Untitled"); };
+// ETABS's "<model> has changed. Save current changes?" box: Yes saves, No goes on without saving, Cancel stops.
+// Resolves true to go on.
+function etfSaveFirst() {
+  if (!hm.state || hm.state.saved !== false) return Promise.resolve(true);
+  return new Promise(done => {
+    const d = dialog("ETABS", `<p style="margin:4px 8px 2px">${esc(etfModelName())} has changed.</p><p style="margin:2px 8px 10px">Save current changes?</p>`,
+      [["Yes", () => { hmSave(false).then(() => done(!!(hm.state && hm.state.saved))); }], ["No", () => done(true)], ["Cancel", () => done(false)]], {width: 260});
+    d.classList.add("etfAsk");
+  });
+}
+// File > Close: asks to save a changed model, then leaves the window with an empty model, as ETABS leaves its window
+// with no model in it (File > New Model or Open goes on from there).
+async function etfClose() {
+  if (!(await etfSaveFirst())) return;
+  const j = await hmRun("new_model", {title: "Untitled", template: "empty", program: "etabs"});
+  if (j.ok) hmSay("The model was closed.");
+}
+async function etfExit() {
+  if (!(await etfSaveFirst())) return;
+  window.close();
+  setTimeout(() => hmSay("Close the window with its X at the top right."), 400);
+}
+
+// ---- File > Export ----
+// A Save As picker for an export: Windows' own (the Engine's window), or, in a plain browser or the field check, a
+// form of the same fields where the full path is typed. Resolves the path, or null when cancelled.
+async function etfSaveAs(title, types, name) {
+  const filter = types.map(t => `${t[0]}|*.${t[1]}`).join("|");
+  const p = await hostPick({kind: "save", title, ext: types[0][1], filter, folder: modelFolder(), name});
+  if (p) return p.cancelled ? null : p.path;
+  const folder = modelFolder();
+  return new Promise(done => {
+    let answered = false; const end = v => { if (!answered) { answered = true; done(v); } };
+    const d = dialog(title, `<div class="g2"><span>File name:</span><input id="efN" style="min-width:380px" value="${esc(folder ? folder + "\\" + name + "." + types[0][1] : "")}" placeholder="C:\\Users\\...\\${esc(name)}.${esc(types[0][1])}">
+      <span>Save as type:</span><select id="efT">${types.map((t, i) => `<option value="${i}">${esc(t[0])}</option>`).join("")}</select></div>`,
+      [["Save", f => {
+        let v = q(f, "#efN").value.trim().replace(/^"|"$/g, "");
+        if (!/^([a-z]:[\\/]|\\\\|\/)/i.test(v)) { formError(f, "Type the file's full path, as C:\\Folder\\Name." + types[0][1]); return false; }
+        const ext = types[+q(f, "#efT").value][1];
+        if (ext !== "*" && !new RegExp("\\." + ext + "$", "i").test(v)) v += "." + ext;
+        end(v);
+      }], ["Cancel", () => end(null)]], {width: 560});
+  });
+}
+const etfSaid = (j, path) => { if (j.ok) { hmSay("Exported " + ((j.result && j.result.saved) || path)); return true; } return false; };
+// ETABS .e2k Text File: Windows' Save As ("Export ETABS Model Text File As", ETABS Model Files (*.e2k)), then ETABS's
+// Consistent Units form (Length, Force, Temperature Unit, as a grid with drop-downs; OK, Cancel): the file is written in them.
+async function etfExportE2k() {
+  const path = await etfSaveAs("Export ETABS Model Text File As", [["ETABS Model Files (*.e2k)", "e2k"]], etfModelName());
+  if (!path) return;
+  const u = modelU(), L = String(u.length || "m").toLowerCase(), F = String(u.force || "kN").toLowerCase(), T = String(u.temperature || "C").toUpperCase().slice(0, 1);
+  const pick = (list, v) => list.map(x => `<option${x.toLowerCase() === v.toLowerCase() ? " selected" : ""}>${x}</option>`).join("");
+  dialog("Consistent Units", `<table class="list etfCU" style="width:270px;border-collapse:collapse">
+      <tr><td style="padding:1px 6px">Length Unit</td><td><select id="ecL" style="width:100%">${pick(["in", "ft", "mm", "cm", "m"], L === "inch" ? "in" : L)}</select></td></tr>
+      <tr><td style="padding:1px 6px">Force Unit</td><td><select id="ecF" style="width:100%">${pick(["lb", "kip", "N", "kN", "kgf", "tonf"], F === "ton" ? "tonf" : F)}</select></td></tr>
+      <tr><td style="padding:1px 6px">Temperature Unit</td><td><select id="ecT" style="width:100%">${pick(["F", "C"], T)}</select></td></tr></table>`,
+    [["OK", d => submit(d, "export_e2k", {path, length: q(d, "#ecL").value, force: q(d, "#ecF").value, temperature: q(d, "#ecT").value}, j => etfSaid(j, path))], ["Cancel"]], {width: 300});
+}
+// ETABS Database Tables to Text / XML: the tables to take (all with rows ticked), then Windows' Save As.
+async function etfExportTables(format) {
+  const j = await hmPost({tool: "model_tables", args: {}}).catch(() => null);
+  if (!j || !j.ok) return hmSay((j && j.error) || "The Engine is not answering.", true);
+  const list = j.result.tables;
+  const d = dialog(format === "xml" ? "Choose Tables for Export to XML" : "Choose Tables for Export to Text File", `<div style="display:flex;gap:10px">
+      <fieldset style="flex:1;margin:0;max-height:380px;overflow:auto"><legend>Tables</legend>${list.map(t => `<label style="display:flex;gap:6px;white-space:nowrap"><input type="checkbox" data-t="${esc(t.name)}" ${t.rows ? "checked" : ""}>${esc(t.name)}<span style="margin-left:auto;padding-left:12px;opacity:.7">${t.rows}</span></label>`).join("")}</fieldset>
+      <fieldset style="width:150px;margin:0"><legend>Options</legend><div style="display:flex;flex-direction:column;gap:6px"><button id="etA">Select All</button><button id="etN">Select None</button></div></fieldset></div>`,
+    [["OK", f => {
+      const tables = [...f.querySelectorAll("[data-t]")].filter(c => c.checked).map(c => c.dataset.t);
+      if (!tables.length) { formError(f, "Pick a table at least."); return false; }
+      const ext = format === "xml" ? "xml" : "txt";
+      etfSaveAs(format === "xml" ? "Export Tables to XML File" : "Export Tables to Text File", [[format === "xml" ? "XML Files (*.xml)" : "Text Files (*.txt)", ext]], etfModelName()).then(path => {
+        if (path) submit(f, "export_tables_file", {path, format, tables}, k => etfSaid(k, path));
+      });
+      return false;
+    }], ["Cancel"]], {width: 560});
+  q(d, "#etA").onclick = () => d.querySelectorAll("[data-t]").forEach(c => c.checked = true);
+  q(d, "#etN").onclick = () => d.querySelectorAll("[data-t]").forEach(c => c.checked = false);
+}
+// The model as solids, as the window draws it extruded: each frame its section's outline along it, each floor and wall
+// its thickness. Gives [{name, kind, section, story, tris: [[p, q, r], ...]}] in the model's units.
+function etfSolids() {
+  const out = [];
+  for (const f of frames) {
+    const sh = shapeOf(f.section), o = {name: f.name, kind: f.kind, section: f.section, story: f.story, line: [f.a, f.b], tris: []};
+    out.push(o);
+    if (!sh) continue;
+    const ax = memberAxes(f), drop = f.kind === "beam" ? sh.d / 2 : 0;
+    const at = (end, p) => { const q0 = end ? f.b : f.a; return [0, 1, 2].map(k => q0[k] + ax.e2[k] * (p[0] - drop) + ax.e3[k] * p[1]); };
+    const A = sh.pts.map(p => at(0, p)), B = sh.pts.map(p => at(1, p)), m = A.length;
+    for (let i = 0; i < m; i++) { const j = (i + 1) % m; o.tris.push([A[i], A[j], B[j]], [A[i], B[j], B[i]]); }
+    for (const t of sh.tris) { o.tris.push([A[t[0]], A[t[2]], A[t[1]]]); o.tris.push([B[t[0]], B[t[1]], B[t[2]]]); }
+    o.profile = {pts: sh.pts, drop, axes: ax};
+  }
+  for (const a of areas) {
+    if (a.kind === "opening" || a.kind === "solid" || (a.pts || []).length < 3) continue;
+    const t = slabT[a.section] || 0, n0 = newell(a.pts), n = a.kind === "wall" ? n0 : (n0[2] < 0 ? mul(n0, -1) : n0), m = a.pts.length;
+    const top = a.pts.map(p => a.kind === "wall" && t ? add(p, mul(n, t / 2)) : p), bot = top.map(p => add(p, mul(n, -t)));
+    const o = {name: a.name, kind: a.kind, section: a.section, story: a.story, outline: a.pts, normal: n, thick: t, tris: []};
+    out.push(o);
+    for (const tr of earclip(etfPlane(top, n))) { o.tris.push([top[tr[0]], top[tr[1]], top[tr[2]]]); if (t) o.tris.push([bot[tr[0]], bot[tr[2]], bot[tr[1]]]); }
+    if (t) for (let i = 0; i < m; i++) { const j = (i + 1) % m; o.tris.push([top[i], bot[i], bot[j]], [top[i], bot[j], top[j]]); }
+  }
+  return out;
+}
+// A planar outline in 2D, in its own plane (for triangulating a floor or wall of any shape).
+function etfPlane(pts, n) {
+  const ux = unitv(sub(pts[1], pts[0])), uy = unitv([n[1] * ux[2] - n[2] * ux[1], n[2] * ux[0] - n[0] * ux[2], n[0] * ux[1] - n[1] * ux[0]]);
+  return pts.map(p => { const d = sub(p, pts[0]); return [d[0] * ux[0] + d[1] * ux[1] + d[2] * ux[2], d[0] * uy[0] + d[1] * uy[1] + d[2] * uy[2]]; });
+}
+const etfNum = v => { const x = Math.abs(v) < 1e-12 ? 0 : +(+v).toPrecision(12); return String(x); };
+const etfLayer = o => ({column: "Columns", beam: "Beams", brace: "Braces", floor: "Floors", slab: "Floors", wall: "Walls", ramp: "Ramps"})[o.kind] || "Other";
+async function etfExportGeometry(kind) {
+  const types = {
+    dxf: ["Export to DXF File", [["AutoCAD .dxf Files (*.dxf)", "dxf"]]],
+    ifc: ["Export to IFC File", [["IFC Files (*.ifc)", "ifc"]]],
+    iges: ["Export to IGES File", [["IGES Files (*.igs)", "igs"]]],
+    stl: ["Export 3D Printing File", [["STL Files (*.stl)", "stl"]]],
+    obj: ["Export 3D Image File", [["OBJ Files (*.obj)", "obj"]]],
+  }[kind];
+  if (!frames.length && !areas.length) return hmSay("The model has no objects to export.", true);
+  const path = await etfSaveAs(types[0], types[1], etfModelName());
+  if (!path) return;
+  const solids = etfSolids(), name = etfModelName();
+  const text = kind === "dxf" ? etfDxf(solids) : kind === "ifc" ? etfIfc(solids, name, path) : kind === "iges" ? etfIges(solids, name, path) : kind === "stl" ? etfStl(solids, name) : etfObj(solids, name);
+  const j = await hmRun("write_export_file", {path, text});
+  if (!etfSaid(j, path)) hmSay(j.error || "The file was not written.", true);
+}
+// DXF (AutoCAD R12 entities): each frame a LINE on its layer (Columns, Beams, Braces), each floor and wall its faces
+// as 3DFACEs (Floors, Walls), in the model's units.
+function etfDxf(solids) {
+  const out = ["0", "SECTION", "2", "HEADER", "9", "$INSUNITS", "70", String({in: 1, inch: 1, ft: 2, mm: 4, cm: 5, m: 6}[String(modelU().length).toLowerCase()] || 0), "0", "ENDSEC",
+    "0", "SECTION", "2", "TABLES", "0", "TABLE", "2", "LAYER", "70", "6"];
+  const layers = [["Columns", 1], ["Beams", 5], ["Braces", 3], ["Floors", 8], ["Walls", 4], ["Other", 7]];
+  for (const [l, c] of layers) out.push("0", "LAYER", "2", l, "70", "0", "62", String(c), "6", "CONTINUOUS");
+  out.push("0", "ENDTAB", "0", "ENDSEC", "0", "SECTION", "2", "ENTITIES");
+  const P3 = (p, k) => [String(10 + k), etfNum(p[0]), String(20 + k), etfNum(p[1]), String(30 + k), etfNum(p[2])];
+  for (const o of solids) {
+    if (o.line) { out.push("0", "LINE", "8", etfLayer(o), ...P3(o.line[0], 0), ...P3(o.line[1], 1)); continue; }
+    const pts = o.outline;
+    for (let i = 1; i + 1 < pts.length; i += 2) {
+      const quad = [pts[0], pts[i], pts[i + 1], pts[i + 2] || pts[i + 1]];
+      out.push("0", "3DFACE", "8", etfLayer(o), ...quad.flatMap((p, k) => P3(p, k)));
+    }
+  }
+  out.push("0", "ENDSEC", "0", "EOF");
+  return out.join("\r\n") + "\r\n";
+}
+function etfStl(solids, name) {
+  const out = ["solid " + name.replace(/\s+/g, "_")];
+  for (const o of solids) for (const t of o.tris) {
+    const n = unitv([(t[1][1] - t[0][1]) * (t[2][2] - t[0][2]) - (t[1][2] - t[0][2]) * (t[2][1] - t[0][1]), (t[1][2] - t[0][2]) * (t[2][0] - t[0][0]) - (t[1][0] - t[0][0]) * (t[2][2] - t[0][2]), (t[1][0] - t[0][0]) * (t[2][1] - t[0][1]) - (t[1][1] - t[0][1]) * (t[2][0] - t[0][0])]);
+    out.push(`  facet normal ${n.map(etfNum).join(" ")}`, "    outer loop", ...t.map(p => `      vertex ${p.map(etfNum).join(" ")}`), "    endloop", "  endfacet");
+  }
+  out.push("endsolid " + name.replace(/\s+/g, "_"));
+  return out.join("\n") + "\n";
+}
+function etfObj(solids, name) {
+  const out = [`# ${name}, from CSI ProMax Engine (${modelU().length || "model"} units)`];
+  let base = 1;
+  for (const o of solids) {
+    if (!o.tris.length) continue;
+    out.push(`g ${(o.kind || "object")}_${String(o.name).replace(/\s+/g, "_")}`);
+    for (const t of o.tris) for (const p of t) out.push("v " + p.map(etfNum).join(" "));
+    for (let i = 0; i < o.tris.length; i++, base += 3) out.push(`f ${base} ${base + 1} ${base + 2}`);
+  }
+  return out.join("\n") + "\n";
+}
+// IGES 5.3: each frame a Line (entity 110), each floor and wall edge a Line, in the model's units.
+function etfIges(solids, name, path) {
+  const segs = [];
+  for (const o of solids) {
+    if (o.line) { segs.push(o.line); continue; }
+    const p = o.outline; for (let i = 0; i < p.length; i++) segs.push([p[i], p[(i + 1) % p.length]]);
+  }
+  const card = (text, letter, n) => text.padEnd(72).slice(0, 72) + letter + String(n).padStart(7, "0");
+  const H = s => s.length + "H" + s;
+  const unit = {in: [1, "IN"], inch: [1, "IN"], ft: [4, "FT"], mm: [2, "MM"], cm: [10, "CM"], m: [6, "M"]}[String(modelU().length).toLowerCase()] || [6, "M"];
+  const now = new Date(), stamp = `${String(now.getFullYear())}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}.${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}${String(now.getSeconds()).padStart(2, "0")}`;
+  const max = Math.max(1, ...segs.flat().flat().map(v => Math.abs(v)));
+  const g = [H(","), H(";"), H(name), H(path.split(/[\\/]/).pop()), H("CSI ProMax Engine"), H("CSI ProMax Engine"), "32", "38", "6", "308", "15", H(name), "1.0", String(unit[0]), H(unit[1]), "1", "0.0", H(stamp), "1.0E-6", etfNum(max), H(""), H(""), "11", "0", H(stamp)].join(",") + ";";
+  const lines = s => { const out = []; let rest = s; while (rest.length > 72) { let cut = rest.lastIndexOf(",", 72); if (cut < 1) cut = 72; out.push(rest.slice(0, cut + 1)); rest = rest.slice(cut + 1); } out.push(rest); return out; };
+  const S = [card("CSI ProMax Engine IGES export of " + name, "S", 1)];
+  const G = lines(g).map((t, i) => card(t, "G", i + 1));
+  const D = [], Pp = [];
+  segs.forEach((s, i) => {
+    const dn = 2 * i + 1, text = "110," + [...s[0], ...s[1]].map(v => etfNum(v).includes(".") || /e/i.test(etfNum(v)) ? etfNum(v).toUpperCase() : etfNum(v) + ".0").join(",") + ";";
+    const parts = []; let rest = text; while (rest.length > 64) { let cut = rest.lastIndexOf(",", 64); if (cut < 1) cut = 64; parts.push(rest.slice(0, cut + 1)); rest = rest.slice(cut + 1); } parts.push(rest);
+    const first = Pp.length + 1;
+    parts.forEach(p => Pp.push(p.padEnd(64) + String(dn).padStart(8) + "P" + String(Pp.length + 1).padStart(7, "0")));
+    const f8 = v => String(v).padStart(8);
+    D.push([110, first, 0, 0, 0, 0, 0, 0, "00000000"].map(f8).join("") + "D" + String(dn).padStart(7, "0"));
+    D.push([110, 0, 0, parts.length, 0, "", "", "LINE", 0].map(f8).join("") + "D" + String(dn + 1).padStart(7, "0"));
+  });
+  const T = card(`S${String(S.length).padStart(7, "0")}G${String(G.length).padStart(7, "0")}D${String(D.length).padStart(7, "0")}P${String(Pp.length).padStart(7, "0")}`, "T", 1);
+  return [...S, ...G, ...D, ...Pp, T].join("\r\n") + "\r\n";
+}
+// IFC 2x3 (Coordination View): the project, site, building and its stories; each column, beam and brace an
+// IfcColumn, IfcBeam or IfcMember swept along it with its section's outline; each floor an IfcSlab and each wall an
+// IfcWall, its outline extruded by its thickness. In the model's length unit.
+function etfIfc(solids, name, path) {
+  const L = [], add1 = s => { L.push(s); return "#" + L.length; };
+  const S = s => "'" + String(s == null ? "" : s).replace(/\\/g, "\\\\").replace(/'/g, "''") + "'";
+  const R = v => { let s = etfNum(v); if (!/[.eE]/.test(s)) s += "."; return s.replace("e", "E"); };
+  const chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_$";
+  const guid = () => { let s = chars[Math.floor(Math.random() * 4)]; for (let i = 1; i < 22; i++) s += chars[Math.floor(Math.random() * 64)]; return S(s); };
+  const pt = p => add1(`IFCCARTESIANPOINT((${p.map(R).join(",")}))`), dir = d => add1(`IFCDIRECTION((${d.map(R).join(",")}))`);
+  const person = add1("IFCPERSON($,$,'',$,$,$,$,$)"), org = add1("IFCORGANIZATION($,'CSI ProMax',$,$,$)"), po = add1(`IFCPERSONANDORGANIZATION(${person},${org},$)`);
+  const app = add1(`IFCAPPLICATION(${org},'1','CSI ProMax Engine','CSIProMax')`);
+  const own = add1(`IFCOWNERHISTORY(${po},${app},$,.ADDED.,$,$,$,${Math.floor(Date.now() / 1000)})`);
+  const lu0 = String(modelU().length || "m").toLowerCase();
+  let len;
+  if (lu0 === "m") len = add1("IFCSIUNIT(*,.LENGTHUNIT.,$,.METRE.)");
+  else if (lu0 === "mm") len = add1("IFCSIUNIT(*,.LENGTHUNIT.,.MILLI.,.METRE.)");
+  else if (lu0 === "cm") len = add1("IFCSIUNIT(*,.LENGTHUNIT.,.CENTI.,.METRE.)");
+  else {
+    const metre = add1("IFCSIUNIT(*,.LENGTHUNIT.,$,.METRE.)"), dims = add1("IFCDIMENSIONALEXPONENTS(1,0,0,0,0,0,0)");
+    const feet = lu0 === "ft", mw = add1(`IFCMEASUREWITHUNIT(IFCLENGTHMEASURE(${feet ? "0.3048" : "0.0254"}),${metre})`);
+    len = add1(`IFCCONVERSIONBASEDUNIT(${dims},.LENGTHUNIT.,${feet ? "'FOOT'" : "'INCH'"},${mw})`);
+  }
+  const units = add1(`IFCUNITASSIGNMENT((${len}))`);
+  const o0 = pt([0, 0, 0]), z0 = dir([0, 0, 1]), x0 = dir([1, 0, 0]), world = add1(`IFCAXIS2PLACEMENT3D(${o0},${z0},${x0})`);
+  const ctx = add1(`IFCGEOMETRICREPRESENTATIONCONTEXT($,'Model',3,1.E-05,${world},$)`);
+  const proj = add1(`IFCPROJECT(${guid()},${own},${S(name)},$,$,$,$,(${ctx}),${units})`);
+  const sitePl = add1(`IFCLOCALPLACEMENT($,${world})`), site = add1(`IFCSITE(${guid()},${own},'Site',$,$,${sitePl},$,$,.ELEMENT.,$,$,$,$,$)`);
+  const bPl = add1(`IFCLOCALPLACEMENT(${sitePl},${world})`), bld = add1(`IFCBUILDING(${guid()},${own},'Building',$,$,${bPl},$,$,.ELEMENT.,$,$,$)`);
+  const storeys = new Map();
+  for (const s of stories) {
+    const sp = add1(`IFCLOCALPLACEMENT(${bPl},${add1(`IFCAXIS2PLACEMENT3D(${pt([0, 0, s.elevation || 0])},$,$)`)})`);
+    storeys.set(s.name, {id: add1(`IFCBUILDINGSTOREY(${guid()},${own},${S(s.name)},$,$,${sp},$,$,.ELEMENT.,${R(s.elevation || 0)})`), items: []});
+  }
+  const loose = [];
+  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  for (const o of solids) {
+    let place, profile, depth, extrude = z0;
+    if (o.line) {
+      if (!o.profile) continue;
+      const [A, B] = o.line, ax = o.profile.axes, length = Math.hypot(B[0] - A[0], B[1] - A[1], B[2] - A[2]);
+      if (!(length > 0)) continue;
+      place = add1(`IFCAXIS2PLACEMENT3D(${pt(A)},${dir(unitv(sub(B, A)))},${dir(ax.e2)})`);
+      const poly = o.profile.pts.map(p => pt2(p[0] - o.profile.drop, p[1]));
+      profile = add1(`IFCARBITRARYCLOSEDPROFILEDEF(.AREA.,${S(o.section)},${add1(`IFCPOLYLINE((${[...poly, poly[0]].join(",")}))`)})`);
+      depth = length;
+    } else {
+      const pts = o.outline, n = o.normal, t = o.thick || 0;
+      if (!(t > 0)) continue;
+      const ux = unitv(sub(pts[1], pts[0])), uy = cross(n, ux), base = o.kind === "wall" ? add(pts[0], mul(n, t / 2)) : pts[0];
+      place = add1(`IFCAXIS2PLACEMENT3D(${pt(base)},${dir(n)},${dir(ux)})`);
+      const flat = pts.map(p => { const d = sub(p, pts[0]); return [d[0] * ux[0] + d[1] * ux[1] + d[2] * ux[2], d[0] * uy[0] + d[1] * uy[1] + d[2] * uy[2]]; });
+      const poly = flat.map(p => pt2(p[0], p[1]));
+      profile = add1(`IFCARBITRARYCLOSEDPROFILEDEF(.AREA.,${S(o.section)},${add1(`IFCPOLYLINE((${[...poly, poly[0]].join(",")}))`)})`);
+      depth = t; extrude = dir([0, 0, -1]);
+    }
+    const solid = add1(`IFCEXTRUDEDAREASOLID(${profile},${add1(`IFCAXIS2PLACEMENT3D(${o0},$,$)`)},${extrude},${R(depth)})`);
+    const shape = add1(`IFCSHAPEREPRESENTATION(${ctx},'Body','SweptSolid',(${solid}))`), pds = add1(`IFCPRODUCTDEFINITIONSHAPE($,$,(${shape}))`);
+    const lp = add1(`IFCLOCALPLACEMENT(${bPl},${place})`);
+    const head = `${guid()},${own},${S(o.name)},$,${S(o.section)},${lp},${pds},${S(o.name)}`;
+    const el = add1(o.kind === "column" ? `IFCCOLUMN(${head})` : o.kind === "beam" ? `IFCBEAM(${head})` : o.line ? `IFCMEMBER(${head})` : o.kind === "wall" ? `IFCWALL(${head})` : `IFCSLAB(${head},.FLOOR.)`);
+    (storeys.get(o.story) || {items: loose}).items.push(el);
+  }
+  function pt2(u, v) { return add1(`IFCCARTESIANPOINT((${R(u)},${R(v)}))`); }
+  add1(`IFCRELAGGREGATES(${guid()},${own},$,$,${proj},(${site}))`);
+  add1(`IFCRELAGGREGATES(${guid()},${own},$,$,${site},(${bld}))`);
+  if (storeys.size) add1(`IFCRELAGGREGATES(${guid()},${own},$,$,${bld},(${[...storeys.values()].map(s => s.id).join(",")}))`);
+  for (const s of storeys.values()) if (s.items.length) add1(`IFCRELCONTAINEDINSPATIALSTRUCTURE(${guid()},${own},$,$,(${s.items.join(",")}),${s.id})`);
+  if (loose.length) add1(`IFCRELCONTAINEDINSPATIALSTRUCTURE(${guid()},${own},$,$,(${loose.join(",")}),${bld})`);
+  const stamp = new Date().toISOString().slice(0, 19);
+  return ["ISO-10303-21;", "HEADER;", "FILE_DESCRIPTION(('ViewDefinition [CoordinationView]'),'2;1');",
+    `FILE_NAME(${S(path.split(/[\\/]/).pop())},'${stamp}',(''),(''),'CSI ProMax Engine','CSI ProMax Engine','');`, "FILE_SCHEMA(('IFC2X3'));", "ENDSEC;", "DATA;",
+    ...L.map((s, i) => `#${i + 1}=${s};`), "ENDSEC;", "END-ISO-10303-21;"].join("\r\n") + "\r\n";
+}
+
+// ---- File > Print Graphics: ETABS's Print Graphics window. Its toolbar: Print, Printer Setup, Page Setup, Add Image,
+// Preview..., the DXF button; Drawing Scale (its scale list on only when ticked) and Zoom. The page: "ETABS 23.2.0" and
+// the date at the top, the active window's drawing in a frame under them. ----
+const etfPage = {landscape: false, margin: 0.75, images: []};
+function etfPrintGraphics() {
+  const p = panes[active], c = p && p.hold && p.hold.querySelector("canvas");
+  const img = c ? c.toDataURL("image/png") : "";
+  const date = new Date().toLocaleDateString("en-US");
+  const scales = ["1/16\" = 1'", "1/8\" = 1'", "3/16\" = 1'", "1/4\" = 1'", "3/8\" = 1'", "1/2\" = 1'", "3/4\" = 1'", "1\" = 1'"];
+  const zooms = ["Whole Page", "Page Width", "500%", "200%", "150%", "100%", "75%", "50%", "25%", "10%"];
+  const page = () => `<div class="etfPg" style="background:#fff;color:#000;margin:12px auto;padding:${etfPage.margin * 64}px;width:${etfPage.landscape ? 704 : 544}px;box-shadow:0 0 0 1px #bbb">
+      <div style="display:flex;justify-content:space-between;font:13px Arial">${"<span>ETABS 23.2.0</span>"}<span>${esc(date)}</span></div>
+      <div style="border:1px solid #000;margin-top:4px;aspect-ratio:${etfPage.landscape ? "11/7" : "8.5/9.5"};display:flex;align-items:center;justify-content:center;overflow:hidden">${img ? `<img src="${img}" style="max-width:100%;max-height:100%">` : ""}</div>
+      ${etfPage.images.map(s => `<img src="${s}" style="max-width:100%;margin-top:6px">`).join("")}</div>`;
+  const d = dialog("Print Graphics", `<div class="etfPG" style="width:760px">
+      <div style="display:flex;align-items:center;gap:6px;padding:4px 6px;border:1px solid var(--line2)">
+        <button id="pgPrint" title="Print">&#128438;</button><button id="pgSetup" title="Printer Setup">&#128424;</button><button id="pgPage" title="Page Setup">&#128459;</button><button id="pgImg" title="Add Image">&#128444;</button>
+        <button id="pgPrev">Preview...</button><button id="pgDxf" title="DXF">DXF</button>
+        <span style="margin-left:auto"></span><label><input type="checkbox" id="pgScl"> <b>Drawing Scale</b></label><select id="pgSc" disabled>${scales.map(s => `<option>${esc(s)}</option>`).join("")}</select>
+        <b>Zoom</b><select id="pgZ">${zooms.map(z => `<option${z === "100%" ? " selected" : ""}>${z}</option>`).join("")}</select></div>
+      <div id="pgView" style="height:440px;overflow:auto;background:#e6e6e6">${page()}</div></div>`, [], {width: 800});
+  const view = q(d, "#pgView"), redraw = () => { view.innerHTML = page(); zoom(); };
+  const zoom = () => { const z = q(d, "#pgZ").value, pg = view.querySelector(".etfPg"); if (!pg) return; const k = /%$/.test(z) ? parseFloat(z) / 100 : z === "Page Width" ? (view.clientWidth - 30) / pg.offsetWidth : Math.min((view.clientWidth - 30) / pg.offsetWidth, (view.clientHeight - 30) / pg.offsetHeight); pg.style.zoom = k; };
+  q(d, "#pgZ").onchange = zoom;
+  q(d, "#pgScl").onchange = e => { q(d, "#pgSc").disabled = !e.target.checked; };
+  q(d, "#pgPrint").onclick = q(d, "#pgSetup").onclick = () => etfPrintNow(page());
+  q(d, "#pgPage").onclick = () => dialog("Page Setup", `<fieldset><legend>Orientation</legend><label><input type="radio" name="pgO" value="p" ${etfPage.landscape ? "" : "checked"}> Portrait</label> <label><input type="radio" name="pgO" value="l" ${etfPage.landscape ? "checked" : ""}> Landscape</label></fieldset>
+      <fieldset><legend>Margins (inches)</legend><div class="g2"><span>Left, Right, Top, Bottom</span><input id="pgM" type="number" step="0.05" min="0" value="${etfPage.margin}"></div></fieldset>`,
+    [["OK", f => { etfPage.landscape = q(f, "[name=pgO]:checked").value === "l"; etfPage.margin = Math.max(0, +q(f, "#pgM").value || 0); redraw(); }], ["Cancel"]], {width: 320});
+  q(d, "#pgImg").onclick = () => { const i = document.createElement("input"); i.type = "file"; i.accept = "image/*"; i.onchange = () => { const r = new FileReader(); r.onload = () => { etfPage.images.push(String(r.result)); redraw(); }; if (i.files[0]) r.readAsDataURL(i.files[0]); }; i.click(); };
+  q(d, "#pgPrev").onclick = () => dialog("Print Preview", `<div style="max-height:620px;overflow:auto;background:#e6e6e6">${page()}</div>`, [["Print", () => etfPrintNow(page())], ["Close"]], {width: 820});
+  q(d, "#pgDxf").onclick = () => etfExportGeometry("dxf");
+  setTimeout(zoom, 0);
+}
+// Prints the page alone: the window's own print, with only the page shown while it prints.
+function etfPrintNow(html) {
+  let box = document.getElementById("etfPrintArea");
+  if (!box) { box = document.createElement("div"); box.id = "etfPrintArea"; document.body.appendChild(box); }
+  box.innerHTML = html; document.body.classList.add("etfPrinting");
+  if (!document.getElementById("etfPrintCss")) { const s = document.createElement("style"); s.id = "etfPrintCss"; s.textContent = "#etfPrintArea{display:none}@media print{body.etfPrinting>*:not(#etfPrintArea){display:none!important}body.etfPrinting #etfPrintArea{display:block!important}body.etfPrinting #etfPrintArea .etfPg{box-shadow:none!important;margin:0!important}}" + `@page{size:${etfPage.landscape ? "landscape" : "portrait"}}`; document.head.appendChild(s); }
+  try { window.print(); } finally { setTimeout(() => document.body.classList.remove("etfPrinting"), 500); }
 }
 
 // ---- Excel: the model's tables out and in, as SAP2000 does (File > Export / Import > Excel) ----
@@ -25255,6 +26652,10 @@ function modelerStart() {
     if (k === "Escape" && hm.chain.length) { e.stopImmediatePropagation(); hm.chain = []; hm.reshape = null; draw(); return; }
     if (ctrl && k.toLowerCase() === "z") { e.preventDefault(); e.stopImmediatePropagation(); modelAct("undo"); }
     else if (ctrl && k.toLowerCase() === "y") { e.preventDefault(); e.stopImmediatePropagation(); modelAct("redo"); }
+    // ETABS's File shortcuts: Shift+Ctrl+S Save As, Shift+Ctrl+E Close, Ctrl+P Print Graphics.
+    else if (ctrl && e.shiftKey && k.toLowerCase() === "s") { e.preventDefault(); e.stopImmediatePropagation(); modelAct("saveAs"); }
+    else if (ctrl && e.shiftKey && k.toLowerCase() === "e" && etnOn()) { e.preventDefault(); e.stopImmediatePropagation(); modelAct("etf:close"); }
+    else if (ctrl && !e.shiftKey && k.toLowerCase() === "p" && etnOn()) { e.preventDefault(); e.stopImmediatePropagation(); modelAct("etf:print"); }
     else if (ctrl && k.toLowerCase() === "s") { e.preventDefault(); e.stopImmediatePropagation(); modelAct("save"); }
     else if (ctrl && k.toLowerCase() === "n") { e.preventDefault(); e.stopImmediatePropagation(); modelAct("new"); }
     else if (ctrl && k.toLowerCase() === "o") { e.preventDefault(); e.stopImmediatePropagation(); modelAct("open"); }
