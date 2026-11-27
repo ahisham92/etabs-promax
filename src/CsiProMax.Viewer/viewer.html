@@ -5369,8 +5369,8 @@ const sapLdOpts = (id, del, what) => `<fieldset><legend>Options</legend>${del ? 
 const sapLdPat = (defs, id) => `<select id="${id}" style="width:225px">${opts(defs.load_patterns.map(p => p.name), hm.pattern && defs.load_patterns.some(p => p.name === hm.pattern) ? hm.pattern : (defs.load_patterns[0] || {}).name)}</select>`;
 const sapLdGrid = rows => `<div style="display:grid;grid-template-columns:190px 230px;gap:6px 8px;align-items:center">${rows.map(([l, c]) => `<span>${l}</span>${c}`).join("")}</div>`;
 async function sapLdStart(t) {
-  const names = t === "joint" ? hmJoints() : hmSelected(t === "frame" ? "f" : "a");
-  if (!names.length) { hmSay(t === "joint" ? "Select the joints first." : t === "frame" ? "Select the frames first." : "Select the areas first.", true); return null; }
+  const names = t === "joint" ? hmJoints() : t === "frame" ? hmSelected("f") : t === "area" ? hmSelected("a") : sapXSelected(t);
+  if (!names.length) { hmSay({joint: "Select the joints first.", frame: "Select the frames first.", area: "Select the areas first.", cable: "Select the cable objects first.", tendon: "Select the tendon objects first.", solid: "Select the solid objects first.", link: "Select the link/support objects first."}[t], true); return null; }
   const defs = await hmDefs();
   if (!defs.load_patterns.length) { hmSay("Define a load pattern first (Define > Load Patterns).", true); return null; }
   return {names, defs, u: sapUnits()};
@@ -5677,7 +5677,7 @@ function hmSapAreaUniformToFrame() { return sapAreaUniform(true); }
 // or By Joint Pattern, Options. Solid: the Face list 1 to 6 in place of the loaded face.
 async function sapSurfacePressure(solid) {
   const s = await sapLdStart(solid ? "solid" : "area"); if (!s) return; const {names, defs, u} = s, jp = await sapJointPatterns(), p = solid ? "ssp" : "asp";
-  const face = solid ? `<fieldset><legend>Loaded Face</legend>${sapLdGrid([["Face", `<select id="${p}F" style="width:110px">${opts(["1", "2", "3", "4", "5", "6"], "1")}</select>`]])}</fieldset>`
+  const face = solid ? `<fieldset><legend>Loaded Face</legend>${sapLdGrid([["Face", `<select id="${p}F" style="width:110px">${opts(["1", "2", "3", "4", "5", "6"], "6")}</select>`]])}</fieldset>`
     : `<fieldset><legend>Loaded Face</legend><label><input type="radio" name="${p}F" value="Top" checked> Top</label><label><input type="radio" name="${p}F" value="Bottom"> Bottom</label><label><input type="radio" name="${p}F" value="Edge"> Edge</label>
       <div style="display:grid;grid-template-columns:270px 110px;gap:6px 8px;align-items:center;margin-left:22px"><span>Edge Face Number</span><input id="${p}E" value="" disabled></div></fieldset>`;
   const d = dialog(solid ? "Assign Solid Surface Pressure Loads" : "Assign Area Surface Pressure Loads", `${sapFormCss}<div class="sapF">
@@ -5693,7 +5693,7 @@ async function sapSurfacePressure(solid) {
   const w = sapJpWire(d, p, () => `${u.f}/${u.l}²`);
   const edge = () => { if (solid) return; const on = q(d, `[name=${p}F]:checked`).value === "Edge"; q(d, `#${p}E`).disabled = !on; q(d, `#${p}E`).value = on ? (q(d, `#${p}E`).value || "1") : ""; };
   if (!solid) d.querySelectorAll(`[name=${p}F]`).forEach(r => r.onchange = edge);
-  q(d, `#${p}R`).onclick = () => { if (solid) q(d, `#${p}F`).value = "1"; else { q(d, `[name=${p}F][value=Top]`).checked = true; edge(); } w.reset(); q(d, `[name=${p}O][value=replace]`).checked = true; };
+  q(d, `#${p}R`).onclick = () => { if (solid) q(d, `#${p}F`).value = "6"; else { q(d, `[name=${p}F][value=Top]`).checked = true; edge(); } w.reset(); q(d, `[name=${p}O][value=replace]`).checked = true; };
   return d;
 }
 function hmSapAreaSurfacePressure() { return sapSurfacePressure(false); }
@@ -5711,7 +5711,7 @@ async function sapPorePressure(solid) {
 }
 function hmSapAreaPorePressure() { return sapPorePressure(false); }
 // Temperature (All): Load Pattern, Type (Temperature, Temperature Gradient 3-3), By Element or By Joint Pattern, Options.
-async function hmSapAreaTemperature() {
+async function hmSapAreaTempLoads() {
   const s = await sapLdStart("area"); if (!s) return; const {names, defs, u} = s, jp = await sapJointPatterns(), T = sapLdTemp();
   const d = dialog("Assign Area Temperature Loads", `${sapFormCss}<div class="sapF">
     <fieldset><legend>Load Pattern</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, "atP")]])}</fieldset>
@@ -5778,7 +5778,137 @@ async function hmSapAreaWindCp() {
 }
 Object.assign(hmSapAssignForms, {
   alGravity: () => hmSapAreaGravity(), alUniform: () => hmSapAreaUniform(), alToFrame: () => hmSapAreaUniformToFrame(), alSurface: () => hmSapAreaSurfacePressure(),
-  alPore: () => hmSapAreaPorePressure(), alTemperature: () => hmSapAreaTemperature(), alStrain: () => hmSapAreaStrain(), alRotate: () => hmSapAreaRotate(), alWindCp: () => hmSapAreaWindCp(),
+  alPore: () => hmSapAreaPorePressure(), alTemperature: () => hmSapAreaTempLoads(), alStrain: () => hmSapAreaStrain(), alRotate: () => hmSapAreaRotate(), alWindCp: () => hmSapAreaWindCp(),
+});
+
+// ---- Assign > Cable, Tendon, Solid and Link/Support Loads (SAP2000 26.3, pictures Assign/CableLoads, TendonLoads,
+// SolidLoads, LinkLoads). Their objects are SAP2000's own (a model opened from a .s2k), named as SAP2000 names them; the
+// rows go into SAP2000's tables (Cable Loads - Distributed, Tendon Loads - Tension Force Or Stress, ...).
+const sapKindWord = {frame: "Frame", area: "Area", cable: "Cable", tendon: "Tendon", solid: "Solid", link: "Link/Support"};
+const sapLdTable = (kind, what) => `${kind === "link" ? "Link" : sapKindWord[kind]} Loads - ${what}`;
+// Gravity: General (Load Pattern, Coordinate System), Gravity Multipliers, Options.
+async function sapGravityForm(kind) {
+  const s = await sapLdStart(kind); if (!s) return; const {names, defs} = s, cs = await sapCsys(), p = "gv" + kind[0];
+  const d = dialog(`Assign ${sapKindWord[kind]} Gravity Loads`, `${sapFormCss}<div class="sapF">
+    <fieldset><legend>General</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, p + "P")], ["Coordinate System", `<select id="${p}C" style="width:225px">${opts(cs, "GLOBAL")}</select>`]])}</fieldset>
+    <fieldset><legend>Gravity Multipliers</legend><div class="g3">${["X", "Y", "Z"].map(x => sapRow("Global " + x, p + x, 0, "")).join("")}</div></fieldset>
+    ${sapLdOpts(p + "O")}<button id="${p}R" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => sapLdSet(d, sapLdTable(kind, "Gravity"), names, q(d, `#${p}P`).value, q(d, `[name=${p}O]:checked`).value,
+      [{CoordSys: q(d, `#${p}C`).value, MultiplierX: sapLdNum(d, `#${p}X`), MultiplierY: sapLdNum(d, `#${p}Y`), MultiplierZ: sapLdNum(d, `#${p}Z`)}])), {width: 450});
+  q(d, `#${p}R`).onclick = () => { q(d, `#${p}C`).value = "GLOBAL"; ["X", "Y", "Z"].forEach(x => q(d, `#${p}${x}`).value = "0"); q(d, `[name=${p}O][value=replace]`).checked = true; };
+  return d;
+}
+// Cable Distributed: General (Load Pattern, Coordinate System with Local, Load Direction, Load Type), Options, Uniform Load.
+async function hmSapCableDistributed() {
+  const s = await sapLdStart("cable"); if (!s) return; const {names, defs, u} = s, cs = [...await sapCsys(), "Local"];
+  const unitOf = t => t === "Moment" ? `${u.fl}/${u.l}` : u.kl;
+  const d = dialog("Assign Cable Distributed Loads", `${sapFormCss}<div class="sapF"><div style="display:grid;grid-template-columns:1fr 190px;gap:0 12px">
+      <fieldset><legend>General</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, "cdP")], ["Coordinate System", `<select id="cdC" style="width:165px">${opts(cs, "GLOBAL")}</select>`],
+        ["Load Direction", `<select id="cdD" style="width:165px"></select>`], ["Load Type", `<select id="cdT" style="width:165px">${opts(["Force", "Moment"], "Force")}</select>`]])}</fieldset>
+      <div>${sapLdOpts("cdO")}<fieldset><legend>Uniform Load</legend><input id="cdV" value="0" style="width:90px"> <span class="u" id="cdU">${unitOf("Force")}</span></fieldset></div></div>
+    <button id="cdR" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => { const t = q(d, "#cdT").value;
+      return sapLdSet(d, "Cable Loads - Distributed", names, q(d, "#cdP").value, q(d, "[name=cdO]:checked").value, [{CoordSys: q(d, "#cdC").value, Type: t, Dir: q(d, "#cdD").value, [t === "Moment" ? "MOverL" : "FOverL"]: sapLdNum(d, "#cdV")}]); }), {width: 600});
+  const syncDir = () => { const c = q(d, "#cdC").value, was = q(d, "#cdD").value, list = c === "Local" ? ["1", "2", "3"] : sapGravDirs; q(d, "#cdD").innerHTML = opts(list, list.includes(was) ? was : c === "Local" ? "1" : "Gravity"); };
+  q(d, "#cdC").onchange = syncDir; q(d, "#cdT").onchange = () => q(d, "#cdU").textContent = unitOf(q(d, "#cdT").value);
+  q(d, "#cdR").onclick = () => { q(d, "#cdC").value = "GLOBAL"; q(d, "#cdD").innerHTML = ""; syncDir(); q(d, "#cdT").value = "Force"; q(d, "#cdU").textContent = unitOf("Force"); q(d, "#cdV").value = "0"; q(d, "[name=cdO][value=replace]").checked = true; };
+  syncDir();
+  return d;
+}
+// Temperature (Cable, Tendon, Solid): Load Pattern, Temperature By Element or By Joint Pattern (Joint Pattern, Multiplier), Options.
+async function sapTempForm(kind) {
+  const s = await sapLdStart(kind); if (!s) return; const {names, defs} = s, jp = await sapJointPatterns(), T = sapLdTemp(), p = "tm" + kind[0];
+  const d = dialog(`Assign ${sapKindWord[kind]} Temperature Loads`, `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Load Pattern</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, p + "P")]])}</fieldset>
+    <fieldset><legend>Temperature</legend>${sapJpBlock(p, "Temperature", T, jp)}</fieldset>
+    ${sapLdOpts(p + "O")}<button id="${p}R" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => { const {v, jp} = w.value();
+      return sapLdSet(d, sapLdTable(kind, "Temperature"), names, q(d, `#${p}P`).value, q(d, `[name=${p}O]:checked`).value, [{...(kind === "solid" ? {} : {Type: "Temperature"}), Temp: v, ...(jp ? {JtPattern: jp} : {})}]); }), {width: 470});
+  const w = sapJpWire(d, p, () => T);
+  q(d, `#${p}R`).onclick = () => { q(d, `[name=${p}O][value=replace]`).checked = true; w.reset(); };
+  return d;
+}
+// Strain (Cable, Tendon: the component is Strain11 only, greyed; Solid: Strain11 to Strain23): Load Pattern, Strain Load
+// By Element or By Joint Pattern, Component, Joint Pattern, Strain, Options.
+async function sapStrainForm(kind) {
+  const s = await sapLdStart(kind); if (!s) return; const {names, defs, u} = s, jp = await sapJointPatterns(), p = "sn" + kind[0], solid = kind === "solid";
+  const comp = solid ? `<select id="${p}C" style="grid-column:span 2">${opts(["Strain11", "Strain22", "Strain33", "Strain12", "Strain13", "Strain23"], "Strain11")}</select>` : `<input id="${p}C" value="Strain11" disabled style="grid-column:span 2">`;
+  const d = dialog(`Assign ${sapKindWord[kind]} Strain Loads`, `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Load Pattern</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, p + "P")]])}</fieldset>
+    <fieldset><legend>Strain Load</legend><label><input type="radio" name="${p}B" value="el" checked> By Element</label><label><input type="radio" name="${p}B" value="jp"> By Joint Pattern</label>
+      <div style="display:grid;grid-template-columns:110px 150px 110px 40px;gap:6px 8px;align-items:center;margin-left:22px">
+        <span>Component</span>${comp}<span></span>
+        <span>Joint Pattern</span><select id="${p}J" style="grid-column:span 2">${opts(jp, "Default")}</select><span></span>
+        <span>Strain</span><span></span><input id="${p}V" value="0"><span class="u">${u.l}/${u.l}</span></div></fieldset>
+    ${sapLdOpts(p + "O")}<button id="${p}R" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => { const jpOn = q(d, `[name=${p}B]:checked`).value === "jp";
+      return sapLdSet(d, sapLdTable(kind, "Strain"), names, q(d, `#${p}P`).value, q(d, `[name=${p}O]:checked`).value, [{Component: q(d, `#${p}C`).value, Strain: sapLdNum(d, `#${p}V`), ...(jpOn ? {JtPattern: q(d, `#${p}J`).value} : {})}]); }), {width: 470});
+  const sync = () => { const jpOn = q(d, `[name=${p}B]:checked`).value === "jp"; q(d, `#${p}J`).disabled = !jpOn; if (!jpOn) q(d, `#${p}J`).selectedIndex = -1; else if (q(d, `#${p}J`).selectedIndex < 0) q(d, `#${p}J`).value = "Default"; };
+  d.querySelectorAll(`[name=${p}B]`).forEach(r => r.onchange = sync);
+  q(d, `#${p}R`).onclick = () => { q(d, `[name=${p}B][value=el]`).checked = q(d, `[name=${p}O][value=replace]`).checked = true; if (solid) q(d, `#${p}C`).value = "Strain11"; q(d, `#${p}V`).value = "0"; sync(); };
+  sync();
+  return d;
+}
+// Deformation (Cable, Tendon): Load Pattern, Axial Deformation U1, Replace or Delete.
+async function sapDeformForm(kind) {
+  const s = await sapLdStart(kind); if (!s) return; const {names, defs, u} = s, p = "df" + kind[0];
+  const d = dialog(`Assign ${sapKindWord[kind]} Deformation Loads`, `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Load Pattern</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, p + "P")]])}</fieldset>
+    <fieldset><legend>Deformation Loads</legend><div style="display:grid;grid-template-columns:190px 110px 40px;gap:6px 8px;align-items:center"><span>Axial Deformation, U1</span><input id="${p}V" value="0"><span class="u">${u.l}</span></div></fieldset>
+    ${sapLdOpts(p + "O", true)}<button id="${p}R" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => sapLdSet(d, sapLdTable(kind, "Deformation"), names, q(d, `#${p}P`).value, q(d, `[name=${p}O]:checked`).value, [{IncludeU1: "Yes", U1: sapLdNum(d, `#${p}V`)}])), {width: 400});
+  q(d, `#${p}R`).onclick = () => { q(d, `#${p}V`).value = "0"; q(d, `[name=${p}O][value=replace]`).checked = true; };
+  return d;
+}
+// Cable Target Force: Load Pattern, Axial Force P with its Relative Distance, Replace or Delete.
+async function hmSapCableTargetForce() {
+  const s = await sapLdStart("cable"); if (!s) return; const {names, defs, u} = s;
+  const d = dialog("Assign Cable Target Force Loads", `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Load Pattern</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, "ctP")]])}</fieldset>
+    <fieldset><legend>Target Force</legend><div style="display:grid;grid-template-columns:130px 100px 40px 100px;gap:4px 8px;align-items:center"><span></span><span style="text-align:center">Target Force</span><span></span><span style="text-align:center">Relative Distance</span>
+      <span>Axial Force, P</span><input id="ctV" value="0"><span class="u">${u.f}</span><input id="ctD" value="0.5"></div></fieldset>
+    ${sapLdOpts("ctO", true)}<button id="ctR" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => {
+      const at = +q(d, "#ctD").value; if (!(at >= 0 && at <= 1)) { formError(d, "The relative distance is from 0 to 1."); return false; }
+      return sapLdSet(d, "Cable Loads - Target Force", names, q(d, "#ctP").value, q(d, "[name=ctO]:checked").value, [{IncludeP: "Yes", P: sapLdNum(d, "#ctV"), RelLocP: String(at)}]);
+    }), {width: 460});
+  q(d, "#ctR").onclick = () => { q(d, "#ctV").value = "0"; q(d, "#ctD").value = "0.5"; q(d, "[name=ctO][value=replace]").checked = true; };
+  return d;
+}
+// Tendon Force/Stress ("Assign Tendon Load"): Tendon Load (Load Pattern, Jack from this Location, Tendon Load Type
+// Force or Stress, the force or stress), Friction and Anchorage Losses, Other Loss Parameters, Replace or Delete,
+// Show Prestress Losses on Tendon Object..., Reset.
+async function hmSapTendonForce() {
+  const s = await sapLdStart("tendon"); if (!s) return; const {names, defs, u} = s, st = `${u.f}/${u.l}²`;
+  const si = u.f === "kN" && u.l === "m", def = {stress: si ? 1500000 : 0, curv: 0.15, wob: si ? 0.003 : 0, slip: si ? 0.006 : 0, es: 0, cr: si ? 35000 : 0, sh: si ? 48000 : 0, re: si ? 35000 : 0};
+  const jack = [["I-End", "I-End (Start) of Tendon"], ["J-End", "J-End (End) of Tendon"], ["Both Ends", "Both Ends Simultaneously"]];
+  const row = (l, id, v, unit) => `<span>${l}</span><input id="${id}" value="${v}" style="width:95px"><span class="u">${esc(unit)}</span>`;
+  const g = rows => `<div style="display:grid;grid-template-columns:270px 100px 50px;gap:6px 8px;align-items:center">${rows}</div>`;
+  const d = dialog("Assign Tendon Load", `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Tendon Load</legend><div style="display:grid;grid-template-columns:170px 205px 50px;gap:6px 8px;align-items:center">
+      <span>Load Pattern</span>${sapLdPat(defs, "tfP").replace('style="width:225px"', 'style="width:200px"')}<span></span>
+      <span>Jack from this Location</span><select id="tfJ" style="width:200px">${opts(jack, "I-End")}</select><span></span>
+      <span>Tendon Load Type</span><select id="tfT" style="width:200px">${opts(["Force", "Stress"], "Force")}</select><span></span>
+      <span id="tfVL">Tendon Force</span><input id="tfV" value="0" style="width:95px;justify-self:end"><span class="u" id="tfVU">${u.f}</span></div></fieldset>
+    <fieldset><legend>Friction and Anchorage Losses</legend>${g(row("Curvature Coefficient", "tfK", def.curv, "") + row("Wobble Coefficient", "tfW", def.wob, `1/${u.l}`) + row("Anchorage Set Slip", "tfA", def.slip, u.l))}</fieldset>
+    <fieldset><legend>Other Loss Parameters</legend><p style="margin:2px 0 8px;font-size:12px">Note:  When tendons are modeled as elements, the Other Loss Parameters (elastic, creep, shrinkage and relaxation losses) apply in addition to the losses computed by analysis.</p>
+      ${g(row("Elastic Shortening Stress", "tfE", def.es, st) + row("Creep Stress", "tfC", def.cr, st) + row("Shrinkage Stress", "tfS", def.sh, st) + row("Steel Relaxation Stress", "tfR2", def.re, st))}</fieldset>
+    ${sapLdOpts("tfO", true)}<button id="tfShow" class="reset" style="width:280px">Show Prestress Losses on Tendon Object...</button><button id="tfR" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => { const t = q(d, "#tfT").value;
+      return sapLdSet(d, "Tendon Loads - Tension Force Or Stress", names, q(d, "#tfP").value, q(d, "[name=tfO]:checked").value, [{LoadType: t, [t === "Stress" ? "Stress" : "Force"]: sapLdNum(d, "#tfV"), JackFrom: q(d, "#tfJ").value,
+        Curvature: sapLdNum(d, "#tfK"), Wobble: sapLdNum(d, "#tfW"), LossAnchor: sapLdNum(d, "#tfA"), LossEShort: sapLdNum(d, "#tfE"), LossCreep: sapLdNum(d, "#tfC"), LossShrink: sapLdNum(d, "#tfS"), LossSRelax: sapLdNum(d, "#tfR2")}]); }), {width: 500});
+  const syncT = () => { const str = q(d, "#tfT").value === "Stress"; q(d, "#tfVL").textContent = str ? "Tendon Stress" : "Tendon Force"; q(d, "#tfVU").textContent = str ? st : u.f; q(d, "#tfV").value = str ? def.stress : 0; };
+  q(d, "#tfT").onchange = syncT;
+  q(d, "#tfShow").onclick = () => sapXSelected("tendon").length ? hmSay("SAP2000 shows the prestress losses of a tendon after the analysis has run (Display > Show Tables).") : hmSay("This command requires at least one tendon object to exist in the model.  The command will be aborted.", true);
+  q(d, "#tfR").onclick = () => { q(d, "#tfJ").value = "I-End"; q(d, "#tfT").value = "Force"; syncT(); [["tfK", def.curv], ["tfW", def.wob], ["tfA", def.slip], ["tfE", def.es], ["tfC", def.cr], ["tfS", def.sh], ["tfR2", def.re]].forEach(([id, v]) => q(d, "#" + id).value = v); q(d, "[name=tfO][value=replace]").checked = true; };
+  return d;
+}
+Object.assign(hmSapAssignForms, {
+  clGravity: () => sapGravityForm("cable"), clDistributed: () => hmSapCableDistributed(), clTemperature: () => sapTempForm("cable"), clStrain: () => sapStrainForm("cable"),
+  clDeformation: () => sapDeformForm("cable"), clTarget: () => hmSapCableTargetForce(),
+  tlGravity: () => sapGravityForm("tendon"), tlForce: () => hmSapTendonForce(), tlTemperature: () => sapTempForm("tendon"), tlStrain: () => sapStrainForm("tendon"), tlDeformation: () => sapDeformForm("tendon"),
+  slGravity: () => sapGravityForm("solid"), slSurface: () => sapSurfacePressure(true), slPore: () => sapPorePressure(true), slTemperature: () => sapTempForm("solid"), slStrain: () => sapStrainForm("solid"),
+  llGravity: () => sapGravityForm("link"),
 });
 
 // Assign > Joint > Restraints (SAP2000 26.3: Restraints in Joint Local Directions, Fast Restraints, OK/Close/Apply).

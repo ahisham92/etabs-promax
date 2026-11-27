@@ -31,7 +31,7 @@ public static class SapObjectLoads
     private static readonly HashSet<string> PerObject = new(StringComparer.OrdinalIgnoreCase) { "Frame Fireproofing Assignments" };
 
     /// <summary>The SAP2000 tables a load form can set.</summary>
-    public static IEnumerable<string> Forms => Own.Keys.Concat(SapObjectTables.Tables.Keys.Where(k => !SapObjectTables.IsNative(k)));
+    public static IEnumerable<string> Forms => Own.Keys.Concat(SapObjectTables.Tables.Keys.Where(k => !SapObjectTables.IsNative(k))).Concat(SapOtherObjects.Tables.Keys.Where(SapOtherObjects.IsLoad));
 
     /// <summary>Sets the rows on each object (label@story; a joint is point@story). option: add, replace or delete.
     /// Says how many objects changed. Throws ArgumentException for a wrong table, object, field or option.</summary>
@@ -39,6 +39,7 @@ public static class SapObjectLoads
     {
         option = option.ToLowerInvariant();
         if (option is not ("add" or "replace" or "delete")) throw new ArgumentException("option is add, replace or delete.");
+        if (SapOtherObjects.IsLoad(table)) return AssignOther(m, table, objects, pattern, rows, option);
         var native = Own.ContainsKey(table);
         var store = native ? Own.Keys.First(k => k.Equals(table, StringComparison.OrdinalIgnoreCase)) + SapObjectTables.Kept : table;
         if (!SapObjectTables.Has(store)) throw new ArgumentException($"There is no SAP2000 object table '{table}'. The tables: {string.Join(", ", Forms)}.");
@@ -93,6 +94,40 @@ public static class SapObjectLoads
             if (a.Tables is { Count: 0 }) a.Tables = null;
         }
         return targets.Count;
+    }
+
+    /// <summary>
+    /// The Cable, Tendon, Solid and Link/Support Loads forms: their objects are SAP2000's own (by SAP2000 name, in a model
+    /// opened from a .s2k), so the rows are kept in SAP2000's table (<see cref="SapOtherObjects"/>), set by load pattern.
+    /// </summary>
+    private static int AssignOther(StructuralModel m, string table, IReadOnlyList<string> objects, string? pattern, IReadOnlyList<Dictionary<string, string>> rows, string option)
+    {
+        table = SapOtherObjects.Tables.Keys.First(k => k.Equals(table, StringComparison.OrdinalIgnoreCase));
+        var (kind, _, fields) = SapOtherObjects.Tables[table];
+        if (string.IsNullOrWhiteSpace(pattern)) throw new ArgumentException("Name the load pattern.");
+        if (!m.LoadPatterns.Exists(x => x.Name == pattern)) throw new ArgumentException($"There is no load pattern '{pattern}'.");
+        foreach (var r in rows)
+            foreach (var f in r.Keys)
+                if (!fields.Contains(f, StringComparer.OrdinalIgnoreCase)) throw new ArgumentException($"'{table}' has no field '{f}'. Its fields: {string.Join(", ", fields)}.");
+        if (objects.Count == 0) throw new ArgumentException($"Name the {kind} objects, by SAP2000 name.");
+        var have = SapOtherObjects.List(m).Where(o => o.Kind == kind).Select(o => o.Name).ToHashSet(StringComparer.Ordinal);
+        foreach (var n in objects) if (!have.Contains(n)) throw new ArgumentException($"There is no {kind} '{n}'.");
+        foreach (var n in objects.Distinct())
+        {
+            var list = SapOtherObjects.Rows(m, kind, n, table);
+            if (option != "add") list.RemoveAll(r => r.GetValueOrDefault("LoadPat") == pattern);
+            if (option != "delete")
+                foreach (var r in rows)
+                {
+                    var row = new Dictionary<string, string>(StringComparer.Ordinal) { ["LoadPat"] = pattern };
+                    foreach (var (k, v) in r) if (!k.Equals("LoadPat", StringComparison.OrdinalIgnoreCase)) row[fields.First(f => f.Equals(k, StringComparison.OrdinalIgnoreCase))] = v;
+                    list.Add(row);
+                }
+            // Every field named (blank when not given), so a row put where another was keeps none of its fields.
+            var full = list.Select(r => fields.ToDictionary(f => f, f => r.GetValueOrDefault(f) ?? "", StringComparer.Ordinal)).ToList();
+            SapOtherObjects.Set(m, kind, [n], new Dictionary<string, List<Dictionary<string, string>>> { [table] = full });
+        }
+        return objects.Distinct().Count();
     }
 
     private static (Assign A, string Label) Find(StructuralModel m, string kind, string o)
