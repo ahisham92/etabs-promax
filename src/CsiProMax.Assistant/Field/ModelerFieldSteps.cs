@@ -83,6 +83,7 @@ public static class ModelerFieldSteps
         ctx.Offer(EditTools.All);
         ctx.Offer(DefineTools.All);
         ctx.Offer(EtabsDefineTools.All);
+        ctx.Offer(EtabsDesignTools.All);
         var folder = Q(ctx.Folder);
 
         // A new model from the template: three stories, two bays each way.
@@ -724,6 +725,9 @@ public static class ModelerFieldSteps
         // ETABS's Define > Load Combinations, Auto Construction Sequence Case, Walking Vibrations, Floor Vibrations, Table Named
         // Sets and Named Assignment Sets, as the forms set them; the ETABS part reads each back (EtabsDefineRoundTrip.Check).
         EtabsDefineRoundTrip.Define(ctx, modeler);
+        // ETABS's Design > Live Load Reduction Factors, Steel Connection Design preferences and the design targets, as the
+        // forms set them; the ETABS part reads the targets back (EtabsDesignRoundTrip.Check).
+        EtabsDesignRoundTrip.Define(ctx, modeler);
         // ETABS's Detailing > Drawing Management > Drawing Format Properties and Drawing Sheet Setup, as the forms keep them
         // (the Engine's own tables: ETABS's .e2k and tables do not carry them); never put into the program's tables.
         if (modeler.Model.Target == CsiProMax.Model.ProgramOptions.Etabs)
