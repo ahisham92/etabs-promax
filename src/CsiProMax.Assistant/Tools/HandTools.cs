@@ -106,6 +106,8 @@ public static class HandTools
                 ["loads"] = m.LineLoads.Count(l => l.Pattern == p.Name) + m.AreaLoads.Count(l => l.Pattern == p.Name) + m.PointLoads.Count(l => l.Pattern == p.Name),
             }).ToArray()),
             ["pattern_types"] = new JsonArray(ProgramOptions.PatternTypes(m.Target).Select(t => (JsonNode)t).ToArray()),
+            // The shell uniform load sets the .e2k holds (Assign > Shell Loads > Uniform Load Sets lists them).
+            ["load_sets"] = new JsonArray(LoadSets.Sets(m).Keys.Select(k => (JsonNode)k).ToArray()),
             ["load_cases"] = new JsonArray(m.LoadCases.Select(c => (JsonNode)new JsonObject { ["name"] = c.Name, ["type"] = Value(c.Lines, "TYPE") ?? "" }).ToArray()),
             ["combinations"] = new JsonArray(m.Combos.Select(c => (JsonNode)new JsonObject
             {

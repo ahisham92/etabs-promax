@@ -190,9 +190,9 @@ public static class PropertyTools
                 return new JsonObject { ["link"] = name, ["directions"] = dofs.Count };
             }, a => a.Flag("delete") ? $"Delete the link {a.Text("name")}" : $"Define the link {a.Text("name")}"),
         new("assign_frame_data",
-            "Assigns to frames (label@story) what Assign > Frame offers: release_i and release_j (any of P V2 V3 T M2 M3; [] takes them off), partial_fixity (Frame Partial Fixity Springs on released ends, e.g. {\"M3I\": 5000, \"M3J\": 5000}, stiffness in the model's units; 0 takes one off), angle (local axis 2 rotation, degrees), cardinal (insertion point 1 to 11: 10 centroid, 8 top center), offset_i, offset_j and rigid_zone (end length offsets, rigid zone factor 0 to 1), modifiers (AMOD A2MOD A3MOD JMOD I2MOD I3MOD MMOD WMOD), spring (a line spring property; \"\" takes it off) hinges (Assign > Frame > Hinges: auto hinges from the code's tables, each {at: relative distance 0 to 1, dof: M3 M2 P V2 V3 T P-M2-M3 P-M3 M3-V2}; [] takes them off; for a pushover) and reverse (Assign > Frame > Reverse Connectivity: global keeps the assigns in the same global orientation, local in the same local orientation)." +
+            "Assigns to frames (label@story) what Assign > Frame offers: release_i and release_j (any of P V2 V3 T M2 M3; [] takes them off), partial_fixity (Frame Partial Fixity Springs on released ends, e.g. {\"M3I\": 5000, \"M3J\": 5000}, stiffness in the model's units; 0 takes one off), angle (local axis 2 rotation, degrees), cardinal (insertion point 1 to 11: 10 centroid, 8 top center), offset_i, offset_j and rigid_zone (end length offsets, rigid zone factor 0 to 1), modifiers (AMOD A2MOD A3MOD JMOD I2MOD I3MOD MMOD WMOD), spring (a line spring property; \"\" takes it off) hinges (Assign > Frame > Hinges: auto hinges from the code's tables, each {at: relative distance 0 to 1, dof: M3 M2 P V2 V3 T P-M2-M3 P-M3 M3-V2}; [] takes them off; for a pushover), hinge_lines (the frame's hinges in the program's own .e2k words after HINGEASSIGN label story, e.g. [\"HINGEDISTRTYPE \\\"User Defined\\\"\", \"AUTOHINGETYPE \\\"ASCE41-17\\\"  TABLEITEM \\\"Steel Beams\\\"  DOF \\\"M3\\\"  LOCATIONTYPE \\\"RelDist\\\"  RDISTANCE 0.05\"]; [] takes them off) and reverse (Assign > Frame > Reverse Connectivity: global keeps the assigns in the same global orientation, local in the same local orientation)." +
             " tables: rows of the program's own assignment tables the other fields do not cover, by full table name, e.g. {\"Frame Assignments - Output Stations\": [{\"StationOpt\": \"Min Stations\", \"MinStations\": \"5\"}]} (property_definitions lists them under assign_tables; [] takes a table off). Only what is given changes.",
-            """{"type":"object","required":["objects"],"properties":{"objects":{"type":"array","items":{"type":"string"}},"release_i":{"type":"array","items":{"type":"string"}},"release_j":{"type":"array","items":{"type":"string"}},"partial_fixity":{"type":"object","additionalProperties":{"type":"number"}},"angle":{"type":"number"},"cardinal":{"type":"integer"},"offset_i":{"type":"number"},"offset_j":{"type":"number"},"rigid_zone":{"type":"number"},"modifiers":""" + Numbers + ""","spring":{"type":"string"},"hinges":{"type":"array","items":{"type":"object","required":["at","dof"],"properties":{"at":{"type":"number"},"dof":{"type":"string"}}}},"tables":{"type":"object"},"reverse":{"type":"string","enum":["global","local"]}}}""",
+            """{"type":"object","required":["objects"],"properties":{"objects":{"type":"array","items":{"type":"string"}},"release_i":{"type":"array","items":{"type":"string"}},"release_j":{"type":"array","items":{"type":"string"}},"partial_fixity":{"type":"object","additionalProperties":{"type":"number"}},"angle":{"type":"number"},"cardinal":{"type":"integer"},"offset_i":{"type":"number"},"offset_j":{"type":"number"},"rigid_zone":{"type":"number"},"modifiers":""" + Numbers + ""","spring":{"type":"string"},"hinges":{"type":"array","items":{"type":"object","required":["at","dof"],"properties":{"at":{"type":"number"},"dof":{"type":"string"}}}},"hinge_lines":{"type":"array","items":{"type":"string"}},"tables":{"type":"object"},"reverse":{"type":"string","enum":["global","local"]}}}""",
             Ask.Changes, AssignFrames, a => "Assign frame data"),
         new("assign_shell_data",
             "Assigns to slabs and walls (label@story) what Assign > Shell offers: modifiers (F11MOD F22MOD F12MOD M11MOD M22MOD M12MOD V13MOD V23MOD MMOD WMOD) and spring (an area spring property, e.g. soil under a mat; \"\" takes it off); opening (Assign > Shell > Opening: true makes the area an opening, false a slab or wall again); tables: rows of the program's own assignment tables the other fields do not cover, by full table name, e.g. {\"Area Assignments - Additional Mass\": [{\"AddedMass\": \"0.1\"}]} (property_definitions lists them under assign_tables; [] takes a table off).",
@@ -330,11 +330,12 @@ public static class PropertyTools
         var mods = Values(a, "modifiers", true);
         var spring = Spring(a, m0, "line");
         var hinges = Hinges(a);
+        List<string>? hingeLines = a.TryGetProperty("hinge_lines", out var hl) && hl.ValueKind == JsonValueKind.Array ? hl.EnumerateArray().Select(x => x.GetString() ?? "").ToList() : null;
         var tables = AssignRows(a);
         Dictionary<string, double>? fixity = Has(a, "partial_fixity") ? Values(a, "partial_fixity", true).ToDictionary(kv => kv.Key.Trim().ToUpperInvariant(), kv => kv.Value, StringComparer.Ordinal) : null;
         var reverse = a.Text("reverse", "").Trim().ToLowerInvariant();
         if (reverse is not ("" or "global" or "local")) throw new ToolInputException("reverse is global (keep assigns in the same global orientation) or local (keep them in the same local orientation).");
-        if (ri is null && rj is null && fixity is null && angle is null && cardinal is null && oi is null && oj is null && rz is null && mods.Count == 0 && spring is null && hinges is null && tables is null && reverse.Length == 0)
+        if (ri is null && rj is null && fixity is null && angle is null && cardinal is null && oi is null && oj is null && rz is null && mods.Count == 0 && spring is null && hinges is null && hingeLines is null && tables is null && reverse.Length == 0)
             throw new ToolInputException("Give what to assign: release_i, release_j, partial_fixity, angle, cardinal, offset_i, offset_j, rigid_zone, modifiers, spring, hinges, tables or reverse.");
         if (reverse.Length > 0)
             foreach (var (label, story) in objects)
@@ -345,7 +346,7 @@ public static class PropertyTools
                 if (m0.LineAssigns.Count(y => y.Label == label) > 1) throw new ToolInputException($"{label} is on more than one story: reversing it would reverse every one of them. Select it on every story, or give it its own label first.");
             }
         if (tables is not null) Core(() => { AssignTables.Set(new LineAssign(), tables); return 0; });
-        Core(() => { PropertyDefs.CheckModifiers(PropertyDefs.FrameModifiers, mods); if (hinges is not null) PropertyDefs.CheckHinges(hinges); return 0; });
+        Core(() => { PropertyDefs.CheckModifiers(PropertyDefs.FrameModifiers, mods); if (hinges is not null) PropertyDefs.CheckHinges(hinges); if (hingeLines is not null) PropertyDefs.CheckHingeLines(hingeLines); return 0; });
         foreach (var (label, story) in objects)
         {
             var (i0, j0) = PropertyDefs.ReleasesOf(m0.LineAssigns.First(y => y.Label == label && y.Story == story));
@@ -375,6 +376,7 @@ public static class PropertyTools
                 if (mods.Count > 0) PropertyDefs.SetModifiers(x.Extra, PropertyDefs.FrameModifiers, mods);
                 if (spring is not null) PropertyDefs.Put(x.Extra, "SPRINGPROP", spring.Length == 0 ? null : E2k.E2kText.Quote(spring));
                 if (hinges is not null) PropertyDefs.SetHinges(m, label, story, hinges);
+                if (hingeLines is not null) PropertyDefs.SetHingeLines(m, label, story, hingeLines);
                 if (tables is not null) AssignTables.Set(x, tables);
                 if (reverse.Length > 0 && m.Line(label) is { } ln)
                 {
@@ -690,6 +692,7 @@ public static class PropertyTools
                         ["offset_i"] = Num(PropertyDefs.Value(l.Extra, "LENGTHOFFI")), ["offset_j"] = Num(PropertyDefs.Value(l.Extra, "LENGTHOFFJ")), ["rigid_zone"] = Num(PropertyDefs.Value(l.Extra, "RIGIDZONE")),
                         ["modifiers"] = Numbers_(PropertyDefs.Modifiers(l.Extra, PropertyDefs.FrameModifiers)), ["spring"] = PropertyDefs.Value(l.Extra, "SPRINGPROP") ?? "",
                         ["hinges"] = new JsonArray(PropertyDefs.HingesOf(m, label, story).Select(h => (JsonNode)new JsonObject { ["at"] = h.At, ["dof"] = h.Dof }).ToArray()),
+                        ["hinge_lines"] = new JsonArray(PropertyDefs.HingeLinesOf(m, label, story).Select(x => (JsonNode)x).ToArray()),
                         ["pier"] = PropertyDefs.Value(l.Extra, "PIER")?.Trim('"') ?? "", ["spandrel"] = PropertyDefs.Value(l.Extra, "SPANDREL")?.Trim('"') ?? "", ["groups"] = GroupsOf(m, "LINE", label, story),
                         ["tables"] = TablesOf(l),
                     });
