@@ -250,6 +250,60 @@ public static class ViewerCheck
           act("selNone");
           return {ok: `${before} selected, ${g.dataset.g} unchecked, ${after} kept (${left.slice(0, 4).join(", ")})`};
         });
+        // The 23.2 Display result forms of the program the model is for, item for item as pictured on Ahmed's PC (field/reference-forms):
+        // each opens with the program's own title and group boxes, OK draws it, and the view shows what it asked for.
+        await step("Display result forms as the program draws them: Deformed Shape, Reactions, Member Force Diagram, Shell Forces/Stresses, Energy/Virtual Work, Story Response", async () => {
+          if (program !== "etabs") return {skipped: "skipped: " + program + " keeps its own forms here"};
+          const want = [
+            ["deformed", "Deformed Shape", ["Load Case/Load Combination/Modal Case", "Scaling", "Contour Options", "Options", "Hinge State Colored Dots are For", "Animation Controls"], () => disp.size, m => m === "deformed"],
+            ["reactions", "Reactions", ["Load Case/Load Combination/Modal Case", "Type of Reactions", "Plot Type", "Contour Values", "Display Results for These Components"], () => reacts.size, m => m === "reactions"],
+            ["forces", "Member Force Diagram for Frames/Piers/Spandrels/Links", ["Load Case/Load Combination/Modal Case", "Component", "Scaling", "Display Options", "Frame Contours", "Include"], () => forces.size, m => m === "forces"],
+            ["shells", "Shell Forces/Stresses", ["Load Case/Load Combination/Modal Case", "Component Type", "Component", "Contour Appearance", "Contour Values", "Scaling"], () => shellRes.size, m => m === "shell"],
+            ["energy", "Energy/Virtual Work Diagram", ["Forces", "Displacement"], () => forces.size && disp.size, m => m === "energy"],
+          ];
+          const done = [], fails = [];
+          for (const [key, title, legends, has, drawn] of want) {
+            if (!has()) { done.push(title + ": no such results in this pack"); continue; }
+            closeDialogs(); dialogs[key](); await wait(150);
+            const d = [...document.querySelectorAll(".dlg")].pop();
+            if (!d || d.querySelector(".dt b").textContent !== title) { fails.push(`${key} opened "${d ? d.querySelector(".dt b").textContent : "nothing"}", not the program's "${title}"`); continue; }
+            const got = [...d.querySelectorAll("legend")].map(l => l.textContent.trim()), missing = legends.filter(l => !got.includes(l));
+            if (missing.length) { fails.push(`${title} lacks ${missing.join(", ")}`); continue; }
+            const bs = [...d.querySelectorAll(".df button")].map(b => b.textContent); if (bs.join() !== "OK,Close,Apply") { fails.push(`${title} buttons are ${bs.join(", ")}, the program has OK, Close, Apply`); continue; }
+            d.querySelector('[data-b="0"]').click(); await wait(200);
+            if (!drawn(res.mode)) { fails.push(`${title} OK left the view in ${res.mode}`); continue; }
+            done.push(title);
+          }
+          closeDialogs();
+          if (storyTables().length || disp.size) {
+            etrStoryResponse(); await wait(150); const d = [...document.querySelectorAll(".dlg")].pop(), types = [...d.querySelectorAll('[data-k="type"] option')].map(o => o.value);
+            if (types.length !== 9) fails.push(`Story Response lists ${types.length} display types, the program lists 9`); else done.push("Story Response (" + d.querySelector("#srMM").textContent + ")");
+            closeDialogs();
+          }
+          // Show Tables (Ctrl+T): Choose Tables for Display, the table window with its menus and Record line, and the Format form.
+          closeDialogs(); act("tables"); await wait(200);
+          let ct = [...document.querySelectorAll(".dlg")].pop();
+          if (!ct || ct.querySelector(".dt b").textContent !== "Choose Tables for Display") fails.push("Show Tables opened " + (ct ? ct.querySelector(".dt b").textContent : "nothing"));
+          else {
+            ct.querySelectorAll("details").forEach(x => x.open = true);
+            const leaf = [...ct.querySelectorAll("[data-t]")].find(x => (tables[x.dataset.t] || {}).rows && tables[x.dataset.t].rows.length);
+            if (!leaf) fails.push("Choose Tables for Display lists no table with rows");
+            else {
+              leaf.checked = true; leaf.onchange(); ct = [...document.querySelectorAll(".dlg")].pop(); ct.querySelector("#ctOK").click(); await wait(250);
+              const tv = [...document.querySelectorAll(".dlg")].pop(), menus = [...tv.querySelectorAll(".etrMenu button")].map(b => b.textContent).join(",");
+              if (menus !== "File,Edit,Format-Filter-Sort,Select,Options") fails.push("the table window's menus are " + menus);
+              else if (!tv.querySelector("#tvG tbody tr")) fails.push(`the table window shows no rows of ${leaf.dataset.t}`);
+              else {
+                etrTableFormat(tables[leaf.dataset.t], "Format"); await wait(150);
+                const tf = [...document.querySelectorAll(".dlg")].pop(), tabs = [...tf.querySelectorAll(".itabs button")].map(b => b.textContent).join(",");
+                if (tabs !== "Format,Filter,Sort") fails.push("Modify/Show Database Table Format tabs are " + tabs); else done.push(`Show Tables: ${leaf.dataset.t}, ${tv.querySelector("#tvOf").textContent} records`);
+              }
+            }
+          }
+          closeDialogs();
+          act("r:model"); await wait(100);
+          return fails.length ? {fail: fails.join("; ")} : {ok: done.join("; ")};
+        });
         await step("the window reads as the model's program: its accent, its menu names and only its own Display items", async () => {
           const root = document.documentElement.dataset.program, run = document.querySelector('[data-menu="Analyze"]').firstChild.textContent.trim();
           const label = document.getElementById("story").parentElement.firstChild.textContent.trim();

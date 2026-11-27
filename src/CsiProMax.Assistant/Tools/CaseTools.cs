@@ -65,12 +65,20 @@ public static class CaseTools
             """{"type":"object","required":["method"],"properties":{"method":{"type":"string","enum":["none","non-iterative","iterative"]},"loads":{"type":"array","items":{"type":"object","required":["pattern","factor"],"properties":{"pattern":{"type":"string"},"factor":{"type":"number"}}}},"iterations":{"type":"integer"},"tolerance":{"type":"number"}}}""",
             Ask.Changes, DefinePDelta, a => $"Set P-Delta to {a.Text("method")}"),
         new("assign_object_loads",
-            "Assigns a load of any kind to joints, frames or shells (Assign > Joint, Frame or Shell Loads), names as label@story (joints: point@story): joint_force (fx..mz), joint_displacement (ux..rz), joint_temperature, frame_point (value or moment at relative distance), frame_trapezoid (start, end, from, to as relative distances), frame_uniform and shell_uniform in any direction, frame_temperature and shell_temperature (temperature change, gradient), frame_strain and shell_strain. dir: GRAV, X, Y, Z or a local axis 1, 2, 3. replace (default true) takes off the same kind of load in that pattern first.",
+            "Assigns a load of any kind to joints, frames or shells (Assign > Joint, Frame or Shell Loads), names as label@story (joints: point@story): joint_force (fx..mz), joint_displacement (ux..rz), joint_temperature, frame_point (value or moment at relative distance), frame_trapezoid (start, end, from, to as relative distances), frame_uniform and shell_uniform in any direction, frame_temperature and shell_temperature (temperature change, gradient), frame_strain and shell_strain. dir: GRAV, X, Y, Z or a local axis 1, 2, 3. replace (default true) takes off the same kind of load in that pattern first. how (the Options of the Assign form): add (Add to Existing: a joint load's values are added to the joint's load of that kind in the pattern; a frame or shell load is added beside the ones there), replace (Replace Existing) or delete (Delete Existing: the load of that kind in that pattern is taken off; no values needed).",
             """
             {"type":"object","required":["kind","pattern","objects"],"properties":{
               "kind":{"type":"string"},"pattern":{"type":"string"},"objects":{"type":"array","items":{"type":"string"}},
-              "values":{"type":"object","additionalProperties":{"type":"number"}},"dir":{"type":"string"},"replace":{"type":"boolean"}}}
+              "values":{"type":"object","additionalProperties":{"type":"number"}},"dir":{"type":"string"},"replace":{"type":"boolean"},"how":{"type":"string","enum":["add","replace","delete"]}}}
             """, Ask.Changes, AssignLoads, a => $"Assign {a.Text("kind").Replace('_', ' ')} loads in {a.Text("pattern")}"),
+        new("assign_shell_load_set",
+            "Assign > Shell Loads > Uniform Load Sets: gives slabs and walls (label@story) a shell uniform load set (Define > Shell Uniform Load Sets), in place of the one they had; \"\" (None) takes it off.",
+            """{"type":"object","required":["objects","set"],"properties":{"objects":{"type":"array","items":{"type":"string"}},"set":{"type":"string"}}}""",
+            Ask.Changes, AssignLoadSet, a => a.Text("set") is { Length: > 0 } t ? $"Assign the load set {t}" : "Take the load sets off"),
+        new("paste_object_loads",
+            "Assign > Paste Assigns, its Loads items: puts the loads of one joint, frame or shell (from, label@story; joints point@story) on other objects of the same kind, in every load pattern, each kept exactly as the object has it. types: the loads' TYPE values to copy (FORCE, GROUNDDISP, TEMP for joints; POINTF, POINTM, UNIFF, UNIFM, TRAPF, TRAPM, TEMP for frames; UNIFF, TEMP for shells); the objects' loads of those types are replaced.",
+            """{"type":"object","required":["from","objects","types"],"properties":{"from":{"type":"string"},"objects":{"type":"array","items":{"type":"string"}},"types":{"type":"array","items":{"type":"string"}}}}""",
+            Ask.Changes, PasteLoads, a => $"Paste the loads of {a.Text("from")}"),
         new("assign_sap_loads",
             "SAP2000's Assign > Joint, Frame, Cable, Tendon, Area, Solid and Link/Support Loads forms: sets the rows of SAP2000's own table on each object (label@story; joints point@story; cables, tendons, solids and links by SAP2000 name, e.g. Cable Loads - Distributed, Tendon Loads - Tension Force Or Stress, Solid Loads - Surface Pressure, Link Loads - Gravity), " +
             "with option add (Add to Existing Loads), replace (Replace Existing Loads, the default: the object's loads of this table in that pattern go first) or delete (Delete Existing Loads). " +
@@ -364,13 +372,18 @@ public static class CaseTools
         if (a.TryGetProperty("values", out var v) && v.ValueKind == JsonValueKind.Object)
             foreach (var x in v.EnumerateObject())
                 values[x.Name.ToLowerInvariant()] = x.Value.ValueKind == JsonValueKind.Number ? x.Value.GetDouble() : throw new ToolInputException($"'{x.Name}' needs a number.");
+        var how = a.Text("how", a.Flag("replace", true) ? "replace" : "add").ToLowerInvariant();
+        if (how is not ("add" or "replace" or "delete")) throw new ToolInputException("how is add, replace or delete.");
+        if (how == "delete") values["delete"] = 0;
         if (values.Count == 0) throw new ToolInputException("Give the load's values, e.g. {\"fx\":10} or {\"temperature\":20}.");
         if (values.Values.Any(d => double.IsNaN(d) || double.IsInfinity(d))) throw new ToolInputException("A value is not a number.");
         foreach (var k in new[] { "distance", "from", "to" })
             if (values.TryGetValue(k, out var r) && (r < 0 || r > 1)) throw new ToolInputException($"'{k}' is a relative distance, from 0 to 1.");
         var dir = a.Text("dir", kind.EndsWith("strain") ? "11" : "GRAV").ToUpperInvariant();
         if (!kind.EndsWith("strain") && !Dirs.Contains(dir)) throw new ToolInputException($"dir is one of {string.Join(", ", Dirs)}.");
-        var tokens = AnalysisDefs.LoadTokens(kind, pattern, values, dir);
+        values.Remove("delete");
+        var given = AnalysisDefs.LoadTokens(kind, pattern, values, dir);
+        var tokens = given;
         var type = E2kText.Value(tokens, "TYPE");
         var objects = a.Texts("objects");
         if (objects.Count == 0) throw new ToolInputException("Name the objects, as label@story.");
@@ -385,24 +398,106 @@ public static class CaseTools
                 : m0.AreaAssigns.Exists(x => x.Label == label && x.Story == story);
             if (!ok) throw new ToolInputException($"There is no {kind.Split('_')[0]} {o}.");
         }
-        var replace = a.Flag("replace", true);
+        var replace = how != "add";
         return link.Edit(m =>
         {
             foreach (var o in objects)
             {
                 var at = o.LastIndexOf('@');
                 var (label, story) = (o[..at], o[(at + 1)..]);
-                IList<ObjectLoad> list = kind.StartsWith("joint") ? m.PointLoads.Cast<ObjectLoad>().ToList() : kind.StartsWith("frame") ? m.LineLoads.Cast<ObjectLoad>().ToList() : m.AreaLoads.Cast<ObjectLoad>().ToList();
-                if (replace)
+                bool Same(ObjectLoad l) => l.Object == label && l.Story == story && l.Pattern == pattern && E2kText.Value(l.Tokens, "TYPE") == type;
+                var mine = tokens;
+                // ETABS's Add to Existing Loads on a joint adds the values to the joint's load of that kind in the pattern.
+                if (how == "add" && kind.StartsWith("joint") && m.PointLoads.Find(l => Same(l)) is { } had)
                 {
-                    bool Same(ObjectLoad l) => l.Object == label && l.Story == story && l.Pattern == pattern && E2kText.Value(l.Tokens, "TYPE") == type;
+                    mine = [.. tokens];
+                    for (var i = 0; i + 1 < had.Tokens.Count; i++)
+                    {
+                        var k = had.Tokens[i];
+                        if (k is "TYPE" or "LC" or "DIR" || !double.TryParse(had.Tokens[i + 1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var hv)) continue;
+                        var j = mine.IndexOf(k);
+                        if (j >= 0 && j + 1 < mine.Count && double.TryParse(mine[j + 1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var nv)) mine[j + 1] = E2kText.Number(nv + hv);
+                        else if (j < 0) mine.AddRange([k, had.Tokens[i + 1]]);
+                        i++;
+                    }
+                    m.PointLoads.RemoveAll(Same);
+                }
+                else if (replace)
+                {
                     if (kind.StartsWith("joint")) m.PointLoads.RemoveAll(Same); else if (kind.StartsWith("frame")) m.LineLoads.RemoveAll(Same); else m.AreaLoads.RemoveAll(Same);
                 }
-                if (kind.StartsWith("joint")) m.PointLoads.Add(new PointLoad { Object = label, Story = story, Tokens = [.. tokens] });
-                else if (kind.StartsWith("frame")) m.LineLoads.Add(new LineLoad { Object = label, Story = story, Tokens = [.. tokens] });
-                else m.AreaLoads.Add(new AreaLoad { Object = label, Story = story, Tokens = [.. tokens] });
+                if (how == "delete") continue;
+                if (kind.StartsWith("joint")) m.PointLoads.Add(new PointLoad { Object = label, Story = story, Tokens = [.. mine] });
+                else if (kind.StartsWith("frame")) m.LineLoads.Add(new LineLoad { Object = label, Story = story, Tokens = [.. mine] });
+                else m.AreaLoads.Add(new AreaLoad { Object = label, Story = story, Tokens = [.. mine] });
             }
             return (JsonNode)new JsonObject { ["done"] = $"{kind.Replace('_', ' ')} loads in {pattern} on {objects.Count} object{(objects.Count == 1 ? "" : "s")}.", ["objects"] = objects.Count };
+        });
+    }
+
+    private static JsonNode AssignLoadSet(JsonElement a, ICsiLink e)
+    {
+        var link = Offline(e);
+        var set = a.Text("set");
+        // A set the .e2k holds (SHELLUNIFORMLOADSET) is named by the AREALOAD line; one defined in the Engine (Define >
+        // Shell Uniform Load Sets, the program's table) goes in by the program's assignment table, after its definition.
+        var inFile = set.Length > 0 && LoadSets.Sets(link.Model).ContainsKey(set);
+        var inTable = set.Length > 0 && (link.Model.DefinitionTables?.GetValueOrDefault("Shell Uniform Load Sets") ?? []).Exists(r => string.Equals(r.GetValueOrDefault("Name"), set, StringComparison.OrdinalIgnoreCase));
+        if (set.Length > 0 && !inFile && !inTable) throw new ToolInputException($"There is no shell uniform load set '{set}'. Define it with Define > Shell Uniform Load Sets first.");
+        var objects = a.Texts("objects");
+        if (objects.Count == 0) throw new ToolInputException("Name the slabs and walls, as label@story.");
+        var at = objects.Select(o => { var i = o.LastIndexOf('@'); return i <= 0 ? throw new ToolInputException($"'{o}' is not label@story.") : (o[..i], o[(i + 1)..]); }).ToList();
+        foreach (var (l, s) in at) if (!link.Model.AreaAssigns.Exists(x => x.Label == l && x.Story == s)) throw new ToolInputException($"There is no slab or wall {l}@{s}.");
+        return link.Edit(m =>
+        {
+            foreach (var (l, s) in at)
+            {
+                m.AreaLoads.RemoveAll(x => x.Object == l && x.Story == s && LoadSets.SetOf(x) is not null);
+                var ar = m.AreaAssigns.First(x => x.Label == l && x.Story == s);
+                ar.Tables?.Remove(AssignTables.AreaLoadSet);
+                if (inFile) m.AreaLoads.Add(new AreaLoad { Object = l, Story = s, Tokens = ["TYPE", "\"UNIFLOADSET\"", E2kText.Quote(set)] });
+                else if (inTable) (ar.Tables ??= new(StringComparer.OrdinalIgnoreCase))[AssignTables.AreaLoadSet] = [new(StringComparer.Ordinal) { ["LoadSet"] = set }];
+            }
+            return (JsonNode)new JsonObject { ["done"] = set.Length > 0 ? $"{set} on {at.Count} object{(at.Count == 1 ? "" : "s")}." : $"Load sets off {at.Count} object{(at.Count == 1 ? "" : "s")}.", ["objects"] = at.Count };
+        });
+    }
+
+    private static JsonNode PasteLoads(JsonElement a, ICsiLink e)
+    {
+        var link = Offline(e);
+        var from = a.Need("from");
+        var types = a.Texts("types").Select(t => t.Trim('"').ToUpperInvariant()).ToHashSet(StringComparer.Ordinal);
+        var objects = a.Texts("objects");
+        if (objects.Count == 0) throw new ToolInputException("Name the objects, as label@story.");
+        static (string, string) Split(string o) { var at = o.LastIndexOf('@'); if (at <= 0) throw new ToolInputException($"'{o}' is not label@story."); return (o[..at], o[(at + 1)..]); }
+        var (fl, fs) = Split(from);
+        var m0 = link.Model;
+        string kind = m0.LineAssigns.Exists(x => x.Label == fl && x.Story == fs) ? "frame" : m0.AreaAssigns.Exists(x => x.Label == fl && x.Story == fs) ? "shell" : m0.Point(fl) is not null ? "joint" : throw new ToolInputException($"There is no object {from}.");
+        foreach (var o in objects)
+        {
+            var (l, s) = Split(o);
+            var ok = kind == "joint" ? m0.Point(l) is not null && m0.StoryIndex(s) >= 0 : kind == "frame" ? m0.LineAssigns.Exists(x => x.Label == l && x.Story == s) : m0.AreaAssigns.Exists(x => x.Label == l && x.Story == s);
+            if (!ok) throw new ToolInputException($"There is no {kind} {o}: loads are pasted on objects of the same kind.");
+        }
+        return link.Edit(m =>
+        {
+            List<T> Paste<T>(List<T> list, Func<string, string, List<string>, T> make) where T : ObjectLoad
+            {
+                bool Typed(ObjectLoad x) => types.Contains((E2kText.Value(x.Tokens, "TYPE") ?? "").Trim('"').ToUpperInvariant());
+                var src = list.Where(x => x.Object == fl && x.Story == fs && Typed(x)).ToList();
+                foreach (var o in objects)
+                {
+                    var (l, s) = Split(o);
+                    if (l == fl && s == fs) continue;
+                    list.RemoveAll(x => x.Object == l && x.Story == s && Typed(x));
+                    list.AddRange(src.Select(x => make(l, s, [.. x.Tokens])));
+                }
+                return src;
+            }
+            var n = kind == "joint" ? Paste(m.PointLoads, (l, s, t) => new PointLoad { Object = l, Story = s, Tokens = t }).Count
+                : kind == "frame" ? Paste(m.LineLoads, (l, s, t) => new LineLoad { Object = l, Story = s, Tokens = t }).Count
+                : Paste(m.AreaLoads, (l, s, t) => new AreaLoad { Object = l, Story = s, Tokens = t }).Count;
+            return (JsonNode)new JsonObject { ["done"] = $"{n} load{(n == 1 ? "" : "s")} of {from} pasted on {objects.Count} object{(objects.Count == 1 ? "" : "s")}.", ["loads"] = n };
         });
     }
 
