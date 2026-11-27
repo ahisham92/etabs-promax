@@ -1,7 +1,8 @@
 name: Release
 # Pushing a tag like v0.3.1 publishes the package the updater downloads: CsiProMax-<version>.zip with a dist folder
 # of DLLs (no .exe). The tag must match the version in the assistant's project file.
-# A tag with a suffix, like v0.4.0-test1, publishes a pre-release: a download to hand out that the updater leaves alone.
+# A tag with a suffix, like v0.4.0-test1, publishes a pre-release: the updater leaves it alone, except on a PC with
+# Settings > Updates > "Get test builds" on (the field test PC), which installs v0.4.67-testN builds by itself.
 # The same runs from the Actions page (Run workflow) with the tag typed in: the release then makes the tag itself.
 on:
   push:
@@ -35,11 +36,15 @@ jobs:
           if [ "$tag" != "$version" ]; then echo "PRERELEASE=--prerelease" >> "$GITHUB_ENV"; echo "NAME=$tag" >> "$GITHUB_ENV"; else echo "NAME=$version" >> "$GITHUB_ENV"; fi
           grep -q "<Version>$version</Version>" src/CsiProMax.Assistant/CsiProMax.Assistant.csproj || { echo "Tag $TAG does not match the project's version"; exit 1; }
           echo "VERSION=$version" >> "$GITHUB_ENV"
+          # A test build (v0.4.67-test5) carries its number as the fourth part of the assembly version (0.4.67.5), so the
+          # updater on a PC that takes test builds sees test5 as newer than test4. Every other tag builds as before.
+          rev="$(echo "$tag" | sed -n 's/^[0-9.]*-test\([0-9][0-9]*\)$/\1/p')"
+          if [ -n "$rev" ]; then echo "STAMP=-p:AssemblyVersion=$version.$rev -p:FileVersion=$version.$rev" >> "$GITHUB_ENV"; else echo "STAMP=" >> "$GITHUB_ENV"; fi
       - run: dotnet run -c Release --project tests/CsiProMax.Tests
-      - run: dotnet publish src/CsiProMax.Assistant -c Release -p:DebugType=none -o package/dist
-      - run: dotnet publish src/CsiProMax.Plugin -c Release -p:DebugType=none -o package/dist
-      - run: dotnet publish src/CsiProMax.Plugin.Safe -c Release -p:DebugType=none -o package/dist
-      - run: dotnet publish src/CsiProMax.Plugin.Sap -c Release -p:DebugType=none -o package/dist
+      - run: dotnet publish src/CsiProMax.Assistant -c Release -p:DebugType=none $STAMP -o package/dist
+      - run: dotnet publish src/CsiProMax.Plugin -c Release -p:DebugType=none $STAMP -o package/dist
+      - run: dotnet publish src/CsiProMax.Plugin.Safe -c Release -p:DebugType=none $STAMP -o package/dist
+      - run: dotnet publish src/CsiProMax.Plugin.Sap -c Release -p:DebugType=none $STAMP -o package/dist
       - run: test -e package/dist/CsiProMax.dll && test -e package/dist/CsiProMaxPlugin.dll && test -e package/dist/CsiProMaxSafePlugin.dll && test -e package/dist/CsiProMaxSapPlugin.dll
       - run: test -e package/dist/CDT.Core.dll && test -e package/dist/CDT.Wpf.dll && test -e package/dist/WpfMath.dll && test -e package/dist/XamlMath.Shared.dll
       - run: test ! -e package/dist/ETABSv1.dll && test ! -e package/dist/SAFEv1.dll && test ! -e package/dist/SAP2000v1.dll && ! find package -iname '*.exe' | grep .
