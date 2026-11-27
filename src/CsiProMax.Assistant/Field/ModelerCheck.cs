@@ -532,7 +532,7 @@ public static class ModelerCheck
         const pick = () => { try { sel.clear(); const b = frames.findIndex(f => f.kind === "beam"); if (b >= 0) sel.add(b + 1); if (areas.length) sel.add(frames.length + 1); selChanged(); } catch (e) { } };
         const programMenus = () => (typeof forProgram === "function" ? forProgram : x => x)(modelerMenus(viewerMenus()));
         // Design and Options too, their Modeler forms (preferences, overwrites, program options; Ahmed 2026-11-27: every form).
-        const listNow = () => { const m = programMenus(), out = []; for (const name of ["File", "Assign", "Define", "Draw", "Edit", "Analyze"]) flat(m[name], name, out); for (const name of ["Design", "Options"]) out.push(...flat(m[name], name, []).filter(it => typeof it.act === "string" && it.act.startsWith("m:"))); return out; };
+        const listNow = () => { const m = programMenus(), out = []; for (const name of ["File", "Assign", "Define", "Draw", "Edit", "Analyze"]) flat(m[name], name, out); for (const name of ["Design", "Options", "Tools"]) out.push(...flat(m[name], name, []).filter(it => typeof it.act === "string" && it.act.startsWith("m:"))); return out; };
         const list = listNow();
         // The menus follow the program the model is for (Ahmed 2026-11-26): the items only SAP2000 or SAFE has are run
         // with the model made for that program, after the first program's.
@@ -631,6 +631,37 @@ public static class ModelerCheck
           const off = Object.keys(want).filter(k => JSON.stringify(got[k]) !== JSON.stringify(want[k]));
           return off.length ? {fail: off.map(k => `${k}: ${got[k].join(" | ")}`).join("; ")} : {ok: `Analyze ${an.length} items, Draw ${dr.length} items, in the program's order and words`};
         });
+        // The Design and Tools menus item by item in the program's words and order (field/reference-forms/etabs/Design, /Tools),
+        // and a preference set in the form reaching the program's table and its .e2k line.
+        await step("Design and Tools menus, as the program has them (23.2 pictures)", async () => {
+          if (program !== "etabs") { await hmRun("set_model_program", {program: "etabs"}, true); for (let i = 0; i < 30 && program !== "etabs"; i++) { if (window.cpmPull) await window.cpmPull(); await wait(200); } }
+          const m = programMenus(), words = l => (l || []).filter(Boolean).map(x => x[0]), sub = (l, n) => words(((l || []).find(x => x && x[0] === n) || [])[1]);
+          const want = {Design: ["Steel Frame Design", "Concrete Frame Design", "Composite Beam Design", "Composite Column Design", "Steel Joist Design", "Overwrite Frame Design Procedure...", "Shear Wall Design", "Steel Connection Design", "Live Load Reduction Factors...", "Set Lateral Displacement Targets...", "Set Time Period Targets..."],
+            "Steel Frame Design": ["View/Revise Preferences...", "View/Revise Overwrites...", "Lateral Bracing...", "Select Design Groups...", "Select Design Combinations...", "Start Design/Check", "Interactive Design", "Display Design Info...", "Make Auto Select Section Null...", "Change Design Section...", "Reset Design Section To Last Analysis", "Verify Analysis vs Design Section...", "Verify All Members Passed...", "Reset All Overwrites...", "Delete Design Results..."],
+            "Shear Wall Design": ["View/Revise Preferences...", "Define General Pier Sections...", "Assign Pier Sections", "View/Revise Pier Overwrites...", "View/Revise Spandrel Overwrites...", "Select Design Combinations...", "Start Design/Check", "Interactive Design", "Display Design Info...", "Make Auto Select Section Null...", "Verify Analysis vs Design Section...", "Reset All Overwrites...", "Delete Design Results..."]};
+          const got = {Design: words(m.Design).filter(x => x !== "Engine Extras"), "Steel Frame Design": sub(m.Design, "Steel Frame Design"), "Shear Wall Design": sub(m.Design, "Shear Wall Design")};
+          const off = Object.keys(want).filter(k => JSON.stringify(got[k]) !== JSON.stringify(want[k]));
+          if (off.length) return {fail: off.map(k => `${k}: ${got[k].join(" | ")}`).join("; ")};
+          const tools = words(m.Tools);
+          if (!/^Set as active instance for API \(Process ID: \d+\)$/.test(tools[0] || "") || tools[1] !== "Add/Show Plugins...") return {fail: "Tools: " + tools.join(" | ")};
+          // Steel preferences: the pictured grid (36 rows with the code), then a value through OK into the table and the .e2k.
+          await etgPrefs("steel", "AISC 360-16"); await wait(500);
+          const dl = [...document.querySelectorAll(".dlg")].pop(), title = dl ? dl.querySelector(".dt b").textContent : "", rows = dl ? dl.querySelectorAll(".etgG tbody tr").length : 0;
+          const legend = dl ? [...dl.querySelectorAll("legend")].map(x => x.textContent).join("|") : "";
+          if (title !== "Steel Frame Design Preferences for AISC 360-16" || rows !== 36) { closeDialogs(); return {fail: `the steel preferences form is "${title}" with ${rows} rows, not 36`}; }
+          if (!/Item Description/.test(legend) || !/Explanation of Color Coding for Values/.test(legend) || !/Set To Default Values/.test(legend) || !/Reset To Previous Values/.test(legend)) { closeDialogs(); return {fail: "the form's boxes are " + legend}; }
+          const box = [...dl.querySelectorAll(".etgG tbody tr")].find(tr => tr.querySelector("td.l").textContent === "Demand/Capacity Ratio Limit");
+          const inp = box && box.querySelector("[data-v]"); if (!inp) { closeDialogs(); return {fail: "no Demand/Capacity Ratio Limit row"}; }
+          inp.value = "0.9"; inp.dispatchEvent(new Event("change")); await wait(100);
+          const red = [...dl.querySelectorAll(".etgG tbody tr")].find(tr => tr.querySelector("td.l").textContent === "Demand/Capacity Ratio Limit").querySelector("td.v").classList.contains("r");
+          [...dl.querySelectorAll(".df button")].find(b => b.textContent === "OK").click(); await wait(1200);
+          const back = await hmPost({tool: "program_forms", args: {design: "steel", code: "AISC 360-16"}});
+          const tv = ((back.result || {}).items || []).find(x => x.field === "DCLimit"), ev = ((back.result || {}).e2k || {}).SRLIMIT;
+          await hmRun("set_program_form", {table: "Steel Frame Design Preferences - AISC 360-16", values: {DCLimit: ""}, design: "steel", items: {"e2k:SRLIMIT": "0.95"}}, true);
+          if (!red) return {fail: "a changed value is not shown red"};
+          if (!tv || tv.value !== "0.9" || ev !== "0.9") return {fail: `OK did not set it: table ${tv && tv.value}, .e2k ${ev}`};
+          return {ok: `Design ${got.Design.length} items, Steel Frame Design ${got["Steel Frame Design"].length}, Shear Wall Design ${got["Shear Wall Design"].length}, Tools as the program has them; the steel preferences form (36 rows) set Demand/Capacity Ratio Limit 0.9 in the table and the .e2k, then back`};
+        });
         for (const it of list) {
           await step("menu: " + it.path, async () => {
             if (it.target && program !== it.target) { await hmRun("set_model_program", {program: it.target}, true); for (let i = 0; i < 30 && program !== it.target; i++) { if (window.cpmPull) await window.cpmPull(); await wait(200); } }
@@ -638,6 +669,11 @@ public static class ModelerCheck
             if (it.act === "m:redo" && offNow(it.act)) { await hmRun("define_load_pattern", {name: "CPM-CHKREDO", type: "Other", self_weight: 0}, true); await hmRun("undo"); await wait(400); }
             // Items the program itself greys in this state (SAP2000 26.3 pictures: Assign > Frame > Path... with no path defined, Update All Generated Hinge Properties with no generated hinges, Paste Assigns before Copy Assigns; the 23.2 Assign menu greys its Paste Assigns items the same way).
             if (offNow(it.act) && ["m:sapa:fPath", "m:sapa:updateHinges", "m:sapa:paste", "m:etn:geometry", "m:etn:messages", "m:etn:log", "m:eta:pasteJ", "m:eta:pasteF", "m:eta:pasteA", "m:eta:pasteL"].includes(it.act)) return {ok: "greyed out, as the program greys it"};
+            // The program (23.2) greys a design's result items until that design has run, and Start Design/Check until the model is analysed (Design/01-07 pictures).
+            if (offNow(it.act) && (/^m:etg:(interactive|info|beam|null|change|reset|verify|passed|delete|copy|paste):/.test(it.act) || /^m:etc:(interactive|info|passed|delete)/.test(it.act) || (it.act === "eng:design" && program === "etabs" && !engine.res))) return {ok: "greyed out until the design has run, as the program greys it"};
+            // SAFE's slab design overwrites (only checked under SAFE since the 23.2 ETABS Design menu has no slab design) wait for the SAFE forms thread: the Engine keeps no SAFE assignment table rows yet.
+            if (it.act === "m:over:slab" && program === "safe") return {ok: "SAFE's slab design overwrites form comes with the SAFE forms"};
+            if (/^m:etc:/.test(it.act) && typeof etcAct !== "function") return {ok: "steel connection design forms come with their own update"};
             if (offNow(it.act) && it.act !== "eng:clear") return {fail: "greyed out, although the check selected a beam and a floor for it first"};
             if (OTHER_WAY[it.act]) return await OTHER_WAY[it.act](it);
             const before = dialogsOpen();
