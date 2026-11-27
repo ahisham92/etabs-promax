@@ -122,6 +122,8 @@ public static class RealModelField
 
         // A: the program opens the copy as it is, analyses and designs it.
         Snapshot? a = null;
+        CsiProMax.Checks.Stability.StabilityCheck.Report? live = null;
+        var liveWhy = "";
         var text = copy;
         var kinds = EngineRun.Kinds[program.Key].Select(k => k.Kind).ToList();
         ctx.Step(title + $"{program.Name} opens it as it is, analyses and designs it, and every table is read", () =>
@@ -133,6 +135,9 @@ public static class RealModelField
             {
                 var link = window.Link;
                 var model = ModelTables(link);
+                // The check as the chat's find_instabilities makes it, read live from the program before it analyses.
+                try { live = CsiProMax.Checks.Stability.StabilityCheck.Run(StabilityTools.Live.Read(link)); }
+                catch (Exception ex) when (ex is EtabsException or InvalidOperationException) { liveWhy = ex.Message; }
                 if (!TextKinds(program).Contains(Path.GetExtension(copy), StringComparer.OrdinalIgnoreCase)) text = TextFor(program, link, copy, folder);
                 link.RunAnalysis();
                 try { DesignResults.RunDesign(link, kinds); } catch (Exception ex) when (ex is EtabsException or ToolInputException) { }
@@ -142,6 +147,17 @@ public static class RealModelField
             finally { window.Close(); }
         });
         if (a is null) return;
+
+        // The pre-run check read live from the program (find_instabilities) must not call unstable a model the program
+        // analyses: Ahmed 2026-11-27, "recheck that we're posting real things for instability".
+        ctx.Step(title + $"find_instabilities on the model open in {program.Name} finds no error in it", () =>
+        {
+            if (live is null) throw new FieldCheckException("the check could not read the model from the program: " + liveWhy);
+            var errors = live.Findings.Where(f => f.Level == CsiProMax.Checks.Stability.Level.Error).ToList();
+            File.WriteAllLines(Path.Combine(folder, "instability check (live).txt"), live.Findings.Select(f => $"{f.Level} {f.Check}: {f.Message} | at {string.Join(", ", f.Objects.Take(8).Select(o => o.Kind + " " + o.Name))}").Concat(live.Notes.Select(n => "note: " + n)));
+            FieldContext.Expect(errors.Count == 0, $"{errors.Count} error(s) the program does not have: " + string.Join(" | ", errors.Take(10).Select(f => $"{f.Check}: {f.Message} (at {string.Join(", ", f.Objects.Take(6).Select(o => o.Kind + " " + o.Name))})")));
+            return $"{live.Warnings} warning(s); {live.Joints} joints, stiffness check {(live.StiffnessRan ? "made" : "not made")}";
+        });
 
         // B: CSI ProMax reads the copy and the Engine writes it back and runs it.
         OfflineEtabs? mine = null;
