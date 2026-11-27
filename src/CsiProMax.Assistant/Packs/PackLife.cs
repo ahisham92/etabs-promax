@@ -69,10 +69,21 @@ public static class PackLife
     }
 
     /// <summary>Written beside its place and moved in: a reader never gets half a file. Tried again while another program holds it.</summary>
-    public static void Replace(string target, byte[] bytes)
+    /// <summary>Writes the pack and its Viewer page made from <paramref name="content"/>, streamed (a large model's page is gigabytes).</summary>
+    public static void Write(string packFile, string pageFile, byte[] zip, System.Text.Json.Nodes.JsonObject content)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(packFile))!);
+        Replace(packFile, zip);
+        if (pageFile.Length > 0) Replace(pageFile, temp => CsiProMax.Assistant.Tools.Pack.WriteViewerHtml(temp, content));
+    }
+
+    public static void Replace(string target, byte[] bytes) => Replace(target, temp => File.WriteAllBytes(temp, bytes));
+
+    /// <summary>As <see cref="Replace(string, byte[])"/>, with the new file written by <paramref name="write"/> to the path it is given.</summary>
+    public static void Replace(string target, Action<string> write)
     {
         var temp = target + ".writing";
-        File.WriteAllBytes(temp, bytes);
+        write(temp);
         Exception? last = null;
         for (var i = 0; i < Math.Max(1, Tries); i++)
         {

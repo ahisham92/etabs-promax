@@ -36,6 +36,11 @@ public static class EngineRun
     private static bool _running, _done;
     private static int _startRevision;
     private static JsonObject? _pack;
+    // What the last run's results lost against the program (only when CheckLoss); null when not checked.
+    private static List<string>? _lost;
+
+    /// <summary>The field test sets this: after each run, what the results lost is checked against the program before it closes.</summary>
+    public static bool CheckLoss { get; set; }
     private static OfflineEtabs? _model;
 
     // The last analysis: the model it was of, its revision, and the program's own file holding its results.
@@ -67,7 +72,7 @@ public static class EngineRun
 
     private static Thread MakeWorker()
     {
-        var t = new Thread(() => { foreach (var job in Queue.GetConsumingEnumerable()) { try { job(); } catch (Exception ex) when (ex is not OutOfMemoryException) { } } }) { IsBackground = true, Name = "CSI ProMax Engine run" };
+        var t = new Thread(() => { foreach (var job in Queue.GetConsumingEnumerable()) { try { job(); } catch (OutOfMemoryException) { CsiProMax.Assistant.OutOfMemory.Free(); } catch (Exception) { } } }) { IsBackground = true, Name = "CSI ProMax Engine run" };
         try { t.SetApartmentState(ApartmentState.STA); } catch (PlatformNotSupportedException) { }
         t.Start();
         return t;
@@ -109,7 +114,7 @@ public static class EngineRun
             if (!current)
                 try { file = model.WriteForRun(Path.Combine(folder, Safe(model.Model.Title) + ".e2k")); }
                 catch (EtabsException ex) { return new JsonObject { ["ok"] = false, ["error"] = ex.Message }; }
-            Lines.Clear(); _error = ""; _pack = null; _done = false; _running = true; _closed = false; _keptOpen = false; _cancel = false; _window = null; _seenNotices = 0;
+            Lines.Clear(); _error = ""; _pack = null; _lost = null; _done = false; _running = true; _closed = false; _keptOpen = false; _cancel = false; _window = null; _seenNotices = 0;
             _mon = new RunMonitor(program) { CaseCount = CasesOf(model) };
             // The model as the instability check reads it, taken here on the window's thread; checked in the background.
             AnalysisModel? check = null;
@@ -314,8 +319,10 @@ public static class EngineRun
             // the comments a reviewer made on the last one carried in.
             var (packFile, pageFile) = PackFiles(_model!);
             var comments = Packs.PackLife.Comments(packFile);
+            // One read session for the pack and, in the field test, the check after it of what the pack lost.
+            using var session = PackSession.Start(window.Link);
             var built = Pack.Build(window.Link, [], [], [], null, comments, by: "CSI ProMax Engine", instabilities: true);
-            try { Packs.PackLife.Write(packFile, pageFile, built.Zip, Pack.ViewerHtml(built.Content)); }
+            try { Packs.PackLife.Write(packFile, pageFile, built.Zip, built.Content); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { lock (Gate) Lines.Add($"The review pack could not be saved to {packFile}: {ex.Message}"); packFile = ""; }
             lock (Gate)
             {
@@ -324,6 +331,23 @@ public static class EngineRun
             }
             var design = RunLog.DesignTrouble(built.Content["tables"] as JsonObject);
             mon.End("results", design.Count > 0 ? "warning" : "done", $"{built.Tables.Count} tables" + (design.Count > 0 ? "; the design has members to look at" : ""));
+            // Ahmed 2026-11-27: the results come back complete. The field test checks it against the program, still open,
+            // after the results step's time is taken (the check reads every table the program lists, empty ones too).
+            if (CheckLoss)
+            {
+                List<string> lost;
+                try { lost = Pack.Missing(window.Link, built.Content, [], []); }
+                catch (Exception ex) when (ex is EtabsException or InvalidOperationException) { lost = ["the check could not be made: " + ex.Message]; }
+                lock (Gate) _lost = lost;
+            }
+        }
+        catch (OutOfMemoryException)
+        {
+            // 0.4.68 full test: a large model's results ran CSI ProMax out of memory on this thread, and the whole program
+            // went down with it. The results are let go, the run is a failure that says so, and the program is closed below.
+            lock (Gate) _pack = null;
+            CsiProMax.Assistant.OutOfMemory.Free();
+            Fail($"The results were too large for the memory CSI ProMax has: the run stopped while reading them ({Etabs.ComEtabs.LastRead}). {program.Name} is closed and its licence freed.");
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -676,6 +700,7 @@ public static class EngineRun
             {
                 ["running"] = _running, ["done"] = _done, ["program"] = _program, ["phase"] = _phase, ["error"] = _error,
                 ["lines"] = new JsonArray(Lines.Select(l => (JsonNode)l).ToArray()), ["pack_file"] = _packFile,
+                ["lost"] = _lost is null ? null : new JsonArray(_lost.Select(l => (JsonNode)l).ToArray()),
                 ["model_changed"] = _model is not null && _model.Revision != _startRevision,
                 // Whether the last analysis is of the model as it is now: a design then needs no new analysis.
                 ["analysed"] = _analysedModel is not null && _analysedRevision == _analysedModel.Revision && File.Exists(_analysedFile),
@@ -686,7 +711,7 @@ public static class EngineRun
                 ["keep_open"] = KeepOpenSetting(),
                 ["kinds"] = new JsonObject(Kinds.Select(p => KeyValuePair.Create(p.Key, (JsonNode?)new JsonArray(p.Value.Select(k => (JsonNode)new JsonObject { ["kind"] = k.Kind, ["name"] = k.Name }).ToArray())))),
             };
-            if (take && _done && _pack is not null) { o["pack"] = _pack; _pack = null; }
+            if (take && _done && _pack is not null) { o["pack"] = Pack.ForWindow(_pack); _pack = null; }
             return o;
         }
     }

@@ -418,6 +418,7 @@ public static class EtabsFieldSteps
             FieldContext.Expect(Int(a["frames"]!["removed"]) == 0 && Int(a["areas"]!["removed"]) == 0, "nothing was removed between the two snapshots: " + a.ToJsonString()));
         ctx.Tool("compare_snapshots", """{"from":"cpm-before-analysis"}""", null, "tool compare_snapshots with the model as it is now");
         Pack.Built? packBuilt = null;
+        List<string>? packLost = null;
         var took = TimeSpan.Zero;
         // This pack, the Viewer's and the watcher's two are of the same analysed model: its tables are read once for all
         // four (Pack.SameModel), not four times at about 9 minutes each (0.4.61 full test).
@@ -430,9 +431,9 @@ public static class EtabsFieldSteps
         {
             var cases = link.LoadCases();
             var watch = System.Diagnostics.Stopwatch.StartNew();
-            var (checks, pack) = PackSpeedField.Build(link, () => ProgramTools.Report(System.Text.Json.JsonDocument.Parse("""{"drift_limit":0.002}""").RootElement, link).AsObject(),
+            var (checks, pack, lost) = PackSpeedField.Build(link, () => ProgramTools.Report(System.Text.Json.JsonDocument.Parse("""{"drift_limit":0.002}""").RootElement, link).AsObject(),
                 c => Pack.Build(link, [], cases, link.Combos(), c, null, by: "CSI ProMax field test"));
-            packBuilt = pack; took = watch.Elapsed;
+            packBuilt = pack; packLost = lost; took = watch.Elapsed;
             var file = Path.Combine(ctx.Folder, ModelerFieldSteps.ModelName + " ETABS.cpmx");
             File.WriteAllBytes(file, pack.Zip);
             FieldContext.Expect(pack.Frames == link.Frames().Count && pack.Areas == link.Areas().Count, $"the pack holds {pack.Frames} frames and {pack.Areas} areas, the model has {link.Frames().Count} and {link.Areas().Count}");
@@ -443,6 +444,7 @@ public static class EtabsFieldSteps
             return new { file = Path.GetFileName(file), kilobytes = pack.Zip.Length / 1024, frames = pack.Frames, areas = pack.Areas, tables = pack.Tables, design = design?.ToJsonString(), notes = pack.Notes };
         });
         PackSpeedField.Timed(ctx, packBuilt, took, link.Program.Name);
+        PackSpeedField.Whole(ctx, link.Program.Name, "review pack", packLost);
         // The pack as it is written by itself after a run: from a copy in a hidden program, closed after, within 3 minutes.
         if (!ctx.NoPack) PackSpeedField.FromCopy(ctx, link);
 

@@ -110,7 +110,7 @@ public sealed class ExportPackTool : IEtabsTool
             var pack = OfficeDocs.FreePath(folder, name, ".cpmx");
             File.WriteAllBytes(pack, built.Zip);
             var page = OfficeDocs.FreePath(folder, name + " viewer", ".html");
-            File.WriteAllText(page, Pack.ViewerHtml(built.Content), new UTF8Encoding(false));
+            Pack.WriteViewerHtml(page, built.Content);
             return ToolResult.Ok(new
             {
                 files = new[] { page, pack },
