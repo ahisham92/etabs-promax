@@ -1008,6 +1008,69 @@ static class TesterBugTests
             var src = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Field", "ScratchProgram.cs"));
             Check(src.Contains("Math.Max(1, TextObjectCount(_program, file))", StringComparison.Ordinal), "a text file CSI ProMax cannot count is opened again although the program holds its objects");
         });
+        yield return ("field test: a failed step is pictured in the window it used, not a leftover blank ETABS (0.4.73: four identical pictures)", () =>
+        {
+            FailurePictures.NewPart(100);
+            FailurePictures.StartedProcess(200);
+            FailurePictures.StartedProcess(300);
+            Check(FailurePictures.PictureOf(100, id => id != 300) == 200, "a step is not pictured in the newest running window the test started");
+            Check(FailurePictures.PictureOf(100, _ => false) == 100, "with no window running the main scratch window is not pictured");
+            FailurePictures.NewPart(400);
+            Check(FailurePictures.PictureOf(400, _ => true) == 400, "a window from an earlier part is pictured in this one");
+            FailurePictures.NewPart(0);
+            var scratch = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Field", "ScratchProgram.cs"));
+            var ask = scratch.IndexOf("private object? Ask(", StringComparison.Ordinal);
+            var take = scratch.IndexOf("FailurePictures.Take(folder, _program, ProcessId", ask, StringComparison.Ordinal);
+            Check(ask > 0 && take > ask && take < scratch.IndexOf("throw new EtabsException(late);", ask, StringComparison.Ordinal), "a call that does not come back is not pictured in its own window before the step gives up");
+        });
+        yield return ("real-model round trip: what every run of the program makes itself is no difference (0.4.73 saved-4: modal signs, message times, design combinations, ~LLRF)", () =>
+        {
+            TableData T(string[] f, params string[][] rows) => new(f.ToList(), rows.ToList());
+            var modalA = new Dictionary<string, TableData> { ["Base Reactions"] = T(["OutputCase", "StepType", "StepNum", "FX"], ["Modal", "Mode", "1", "49.1378"], ["Dead", "", "", "12.5"]) };
+            var modalB = new Dictionary<string, TableData> { ["Base Reactions"] = T(["OutputCase", "StepType", "StepNum", "FX"], ["Modal", "Mode", "1", "-49.1378"], ["Dead", "", "", "12.5"]) };
+            Equal<int>(0, RealModelField.Compare(modalA, modalB, model: false).Count, "a mode at the other sign is a difference");
+            var staticB = new Dictionary<string, TableData> { ["Base Reactions"] = T(["OutputCase", "StepType", "StepNum", "FX"], ["Modal", "Mode", "1", "49.1378"], ["Dead", "", "", "-12.5"]) };
+            Equal<int>(1, RealModelField.Compare(modalA, staticB, model: false).Count, "a static result at the other sign is not a difference");
+            var msgA = new Dictionary<string, TableData> { ["Analysis Messages"] = T(["Message"], ["Run at 10:00"]) };
+            var msgB = new Dictionary<string, TableData> { ["Analysis Messages"] = T(["Message"], ["Run at 11:00"]) };
+            Equal<int>(0, RealModelField.Compare(msgA, msgB, model: false).Count, "the time of a message is a difference");
+            var combA = new Dictionary<string, TableData> { ["Load Combination Definitions"] = T(["Name", "LoadName", "SF"], ["C1", "Dead", "1.4"]), ["Load Pattern Definitions"] = T(["Name", "Type"], ["Dead", "Dead"]) };
+            var combB = new Dictionary<string, TableData>
+            {
+                ["Load Combination Definitions"] = T(["Name", "LoadName", "SF"], ["C1", "Dead", "1.4"], ["DConS1", "Dead", "1.4"], ["Mine2", "Dead", "1"]),
+                ["Load Pattern Definitions"] = T(["Name", "Type"], ["Dead", "Dead"], ["~LLRF", "Other"]),
+                ["Concrete Beam Overwrites - ACI 318-19"] = T(["Label", "LLRF"], ["B1", "1"]),
+            };
+            var said = RealModelField.Compare(combA, combB, model: true);
+            Check(said.Count == 1 && said[0].Contains("Mine2"), "the program's own design combinations, ~LLRF or design overwrites count, or an added combination of the engineer does not: " + string.Join(" | ", said));
+            var ptA = new Dictionary<string, TableData>
+            {
+                ["Point Object Connectivity"] = T(["UniqueName", "Story", "PointBay", "IsAuto", "X", "Y"], ["1", "Story1", "1", "No", "0", "0"], ["37", "Story1", "10", "Yes", "5.6992", "4.4987"]),
+                ["Joint Assignments - Diaphragms"] = T(["Story", "Label", "UniqueName", "Diaphragm"], ["Story1", "10", "37", "D1"]),
+            };
+            var ptB = new Dictionary<string, TableData>
+            {
+                ["Point Object Connectivity"] = T(["UniqueName", "Story", "PointBay", "IsAuto", "X", "Y"], ["1", "Story1", "1", "No", "0", "0"], ["40", "Story1", "13", "Yes", "5.6923", "4.4872"]),
+                ["Joint Assignments - Diaphragms"] = T(["Story", "Label", "UniqueName", "Diaphragm"], ["Story1", "13", "40", "D1"]),
+            };
+            Equal<int>(0, RealModelField.Compare(ptA, ptB, model: true).Count, "ETABS's own diaphragm centre point, numbered and placed again, counts as a difference");
+            ptB["Point Object Connectivity"].Rows[0][4] = "1";
+            Equal<int>(1, RealModelField.Compare(ptA, ptB, model: true).Count, "a moved point of the engineer's is not a difference");
+            var setA = new Dictionary<string, TableData> { ["Database Table Named Set Definitions"] = T(["Name", "Table", "LoadPattern", "LoadCase", "Combo"], ["Test", "Element Forces - Columns", "Dead", "~LLRF", "Comb1"], ["", "", "Live", "Ultimate", ""], ["", "", "", "", ""], ["", "", "~LLRF", "", ""]) };
+            var setB = new Dictionary<string, TableData> { ["Database Table Named Set Definitions"] = T(["Name", "Table", "LoadPattern", "LoadCase", "Combo"], ["Test", "Element Forces - Columns", "Live", "Ultimate", "Comb1"], ["", "", "Dead", "", ""]) };
+            Equal<int>(0, RealModelField.Compare(setA, setB, model: true).Count, "a table set packed into other rows, or without ETABS's ~LLRF, counts as a difference");
+            setB["Database Table Named Set Definitions"].Rows[1][2] = "SDL";
+            Check(RealModelField.Compare(setA, setB, model: true).Count > 0, "a set that lost a pattern is not a difference");
+            var matA = new Dictionary<string, TableData> { ["Material Properties - General"] = T(["Material", "Type"], ["C30/37", "Concrete"]) };
+            var matB = new Dictionary<string, TableData> { ["Material Properties - General"] = T(["Material", "Type"], ["C30/37", "Concrete"], ["A416Gr270", "Tendon"]), ["Tendon Section Properties"] = T(["Name", "Material"], ["Tendon1", "A416Gr270"]) };
+            Equal<int>(0, RealModelField.Compare(matA, matB, model: true).Count, "ETABS's own default tendon material counts as a difference");
+            var colA = new Dictionary<string, TableData> { ["Column Object Connectivity"] = T(["UniqueName", "Story", "Label", "UniquePtI", "UniquePtJ", "Length"], ["2", "Story1", "C1", "3", "4", "3000"]) };
+            var colB = new Dictionary<string, TableData> { ["Column Object Connectivity"] = T(["UniqueName", "Story", "Label", "UniquePtI", "UniquePtJ", "Length"], ["1", "Story1", "C1", "1", "2", "3000"]) };
+            Equal<int>(0, RealModelField.Compare(colA, colB, model: true).Count, "a column ETABS numbered again counts as a difference although its story and label are the same");
+            Check(File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Field", "PackSpeedField.cs")).Contains("File.WriteAllLines(Path.Combine(folder, LostFile(program, what)), lost)", StringComparison.Ordinal), "the whole list of lost tables is not written for the zip");
+            var field = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Field", "RealModelField.cs"));
+            Check(field.Contains("FromPack(carriedPack ?? pack)", StringComparison.Ordinal), "the results are compared from the run without the carried rows");
+        });
         yield return ("field test: steps a workaround can test are tested, not left out (Ahmed, 2026-11-26: only a missing program or licence)", () =>
         {
             string Src(string f) => File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant", f));
@@ -1439,7 +1502,7 @@ static class TesterBugTests
                 var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ReferenceData.cs"));
                 Check(!source.Contains("ctx.Step(") && !source.Contains("ctx.Fail("), "gathering reference data is recorded as a test step");
                 var test = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/FieldTest.cs"));
-                Check(test.Contains("if (finished && o.ReferenceData) GatherReference(ctx, o, program, open);") && test.Contains("ReferenceData.Run(ctx.Folder, program, open.Link, open.ModelPath, (open as ScratchProgram)?.ProcessId ?? 0)") && test.Contains("sb.Append(ReferenceData.Section(work));") && test.Contains("FailurePictures.Take(ctx.Folder, program, scratch.ProcessId, step.Name)"),
+                Check(test.Contains("if (finished && o.ReferenceData) GatherReference(ctx, o, program, open);") && test.Contains("ReferenceData.Run(ctx.Folder, program, open.Link, open.ModelPath, (open as ScratchProgram)?.ProcessId ?? 0)") && test.Contains("sb.Append(ReferenceData.Section(work));") && test.Contains("FailurePictures.Take(ctx.Folder, program, FailurePictures.PictureOf(scratch.ProcessId), step.Name)"),
                     "the full test does not gather the needed things, list them, or picture a failure");
             }
             finally
