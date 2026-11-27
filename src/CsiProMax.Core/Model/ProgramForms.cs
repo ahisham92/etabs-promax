@@ -58,8 +58,8 @@ public static class ProgramForms
         static string Norm(string x) => new(x.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
         var found = new List<string>();
         foreach (var prefix in OverwritePrefixes(target, kind))
-            if (cat.Keys.FirstOrDefault(k => k.Equals(prefix + code, StringComparison.OrdinalIgnoreCase))
-                ?? cat.Keys.FirstOrDefault(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && Norm(k[prefix.Length..]) == Norm(code)) is { } t)
+            if ((cat.Keys.FirstOrDefault(k => k.Equals(prefix + code, StringComparison.OrdinalIgnoreCase))
+                ?? cat.Keys.FirstOrDefault(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && Norm(k[prefix.Length..]) == Norm(code))) is { } t)
                 found.Add(t);
         return found;
     }
