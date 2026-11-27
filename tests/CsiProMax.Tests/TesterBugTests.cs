@@ -910,7 +910,8 @@ static class TesterBugTests
                 File.WriteAllText(Path.Combine(dir, "Projects", "A", "solo.sdb"), "x");
                 var etabs = RealModelField.Find(CsiProMax.Assistant.Etabs.CsiProgram.Etabs, [dir], Path.Combine(dir, "none.txt")).Select(Path.GetFileName).ToList();
                 Check(etabs.Contains("tower.e2k") && etabs.Contains("frame.e2k") && !etabs.Contains("frame.EDB") && !etabs.Contains("cpm-field-test-1.e2k"), "ETABS models: " + string.Join(", ", etabs));
-                Check(RealModelField.Find(CsiProMax.Assistant.Etabs.CsiProgram.Sap2000, [dir], Path.Combine(dir, "none.txt")).Count == 0, "a SAP2000 model with no text beside it is taken");
+                // A SAP2000 model with no text beside it is taken too: its tables are read as its .s2k (SapTablesText).
+                Check(RealModelField.Find(CsiProMax.Assistant.Etabs.CsiProgram.Sap2000, [dir], Path.Combine(dir, "none.txt")).Select(Path.GetFileName).SequenceEqual(["solo.sdb"]), "a SAP2000 .sdb with no text beside it is taken");
             }
             finally { Directory.Delete(dir, true); }
             var a = new Dictionary<string, TableData>(StringComparer.OrdinalIgnoreCase)

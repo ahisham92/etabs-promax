@@ -36,10 +36,10 @@ public static class RealModelField
     public static string ModelKind(CsiProgram program) => program.Key switch { "sap2000" => ".sdb", "safe" => ".fdb", _ => ".edb" };
 
     /// <summary>A program's own model file CSI ProMax can be given as text: ETABS exports its .e2k through its API
-    /// (File.ExportFile, TextFile); SAP2000 has no export, but keeps a .$2k beside a model it saved.</summary>
+    /// (File.ExportFile, TextFile); SAP2000 keeps a .$2k beside a model it saved, and any .sdb's tables are read as its .s2k.</summary>
     public static bool Takes(CsiProgram program, string file) =>
         TextKinds(program).Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase)
-        || Path.GetExtension(file).Equals(ModelKind(program), StringComparison.OrdinalIgnoreCase) && (program.Key == CsiProgram.Etabs.Key || TwinOf(program, file) is not null);
+        || Path.GetExtension(file).Equals(ModelKind(program), StringComparison.OrdinalIgnoreCase) && (program.Key == CsiProgram.Etabs.Key || program.Key == CsiProgram.Sap2000.Key || TwinOf(program, file) is not null);
 
     private static string? TwinOf(CsiProgram program, string file) =>
         TextKinds(program).Select(k => Path.ChangeExtension(file, k)).FirstOrDefault(File.Exists);
@@ -203,10 +203,17 @@ public static class RealModelField
     }
 
     /// <summary>The model as text for CSI ProMax: ETABS's own export of it (File > Export > ETABS .e2k, through the
-    /// API), or the .$2k SAP2000 keeps beside it.</summary>
+    /// API), or the .$2k SAP2000 keeps beside it, or else SAP2000's own tables of it written as a .s2k.</summary>
     private static string TextFor(CsiProgram program, ICsiLink link, string copy, string folder)
     {
         if (TwinOf(program, copy) is { } twin) return twin;
+        if (program.Key == CsiProgram.Sap2000.Key)
+        {
+            // No .$2k beside it: the model as SAP2000's own tables give it, every importable table, as its .s2k would be.
+            var s2k = Path.Combine(folder, Path.GetFileNameWithoutExtension(copy) + " tables.s2k");
+            File.WriteAllText(s2k, Sap2000.SapTablesText.Read(link));
+            return s2k;
+        }
         var target = Path.Combine(folder, Path.GetFileNameWithoutExtension(copy) + ".e2k");
         var kinds = AppDomain.CurrentDomain.GetAssemblies().Where(x => !x.IsDynamic).Select(x => { try { return x.GetType("ETABSv1.eFileTypeIO") ?? x.GetType("CSiAPIv1.eFileTypeIO"); } catch (Exception) { return null; } }).FirstOrDefault(t => t is not null)
             ?? throw new FieldCheckException($"{program.Name}'s API has no file export here (no eFileTypeIO), so the model cannot be given to CSI ProMax as text");
