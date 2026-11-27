@@ -194,6 +194,21 @@ static class ExtrasTests
                 Check(html.Contains(part), "viewer.html lost " + part);
             Check(html.Contains("[[\"OK\", d => applyDeformed(d)], [\"Close\"], [\"Apply\"") && html.Contains("[[\"OK\", d => applyForces(d)], [\"Close\"], [\"Apply\""), "OK, Close, Apply as the programs");
         });
+        yield return ("extras: ETABS's Display result forms are ETABS 23.2's as pictured on Ahmed's PC: Deformed Shape, Reactions, Member Force Diagram for Frames/Piers/Spandrels/Links, Shell Forces/Stresses with Select Groups, Energy/Virtual Work Diagram, Story Response (2026-11-27)", () =>
+        {
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var part in new[] { "<legend>Load Case/Load Combination/Modal Case</legend>", "value=\"case\">Case</label>", "value=\"combo\">Combo</label>", "value=\"mode\">Mode</label>",
+                "dialog(\"Deformed Shape\"", "Draw Contours on Objects", "Show Contours for", "Minimum Value for Contour Range", "Cubic Curve", "Hinge State Colored Dots are For", "IO, LS and CP Acceptance Points", "<legend>Animation Controls</legend>", "Time Increment",
+                "dialog(\"Reactions\"", "Integrated Wall Reactions", "Reset Tabulation Location", "Force Min/Max Range", "Moment Min/Max Range", "Display Results for These Components",
+                "dialog(\"Member Force Diagram for Frames/Piers/Spandrels/Links\"", "\"Inplane Shear\"", "\"Inplane Moment\"", "Show Values at Controlling Stations on Diagram", "<legend>Frame Contours</legend>", "<legend>Include</legend>",
+                "dialog(\"Shell Forces/Stresses\"", "\"Resultant Forces\"", "\"Shell Stresses\"", "\"Shell Strains\"", "\"Visible Face\", \"Top Face\", \"Bottom Face\", \"Maximum\", \"Minimum\", \"Absolute Maximum\"", "\"Display on Undeformed Shape\", \"Display on Deformed Shape\", \"Display in Extruded Form\"",
+                "Contour Averaging at Nodes", "\"None\", \"By Objects\", \"By Selected Groups\"", "dialog(\"Select Groups\"", "User Scale Factor", "\"0.0\", \"0.1\", \"0.2\"",
+                "dialog(\"Energy/Virtual Work Diagram\"", "value=\"Not Applicable\"", "energyvirtualwork",
+                "dialog(\"Story Response\"", "\"Max story displ\"", "\"Max story drifts\"", "\"Story shears\"", "\"Overturning moments\"", "\"Story stiffness\"", "\"Diaph CM displ\"", "\"Diaph drifts\"", "Indicates the type of story response to be displayed.",
+                "shells() { if (etrOn()) return etrShells(); openShells(); }", "if (etrOn()) return etrForces();", "if (etrOn()) return etrReactions();", "if (etrOn()) return etrDeformed(" })
+                Check(html.Contains(part), "viewer.html lost " + part);
+            Check(ViewerCheck.Script.Contains("Display result forms as the program draws them: Deformed Shape, Reactions, Member Force Diagram"), "the field test lost the ETABS Display result forms step");
+        });
         yield return ("extras: Display Design Info as the programs (Design Output and Design Input lists by their names), the Detailing menu's schedules and the Units button (Ahmed 2026-11-26)", () =>
         {
             var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
