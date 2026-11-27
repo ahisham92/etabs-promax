@@ -1475,6 +1475,58 @@ static class TesterBugTests
             Check(scratch.IndexOf("Probe(ctx, name, text)", StringComparison.Ordinal) is var probe and > 0 && probe > scratch.IndexOf("if (openedEmpty)", StringComparison.Ordinal), "the probe runs after an empty open");
         });
 
+        yield return ("SAFE 23.1 tester (0.4.68): SAFE's File.OpenFile takes no .f2k, its own export neither, so the Modeler's file goes in through SAFE's tables as File > Import does", () =>
+        {
+            const string seen = "SAFE 23.1.0: 1. SAFE's own export of the RC-PN example (the control): answered 0, holds 0 objects (probe-1.f2k); 2. ProgLevel Standard: answered 0, holds 0 objects (probe-2.f2k)";
+            Check(CsiProMax.Assistant.ScratchProgram.ProbeControlEmpty(seen), "the tester's probe: SAFE's own export came in empty");
+            Check(!CsiProMax.Assistant.ScratchProgram.ProbeControlEmpty(seen.Replace("(the control): answered 0, holds 0", "(the control): answered 0, holds 212", StringComparison.Ordinal)), "a SAFE that opens its own export is not that case");
+
+            var text = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "samples", "safe22-tester-cpm-field-test.f2k"));
+            var api = new TablesApi(["Point Object Connectivity", "Floor Object Connectivity", "Slab Property Definitions", "Material Properties - General", "Analysis Messages"]);
+            var link = new SafeMemory(new MemoryEtabs { Program = CsiProgram.Safe }, program: CsiProgram.Safe) { Api = api };
+            var answer = CsiProMax.Assistant.Safe.F2kRebuild.ImportTables(link, text);
+            Equal(0, answer["applied"]!.GetValue<int>(), "one apply of every staged table");
+            Check(api.Staged.ContainsKey("Floor Object Connectivity") && api.Staged["Floor Object Connectivity"].Rows == 4, "the four floors go in by SAFE's own table key: " + string.Join(", ", api.Staged.Keys));
+            Check(api.Staged["Floor Object Connectivity"].Fields.Contains("Unique Name") && api.Staged["Point Object Connectivity"].Fields.Contains("UniqueName"), "by the fields SAFE names");
+            Check(!api.Staged.ContainsKey("Analysis Messages"), "a table SAFE does not import is not sent");
+            Check(answer["not_in_program"]!.AsArray().Any(n => n!.GetValue<string>() == "TENDON OBJECT CONNECTIVITY"), "a table this SAFE does not list is named");
+            Check(answer["not_importable"]!.AsArray().Count == 0 || !answer["not_importable"]!.AsArray().Any(n => n!.GetValue<string>().StartsWith("Floor", StringComparison.Ordinal)), "the floors are importable");
+            Equal(1, api.Applies, "applied once");
+
+            var scratch = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));
+            Check(scratch.IndexOf("F2kRebuild.ImportTables(Link, text)", StringComparison.Ordinal) is var tables and > 0 && tables < scratch.IndexOf("F2kRebuild.Build(Link, text)", StringComparison.Ordinal),
+                "the tables first, the object calls only when they brought nothing in");
+            Check(scratch.Contains("if (probe is not null && ProbeControlEmpty(probe))", StringComparison.Ordinal), "an empty open of the Modeler's file fails only when SAFE opens its own export");
+        });
+
+        yield return ("SAFE tester (0.4.68): a field test that runs out of memory still writes its report; a table too large for one array is read a load case at a time", () =>
+        {
+            // A step that runs out of memory is one failure, and the steps after it still run.
+            var ctx = new FieldContext(CsiProgram.Safe, Path.GetTempPath(), new MemoryEtabs { Program = CsiProgram.Safe });
+            ctx.Section("memory");
+            ctx.Step<string>("a step that runs out of memory", () => throw new OutOfMemoryException());
+            ctx.Step("the next step", () => "ran");
+            var oom = ctx.Steps.Single(s => s.Name == "a step that runs out of memory");
+            Check(!oom.Ok && oom.Detail.StartsWith("OutOfMemoryException", StringComparison.Ordinal) && oom.Detail.Contains("last table read", StringComparison.Ordinal), oom.Detail);
+            Check(ctx.Steps.Single(s => s.Name == "the next step").Ok, "the run went on");
+
+            var field = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/FieldTest.cs"));
+            Check(field.Contains("catch (OutOfMemoryException)", StringComparison.Ordinal) && field.IndexOf("catch (OutOfMemoryException)", StringComparison.Ordinal) < field.IndexOf("var report = Render(", StringComparison.Ordinal),
+                "out of memory outside a step still reaches the report");
+            var com = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Etabs/ComEtabs.cs"));
+            Check(com.Contains("catch (OutOfMemoryException) { return ReadInPages(key, cases, combos); }", StringComparison.Ordinal), "a table read that runs out of memory is read in pages");
+            Check(com.Contains("catch (OutOfMemoryException ex) { done.SetException(ex); }", StringComparison.Ordinal), "and out of memory is not wrapped on the program's thread, so the pages are tried");
+            Check(com.Contains("ReadTableNow(key, isCase ? [one] : [], isCase ? [] : [one])", StringComparison.Ordinal), "one load case or combination a page");
+        });
+
+        yield return ("SAFE tester (0.4.68): a field test started from a Modeler window with no program expects the Modeler to name itself in get_model_context", () =>
+        {
+            var self = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/SelfTest.cs"));
+            Check(self.Contains("var expected = etabs is Etabs.OfflineEtabs ? \"CSI ProMax Modeler\" : program;", StringComparison.Ordinal), "the Modeler's own name is expected there");
+            var tools = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Tools/EtabsTools.cs"));
+            Check(tools.Contains("[\"program\"] = e is OfflineEtabs ? \"CSI ProMax Modeler\" : e.Program.Name", StringComparison.Ordinal), "which is what get_model_context says for it");
+        });
+
         yield return ("SAFE 22.7 tester (0.4.66): one call the engineer's program never came back from does not fail every later tool; the report gives a failure no skip reason", () =>
         {
             var com = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Etabs/ComEtabs.cs"));
@@ -1582,6 +1634,40 @@ static class TesterBugTests
     {
         public override ModelInfo Info() => base.Info() with { Locked = true };
     }
+}
+
+/// <summary>SAFE's interactive database as far as ImportTables asks it: the tables it lists, each importable but Analysis Messages.</summary>
+public sealed class TablesApi(string[] tables)
+{
+    public Dictionary<string, (string[] Fields, int Rows)> Staged { get; } = [];
+    public int Applies;
+    public TablesApi DatabaseTables => this;
+    public int GetPresentUnits() => 6;
+    public int GetAllTables(ref int NumberTables, ref string[] TableKey, ref string[] TableName, ref int[] ImportType, ref bool[] IsEmpty)
+    {
+        TableKey = tables; TableName = tables; NumberTables = tables.Length;
+        ImportType = tables.Select(t => t == "Analysis Messages" ? 0 : 2).ToArray(); IsEmpty = tables.Select(_ => true).ToArray();
+        return 0;
+    }
+    public int GetAllFieldsInTable(string TableKey, ref int TableVersion, ref int NumberFields, ref string[] FieldKey, ref string[] FieldName, ref string[] Description, ref string[] UnitsString, ref bool[] IsImportable)
+    {
+        FieldKey = TableKey switch
+        {
+            "Point Object Connectivity" => ["UniqueName", "Is Auto Point", "IsSpecial", "X", "Y", "Z", "GUID"],
+            "Floor Object Connectivity" => ["Unique Name", "UniquePt1", "UniquePt2", "UniquePt3", "UniquePt4", "GUID"],
+            _ => ["Name", "Material", "Type", "Modeling Type", "Property Type", "Slab Thickness", "SymType"],
+        };
+        FieldName = FieldKey; NumberFields = FieldKey.Length; IsImportable = FieldKey.Select(_ => true).ToArray();
+        return 0;
+    }
+    public int SetTableForEditingArray(string TableKey, ref int TableVersion, ref string[] FieldsKeysIncluded, int NumberRecords, ref string[] TableData)
+    {
+        if (TableData.Length != FieldsKeysIncluded.Length * NumberRecords) return 1;
+        Staged[TableKey] = (FieldsKeysIncluded, NumberRecords);
+        return 0;
+    }
+    public int ApplyEditedTables(bool FillImportLog, ref int NumFatalErrors, ref int NumErrorMsgs, ref int NumWarnMsgs, ref int NumInfoMsgs, ref string ImportLog) { Applies++; ImportLog = "ok"; return 0; }
+    public int CancelTableEditing() => 0;
 }
 
 /// <summary>SAFE's own API as far as the self test asks it: the tester's three area properties, of which WALL1 is no slab.</summary>

@@ -359,7 +359,8 @@ static class CsiToolsTests
             var direct = Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)
                 .Where(f => File.ReadAllText(f).Contains("DatabaseTables.SetTableForEditingArray(", StringComparison.Ordinal))
                 .Select(f => Path.GetFileName(f)).OrderBy(f => f).ToList();
-            Equal("CsiTools.cs,EditableTables.cs,SafeTools.cs", string.Join(",", direct), "the files that import a table directly (each new one needs SAP2000's guard)");
+            Check(File.ReadAllText(Path.Combine(root, "CsiProMax.Assistant/Safe/F2kRebuild.cs")).Contains("SAP2000 loses its patterns on its import", StringComparison.Ordinal), "the .f2k table import has SAP2000's guard");
+            Equal("CsiTools.cs,EditableTables.cs,F2kRebuild.cs,SafeTools.cs", string.Join(",", direct), "the files that import a table directly (each new one needs SAP2000's guard)");
         });
         yield return ("CSI tools: ETABS 23 gets a code load's row in the code's table even with no inputs given (0.4.34: none was read back)", () =>
         {

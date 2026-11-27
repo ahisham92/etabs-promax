@@ -154,6 +154,8 @@ public sealed class ComEtabs : ICsiLink, IDisposable
         {
             try { done.SetResult(body(Model())); }
             catch (EtabsException ex) { done.SetException(ex); }
+            // Out of memory stays itself: a table read then reads a load case at a time (ReadTable).
+            catch (OutOfMemoryException ex) { done.SetException(ex); }
             catch (COMException ex)
             {
                 // ETABS was closed, or is closing: attach again on the next call.
@@ -178,6 +180,9 @@ public sealed class ComEtabs : ICsiLink, IDisposable
         try { return done.Task.GetAwaiter().GetResult(); }
         catch (EtabsException) { throw; }
     }
+
+    /// <summary>The last table a link read (or is reading), with its size: what an out-of-memory failure names.</summary>
+    public static string LastRead { get; private set; } = "none";
 
     private static string Span(TimeSpan t) => t.TotalHours >= 1 ? $"{t.TotalHours:0.#} hours" : t.TotalMinutes >= 1 ? $"{t.TotalMinutes:0} minutes" : $"{t.TotalSeconds:0} seconds";
 
@@ -681,6 +686,36 @@ public sealed class ComEtabs : ICsiLink, IDisposable
 
     public TableData ReadTable(string key, IReadOnlyList<string>? cases, IReadOnlyList<string>? combos)
     {
+        try { return ReadTableKept(key, cases, combos); }
+        catch (OutOfMemoryException) { return ReadInPages(key, cases, combos); }
+    }
+
+    /// <summary>
+    /// A table too large to come over in one array (the API gives a whole table as one, which a large analysed model's
+    /// results can make larger than memory: a tester's SAFE field test ended on OutOfMemoryException) is read one load
+    /// case or combination at a time, as the pack reads its results, and the rows are put together.
+    /// </summary>
+    private TableData ReadInPages(string key, IReadOnlyList<string>? cases, IReadOnlyList<string>? combos)
+    {
+        OutOfMemory.Free();
+        var allCases = cases is { Count: > 0 } ? cases : cases is null && combos is null ? LoadCases() : [];
+        var allCombos = combos is { Count: > 0 } ? combos : cases is null && combos is null ? Combos() : [];
+        if (allCases.Count + allCombos.Count <= 1)
+            throw new EtabsException($"{Program.Name}'s table '{key}' is too large to read in this CSI ProMax window's memory, even for one load case ({LastRead}).");
+        string[]? fields = null;
+        var rows = new List<string[]>();
+        foreach (var (one, isCase) in allCases.Select(c => (c, true)).Concat(allCombos.Select(c => (c, false))))
+        {
+            var page = ReadTableNow(key, isCase ? [one] : [], isCase ? [] : [one]);
+            if (page.Fields.Count > 0) fields ??= page.Fields.ToArray();
+            rows.AddRange(page.Rows);
+        }
+        LastRead = $"{Program.Name}'s '{key}' in {allCases.Count + allCombos.Count} pages, {rows.Count:N0} rows";
+        return new TableData(fields ?? [], rows);
+    }
+
+    private TableData ReadTableKept(string key, IReadOnlyList<string>? cases, IReadOnlyList<string>? combos)
+    {
         if (_session is not { } session) return ReadTableNow(key, cases, combos);
         var id = key + "\u0002" + string.Join("\u0001", cases ?? []) + "\u0002" + string.Join("\u0001", combos ?? []);
         lock (_gate) if (session.Reads.TryGetValue(id, out var kept)) return kept;
@@ -734,7 +769,9 @@ public sealed class ComEtabs : ICsiLink, IDisposable
             }
             catch (Exception ex) when (ex is Microsoft.CSharp.RuntimeBinder.RuntimeBinderException or MissingMethodException or System.Runtime.InteropServices.COMException or InvalidCastException or ArgumentException) { }
         string[] ask = None, fields = None, data = None; int version = 0, records = 0;
+        LastRead = $"{Program.Name}'s '{key}' (being read)";
         int ret = Convert.ToInt32(m.DatabaseTables.GetTableForDisplayArray(key, ref ask, "", ref version, ref fields, ref records, ref data));
+        LastRead = $"{Program.Name}'s '{key}', {records:N0} rows of {fields?.Length ?? 0} fields";
         fields ??= None; data ??= None;
         // ETABS 23 can give an empty table's field list with empty entries: a null field name broke a check (0.4.57).
         fields = fields.Select(f => f ?? "").ToArray();

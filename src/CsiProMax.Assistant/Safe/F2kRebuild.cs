@@ -64,6 +64,66 @@ public static class F2kRebuild
         return $" The file's floors are at Z = {CsiTableText.Number(z)}, and the model's stories are at {string.Join(", ", stories.Select(s => $"{s.Name} {CsiTableText.Number(s.Elevation)}"))}: no story is at the floors' level.";
     }
 
+    /// <summary>
+    /// Puts every table of the file that the program can import into the open (blank, saved) model through its
+    /// interactive database (DatabaseTables.SetTableForEditingArray, then one ApplyEditedTables), as File > Import
+    /// does by hand. SAFE 23.1's File.OpenFile held nothing of any .f2k, SAFE's own export of the RC-PN example too
+    /// (the field test's probe, tester's SAFE-only run on 0.4.68), and its AreaObj.AddByCoord refused the floors: the
+    /// tables are the way in. Fields the program does not have are left out and named; the import log comes back.
+    /// </summary>
+    public static JsonObject ImportTables(ICsiLink e, string f2kText)
+    {
+        var file = CsiTableText.Parse(f2kText);
+        var program = e.Program.Name;
+        return (JsonObject)e.Raw("import the file's tables", m =>
+        {
+            int n = 0; string[] keys = [], names = []; int[] import = []; bool[] empty = [];
+            var listed = Convert.ToInt32(m.DatabaseTables.GetAllTables(ref n, ref keys, ref names, ref import, ref empty));
+            if (listed != 0) throw new EtabsException($"{program} refused to list its tables (GetAllTables answered {listed}), so the file's tables cannot go in.");
+            keys ??= []; import ??= [];
+            var byName = new Dictionary<string, (string Key, int Import)>(StringComparer.OrdinalIgnoreCase);
+            for (var i = 0; i < keys.Length; i++) byName.TryAdd(keys[i] ?? "", (keys[i] ?? "", i < import.Length ? import[i] : 0));
+            var sent = new JsonArray(); var notThere = new JsonArray(); var notImported = new JsonArray(); var leftOut = new JsonArray();
+            try { m.DatabaseTables.CancelTableEditing(); } catch { /* nothing staged */ }
+            foreach (var (table, rows) in file)
+            {
+                if (table == "PROGRAM CONTROL" || rows.Count == 0) continue;
+                // SAP2000 26 wipes its load patterns on any import of this table (EditableTables.Put's guard): never here.
+                if (e.Program.Key == CsiProgram.Sap2000.Key && string.Equals(table, "LOAD PATTERN DEFINITIONS", StringComparison.OrdinalIgnoreCase)) { notImported.Add(table + " (SAP2000 loses its patterns on its import)"); continue; }
+                if (!byName.TryGetValue(table, out var have)) { notThere.Add(table); continue; }
+                if (have.Import < 2) { notImported.Add(have.Key); continue; }
+                int version = 0, count = 0; string[] fieldKeys = [], fieldNames = [], about = [], units = []; bool[] importable = [];
+                m.DatabaseTables.GetAllFieldsInTable(have.Key, ref version, ref count, ref fieldKeys, ref fieldNames, ref about, ref units, ref importable);
+                fieldKeys ??= [];
+                var wanted = rows.SelectMany(r => r.Keys).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                var map = new List<(string From, string To)>();
+                foreach (var w in wanted)
+                {
+                    var to = fieldKeys.FirstOrDefault(k => string.Equals(k, w, StringComparison.OrdinalIgnoreCase))
+                        ?? fieldKeys.FirstOrDefault(k => string.Equals(Plain(k), Plain(w), StringComparison.OrdinalIgnoreCase));
+                    if (to is null) leftOut.Add($"{have.Key}: {w}"); else map.Add((w, to));
+                }
+                if (map.Count == 0) { leftOut.Add($"{have.Key}: every field"); continue; }
+                var fields = map.Select(x => x.To).ToArray();
+                var data = rows.SelectMany(r => map.Select(x => r.GetValueOrDefault(x.From) ?? "")).ToArray();
+                var answer = Convert.ToInt32(m.DatabaseTables.SetTableForEditingArray(have.Key, ref version, ref fields, rows.Count, ref data));
+                if (answer != 0) { notImported.Add($"{have.Key} (SetTableForEditingArray answered {answer})"); continue; }
+                sent.Add($"{have.Key} ({rows.Count})");
+            }
+            int fatal = 0, errors = 0, warnings = 0, info = 0; string log = "";
+            var before = EditableTables.PresentUnits(m);
+            var applied = sent.Count == 0 ? -1 : Convert.ToInt32(m.DatabaseTables.ApplyEditedTables(true, ref fatal, ref errors, ref warnings, ref info, ref log));
+            EditableTables.KeepUnits(m, before);
+            if (applied != 0) try { m.DatabaseTables.CancelTableEditing(); } catch { /* nothing more to undo */ }
+            return new JsonObject
+            {
+                ["applied"] = applied, ["fatal"] = fatal, ["errors"] = errors, ["warnings"] = warnings,
+                ["tables"] = sent, ["not_in_program"] = notThere, ["not_importable"] = notImported, ["fields_left_out"] = leftOut,
+                ["log"] = EditableTables.LogCut(log ?? "", 1500),
+            };
+        })!;
+    }
+
     /// <summary>Builds what the file holds; the answer counts it the way save_safe_file does, with what was left out.</summary>
     public static JsonObject Build(ICsiLink e, string f2kText)
     {

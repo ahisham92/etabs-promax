@@ -97,7 +97,10 @@ public static class SelfTest
         {
             var answer = ProgramTools.Chat(etabs.Program).First(t => t.Name == "get_model_context").Run(none, etabs);
             var named = answer["program"]?.GetValue<string>();
-            if (named != program) throw new InvalidOperationException($"the model context says the program is '{named ?? "(not said)"}', and this is {program}");
+            // The Modeler with no program behind it names itself (EtabsTools' get_model_context): a field test started from
+            // a Modeler window with no ETABS open read that as wrong (tester's SAFE-only run, 0.4.68).
+            var expected = etabs is Etabs.OfflineEtabs ? "CSI ProMax Modeler" : program;
+            if (named != expected) throw new InvalidOperationException($"the model context says the program is '{named ?? "(not said)"}', and this is {expected}");
             return answer;
         });
         // The one rule for checks (Verdict), held on the engineer's own model: nothing passes or fails without an analysis.
