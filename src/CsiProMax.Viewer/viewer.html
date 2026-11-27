@@ -269,6 +269,29 @@ footer #fbFilter{display:flex;align-items:center;gap:4px;border:0;border-left:1p
 .dlg label.dis{color:var(--mute)}
 .dlg .gu{display:grid;grid-template-columns:auto 1fr auto;gap:5px 8px;align-items:center}.dlg .gu .un{min-width:52px;color:var(--mute)}.dlg input.grey,.dlg select:disabled,.dlg input:disabled{background:var(--form);color:var(--mute)}
 .dlg .g3{display:grid;grid-template-columns:1fr 1fr;gap:3px 14px}
+/* ETABS 23.2 Display result forms (etr*): the pictured layouts of Deformed Shape, Reactions, Member Force Diagram, Shell Forces/Stresses, Energy, Story Response */
+.dlg .etr fieldset fieldset.sub{margin:6px 0 4px}
+.dlg .etr label{display:flex;align-items:center;gap:5px;min-height:22px}
+.dlg .etr .off,.dlg .etr label:has(input:disabled),.dlg .etr legend.off{opacity:.5}
+.dlg .etr3{display:grid;grid-template-columns:repeat(3,1fr);gap:2px 10px}
+.dlg .etr2{display:grid;grid-template-columns:1fr 1fr;gap:2px 10px}
+.dlg .etrN{display:grid;gap:2px 8px}
+.dlg .etrCase{display:grid;grid-template-columns:150px 1fr 1fr;gap:4px;margin-top:6px}
+.dlg .etrSc{display:grid;grid-template-columns:130px 1fr 1fr;gap:2px 8px;align-items:center}
+.dlg .etrRow{display:grid;grid-template-columns:1fr 150px;gap:6px;align-items:center;padding-left:18px}
+.dlg .etrRg{display:grid;grid-template-columns:1fr 90px 28px;gap:4px 8px;align-items:center;padding-left:12px}
+.dlg .etrMM{display:grid;grid-template-columns:auto 1fr 1fr 44px;gap:4px 6px;align-items:center}
+.dlg .etr2c{display:grid;grid-template-columns:1fr 1.6fr;gap:0 8px}
+.dlg .etrRow2{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+.dlg .etrRow3{display:grid;grid-template-columns:auto 1fr auto;gap:4px 6px;align-items:center}
+.dlg .etrCA{display:grid;grid-template-columns:1fr 1fr 80px;gap:2px 8px;align-items:center}
+.dlg .etrCA #sO{grid-column:2/4}
+.dlg .etrEn{display:grid;grid-template-columns:90px 1fr;gap:4px 8px;align-items:center;padding-left:14px}
+.dlg .etrSel{display:grid;grid-template-columns:1fr auto;gap:10px}.dlg .etrSel select{width:100%;min-height:120px}.dlg .etrSelB{display:flex;flex-direction:column;gap:6px;padding-top:16px}.dlg .etrSelB span{flex:1}
+.dlg .etrSR{display:flex;flex-direction:column;gap:4px}.dlg .etrTB{display:flex;gap:2px}.dlg .etrTB span{flex:1}.dlg .etrTB button{min-width:26px;padding:1px 4px}
+.dlg .etrSRb{display:flex;gap:6px}.dlg .etrPG{width:180px;display:flex;flex-direction:column;justify-content:space-between;border:1px solid var(--fgroup)}
+.dlg .etrPG table{width:100%;border-collapse:collapse;font-size:12px}.dlg .etrPG td{border-bottom:1px solid var(--fgroup);padding:1px 3px}.dlg .etrPG tr.h td{font-weight:bold;background:var(--fgroup)}.dlg .etrPG select,.dlg .etrPG input{width:100%;font-size:12px}
+.dlg .etrHelp{font-size:12px;padding:4px;border-top:1px solid var(--fgroup)}.dlg .etrPlot{flex:1;background:#d9d9d9;padding:4px}.dlg .etrPlot canvas{width:100%;background:#fff}
 .dlg .g4{display:grid;grid-template-columns:1fr 1fr 1fr;gap:3px 14px}
 .dlg label{white-space:nowrap}
 .dlg select,.dlg input[type=text],.dlg input[type=number]{width:100%}
@@ -1188,7 +1211,7 @@ const resComps = mode => { mode = mode || res.mode; return mode === "shell" ? sh
 const compName = () => (resComps().find(c => c[0] === res.comp) || ["", res.comp])[1];
 function syncResults() {
   if (!P) return;
-  const have = {deformed: disp.size, contour: disp.size, forces: forces.size, reactions: reacts.size, ratios: ratio.size, design: design.length, shell: shellRes.size, values: P.tables[res.vt] ? 1 : 0, loads: P.tables[res.lt] ? 1 : 0, model: 1};
+  const have = {deformed: disp.size, contour: disp.size, forces: forces.size, reactions: reacts.size, ratios: ratio.size, design: design.length, shell: shellRes.size, energy: etrEnergy && etrEnergy.by ? 1 : 0, wallforces: res.fInc ? 1 : 0, values: P.tables[res.vt] ? 1 : 0, loads: P.tables[res.lt] ? 1 : 0, model: 1};
   if (!have[res.mode] || res.mode === "ratios") res.mode = "model";
   document.querySelectorAll("[data-res]").forEach(b => { b.disabled = !have[b.dataset.res]; b.classList.toggle("on", b.dataset.res === "ratios" ? res.mode === "model" && $("colour").value === "ratio" : b.dataset.res === res.mode && !(res.mode === "model" && $("colour").value === "ratio")); });
   const cases = resCases(), comps = resComps();
@@ -1811,7 +1834,7 @@ void main(){
 }`;
 const SOLID_FS = `#version 300 es
 precision highp float; precision highp int;
-uniform int uMode; uniform vec3 uLight; uniform vec3 uFwd; uniform float uAlpha; uniform int uContour; uniform vec2 uRange; uniform int uNB; uniform vec3 uBands[12]; uniform vec3 uPickCol; uniform float uAmb;
+uniform int uMode; uniform vec3 uLight; uniform vec3 uFwd; uniform float uAlpha; uniform int uContour; uniform vec2 uRange; uniform int uNB; uniform vec3 uBands[12]; uniform vec3 uPickCol; uniform float uAmb; uniform float uCLine; uniform int uCFill;
 in vec3 vNor; in vec3 vCol; in float vVal; in float vHas; flat in int vId; flat in int vFlag;
 out vec4 o;
 void main(){
@@ -1819,7 +1842,8 @@ void main(){
   vec3 n = normalize(vNor); if (dot(n, uFwd) > 0.0) n = -n;
   float l = uAmb + (1.0 - uAmb) * (0.72 * max(dot(n, uLight), 0.0) + 0.28 * max(-dot(n, uFwd), 0.0));
   vec3 c = vCol;
-  if (uContour == 1 && vHas > 0.5) { float t = (vVal - uRange.x) / max(uRange.y - uRange.x, 1e-30); int b = int(clamp(floor(t * float(uNB)), 0.0, float(uNB - 1))); c = uBands[b]; l = 0.78 + 0.22 * l; }
+  if (uContour == 1 && vHas > 0.5) { float t = (vVal - uRange.x) / max(uRange.y - uRange.x, 1e-30); int b = int(clamp(floor(t * float(uNB)), 0.0, float(uNB - 1))); if (uCFill == 1) c = uBands[b]; l = 0.78 + 0.22 * l;
+    if (uCLine > 0.0) { float sb = t * float(uNB), fw = fwidth(sb) * uCLine, fr = fract(sb); if (fr < fw || fr > 1.0 - fw) { c = uCFill == 1 ? vec3(0.0) : uBands[b]; l = 1.0; } } }
   c *= l;
   if ((vFlag & 2) != 0 && mod(gl_FragCoord.x + gl_FragCoord.y, 8.0) < 4.0) c = uPickCol;
   if ((vFlag & 4) != 0) c = mix(c, vec3(1.0), 0.33);
@@ -2123,6 +2147,7 @@ function buildColours() {
     else if (mode === "story") { const st = o.story || ""; label = st || "(none)"; c = palette[Math.max(0, stories.findIndex(x => x.name === st)) % palette.length]; }
     else if (mode === "ratio") { const r = ratio.get(o.id); c = ratioColour(r) || (o.type === "a" ? (o.kind === "wall" ? T.wall : T.floor) : T.dark ? "#59636a" : "#b4bcc1"); label = o.type === "a" && r === undefined ? null : ratioLabel(r); }
     else { c = o.type === "a" ? (o.kind === "wall" ? T.wall : T.floor) : T[o.kind] || T.other; label = kindName[o.kind] || o.kind; }
+    const ec = etrFrameContour(o) || etrEnergyColour(o); if (ec) { c = ec; label = null; }
     put(o.id, c); if (label) legend.set(label, c);
   }
   baseColour = out; colourDirty = false; panes.forEach(p => p.sig = "");
@@ -2187,7 +2212,8 @@ function contourOf() {
   return {lo: a, hi: b, val, map, at: pn => { const d = map.get(pn); return d ? val(d) : undefined; }, title: compName() + (unit ? ", " + unit : "")};
 }
 function deformK() {
-  if (res.mode !== "deformed" || !disp.has(res.case)) return 0;
+  if (!(res.mode === "deformed" || res.mode === "contour" && res.defContour && etrOn() || etrShellDeformed()) || !disp.has(res.case)) return 0;
+  if (etrShellDeformed() && res.etrS.scale === "user") return res.etrS.sf;
   let max = 0; disp.get(res.case).forEach(d => max = Math.max(max, Math.hypot(...d)));
   if (res.userScale) return res.userScale;
   return max > 0 ? size * 0.07 * Math.pow(res.scale / 50, 2) / max : 0;
@@ -2195,7 +2221,7 @@ function deformK() {
 function uploadPoints() {
   const n = points.length + meshList.length, rows = Math.max(1, Math.ceil((n + 1) / TEXW)), data = new Float32Array(TEXW * rows * 4);
   contour = contourOf();
-  const dm = (res.mode === "deformed" || res.mode === "contour") && disp.get(res.case);
+  const dm = (res.mode === "deformed" || res.mode === "contour" || etrShellDeformed()) && disp.get(res.case);
   for (let i = 0; i < n; i++) {
     const pn = i < points.length ? String(points[i][0]) : meshList[i - points.length];
     const d = dm && dm.get(pn);
@@ -2272,7 +2298,7 @@ function diagram(p, M) {
   const vis = p.vis;
   let shownCount = 0; for (const f of frames) if (vis && vis[f.id] && map.has(f.name)) shownCount++;
   for (const f of frames) {
-    if (!vis || !vis[f.id]) continue;
+    if (!vis || !vis[f.id] || !isLoad && !etrFrameShown(f)) continue;
     const rows = map.get(f.name); if (!rows || rows.length < 2) continue;
     const ax = memberAxes(f);
     // A load is drawn on the side it comes from, pointing at the member: a gravity load above the beam.
@@ -2369,7 +2395,7 @@ function setCommon(pr, M, R, dpr, mode) {
 let curDefK = 0;
 function drawScene(p, M, R, dpr, mode) {
   // mode 0 draws for the eye, mode 1 draws object numbers for picking.
-  const T = theme(), extrude = opt.extrude && opt.sections && res.mode !== "forces", see = !(extrude || opt.extrudeA && opt.sections) || opt.see || p.mode !== "3d";
+  const T = theme(), extrude = opt.extrude && opt.sections && (res.mode !== "forces" || res.fExtrude && etrOn()), see = !(extrude || opt.extrudeA && opt.sections) || opt.see || p.mode !== "3d";
   const contourOn = (res.mode === "contour" || res.mode === "shell") && contour;
   const L = unitv(add(add(mul(M.d, -0.55), mul(M.up, 0.75)), mul(M.right, -0.35)));
   gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.depthMask(true); gl.disable(gl.BLEND);
@@ -2378,6 +2404,7 @@ function drawScene(p, M, R, dpr, mode) {
     const pr = prog.solid; setCommon(pr, M, R, dpr, mode);
     gl.uniform3fv(pr.u.uLight, L); gl.uniform3fv(pr.u.uFwd, M.d); gl.uniform1f(pr.u.uAlpha, alpha); gl.uniform1f(pr.u.uAmb, T.dark ? 0.38 : 0.46);
     gl.uniform1i(pr.u.uContour, contourOn && !(noContour && areas.length) ? 1 : 0);
+    const eS = etrOn() && res.mode === "shell" && res.etrS; if (pr.u.uCLine) gl.uniform1f(pr.u.uCLine, eS && eS.lines ? eS.lw : 0); if (pr.u.uCFill) gl.uniform1i(pr.u.uCFill, eS && !eS.fill ? 0 : 1);
     if (contourOn) { const bands = bandSet(); gl.uniform2f(pr.u.uRange, contour.lo, contour.hi); gl.uniform1i(pr.u.uNB, bands.length); const flatB = new Float32Array(36); bands.forEach((c, i) => flatB.set(rgb(c), i * 3)); gl.uniform3fv(pr.u.uBands, flatB); }
     gl.bindVertexArray(buf.vao); gl.drawArrays(gl.TRIANGLES, 0, buf.count);
   };
@@ -2412,7 +2439,9 @@ function drawScene(p, M, R, dpr, mode) {
   const under = see && !contourOn && p.mode !== "3d";
   if (under) { gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false); solids(bufs.solidA, T.dark ? 0.42 : 0.23); gl.depthMask(true); gl.disable(gl.BLEND); gl.clear(gl.DEPTH_BUFFER_BIT); }
   if (extrude) solids(bufs.solidF, 1, true);
-  if (!see || contourOn) solids(bufs.solidA, 1);
+  const sTr = contourOn && etrOn() && res.mode === "shell" && res.etrS ? +res.etrS.transp || 0 : 0;
+  if (sTr > 0) { gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false); solids(bufs.solidA, 1 - sTr); gl.depthMask(true); gl.disable(gl.BLEND); }
+  else if (!see || contourOn) solids(bufs.solidA, 1);
   // Grid lines after the solids, so members hide them; they do not hide anything themselves.
   if (p.aux) { gl.depthMask(false); if (opt.grid) { thick(p.aux.grid, 1, 1, p.mode === "3d" && T.ground ? [0.62, 0.8, 0.96] : T.grid, 1, 0); if (opt.levels) thick(p.aux.level, 1, 1, T.level, 1, 0); } if (opt.supports) thick(p.aux.sup, 1.4, 1, rgb(T.support), 1, 0.002); gl.depthMask(true); }
   if (!extrude) thick(bufs.lines, p.mode === "3d" ? (T.dark ? 1.6 : 0.75) : 2, 1); else thick(bufs.bare, 2, 1);
@@ -2547,7 +2576,8 @@ function overlay(p, g, M, T, w, h) {
   drawSelJoints(p, g, to, T);
   drawInst(p, g, to, T);
   drawDesign(p, g, to, T);
-  if (res.mode === "reactions") drawReactions(p, g, to, T);
+  if (res.mode === "reactions") (etrOn() && res.etrR ? etrDrawReactions : drawReactions)(p, g, to, T);
+  if (etrOn()) { if (res.mode === "forces" || res.mode === "wallforces") etrDrawWallForces(p, g, to, T); etrDrawShellValues(p, g, to, T); etrDrawEnergy(p, g, to, T); }
   if (res.mode === "loads" && jointLoads) drawReactions(p, g, to, T, jointLoads);
   if (p.diag && p.diag.labels) {
     font(10.5); g.textBaseline = "middle"; const taken = [];
@@ -3677,10 +3707,495 @@ function caseBoxWire(d, list) {
   q(d, "#dBase").onchange = pick; q(d, "#dStep").onchange = () => { q(d, "#dCase").value = q(d, "#dStep").value; };
   pick(); return d;
 }
+// ---- ETABS 23.2's Display result forms, item for item as pictured on Ahmed's PC (2026-11-27, project files
+// field/reference-forms/etabs/Display): Deformed Shape, Reactions, Member Force Diagram for Frames/Piers/Spandrels/
+// Links, Shell Forces/Stresses with Select Groups, Energy/Virtual Work Diagram and Story Response Plots. SAP2000 and
+// SAFE keep their own forms (dialogs.*). A choice ETABS greys is greyed here only in the same state: Combo with no
+// load combinations, Mode with no modal case, Hinge State dots with no hinge results, Integrated Wall Reactions with
+// no wall reactions in the pack.
+const etrOn = () => program === "etabs";
+function etrSplit(list) {
+  // ETABS's Case / Combo / Mode radios: modal cases go under Mode (one entry per mode), combinations under Combo.
+  const combos = new Set((P.model.combinations || []).map(String)), out = {case: [], combo: [], mode: []};
+  for (const k of list) { const p = casePart(k), kind = p.by === "Mode" ? "mode" : combos.has(p.base) ? "combo" : "case"; if (!out[kind].includes(p.base)) out[kind].push(p.base); }
+  return out;
+}
+function etrCaseBox() {
+  return `<fieldset><legend>Load Case/Load Combination/Modal Case</legend>
+    <div class="etr3"><label><input type="radio" name="eK" value="case">Case</label><label><input type="radio" name="eK" value="combo">Combo</label><label><input type="radio" name="eK" value="mode">Mode</label></div>
+    <div class="etrCase"><select id="eBase"></select><select id="eStep"></select><input id="eNote" readonly tabindex="-1"></div><input type="hidden" id="dCase"></fieldset>`;
+}
+function etrCaseWire(d, list, onPick) {
+  // The two boxes beside the name: for a modal case the mode number and its period (UNVERIFIED: the pictures so far
+  // show them empty and greyed, as for a single-valued case; asked of the capture thread 2026-11-27).
+  const sp = etrSplit(list), radios = [...d.querySelectorAll("[name=eK]")];
+  radios.forEach(r => { r.disabled = !sp[r.value].length; });
+  const cur = list.includes(res.case) ? res.case : list.find(c => !casePart(c).by) || list[0] || "", cp = casePart(cur);
+  const kind0 = cp.by === "Mode" ? "mode" : sp.combo.includes(cp.base) ? "combo" : sp.case.length ? "case" : sp.combo.length ? "combo" : "mode";
+  (radios.find(r => r.value === kind0) || radios[0]).checked = true;
+  const steps = () => list.filter(c => casePart(c).base === q(d, "#eBase").value && casePart(c).by);
+  const pick = keep => {
+    const st = steps(), want = casePart(keep || q(d, "#dCase").value), hit = st.find(c => casePart(c).n === want.n) || st[0];
+    q(d, "#eStep").disabled = !st.length; q(d, "#eStep").innerHTML = st.length ? opts(st.map(c => [c, casePart(c).n]), hit) : "";
+    q(d, "#dCase").value = st.length ? hit : q(d, "#eBase").value; q(d, "#eNote").value = st.length ? periodOf(hit) : ""; q(d, "#eNote").disabled = !st.length;
+    if (onPick) onPick(q(d, "#dCase").value);
+  };
+  const fill = (kind, keep) => { const names = sp[kind] || []; q(d, "#eBase").innerHTML = opts(names, names.includes(casePart(keep || "").base) ? casePart(keep).base : names[0]); pick(keep); };
+  radios.forEach(r => r.onchange = () => fill(r.value));
+  q(d, "#eBase").onchange = () => pick(); q(d, "#eStep").onchange = () => { q(d, "#dCase").value = q(d, "#eStep").value; q(d, "#eNote").value = periodOf(q(d, "#eStep").value); if (onPick) onPick(q(d, "#dCase").value); };
+  fill(kind0, cur);
+  return d;
+}
+// Turns parts of a form on and off as ETABS does: every element named by data-en="key" follows on().
+function etrEnable(d, key, on) { d.querySelectorAll(`[data-en="${key}"]`).forEach(x => { x.disabled = !on; x.classList.toggle("off", !on); }); }
+const etrNum = (d, s) => { const v = parseFloat(q(d, s).value); return isNaN(v) ? 0 : v; };
+const etrRange = (a, b) => b > a ? [a, b] : null; // ETABS: 0 and 0 (or max not above min) = the program's own range
+const etrHingeTables = () => Object.values(P.tables).filter(t => t.rows && t.rows.length && /hinge/.test(norm(t.name)) && caseCol(t.fields) >= 0);
+const etrUnits = () => { const u = infoUnits(); return {f: u.f || "kN", l: u.l || "m"}; };
+const etrBtns = (apply) => [["OK", d => apply(d)], ["Close"], ["Apply", d => { apply(d); return false; }, true]];
+
+// Display > Deformed Shape (F6). Mode Shapes open the same form with Mode chosen, as ETABS has no separate one.
+function etrDeformed(only) {
+  if (!disp.size) return;
+  const list = Array.isArray(only) ? only : [...disp.keys()], U = etrUnits(), cont = res.mode === "contour" && res.defContour, rg = cont && res.range ? res.range : [0, 0];
+  const comp = cont ? res.comp : "UZ", hinge = etrHingeTables().length > 0, at = res.animT || [0, 0, 0.1];
+  const d = dialog("Deformed Shape", `<div class="etr">${etrCaseBox()}
+    <fieldset><legend>Scaling</legend><div class="etrSc"><label><input type="radio" name="sc" value="auto" ${res.userScale ? "" : "checked"}>Automatic</label><span></span><span></span>
+      <label><input type="radio" name="sc" value="user" ${res.userScale ? "checked" : ""}>User Defined</label><span data-en="sc">Scale Factor</span><input type="number" step="any" id="dScale" data-en="sc" value="${res.userScale || 0}"></div></fieldset>
+    <fieldset><legend>Contour Options</legend><label><input type="checkbox" id="dCont" ${cont ? "checked" : ""}>Draw Contours on Objects</label>
+      <fieldset class="sub"><legend data-en="ct">Contour Component</legend><div class="etrRow"><span data-en="ct">Show Contours for</span><select id="dComp" data-en="ct">${opts([["UX", "Displacement UX"], ["UY", "Displacement UY"], ["UZ", "Displacement UZ"], ["U", "Displacement Resultant"]], comp)}</select></div></fieldset>
+      <fieldset class="sub"><legend data-en="ct">Contour Range</legend><div class="etrRg"><span data-en="ct">Minimum Value for Contour Range</span><input type="number" step="any" id="dMin" data-en="ct" value="${rg[0]}"><span data-en="ct">${esc(U.l)}</span>
+        <span data-en="ct">Maximum Value for Contour Range</span><input type="number" step="any" id="dMax" data-en="ct" value="${rg[1]}"><span data-en="ct">${esc(U.l)}</span></div></fieldset></fieldset>
+    <div class="etr2c"><fieldset><legend>Options</legend><label><input type="checkbox" id="dGhost" ${res.ghost ? "checked" : ""}>Wire Shadow</label><label><input type="checkbox" id="dCubic" ${res.cubic !== false ? "checked" : ""}>Cubic Curve</label></fieldset>
+      <fieldset><legend data-en="hg">Hinge State Colored Dots are For</legend><label data-en="hg"><input type="radio" name="hg" value="bcde" data-en="hg" ${res.hingeDots !== "acc" ? "checked" : ""}>B, C , D and E Points</label><label data-en="hg"><input type="radio" name="hg" value="acc" data-en="hg" ${res.hingeDots === "acc" ? "checked" : ""}>IO, LS and CP Acceptance Points</label></fieldset></div>
+    <fieldset><legend>Animation Controls</legend><div class="etrRg"><span>Start Time</span><input type="number" step="any" id="dT0" value="${at[0]}"><span>sec</span><span>End Time</span><input type="number" step="any" id="dT1" value="${at[1]}"><span>sec</span><span>Time Increment</span><input type="number" step="any" id="dTi" value="${at[2]}"><span>sec</span></div></fieldset></div>`,
+    etrBtns(etrApplyDeformed), {width: 450});
+  etrCaseWire(d, list);
+  const sync = () => { etrEnable(d, "sc", q(d, "[name=sc]:checked").value === "user"); etrEnable(d, "ct", q(d, "#dCont").checked); etrEnable(d, "hg", hinge); };
+  d.querySelectorAll("[name=sc], #dCont").forEach(x => x.onchange = sync); sync();
+  return d;
+}
+function etrApplyDeformed(d) {
+  const user = q(d, "[name=sc]:checked").value === "user";
+  res.userScale = user ? Math.abs(etrNum(d, "#dScale")) : 0; res.ghost = q(d, "#dGhost").checked; res.cubic = q(d, "#dCubic").checked;
+  res.hingeDots = q(d, "[name=hg]:checked").value; res.animT = [etrNum(d, "#dT0"), etrNum(d, "#dT1"), etrNum(d, "#dTi") || 0.1];
+  const c = q(d, "#dCase").value;
+  if (q(d, "#dCont").checked) { res.mode = "contour"; res.defContour = true; syncResults(); res.case = c; res.comp = q(d, "#dComp").value; res.range = etrRange(etrNum(d, "#dMin"), etrNum(d, "#dMax")); colourDirty = true; }
+  else { res.mode = "deformed"; res.defContour = false; syncResults(); res.case = c; }
+  $("case").value = res.case; pointsDirty = true; syncResults(); syncTools(); draw();
+}
+
+// Display > Force/Stress Diagrams > Support/Spring Reactions (F7).
+let wallReacts = new Map();
+function etrReadWallReactions() {
+  // ETABS's own "Integrated Wall Reactions" table: one row per wall bay, its resultant and where it acts.
+  wallReacts = new Map();
+  const t = Object.values(P.tables).find(t => norm(t.name) === "integratedwallreactions"); if (!t || !t.rows) return wallReacts;
+  const f = t.fields, u = col(f, "UniqueName", "WallBay"), c = caseCol(f), st = stepCol(f), sn = stepNumCol(f), gx = col(f, "globalX", "GlobalX"), gy = col(f, "globalY", "GlobalY"), gz = col(f, "globalZ", "GlobalZ");
+  const idx = ["FX", "FY", "FZ", "MX", "MY", "MZ"].map(k => col(f, k));
+  if (u < 0 || c < 0 || gx < 0) return wallReacts;
+  for (const r of t.rows) { if (st >= 0 && /min/i.test(r[st])) continue; const k = caseKey(t, r, c, st, sn); let m = wallReacts.get(k); if (!m) wallReacts.set(k, m = new Map());
+    const v = idx.map(i => i >= 0 ? parseFloat(r[i]) || 0 : 0); v.at = [+r[gx] || 0, +r[gy] || 0, +r[gz] || 0]; m.set(String(r[u]), v); }
+  return wallReacts;
+}
+function etrReactions() {
+  etrReadWallReactions();
+  if (!reacts.size && !wallReacts.size) return;
+  const U = etrUnits(), r = res.etrR || {type: "point", plot: "arrows", contours: false, comps: [2], f: [0, 0], m: [0, 0]};
+  const comp = (i, n) => `<label><input type="checkbox" data-rc="${i}" ${r.comps.includes(i) ? "checked" : ""}>${n}</label>`;
+  const d = dialog("Reactions", `<div class="etr">${etrCaseBox()}
+    <fieldset><legend>Type of Reactions</legend><div class="etr2"><label><input type="radio" name="rT" value="point" ${r.type !== "wall" ? "checked" : ""} ${reacts.size ? "" : "disabled"}>Point Reactions</label><label><input type="radio" name="rT" value="wall" ${r.type === "wall" ? "checked" : ""} ${wallReacts.size ? "" : "disabled"}>Integrated Wall Reactions</label></div></fieldset>
+    <fieldset><legend>Plot Type</legend><div class="etr2"><label><input type="radio" name="rP" value="arrows" ${r.plot !== "table" ? "checked" : ""}>Arrows</label><label><input type="checkbox" id="rCont" ${r.contours ? "checked" : ""}>Show Contours</label>
+      <label><input type="radio" name="rP" value="table" ${r.plot === "table" ? "checked" : ""}>Tabulated</label><label data-en="tb"><input type="checkbox" id="rReset" data-en="tb">Reset Tabulation Location</label></div></fieldset>
+    <fieldset><legend>Contour Values</legend><div class="etrMM"><span data-en="cv">Force Min/Max Range</span><input type="number" step="any" id="rF0" data-en="cv" value="${r.f[0]}"><input type="number" step="any" id="rF1" data-en="cv" value="${r.f[1]}"><span data-en="cv">${esc(U.f)}</span>
+      <span data-en="cv">Moment Min/Max Range</span><input type="number" step="any" id="rM0" data-en="cv" value="${r.m[0]}"><input type="number" step="any" id="rM1" data-en="cv" value="${r.m[1]}"><span data-en="cv">${esc(U.f + "-" + U.l)}</span></div></fieldset>
+    <fieldset><legend>Display Results for These Components</legend><div class="etr2">${comp(0, "Fx")}${comp(3, "Mx")}${comp(1, "Fy")}${comp(4, "My")}${comp(2, "Fz")}${comp(5, "Mz")}</div></fieldset></div>`,
+    etrBtns(etrApplyReactions), {width: 450});
+  const listOf = () => [...(q(d, "[name=rT]:checked") && q(d, "[name=rT]:checked").value === "wall" ? wallReacts : reacts).keys()];
+  etrCaseWire(d, listOf());
+  if (!q(d, "[name=rT]:checked")) q(d, "[name=rT]:not(:disabled)").checked = true;
+  const sync = () => { etrEnable(d, "tb", q(d, "[name=rP]:checked").value === "table"); etrEnable(d, "cv", q(d, "#rCont").checked); };
+  d.querySelectorAll("[name=rP], #rCont").forEach(x => x.onchange = sync); sync();
+  d.querySelectorAll("[name=rT]").forEach(x => x.onchange = () => etrCaseWire(d, listOf()));
+  return d;
+}
+function etrApplyReactions(d) {
+  const comps = [...d.querySelectorAll("[data-rc]:checked")].map(x => +x.dataset.rc);
+  res.etrR = {type: q(d, "[name=rT]:checked").value, plot: q(d, "[name=rP]:checked").value, contours: q(d, "#rCont").checked, comps,
+    f: [etrNum(d, "#rF0"), etrNum(d, "#rF1")], m: [etrNum(d, "#rM0"), etrNum(d, "#rM1")], off: q(d, "#rReset").checked ? {} : (res.etrR && res.etrR.off) || {}};
+  res.mode = "reactions"; syncResults(); res.case = q(d, "#dCase").value; if (res.etrR.type === "wall") res.mode = "reactions";
+  syncTools(); draw();
+}
+function etrDrawReactions(p, g, to, T) {
+  // As ETABS draws them: an arrow per force (a double-headed arrow per moment) with its value, or the values
+  // tabulated beside each support; with Show Contours the arrows and values take the contour colour of their value.
+  const R = res.etrR, map = (R.type === "wall" ? wallReacts : reacts).get(res.case); if (!map) return;
+  const comps = R.comps, L = size * 0.06, bands = bandSet(), names = ["FX", "FY", "FZ", "MX", "MY", "MZ"];
+  let fmax = 0, mmax = 0, flo = 1e30, fhi = -1e30, mlo = 1e30, mhi = -1e30;
+  map.forEach(r => comps.forEach(i => { const v = r[i]; if (i < 3) { fmax = Math.max(fmax, Math.abs(v)); flo = Math.min(flo, v); fhi = Math.max(fhi, v); } else { mmax = Math.max(mmax, Math.abs(v)); mlo = Math.min(mlo, v); mhi = Math.max(mhi, v); } }));
+  const fr = etrRange(R.f[0], R.f[1]) || [flo, fhi], mr = etrRange(R.m[0], R.m[1]) || [mlo, mhi];
+  const colourOf = (i, v) => { if (!R.contours) return i < 3 ? (i === 2 ? T.posEdge : T.negEdge) : T.brace || T.negEdge; const [a, b] = i < 3 ? fr : mr; const t = b > a ? (v - a) / (b - a) : 0.5; return bands[Math.max(0, Math.min(bands.length - 1, Math.floor(t * bands.length)))]; };
+  g.lineWidth = 1.6; g.font = "10.5px Segoe UI, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle";
+  map.forEach((r, name) => {
+    const q0 = r.at || pointXyz.get(String(name)); if (!q0) return;
+    if (p.mode === "elev" && p.line && !onLine(q0, p.line)) return;
+    if (p.mode === "plan") { const z = elevationOf(p.story); if (z === null || Math.abs(q0[2] - z) > tol() * 10) return; }
+    if (R.plot === "table") {
+      const at = to(q0); if (!at[3]) return;
+      const lines = comps.map(i => `${names[i]} = ${fmt(r[i])}`); if (!lines.length) return;
+      const w = Math.max(...lines.map(s => g.measureText(s).width)) + 8, h = lines.length * 13 + 4, x = at[0] + 10, y = at[1] + 6;
+      g.fillStyle = css(T.canvas); g.strokeStyle = T.text; g.lineWidth = 1; g.fillRect(x, y, w, h); g.strokeRect(x, y, w, h);
+      g.beginPath(); g.moveTo(at[0], at[1]); g.lineTo(x, y); g.stroke();
+      g.textAlign = "left"; lines.forEach((s, k) => { g.fillStyle = R.contours ? colourOf(comps[k], r[comps[k]]) : T.text; g.fillText(s, x + 4, y + 9 + k * 13); }); g.textAlign = "center";
+      return;
+    }
+    for (const i of comps) {
+      const v = r[i], max = i < 3 ? fmax : mmax; if (!max || Math.abs(v) < max * 1e-4) continue;
+      const dir = [0, 0, 0]; dir[i % 3] = v >= 0 ? 1 : -1;
+      const from = sub(q0, mul(dir, L * (0.45 + 0.55 * Math.abs(v) / max) + L * 0.15)), tip = sub(q0, mul(dir, L * 0.15));
+      const a = to(from), b = to(tip); if (!a[3] || Math.hypot(b[0] - a[0], b[1] - a[1]) < 3) { if (p.mode === "plan" && i === 2) { g.fillStyle = colourOf(i, v); g.fillText(fmt(v), b[0], b[1] + 12); } continue; }
+      g.strokeStyle = g.fillStyle = colourOf(i, v); arrow(g, a, b);
+      if (i >= 3) { const dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1; arrow(g, a, [b[0] - dx / l * 6, b[1] - dy / l * 6]); }
+      g.lineWidth = 3; g.strokeStyle = css(T.canvas); g.strokeText(fmt(v), a[0], a[1] + (a[1] > b[1] ? 8 : -8)); g.fillText(fmt(v), a[0], a[1] + (a[1] > b[1] ? 8 : -8)); g.lineWidth = 1.6;
+    }
+  });
+}
+
+// Display > Force/Stress Diagrams > Frame/Pier/Spandrel/Link Forces (F8).
+const etrFComps = [["P", "Axial Force"], ["T", "Torsion"], ["IV", "Inplane Shear"], ["V2", "Shear 2-2"], ["M2", "Moment 2-2"], ["IM", "Inplane Moment"], ["V3", "Shear 3-3"], ["M3", "Moment 3-3"]];
+const etrWallForceTables = kind => Object.values(P.tables).filter(t => t.rows && t.rows.length && norm(t.name) === (kind === "pier" ? "pierforces" : kind === "spandrel" ? "spandrelforces" : "elementforceslinks"));
+function etrForces() {
+  const inc0 = res.fInc || {frames: true, piers: false, spandrels: false, links: false};
+  const cases = new Set([...forces.keys()]); for (const k of ["pier", "spandrel", "link"]) for (const t of etrWallForceTables(k)) tableCases(t).forEach(c => cases.add(c));
+  if (!cases.size) return;
+  const U = etrUnits(), cur = res.mode === "forces" ? (res.etrComp || res.comp) : "M3", rg = res.fRange || [0, 0];
+  const unitOf = c => /M|T|IM/.test(c) && c !== "IV" ? U.f + "-" + U.l : U.f;
+  const d = dialog("Member Force Diagram for Frames/Piers/Spandrels/Links", `<div class="etr">${etrCaseBox()}
+    <fieldset><legend>Component</legend><div class="etr3">${etrFComps.map(([k, l]) => `<label><input type="radio" name="comp" value="${k}" ${cur === k ? "checked" : ""}>${l}</label>`).join("")}</div></fieldset>
+    <fieldset><legend>Scaling</legend><div class="etrSc"><label><input type="radio" name="sc" value="auto" ${res.userScale ? "" : "checked"}>Automatic</label><span></span><span></span>
+      <label><input type="radio" name="sc" value="user" ${res.userScale ? "checked" : ""}>User Defined</label><span data-en="sc">Scale Factor</span><input type="number" step="any" id="dScale" data-en="sc" value="${res.userScale || 1}"></div></fieldset>
+    <fieldset><legend>Display Options</legend><label><input type="checkbox" id="dFill" ${res.fill ? "checked" : ""}>Fill Diagram</label><label><input type="checkbox" id="dVals" ${res.values ? "checked" : ""}>Show Values at Controlling Stations on Diagram</label>
+      <fieldset class="sub"><legend>Frame Contours</legend><div class="etr2"><label><input type="checkbox" id="fCont" ${res.fContour ? "checked" : ""}>Show Contours</label><label><input type="checkbox" id="fExt" ${res.fExtrude ? "checked" : ""}>Extrude</label></div>
+        <div class="etrMM"><span data-en="fc">Min/Max Range</span><input type="number" step="any" id="fMin" data-en="fc" value="${rg[0]}"><input type="number" step="any" id="fMax" data-en="fc" value="${rg[1]}"><span data-en="fc" id="fU">${esc(unitOf(cur))}</span></div></fieldset></fieldset>
+    <fieldset><legend>Include</legend><div class="etr3"><label><input type="checkbox" id="iF" ${inc0.frames ? "checked" : ""}>Frames</label><label><input type="checkbox" id="iP" ${inc0.piers ? "checked" : ""}>Piers</label><label><input type="checkbox" id="iS" ${inc0.spandrels ? "checked" : ""}>Spandrels</label><label><input type="checkbox" id="iL" ${inc0.links ? "checked" : ""}>Links</label></div></fieldset></div>`,
+    etrBtns(etrApplyForces), {width: 450});
+  etrCaseWire(d, [...cases]);
+  const sync = () => { etrEnable(d, "sc", q(d, "[name=sc]:checked").value === "user"); etrEnable(d, "fc", q(d, "#fCont").checked); q(d, "#fU").textContent = unitOf(q(d, "[name=comp]:checked").value); };
+  d.querySelectorAll("[name=sc], #fCont, [name=comp]").forEach(x => x.onchange = sync); sync();
+  return d;
+}
+function etrApplyForces(d) {
+  const c = q(d, "[name=comp]:checked").value;
+  res.etrComp = c; res.fInc = {frames: q(d, "#iF").checked, piers: q(d, "#iP").checked, spandrels: q(d, "#iS").checked, links: q(d, "#iL").checked};
+  res.userScale = q(d, "[name=sc]:checked").value === "user" ? Math.abs(etrNum(d, "#dScale")) : 0;
+  res.fill = q(d, "#dFill").checked; res.values = q(d, "#dVals").checked; res.fContour = q(d, "#fCont").checked; res.fExtrude = q(d, "#fExt").checked;
+  res.fRange = [etrNum(d, "#fMin"), etrNum(d, "#fMax")];
+  if (res.fExtrude && !opt.extrude) { opt.extrude = true; geometryDirty = true; geometryStamp++; }
+  if ($("colour").value === "ratio") $("colour").value = "kind";
+  res.mode = forces.size && (res.fInc.frames || res.fInc.links) ? "forces" : "wallforces"; syncResults();
+  // Inplane shear and moment are the in-plane V2 and M3 of piers and spandrels (and of frames).
+  res.comp = c === "IV" ? "V2" : c === "IM" ? "M3" : c; res.case = q(d, "#dCase").value;
+  if (forces.size) { $("case").value = res.case; $("comp").value = res.comp; }
+  colourDirty = true; panes.forEach(p => p.diagSig = null); syncTools(); draw();
+}
+function etrFrameShown(f) {
+  // Include: Frames and Links (ETABS draws link force diagrams on the link objects).
+  const inc = res.fInc; if (!inc || program !== "etabs") return true;
+  return f.kind === "link" ? inc.links : inc.frames;
+}
+function etrFrameContour(o) {
+  // Frame Contours > Show Contours: each frame coloured by its largest value of the component along it.
+  if (!(res.mode === "forces" && res.fContour && program === "etabs" && o.type === "f")) return null;
+  const map = forces.get(res.case); if (!map) return null;
+  if (!etrFrameContour.c || etrFrameContour.c.sig !== res.case + "|" + res.comp + "|" + res.fRange) {
+    let a = 1e30, b = -1e30; const big = new Map();
+    map.forEach((rows, name) => { let m = 0; rows.forEach(r => { if (Math.abs(r[res.comp]) > Math.abs(m)) m = r[res.comp]; }); big.set(name, m); a = Math.min(a, m); b = Math.max(b, m); });
+    const rg = etrRange(...(res.fRange || [0, 0])) || [a, b]; etrFrameContour.c = {sig: res.case + "|" + res.comp + "|" + res.fRange, big, rg};
+  }
+  const {big, rg} = etrFrameContour.c, v = big.get(o.name); if (v === undefined) return null;
+  const bands = bandSet(), t = rg[1] > rg[0] ? (v - rg[0]) / (rg[1] - rg[0]) : 0.5;
+  return bands[Math.max(0, Math.min(bands.length - 1, Math.floor(t * bands.length)))];
+}
+function etrDrawWallForces(p, g, to, T) {
+  // Piers, spandrels and links ticked in Include: the component at the top and bottom of each pier or spandrel
+  // (both ends of a link), written where it acts.
+  const inc = res.fInc; if (!inc || res.mode === "values") return;
+  const comp = res.etrComp === "IV" ? "V2" : res.etrComp === "IM" ? "M3" : res.etrComp || res.comp;
+  g.font = "10.5px Segoe UI, sans-serif"; g.textBaseline = "middle"; g.textAlign = "center";
+  for (const [kind, on] of [["pier", inc.piers], ["spandrel", inc.spandrels], ["link", inc.links]]) {
+    if (!on) continue;
+    for (const t of etrWallForceTables(kind)) {
+      const f = t.fields, c = caseCol(f), st = stepCol(f), sn = stepNumCol(f), vi = col(f, comp), lc = col(f, "Location"), place = rowPlacer(t); if (c < 0 || vi < 0) continue;
+      for (const r of t.rows) {
+        if (caseKey(t, r, c, st, sn) !== res.case) continue;
+        const at = place(r); if (!at) continue;
+        let xyz = at.at;
+        if (!xyz && at.objs && at.objs.length) { const ps = at.objs.flatMap(o => o.type === "f" ? [o.a, o.b] : o.pts || []); if (!ps.length) continue;
+          const zs = ps.map(q => q[2]), top = lc >= 0 && /top|j/i.test(r[lc]) && !/bot/i.test(r[lc]); xyz = [ps.reduce((s, q) => s + q[0], 0) / ps.length, ps.reduce((s, q) => s + q[1], 0) / ps.length, top ? Math.max(...zs) : Math.min(...zs)]; }
+        if (!xyz) continue;
+        if (p.mode === "plan") { const z = elevationOf(p.story); if (z === null || Math.abs(xyz[2] - z) > (elevationOf(p.story) - (stories[stories.findIndex(s => s.name === p.story) - 1] || {elevation: z}).elevation) + tol()) continue; }
+        const s = to(xyz); if (!s[3]) continue;
+        const v = parseFloat(r[vi]) || 0; g.lineWidth = 3; g.strokeStyle = css(T.canvas); g.strokeText(fmt(v), s[0], s[1]); g.fillStyle = v >= 0 ? T.posEdge : T.negEdge; g.fillText(fmt(v), s[0], s[1]);
+      }
+    }
+  }
+}
+
+// Display > Force/Stress Diagrams > Shell Stresses/Forces (F9).
+const etrShellTypes = {
+  forces: {label: "Resultant Forces", comps: [["F11", "F11"], ["FMax", "FMax"], ["V13", "V13"], ["M11", "M11"], ["MMax", "MMax"], ["F22", "F22"], ["FMin", "FMin"], ["V23", "V23"], ["M22", "M22"], ["MMin", "MMin"], ["F12", "F12"], ["FVM", "FVM"], ["VMax", "VMax"], ["M12", "M12"]], cols: 5},
+  stresses: {label: "Shell Stresses", comps: [["S11", "S11"], ["SMax", "SMax"], ["S13", "S13"], ["S22", "S22"], ["SMin", "SMin"], ["S23", "S23"], ["S12", "S12"], ["SVM", "SVM"], ["SMaxV", "SMaxV"]], cols: 3},
+  strains: {label: "Shell Strains", comps: [["E11", "E11"], ["EMax", "EMax"], ["G13", "G13"], ["E22", "E22"], ["EMin", "EMin"], ["G23", "G23"], ["G12", "G12"], ["EVM", "EVM"], ["GMaxV", "GMaxV"]], cols: 3},
+};
+const etrFaces = ["Visible Face", "Top Face", "Bottom Face", "Maximum", "Minimum", "Absolute Maximum"];
+function etrShellField(type, comp, face) {
+  // ETABS's table fields: F11 ... in Element Forces - Area Shells; S11Top / S11Bot, S13Avg, SMaxVAvg in Element
+  // Stresses; E11Top / G12Bot, G13Avg, GMaxVAvg in Element Strains. Maximum, Minimum and Absolute Maximum of the
+  // two faces are worked out here from the Top and Bottom values at each joint.
+  if (type === "forces") return comp;
+  if (/^(S13|S23|G13|G23)$/.test(comp)) return comp + "Avg";
+  if (/^(SMaxV|GMaxV)$/.test(comp)) return comp + "Avg";
+  if (face === "Bottom Face") return comp + "Bot";
+  if (face === "Top Face" || face === "Visible Face") return comp + "Top";
+  const name = comp + " (" + face + ")";
+  if (!shellFields.some(s => s.name === name) && shellFields.some(s => s.name === comp + "Top")) {
+    shellFields.push({name, derived: true, stress: type === "stresses"});
+    shellRes.forEach(m => m.forEach(a => { const t = a[comp + "Top"], b = a[comp + "Bot"]; if (!t || !b || !t[1] || !b[1]) return; const x = t[0] / t[1], y = b[0] / b[1];
+      a[name] = [face === "Maximum" ? Math.max(x, y) : face === "Minimum" ? Math.min(x, y) : Math.abs(x) >= Math.abs(y) ? x : y, 1]; }));
+  }
+  return name;
+}
+let etrShellGroups = ["All"];
+function etrSelectGroups(done) {
+  // Shell Forces/Stresses > Groups...: ETABS's Select Groups list (All and every group), OK, Cancel, Clear All.
+  const names = ["All", ...groupNames().filter(g => g !== "All")];
+  const d = dialog("Select Groups", `<div class="etr etrSel"><fieldset><legend>Select</legend><select id="gL" multiple size="8">${names.map(n => `<option ${etrShellGroups.includes(n) ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></fieldset>
+    <div class="etrSelB"><button id="gOK">OK</button><button id="gCa">Cancel</button><span></span><button id="gClr">Clear All</button></div></div>`, [], {width: 330});
+  q(d, "#gOK").onclick = () => { etrShellGroups = [...q(d, "#gL").selectedOptions].map(o => o.value); d.close(); if (done) done(); };
+  q(d, "#gCa").onclick = () => d.close(); q(d, "#gClr").onclick = () => [...q(d, "#gL").options].forEach(o => o.selected = false);
+  return d;
+}
+function etrShells() {
+  if (!shellRes.size) return;
+  const S = res.etrS || {type: "forces", face: "Visible Face", comp: "F11", copt: "Display on Undeformed Shape", lines: false, lw: 1, fill: true, transp: "0.0", values: false, arrows: false, avg: "By Selected Groups", range: [0, 0], scale: "auto", sf: 1};
+  const U = etrUnits(), unitOf = (type, comp) => type === "strains" ? `${U.l}/${U.l}` : type === "stresses" ? `${U.f}/${U.l}²` : /^M/.test(comp) ? `${U.f}-${U.l}/${U.l}` : `${U.f}/${U.l}`;
+  const comps = type => { const T0 = etrShellTypes[type]; return `<div class="etrN" style="grid-template-columns:repeat(${T0.cols},1fr)">${T0.comps.map(([k, l]) => `<label><input type="radio" name="comp" value="${k}" ${S.type === type && S.comp === k ? "checked" : ""}>${l}</label>`).join("")}</div>`; };
+  const d = dialog("Shell Forces/Stresses", `<div class="etr">${etrCaseBox()}
+    <fieldset><legend>Component Type</legend><div class="etrRow2"><select id="sT">${opts(Object.entries(etrShellTypes).map(([k, v]) => [k, v.label]), S.type)}</select><select id="sF">${S.type === "forces" ? "" : opts(etrFaces, S.face)}</select></div></fieldset>
+    <fieldset><legend>Component</legend><div id="sC">${comps(S.type)}</div></fieldset>
+    <fieldset><legend>Contour Appearance</legend><div class="etrCA"><span>Contour Option</span><select id="sO">${opts(["Display on Undeformed Shape", "Display on Deformed Shape", "Display in Extruded Form"], S.copt)}</select>
+      <label><input type="checkbox" id="sL" ${S.lines ? "checked" : ""}>Show Lines</label><span data-en="lw" class="r">Line Width</span><input type="number" min="1" max="10" step="1" id="sW" data-en="lw" value="${S.lines ? S.lw : ""}">
+      <label><input type="checkbox" id="sFl" ${S.fill ? "checked" : ""}>Show Fill</label><span class="r">Transparency</span><select id="sTr">${opts(["0.0", "0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9", "1.0"], S.transp)}</select>
+      <label><input type="checkbox" id="sV" ${S.values ? "checked" : ""}>Show Values</label><span></span><span></span>
+      <label data-en="ar"><input type="checkbox" id="sA" data-en="ar" ${S.arrows ? "checked" : ""}>Show Arrows</label></div></fieldset>
+    <fieldset><legend>Contour Values</legend><div class="etrMM"><span>Min/Max Range</span><input type="number" step="any" id="sMin" value="${S.range[0]}"><input type="number" step="any" id="sMax" value="${S.range[1]}"><span id="sU">${esc(unitOf(S.type, S.comp))}</span></div>
+      <div class="etrRow3"><span>Contour Averaging at Nodes</span><select id="sAv">${opts(["None", "By Objects", "By Selected Groups"], S.avg)}</select><button id="sG" data-en="gr">Groups...</button></div></fieldset>
+    <fieldset><legend data-en="ss">Scaling</legend><div class="etrRow3"><label data-en="ss"><input type="radio" name="ss" value="auto" data-en="ss" ${S.scale !== "user" ? "checked" : ""}>Automatic</label><label data-en="ss"><input type="radio" name="ss" value="user" data-en="ss" ${S.scale === "user" ? "checked" : ""}>User Scale Factor</label><input type="number" step="any" id="sSF" data-en="sf" value="${S.scale === "user" ? S.sf : ""}"></div></fieldset></div>`,
+    etrBtns(etrApplyShells), {width: 490});
+  etrCaseWire(d, [...shellRes.keys()]);
+  const sync = () => {
+    const type = q(d, "#sT").value, comp = (q(d, "[name=comp]:checked") || {}).value || "";
+    q(d, "#sF").disabled = type === "forces"; q(d, "#sU").textContent = unitOf(type, comp);
+    etrEnable(d, "lw", q(d, "#sL").checked); etrEnable(d, "ar", false); etrEnable(d, "gr", q(d, "#sAv").value === "By Selected Groups");
+    const sc = q(d, "#sO").value !== "Display on Undeformed Shape"; etrEnable(d, "ss", sc); etrEnable(d, "sf", sc && q(d, "[name=ss]:checked").value === "user");
+  };
+  q(d, "#sT").onchange = () => { const type = q(d, "#sT").value; q(d, "#sF").innerHTML = type === "forces" ? "" : opts(etrFaces, "Visible Face"); q(d, "#sC").innerHTML = comps(type);
+    if (!q(d, "[name=comp]:checked")) q(d, "[name=comp]").checked = true; d.querySelectorAll("[name=comp]").forEach(x => x.onchange = sync); sync(); };
+  if (!q(d, "[name=comp]:checked")) q(d, "[name=comp]").checked = true;
+  d.querySelectorAll("[name=comp], #sL, #sAv, #sO, [name=ss]").forEach(x => x.onchange = sync);
+  q(d, "#sG").onclick = () => etrSelectGroups(); sync();
+  return d;
+}
+function etrApplyShells(d) {
+  const type = q(d, "#sT").value, face = type === "forces" ? "" : q(d, "#sF").value, comp = q(d, "[name=comp]:checked").value;
+  res.etrS = {type, face: face || "Visible Face", comp, copt: q(d, "#sO").value, lines: q(d, "#sL").checked, lw: +q(d, "#sW").value || 1, fill: q(d, "#sFl").checked, transp: q(d, "#sTr").value,
+    values: q(d, "#sV").checked, arrows: q(d, "#sA").checked, avg: q(d, "#sAv").value, range: [etrNum(d, "#sMin"), etrNum(d, "#sMax")], scale: q(d, "[name=ss]:checked").value, sf: etrNum(d, "#sSF") || 1};
+  const field = etrShellField(type, comp, face);
+  res.mode = "shell"; syncResults(); res.case = q(d, "#dCase").value; res.comp = field; res.range = etrRange(...res.etrS.range);
+  if (!shellFields.some(s => s.name === field)) $("hint").textContent = (`This model's results have no ${etrShellTypes[type].label.toLowerCase()} ${comp}${face ? " (" + face + ")" : ""}: ETABS gives them in "${type === "forces" ? "Element Forces" : type === "stresses" ? "Element Stresses" : "Element Strains"} - Area Shells", which this run did not return.`);
+  if (res.etrS.copt === "Display in Extruded Form" && !opt.extrude) { opt.extrude = true; geometryDirty = true; geometryStamp++; }
+  $("case").value = res.case; pointsDirty = true; colourDirty = true; syncResults(); syncTools(); draw();
+}
+const etrShellDeformed = () => program === "etabs" && res.mode === "shell" && res.etrS && res.etrS.copt !== "Display on Undeformed Shape" && disp.has(res.case);
+function etrDrawShellValues(p, g, to, T) {
+  // Show Values: the contour value of each shell at its centre, as ETABS writes them.
+  if (!(program === "etabs" && res.mode === "shell" && res.etrS && res.etrS.values && contour)) return;
+  const vis = p.vis; let n = 0; g.font = "10px Segoe UI, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillStyle = T.text;
+  for (const a of areas) {
+    if (vis && !vis[a.id] || n > 600) continue;
+    const vs = a.idx.filter(i => i >= 0).map(i => contour.at(String(points[i][0]))).filter(v => v !== undefined); if (!vs.length) continue;
+    const c = [0, 1, 2].map(k => a.pts.reduce((s, q) => s + q[k], 0) / a.pts.length), s = to(c); if (!s[3]) continue;
+    g.fillText(fmt(vs.reduce((x, y) => x + y, 0) / vs.length), s[0], s[1]); n++;
+  }
+}
+
+// Display > Energy/Virtual Work Diagram: the virtual work of the forces of one case on the displacements of another,
+// member by member, from ETABS's own Beam/Column/Brace/Wall/Floor Energy Virtual Work tables (CaseForce, CaseDisp,
+// Energy); where the pack has no row for the pair, from the member end forces and joint displacements.
+let etrEnergy = null;
+function etrEnergyDialog() {
+  const cs = [...new Set([...forces.keys(), ...disp.keys()].map(c => casePart(c).base))].filter(c => !(P.model.combinations || []).map(String).includes(c));
+  if (!cs.length) return;
+  const E = etrEnergy || {fc: cs[0], dc: cs[0], values: true}, stepsOf = c => [...new Set([...forces.keys(), ...disp.keys()].filter(k => casePart(k).base === c && casePart(k).by))];
+  const stepBox = (id, c) => { const st = stepsOf(c); return st.length ? `<select id="${id}">${opts(st.map(k => [k, casePart(k).n]), st[0])}</select>` : `<input id="${id}" readonly value="Not Applicable" class="off">`; };
+  const d = dialog("Energy/Virtual Work Diagram", `<div class="etr">
+    <fieldset><legend>Forces</legend><div class="etrEn"><span>Load Case</span><select id="eFc">${opts(cs, E.fc)}</select><span>Load Step</span><span id="eFsW">${stepBox("eFs", E.fc)}</span></div></fieldset>
+    <fieldset><legend>Displacement</legend><div class="etrEn"><span>Load Case</span><select id="eDc">${opts(cs, E.dc)}</select><span>Load Step</span><span id="eDsW">${stepBox("eDs", E.dc)}</span></div></fieldset>
+    <label><input type="checkbox" id="eV" ${E.values ? "checked" : ""}>Show Values</label></div>`, etrBtns(etrApplyEnergy), {width: 360});
+  q(d, "#eFc").onchange = () => q(d, "#eFsW").innerHTML = stepBox("eFs", q(d, "#eFc").value);
+  q(d, "#eDc").onchange = () => q(d, "#eDsW").innerHTML = stepBox("eDs", q(d, "#eDc").value);
+  return d;
+}
+function etrApplyEnergy(d) {
+  const pick = (c, s) => q(d, s).tagName === "SELECT" ? q(d, s).value : q(d, c).value;
+  etrEnergy = {fc: q(d, "#eFc").value, dc: q(d, "#eDc").value, f: pick("#eFc", "#eFs"), u: pick("#eDc", "#eDs"), values: q(d, "#eV").checked};
+  etrEnergy.by = etrEnergyValues(etrEnergy.f, etrEnergy.u);
+  if ($("colour").value === "ratio") $("colour").value = "kind";
+  res.mode = "energy"; colourDirty = true; syncTools(); draw();
+}
+function etrEnergyValues(fc, uc) {
+  const by = new Map();
+  for (const t of Object.values(P.tables)) {
+    if (!t.rows || !/energyvirtualwork$/.test(norm(t.name))) continue;
+    const f = t.fields, u = col(f, "UniqueName"), a = col(f, "CaseForce"), b = col(f, "CaseDisp"), e = col(f, "Energy"); if (u < 0 || e < 0) continue;
+    for (const r of t.rows) if ((a < 0 || String(r[a]) === casePart(fc).base) && (b < 0 || String(r[b]) === casePart(uc).base)) by.set(String(r[u]), parseFloat(r[e]) || 0);
+  }
+  if (by.size) return by;
+  // Not in the pack: the work of each frame's end forces (from the force case) through its joints' movements (from
+  // the displacement case). UNVERIFIED against ETABS's own numbers until the PC field test compares them.
+  const F = forces.get(fc), D = disp.get(uc); if (!F || !D) return by;
+  for (const fr of frames) {
+    const rows = F.get(fr.name), da = D.get(String(fr.ia !== undefined && points[fr.ia] ? points[fr.ia][0] : "")), db = D.get(String(fr.ib !== undefined && points[fr.ib] ? points[fr.ib][0] : ""));
+    if (!rows || rows.length < 2 || !da || !db) continue;
+    const ax = memberAxes(fr), endF = o => add(add(mul(ax.a, o.P), mul(ax.e2, o.V2)), mul(ax.e3, o.V3));
+    const w = -dot(endF(rows[0]), da) + dot(endF(rows[rows.length - 1]), db); by.set(fr.name, w);
+  }
+  return by;
+}
+function etrEnergyColour(o) {
+  if (!(res.mode === "energy" && etrEnergy && etrEnergy.by)) return null;
+  const v = etrEnergy.by.get(o.name); if (v === undefined) return null;
+  let a = 0, b = 0; etrEnergy.by.forEach(x => { a = Math.min(a, x); b = Math.max(b, x); });
+  const bands = bandSet(), t = b > a ? (v - a) / (b - a) : 0.5; return bands[Math.max(0, Math.min(bands.length - 1, Math.floor(t * bands.length)))];
+}
+function etrDrawEnergy(p, g, to, T) {
+  if (!(res.mode === "energy" && etrEnergy && etrEnergy.by && etrEnergy.values)) return;
+  g.font = "10px Segoe UI, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle";
+  for (const o of frames.concat(areas)) {
+    if (p.vis && !p.vis[o.id]) continue; const v = etrEnergy.by.get(o.name); if (v === undefined) continue;
+    const c = o.type === "f" ? mul(add(o.a, o.b), 0.5) : [0, 1, 2].map(k => o.pts.reduce((s, q) => s + q[k], 0) / o.pts.length), s = to(c); if (!s[3]) continue;
+    g.lineWidth = 3; g.strokeStyle = css(T.canvas); g.strokeText(fmt(v), s[0], s[1]); g.fillStyle = T.text; g.fillText(fmt(v), s[0], s[1]);
+  }
+}
+
+// Display > Story Response Plots: ETABS opens a "Story Response" window with a property grid (Show, Display For,
+// Display Colors, Legend) beside the plot, Global X in blue and Global Y in red, the Max and Min under the plot.
+const etrStoryTypes = [
+  // [name in the Display Type list, plot title, table, X field(s), Y field(s), axis word, is a load pattern plot]
+  ["Auto lateral loads to diaphragms", "Auto Lateral Load to Diaphragm", "loadpatterndefinitionsautoseismicloadstodiaphragms", "FX", "FY", "Force", true],
+  ["Auto lateral loads to stories", "Auto Lateral Load to Stories", "loadpatterndefinitionsautoseismicloadstostories", "FX", "FY", "Force", true],
+  ["Diaph CM displ", "Diaphragm Center of Mass Displacements", "diaphragmcenterofmassdisplacements", "UX", "UY", "Displacement"],
+  ["Diaph drifts", "Drifts for Diaphragm", "diaphragmcenterofmassdisplacements", "UX", "UY", "Drift"],
+  ["Max story displ", "Maximum Story Displacement", "storymaxoveravgdisplacements", "Maximum", "Maximum", "Displacement"],
+  ["Max story drifts", "Maximum Story Drifts", "storydrifts", "Drift", "Drift", "Drift"],
+  ["Story shears", "Story Shears", "storyforces", "VX", "VY", "Force"],
+  ["Overturning moments", "Overturning Moments", "storyforces", "MY", "MX", "Moment"],
+  ["Story stiffness", "Story Stiffness", "storystiffness", "StiffX", "StiffY", "Stiffness"],
+];
+let etrStory = null;
+function etrStoryData(S) {
+  // The two lines (Global X, Global Y): one point per story, top and bottom where ETABS gives both (story forces).
+  const ty = etrStoryTypes.find(t => t[0] === S.type), U = etrUnits(); if (!ty) return null;
+  const t = Object.values(P.tables).find(x => norm(x.name) === ty[2] && x.rows && x.rows.length);
+  const zOf = s => { const x = stories.find(q => q.name === s); return x ? x.elevation : null; };
+  const inRange = z => { const top = zOf(S.top), bot = zOf(S.bottom); return (top === null || z <= top + tol()) && (bot === null || z >= bot - tol()); };
+  const out = [{name: "Global X", pts: []}, {name: "Global Y", pts: []}], unitWord = ty[5] === "Force" ? U.f : ty[5] === "Displacement" ? U.l : ty[5] === "Moment" ? U.f + "-" + U.l : ty[5] === "Stiffness" ? U.f + "/" + U.l : "Unitless";
+  const res0 = {title: ty[1] + (/Diaph|diaphragm/i.test(ty[0]) ? " " + S.diaph : ""), axis: ty[5] + ", " + unitWord, series: out};
+  if (ty[0] === "Max story displ" && !t) {
+    // No "Story Max Over Avg Displacements" in the pack: the largest joint movement on each story.
+    const m = disp.get(S.case); if (!m) return res0;
+    for (const s of stories) { if (!inRange(s.elevation)) continue; let x = 0, y = 0; m.forEach((d, n) => { const q0 = pointXyz.get(String(n)); if (q0 && Math.abs(q0[2] - s.elevation) <= tol() * 10) { if (Math.abs(d[0]) > Math.abs(x)) x = d[0]; if (Math.abs(d[1]) > Math.abs(y)) y = d[1]; } }); out[0].pts.push({z: s.elevation, v: Math.abs(x), s: s.name}); out[1].pts.push({z: s.elevation, v: Math.abs(y), s: s.name}); }
+    return res0;
+  }
+  if (!t) return res0;
+  const f = t.fields, si = col(f, "Story"), ci = caseCol(f), st = stepCol(f), sn = stepNumCol(f), di = col(f, "Direction"), li = col(f, "Location"), dg = col(f, "Diaphragm"), lp = col(f, "LoadPattern");
+  const xi = col(f, ty[3]), yi = col(f, ty[4]);
+  const rows = t.rows.filter(r => (ty[6] ? lp < 0 || String(r[lp]) === S.pattern : ci < 0 || caseKey(t, r, ci, st, sn) === S.case) && (dg < 0 || String(r[dg]) === S.diaph) && (st < 0 || !/min/i.test(r[st])));
+  const put = (k, r, i) => { const z = zOf(String(r[si])); if (z === null || !inRange(z) || i < 0 || !isNum(r[i])) return; const bot = li >= 0 && /bot/i.test(r[li]); const zz = bot ? z - (stories.find(q => q.name === String(r[si])).height || 0) : z;
+    const v = parseFloat(r[i]), ex = out[k].pts.find(p0 => Math.abs(p0.z - zz) < tol() && p0.bot === bot); if (ex) { if (Math.abs(v) > Math.abs(ex.v)) ex.v = v; } else out[k].pts.push({z: zz, v, s: String(r[si]), bot}); };
+  if (ty[0] === "Diaph drifts") {
+    // Drift of the diaphragm's centre of mass: the change of its movement from the story below, over the story height.
+    const byS = new Map(rows.map(r => [String(r[si]), r]));
+    for (let k = 0; k < stories.length; k++) { const s = stories[k], r = byS.get(s.name); if (!r || !inRange(s.elevation)) continue; const below = k ? byS.get(stories[k - 1].name) : null, h = s.height || (k ? s.elevation - stories[k - 1].elevation : 0); if (!h) continue;
+      for (const [n, i] of [[0, xi], [1, yi]]) { const v = (parseFloat(r[i]) || 0) - (below ? parseFloat(below[i]) || 0 : 0); out[n].pts.push({z: s.elevation, v: v / h, s: s.name}); } }
+  } else for (const r of rows) {
+    if (di >= 0) { const dir = String(r[di]).toUpperCase(); if (/^X/.test(dir)) put(0, r, xi); else if (/^Y/.test(dir)) put(1, r, yi); }
+    else { put(0, r, xi); put(1, r, yi); }
+  }
+  out.forEach(s => s.pts.sort((a, b) => a.z - b.z || (a.bot ? -1 : 1)));
+  return res0;
+}
+function etrStoryResponse() {
+  const st = stories.map(s => s.name), combos = (P.model.combinations || []).map(String);
+  const cases = [...new Set([...disp.keys(), ...drifts.keys(), ...forces.keys()].map(c => casePart(c).base))];
+  const pats = (P.model.load_patterns || []).map(p => typeof p === "string" ? p : p.name).filter(Boolean);
+  const diaphs = [...new Set(Object.values(P.tables).filter(t => /diaphragm/.test(norm(t.name)) && t.rows).flatMap(t => { const i = col(t.fields, "Diaphragm"); return i < 0 ? [] : t.rows.map(r => String(r[i])); }))];
+  const S = etrStory || {type: "Max story displ", case: cases.find(c => !combos.includes(c)) || cases[0] || "", pattern: pats.find(p => /eq|seis|wind|^w/i.test(p)) || pats[0] || "", loadSet: "Load Set 1", range: "All Stories", top: st[st.length - 1], bottom: st[0], diaph: diaphs[0] || "D1", cx: "Blue", cy: "Red", legend: "None"};
+  etrStory = S;
+  const colours = ["Black", "Blue", "Red", "Green", "Magenta", "Cyan", "Yellow", "Gray"];
+  const d = dialog("Story Response", `<div class="etrSR"><div class="etrTB"><button data-tb="save" title="Save">&#128190;</button><button data-tb="print" title="Print">&#128438;</button><button data-tb="image" title="Copy image">&#128444;&#9662;</button><button data-tb="table" title="Show table">&#9638;&#9662;</button><button data-tb="chart" title="Chart">&#9636;&#9662;</button><span></span><button data-tb="grid" title="Show or hide the properties">&#9776;</button></div>
+    <div class="etrSRb"><div class="etrPG"><table id="srG"></table><div class="etrHelp"><b>Display Type</b><br>Indicates the type of story response to be displayed.</div></div>
+    <div class="etrPlot"><canvas id="srC" width="440" height="500"></canvas><div id="srMM" class="kv"></div></div></div></div>`, [], {width: 760, float: true});
+  const grid = () => {
+    const ty = etrStoryTypes.find(t => t[0] === S.type), auto = ty && ty[6], dia = /Diaph|diaphragms/.test(S.type);
+    const row = (k, label, input, off) => `<tr${off ? ' class="off"' : ""}><td>${label}</td><td>${input}</td></tr>`, sel = (k, list, v, dis) => `<select data-k="${k}" ${dis ? "disabled" : ""}>${opts(list, v)}</select>`;
+    q(d, "#srG").innerHTML = `<tr class="h"><td colspan="2">&#8964; Show</td></tr>` + row("type", "Display Type", sel("type", etrStoryTypes.map(t => t[0]), S.type)) +
+      (auto ? row("pattern", "Load Pattern", sel("pattern", pats, S.pattern)) + row("loadSet", "Load Set", sel("loadSet", ["Load Set 1"], S.loadSet)) : row("case", "Case/Combo", sel("case", cases, S.case)) + row("ltype", "Load Type", `<input value="${combos.includes(S.case) ? "Load Combo" : "Load Case"}" disabled>`, true)) +
+      `<tr class="h"><td colspan="2">&#8964; Display For</td></tr>` + row("range", "Story Range", sel("range", ["All Stories", "Story Range"], S.range)) +
+      row("top", "Top Story", sel("top", st, S.top, S.range === "All Stories")) + row("bottom", "Bottom Story", sel("bottom", st, S.bottom, S.range === "All Stories")) + (dia ? row("diaph", "Diaphragm", sel("diaph", diaphs.length ? diaphs : [S.diaph], S.diaph)) : "") +
+      `<tr class="h"><td colspan="2">&#8964; Display Colors</td></tr>` + row("cx", "Global X", sel("cx", colours, S.cx)) + row("cy", "Global Y", sel("cy", colours, S.cy)) +
+      `<tr class="h"><td colspan="2">&#8964; Legend</td></tr>` + row("legend", "Legend Type", sel("legend", ["None", "Floating", "Top", "Bottom", "Left", "Right"], S.legend));
+    q(d, "#srG").querySelectorAll("[data-k]").forEach(x => x.onchange = () => { S[x.dataset.k] = x.value; if (x.dataset.k === "range" && x.value === "All Stories") { S.top = st[st.length - 1]; S.bottom = st[0]; } grid(); plot(); });
+  };
+  const plot = () => {
+    const c = q(d, "#srC"), g = c.getContext("2d"), T = theme(), data = etrStoryData(S), w = c.width, h = c.height;
+    g.fillStyle = "#ffffff"; g.fillRect(0, 0, w, h); g.fillStyle = "#000"; g.textAlign = "center"; g.textBaseline = "middle"; g.font = "italic bold 14px Segoe UI, sans-serif";
+    g.fillText(data ? data.title : S.type, w / 2, 14);
+    const all = data ? data.series.flatMap(s => s.pts) : [], L = 56, R = 20, Tm = 30, B = 46;
+    const sts = stories.filter(s => { const top = stories.find(q => q.name === S.top), bot = stories.find(q => q.name === S.bottom); return (!top || s.elevation <= top.elevation + tol()) && (!bot || s.elevation >= bot.elevation - tol()); });
+    const z0 = Math.min(...sts.map(s => s.elevation - (s === sts[0] ? s.height || 0 : 0)), ...all.map(q => q.z)), z1 = Math.max(...sts.map(s => s.elevation), ...all.map(q => q.z));
+    let v0 = Math.min(0, ...all.map(q => q.v)), v1 = Math.max(0, ...all.map(q => q.v)); if (!(v1 > v0)) { v0 = -6e-6; v1 = 6e-6; }
+    const ticks = niceTicks(v0, v1, 10), stp = ticks.length > 1 ? ticks[1] - ticks[0] : 1; while (ticks[ticks.length - 1] < v1 - stp * 1e-9) ticks.push(+(ticks[ticks.length - 1] + stp).toPrecision(12)); v0 = ticks[0]; v1 = ticks[ticks.length - 1];
+    const X = v => L + (w - L - R) * (v - v0) / (v1 - v0), Y = z => h - B - (h - B - Tm) * (z - z0) / ((z1 - z0) || 1);
+    g.strokeStyle = "#d0d0d0"; g.lineWidth = 1; for (const v of ticks) { g.beginPath(); g.moveTo(X(v), Tm); g.lineTo(X(v), h - B); g.stroke(); }
+    g.font = "10.5px Segoe UI, sans-serif"; g.fillStyle = "#000"; g.textAlign = "right"; sts.forEach(s => { g.fillText(s.name + " –", L - 2, Y(s.elevation)); g.strokeStyle = "#e4e4e4"; g.beginPath(); g.moveTo(L, Y(s.elevation)); g.lineTo(w - R, Y(s.elevation)); g.stroke(); });
+    const e = Math.max(...ticks.map(Math.abs)), pw = e ? Math.floor(Math.log10(e)) : 0, sc = Math.abs(pw) >= 4 ? Math.pow(10, pw) : 1;
+    g.textAlign = "center"; ticks.forEach(v => g.fillText((v / sc).toFixed(2), X(v), h - B + 10)); if (sc !== 1) { g.textAlign = "left"; g.fillText("E" + (pw > 0 ? "+" : "") + pw, w - R + 2, h - B + 10); }
+    g.strokeStyle = "#000"; g.strokeRect(L, Tm, w - L - R, h - B - Tm);
+    g.font = "bold 13px Segoe UI, sans-serif"; g.textAlign = "center"; g.fillText(data ? data.axis : "", (L + w - R) / 2, h - 16);
+    const col0 = n => ({Black: "#000", Blue: "#0000ff", Red: "#ff0000", Green: "#00a000", Magenta: "#ff00ff", Cyan: "#00c0c0", Yellow: "#d0c000", Gray: "#808080"}[n] || n);
+    let mx = null, mn = null;
+    (data ? data.series : []).forEach((s, k) => { g.strokeStyle = g.fillStyle = col0(k ? S.cy : S.cx); g.lineWidth = 1.6; g.beginPath(); s.pts.forEach((q0, i) => i ? g.lineTo(X(q0.v), Y(q0.z)) : g.moveTo(X(q0.v), Y(q0.z))); g.stroke();
+      s.pts.forEach(q0 => { g.beginPath(); g.arc(X(q0.v), Y(q0.z), 3, 0, 7); g.fill(); if (!mx || q0.v > mx.v) mx = q0; if (!mn || q0.v < mn.v) mn = q0; }); });
+    if (S.legend !== "None" && data) { g.font = "11px Segoe UI, sans-serif"; g.textAlign = "left"; data.series.forEach((s, k) => { g.fillStyle = col0(k ? S.cy : S.cx); g.fillRect(L + 8, Tm + 8 + k * 14, 10, 3); g.fillStyle = "#000"; g.fillText(s.name, L + 22, Tm + 10 + k * 14); }); }
+    q(d, "#srMM").textContent = mx ? `Max: (${fmt(mx.v)}, ${mx.s}); Min: (${fmt(mn.v)}, ${mn.s})` : "Max: (0, " + (sts[0] || {name: ""}).name + "); Min: (0, " + (sts[0] || {name: ""}).name + ")";
+  };
+  d.querySelectorAll("[data-tb]").forEach(b => b.onclick = () => {
+    const k = b.dataset.tb, c = q(d, "#srC");
+    if (k === "grid") { const pg = q(d, ".etrPG"); pg.hidden = !pg.hidden; }
+    else if (k === "save" || k === "image") { const a = document.createElement("a"); a.href = c.toDataURL("image/png"); a.download = (S.type || "Story Response") + ".png"; a.click(); }
+    else if (k === "print") { const w0 = window.open(""); if (w0) { w0.document.write(`<img src="${c.toDataURL("image/png")}">`); w0.print(); } }
+    else if (k === "table") { const data = etrStoryData(S); if (!data) return; dialog(data.title, `<div class="scroll" style="max-height:60vh"><table class="list"><tr><th>Story</th><th>Elevation</th>${data.series.map(s => `<th>${esc(s.name)}</th>`).join("")}</tr>${[...new Set(data.series.flatMap(s => s.pts.map(p0 => p0.z)))].sort((a, b) => b - a).map(z => `<tr><td>${esc((data.series.flatMap(s => s.pts).find(p0 => p0.z === z) || {}).s || "")}</td><td class="r">${fmt(z)}</td>${data.series.map(s => { const p0 = s.pts.find(x => x.z === z); return `<td class="r">${p0 ? fmt(p0.v) : ""}</td>`; }).join("")}</tr>`).join("")}</table></div>`, [["Close"]], {width: 460, float: true}); }
+    else if (k === "chart") { S.legend = S.legend === "None" ? "Floating" : "None"; grid(); plot(); }
+  });
+  grid(); plot();
+  return d;
+}
 const dialogs = {
   modes() { openModes(); },
-  shells() { openShells(); },
-  storyPlot() { openStoryPlot(); },
+  shells() { if (etrOn()) return etrShells(); openShells(); },
+  storyPlot() { if (etrOn()) return etrStoryResponse(); openStoryPlot(); },
+  energy() { if (etrOn()) return etrEnergyDialog(); dialogs.forces(); },
   coverage() {
     const rows = coverage();
     dialog("Results Coverage", `<p class="kv" style="max-width:640px">Every kind of result and design the CSI programs show, where it is in this Viewer, and whether this pack holds it. A kind this pack does not hold was not run or not kept in the program: run it there and make the pack again.</p>
@@ -3688,6 +4203,7 @@ const dialogs = {
       ${((P.manifest || {}).left_out_tables || []).length ? `<p class="kv">Left out of this pack for its size: ${esc(P.manifest.left_out_tables.join(", "))}.</p>` : ""}`, [["Close"]], {width: 700, float: true});
   },
   forces() {
+    if (etrOn()) return etrForces();
     if (!forces.size) return;
     // As ETABS's and SAP2000's Member Force Diagram for Frames: the components in its order, two to a row.
     const order = ["P", "T", "V2", "M2", "V3", "M3"], label = {P: "Axial Force", T: "Torsion", V2: "Shear 2-2", M2: "Moment 2-2", V3: "Shear 3-3", M3: "Moment 3-3"};
@@ -3700,6 +4216,7 @@ const dialogs = {
       [["OK", d => applyForces(d)], ["Close"], ["Apply", d => { applyForces(d); return false; }, true]], {width: 470}), list);
   },
   deformed(only, title) {
+    if (etrOn()) return etrDeformed(title === "Mode Shape" ? null : only);
     if (!disp.size) return;
     // As ETABS's and SAP2000's Deformed Shape: case, scaling, contours drawn on the objects, wire shadow.
     const list = Array.isArray(only) ? only : resCases("deformed"), on = res.mode === "contour", comp = on ? res.comp : "U";
@@ -3719,6 +4236,7 @@ const dialogs = {
       [["OK", d => applyContour(d)], ["Close"], ["Apply", d => { applyContour(d); return false; }, true]], {width: 430}), resCases("contour"));
   },
   reactions() {
+    if (etrOn()) return etrReactions();
     if (!reacts.size) return;
     caseBoxWire(dialog("Joint Reactions", `${caseBox(resCases("reactions"))}
       <fieldset><legend>Display Type</legend><div class="g3">${[["ALL", "Arrows, FX FY FZ"], ["FZ", "Vertical FZ only"], ["FX", "FX only"], ["FY", "FY only"]].map(([k, l]) => `<label><input type="radio" name="comp" value="${k}" ${(res.mode === "reactions" ? res.comp : "ALL") === k ? "checked" : ""}>${l}</label>`).join("")}</div></fieldset>`,
