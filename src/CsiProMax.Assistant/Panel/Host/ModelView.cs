@@ -25,7 +25,7 @@ internal static class ModelView
     /// so the two never change the model at once.
     /// </summary>
     internal static Task<(byte[] Body, string ContentType)?> PostAsync(string path, byte[] body) =>
-        path == "chat" ? ChatAsync(body) : path == "edit" ? EditAsync(body) : path == "check" ? CheckAsync(body) : path == "run" ? RunAsync(body) : path == "app" ? AppAsync(body) : Task.FromResult<(byte[] Body, string ContentType)?>(null);
+        path == "chat" ? ChatAsync(body) : path == "edit" ? EditAsync(body) : path == "check" ? CheckAsync(body) : path == "run" ? RunAsync(body) : path == "app" ? AppAsync(body) : path == "pick" ? PickAsync(body) : Task.FromResult<(byte[] Body, string ContentType)?>(null);
 
     /// <summary>
     /// CSI ProMax Engine's Analyze > Run (EngineRun): the Run form's {"analyse","kinds","selected"} (or {"design":bool}) starts it, on the window's thread for the model;
@@ -139,6 +139,11 @@ internal static class ModelView
         : Pack.Build(link, [], [], [], null, null, withTables: false).Content;
 
     /// <summary>One of the window's own menu items, chosen in the Engine's Tools or Help menu: {"id":"Help/Self test"}.</summary>
+    /// <summary>File > Open, Save As, Import, Export: Windows' own picker (FilePicker).</summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static async Task<(byte[] Body, string ContentType)?> PickAsync(byte[] body) =>
+        (Encoding.UTF8.GetBytes((await FilePicker.ShowAsync(body).ConfigureAwait(false)).ToJsonString()), "application/json");
+
     private static Task<(byte[] Body, string ContentType)?> AppAsync(byte[] body)
     {
         string id = "";

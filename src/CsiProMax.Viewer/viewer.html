@@ -6707,21 +6707,62 @@ function caseTypesFor(types, now) {
   const safe = ["Linear Static", "Nonlinear Static", "Modal - Eigen", "Modal - Ritz", "Response Spectrum"];
   return program === "safe" ? types.filter(t => safe.includes(t) || t === now) : types;
 }
-function hmOpen() {
+// Windows' own file and folder pickers, from the Engine's window (Ahmed 2026-11-27: File > Open opens the file picker
+// straight away, as the programs do). Null when the page has no window behind it to ask (a plain browser): the typed
+// path forms below are used then.
+async function hostPick(o) {
+  try {
+    const r = await fetch("pick", {method: "POST", headers: {"Content-Type": "application/json", "X-CPM-View": "1"}, body: JSON.stringify(o), cache: "no-store"});
+    if (!r.ok) return null;
+    const j = await r.json();
+    return j && j.ok ? j : null;
+  } catch (e) { return null; }
+}
+let hostPicks = null;
+async function hostHas() { if (hostPicks === null) hostPicks = !!(await hostPick({kind: "probe"})); return hostPicks; }
+const pickParts = path => ({folder: path.replace(/[\\/][^\\/]*$/, ""), name: path.split(/[\\/]/).pop().replace(/\.[^.]*$/, "")});
+const modelFilter = "CSI ProMax and CSI text models (*.cpm;*.e2k;*.s2k;*.f2k)|*.cpm;*.e2k;*.s2k;*.f2k|CSI ProMax model (*.cpm)|*.cpm|ETABS text file (*.e2k)|*.e2k|SAP2000 text file (*.s2k)|*.s2k|SAFE text file (*.f2k)|*.f2k|All files (*.*)|*.*";
+const modelFolder = () => { const f = (hm.state && hm.state.file) || ""; return f ? f.replace(/[\\/][^\\/]*$/, "") : ""; };
+async function hmOpen() {
+  const p = await hostPick({kind: "open", title: "Open Model", filter: modelFilter, folder: modelFolder()});
+  if (p) { if (!p.cancelled) { const j = await hmRun("open_model_file", {path: p.path}); if (j.ok) hmSay("Opened " + p.path); } return; }
+  hmOpenTyped();
+}
+function hmOpenTyped() {
   dialog("Open Model", `<div class="g2"><span>File</span><input id="oP" placeholder="C:\\Users\\...\\Models\\Tower.e2k" style="min-width:380px"></div><p class="kv" style="max-width:480px">Type or paste the full path of an ETABS (.e2k), SAP2000 (.s2k) or SAFE (.f2k) text file, or a Modeler file (.cpm). A browser can't hand over a file's place on the PC, so the path is typed here; the Modeler reads it.</p>`,
     [["Open", d => submit(d, "open_model_file", {path: q(d, "#oP").value.trim().replace(/^"|"$/g, "")}, () => hmSay("Opened.")), true], ["Cancel"]], {width: 560});
 }
-function hmSave(as) {
+async function hmSave(as) {
   const file = (hm.state && hm.state.file) || "";
   if (!as && file) return hmRun("save_model", {}).then(j => j.ok && hmSay("Saved " + file));
+  const ext = {etabs: "e2k", sap2000: "s2k", safe: "f2k"}[program] || "e2k";
+  const p = await hostPick({kind: "save", title: "Save Model As", ext, folder: modelFolder(), name: file ? pickParts(file).name : ((P && P.manifest && P.manifest.model) || "Model"),
+    filter: {etabs: "ETABS text file (*.e2k)|*.e2k", sap2000: "SAP2000 text file (*.s2k)|*.s2k", safe: "SAFE text file (*.f2k)|*.f2k"}[program] || "ETABS text file (*.e2k)|*.e2k"});
+  if (p) { if (!p.cancelled) { const x = pickParts(p.path); const j = await hmRun("save_model_as", {name: x.name, folder: x.folder}); if (j.ok) hmSay("Saved " + ((j.result && (j.result.path || j.result.file)) || p.path)); } return; }
   dialog("Save Model As", `<div class="g2"><span>File name</span><input id="sv" value="${esc(file ? file.split(/[\\/]/).pop().replace(/\.e2k$/i, "") : ((P && P.manifest && P.manifest.model) || "Model"))}"><span>Folder</span><input id="sf" placeholder="Documents\\CSI ProMax\\Models" value="${esc(file ? file.replace(/[\\/][^\\/]*$/, "") : "")}"></div><p class="kv">${{etabs: "Saves an ETABS text file (.e2k, for File > Import in ETABS)", sap2000: "Saves a SAP2000 text file (.s2k, for File > Import in SAP2000) and an .e2k", safe: "Saves a SAFE text file (.f2k of the floor with the most slab, for File > Import in SAFE) and an .e2k"}[program]} with the Modeler's .cpm beside it. An empty folder means Documents\\CSI ProMax\\Models.</p>`,
     [["Save", d => submit(d, "save_model_as", {name: q(d, "#sv").value.trim(), folder: q(d, "#sf").value.trim() || undefined}, j => hmSay("Saved " + ((j.result && (j.result.path || j.result.file)) || ""))), true], ["Cancel"]], {width: 500});
 }
-function hmExport(kind) {
+async function hmExport(kind) {
+  const model = (P && P.manifest && P.manifest.model) || "Model";
+  if (kind === "s2k") {
+    const p = await hostPick({kind: "save", title: "Export SAP2000 .s2k Text File", ext: "s2k", filter: "SAP2000 text file (*.s2k)|*.s2k", folder: modelFolder(), name: model});
+    if (p) { if (!p.cancelled) { const x = pickParts(p.path); const j = await hmRun("save_model_s2k", {name: x.name, folder: x.folder}); if (j.ok) hmSay("Exported " + p.path); } return; }
+  }
   if (kind === "s2k") return dialog("Export SAP2000 .s2k", `<div class="g2"><span>File name</span><input id="xn" value="${esc((P && P.manifest && P.manifest.model) || "Model")}"><span>Folder</span><input id="xf" placeholder="Documents\\CSI ProMax\\Models"></div>`,
     [["Export", d => submit(d, "save_model_s2k", {name: q(d, "#xn").value.trim(), folder: q(d, "#xf").value.trim() || undefined}, j => hmSay("Exported " + JSON.stringify(j.result).slice(0, 160))), true], ["Cancel"]], {width: 460});
-  dialog("Export SAFE .f2k", `<div class="g2"><span>Floor</span><select id="xs">${opts(stories.slice().reverse().map(s => s.name), (panes[active] || {}).story)}</select><span>File name</span><input id="xn" placeholder="model and floor"><span>Folder</span><input id="xf" placeholder="Documents\\CSI ProMax\\Models"></div>`,
-    [["Export", d => submit(d, "save_safe_file", {story: q(d, "#xs").value, name: q(d, "#xn").value.trim() || undefined, folder: q(d, "#xf").value.trim() || undefined}, j => hmSay("Exported " + JSON.stringify(j.result).slice(0, 160))), true], ["Cancel"]], {width: 460});
+  // SAFE's file is of one floor: the floor is chosen here, then Windows' Save As picker asks where (a plain browser types it).
+  const picks = await hostHas();
+  dialog("Export SAFE .f2k", `<div class="g2"><span>Floor</span><select id="xs">${opts(stories.slice().reverse().map(s => s.name), (panes[active] || {}).story)}</select>${picks ? "" : `<span>File name</span><input id="xn" placeholder="model and floor"><span>Folder</span><input id="xf" placeholder="Documents\\CSI ProMax\\Models">`}</div>`,
+    [["Export", d => {
+      if (!picks) return submit(d, "save_safe_file", {story: q(d, "#xs").value, name: q(d, "#xn").value.trim() || undefined, folder: q(d, "#xf").value.trim() || undefined}, j => hmSay("Exported " + JSON.stringify(j.result).slice(0, 160)));
+      const story = q(d, "#xs").value;
+      hostPick({kind: "save", title: "Export SAFE .f2k Text File", ext: "f2k", filter: "SAFE text file (*.f2k)|*.f2k", folder: modelFolder(), name: model + " " + story}).then(p => {
+        if (!p || p.cancelled) return;
+        const x = pickParts(p.path);
+        submit(d, "save_safe_file", {story, name: x.name, folder: x.folder}, () => hmSay("Exported " + p.path));
+      });
+      return false;
+    }, true], ["Cancel"]], {width: 460});
 }
 
 // ---- Excel: the model's tables out and in, as SAP2000 does (File > Export / Import > Excel) ----
@@ -6731,7 +6772,7 @@ async function hmTablesOut() {
   const list = j.result.tables, u = j.result.units;
   const groups = [["Definitions", 0, 9], ["Objects and assignments", 9, 15], ["Loads", 15, 99]];
   const rows = g => list.slice(g[1], g[2]).map((t, i) => `<label style="display:flex;gap:6px;align-items:center;margin:2px 0;white-space:nowrap"><input type="checkbox" data-t="${esc(t.name)}" ${t.rows ? "checked" : ""}> ${esc(t.name)} <span style="margin-left:auto;padding-left:12px;opacity:.7">${t.rows} row${t.rows === 1 ? "" : "s"}</span></label>`).join("");
-  const name = (P && P.manifest && P.manifest.model) || "Model";
+  const name = (P && P.manifest && P.manifest.model) || "Model", picks = await hostHas();
   const d = dialog("Choose Tables for Export to Excel", `
     <div style="display:flex;gap:10px"><div style="flex:1 1 auto;min-width:0;max-height:400px;overflow:auto">${groups.map(g => `<fieldset style="margin:0 0 6px"><legend>${esc(g[0])}</legend>${rows(g)}</fieldset>`).join("")}</div>
     <fieldset style="flex:0 0 210px;width:210px;box-sizing:border-box;margin:0;min-width:0"><legend>Options</legend><div style="display:flex;flex-direction:column;gap:6px;white-space:normal">
@@ -6739,19 +6780,33 @@ async function hmTablesOut() {
       <label style="display:flex;gap:6px;align-items:flex-start;white-space:normal;min-width:0"><input type="radio" name="xfm" value="model" checked><span style="white-space:normal;min-width:0">Model tables, to edit and import back</span></label>
       <label style="display:flex;gap:6px;align-items:flex-start;white-space:normal;min-width:0"><input type="radio" name="xfm" value="sap2000"><span style="white-space:normal;min-width:0">SAP2000 tables (joints, frames, areas), for SAP2000's File &gt; Import &gt; Excel</span></label>
       <p class="kv" style="margin:4px 0 0">Units: ${esc(u.force)}, ${esc(u.length)}</p></div></fieldset></div>
-    <div class="g2" style="margin-top:8px"><span>File name</span><input id="xnm" value="${esc(name)} tables"><span>Folder</span><input id="xfd" placeholder="the model's own folder"></div>
+    <div class="g2" style="margin-top:8px"${picks ? " hidden" : ""}><span>File name</span><input id="xnm" value="${esc(name)} tables"><span>Folder</span><input id="xfd" placeholder="the model's own folder"></div>
     <p class="kv" style="max-width:700px">One sheet per table: row 1 is the table's title, row 2 the field names, row 3 the units, then one row per item, as SAP2000 writes them. Edit the rows in Excel, save, and bring them back with File &gt; Import &gt; Tables from Excel.</p>`,
     [["OK", d => {
       const fmt = q(d, "input[name=xfm]:checked").value, tables = [...d.querySelectorAll("[data-t]")].filter(c => c.checked).map(c => c.dataset.t);
       if (fmt === "model" && !tables.length) { formError(d, "Pick a table at least."); return false; }
-      return submit(d, "export_tables_excel", {name: q(d, "#xnm").value.trim() || undefined, folder: q(d, "#xfd").value.trim() || undefined, format: fmt, tables: fmt === "model" ? tables : undefined},
+      const send = (nm, fd) => submit(d, "export_tables_excel", {name: nm || undefined, folder: fd || undefined, format: fmt, tables: fmt === "model" ? tables : undefined},
         j => hmSay("Exported " + ((j.result && j.result.saved) || "") + " (" + ((j.result && j.result.tables) || []).length + " tables)."));
+      if (!picks) return send(q(d, "#xnm").value.trim(), q(d, "#xfd").value.trim());
+      // Windows' Save As picker asks where the workbook goes.
+      hostPick({kind: "save", title: "Export Tables to Excel", ext: "xlsx", filter: "Excel workbook (*.xlsx)|*.xlsx", folder: modelFolder(), name: q(d, "#xnm").value.trim()}).then(p => {
+        if (!p || p.cancelled) return;
+        const x = pickParts(p.path); send(x.name, x.folder);
+      });
+      return false;
     }], ["Cancel"]], {width: 760});
   q(d, "#xa").onclick = () => d.querySelectorAll("[data-t]").forEach(c => c.checked = true);
   q(d, "#xn0").onclick = () => d.querySelectorAll("[data-t]").forEach(c => c.checked = false);
   d.querySelectorAll("input[name=xfm]").forEach(r => r.onchange = () => { const sap = q(d, "input[name=xfm]:checked").value === "sap2000"; d.querySelectorAll("[data-t]").forEach(c => c.disabled = sap); q(d, "#xnm").value = name + (sap ? " SAP2000 tables" : " tables"); });
 }
-function hmTablesIn() {
+async function hmTablesIn() {
+  const p = await hostPick({kind: "open", title: "Import Tables from Excel", filter: "Excel workbook (*.xlsx)|*.xlsx|All files (*.*)|*.*", folder: modelFolder()});
+  if (p) {
+    if (p.cancelled) return;
+    const j = await hmRun("import_tables_excel", {path: p.path});
+    if (j.ok) { const r = j.result || {}; hmSay("Imported " + (r.read || []).join("; ") + ((r.notes || []).length ? ". " + r.notes.slice(0, 3).join(" ") : "")); if ((r.notes || []).length > 3 || (r.checks || []).length) hmImportReport(r); }
+    return;
+  }
   const d = dialog("Import Tables from Excel", `
     <div class="g2"><span>Workbook</span><input id="iF" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"><span>or its path</span><input id="iP" placeholder="C:\\Users\\...\\Model tables.xlsx" style="min-width:360px"></div>
     <p class="kv" style="max-width:520px">Each table in the workbook replaces the same table in the model, the way SAP2000 imports Excel: rows you deleted are removed, new rows are added, changed rows are changed. Tables that are not in the workbook stay as they are. Values in other units (mm, N/mm², ...) are converted. If any table can't be read, nothing changes and the message names the table, row and field. Edit &gt; Undo takes an import back.</p>`,

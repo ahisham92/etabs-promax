@@ -488,6 +488,16 @@ static class ExtrasTests
             Check(CsiProMax.Assistant.ReferenceForms.FileName("Define > Functions > Response Spectrum...") == "Define - Functions - Response Spectrum", "the picture's file name");
             Check(CsiProMax.Assistant.ReferenceData.Items.Any(i => i.Name.StartsWith("the program's own forms", StringComparison.Ordinal)), "the field test does not picture the program's own forms");
         });
+        yield return ("Ahmed 2026-11-27: File > Open, Save As, Import and Export open Windows' own pickers straight away in the Engine's window, with no typed path", () =>
+        {
+            Check(CsiProMax.Host.FilePicker.Kind(System.Text.Json.Nodes.JsonNode.Parse("{\"kind\":\"save\"}")) == "save" && CsiProMax.Host.FilePicker.Kind(System.Text.Json.Nodes.JsonNode.Parse("{\"kind\":\"probe\"}")) == "probe" && CsiProMax.Host.FilePicker.Kind(null) == "open", "the picker kinds");
+            Check(CsiProMax.Host.FilePicker.Filter(System.Text.Json.Nodes.JsonNode.Parse("{\"filter\":\"ETABS text file (*.e2k)|*.e2k\"}")) == "ETABS text file (*.e2k)|*.e2k" && CsiProMax.Host.FilePicker.Filter(System.Text.Json.Nodes.JsonNode.Parse("{\"filter\":\"broken\"}")) == "All files|*.*", "the picker filter");
+            var view = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Panel", "Host", "ModelView.cs"));
+            Check(view.Contains("path == \"pick\" ? PickAsync(body)", StringComparison.Ordinal), "the Engine's window does not answer the page's picker requests");
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var marker in new[] { "hostPick({kind: \"open\", title: \"Open Model\"", "hostPick({kind: \"save\", title: \"Save Model As\"", "title: \"Export SAP2000 .s2k Text File\"", "title: \"Export SAFE .f2k Text File\"", "title: \"Export Tables to Excel\"", "title: \"Import Tables from Excel\"" })
+                Check(html.Contains(marker, StringComparison.Ordinal), "the page does not use Windows' picker for: " + marker);
+        });
         yield return ("Ahmed 2026-11-27: Design > View/Revise Overwrites is each code's overwrite table of the program (ETABS 23.2, SAP2000 26.3), the selected frames' rows; SAP2000's go into its .s2k and come back", () =>
         {
             Check(ProgramForms.OverwriteTables("etabs", "steel", "AISC 360-16").SequenceEqual(["Steel Frame Design Overwrites - AISC 360-16"]), "ETABS's steel overwrites: " + string.Join(", ", ProgramForms.OverwriteTables("etabs", "steel", "AISC 360-16")));
