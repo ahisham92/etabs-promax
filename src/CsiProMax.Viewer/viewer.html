@@ -3486,6 +3486,7 @@ function act(name) {
   if (name.startsWith("r:")) return setRes(name.slice(2));
   if (name.startsWith("o:")) { const k = name.slice(2); opt[k] = !opt[k]; if (k === "extrude") opt.extrudeA = opt.extrude; if (k === "extrude" || k === "sections") { geometryDirty = true; geometryStamp++; } if (k === "fill") hiddenVersion++; if (k === "explorer") $("explorer").hidden = !opt.explorer; if (k === "side") $("right").hidden = !opt.side; syncTools(); return draw(); }
   if (name.startsWith("m:")) return modelAct(name.slice(2));
+  if (name.startsWith("eto:")) return etoAct(name.slice(4));
   if (name === "u:consistent") return consistentUnits();
   if (name === "u:form") return unitsForm();
   if (name.startsWith("u:set:")) return setDispUnits(unitDefaults[name.slice(6)] || null);
@@ -3573,6 +3574,7 @@ function programLook() {
   const det = document.querySelector('[data-menu="Detailing"]'); if (det) det.hidden = program === "sap2000";
   try { syncUnits(); } catch (e) { /* before the page's footer is wired */ }
   buildBars();
+  try { etoBars(); etoCross(); } catch (e) { /* before the ETABS options are read */ }
 }
 function forProgram(m) {
   const tidy = list => {
@@ -3637,6 +3639,7 @@ function ticked(a) {
   if (a.startsWith("t:")) return tool === a.slice(2);
   if (a.startsWith("d:")) return tool === a;
   if (a === "m:etn:alive") return etn.alive;
+  if (a.startsWith("eto:")) return etoTicked(a);
   if (a === "m:etn:snapOnly") return !!hm.snapOnly;
   return {bg: bg === "black", tables: !$("dock").hidden, plot: !!p && p.mode === "plot", persp: !!p && !!p.cam.persp && p.mode === "3d", explorer: opt.explorer, side: opt.side, anim: res.anim}[a] || false;
 }
@@ -5924,7 +5927,7 @@ async function hmPost(body) {
 }
 // One change: the answer, and the view and the forms' lists brought up to date. Errors go to the status bar.
 async function hmRun(tool, args, quiet) {
-  if (etnLocked(tool)) return {ok: false, error: "The model is locked (Analyze > Unlock Model)."};
+  if (etnLocked(tool, args)) return {ok: false, error: "The model is locked (Analyze > Unlock Model)."};
   if (hm.busy) return {ok: false, error: "The last change is still being made."};
   hm.busy = true; document.body.classList.add("hmbusy");
   let j;
@@ -5934,7 +5937,7 @@ async function hmRun(tool, args, quiet) {
   if ("rev" in j) hm.state = j;
   if (j.ok) {
     hm.lastError = ""; hm.defs = null; if (window.cpmPull) await window.cpmPull(); await hmDefs();
-    etnChanged(tool);
+    etnChanged(tool, args);
     // A new model, another file, or new stories and grids: the windows show all of it again, plans at the top story.
     if (["new_model", "open_model_file", "define_stories", "define_grids", "import_tables_excel"].includes(tool)) {
       const top = stories.length ? stories[stories.length - 1].name : "";
@@ -5995,6 +5998,8 @@ function modelerMenus(m) {
     of.forEach((f, i) => { const it = [f.item, "m:oform:" + i]; if (!f.group) return items.push(it); let g = groups.find(x => x[0] === f.group); if (!g) groups.push(g = [f.group, []]); g[1].push(it); });
     m.Options = [...groups, ...items, 0, ...(m.Options || [])];
   }
+  // ETABS 23.2's own Options menu; the Engine's view options under Engine Extras.
+  if (etnOn()) m.Options = etoOptionsMenu(viewerMenus().Options);
   if (program === "safe") m.Tools = [...(m.Tools || []), 0, ["SAFE Definition Tables...", "m:sf:"]];
   if (fm.designs.length) m.Design = [...fm.designs.map(d => [d.name, [["View/Revise Preferences...", "m:pref:" + d.design], ...(d.design === "shear_wall" ? (d.overwrites || []).map(t => [/Spandrel/.test(t) ? "View/Revise Spandrel Overwrites..." : "View/Revise Pier Overwrites...", "m:dt:" + t]) : (d.overwrites || []).length ? [["View/Revise Overwrites...", "m:over:" + d.design, "", !hmSelected(d.design === "slab" ? "a" : "f").length]] : []), ...(window.cpmLive ? [["Start Design/Check...", "eng:design"]] : [])]]), 0, ...(m.Design || [])];
   return m;
@@ -6252,15 +6257,15 @@ function etnAct(a) {
   }
 }
 // Lock Model: what would change the model is refused while it is locked, as ETABS does.
-const etnChanges = tool => /^(define_|assign_|add_|delete_|draw_|set_section|set_loads?|set_lateral|set_program_form|set_slab|set_punching|set_load_cases|reshape_|move_|replicate_|divide_|edit_model_text|import_tables|frame_section_to_sd|undo$|redo$)/.test(tool);
-function etnLocked(tool) {
-  if (!hm.userLock || !etnChanges(tool)) return false;
+const etnChanges = (tool, args) => !(tool === "set_program_form" && args && /^(Options - |Miscellaneous Options|Preferences - Graphics)/.test(args.table || "")) && /^(define_|assign_|add_|delete_|draw_|set_section|set_loads?|set_lateral|set_program_form|set_slab|set_punching|set_load_cases|reshape_|move_|replicate_|divide_|edit_model_text|import_tables|frame_section_to_sd|undo$|redo$)/.test(tool);
+function etnLocked(tool, args) {
+  if (!hm.userLock || !etnChanges(tool, args)) return false;
   dialog("ETABS", `<p style="max-width:380px">The model is locked. Unlock it first (Analyze &gt; Unlock Model) to change it.</p>`, [["OK"]], {width: 420});
   return true;
 }
 // Model Alive: after each change the model is analysed again (a run of the analysis only, as ETABS's Model Alive).
-function etnChanged(tool) {
-  if (!etn.alive || !etnOn() || !etnChanges(tool) || !window.cpmLive) return;
+function etnChanged(tool, args) {
+  if (!etn.alive || !etnOn() || !etnChanges(tool, args) || !window.cpmLive) return;
   clearTimeout(etn.aliveTimer);
   etn.aliveTimer = setTimeout(() => { if (!etn.running) engineStart({analyse: true, kinds: [], selected: [], keep_open: false, stop_on_errors: true}); }, 1500);
 }
@@ -6391,9 +6396,299 @@ function etnDrawMenu() {
     ["Snap Options...", "m:drawHelp"], ["Draw Using Snap Only", "m:etn:snapOnly"], 0,
     ["Engine Extras", [["Draw Circular Floors (centre, then edge)", "d:circ"], 0, ["Design Strips...", "m:ex:strips"], ["Tendons...", "m:ex:tendons"], ["Slab Rebar...", "m:ex:slabrebar"]]]];
 }
+// ---- ETABS 23.2's Options menu and its forms, from the pictures in field/reference-forms/etabs/Options: Display
+// Units, Database, Tolerances, Arrange Windows, Graphics Preferences (with Set Line Thickness), Graphics Colors
+// (Set Display Colors, Set Output Colors), Graphics Mode (Video Card Information), the ticked options, Auto Save,
+// user default settings and Customize. Values that are ETABS tables go through set_program_form; the program's own
+// settings that no ETABS table holds (edge colours, font, line thickness, toolbars, keys) are kept on this computer,
+// as ETABS keeps them in its own settings. ----
+const etoLocal = (() => { let v = {}; try { v = JSON.parse(localStorage.getItem("cpm-etabs-options") || "{}"); } catch (e) { v = {}; } return v; })();
+const etoSave = () => { try { localStorage.setItem("cpm-etabs-options", JSON.stringify(etoLocal)); } catch (e) { } };
+const etoRgb = (r, g, b) => String(r + g * 256 + b * 65536);
+// Miscellaneous Options' ticks as ETABS 23.2 shows them on a new install (picture "00 Options menu").
+const etoMiscDefault = {StartPage: "Yes", CursorValue: "Yes", FrameInfo: "Yes", BoundPlane: "No", ArchDim: "No", MomentTens: "Yes", AniSound: "Yes", AutoSave: "No", AutoSaveInt: "10", Crosshairs: "No", ModelExp: "Yes"};
+const eto = {misc: null};
+async function etoItems(table) { const j = await hmPost({tool: "program_forms", args: {table}}).catch(() => null); return j && j.ok ? Object.fromEntries(j.result.items.map(i => [i.field, i.value])) : {}; }
+async function etoSet(table, values, quiet) {
+  const changed = Object.keys(values).length; if (!changed) return {ok: true};
+  const r = await hmRun("set_program_form", {table, values}, true);
+  if (!r.ok && !quiet) hmSay(r.error, true);
+  return r;
+}
+const etoYes = (v, d) => !/^(no|false|0)$/i.test(v === undefined || v === "" ? d : v);
+function etoMiscLoad() { if (eto.loading) return; eto.loading = true; etoItems("Miscellaneous Options").then(v => { eto.misc = v; eto.loading = false; }); }
+const etoMisc = k => etoYes((eto.misc || {})[k], etoMiscDefault[k]);
+function etoOptionsMenu(engine) {
+  if (!eto.misc) etoMiscLoad();
+  const t = k => ["eto:t:" + k];
+  return [["Display Units...", "u:form", "Ctrl+U"],
+    ["Database", [["Set Current Format File Source...", "m:eto:formatSource"], ["Edit Format File...", "m:eto:formatEdit"], 0, ["Write Table and Field Keys To XML File...", "m:eto:keysXml"], ["Set Table and Field Names...", "m:eto:names"], 0, ["Documentation to Word...", "m:eto:word"]]], 0,
+    ["Tolerances...", "m:eto:tolerances"], 0, ["Arrange Windows...", "eto:arrange"], 0,
+    ["Graphics Preferences...", "m:eto:graphics"], ["Architectural Plan Options...", "m:eto:archPlan", "", true],
+    ["Graphics Colors", [["Display...", "m:eto:colorsDisplay"], ["Output...", "m:eto:colorsOutput"]]],
+    ["Graphics Mode", [["Standard Graphics", "eto:std"], ["DirectX", "eto:dx", "", true], 0, ["Video Card(s) Information...", "m:eto:video"]]], 0,
+    ["Allow Multiple Towers", "eto:towers"], 0, ["Show Start Page at Startup", ...t("StartPage")], 0,
+    ["Show Value at Cursor for Assign/Design", ...t("CursorValue")], ["Show Frame Information in Local Plane", ...t("FrameInfo")], ["Show Bounding Plane", ...t("BoundPlane")], ["Architectural Dimensioning", ...t("ArchDim")], ["Moment Diagrams on Tension Side", ...t("MomentTens")], ["Animation Sound", ...t("AniSound")], 0,
+    ["Auto Save Model...", "m:eto:autosave"], ["Save User Default Settings", "eto:saveDefaults"], ["Reset User Default Settings", "eto:resetDefaults"], 0,
+    ["Customize Toolbars", "eto:customize"], ["Reset Default Toolbars", "eto:resetToolbars"], 0, ["Show Crosshairs", ...t("Crosshairs")], 0, ["Show Model Explorer", "explorer"], 0,
+    ["Engine Extras", engine || []]];
+}
+function etoTicked(a) {
+  if (a.startsWith("eto:t:")) return etoMisc(a.slice(6));
+  if (a === "eto:std") return true;
+  if (a === "eto:towers") return !!etoLocal.towers;
+  return false;
+}
+async function etoAct(a) {
+  if (a.startsWith("t:")) {
+    const k = a.slice(2), v = etoMisc(k) ? "No" : "Yes";
+    eto.misc = {...(eto.misc || {}), [k]: v};
+    if (k === "Crosshairs") etoCross();
+    await etoSet("Miscellaneous Options", {[k]: v});
+    return hmSay(`${k === "Crosshairs" ? "Show Crosshairs" : k}: ${v === "Yes" ? "on" : "off"}.`);
+  }
+  switch (a) {
+    case "arrange": { const n = typeof layout === "number" ? layout : 1; const b = document.querySelector(`[data-lay="${n}"]`); if (b) b.click(); panes.forEach(p => fit(p)); return hmSay("Windows arranged."); }
+    case "std": return hmSay("Standard Graphics is the graphics mode.");
+    case "towers": etoLocal.towers = !etoLocal.towers; etoSave(); return hmSay(etoLocal.towers ? "Multiple towers allowed." : "Multiple towers not allowed.");
+    case "saveDefaults": {
+      const keep = {}; for (const t of ["Preferences - Graphics", "Preferences - Tolerance", "Options - Colors - Display", "Options - Colors - Output", "Miscellaneous Options"]) keep[t] = await etoItems(t);
+      etoLocal.userDefaults = {tables: keep, local: {...etoLocal, userDefaults: undefined}}; etoSave(); return hmSay("The settings were saved as your defaults.");
+    }
+    case "resetDefaults": {
+      for (const t of ["Preferences - Graphics", "Options - Colors - Display", "Options - Colors - Output", "Miscellaneous Options"]) { const v = await etoItems(t); await etoSet(t, Object.fromEntries(Object.keys(v).filter(k => v[k] !== "").map(k => [k, ""])), true); }
+      for (const k of Object.keys(etoLocal)) delete etoLocal[k]; etoSave(); eto.misc = null; etoCross(); return hmSay("The settings are back to the program's defaults.");
+    }
+    case "customize": return etoCustomize();
+    case "resetToolbars": etoLocal.toolbars = null; etoSave(); etoBars(); return hmSay("The toolbars are back to their defaults.");
+  }
+}
+function etoCross() { document.querySelectorAll("canvas").forEach(c => { c.style.cursor = etoMisc("Crosshairs") ? "crosshair" : ""; }); }
+// The forms
+async function etoForm(a) {
+  const u = hmU();
+  if (a === "tolerances") {
+    const v = await etoItems("Preferences - Tolerance"), tol = {in: 0.1, ft: 0.1 / 12, mm: 2.54, cm: 0.254, m: 0.00254}[u.l] ?? 0.1;
+    const def = {MergeTol: String(+tol.toPrecision(6)), MaxInclVertCol: "1", MaxInclHorzBmFlr: "20"}, val = k => v[k] !== undefined && v[k] !== "" ? v[k] : def[k];
+    const d = dialog("Set Tolerances", `<fieldset><div class="gu" style="grid-template-columns:auto 120px auto;gap:6px 10px;align-items:center">
+        <label class="kv">Auto Merge Tolerance for Joints</label><input data-f="MergeTol" value="${esc(val("MergeTol"))}"><span>${esc(u.l)}</span>
+        <label class="kv">Maximum Inclination from Vertical for Columns</label><input data-f="MaxInclVertCol" value="${esc(val("MaxInclVertCol"))}"><span>deg</span>
+        <label class="kv">Maximum Inclination from Horizontal for Beams and Floors</label><input data-f="MaxInclHorzBmFlr" value="${esc(val("MaxInclHorzBmFlr"))}"><span>deg</span></div></fieldset>
+      <div style="text-align:center;margin-top:8px"><button id="toDef">Set to Default Values</button></div>`,
+      [["OK", x => { const out = {}; for (const b of x.querySelectorAll("[data-f]")) { if (!isFinite(+b.value) || b.value === "") { formError(x, "Each value must be a number."); return false; } if (b.value !== val(b.dataset.f)) out[b.dataset.f] = b.value; } etoSet("Preferences - Tolerance", out); }], ["Cancel"]], {width: 470});
+    q(d, "#toDef").onclick = () => d.querySelectorAll("[data-f]").forEach(b => { b.value = def[b.dataset.f]; });
+    return d;
+  }
+  if (a === "graphics") {
+    const v = await etoItems("Preferences - Graphics"), def = {MaxFontSize: "8", MinFontSize: "3", MinSLineThick: "1", MinPLineThick: "4", AntiAliasing: "Yes", ConstantLineThick: "Yes", ShadingWithinElement: "No", AutoZoomStep: "10", ShrinkFactor: "70"};
+    const val = k => v[k] !== undefined && v[k] !== "" ? v[k] : def[k], num = (k, label, unit) => `<label class="kv">${label}</label><input data-f="${k}" value="${esc(val(k))}" style="width:90px"><span>${unit}</span>`, cb = (k, label) => `<label class="kv" style="grid-column:1/4"><input type="checkbox" data-c="${k}" ${etoYes(val(k)) ? "checked" : ""}> ${label}</label>`;
+    let font = etoLocal.font || "Arial";
+    const d = dialog("Graphics Preferences", `<fieldset><legend>Font</legend><div class="gu" style="grid-template-columns:1fr auto auto;gap:5px 8px;align-items:center">
+        <span id="gpFont">${esc(font)}</span><button id="gpChange" style="grid-column:2/4">Change...</button>${num("MaxFontSize", "Maximum Graphic Font Size", "points")}${num("MinFontSize", "Minimum Graphic Font Size", "points")}</div></fieldset>
+      <fieldset><legend>Quality</legend><div class="gu" style="grid-template-columns:1fr auto auto;gap:5px 8px;align-items:center">${num("MinSLineThick", "Minimum Screen Line Thickness", "pixels")}${num("MinPLineThick", "Minimum Printer Line Thickness", "pixels")}
+        ${cb("AntiAliasing", "Anti Aliasing")}<label class="kv"><input type="checkbox" data-c="ConstantLineThick" ${etoYes(val("ConstantLineThick")) ? "checked" : ""}> Constant Line Thickness</label><button id="gpLine" style="grid-column:2/4">Set Line Thickness</button>${cb("ShadingWithinElement", "Shading within Element")}</div></fieldset>
+      <fieldset><legend>Size</legend><div class="gu" style="grid-template-columns:1fr auto auto;gap:5px 8px;align-items:center">${num("AutoZoomStep", "Auto Zoom Step", "percent")}${num("ShrinkFactor", "Shrink Factor for Line Objects", "percent")}</div></fieldset>`,
+      [["OK", x => {
+        const out = {}; for (const b of x.querySelectorAll("[data-f]")) { if (!isFinite(+b.value) || b.value === "") { formError(x, "Each value must be a number."); return false; } if (b.value !== val(b.dataset.f)) out[b.dataset.f] = b.value; }
+        for (const b of x.querySelectorAll("[data-c]")) { const y = b.checked ? "Yes" : "No"; if (y !== (etoYes(val(b.dataset.c)) ? "Yes" : "No")) out[b.dataset.c] = y; }
+        etoLocal.font = font; etoSave(); etoSet("Preferences - Graphics", out);
+      }], ["Cancel"]], {width: 400});
+    const line = () => { q(d, "#gpLine").disabled = q(d, '[data-c="ConstantLineThick"]').checked; };
+    q(d, '[data-c="ConstantLineThick"]').onchange = line; line();
+    q(d, "#gpLine").onclick = () => etoLineThickness();
+    q(d, "#gpChange").onclick = () => {
+      const f = dialog("Font", `<div class="g2"><span>Font</span><select id="ftN">${opts(["Arial", "Calibri", "Consolas", "Courier New", "Segoe UI", "Tahoma", "Times New Roman", "Verdana"], font)}</select></div>`,
+        [["OK", x => { font = q(x, "#ftN").value; q(d, "#gpFont").textContent = font; }], ["Cancel"]], {width: 300});
+      return f;
+    };
+    return d;
+  }
+  if (a === "colorsDisplay") return etoColors(false);
+  if (a === "colorsOutput") return etoColors(true);
+  if (a === "autosave") {
+    const v = await etoItems("Miscellaneous Options"), on = etoYes(v.AutoSave, "No"), n = v.AutoSaveInt || "10";
+    const d = dialog("Model Auto Save Options", `<fieldset><legend>Auto Save Options</legend><label class="kv" style="display:block"><input type="checkbox" id="asOn" ${on ? "checked" : ""}> Auto Save Model File at Specified Interval</label>
+        <div class="g2" style="margin-left:20px"><span>Interval in Minutes</span><input id="asN" value="${esc(on ? n : "")}"></div></fieldset>`,
+      [["OK", x => { const y = q(x, "#asOn").checked; if (y && !(+q(x, "#asN").value > 0)) { formError(x, "The interval must be a number of minutes above 0."); return false; } etoSet("Miscellaneous Options", {AutoSave: y ? "Yes" : "No", ...(y ? {AutoSaveInt: q(x, "#asN").value} : {})}).then(r => { if (r.ok) { eto.misc = null; hmSay(y ? `The model is saved every ${q(x, "#asN").value} minutes.` : "Auto save is off."); } }); }], ["Cancel"]], {width: 340});
+    const sync = () => { const y = q(d, "#asOn").checked, b = q(d, "#asN"); b.disabled = !y; if (y && !b.value) b.value = n; if (!y) b.value = ""; };
+    q(d, "#asOn").onchange = sync; sync();
+    return d;
+  }
+  if (a === "video") {
+    let r = "Unknown", vendor = "";
+    try { const gl = document.createElement("canvas").getContext("webgl"); const ext = gl && gl.getExtension("WEBGL_debug_renderer_info"); if (gl) { r = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER); vendor = ext ? gl.getParameter(ext.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR); } } catch (e) { }
+    return dialog("Video Card Information", `<fieldset><table class="list" style="width:100%"><tr><th>Video Card ID</th><th>Video Card Memory (MB)</th><th>Hardware Description</th><th>Compatible?</th></tr>
+        <tr style="color:#1a7a1a"><td>${esc(vendor)}</td><td>${navigator.deviceMemory ? navigator.deviceMemory * 1024 : ""}</td><td>${esc(r)}</td><td>Yes</td></tr></table></fieldset>
+      <p class="kv">Graphics card highlighted in green color will be used for DX rendering.</p><p class="kv">Graphics card can be selected/switched from Windows Settings &gt; System &gt; Display &gt; Graphics &gt; Custom options for apps.</p>`, [["OK"]], {width: 640});
+  }
+  if (a === "formatSource") {
+    const d = dialog("Set Database Table Format File", `<fieldset><legend>Format File</legend><label class="kv" style="display:block"><input type="radio" name="fsO" value="none" ${etoLocal.formatFile ? "" : "checked"}> None - Use Program Defaults</label>
+        <label class="kv" style="display:block"><input type="radio" name="fsO" value="user" ${etoLocal.formatFile ? "checked" : ""}> User Specified File</label>
+        <div style="display:flex;gap:6px"><input id="fsP" readonly style="flex:1" value="${esc((etoLocal.formatFile || {}).name || "")}"><button id="fsB">Browse</button></div></fieldset>`,
+      [["OK", x => { const u2 = q(x, "input[name=fsO]:checked").value; if (u2 === "none") etoLocal.formatFile = null; else if (!pick && !etoLocal.formatFile) { formError(x, "Browse for the format file first."); return false; } else if (pick) etoLocal.formatFile = pick; etoSave(); hmSay(etoLocal.formatFile ? "Tables use the format file " + etoLocal.formatFile.name + "." : "Tables use the program's default format."); }], ["Cancel"]], {width: 640});
+    let pick = null;
+    q(d, "#fsB").onclick = () => etoPickFile(".xml,.json,.txt,*", (name, text) => { pick = {name, text}; q(d, "#fsP").value = name; q(d, 'input[value="user"]').checked = true; });
+    return d;
+  }
+  if (a === "formatEdit") {
+    // ETABS asks for the format file to edit (Windows Open box), then opens it in an editor.
+    return dialog("Edit Format File", `<div class="g2"><span>File name</span><input id="feF" type="file" accept=".xml,.json,.txt"></div>`,
+      [["Open", x => {
+        const f = q(x, "#feF").files[0]; if (!f) { formError(x, "Choose the format file."); return false; }
+        const rd = new FileReader(); rd.onload = () => {
+          const name = f.name, text = String(rd.result);
+          dialog("Edit Format File - " + name, `<textarea id="feT" style="width:100%;height:340px;font-family:Consolas,monospace;font-size:11px">${esc(text)}</textarea>`,
+            [["Save", y => { etoDownload(name, q(y, "#feT").value, "text/plain"); if (etoLocal.formatFile && etoLocal.formatFile.name === name) { etoLocal.formatFile.text = q(y, "#feT").value; etoSave(); } }], ["Cancel"]], {width: 640});
+        }; rd.readAsText(f);
+      }], ["Cancel"]], {width: 440});
+  }
+  if (a === "keysXml") {
+    // ETABS asks where to save (Windows Save As box): the file name, then Save.
+    return dialog("Write Table and Field Keys To XML File", `<div class="g2"><span>File name</span><input id="kxN" value="${esc(etoJob())}.xml"><span>Save as type</span><select disabled><option>XML Files (*.xml)</option></select></div>`,
+      [["Save", x => {
+        const t = etoTables(), n = q(x, "#kxN").value.trim() || etoJob() + ".xml";
+        const xml = `<?xml version="1.0" encoding="utf-8"?>\n<Tables>\n${t.map(y => `  <Table Key="${etoX(y.name)}" Name="${etoX(etoName(y.name))}">\n${y.fields.map(f => `    <Field Key="${etoX(f)}" Name="${etoX(etoName(y.name, f))}"/>`).join("\n")}\n  </Table>`).join("\n")}\n</Tables>\n`;
+        etoDownload(/\.xml$/i.test(n) ? n : n + ".xml", xml, "application/xml"); hmSay(`Table and field keys of ${t.length} tables written to ${n}.`);
+      }], ["Cancel"]], {width: 460});
+  }
+  if (a === "names") {
+    const d = dialog("Set Table and Field Names", `<fieldset><legend>Table and Field Name Options</legend><div style="display:flex;flex-direction:column;gap:6px;align-items:center"><button id="tnD" style="width:220px">Set to Default</button><button id="tnX" style="width:220px">Import from XML File...</button></div></fieldset>`, [["Cancel"]], {width: 340});
+    q(d, "#tnD").onclick = () => { etoLocal.names = null; etoSave(); d.close(); hmSay("Table and field names are the program's own."); };
+    q(d, "#tnX").onclick = () => etoPickFile(".xml", (name, text) => {
+      const doc = new DOMParser().parseFromString(text, "application/xml"), map = {};
+      doc.querySelectorAll("Table").forEach(t => { const k = t.getAttribute("Key"); if (!k) return; map[k] = {name: t.getAttribute("Name") || k, fields: {}}; t.querySelectorAll("Field").forEach(f => { map[k].fields[f.getAttribute("Key")] = f.getAttribute("Name") || f.getAttribute("Key"); }); });
+      if (!Object.keys(map).length) return hmSay(name + " has no Table elements with a Key.", true);
+      etoLocal.names = map; etoSave(); d.close(); hmSay(`Names of ${Object.keys(map).length} tables read from ${name}.`);
+    });
+    return d;
+  }
+  if (a === "word") {
+    const all = etoTables();
+    const d = dialog("Database Documentation to Word", `<fieldset><legend>Select A Documentation Option</legend>
+        <label class="kv"><input type="radio" name="dwO" value="all" checked> Document All Tables</label><label class="kv" style="margin-left:24px"><input type="radio" name="dwO" value="sel"> Document Selected Tables</label>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:6px"><span class="kv">FileName</span><button id="dwF" style="margin-left:auto">Set FileName</button></div><input id="dwN" readonly style="width:100%" value="${esc(etoJob())}.rtf"></fieldset>
+      <fieldset id="dwT" hidden><legend>Select Tables</legend><select id="dwL" multiple size="10" style="width:100%">${all.map(t => `<option>${esc(t.name)}</option>`).join("")}</select></fieldset>
+      <label class="kv"><input type="checkbox" id="dwOpen" checked> Open Word File after Documentation is Created</label>`,
+      [["OK", x => {
+        const sel2 = q(x, "input[name=dwO]:checked").value === "sel" ? [...q(x, "#dwL").selectedOptions].map(o => o.value) : null;
+        if (sel2 && !sel2.length) { formError(x, "Select the tables to document."); return false; }
+        etoDownload(q(x, "#dwN").value || etoJob() + ".rtf", etoRtf(all.filter(t => !sel2 || sel2.includes(t.name))), "application/rtf");
+      }], ["Cancel"]], {width: 520});
+    d.querySelectorAll("input[name=dwO]").forEach(r => r.onchange = () => { q(d, "#dwT").hidden = q(d, "input[name=dwO]:checked").value !== "sel"; });
+    q(d, "#dwF").onclick = () => { const b = q(d, "#dwN"); b.readOnly = false; b.focus(); b.select(); };
+    q(d, "#dwN").onchange = e => { const n = e.target.value.trim(); e.target.value = n ? (/\.rtf$/i.test(n) ? n : n + ".rtf") : etoJob() + ".rtf"; };
+    return d;
+  }
+}
+const etoX = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+const etoJob = () => String((hm.state || {}).file || "Model").split(/[\\/]/).pop().replace(/\.[^.]*$/, "");
+const etoName = (t, f) => { const m = (etoLocal.names || {})[t]; return f === undefined ? (m && m.name) || t : (m && m.fields[f]) || f; };
+const etoTables = () => Object.values((P && P.tables) || {}).filter(t => t && t.name && t.fields).map(t => ({name: t.name, fields: t.fields})).sort((a, b) => a.name.localeCompare(b.name));
+function etoRtf(list) {
+  const r = s => String(s).replace(/[\\{}]/g, m => "\\" + m).replace(/[^\x00-\x7f]/g, c => `\\u${c.charCodeAt(0)}?`);
+  return `{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Arial;}}\\fs20\n` + list.map(t => `{\\b\\fs24 ${r(etoName(t.name))}\\par}\n` + t.fields.map(f => `\\tab ${r(f)}\\tab ${r(etoName(t.name, f))}\\par\n`).join("") + "\\par\n").join("") + "}";
+}
+function etoDownload(name, text, type) { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([text], {type})); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); }
+function etoPickFile(accept, then) { const f = document.createElement("input"); f.type = "file"; f.accept = accept; f.onchange = () => { const file = f.files[0]; if (!file) return; const rd = new FileReader(); rd.onload = () => then(file.name, String(rd.result)); rd.readAsText(file); }; f.click(); }
+function etoLineThickness() {
+  const items = [["Columns", "Openings"], ["Beams", "Rebars"], ["Braces", "Grid Lines"], ["Links", "Dimension Lines"], ["Springs", "User Mesh Edge"], ["Walls"], ["Floors"], ["Null Objects"]], lt = etoLocal.lines || {};
+  const cell = n => n ? `<label class="kv">${n}</label><input data-l="${n}" value="${esc(lt[n] || "1.0")}" style="width:70px"><span>pixels</span><span style="display:inline-block;width:50px;border-top:${Math.max(1, +(lt[n] || 1))}px solid currentColor;align-self:center"></span>` : "<span></span><span></span><span></span><span></span>";
+  return dialog("Set Line Thickness for Objects and Entities", `<fieldset><legend>Line Thickness for:</legend><div class="gu" style="grid-template-columns:auto 80px auto 60px 40px auto 80px auto 60px;gap:6px 8px;align-items:center">${items.map(([a, b]) => cell(a) + "<span></span>" + cell(b)).join("")}</div></fieldset>`,
+    [["OK", x => { const out = {}; for (const b of x.querySelectorAll("[data-l]")) { if (!(+b.value > 0)) { formError(x, "A thickness must be a number above 0."); return false; } out[b.dataset.l] = b.value; } etoLocal.lines = out; etoSave(); }], ["Cancel"]], {width: 760});
+}
+// Set Display Colors / Set Output Colors. A colour is ETABS's number (red + green*256 + blue*65536); the defaults are
+// the colours ETABS 23.2 shows (pictures "Set Display Colors", "Set Output Colors").
+const etoDisp = {ColorColumns: [64, 80, 160], ColorBeams: [64, 80, 160], ColorBraces: [64, 80, 160], ColorTendons: [0, 128, 128], ColorLinks: [64, 80, 160], ColorSprings: [0, 0, 0], ColorNullObjects: [128, 128, 128], ColorOpenings: [0, 0, 0], ColorStripEdge: [255, 128, 255], ColorOtherStripFill: [0, 255, 0], ColorDimLines: [160, 160, 160], ColorText: [32, 32, 32], ColorGridLines: [160, 160, 160], ColorBackground: [255, 255, 255], ColorColStripA: [255, 0, 0], ColorColStripB: [0, 0, 255], ColorUserMeshEdge: [0, 80, 80], ColorStlDesign: [0, 128, 128], ColorCompDesign: [0, 255, 255], ColorConcDesign: [255, 128, 64], ColorNoDesign: [255, 128, 64], ColorMidStripA: [255, 255, 0], ColorMidStripB: [0, 255, 255], ColorWalls: [255, 0, 0], ColorFloors: [192, 192, 192],
+  "~EdgeColumns": [64, 80, 160], "~EdgeBeams": [64, 80, 160], "~EdgeBraces": [64, 80, 160], "~EdgeTendons": [0, 128, 128], "~QuadGage": [0, 255, 0], "~LineGage": [0, 255, 0], "~Rebars": [0, 0, 255], "~TopRebars": [0, 255, 0], "~BottomRebars": [0, 0, 255], "~WallsNeg": [255, 0, 0], "~WallsEdge": [0, 0, 0], "~FloorsNeg": [192, 192, 192], "~FloorsEdge": [0, 0, 0]};
+const etoOut = {Contour1: [192, 0, 192], Contour2: [224, 0, 96], Contour3: [255, 0, 0], Contour4: [255, 64, 0], Contour5: [255, 128, 0], Contour6: [255, 165, 0], Contour7: [255, 200, 0], Contour8: [255, 255, 0], Contour9: [128, 255, 0], Contour10: [0, 224, 0], Contour11: [0, 255, 128], Contour12: [0, 255, 255], Contour13: [0, 160, 255], Contour14: [0, 80, 255], Contour15: [0, 0, 255],
+  DFillPos: [255, 255, 0], DFillNeg: [255, 0, 0], DFillRange: [0, 0, 255], Ratio1: [0, 255, 255], Ratio2: [0, 224, 0], Ratio3: [255, 255, 0], Ratio4: [255, 0, 255], Ratio5: [255, 0, 0], RatioNotD: [192, 192, 192],
+  HState1: [224, 224, 224], HState2: [0, 224, 0], HState3: [255, 255, 0], HState4: [0, 255, 255], HState5: [0, 0, 255], HStatus1: [224, 224, 224], HStatus2: [0, 224, 0], HStatus3: [0, 255, 255], HStatus4: [255, 0, 0],
+  "~RangeNeg": [0, 255, 255], "~NotCalculated": [255, 0, 0], "~HState6": [255, 0, 255], "~HState7": [255, 0, 0]};
+async function etoColors(output) {
+  const table = output ? "Options - Colors - Output" : "Options - Colors - Display", v = await etoItems(table), defs = output ? etoOut : etoDisp, store = etoLocal[output ? "outColors" : "dispColors"] || {};
+  const now = {}; for (const k of Object.keys(defs)) now[k] = k.startsWith("~") ? store[k] || etoRgb(...defs[k]) : v[k] !== undefined && v[k] !== "" ? v[k] : etoRgb(...defs[k]);
+  const sw = (k, w) => `<input type="color" data-k="${k}" value="${hmColorHex(now[k])}" style="width:${w || 76}px;height:22px;padding:0;border:1px solid #888">`;
+  const row = (label, k) => `<label class="kv" style="text-align:right">${label}</label>${sw(k)}`;
+  const tr = (label, k, list, d) => `<label class="kv">${label}</label><select data-t="${k}">${opts(list, v[k] !== undefined && v[k] !== "" ? String(+v[k]) : d)}</select>`;
+  const tenth = Array.from({length: 11}, (_, i) => String(i / 10)), bgs = ["White background", "Black Background", "Blue Scale", "Gray Scale", "Ocean", "Forest", "Desert"];
+  const dev = `<fieldset><legend>For Device Type:</legend><div class="gu" style="grid-template-columns:auto 1fr;gap:4px 8px;align-items:center">
+      <label class="kv"><input type="radio" name="ecD" value="Screen" ${(v.DeviceType || "Screen") === "Screen" ? "checked" : ""}> Screen</label><select id="ecBg">${opts(bgs, store.background || "White background")}</select>
+      <label class="kv"><input type="radio" name="ecD" value="Printer" ${v.DeviceType === "Printer" ? "checked" : ""}> Printer</label><span></span>
+      <label class="kv"><input type="radio" name="ecD" value="Color Printer" ${v.DeviceType === "Color Printer" ? "checked" : ""}> Color Printer</label><span></span></div></fieldset>`;
+  const cp = `<label class="kv"><input type="checkbox" id="ecCp" ${store.colorPrinter === false ? "" : "checked"}> Color Printer (Graphics)</label>`;
+  const body = output
+    ? `<div style="display:flex;gap:10px"><fieldset style="margin:0"><legend>Contours</legend><div style="display:flex;gap:8px"><div style="display:flex;flex-direction:column;justify-content:space-between"><span>Min</span><span>Max</span></div><div style="display:flex;flex-direction:column">${Array.from({length: 15}, (_, i) => sw("Contour" + (i + 1), 76)).join("")}</div></div></fieldset>
+        <div style="display:flex;flex-direction:column;gap:6px"><fieldset style="margin:0"><legend>Diagram Fill</legend><div class="gu" style="grid-template-columns:auto auto;gap:4px 10px">${row("Positive Region", "DFillPos")}${row("Negative Region", "DFillNeg")}${row("Range Pos", "DFillRange")}${row("Range Neg", "~RangeNeg")}</div></fieldset>
+          <fieldset style="margin:0"><legend>D/C Ratios</legend><div class="gu" style="grid-template-columns:auto auto;gap:2px 10px"><b class="kv">Colors</b><b class="kv">Values</b>${[1, 2, 3, 4, 5].map(i => `${sw("Ratio" + i)}${i === 1 ? `<input value="0" disabled style="width:70px">` : `<input data-r="RatioVal${i - 1}" value="${esc(v["RatioVal" + (i - 1)] || ["0.5", "0.7", "0.9", "1"][i - 2])}" style="width:70px">`}`).join("")}</div></fieldset>
+          <fieldset style="margin:0"><legend>Design Status</legend><div class="gu" style="grid-template-columns:auto auto;gap:4px 10px">${sw("RatioNotD")}<span class="kv">Not Yet Designed</span>${sw("~NotCalculated")}<span class="kv">Not Calculated</span></div></fieldset></div>
+        <div style="display:flex;flex-direction:column;gap:6px"><fieldset style="margin:0"><legend>Hinge States</legend><div class="gu" style="grid-template-columns:auto auto;gap:2px 10px">${["Point A", "Point B", "Point BC/U", "Point C", "Point CD", "Point D", "Point E"].map((n, i) => `${sw(i < 5 ? "HState" + (i + 1) : "~HState" + (i + 1))}<span class="kv">${n}</span>`).join("")}</div></fieldset>
+          <fieldset style="margin:0"><legend>Hinge Status</legend><div class="gu" style="grid-template-columns:auto auto;gap:2px 10px">${sw("HStatus1")}<span class="kv">Immediate Occupancy</span>${sw("HStatus2")}<span class="kv">Life Safety</span>${sw("HStatus3")}<span class="kv">Collapse Prevention</span>${sw("HStatus4")}<span></span></div></fieldset></div>
+        <div style="display:flex;flex-direction:column;gap:6px;width:240px"><fieldset style="margin:0"><legend>Transparency</legend><div class="gu" style="grid-template-columns:auto 1fr;gap:4px 8px">${tr("Contours", "TransContours", tenth, "0")}${tr("Diagram Fill", "TransDiag", tenth, "0.2")}</div></fieldset>${dev}${cp}<button id="ecReset">Reset Defaults</button></div></div>`
+    : `<fieldset><legend>Click to Change Color</legend><div style="display:flex;gap:14px;flex-wrap:wrap">
+        <div><div class="gu" style="grid-template-columns:auto 34px 34px;gap:0 6px;align-items:center"><span></span><b class="kv">Fill</b><b class="kv">Edge</b>${[["Columns", "ColorColumns", "~EdgeColumns"], ["Beams", "ColorBeams", "~EdgeBeams"], ["Braces", "ColorBraces", "~EdgeBraces"], ["Tendons", "ColorTendons", "~EdgeTendons"]].map(([n, a, b]) => `<label class="kv">${n}</label>${sw(a, 30)}${sw(b, 30)}`).join("")}</div>
+          <div class="gu" style="grid-template-columns:auto 34px 34px 34px;gap:0 6px;align-items:center;margin-top:14px"><span></span><b class="kv">Fill(+)</b><b class="kv">Fill(-)</b><b class="kv">Edge</b><label class="kv">Walls</label>${sw("ColorWalls", 30)}${sw("~WallsNeg", 30)}${sw("~WallsEdge", 30)}<label class="kv">Floors</label>${sw("ColorFloors", 30)}${sw("~FloorsNeg", 30)}${sw("~FloorsEdge", 30)}</div></div>
+        <div class="gu" style="grid-template-columns:auto auto;gap:3px 8px;align-content:start">${[["Links", "ColorLinks"], ["Springs", "ColorSprings"], ["Null Objects", "ColorNullObjects"], ["Openings", "ColorOpenings"], ["Design Strip Edge", "ColorStripEdge"], ["Other Strip Fill", "ColorOtherStripFill"], ["Quad Strain Gage", "~QuadGage"], ["Line Strain Gage", "~LineGage"]].map(([n, k]) => row(n, k)).join("")}</div>
+        <div class="gu" style="grid-template-columns:auto auto;gap:3px 8px;align-content:start">${[["Dimensions", "ColorDimLines"], ["Text", "ColorText"], ["Grid Lines", "ColorGridLines"], ["Background", "ColorBackground"], ["Column Strip Layer A", "ColorColStripA"], ["Column Strip Layer B", "ColorColStripB"], ["User Mesh Edge", "ColorUserMeshEdge"]].map(([n, k]) => row(n, k)).join("")}</div>
+        <div class="gu" style="grid-template-columns:auto auto;gap:3px 8px;align-content:start">${[["Steel Design", "ColorStlDesign"], ["Composite Design", "ColorCompDesign"], ["Concrete Design", "ColorConcDesign"], ["No Design", "ColorNoDesign"], ["Middle Strip Layer A", "ColorMidStripA"], ["Middle Strip Layer B", "ColorMidStripB"], ["Rebars", "~Rebars"], ["Top Rebars", "~TopRebars"], ["BottomRebars", "~BottomRebars"]].map(([n, k]) => row(n, k)).join("")}</div></div></fieldset>
+      <div style="display:flex;gap:10px"><fieldset style="flex:1;margin:0"><legend>Set Transparency</legend><div class="gu" style="grid-template-columns:auto 90px auto 90px;gap:4px 10px">${tr("Columns", "TransColumns", tenth, "0.5")}${tr("Floors", "TransFloors", tenth, "0.5")}${tr("Beams", "TransBeams", tenth, "0.5")}${tr("Walls", "TransWalls", tenth, "0.4")}${tr("Braces", "TransBraces", tenth, "0.5")}${tr("Links", "TransLinks", tenth, "0.5")}</div></fieldset><div style="width:250px">${dev}</div></div>
+      <div style="display:flex;gap:16px;align-items:center;margin-top:6px"><fieldset style="margin:0"><legend>Darkness</legend><select data-t="Darkness">${opts(tenth, v.Darkness !== undefined && v.Darkness !== "" ? String(+v.Darkness) : "0.3")}</select></fieldset><div style="display:flex;flex-direction:column;gap:4px"><button id="ecReset">Reset Defaults</button>${cp}</div></div>`;
+  const d = dialog(output ? "Set Output Colors" : "Set Display Colors", body, [["OK", x => {
+    const out = {}, loc = {...store};
+    for (const b of x.querySelectorAll("[data-k]")) { const n = String(hmColorNumber(b.value)); if (b.dataset.k.startsWith("~")) loc[b.dataset.k] = n; else if (n !== String(hmColorNumber(hmColorHex(now[b.dataset.k])))) out[b.dataset.k] = n; }
+    for (const b of x.querySelectorAll("[data-t]")) if (b.value !== (v[b.dataset.t] !== undefined && v[b.dataset.t] !== "" ? String(+v[b.dataset.t]) : null)) out[b.dataset.t] = b.value;
+    for (const b of x.querySelectorAll("[data-r]")) { if (!isFinite(+b.value) || b.value === "") { formError(x, "A ratio value must be a number."); return false; } if (b.value !== (v[b.dataset.r] || "")) out[b.dataset.r] = b.value; }
+    const devv = q(x, "input[name=ecD]:checked").value; if (devv !== (v.DeviceType || "Screen")) out.DeviceType = devv;
+    loc.background = q(x, "#ecBg").value; loc.colorPrinter = q(x, "#ecCp").checked;
+    etoLocal[output ? "outColors" : "dispColors"] = loc; etoSave();
+    etoSet(table, out).then(r => { if (r.ok) hmSay((output ? "Output" : "Display") + " colors set."); });
+  }], ["Cancel"]], {width: output ? 1000 : 900});
+  q(d, "#ecReset").onclick = () => { d.querySelectorAll("[data-k]").forEach(b => { b.value = hmColorHex(etoRgb(...defs[b.dataset.k])); }); };
+  return d;
+}
+// Customize: the Toolbars tab (which toolbars show) and the Keyboard tab (a key for any menu command), as ETABS 23.2.
+const etoBarNames = ["Draw", "Select", "Snap", "Assign Joint", "Assign Frame", "Assign Shell", "Edit", "View", "Define", "Standard", "Design"];
+const etoBarDefault = {Draw: true, Select: true, Snap: true, Standard: true, Design: true};
+function etoBars() { const on = etoLocal.toolbars || etoBarDefault, etabs = program === "etabs"; const side = document.getElementById("strip"); if (side) side.hidden = etabs && !on.Draw && !on.Select; const top = document.getElementById("icons"); if (top) top.hidden = etabs && !on.Standard; }
+function etoCommands() {
+  const out = [], walk = (list, path) => { for (const it of list || []) { if (!it) continue; if (Array.isArray(it[1])) walk(it[1], path + " > " + it[0]); else if (it[1] && !it[3]) out.push({cat: path, label: it[0], act: it[1], key: it[2] || ""}); } };
+  const m = menus(); for (const k of Object.keys(m)) walk(m[k], k);
+  return out;
+}
+function etoCustomize() {
+  const on = {...(etoLocal.toolbars || etoBarDefault)}, keys = {...(etoLocal.keys || {})}, cmds = etoCommands(), cats = [...new Set(cmds.map(c => c.cat))];
+  const d = dialog("Customize", `<div class="itabs"><button class="on" data-p="tb">Toolbars</button><button data-p="kb">Keyboard</button></div>
+      <div class="ipage on" data-pg="tb"><div style="display:flex;gap:10px"><div class="pgwrap" style="flex:1;height:200px">${etoBarNames.map(n => `<label class="kv" style="display:block"><input type="checkbox" data-b="${esc(n)}" ${on[n] ? "checked" : ""}> ${esc(n)}</label>`).join("")}</div><div><button id="cuR">Reset</button></div></div></div>
+      <div class="ipage" data-pg="kb"><div style="display:flex;gap:10px"><div style="flex:1"><b class="kv">Categories</b><select id="kcC" size="9" style="width:100%">${cats.map(c => `<option>${esc(c)}</option>`).join("")}</select>
+        <b class="kv">New Key</b><input id="kcN" placeholder="Press a key" style="width:100%"></div>
+        <div style="flex:1"><b class="kv">Commands</b><select id="kcM" size="9" style="width:100%"></select><b class="kv">Current Key</b><input id="kcK" disabled style="width:100%"></div>
+        <div style="display:flex;flex-direction:column;gap:6px;padding-top:16px"><button id="kcA">Assign</button><button id="kcX">Remove</button><button id="kcR">Reset</button><button id="kcRA">Reset All</button></div></div></div>`,
+    [["OK", x => { x.querySelectorAll("[data-b]").forEach(b => { on[b.dataset.b] = b.checked; }); etoLocal.toolbars = on; etoLocal.keys = keys; etoSave(); etoBars(); }]], {width: 620});
+  d.querySelectorAll(".itabs button").forEach(b => b.onclick = () => { d.querySelectorAll(".itabs button").forEach(y => y.classList.toggle("on", y === b)); d.querySelectorAll(".ipage").forEach(p => p.classList.toggle("on", p.dataset.pg === b.dataset.p)); });
+  const cmd = () => cmds.find(c => c.cat === q(d, "#kcC").value && c.act === q(d, "#kcM").value);
+  const showKey = () => { const c = cmd(); q(d, "#kcK").value = c ? (keys[c.act] !== undefined ? keys[c.act] : c.key) : ""; };
+  q(d, "#kcC").onchange = () => { q(d, "#kcM").innerHTML = cmds.filter(c => c.cat === q(d, "#kcC").value).map(c => `<option value="${esc(c.act)}">${esc(c.label)}</option>`).join(""); q(d, "#kcM").selectedIndex = 0; showKey(); };
+  q(d, "#kcM").onchange = showKey;
+  q(d, "#kcN").onkeydown = e => { e.preventDefault(); e.stopPropagation(); if (["Control", "Shift", "Alt", "Meta"].includes(e.key)) return; e.target.value = (e.ctrlKey ? "Ctrl+" : "") + (e.shiftKey ? "Shift+" : "") + (e.altKey ? "Alt+" : "") + (e.key.length === 1 ? e.key.toUpperCase() : e.key); };
+  q(d, "#kcA").onclick = () => { const c = cmd(), k = q(d, "#kcN").value; if (!c || !k) return hmSay("Pick a command and press its new key.", true); for (const a of Object.keys(keys)) if (keys[a] === k) delete keys[a]; keys[c.act] = k; showKey(); };
+  q(d, "#kcX").onclick = () => { const c = cmd(); if (c) { keys[c.act] = ""; showKey(); } };
+  q(d, "#kcR").onclick = () => { const c = cmd(); if (c) { delete keys[c.act]; showKey(); } };
+  q(d, "#kcRA").onclick = () => { for (const a of Object.keys(keys)) delete keys[a]; showKey(); };
+  q(d, "#cuR").onclick = () => d.querySelectorAll("[data-b]").forEach(b => { b.checked = !!etoBarDefault[b.dataset.b]; });
+  if (cats.length) { q(d, "#kcC").selectedIndex = 0; q(d, "#kcC").onchange(); }
+  return d;
+}
+// A key set in Customize > Keyboard runs its command.
+document.addEventListener("keydown", e => {
+  const keys = etoLocal.keys; if (!keys || !Object.keys(keys).length || (e.target.closest && e.target.closest("input, textarea, select")) || document.querySelector(".dlg:not(.float)")) return;
+  if (["Control", "Shift", "Alt", "Meta"].includes(e.key)) return;
+  const k = (e.ctrlKey ? "Ctrl+" : "") + (e.shiftKey ? "Shift+" : "") + (e.altKey ? "Alt+" : "") + (e.key.length === 1 ? e.key.toUpperCase() : e.key);
+  const a = Object.keys(keys).find(x => keys[x] === k); if (!a) return;
+  e.preventDefault(); e.stopImmediatePropagation(); act(a);
+}, true);
 async function modelAct(a) {
   hideMenus();
   if (a.startsWith("etn:")) return etnAct(a.slice(4));
+  if (a.startsWith("eto:")) { await hmDefs(); return etoForm(a.slice(4)); }
   if (a.startsWith("ld:")) return hmObjectLoad(a.slice(3));
   if (a.startsWith("spr:")) return hmSprings(a.slice(4));
   if (a.startsWith("sapa:")) return hmSapAssign(a.slice(5));

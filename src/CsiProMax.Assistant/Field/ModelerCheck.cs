@@ -631,13 +631,27 @@ public static class ModelerCheck
           const off = Object.keys(want).filter(k => JSON.stringify(got[k]) !== JSON.stringify(want[k]));
           return off.length ? {fail: off.map(k => `${k}: ${got[k].join(" | ")}`).join("; ")} : {ok: `Analyze ${an.length} items, Draw ${dr.length} items, in the program's order and words`};
         });
+        // The Options menu in the program's order and words (pictures in field/reference-forms/<program>/Options), and
+        // Set Tolerances read back from the model after OK.
+        await step("Options menu, as the program has it (23.2 pictures), and Set Tolerances reaches the model", async () => {
+          const m = programMenus(), words = (m.Options || []).filter(Boolean).map(x => x[0]).filter(x => x !== "Engine Extras");
+          const want = ["Display Units...", "Database", "Tolerances...", "Arrange Windows...", "Graphics Preferences...", "Architectural Plan Options...", "Graphics Colors", "Graphics Mode", "Allow Multiple Towers", "Show Start Page at Startup", "Show Value at Cursor for Assign/Design", "Show Frame Information in Local Plane", "Show Bounding Plane", "Architectural Dimensioning", "Moment Diagrams on Tension Side", "Animation Sound", "Auto Save Model...", "Save User Default Settings", "Reset User Default Settings", "Customize Toolbars", "Reset Default Toolbars", "Show Crosshairs", "Show Model Explorer"];
+          if (JSON.stringify(words) !== JSON.stringify(want)) return {fail: "Options: " + words.join(" | ")};
+          await act("m:eto:tolerances"); await wait(700);
+          const box = document.querySelector('.dlg [data-f="MaxInclVertCol"]'); if (!box) return {fail: "Tolerances... opened no Set Tolerances form"};
+          box.value = "2"; formOk("OK"); await wait(1200);
+          const j = await hmPost({tool: "program_forms", args: {table: "Preferences - Tolerance"}});
+          const got = j.ok ? (j.result.items.find(i => i.field === "MaxInclVertCol") || {}).value : "";
+          await hmRun("set_program_form", {table: "Preferences - Tolerance", values: {MaxInclVertCol: ""}}, true);
+          return String(got) === "2" ? {ok: `${words.length} items in order; Maximum Inclination from Vertical for Columns 2 reached the model, then back to the default`} : {fail: "Set Tolerances OK left " + got};
+        });
         for (const it of list) {
           await step("menu: " + it.path, async () => {
             if (it.target && program !== it.target) { await hmRun("set_model_program", {program: it.target}, true); for (let i = 0; i < 30 && program !== it.target; i++) { if (window.cpmPull) await window.cpmPull(); await wait(200); } }
             pick();
             if (it.act === "m:redo" && offNow(it.act)) { await hmRun("define_load_pattern", {name: "CPM-CHKREDO", type: "Other", self_weight: 0}, true); await hmRun("undo"); await wait(400); }
             // Items the program itself greys in this state (SAP2000 26.3 pictures: Assign > Frame > Path... with no path defined, Update All Generated Hinge Properties with no generated hinges, Paste Assigns before Copy Assigns; the 23.2 Assign menu greys its Paste Assigns items the same way).
-            if (offNow(it.act) && ["m:sapa:fPath", "m:sapa:updateHinges", "m:sapa:paste", "m:etn:geometry", "m:etn:messages", "m:etn:log", "m:eta:pasteJ", "m:eta:pasteF", "m:eta:pasteA", "m:eta:pasteL"].includes(it.act)) return {ok: "greyed out, as the program greys it"};
+            if (offNow(it.act) && ["m:sapa:fPath", "m:sapa:updateHinges", "m:sapa:paste", "m:etn:geometry", "m:etn:messages", "m:etn:log", "m:eto:archPlan", "m:eta:pasteJ", "m:eta:pasteF", "m:eta:pasteA", "m:eta:pasteL"].includes(it.act)) return {ok: "greyed out, as the program greys it"};
             if (offNow(it.act) && it.act !== "eng:clear") return {fail: "greyed out, although the check selected a beam and a floor for it first"};
             if (OTHER_WAY[it.act]) return await OTHER_WAY[it.act](it);
             const before = dialogsOpen();
