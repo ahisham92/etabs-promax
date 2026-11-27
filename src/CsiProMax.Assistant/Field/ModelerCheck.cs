@@ -85,13 +85,18 @@ public static class ModelerCheck
           const before = dialogsOpen();
           await act(it ? it.act : "eng:run"); await wait(900);
           const d = [...document.querySelectorAll(".dlg")].pop();
-          if (dialogsOpen() <= before || !d || !d.querySelector("#rA")) return {fail: "the Run Options form did not open: " + document.getElementById("hint").textContent};
+          if (dialogsOpen() <= before || !d || d.querySelectorAll("input[name=rM]").length !== 3) return {fail: "the Run Options form did not open with Analyze only, Analyze and Design and Design only: " + document.getElementById("hint").textContent};
+          // Analyze only leaves the design types closed; a design choice opens them (Ahmed 2026-11-27).
+          const pick = v => { const r = d.querySelector(`input[name=rM][value="${v}"]`); if (r && !r.disabled) { r.checked = true; r.dispatchEvent(new Event("change")); } };
+          pick("a"); const closedForAnalysis = [...d.querySelectorAll("[data-kind]")].every(x => x.disabled);
+          pick("ad"); const openForDesign = [...d.querySelectorAll("[data-kind]")].every(x => !x.disabled);
           const kinds = d.querySelectorAll("[data-kind]").length, scope = d.querySelectorAll("input[name=rS]").length;
           const buttons = [...d.querySelectorAll(".df button")].map(b => b.textContent).join(", ");
           closeDialogs(); await wait(150);
           if (buttons !== "Run Now, Cancel") return {fail: "its buttons are " + buttons};
+          if (kinds && (!closedForAnalysis || !openForDesign)) return {fail: "the design types do not follow the choice (closed for Analyze only, open for a design)"};
           if (scope !== 2) return {fail: "it has no choice of all or selected objects"};
-          return {ok: `Run Options: the analysis, ${kinds} designs, all or selected; closed without running`};
+          return {ok: `Run Options: Analyze only / Analyze and Design / Design only, ${kinds} designs, all or selected; closed without running`};
         },
         "m:open": async () => {
           const saved = await hmRun("save_model_as", {name: "CPM open check", folder: FOLDER}, true);
