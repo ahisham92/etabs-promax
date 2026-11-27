@@ -487,7 +487,7 @@ public static class ReferenceData
         {
             // A .NET Framework API file is not loaded into this process: its names are read without running it.
             if (EtabsApi.RunsOnFramework(api)) return MetadataCalls(g, api);
-            loaded = System.Reflection.Assembly.LoadFrom(api);
+            loaded = EtabsApi.Load(api);
         }
         Type[] types;
         try { types = loaded.GetTypes(); } catch (System.Reflection.ReflectionTypeLoadException ex) { types = ex.Types.Where(t => t is not null).ToArray()!; }
