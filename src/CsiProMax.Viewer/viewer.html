@@ -12966,6 +12966,87 @@ function sdObjectForm(s, mats, rmats, bars, u, done, smats) {
   paint();
   return d;
 }
+// Interaction Surface (SD 115-122): ETABS 23.2's design code curves for a concrete Section Designer section, checked point by
+// point against ETABS on SD1 (ACI 318-19; curves at 0, 15 and 345 deg, Include and Exclude Phi). 24 curves, one each 15 deg of
+// the neutral axis; 11 points each: the capped axial load, four neutral axis depths from the balanced one (c_b) to the depth over
+// beta1 in fifths, five from c_b down in fifths, and pure tension. Whitney block (0.85 f'c over beta1 c) less the bars inside it,
+// bars elastic-plastic, phi from the extreme bar's strain (0.65 to 0.90), and P no more than 0.80 phi Po.
+let sdMatTable = [];
+function sdPMData(sd, u, base, mode) {
+  const mat = n => (sdMatTable.find(m => m.name === n) || {}).values || {}, conc = sd.shapes.filter(s => s.known && sdOutline(s).length && !(s.type === "STEEL I/WIDE FLANGE" || (s.ext && sdX[s.type].steel)));
+  const rmName = (sd.shapes.find(s => s.rebarMat) || {}).rebarMat || (sd.shapes.find(s => s.ext && sdX[s.type].bar) || {}).material || (sd.shapes.find(s => s.type === "REBAR" || s.type === "LINE REBAR") || {}).material;
+  const ksi = etKipIn(1, 1, -2, u), cm = mat(base), rm = mat(rmName), fc = +cm.FC || 0, Es = +rm.E || etKipIn(29000, 1, -2, u), fy0 = +rm.FY || etKipIn(60, 1, -2, u);
+  const bars = [], dd = sdPMData.bars || [];
+  sd.shapes.forEach(s => sdBars(s, dd).forEach(b => bars.push(b)));
+  const polys = conc.flatMap(s => sdOutline(s));
+  if (!polys.length || !fc) return null;
+  const fy = mode === 2 ? 1.25 * fy0 : fy0, ety = fy / Es, ecu = 0.003, psi = fc / ksi * 1000, b1 = Math.max(0.65, Math.min(0.85, 0.85 - 0.05 * (psi - 4000) / 1000));
+  const signed = p => { let a = 0, sx = 0, sy = 0; for (let i = 0; i < p.length; i++) { const [x0, y0] = p[i], [x1, y1] = p[(i + 1) % p.length], c = x0 * y1 - x1 * y0; a += c / 2; sx += (x0 + x1) * c / 6; sy += (y0 + y1) * c / 6; } return [a, sx, sy]; };
+  const area = (ps, f) => ps.reduce((t, p) => { const q2 = f ? f(p) : p; if (q2.length < 3) return t; const [a, sx, sy] = signed(q2), sg = (a < 0 ? -1 : 1) * (p.hole ? -1 : 1); return [t[0] + a * sg, t[1] + sx * sg, t[2] + sy * sg]; }, [0, 0, 0]);
+  const As = bars.reduce((t, b) => t + b.a, 0), Ag = area(polys)[0], Po = 0.85 * fc * (Ag - As) + fy * As, inc = mode === 0, Pmax = 0.8 * (inc ? 0.65 : 1) * Po;
+  const mS = {in: 12, mm: 1000, cm: 100}[u.l] || 1, curves = [];
+  for (let k = 0; k < 24; k++) {
+    const th = k * 15 * Math.PI / 180, nx = -Math.sin(th), ny = Math.cos(th), v = (x, y) => x * nx + y * ny;
+    const pv = polys.flat().map(([x, y]) => v(x, y)), top = Math.max(...pv), D = top - Math.min(...pv), dt = Math.max(...bars.map(b => top - v(b.x, b.y)), 0), cb = dt * ecu / (ecu + ety);
+    const clip = (p, lim) => { const out = []; for (let i = 0; i < p.length; i++) { const a = p[i], b = p[(i + 1) % p.length], ia = v(...a) >= lim, ib = v(...b) >= lim; if (ia) out.push(a);
+      if (ia !== ib) { const t = (lim - v(...a)) / (v(...b) - v(...a)); out.push([a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])]); } } return out; };
+    const at = c => { const a = b1 * c, [Ac, Sx, Sy] = area(polys, p => clip(p, top - a)); let P = 0.85 * fc * Ac, Mx = 0.85 * fc * Sy, My = 0.85 * fc * Sx;
+      bars.forEach(b => { const d = top - v(b.x, b.y), e = ecu * (c - d) / c; let s = Math.max(-fy, Math.min(fy, e * Es)); if (d <= a) s -= 0.85 * fc; P += s * b.a; Mx += s * b.a * b.y; My += s * b.a * b.x; });
+      const et = ecu * (dt - c) / c, phi = inc ? (et <= ety ? 0.65 : et >= ety + 0.003 ? 0.9 : 0.65 + 0.25 * (et - ety) / 0.003) : 1;
+      return [Math.min(P * phi, Pmax), -My * phi / mS, Mx * phi / mS]; };
+    const s = (D / b1 - cb) / 5;
+    curves.push({ang: k * 15, pts: [[Pmax, 0, 0], ...[4, 3, 2, 1].map(j => at(cb + j * s)), ...[5, 4, 3, 2, 1].map(j => at(cb * j / 5)), [-(inc ? 0.9 : 1) * fy * As, 0, 0]]});
+  }
+  return {curves, Pmax, fU: u.f, mU: u.f + "-" + ({in: "ft", mm: "m", cm: "m"}[u.l] || u.l)};
+}
+function sdInteractionForm(sd, base, u, bars) {
+  sdPMData.bars = bars;
+  let mode = 0, fiber = false, cur = 0, plan = 315, elev = 35, data = sdPMData(sd, u, base, mode);
+  // ETABS shows P to 3 decimals and the moments to 4 (SD 116, 117).
+  const fx = (x, n) => { const v = +(+x).toFixed(n); return String(Object.is(v, -0) ? 0 : v); };
+  const d = dialog("Interaction Surface (" + ((hm.defs && hm.defs.concrete_code) || "ACI 318-19") + ")", `<div style="display:grid;grid-template-columns:340px 250px 280px;gap:10px">
+    <div><fieldset><legend>Display Options</legend><div style="display:grid;grid-template-columns:1fr 1fr">
+      <label><input type="radio" name="isK" value="d" checked> Show Design Code Data</label><label><input type="radio" name="isK" value="f"> Show Fiber Model Data</label></div>
+      <div style="margin-left:22px"><label style="display:block"><input type="radio" name="isP" value="0" checked> Include Phi</label><label style="display:block"><input type="radio" name="isP" value="1"> Exclude Phi</label><label style="display:block"><input type="radio" name="isP" value="2"> Exclude Phi and Increase Fy</label></div></fieldset>
+      <fieldset><legend>Curve Data</legend><div class="pgwrap" style="height:250px"><table class="grid" id="isT" style="width:100%"></table></div>
+      <div style="display:flex;justify-content:center;gap:6px;align-items:center;margin-top:6px"><button id="isF">|◀</button><button id="isB">◀</button><span id="isC" style="min-width:110px;text-align:center"></span><button id="isN">▶</button><button id="isL">▶|</button></div></fieldset></div>
+    <fieldset><legend>3D Interaction Surface</legend><svg id="is3" width="230" height="230" style="background:#fff"></svg>
+      <div class="g2" style="margin-top:6px"><span>Plan</span><span><input id="isPl" type="number" value="315" style="width:80px"> deg</span><span>Elevation</span><span><input id="isEl" type="number" value="35" style="width:80px"> deg</span></div>
+      <div style="display:flex;gap:6px;justify-content:center;margin-top:6px"><button id="is3D">3D</button><button id="isMM">MM</button><button id="isPM3">PM3</button><button id="isPM2">PM2</button></div></fieldset>
+    <fieldset><legend>Current Interaction Curve</legend><svg id="isP2" width="260" height="230" style="background:#fff"></svg><div id="isS" style="height:14px;border:1px solid #ccc;margin:4px 0"></div>
+      <label><input type="checkbox" id="isD"> <span id="isDL">Superimpose Dashed Fiber Curve</span></label><p class="note">Note:&nbsp; Compression is positive in this form.</p></fieldset></div>`, [["Done"]], {width: 920});
+  const paint = () => {
+    q(d, "#isDL").textContent = fiber ? "Superimpose Dashed Nominal Curve" : "Superimpose Dashed Fiber Curve";
+    d.querySelectorAll("input[name=isP]").forEach(r => r.disabled = fiber);
+    if (fiber || !data) { q(d, "#isT").innerHTML = `<tr><th>Point</th><th>P ${esc(u.f)}</th><th>M2</th><th>M3</th></tr>`; q(d, "#isC").textContent = fiber ? "Fiber model: comes next" : "No concrete shape"; q(d, "#is3").innerHTML = ""; q(d, "#isP2").innerHTML = ""; return; }
+    const c = data.curves[cur];
+    q(d, "#isT").innerHTML = `<tr><th>Point</th><th>P&nbsp; ${esc(data.fU)}</th><th>M2&nbsp; ${esc(data.mU)}</th><th>M3&nbsp; ${esc(data.mU)}</th></tr>` + c.pts.map((p, i) => `<tr><td>${i + 1}</td><td>${fx(p[0], 3)}</td><td>${fx(p[1], 4)}</td><td>${fx(p[2], 4)}</td></tr>`).join("");
+    q(d, "#isC").textContent = `Curve #${cur + 1}  ${c.ang} deg`;
+    // The 3D surface: every curve and every point's ring, the current curve in magenta, seen from the plan and elevation angles.
+    const all = data.curves.flatMap(k => k.pts), mm = Math.max(...all.map(p => Math.hypot(p[1], p[2])), 1e-9), pm = Math.max(...all.map(p => Math.abs(p[0])), 1e-9);
+    const a = plan * Math.PI / 180, e = elev * Math.PI / 180, prj = p => { const x = p[1] / mm, y = p[2] / mm, z = p[0] / pm; const xr = x * Math.cos(a) - y * Math.sin(a), yr = x * Math.sin(a) + y * Math.cos(a); return [115 + 80 * xr, 115 - 80 * (z * Math.cos(e) - yr * Math.sin(e))]; };
+    const path = ps => "M" + ps.map(p => prj(p).map(v => v.toFixed(1)).join(" ")).join("L");
+    let h = data.curves.map((k, i) => `<path d="${path(k.pts)}" fill="none" stroke="#1a5fb4" stroke-width=".6"/>`).join("") + c.pts.map((_, j) => `<path d="${path(data.curves.map(k => k.pts[j]).concat([data.curves[0].pts[j]]))}" fill="none" stroke="#1a5fb4" stroke-width=".5"/>`).join("");
+    h += `<path d="${path(c.pts)}" fill="none" stroke="#e000e0" stroke-width="2.4"/>`;
+    const ax = (p, t) => { const [x, y] = prj(p); return `<path d="M115 ${prj([0, 0, 0])[1]}L${x} ${y}" stroke="#c00" stroke-width=".8"/><text x="${x}" y="${y}" fill="#c00" font-size="11">${t}</text>`; };
+    q(d, "#is3").innerHTML = `<rect width="230" height="230" fill="#e8f6ff" opacity=".4"/>` + h + ax([pm * 1.15, 0, 0], "P") + ax([-pm * 1.15, 0, 0], "-P") + ax([0, 0, mm * 1.2], "M3") + ax([0, 0, -mm * 1.2], "-M3") + ax([0, mm * 1.2, 0], "M2") + ax([0, -mm * 1.2, 0], "-M2");
+    // The current curve: P against the resultant moment.
+    const W = 260, H = 230, px = m => 50 + (m / (mm * 1.2)) * (W - 70), py = P => 20 + (1 - (P + pm * 1.1) / (2.2 * pm)) * (H - 50);
+    q(d, "#isP2").innerHTML = `<rect x="50" y="20" width="${W - 70}" height="${H - 50}" fill="none" stroke="#999"/>` + [0.25, 0.5, 0.75].map(t => `<path d="M${50 + t * (W - 70)} 20V${H - 30}M50 ${20 + t * (H - 50)}H${W - 20}" stroke="#ddd"/>`).join("")
+      + `<path d="M${c.pts.map(p => px(Math.hypot(p[1], p[2])).toFixed(1) + " " + py(p[0]).toFixed(1)).join("L")}" fill="none" stroke="#000" stroke-width="2"/>`
+      + [0, 0.25, 0.5, 0.75, 1].map(t => `<text x="46" y="${20 + t * (H - 50) + 4}" font-size="9" text-anchor="end">${+((1.1 - 2.2 * t) * pm).toPrecision(3)}</text><text x="${50 + t * (W - 70)}" y="${H - 18}" font-size="9" text-anchor="middle">${+(t * mm * 1.2).toPrecision(3)}</text>`).join("")
+      + `<text x="12" y="${H / 2}" font-size="11" transform="rotate(-90 12 ${H / 2})">P (${esc(data.fU)})</text><text x="${W / 2}" y="${H - 6}" font-size="11">M (${esc(data.mU)})</text>`;
+  };
+  const go = i => { cur = (i + 24) % 24; paint(); };
+  q(d, "#isF").onclick = () => go(0); q(d, "#isB").onclick = () => go(cur - 1); q(d, "#isN").onclick = () => go(cur + 1); q(d, "#isL").onclick = () => go(23);
+  d.querySelectorAll("input[name=isP]").forEach(r => r.onchange = () => { mode = +r.value; data = sdPMData(sd, u, base, mode); paint(); });
+  d.querySelectorAll("input[name=isK]").forEach(r => r.onchange = () => { fiber = r.value === "f"; paint(); });
+  const view = (p, e) => { plan = p; elev = e; q(d, "#isPl").value = p; q(d, "#isEl").value = e; paint(); };
+  q(d, "#isPl").onchange = () => view(+q(d, "#isPl").value || 0, elev); q(d, "#isEl").onchange = () => view(plan, +q(d, "#isEl").value || 0);
+  q(d, "#is3D").onclick = () => view(315, 35); q(d, "#isMM").onclick = () => view(-90, 90); q(d, "#isPM3").onclick = () => view(0, 0); q(d, "#isPM2").onclick = () => view(90, 0);
+  paint();
+  return d;
+}
 // Drawing Options (SD 15, 16).
 const sdOpt = {guide: 20, fine: 9, snapAng: 15, conAng: 45, transp: true, disc: "11.25"};
 function sdDrawingOptions(u, after) {
@@ -12995,9 +13076,9 @@ function hmSdWindow(lines, base, mats, rmats, bars, u, done, smats) {
       ["Reference Line", ["Point", "Line", "Circle"].map(n => [n, () => notYet("Reference " + n)])], 0,
       ["Snap To", ["Points and Guideline Intersections", "Line Ends and Midpoints", "Line Intersections", "Perpendicular Projections", "Lines and Edges", "Fine Grids"].map(n => [n, () => { snapTo = n; }, "", false, () => snapTo === n])], 0, ["Settings...", () => sdDrawingOptions(u, draw)]],
     Select: [["Pointer/Window", () => { mode = "select"; }], ["Intersecting Line", () => { mode = "select"; }], ["All", () => { sel = new Set(sd.shapes.map((_, i) => i)); draw(); }, "Ctrl+A"], 0, ["Deselect Intersecting Line"], ["Deselect Window"], ["Clear Selection", () => { prevSel = [...sel]; sel.clear(); draw(); }], 0, ["Get Previous Selection", () => { sel = new Set(prevSel); draw(); }, "Ctrl+J"]],
-    Display: [["Section Properties...", () => sdPropsForm(sd, base, u), "", () => !hasArea()], 0, ["Interaction Surface...", () => notYet("Interaction Surface"), "", () => !hasArea()], ["Moment-Curvature Curve...", () => notYet("Moment-Curvature Curve"), "", () => !hasArea()]]};
+    Display: [["Section Properties...", () => sdPropsForm(sd, base, u), "", () => !hasArea()], 0, ["Interaction Surface...", () => sdInteractionForm(sd, base, u, bars), "", () => !hasArea()], ["Moment-Curvature Curve...", () => notYet("Moment-Curvature Curve"), "", () => !hasArea()]]};
   let snapTo = "Points and Guideline Intersections";
-  const tools = [["undo", "Undo", () => step(undo, redo)], ["redo", "Redo", () => step(redo, undo)], ["pen", "Refresh Window", () => draw()], ["zr", "Rubberband Zoom", () => { mode = "zoom"; }], ["zf", "Restore Full View", () => { fit(); draw(); }], ["zp", "Previous Zoom", () => { if (prevView.length) { view = prevView.pop(); draw(); } }], ["zi", "Zoom In One Step", () => zoom(1.25)], ["zo", "Zoom Out One Step", () => zoom(0.8)], ["pan", "Pan", () => { mode = "pan"; }], ["sp", "Section Properties...", () => sdPropsForm(sd, base, u)], ["is", "Interaction Surface...", () => notYet("Interaction Surface")], ["mc", "Moment-Curvature Curve...", () => notYet("Moment-Curvature Curve")]];
+  const tools = [["undo", "Undo", () => step(undo, redo)], ["redo", "Redo", () => step(redo, undo)], ["pen", "Refresh Window", () => draw()], ["zr", "Rubberband Zoom", () => { mode = "zoom"; }], ["zf", "Restore Full View", () => { fit(); draw(); }], ["zp", "Previous Zoom", () => { if (prevView.length) { view = prevView.pop(); draw(); } }], ["zi", "Zoom In One Step", () => zoom(1.25)], ["zo", "Zoom Out One Step", () => zoom(0.8)], ["pan", "Pan", () => { mode = "pan"; }], ["sp", "Section Properties...", () => sdPropsForm(sd, base, u)], ["is", "Interaction Surface...", () => hasArea() && sdInteractionForm(sd, base, u, bars)], ["mc", "Moment-Curvature Curve...", () => notYet("Moment-Curvature Curve")]];
   const side = [["Select Mode", () => { mode = "select"; }], ["Reshape Mode", () => { mode = "select"; }], 0, ["Draw Steel Shape ▾", () => setMode("isec", "Click where the I section's center goes")], ["Draw Concrete Shape ▾", () => { mode = "rect"; status("Click where the rectangle's center goes"); }], ["Draw Rebar Shape ▾", () => setMode("bar", "Click where the bar goes")], ["Draw Reference Line ▾", () => notYet("reference lines")], 0,
     ["all", () => { sel = new Set(sd.shapes.map((_, i) => i)); draw(); }], ["ps", () => { sel = new Set(prevSel); draw(); }], ["clr", () => { prevSel = [...sel]; sel.clear(); draw(); }], 0, ...["Points and Guideline Intersections", "Line Ends and Midpoints", "Line Intersections", "Perpendicular Projections", "Lines and Edges", "Fine Grids"].map(n => [n, () => { snapTo = n; }])];
   const d = dialog("Section Designer", `<div class="sdw"><div class="sdm">${Object.keys(menu).map(k => `<button data-m="${k}">${k}</button>`).join("")}</div>
@@ -13116,6 +13197,7 @@ function sdIcon(k) {
 // Composite Column), Concrete Column Check/Design, Section Designer..., Properties... and Set Modifiers... OK once the section has a shape.
 async function hmEtabsSdSection(s, cur, was, copy, pd, after) {
   const u = hmU(), dd = (await hmRun("definition_data", {}, true)).result || {}, bars = dd.rebar_sizes || [];
+  sdMatTable = pd.materials || [];
   const mats = (pd.materials || []).filter(m => !/rebar|tendon/i.test(m.type)).map(m => m.name), rmats = (pd.materials || []).filter(m => /rebar/i.test(m.type)).map(m => m.name), conc = (pd.materials || []).filter(m => /concrete/i.test(m.type)).map(m => m.name), smats = (pd.materials || []).filter(m => /steel/i.test(m.type)).map(m => m.name);
   const extras = {...((cur && cur.extras) || {})}; let mods = cur ? {...cur.modifiers} : null, lines = (cur && cur.sd_lines) || [];
   if (!extras.Color) extras.Color = "Green";
