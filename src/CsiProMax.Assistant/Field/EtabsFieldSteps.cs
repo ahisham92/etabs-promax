@@ -277,7 +277,7 @@ public static class EtabsFieldSteps
                 if (a["note"] is not null && a["lateral"] is null && !FieldTest.IsLive(link))
                     throw new FieldSkipException("no CSI program is behind this stand-in, so no automatic load can be set: " + a["note"]!.GetValue<string>());
                 if (a["note"] is not null && a["lateral"] is null && link.LoadPatterns().Any(p => p.Name == "CPM-EQX"))
-                    throw new FieldCheckException("the Seismic pattern is added, but neither its user coefficient table nor ASCE 7-16 took its automatic load: " + a["note"]!.GetValue<string>());
+                    throw new FieldCheckException("the Seismic pattern is added, but its user coefficient table did not take its automatic load: " + a["note"]!.GetValue<string>());
                 FieldContext.Expect(a["lateral"] is not null && link.LoadPatterns().Any(p => p.Name == "CPM-EQX"), "the seismic pattern or its coefficient is not in ETABS: " + a.ToJsonString());
             },
             "tool add_load_pattern, seismic by a user coefficient");

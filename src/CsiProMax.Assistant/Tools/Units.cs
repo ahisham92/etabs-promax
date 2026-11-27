@@ -66,7 +66,9 @@ public static class Spectrum
     private static readonly Dictionary<string, double?[]> FvTable = new(StringComparer.OrdinalIgnoreCase)
     {
         ["A"] = [0.8, 0.8, 0.8, 0.8, 0.8, 0.8], ["B"] = [0.8, 0.8, 0.8, 0.8, 0.8, 0.8], ["C"] = [1.5, 1.5, 1.5, 1.5, 1.5, 1.4],
-        ["D"] = [2.4, 2.2, 2.0, 1.9, 1.8, 1.7], ["E"] = [4.2, null, null, null, null, null],
+        // Site class E from S1 0.2 up as Supplement 1 to ASCE 7-16 gives it back; 11.4.8 then asks for a site-specific
+        // study unless an exception applies (SiteSpecificNote says so).
+        ["D"] = [2.4, 2.2, 2.0, 1.9, 1.8, 1.7], ["E"] = [4.2, 3.3, 2.8, 2.4, 2.2, 2.0],
     };
 
     public static double Fa(string site, double ss) => Interpolate(FaTable, SsAt, site, ss, "Fa");
@@ -87,6 +89,23 @@ public static class Spectrum
 
     private static ToolInputException Needs(string site, string what) =>
         new($"ASCE 7-16 gives no {what} for site class {site} at this value (a site-specific study, 11.4.8): give {what.ToLowerInvariant()} yourself.");
+
+    /// <summary>
+    /// What ASCE 7-16 11.4.8 says about this site, or null: a ground motion hazard analysis is required for site class D
+    /// and E with S1 at 0.2 or more, and E with Ss at 1.0 or more, unless one of the section's exceptions applies.
+    /// </summary>
+    public static string? SiteSpecificNote(string site, double ss, double s1)
+    {
+        var e = site.Equals("E", StringComparison.OrdinalIgnoreCase);
+        var d = site.Equals("D", StringComparison.OrdinalIgnoreCase);
+        var reasons = new List<string>();
+        if ((d || e) && s1 >= 0.2) reasons.Add($"site class {site.ToUpperInvariant()} with S1 = {s1.ToString(System.Globalization.CultureInfo.InvariantCulture)} (0.2 or more)");
+        if (e && ss >= 1.0) reasons.Add($"site class E with Ss = {ss.ToString(System.Globalization.CultureInfo.InvariantCulture)} (1.0 or more)");
+        if (reasons.Count == 0) return null;
+        return $"ASCE 7-16 11.4.8 requires a site-specific ground motion hazard analysis for {string.Join(" and ", reasons)}, unless one of its exceptions applies " +
+               "(for site class D, ELF with Cs by Eq. 12.8-2 up to T = 1.5 Ts and 1.5 times Eq. 12.8-3 or 12.8-4 above; Supplement 3 instead raises SM1 by 50%). " +
+               "The table's Fa and Fv are then only for Ts and the exceptions: confirm with the engineer which applies before using these loads.";
+    }
 
     /// <summary>SDS and SD1 (11.4.4): two thirds of the site-adjusted MCE values.</summary>
     public static (double Sds, double Sd1) Design(double ss, double s1, double fa, double fv) => (2.0 / 3 * fa * ss, 2.0 / 3 * fv * s1);

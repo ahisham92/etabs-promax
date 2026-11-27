@@ -347,6 +347,17 @@ Test("results: drift, torsion, modal, soft story, mass and design ratios from ET
     Equal("Story3", (string)drift["by_story"]![0]!["story"]!, "top story first");
     Equal("reported", (string)Call(mcp, "check_drift", "{}")["status"]!, "no limit, no verdict");
     Equal("pass", (string)Call(mcp, "check_drift", """{"limit":0.0025}""")["status"]!, "within a looser limit");
+    Check(Call(mcp, "check_drift", """{"limit":0.0025}""")["elastic_note"] is not null, "a verdict on elastic drifts says they are not multiplied by Cd/Ie");
+    // Seismic: the elastic drifts times Cd/Ie (ASCE 7-16 12.8.6) against the allowed story drift ratio.
+    var seismic = Call(mcp, "check_drift", """{"limit":0.02,"cd":5.5,"importance":1.25,"cases":["EQX"]}""");
+    Near(0.0024 * 5.5 / 1.25, (double)seismic["max_drift"]!, "the largest drift is amplified by Cd/Ie");
+    Near(0.0024, (double)seismic["elastic_max_drift"]!, "and the elastic one is kept");
+    Near(4.4, (double)seismic["amplification"]!["factor"]!, "Cd/Ie");
+    Equal("pass", (string)seismic["status"]!, "0.01056 is within 0.02");
+    Equal("fail", (string)Call(mcp, "check_drift", """{"limit":0.01,"cd":5.5,"importance":1.25}""")["status"]!, "0.01056 is over 0.01: a check on the elastic 0.0024 would have passed");
+    Check(Refused(mcp, "check_drift", """{"cd":0}""").Contains("Cd"), "a Cd of 0 is refused");
+    var amplifiedReport = Call(mcp, "check_report", """{"drift_limit":0.01,"drift_cd":5.5,"drift_importance":1.25}""");
+    Equal("fail", (string)amplifiedReport["checks"]!["drift"]!["status"]!, "check_report passes drift_cd and drift_importance on");
 
     e.ResultTables["Story Max Over Avg Displacements"] = new(["Story", "Output Case", "Direction", "Maximum", "Average", "Ratio"],
         [["Story3", "EQX", "X", "0.012", "0.010", "1.2"], ["Story2", "EQX", "X", "0.009", "0.0068", "1.32"], ["Story1", "EQY", "Y", "0.004", "0.004", "1.0"]]);
@@ -1009,7 +1020,7 @@ Test("add_load_pattern: a user coefficient the program's API cannot set keeps th
     Check(body.Contains("ex is MissingMethodException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException") && body.Contains("Modify Lateral Load"),
         "a program with no SetUserCoefficient (ETABS 23) still fails add_load_pattern instead of keeping the pattern and saying how to set it");
     var steps = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Field", "EtabsFieldSteps.cs"));
-    Check(steps.Contains("neither its user coefficient table nor ASCE 7-16 took its automatic load"), "the field test does not fail, by name, a seismic load neither the table nor ASCE 7-16 took (Ahmed, 2026-11-26: only a missing program or licence is not tested)");
+    Check(steps.Contains("the Seismic pattern is added, but its user coefficient table did not take its automatic load"), "the field test does not fail, by name, a seismic load the user coefficient table did not take (Ahmed, 2026-11-26: only a missing program or licence is not tested)");
 });
 Test("field test: the ETABS scratch model gets a lateral load its checks can read, also on ETABS 23", () =>
 {
@@ -1027,6 +1038,7 @@ Test("add_load_pattern: ETABS refusing ASCE 7-16 keeps the Seismic pattern and s
     var a = EtabsTools.All.First(t => t.Name == "add_load_pattern").Run(JsonDocument.Parse("""{"name":"EQX","type":"Seismic","user_coefficient":{"c":0.05,"direction":"X"}}""").RootElement, link);
     Check(a["lateral"] is null && a["note"]!.GetValue<string>().Contains("Modify Lateral Load", StringComparison.Ordinal), a.ToJsonString());
     Check(model.LoadPatterns.Names.Contains("EQX"), "the Seismic pattern is kept");
+    Check(model.AutoSeismic.Named.Length == 0, "no ASCE 7-16 load with made-up values is put in the user coefficient's place");
 });
 Test("tables for editing: every load pattern is selected for display first (SAP2000 26 hides the others)", () =>
 {

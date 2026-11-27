@@ -547,7 +547,9 @@ public static class EtabsTools
                 return result;
             }
             // ETABS 23's API has no user coefficient (its ETABSv1.dll, 0.4.15 to 0.4.17 field tests): its table
-            // "Auto Seismic - User Coefficient" takes it, and failing that ASCE 7-16 through SetASCE716_1 or its table.
+            // "Auto Seismic - User Coefficient" takes it. When the table does not either, the pattern is kept with no
+            // automatic load and the answer says how to set it: an ASCE 7-16 load with made-up values (R, Ss, S1, site
+            // class) in its place would be a seismic load nobody asked for.
             try
             {
                 result["lateral"] = EtabsLateral.UserCoefficient(e, name, dir, ecc, c, k);
@@ -555,19 +557,10 @@ public static class EtabsTools
             }
             catch (EtabsException first)
             {
-                string took;
-                try { took = EtabsLateral.Asce716(e, name, dir, ecc, 2, 1, 0, 8, 3, 5.5, 1, 1.0, 0.4, 8, 4, 1, 1); }
-                catch (EtabsException second)
-                {
-                    // Neither was taken: the pattern is kept with no automatic load (0.4.18), and the answer says why and how to set it.
-                    result["note"] = $"{e.Program.Name} added {name} as a Seismic pattern but took no automatic seismic load ({first.Message} | {second.Message}). " +
-                                     $"Set it in {e.Program.Name}: Define > Load Patterns, select {name}, Modify Lateral Load, User Coefficient (C = {c.ToString(System.Globalization.CultureInfo.InvariantCulture)}, K = {k.ToString(System.Globalization.CultureInfo.InvariantCulture)}, direction {dir}), or give its load with joint forces.";
-                    return result;
-                }
-                result["lateral"] = $"ASCE 7-16 ({e.Program.Name} did not take the user coefficient): direction {dir}, eccentricity {ecc.ToString(System.Globalization.CultureInfo.InvariantCulture)}, R 8, Omega 3, Cd 5.5, Ie 1, Ss 1.0, S1 0.4, TL 8 s, site class D, program period. " +
-                    $"For a user coefficient (C = {c.ToString(System.Globalization.CultureInfo.InvariantCulture)}, K = {k.ToString(System.Globalization.CultureInfo.InvariantCulture)}): Define > Load Patterns, select {name}, Modify Lateral Load, User Coefficient";
-                result["set_by"] = took;
+                result["note"] = $"{e.Program.Name} added {name} as a Seismic pattern but took no automatic seismic load ({first.Message}). " +
+                                 $"Set it in {e.Program.Name}: Define > Load Patterns, select {name}, Modify Lateral Load, User Coefficient (C = {c.ToString(System.Globalization.CultureInfo.InvariantCulture)}, K = {k.ToString(System.Globalization.CultureInfo.InvariantCulture)}, direction {dir}), or give its load with joint forces.";
                 result["why_not_user_coefficient"] = first.Message;
+                return result;
             }
         }
         return result;
