@@ -224,6 +224,7 @@ footer #fbFilter{display:flex;align-items:center;gap:4px;border:0;border-left:1p
 .dlg fieldset{border:1px solid var(--fgroup);border-radius:2px;margin:0 0 9px;padding:6px 10px 8px}
 .dlg legend{padding:0 4px;color:var(--group);font-weight:400}
 .dlg .g2{display:grid;grid-template-columns:auto 1fr;gap:5px 10px;align-items:center}
+.dlg .gu{display:grid;grid-template-columns:auto 1fr auto;gap:5px 8px;align-items:center}.dlg .gu .un{min-width:52px;color:var(--mute)}.dlg input.grey,.dlg select:disabled,.dlg input:disabled{background:var(--form);color:var(--mute)}
 .dlg .g3{display:grid;grid-template-columns:1fr 1fr;gap:3px 14px}
 .dlg .g4{display:grid;grid-template-columns:1fr 1fr 1fr;gap:3px 14px}
 .dlg label{white-space:nowrap}
@@ -3192,7 +3193,7 @@ function dialog(title, body, buttons, opts) {
   const dt = d.querySelector(".dt");
   dt.addEventListener("pointerdown", e => { if (e.target.closest(".x")) return; const sx = e.clientX - d.offsetLeft, sy = e.clientY - d.offsetTop; dt.setPointerCapture(e.pointerId); dt.onpointermove = m => { d.style.left = Math.max(0, m.clientX - sx) + "px"; d.style.top = Math.max(0, m.clientY - sy) + "px"; }; dt.onpointerup = () => dt.onpointermove = null; });
   d.querySelectorAll(".itabs button").forEach(b => b.onclick = () => { d.querySelectorAll(".itabs button").forEach(x => x.classList.toggle("on", x === b)); d.querySelectorAll(".ipage").forEach(x => x.classList.toggle("on", x.dataset.page === b.dataset.page)); });
-  const first = d.querySelector("select, input"); if (first && !opts.float) first.focus();
+  const first = d.querySelector("select:not(:disabled), input:not([readonly]):not(:disabled):not([type=hidden])"); if (first && !opts.float) first.focus();
   d.close = close;
   return d;
 }
@@ -4628,7 +4629,7 @@ function listForm(title, what, names, actions, onPick) {
   const d = dialog(title, `<div style="display:flex;gap:10px"><fieldset style="flex:1;margin:0"><legend>${esc(what)}</legend>
       <select id="hmList" size="14" style="width:100%;height:auto;min-width:220px">${names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join("")}</select></fieldset>
       <fieldset style="width:190px;margin:0"><legend>Click to:</legend><div style="display:flex;flex-direction:column;gap:6px">${actions.map((x, i) => `<button data-a="${i}">${esc(x[0])}</button>`).join("")}</div></fieldset></div>`,
-    [["OK"]], {width: 480});
+    [["OK"], ["Cancel"]], {width: 480});
   const list = q(d, "#hmList"); if (names.length) list.selectedIndex = 0;
   d.querySelectorAll("[data-a]").forEach(b => b.onclick = () => { const x = actions[+b.dataset.a]; x[1](list.value, d); });
   list.ondblclick = () => { if (onPick && list.value) onPick(list.value, d); };
@@ -4642,7 +4643,7 @@ async function hmMaterials() {
   const defs = await hmDefs();
   const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmMaterials(); };
   listForm("Define Materials", "Materials", defs.materials.map(m => m.name), [
-    ["Add New Material...", () => hmMaterial(null, again)],
+    ["Add New Material...", () => hmMaterialNew(again)],
     ["Add Copy of Material...", n => n && hmMaterial(defs.materials.find(m => m.name === n), again, true)],
     ["Modify/Show Material...", n => n && hmMaterial(defs.materials.find(m => m.name === n), again)],
     ["Delete Material", n => n && hmRun("delete_definition", {kind: "material", name: n}).then(j => j.ok && again())],
@@ -4658,9 +4659,79 @@ const matTimeCodes = ["CEB-FIP 90", "CEB-FIP 2010", "ACI 209R-92", "Eurocode 2-2
 const matLabels = {STRAINATFC: "Strain at f'c", STRAINATULTIMATE: "Ultimate strain capacity", STRAINATHARDENING: "Strain at onset of strain hardening", STRAINATMAXSTRESS: "Strain at maximum stress", STRAINATRUPTURE: "Strain at rupture",
   FINALSLOPE: "Final slope (multiplier on E)", ENERGYDEGFACT: "Energy degradation factor", IOTENSION: "Immediate Occupancy, tension", LSTENSION: "Life Safety, tension", CPTENSION: "Collapse Prevention, tension",
   IOCOMPRESSION: "Immediate Occupancy, compression", LSCOMPRESSION: "Life Safety, compression", CPCOMPRESSION: "Collapse Prevention, compression"};
-async function hmMaterial(m, after, copy) {
+// The units a material's numbers are shown in, and kN-m values put into the model's units (the library is kept in kN, m, C).
+const uForce = {kN: 1, N: 1000, kip: 0.2248089, lb: 224.8089, tonf: 0.1019716, kgf: 101.9716}, uLen = {m: 1, mm: 1000, cm: 100, in: 39.37008, ft: 3.28084};
+const toModel = (u, v, fp, lp) => v * Math.pow(uForce[u.f] || 1, fp) / Math.pow(uLen[u.l] || 1, lp);
+const tempUnit = u => /^(in|ft)$/.test(u.l) ? "F" : "C";
+// Add New Material Property, as ETABS, SAP2000 and SAFE show it: Region, Material Type, Standard and Grade from the
+// program's material library; the grade's values then fill Material Property Data. Region User leaves every value open.
+// Each grade: [name, grade, E MPa, weight kN/m3, U, A 1/C, strengths MPa {FC} or {FY, FU, FYE, FUE}].
+const matLib = {
+  "United States": {
+    Concrete: {"Customary": [["3000Psi", "f'c 3000 psi", 21525.8, 23.563, 0.2, 9.9e-6, {FC: 20.684}], ["4000Psi", "f'c 4000 psi", 24855.6, 23.563, 0.2, 9.9e-6, {FC: 27.579}], ["5000Psi", "f'c 5000 psi", 27788.6, 23.563, 0.2, 9.9e-6, {FC: 34.474}], ["6000Psi", "f'c 6000 psi", 30440.8, 23.563, 0.2, 9.9e-6, {FC: 41.369}]]},
+    Steel: {"ASTM A992": [["A992Fy50", "Grade 50", 199948, 76.973, 0.3, 1.17e-5, {FY: 344.74, FU: 448.16, FYE: 379.21, FUE: 492.98}]],
+      "ASTM A36": [["A36", "Grade 36", 199948, 76.973, 0.3, 1.17e-5, {FY: 248.21, FU: 399.9, FYE: 372.32, FUE: 479.88}]],
+      "ASTM A572": [["A572Gr50", "Grade 50", 199948, 76.973, 0.3, 1.17e-5, {FY: 344.74, FU: 448.16, FYE: 379.21, FUE: 492.98}]]},
+    Rebar: {"ASTM A615": [["A615Gr40", "Grade 40", 199948, 76.973, 0, 1.17e-5, {FY: 275.79, FU: 413.69, FYE: 303.37, FUE: 455.05}], ["A615Gr60", "Grade 60", 199948, 76.973, 0, 1.17e-5, {FY: 413.69, FU: 620.53, FYE: 455.05, FUE: 682.58}]],
+      "ASTM A706": [["A706Gr60", "Grade 60", 199948, 76.973, 0, 1.17e-5, {FY: 413.69, FU: 551.58, FYE: 455.05, FUE: 606.74}]]},
+    Tendon: {"ASTM A416": [["A416Gr250", "Grade 250", 196501, 76.973, 0, 1.17e-5, {FY: 1551.3, FU: 1723.7}], ["A416Gr270", "Grade 270", 196501, 76.973, 0, 1.17e-5, {FY: 1675.4, FU: 1861.6}]]},
+  },
+  "Europe": {
+    Concrete: {"EN 1992-1-1 per EN 206-1": [20, 25, 30, 35, 40, 45, 50].map(fck => { const cube = {20: 25, 25: 30, 30: 37, 35: 45, 40: 50, 45: 55, 50: 60}[fck]; return [`C${fck}/${cube}`, `C${fck}/${cube}`, Math.round(22000 * Math.pow((fck + 8) / 10, 0.3)), 24.9926, 0.2, 1e-5, {FC: fck}]; })},
+    Steel: {"EN 10025-2": [["S235", "S235", 210000, 76.982, 0.3, 1.2e-5, {FY: 235, FU: 360, FYE: 258.5, FUE: 396}], ["S275", "S275", 210000, 76.982, 0.3, 1.2e-5, {FY: 275, FU: 430, FYE: 302.5, FUE: 473}], ["S355", "S355", 210000, 76.982, 0.3, 1.2e-5, {FY: 355, FU: 490, FYE: 390.5, FUE: 539}], ["S450", "S450", 210000, 76.982, 0.3, 1.2e-5, {FY: 440, FU: 550, FYE: 484, FUE: 605}]]},
+    Rebar: {"EN 1992-1-1 per EN 10080": [["B500B", "B500B", 200000, 76.982, 0, 1e-5, {FY: 500, FU: 540, FYE: 550, FUE: 594}], ["B500C", "B500C", 200000, 76.982, 0, 1e-5, {FY: 500, FU: 575, FYE: 550, FUE: 632.5}]]},
+    Tendon: {"EN 10138": [["Y1770", "Y1770", 195000, 76.982, 0, 1e-5, {FY: 1593, FU: 1770}], ["Y1860", "Y1860", 195000, 76.982, 0, 1e-5, {FY: 1674, FU: 1860}]]},
+  },
+  "India": {
+    Concrete: {"Indian": [20, 25, 30, 35, 40, 45, 50].map(fck => [`M${fck}`, `M${fck}`, Math.round(5000 * Math.sqrt(fck)), 24.9926, 0.2, 5.5e-6, {FC: fck}])},
+    Steel: {"IS 2062": [["E250", "E250", 200000, 76.982, 0.3, 1.17e-5, {FY: 250, FU: 410, FYE: 275, FUE: 451}], ["E350", "E350", 200000, 76.982, 0.3, 1.17e-5, {FY: 350, FU: 490, FYE: 385, FUE: 539}]]},
+    Rebar: {"IS 1786": [["HYSD415", "Fe415", 200000, 76.982, 0, 1.17e-5, {FY: 415, FU: 485, FYE: 456.5, FUE: 533.5}], ["HYSD500", "Fe500", 200000, 76.982, 0, 1.17e-5, {FY: 500, FU: 545, FYE: 550, FUE: 599.5}]]},
+  },
+};
+// Region User: the type's usual values, for the user to change in Material Property Data.
+const matUser = {Concrete: ["4000Psi", 24855.6, 23.563, 0.2, 9.9e-6, {FC: 27.579}], Steel: ["Steel", 199948, 76.973, 0.3, 1.17e-5, {FY: 344.74, FU: 448.16, FYE: 379.21, FUE: 492.98}],
+  Rebar: ["Rebar", 199948, 76.973, 0, 1.17e-5, {FY: 413.69, FU: 620.53, FYE: 455.05, FUE: 682.58}], Tendon: ["Tendon", 196501, 76.973, 0, 1.17e-5, {FY: 1675.4, FU: 1861.6}],
+  Aluminum: ["Aluminum", 69637, 26.6018, 0.33, 2.36e-5, {}], ColdFormed: ["ColdFormed", 203395, 76.973, 0.3, 1.17e-5, {FY: 344.74, FU: 448.16}], Masonry: ["Masonry", 12411, 18.85, 0.2, 8.1e-6, {}], Other: ["Other", 199948, 76.973, 0.3, 1.17e-5, {}]};
+function matPreset(region, type, standard, grade, u, taken) {
+  const lib = region !== "User" && ((matLib[region] || {})[type] || {})[standard], g = lib && (lib.find(x => x[1] === grade) || lib[0]);
+  const [name, gradeName, E, W, U, A, str] = g ? g : [matUser[type][0], "", ...matUser[type].slice(1)];
+  const tf = tempUnit(u) === "F" ? 1 / 1.8 : 1, values = {E: toModel(u, E * 1000, 1, 2), WEIGHTPERVOLUME: toModel(u, W, 1, 3), A: A * tf};
+  if (!/Rebar|Tendon/.test(type)) values.U = U;
+  for (const k in str) values[k] = toModel(u, str[k] * 1000, 1, 2);
+  for (const k in values) values[k] = +values[k].toPrecision(7);
+  let n = name, i = 1; while (taken.includes(n)) n = name + "-" + i++;
+  return {name: n, type, grade: gradeName, values, region, standard};
+}
+async function hmMaterialNew(after) {
+  const defs = await hmDefs(), pd = (await hmRun("property_definitions", {}, true)).result || {material_types: ["Concrete"]}, u = hmU();
+  const types = pd.material_types || ["Concrete"], taken = (defs.materials || []).map(m => m.name);
+  const d = dialog("Add New Material Property", `<fieldset><legend>Material Property Template</legend><div class="g2">
+      <span>Region</span><select id="anR">${opts([...Object.keys(matLib), "User"], "User")}</select>
+      <span>Material Type</span><select id="anT">${opts(types, types[0])}</select>
+      <span>Standard</span><select id="anS"></select>
+      <span>Grade</span><select id="anG"></select></div></fieldset>`,
+    [["OK", d => { const p = matPreset(q(d, "#anR").value, q(d, "#anT").value, q(d, "#anS").value, q(d, "#anG").value, u, taken); setTimeout(() => hmMaterial(null, after, false, p)); }], ["Cancel"]], {width: 400});
+  const fill = (lvl) => {
+    const r = q(d, "#anR").value, lib = matLib[r] || {}, tlist = r === "User" ? types : types.filter(t => lib[t]);
+    if (lvl < 1) q(d, "#anT").innerHTML = opts(tlist, tlist.includes(q(d, "#anT").value) ? q(d, "#anT").value : tlist[0]);
+    const std = r === "User" ? ["User"] : Object.keys(lib[q(d, "#anT").value] || {});
+    if (lvl < 2) q(d, "#anS").innerHTML = opts(std, std[0]);
+    const gr = r === "User" ? ["User"] : ((lib[q(d, "#anT").value] || {})[q(d, "#anS").value] || []).map(g => g[1]);
+    q(d, "#anG").innerHTML = opts(gr, gr[0]); q(d, "#anS").disabled = q(d, "#anG").disabled = r === "User";
+  };
+  q(d, "#anR").onchange = () => fill(0); q(d, "#anT").onchange = () => fill(1); q(d, "#anS").onchange = () => fill(2); fill(0);
+  return d;
+}
+// The program's Color window: the basic colours to pick from.
+function hmColor(now, done) {
+  const c = dialog("Color", `<p class="kv" style="margin:0 0 6px">Basic colors:</p><div style="display:grid;grid-template-columns:repeat(7,28px);gap:6px">${matColors.map(k => `<button data-c="${k}" title="${k}" style="width:28px;height:22px;padding:0;background:${matColorCss(k)};border:${k === now ? "2px solid #3399ff" : "1px solid #888"}"></button>`).join("")}</div>`,
+    [["OK", c => { done(c.dataset.pick || now); }], ["Cancel"]], {width: 290});
+  c.querySelectorAll("[data-c]").forEach(b => b.onclick = () => { c.dataset.pick = b.dataset.c; c.querySelectorAll("[data-c]").forEach(x => x.style.border = x === b ? "2px solid #3399ff" : "1px solid #888"); });
+  return c;
+}
+async function hmMaterial(m, after, copy, preset) {
   const u = hmU(), pd = (await hmRun("property_definitions", {}, true)).result || {materials: [], material_types: ["Concrete"], material_values: [], material_tables: {}, material_nonlinear: {}};
-  const cur = m ? pd.materials.find(x => x.name === m.name) || {name: m.name, type: m.type, values: {}} : {name: "", type: "Concrete", grade: "", values: {WEIGHTPERVOLUME: 25, E: 32836568, U: 0.2, A: 9.9e-6, FC: 30000}};
+  const cur = m ? pd.materials.find(x => x.name === m.name) || {name: m.name, type: m.type, values: {}} : preset || {name: "", type: "Concrete", grade: "", values: {WEIGHTPERVOLUME: 25, E: 32836568, U: 0.2, A: 9.9e-6, FC: 30000}};
   const was = m && !copy ? cur.name : null;
   // The form's state: the .e2k values and texts, and the table rows; the sub-forms change it, OK sends it all.
   const st = {values: {...(cur.values || {})}, texts: {...(cur.texts || {})}, tables: JSON.parse(JSON.stringify(cur.tables || {}))};
@@ -4668,24 +4739,24 @@ async function hmMaterial(m, after, copy) {
   const setRow = (t, r) => { const clean = {}; for (const k in r) if (r[k] !== "" && r[k] != null) clean[k] = String(r[k]); st.tables[t] = Object.keys(clean).length ? [clean] : []; };
   const stress = `${u.f}/${u.l}²`, g = {m: 9.80665, mm: 9806.65, cm: 980.665, in: 386.0886, ft: 32.174}[u.l] || 9.80665;
   const gen = row("General"), basic = row("Basic Mechanical Properties"), conc = row("Concrete Data");
-  const V = st.values;
+  const V = st.values, un = t => `<span class="un">${t}</span>`, type0 = cur.type || "Concrete";
+  if (!gen.Color) setRow("General", {...gen, Color: type0 === "Concrete" ? "Gray8Dark" : /Rebar|Tendon/.test(type0) ? "Green" : "Blue"});
   const d = dialog("Material Property Data", `
-    <fieldset><legend>General Data</legend><div class="g2">
-      <span>Material Name</span><input id="mN" value="${esc(m ? (copy ? cur.name + " copy" : cur.name) : "Concrete")}">
-      <span>Material Type</span><select id="mT">${opts(pd.material_types, cur.type)}</select>
-      <span>Directional Symmetry Type</span><select id="mSym"></select>
-      <span>Material Grade</span><input id="mG" value="${esc(cur.grade || "")}">
-      <span>Material Display Color</span><span style="display:flex;gap:6px;align-items:center"><span id="mSw" style="width:46px;height:18px;border:1px solid #888;display:inline-block"></span><select id="mC">${opts(matColors, gen.Color || "")}</select></span>
-      <span>Material Notes</span><button id="mNotes">Modify/Show Notes...</button></div></fieldset>
+    <fieldset><legend>General Data</legend><div class="gu">
+      <span>Material Name</span><input id="mN" value="${esc(m ? (copy ? cur.name + " copy" : cur.name) : cur.name || "Concrete")}"><span></span>
+      <span>Material Type</span><select id="mT" disabled>${opts(pd.material_types, type0)}</select><span></span>
+      <span>Directional Symmetry Type</span><select id="mSym"></select><span></span>
+      <span>Material Display Color</span><span id="mSw" style="height:20px;border:1px solid #888;display:block"></span><button id="mCol">Change...</button>
+      <span>Material Notes</span><button id="mNotes">Modify/Show Notes...</button><span></span></div><input id="mC" type="hidden" value="${esc(row("General").Color || "")}"></fieldset>
     <fieldset><legend>Material Weight and Mass</legend>
       <div style="display:flex;gap:24px;margin-bottom:4px"><label><input type="radio" name="mDen" value="Weight" ${basic.DensityType !== "Mass" ? "checked" : ""}> Specify Weight Density</label><label><input type="radio" name="mDen" value="Mass" ${basic.DensityType === "Mass" ? "checked" : ""}> Specify Mass Density</label></div>
-      <div class="g2"><span>Weight per Unit Volume, ${u.f}/${u.l}³</span><input id="mW" type="number" step="any" value="${V.WEIGHTPERVOLUME ?? ""}">
-      <span>Mass per Unit Volume, ${u.f}-s²/${u.l}⁴</span><input id="mM" type="number" step="any"></div></fieldset>
-    <fieldset><legend>Mechanical Property Data</legend><div class="g2">
-      <span>Modulus of Elasticity, E, ${stress}</span><input id="mE" type="number" step="any" value="${V.E ?? ""}">
-      <span data-r="U">Poisson's Ratio, U</span><input data-r="U" id="mU" type="number" step="any" value="${V.U ?? ""}">
-      <span>Coefficient of Thermal Expansion, A, 1/°</span><input id="mA" type="number" step="any" value="${V.A ?? ""}">
-      <span data-r="U">Shear Modulus, G, ${stress}</span><input data-r="U" id="mGm" readonly></div></fieldset>
+      <div class="gu"><span>Weight per Unit Volume</span><input id="mW" type="number" step="any" value="${V.WEIGHTPERVOLUME ?? ""}">${un(`${u.f}/${u.l}³`)}
+      <span>Mass per Unit Volume</span><input id="mM" type="number" step="any">${un(`${u.f}-s²/${u.l}⁴`)}</div></fieldset>
+    <fieldset><legend>Mechanical Property Data</legend><div class="gu">
+      <span>Modulus of Elasticity, E</span><input id="mE" type="number" step="any" value="${V.E ?? ""}">${un(stress)}
+      <span data-r="U">Poisson's Ratio, U</span><input data-r="U" id="mU" type="number" step="any" value="${V.U ?? ""}"><span data-r="U"></span>
+      <span>Coefficient of Thermal Expansion, A</span><input id="mA" type="number" step="any" value="${V.A ?? ""}">${un("1/" + tempUnit(u))}
+      <span data-r="U">Shear Modulus, G</span><input data-r="U" id="mGm" class="grey" readonly><span data-r="U" class="un">${stress}</span></div></fieldset>
     <fieldset><legend>Design Property Data</legend><button id="mDes" style="width:100%">Modify/Show Material Property Design Data...</button></fieldset>
     <fieldset><legend>Advanced Material Property Data</legend><div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center">
       <button id="mNl">Nonlinear Material Data...</button><button id="mDamp">Material Damping Properties...</button><button id="mTime">Time Dependent Properties...</button></div></fieldset>
@@ -4701,9 +4772,9 @@ async function hmMaterial(m, after, copy) {
       if (type === "Concrete") setRow("Concrete Data", {...row("Concrete Data"), IsUserFr: q(d, "input[name=mRup]:checked").value === "Yes" ? "Yes" : "", UserFr: q(d, "input[name=mRup]:checked").value === "Yes" ? q(d, "#mFr").value : ""});
       // Only the tables this type has go: a table of another type the material once was is taken off.
       const tables = {}; for (const t in st.tables) tables[t] = matTableFits(t, type) ? st.tables[t] : [];
-      return submit(d, "define_material_data", {name: q(d, "#mN").value.trim(), was, type, grade: q(d, "#mG").value.trim() || undefined, values: V, texts: st.texts, tables}, after);
+      return submit(d, "define_material_data", {name: q(d, "#mN").value.trim(), was, type, grade: cur.grade || undefined, values: V, texts: st.texts, tables}, after);
     }, true], ["Cancel"]], {width: 520});
-  const type = () => q(d, "#mT").value;
+  const type = () => q(d, "#mT").value, name = () => q(d, "#mN").value.trim();
   const syms = () => /Rebar|Tendon/.test(type()) ? ["Uniaxial"] : ["Isotropic"];
   const show = () => {
     q(d, "#mSym").innerHTML = opts(syms(), syms()[0]);
@@ -4713,21 +4784,22 @@ async function hmMaterial(m, after, copy) {
     const e = parseFloat(q(d, "#mE").value), nu = parseFloat(q(d, "#mU").value);
     q(d, "#mGm").value = isFinite(e) && isFinite(nu) ? +(e / (2 * (1 + nu))).toPrecision(6) : "";
   };
-  const density = () => { const mass = q(d, "input[name=mDen]:checked").value === "Mass"; q(d, "#mW").readOnly = mass; q(d, "#mM").readOnly = !mass; };
+  const density = () => { const mass = q(d, "input[name=mDen]:checked").value === "Mass"; q(d, "#mW").readOnly = mass; q(d, "#mM").readOnly = !mass; q(d, "#mW").classList.toggle("grey", mass); q(d, "#mM").classList.toggle("grey", !mass); };
   const w2m = () => { const w = parseFloat(q(d, "#mW").value); q(d, "#mM").value = isFinite(w) ? +(w / g).toPrecision(6) : ""; };
   const m2w = () => { const v = parseFloat(q(d, "#mM").value); if (isFinite(v)) q(d, "#mW").value = +(v * g).toPrecision(8); };
   const swatch = () => q(d, "#mSw").style.background = matColorCss(q(d, "#mC").value);
-  q(d, "#mT").onchange = show; q(d, "#mE").oninput = show; q(d, "#mU").oninput = show; q(d, "#mC").onchange = swatch;
+  q(d, "#mE").oninput = show; q(d, "#mU").oninput = show;
+  q(d, "#mCol").onclick = () => hmColor(q(d, "#mC").value, c => { q(d, "#mC").value = c; swatch(); });
   d.querySelectorAll("input[name=mDen]").forEach(r => r.onchange = density); q(d, "#mW").oninput = w2m; q(d, "#mM").oninput = m2w;
   show(); density(); w2m(); swatch();
   q(d, "#mNotes").onclick = () => {
-    const n = dialog("Material Notes", `<textarea id="nT" rows="8" style="width:100%;box-sizing:border-box">${esc(row("General").Notes || "")}</textarea>`,
+    const n = dialog("Material Notes", `<div class="g2" style="margin-bottom:6px"><span>Material Name</span><input class="grey" readonly value="${esc(name())}"></div><textarea id="nT" rows="8" style="width:100%;box-sizing:border-box">${esc(row("General").Notes || "")}</textarea>`,
       [["OK", n => { setRow("General", {...row("General"), Notes: q(n, "#nT").value}); }], ["Cancel"]], {width: 420});
   };
-  q(d, "#mDes").onclick = () => hmMaterialDesign(type(), st, V, row, setRow, stress);
-  q(d, "#mNl").onclick = () => hmMaterialNonlinear(type(), st, V, row, setRow, pd);
-  q(d, "#mDamp").onclick = () => hmTableForm("Material Damping Properties", "Damping Parameters", [["ModalRatio", "Modal Damping Ratio"], ["VisMass", "Viscous Proportional Damping, Mass Coefficient"], ["VisStiff", "Viscous Proportional Damping, Stiffness Coefficient"]], row, setRow);
-  q(d, "#mTime").onclick = () => hmMaterialTime(st, row, setRow, pd);
+  q(d, "#mDes").onclick = () => hmMaterialDesign(type(), st, V, row, setRow, stress, name());
+  q(d, "#mNl").onclick = () => hmMaterialNonlinear(type(), st, V, row, setRow, pd, name());
+  q(d, "#mDamp").onclick = () => hmTableForm("Material Damping Properties", "Damping Parameters", [["ModalRatio", "Modal Damping Ratio", "num", "Modal Damping"], ["VisMass", "Mass Coefficient", "num", "Viscous Proportional Damping"], ["VisStiff", "Stiffness Coefficient", "num", "Viscous Proportional Damping"]], row, setRow, "", name());
+  q(d, "#mTime").onclick = () => hmMaterialTime(st, row, setRow, pd, name());
   return d;
 }
 // Which of the program's material tables a material type has.
@@ -4737,75 +4809,147 @@ function matTableFits(t, type) {
   return shared.includes(t) || (own[type] || []).some(x => t.startsWith(x));
 }
 // A form for one row of one of the program's tables: a label and a box per field.
-function hmTableForm(title, table, fields, row, setRow, extra) {
-  const r = row(table);
-  return dialog(title, `<div class="g2" id="tfV">${fields.map(([k, label, kind]) => `<span>${esc(label)}</span>` + (Array.isArray(kind) ? `<select data-k="${k}">${opts(["", ...kind], r[k] || "")}</select>` : kind === "check" ? `<input data-k="${k}" type="checkbox" ${r[k] === "Yes" ? "checked" : ""}>` : `<input data-k="${k}" ${kind === "text" ? "" : 'type="number" step="any"'} value="${esc(r[k] ?? "")}">`)).join("")}</div>${extra || ""}`,
+function hmTableForm(title, table, fields, row, setRow, extra, name) {
+  const r = row(table), box = ([k, label, kind]) => `<span>${esc(label)}</span>` + (Array.isArray(kind) ? `<select data-k="${k}">${opts(["", ...kind], r[k] || "")}</select>` : kind === "check" ? `<input data-k="${k}" type="checkbox" ${r[k] === "Yes" ? "checked" : ""}>` : `<input data-k="${k}" ${kind === "text" ? "" : 'type="number" step="any"'} value="${esc(r[k] ?? "")}">`);
+  // Fields that name a group go under it, as the programs' forms frame them; the others stand together.
+  const groups = []; for (const f of fields) { const gname = f[3] || ""; const last = groups[groups.length - 1]; if (last && last[0] === gname) last[1].push(f); else groups.push([gname, [f]]); }
+  const body = groups.map(([gname, fs]) => gname ? `<fieldset><legend>${esc(gname)}</legend><div class="g2">${fs.map(box).join("")}</div></fieldset>` : `<div class="g2">${fs.map(box).join("")}</div>`).join("");
+  return dialog(title, (name != null ? `<fieldset><legend>Material Name</legend><input class="grey" readonly style="width:100%" value="${esc(name)}"></fieldset>` : "") + `<div id="tfV">${body}</div>${extra || ""}`,
     [["OK", t => { const o = {...row(table)}; t.querySelectorAll("#tfV [data-k]").forEach(x => o[x.dataset.k] = x.type === "checkbox" ? (x.checked ? "Yes" : "") : x.value.trim()); setRow(table, o); }], ["Cancel"]], {width: 480});
 }
-function hmMaterialDesign(type, st, V, row, setRow, stress) {
-  const num = (k, label) => `<span>${esc(label)}, ${stress}</span><input data-v="${k}" type="number" step="any" value="${V[k] ?? ""}">`;
-  if (type === "Aluminum") return hmTableForm("Material Property Design Data", "Aluminum Data", [["AlumType", "Aluminum Type", ["Wrought", "Cast-Mold", "Cast-Sand"]], ["Alloy", "Alloy", "text"], ["Fcy", "Compressive Yield Strength, Fcy, " + stress], ["Fty", "Tensile Yield Strength, Fty, " + stress], ["Ftu", "Tensile Ultimate Strength, Ftu, " + stress], ["Fsu", "Shear Ultimate Strength, Fsu, " + stress]], row, setRow);
-  if (type === "Masonry") return hmTableForm("Material Property Design Data", "Masonry Data", [["Fm", "Specified Compressive Strength, f'm, " + stress]], row, setRow);
-  if (type === "Other") return dialog("Material Property Design Data", `<p class="kv">A material of type Other has no design data.</p>`, [["OK"]], {width: 360});
+function hmMaterialDesign(type, st, V, row, setRow, stress, name) {
+  const head = `<fieldset><legend>Material Name and Type</legend><div class="g2"><span>Material Name</span><input class="grey" readonly value="${esc(name || "")}"><span>Material Type</span><input class="grey" readonly value="${esc(type)}"></div></fieldset>`;
+  const num = (k, label) => `<span>${esc(label)}</span><input data-v="${k}" type="number" step="any" value="${V[k] ?? ""}"><span class="un">${stress}</span>`;
+  const tab = (table, fs) => { const r = row(table); return fs.map(([k, label, kind]) => `<span>${esc(label)}</span>` + (Array.isArray(kind) ? `<select data-k="${k}">${opts(kind, r[k] || kind[0])}</select><span></span>` : kind === "text" ? `<input data-k="${k}" value="${esc(r[k] || "")}"><span></span>` : `<input data-k="${k}" type="number" step="any" value="${esc(r[k] || "")}"><span class="un">${stress}</span>`)).join(""); };
+  const own = {Aluminum: "Aluminum Data", Masonry: "Masonry Data"}[type];
+  if (type === "Other") return dialog("Material Property Design Data", head + `<p class="kv">A material of type Other has no design data.</p>`, [["OK"]], {width: 400});
+  const label = {Concrete: "Concrete", Steel: "Steel", Rebar: "Rebar", Tendon: "Tendon", Aluminum: "Aluminum", ColdFormed: "Cold Formed Steel", Masonry: "Masonry"}[type] || type;
   const body = type === "Concrete"
-    ? `<div class="g2">${num("FC", "Specified Concrete Compressive Strength, f'c")}<span>Lightweight Concrete</span><input id="dLw" type="checkbox" ${row("Concrete Data").LtWtConc === "Yes" ? "checked" : ""}>
-       <span>Shear Strength Reduction Factor</span><input id="dLf" type="number" step="any" value="${esc(row("Concrete Data").LtWtFact || "")}"></div>`
-    : `<div class="g2">${num("FY", "Minimum Yield Stress, Fy")}${num("FU", "Minimum Tensile Stress, Fu")}${/Steel|Rebar/.test(type) ? num("FYE", "Expected Yield Stress, Fye") + num("FUE", "Expected Tensile Stress, Fue") : ""}</div>`;
-  dialog("Material Property Design Data", body, [["OK", t => {
+    ? `${num("FC", "Specified Concrete Compressive Strength, f'c")}<span>Lightweight Concrete</span><input id="dLw" type="checkbox" ${row("Concrete Data").LtWtConc === "Yes" ? "checked" : ""} style="justify-self:start"><span></span>
+       <span>Shear Strength Reduction Factor</span><input id="dLf" type="number" step="any" value="${esc(row("Concrete Data").LtWtFact || "")}"><span></span>`
+    : type === "Aluminum" ? tab(own, [["AlumType", "Aluminum Type", ["Wrought", "Cast-Mold", "Cast-Sand"]], ["Alloy", "Alloy", "text"], ["Fcy", "Compressive Yield Strength, Fcy"], ["Fty", "Tensile Yield Strength, Fty"], ["Ftu", "Tensile Ultimate Strength, Ftu"], ["Fsu", "Shear Ultimate Strength, Fsu"]])
+    : type === "Masonry" ? tab(own, [["Fm", "Specified Compressive Strength, f'm"]])
+    : `${num("FY", "Minimum Yield Stress, Fy")}${num("FU", "Minimum Tensile Stress, Fu")}${/Steel|Rebar/.test(type) ? num("FYE", "Expected Yield Stress, Fye") + num("FUE", "Expected Tensile Stress, Fue") : ""}`;
+  const t = dialog("Material Property Design Data", head + `<fieldset><legend>Design Properties for ${esc(label)} Materials</legend><div class="gu">${body}</div></fieldset>`, [["OK", t => {
     t.querySelectorAll("[data-v]").forEach(x => { const v = parseFloat(x.value); if (isFinite(v)) V[x.dataset.v] = v; else delete V[x.dataset.v]; });
+    if (own) { const o = {...row(own)}; t.querySelectorAll("[data-k]").forEach(x => o[x.dataset.k] = x.value.trim()); setRow(own, o); }
     if (type === "Concrete") setRow("Concrete Data", {...row("Concrete Data"), LtWtConc: q(t, "#dLw").checked ? "Yes" : "", LtWtFact: q(t, "#dLw").checked ? q(t, "#dLf").value : ""});
-  }], ["Cancel"]], {width: 480});
+  }], ["Cancel"]], {width: 500});
+  if (type === "Concrete") { const lw = () => q(t, "#dLf").disabled = !q(t, "#dLw").checked; q(t, "#dLw").onchange = lw; lw(); }
+  return t;
 }
-function hmMaterialNonlinear(type, st, V, row, setRow, pd) {
+// Nonlinear Material Data, as ETABS lays it out: General Data, Hysteresis Type and Drucker-Prager Parameters, the
+// Stress-Strain Curve Definition Options (Parametric or User Defined, with its plot), the Parametric Strain Data and the
+// Acceptance Criteria Strains as a Tension / Compression table.
+const matNlLabels = {
+  Concrete: {STRAINATFC: "Strain at Unconfined Compressive Strength, f'c", STRAINATULTIMATE: "Ultimate Unconfined Strain Capacity", FINALSLOPE: "Final Compression Slope (Multiplier on E)", ENERGYDEGFACT: "Energy Degradation Factor"},
+  Steel: {STRAINATHARDENING: "Strain at Onset of Strain Hardening", STRAINATMAXSTRESS: "Strain at Maximum Stress", STRAINATRUPTURE: "Strain at Rupture", FINALSLOPE: "Final Slope (Multiplier on E)"},
+  Rebar: {STRAINATHARDENING: "Strain at Onset of Strain Hardening", STRAINATULTIMATE: "Ultimate Strain Capacity", FINALSLOPE: "Final Slope (Multiplier on E)"},
+  Tendon: {FINALSLOPE: "Final Slope (Multiplier on E)"}};
+// The curve a material's form describes, as (strain, stress) points, for Show Stress-Strain Plot.
+function matCurvePoints(type, V, val, user) {
+  if (user.length > 1) return user;
+  const E = V.E || 1, n = k => parseFloat(val(k));
+  if (type === "Concrete") {
+    const fc = V.FC || 0.0004 * E, e0 = n("STRAINATFC") || 0.002, eu = n("STRAINATULTIMATE") || 0.005, pts = [];
+    for (let i = 0; i <= 20; i++) { const e = e0 * i / 20, x = e / e0; pts.push([-e, -fc * (2 * x - x * x)]); }
+    pts.push([-eu, -fc * Math.max(0.2, 1 + (n("FINALSLOPE") || -0.1) * 0.5)]); return pts.reverse().concat([[0.0001, 0]]);
+  }
+  const fy = V.FY || 0.002 * E, fu = V.FU || 1.3 * fy, ey = fy / E;
+  const eh = n("STRAINATHARDENING") || 0.01, em = n("STRAINATMAXSTRESS") || n("STRAINATULTIMATE") || 0.09, er = n("STRAINATRUPTURE") || em * 1.1;
+  const half = type === "Tendon" ? [[0, 0], [0.9 * fy / E, 0.9 * fy], [0.01, fy], [0.04, fu]] : [[0, 0], [ey, fy], [eh, fy], [(eh + em) / 2, (fy + fu) / 2 + (fu - fy) * 0.25], [em, fu], [er, 0.8 * fu]];
+  return half.slice(1).map(p => [-p[0], -p[1]]).reverse().concat(half);
+}
+function hmCurvePlot(title, pts, stress) {
+  const W = 420, H = 280, c = dialog(title, `<canvas id="ssC" width="${W}" height="${H}" style="background:#fff;border:1px solid #999;display:block"></canvas><p class="kv" style="margin:4px 0 0">Strain (horizontal) against stress, ${esc(stress)} (vertical).</p>`, [["Done"]], {width: W + 40});
+  const g = q(c, "#ssC").getContext("2d"), xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+  const x0 = Math.min(0, ...xs), x1 = Math.max(0, ...xs), y0 = Math.min(0, ...ys), y1 = Math.max(0, ...ys);
+  const X = x => 30 + (x - x0) / ((x1 - x0) || 1) * (W - 50), Y = y => H - 20 - (y - y0) / ((y1 - y0) || 1) * (H - 40);
+  g.strokeStyle = "#888"; g.beginPath(); g.moveTo(X(x0), Y(0)); g.lineTo(X(x1), Y(0)); g.moveTo(X(0), Y(y0)); g.lineTo(X(0), Y(y1)); g.stroke();
+  g.strokeStyle = "#d00"; g.lineWidth = 2; g.beginPath(); pts.forEach((p, i) => i ? g.lineTo(X(p[0]), Y(p[1])) : g.moveTo(X(p[0]), Y(p[1]))); g.stroke();
+  g.fillStyle = "#333"; g.font = "11px Segoe UI, sans-serif"; g.fillText(String(+y1.toPrecision(4)), X(0) + 4, Y(y1) + 10); g.fillText(String(+y0.toPrecision(4)), X(0) + 4, Y(y0) - 2); g.fillText(String(+x1.toPrecision(3)), X(x1) - 34, Y(0) - 4); g.fillText(String(+x0.toPrecision(3)), X(x0), Y(0) - 4);
+  return c;
+}
+function hmMaterialNonlinear(type, st, V, row, setRow, pd, name) {
   const nl = pd.material_nonlinear[type] || {keys: [], defaults: {}}, keys = nl.keys.filter(k => k !== "HYSTYPE" && k !== "SSTYPE"), def = nl.defaults || {};
-  const hys = pd.material_texts.HYSTYPE, curves = matCurves[type] || ["Simple", "User"];
+  const hys = pd.material_texts.HYSTYPE, curves = (matCurves[type] || ["Simple", "User"]).filter(c => c !== "User"), labels = matNlLabels[type] || {};
   const strains = keys.filter(k => !/TENSION|COMPRESSION/.test(k)), accept = keys.filter(k => /TENSION|COMPRESSION/.test(k));
-  const box = k => `<span>${esc(matLabels[k] || k)}</span><input data-v="${k}" type="number" step="any" value="${V[k] ?? def[k] ?? ""}">`;
+  const val = k => V[k] ?? def[k] ?? "";
+  const box = k => `<span>${esc(labels[k] || matLabels[k] || k)}</span><input data-v="${k}" type="number" step="any" value="${val(k)}">`;
   const curve = (st.tables["User Stress-Strain Curves"] || []).map(r => [r.Strain, r.Stress]);
   const other = !nl.keys.length; // Aluminum, ColdFormed, Masonry, Other: their curve and hysteresis are in their own tables
   const ownTable = {Aluminum: "Aluminum Data", ColdFormed: "Coldformed Data", Masonry: "Masonry Data", Other: "Other Data"}[type];
+  const dpTable = {Concrete: "Concrete Data", Masonry: "Masonry Data", Other: "Other Data"}[type]; // the types with Drucker-Prager angles
   const hysNow = other ? row(ownTable).SSHysType || "" : st.texts.HYSTYPE || def.HYSTYPE || "";
+  const ssNow = st.texts.SSTYPE || def.SSTYPE || curves[0], userNow = ssNow === "User";
+  const acc = ["IO", "LS", "CP"], accName = {IO: "Immediate Occupancy", LS: "Life Safety", CP: "Collapse Prevention"};
   const t = dialog("Nonlinear Material Data", `
-    <fieldset><legend>Hysteresis Type and Stress-Strain Curve</legend><div class="g2"><span>Hysteresis Type</span><select id="nH">${opts(hys, hysNow)}</select>
-      ${other ? "" : `<span>Stress-Strain Curve</span><select id="nS">${opts(curves, st.texts.SSTYPE || def.SSTYPE || curves[0])}</select>`}</div></fieldset>
-    ${strains.length ? `<fieldset><legend>Stress-Strain Curve Parameters</legend><div class="g2" id="nV">${strains.map(box).join("")}</div></fieldset>` : ""}
-    ${other ? `<fieldset><legend>Drucker-Prager Parameters</legend><div class="g2"><span>Friction Angle</span><input id="nFa" type="number" step="any" value="${esc(row(ownTable).FAngle || "")}"><span>Dilatational Angle</span><input id="nDa" type="number" step="any" value="${esc(row(ownTable).DAngle || "")}"></div></fieldset>` : ""}
+    <fieldset><legend>General Data</legend><div class="g2"><span>Material Name</span><input class="grey" readonly value="${esc(name || "")}"><span>Material Type</span><input class="grey" readonly value="${esc(type)}"></div></fieldset>
+    <fieldset><legend>Hysteresis Type And Drucker-Prager Parameters</legend><div class="gu"><span>Hysteresis Type</span><select id="nH">${opts(hys, hysNow)}</select><span></span>
+      ${dpTable ? `<span>Drucker-Prager Friction Angle</span><input id="nFa" type="number" step="any" value="${esc(row(dpTable).FAngle || "0")}"><span class="un">deg</span>
+      <span>Drucker-Prager Dilatational Angle</span><input id="nDa" type="number" step="any" value="${esc(row(dpTable).DAngle || "0")}"><span class="un">deg</span>` : ""}</div></fieldset>
+    ${other ? "" : `<fieldset><legend>Stress-Strain Curve Definition Options</legend><div class="g2">
+      <label><input type="radio" name="nOpt" value="P" ${userNow ? "" : "checked"}> Parametric</label><select id="nS">${opts(curves, userNow ? curves[0] : ssNow)}</select>
+      <label><input type="radio" name="nOpt" value="U" ${userNow ? "checked" : ""}> User Defined</label><span></span></div>
+      <div style="text-align:center;margin-top:6px"><button id="nPlot">Show Stress-Strain Plot...</button></div></fieldset>`}
+    ${strains.length ? `<fieldset id="nPar"><legend>Parametric Strain Data</legend><div class="g2" id="nV">${strains.map(box).join("")}</div></fieldset>` : ""}
     <fieldset id="nPivot"><legend>Pivot Hysteresis Parameters</legend><div class="g2">${["Alpha1", "Alpha2", "Beta1", "Beta2", "Eta"].map(k => `<span>${k}</span><input data-p="${k}" type="number" step="any" value="${esc(row("Hysteresis Parameters - Pivot")[k] || "")}">`).join("")}</div></fieldset>
     <fieldset id="nDeg"><legend>Degrading Hysteresis Parameters</legend><div class="g2" style="grid-template-columns:repeat(4,auto)">${["f0", "f1", "f2", "x1", "x2", "ADWtFac"].map(k => `<span>Tension ${k}</span><input data-g="Tens${k}" type="number" step="any" value="${esc(row("Hysteresis Parameters - Degrading")["Tens" + k] || "")}"><span>Compression ${k}</span><input data-g="Comp${k}" type="number" step="any" value="${esc(row("Hysteresis Parameters - Degrading")["Comp" + k] || "")}">`).join("")}<span>Stiffness weight factor</span><input data-g="StiffWtFac" type="number" step="any" value="${esc(row("Hysteresis Parameters - Degrading").StiffWtFac || "")}"><span>Large/small weight factor</span><input data-g="LrgSmlWtFac" type="number" step="any" value="${esc(row("Hysteresis Parameters - Degrading").LrgSmlWtFac || "")}"></div></fieldset>
     <fieldset id="nBrb"><legend>BRB Hardening Parameters</legend><div class="g2" style="grid-template-columns:repeat(4,auto)">${["HardFac", "MaxPDef", "AccPDef", "ProAcc"].map(k => `<span>Tension ${k}</span><input data-b="Tens${k}" type="number" step="any" value="${esc(row("Hysteresis Parameters - BRB Hardening")["Tens" + k] || "")}"><span>Compression ${k}</span><input data-b="Comp${k}" type="number" step="any" value="${esc(row("Hysteresis Parameters - BRB Hardening")["Comp" + k] || "")}">`).join("")}</div></fieldset>
     <fieldset id="nUser"><legend>User Stress-Strain Curve (strain, stress)</legend><textarea id="nCurve" rows="6" style="width:100%;box-sizing:border-box" placeholder="-0.005, -30000&#10;0, 0&#10;0.002, 400000">${esc(curve.map(r => r.join(", ")).join("\n"))}</textarea></fieldset>
-    ${accept.length ? `<fieldset><legend>Acceptance Criteria Strains</legend><div class="g2" id="nA">${accept.map(box).join("")}</div></fieldset>` : ""}`,
+    ${accept.length ? `<fieldset><legend>Acceptance Criteria Strains</legend><div id="nA" style="display:grid;grid-template-columns:auto 1fr 1fr;gap:5px 8px;align-items:center"><span></span><b style="text-align:center">Tension</b><b style="text-align:center">Compression</b>
+      ${acc.map(a => `<span>${accName[a]}</span><input data-v="${a}TENSION" type="number" step="any" value="${val(a + "TENSION")}"><input data-v="${a}COMPRESSION" type="number" step="any" value="${val(a + "COMPRESSION")}">`).join("")}</div></fieldset>` : ""}
+    ${other ? "" : `<div style="text-align:center;margin-top:6px"><button id="nConv">Convert To User Defined</button></div>`}`,
     [["OK", t => {
       t.querySelectorAll("[data-v]").forEach(x => { const v = parseFloat(x.value); if (isFinite(v)) V[x.dataset.v] = v; else delete V[x.dataset.v]; });
-      if (other) setRow(ownTable, {...row(ownTable), SSHysType: q(t, "#nH").value, FAngle: q(t, "#nFa").value, DAngle: q(t, "#nDa").value});
-      else { st.texts.HYSTYPE = q(t, "#nH").value; st.texts.SSTYPE = q(t, "#nS").value; }
+      if (other) setRow(ownTable, {...row(ownTable), SSHysType: q(t, "#nH").value});
+      else { st.texts.HYSTYPE = q(t, "#nH").value; st.texts.SSTYPE = isUser() ? "User" : q(t, "#nS").value; }
+      if (dpTable) { const r = row(dpTable), keep = (k, v) => r[k] != null || (v !== "" && +v !== 0) ? v : ""; setRow(dpTable, {...r, FAngle: keep("FAngle", q(t, "#nFa").value), DAngle: keep("DAngle", q(t, "#nDa").value)}); }
       const h = q(t, "#nH").value, take = (sel, attr) => { const o = {}; t.querySelectorAll(sel).forEach(x => o[x.dataset[attr]] = x.value.trim()); return o; };
       setRow("Hysteresis Parameters - Pivot", h === "Pivot" ? take("[data-p]", "p") : {});
       setRow("Hysteresis Parameters - Degrading", h === "Degrading" ? take("[data-g]", "g") : {});
       setRow("Hysteresis Parameters - BRB Hardening", h === "BRB Hardening" ? take("[data-b]", "b") : {});
-      const pts = q(t, "#nCurve").value.split(/\n/).map(l => l.split(/[,;\s]+/).filter(Boolean).map(Number)).filter(p => p.length === 2 && p.every(isFinite));
-      st.tables["User Stress-Strain Curves"] = !other && q(t, "#nS").value === "User" ? pts.map((p, i) => ({Point: String(i + 1), Strain: String(p[0]), Stress: String(p[1])})) : [];
+      st.tables["User Stress-Strain Curves"] = !other && isUser() ? userPts().map((p, i) => ({Point: String(i + 1), Strain: String(p[0]), Stress: String(p[1])})) : [];
     }], ["Cancel"]], {width: 620});
-  const showH = () => { const h = q(t, "#nH").value; q(t, "#nPivot").hidden = h !== "Pivot"; q(t, "#nDeg").hidden = h !== "Degrading"; q(t, "#nBrb").hidden = h !== "BRB Hardening"; q(t, "#nUser").hidden = other || q(t, "#nS").value !== "User"; };
-  q(t, "#nH").onchange = showH; if (!other) q(t, "#nS").onchange = showH; showH();
+  const isUser = () => !other && q(t, "input[name=nOpt]:checked").value === "U";
+  const userPts = () => q(t, "#nCurve").value.split(/\n/).map(l => l.split(/[,;\s]+/).filter(Boolean).map(Number)).filter(p => p.length === 2 && p.every(isFinite));
+  const formVal = k => { const x = t.querySelector(`[data-v="${k}"]`); return x ? x.value : val(k); };
+  const showH = () => {
+    const h = q(t, "#nH").value; q(t, "#nPivot").hidden = h !== "Pivot"; q(t, "#nDeg").hidden = h !== "Degrading"; q(t, "#nBrb").hidden = h !== "BRB Hardening";
+    q(t, "#nUser").hidden = !isUser(); if (!other) q(t, "#nS").disabled = isUser(); const par = t.querySelector("#nPar"); if (par) par.hidden = isUser();
+  };
+  q(t, "#nH").onchange = showH;
+  if (!other) {
+    t.querySelectorAll("input[name=nOpt]").forEach(r => r.onchange = showH);
+    q(t, "#nPlot").onclick = () => hmCurvePlot("Material Stress-Strain Curve Plot", matCurvePoints(type, V, formVal, isUser() ? userPts() : []), `${hmU().f}/${hmU().l}²`);
+    q(t, "#nConv").onclick = () => { const pts = matCurvePoints(type, V, formVal, []); q(t, "#nCurve").value = pts.map(p => `${+p[0].toPrecision(6)}, ${+p[1].toPrecision(6)}`).join("\n"); t.querySelector("input[name=nOpt][value=U]").checked = true; showH(); };
+  }
+  showH();
   return t;
 }
-function hmMaterialTime(st, row, setRow, pd) {
+// The time dependence codes' parameters, by the names ETABS's Time Dependence Parameters form gives them.
+const matTimeLabels = {RelHumid: "Relative Humidity, %", ShrinkStart: "Shrinkage Starting Age, days", CementCoeff: "Cement Type Coefficient, s", BetaSC: "Shrinkage Coefficient, βsc", CementType: "Cement Type",
+  LtwtGrade: "Lightweight Concrete Grade", LtwtDensity: "Lightweight Concrete Density", A: "Constant, a", Beta: "Constant, β", CuringType: "Curing Type", Slump: "Concrete Slump", FineAgg: "Fine Aggregate, %", AirContent: "Air Content, %",
+  CementCont: "Cement Content", CompFactA: "Compressive Strength Factor, a", CompFactB: "Compressive Strength Factor, b", CreepCoeff: "Basic Creep Coefficient", Environment: "Environment", DryShrink: "Final Drying Basic Shrinkage Strain",
+  StrDevParam: "Strength Development Parameter, s", Correction: "Correction Term", DeltaF: "Maximum Strength Increase, Δf", AggTypeFact: "Aggregate Type Factor"};
+function hmMaterialTime(st, row, setRow, pd, name) {
   const c = row("Concrete Data"), now = c.TimeType || (st.texts.TIMEDEPCONCCODE === "CEBFIP90" ? "CEB-FIP 90" : "");
   const fieldsOf = code => (pd.material_tables["Time Dependence - " + code] || []);
+  const ct = c.CreepType || "Full Integration";
   const t = dialog("Time Dependent Properties", `
-    <div class="g2"><span>Time Dependence Type</span><select id="tT">${opts(["", ...matTimeCodes], now)}</select></div>
-    <fieldset><legend>Consider</legend><div class="g2">
-      <span>Time Dependent Elasticity, modulus factor</span><span><input id="tE" type="checkbox" ${c.TimeE === "Yes" ? "checked" : ""}> <input id="tEf" type="number" step="any" style="width:90px" value="${esc(c.EFact || "1")}"></span>
-      <span>Creep, creep factor</span><span><input id="tC" type="checkbox" ${c.TimeCreep === "Yes" ? "checked" : ""}> <input id="tCf" type="number" step="any" style="width:90px" value="${esc(c.CreepFact || "1")}"></span>
-      <span>Shrinkage, shrinkage factor</span><span><input id="tS" type="checkbox" ${c.TimeShrink === "Yes" ? "checked" : ""}> <input id="tSf" type="number" step="any" style="width:90px" value="${esc(c.ShrinkFact || "1")}"></span>
-      <span>Creep analysis</span><select id="tCt">${opts(["", "Full Integration", "Dirichlet Series"], c.CreepType || "")}</select>
-      <span>Dirichlet series terms</span><input id="tCn" type="number" step="1" value="${esc(c.CreepTerms || "")}"></div></fieldset>
-    <fieldset><legend>Code Parameters</legend><div class="g2" id="tP"></div></fieldset>`,
+    <fieldset><legend>Material Name</legend><input class="grey" readonly style="width:100%" value="${esc(name || "")}"></fieldset>
+    <fieldset><legend>Time Dependence Type</legend><div class="g2"><span>Type</span><select id="tT">${opts([["", "None"], ...matTimeCodes], now)}</select></div></fieldset>
+    <fieldset><legend>Time Dependence Parameters</legend><div class="g2" id="tP"></div></fieldset>
+    <fieldset><legend>Consider</legend><div style="display:grid;grid-template-columns:auto auto 1fr;gap:5px 8px;align-items:center"><span></span><span></span><b>Scale Factor</b>
+      <input id="tE" type="checkbox" ${c.TimeE === "Yes" ? "checked" : ""}><span>Time Dependence for Modulus of Elasticity</span><input id="tEf" type="number" step="any" value="${esc(c.EFact || "1")}">
+      <input id="tC" type="checkbox" ${c.TimeCreep === "Yes" ? "checked" : ""}><span>Creep</span><input id="tCf" type="number" step="any" value="${esc(c.CreepFact || "1")}">
+      <input id="tS" type="checkbox" ${c.TimeShrink === "Yes" ? "checked" : ""}><span>Shrinkage</span><input id="tSf" type="number" step="any" value="${esc(c.ShrinkFact || "1")}"></div></fieldset>
+    <fieldset><legend>Creep Analysis Type</legend><label><input type="radio" name="tCt" value="Full Integration" ${ct !== "Dirichlet Series" ? "checked" : ""}> Full Integration</label><br>
+      <label><input type="radio" name="tCt" value="Dirichlet Series" ${ct === "Dirichlet Series" ? "checked" : ""}> Dirichlet Series</label>&nbsp; Number of Series Terms <input id="tCn" type="number" step="1" style="width:70px" value="${esc(c.CreepTerms || "5")}"></fieldset>`,
     [["OK", t => {
       const code = q(t, "#tT").value, yes = id => q(t, id).checked ? "Yes" : "";
       setRow("Concrete Data", {...row("Concrete Data"), TimeType: code, TimeE: yes("#tE"), EFact: q(t, "#tE").checked ? q(t, "#tEf").value : "", TimeCreep: yes("#tC"), CreepFact: q(t, "#tC").checked ? q(t, "#tCf").value : "",
-        TimeShrink: yes("#tS"), ShrinkFact: q(t, "#tS").checked ? q(t, "#tSf").value : "", CreepType: q(t, "#tCt").value, CreepTerms: q(t, "#tCn").value});
+        TimeShrink: yes("#tS"), ShrinkFact: q(t, "#tS").checked ? q(t, "#tSf").value : "", CreepType: code ? q(t, "input[name=tCt]:checked").value : "", CreepTerms: code && q(t, "input[name=tCt]:checked").value === "Dirichlet Series" ? q(t, "#tCn").value : ""});
       st.texts.TIMEDEPCONCCODE = code === "CEB-FIP 90" ? "CEBFIP90" : "";
       for (const k of matTimeCodes) if (k !== "User") st.tables["Time Dependence - " + k] = [];
       for (const k of users) st.tables["Time Dependence - " + k] = [];
@@ -4817,7 +4961,8 @@ function hmMaterialTime(st, row, setRow, pd) {
   const params = () => {
     const code = q(t, "#tT").value, r = row("Time Dependence - " + code);
     q(t, "#tP").innerHTML = code === "User" ? users.map(k => { const f = fieldsOf(k); return `<span style="grid-column:1/-1">${esc(k)}: ${esc(f.join(", "))}</span><textarea data-u="${esc(k)}" rows="3" style="grid-column:1/-1;width:100%;box-sizing:border-box">${esc((st.tables["Time Dependence - " + k] || []).map(x => f.map(n => x[n] ?? "").join(", ")).join("\n"))}</textarea>`; }).join("")
-      : code ? fieldsOf(code).map(k => `<span>${esc(k)}</span><input data-k="${k}" value="${esc(r[k] || "")}">`).join("") : `<span class="kv">No time dependence.</span>`;
+      : code ? fieldsOf(code).map(k => `<span>${esc(matTimeLabels[k] || k)}</span><input data-k="${k}" value="${esc(r[k] || "")}">`).join("") : `<span class="kv">No time dependence.</span>`;
+    t.querySelectorAll("#tE,#tEf,#tC,#tCf,#tS,#tSf,input[name=tCt],#tCn").forEach(x => x.disabled = !code);
   };
   q(t, "#tT").onchange = params; params();
   return t;

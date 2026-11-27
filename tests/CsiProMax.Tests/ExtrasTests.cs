@@ -203,6 +203,18 @@ static class ExtrasTests
                 Check(html.Contains(part), "viewer.html lost " + part);
             Check(html.Contains("det.hidden = program === \"sap2000\""), "SAP2000 has no Detailing menu");
         });
+        yield return ("extras: the material forms match ETABS 23.2 field by field: Add New Material Property (Region, Material Type, Standard, Grade), Material Property Data with units on the right and a Change... colour, the design, nonlinear, damping and time dependent forms with their own headings (Ahmed 2026-11-27 07:34)", () =>
+        {
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var part in new[] { "dialog(\"Add New Material Property\"", "<span>Region</span><select id=\"anR\">", "<span>Standard</span><select id=\"anS\">", "<span>Grade</span><select id=\"anG\">", "[\"Add New Material...\", () => hmMaterialNew(again)]",
+                "<select id=\"mT\" disabled>", "<button id=\"mCol\">Change...</button>", "function hmColor(now, done)", ".dlg .gu{display:grid;grid-template-columns:auto 1fr auto", "<legend>Material Name and Type</legend>", "<legend>Design Properties for ${esc(label)} Materials</legend>",
+                "<legend>Hysteresis Type And Drucker-Prager Parameters</legend>", "<legend>Stress-Strain Curve Definition Options</legend>", "<legend>Parametric Strain Data</legend>", "<b style=\"text-align:center\">Tension</b><b style=\"text-align:center\">Compression</b>",
+                "<button id=\"nPlot\">Show Stress-Strain Plot...</button>", "<button id=\"nConv\">Convert To User Defined</button>", "<legend>Creep Analysis Type</legend>", "<legend>Time Dependence Parameters</legend>", "\"Viscous Proportional Damping\"]",
+                "[[\"OK\"], [\"Cancel\"]], {width: 480});" })
+                Check(html.Contains(part), "viewer.html lost " + part);
+            // ETABS has no Material Grade box in Material Property Data: the grade comes from Add New Material Property.
+            Check(!html.Contains("<span>Material Grade</span>"), "Material Property Data shows a Material Grade box ETABS does not have");
+        });
         yield return ("extras: the views and toolbars are drawn as ETABS draws them: grey see-through slabs with white edges, thin columns, solid grid, light-blue ground grid with flat bubbles, the axes at the origin, column squares in plan, captions as tabs, the toolbar and strip in the program's order (Ahmed 2026-11-26 22:19)", () =>
         {
             var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));

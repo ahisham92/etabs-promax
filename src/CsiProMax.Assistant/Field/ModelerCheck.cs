@@ -191,7 +191,12 @@ public static class ModelerCheck
           addNew.click(); await wait(1000);
           const top = () => { const f = document.querySelectorAll(".dlg"); return f[f.length - 1]; };
           const set = (root, sel, v) => { const e = root.querySelector(sel); if (!e) throw new Error("the form has no " + sel); if (e.type === "checkbox" || e.type === "radio") e.checked = v; else e.value = v; e.dispatchEvent(new Event("input", {bubbles: true})); e.dispatchEvent(new Event("change", {bubbles: true})); };
+          // Add New Material Property comes first, as in the programs: Region User, Material Type Concrete.
+          const pick = top();
+          if (!pick.querySelector("#anR")) return {fail: "Add New Material... did not open Add New Material Property"};
+          set(pick, "#anR", "User"); set(pick, "#anT", "Concrete"); pick.querySelector(".df button.primary").click(); await wait(1000);
           const main = top();
+          if (!main.querySelector("#mN")) return {fail: "Add New Material Property did not open Material Property Data"};
           set(main, "#mN", "CPM-CHKMAT"); set(main, "#mC", "Yellow");
           for (const [btn, fill] of [
             ["#mDes", f => { set(f, '[data-v="FC"]', "40000"); set(f, "#dLw", true); set(f, "#dLf", "0.85"); }],
