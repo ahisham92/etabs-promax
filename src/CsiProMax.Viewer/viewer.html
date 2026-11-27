@@ -2299,16 +2299,21 @@ function auxLines(p) {
     }
     for (const g of grids.X) { seg(G, [g.at, Y0 - out, z], [g.at, Y1 + bay * 0.25, z], dash); bub.push({at: [g.at, Y0 - out, z], from: [g.at, Y1, z], label: g.label, dir: "X", flat: bay * 0.09}); }
     for (const g of grids.Y) { seg(G, [X0 - out, g.at, z], [X1 + bay * 0.25, g.at, z], dash); bub.push({at: [X0 - out, g.at, z], from: [X1, g.at, z], label: g.label, dir: "Y", flat: bay * 0.09}); }
-    // In an ETABS model each grid line stands as a plane from the base to the top story, only its border drawn, as
-    // ETABS's 3-D view shows it: an edge up at both ends of the line (flush with the outer grids) and an edge across at
-    // the top story. The top edges together cap the grid at the top level; the stories between have no lines, and the
-    // bottom edge is the line on the ground above. An end shared by two planes (a corner) rises once. SAP2000 and SAFE
-    // draw their grids their own way, so their models keep the grid on the ground only.
+    // In an ETABS model the grid stands as a cube lattice, as ETABS's 3-D view shows it: every grid line is drawn again
+    // at every story above the base, across the outer grids only (flush, no bubble and no run-out past them), and an
+    // edge rises at both ends of each line from the base to the top story. The top story's lines cap the lattice; the
+    // base keeps the line on the ground above with its bubble. An end shared by two lines (a corner) rises once.
+    // SAP2000 and SAFE draw their grids their own way, so their models keep the grid on the ground only.
     const zt = s.z1;
     if (program === "etabs" && zt - z > 1e-9) {
+      const levels = [...new Set((stories.length ? stories.map(st => st.elevation) : [zt]).filter(e => e - z > 1e-9))];
+      for (const zl of levels) {
+        for (const g of grids.X) seg(G, [g.at, Y0, zl], [g.at, Y1, zl], dash);
+        for (const g of grids.Y) seg(G, [X0, g.at, zl], [X1, g.at, zl], dash);
+      }
       const up = new Set(), rise = (x, y) => { const k = x.toFixed(6) + "," + y.toFixed(6); if (up.has(k)) return; up.add(k); seg(G, [x, y, z], [x, y, zt], dash); };
-      for (const g of grids.X) { seg(G, [g.at, Y0, zt], [g.at, Y1, zt], dash); rise(g.at, Y0); rise(g.at, Y1); }
-      for (const g of grids.Y) { seg(G, [X0, g.at, zt], [X1, g.at, zt], dash); rise(X0, g.at); rise(X1, g.at); }
+      for (const g of grids.X) { rise(g.at, Y0); rise(g.at, Y1); }
+      for (const g of grids.Y) { rise(X0, g.at); rise(X1, g.at); }
     }
   } else if (p.mode === "plan" || p.mode === "3d") {
     const z = p.mode === "plan" ? (elevationOf(p.story) ?? lo[2]) : s.z0;
