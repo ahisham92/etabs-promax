@@ -664,7 +664,7 @@ public static class ModelerCheck
             ViewerCheck.Result? seen = null;
             var ran = ctx.Step($"the Modeler's window opens on a scratch model, {label}", () =>
             {
-                seen = Run(chat, Path.Combine(ctx.Folder, "Modeler window"), browser, pictures: !chat && !ctx.NoPack);
+                seen = Run(chat, Path.Combine(ctx.Folder, "Modeler window"), browser, pictures: !chat && !ctx.NoPack && OperatingSystem.IsWindows());
                 if (seen.NotRun is not null) throw new FieldSkipException(seen.NotRun);
                 return new { checked_items = seen.Items.Count, form_pictures = seen.Pictures.Count };
             }) is not null;
