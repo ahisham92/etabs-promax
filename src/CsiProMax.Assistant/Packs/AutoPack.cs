@@ -227,7 +227,7 @@ public static class AutoPack
             auto["copy_seconds"] = Math.Round(copy.Took.TotalSeconds, 1);
         }
         built = built is null ? Make(link, zip: true) : Pack.Zipped(built);
-        lock (LockFor(pack)) PackLife.Write(pack, page, built.Zip, Pack.ViewerHtml(built.Content));
+        lock (LockFor(pack)) PackLife.Write(pack, page, built.Zip, built.Content);
         return new Written(pack, page, why, built.Frames, built.Areas, built.Tables.Count, comments.Count, watch.Elapsed, built.Notes);
     }
 

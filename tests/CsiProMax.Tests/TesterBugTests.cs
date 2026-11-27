@@ -1614,6 +1614,42 @@ static class TesterBugTests
             Check(com.Contains("ReadTableNow(key, isCase ? [one] : [], isCase ? [] : [one])", StringComparison.Ordinal), "one load case or combination a page");
         });
 
+        yield return ("SAFE tester (0.4.69): the .f2k's fields go in by the names SAFE shows, strips by SAFE 23.1's point table, a part import starts again, one API file loads once", () =>
+        {
+            // SAFE gives field keys and the names it shows; the .f2k uses the shown names.
+            string[] keys = ["Name", "Thickness", "SlabType"], shown = ["Name", "Slab Thickness", "Property Type"];
+            Check(CsiProMax.Assistant.Safe.F2kRebuild.FieldKeyOf(keys, shown, "Slab Thickness") == "Thickness", "a shown name finds its key");
+            Check(CsiProMax.Assistant.Safe.F2kRebuild.FieldKeyOf(keys, shown, "Property Type") == "SlabType", "another shown name finds its key");
+            Check(CsiProMax.Assistant.Safe.F2kRebuild.FieldKeyOf(keys, shown, "name") == "Name", "a key itself still matches");
+            Check(CsiProMax.Assistant.Safe.F2kRebuild.FieldKeyOf(["UniqueName"], ["Unique Name"], "UniqueName") == "UniqueName", "and without spaces");
+            Check(CsiProMax.Assistant.Safe.F2kRebuild.FieldKeyOf(keys, shown, "Colour") is null, "a field SAFE does not have is left out");
+
+            // SAFE 23.1's strip table names point objects: one row per segment, points placed by the program.
+            var text = File.ReadAllText(Path.Combine(SourceText.Root(), "tests/CsiProMax.Tests/samples/safe22-tester-cpm-field-test.f2k"));
+            string[] safe23 = ["Name", "NumSegs", "StartPoint", "EndPoint", "WStartLeft", "WStartRight", "WEndLeft", "WEndRight", "AutoWiden", "Layer", "GUID"];
+            var asked = new List<string>();
+            var rows = CsiProMax.Assistant.Safe.F2kRebuild.StripRows(text, safe23, (x, y, z) => { asked.Add($"{x},{y},{z}"); return "P" + asked.Count; });
+            Check(rows.Count is > 0 && rows.All(r => r.ContainsKey("StartPoint") && r.ContainsKey("EndPoint") && r["StartPoint"].StartsWith('P')), string.Join(" | ", rows.Select(r => string.Join(",", r))));
+            Check(rows[0]["Name"] == "CSA1" && rows[0]["WStartLeft"] == "2.5" && rows[0]["NumSegs"] == "1" && rows[0]["Layer"] == "A", string.Join(",", rows[0]));
+            Check(asked[0] == "0,0,3.2", "the point is asked for at the file's point's place: " + asked[0]);
+            Check(asked.Count == asked.Distinct().Count(), "a point two strips share is asked for once");
+
+            Check(!ScratchProgram.TablesBroughtAll(18, CsiProMax.Assistant.Safe.F2kRebuild.ObjectCount(text) + 1) && ScratchProgram.TablesBroughtAll(5, 5) && !ScratchProgram.TablesBroughtAll(0, 0), "a part import is built again");
+            var scratch = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));
+            Check(scratch.Contains("if (held > 0) again = StartBlank();", StringComparison.Ordinal), "on a blank model, so nothing is there twice");
+
+            // The same API file from two folders loads once ("Assembly with same name is already loaded").
+            var from = Path.Combine(AppContext.BaseDirectory, "XamlMath.Shared.dll");
+            var a = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "cpm-api-a-" + Guid.NewGuid().ToString("N")[..6])).FullName;
+            var b = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "cpm-api-b-" + Guid.NewGuid().ToString("N")[..6])).FullName;
+            File.Copy(from, Path.Combine(a, "XamlMath.Shared.dll")); File.Copy(from, Path.Combine(b, "XamlMath.Shared.dll"));
+            var first = CsiProMax.Assistant.Etabs.EtabsApi.Load(Path.Combine(a, "XamlMath.Shared.dll"));
+            var second = CsiProMax.Assistant.Etabs.EtabsApi.Load(Path.Combine(b, "XamlMath.Shared.dll"));
+            Check(first.GetName().Name == second.GetName().Name, "the second folder's copy gives the loaded one or its own, never an error");
+            foreach (var file in new[] { "Etabs/EtabsApi.cs", "Field/ScratchProgram.cs", "Tools/SapFreshProcess.cs", "Field/ReferenceData.cs" })
+                Check(!File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant", file)).Replace("try { return Assembly.LoadFrom(apiFile); }", "").Contains("LoadFrom(api", StringComparison.Ordinal), file + " loads the API through EtabsApi.Load");
+        });
+
         yield return ("Out of memory box (0.4.68): a large model's results table is read one load case or combination at a time from the start, with repeated values kept once", () =>
         {
             Check(ComEtabs.IsCaseTable(["Story", "Joint", "OutputCase", "CaseType", "UX"]), "a table with OutputCase is read by case");
