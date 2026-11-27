@@ -366,17 +366,24 @@ public static class EtabsTools
         return result;
     }
 
-    /// <summary>The stories to work on, each with the elevation below it.</summary>
-    private static List<(StoryRow Story, double Below)> Levels(JsonElement a, ICsiLink e)
+    /// <summary>
+    /// The stories to work on, each with the elevation below it. Beams and slabs (<paramref name="atBase"/>) also go on
+    /// the base level when it is named, as grade beams or a mat; with no stories named they go on every story above
+    /// it. Columns and walls run from the story below, so the base level is no place for them, and they say so.
+    /// </summary>
+    private static List<(StoryRow Story, double Below)> Levels(JsonElement a, ICsiLink e, bool atBase = false)
     {
         var stories = e.Stories();
         if (stories.Count < 2) throw new ToolInputException("The model has no stories yet.");
         var wanted = a.Texts("stories");
+        var first = atBase && wanted.Count > 0 ? 0 : 1;
         var levels = new List<(StoryRow, double)>();
-        for (var i = 1; i < stories.Count; i++)
-            if (wanted.Count == 0 || wanted.Contains(stories[i].Name, StringComparer.OrdinalIgnoreCase)) levels.Add((stories[i], stories[i - 1].Elevation));
-        var unknown = wanted.Where(w => !stories.Skip(1).Any(s => string.Equals(s.Name, w, StringComparison.OrdinalIgnoreCase))).ToList();
-        if (unknown.Count > 0) throw new ToolInputException($"No story named {string.Join(", ", unknown)}. The stories are: {string.Join(", ", stories.Skip(1).Select(s => s.Name))}.");
+        for (var i = first; i < stories.Count; i++)
+            if (wanted.Count == 0 || wanted.Contains(stories[i].Name, StringComparer.OrdinalIgnoreCase)) levels.Add((stories[i], stories[Math.Max(0, i - 1)].Elevation));
+        var unknown = wanted.Where(w => !stories.Skip(first).Any(s => string.Equals(s.Name, w, StringComparison.OrdinalIgnoreCase))).ToList();
+        if (unknown.Count == 1 && string.Equals(unknown[0], stories[0].Name, StringComparison.OrdinalIgnoreCase))
+            throw new ToolInputException($"{stories[0].Name} is the bottom level, with no story below it: columns and walls run up from the story below, so they go on {stories[1].Name} or above. Beams, slabs and joints can go on {stories[0].Name}.");
+        if (unknown.Count > 0) throw new ToolInputException($"No story named {string.Join(", ", unknown)}. The stories are: {string.Join(", ", stories.Skip(first).Select(s => s.Name))}.");
         return levels;
     }
 
@@ -414,7 +421,7 @@ public static class EtabsTools
         var section = Section(a, e.FrameSections(), "frame");
         var lines = a.Items("lines").Select(Line).ToList();
         var names = new List<string>();
-        foreach (var (story, _) in Levels(a, e))
+        foreach (var (story, _) in Levels(a, e, atBase: true))
             foreach (var l in lines) names.Add(e.AddFrame(l.X1, l.Y1, story.Elevation, l.X2, l.Y2, story.Elevation, section));
         return Added(e, names, "beams");
     }
@@ -425,7 +432,7 @@ public static class EtabsTools
         var outlines = a.Items("outlines").Select(o => o.EnumerateArray().Select(p => p.Point()).ToList()).ToList();
         if (outlines.Any(o => o.Count < 3)) throw new ToolInputException("A slab outline needs three points or more.");
         var names = new List<string>();
-        foreach (var (story, _) in Levels(a, e))
+        foreach (var (story, _) in Levels(a, e, atBase: true))
             foreach (var outline in outlines) names.Add(e.AddArea(outline.Select(p => (p.X, p.Y, story.Elevation)).ToList(), section));
         return Added(e, names, "slabs");
     }

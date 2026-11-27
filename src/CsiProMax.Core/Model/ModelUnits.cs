@@ -163,6 +163,7 @@ public static partial class ModelUnits
                 if (double.TryParse(system.Extra[i], NumberStyles.Float, Inv, out var v)) system.Extra[i] = Text(v * K(Dim.Len));
         }
         foreach (var p in m.Points) { p.X = S(p.X, Dim.Len); p.Y = S(p.Y, Dim.Len); p.Below = S(p.Below, Dim.Len); }
+        foreach (var w in m.WorkPlanes ?? []) w.Points = w.Points.Select(p => p.Select(v => S(v, Dim.Len)).ToArray()).ToList();
         foreach (var d in m.Materials.Cast<Definition>().Concat(m.FrameSections).Concat(m.ShellSections))
         {
             foreach (var line in d.Lines) Tokens(line, k => NotInDefinitions.Contains(k) ? Dim.None : KeywordDim(k), K);
