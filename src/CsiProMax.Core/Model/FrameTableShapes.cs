@@ -192,6 +192,14 @@ public static class FrameTableShapes
     public static IEnumerable<List<string>> E2kLines(FrameSection s, StructuralModel m)
     {
         if (s.Shape == "Auto Select" || AsRead(s)) { foreach (var l in s.Lines) yield return l; yield break; }
+        // A Section Designer section with its shapes (SDSECTION lines) goes as ETABS writes it: MATERIAL and SHAPE "SD Section".
+        if (s.Shape == "SD Section" && SectionDesigner.Has(m, s.Name))
+        {
+            if (s.Lines.Any(l => l.Contains("SHAPE") && l.Contains("MATERIAL"))) { foreach (var l in s.Lines) yield return l; yield break; }
+            yield return ["MATERIAL", Quote(s.Material.Length > 0 ? s.Material : m.Materials.First().Name), "SHAPE", Quote("SD Section")];
+            foreach (var l in s.Lines.Where(l => l.Count > 0 && PropertyDefs.FrameModifiers.Contains(l[0]))) yield return l;
+            yield break;
+        }
         // A section turned into a Section Designer section keeps the line it had: ETABS gets the section it was.
         if (SdSource(s) is { } was)
         {
