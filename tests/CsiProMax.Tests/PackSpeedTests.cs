@@ -25,6 +25,24 @@ static class PackSpeedTests
 
     public static IEnumerable<(string, Action)> All()
     {
+        yield return ("pack speed: the large model of the field test is written for ETABS, SAP2000 and SAFE, with thousands of frames and slabs", () =>
+        {
+            var dir = Path.Combine(Path.GetTempPath(), "cpm-large-test-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                foreach (var program in CsiProgram.All)
+                {
+                    var model = PackSpeedField.LargeModel(program, Path.Combine(dir, program.Key));
+                    Check(model.Frames().Count >= 1000 || program.Key == CsiProgram.Safe.Key && model.Frames().Count >= 400, $"{program.Name}: {model.Frames().Count} frames");
+                    Check(model.Areas().Count >= 400, $"{program.Name}: {model.Areas().Count} slabs");
+                    var file = model.WriteForRun(Path.Combine(dir, program.Key, "run", "cpm-large-pack.e2k"));
+                    Check(File.Exists(file) && new FileInfo(file).Length > 10000, $"{program.Name}: the run file {file}");
+                    var ext = program.Key == CsiProgram.Sap2000.Key ? ".s2k" : program.Key == CsiProgram.Safe.Key ? ".f2k" : ".e2k";
+                    Equal(ext, Path.GetExtension(file), $"{program.Name}: the file the program opens");
+                }
+            }
+            finally { try { Directory.Delete(dir, true); } catch (IOException) { } }
+        });
         yield return ("pack speed: a pack after a run is read from a copy of the model and its results in a hidden program, which is closed, and the copy removed", () =>
         {
             var dir = Path.Combine(Path.GetTempPath(), "cpm-copy-test-" + Guid.NewGuid().ToString("N"));
