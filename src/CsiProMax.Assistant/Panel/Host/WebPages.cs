@@ -135,7 +135,7 @@ internal static class WebPages
         var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CsiProMax", "Viewer");
         Directory.CreateDirectory(folder);
         var page = Path.Combine(folder, Path.GetFileNameWithoutExtension(file) + " viewer.html");
-        File.WriteAllText(page, CsiProMax.Assistant.Tools.Pack.ViewerHtml(content), new UTF8Encoding(false));
+        CsiProMax.Assistant.Tools.Pack.WriteViewerHtml(page, content);
         return page;
     }
 
