@@ -129,21 +129,6 @@ internal sealed class JobControl
         return true;
     }
 
-    /// <summary>Blocks up to <paramref name="ms"/> while paused; returns the state then. Not on a UI thread.</summary>
-    public JobState WaitWhilePaused(int ms)
-    {
-        var until = Environment.TickCount + ms;
-        lock (_gate)
-        {
-            while (_state == JobState.Paused)
-            {
-                var left = until - Environment.TickCount;
-                if (left <= 0 || !Monitor.Wait(_gate, left)) break;
-            }
-            return _state;
-        }
-    }
-
     /// <summary>Waits (without a thread) while paused, at most <paramref name="ms"/>; returns the state then.</summary>
     public async Task<JobState> WaitWhilePausedAsync(int ms, CancellationToken ct)
     {
@@ -173,40 +158,6 @@ internal sealed class JobControl
 
     /// <summary>The field test's hook: told after an item's edit, before it is committed (a Stop here rolls the item back).</summary>
     internal static Action<string, int>? TestAfterItem;
-
-    /// <summary>
-    /// At the boundary before item <paramref name="index"/> of a batch, with no transaction open: a requested pause
-    /// takes effect and waits here. Returns the state to act on (Skipping or Stopping: do no more items).
-    /// </summary>
-    public static JobState AtBoundary(string what, int index)
-    {
-        TestBoundary?.Invoke(what, index);
-        if (Tool is not { } control) return JobState.Running;
-        if (control.EnterPause())
-        {
-            JobFeed.SetPaused(true);
-            try
-            {
-                var wait = TestWait ?? WaitAtBoundary;
-                if (wait is null) control.Apply(JobAction.Resume);
-                else wait(control, what);
-                if (control.State == JobState.Paused) control.Apply(JobAction.Resume); // the wait gave up: carry on
-            }
-            finally { JobFeed.SetPaused(false); }
-        }
-        return control.State;
-    }
-
-    /// <summary>After an item's edit, before its commit: true when Stop was pressed meanwhile (roll this item back).</summary>
-    public static bool StopNow(string what, int index)
-    {
-        TestAfterItem?.Invoke(what, index);
-        return Tool?.State == JobState.Stopping;
-    }
-
-    /// <summary>A batch item's reason when Skip or Stop ended the batch before it.</summary>
-    public static string NotDone(JobState state) =>
-        state == JobState.Skipping ? "not done: the user skipped this step (Skip step)" : "not done: the user stopped the task (Stop)";
 
     public const string RolledBack = "rolled back: the user pressed Stop while this item ran; it was undone, finished items are kept";
 

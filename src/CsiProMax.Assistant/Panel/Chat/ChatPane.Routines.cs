@@ -13,24 +13,6 @@ internal sealed partial class ChatPane
 {
     private DispatcherTimer? _routineTimer;
 
-    /// <summary>
-    /// ETABS opened a model: with routines set up, or an autopilot run left by an ETABS that crashed or was restarted, the
-    /// chat is made (unseen until opened) so they run, catch up and carry on.
-    /// </summary>
-    internal static void WakeForRoutines()
-    {
-        try
-        {
-            if (_instance is not null || !Routines.Load(ClaudeCli.Folder).Any(r => r.On) && AutopilotShare.Orphan(DateTime.UtcNow) is null) return;
-            System.Windows.Application.Current?.Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(() =>
-            {
-                try { Get(); }
-                catch (Exception) { /* the chat is made when it is opened; the routine catches up then */ }
-            }));
-        }
-        catch (Exception) { /* routines are never worth a problem while a model opens */ }
-    }
-
     private void StartRoutineClock()
     {
         if (_sample || _routineTimer is not null) return;

@@ -138,14 +138,6 @@ internal static class AutopilotShare
     /// <summary>ETABS closes the normal way: the run isn't carried on by a restart.</summary>
     public static void MarkClosed() => Change(s => s.Closed = true);
 
-    /// <summary>The owner restarts ETABS after a hang (<paramref name="why"/>): the new one carries the run on.</summary>
-    public static void MarkRestart(string why) => Change(s =>
-    {
-        s.Relaunched = true;
-        s.Why = why;
-        s.Restarts++;
-    });
-
     /// <summary>
     /// A run left behind by an ETABS that went away without closing (a crash, or a restart after a hang): a new ETABS
     /// takes it over. Null when there is none (no run, closed the normal way, its ETABS still runs, or too long ago).
@@ -155,43 +147,6 @@ internal static class AutopilotShare
         var state = Read();
         if (state is null || state.Closed || state.Owner == Me || now - state.Beat > Orphaned || IsAlive(state.Owner)) return null;
         return state;
-    }
-
-    /// <summary>
-    /// The watchdog (CsiProMax.Mcp.exe --watch-etabs): ETABS <paramref name="pid"/> has ended; true when it should be
-    /// started again (it owned a run that was on, didn't close the normal way, didn't restart itself, and hasn't been
-    /// restarted too often), and the restart is counted.
-    /// </summary>
-    public static bool ShouldRelaunch(int pid, DateTime now)
-    {
-        lock (Lock)
-        {
-            try
-            {
-                if (Read() is not { } state || state.Owner != pid || state.Closed || state.Relaunched || now - state.Beat > Fresh + Fresh
-                    || state.Restarts >= MaxRestarts) return false;
-                state.Restarts++;
-                state.Relaunched = true; // one ETABS, even if a second watcher (after an update in session) asks too
-                Write(state);
-                return true;
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
-        }
-    }
-
-    /// <summary>The watchdog asked to open ETABS again and the user said no: the run counts as closed (no ETABS takes it over).</summary>
-    public static void Decline(int pid)
-    {
-        lock (Lock)
-        {
-            try
-            {
-                if (Read() is not { } state || state.Owner != pid) return;
-                state.Closed = true;
-                Write(state);
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
-        }
     }
 
     /// <summary>The run ended: the other windows go back to asking.</summary>

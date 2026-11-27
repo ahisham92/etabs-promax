@@ -9,18 +9,13 @@ internal static class SettingsLayout
     /// <summary>A tab: its key (remembered between openings), the name in the tab list and the line at the top of its page.</summary>
     public sealed record Tab(string Key, string Name, string Intro);
 
-    public const string Approvals = "approvals", Chat = "chat", Standards = "standards", Time = "time", Issue = "issue", SignOff = "signoff", Recovery = "recovery", Storage = "storage", Runs = "runs", Updates = "updates";
+    public const string Approvals = "approvals", Chat = "chat", Standards = "standards", Runs = "runs", Updates = "updates";
 
     public static readonly Tab[] Tabs =
     [
         new(Approvals, "Approvals", $"When {Csi.Name} asks before CSI ProMax changes the model."),
         new(Chat, "Chat", "How the Chat pane looks and moves, the type, model and effort new chats start with, how many jobs run at once, and when to synchronize."),
         new(Standards, "Firm standards", "Your office's rules, followed in every conversation."),
-        new(Time, "Time tracking", "Working time and time saved, kept in each model."),
-        new(Issue, "Issue & drawings", "What the issue check lets through."),
-        new(SignOff, "Sign-off", "Your signature and the checklist used by the Pre-submission checklist button."),
-        new(Recovery, "Lifeline", "A record of your changes since the last save, to put them back if the model is lost or damaged."),
-        new(Storage, "Model size", "The size models should stay under, shown by Storage & cleanup."),
         new(Runs, "Runs", "What CSI ProMax Engine's Run does with the CSI program once the run is done."),
         new(Updates, "Updates", "Keeping CSI ProMax up to date."),
     ];
@@ -62,24 +57,6 @@ internal static class SettingsLayout
         ["PhoneUpdateMinutes"] = Chat,
         ["PhoneProjectNames"] = Chat,
         ["FirmStandards"] = Standards,
-        ["LegendSeedPath"] = Standards,
-        ["TimeTracking"] = Time,
-        ["IdleMinutes"] = Time,
-        ["TimeRates"] = Time,
-        ["AllowIssueWithOpenItems"] = Issue,
-        ["SignatureName"] = SignOff,
-        ["SignatureRole"] = SignOff,
-        ["SignatureImage"] = SignOff,
-        ["ChecklistPath"] = SignOff,
-        ["ChecklistHelper"] = SignOff,
-        ["ChangeFile"] = Recovery,
-        // Also in the Lifeline window, which everyone has (with TritoETABS alone too).
-        ["LifelineWarnings"] = Recovery,
-        ["LifelineAutoSave"] = Recovery,
-        ["LifelineAutoSaveMinutes"] = Recovery,
-        ["LifelineAutoSync"] = Recovery,
-        ["LifelineAutoSyncMinutes"] = Recovery,
-        ["ModelSizeLimitMb"] = Storage,
         ["KeepProgramOpenAfterRun"] = Runs,
         ["AutoUpdate"] = Updates,
     };

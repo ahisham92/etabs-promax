@@ -212,17 +212,6 @@ public static class Jobs
         return !j.Task.IsCompleted;
     }
 
-    /// <summary>
-    /// Drops every job still waiting for ETABS, with <paramref name="why"/> as its answer. Called when this core stops
-    /// (an update switch): its dispatcher stops with it, so a queued job would otherwise wait for ever (bug 87).
-    /// </summary>
-    internal static int DropQueued(string why)
-    {
-        List<Job> all;
-        lock (Gate) all = Recent.ToList();
-        return Drop(all, why);
-    }
-
     /// <summary>Drops those of <paramref name="jobs"/> that have not started; the number dropped.</summary>
     internal static int Drop(IEnumerable<Job> jobs, string why)
     {

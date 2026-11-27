@@ -58,27 +58,6 @@ public sealed class AgentSettings
     /// </summary>
     public bool KeepProgramOpenAfterRun { get; set; } = true;
 
-    /// <summary>
-    /// Optional firm template or seed (.rvt/.rte) holding a legend. create_legend copies a legend from it when the model
-    /// has none (ETABS's API can't create a legend from nothing). Empty: not set.
-    /// </summary>
-    public string LegendSeedPath { get; set; } = "";
-
-    /// <summary>Count working time (AI and by hand) and time saved, and keep them in each model (ETABS/TimeLog).</summary>
-    public bool TimeTracking { get; set; } = true;
-
-    /// <summary>Minutes without activity after which working time stops counting.</summary>
-    public double IdleMinutes { get; set; } = 5;
-
-    /// <summary>By-hand rates the user set (minutes per run and per item); tools not listed use the built-in estimates.</summary>
-    public List<Tools.TimeRate>? TimeRates { get; set; }
-
-    /// <summary>
-    /// Let an issue go ahead while the issue check still has open items (each issue that does says so, with the reason,
-    /// in its issue record). Off: every item must be fixed or accepted first.
-    /// </summary>
-    public bool AllowIssueWithOpenItems { get; set; }
-
     /// <summary>How much the chat pane moves: full (the default), reduced or off (Chat.MotionLevels). Empty in older files: full.</summary>
     public string? ChatAnimations { get; set; }
 
@@ -175,55 +154,6 @@ public sealed class AgentSettings
     /// its own chat there, and the name CSI ProMax guesses from the model's file can be changed or two joined (2 Nov 2026).
     /// </summary>
     public string PhoneProjectNames { get; set; } = "";
-
-    /// <summary>Your name as it goes on a signed checklist (next to Chat).</summary>
-    public string SignatureName { get; set; } = "";
-
-    /// <summary>The sign-off role you sign as, e.g. "Trade BIM coordinator"; the checklist puts your signature there.</summary>
-    public string SignatureRole { get; set; } = "";
-
-    /// <summary>Your signature picture (PNG or JPEG), kept as a copy in %APPDATA%\CsiProMax. Empty: none.</summary>
-    public string SignatureImage { get; set; } = "";
-
-    /// <summary>The office's pre-submission checklist (.xlsx) the checklist window reads. Empty: asked the first time.</summary>
-    public string ChecklistPath { get; set; } = "";
-
-    /// <summary>
-    /// Who helps with a checklist check the model test can't do (Ask the helper in the checklist's details): "promax"
-    /// sends it to the CSI ProMax chat, "sketchpro" copies the question to paste into SketchPro's chat, "none" hides
-    /// the button.
-    /// </summary>
-    public string ChecklistHelper { get; set; } = "promax";
-
-    /// <summary>
-    /// Keep a change file for each model (ETABS/ChangeFile): what changed since the last save, cleared at every save, to
-    /// play onto the model again if it is lost or damaged (Recover > Replay a change file).
-    /// </summary>
-    public bool ChangeFile { get; set; } = true;
-
-    /// <summary>
-    /// Lifeline's hints (ETABS/LifelineWatch): the server of a central model stopped answering, the PC is short of
-    /// memory or disk, ETABS is close to its window-handle limit, or a lot is unsaved. Hints only; on by default.
-    /// </summary>
-    public bool LifelineWarnings { get; set; } = true;
-
-    /// <summary>Lifeline saves the local copy by itself (never a synchronize) every <see cref="LifelineAutoSaveMinutes"/> minutes when it has changes. Off by default.</summary>
-    public bool LifelineAutoSave { get; set; }
-
-    /// <summary>How often the local copy is saved by itself: 20 minutes by default, 5 to 240.</summary>
-    public int LifelineAutoSaveMinutes { get; set; } = 20;
-
-    /// <summary>Lifeline synchronizes a local copy with central by itself every <see cref="LifelineAutoSyncMinutes"/> minutes when it has changes. Off by default.</summary>
-    public bool LifelineAutoSync { get; set; }
-
-    /// <summary>How often a local copy is synchronized by itself: 60 minutes by default, 10 to 480.</summary>
-    public int LifelineAutoSyncMinutes { get; set; } = 60;
-
-    /// <summary>
-    /// The size a model should stay under, in MB (Storage & cleanup shows the model against it; a model can still pass it):
-    /// 200 by default, 10 to 100000 (Tools.ModelStorageMath).
-    /// </summary>
-    public int ModelSizeLimitMb { get; set; } = 200;
 
     public static string FilePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "CsiProMax", "settings.json");

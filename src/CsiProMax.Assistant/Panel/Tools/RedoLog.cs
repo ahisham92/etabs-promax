@@ -26,9 +26,8 @@ internal static class RedoLog
     /// <summary>Calls that are not model work to redo (bookkeeping, sync, the redo itself).</summary>
     public static readonly HashSet<string> NotRedone = new(StringComparer.Ordinal)
     {
-        "redo_steps", "auto_sync", "ask_user", "chat_questions", "save_model", "reload_links", "relinquish_mine", "borrow_elements", "make_worksets_editable",
-        "memory_note", "chat_jobs", "work_progress", "berth_status", "berth_costing", "report_bug", "save_recipe", "save_as_tool",
-        "delete_learned_tool", "model_snapshot", "coordination_progress", "use_etabs_model", "open_etabs_model", "cancel_job", "wait_for_job",
+        "ask_user", "chat_questions", "save_model", "memory_note", "chat_jobs", "report_bug", "save_recipe", "save_as_tool",
+        "delete_learned_tool", "model_snapshot", "use_etabs_model", "open_etabs_model", "cancel_job", "wait_for_job",
     };
 
     public static string Folder => Path.Combine(
@@ -158,13 +157,4 @@ internal static class RedoLog
     public static List<long> Ids(string text) =>
         Number.Matches(text).Cast<Match>().Select(m => long.TryParse(m.Value, out var v) ? v : -1).Where(v => v > 0).Distinct().ToList();
 
-    /// <summary>
-    /// Writes each old id in <paramref name="map"/> as its new id: element ids the lost work made, which the redo made
-    /// again under new ids, so a later step (code included, "new ElementId(5475707L)") acts on the new elements.
-    /// </summary>
-    public static string Remap(string arguments, IReadOnlyDictionary<long, long> map)
-    {
-        if (map.Count == 0) return arguments;
-        return Number.Replace(arguments, m => long.TryParse(m.Value, out var v) && map.TryGetValue(v, out var to) ? to.ToString() : m.Value);
-    }
 }

@@ -27,12 +27,6 @@ internal static partial class UpdateNotice
         };
     }
 
-    /// <summary>
-    /// Whether a notice is worth a toast at all. An update that applied in place with nothing for the user to do is
-    /// silent: the Update button already says "Updated to", and What's new is there for anyone who wants it.
-    /// </summary>
-    public static bool WorthShowing(Kind kind, string? note) => kind != Kind.Updated || !string.IsNullOrWhiteSpace(note);
-
     /// <summary>Whether the toast for <paramref name="version"/> shows now, later (something is running) or never (already shown).</summary>
     public static Decision Decide(string version, IEnumerable<string> shown, bool busy) =>
         shown.Contains(Plain(version), StringComparer.OrdinalIgnoreCase) ? Decision.Skip : busy ? Decision.Wait : Decision.Show;

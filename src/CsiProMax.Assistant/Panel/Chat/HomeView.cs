@@ -437,11 +437,11 @@ internal sealed class HomeView : StackPanel
 
     // ---- Blanks filled from the model ------------------------------------------------------------------------------
 
-    /// <summary>How long the home screen waits for ETABS to name the model's levels, grids and sheet sets.</summary>
+    /// <summary>How long the home screen waits for ETABS to name the model's levels and grids.</summary>
     private const int ChoicesWaitMs = 2000;
 
     /// <summary>
-    /// Puts a prompt in the message box, its blanks ({level}, {grid}, {sheet_set}, {berth}) first picked from the open
+    /// Puts a prompt in the message box, its blanks ({level}, {grid}) first picked from the open
     /// model's own names with one tap each. A blank the model has no names for (or when ETABS is busy) is left as
     /// "[level]" for the user to type over.
     /// </summary>

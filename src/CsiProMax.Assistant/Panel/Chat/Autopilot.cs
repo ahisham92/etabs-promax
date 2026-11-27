@@ -392,7 +392,6 @@ internal static class Autopilot
     /// <summary>What a job is told when it starts during a run (added to its instructions).</summary>
     public const string JobRules = """
 
-
         - Autopilot: nobody is at the computer. Never end with a question and never wait for an answer. Work as a senior
           engineer: where you would ask, make the best call for the goal (not merely the safest), change or delete what
           the task needs, and say in your report what you decided and why. A backup of the model was saved first.
@@ -425,9 +424,6 @@ internal static class Autopilot
         _ => 2, // OK/Cancel, Yes/No/Cancel, Retry/Cancel: cancel
     };
 
-    /// <summary>What the safe answer reads as, for the log.</summary>
-    public static string ResultName(int result) => result switch { 1 => "OK", 3 => "Abort", 7 => "No", _ => "Cancel" };
-
     // ---- Updates of CSI ProMax ----------------------------------------------------------------------------------------
 
     /// <summary>How long new jobs wait for an update to go in before the run carries on without it (and tries again later).</summary>
@@ -448,14 +444,6 @@ internal static class Autopilot
 
     /// <summary>ETABS busy (the processor, memory or files moving) but not responding this long: restarted too.</summary>
     public static readonly TimeSpan RestartWhenBusy = TimeSpan.FromMinutes(45);
-
-    /// <summary>
-    /// Whether an autopilot restarts a hung ETABS by itself: ETABS not responding for <see cref="RestartWhenStuck"/> while
-    /// doing nothing at all, or for <see cref="RestartWhenBusy"/> while working; long work ETABS is known to do
-    /// (<paramref name="longWork"/>: synchronizing, opening, saving, loading links) gets the longer time either way.
-    /// </summary>
-    public static bool RestartAfterHang(bool unattended, bool notResponding, TimeSpan lasted, bool idle, bool longWork) =>
-        unattended && notResponding && lasted >= (idle && !longWork ? RestartWhenStuck : RestartWhenBusy);
 
     /// <summary>What the coordinator is told when the run carries on after ETABS was started again.</summary>
     public static string Recovered(AutopilotRun run, string why) =>

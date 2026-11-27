@@ -26,7 +26,6 @@
   <ItemGroup>
     <Using Include="CsiProMax.ETABS" />
     <FrameworkReference Include="Microsoft.WindowsDesktop.App" />
-    <PackageReference Include="PdfPig" Version="0.1.9" />
     <PackageReference Include="QRCoder" Version="1.6.0" />
     <!-- ACadSharp (MIT): reads and writes AutoCAD DWG and DXF files, for drawings attached to the chat and layouts given back. -->
     <PackageReference Include="ACadSharp" Version="1.0.6" />
@@ -37,7 +36,6 @@
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" />
     <EmbeddedResource Include="../../assets/logo/csi-promax-64.png" LogicalName="CsiProMax.logo-64.png" />
     <EmbeddedResource Include="../../assets/logo/csi-promax.ico" LogicalName="CsiProMax.csi-promax.ico" />
-    <EmbeddedResource Include="../../docs/guides/*.md" LogicalName="CsiProMax.guides.%(Filename).md" />
     <EmbeddedResource Include="../CsiProMax.Viewer/viewer.html" LogicalName="CsiProMax.viewer.html" />
     <EmbeddedResource Include="Panel/Chat/chat-prompts.json" LogicalName="CsiProMax.chat-prompts.json" />
     <!-- Keeps CSI ProMax in the Tools menus when CSI ProMax is not open (MenuKeeper): the same file as the repository's. -->
@@ -80,6 +78,17 @@
     <ItemGroup>
       <EmbeddedResource Include="$(IntermediateOutputPath)source-prints.txt" LogicalName="CsiProMax.source-prints.txt" />
     </ItemGroup>
+  </Target>
+  <!-- What the packages bring and CSI ProMax never uses stays out of the build and the package: their API help files
+       (*.xml) and WebView2's loader for 32-bit and ARM Windows (the CSI programs are 64-bit only; the win-x64 loader
+       stays). -->
+  <PropertyGroup>
+    <AllowedReferenceRelatedFileExtensions>.pdb</AllowedReferenceRelatedFileExtensions>
+    <PublishReferencesDocumentationFiles>false</PublishReferencesDocumentationFiles>
+  </PropertyGroup>
+  <Target Name="CpmDropUnusedLoaders" AfterTargets="CopyFilesToOutputDirectory;Publish">
+    <RemoveDir Directories="$(OutDir)runtimes/win-x86;$(OutDir)runtimes/win-arm64" />
+    <RemoveDir Condition="'$(PublishDir)' != ''" Directories="$(PublishDir)runtimes/win-x86;$(PublishDir)runtimes/win-arm64" />
   </Target>
   <Target Name="CpmCheckCdtSdk" BeforeTargets="PrepareForBuild">
     <Error Condition="!Exists('$(CdtSdkLib)CDT.Wpf.dll')" Text="The CDT SDK DLLs are missing from lib\cdt-sdk\net8.0-windows." />

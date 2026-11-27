@@ -41,12 +41,6 @@ internal sealed class AutoSyncRule
     /// <summary>The number Settings stored, kept in range (0 or unreadable: the default).</summary>
     public static int Clamp(int limit) => limit <= 0 ? DefaultLimit : Math.Max(MinLimit, Math.Min(MaxLimit, limit));
 
-    /// <summary>Settings were read: on or off, and after how many changes.</summary>
-    public void Configure(bool on, int limit)
-    {
-        lock (_gate) { _on = on; _limit = Clamp(limit); }
-    }
-
     public bool On { get { lock (_gate) return _on; } }
     public int Limit { get { lock (_gate) return _limit; } }
 

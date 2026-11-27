@@ -25,13 +25,6 @@ internal sealed record ConnectorCaller(bool FromChat, string? Job, int? Preferre
 /// </summary>
 internal sealed class ETABSTargets
 {
-    /// <summary>
-    /// A model with no file behind it: a new one (no path) or a detached copy (ETABS gives its bare name, "X_detached.rvt").
-    /// A cloud model's path is not a disk path but it is saved.
-    /// </summary>
-    internal static bool NeverSaved(string? pathName) =>
-        string.IsNullOrWhiteSpace(pathName) || !(pathName!.Contains("://") || pathName.StartsWith(@"\\", StringComparison.Ordinal)
-                                                || (pathName.Length > 2 && char.IsLetter(pathName[0]) && pathName[1] == ':' && pathName[2] is '\\' or '/'));
 
     private readonly ConnectorCaller _caller;
 
@@ -115,9 +108,6 @@ internal sealed class ETABSTargets
         try { existing = ExistingFor?.Invoke(what) ?? ""; } catch (Exception) { existing = ""; }
         return "Not run yet. CSI ProMax asks each job once to use what already exists before writing code." +
                (existing.Length > 0 ? existing : "\n\nLook first: list_learned_tools for a ready-made tool, and worked_code (action=find) with what this code does.") +
-               (name == "run_etabs_query_code" ? "\n\nFor a look at the model there are tools with no code: views_showing (which views and sheets show " +
-                   "elements), element_readback (an element's type, levels, joins, sketch, shape points, parameters) and find_in_views " +
-                   "(text, tags, clouds, dimensions, spot levels, bar lines, hatches and viewports in views or sheets)." : "") +
                "\n\nIf one of these does this step, use it (adapt kept code rather than rewriting it). If none fits, send this same call " +
                "again and it will run.";
     }
@@ -196,7 +186,7 @@ internal sealed class ETABSTargets
         // Job questions don't touch a model, so they skip switching models (which would wait behind a busy ETABS). Every
         // other call switches first; a busy ETABS answers that at once with what it is running, so nothing runs on the wrong model.
         // Notes, questions, jobs and auto sync need no model either (bug 125: a note waited minutes behind a busy ETABS).
-        if (chosen!.Model is not null && name is not ("wait_for_job" or "cancel_job" or "memory_note" or "chat_questions" or "chat_jobs" or "auto_sync"))
+        if (chosen!.Model is not null && name is not ("wait_for_job" or "cancel_job" or "memory_note" or "chat_questions" or "chat_jobs"))
         {
             var activate = await SendAsync(target.Pipe, JsonSerializer.Serialize(new { method = "activate_document", title = chosen.Model }), 5000, ct,
                 readTimeoutMs: 15000).ConfigureAwait(false);

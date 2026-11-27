@@ -52,9 +52,6 @@ public sealed class ToolArgs(IReadOnlyDictionary<string, JsonElement> raw)
 
     public bool OptBool(string key, bool fallback = false) => Has(key) ? raw[key].GetBoolean() : fallback;
 
-    public List<long> LongList(string key) =>
-        Has(key) ? raw[key].EnumerateArray().Select(e => e.GetInt64()).ToList() : [];
-
     public List<string> StringList(string key) =>
         Has(key) ? raw[key].EnumerateArray().Select(e => e.GetString() ?? "").ToList() : [];
 

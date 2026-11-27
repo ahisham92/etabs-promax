@@ -12,8 +12,7 @@ using CsiProMax.Settings;
 namespace CsiProMax.UI;
 
 /// <summary>
-/// Settings dialog opened from the ribbon, in tabs (<see cref="SettingsLayout"/>): Approvals, Chat, Firm standards, Time
-/// tracking, Issue &amp; drawings, Sign-off and Updates. The window fits the monitor ETABS is on, each tab's page scrolls on its own
+/// Settings dialog, in tabs (<see cref="SettingsLayout"/>): Approvals, Chat, Firm standards, Runs and Updates. The window fits the monitor ETABS is on, each tab's page scrolls on its own
 /// and the Save / Cancel bar stays pinned at the bottom. The tab opened last is opened again.
 /// </summary>
 public sealed class SettingsWindow : Window
@@ -27,30 +26,13 @@ public sealed class SettingsWindow : Window
     private readonly StackPanel _noAskList = new();
     private readonly CheckBox _autoUpdate = Check("Update CSI ProMax automatically");
     private readonly CheckBox _keepOpen = Check("Keep the CSI program open with the analysed model after a Run (it holds its licence until you close it)");
-    private readonly CheckBox _openItems = Check("Allow issue with open items (each such issue says so, with the reason, in its issue record)");
     private readonly TextBox _standards = new()
     {
         AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Height = 200, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
     };
 
-    private readonly TextBox _legendSeed = new();
-    private readonly TextBlock _seedHint = Brand.Text("", Brand.K.WarningText, size: 11);
     private readonly TextBlock _error = Brand.Text("", Brand.K.DangerText);
-    private readonly CheckBox _timeOn = Check("Count working time and time saved in each model");
-    private readonly TextBox _idle = new() { Width = 56, MinHeight = 26, Margin = new Thickness(6, 0, 6, 0) };
-    private readonly CheckBox _changeFile = Check("Keep a change file for each model (cleared at every save)");
-    private readonly CheckBox _lifeWarn = Check("Warn me when the server can't be reached, a lot is unsaved, or the PC is close to a crash");
-    private readonly CheckBox _lifeSave = Check("Save my local copy by itself every");
-    private readonly TextBox _lifeMinutes = new() { Width = 48, MinHeight = 26, Margin = new Thickness(6, 0, 6, 0) };
-    private readonly CheckBox _lifeSync = Check("Synchronize with central by itself every");
-    private readonly TextBox _lifeSyncMinutes = new() { Width = 48, MinHeight = 26, Margin = new Thickness(6, 0, 6, 0) };
-    private readonly TextBox _sigName = new() { MinHeight = 26 };
     private readonly TextBox _phoneNames = new() { MinHeight = 26 };
-    private readonly ComboBox _sigRole = new() { IsEditable = true, MinHeight = 26 };
-    private readonly System.Windows.Controls.Image _sigPreview = new() { MaxHeight = 70, MaxWidth = 260, Stretch = System.Windows.Media.Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Left };
-    private readonly TextBlock _sigHint = Brand.Text("", Brand.K.Muted, size: 11);
-    private readonly TextBox _checklistPath = new();
-    private readonly ComboBox _helper = new() { MinHeight = 26 };
     private readonly TextBox _crewYou = new() { MinHeight = 26 }, _crewCoordinator = new() { MinHeight = 26 }, _crewWorkers = new() { MinHeight = 26 }, _crewApplier = new() { MinHeight = 26 };
     private readonly ComboBox _jobLimit = new() { MinHeight = 26, MinWidth = 56, Margin = new Thickness(6, 0, 6, 0) };
     private readonly ComboBox _jobBudget = new() { MinHeight = 26, MinWidth = 64, Margin = new Thickness(6, 0, 6, 0) };
@@ -65,11 +47,8 @@ public sealed class SettingsWindow : Window
     private static readonly int[] FiveHourChoices = [50, 60, 70, 75, 80, 85, 90, 95, 100];
     private static readonly int[] WeekChoices = [0, 5, 10, 15, 20, 25, 30, 40, 50, 75, 100];
     private readonly TextBox _syncChanges = new() { Width = 64, MinHeight = 26, Margin = new Thickness(6, 0, 6, 0) };
-    private readonly TextBox _sizeLimit = new() { Width = 72, MinHeight = 26, Margin = new Thickness(6, 0, 6, 0) };
-    private string _sigImage = "";
     private readonly TabControl _tabs = new();
     private readonly List<(string Setting, FrameworkElement Control)> _placed = [];
-    private List<Tools.TimeRate>? _rates;
 
     /// <param name="openTab">The tab to open on (a SettingsLayout key); null: the one used last.</param>
     public SettingsWindow(string? openTab = null)
@@ -84,23 +63,8 @@ public sealed class SettingsWindow : Window
         _noAsk = [.. _settings.NoAskTools ?? []];
         _autoUpdate.IsChecked = _settings.AutoUpdate;
         _keepOpen.IsChecked = _settings.KeepProgramOpenAfterRun;
-        _openItems.IsChecked = _settings.AllowIssueWithOpenItems;
         _standards.Text = _settings.FirmStandards;
-        _legendSeed.Text = _settings.LegendSeedPath ?? "";
-        _timeOn.IsChecked = _settings.TimeTracking;
-        _idle.Text = _settings.IdleMinutes.ToString("0.#", System.Globalization.CultureInfo.CurrentCulture);
-        _rates = _settings.TimeRates;
-        _changeFile.IsChecked = _settings.ChangeFile;
-        _lifeWarn.IsChecked = _settings.LifelineWarnings;
-        _lifeSave.IsChecked = _settings.LifelineAutoSave;
-        _lifeSync.IsChecked = _settings.LifelineAutoSync;
-        _lifeSyncMinutes.Text = ETABS.LifelineWatchMath.ClampSyncMinutes(_settings.LifelineAutoSyncMinutes).ToString(System.Globalization.CultureInfo.CurrentCulture);
-        _lifeMinutes.Text = ETABS.LifelineWatchMath.ClampMinutes(_settings.LifelineAutoSaveMinutes).ToString(System.Globalization.CultureInfo.CurrentCulture);
-        _sigName.Text = _settings.SignatureName ?? "";
         _phoneNames.Text = _settings.PhoneProjectNames ?? "";
-        _sigRole.Text = _settings.SignatureRole ?? "";
-        _sigImage = _settings.SignatureImage ?? "";
-        _checklistPath.Text = _settings.ChecklistPath ?? "";
         for (var n = Chat.JobBoard.MinLimit; n <= Chat.JobBoard.MaxLimit; n++) _jobLimit.Items.Add(new ComboBoxItem { Content = n.ToString(System.Globalization.CultureInfo.CurrentCulture), Tag = n });
         _jobLimit.SelectedIndex = Chat.JobBoard.ClampLimit(_settings.ChatJobLimit) - Chat.JobBoard.MinLimit;
         foreach (var p in Chat.JobBudget.Choices)
@@ -123,7 +87,6 @@ public sealed class SettingsWindow : Window
         _apAsk.SelectedIndex = Math.Max(0, Array.IndexOf(Chat.AskRules.WaitChoices, _settings.AutopilotAskWaitMinutes) is var i and >= 0 ? i
             : Array.IndexOf(Chat.AskRules.WaitChoices, Chat.AskRules.DefaultWaitMinutes));
         _syncChanges.Text = ETABS.AutoSyncRule.Clamp(_settings.AutoSyncChanges).ToString(System.Globalization.CultureInfo.CurrentCulture);
-        _sizeLimit.Text = Tools.ModelStorageMath.ClampLimit(_settings.ModelSizeLimitMb).ToString(System.Globalization.CultureInfo.CurrentCulture);
 
         // One primary action: Save (Enter, except inside the standards box where Enter starts a new line). Esc cancels.
         var save = Brand.Button("Save", Brand.Weight.Primary);
@@ -134,19 +97,13 @@ public sealed class SettingsWindow : Window
 
         TabStyles(_tabs);
         AutomationProperties.SetName(_tabs, "Settings sections");
-        // CSI ProMax has no drawings to issue, no sign-off sheets, no Lifeline and no time log: those pages stay out.
-        foreach (var tab in SettingsLayout.Tabs.Where(t => t.Key is SettingsLayout.Approvals or SettingsLayout.Chat or SettingsLayout.Standards or SettingsLayout.Runs or SettingsLayout.Updates))
+        foreach (var tab in SettingsLayout.Tabs)
         {
             var page = tab.Key switch
             {
                 SettingsLayout.Approvals => ApprovalPage(),
                 SettingsLayout.Chat => ChatPage(),
                 SettingsLayout.Standards => StandardsPage(),
-                SettingsLayout.Time => TimePage(),
-                SettingsLayout.Issue => IssuePage(),
-                SettingsLayout.SignOff => SignOffPage(),
-                SettingsLayout.Recovery => RecoveryPage(),
-                SettingsLayout.Storage => StoragePage(),
                 SettingsLayout.Runs => RunsPage(),
                 _ => UpdatesPage(),
             };
@@ -280,7 +237,7 @@ public sealed class SettingsWindow : Window
 
     /// <summary>
     /// When ETABS asks before CSI ProMax changes something: the levels, what is always asked (code, deletes that take
-    /// other elements, overwriting files, what-ifs, the issue gate), and the tools the user said not to ask about again,
+    /// other elements, overwriting files), and the tools the user said not to ask about again,
     /// each with "Ask again".
     /// </summary>
     private StackPanel ApprovalPage()
@@ -549,7 +506,14 @@ public sealed class SettingsWindow : Window
 
     private string Picked(string key, string fallback) => _picks.TryGetValue(key, out var box) && (box.SelectedItem as ComboBoxItem)?.Tag is string v ? v : fallback;
 
-    /// <summary>Firm standards in plain English, and the legend seed file with Browse.</summary>
+    private static TextBlock Label(string text)
+    {
+        var label = Brand.Text(text);
+        label.Margin = new Thickness(0, 12, 0, 4);
+        return label;
+    }
+
+    /// <summary>Firm standards in plain English.</summary>
     private StackPanel StandardsPage()
     {
         var page = new StackPanel();
@@ -563,235 +527,6 @@ public sealed class SettingsWindow : Window
         page.Children.Add(Place("FirmStandards", _standards));
         page.Children.Add(Hint("Enter starts a new line here; Ctrl+Enter saves."));
 
-        return page;
-    }
-
-    private void BrowseSeed()
-    {
-        var dialog = new Microsoft.Win32.OpenFileDialog
-        {
-            Title = "Pick the legend seed file",
-            Filter = $"{Csi.Name} projects and templates|*.rvt;*.rte|All files|*.*",
-        };
-        try
-        {
-            var current = _legendSeed.Text.Trim().Trim('"');
-            if (current.Length > 0 && Path.GetDirectoryName(current) is { Length: > 0 } dir && Directory.Exists(dir)) dialog.InitialDirectory = dir;
-        }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { }
-        if (dialog.ShowDialog(this) == true) _legendSeed.Text = dialog.FileName;
-        _legendSeed.Focus();
-    }
-
-    /// <summary>Time saved and working time (ETABS/TimeLog): on or off, the idle threshold, the by-hand rates, who sees the totals.</summary>
-    private StackPanel TimePage()
-    {
-        var page = new StackPanel();
-        page.Children.Add(Place("TimeTracking", _timeOn));
-        var idleRow = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
-        var before = Brand.Text("Stop counting after");
-        before.VerticalAlignment = VerticalAlignment.Center;
-        idleRow.Children.Add(before);
-        AutomationProperties.SetName(_idle, "Minutes without activity before working time stops counting");
-        idleRow.Children.Add(Place("IdleMinutes", _idle));
-        var after = Brand.Text("minutes without activity");
-        after.VerticalAlignment = VerticalAlignment.Center;
-        idleRow.Children.Add(after);
-        page.Children.Add(idleRow);
-        var ratesRow = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
-        var rates = Brand.Button("Edit by-hand rates…");
-        rates.Margin = new Thickness(0);
-        AutomationProperties.SetHelpText(rates, "Minutes per run and per item for each tool. The built-in ones are estimates.");
-        rates.Click += (_, _) =>
-        {
-            var window = new TimeRatesWindow(_rates) { Owner = this };
-            if (window.ShowDialog() == true) _rates = window.Result;
-        };
-        ratesRow.Children.Add(Place("TimeRates", rates));
-        var estimate = Brand.Text("Built-in rates are estimates.", Brand.K.Muted, size: 11);
-        estimate.VerticalAlignment = VerticalAlignment.Center;
-        estimate.Margin = new Thickness(8, 0, 0, 0);
-        ratesRow.Children.Add(estimate);
-        page.Children.Add(ratesRow);
-        page.Children.Add(Hint("The totals are kept in the model and in Project Information, per user: in a shared model, anyone who opens it can see them.", 10));
-        return page;
-    }
-
-    /// <summary>What the issue check lets through.</summary>
-    private StackPanel IssuePage()
-    {
-        var page = new StackPanel();
-        const string off = "Off: an issue waits until every item of the issue check is fixed or accepted with a reason.";
-        AutomationProperties.SetHelpText(_openItems, off);
-        page.Children.Add(Place("AllowIssueWithOpenItems", _openItems));
-        page.Children.Add(Hint(off));
-        return page;
-    }
-
-    /// <summary>
-    /// The pre-submission checklist's sign-off: your name, the role you sign as, your signature picture (kept as a copy
-    /// next to the settings, so moving the original doesn't lose it) and the office's checklist Excel file.
-    /// </summary>
-    private StackPanel SignOffPage()
-    {
-        var page = new StackPanel();
-        page.Children.Add(Label("Your name, as it goes on the signed checklist"));
-        AutomationProperties.SetName(_sigName, "Your name on the signed checklist");
-        page.Children.Add(Place("SignatureName", _sigName));
-
-        page.Children.Add(Label("You sign as"));
-        foreach (var role in new[] { "Trade BIM coordinator", "Trade group leader" }) _sigRole.Items.Add(role);
-        AutomationProperties.SetName(_sigRole, "The sign-off role you sign as");
-        AutomationProperties.SetHelpText(_sigRole, "Pick one or type the role as the checklist names it. Your signature goes in that row.");
-        page.Children.Add(Place("SignatureRole", _sigRole));
-        page.Children.Add(Hint("Pick one, or type the role as your checklist names it. Your signature goes in that row; the other signs by hand or with a picture you pick in the checklist."));
-
-        page.Children.Add(Label("Your signature picture (PNG or JPG, on a white or clear background)"));
-        var frame = new Border { BorderThickness = new Thickness(1), Padding = new Thickness(8), MinHeight = 60, CornerRadius = new CornerRadius(4), Child = _sigPreview };
-        frame.SetResourceReference(Border.BorderBrushProperty, Brand.K.Border);
-        // White under the picture in both themes: signatures are dark ink on white paper.
-        frame.Background = Brand.Brush(System.Windows.Media.Colors.White);
-        frame.HorizontalAlignment = HorizontalAlignment.Left;
-        frame.MinWidth = 280;
-        AutomationProperties.SetName(_sigPreview, "Your signature");
-        page.Children.Add(frame);
-        var row = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
-        var choose = Brand.Button("Choose picture…");
-        choose.Margin = new Thickness(0);
-        AutomationProperties.SetHelpText(choose, "Pick a scan or photo of your signature. A copy is kept with your settings.");
-        choose.Click += (_, _) => ChooseSignature();
-        row.Children.Add(Place("SignatureImage", choose));
-        var remove = Brand.Button("Remove picture", Brand.Weight.Danger);
-        AutomationProperties.SetHelpText(remove, "Removes your signature picture from CSI ProMax when you press Save. Checklists already made keep theirs.");
-        remove.Click += (_, _) => { _sigImage = ""; ShowSignature(); };
-        row.Children.Add(remove);
-        page.Children.Add(row);
-        _sigHint.Margin = new Thickness(0, 4, 0, 0);
-        page.Children.Add(_sigHint);
-        ShowSignature();
-
-        page.Children.Add(SubHeading("Checklist"));
-        page.Children.Add(Brand.Text("Optional: an Excel checklist (.xlsx) to use instead of the built-in one. It is followed while it changes; to edit the checklist instead, use Edit the checklist in the checklist window."));
-        var pathRow = new DockPanel { Margin = new Thickness(0, 4, 0, 0) };
-        var browse = Brand.Button("Browse…");
-        AutomationProperties.SetName(browse, "Browse for the checklist Excel file");
-        browse.Click += (_, _) =>
-        {
-            var dialog = new Microsoft.Win32.OpenFileDialog { Title = "Pick the pre-submission checklist", Filter = "Excel workbooks|*.xlsx|All files|*.*" };
-            if (dialog.ShowDialog(this) == true) _checklistPath.Text = dialog.FileName;
-            _checklistPath.Focus();
-        };
-        DockPanel.SetDock(browse, Dock.Right);
-        pathRow.Children.Add(browse);
-        AutomationProperties.SetName(_checklistPath, "Checklist Excel file");
-        pathRow.Children.Add(Place("ChecklistPath", _checklistPath));
-        page.Children.Add(pathRow);
-        page.Children.Add(Hint("Empty: the built-in checklist, or the one edited in the checklist window."));
-
-        page.Children.Add(Label("Helper for the checks the model test can't do"));
-        AutomationProperties.SetName(_helper, "Checklist helper");
-        AutomationProperties.SetHelpText(_helper, "Who the checklist's Ask button hands a check to.");
-        page.Children.Add(Place("ChecklistHelper", _helper));
-        page.Children.Add(Hint("CSI ProMax: the check goes to the chat, which looks at the model (and pictures of views) and says pass or fail. " +
-                               "SketchPro: its Copilot opens with the question pasted in, for you to send. None: no Ask button. The helper only advises; you still answer each check."));
-        return page;
-    }
-
-    private static TextBlock Label(string text)
-    {
-        var label = Brand.Text(text);
-        label.Margin = new Thickness(0, 12, 0, 4);
-        return label;
-    }
-
-    private void ChooseSignature()
-    {
-        var dialog = new Microsoft.Win32.OpenFileDialog { Title = "Pick your signature picture", Filter = "Pictures|*.png;*.jpg;*.jpeg|All files|*.*" };
-        if (dialog.ShowDialog(this) != true) return;
-        try
-        {
-            var bytes = File.ReadAllBytes(dialog.FileName);
-            if (bytes.Length < 8)
-            {
-                _sigHint.Text = "That file isn't a PNG or JPG picture. Save the signature as PNG or JPG and pick it again.";
-                _sigHint.SetResourceReference(TextBlock.ForegroundProperty, Brand.K.DangerText);
-                return;
-            }
-            _sigImage = dialog.FileName;
-            ShowSignature();
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            _sigHint.Text = $"Couldn't read the picture ({ex.Message}). Copy it to your PC and pick it again.";
-            _sigHint.SetResourceReference(TextBlock.ForegroundProperty, Brand.K.DangerText);
-        }
-    }
-
-    private void ShowSignature()
-    {
-        _sigPreview.Source = null;
-        _sigHint.SetResourceReference(TextBlock.ForegroundProperty, Brand.K.Muted);
-        _sigHint.Text = _sigPreview.Source is null
-            ? (_sigImage.Length > 0 ? "The picture can't be read any more. Choose it again." : "No signature picture: checklists leave your box empty to sign by hand.")
-            : "This picture goes on checklists that are ready to submit (nothing No, nothing unanswered).";
-    }
-
-    /// <summary>The change file (ETABS/ChangeFile): on or off, and Recover.</summary>
-    private StackPanel RecoveryPage()
-    {
-        var page = new StackPanel();
-        page.Children.Add(Place("ChangeFile", _changeFile));
-        page.Children.Add(Hint("A text file in Documents\\CSI ProMax\\Change files lists every element you add, move, change or delete, a few seconds after you do it. " +
-                               "Saving or synchronizing clears it. If the model is lost or damaged, open the last good copy and replay the file onto it. It never changes the model by itself."));
-        page.Children.Add(Place("LifelineWarnings", _lifeWarn));
-        var saveRow = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
-        _lifeSave.Margin = new Thickness(0);
-        _lifeSave.VerticalAlignment = VerticalAlignment.Center;
-        saveRow.Children.Add(Place("LifelineAutoSave", _lifeSave));
-        AutomationProperties.SetName(_lifeMinutes, "Minutes between saves");
-        AutomationProperties.SetHelpText(_lifeMinutes, $"From {ETABS.LifelineWatchMath.MinMinutes} to {ETABS.LifelineWatchMath.MaxMinutes} minutes; {ETABS.LifelineWatchMath.DefaultMinutes} is the default.");
-        saveRow.Children.Add(Place("LifelineAutoSaveMinutes", _lifeMinutes));
-        var minutesText = Brand.Text("minutes");
-        minutesText.VerticalAlignment = VerticalAlignment.Center;
-        saveRow.Children.Add(minutesText);
-        page.Children.Add(saveRow);
-        var syncRow = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
-        _lifeSync.Margin = new Thickness(0);
-        _lifeSync.VerticalAlignment = VerticalAlignment.Center;
-        syncRow.Children.Add(Place("LifelineAutoSync", _lifeSync));
-        AutomationProperties.SetName(_lifeSyncMinutes, "Minutes between synchronizes");
-        AutomationProperties.SetHelpText(_lifeSyncMinutes, $"From {ETABS.LifelineWatchMath.MinSyncMinutes} to {ETABS.LifelineWatchMath.MaxSyncMinutes} minutes; {ETABS.LifelineWatchMath.DefaultSyncMinutes} is the default.");
-        syncRow.Children.Add(Place("LifelineAutoSyncMinutes", _lifeSyncMinutes));
-        var syncMinutesText = Brand.Text("minutes");
-        syncMinutesText.VerticalAlignment = VerticalAlignment.Center;
-        syncRow.Children.Add(syncMinutesText);
-        page.Children.Add(syncRow);
-        page.Children.Add(Hint("Warnings are small hints in the corner: they never ask and never stop a command. Saving and synchronizing by themselves are off unless you turn them on: " +
-                               "each runs at a quiet moment with no tool open and nothing selected. Saving saves your local copy only. Synchronizing waits while the server can't be reached. The Lifeline window has the same choices."));
-        var recover = Brand.Button("Lifeline…");
-        recover.HorizontalAlignment = HorizontalAlignment.Left;
-        recover.Margin = new Thickness(0, 10, 0, 0);
-        AutomationProperties.SetHelpText(recover, "Opens the Lifeline window: each model's change file, and Replay onto the open model. It doesn't save the settings here.");
-        page.Children.Add(recover);
-        return page;
-    }
-
-    /// <summary>The model size limit Model storage measures against.</summary>
-    private StackPanel StoragePage()
-    {
-        var page = new StackPanel();
-        var row = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
-        var before = Brand.Text("Keep models under");
-        before.VerticalAlignment = VerticalAlignment.Center;
-        row.Children.Add(before);
-        AutomationProperties.SetName(_sizeLimit, "Model size limit in MB");
-        AutomationProperties.SetHelpText(_sizeLimit, $"From {Tools.ModelStorageMath.MinLimitMb} to {Tools.ModelStorageMath.MaxLimitMb:N0} MB; {Tools.ModelStorageMath.DefaultLimitMb} is the default.");
-        row.Children.Add(Place("ModelSizeLimitMb", _sizeLimit));
-        var after = Brand.Text("MB");
-        after.VerticalAlignment = VerticalAlignment.Center;
-        row.Children.Add(after);
-        page.Children.Add(row);
-        page.Children.Add(Hint("Storage & cleanup (Check panel) shows the model against this. A model can pass it: the bar fills and says by how much."));
         return page;
     }
 
@@ -1134,36 +869,13 @@ public sealed class SettingsWindow : Window
 
     // ---- Saving --------------------------------------------------------------------------------------------------
 
-    /// <summary>Says straight away when the legend seed path points nowhere (saving still works; the tool then ignores it).</summary>
-    private void CheckSeed()
-    {
-        var path = _legendSeed.Text.Trim().Trim('"');
-        var missing = false;
-        if (path.Length > 0)
-        {
-            try { missing = !File.Exists(path); }
-            catch (Exception ex) when (ex is ArgumentException or NotSupportedException) { missing = true; }
-        }
-        _seedHint.Text = missing ? "No file at this path. Check it (copy the path from File Explorer) or leave it empty." : "";
-        _seedHint.Visibility = missing ? Visibility.Visible : Visibility.Collapsed;
-    }
-
     private void Save()
     {
         _settings.Approvals = _levels.FirstOrDefault(l => l.Button.IsChecked == true).Level;
         _settings.NoAskTools = _noAsk.Count > 0 ? _noAsk : null;
         _settings.AutoUpdate = _autoUpdate.IsChecked == true;
         _settings.KeepProgramOpenAfterRun = _keepOpen.IsChecked == true;
-        _settings.AllowIssueWithOpenItems = _openItems.IsChecked == true;
         _settings.FirmStandards = _standards.Text;
-        _settings.LegendSeedPath = _legendSeed.Text.Trim().Trim('"');
-        if (!double.TryParse(_idle.Text.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.CurrentCulture, out var idle) || idle < 1 || idle > 60)
-        {
-            _error.Text = "Type the idle time (Time tracking tab) as a number of minutes from 1 to 60 (5 is usual), then press Save again.";
-            _error.Visibility = Visibility.Visible;
-            ShowOnTab(SettingsLayout.Time, _idle);
-            return;
-        }
         if (!int.TryParse(_syncChanges.Text.Trim(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.CurrentCulture, out var syncChanges)
             || syncChanges < ETABS.AutoSyncRule.MinLimit || syncChanges > ETABS.AutoSyncRule.MaxLimit)
         {
@@ -1172,36 +884,6 @@ public sealed class SettingsWindow : Window
             ShowOnTab(SettingsLayout.Chat, _syncChanges);
             return;
         }
-        if (!int.TryParse(_sizeLimit.Text.Trim(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.CurrentCulture, out var sizeLimit)
-            || sizeLimit < Tools.ModelStorageMath.MinLimitMb || sizeLimit > Tools.ModelStorageMath.MaxLimitMb)
-        {
-            _error.Text = $"Type the model size limit (Model size tab) as a whole number of MB from {Tools.ModelStorageMath.MinLimitMb} to {Tools.ModelStorageMath.MaxLimitMb} ({Tools.ModelStorageMath.DefaultLimitMb} is the default), then press Save again.";
-            _error.Visibility = Visibility.Visible;
-            ShowOnTab(SettingsLayout.Storage, _sizeLimit);
-            return;
-        }
-        _settings.ModelSizeLimitMb = sizeLimit;
-        if (!int.TryParse(_lifeMinutes.Text.Trim(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.CurrentCulture, out var lifeMinutes)
-            || lifeMinutes < ETABS.LifelineWatchMath.MinMinutes || lifeMinutes > ETABS.LifelineWatchMath.MaxMinutes)
-        {
-            _error.Text = $"Type the minutes between saves (Lifeline tab) as a whole number from {ETABS.LifelineWatchMath.MinMinutes} to {ETABS.LifelineWatchMath.MaxMinutes} ({ETABS.LifelineWatchMath.DefaultMinutes} is the default), then press Save again.";
-            _error.Visibility = Visibility.Visible;
-            ShowOnTab(SettingsLayout.Recovery, _lifeMinutes);
-            return;
-        }
-        _settings.LifelineWarnings = _lifeWarn.IsChecked == true;
-        _settings.LifelineAutoSave = _lifeSave.IsChecked == true;
-        _settings.LifelineAutoSaveMinutes = lifeMinutes;
-        if (!int.TryParse(_lifeSyncMinutes.Text.Trim(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.CurrentCulture, out var lifeSyncMinutes)
-            || lifeSyncMinutes < ETABS.LifelineWatchMath.MinSyncMinutes || lifeSyncMinutes > ETABS.LifelineWatchMath.MaxSyncMinutes)
-        {
-            _error.Text = $"Type the minutes between synchronizes (Lifeline tab) as a whole number from {ETABS.LifelineWatchMath.MinSyncMinutes} to {ETABS.LifelineWatchMath.MaxSyncMinutes} ({ETABS.LifelineWatchMath.DefaultSyncMinutes} is the default), then press Save again.";
-            _error.Visibility = Visibility.Visible;
-            ShowOnTab(SettingsLayout.Recovery, _lifeSyncMinutes);
-            return;
-        }
-        _settings.LifelineAutoSync = _lifeSync.IsChecked == true;
-        _settings.LifelineAutoSyncMinutes = lifeSyncMinutes;
         _settings.AutoSync = _autoSync.IsChecked == true;
         _settings.AutopilotResumeWeekly = _autopilotWeekly.IsChecked == true;
         _settings.AutopilotJobBudget = Picked(_apJob, Chat.JobBudget.DefaultPercent);
@@ -1210,8 +892,6 @@ public sealed class SettingsWindow : Window
         _settings.AutopilotAskWaitMinutes = Picked(_apAsk, Chat.AskRules.DefaultWaitMinutes);
         _settings.PhoneUpdateMinutes = Picked(_apUpdate, Chat.AskRules.DefaultUpdateMinutes);
         _settings.AutoSyncChanges = syncChanges;
-        _settings.ChangeFile = _changeFile.IsChecked == true;
-        _settings.TimeTracking = _timeOn.IsChecked == true;
         var motion = _motion.FirstOrDefault(m => m.Button.IsChecked == true).Level;
         _settings.ChatAnimations = Chat.MotionLevels.Store(motion);
         _settings.ChatJobLimit = (_jobLimit.SelectedItem as ComboBoxItem)?.Tag is int limit ? limit : Chat.JobBoard.DefaultLimit;
@@ -1235,12 +915,7 @@ public sealed class SettingsWindow : Window
         _settings.ChatEffortHard = Picked("ChatEffortHard", Chat.ChatAuto.DefaultEffort(Chat.ChatAuto.Hard));
         _settings.ChatModelCoordinator = Picked("ChatModelCoordinator", Chat.ChatAuto.DefaultModel(Chat.ChatAuto.Coordinating));
         _settings.ChatEffortCoordinator = Picked("ChatEffortCoordinator", Chat.ChatAuto.DefaultEffort(Chat.ChatAuto.Coordinating));
-        _settings.IdleMinutes = idle;
-        _settings.TimeRates = _rates is { Count: > 0 } ? _rates : null;
-        _settings.SignatureName = _sigName.Text.Trim();
         _settings.PhoneProjectNames = _phoneNames.Text.Trim();
-        _settings.SignatureRole = _sigRole.Text.Trim();
-        _settings.ChecklistPath = _checklistPath.Text.Trim().Trim('"');
         try { _settings.Save(); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {

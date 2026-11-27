@@ -120,13 +120,6 @@ internal static class BugReport
         ui.UnhandledException += OnUnhandled;
     }
 
-    public static void Unwatch()
-    {
-        if (_watched is { } ui) ui.UnhandledException -= OnUnhandled;
-        _watched = null;
-        _watchedApp = null;
-    }
-
     private static void OnUnhandled(object sender, System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)
     {
         if (!Ours(e.Exception)) return;
