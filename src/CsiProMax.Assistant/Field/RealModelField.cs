@@ -36,10 +36,10 @@ public static class RealModelField
     public static string ModelKind(CsiProgram program) => program.Key switch { "sap2000" => ".sdb", "safe" => ".fdb", _ => ".edb" };
 
     /// <summary>A program's own model file CSI ProMax can be given as text: ETABS exports its .e2k through its API
-    /// (File.ExportFile, TextFile); SAP2000 has no export, but keeps a .$2k beside a model it saved.</summary>
+    /// (File.ExportFile, TextFile); SAP2000 keeps a .$2k beside a model it saved, and any .sdb's tables are read as its .s2k.</summary>
     public static bool Takes(CsiProgram program, string file) =>
         TextKinds(program).Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase)
-        || Path.GetExtension(file).Equals(ModelKind(program), StringComparison.OrdinalIgnoreCase) && (program.Key == CsiProgram.Etabs.Key || TwinOf(program, file) is not null);
+        || Path.GetExtension(file).Equals(ModelKind(program), StringComparison.OrdinalIgnoreCase) && (program.Key == CsiProgram.Etabs.Key || program.Key == CsiProgram.Sap2000.Key || TwinOf(program, file) is not null);
 
     private static string? TwinOf(CsiProgram program, string file) =>
         TextKinds(program).Select(k => Path.ChangeExtension(file, k)).FirstOrDefault(File.Exists);
@@ -122,6 +122,8 @@ public static class RealModelField
 
         // A: the program opens the copy as it is, analyses and designs it.
         Snapshot? a = null;
+        CsiProMax.Checks.Stability.StabilityCheck.Report? live = null;
+        var liveWhy = "";
         var text = copy;
         var kinds = EngineRun.Kinds[program.Key].Select(k => k.Kind).ToList();
         ctx.Step(title + $"{program.Name} opens it as it is, analyses and designs it, and every table is read", () =>
@@ -132,16 +134,40 @@ public static class RealModelField
             try
             {
                 var link = window.Link;
+                // Each part and each table read is written down as it starts: the 0.4.70 full test sat 18 minutes in this
+                // step on a 25 KB Verification model with ETABS busy and no word of which call it was in.
+                Progress = Path.Combine(sub.Folder, "progress.txt");
+                Mark("read every model table");
                 var model = ModelTables(link);
+                Mark("the live instability check");
+                // The check as the chat's find_instabilities makes it, read live from the program before it analyses.
+                try { live = CsiProMax.Checks.Stability.StabilityCheck.Run(StabilityTools.Live.Read(link)); }
+                catch (Exception ex) when (ex is EtabsException or InvalidOperationException) { liveWhy = ex.Message; }
+                Mark("export the text file");
                 if (!TextKinds(program).Contains(Path.GetExtension(copy), StringComparer.OrdinalIgnoreCase)) text = TextFor(program, link, copy, folder);
+                Mark("run the analysis");
                 link.RunAnalysis();
+                Mark("run the design");
                 try { DesignResults.RunDesign(link, kinds); } catch (Exception ex) when (ex is EtabsException or ToolInputException) { }
+                Mark("read every result and design table");
                 a = new Snapshot(model, ResultTables(link, null));
+                Mark("done");
                 return $"{a.Model.Count} model tables, {a.Model.Sum(t => t.Value.Rows.Count):N0} rows; {a.Results.Count} result and design tables";
             }
-            finally { window.Close(); }
+            finally { Progress = null; window.Close(); }
         });
         if (a is null) return;
+
+        // The pre-run check read live from the program (find_instabilities) must not call unstable a model the program
+        // analyses: Ahmed 2026-11-27, "recheck that we're posting real things for instability".
+        ctx.Step(title + $"find_instabilities on the model open in {program.Name} finds no error in it", () =>
+        {
+            if (live is null) throw new FieldCheckException("the check could not read the model from the program: " + liveWhy);
+            var errors = live.Findings.Where(f => f.Level == CsiProMax.Checks.Stability.Level.Error).ToList();
+            File.WriteAllLines(Path.Combine(folder, "instability check (live).txt"), live.Findings.Select(f => $"{f.Level} {f.Check}: {f.Message} | at {string.Join(", ", f.Objects.Take(8).Select(o => o.Kind + " " + o.Name))}").Concat(live.Notes.Select(n => "note: " + n)));
+            FieldContext.Expect(errors.Count == 0, $"{errors.Count} error(s) the program does not have: " + string.Join(" | ", errors.Take(10).Select(f => $"{f.Check}: {f.Message} (at {string.Join(", ", f.Objects.Take(6).Select(o => o.Kind + " " + o.Name))})")));
+            return $"{live.Warnings} warning(s); {live.Joints} joints, stiffness check {(live.StiffnessRan ? "made" : "not made")}";
+        });
 
         // B: CSI ProMax reads the copy and the Engine writes it back and runs it.
         OfflineEtabs? mine = null;
@@ -180,17 +206,43 @@ public static class RealModelField
         if (status?["pack"] is not JsonObject pack) return;
 
         var analysed = status["analysed_file"]?.GetValue<string>() ?? "";
-        ctx.Step(title + "every model table is the same after the round trip, row by row and field by field", () =>
+        // First what the text file alone carries; what it does not is then put in through the program's tables (the
+        // carry step, as every later run does) and must leave nothing different.
+        Dictionary<string, TableData>? throughText = null;
+        var lostByText = new List<string>();
+        ctx.Step(title + "the model tables after the round trip through the text file alone are read and compared", () =>
         {
             FieldContext.Expect(File.Exists(analysed), $"the Engine's analysed model is not there to compare ({analysed})");
             var b = Packs.PackCopy.Read(program, analysed, ModelTables);
             FieldContext.Expect(b.Value is not null, "the Engine's model could not be read from a copy: " + b.Said);
-            var lost = Compare(a.Model, b.Value!, model: true);
+            throughText = b.Value!;
+            lostByText = Compare(a.Model, throughText, model: true);
             // The whole list beside the model, for the lossless threads: every table, row and field, before and after.
-            File.WriteAllLines(Path.Combine(folder, "model table differences.txt"), lost.Count > 0 ? lost : ["none"]);
-            FieldContext.Expect(lost.Count == 0, $"{lost.Count} difference(s): " + string.Join(" | ", lost.Take(25)));
-            return $"{a.Model.Count} tables, {a.Model.Sum(t => t.Value.Rows.Count):N0} rows, all the same";
+            File.WriteAllLines(Path.Combine(folder, "model table differences.txt"), lostByText.Count > 0 ? lostByText : ["none"]);
+            return lostByText.Count == 0 ? $"{a.Model.Count} tables, {a.Model.Sum(t => t.Value.Rows.Count):N0} rows, all the same"
+                : $"{lostByText.Count} difference(s) the text file does not carry, put in through the tables next: " + string.Join(" | ", lostByText.Take(10));
         });
+        if (throughText is not null)
+            ctx.Step(title + "every model table is the same after the round trip, row by row and field by field", () =>
+            {
+                if (lostByText.Count == 0) return "the text file carried every table";
+                var carried = ProgramCarry.Measure(program, a.Model, throughText);
+                FieldContext.Expect(carried is not null, $"{lostByText.Count} difference(s), and no row to put back was found: " + string.Join(" | ", lostByText.Take(25)));
+                mine.Edit(m => m.Carried = carried);
+                var again = EngineRun.Start(mine, analyse: true, kinds: kinds, keepOpen: false);
+                FieldContext.Expect(again["ok"]?.GetValue<bool>() == true, "the run with the carried rows did not start: " + again["error"]);
+                var until = DateTime.UtcNow.AddMinutes(60);
+                while (EngineRun.Status(false)["done"]?.GetValue<bool>() != true && DateTime.UtcNow < until) Thread.Sleep(2000);
+                var st = EngineRun.Status(true);
+                FieldContext.Expect(string.IsNullOrEmpty(st["error"]?.GetValue<string>()), "the run with the carried rows stopped: " + st["error"]);
+                var file = st["analysed_file"]?.GetValue<string>() ?? "";
+                var b = Packs.PackCopy.Read(program, file, ModelTables);
+                FieldContext.Expect(b.Value is not null, "the Engine's model could not be read from a copy: " + b.Said);
+                var lost = Compare(a.Model, b.Value!, model: true);
+                File.WriteAllLines(Path.Combine(folder, "model table differences after the carry step.txt"), lost.Count > 0 ? lost : ["none"]);
+                FieldContext.Expect(lost.Count == 0, $"{lost.Count} difference(s) after putting back {carried!.Count} row(s) of {carried.Rows.Count} table(s): " + string.Join(" | ", lost.Take(25)));
+                return $"{a.Model.Count} tables, {a.Model.Sum(t => t.Value.Rows.Count):N0} rows, all the same; {carried!.Count} row(s) of {carried.Rows.Count} table(s) the text file does not carry went in through the tables";
+            });
         ctx.Step(title + "the Engine's analysis and design results match the program's own run of your model", () =>
         {
             var b = FromPack(pack);
@@ -206,10 +258,17 @@ public static class RealModelField
     }
 
     /// <summary>The model as text for CSI ProMax: ETABS's own export of it (File > Export > ETABS .e2k, through the
-    /// API), or the .$2k SAP2000 keeps beside it.</summary>
-    private static string TextFor(CsiProgram program, ICsiLink link, string copy, string folder)
+    /// API), or the .$2k SAP2000 keeps beside it, or else SAP2000's own tables of it written as a .s2k.</summary>
+    internal static string TextFor(CsiProgram program, ICsiLink link, string copy, string folder)
     {
         if (TwinOf(program, copy) is { } twin) return twin;
+        if (program.Key == CsiProgram.Sap2000.Key)
+        {
+            // No .$2k beside it: the model as SAP2000's own tables give it, every importable table, as its .s2k would be.
+            var s2k = Path.Combine(folder, Path.GetFileNameWithoutExtension(copy) + " tables.s2k");
+            File.WriteAllText(s2k, Sap2000.SapTablesText.Read(link));
+            return s2k;
+        }
         var target = Path.Combine(folder, Path.GetFileNameWithoutExtension(copy) + ".e2k");
         var kinds = AppDomain.CurrentDomain.GetAssemblies().Where(x => !x.IsDynamic).Select(x => { try { return x.GetType("ETABSv1.eFileTypeIO") ?? x.GetType("CSiAPIv1.eFileTypeIO"); } catch (Exception) { return null; } }).FirstOrDefault(t => t is not null)
             ?? throw new FieldCheckException($"{program.Name}'s API has no file export here (no eFileTypeIO), so the model cannot be given to CSI ProMax as text");
@@ -220,12 +279,22 @@ public static class RealModelField
 
     public sealed record Snapshot(Dictionary<string, TableData> Model, Dictionary<string, TableData> Results);
 
+    /// <summary>The file each part and table read of the program's own run is noted in as it starts (null: none).</summary>
+    [ThreadStatic] private static string? Progress;
+
+    private static void Mark(string what)
+    {
+        if (Progress is not { } file) return;
+        try { File.AppendAllText(file, $"{DateTime.Now:HH:mm:ss} {what}{Environment.NewLine}"); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* the note is only a help */ }
+    }
+
     /// <summary>Every model table (the ones the program can import), as the program gives it.</summary>
     public static Dictionary<string, TableData> ModelTables(ICsiLink link)
     {
         var all = new Dictionary<string, TableData>(StringComparer.OrdinalIgnoreCase);
         foreach (var t in link.Tables().Where(t => t.Import > 0 || t.Import < 0 && !IsResult(t.Key)))
-            try { var d = link.ReadTable(t.Key, null, null); if (d.Rows.Count > 0) all[t.Key] = d; }
+            try { Mark("  model table " + t.Key); var d = link.ReadTable(t.Key, null, null); if (d.Rows.Count > 0) all[t.Key] = d; }
             catch (Exception ex) when (ex is EtabsException or InvalidOperationException) { }
         return all;
     }
@@ -236,7 +305,7 @@ public static class RealModelField
         var all = new Dictionary<string, TableData>(StringComparer.OrdinalIgnoreCase);
         var cases = link.LoadCases(); var combos = link.Combos();
         foreach (var t in link.Tables().Where(t => (t.Import == 0 || t.Import < 0 && IsResult(t.Key)) && (only is null || only.Contains(t.Key))))
-            try { var d = link.ReadTable(t.Key, cases, combos); if (d.Rows.Count > 0) all[t.Key] = d; }
+            try { Mark("  result table " + t.Key); var d = link.ReadTable(t.Key, cases, combos); if (d.Rows.Count > 0) all[t.Key] = d; }
             catch (Exception ex) when (ex is EtabsException or InvalidOperationException) { }
         return all;
     }

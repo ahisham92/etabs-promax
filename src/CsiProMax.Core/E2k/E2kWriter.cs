@@ -104,11 +104,13 @@ public static class E2kWriter
                 // 23.2.0 text file", Ahmed's real model in the Engine, 2026-11-27).
                 yield return Line(["GRIDSYSTEM", Quote(m.GridSystem.Length > 0 ? m.GridSystem : "G1")],
                     m.GridSystemExtra.Count > 0 ? m.GridSystemExtra : ["TYPE", Quote("CARTESIAN"), "BUBBLESIZE", "1.25"]);
-                foreach (var g in m.Grids)
-                    yield return Line(["GRID", Quote(m.GridSystem), "LABEL", Quote(g.Label), "DIR", Quote(g.Direction), "COORD", Number(g.Coordinate)], g.Extra);
+                // Every other grid system after the first, then each system's grid lines (ETABS keeps any number of them).
+                foreach (var system in m.MoreGridSystems) yield return Line(["GRIDSYSTEM", Quote(system.Name)], system.Extra);
+                foreach (var g in m.Grids.Where(g => !IsOther(m, g)).Concat(m.MoreGridSystems.SelectMany(sy => m.Grids.Where(g => g.System == sy.Name))))
+                    yield return Line(["GRID", Quote(IsOther(m, g) ? g.System! : m.GridSystem), "LABEL", Quote(g.Label), "DIR", Quote(g.Direction), "COORD", Number(g.Coordinate)], g.Extra);
                 break;
             case S.Diaphragms:
-                foreach (var d in m.Diaphragms) yield return Line(["DIAPHRAGM", Quote(d.Name), "TYPE", d.Type]);
+                foreach (var d in m.Diaphragms) yield return Line(["DIAPHRAGM", Quote(d.Name), "TYPE", d.Type], d.Extra);
                 break;
             case S.Materials:
                 foreach (var line in DefinitionLines("MATERIAL", m.Materials)) yield return line;
@@ -129,19 +131,19 @@ public static class E2kWriter
                 break;
             case S.Points:
                 foreach (var p in m.Points)
-                    yield return p.Below == 0
+                    yield return p.Below == 0 && p.Extra.Count == 0
                         ? Line(["POINT", Quote(p.Name), Number(p.X), Number(p.Y)])
-                        : Line(["POINT", Quote(p.Name), Number(p.X), Number(p.Y), Number(p.Below)]);
+                        : Line(["POINT", Quote(p.Name), Number(p.X), Number(p.Y), Number(p.Below)], p.Extra);
                 break;
             case S.Lines:
                 foreach (var l in m.Lines)
-                    yield return Line(["LINE", Quote(l.Label), l.Kind.ToString().ToUpperInvariant(), Quote(l.PointI), Quote(l.PointJ), l.StoriesBelowI.ToString()]);
+                    yield return Line(["LINE", Quote(l.Label), l.Kind.ToString().ToUpperInvariant(), Quote(l.PointI), Quote(l.PointJ), l.StoriesBelowI.ToString()], l.Extra);
                 break;
             case S.Areas:
                 foreach (var a in m.Areas)
                     yield return Line(
                         ["AREA", Quote(a.Label), a.Kind switch { AreaKind.Wall => "PANEL", AreaKind.Ramp => "RAMP", _ => "FLOOR" }, a.PointNames.Count.ToString()],
-                        a.PointNames.Select(Quote), a.StoriesBelow.Select(o => o.ToString()));
+                        a.PointNames.Select(Quote), a.StoriesBelow.Select(o => o.ToString()), a.Extra);
                 break;
             case S.PointAssigns:
                 foreach (var a in m.PointAssigns)
@@ -183,6 +185,10 @@ public static class E2kWriter
                 break;
         }
     }
+
+    /// <summary>A grid line of one of the model's other grid systems (one that is still in the model).</summary>
+    private static bool IsOther(StructuralModel m, GridLine g) =>
+        g.System is { Length: > 0 } s && s != m.GridSystem && m.MoreGridSystems.Exists(x => x.Name == s);
 
     private static bool IsDeck(ShellSection s) => string.Equals(s.Get("PROPTYPE"), "Deck", StringComparison.OrdinalIgnoreCase);
 

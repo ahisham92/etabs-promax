@@ -29,6 +29,9 @@ public static partial class S2kReader
         var notes = new List<string>();
         var m = Tables(tables, title, notes, keep: true);
         m.Target = "sap2000";
+        // Every table of the file is kept as it was, and what the writer makes of the model just read is the base the
+        // changes are measured from: the file goes back out as it came in, with only the changes put in.
+        m.Source = SourceTables.Capture("sap2000", text, S2kWriter.WriteOwn(m).Text);
         return new Result(m, false, notes.Distinct().ToList());
     }
 
@@ -60,7 +63,18 @@ public static partial class S2kReader
             m.DefinitionTables ??= new(StringComparer.OrdinalIgnoreCase);
             m.DefinitionTables["Active Degrees of Freedom"] = [activeDofRow.Where(dofKv => dofKv.Value.Length > 0).ToDictionary(dofKv => dofKv.Key.ToUpperInvariant(), dofKv => dofKv.Value, StringComparer.Ordinal)];
         }
-        Use("COORDINATE SYSTEMS");
+        // The systems other than GLOBAL, and their grid lines, are kept as Define > Coordinate Systems/Grids has them.
+        var otherSystems = Use("COORDINATE SYSTEMS").Where(cs => S(cs, "Name").Length > 0 && !S(cs, "Name").Equals("GLOBAL", StringComparison.OrdinalIgnoreCase)).ToList();
+        void KeepSap(string keepTable, IEnumerable<Dictionary<string, string>> keepRows)
+        {
+            var keepFields = DefineTables.SapHinges[keepTable];
+            var keptRows = keepRows.Select(kr => kr.Where(kv => kv.Value.Length > 0 && keepFields.Contains(kv.Key, StringComparer.OrdinalIgnoreCase))
+                .ToDictionary(kv => keepFields.First(f => f.Equals(kv.Key, StringComparison.OrdinalIgnoreCase)), kv => kv.Value, StringComparer.Ordinal)).Where(kr => kr.Count > 0).ToList();
+            if (keptRows.Count == 0) return;
+            m.DefinitionTables ??= new(StringComparer.OrdinalIgnoreCase);
+            m.DefinitionTables[keepTable] = keptRows;
+        }
+        KeepSap("Coordinate Systems", otherSystems);
 
         // Joints.
         var joints = new Dictionary<string, Xyz>(StringComparer.OrdinalIgnoreCase);
@@ -75,7 +89,9 @@ public static partial class S2kReader
 
         // Grids and levels: the Z grid lines are the levels; without them, every height a joint is at.
         var levels = new List<(string Name, double Z)>();
-        foreach (var r in Use("GRID LINES"))
+        var gridRows = Use("GRID LINES").ToList();
+        KeepSap("Grid Lines", gridRows.Where(gl => otherSystems.Any(o => S(o, "Name").Equals(S(gl, "CoordSys"), StringComparison.OrdinalIgnoreCase))));
+        foreach (var r in gridRows.Where(gl => !otherSystems.Any(o => S(o, "Name").Equals(S(gl, "CoordSys"), StringComparison.OrdinalIgnoreCase))))
         {
             var dir = S(r, "AxisDir").ToUpperInvariant();
             if (dir == "Z") levels.Add((S(r, "GridID"), D(r, "XRYZCoord")));
@@ -209,7 +225,7 @@ public static partial class S2kReader
 
         Releases(m, Use, frameAt, notes);
         Patterns(m, Use, notes);
-        Functions(m, Use, notes);
+        Functions(m, t, Use, notes);
         Cases(m, Use, notes);
         // Groups, constraints, springs, links, hinges, the mass source and moving loads.
         Extras(m, Use, t, joints, j => { var w = Where(j); return w.Point.Name + "@" + storyNames[w.Level]; }, frameAt, areaAt, storyNames, notes);
@@ -219,6 +235,35 @@ public static partial class S2kReader
             .Where(n => RunCases.List(m).Any(c => c.Name == n)).ToList();
         if (notRun.Count > 0) RunCases.SetNotRun(m, notRun);
         Loads(m, Use, joints, frameAt, areaAt, Where, storyNames, notes);
+
+        // SAP2000's own load tables (every Load Pattern, Load Case and Load Combination field) go into its load forms.
+        SapLoadTables.Read(m, t, known);
+        // SAP2000's own per-object assignment and load tables (SapObjectTables) onto each object's Assign.Tables, every
+        // field as the file has it, so they follow the object; a table naming an object the Modeler has not got stays kept.
+        foreach (var name in t.Keys.Where(k => !known.Contains(k) && SapObjectTables.Has(k)).ToList())
+        {
+            var full = SapObjectTables.Name(name);
+            var kind = SapObjectTables.Tables[full].Kind;
+            var key = SapObjectTables.KeyField(kind);
+            Assign? Owner(Dictionary<string, string> r)
+            {
+                var who = S(r, key);
+                if (who.Length == 0) return null;
+                if (kind == "frame") return frameAt.TryGetValue(who, out var fa) ? m.LineAssigns.Find(x => x.Label == fa.Label && x.Story == fa.Story) : null;
+                if (kind == "area") return areaAt.TryGetValue(who, out var aa) ? m.AreaAssigns.Find(x => x.Label == aa.Label && x.Story == aa.Story) : null;
+                return joints.ContainsKey(who) ? PointOf(who) : null;
+            }
+            var rows = T(t, name);
+            if (rows.Count == 0 || rows.Exists(r => S(r, key).Length == 0 || (kind == "joint" ? !joints.ContainsKey(S(r, key)) : Owner(r) is null))) continue;
+            known.Add(name);
+            foreach (var r in rows)
+            {
+                var a = Owner(r)!;
+                a.Tables ??= new(StringComparer.OrdinalIgnoreCase);
+                var list = a.Tables.TryGetValue(full, out var have) ? have : a.Tables[full] = [];
+                list.Add(r.Where(kv => !kv.Key.Equals(key, StringComparison.OrdinalIgnoreCase)).ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal));
+            }
+        }
 
         // SAP2000's hinge definitions go into the Modeler's own hinge forms (DefineTables.SapHinges).
         foreach (var name in t.Keys.Where(k => !known.Contains(k) && DefineTables.IsSap(k)).ToList())
@@ -376,7 +421,10 @@ public static partial class S2kReader
                 sec = new FrameSection { Name = name, Lines = [["MATERIAL", Quote(material), "SHAPE", Quote("General"), "D", Number(d > 0 ? d : 1), "B", Number(b > 0 ? b : 1),
                     "AREA", Number(D(r, "Area")), "AS2", Number(D(r, "AS2")), "AS3", Number(D(r, "AS3")), "I33", Number(D(r, "I33")), "I22", Number(D(r, "I22")), "J", Number(D(r, "TorsConst"))]] };
                 m.FrameSections.Add(sec);
-                if (etabs is null && shape != "General") notes.Add($"Frame section {name} is SAP2000's {shape} shape: it opens as a general section with its area and inertias.");
+                // SAP2000's own row is kept, so the section goes back to SAP2000 as it was and its form shows it.
+                var fgFields = DefineTables.SapHinges[DefineTables.SapFrameGeneral];
+                DefineTables.Set(m, DefineTables.SapFrameGeneral, name, [r.Where(kv => kv.Value.Length > 0 && fgFields.Contains(kv.Key, StringComparer.OrdinalIgnoreCase))
+                    .ToDictionary(kv => fgFields.First(f => f.Equals(kv.Key, StringComparison.OrdinalIgnoreCase)), kv => kv.Value, StringComparer.Ordinal)]);
             }
             Modifiers(sec, r);
             Extras(sec, r);
@@ -421,8 +469,17 @@ public static partial class S2kReader
             var name = S(r, "Section");
             var modelling = S(r, "Type") switch { "Shell-Thick" => "ShellThick", "Membrane" => "Membrane", "Shell-Layered/Nonlinear" => "Layered", _ => "ShellThin" };
             var thickness = D(r, "Thickness", D(r, "BendThick"));
-            if (!S(r, "AreaType", "Shell").Equals("Shell", StringComparison.OrdinalIgnoreCase) || thickness <= 0)
-            { notes.Add($"Area section {name} ({S(r, "AreaType")}) has no Modeler form yet; areas using it open without a section."); continue; }
+            // Plane, Asolid and the plate shells: an Engine shell section of the same name (so the areas keep it) and
+            // SAP2000's own row, which goes back to SAP2000 as it was.
+            var sapOnlyArea = !S(r, "AreaType", "Shell").Equals("Shell", StringComparison.OrdinalIgnoreCase) || S(r, "Type").StartsWith("Plate", StringComparison.OrdinalIgnoreCase);
+            if (sapOnlyArea)
+            {
+                var asFields = DefineTables.SapHinges[DefineTables.SapAreaSections];
+                DefineTables.Set(m, DefineTables.SapAreaSections, name, [r.Where(kv => kv.Value.Length > 0 && asFields.Contains(kv.Key, StringComparer.OrdinalIgnoreCase))
+                    .ToDictionary(kv => asFields.First(f => f.Equals(kv.Key, StringComparison.OrdinalIgnoreCase)), kv => kv.Value, StringComparer.Ordinal)]);
+                if (thickness <= 0) thickness = 1;
+                modelling = S(r, "Type").Equals("Plate-Thick", StringComparison.OrdinalIgnoreCase) ? "ShellThick" : S(r, "Type").StartsWith("Plate", StringComparison.OrdinalIgnoreCase) ? "ShellThin" : "Membrane";
+            }
             try
             {
                 var sec = PropertyDefs.SetShellType(m, name, m.ShellSections.Exists(x => x.Name == name) ? name : null, upright.Contains(name), PropertyDefs.SlabTypes.FirstOrDefault(x => x.Equals(S(r, "SlabType"), StringComparison.OrdinalIgnoreCase)) ?? "Slab", modelling, thickness, S(r, "Material"), false);
@@ -553,13 +610,41 @@ public static partial class S2kReader
             var name = S(r, "LoadPat");
             if (name.Length == 0 || m.LoadPatterns.Exists(p => p.Name == name)) continue;
             m.LoadPatterns.Add(new LoadPattern { Name = name, Type = PatternType(S(r, "DesignType")), SelfWeight = D(r, "SelfWtMult") });
-            if (S(r, "AutoLoad") is { Length: > 0 } auto && !auto.Equals("None", StringComparison.OrdinalIgnoreCase))
-                notes.Add($"Load pattern {name} has SAP2000's automatic {auto} load: set it again in the Modeler (Define > Load Patterns > Modify Lateral Load).");
         }
     }
 
-    private static void Functions(StructuralModel m, Func<string, List<Dictionary<string, string>>> use, List<string> notes)
+    private static void Functions(StructuralModel m, Dictionary<string, List<Dictionary<string, string>>> t, Func<string, List<Dictionary<string, string>>> use, List<string> notes)
     {
+        // SAP2000's other function tables (a code spectrum, From File, the time history types, power spectral density,
+        // steady state): kept as the file has them (SapFunctions), and a spectrum or time history is also a function of
+        // the model with its points.
+        foreach (var name in t.Keys.Where(k => SapFunctions.Table(k) is { } full && !full.EndsWith("Response Spectrum - User", StringComparison.OrdinalIgnoreCase) && !full.EndsWith("Time History - User", StringComparison.OrdinalIgnoreCase)).ToList())
+        {
+            var full = SapFunctions.Table(name)!;
+            var fields = SapFunctions.Tables[full];
+            var (px, py) = SapFunctions.PointFields(full);
+            foreach (var g in use(name).GroupBy(r => S(r, "Name")).Where(g => g.Key.Length > 0))
+            {
+                var rows = g.Select(r => r.Where(kv => kv.Value.Length > 0 && fields.Contains(kv.Key, StringComparer.OrdinalIgnoreCase))
+                    .ToDictionary(kv => fields.First(f => f.Equals(kv.Key, StringComparison.OrdinalIgnoreCase)), kv => kv.Value, StringComparer.Ordinal)).ToList();
+                // A From File spectrum by frequency has its points as Frequency and Accel.
+                var pts = g.Select(r => (X: r.ContainsKey(px) ? D(r, px, double.NaN) : D(r, "Frequency", double.NaN) is var fq && fq > 0 ? 1 / fq : double.NaN, Y: D(r, py, double.NaN)))
+                    .Where(p => !double.IsNaN(p.X) && !double.IsNaN(p.Y)).OrderBy(p => p.X).ToList();
+                m.DefinitionTables ??= new(StringComparer.OrdinalIgnoreCase);
+                var list = m.DefinitionTables.TryGetValue(full, out var have) ? have : m.DefinitionTables[full] = [];
+                list.AddRange(rows);
+                // User Periodic: the rows are one cycle, repeated NumCycles times.
+                if (full.EndsWith("User Periodic", StringComparison.OrdinalIgnoreCase) && pts.Count > 1 && D(g.First(), "NumCycles", 1) is var cyc && cyc > 1)
+                {
+                    var one = pts.ToList(); var span = one[^1].X - one[0].X;
+                    for (var c = 1; c < (int)Math.Round(Math.Min(cyc, 100000.0 / one.Count)); c++) pts.AddRange(one.Skip(1).Select(p => (Math.Round(p.X + c * span, 9), p.Y)));
+                }
+                var kind = SapFunctions.KindOf(full);
+                if (kind is "spectrum" or "history")
+                    try { AnalysisDefs.SetFunction(m, new FunctionDef(g.Key, kind, pts, D(g.First(), "FuncDamp", 0.05))); }
+                    catch (ArgumentException ex) { notes.Add(ex.Message); }
+            }
+        }
         foreach (var g in use("FUNCTION - RESPONSE SPECTRUM - USER").GroupBy(r => S(r, "Name")))
             try { AnalysisDefs.SetFunction(m, new FunctionDef(g.Key, "spectrum", g.Select(r => (D(r, "Period"), D(r, "Accel"))).ToList(), D(g.First(), "FuncDamp", 0.05))); }
             catch (ArgumentException ex) { notes.Add(ex.Message); }

@@ -447,7 +447,8 @@ static class OldProgramTests
             var control = CsiTableText.Parse(written.Text)["PROGRAM CONTROL"].Single();
             Equal("Standard", control["ProgLevel"], "a model with no tendons asks for SAFE Standard, as SAFE 23.1's own export does");
             Equal("Post Tensioning", CsiProMax.F2k.F2kWriter.ProgLevel(1), "one with tendons for Post Tensioning");
-            Check(!written.Text.Contains("OBJECT GEOMETRY", StringComparison.Ordinal), "none of SAFE 16's tables, which SAFE 23.1 opened as an empty model");
+            // SAFE 16's tables began "OBJECT GEOMETRY - ..."; SAFE 20+'s own "DIMENSION LINE OBJECT GEOMETRY" and "SLAB REBAR OBJECT GEOMETRY" are not them.
+            Check(!CsiTableText.Parse(written.Text).Keys.Any(k => k.StartsWith("OBJECT GEOMETRY", StringComparison.OrdinalIgnoreCase)), "none of SAFE 16's tables, which SAFE 23.1 opened as an empty model");
             Check(!CsiProMax.Assistant.ScratchProgram.OpenedEmpty(written.Text, 7), "SAFE holding some is not");
             Check(!CsiProMax.Assistant.ScratchProgram.OpenedEmpty("TABLE:  \"PROGRAM CONTROL\"\n   ProgramName=SAFE\n", 0), "a file with no objects is not");
             var scratch = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));

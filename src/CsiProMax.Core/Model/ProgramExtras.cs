@@ -29,6 +29,9 @@ public sealed class JointConstraint
     public List<string> Dofs { get; set; } = [];
     /// <summary>Weld: how close joints must be to be welded.</summary>
     public double Tolerance { get; set; }
+    /// <summary>Diaphragm: SAP2000's Semi-rigid option, and a different diaphragm for each Z level (MultiLevel).</summary>
+    public bool SemiRigid { get; set; }
+    public bool MultiLevel { get; set; }
     public List<string> Joints { get; set; } = [];
 }
 
@@ -103,7 +106,7 @@ public sealed class DesignStrip
 /// <summary>The checks and edits behind the Define and Assign items for <see cref="ProgramExtras"/>.</summary>
 public static class ExtrasDefs
 {
-    public static readonly string[] ConstraintTypes = ["Body", "Diaphragm", "Plate", "Rod", "Beam", "Equal", "Local", "Weld"];
+    public static readonly string[] ConstraintTypes = ["Body", "Diaphragm", "Plate", "Rod", "Beam", "Equal", "Local", "Weld", "Line"];
     public static readonly string[] Axes = ["X", "Y", "Z", "Auto"];
     public static readonly string[] GlobalDofs = ["UX", "UY", "UZ", "RX", "RY", "RZ"];
     public static readonly string[] LocalDofs = ["U1", "U2", "U3", "R1", "R2", "R3"];
@@ -115,7 +118,7 @@ public static class ExtrasDefs
     public static void Tidy(StructuralModel m) { if (m.Extras is { IsEmpty: true }) m.Extras = null; }
 
     public static bool HasAxis(string type) => type is "Diaphragm" or "Plate" or "Rod" or "Beam";
-    public static bool HasDofs(string type) => type is "Body" or "Equal" or "Local" or "Weld";
+    public static bool HasDofs(string type) => type is "Body" or "Equal" or "Local" or "Weld" or "Line";
 
     private static void Name(string name, string what)
     {

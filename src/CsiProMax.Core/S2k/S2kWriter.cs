@@ -33,7 +33,21 @@ public static class S2kWriter
         return result;
     }
 
+    /// <summary>The model as SAP2000's tables. A model opened from a SAP2000 file is written as that file, with only
+    /// what was changed since put in (<see cref="SourceTables"/>), so nothing of the file is lost.</summary>
     public static Result Write(StructuralModel m, string fileName = "model.s2k")
+    {
+        var own = WriteOwn(m, fileName);
+        if (m.Source is not { Program: "sap2000" } source) return own;
+        try { return own with { Text = SourceTables.Merge(source, own.Text) }; }
+        catch (Exception ex) when (ex is FormatException or InvalidDataException or IOException)
+        {
+            return own with { Notes = [.. own.Notes, $"The SAP2000 file this model was opened from could not be read back ({ex.Message}); its tables were written from the model."] };
+        }
+    }
+
+    /// <summary>The model as CSI ProMax writes it, without the file it was opened from.</summary>
+    public static Result WriteOwn(StructuralModel m, string fileName = "model.s2k")
     {
         var notes = new List<string>();
         var tables = new List<string>();
@@ -44,7 +58,10 @@ public static class S2kWriter
         // Analyze > Set Active Degrees of Freedom (the form's row; each one on when not set).
         var activeDof = m.DefinitionTables?.GetValueOrDefault("Active Degrees of Freedom")?.FirstOrDefault();
         Add(tables, "ACTIVE DEGREES OF FREEDOM", new[] { "UX", "UY", "UZ", "RX", "RY", "RZ" }.Select(dofKey => (dofKey, activeDof?.GetValueOrDefault(dofKey) is { Length: > 0 } dofOn ? dofOn : "Yes")).ToList());
-        Add(tables, "COORDINATE SYSTEMS", Row(("Name", "GLOBAL"), ("Type", "Cartesian"), ("X", "0"), ("Y", "0"), ("Z", "0"), ("AboutZ", "0"), ("AboutY", "0"), ("AboutX", "0")));
+        // GLOBAL, then the other systems Define > Coordinate Systems/Grids keeps (DefineTables.SapHinges "Coordinate Systems").
+        var otherSystems = (m.DefinitionTables?.GetValueOrDefault("Coordinate Systems") ?? []).Where(r => !(r.GetValueOrDefault("Name") ?? "").Equals("GLOBAL", StringComparison.OrdinalIgnoreCase)).ToList();
+        Add(tables, "COORDINATE SYSTEMS", new[] { Row(("Name", "GLOBAL"), ("Type", "Cartesian"), ("X", "0"), ("Y", "0"), ("Z", "0"), ("AboutZ", "0"), ("AboutY", "0"), ("AboutX", "0")) }
+            .Concat(otherSystems.Select(r => (IReadOnlyList<(string, string)>)DefineTables.SapHinges["Coordinate Systems"].Where(r.ContainsKey).Select(f => (f, r[f])).ToList())));
 
         // Grids: the plan grids, and a Z grid line at each story level so the levels can still be found in SAP2000.
         var grids = new List<IReadOnlyList<(string, string)>>();
@@ -54,6 +71,9 @@ public static class S2kWriter
         for (var i = 0; i < m.Stories.Count; i++)
             grids.Add(Row(("CoordSys", "GLOBAL"), ("AxisDir", "Z"), ("GridID", m.Stories[i].Name), ("XRYZCoord", N(m.Elevation(i))),
                 ("LineType", "Primary"), ("LineColor", "Gray8Dark"), ("Visible", "Yes"), ("BubbleLoc", "End")));
+        // The other systems' grid lines, as their Define Grid System Data form keeps them.
+        foreach (var gr in (m.DefinitionTables?.GetValueOrDefault("Grid Lines") ?? []).Where(gl => otherSystems.Any(o => o.GetValueOrDefault("Name") == gl.GetValueOrDefault("CoordSys"))))
+            grids.Add(DefineTables.SapHinges["Grid Lines"].Where(gr.ContainsKey).Select(f => (f, gr[f])).ToList());
         Add(tables, "GRID LINES", grids);
 
         Materials(m, tables, notes, m.Units.Length);
@@ -355,6 +375,21 @@ public static class S2kWriter
         // release it imports (SAP2000 26.3, 2026-11-26); the constraints are set after the file opens.
         Add(tables, "AREA EDGE RELEASE ASSIGNMENTS", edgeReleases);
         Add(tables, "JOINT PANEL ZONE ASSIGNMENTS", panelZones);
+        // SAP2000's own per-object assignment and load tables (SapObjectTables), each row with the object's name first.
+        var own = new SortedDictionary<string, List<IReadOnlyList<(string, string)>>>(StringComparer.OrdinalIgnoreCase);
+        void Own(Assign a, string name)
+        {
+            var kind = AssignTables.KindOf(a);
+            foreach (var (table, rows) in a.Tables ?? [])
+                if (SapObjectTables.Tables.TryGetValue(table, out var st) && st.Kind == kind)
+                    foreach (var r in rows)
+                        (own.TryGetValue(table, out var list) ? list : own[table] = []).Add(new[] { (SapObjectTables.KeyField(kind), name) }.Concat(st.Fields.Where(r.ContainsKey).Select(f => (f, r[f]))).ToList());
+        }
+        foreach (var x in m.LineAssigns) if (frameNames.TryGetValue((x.Label, x.Story), out var ofn)) Own(x, ofn);
+        foreach (var x in m.AreaAssigns) if (areaNames.TryGetValue((x.Label, x.Story), out var oan)) Own(x, oan);
+        foreach (var pa in m.PointAssigns)
+            if (pa.Tables is not null && m.StoryIndex(pa.Story) is var osi && osi >= 0 && points.TryGetValue(pa.Point, out var op)) Own(pa, Joint(Physical.At(m, op, osi)));
+        foreach (var (ownTable, ownRows) in own) Add(tables, SapObjectTables.Name(ownTable).ToUpperInvariant(), ownRows);
         Add(tables, "GENERALIZED DISPLACEMENT DEFINITIONS 1 - TRANSLATIONAL", genTrans);
         Add(tables, "GENERALIZED DISPLACEMENT DEFINITIONS 2 - ROTATIONAL", genRot);
 
@@ -369,7 +404,7 @@ public static class S2kWriter
             var row = new List<(string, string)> { ("Name", c.Name) };
             if (c.Type != "Local") row.Add(("CoordSys", "GLOBAL"));
             if (ExtrasDefs.HasAxis(c.Type)) row.Add(("Axis", c.Axis));
-            if (c.Type == "Diaphragm") row.Add(("MultiLevel", "No"));
+            if (c.Type == "Diaphragm") { row.Add(("MultiLevel", c.MultiLevel ? "Yes" : "No")); if (c.SemiRigid) row.Add(("SemiRigid", "Yes")); }
             if (ExtrasDefs.HasDofs(c.Type))
                 foreach (var d in c.Type == "Local" ? ExtrasDefs.LocalDofs : ExtrasDefs.GlobalDofs) row.Add((d, c.Dofs.Contains(d) ? "Yes" : "No"));
             if (c.Type == "Weld") row.Add(("Tolerance", N(c.Tolerance)));
@@ -424,17 +459,23 @@ public static class S2kWriter
         }
 
         // Section cuts by group, with the result type, location and axes their Section Cut Data form set.
-        var cuts = StructureExtras.Cuts(m).Where(c => groups.ContainsKey(c.Group)).ToList();
+        var cuts = StructureExtras.Cuts(m).Where(c => groups.ContainsKey(c.Group) || c.Group.Equals("ALL", StringComparison.OrdinalIgnoreCase)).ToList();
         if (cuts.Count > 0)
             Add(tables, "SECTION CUTS 1 - GENERAL", cuts.Select(c =>
             {
                 var x = StructureExtras.Get(m, StructureExtras.CutTable, c.Name);
                 string V(string k, string d) => x.TryGetValue(k, out var v) && v.Length > 0 ? v : d;
                 var user = V("ResultLoc", "Default").Equals("User", StringComparison.OrdinalIgnoreCase) || V("ResultLoc", "Default").StartsWith("User", StringComparison.OrdinalIgnoreCase);
-                return Row(("CutName", c.Name), ("DefinedBy", "Group"), ("Group", c.Group), ("ResultType", V("ResultType", "Analysis").StartsWith("Design", StringComparison.OrdinalIgnoreCase) ? "Design" : "Analysis"),
+                return Row(("CutName", c.Name), ("DefinedBy", V("DefinedBy", "Group").StartsWith("Quad", StringComparison.OrdinalIgnoreCase) ? "Quadrilateral" : "Group"), ("Group", c.Group), ("ResultType", V("ResultType", "Analysis").StartsWith("Design", StringComparison.OrdinalIgnoreCase) ? "Design" : "Analysis"),
                     ("DefaultLoc", user ? "No" : "Yes"), ("GlobalX", V("LocX", "0")), ("GlobalY", V("LocY", "0")), ("GlobalZ", V("LocZ", "0")),
-                    ("AngleA", V("RotAboutZ", "0")), ("AngleB", V("RotAboutY", "0")), ("AngleC", V("RotAboutX", "0")), ("AdvanceAxes", "No"), ("NumQuads", "0"));
+                    ("AngleA", V("RotAboutZ", "0")), ("AngleB", V("RotAboutY", "0")), ("AngleC", V("RotAboutX", "0")), ("AdvanceAxes", V("AdvanceAxes", "No")), ("NumQuads", Quads(x).Count.ToString(CultureInfo.InvariantCulture)))
+                    // SAP2000's design axes and reported side, when the form set them.
+                    .Concat(new[] { "DesignType", "DesignAngle", "ElemSide" }.Where(x.ContainsKey).Select(k => (k, x[k]))).ToList();
             }));
+        // Quadrilateral cutting planes: 4 points each, as Section Cut Data's Quadrilateral Cutting Planes grid has them.
+        var quadRows = cuts.SelectMany(c => Quads(StructureExtras.Get(m, StructureExtras.CutTable, c.Name)).SelectMany((qd, i) => qd.Select((pt, j) =>
+            Row(("SectionCut", c.Name), ("QuadNum", (i + 1).ToString(CultureInfo.InvariantCulture)), ("PointNum", (j + 1).ToString(CultureInfo.InvariantCulture)), ("X", pt[0]), ("Y", pt[1]), ("Z", pt[2]))))).ToList();
+        if (quadRows.Count > 0) Add(tables, "SECTION CUTS 3 - QUADRILATERAL DEFINITIONS", quadRows);
 
         // Loads.
         var patternTypes = m.LoadPatterns.ToDictionary(p => p.Name, p => DesignType(p.Type), StringComparer.OrdinalIgnoreCase);
@@ -526,11 +567,13 @@ public static class S2kWriter
 
         // The tables of a SAP2000 file the Modeler opened that it has no form for, as the file had them.
         // SAP2000's own hinge definitions, kept as its table rows.
-        foreach (var (t, rows) in (m.DefinitionTables ?? []).Where(x => DefineTables.IsSap(x.Key)).OrderBy(x => x.Key, StringComparer.Ordinal))
+        foreach (var (t, rows) in (m.DefinitionTables ?? []).Where(x => DefineTables.SapHinges.ContainsKey(x.Key) && !DefineTables.IsGridTable(x.Key)).OrderBy(x => x.Key, StringComparer.Ordinal))
             Add(tables, t.ToUpperInvariant(), rows.Select(r => (IReadOnlyList<(string, string)>)DefineTables.SapHinges[t].Where(r.ContainsKey).Select(f => (f, r[f])).ToList()));
         // The preference and analysis option forms (ProgramForms), as SAP2000's own tables.
         foreach (var (t, rows) in (m.DefinitionTables ?? []).Where(x => ProgramForms.HasForm(ProgramOptions.Sap2000, x.Key) && !x.Key.Equals("Active Degrees of Freedom", StringComparison.OrdinalIgnoreCase)).OrderBy(x => x.Key, StringComparer.Ordinal))
             Add(tables, t.ToUpperInvariant(), rows.Take(1).Select(r => (IReadOnlyList<(string, string)>)ProgramForms.Fields(ProgramOptions.Sap2000, t).Where(f => r.ContainsKey(f.Key)).Select(f => (f.Key, r[f.Key])).ToList()).Where(r => r.Count > 0));
+        // SAP2000's own load tables: every Load Pattern, Load Case and Load Combination field its forms have.
+        SapLoadTables.MergeInto(m, tables);
         KeptTables.WriteInto(m, "sap2000", tables);
 
         var at = SavedAt ?? DateTime.Now;
@@ -628,7 +671,7 @@ public static class S2kWriter
             else if (OpenName(shape) is { } open && OpenShape(open, d, b, tf, tw, s.Number("DIS") ?? 0) is { } parts) { name = open is "Concrete Tee" or "Concrete L" ? "General" : open; p = Composite(parts); }
             else
             {
-                if (m.LineAssigns.Exists(x => x.Section == s.Name))
+                if (m.LineAssigns.Exists(x => x.Section == s.Name) && !DefineTables.HasRow(m, DefineTables.SapFrameGeneral, s.Name))
                     notes.Add($"Frame section {s.Name} ({s.Shape}) has no plain SAP2000 shape here and was left out: define it in SAP2000 (Define > Section Properties > Frame Sections).");
                 continue;
             }
@@ -649,6 +692,7 @@ public static class S2kWriter
                 ("Notes", PropertyDefs.FrameExtras(s).GetValueOrDefault("Notes") ?? ""), ("FilletRadius", PropertyDefs.FrameExtras(s).GetValueOrDefault("FilletRad") ?? "0"),
                 ("AMod", N(fm["AMOD"])), ("A2Mod", N(fm["A2MOD"])), ("A3Mod", N(fm["A3MOD"])), ("JMod", N(fm["JMOD"])), ("I2Mod", N(fm["I2MOD"])), ("I3Mod", N(fm["I3MOD"])), ("MMod", N(fm["MMOD"])), ("WMod", N(fm["WMOD"]))));
         }
+        SapRows(m, DefineTables.SapFrameGeneral, "SectionName", rows, (n, r) => shapes[n] = r.GetValueOrDefault("Shape") ?? "General");
         Add(tables, "FRAME SECTION PROPERTIES 01 - GENERAL", rows);
 
         // Link properties: their type and each direction's effective (linear) stiffness and damping.
@@ -658,14 +702,21 @@ public static class S2kWriter
             "PLASTIC (WEN)" => "Plastic (Wen)", "MULTILINEAR ELASTIC" => "MultiLinear Elastic", "MULTILINEAR PLASTIC" => "MultiLinear Plastic",
             _ => CultureInfo.InvariantCulture.TextInfo.ToTitleCase(t.ToLowerInvariant()),
         };
-        Add(tables, "LINK PROPERTY DEFINITIONS 01 - GENERAL", links.Select(l => Row(("Link", l.Name), ("LinkType", LinkType(l.Type)), ("Mass", "0"), ("Weight", "0"),
-            ("RotInert1", "0"), ("RotInert2", "0"), ("RotInert3", "0"), ("DefLength", "1"), ("DefArea", "1"), ("PDM2I", "0"), ("PDM2J", "0"), ("PDM3I", "0"), ("PDM3J", "0"))));
+        // A link SAP2000's own rows hold (Link/Support Property Data in SAP2000's words) goes back as those rows.
+        var sapLinks = (m.DefinitionTables?.GetValueOrDefault(DefineTables.SapLinkGeneral) ?? []).Select(r => r.GetValueOrDefault("Link") ?? "").Where(n => n.Length > 0).ToHashSet(StringComparer.Ordinal);
+        var linkRows = links.Where(l => !sapLinks.Contains(l.Name)).Select(l => Row(("Link", l.Name), ("LinkType", LinkType(l.Type)), ("Mass", "0"), ("Weight", "0"),
+            ("RotInert1", "0"), ("RotInert2", "0"), ("RotInert3", "0"), ("DefLength", "1"), ("DefArea", "1"), ("PDM2I", "0"), ("PDM2J", "0"), ("PDM3I", "0"), ("PDM3J", "0"))).ToList();
+        SapRows(m, DefineTables.SapLinkGeneral, "Link", linkRows);
+        Add(tables, "LINK PROPERTY DEFINITIONS 01 - GENERAL", linkRows);
         // "02 - Linear" takes only linear links (SAP2000 26 skipped a rubber isolator's rows there, 0.4.39): the other
         // types' stiffness goes in their own table, not known yet, so it is said in a note.
-        foreach (var l in links.Where(l => LinkType(l.Type) != "Linear" && l.Dofs.Count > 0))
+        foreach (var l in links.Where(l => LinkType(l.Type) != "Linear" && l.Dofs.Count > 0 && !sapLinks.Contains(l.Name)))
             notes.Add($"Link property {l.Name} ({LinkType(l.Type)}) goes across with its type only: set its stiffness and damping in SAP2000 (Define > Section Properties > Link/Support Properties).");
-        Add(tables, "LINK PROPERTY DEFINITIONS 02 - LINEAR", links.Where(l => LinkType(l.Type) == "Linear").SelectMany(l => l.Dofs.Select(d => Row(("Link", l.Name), ("DOF", d.Key), ("Fixed", "No"),
-            (d.Key[0] == 'U' ? "TransKE" : "RotKE", N(d.Value.Stiff)), (d.Key[0] == 'U' ? "TransCE" : "RotCE", N(d.Value.Damp))))));
+        var linearRows = links.Where(l => LinkType(l.Type) == "Linear" && !sapLinks.Contains(l.Name)).SelectMany(l => l.Dofs.Select(d => Row(("Link", l.Name), ("DOF", d.Key), ("Fixed", "No"),
+            (d.Key[0] == 'U' ? "TransKE" : "RotKE", N(d.Value.Stiff)), (d.Key[0] == 'U' ? "TransCE" : "RotCE", N(d.Value.Damp))))).ToList();
+        foreach (var r in m.DefinitionTables?.GetValueOrDefault(DefineTables.SapLinkLinear) ?? [])
+            if (sapLinks.Contains(r.GetValueOrDefault("Link") ?? "")) linearRows.Add(DefineTables.SapHinges[DefineTables.SapLinkLinear].Where(r.ContainsKey).Select(f => (f, r[f])).ToList());
+        Add(tables, "LINK PROPERTY DEFINITIONS 02 - LINEAR", linearRows);
         return shapes;
     }
 
@@ -685,7 +736,7 @@ public static class S2kWriter
         {
             if (s.Thickness is not { } t || t <= 0 || s.Material.Length == 0)
             {
-                if (m.AreaAssigns.Exists(x => x.Section == s.Name))
+                if (m.AreaAssigns.Exists(x => x.Section == s.Name) && !DefineTables.HasRow(m, DefineTables.SapAreaSections, s.Name))
                     notes.Add($"Slab or wall section {s.Name} has no plain SAP2000 equal here (a deck, say) and was left out.");
                 continue;
             }
@@ -707,6 +758,7 @@ public static class S2kWriter
                 ("Thickness", N(t)), ("BendThick", sx.GetValueOrDefault("BendThick") ?? N(t)), ("Color", sx.GetValueOrDefault("Color") ?? (s.IsWall ? "Red" : "Cyan")), ("Notes", sx.GetValueOrDefault("Notes") ?? ""),
                 ("F11Mod", N(sm["F11MOD"])), ("F22Mod", N(sm["F22MOD"])), ("F12Mod", N(sm["F12MOD"])), ("M11Mod", N(sm["M11MOD"])), ("M22Mod", N(sm["M22MOD"])), ("M12Mod", N(sm["M12MOD"])), ("V13Mod", N(sm["V13MOD"])), ("V23Mod", N(sm["V23MOD"])), ("MMod", N(sm["MMOD"])), ("WMod", N(sm["WMOD"]))));
         }
+        SapRows(m, DefineTables.SapAreaSections, "Section", rows, (n, _) => names.Add(n));
         Add(tables, "AREA SECTION PROPERTIES", rows);
         Add(tables, "AREA SECTION PROPERTY LAYERS", layers);
         return names;
@@ -771,9 +823,19 @@ public static class S2kWriter
     /// <summary>The functions as SAP2000's user function tables.</summary>
     private static void Functions(StructuralModel m, List<string> tables)
     {
-        var fs = AnalysisDefs.ListFunctions(m);
-        Add(tables, "FUNCTION - RESPONSE SPECTRUM - USER", fs.Where(f => f.Kind == "spectrum").SelectMany(f => f.Points.Select(p => Row(("Name", f.Name), ("Period", N(p.X)), ("Accel", N(p.Y)), ("FuncDamp", N(f.Damping))))));
-        Add(tables, "FUNCTION - TIME HISTORY - USER", fs.Where(f => f.Kind == "history").SelectMany(f => f.Points.Select(p => Row(("Name", f.Name), ("Time", N(p.X)), ("Value", N(p.Y))))));
+        // A function made in SAP2000's own forms (a code spectrum, a sine, From File, a power spectral density ...) goes in
+        // its own table with every parameter, as SAP2000 exports it (SapFunctions); the others as user functions.
+        var fs = AnalysisDefs.ListFunctions(m).Where(f => SapFunctions.Find(m, f.Name) is null).ToList();
+        var own = (m.DefinitionTables ?? []).Where(t => SapFunctions.IsTable(t.Key) && t.Value.Count > 0).ToDictionary(t => SapFunctions.Table(t.Key)!, t => t.Value, StringComparer.OrdinalIgnoreCase);
+        IEnumerable<IReadOnlyList<(string, string)>> Own(string table) => own.TryGetValue(table, out var rows)
+            ? rows.Select(r => (IReadOnlyList<(string, string)>)SapFunctions.Tables[table].Where(r.ContainsKey).Select(f => (f, r[f])).ToList()) : [];
+        Add(tables, "FUNCTION - RESPONSE SPECTRUM - USER", Own("Function - Response Spectrum - User").Concat(fs.Where(f => f.Kind == "spectrum").SelectMany(f => f.Points.Select(p => Row(("Name", f.Name), ("Period", N(p.X)), ("Accel", N(p.Y)), ("FuncDamp", N(f.Damping)))))));
+        Add(tables, "FUNCTION - TIME HISTORY - USER", Own("Function - Time History - User").Concat(fs.Where(f => f.Kind == "history").SelectMany(f => f.Points.Select(p => Row(("Name", f.Name), ("Time", N(p.X)), ("Value", N(p.Y)))))));
+        // ETABS's own power spectral density and steady state functions (FUNCTYPE in the .e2k) as SAP2000's user ones.
+        Add(tables, "FUNCTION - POWER SPECTRAL DENSITY - USER", Own("Function - Power Spectral Density - User").Concat(fs.Where(f => f.Kind == "powerspecdensity").SelectMany(f => f.Points.Select(p => Row(("Name", f.Name), ("Frequency", N(p.X)), ("Value", N(p.Y)))))));
+        Add(tables, "FUNCTION - STEADY STATE - USER", Own("Function - Steady State - User").Concat(fs.Where(f => f.Kind == "steadystate").SelectMany(f => f.Points.Select(p => Row(("Name", f.Name), ("Frequency", N(p.X)), ("Value", N(p.Y)))))));
+        foreach (var t in own.Keys.Where(k => !k.EndsWith(" - User", StringComparison.OrdinalIgnoreCase)).OrderBy(k => k, StringComparer.Ordinal))
+            Add(tables, t.ToUpperInvariant(), Own(t));
     }
 
     /// <summary>The case types beyond linear static and modal: nonlinear static, response spectrum, histories, buckling.</summary>
@@ -1022,6 +1084,28 @@ public static class S2kWriter
     private static string N(double v) => CsiTableText.Number(v);
     private static string YesNo(bool v) => v ? "Yes" : "No";
     private static IReadOnlyList<(string, string)> Row(params (string, string)[] pairs) => pairs;
+
+    /// <summary>SAP2000's own rows of a section table (DefineTables.SapHinges) put over the rows the writer made: a
+    /// section SAP2000 holds in a shape the Engine has no geometry for goes back as SAP2000 had it.</summary>
+    private static void SapRows(StructuralModel m, string table, string key, List<IReadOnlyList<(string, string)>> rows, Action<string, Dictionary<string, string>>? each = null)
+    {
+        foreach (var r in m.DefinitionTables?.GetValueOrDefault(table) ?? [])
+        {
+            var name = r.GetValueOrDefault(key) ?? "";
+            if (name.Length == 0) continue;
+            var row = DefineTables.SapHinges[table].Where(r.ContainsKey).Select(f => (f, r[f])).ToList();
+            var i = rows.FindIndex(x => x.Any(p => p.Item1 == key && p.Item2 == name));
+            if (i >= 0) rows[i] = row; else rows.Add(row);
+            each?.Invoke(name, r);
+        }
+    }
+
+
+    /// <summary>A section cut's quadrilaterals, kept as "x,y,z;x,y,z;x,y,z;x,y,z" with "|" between them.</summary>
+    private static List<string[][]> Quads(IReadOnlyDictionary<string, string> cut) =>
+        cut.TryGetValue("Quads", out var t) && t.Length > 0
+            ? t.Split('|').Select(qd => qd.Split(';').Select(pt => pt.Split(',')).Where(pt => pt.Length == 3).ToArray()).Where(qd => qd.Length > 0).ToList()
+            : [];
 
     private static void Add(List<string> tables, string name, IReadOnlyList<(string, string)> row) => tables.Add(CsiTableText.Table(name, [row]));
 

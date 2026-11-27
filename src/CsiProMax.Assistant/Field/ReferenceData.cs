@@ -76,6 +76,8 @@ public static class ReferenceData
         // Opens two small files of the Modeler's in the scratch window, then the scratch model again.
         new("whether the program imports the Modeler's files that carry the model after END TABLE DATA", p => p.Key is "sap2000" or "safe", ImportsCarriedModel),
         new("the program's own forms, pictured beside the Engine's (Modeler window\\Form pictures\\Engine forms side by side.html)", null, ReferenceForms.Gather),
+        // Opens copies of the slab examples and new blank models in the scratch window (never saved): after every item that reads the scratch model.
+        new("SAFE's own .f2k of its examples and of a blank model, and each one read, written, imported and exported again by CSI ProMax, with the differences", p => p.Key == "safe", SafeRoundTrip.Gather),
         // Last: it replaces the scratch model in the scratch window with a new blank one (never saved).
         new("the program's defaults, from a new blank model", null, BlankDefaults),
     ];
@@ -87,7 +89,7 @@ public static class ReferenceData
     /// Runs every item for one program and writes gathered.md. Never throws and adds no step: what could not be
     /// gathered is a line in gathered.md, not a failure of the test. Gives the lines back.
     /// </summary>
-    public static IReadOnlyList<string> Run(string workFolder, CsiProgram program, ICsiLink link, string modelPath = "", int processId = 0)
+    public static IReadOnlyList<string> Run(string workFolder, CsiProgram program, ICsiLink link, string modelPath = "", int processId = 0, string note = "")
     {
         var lines = new List<string>();
         try
@@ -99,10 +101,17 @@ public static class ReferenceData
                 try { lines.Add($"- {item.Name}: {item.Run(gather)}"); }
                 catch (Exception ex) when (ex is not OutOfMemoryException) { lines.Add($"- {item.Name}: not gathered ({ex.GetType().Name}: {Short(ex.Message)})"); }
             }
-            gather.Write("gathered.md", $"# Reference data from {program.Name}\n\nNeeded things the field test gathered by itself. These are not test results and not bugs.\n\n{string.Join("\n", lines)}\n");
+            gather.Write("gathered.md", $"# Reference data from {program.Name}\n\nNeeded things the field test gathered by itself. These are not test results and not bugs.{(note.Length > 0 ? " " + note : "")}\n\n{string.Join("\n", lines)}\n");
         }
         catch (Exception ex) when (ex is not OutOfMemoryException) { lines.Add($"- nothing could be written ({ex.GetType().Name}: {Short(ex.Message)})"); }
         return lines;
+    }
+
+    /// <summary>gathered.md with only a note: why nothing could be gathered from the program.</summary>
+    public static void Note(string workFolder, CsiProgram program, string note)
+    {
+        try { new Gather(program, null!, Path.Combine(workFolder, FolderName, program.Name)).Write("gathered.md", $"# Reference data from {program.Name}\n\n{note}\n"); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* the report still says the test ran */ }
     }
 
     /// <summary>The report's section: what was gathered for each program, read from the work folder. "" when nothing was.</summary>

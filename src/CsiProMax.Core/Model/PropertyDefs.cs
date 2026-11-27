@@ -579,6 +579,20 @@ public static class PropertyDefs
         return list;
     }
 
+    /// <summary>The Engine's link type for a SAP2000 or ETABS link type (SAP2000's dampers, isolators and the rest
+    /// keep their own type in SAP2000's rows; the Engine analyses them by their effective stiffness and damping).</summary>
+    public static string EngineLinkType(string type)
+    {
+        var t = type.Trim();
+        if (LinkTypes.FirstOrDefault(x => x.Equals(t, StringComparison.OrdinalIgnoreCase)) is { } same) return same;
+        if (t.Contains("Damper", StringComparison.OrdinalIgnoreCase)) return "DAMPER";
+        if (t.Contains("Rubber", StringComparison.OrdinalIgnoreCase)) return "RUBBER ISOLATOR";
+        if (t.Contains("Friction", StringComparison.OrdinalIgnoreCase) || t.Contains("Pendulum", StringComparison.OrdinalIgnoreCase) || t.Contains("Sliding", StringComparison.OrdinalIgnoreCase)) return "FRICTION ISOLATOR";
+        if (t.Contains("Wen", StringComparison.OrdinalIgnoreCase)) return "PLASTIC (WEN)";
+        if (t.Contains("MultiLinear", StringComparison.OrdinalIgnoreCase)) return t.Contains("Plastic", StringComparison.OrdinalIgnoreCase) ? "MULTILINEAR PLASTIC" : "MULTILINEAR ELASTIC";
+        return "LINEAR";
+    }
+
     public static void SetLink(StructuralModel m, string name, string type, IReadOnlyDictionary<string, (double Stiff, double Damp)> dofs)
     {
         Name(name, "link property");

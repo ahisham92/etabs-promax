@@ -60,6 +60,8 @@ public static class AssignTables
         foreach (var target in new[] { ProgramOptions.Etabs, ProgramOptions.Sap2000 })
             foreach (var (table, fields) in ProgramForms.OverwriteCatalog(target))
                 tables[table] = (table == ProgramForms.SlabOverwrites ? "area" : "frame", fields.Select(f => (f.Key, f.Label)).ToArray());
+        // SAP2000's own per-object tables (SapObjectTables), each field by SAP2000's own name.
+        foreach (var (table, t) in SapObjectTables.Tables) tables[table] = (t.Kind, t.Fields.Select(f => (f, f)).ToArray());
         return tables;
     }
 
@@ -67,7 +69,8 @@ public static class AssignTables
     public const string Insertion = "Frame Assignments - Insertion Point";
 
     /// <summary>The tables with a row per edge or corner of the object, not one row.</summary>
-    public static readonly string[] ManyRows = ["Area Edge Release Assignments", "Area Assignments - Edge Releases", "Area Assignments - Thickness Overwrites", "Area Assignments - Slab Rib Locations"];
+    public static readonly string[] ManyRows = ["Area Edge Release Assignments", "Area Assignments - Edge Releases", "Area Assignments - Thickness Overwrites", "Area Assignments - Slab Rib Locations",
+        .. SapObjectTables.Tables.Where(t => t.Value.Many).Select(t => t.Key)];
 
     /// <summary>The kind of objects an assignment is for.</summary>
     public static string KindOf(Assign a) => a switch { LineAssign => "frame", AreaAssign => "area", _ => "joint" };

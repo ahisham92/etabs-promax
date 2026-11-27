@@ -69,6 +69,14 @@ public static class Program
         return info;
     }
 
+    /// <summary>What --version prints: the version running, and a newer one already downloaded when there is one.</summary>
+    internal static string VersionText()
+    {
+        var running = typeof(Program).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? Updater.Current.ToString();
+        return Updater.NewestDownloaded(Updater.Current) is { } newer ? $"{running} (a newer version is downloaded: {newer})" : running;
+    }
+
     [STAThread]
     public static int Main(string[] args)
     {
@@ -101,6 +109,9 @@ public static class Program
             var folder = sapTest + 2 < args.Length ? args[sapTest + 2] : Path.Combine(Path.GetTempPath(), "CsiProMax-sap-test");
             return CsiProMax.Assistant.Sap2000.SapScratchTest.Run(s2k, folder);
         }
+        // The values SAP2000 writes in its own definition tables, for the Engine's SAP2000 forms (Ahmed 2026-11-27: no guessed names).
+        if (Array.IndexOf(args, "--sap2000-table-values") is var tv and >= 0 && tv + 1 < args.Length)
+            return CsiProMax.Assistant.Sap2000.SapTableValues.Run(args[tv + 1], args.Skip(tv + 2).TakeWhile(a => !a.StartsWith("--", StringComparison.Ordinal)).ToList());
         // An update check with no window (the Tools menu keeper runs it hourly): a PC where no CSI ProMax window or
         // watcher is open still gets the newest version into versions\, which the Tools menu, the tests and the window
         // then start. On 2026-11-27 Ahmed's PC had none open and 0.4.68 never arrived.
@@ -120,6 +131,8 @@ public static class Program
             }
             catch (Exception ex) when (ex is not OutOfMemoryException) { Console.Error.WriteLine("The check did not run: " + ex.Message); return 2; }
         }
+        // The version, printed, and no window: on 2026-11-27 "--version" on Ahmed's PC opened a CSI ProMax window instead.
+        if (args.Contains("--version")) { Console.WriteLine(VersionText()); return 0; }
         if (args.Contains("--check-update"))
         {
             try

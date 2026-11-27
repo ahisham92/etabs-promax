@@ -103,7 +103,7 @@ static class DefineTablesTests
             Check(!sap["assign_tables"]!.AsObject().ContainsKey("Frame Assignments - Floor Cracking") && sap["assign_tables"]!.AsObject().ContainsKey("Frame Assignments - Output Stations"), "SAP2000: output stations but no floor cracking");
             Check(Names(sap["slab_types"]!).Length == 0, "SAP2000 has no slab types");
             Check(!Names(Run(link, "model_definitions", new { })["pattern_types"]!).Contains("Seismic (Drift)"), "SAP2000 has no drift seismic patterns");
-            Check(Run(link, "definition_data", new { })["tables"]!.AsObject().All(t => t.Key.EndsWith("Layers") || t.Key.StartsWith("Generalized") || t.Key.StartsWith("Hinges Def")), "SAP2000's definition tables");
+            Check(Run(link, "definition_data", new { })["tables"]!.AsObject().All(t => t.Key.EndsWith("Layers") || t.Key.StartsWith("Generalized") || t.Key.StartsWith("Hinges Def") || DefineTables.IsSap(t.Key)), "SAP2000's definition tables");
             link.Model.Target = "safe";
             var safe = Run(link, "property_definitions", new { });
             Check(Names(safe["shapes"]!).All(s => s.StartsWith("Concrete")), "SAFE: concrete shapes only");

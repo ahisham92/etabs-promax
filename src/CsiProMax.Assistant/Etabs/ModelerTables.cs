@@ -24,13 +24,20 @@ public static class ModelerTables
     public static (List<string> Done, List<string> Refused) Apply(ICsiLink e, string cpm)
     {
         var model = ModelFile.Load(cpm);
-        if (e.Program.Key == CsiProgram.Sap2000.Key) return ApplySap(e, model);
+        var (done0, refused0) = e.Program.Key == CsiProgram.Sap2000.Key ? ApplySap(e, model) : ApplyEtabs(e, model);
+        // Last, what the program's own model held that its text file does not carry (measured when it came from there).
+        var (carriedDone, carriedRefused) = ProgramCarry.Apply(e, model);
+        return ([.. done0, .. carriedDone], [.. refused0, .. carriedRefused]);
+    }
+
+    private static (List<string> Done, List<string> Refused) ApplyEtabs(ICsiLink e, StructuralModel model)
+    {
         var done = new List<string>(); var refused = new List<string>();
         foreach (var (table, rows) in ProgramTables.MaterialRows(model).OrderBy(t => t.Key, StringComparer.Ordinal))
         {
             try
             {
-                EditableTables.Put(e, table, "Material", rows.Select(r => (IReadOnlyDictionary<string, string>)r).ToList(), $"put the Modeler's '{table}' in");
+                EditableTables.Put(e, table, "Material", rows.Select(r => (IReadOnlyDictionary<string, string>)ProgramTables.WithoutSapOnly(table, r)).ToList(), $"put the Modeler's '{table}' in");
                 done.Add($"{table}: {rows.Count} row{(rows.Count == 1 ? "" : "s")}");
             }
             catch (EtabsException ex) { refused.Add($"{table}: {ex.Message}"); }
@@ -126,7 +133,7 @@ public static class ModelerTables
     public static bool HasRows(string cpm, CsiProgram program)
     {
         var model = ModelFile.Load(cpm);
-        return AssignTables.Rows(model).Count > 0 || (program.Key == CsiProgram.Etabs.Key && (model.Materials.Any(x => x.Tables is not null) || model.FrameSections.Any(x => x.Tables is not null || FrameTableShapes.Is(x.Shape)) || (model.DefinitionTables ?? []).Keys.Any(k => ProgramOptions.HasDefinitionTable(ProgramOptions.Etabs, k))))
+        return ProgramCarry.Has(model, program) || AssignTables.Rows(model).Count > 0 || (program.Key == CsiProgram.Etabs.Key && (model.Materials.Any(x => x.Tables is not null) || model.FrameSections.Any(x => x.Tables is not null || FrameTableShapes.Is(x.Shape)) || (model.DefinitionTables ?? []).Keys.Any(k => ProgramOptions.HasDefinitionTable(ProgramOptions.Etabs, k))))
             || (program.Key != CsiProgram.Sap2000.Key && SlabDefs.SlabRebars(model).Count > 0);
     }
 
