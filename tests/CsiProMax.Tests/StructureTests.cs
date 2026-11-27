@@ -14,7 +14,7 @@ static class StructureTests
     static OfflineEtabs Frame() => new(Templates.ConcreteFrame("Structure", [6, 5], [4], 3, 3.2));
 
     static JsonObject Run(ICsiLink link, string tool, object args) =>
-        (JsonObject)StructureTools.All.Single(x => x.Name == tool).Run(JsonDocument.Parse(JsonSerializer.Serialize(args)).RootElement, link);
+        (JsonObject)StructureTools.All.Concat(HandTools.All).Single(x => x.Name == tool).Run(JsonDocument.Parse(JsonSerializer.Serialize(args)).RootElement, link);
 
     static void Refused(OfflineEtabs link, string tool, object args, string says)
     {
