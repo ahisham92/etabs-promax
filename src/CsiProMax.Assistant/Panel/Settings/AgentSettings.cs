@@ -49,6 +49,9 @@ public sealed class AgentSettings
     /// <summary>Download new versions from GitHub when ETABS starts; they take effect the next time ETABS opens.</summary>
     public bool AutoUpdate { get; set; } = true;
 
+    /// <summary>Also take the test builds (pre-releases v0.4.67-testN) before they go to everyone: only on the field test PC.</summary>
+    public bool TestBuilds { get; set; }
+
     /// <summary>
     /// CSI ProMax Engine's Run: leave the CSI program open, shown, with the analysed model after the run, instead of
     /// closing it to free its licence. On for now, until runs are settled (Ahmed 2026-11-27); the next run closes it first.

@@ -417,6 +417,32 @@ static class TesterBugTests
             Check(Updater.Behind(old, "0.4.6", "0.4.5", "0.4.5")?.Contains("0.4.6 is out") == true, "a release newer than the download was not named");
         });
 
+        // ---- Ahmed 2026-11-27: a test build had to be pasted in by hand; the field test PC now takes them by itself ----
+
+        yield return ("test builds: v0.4.67-testN is newer than the build before it and older than the next release, and only a PC that asks takes it", () =>
+        {
+            Check(Updater.TagVersion("v0.4.66") == "0.4.66", "a release tag");
+            Check(Updater.TagVersion("v0.4.67-test5") == "0.4.67.5", "a test build tag");
+            Check(Updater.TagVersion("v0.4.67-rc1") is null && Updater.TagVersion("nightly") is null, "an unknown tag was taken");
+            var order = new[] { "0.4.66", "0.4.67", "0.4.67.4", "0.4.67.5", "0.4.68" }.Select(Updater.Parse).ToArray();
+            for (var i = 1; i < order.Length; i++) Check(order[i] > order[i - 1], $"{order[i]} is not newer than {order[i - 1]}");
+            Check(Updater.Parse("0.4.66.0") == Updater.Parse("0.4.66"), "a plain assembly version 0.4.66.0 is 0.4.66");
+            static string Rel(string tag, bool draft = false, bool zip = true) =>
+                $$"""{"tag_name":"{{tag}}","draft":{{(draft ? "true" : "false")}},"body":"notes","assets":[{"name":"{{(zip ? $"CsiProMax-{tag.TrimStart('v')}.zip" : "other.zip")}}","browser_download_url":"https://example.invalid/{{tag}}.zip","digest":"sha256:abc"}]}""";
+            using (var doc = System.Text.Json.JsonDocument.Parse("[" + string.Join(",", Rel("v0.4.67-test4"), Rel("v0.4.67-test6", draft: true), Rel("v0.4.67-test5"), Rel("v0.4.66"), Rel("v0.4.67-test7", zip: false)) + "]"))
+            {
+                var pick = Updater.PickNewest(doc.RootElement) ?? throw new Exception("nothing picked");
+                Check(pick.Version == "0.4.67.5" && pick.ZipUrl.EndsWith("v0.4.67-test5.zip", StringComparison.Ordinal) && pick.Sha256 == "abc", "picked " + pick);
+            }
+            using (var doc = System.Text.Json.JsonDocument.Parse("[" + string.Join(",", Rel("v0.4.67-test5"), Rel("v0.4.68")) + "]"))
+                Check(Updater.PickNewest(doc.RootElement)?.Version == "0.4.68", "the public release after the test builds was not taken");
+            Check(Updater.Behind(Updater.Parse("0.4.67.4"), "0.4.67.5", null, null)?.Contains("0.4.67.5") == true, "test4 was not told test5 is out");
+            // Off by default: every other PC keeps taking only the public releases.
+            Check(!new CsiProMax.Settings.AgentSettings().TestBuilds, "test builds are on by default");
+            var settings = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Panel/UI/SettingsWindow.cs"));
+            Check(settings.Contains("Get test builds", StringComparison.Ordinal), "the switch is not in Settings > Updates");
+        });
+
         yield return ("second SAFE run: a test on an old version fails its first check, and the report says so at the top", () =>
         {
             try

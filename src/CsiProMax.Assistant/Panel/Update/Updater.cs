@@ -40,7 +40,7 @@ public static class Updater
 
     public static Version Current { get; } = Normalize(typeof(Updater).Assembly.GetName().Version);
 
-    public static string CurrentText => $"{Current.Major}.{Current.Minor}.{Current.Build}";
+    public static string CurrentText => $"{Current.Major}.{Current.Minor}.{Current.Build}" + (Current.Revision > 0 ? $"-test{Current.Revision}" : "");
 
     /// <summary>
     /// Sketch ProMax switches versions inside a running Revit. CSI ProMax is its own window: a new version is used the
@@ -305,7 +305,7 @@ public static class Updater
     /// </summary>
     internal static async Task<Release?> LatestReleaseAsync(CancellationToken ct)
     {
-        var (release, _) = await ReleaseSource.ApiThenWebAsync(LatestReleaseFromApiAsync, LatestReleaseFromWebAsync, ReleaseSource.ApiTimeout, ct).ConfigureAwait(false);
+        var (release, _) = await ReleaseSource.ApiThenWebAsync(TestBuilds() ? NewestWithTestBuildsAsync : LatestReleaseFromApiAsync, LatestReleaseFromWebAsync, ReleaseSource.ApiTimeout, ct).ConfigureAwait(false);
         return release;
     }
 
@@ -537,7 +537,67 @@ public static class Updater
 
     internal static Version Parse(string text) => Normalize(Version.TryParse(text, out var v) ? v : null);
 
-    private static Version Normalize(Version? v) => v is null ? new Version(0, 0, 0) : new Version(v.Major, v.Minor, Math.Max(v.Build, 0));
+    /// <summary>
+    /// Major.minor.build; a test build (tag v0.4.67-test5, built with assembly version 0.4.67.5) keeps its number as the
+    /// fourth part, so test5 is newer than test4 and than the plain 0.4.67, and older than 0.4.68.
+    /// </summary>
+    private static Version Normalize(Version? v) => v is null ? new Version(0, 0, 0)
+        : v.Revision > 0 ? new Version(v.Major, v.Minor, Math.Max(v.Build, 0), v.Revision)
+        : new Version(v.Major, v.Minor, Math.Max(v.Build, 0));
+
+    /// <summary>A release tag as the version this updater compares and names its folder by: v0.4.66 → 0.4.66, v0.4.67-test5 → 0.4.67.5; null for any other tag.</summary>
+    internal static string? TagVersion(string tag)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(tag ?? "", @"^[vV]?(\d+\.\d+\.\d+)(?:-test(\d+))?$");
+        if (!m.Success) return null;
+        return m.Groups[2].Success ? m.Groups[1].Value + "." + int.Parse(m.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture) : m.Groups[1].Value;
+    }
+
+    /// <summary>
+    /// Settings > Updates > "Get test builds" (AgentSettings.TestBuilds): this PC also takes the test builds (pre-releases
+    /// tagged v0.4.67-testN) that the field test PC tries before a version is released to everyone. Off everywhere else.
+    /// </summary>
+    internal static bool TestBuilds()
+    {
+        try { return CsiProMax.Settings.AgentSettings.Load().TestBuilds; }
+        catch (Exception) { return false; }
+    }
+
+    /// <summary>The newest release or test build, from the list of releases: for a PC with <see cref="TestBuilds"/> on.</summary>
+    private static async Task<ReleaseSource.Answer<Release>> NewestWithTestBuildsAsync(CancellationToken ct)
+    {
+        using var http = CreateClient();
+        using var response = await http.GetAsync($"https://api.github.com/repos/{Repository}/releases?per_page=30", ct).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode) return await LatestReleaseFromApiAsync(ct).ConfigureAwait(false);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync().ConfigureAwait(false));
+        return ReleaseSource.Found(PickNewest(doc.RootElement));
+    }
+
+    /// <summary>Of a GitHub list of releases, the newest (by <see cref="TagVersion"/>) that is not a draft and has its package.</summary>
+    internal static Release? PickNewest(JsonElement releases)
+    {
+        Release? best = null;
+        if (releases.ValueKind != JsonValueKind.Array) return null;
+        foreach (var r in releases.EnumerateArray())
+        {
+            if (r.TryGetProperty("draft", out var d) && d.GetBoolean()) continue;
+            var tag = r.TryGetProperty("tag_name", out var t) ? t.GetString() ?? "" : "";
+            if (TagVersion(tag) is not { } version) continue;
+            if (best is not null && Parse(version) <= Parse(best.Version)) continue;
+            var name = tag.TrimStart('v', 'V');
+            if (!r.TryGetProperty("assets", out var assets) || assets.ValueKind != JsonValueKind.Array) continue;
+            foreach (var asset in assets.EnumerateArray())
+            {
+                if (!(asset.GetProperty("name").GetString() ?? "").Equals($"CsiProMax-{name}.zip", StringComparison.OrdinalIgnoreCase)) continue;
+                var digest = asset.TryGetProperty("digest", out var dg) && dg.ValueKind == JsonValueKind.String ? dg.GetString() : null;
+                var sha = digest is not null && digest.StartsWith("sha256:", StringComparison.Ordinal) ? digest.Substring(7) : null;
+                var notes = r.TryGetProperty("body", out var b) && b.ValueKind == JsonValueKind.String ? b.GetString() : null;
+                best = new Release(version, asset.GetProperty("browser_download_url").GetString()!, sha, notes);
+                break;
+            }
+        }
+        return best;
+    }
 
     private sealed class State
     {

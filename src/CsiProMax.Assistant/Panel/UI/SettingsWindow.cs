@@ -934,6 +934,11 @@ public sealed class SettingsWindow : Window
         var page = new StackPanel();
         page.Children.Add(Place("AutoUpdate", _autoUpdate));
         page.Children.Add(Hint($"New versions install while {Csi.Name} stays open and switch over when no job is running."));
+        var tests = Check("Get test builds before they are released to everyone (only on the PC that runs the field test)");
+        tests.IsChecked = _settings.TestBuilds;
+        tests.Click += (_, _) => _settings.TestBuilds = tests.IsChecked == true;
+        page.Children.Add(tests);
+        page.Children.Add(Hint("With this on, each test build installs itself here the same way updates do, with nothing to paste. Press Save to keep it."));
         page.Children.Add(SubHeading("Background work"));
         page.Children.Add(Brand.Text($"CSI ProMax does nothing in {Csi.Name} until you open it from Tools > CSI ProMax, and it never asks a program anything while that program is busy with a run or a design."));
         var packs = Check("Write the review pack beside each model by itself after every analysis and design");
