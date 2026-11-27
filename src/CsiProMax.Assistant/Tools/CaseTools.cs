@@ -48,8 +48,8 @@ public static class CaseTools
               "steps":{"type":"integer"},"step_size":{"type":"number"},"geometric":{"type":"string","enum":["None","P-Delta","P-Delta and Large Displacements"]}}}
             """, Ask.Changes, DefineCase, a => $"Define the load case {a.Text("name")}"),
         new("define_mass_source",
-            "Sets the mass source (Define > Mass Source): the elements' own mass, the added mass, and load patterns with their factors (e.g. Dead 1, SDL 1, Live 0.25). The seismic loads by code are worked out from it again.",
-            """{"type":"object","properties":{"elements":{"type":"boolean","description":"Default true."},"added_mass":{"type":"boolean","description":"Default true."},"loads":{"type":"array","items":{"type":"object","required":["pattern","factor"],"properties":{"pattern":{"type":"string"},"factor":{"type":"number"}}}}}}""",
+            "Sets the mass source (Define > Mass Source): its name, the elements' own mass, the added mass, and load patterns with their factors (e.g. Dead 1, SDL 1, Live 0.25), and the mass options (lateral, vertical, lumped at the stories, centroid moved by a ratio of the diaphragm width). The seismic loads by code are worked out from it again.",
+            """{"type":"object","properties":{"elements":{"type":"boolean","description":"Default true."},"added_mass":{"type":"boolean","description":"Default true."},"name":{"type":"string","description":"Mass Source Name; default the current one."},"lateral":{"type":"boolean","description":"Include Lateral Mass; default true."},"vertical":{"type":"boolean","description":"Include Vertical Mass; default false."},"lump":{"type":"boolean","description":"Lump Lateral Mass at Story Levels; default true."},"move":{"type":"boolean","description":"Adjust Diaphragm Lateral Mass to Move Mass Centroid by move_x and move_y (ratios of the diaphragm width)."},"move_x":{"type":"number"},"move_y":{"type":"number"},"loads":{"type":"array","items":{"type":"object","required":["pattern","factor"],"properties":{"pattern":{"type":"string"},"factor":{"type":"number"}}}}}}""",
             Ask.Changes, DefineMassSource, a => "Set the mass source"),
         new("define_pdelta",
             "Sets the P-Delta option (Define > P-Delta Options): none, non-iterative based on the mass, or iterative based on load patterns with factors (e.g. Dead 1.2, Live 0.5), with the iterations and tolerance.",
@@ -180,8 +180,12 @@ public static class CaseTools
         if (!elements && loads.Count == 0 && !a.Flag("added_mass", true)) throw new ToolInputException("A mass source with nothing in it gives the model no mass.");
         return link.Edit(m =>
         {
-            var name = MassSource.Of(m).Name;
-            new MassSource(name, elements, a.Flag("added_mass", true), loads).WriteTo(m);
+            var now = MassSource.Of(m);
+            var name = a.Text("name", now.Name).Trim();
+            if (name.Length == 0) name = now.Name;
+            var move = a.Flag("move", now.Move);
+            new MassSource(name, elements, a.Flag("added_mass", true), loads, a.Flag("lateral", now.Lateral), a.Flag("vertical", now.Vertical), a.Flag("lump", now.Lump),
+                move, move ? a.Number("move_x", now.MoveX) : 0, move ? a.Number("move_y", now.MoveY) : 0).WriteTo(m);
             return (JsonNode)new JsonObject { ["done"] = $"The mass source {name}: {(elements ? "the elements, " : "")}{string.Join(", ", loads.Select(l => $"{l.Item1} × {E2kText.Number(l.Item2)}"))}".TrimEnd(',', ' ') };
         });
     }
@@ -290,6 +294,7 @@ public static class CaseTools
             ["mass_source"] = new JsonObject
             {
                 ["name"] = ms.Name, ["elements"] = ms.Elements, ["added_mass"] = ms.AddedMass,
+                ["lateral"] = ms.Lateral, ["vertical"] = ms.Vertical, ["lump"] = ms.Lump, ["move"] = ms.Move, ["move_x"] = ms.MoveX, ["move_y"] = ms.MoveY,
                 ["loads"] = new JsonArray(ms.Loads.Select(l => (JsonNode)new JsonObject { ["pattern"] = l.Pattern, ["factor"] = l.Factor }).ToArray()),
             },
             ["pdelta"] = new JsonObject

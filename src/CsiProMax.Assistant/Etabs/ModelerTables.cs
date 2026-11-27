@@ -36,12 +36,24 @@ public static class ModelerTables
             catch (EtabsException ex) { refused.Add($"{table}: {ex.Message}"); }
         }
         // The definitions the .e2k has no keyword for (generalized displacements, hinges, layers, ...), by name.
-        foreach (var (table, rows) in (model.DefinitionTables ?? []).Where(t => ProgramOptions.HasDefinitionTable(ProgramOptions.Etabs, t.Key)).OrderBy(t => t.Key, StringComparer.Ordinal))
+        foreach (var (table, rows) in (model.DefinitionTables ?? []).Where(t => ProgramOptions.HasDefinitionTable(ProgramOptions.Etabs, t.Key) && !t.Key.Equals(CsiProMax.Lateral.MassSource.Table, StringComparison.OrdinalIgnoreCase)).OrderBy(t => t.Key, StringComparer.Ordinal))
         {
             try
             {
                 EditableTables.Put(e, table, "Name", rows.Select(r => (IReadOnlyDictionary<string, string>)r).ToList(), $"put the Modeler's '{table}' in");
                 done.Add($"{table}: {rows.Count} row{(rows.Count == 1 ? "" : "s")}");
+            }
+            catch (EtabsException ex) { refused.Add($"{table}: {ex.Message}"); }
+        }
+        // The mass source's move ratios, on each of its rows (one per load pattern) so none is lost.
+        if (CsiProMax.Lateral.MassSource.Of(model) is { Move: true } ms)
+        {
+            var table = CsiProMax.Lateral.MassSource.Table;
+            var pats = ms.Loads.Count > 0 ? ms.Loads.Select(l => l.Pattern).ToList() : new List<string> { "" };
+            try
+            {
+                EditableTables.Put(e, table, "Name|LoadPattern", pats.Select(p => (IReadOnlyDictionary<string, string>)new Dictionary<string, string> { ["Name"] = ms.Name, ["LoadPattern"] = p, ["MoveMass"] = "Yes", ["RatioX"] = CsiProMax.E2k.E2kText.Number(ms.MoveX), ["RatioY"] = CsiProMax.E2k.E2kText.Number(ms.MoveY) }).ToList(), $"put the Modeler's '{table}' in");
+                done.Add($"{table}: {pats.Count} row{(pats.Count == 1 ? "" : "s")}");
             }
             catch (EtabsException ex) { refused.Add($"{table}: {ex.Message}"); }
         }

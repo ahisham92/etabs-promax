@@ -233,6 +233,14 @@ static class ExtrasTests
                 Check(html.Contains(part), "viewer.html lost " + part);
             Check(!html.Contains("\"Slab or Wall Property Data\""), "ETABS has no Slab or Wall Property Data window: a slab and a wall have forms of their own");
         });
+        yield return ("extras: the load forms match ETABS 23.2 and SAP2000 26.3 field by field: Define Load Patterns with each program's words, Load Cases as a table with Show Load Case Tree, Load Case Data's General, sub-type and Initial Condition, Load Combinations with Add Default Design Combos, Mass Sources then Mass Source Data with the move ratios and Mass Options (Ahmed 2026-11-27)", () =>
+        {
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var part in new[] { "add: \"Add New Load\", mod: \"Modify Load\", lat: \"Modify Lateral Load...\"", "<button id=\"pCopy\">Add Copy of Load Pattern</button>", "<th>Load Case Name</th><th>Load Case Type</th>", "<button data-k=\"tree\">Show Load Case Tree...</button>",
+                "Zero Initial Conditions - Start from Unstressed State", "Continue from State at End of Nonlinear Case", "<span>Exclude Objects in this Group</span>", "Add Code-Generated Load Combinations", "Define Combination of Load Case/Combo Results",
+                "\"Mass Sources\", \"Mass Sources\"", "<span>Mass Source Name</span><input id=\"mN\"", "Adjust Diaphragm Lateral Mass to Move Mass Centroid by:", "This Ratio of Diaphragm Width in X Direction", "<legend>Mass Options</legend>", "Lump Lateral Mass at Story Levels", "Element Self Mass and Additional Mass" })
+                Check(html.Contains(part), "viewer.html lost " + part);
+        });
         yield return ("extras: the views and toolbars are drawn as ETABS draws them: grey see-through slabs with white edges, thin columns, solid grid, light-blue ground grid with flat bubbles, the axes at the origin, column squares in plan, captions as tabs, the toolbar and strip in the program's order (Ahmed 2026-11-26 22:19)", () =>
         {
             var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));

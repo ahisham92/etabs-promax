@@ -121,6 +121,22 @@ static class AnalysisTests
             Refused(link, "define_mass_source", new { loads = new object[] { new { pattern = "Nope", factor = 1 } } }, "no load pattern");
         });
 
+        yield return ("analysis: Mass Source Data in full (name, mass options, centroid moved by a ratio) reads back (Ahmed 2026-11-27, every field)", () =>
+        {
+            var link = Frame();
+            Run(link, "define_mass_source", new { name = "MsSrc2", elements = true, added_mass = false, lateral = true, vertical = true, lump = false, move = true, move_x = 0.05, move_y = 0.1, loads = new object[] { new { pattern = "Live", factor = 0.25 } } });
+            var e2k = E2kWriter.Write(link.Model);
+            Check(e2k.Contains("INCLUDEVERTICALMASS \"Yes\"") && e2k.Contains("LUMPATSTORIES \"No\"") && e2k.Contains("INCLUDEMOVE \"Yes\"") && e2k.Contains("\"MsSrc2\""), "the .e2k has the options and the name");
+            var ms = CsiProMax.Lateral.MassSource.Of(link.Model);
+            Check(ms.Name == "MsSrc2" && !ms.AddedMass && ms.Vertical && !ms.Lump && ms.Move && ms.MoveX == 0.05 && ms.MoveY == 0.1, "read back: " + ms);
+            var back = CsiProMax.Lateral.MassSource.Of(ViaE2k(link.Model));
+            Check(back.Vertical && !back.Lump && back.Move, "the options read back from the .e2k alone");
+            Check(link.Model.DefinitionTables?["Mass Source Definition"].Single()["RatioY"] == "0.1", "the ratios are kept as the program's table row");
+            Run(link, "define_mass_source", new { move = false, loads = new object[] { new { pattern = "Live", factor = 0.25 } } });
+            Check(link.Model.DefinitionTables is null || !link.Model.DefinitionTables.ContainsKey("Mass Source Definition"), "no move, no table row");
+            Check(CsiProMax.Lateral.MassSource.Of(link.Model).Vertical, "an option not given stays as it was");
+        });
+
         yield return ("analysis: P-Delta none, non-iterative and iterative with its loads read back", () =>
         {
             var link = Frame();

@@ -5569,17 +5569,20 @@ async function hmGrids() {
 
 // ---- Define: load patterns (SAP2000's Define Load Patterns: the edit row, then the list) ----
 async function hmPatterns() {
-  const defs = await hmDefs();
+  const defs = await hmDefs(), sapP = program === "sap2000";
+  // The words each program's Define Load Patterns uses: ETABS "Load" and "Add New Load"; SAP2000 "Load Pattern Name" and "Add New Load Pattern".
+  const W = sapP ? {name: "Load Pattern Name", auto: "Auto Lateral Load Pattern", add: "Add New Load Pattern", mod: "Modify Load Pattern", lat: "Modify Lateral Load Pattern...", del: "Delete Load Pattern"}
+    : {name: "Load", auto: "Auto Lateral Load", add: "Add New Load", mod: "Modify Load", lat: "Modify Lateral Load...", del: "Delete Load"};
   let pick = defs.load_patterns.length ? 0 : -1;
   const d = dialog("Define Load Patterns", `<div style="display:flex;gap:10px"><fieldset style="flex:1;margin:0"><legend>Load Patterns</legend>
-      <div class="scroll" style="max-height:46vh"><table class="list hmgrid"><thead><tr><th>Load Pattern Name</th><th>Type</th><th>Self Weight Multiplier</th><th>Auto Lateral Load</th><th>Loads on</th></tr>
-      <tr class="edit"><td><input id="pN"></td><td><select id="pT">${opts(defs.pattern_types, "Dead")}</select></td><td><input id="pS" type="number" step="any" value="0"></td><td></td><td></td></tr></thead><tbody id="pL"></tbody></table></div></fieldset>
-    <fieldset style="width:180px;margin:0"><legend>Click To:</legend><div style="display:flex;flex-direction:column;gap:6px"><button id="pAdd">Add New Load Pattern</button><button id="pMod">Modify Load Pattern</button><button id="pDel">Delete Load Pattern</button><button id="pLat">Modify Lateral Load Pattern...</button></div></fieldset></div>`,
-    [["OK"]], {width: 700});
+      <div class="scroll" style="max-height:46vh"><table class="list hmgrid"><thead><tr><th>${W.name}</th><th>Type</th><th>Self Weight Multiplier</th>${program === "safe" ? "" : `<th>${W.auto}</th>`}</tr>
+      <tr class="edit"><td><input id="pN"></td><td><select id="pT" style="min-width:110px">${opts(defs.pattern_types, "Dead")}</select></td><td><input id="pS" type="number" step="any" value="0"></td>${program === "safe" ? "" : "<td></td>"}</tr></thead><tbody id="pL"></tbody></table></div></fieldset>
+    <fieldset style="width:200px;margin:0"><legend>Click To:</legend><div style="display:flex;flex-direction:column;gap:6px"><button id="pAdd">${W.add}</button>${sapP ? `<button id="pCopy">Add Copy of Load Pattern</button>` : ""}<button id="pMod">${W.mod}</button><button id="pLat">${W.lat}</button><button id="pDel">${W.del}</button></div></fieldset></div>`,
+    [["OK"], ["Cancel"]], {width: 700});
   const L = () => hm.defs ? hm.defs.load_patterns : defs.load_patterns;
   const fill = () => { const p = L()[pick]; if (!p) return; q(d, "#pN").value = p.name; q(d, "#pT").value = p.type; q(d, "#pS").value = p.self_weight; };
   const paint = () => {
-    q(d, "#pL").innerHTML = L().map((p, i) => `<tr data-i="${i}" class="${i === pick ? "on" : ""}"><td>${esc(p.name)}</td><td>${esc(p.type)}</td><td class="r">${num(p.self_weight)}</td><td>${p.lateral ? esc(p.lateral.code) + (p.lateral.error ? " (not computed)" : "") : ["Seismic", "Wind"].includes(p.type) ? "None" : ""}</td><td class="r">${p.loads}</td></tr>`).join("");
+    q(d, "#pL").innerHTML = L().map((p, i) => `<tr data-i="${i}" class="${i === pick ? "on" : ""}"><td>${esc(p.name)}</td><td>${esc(p.type)}</td><td class="r">${num(p.self_weight)}</td>${program === "safe" ? "" : `<td>${p.lateral ? esc(p.lateral.code) : ["Seismic", "Wind"].includes(p.type) ? "None" : ""}</td>`}</tr>`).join("");
     const p = L()[pick]; q(d, "#pLat").disabled = !p || !["Seismic", "Wind"].includes(p.type); q(d, "#pLat").hidden = program === "safe"; // SAFE makes no auto lateral loads
     d.querySelectorAll("#pL [data-i]").forEach(tr => tr.onclick = () => { pick = +tr.dataset.i; paint(); fill(); });
   };
@@ -5587,6 +5590,7 @@ async function hmPatterns() {
   q(d, "#pAdd").onclick = () => { const name = q(d, "#pN").value.trim(); go("define_load_pattern", {name, type: q(d, "#pT").value, self_weight: fnum(d, "#pS")}).then(() => { pick = L().findIndex(p => p.name === name); paint(); }); };
   q(d, "#pMod").onclick = () => { const p = L()[pick]; if (p) go("define_load_pattern", {name: q(d, "#pN").value.trim(), was: p.name, type: q(d, "#pT").value, self_weight: fnum(d, "#pS")}); };
   q(d, "#pDel").onclick = () => { const p = L()[pick]; if (p) go("delete_definition", {kind: "load_pattern", name: p.name}); };
+  if (sapP) q(d, "#pCopy").onclick = () => { const p = L()[pick]; if (!p) return; let n = p.name + "-1", i = 1; while (L().some(x => x.name === n)) n = p.name + "-" + ++i; go("define_load_pattern", {name: n, type: p.type, self_weight: p.self_weight}).then(() => { pick = L().findIndex(x => x.name === n); paint(); fill(); }); };
   q(d, "#pLat").onclick = () => { const p = L()[pick]; if (p) hmLateral(p, () => { pick = Math.min(pick, L().length - 1); paint(); }); };
   paint(); fill();
 }
@@ -5639,29 +5643,61 @@ async function hmCombos() {
   const defs = await hmDefs();
   const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmCombos(); };
   const find = n => defs.combinations.find(c => c.name === n);
-  listForm("Define Load Combinations", "Load Combinations", defs.combinations.map(c => c.name), [
+  listForm(program === "sap2000" ? "Define Load Combinations" : "Load Combinations", "Load Combinations", defs.combinations.map(c => c.name), [
     ["Add New Combo...", () => hmCombo(null, again)],
     ["Add Copy of Combo...", n => n && hmCombo(find(n), again, true)],
     ["Modify/Show Combo...", n => n && hmCombo(find(n), again)],
     ["Delete Combo", n => n && hmRun("delete_definition", {kind: "combination", name: n}).then(j => j.ok && again())],
+    [program === "sap2000" ? "Add Default Design Combos..." : "Add Default Design Combos...", () => hmDefaultCombos(defs, again)],
   ], n => hmCombo(find(n), again));
+}
+// Add Default Design Combos: the design code's strength combinations of the model's load patterns by their type, named
+// as the programs name them (DConS1... for concrete, DStlS1... for steel).
+function hmDefaultCombos(defs, after) {
+  const by = t => defs.load_patterns.filter(p => t.includes(p.type)).map(p => p.name);
+  const D = by(["Dead", "Super Dead"]), L = by(["Live", "Reducible Live"]), Lr = by(["Roof Live"]), S = by(["Snow"]), W = by(["Wind"]), E = by(["Seismic"]);
+  const sum = parts => parts.flatMap(([names, f]) => names.map(n => ({case: n, factor: f})));
+  const both = (list, make) => list.flatMap(x => [make(x, 1), make(x, -1)]);
+  const codes = {
+    "ASCE 7-16": () => [sum([[D, 1.4]]), sum([[D, 1.2], [L, 1.6], [Lr, 0.5], [S, 0.5]]), ...(Lr.length || S.length ? [sum([[D, 1.2], [Lr, 1.6], [S, 1.6], [L, 1]])] : []),
+      ...both(W, (w, s) => sum([[D, 1.2], [[w], s], [L, 1], [Lr, 0.5], [S, 0.5]])), ...both(E, (e, s) => sum([[D, 1.2], [[e], s], [L, 1], [S, 0.2]])),
+      ...both(W, (w, s) => sum([[D, 0.9], [[w], s]])), ...both(E, (e, s) => sum([[D, 0.9], [[e], s]]))],
+    "Eurocode 0 (EN 1990), 6.10": () => [sum([[D, 1.35], [L, 1.5], [Lr, 1.5], [S, 1.5 * 0.5]]), ...both(W, (w, s) => sum([[D, 1.35], [[w], 1.5 * s], [L, 1.05]])), ...both(W, (w, s) => sum([[D, 1], [[w], 1.5 * s]])),
+      ...both(E, (e, s) => sum([[D, 1], [[e], s], [L, 0.3]]))],
+  };
+  const d = dialog("Add Code-Generated Load Combinations", `<fieldset><legend>Design Type</legend>${[["Con", "Concrete Frame Design"], ["Stl", "Steel Frame Design"]].map(([k, l], i) => `<label style="display:block"><input type="checkbox" data-t="${k}" ${i === 0 ? "checked" : ""}> ${l}</label>`).join("")}</fieldset>
+    <fieldset><legend>Code</legend><select id="dcC" style="width:100%">${opts(Object.keys(codes), "ASCE 7-16")}</select></fieldset>
+    <fieldset><legend>Options</legend><label><input type="checkbox" id="dcU" checked> Convert to User Combos (Eligible for Modification)</label></fieldset>
+    <p class="kv">From the load patterns by type: Dead and Super Dead, Live and Reducible Live, Roof Live, Snow, Wind and Seismic (each both ways).</p>`,
+    [["OK", d => {
+      const made = codes[q(d, "#dcC").value]().filter(c => c.length), kinds = [...d.querySelectorAll("[data-t]:checked")].map(x => x.dataset.t);
+      if (!made.length || !kinds.length) { formError(d, "There is nothing to combine: define Dead and Live load patterns first."); return false; }
+      (async () => { for (const k of kinds) for (const [i, cases] of made.entries()) { const name = `D${k}S${i + 1}`, was = defs.combinations.some(c => c.name === name) ? name : undefined; const j = await hmRun("define_combination", {name, was, type: "Linear Add", cases}, true); if (!j.ok) { formError(d, name + ": " + j.error); return; } }
+        d.close(); hmSay(`Added ${made.length * kinds.length} design combinations. Edit > Undo steps back.`); if (after) after(); })();
+      return false;
+    }, true], ["Cancel"]], {width: 420});
+  return d;
 }
 async function hmCombo(c, after, copy) {
   const defs = await hmDefs(), was = c && !copy ? c.name : null;
   const names = defs.load_cases.map(x => x.name).concat(defs.combinations.map(x => x.name).filter(n => n !== was));
   const rows = c ? c.cases.map(x => ({case: x.case, factor: x.factor})) : [];
   let pick = rows.length ? 0 : -1, n = defs.combinations.length + 1; while (defs.combinations.some(x => x.name === "Comb" + n)) n++;
-  const d = dialog("Load Combination Data", `<fieldset><legend>Load Combination Name</legend><div class="g2"><span>Load Combination Name</span><input id="cN" value="${esc(c ? (copy ? c.name + " copy" : c.name) : "Comb" + n)}">
-      <span>Load Combination Type</span><select id="cT">${opts(["Linear Add", "Envelope", "Absolute Add", "SRSS", "Range Add"], c ? c.type : "Linear Add")}</select></div></fieldset>
-    <fieldset><legend>Define Combination of Load Case Results</legend><div style="display:flex;gap:10px"><div style="flex:1">
-      <div class="scroll" style="max-height:40vh"><table class="list hmgrid"><thead><tr><th>Load Case Name</th><th>Scale Factor</th></tr><tr class="edit"><td><select id="cC">${opts(names, names[0])}</select></td><td><input id="cF" type="number" step="any" value="1"></td></tr></thead><tbody id="cL"></tbody></table></div></div>
+  const sapC = program === "sap2000", typeOf = nm => (defs.load_cases.find(x => x.name === nm) || {}).type || (defs.combinations.some(x => x.name === nm) ? "Combination" : "");
+  const d = dialog("Load Combination Data", `<fieldset><legend>${sapC ? "Load Combination Name" : "General Data"}</legend><div class="g2"><span>Load Combination Name${sapC ? " (User-Generated)" : ""}</span><input id="cN" value="${esc(c ? (copy ? c.name + " copy" : c.name) : "Comb" + n)}">
+      <span>${sapC ? "Load Combination Type" : "Combination Type"}</span><select id="cT">${opts(["Linear Add", "Envelope", "Absolute Add", "SRSS", "Range Add"], c ? c.type : "Linear Add")}</select>
+      ${sapC ? "" : `<span>Auto Combination</span><span class="kv">${c && /^D(Con|Stl)S\d+$/.test(c.name) ? "Yes" : "No"}</span>`}</div></fieldset>
+    <fieldset><legend>${sapC ? "Define Combination of Load Case Results" : "Define Combination of Load Case/Combo Results"}</legend><div style="display:flex;gap:10px"><div style="flex:1">
+      <div class="scroll" style="max-height:40vh"><table class="list hmgrid"><thead><tr><th>${sapC ? "Load Case Name" : "Load Name"}</th>${sapC ? "<th>Load Case Type</th>" : ""}<th>Scale Factor</th></tr><tr class="edit"><td><select id="cC">${opts(names, names[0])}</select></td>${sapC ? `<td id="cCt"></td>` : ""}<td><input id="cF" type="number" step="any" value="1"></td></tr></thead><tbody id="cL"></tbody></table></div></div>
       <div style="display:flex;flex-direction:column;gap:6px;width:90px"><button id="cAdd">Add</button><button id="cMod">Modify</button><button id="cDel">Delete</button></div></div></fieldset>`,
     [["OK", d => submit(d, "define_combination", {name: q(d, "#cN").value.trim(), was, type: q(d, "#cT").value, cases: rows}, after), true], ["Cancel"]], {width: 520});
   const paint = () => {
-    q(d, "#cL").innerHTML = rows.map((r, i) => `<tr data-i="${i}" class="${i === pick ? "on" : ""}"><td>${esc(r.case)}</td><td class="r">${num(r.factor)}</td></tr>`).join("") || `<tr><td colspan="2" class="kv">Pick a load case and a scale factor above, then Add.</td></tr>`;
+    q(d, "#cL").innerHTML = rows.map((r, i) => `<tr data-i="${i}" class="${i === pick ? "on" : ""}"><td>${esc(r.case)}</td>${sapC ? `<td>${esc(typeOf(r.case))}</td>` : ""}<td class="r">${num(r.factor)}</td></tr>`).join("");
+    if (sapC) q(d, "#cCt").textContent = typeOf(q(d, "#cC").value);
     d.querySelectorAll("#cL [data-i]").forEach(tr => tr.onclick = () => { pick = +tr.dataset.i; q(d, "#cC").value = rows[pick].case; q(d, "#cF").value = rows[pick].factor; paint(); });
   };
   q(d, "#cAdd").onclick = () => { rows.push({case: q(d, "#cC").value, factor: fnum(d, "#cF")}); pick = rows.length - 1; paint(); };
+  q(d, "#cC").onchange = paint;
   q(d, "#cMod").onclick = () => { if (rows[pick]) { rows[pick] = {case: q(d, "#cC").value, factor: fnum(d, "#cF")}; paint(); } };
   q(d, "#cDel").onclick = () => { if (rows[pick]) { rows.splice(pick, 1); pick = Math.min(pick, rows.length - 1); paint(); } };
   paint();
@@ -5754,16 +5790,37 @@ async function hmFunction(kind, f, after) {
   paint();
 }
 
+// Define > Load Cases as the programs show it: a table of Load Case Name and Load Case Type, and Click to: Add New Case,
+// Add Copy of Case, Modify/Show Case, Delete Case, Show Load Case Tree.
 async function hmCases() {
   const a = await hmAnalysis();
   const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmCases(); };
   const find = n => a.load_cases.find(c => c.name === n);
-  listForm("Define Load Cases", "Load Cases", a.load_cases.map(c => c.name + "  (" + c.type + ")"), [
-    ["Add New Case...", () => hmCase(null, a, again)],
-    ["Add Copy of Case...", n => n && hmCase(find(n.replace(/  \(.*\)$/, "")), a, again, true)],
-    ["Modify/Show Case...", n => n && hmCase(find(n.replace(/  \(.*\)$/, "")), a, again)],
-    ["Delete Case", n => n && hmRun("delete_definition", {kind: "load_case", name: n.replace(/  \(.*\)$/, "")}, true).then(j => j.ok ? again() : hmSay(j.error, true))],
-  ]);
+  let pick = a.load_cases.length ? 0 : -1;
+  const d = dialog(program === "sap2000" ? "Define Load Cases" : "Load Cases", `<div style="display:flex;gap:10px"><fieldset style="flex:1;margin:0"><legend>Load Cases</legend>
+      <div class="scroll" style="max-height:46vh;min-height:220px"><table class="list hmgrid"><thead><tr><th>Load Case Name</th><th>Load Case Type</th></tr></thead><tbody id="kL"></tbody></table></div></fieldset>
+    <fieldset style="width:190px;margin:0"><legend>Click to:</legend><div style="display:flex;flex-direction:column;gap:6px">
+      <button data-k="add">Add New Case...</button><button data-k="copy">Add Copy of Case...</button><button data-k="mod">Modify/Show Case...</button><button data-k="del">Delete Case</button>
+      <button data-k="tree">Show Load Case Tree...</button></div></fieldset></div>`, [["OK"], ["Cancel"]], {width: 560});
+  const cur = () => pick >= 0 ? a.load_cases[pick] : null;
+  const paint = () => {
+    q(d, "#kL").innerHTML = a.load_cases.map((c, i) => `<tr data-i="${i}" style="cursor:default${i === pick ? ";background:var(--sel,#cce4f7)" : ""}"><td>${esc(c.name)}</td><td>${esc(c.type)}</td></tr>`).join("");
+    d.querySelectorAll("#kL tr").forEach(r => { r.onclick = () => { pick = +r.dataset.i; paint(); }; r.ondblclick = () => hmCase(cur(), a, again); });
+  };
+  const go = {
+    add: () => hmCase(null, a, again),
+    copy: () => cur() && hmCase(cur(), a, again, true),
+    mod: () => cur() && hmCase(cur(), a, again),
+    del: () => cur() && hmRun("delete_definition", {kind: "load_case", name: cur().name}, true).then(j => j.ok ? again() : hmSay(j.error, true)),
+    tree: () => {
+      // Each case under the nonlinear case it continues from; a response spectrum or modal history under its modal case.
+      const kids = p => a.load_cases.filter(c => (c.initial_case || c.modal_case || "") === p);
+      const branch = (p, depth) => kids(p).map(c => `<div style="padding-left:${depth * 18}px">${depth ? "└ " : ""}${esc(c.name)} <span class="kv" style="display:inline">(${esc(c.type)})</span></div>` + (depth < 8 ? branch(c.name, depth + 1) : "")).join("");
+      dialog("Load Case Tree", `<fieldset><legend>Load Cases</legend><div class="scroll" style="max-height:50vh">${branch("", 0) || "<i>No load cases</i>"}</div></fieldset>`, [["OK"]], {width: 420});
+    },
+  };
+  d.querySelectorAll("[data-k]").forEach(b => b.onclick = () => go[b.dataset.k]());
+  paint();
 }
 async function hmCase(c, a, after, copy) {
   const defs = await hmDefs();
@@ -5771,21 +5828,30 @@ async function hmCase(c, a, after, copy) {
   let loads = c ? c.loads.map(l => ({...l})) : [];
   const fns = k => a.functions.filter(f => f.kind === k).map(f => f.name);
   const modals = a.load_cases.filter(x => x.type.startsWith("Modal")).map(x => x.name), nonlinear = a.load_cases.filter(x => x.type.startsWith("Nonlinear") && (!c || x.name !== c.name)).map(x => x.name);
-  const d = dialog("Load Case Data", `<div class="g2"><span>Load Case Name</span><input id="cN" value="${esc(c ? (copy ? c.name + " copy" : c.name) : "LCase1")}"><span>Load Case Type</span><select id="cT">${opts(caseTypesFor(a.case_types, type).map(t => [t, t]), type)}</select></div>
-    <fieldset id="cInit"><legend>Initial Conditions</legend><select id="cI">${opts([["", "Zero initial conditions (unstressed state)"], ...nonlinear.map(n => [n, "Continue from the end of " + n])], c && c.initial_case || "")}</select></fieldset>
-    <fieldset id="cModal"><legend>Modes</legend><div class="g2"><span>Maximum number of modes</span><input id="cMx" type="number" value="${c ? c.max_modes : 12}"><span>Minimum number of modes</span><input id="cMn" type="number" value="${c ? c.min_modes : 1}"></div></fieldset>
-    <fieldset id="cRS"><legend>Response Spectrum and History Options</legend><div class="g2"><span>Modal case</span><select id="cMc">${opts(modals.map(m => [m, m]), c ? c.modal_case : modals[0])}</select>
-      <span class="rsOnly">Modal combination</span><select id="cMcb" class="rsOnly">${opts(a.modal_combos.map(x => [x, x]), c ? c.modal_combo : "CQC")}</select>
-      <span class="rsOnly">Directional combination</span><select id="cDc" class="rsOnly">${opts(a.dir_combos.map(x => [x, x]), c ? c.dir_combo : "SRSS")}</select>
-      <span>Damping ratio</span><input id="cD" type="number" step="any" value="${c ? c.damping : 0.05}">
-      <span class="rsOnly">Diaphragm eccentricity ratio</span><input id="cE" class="rsOnly" type="number" step="any" value="${c ? c.eccentricity : 0}"></div></fieldset>
-    <fieldset id="cTH"><legend>Time Steps</legend><div class="g2"><span>Number of output time steps</span><input id="cS" type="number" value="${c ? c.steps : 100}"><span>Output time step size (s)</span><input id="cSz" type="number" step="any" value="${c ? c.step_size : 0.01}"></div></fieldset>
-    <fieldset id="cGeo"><legend>Geometric Nonlinearity</legend><select id="cG">${opts([["None", "None"], ["P-Delta", "P-Delta"], ["P-Delta and Large Displacements", "P-Delta plus Large Displacements"]], c ? c.geometric : "None")}</select></fieldset>
-    <fieldset><legend>Loads Applied</legend><div class="scroll" style="max-height:24vh"><table class="list hmgrid" id="cL"></table></div><button id="cAdd" style="margin-top:6px">Add</button></fieldset>`,
+  // The programs' own Load Case Type list (ETABS: Modal, Time History; SAP2000: Static with Linear or Nonlinear), with
+  // the type of modes, analysis type and solution type beside it, as their Load Case Data shows them.
+  const sap = program === "sap2000", fam = t => t.startsWith("Modal") ? "Modal" : t.includes("History") ? "Time History" : sap && /Static$/.test(t) ? "Static" : t;
+  const fams = [...new Set(caseTypesFor(a.case_types, type).map(fam))];
+  const d = dialog("Load Case Data", `<fieldset><legend>General</legend><div class="g2"><span>Load Case Name</span><input id="cN" value="${esc(c ? (copy ? c.name + " copy" : c.name) : "LCase1")}">
+      <span>Load Case Type</span><select id="cF">${opts(fams.map(t => [t, t]), fam(type))}</select>
+      <span>Mass Source</span><select disabled><option>${esc(a.mass_source.name || (sap ? "MSSSRC1" : "MsSrc1"))}</option></select>
+      ${sap ? "" : `<span>Exclude Objects in this Group</span><select disabled><option>Not Applicable</option></select>`}</div><select id="cT" hidden>${opts(caseTypesFor(a.case_types, type).map(t => [t, t]), type)}</select></fieldset>
+    <fieldset id="cSub"><legend id="cSubL"></legend><div id="cSubB"></div></fieldset>
+    <fieldset id="cInit"><legend>Initial Condition</legend><label style="display:block"><input type="radio" name="cIr" value="0" ${c && c.initial_case ? "" : "checked"}> Zero Initial Conditions - Start from Unstressed State</label>
+      <label style="display:block"><input type="radio" name="cIr" value="1" ${c && c.initial_case ? "checked" : ""} ${nonlinear.length ? "" : "disabled"}> Continue from State at End of Nonlinear Case</label><select id="cI" style="margin-left:22px;width:calc(100% - 22px)">${opts([["", ""], ...nonlinear.map(n => [n, n])], c && c.initial_case || nonlinear[0] || "")}</select></fieldset>
+    <fieldset id="cModal"><legend>Number of Modes</legend><div class="g2"><span>Maximum Number of Modes</span><input id="cMx" type="number" value="${c ? c.max_modes : 12}"><span>Minimum Number of Modes</span><input id="cMn" type="number" value="${c ? c.min_modes : 1}"></div></fieldset>
+    <fieldset><legend>Loads Applied</legend><div class="scroll" style="max-height:24vh"><table class="list hmgrid" id="cL"></table></div><button id="cAdd" style="margin-top:6px">Add</button></fieldset>
+    <fieldset id="cRS"><legend>Other Parameters</legend><div class="g2"><span>Modal Load Case</span><select id="cMc">${opts(modals.map(m => [m, m]), c ? c.modal_case : modals[0])}</select>
+      <span class="rsOnly">Modal Combination Method</span><select id="cMcb" class="rsOnly">${opts(a.modal_combos.map(x => [x, x]), c ? c.modal_combo : "CQC")}</select>
+      <span class="rsOnly">Directional Combination Type</span><select id="cDc" class="rsOnly">${opts(a.dir_combos.map(x => [x, x]), c ? c.dir_combo : "SRSS")}</select>
+      <span>Modal Damping, Constant at</span><input id="cD" type="number" step="any" value="${c ? c.damping : 0.05}">
+      <span class="rsOnly">Diaphragm Eccentricity, for All Diaphragms</span><input id="cE" class="rsOnly" type="number" step="any" value="${c ? c.eccentricity : 0}"></div></fieldset>
+    <fieldset id="cTH"><legend>Time Step Data</legend><div class="g2"><span>Number of Output Time Steps</span><input id="cS" type="number" value="${c ? c.steps : 100}"><span>Output Time Step Size</span><span><input id="cSz" type="number" step="any" style="width:120px" value="${c ? c.step_size : 0.01}"> sec</span></div></fieldset>
+    <fieldset id="cGeo"><legend>Geometric Nonlinearity Option</legend>${[["None", "None"], ["P-Delta", "P-Delta"], ["P-Delta and Large Displacements", "P-Delta plus Large Displacements"]].map(([v, l]) => `<label style="display:block"><input type="radio" name="cG" value="${v}" ${(c ? c.geometric : "None") === v ? "checked" : ""}> ${l}</label>`).join("")}<select id="cG" hidden>${opts([["None", "None"], ["P-Delta", "P-Delta"], ["P-Delta and Large Displacements", "P-Delta and Large Displacements"]], c ? c.geometric : "None")}</select></fieldset>`,
     [["OK", d => {
       const name = q(d, "#cN").value.trim();
       return submit(d, "define_load_case", {name, was: c && !copy && c.name !== name ? c.name : undefined, type, loads: loads.map(l => l.accel ? {accel: l.accel, factor: +l.factor, function: l.function || undefined, angle: +l.angle || 0, arrival: +l.arrival || 0} : {pattern: l.pattern, factor: +l.factor, function: l.function || undefined, arrival: +l.arrival || 0}),
-        initial_case: q(d, "#cI").value || undefined, max_modes: parseInt(q(d, "#cMx").value) || 12, min_modes: parseInt(q(d, "#cMn").value) || 1, modal_case: q(d, "#cMc").value || "Modal",
+        initial_case: q(d, "input[name=cIr]:checked").value === "1" ? q(d, "#cI").value || undefined : undefined, max_modes: parseInt(q(d, "#cMx").value) || 12, min_modes: parseInt(q(d, "#cMn").value) || 1, modal_case: q(d, "#cMc").value || "Modal",
         modal_combo: q(d, "#cMcb").value, dir_combo: q(d, "#cDc").value, damping: fnum(d, "#cD"), eccentricity: fnum(d, "#cE"), steps: parseInt(q(d, "#cS").value) || 100, step_size: fnum(d, "#cSz"), geometric: q(d, "#cG").value}, after);
     }, true], ["Cancel"]], {width: 640});
   const paint = () => {
@@ -5810,6 +5876,30 @@ async function hmCase(c, a, after, copy) {
     d.querySelectorAll("#cL [data-del]").forEach(b => b.onclick = () => { loads.splice(+b.dataset.del, 1); paint(); });
     loads.forEach(l => { if (fnKind && !l.function) l.function = fns(fnKind)[0]; });
   };
+  // The sub-choices beside the type: Modal (Eigen / Ritz), Static in SAP2000 and Time History (Linear / Nonlinear, Modal / Direct Integration).
+  const sub = () => {
+    const f = q(d, "#cF").value, have = caseTypesFor(a.case_types, type), radio = (n, list, now) => list.map(([v, l]) => `<label style="margin-right:16px"><input type="radio" name="${n}" value="${v}" ${now === v ? "checked" : ""}> ${l}</label>`).join("");
+    let html = "", legend = "";
+    if (f === "Modal") { legend = "Type of Modes"; html = radio("cSm", [["Modal - Eigen", "Eigen Modes"], ["Modal - Ritz", "Ritz Modes"]].filter(x => have.includes(x[0])), type.startsWith("Modal") ? type : "Modal - Eigen"); }
+    else if (f === "Static") { legend = "Analysis Type"; html = radio("cSa", [["Linear Static", "Linear"], ["Nonlinear Static", "Nonlinear"]], /Static$/.test(type) ? type : "Linear Static"); }
+    else if (f === "Time History") {
+      legend = "Analysis Type and Solution Type"; const lin = !type.startsWith("Nonlinear") || !type.includes("History"), modalSol = !type.includes("Direct");
+      html = `<div>${radio("cSl", [["L", "Linear"], ["N", "Nonlinear"]], type.includes("History") ? (lin ? "L" : "N") : "L")}</div><div style="margin-top:4px">${radio("cSs", [["M", "Modal"], ["D", "Direct Integration"]], type.includes("History") ? (modalSol ? "M" : "D") : "M")}</div>`;
+    }
+    q(d, "#cSub").hidden = !html; q(d, "#cSubL").textContent = legend; q(d, "#cSubB").innerHTML = html;
+    d.querySelectorAll("#cSubB input").forEach(x => x.onchange = pickType);
+  };
+  const pickType = () => {
+    const f = q(d, "#cF").value, val = n => (d.querySelector(`input[name=${n}]:checked`) || {}).value;
+    let t = f;
+    if (f === "Modal") t = val("cSm") || "Modal - Eigen";
+    else if (f === "Static") t = val("cSa") || "Linear Static";
+    else if (f === "Time History") { const nl = val("cSl") === "N", dir = val("cSs") === "D"; t = nl ? (dir ? "Nonlinear Direct History" : "Nonlinear Modal History (FNA)") : (dir ? "Linear Direct History" : "Linear Modal History"); }
+    q(d, "#cT").value = t; q(d, "#cT").onchange();
+  };
+  q(d, "#cF").onchange = () => { sub(); pickType(); };
+  d.querySelectorAll("input[name=cG]").forEach(r => r.onchange = () => q(d, "#cG").value = r.value);
+  sub();
   q(d, "#cT").onchange = () => {
     type = q(d, "#cT").value;
     if (type === "Response Spectrum") loads = loads.filter(l => l.accel);
@@ -5824,20 +5914,63 @@ async function hmCase(c, a, after, copy) {
   paint();
 }
 
+// Define > Mass Source: the programs' Mass Sources list, then Mass Source Data field by field. ETABS and SAFE: Mass
+// Source Name; Element Self Mass, Additional Mass, Specified Load Patterns, Adjust Diaphragm Lateral Mass to Move Mass
+// Centroid by (ratios of the diaphragm width in X and Y); Mass Multipliers for Load Patterns (Load Pattern, Multiplier,
+// Add / Modify / Delete); Mass Options (Include Lateral Mass, Include Vertical Mass, Lump Lateral Mass at Story Levels).
+// SAP2000: the name, Element Self Mass and Additional Mass, Specified Load Patterns, and the multipliers.
 async function hmMass() {
-  const a = await hmAnalysis(), defs = await hmDefs(), ms = a.mass_source;
-  let loads = ms.loads.map(l => ({...l}));
-  const d = dialog("Mass Source Data", `<fieldset><legend>Mass Source</legend><label style="display:block"><input type="checkbox" id="mE" ${ms.elements ? "checked" : ""}> Element self mass</label><label style="display:block"><input type="checkbox" id="mA" ${ms.added_mass ? "checked" : ""}> Additional mass</label><label style="display:block"><input type="checkbox" id="mL" ${loads.length ? "checked" : ""}> Specified load patterns</label></fieldset>
-    <fieldset><legend>Mass Multipliers for Load Patterns</legend><table class="list hmgrid" id="mT"></table><button id="mAdd" style="margin-top:6px">Add</button></fieldset>
-    <p class="kv">The seismic loads by code are worked out from this mass.</p>`,
-    [["OK", d => submit(d, "define_mass_source", {elements: q(d, "#mE").checked, added_mass: q(d, "#mA").checked, loads: q(d, "#mL").checked ? loads.map(l => ({pattern: l.pattern, factor: +l.factor})) : []}), true], ["Cancel"]], {width: 460});
-  const paint = () => {
-    q(d, "#mT").innerHTML = `<tr><th>Load Pattern</th><th>Multiplier</th><th></th></tr>` + loads.map((l, i) => `<tr data-i="${i}"><td><select data-k="pattern">${opts(defs.load_patterns.map(p => [p.name, p.name]), l.pattern)}</select></td><td><input data-k="factor" type="number" step="any" value="${l.factor}"></td><td><button data-del="${i}">Delete</button></td></tr>`).join("");
-    d.querySelectorAll("#mT [data-k]").forEach(x => x.onchange = () => { loads[+x.closest("tr").dataset.i][x.dataset.k] = x.value; });
-    d.querySelectorAll("#mT [data-del]").forEach(b => b.onclick = () => { loads.splice(+b.dataset.del, 1); paint(); });
+  const a = await hmAnalysis(), ms = a.mass_source;
+  const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmMass(); };
+  const d = listForm(program === "sap2000" ? "Define Mass Source" : "Mass Sources", "Mass Sources", [ms.name], [
+    ["Add New Mass Source...", () => hmSay("The model keeps one mass source, the default: Modify/Show changes it.", true)],
+    ["Add Copy of Mass Source...", () => hmSay("The model keeps one mass source, the default: Modify/Show changes it.", true)],
+    ["Modify/Show Mass Source...", () => hmMassData(again)],
+    ["Delete Mass Source", () => hmSay("The default mass source cannot be deleted.", true)],
+    ["Make Default", () => hmSay(ms.name + " is the default mass source.")],
+  ], () => hmMassData(again));
+  d.querySelectorAll("[data-a]").forEach(b => { if (!/Modify/.test(b.textContent)) b.disabled = !/Default/.test(b.textContent) || false; });
+}
+async function hmMassData(after) {
+  const a = await hmAnalysis(), defs = await hmDefs(), ms = a.mass_source, sap = program === "sap2000";
+  let loads = ms.loads.map(l => ({...l})), at = -1;
+  const pats = defs.load_patterns.map(p => [p.name, p.name]);
+  const d = dialog("Mass Source Data", `<div class="g2"><span>Mass Source Name</span><input id="mN" value="${esc(ms.name)}"></div>
+    <fieldset><legend>Mass Source</legend>${sap
+      ? `<label style="display:block"><input type="checkbox" id="mE" ${ms.elements && ms.added_mass ? "checked" : ""}> Element Self Mass and Additional Mass</label>`
+      : `<label style="display:block"><input type="checkbox" id="mE" ${ms.elements ? "checked" : ""}> Element Self Mass</label><label style="display:block"><input type="checkbox" id="mA" ${ms.added_mass ? "checked" : ""}> Additional Mass</label>`}
+      <label style="display:block"><input type="checkbox" id="mL" ${loads.length ? "checked" : ""}> Specified Load Patterns</label>
+      ${sap ? "" : `<label style="display:block"><input type="checkbox" id="mM" ${ms.move ? "checked" : ""}> Adjust Diaphragm Lateral Mass to Move Mass Centroid by:</label>
+      <div class="gu" style="margin-left:22px"><span>This Ratio of Diaphragm Width in X Direction</span><input id="mX" type="number" step="any" value="${ms.move_x || 0}"><span class="un"></span>
+        <span>This Ratio of Diaphragm Width in Y Direction</span><input id="mY" type="number" step="any" value="${ms.move_y || 0}"><span class="un"></span></div>`}</fieldset>
+    <fieldset id="mMul"><legend>Mass Multipliers for Load Patterns</legend><div style="display:flex;gap:10px"><div style="flex:1">
+      <table class="list hmgrid" id="mT"></table></div>
+      <div style="display:flex;flex-direction:column;gap:6px;width:90px"><button id="mAdd">Add</button><button id="mMod">Modify</button><button id="mDel">Delete</button></div></div></fieldset>
+    ${sap ? "" : `<fieldset><legend>Mass Options</legend><label style="display:block"><input type="checkbox" id="mLat" ${ms.lateral !== false ? "checked" : ""}> Include Lateral Mass</label>
+      <label style="display:block"><input type="checkbox" id="mVer" ${ms.vertical ? "checked" : ""}> Include Vertical Mass</label>
+      <label style="display:block"><input type="checkbox" id="mLump" ${ms.lump !== false ? "checked" : ""}> Lump Lateral Mass at Story Levels</label></fieldset>`}`,
+    [["OK", d => {
+      const chk = s => !!(q(d, s) && q(d, s).checked), self = chk("#mE"), args = {name: q(d, "#mN").value.trim() || ms.name, elements: self, added_mass: sap ? self : chk("#mA"),
+        loads: chk("#mL") ? loads.map(l => ({pattern: l.pattern, factor: +l.factor})) : []};
+      if (!sap) Object.assign(args, {move: chk("#mM"), move_x: fnum(d, "#mX"), move_y: fnum(d, "#mY"), lateral: chk("#mLat"), vertical: chk("#mVer"), lump: chk("#mLump")});
+      return submit(d, "define_mass_source", args, after);
+    }], ["Cancel"]], {width: 500});
+  const sync = () => {
+    const on = q(d, "#mL").checked; q(d, "#mMul").disabled = !on;
+    if (q(d, "#mM")) ["#mX", "#mY"].forEach(s => q(d, s).disabled = !q(d, "#mM").checked);
   };
-  q(d, "#mAdd").onclick = () => { loads.push({pattern: (defs.load_patterns[0] || {}).name, factor: 1}); q(d, "#mL").checked = true; paint(); };
-  paint();
+  const paint = () => {
+    q(d, "#mT").innerHTML = `<tr><th>Load Pattern</th><th>Multiplier</th></tr>
+      <tr><td><select id="mP">${opts(pats, at >= 0 ? loads[at].pattern : (pats[0] || [])[0])}</select></td><td><input id="mF" type="number" step="any" value="${at >= 0 ? loads[at].factor : 1}"></td></tr>`
+      + loads.map((l, i) => `<tr data-i="${i}" class="${i === at ? "sel" : ""}" style="cursor:default${i === at ? ";background:var(--sel,#cde)" : ""}"><td>${esc(l.pattern)}</td><td>${esc(String(l.factor))}</td></tr>`).join("");
+    d.querySelectorAll("#mT [data-i]").forEach(r => r.onclick = () => { at = +r.dataset.i; paint(); });
+  };
+  const row = () => ({pattern: q(d, "#mP").value, factor: fnum(d, "#mF")});
+  q(d, "#mAdd").onclick = () => { const r = row(); if (!r.pattern) return; const k = loads.findIndex(l => l.pattern === r.pattern); if (k >= 0) loads[k] = r; else loads.push(r); at = -1; q(d, "#mL").checked = true; sync(); paint(); };
+  q(d, "#mMod").onclick = () => { if (at < 0) return; loads[at] = row(); paint(); };
+  q(d, "#mDel").onclick = () => { if (at < 0) return; loads.splice(at, 1); at = -1; paint(); };
+  q(d, "#mL").onchange = sync; if (q(d, "#mM")) q(d, "#mM").onchange = sync;
+  sync(); paint();
 }
 
 async function hmPDelta() {
