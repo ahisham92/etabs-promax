@@ -2488,7 +2488,7 @@ function drawPT(p, g, to, T) {
   }
   // Openings: their outline crossed corner to corner, as ETABS draws an opening in a floor.
   g.strokeStyle = "#6b7280"; g.lineWidth = 1;
-  for (const o of openings) {
+  for (const o of hidden.kind.has("opening") ? [] : openings) {
     if (o.pts.length < 3 || !near(o.pts, tol() * 10)) continue;
     line(o.pts, true); line([o.pts[0], o.pts[Math.floor(o.pts.length / 2)]]);
     if (o.pts.length >= 4) line([o.pts[1], o.pts[Math.min(o.pts.length - 1, Math.floor(o.pts.length / 2) + 1)]]);
@@ -3438,7 +3438,8 @@ const dialogs = {
       [["OK", d => { res.mode = "reactions"; syncResults(); res.case = q(d, "#dCase").value; res.comp = q(d, "[name=comp]:checked").value; syncResults(); syncTools(); draw(); }], ["Close"]], {width: 400}), resCases("reactions"));
   },
   display() {
-    const kinds = [["column", "Columns"], ["beam", "Beams"], ["brace", "Braces"], ["floor", "Floors"], ["wall", "Walls"]].filter(([k]) => frames.some(f => f.kind === k) || areas.some(a => a.kind === k));
+    const kinds = [["column", "Columns"], ["beam", "Beams"], ["brace", "Braces"], ["floor", "Floors"], ["wall", "Walls"]].filter(([k]) => frames.some(f => f.kind === k) || areas.some(a => a.kind === k))
+      .concat(openings.length ? [["opening", "Openings"]] : []);
     dialog("Set View Options", `<div class="itabs"><button data-page="g" class="on">General</button><button data-page="o">Objects</button></div>
       <div class="ipage on" data-page="g">
       <fieldset><legend>Display</legend><div class="g3">${[["extrude", "Extruded sections"], ["fill", "Floors and walls (fill)"], ["see", "See-through floors and walls"], ["edges", "Object edges"], ["grid", "Grid lines"], ["axes", "Global axes"], ["names", "Labels"], ["supports", "Supports"], ["joints", "Joints"]].map(([k, l]) => `<label><input type="checkbox" data-o="${k}" ${opt[k] ? "checked" : ""}>${l}</label>`).join("")}</div></fieldset>

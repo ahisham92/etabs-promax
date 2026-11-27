@@ -104,6 +104,22 @@ public static class Program
         // An update check with no window (the Tools menu keeper runs it hourly): a PC where no CSI ProMax window or
         // watcher is open still gets the newest version into versions\, which the Tools menu, the tests and the window
         // then start. On 2026-11-27 Ahmed's PC had none open and 0.4.68 never arrived.
+        // The pre-run instability check of a model file, printed (on a PC with no SDK, to see what it says of a real model).
+        if (Array.IndexOf(args, "--instabilities") is var ins and >= 0 && ins + 1 < args.Length)
+        {
+            try
+            {
+                var model = OfflineEtabs.Load(args[ins + 1]);
+                var target = Array.IndexOf(args, "--program") is var pr and >= 0 && pr + 1 < args.Length ? args[pr + 1] : model.Target is { Length: > 0 } t ? t : "etabs";
+                var report = CsiProMax.Checks.Stability.StabilityCheck.Run(CsiProMax.Checks.Stability.FromStructural.Read(model, target));
+                foreach (var f in report.Findings)
+                    Console.WriteLine($"{f.Level.ToString().ToUpperInvariant(),-8} {f.Check,-13} {f.Message} | at {string.Join(", ", f.Objects.Take(8).Select(o => o.Kind + " " + o.Name))}");
+                foreach (var n in report.Notes) Console.WriteLine("note: " + n);
+                Console.WriteLine($"{report.Errors} error(s), {report.Warnings} warning(s); {report.Joints} joints, {report.Frames} frames, {report.Shells} areas, stiffness check {(report.StiffnessRan ? $"made ({report.Equations} equations)" : "not made")}.");
+                return report.Errors > 0 ? 1 : 0;
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { Console.Error.WriteLine("The check did not run: " + ex.Message); return 2; }
+        }
         if (args.Contains("--check-update"))
         {
             try

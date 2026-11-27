@@ -99,8 +99,7 @@ public static class F2kRebuild
                 var map = new List<(string From, string To)>();
                 foreach (var w in wanted)
                 {
-                    var to = fieldKeys.FirstOrDefault(k => string.Equals(k, w, StringComparison.OrdinalIgnoreCase))
-                        ?? fieldKeys.FirstOrDefault(k => string.Equals(Plain(k), Plain(w), StringComparison.OrdinalIgnoreCase));
+                    var to = FieldKeyOf(fieldKeys, fieldNames ?? [], w);
                     if (to is null) leftOut.Add($"{have.Key}: {w}"); else map.Add((w, to));
                 }
                 if (map.Count == 0) { leftOut.Add($"{have.Key}: every field"); continue; }
@@ -122,6 +121,24 @@ public static class F2kRebuild
                 ["log"] = EditableTables.LogCut(log ?? "", 1500),
             };
         })!;
+    }
+
+    /// <summary>
+    /// The table field a file's field goes into. A .f2k names its fields as the program shows them ("Slab Thickness",
+    /// "Strip Start Point"); SetTableForEditingArray takes the field keys ("Thickness", "StartPoint"). SAFE 23.1 left
+    /// out every such field when only the keys were matched, and took the floors with no section (tester's SAFE field
+    /// test on 0.4.69). So the shown names come first, then the keys, then both without spaces.
+    /// </summary>
+    internal static string? FieldKeyOf(IReadOnlyList<string> keys, IReadOnlyList<string> names, string field)
+    {
+        string? By(Func<string, string, bool> same)
+        {
+            for (var i = 0; i < keys.Count; i++)
+                if (keys[i] is { Length: > 0 } key && ((i < names.Count && names[i] is { } shown && same(shown, field)) || same(key, field))) return key;
+            return null;
+        }
+        return By((a, b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase))
+            ?? By((a, b) => string.Equals(Plain(a), Plain(b), StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>Builds what the file holds; the answer counts it the way save_safe_file does, with what was left out.</summary>
@@ -325,10 +342,12 @@ public static class F2kRebuild
     /// as SAFE lists them): each value goes to the first field named like it. Throws, naming SAFE's fields, when the
     /// table has no field for the strip's name or for a point's place, so the report shows what to match next time.
     /// </summary>
-    public static List<Dictionary<string, string>> StripRows(string f2kText, IReadOnlyList<string> fields)
+    public static List<Dictionary<string, string>> StripRows(string f2kText, IReadOnlyList<string> fields, Func<string, string, string, string>? pointAt = null)
     {
         string? Field(params string[] names) => FieldOf(fields, names);
         var name = NameField(fields);
+        if (name is not null && Field("StartPoint", "StripStartPoint") is { } start && Field("EndPoint", "SegmentEndPoint") is { } end)
+            return StripSegments(CsiTableText.Parse(f2kText), fields, name, start, end, pointAt);
         var x = Field("GlobalX", "X", "XCoord", "PointX");
         var y = Field("GlobalY", "Y", "YCoord", "PointY");
         if (name is null || x is null || y is null)
@@ -349,6 +368,50 @@ public static class F2kRebuild
             var r = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var (field, from) in map)
                 if (field is not null && !r.ContainsKey(field) && row.TryGetValue(from, out var v)) r[field] = from == "GlobalZ" && v.Length == 0 ? "0" : v;
+            rows.Add(r);
+        }
+        return rows;
+    }
+
+    /// <summary>
+    /// The file's strips one row per segment, for a strip table whose rows name point objects (SAFE 20's and SAFE 23.1's:
+    /// Name, NumSegs, StartPoint, EndPoint, WStartLeft, WStartRight, WEndLeft, WEndRight, AutoWiden, Layer; tester's
+    /// SAFE field test on 0.4.69). Each point is the program's point at the file's point's place (<paramref name="pointAt"/>
+    /// with X, Y, Z), or the file's own name when no such call is given.
+    /// </summary>
+    private static List<Dictionary<string, string>> StripSegments(Dictionary<string, List<Dictionary<string, string>>> t, IReadOnlyList<string> fields,
+        string name, string start, string end, Func<string, string, string, string>? pointAt)
+    {
+        string? Field(params string[] names) => FieldOf(fields, names);
+        var points = Rows(t, "POINT OBJECT CONNECTIVITY").GroupBy(r => r.GetValueOrDefault("UniqueName") ?? "", StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+        var placed = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        string Point(string strip, string point)
+        {
+            if (pointAt is null) return point;
+            if (placed.TryGetValue(point, out var known)) return known;
+            if (!points.TryGetValue(point, out var p)) throw new EtabsException($"The strip {strip} names point {point}, which the file does not list.");
+            return placed[point] = pointAt(p.GetValueOrDefault("X") ?? "0", p.GetValueOrDefault("Y") ?? "0", p.GetValueOrDefault("Z") ?? "0");
+        }
+        var map = new (string? Field, string From)[]
+        {
+            (Field("NumSegs", "NumberSegments"), "Number Segments"),
+            (Field("WStartLeft", "StartWidthLeft"), "Start Width Left"), (Field("WStartRight", "StartWidthRight"), "Start Width Right"),
+            (Field("WEndLeft", "EndWidthLeft"), "End Width Left"), (Field("WEndRight", "EndWidthRight"), "End Width Right"),
+            (Field("AutoWiden", "AutoWidening"), "Auto Widen"), (Field("Layer", "StripLayer"), "Layer"),
+        };
+        var rows = new List<Dictionary<string, string>>();
+        foreach (var row in Rows(t, "STRIP OBJECT CONNECTIVITY"))
+        {
+            var strip = row.GetValueOrDefault("Name") ?? "";
+            if (strip.Length == 0) continue;
+            var r = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                [name] = strip,
+                [start] = Point(strip, row.GetValueOrDefault("Strip Start Point") ?? ""),
+                [end] = Point(strip, row.GetValueOrDefault("Segment End Point") ?? ""),
+            };
+            foreach (var (field, from) in map)
+                if (field is not null && !r.ContainsKey(field) && row.TryGetValue(from, out var v)) r[field] = v;
             rows.Add(r);
         }
         return rows;
@@ -390,6 +453,8 @@ public static class F2kRebuild
     private static string? FieldOf(IReadOnlyList<string> fields, params string[] names) =>
         names.Select(n => fields.FirstOrDefault(f => string.Equals(Plain(f), Plain(n), StringComparison.OrdinalIgnoreCase))).FirstOrDefault(f => f is not null);
 
+    private static double Num(string text) => double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : 0;
+
     /// <summary>The strip table's field for the strip's name.</summary>
     public static string? NameField(IReadOnlyList<string> fields) => FieldOf(fields, "Name", "Strip", "StripName", "Label");
 
@@ -409,7 +474,17 @@ public static class F2kRebuild
             if (answer != 0 || keys is not { Length: > 0 }) throw new EtabsException($"SAFE gave no fields for its table '{StripTable}' (it answered {answer}).");
             return keys;
         }) ?? Array.Empty<string>());
-        var rows = StripRows(f2kText, fields);
+        // Strips that came in with the file's tables (ImportTables) are not put in twice.
+        var file = Rows(CsiTableText.Parse(f2kText), "STRIP OBJECT CONNECTIVITY").Select(r => r.GetValueOrDefault("Name") ?? "").Where(n => n.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+        var already = Convert.ToInt32(e.Raw("count the design strips", m => { int n = 0; string[] names = []; m.DesignConcreteSlab.DesignStrip.GetNameList(ref n, ref names); return n; }), CultureInfo.InvariantCulture);
+        if (file > 0 && already >= file) return already;
+        var rows = StripRows(f2kText, fields, (x, y, z) => Convert.ToString(e.Raw($"the point at {x}, {y}, {z}", m =>
+        {
+            string point = "";
+            var answer = Convert.ToInt32(m.PointObj.AddCartesian(Num(x), Num(y), Num(z), ref point, "", "Global", false, 0), CultureInfo.InvariantCulture);
+            if (answer != 0 || string.IsNullOrEmpty(point)) throw new EtabsException($"SAFE gave no point at {x}, {y}, {z} for a strip (it answered {answer}).");
+            return point;
+        }), CultureInfo.InvariantCulture) ?? "");
         if (rows.Count == 0) return 0;
         EditableTables.Put(e, StripTable, NameField(fields)!, rows, "put in the design strips");
         return Convert.ToInt32(e.Raw("count the design strips", m => { int n = 0; string[] names = []; m.DesignConcreteSlab.DesignStrip.GetNameList(ref n, ref names); return n; }), CultureInfo.InvariantCulture);

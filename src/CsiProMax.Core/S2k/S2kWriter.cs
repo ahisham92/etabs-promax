@@ -487,7 +487,8 @@ public static class S2kWriter
         var areaLoads = new List<IReadOnlyList<(string, string)>>();
         var areaTemps = new List<IReadOnlyList<(string, string)>>();
         var areaStrains = new List<IReadOnlyList<(string, string)>>();
-        foreach (var load in m.AreaLoads)
+        // A shell uniform load set is the plain loads it stands for: SAP2000 has no sets.
+        foreach (var load in LoadSets.Expanded(m))
         {
             if (!areaNames.TryGetValue((load.Object, load.Story), out var area)) { notes.Add($"An area load on {load.Object} at {load.Story} points at nothing and was left out."); continue; }
             var type = E2kText.Unquote(E2kText.Value(load.Tokens, "TYPE") ?? "");

@@ -572,7 +572,7 @@ public static class FieldTest
             if (finished && o.StartScratch.Method.DeclaringType == typeof(ScratchProgram)) {
                 // Every run checks that its results came back whole (Ahmed 2026-11-27), only while the field test runs.
                 EngineRun.CheckLoss = true;
-                try { EngineRunStep(ctx, program); PackSpeedField.Large(ctx, program); }
+                try { EngineRunStep(ctx, program); PackSpeedField.Large(ctx, program); RealModelField.Run(ctx, program); }
                 finally { EngineRun.CheckLoss = false; }
             }
         }
@@ -888,7 +888,10 @@ public static class FieldTest
                 if (start == "done") { cancel = EngineRun.Cancel(); break; }
                 Thread.Sleep(200);
             }
-            FieldContext.Expect(cancel?["ok"]?.GetValue<bool>() == true, "the run ended before Cancel could be pressed, or Cancel was refused: " + cancel?.ToJsonString());
+            // When the run ended first, why it ended is the failure (0.4.68 full test: only "ended before Cancel").
+            FieldContext.Expect(cancel is not null, "the run ended before the program was open, so there was nothing to cancel: " +
+                (EngineRun.Status(true)["monitor"]?["report"] is JsonObject r ? $"{r["headline"]} {r["error"]}" : EngineRun.Status(false)["phase"]?.ToString()));
+            FieldContext.Expect(cancel!["ok"]?.GetValue<bool>() == true, "Cancel was refused: " + cancel.ToJsonString());
             var status = Done(new JsonObject { ["ok"] = true }, 3);
             var report = Report(status);
             FieldContext.Expect(report["cancelled"]?.GetValue<bool>() == true, "the Run Report does not say it was cancelled: " + report["headline"]);

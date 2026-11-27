@@ -686,8 +686,105 @@ public sealed class ComEtabs : ICsiLink, IDisposable
 
     public TableData ReadTable(string key, IReadOnlyList<string>? cases, IReadOnlyList<string>? combos)
     {
-        try { return ReadTableKept(key, cases, combos); }
+        try
+        {
+            // A results table of a large model is read in pieces from the start, so it never has to fit in one array.
+            if (Paged(key, cases, combos) is { } paged) return paged;
+            return ReadTableKept(key, cases, combos);
+        }
         catch (OutOfMemoryException) { return ReadInPages(key, cases, combos); }
+    }
+
+    /// <summary>Rows above which a table is read one load case or combination at a time (the API gives a table as one array).</summary>
+    public static long PageAboveCells { get; set; } = 5_000_000;
+
+    /// <summary>Objects (points, frames, areas) from which a model counts as large, so its results tables are measured first.</summary>
+    public static int LargeModelObjects { get; set; } = 5_000;
+
+    private (string File, bool Large)? _large;
+    private readonly Dictionary<string, bool> _caseTables = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Whether the model has <see cref="LargeModelObjects"/> objects or more (once per model file).</summary>
+    private bool LargeModel()
+    {
+        try
+        {
+            var file = Info().File;
+            if (_large is { } known && known.File == file) return known.Large;
+            var count = Convert.ToInt64(On("count the objects", m =>
+            {
+                long n = 0;
+                foreach (var kind in new[] { "PointObj", "FrameObj", "AreaObj" })
+                    try { n += Convert.ToInt64(Tools.ApiCall.Invoke((object)m, kind + ".Count")["return"]?.GetValue<int>() ?? 0); }
+                    catch (Exception ex) when (ex is EtabsException or Tools.ToolInputException or MissingMethodException or InvalidOperationException) { }
+                return (object)n;
+            }));
+            _large = (file, count >= LargeModelObjects);
+            return _large.Value.Large;
+        }
+        catch (EtabsException) { return false; }
+    }
+
+    /// <summary>Whether a table has a row per load case or combination (a field named for the case), once per table.</summary>
+    private bool CaseTable(string key)
+    {
+        lock (_caseTables) if (_caseTables.TryGetValue(key, out var known)) return known;
+        var fields = (string[])(On("read the fields of a table", m =>
+        {
+            int version = 0, n = 0; string[] keys = None, names = None, about = None, units = None; bool[] importable = [];
+            try { m.DatabaseTables.GetAllFieldsInTable(key, ref version, ref n, ref keys, ref names, ref about, ref units, ref importable); }
+            catch (Exception ex) when (ex is not COMException and not OutOfMemoryException) { keys = None; }
+            return (object)(keys ?? None);
+        }) ?? None);
+        var byCase = IsCaseTable(fields);
+        lock (_caseTables) _caseTables[key] = byCase;
+        return byCase;
+    }
+
+    /// <summary>A table's fields name the load case or combination of each row.</summary>
+    internal static bool IsCaseTable(IReadOnlyList<string> fields) =>
+        fields.Any(f => f is not null && f.Replace(" ", "", StringComparison.Ordinal) is var x
+            && (x.Equals("OutputCase", StringComparison.OrdinalIgnoreCase) || x.Equals("LoadCase", StringComparison.OrdinalIgnoreCase)
+                || x.Equals("Combo", StringComparison.OrdinalIgnoreCase) || x.Equals("LoadCombo", StringComparison.OrdinalIgnoreCase) || x.Equals("Case", StringComparison.OrdinalIgnoreCase)));
+
+    /// <summary>
+    /// The pieces a table is read in when it would be too large for one array: a results table (one row per load case
+    /// or combination) of a large model, read for the first case, whose rows times the number of cases and
+    /// combinations pass <see cref="PageAboveCells"/>. The whole table, put together from those pieces; null when one
+    /// read is fine. A tester's SAFE field test ran out of memory on one results table of a large analysed model.
+    /// </summary>
+    private TableData? Paged(string key, IReadOnlyList<string>? cases, IReadOnlyList<string>? combos)
+    {
+        if (!CaseTable(key) || !LargeModel()) return null;
+        var parts = Parts(cases, combos);
+        if (parts.Count <= 1) return null;
+        var first = ReadTableNow(key, parts[0].IsCase ? [parts[0].Name] : [], parts[0].IsCase ? [] : [parts[0].Name]);
+        if (!PagesNeeded(first.Rows.Count, Math.Max(first.Fields.Count, 1), parts.Count)) return null;
+        return ReadParts(key, parts, first);
+    }
+
+    /// <summary>Whether a table whose first case has <paramref name="rows"/> rows is to be read a case at a time.</summary>
+    internal static bool PagesNeeded(long rows, int fields, int parts) => rows * fields * parts > PageAboveCells;
+
+    private List<(string Name, bool IsCase)> Parts(IReadOnlyList<string>? cases, IReadOnlyList<string>? combos)
+    {
+        var allCases = cases is { Count: > 0 } ? cases : cases is null && combos is null ? LoadCases() : [];
+        var allCombos = combos is { Count: > 0 } ? combos : cases is null && combos is null ? Combos() : [];
+        return allCases.Select(c => (c, true)).Concat(allCombos.Select(c => (c, false))).ToList();
+    }
+
+    private TableData ReadParts(string key, List<(string Name, bool IsCase)> parts, TableData? first = null)
+    {
+        string[]? fields = first?.Fields.ToArray();
+        var rows = new List<string[]>(first?.Rows ?? []);
+        foreach (var (one, isCase) in parts.Skip(first is null ? 0 : 1))
+        {
+            var page = ReadTableNow(key, isCase ? [one] : [], isCase ? [] : [one]);
+            if (page.Fields.Count > 0) fields ??= page.Fields.ToArray();
+            rows.AddRange(page.Rows);
+        }
+        LastRead = $"{Program.Name}'s '{key}' in {parts.Count} pieces (a load case or combination each), {rows.Count:N0} rows";
+        return new TableData(fields ?? [], rows);
     }
 
     /// <summary>
@@ -698,20 +795,10 @@ public sealed class ComEtabs : ICsiLink, IDisposable
     private TableData ReadInPages(string key, IReadOnlyList<string>? cases, IReadOnlyList<string>? combos)
     {
         OutOfMemory.Free();
-        var allCases = cases is { Count: > 0 } ? cases : cases is null && combos is null ? LoadCases() : [];
-        var allCombos = combos is { Count: > 0 } ? combos : cases is null && combos is null ? Combos() : [];
-        if (allCases.Count + allCombos.Count <= 1)
+        var parts = Parts(cases, combos);
+        if (parts.Count <= 1)
             throw new EtabsException($"{Program.Name}'s table '{key}' is too large to read in this CSI ProMax window's memory, even for one load case ({LastRead}).");
-        string[]? fields = null;
-        var rows = new List<string[]>();
-        foreach (var (one, isCase) in allCases.Select(c => (c, true)).Concat(allCombos.Select(c => (c, false))))
-        {
-            var page = ReadTableNow(key, isCase ? [one] : [], isCase ? [] : [one]);
-            if (page.Fields.Count > 0) fields ??= page.Fields.ToArray();
-            rows.AddRange(page.Rows);
-        }
-        LastRead = $"{Program.Name}'s '{key}' in {allCases.Count + allCombos.Count} pages, {rows.Count:N0} rows";
-        return new TableData(fields ?? [], rows);
+        return ReadParts(key, parts);
     }
 
     private TableData ReadTableKept(string key, IReadOnlyList<string>? cases, IReadOnlyList<string>? combos)
@@ -791,10 +878,14 @@ public sealed class ComEtabs : ICsiLink, IDisposable
         var rows = new List<string[]>(Math.Max(records, 0));
         var width = fields.Length;
         records = width > 0 ? Math.Min(records, data.Length / width) : 0;
+        // A value repeated down a column (the case, its type, the story, the step) is kept once: results tables repeat
+        // them in every row, and they were most of a large table's memory.
+        var same = new Repeats(width);
         for (var r = 0; r < records && width > 0; r++)
         {
             var row = new string[width];
-            for (var c = 0; c < width; c++) row[c] = data[r * width + c] ?? "";
+            for (var c = 0; c < width; c++) row[c] = same.Kept(c, data[r * width + c] ?? "");
+            data[r * width] = null!; // let go of the array's first cell of the row as it is copied (the rest goes with the array)
             rows.Add(row);
         }
         return new TableData(fields, rows);
@@ -829,5 +920,23 @@ public sealed class ComEtabs : ICsiLink, IDisposable
         try { Model().View.RefreshView(0, false); }
         catch (COMException) { _model = null; }
         catch (Exception) { } // a redraw that fails changes nothing in the model
+    }
+}
+
+/// <summary>One copy of each value repeated down a column, up to a few thousand distinct values a column.</summary>
+internal sealed class Repeats(int columns)
+{
+    private const int MostDistinct = 4096;
+    private readonly Dictionary<string, string>?[] _seen = new Dictionary<string, string>?[columns];
+    private readonly bool[] _off = new bool[columns];
+
+    public string Kept(int column, string value)
+    {
+        if (_off[column] || value.Length > 64) return value;
+        var seen = _seen[column] ??= new Dictionary<string, string>(StringComparer.Ordinal);
+        if (seen.TryGetValue(value, out var kept)) return kept;
+        if (seen.Count >= MostDistinct) { _off[column] = true; _seen[column] = null; return value; }
+        seen[value] = value;
+        return value;
     }
 }

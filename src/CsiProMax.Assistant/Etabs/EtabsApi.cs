@@ -36,6 +36,22 @@ namespace CsiProMax.Assistant.Etabs
         internal Type ApiType { get { return _type; } }
 
         /// <summary>
+        /// The API file loaded once into this process. Two installs (SAFE 22.7 and 23.1, say) or two windows reached by
+        /// different routes give the same API (SAFEv1) from two folders, and the second LoadFrom fails with "Assembly
+        /// with same name is already loaded" (tester's SAFE field test on 0.4.69, started from ETABS's CSI ProMax
+        /// window). The one already loaded is used then: its interfaces are the same COM interfaces.
+        /// </summary>
+        public static Assembly Load(string apiFile)
+        {
+            var name = Path.GetFileNameWithoutExtension(apiFile);
+            var same = AppDomain.CurrentDomain.GetAssemblies().Where(a => !a.IsDynamic && string.Equals(a.GetName().Name, name, StringComparison.OrdinalIgnoreCase)).ToList();
+            var here = same.FirstOrDefault(a => { try { return string.Equals(a.Location, Path.GetFullPath(apiFile), StringComparison.OrdinalIgnoreCase); } catch (NotSupportedException) { return false; } });
+            if (here != null) return here;
+            try { return Assembly.LoadFrom(apiFile); }
+            catch (FileLoadException) when (same.Count > 0) { return same[0]; }
+        }
+
+        /// <summary>
         /// The API file of the running program (the one with this process id, when given), or of the program where it is
         /// usually installed. Each program has its own API file (ETABSv1.dll, SAP2000v1.dll, SAFEv1.dll); the newer
         /// versions also ship CSI's common API, CSiAPIv1.dll, which is used when the program's own file is not there.
@@ -93,7 +109,7 @@ namespace CsiProMax.Assistant.Etabs
         /// </summary>
         public static EtabsApi Attach(string apiFile, CsiProgram program, int? pid = null)
         {
-            var api = Assembly.LoadFrom(apiFile);
+            var api = Load(apiFile);
             var ns = NamespaceOf(apiFile);
             var type = api.GetType(ns + ".cOAPI", true);
             var progId = program.ProgId;
