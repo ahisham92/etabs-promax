@@ -15,11 +15,27 @@ namespace CsiProMax.Assistant;
 public static class PackSpeedField
 {
     /// <summary>The checks and the pack, read in one session: what the step returns, and the time check after it.</summary>
-    public static (JsonObject Checks, Pack.Built Pack) Build(ICsiLink link, Func<JsonObject> checks, Func<JsonObject, Pack.Built> build)
+    public static (JsonObject Checks, Pack.Built Pack, List<string> Lost) Build(ICsiLink link, Func<JsonObject> checks, Func<JsonObject, Pack.Built> build)
     {
         using var session = PackSession.Start(link);
         var c = checks();
-        return (c, build(c));
+        var pack = build(c);
+        return (c, pack, Pack.Missing(link, pack.Content, [], []));
+    }
+
+    /// <summary>
+    /// Ahmed 2026-11-27: the results of an analysis or a design come back "complete, no way to lose anything". Fails
+    /// when a result, design or design-input table the program has for the model is not in the pack whole (every row
+    /// and field); <paramref name="lost"/> is what <see cref="Pack.Missing"/> found while the program was open.
+    /// </summary>
+    public static void Whole(FieldContext ctx, string program, string what, IReadOnlyList<string>? lost)
+    {
+        if (lost is null) return;
+        ctx.Step($"the {program} {what} holds every result and design table the program has, every row and field", () =>
+        {
+            FieldContext.Expect(lost.Count == 0, $"{lost.Count} lost: " + string.Join("; ", lost.Take(30)) + (lost.Count > 30 ? "; ..." : ""));
+            return "nothing lost";
+        });
     }
 
     /// <summary>Fails when the pack took longer than <see cref="Pack.MostTime"/>; names the slowest tables either way.</summary>
@@ -49,11 +65,15 @@ public static class PackSpeedField
         {
             var file = link.Info().File;
             FieldContext.Expect(file.Length > 0 && File.Exists(file), $"the scratch model has no saved file to copy ({file})");
+            List<string>? lost = null;
             var copy = Packs.PackCopy.Read(link.Program, file, from =>
             {
                 using var session = PackSession.Start(from);
                 var checks = ProgramTools.Report(System.Text.Json.JsonDocument.Parse("{}").RootElement, from).AsObject();
-                return Pack.Build(from, [], from.LoadCases(), from.Combos(), checks, null, by: "CSI ProMax field test, from a copy", fileAs: file, zip: false);
+                var built = Pack.Build(from, [], from.LoadCases(), from.Combos(), checks, null, by: "CSI ProMax field test, from a copy", fileAs: file, zip: false);
+                // What the pack lost, against the program while the copy is still open.
+                lost = Pack.Missing(from, built.Content, from.LoadCases(), from.Combos());
+                return built;
             });
             FieldContext.Expect(copy.Value is not null, $"the pack was not read from a copy: {copy.Said}");
             var zipping = Stopwatch.StartNew();
@@ -64,6 +84,7 @@ public static class PackSpeedField
                 $"copying, opening in a hidden {link.Program.Name}, reading the pack, closing and zipping it after took {took.TotalSeconds:0} s (zipping {zipping.Elapsed.TotalSeconds:0} s), more than {Pack.MostTime.TotalSeconds:0} s (reading alone {timing?["seconds"]} s). Slowest: {timing?["slowest"]?.ToJsonString()}");
             var cut = Cut(got.Content);
             FieldContext.Expect(cut.Count == 0, "the pack is not whole: " + string.Join(", ", cut));
+            FieldContext.Expect(lost is { Count: 0 }, "the pack lost what the program has: " + string.Join("; ", (lost ?? ["not checked"]).Take(30)));
             var target = Path.Combine(ctx.Folder, ModelerFieldSteps.ModelName + $" {link.Program.Name} from a copy.cpmx");
             File.WriteAllBytes(target, got.Zip);
             return new { seconds = Math.Round(took.TotalSeconds, 1), zip_seconds = Math.Round(zipping.Elapsed.TotalSeconds, 1), reading = timing?["seconds"]?.ToJsonString(), file = Path.GetFileName(target), frames = got.Frames, areas = got.Areas, tables = got.Tables.Count, notes = got.Notes };
@@ -104,24 +125,33 @@ public static class PackSpeedField
             var model = LargeModel(program, ctx.Folder);
             var frames = model.Frames().Count;
             var areas = model.Areas().Count;
-            var started = EngineRun.Start(model, analyse: true, kinds: [], keepOpen: false);
+            EngineRun.WhileOpen = NumericProbe;
+            JsonObject started;
+            try { started = EngineRun.Start(model, analyse: true, kinds: [], keepOpen: false); }
+            catch { EngineRun.WhileOpen = null; throw; }
             FieldContext.Expect(started["ok"]?.GetValue<bool>() == true, "the run did not start: " + started["error"]);
             var until = DateTime.UtcNow.AddMinutes(40);
             while (EngineRun.Status(false)["done"]?.GetValue<bool>() != true && DateTime.UtcNow < until) Thread.Sleep(2000);
             var status = EngineRun.Status(true);
+            EngineRun.WhileOpen = null;
+            ctx.Note($"how fast {program.Name} gives the large model's shell results by its numeric results calls (measured, not checked)", status["probe"]?.ToJsonString() ?? "not measured");
             FieldContext.Expect(status["done"]?.GetValue<bool>() == true, "the run did not finish within 40 minutes: " + status["phase"]);
             FieldContext.Expect(string.IsNullOrEmpty(status["error"]?.GetValue<string>()), "the run stopped: " + status["error"]);
             var steps = (status["monitor"]?["steps"] as JsonArray ?? []).Where(x => x is not null).ToDictionary(x => x!["key"]!.GetValue<string>(), x => x!["seconds"]?.GetValue<double>() ?? 0);
             double At(string key) => steps.GetValueOrDefault(key);
             var pack = status["pack"] as JsonObject;
             FieldContext.Expect(pack is not null, "no results came back to the model");
+            // What the window is given, written out as it is sent, but only counted: one text of a large model's results
+            // is more than memory holds (0.4.68 full test).
             var w = Stopwatch.StartNew();
-            var text = pack!.ToJsonString();
+            var bytes = Pack.JsonSize(pack!);
             var load = w.Elapsed.TotalSeconds;
             var tables = (pack["tables"] as JsonObject)?.Count ?? 0;
-            var rows = (pack["tables"] as JsonObject)?.Sum(t => (t.Value?["rows"] as JsonArray)?.Count ?? 0) ?? 0;
+            var rows = (pack["tables"] as JsonObject)?.Sum(t => t.Value?["rows_total"]?.GetValue<int>() ?? (t.Value?["rows"] as JsonArray)?.Count ?? 0) ?? 0;
             var cut = Cut(pack);
             FieldContext.Expect(cut.Count == 0, "the results are not whole: " + string.Join(", ", cut));
+            var lost = status["lost"] as JsonArray;
+            FieldContext.Expect(lost is { Count: 0 }, "the results that came back lost what the program has: " + (lost?.ToJsonString() ?? "not checked"));
             var left = pack["manifest"]?["left_out_tables"] as JsonArray ?? [];
             FieldContext.Expect(left.Count == 0, "tables were left out of the pack: " + left.ToJsonString());
             var unread = (pack["manifest"]?["notes"] as JsonArray ?? []).Select(n => n?.ToString() ?? "").Where(n => n.Contains("could not be read", StringComparison.Ordinal)).ToList();
@@ -133,11 +163,86 @@ public static class PackSpeedField
                 $"reading the results ({At("results"):0} s), closing {program.Name} ({At("close"):0} s) and giving them to the model ({load:0.0} s) took {round:0} s, more than {Pack.LargeMostTime.TotalSeconds:0} s, for {frames} frames and {areas} areas. Slowest tables: {slowest}");
             return new
             {
-                frames, areas, tables, rows, left_out = pack["manifest"]?["left_out_tables"]?.ToJsonString(), megabytes = Math.Round(text.Length / 1e6, 1),
+                frames, areas, tables, rows, left_out = pack["manifest"]?["left_out_tables"]?.ToJsonString(), megabytes = Math.Round(bytes / 1e6, 1),
                 results_seconds = Math.Round(At("results"), 1), close_seconds = Math.Round(At("close"), 1), load_seconds = Math.Round(load, 1),
-                start_seconds = Math.Round(At("start"), 1), analysis_seconds = Math.Round(At("analysis"), 1), slowest,
+                start_seconds = Math.Round(At("start"), 1), analysis_seconds = Math.Round(At("analysis"), 1), slowest, numeric = status["probe"]?.ToJsonString(),
             };
         });
+    }
+
+    /// <summary>
+    /// How fast the program gives the shell results through its numeric results calls (Results.AreaForceShell and the
+    /// like: numbers, not formatted table text), against its tables: 0.4.68 full test, ETABS gave each 2.1-million-row
+    /// shell table in about 150 s (about 14,000 rows a second), so the large model took about 15 minutes. Run on the
+    /// large model while the program is open, a load case at a time for the first cases. Never fails: it measures.
+    /// </summary>
+    public static JsonObject NumericProbe(ICsiLink link)
+    {
+        var o = new JsonObject();
+        var cases = link.LoadCases().Take(3).ToList();
+        foreach (var (call, doubles) in new[] { ("AreaForceShell", 19), ("AreaJointForceShell", 6), ("AreaStressShell", 20), ("AreaStrainShell", 20) })
+        {
+            var parts = new JsonArray();
+            long rows = 0, ms = 0;
+            foreach (var c in cases)
+            {
+                var said = link.Raw($"time {call} for {c}", m =>
+                {
+                    try
+                    {
+                        m.Results.Setup.DeselectAllCasesAndCombosForOutput();
+                        m.Results.Setup.SetCaseSelectedForOutput(c, true);
+                        object results = m.Results;
+                        var args = new object[3 + 5 + 1 + doubles];
+                        args[0] = "All"; args[1] = 2; args[2] = 0;
+                        for (var i = 3; i < 8; i++) args[i] = Array.Empty<string>();
+                        args[8] = Array.Empty<double>();
+                        for (var i = 9; i < args.Length; i++) args[i] = Array.Empty<double>();
+                        var refs = new System.Reflection.ParameterModifier(args.Length);
+                        for (var i = 2; i < args.Length; i++) refs[i] = true;
+                        var w = Stopwatch.StartNew();
+                        var ret = results.GetType().InvokeMember(call, System.Reflection.BindingFlags.InvokeMethod, null, results, args, [refs], null, null);
+                        return (object)$"{Convert.ToInt32(args[2])}|{w.ElapsedMilliseconds}|{ret}";
+                    }
+                    catch (Exception ex) when (ex is not OutOfMemoryException) { return "error|" + (ex.InnerException ?? ex).Message; }
+                }) as string ?? "";
+                var bits = said.Split('|');
+                if (bits.Length == 3 && long.TryParse(bits[0], out var n) && long.TryParse(bits[1], out var t)) { rows += n; ms += t; parts.Add((JsonNode)$"{c}: {n} rows in {t} ms (answer {bits[2]})"); }
+                else { parts.Add((JsonNode)$"{c}: {said}"); break; }
+            }
+            o[call] = new JsonObject { ["rows"] = rows, ["ms"] = ms, ["rows_per_second"] = ms > 0 ? Math.Round(rows * 1000.0 / ms) : 0, ["cases"] = parts };
+        }
+        // The program writing a whole table to a CSV file itself: nothing is carried over COM but the file's name (a
+        // table given as one array of 30 million texts is carried between the two programs text by text).
+        foreach (var table in new[] { "Element Forces - Area Shells", "Element Forces - Frames" })
+        {
+            var csv = Path.Combine(Path.GetTempPath(), "cpm-probe-" + Guid.NewGuid().ToString("N") + ".csv");
+            var said = link.Raw($"time {table} to a CSV file", m =>
+            {
+                try
+                {
+                    string[] ask = []; int version = 0;
+                    var w = Stopwatch.StartNew();
+                    int ret = Convert.ToInt32(m.DatabaseTables.GetTableForDisplayCSVFile(table, ref ask, "", ref version, csv, ","));
+                    return (object)$"{w.ElapsedMilliseconds} ms, answer {ret}";
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException) { return "error: " + (ex.InnerException ?? ex).Message; }
+            }) as string ?? "";
+            long lines = 0, bytes = 0;
+            var head = new List<string>();
+            try
+            {
+                if (File.Exists(csv))
+                {
+                    bytes = new FileInfo(csv).Length;
+                    using (var r = new StreamReader(csv)) while (r.ReadLine() is { } line) { if (lines++ < 4) head.Add(line.Length > 300 ? line[..300] : line); }
+                    File.Delete(csv);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { said += "; " + ex.Message; }
+            o["csv_file " + table] = $"{said}, {lines} lines, {bytes / 1e6:0.0} MB; first lines: {string.Join(" ⏎ ", head)}";
+        }
+        return o;
     }
 
     /// <summary>The tables measured: a small input table, a story result and an element result, the first with data of each.</summary>

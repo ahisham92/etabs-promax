@@ -186,6 +186,8 @@ public static class RealModelField
             var b = Packs.PackCopy.Read(program, analysed, ModelTables);
             FieldContext.Expect(b.Value is not null, "the Engine's model could not be read from a copy: " + b.Said);
             var lost = Compare(a.Model, b.Value!, model: true);
+            // The whole list beside the model, for the lossless threads: every table, row and field, before and after.
+            File.WriteAllLines(Path.Combine(folder, "model table differences.txt"), lost.Count > 0 ? lost : ["none"]);
             FieldContext.Expect(lost.Count == 0, $"{lost.Count} difference(s): " + string.Join(" | ", lost.Take(25)));
             return $"{a.Model.Count} tables, {a.Model.Sum(t => t.Value.Rows.Count):N0} rows, all the same";
         });
@@ -196,6 +198,7 @@ public static class RealModelField
             FieldContext.Expect(shared.Count > 0, $"no result table to compare: the program's run gave {string.Join(", ", a.Results.Keys.Take(10))}; the Engine's {string.Join(", ", b.Keys.Take(10))}");
             var missing = a.Results.Keys.Where(k => !b.ContainsKey(k) && a.Results[k].Rows.Count > 0).ToList();
             var off = Compare(a.Results.Where(t => shared.Contains(t.Key)).ToDictionary(t => t.Key, t => t.Value), b, model: false);
+            File.WriteAllLines(Path.Combine(folder, "result differences.txt"), (off.Count > 0 ? off : ["none"]).Concat(missing.Select(m => m + ": not brought back by the Engine")));
             FieldContext.Expect(missing.Count == 0, "the Engine brought back none of: " + string.Join(", ", missing.Take(20)));
             FieldContext.Expect(off.Count == 0, $"{off.Count} difference(s): " + string.Join(" | ", off.Take(25)));
             return $"{shared.Count} result and design tables, {shared.Sum(k => a.Results[k].Rows.Count):N0} rows, all the same";

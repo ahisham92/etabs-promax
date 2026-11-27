@@ -34,7 +34,7 @@ public static class PackCopy
     }
 
     /// <summary>Copies a file the program may still hold open (read with others writing it).</summary>
-    private static void CopyShared(string from, string to)
+    internal static void CopyShared(string from, string to)
     {
         using var source = new FileStream(from, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         using var target = new FileStream(to, FileMode.Create, FileAccess.Write, FileShare.None);

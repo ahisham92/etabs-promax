@@ -39,6 +39,8 @@ public static class F2kReader
             KeptTables.Keep(m, "safe", name, f[name]);
         // Groups, offsets and insertion points were read for ETABS and SAP2000 too; SAFE gets them back as they were.
         foreach (var name in BothWays.Where(f.ContainsKey)) KeptTables.Keep(m, "safe", name, f[name]);
+        // And the whole file, so saving it again gives SAFE back every table, row and field it wrote (F2kSource).
+        F2kSource.Remember(m, f, CsiTableText.Names(text));
         return new S2kReader.Result(m, false, notes.Distinct().ToList());
     }
 

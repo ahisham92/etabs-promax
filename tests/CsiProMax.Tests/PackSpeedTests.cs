@@ -173,6 +173,113 @@ static class PackSpeedTests
             Check(back["manifest"]!["timing"] is not null && back["manifest"]!["notes"] is not null, "the manifest is in the zip");
             Check(ReferenceEquals(zipped, Pack.Zipped(zipped)), "a zipped pack is not zipped again");
         });
+        yield return ("pack complete: every result and design table the program has is in the pack, every row and field; what is not is named", () =>
+        {
+            var m = new MemoryEtabs { ModelFile = @"C:\Jobs\T\T.EDB" };
+            m.AddFrame(0, 0, 0, 0, 0, 3, "C1");
+            m.Locked = true;
+            m.ResultTables["Joint Displacements"] = new(["Joint", "OutputCase", "Ux"], [["1", "Dead", "0.1"], ["2", "Dead", "0.2"]]);
+            m.ResultTables["Concrete Frame Design - Summary"] = new(["Story", "Label", "Status"], [["S1", "C1", "OK"]]);
+            var built = Pack.Build(m, [], [], [], null, null);
+            var none = Pack.Missing(m, built.Content, [], []);
+            Check(none.Count == 0, "nothing lost: " + string.Join("; ", none));
+            var tables = (System.Text.Json.Nodes.JsonObject)built.Content["tables"]!;
+            tables.Remove("Concrete Frame Design - Summary");
+            ((System.Text.Json.Nodes.JsonArray)tables["Joint Displacements"]!["rows"]!).RemoveAt(1);
+            tables["Joint Displacements"]!["fields"] = new System.Text.Json.Nodes.JsonArray("Joint", "OutputCase");
+            var lostRows = Pack.Missing(m, built.Content, [], []);
+            Check(lostRows.Any(l => l.Contains("1 of 2 rows")), "a row lost against what the program gave is named: " + string.Join("; ", lostRows));
+            // A table the pack has no read count for is read from the program again, field by field.
+            ((System.Text.Json.Nodes.JsonObject)built.Content["manifest"]!["read_rows"]!).Remove("Joint Displacements");
+            var lost = Pack.Missing(m, built.Content, [], []);
+            Check(lost.Any(l => l.Contains("Concrete Frame Design - Summary") && l.Contains("not in the pack")), "a design table left out is named: " + string.Join("; ", lost));
+            Check(lost.Any(l => l.Contains("1 of 2 rows")), "a row lost is named: " + string.Join("; ", lost));
+            Check(lost.Any(l => l.Contains("fields Ux")), "a field lost is named: " + string.Join("; ", lost));
+        });
+        yield return ("pack memory: a large table goes into the pack and its Viewer page in parts, written as it goes, and reads back whole", () =>
+        {
+            var old = Pack.PartRows;
+            var oldWindow = Pack.WindowMostRows;
+            try
+            {
+                Pack.PartRows = 10;
+                Pack.WindowMostRows = 20;
+                var m = new MemoryEtabs { ModelFile = @"C:\Jobs\T\T.EDB" };
+                m.AddFrame(0, 0, 0, 0, 0, 3, "C1");
+                m.Locked = true;
+                m.ResultTables["Joint Displacements"] = new(["Joint", "OutputCase", "Ux"], Enumerable.Range(0, 35).Select(i => new[] { i.ToString(), "</script><!--", "0." + i }).ToList());
+                var built = Pack.Build(m, [], [], [], null, null);
+                var back = Pack.Read(built.Zip);
+                var rows = (System.Text.Json.Nodes.JsonArray)back["tables"]!["Joint Displacements"]!["rows"]!;
+                Equal(35, rows.Count, "rows read back from the parts");
+                Equal("34", rows[34]![0]!.GetValue<string>(), "the last row");
+                var page = Pack.ViewerHtml(built.Content);
+                Equal(3, System.Text.RegularExpressions.Regex.Matches(page, "class=\"pack-rows\"").Count, "the rows past the first part in their own script elements");
+                var json = page[(page.IndexOf("<script id=\"pack\"", StringComparison.Ordinal) + 40)..];
+                Check(!json[..json.IndexOf("</script>", StringComparison.Ordinal)].Contains("<!--"), "nothing in the pack's JSON can end its script element");
+                Check(Pack.JsonSize(built.Content) > 1000, "the size is counted");
+                var window = Pack.ForWindow(built.Content);
+                Equal(10, ((System.Text.Json.Nodes.JsonArray)window["tables"]!["Joint Displacements"]!["rows"]!).Count, "the window is given the first part of a pack too large for it");
+                Equal(35, window["tables"]!["Joint Displacements"]!["rows_total"]!.GetValue<int>(), "with the whole row count");
+            }
+            finally { Pack.PartRows = old; Pack.WindowMostRows = oldWindow; }
+        });
+        yield return ("pack helpers: two hidden windows on copies read result tables beside the one that ran, within three windows; the pack is the same", () =>
+        {
+            var dir = Path.Combine(Path.GetTempPath(), "cpm-helpers-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            var oldStart = CsiProMax.Assistant.Packs.PackCopy.Start;
+            var oldRoot = CsiProMax.Assistant.Packs.PackCopy.Root;
+            var oldRunning = CsiProMax.Assistant.Packs.PackHelpers.Running;
+            try
+            {
+                var file = Path.Combine(dir, "Tower.EDB");
+                File.WriteAllText(file, "model");
+                MemoryEtabs Model(bool design)
+                {
+                    var m = new MemoryEtabs { ModelFile = file };
+                    m.AddFrame(0, 0, 0, 0, 0, 3, "C1");
+                    m.Locked = true;
+                    for (var i = 0; i < 6; i++)
+                        m.ResultTables[$"Element Forces - Area Shells {i}"] = new(["Area", "OutputCase", "F11"], Enumerable.Range(0, 50).Select(r => new[] { r.ToString(), "Dead", i.ToString() }).ToList());
+                    m.ResultTables["Joint Displacements"] = new(["Joint", "OutputCase", "Ux"], [["1", "Dead", "0.1"]]);
+                    if (design) m.ResultTables["Concrete Frame Design - Summary"] = new(["Story", "Label", "Status"], [["S1", "C1", "OK"]]);
+                    return m;
+                }
+                var opened = 0;
+                var windows = new List<CopyWindow>();
+                CsiProMax.Assistant.Packs.PackCopy.Root = Path.Combine(dir, "copies");
+                CsiProMax.Assistant.Packs.PackCopy.Start = (p, ctx, f) => { Interlocked.Increment(ref opened); var w = new CopyWindow(Model(design: false), f); lock (windows) windows.Add(w); return w; };
+                CsiProMax.Assistant.Packs.PackHelpers.Running = _ => 1;
+                var main = Model(design: true);
+                var alone = Pack.Build(main, [], [], [], null, null);
+                using (var helpers = CsiProMax.Assistant.Packs.PackHelpers.Open(CsiProgram.Etabs, file))
+                {
+                    Equal(2, helpers.Asked, "two helpers beside the window that ran (three windows)");
+                    var together = Pack.Build(main, [], [], [], null, null, helpers: helpers);
+                    var a = (System.Text.Json.Nodes.JsonObject)alone.Content["tables"]!;
+                    var b = (System.Text.Json.Nodes.JsonObject)together.Content["tables"]!;
+                    Equal(string.Join(",", a.Select(t => t.Key).OrderBy(k => k)), string.Join(",", b.Select(t => t.Key).OrderBy(k => k)), "the same tables");
+                    foreach (var (name, t) in a) Equal(t!["rows"]!.ToJsonString(), b[name]!["rows"]!.ToJsonString(), name + " rows");
+                    Check(b["Concrete Frame Design - Summary"] is not null, "the design, only in the window that ran, is in the pack");
+                    Check(together.Content["manifest"]!["timing"]!["helpers"]!["asked"]!.GetValue<int>() == 2, "the manifest says the helpers");
+                    Check(Pack.Missing(main, together.Content, [], []).Count == 0, "nothing lost");
+                }
+                Check(windows.All(w => w.Closed == 1), "every helper window is closed after");
+                Check(!Directory.EnumerateDirectories(Path.Combine(dir, "copies")).Any(), "the copies are removed");
+                Equal(0, CsiProMax.Assistant.Packs.PackHelpers.ForSize(80, 15, 20), "a small model: one window");
+                Check(CsiProMax.Assistant.Packs.PackHelpers.ForSize(5115, 1500, 3) == 2, "the field test's large model: three windows");
+                CsiProMax.Assistant.Packs.PackHelpers.Running = _ => 3;
+                using (var none = CsiProMax.Assistant.Packs.PackHelpers.Open(CsiProgram.Etabs, file)) Equal(0, none.Asked, "no helper when three windows are open");
+            }
+            finally
+            {
+                CsiProMax.Assistant.Packs.PackCopy.Start = oldStart;
+                CsiProMax.Assistant.Packs.PackCopy.Root = oldRoot;
+                CsiProMax.Assistant.Packs.PackHelpers.Running = oldRunning;
+                try { Directory.Delete(dir, true); } catch (IOException) { }
+            }
+        });
         yield return ("pack speed: the manifest says how long the pack took and which tables were slowest, against 3 minutes", () =>
         {
             var m = new MemoryEtabs { ModelFile = @"C:\Jobs\T\T.EDB" };
