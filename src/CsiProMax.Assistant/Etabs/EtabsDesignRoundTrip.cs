@@ -19,7 +19,7 @@ public static class EtabsDesignRoundTrip
         var m = modeler.Model;
         if (m.Target is "sap2000" or "safe") return;
         ctx.Tool("set_live_load_reduction", """{"method":"Code","code":"ASCE7-10","default_min":true}""",
-            _ => FieldContext.Expect(E2kWriter.Write(m).Contains("RLLF  METHOD \"ASCE7-10\"  USEDEFAULTMIN \"YES\"", StringComparison.Ordinal), "the .e2k has no RLLF line as ETABS writes it"),
+            _ => FieldContext.Expect(E2kWriter.Write(m).Contains("RLLF  METHOD \"ASCE7-10\"  USEDEFAULTMIN \"YES\"", StringComparison.Ordinal), "the .e2k has no RLLF line as ETABS writes it"), // ETABS itself
             "ETABS form Live Load Reduction Factor: Tributary Area (ASCE7-10), as the .e2k's RLLF line"); // ETABS itself
         ctx.Tool("set_live_load_reduction", """{"method":"Stories","default_min":false,"single":0.6,"multiple":0.45,"all_forces":true,"stories":[[1,1],[3,0.8]]}""",
             null, "ETABS form Live Load Reduction By Stories Supported: two rows, kept with the model"); // ETABS itself
