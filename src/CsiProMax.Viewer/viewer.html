@@ -11447,6 +11447,29 @@ function hmChooseProgram() {
   d.dataset.chooseProgram = "1";
   return d;
 }
+// A model file double-clicked while this Engine window is open (Ahmed 2026-11-27): the window hands it here and it
+// opens, as File > Open would. Unsaved changes are asked about first; while the first question (which program) is still
+// up, the file answers it: it opens for its own program.
+let hmPendingBusy = false;
+async function hmPendingOpen() {
+  if (hmPendingBusy) return;
+  let path = "";
+  try { const r = await fetch("pending-open", {cache: "no-store"}); if (r.ok) path = ((await r.json()) || {}).path || ""; } catch (e) { return; }
+  if (!path) return;
+  hmPendingBusy = true;
+  try {
+    const choose = document.querySelector(".dlg[data-choose-program]");
+    if (choose) { choose.close(); const j = await hmRun("open_model_file", {path}); if (j.ok) hmSay("Opened " + path); return; }
+    if (hm.state && hm.state.saved === false) {
+      const go = await new Promise(done => { let said = false; const a = dialog("CSI ProMax Engine", `<p class="kv" style="max-width:420px;margin-top:0">The model has changes that are not saved. Save them before opening <b>${esc(path.split(/[\\/]/).pop())}</b>?</p>`,
+        [["Save", () => { said = true; hmSave(false).then(() => done(!(hm.state && hm.state.saved === false))); }], ["Don't Save", () => { said = true; done(true); }], ["Cancel", () => { said = true; done(false); }]], {width: 440});
+        // Closed with its X or Escape: the same as Cancel.
+        const t = setInterval(() => { if (!a.isConnected) { clearInterval(t); if (!said) done(false); } }, 300); });
+      if (!go) return;
+    }
+    await hmOpenFile(path);
+  } finally { hmPendingBusy = false; }
+}
 function hmOpenTyped() {
   dialog("Open Model", `<div class="g2"><span>File</span><input id="oP" placeholder="C:\\Users\\...\\Models\\Tower.e2k" style="min-width:380px"></div><p class="kv" style="max-width:480px">Type or paste the full path of an ETABS (.e2k), SAP2000 (.s2k) or SAFE (.f2k) text file, or a Modeler file (.cpme, .cpms, .cpmf, or an old .cpm). A browser can't hand over a file's place on the PC, so the path is typed here; the Modeler reads it.</p>`,
     [["Open", d => { formError(d, ""); hmOpenFile(q(d, "#oP").value.trim().replace(/^"|"$/g, ""), d); return false; }, true], ["Cancel"]], {width: 560});
@@ -11778,6 +11801,7 @@ function modelerStart() {
     else if (k === "Delete" && sel.size) { e.preventDefault(); e.stopImmediatePropagation(); modelAct("delete"); }
   }, true);
   hmDefs().then(() => { if (hm.state && hm.state.choose_program) hmChooseProgram(); });
+  setInterval(hmPendingOpen, 1000);
 }
 let started = false;
 function start() {

@@ -22,14 +22,57 @@ public static class Program
     /// file is for), otherwise a new model whose program the window asks for first.</summary>
     private static OfflineEtabs OpenModeler(string[] args)
     {
-        var at = Array.IndexOf(args, "--modeler");
-        var file = at + 1 < args.Length && !args[at + 1].StartsWith("--", StringComparison.Ordinal) ? args[at + 1] : null;
+        var file = ModelerFileArg(args);
         if (file is not null && File.Exists(file))
             try { var opened = OfflineEtabs.Open(file); return new OfflineEtabs(opened.Model, OfflineEtabs.SavesTo(file, opened)); }
             catch (Exception ex) when (ex is IOException or CsiProMax.E2k.E2kFormatException or System.Text.Json.JsonException or InvalidDataException) { Note("modeler file", ex); }
         // Started with no file (the Engine's shortcut): the window first asks which program to work in. A file given
         // (a double-click on it) says its program itself, so nothing is asked.
         return new OfflineEtabs { ChooseProgram = true };
+    }
+
+    /// <summary>The file named after --modeler (a double-click on a model file), or null.</summary>
+    internal static string? ModelerFileArg(string[] args)
+    {
+        var at = Array.IndexOf(args, "--modeler");
+        return at >= 0 && at + 1 < args.Length && !args[at + 1].StartsWith("--", StringComparison.Ordinal) ? args[at + 1] : null;
+    }
+
+    /// <summary>
+    /// A model file double-clicked while an Engine window is already open (Ahmed 2026-11-27: it must open that file):
+    /// the new start writes the file's path here, asks the open window to come forward, and ends; the open window takes
+    /// the paths and its page opens them (asking first when its model has unsaved changes).
+    /// </summary>
+    internal static class FileHandover
+    {
+        internal static string File(string name) => Path.Combine(Path.GetDirectoryName(NoteFile)!, name + ".open");
+
+        /// <summary>Leaves a file for the open window. True when one was left.</summary>
+        internal static bool Give(string name, string? file)
+        {
+            if (file is null || !System.IO.File.Exists(file)) return false;
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(NoteFile)!);
+                System.IO.File.AppendAllText(File(name), Path.GetFullPath(file) + "\n");
+                return true;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Note("hand a file to the open window", ex); return false; }
+        }
+
+        /// <summary>The files left for this window, oldest first; none is left behind.</summary>
+        internal static List<string> Take(string name)
+        {
+            var at = File(name);
+            try
+            {
+                if (!System.IO.File.Exists(at)) return [];
+                var files = System.IO.File.ReadAllLines(at).Select(l => l.Trim()).Where(l => l.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                System.IO.File.Delete(at);
+                return files;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Note("take the files handed to this window", ex); return []; }
+        }
     }
 
     /// <summary>
@@ -214,7 +257,16 @@ public static class Program
             using var one = new Mutex(true, name, out var first);
             using var show = new EventWaitHandle(false, EventResetMode.AutoReset, name + ".show");
             using var shown = new EventWaitHandle(false, EventResetMode.AutoReset, name + ".shown");
+            // A model file double-clicked while the Engine is open goes to that window, which opens it.
+            var handed = modeler && !first && FileHandover.Give(name, ModelerFileArg(args));
             if (!first && !Handover(one, show, shown, name, args)) return 0;
+            // This start opens the window itself after all (the old one was gone): it opens its own file, so none is
+            // left for later. A window taking over from an older version (--after-pid) opens what was handed to that one.
+            if (handed || modeler)
+            {
+                var left = FileHandover.Take(name);
+                if (modeler && args.Contains("--after-pid")) foreach (var f in left) CsiProMax.Host.ModelView.PendingOpens.Enqueue(f);
+            }
             Holder.Write(name);
 
             // Started for an ETABS that is no longer open: say so, instead of a window that closes by itself.
@@ -285,9 +337,10 @@ public static class Program
                         else
                         {
                             window.Surface();
-                            // The Modeler is its 3D view: double-clicked again, that window opens (or comes forward) too.
+                            // The Modeler is its 3D view: double-clicked again, that window opens (or comes forward) too,
+                            // and a model file double-clicked goes to its page, which opens it.
                             if (CsiProMax.App.Modeler)
-                                try { CsiProMax.Host.ModelView.Open(); }
+                                try { foreach (var f in FileHandover.Take(name)) CsiProMax.Host.ModelView.PendingOpens.Enqueue(f); CsiProMax.Host.ModelView.Open(); }
                                 catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { Note("modeler view", ex); }
                         }
                         // Told to the start that asked: it ends, knowing a window answered.

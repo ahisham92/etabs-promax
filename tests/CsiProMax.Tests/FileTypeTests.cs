@@ -223,6 +223,31 @@ static class FileTypeTests
             Check(CsiProMax.Assistant.ModelerCheck.Script.Contains("asks before converting", StringComparison.Ordinal), "the window check does not try a file of another program");
         });
 
+        yield return ("file types: a model file double-clicked while the Engine is open goes to that window and opens there, asking about unsaved changes first; no console window shows (Ahmed 2026-11-27)", () =>
+        {
+            var name = "CsiProMax.test-handover-" + Guid.NewGuid().ToString("N");
+            var file = Path.Combine(Path.GetTempPath(), name + ".cpme");
+            File.WriteAllText(file, "{}");
+            try
+            {
+                Check(!CsiProMax.Assistant.Program.FileHandover.Give(name, null) && !CsiProMax.Assistant.Program.FileHandover.Give(name, file + ".missing"), "a start with no file, or a missing one, hands nothing over");
+                Check(CsiProMax.Assistant.Program.FileHandover.Give(name, file) && CsiProMax.Assistant.Program.FileHandover.Give(name, file), "the start hands its file to the open window");
+                var taken = CsiProMax.Assistant.Program.FileHandover.Take(name);
+                Check(taken.Count == 1 && taken[0] == Path.GetFullPath(file), "the open window takes the file once: " + string.Join(", ", taken));
+                Check(CsiProMax.Assistant.Program.FileHandover.Take(name).Count == 0, "nothing is left for later");
+                Check(CsiProMax.Assistant.Program.ModelerFileArg(["--modeler", file]) == file && CsiProMax.Assistant.Program.ModelerFileArg(["--modeler", "--no-update"]) is null, "the file is read after --modeler");
+            }
+            finally { File.Delete(file); File.Delete(CsiProMax.Assistant.Program.FileHandover.File(name)); }
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            Check(html.Contains("setInterval(hmPendingOpen, 1000);", StringComparison.Ordinal) && html.Contains("fetch(\"pending-open\"", StringComparison.Ordinal), "the page does not ask for handed files");
+            var pending = html[html.IndexOf("async function hmPendingOpen", StringComparison.Ordinal)..html.IndexOf("function hmOpenTyped", StringComparison.Ordinal)];
+            Check(pending.Contains("hm.state.saved === false", StringComparison.Ordinal) && pending.Contains("Don't Save", StringComparison.Ordinal), "unsaved changes are not asked about first");
+            var program = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Program.cs"));
+            Check(program.Contains("FileHandover.Give(name, ModelerFileArg(args))", StringComparison.Ordinal) && program.Contains("ModelView.PendingOpens.Enqueue(f)", StringComparison.Ordinal), "the start does not hand its file to the open window");
+            var install = File.ReadAllText(Path.Combine(SourceText.Root(), "install.ps1"));
+            Check(install.Contains("--headless ", StringComparison.Ordinal) && install.Contains("System32\\conhost.exe", StringComparison.Ordinal), "a double-click starts dotnet with a console window");
+        });
+
         yield return ("file types: install.ps1 registers .cpme, .cpms, .cpmf and the old .cpm for the current user, each opening in the Engine", () =>
         {
             var ps = File.ReadAllText(Path.Combine(SourceText.Root(), "install.ps1"));
