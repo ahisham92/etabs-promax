@@ -6689,24 +6689,24 @@ const sapLinkDofs = ["U1", "U2", "U3", "R1", "R2", "R3"];
 const sapLinkHys = ["Kinematic", "Takeda", "Pivot", "Concrete", "BRB Hardening", "Isotropic", "Degrading"];
 // The nonlinear properties of one direction of a type: [field (Trans/Rot by the direction when the table has both), label, choices?].
 function sapLinkNl(type, dof) {
-  const ax = dof === "U1", K = ["K", "Stiffness"], C = ["C", "Damping Coefficient"], brace = [["FLDamper", "Include Brace Flexibility", ["No", "Yes"]], ["FLDLength", "Brace Length"], ["FLDModulus", "Brace Modulus of Elasticity"], ["FLDArea", "Brace Area"]];
+  const ax = dof === "U1", K = ["K", "Stiffness"], C = ["C", "Damping Coefficient"], brace = [["FLDamper", "Fixed Length Damper", ["No", "Yes"]], ["FLDLength", "Fixed Length Damper Length"], ["FLDModulus", "Extender Modulus of Elasticity"], ["FLDArea", "Extender Area of Cross Section"]];
   switch (type) {
-    case "Gap": case "Hook": return [K, ["Open", "Open"]];
+    case "Gap": case "Hook": return [K, ["Open", "Initial Opening"]];
     case "Damper": case "Damper - Exponential": return [K, C, ["CExp", "Damping Exponent"], ...brace];
     case "Linear Exponential Damper": return [K, C, ["CExp", "Damping Exponent"], ["Limit", "Force Limit"]];
-    case "Damper - Bilinear": return [K, ["C", "Initial Damping Coefficient"], ["Cy", "Yielded Damping Coefficient"], ["Limit", "Force Limit"], ...brace];
-    case "Damper - Friction Spring": return [K, ["K1", "Loading Stiffness"], ["K2", "Unloading Stiffness"], ["U0", "Precompression Displacement"], ["Us", "Stop Displacement"], ["ActiveDir", "Active Direction", ["Compression", "Tension", "Both"]]];
+    case "Damper - Bilinear": return [K, ["C", "Initial Damping"], ["Cy", "Yielded Damping"], ["Limit", "Force Limit"], ...brace];
+    case "Damper - Friction Spring": return [["K", "Initial Stiffness"], ["K1", "Slipping Stiffness for Loading"], ["K2", "Slipping Stiffness for Unloading"], ["U0", "Precompression Displacement"], ["Us", "Stop Displacement"], ["ActiveDir", "Active Direction", ["Compression", "Tension", "Both"]]];
     case "Damper - Sumitomo Rubber QR4": return [["ProdModel", "Product Model"], ["ShearArea", "Shear Area"], ["Thickness", "Thickness"], ["Temp", "Temperature"], ["ExcitFreq", "Excitation Frequency"], ["RigidFluctCoeff", "Rigidity Fluctuation Coefficient"], ["DampFluctCoeff", "Damping Fluctuation Coefficient"]];
     case "Plastic (Wen)": return [K, ["Yield", "Yield Strength"], ["Ratio", "Post Yield Stiffness Ratio"], ["YieldExp", "Yielding Exponent"]];
     case "Rubber Isolator": return ax ? [K] : [K, ["Yield", "Yield Strength"], ["Ratio", "Post Yield Stiffness Ratio"]];
-    case "Friction Isolator": return ax ? [K, C] : [K, ["Slow", "Friction Coefficient, Slow"], ["Fast", "Friction Coefficient, Fast"], ["Rate", "Rate Parameter"], ["Radius", "Net Pendulum Radius"]];
-    case "T/C Friction Isolator": return ax ? [["K", "Compression Stiffness"], ["KTens", "Tension Stiffness"], ["GapComp", "Compression Gap Opening"], ["GapTens", "Tension Gap Opening"], C]
-      : [K, ["SlowComp", "Friction Coefficient, Slow, Compression"], ["FastComp", "Friction Coefficient, Fast, Compression"], ["RateComp", "Rate Parameter, Compression"], ["SlowTens", "Friction Coefficient, Slow, Tension"], ["FastTens", "Friction Coefficient, Fast, Tension"], ["RateTens", "Rate Parameter, Tension"], ["Radius", "Net Pendulum Radius"]];
-    case "Triple Pendulum Isolator": return ax ? [["K", "Compression Stiffness"], C] : [["HeightOut", "Height, Outer Sliders"], ["HeightIn", "Height, Inner Sliders"], ["SymOut", "Outer Sliders Symmetric", ["Yes", "No"]],
-      ...[["OutTop", "Outer Top"], ["OutBot", "Outer Bottom"], ["InTop", "Inner"]].flatMap(([s, l]) => [["K" + s, l + " Surface Stiffness"], ["Slow" + s, l + " Friction Coefficient, Slow"], ["Fast" + s, l + " Friction Coefficient, Fast"], ["Rate" + s, l + " Rate Parameter"], ["Rad" + s, l + " Radius"], ["Stop" + s, l + " Stop Distance"]])];
-    case "High Damping Rubber Isolator": return [["Area", "Rubber Area"], ["EffHeight", "Effective Rubber Height"], ["AddStiff", "Additional Stiffness"], ["NumHysTerms", "Number of Hysteresis Terms"],
-      ["CoStrain1", "Strain Coefficient 1"], ["CoStrength1", "Strength Coefficient 1"], ["CoStrain2", "Strain Coefficient 2"], ["CoStrength2", "Strength Coefficient 2"], ["CoStrain3", "Strain Coefficient 3"], ["CoStrength3", "Strength Coefficient 3"],
-      ["Resistance", "Resistance"], ["CoStrainDam", "Strain Coefficient for Damage"], ["StiffIter", "Stiffness Iterations"]];
+    case "Friction Isolator": return ax ? [K, C] : [K, ["Slow", "Slow Friction Coefficient"], ["Fast", "Fast Friction Coefficient"], ["Rate", "Rate Parameter"], ["Radius", "Net Pendulum Radius"]];
+    case "T/C Friction Isolator": return ax ? [["K", "Stiffness Compression"], ["KTens", "Stiffness Tension"], ["GapComp", "Gap Compression"], ["GapTens", "Gap Tension"], C]
+      : [K, ["SlowComp", "Slow Friction Coefficient Compression"], ["FastComp", "Fast Friction Coefficient Compression"], ["RateComp", "Rate Parameter Compression"], ["SlowTens", "Slow Friction Coefficient Tension"], ["FastTens", "Fast Friction Coefficient Tension"], ["RateTens", "Rate Parameter Tension"], ["Radius", "Net Pendulum Radius"]];
+    case "Triple Pendulum Isolator": return ax ? [K, C] : [["SymOut", "Outer Surface Symmetric", ["Yes", "No"]], ["HeightOut", "Outer Surface Height"], ["HeightIn", "Inner Surface Height"],
+      ...[["OutTop", "Outer Top"], ["OutBot", "Outer Bottom"], ["InTop", "Inner"]].flatMap(([s, l]) => [["K" + s, l + " Stiffness"], ["Slow" + s, l + " Slow Friction Coefficient"], ["Fast" + s, l + " Fast Friction Coefficient"], ["Rate" + s, l + " Rate Parameter"], ["Rad" + s, l + " Sliding Surface Radius"], ["Stop" + s, l + " Stop Distance"]])];
+    case "High Damping Rubber Isolator": return [["Area", "Isolator Area"], ["EffHeight", "Isolator Effective Height"], ["AddStiff", "Added Elastic Stiffness"], ["NumHysTerms", "Number of Hysteretic Terms"],
+      ["CoStrain1", "Control Strain #1"], ["CoStrength1", "Control Strength #1"], ["CoStrain2", "Control Strain #2"], ["CoStrength2", "Control Strength #2"], ["CoStrain3", "Control Strain #3"], ["CoStrength3", "Control Strength #3"],
+      ["Resistance", "Damage Resistance Ratio"], ["CoStrainDam", "Damage Control Strain"], ["StiffIter", "Stiffness for Iteration"]];
   }
   return [];
 }
