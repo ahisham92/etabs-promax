@@ -343,9 +343,39 @@ public static class PropertyDefs
     /// A waffle slab has ribs both ways: Spacing is the spacing of the ribs parallel to the slab's 1 axis and Spacing2 of those parallel to its 2 axis.</summary>
     public sealed record Ribs(double OverallDepth, double WidthTop, double WidthBottom, double Spacing, int ParallelTo = 1, double? Spacing2 = null);
 
-    public static ShellSection SetShellType(StructuralModel m, string name, string? was, bool wall, string slabType, string modeling, double thickness, string material, bool oneWay, Ribs? ribs = null)
+    /// <summary>ETABS 23.2's Composite Shear Wall Data (a wall with modeling type Composite), as ETABS writes it on the
+    /// wall's second SHELLPROP line: the concrete and steel, the length (Wall / Pier) or height (Beam / Spandrel), the overall
+    /// thickness, the web and flange plates, the tie bars, and the cracked in-plane and out-of-plane stiffness modifiers.</summary>
+    public sealed record CompositeWall(string Concrete, string Steel, double? Length, double TotalThick, double PlateThick, double FlangeThick, double TieDiameter, double TieSpacing,
+        double InPlane = 1, double OutOfPlane = 1, bool Spandrel = false);
+
+    public static ShellSection SetShellType(StructuralModel m, string name, string? was, bool wall, string slabType, string modeling, double thickness, string material, bool oneWay, Ribs? ribs = null, CompositeWall? composite = null)
     {
         Name(name, "slab or wall section");
+        if (string.Equals(modeling, "Composite", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!wall || m.Target is ProgramOptions.Sap2000 or ProgramOptions.Safe) throw new ArgumentException("Only an ETABS wall has the Composite modeling type.");
+            var c = composite ?? throw new ArgumentException("A composite wall needs its Composite Shear Wall Data: concrete, steel, overall thickness, web and flange plate thickness, tie bar diameter and spacing.");
+            if (!m.Materials.Exists(x => x.Name == c.Concrete)) throw new ArgumentException($"There is no material '{c.Concrete}'.");
+            if (!m.Materials.Exists(x => x.Name == c.Steel)) throw new ArgumentException($"There is no material '{c.Steel}'.");
+            if (new[] { c.TotalThick, c.PlateThick, c.FlangeThick, c.TieDiameter, c.TieSpacing }.Any(x => !(x > 0))) throw new ArgumentException("The overall thickness, plate thicknesses and tie bar diameter and spacing are above 0.");
+            if (!(c.TotalThick > 2 * c.PlateThick)) throw new ArgumentException("The overall thickness is more than the two web plates.");
+            if (c.InPlane < 0 || c.OutOfPlane < 0) throw new ArgumentException("The cracked stiffness modifiers are 0 or more.");
+            var oldC = m.ShellSections.Find(x => x.Name == (was ?? name));
+            if (was is not null && oldC is null) throw new ArgumentException($"There is no slab or wall section '{was}'.");
+            if (was is not null && was != name && m.ShellSections.Exists(x => x.Name == name)) throw new ArgumentException($"A section is already named '{name}'.");
+            var two = new List<string> { "CONCMATERIALCOMP", Quote(c.Concrete), "STEELMATERIALCOMP", Quote(c.Steel) };
+            if (c.Length is { } len) two.AddRange(["WALLLENGTH", Number(len)]);
+            two.AddRange(["TOTALTHICK", Number(c.TotalThick), "PLATETHICK", Number(c.PlateThick), "FLANGEPLATETHICK", Number(c.FlangeThick), "TIEBARDIAMETER", Number(c.TieDiameter),
+                "TIEBARSPACING", Number(c.TieSpacing), "CSTIFFNESSMODIFIER1", Number(c.InPlane), "CSTIFFNESSMODIFIER2", Number(c.OutOfPlane), "ISPANDREL", Quote(c.Spandrel ? "Yes" : "No")]);
+            var secC = oldC ?? new ShellSection();
+            if (oldC is null) m.ShellSections.Add(secC);
+            var modsC = oldC?.Lines.Where(l => l.Count > 0 && ShellModifiers.Contains(l[0])).ToList() ?? [];
+            secC.Name = name;
+            secC.Lines = [["PROPTYPE", Quote("Wall"), "MATERIAL", Quote(c.Concrete), "MODELINGTYPE", Quote("Composite"), "WALLTHICKNESS", Number(c.TotalThick)], two, .. modsC];
+            if (was is not null && was != name) foreach (var a in m.AreaAssigns.Where(x => x.Section == was)) a.Section = name;
+            return secC;
+        }
         var layered = string.Equals(modeling, "Layered", StringComparison.OrdinalIgnoreCase);
         if (!(layered && string.IsNullOrEmpty(material)) && !m.Materials.Exists(x => x.Name == material)) throw new ArgumentException($"There is no material '{material}'.");
         if (!(thickness > 0)) throw new ArgumentException("The thickness must be above 0.");

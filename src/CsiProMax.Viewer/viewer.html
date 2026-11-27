@@ -8277,7 +8277,7 @@ async function hmFrameSection(s, after, copy, newShape) {
       <span>Web Members</span>${sel("jWeb", secs(), extras.WebMembers)}<span></span><span></span></div></fieldset>
       <fieldset><legend>Geometry</legend><div class="ex" style="grid-template-columns:auto 90px auto;justify-content:start">${[["Depth", "Depth", "L", 10], ["PanelWidth", "Panel Width", "L", 120]].map(dimRow).join("")}</div></fieldset>`;
     else if (sp.special === "brb") own = `<fieldset><legend>BRB Weight</legend><div class="ex">${dimRow(["Weight", "Total BRB Weight", "F", 0.9468])}</div></fieldset>
-      <fieldset><legend>BRB Section Dimensions</legend><div class="ex">${[["t3", "Overall Depth (for drawing only)", "L", 6], ["t2", "Overall Width (for drawing only)", "L", 6], ["AreaYC", "Area of Yielding Core", "L2", 1], ["StiffES", "Stiffness of Elastic Segment", "FpL", 2329.7245], ["LengthYC", "Length of Yielding Core", "L", 168], ["LengthES", "Length of Elastic Segment", "L", 56.736]].map(dimRow).join("")}</div>
+      <fieldset><legend>BRB Section Dimensions</legend><div class="ex">${[["t3", "Overall Depth (for drawing only)", "L", 6], ["t2", "Overall Width (for drawing only)", "L", 6], ["AreaYC", "Area of Yielding Core", "L2", 1], ["StiffES", "Stiffness of Elastic Segment", "FpL", 2329.7245], ["LengthYC", "Length of Yielding Core", "L", 168], ["LengthES", "Length of Elastic Segment", "L", 56.7456]].map(dimRow).join("")}</div>
         <div id="brbK" style="margin:6px 0 4px 10px"></div><div class="cbtn"><button id="sProps">Show Elastic Section Properties...</button></div></fieldset>
       <fieldset><legend>Inelastic Data</legend><label style="display:block"><input type="radio" name="bIn" value="No" ${extras.UserInElast !== "Yes" ? "checked" : ""}> Program Default from Section Dimensions</label><label style="display:block"><input type="radio" name="bIn" value="Yes" ${extras.UserInElast === "Yes" ? "checked" : ""}> User Specified</label>
         <div class="cbtn"><button id="bInB">Modify/Show Inelastic Section Properties...</button></div></fieldset>`;
@@ -8405,7 +8405,7 @@ async function hmFrameSection(s, after, copy, newShape) {
     const mb = d.querySelector("#sMod"), modText = () => { const t = d.querySelector("#sModT"); if (t) { const m = mods || (cur && cur.modifiers) || {}; t.textContent = Object.values(m).some(v => Math.abs(v - 1) > 1e-12) ? "Currently User Specified" : "Currently Default"; } };
     if (mb) mb.onclick = () => hmModifiers(pd.frame_modifiers || ["AMOD", "A2MOD", "A3MOD", "JMOD", "I2MOD", "I3MOD", "MMOD", "WMOD"], mods || (cur && cur.modifiers), o => { mods = o; modText(); }); modText();
     const rb = d.querySelector("#sRebar"); if (rb) rb.onclick = () => hmFrameRebarForm(q(d, "#sN").value.trim(), shape, kind, extras, mats, k => kind = k, was, rebar && {...rebar.values, ...Object.fromEntries(Object.entries(rebar.sizes).map(([k, v]) => ["SIZE:" + k, v]))}, r => rebar = r);
-    const bi = d.querySelector("#bInB"); if (bi) bi.onclick = () => hmBrbInelastic(brbInel || extras, o => brbInel = o, u);
+    const bi = d.querySelector("#bInB"); if (bi) bi.onclick = () => hmBrbInelastic(brbInel || extras, o => brbInel = o, u, q(d, "#sN").value.trim(), (d.querySelector("input[name=bIn]:checked") || {}).value === "Yes");
     const so = d.querySelector("#sdOpen"); if (so) so.onclick = () => hmSectionDesigner(q(d, "#sN").value.trim(), extras, cur, pd);
     if (sp.special === "nonprismatic") npWire(); if (sp.special === "auto") autoWire(); if (sp.special === "csw") cswWire();
     redraw();
@@ -8416,7 +8416,7 @@ async function hmFrameSection(s, after, copy, newShape) {
 // Composite Shear Wall Data (pictured 36a, 36b): Usage Wall / Pier or Beam / Spandrel with its sketch, the concrete and
 // steel, the Property Data and the Cracked Concrete Stiffness Modifiers.
 const cswFields = ["Usage", "ConcMat", "SteelMat", "Lw", "tsc", "tpw", "tpf", "dtie", "TieSpacing", "EAMod", "EIMod"];
-function hmCswData(now, mats, u, done) {
+function hmCswData(now, mats, u, done, wallForm) {
   const conc = mats.filter(m => /concrete/i.test(m.type)).map(m => m.name), steel = mats.filter(m => /steel/i.test(m.type)).map(m => m.name), wall = (now.Usage || "Wall") !== "Beam";
   const val = (k, dflt) => now[k] !== "" && now[k] != null ? now[k] : dflt, L = `<span class="un">${u.l}</span>`, i = '<span class="info">i</span>';
   const pic = w => w ? `<svg width="420" height="190" viewBox="0 0 420 190" style="background:#fff"><path d="M40 40h310v8H40zM40 160h310v8H40zM350 30h8v148h-8z" fill="#e5a4a4" stroke="#933"/><path d="M40 48h310v112H40z" fill="#eee" stroke="#999"/>${[90, 140, 190, 240, 290].map(x => `<path d="M${x} 52v104" stroke="#333" stroke-dasharray="8 5" stroke-width="2"/>`).join("")}<path d="M180 105h50M180 105V60" stroke="#0a0" stroke-width="2"/><path d="M180 105V60" stroke="#00f" stroke-width="2"/><text x="182" y="58" fill="#00f" font-size="13">3</text><text x="232" y="110" fill="#0a0" font-size="13">2</text><text x="190" y="20" font-size="14">L</text><text x="199" y="24" font-size="9">w</text><text x="8" y="108" font-size="13">t</text><text x="15" y="112" font-size="9">sc</text><text x="248" y="34" font-size="12">s</text><g font-size="12" font-family="monospace"><text x="364" y="96">Infill</text><text x="364" y="110">concrete</text><text x="364" y="175">Flange</text><text x="364" y="188">plate</text><text x="160" y="184">Web    Tie</text><text x="160" y="196">plate  bars</text></g></svg>`
@@ -8424,11 +8424,11 @@ function hmCswData(now, mats, u, done) {
   const d = dialog("Composite Shear Wall Data", `<div id="cwP" style="display:flex;justify-content:center;border:1px solid #ccc;margin-bottom:6px">${pic(wall)}</div>
     <fieldset><legend>General Data</legend><div class="cwg">${i}<span>Usage</span><span class="rowb" style="gap:18px"><label><input type="radio" name="cwU" value="Wall" ${wall ? "checked" : ""}> Wall / Pier</label><label><input type="radio" name="cwU" value="Beam" ${wall ? "" : "checked"}> Beam / Spandrel</label></span><span></span>
       <span></span><span>Concrete Material</span><select id="cwC">${opts(conc, val("ConcMat", conc[0]))}</select><span></span><span></span><span>Steel Material</span><select id="cwS">${opts(steel, val("SteelMat", steel[0]))}</select><span></span></div></fieldset>
-    <fieldset><legend>Property Data</legend><div class="cwg">${i}<span id="cwL1">Length, Lw</span><input data-k="Lw" type="number" step="any" value="${esc(val("Lw", inTo(150, u)))}">${L}<span></span><span id="cwL2">Overall Thickness, tsc</span><input data-k="tsc" type="number" step="any" value="${esc(val("tsc", inTo(12, u)))}">${L}
+    <fieldset><legend>Property Data</legend><div class="cwg">${i}<span id="cwL1">Length, Lw</span><input data-k="Lw" type="number" step="any" value="${wallForm ? "" : esc(val("Lw", inTo(150, u)))}" ${wallForm ? "disabled" : ""}>${wallForm ? `<span class="un" style="color:#999">${u.l}</span>` : L}<span></span><span id="cwL2">Overall Thickness, tsc</span><input data-k="tsc" type="number" step="any" value="${esc(val("tsc", inTo(12, u)))}">${L}
       <span></span><span>Web Plate Thickness, tpw</span><input data-k="tpw" type="number" step="any" value="${esc(val("tpw", inTo(0.5, u)))}">${L}<span></span><span>Flange Plate Thickness, tpf</span><input data-k="tpf" type="number" step="any" value="${esc(val("tpf", inTo(0.5, u)))}">${L}
       <span></span><span>Tie Bar Diameter, dtie</span><input data-k="dtie" type="number" step="any" value="${esc(val("dtie", inTo(0.625, u)))}">${L}<span></span><span>Tie Bar Spacing, S</span><input data-k="TieSpacing" type="number" step="any" value="${esc(val("TieSpacing", inTo(12, u)))}">${L}</div></fieldset>
-    <fieldset><legend>Cracked Concrete Stiffness Modifiers</legend><div class="cwg">${i}<span>Axial Stiffness (EA)</span><input data-k="EAMod" type="number" step="any" value="${esc(val("EAMod", 1))}"><span></span><span></span><span>Bending Stiffness (EI)</span><input data-k="EIMod" type="number" step="any" value="${esc(val("EIMod", 1))}"><span></span></div></fieldset>`,
-    [["Ok", x => { const o = {Usage: q(x, "input[name=cwU]:checked").value, ConcMat: q(x, "#cwC").value, SteelMat: q(x, "#cwS").value}; x.querySelectorAll("[data-k]").forEach(n => o[n.dataset.k] = n.value.trim()); done(o); }], ["Cancel"]], {width: 500});
+    <fieldset><legend>Cracked Concrete Stiffness Modifiers</legend><div class="cwg">${i}<span>${wallForm ? "In-Plane Stiffness" : "Axial Stiffness (EA)"}</span><input data-k="EAMod" type="number" step="any" value="${esc(val("EAMod", 1))}"><span></span><span></span><span>${wallForm ? "Out-of-Plane Stiffness" : "Bending Stiffness (EI)"}</span><input data-k="EIMod" type="number" step="any" value="${esc(val("EIMod", 1))}"><span></span></div></fieldset>`,
+    [["Ok", x => { const o = {Usage: q(x, "input[name=cwU]:checked").value, ConcMat: q(x, "#cwC").value, SteelMat: q(x, "#cwS").value}; x.querySelectorAll("[data-k]").forEach(n => o[n.dataset.k] = n.value.trim()); if (wallForm) o.Lw = val("Lw", inTo(150, u)); done(o); }], ["Cancel"]], {width: 500});
   const on = () => { const w = q(d, "input[name=cwU]:checked").value === "Wall"; q(d, "#cwP").innerHTML = pic(w); q(d, "#cwL1").textContent = w ? "Length, Lw" : "Height, hcb"; q(d, "#cwL2").textContent = w ? "Overall Thickness, tsc" : "Overall Thickness, bcb"; };
   d.querySelectorAll("input[name=cwU]").forEach(r => r.onchange = on); on();
   return d;
@@ -8527,18 +8527,78 @@ async function hmFrameRebarForm(name, shape, kind, extras, mats, setKind, was, p
 }
 // Buckling Restrained Brace: Modify/Show Inelastic Section Properties... the brace's force-deformation (its table's
 // fields): the backbone in tension and compression, the acceptance criteria and the hardening.
-function hmBrbInelastic(now, done, u) {
-  const F = u.f, L = u.l, cell = (k, un) => `<input data-k="${k}" type="number" step="any" value="${esc(now[k] ?? "")}"><span class="un">${un}</span>`;
-  const sym = (now.Symmetric || "Yes") === "Yes";
-  const d = dialog("Buckling Restrained Brace Inelastic Properties", `<fieldset><legend>Force-Deformation</legend><div style="display:grid;grid-template-columns:auto 1fr;gap:4px 8px;align-items:center"><span>Type</span><select data-k="FDType">${opts(["Force-Deformation", "Stress-Strain"], now.FDType || "Force-Deformation")}</select></div>
-      <label style="display:block;margin-top:4px"><input type="checkbox" id="bSym" ${sym ? "checked" : ""}> Symmetric</label>
-      <div style="display:grid;grid-template-columns:150px 90px 40px;gap:4px 8px;align-items:center;margin-top:6px"><span>Initial Stiffness</span>${cell("InitStiff", `${F}/${L}`)}<span>Final Stiffness Ratio</span>${cell("FinalStiff", "")}</div></fieldset>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 10px">${["Tens", "Comp"].map(s => `<fieldset class="bS${s}"><legend>${s === "Tens" ? "Tension" : "Compression"}</legend><div style="display:grid;grid-template-columns:1fr 90px 40px;gap:4px 8px;align-items:center">
-      <span>Yield Force</span>${cell(s + "Fy", F)}<span>Ultimate Force</span>${cell(s + "Fu0", F)}<span>Ultimate Deformation</span>${cell(s + "Du", L)}<span>Maximum Deformation</span>${cell(s + "Dx", L)}
-      <span>Immediate Occupancy</span>${cell(s + "IO", "")}<span>Life Safety</span>${cell(s + "LS", "")}<span>Collapse Prevention</span>${cell(s + "CP", "")}
-      <span>Hardening Factor</span>${cell(s + "HF", "")}<span>Maximum Plastic Deformation</span>${cell(s + "MaxDef", L)}<span>Accumulated Plastic Deformation</span>${cell(s + "AccDef", L)}<span>Proportion</span>${cell(s + "ProDef", "")}</div></fieldset>`).join("")}</div>`,
-    [["OK", x => { const o = {Symmetric: q(x, "#bSym").checked ? "Yes" : "No"}; x.querySelectorAll("[data-k]").forEach(i => { if (i.value.trim() !== "") o[i.dataset.k] = i.value.trim(); }); if (o.Symmetric === "Yes") for (const k in o) if (/^Comp/.test(k)) o[k] = o["Tens" + k.slice(4)] ?? o[k]; done(o); }], ["Cancel"]], {width: 700});
-  const on = () => d.querySelectorAll(".bSComp input").forEach(i => i.disabled = q(d, "#bSym").checked); q(d, "#bSym").onchange = on; on();
+// ETABS 23.2's Inelastic Properties for a Buckling Restrained Brace (pictured BRB 06-15): Property Name with "Program default
+// inelastic properties, not editable by user" or "User specified inelastic properties", the Trilinear or Elastic Perfectly
+// Plastic definition plot, Show Definition Plot / Show Data Plot (after Check Data) with IO, LS and CP marks, and Property
+// Data with Basic Properties, Acceptance Criteria and Hysteresis Data. Elastic Perfectly Plastic leaves out Fy and Du;
+// Symmetric Yes leaves out the compression rows (ETABS then writes Fy = Fu0 for Elastic Perfectly Plastic). The grid can be typed into only when Inelastic Data is User Specified.
+const brbDefaults = {FDType: "Trilinear", Symmetric: "No", InitStiff: [172.619, 1, -1], FinalStiff: [2.9345, 1, -1], TensFy: [44.5, 1, 0], TensFu0: [52.5, 1, 0], CompFy: [44, 1, 0], CompFu0: [52, 1, 0],
+  TensDu: [0.6552, 0, 1], TensDx: [6.72, 0, 1], CompDu: [0.6552, 0, 1], CompDx: [6.72, 0, 1], TensIO: [1, 0, 1], TensLS: [3, 0, 1], TensCP: [5, 0, 1], CompIO: [1, 0, 1], CompLS: [3, 0, 1], CompCP: [5, 0, 1],
+  TensHF: 1.25, TensMaxDef: 16, TensAccDef: 32, TensProDef: 0, CompHF: 1.25, CompMaxDef: 16, CompAccDef: 32, CompProDef: 0};
+const brbDesc = {"Force Displacement Type": "Indicates the shape of the force-displacement curve.", "Symmetric": "Indicates if the force-displacement relationship is symmetric.",
+  "Initial Stiffness, K0": "The initial stiffness, K0.", "Final Stiffness, Kf": "The final stiffness, Kf.",
+  "Tension Yield Strength, Fy": "The yield strength in tension, Fy.", "Tension Strength, Fu0": "The strength in tension, Fu0.", "Compression Yield Strength, Fy": "The yield strength in compression, Fy.", "Compression Strength, Fu0": "The strength in compression, Fu0.",
+  "Tension Deformation, Du": "The deformation in tension at Fu0, Du.", "Tension Deformation, Dx": "The maximum deformation in tension, Dx.", "Compression Deformation, Du": "The deformation in compression at Fu0, Du.", "Compression Deformation, Dx": "The maximum deformation in compression, Dx.",
+  "Hardening Factor": "The hardening factor.", "Maximum Deformation Ratio": "The maximum deformation ratio.", "Accumulated Deformation Ratio": "The accumulated deformation ratio.", "Proportion of Deformation": "The proportion of deformation."};
+function hmBrbInelastic(now, done, u, name, user) {
+  const F = u.f, L = u.l, s = {};
+  for (const [k, v] of Object.entries(brbDefaults)) s[k] = now[k] != null && now[k] !== "" ? now[k] : Array.isArray(v) ? etKipIn(v[0], v[1], v[2], u) : v;
+  if (s.FDType !== "Elastic Perfectly Plastic") s.FDType = "Trilinear";
+  if (s.Symmetric !== "Yes") s.Symmetric = "No";
+  const r = (n, k, un) => pr(n, s[k], null, {key: k, type: "num"}, {unit: un});
+  const basic = () => { const epp = s.FDType === "Elastic Perfectly Plastic", sym = s.Symmetric === "Yes", sides = sym ? ["Tension"] : ["Tension", "Compression"], k = n => n === "Tension" ? "Tens" : "Comp";
+    return [pr("General", "", [pr("Force Displacement Type", s.FDType, null, {key: "FDType", type: "select", options: ["Trilinear", "Elastic Perfectly Plastic"]}), pr("Symmetric", s.Symmetric, null, {key: "Symmetric", type: "select", options: ["Yes", "No"]})], null, {head: true}),
+      pr("Stiffness Values", "", [r("Initial Stiffness, K0", "InitStiff", `${F}/${L}`), r("Final Stiffness, Kf", "FinalStiff", `${F}/${L}`)], null, {head: true}),
+      pr("Force Values", "", sides.flatMap(n => [epp ? null : r(`${n} Yield Strength, Fy`, k(n) + "Fy", F), r(`${n} Strength, Fu0`, k(n) + "Fu0", F)]).filter(Boolean), null, {head: true}),
+      pr("Deformation Values", "", sides.flatMap(n => [epp ? null : r(`${n} Deformation, Du`, k(n) + "Du", L), r(`${n} Deformation, Dx`, k(n) + "Dx", L)]).filter(Boolean), null, {head: true})]; };
+  const accept = () => ["Tension", "Compression"].map(n => pr(`Maximum ${n} Deformation`, "", [["Immediate Occupancy, IO", "IO"], ["Life Safety, LS", "LS"], ["Collapse Prevention, CP", "CP"]].map(([t, k]) => r(t, n.slice(0, 4) + k, L)), null, {head: true}));
+  const hyst = () => ["Tension", "Compression"].map(n => pr(`${n} Parameters`, "", [["Hardening Factor", "HF"], ["Maximum Deformation Ratio", "MaxDef"], ["Accumulated Deformation Ratio", "AccDef"], ["Proportion of Deformation", "ProDef"]].map(([t, k]) => r(t, n.slice(0, 4) + k, "")), null, {head: true}));
+  const tabs = [["Basic Properties", basic], ["Acceptance Criteria", accept], ["Hysteresis Data", hyst]];
+  const d = dialog("Inelastic Properties for a Buckling Restrained Brace", `<div style="display:grid;grid-template-columns:470px 500px;gap:10px">
+    <div><fieldset><div style="display:grid;grid-template-columns:200px 1fr;align-items:center"><span>Property Name</span><input value="${esc(name || "")}" readonly class="pgg"></div>
+      <div class="note">${user ? "User specified inelastic properties" : "Program default inelastic properties, not editable by user"}</div></fieldset>
+      <fieldset><div id="bTl" style="font-weight:600;margin:4px 0"></div><div id="bPl" style="height:280px;border:1px solid var(--line);background:#fff"></div>
+      <div style="display:flex;gap:16px;align-items:center;margin-top:6px"><label><input type="radio" name="bPv" value="def" checked> Show Definition Plot</label><label><input type="radio" name="bPv" value="data" disabled> Show Data Plot</label><span style="flex:1"></span><button id="bChk">Check Data</button></div></fieldset></div>
+    <fieldset><legend>Property Data</legend><div class="itabs">${tabs.map((t, i) => `<button data-page="b${i}" class="${i ? "" : "on"}">${t[0]}</button>`).join("")}</div>
+      ${tabs.map((t, i) => `<div class="ipage${i ? "" : " on"}" data-page="b${i}"><div class="pgwrap" style="height:340px" id="bG${i}"></div></div>`).join("")}<div class="pgdesc"><b></b></div></fieldset></div>`,
+    [["OK", x => { if (!user) return; read(); const o = {...s}; if (o.FDType === "Elastic Perfectly Plastic") { o.TensFy = o.TensFu0; o.CompFy = o.CompFu0; } if (o.Symmetric === "Yes") for (const k in o) if (/^Comp(Fy|Fu0|Du|Dx)$/.test(k)) o[k] = o["Tens" + k.slice(4)]; done(o); }], ["Cancel"]], {width: 1010});
+  const read = () => d.querySelectorAll("[data-ed]").forEach(i => { s[i.dataset.ed] = i.tagName === "SELECT" ? i.value : i.value.trim(); });
+  const n = k => parseFloat(s[k]) || 0;
+  const plot = () => {
+    const epp = s.FDType === "Elastic Perfectly Plastic", data = (d.querySelector("input[name=bPv]:checked") || {}).value === "data", box = q(d, "#bPl");
+    q(d, "#bTl").textContent = (epp ? "Elastic Perfectly Plastic" : "Trilinear") + " Force-Deformation";
+    if (!data) {
+      const pts = epp ? "50,250 80,100 400,82" : "50,250 80,150 170,100 400,82";
+      box.innerHTML = `<svg viewBox="0 0 450 280" width="100%" height="100%"><g stroke="#000" fill="none"><path d="M50 250V30M50 250H425" stroke-width="2.5"/><path d="M44 38l6-12 6 12M417 244l12 6-12 6" fill="#000"/><polyline points="${pts}" stroke-width="1.2"/>
+        <path d="M50 100H${epp ? 80 : 170}${epp ? "" : "M50 150H80M170 100V250"}M400 82V250" stroke-dasharray="3 3" stroke-width=".7"/></g><g font-size="13" font-family="Arial"><text x="45" y="28">F</text><text x="432" y="255">D</text>
+        <text x="22" y="105">Fu0</text>${epp ? "" : `<text x="30" y="155">Fy</text><text x="160" y="270">Du</text>`}<text x="390" y="270">Dx</text><text x="${epp ? 72 : 76}" y="${epp ? 170 : 200}">K0</text><text x="285" y="105">Kf</text></g></svg>`;
+      return;
+    }
+    const side = c => { const K0 = n("InitStiff"), Kf = n("FinalStiff"), sym = s.Symmetric === "Yes", p = c && !sym ? "Comp" : "Tens", Fu0 = n(p + "Fu0"), Dx = n(p + "Dx");
+      const a = epp ? [[0, 0], [Fu0 / (K0 || 1), Fu0]] : [[0, 0], [n(p + "Fy") / (K0 || 1), n(p + "Fy")], [n(p + "Du"), Fu0]], last = a[a.length - 1];
+      a.push([Dx, last[1] + Kf * (Dx - last[0])]); return a; };
+    const at = (pts, x) => { for (let i = 1; i < pts.length; i++) if (x <= pts[i][0]) { const [a, b] = [pts[i - 1], pts[i]]; return a[1] + (b[1] - a[1]) * (x - a[0]) / ((b[0] - a[0]) || 1); } return pts[pts.length - 1][1]; };
+    const t = side(false), c = side(true), xm = Math.max(t[t.length - 1][0], c[c.length - 1][0]) * 1.1 || 1, ym = Math.max(t[t.length - 1][1], c[c.length - 1][1]) * 1.05 || 1;
+    const X = x => 225 + x / xm * 175, Y = y => 125 - y / ym * 105, line = pts => pts.map(([x, y]) => `${X(x).toFixed(1)},${Y(y).toFixed(1)}`).join(" ");
+    const marks = ["IO", "LS", "CP"].map((m, i) => [["Tens", 1, t], ["Comp", -1, c]].map(([p, g, pts]) => { const x = n(p + m); if (!(x > 0)) return ""; const px = X(g * x), py = Y(g * at(pts, x)); return `<path d="M${px} ${py - 6}V${py + 6}" stroke="${["#0c0", "#0cc", "#e00"][i]}" stroke-width="4"/>`; }).join("")).join("");
+    const tick = k => `<text x="${X(k * xm / 1.1 / 4 * 1).toFixed(0)}" y="248" font-size="9" text-anchor="middle">${(k * xm / 1.1 / 4).toFixed(2)}</text>`;
+    box.innerHTML = `<svg viewBox="0 0 450 280" width="100%" height="100%"><rect x="50" y="20" width="350" height="210" fill="#fff" stroke="#999"/><path d="M50 125H400M225 20V230" stroke="#00c"/>
+      <polyline points="${line(t)}" fill="none" stroke="#e00" stroke-width="2"/><polyline points="${line(c.map(([x, y]) => [-x, -y]))}" fill="none" stroke="#e00" stroke-width="2"/>${marks}
+      ${[-4, -2, 0, 2, 4].map(tick).join("")}${[-1, 0, 1].map(k => `<text x="46" y="${Y(k * ym / 1.05) + 3}" font-size="9" text-anchor="end">${(k * ym / 1.05).toFixed(1)}</text>`).join("")}
+      <text x="225" y="268" font-size="13" font-weight="bold" text-anchor="middle">Axial Deformation ${esc(L)}</text><text transform="translate(16 125) rotate(-90)" font-size="13" font-weight="bold" text-anchor="middle">Axial Force ${esc(F)}</text>
+      ${["IO", "LS", "CP"].map((m, i) => `<rect x="420" y="${4 + i * 16}" width="4" height="12" fill="${["#0c0", "#0cc", "#e00"][i]}"/><text x="428" y="${14 + i * 16}" font-size="11">${m}</text>`).join("")}</svg>`;
+  };
+  const paint = () => {
+    tabs.forEach(([, rows], i) => { q(d, "#bG" + i).innerHTML = gridHtml(rows(), user); });
+    const all = {}; tabs.forEach(([, rows], i) => all["b" + i] = rows()); wireGrid(d, all, brbDesc);
+    d.querySelectorAll("#bG0 select[data-ed]").forEach(x => x.onchange = () => { read(); paint(); });
+    d.querySelectorAll("[data-ed]").forEach(x => x.addEventListener("change", () => { read(); d.querySelector("input[name=bPv][value=data]").disabled = true; q(d, "input[name=bPv][value=def]").checked = true; plot(); }));
+    plot();
+  };
+  d.querySelectorAll(".itabs button").forEach(b => b.onclick = () => { d.querySelectorAll(".itabs button").forEach(x => x.classList.toggle("on", x === b)); d.querySelectorAll(".ipage").forEach(p => p.classList.toggle("on", p.dataset.page === b.dataset.page)); });
+  d.querySelectorAll("input[name=bPv]").forEach(x => x.onchange = plot);
+  q(d, "#bChk").onclick = () => { read(); const bad = ["InitStiff", "TensFu0", "TensDx"].filter(k => !(n(k) > 0)); if (bad.length) return formError(d, "The stiffness, strength and deformation values must be greater than zero."); formError(d, ""); const r2 = d.querySelector("input[name=bPv][value=data]"); r2.disabled = false; r2.checked = true; plot(); };
+  paint();
   return d;
 }
 // Section Designer...: ETABS draws the section in its Section Designer window; here its base material and design
@@ -9621,7 +9681,11 @@ async function hmEtabsShellSection(s, after, copy, newKind) {
   const ribRow = (id, label, val) => `<span data-r>${label}</span><input data-r id="${id}" type="number" step="any" value="${val}"><span data-r class="un">${u.l}</span>`;
   const types = (pd.slab_types || ["Slab", "Drop", "Stiff", "Ribbed", "Waffle", "Mat", "Footing"]);
   const modelLabel = {ShellThin: "Shell-Thin", ShellThick: "Shell-Thick", Membrane: "Membrane", Layered: "Layered"};
-  const modeling = (pd.modeling_types || ["ShellThin", "ShellThick", "Membrane", "Layered"]).map(k => [k, modelLabel[k] || k]);
+  const modeling = (pd.modeling_types || ["ShellThin", "ShellThick", "Membrane", "Layered"]).map(k => [k, modelLabel[k] || k]).concat(wall && program === "etabs" ? [["Composite", "Composite"]] : []);
+  // ETABS 23.2's Composite modeling type of a wall (pictured Wall Composite 1b-6): Wall Material Not Applicable, Notional Size
+  // greyed, and Property Data's Modify/Show Composite Wall Data... (its Composite Shear Wall Data with Lw greyed).
+  const cc = cur && cur.composite || {};
+  let csw = {Usage: cc.spandrel ? "Beam" : "Wall", ConcMat: cc.concrete || "", SteelMat: cc.steel || "", Lw: cc.length ?? "", tsc: cc.total_thick ?? "", tpw: cc.plate_thick ?? "", tpf: cc.flange_thick ?? "", dtie: cc.tie_diameter ?? "", TieSpacing: cc.tie_spacing ?? "", EAMod: cc.in_plane ?? "", EIMod: cc.out_of_plane ?? ""};
   const matNow = cur && cur.material || (concs().includes("4000Psi") ? "4000Psi" : concs()[0]);
   const isAuto = wall && autoRows.length > 0;
   const d = dialog(wall ? "Wall Property Data" : "Slab Property Data", `<fieldset><legend>General Data</legend><div class="ex shg">
@@ -9638,18 +9702,20 @@ async function hmEtabsShellSection(s, after, copy, newKind) {
   const pdBox = q(d, "#aPD");
   // The Property Data box for the choices made: a layered or auto select section has one button and its count.
   const paint = () => {
-    const auto = wall && q(d, "#aPT").value === "Auto Select List", layered = !auto && q(d, "#aG").value === "Layered";
+    const auto = wall && q(d, "#aPT").value === "Auto Select List", layered = !auto && q(d, "#aG").value === "Layered", comp = !auto && wall && q(d, "#aG").value === "Composite";
     const wasRib = !!pdBox.querySelector("#aRD"), keep = {}; pdBox.querySelectorAll("input,select").forEach(i => { if (i.id) keep[i.id] = i.type === "checkbox" ? i.checked : i.value; });
-    q(d, "#aMW").innerHTML = auto || layered ? na : `<select id="aM">${opts(concs(), q(d, "#aM") ? q(d, "#aM").value : matNow)}</select>`;
-    q(d, "#aMb").style.visibility = auto || layered ? "hidden" : "";
-    q(d, "#aNot").disabled = auto || layered; q(d, "#aNotL").style.color = layered ? "#999" : "";
+    q(d, "#aMW").innerHTML = auto || layered || comp ? na : `<select id="aM">${opts(concs(), q(d, "#aM") ? q(d, "#aM").value : matNow)}</select>`;
+    q(d, "#aMb").style.visibility = auto || layered || comp ? "hidden" : "";
+    q(d, "#aNot").disabled = auto || layered || comp; q(d, "#aNotL").style.color = layered || comp ? "#999" : "";
     if (auto) { q(d, "#aNotW").innerHTML = na; q(d, "#aGW").innerHTML = na; q(d, "#aModW").innerHTML = na; q(d, "#aModL").textContent = "Modifiers"; }
     else {
-      if (!q(d, "#aNot")) { q(d, "#aNotW").innerHTML = `<button id="aNot" style="width:100%" ${layered ? "disabled" : ""}>Modify/Show Notional Size...</button>`; q(d, "#aNot").onclick = notional; }
+      if (!q(d, "#aNot")) { q(d, "#aNotW").innerHTML = `<button id="aNot" style="width:100%" ${layered || comp ? "disabled" : ""}>Modify/Show Notional Size...</button>`; q(d, "#aNot").onclick = notional; }
       if (!q(d, "#aG")) { q(d, "#aGW").innerHTML = `<select id="aG">${opts(modeling, cur && cur.modeling || "ShellThin")}</select>`; q(d, "#aG").onchange = paint; }
       if (!q(d, "#aMod")) { q(d, "#aModW").innerHTML = `<button id="aMod" style="width:100%">Modify/Show...</button>`; q(d, "#aModL").innerHTML = `Modifiers (Currently <span id="aModT"></span>)`; q(d, "#aMod").onclick = modify; modText(); }
     }
     if (auto) pdBox.innerHTML = `<div style="text-align:center;padding:10px 0"><button id="aAS" style="min-width:220px">Modify/Show Auto Select List...</button><div style="margin-top:4px">Current Number of Properties in List: ${auto ? autoCount() : 0}</div></div>`;
+    else if (comp) pdBox.innerHTML = `<div style="text-align:center;padding:14px 0 6px"><button id="aCW" style="min-width:220px">Modify/Show Composite Wall Data...</button></div>
+      <label style="display:block;margin-top:10px"><input type="checkbox" id="aRZ" ${ex.RigidZone === "Yes" ? "checked" : ""}> Include Automatic Rigid Zone Area Over Wall</label>`;
     else if (layered) pdBox.innerHTML = `<div style="text-align:center;padding:28px 0 10px"><button id="aLy" style="min-width:220px">Modify/Show Layered ${wall ? "Wall" : "Slab"} Data</button><div style="margin-top:4px">Current Number of Layers: ${layers.length}</div></div>`
       + (wall ? `<label style="display:block;margin-top:10px"><input type="checkbox" id="aRZ" ${ex.RigidZone === "Yes" ? "checked" : ""}> Include Automatic Rigid Zone Area Over Wall</label>` : "");
     else if (wall) pdBox.innerHTML = `<div class="ex shg"><span>Thickness</span><input id="aT" type="number" step="any" value="${th}">${L}</div>
@@ -9666,6 +9732,7 @@ async function hmEtabsShellSection(s, after, copy, newKind) {
       q(d, "#aY").onchange = paint;
     }
     for (const [id, val] of Object.entries(keep)) { const i = pdBox.querySelector("#" + id); if (i && id !== "aY") { if (i.type === "checkbox") i.checked = val; else i.value = val; } }
+    const cw = q(d, "#aCW"); if (cw) cw.onclick = () => hmCswData(csw, pd.materials || [], u, o => csw = o, true);
     const ly = q(d, "#aLy"); if (ly) ly.onclick = () => hmLayers(wall, q(d, "#aN").value, layers, pd, dd, u, out => { layers = out; paint(); });
     const as = q(d, "#aAS"); if (as) as.onclick = () => hmWallAutoList(pd, tables, q(d, "#aN").value, auto0(), start, (list, st) => { auto = list; start = st; paint(); });
   };
@@ -9696,6 +9763,18 @@ async function hmEtabsShellSection(s, after, copy, newKind) {
       hm.sec[kind] = name; if (after) after(j); return true;
     }
     const g = q(d, "#aG").value, layered = g === "Layered";
+    if (g === "Composite") {
+      const conc = (pd.materials || []).filter(m => /concrete/i.test(m.type)).map(m => m.name), steel = (pd.materials || []).filter(m => /steel/i.test(m.type)).map(m => m.name);
+      const n = (k, dflt) => { const x = parseFloat(csw[k]); return isFinite(x) ? x : dflt; };
+      const comp = {concrete: csw.ConcMat || (conc.includes("4000Psi") ? "4000Psi" : conc[0]), steel: csw.SteelMat || (steel.includes("A992Fy50") ? "A992Fy50" : steel[0]), length: n("Lw", inTo(150, u)), total_thick: n("tsc", inTo(12, u)),
+        plate_thick: n("tpw", inTo(0.5, u)), flange_thick: n("tpf", inTo(0.5, u)), tie_diameter: n("dtie", inTo(0.625, u)), tie_spacing: n("TieSpacing", inTo(12, u)), in_plane: n("EAMod", 1), out_of_plane: n("EIMod", 1), spandrel: csw.Usage === "Beam"};
+      const e = {Color: ex.Color, Notes: ex.Notes || "", RigidZone: q(d, "#aRZ") && q(d, "#aRZ").checked ? "Yes" : ""};
+      const j = await hmRun("define_shell_type", {name, was: was || undefined, kind, modeling: "Composite", material: comp.concrete, thickness: comp.total_thick, composite: comp, modifiers: mods || undefined, extras: e}, true);
+      if (!j.ok) { formError(d, j.error); return false; }
+      if (was && autoRows.length) await hmRun("define_table_rows", {table: shAutoT, name: was, rows: []}, true);
+      if (layers.length) await hmRun("define_table_rows", {table: shLayerT(wall), name: was || name, rows: []}, true);
+      hm.sec[kind] = name; if (after) after(j); return true;
+    }
     const total = layers.reduce((a, r) => a + (+r.Thickness || 0), 0);
     if (layered && !layers.length) { formError(d, "A layered section needs its layers: Modify/Show Layered " + (wall ? "Wall" : "Slab") + " Data."); return false; }
     const args = {name, was: was || undefined, kind, modeling: g, material: layered ? "" : q(d, "#aM").value, thickness: layered ? total : fnum(d, "#aT"), modifiers: mods || undefined};

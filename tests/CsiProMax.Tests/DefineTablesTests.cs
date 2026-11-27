@@ -137,7 +137,28 @@ static class DefineTablesTests
             Check(ProgramOptions.HasDefinitionTable(ProgramOptions.Etabs, "Panel Zone Property Definitions - User Nonlinear Data"), "they go into ETABS");
             var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
             foreach (var part in new[] { "dialog(\"Panel Zone Properties\"", "<legend>Defined Panel Zones</legend>", "Auto Nonlinear Properties based on ASCE 41-17 Table 9-7.2 (Steel Only)", "dialog(\"Nonlinear Panel Zone Properties\"", "dialog(\"User Nonlinear Panel Zone Data - \" + name",
-                "dialog(\"User-Defined Panel Zone Acceptance Criteria\"", "Use Acceptance Criteria from Link Property", "fs(\"Single Joint Links at Point\"", "dialog(\"Soil Profile Data\"", "dialog(\"Isolated Column Footing Data\"", "fs(\"Choose Soil Profile and Isolated Footing\"" })
+                "dialog(\"User-Defined Panel Zone Acceptance Criteria\"", "Use Acceptance Criteria from Link Property", "fs(\"Single Joint Links at Point\"", "dialog(\"Soil Profile Data\"", "dialog(\"Isolated Column Footing Data\"", "fs(\"Choose Soil Profile and Isolated Footing\"", "dialog(\"Inelastic Properties for a Buckling Restrained Brace\"", "Program default inelastic properties, not editable by user", "pr(\"Force Displacement Type\"", "[\"Trilinear\", \"Elastic Perfectly Plastic\"]", "Accumulated Deformation Ratio", "o.TensFy = o.TensFu0" })
+                Check(html.Contains(part), "viewer.html lost " + part);
+        });
+
+        yield return ("define: ETABS 23.2's composite wall (Composite Shear Wall Data, Wall / Pier or Beam / Spandrel) goes on the wall's own SHELLPROP lines as ETABS writes them, and comes back", () =>
+        {
+            var link = Frame();
+            var conc = link.Model.Materials.First().Name;
+            Run(link, "define_shell_type", new { name = "Wall2", kind = "wall", modeling = "Composite", material = conc, thickness = 0.3, composite = new { concrete = conc, steel = conc, length = 3.81, total_thick = 0.3, plate_thick = 0.019, flange_thick = 0.0127, tie_diameter = 0.0159, tie_spacing = 0.3, in_plane = 0.7, out_of_plane = 1, spandrel = true } });
+            var e2k = E2kWriter.Write(link.Model);
+            Check(System.Text.RegularExpressions.Regex.IsMatch(e2k, "SHELLPROP\\s+\"Wall2\"\\s+PROPTYPE\\s+\"Wall\"\\s+MATERIAL\\s+\"[^\"]+\"\\s+MODELINGTYPE\\s+\"Composite\"\\s+WALLTHICKNESS"), "the first line as ETABS writes it: " + e2k.Split('\n').FirstOrDefault(l => l.Contains("Wall2")));
+            Check(System.Text.RegularExpressions.Regex.IsMatch(e2k, "SHELLPROP\\s+\"Wall2\"\\s+CONCMATERIALCOMP .*STEELMATERIALCOMP .*WALLLENGTH .*TOTALTHICK .*PLATETHICK .*FLANGEPLATETHICK .*TIEBARDIAMETER .*TIEBARSPACING .*CSTIFFNESSMODIFIER1 .*CSTIFFNESSMODIFIER2 .*ISPANDREL\\s+\"Yes\""), "the composite line as ETABS writes it");
+            var back = ThroughE2k(link.Model).ShellSections.Single(s => s.Name == "Wall2");
+            Check(back.Get("MODELINGTYPE") == "Composite" && back.Number("PLATETHICK") is { } p && Math.Abs(p - 0.019) < 1e-9 && back.Number("CSTIFFNESSMODIFIER1") is { } c1 && Math.Abs(c1 - 0.7) < 1e-9 && back.Get("ISPANDREL") == "Yes", "the composite data comes back");
+            var pd = Run(link, "property_definitions", new { });
+            var w = pd["shell_sections"]!.AsArray().First(x => x!["name"]!.GetValue<string>() == "Wall2")!;
+            Check(w["composite"]!["spandrel"]!.GetValue<bool>() && Math.Abs(w["composite"]!["tie_spacing"]!.GetValue<double>() - 0.3) < 1e-9, "the form reads it back");
+            link.Model.Target = "sap2000";
+            Refused(link, "define_shell_type", new { name = "W3", kind = "wall", modeling = "Composite", material = conc, thickness = 0.3, composite = new { concrete = conc, steel = conc, total_thick = 0.3, plate_thick = 0.01, flange_thick = 0.01, tie_diameter = 0.01, tie_spacing = 0.3 } }, "Only an ETABS wall");
+            link.Model.Target = "etabs";
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var part in new[] { "Modify/Show Composite Wall Data...", "\"In-Plane Stiffness\"", "\"Out-of-Plane Stiffness\"", "modeling: \"Composite\"" })
                 Check(html.Contains(part), "viewer.html lost " + part);
         });
 
