@@ -1149,6 +1149,7 @@ foreach (var (name, body) in FieldQuietTests.All()) Test(name, body);
 foreach (var (name, body) in TeamLibraryTests.All()) Test(name, body);
 foreach (var (name, body) in ChatDefaultsTests.All()) Test(name, body);
 foreach (var (name, body) in FileTypeTests.All()) Test(name, body);
+foreach (var (name, body) in EtabsFileMenuTests.All()) Test(name, body);
 
 var failed = 0;
 // ---- SAP2000 ----
