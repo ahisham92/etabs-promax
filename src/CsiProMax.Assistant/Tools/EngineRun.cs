@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.IO;
 using System.Text.Json;
+using CsiProMax.Model;
 using System.Text.Json.Nodes;
 using CsiProMax.Assistant.Etabs;
 
@@ -213,6 +214,14 @@ public static class EngineRun
                     var (frames, areas) = Find(window.Link, only);
                     ctx.Tool("select_objects", JsonSerializer.Serialize(new { frames, areas }));
                     lock (Gate) Lines.Add($"Selected in {program.Name} for the design: {frames.Count} of {only.Frames.Count} frames, {areas.Count} of {only.Areas.Count} areas.");
+                }
+                // SAP2000's .s2k has no place for the design codes chosen in the Modeler (Design > ... > View/Revise
+                // Preferences): they are set in the program before the design. ETABS and SAFE read them from their file.
+                if (program.Key == CsiProgram.Sap2000.Key)
+                {
+                    var codes = kinds.Select(k => (k, c: ProgramForms.Code(_model!.Model, k))).Where(x => x.c.Length > 0).ToDictionary(x => x.k, x => x.c);
+                    if (codes.Count > 0 && ctx.Tool("design_codes", JsonSerializer.Serialize(new { set = codes })) is not null)
+                        lock (Gate) Lines.Add("Design codes set: " + string.Join(", ", codes.Select(c => $"{c.Key} {c.Value}")) + ".");
                 }
                 Say("Running the design: " + string.Join(", ", kinds.Select(k => Kinds[program.Key].First(x => x.Kind == k).Name)) + (only is not null ? " (selected objects)" : ""));
                 if (ctx.Tool("run_design", DesignArgs(program, kinds)) is null) lock (Gate) Lines.Add("The design did not run: " + Failed(ctx));

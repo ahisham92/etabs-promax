@@ -41,7 +41,9 @@ public static class S2kWriter
         var length = Length(m.Units.Length);
 
         Add(tables, "PROGRAM CONTROL", Row(("ProgramName", "SAP2000"), ("Version", ProgramVersion), ("CurrUnits", $"{force}, {length}, {(m.Units.Temperature.StartsWith('F') ? "F" : "C")}")));
-        Add(tables, "ACTIVE DEGREES OF FREEDOM", Row(("UX", "Yes"), ("UY", "Yes"), ("UZ", "Yes"), ("RX", "Yes"), ("RY", "Yes"), ("RZ", "Yes")));
+        // Analyze > Set Active Degrees of Freedom (the form's row; each one on when not set).
+        var dof = m.DefinitionTables?.GetValueOrDefault("Active Degrees of Freedom")?.FirstOrDefault();
+        Add(tables, "ACTIVE DEGREES OF FREEDOM", new[] { "UX", "UY", "UZ", "RX", "RY", "RZ" }.Select(d => (d, dof?.GetValueOrDefault(d) is { Length: > 0 } v ? v : "Yes")).ToList());
         Add(tables, "COORDINATE SYSTEMS", Row(("Name", "GLOBAL"), ("Type", "Cartesian"), ("X", "0"), ("Y", "0"), ("Z", "0"), ("AboutZ", "0"), ("AboutY", "0"), ("AboutX", "0")));
 
         // Grids: the plan grids, and a Z grid line at each story level so the levels can still be found in SAP2000.
@@ -506,6 +508,9 @@ public static class S2kWriter
         // SAP2000's own hinge definitions, kept as its table rows.
         foreach (var (t, rows) in (m.DefinitionTables ?? []).Where(x => DefineTables.IsSap(x.Key)).OrderBy(x => x.Key, StringComparer.Ordinal))
             Add(tables, t.ToUpperInvariant(), rows.Select(r => (IReadOnlyList<(string, string)>)DefineTables.SapHinges[t].Where(r.ContainsKey).Select(f => (f, r[f])).ToList()));
+        // The preference and analysis option forms (ProgramForms), as SAP2000's own tables.
+        foreach (var (t, rows) in (m.DefinitionTables ?? []).Where(x => ProgramForms.HasForm(ProgramOptions.Sap2000, x.Key) && !x.Key.Equals("Active Degrees of Freedom", StringComparison.OrdinalIgnoreCase)).OrderBy(x => x.Key, StringComparer.Ordinal))
+            Add(tables, t.ToUpperInvariant(), rows.Take(1).Select(r => (IReadOnlyList<(string, string)>)ProgramForms.Fields(ProgramOptions.Sap2000, t).Where(f => r.ContainsKey(f.Key)).Select(f => (f.Key, r[f.Key])).ToList()));
         KeptTables.WriteInto(m, "sap2000", tables);
 
         var at = SavedAt ?? DateTime.Now;

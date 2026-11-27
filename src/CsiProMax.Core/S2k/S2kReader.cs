@@ -54,7 +54,13 @@ public static partial class S2kReader
             m.Units.Length = u[1].ToUpperInvariant();
             if (u.Length > 2) m.Units.Temperature = u[2].ToUpperInvariant();
         }
-        Use("ACTIVE DEGREES OF FREEDOM"); Use("COORDINATE SYSTEMS");
+        // Analyze > Set Active Degrees of Freedom: kept as the form's row when one of them is off.
+        if (Use("ACTIVE DEGREES OF FREEDOM").FirstOrDefault() is { } dof && dof.Any(kv => kv.Value.Equals("No", StringComparison.OrdinalIgnoreCase)))
+        {
+            m.DefinitionTables ??= new(StringComparer.OrdinalIgnoreCase);
+            m.DefinitionTables["Active Degrees of Freedom"] = [dof.Where(kv => kv.Value.Length > 0).ToDictionary(kv => kv.Key.ToUpperInvariant(), kv => kv.Value, StringComparer.Ordinal)];
+        }
+        Use("COORDINATE SYSTEMS");
 
         // Joints.
         var joints = new Dictionary<string, Xyz>(StringComparer.OrdinalIgnoreCase);
@@ -221,6 +227,18 @@ public static partial class S2kReader
             if (rows.Count == 0) continue;
             m.DefinitionTables ??= new(StringComparer.OrdinalIgnoreCase);
             m.DefinitionTables[full] = rows;
+        }
+        // SAP2000's preference and analysis option tables go into the Modeler's forms of them (ProgramForms), as the file has them.
+        foreach (var name in t.Keys.Where(k => !known.Contains(k) && ProgramForms.HasForm(ProgramOptions.Sap2000, k)).ToList())
+        {
+            known.Add(name);
+            var full = ProgramForms.Catalog(ProgramOptions.Sap2000).Keys.First(k => k.Equals(name, StringComparison.OrdinalIgnoreCase));
+            var fields = ProgramForms.Fields(ProgramOptions.Sap2000, full);
+            var row = (t[name].FirstOrDefault() ?? []).Where(kv => kv.Value.Length > 0 && fields.Exists(f => f.Key.Equals(kv.Key, StringComparison.OrdinalIgnoreCase)))
+                .ToDictionary(kv => fields.First(f => f.Key.Equals(kv.Key, StringComparison.OrdinalIgnoreCase)).Key, kv => kv.Value, StringComparer.Ordinal);
+            if (row.Count == 0) continue;
+            m.DefinitionTables ??= new(StringComparer.OrdinalIgnoreCase);
+            m.DefinitionTables[full] = [row];
         }
         // A table the Modeler has no form for is kept as the file has it, and goes back into the .s2k.
         foreach (var name in t.Keys.Where(k => !known.Contains(k)).OrderBy(k => k, StringComparer.Ordinal))

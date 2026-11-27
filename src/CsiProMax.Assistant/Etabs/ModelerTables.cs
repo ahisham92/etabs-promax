@@ -202,6 +202,8 @@ public static class ModelerTables
     {
         "story definitions" => "Story",
         "mass source definition" => "Name|LoadPattern",
+        // A form's table (design preferences, analysis options) has one row and no name: its row is that one.
+        _ when ProgramForms.IsForm(table) => "",
         _ when StructureExtras.PerDirection(table) => "Name|Direction",
         _ => "Name",
     };

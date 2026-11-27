@@ -17,7 +17,7 @@ static class ExtrasTests
     static OfflineEtabs Frame() => new(Templates.ConcreteFrame("Extras", [6, 5], [4], 3, 3.2));
 
     static JsonObject Run(ICsiLink link, string tool, object args) =>
-        (JsonObject)ExtraTools.All.Concat(PropertyTools.All).Concat(ModelerTools.All).Single(x => x.Name == tool).Run(JsonDocument.Parse(JsonSerializer.Serialize(args)).RootElement, link);
+        (JsonObject)ExtraTools.All.Concat(PropertyTools.All).Concat(ModelerTools.All).Concat(DefineTools.All).Single(x => x.Name == tool).Run(JsonDocument.Parse(JsonSerializer.Serialize(args)).RootElement, link);
 
     static void Refused(OfflineEtabs link, string tool, object args, string says)
     {
@@ -394,6 +394,47 @@ static class ExtrasTests
             Check(view.Contains("EngineRun.Changed(moved)", StringComparison.Ordinal) && view.Contains("EngineRun.Changed(edited)", StringComparison.Ordinal), "a change to the model does not remove the run's pack");
             var program = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Program.cs"));
             Check(program.Contains("WebPages.RemovedPageFor(file)", StringComparison.Ordinal), "a Viewer window on a removed pack does not say it was removed");
+        });
+        yield return ("Ahmed 2026-11-27: the Analyze and Design forms carry the program's own items (ETABS 23.2, SAP2000 26.3): design codes, each code's preferences, active DOF; kept as the program's table rows, the code in the .e2k", () =>
+        {
+            Check(ProgramForms.Codes("etabs", "steel").Contains("AISC 360-16") && ProgramForms.Codes("etabs", "concrete").Contains("ACI 318-19") && ProgramForms.Codes("etabs", "shear_wall").Contains("ACI 318-19"), "ETABS's design codes: " + string.Join(", ", ProgramForms.Codes("etabs", "steel")));
+            Check(ProgramForms.Codes("sap2000", "steel").Contains("AISC 360-16") && ProgramForms.Codes("sap2000", "concrete").Contains("Eurocode 2-2004"), "SAP2000's design codes: " + string.Join(", ", ProgramForms.Codes("sap2000", "concrete")));
+            Check(ProgramForms.Fields("etabs", "Steel Frame Design Preferences - AISC 360-16").Exists(f => f.Key == "PatLLF" && f.Label == "Pattern Live Load Factor"), "the steel preferences do not have ETABS's item names");
+            Check(ProgramForms.Designs("safe").Single().Kind == "slab" && ProgramForms.AnalysisForms("etabs")[0].Table == "Analysis Options - Active Degrees of Freedom" && ProgramForms.AnalysisForms("sap2000").Any(f => f.Table == "Active Degrees of Freedom"), "the designs and Analyze forms per program");
+            Check(CsiProMax.Assistant.Etabs.ModelerTables.KeyOf("Steel Frame Design Preferences - AISC 360-16") == "" && ProgramOptions.HasDefinitionTable("etabs", "Analysis Options - SAPFire Options") && !ProgramOptions.HasDefinitionTable("etabs", "Preferences - Steel Design - AISC 360-16"), "a form's table goes into its own program as one row");
+            var link = Frame();
+            Check(ProgramForms.Code(link.Model, "steel") == "AISC 360-16", "the template's steel code from the .e2k: " + ProgramForms.Code(link.Model, "steel"));
+            var forms = Run(link, "program_forms", new { });
+            Check((forms["designs"] as JsonArray)!.Count == ProgramForms.Designs("etabs").Count && (forms["analysis"] as JsonArray)!.Count == ProgramForms.AnalysisForms("etabs").Count, "program_forms lists every design and Analyze form");
+            Run(link, "set_program_form", new { design = "steel", code = "Eurocode 3-2005", table = "Steel Frame Design Preferences - Eurocode 3-2005", values = new Dictionary<string, string> { ["Pattern Live Load Factor"] = "0.8" } });
+            Check(ProgramForms.Code(link.Model, "steel") == "Eurocode 3-2005", "the code did not change");
+            var e2k = CsiProMax.E2k.E2kWriter.Write(link.Model);
+            Check(e2k.Contains("STEELPREFERENCE  CODE  \"Eurocode 3-2005\"", StringComparison.Ordinal) && !e2k.Contains("CODE \"AISC 360-16\"  THDESIGN", StringComparison.Ordinal), "the .e2k does not carry the new steel code");
+            Check(link.Model.DefinitionTables!["Steel Frame Design Preferences - Eurocode 3-2005"].Single()["PatLLF"] == "0.8", "the preference is not the table's row");
+            var one = Run(link, "program_forms", new { design = "steel" });
+            Check(((one["items"] as JsonArray)!.First(i => i!["field"]!.GetValue<string>() == "PatLLF"))!["value"]!.GetValue<string>() == "0.8", "the form does not show the value set");
+            Run(link, "set_program_form", new { table = "Steel Frame Design Preferences - Eurocode 3-2005", values = new Dictionary<string, string> { ["PatLLF"] = "" } });
+            Check(!link.Model.DefinitionTables!.ContainsKey("Steel Frame Design Preferences - Eurocode 3-2005"), "a blank value did not go back to the program's default");
+            Refused(link, "set_program_form", new { table = "Steel Frame Design Preferences - AISC 360-16", values = new Dictionary<string, string> { ["Nope"] = "1" } }, "no item");
+            Refused(link, "set_program_form", new { design = "steel", code = "AISC 999" }, "no code");
+            Refused(link, "set_program_form", new { table = "Preferences - Steel Design - AISC 360-16", values = new Dictionary<string, string> { ["PatLLF"] = "1" } }, "no form");
+            var back = ModelFile.FromJson(ModelFile.ToJson(link.Model));
+            Check(ProgramForms.Code(back, "steel") == "Eurocode 3-2005", "the code is not kept in the .cpm");
+            // SAP2000: the preference tables are its .s2k's own, read back as they were written.
+            var sap = Frame();
+            sap.Model.Target = "sap2000";
+            Run(sap, "set_program_form", new { design = "concrete", code = "ACI 318-19", table = "Preferences - Concrete Design - ACI 318-19", values = new Dictionary<string, string> { ["PatLLF"] = "0.7" } });
+            Run(sap, "set_program_form", new { table = "Active Degrees of Freedom", values = new Dictionary<string, string> { ["RZ"] = "No" } });
+            var text = CsiProMax.S2k.S2kWriter.Write(sap.Model, "a.s2k").Text;
+            Check(text.Contains("TABLE:  \"PREFERENCES - CONCRETE DESIGN - ACI 318-19\"", StringComparison.Ordinal) && text.Contains("TABLE:  \"ACTIVE DEGREES OF FREEDOM\"", StringComparison.Ordinal), "the .s2k has no preference or DOF table");
+            var read = CsiProMax.S2k.S2kReader.Read(text, "Extras");
+            Check(read.DefinitionTables?.GetValueOrDefault("Preferences - Concrete Design - ACI 318-19")?.Single().GetValueOrDefault("PatLLF") == "0.7" && read.DefinitionTables?.GetValueOrDefault("Active Degrees of Freedom")?.Single().GetValueOrDefault("RZ") == "No", "the .s2k's forms did not come back");
+            Check(ProgramForms.Code(sap.Model, "concrete") == "ACI 318-19", "SAP2000's code is not kept");
+            var engine = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Tools", "EngineRun.cs"));
+            Check(engine.Contains("ctx.Tool(\"design_codes\"", StringComparison.Ordinal), "SAP2000's codes are not set before its design");
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var marker in new[] { "async function hmPrefs(kind, code, changed)", "\"View/Revise Preferences...\"", "Set To Default Values", "Reset To Previous Values", "Fast DOFs", "\"m:pform:\" + i", "Preferences for ${code}" })
+                Check(html.Contains(marker, StringComparison.Ordinal), "the page has no " + marker);
         });
         yield return ("Ahmed 2026-11-27: Run asks Analyze only / Analyze and Design / Design only, opens the design types only for a design, and the job counts as closed only when the program's process has ended", () =>
         {

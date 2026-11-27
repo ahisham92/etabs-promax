@@ -675,6 +675,20 @@ public static class ModelerFieldSteps
         ctx.Refused("define_shell_type", """{"name":"CPM-RIB2","kind":"slab","slab_type":"Ribbed","thickness":0.1,"material":""" + Q(conc) + """}""", "ribs", "tool define_shell_type says no to a ribbed slab with no ribs");
         ctx.Tool("define_deck", """{"name":"CPM-DECK","deck_type":"Filled","slab_material":""" + Q(conc) + ""","deck_material":""" + Q(conc) + ""","slab_depth":0.0875,"rib_depth":0.075,"rib_width_top":0.175,"rib_width_bottom":0.125,"rib_spacing":0.3,"shear_thickness":0.001,"unit_weight":0.11,"stud_diameter":0.019,"stud_height":0.15,"stud_fu":400000,"extras":{"Notes":"field test"}}""", null, "tool define_deck, a filled deck");
         ctx.Refused("define_deck", """{"name":"CPM-DECK2","deck_type":"Corrugated"}""", "deck type", "tool define_deck says no to a deck type the programs do not have");
+        // Analyze and Design forms with the program's own items (Ahmed 2026-11-27): a design code's preferences and
+        // Set Active Degrees of Freedom, as rows of the program's tables, put into the program with the model.
+        ctx.Tool("program_forms", "{}", null, "tool program_forms, the Analyze and Design menu forms");
+        var (fDesign, fCode, fTable) = modeler.Model.Target switch
+        {
+            "sap2000" => ("steel", "AISC 360-16", "Preferences - Steel Design - AISC 360-16"),
+            "safe" => ("slab", "ACI 318-19", "Concrete Slab Design Preferences - ACI 318-19"),
+            _ => ("steel", "AISC 360-16", "Steel Frame Design Preferences - AISC 360-16"),
+        };
+        ctx.Tool("set_program_form", $$"""{"design":{{Q(fDesign)}},"code":{{Q(fCode)}},"table":{{Q(fTable)}},"values":{"PatLLF":"0.75"}}""", null, "tool set_program_form, a design code and one of its preferences");
+        var dofTable = CsiProMax.Model.ProgramForms.AnalysisForms(modeler.Model.Target).Select(f => f.Table).FirstOrDefault(t => t.Contains("Degrees of Freedom", StringComparison.Ordinal));
+        if (dofTable is not null)
+            ctx.Tool("set_program_form", $$"""{"table":{{Q(dofTable)}},"values":{"UX":"Yes","UY":"Yes","UZ":"Yes","RX":"Yes","RY":"Yes","RZ":"Yes"}}""", null, "tool set_program_form, Set Active Degrees of Freedom");
+        ctx.Refused("set_program_form", $$"""{"table":{{Q(fTable)}},"values":{"No Such Item":"1"}}""", "no item", "tool set_program_form says no to an item the form does not have");
         ctx.Tool("define_spring", """{"kind":"point","name":"CPM-PS","values":{"UX":1000,"UY":1000,"UZ":50000}}""", null, "tool define_spring, a point spring");
         ctx.Tool("define_spring", """{"kind":"area","name":"CPM-AS","values":{"U3":20000}}""", null, "tool define_spring, an area spring");
         ctx.Refused("define_spring", """{"kind":"line","name":"CPM-BAD","values":{"UX":5}}""", "not 'UX'", "tool define_spring says no to a value the kind does not have");

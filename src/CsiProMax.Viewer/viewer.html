@@ -4368,6 +4368,9 @@ async function hmDefs() {
   if (hm.defs) return hm.defs;
   const j = await hmPost({tool: "model_definitions", args: {}}).catch(() => null);
   if (j && j.ok) { hm.defs = j.result; if ("rev" in j) hm.state = j; }
+  // The Analyze and Design menus' forms of the model's program (its own items): fetched with the definitions.
+  const f = await hmPost({tool: "program_forms", args: {}}).catch(() => null);
+  hm.forms = f && f.ok ? f.result : hm.forms || {designs: [], analysis: []};
   return hm.defs || {stories: [], grids: [], materials: [], frame_sections: [], shell_sections: [], load_patterns: [], load_cases: [], combinations: [], pattern_types: [], base: {name: "Base", elevation: 0}, units: {}};
 }
 const hmU = () => { const u = (hm.defs && hm.defs.units) || {}; return {f: (u.force || "kN").replace(/^KN$/i, "kN"), l: (u.length || "m").toLowerCase()}; };
@@ -4394,7 +4397,64 @@ function modelerMenus(m) {
     ["Joint Loads", [["Forces...", "m:ld:joint_force", "", !any], ["Ground Displacements...", "m:ld:joint_displacement", "", !any], only(ES, ["Temperature...", "m:ld:joint_temperature", "", !any])]],
     ["Frame Loads", [["Distributed...", "m:asgFrameLoad", "", !fr], ["Uniform in any direction...", "m:ld:frame_uniform", "", !fr], ["Point...", "m:ld:frame_point", "", !fr], ["Trapezoidal...", "m:ld:frame_trapezoid", "", !fr], ["Temperature...", "m:ld:frame_temperature", "", !fr], only(ES, ["Strain...", "m:ld:frame_strain", "", !fr])]],
     [({sap2000: "Area Loads", safe: "Slab Loads"})[program] || "Shell Loads", [["Uniform...", "m:asgShellLoad", "", !ar], ["Uniform in any direction...", "m:ld:shell_uniform", "", !ar], ["Temperature...", "m:ld:shell_temperature", "", !ar], only(ES, ["Strain...", "m:ld:shell_strain", "", !ar])]]];
+  // Analyze and Design as the program has them (Ahmed 2026-11-27, every form): its option forms first, then the checks and
+  // the Run; each design's View/Revise Preferences (its code and the code's items) above the results.
+  const fm = hm.forms || {designs: [], analysis: []};
+  m.Analyze = [...fm.analysis.map((f, i) => [f.item, "m:pform:" + i]), ...(fm.analysis.length ? [0] : []), ...(m.Analyze || [])];
+  if (fm.designs.length) m.Design = [...fm.designs.map(d => [d.name, [["View/Revise Preferences...", "m:pref:" + d.design], ...(window.cpmLive ? [["Start Design/Check...", "eng:design"]] : [])]]), 0, ...(m.Design || [])];
   return m;
+}
+// A design's View/Revise Preferences (ETABS: "Steel Frame Design Preferences for AISC 360-16"): Design Code first, then
+// each item of that code's preferences as the program names it; a blank value is the program's default for the code.
+async function hmPrefs(kind, code, changed) {
+  const fm = hm.forms || {designs: []}, d = fm.designs.find(x => x.design === kind);
+  if (!d) return hmSay("This program has no such design.", true);
+  code = code || d.code || d.codes[0] || "";
+  const j = await hmPost({tool: "program_forms", args: {design: kind, code}});
+  if (!j.ok) return hmSay(j.error, true);
+  const items = j.result.items, table = j.result.table;
+  const row = (n, label, box) => `<tr><td class="kv" style="white-space:nowrap;padding:1px 6px">${String(n).padStart(2, "0")}</td><td class="kv" style="padding:1px 6px">${esc(label)}</td><td style="padding:1px 4px">${box}</td></tr>`;
+  const body = `<div class="pgwrap" style="max-height:420px;overflow:auto"><table style="border-collapse:collapse;width:100%"><thead><tr><th></th><th class="kv" style="text-align:left;padding:2px 6px">Item</th><th class="kv" style="text-align:left;padding:2px 6px">Value</th></tr></thead><tbody>
+      ${row(1, "Design Code", `<select id="pCode" style="width:220px">${opts(d.codes, code)}</select>`)}
+      ${items.map((it, i) => row(i + 2, it.name, `<input data-f="${esc(it.field)}" value="${esc(it.value)}" placeholder="Program default" style="width:220px">`)).join("")}
+    </tbody></table></div>
+    <fieldset style="margin-top:6px"><legend>Explanation</legend><p class="kv" style="margin:0;max-width:520px">An item left blank takes ${esc(progLabel(program))}'s own default for ${esc(code)}. The items are ${esc(progLabel(program))}'s table "${esc(table)}"; they go into the program with the model.</p></fieldset>`;
+  const was = Object.fromEntries(items.map(it => [it.field, it.value]));
+  const dlg = dialog(`${d.name} Preferences for ${code}`, body, [
+    ["OK", x => {
+      const values = {};
+      x.querySelectorAll("[data-f]").forEach(b => { if (b.value !== was[b.dataset.f]) values[b.dataset.f] = b.value; });
+      const args = Object.keys(values).length ? {table, values} : {};
+      if (changed || code !== d.code) Object.assign(args, {design: kind, code});
+      if (!Object.keys(args).length) return;
+      hmRun("set_program_form", args).then(r => { if (r.ok) hmSay(`${d.name}: ${code}` + (args.values ? `, ${Object.keys(values).length} item(s) set.` : ".")); });
+    }],
+    ["Set To Default Values", x => { x.querySelectorAll("[data-f]").forEach(b => { b.value = ""; }); return false; }, true],
+    ["Reset To Previous Values", x => { x.querySelectorAll("[data-f]").forEach(b => { b.value = was[b.dataset.f]; }); return false; }, true],
+    ["Cancel"]], {width: 600});
+  q(dlg, "#pCode").onchange = e => { const c = e.target.value; dlg.close(); hmPrefs(kind, c, true); };
+}
+// An Analyze option form (Set Active Degrees of Freedom, Set Analysis Options, the mesh settings, SAPFire): the program's
+// items; the degrees of freedom as its check boxes with its Fast DOFs.
+async function hmProgForm(i) {
+  const f = ((hm.forms || {}).analysis || [])[i]; if (!f) return;
+  const j = await hmPost({tool: "program_forms", args: {table: f.table}});
+  if (!j.ok) return hmSay(j.error, true);
+  const items = j.result.items, dof = /Degrees of Freedom/i.test(f.table), was = Object.fromEntries(items.map(it => [it.field, it.value]));
+  const yes = v => !/^(no|false|0)$/i.test(v || "yes");
+  const body = dof
+    ? `<fieldset><legend>Available DOFs</legend><div class="g3">${items.map(it => `<label class="kv"><input type="checkbox" data-d="${esc(it.field)}" ${yes(it.value) ? "checked" : ""}> ${esc(it.name)}</label>`).join("")}</div></fieldset>
+       <fieldset><legend>Fast DOFs</legend>${[["Space Frame", "UX UY UZ RX RY RZ"], ["Plane Frame", "UX UZ RY"], ["Plane Grid", "UZ RX RY"], ["Space Truss", "UX UY UZ"]].map(([n, on]) => `<button type="button" data-fast="${on}">${n}</button>`).join(" ")}</fieldset>`
+    : `<div class="gu" style="grid-template-columns:auto 220px">${items.map(it => `<label class="kv">${esc(it.name)}</label><input data-f="${esc(it.field)}" value="${esc(it.value)}" placeholder="Program default">`).join("")}</div>
+       <p class="kv" style="margin:6px 0 0;max-width:460px">An item left blank takes ${esc(progLabel(program))}'s own default.</p>`;
+  const dlg = dialog(f.item.replace(/\.\.\.$/, "").replace(/^Set /, "").replace(/^Advanced /, ""), body, [["OK", x => {
+    const values = {};
+    if (dof) x.querySelectorAll("[data-d]").forEach(b => { const v = b.checked ? "Yes" : "No"; if (v !== (was[b.dataset.d] || "Yes")) values[b.dataset.d] = v; });
+    else x.querySelectorAll("[data-f]").forEach(b => { if (b.value !== was[b.dataset.f]) values[b.dataset.f] = b.value; });
+    if (!Object.keys(values).length) return;
+    hmRun("set_program_form", {table: f.table, values}).then(r => { if (r.ok) hmSay(f.item.replace(/\.\.\.$/, "") + ": set."); });
+  }], ["Cancel"]], {width: dof ? 420 : 520});
+  dlg.querySelectorAll("[data-fast]").forEach(b => b.onclick = () => { const on = b.dataset.fast.split(" "); dlg.querySelectorAll("[data-d]").forEach(c => { c.checked = on.includes(c.dataset.d); }); });
 }
 // Define as each program has it, in its order and words (Ahmed 2026-11-27, every form): ETABS 23.2 Define, SAP2000 26.3
 // Define and SAFE's Define. Story and grid data are in ETABS's and SAFE's Edit menu (Edit Stories and Grid Systems...), in
@@ -4440,6 +4500,8 @@ async function modelAct(a) {
   if (a.startsWith("st:")) return hmStructure(a.slice(3));
   if (a.startsWith("sa:")) return hmAssignStructure(a.slice(3));
   if (a.startsWith("ex:")) return hmExtras(a.slice(3));
+  if (a.startsWith("pref:")) { await hmDefs(); return hmPrefs(a.slice(5)); }
+  if (a.startsWith("pform:")) { await hmDefs(); return hmProgForm(+a.slice(6)); }
   switch (a) {
     case "undo": case "redo": { const j = await hmRun(a); if (j.ok) hmSay(j.did || "Done."); return; }
     case "delete": return hmDelete();
