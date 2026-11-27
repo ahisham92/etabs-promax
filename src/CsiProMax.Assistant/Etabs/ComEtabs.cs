@@ -478,7 +478,13 @@ public sealed class ComEtabs : ICsiLink, IDisposable
         }
     });
 
-    public IReadOnlyList<TableName> Tables() => On("list the tables", m => ListTables(m.DatabaseTables, Program.Name));
+    public IReadOnlyList<TableName> Tables() => On("list the tables", m => WithStories((IReadOnlyList<TableName>)ListTables(m.DatabaseTables, Program.Name), Program));
+
+    /// <summary>ETABS's list with "Story Definitions" in it: ETABS 23.2 left it out on the scratch model before the
+    /// analysis (0.4.59 to 0.4.61 full tests), and ReadTable gives it from the Story API then.</summary>
+    internal static IReadOnlyList<TableName> WithStories(IReadOnlyList<TableName> list, CsiProgram program) =>
+        program.Key != CsiProgram.Etabs.Key || list.Count == 0 || list.Any(t => string.Equals(t.Key, StoryTable, StringComparison.OrdinalIgnoreCase))
+            ? list : [.. list, new TableName(StoryTable, StoryTable, false, -1)];
 
     /// <summary>
     /// The program's tables: GetAllTables, else GetAvailableTables (the tables with data). SAFE 23.1 refused
@@ -517,6 +523,37 @@ public sealed class ComEtabs : ICsiLink, IDisposable
             }
             catch (Exception ex) when (ex is Microsoft.CSharp.RuntimeBinder.RuntimeBinderException or MissingMethodException or COMException or InvalidCastException) { /* GetAllTables' list stands */ }
         return list;
+    }
+
+    /// <summary>ETABS's story table, by its key.</summary>
+    internal const string StoryTable = "Story Definitions";
+
+    /// <summary>ETABS's "Story Definitions" table (ETABS 23.2's fields), made from Story.GetStories_2: top story first, the base left out.</summary>
+    internal static TableData StoryDefinitions(dynamic m)
+    {
+        double baseElevation = 0; int n = 0;
+        string[] names = None, similar = None; double[] elevations = NoNumbers, heights = NoNumbers, spliceHeight = NoNumbers;
+        bool[] master = [], splice = []; int[] color = [];
+        if (Convert.ToInt32(m.Story.GetStories_2(ref baseElevation, ref n, ref names, ref elevations, ref heights, ref master, ref similar, ref splice, ref spliceHeight, ref color)) != 0)
+            throw new EtabsException("ETABS refused to read the table 'Story Definitions' and to list the stories."); // ETABS itself
+        names ??= None; n = Math.Min(n, names.Length);
+        static string At<T>(T[]? list, int i, Func<T, string> text) => list is not null && i < list.Length ? text(list[i]) : "";
+        var rows = new List<(double Z, string[] Row)>();
+        for (var i = 0; i < n; i++)
+        {
+            var guid = "";
+            try { string g = ""; if (Convert.ToInt32(m.Story.GetGUID(names[i], ref g)) == 0) guid = g ?? ""; }
+            catch (Exception ex) when (ex is not COMException) { }
+            var z = elevations is not null && i < elevations.Length ? elevations[i] : i;
+            rows.Add((z, new[]
+            {
+                "T1", names[i], At(heights, i, N), At(master, i, b => b ? "Yes" : "No"), At(similar, i, s => s ?? ""), At(splice, i, b => b ? "Yes" : "No"),
+                At(spliceHeight, i, N), At(color, i, c => c.ToString(System.Globalization.CultureInfo.InvariantCulture)), guid,
+            }));
+        }
+        return new TableData(["Tower", "Story", "Height", "IsMaster", "SimilarTo", "IsSpliced", "SpliceHt", "Color", "GUID"],
+            rows.OrderByDescending(r => r.Z).Select(r => r.Row).ToList());
+        static string N(double v) => v.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private static string ModelFileOf(dynamic m)
@@ -559,6 +596,10 @@ public sealed class ComEtabs : ICsiLink, IDisposable
         fields ??= None; data ??= None;
         // ETABS 23 can give an empty table's field list with empty entries: a null field name broke a check (0.4.57).
         fields = fields.Select(f => f ?? "").ToArray();
+        if (ret != 0 && Program.Key == CsiProgram.Etabs.Key && string.Equals(key, StoryTable, StringComparison.OrdinalIgnoreCase))
+            // ETABS 23.2 refused "Story Definitions" and left it out of its table list on the scratch model before the
+            // analysis (0.4.59 to 0.4.61 full tests), while it read it after: the same table from the Story API.
+            return StoryDefinitions(m);
         if (ret != 0)
         {
             // ETABS 23 lists tables it then refuses to read because there is nothing in them: Story Stiffness with no

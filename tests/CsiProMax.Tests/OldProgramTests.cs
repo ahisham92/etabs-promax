@@ -50,6 +50,26 @@ static class OldProgramTests
             Check(list.Any(t => t.Name == "Story Definitions") && list.Count(t => t.Key == "Load Pattern Definitions") == 1 && list.Count == 3, "the table list: " + string.Join(", ", list.Select(t => t.Name)));
         });
 
+        yield return ("ETABS 23.2 'Story Definitions': added to a list that leaves it out, and made from the Story API when ETABS refuses it (0.4.59 to 0.4.61)", () =>
+        {
+            IReadOnlyList<TableName> some = [new("Load Pattern Definitions", "Load Pattern Definitions", false, 1)];
+            var etabs = CsiProMax.Assistant.Etabs.ComEtabs.WithStories(some, CsiProgram.Etabs);
+            Check(etabs.Count == 2 && etabs.Any(t => t.Key == "Story Definitions" && !t.Empty), "ETABS's list has Story Definitions: " + string.Join(", ", etabs.Select(t => t.Key)));
+            Equal(1, CsiProMax.Assistant.Etabs.ComEtabs.WithStories(some, CsiProgram.Sap2000).Count, "SAP2000 has no story table to add");
+            Equal(1, CsiProMax.Assistant.Etabs.ComEtabs.WithStories(etabs, CsiProgram.Etabs).Count(t => t.Key == "Story Definitions"), "never added twice");
+            var table = CsiProMax.Assistant.Etabs.ComEtabs.StoryDefinitions(new StoryModel());
+            Equal("Tower|Story|Height|IsMaster|SimilarTo|IsSpliced|SpliceHt|Color|GUID", string.Join("|", table.Fields), "ETABS 23.2's fields");
+            Equal("Story2|Story1", string.Join("|", table.Rows.Select(r => r[1])), "top story first, no base");
+            Equal("T1|Story2|3.2|Yes|None|No|0|255|g-Story2", string.Join("|", table.Rows[0]), "the top story's row");
+        });
+
+        yield return ("SAP2000 Plus's 'save with bridge data removed under a new name?' question is answered No (0.4.61: it held the SAP2000 part 25 minutes)", () =>
+        {
+            Check(CsiProMax.Assistant.ScratchDialogs.IsBridgeDataQuestion(["&Yes", "&No", "This model file has been modified to remove bridge-related data.  Do you want to save this file with a new name?"])
+                && !CsiProMax.Assistant.ScratchDialogs.IsBridgeDataQuestion(["&Yes", "&No", "Do you want to save this file with a new name?"])
+                && !CsiProMax.Assistant.ScratchDialogs.IsBridgeDataQuestion(["OK", "remove bridge-related data: your licence ... new name"]), "the question is told apart, never a licence message");
+        });
+
         yield return ("ETABS 23 shear wall design: no StartDesign in its API, so its own menu Design > Shear Wall Design > Start Design/Check is picked", () =>
         {
             Check(MenuCommand.Matches("&Start Design/Check...", "Start Design/Check") && MenuCommand.Matches("Shear &Wall Design", "Shear Wall Design") && !MenuCommand.Matches("Steel Frame Design", "Shear Wall Design"), "menu words without access keys or dots");
@@ -959,5 +979,23 @@ public sealed class TwoTableLists
     public int GetAvailableTables(ref int n, ref string[] keys, ref string[] names, ref int[] import)
     {
         keys = ["Story Definitions", "Load Pattern Definitions"]; names = keys.ToArray(); import = [1, 1]; n = 2; return 0;
+    }
+}
+
+/// <summary>ETABS's SapModel with two stories, for the "Story Definitions" made from the Story API.</summary>
+public sealed class StoryModel
+{
+    public StoryApi Story { get; } = new();
+
+    public sealed class StoryApi
+    {
+        public int GetStories_2(ref double baseElevation, ref int n, ref string[] names, ref double[] elevations, ref double[] heights, ref bool[] master,
+            ref string[] similar, ref bool[] splice, ref double[] spliceHeight, ref int[] color)
+        {
+            baseElevation = 0; n = 2; names = ["Story1", "Story2"]; elevations = [3.2, 6.4]; heights = [3.2, 3.2]; master = [false, true];
+            similar = ["Story2", "None"]; splice = [false, false]; spliceHeight = [0, 0]; color = [65280, 255]; return 0;
+        }
+
+        public int GetGUID(string name, ref string guid) { guid = "g-" + name; return 0; }
     }
 }
