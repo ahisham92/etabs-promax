@@ -4863,7 +4863,7 @@ function modelerMenus(m) {
     program === "sap2000" ? hmSapAssignMenu()[0] : ["Joint", [["Springs...", "m:ad:joint", "", !any], only(["etabs", "sap2000"], ["Diaphragms...", "m:sa:jdiaph", "", !any]), only(["sap2000"], ["Constraints...", "m:ex:jconstraint", "", !any]), 0, ...hmTableItems("Joint", !any)]],
     program === "sap2000" ? hmSapAssignMenu()[1] : ["Frame", [["Releases...", "m:ad:releases", "", !fr], ["Local Axes...", "m:ad:axes", "", !fr], ["Insertion Point...", "m:ad:insertion", "", !fr], ["End Length Offsets...", "m:ad:offsets", "", !fr], ["Property Modifiers...", "m:ad:fmods", "", !fr], ["Line Springs...", "m:ad:lspring", "", !fr], only(["etabs", "sap2000"], ["Hinges...", "m:ad:hinges", "", !fr]), 0, ...hmTableItems("Frame", !fr)]],
     [program === "sap2000" ? "Area" : "Shell", [["Property Modifiers...", "m:ad:smods", "", !ar], ["Area Springs...", "m:ad:aspring", "", !ar], only(["etabs", "sap2000"], ["Diaphragms...", "m:sa:diaph", "", !ar]), only(["etabs"], ["Pier Label...", "m:sa:pier", "", !any]), only(["etabs"], ["Spandrel Label...", "m:sa:spandrel", "", !any]), 0, only(["etabs"], ["Opening...", "m:at:opening", "", !ar]), ...hmTableItems("Area", !ar)]],
-    ["Assign Objects to Group...", "m:sa:group", "", !any], 0,
+    ...(program === "sap2000" ? hmSapAssignTail() : [["Assign Objects to Group...", "m:sa:group", "", !any]]), 0,
     ["Joint Loads", [["Forces...", "m:ld:joint_force", "", !any], ["Ground Displacements...", "m:ld:joint_displacement", "", !any], only(ES, ["Temperature...", "m:ld:joint_temperature", "", !any])]],
     ["Frame Loads", [["Distributed...", "m:asgFrameLoad", "", !fr], ["Uniform in any direction...", "m:ld:frame_uniform", "", !fr], ["Point...", "m:ld:frame_point", "", !fr], ["Trapezoidal...", "m:ld:frame_trapezoid", "", !fr], ["Temperature...", "m:ld:frame_temperature", "", !fr], only(ES, ["Strain...", "m:ld:frame_strain", "", !fr])]],
     [({sap2000: "Area Loads", safe: "Slab Loads"})[program] || "Shell Loads", [["Uniform...", "m:asgShellLoad", "", !ar], ["Uniform in any direction...", "m:ld:shell_uniform", "", !ar], ["Temperature...", "m:ld:shell_temperature", "", !ar], only(ES, ["Strain...", "m:ld:shell_strain", "", !ar])]]];
@@ -5282,10 +5282,12 @@ function hmSapAssignMenu() {
     ["Link/Support Loads", [it("Gravity...", "llGravity")]], 0,
     it("Joint Patterns...", "jPatterns"), 0,
     it("Assign to Group...", "group", "Ctrl+Shift+G"), 0,
-    it("Update All Generated Hinge Properties", "updateHinges"), 0,
+    [...it("Update All Generated Hinge Properties", "updateHinges"), true], 0,
     it("Clear Display of Assigns", "clearDisplay"), 0,
     it("Copy Assigns", "copy"), ["Paste Assigns", "m:sapa:paste", "", !hm.copiedAssigns]];
 }
+// Its last items, from Joint Patterns to Paste Assigns.
+const hmSapAssignTail = () => { const all = hmSapAssignMenu(); return all.slice(all.findIndex(x => x && x[1] === "m:sapa:jPatterns")); };
 // The forms behind it. A key with no SAP2000 form yet opens the Engine's own form for the same assignment.
 const hmSapAssignForms = {
   jRestraints: () => hmSapRestraints(), jConstraints: () => hmSapJointConstraints(), jSprings: () => hmSapJointSprings(), jMasses: () => hmSapJointMasses(),
@@ -6028,6 +6030,107 @@ Object.assign(hmSapAssignForms, {
   fSprings: () => hmSapFrameSprings(), fMass: () => hmSapFrameMass(), fMatTemp: () => hmSapFrameMatTemp(), fMesh: () => hmSapFrameMesh(), fCreep: () => hmSapFrameCreep(), fTransfer: () => hmSapFrameTransfer(),
   fHingeOverwrites: () => hmSapFrameHingeOverwrites(),
 });
+
+// ---- SAP2000 26.3's other Assign items (pictures Assign/Joint/Joint Patterns 1-2, Assign/Assign to Groups) ----
+// Assign > Joint Patterns: a pattern's value at each selected joint, from Ax + By + Cz + D or from the Z coordinate at
+// zero pressure and the weight per unit volume, with the restriction, added to, replacing or deleting what is there.
+// Kept as SAP2000's Joint Pattern Assignments rows (Pattern, Value), one per pattern on each joint.
+async function hmSapAssignJointPatterns() {
+  const names = hmJoints(); if (!names.length) return hmSay("Select the joints first.", true);
+  const u = sapUnits(), dd = (await hmRun("definition_data", {}, true)).result || {tables: {}};
+  const pats = ["Default", ...new Set((((dd.tables || {})["Joint Pattern Definitions"] || {}).rows || []).map(r => r.Pattern || r.Name).filter(n => n && n !== "Default"))];
+  const restr = [["all", "Use All Values"], ["neg", "Zero Negative Values"], ["pos", "Zero Positive Values"]];
+  const d = dialog("Assign Joint Pattern Data", `${sapFormCss}<div class="sapF">
+    <fieldset><legend>General</legend><div style="display:flex;justify-content:space-between;align-items:center"><span>Joint Pattern Name</span><select id="jpN" style="width:220px">${opts(pats, "Default")}</select></div></fieldset>
+    <fieldset><legend>Pattern Assignment Type</legend><label><input type="radio" name="jpT" value="abc" checked> X, Y, Z Multipliers&nbsp; (Pattern Value = Ax + By + Cz + D)</label><label><input type="radio" name="jpT" value="z"> Z Coordinate at Zero Pressure and Weight per Unit Volume</label></fieldset>
+    <fieldset id="jpBox" style="min-height:170px"></fieldset>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><fieldset><legend>Restrictions</legend>${restr.map(([v, l], i) => `<label><input type="radio" name="jpR" value="${v}" ${i ? "" : "checked"}> ${l}</label>`).join("")}</fieldset>
+      <fieldset><legend>Options</legend><label><input type="radio" name="jpO" value="add" checked> Add to Existing Values</label><label><input type="radio" name="jpO" value="replace"> Replace Existing Values</label><label><input type="radio" name="jpO" value="delete"> Delete Existing Values</label></fieldset></div>
+    <div style="text-align:center"><button id="jpRst" class="reset" style="width:250px">Reset Form to Default Values</button></div></div>`,
+    sapOkCloseApply(async d => {
+      const pat = q(d, "#jpN").value, o = q(d, "[name=jpO]:checked").value, r = q(d, "[name=jpR]:checked").value, z = q(d, "[name=jpT]:checked").value === "z";
+      const num = id => +(q(d, id).value.trim() || 0);
+      const A = z ? 0 : num("#jpA"), B = z ? 0 : num("#jpB"), C = z ? 0 : num("#jpC"), D = z ? 0 : num("#jpD");
+      const z0 = z ? q(d, "#jpZ").value.trim() : "", w = z ? q(d, "#jpW").value.trim() : "", rz = z ? q(d, "#jpZR").value : "", add = z ? num("#jpAdd") : 0;
+      if (z && (z0 === "" || w === "" || !isFinite(+z0) || !isFinite(+w))) { formError(d, "Give the Z coordinate at zero pressure and the unit weight."); return false; }
+      const lim = (v, how) => how === "neg" ? Math.max(0, v) : how === "pos" ? Math.min(0, v) : v;
+      const value = n => { const p = pointXyz.get(n) || [0, 0, 0]; if (!z) return lim(A * p[0] + B * p[1] + C * p[2] + D, r);
+        let v = lim(+w * (+z0 - p[2]), rz === "Zero Positive Values" ? "pos" : rz === "Zero Negative Values" ? "neg" : "all") + add; return lim(v, r); };
+      const got = await sapObjRows(names); if (!got) return false;
+      return sapSetEach("assign_joint_data", names, n => {
+        const rows = ((got.by[n] || {})["Joint Pattern Assignments"] || []).map(x => ({...x})), i = rows.findIndex(x => x.Pattern === pat), old = i >= 0 ? +rows[i].Value || 0 : 0;
+        if (o === "delete") { if (i >= 0) rows.splice(i, 1); }
+        else { const v = +(value(n) + (o === "add" ? old : 0)).toPrecision(12), row = {Pattern: pat, Value: String(v)}; if (i >= 0) rows[i] = row; else rows.push(row); }
+        return {"Joint Pattern Assignments": rows};
+      });
+    }), {width: 580});
+  const line = (l, id, unit) => `<div style="display:grid;grid-template-columns:1fr 110px 40px;gap:6px;align-items:center;margin:4px 0"><span>${l}</span><input id="${id}" value="0"><span>${unit}</span></div>`;
+  const paint = () => {
+    const z = q(d, "[name=jpT]:checked").value === "z", box = q(d, "#jpBox");
+    box.innerHTML = z ? `<legend>Z Coordinate at Zero Pressure and Weight per Unit Volume</legend><table class="sapGrid" style="width:100%;border-collapse:collapse"><tr style="background:#b4d8e7;color:#1f3fbf"><th>Z Coordinate<br>${u.l}</th><th>Unit Weight<br>${u.f}/${u.l}³</th><th>Restriction</th></tr>
+        <tr><td><input id="jpZ" style="width:100%"></td><td><input id="jpW" style="width:100%"></td><td><select id="jpZR" style="width:100%">${opts(restr.map(x => x[1]), "Use All Values")}</select></td></tr></table>
+        <div style="display:grid;grid-template-columns:1fr 110px 50px;gap:6px;align-items:center;margin-top:12px"><span>Added Uniform Value per Unit Area</span><input id="jpAdd" value="0"><span>${u.f}/${u.l}²</span></div>`
+      : `<legend>Pattern Value = Ax + By + Cz + D</legend>${line("Constant A", "jpA", "1/" + u.l)}${line("Constant B", "jpB", "1/" + u.l)}${line("Constant C", "jpC", "1/" + u.l)}${line("Constant D", "jpD", "")}`;
+  };
+  d.querySelectorAll("[name=jpT]").forEach(r => r.onchange = paint);
+  q(d, "#jpRst").onclick = () => { q(d, "#jpN").value = "Default"; q(d, "[name=jpT][value=abc]").checked = true; q(d, "[name=jpR][value=all]").checked = true; q(d, "[name=jpO][value=add]").checked = true; paint(); };
+  paint();
+  return d;
+}
+// Assign > Assign to Group (Ctrl+Shift+G): the groups, Add to Group, Replace Group or Delete from Group, Define Groups...
+async function hmSapAssignGroups() {
+  const fr = hmSelected("f"), ar = hmSelected("a"), jt = [...selJ].filter(n => pointIdx.has(n));
+  if (!fr.length && !ar.length && !jt.length) return hmSay("Select the objects first.", true);
+  const sd = (await hmRun("structure_definitions", {}, true)).result || {}, groups = (sd.groups || []).map(g => g.name).filter(n => n !== "ALL");
+  const d = dialog("Assign to Groups", `${sapFormCss}<div class="sapF"><select id="gL" multiple size="16" style="width:100%;height:330px">${groups.map(g => `<option>${esc(g)}</option>`).join("")}</select>
+    <fieldset><legend>Options</legend><label><input type="radio" name="gO" value="add"> Add to Group</label><label><input type="radio" name="gO" value="replace" checked> Replace Group</label><label><input type="radio" name="gO" value="delete"> Delete from Group</label></fieldset>
+    <div style="text-align:center"><button id="gDef" class="reset" style="width:230px">Define Groups...</button></div></div>`,
+    sapOkCloseApply(async d => {
+      const picked = [...q(d, "#gL").selectedOptions].map(o => o.value), o = q(d, "[name=gO]:checked").value;
+      if (!picked.length) { formError(d, "Pick a group."); return false; }
+      for (const g of picked) {
+        let first = true;
+        for (const [objects, joints] of [[[...fr, ...ar], false], [jt, true]]) {
+          if (!objects.length) continue;
+          const j = await hmRun("assign_group_data", {group: g, objects, joints, remove: o === "delete", replace: o === "replace" && first}, true);
+          if (!j.ok) { hmSay(j.error, true); return false; }
+          first = false;
+        }
+      }
+      hmSay("Done. Edit > Undo steps back."); return true;
+    }), {width: 300});
+  q(d, "#gDef").onclick = () => modelAct("st:group");
+  return d;
+}
+// Assign > Clear Display of Assigns: the view stops showing assignments, as SAP2000 does.
+function hmSapClearAssignDisplay() {
+  for (const k of ["f", "a", "j"]) for (const it of asgItems[k] || []) opt[it[0]] = false;
+  for (const k of ["fAxes", "aAxes", "fReleases", "fHinges", "fOffsets", "pierNames", "spanNames", "pierAxes", "spanAxes", "jAxes", "dia"]) opt[k] = false;
+  geometryDirty = true; draw();
+}
+// Assign > Copy Assigns: the assignments of the one selected frame, area or joint; Paste Assigns puts them on the selection.
+async function hmSapCopyAssigns() {
+  const fr = hmSelected("f"), ar = hmSelected("a"), jt = [...selJ].filter(n => pointIdx.has(n)), all = [...fr.map(n => ["f", n]), ...ar.map(n => ["a", n]), ...jt.map(n => ["j", n])];
+  if (all.length !== 1) return hmSay("Select one frame, area or joint to copy its assignments from.", true);
+  const [kind, name] = all[0], pd = (await hmRun("property_definitions", {objects: [name]}, true)).result || {}, o = (pd.objects || [])[0];
+  if (!o) return hmSay("Its assignments could not be read.", true);
+  hm.copiedAssigns = {kind, from: name, o}; hmSay(`Copied the assignments of ${name}. Assign > Paste Assigns puts them on the selected ${kind === "f" ? "frames" : kind === "a" ? "areas" : "joints"}.`);
+}
+async function hmSapPasteAssigns() {
+  const c = hm.copiedAssigns; if (!c) return hmSay("Copy the assignments of an object first (Assign > Copy Assigns).", true);
+  const to = c.kind === "j" ? [...selJ].filter(n => pointIdx.has(n)) : hmSelected(c.kind), o = c.o;
+  if (!to.length) return hmSay(`Select the ${c.kind === "f" ? "frames" : c.kind === "a" ? "areas" : "joints"} to paste on first.`, true);
+  const tables = Object.fromEntries(Object.entries(o.tables || {}).map(([k, v]) => [k, v]));
+  let j;
+  if (c.kind === "f") {
+    if (o.section) { j = await hmRun("set_section", {frames: to, section: o.section}, true); if (!j.ok) return hmSay(j.error, true); }
+    j = await hmRun("assign_frame_data", {objects: to, release_i: o.release_i || [], release_j: o.release_j || [], partial_fixity: o.partial_fixity || {}, angle: o.angle || 0, cardinal: o.cardinal || 10,
+      offset_i: o.offset_i || 0, offset_j: o.offset_j || 0, rigid_zone: o.rigid_zone || 0, modifiers: o.modifiers || {}, spring: o.spring || "", hinges: o.hinges || [], tables}, true);
+  } else if (c.kind === "a") j = await hmRun("assign_shell_data", {objects: to, modifiers: o.modifiers || {}, spring: o.spring || "", tables}, true);
+  else j = await hmRun("assign_joint_data", {objects: to, restraint: String(o.restraint || "").split(/[\s,]+/).filter(Boolean), spring: o.spring || "", tables}, true);
+  sapDone(j);
+}
+Object.assign(hmSapAssignForms, {jPatterns: () => hmSapAssignJointPatterns(), group: () => hmSapAssignGroups(), clearDisplay: () => hmSapClearAssignDisplay(), copy: () => hmSapCopyAssigns(), paste: () => hmSapPasteAssigns()});
 
 // ---- Define: the items kept as rows of the program's own definition tables, rebar sizes and a section's rebar ----
 // label, table(s), the programs that have it (ETABS when left out), SAP2000's own name.
