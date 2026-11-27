@@ -1844,6 +1844,14 @@ Test("field test: the full test runs every part, closes its window, and leaves t
         Check(ownClosed.Count > 20 && ownClosed.All(s => !s.Detail.Contains("is not open") && !s.Detail.Contains("stopped answering")), "CSI ProMax's own features ran on the hidden scratch window: " + string.Join("; ", ownClosed.Where(s => !s.Ok).Take(3).Select(s => s.Name + ": " + s.Detail)));
         Check(helper is { Closed: true, Disposed: true }, "the hidden scratch window for them is closed and let go of");
 
+        // Ahmed 2026-11-27: reruns of what failed leave out the review pack's steps (--no-pack); everything else still runs.
+        {
+            var quick = FieldTest.Run(open, options with { At = at.AddMinutes(6), Viewer = false, NoPack = true, Folder = Path.Combine(root, "out-np"), WorkFolder = Path.Combine(root, "work-np") });
+            Check(quick.Steps.Any(s => s.Skipped && s.Name == "tool export_pack" && s.Detail.Contains("--no-pack")), "export_pack is left out and says why: " + string.Join("; ", quick.Steps.Where(s => s.Name.Contains("export_pack") || s.Detail.Contains("no-pack")).Select(s => $"{s.Name} [{(s.Skipped ? "skip" : s.Ok ? "ok" : "FAIL")}] {s.Detail}")));
+            Check(!quick.Steps.Any(s => s.Name.StartsWith("the Viewer opens", StringComparison.Ordinal) || (s.Name == "tool export_pack with no folder saves beside the model" && !s.Skipped)), "no pack step ran");
+            Check(quick.Steps.Any(s => s.Section == PanelFieldSteps.Section && s.Name == "every tool of the panel was run, or is listed as not tested" && s.Ok), "the rest of CSI ProMax's own features still ran");
+        }
+
         // And the open model's checks themselves, with no program open on the PC: run on a hidden scratch window too.
         {
             var standCtx = new FieldContext(CsiProgram.Etabs, Path.Combine(root, "stand"), System.Reflection.DispatchProxy.Create<ICsiLink, CsiProMax.Tests.DeadLink>());

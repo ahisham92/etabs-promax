@@ -21,6 +21,10 @@ public static class AssignTables
         ["Frame Assignments - Frame Auto Mesh Options"] = ("frame", [("AutoMesh", "Auto Mesh"), ("AtIntJoints", "At Intermediate Joints"), ("AtIntersect", "At Intersections"), ("MinNumber", "Min Number?"), ("NumSegments", "Number Segments"), ("MaxLength", "Max Length?"), ("SegLength", "Segment Length")]),
         ["Frame Assignments - Frame Floor Meshing Option"] = ("frame", [("MeshOption", "Offset Option")]),
         ["Frame Assignments - Material Overwrites"] = ("frame", [("Material", "Material")]),
+        // Assign > Frame > Insertion Point beyond the cardinal point (the .e2k's CARDINALPT): mirror, joint offsets, stiffness transform.
+        [Insertion] = ("frame", [("Mirror2", "Mirror2"), ("Mirror3", "Mirror3"), ("OffsetCSys", "Offset CSys"), ("XI", "XI"), ("YI", "YI"), ("ZI", "ZI"), ("XJ", "XJ"), ("YJ", "YJ"), ("ZJ", "ZJ"), ("NoTransform", "No Transform Stiffness")]),
+        // Assign > Frame > Releases/Partial Fixity: the springs of the partial fixity at a released end (ETABS 23.2's table).
+        [PartialFixity] = ("frame", PropertyDefs.Releases.SelectMany(r => new[] { (r + "ISpring", r + "I Spring"), (r + "JSpring", r + "J Spring") }).ToArray()),
         ["Frame Assignments - Moment Frame Beam Connection Type"] = ("frame", [("Type", "Type"), ("ConnLoc", "Connection Location"), ("SidePlOpt", "Sideplate Option"), ("RBSOption", "RBS Option"), ("x1", "x1"), ("x2", "x2"), ("x3", "x3"), ("a", "a"), ("b", "b"), ("c", "c")]),
         ["Frame Assignments - Output Stations"] = ("frame", [("StationOpt", "Station Option"), ("MaxSpacing", "Max Spacing"), ("MinStations", "Min Stations")]),
         ["Frame Assignments - Rebar Ratio For Creep Analysis"] = ("frame", [("RebarOpt", "Rebar Option"), ("UserRatio", "User Ratio")]),
@@ -47,6 +51,9 @@ public static class AssignTables
             ("PZLink", "Link Property"), ("PZConnect", "Connectivity"), ("AxesFrom", "Local Axes From"), ("PZAxesAngle", "Local Axis Angle")]),
         ["Joint Assignments - Panel Zone"] = ("joint", [("PanelZone", "Panel Zone Assignment"), ("GenPanelZone", "Generated PanelZone")]),
     };
+
+    public const string PartialFixity = "Frame Assignments - Releases and Partial Fixity";
+    public const string Insertion = "Frame Assignments - Insertion Point";
 
     /// <summary>The tables with a row per edge or corner of the object, not one row.</summary>
     public static readonly string[] ManyRows = ["Area Edge Release Assignments", "Area Assignments - Edge Releases", "Area Assignments - Thickness Overwrites", "Area Assignments - Slab Rib Locations"];

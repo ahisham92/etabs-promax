@@ -50,6 +50,12 @@ public sealed class AgentSettings
     public bool AutoUpdate { get; set; } = true;
 
     /// <summary>
+    /// CSI ProMax Engine's Run: leave the CSI program open, shown, with the analysed model after the run, instead of
+    /// closing it to free its licence. On for now, until runs are settled (Ahmed 2026-11-27); the next run closes it first.
+    /// </summary>
+    public bool KeepProgramOpenAfterRun { get; set; } = true;
+
+    /// <summary>
     /// Optional firm template or seed (.rvt/.rte) holding a legend. create_legend copies a legend from it when the model
     /// has none (ETABS's API can't create a legend from nothing). Empty: not set.
     /// </summary>

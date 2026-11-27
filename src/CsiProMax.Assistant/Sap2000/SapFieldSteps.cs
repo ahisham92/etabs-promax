@@ -295,6 +295,9 @@ public static class SapFieldSteps
         ctx.Tool("compare_snapshots", """{"from":"cpm-before-analysis"}""");
         Pack.Built? packBuilt = null;
         var took = TimeSpan.Zero;
+        // Left out of a rerun of what failed, as in ETABS (Ahmed 2026-11-27: what he says of ETABS holds for all three).
+        if (ctx.NoPack) ctx.LeftOutOfRerun("the review pack of the scratch model is written");
+        else
         ctx.Step("the review pack of the scratch model is written", () =>
         {
             var watch = System.Diagnostics.Stopwatch.StartNew();

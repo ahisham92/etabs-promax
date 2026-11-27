@@ -41,7 +41,9 @@ public static class S2kWriter
         var length = Length(m.Units.Length);
 
         Add(tables, "PROGRAM CONTROL", Row(("ProgramName", "SAP2000"), ("Version", ProgramVersion), ("CurrUnits", $"{force}, {length}, {(m.Units.Temperature.StartsWith('F') ? "F" : "C")}")));
-        Add(tables, "ACTIVE DEGREES OF FREEDOM", Row(("UX", "Yes"), ("UY", "Yes"), ("UZ", "Yes"), ("RX", "Yes"), ("RY", "Yes"), ("RZ", "Yes")));
+        // Analyze > Set Active Degrees of Freedom (the form's row; each one on when not set).
+        var activeDof = m.DefinitionTables?.GetValueOrDefault("Active Degrees of Freedom")?.FirstOrDefault();
+        Add(tables, "ACTIVE DEGREES OF FREEDOM", new[] { "UX", "UY", "UZ", "RX", "RY", "RZ" }.Select(dofKey => (dofKey, activeDof?.GetValueOrDefault(dofKey) is { Length: > 0 } dofOn ? dofOn : "Yes")).ToList());
         Add(tables, "COORDINATE SYSTEMS", Row(("Name", "GLOBAL"), ("Type", "Cartesian"), ("X", "0"), ("Y", "0"), ("Z", "0"), ("AboutZ", "0"), ("AboutY", "0"), ("AboutX", "0")));
 
         // Grids: the plan grids, and a Z grid line at each story level so the levels can still be found in SAP2000.
@@ -169,6 +171,7 @@ public static class S2kWriter
         // What Assign > Frame, Shell and Joint set beyond sections: releases, local axes, insertion points, end offsets,
         // modifiers and springs.
         var releases = new List<IReadOnlyList<(string, string)>>();
+        var partial = new List<IReadOnlyList<(string, string)>>();
         var axes = new List<IReadOnlyList<(string, string)>>();
         var insertion = new List<IReadOnlyList<(string, string)>>();
         var offsets = new List<IReadOnlyList<(string, string)>>();
@@ -199,10 +202,20 @@ public static class S2kWriter
             var (ri, rj) = PropertyDefs.ReleasesOf(x);
             if (ri.Count + rj.Count > 0)
                 releases.Add(Row(("Frame", name), ("PI", YesNo(ri.Contains("P"))), ("V2I", YesNo(ri.Contains("V2"))), ("V3I", YesNo(ri.Contains("V3"))), ("TI", YesNo(ri.Contains("T"))), ("M2I", YesNo(ri.Contains("M2"))), ("M3I", YesNo(ri.Contains("M3"))),
-                    ("PJ", YesNo(rj.Contains("P"))), ("V2J", YesNo(rj.Contains("V2"))), ("V3J", YesNo(rj.Contains("V3"))), ("TJ", YesNo(rj.Contains("T"))), ("M2J", YesNo(rj.Contains("M2"))), ("M3J", YesNo(rj.Contains("M3"))), ("PartialFix", "No")));
+                    ("PJ", YesNo(rj.Contains("P"))), ("V2J", YesNo(rj.Contains("V2"))), ("V3J", YesNo(rj.Contains("V3"))), ("TJ", YesNo(rj.Contains("T"))), ("M2J", YesNo(rj.Contains("M2"))), ("M3J", YesNo(rj.Contains("M3"))), ("PartialFix", YesNo(PropertyDefs.PartialFixity(x).Count > 0))));
+            // Partial fixity springs, as SAP2000's own table (0 where the end has none).
+            if (ri.Count + rj.Count > 0 && PropertyDefs.PartialFixity(x) is { Count: > 0 } pf)
+                partial.Add(new[] { ("Frame", name) }.Concat(new[] { "I", "J" }.SelectMany(pfEnd => PropertyDefs.Releases.Select(pfDof => (pfDof + pfEnd, N(pf.GetValueOrDefault(pfDof + pfEnd)))))).ToList());
             if (PropertyDefs.Value(x.Extra, "ANG") is { } ang) axes.Add(Row(("Frame", name), ("Angle", ang), ("AdvanceAxes", "No")));
-            if (PropertyDefs.Value(x.Extra, "CARDINALPT") is { } cp && cp != "10")
-                insertion.Add(Row(("Frame", name), ("CardinalPt", Cardinal(cp)), ("CoordSys", "Local"), ("JtOffsetXI", "0"), ("JtOffsetYI", "0"), ("JtOffsetZI", "0"), ("JtOffsetXJ", "0"), ("JtOffsetYJ", "0"), ("JtOffsetZJ", "0"), ("Mirror2", "No"), ("Mirror3", "No"), ("Transform", "Yes")));
+            var ip = AssignTables.Row(x, AssignTables.Insertion);
+            var cpt = PropertyDefs.Value(x.Extra, "CARDINALPT") ?? "10";
+            if (cpt != "10" || ip.Count > 0)
+            {
+                string O(string ipKey) => ip.GetValueOrDefault(ipKey) is { Length: > 0 } ipValue ? ipValue : "0";
+                insertion.Add(Row(("Frame", name), ("CardinalPt", Cardinal(cpt)), ("CoordSys", (ip.GetValueOrDefault("OffsetCSys") ?? "Local").Equals("Global", StringComparison.OrdinalIgnoreCase) ? "GLOBAL" : "Local"),
+                    ("JtOffsetXI", O("XI")), ("JtOffsetYI", O("YI")), ("JtOffsetZI", O("ZI")), ("JtOffsetXJ", O("XJ")), ("JtOffsetYJ", O("YJ")), ("JtOffsetZJ", O("ZJ")),
+                    ("Mirror2", ip.GetValueOrDefault("Mirror2") ?? "No"), ("Mirror3", ip.GetValueOrDefault("Mirror3") ?? "No"), ("Transform", (ip.GetValueOrDefault("NoTransform") ?? "No").Equals("Yes", StringComparison.OrdinalIgnoreCase) ? "No" : "Yes")));
+            }
             var oi = PropertyDefs.Value(x.Extra, "LENGTHOFFI"); var oj = PropertyDefs.Value(x.Extra, "LENGTHOFFJ"); var rz = PropertyDefs.Value(x.Extra, "RIGIDZONE");
             if (oi is not null || oj is not null || rz is not null)
                 offsets.Add(Row(("Frame", name), ("LengthType", "User Defined"), ("Offset1", oi ?? "0"), ("Offset2", oj ?? "0"), ("RZ", rz ?? "0"), ("FixedRZ", "No")));
@@ -318,6 +331,7 @@ public static class S2kWriter
         Add(tables, "JOINT RESTRAINT ASSIGNMENTS", restraints);
         Add(tables, "JOINT SPRING ASSIGNMENTS 1 - UNCOUPLED", springs);
         Add(tables, "FRAME RELEASE ASSIGNMENTS 1 - GENERAL", releases);
+        Add(tables, "FRAME RELEASE ASSIGNMENTS 2 - PARTIAL FIXITY", partial);
         Add(tables, "FRAME LOCAL AXES ASSIGNMENTS 1 - TYPICAL", axes);
         Add(tables, "FRAME INSERTION POINT ASSIGNMENTS", insertion);
         Add(tables, "FRAME OFFSET ALONG LENGTH ASSIGNMENTS", offsets);
@@ -506,6 +520,9 @@ public static class S2kWriter
         // SAP2000's own hinge definitions, kept as its table rows.
         foreach (var (t, rows) in (m.DefinitionTables ?? []).Where(x => DefineTables.IsSap(x.Key)).OrderBy(x => x.Key, StringComparer.Ordinal))
             Add(tables, t.ToUpperInvariant(), rows.Select(r => (IReadOnlyList<(string, string)>)DefineTables.SapHinges[t].Where(r.ContainsKey).Select(f => (f, r[f])).ToList()));
+        // The preference and analysis option forms (ProgramForms), as SAP2000's own tables.
+        foreach (var (t, rows) in (m.DefinitionTables ?? []).Where(x => ProgramForms.HasForm(ProgramOptions.Sap2000, x.Key) && !x.Key.Equals("Active Degrees of Freedom", StringComparison.OrdinalIgnoreCase)).OrderBy(x => x.Key, StringComparer.Ordinal))
+            Add(tables, t.ToUpperInvariant(), rows.Take(1).Select(r => (IReadOnlyList<(string, string)>)ProgramForms.Fields(ProgramOptions.Sap2000, t).Where(f => r.ContainsKey(f.Key)).Select(f => (f.Key, r[f.Key])).ToList()));
         KeptTables.WriteInto(m, "sap2000", tables);
 
         var at = SavedAt ?? DateTime.Now;

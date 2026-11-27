@@ -36,7 +36,7 @@ try {
   Time "open model" { $m.File.OpenFile($copy) }
   Time "run analysis" { $m.Analyze.RunAnalysis() }
   [string[]]$cases = $null; $n = 0
-  $m.LoadCases.GetNameList([ref]$n, [ref]$cases, [ETABSv1.eLoadCaseType]0) | Out-Null
+  $m.LoadCases.GetNameList([ref]$n, [ref]$cases, [Enum]::ToObject([ETABSv1.eLoadCaseType], 0)) | Out-Null
   Time "SetLoadCasesSelectedForDisplay ($n)" { $m.DatabaseTables.SetLoadCasesSelectedForDisplay([ref]$cases) }
   1..5 | ForEach-Object { Time "LoadPatterns.GetNameList (baseline call)" { $k = 0; [string[]]$x = $null; $m.LoadPatterns.GetNameList([ref]$k, [ref]$x) } }
   Time "GetAllTables" { $k=0; [string[]]$a=$null; [string[]]$b=$null; [int[]]$c=$null; [bool[]]$d=$null; $m.DatabaseTables.GetAllTables([ref]$k,[ref]$a,[ref]$b,[ref]$c,[ref]$d) }

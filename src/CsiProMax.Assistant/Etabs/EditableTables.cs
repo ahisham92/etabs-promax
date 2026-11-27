@@ -123,7 +123,8 @@ public static class EditableTables
             }
 
             // A key of several fields ("Story|Label", an object's assignment rows) matches when all of them do.
-            var keyFields = keyField.Split('|');
+            // No key field (a form's one-row table, design preferences): the given row is merged into the row there.
+            var keyFields = keyField.Length == 0 ? [] : keyField.Split('|');
             var ats = keyFields.Select(k => Array.FindIndex(fields, f => string.Equals(f, k, StringComparison.OrdinalIgnoreCase))).ToArray();
             var at = ats.All(i => i >= 0) ? 0 : -1;
             string KeyOfRow(string[] row) => string.Join("\u0001", ats.Select(i => row[i]));
