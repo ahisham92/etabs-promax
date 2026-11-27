@@ -3206,7 +3206,7 @@ function wire(p) {
     if (!d || !P) return;
     if (d.act === "draw") { if (!d.moved) drawClick(p, x, y, false); return; }
     if (d.act === "wppick") { if (!d.moved) wpPickClick(p, x, y); return; }
-    if (d.act === "measure") { if (!d.moved && d.button === 0) etvMeasureClick(p, x, y, false); else if (d.button === 2) etv.measure = null; return; }
+    if (d.act === "measure") { if (!d.moved && d.button === 0) etvMeasureClick(p, x, y, false); else if (d.button === 2) { if (etv.measure && etv.measure.cancel) etv.measure.cancel(); etv.measure = null; } return; }
     if (d.act === "walk") return;
     if (d.act === "iline") { p.iline = null; if (d.moved) { const n = lineSelect(p, [d.x0, d.y0], [x, y]); $("hint").textContent = n + " objects crossed by the line selected."; } else draw(); return; }
     if (!d.moved && d.button === 2 && tool.startsWith("d:") && hm.chain.length) { hm.chain = []; draw(); return; }
@@ -3666,6 +3666,8 @@ function ticked(a) {
   if (a === "m:etn:alive") return etn.alive;
   if (a.startsWith("eto:")) return etoTicked(a);
   if (a === "m:etn:snapOnly") return !!hm.snapOnly;
+  if (a === "m:ete:glue") return !!ete.glue;
+  if (a === "m:ete:lockGrid") return !!ete.lockGrid;
   return {bg: bg === "black", tables: !$("dock").hidden, plot: !!p && p.mode === "plot", persp: !!p && !!p.cam.persp && p.mode === "3d", explorer: opt.explorer, side: opt.side, anim: res.anim}[a] || false;
 }
 function menuHtml(list) {
@@ -6250,6 +6252,7 @@ function modelerMenus(m) {
   if (etnOn()) m.Detailing = etqDetailingMenu();
   if (etnOn()) m.Select = etsSelectMenu();
   if (etnOn()) m.View = etvViewMenu();
+  if (etnOn()) m.Edit = eteEditMenu();
   // ETABS 23.2's own Assign menu, item for item (hmEtabsAssignMenu); SAP2000's and SAFE's below.
   if (program === "etabs") m.Assign = hmEtabsAssignMenu(); else
   // SAP2000's Assign menu has no top-level section or restraint items: they are in its Joint, Frame and Area submenus.
@@ -8198,6 +8201,7 @@ function etvPoint(p, x, y) {
   return p.M ? p.M.back(x, y) : null;
 }
 function etvMeasureClick(p, x, y, dbl) {
+  if (tool === "measure:pick" && etv.measure && etv.measure.kind === "pick") { const pk = etv.measure, at = etvPoint(p, x, y); if (!at) return; pk.pts.push(at); if (pk.pts.length >= pk.n) { etv.measure = null; pk.done(pk.pts); } else hmSay("Click the second point on the model."); return; }
   const kind = tool.slice(8), m = etv.measure && etv.measure.kind === kind ? etv.measure : (etv.measure = {kind, pts: []}), q0 = etvPoint(p, x, y); if (!q0) return;
   if (!dbl) m.pts.push(q0); const U = lu() ? " " + lu() : "", f = v => num(L(v));
   if (kind === "line" && m.pts.length === 2) { const [a, b] = m.pts, dv = sub(b, a); hmSay(`Measure Line: length ${f(len(dv))}${U}  (dX ${f(dv[0])}, dY ${f(dv[1])}, dZ ${f(dv[2])})`); etv.measure = null; return; }
@@ -8225,6 +8229,502 @@ document.addEventListener("keydown", e => {
     : !c && s ? {F2: "zin", F3: "zout"}[k] : !c && !s && k === "F10" ? "t:pan" : null;
   if (!a) return; e.preventDefault(); e.stopPropagation(); act(a);
 }, true);
+// ---- ETABS Edit menu, read from the 23.2 pictures (field/reference-forms/etabs/Edit) ----
+var ete = {clip: null, glue: false, lockGrid: false, repSkip: null};
+const eteRepItems = {
+  Joints: {Assigns: ["Restraints", "Springs", "Diaphragms", "Panel Zones", "Additional Mass", "Floor Meshing Options"], Loads: ["Force", "Ground Displacement", "Temperature"]},
+  Frames: {Assigns: ["Section Properties", "Property Modifiers", "Releases and Partial Fixity", "End Length Offsets", "Insertion Point", "Local Axes", "OutputStations", "Tension and Compression Limits", "Hinges", "Line Springs", "Additional Mass", "Pier Labels", "Spandrel Labels", "Automatic Frame Subdivide", "Floor Meshing Options", "Moment Frame Beam Types", "Column Splice Overwrites", "Material Overwrites"], Loads: ["Point", "Distributed", "Temperature", "Open Structure Wind"], "Design Overwrites": ["Design Procedure", "Steel Frame", "Concrete Frame", "Composite Beam", "Composite Column", "Steel Joist", "Steel Connection"]},
+  Shells: {Assigns: ["Section Properties", "Stiffness Modifiers", "Diaphragms", "Local Axes", "Area Springs", "Additional Mass", "Pier Labels", "Spandrel Labels", "Floor Auto Mesh Options", "Wall Auto Mesh Options", "Wall Openings", "Auto Edge Constraints", "Material Overwrites", "Edge Releases"], Loads: ["Uniform Load Sets", "Uniform", "Non-Uniform", "Temperature", "Wind Pressure Coefficients"]},
+  Links: {Assigns: ["Properties", "Local Axes"]},
+};
+// Off by default, as the pictures show: Joints > Diaphragms and Shells > Diaphragms.
+const eteRepDefaultOff = ["Joints:Diaphragms", "Shells:Diaphragms"];
+function eteSkip() { if (!ete.repSkip) { try { ete.repSkip = JSON.parse(localStorage.getItem("cpm-etabs-replicate-assigns") || "null"); } catch {} } return ete.repSkip || eteRepDefaultOff; }
+function eteRepCount(skip) { let all = 0; for (const k of Object.keys(eteRepItems)) for (const g of Object.values(eteRepItems[k])) all += g.length; return {all, on: all - skip.length}; }
+function eteObjects() { return hmEditObjects(); }
+function eteJoints() {
+  // The joints an edit works on: the selected joints, and the ends and corners of the selected objects.
+  const out = new Set([...selJ]);
+  for (const id of sel) { const o = objOf(id); if (!o) continue; for (const q0 of o.type === "f" ? [o.a, o.b] : o.pts || []) { const n = pointAt.get(key(q0[0], q0[1], q0[2])); if (n !== undefined) out.add(String(n)); } }
+  return [...out];
+}
+function eteEditMenu() {
+  const s = hm.state || {}, objs = eteObjects().length, any = objs || selJ.size, fr = hmSelected("f"), ar = hmSelected("a");
+  const beams = fr.filter(n => { const o = [...sel].map(objOf).find(x => x && x.name === n); return o && o.kind === "beam"; });
+  const walls = ar.filter(n => { const o = [...sel].map(objOf).find(x => x && x.name === n); return o && o.kind === "wall"; });
+  return [[s.undo ? "Undo " + s.undo : "Undo", "m:undo", "Ctrl+Z", !s.undo], [s.redo ? "Redo " + s.redo : "Redo", "m:redo", "Ctrl+Y", !s.redo], 0,
+    ["Cut", "m:ete:cut", "Ctrl+X", !objs], ["Copy", "m:ete:copy", "Ctrl+C", !objs], ["Paste...", "m:ete:paste", "Ctrl+V"], ["Delete", "m:delete", "Delete", !objs], 0,
+    ["Add to Model from Template", [["2D Structure...", "m:ete:tpl2d"], ["3D Structure...", "m:ete:tpl3d"]]], 0,
+    ["Edit Stories and Grid Systems...", "m:storyGrid"], ["Add Grid Lines at Selected Joints...", "m:ete:gridAtJoints"], ["Grid Options", [["Glue Joints to Grids", "m:ete:glue"], ["Lock Onscreen Grid System Edit", "m:ete:lockGrid"]]], 0,
+    ["Interactive Database...", "m:ete:idb", "Ctrl+E"], 0,
+    ["Replicate...", "m:ete:replicate", "Ctrl+R"], ["Extrude", [["Extrude Joints to Frames...", "m:ete:extJ"], ["Extrude Frames to Shells...", "m:ete:extF"]]], 0,
+    ["Merge Joints...", "m:ete:merge"], ["Align Joints/Frames/Edges...", "m:ete:align", "Shift+Ctrl+M"], ["Move Joints/Frames/Shells...", "m:ete:move", "Ctrl+M"], 0,
+    ["Edit Frames", [["Divide Frames...", "m:ete:divide"], ["Join Frames", "m:ete:join", "", !fr.length], ["Convert Beams to Slab Areas", "m:ete:beamsToSlab", "", true], 0, ["Reverse Frame Connectivity", "m:ete:reverse", "", !fr.length], 0, ["Modify/Show Frame Type...", "m:ete:frameType", "", !fr.length]]],
+    ["Edit Shells", [["Divide Shells...", "m:ete:divShells"], ["Merge Shells", "m:ete:mergeShells", "", !ar.length], ["Expand/Shrink Shells...", "m:ete:expand"], 0, ["Split Shell Edges", "m:ete:splitEdges", "", !ar.length], ["Remove Joints from Shells", "m:ete:removeJoints", "", !(ar.length && selJ.size)], 0, ["Chamfer Slab Corners...", "m:ete:chamfer"], 0,
+      ["Explode User Mesh to Shells", "m:ete:explode", "", !ar.length], ["Merge Shells to Create User Mesh", "m:ete:userMesh", "", !ar.length], ["Remove User Mesh From Shell Object", "m:ete:removeMesh", "", !ar.length], ["Convert Current Mesh to User Mesh", "m:ete:convertMesh", "", true], 0,
+      ["Reverse Wall Local 3 Axis", "m:ete:reverseWall", "", !walls.length], ["Divide Walls for Openings", "m:ete:wallOpenings", "", !walls.length], 0, ["Modify/Show Slab Edge Type...", "m:ete:edgeType", "", !ar.length], ["Modify/Show Wall Curve Type...", "m:ete:wallCurve", "", !walls.length]]],
+    ["Edit Links", [["Divide Links...", "m:ete:divLinks", "", true], ["Reverse Link Connectivity", "m:ete:revLinks", "", true]], "", true], 0,
+    ["Auto Relabel All", "m:ete:relabel"]];
+}
+function etePick(d, n, done) {
+  // Pick One/Two Points on Model: the form steps aside, the clicks snap as drawing does, and the form comes back filled in.
+  d.style.display = "none"; const veil = document.querySelector(".veil:last-of-type"); if (veil) veil.style.display = "none";
+  const back = () => { d.style.display = ""; if (veil) veil.style.display = ""; act("t:select"); };
+  act("t:measure:pick"); etv.measure = {kind: "pick", pts: [], n, cancel: back, done: pts => { back(); done(pts); }};
+  hmSay(n === 1 ? "Click the point on the model." : "Click the first point on the model, then the second.");
+}
+async function eteApply(d, tool, args, close, after) {
+  if (d) formError(d, "");
+  const j = await hmRun(tool, args, true);
+  if (!j.ok) { if (d) formError(d, j.error); else hmSay(j.error, true); return false; }
+  hmSay((hm.state && hm.state.undo ? "Done: " + hm.state.undo : "Done") + ". Edit > Undo steps back.");
+  if (after) after(j); if (close && d) d.close(); return true;
+}
+function eteSelCenter() {
+  const xs = [], ys = []; for (const id of sel) { const o = objOf(id); if (!o) continue; for (const q0 of o.type === "f" ? [o.a, o.b] : o.pts || []) { xs.push(q0[0]); ys.push(q0[1]); } }
+  return xs.length ? [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2] : [0, 0];
+}
+function eteReplicate() {
+  const objects = eteObjects(); if (!objects.length) return hmSay("Select the objects to replicate first.", true);
+  const U = esc(hmU().l), names = stories.slice().reverse().map(s => s.name), p = panes[active], cur = p && p.mode === "plan" ? p.story : topStory();
+  const box = (id, v) => `<span><input id="${id}" value="${v}" style="width:90px"> ${U}</span>`, tiny = +(({in: 1, ft: 1 / 12, mm: 25.4, cm: 2.54, m: 0.0254})[hmU().l] ?? 0.0254).toPrecision(4);
+  const d = dialog("Replicate", `<div class="itabs"><button class="on" data-page="linear">Linear</button><button data-page="radial">Radial</button><button data-page="mirror">Mirror</button><button data-page="story">Story</button></div>
+    <div class="ipage on" data-page="linear"><fieldset><legend>Increment Data</legend><div class="g2"><span>dx</span>${box("rpX", 0)}<span>dy</span>${box("rpY", 0)}<span></span><span></span><span>Number</span><input id="rpN" value="1" style="width:90px"></div><div style="text-align:center;margin-top:8px"><button type="button" data-pk="linear">Pick Two Points on Model</button></div></fieldset></div>
+    <div class="ipage" data-page="radial"><fieldset><legend>Rotate About Point</legend><label><input type="radio" name="rpC" value="center" checked> Center</label> <label><input type="radio" name="rpC" value="specify"> Specify</label><div class="g2"><span>X</span>${box("rpCX", 0)}<span>Y</span>${box("rpCY", 0)}</div><div style="text-align:center"><button type="button" data-pk="radial" disabled>Pick One Point on Model</button></div></fieldset>
+      <fieldset><legend>Increment Data</legend><div class="g2"><span>Angle</span><span><input id="rpA" value="90" style="width:90px"> deg</span><span>Number</span><input id="rpRN" value="1" style="width:90px"></div></fieldset><label style="display:block;margin:6px 0"><input type="checkbox" id="rpRot" checked> Rotate Local Axes, where Applicable</label></div>
+    <div class="ipage" data-page="mirror"><fieldset><legend>Mirror About Line 1-2</legend><div class="g2"><span>X1</span>${box("rpX1", 0)}<span>Y1</span>${box("rpY1", 0)}<span>X2</span>${box("rpX2", 0)}<span>Y2</span>${box("rpY2", tiny)}</div><div style="text-align:center;margin-top:8px"><button type="button" data-pk="mirror">Pick Two Points on Model</button></div></fieldset></div>
+    <div class="ipage" data-page="story"><fieldset><legend>Replicate on Stories</legend><select id="rpS" multiple size="12" style="width:100%;height:auto">${names.map(n => `<option ${n === cur ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></fieldset></div>
+    <label style="display:block;margin:8px 0"><input type="checkbox" id="rpDel"> Delete Original Objects</label>
+    <div style="text-align:center"><button type="button" id="rpAs" style="width:100%">Modify/Show Replicate Options for Assigns...</button><div id="rpCnt" style="margin-top:4px"></div></div>`,
+    [["OK", d => go(d, true)], ["Close"], ["Apply", d => { go(d, false); return false; }, true]], {width: 300});
+  const count = () => { const c = eteRepCount(eteSkip()); q(d, "#rpCnt").textContent = `${c.on} of ${c.all} options selected`; }; count();
+  const spec = () => { const on = q(d, "[name=rpC]:checked").value === "specify"; q(d, "#rpCX").disabled = q(d, "#rpCY").disabled = !on; q(d, '[data-pk="radial"]').disabled = !on; }; spec();
+  d.querySelectorAll("[name=rpC]").forEach(r => r.onchange = spec);
+  q(d, "#rpAs").onclick = () => eteRepAssigns(count);
+  d.querySelectorAll("[data-pk]").forEach(b => b.onclick = () => {
+    const k = b.dataset.pk;
+    etePick(d, k === "radial" ? 1 : 2, pts => {
+      if (k === "linear") { q(d, "#rpX").value = num(pts[1][0] - pts[0][0]); q(d, "#rpY").value = num(pts[1][1] - pts[0][1]); }
+      else if (k === "radial") { q(d, "#rpCX").value = num(pts[0][0]); q(d, "#rpCY").value = num(pts[0][1]); }
+      else { q(d, "#rpX1").value = num(pts[0][0]); q(d, "#rpY1").value = num(pts[0][1]); q(d, "#rpX2").value = num(pts[1][0]); q(d, "#rpY2").value = num(pts[1][1]); }
+    });
+  });
+  async function go(d, close) {
+    const mode = q(d, ".itabs button.on").dataset.page, n = id => fnum(d, id), args = {objects: eteObjects().length ? eteObjects() : objects, mode, delete_original: q(d, "#rpDel").checked, skip: eteSkip().filter(x => !x.startsWith("Joints:") && !x.startsWith("Links:"))};
+    if (mode === "linear") { Object.assign(args, {dx: n("#rpX"), dy: n("#rpY"), number: n("#rpN")}); if (![args.dx, args.dy, args.number].every(isFinite)) { formError(d, "Enter numbers for dx, dy and Number."); return false; } }
+    if (mode === "radial") { const c = q(d, "[name=rpC]:checked").value === "center" ? eteSelCenter() : [n("#rpCX"), n("#rpCY")]; Object.assign(args, {cx: c[0], cy: c[1], angle: n("#rpA"), number: n("#rpRN")}); if (![args.cx, args.cy, args.angle, args.number].every(isFinite)) { formError(d, "Enter numbers for the point, Angle and Number."); return false; } }
+    if (mode === "mirror") { Object.assign(args, {x1: n("#rpX1"), y1: n("#rpY1"), x2: n("#rpX2"), y2: n("#rpY2")}); if (![args.x1, args.y1, args.x2, args.y2].every(isFinite)) { formError(d, "Enter numbers for the two points of the line."); return false; } }
+    if (mode === "story") { args.stories = [...q(d, "#rpS").selectedOptions].map(o => o.value); if (!args.stories.length) { formError(d, "Select the stories to replicate on."); return false; } }
+    if (args.number !== undefined) args.number = Math.round(args.number);
+    await eteApply(d, "replicate_objects", args, close, () => { if (args.delete_original) { sel.clear(); selChanged(); } });
+    return false;
+  }
+}
+function eteRepAssigns(after) {
+  // Modify/Show Replicate Options for Assigns: a tree per object type; the parent boxes follow their children.
+  let skip = eteSkip().slice();
+  const tab = k => { const groups = eteRepItems[k], all = Object.values(groups).flat().length, on = all - skip.filter(x => x.startsWith(k + ":")).length; return `${k} (${on} of ${all})`; };
+  const tree = k => `<div class="ereTree" style="border:1px solid var(--line);background:var(--field,#fff);height:260px;overflow:auto;padding:4px 6px">
+      <label style="display:block"><input type="checkbox" data-grp="${k}"> <b data-cnt="${k}">${k}</b></label>
+      ${Object.entries(eteRepItems[k]).map(([g, items]) => `<div style="margin-left:18px"><label style="display:block"><input type="checkbox" data-grp="${k}|${g}"> <span data-cnt="${k}|${g}">${esc(g)}</span></label>
+        ${items.map(it => `<label style="display:block;margin-left:22px"><input type="checkbox" data-it="${esc(k + ":" + it)}" data-g="${esc(k + "|" + g)}" ${skip.includes(k + ":" + it) ? "" : "checked"}> ${esc(it)}</label>`).join("")}</div>`).join("")}</div>`;
+  const d = dialog("Replicate Assigns", `<fieldset><legend>Assign Options</legend><div class="itabs">${Object.keys(eteRepItems).map((k, i) => `<button data-page="${k}" class="${i ? "" : "on"}" data-tab="${k}">${tab(k)}</button>`).join("")}</div>
+    ${Object.keys(eteRepItems).map((k, i) => `<div class="ipage ${i ? "" : "on"}" data-page="${k}">${tree(k)}</div>`).join("")}</fieldset>
+    <div style="text-align:center;margin-top:8px"><button type="button" id="raDef">Set To Default Values</button></div>`,
+    [["OK", () => { ete.repSkip = skip; try { localStorage.setItem("cpm-etabs-replicate-assigns", JSON.stringify(skip)); } catch {} if (after) after(); }], ["Cancel"]], {width: 300});
+  const sync = () => {
+    skip = [...d.querySelectorAll("[data-it]")].filter(c => !c.checked).map(c => c.dataset.it);
+    d.querySelectorAll("[data-grp]").forEach(c => { const g = c.dataset.grp, kids = [...d.querySelectorAll("[data-it]")].filter(x => g.includes("|") ? x.dataset.g === g : x.dataset.it.startsWith(g + ":")), on = kids.filter(x => x.checked).length; c.checked = on === kids.length; c.indeterminate = on > 0 && on < kids.length; const lab = d.querySelector(`[data-cnt="${CSS.escape(g)}"]`); if (lab) lab.textContent = `${g.split("|").pop()}  (${on} of ${kids.length} items selected)`; });
+    d.querySelectorAll("[data-tab]").forEach(b => b.textContent = tab(b.dataset.tab));
+  };
+  d.querySelectorAll("[data-it]").forEach(c => c.onchange = sync);
+  d.querySelectorAll("[data-grp]").forEach(c => c.onchange = () => { const g = c.dataset.grp; d.querySelectorAll("[data-it]").forEach(x => { if (g.includes("|") ? x.dataset.g === g : x.dataset.it.startsWith(g + ":")) x.checked = c.checked; }); sync(); });
+  q(d, "#raDef").onclick = () => { d.querySelectorAll("[data-it]").forEach(x => x.checked = !eteRepDefaultOff.includes(x.dataset.it)); sync(); };
+  sync();
+}
+function eteMove() {
+  const U = esc(hmU().l);
+  const d = dialog("Move Joints/Frames/Shells", `<fieldset><legend>Change Coordinates By</legend><div class="g2"><span>Delta X</span><span><input id="mvX" value="0" style="width:110px"> ${U}</span><span>Delta Y</span><span><input id="mvY" value="0" style="width:110px"> ${U}</span><span>Delta Z</span><span><input id="mvZ" value="0" style="width:110px"> ${U}</span></div><div style="text-align:center;margin-top:8px"><button type="button" id="mvP">Pick Two Points on Model</button></div></fieldset>`,
+    [["OK", d => { go(d, true); return false; }], ["Close"], ["Apply", d => { go(d, false); return false; }, true]], {width: 320});
+  q(d, "#mvP").onclick = () => etePick(d, 2, pts => { q(d, "#mvX").value = num(pts[1][0] - pts[0][0]); q(d, "#mvY").value = num(pts[1][1] - pts[0][1]); q(d, "#mvZ").value = num(pts[1][2] - pts[0][2]); });
+  async function go(d, close) {
+    const objects = eteObjects(); if (!objects.length) { formError(d, "Select the frames, slabs or walls to move."); return; }
+    const v = ["#mvX", "#mvY", "#mvZ"].map(s => fnum(d, s)); if (!v.every(isFinite)) { formError(d, "Enter numbers for Delta X, Y and Z."); return; }
+    await eteApply(d, "move_objects", {objects, dx: v[0], dy: v[1], dz: v[2]}, close, () => { sel.clear(); selChanged(); });
+  }
+}
+async function eteMerge() {
+  const v = await etoItems("Preferences - Tolerance"), u = hmU().l, def = {in: 0.1, ft: 0.1 / 12, mm: 2.54, cm: 0.254, m: 0.00254}[u] ?? 0.1, tolv = v.MergeTol !== undefined && v.MergeTol !== "" ? +v.MergeTol : +def.toPrecision(6);
+  const d = dialog("Merge Selected Joints", `<fieldset><div class="row" style="margin:0"><span style="width:120px">Merge Tolerance</span><input id="mgT" value="${num(tolv)}" style="width:100px"><span>${esc(u)}</span></div></fieldset>`,
+    [["OK", d => { go(d, true); return false; }], ["Close"], ["Apply", d => { go(d, false); return false; }, true]], {width: 300});
+  async function go(d, close) {
+    const t = fnum(d, "#mgT"); if (!(t > 0)) { formError(d, "The merge tolerance is a number more than zero."); return; }
+    const joints = eteJoints(); if (joints.length < 2) { formError(d, "Select two joints or more (or the objects whose joints to merge)."); return; }
+    await eteApply(d, "merge_joints", {joints, tolerance: t}, close, j => hmSay(`${j.result && j.result.merged || 0} joints merged. Edit > Undo steps back.`));
+  }
+}
+function eteDivide() {
+  const d = dialog("Divide Selected Frames", `<fieldset><label style="display:block;margin:4px 0"><input type="radio" name="dvO" value="n" checked> Divide into <input id="dvN" value="2" style="width:70px"> Frame Objects</label>
+    <label style="display:block;margin:4px 0"><input type="radio" name="dvO" value="sel"> Break at Intersections with Selected Frames and Joints</label><label style="display:block;margin:4px 0"><input type="radio" name="dvO" value="grid"> Break at Intersections with Visible Grid Lines</label></fieldset>`,
+    [["OK", d => { go(d, true); return false; }], ["Close"], ["Apply", d => { go(d, false); return false; }, true]], {width: 380});
+  d.querySelectorAll("[name=dvO]").forEach(r => r.onchange = () => { q(d, "#dvN").disabled = q(d, "[name=dvO]:checked").value !== "n"; });
+  async function go(d, close) {
+    const objects = hmSelected("f"); if (!objects.length) { formError(d, "Select the beams to divide."); return; }
+    const how = q(d, "[name=dvO]:checked").value;
+    if (how === "n") { const n = fnum(d, "#dvN"); if (!(n >= 2 && n <= 20 && Number.isInteger(n))) { formError(d, "Divide into a whole number from 2 to 20."); return; } return eteApply(d, "divide_frames", {objects, parts: n}, close, () => { sel.clear(); selChanged(); }); }
+    const segs = [...sel].map(objOf).filter(o => o && o.type === "f"), points = [];
+    if (how === "sel") {
+      for (const a of segs) for (const b of segs) if (a !== b) { const x = eteCross(a.a, a.b, b.a, b.b); if (x) points.push(x); }
+      for (const n of selJ) { const at = pointXyz.get(String(n)); if (at) points.push([at[0], at[1]]); }
+    } else {
+      const p = panes[active];
+      for (const g of grids.X) for (const o of segs) { const x = eteCross(o.a, o.b, [g.at, -1e9], [g.at, 1e9]); if (x) points.push(x); }
+      for (const g of grids.Y) for (const o of segs) { const x = eteCross(o.a, o.b, [-1e9, g.at], [1e9, g.at]); if (x) points.push(x); }
+      if (p && !opt.grid) { formError(d, "The grid lines are not shown in this window (View > Set Grid System Visibility)."); return; }
+    }
+    if (!points.length) { formError(d, "Nothing crosses the selected beams between their ends."); return; }
+    await eteApply(d, "divide_frames", {objects, points}, close, () => { sel.clear(); selChanged(); });
+  }
+}
+function eteCross(a, b, c, e) {
+  // Where two plan segments cross, strictly inside the first.
+  const r = [b[0] - a[0], b[1] - a[1]], s = [e[0] - c[0], e[1] - c[1]], den = r[0] * s[1] - r[1] * s[0];
+  if (Math.abs(den) < 1e-12) return null;
+  const t = ((c[0] - a[0]) * s[1] - (c[1] - a[1]) * s[0]) / den, u = ((c[0] - a[0]) * r[1] - (c[1] - a[1]) * r[0]) / den;
+  return t > 1e-6 && t < 1 - 1e-6 && u >= -1e-6 && u <= 1 + 1e-6 ? [a[0] + r[0] * t, a[1] + r[1] * t] : null;
+}
+function eteNextLabel(list) {
+  // The next grid label after the last one: B after A, 5 after 4, A1 after A, as the program goes on.
+  const last = list.length ? String(list[list.length - 1].label) : "", taken = new Set(list.map(g => String(g.label)));
+  const nextOf = s => /^\d+$/.test(s) ? String(+s + 1) : /^[A-Y]$/i.test(s) ? String.fromCharCode(s.charCodeAt(0) + 1) : /\d+$/.test(s) ? s.replace(/\d+$/, n => String(+n + 1)) : s + "1";
+  let n = last ? nextOf(last) : "1"; while (taken.has(n)) n = nextOf(n); return n;
+}
+async function eteGridAtJoints() {
+  const js = eteJoints().map(n => pointXyz.get(String(n))).filter(Boolean); if (!js.length) return hmSay("Select the joints to add grid lines at first.", true);
+  const t = tol() * 10, xs = [], ys = [], X = grids.X.slice(), Y = grids.Y.slice(), add = [];
+  for (const at of js) {
+    if (!X.some(g => Math.abs(g.at - at[0]) <= t) && !xs.some(x => Math.abs(x - at[0]) <= t)) xs.push(at[0]);
+    if (!Y.some(g => Math.abs(g.at - at[1]) <= t) && !ys.some(y => Math.abs(y - at[1]) <= t)) ys.push(at[1]);
+  }
+  for (const x of xs.sort((a, b) => a - b)) { const label = eteNextLabel(X); X.push({label}); add.push({label, direction: "X", coordinate: x}); }
+  for (const y of ys.sort((a, b) => a - b)) { const label = eteNextLabel(Y); Y.push({label}); add.push({label, direction: "Y", coordinate: y}); }
+  if (!add.length) return hmSay("Each selected joint is already on a grid line both ways.");
+  const j = await hmRun("add_grids", {grids: add}); if (j.ok) hmSay(`${add.length} grid line${add.length === 1 ? "" : "s"} added at the selected joints. Edit > Undo steps back.`);
+}
+function etePaste() {
+  const U = esc(hmU().l);
+  const d = dialog("Paste Coordinates", `<fieldset><legend>Paste with Offsets</legend><div class="g2"><span>Delta X</span><span><input id="paX" value="0" style="width:110px"> ${U}</span><span>Delta Y</span><span><input id="paY" value="0" style="width:110px"> ${U}</span><span>Delta Z</span><span><input id="paZ" value="0" style="width:110px"> ${U}</span></div></fieldset>`,
+    [["OK", d => { go(d); return false; }], ["Cancel"]], {width: 300});
+  async function go(d) {
+    const v = ["#paX", "#paY", "#paZ"].map(s => fnum(d, s)); if (!v.every(isFinite)) { formError(d, "Enter numbers for Delta X, Y and Z."); return; }
+    const c = ete.clip; if (!c) { formError(d, "Nothing has been cut or copied: Edit > Copy or Cut first."); return; }
+    if (c.cut) {
+      // Cut took the objects off; Paste brings them back where they go, as one step after the cut.
+      if (!hm.state || hm.state.undo !== c.undo) { formError(d, "The model changed since the Cut, so its objects cannot be brought back: use Edit > Undo, then Copy and Delete."); return; }
+      const u = await hmRun("undo", null, true); if (!u.ok) { formError(d, u.error); return; }
+      if (v.some(x => Math.abs(x) > 0)) { const ok = await eteApply(d, "move_objects", {objects: c.objects, dx: v[0], dy: v[1], dz: v[2]}, true); if (!ok) return; } else d.close();
+      ete.clip = {...c, cut: false}; return;
+    }
+    if (v.every(x => Math.abs(x) <= 1e-12)) { formError(d, "Give an offset: a copy in the same place would lie on the objects."); return; }
+    await eteApply(d, "replicate_objects", {objects: c.objects, mode: "linear", dx: v[0], dy: v[1], dz: v[2], number: 1}, true);
+  }
+}
+async function eteAct(a) {
+  if (a === "replicate") return eteReplicate();
+  if (a === "move") return eteMove();
+  if (a === "merge") return eteMerge();
+  if (a === "divide") return eteDivide();
+  if (a === "paste") return etePaste();
+  if (a === "gridAtJoints") return eteGridAtJoints();
+  if (a === "glue") { ete.glue = !ete.glue; return hmSay(ete.glue ? "Glue Joints to Grids is on: a grid line moved in Edit Stories and Grid Systems takes its joints with it." : "Glue Joints to Grids is off."); }
+  if (a === "lockGrid") { ete.lockGrid = !ete.lockGrid; return hmSay(ete.lockGrid ? "Lock Onscreen Grid System Edit is on: grid lines cannot be dragged in the windows." : "Lock Onscreen Grid System Edit is off."); }
+  if (a === "copy" || a === "cut") {
+    const objects = eteObjects(); if (!objects.length) return hmSay("Select the objects first.", true);
+    if (a === "copy") { ete.clip = {objects, cut: false}; copyText(objects.join("\n")); return hmSay(`${objects.length} object${objects.length === 1 ? "" : "s"} copied: Edit > Paste puts a copy at an offset.`); }
+    const j = await hmRun("delete_objects", {frames: hmSelected("f"), areas: hmSelected("a")}); if (!j.ok) return;
+    ete.clip = {objects, cut: true, undo: hm.state && hm.state.undo}; sel.clear(); selChanged(); return hmSay(`${objects.length} object${objects.length === 1 ? "" : "s"} cut: Edit > Paste puts them back at an offset.`);
+  }
+  if (a === "reverse") { const objects = hmSelected("f"); if (!objects.length) return hmSay("Select the frames to reverse first.", true); const j = await hmRun("reverse_frames", {objects}); if (j.ok) { sel.clear(); selChanged(); hmSay(`${objects.length} frame${objects.length === 1 ? "" : "s"} reversed. Edit > Undo steps back.`); } return; }
+  if (a === "join") { const objects = hmSelected("f"); if (!objects.length) return hmSay("Select the beams to join first.", true); const j = await hmRun("join_frames", {objects}); if (j.ok) { sel.clear(); selChanged(); hmSay("Beams joined. Edit > Undo steps back."); } return; }
+  return eteMore(a);
+}
+function eteStoryAt(z) { const s = stories.find(s => Math.abs(s.elevation - z) <= tol() * 10); return s ? s.name : null; }
+function eteAlign() {
+  const U = esc(hmU().l), r = (v, t, box) => `<div style="display:flex;align-items:center;gap:6px;margin:6px 0"><label style="flex:1"><input type="radio" name="alO" value="${v}" ${v === "x" ? "checked" : ""}> ${t}</label>${box ? `<input id="al_${v}" value="0" style="width:90px" ${v === "x" ? "" : "disabled"}><span>${U}</span>` : ""}</div>`;
+  const d = dialog("Align Joints/Frames/Edges", `<fieldset><legend>Edit Options for Selected Objects</legend>${r("x", "Align Joints to X-Ordinate", true)}${r("y", "Align Joints to Y-Ordinate", true)}${r("z", "Align Joints to Z-Ordinate", true)}${r("nearest", "Align Joints to Nearest Frame or Edge")}${r("trim", "Trim Frame/Tendon/Strip Objects")}${r("extend", "Extend Frame/Tendon/Strip Objects")}</fieldset>`,
+    [["OK", d => { go(d, true); return false; }], ["Close"], ["Apply", d => { go(d, false); return false; }, true]], {width: 400});
+  d.querySelectorAll("[name=alO]").forEach(x => x.onchange = () => { const v = q(d, "[name=alO]:checked").value; ["x", "y", "z"].forEach(k => q(d, "#al_" + k).disabled = k !== v); });
+  async function go(d, close) {
+    const mode = q(d, "[name=alO]:checked").value;
+    const joints = [...selJ].map(n => pointXyz.get(String(n))).filter(Boolean).map(at => [at[0], at[1], eteStoryAt(at[2])]).filter(j => j[2]);
+    if (mode === "z") { formError(d, "The model's joints stand on story levels: to raise or lower one, move its objects to another story (Move Joints/Frames/Shells with Delta Z)."); return; }
+    if (mode === "x" || mode === "y") { const v = fnum(d, "#al_" + mode); if (!isFinite(v)) { formError(d, "Enter the ordinate."); return; } if (!joints.length) { formError(d, "Select the joints to align."); return; } return eteApply(d, "align_joints", {mode, joints, value: v}, close); }
+    const segs = [...sel].map(objOf).filter(o => o && o.type === "f");
+    if (mode === "nearest") {
+      if (!joints.length || !segs.length) { formError(d, "Select the joints and the frames to align them to."); return; }
+      const rows = joints.map(j => { let best = null, bd = Infinity; for (const o of segs) { const ax = o.a[0], ay = o.a[1], bx = o.b[0] - ax, by = o.b[1] - ay, l2 = bx * bx + by * by; if (!l2) continue; const t = Math.max(0, Math.min(1, ((j[0] - ax) * bx + (j[1] - ay) * by) / l2)), px = ax + bx * t, py = ay + by * t, dd = Math.hypot(px - j[0], py - j[1]); if (dd < bd) { bd = dd; best = [px, py]; } } return best ? [...j, best[0], best[1]] : null; }).filter(Boolean);
+      return eteApply(d, "align_joints", {mode, joints: rows}, close);
+    }
+    // Trim and Extend: the last frame selected is the boundary, as the program takes it.
+    const names = hmSelected("f"); if (names.length < 2) { formError(d, "Select the frames to " + mode + " and, last, the frame to " + mode + " them to."); return; }
+    await eteApply(d, "align_joints", {mode, objects: names.slice(0, -1), boundary: names[names.length - 1]}, close, () => { sel.clear(); selChanged(); });
+  }
+}
+function eteExtrude(what) {
+  // Extrude Joints to Frames / Frames to Shells: Linear (dx, dy, dz, Number) or Radial (about a point, Angle, Number, Total Drop).
+  const U = esc(hmU().l), frames_ = what === "frames", box = (id, v) => `<span><input id="${id}" value="${v}" style="width:100px"> ${U}</span>`;
+  const d = dialog(frames_ ? "Extrude Frames to Shells" : "Extrude Joints to Frames", `<div class="itabs"><button class="on" data-page="lin">Linear Extrusion</button><button data-page="rad">Radial Extrusion</button></div>
+    <div class="ipage on" data-page="lin"><fieldset><legend>Increment Data</legend><div class="g2"><span>dx</span>${box("exX", 0)}<span>dy</span>${box("exY", 0)}<span>dz</span>${box("exZ", 0)}</div><div style="text-align:center;margin:8px 0"><button type="button" id="exP">Pick Two Points on Model</button></div><div class="g2"><span>Number</span><input id="exN" value="1" style="width:100px"></div></fieldset></div>
+    <div class="ipage" data-page="rad"><fieldset><legend>Rotate About Point with:</legend><div class="g2"><span>X-Coordinate</span>${box("exCX", 0)}<span>Y-Coordinate</span>${box("exCY", 0)}</div><div style="text-align:center;margin:8px 0"><button type="button" id="exP1">Pick One Point on Model</button></div></fieldset>
+      <fieldset><legend>Increment Data</legend><div class="g2"><span>Angle</span><span><input id="exA" value="0" style="width:100px"> deg</span><span>Number</span><input id="exRN" value="0" style="width:100px"><span>Total Drop</span>${box("exD", 0)}</div></fieldset></div>
+    ${frames_ ? `<label style="display:block;margin:8px 0;text-align:center"><input type="checkbox" id="exDel"> Delete Source Objects</label>` : ""}`,
+    [["OK", d => { go(d, true); return false; }], ["Close"], ["Apply", d => { go(d, false); return false; }, true]], {width: 330});
+  q(d, "#exP").onclick = () => etePick(d, 2, pts => { q(d, "#exX").value = num(pts[1][0] - pts[0][0]); q(d, "#exY").value = num(pts[1][1] - pts[0][1]); q(d, "#exZ").value = num(pts[1][2] - pts[0][2]); });
+  q(d, "#exP1").onclick = () => etePick(d, 1, pts => { q(d, "#exCX").value = num(pts[0][0]); q(d, "#exCY").value = num(pts[0][1]); });
+  async function go(d, close) {
+    const lin = q(d, ".itabs button.on").dataset.page === "lin", n = s => fnum(d, s);
+    const steps = [];
+    if (lin) { const v = [n("#exX"), n("#exY"), n("#exZ"), n("#exN")]; if (!v.every(isFinite) || !(v[3] >= 1)) { formError(d, "Enter numbers for dx, dy, dz and a Number of 1 or more."); return; } for (let k = 1; k <= Math.round(v[3]); k++) steps.push(p => [p[0] + v[0] * k, p[1] + v[1] * k, p[2] + v[2] * k]); }
+    else { const v = [n("#exCX"), n("#exCY"), n("#exA"), n("#exRN"), n("#exD")]; if (!v.every(isFinite) || !(v[3] >= 1)) { formError(d, "Enter the point, an Angle, a Number of 1 or more and the Total Drop."); return; } const N = Math.round(v[3]); for (let k = 1; k <= N; k++) { const t = v[2] * k * Math.PI / 180, c = Math.cos(t), s = Math.sin(t); steps.push(p => [v[0] + (p[0] - v[0]) * c - (p[1] - v[1]) * s, v[1] + (p[0] - v[0]) * s + (p[1] - v[1]) * c, p[2] - v[4] * k / N]); } }
+    if (steps.length > 100) { formError(d, "Extrude up to 100 times at once."); return; }
+    const calls = [];
+    const st = z => eteStoryAt(z);
+    if (!frames_) {
+      const js = [...selJ].map(x => pointXyz.get(String(x))).filter(Boolean); if (!js.length) { formError(d, "Select the joints to extrude."); return; }
+      const beamSec = (await drawSection("beam")).now, colSec = (await drawSection("column")).now, brSec = (await drawSection("brace")).now;
+      for (const j of js) { let from = j; for (const f of steps) { const to = f(j); calls.push(eteFrameCall(from, to, {beamSec, colSec, brSec}, st)); from = to; } }
+    } else {
+      const fs = [...sel].map(objOf).filter(o => o && o.type === "f"); if (!fs.length) { formError(d, "Select the frames to extrude."); return; }
+      const slab = (await drawSection("slab")).now, wall = (await drawSection("wall")).now;
+      for (const o of fs) { let a = o.a, b = o.b; for (const f of steps) { const a2 = f(o.a), b2 = f(o.b); calls.push(eteShellCall(a, b, a2, b2, {slab, wall}, st)); a = a2; b = b2; } }
+    }
+    const bad = calls.find(c => c.error); if (bad) { formError(d, bad.error); return; }
+    formError(d, ""); let made = 0;
+    for (const c of calls) { const j = await hmRun(c.tool, c.args, true); if (!j.ok) { formError(d, j.error + (made ? ` (${made} made before; Edit > Undo steps back one at a time)` : "")); return; } made++; }
+    if (frames_ && q(d, "#exDel").checked) await hmRun("delete_objects", {frames: hmSelected("f"), areas: []}, true);
+    hmSay(`${made} object${made === 1 ? "" : "s"} made by extrusion. Edit > Undo steps back.`); if (close) d.close();
+  }
+}
+function eteFrameCall(a, b, sec, st) {
+  // A frame from a to b as the model holds them: a beam on a story level, a column straight up a story, else a brace.
+  const t = tol() * 10, sa = st(a[2]), sb = st(b[2]);
+  if (Math.abs(a[2] - b[2]) <= t) return sa ? {tool: "add_beams", args: {lines: [[a[0], a[1], b[0], b[1]]], stories: [sa], section: sec.beamSec}} : {error: "The extruded frame would stand between story levels; the model's frames stand on stories."};
+  const [lo, hi] = a[2] < b[2] ? [a, b] : [b, a], i = stories.findIndex(s => s.name === st(hi[2])), below = i > 0 ? stories[i - 1] : null;
+  if (i < 1 || !below || Math.abs(below.elevation - lo[2]) > t) return {error: "Extrude up or down one story at a time (dz = the story height): the model's columns and braces run from one story to the next."};
+  if (Math.hypot(hi[0] - lo[0], hi[1] - lo[1]) <= t) return {tool: "add_columns", args: {points: [[hi[0], hi[1]]], stories: [stories[i].name], section: sec.colSec}};
+  return {tool: "add_braces", args: {braces: [[lo[0], lo[1], hi[0], hi[1]]], stories: [stories[i].name], section: sec.brSec}};
+}
+function eteShellCall(a, b, a2, b2, sec, st) {
+  const t = tol() * 10;
+  if ([a, b, a2, b2].every(p => Math.abs(p[2] - a[2]) <= t)) { const s = st(a[2]); return s ? {tool: "add_slabs", args: {outlines: [[[a[0], a[1]], [b[0], b[1]], [b2[0], b2[1]], [a2[0], a2[1]]]], stories: [s], section: sec.slab}} : {error: "The floor would stand between story levels."}; }
+  if (Math.hypot(a2[0] - a[0], a2[1] - a[1]) <= t && Math.hypot(b2[0] - b[0], b2[1] - b[1]) <= t && Math.abs(a[2] - b[2]) <= t) {
+    const hi = Math.max(a[2], a2[2]), lo = Math.min(a[2], a2[2]), i = stories.findIndex(s => s.name === st(hi));
+    if (i > 0 && Math.abs(stories[i - 1].elevation - lo) <= t) return {tool: "add_walls", args: {lines: [[a[0], a[1], b[0], b[1]]], stories: [stories[i].name], section: sec.wall}};
+  }
+  return {error: "Extrude a frame across in plan (a floor) or up or down one story (a wall): the model's shells stand on or between stories."};
+}
+// ---- Edit Shells: the floor geometry worked out here, the model changed by replace_floors (one undo step) ----
+const eteFloors = () => [...sel].map(objOf).filter(o => o && o.type === "a" && o.kind !== "wall");
+const eteSigned = pts => { let s = 0; for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; s += a[0] * b[1] - b[0] * a[1]; } return s / 2; };
+function eteSplitByLine(poly, p, dir) {
+  // A polygon cut by the infinite line through p along dir: the two sides, or the polygon whole when the line misses it.
+  const side = q0 => (q0[0] - p[0]) * dir[1] - (q0[1] - p[1]) * dir[0], L = [], R = [], e = 1e-9;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i], b = poly[(i + 1) % poly.length], sa = side(a), sb = side(b);
+    if (sa >= -e) L.push(a); if (sa <= e) R.push(a);
+    if ((sa > e && sb < -e) || (sa < -e && sb > e)) { const t = sa / (sa - sb), x = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]; L.push(x); R.push(x); }
+  }
+  const ok = s => s.length >= 3 && Math.abs(eteSigned(s)) > 1e-9;
+  return ok(L) && ok(R) ? [L, R] : [poly];
+}
+function eteCutAll(polys, lines) { let out = polys; for (const [p, d] of lines) out = out.flatMap(x => eteSplitByLine(x, p, d)); return out; }
+async function eteReplace(d, pairs, close) {
+  // pairs: [[objectNames, outlines]] each one undo step, or one when there is one.
+  for (const [objects, outlines] of pairs) { const ok = await eteApply(d, "replace_floors", {objects, outlines: outlines.map(o => o.map(p => [p[0], p[1]]))}, false); if (!ok) return false; }
+  sel.clear(); selChanged(); if (close && d) d.close(); return true;
+}
+function eteDivShells() {
+  const d = dialog("Divide Selected Shells", `<fieldset>
+    <label style="display:block;margin:4px 0"><input type="radio" name="dsO" value="frames"> Cookie Cut Floor Objects at Selected Frame Objects</label><label style="display:block;margin:2px 0 6px 24px"><input type="checkbox" id="dsExt" disabled> Extend Frames to Shell Edges</label>
+    <label style="display:block;margin:4px 0"><input type="radio" name="dsO" value="joints"> Cookie Cut Floor Objects at Selected Joints at <input id="dsAng" value="" style="width:70px" disabled> Degrees</label>
+    <label style="display:block;margin:4px 0"><input type="radio" name="dsO" value="n" checked> Divide Quadrilaterals/Triangles into <input id="dsN1" value="2" style="width:70px"> by <input id="dsN2" value="2" style="width:70px"> Areas</label>
+    <label style="display:block;margin:4px 0"><input type="radio" name="dsO" value="at"> Divide Quadrilaterals/Triangles at</label>
+    <div style="margin-left:24px"><label style="display:block"><input type="checkbox" id="dsG" disabled> Intersections with Visible Grids</label><label style="display:block"><input type="checkbox" id="dsJ" disabled> Selected Joint Objects on Edges</label><label style="display:block"><input type="checkbox" id="dsF" disabled> Intersections with Selected Frame Objects</label></div></fieldset>`,
+    [["OK", d => { go(d, true); return false; }], ["Close"], ["Apply", d => { go(d, false); return false; }, true]], {width: 520});
+  const sync = () => { const v = q(d, "[name=dsO]:checked").value; q(d, "#dsExt").disabled = v !== "frames"; q(d, "#dsAng").disabled = v !== "joints"; q(d, "#dsN1").disabled = q(d, "#dsN2").disabled = v !== "n"; ["#dsG", "#dsJ", "#dsF"].forEach(s => q(d, s).disabled = v !== "at"); };
+  d.querySelectorAll("[name=dsO]").forEach(r => r.onchange = sync);
+  async function go(d, close) {
+    const fl = eteFloors(); if (!fl.length) { formError(d, "Select the floors to divide."); return; }
+    const v = q(d, "[name=dsO]:checked").value, fr = [...sel].map(objOf).filter(o => o && o.type === "f"), pairs = [];
+    const js = [...selJ].map(n => pointXyz.get(String(n))).filter(Boolean);
+    for (const o of fl) {
+      const poly = o.pts.map(p => [p[0], p[1]]); let out = [poly];
+      if (v === "n") {
+        const n1 = fnum(d, "#dsN1"), n2 = fnum(d, "#dsN2"); if (!(Number.isInteger(n1) && Number.isInteger(n2) && n1 >= 1 && n2 >= 1 && n1 * n2 >= 2 && n1 * n2 <= 400)) { formError(d, "Divide into whole numbers of areas (1 to 20 each way, two areas or more)."); return; }
+        if (poly.length === 4) { out = []; const P = (i, j) => { const u = i / n1, w = j / n2, [a, b, c, e] = poly; return [a[0] * (1 - u) * (1 - w) + b[0] * u * (1 - w) + c[0] * u * w + e[0] * (1 - u) * w, a[1] * (1 - u) * (1 - w) + b[1] * u * (1 - w) + c[1] * u * w + e[1] * (1 - u) * w]; }; for (let i = 0; i < n1; i++) for (let j = 0; j < n2; j++) out.push([P(i, j), P(i + 1, j), P(i + 1, j + 1), P(i, j + 1)]); }
+        else if (poly.length === 3) { out = []; const n = n1, [a, b, c] = poly, P = (i, j) => [a[0] + (b[0] - a[0]) * i / n + (c[0] - a[0]) * j / n, a[1] + (b[1] - a[1]) * i / n + (c[1] - a[1]) * j / n]; for (let i = 0; i < n; i++) for (let j = 0; i + j < n; j++) { out.push([P(i, j), P(i + 1, j), P(i, j + 1)]); if (i + j < n - 1) out.push([P(i + 1, j), P(i + 1, j + 1), P(i, j + 1)]); } }
+        else { formError(d, `${o.name} has ${poly.length} corners: this divides quadrilaterals and triangles.`); return; }
+      } else if (v === "frames") {
+        if (!fr.length) { formError(d, "Select the frames to cut at."); return; }
+        const ext = q(d, "#dsExt").checked, lines = fr.filter(f => ext || poly.every(p => true)).map(f => [f.a, [f.b[0] - f.a[0], f.b[1] - f.a[1]]]);
+        out = ext ? eteCutAll(out, lines) : eteCutAll(out, lines.filter(([pa, dd], k) => { const f = fr[k], inside = q0 => eteInside(poly, q0); return !inside(f.a) && !inside(f.b); }));
+      } else if (v === "joints") {
+        const ang = fnum(d, "#dsAng"); if (!isFinite(ang)) { formError(d, "Enter the angle of the cut lines in degrees."); return; } if (!js.length) { formError(d, "Select the joints to cut at."); return; }
+        const t = ang * Math.PI / 180; out = eteCutAll(out, js.map(j => [j, [Math.cos(t), Math.sin(t)]]));
+      } else {
+        const lines = [];
+        if (q(d, "#dsG").checked) { for (const g of grids.X) lines.push([[g.at, 0], [0, 1]]); for (const g of grids.Y) lines.push([[0, g.at], [1, 0]]); }
+        if (q(d, "#dsF").checked) for (const f of fr) lines.push([f.a, [f.b[0] - f.a[0], f.b[1] - f.a[1]]]);
+        out = eteCutAll(out, lines);
+        if (q(d, "#dsJ").checked) out = out.map(pg => eteAddEdgePoints(pg, js));
+        if (!q(d, "#dsG").checked && !q(d, "#dsJ").checked && !q(d, "#dsF").checked) { formError(d, "Tick what to divide at."); return; }
+      }
+      if (out.length > 1 || out[0] !== poly) pairs.push([[o.name], out]);
+    }
+    if (!pairs.length) { formError(d, "Nothing divides the selected floors."); return; }
+    await eteReplace(d, pairs, close);
+  }
+}
+function eteInside(poly, p) { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const a = poly[i], b = poly[j]; if ((a[1] > p[1]) !== (b[1] > p[1]) && p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0]) c = !c; } return c; }
+function eteAddEdgePoints(poly, pts) {
+  const out = [], t = tol() * 10;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i], b = poly[(i + 1) % poly.length], dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy; out.push(a);
+    const on = pts.map(p => ({p, u: ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2})).filter(x => x.u > 1e-6 && x.u < 1 - 1e-6 && Math.abs((x.p[0] - a[0]) * dy - (x.p[1] - a[1]) * dx) / Math.sqrt(l2) <= t).sort((x, y) => x.u - y.u);
+    for (const x of on) out.push([x.p[0], x.p[1]]);
+  }
+  return out;
+}
+function eteNumForm(title, label, idv, extra, run) {
+  const d = dialog(title, `<fieldset>${extra ? `<legend>${esc(extra.legend)}</legend>` : ""}<div class="row" style="margin:0"><span style="width:170px">${esc(label)}</span><input id="${idv}" value="0" style="width:100px"><span>${esc(hmU().l)}</span></div>${extra ? extra.html : ""}</fieldset>`,
+    [["OK", d => { run(d, true); return false; }], ["Close"], ["Apply", d => { run(d, false); return false; }, true]], {width: 380});
+  return d;
+}
+function eteOffset(poly, off) {
+  // Each edge moved out by off (in for less than zero), corners where the moved edges meet.
+  const ccw = eteSigned(poly) > 0, n = poly.length, lines = [];
+  for (let i = 0; i < n; i++) { const a = poly[i], b = poly[(i + 1) % n], dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1, nx = (ccw ? dy : -dy) / l, ny = (ccw ? -dx : dx) / l; lines.push([[a[0] + nx * off, a[1] + ny * off], [dx, dy]]); }
+  return lines.map((L1, i) => { const L0 = lines[(i + n - 1) % n], [p, r] = L0, [q0, s] = L1, den = r[0] * s[1] - r[1] * s[0]; if (Math.abs(den) < 1e-12) return q0; const t = ((q0[0] - p[0]) * s[1] - (q0[1] - p[1]) * s[0]) / den; return [p[0] + r[0] * t, p[1] + r[1] * t]; });
+}
+function eteExpand() {
+  eteNumForm("Expand/Shrink Shells", "Offset Value", "esV", null, async (d, close) => {
+    const v = fnum(d, "#esV"); if (!isFinite(v) || v === 0) { formError(d, "Enter the offset: more than zero expands, less than zero shrinks."); return; }
+    const fl = eteFloors(); if (!fl.length) { formError(d, "Select the floors to expand or shrink."); return; }
+    const pairs = []; for (const o of fl) { const out = eteOffset(o.pts.map(p => [p[0], p[1]]), v); if (Math.sign(eteSigned(out)) !== Math.sign(eteSigned(o.pts)) || Math.abs(eteSigned(out)) < 1e-9) { formError(d, `${o.name} would shrink to nothing.`); return; } pairs.push([[o.name], [out]]); }
+    await eteReplace(d, pairs, close);
+  });
+}
+function eteChamfer() {
+  eteNumForm("Chamfer Slab Corners", "Chamfer/Fillet Dimension", "chV", {legend: "Chamfer/Fillet Dimension and Type", html: `<label style="display:block;margin:6px 0 0 20px"><input type="radio" name="chT" value="bevel" checked> Beveled Edge (Chamfer)</label><label style="display:block;margin:4px 0 0 20px"><input type="radio" name="chT" value="fillet"> Rounded Edge (Fillet)</label>`}, async (d, close) => {
+    const v = fnum(d, "#chV"); if (!(v > 0)) { formError(d, "Enter the chamfer or fillet dimension, more than zero."); return; }
+    const fl = eteFloors(); if (!fl.length) { formError(d, "Select the floors whose corners to chamfer."); return; }
+    const round = q(d, "[name=chT]:checked").value === "fillet", picked = [...selJ].map(n => pointXyz.get(String(n))).filter(Boolean), t = tol() * 10, pairs = [];
+    for (const o of fl) {
+      const poly = o.pts.map(p => [p[0], p[1]]), n = poly.length, out = [];
+      const which = i => !picked.length || picked.some(p => Math.hypot(p[0] - poly[i][0], p[1] - poly[i][1]) <= t);
+      for (let i = 0; i < n; i++) {
+        const c = poly[i], a = poly[(i + n - 1) % n], b = poly[(i + 1) % n], la = Math.hypot(a[0] - c[0], a[1] - c[1]), lb = Math.hypot(b[0] - c[0], b[1] - c[1]);
+        if (!which(i)) { out.push(c); continue; }
+        if (v >= la / 2 || v >= lb / 2) { formError(d, `The dimension is too big for a corner of ${o.name}: less than half its shortest edge.`); return; }
+        const pa = [c[0] + (a[0] - c[0]) * v / la, c[1] + (a[1] - c[1]) * v / la], pb = [c[0] + (b[0] - c[0]) * v / lb, c[1] + (b[1] - c[1]) * v / lb];
+        if (!round) { out.push(pa, pb); continue; }
+        // The fillet: a quadratic arc from pa to pb with the corner as its control point, in 6 pieces.
+        for (let k = 0; k <= 6; k++) { const u = k / 6; out.push([(1 - u) * (1 - u) * pa[0] + 2 * u * (1 - u) * c[0] + u * u * pb[0], (1 - u) * (1 - u) * pa[1] + 2 * u * (1 - u) * c[1] + u * u * pb[1]]); }
+      }
+      pairs.push([[o.name], [out]]);
+    }
+    await eteReplace(d, pairs, close);
+  });
+}
+function eteUnion(polys) {
+  // The outline of floors that touch edge to edge: the edges only one of them has, chained into one loop.
+  const k = p => p[0].toFixed(6) + "," + p[1].toFixed(6), edges = new Map();
+  for (const pg of polys) { const split = eteAddEdgePoints(pg, polys.flat()); for (let i = 0; i < split.length; i++) { const a = split[i], b = split[(i + 1) % split.length], key2 = [k(a), k(b)].sort().join("|"); if (edges.has(key2)) edges.delete(key2); else edges.set(key2, [a, b]); } }
+  const list = [...edges.values()]; if (!list.length) return null;
+  const loop = [list[0][0], list[0][1]]; list.shift();
+  while (list.length) { const end = k(loop[loop.length - 1]), i = list.findIndex(e => k(e[0]) === end || k(e[1]) === end); if (i < 0) return null; const e = list.splice(i, 1)[0]; const nxt = k(e[0]) === end ? e[1] : e[0]; if (k(nxt) === k(loop[0])) { if (list.length) return null; break; } loop.push(nxt); }
+  // Corners on a straight run are dropped.
+  return loop.filter((p, i) => { const a = loop[(i + loop.length - 1) % loop.length], b = loop[(i + 1) % loop.length]; return Math.abs((p[0] - a[0]) * (b[1] - a[1]) - (p[1] - a[1]) * (b[0] - a[0])) > 1e-9; });
+}
+async function eteMergeShells(userMesh) {
+  const fl = eteFloors(); if (fl.length < 2) return hmSay("Select two floors or more that touch edge to edge.", true);
+  const u = eteUnion(fl.map(o => o.pts.map(p => [p[0], p[1]]))); if (!u) return hmSay("The selected floors do not make one outline (they must touch edge to edge, with no hole).", true);
+  if (await eteReplace(null, [[fl.map(o => o.name), [u]]], false)) hmSay(`${fl.length} floors merged into one${userMesh ? " (its user mesh is the floors it was made of: Assign > Shell > Floor Auto Mesh Options keeps the meshing)" : ""}. Edit > Undo steps back.`);
+}
+async function eteShellEdit(a) {
+  const fl = eteFloors();
+  if (a === "splitEdges") { if (!fl.length) return hmSay("Select the floors whose edges to split.", true); return eteReplace(null, fl.map(o => { const p = o.pts.map(q0 => [q0[0], q0[1]]), out = []; p.forEach((x, i) => { const y = p[(i + 1) % p.length]; out.push(x, [(x[0] + y[0]) / 2, (x[1] + y[1]) / 2]); }); return [[o.name], [out]]; }), false); }
+  if (a === "removeJoints") {
+    const js = [...selJ].map(n => pointXyz.get(String(n))).filter(Boolean), t = tol() * 10; if (!fl.length || !js.length) return hmSay("Select the floors and the joints to take out of them.", true);
+    const pairs = []; for (const o of fl) { const p = o.pts.map(q0 => [q0[0], q0[1]]), out = p.filter(x => !js.some(j => Math.hypot(j[0] - x[0], j[1] - x[1]) <= t)); if (out.length !== p.length) { if (out.length < 3) return hmSay(`${o.name} would keep fewer than three corners.`, true); pairs.push([[o.name], [out]]); } }
+    if (!pairs.length) return hmSay("None of the selected joints is a corner of the selected floors.", true); return eteReplace(null, pairs, false);
+  }
+  if (a === "mergeShells") return eteMergeShells(false);
+  if (a === "userMesh") return eteMergeShells(true);
+  if (a === "explode" || a === "removeMesh") return hmSay(fl.length ? `The selected floors have no user mesh: they are ${a === "explode" ? "already single shells" : "meshed by Floor Auto Mesh Options"}.` : "Select the floors first.", !fl.length);
+  if (a === "reverseWall") { const walls = [...sel].map(objOf).filter(o => o && o.kind === "wall").map(o => o.name); if (!walls.length) return hmSay("Select the walls first.", true); const j = await hmRun("reverse_objects", {kind: "area", objects: walls}); if (j.ok) hmSay(`Local 3 axis reversed on ${walls.length} wall${walls.length === 1 ? "" : "s"}. Edit > Undo steps back.`); return; }
+  if (a === "wallOpenings") return hmSay("The selected walls have no openings to divide them at.");
+}
+// Add to Model from Template, Interactive Database and the curve types: first versions here; the thread that builds
+// them in full replaces these function bodies (the menu calls them by name).
+function eteTplChooser(title, legend, kinds, open) {
+  const d = dialog(title, `<fieldset><legend>${esc(legend)}</legend><div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center">${kinds.map(k => `<button type="button" data-tk="${esc(k)}" style="width:96px;height:88px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding:6px">${esc(k)}</button>`).join("")}</div></fieldset>`, [["Close"]], {width: kinds.length > 3 ? 470 : 360, float: true});
+  d.querySelectorAll("[data-tk]").forEach(b => b.onclick = () => open(b.dataset.tk, d));
+  return d;
+}
+function eteTpl2d() { return eteTplChooser("Add to Model - 2D Structure", "Click to Choose 2D Structure Type:", ["2D Frame", "2D Truss", "2D Wall"], k => hmSay(`${k}: its form comes with the next update.`)); }
+function eteTpl3d() { return eteTplChooser("Add to Model - 3D Structure", "Click to Choose 3D Structure Type:", ["Steel Deck", "Staggered Truss", "Flat Slab", "Flat Slab with Perimeter Beams", "Waffle Slab", "Two Way or Ribbed Slab"], k => hmSay(`${k}: its form comes with the next update.`)); }
+function eteIdb() { if (typeof etrChooseTables === "function" && P) return etrChooseTables(); return act("tables"); }
+function eteCurveForm(title, legendInfo, label, objName, types, ends) {
+  const U = esc(hmU().l), row = (t, v) => `<span>${t}</span><span><input value="${esc(v)}" readonly style="width:90px"> ${U}</span>`;
+  return dialog(title, `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div><fieldset><legend>${esc(legendInfo)}</legend><div class="g2"><span>Story; Label</span><select>${opts([objName], objName)}</select><span>${esc(label)}</span><select id="ctT">${opts(types, types[0])}</select></div></fieldset>
+    <fieldset><legend>Start Joint Object</legend><div class="g2"><span>Name</span><input value="${esc(ends[0].name)}" readonly>${row("Global X", num(ends[0].at[0]))}${row("Global Y", num(ends[0].at[1]))}</div></fieldset>
+    <fieldset><legend>End Joint Object</legend><div class="g2"><span>Name</span><input value="${esc(ends[1].name)}" readonly>${row("Global X", num(ends[1].at[0]))}${row("Global Y", num(ends[1].at[1]))}</div></fieldset></div>
+    <div><fieldset><legend id="ctL">Straight Line Data</legend><p class="kv" id="ctP">No Additional Parameters Required For Straight Lines</p></fieldset></div></div>`,
+    [["OK", d => { if (q(d, "#ctT").value !== types[0]) { formError(d, q(d, "#ctT").value + " comes with the next update; the object stays straight."); return false; } }], ["Cancel"]], {width: 640});
+}
+function eteFrameType() {
+  const o = [...sel].map(objOf).find(x => x && x.type === "f"); if (!o) return hmSay("Select a frame first.", true);
+  const end = q0 => ({name: String(pointAt.get(key(q0[0], q0[1], q0[2])) ?? ""), at: q0});
+  return eteCurveForm("Frame Object Type Options", "Frame Object Information", "Frame Type", (o.story || "") + "; " + o.name.split("@")[0], ["Straight Frame", "Circular Curve", "Multilinear Curve", "Bezier Curve", "Spline Curve"], [end(o.a), end(o.b)]);
+}
+function eteEdgeType(wall) {
+  const o = [...sel].map(objOf).find(x => x && x.type === "a" && (wall ? x.kind === "wall" : x.kind !== "wall")); if (!o) return hmSay(`Select a ${wall ? "wall" : "slab"} first.`, true);
+  const end = q0 => ({name: String(pointAt.get(key(q0[0], q0[1], q0[2])) ?? ""), at: q0});
+  return eteCurveForm(wall ? "Wall Shell Object Curve Type Options" : "Slab Shell Object Edge Type Options", "Shell Object Information", "Edge Type", (o.story || "") + "; " + o.name.split("@")[0], ["Straight", "Circular Curve", "Multilinear Curve", "Bezier Curve", "Spline Curve"], [end(o.pts[0]), end(o.pts[1 % o.pts.length])]);
+}
+function eteWallCurve() { return eteEdgeType(true); }
+async function eteRelabel() {
+  // Auto Relabel All: the program's labels again, story by story from the bottom, as the program numbers them.
+  const j = await hmRun("relabel_objects", {}); if (j.ok) hmSay("Every object has its label again, in the program's order. Edit > Undo steps back.");
+}
+function eteMore(a) {
+  switch (a) {
+    case "align": return eteAlign();
+    case "extJ": return eteExtrude("joints");
+    case "extF": return eteExtrude("frames");
+    case "divShells": return eteDivShells();
+    case "expand": return eteExpand();
+    case "chamfer": return eteChamfer();
+    case "tpl2d": return eteTpl2d();
+    case "tpl3d": return eteTpl3d();
+    case "idb": return eteIdb();
+    case "frameType": return eteFrameType();
+    case "edgeType": return eteEdgeType(false);
+    case "wallCurve": return eteWallCurve();
+    case "relabel": return eteRelabel();
+    case "beamsToSlab": return hmSay("Convert Beams to Slab Areas works on beams that close an outline; the program greys it otherwise.");
+    case "convertMesh": return hmSay("The selected floors have no current mesh to convert.");
+    case "divLinks": case "revLinks": return hmSay("The model has no links.");
+    default: return eteShellEdit(a);
+  }
+}
+// Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+E, Ctrl+R, Ctrl+M and Shift+Ctrl+M as ETABS has them.
+document.addEventListener("keydown", e => {
+  if (program !== "etabs" || !window.cpmLive || !(e.ctrlKey || e.metaKey) || e.altKey || (e.target.closest && e.target.closest("input, textarea, select, .dlg"))) return;
+  const k = e.key.toLowerCase(), a = e.shiftKey ? (k === "m" ? "m:ete:align" : null) : {x: "m:ete:cut", c: "m:ete:copy", v: "m:ete:paste", e: "m:ete:idb", r: "m:ete:replicate", m: "m:ete:move"}[k];
+  if (!a) return; e.preventDefault(); e.stopPropagation(); act(a);
+}, true);
 async function modelAct(a) {
   hideMenus();
   if (a.startsWith("etn:")) return etnAct(a.slice(4));
@@ -8232,6 +8732,7 @@ async function modelAct(a) {
   if (a.startsWith("etc:")) return etcAct(a.slice(4));
   if (a.startsWith("ets:")) return etsForm(a.slice(4));
   if (a.startsWith("etv:")) return etvAct(a.slice(4));
+  if (a.startsWith("ete:")) return eteAct(a.slice(4));
   if (a.startsWith("eto:")) { await hmDefs(); return etoForm(a.slice(4)); }
   if (a.startsWith("ld:")) return hmObjectLoad(a.slice(3));
   if (a.startsWith("etf:")) return etfAct(a.slice(4));

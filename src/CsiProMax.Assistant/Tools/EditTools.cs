@@ -35,20 +35,44 @@ public static class EditTools
             """{"type":"object","required":["points","stories"],"properties":{"points":{"type":"array","items":{"type":"array","items":{"type":"number"},"description":"[x, y]"}},"stories":{"type":"array","items":{"type":"string"}}}}""",
             Ask.Changes, AddJoints, a => $"Draw {a.Items("points").Count()} joints"),
         new("replicate_objects",
-            "Edit > Replicate: copies frames, slabs and walls with their sections, assignments, loads and hinges. mode 'linear': 'number' copies, each dx, dy on from the last; mode 'story': onto each of 'stories', in the same place.",
-            "{\"type\":\"object\",\"required\":[\"objects\",\"mode\"],\"properties\":{" + Objects + ",\"mode\":{\"type\":\"string\",\"enum\":[\"linear\",\"story\"]},\"dx\":{\"type\":\"number\"},\"dy\":{\"type\":\"number\"},\"number\":{\"type\":\"integer\"},\"stories\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}}}",
+            "Edit > Replicate: copies frames, slabs and walls with their sections, assignments, loads and hinges. mode 'linear': 'number' copies, each dx, dy on from the last; mode 'radial': 'number' copies turned about (cx, cy), each 'angle' degrees on; mode 'mirror': one copy mirrored about the plan line (x1, y1)-(x2, y2); mode 'story': onto each of 'stories', in the same place. delete_original takes the originals off after (Delete Original Objects).",
+            "{\"type\":\"object\",\"required\":[\"objects\",\"mode\"],\"properties\":{" + Objects + ",\"mode\":{\"type\":\"string\",\"enum\":[\"linear\",\"radial\",\"mirror\",\"story\"]},\"dx\":{\"type\":\"number\"},\"dy\":{\"type\":\"number\"},\"dz\":{\"type\":\"number\",\"description\":\"linear: up by this each copy, to another story's level (Paste).\"},\"number\":{\"type\":\"integer\"},\"cx\":{\"type\":\"number\"},\"cy\":{\"type\":\"number\"},\"angle\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"y1\":{\"type\":\"number\"},\"x2\":{\"type\":\"number\"},\"y2\":{\"type\":\"number\"},\"stories\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"delete_original\":{\"type\":\"boolean\"},\"skip\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"description\":\"Replicate Assigns options left off the copies, as 'Frames:Hinges', 'Shells:Diaphragms', 'Frames:Distributed' (loads) ...\"}}}",
             Ask.Changes, Replicate, a => $"Replicate {a.Texts("objects").Count} objects"),
         new("move_objects",
-            "Edit > Move: moves frames, slabs and walls by dx, dy in plan, with their sections, assignments, loads and hinges.",
-            "{\"type\":\"object\",\"required\":[\"objects\"],\"properties\":{" + Objects + ",\"dx\":{\"type\":\"number\"},\"dy\":{\"type\":\"number\"}}}",
+            "Edit > Move Joints/Frames/Shells: moves frames, slabs and walls by dx, dy in plan and dz up (dz must reach another story's level), with their sections, assignments, loads and hinges.",
+            "{\"type\":\"object\",\"required\":[\"objects\"],\"properties\":{" + Objects + ",\"dx\":{\"type\":\"number\"},\"dy\":{\"type\":\"number\"},\"dz\":{\"type\":\"number\"}}}",
             Ask.Changes, MoveObjects, a => $"Move {a.Texts("objects").Count} objects"),
+        new("reverse_frames",
+            "Edit > Edit Frames > Reverse Frame Connectivity: each frame named runs from its J end to its I end; end releases, end offsets and hinges change ends with it.",
+            "{\"type\":\"object\",\"required\":[\"objects\"],\"properties\":{" + Objects + "}}",
+            Ask.Changes, ReverseFrames, a => $"Reverse {a.Texts("objects").Count} frames"),
+        new("join_frames",
+            "Edit > Edit Frames > Join Frames: beams on one story that run on in a straight line, end to end, with the same loads and nothing else at the joint between, become one beam with the first one's section and assignments.",
+            "{\"type\":\"object\",\"required\":[\"objects\"],\"properties\":{" + Objects + "}}",
+            Ask.Changes, JoinFrames, a => $"Join {a.Texts("objects").Count} frames"),
+        new("align_joints",
+            "Edit > Align Joints/Frames/Edges: mode 'x' or 'y' puts each joint ([x, y, story]) on the ordinate 'value', the frames, slabs and walls ending there following; mode 'trim' or 'extend' takes the beams named ('objects') to where they cross the 'boundary' beam.",
+            "{\"type\":\"object\",\"required\":[\"mode\"],\"properties\":{\"mode\":{\"type\":\"string\",\"enum\":[\"x\",\"y\",\"nearest\",\"trim\",\"extend\"]},\"joints\":{\"type\":\"array\",\"items\":{\"type\":\"array\"},\"description\":\"[x, y, story] each.\"},\"value\":{\"type\":\"number\"}," + Objects + ",\"boundary\":{\"type\":\"string\"}}}",
+            Ask.Changes, AlignJoints, a => $"Align ({a.Text("mode")})"),
+        new("replace_floors",
+            "Edit > Edit Shells (Divide Shells, Merge Shells, Expand/Shrink, Split Shell Edges, Remove Joints from Shells, Chamfer Slab Corners, Slab Edge Type): the floors named ('objects', one story) become the floors of 'outlines' (each [[x, y], ...]), each keeping the first floor's section, assignments and loads.",
+            "{\"type\":\"object\",\"required\":[\"objects\",\"outlines\"],\"properties\":{" + Objects + ",\"outlines\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}}}}}}",
+            Ask.Changes, ReplaceFloors, a => $"Reshape {a.Texts("objects").Count} floors into {a.Items("outlines").Count()}"),
+        new("relabel_objects",
+            "Edit > Auto Relabel All: frames, floors and walls get the program's labels again (B, C, D, F, W by kind, from the lowest plan point up). An object something else names by its label (a group, an overwrite, a kept table row) keeps its label.",
+            """{"type":"object","properties":{}}""",
+            Ask.Changes, RelabelObjects, _ => "Auto Relabel All"),
+        new("merge_joints",
+            "Edit > Merge Joints: the joints named that lie within 'tolerance' of each other in plan become one; frames, slabs, walls, joint assignments and loads follow it, and a frame left with both ends at one joint is taken off.",
+            """{"type":"object","required":["joints","tolerance"],"properties":{"joints":{"type":"array","items":{"type":"string"},"description":"Joint (point) names."},"tolerance":{"type":"number"}}}""",
+            Ask.Changes, MergeJoints, a => $"Merge {a.Texts("joints").Count} joints"),
         new("reshape_object",
             "Draw > Reshape Object: moves the end or corner of one frame, slab or wall that stands at 'from' [x, y] in plan to 'to' [x, y], on its own story, keeping its section, assignments, loads and hinges. A column moves whole.",
             "{\"type\":\"object\",\"required\":[\"object\",\"from\",\"to\"],\"properties\":{\"object\":{\"type\":\"string\",\"description\":\"label@story\"},\"from\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}},\"to\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}}}}",
             Ask.Changes, Reshape, a => $"Reshape {a.Text("object")}"),
         new("divide_frames",
-            "Edit > Edit Frames > Divide Frames: beams into 'parts' equal beams (2 to 20), each keeping the section and assignments; uniform loads go on every part, end releases and offsets stay at the beam's ends.",
-            "{\"type\":\"object\",\"required\":[\"objects\",\"parts\"],\"properties\":{" + Objects + ",\"parts\":{\"type\":\"integer\"}}}",
+            "Edit > Edit Frames > Divide Frames: beams into 'parts' equal beams (2 to 20), or, with 'points', broken at each plan point [x, y] that lies on a beam between its ends (Break at Intersections); each part keeps the section and assignments; uniform loads go on every part, end releases and offsets stay at the beam's ends.",
+            "{\"type\":\"object\",\"required\":[\"objects\"],\"properties\":{" + Objects + ",\"parts\":{\"type\":\"integer\"},\"points\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}}}}}",
             Ask.Changes, Divide, a => $"Divide {a.Texts("objects").Count} beams into {a.Text("parts")}"),
     ];
 
@@ -124,14 +148,22 @@ public static class EditTools
         var link = Offline(e);
         var objects = Find(a, link.Model);
         var mode = a.Need("mode");
-        return Core(() => link.Edit(m => (JsonNode)new JsonObject
+        var delete = a.TryGetProperty("delete_original", out var d) && d.ValueKind == JsonValueKind.True;
+        return Core(() => link.Edit(m =>
         {
-            ["made"] = Names(mode switch
+            var made = mode switch
             {
-                "linear" => ModelOps.ReplicateLinear(m, objects, a.Number("dx", 0), a.Number("dy", 0), a.Whole("number", 1)),
+                "linear" => Math.Abs(a.Number("dz", 0)) > 0 ? ModelOps.ReplicateLinear(m, objects, a.Number("dx", 0), a.Number("dy", 0), a.Number("dz", 0), a.Whole("number", 1)) : ModelOps.ReplicateLinear(m, objects, a.Number("dx", 0), a.Number("dy", 0), a.Whole("number", 1)),
+                "radial" => ModelOps.ReplicateRadial(m, objects, a.Number("cx", 0), a.Number("cy", 0), a.Number("angle", 90), a.Whole("number", 1)),
+                "mirror" => ModelOps.ReplicateMirror(m, objects, a.Number("x1", 0), a.Number("y1", 0), a.Number("x2", 0), a.Number("y2", 1)),
                 "story" => ModelOps.ReplicateStories(m, objects, Stories(a, m)),
-                _ => throw new ArgumentException("mode is linear or story."),
-            }),
+                _ => throw new ArgumentException("mode is linear, radial, mirror or story."),
+            };
+            var skip = a.Texts("skip");
+            foreach (var o in made) ModelOps.StripCopy(m, o, skip);
+            // Delete Original Objects: the copies stay, the objects copied go.
+            if (delete) foreach (var o in objects) ModelOps.Remove(m, o);
+            return (JsonNode)new JsonObject { ["made"] = Names(made) };
         }));
     }
 
@@ -139,7 +171,93 @@ public static class EditTools
     {
         var link = Offline(e);
         var objects = Find(a, link.Model);
-        return Core(() => link.Edit(m => (JsonNode)new JsonObject { ["moved"] = Names(ModelOps.Move(m, objects, a.Number("dx", 0), a.Number("dy", 0))) }));
+        return Core(() => link.Edit(m => (JsonNode)new JsonObject { ["moved"] = Names(ModelOps.Move(m, objects, a.Number("dx", 0), a.Number("dy", 0), a.Number("dz", 0))) }));
+    }
+
+    private static JsonNode ReverseFrames(JsonElement a, ICsiLink e)
+    {
+        var link = Offline(e);
+        var objects = Find(a, link.Model);
+        return Core(() => link.Edit(m => (JsonNode)new JsonObject { ["reversed"] = Names(objects.Select(o => ModelOps.Reverse(m, o)).ToList()) }));
+    }
+
+    private static JsonNode JoinFrames(JsonElement a, ICsiLink e)
+    {
+        var link = Offline(e);
+        var objects = Find(a, link.Model);
+        return Core(() => link.Edit(m =>
+        {
+            var before = objects.Count;
+            var left = ModelOps.Join(m, objects);
+            if (left.Count >= before) throw new ArgumentException("None of the selected beams run on from each other in a straight line, end to end on one story, with nothing else at the joint between.");
+            return (JsonNode)new JsonObject { ["frames"] = Names(left) };
+        }));
+    }
+
+    private static JsonNode AlignJoints(JsonElement a, ICsiLink e)
+    {
+        var link = Offline(e);
+        var mode = a.Need("mode");
+        if (mode is "trim" or "extend")
+        {
+            var objects = Find(a, link.Model);
+            var boundary = Core(() => ModelOps.Find(link.Model, a.Need("boundary")));
+            return Core(() => link.Edit(m =>
+            {
+                var n = ModelOps.TrimExtend(m, objects, boundary, mode == "extend");
+                if (n == 0) throw new ArgumentException(mode == "trim" ? "No selected beam crosses the boundary beam's line between its ends." : "No selected beam stops short of the boundary beam's line.");
+                return (JsonNode)new JsonObject { ["changed"] = n };
+            }));
+        }
+        var rows = a.Items("joints").Select(x => x.ValueKind == JsonValueKind.Array ? x.EnumerateArray().ToList() : []).ToList();
+        if (rows.Count == 0) throw new ToolInputException("Select the joints to align.");
+        if (rows.Any(x => x.Count is not (3 or 5) || x[2].ValueKind != JsonValueKind.String || x.Where((_, i) => i != 2).Any(y => y.ValueKind != JsonValueKind.Number))) throw new ToolInputException("Each joint is [x, y, story], or [x, y, story, new x, new y] for mode 'nearest'.");
+        if (mode == "nearest")
+            return Core(() => link.Edit(m =>
+            {
+                var n = 0;
+                foreach (var r in rows.Where(r => r.Count == 5)) n += ModelOps.AlignJoints(m, [(r[0].GetDouble(), r[1].GetDouble(), r[2].GetString()!)], r[3].GetDouble(), r[4].GetDouble());
+                if (n == 0) throw new ArgumentException("Each selected joint is already on the nearest selected frame or edge.");
+                return (JsonNode)new JsonObject { ["aligned"] = n };
+            }));
+        if (mode is not ("x" or "y")) throw new ToolInputException("mode is x, y, nearest, trim or extend.");
+        if (!a.TryGetProperty("value", out var v) || v.ValueKind != JsonValueKind.Number) throw new ToolInputException("Give the ordinate to align to.");
+        var joints = rows.Select(x => (x[0].GetDouble(), x[1].GetDouble(), x[2].GetString()!)).ToList();
+        return Core(() => link.Edit(m =>
+        {
+            var n = ModelOps.AlignJoints(m, joints, mode == "x" ? v.GetDouble() : null, mode == "y" ? v.GetDouble() : null);
+            return (JsonNode)new JsonObject { ["aligned"] = n };
+        }));
+    }
+
+    private static JsonNode ReplaceFloors(JsonElement a, ICsiLink e)
+    {
+        var link = Offline(e);
+        var objects = Find(a, link.Model);
+        var outlines = a.Items("outlines").Select(o => o.ValueKind == JsonValueKind.Array ? o.EnumerateArray().Select(p => p.ValueKind == JsonValueKind.Array && p.GetArrayLength() == 2 ? (p[0].GetDouble(), p[1].GetDouble()) : throw new ToolInputException("Each corner is [x, y].")).ToList() : throw new ToolInputException("Each outline is a list of [x, y].")).ToList();
+        return Core(() => link.Edit(m => (JsonNode)new JsonObject { ["floors"] = Names(ModelOps.ReplaceFloors(m, objects, outlines.Select(o => (IReadOnlyList<(double, double)>)o).ToList())) }));
+    }
+
+    private static JsonNode RelabelObjects(JsonElement a, ICsiLink e)
+    {
+        var link = Offline(e);
+        return Core(() => link.Edit(m =>
+        {
+            var (n, kept) = ModelOps.Relabel(m);
+            return (JsonNode)new JsonObject { ["relabelled"] = n, ["kept"] = new JsonArray(kept.Select(k => (JsonNode)k).ToArray()) };
+        }));
+    }
+
+    private static JsonNode MergeJoints(JsonElement a, ICsiLink e)
+    {
+        var link = Offline(e);
+        var joints = a.Texts("joints");
+        if (joints.Count < 2) throw new ToolInputException("Select two joints or more to merge.");
+        return Core(() => link.Edit(m =>
+        {
+            var (merged, removed) = ModelOps.MergePoints(m, joints, a.Number("tolerance", 0));
+            return (JsonNode)new JsonObject { ["merged"] = merged, ["removed"] = Names(removed) };
+        }));
     }
 
     private static JsonNode Reshape(JsonElement a, ICsiLink e)
@@ -161,6 +279,25 @@ public static class EditTools
     {
         var link = Offline(e);
         var objects = Find(a, link.Model);
+        if (a.TryGetProperty("points", out var pv) && pv.ValueKind == JsonValueKind.Array)
+        {
+            var pts = Numbers(a, "points", 2);
+            return Core(() => link.Edit(m =>
+            {
+                var made = new List<ModelOps.Obj>();
+                foreach (var o in objects)
+                {
+                    if (!o.Line) continue;
+                    var line = m.Line(o.Label)!; var (i, j) = (m.Point(line.PointI)!, m.Point(line.PointJ)!);
+                    var (dx, dy) = (j.X - i.X, j.Y - i.Y); var l2 = dx * dx + dy * dy; if (l2 <= 0) continue;
+                    var at = pts.Select(p => (t: ((p[0] - i.X) * dx + (p[1] - i.Y) * dy) / l2, p))
+                        .Where(x => Math.Abs((x.p[0] - i.X) * dy - (x.p[1] - i.Y) * dx) / Math.Sqrt(l2) <= ModelEdit.Tolerance * 10).Select(x => x.t).ToList();
+                    if (at.Any(t => t > 1e-6 && t < 1 - 1e-6)) made.AddRange(ModelOps.DivideAt(m, o, at));
+                }
+                if (made.Count == 0) throw new ArgumentException("Nothing crosses the selected beams between their ends: they stay whole.");
+                return (JsonNode)new JsonObject { ["parts"] = Names(made) };
+            }));
+        }
         var parts = a.Whole("parts", 2);
         return Core(() => link.Edit(m => (JsonNode)new JsonObject { ["parts"] = Names(objects.SelectMany(o => ModelOps.Divide(m, o, parts)).ToList()) }));
     }
