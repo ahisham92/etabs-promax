@@ -197,14 +197,14 @@ static class FileTypeTests
             HandModel.Reset();
         });
 
-        yield return ("file types: the window's File > Open shows the program's own files first, Save As writes its extension, and nothing asks with a browser alert", () =>
+        yield return ("file types: the window's File > Open shows only the program's own files, Save As writes its extension, and nothing asks with a browser alert", () =>
         {
             var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
             foreach (var part in new[]
             {
                 "const progExt = {etabs: \"cpme\", sap2000: \"cpms\", safe: \"cpmf\"};",
                 "const progText = {etabs: [\"e2k\", \"$et\"], sap2000: [\"s2k\", \"$2k\"], safe: [\"f2k\", \"$fk\"]};",
-                "All CSI ProMax files",
+                "Older CSI ProMax model (*.cpm)|*.cpm",
                 "filter: modelFilter(program)",
                 "async function hmOpenFile(path, d)",
                 "for_program: program",
@@ -213,6 +213,8 @@ static class FileTypeTests
                 "hmPost({start_program: k})",
             })
                 Check(html.Contains(part, StringComparison.Ordinal), "viewer.html lacks: " + part);
+            var filter = html[html.IndexOf("function modelFilter", StringComparison.Ordinal)..html.IndexOf("const modelFolder", StringComparison.Ordinal)];
+            Check(!filter.Contains("All files", StringComparison.Ordinal) && !filter.Contains("Object.values(progText)", StringComparison.Ordinal), "File > Open offers other programs' files (Ahmed: only that program's files)");
             var open = html[html.IndexOf("async function hmOpenFile", StringComparison.Ordinal)..html.IndexOf("function hmOpenTyped", StringComparison.Ordinal)];
             Check(!open.Contains("alert(", StringComparison.Ordinal) && !open.Contains("confirm(", StringComparison.Ordinal), "a browser alert or confirm asks");
             Check(open.Contains("dialog(\"Open Model\"", StringComparison.Ordinal), "the question is not in the page's own form");

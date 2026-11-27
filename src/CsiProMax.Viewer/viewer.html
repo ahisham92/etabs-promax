@@ -10953,15 +10953,15 @@ let hostPicks = null;
 async function hostHas() { if (hostPicks === null) hostPicks = !!(await hostPick({kind: "probe"})); return hostPicks; }
 const pickParts = path => ({folder: path.replace(/[\\/][^\\/]*$/, ""), name: path.split(/[\\/]/).pop().replace(/\.[^.]*$/, "")});
 // The model's own file has one extension per program (Ahmed 2026-11-27): .cpme for ETABS, .cpms for SAP2000 and
-// .cpmf for SAFE. The Open picker shows the window's program's files first (its model files and its own text files),
-// as each CSI program shows only its own; every CSI ProMax file, also the old .cpm, is the second choice.
+// .cpmf for SAFE. The Open picker shows ONLY the window's program's files (Ahmed: "only that program's files"), as each
+// CSI program shows only its own: its model file, its own text files, and the old .cpm (which holds its program
+// inside; one made for another program is asked about when it opens). No other program's files, no "All files".
 const progExt = {etabs: "cpme", sap2000: "cpms", safe: "cpmf"};
 const progText = {etabs: ["e2k", "$et"], sap2000: ["s2k", "$2k"], safe: ["f2k", "$fk"]};
 const extList = xs => xs.map(x => "*." + x).join(";");
 function modelFilter(prog) {
-  const k = progExt[prog] ? prog : "etabs", own = [progExt[k], ...progText[k]];
-  const all = [...Object.values(progExt), "cpm", ...Object.values(progText).flat()];
-  return `${progLabel(k)} models (${extList(own)})|${extList(own)}|All CSI ProMax files (${extList(all)})|${extList(all)}|All files (*.*)|*.*`;
+  const k = progExt[prog] ? prog : "etabs", L = progLabel(k), own = [progExt[k], ...progText[k], "cpm"];
+  return `${L} models (${extList(own)})|${extList(own)}|${L} model (*.${progExt[k]})|*.${progExt[k]}|${L} text file (${extList(progText[k])})|${extList(progText[k])}|Older CSI ProMax model (*.cpm)|*.cpm`;
 }
 const modelFolder = () => { const f = (hm.state && hm.state.file) || ""; return f ? f.replace(/[\\/][^\\/]*$/, "") : ""; };
 async function hmOpen() {

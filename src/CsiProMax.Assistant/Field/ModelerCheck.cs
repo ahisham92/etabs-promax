@@ -473,7 +473,7 @@ public static class ModelerCheck
           await hmRun("set_model_program", {program: "etabs"}, true);
           for (let i = 0; i < 30 && program !== "etabs"; i++) { if (window.cpmPull) await window.cpmPull(); await wait(200); }
           const f = modelFilter("etabs").split("|");
-          if (f[1] !== "*.cpme;*.e2k;*.$et" || !/^All CSI ProMax files/.test(f[2] || "") || !/\*\.cpm;/.test(f[3] || "")) return {fail: progLabel("etabs") + "'s Open picker shows " + f.slice(0, 4).join(" | ")};
+          if (f[1] !== "*.cpme;*.e2k;*.$et;*.cpm" || /cpms|cpmf|s2k|f2k|\*\.\*/.test(f.join("|"))) return {fail: progLabel("etabs") + "'s Open picker shows " + f.slice(0, 4).join(" | ")};
           const count = frames.length;
           const opening = hmOpenFile(exts.sap2000); await wait(1200);
           const ask = [...document.querySelectorAll(".dlg")].find(d => d.dataset.otherProgram === "sap2000");
