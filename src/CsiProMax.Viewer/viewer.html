@@ -4855,7 +4855,7 @@ function modelerMenus(m) {
     ["Draw Walls (click start and end)", "d:wall"], ["Quick Draw Walls (click a grid line)", "d:qwall"], 0,
     only(ES, ["Draw Braces (click bottom and top)", "d:brace"]), ["Draw Joints (click a point)", "d:joint"], 0, only(["etabs", "safe"], ["Design Strips...", "m:ex:strips"]), ["Tendons...", "m:ex:tendons"], only(["etabs", "safe"], ["Slab Rebar...", "m:ex:slabrebar"]), 0, ["Snap and Story Options...", "m:drawHelp"]];
   m.Assign = [["Frame Section...", "m:asgFrame", "", !fr], [program === "sap2000" ? "Area Section..." : "Slab or Wall Section...", "m:asgShell", "", !ar], 0, ["Joint Restraints (Supports)...", "m:asgSupport"], 0,
-    ["Joint", [["Springs...", "m:ad:joint", "", !any], only(["etabs", "sap2000"], ["Diaphragms...", "m:sa:jdiaph", "", !any]), only(["sap2000"], ["Constraints...", "m:ex:jconstraint", "", !any]), 0, ...hmTableItems("Joint", !any)]],
+    program === "sap2000" ? hmSapAssignMenu()[0] : ["Joint", [["Springs...", "m:ad:joint", "", !any], only(["etabs", "sap2000"], ["Diaphragms...", "m:sa:jdiaph", "", !any]), only(["sap2000"], ["Constraints...", "m:ex:jconstraint", "", !any]), 0, ...hmTableItems("Joint", !any)]],
     ["Frame", [["Releases...", "m:ad:releases", "", !fr], ["Local Axes...", "m:ad:axes", "", !fr], ["Insertion Point...", "m:ad:insertion", "", !fr], ["End Length Offsets...", "m:ad:offsets", "", !fr], ["Property Modifiers...", "m:ad:fmods", "", !fr], ["Line Springs...", "m:ad:lspring", "", !fr], only(["etabs", "sap2000"], ["Hinges...", "m:ad:hinges", "", !fr]), 0, ...hmTableItems("Frame", !fr)]],
     [program === "sap2000" ? "Area" : "Shell", [["Property Modifiers...", "m:ad:smods", "", !ar], ["Area Springs...", "m:ad:aspring", "", !ar], only(["etabs", "sap2000"], ["Diaphragms...", "m:sa:diaph", "", !ar]), only(["etabs"], ["Pier Label...", "m:sa:pier", "", !any]), only(["etabs"], ["Spandrel Label...", "m:sa:spandrel", "", !any]), 0, only(["etabs"], ["Opening...", "m:at:opening", "", !ar]), ...hmTableItems("Area", !ar)]],
     ["Assign Objects to Group...", "m:sa:group", "", !any], 0,
@@ -5086,6 +5086,7 @@ async function modelAct(a) {
   hideMenus();
   if (a.startsWith("ld:")) return hmObjectLoad(a.slice(3));
   if (a.startsWith("spr:")) return hmSprings(a.slice(4));
+  if (a.startsWith("sapa:")) return hmSapAssign(a.slice(5));
   if (a.startsWith("ad:")) return hmAssignData(a.slice(3));
   if (a.startsWith("at:")) return hmAssignTable(a.slice(3));
   if (a.startsWith("dt:")) return hmDefineTable(a.slice(3));
@@ -5124,7 +5125,7 @@ async function modelAct(a) {
     case "combos": return hmCombos();
     case "asgFrame": return hmAssignSection("f");
     case "asgShell": return hmAssignSection("a");
-    case "asgSupport": return hmAssignSupport();
+    case "asgSupport": return program === "sap2000" ? hmSapRestraints() : hmAssignSupport();
     case "fnRS": return hmFunctions("spectrum");
     case "fnTH": return hmFunctions("history");
     case "fnPSD": return hmFunctions("psd");
@@ -5224,6 +5225,349 @@ async function hmAssignTable(table, as, title0) {
   };
   if (def.many) q(d, "#atAdd").onclick = () => { read(); rows.push({}); paint(); };
   paint();
+}
+
+// ---- SAP2000 26.3's own Assign forms (Ahmed 2026-11-27: identical to SAP2000, every option there and working). Each form
+// is drawn from the pictures of SAP2000's form (project files field/reference-forms/sap2000/Assign/) and keeps what has no
+// native place as rows of SAP2000's own tables (Core SapObjectTables), which the .s2k carries. ----
+// The selected objects of a kind ("joint", "frame", "area"), the first one's rows by table, and the tool that sets them.
+async function hmSapPick(kind) {
+  const names = kind === "joint" ? hmJoints() : hmSelected(kind === "frame" ? "f" : "a");
+  if (!names.length) { hmSay(kind === "joint" ? "Select the joints first." : kind === "frame" ? "Select the frames first." : "Select the areas first.", true); return null; }
+  const pd = (await hmRun("property_definitions", {objects: names.slice(0, 1)}, true)).result; if (!pd) return null;
+  return {names, pd, now: ((pd.objects || [])[0] || {}).tables || {}, tool: {joint: "assign_joint_data", frame: "assign_frame_data", area: "assign_shell_data"}[kind]};
+}
+// SAP2000's Add to Existing / Replace Existing / Delete Existing: the rows of one table (a load table: those of one load
+// pattern) for each selected object; replace and delete drop what the object had, add keeps it.
+function hmSapRows(have, rows, how, same) {
+  const kept = how === "add" ? have : have.filter(r => !same(r));
+  return how === "delete" ? kept : [...kept, ...rows];
+}
+
+// SAP2000 26.3's Assign menu, item for item and in its order (pictures Assign/00 *.jpg). Each item opens SAP2000's own
+// form ("sapa:<key>", hmSapAssignForms); until a form is rebuilt from its picture, the Engine's form for it opens.
+function hmSapAssignMenu() {
+  const it = (label, key, keys) => [label, "m:sapa:" + key, keys || ""];
+  return [
+    ["Joint", [it("Restraints...", "jRestraints"), it("Constraints...", "jConstraints"), it("Springs...", "jSprings"), it("Masses...", "jMasses"), it("Local Axes...", "jAxes"), it("Panel Zones...", "jPanelZones"), it("Merge Number...", "jMerge")]],
+    ["Frame", [it("Frame Sections...", "fSections"), it("Property Modifiers...", "fModifiers"), it("Material Property Overwrites...", "fMaterial"), 0,
+      it("Releases/Partial Fixity...", "fReleases"), it("Local Axes...", "fAxes"), it("Reverse Connectivity...", "fReverse"), it("End (Length) Offsets...", "fOffsets"), it("Insertion Point...", "fInsertion"), 0,
+      it("Output Stations...", "fStations"), 0, it("P-Delta Force...", "fPDelta"), 0, it("Path...", "fPath"), 0,
+      it("Tension/Compression Limits...", "fTCLimits"), it("Hinges...", "fHinges"), it("Hinge Overwrites...", "fHingeOverwrites"), 0,
+      it("Line Springs...", "fSprings"), it("Line Mass...", "fMass"), 0, it("Material Temperatures...", "fMatTemp"), 0, it("Automatic Frame Mesh...", "fMesh"), 0,
+      it("Rebar Ratio for Creep Analysis...", "fCreep"), 0, it("Load Transfer Options...", "fTransfer")]],
+    ["Cable", [it("Cable Properties...", "cSections"), it("Property Modifiers...", "cModifiers"), it("Material Property Overwrites...", "cMaterial"), 0, it("Reverse Connectivity...", "cReverse"), 0,
+      it("Output Stations...", "cStations"), 0, it("Line Mass...", "cMass"), 0, it("Material Temperatures...", "cMatTemp")]],
+    ["Tendon", [it("Tendon Properties...", "tSections"), 0, it("Local Axes...", "tAxes"), 0, it("Tension/Compression Limits...", "tTCLimits"), 0, it("Material Temperatures...", "tMatTemp")]],
+    ["Area", [it("Sections...", "aSections"), it("Area Stiffness Modifiers (Shell)...", "aModifiers"), it("Area Material Property Overwrites...", "aMaterial"), it("Area Thickness Overwrites (Shells)...", "aThickness"), 0,
+      it("Local Axes...", "aAxes"), it("Reverse Local 3...", "aReverse3"), 0, it("Area Springs...", "aSprings"), it("Area Mass...", "aMass"), 0, it("Material Temperatures...", "aMatTemp"), 0,
+      it("Automatic Area Mesh...", "aMesh"), 0, it("Edge Releases...", "aEdgeReleases"), it("Generate Edge Constraints...", "aEdgeConstraints"), 0, it("Rebar Ratio for Creep Analysis...", "aCreep")]],
+    ["Solid", [it("Properties...", "sSections"), 0, it("Local Axes...", "sAxes"), 0, it("Surface Springs...", "sSprings"), it("Material Temperatures...", "sMatTemp"), it("Switch Faces...", "sSwitch"), it("Automatic Solid Mesh...", "sMesh"), it("Generate Edge Constraints...", "sEdgeConstraints")]],
+    ["Link/Support", [it("Link/Support Properties...", "lSections"), it("Frequency Dep. Link Props...", "lFreq"), it("Property Modifier...", "lModifiers"), 0, it("Local Axes...", "lAxes"), it("Reverse Connectivity", "lReverse")]], 0,
+    ["Joint Loads", [it("Forces...", "jlForces"), it("Displacements...", "jlDispl")]],
+    ["Frame Loads", [it("Gravity...", "flGravity"), 0, it("Point...", "flPoint"), it("Distributed...", "flDistributed"), 0, it("Temperature...", "flTemperature"), 0, it("Strain...", "flStrain"), it("Deformation...", "flDeformation"), 0,
+      it("Target Force...", "flTarget"), 0, it("Auto Wave Loading Parameters...", "flWave"), it("Open Structure Wind Parameters...", "flWind"), 0, it("Fireproofing...", "flFireproofing")]],
+    ["Cable Loads", [it("Gravity...", "clGravity"), 0, it("Distributed...", "clDistributed"), 0, it("Temperature...", "clTemperature"), 0, it("Strain...", "clStrain"), it("Deformation...", "clDeformation"), 0, it("Target Force...", "clTarget")]],
+    ["Tendon Loads", [it("Gravity...", "tlGravity"), 0, it("Tendon Force/Stress...", "tlForce"), 0, it("Temperature...", "tlTemperature"), 0, it("Strain...", "tlStrain"), it("Deformation...", "tlDeformation")]],
+    ["Area Loads", [it("Gravity (All)...", "alGravity"), 0, it("Uniform (Shell)...", "alUniform"), it("Uniform to Frame (Shell)...", "alToFrame"), 0, it("Surface Pressure (All)...", "alSurface"), it("Pore Pressure (Plane, Asolid)...", "alPore"), 0,
+      it("Temperature (All)...", "alTemperature"), 0, it("Strain (All)...", "alStrain"), 0, it("Rotate (Asolid)...", "alRotate"), 0, it("Wind Pressure Coefficients (Shell)...", "alWindCp")]],
+    ["Solid Loads", [it("Gravity...", "slGravity"), 0, it("Surface Pressure...", "slSurface"), it("Pore Pressure...", "slPore"), 0, it("Temperature...", "slTemperature"), 0, it("Strain...", "slStrain")]],
+    ["Link/Support Loads", [it("Gravity...", "llGravity")]], 0,
+    it("Joint Patterns...", "jPatterns"), 0,
+    it("Assign to Group...", "group", "Ctrl+Shift+G"), 0,
+    it("Update All Generated Hinge Properties", "updateHinges"), 0,
+    it("Clear Display of Assigns", "clearDisplay"), 0,
+    it("Copy Assigns", "copy"), ["Paste Assigns", "m:sapa:paste", "", !hm.copiedAssigns]];
+}
+// The forms behind it. A key with no SAP2000 form yet opens the Engine's own form for the same assignment.
+const hmSapAssignForms = {
+  jRestraints: () => hmSapRestraints(), jConstraints: () => hmSapJointConstraints(), jSprings: () => hmSapJointSprings(), jMasses: () => hmSapJointMasses(),
+  jAxes: () => hmSapJointLocalAxes(), jPanelZones: () => hmSapPanelZones(), jMerge: () => hmSapMergeNumber(),
+};
+const hmSapAssignOld = {
+  fSections: "asgFrame", fModifiers: "ad:fmods", fMaterial: "at:Frame Assignments - Material Overwrites", fReleases: "ad:releases", fAxes: "ad:axes", fOffsets: "ad:offsets", fInsertion: "ad:insertion",
+  fStations: "at:Frame Assignments - Output Stations", fTCLimits: "at:Frame Assignments - Tension and Compression Limits", fHinges: "ad:hinges", fSprings: "ad:lspring", fMass: "at:Frame Assignments - Additional Mass",
+  fMesh: "at:Frame Assignments - Frame Auto Mesh Options", aSections: "asgShell", aModifiers: "ad:smods", aMaterial: "at:Area Assignments - Material Overwrites", aThickness: "at:Area Assignments - Thickness Overwrites",
+  aAxes: "at:Area Assignments - Local Axes", aSprings: "ad:aspring", aMass: "at:Area Assignments - Additional Mass", aMesh: "at:Area Assignments - Floor Auto Mesh Options", aEdgeReleases: "at:Area Edge Release Assignments",
+  aEdgeConstraints: "at:Area Assignments - Auto Edge Constraints", tSections: "ex:tendons", lSections: "links", jlForces: "ld:joint_force", jlDispl: "ld:joint_displacement", flPoint: "ld:frame_point", flDistributed: "asgFrameLoad",
+  flTemperature: "ld:frame_temperature", flStrain: "ld:frame_strain", alUniform: "asgShellLoad", alTemperature: "ld:shell_temperature", alStrain: "ld:shell_strain", group: "sa:group",
+};
+function hmSapAssign(key) {
+  if (hmSapAssignForms[key]) return hmSapAssignForms[key]();
+  if (hmSapAssignOld[key]) return modelAct(hmSapAssignOld[key]);
+  hmSay("SAP2000's form for this item is being rebuilt from SAP2000 26.3's own form.", true);
+}
+// SAP2000's units as its forms print them: force, length, mass (kN-m gives ton), and products of them.
+function sapUnits() {
+  const u = hmU(), f = u.f, l = u.l, mass = f === "kN" && l === "m" ? "ton" : f === "N" && l === "m" ? "kg" : `${f}-s²/${l}`;
+  return {f, l, mass, kl: `${f}/${l}`, kr: `${f}-${l}/rad`, fr: `${f}/rad`, ml2: `${mass}-${l}²`, fl2: `${f}-${l}²`, l3: `${l}³`, l5: `${l}⁵`, fl: `${f}-${l}`};
+}
+// The coordinate systems a SAP2000 form lists (GLOBAL first), and the coordinate directions of its axes forms.
+async function sapCsys() { const dd = (await hmRun("definition_data", {}, true)).result || {tables: {}}; return ["GLOBAL", ...(((dd.tables || {})["Coordinate Systems"] || {}).rows || []).map(r => r.Name).filter(n => n && n.toUpperCase() !== "GLOBAL")]; }
+const sapDirs = ["+X", "-X", "+Y", "-Y", "+Z", "-Z"];
+const sapPlanes = ["12", "13", "21", "23", "31", "32"];
+// OK, Close and Apply as SAP2000's Assign forms have them: go(d) does the work and says whether it worked.
+const sapOkCloseApply = go => [["OK", d => { go(d).then(ok => ok && d.close()); return false; }, true], ["Close"], ["Apply", d => { go(d); return false; }]];
+const sapRow = (label, id, v, unit, dis) => `<span>${label}</span><input id="${id}" value="${esc(String(v ?? 0))}" ${dis ? "disabled" : ""}><span class="u">${esc(unit || "")}</span>`;
+const sapFormCss = `<style>.sapF fieldset{margin:0 0 8px}.sapF .g3{display:grid;grid-template-columns:1fr 110px 80px;gap:4px 8px;align-items:center}.sapF .g3 input{width:110px}.sapF label{display:block;margin:3px 0}.sapF .reset{display:block;margin:6px auto 0;width:250px}</style>`;
+// Sets SAP2000's own tables of each joint (several calls when Add to Existing meets joints that differ), one undo step.
+async function sapSetEach(tool, names, tablesOf, extra) {
+  const groups = new Map();
+  for (const n of names) { const t = tablesOf(n); const k = JSON.stringify(t); if (!groups.has(k)) groups.set(k, {t, objects: []}); groups.get(k).objects.push(n); }
+  for (const g of groups.values()) { const j = await hmRun(tool, {objects: g.objects, tables: g.t, ...(extra || {})}, true); if (!j.ok) { hmSay(j.error, true); return false; } }
+  hmSay("Done. Edit > Undo steps back."); return true;
+}
+// Every selected joint's rows by table.
+async function sapObjRows(names) {
+  const pd = (await hmRun("property_definitions", {objects: names}, true)).result; if (!pd) return null;
+  const by = {}; (pd.objects || []).forEach((o, i) => by[names[i]] = o.tables || {}); return {pd, by};
+}
+
+// Assign > Joint > Restraints (SAP2000 26.3: Restraints in Joint Local Directions, Fast Restraints, OK/Close/Apply).
+function hmSapRestraints() {
+  const names = hmJoints(); if (!names.length) return hmSay("Select the joints first.", true);
+  const dofs = ["UX", "UY", "UZ", "RX", "RY", "RZ"], lab = ["Translation 1", "Translation 2", "Translation 3", "Rotation about 1", "Rotation about 2", "Rotation about 3"];
+  const fast = [["fixed", dofs], ["pinned", ["UX", "UY", "UZ"]], ["roller", ["UZ"]], ["free", []]];
+  const icons = {fixed: '<path d="M12 3v13" stroke="#222" stroke-width="1.6"/><path d="M3 16h18M5 16l-2 4M9 16l-2 4M13 16l-2 4M17 16l-2 4M21 16l-2 4" stroke="#222"/>', pinned: '<path d="M12 4L5 15h14z" fill="none" stroke="#222" stroke-width="1.4"/><path d="M3 17h18M5 17l-2 4M9 17l-2 4M13 17l-2 4M17 17l-2 4M21 17l-2 4" stroke="#222"/>',
+    roller: '<path d="M12 2L7 9h10z" fill="none" stroke="#222" stroke-width="1.4"/><circle cx="12" cy="12.5" r="3" fill="none" stroke="#222" stroke-width="1.4"/><path d="M3 17h18M5 17l-2 4M9 17l-2 4M13 17l-2 4M17 17l-2 4M21 17l-2 4" stroke="#222"/>', free: '<circle cx="12" cy="12" r="4" fill="#111"/>'};
+  const d = dialog("Assign Joint Restraints", `${sapFormCss}<div class="sapF"><fieldset><legend>Restraints in Joint Local Directions</legend><div style="display:grid;grid-auto-flow:column;grid-template-rows:repeat(3,auto);gap:6px 60px">${dofs.map((k, i) => `<label><input type="checkbox" data-r="${k}" ${i < 3 ? "checked" : ""}> ${lab[i]}</label>`).join("")}</div></fieldset>
+    <fieldset><legend>Fast Restraints</legend><div style="display:flex;justify-content:space-around">${fast.map(([k]) => `<button data-f="${k}" style="width:40px;height:40px;padding:2px"><svg width="30" height="28" viewBox="0 0 24 22">${icons[k]}</svg></button>`).join("")}</div></fieldset></div>`,
+    sapOkCloseApply(async d => { const j = await hmRun("assign_joint_data", {objects: names, restraint: [...d.querySelectorAll("[data-r]:checked")].map(x => x.dataset.r)}); if (!j.ok) hmSay(j.error, true); else hmSay("Done. Edit > Undo steps back."); return j.ok; }), {width: 480});
+  d.querySelectorAll("[data-f]").forEach(b => b.onclick = () => { const on = fast.find(f => f[0] === b.dataset.f)[1]; d.querySelectorAll("[data-r]").forEach(x => x.checked = on.includes(x.dataset.r)); });
+  return d;
+}
+
+// Assign > Joint > Constraints: the defined constraints (None first) and Define Joint Constraints...
+async function hmSapJointConstraints() {
+  const names = hmJoints(); if (!names.length) return hmSay("Select the joints first.", true);
+  const xd = (await hmRun("extra_definitions", {}, true)).result; if (!xd) return;
+  const list = ["None", ...xd.constraints.map(c => c.name)];
+  const d = dialog("Assign Joint Constraints", `<select id="jcL" size="16" style="width:100%;height:330px">${opts(list, "None")}</select>
+    <div style="text-align:center;margin-top:10px"><button id="jcD" style="width:220px">Define Joint Constraints...</button></div>`,
+    sapOkCloseApply(async d => { const j = await hmRun("assign_joint_constraint", {objects: names, constraint: q(d, "#jcL").value === "None" ? "" : q(d, "#jcL").value}); if (!j.ok) hmSay(j.error, true); else hmSay("Done. Edit > Undo steps back."); return j.ok; }), {width: 340});
+  q(d, "#jcD").onclick = () => hmSapConstraints(xd, () => { d.close(); hmSapJointConstraints(); });
+  return d;
+}
+
+// Assign > Joint > Springs: Simple (six uncoupled stiffnesses) or Advanced - Coupled 6x6 Spring, in GLOBAL or Local
+// directions; Add to, Replace or Delete Existing Springs. Kept as SAP2000's Joint Spring Assignments 1 and 2.
+const sapSpringT1 = "Joint Spring Assignments 1 - Uncoupled", sapSpringT2 = "Joint Spring Assignments 2 - Coupled";
+const sapK = ["U1", "U2", "U3", "R1", "R2", "R3"];
+const sapCoupledKey = (i, j) => i === j ? sapK[i] : sapK[i] + sapK[j];  // U1U2, U1R1 ... as SAP2000's table names them (column first)
+function sapCoupledField(i, j) { const [a, b] = i <= j ? [i, j] : [j, i]; return a === b ? sapK[a] : sapK[a] + sapK[b]; }
+function hmSapJointSprings() {
+  const names = hmJoints(); if (!names.length) return hmSay("Select the joints first.", true);
+  const u = sapUnits(), units = [u.kl, u.kl, u.kl, u.kr, u.kr, u.kr], labels = ["Translation 1", "Translation 2", "Translation 3", "Rotation about 1", "Rotation about 2", "Rotation about 3"];
+  let matrix = {};
+  const d = dialog("Assign Joint Springs", `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Spring Type</legend><label><input type="radio" name="sT" value="s" checked> Simple</label><label><input type="radio" name="sT" value="a"> Advanced - Coupled 6x6 Spring</label>
+      <button id="sAdv" class="reset" style="width:330px" disabled>Modify/Show Advanced Spring Stiffness...</button></fieldset>
+    <fieldset><legend>Spring Coordinate System</legend><div style="display:flex;gap:30px;align-items:center"><span>Direction</span><select id="sC" style="width:225px">${opts(["GLOBAL", "Local"], "Local")}</select></div></fieldset>
+    <fieldset id="sSF"><legend>Simple Spring Stiffness</legend><div class="g3">${labels.map((l, i) => sapRow(l, "sK" + i, 0, units[i])).join("")}</div></fieldset>
+    <fieldset><legend>Options</legend><label><input type="radio" name="sO" value="add"> Add to Existing Springs</label><label><input type="radio" name="sO" value="replace" checked> Replace Existing Springs</label><label><input type="radio" name="sO" value="delete"> Delete Existing Springs</label></fieldset>
+    <button id="sR" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => {
+      const how = q(d, "[name=sO]:checked").value, adv = q(d, "[name=sT]:checked").value === "a", cs = q(d, "#sC").value;
+      const got = await sapObjRows(names); if (!got) return false;
+      const simple = Object.fromEntries(sapK.map((k, i) => [k, q(d, "#sK" + i).value.trim() || "0"]));
+      return sapSetEach("assign_joint_data", names, n => {
+        const have = got.by[n] || {}, h1 = (have[sapSpringT1] || [])[0], h2 = (have[sapSpringT2] || [])[0];
+        if (how === "delete") return {[sapSpringT1]: [], [sapSpringT2]: []};
+        const add = (a, b) => String((+a || 0) + (+b || 0));
+        if (!adv) {
+          const row = {CoordSys: cs, ...simple};
+          if (how === "add" && h1 && h1.CoordSys === cs) sapK.forEach(k => row[k] = add(row[k], h1[k]));
+          return {[sapSpringT1]: [row], [sapSpringT2]: how === "add" ? (have[sapSpringT2] || []) : []};
+        }
+        const row = {CoordSys: cs}; for (let i = 0; i < 6; i++) for (let j = i; j < 6; j++) { const f = sapCoupledField(i, j); row[f] = String(matrix[f] ?? 0); }
+        if (how === "add" && h2 && h2.CoordSys === cs) Object.keys(row).filter(k => k !== "CoordSys").forEach(k => row[k] = add(row[k], h2[k]));
+        return {[sapSpringT2]: [row], [sapSpringT1]: how === "add" ? (have[sapSpringT1] || []) : []};
+      }, {spring: ""});
+    }), {width: 500});
+  const sync = () => { const adv = q(d, "[name=sT]:checked").value === "a"; q(d, "#sAdv").disabled = !adv; d.querySelectorAll("#sSF input").forEach(x => { x.disabled = adv; if (adv) x.value = ""; else if (x.value === "") x.value = "0"; }); q(d, "#sSF").classList.toggle("dis", adv); };
+  d.querySelectorAll("[name=sT]").forEach(r => r.onchange = sync);
+  q(d, "#sAdv").onclick = () => hmSapCoupled6x6(matrix, q(d, "#sC").value, m => matrix = m);
+  q(d, "#sR").onclick = () => { q(d, "[name=sT][value=s]").checked = true; q(d, "#sC").value = "Local"; q(d, "[name=sO][value=replace]").checked = true; sapK.forEach((k, i) => q(d, "#sK" + i).value = "0"); matrix = {}; sync(); };
+  return d;
+}
+// Coupled 6x6 Joint Spring: the upper stiffness matrix (the lower triangle mirrors it, greyed as in SAP2000).
+function hmSapCoupled6x6(now, cs, done) {
+  const u = sapUnits(), unit = (i, j) => i < 3 && j < 3 ? u.kl : i >= 3 && j >= 3 ? u.kr : u.fr, n = ["u1", "u2", "u3", "r1", "r2", "r3"];
+  const cell = (i, j) => `<span style="display:flex;gap:4px;align-items:center"><input data-i="${i}" data-j="${j}" style="width:110px" value="${esc(String(now[sapCoupledField(i, j)] ?? 0))}" ${j < i ? "disabled" : ""}><span class="u" style="width:72px">${unit(i, j)}</span></span>`;
+  const d = dialog("Coupled 6x6 Joint Spring", `<fieldset><legend>Upper Stiffness Matrix - ${cs === "Local" ? "Local Coordinate System" : cs + " Coordinate System"}</legend>
+    <div style="display:grid;grid-template-columns:24px repeat(6,auto);gap:6px 6px;align-items:center"><span></span>${n.map(x => `<b style="font-weight:normal;text-align:center">${x}</b>`).join("")}
+    ${n.map((r, i) => `<span>${r}</span>${n.map((c, j) => cell(i, j)).join("")}`).join("")}</div></fieldset>
+    <div style="text-align:center"><button id="cOff" style="width:220px">Clear Off-Diagonal Terms</button></div>`,
+    [["OK", d => { const m = {}; d.querySelectorAll("input[data-i]").forEach(x => { const i = +x.dataset.i, j = +x.dataset.j; if (j >= i) m[sapCoupledField(i, j)] = x.value.trim() || "0"; }); done(m); return true; }, true], ["Cancel"]], {width: 1240});
+  const mirror = () => d.querySelectorAll("input[data-i]").forEach(x => { const i = +x.dataset.i, j = +x.dataset.j; if (j < i) x.value = q(d, `input[data-i="${j}"][data-j="${i}"]`).value; });
+  d.querySelectorAll("input[data-i]").forEach(x => x.oninput = mirror); mirror();
+  q(d, "#cOff").onclick = () => { d.querySelectorAll("input[data-i]").forEach(x => { if (x.dataset.i !== x.dataset.j) x.value = "0"; }); };
+  return d;
+}
+
+// Assign > Joint > Masses: As Mass, As Weight or As Volume and Material Property, in GLOBAL or Local directions, with the
+// mass moments of inertia; Add to, Replace or Delete Existing Masses (SAP2000's three joint mass tables).
+const sapMassT = {mass: "Joint Added Mass Assignments", weight: "Joint Added Mass By Weight Assignments", volume: "Joint Added Mass By Volume Assignments"};
+const sapMassF = {mass: [["Mass1", "Mass2", "Mass3"], ["MMI1", "MMI2", "MMI3"]], weight: [["Weight1", "Weight2", "Weight3"], ["WMI1", "WMI2", "WMI3"]], volume: [["Vol1", "Vol2", "Vol3"], ["VMI1", "VMI2", "VMI3"]]};
+async function hmSapJointMasses() {
+  const names = hmJoints(); if (!names.length) return hmSay("Select the joints first.", true);
+  const defs = await hmDefs(), u = sapUnits(), mats = defs.materials.map(m => m.name);
+  const unitOf = k => ({mass: [u.mass, u.ml2], weight: [u.f, u.fl2], volume: [u.l3, u.l5]})[k];
+  const tr = ["Translation 1", "Translation 2", "Translation 3"], rot = ["Rotation about 1", "Rotation about 2", "Rotation about 3"];
+  const d = dialog("Assign Joint Masses", `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Specify Joint Mass</legend><label><input type="radio" name="mK" value="mass" checked> As Mass</label><label><input type="radio" name="mK" value="weight"> As Weight</label><label><input type="radio" name="mK" value="volume"> As Volume and Material Property</label>
+      <div style="display:flex;gap:8px;align-items:center;margin:4px 0 0 46px"><span style="width:90px">Material</span><button id="mPlus" style="width:28px;padding:0">+</button><select id="mM" style="width:225px">${opts(mats, mats.find(m => /4000|concrete|^C\d/i.test(m)) || mats[0])}</select></div></fieldset>
+    <fieldset><legend>Mass Coordinate System</legend><div style="display:flex;gap:30px;align-items:center"><span>Direction</span><select id="mC" style="width:225px">${opts(["GLOBAL", "Local"], "Local")}</select></div></fieldset>
+    <fieldset><legend>Mass</legend><div class="g3" id="mT">${tr.map((l, i) => sapRow(l, "mT" + i, 0, "")).join("")}</div></fieldset>
+    <fieldset><legend>Mass Moment of Inertia</legend><div class="g3" id="mR">${rot.map((l, i) => sapRow(l, "mR" + i, 0, "")).join("")}</div></fieldset>
+    <fieldset><legend>Options</legend><label><input type="radio" name="mO" value="add"> Add to Existing Masses</label><label><input type="radio" name="mO" value="replace" checked> Replace Existing Masses</label><label><input type="radio" name="mO" value="delete"> Delete Existing Masses</label></fieldset>
+    <button id="mRst" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => {
+      const kind = q(d, "[name=mK]:checked").value, how = q(d, "[name=mO]:checked").value, cs = q(d, "#mC").value, [tf, rf] = sapMassF[kind];
+      const got = await sapObjRows(names); if (!got) return false;
+      return sapSetEach("assign_joint_data", names, n => {
+        const have = got.by[n] || {}, out = {"Joint Assignments - Additional Mass": []};
+        for (const k of Object.keys(sapMassT)) out[sapMassT[k]] = how === "add" ? (have[sapMassT[k]] || []) : [];
+        if (how === "delete") return out;
+        const row = {CoordSys: cs, ...(kind === "volume" ? {Material: q(d, "#mM").value} : {})};
+        tf.forEach((f, i) => row[f] = q(d, "#mT" + i).value.trim() || "0"); rf.forEach((f, i) => row[f] = q(d, "#mR" + i).value.trim() || "0");
+        const was = (have[sapMassT[kind]] || [])[0];
+        if (how === "add" && was && was.CoordSys === cs && (kind !== "volume" || was.Material === row.Material)) [...tf, ...rf].forEach(f => row[f] = String((+row[f] || 0) + (+was[f] || 0)));
+        out[sapMassT[kind]] = [row];
+        return out;
+      });
+    }), {width: 500});
+  const sync = () => { const k = q(d, "[name=mK]:checked").value, [a, b] = unitOf(k); d.querySelectorAll("#mT .u").forEach(x => x.textContent = a); d.querySelectorAll("#mR .u").forEach(x => x.textContent = b); q(d, "#mM").disabled = q(d, "#mPlus").disabled = k !== "volume"; };
+  d.querySelectorAll("[name=mK]").forEach(r => r.onchange = sync);
+  q(d, "#mPlus").onclick = () => modelAct("materials");
+  q(d, "#mRst").onclick = () => { q(d, "[name=mK][value=mass]").checked = true; q(d, "#mC").value = "Local"; q(d, "[name=mO][value=replace]").checked = true; d.querySelectorAll("#mT input,#mR input").forEach(x => x.value = "0"); sync(); };
+  sync();
+  return d;
+}
+
+// Assign > Joint > Local Axes: Standard (rotations about Z, Y, X), Advanced (Joint Advanced Axes) or Reset to Default
+// (Global). SAP2000's Joint Local Axes Assignments 1 - Typical and 2 - Advanced.
+const sapJAx1 = "Joint Local Axes Assignments 1 - Typical", sapJAx2 = "Joint Local Axes Assignments 2 - Advanced";
+const sapAdvDefault = {LocalPlane: "31", AxOption1: "Coord Dir", AxCoordSys: "GLOBAL", AxCoordDir: "+Z", AxVecJt1: "", AxVecJt2: "", AxVecX: "0", AxVecY: "0", AxVecZ: "1",
+  PlOption1: "Coord Dir", PlCoordSys: "GLOBAL", CoordDir1: "+X", CoordDir2: "+Y", PlVecJt1: "", PlVecJt2: "", PlVecX: "1", PlVecY: "0", PlVecZ: "0"};
+const sapOptLabel = {"Coord Dir": "Coordinate Direction", "Two Joints": "Two Joints", "User Vector": "User Vector"};
+function sapAdvSummary(a) {
+  const ax = a.AxOption1 === "Coord Dir" ? `${a.AxCoordSys} ${a.AxCoordDir}` : a.AxOption1 === "Two Joints" ? `Joints ${a.AxVecJt1 || "None"} to ${a.AxVecJt2 || "None"}` : `(${a.AxVecX}, ${a.AxVecY}, ${a.AxVecZ})`;
+  const pl = a.PlOption1 === "Coord Dir" ? `Primary: ${a.PlCoordSys} ${a.CoordDir1}&nbsp;&nbsp;&nbsp;Secondary: ${a.PlCoordSys} ${a.CoordDir2}` : a.PlOption1 === "Two Joints" ? `Joints ${a.PlVecJt1 || "None"} to ${a.PlVecJt2 || "None"}` : `(${a.PlVecX}, ${a.PlVecY}, ${a.PlVecZ})`;
+  return `<p>Axial Reference Vector Type:&nbsp; ${sapOptLabel[a.AxOption1]}<br>&nbsp;&nbsp;&nbsp;&nbsp;${ax}</p><p>Local Plane = Plane ${a.LocalPlane[0]}-${a.LocalPlane[1]}</p><p>Plane Reference Vector Type:&nbsp; ${sapOptLabel[a.PlOption1]}<br>&nbsp;&nbsp;&nbsp;&nbsp;${pl}</p>`;
+}
+async function hmSapJointLocalAxes() {
+  const names = hmJoints(); if (!names.length) return hmSay("Select the joints first.", true);
+  const csys = await sapCsys(); let adv = {...sapAdvDefault};
+  const d = dialog("Assign Joint Local Axes", `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Options</legend><label><input type="radio" name="aO" value="std" checked> Specify Standard Local Axes</label><label><input type="radio" name="aO" value="adv"> Specify Advanced Local Axes</label><label><input type="radio" name="aO" value="reset"> Reset Local Axes to Default&nbsp; (Global)</label></fieldset>
+    <fieldset id="aRot"><legend>Rotation</legend><div class="g3">${sapRow("Rotation about Z", "aA", 0, "deg")}${sapRow("Rotation about Y", "aB", 0, "deg")}${sapRow("Rotation about X", "aC", 0, "deg")}</div></fieldset>
+    <fieldset id="aAdv" style="min-height:200px;display:flex;flex-direction:column"><legend>Advanced</legend><div id="aSum" style="flex:1"></div><button id="aMod" class="reset" style="width:300px">Modify/Show Advanced Parameters...</button></fieldset>
+    <button id="aRst" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => {
+      const o = q(d, "[name=aO]:checked").value;
+      const t1 = o === "reset" ? [] : [{AngleA: q(d, "#aA").value.trim() || "0", AngleB: q(d, "#aB").value.trim() || "0", AngleC: q(d, "#aC").value.trim() || "0", AdvanceAxes: o === "adv" ? "Yes" : "No"}];
+      return sapSetEach("assign_joint_data", names, () => ({[sapJAx1]: t1, [sapJAx2]: o === "adv" ? [{...adv}] : []}));
+    }), {width: 500});
+  const sync = () => { const o = q(d, "[name=aO]:checked").value; d.querySelectorAll("#aRot input").forEach(x => x.disabled = o === "reset"); q(d, "#aRot").classList.toggle("dis", o === "reset");
+    q(d, "#aMod").disabled = o !== "adv"; q(d, "#aAdv").classList.toggle("dis", o !== "adv"); q(d, "#aSum").innerHTML = o === "adv" ? sapAdvSummary(adv) : ""; };
+  d.querySelectorAll("[name=aO]").forEach(r => r.onchange = sync);
+  q(d, "#aMod").onclick = () => hmSapAdvancedAxes("Joint Advanced Axes", adv, csys, a => { adv = a; sync(); });
+  q(d, "#aRst").onclick = () => { q(d, "[name=aO][value=std]").checked = true; ["#aA", "#aB", "#aC"].forEach(i => q(d, i).value = "0"); adv = {...sapAdvDefault}; sync(); };
+  sync();
+  return d;
+}
+// Joint (and Frame/Area/Solid/Link) Advanced Axes: the local plane, its axial and plane reference vectors each by
+// Coordinate Direction, Two Joints or User Vector.
+function hmSapAdvancedAxes(title, now, csys, done, opt) {
+  const joints = ["None", ...[...pointXyz.keys()]], a = {...now};
+  const side = (k, label) => {
+    const p = k === "Ax" ? "Ax" : "Pl";
+    return `<fieldset><legend>${label} Reference Vector Specified By</legend>${["Coord Dir", "Two Joints", "User Vector"].map(v => `<label><input type="radio" name="${p}O" value="${v}" ${a[p + "Option1"] === v ? "checked" : ""}> ${sapOptLabel[v]}</label>`).join("")}
+      <div style="display:flex;gap:20px;align-items:center;margin-top:6px"><span style="width:120px">Coordinate System</span><select id="${p}CS" style="width:240px">${opts(csys, a[p === "Ax" ? "AxCoordSys" : "PlCoordSys"])}</select></div></fieldset>
+      <fieldset id="${p}Box" style="min-height:120px"></fieldset>`;
+  };
+  const d = dialog(title, `<div class="sapF">${sapFormCss}<fieldset><legend>Local Plane</legend><div style="display:flex;gap:60px;align-items:center"><span>Plane</span><select id="xP" style="width:150px">${opts(sapPlanes.map(p => [p, `Plane ${p[0]}-${p[1]}`]), a.LocalPlane)}</select></div></fieldset>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px"><div>${side("Ax", "Axial")}</div><div>${side("Pl", "Plane")}</div></div>
+    <button id="xR" class="reset">Reset Form to Default Values</button></div>`,
+    [["OK", d => { read(); done(a); return true; }, true], ["Cancel"]], {width: 880});
+  const sel = (id, list, v) => `<select id="${id}" style="width:150px">${opts(list, v)}</select>`, inp = (id, v) => `<input id="${id}" style="width:110px" value="${esc(String(v))}">`;
+  const line = (l, c) => `<div style="display:flex;justify-content:space-between;align-items:center;margin:6px 0"><span>${l}</span>${c}</div>`;
+  function read() {
+    a.LocalPlane = q(d, "#xP").value;
+    for (const p of ["Ax", "Pl"]) {
+      a[p + "Option1"] = q(d, `[name=${p}O]:checked`).value; a[p === "Ax" ? "AxCoordSys" : "PlCoordSys"] = q(d, `#${p}CS`).value;
+      d.querySelectorAll(`#${p}Box [data-f]`).forEach(x => a[x.dataset.f] = x.value === "None" ? "" : x.value.trim());
+    }
+  }
+  function paint() {
+    for (const p of ["Ax", "Pl"]) {
+      const o = a[p + "Option1"], box = q(d, `#${p}Box`), ax = p === "Ax";
+      q(d, `#${p}CS`).disabled = o === "Two Joints";
+      box.innerHTML = o === "Coord Dir" ? (ax ? `<legend>Axial Coordinate Direction</legend>${line("Direction", sel("AxD", sapDirs, a.AxCoordDir))}` : `<legend>Plane Coordinate Direction</legend>${line("Primary Direction", sel("PlD1", sapDirs, a.CoordDir1))}${line("Secondary Direction", sel("PlD2", sapDirs, a.CoordDir2))}`)
+        : o === "Two Joints" ? `<legend>Two Joints for ${ax ? "Axial" : "Plane"} Reference Vector</legend>${line(ax ? "Axial Joint 1" : "Plane Joint 1", sel(p + "J1", joints, a[p + "VecJt1"] || "None"))}${line(ax ? "Axial Joint 2" : "Plane Joint 2", sel(p + "J2", joints, a[p + "VecJt2"] || "None"))}`
+        : `<legend>User ${ax ? "Axial" : "Plane"} Reference Vector</legend>${["X", "Y", "Z"].map(c => line(`${ax ? "Axial" : "Plane"} Vector ${c}`, inp(p + "V" + c, a[p + "Vec" + c]))).join("")}`;
+      const tag = {AxD: "AxCoordDir", PlD1: "CoordDir1", PlD2: "CoordDir2", [p + "J1"]: p + "VecJt1", [p + "J2"]: p + "VecJt2", [p + "VX"]: p + "VecX", [p + "VY"]: p + "VecY", [p + "VZ"]: p + "VecZ"};
+      box.querySelectorAll("select,input").forEach(x => x.dataset.f = tag[x.id]);
+    }
+  }
+  d.querySelectorAll("[name=AxO],[name=PlO]").forEach(r => r.onchange = () => { read(); paint(); });
+  q(d, "#xR").onclick = () => { Object.assign(a, sapAdvDefault); q(d, "#xP").value = a.LocalPlane; for (const p of ["Ax", "Pl"]) { q(d, `[name=${p}O][value="Coord Dir"]`).checked = true; q(d, `#${p}CS`).value = "GLOBAL"; } paint(); };
+  paint();
+  return d;
+}
+
+// Assign > Joint > Panel Zones (SAP2000's Joint Panel Zone Assignments).
+async function hmSapPanelZones() {
+  const names = hmJoints(); if (!names.length) return hmSay("Select the joints first.", true);
+  const pd = (await hmRun("property_definitions", {}, true)).result || {}, links = (pd.links || []).map(l => l.name), u = sapUnits();
+  const d = dialog("Assign Joint Panel Zones", `${sapFormCss}<div class="sapF" style="display:grid;grid-template-columns:1fr 300px;gap:0 12px">
+    <fieldset><legend>Properties</legend>
+      <label><input type="radio" name="pP" value="col" checked> Elastic Properties from Column</label>
+      <label><input type="radio" name="pP" value="dbl"> Elastic Properties from Column and Doubler Plate</label>
+      <div class="pzr"><span>Doubler Plate Thicknes</span><input id="pD"><span class="u">${u.l}</span></div>
+      <label><input type="radio" name="pP" value="spr"> Specified Spring Stiffnesses</label>
+      <div class="pzr"><span>Major Stiffness</span><input id="pMa"><span class="u">${u.kr}</span></div><div class="pzr"><span>Minor Stiffness</span><input id="pMi"><span class="u">${u.kr}</span></div>
+      <label><input type="radio" name="pP" value="link" ${links.length ? "" : "disabled"}> Specified Link Property</label>
+      <div class="pzr"><span>Link Property</span><span style="display:flex;gap:4px"><button id="pPlus" style="width:28px;padding:0">+</button><select id="pL" style="width:200px">${opts(links, links[0] || "")}</select></span><span></span></div>
+      <style>.pzr{display:grid;grid-template-columns:1fr 112px 80px;gap:6px;align-items:center;margin:4px 0 4px 46px}.pzr input{width:110px}</style></fieldset>
+    <div><fieldset><legend>Panel Zone Connects</legend><label><input type="radio" name="pC" value="Beams to Other Objects" checked> Beams to Other Objects</label><label><input type="radio" name="pC" value="Braces to Other Objects"> Braces to Other Objects</label></fieldset>
+      <fieldset><legend>Local Axes</legend><label><input type="radio" name="pA" value="Column" checked> From Column</label><div style="display:flex;justify-content:space-between;align-items:center"><label><input type="radio" name="pA" value="User"> Specified Angle</label><input id="pAng" style="width:110px"></div></fieldset>
+      <fieldset><legend>Options</legend><label><input type="radio" name="pO" value="replace" checked> Replace Existing Panel Zones</label><label><input type="radio" name="pO" value="delete"> Delete Existing Panel Zones</label></fieldset></div>
+    <button id="pR" class="reset" style="grid-column:1/3">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => {
+      if (q(d, "[name=pO]:checked").value === "delete") return sapSetEach("assign_joint_data", names, () => ({"Joint Panel Zone Assignments": [], "Joint Assignments - Panel Zone": []}));
+      const p = q(d, "[name=pP]:checked").value, row = {PZFrom: {col: "Elastic", dbl: "Elastic", spr: "User", link: "Link"}[p], PZConnect: q(d, "[name=pC]:checked").value, AxesFrom: q(d, "[name=pA]:checked").value};
+      if (p === "dbl") row.DoublerPl = q(d, "#pD").value.trim() || "0";
+      if (p === "spr") { row.MajorStiff = q(d, "#pMa").value.trim() || "0"; row.MinorStiff = q(d, "#pMi").value.trim() || "0"; }
+      if (p === "link") row.PZLink = q(d, "#pL").value;
+      if (row.AxesFrom === "User") row.PZAxesAngle = q(d, "#pAng").value.trim() || "0";
+      return sapSetEach("assign_joint_data", names, () => ({"Joint Panel Zone Assignments": [row], "Joint Assignments - Panel Zone": []}));
+    }), {width: 860});
+  const sync = () => {
+    const p = q(d, "[name=pP]:checked").value, link = p === "link";
+    const on = (id, yes, v) => { const x = q(d, id); x.disabled = !yes; if (!yes) x.value = ""; else if (x.value === "" && v != null) x.value = v; };
+    on("#pD", p === "dbl", "0"); on("#pMa", p === "spr", "0"); on("#pMi", p === "spr", "0");
+    q(d, "#pL").disabled = q(d, "#pPlus").disabled = !link;
+    // SAP2000 offers bracing connectivity and a specified angle only for a link panel zone.
+    q(d, "[name=pC][value^=Braces]").disabled = q(d, "[name=pA][value=User]").disabled = !link;
+    if (!link) { q(d, "[name=pC][value^=Beams]").checked = true; q(d, "[name=pA][value=Column]").checked = true; }
+    on("#pAng", link && q(d, "[name=pA]:checked").value === "User", "0");
+  };
+  d.querySelectorAll("[name=pP],[name=pA]").forEach(r => r.onchange = sync);
+  q(d, "#pPlus").onclick = () => modelAct("links");
+  q(d, "#pR").onclick = () => { q(d, "[name=pP][value=col]").checked = true; q(d, "[name=pO][value=replace]").checked = true; sync(); };
+  sync();
+  return d;
+}
+
+// Assign > Joint > Merge Number (SAP2000's Joint Merge Number Assignments).
+function hmSapMergeNumber() {
+  const names = hmJoints(); if (!names.length) return hmSay("Select the joints first.", true);
+  const d = dialog("Assign Merge Numbers", `<fieldset><legend>Point Object Merge Number</legend><div style="display:flex;justify-content:space-between;align-items:center;gap:30px"><span>Merge Number</span><input id="mgN" style="width:110px" value="0"></div></fieldset>`,
+    sapOkCloseApply(async d => { const v = q(d, "#mgN").value.trim(); if (!/^\d+$/.test(v)) { formError(d, "The merge number is a whole number, 0 or more."); return false; }
+      return sapSetEach("assign_joint_data", names, () => ({"Joint Merge Number Assignments": v === "0" ? [] : [{MergeNumber: v}]})); }), {width: 330});
+  return d;
 }
 
 // ---- Define: the items kept as rows of the program's own definition tables, rebar sizes and a section's rebar ----
