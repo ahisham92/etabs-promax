@@ -985,6 +985,15 @@ static class TesterBugTests
             Check(written.Contains("DBTABLESETLOADPATTERN \"Test\"  \"DEAD\"", StringComparison.Ordinal) || written.Contains("DBTABLESETLOADPATTERN", StringComparison.Ordinal), "the table set's own pattern went missing");
             Check(written.Contains("DBTABLESETLOADCASE", StringComparison.Ordinal), "the table set's own case went missing");
         });
+        yield return ("field test: an ETABS that holds (Untitled) after opening the scratch copy is given the file again, and a menu that did not open is clicked open and says what it shows", () =>
+        {
+            var scratch = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Field", "ScratchProgram.cs"));
+            var at = scratch.IndexOf("\"the link reads the scratch model, and no other\"", StringComparison.Ordinal);
+            Check(at > 0 && scratch.IndexOf("\"open the file again\"", at, StringComparison.Ordinal) is var again && again > at && again < scratch.IndexOf("Link = link;", at, StringComparison.Ordinal), "the link step does not open the file again");
+            var menu = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Etabs", "MenuCommand.cs"));
+            Check(menu.Contains("+ Shows(under, processId)", StringComparison.Ordinal), "a missing menu item does not say what the menu showed");
+            Check(menu.Contains("((InvokePattern)click).Invoke()", StringComparison.Ordinal), "a drop-down that did not open is not clicked open");
+        });
         yield return ("field test: steps a workaround can test are tested, not left out (Ahmed, 2026-11-26: only a missing program or licence)", () =>
         {
             string Src(string f) => File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant", f));
