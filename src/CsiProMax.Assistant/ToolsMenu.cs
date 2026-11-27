@@ -152,8 +152,9 @@ public static class ToolsMenu
     /// <param name="isOpen">For tests: whether a version of a program is open. Left out: asked of Windows.</param>
     /// <param name="change">False: say what would be done, and change nothing.</param>
     /// <param name="prefer">An entry that names another folder's copy is made to name this folder. Left out: only when this folder is Documents\CSI ProMax.</param>
-    public static IReadOnlyList<Entry> Repair(string? installFolder = null, string? settingsRoot = null, Func<CsiProgram, int, bool>? isOpen = null, bool change = true, bool? prefer = null)
+    public static IReadOnlyList<Entry> Repair(string? installFolder = null, string? settingsRoot = null, Func<CsiProgram, int, bool>? isOpen = null, bool change = true, bool? prefer = null, Func<CsiProgram, int, bool>? hasPlugIn = null)
     {
+        hasPlugIn ??= settingsRoot is null ? HasPlugInLoaded : (_, _) => false;
         var found = new List<Entry>();
         installFolder ??= InstallFolder();
         var mine = prefer ?? (installFolder is not null && DefaultInstall() is { } usual && string.Equals(usual.TrimEnd('\\', '/'), installFolder.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase));
@@ -181,6 +182,10 @@ public static class ToolsMenu
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or System.Security.SecurityException) { state = State.Unknown; }
                 // Missing from the file of the very program this window was started from: the program has it.
                 if (state is State.Open or State.Missing or State.Others or State.Unknown && string.Equals(label, OpenedFrom, StringComparison.OrdinalIgnoreCase)) state = State.Running;
+                // Missing from the file of a program that is open with CSI ProMax's plug-in loaded in it: the program has
+                // it in its Tools menu and writes the list when it closes (0.4.64 SAP2000 rerun: the engineer's ETABS 23 was
+                // open with Tools > CSI ProMax in use, its file said NumberPlugIns=0, and two checks failed).
+                else if (state is State.Open && hasPlugIn(plugIn.Program, number)) state = State.Running;
                 found.Add(new Entry(label, plugIn.Program, number, ini, state, path));
             }
         }
@@ -284,6 +289,30 @@ public static class ToolsMenu
     /// so the file of an open program is never changed. The version is told from the folder the program runs from
     /// (...\ETABS 23\ETABS.exe); a window whose folder cannot be read counts as open.
     /// </summary>
+    /// <summary>Whether an open copy of the program's version <paramref name="number"/> has CSI ProMax's plug-in file loaded.</summary>
+    private static bool HasPlugInLoaded(CsiProgram program, int number)
+    {
+        if (!OperatingSystem.IsWindows()) return false;
+        var dll = PlugIns.First(p => p.Program.Key == program.Key).Dll;
+        Process[] running;
+        try { running = Process.GetProcessesByName(program.ProcessName); }
+        catch (InvalidOperationException) { return false; }
+        try
+        {
+            foreach (var process in running)
+                try
+                {
+                    if (LabelOfFolder(System.IO.Path.GetDirectoryName(process.MainModule?.FileName ?? "")) != $"{program.Name} {number}") continue;
+                    foreach (ProcessModule module in process.Modules)
+                        // A live update renames the file in use (CsiProMaxPlugin.dll.old-xxxxxxxx): still the plug-in.
+                        if (System.IO.Path.GetFileName(module.FileName) is var name && (string.Equals(name, dll, StringComparison.OrdinalIgnoreCase) || name.StartsWith(dll + ".old", StringComparison.OrdinalIgnoreCase))) return true;
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException) { /* a process this one may not look into */ }
+        }
+        finally { foreach (var process in running) process.Dispose(); }
+        return false;
+    }
+
     private static bool IsOpen(CsiProgram program, int number)
     {
         Process[] running;
