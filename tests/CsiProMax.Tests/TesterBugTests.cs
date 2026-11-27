@@ -365,6 +365,12 @@ static class TesterBugTests
                 var open = ToolsMenu.Repair(install, settings, (program, number) => program.Key == "etabs" && number == 23);
                 Equal(ToolsMenu.State.Open, open.Single(e => e.Label == "ETABS 23").State, "ETABS 23, open");
                 Equal(none, System.Text.Encoding.Latin1.GetString(File.ReadAllBytes(etabs23)), "its file while it is open");
+                // 0.4.64 SAP2000 rerun: the engineer's ETABS 23 was open with CSI ProMax's plug-in in use and its file listing
+                // none: its Tools menu has it, so it is not a failure, and the file is still left alone.
+                var inUse = ToolsMenu.Repair(install, settings, (program, number) => program.Key == "etabs" && number == 23, hasPlugIn: (program, number) => program.Key == "etabs" && number == 23);
+                Equal(ToolsMenu.State.Running, inUse.Single(e => e.Label == "ETABS 23").State, "ETABS 23, open with the plug-in loaded");
+                Check(inUse.Single(e => e.Label == "ETABS 23").Listed, "it counts as in the Tools menu");
+                Equal(none, System.Text.Encoding.Latin1.GetString(File.ReadAllBytes(etabs23)), "its file is still left alone");
 
                 var entries = ToolsMenu.Repair(install, settings, (_, _) => false);
                 Equal("ETABS 22, ETABS 23, SAFE 22, SAFE 23, SAP2000 26", string.Join(", ", entries.Select(e => e.Label)), "the programs CSI ProMax works with");
