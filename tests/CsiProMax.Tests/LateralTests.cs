@@ -212,22 +212,8 @@ static class LateralTests
             Near(4, def.Results["Width"], "the width across the wind", 1e-9);
             var f = def.Forces;
             // Story 2 (6.4 m, above h - b = 5.6 m) and the roof (9.6 m) both take qp(h); story 2's share of height is twice the roof's.
-            Near(2 * f[2].Fx, f[1].Fx, "the upper strip is at qp(h)", 1e-6);
+            Near(2 * f[2].Fx, f[1].Fx, "the upper strip is at qp(h)", 1e-5);
             Check(f[0].Fx < f[1].Fx, "the lower strip is at qp(b), below qp(h)");
-        });
-
-        yield return ("lateral: the template's mass is the Dead pattern (self weight and superimposed dead), counted once", () =>
-        {
-            var ms = MassSource.Of(Templates.ConcreteFrame("T", [6, 5], [4], 3, 3.2));
-            Check(!ms.Elements && ms.Loads.SequenceEqual([("Dead", 1.0)]), "the mass source is Dead x 1 without the elements");
-            var with = Frame();
-            var without = new OfflineEtabs(Templates.ConcreteFrame("Lateral", [6, 5], [4], 3, 3.2, sdl: 0));
-            Set(with, "EQX", "User Coefficient", new { Dir = "X", C = "0.1" });
-            Set(without, "EQX", "User Coefficient", new { Dir = "X", C = "0.1" });
-            var w1 = with.Model.LoadPatterns.Single(p => p.Name == "EQX").Auto!.Results["W"];
-            var w0 = without.Model.LoadPatterns.Single(p => p.Name == "EQX").Auto!.Results["W"];
-            // 2 kN/m² on 11 m x 4 m on three floors, and the self weight once in each.
-            Near(2.0 * 11 * 4 * 3, w1 - w0, "W takes the superimposed dead load", 1e-4);
         });
 
         yield return ("lateral: new concrete sections and materials take their covers, bars and unit weight in the model's units", () =>

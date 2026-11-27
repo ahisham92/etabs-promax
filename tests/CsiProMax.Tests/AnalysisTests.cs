@@ -111,12 +111,11 @@ static class AnalysisTests
             var link = Frame();
             Run(link, "set_lateral_load", new { name = "EQX", code = "User Coefficient", values = new { C = "0.1" } });
             var w0 = link.Model.LoadPatterns.First(p => p.Name == "EQX").Auto!.Results["W"];
-            // The template's mass source is the Dead pattern (self weight and superimposed dead): add a quarter of the live load.
-            Run(link, "define_mass_source", new { elements = false, loads = new object[] { new { pattern = "Dead", factor = 1.0 }, new { pattern = "Live", factor = 0.25 } } });
+            Run(link, "define_mass_source", new { elements = true, loads = new object[] { new { pattern = "Live", factor = 0.25 } } });
             var w1 = link.Model.LoadPatterns.First(p => p.Name == "EQX").Auto!.Results["W"];
             Check(w1 > w0, $"a quarter of the live load adds weight: {w0} then {w1}");
             var ms = CsiProMax.Lateral.MassSource.Of(ViaE2k(link.Model));
-            Check(!ms.Elements && ms.Loads.SequenceEqual([("Dead", 1.0), ("Live", 0.25)]), "the mass source reads back from the .e2k");
+            Check(ms.Elements && ms.Loads.Single() == ("Live", 0.25), "the mass source reads back from the .e2k");
             Check(S2kWriter.Write(link.Model, "a.s2k").Text.Contains("LoadPat=Live") , "the .s2k mass source names Live");
             Refused(link, "delete_definition", new { kind = "load_pattern", name = "Live" }, "mass source");
             Refused(link, "define_mass_source", new { loads = new object[] { new { pattern = "Nope", factor = 1 } } }, "no load pattern");
