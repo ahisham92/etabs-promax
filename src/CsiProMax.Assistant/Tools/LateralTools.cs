@@ -96,7 +96,7 @@ public static class LateralTools
             ["code"] = c.Name, ["method"] = c.About, ["programs"] = c.Programs,
             ["inputs"] = new JsonArray(c.Params.Select(p => (JsonNode)new JsonObject
             {
-                ["key"] = p.Key, ["name"] = p.Label, ["default"] = p.Default, ["type"] = p.Kind.ToString().ToLowerInvariant(),
+                ["key"] = p.Key, ["name"] = p.Label, ["default"] = p.Default, ["type"] = p.Kind.ToString().ToLowerInvariant(), ["group"] = LateralCodes.Group(c, p),
                 ["choices"] = p.Kind == ParamKind.Story ? new JsonArray(m.Stories.Select(s => (JsonNode)s.Name).ToArray()) : p.Choices is null ? null : new JsonArray(p.Choices.Select(x => (JsonNode)x).ToArray()),
                 ["about"] = p.Help.Length > 0 ? p.Help : null,
             }).ToArray()),

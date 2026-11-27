@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -165,8 +166,17 @@ public static class ModelerCheck
         const hit = all.find(it => it[1] === a);
         return !hit || !!hit[3];
       }
+      // A picture of one form (Ahmed 2026-11-27: the Engine's forms side by side with the programs'): "#cpmform=program|act"
+      // opens only that form, with a beam and a floor selected, for the browser's screenshot.
+      async function formShot(target, a) {
+        if (target && program !== target) { await hmRun("set_model_program", {program: target}, true); for (let i = 0; i < 30 && program !== target; i++) { if (window.cpmPull) await window.cpmPull(); await wait(200); } }
+        try { sel.clear(); const b = frames.findIndex(f => f.kind === "beam"); if (b >= 0) sel.add(b + 1); if (areas.length) sel.add(frames.length + 1); selChanged(); } catch (e) { }
+        await act(a); await wait(1200);
+      }
       async function run() {
         await wait(1500);
+        const shot = /#cpmform=([^|]*)\|(.*)$/.exec(location.hash);
+        if (shot) { await formShot(decodeURIComponent(shot[1]), decodeURIComponent(shot[2])); document.title = "cpm-shot-done"; return; }
         await step("the Modeler page opens live on the scratch model", async () => {
           if (!window.cpmLive) return {fail: "the page is not in live mode (no Draw, Assign or Define by hand)"};
           if (errors.length) return {fail: "errors while opening: " + errors.join("; ")};
@@ -451,7 +461,8 @@ public static class ModelerCheck
         // A beam and a floor selected before each item, so the items that act on a selection are on (Delete empties it).
         const pick = () => { try { sel.clear(); const b = frames.findIndex(f => f.kind === "beam"); if (b >= 0) sel.add(b + 1); if (areas.length) sel.add(frames.length + 1); selChanged(); } catch (e) { } };
         const programMenus = () => (typeof forProgram === "function" ? forProgram : x => x)(modelerMenus(viewerMenus()));
-        const listNow = () => { const m = programMenus(), out = []; for (const name of ["File", "Assign", "Define", "Draw", "Edit", "Analyze"]) flat(m[name], name, out); return out; };
+        // Design and Options too, their Modeler forms (preferences, overwrites, program options; Ahmed 2026-11-27: every form).
+        const listNow = () => { const m = programMenus(), out = []; for (const name of ["File", "Assign", "Define", "Draw", "Edit", "Analyze"]) flat(m[name], name, out); for (const name of ["Design", "Options"]) out.push(...flat(m[name], name, []).filter(it => typeof it.act === "string" && it.act.startsWith("m:"))); return out; };
         const list = listNow();
         // The menus follow the program the model is for (Ahmed 2026-11-26): the items only SAP2000 or SAFE has are run
         // with the model made for that program, after the first program's.
@@ -472,6 +483,7 @@ public static class ModelerCheck
           list.push(...extra.map(it => ({...it, path: it.path + " (" + target + ")", target})));
         }
         if (typeof forProgram === "function") { await hmRun("set_model_program", {program: "etabs"}, true); if (window.cpmPull) await window.cpmPull(); await wait(400); }
+        window.cpmForms = list.filter(it => it.label.endsWith("...") && !OTHER_WAY[it.act]).map(it => ({path: it.path, act: it.act, target: it.target || "etabs"}));
         for (const it of list) {
           await step("menu: " + it.path, async () => {
             if (it.target && program !== it.target) { await hmRun("set_model_program", {program: it.target}, true); for (let i = 0; i < 30 && program !== it.target; i++) { if (window.cpmPull) await window.cpmPull(); await wait(200); } }
@@ -493,7 +505,7 @@ public static class ModelerCheck
       }
       run().catch(e => add("the check itself", false, String(e && e.message || e))).finally(() => {
         const out = document.createElement("script"); out.type = "application/json"; out.id = "cpm-selfcheck";
-        out.textContent = JSON.stringify({items}).replace(/</g, "\\u003c");
+        out.textContent = JSON.stringify({items, forms: window.cpmForms || []}).replace(/</g, "\\u003c");
         document.body.appendChild(out); document.title = "cpm-selfcheck-done";
       });
     })();
@@ -507,7 +519,7 @@ public static class ModelerCheck
     /// Serves the live Modeler page on a scratch model and checks it in <paramref name="browser"/> (Edge or Chrome when
     /// null). <paramref name="chat"/>: the page as a window with the AI chat on serves it (a chat with nothing in it), or off.
     /// </summary>
-    public static ViewerCheck.Result Run(bool chat, string folder, string? browser = null, int seconds = 420)
+    public static ViewerCheck.Result Run(bool chat, string folder, string? browser = null, int seconds = 420, bool pictures = false)
     {
         browser ??= ViewerCheck.FindBrowser();
         if (browser is null) return new ViewerCheck.Result([], [], "no Edge or Chrome was found on this PC to open the Modeler's window in");
@@ -569,7 +581,7 @@ public static class ModelerCheck
             if (dom is null) return new ViewerCheck.Result([], [], "the browser could not be run: " + error);
             if (ViewerCheck.Read(dom) is not { } items)
                 return new ViewerCheck.Result([new ViewerCheck.Item("the Modeler page ran its check", false, "the page did not finish its check within the time the browser gave it")], [], null);
-            return new ViewerCheck.Result(items, [], null);
+            return new ViewerCheck.Result(items, pictures ? FormPictures(browser, profile, server.ViewUrl, Forms(dom), Path.Combine(folder, "Form pictures")) : [], null);
         }
         finally
         {
@@ -577,6 +589,51 @@ public static class ModelerCheck
             try { if (Directory.Exists(profile)) Directory.Delete(profile, true); if (Directory.Exists(files)) Directory.Delete(files, true); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* the test's work folder says where it is */ }
         }
+    }
+
+    /// <summary>The forms the page's check opened, as (menu path, action, program), from its answer.</summary>
+    public static IReadOnlyList<(string Path, string Act, string Target)> Forms(string dom)
+    {
+        const string open = "<script type=\"application/json\" id=\"cpm-selfcheck\">";
+        var at = dom.IndexOf(open, StringComparison.Ordinal);
+        var end = at < 0 ? -1 : dom.IndexOf("</script>", at, StringComparison.Ordinal);
+        if (end < 0) return [];
+        try
+        {
+            using var doc = JsonDocument.Parse(dom[(at + open.Length)..end]);
+            return doc.RootElement.TryGetProperty("forms", out var f) && f.ValueKind == JsonValueKind.Array
+                ? f.EnumerateArray().Select(x => (x.GetProperty("path").GetString() ?? "", x.GetProperty("act").GetString() ?? "", x.GetProperty("target").GetString() ?? "etabs")).Where(x => x.Item2.Length > 0).ToList()
+                : [];
+        }
+        catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException) { return []; }
+    }
+
+    /// <summary>
+    /// A picture of every form of the Engine, one browser screenshot each, by program and menu, with a page that lays
+    /// them out beside the program's own picture of the same form where the test's reference folder has one
+    /// ("Reference forms\program\Menu - Item.png"), so the two can be compared side by side (Ahmed 2026-11-27).
+    /// </summary>
+    public static IReadOnlyList<string> FormPictures(string browser, string profile, string address, IReadOnlyList<(string Path, string Act, string Target)> forms, string folder)
+    {
+        var made = new List<string>();
+        if (forms.Count == 0) return made;
+        Directory.CreateDirectory(folder);
+        var rows = new StringBuilder();
+        foreach (var (path, act, target) in forms)
+        {
+            var name = string.Concat((target + " - " + path.Replace(" > ", " - ", StringComparison.Ordinal).TrimEnd('.')).Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
+            var picture = Path.Combine(folder, name + ".png");
+            ViewerCheck.Browse(browser, profile, 60, "--screenshot=" + picture, "--window-size=1400,900", "--virtual-time-budget=9000", address + "#cpmform=" + Uri.EscapeDataString(target) + "|" + Uri.EscapeDataString(act));
+            if (!File.Exists(picture) || new FileInfo(picture).Length < 2000) continue;
+            made.Add(picture);
+            var theirs = Path.Combine(folder, "..", "Reference forms", target, path.Replace(" > ", " - ", StringComparison.Ordinal).TrimEnd('.') + ".png");
+            rows.Append("<tr><td>").Append(WebUtility.HtmlEncode(target)).Append("</td><td>").Append(WebUtility.HtmlEncode(path)).Append("</td><td><img src=\"").Append(Uri.EscapeDataString(name + ".png"))
+                .Append("\"></td><td>").Append(File.Exists(theirs) ? "<img src=\"" + new Uri(Path.GetFullPath(theirs)).AbsoluteUri + "\">" : "(no picture of the program's own form yet)").Append("</td></tr>\n");
+        }
+        File.WriteAllText(Path.Combine(folder, "Engine forms side by side.html"),
+            "<!doctype html><meta charset=\"utf-8\"><title>Engine forms side by side</title><style>body{font:13px Segoe UI,sans-serif}td{vertical-align:top;padding:4px;border-bottom:1px solid #ccc}img{max-width:700px}</style>"
+            + "<h1>Engine forms side by side</h1><table><tr><th>Program</th><th>Menu</th><th>CSI ProMax Engine</th><th>The program's own form</th></tr>\n" + rows + "</table>", new UTF8Encoding(false));
+        return made;
     }
 
     /// <summary>
@@ -591,9 +648,9 @@ public static class ModelerCheck
             ViewerCheck.Result? seen = null;
             var ran = ctx.Step($"the Modeler's window opens on a scratch model, {label}", () =>
             {
-                seen = Run(chat, Path.Combine(ctx.Folder, "Modeler window"), browser);
+                seen = Run(chat, Path.Combine(ctx.Folder, "Modeler window"), browser, pictures: !chat && !ctx.NoPack);
                 if (seen.NotRun is not null) throw new FieldSkipException(seen.NotRun);
-                return new { checked_items = seen.Items.Count };
+                return new { checked_items = seen.Items.Count, form_pictures = seen.Pictures.Count };
             }) is not null;
             if (!ran || seen is null) continue;
             foreach (var item in seen.Items)

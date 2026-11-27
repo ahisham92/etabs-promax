@@ -192,6 +192,27 @@ public static class LateralCodes
         return list;
     }
 
+    /// <summary>The group box of the programs' Modify Lateral Load Pattern form a code input sits in (ETABS 23.2, SAP2000
+    /// 26.3: Direction and Eccentricity, Time Period, Story Range, Factors, Seismic Coefficients; for wind Exposure and
+    /// Pressure Coefficients, Exposure Height, Wind Coefficients, Wind Case), so the Engine's form is laid out as theirs.</summary>
+    public static string Group(LateralCode code, CodeParam p)
+    {
+        var wind = code.Kind == Wind;
+        return p.Key switch
+        {
+            "Dir" or "Ecc" => wind ? "Exposure and Pressure Coefficients" : "Direction and Eccentricity",
+            "Period" or "System" or "Ct" or "x" or "UserT" or "CuCap" => "Time Period",
+            "TopStory" or "BottomStory" => wind ? "Exposure Height" : "Story Range",
+            "Angle" or "Width" or "Cpw" or "Cpl" => "Exposure and Pressure Coefficients",
+            "ASCECase" or "ASCEe1" or "ASCEe2" => "Wind Case",
+            "Loads" => wind ? "User Wind Loads" : "User Loads",
+            "Spectrum" => "Spectrum",
+            "Profile" or "Factor" => "Pressure",
+            "R" or "Omega" or "Cd" or "I" or "IE" or "GammaI" or "q" or "Beta" or "Lambda" or "Mv" or "Rd" or "Ro" or "K" or "Min" or "C" => "Factors",
+            _ => wind ? "Wind Coefficients" : "Seismic Coefficients",
+        };
+    }
+
     /// <summary>The codes of one kind (Seismic or Wind).</summary>
     public static IEnumerable<LateralCode> Of(string kind) => All.Where(c => c.Kind.Equals(kind, StringComparison.OrdinalIgnoreCase));
 

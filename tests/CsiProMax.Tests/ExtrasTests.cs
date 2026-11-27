@@ -469,6 +469,22 @@ static class ExtrasTests
             var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
             Check(html.Contains("[\"Set Load Cases to Run...\", \"m:runCases\"]", StringComparison.Ordinal) && html.Contains("Run/Do Not Run Case", StringComparison.Ordinal) && html.Contains("Run/Do Not Run All", StringComparison.Ordinal), "the Analyze menu has no Set Load Cases to Run form");
         });
+        yield return ("Ahmed 2026-11-27: each code's lateral load form is laid out in the programs' group boxes, and the Engine's forms are pictured for a side-by-side page", () =>
+        {
+            var asce = CsiProMax.Lateral.LateralCodes.Find("Seismic", "ASCE 7-16")!;
+            string G(CsiProMax.Lateral.LateralCode c, string key) => CsiProMax.Lateral.LateralCodes.Group(c, c.Params.First(p => p.Key == key));
+            Check(G(asce, "Dir") == "Direction and Eccentricity" && G(asce, "Period") == "Time Period" && G(asce, "TopStory") == "Story Range" && G(asce, "R") == "Factors" && G(asce, "Ss") == "Seismic Coefficients", "the ASCE 7-16 seismic groups");
+            var wind = CsiProMax.Lateral.LateralCodes.Find("Wind", "ASCE 7-16")!;
+            Check(G(wind, "Cpw") == "Exposure and Pressure Coefficients" && G(wind, "TopStory") == "Exposure Height" && G(wind, "ASCECase") == "Wind Case" && G(wind, "Kzt") == "Wind Coefficients", "the ASCE 7-16 wind groups");
+            var listed = LateralTools.OfflineCodes(Frame().Model, "seismic", "ASCE 7-16");
+            Check(listed.ToJsonString().Contains("\"group\":\"Seismic Coefficients\"", StringComparison.Ordinal), "lateral_codes gives no group: " + listed.ToJsonString()[..Math.Min(300, listed.ToJsonString().Length)]);
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            Check(html.Contains("`${code} ${word} Load Pattern`", StringComparison.Ordinal) && html.Contains("i.group || \"Parameters\"", StringComparison.Ordinal), "the lateral form is not titled and grouped as the programs'");
+            Check(CsiProMax.Assistant.ModelerCheck.Script.Contains("#cpmform=", StringComparison.Ordinal), "the Modeler page cannot open one form for its picture");
+            var dom = "<html><script type=\"application/json\" id=\"cpm-selfcheck\">{\"items\":[],\"forms\":[{\"path\":\"Define > Load Patterns...\",\"act\":\"m:patterns\",\"target\":\"sap2000\"}]}</script></html>";
+            var forms = CsiProMax.Assistant.ModelerCheck.Forms(dom);
+            Check(forms.Count == 1 && forms[0].Act == "m:patterns" && forms[0].Target == "sap2000", "the forms the check opened are not read back");
+        });
         yield return ("Ahmed 2026-11-27: Design > View/Revise Overwrites is each code's overwrite table of the program (ETABS 23.2, SAP2000 26.3), the selected frames' rows; SAP2000's go into its .s2k and come back", () =>
         {
             Check(ProgramForms.OverwriteTables("etabs", "steel", "AISC 360-16").SequenceEqual(["Steel Frame Design Overwrites - AISC 360-16"]), "ETABS's steel overwrites: " + string.Join(", ", ProgramForms.OverwriteTables("etabs", "steel", "AISC 360-16")));
