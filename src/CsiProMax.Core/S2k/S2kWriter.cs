@@ -44,7 +44,10 @@ public static class S2kWriter
         // Analyze > Set Active Degrees of Freedom (the form's row; each one on when not set).
         var activeDof = m.DefinitionTables?.GetValueOrDefault("Active Degrees of Freedom")?.FirstOrDefault();
         Add(tables, "ACTIVE DEGREES OF FREEDOM", new[] { "UX", "UY", "UZ", "RX", "RY", "RZ" }.Select(dofKey => (dofKey, activeDof?.GetValueOrDefault(dofKey) is { Length: > 0 } dofOn ? dofOn : "Yes")).ToList());
-        Add(tables, "COORDINATE SYSTEMS", Row(("Name", "GLOBAL"), ("Type", "Cartesian"), ("X", "0"), ("Y", "0"), ("Z", "0"), ("AboutZ", "0"), ("AboutY", "0"), ("AboutX", "0")));
+        // GLOBAL, then the other systems Define > Coordinate Systems/Grids keeps (DefineTables.SapHinges "Coordinate Systems").
+        var otherSystems = (m.DefinitionTables?.GetValueOrDefault("Coordinate Systems") ?? []).Where(r => !(r.GetValueOrDefault("Name") ?? "").Equals("GLOBAL", StringComparison.OrdinalIgnoreCase)).ToList();
+        Add(tables, "COORDINATE SYSTEMS", new[] { Row(("Name", "GLOBAL"), ("Type", "Cartesian"), ("X", "0"), ("Y", "0"), ("Z", "0"), ("AboutZ", "0"), ("AboutY", "0"), ("AboutX", "0")) }
+            .Concat(otherSystems.Select(r => (IReadOnlyList<(string, string)>)DefineTables.SapHinges["Coordinate Systems"].Where(r.ContainsKey).Select(f => (f, r[f])).ToList())));
 
         // Grids: the plan grids, and a Z grid line at each story level so the levels can still be found in SAP2000.
         var grids = new List<IReadOnlyList<(string, string)>>();
@@ -54,6 +57,9 @@ public static class S2kWriter
         for (var i = 0; i < m.Stories.Count; i++)
             grids.Add(Row(("CoordSys", "GLOBAL"), ("AxisDir", "Z"), ("GridID", m.Stories[i].Name), ("XRYZCoord", N(m.Elevation(i))),
                 ("LineType", "Primary"), ("LineColor", "Gray8Dark"), ("Visible", "Yes"), ("BubbleLoc", "End")));
+        // The other systems' grid lines, as their Define Grid System Data form keeps them.
+        foreach (var gr in (m.DefinitionTables?.GetValueOrDefault("Grid Lines") ?? []).Where(gl => otherSystems.Any(o => o.GetValueOrDefault("Name") == gl.GetValueOrDefault("CoordSys"))))
+            grids.Add(DefineTables.SapHinges["Grid Lines"].Where(gr.ContainsKey).Select(f => (f, gr[f])).ToList());
         Add(tables, "GRID LINES", grids);
 
         Materials(m, tables, notes, m.Units.Length);
@@ -532,7 +538,7 @@ public static class S2kWriter
 
         // The tables of a SAP2000 file the Modeler opened that it has no form for, as the file had them.
         // SAP2000's own hinge definitions, kept as its table rows.
-        foreach (var (t, rows) in (m.DefinitionTables ?? []).Where(x => DefineTables.IsSap(x.Key)).OrderBy(x => x.Key, StringComparer.Ordinal))
+        foreach (var (t, rows) in (m.DefinitionTables ?? []).Where(x => DefineTables.IsSap(x.Key) && !DefineTables.IsGridTable(x.Key)).OrderBy(x => x.Key, StringComparer.Ordinal))
             Add(tables, t.ToUpperInvariant(), rows.Select(r => (IReadOnlyList<(string, string)>)DefineTables.SapHinges[t].Where(r.ContainsKey).Select(f => (f, r[f])).ToList()));
         // The preference and analysis option forms (ProgramForms), as SAP2000's own tables.
         foreach (var (t, rows) in (m.DefinitionTables ?? []).Where(x => ProgramForms.HasForm(ProgramOptions.Sap2000, x.Key) && !x.Key.Equals("Active Degrees of Freedom", StringComparison.OrdinalIgnoreCase)).OrderBy(x => x.Key, StringComparer.Ordinal))

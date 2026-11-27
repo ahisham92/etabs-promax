@@ -60,7 +60,18 @@ public static partial class S2kReader
             m.DefinitionTables ??= new(StringComparer.OrdinalIgnoreCase);
             m.DefinitionTables["Active Degrees of Freedom"] = [activeDofRow.Where(dofKv => dofKv.Value.Length > 0).ToDictionary(dofKv => dofKv.Key.ToUpperInvariant(), dofKv => dofKv.Value, StringComparer.Ordinal)];
         }
-        Use("COORDINATE SYSTEMS");
+        // The systems other than GLOBAL, and their grid lines, are kept as Define > Coordinate Systems/Grids has them.
+        var otherSystems = Use("COORDINATE SYSTEMS").Where(cs => S(cs, "Name").Length > 0 && !S(cs, "Name").Equals("GLOBAL", StringComparison.OrdinalIgnoreCase)).ToList();
+        void KeepSap(string keepTable, IEnumerable<Dictionary<string, string>> keepRows)
+        {
+            var keepFields = DefineTables.SapHinges[keepTable];
+            var keptRows = keepRows.Select(kr => kr.Where(kv => kv.Value.Length > 0 && keepFields.Contains(kv.Key, StringComparer.OrdinalIgnoreCase))
+                .ToDictionary(kv => keepFields.First(f => f.Equals(kv.Key, StringComparison.OrdinalIgnoreCase)), kv => kv.Value, StringComparer.Ordinal)).Where(kr => kr.Count > 0).ToList();
+            if (keptRows.Count == 0) return;
+            m.DefinitionTables ??= new(StringComparer.OrdinalIgnoreCase);
+            m.DefinitionTables[keepTable] = keptRows;
+        }
+        KeepSap("Coordinate Systems", otherSystems);
 
         // Joints.
         var joints = new Dictionary<string, Xyz>(StringComparer.OrdinalIgnoreCase);
@@ -75,7 +86,9 @@ public static partial class S2kReader
 
         // Grids and levels: the Z grid lines are the levels; without them, every height a joint is at.
         var levels = new List<(string Name, double Z)>();
-        foreach (var r in Use("GRID LINES"))
+        var gridRows = Use("GRID LINES").ToList();
+        KeepSap("Grid Lines", gridRows.Where(gl => otherSystems.Any(o => S(o, "Name").Equals(S(gl, "CoordSys"), StringComparison.OrdinalIgnoreCase))));
+        foreach (var r in gridRows.Where(gl => !otherSystems.Any(o => S(o, "Name").Equals(S(gl, "CoordSys"), StringComparison.OrdinalIgnoreCase))))
         {
             var dir = S(r, "AxisDir").ToUpperInvariant();
             if (dir == "Z") levels.Add((S(r, "GridID"), D(r, "XRYZCoord")));

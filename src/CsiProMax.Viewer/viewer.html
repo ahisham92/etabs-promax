@@ -6953,7 +6953,146 @@ async function hmStories() {
 // Grid System Data as ETABS 23 shows it: Grid System Name, Story Range Option, Options (Bubble Size, Grid Color),
 // Display Grid Data as Ordinates or Spacing, then X and Y Grid Data with Grid ID, Ordinate, Visible and Bubble Location.
 // SAP2000's Define Grid System Data: System Name, X and Y Grid Data with Grid ID, Ordinate, Line Type, Visible, Bubble Loc.
+// SAP2000 26.3's Coordinate/Grid Systems: GLOBAL (the model's grids, with the stories as its Z grid lines) and the other
+// systems kept as SAP2000's Coordinate Systems and Grid Lines rows; Coord System Location And Orientation (2D/3D),
+// Define Grid System Data (X, Y, Z Grid Data, Quick Start..., Display Grids as, Hide All, Glue, Bubble Size, Reset to
+// Default Color, Reorder Ordinates) and Quick Grid Lines (Cartesian and Cylindrical).
+async function hmSapGridSystems() {
+  const dd = (await hmRun("definition_data", {}, true)).result || {tables: {}}, defs = await hmDefs();
+  const cs = ((dd.tables["Coordinate Systems"] || {}).rows || []).filter(r => r.Name && r.Name.toUpperCase() !== "GLOBAL");
+  const gl = (dd.tables["Grid Lines"] || {}).rows || [];
+  const again = () => { document.querySelectorAll(".dlg").forEach(x => x.close && x.close()); hmSapGridSystems(); };
+  const names = ["GLOBAL", ...cs.map(r => r.Name)];
+  const location = (src, copy) => {
+    let k = 1; while (names.includes("CSYS" + k)) k++;
+    const v = f => src ? +(src[f] || 0) : 0, d3 = src && /3d/i.test(src.Type || "") || (src && (+src.Z || +src.AboutY || +src.AboutX));
+    const row = (l, id, val) => `<span>${l}</span><input id="${id}" type="number" step="any" value="${val}" style="width:90px">`;
+    const d = dialog("Coord System Location And Orientation", `<fieldset><legend>Coordinate System Name</legend><input id="cN" style="width:100%" value="${esc(src && !copy ? src.Name : "CSYS" + k)}" ${src && !copy ? "disabled" : ""}></fieldset>
+      <fieldset><legend>Option</legend><label style="margin-right:60px"><input type="radio" name="cO" value="2D" ${d3 ? "" : "checked"}> 2D</label><label><input type="radio" name="cO" value="3D" ${d3 ? "checked" : ""}> 3D</label></fieldset>
+      <fieldset><legend>Origin Location</legend><div style="display:grid;grid-template-columns:1fr 90px;gap:6px;align-items:center">${row("Global  X", "cX", v("X"))}${row("Global  Y", "cY", v("Y"))}${row("Global  Z", "cZ", v("Z"))}</div></fieldset>
+      <fieldset><legend>Origin Orientation - Rotations in Degrees</legend><div style="display:grid;grid-template-columns:1fr 90px;gap:6px;align-items:center">${row("about  Global  Z", "cRz", v("AboutZ"))}${row("about  Global  Y", "cRy", v("AboutY"))}${row("about  Global  X", "cRx", v("AboutX"))}</div></fieldset>`,
+      [["OK", async d => {
+        const n = q(d, "#cN").value.trim(); if (!n) { formError(d, "Give the system a name."); return false; }
+        if ((!src || copy) && names.some(x => x.toUpperCase() === n.toUpperCase())) { formError(d, "There is a system " + n + " already."); return false; }
+        const three = q(d, "[name=cO]:checked").value === "3D", f = id => String(fnum(d, id) || 0);
+        const r = {Name: n, Type: "Cartesian", X: f("#cX"), Y: f("#cY"), Z: three ? f("#cZ") : "0", AboutZ: f("#cRz"), AboutY: three ? f("#cRy") : "0", AboutX: three ? f("#cRx") : "0"};
+        const j = await hmRun("define_table_rows", {table: "Coordinate Systems", name: n, rows: [r]}, true); if (!j.ok) { formError(d, j.error); return false; }
+        if (copy && src) { const lines = gl.filter(x => x.CoordSys === src.Name).map(x => ({...x, CoordSys: n})); if (lines.length) { await hmRun("define_table_rows", {table: "Grid Lines", name: n, rows: lines}, true); gl.push(...lines); } }
+        d.close();
+        if (!src || copy) { cs.push(r); names.push(n); return gridData(n, true); }
+        again();
+      }, true], ["Cancel"]], {width: 300});
+    const sync = () => { const three = q(d, "[name=cO]:checked").value === "3D"; ["#cZ", "#cRy", "#cRx"].forEach(x => { q(d, x).disabled = !three; q(d, x).style.visibility = three ? "" : "hidden"; }); };
+    d.querySelectorAll("[name=cO]").forEach(r => r.onchange = sync); sync();
+    return d;
+  };
+  // Define Grid System Data for one system.
+  const gridData = (sys, fresh) => {
+    const u = hmU(), global = sys === "GLOBAL";
+    const mk = (id, at, extra) => Object.assign({id: String(id), at: +at, type: "Primary", visible: true, bubble: "End", color: "Gray8Dark"}, extra || {});
+    const T = {X: [], Y: [], Z: []};
+    if (global) {
+      defs.grids.filter(g => g.direction === "X" || g.direction === "Y").sort((a, b) => a.coordinate - b.coordinate).forEach(g => T[g.direction].push(mk(g.label, g.coordinate, {visible: g.visible !== false, bubble: g.bubble || (g.direction === "Y" ? "Start" : "End")})));
+      let z = (defs.base || {}).elevation || 0; T.Z.push(mk((defs.base || {}).name || "Base", z, {was: (defs.base || {}).name, base: true}));
+      (defs.stories || []).forEach(st => { z += +st.height; T.Z.push(mk(st.name, +z.toFixed(6), {was: st.name})); });
+    } else gl.filter(r => r.CoordSys === sys).forEach(r => { const dir = (r.AxisDir || "X").toUpperCase(); if (T[dir]) T[dir].push(mk(r.GridID, r.XRYZCoord, {type: r.LineType || "Primary", visible: !/^no/i.test(r.Visible || ""), bubble: r.BubbleLoc || "End", color: r.LineColor || "Gray8Dark"})); });
+    if (!global && fresh && !T.X.length) { [0, 1, 2, 3].forEach(i => { T.X.push(mk(String.fromCharCode(65 + i), i * 6)); T.Y.push(mk(i + 1, i * 6, {bubble: "Start"})); }); [0, 1, 2, 3, 4].forEach(i => T.Z.push(mk("Z" + (i + 1), i * 3))); }
+    const was = JSON.stringify(T);
+    let spacing = false, pick = {X: -1, Y: -1, Z: -1};
+    const gs = defs.grid_system || {};
+    const table = dir => `<fieldset style="margin:0 0 6px"><legend>${dir} Grid Data</legend><div style="display:flex;gap:10px;align-items:flex-start"><div style="flex:1;height:120px;overflow:auto;border:1px solid #888;background:#fff"><table class="list hmgrid" id="sg${dir}" style="width:100%"></table></div>
+      <div style="display:flex;flex-direction:column;gap:6px;margin-top:20px"><button data-add="${dir}" style="width:60px">Add</button><button data-del="${dir}" style="width:60px">Delete</button></div></div></fieldset>`;
+    const d = dialog("Define Grid System Data", `<div style="display:flex;gap:12px"><div style="flex:1">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 10px 8px"><b>System Name</b><input value="${esc(sys)}" disabled style="width:220px"></div>
+        ${table("X")}${table("Y")}${table("Z")}</div>
+      <div style="width:170px;display:flex;flex-direction:column;gap:8px">
+        <fieldset style="margin:0"><legend>Grid Lines</legend><button id="sgQ" style="width:100%">Quick Start...</button></fieldset>
+        <canvas id="sgP" width="160" height="150" style="border:1px solid #888;background:#fff"></canvas>
+        <fieldset style="margin:0"><legend>Display Grids as</legend><label><input type="radio" name="sgD" value="0" checked> Ordinates</label> <label><input type="radio" name="sgD" value="1"> Spacing</label></fieldset>
+        <label><input type="checkbox" id="sgH" ${/^yes/i.test(gs.hide_all || "") ? "checked" : ""}> Hide All Grid Lines</label><label><input type="checkbox" id="sgG" ${/^yes/i.test(gs.glue || "") ? "checked" : ""}> Glue to Grid Lines</label>
+        <div style="display:flex;justify-content:space-between;align-items:center"><span>Bubble Size</span><input id="sgB" type="number" step="any" style="width:70px" value="${gs.bubble_size || +(sapConv(1.25, {f: "kN", l: "m"}, u, 0, 1, 0)).toPrecision(5)}"></div>
+        <button id="sgC">Reset to Default Color</button><button id="sgR">Reorder Ordinates</button></div></div>`,
+      [["OK", async d => {
+        read(); const bubble = fnum(d, "#sgB");
+        if (global) {
+          const j = await hmRun("define_grids", {system_name: "GLOBAL", bubble_size: bubble || undefined, grids: ["X", "Y"].flatMap(dir => T[dir].map(g => ({label: g.id.trim(), direction: dir, coordinate: g.at, visible: g.visible, bubble: g.bubble})))}, true);
+          if (!j.ok) { formError(d, j.error); return false; }
+          if (JSON.stringify(T.Z) !== JSON.stringify(JSON.parse(was).Z)) {
+            const z = T.Z.slice().sort((a, b) => a.at - b.at); if (z.length < 2) { formError(d, "GLOBAL's Z grid lines are the model's levels: keep the base and at least one above it."); return false; }
+            const j2 = await hmRun("define_stories", {base_name: z[0].id, base_elevation: z[0].at, stories: z.slice(1).map((g, i) => ({name: g.id.trim(), height: +(g.at - z[i].at).toFixed(6), was: g.was && !g.base ? g.was : undefined}))}, true);
+            if (!j2.ok) { formError(d, j2.error); return false; }
+          }
+        } else {
+          const rows = ["X", "Y", "Z"].flatMap(dir => T[dir].map(g => ({CoordSys: sys, AxisDir: dir, GridID: g.id.trim(), XRYZCoord: String(g.at), LineType: g.type, LineColor: g.color, Visible: g.visible ? "Yes" : "No", BubbleLoc: g.bubble, AllVisible: q(d, "#sgH").checked ? "No" : "Yes", BubbleSize: String(bubble || "")})));
+          const j = await hmRun("define_table_rows", {table: "Grid Lines", name: sys, rows}, true); if (!j.ok) { formError(d, j.error); return false; }
+        }
+        again();
+      }, true], ["Cancel"]], {width: 860});
+    const cols = dir => `<tr><th>Grid ID</th><th>${spacing ? "Spacing" : "Ordinate"} (${u.l})</th><th>Line Type</th><th>Visible</th><th>Bubble Loc</th>${dir === "Z" ? "" : "<th>Grid Color</th>"}</tr>`;
+    const paint = dir => {
+      const L = T[dir];
+      q(d, "#sg" + dir).innerHTML = cols(dir) + L.map((g, i) => `<tr data-i="${i}" class="${i === pick[dir] ? "on" : ""}"><td><input data-k="id" value="${esc(g.id)}"></td><td><input data-k="at" type="number" step="any" value="${spacing ? (i + 1 < L.length ? +(L[i + 1].at - g.at).toFixed(6) : 0) : g.at}"></td>
+        <td><select data-k="type">${opts(["Primary", "Secondary"], g.type)}</select></td><td><select data-k="visible">${opts([["1", "Yes"], ["0", "No"]], g.visible ? "1" : "0")}</select></td><td><select data-k="bubble">${opts(["End", "Start"], g.bubble)}</select></td>
+        ${dir === "Z" ? "" : `<td><button data-c="${i}" title="${esc(g.color)}" style="width:100%;height:16px;padding:0;background:${matColorCss(g.color)}"></button></td>`}</tr>`).join("");
+      q(d, "#sg" + dir).querySelectorAll("[data-i]").forEach(tr => tr.onclick = () => { pick[dir] = +tr.dataset.i; q(d, "#sg" + dir).querySelectorAll("[data-i]").forEach(x => x.classList.toggle("on", x === tr)); });
+      q(d, "#sg" + dir).querySelectorAll("[data-k]").forEach(inp => inp.onchange = () => {
+        const i = +inp.closest("tr").dataset.i, g = L[i], k = inp.dataset.k;
+        if (k === "at" && spacing) { const sp = parseFloat(inp.value) || 0, shift = (g.at + sp) - (i + 1 < L.length ? L[i + 1].at : g.at + sp); for (let j = i + 1; j < L.length; j++) L[j].at = +(L[j].at + shift).toFixed(6); }
+        else if (k === "at") g.at = parseFloat(inp.value) || 0; else if (k === "visible") g.visible = inp.value === "1"; else g[k] = inp.value;
+        paint(dir); draw();
+      });
+      q(d, "#sg" + dir).querySelectorAll("[data-c]").forEach(b => b.onclick = e => { e.stopPropagation(); const g = L[+b.dataset.c]; hmColor(g.color, c => { g.color = c; paint(dir); }); });
+    };
+    const read = () => {};
+    const draw = () => {
+      const c = q(d, "#sgP"), x = c.getContext("2d"); x.clearRect(0, 0, c.width, c.height);
+      const xs = T.X.map(g => g.at), ys = T.Y.map(g => g.at); if (!xs.length || !ys.length) return;
+      const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys), sc = Math.min(130 / ((x1 - x0) || 1), 120 / ((y1 - y0) || 1));
+      x.strokeStyle = "#888"; x.lineWidth = 1;
+      T.X.forEach(g => { const px = 15 + (g.at - x0) * sc; x.beginPath(); x.moveTo(px, 15); x.lineTo(px, 15 + (y1 - y0) * sc); x.stroke(); });
+      T.Y.forEach(g => { const py = 15 + (y1 - g.at) * sc; x.beginPath(); x.moveTo(15, py); x.lineTo(15 + (x1 - x0) * sc, py); x.stroke(); });
+    };
+    d.querySelectorAll("[name=sgD]").forEach(r => r.onchange = () => { spacing = q(d, "[name=sgD]:checked").value === "1"; ["X", "Y", "Z"].forEach(paint); });
+    d.querySelectorAll("[data-add]").forEach(b => b.onclick = () => { const dir = b.dataset.add, L = T[dir], last = L.length ? L[L.length - 1].at : 0, gap = L.length > 1 ? L[L.length - 1].at - L[L.length - 2].at : dir === "Z" ? 3 : 6;
+      const id = dir === "X" ? String.fromCharCode(65 + L.length % 26) : dir === "Y" ? String(L.length + 1) : "Z" + (L.length + 1);
+      L.push(mk(id, L.length ? +(last + gap).toFixed(6) : 0, {bubble: dir === "Y" ? "Start" : "End"})); pick[dir] = L.length - 1; paint(dir); draw(); });
+    d.querySelectorAll("[data-del]").forEach(b => b.onclick = () => { const dir = b.dataset.del; if (pick[dir] < 0) return; T[dir].splice(pick[dir], 1); pick[dir] = -1; paint(dir); draw(); });
+    q(d, "#sgC").onclick = () => { ["X", "Y", "Z"].forEach(dir => T[dir].forEach(g => g.color = "Gray8Dark")); ["X", "Y", "Z"].forEach(paint); };
+    q(d, "#sgR").onclick = () => { ["X", "Y", "Z"].forEach(dir => T[dir].sort((a, b) => a.at - b.at)); ["X", "Y", "Z"].forEach(paint); draw(); };
+    q(d, "#sgQ").onclick = () => quick(sys, T, () => { ["X", "Y", "Z"].forEach(paint); draw(); });
+    ["X", "Y", "Z"].forEach(paint); draw();
+    return d;
+  };
+  // Quick Grid Lines: Cartesian (number, spacing, first line in X, Y, Z) or Cylindrical (radius, theta, Z).
+  const quick = (sys, T, done) => {
+    const box = (legend, rows) => `<fieldset><legend>${legend}</legend><div style="display:grid;grid-template-columns:1fr 90px;gap:5px;align-items:center">${rows.map(([l, id, v]) => `<span>${l}</span><input id="${id}" type="number" step="any" value="${v}">`).join("")}</div></fieldset>`;
+    const name = `<fieldset><legend>Coordinate System Name</legend><input value="${esc(sys)}" disabled style="width:100%"></fieldset>`;
+    const d = dialog("Quick Grid Lines", `<div class="tabs" style="display:flex;gap:2px;margin-bottom:-1px"><button data-tab="c" class="on">Cartesian</button><button data-tab="y">Cylindrical</button></div>
+      <div style="border:1px solid #aaa;padding:8px">
+        <div id="qgC">${name}${box("Number of Grid Lines", [["X direction", "qxN", 4], ["Y direction", "qyN", 4], ["Z direction", "qzN", 5]])}${box("Grid Spacing", [["X direction", "qxS", 6], ["Y direction", "qyS", 6], ["Z direction", "qzS", 3]])}${box("First Grid Line Location", [["X direction", "qx0", 0], ["Y direction", "qy0", 0], ["Z direction", "qz0", 0]])}</div>
+        <div id="qgY" style="display:none">${name}${box("Number of Grid Lines", [["Along  Radius", "qrN", 4], ["Along  Theta", "qtN", 7], ["Along  Z", "qzzN", 5]])}${box("Grid Spacing", [["Along  Radius", "qrS", 6], ["Along  Theta (deg)", "qtS", 30], ["Along  Z", "qzzS", 3]])}${box("First Grid Line Location", [["Along  Radius", "qr0", 0], ["Along  Theta (deg)", "qt0", 0], ["Along  Z", "qzz0", 0]])}</div></div>`,
+      [["OK", d => {
+        const n = id => Math.max(1, Math.min(200, parseInt(q(d, id).value) || 1)), f = id => parseFloat(q(d, id).value) || 0;
+        const line = (dir, i, at) => ({id: dir === "X" ? String.fromCharCode(65 + i % 26) + (i >= 26 ? Math.floor(i / 26) : "") : dir === "Y" ? String(i + 1) : "Z" + (i + 1), at: +at.toFixed(6), type: "Primary", visible: true, bubble: dir === "Y" ? "Start" : "End", color: "Gray8Dark"});
+        if (q(d, "#qgY").style.display !== "none") { formError(d, "The model's grids are Cartesian: a cylindrical grid is kept only in SAP2000 itself for now."); return false; }
+        T.X = Array.from({length: n("#qxN")}, (_, i) => line("X", i, f("#qx0") + i * f("#qxS"))); T.Y = Array.from({length: n("#qyN")}, (_, i) => line("Y", i, f("#qy0") + i * f("#qyS")));
+        const zs = Array.from({length: n("#qzN")}, (_, i) => line("Z", i, f("#qz0") + i * f("#qzS")));
+        if (sys === "GLOBAL") zs.forEach((z, i) => { if (T.Z[i]) { z.id = T.Z[i].id; z.was = T.Z[i].was; z.base = T.Z[i].base; } });
+        T.Z = zs; done();
+      }], ["Cancel"]], {width: 300});
+    d.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => { d.querySelectorAll("[data-tab]").forEach(x => x.classList.toggle("on", x === b)); q(d, "#qgC").style.display = b.dataset.tab === "c" ? "" : "none"; q(d, "#qgY").style.display = b.dataset.tab === "y" ? "" : "none"; });
+    return d;
+  };
+  const find = n => cs.find(r => r.Name === n);
+  const d = listForm("Coordinate/Grid Systems", "Systems", names, [["Add New System...", () => location(null)], ["Add Copy of System...", n => n && location(find(n) || {Name: n, Type: "Cartesian"}, true)], ["Modify/Show System...", n => n && gridData(n)],
+    ["Delete System", n => n && n !== "GLOBAL" && hmRun("define_table_rows", {table: "Grid Lines", name: n, rows: []}, true).then(() => hmRun("define_table_rows", {table: "Coordinate Systems", name: n, rows: []})).then(j => j.ok && again())]], n => gridData(n),
+    `<label style="display:block;margin-top:10px;color:#888"><input type="checkbox" disabled> Convert to General Grid</label>`);
+  const L = q(d, "#hmList"), delB = d.querySelectorAll("[data-a]")[3], st = () => { delB.disabled = !L.value || L.value === "GLOBAL"; };
+  L.addEventListener("change", st); st();
+  return d;
+}
 async function hmGrids() {
+  if (program === "sap2000") return hmSapGridSystems();
   const defs = await hmDefs(), u = hmU(), sapG = program === "sap2000", gs = defs.grid_system || {name: "G1", bubble_size: 0};
   const data = {X: defs.grids.filter(g => g.direction === "X").map(g => ({label: g.label, at: g.coordinate, visible: g.visible !== false, bubble: g.bubble || "End"})).sort((a, b) => a.at - b.at),
     Y: defs.grids.filter(g => g.direction === "Y").map(g => ({label: g.label, at: g.coordinate, visible: g.visible !== false, bubble: g.bubble || "Start"})).sort((a, b) => a.at - b.at)};
@@ -7556,6 +7695,7 @@ async function hmMassData(after) {
       <tr><td><select id="mP">${opts(pats, at >= 0 ? loads[at].pattern : (pats[0] || [])[0])}</select></td><td><input id="mF" type="number" step="any" value="${at >= 0 ? loads[at].factor : 1}"></td></tr>`
       + loads.map((l, i) => `<tr data-i="${i}" class="${i === at ? "sel" : ""}" style="cursor:default${i === at ? ";background:var(--sel,#cde)" : ""}"><td>${esc(l.pattern)}</td><td>${esc(String(l.factor))}</td></tr>`).join("");
     d.querySelectorAll("#mT [data-i]").forEach(r => r.onclick = () => { at = +r.dataset.i; paint(); });
+    q(d, "#mMod").disabled = q(d, "#mDel").disabled = at < 0; // SAP2000 and ETABS grey them until a row is picked
   };
   const row = () => ({pattern: q(d, "#mP").value, factor: fnum(d, "#mF")});
   q(d, "#mAdd").onclick = () => { const r = row(); if (!r.pattern) return; const k = loads.findIndex(l => l.pattern === r.pattern); if (k >= 0) loads[k] = r; else loads.push(r); at = -1; q(d, "#mL").checked = true; sync(); paint(); };

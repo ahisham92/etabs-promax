@@ -17,6 +17,9 @@ public static class DefineTables
     /// in them, and the .s2k writes them back as they are.</summary>
     public static readonly IReadOnlyDictionary<string, string[]> SapHinges = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
     {
+        // Define > Coordinate Systems/Grids: the systems other than GLOBAL and their grid lines (GLOBAL's grids are the model's own).
+        ["Coordinate Systems"] = ["Name", "Type", "X", "Y", "Z", "AboutZ", "AboutY", "AboutX"],
+        ["Grid Lines"] = ["CoordSys", "AxisDir", "GridID", "XRYZCoord", "TAngle", "LineType", "LineColor", "Visible", "BubbleLoc", "AllVisible", "BubbleSize"],
         ["Hinges Def 01 - Overview"] = ["HingeName", "AssignHinge", "DOFType", "Behavior"],
         ["Hinges Def 02 - Noninteracting - Deform Control - General"] = ["HingeName", "AssignHinge", "DOFType", "Symmetric", "BeyondE", "FDType", "UseYldForce", "UseYldDispl", "FDPosForSF", "FDPosDisSF", "FDNegForSF", "FDNegDisSF", "MRPosMoSF", "MRPosRoSF", "MRNegMoSF", "MRNegRoSF", "SSPosStrsSF", "SSPosStnSF", "SSNegStrsSF", "SSNegStnSF", "MCPosMoSF", "MCPosCuSF", "MCNegMoSF", "MCNegCuSF", "LengthType", "SSAbsLen", "SSRelLen", "HysType", "PivotAlpha1", "PivotAlpha2", "PivotBeta1", "PivotBeta2", "PivotEta"],
         ["Hinges Def 03 - Noninteracting - Deform Control - Force-Deform"] = ["HingeName", "AssignHinge", "DOFType", "FDPoint", "Force", "Displ"],
@@ -118,6 +121,9 @@ public static class DefineTables
 
     /// <summary>True for a table of SAP2000's own (written to the .s2k as it is), not one of ETABS's.</summary>
     public static bool IsSap(string table) => SapHinges.ContainsKey(table);
+
+    /// <summary>The coordinate system and grid line tables: the .s2k writes them with GLOBAL's own, not on their own.</summary>
+    public static bool IsGridTable(string table) => table.Equals("Coordinate Systems", StringComparison.OrdinalIgnoreCase) || table.Equals("Grid Lines", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Sets the rows of one definition (by its name) in a table; no rows takes the definition out of it.</summary>
     public static void Set(StructuralModel m, string table, string name, IReadOnlyList<Dictionary<string, string>> rows)
