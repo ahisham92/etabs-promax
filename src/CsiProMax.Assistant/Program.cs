@@ -131,9 +131,20 @@ public static class Program
             using var check = new ComEtabs(etabsPid, program);
             // --full: every tool, on scratch models in windows of the programs the test opens itself (20 to 60 minutes).
             var link = demo ? new MemoryEtabs() : CsiProMax.Assistant.Tools.ProgramTools.Live(check);
-            var outcome = args.Contains("--full")
-                ? FieldTest.Run(link, new FieldTest.Options { Full = true, Retest = args.Contains("--retest"), NoPack = args.Contains("--no-pack"), OnlyProgram = Array.IndexOf(args, "--only") is var onlyAt and >= 0 && onlyAt + 1 < args.Length ? CsiProgram.Find(args[onlyAt + 1]) : null, StartedFrom = "the command line", Progress = step => Console.Error.WriteLine("... " + step), Outcome = line => Console.Error.WriteLine(line) })
-                : FieldTest.Run(link, args.Contains("--changes"), "the command line");
+            FieldTest.Outcome outcome;
+            if (args.Contains("--full"))
+            {
+                // The progress window too, as from Help > Field test (Ahmed 2026-11-27), unless told not to (--no-window).
+                var options = new FieldTest.Options { Full = true, Retest = args.Contains("--retest"), NoPack = args.Contains("--no-pack"), OnlyProgram = Array.IndexOf(args, "--only") is var onlyAt and >= 0 && onlyAt + 1 < args.Length ? CsiProgram.Find(args[onlyAt + 1]) : null, StartedFrom = "the command line", Progress = step => Console.Error.WriteLine("... " + step), Outcome = line => Console.Error.WriteLine(line) };
+                if (args.Contains("--no-window") || !OperatingSystem.IsWindows()) outcome = FieldTest.Run(link, options);
+                else
+                {
+                    var run = FieldTest.Start(link, options);
+                    CsiProMax.UI.FieldProgressWindow.ShowAlone(run);
+                    outcome = run.Task.GetAwaiter().GetResult();
+                }
+            }
+            else outcome = FieldTest.Run(link, args.Contains("--changes"), "the command line");
             Console.WriteLine(outcome.Report);
             Console.WriteLine("Saved: " + outcome.File);
             if (outcome.Zip is not null) Console.WriteLine("To send: " + outcome.Zip);

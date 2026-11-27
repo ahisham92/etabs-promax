@@ -835,6 +835,15 @@ static class TesterBugTests
             var program = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Program.cs"));
             Check(program.Contains("args.Contains(\"--check-update\")", StringComparison.Ordinal) && program.IndexOf("--check-update", StringComparison.Ordinal) < program.IndexOf("if (args.Contains(\"--fieldtest\"))", StringComparison.Ordinal), "the program has no window-less update check");
         });
+        yield return ("field test: no step makes a program export to Access (0.4.68: Microsoft Access opened on Ahmed's PC), and a command-line run shows its progress window", () =>
+        {
+            foreach (var f in Directory.GetFiles(Path.Combine(SourceText.Root(), "src"), "*.cs", SearchOption.AllDirectories))
+                Check(!File.ReadAllText(f).Contains("(\"DBTablesAccess\"", StringComparison.Ordinal), Path.GetFileName(f) + " exports the tables to Access");
+            var program = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Program.cs"));
+            Check(program.Contains("FieldProgressWindow.ShowAlone(run);", StringComparison.Ordinal) && program.Contains("--no-window", StringComparison.Ordinal), "the command-line full test shows no progress window");
+            var window = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Panel/UI/FieldProgressWindow.cs"));
+            Check(window.Contains("ShowActivated = false", StringComparison.Ordinal), "the progress window takes the focus");
+        });
         yield return ("field test: steps a workaround can test are tested, not left out (Ahmed, 2026-11-26: only a missing program or licence)", () =>
         {
             string Src(string f) => File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant", f));
