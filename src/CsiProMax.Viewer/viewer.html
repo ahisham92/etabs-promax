@@ -5804,7 +5804,7 @@ async function hmSapMaterial(m, after, copy, preset, options) {
     : dialog("Material Property Data", `<fieldset><legend>General Data</legend><div class="g2">
         <span>Material Name and Display Color</span><span style="display:flex;gap:6px"><input id="mN" style="flex:1" value="${esc(st.name)}"><button id="mCol" title="Display Color" style="width:22px;padding:0"></button></span>
         <span>Material Type</span><select disabled>${opts([sapMatTypeName(st.type)], sapMatTypeName(st.type))}</select>
-        <span>Material Grade</span><input id="mGr" value="${esc(st.grade || "")}">
+        <span>${"Material Grade"}</span><input id="mGr" value="${esc(st.grade || "")}">
         <span>Material Notes</span><button id="mNotes">Modify/Show Notes...</button></div><input id="mC" type="hidden" value="${esc(row("General").Color || "")}"></fieldset>
       <div style="display:flex;gap:8px">${weight}${unitsBox}</div>${iso}${otherBox}
       <label><input type="checkbox" id="mAdv"> Switch To Advanced Property Display</label>`,
@@ -5836,7 +5836,7 @@ async function hmSapMaterial(m, after, copy, preset, options) {
 async function hmSapMaterialOptions(st, after, done) {
   if (!st.row) { const h = await hmSapMaterial(null, after, false, null, null); return h; }
   const uni = /Rebar|Tendon/.test(st.type), row = st.row, setRow = st.setRow;
-  const d = dialog("Material Property Options", `<div class="g2"><b>Material Name</b><input id="oN" value="${esc(st.name)}"><span>Material Grade</span><input id="oG" value="${esc(st.grade || "")}"><span>Material Notes</span><button id="oNo">Modify/Show...</button></div>
+  const d = dialog("Material Property Options", `<div class="g2"><b>Material Name</b><input id="oN" value="${esc(st.name)}"><span>${"Material Grade"}</span><input id="oG" value="${esc(st.grade || "")}"><span>Material Notes</span><button id="oNo">Modify/Show...</button></div>
     <fieldset><legend>Options</legend><div class="g2"><span>Material Type</span><select disabled>${opts([sapMatTypeName(st.type)], sapMatTypeName(st.type))}</select>
       <span>Directional Symmetry Type</span><select id="oS">${opts([uni ? "Uniaxial" : "Isotropic"], uni ? "Uniaxial" : "Isotropic")}</select>
       <span>Display Color</span><button id="oC" style="height:20px"></button></div>
