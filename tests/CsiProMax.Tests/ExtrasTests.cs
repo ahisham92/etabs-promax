@@ -453,20 +453,20 @@ static class ExtrasTests
             Check(ProgramForms.Code(link.Model, "steel") == "AISC 360-16", "the template's steel code from the .e2k: " + ProgramForms.Code(link.Model, "steel"));
             var forms = Run(link, "program_forms", new { });
             Check((forms["designs"] as JsonArray)!.Count == ProgramForms.Designs("etabs").Count && (forms["analysis"] as JsonArray)!.Count == ProgramForms.AnalysisForms("etabs").Count, "program_forms lists every design and Analyze form");
-            Run(link, "set_program_form", new { design = "steel", code = "Eurocode 3-2005", table = "Steel Frame Design Preferences - Eurocode 3-2005", values = new Dictionary<string, string> { ["Pattern Live Load Factor"] = "0.8" } });
-            Check(ProgramForms.Code(link.Model, "steel") == "Eurocode 3-2005", "the code did not change");
+            Run(link, "set_program_form", new { design = "steel", code = "EN 1993-1-1-2005", table = "Steel Frame Design Preferences - EN 1993-1-1-2005", values = new Dictionary<string, string> { ["Pattern Live Load Factor"] = "0.8" } });
+            Check(ProgramForms.Code(link.Model, "steel") == "EN 1993-1-1-2005", "the code did not change");
             var e2k = CsiProMax.E2k.E2kWriter.Write(link.Model);
-            Check(e2k.Contains("STEELPREFERENCE  CODE  \"Eurocode 3-2005\"", StringComparison.Ordinal) && !e2k.Contains("CODE \"AISC 360-16\"  THDESIGN", StringComparison.Ordinal), "the .e2k does not carry the new steel code");
-            Check(link.Model.DefinitionTables!["Steel Frame Design Preferences - Eurocode 3-2005"].Single()["PatLLF"] == "0.8", "the preference is not the table's row");
+            Check(e2k.Contains("STEELPREFERENCE  CODE  \"EN 1993-1-1-2005\"", StringComparison.Ordinal) && !e2k.Contains("CODE \"AISC 360-16\"  THDESIGN", StringComparison.Ordinal), "the .e2k does not carry the new steel code");
+            Check(link.Model.DefinitionTables!["Steel Frame Design Preferences - EN 1993-1-1-2005"].Single()["PatLLF"] == "0.8", "the preference is not the table's row");
             var one = Run(link, "program_forms", new { design = "steel" });
             Check(((one["items"] as JsonArray)!.First(i => i!["field"]!.GetValue<string>() == "PatLLF"))!["value"]!.GetValue<string>() == "0.8", "the form does not show the value set");
-            Run(link, "set_program_form", new { table = "Steel Frame Design Preferences - Eurocode 3-2005", values = new Dictionary<string, string> { ["PatLLF"] = "" } });
-            Check(!link.Model.DefinitionTables!.ContainsKey("Steel Frame Design Preferences - Eurocode 3-2005"), "a blank value did not go back to the program's default");
+            Run(link, "set_program_form", new { table = "Steel Frame Design Preferences - EN 1993-1-1-2005", values = new Dictionary<string, string> { ["PatLLF"] = "" } });
+            Check(!link.Model.DefinitionTables!.ContainsKey("Steel Frame Design Preferences - EN 1993-1-1-2005"), "a blank value did not go back to the program's default");
             Refused(link, "set_program_form", new { table = "Steel Frame Design Preferences - AISC 360-16", values = new Dictionary<string, string> { ["Nope"] = "1" } }, "no item");
             Refused(link, "set_program_form", new { design = "steel", code = "AISC 999" }, "no code");
             Refused(link, "set_program_form", new { table = "Preferences - Steel Design - AISC 360-16", values = new Dictionary<string, string> { ["PatLLF"] = "1" } }, "no form");
             var back = ModelFile.FromJson(ModelFile.ToJson(link.Model));
-            Check(ProgramForms.Code(back, "steel") == "Eurocode 3-2005", "the code is not kept in the .cpm");
+            Check(ProgramForms.Code(back, "steel") == "EN 1993-1-1-2005", "the code is not kept in the .cpm");
             // SAP2000: the preference tables are its .s2k's own, read back as they were written.
             var sap = Frame();
             sap.Model.Target = "sap2000";
