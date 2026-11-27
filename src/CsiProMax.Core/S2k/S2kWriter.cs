@@ -33,7 +33,21 @@ public static class S2kWriter
         return result;
     }
 
+    /// <summary>The model as SAP2000's tables. A model opened from a SAP2000 file is written as that file, with only
+    /// what was changed since put in (<see cref="SourceTables"/>), so nothing of the file is lost.</summary>
     public static Result Write(StructuralModel m, string fileName = "model.s2k")
+    {
+        var own = WriteOwn(m, fileName);
+        if (m.Source is not { Program: "sap2000" } source) return own;
+        try { return own with { Text = SourceTables.Merge(source, own.Text) }; }
+        catch (Exception ex) when (ex is FormatException or InvalidDataException or IOException)
+        {
+            return own with { Notes = [.. own.Notes, $"The SAP2000 file this model was opened from could not be read back ({ex.Message}); its tables were written from the model."] };
+        }
+    }
+
+    /// <summary>The model as CSI ProMax writes it, without the file it was opened from.</summary>
+    public static Result WriteOwn(StructuralModel m, string fileName = "model.s2k")
     {
         var notes = new List<string>();
         var tables = new List<string>();
@@ -538,11 +552,13 @@ public static class S2kWriter
 
         // The tables of a SAP2000 file the Modeler opened that it has no form for, as the file had them.
         // SAP2000's own hinge definitions, kept as its table rows.
-        foreach (var (t, rows) in (m.DefinitionTables ?? []).Where(x => DefineTables.IsSap(x.Key) && !DefineTables.IsGridTable(x.Key)).OrderBy(x => x.Key, StringComparer.Ordinal))
+        foreach (var (t, rows) in (m.DefinitionTables ?? []).Where(x => DefineTables.SapHinges.ContainsKey(x.Key) && !DefineTables.IsGridTable(x.Key)).OrderBy(x => x.Key, StringComparer.Ordinal))
             Add(tables, t.ToUpperInvariant(), rows.Select(r => (IReadOnlyList<(string, string)>)DefineTables.SapHinges[t].Where(r.ContainsKey).Select(f => (f, r[f])).ToList()));
         // The preference and analysis option forms (ProgramForms), as SAP2000's own tables.
         foreach (var (t, rows) in (m.DefinitionTables ?? []).Where(x => ProgramForms.HasForm(ProgramOptions.Sap2000, x.Key) && !x.Key.Equals("Active Degrees of Freedom", StringComparison.OrdinalIgnoreCase)).OrderBy(x => x.Key, StringComparer.Ordinal))
             Add(tables, t.ToUpperInvariant(), rows.Take(1).Select(r => (IReadOnlyList<(string, string)>)ProgramForms.Fields(ProgramOptions.Sap2000, t).Where(f => r.ContainsKey(f.Key)).Select(f => (f.Key, r[f.Key])).ToList()).Where(r => r.Count > 0));
+        // SAP2000's own load tables: every Load Pattern, Load Case and Load Combination field its forms have.
+        SapLoadTables.MergeInto(m, tables);
         KeptTables.WriteInto(m, "sap2000", tables);
 
         var at = SavedAt ?? DateTime.Now;
@@ -792,9 +808,19 @@ public static class S2kWriter
     /// <summary>The functions as SAP2000's user function tables.</summary>
     private static void Functions(StructuralModel m, List<string> tables)
     {
-        var fs = AnalysisDefs.ListFunctions(m);
-        Add(tables, "FUNCTION - RESPONSE SPECTRUM - USER", fs.Where(f => f.Kind == "spectrum").SelectMany(f => f.Points.Select(p => Row(("Name", f.Name), ("Period", N(p.X)), ("Accel", N(p.Y)), ("FuncDamp", N(f.Damping))))));
-        Add(tables, "FUNCTION - TIME HISTORY - USER", fs.Where(f => f.Kind == "history").SelectMany(f => f.Points.Select(p => Row(("Name", f.Name), ("Time", N(p.X)), ("Value", N(p.Y))))));
+        // A function made in SAP2000's own forms (a code spectrum, a sine, From File, a power spectral density ...) goes in
+        // its own table with every parameter, as SAP2000 exports it (SapFunctions); the others as user functions.
+        var fs = AnalysisDefs.ListFunctions(m).Where(f => SapFunctions.Find(m, f.Name) is null).ToList();
+        var own = (m.DefinitionTables ?? []).Where(t => SapFunctions.IsTable(t.Key) && t.Value.Count > 0).ToDictionary(t => SapFunctions.Table(t.Key)!, t => t.Value, StringComparer.OrdinalIgnoreCase);
+        IEnumerable<IReadOnlyList<(string, string)>> Own(string table) => own.TryGetValue(table, out var rows)
+            ? rows.Select(r => (IReadOnlyList<(string, string)>)SapFunctions.Tables[table].Where(r.ContainsKey).Select(f => (f, r[f])).ToList()) : [];
+        Add(tables, "FUNCTION - RESPONSE SPECTRUM - USER", Own("Function - Response Spectrum - User").Concat(fs.Where(f => f.Kind == "spectrum").SelectMany(f => f.Points.Select(p => Row(("Name", f.Name), ("Period", N(p.X)), ("Accel", N(p.Y)), ("FuncDamp", N(f.Damping)))))));
+        Add(tables, "FUNCTION - TIME HISTORY - USER", Own("Function - Time History - User").Concat(fs.Where(f => f.Kind == "history").SelectMany(f => f.Points.Select(p => Row(("Name", f.Name), ("Time", N(p.X)), ("Value", N(p.Y)))))));
+        // ETABS's own power spectral density and steady state functions (FUNCTYPE in the .e2k) as SAP2000's user ones.
+        Add(tables, "FUNCTION - POWER SPECTRAL DENSITY - USER", Own("Function - Power Spectral Density - User").Concat(fs.Where(f => f.Kind == "powerspecdensity").SelectMany(f => f.Points.Select(p => Row(("Name", f.Name), ("Frequency", N(p.X)), ("Value", N(p.Y)))))));
+        Add(tables, "FUNCTION - STEADY STATE - USER", Own("Function - Steady State - User").Concat(fs.Where(f => f.Kind == "steadystate").SelectMany(f => f.Points.Select(p => Row(("Name", f.Name), ("Frequency", N(p.X)), ("Value", N(p.Y)))))));
+        foreach (var t in own.Keys.Where(k => !k.EndsWith(" - User", StringComparison.OrdinalIgnoreCase)).OrderBy(k => k, StringComparer.Ordinal))
+            Add(tables, t.ToUpperInvariant(), Own(t));
     }
 
     /// <summary>The case types beyond linear static and modal: nonlinear static, response spectrum, histories, buckling.</summary>

@@ -69,6 +69,14 @@ public static class Program
         return info;
     }
 
+    /// <summary>What --version prints: the version running, and a newer one already downloaded when there is one.</summary>
+    internal static string VersionText()
+    {
+        var running = typeof(Program).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? Updater.Current.ToString();
+        return Updater.NewestDownloaded(Updater.Current) is { } newer ? $"{running} (a newer version is downloaded: {newer})" : running;
+    }
+
     [STAThread]
     public static int Main(string[] args)
     {
@@ -123,6 +131,8 @@ public static class Program
             }
             catch (Exception ex) when (ex is not OutOfMemoryException) { Console.Error.WriteLine("The check did not run: " + ex.Message); return 2; }
         }
+        // The version, printed, and no window: on 2026-11-27 "--version" on Ahmed's PC opened a CSI ProMax window instead.
+        if (args.Contains("--version")) { Console.WriteLine(VersionText()); return 0; }
         if (args.Contains("--check-update"))
         {
             try

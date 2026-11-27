@@ -29,6 +29,9 @@ public static partial class S2kReader
         var notes = new List<string>();
         var m = Tables(tables, title, notes, keep: true);
         m.Target = "sap2000";
+        // Every table of the file is kept as it was, and what the writer makes of the model just read is the base the
+        // changes are measured from: the file goes back out as it came in, with only the changes put in.
+        m.Source = SourceTables.Capture("sap2000", text, S2kWriter.WriteOwn(m).Text);
         return new Result(m, false, notes.Distinct().ToList());
     }
 
@@ -222,7 +225,7 @@ public static partial class S2kReader
 
         Releases(m, Use, frameAt, notes);
         Patterns(m, Use, notes);
-        Functions(m, Use, notes);
+        Functions(m, t, Use, notes);
         Cases(m, Use, notes);
         // Groups, constraints, springs, links, hinges, the mass source and moving loads.
         Extras(m, Use, t, joints, j => { var w = Where(j); return w.Point.Name + "@" + storyNames[w.Level]; }, frameAt, areaAt, storyNames, notes);
@@ -233,6 +236,8 @@ public static partial class S2kReader
         if (notRun.Count > 0) RunCases.SetNotRun(m, notRun);
         Loads(m, Use, joints, frameAt, areaAt, Where, storyNames, notes);
 
+        // SAP2000's own load tables (every Load Pattern, Load Case and Load Combination field) go into its load forms.
+        SapLoadTables.Read(m, t, known);
         // SAP2000's hinge definitions go into the Modeler's own hinge forms (DefineTables.SapHinges).
         foreach (var name in t.Keys.Where(k => !known.Contains(k) && DefineTables.IsSap(k)).ToList())
         {
@@ -578,13 +583,41 @@ public static partial class S2kReader
             var name = S(r, "LoadPat");
             if (name.Length == 0 || m.LoadPatterns.Exists(p => p.Name == name)) continue;
             m.LoadPatterns.Add(new LoadPattern { Name = name, Type = PatternType(S(r, "DesignType")), SelfWeight = D(r, "SelfWtMult") });
-            if (S(r, "AutoLoad") is { Length: > 0 } auto && !auto.Equals("None", StringComparison.OrdinalIgnoreCase))
-                notes.Add($"Load pattern {name} has SAP2000's automatic {auto} load: set it again in the Modeler (Define > Load Patterns > Modify Lateral Load).");
         }
     }
 
-    private static void Functions(StructuralModel m, Func<string, List<Dictionary<string, string>>> use, List<string> notes)
+    private static void Functions(StructuralModel m, Dictionary<string, List<Dictionary<string, string>>> t, Func<string, List<Dictionary<string, string>>> use, List<string> notes)
     {
+        // SAP2000's other function tables (a code spectrum, From File, the time history types, power spectral density,
+        // steady state): kept as the file has them (SapFunctions), and a spectrum or time history is also a function of
+        // the model with its points.
+        foreach (var name in t.Keys.Where(k => SapFunctions.Table(k) is { } full && !full.EndsWith("Response Spectrum - User", StringComparison.OrdinalIgnoreCase) && !full.EndsWith("Time History - User", StringComparison.OrdinalIgnoreCase)).ToList())
+        {
+            var full = SapFunctions.Table(name)!;
+            var fields = SapFunctions.Tables[full];
+            var (px, py) = SapFunctions.PointFields(full);
+            foreach (var g in use(name).GroupBy(r => S(r, "Name")).Where(g => g.Key.Length > 0))
+            {
+                var rows = g.Select(r => r.Where(kv => kv.Value.Length > 0 && fields.Contains(kv.Key, StringComparer.OrdinalIgnoreCase))
+                    .ToDictionary(kv => fields.First(f => f.Equals(kv.Key, StringComparison.OrdinalIgnoreCase)), kv => kv.Value, StringComparer.Ordinal)).ToList();
+                // A From File spectrum by frequency has its points as Frequency and Accel.
+                var pts = g.Select(r => (X: r.ContainsKey(px) ? D(r, px, double.NaN) : D(r, "Frequency", double.NaN) is var fq && fq > 0 ? 1 / fq : double.NaN, Y: D(r, py, double.NaN)))
+                    .Where(p => !double.IsNaN(p.X) && !double.IsNaN(p.Y)).OrderBy(p => p.X).ToList();
+                m.DefinitionTables ??= new(StringComparer.OrdinalIgnoreCase);
+                var list = m.DefinitionTables.TryGetValue(full, out var have) ? have : m.DefinitionTables[full] = [];
+                list.AddRange(rows);
+                // User Periodic: the rows are one cycle, repeated NumCycles times.
+                if (full.EndsWith("User Periodic", StringComparison.OrdinalIgnoreCase) && pts.Count > 1 && D(g.First(), "NumCycles", 1) is var cyc && cyc > 1)
+                {
+                    var one = pts.ToList(); var span = one[^1].X - one[0].X;
+                    for (var c = 1; c < (int)Math.Round(Math.Min(cyc, 100000.0 / one.Count)); c++) pts.AddRange(one.Skip(1).Select(p => (Math.Round(p.X + c * span, 9), p.Y)));
+                }
+                var kind = SapFunctions.KindOf(full);
+                if (kind is "spectrum" or "history")
+                    try { AnalysisDefs.SetFunction(m, new FunctionDef(g.Key, kind, pts, D(g.First(), "FuncDamp", 0.05))); }
+                    catch (ArgumentException ex) { notes.Add(ex.Message); }
+            }
+        }
         foreach (var g in use("FUNCTION - RESPONSE SPECTRUM - USER").GroupBy(r => S(r, "Name")))
             try { AnalysisDefs.SetFunction(m, new FunctionDef(g.Key, "spectrum", g.Select(r => (D(r, "Period"), D(r, "Accel"))).ToList(), D(g.First(), "FuncDamp", 0.05))); }
             catch (ArgumentException ex) { notes.Add(ex.Message); }

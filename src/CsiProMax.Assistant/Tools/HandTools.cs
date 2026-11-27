@@ -43,7 +43,7 @@ public static class HandTools
             Ask.Changes, DefineShellSection, a => $"Define the section {Text(a, "name")}"),
         new("define_load_pattern",
             "Adds a load pattern (with its load case), or changes one ('was': its name now; its loads, case and combinations follow a new name).",
-            """{"type":"object","required":["name","type"],"properties":{"name":{"type":"string"},"was":{"type":"string"},"type":{"type":"string"},"self_weight":{"type":"number"}}}""",
+            """{"type":"object","required":["name","type"],"properties":{"name":{"type":"string"},"was":{"type":"string"},"type":{"type":"string"},"self_weight":{"type":"number"},"position":{"type":"integer","description":"Where the pattern goes in the list, from 0 (the arrows of SAP2000's Define Load Patterns)."}}}""",
             Ask.Changes, DefineLoadPattern, a => $"Define the load pattern {Text(a, "name")}"),
         new("define_combination",
             "Adds a load combination, or changes one ('was': its name now): its type (Linear Add, Envelope, Absolute Add, SRSS, Range Add) and each load case or combination with its scale factor.",
@@ -335,15 +335,24 @@ public static class HandTools
         var type = ModelEdit.LoadPatternTypes.FirstOrDefault(t => t.Equals(Need(a, "type"), StringComparison.OrdinalIgnoreCase))
                    ?? throw new ToolInputException($"Load pattern types: {string.Join(", ", ModelEdit.LoadPatternTypes)}.");
         var selfWeight = Num(a, "self_weight") ?? 0;
+        var position = Num(a, "position") is { } pos ? (int)pos : (int?)null;
+        void Place(StructuralModel m)
+        {
+            if (position is not { } at || m.LoadPatterns.Find(x => x.Name == name) is not { } p) return;
+            m.LoadPatterns.Remove(p);
+            m.LoadPatterns.Insert(Math.Clamp(at, 0, m.LoadPatterns.Count), p);
+        }
         return Offline(e).Edit(m =>
         {
             FreeName(m.LoadPatterns.Select(x => x.Name).Concat(m.Combos.Select(c => c.Name)), name, was, "load pattern or combination");
             var pattern = Existing(m.LoadPatterns, was, x => x.Name, "load pattern");
-            if (pattern is null) { m.AddLoadPattern(name, type, selfWeight); return Done($"added {name}"); }
+            if (pattern is null) { m.AddLoadPattern(name, type, selfWeight); Place(m); return Done($"added {name}"); }
             pattern.Type = type; pattern.SelfWeight = selfWeight;
             if (was != name)
             {
                 pattern.Name = name;
+                SapLoadTables.Rename(m, "pattern", was!, name);
+                SapLoadTables.Rename(m, "case", was!, name);
                 foreach (var l in m.LineLoads) Retag(l.Tokens, was!, name);
                 foreach (var l in m.AreaLoads) Retag(l.Tokens, was!, name);
                 foreach (var l in m.PointLoads) Retag(l.Tokens, was!, name);
@@ -356,6 +365,7 @@ public static class HandTools
                     RenameCase(m, was!, name);
                 }
             }
+            Place(m);
             return Done($"changed {name}");
         });
     }
@@ -384,7 +394,7 @@ public static class HandTools
             if (combo is null) { m.Combos.Add(new LoadCombo { Name = name, Lines = lines }); return Done($"added {name}"); }
             // What ETABS keeps on a combination beyond its type and cases (design use, ...) stays.
             combo.Lines = lines.Concat(combo.Lines.Skip(1).Where(l => l.Count > 0 && l[0] is not ("LOADCASE" or "LOADCOMBO" or "TYPE"))).ToList();
-            if (was != name) { combo.Name = name; RenameCase(m, was!, name); }
+            if (was != name) { combo.Name = name; RenameCase(m, was!, name); SapLoadTables.Rename(m, "combo", was!, name); }
             return Done($"changed {name}");
         });
     }

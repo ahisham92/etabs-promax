@@ -149,10 +149,10 @@ public static class DefineTools
         return Core(() => link.Edit(m =>
         {
             DefineTables.Set(m, table, name, rows);
-            var full = DefineTables.Tables.Keys.First(k => k.Equals(table, StringComparison.OrdinalIgnoreCase));
+            var full = DefineTables.FullName(table)!;
             if (full == DefineTables.SapFrameGeneral || full == DefineTables.SapAreaSections) DefineTables.SyncSapSection(m, full, name);
             else if (full == DefineTables.SapLinkGeneral) DefineTables.SyncSapLink(m, name);
-            return (JsonNode)new JsonObject { ["table"] = full, ["name"] = name, ["rows"] = m.DefinitionTables?.GetValueOrDefault(full)?.Count(x => x.GetValueOrDefault(DefineTables.Tables[full][0].Key) == name) ?? 0 };
+            return (JsonNode)new JsonObject { ["table"] = full, ["name"] = name, ["rows"] = m.DefinitionTables?.GetValueOrDefault(full)?.Count(x => x.GetValueOrDefault(DefineTables.KeyField(full)) == name) ?? 0 };
         }));
     }
 
@@ -173,12 +173,22 @@ public static class DefineTools
                 ["fields"] = new JsonArray(fields.Select(f => (JsonNode)new JsonArray(f.Key, f.Label)).ToArray()),
                 ["rows"] = new JsonArray((m.DefinitionTables?.GetValueOrDefault(name) ?? []).Select(x => (JsonNode)Obj(x)).ToArray()),
             };
+        // SAP2000's own load tables (Define > Load Patterns, Load Cases, Load Combinations) the model has rows of.
+        if (m.Target == ProgramOptions.Sap2000)
+            foreach (var (name, rows) in (m.DefinitionTables ?? []).Where(t => SapLoadTables.Has(t.Key)))
+                tables[name] = new JsonObject
+                {
+                    ["fields"] = new JsonArray(SapLoadTables.Fields[name].Select(f => (JsonNode)new JsonArray(f, f)).ToArray()),
+                    ["rows"] = new JsonArray(rows.Select(x => (JsonNode)Obj(x)).ToArray()),
+                };
         return new JsonObject
         {
             ["program"] = m.Target,
             ["rebar_sizes"] = new JsonArray(DefineTables.RebarSizes(m).Select(x => (JsonNode)new JsonObject { ["name"] = x.Name, ["area"] = x.Area, ["diameter"] = x.Diameter }).ToArray()),
             ["section_rebar"] = sections,
             ["tables"] = tables,
+            // SAP2000's load tables' fields (its load forms lay them out), the key first.
+            ["sap_load_fields"] = m.Target == ProgramOptions.Sap2000 ? new JsonObject(SapLoadTables.Fields.Select(f => KeyValuePair.Create(f.Key, (JsonNode?)new JsonArray(f.Value.Select(x => (JsonNode)x).ToArray())))) : null,
         };
     }
 }

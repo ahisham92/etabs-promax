@@ -66,6 +66,8 @@ public static class StabilityCheck
         public bool[] Floating { get; set; } = new bool[a.Joints.Count];
         public HashSet<string> Stiffless { get; } = new(StringComparer.OrdinalIgnoreCase);
         public HashSet<string> StifflessShells { get; } = new(StringComparer.OrdinalIgnoreCase);
+        /// <summary>Links and constraints: joint I to joint J, or to the ground (J -1).</summary>
+        public List<(int I, int J, Link L)> Ties { get; } = [];
 
         public void Add(Level level, string check, string message, string fix, IEnumerable<ObjectRef> objects, IEnumerable<Xyz> at) =>
             Found.Add(new Instability(level, check, message, fix, objects.Take(200).ToList(), at.Take(200).ToList()));
@@ -235,6 +237,11 @@ public static class StabilityCheck
             }
             if (distinct.Count < idx.Count)
                 c.Add(Level.Warning, "geometry", $"{Show(s)} uses the same corner twice.", "Redraw it with each corner once.", [Context.Ref(s)], pts);
+            // ETABS and SAFE mesh each floor and wall into elements of their own (Auto Mesh, on by default), so the
+            // object's own shape (a long thin strip, a slightly warped panel) is not what is analysed and they say
+            // nothing of it. Only an area analysed as one element (SAP2000's, or one meshed 'None') is judged here.
+            var asOneElement = !a.JoinsAtIntersections || s.MeshNone;
+            if (!asOneElement) continue;
             // Warped: a corner off the plane of the others.
             if (pts.Count >= 4 && Warp(pts) is var w && w > Math.Max(10 * tol, 1e-3 * Size(pts)))
                 c.Add(Level.Warning, "meshing", $"{Show(s)} is warped: a corner is {w:0.###} {a.LengthUnit} off the plane of the others.",
@@ -348,6 +355,16 @@ public static class StabilityCheck
                 c.At[c.Index[jn]].Add(Context.Ref(s));
                 used[c.Index[jn]] = true;
             }
+        foreach (var l in a.Links)
+        {
+            if (!c.Index.TryGetValue(l.I, out var i)) continue;
+            var j = l.J is not null && c.Index.TryGetValue(l.J, out var jj) ? jj : -1;
+            if (l.J is not null && j < 0) continue;
+            c.Ties.Add((i, j, l));
+            c.At[i].Add(new ObjectRef("link", l.Name));
+            used[i] = true;
+            if (j >= 0) { c.At[j].Add(new ObjectRef("link", l.Name)); used[j] = true; }
+        }
 
         // Frames: split at the joints they pass through when the program joins them there (ETABS, a meshed SAP2000
         // frame); otherwise a joint on a member's span is not joined to it, which is said.
@@ -415,15 +432,18 @@ public static class StabilityCheck
         foreach (var (i, j, _) in c.Pieces) Union(i, j);
         foreach (var (joints, _, _) in c.Plates) for (var k = 1; k < joints.Length; k++) Union(joints[0], joints[k]);
         foreach (var g in Floors(c)) for (var k = 1; k < g.Count; k++) Union(g[0], g[k]);
+        foreach (var (i, j, _) in c.Ties) if (j >= 0) Union(i, j);
 
         var supported = new bool[n];
         for (var i = 0; i < n; i++) supported[i] = c.J(i).Supported;
         foreach (var (i, j, f) in c.Pieces) if (f.Spring) supported[i] = supported[j] = true;
         foreach (var (joints, s, _) in c.Plates) if (s.Spring) foreach (var k in joints) supported[k] = true;
+        foreach (var (i, j, _) in c.Ties) if (j < 0) supported[i] = true;
 
         var structural = new bool[n];
         foreach (var (i, j, _) in c.Pieces) structural[i] = structural[j] = true;
         foreach (var (joints, _, _) in c.Plates) foreach (var k in joints) structural[k] = true;
+        foreach (var (i, j, _) in c.Ties) { structural[i] = true; if (j >= 0) structural[j] = true; }
 
         if (!Enumerable.Range(0, n).Any(i => supported[i]))
         {
@@ -476,7 +496,11 @@ public static class StabilityCheck
     {
         string[] words = ["axial force (P)", "shear V2", "shear V3", "torsion (T)"];
         var found = new Dictionary<int, List<Frame>>();
-        foreach (var f in c.M.Frames.Where(f => f.Releases.Length >= 12))
+        // A frame joined along its length (ETABS meshes a beam at the joints of the slab and the members it meets) is
+        // held between its ends there: the releases at its two ends no longer leave it free, and the program does not
+        // complain. Only a frame analysed as one piece, end to end, is judged by its releases.
+        var pieces = c.Pieces.GroupBy(p => p.F.Name).ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
+        foreach (var f in c.M.Frames.Where(f => f.Releases.Length >= 12 && pieces.GetValueOrDefault(f.Name) == 1))
         {
             for (var d = 0; d < 4; d++)
                 if (f.Releases[d] && f.Releases[d + 6])
@@ -559,10 +583,16 @@ public static class StabilityCheck
             var e = E(p.Material);
             var t = p.Thickness is > 0 ? p.Thickness.Value : typicalL / 30;
             var pts = joints.Select(c.Xyz).ToList();
-            var w = Math.Sqrt(Math.Max(PolygonArea(pts), 1e-12));
+            var span = Math.Sqrt(Math.Max(PolygonArea(pts), 1e-12));
             for (var x = 0; x < joints.Length; x++)
                 for (var y = x + 1; y < joints.Length; y++)
                 {
+                    // Each tie stands for the strip of the shell between its two joints, as wide as the tie is long
+                    // (no wider than the shell): its stiffness then goes as E t, as a shell element's does, whatever the
+                    // tie's length. A strip as wide as the whole shell on a short tie (two corners close together, a
+                    // sliver) made that tie 1e8 to 1e12 times stiffer than the rest, and the factoring lost every digit
+                    // at the corner: Ahmed's floor F11, 2026-11-27, called "free in UZ" where ETABS found nothing.
+                    var w = Math.Min(Math.Max(Distance(pts[x], pts[y]), c.M.Tolerance), span);
                     var membrane = p.Type != "Plate";
                     var bending = p.Type != "Membrane";
                     var ea = membrane ? e * t * w / 2 : 0;
@@ -578,6 +608,20 @@ public static class StabilityCheck
                 }
         }
 
+        // Links and constraints: a stiff member between their joints (fixed at both ends), or a support at a link's one
+        // joint. Their own stiffness is not judged, only that they join.
+        foreach (var (i, j, _) in c.Ties)
+        {
+            if (c.Floating[i] || j >= 0 && c.Floating[j]) continue;
+            if (j < 0) { spring[i] = [true, true, true, true, true, true]; continue; }
+            // A link of no length (an isolator, a zero-length spring between two joints in one place) has no direction
+            // to build a member on: both its joints are taken as held, so it hides nothing it does not join.
+            if (Distance(c.Xyz(i), c.Xyz(j)) <= a.Tolerance) { spring[i] = [true, true, true, true, true, true]; spring[j] = [true, true, true, true, true, true]; continue; }
+            var ea = typicalE * defaultArea * 10;
+            var ei = typicalE * defaultI * 10;
+            bars.Add(new StiffnessProbe.Bar(i, j, ea, ei, ei, ei, new bool[12], "link"));
+        }
+
         // A joint no member with stiffness reaches (only a member with no section, say) is reported elsewhere: held here.
         var reached = new bool[n];
         foreach (var b in bars) reached[b.I] = reached[b.J] = true;
@@ -591,9 +635,11 @@ public static class StabilityCheck
         }
         bool[] active = a.PlateOnly ? [false, false, true, true, true, false] : [true, true, true, true, true, true];
         StiffnessProbe.Result r;
-        try { r = StiffnessProbe.Run(xyz, fixedDof, spring, bars, floors, active, o.MostEquations); }
+        var holdUnstiffened = a.Program != "sap2000";
+        try { r = StiffnessProbe.Run(xyz, fixedDof, spring, bars, floors, active, o.MostEquations, holdUnstiffened: holdUnstiffened); }
         catch (OutOfMemoryException) { c.Notes.Add("The stiffness check needed more memory than the PC had; the other checks ran."); return (0, false); }
         if (!r.Ran) { c.Notes.Add($"The stiffness check was left out: {r.Why}. The other checks ran."); return (r.Equations, false); }
+        if (r.Held > 0) c.Notes.Add($"{r.Held} joint direction(s) have no stiffness from any member (the corners of membrane floors up and down, say); {(a.Program == "safe" ? "SAFE" : "ETABS")} leaves them out of the analysis, so they are not reported.");
         if (r.IllConditioned) c.Notes.Add("The stiffness is badly conditioned in places (some pivots lost 7 or more digits): look for very stiff members next to very soft ones.");
         ReportFree(c, r, floors);
         return (r.Equations, true);

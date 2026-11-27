@@ -101,7 +101,9 @@ public static class AnalysisDefs
     {
         var s = m.Passthrough.Find(x => x.Heading == Functions);
         SetFunctionSource(m, name, null);
-        return s is not null && s.Lines.RemoveAll(l => Tokenize(l) is { Count: > 1 } t && t[0] == "FUNCTION" && Unquote(t[1]) == name) > 0;
+        // SAP2000's own rows of it (its code, type and parameters; a power spectral density or steady state function lives there only).
+        var sap = SapFunctions.Remove(m, name);
+        return (s is not null && s.Lines.RemoveAll(l => Tokenize(l) is { Count: > 1 } t && t[0] == "FUNCTION" && Unquote(t[1]) == name) > 0) | sap;
     }
 
     /// <summary>How a function was made in its definition form (Ahmed 2026-11-27, every field): the function type
@@ -204,6 +206,7 @@ public static class AnalysisDefs
         else
         {
             existing.Name = c.Name; existing.Lines = lines;
+            SapLoadTables.Rename(m, "case", old, c.Name);
             if (c.Name != old)
                 foreach (var combo in m.Combos)
                     foreach (var line in combo.Lines)

@@ -910,7 +910,8 @@ static class TesterBugTests
                 File.WriteAllText(Path.Combine(dir, "Projects", "A", "solo.sdb"), "x");
                 var etabs = RealModelField.Find(CsiProMax.Assistant.Etabs.CsiProgram.Etabs, [dir], Path.Combine(dir, "none.txt")).Select(Path.GetFileName).ToList();
                 Check(etabs.Contains("tower.e2k") && etabs.Contains("frame.e2k") && !etabs.Contains("frame.EDB") && !etabs.Contains("cpm-field-test-1.e2k"), "ETABS models: " + string.Join(", ", etabs));
-                Check(RealModelField.Find(CsiProMax.Assistant.Etabs.CsiProgram.Sap2000, [dir], Path.Combine(dir, "none.txt")).Count == 0, "a SAP2000 model with no text beside it is taken");
+                // A SAP2000 model with no text beside it is taken too: its tables are read as its .s2k (SapTablesText).
+                Check(RealModelField.Find(CsiProMax.Assistant.Etabs.CsiProgram.Sap2000, [dir], Path.Combine(dir, "none.txt")).Select(Path.GetFileName).SequenceEqual(["solo.sdb"]), "a SAP2000 .sdb with no text beside it is taken");
             }
             finally { Directory.Delete(dir, true); }
             var a = new Dictionary<string, TableData>(StringComparer.OrdinalIgnoreCase)
@@ -929,6 +930,13 @@ static class TesterBugTests
                 "differences: " + string.Join(" | ", d));
             var src = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/FieldTest.cs"));
             Check(src.Contains("RealModelField.Run(ctx, program);", StringComparison.Ordinal), "the field test does not run the real-model round trip");
+        });
+        yield return ("--version prints the running version and opens no window", () =>
+        {
+            var text = CsiProMax.Assistant.Program.VersionText();
+            Check(text.StartsWith(CsiProMax.Update.Updater.Current.ToString(3), StringComparison.Ordinal) || text.Contains(CsiProMax.Update.Updater.Current.ToString(), StringComparison.Ordinal), "the version printed: " + text);
+            var main = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Program.cs"));
+            Check(main.IndexOf("args.Contains(\"--version\")", StringComparison.Ordinal) is var at and > 0 && at < main.IndexOf("Newer(args) is { } newerTest", StringComparison.Ordinal), "--version is answered before any window or hand-over");
         });
         yield return ("field test: steps a workaround can test are tested, not left out (Ahmed, 2026-11-26: only a missing program or licence)", () =>
         {
@@ -1361,7 +1369,7 @@ static class TesterBugTests
                 var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ReferenceData.cs"));
                 Check(!source.Contains("ctx.Step(") && !source.Contains("ctx.Fail("), "gathering reference data is recorded as a test step");
                 var test = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/FieldTest.cs"));
-                Check(test.Contains("if (finished && o.ReferenceData) ReferenceData.Run(ctx.Folder, program, open.Link, open.ModelPath, (open as ScratchProgram)?.ProcessId ?? 0);") && test.Contains("sb.Append(ReferenceData.Section(work));") && test.Contains("FailurePictures.Take(ctx.Folder, program, scratch.ProcessId, step.Name)"),
+                Check(test.Contains("if (finished && o.ReferenceData) GatherReference(ctx, o, program, open);") && test.Contains("ReferenceData.Run(ctx.Folder, program, open.Link, open.ModelPath, (open as ScratchProgram)?.ProcessId ?? 0)") && test.Contains("sb.Append(ReferenceData.Section(work));") && test.Contains("FailurePictures.Take(ctx.Folder, program, scratch.ProcessId, step.Name)"),
                     "the full test does not gather the needed things, list them, or picture a failure");
             }
             finally
@@ -1612,6 +1620,24 @@ static class TesterBugTests
             Check(com.Contains("catch (OutOfMemoryException) { return ReadInPages(key, cases, combos); }", StringComparison.Ordinal), "a table read that runs out of memory is read in pages");
             Check(com.Contains("catch (OutOfMemoryException ex) { done.SetException(ex); }", StringComparison.Ordinal), "and out of memory is not wrapped on the program's thread, so the pages are tried");
             Check(com.Contains("ReadTableNow(key, isCase ? [one] : [], isCase ? [] : [one])", StringComparison.Ordinal), "one load case or combination a page");
+        });
+
+        yield return ("SAFE reference data (for 0.4.71): the testers' zips bring SAFE's own .f2k round trip with its differences, even when the scratch window stopped answering", () =>
+        {
+            var a = File.ReadAllText(Path.Combine(SourceText.Root(), "tests/CsiProMax.Tests/samples/safe-RC-PN-v23.f2k"));
+            Check(SafeRoundTrip.Count(a, a) == "the same in every table, row and field", "a file against itself");
+            var edited = SafeRoundTrip.Edited(a);
+            Check(edited is not null && edited.Contains("\"Self Weight Multiplier\"=0.5", StringComparison.Ordinal), "the first pattern's self weight is set to 0.5");
+            var diff = SafeRoundTrip.Diff(a, edited!, "A", "D");
+            Check(diff.Contains("<!-- 1 tables, 1 rows, 1 fields differ -->", StringComparison.Ordinal) && diff.Contains("## LOAD PATTERN DEFINITIONS", StringComparison.Ordinal), diff[..Math.Min(400, diff.Length)]);
+            var newGuids = System.Text.RegularExpressions.Regex.Replace(a, "GUID=[0-9a-f-]+", "GUID=x");
+            Check(SafeRoundTrip.Count(a, newGuids) == "the same in every table, row and field", "a new GUID on export is no difference");
+            Check(SafeRoundTrip.Texty("TextFile") && SafeRoundTrip.Texty("SAFEF2k") && !SafeRoundTrip.Texty("DBTablesText") && !SafeRoundTrip.Texty("DBTablesExcel"), "the text file types are tried, not the table exports");
+            Check(ReferenceData.Items.Any(i => i.Run == SafeRoundTrip.Gather && i.For!(CsiProgram.Safe) && !i.For(CsiProgram.Etabs)), "the round trip is gathered from SAFE");
+            Check(ReferenceData.Items.Last().Name.StartsWith("the program's defaults", StringComparison.Ordinal), "and the blank defaults stay last");
+            var field = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/FieldTest.cs"));
+            Check(field.Contains("if (finished && o.ReferenceData) GatherReference(ctx, o, program, open);", StringComparison.Ordinal)
+                && field.Contains("fresh = o.StartScratch(program, quiet, copy);", StringComparison.Ordinal), "a scratch window that stopped answering gives way to a fresh one for the reference data");
         });
 
         yield return ("SAFE tester (0.4.69): the .f2k's fields go in by the names SAFE shows, strips by SAFE 23.1's point table, a part import starts again, one API file loads once", () =>

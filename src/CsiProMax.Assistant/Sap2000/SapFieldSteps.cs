@@ -14,9 +14,30 @@ namespace CsiProMax.Assistant.Sap2000;
 public static class SapFieldSteps
 {
     /// <summary>In the Modeler's part: the model saved as a SAP2000 text file, for the scratch window to open.</summary>
+    /// <summary>The SAP2000 function forms' tables the Modeler writes (Ahmed 2026-11-27: every form works as in SAP2000):
+    /// one function of several codes and types, each with its form's own default parameters, written into the .s2k and read
+    /// back from SAP2000's own table, field by field.</summary>
+    internal static readonly (string Name, string Kind, string Table, Dictionary<string, string> Values, double[][] Points)[] Functions =
+    [
+        ("CPM-RS-ASCE716", "spectrum", "Function - Response Spectrum - ASCE 7-16", new() { ["Ss"] = "2.29", ["S1"] = "0.869", ["TL"] = "8", ["SiteClass"] = "B", ["Fa"] = "0.9", ["Fv"] = "0.8", ["SDS"] = "1.374", ["SD1"] = "0.4635" }, [[0, 0.5496], [0.0675, 1.374], [0.3373, 1.374], [1, 0.4635], [8, 0.0579]]),
+        ("CPM-RS-EC8", "spectrum", "Function - Response Spectrum - EuroCode8 2004", new() { ["Country"] = "CEN Default", ["Direction"] = "Horizontal", ["Ag"] = "0.4", ["SpecType"] = "1", ["GroundType"] = "B", ["SoilFact"] = "1.2", ["Tb"] = "0.15", ["Tc"] = "0.5", ["Td"] = "2", ["LBFact"] = "0.2", ["BehaveFact"] = "2" }, [[0, 0.32], [0.15, 0.6], [0.5, 0.6], [2, 0.15], [4, 0.08]]),
+        ("CPM-RS-UBC97", "spectrum", "Function - Response Spectrum - UBC97", new() { ["Ca"] = "0.36", ["Cv"] = "0.54" }, [[0, 0.36], [0.12, 0.9], [0.6, 0.9], [1, 0.54], [4, 0.135]]),
+        ("CPM-TH-SINE", "history", "Function - Time History - Sine", new() { ["Period"] = "1", ["StepsPerCyc"] = "4", ["NumCycles"] = "2", ["Amplitude"] = "1" }, [[0, 0], [0.25, 1], [0.5, 0], [0.75, -1], [1, 0], [1.25, 1], [1.5, 0], [1.75, -1], [2, 0]]),
+        ("CPM-TH-RAMP", "history", "Function - Time History - Ramp", new() { ["RampTime"] = "1", ["Amplitude"] = "1", ["MaxTime"] = "20" }, [[0, 0], [1, 1], [20, 1]]),
+        ("CPM-PSD", "psd", "Function - Power Spectral Density - User", new(), [[1, 0.1], [10, 0.2], [20, 0.05]]),
+        ("CPM-SS", "steady", "Function - Steady State - User", new(), [[0.5, 1], [5, 1], [10, 0.5]]),
+    ];
+
     public static void Modeler(FieldContext ctx)
     {
         SapFormRoundTrip.Define(ctx);
+        // The SAP2000 function forms' functions, so SAP2000 reads them back (Scratch: "SAP2000 read the function forms' tables").
+        foreach (var (name, kind, table, values, points) in Functions)
+            ctx.Tool("define_function", new JsonObject
+            {
+                ["name"] = name, ["kind"] = kind, ["points"] = new JsonArray(points.Select(p => (JsonNode)new JsonArray(p[0], p[1])).ToArray()), ["sap_table"] = table,
+                ["sap_values"] = new JsonObject(values.Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))),
+            }.ToJsonString(), null, $"tool define_function, SAP2000's {table.Split(" - ").Last()} {(kind == "spectrum" ? "response spectrum" : kind == "history" ? "time history" : kind)} form");
         var answer = ctx.Tool("save_model_s2k", $$"""{"name":"{{ModelerFieldSteps.ModelName}}","folder":{{Q(ctx.Folder)}}}""", a =>
         {
             var file = a["saved"]!.GetValue<string>();
@@ -108,6 +129,27 @@ public static class SapFieldSteps
         ctx.Offer(SapTools.All);
 
         // ---- what SAP2000 read from the file the Modeler wrote ----
+        // The function forms: each function in SAP2000's own table of its code or type, every parameter as the Engine wrote it.
+        foreach (var (name, kind, fnTable, values, points) in Functions)
+            ctx.Step($"SAP2000 read the Engine's {fnTable.Replace("Function - ", "")} function, every field", () =>
+            {
+                if (!FieldTest.IsLive(link)) throw new FieldSkipException("no CSI program is behind this stand-in, so there is no table to read back");
+                TableData t;
+                try { t = link.ReadTable(fnTable, null, null); }
+                catch (EtabsException ex) { throw new FieldCheckException($"SAP2000 did not give its table \"{fnTable}\" ({ex.Message})"); }
+                var col = t.Fields.Select((f, i) => (f, i)).ToDictionary(x => x.f, x => x.i, StringComparer.OrdinalIgnoreCase);
+                FieldContext.Expect(col.ContainsKey("Name"), $"SAP2000's \"{fnTable}\" has no Name field: {string.Join(", ", t.Fields)}");
+                var rows = t.Rows.Where(r => r[col["Name"]] == name).ToList();
+                FieldContext.Expect(rows.Count > 0, $"SAP2000 has no {name} in \"{fnTable}\" (it has {string.Join(", ", t.Rows.Select(r => r[col["Name"]]).Distinct())})");
+                static bool Same(string a, string b) => a.Equals(b, StringComparison.OrdinalIgnoreCase)
+                    || double.TryParse(a, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var x) && double.TryParse(b, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var y) && Math.Abs(x - y) <= 1e-3 * Math.Max(1, Math.Abs(x));
+                var off = values.Where(kv => !col.TryGetValue(kv.Key, out var c) || !Same(rows[0][c] ?? "", kv.Value)).Select(kv => $"{kv.Key}: Engine {kv.Value}, SAP2000 {(col.TryGetValue(kv.Key, out var c2) ? rows[0][c2] : "(no field)")}").ToList();
+                FieldContext.Expect(off.Count == 0, $"{name}: " + string.Join("; ", off));
+                if (kind is "psd" or "steady" or "history" && fnTable.EndsWith("User", StringComparison.OrdinalIgnoreCase) || kind is "psd" or "steady")
+                    FieldContext.Expect(rows.Count == points.Length, $"{name}: the Engine wrote {points.Length} points, SAP2000 has {rows.Count}");
+                return $"{rows.Count} rows; " + string.Join(", ", values.Select(kv => kv.Key + "=" + rows[0][col[kv.Key]]));
+            });
+
         ctx.Step("SAP2000 read every joint, frame and area the Modeler wrote", () =>
         {
             var (joints, frames, areas) = (link.Points().Count, link.Frames().Count, link.Areas().Count);
