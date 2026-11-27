@@ -65,6 +65,8 @@ static class LosslessTests
 
     static void Same(string name, string before, StructuralModel model, string how)
     {
+        // A table set's ETABS-internal "~LLRF" lines are left out on purpose: ETABS 23.2 cannot read them back (KBC 2009 Ex002).
+        before = string.Join("\n", before.Split('\n').Where(l => !E2kWriter.InternalTableSetName(l.TrimEnd('\r'))));
         var lost = Lost(before, E2kWriter.Write(model));
         Check(lost.Count == 0, $"{name} {how}: {lost.Count} word(s) lost: {string.Join(" | ", lost.Take(12))}");
     }

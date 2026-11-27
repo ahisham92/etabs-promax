@@ -32,6 +32,8 @@ public static class EtabsFieldSteps
 
         // ---- what ETABS read from the file the Modeler wrote ----
         var written = ctx.Written;
+        // The function forms: each function in ETABS's own table of its code or type, every parameter as the Engine wrote it.
+        EtabsFunctionRoundTrip.Check(ctx, link);
         ctx.Step("ETABS read every story, frame and area the Modeler wrote", () =>
         {
             var (stories, frames, areas) = (link.Stories().Count - 1, link.Frames().Count, link.Areas().Count);
@@ -54,6 +56,8 @@ public static class EtabsFieldSteps
             FieldContext.Expect(missing.Count == 0, "not in ETABS after the import: " + string.Join(", ", missing));
             return "all there";
         });
+        // The Frame/Wall Nonlinear Hinges forms' hinges, set in the Modeler's part, read back from ETABS.
+        EtabsHingeRoundTrip.Check(ctx);
         ctx.Step("the fixed supports at the base came across", () =>
         {
             var z0 = link.Stories()[0].Elevation;

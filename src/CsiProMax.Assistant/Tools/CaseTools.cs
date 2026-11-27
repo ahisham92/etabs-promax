@@ -34,6 +34,10 @@ public static class CaseTools
               "sap_table":{"type":"string","description":"SAP2000's own function table the function is kept in, e.g. 'Function - Response Spectrum - ASCE 7-16' (its code or type and parameters go back to SAP2000 as they are)."},
               "sap_values":{"type":"object","additionalProperties":{"type":["string","number"]},"description":"That table's parameter fields (SAP2000 field names) for this function."},
               "sap_points":{"type":"array","items":{"type":"array","items":{"type":"number"}},"description":"The points SAP2000's table keeps when they differ from the function's own (User Periodic: one cycle)."},
+              "etabs_table":{"type":"string","description":"The etabs target's own function table the function is kept in, e.g. 'Functions - Response Spectrum - ASCE7-16' (its code or type and every parameter go back through its database tables)."},
+              "etabs_values":{"type":"object","additionalProperties":{"type":["string","number"]},"description":"That table's parameter fields (the etabs table's field names) for this function."},
+              "etabs_points":{"type":"array","items":{"type":"array","items":{"type":"number"}},"description":"The points the etabs table keeps when they differ from the function's own (User Periodic: one cycle)."},
+              "etabs_form":{"type":"object","additionalProperties":{"type":["string","number"]},"description":"What the etabs form shows that its table has no field for (kept in the .cpm only)."},
               "from":{"type":"string","enum":["points","code","sine","cosine","ramp","sawtooth","triangular","periodic","file"],"description":"Default points."},
               "ramp_time":{"type":"number"},"max_time":{"type":"number"},"preview":{"type":"boolean"},"units":{"type":"string","description":"Frequency Units Hz or RPM (power spectral density, steady state), as the form shows the frequencies."},
               "file":{"type":"object","additionalProperties":{"type":["string","number","boolean"]},"description":"The From File form's fields, kept with the function."},
@@ -67,6 +71,15 @@ public static class CaseTools
               "kind":{"type":"string"},"pattern":{"type":"string"},"objects":{"type":"array","items":{"type":"string"}},
               "values":{"type":"object","additionalProperties":{"type":"number"}},"dir":{"type":"string"},"replace":{"type":"boolean"}}}
             """, Ask.Changes, AssignLoads, a => $"Assign {a.Text("kind").Replace('_', ' ')} loads in {a.Text("pattern")}"),
+        new("assign_sap_loads",
+            "SAP2000's Assign > Joint, Frame, Cable, Tendon, Area, Solid and Link/Support Loads forms: sets the rows of SAP2000's own table on each object (label@story; joints point@story; cables, tendons, solids and links by SAP2000 name, e.g. Cable Loads - Distributed, Tendon Loads - Tension Force Or Stress, Solid Loads - Surface Pressure, Link Loads - Gravity), " +
+            "with option add (Add to Existing Loads), replace (Replace Existing Loads, the default: the object's loads of this table in that pattern go first) or delete (Delete Existing Loads). " +
+            "table is SAP2000's table, e.g. Joint Loads - Force (CoordSys, F1..M3), Frame Loads - Distributed (CoordSys, Type, Dir, DistType, RelDistA, RelDistB, AbsDistA, AbsDistB, FOverLA, FOverLB, MOverLA, MOverLB), " +
+            "Frame Loads - Point, Frame Loads - Temperature, Frame Loads - Strain, Frame Loads - Gravity, Frame Loads - Deformation, Frame Loads - Target Force, Overwrites - Auto Wave Loads - Frame, " +
+            "Overwrites - Auto Wind Loads - Frame, Frame Fireproofing Assignments, Area Loads - Gravity, ...; rows give its fields by SAP2000's names (LoadPat comes from pattern). " +
+            "Rows the Modeler holds as its own loads become them; every other row is kept as SAP2000 has it and goes into the .s2k.",
+            """{"type":"object","required":["table","objects"],"properties":{"table":{"type":"string"},"objects":{"type":"array","items":{"type":"string"}},"pattern":{"type":"string"},"option":{"type":"string","enum":["add","replace","delete"]},"rows":{"type":"array","items":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}}}}}""",
+            Ask.Changes, AssignSapLoads, a => $"Assign {a.Text("table")}{(a.Text("pattern").Length > 0 ? " in " + a.Text("pattern") : "")}"),
         new("set_load_cases_to_run",
             "Analyze > Set Load Cases to Run: which load cases the next run runs. run lists the cases to run, not_run the cases to leave out; all true runs every case, all false none. A case not named keeps its choice. The run sets the program's own run flags before it starts (SAP2000's file gets RunCase=No).",
             """{"type":"object","properties":{"run":{"type":"array","items":{"type":"string"}},"not_run":{"type":"array","items":{"type":"string"}},"all":{"type":"boolean"}}}""",
@@ -96,6 +109,19 @@ public static class CaseTools
         var sapValues = new Dictionary<string, string>(StringComparer.Ordinal);
         if (a.TryGetProperty("sap_values", out var sv) && sv.ValueKind == JsonValueKind.Object)
             foreach (var x in sv.EnumerateObject()) sapValues[x.Name] = x.Value.ValueKind == JsonValueKind.String ? x.Value.GetString() ?? "" : x.Value.GetRawText();
+        // ETABS's own table for the function (its code or type and every parameter, put into ETABS through its tables).
+        var etabsTable = a.Text("etabs_table").Trim();
+        if (etabsTable.Length > 0)
+        {
+            etabsTable = EtabsFunctions.Table(etabsTable) ?? throw new ToolInputException($"There is no ETABS function table '{etabsTable}'."); // ETABS itself
+            if (EtabsFunctions.KindOf(etabsTable) != kind) throw new ToolInputException($"The table \"{etabsTable}\" is for {EtabsFunctions.KindOf(etabsTable)} functions, not {kind}.");
+            if (kind is "psd" or "steady") throw new ToolInputException("The Engine's ETABS forms make response spectrum and time history functions."); // ETABS itself
+        }
+        var etabsValues = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (a.TryGetProperty("etabs_values", out var ev) && ev.ValueKind == JsonValueKind.Object)
+            foreach (var x in ev.EnumerateObject()) etabsValues[x.Name] = x.Value.ValueKind == JsonValueKind.String ? x.Value.GetString() ?? "" : x.Value.GetRawText();
+        if (etabsTable.Length > 0 && etabsValues.Keys.FirstOrDefault(k => !EtabsFunctions.Tables[etabsTable].Contains(k, StringComparer.Ordinal) || k == "Name" || k == EtabsFunctions.PointFields(etabsTable).X || k == EtabsFunctions.PointFields(etabsTable).Y) is { } badField)
+            throw new ToolInputException($"The table \"{etabsTable}\" has no field \"{badField}\" to set (its fields: {string.Join(", ", EtabsFunctions.Tables[etabsTable])}).");
         if (kind is "psd" or "steady" && from is not ("points" or "file")) throw new ToolInputException("A power spectral density or steady state function is from points or a file.");
         List<(double, double)> points;
         if (from is "points" or "periodic" or "file")
@@ -207,6 +233,7 @@ public static class CaseTools
             if (a.TryGetProperty(k, out var x) && x.ValueKind == JsonValueKind.Number) source[k] = x.GetRawText();
         if (from == "periodic" && a.TryGetProperty("points", out var cyc)) source["cycle"] = cyc.GetRawText();
         if (from == "file" && a.TryGetProperty("file", out var fl) && fl.ValueKind == JsonValueKind.Object) foreach (var x in fl.EnumerateObject()) source["f:" + x.Name] = x.Value.ValueKind == JsonValueKind.String ? x.Value.GetString() ?? "" : x.Value.GetRawText();
+        if (a.TryGetProperty("etabs_form", out var efm) && efm.ValueKind == JsonValueKind.Object) foreach (var x in efm.EnumerateObject()) source["e:" + x.Name] = x.Value.ValueKind == JsonValueKind.String ? x.Value.GetString() ?? "" : x.Value.GetRawText();
         return link.Edit(m => Core(() =>
         {
             if (was.Length > 0 && was != name)
@@ -226,6 +253,16 @@ public static class CaseTools
                 if (a.TryGetProperty("sap_points", out var sp) && sp.ValueKind == JsonValueKind.Array)
                     rowPoints = sp.EnumerateArray().Select(x => x.EnumerateArray().Select(y => y.GetDouble()).ToArray()).Where(x => x.Length == 2).Select(x => (x[0], x[1])).ToList();
                 SapFunctions.Set(m, sapTable, name, sapValues, rowPoints);
+            }
+            // ETABS's own rows, the same way: set by the ETABS form, any other change makes the function a plain one again.
+            EtabsFunctions.Remove(m, name);
+            if (etabsTable.Length > 0)
+            {
+                if (kind == "spectrum" && !etabsValues.ContainsKey("DampRatio") && EtabsFunctions.Tables[etabsTable].Contains("DampRatio")) etabsValues["DampRatio"] = f.Damping.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+                var rowPoints = points;
+                if (a.TryGetProperty("etabs_points", out var ep) && ep.ValueKind == JsonValueKind.Array)
+                    rowPoints = ep.EnumerateArray().Select(x => x.EnumerateArray().Select(y => y.GetDouble()).ToArray()).Where(x => x.Length == 2).Select(x => (x[0], x[1])).ToList();
+                EtabsFunctions.Set(m, etabsTable, name, etabsValues, rowPoints);
             }
             return (JsonNode)new JsonObject { ["done"] = $"The {kind} function {name}, {points.Count} points.", ["points"] = points.Count, ["first"] = Pair(points[0]), ["last"] = Pair(points[^1]) };
         }));
@@ -369,6 +406,27 @@ public static class CaseTools
         });
     }
 
+    private static JsonNode AssignSapLoads(JsonElement a, ICsiLink e)
+    {
+        var link = Offline(e);
+        var rows = new List<Dictionary<string, string>>();
+        if (a.TryGetProperty("rows", out var rs) && rs.ValueKind == JsonValueKind.Array)
+            foreach (var r in rs.EnumerateArray())
+                rows.Add(r.ValueKind == JsonValueKind.Object ? r.EnumerateObject().ToDictionary(x => x.Name, x => x.Value.ValueKind switch
+                {
+                    JsonValueKind.String => x.Value.GetString() ?? "", JsonValueKind.True => "Yes", JsonValueKind.False => "No", _ => x.Value.GetRawText(),
+                }, StringComparer.Ordinal) : throw new ToolInputException("Each row is an object of SAP2000's fields."));
+        var option = a.Text("option", "replace");
+        var table = a.Need("table");
+        var objects = a.Texts("objects");
+        var pattern = a.Text("pattern");
+        if (option != "delete" && rows.Count == 0) throw new ToolInputException("Give the rows the form sets.");
+        // Checked on a copy first: a refusal leaves the model as it was.
+        Core(() => SapObjectLoads.Assign(ModelFile.FromJson(ModelFile.ToJson(link.Model)), table, objects, pattern.Length > 0 ? pattern : null, rows, option));
+        var n = link.Edit(m => SapObjectLoads.Assign(m, table, objects, pattern.Length > 0 ? pattern : null, rows, option));
+        return new JsonObject { ["done"] = $"{table}: {option} on {n} object{(n == 1 ? "" : "s")}{(pattern.Length > 0 ? " in " + pattern : "")}.", ["objects"] = n };
+    }
+
     // ---- Analyze > Set Load Cases to Run ----
 
     private static JsonNode SetCasesToRun(JsonElement a, ICsiLink e)
@@ -410,6 +468,9 @@ public static class CaseTools
                 ["used_by"] = new JsonArray(AnalysisDefs.UsersOfFunction(m, f.Name).Select(x => (JsonNode)x).ToArray()),
                 ["sap_table"] = SapFunctions.Find(m, f.Name),
                 ["sap_values"] = SapFunctions.Find(m, f.Name) is { } st ? new JsonObject(SapFunctions.Parameters(m, st, f.Name).Select(x => KeyValuePair.Create(x.Key, (JsonNode?)x.Value))) : null,
+                ["etabs_table"] = EtabsFunctions.Find(m, f.Name),
+                ["etabs_values"] = EtabsFunctions.Find(m, f.Name) is { } et ? new JsonObject(EtabsFunctions.Parameters(m, et, f.Name).Select(x => KeyValuePair.Create(x.Key, (JsonNode?)x.Value))) : null,
+                ["etabs_points"] = EtabsFunctions.Find(m, f.Name) is { } et2 ? new JsonArray(EtabsFunctions.Points(m, et2, f.Name).Select(p => (JsonNode)Pair(p)).ToArray()) : null,
             }).Concat(SapFunctions.Others(m).Select(f => (JsonNode)new JsonObject
             {
                 // SAP2000's power spectral density and steady state functions.
