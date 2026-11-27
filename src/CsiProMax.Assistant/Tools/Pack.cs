@@ -75,6 +75,51 @@ public static class Pack
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* only a trace */ }
     }
 
+    /// <summary>
+    /// How long a pack may take to write (Ahmed 2026-11-27: "in a minute or two or 3 maximum"). The field test fails a
+    /// pack that takes longer, and the manifest's "timing" says where the time went.
+    /// </summary>
+    public static readonly TimeSpan MostTime = TimeSpan.FromMinutes(3);
+
+    /// <summary>Where a pack's time goes: each step and each table read, in milliseconds, for the manifest and the trace.</summary>
+    private sealed class Timing
+    {
+        private readonly System.Diagnostics.Stopwatch _all = System.Diagnostics.Stopwatch.StartNew();
+        private readonly System.Diagnostics.Stopwatch _step = System.Diagnostics.Stopwatch.StartNew();
+        private readonly JsonObject _steps = new();
+        private readonly List<(string Table, int Rows, long Ms)> _tables = [];
+
+        public void Step(string name) { _steps[name] = (_steps[name]?.GetValue<long>() ?? 0) + _step.ElapsedMilliseconds; _step.Restart(); }
+
+        public TableData Read(ICsiLink e, TableName t, IReadOnlyList<string>? cases, IReadOnlyList<string>? combos)
+        {
+            Trace(e, t.Key);
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            var rows = -1;
+            try { var data = e.ReadTable(t.Key, cases, combos); rows = data.Rows.Count; return data; }
+            finally
+            {
+                _tables.Add((t.Name, rows, watch.ElapsedMilliseconds));
+                Trace(e, $"  {t.Key}: {watch.ElapsedMilliseconds} ms, {rows} rows");
+            }
+        }
+
+        public JsonObject Json()
+        {
+            Step("the rest");
+            return new JsonObject
+            {
+                ["seconds"] = Math.Round(_all.Elapsed.TotalSeconds, 1),
+                ["most_seconds"] = MostTime.TotalSeconds,
+                ["steps_ms"] = _steps,
+                ["tables_read"] = _tables.Count,
+                ["tables_ms"] = _tables.Sum(t => t.Ms),
+                // The slowest reads first: what to look at when a pack is slow.
+                ["slowest"] = new JsonArray(_tables.OrderByDescending(t => t.Ms).Take(25).Select(t => (JsonNode)new JsonArray(t.Table, t.Rows, t.Ms)).ToArray()),
+            };
+        }
+    }
+
     public sealed record Built(byte[] Zip, JsonObject Content, int Frames, int Areas, IReadOnlyList<string> Tables, IReadOnlyList<string> Notes);
 
     /// <param name="extraTables">More tables to take, by name or key (for example "Element Forces - Beams").</param>
@@ -82,6 +127,10 @@ public static class Pack
         JsonObject? checks, JsonArray? comments, int mostRows = DefaultMostRows, string by = "", bool withTables = true,
         IReadOnlyList<string>? designFiles = null, bool instabilities = false, JsonObject? auto = null)
     {
+        // Every table is listed once and read once while the pack is written (with the checks before it, when the caller
+        // started the session): the program is not asked again for what it gave already.
+        using var session = PackSession.Start(e);
+        var timing = new Timing();
         var info = e.Info();
         var notes = new List<string>();
         var file = info.File.Replace('\\', '/').Split('/').Last();
@@ -118,9 +167,12 @@ public static class Pack
             ["load_cases"] = Texts(e.LoadCases()), ["combinations"] = Texts(e.Combos()),
         };
 
+        timing.Step("model");
         Drawing.AddTo(model, e, points);
+        timing.Step("drawing");
 
         var known = withTables ? e.Tables() : [];
+        timing.Step("table list");
         var wanted = new List<TableName>();
         foreach (var name in UsualTables)
             if (known.FirstOrDefault(t => !t.Empty && (ResultTools.Norm(t.Name) == ResultTools.Norm(name) || ResultTools.Norm(t.Key) == ResultTools.Norm(name))) is { } t) wanted.Add(t);
@@ -137,15 +189,17 @@ public static class Pack
         foreach (var t in wanted.DistinctBy(t => t.Key))
         {
             TableData data;
-            Trace(e, t.Key);
-            try { data = e.ReadTable(t.Key, cases, combos); }
+            try { data = timing.Read(e, t, cases, combos); }
             catch (EtabsException ex) { notes.Add($"'{t.Name}' could not be read ({ex.Message})."); continue; }
             if (data.Rows.Count == 0) continue;
             tables[t.Name] = TableJson(t.Name, data, DesignResults.IsDesignTable(t.Name) ? Math.Max(mostRows, DesignMostRows) : mostRows, notes, null);
         }
-        if (withTables) AddEverything(e, known, wanted, cases, combos, tables, mostRows, notes, manifest);
+        timing.Step("usual tables");
+        if (withTables) AddEverything(e, known, wanted, cases, combos, tables, mostRows, notes, manifest, timing);
+        timing.Step("every other table");
         if (withTables && tables.Count <= 1 && !info.Locked) notes.Add("The analysis has not been run, so the pack holds the model without results.");
         if (withTables) manifest["design"] = AddDesign(e, info, known, tables, designFiles ?? [], Math.Max(mostRows, DesignMostRows), notes);
+        timing.Step("design");
         if (withTables && (areas.Any(a => a.Kind == "wall") || tables.Select(t => t.Key).Any(n => DesignResults.FamilyOf(n) is { On: "pier" or "spandrel" })))
             model["wall_labels"] = DesignResults.WallLabels(e, known, notes);
         else if (e is OfflineEtabs) model["wall_labels"] = DesignResults.WallLabels(e, [], notes);
@@ -157,6 +211,10 @@ public static class Pack
             try { content["instabilities"] = StabilityTools.Json(CsiProMax.Checks.Stability.StabilityCheck.Run(StabilityTools.Read(e)), e.Program, e is OfflineEtabs); }
             catch (Exception ex) when (ex is EtabsException or InvalidOperationException or ArgumentException) { notes.Add($"The instability check could not be made for the pack ({ex.Message})."); }
         }
+        timing.Step("labels and instabilities");
+        manifest["timing"] = timing.Json();
+        if (withTables && manifest["timing"]!["seconds"]!.GetValue<double>() > MostTime.TotalSeconds)
+            notes.Add($"The pack took {manifest["timing"]!["seconds"]} s to read from {e.Program.Name}, more than {MostTime.TotalMinutes:0} minutes: manifest.json's \"timing\" names the slowest tables.");
         using var stream = new MemoryStream();
         using (var zip = new ZipArchive(stream, ZipArchiveMode.Create, true))
         {
@@ -177,7 +235,7 @@ public static class Pack
     /// the Viewer can say which tables to ask for.
     /// </summary>
     private static void AddEverything(ICsiLink e, IReadOnlyList<TableName> known, IReadOnlyList<TableName> wanted, IReadOnlyList<string> cases,
-        IReadOnlyList<string> combos, JsonObject tables, int mostRows, List<string> notes, JsonObject manifest)
+        IReadOnlyList<string> combos, JsonObject tables, int mostRows, List<string> notes, JsonObject manifest, Timing timing)
     {
         var left = new JsonArray();
         // The results and the inputs beside them each have their own total, so that a model with many result rows
@@ -189,15 +247,16 @@ public static class Pack
             var kind = PackTables.Kind(t) ?? "result";
             if (budget[kind] <= 0) { left.Add((JsonNode)t.Name); continue; }
             TableData data;
-            Trace(e, t.Key);
-            try { data = e.ReadTable(t.Key, cases, combos); }
+            try { data = timing.Read(e, t, cases, combos); }
             catch (EtabsException ex) { notes.Add($"'{t.Name}' could not be read ({ex.Message})."); continue; }
             if (data.Rows.Count == 0) continue;
             var most = Math.Min(mostRows, budget[kind]);
             tables[t.Name] = TableJson(t.Name, data, most, notes, kind == "input" ? "input" : null);
             budget[kind] -= Math.Min(data.Rows.Count, most);
         }
+        timing.Step("results and inputs");
         if (PackTables.AddSteps(e, known, cases, combos, tables, mostRows, notes, (name, data, most) => TableJson(name, data, most, notes, null)) is { } steps) manifest["step_output"] = steps;
+        timing.Step("time history steps");
         if (left.Count > 0)
         {
             manifest["left_out_tables"] = left;

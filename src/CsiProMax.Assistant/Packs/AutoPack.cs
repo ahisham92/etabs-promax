@@ -194,6 +194,8 @@ public static class AutoPack
         var page = PageFile(look.File);
         // The reviewer's comments: those in the pack there now and those kept beside the model when a pack was taken away.
         var comments = KeepComments(look.File);
+        // The checks and the pack read the same tables: each is read from the program once.
+        using var session = PackSession.Start(link);
         JsonObject checks;
         try { checks = ProgramTools.Report(JsonDocument.Parse("{}").RootElement, link).AsObject(); }
         catch (Exception ex) when (ex is EtabsException or InvalidOperationException or ToolInputException) { checks = new JsonObject { ["note"] = "The checks could not be made: " + ex.Message }; }

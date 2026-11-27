@@ -126,7 +126,11 @@ public sealed class ComEtabs : ICsiLink, IDisposable
     /// <summary>The same for work that gives nothing back. Its own name, so a call can never be mistaken for one that does.</summary>
     public object? Raw(string what, Func<dynamic, object?> work) => On<object?>(what, m => work(m));
 
-    private void Do(string what, Action<dynamic> body) => On<bool>(what, m => { body(m); return true; });
+    private void Do(string what, Action<dynamic> body)
+    {
+        Forget();
+        On<bool>(what, m => { body(m); return true; });
+    }
 
     private dynamic Model()
     {
@@ -478,7 +482,57 @@ public sealed class ComEtabs : ICsiLink, IDisposable
         }
     });
 
-    public IReadOnlyList<TableName> Tables() => On("list the tables", m => WithStories((IReadOnlyList<TableName>)ListTables(m.DatabaseTables, Program.Name), Program));
+    public IReadOnlyList<TableName> Tables()
+    {
+        if (_session is { Tables: { } kept }) return kept;
+        var list = On("list the tables", m => WithStories((IReadOnlyList<TableName>)ListTables(m.DatabaseTables, Program.Name), Program));
+        if (_session is { } s) s.Tables = list;
+        return list;
+    }
+
+    /// <summary>
+    /// What a read session (<see cref="PackSession"/>) has read already: the table list and each table, by its key,
+    /// cases and combinations. Writing a pack lists the tables once (GetAllTables checks every one of ETABS's ~1,000
+    /// tables for data, seconds each time) where it listed them again for every table the program then refused, and
+    /// reads a table the checks read already only once.
+    /// </summary>
+    internal sealed class ReadCache
+    {
+        public IReadOnlyList<TableName>? Tables;
+        public readonly Dictionary<string, TableData> Reads = new(StringComparer.Ordinal);
+        public int Depth = 1;
+    }
+
+    private volatile ReadCache? _session;
+
+    /// <summary>Starts a read session (nested ones share the outer one). Every change through this link ends what it kept.</summary>
+    internal IDisposable StartSession()
+    {
+        lock (_work)
+        {
+            if (_session is { } s) s.Depth++;
+            else _session = new ReadCache();
+        }
+        return new Ending(this);
+    }
+
+    /// <summary>Forgets what the session read (the program's output options changed), keeping the session.</summary>
+    internal void Forget()
+    {
+        if (_session is { } s) lock (_work) { s.Tables = null; s.Reads.Clear(); }
+    }
+
+    private sealed class Ending(ComEtabs link) : IDisposable
+    {
+        private bool _done;
+        public void Dispose()
+        {
+            if (_done) return;
+            _done = true;
+            lock (link._work)
+                if (link._session is { } s && --s.Depth <= 0) link._session = null;
+        }
+    }
 
     /// <summary>ETABS's list with "Story Definitions" in it: ETABS 23.2 left it out on the scratch model before the
     /// analysis (0.4.59 to 0.4.61 full tests), and ReadTable gives it from the Story API then.</summary>
@@ -565,7 +619,17 @@ public sealed class ComEtabs : ICsiLink, IDisposable
     /// <summary>The cases, combinations, patterns and model the display selection was last set for (ReadTable).</summary>
     private string? _shown;
 
-    public TableData ReadTable(string key, IReadOnlyList<string>? cases, IReadOnlyList<string>? combos) => On("read a table", m =>
+    public TableData ReadTable(string key, IReadOnlyList<string>? cases, IReadOnlyList<string>? combos)
+    {
+        if (_session is not { } session) return ReadTableNow(key, cases, combos);
+        var id = key + "\u0002" + string.Join("\u0001", cases ?? []) + "\u0002" + string.Join("\u0001", combos ?? []);
+        lock (_work) if (session.Reads.TryGetValue(id, out var kept)) return kept;
+        var data = ReadTableNow(key, cases, combos);
+        lock (_work) if (_session == session) session.Reads[id] = data;
+        return data;
+    }
+
+    private TableData ReadTableNow(string key, IReadOnlyList<string>? cases, IReadOnlyList<string>? combos) => On("read a table", m =>
     {
         // The display selection is set only when it changes: set before every one of a pack's 230 tables, ETABS 23 took
         // 2.3 s a table and up to 11 minutes for one (0.4.60 full test, pack trace), and the ETABS part ran out of time.
@@ -612,7 +676,12 @@ public sealed class ComEtabs : ICsiLink, IDisposable
         var rows = new List<string[]>(Math.Max(records, 0));
         var width = fields.Length;
         records = width > 0 ? Math.Min(records, data.Length / width) : 0;
-        for (var r = 0; r < records && width > 0; r++) rows.Add(data.Skip(r * width).Take(width).Select(v => v ?? "").ToArray());
+        for (var r = 0; r < records && width > 0; r++)
+        {
+            var row = new string[width];
+            for (var c = 0; c < width; c++) row[c] = data[r * width + c] ?? "";
+            rows.Add(row);
+        }
         return new TableData(fields, rows);
     });
 

@@ -170,6 +170,8 @@ public static class PackTables
         try
         {
             var set = e.Raw("set the table output to step by step", m => ApiCall.Invoke((object)m, "DatabaseTables.Set" + name, steps)) as JsonObject;
+            // The same tables read again now give every step: what a read session kept of them is not the answer.
+            PackSession.Forget(e);
             if (set is null || !ApiCall.Worked(set)) return Say($"not taken: {e.Program.Name} refused step by step table output ({set?["return"]?.ToJsonString()}).");
             var taken = new JsonArray();
             foreach (var t in wanted)
@@ -196,6 +198,7 @@ public static class PackTables
         {
             var back = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
             foreach (var (k, v) in old) back[k] = v?.DeepClone();
+            PackSession.Forget(e);
             try { e.Raw("set the table output back", m => ApiCall.Invoke((object)m, "DatabaseTables.Set" + name, back)); }
             catch (Exception ex) when (ex is EtabsException or MissingMethodException or ToolInputException or InvalidOperationException) { notes.Add($"The table output options could not be set back ({ex.Message})."); }
         }
