@@ -145,6 +145,18 @@ public static class ScratchDialogs
         return all.Contains("reiterate analysis and design", StringComparison.OrdinalIgnoreCase) && !all.Contains("licen", StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>Waits until <paramref name="file"/> can be opened by this process alone (no program holds it), at most <paramref name="most"/>.</summary>
+    internal static bool WaitUntilFree(string file, TimeSpan most)
+    {
+        var watch = Stopwatch.StartNew();
+        while (true)
+        {
+            try { using (new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.None)) { } return true; }
+            catch (IOException) when (watch.Elapsed < most) { Thread.Sleep(1000); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
+        }
+    }
+
     /// <summary>ETABS's plain "Log" window, shown when it opens a .e2k it had to change (duplicated lines).</summary>
     public static bool IsLineLog(string title) => title.Trim().Equals("Log", StringComparison.OrdinalIgnoreCase);
 
@@ -601,6 +613,9 @@ public sealed class ScratchProgram : IScratchWindow
         {
             // A missing file makes the program ask for one in its own file box and wait there (SAP2000, 0.4.57 full test).
             if (!File.Exists(modelFile)) throw new EtabsException($"{Path.GetFileName(modelFile)} is not there ({modelFile}), so it is not given to {name}.");
+            // The program that saved it may still hold it for a moment (0.4.60 full test: the second SAP2000 asked for a file
+            // to open, for the .sdb the first had just written): it is opened only once no one holds it, at most 60 s.
+            ScratchDialogs.WaitUntilFree(modelFile, TimeSpan.FromSeconds(60));
             var answer = Convert.ToInt32(Ask(FileTimeout, "open the file", m => m.File.OpenFile(Path.GetFullPath(modelFile)),
                 $"{name} did not finish opening the file within {FileTimeout.TotalMinutes:0} minutes. A message may be waiting in its window."));
             // The .sdb the first SAP2000 saved from the Modeler's .s2k may still be held for a moment after that SAP2000

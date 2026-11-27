@@ -325,8 +325,8 @@ public static class EtabsTools
         if (table is null && asked.Trim().Length > 0)
         {
             // A table the program's list leaves out may still be read by its key (ETABS 23's "Story Definitions", 0.4.59).
-            try { if (e.ReadTable(asked.Trim(), a.Texts("cases"), a.Texts("combinations")) is { Fields.Count: > 0, Rows.Count: > 0 }) table = new TableName(asked.Trim(), asked.Trim(), false, -1); }
-            catch (EtabsException) { /* not a table of the program's */ }
+            try { if (e.ReadTable(asked.Trim(), a.Texts("cases") is { Count: > 0 } c ? c : null, a.Texts("combinations") is { Count: > 0 } k ? k : null) is { Fields.Count: > 0, Rows.Count: > 0 }) table = new TableName(asked.Trim(), asked.Trim(), false, -1); }
+            catch (Exception ex) when (ex is EtabsException or InvalidOperationException or ArgumentException or System.Runtime.InteropServices.COMException) { /* not a table of the program's */ }
         }
         if (table is null)
         {

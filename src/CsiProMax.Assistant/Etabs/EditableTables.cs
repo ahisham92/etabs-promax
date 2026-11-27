@@ -164,13 +164,12 @@ public static class EditableTables
                 // A field blank in every row is left out too: ETABS 23 skipped the Modeler's joint mass row for its blank
                 // MMI X ("Field name: MMI X ... Error reading field; record skipped", 0.4.57 full test). Blank means the
                 // program's default, which leaving the field out gives as well.
-                // A field the table's own field list does not name is left out as well: ETABS 23 lists Story, Label,
-                // UniqueName, MassXY and MassZ for 'Joint Assignments - Additional Mass' but its edit array carries MMIX,
-                // MMIY and MMIZ, and refused the row at MMI X however they were filled (0.4.57 and 0.4.59 full tests).
-                if (e.Program.Key == CsiProgram.Etabs.Key && keys.Length > 0)
-                    foreach (var i in Enumerable.Range(0, fields.Length).Where(i => !keyFields.Contains(fields[i], StringComparer.OrdinalIgnoreCase)
-                                 && !keys.Any(k => string.Equals(k, fields[i], StringComparison.OrdinalIgnoreCase))))
-                        drop.Add(i);
+                // ETABS 23 refuses a joint added-mass row whose mass moments of inertia (MMIX, MMIY, MMIZ) are blank, and
+                // also when they are left out ("Field name: MMI X ... Error reading field; record skipped", 0.4.57, 0.4.59
+                // and 0.4.60 full tests): a blank one is sent as 0, ETABS's own value for no rotational mass.
+                if (e.Program.Key == CsiProgram.Etabs.Key)
+                    foreach (var i in Enumerable.Range(0, fields.Length).Where(i => System.Text.RegularExpressions.Regex.IsMatch(fields[i], "^MMI ?[XYZ]$", System.Text.RegularExpressions.RegexOptions.IgnoreCase)))
+                        foreach (var r in kept) if (i < r.Length && r[i].Trim().Length == 0) r[i] = "0";
                 if (e.Program.Key == CsiProgram.Etabs.Key)
                 foreach (var i in Enumerable.Range(0, fields.Length).Where(i => !keyFields.Contains(fields[i], StringComparer.OrdinalIgnoreCase)
                              && !fields[i].Equals("UniqueName", StringComparison.OrdinalIgnoreCase) && kept.Count > 0 && kept.All(r => i < r.Length && r[i].Trim().Length == 0)))
