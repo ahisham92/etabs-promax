@@ -63,6 +63,14 @@ static class OldProgramTests
             Equal("T1|Story2|3.2|Yes|None|No|0|255|g-Story2", string.Join("|", table.Rows[0]), "the top story's row");
         });
 
+        yield return ("checkpoints of an ETABS model whose working file name.$et is answered are taken and listed as name.edb (0.4.62 ETABS field test)", () =>
+        {
+            Equal(Path.Combine("C:", "m", "cpm.edb"), CsiTools.ModelFileOf(Path.Combine("C:", "m", "cpm.$et"), CsiProgram.Etabs), "ETABS's working file is its .edb");
+            Equal(Path.Combine("C:", "m", "cpm.sdb"), CsiTools.ModelFileOf(Path.Combine("C:", "m", "cpm.$2k"), CsiProgram.Sap2000), "SAP2000's working file is its .sdb");
+            Equal(Path.Combine("C:", "m", "cpm.edb"), CsiTools.ModelFileOf(Path.Combine("C:", "m", "cpm.edb"), CsiProgram.Etabs), "the model file itself stays");
+            Equal("", CsiTools.ModelFileOf("", CsiProgram.Etabs), "an unsaved model has none");
+        });
+
         yield return ("SAP2000 Plus's 'save with bridge data removed under a new name?' question is answered No (0.4.61: it held the SAP2000 part 25 minutes)", () =>
         {
             Check(CsiProMax.Assistant.ScratchDialogs.IsBridgeDataQuestion(["&Yes", "&No", "This model file has been modified to remove bridge-related data.  Do you want to save this file with a new name?"])

@@ -292,8 +292,8 @@ public static class PanelFieldSteps
         {
             Tool("run_etabs_query_code", """{"description":"count the frames","code":"int n = 0; string[] names = null; Ok(sap.FrameObj.GetNameList(ref n, ref names), \"list the frames\"); return n;"}""", (_, r) =>
             {
-                var frames = link.Frames().Count;
-                FieldContext.Expect(r.Text.Contains(frames.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal), $"the link reads {frames} frames; the code gave: {Short(r.Text)}");
+                var frames = ApiFrameCount(link).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                FieldContext.Expect(r.Text.Contains(frames, StringComparison.Ordinal), $"the program lists {frames} line objects; the code gave: {Short(r.Text)}");
             });
             ctx.Step("tool run_etabs_query_code gives a mistake in the code back as one", () =>
             {
@@ -404,8 +404,8 @@ public static class PanelFieldSteps
                 var tool = registry.Find(name) ?? throw new FieldCheckException("the registry does not find the learned tool by its name");
                 var result = tool.Execute(new EtabsApp(link), new ToolArgs(new Dictionary<string, JsonElement>()));
                 FieldContext.Expect(!result.IsError, "it failed in " + program.Name + ": " + Short(result.Text));
-                var frames = link.Frames().Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
-                FieldContext.Expect(result.Text.Contains(frames, StringComparison.Ordinal), $"the model has {frames} frames; the tool gave: {Short(result.Text)}");
+                var frames = ApiFrameCount(link).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                FieldContext.Expect(result.Text.Contains(frames, StringComparison.Ordinal), $"the program lists {frames} line objects; the tool gave: {Short(result.Text)}");
                 var after = LearnedTools.Load(name) ?? throw new FieldCheckException("the tool's file is gone after it ran");
                 FieldContext.Expect(after.Programs.Contains(program.Key), $"after it worked here it still says only {string.Join(", ", after.Programs)}, so the team would not see that it works in {program.Name}");
                 return $"it counted {frames} frames through {program.Name}'s API and now says it runs in {string.Join(", ", after.Programs)}";
@@ -455,6 +455,21 @@ public static class PanelFieldSteps
         var left = files.Where(File.Exists).ToList();
         FieldContext.Expect(left.Count == 0, "still there, delete it by hand: " + string.Join(", ", left));
         return "nothing of the test is left";
+    }
+
+    /// <summary>
+    /// The number of line objects FrameObj.GetNameList gives, as the test's code counts them: null lines too (ETABS
+    /// lists the Modeler's slab line release line CPM-LR, which the link's frames leave out: 81 against 80 in the 0.4.62
+    /// ETABS field test). The link's frames when the program's API is not behind it.
+    /// </summary>
+    internal static int ApiFrameCount(ICsiLink link)
+    {
+        try
+        {
+            if (link.Raw("count the line objects", api => { int n = 0; string[] names = []; return Convert.ToInt32(api.FrameObj.GetNameList(ref n, ref names)) == 0 ? (object)n : null; }) is int n) return n;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { /* a link without the program's API */ }
+        return link.Frames().Count;
     }
 
     private static string Short(string text) => text.Length > 300 ? text[..300] + "..." : text;
