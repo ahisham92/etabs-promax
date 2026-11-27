@@ -20,10 +20,12 @@ public static class ResultTools
             Ask.Never, Overview),
 
         new("check_drift",
-            $"Story drift check from {Csi.Name}'s Story Drifts table: the largest drift ratio per story and direction with its load case, the governing story, and pass or fail against 'limit' when one is given (for example 0.002 or 1/500 as 0.002). Without a limit it reports the values only. The limit depends on the code and the load case, so ask the engineer when it is not known.",
+            $"Story drift check from {Csi.Name}'s Story Drifts table: the largest drift ratio per story and direction with its load case, the governing story, and pass or fail against 'limit' when one is given (for example 0.002 or 1/500 as 0.002). Without a limit it reports the values only. The limit depends on the code and the load case, so ask the engineer when it is not known. {Csi.Name}'s drifts are elastic: for a seismic check (ASCE 7-16 12.8.6, limits of table 12.12-1) give 'cd' and 'importance' so they are multiplied by Cd/Ie before the comparison, and give only the seismic cases.",
             """
             {"type":"object","properties":{
               "limit":{"type":"number","description":"Allowed drift ratio, e.g. 0.002. Leave out to report without a verdict."},
+              "cd":{"type":"number","description":"Seismic: the deflection amplification factor Cd. The drifts are multiplied by Cd/Ie. Leave out for wind or other elastic checks."},
+              "importance":{"type":"number","description":"Seismic: the importance factor Ie, with cd. Default 1."},
               "cases":{"type":"array","items":{"type":"string"}},
               "combinations":{"type":"array","items":{"type":"string"}}}}
             """, Ask.Never, Drift),
@@ -64,6 +66,8 @@ public static class ResultTools
             """
             {"type":"object","properties":{
               "drift_limit":{"type":"number","description":"Allowed drift ratio. Leave out to report drift without a verdict."},
+              "drift_cd":{"type":"number","description":"Seismic: Cd, so the drifts are multiplied by Cd/Ie (see check_drift)."},
+              "drift_importance":{"type":"number","description":"Seismic: Ie, with drift_cd. Default 1."},
               "design_limit":{"type":"number"},
               "cases":{"type":"array","items":{"type":"string"}},
               "combinations":{"type":"array","items":{"type":"string"}}}}
@@ -261,11 +265,20 @@ public static class ResultTools
         if (data is null) return Missing(e, "the drift", "Story Drifts");
         double? limit = a.ValueKind == JsonValueKind.Object && a.TryGetProperty("limit", out var l) && l.ValueKind == JsonValueKind.Number ? l.GetDouble() : null;
         if (limit is <= 0) throw new ToolInputException("'limit' is a drift ratio above 0, e.g. 0.002.");
-        return DriftCheck(data, limit, e.Stories().Select(s => s.Name).ToList());
+        double? cd = a.ValueKind == JsonValueKind.Object && a.TryGetProperty("cd", out var c) && c.ValueKind == JsonValueKind.Number ? c.GetDouble() : null;
+        var importance = a.Number("importance", 1);
+        if (cd is <= 0) throw new ToolInputException("'cd' is the deflection amplification factor Cd, above 0 (e.g. 5.5).");
+        if (importance <= 0) throw new ToolInputException("'importance' is the importance factor Ie, above 0 (e.g. 1.0).");
+        return DriftCheck(data, limit, e.Stories().Select(s => s.Name).ToList(), cd, importance);
     }
 
-    internal static JsonObject DriftCheck(TableData data, double? limit, IReadOnlyList<string> storyOrder)
+    /// <summary>
+    /// The largest drift per story and direction. With <paramref name="cd"/> the program's elastic drifts are multiplied by
+    /// Cd/Ie (ASCE 7-16 12.8.6) before they are compared with the limit, as a seismic drift check needs.
+    /// </summary>
+    internal static JsonObject DriftCheck(TableData data, double? limit, IReadOnlyList<string> storyOrder, double? cd = null, double importance = 1)
     {
+        var amplify = cd is { } cdValue ? cdValue / importance : 1.0;
         var f = data.Fields;
         int story = Col(f, "Story"), oc = Col(f, "OutputCase", "Output Case", "Load Case/Combo"), dir = Col(f, "Direction", "Dir"), drift = Col(f, "Drift"), label = Col(f, "Label");
         if (story < 0 || drift < 0) return Unreadable(data, "Story Drifts", story < 0 ? "Story" : "Drift");
@@ -273,7 +286,7 @@ public static class ResultTools
         foreach (var r in data.Rows)
         {
             if (Num(r[drift]) is not { } d) continue;
-            d = Math.Abs(d);
+            d = Math.Abs(d) * amplify;
             var key = (r[story], dir >= 0 ? r[dir] : "");
             if (!worst.TryGetValue(key, out var had) || d > had.Drift) worst[key] = (d, oc >= 0 ? r[oc] : "", label >= 0 ? r[label] : "");
         }
@@ -293,6 +306,14 @@ public static class ResultTools
             result["stories_over_limit"] = new JsonArray(rows.Where(w => w.Value.Drift > lim).Select(w => (JsonNode)$"{w.Key.Story} {w.Key.Dir}".Trim()).ToArray());
         }
         else result["note"] = "No limit was given, so there is no verdict. The limit depends on the code and the load case.";
+        if (cd is not null)
+        {
+            result["amplification"] = new JsonObject { ["cd"] = cd, ["importance"] = importance, ["factor"] = R(amplify, 4) };
+            result["elastic_max_drift"] = R(top.Value.Drift / amplify);
+            result["amplified_note"] = $"Every drift here is the program's elastic drift times Cd/Ie = {R(amplify, 4)} (ASCE 7-16 12.8.6), for every case read: give only the seismic cases.";
+        }
+        else if (limit is not null)
+            result["elastic_note"] = "These are the program's elastic drifts, not multiplied by Cd/Ie. Right for wind and serviceability; for a seismic check (ASCE 7-16 12.8.6) give cd and importance.";
         result["by_story"] = new JsonArray(rows.Select(w =>
         {
             var row = new JsonObject { ["story"] = w.Key.Story, ["direction"] = w.Key.Dir, ["drift"] = R(w.Value.Drift), ["case"] = w.Value.Case };
@@ -519,7 +540,7 @@ public static class ResultTools
         var parts = new (string Name, Func<JsonNode> Run)[]
         {
             ("modal", () => Modal(default, e)),
-            ("drift", () => Drift(With(a, "limit", "drift_limit"), e)),
+            ("drift", () => Drift(With(With(With(a, "limit", "drift_limit"), "cd", "drift_cd"), "importance", "drift_importance"), e)),
             ("torsion", () => Torsion(a, e)),
             ("story_irregularity", () => Irregularity(a, e)),
             ("design_ratios", () => DesignRatios(With(default, "limit", "design_limit", a), e)),

@@ -214,7 +214,7 @@ public static class CsiTools
               "name":{"type":"string"},"direction":{"type":"string","enum":["x","y"]},
               "method":{"type":"string","enum":["asce7-16","user"],"description":"Default asce7-16."},
               "eccentricity":{"type":"number","description":"Ratio. Default 0.05."},
-              "r":{"type":"number"},"omega":{"type":"number"},"cd":{"type":"number"},"importance":{"type":"number","description":"Default 1."},
+              "r":{"type":"number"},"omega":{"type":"number"},"cd":{"type":"number","description":"asce7-16: the deflection amplification factor of the system (ASCE 7-16 table 12.2-1), needed: ask the engineer when it is not known."},"importance":{"type":"number","description":"Default 1."},
               "ss":{"type":"number"},"s1":{"type":"number"},"tl":{"type":"number","description":"Default 8 s."},
               "site_class":{"type":"string","enum":["A","B","C","D","E"]},"fa":{"type":"number"},"fv":{"type":"number"},
               "period":{"type":"string","enum":["approximate","program","user"],"description":"Default program (calculated, capped by Cu Ta)."},
@@ -1394,7 +1394,10 @@ public static class CsiTools
             common["UserT"] = a.Number("user_period", 0);
             common["R"] = a.Number("r");
             common["Omega"] = a.Number("omega", 3);
-            common["Cd"] = a.Number("cd", a.Number("r") * 0.9);
+            // Cd is the system's own (table 12.2-1, e.g. 5.5 for a special moment frame with R 8): no default is safe.
+            common["Cd"] = a.Number("cd", double.NaN);
+            if (double.IsNaN((double)common["Cd"]!))
+                throw new ToolInputException("'cd' is missing: give the deflection amplification factor Cd of the seismic force-resisting system (ASCE 7-16 table 12.2-1, e.g. 5.5 for a special moment frame with R 8).");
             common["I"] = a.Number("importance", 1);
             common["Ss"] = ss;
             common["S1"] = s1;
@@ -1413,6 +1416,7 @@ public static class CsiTools
                 else if (EditableTables.Read(e, "Load Pattern Definitions - Auto Seismic - ASCE 7-16", "Name", name) is { } row)
                     made["read_back"] = new JsonObject(row.Where(kv => kv.Key is not ("Name" or "GUID")).Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value)));
                 made["note"] = $"{e.Program.Name} computes the loads when the analysis runs. Check them in its Load Patterns > Modify Lateral Load.";
+                if (Spectrum.SiteSpecificNote(site, ss, s1) is { } siteNote) made["warning"] = siteNote;
                 return made;
             }
             // SAP2000 26's SetASCE716(_1) takes nDir, the directions X and Y, not a DirFlag (its help; 0.4.17 field test).
@@ -1435,6 +1439,7 @@ public static class CsiTools
         var result = new JsonObject { ["pattern"] = name, ["method"] = method, ["direction"] = direction.ToLowerInvariant(), ["dir_flag"] = dir };
         if (back?["values"] is JsonObject values) result["read_back"] = values.DeepClone();
         result["note"] = $"{e.Program.Name} computes the loads when the analysis runs. Check them in its Load Patterns > Modify Lateral Load.";
+        if (method == "asce7-16" && Spectrum.SiteSpecificNote(a.Need("site_class"), a.Number("ss"), a.Number("s1")) is { } note) result["warning"] = note;
         return result;
     }
 
@@ -1506,13 +1511,15 @@ public static class CsiTools
             ("CSys", Enumerable.Repeat("Global", dirs.Length).ToArray()), ("Ang", new double[dirs.Length])));
         Try(e, $"set the damping of {name}", "LoadCases.ResponseSpectrum.SetDampConstant", D(("Name", name), ("Damp", damping)));
         var back = Try(e, $"read {name}'s loads", "LoadCases.ResponseSpectrum.GetLoads", D(("Name", name)));
-        return new JsonObject
+        var made = new JsonObject
         {
             ["function"] = function, ["case"] = name, ["modal_case"] = modal,
             ["fa"] = R(fa, 4), ["fv"] = R(fv, 4), ["sds"] = R(sds, 4), ["sd1"] = R(sd1, 4), ["points"] = periods.Length,
             ["scale_factor"] = R(scale, 6), ["directions"] = Arr(dirs),
             ["read_back"] = back is null ? null : new JsonObject { ["loads"] = Arr(Names(back, "LoadName")), ["functions"] = Arr(Names(back, "Func")), ["scale_factors"] = ApiCall.Value(back, "SF")?.DeepClone() },
         };
+        if (Spectrum.SiteSpecificNote(site, ss, s1) is { } siteNote) made["warning"] = siteNote;
+        return made;
     }
 
     /// <summary>The largest base shear of a case in X or Y, read through the API's results (every program has BaseReact).</summary>

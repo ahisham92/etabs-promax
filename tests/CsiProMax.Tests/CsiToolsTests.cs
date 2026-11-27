@@ -86,6 +86,11 @@ static class CsiToolsTests
             Near(1.9, Spectrum.Fv("D", 0.4), "Fv D at S1 0.4");
             Near(1.2, Spectrum.Fa("C", 2.0), "above the table: the last column");
             try { Spectrum.Fa("E", 1.0); throw new Exception("no error"); } catch (ToolInputException ex) { Check(ex.Message.Contains("site-specific"), ex.Message); }
+            Near(3.75, Spectrum.Fv("E", 0.15), "Fv E between S1 0.1 and 0.2 (Supplement 1 to ASCE 7-16)");
+            Near(2.0, Spectrum.Fv("E", 0.7), "Fv E above the table");
+            Check(Spectrum.SiteSpecificNote("D", 1.0, 0.4) is { } d && d.Contains("11.4.8"), "site class D with S1 0.4 says a site-specific study is required unless an exception applies");
+            Check(Spectrum.SiteSpecificNote("E", 1.2, 0.1) is not null, "site class E with Ss 1.2 too");
+            Check(Spectrum.SiteSpecificNote("D", 1.0, 0.15) is null && Spectrum.SiteSpecificNote("C", 1.5, 0.6) is null, "and no note where 11.4.8 asks nothing");
             var (sds, sd1) = Spectrum.Design(1.0, 0.4, 1.1, 1.9);
             Near(2.0 / 3 * 1.1, sds, "SDS");
             Near(2.0 / 3 * 0.76, sd1, "SD1");
@@ -195,7 +200,9 @@ static class CsiToolsTests
             Run(CsiProgram.Etabs, "add_seismic_load", """{"name":"EQX","direction":"x","r":8,"omega":3,"cd":5.5,"ss":1.0,"s1":0.4,"site_class":"D"}""", link);
             Check(api.Log.Last(l => l.StartsWith("ASCE716", StringComparison.Ordinal)).StartsWith("ASCE716_1 EQX dirs 100000 R 8 Ss 1 S1 0.4 site 4 Fa 1.1 Fv 1.9 TL 8 Z ", StringComparison.Ordinal),
                 "ETABS: ASCE 7-16 by SetASCE716_1, X of six directions, Fa and Fv from the tables: " + api.Log.Last(l => l.StartsWith("ASCE716", StringComparison.Ordinal)));
-            Run(CsiProgram.Sap2000, "add_seismic_load", """{"name":"EQX","direction":"x","r":8,"ss":1.0,"s1":0.4,"site_class":"D"}""", sap);
+            Run(CsiProgram.Sap2000, "add_seismic_load", """{"name":"EQX","direction":"x","r":8,"cd":5.5,"ss":1.0,"s1":0.4,"site_class":"D"}""", sap);
+            try { Run(CsiProgram.Sap2000, "add_seismic_load", """{"name":"EQX2","direction":"x","r":8,"ss":1.0,"s1":0.4,"site_class":"D"}""", sap); throw new Exception("no error"); }
+            catch (ToolInputException ex) { Check(ex.Message.Contains("'cd' is missing"), "Cd has no made-up default: " + ex.Message); }
             Check(sapApi.Log.Last(l => l.StartsWith("ASCE716", StringComparison.Ordinal)).StartsWith("ASCE716_1 EQX dirs 10 ", StringComparison.Ordinal), "SAP2000: nDir is X and Y");
             Throws(() => Run(CsiProgram.Etabs, "add_seismic_load", """{"name":"Dead","direction":"x","method":"user","coefficient":0.1}""", link), "a pattern of another type");
             Run(CsiProgram.Etabs, "add_wind_load", """{"name":"WX","speed":110,"exposure":"D"}""", link);
@@ -204,6 +211,7 @@ static class CsiToolsTests
             Check(inner.LoadPatterns().Any(p => p.Name == "WX" && p.Type == "Wind") && wx[Array.IndexOf(wind.Fields, "WindSpeed")] == "110" && wx[Array.IndexOf(wind.Fields, "ExpType")] == "D",
                 "ETABS 23's cAutoWind has no methods: the wind goes through its table: " + string.Join(",", wx));
             var rs = Run(CsiProgram.Etabs, "add_response_spectrum", """{"ss":1.0,"s1":0.4,"site_class":"D","r":8,"importance":1.25}""", link);
+            Check(rs["warning"]?.GetValue<string>().Contains("11.4.8") == true, "the spectrum on site class D with S1 0.4 warns of 11.4.8: " + rs.ToJsonString());
             Near(9.80665 * 1.25 / 8, rs["scale_factor"]!.GetValue<double>(), "g Ie / R in m/s2");
             Equal("Modal", rs["modal_case"]!.GetValue<string>(), "on the model's modal case");
             Check(api.Functions["CPM-ASCE716"].Length == rs["points"]!.GetValue<int>(), "the function's points");
