@@ -2644,7 +2644,7 @@ function overlay(p, g, M, T, w, h) {
   else if (dview) { const nb = bandSet().length, step = (dview.hi - dview.lo) / nb; hScale(g, T, w, h, dview.title, bandSet(), k => dview.hi <= dview.lo && k ? undefined : dview.k !== 1 ? String(Math.round((dview.lo + step * k) * dview.k)) : fmt(dview.lo + step * k)); }
   else if ($("colour").value === "ratio" && ratio.size) hScale(g, T, w, h, "Design ratio (demand / capacity)", ratioCols, k => ["0.00", "0.50", "0.70", "0.90", "1.00", ">1"][k]);
   if (opt.axes) drawAxes(p, g, M, T, h);
-  if (window.cpmLive) drawPreview(p, g, M);
+  if (window.cpmLive) { drawPreview(p, g, M); wpPreview(p, g, M); }
   if (p.iline) { g.save(); g.strokeStyle = T.pick; g.lineWidth = 1.5; g.setLineDash([6, 4]); g.beginPath(); g.moveTo(...p.iline[0]); g.lineTo(...p.iline[1]); g.stroke(); g.restore(); }
 }
 function hScale(g, T, w, h, title, cols, label) {
@@ -3179,14 +3179,14 @@ function wire(p) {
     let act;
     if (e.button === 1) { act = e.shiftKey ? "orbit" : "pan"; if (performance.now() - lastMid < 350) { fit(p); act = "none"; } lastMid = performance.now(); e.preventDefault(); }
     else if (e.button === 2) act = p.mode === "3d" && !e.shiftKey ? "orbit" : "pan";
-    else act = tool.startsWith("measure:") ? "measure" : tool === "walk" ? "walk" : tool.startsWith("d:") ? "draw" : tool === "orbit" ? (p.mode === "3d" ? "orbit" : "pan") : tool === "pan" ? "pan" : tool === "zoom" ? "rubberzoom" : tool === "iline" ? "iline" : e.altKey && p.mode === "3d" ? "orbit" : "box";
+    else act = tool.startsWith("measure:") ? "measure" : tool.startsWith("wp:") ? "wppick" : tool === "walk" ? "walk" : tool.startsWith("d:") ? "draw" : tool === "orbit" ? (p.mode === "3d" ? "orbit" : "pan") : tool === "pan" ? "pan" : tool === "zoom" ? "rubberzoom" : tool === "iline" ? "iline" : e.altKey && p.mode === "3d" ? "orbit" : "box";
     drag = {x, y, x0: x, y0: y, sx: e.clientX, sy: e.clientY, moved: false, act, button: e.button, ctrl: e.ctrlKey || e.metaKey || e.shiftKey};
     hideTip();
   });
   cv.addEventListener("pointermove", e => {
     const [x, y] = local(e);
     showCoords(p, x, y);
-    if (!drag) { if (tool.startsWith("d:")) drawMove(p, x, y); else scheduleHover(p, x, y, e.clientX, e.clientY); return; }
+    if (!drag) { if (tool.startsWith("wp:")) wpPickMove(p, x, y); else if (tool.startsWith("d:")) drawMove(p, x, y); else scheduleHover(p, x, y, e.clientX, e.clientY); return; }
     const dx = x - drag.x, dy = y - drag.y;
     if (Math.abs(x - drag.x0) + Math.abs(y - drag.y0) > (drag.button === 2 ? 6 : 3)) drag.moved = true;
     if (!drag.moved) return;
@@ -3205,6 +3205,7 @@ function wire(p) {
     const [x, y] = local(e), d = drag; drag = null; $("rubber").style.display = "none";
     if (!d || !P) return;
     if (d.act === "draw") { if (!d.moved) drawClick(p, x, y, false); return; }
+    if (d.act === "wppick") { if (!d.moved) wpPickClick(p, x, y); return; }
     if (d.act === "measure") { if (!d.moved && d.button === 0) etvMeasureClick(p, x, y, false); else if (d.button === 2) etv.measure = null; return; }
     if (d.act === "walk") return;
     if (d.act === "iline") { p.iline = null; if (d.moved) { const n = lineSelect(p, [d.x0, d.y0], [x, y]); $("hint").textContent = n + " objects crossed by the line selected."; } else draw(); return; }
@@ -3267,7 +3268,7 @@ function tipText(o) {
   if ((res.mode === "contour" || res.mode === "deformed") && disp.has(res.case)) { const idx = o.type === "f" ? [o.ia, o.ib] : o.idx; const ds = idx.filter(i => i >= 0).map(i => disp.get(res.case).get(String(points[i][0]))).filter(Boolean); if (ds.length) { const c = ["UX", "UY", "UZ"], best = ds.reduce((m, d) => Math.max(m, Math.hypot(...d)), 0); lines.push(`Largest movement ${fmt(best)}${unit ? " " + unit : ""} (${res.case})`); } }
   return lines.join("\n");
 }
-const hintText = () => tool.startsWith("d:") ? drawHint() : tool === "zoom" ? "Drag a box to zoom into it." : tool === "pan" ? "Drag to pan. Wheel zooms." : tool === "orbit" ? "Drag to turn the 3-D view. Wheel zooms." : tool === "iline" ? "Drag a line across the objects to select every one it crosses." : "Ready";
+const hintText = () => tool.startsWith("wp:") ? wpHint() : tool.startsWith("d:") ? drawHint() : tool === "zoom" ? "Drag a box to zoom into it." : tool === "pan" ? "Drag to pan. Wheel zooms." : tool === "orbit" ? "Drag to turn the 3-D view. Wheel zooms." : tool === "iline" ? "Drag a line across the objects to select every one it crosses." : "Ready";
 
 // ---- toolbars ----
 const I = {
@@ -3517,6 +3518,7 @@ function act(name) {
   if (name === "eng:import") { const f = document.createElement("input"); f.type = "file"; f.accept = ".cpmx,.zip,.json"; f.onchange = () => { if (f.files[0]) engineImport(f.files[0]); }; return f.click(); }
   if (name === "eng:clear") return engineClear();
   if (name === "eng:run" || name === "eng:runDesign" || name === "eng:design") return engineRun(name === "eng:run" ? "analysis" : name === "eng:design" ? "design" : "both");
+  if (name.startsWith("wp:")) { tool = name; wpPick.got = []; wpPick.frame = null; wpPick.hover = null; hm.chain = []; syncTools(); $("hint").textContent = hintText(); draw(); return; }
   if (name.startsWith("t:") || name.startsWith("d:")) { tool = name.startsWith("t:") ? name.slice(2) : name; hm.chain = []; hm.reshape = null; hm.hover = null; syncTools(); showObjBox(); draw(); return; }
   if (name.startsWith("v:")) return setMode(p, name.slice(2));
   if (name.startsWith("cam:")) { if (p) setView3d(p, name.slice(4)); return; }
@@ -6390,7 +6392,7 @@ function hmDefineMenu() {
     // Floor Openings and Slab Line Releases are ETABS's Assign > Shell forms, Frame Release Definitions its Named
     // Assignment Sets > Frame Releases: they left Engine Extras when those landed.
     ["Engine Extras", [["Tendon Sections...", "m:ex:tendonsections"], ["Frame Section Rebar (Modify/Show Rebar)...", "m:frameRebar"], ["Hyperstatic Load Cases...", "m:ex:hyperstatic"],
-      ["Punching Shear Overwrites...", "m:ex:punching"]]]];
+      ["Punching Shear Overwrites...", "m:ex:punching"], 0, ["Work Planes...", "m:workPlanes"]]]];
 }
 // ---- SAFE forms (Ahmed 2026-11-27: every SAFE form identical to SAFE 23's, every option working) ----
 // Each SAFE form of the Engine's SAFE menus, with SAFE's own tables behind it ("SAFE | <table>", by the names SAFE's own
@@ -7342,6 +7344,7 @@ async function modelAct(a) {
     case "program": return hmProgram();
     case "open": return hmOpen();
     case "materials": return hmMaterials();
+    case "workPlanes": return hmWorkPlanes();
     case "sapHinges": return hmSapHingeProps();
     case "etHinges": return hmEtHinges();
     case "sapFreqLinks": return hmSapFreqLinks();
@@ -25176,7 +25179,8 @@ const drawing = () => tool.startsWith("d:");
 const drawKind = () => tool.slice(2);
 function drawHint() {
   const k = drawKind(), p = panes[active];
-  if (!p || p.mode !== "plan") return "Drawing is done in a plan view: click a Plan View window, or press the plan button on the toolbar.";
+  if (p && p.mode === "3d" && program === "etabs") return draw3dHint();
+  if (!p || p.mode !== "plan") return program === "etabs" ? "Drawing is done in a plan view or the 3-D view: click one of them." : "Drawing is done in a plan view: click a Plan View window, or press the plan button on the toolbar.";
   const where = hm.similar === "all" ? "on every story" : "on " + p.story;
   return {column: `Click a grid crossing or a point to place a column ${where}.`, beam: `Click the start, then each next point of the beams ${where}. Right click or Esc ends the line.`, qbeam: `Click a grid line between two crossings: a beam fills that span ${where}.`,
     wall: `Click the start, then each next point of the walls ${where}. Right click or Esc ends the line.`, qwall: `Click a grid line between two crossings: a wall fills that span ${where}.`,
@@ -25245,15 +25249,18 @@ async function showObjBox() {
     ${kind === "joint" ? "" : `<span>Section</span><select id="pobjS">${s.list.length ? opts(s.list, s.now) : `<option value="">(define one first)</option>`}</select>`}
     ${drawKind() === "qsec" ? `<span>No. of Beams</span><input id="pobjN" type="number" min="1" max="20" value="${hm.secN}"><span>Approx. Orientation</span><select id="pobjD">${opts([["X", "Parallel to X"], ["Y", "Parallel to Y"]], hm.secDir)}</select>` : ""}
     ${drawKind() === "circ" ? `<span>Sides</span><input id="pobjC" type="number" min="8" max="72" value="${hm.circN}">` : ""}
-    <span>Stories</span><select id="pobjW">${opts([["one", "One Story"], ["all", "All Stories"]], hm.similar)}</select></div>
+    <span>Stories</span><select id="pobjW">${opts([["one", "One Story"], ["all", "All Stories"]], hm.similar)}</select>
+    ${program === "etabs" ? `<span title="The plane the 3-D view draws on (Define > Engine Extras > Work Planes)">Work Plane</span><select id="pobjP">${opts([["", "None"], ...workPlanes().map(w => [w.name, w.name])], wpOf(hm.wp) ? hm.wp : "")}</select>` : ""}</div>
     ${s.list.length || kind === "joint" ? "" : `<p class="kv" style="padding:0 8px 6px">No ${kind === "slab" ? "slab" : kind} section yet: Define > ${kind === "slab" || kind === "wall" ? "Slab and Wall Sections" : "Frame Sections"}.</p>`}`;
   if (q(box, "#pobjS")) q(box, "#pobjS").onchange = e => hm.sec[kind] = e.target.value;
   if (q(box, "#pobjN")) q(box, "#pobjN").onchange = e => { hm.secN = Math.max(1, Math.min(20, Math.round(+e.target.value) || 3)); e.target.value = hm.secN; $("hint").textContent = hintText(); };
   if (q(box, "#pobjD")) q(box, "#pobjD").onchange = e => { hm.secDir = e.target.value; $("hint").textContent = hintText(); };
   if (q(box, "#pobjC")) q(box, "#pobjC").onchange = e => { hm.circN = Math.max(8, Math.min(72, Math.round(+e.target.value) || 24)); e.target.value = hm.circN; };
   q(box, "#pobjW").onchange = e => { hm.similar = e.target.value; $("similar").value = hm.similar; $("hint").textContent = hintText(); };
+  if (q(box, "#pobjP")) q(box, "#pobjP").onchange = e => { hm.wp = e.target.value; hm.chain = []; $("hint").textContent = hintText(); draw(); };
 }
 async function drawClick(p, x, y, dbl) {
+  if (p.mode === "3d" && program === "etabs") return draw3dClick(p, x, y, dbl);
   if (p.mode !== "plan") { hmSay(drawHint(), true); return; }
   const k = drawKind(), kind = drawKinds[k], sec = (await drawSection(kind)).now, st = drawStories(p);
   if (hm.snapOnly && etnOn() && !["qbeam", "qwall", "qfloor", "qsec", "reshape"].includes(k) && !snapAt(p, x, y).what) return hmSay("Draw Using Snap Only is on: click a grid crossing, a joint or a grid line.", true);
@@ -25331,8 +25338,9 @@ function lineSelect(p, a, b) {
   selChanged(); return n;
 }
 function drawPreview(p, g, M) {
-  if (!drawing() || p.mode !== "plan" || panes[active] !== p) return;
-  const z = elevationOf(p.story) ?? 0, to = q2 => M.to([q2[0], q2[1], z]), k = drawKind();
+  if (!drawing() || !(p.mode === "plan" || (p.mode === "3d" && program === "etabs")) || panes[active] !== p) return;
+  // A plan's points are [x, y] on its story; the 3-D view's are [x, y, z].
+  const z = p.mode === "plan" ? (elevationOf(p.story) ?? 0) : (hm.chain[0] && hm.chain[0][2]) ?? 0, to = q => M.to(q.length > 2 ? q : [q[0], q[1], z]), k = drawKind();
   g.save(); g.lineWidth = 2; g.strokeStyle = "#ffd83c"; g.fillStyle = "rgba(255,216,60,.18)"; g.setLineDash([6, 4]);
   const h = hm.hover;
   if (h && h.bay) { g.beginPath(); h.bay.forEach((c, i) => { const s = to(c); i ? g.lineTo(s[0], s[1]) : g.moveTo(s[0], s[1]); }); g.closePath(); g.fill(); g.stroke(); }
@@ -25342,7 +25350,7 @@ function drawPreview(p, g, M) {
     if (r > 1e-6) { g.beginPath(); circleOutline(c, r, hm.circN).forEach((q, i) => { const s = to(q); i ? g.lineTo(s[0], s[1]) : g.moveTo(s[0], s[1]); }); g.closePath(); g.fill(); g.stroke(); }
   } else if (hm.chain.length) {
     g.beginPath(); hm.chain.forEach((c, i) => { const s = to(c); i ? g.lineTo(s[0], s[1]) : g.moveTo(s[0], s[1]); });
-    if (h && h.snap) { if (k === "rect") { const a = hm.chain[0], b = h.snap.q; g.beginPath(); [[a[0], a[1]], [b[0], a[1]], [b[0], b[1]], [a[0], b[1]]].forEach((c, i) => { const s = to(c); i ? g.lineTo(s[0], s[1]) : g.moveTo(s[0], s[1]); }); g.closePath(); g.fill(); } else { const s = to(h.snap.q); g.lineTo(s[0], s[1]); } }
+    if (h && h.snap) { if (k === "rect") { const a = hm.chain[0], b = h.snap.q, za = a.length > 2 ? a[2] : z; g.beginPath(); [[a[0], a[1], za], [b[0], a[1], za], [b[0], b[1], za], [a[0], b[1], za]].forEach((c, i) => { const s = to(c); i ? g.lineTo(s[0], s[1]) : g.moveTo(s[0], s[1]); }); g.closePath(); g.fill(); } else { const s = to(h.snap.q); g.lineTo(s[0], s[1]); } }
     g.stroke();
   }
   if (h && h.snap) {
@@ -25352,13 +25360,182 @@ function drawPreview(p, g, M) {
   g.restore();
 }
 function drawMove(p, x, y) {
+  if (p.mode === "3d" && program === "etabs") { hm.hover = draw3dKinds.includes(drawKind()) ? {snap: snap3d(p, x, y)} : null; draw(); return; }
   if (p.mode !== "plan") { hm.hover = null; return; }
   const k = drawKind();
   hm.hover = k === "qfloor" || k === "qsec" ? {bay: bayAt(p, x, y)} : k === "reshape" && !hm.chain.length ? (() => { const r = reshapeAt(p, x, y); return r ? {snap: {q: r.from, what: "reshape " + r.name.replace(/@.*$/, "")}} : null; })() : k === "qbeam" || k === "qwall" ? {span: spanAt(p, x, y)} : {snap: snapAt(p, x, y)};
   draw();
 }
+// ---- drawing in the 3-D view, and work planes (an ETABS model) ----
+// In the 3-D view, members are drawn by their points at story levels: grid crossings at every level, and joints. A
+// beam, wall or floor has its points on one story; a brace runs from a story to the next one up. With a work plane
+// active (Properties of Object, or Define > Engine Extras > Work Planes > Draw on It), only points on it are offered,
+// with the points where it crosses the grid lines at each level, so a sloped or skew plane can be drawn on too.
+const draw3dKinds = ["joint", "column", "beam", "wall", "brace", "floor", "rect"];
+const workPlanes = () => (hm.defs && hm.defs.work_planes) || [];
+const wpOf = name => (name && workPlanes().find(w => w.name === name)) || null;
+const fullName = o => o.name.includes("@") ? o.name : o.name + "@" + o.story;
+function onWorkPlane(w, q, tol) {
+  if (!w) return true;
+  const n = w.normal, o = w.points[0];
+  return Math.abs(n[0] * (q[0] - o[0]) + n[1] * (q[1] - o[1]) + n[2] * (q[2] - o[2])) <= tol;
+}
+// The point under the pointer (14 px): the nearest on screen, the nearer one to the eye when two overlap. "only" keeps
+// the candidates a view can show (a plan's story, an elevation's grid line).
+function snap3d(p, x, y, only) {
+  const M = p.M; if (!M || !grids.X.length || !grids.Y.length) return null;
+  const w = wpOf(hm.wp), tol = Math.max(1e-6, size * 1e-6), cand = [];
+  const xs = grids.X.map(g => g.at), ys = grids.Y.map(g => g.at), X0 = Math.min(...xs), X1 = Math.max(...xs), Y0 = Math.min(...ys), Y1 = Math.max(...ys);
+  for (const st of stories) {
+    const z = st.elevation;
+    for (const gx of grids.X) for (const gy of grids.Y) cand.push({q: [gx.at, gy.at, z], what: `${gx.label}-${gy.label}, ${st.name}`});
+    if (w) {
+      // Where the plane crosses each grid line at this level, between its outer crossings.
+      const n = w.normal, o = w.points[0];
+      if (Math.abs(n[1]) > 1e-9) for (const gx of grids.X) { const t = o[1] - (n[0] * (gx.at - o[0]) + n[2] * (z - o[2])) / n[1]; if (t > Y0 + tol && t < Y1 - tol) cand.push({q: [gx.at, t, z], what: `grid ${gx.label}, ${st.name}`}); }
+      if (Math.abs(n[0]) > 1e-9) for (const gy of grids.Y) { const t = o[0] - (n[1] * (gy.at - o[1]) + n[2] * (z - o[2])) / n[0]; if (t > X0 + tol && t < X1 - tol) cand.push({q: [t, gy.at, z], what: `grid ${gy.label}, ${st.name}`}); }
+    }
+  }
+  for (const pt of points) cand.push({q: [pt[1], pt[2], pt[3]], what: "joint " + pt[0]});
+  if (hm.chain.length && hm.chain[0].length === 3) cand.push({q: hm.chain[0], what: "first point"});
+  let best = null, bd = 14;
+  for (const c of cand) {
+    if (!onWorkPlane(w, c.q, tol * 10) || (only && !only(c.q))) continue;
+    const s = M.to(c.q); if (!s[3]) continue;
+    const d = Math.hypot(s[0] - x, s[1] - y);
+    if (d < bd - 0.5 || (best && Math.abs(d - bd) <= 0.5 && s[2] < best.depth)) { bd = Math.min(bd, d); best = {q: c.q, what: c.what, depth: s[2]}; }
+  }
+  if (!best) return null;
+  const st = stories.find(s => Math.abs(s.elevation - best.q[2]) <= tol * 10);
+  return {q: best.q.map(v => Math.round(v * 1e4) / 1e4), what: best.what, story: st ? st.name : ""};
+}
+function draw3dHint() {
+  const k = drawKind(), plane = hm.wp && wpOf(hm.wp) ? ` on the work plane ${hm.wp}` : "";
+  if (!draw3dKinds.includes(k)) return "In the 3-D view, joints, columns, beams, walls, braces and floors are drawn by their points. Quick Draw and Reshape work in a plan view.";
+  return {joint: `Click a grid crossing or joint${plane} to place a joint there.`, column: `Click a grid crossing or joint${plane}: a column runs down to it from the story below.`,
+    beam: `Click the start, then each next point of the beams${plane}, all on one story. Right click or Esc ends the line.`, wall: `Click the start, then each next point of the walls${plane}, on one story: each runs down to the story below.`,
+    brace: `Click the brace's two ends${plane}, on two stories next to each other.`, floor: `Click the floor's corners${plane}, on one story; click the first corner again (or double click) to close it.`,
+    rect: `Click two opposite corners of the floor${plane}, on one story.`}[k];
+}
+async function draw3dClick(p, x, y, dbl) {
+  const k = drawKind(), kind = drawKinds[k];
+  if (!draw3dKinds.includes(k)) return hmSay(draw3dHint(), true);
+  const s = snap3d(p, x, y);
+  if (!s) return hmSay(hm.wp && wpOf(hm.wp) ? `Click a grid crossing or joint on the work plane ${hm.wp}.` : "Click a grid crossing or joint.", true);
+  if (!s.story) return hmSay("That point is between stories: members are drawn between points at story levels.", true);
+  const sec = k === "joint" ? "" : (await drawSection(kind)).now;
+  if (k !== "joint" && !sec) return hmSay(`Define a ${kind === "slab" ? "slab" : kind} section first (Define menu).`, true);
+  const st = hm.similar === "all" ? stories.slice(1).map(v => v.name) : [s.story], xy = q => [q[0], q[1]];
+  if (k === "joint") return hmRun("add_joints", {points: [xy(s.q)], stories: st});
+  if (k === "column") return hmRun("add_columns", {points: [xy(s.q)], stories: st, section: sec});
+  if (hm.chain.length && hm.chain[0].length !== 3) hm.chain = []; // a chain begun in a plan view
+  const first = hm.chain[0], last = hm.chain[hm.chain.length - 1];
+  if (k === "brace") {
+    if (!first) { hm.chain = [s.q]; draw(); return; }
+    hm.chain = [];
+    const [lo, hi] = first[2] <= s.q[2] ? [first, s.q] : [s.q, first], il = stories.findIndex(v => Math.abs(v.elevation - lo[2]) < 1e-6 * Math.max(1, size)), ih = stories.findIndex(v => Math.abs(v.elevation - hi[2]) < 1e-6 * Math.max(1, size));
+    if (ih - il !== 1) { draw(); return hmSay("A brace runs from one story to the next one up: click its ends on two stories next to each other.", true); }
+    if (Math.hypot(lo[0] - hi[0], lo[1] - hi[1]) < 1e-6) { draw(); return hmSay("Those two ends are one above the other: that is a column (Draw Columns).", true); }
+    return hmRun("add_braces", {braces: [[lo[0], lo[1], hi[0], hi[1]]], stories: [stories[ih].name], section: sec});
+  }
+  // Beams, walls and floors have all their points on one story.
+  if (first && Math.abs(first[2] - s.q[2]) > 1e-6 * Math.max(1, size)) return hmSay(`Its points are on one story: this one is on ${s.story}, the first is not. A member from one story to the next is a brace.`, true);
+  if (k === "beam" || k === "wall") {
+    if (!first) { hm.chain = [s.q]; draw(); return; }
+    if (Math.hypot(last[0] - s.q[0], last[1] - s.q[1]) < 1e-6) return;
+    const j = await hmRun(k === "beam" ? "add_beams" : "add_walls", {lines: [[last[0], last[1], s.q[0], s.q[1]]], stories: hm.similar === "all" ? st : [s.story], section: sec});
+    if (j.ok) hm.chain = [s.q]; draw(); return;
+  }
+  if (k === "rect") {
+    if (!first) { hm.chain = [s.q]; draw(); return; }
+    hm.chain = [];
+    if (Math.abs(first[0] - s.q[0]) < 1e-6 || Math.abs(first[1] - s.q[1]) < 1e-6) return hmSay("The two corners must differ in X and in Y.", true);
+    return hmRun("add_slabs", {outlines: [[[first[0], first[1]], [s.q[0], first[1]], [s.q[0], s.q[1]], [first[0], s.q[1]]]], stories: st, section: sec});
+  }
+  if (k === "floor") {
+    const close = hm.chain.length >= 3 && (dbl || Math.hypot(first[0] - s.q[0], first[1] - s.q[1]) < 1e-6);
+    if (!close) { if (!dbl) hm.chain.push(s.q); draw(); return; }
+    const outline = hm.chain.map(xy); hm.chain = [];
+    return hmRun("add_slabs", {outlines: [outline], stories: st, section: sec});
+  }
+}
+
+// ---- Define > Engine Extras > Work Planes ----
+// Add a plane by picking, in any view: three points; two frames; a frame and a point off it; or an area. Rename and
+// Delete; Draw on It makes it the plane the 3-D view draws on. The planes are saved with the model, in the Modeler's file.
+async function hmWorkPlanes() {
+  const defs = await hmDefs(), names = (defs.work_planes || []).map(w => w.name);
+  const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmWorkPlanes(); };
+  const use = (n, d) => { hm.wp = n; if (d) d.close(); showObjBox(); draw(); hmSay(n ? `Drawing in the 3-D view is on the work plane ${n}.` : "Drawing in the 3-D view is on no work plane."); };
+  const pick = (kind, d) => { d.close(); act("wp:" + kind); };
+  listForm("Work Planes", "Work Planes", names, [
+    ["Add by 3 Points...", (n, d) => pick("points", d)],
+    ["Add from 2 Frames...", (n, d) => pick("frames", d)],
+    ["Add from a Frame and a Point...", (n, d) => pick("pointframe", d)],
+    ["Add from an Area...", (n, d) => pick("area", d)],
+    ["Rename...", n => n && wpName("Rename Work Plane", n, name => hmRun("define_work_plane", {name, was: n}).then(j => { if (!j.ok) return; if (hm.wp === n) hm.wp = name; again(); }))],
+    ["Delete", n => n && hmRun("delete_definition", {kind: "work_plane", name: n}).then(j => { if (!j.ok) return; if (hm.wp === n) hm.wp = ""; again(); })],
+    ["Draw on It", (n, d) => n && use(n, d)],
+    ["Draw on No Plane", (n, d) => use("", d)],
+  ], n => use(n, document.querySelector(".dlg:last-of-type")),
+  `<p class="kv" style="margin:6px 0 0">Active: <b>${esc(hm.wp && names.includes(hm.wp) ? hm.wp : "none")}</b></p>`);
+}
+function wpName(title, now, done) {
+  const d = dialog(title, `<div class="g2"><span>Name</span><input id="wpN" value="${esc(now)}"></div>`,
+    [["OK", d => { const v = q(d, "#wpN").value.trim(); if (!v) { formError(d, "Give the work plane a name."); return false; } done(v); }], ["Cancel"]], {width: 340});
+  setTimeout(() => { const i = q(d, "#wpN"); i.focus(); i.select(); });
+  return d;
+}
+// Picking a work plane: the tool "wp:<kind>" collects what is clicked, then asks for the plane's name.
+const wpPick = {got: [], frame: null, hover: null};
+function wpHint() {
+  const k = tool.slice(3), n = wpPick.got.length;
+  return {points: `Work plane: click point ${n + 1} of 3 (grid crossings and joints, in any view). Esc cancels.`,
+    frames: `Work plane: click frame ${n + 1} of 2 (the two lie in one plane). Esc cancels.`,
+    pointframe: wpPick.frame ? `Work plane: frame ${wpPick.frame} taken; now click a point off its line. Esc cancels.` : "Work plane: click the frame, then a point off its line. Esc cancels.",
+    area: "Work plane: click a floor or wall: the plane it lies in. Esc cancels."}[k] || "";
+}
+// In a plan, only its story's points; in an elevation, only its grid line's; in 3-D, all.
+function wpOnly(p) {
+  const tol = Math.max(1e-6, size * 1e-6) * 10;
+  if (p.mode === "plan") { const z = elevationOf(p.story) ?? 0; return q => Math.abs(q[2] - z) <= tol; }
+  if (p.mode === "elev" && p.line) { const ax = p.line.dir === "X" ? 0 : 1; return q => Math.abs(q[ax] - p.line.at) <= tol; }
+  return null;
+}
+function wpPickMove(p, x, y) {
+  const k = tool.slice(3), wantPoint = k === "points" || (k === "pointframe" && wpPick.frame);
+  if (!wantPoint) { if (wpPick.hover) { wpPick.hover = null; draw(); } return; }
+  const was = hm.wp; hm.wp = ""; wpPick.hover = snap3d(p, x, y, wpOnly(p)); hm.wp = was; draw();
+}
+function wpPickClick(p, x, y) {
+  const k = tool.slice(3), done = args => { const n = workPlanes().length + 1; act("t:select"); wpName("New Work Plane", "WP" + n, name => hmRun("define_work_plane", {name, ...args}).then(j => { if (j.ok) { hm.wp = name; showObjBox(); hmSay(`Work plane ${name} added. Drawing in the 3-D view is on it now (Properties of Object > Work Plane changes that).`); } })); };
+  if (k === "points" || (k === "pointframe" && wpPick.frame)) {
+    const was = hm.wp; hm.wp = ""; const s = snap3d(p, x, y, wpOnly(p)); hm.wp = was;
+    if (!s) return hmSay("Click a grid crossing or a joint.", true);
+    if (k === "pointframe") return done({frame: wpPick.frame, point: s.q});
+    wpPick.got.push(s.q); $("hint").textContent = hintText(); draw();
+    if (wpPick.got.length === 3) done({points: wpPick.got.slice()});
+    return;
+  }
+  const {id} = pickAt(p, x, y, 6), o = objOf(id);
+  if (k === "area") { if (!o || o.type !== "a") return hmSay("Click a floor or a wall.", true); return done({area: fullName(o)}); }
+  if (!o || o.type !== "f") return hmSay("Click a frame (a beam, column or brace).", true);
+  if (k === "pointframe") { wpPick.frame = fullName(o); $("hint").textContent = hintText(); return; }
+  if (wpPick.got.includes(fullName(o))) return hmSay("Click another frame.", true);
+  wpPick.got.push(fullName(o)); $("hint").textContent = hintText();
+  if (wpPick.got.length === 2) done({frames: wpPick.got.slice()});
+}
+function wpPreview(p, g, M) {
+  if (!tool.startsWith("wp:")) return;
+  g.save(); g.lineWidth = 1.5; g.strokeStyle = "#ffd83c"; g.fillStyle = "#ffd83c"; g.font = "11px Segoe UI, sans-serif"; g.textBaseline = "bottom";
+  for (const q of wpPick.got) if (Array.isArray(q)) { const s = M.to(q); if (s[3]) g.fillRect(s[0] - 4, s[1] - 4, 8, 8); }
+  const h = wpPick.hover; if (h && panes[active] === p) { const s = M.to(h.q); if (s[3]) { g.strokeRect(s[0] - 5, s[1] - 5, 10, 10); g.fillText(h.what, s[0] + 8, s[1] - 6); } }
+  g.restore();
+}
 function hmDrawHelp() {
   dialog("Drawing in the Modeler", `<table class="list">${[["Snap", "Clicks snap to grid crossings and joints (12 px), then to grid lines (8 px). The point it snaps to shows a yellow square and its name."],
+    ["In 3-D", "In the 3-D view of an ETABS model, joints, columns, beams, walls, braces and floors are drawn by their points at story levels: grid crossings at every level, and joints. A beam, wall or floor has its points on one story; a brace runs to the next story up."],
+    ["Work planes", "Define > Engine Extras > Work Planes: a plane by three points, two frames, a frame and a point, or an area. With one active (Properties of Object > Work Plane), the 3-D view offers only the points on it, and where it crosses the grid lines."],
     ["Stories", "One Story draws on the plan's story; All Stories draws the same object on every story (ETABS's All Stories). Pick it in the status bar or in Properties of Object."],
     ["Columns, walls", "A column or wall on a story runs from the story below up to it."], ["Beams, floors", "A beam or floor sits at the story's level."],
     ["Quick draw", "Quick Draw Beams and Walls fill one grid span per click; Quick Draw Floors fill one bay."],
