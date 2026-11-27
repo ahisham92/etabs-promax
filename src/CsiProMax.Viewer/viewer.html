@@ -5564,18 +5564,18 @@ async function hmAssignData(what) {
   const tool = joint ? "assign_joint_data" : shell ? "assign_shell_data" : "assign_frame_data";
   let body = "", read;
   if (what === "releases") {
-    const rel = ["P", "V2", "V3", "T", "M2", "M3"], lab = {P: "Axial load", V2: "Shear force 2 (major)", V3: "Shear force 3 (minor)", T: "Torsion", M2: "Moment 22 (minor)", M3: "Moment 33 (major)"};
-    body = `<table class="list hmgrid"><tr><th>Release</th><th>Start</th><th>End</th></tr>${rel.map(r => `<tr><td>${lab[r]}</td><td><input type="checkbox" data-i="${r}" ${(now.release_i || []).includes(r) ? "checked" : ""}></td><td><input type="checkbox" data-j="${r}" ${(now.release_j || []).includes(r) ? "checked" : ""}></td></tr>`).join("")}</table>`;
+    const rel = ["P", "V2", "V3", "T", "M2", "M3"], lab = {P: "Axial Load", V2: "Shear Force 2 (Major)", V3: "Shear Force 3 (Minor)", T: "Torsion", M2: "Moment 22 (Minor)", M3: "Moment 33 (Major)"};
+    body = `<fieldset><legend>Release</legend><table class="list hmgrid"><tr><th></th><th>Start</th><th>End</th></tr>${rel.map(r => `<tr><td>${lab[r]}</td><td><input type="checkbox" data-i="${r}" ${(now.release_i || []).includes(r) ? "checked" : ""}></td><td><input type="checkbox" data-j="${r}" ${(now.release_j || []).includes(r) ? "checked" : ""}></td></tr>`).join("")}</table></fieldset>`;
     read = d => ({release_i: [...d.querySelectorAll("[data-i]:checked")].map(x => x.dataset.i), release_j: [...d.querySelectorAll("[data-j]:checked")].map(x => x.dataset.j)});
   } else if (what === "axes") {
-    body = `<div class="g2"><span>Rotate local axis 2 by angle (degrees)</span><input id="xA" type="number" step="any" value="${now.angle || 0}"></div>`;
+    body = `<fieldset><legend>${program === "sap2000" ? "Angle in Degrees" : "Rotation by Angle"}</legend><div class="g2"><span>Angle (deg)</span><input id="xA" type="number" step="any" value="${now.angle || 0}"></div></fieldset>`;
     read = d => ({angle: fnum(d, "#xA")});
   } else if (what === "insertion") {
-    const cp = ["1 Bottom left", "2 Bottom center", "3 Bottom right", "4 Middle left", "5 Middle center", "6 Middle right", "7 Top left", "8 Top center", "9 Top right", "10 Centroid", "11 Shear center"];
-    body = `<div class="g2"><span>Cardinal point</span><select id="xC">${opts(cp.map((t, i) => [String(i + 1), t]), String(now.cardinal || 10))}</select></div>`;
+    const cp = ["Bottom Left", "Bottom Center", "Bottom Right", "Middle Left", "Middle Center", "Middle Right", "Top Left", "Top Center", "Top Right", "Centroid", "Shear Center"];
+    body = `<fieldset><legend>Cardinal Point</legend><div class="g2"><span>Cardinal Point</span><select id="xC">${opts(cp.map((t, i) => [String(i + 1), `${i + 1} (${t})`]), String(now.cardinal || 10))}</select></div></fieldset>`;
     read = d => ({cardinal: parseInt(q(d, "#xC").value)});
   } else if (what === "offsets") {
-    body = `<div class="g2"><span>End-I offset, ${u.l}</span><input id="xI" type="number" step="any" value="${now.offset_i || 0}"><span>End-J offset, ${u.l}</span><input id="xJ" type="number" step="any" value="${now.offset_j || 0}"><span>Rigid zone factor (0 to 1)</span><input id="xR" type="number" step="any" value="${now.rigid_zone || 0}"></div>`;
+    body = `<fieldset><legend>End Offset Along Length</legend><div class="g2"><span>End-I (${u.l})</span><input id="xI" type="number" step="any" value="${now.offset_i || 0}"><span>End-J (${u.l})</span><input id="xJ" type="number" step="any" value="${now.offset_j || 0}"><span>Rigid-zone factor</span><input id="xR" type="number" step="any" min="0" max="1" value="${now.rigid_zone || 0}"></div></fieldset>`;
     read = d => ({offset_i: fnum(d, "#xI"), offset_j: fnum(d, "#xJ"), rigid_zone: fnum(d, "#xR")});
   } else if (what === "hinges") {
     // Auto hinges: the program picks each from the code's tables for the member's section, as in Assign > Frame > Hinges.
@@ -5599,8 +5599,10 @@ async function hmAssignData(what) {
     read = d => ({spring: q(d, "#xS").value});
     setTimeout(() => { const d = [...document.querySelectorAll(".dlg")].pop(), nb = d && d.querySelector("#xNew"); if (nb) nb.onclick = () => hmSpring(k, null, async () => { const p2 = (await hmRun("property_definitions", {}, true)).result; const l2 = p2.springs.filter(x => x.kind === k).map(x => x.name); q(d, "#xS").innerHTML = opts([["", "None"]].concat(l2.map(n => [n, n])), l2[l2.length - 1]); }); }, 0);
   }
-  const title = {releases: "Frame Releases", axes: "Frame Local Axes", insertion: "Frame Insertion Point", offsets: "Frame End Length Offsets", lspring: "Frame Line Springs", hinges: "Frame Hinges", aspring: "Shell Area Springs", joint: "Joint Springs"}[what];
-  return dialog("Assign " + title, body + `<p class="kv">${names.length} selected ${joint ? "joints" : shell ? "floors and walls" : "frames"}.</p>`,
+  // Each program's own window title for the form.
+  const title = (program === "sap2000" ? {releases: "Assign Frame Releases", axes: "Assign Frame Local Axes", insertion: "Assign Frame Insertion Point", offsets: "Assign Frame End Length Offsets", lspring: "Assign Frame Line Springs", hinges: "Assign Frame Hinges", aspring: "Assign Area Springs", joint: "Assign Joint Springs"}
+    : {releases: "Frame Assignment - Releases/Partial Fixity", axes: "Frame Assignment - Local Axes", insertion: "Frame Assignment - Insertion Point", offsets: "Frame Assignment - End Length Offsets", lspring: "Frame Assignment - Line Springs", hinges: "Frame Assignment - Hinges", aspring: "Shell Assignment - Area Springs", joint: "Joint Assignment - Springs"})[what];
+  return dialog(title, body + `<p class="kv">${names.length} selected ${joint ? "joints" : shell ? "floors and walls" : "frames"}.</p>`,
     [["OK", d => submit(d, tool, Object.assign({objects: names}, read(d))), true], ["Cancel"]], {width: 420});
 }
 
@@ -5853,12 +5855,31 @@ function supportPoints() {
   }
   return [...out];
 }
+// Assign > Joint > Restraints as the programs show it (Ahmed 2026-11-27, every form): ETABS's "Joint Assignment -
+// Restraints" with Restraints in Global Directions, SAP2000's "Assign Joint Restraints" in the joint's local directions,
+// the six check boxes and the four Fast Restraints buttons (fixed, pinned, roller, free).
 function hmAssignSupport() {
-  const pts = supportPoints();
-  const icons = {fixed: '<path d="M4 4h16v10H4z" fill="#6c7a84"/><path d="M2 16h20M4 16l-2 3M8 16l-2 3M12 16l-2 3M16 16l-2 3M20 16l-2 3" stroke="#333"/>', pinned: '<path d="M12 4L5 14h14z" fill="#6c7a84"/><path d="M3 16h18" stroke="#333"/>', free: '<circle cx="12" cy="10" r="3" fill="#6c7a84"/>'};
-  const d = dialog("Assign Joint Restraints", `<fieldset><legend>Fast Restraints</legend><div style="display:flex;gap:8px">${["fixed", "pinned", "free"].map(k => `<label style="display:flex;flex-direction:column;align-items:center;gap:3px;border:1px solid var(--fgroup);padding:6px 10px"><svg width="24" height="22" viewBox="0 0 24 22">${icons[k]}</svg><span><input type="radio" name="rK" value="${k}" ${k === "fixed" ? "checked" : ""}>${k[0].toUpperCase() + k.slice(1)}</span></label>`).join("")}</div></fieldset>
-    <fieldset><legend>Where</legend><label style="display:block"><input type="radio" name="rW" value="sel" ${pts.length ? "checked" : "disabled"}>The bottom ends of the selected columns and walls (${pts.length} joints)</label><label style="display:block"><input type="radio" name="rW" value="base" ${pts.length ? "" : "checked"}>Every column and wall that stands on the base</label></fieldset>`,
-    [["OK", d => { const where = q(d, "[name=rW]:checked").value; return submit(d, "set_supports", where === "base" ? {type: q(d, "[name=rK]:checked").value, at_base: true} : {type: q(d, "[name=rK]:checked").value, points: pts}); }, true], ["Cancel"]], {width: 420});
+  const sapR = program === "sap2000", pts = [...new Set([...supportPoints(), ...[...selJ].map(String).filter(n => pointXyz.has(n))])];
+  const dofs = ["UX", "UY", "UZ", "RX", "RY", "RZ"], lab = sapR ? ["Translation 1", "Translation 2", "Translation 3", "Rotation about 1", "Rotation about 2", "Rotation about 3"] : ["Translation X", "Translation Y", "Translation Z", "Rotation about X", "Rotation about Y", "Rotation about Z"];
+  const fast = {fixed: dofs, pinned: ["UX", "UY", "UZ"], roller: ["UZ"], free: []};
+  const icons = {fixed: '<path d="M4 4h16v10H4z" fill="#6c7a84"/><path d="M2 16h20M4 16l-2 3M8 16l-2 3M12 16l-2 3M16 16l-2 3M20 16l-2 3" stroke="#333"/>', pinned: '<path d="M12 4L5 14h14z" fill="#6c7a84"/><path d="M3 16h18" stroke="#333"/>',
+    roller: '<path d="M12 3L6 11h12z" fill="#6c7a84"/><circle cx="8" cy="14" r="2.4" fill="#6c7a84"/><circle cx="16" cy="14" r="2.4" fill="#6c7a84"/><path d="M3 18h18" stroke="#333"/>', free: '<circle cx="12" cy="10" r="3" fill="#6c7a84"/>'};
+  const d = dialog(sapR ? "Assign Joint Restraints" : program === "safe" ? "Point Restraint Assignment" : "Joint Assignment - Restraints",
+    `<fieldset><legend>${sapR ? "Restraints in Joint Local Directions" : "Restraints in Global Directions"}</legend><div style="display:grid;grid-auto-flow:column;grid-template-rows:repeat(3,auto);gap:4px 24px">${dofs.map((k, i) => `<label><input type="checkbox" data-r="${k}" checked> ${lab[i]}</label>`).join("")}</div></fieldset>
+    <fieldset><legend>Fast Restraints</legend><div style="display:flex;gap:8px">${Object.keys(fast).map(k => `<button data-f="${k}" title="${k[0].toUpperCase() + k.slice(1)}" style="padding:4px 10px"><svg width="24" height="22" viewBox="0 0 24 22">${icons[k]}</svg></button>`).join("")}</div></fieldset>
+    <fieldset><legend>Where</legend><label style="display:block;white-space:normal"><input type="radio" name="rW" value="sel" ${pts.length ? "checked" : "disabled"}>The selected joints (${pts.length}, with the bottom ends of selected columns and walls)</label><label style="display:block"><input type="radio" name="rW" value="base" ${pts.length ? "" : "checked"}>Every column and wall that stands on the base</label></fieldset>`,
+    [["OK", d => go(d, false), true], ["Close"], ["Apply", d => go(d, true), true]], {width: 440});
+  function go(d, apply) {
+      const run = (tool, args) => apply ? (hmRun(tool, args).then(j => j.ok ? hmSay("Done. Edit > Undo steps back.") : hmSay(j.error, true)), false) : submit(d, tool, args);
+      const r = [...d.querySelectorAll("[data-r]:checked")].map(x => x.dataset.r), where = q(d, "[name=rW]:checked").value;
+      const type = Object.keys(fast).find(k => fast[k].length === r.length && fast[k].every(x => r.includes(x)));
+      if (type && type !== "roller") return run("set_supports", where === "base" ? {type, at_base: true} : {type, points: pts});
+      const base = stories.length ? elevationOf(stories[0].name) ?? 0 : 0;
+      const objects = where === "sel" ? pts : [...pointXyz].filter(([n, p]) => Math.abs(p[2] - base) < 1e-6 && n.includes("@")).map(([n]) => n);
+      if (!objects.length) { hmSay("There are no joints on the base to restrain.", true); return false; }
+      return run("assign_joint_data", {objects, restraint: r});
+  }
+  d.querySelectorAll("[data-f]").forEach(b => b.onclick = () => d.querySelectorAll("[data-r]").forEach(x => { x.checked = fast[b.dataset.f].includes(x.dataset.r); }));
   return d;
 }
 async function hmAssignLoad(t) {
