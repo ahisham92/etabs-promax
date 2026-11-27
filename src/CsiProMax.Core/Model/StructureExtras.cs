@@ -23,9 +23,14 @@ public static class StructureExtras
         [GroupTable] = ["Steel", "Concrete", "Composite", "Selection", "SectionCut", "Aluminum", "ColdFormed", "Stage", "Bridge", "AutoSeismic", "AutoWind", "MassWeight", "ConcShell"],
         [CutTable] = ["ResultType", "ResultLoc", "LocX", "LocY", "LocZ", "RotAboutZ", "RotAboutY", "RotAboutX", "DefinedBy", "DesignType", "DesignAngle", "ElemSide", "AdvanceAxes", "Quads"],
         [SpandrelTable] = ["MultiStory"],
-        ["Spring Property Definitions - Point Springs"] = ["NonlinOpt", "Color", "Notes"],
-        ["Spring Property Definitions - Line Springs"] = ["NonlinOpt2", "NonlinOpt3", "Color", "Notes"],
-        ["Spring Property Definitions - Area Springs"] = ["NonlinOpt3", "Color", "Notes"],
+        // ETABS 23.2's Point, Line and Area Spring Property Data beyond the stiffnesses, by the names its Show Tables heads
+        // the columns with (field/reference-forms/etabs/Define/Tables): Elasto-Plastic's four values, the springs from
+        // link properties (a point spring's single joint links: one row each, kept here as lists split by "|") and the
+        // springs from a soil profile and an isolated column footing.
+        ["Spring Property Definitions - Point Springs"] = ["NonlinOpt", "Color", "Notes", "Stiffness Option", "Nonlinearity Specification", "Compression Stiffness", "Compression Strength", "Tension Stiffness", "Tension Strength",
+            "Link Property", "Link Axial Direction", "Link Axis 2 Angle", "Soil Profile", "Isolated Column Footing", "First Period"],
+        ["Spring Property Definitions - Line Springs"] = ["NonlinOpt2", "NonlinOpt3", "Color", "Notes", "Stiffness Option", "Link Property"],
+        ["Spring Property Definitions - Area Springs"] = ["NonlinOpt3", "Color", "Notes", "Stiffness Option", "Compression Stiffness", "Compression Strength", "Tension Stiffness", "Tension Strength", "Link Property"],
         ["Link Property Definitions - Linear"] = LinkFields,
         ["Link Property Definitions - Damper - Exponential"] = LinkFields,
         ["Link Property Definitions - Gap"] = LinkFields,

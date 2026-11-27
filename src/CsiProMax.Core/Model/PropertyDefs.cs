@@ -520,7 +520,7 @@ public static class PropertyDefs
         return list;
     }
 
-    public static void SetSpring(StructuralModel m, string kind, string name, IReadOnlyDictionary<string, double> values)
+    public static void SetSpring(StructuralModel m, string kind, string name, IReadOnlyDictionary<string, double> values, bool stiffnessElsewhere = false)
     {
         if (!SpringKinds.TryGetValue(kind, out var k)) throw new ArgumentException("The spring kind is point, line or area.");
         Name(name, "spring property");
@@ -529,7 +529,8 @@ public static class PropertyDefs
             if (!k.Keys.Contains(key)) throw new ArgumentException($"A {kind} spring has {string.Join(", ", k.Keys)}, not '{key}'.");
             if (double.IsNaN(v) || double.IsInfinity(v) || v < 0) throw new ArgumentException($"{key} must be a stiffness, 0 or more.");
         }
-        if (!values.Values.Any(v => v > 0)) throw new ArgumentException("Give at least one stiffness above 0.");
+        // A spring from a soil profile or from link properties takes its stiffness from those (ETABS 23.2's Spring Stiffness Options).
+        if (!stiffnessElsewhere && !values.Values.Any(v => v > 0)) throw new ArgumentException("Give at least one stiffness above 0.");
         var raw = m.Passthrough.Find(r => r.Heading == k.Heading);
         if (raw is null)
         {

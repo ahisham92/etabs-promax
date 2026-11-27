@@ -157,7 +157,10 @@ public static class PropertyTools
                 if (a.Flag("delete")) { Core(() => link.Edit(m => { PropertyDefs.DeleteSpring(m, kind, name); StructureExtras.Remove(m, table, name); return 0; })); return new JsonObject { ["deleted"] = name }; }
                 var values = Values(a, "values", false);
                 CheckExtras(a, StructureExtras.Fields[table].ToArray(), "A " + kind + " spring");
-                Core(() => link.Edit(m => { PropertyDefs.SetSpring(m, kind, name, values); SetRowExtras(m, a, table, name); return 0; }));
+                var elsewhere = a.TryGetProperty("extras", out var ex) && ex.ValueKind == JsonValueKind.Object
+                    && ((ex.TryGetProperty("Stiffness Option", out var so) && so.ValueKind == JsonValueKind.String && !so.GetString()!.Equals("User", StringComparison.OrdinalIgnoreCase))
+                        || (ex.TryGetProperty("Nonlinearity Specification", out var ns) && ns.ValueKind == JsonValueKind.String && ns.GetString()!.StartsWith("From Link", StringComparison.OrdinalIgnoreCase)));
+                Core(() => link.Edit(m => { PropertyDefs.SetSpring(m, kind, name, values, elsewhere); SetRowExtras(m, a, table, name); return 0; }));
                 return new JsonObject { ["spring"] = name, ["kind"] = kind };
             }, a => a.Flag("delete") ? $"Delete the spring {a.Text("name")}" : $"Define the spring {a.Text("name")}"),
         new("define_link",
