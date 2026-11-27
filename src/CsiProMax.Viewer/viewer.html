@@ -5582,10 +5582,10 @@ Object.assign(hmSapAssignForms, {
 // multiplier; the boxes of the other choice are empty and greyed, and the unit stands by the box in use.
 function sapJpBlock(p, label, unit, jp) {
   return `<label><input type="radio" name="${p}B" value="el" checked> By Element</label>
-    <div style="display:grid;grid-template-columns:120px 150px 110px 60px;gap:6px 8px;align-items:center;margin-left:22px">
+    <div style="display:grid;grid-template-columns:110px 110px 110px 50px;gap:6px 8px;align-items:center;margin-left:22px">
       <span>${label}</span><span></span><input id="${p}V" value="0"><span class="u" id="${p}UV">${esc(unit)}</span></div>
     <label><input type="radio" name="${p}B" value="jp"> By Joint Pattern</label>
-    <div style="display:grid;grid-template-columns:120px 150px 110px 60px;gap:6px 8px;align-items:center;margin-left:22px">
+    <div style="display:grid;grid-template-columns:110px 110px 110px 50px;gap:6px 8px;align-items:center;margin-left:22px">
       <span>Joint Pattern</span><select id="${p}J" style="grid-column:span 2">${opts(jp, "Default")}</select><span></span>
       <span>Multiplier</span><span></span><input id="${p}M" value=""><span class="u" id="${p}UM"></span></div>`;
 }

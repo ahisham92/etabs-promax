@@ -90,6 +90,29 @@ static class SapObjectLoadsTests
             Check(!Rows(S2kWriter.Write(link.Model, "c.s2k").Text, "FRAME LOADS - DISTRIBUTED").Any(r => r.GetValueOrDefault("Type") == "Moment"), "Delete took the kept moment off");
         });
 
+        yield return ("sap2000 load forms: area uniform, temperature and strain become the Modeler's own when they can; projected, gradients, curvature and SAP2000-only area loads are kept and come back", () =>
+        {
+            var link = Sap();
+            const string pat = "CPM-AL";
+            Run(link, "define_load_pattern", new { name = pat, type = "Other", self_weight = 0 });
+            var a = link.Model.AreaAssigns[0]; var area = a.Label + "@" + a.Story;
+            var count = link.Model.AreaLoads.Count;
+            Run(link, "assign_sap_loads", new { table = "Area Loads - Uniform", objects = new[] { area }, pattern = pat, rows = new[] { new { CoordSys = "GLOBAL", Dir = "Gravity", UnifLoad = "3" } } });
+            Check(link.Model.AreaLoads.Count == count + 1, "a gravity uniform load is the Modeler's own");
+            Run(link, "assign_sap_loads", new { table = "Area Loads - Uniform", objects = new[] { area }, pattern = pat, option = "add", rows = new[] { new { CoordSys = "GLOBAL", Dir = "Z Projected", UnifLoad = "1" } } });
+            Run(link, "assign_sap_loads", new { table = "Area Loads - Temperature", objects = new[] { area }, pattern = pat, rows = new[] { new { Type = "Gradient3", TempGrad3 = "8" } } });
+            Run(link, "assign_sap_loads", new { table = "Area Loads - Strain", objects = new[] { area }, pattern = pat, rows = new[] { new { Component = "Curvature12", Curvature = "0.001" } } });
+            Run(link, "assign_sap_loads", new { table = "Area Loads - Surface Pressure", objects = new[] { area }, pattern = pat, rows = new[] { new { Face = "Top", Pressure = "4" } } });
+            Run(link, "assign_sap_loads", new { table = "Area Loads - Uniform To Frame", objects = new[] { area }, pattern = pat, rows = new[] { new { CoordSys = "GLOBAL", Dir = "Gravity", UnifLoad = "2", DistType = "Two Way" } } });
+            Run(link, "assign_sap_loads", new { table = "Area Loads - Wind Pressure Coefficients", objects = new[] { area }, pattern = pat, rows = new[] { new { Windward = "Yes", Cp = "0.8", DistType = "To Joints" } } });
+            var s2k = S2kWriter.Write(link.Model, "a.s2k").Text;
+            Check(Rows(s2k, "AREA LOADS - UNIFORM").Count(r => r["LoadPat"] == pat) == 2 && Rows(s2k, "AREA LOADS - UNIFORM").Any(r => r["Dir"] == "Z Projected"), "both uniform loads, the projected one as SAP2000 has it");
+            var back = S2kReader.Read(s2k, "a").Model;
+            var again = S2kWriter.Write(back, "b.s2k").Text;
+            foreach (var t in new[] { "AREA LOADS - UNIFORM", "AREA LOADS - TEMPERATURE", "AREA LOADS - STRAIN", "AREA LOADS - SURFACE PRESSURE", "AREA LOADS - UNIFORM TO FRAME", "AREA LOADS - WIND PRESSURE COEFFICIENTS" })
+                Check(Rows(s2k, t).Count > 0 && Rows(again, t).Count == Rows(s2k, t).Count, $"{t}: {Rows(s2k, t).Count} rows out, {Rows(again, t).Count} after the round trip");
+        });
+
         yield return ("sap2000 load forms: a joint force in a user coordinate system is kept, and a wrong field or pattern is refused with the model unchanged", () =>
         {
             var link = Sap();

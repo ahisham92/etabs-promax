@@ -65,6 +65,10 @@ public static class SapFormRoundTrip
         ("Assign Frame Deformation Loads", "Frame Loads - Deformation", "frame", [R(("IncludeU1", "Yes"), ("U1", "0.001"))]),
         ("Assign Frame Target Force Loads", "Frame Loads - Target Force", "frame", [R(("IncludeP", "Yes"), ("P", "40"), ("RelLocP", "0.5"))]),
         ("Assign Frame Auto Wind Load (Open Structure) Overwrites", "Overwrites - Auto Wind Loads - Frame", "frame", [R(("LoadByWind", "No"))]),
+        ("Assign Area Gravity Loads", "Area Loads - Gravity", "area", [R(("CoordSys", "GLOBAL"), ("MultiplierX", "0"), ("MultiplierY", "0"), ("MultiplierZ", "-1"))]),
+        ("Assign Area Uniform Loads", "Area Loads - Uniform", "area", [R(("CoordSys", "GLOBAL"), ("Dir", "Z Projected"), ("UnifLoad", "1.5"))]),
+        ("Assign Area Uniform Loads to Frames", "Area Loads - Uniform To Frame", "area", [R(("CoordSys", "GLOBAL"), ("Dir", "Gravity"), ("UnifLoad", "2"), ("DistType", "Two Way"))]),
+        ("Assign Area Temperature Loads", "Area Loads - Temperature", "area", [R(("Type", "Temperature"), ("Temp", "15"))]),
     ];
 
     /// <summary>In the Modeler's part: each Assign > ... Loads form's rows set on a beam or a joint, as the form sets them.</summary>
@@ -77,12 +81,14 @@ public static class SapFormRoundTrip
         if (beam is null || string.IsNullOrEmpty(joint)) return;
         if (!m.LoadPatterns.Exists(p => p.Name == LoadPattern))
             ctx.Tool("define_load_pattern", new JsonObject { ["name"] = LoadPattern, ["type"] = "Other", ["self_weight"] = 0 }.ToJsonString(), null, "tool define_load_pattern, the pattern of the SAP2000 load forms");
+        var area = m.AreaAssigns.FirstOrDefault();
         foreach (var (form, table, kind, rows) in Loads)
         {
+            if (kind == "area" && area is null) continue;
             var json = new JsonObject
             {
                 ["table"] = table, ["pattern"] = LoadPattern, ["option"] = "replace",
-                ["objects"] = new JsonArray(kind == "joint" ? joint + "@" + beam.Story : beam.Label + "@" + beam.Story),
+                ["objects"] = new JsonArray(kind == "joint" ? joint + "@" + beam.Story : kind == "area" ? area!.Label + "@" + area.Story : beam.Label + "@" + beam.Story),
                 ["rows"] = new JsonArray(rows.Select(r => (JsonNode)new JsonObject(r.Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value)))).ToArray()),
             };
             ctx.Tool("assign_sap_loads", json.ToJsonString(), a => FieldContext.Expect(Int(a["objects"]) == 1, $"{table}: set on {a["objects"]} objects"), $"tool assign_sap_loads, SAP2000 form {form}: {table} set as the form sets it");
