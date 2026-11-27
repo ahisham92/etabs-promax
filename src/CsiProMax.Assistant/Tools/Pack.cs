@@ -256,6 +256,8 @@ public static class Pack
         manifest["timing"] = timing.Json();
         if (withTables && manifest["timing"]!["seconds"]!.GetValue<double>() > MostTime.TotalSeconds)
             notes.Add($"The pack took {manifest["timing"]!["seconds"]} s to read from {e.Program.Name}, more than {MostTime.TotalMinutes:0} minutes: manifest.json's \"timing\" names the slowest tables.");
+        // What the pack says about itself (tables read in parts, cut, left out or refused), for the Viewer and the checks.
+        manifest["notes"] = new JsonArray(notes.Select(n => (JsonNode)n).ToArray());
         using var stream = new MemoryStream();
         using (var zip = new ZipArchive(stream, ZipArchiveMode.Create, true))
         {
@@ -288,7 +290,7 @@ public static class Pack
             var kind = PackTables.Kind(t) ?? "result";
             if (budget[kind] <= 0) { left.Add((JsonNode)t.Name); continue; }
             TableData data;
-            try { data = timing.Read(e, t, cases, combos); }
+            try { data = TooBig(e, t, known, cases, combos, tables, timing) is { } guess ? ByCase(e, t, cases, combos, timing, guess, notes) : timing.Read(e, t, cases, combos); }
             catch (EtabsException ex) { notes.Add($"'{t.Name}' could not be read ({ex.Message})."); continue; }
             if (data.Rows.Count == 0) continue;
             var most = Math.Min(mostRows, budget[kind]);
@@ -303,6 +305,60 @@ public static class Pack
             manifest["left_out_tables"] = left;
             notes.Add($"{left.Count} more result tables did not fit in the pack ({string.Join(", ", left.Take(8).Select(n => n!.GetValue<string>()))}{(left.Count > 8 ? ", ..." : "")}): make the pack again with those tables named, or with fewer load cases.");
         }
+    }
+
+    /// <summary>
+    /// SAP2000's frame stresses: a row for every stress point of the section at every station of every case, about
+    /// <see cref="StressRowsPerForceRow"/> rows for each row of the frame forces (0.4.67-test1: 215,488 of them for
+    /// 79 frames; 0.4.67-test4: the large model's did not come back within 180 s). Read when it fits.
+    /// </summary>
+    public const string Stresses = "Element Stresses - Frames", StressesFrom = "Element Forces - Frames";
+
+    /// <summary>Rows of <see cref="Stresses"/> for each row of <see cref="StressesFrom"/> (test1: 215,488 / 23,569).</summary>
+    public const double StressRowsPerForceRow = 9.2;
+
+    /// <summary>
+    /// The most rows asked of the program in one call (about 30,000 rows a second, so under a minute): a bigger table is
+    /// read one load case or combination at a time, so that each call comes back (0.4.67-test4: SAP2000 gave nothing of
+    /// 6 million rows asked at once within the 3 minutes a call may take) and is not held whole twice in memory.
+    /// </summary>
+    public const int HeavyMostRows = 1_500_000;
+
+    /// <summary>
+    /// How long the pack of a large model may take (Ahmed 2026-11-27: more than 3 minutes "is fine but not much"); the
+    /// large-model field step holds it to this.
+    /// </summary>
+    public static readonly TimeSpan LargeMostTime = TimeSpan.FromMinutes(6);
+
+    /// <summary>A table read one load case, then one combination, at a time: the rows of each, one after the other.</summary>
+    private static TableData ByCase(ICsiLink e, TableName t, IReadOnlyList<string> cases, IReadOnlyList<string> combos, Timing timing, long guess, List<string> notes)
+    {
+        var caseList = cases.Count > 0 ? cases : e.LoadCases();
+        var comboList = combos.Count > 0 ? combos : e.Combos();
+        string[]? fields = null;
+        var rows = new List<string[]>((int)Math.Min(guess, int.MaxValue / 2));
+        void Add(TableData part) { fields ??= part.Fields.ToArray(); rows.AddRange(part.Rows); }
+        foreach (var c in caseList) Add(timing.Read(e, t, [c], []));
+        foreach (var c in comboList) Add(timing.Read(e, t, [], [c]));
+        notes.Add($"'{t.Name}' ({rows.Count:N0} rows) was read one load case or combination at a time ({caseList.Count + comboList.Count} parts).");
+        return new TableData(fields ?? [], rows);
+    }
+
+    /// <summary>The rows <paramref name="t"/> would have when that is more than <see cref="HeavyMostRows"/>; otherwise null.</summary>
+    private static long? TooBig(ICsiLink e, TableName t, IReadOnlyList<TableName> known, IReadOnlyList<string> cases, IReadOnlyList<string> combos, JsonObject tables, Timing timing)
+    {
+        if (!string.Equals(t.Name, Stresses, StringComparison.OrdinalIgnoreCase)) return null;
+        int forces;
+        if (tables[StressesFrom]?["rows"] is JsonArray have) forces = have.Count + (tables[StressesFrom]?["left_out"]?.GetValue<int>() ?? 0);
+        else
+        {
+            var from = known.FirstOrDefault(k => string.Equals(k.Name, StressesFrom, StringComparison.OrdinalIgnoreCase));
+            if (from is null) return null;
+            try { forces = timing.Read(e, from, cases, combos).Rows.Count; }
+            catch (EtabsException) { return null; }
+        }
+        var guess = (long)Math.Round(forces * StressRowsPerForceRow);
+        return guess > HeavyMostRows ? guess : null;
     }
 
     private static JsonObject TableJson(string name, TableData data, int most, List<string> notes, string? from)
