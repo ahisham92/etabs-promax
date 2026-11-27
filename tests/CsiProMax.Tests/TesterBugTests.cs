@@ -930,6 +930,13 @@ static class TesterBugTests
             var src = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/FieldTest.cs"));
             Check(src.Contains("RealModelField.Run(ctx, program);", StringComparison.Ordinal), "the field test does not run the real-model round trip");
         });
+        yield return ("--version prints the running version and opens no window", () =>
+        {
+            var text = CsiProMax.Assistant.Program.VersionText();
+            Check(text.StartsWith(CsiProMax.Update.Updater.Current.ToString(3), StringComparison.Ordinal) || text.Contains(CsiProMax.Update.Updater.Current.ToString(), StringComparison.Ordinal), "the version printed: " + text);
+            var main = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Program.cs"));
+            Check(main.IndexOf("args.Contains(\"--version\")", StringComparison.Ordinal) is var at and > 0 && at < main.IndexOf("Newer(args) is { } newerTest", StringComparison.Ordinal), "--version is answered before any window or hand-over");
+        });
         yield return ("field test: steps a workaround can test are tested, not left out (Ahmed, 2026-11-26: only a missing program or licence)", () =>
         {
             string Src(string f) => File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant", f));
