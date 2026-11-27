@@ -4365,16 +4365,12 @@ function modelerMenus(m) {
     ["Import", [["Tables from Excel (.xlsx)...", "m:xlsxIn"], ["Results from a Review Pack (.cpmx)...", "eng:import"]]],
     ["Export", [["Tables to Excel (.xlsx)...", "m:xlsxOut"], 0, only(["etabs", "sap2000"], ["SAP2000 .s2k Text File...", "m:s2k"]), only(["etabs", "safe"], ["SAFE .f2k Text File (one floor)...", "m:f2k"])]], 0, ["Print the active window...", "print", "Ctrl+P"]];
   m.Edit = [[s.undo ? "Undo " + s.undo : "Undo", "m:undo", "Ctrl+Z", !s.undo], [s.redo ? "Redo " + s.redo : "Redo", "m:redo", "Ctrl+Y", !s.redo], 0,
-    ["Delete", "m:delete", "Del", !any], 0, ["Replicate...", "m:replicate", "", !any], ["Move...", "m:move", "", !any], ["Divide Frames...", "m:divide", "", !hmSelected("f").length], 0, ["Copy names of the selected objects", "copyNames", "Ctrl+C", !any], 0, ["Hide the selected objects", "hideSel", "", !any], ["Show all objects", "showAll"], 0, ["Model Text...", "m:text"]];
-  m.Define = [["Material Properties...", "m:materials"], ["Frame Sections...", "m:frameSections"], ...(program === "sap2000" ? [["Area Sections...", "m:shellSections"]] : [["Slab Sections...", "m:shellSections"], ["Wall Sections...", "m:wallSections"]]), ["Reinforcing Bar Sizes...", "m:rebarSizes"], ["Frame Section Rebar (Modify/Show Rebar)...", "m:frameRebar"], only(["etabs", "sap2000"], ["Link/Support Properties...", "m:links"]), ["Spring Properties", [["Point Springs...", "m:spr:point"], ["Line Springs...", "m:spr:line"], ["Area Springs...", "m:spr:area"]]], 0,
-    only(["etabs", "sap2000"], ["Diaphragms...", "m:st:diaphragm"]), only(["etabs"], ["Pier Labels...", "m:st:pier"]), only(["etabs"], ["Spandrel Labels...", "m:st:spandrel"]), ["Groups...", "m:st:group"], ["Section Cuts...", "m:st:cut"], only(["sap2000"], ["Joint Constraints...", "m:ex:constraints"]), only(["etabs", "safe"], ["Design Strips...", "m:ex:strips"]), ["Tendon Sections...", "m:ex:tendonsections"], ["Tendons...", "m:ex:tendons"], only(["etabs", "safe"], ["Hyperstatic Load Cases...", "m:ex:hyperstatic"]), only(["etabs", "safe"], ["Punching Shear Overwrites...", "m:ex:punching"]), only(["etabs", "safe"], ["Floor Openings...", "m:ex:openings"]), only(["etabs", "safe"], ["Slab Line Releases...", "m:ex:linereleases"]), only(["etabs", "safe"], ["Slab Rebar...", "m:ex:slabrebar"]), 0,
-    ...hmDefineTableItems(), 0,
-    [program === "sap2000" ? "Elevations (Z Grid Lines)..." : "Story Data...", "m:stories"], [program === "sap2000" ? "Coordinate Systems/Grids..." : "Grid Data...", "m:grids"], 0, ["Functions", [["Response Spectrum...", "m:fnRS"], only(ES, ["Time History...", "m:fnTH"])]],
-    ["Load Patterns...", "m:patterns"], ["Load Cases...", "m:cases"], only(["sap2000"], ["Moving Loads", [["Lanes...", "m:ex:lanes"], ["Vehicles...", "m:ex:vehicles"], ["Vehicle Classes...", "m:ex:classes"], ["Moving Load Cases...", "m:ex:mcases"]]]), ["Load Combinations...", "m:combos"], 0, ["Mass Source...", "m:mass"], only(["etabs"], ["P-Delta Options...", "m:pdelta"]) /* SAP2000 sets P-Delta in each nonlinear load case */];
+    ["Delete", "m:delete", "Del", !any], 0, ["Replicate...", "m:replicate", "", !any], ["Move...", "m:move", "", !any], ["Divide Frames...", "m:divide", "", !hmSelected("f").length], 0, only(["etabs", "safe"], ["Edit Stories and Grid Systems...", "m:storyGrid"]), 0, ["Copy names of the selected objects", "copyNames", "Ctrl+C", !any], 0, ["Hide the selected objects", "hideSel", "", !any], ["Show all objects", "showAll"], 0, ["Model Text...", "m:text"]];
+  m.Define = hmDefineMenu();
   m.Draw = [["Select Object", "t:select", "Esc"], ["Reshape Object", "d:reshape"], 0, ["Draw Columns (click a point)", "d:column"], ["Draw Beams (click start and end)", "d:beam"], ["Quick Draw Beams (click a grid line)", "d:qbeam"], only(ES, ["Quick Draw Secondary Beams (click in a bay)", "d:qsec"]), 0,
     ["Draw Floors (click corners)", "d:floor"], ["Draw Rectangular Floors (two corners)", "d:rect"], ["Quick Draw Floors (click in a bay)", "d:qfloor"], ["Draw Circular Floors (centre, then edge)", "d:circ"], 0,
     ["Draw Walls (click start and end)", "d:wall"], ["Quick Draw Walls (click a grid line)", "d:qwall"], 0,
-    only(ES, ["Draw Braces (click bottom and top)", "d:brace"]), ["Draw Joints (click a point)", "d:joint"], 0, ["Snap and Story Options...", "m:drawHelp"]];
+    only(ES, ["Draw Braces (click bottom and top)", "d:brace"]), ["Draw Joints (click a point)", "d:joint"], 0, only(["etabs", "safe"], ["Design Strips...", "m:ex:strips"]), ["Tendons...", "m:ex:tendons"], only(["etabs", "safe"], ["Slab Rebar...", "m:ex:slabrebar"]), 0, ["Snap and Story Options...", "m:drawHelp"]];
   m.Assign = [["Frame Section...", "m:asgFrame", "", !fr], [program === "sap2000" ? "Area Section..." : "Slab or Wall Section...", "m:asgShell", "", !ar], 0, ["Joint Restraints (Supports)...", "m:asgSupport"], 0,
     ["Joint", [["Springs...", "m:ad:joint", "", !any], only(["etabs", "sap2000"], ["Diaphragms...", "m:sa:jdiaph", "", !any]), only(["sap2000"], ["Constraints...", "m:ex:jconstraint", "", !any]), 0, ...hmTableItems("Joint", !any)]],
     ["Frame", [["Releases...", "m:ad:releases", "", !fr], ["Local Axes...", "m:ad:axes", "", !fr], ["Insertion Point...", "m:ad:insertion", "", !fr], ["End Length Offsets...", "m:ad:offsets", "", !fr], ["Property Modifiers...", "m:ad:fmods", "", !fr], ["Line Springs...", "m:ad:lspring", "", !fr], only(["etabs", "sap2000"], ["Hinges...", "m:ad:hinges", "", !fr]), 0, ...hmTableItems("Frame", !fr)]],
@@ -4384,6 +4380,40 @@ function modelerMenus(m) {
     ["Frame Loads", [["Distributed...", "m:asgFrameLoad", "", !fr], ["Uniform in any direction...", "m:ld:frame_uniform", "", !fr], ["Point...", "m:ld:frame_point", "", !fr], ["Trapezoidal...", "m:ld:frame_trapezoid", "", !fr], ["Temperature...", "m:ld:frame_temperature", "", !fr], only(ES, ["Strain...", "m:ld:frame_strain", "", !fr])]],
     [({sap2000: "Area Loads", safe: "Slab Loads"})[program] || "Shell Loads", [["Uniform...", "m:asgShellLoad", "", !ar], ["Uniform in any direction...", "m:ld:shell_uniform", "", !ar], ["Temperature...", "m:ld:shell_temperature", "", !ar], only(ES, ["Strain...", "m:ld:shell_strain", "", !ar])]]];
   return m;
+}
+// Define as each program has it, in its order and words (Ahmed 2026-11-27, every form): ETABS 23.2 Define, SAP2000 26.3
+// Define and SAFE's Define. Story and grid data are in ETABS's and SAFE's Edit menu (Edit Stories and Grid Systems...), in
+// SAP2000's Define (Coordinate Systems/Grids...). Design strips, tendons and slab rebar are drawn objects: Draw has them.
+function hmDefineMenu() {
+  const dt = label => { const x = defTables.find(t => t[0] === label); return x ? only(x[2] || ["etabs"], [program === "sap2000" && x[3] || x[0], "m:dt:" + x[1].join("|")]) : 0; };
+  const springs = [["Point Springs...", "m:spr:point"], ["Line Springs...", "m:spr:line"], ["Area Springs...", "m:spr:area"]];
+  const fns = ["Functions", [["Response Spectrum...", "m:fnRS"], only(ES, ["Time History...", "m:fnTH"])]];
+  const hinges = hmDefineTableItems().slice(-2);
+  if (program === "sap2000") return [["Materials...", "m:materials"],
+    ["Section Properties", [["Frame Sections...", "m:frameSections"], ["Tendon Sections...", "m:ex:tendonsections"], ["Area Sections...", "m:shellSections"], ["Link/Support Properties...", "m:links"], ...hinges, dt("Panel Zone Properties..."), ["Reinforcing Bar Sizes...", "m:rebarSizes"], 0,
+      ["Frame Section Rebar (Modify/Show Rebar)...", "m:frameRebar"], dt("Slab Layers..."), dt("Wall Layers..."), dt("Frame Release Definitions..."), ["Spring Properties", springs]]],
+    ["Mass Source...", "m:mass"], ["Coordinate Systems/Grids...", "m:grids"], ["Elevations (Z Grid Lines)...", "m:stories"], ["Joint Constraints...", "m:ex:constraints"], ["Groups...", "m:st:group"], ["Section Cuts...", "m:st:cut"], dt("Generalized Displacements..."), ["Diaphragms...", "m:st:diaphragm"],
+    fns, ["Load Patterns...", "m:patterns"], ["Load Cases...", "m:cases"], ["Load Combinations...", "m:combos"],
+    ["Moving Loads", [["Lanes...", "m:ex:lanes"], ["Vehicles...", "m:ex:vehicles"], ["Vehicle Classes...", "m:ex:classes"], ["Moving Load Cases...", "m:ex:mcases"]]]];
+  if (program === "safe") return [["Materials...", "m:materials"],
+    ["Section Properties", [["Slab Properties...", "m:shellSections"], ["Beam Properties...", "m:frameSections"], ["Tendon Properties...", "m:ex:tendonsections"], ["Reinforcing Bar Sizes...", "m:rebarSizes"],
+      ["Soil Subgrade Properties...", "m:spr:area"], ["Point Spring Properties...", "m:spr:point"], ["Line Spring Properties...", "m:spr:line"], ["Wall Properties...", "m:wallSections"]]],
+    ["Load Patterns...", "m:patterns"], ["Load Cases...", "m:cases"], ["Load Combinations...", "m:combos"], ["Hyperstatic Load Cases...", "m:ex:hyperstatic"], 0, ["Groups...", "m:st:group"], ["Section Cuts...", "m:st:cut"], fns, ["Mass Source...", "m:mass"], 0,
+    ["Punching Shear Overwrites...", "m:ex:punching"], ["Floor Openings...", "m:ex:openings"], ["Slab Line Releases...", "m:ex:linereleases"]];
+  return [["Material Properties...", "m:materials"],
+    ["Section Properties", [["Frame Sections...", "m:frameSections"], ["Slab Sections...", "m:shellSections"], ["Wall Sections...", "m:wallSections"], ["Reinforcing Bar Sizes...", "m:rebarSizes"], ["Link/Support Properties...", "m:links"],
+      ...hinges, dt("Panel Zone Properties..."), ["Tendon Sections...", "m:ex:tendonsections"], 0, ["Frame Section Rebar (Modify/Show Rebar)...", "m:frameRebar"], dt("Slab Layers..."), dt("Wall Layers..."), dt("Wall Auto Select Lists..."), dt("Frame Release Definitions...")]],
+    ["Spring Properties", springs], ["Diaphragms...", "m:st:diaphragm"], ["Pier Labels...", "m:st:pier"], ["Spandrel Labels...", "m:st:spandrel"], ["Group Definitions...", "m:st:group"], ["Section Cuts...", "m:st:cut"], dt("Generalized Displacements..."),
+    fns, ["Load Patterns...", "m:patterns"], dt("Shell Uniform Load Sets..."), ["Load Cases...", "m:cases"], ["Load Combinations...", "m:combos"], dt("Auto Construction Sequence..."), dt("Walking Vibrations..."), ["Mass Source...", "m:mass"], ["P-Delta Options...", "m:pdelta"], 0,
+    ["Hyperstatic Load Cases...", "m:ex:hyperstatic"], ["Punching Shear Overwrites...", "m:ex:punching"], ["Floor Openings...", "m:ex:openings"], ["Slab Line Releases...", "m:ex:linereleases"]];
+}
+// ETABS's Edit > Edit Stories and Grid Systems...: the stories and the grid systems, each with its Modify/Show button.
+function hmStoryGrid() {
+  const defs = hm.defs || {}, gs = (defs.grid_system || {}).name || "G1";
+  const d = dialog("Edit Story and Grid System Data", `<fieldset><legend>Stories</legend><div style="display:flex;gap:8px;align-items:center"><span style="flex:1">${(defs.stories || []).length} stories above the base</span><button id="sgS">Modify/Show Story Data...</button></div></fieldset>
+    <fieldset><legend>Grid Systems</legend><div style="display:flex;gap:8px"><select id="sgL" size="4" style="flex:1"><option selected>${esc(gs)}</option></select><div style="display:flex;flex-direction:column;gap:6px"><button id="sgG">Modify/Show Grid System...</button></div></div></fieldset>`,
+    [["OK"], ["Cancel"]], {width: 460});
+  q(d, "#sgS").onclick = () => hmStories(); q(d, "#sgG").onclick = () => hmGrids();
 }
 async function modelAct(a) {
   hideMenus();
@@ -4412,6 +4442,7 @@ async function modelAct(a) {
     case "shellSections": return hmShellSections();
     case "wallSections": return hmShellSections("wall");
     case "stories": return hmStories();
+    case "storyGrid": await hmDefs(); return hmStoryGrid();
     case "grids": return hmGrids();
     case "patterns": return hmPatterns();
     case "combos": return hmCombos();

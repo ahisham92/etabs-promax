@@ -265,6 +265,13 @@ static class ExtrasTests
                 "Values at Equal Intervals of", "<legend>Function Graph</legend>", "<button id=\"fConv\">Convert to User Defined</button>", "[\"ramp_time\", \"Ramp Time\", 1], [\"amplitude\", \"Amplitude\", 1], [\"max_time\", \"Maximum Time\", 2]", "[\"steps_per_cycle\", \"Number of Steps per Cycle\", 16]" })
                 Check(html.Contains(part), "viewer.html lost " + part);
         });
+        yield return ("extras: Define is each program's own menu in its order and words (Section Properties, Spring Properties, Group Definitions / Groups, Coordinate Systems/Grids in SAP2000), stories and grids from ETABS's Edit menu, strips, tendons and slab rebar under Draw (Ahmed 2026-11-27)", () =>
+        {
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var part in new[] { "m.Define = hmDefineMenu();", "[\"Edit Stories and Grid Systems...\", \"m:storyGrid\"]", "dialog(\"Edit Story and Grid System Data\"", "[\"Coordinate Systems/Grids...\", \"m:grids\"]",
+                "[\"Group Definitions...\", \"m:st:group\"]", "[\"Soil Subgrade Properties...\", \"m:spr:area\"]", "dt(\"Shell Uniform Load Sets...\")", "only([\"etabs\", \"safe\"], [\"Design Strips...\", \"m:ex:strips\"]), [\"Tendons...\", \"m:ex:tendons\"]" })
+                Check(html.Contains(part), "viewer.html lost " + part);
+        });
         yield return ("extras: the views and toolbars are drawn as ETABS draws them: grey see-through slabs with white edges, thin columns, solid grid, light-blue ground grid with flat bubbles, the axes at the origin, column squares in plan, captions as tabs, the toolbar and strip in the program's order (Ahmed 2026-11-26 22:19)", () =>
         {
             var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
