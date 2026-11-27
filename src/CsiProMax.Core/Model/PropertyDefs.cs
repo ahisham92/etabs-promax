@@ -259,9 +259,11 @@ public static class PropertyDefs
     /// <summary>ETABS 23.2's table for a slab or a wall section's row.</summary>
     public static string ShellTable(ShellSection s) => s.IsDeck ? DeckTable : s.IsWall ? "Wall Property Definitions - Specified" : "Slab Property Definitions";
 
-    public static void SetShellExtras(ShellSection s, IReadOnlyDictionary<string, string> extras) => s.IsDeck
-        ? SetExtras(s, DeckTable, DeckExtraFields, extras, "A deck section")
-        : SetExtras(s, ShellTable(s), ShellExtraFields(s.IsWall), extras, s.IsWall ? "A wall section" : "A slab section");
+    public static void SetShellExtras(ShellSection s, IReadOnlyDictionary<string, string> extras)
+    {
+        if (s.IsDeck) SetExtras(s, DeckTable, DeckExtraFields, extras, "A deck section");
+        else SetExtras(s, ShellTable(s), ShellExtraFields(s.IsWall), extras, s.IsWall ? "A wall section" : "A slab section");
+    }
 
     // ---- deck sections (ETABS 23.2: Define > Section Properties > Deck Sections, its Deck Property Data form) ----
 
