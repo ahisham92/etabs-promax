@@ -10,7 +10,7 @@ namespace CsiProMax.Assistant;
 /// </summary>
 internal static class SkipAudit
 {
-    public enum Why { ProgramNotHere, Licence, NotWindows, PcSetUpWithoutIt, NeedsAPerson, ProgramCannot, YourOwnModel, WindowWentAway, NoWindowInThisRun, Unjustified }
+    public enum Why { ProgramNotHere, Licence, NotWindows, PcSetUpWithoutIt, NeedsAPerson, ProgramCannot, YourOwnModel, WindowWentAway, NoWindowInThisRun, LeftOutOfRerun, Unjustified }
 
     /// <summary>The reasons that hold, by a part of their text, each with its kind. A new reason is added here or it fails.</summary>
     internal static readonly (string Part, Why Kind)[] Known =
@@ -41,6 +41,8 @@ internal static class SkipAudit
         ("the open model could not be read", Why.YourOwnModel),
         ("stopped answering", Why.WindowWentAway), ("no longer answers", Why.WindowWentAway),
         ("this run has no CSI ProMax window", Why.NoWindowInThisRun),
+        // Ahmed 2026-11-27: reruns of what failed leave the slow review pack out (--no-pack); the full run tests it.
+        ("left out of this rerun of what failed (--no-pack)", Why.LeftOutOfRerun),
     ];
 
     /// <summary>The kind of a "not tested" reason; <see cref="Why.Unjustified"/> when it is none of the reasons that hold.</summary>
@@ -65,7 +67,7 @@ internal static class SkipAudit
     /// dialog or a printer, that the program's API cannot do, is not
     /// left out: it is tested another way, and until it is, it fails.
     /// </summary>
-    public static bool Allowed(Why kind) => kind is Why.ProgramNotHere or Why.Licence or Why.NotWindows or Why.PcSetUpWithoutIt or Why.YourOwnModel or Why.WindowWentAway or Why.NoWindowInThisRun;
+    public static bool Allowed(Why kind) => kind is Why.ProgramNotHere or Why.Licence or Why.NotWindows or Why.PcSetUpWithoutIt or Why.YourOwnModel or Why.WindowWentAway or Why.NoWindowInThisRun or Why.LeftOutOfRerun;
 
     private const string FailureLead = "not tested, and that is not allowed here (";
 
@@ -86,6 +88,7 @@ internal static class SkipAudit
         Why.YourOwnModel => "your own model and your own open windows are never changed, analysed or closed by the test",
         Why.WindowWentAway => "the program's window went away (tried again in the next run)",
         Why.NoWindowInThisRun => "this run has no CSI ProMax window (Help > Field test in the window covers it)",
+        Why.LeftOutOfRerun => "left out of a rerun of what failed (--no-pack); the full run tests it",
         _ => "no reason that holds",
     };
 }

@@ -148,6 +148,15 @@ public sealed class FieldContext(CsiProgram program, string folder, ICsiLink lin
     /// </summary>
     public Action? WhileAnalysed { get; set; }
 
+    /// <summary>The steps writing the review pack are left out of this run (FieldTest.Options.NoPack).</summary>
+    public bool NoPack { get; init; }
+
+    /// <summary>What a step left out by <see cref="NoPack"/> says.</summary>
+    public const string NoPackWhy = "left out of this rerun of what failed (--no-pack): the review pack is tested again in the full run";
+
+    /// <summary>A review pack step left out of a rerun of what failed (<see cref="NoPack"/>); never in a full run.</summary>
+    public void LeftOutOfRerun(string name) => Skip(name, NoPackWhy);
+
     /// <summary>Runs <see cref="WhileAnalysed"/> if it has not run yet.</summary>
     public void WithResults()
     {

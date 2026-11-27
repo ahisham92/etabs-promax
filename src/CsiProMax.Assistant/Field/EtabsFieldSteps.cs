@@ -417,6 +417,13 @@ public static class EtabsFieldSteps
         ctx.Tool("compare_snapshots", """{"from":"cpm-before-analysis","to":"cpm-after-analysis"}""", a =>
             FieldContext.Expect(Int(a["frames"]!["removed"]) == 0 && Int(a["areas"]!["removed"]) == 0, "nothing was removed between the two snapshots: " + a.ToJsonString()));
         ctx.Tool("compare_snapshots", """{"from":"cpm-before-analysis"}""", null, "tool compare_snapshots with the model as it is now");
+        // This pack, the Viewer's and the watcher's two are of the same analysed model: its tables are read once for all
+        // four (Pack.SameModel), not four times at about 9 minutes each (0.4.61 full test).
+        var sameModel = Pack.SameModel();
+        try
+        {
+        if (ctx.NoPack) ctx.LeftOutOfRerun("the review pack of the scratch model is written");
+        else
         ctx.Step("the review pack of the scratch model is written", () =>
         {
             var cases = link.LoadCases();
@@ -434,6 +441,8 @@ public static class EtabsFieldSteps
 
         // The Viewer's check runs here, while the model still has its results (it is unlocked next).
         if (analysed) ctx.WithResults();
+        }
+        finally { sameModel.Dispose(); }
 
         // ---- unlocked again: every load pattern type by its name, read back from ETABS ----
         if (analysed)
