@@ -72,7 +72,12 @@ static class PropertyTests
             Check(s2k.Contains("MATERIAL PROPERTIES 05A - TIME DEPENDENCE - CEB-FIP 90") && s2k.Contains("RelHumid=70"), "the .s2k has the time dependence");
             Check(s2k.Contains("MATERIAL PROPERTIES 04 - USER STRESS-STRAIN CURVES") && s2k.Contains("Notes=\"Cores and transfer slabs\""), "the .s2k has the curve and the notes");
             Check(s2k.Contains("SSHysType=Takeda") && s2k.Contains("LtWtConc=Yes") && !s2k.Contains("UserFr"), "SAP2000's concrete row takes the nonlinear and lightweight data, and no user rupture (SAP2000 has none)");
-            Check(s2k.Contains("MATERIAL PROPERTIES 09 - ACCEPTANCE CRITERIA") && s2k.Contains("IOComp=0.002"), "the .s2k has the acceptance criteria");
+            // SAP2000 26.3 takes compression acceptance strains as negative only ("IOComp can not be positive; default
+            // value used", 0.4.67-test1 field test): the .s2k gives them negative, and they read back positive.
+            Check(s2k.Contains("MATERIAL PROPERTIES 09 - ACCEPTANCE CRITERIA") && s2k.Contains("IOComp=-0.002") && !s2k.Contains("IOComp=0.002"), "the .s2k has the acceptance criteria, compression negative");
+            var sapBack = S2kReader.Read(s2k, "Back").Model.Materials.Single(x => x.Name == "C40");
+            Check(ProgramTables.MaterialData(sapBack)["Acceptance Criteria"][0]["IOComp"] == "0.002", "the compression acceptance strain does not read back positive: " + string.Join(",", ProgramTables.MaterialData(sapBack)["Acceptance Criteria"][0]));
+            Check(ProgramTables.SapValue("Acceptance Criteria", "IOTens", "0.01", true) == "0.01" && ProgramTables.SapValue("Acceptance Criteria", "CPComp", "-0.02", true) == "-0.02" && ProgramTables.SapValue("Damping Parameters", "IOComp", "1", true) == "1", "only the compression acceptance strains change sign");
             var f2k = CsiProMax.F2k.F2kWriter.Write(link.Model, new CsiProMax.F2k.F2kOptions()).Text;
             Check(!f2k.Contains("MATERIAL PROPERTIES - DAMPING PARAMETERS") && f2k.Contains("UserFr=4000") && f2k.Contains("LtWtConc=Yes") && f2k.Contains("Color=Yellow"), "the .f2k has the rupture, the lightweight data and the color, in the tables SAFE has");
             var rows = ProgramTables.MaterialRows(link.Model);

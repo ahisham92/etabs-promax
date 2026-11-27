@@ -590,7 +590,7 @@ public static class S2kWriter
                 if (table is "General" or "Basic Mechanical Properties" or "Steel Data" or "Concrete Data" or "Rebar Data") continue;
                 if (ProgramTables.SapMaterialTable(table) is not { } sap) { notes.Add($"Material {mat.Name}: SAP2000 has no table for its {table}; it stays in the .cpm."); continue; }
                 if (!more.TryGetValue(sap, out var list)) more[sap] = list = [];
-                list.AddRange(rows.Select(r => (IReadOnlyList<(string, string)>)ProgramTables.With(Row(("Material", mat.Name)), r, ProgramTables.SapField)));
+                list.AddRange(rows.Select(r => (IReadOnlyList<(string, string)>)ProgramTables.With(Row(("Material", mat.Name)), r.ToDictionary(kv => kv.Key, kv => ProgramTables.SapValue(table, kv.Key, kv.Value, toSap: true), StringComparer.Ordinal), ProgramTables.SapField)));
             }
         }
         Add(tables, "MATERIAL PROPERTIES 01 - GENERAL", general);
