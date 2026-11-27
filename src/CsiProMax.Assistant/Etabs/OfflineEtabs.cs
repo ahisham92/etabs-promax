@@ -39,7 +39,18 @@ public sealed class OfflineEtabs : ICsiLink, CsiProMax.Assistant.Tools.IModelDra
 
     public void Replace(StructuralModel model, string path)
     {
-        Model = model; Path = path; _selected.Clear(); Revision++; Unsaved = false; SavedUnits = null; _own = null;
+        Model = model; Path = path; _selected.Clear(); Revision++; Unsaved = false; SavedUnits = null; _own = null; ChooseProgram = false;
+    }
+
+    /// <summary>Whether the window still asks which program to work in (ETABS, SAP2000 or SAFE): true while the Engine
+    /// started with no file and nothing has set the program yet (Ahmed 2026-11-27). A file given at the start, a new
+    /// model, an opened file or a change of program answers it.</summary>
+    public bool ChooseProgram { get; set; }
+
+    /// <summary>The program chosen when the Engine starts: the model is made for it, and nothing is marked unsaved.</summary>
+    public void StartFor(string target)
+    {
+        Model.Target = target; ChooseProgram = false; Revision++;
     }
 
     /// <summary>The model's own units while it is shown in others (the units control at the bottom right; Ahmed
@@ -404,7 +415,8 @@ public sealed class OfflineEtabs : ICsiLink, CsiProMax.Assistant.Tools.IModelDra
 
     public void RunAnalysis() => throw new EtabsException(NoAnalysis);
 
-    /// <summary>Saves the .e2k (what ETABS imports) and the .cpm beside it (the Modeler's own file).</summary>
+    /// <summary>Saves the .e2k (what ETABS imports) and the Modeler's own file beside it, with the extension of the
+    /// model's program (.cpme, .cpms or .cpmf). An old .cpm beside it is left as it was.</summary>
     public void Save() => SaveAs(Path.Length > 0 ? Path : System.IO.Path.Combine(DefaultFolder, FileName(Model.Title) + ".e2k"));
 
     public string SaveAs(string path)
@@ -415,7 +427,7 @@ public sealed class OfflineEtabs : ICsiLink, CsiProMax.Assistant.Tools.IModelDra
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
             var saved = ForSave;
             E2kWriter.WriteFile(saved, path);
-            ModelFile.Save(saved, System.IO.Path.ChangeExtension(path, ModelFile.Extension));
+            ModelFile.Save(saved, ModelFile.PathFor(path, saved.Target));
             ProgramFile = WriteProgramFile(path, saved);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { throw new EtabsException($"The model could not be saved to {path}: {ex.Message}"); }
@@ -486,7 +498,8 @@ public sealed class OfflineEtabs : ICsiLink, CsiProMax.Assistant.Tools.IModelDra
         return clean.Length > 0 ? clean : "Untitled";
     }
 
-    /// <summary>Opens an ETABS text file (.e2k, .$et), a SAP2000 one (.s2k, .$2k), a SAFE one (.f2k, .$fk) or a Modeler file (.cpm).</summary>
+    /// <summary>Opens an ETABS text file (.e2k, .$et), a SAP2000 one (.s2k, .$2k), a SAFE one (.f2k, .$fk) or a Modeler
+    /// file (.cpme, .cpms, .cpmf, or an old .cpm).</summary>
     public static StructuralModel Load(string path) => Open(path).Model;
 
     /// <summary>What a file opens as: the model, whether it is exactly the model CSI ProMax saved (a .cpm, an .e2k, or a
@@ -498,7 +511,7 @@ public sealed class OfflineEtabs : ICsiLink, CsiProMax.Assistant.Tools.IModelDra
         var ext = System.IO.Path.GetExtension(path).ToLowerInvariant();
         switch (ext)
         {
-            case ".cpm": return new Opened(ModelFile.Load(path), true, []);
+            case ModelFile.Etabs or ModelFile.Sap2000 or ModelFile.Safe or ModelFile.Legacy: return new Opened(ModelFile.Load(path), true, []);
             case ".s2k" or ".$2k": { var r = CsiProMax.S2k.S2kReader.ReadFile(path); return new Opened(r.Model, r.Exact, r.Notes); }
             case ".f2k" or ".$fk": { var r = CsiProMax.F2k.F2kReader.ReadFile(path); return new Opened(r.Model, r.Exact, r.Notes); }
             default:
@@ -514,14 +527,17 @@ public sealed class OfflineEtabs : ICsiLink, CsiProMax.Assistant.Tools.IModelDra
         }
     }
 
-    /// <summary>The .e2k a model opened from this file saves to: the file itself for an .e2k; for a .s2k or .f2k the
-    /// Modeler saved (its .cpm beside it, the model carried in it), that model's .e2k, so Save writes the same files
-    /// again; "" otherwise (a file another program wrote, a single floor's file), so it is never written over.</summary>
+    /// <summary>The .e2k a model opened from this file saves to: the file itself for an .e2k; for the Modeler's own
+    /// file (.cpme, .cpms, .cpmf or an old .cpm) the .e2k beside it, so Save writes its files in the same place again
+    /// (an old .cpm then gets the new extension beside it, and is left as it was); for a .s2k or .f2k the Modeler saved
+    /// (its own file beside it, the model carried in it), that model's .e2k; "" otherwise (a file another program
+    /// wrote, a single floor's file), so it is never written over.</summary>
     public static string SavesTo(string path, Opened opened)
     {
         var ext = System.IO.Path.GetExtension(path).ToLowerInvariant();
         if (ext is ".e2k" or ".$et") return path;
-        if (opened.Exact && ext is ".s2k" or ".f2k" && File.Exists(System.IO.Path.ChangeExtension(path, ModelFile.Extension))) return System.IO.Path.ChangeExtension(path, ".e2k");
+        if (ModelFile.IsModelFile(path)) return System.IO.Path.ChangeExtension(path, ".e2k");
+        if (opened.Exact && ext is ".s2k" or ".f2k" && ModelFile.Beside(path) is not null) return System.IO.Path.ChangeExtension(path, ".e2k");
         return "";
     }
 

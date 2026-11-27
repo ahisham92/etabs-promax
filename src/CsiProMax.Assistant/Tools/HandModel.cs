@@ -34,7 +34,8 @@ public static class HandModel
         if (!ReferenceEquals(_of, link)) { Reset(); _of = link; }
     }
 
-    /// <summary>The window's request, as JSON: {"tool":name,"args":{...}}, or {"undo":true}, or {"redo":true}.</summary>
+    /// <summary>The window's request, as JSON: {"tool":name,"args":{...}}, or {"undo":true}, or {"redo":true}, or
+    /// {"start_program":"etabs"|"sap2000"|"safe"}.</summary>
     public static JsonObject Handle(ICsiLink link, JsonElement request)
     {
         if (link is not OfflineEtabs model)
@@ -42,6 +43,14 @@ public static class HandModel
         Follow(model);
         if (request.TryGetProperty("undo", out var u) && u.ValueKind == JsonValueKind.True) return Back(model, Undos, Redos, "Undo");
         if (request.TryGetProperty("redo", out var r) && r.ValueKind == JsonValueKind.True) return Back(model, Redos, Undos, "Redo");
+        // The program the Engine works in, chosen when it starts with no file: the new, empty model is made for it. It is
+        // no change to undo or to save, as choosing the program at the start of a CSI program is not.
+        if (request.TryGetProperty("start_program", out var sp) && sp.ValueKind == JsonValueKind.String)
+        {
+            if (!StructuralModel.Targets.Contains(sp.GetString())) return Answer(false, "The program is ETABS, SAP2000 or SAFE.", model); // ETABS itself
+            model.StartFor(sp.GetString()!);
+            return Answer(true, null, model);
+        }
         var name = request.TryGetProperty("tool", out var n) && n.ValueKind == JsonValueKind.String ? n.GetString() ?? "" : "";
         if (!Tools.TryGetValue(name, out var tool)) return Answer(false, $"There is no Modeler command named '{name}'.", model);
         var args = request.TryGetProperty("args", out var a) && a.ValueKind == JsonValueKind.Object ? a.Clone() : JsonDocument.Parse("{}").RootElement.Clone();
@@ -101,6 +110,8 @@ public static class HandModel
             o["redo"] = Redos.Last?.Value.What;
             o["saved"] = !model.Unsaved;
             o["file"] = model.Path;
+            // The Engine started with no file asks which program to work in, once the page is up.
+            if (model.ChooseProgram) o["choose_program"] = true;
         }
         return o;
     }

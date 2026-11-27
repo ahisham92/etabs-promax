@@ -465,7 +465,7 @@ public sealed class ScratchProgram : IScratchWindow
     /// <summary>The scratch window's process, 0 when it could not be told apart.</summary>
     public int ProcessId { get; private set; }
 
-    /// <summary>The Modeler's .cpm of the file this window was given, when it opens a converted copy of it.</summary>
+    /// <summary>The Modeler's own file (.cpme, .cpms, .cpmf or an old .cpm) of the file this window was given, when it opens a converted copy of it.</summary>
     private string? _modelerFile;
 
     public string ModelPath { get; private set; } = "";
@@ -492,7 +492,7 @@ public sealed class ScratchProgram : IScratchWindow
         // SAP2000 opening the same .sdb takes the same rows (experiment N on Ahmed's PC, 2026-11-26: the 20 table codes
         // of the 0.4.54 field test). So one SAP2000 turns the Modeler's .s2k into a .sdb and closes, and the test
         // works in a second one that opens that .sdb, as an engineer's SAP2000 opening its model file would be.
-        // The Modeler's .cpm beside the text file: the .sdb made from it has none beside it, and its rows (SAP2000's output
+        // The Modeler's own file beside the text file: the .sdb made from it has none beside it, and its rows (SAP2000's output
         // stations, set by the API) were never put in (0.4.57 full test: "'Frame Output Station Assignments' has no row with 7").
         var modelerFile = ModelerTables.ModelerFileBeside(modelFile);
         string? text = null;

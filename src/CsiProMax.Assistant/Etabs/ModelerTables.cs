@@ -10,12 +10,9 @@ namespace CsiProMax.Assistant.Etabs;
 /// </summary>
 public static class ModelerTables
 {
-    /// <summary>The Modeler's .cpm beside a program file, or null.</summary>
-    public static string? ModelerFileBeside(string programFile)
-    {
-        var cpm = Path.ChangeExtension(programFile, ModelFile.Extension);
-        return File.Exists(cpm) ? cpm : null;
-    }
+    /// <summary>The Modeler's own file beside a program file (.cpme, .cpms, .cpmf or an old .cpm; the last saved when
+    /// there are several), or null.</summary>
+    public static string? ModelerFileBeside(string programFile) => ModelFile.Beside(programFile);
 
     /// <summary>
     /// Puts the table rows of the Modeler's model at <paramref name="cpm"/> into the program behind <paramref name="e"/>,

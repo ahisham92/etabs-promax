@@ -10670,7 +10670,7 @@ async function nmInitOk(d) {
   let init = {...nmSavedDefaults()};
   if (how === "builtin") init = {units: q(d, "#miU").value, region: q(d, "#miR").value, db: q(d, "#miD").value, steel: q(d, "#miS").value, conc: q(d, "#miC").value};
   if (how === "file") {
-    const p = await hostPick({kind: "open", title: "Open Model File", filter: modelFilter, folder: modelFolder()});
+    const p = await hostPick({kind: "open", title: "Open Model File", filter: modelFilter(program), folder: modelFolder()});
     if (p && p.cancelled) return;
     init.from = p ? p.path : "";
   }
@@ -10930,8 +10930,8 @@ function sapBeam(d, u) {
 }
 // File > Model for...: the program the model is made for, changed later (nothing in the model is removed).
 function hmProgram() {
-  dialog("Model For", `<p class="kv" style="max-width:420px;margin-top:0">The menus, load case types and codes follow this program, and Save writes its file beside the .cpm. Nothing in the model is removed by a change.</p>${["etabs", "sap2000", "safe"].map(k => `<label style="display:block"><input type="radio" name="pP" value="${k}"${k === program ? " checked" : ""}>${progLabel(k)}</label>`).join("")}`,
-    [["OK", d => submit(d, "set_model_program", {program: q(d, "[name=pP]:checked").value}, j => hmSay(`The model is for ${j.result.program} now.` + (j.result.kept_but_not_used.length ? " Kept in the .cpm but not used there: " + j.result.kept_but_not_used.join("; ") + "." : ""))), true], ["Cancel"]], {width: 440});
+  dialog("Model For", `<p class="kv" style="max-width:420px;margin-top:0">The menus, load case types and codes follow this program, and Save writes its file beside the model's own file, which takes this program's extension (.cpme for ETABS, .cpms for SAP2000, .cpmf for SAFE). Nothing in the model is removed by a change.</p>${["etabs", "sap2000", "safe"].map(k => `<label style="display:block"><input type="radio" name="pP" value="${k}"${k === program ? " checked" : ""}>${progLabel(k)}</label>`).join("")}`,
+    [["OK", d => submit(d, "set_model_program", {program: q(d, "[name=pP]:checked").value}, j => hmSay(`The model is for ${j.result.program} now.` + (j.result.kept_but_not_used.length ? " Kept in the model's own file but not used there: " + j.result.kept_but_not_used.join("; ") + "." : ""))), true], ["Cancel"]], {width: 440});
 }
 // The load case types the model's program has (SAFE: static, modal and response spectrum).
 function caseTypesFor(types, now) {
@@ -10952,25 +10952,71 @@ async function hostPick(o) {
 let hostPicks = null;
 async function hostHas() { if (hostPicks === null) hostPicks = !!(await hostPick({kind: "probe"})); return hostPicks; }
 const pickParts = path => ({folder: path.replace(/[\\/][^\\/]*$/, ""), name: path.split(/[\\/]/).pop().replace(/\.[^.]*$/, "")});
-const modelFilter = "CSI ProMax and CSI text models (*.cpm;*.e2k;*.s2k;*.f2k)|*.cpm;*.e2k;*.s2k;*.f2k|CSI ProMax model (*.cpm)|*.cpm|ETABS text file (*.e2k)|*.e2k|SAP2000 text file (*.s2k)|*.s2k|SAFE text file (*.f2k)|*.f2k|All files (*.*)|*.*";
+// The model's own file has one extension per program (Ahmed 2026-11-27): .cpme for ETABS, .cpms for SAP2000 and
+// .cpmf for SAFE. The Open picker shows the window's program's files first (its model files and its own text files),
+// as each CSI program shows only its own; every CSI ProMax file, also the old .cpm, is the second choice.
+const progExt = {etabs: "cpme", sap2000: "cpms", safe: "cpmf"};
+const progText = {etabs: ["e2k", "$et"], sap2000: ["s2k", "$2k"], safe: ["f2k", "$fk"]};
+const extList = xs => xs.map(x => "*." + x).join(";");
+function modelFilter(prog) {
+  const k = progExt[prog] ? prog : "etabs", own = [progExt[k], ...progText[k]];
+  const all = [...Object.values(progExt), "cpm", ...Object.values(progText).flat()];
+  return `${progLabel(k)} models (${extList(own)})|${extList(own)}|All CSI ProMax files (${extList(all)})|${extList(all)}|All files (*.*)|*.*`;
+}
 const modelFolder = () => { const f = (hm.state && hm.state.file) || ""; return f ? f.replace(/[\\/][^\\/]*$/, "") : ""; };
 async function hmOpen() {
-  const p = await hostPick({kind: "open", title: "Open Model", filter: modelFilter, folder: modelFolder()});
-  if (p) { if (!p.cancelled) { const j = await hmRun("open_model_file", {path: p.path}); if (j.ok) hmSay("Opened " + p.path); } return; }
+  const p = await hostPick({kind: "open", title: "Open Model", filter: modelFilter(program), folder: modelFolder()});
+  if (p) { if (!p.cancelled) await hmOpenFile(p.path); return; }
   hmOpenTyped();
 }
+// Opens a file for the window's program. A file made for another program is not opened at once: the window asks
+// whether to convert it to its own program or to open it for the file's (Ahmed 2026-11-27), in a form of its own.
+// Gives back the answer, or the error, as hmRun does.
+async function hmOpenFile(path, d) {
+  const j = await hmRun("open_model_file", {path, for_program: program}, !!d);
+  if (!j.ok) { if (d) formError(d, j.error); return j; }
+  if (d) d.close();
+  const r = j.result || {};
+  if (!r.needs_choice) { hmSay("Opened " + path); return j; }
+  return new Promise(done => {
+    const go = convert => { hmRun("open_model_file", {path, for_program: program, convert}).then(k => { if (k.ok) hmSay(convert ? `Opened ${path}, converted from ${r.file_program} to ${r.window_program}.` : `Opened ${path} for ${r.file_program}.`); done(k); }); };
+    const f = dialog("Open Model", `<p class="kv" style="max-width:440px;margin-top:0"><b>${esc(path.split(/[\/]/).pop())}</b> is a ${esc(r.file_program)} model, and this window works in ${esc(r.window_program)}.</p>
+      <p class="kv" style="max-width:440px">Convert it to ${esc(r.window_program)}: the menus, forms and Save follow ${esc(r.window_program)}, and nothing in the model is removed. The file itself is not changed.</p>`,
+      [[`Convert to ${r.window_program}`, () => go(true)], [`Open for ${r.file_program}`, () => go(false)], ["Cancel", () => done({ok: false, cancelled: true})]], {width: 480});
+    f.dataset.otherProgram = r.file_program_key || "";
+  });
+}
+// The Engine started with no file asks first which program to work in (Ahmed 2026-11-27), as each CSI program is one
+// program: the choice sets the menus, forms and look, which files File > Open shows, and the extension Save writes.
+function hmChooseProgram() {
+  const d = dialog("CSI ProMax Engine", `<p class="kv" style="max-width:380px;margin-top:0">Which program will you work in?</p>
+    ${["etabs", "sap2000", "safe"].map((k, i) => `<label style="display:block;margin:6px 0"><input type="radio" name="sP" value="${k}"${i === 0 ? " checked" : ""}>${progLabel(k)}</label>`).join("")}
+    <p class="kv" style="max-width:380px">File > Model For changes it later; nothing in the model is removed by a change.</p>`,
+    [["OK", async f => {
+      const k = q(f, "[name=sP]:checked").value;
+      const j = await hmPost({start_program: k}).catch(e => ({ok: false, error: e.message}));
+      if ("rev" in j) hm.state = j;
+      if (!j.ok) return hmSay(j.error || "That did not work.", true);
+      hm.defs = null; if (window.cpmPull) await window.cpmPull(); await hmDefs();
+      $("similarWrap").hidden = program === "sap2000";
+      hmSay(`Working in ${progLabel(k)}.`);
+    }]], {width: 400});
+  d.dataset.chooseProgram = "1";
+  return d;
+}
 function hmOpenTyped() {
-  dialog("Open Model", `<div class="g2"><span>File</span><input id="oP" placeholder="C:\\Users\\...\\Models\\Tower.e2k" style="min-width:380px"></div><p class="kv" style="max-width:480px">Type or paste the full path of an ETABS (.e2k), SAP2000 (.s2k) or SAFE (.f2k) text file, or a Modeler file (.cpm). A browser can't hand over a file's place on the PC, so the path is typed here; the Modeler reads it.</p>`,
-    [["Open", d => submit(d, "open_model_file", {path: q(d, "#oP").value.trim().replace(/^"|"$/g, "")}, () => hmSay("Opened.")), true], ["Cancel"]], {width: 560});
+  dialog("Open Model", `<div class="g2"><span>File</span><input id="oP" placeholder="C:\\Users\\...\\Models\\Tower.e2k" style="min-width:380px"></div><p class="kv" style="max-width:480px">Type or paste the full path of an ETABS (.e2k), SAP2000 (.s2k) or SAFE (.f2k) text file, or a Modeler file (.cpme, .cpms, .cpmf, or an old .cpm). A browser can't hand over a file's place on the PC, so the path is typed here; the Modeler reads it.</p>`,
+    [["Open", d => { formError(d, ""); hmOpenFile(q(d, "#oP").value.trim().replace(/^"|"$/g, ""), d); return false; }, true], ["Cancel"]], {width: 560});
 }
 async function hmSave(as) {
   const file = (hm.state && hm.state.file) || "";
   if (!as && file) return hmRun("save_model", {}).then(j => j.ok && hmSay("Saved " + file));
-  const ext = {etabs: "e2k", sap2000: "s2k", safe: "f2k"}[program] || "e2k";
+  // The program's own model extension (.cpme, .cpms, .cpmf); the program's text file is written beside it either way.
+  const k = progExt[program] ? program : "etabs", ext = progExt[k], text = progText[k][0];
   const p = await hostPick({kind: "save", title: "Save Model As", ext, folder: modelFolder(), name: file ? pickParts(file).name : ((P && P.manifest && P.manifest.model) || "Model"),
-    filter: {etabs: "ETABS text file (*.e2k)|*.e2k", sap2000: "SAP2000 text file (*.s2k)|*.s2k", safe: "SAFE text file (*.f2k)|*.f2k"}[program] || "ETABS text file (*.e2k)|*.e2k"});
+    filter: `${progLabel(k)} model (*.${ext})|*.${ext}|${progLabel(k)} text file (*.${text})|*.${text}`});
   if (p) { if (!p.cancelled) { const x = pickParts(p.path); const j = await hmRun("save_model_as", {name: x.name, folder: x.folder}); if (j.ok) hmSay("Saved " + ((j.result && (j.result.path || j.result.file)) || p.path)); } return; }
-  dialog("Save Model As", `<div class="g2"><span>File name</span><input id="sv" value="${esc(file ? file.split(/[\\/]/).pop().replace(/\.e2k$/i, "") : ((P && P.manifest && P.manifest.model) || "Model"))}"><span>Folder</span><input id="sf" placeholder="Documents\\CSI ProMax\\Models" value="${esc(file ? file.replace(/[\\/][^\\/]*$/, "") : "")}"></div><p class="kv">${{etabs: "Saves an ETABS text file (.e2k, for File > Import in ETABS)", sap2000: "Saves a SAP2000 text file (.s2k, for File > Import in SAP2000) and an .e2k", safe: "Saves a SAFE text file (.f2k of the floor with the most slab, for File > Import in SAFE) and an .e2k"}[program]} with the Modeler's .cpm beside it. An empty folder means Documents\\CSI ProMax\\Models.</p>`,
+  dialog("Save Model As", `<div class="g2"><span>File name</span><input id="sv" value="${esc(file ? file.split(/[\\/]/).pop().replace(/\.e2k$/i, "") : ((P && P.manifest && P.manifest.model) || "Model"))}"><span>Folder</span><input id="sf" placeholder="Documents\\CSI ProMax\\Models" value="${esc(file ? file.replace(/[\\/][^\\/]*$/, "") : "")}"></div><p class="kv">${{etabs: "Saves an ETABS text file (.e2k, for File > Import in ETABS)", sap2000: "Saves a SAP2000 text file (.s2k, for File > Import in SAP2000) and an .e2k", safe: "Saves a SAFE text file (.f2k of the floor with the most slab, for File > Import in SAFE) and an .e2k"}[program]} with the model's own file beside it (.${progExt[program] || "cpme"}). An empty folder means Documents\\CSI ProMax\\Models.</p>`,
     [["Save", d => submit(d, "save_model_as", {name: q(d, "#sv").value.trim(), folder: q(d, "#sf").value.trim() || undefined}, j => hmSay("Saved " + ((j.result && (j.result.path || j.result.file)) || ""))), true], ["Cancel"]], {width: 500});
 }
 async function hmExport(kind) {
@@ -11288,7 +11334,7 @@ function modelerStart() {
     else if (ctrl && k.toLowerCase() === "o") { e.preventDefault(); e.stopImmediatePropagation(); modelAct("open"); }
     else if (k === "Delete" && sel.size) { e.preventDefault(); e.stopImmediatePropagation(); modelAct("delete"); }
   }, true);
-  hmDefs();
+  hmDefs().then(() => { if (hm.state && hm.state.choose_program) hmChooseProgram(); });
 }
 let started = false;
 function start() {

@@ -102,7 +102,7 @@ public static class ModelerCheck
         "m:open": async () => {
           const saved = await hmRun("save_model_as", {name: "CPM open check", folder: FOLDER}, true);
           if (!saved.ok) return {fail: "the check could not save a model to open: " + saved.error};
-          const file = (saved.result.modeler_file || "").endsWith(".cpm") ? saved.result.modeler_file : saved.result.e2k || saved.result.file;
+          const file = /\.cpm[esf]?$/i.test(saved.result.modeler_file || "") ? saved.result.modeler_file : saved.result.e2k || saved.result.file;
           const count = frames.length;
           await act("m:open"); await wait(600);
           const box = document.querySelector(".dlg #oP");
@@ -457,6 +457,37 @@ public static class ModelerCheck
           await hmRun("undo"); await wait(800);
           const back = ((await hmDefs()).combinations || []).some(c => c.name === "CPM-CHKTXT");
           return back ? {fail: "undo did not take it out"} : {ok: "taken, then undone"};
+        });
+        // The model's own file has one extension per program, and a file of another program asks before it is
+        // converted, in the page's own form (Ahmed 2026-11-27). The Engine's first question is the program to work in.
+        await step("File > Open: each program saves its own extension, and a SAP2000 file in a window of the first program asks before converting", async () => {
+          const exts = {};
+          for (const k of ["etabs", "sap2000", "safe"]) {
+            const set = await hmRun("set_model_program", {program: k}, true);
+            if (!set.ok) return {fail: "set_model_program " + k + ": " + set.error};
+            const saved = await hmRun("save_model_as", {name: "CPM program check " + k, folder: FOLDER}, true);
+            if (!saved.ok) return {fail: "the check could not save the " + k + " model: " + saved.error};
+            exts[k] = saved.result.modeler_file || "";
+            if (!exts[k].toLowerCase().endsWith("." + progExt[k])) return {fail: `the ${k} model's own file is ${exts[k]}, not a .${progExt[k]}`};
+          }
+          await hmRun("set_model_program", {program: "etabs"}, true);
+          for (let i = 0; i < 30 && program !== "etabs"; i++) { if (window.cpmPull) await window.cpmPull(); await wait(200); }
+          const f = modelFilter("etabs").split("|");
+          if (f[1] !== "*.cpme;*.e2k;*.$et" || !/^All CSI ProMax files/.test(f[2] || "") || !/\*\.cpm;/.test(f[3] || "")) return {fail: progLabel("etabs") + "'s Open picker shows " + f.slice(0, 4).join(" | ")};
+          const count = frames.length;
+          const opening = hmOpenFile(exts.sap2000); await wait(1200);
+          const ask = [...document.querySelectorAll(".dlg")].find(d => d.dataset.otherProgram === "sap2000");
+          if (!ask) return {fail: "no form asked before the SAP2000 file was opened in the window: " + document.getElementById("hint").textContent};
+          if (program !== "etabs") return {fail: "the model was replaced before the question was answered"};
+          formOk("Convert to " + progLabel("etabs")); await opening; await wait(600);
+          for (let i = 0; i < 30 && hm.state && !/\.e2k$/i.test(hm.state.file || ""); i++) { if (window.cpmPull) await window.cpmPull(); await wait(150); }
+          if (program !== "etabs") return {fail: "after Convert the page shows " + program};
+          if (frames.length !== count) return {fail: `the converted model has ${frames.length} frames, not ${count}`};
+          const chooser = hmChooseProgram(); await wait(200);
+          const picks = [...chooser.querySelectorAll("[name=sP]")].map(x => x.value).join(",");
+          chooser.close();
+          if (picks !== "etabs,sap2000,safe") return {fail: "the Engine's first question offers " + picks};
+          return {ok: "saved " + Object.values(exts).map(x => x.split(/[\\/]/).pop()).join(", ") + "; the SAP2000 file asked first, then opened converted; the start asks for one of the three programs"};
         });
         // A beam and a floor selected before each item, so the items that act on a selection are on (Delete empties it).
         const pick = () => { try { sel.clear(); const b = frames.findIndex(f => f.kind === "beam"); if (b >= 0) sel.add(b + 1); if (areas.length) sel.add(frames.length + 1); selChanged(); } catch (e) { } };

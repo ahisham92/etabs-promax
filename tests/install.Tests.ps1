@@ -172,6 +172,34 @@ Compress-Archive -Path (Join-Path $package.FullName 'INSTALL.txt') -DestinationP
 $output = (& $script -Zip $wrong -Folder (Join-Path $root 'nowhere') -SettingsRoot $settings -NoRuntime *>&1 | Out-String)
 Check ($output -match 'not installed' -and -not (Test-Path -LiteralPath (Join-Path $root 'nowhere'))) 'a zip that is not CSI ProMax is refused'
 
+# The model file types, one per program and the old .cpm, for this Windows user only. The registry is Windows', so on
+# another system only the list is checked; on Windows they are written under a key of the test's own.
+$installText = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '..' 'install.ps1')
+foreach ($ext in '.cpme', '.cpms', '.cpmf', '.cpm') { Check ($installText -match [regex]::Escape("Ext = '$ext'")) "install.ps1 registers $ext" }
+$typesPart = $installText.Substring($installText.IndexOf('# 3c.'), $installText.IndexOf('# 4.') - $installText.IndexOf('# 3c.'))
+Check ($typesPart -match [regex]::Escape('HKCU:\Software\Classes') -and $typesPart -notmatch 'HKLM:|HKCR:') 'the file types are the current user''s only'
+if ($env:OS -eq 'Windows_NT') {
+    $classes = 'HKCU:\Software\CsiProMaxInstallTest-' + [Guid]::NewGuid().ToString('N').Substring(0, 8) + '\Classes'
+    try {
+        # Another program's .cpm is left to it.
+        New-Item -Path (Join-Path $classes '.cpm') -Force | Out-Null
+        Set-ItemProperty -LiteralPath (Join-Path $classes '.cpm') -Name '(default)' -Value 'Someone.Else'
+        $output = (& $script -Zip $zip2 -Folder $folder -SettingsRoot $settings -AiFile $aiFile -NoRuntime -NoPlugins -ClassesRoot $classes *>&1 | Out-String)
+        function Default([string]$key) { [string](Get-ItemProperty -LiteralPath (Join-Path $classes $key) -Name '(default)' -ErrorAction SilentlyContinue).'(default)' }
+        Check ((Default '.cpme') -eq 'CsiProMax.Model.Etabs' -and (Default '.cpms') -eq 'CsiProMax.Model.Sap2000' -and (Default '.cpmf') -eq 'CsiProMax.Model.Safe') 'each program''s model file type is registered'
+        Check ((Default 'CsiProMax.Model.Sap2000') -eq 'CSI ProMax model for SAP2000' -and (Default 'CsiProMax.Model.Safe\DefaultIcon') -match 'csi-promax\.ico') 'with its name and CSI ProMax''s icon'
+        $open = Default 'CsiProMax.Model.Etabs\shell\open\command'
+        Check ($open -match [regex]::Escape((Join-Path $folder 'CsiProMax.dll')) -and $open.EndsWith('--modeler "%1"')) 'a double-click opens the file in the Engine of this folder'
+        Check ((Default '.cpm') -eq 'Someone.Else' -and (Default 'CsiProMax.Model\shell\open\command') -ne '' -and $output -match '\.cpm already open in another program') 'an old .cpm another program opens is left to it, and said'
+        Set-ItemProperty -LiteralPath (Join-Path $classes '.cpm') -Name '(default)' -Value ''
+        & $script -Zip $zip2 -Folder $folder -SettingsRoot $settings -AiFile $aiFile -NoRuntime -NoPlugins -ClassesRoot $classes *> $null
+        Check ((Default '.cpm') -eq 'CsiProMax.Model' -and (Default '.cpme') -eq 'CsiProMax.Model.Etabs') 'the old .cpm is registered when free, and a second run changes nothing else'
+        & $script -Zip $zip2 -Folder $folder -SettingsRoot $settings -AiFile $aiFile -NoRuntime -NoPlugins -ClassesRoot (Join-Path $classes 'preview') -Preview *> $null
+        Check (-not (Test-Path -LiteralPath (Join-Path $classes 'preview'))) '-Preview registers nothing'
+    }
+    finally { Remove-Item -LiteralPath (Split-Path -Parent $classes) -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
 Check (-not ((Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '..' 'install.ps1')) -match '[^\x09\x0A\x0D\x20-\x7E]')) 'install.ps1 is plain ASCII'
 Check (@(Get-ChildItem -LiteralPath ([IO.Path]::GetTempPath()) -Directory -Filter 'CsiProMax-install-*').Count -eq 0) 'the working folder is removed'
 

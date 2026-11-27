@@ -264,6 +264,7 @@ public static class ModelerFieldSteps
             var file = a["file"]!.GetValue<string>();
             FieldContext.Expect(File.Exists(file) && new FileInfo(file).Length > 1000, $"the file {file} was not written");
             FieldContext.Expect(File.Exists(a["modeler_file"]!.GetValue<string>()), "the Modeler's own file was not written beside it");
+            FieldContext.Expect(a["modeler_file"]!.GetValue<string>().EndsWith(CsiProMax.Model.ModelFile.Etabs, StringComparison.OrdinalIgnoreCase), $"an ETABS model's own file is {a["modeler_file"]}, not a .cpme"); // ETABS itself
             FieldContext.Expect(Int(a["errors"]) == 0, "the saved model has errors: " + a["findings"]!.ToJsonString());
         });
         if (saved?["file"]?.GetValue<string>() is { } e2k)
@@ -293,7 +294,7 @@ public static class ModelerFieldSteps
         });
         if (ctx.Files.TryGetValue(CsiProgram.Etabs.Key, out var written))
         {
-            ctx.Tool("open_model_file", $$"""{"path":{{Q(Path.ChangeExtension(written, ".cpm"))}}}""", a => Same(ctx, a, "the Modeler's own file"), "tool open_model_file reads the .cpm back");
+            ctx.Tool("open_model_file", $$"""{"path":{{Q(CsiProMax.Model.ModelFile.Beside(written) ?? CsiProMax.Model.ModelFile.PathFor(written, "etabs"))}}}""", a => Same(ctx, a, "the Modeler's own file"), "tool open_model_file reads the .cpme back");
             ctx.Tool("open_model_file", $$"""{"path":{{Q(written)}}}""", a =>
             {
                 Same(ctx, a, "the .e2k");
@@ -310,6 +311,7 @@ public static class ModelerFieldSteps
                     Same(ctx, a, "the " + ext);
                     FieldContext.Expect(a["not_read"] is null, $"the {ext} the Modeler wrote should open with nothing left out: " + a["not_read"]?.ToJsonString());
                 }, $"tool open_model_file reads the {ext} back, the whole model");
+        FileTypes(ctx, modeler);
         if (ctx.Files.TryGetValue(CsiProgram.Etabs.Key, out var e2kAgain))
             ctx.Tool("open_model_file", $$"""{"path":{{Q(e2kAgain)}}}""", a => Same(ctx, a, "the .e2k"), "tool open_model_file opens the .e2k again for the steps after");
         ctx.Refused("open_model_file", $$"""{"path":{{Q(Path.Combine(ctx.Folder, "no such file.e2k"))}}}""", "no file", "tool open_model_file says no to a file that is not there");
@@ -822,6 +824,81 @@ public static class ModelerFieldSteps
     private static void Same(FieldContext ctx, JsonNode answer, string what) =>
         FieldContext.Expect(Int(answer["stories"]) == ctx.Written.Stories && Int(answer["frames"]) == ctx.Written.Frames && Int(answer["areas"]) == ctx.Written.Areas,
             $"{what} was written with {ctx.Written.Stories} stories, {ctx.Written.Frames} frames and {ctx.Written.Areas} areas, and read back with {answer["stories"]}, {answer["frames"]} and {answer["areas"]}");
+
+    /// <summary>
+    /// The Modeler's own file has one extension per program (Ahmed 2026-11-27): each program's model saves its own
+    /// (.cpme, .cpms, .cpmf), a file saved before that (.cpm) still opens with its program and the next save writes the
+    /// new extension beside it without removing the old file, and a file of another program than the window's is
+    /// recognised before anything is replaced. Each save is under a name of its own, so the scratch model's files stay.
+    /// </summary>
+    private static void FileTypes(FieldContext ctx, OfflineEtabs modeler)
+    {
+        var folder = Q(ctx.Folder);
+        var was = modeler.Model.Target;
+        var own = new Dictionary<string, string>();
+        foreach (var key in CsiProMax.Model.StructuralModel.Targets)
+        {
+            var ext = CsiProMax.Model.ModelFile.ExtensionFor(key);
+            ctx.Tool("set_model_program", $$"""{"program":{{Q(key)}}}""", step: $"tool set_model_program makes the model for {CsiProMax.Model.StructuralModel.TargetName(key)}");
+            ctx.Tool("save_model_as", $$"""{"name":{{Q(ModelName + " " + key)}},"folder":{{folder}}}""", a =>
+            {
+                var file = a["modeler_file"]!.GetValue<string>();
+                FieldContext.Expect(file.EndsWith(ext, StringComparison.OrdinalIgnoreCase) && File.Exists(file), $"the {CsiProMax.Model.StructuralModel.TargetName(key)} model's own file is {file}, not a {ext} that was written");
+                foreach (var other in CsiProMax.Model.ModelFile.Extensions.Where(x => x != ext))
+                    FieldContext.Expect(!File.Exists(Path.ChangeExtension(file, other)), $"a {other} was written beside the {ext} too");
+                own[key] = file;
+            }, $"tool save_model_as writes a {CsiProMax.Model.StructuralModel.TargetName(key)} model as {ext}");
+            if (own.TryGetValue(key, out var saved))
+                ctx.Tool("open_model_file", $$"""{"path":{{Q(saved)}}}""", a =>
+                {
+                    Same(ctx, a, "the " + ext);
+                    FieldContext.Expect(modeler.Model.Target == key, $"the {ext} opened as a model for {modeler.Model.Target}");
+                }, $"tool open_model_file opens the {ext} for {CsiProMax.Model.StructuralModel.TargetName(key)}");
+        }
+
+        // An old .cpm, of SAP2000, written as the versions before wrote it.
+        var old = Path.Combine(ctx.Folder, ModelName + " old" + CsiProMax.Model.ModelFile.Legacy);
+        ctx.Step("write a Modeler file of the old kind (.cpm) for SAP2000", () =>
+        {
+            var m = CsiProMax.Model.ModelFile.FromJson(CsiProMax.Model.ModelFile.ToJson(modeler.Model));
+            m.Target = "sap2000";
+            CsiProMax.Model.ModelFile.Save(m, old);
+        });
+        if (File.Exists(old))
+        {
+            ctx.Tool("open_model_file", $$"""{"path":{{Q(old)}}}""", a =>
+            {
+                Same(ctx, a, "the old .cpm");
+                FieldContext.Expect(modeler.Model.Target == "sap2000", $"the old .cpm of a SAP2000 model opened for {modeler.Model.Target}");
+            }, "tool open_model_file opens an old .cpm, for the program it holds");
+            ctx.Tool("save_model", "{}", _ =>
+            {
+                var now = Path.ChangeExtension(old, CsiProMax.Model.ModelFile.Sap2000);
+                FieldContext.Expect(File.Exists(now), "saving the model opened from the old .cpm did not write a .cpms beside it");
+                FieldContext.Expect(File.Exists(old), "the old .cpm was removed by the save");
+            }, "tool save_model writes the new .cpms beside the old .cpm, and keeps the old file");
+        }
+
+        // A SAP2000 file in a window that works in ETABS: recognised, nothing replaced until the person chooses.
+        if (own.TryGetValue("sap2000", out var sap))
+        {
+            ctx.Tool("open_model_file", $$"""{"path":{{Q(own["etabs"])}}}""", step: "tool open_model_file opens the ETABS model again"); // ETABS itself
+            var revision = modeler.Revision;
+            ctx.Tool("open_model_file", $$"""{"path":{{Q(sap)}},"for_program":"etabs"}""", a =>
+            {
+                FieldContext.Expect(a["needs_choice"]?.GetValue<bool>() == true && a["file_program"]?.GetValue<string>() == "SAP2000", "a SAP2000 file was not recognised in an ETABS window: " + a.ToJsonString()); // ETABS itself
+                FieldContext.Expect(modeler.Revision == revision && modeler.Model.Target == "etabs", "the model was replaced before the person chose");
+            }, "tool open_model_file recognises a SAP2000 file in an ETABS window and asks first"); // ETABS itself
+            ctx.Tool("open_model_file", $$"""{"path":{{Q(sap)}},"for_program":"etabs","convert":true}""", a =>
+            {
+                Same(ctx, a, "the .cpms");
+                FieldContext.Expect(modeler.Model.Target == "etabs" && a["converted_from"]?.GetValue<string>() == "SAP2000", "the SAP2000 file was not converted to an ETABS model: " + a.ToJsonString()); // ETABS itself
+            }, "tool open_model_file converts it to ETABS when the person says so"); // ETABS itself
+            ctx.Tool("open_model_file", $$"""{"path":{{Q(sap)}},"for_program":"etabs","convert":false}""", a =>
+                FieldContext.Expect(modeler.Model.Target == "sap2000", "the SAP2000 file did not keep its program"), "tool open_model_file keeps the file's own program when the person says so");
+        }
+        ctx.Tool("set_model_program", $$"""{"program":{{Q(was.Length > 0 ? was : "etabs")}}}""", step: "tool set_model_program puts the model's program back");
+    }
 
     /// <summary>The value of a load as the Modeler keeps it (the number after FVAL); 0 when it has none.</summary>
     private static double Fval(CsiProMax.Model.ObjectLoad load) =>

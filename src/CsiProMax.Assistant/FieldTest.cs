@@ -1113,7 +1113,7 @@ public static class FieldTest
     /// <summary>File kinds the zip takes from the test's folder: what was written and read, never the programs' model files.</summary>
     private static readonly HashSet<string> Small = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".md", ".txt", ".log", ".out", ".json", ".csv", ".e2k", ".$et", ".s2k", ".$2k", ".f2k", ".$fk", ".cpm", ".cpmx",
+        ".md", ".txt", ".log", ".out", ".json", ".csv", ".e2k", ".$et", ".s2k", ".$2k", ".f2k", ".$fk", ".cpme", ".cpms", ".cpmf", ".cpm", ".cpmx",
         ".xlsx", ".docx", ".pptx", ".pdf", ".dxf", ".dwg", ".png", ".jpg",
         // The scratch models themselves and what the programs wrote beside them (Ahmed, 2026-11-26: one run must bring
         // everything needed, with no second ask): only the test's own models are in the work folder.

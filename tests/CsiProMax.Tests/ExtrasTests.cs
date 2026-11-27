@@ -49,8 +49,8 @@ static class ExtrasTests
             {
                 var saved = Run(link, "save_model_as", new { name = "P", folder });
                 Check(saved["program"]!.GetValue<string>() == "SAP2000" && File.Exists(Path.Combine(folder, "P.s2k")) && saved["file"]!.GetValue<string>().EndsWith(".s2k"), "saving writes the .s2k: " + saved.ToJsonString());
-                Check(File.Exists(Path.Combine(folder, "P.cpm")), "and the .cpm");
-                Check(OfflineEtabs.Load(Path.Combine(folder, "P.cpm")).Target == "sap2000", "the .cpm opens as a SAP2000 model again");
+                Check(File.Exists(Path.Combine(folder, "P.cpms")), "and the .cpms (a SAP2000 model's own extension)");
+                Check(OfflineEtabs.Load(Path.Combine(folder, "P.cpms")).Target == "sap2000", "the .cpms opens as a SAP2000 model again");
                 var changed = Run(link, "set_model_program", new { program = "safe" });
                 Check(changed["program"]!.GetValue<string>() == "SAFE" && changed["was"]!.GetValue<string>() == "SAP2000" && link.Model.Target == "safe", "changed to SAFE");
                 Run(link, "save_model_as", new { name = "P2", folder });

@@ -53,6 +53,8 @@ jobs:
       - run: pwsh -NoProfile -File tests/keep-plugins.Tests.ps1
       # The check goes into the package (the installer and the field test run it) and beside it as a file of its own.
       - run: cp check.ps1 keep-plugins.ps1 package/dist/
+      # The icon of the model file types install.ps1 registers (.cpme, .cpms, .cpmf, .cpm).
+      - run: cp assets/logo/csi-promax.ico package/dist/
       - run: cp docs/INSTALL.txt package/ && cd package && zip -q -r "../CsiProMax-$NAME.zip" .
       # What an update downloads instead of the whole package: the file list, and a zip of only the files that differ
       # from the latest release (scripts/changed-files.py). Its name must not start with CsiProMax-: older updaters take
