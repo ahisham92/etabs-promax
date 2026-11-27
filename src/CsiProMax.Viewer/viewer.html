@@ -5680,6 +5680,13 @@ function wireCaption(k) {
     const x0 = e.clientX, y0 = e.clientY;
     let moving = false, offX = 0, offY = 0;
     const move = m => {
+      // The button was let go where the page didn't hear it (outside the window): the drag ends there, and the panel
+      // stays where it is instead of following the pointer about.
+      if (!(m.buttons & 1)) {
+        removeEventListener("pointermove", move); removeEventListener("pointerup", up);
+        if (moving) { document.body.classList.remove("dragging"); showHint(k, null); dockSave(); }
+        return;
+      }
       if (!moving) {
         if (Math.hypot(m.clientX - x0, m.clientY - y0) < 6) return;
         moving = true; document.body.classList.add("dragging");
@@ -6053,10 +6060,12 @@ async function hmProgForm(i, list) {
   if (!j.ok) return hmSay(j.error, true);
   const items = j.result.items, dof = /Degrees of Freedom/i.test(f.table), colors = /Colors/i.test(f.table), was = Object.fromEntries(items.map(it => [it.field, it.value]));
   const yes = v => !/^(no|false|0)$/i.test(v || "yes");
+  // A colour's swatch fills its 40-pixel column: on its own a colour box is 50 pixels wide, which pushed the list
+  // 10 pixels past its edge and gave the colour forms a sideways scroll bar however wide the window was.
   const body = dof
     ? `<fieldset><legend>Available DOFs</legend><div class="g3">${items.map(it => `<label class="kv"><input type="checkbox" data-d="${esc(it.field)}" ${yes(it.value) ? "checked" : ""}> ${esc(it.name)}</label>`).join("")}</div></fieldset>
        <fieldset><legend>Fast DOFs</legend>${[["Space Frame", "UX UY UZ RX RY RZ"], ["Plane Frame", "UX UZ RY"], ["Plane Grid", "UZ RX RY"], ["Space Truss", "UX UY UZ"]].map(([n, on]) => `<button type="button" data-fast="${on}">${n}</button>`).join(" ")}</fieldset>`
-    : `<div class="gu" style="grid-template-columns:auto 220px${colors ? " 40px" : ""};max-height:440px;overflow:auto">${items.map(it => `<label class="kv">${esc(it.name)}</label><input data-f="${esc(it.field)}" value="${esc(it.value)}" placeholder="Program default">${colors ? (hmIsColor(it.field) ? `<input type="color" data-c="${esc(it.field)}" value="${hmColorHex(it.value)}" title="Pick the colour">` : "<span></span>") : ""}`).join("")}</div>
+    : `<div class="gu" style="grid-template-columns:auto 220px${colors ? " 40px" : ""};max-height:440px;overflow:auto">${items.map(it => `<label class="kv">${esc(it.name)}</label><input data-f="${esc(it.field)}" value="${esc(it.value)}" placeholder="Program default">${colors ? (hmIsColor(it.field) ? `<input type="color" data-c="${esc(it.field)}" value="${hmColorHex(it.value)}" title="Pick the colour" style="width:100%;min-width:0;padding:0">` : "<span></span>") : ""}`).join("")}</div>
        <p class="kv" style="margin:6px 0 0;max-width:460px">An item left blank takes ${esc(progLabel(program))}'s own default.</p>`;
   const word = f.item.replace(/\.\.\.$/, "");
   const title = f.group === "Preferences" ? word + " Preferences" : f.group === "Colors" ? `Assign ${word} Colors` : word.replace(/^Set /, "").replace(/^Advanced /, "");
