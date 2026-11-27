@@ -130,6 +130,43 @@ public static class ModelerCheck
           if (scope !== 2) return {fail: "it has no choice of all or selected objects"};
           return {ok: `Run Options: Analyze only / Analyze and Design / Design only, ${kinds} designs, all or selected; closed without running`};
         },
+        // The program's File menu (etf*): Close asks to save a changed model (Cancel keeps it); Exit asks the same and is not
+        // let close the window; Print Graphics opens the program's window, and its Print prints the page with the drawing.
+        "m:etf:close": async () => {
+          await hmRun("define_load_pattern", {name: "CPM-CHKCLOSE", type: "Other", self_weight: 0}, true); await wait(300);
+          const count = frames.length; act("m:etf:close"); await wait(500);
+          const box = [...document.querySelectorAll(".dlg.etfAsk")].pop(), words = box ? box.textContent : "";
+          const buttons = box ? [...box.querySelectorAll(".df button")].map(b => b.textContent).join(", ") : "";
+          if (box) formOk("Cancel"); await wait(300); await hmRun("undo"); await wait(300);
+          if (!box) return {fail: "Close did not ask to save the changed model"};
+          if (!/has changed\./.test(words) || !/Save current changes\?/.test(words) || buttons !== "Yes, No, Cancel") return {fail: "the box reads " + words.slice(0, 120) + " with " + buttons};
+          return frames.length === count ? {ok: "asks '<model> has changed. Save current changes?' Yes/No/Cancel; Cancel keeps the model"} : {fail: "Cancel did not keep the model"};
+        },
+        "m:etf:exit": async () => {
+          const real = window.close; let closed = 0; window.close = () => { closed++; };
+          try {
+            await hmRun("define_load_pattern", {name: "CPM-CHKEXIT", type: "Other", self_weight: 0}, true); await wait(300);
+            act("m:etf:exit"); await wait(500);
+            const box = [...document.querySelectorAll(".dlg.etfAsk")].pop();
+            if (box) formOk("Cancel"); await wait(300); await hmRun("undo"); await wait(300);
+            if (!box) return {fail: "Exit did not ask to save the changed model"};
+            return closed ? {fail: "Cancel still closed the window"} : {ok: "asks to save first; Cancel keeps the window open"};
+          } finally { window.close = real; }
+        },
+        "m:etf:print": async () => {
+          const real = window.print; let asked = 0;
+          window.print = () => { asked++; };
+          try {
+            await act("m:etf:print"); await wait(400);
+            const d = [...document.querySelectorAll(".dlg")].pop();
+            if (!d || !d.querySelector("#pgView .etfPg")) return {fail: "Print Graphics opened no page"};
+            const tips = ["#pgPrint", "#pgSetup", "#pgPage", "#pgImg"].map(x => (d.querySelector(x) || {}).title).join(", ");
+            if (tips !== "Print, Printer Setup, Page Setup, Add Image") return {fail: "its toolbar is " + tips};
+            if (!d.querySelector("#pgView img")) return {fail: "the page has no drawing of the active window"};
+            d.querySelector("#pgPrint").click(); await wait(200);
+            return asked === 1 ? {ok: "the program's Print Graphics window with the page; Print asked for the printer once"} : {fail: `Print asked for the printer ${asked} times`};
+          } finally { window.print = real; closeDialogs(); }
+        },
         "m:open": async () => {
           const saved = await hmRun("save_model_as", {name: "CPM open check", folder: FOLDER}, true);
           if (!saved.ok) return {fail: "the check could not save a model to open: " + saved.error};
@@ -739,7 +776,7 @@ public static class ModelerCheck
             pick();
             if (it.act === "m:redo" && offNow(it.act)) { await hmRun("define_load_pattern", {name: "CPM-CHKREDO", type: "Other", self_weight: 0}, true); await hmRun("undo"); await wait(400); }
             // Items the program itself greys in this state (SAP2000 26.3 pictures: Assign > Frame > Path... with no path defined, Update All Generated Hinge Properties with no generated hinges, Paste Assigns before Copy Assigns; the 23.2 Assign menu greys its Paste Assigns items the same way).
-            if (offNow(it.act) && ["m:sapa:fPath", "m:sapa:updateHinges", "m:sapa:paste", "m:etn:geometry", "m:etn:messages", "m:etn:log", "m:eto:archPlan", "m:etc:start", "m:etc:interactive", "m:etc:info", "m:etc:verify", "m:etc:resetOw", "m:etc:delete", "m:eta:pasteJ", "m:eta:pasteF", "m:eta:pasteA", "m:eta:pasteL"].includes(it.act)) return {ok: "greyed out, as the program greys it"};
+            if (offNow(it.act) && ["m:sapa:fPath", "m:sapa:updateHinges", "m:sapa:paste", "m:etn:geometry", "m:etn:messages", "m:etn:log", "m:eto:archPlan", "m:etc:start", "m:etc:interactive", "m:etc:info", "m:etc:verify", "m:etc:resetOw", "m:etc:delete", "m:eta:pasteJ", "m:eta:pasteF", "m:eta:pasteA", "m:eta:pasteL", "m:etf:p3dTxt", "m:etf:p3dStr"].includes(it.act)) return {ok: "greyed out, as the program greys it"};
             if (offNow(it.act) && it.act !== "eng:clear") return {fail: "greyed out, although the check selected a beam and a floor for it first"};
             if (OTHER_WAY[it.act]) return await OTHER_WAY[it.act](it);
             const before = dialogsOpen();

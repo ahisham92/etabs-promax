@@ -239,6 +239,7 @@ public static class ModelerFieldSteps
         Editing(ctx, modeler);
         DefineItems(ctx, modeler);
         Tables(ctx, modeler);
+        FileExports(ctx, modeler);
         ModelerCheck.FieldSteps(ctx);
         Lateral(ctx, modeler);
         Analysis(ctx, modeler);
@@ -838,6 +839,29 @@ public static class ModelerFieldSteps
         ctx.Tool("edit_model_text", """{"section":"LOAD COMBINATIONS","text":""" + Q(text) + "}", _ =>
             FieldContext.Expect(modeler.Combos().Contains("CPM-TXT"), "the combination written as text is not in the model"), "tool edit_model_text, a combination written by hand");
         ctx.Refused("edit_model_text", """{"section":"LINE CONNECTIVITIES","text":"  LINE \"B1\" BEAM \"no such point\""}""", "Nothing was changed", "tool edit_model_text says no to text that breaks the model");
+    }
+
+    /// <summary>The program's File > Export items: the .e2k in the Consistent Units form's units, the database tables as
+    /// text and XML, and a geometry file the page made; each a copy, the open model's file and units untouched.</summary>
+    private static void FileExports(FieldContext ctx, OfflineEtabs modeler)
+    {
+        var path = modeler.Path; var units = modeler.Model.Units.Length;
+        var e2k = Path.Combine(ctx.Folder, "CPM export check.e2k");
+        ctx.Tool("export_e2k", $$"""{"path":{{Q(e2k)}},"length":"mm","force":"N","temperature":"C"}""", a =>
+        {
+            FieldContext.Expect(File.Exists(e2k) && File.ReadLines(e2k).Any(l => l.Contains("\"mm\"", StringComparison.OrdinalIgnoreCase) && l.TrimStart().StartsWith("UNITS", StringComparison.OrdinalIgnoreCase)), "the .e2k was not written in N, mm: " + a.ToJsonString());
+            FieldContext.Expect(modeler.Path == path && modeler.Model.Units.Length == units, "the export changed the open model's file or units");
+        }, "tool export_e2k writes the .e2k in the units asked, the model unchanged");
+        var txt = Path.Combine(ctx.Folder, "CPM export check tables.txt");
+        ctx.Tool("export_tables_file", $$"""{"path":{{Q(txt)}},"format":"text"}""", a =>
+            FieldContext.Expect(File.Exists(txt) && CsiProMax.CsiTables.CsiTableText.Parse(File.ReadAllText(txt)).Count == a["tables"]!.AsArray().Count, "the text file does not hold every table: " + a.ToJsonString()), "tool export_tables_file writes the tables as text");
+        var xml = Path.Combine(ctx.Folder, "CPM export check tables.xml");
+        ctx.Tool("export_tables_file", $$"""{"path":{{Q(xml)}},"format":"xml"}""", a =>
+            FieldContext.Expect(File.Exists(xml) && System.Xml.Linq.XDocument.Load(xml).Root!.Elements("Table").Count() == a["tables"]!.AsArray().Count, "the XML file does not hold every table: " + a.ToJsonString()), "tool export_tables_file writes the tables as XML");
+        var obj = Path.Combine(ctx.Folder, "CPM export check.obj");
+        ctx.Tool("write_export_file", $$"""{"path":{{Q(obj)}},"text":"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n"}""", a =>
+            FieldContext.Expect(File.Exists(obj) && File.ReadAllText(obj).Contains("f 1 2 3", StringComparison.Ordinal), "the .obj was not written: " + a.ToJsonString()), "tool write_export_file writes the page's geometry file");
+        ctx.Refused("write_export_file", $$"""{"path":{{Q(Path.Combine(ctx.Folder, "CPM export check.exe"))}},"text":"x"}""", "writes only", "tool write_export_file says no to a file type it does not write");
     }
 
     private static void Tables(FieldContext ctx, OfflineEtabs modeler)
