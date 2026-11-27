@@ -293,18 +293,26 @@ public static class SapFieldSteps
         // ---- snapshots and the review pack ----
         ctx.Tool("list_snapshots", "{}", a => FieldContext.Expect(Int(a["count"]) >= 1, "the snapshot is not listed"));
         ctx.Tool("compare_snapshots", """{"from":"cpm-before-analysis"}""");
+        Pack.Built? packBuilt = null;
+        var took = TimeSpan.Zero;
         ctx.Step("the review pack of the scratch model is written", () =>
         {
-            var checks = ProgramTools.Report(System.Text.Json.JsonDocument.Parse("{}").RootElement, link).AsObject();
-            var pack = Pack.Build(link, [], link.LoadCases(), link.Combos(), checks, null, mostRows: 20000, by: "CSI ProMax field test");
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            var (checks, pack) = PackSpeedField.Build(link, () => ProgramTools.Report(System.Text.Json.JsonDocument.Parse("{}").RootElement, link).AsObject(),
+                c => Pack.Build(link, [], link.LoadCases(), link.Combos(), c, null, mostRows: 20000, by: "CSI ProMax field test"));
+            packBuilt = pack; took = watch.Elapsed;
             var file = Path.Combine(ctx.Folder, ModelerFieldSteps.ModelName + " SAP2000.cpmx");
             File.WriteAllBytes(file, pack.Zip);
             FieldContext.Expect(pack.Frames == link.Frames().Count && pack.Areas == link.Areas().Count, $"the pack holds {pack.Frames} frames and {pack.Areas} areas, the model has {link.Frames().Count} and {link.Areas().Count}");
             return new { file = Path.GetFileName(file), kilobytes = pack.Zip.Length / 1024, frames = pack.Frames, areas = pack.Areas, tables = pack.Tables, notes = pack.Notes };
         });
+        PackSpeedField.Timed(ctx, packBuilt, took, link.Program.Name);
 
         // ---- the tools every program has through the same API (the whole API, lateral loads, checkpoints, a building) ----
         CsiFieldSteps.Run(ctx);
+
+        // ---- how fast the program gives its tables, each way (last: ETABS's export of every table may take a while) ----
+        PackSpeedField.Probe(ctx, link, link.Program.Name);
 
         // ---- an engineer's SAP2000 that opened an .s2k (last: from here on this window takes no table import itself) ----
         // SAP2000 26 refuses every table import in a session that opened an .s2k (experiment N, 2026-11-26), as an
