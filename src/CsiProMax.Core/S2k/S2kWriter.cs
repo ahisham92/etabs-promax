@@ -349,6 +349,48 @@ public static class S2kWriter
                 ("R1SF", r.GetValueOrDefault(pre + "R1SF", "0")), ("R2SF", r.GetValueOrDefault(pre + "R2SF", "0")), ("R3SF", r.GetValueOrDefault(pre + "R3SF", "0"))));
         }
 
+        // SAP2000's own per-object assignment and load tables (SapObjectTables), each row with the object's name first.
+        var own = new SortedDictionary<string, List<IReadOnlyList<(string, string)>>>(StringComparer.OrdinalIgnoreCase);
+        void Own(Assign a, string name)
+        {
+            var kind = AssignTables.KindOf(a);
+            foreach (var (table, rows) in a.Tables ?? [])
+                if (SapObjectTables.Tables.TryGetValue(table, out var st) && st.Kind == kind)
+                    foreach (var r in rows)
+                        (own.TryGetValue(table, out var list) ? list : own[table] = []).Add(new[] { (SapObjectTables.KeyField(kind), name) }.Concat(st.Fields.Where(r.ContainsKey).Select(f => (f, r[f]))).ToList());
+        }
+        foreach (var x in m.LineAssigns) if (frameNames.TryGetValue((x.Label, x.Story), out var ofn)) Own(x, ofn);
+        foreach (var x in m.AreaAssigns) if (areaNames.TryGetValue((x.Label, x.Story), out var oan)) Own(x, oan);
+        foreach (var pa in m.PointAssigns)
+            if (pa.Tables is not null && m.StoryIndex(pa.Story) is var osi && osi >= 0 && points.TryGetValue(pa.Point, out var op)) Own(pa, Joint(Physical.At(m, op, osi)));
+                // A table the writer fills itself too (springs, masses, axes, ...) takes the SAP2000 form's rows in its place for those objects.
+        void Merge(string table, List<IReadOnlyList<(string, string)>> native)
+        {
+            var hit = own.Keys.FirstOrDefault(k => k.Equals(table, StringComparison.OrdinalIgnoreCase));
+            if (hit is null) return;
+            var mine = own[hit];
+            own.Remove(hit);
+            var who = mine.Select(r => r[0].Item2).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            native.RemoveAll(r => r.Count > 0 && who.Contains(r[0].Item2));
+            native.AddRange(mine);
+        }
+        Merge("Joint Spring Assignments 1 - Uncoupled", springs);
+        Merge("Joint Added Mass Assignments", jointMass);
+        Merge("Joint Panel Zone Assignments", panelZones);
+        Merge("Frame Local Axes Assignments 1 - Typical", axes);
+        Merge("Area Local Axes Assignments 1 - Typical", areaAxes);
+        Merge("Frame Added Mass Assignments", frameMass);
+        Merge("Area Added Mass Assignments", areaMass);
+        Merge("Frame Insertion Point Assignments", insertion);
+        Merge("Frame Offset Along Length Assignments", offsets);
+        Merge("Frame Tension And Compression Limits", tcLimits);
+        Merge("Frame Release Assignments 1 - General", releases);
+        Merge("Frame Release Assignments 2 - Partial Fixity", partial);
+        Merge("Frame Property Modifiers", frameMods);
+        Merge("Area Stiffness Modifiers", areaMods);
+        Merge("Joint Restraint Assignments", restraints);
+        foreach (var (ownTable, ownRows) in own) Add(tables, SapObjectTables.Name(ownTable).ToUpperInvariant(), ownRows);
+
         Add(tables, "JOINT COORDINATES", jointRows);
         Add(tables, "CONNECTIVITY - FRAME", connect);
         Add(tables, "CONNECTIVITY - AREA", areaConnect);
@@ -375,21 +417,6 @@ public static class S2kWriter
         // release it imports (SAP2000 26.3, 2026-11-26); the constraints are set after the file opens.
         Add(tables, "AREA EDGE RELEASE ASSIGNMENTS", edgeReleases);
         Add(tables, "JOINT PANEL ZONE ASSIGNMENTS", panelZones);
-        // SAP2000's own per-object assignment and load tables (SapObjectTables), each row with the object's name first.
-        var own = new SortedDictionary<string, List<IReadOnlyList<(string, string)>>>(StringComparer.OrdinalIgnoreCase);
-        void Own(Assign a, string name)
-        {
-            var kind = AssignTables.KindOf(a);
-            foreach (var (table, rows) in a.Tables ?? [])
-                if (SapObjectTables.Tables.TryGetValue(table, out var st) && st.Kind == kind)
-                    foreach (var r in rows)
-                        (own.TryGetValue(table, out var list) ? list : own[table] = []).Add(new[] { (SapObjectTables.KeyField(kind), name) }.Concat(st.Fields.Where(r.ContainsKey).Select(f => (f, r[f]))).ToList());
-        }
-        foreach (var x in m.LineAssigns) if (frameNames.TryGetValue((x.Label, x.Story), out var ofn)) Own(x, ofn);
-        foreach (var x in m.AreaAssigns) if (areaNames.TryGetValue((x.Label, x.Story), out var oan)) Own(x, oan);
-        foreach (var pa in m.PointAssigns)
-            if (pa.Tables is not null && m.StoryIndex(pa.Story) is var osi && osi >= 0 && points.TryGetValue(pa.Point, out var op)) Own(pa, Joint(Physical.At(m, op, osi)));
-        foreach (var (ownTable, ownRows) in own) Add(tables, SapObjectTables.Name(ownTable).ToUpperInvariant(), ownRows);
         Add(tables, "GENERALIZED DISPLACEMENT DEFINITIONS 1 - TRANSLATIONAL", genTrans);
         Add(tables, "GENERALIZED DISPLACEMENT DEFINITIONS 2 - ROTATIONAL", genRot);
 
