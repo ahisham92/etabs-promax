@@ -5939,6 +5939,7 @@ async function hmRun(tool, args, quiet) {
   if (etnLocked(tool)) return {ok: false, error: "The model is locked (Analyze > Unlock Model)."};
   if (hm.busy) return {ok: false, error: "The last change is still being made."};
   hm.busy = true; document.body.classList.add("hmbusy");
+  const lenBefore = tool === "set_display_units" ? String(modelU().length).toLowerCase() : "";
   let j;
   try { j = await hmPost(tool === "undo" || tool === "redo" ? {[tool]: true} : {tool, args: args || {}}); }
   catch (e) { j = {ok: false, error: "The Modeler could not be reached: " + e.message}; }
@@ -5947,6 +5948,17 @@ async function hmRun(tool, args, quiet) {
   if (j.ok) {
     hm.lastError = ""; hm.defs = null; if (window.cpmPull) await window.cpmPull(); await hmDefs();
     etnChanged(tool);
+    // A new length unit turns every coordinate into it (feet are 3.28 times the metres), so each window's camera is
+    // turned with them and the view stays as it was. New Model frames the model and then sets its units: without
+    // this its windows were left 3.28 times too close, and a change at Units... jumped the zoom the same way.
+    if (lenBefore) {
+      const k = (uLen[String(modelU().length).toLowerCase()] || 0) / (uLen[lenBefore] || 0);
+      if (isFinite(k) && k > 0 && Math.abs(k - 1) > 1e-9) {
+        const scale = c => c && {...c, target: c.target.map(v => v * k), hh: c.hh * k};
+        for (const p of panes) { p.anim = null; p.cam = scale(p.cam); if (p.camPrev) p.camPrev = scale(p.camPrev); p.pickOk = false; }
+        draw();
+      }
+    }
     // A new model, another file, or new stories and grids: the windows show all of it again, plans at the top story.
     if (["new_model", "open_model_file", "define_stories", "define_grids", "import_tables_excel"].includes(tool)) {
       const top = stories.length ? stories[stories.length - 1].name : "";
