@@ -53,18 +53,20 @@ public static class PackSpeedField
             {
                 using var session = PackSession.Start(from);
                 var checks = ProgramTools.Report(System.Text.Json.JsonDocument.Parse("{}").RootElement, from).AsObject();
-                return Pack.Build(from, [], from.LoadCases(), from.Combos(), checks, null, by: "CSI ProMax field test, from a copy", fileAs: file);
+                return Pack.Build(from, [], from.LoadCases(), from.Combos(), checks, null, by: "CSI ProMax field test, from a copy", fileAs: file, zip: false);
             });
             FieldContext.Expect(copy.Value is not null, $"the pack was not read from a copy: {copy.Said}");
-            got = copy.Value!;
+            var zipping = Stopwatch.StartNew();
+            got = Pack.Zipped(copy.Value!);
+            var took = copy.Took + zipping.Elapsed;
             var timing = got.Content["manifest"]?["timing"];
-            FieldContext.Expect(copy.Took <= Pack.MostTime,
-                $"copying, opening in a hidden {link.Program.Name}, reading the pack and closing took {copy.Took.TotalSeconds:0} s, more than {Pack.MostTime.TotalSeconds:0} s (reading alone {timing?["seconds"]} s). Slowest: {timing?["slowest"]?.ToJsonString()}");
+            FieldContext.Expect(took <= Pack.MostTime,
+                $"copying, opening in a hidden {link.Program.Name}, reading the pack, closing and zipping it after took {took.TotalSeconds:0} s (zipping {zipping.Elapsed.TotalSeconds:0} s), more than {Pack.MostTime.TotalSeconds:0} s (reading alone {timing?["seconds"]} s). Slowest: {timing?["slowest"]?.ToJsonString()}");
             var cut = Cut(got.Content);
             FieldContext.Expect(cut.Count == 0, "the pack is not whole: " + string.Join(", ", cut));
             var target = Path.Combine(ctx.Folder, ModelerFieldSteps.ModelName + $" {link.Program.Name} from a copy.cpmx");
             File.WriteAllBytes(target, got.Zip);
-            return new { seconds = Math.Round(copy.Took.TotalSeconds, 1), reading = timing?["seconds"]?.ToJsonString(), file = Path.GetFileName(target), frames = got.Frames, areas = got.Areas, tables = got.Tables.Count, notes = got.Notes };
+            return new { seconds = Math.Round(took.TotalSeconds, 1), zip_seconds = Math.Round(zipping.Elapsed.TotalSeconds, 1), reading = timing?["seconds"]?.ToJsonString(), file = Path.GetFileName(target), frames = got.Frames, areas = got.Areas, tables = got.Tables.Count, notes = got.Notes };
         });
         return got;
     }

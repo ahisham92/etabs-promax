@@ -165,7 +165,7 @@ public static class Pack
     /// <param name="extraTables">More tables to take, by name or key (for example "Element Forces - Beams").</param>
     public static Built Build(ICsiLink e, IReadOnlyList<string> extraTables, IReadOnlyList<string> cases, IReadOnlyList<string> combos,
         JsonObject? checks, JsonArray? comments, int mostRows = DefaultMostRows, string by = "", bool withTables = true,
-        IReadOnlyList<string>? designFiles = null, bool instabilities = false, JsonObject? auto = null, string? fileAs = null)
+        IReadOnlyList<string>? designFiles = null, bool instabilities = false, JsonObject? auto = null, string? fileAs = null, bool zip = true)
     {
         // Every table is listed once and read once while the pack is written (with the checks before it, when the caller
         // started the session): the program is not asked again for what it gave already.
@@ -260,19 +260,31 @@ public static class Pack
             notes.Add($"The pack took {manifest["timing"]!["seconds"]} s to read from {e.Program.Name}, more than {MostTime.TotalMinutes:0} minutes: manifest.json's \"timing\" names the slowest tables.");
         // What the pack says about itself (tables read in parts, cut, left out or refused), for the Viewer and the checks.
         manifest["notes"] = new JsonArray(notes.Select(n => (JsonNode)n).ToArray());
+        return new Built(zip ? ZipOf(content) : [], content, frames.Count, areas.Count, tables.Select(t => t.Key).ToList(), notes);
+    }
+
+    /// <summary>
+    /// The .cpmx of a pack's content. Build makes it at once unless asked not to (zip: false): a pack read from a copy
+    /// in a hidden program is zipped after that program is closed, so it holds a licence only while it reads.
+    /// </summary>
+    public static byte[] ZipOf(JsonObject content)
+    {
         using var stream = new MemoryStream();
         using (var zip = new ZipArchive(stream, ZipArchiveMode.Create, true))
         {
-            Add(zip, "manifest.json", manifest);
-            Add(zip, "model.json", model);
-            if (checks is not null) Add(zip, "checks.json", checks);
+            Add(zip, "manifest.json", content["manifest"]!.AsObject());
+            Add(zip, "model.json", content["model"]!.AsObject());
+            if (content["checks"] is JsonObject checks) Add(zip, "checks.json", checks);
             if (content["instabilities"] is JsonObject found) Add(zip, "instabilities.json", found);
-            Add(zip, "comments.json", comments ?? []);
+            Add(zip, "comments.json", content["comments"] as JsonArray ?? []);
             var n = 0;
-            foreach (var (_, table) in tables) AddTable(zip, $"tables/{++n:000}", table!.AsObject());
+            foreach (var (_, table) in content["tables"] as JsonObject ?? []) AddTable(zip, $"tables/{++n:000}", table!.AsObject());
         }
-        return new Built(stream.ToArray(), content, frames.Count, areas.Count, tables.Select(t => t.Key).ToList(), notes);
+        return stream.ToArray();
     }
+
+    /// <summary>The pack with its .cpmx made (after <c>Build(..., zip: false)</c>); as it is when it has one.</summary>
+    public static Built Zipped(Built built) => built.Zip.Length > 0 ? built : built with { Zip = ZipOf(built.Content) };
 
     /// <summary>
     /// Every other result, design and design-input table that has data (<see cref="PackTables"/>), within the pack's
