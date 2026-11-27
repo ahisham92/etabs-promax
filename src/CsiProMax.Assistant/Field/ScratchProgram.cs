@@ -785,7 +785,7 @@ public sealed class ScratchProgram : IScratchWindow
             // ETABS 23.2 answered 0 and asked for a file in its own "Open Model File" box, or held "(Untitled)", for an
             // .EDB that was there, just after the program before it had closed with it (0.4.68 full test: the Engine's
             // second run on the analysed model, and the hidden copy of the pack). The file is given again, up to 3 times.
-            for (var again = 0; again < 3 && answer == 0 && File.Exists(modelFile) && (refused.Any(ScratchDialogs.AskedForFile) || !Holds(modelFile)); again++)
+            for (var again = 0; again < 3 && answer == 0 && File.Exists(modelFile) && (refused.Any(ScratchDialogs.AskedForFile) || !Holds(modelFile) && !BuildsThroughApi(_program, modelFile)); again++)
             {
                 Thread.Sleep(TimeSpan.FromSeconds(10));
                 lock (_noticesClosed) _noticesClosed.RemoveAll(ScratchDialogs.AskedForFile);
@@ -796,7 +796,16 @@ public sealed class ScratchProgram : IScratchWindow
                 lock (_noticesClosed) refused = _noticesClosed.Where(n => ScratchDialogs.IsFileRefused(n)).ToArray();
             }
             if (answer == 0 && refused.Length == 0 && !Holds(modelFile))
+            {
+                // SAFE 22.7 answered 0 to the Modeler's .f2k and held '(Untitled)' (tester's SAFE-only run, 0.4.71): its
+                // File.OpenFile takes no .f2k, as SAFE 23.1's holds an empty model. A file the test can build is built.
+                if (BuildsThroughApi(_program, modelFile))
+                {
+                    openedEmpty = true;
+                    return $"{name} answered that it opened it, but holds '{Path.GetFileName(OpenFileName())}': the model is built through {name}'s tables instead";
+                }
                 throw new EtabsException($"{name} answered that it opened {Path.GetFileName(modelFile)}, but it holds '{Path.GetFileName(OpenFileName())}' (3 more tries).");
+            }
             if (answer != 0 || refused.Length > 0)
                 throw new EtabsException($"{name} could not open the file the Modeler wrote (it answered {answer})." + (refused.Length > 0 ? $" It said: {string.Join(" | ", refused)}; the test pressed OK." : ""));
             Ask(FileTimeout, "use the model's own units", m => { CsiProMax.Assistant.Etabs.EditableTables.PresentAsDatabase(m); return 0; }, $"{name} did not answer within {FileTimeout.TotalMinutes:0} minutes.");

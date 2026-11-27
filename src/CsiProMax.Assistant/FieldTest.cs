@@ -562,6 +562,9 @@ public static class FieldTest
                 if (waiting.Count > 0)
                     ctx.Fail($"windows waiting in the scratch {program.Name}", (finished ? "These were open in it when a call to it did not come back: " : "These were open in it when the test gave up: ") + string.Join("; ", waiting.Select(t => $"'{t}'")) + ". Answer them yourself, close that window without saving, and run the field test again.");
             }
+            // The needed things come even when the part could not start its window (SAFE 22.7 on 0.4.71: the open failed,
+            // and the zip held no Reference data): from a fresh hidden window of the program, on a real PC.
+            if (window is null && o.ReferenceData && o.StartScratch.Method.DeclaringType == typeof(ScratchProgram)) GatherReference(ctx, o, program, null);
             if (window is { } open)
             {
                 // Closing and letting go never stop the test: the next program and the report still follow.
@@ -604,6 +607,15 @@ public static class FieldTest
             ctx.Section(OpenSection);
             ctx.Fail($"the open {link.Program.Name} window answers before CSI ProMax's own features", silent);
         }
+        // CSI ProMax's own features never wait on the engineer's own model: with no scratch window that answered, they
+        // take a hidden scratch window of their own first. SAFE 22.7 on 0.4.71 (a tester's large real model open): the
+        // first read of it never came back, and every later feature failed on it. The open window is the last resort.
+        if (!standIn && !panelDone && IsLive(link) && o.StartScratch.Method.DeclaringType == typeof(ScratchProgram))
+            foreach (var program in programs)
+            {
+                if (panelDone) break;
+                if (StandIn(ctx, o, program, false, true) is var (_, panel2)) panelDone |= panel2;
+            }
         if (standIn || (!panelDone && !Answers(link)))
             foreach (var program in programs)
             {
@@ -645,10 +657,10 @@ public static class FieldTest
     /// testers' zips always bring them: SAFE 23.1 stopped on one call in a tester's run (0.4.69), and every item that
     /// read the program was lost. The fresh window's own start is not part of the test's steps.
     /// </summary>
-    internal static void GatherReference(FieldContext ctx, Options o, CsiProgram program, IScratchWindow open)
+    internal static void GatherReference(FieldContext ctx, Options o, CsiProgram program, IScratchWindow? open)
     {
         // A test's stand-in window is no program: a fresh one is started only on a real PC.
-        if (Answers(open.Link) || o.StartScratch.Method.DeclaringType != typeof(ScratchProgram)) { ReferenceData.Run(ctx.Folder, program, open.Link, open.ModelPath, (open as ScratchProgram)?.ProcessId ?? 0); return; }
+        if (open is not null && (Answers(open.Link) || o.StartScratch.Method.DeclaringType != typeof(ScratchProgram))) { ReferenceData.Run(ctx.Folder, program, open.Link, open.ModelPath, (open as ScratchProgram)?.ProcessId ?? 0); return; }
         var file = ctx.Files.GetValueOrDefault(program.Key, "");
         var lines = new List<string>();
         IScratchWindow? fresh = null;
@@ -662,12 +674,12 @@ public static class FieldTest
             var quiet = new FieldContext(program, folder, ctx.Link);
             fresh = o.StartScratch(program, quiet, copy);
             if (fresh is null || !Answers(fresh.Link)) throw new EtabsException($"a fresh hidden {program.Name} could not be started ({string.Join("; ", quiet.Steps.Where(st => !st.Ok).Select(st => st.Name + ": " + st.Detail).Take(2))})");
-            lines.AddRange(ReferenceData.Run(ctx.Folder, program, fresh.Link, fresh.ModelPath, (fresh as ScratchProgram)?.ProcessId ?? 0, $"The scratch window stopped answering, so these come from a fresh hidden {program.Name} started for them."));
+            lines.AddRange(ReferenceData.Run(ctx.Folder, program, fresh.Link, fresh.ModelPath, (fresh as ScratchProgram)?.ProcessId ?? 0, $"The scratch window {(open is null ? "could not be started" : "stopped answering")}, so these come from a fresh hidden {program.Name} started for them."));
         }
         catch (Exception ex) when (ex is not (OutOfMemoryException or OperationCanceledException))
         {
             var real = ex is AggregateException { InnerException: { } inner } ? inner : ex;
-            ReferenceData.Note(ctx.Folder, program, $"The scratch window stopped answering, and the needed things could not come from a fresh window either ({real.GetType().Name}: {real.Message}).");
+            ReferenceData.Note(ctx.Folder, program, $"The scratch window {(open is null ? "could not be started" : "stopped answering")}, and the needed things could not come from a fresh window either ({real.GetType().Name}: {real.Message}).");
         }
         finally
         {

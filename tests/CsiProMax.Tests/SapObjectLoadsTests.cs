@@ -33,6 +33,14 @@ static class SapObjectLoadsTests
 
     public static IEnumerable<(string Name, Action Body)> All()
     {
+        yield return ("viewer: no two top-level functions share a name (a later one silently replaced Assign > Area Loads > Temperature with the Material Temperature form)", () =>
+        {
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            var names = System.Text.RegularExpressions.Regex.Matches(html, @"^(?:async )?function ([A-Za-z0-9_$]+)", System.Text.RegularExpressions.RegexOptions.Multiline).Select(x => x.Groups[1].Value);
+            var twice = names.GroupBy(n => n).Where(g => g.Count() > 1).Select(g => g.Key).ToList();
+            Check(twice.Count == 0, "declared twice in viewer.html: " + string.Join(", ", twice));
+            Check(html.Contains("alTemperature: () => hmSapAreaTempLoads()") && html.Contains("aMatTemp: () => hmSapAreaTemperature()"), "Area Loads > Temperature and Area > Material Temperatures open their own forms");
+        });
         yield return ("sap2000 load forms: a GLOBAL joint force and a frame distributed load become the Modeler's own loads; Replace and Delete work", () =>
         {
             var link = Sap();
