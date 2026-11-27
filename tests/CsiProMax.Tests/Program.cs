@@ -1351,16 +1351,17 @@ Test("tool: add_load_pattern refuses a user coefficient that is not for a seismi
     Throws<ToolInputException>(() => tool.Run(JsonDocument.Parse("""{"name":"E","type":"Seismic","user_coefficient":{"c":0.05,"direction":"Z"}}""").RootElement, link), "direction Z");
 });
 
-Test("tool: a seismic pattern by coefficient in ETABS, whose API has only ASCE 7-16, uses ASCE 7-16 and says so", () =>
+Test("tool: a seismic pattern by coefficient in ETABS, whose API has only ASCE 7-16, is kept with no load rather than given made-up ASCE 7-16 values", () =>
 {
-    // 0.4.15 field test: ETABS 23's cAutoSeismic has no SetUserCoefficient, only SetASCE716 and SetIBC2006.
+    // 0.4.15 field test: ETABS 23's cAutoSeismic has no SetUserCoefficient, only SetASCE716 and SetIBC2006. An ASCE 7-16
+    // load with R 8, Ss 1.0, S1 0.4 and site class D in its place is a seismic load nobody asked for.
     var model = new CpmFakes.EtabsSeismic();
     using var link = new ComEtabs(CsiProgram.Etabs, () => model);
     var tool = EtabsTools.All.First(t => t.Name == "add_load_pattern");
     var a = tool.Run(JsonDocument.Parse("""{"name":"EQX","type":"Seismic","user_coefficient":{"c":0.05,"direction":"X"}}""").RootElement, link);
-    Check(a["lateral"]!.GetValue<string>().StartsWith("ASCE 7-16", StringComparison.Ordinal), a.ToJsonString());
-    Equal("EQX", model.AutoSeismic.Named, "the pattern given ASCE 7-16");
-    Check(model.AutoSeismic.Flags is [true, false, false, false, false, false], "X only");
+    Check(a["lateral"] is null && a["note"]!.GetValue<string>().Contains("User Coefficient (C = 0.05", StringComparison.Ordinal), a.ToJsonString());
+    Check(model.LoadPatterns.Names.Contains("EQX"), "the Seismic pattern is kept");
+    Equal("", model.AutoSeismic.Named, "no pattern is given ASCE 7-16");
 });
 
 Test("link: units from the older one-value call, by name or number", () =>
