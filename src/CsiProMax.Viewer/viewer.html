@@ -648,6 +648,7 @@ function runProgress(mon) {
   return all ? Math.min(1, done / all) : 0;
 }
 async function engineMonitor(ask, what, prog) {
+  if (etnOn()) return etnMonitor(ask, what, prog);
   let follow = true, tab = "log", last = null, finished = false;
   const d = dialog(`Analysis Monitor - ${prog}`, `<div class="rm">
       <div class="rmHead"><b id="rmNow">Starting...</b><span id="rmTime"></span></div>
@@ -688,15 +689,19 @@ async function engineMonitor(ask, what, prog) {
     last = st; paint();
     if (!st.done) continue;
     finished = true;
-    const rep = st.monitor && st.monitor.report;
-    if (st.pack && !st.model_changed) { engine.res = st.pack; engine.from = st.pack_file || "the run"; load(engine.base || P, true); buildTree(); }
-    if (st.model_changed) hmSay("The model changed while it ran, so its results were not put on it. Run again.", true);
-    else if (st.error) hmSay(rep ? rep.headline + " See the Run Report." : st.error, true);
-    else if (st.pack) hmSay(`${what} in ${st.program}: the results are shown (Display and Design menus); ${st.program} ${st.kept_open ? "was left open with the analysed model" : "was closed"}${st.pack_file ? "; review pack " + st.pack_file : ""}.` + (rep && runIssues(rep) ? " The Run Report lists things to look at." : ""));
-    // A run that stopped or has anything to look at opens its Run Report by itself: nobody is left wondering why.
-    if (rep && (!rep.ok || runIssues(rep))) engineReport(rep, ask);
+    engineFinish(st, ask, what);
     return;
   }
+}
+// The end of a run: its results onto the model, and its Run Report when it stopped or has things to look at.
+function engineFinish(st, ask, what) {
+  const rep = st.monitor && st.monitor.report;
+  if (st.pack && !st.model_changed) { engine.res = st.pack; engine.from = st.pack_file || "the run"; load(engine.base || P, true); buildTree(); }
+  if (st.model_changed) hmSay("The model changed while it ran, so its results were not put on it. Run again.", true);
+  else if (st.error) hmSay(rep ? rep.headline + " See the Run Report." : st.error, true);
+  else if (st.pack) hmSay(`${what} in ${st.program}: the results are shown (Display and Design menus); ${st.program} ${st.kept_open ? "was left open with the analysed model" : "was closed"}${st.pack_file ? "; review pack " + st.pack_file : ""}.` + (rep && runIssues(rep) ? " The Run Report lists things to look at." : ""));
+  // A run that stopped or has anything to look at opens its Run Report by itself: nobody is left wondering why.
+  if (rep && (!rep.ok || runIssues(rep))) engineReport(rep, ask);
 }
 function runIssues(r) { return (r.trouble || []).length + (r.design || []).length + (r.notices || []).length + (r.instabilities ? (r.instabilities.errors || 0) + (r.instabilities.warnings || 0) : 0); }
 // The objects a message names (joints, frames, areas by the program's names or labels), selected and ringed on the model.
@@ -3579,6 +3584,8 @@ function ticked(a) {
   if (a.startsWith("dshow:")) { const [, k, id] = a.split(":"); return res.mode === "design" && res.dfam === k && res.dshow === id; }
   if (a.startsWith("t:")) return tool === a.slice(2);
   if (a.startsWith("d:")) return tool === a;
+  if (a === "m:etn:alive") return etn.alive;
+  if (a === "m:etn:snapOnly") return !!hm.snapOnly;
   return {bg: bg === "black", tables: !$("dock").hidden, plot: !!p && p.mode === "plot", persp: !!p && !!p.cam.persp && p.mode === "3d", explorer: opt.explorer, side: opt.side, anim: res.anim}[a] || false;
 }
 function menuHtml(list) {
@@ -5093,6 +5100,7 @@ async function hmPost(body) {
 }
 // One change: the answer, and the view and the forms' lists brought up to date. Errors go to the status bar.
 async function hmRun(tool, args, quiet) {
+  if (etnLocked(tool)) return {ok: false, error: "The model is locked (Analyze > Unlock Model)."};
   if (hm.busy) return {ok: false, error: "The last change is still being made."};
   hm.busy = true; document.body.classList.add("hmbusy");
   let j;
@@ -5102,6 +5110,7 @@ async function hmRun(tool, args, quiet) {
   if ("rev" in j) hm.state = j;
   if (j.ok) {
     hm.lastError = ""; hm.defs = null; if (window.cpmPull) await window.cpmPull(); await hmDefs();
+    etnChanged(tool);
     // A new model, another file, or new stories and grids: the windows show all of it again, plans at the top story.
     if (["new_model", "open_model_file", "define_stories", "define_grids", "import_tables_excel"].includes(tool)) {
       const top = stories.length ? stories[stories.length - 1].name : "";
@@ -5138,6 +5147,7 @@ function modelerMenus(m) {
     ["Draw Floors (click corners)", "d:floor"], ["Draw Rectangular Floors (two corners)", "d:rect"], ["Quick Draw Floors (click in a bay)", "d:qfloor"], ["Draw Circular Floors (centre, then edge)", "d:circ"], 0,
     ["Draw Walls (click start and end)", "d:wall"], ["Quick Draw Walls (click a grid line)", "d:qwall"], 0,
     only(ES, ["Draw Braces (click bottom and top)", "d:brace"]), ["Draw Joints (click a point)", "d:joint"], 0, only(["etabs", "safe"], ["Design Strips...", "m:ex:strips"]), ["Tendons...", "m:ex:tendons"], only(["etabs", "safe"], ["Slab Rebar...", "m:ex:slabrebar"]), 0, ["Snap and Story Options...", "m:drawHelp"]];
+  if (etnOn()) m.Draw = etnDrawMenu();
   // SAP2000's Assign menu has no top-level section or restraint items: they are in its Joint, Frame and Area submenus.
   m.Assign = [...(program === "sap2000" ? [] : [["Frame Section...", "m:asgFrame", "", !fr], ["Slab or Wall Section...", "m:asgShell", "", !ar], 0, ["Joint Restraints (Supports)...", "m:asgSupport"], 0]),
     program === "sap2000" ? hmSapAssignMenu()[0] : ["Joint", [["Springs...", "m:ad:joint", "", !any], only(["etabs", "sap2000"], ["Diaphragms...", "m:sa:jdiaph", "", !any]), only(["sap2000"], ["Constraints...", "m:ex:jconstraint", "", !any]), 0, ...hmTableItems("Joint", !any)]],
@@ -5150,7 +5160,7 @@ function modelerMenus(m) {
   // Analyze and Design as the program has them (Ahmed 2026-11-27, every form): its option forms first, then the checks and
   // the Run; each design's View/Revise Preferences (its code and the code's items) above the results.
   const fm = hm.forms || {designs: [], analysis: []};
-  m.Analyze = [...fm.analysis.map((f, i) => [f.item, "m:pform:" + i]), ["Set Load Cases to Run...", "m:runCases"], 0, ...(m.Analyze || [])];
+  m.Analyze = etnOn() ? etnAnalyzeMenu(fm) : [...fm.analysis.map((f, i) => [f.item, "m:pform:" + i]), ["Set Load Cases to Run...", "m:runCases"], 0, ...(m.Analyze || [])];
   // Options as the program has them: Preferences (Dimensions/Tolerances, Graphics), Colors (Display, Output) and
   // Miscellaneous Options, then the Engine's own view options.
   const of = fm.options || [];
@@ -5376,8 +5386,188 @@ function hmStoryGrid() {
     [["OK"], ["Cancel"]], {width: 460});
   q(d, "#sgS").onclick = () => hmStories(); q(d, "#sgG").onclick = () => hmGrids();
 }
+// ---- ETABS 23.2's Analyze menu and its run windows, from the pictures in field/reference-forms/etabs/Analyze (thread
+// 'Make remaining ETABS menu forms identical', 2026-11-27): the menu in ETABS's order and words; Run Analysis shows
+// ETABS's "Analyzing" window (File Name, Start/Finish Time, Elapsed Time, Run Status, Cancel Run, the Run 1 log) and its
+// "OK to terminate execution of Job ...?" box; Show Analysis Messages and Last Analysis Run Log after a run; Lock Model,
+// Model Alive and Merge Analysis Results. SAP2000 and SAFE keep their own Analyze menus. ----
+const etn = {runs: [], last: null, alive: false, aliveTimer: 0, running: false};
+const etnOn = () => program === "etabs";
+const etnStamp = t => t ? new Date(t).toLocaleString("en-US").replace(",", "") : "Not Applicable";
+const etnClock = s => { s = Math.max(0, Math.round(s || 0)); return [Math.floor(s / 3600), Math.floor(s % 3600 / 60), s % 60].map(x => String(x).padStart(2, "0")).join(":"); };
+const etnJob = f => String(f || "").split(/[\\/]/).pop().replace(/\.[^.]*$/, "") || "Untitled";
+function etnAnalyzeMenu(fm) {
+  const pf = re => { const i = (fm.analysis || []).findIndex(f => re.test(f.table)); return i < 0 ? null : "m:pform:" + i; };
+  const it = (label, a, key, off) => a ? [label, a, key || "", !!off] : null;
+  const locked = !!engine.res || hm.userLock, ran = !!etn.last;
+  return [it("Check Model...", "inst"), 0,
+    it("Set Active Degrees of Freedom...", pf(/Active Degrees of Freedom/i)), ["Set Load Cases To Run...", "m:runCases"],
+    it("Advanced SAPFire Options...", pf(/SAPFire/i)), it("Advanced Design and Response Recovery Options...", pf(/Design and Response Recovery/i)), 0,
+    it("Automatic Mesh Settings for Floors...", pf(/Mesh Settings for Floors/i)), it("Automatic Rectangular Mesh Settings for Walls...", pf(/Mesh Options for Walls/i)), it("Analysis Model for Nonlinear Hinges...", pf(/Nonlinear Hinges/i)), 0,
+    it("Cracking Analysis Options...", pf(/Cracking/i)), 0,
+    ["Run Analysis", "eng:run", "F5"], ["Model Alive", "m:etn:alive"], ["Merge Analysis Results", "m:etn:merge"], 0,
+    // ETABS greys these until there are analysis results (picture "00 Analyze menu model unlocked"). Modify Undeformed
+    // Geometry stays greyed until the picture of its form (asked of the capture thread) shows what it holds.
+    ["Modify Undeformed Geometry...", "m:etn:geometry", "", true], 0,
+    ["Show Analysis Messages...", "m:etn:messages", "", !ran], ["Last Analysis Run Log...", "m:etn:log", "", !ran], 0,
+    [locked ? "Unlock Model" : "Lock Model", "m:etn:lock"], 0,
+    ["Engine Extras", [["Show the Last Check's Marks", "instMarks", "", !inst.answer], ["What the check looks for", "instHelp"], 0, ["Run Analysis and Design...", "eng:runDesign"], ["Show Results from a Review Pack (.cpmx)...", "eng:import"]]]].filter(x => x !== null);
+}
+function etnAct(a) {
+  if (a === "snapOnly") { hm.snapOnly = !hm.snapOnly; return hmSay(hm.snapOnly ? "Draw Using Snap Only is on: a click away from a grid crossing, joint or grid line draws nothing." : "Draw Using Snap Only is off."); }
+  if (a === "alive") { etn.alive = !etn.alive; return hmSay(etn.alive ? "Model Alive is on: the model is analysed again after each change." : "Model Alive is off."); }
+  if (a === "merge") return etnMergeForm();
+  if (a === "messages") return etnMessages();
+  if (a === "log") return etnRunWindow(etn.last, true);
+  if (a === "lock") {
+    if (engine.res) return engineClear();
+    hm.userLock = !hm.userLock;
+    return hmSay(hm.userLock ? "The model is locked: it cannot be changed until Analyze > Unlock Model." : "The model is unlocked.");
+  }
+}
+// Lock Model: what would change the model is refused while it is locked, as ETABS does.
+const etnChanges = tool => /^(define_|assign_|add_|delete_|draw_|set_section|set_loads?|set_lateral|set_program_form|set_slab|set_punching|set_load_cases|reshape_|move_|replicate_|divide_|edit_model_text|import_tables|frame_section_to_sd|undo$|redo$)/.test(tool);
+function etnLocked(tool) {
+  if (!hm.userLock || !etnChanges(tool)) return false;
+  dialog("ETABS", `<p style="max-width:380px">The model is locked. Unlock it first (Analyze &gt; Unlock Model) to change it.</p>`, [["OK"]], {width: 420});
+  return true;
+}
+// Model Alive: after each change the model is analysed again (a run of the analysis only, as ETABS's Model Alive).
+function etnChanged(tool) {
+  if (!etn.alive || !etnOn() || !etnChanges(tool) || !window.cpmLive) return;
+  clearTimeout(etn.aliveTimer);
+  etn.aliveTimer = setTimeout(() => { if (!etn.running) engineStart({analyse: true, kinds: [], selected: [], keep_open: false, stop_on_errors: true}); }, 1500);
+}
+function etnMergeForm() {
+  const d = dialog("Merge Analysis Results", `<div class="g2"><span>Results to merge</span><input id="emF" type="file" accept=".cpmx,.zip,.json"></div>
+    <p class="kv" style="max-width:440px;margin:6px 0 0">The load cases of the chosen run that this model's results do not have yet are added to them (a run of other cases of the same model, on this or another computer).</p>`,
+    [["OK", x => { const f = q(x, "#emF").files[0]; if (!f) { formError(x, "Choose the results to merge."); return false; } etnMerge(f); }], ["Cancel"]], {width: 500});
+  return d;
+}
+async function etnMerge(file) {
+  try {
+    if (!engine.res) return engineImport(file);
+    const pack = await readPack(file); if (!pack) return;
+    const t = engine.res.tables; let added = 0, tables = 0;
+    for (const [n, x] of Object.entries(pack.tables || {})) {
+      if (!engineKinds(x)) continue;
+      if (!t[n]) { t[n] = x; tables++; added += (x.rows || []).length; continue; }
+      const ci = (x.fields || []).indexOf("OutputCase");
+      if (ci < 0 || JSON.stringify(t[n].fields) !== JSON.stringify(x.fields)) continue;
+      const have = new Set(t[n].rows.map(r => r[ci])), more = (x.rows || []).filter(r => !have.has(r[ci]));
+      if (more.length) { t[n].rows = t[n].rows.concat(more); added += more.length; tables++; }
+    }
+    engine.from += " + " + file.name; load(engine.base || P, true); buildTree();
+    hmSay(added ? `Merged ${added} result rows of ${file.name} into ${tables} tables.` : `${file.name} has no load cases these results do not have already.`, !added);
+  } catch (ex) { hmSay("That file could not be read: " + ex.message, true); }
+}
+// The run window as ETABS 23.2 shows it while analysing, and after (Analysis Complete / Analysis Incomplete).
+function etnRunWindow(run, asLog) {
+  if (!run) return hmSay("No analysis has run in this session.", true);
+  const st = run.st || {}, mon = st.monitor || {}, done = !st.running;
+  const pct = Math.round((st.running ? runProgress(mon) : 1) * 100);
+  const ok = done && !st.error && !mon.cancelled;
+  const title = !done ? `Analyzing (${String(pct).padStart(3, " ")}%)${mon.case ? `: Case ${mon.case_count ? `(${String(Math.round(100 * (mon.case_number || 0) / mon.case_count)).padStart(3, " ")}%) ` : ""}${mon.case}` : ""}` : ok ? "Analysis Complete" : "Analysis Incomplete";
+  const status = !done ? "Analyzing" : ok ? "Done - Analysis Complete" : "Done - Analysis Incomplete";
+  const file = (mon.model_file || run.file || "").replace(/\.[^.\\/]*$/, "") + " (.EDB)";
+  const head = `<div class="etnRh"><div class="g2" style="grid-template-columns:auto 1fr auto 1fr;gap:4px 12px;flex:1">
+      <span>File Name:</span><span style="grid-column:2/5">${esc(file)}</span>
+      <span>Start Time:</span><span>${esc(etnStamp(run.started))}</span><span>Elapsed Time:</span><span id="etnEl">${etnClock(mon.elapsed)}</span>
+      <span>Finish Time:</span><span>${esc(done ? etnStamp(run.finished) : "Not Applicable")}</span><span>Run Status:</span><span>${esc(status)}</span></div>
+      ${done ? "" : `<button id="etnCancel" style="align-self:center;min-width:90px">Cancel Run</button>`}</div>
+    <div class="itabs" style="margin-top:8px"><button class="on">Run 1</button></div>
+    <div class="pgwrap" id="etnLog" style="height:300px;font-family:Consolas,'Courier New',monospace;font-size:11px;white-space:pre;color:#1a3a8a;background:#fff">${(mon.log || []).map(l => esc(l)).join("\n")}</div>
+    ${(mon.steps || []).length ? `<details style="margin-top:6px"><summary class="kv">Engine steps</summary><div class="rmSteps">${mon.steps.map(s => `<div class="rs ${esc(s.state)}"><span class="ri">${runIcons[s.state] || ""}</span><span class="rn">${esc(s.name)}</span><span class="rt">${s.seconds ? runTime(s.seconds) : ""}</span></div>`).join("")}</div></details>` : ""}`;
+  let d = run.win && run.win.isConnected && !asLog ? run.win : null;
+  if (!d) {
+    d = dialog(title, head, done ? [["Show Analysis Messages", () => { etnMessages(); return false; }, true], ...(mon.report || (st.monitor || {}).report ? [["Run Report", () => { engineReport(mon.report, run.ask); return false; }, true]] : [])] : [["Show program window", () => { enginePost({show_program: true}).then(j => hmSay(j.ok ? j.said : j.error, !j.ok)).catch(() => {}); return false; }, true]], {float: true, width: 640});
+    if (!asLog) run.win = d;
+  } else { q(d, ".dt b").textContent = title; q(d, ".db").innerHTML = head; }
+  const log = q(d, "#etnLog"); if (log) log.scrollTop = 1e9;
+  const c = q(d, "#etnCancel");
+  if (c) c.onclick = () => dialog("ETABS", `<p style="max-width:360px">&#9888; OK to terminate execution of Job ${esc(etnJob(mon.model_file || run.file))} ?</p>`,
+    [["OK", () => { enginePost({cancel: true}).then(j => hmSay(j.ok ? "Cancelling: " + j.said + "." : j.error, !j.ok)).catch(() => {}); }], ["Cancel"]], {width: 400});
+  return d;
+}
+// The run as ETABS runs it: its window follows the job; the results come onto the model when it ends.
+async function etnMonitor(ask, what, prog) {
+  const run = {ask, started: Date.now(), finished: 0, st: {running: true, monitor: {}}, file: (hm.state || {}).file || "", win: null};
+  etn.running = true;
+  try {
+    etnRunWindow(run);
+    for (;;) {
+      await new Promise(r => setTimeout(r, 1000));
+      let st; try { st = await enginePost({take: true}); } catch (e) { continue; }
+      run.st = st; if (!st.done) { st.running = true; etnRunWindow(run); continue; }
+      st.running = false; run.finished = Date.now(); etn.last = run;
+      const mon = st.monitor || {};
+      etn.runs.push({at: run.started, messages: etnMessageList(run)});
+      if (run.win && run.win.isConnected) { run.win.close(); }
+      run.win = null; etnRunWindow(run);
+      engineFinish(st, ask, what);
+      if ((mon.report && !mon.report.ok) || etn.runs[etn.runs.length - 1].messages.length) etnMessages();
+      return;
+    }
+  } finally { etn.running = false; }
+}
+// ETABS's Analysis Messages: each message the run gave, numbered by kind, with the run's date and time.
+function etnMessageList(run) {
+  const r = ((run.st || {}).monitor || {}).report || {}, out = [], n = {Error: 0, Warning: 0, Information: 0};
+  for (const t of r.trouble || []) {
+    const kind = t.level === "error" ? "Error" : t.level === "warning" ? "Warning" : "Information"; n[kind]++;
+    out.push({kind, text: [`*** ${kind} Message ${n[kind]} ***`, `Date & Time : ${etnStamp(run.started)}`, "Operation : RUNNING ANALYSIS", ...((t.said || []).length ? t.said : [t.meaning])].join("\n")});
+  }
+  for (const note of r.notices || []) { n.Information++; out.push({kind: "Information", text: [`*** Information Message ${n.Information} ***`, `Date & Time : ${etnStamp(run.started)}`, "Operation : RUNNING ANALYSIS", note].join("\n")}); }
+  return out;
+}
+function etnMessages() {
+  if (!etn.runs.length) return hmSay("No analysis has run in this session.", true);
+  let onlyNew = true, at = -1;
+  const list = () => onlyNew ? etn.runs[etn.runs.length - 1].messages : etn.runs.flatMap(r => r.messages);
+  const count = k => list().filter(m => m.kind === k).length;
+  const d = dialog("Analysis Messages", `<div style="display:flex;gap:10px">
+      <div class="pgwrap" id="amT" style="flex:1;height:420px;font-family:Arial,sans-serif;font-size:12px;white-space:pre-wrap;background:#fff"></div>
+      <div style="width:170px;display:flex;flex-direction:column;gap:6px">
+        <fieldset style="margin:0"><legend>errors</legend><div style="display:flex;flex-direction:column;gap:4px">
+          <button data-k="Error">Error</button><button data-k="Warning">Warning</button><button data-k="Information">Information</button><button data-k="Error or Warning">Error or Warning</button></div></fieldset>
+        <div class="kv" id="amN"></div>
+        <label class="kv"><input type="checkbox" id="amNew" checked> New Messages Only</label>
+        <div style="flex:1"></div>
+        <button id="amW">Write to Text File</button><button id="amL">Show Log</button><button id="amD">Done</button></div></div>`, [], {width: 760});
+  const paint = () => {
+    const l = list();
+    q(d, "#amT").innerHTML = l.map((m, i) => `<div data-m="${i}" style="margin-bottom:12px">${esc(m.text)}</div>`).join("") || `<div class="kv">No messages.</div>`;
+    q(d, "#amN").innerHTML = `${count("Error")} errors<br>${count("Warning")} warnings<br>${count("Information")} informations`;
+    d.querySelectorAll("[data-k]").forEach(b => { const k = b.dataset.k; b.disabled = !l.some(m => k === "Error or Warning" ? m.kind !== "Information" : m.kind === k); });
+  };
+  d.querySelectorAll("[data-k]").forEach(b => b.onclick = () => {
+    const l = list(), k = b.dataset.k, hit = (m) => k === "Error or Warning" ? m.kind !== "Information" : m.kind === k;
+    for (let s = 1; s <= l.length; s++) { const i = (at + s) % l.length; if (hit(l[i])) { at = i; const el = q(d, `[data-m="${i}"]`); if (el) { q(d, "#amT").scrollTop = el.offsetTop - q(d, "#amT").offsetTop; d.querySelectorAll("[data-m]").forEach(x => x.style.background = x === el ? "var(--sel,#cfe3ff)" : ""); } return; } }
+  });
+  q(d, "#amNew").onchange = e => { onlyNew = e.target.checked; at = -1; paint(); };
+  q(d, "#amW").onclick = () => { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([list().map(m => m.text).join("\n\n")], {type: "text/plain"})); a.download = etnJob((etn.last || {}).file) + " analysis messages.txt"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); };
+  q(d, "#amL").onclick = () => etnRunWindow(etn.last, true);
+  q(d, "#amD").onclick = () => d.close();
+  paint();
+  return d;
+}
+// ETABS 23.2's Draw menu in its order and words (pictures "00 Draw menu", "01 Draw Floor-Wall submenu", "02 Draw
+// Beam-Column-Brace submenu"). Draw Section Cut is greyed until there are results, as ETABS greys it. Design strips,
+// tendons and slab rebar are not in ETABS's Draw menu: they are the Engine's, under Engine Extras.
+function etnDrawMenu() {
+  const any = sel.size > 0;
+  return [["Select Object", "t:select", "Esc"], ["Reshape Object", "d:reshape"], 0,
+    ["Draw Joint Objects", "d:joint"],
+    ["Draw Beam/Column/Brace Objects", [["Draw Beam/Column/Brace (Plan, Elev, 3D)", "d:beam"], ["Quick Draw Beams/Columns (Plan, Elev, 3D)", "d:qbeam"], ["Quick Draw Columns (Plan, 3D)", "d:column"], ["Quick Draw Secondary Beams (Plan, 3D)", "d:qsec"], ["Quick Draw Braces (Plan, Elev, 3D)", "d:brace"]]],
+    ["Draw Floor/Wall Objects", [["Draw Floor/Wall (Plan, Elev, 3D)", "d:floor"], ["Draw Rectangular Floor/Wall (Plan, Elev)", "d:rect"], ["Quick Draw Floor/Wall (Plan, Elev, 3D)", "d:qfloor"], ["Quick Draw Area Around Point (Plan)", "d:qfloor"], ["Draw Walls (Plan)", "d:wall"], ["Quick Draw Walls (Plan)", "d:qwall"], ["Draw Wall Openings (Plan, Elev, 3D)", "m:ex:openings"]]], 0,
+    ["Draw Grids", "m:storyGrid"], 0,
+    ["Draw Section Cut...", "m:st:cut", "", !engine.res], 0,
+    ["Snap Options...", "m:drawHelp"], ["Draw Using Snap Only", "m:etn:snapOnly"], 0,
+    ["Engine Extras", [["Draw Circular Floors (centre, then edge)", "d:circ"], 0, ["Design Strips...", "m:ex:strips"], ["Tendons...", "m:ex:tendons"], ["Slab Rebar...", "m:ex:slabrebar"]]]];
+}
 async function modelAct(a) {
   hideMenus();
+  if (a.startsWith("etn:")) return etnAct(a.slice(4));
   if (a.startsWith("ld:")) return hmObjectLoad(a.slice(3));
   if (a.startsWith("spr:")) return hmSprings(a.slice(4));
   if (a.startsWith("sapa:")) return hmSapAssign(a.slice(5));
@@ -16898,6 +17088,7 @@ async function showObjBox() {
 async function drawClick(p, x, y, dbl) {
   if (p.mode !== "plan") { hmSay(drawHint(), true); return; }
   const k = drawKind(), kind = drawKinds[k], sec = (await drawSection(kind)).now, st = drawStories(p);
+  if (hm.snapOnly && etnOn() && !["qbeam", "qwall", "qfloor", "qsec", "reshape"].includes(k) && !snapAt(p, x, y).what) return hmSay("Draw Using Snap Only is on: click a grid crossing, a joint or a grid line.", true);
   if (k === "joint") return hmRun("add_joints", {points: [snapAt(p, x, y).q], stories: st});
   if (k === "reshape") {
     // Draw > Reshape Object: an end or corner of an object on this story, then where it goes.
