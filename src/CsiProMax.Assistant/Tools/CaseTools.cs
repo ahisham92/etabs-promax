@@ -113,9 +113,9 @@ public static class CaseTools
             double period = a.Number("period", 1), cycles = a.Number("cycles", 1), amp = a.Number("amplitude", 1), rt = a.Number("ramp_time", period / 8);
             if (period <= 0 || cycles < 1 || cycles > 100000) throw new ToolInputException("A wave needs a period above 0 and 1 to 100000 cycles.");
             if (from == "sawtooth" && (rt <= 0 || rt > period / 4)) throw new ToolInputException("The sawtooth ramp time is above 0 and at most a quarter of the period.");
-            (double T, double Y)[] one = from == "sawtooth"
-                ? [(rt, amp), (period / 2 - rt, amp), (period / 2 + rt, -amp), (period - rt, -amp), (period, 0)]
-                : [(period / 4, amp), (3 * period / 4, -amp), (period, 0)];
+            var one = from == "sawtooth"
+                ? new (double T, double Y)[] { (rt, amp), (period / 2 - rt, amp), (period / 2 + rt, -amp), (period - rt, -amp), (period, 0) }
+                : new (double T, double Y)[] { (period / 4, amp), (3 * period / 4, -amp), (period, 0) };
             points = [(0, 0)];
             for (var c = 0; c < (int)Math.Round(cycles); c++)
                 foreach (var (t, y) in one) points.Add((Math.Round(c * period + t, 9), y));

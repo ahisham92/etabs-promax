@@ -13,6 +13,10 @@ public static class StructureExtras
 {
     public const string GroupTable = "Group Definitions", CutTable = "Section Cut Definitions", SpandrelTable = "Spandrel Label Definitions";
 
+    /// <summary>Link/Support Property Data's Total Mass and Weight, Factors For Line and Area Springs and notes.</summary>
+    public static readonly string[] LinkFields = ["Mass", "Weight", "RotInert1", "RotInert2", "RotInert3", "DefLength", "DefArea", "Notes"];
+    // Declared before Fields, which uses it: statics start in the order they are written.
+
     /// <summary>The fields each table keeps, by the program's field names.</summary>
     public static readonly IReadOnlyDictionary<string, string[]> Fields = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
     {
@@ -33,8 +37,6 @@ public static class StructureExtras
         ["Link Property Definitions - Multilinear - Plastic"] = LinkFields,
     };
 
-    /// <summary>Link/Support Property Data's Total Mass and Weight, Factors For Line and Area Springs and notes.</summary>
-    public static readonly string[] LinkFields = ["Mass", "Weight", "RotInert1", "RotInert2", "RotInert3", "DefLength", "DefArea", "Notes"];
 
     public static string SpringTable(string kind) => "Spring Property Definitions - " + kind.ToLowerInvariant() switch { "point" => "Point Springs", "line" => "Line Springs", _ => "Area Springs" };
 
