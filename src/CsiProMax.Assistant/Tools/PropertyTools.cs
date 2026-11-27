@@ -104,8 +104,8 @@ public static class PropertyTools
                 return new JsonObject { ["section"] = s.Name, ["shape"] = s.Shape, ["area"] = s.Area };
             }, a => $"Define the frame section {a.Text("name")}"),
         new("define_shell_type",
-            "Adds or changes a slab or wall section with its type (Define > Section Properties > Slab or Wall Sections): kind slab or wall; slab_type Slab, Drop, Stiff, Ribbed, Waffle, Mat, Footing; modeling ShellThin, ShellThick, Membrane, Layered; one_way load distribution; a Ribbed slab also takes overall_depth, rib_width_top, rib_width_bottom, rib_spacing and rib_direction (local axis 1 or 2 the ribs run along); modifiers F11MOD F22MOD F12MOD M11MOD M22MOD M12MOD V13MOD V23MOD MMOD WMOD (e.g. cracked slabs M11MOD 0.25). extras: the form's other fields (NotSizeType NotAutoFact NotUserSize Color Notes; a wall's RigidZone; MatAngle and BendThick for SAP2000); given, they replace the ones it has.",
-            """{"type":"object","required":["name","kind","thickness","material"],"properties":{"name":{"type":"string"},"was":{"type":"string"},"kind":{"type":"string","enum":["slab","wall"]},"slab_type":{"type":"string"},"modeling":{"type":"string"},"thickness":{"type":"number"},"material":{"type":"string"},"one_way":{"type":"boolean"},"overall_depth":{"type":"number"},"rib_width_top":{"type":"number"},"rib_width_bottom":{"type":"number"},"rib_spacing":{"type":"number"},"rib_direction":{"type":"integer"},"modifiers":""" + Numbers + ""","extras":{"type":"object","additionalProperties":{"type":"string"}}}}""",
+            "Adds or changes a slab or wall section with its type (Define > Section Properties > Slab or Wall Sections): kind slab or wall; slab_type Slab, Drop, Stiff, Ribbed, Waffle, Mat, Footing; modeling ShellThin, ShellThick, Membrane, Layered; one_way load distribution; a Ribbed slab also takes overall_depth, rib_width_top, rib_width_bottom, rib_spacing and rib_direction (local axis 1 or 2 the ribs run along); a Waffle slab takes the same with rib_spacing for the ribs parallel to the 1 axis and rib_spacing_2 for those parallel to the 2 axis; a Layered section may leave material empty (its layers carry the materials); modifiers F11MOD F22MOD F12MOD M11MOD M22MOD M12MOD V13MOD V23MOD MMOD WMOD (e.g. cracked slabs M11MOD 0.25). extras: the form's other fields (NotSizeType NotAutoFact NotUserSize Color Notes; a wall's RigidZone; MatAngle and BendThick for SAP2000); given, they replace the ones it has.",
+            """{"type":"object","required":["name","kind","thickness"],"properties":{"name":{"type":"string"},"was":{"type":"string"},"kind":{"type":"string","enum":["slab","wall"]},"slab_type":{"type":"string"},"modeling":{"type":"string"},"thickness":{"type":"number"},"material":{"type":"string"},"one_way":{"type":"boolean"},"overall_depth":{"type":"number"},"rib_width_top":{"type":"number"},"rib_width_bottom":{"type":"number"},"rib_spacing":{"type":"number"},"rib_spacing_2":{"type":"number"},"rib_direction":{"type":"integer"},"modifiers":""" + Numbers + ""","extras":{"type":"object","additionalProperties":{"type":"string"}}}}""",
             Ask.Changes, (a, e) =>
             {
                 var link = Offline(e);
@@ -115,8 +115,9 @@ public static class PropertyTools
                 CheckExtras(a, PropertyDefs.ShellExtraFields(wall), wall ? "A wall section" : "A slab section");
                 var s = Core(() => link.Edit(m =>
                 {
-                    var sec = PropertyDefs.SetShellType(m, a.Need("name"), Was(a), wall, a.Text("slab_type", "Slab"), a.Text("modeling", wall ? "ShellThin" : "ShellThin"), a.Number("thickness"), a.Need("material"), a.Flag("one_way"),
-                        a.TryGetProperty("overall_depth", out _) ? new PropertyDefs.Ribs(a.Number("overall_depth"), a.Number("rib_width_top"), a.Number("rib_width_bottom", a.Number("rib_width_top")), a.Number("rib_spacing"), a.Whole("rib_direction", 1)) : null);
+                    var sec = PropertyDefs.SetShellType(m, a.Need("name"), Was(a), wall, a.Text("slab_type", "Slab"), a.Text("modeling", wall ? "ShellThin" : "ShellThin"), a.Number("thickness"), a.Text("material", ""), a.Flag("one_way"),
+                        a.TryGetProperty("overall_depth", out _) ? new PropertyDefs.Ribs(a.Number("overall_depth"), a.Number("rib_width_top"), a.Number("rib_width_bottom", a.Number("rib_width_top")), a.Number("rib_spacing"), a.Whole("rib_direction", 1),
+                            a.TryGetProperty("rib_spacing_2", out _) ? a.Number("rib_spacing_2") : null) : null);
                     if (mods.Count > 0) PropertyDefs.SetModifiers(sec.Lines, PropertyDefs.ShellModifiers, mods);
                     if (a.TryGetProperty("extras", out var x) && x.ValueKind == JsonValueKind.Object)
                         PropertyDefs.SetShellExtras(sec, x.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.ValueKind == JsonValueKind.String ? p.Value.GetString() ?? "" : p.Value.ToString()));
@@ -523,7 +524,7 @@ public static class PropertyTools
                 } : null,
                 ["slab_type"] = s.Get("SLABTYPE"), ["modeling"] = s.Get("MODELINGTYPE"), ["one_way"] = s.Get("ONEWAYLOADDIST") == "Yes",
                 ["overall_depth"] = s.Number("OVERALLDEPTH"), ["rib_width_top"] = s.Number("SLABRIBWIDTHTOP"), ["rib_width_bottom"] = s.Number("SLABRIBWIDTHBOTTOM"),
-                ["rib_spacing"] = s.Number("SLABRIBSPACING"), ["rib_direction"] = s.Number("SLABRIBPARALLELTOAXIS"),
+                ["rib_spacing"] = s.Number("SLABRIBSPACING") ?? s.Number("SLABRIBSPACINGDIR1"), ["rib_spacing_2"] = s.Number("SLABRIBSPACINGDIR2"), ["rib_direction"] = s.Number("SLABRIBPARALLELTOAXIS"),
                 ["modifiers"] = Numbers_(PropertyDefs.Modifiers(s.Lines, PropertyDefs.ShellModifiers)),
                 ["extras"] = new JsonObject(PropertyDefs.ShellExtras(s).Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))),
             }).ToArray()),

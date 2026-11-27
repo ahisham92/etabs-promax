@@ -209,17 +209,8 @@ public static class QuickTemplates
     }
 
     /// <summary>A waffle slab section: ribs both ways at the one spacing.</summary>
-    private static void Waffle(StructuralModel m, string name, double thickness, string material, PropertyDefs.Ribs ribs)
-    {
-        var sec = PropertyDefs.SetShellType(m, name, null, false, "Ribbed", "ShellThin", thickness, material, false, ribs);
-        var line = sec.Lines[0];
-        var at = line.IndexOf("SLABTYPE");
-        if (at >= 0) line[at + 1] = "\"Waffle\"";
-        var axis = line.IndexOf("SLABRIBPARALLELTOAXIS");
-        if (axis >= 0) line.RemoveRange(axis, 2);
-        var spacing = line.IndexOf("SLABRIBSPACING");
-        if (spacing >= 0) { line[spacing] = "SLABRIBSPACINGDIR1"; line.InsertRange(spacing + 2, ["SLABRIBSPACINGDIR2", line[spacing + 1]]); }
-    }
+    private static void Waffle(StructuralModel m, string name, double thickness, string material, PropertyDefs.Ribs ribs) =>
+        PropertyDefs.SetShellType(m, name, null, false, "Waffle", "ShellThin", thickness, material, false, ribs with { Spacing2 = ribs.Spacing });
 
     // ---- steel deck ----
 

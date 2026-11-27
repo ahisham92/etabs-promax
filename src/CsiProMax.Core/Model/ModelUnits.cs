@@ -81,7 +81,7 @@ public static partial class ModelUnits
         ["R33"] = Dim.Len, ["R22"] = Dim.Len, ["COVER"] = Dim.Len, ["COVERTOP"] = Dim.Len, ["COVERBOTTOM"] = Dim.Len, ["COVERBOT"] = Dim.Len,
         ["CONFINEBARSPACING"] = Dim.Len, ["SLABTHICKNESS"] = Dim.Len, ["WALLTHICKNESS"] = Dim.Len, ["DECKSLABDEPTH"] = Dim.Len, ["DECKRIBDEPTH"] = Dim.Len,
         ["DECKRIBWIDTHTOP"] = Dim.Len, ["DECKRIBWIDTHBOTTOM"] = Dim.Len, ["DECKRIBSPACING"] = Dim.Len, ["DECKSHEARTHICKNESS"] = Dim.Len,
-        ["SLABRIBWIDTHTOP"] = Dim.Len, ["SLABRIBWIDTHBOTTOM"] = Dim.Len, ["SLABRIBSPACING"] = Dim.Len, ["OVERALLDEPTH"] = Dim.Len,
+        ["SLABRIBWIDTHTOP"] = Dim.Len, ["SLABRIBWIDTHBOTTOM"] = Dim.Len, ["SLABRIBSPACING"] = Dim.Len, ["SLABRIBSPACINGDIR1"] = Dim.Len, ["SLABRIBSPACINGDIR2"] = Dim.Len, ["OVERALLDEPTH"] = Dim.Len,
         ["SHEARSTUDDIAM"] = Dim.Len, ["SHEARSTUDHEIGHT"] = Dim.Len, ["MEMBRANETHICKNESS"] = Dim.Len, ["BENDINGTHICKNESS"] = Dim.Len, ["DIA"] = Dim.Len,
         ["ANCHORSLIP"] = Dim.Len, ["LENGTHOFFI"] = Dim.Len, ["LENGTHOFFJ"] = Dim.Len, ["MAXSTASPC"] = Dim.Len, ["FLOORMESHMAXSIZE"] = Dim.Len,
         ["WALLMESHMAXSIZE"] = Dim.Len, ["MERGETOL"] = Dim.Len, ["MINLONGSPACING"] = Dim.Len, ["MAXLONGSPACING"] = Dim.Len, ["MINTRANSSPACING"] = Dim.Len,

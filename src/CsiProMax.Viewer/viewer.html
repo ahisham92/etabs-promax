@@ -228,7 +228,7 @@ footer #fbFilter{display:flex;align-items:center;gap:4px;border:0;border-left:1p
 .dlg .ex.ex2{grid-template-columns:1fr 150px}
 .dlg .fs2{display:grid;grid-template-columns:1fr 230px;gap:0 10px}.dlg .fs1{width:440px;margin:0 auto}.dlg .fsr{display:flex;flex-direction:column;gap:6px}
 .dlg .fspic{height:200px;border:1px solid #9aa;background:linear-gradient(#fff,#d9e3ee);display:flex;align-items:center;justify-content:center}
-.dlg .ex.fsx{grid-template-columns:150px 1fr 30px}.dlg .dots{min-width:26px;padding:0 4px}
+.dlg .ex.fsx{grid-template-columns:150px 1fr 30px}.dlg .ex.shg{grid-template-columns:190px 1fr 30px}.dlg table.ly select{appearance:none;border:0;background:transparent;width:100%}.dlg table.ly input{border:0;width:100%;box-sizing:border-box}.dlg .ex.shp{grid-template-columns:280px 1fr 30px}.dlg .ex.qlg{grid-template-columns:200px 1fr 30px}.dlg .dots{min-width:26px;padding:0 4px}
 .dlg .tile{width:76px;height:76px;padding:4px;display:flex;align-items:center;justify-content:center;background:#fff}
 .dlg table.grid{border-collapse:collapse;width:100%;background:#fff}.dlg table.grid th,.dlg table.grid td{border:1px solid #bbb;padding:1px 4px;font-weight:400;text-align:left}.dlg table.grid th{background:#eef1f5}
 .dlg table.grid td input,.dlg table.grid td select{width:100%;box-sizing:border-box;border:0}.dlg table.grid tr.on td{background:#dbe8f8}
@@ -6560,8 +6560,10 @@ function submit(d, tool, args, after) {
 function listForm(title, what, names, actions, onPick, extra) {
   const d = dialog(title, `<div style="display:flex;gap:10px"><fieldset style="flex:1;margin:0"><legend>${esc(what)}</legend>
       <select id="hmList" size="14" style="width:100%;height:auto;min-width:220px">${names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join("")}</select></fieldset>
-      <fieldset style="width:190px;margin:0"><legend>Click to:</legend><div style="display:flex;flex-direction:column;gap:6px">${actions.map((x, i) => `<button data-a="${i}">${esc(x[0])}</button>`).join("")}</div>${extra || ""}</fieldset></div>`,
+      <div id="lfR"><fieldset style="width:190px;margin:0"><legend>Click to:</legend><div style="display:flex;flex-direction:column;gap:6px">${actions.map((x, i) => `<button data-a="${i}">${esc(x[0])}</button>`).join("")}</div>${extra || ""}</fieldset></div></div>`,
     [["OK"], ["Cancel"]], {width: 480});
+  // ETABS 23.2 has OK and Cancel under Click to: (pictured Slab 1, Wall 1, Deck 1).
+  if (program === "etabs") dfInto(d, "#lfR");
   const list = q(d, "#hmList"); if (names.length) list.selectedIndex = 0;
   d.querySelectorAll("[data-a]").forEach(b => b.onclick = () => { const x = actions[+b.dataset.a]; x[1](list.value, d); });
   list.ondblclick = () => { if (onPick && list.value) onPick(list.value, d); };
@@ -8032,48 +8034,78 @@ async function hmDecks() {
   const pd = (await hmRun("property_definitions", {}, true)).result; if (!pd) return;
   const decks = pd.shell_sections.filter(s => s.deck), find = n => decks.find(s => s.name === n);
   const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmDecks(); };
-  listForm("Deck Properties", "Properties", decks.map(s => s.name), [
+  listForm("Deck Properties", "Deck Property", decks.map(s => s.name), [
     ["Add New Property...", () => hmDeck(null, pd, again)],
     ["Add Copy of Property...", n => n && hmDeck(find(n), pd, again, true)],
     ["Modify/Show Property...", n => n && hmDeck(find(n), pd, again)],
     ["Delete Property", n => n && hmRun("delete_definition", {kind: "shell_section", name: n}).then(j => j.ok ? again() : hmSay(j.error, true))],
   ], n => hmDeck(find(n), pd, again));
 }
+// Deck Property Data, as ETABS 23.2 has it (pictured Deck 2, 2b, 2c, 3a-3c): Type with its picture behind the "i", the slab
+// and deck materials with "..." ("Not Applicable" where the type has none), Modeling Type Membrane (greyed), Modifiers,
+// Display Color, Property Notes; Property Data shows only the type's own fields.
 function hmDeck(s, pd, after, copy) {
   const u = hmU(), k = (s && s.deck) || {}, x = (s && s.extras) || {}, mats = t => pd.materials.filter(m => t.test(m.type)).map(m => m.name);
-  const conc = mats(/concrete/i), steel = mats(/steel/i);
-  let mods = s ? {...s.modifiers} : {}, notes = x.Notes || "";
-  const f = (id, label, v, unit) => `<span>${label}</span><input id="${id}" type="number" step="any" value="${v ?? ""}"><span class="un">${unit}</span>`;
-  const d = dialog("Deck Property Data", `<fieldset><legend>General Data</legend><div class="g2">
-      <span>Property Name</span><input id="dkN" value="${esc(s ? (copy ? s.name + " copy" : s.name) : "Deck1")}">
-      <span>Type</span><select id="dkT">${opts(["Filled", "Unfilled", "Solid Slab"], k.deck_type || "Filled")}</select>
-      <span>Slab Material</span><select id="dkS">${opts(conc, k.slab_material || conc[0])}</select>
-      <span>Deck Material</span><select id="dkD">${opts(steel, k.deck_material || steel[0])}</select>
-      <span>Modeling Type</span><select disabled><option>Membrane</option></select>
-      <span>Modifiers (Currently ${s && Object.values(s.modifiers || {}).some(v => v !== 1) ? "User Specified" : "Default"})</span><button id="dkM">Modify/Show...</button>
-      <span>Display Color</span><input id="dkC" type="color" value="${/^#[0-9a-f]{6}$/i.test(x.Color || "") ? x.Color : "#bfa0ff"}" style="width:60px;padding:0">
-      <span>Property Notes</span><button id="dkNo">Modify/Show...</button></div></fieldset>
-    <fieldset><legend>Property Data</legend><div class="gu">
-      ${f("dk1", "Slab Depth, tc", k.slab_depth ?? 0.0875, u.l)}${f("dk2", "Rib Depth, hr", k.rib_depth ?? 0.075, u.l)}${f("dk3", "Rib Width Top, wrt", k.rib_width_top ?? 0.175, u.l)}${f("dk4", "Rib Width Bottom, wrb", k.rib_width_bottom ?? 0.125, u.l)}
-      ${f("dk5", "Rib Spacing, sr", k.rib_spacing ?? 0.3, u.l)}${f("dk6", "Deck Shear Thickness", k.shear_thickness ?? 0.001, u.l)}${f("dk7", "Deck Unit Weight", k.unit_weight ?? 0.11, `${u.f}/${u.l}²`)}
-      ${f("dk8", "Shear Stud Diameter", k.stud_diameter ?? 0.019, u.l)}${f("dk9", "Shear Stud Height, hs", k.stud_height ?? 0.15, u.l)}${f("dk10", "Shear Stud Tensile Strength, Fu", k.stud_fu ?? 400000, `${u.f}/${u.l}²`)}</div></fieldset>`,
+  const conc = () => mats(/concrete/i), steel = () => mats(/steel/i);
+  let mods = s ? {...s.modifiers} : {}, notes = x.Notes || "", color = x.Color || "Blue";
+  const l = (uLen[u.l] || 1) / 39.37008, f = (uForce[u.f] || 1) / 0.2248089, L = v0 => +(v0 * l).toPrecision(6), P = v0 => +(v0 * f / (l * l)).toPrecision(6);
+  const used = new Set(pd.shell_sections.map(z => z.name));
+  let n0 = s ? (copy ? s.name + " copy" : s.name) : null; for (let i = 1; !n0; i++) if (!used.has("Deck" + i)) n0 = "Deck" + i;
+  const pa = `${u.f}/${u.l}²`;
+  const row = (id, label, val, unit, kind) => `<span data-k="${kind}">${label}</span><input data-k="${kind}" id="${id}" type="number" step="any" value="${val}"><span data-k="${kind}" class="un">${unit}</span>`;
+  const pic = t => { const filled = t === "Filled", solid = t === "Solid Slab";
+    return `<svg width="240" height="120" viewBox="0 0 240 120" style="background:#fff"><rect x="8" y="8" width="224" height="104" rx="6" fill="#e8eef6" stroke="#999"/>
+      ${solid ? '<rect x="20" y="40" width="200" height="30" fill="#9aa"/>' : `<path d="M20 ${filled ? 44 : 56}h40l8 22h40l8-22h60l8 22h30" fill="none" stroke="#335" stroke-width="3"/>${filled ? '<path d="M20 30h196v16l-8-2-8 22h-40l-8-22h-60l-8 22h-40l-8-22h-16z" fill="#9aa" opacity=".8"/>' : ""}`}
+      ${filled || solid ? '<path d="M76 66v-30h-6h12M76 36" stroke="#000" stroke-width="3"/>' : ""}
+      <text x="120" y="104" font-size="11" text-anchor="middle" font-weight="bold">${solid ? "Solid Slab" : filled ? "Filled Deck" : "Unfilled Deck"}</text></svg>`; };
+  const d = dialog("Deck Property Data", `<fieldset><legend>General Data</legend><div class="ex shg">
+      <span>Property Name</span><input id="dkN" value="${esc(n0)}"><span></span>
+      <span>Type</span><select id="dkT">${opts(["Filled", "Unfilled", "Solid Slab"], k.deck_type || "Filled")}</select><span class="info" id="dkI" style="cursor:help">i</span>
+      <span>Slab Material</span><span id="dkSW"></span><button id="dkSb" class="dots">...</button>
+      <span>Deck Material</span><span id="dkDW"></span><button id="dkDb" class="dots">...</button>
+      <span>Modeling Type</span><select disabled><option>Membrane</option></select><span></span>
+      <span>Modifiers (Currently <span id="dkMT"></span>)</span><button id="dkM">Modify/Show...</button><span></span>
+      <span>Display Color</span><span style="display:grid;grid-template-columns:1fr 1fr;gap:6px"><span id="dkSw" style="height:20px;border:1px solid #888;display:block"></span><button id="dkC">Change...</button></span><span></span>
+      <span>Property Notes</span><button id="dkNo">Modify/Show...</button><span></span></div></fieldset>
+    <fieldset><legend>Property Data</legend><div class="ex shp" style="grid-template-columns:230px 1fr 50px">
+      ${row("dk1", "Slab Depth, tc", k.slab_depth ?? L(3.5), u.l, "c")}${row("dk2", "Rib Depth, hr", k.rib_depth ?? L(3), u.l, "d")}${row("dk3", "Rib Width Top, wrt", k.rib_width_top ?? L(7), u.l, "d")}${row("dk4", "Rib Width Bottom, wrb", k.rib_width_bottom ?? L(5), u.l, "d")}
+      ${row("dk5", "Rib Spacing, sr", k.rib_spacing ?? L(12), u.l, "d")}${row("dk6", "Deck Shear Thickness", k.shear_thickness ?? L(0.035), u.l, "d")}${row("dk7", "Deck Unit Weight", k.unit_weight ?? P(2.3 / 144000), pa, "d")}
+      ${row("dk8", "Shear Stud Diameter", k.stud_diameter ?? L(0.75), u.l, "c")}${row("dk9", "Shear Stud Height, hs", k.stud_height ?? L(6), u.l, "c")}${row("dk10", "Shear Stud Tensile Strength, Fu", k.stud_fu ?? P(65), pa, "c")}</div></fieldset>`,
     [["OK", d => {
-      const name = q(d, "#dkN").value.trim();
-      const args = {name, was: s && !copy && s.name !== name ? s.name : undefined, deck_type: q(d, "#dkT").value, slab_material: q(d, "#dkS").value, deck_material: q(d, "#dkD").value,
-        slab_depth: fnum(d, "#dk1"), rib_depth: fnum(d, "#dk2"), rib_width_top: fnum(d, "#dk3"), rib_width_bottom: fnum(d, "#dk4"), rib_spacing: fnum(d, "#dk5"), shear_thickness: fnum(d, "#dk6"),
-        unit_weight: fnum(d, "#dk7"), stud_diameter: fnum(d, "#dk8"), stud_height: fnum(d, "#dk9"), stud_fu: fnum(d, "#dk10"), modifiers: mods, extras: {Color: q(d, "#dkC").value, Notes: notes}};
-      for (const key in args) if (typeof args[key] === "number" && isNaN(args[key])) delete args[key];
+      const name = q(d, "#dkN").value.trim(), t = q(d, "#dkT").value, sm = q(d, "#dkS"), dm = q(d, "#dkD");
+      const args = {name, was: s && !copy && s.name !== name ? s.name : undefined, deck_type: t, slab_material: sm ? sm.value : undefined, deck_material: dm ? dm.value : undefined,
+        modifiers: mods, extras: {Color: color, Notes: notes}};
+      const keys = {dk1: "slab_depth", dk2: "rib_depth", dk3: "rib_width_top", dk4: "rib_width_bottom", dk5: "rib_spacing", dk6: "shear_thickness", dk7: "unit_weight", dk8: "stud_diameter", dk9: "stud_height", dk10: "stud_fu"};
+      for (const [id, key] of Object.entries(keys)) { const i = q(d, "#" + id); if (!i.hidden && i.value !== "") args[key] = +i.value; }
       return submit(d, "define_deck", args, after);
-    }, true], ["Cancel"]], {width: 520});
+    }, true], ["Cancel"]], {width: 470});
+  const na = `<input class="grey" readonly value="Not Applicable">`;
   // A filled deck has every field; an unfilled deck no concrete or studs; a solid slab no deck.
   const paint = () => {
     const t = q(d, "#dkT").value, concrete = t !== "Unfilled", deck = t !== "Solid Slab";
-    q(d, "#dkS").disabled = !concrete; q(d, "#dkD").disabled = !deck;
-    ["#dk1", "#dk8", "#dk9", "#dk10"].forEach(id => q(d, id).disabled = !concrete); ["#dk2", "#dk3", "#dk4", "#dk5", "#dk6", "#dk7"].forEach(id => q(d, id).disabled = !deck);
+    const sv = q(d, "#dkS") ? q(d, "#dkS").value : k.slab_material, dv = q(d, "#dkD") ? q(d, "#dkD").value : k.deck_material;
+    q(d, "#dkSW").innerHTML = concrete ? `<select id="dkS" style="width:100%">${opts(conc(), sv && conc().includes(sv) ? sv : conc().includes("4000Psi") ? "4000Psi" : conc()[0])}</select>` : na;
+    q(d, "#dkDW").innerHTML = deck ? `<select id="dkD" style="width:100%">${opts(steel(), dv && steel().includes(dv) ? dv : steel().includes("A992Fy50") ? "A992Fy50" : steel()[0])}</select>` : na;
+    d.querySelectorAll("[data-k=c]").forEach(e => e.hidden = !concrete); d.querySelectorAll("[data-k=d]").forEach(e => e.hidden = !deck);
+    q(d, "#dkI").title = ""; q(d, "#dkI").dataset.t = t;
   };
   q(d, "#dkT").onchange = paint; paint();
-  q(d, "#dkM").onclick = () => hmModifiers(pd.shell_modifiers, mods, o => { mods = o; });
-  q(d, "#dkNo").onclick = () => { const n = dialog("Property Notes", `<textarea id="nT" rows="8" style="width:100%">${esc(notes)}</textarea>`, [["OK", n => { notes = q(n, "#nT").value; }], ["Cancel"]], {width: 420}); };
+  const tip = document.createElement("div"); tip.style.cssText = "position:fixed;z-index:99;display:none;box-shadow:0 2px 6px #0004";
+  document.body.appendChild(tip);
+  q(d, "#dkI").onmouseenter = e => { tip.innerHTML = pic(q(d, "#dkT").value); tip.style.left = e.clientX + 12 + "px"; tip.style.top = e.clientY + 12 + "px"; tip.style.display = "block"; };
+  q(d, "#dkI").onmouseleave = () => tip.style.display = "none";
+  new MutationObserver((_, ob) => { if (!document.body.contains(d)) { tip.remove(); ob.disconnect(); } }).observe(document.body, {childList: true});
+  const modText = () => q(d, "#dkMT").textContent = Object.values(mods || {}).some(v0 => Math.abs(v0 - 1) > 1e-12) ? "User Specified" : "Default";
+  const swatch = () => q(d, "#dkSw").style.background = matColorCss(color);
+  q(d, "#dkM").onclick = () => hmModifiers(pd.shell_modifiers, mods, o => { mods = o; modText(); });
+  q(d, "#dkC").onclick = () => hmColor(color, c => { color = c; swatch(); });
+  q(d, "#dkNo").onclick = () => dialog("Property Notes", `<div class="g2" style="margin-bottom:6px"><span>Property Name</span><input class="grey" readonly value="${esc(q(d, "#dkN").value)}"></div><textarea id="nT" rows="8" style="width:100%;box-sizing:border-box">${esc(notes)}</textarea>`, [["OK", n => { notes = q(n, "#nT").value; }], ["Cancel"]], {width: 420});
+  const dots = (b, sel) => q(d, b).onclick = async () => { const m = await hmMaterials(); if (!m || !m.addEventListener) return;
+    const ob = new MutationObserver(async () => { if (document.body.contains(m)) return; ob.disconnect(); const p2 = (await hmRun("property_definitions", {}, true)).result; if (p2) { pd.materials = p2.materials; paint(); } });
+    ob.observe(document.body, {childList: true}); };
+  dots("#dkSb", "#dkS"); dots("#dkDb", "#dkD");
+  modText(); swatch();
+  return d;
 }
 async function hmShellSections(kind) {
   if (program === "sap2000") return hmSapAreaSections();
@@ -8081,22 +8113,323 @@ async function hmShellSections(kind) {
   const defs = await hmDefs(), sap = program === "sap2000";
   if (!sap && !kind) kind = "slab";
   const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmShellSections(kind); };
-  const find = n => defs.shell_sections.find(s => s.name === n);
-  const names = defs.shell_sections.filter(s => sap ? s.kind !== "deck" : s.kind === kind).map(s => s.name);
+  const autoW = !sap && kind === "wall" && program === "etabs" ? [...new Set(((((await hmRun("definition_data", {}, true)).result || {}).tables || {})[shAutoT] || {rows: []}).rows.map(r => r.Name))] : [];
+  const names = [...defs.shell_sections.filter(s => sap ? s.kind !== "deck" : s.kind === kind).map(s => s.name), ...autoW];
+  const find = n => defs.shell_sections.find(s => s.name === n) || (autoW.includes(n) ? {name: n, kind: "wall"} : null);
+  // Delete Property: an auto select list is its rows; a section takes its layers with it.
+  const del = async n => {
+    if (autoW.includes(n)) { const j = await hmRun("define_table_rows", {table: shAutoT, name: n, rows: []}); return j.ok ? again() : hmSay(j.error, true); }
+    const j = await hmRun("delete_definition", {kind: "shell_section", name: n}); if (!j.ok) return hmSay(j.error, true);
+    if (program === "etabs") await hmRun("define_table_rows", {table: shLayerT(kind === "wall"), name: n, rows: []}, true);
+    again();
+  };
   const title = sap ? "Area Sections" : kind === "wall" ? "Wall Properties" : "Slab Properties";
-  const d = listForm(title, sap ? "Sections" : "Properties", names, [
+  const d = listForm(title, sap ? "Sections" : kind === "wall" ? "Wall Property" : "Slab Property", names, [
     [sap ? "Add New Section..." : "Add New Property...", () => hmShellSection(null, again, false, sap ? "slab" : kind)],
     [sap ? "Add Copy of Section..." : "Add Copy of Property...", n => n && hmShellSection(find(n), again, true)],
     [sap ? "Modify/Show Section..." : "Modify/Show Property...", n => n && hmShellSection(find(n), again)],
-    [sap ? "Delete Section" : "Delete Property", n => n && hmRun("delete_definition", {kind: "shell_section", name: n}).then(j => j.ok ? again() : hmSay(j.error, true))],
+    [sap ? "Delete Section" : "Delete Property", n => n && del(n)],
   ], n => hmShellSection(find(n), again));
   // SAP2000's Area Sections asks the section type first: Shell (the Modeler's areas are shells).
   if (sap) { const f = d.querySelector(".db > div"); f.insertAdjacentHTML("beforebegin", `<fieldset style="margin:0 0 6px"><legend>Select Section Type To Add</legend><select disabled style="width:100%"><option>Shell</option></select></fieldset>`); }
   return d;
 }
+// Slab Property Data and Wall Property Data, as ETABS 23.2 has them (pictured Slab 2-8, Wall 2-5a): General Data with
+// the material and its "..." button, Notional Size Data, Modeling Type, Modifiers, Display Color and Property Notes;
+// Property Data by the slab's Type (Slab, Drop, Stiff, Ribbed, Waffle, Mat, Footing) or the wall's thickness and rigid
+// zone. Layered takes its materials from the layers (Slab/Wall Property Layer Definition Data); a wall's Property Type
+// Auto Select List keeps its list in "Wall Property Definitions - Auto Select List".
+const shLayerT = w => w ? "Wall Property Definitions - Layers" : "Slab Property Definitions - Layers";
+const shAutoT = "Wall Property Definitions - Auto Select List";
+async function hmEtabsShellSection(s, after, copy, newKind) {
+  const u = hmU(), pd = (await hmRun("property_definitions", {}, true)).result, dd = (await hmRun("definition_data", {}, true)).result || {tables: {}};
+  if (!pd) return;
+  const kind = s ? s.kind : newKind || "slab", wall = kind === "wall", was = s && !copy ? s.name : null;
+  const cur = s ? pd.shell_sections.find(x => x.name === s.name) : null, tables = dd.tables || {};
+  const T = t => (tables[t] && tables[t].rows) || [], autoRows = s ? T(shAutoT).filter(r => r.Name === s.name) : [];
+  let mods = cur ? {...cur.modifiers} : null, layers = s ? T(shLayerT(wall)).filter(r => r.Name === s.name).map(r => ({...r})) : [];
+  let auto = autoRows.map(r => r.IncludedPrp).filter(Boolean), start = (autoRows[0] && autoRows[0].StartProp) || "Median Property by Thickness";
+  const ex = {...((cur && cur.extras) || {})};
+  if (autoRows[0]) { ex.Color = autoRows[0].Color || ex.Color; ex.Notes = autoRows[0].Notes || ex.Notes; }
+  if (!ex.Color) ex.Color = wall ? "Green" : "Gray8Dark";
+  const used = new Set([...pd.shell_sections.map(x => x.name), ...T(shAutoT).map(r => r.Name)]);
+  let n0 = s ? (copy ? s.name + " copy" : s.name) : null;
+  if (!n0) { for (let i = 1; ; i++) if (!used.has((wall ? "Wall" : "Slab") + i)) { n0 = (wall ? "Wall" : "Slab") + i; break; } }
+  const concs = () => pd.materials.filter(m => /concrete/i.test(m.type)).map(m => m.name);
+  const allMats = () => pd.materials.map(m => m.name);
+  const L = `<span class="un">${u.l}</span>`, na = `<input class="grey" readonly value="Not Applicable">`;
+  const v = (x, d) => x != null && x !== "" ? x : d;
+  const th = v(cur && cur.thickness, inTo(wall ? 12 : 8, u)), rib = k => v(cur && cur[k], null);
+  const ribRow = (id, label, val) => `<span data-r>${label}</span><input data-r id="${id}" type="number" step="any" value="${val}"><span data-r class="un">${u.l}</span>`;
+  const types = (pd.slab_types || ["Slab", "Drop", "Stiff", "Ribbed", "Waffle", "Mat", "Footing"]);
+  const modelLabel = {ShellThin: "Shell-Thin", ShellThick: "Shell-Thick", Membrane: "Membrane", Layered: "Layered"};
+  const modeling = (pd.modeling_types || ["ShellThin", "ShellThick", "Membrane", "Layered"]).map(k => [k, modelLabel[k] || k]);
+  const matNow = cur && cur.material || (concs().includes("4000Psi") ? "4000Psi" : concs()[0]);
+  const isAuto = wall && autoRows.length > 0;
+  const d = dialog(wall ? "Wall Property Data" : "Slab Property Data", `<fieldset><legend>General Data</legend><div class="ex shg">
+      <span>Property Name</span><input id="aN" value="${esc(n0)}"><span></span>
+      ${wall ? `<span>Property Type</span><select id="aPT">${opts(["Specified", "Auto Select List"], isAuto ? "Auto Select List" : "Specified")}</select><span></span>` : ""}
+      <span id="aML">${wall ? "Wall" : "Slab"} Material</span><span id="aMW"><select id="aM">${opts(concs(), matNow)}</select></span><button id="aMb" class="dots">...</button>
+      <span id="aNotL">Notional Size Data</span><span id="aNotW"><button id="aNot" style="width:100%">Modify/Show Notional Size...</button></span><span></span>
+      <span>Modeling Type</span><span id="aGW"><select id="aG">${opts(modeling, cur && cur.modeling || "ShellThin")}</select></span><span></span>
+      <span id="aModL">Modifiers (Currently <span id="aModT"></span>)</span><span id="aModW"><button id="aMod" style="width:100%">Modify/Show...</button></span><span></span>
+      <span>Display Color</span><span style="display:grid;grid-template-columns:1fr 1fr;gap:6px"><span id="aSw" style="height:20px;border:1px solid #888;display:block"></span><button id="aCol">Change...</button></span><span></span>
+      <span>Property Notes</span><button id="aNotes">Modify/Show...</button><span></span></div></fieldset>
+    <fieldset><legend>Property Data</legend><div id="aPD" style="min-height:${wall ? 90 : 190}px"></div></fieldset>`,
+    [["OK", d => save(d), true], ["Cancel"]], {width: 490});
+  const pdBox = q(d, "#aPD");
+  // The Property Data box for the choices made: a layered or auto select section has one button and its count.
+  const paint = () => {
+    const auto = wall && q(d, "#aPT").value === "Auto Select List", layered = !auto && q(d, "#aG").value === "Layered";
+    const wasRib = !!pdBox.querySelector("#aRD"), keep = {}; pdBox.querySelectorAll("input,select").forEach(i => { if (i.id) keep[i.id] = i.type === "checkbox" ? i.checked : i.value; });
+    q(d, "#aMW").innerHTML = auto || layered ? na : `<select id="aM">${opts(concs(), q(d, "#aM") ? q(d, "#aM").value : matNow)}</select>`;
+    q(d, "#aMb").style.visibility = auto || layered ? "hidden" : "";
+    q(d, "#aNot").disabled = auto || layered; q(d, "#aNotL").style.color = layered ? "#999" : "";
+    if (auto) { q(d, "#aNotW").innerHTML = na; q(d, "#aGW").innerHTML = na; q(d, "#aModW").innerHTML = na; q(d, "#aModL").textContent = "Modifiers"; }
+    else {
+      if (!q(d, "#aNot")) { q(d, "#aNotW").innerHTML = `<button id="aNot" style="width:100%" ${layered ? "disabled" : ""}>Modify/Show Notional Size...</button>`; q(d, "#aNot").onclick = notional; }
+      if (!q(d, "#aG")) { q(d, "#aGW").innerHTML = `<select id="aG">${opts(modeling, cur && cur.modeling || "ShellThin")}</select>`; q(d, "#aG").onchange = paint; }
+      if (!q(d, "#aMod")) { q(d, "#aModW").innerHTML = `<button id="aMod" style="width:100%">Modify/Show...</button>`; q(d, "#aModL").innerHTML = `Modifiers (Currently <span id="aModT"></span>)`; q(d, "#aMod").onclick = modify; modText(); }
+    }
+    if (auto) pdBox.innerHTML = `<div style="text-align:center;padding:10px 0"><button id="aAS" style="min-width:220px">Modify/Show Auto Select List...</button><div style="margin-top:4px">Current Number of Properties in List: ${auto ? autoCount() : 0}</div></div>`;
+    else if (layered) pdBox.innerHTML = `<div style="text-align:center;padding:28px 0 10px"><button id="aLy" style="min-width:220px">Modify/Show Layered ${wall ? "Wall" : "Slab"} Data</button><div style="margin-top:4px">Current Number of Layers: ${layers.length}</div></div>`
+      + (wall ? `<label style="display:block;margin-top:10px"><input type="checkbox" id="aRZ" ${ex.RigidZone === "Yes" ? "checked" : ""}> Include Automatic Rigid Zone Area Over Wall</label>` : "");
+    else if (wall) pdBox.innerHTML = `<div class="ex shg"><span>Thickness</span><input id="aT" type="number" step="any" value="${th}">${L}</div>
+      <label style="display:block;margin-top:10px"><input type="checkbox" id="aRZ" ${ex.RigidZone === "Yes" ? "checked" : ""}> Include Automatic Rigid Zone Area Over Wall</label>`;
+    else {
+      const t = q(d, "#aY") ? q(d, "#aY").value : cur && cur.slab_type || "Slab", ribbed = t === "Ribbed" || t === "Waffle";
+      if (ribbed !== wasRib) delete keep.aT;
+      pdBox.innerHTML = `<div class="ex shp"><span>Type</span><select id="aY">${opts(types, t)}</select><span></span>
+        ${ribbed ? ribRow("aRD", "Overall Depth", v(rib("overall_depth"), inTo(8, u))) : ""}
+        <span>${ribbed ? "Slab Thickness" : "Thickness"}</span><input id="aT" type="number" step="any" value="${ribbed ? v(cur && cur.overall_depth && cur.thickness, inTo(4, u)) : th}">${L}
+        ${ribbed ? ribRow("aRT", "Stem Width at Top", v(rib("rib_width_top"), inTo(6, u))) + ribRow("aRB", "Stem Width at Bottom", v(rib("rib_width_bottom"), inTo(6, u))) : ""}
+        ${t === "Ribbed" ? ribRow("aRS", "Rib Spacing (Perpendicular to Rib Direction)", v(rib("rib_spacing"), inTo(36, u))) + `<span>Rib Direction is Parallel to</span><select id="aRA">${opts([["1", "Local 1 Axis"], ["2", "Local 2 Axis"]], String(v(rib("rib_direction"), 1)))}</select><span></span>` : ""}
+        ${t === "Waffle" ? ribRow("aRS", "Spacing of Ribs that are Parallel to Slab 1-Axis", v(rib("rib_spacing"), inTo(36, u))) + ribRow("aRS2", "Spacing of Ribs that are Parallel to Slab 2-Axis", v(rib("rib_spacing_2") ?? rib("rib_spacing"), inTo(36, u))) : ""}</div>`;
+      q(d, "#aY").onchange = paint;
+    }
+    for (const [id, val] of Object.entries(keep)) { const i = pdBox.querySelector("#" + id); if (i && id !== "aY") { if (i.type === "checkbox") i.checked = val; else i.value = val; } }
+    const ly = q(d, "#aLy"); if (ly) ly.onclick = () => hmLayers(wall, q(d, "#aN").value, layers, pd, dd, u, out => { layers = out; paint(); });
+    const as = q(d, "#aAS"); if (as) as.onclick = () => hmWallAutoList(pd, tables, q(d, "#aN").value, auto0(), start, (list, st) => { auto = list; start = st; paint(); });
+  };
+  const auto0 = () => auto, autoCount = () => auto.length;
+  const swatch = () => q(d, "#aSw").style.background = matColorCss(ex.Color);
+  const modText = () => { const t = q(d, "#aModT"); if (t) t.textContent = Object.values(mods || {}).some(x => Math.abs(x - 1) > 1e-12) ? "User Specified" : "Default"; };
+  const notional = () => hmNotional(ex, u);
+  const modify = () => hmModifiers(pd.shell_modifiers || [], mods, o => { mods = o; modText(); });
+  q(d, "#aNot").onclick = notional; q(d, "#aMod").onclick = modify; q(d, "#aG").onchange = paint;
+  if (wall) q(d, "#aPT").onchange = paint;
+  q(d, "#aCol").onclick = () => hmColor(ex.Color, c => { ex.Color = c; swatch(); });
+  q(d, "#aNotes").onclick = () => dialog("Property Notes", `<div class="g2" style="margin-bottom:6px"><span>Property Name</span><input class="grey" readonly value="${esc(q(d, "#aN").value)}"></div><textarea id="nT" rows="8" style="width:100%;box-sizing:border-box">${esc(ex.Notes || "")}</textarea>`, [["OK", n => { ex.Notes = q(n, "#nT").value; }], ["Cancel"]], {width: 420});
+  q(d, "#aMb").onclick = async () => {
+    const m = await hmMaterials(); if (!m || !m.addEventListener) return;
+    const done = new MutationObserver(async () => { if (document.body.contains(m)) return; done.disconnect(); const p2 = (await hmRun("property_definitions", {}, true)).result; if (p2) { pd.materials = p2.materials; const sel = q(d, "#aM"); if (sel) { const was0 = sel.value, list = concs(); sel.innerHTML = opts(list, list.includes(was0) ? was0 : list[0]); } } });
+    done.observe(document.body, {childList: true});
+  };
+  async function save(d) {
+    const name = q(d, "#aN").value.trim(), auto1 = wall && q(d, "#aPT").value === "Auto Select List";
+    if (!name) { formError(d, "Give the property a name."); return false; }
+    if (auto1) {
+      if (!auto.length) { formError(d, "Add at least one wall property to the auto select list."); return false; }
+      if (was && was !== name) { const j0 = await hmRun("define_table_rows", {table: shAutoT, name: was, rows: []}, true); if (!j0.ok) { formError(d, j0.error); return false; } }
+      // A specified wall turned into an auto select list stops being a section.
+      if (was && cur) { const j1 = await hmRun("delete_definition", {kind: "shell_section", name: was}, true); if (!j1.ok) { formError(d, j1.error); return false; } }
+      const j = await hmRun("define_table_rows", {table: shAutoT, name, rows: auto.map((p, i) => i ? {IncludedPrp: p} : {IncludedPrp: p, StartProp: start, Color: ex.Color, Notes: ex.Notes || ""})}, true);
+      if (!j.ok) { formError(d, j.error); return false; }
+      hm.sec[kind] = name; if (after) after(j); return true;
+    }
+    const g = q(d, "#aG").value, layered = g === "Layered";
+    const total = layers.reduce((a, r) => a + (+r.Thickness || 0), 0);
+    if (layered && !layers.length) { formError(d, "A layered section needs its layers: Modify/Show Layered " + (wall ? "Wall" : "Slab") + " Data."); return false; }
+    const args = {name, was: was || undefined, kind, modeling: g, material: layered ? "" : q(d, "#aM").value, thickness: layered ? total : fnum(d, "#aT"), modifiers: mods || undefined};
+    if (!wall) {
+      args.slab_type = layered ? "Slab" : q(d, "#aY").value; args.one_way = !!(cur && cur.one_way);
+      if (!layered && (args.slab_type === "Ribbed" || args.slab_type === "Waffle")) Object.assign(args, {overall_depth: fnum(d, "#aRD"), rib_width_top: fnum(d, "#aRT"), rib_width_bottom: fnum(d, "#aRB"), rib_spacing: fnum(d, "#aRS")},
+        args.slab_type === "Ribbed" ? {rib_direction: parseInt(q(d, "#aRA").value) || 1} : {rib_spacing_2: fnum(d, "#aRS2")});
+    }
+    const e = {Color: ex.Color, Notes: ex.Notes || ""};
+    for (const f of ["NotSizeType", "NotAutoFact", "NotUserSize", "MatAngle", "BendThick"]) if (ex[f]) e[f] = ex[f];
+    if (layered) { delete e.NotSizeType; delete e.NotAutoFact; delete e.NotUserSize; }
+    if (wall) e.RigidZone = q(d, "#aRZ") && q(d, "#aRZ").checked ? "Yes" : "";
+    args.extras = e;
+    const j = await hmRun("define_shell_type", args, true);
+    if (!j.ok) { formError(d, j.error); return false; }
+    if (was && autoRows.length) await hmRun("define_table_rows", {table: shAutoT, name: was, rows: []}, true);
+    // The layers follow the section (none when it is no longer layered); a renamed section's old layers go.
+    if (was && was !== name && layers.length) await hmRun("define_table_rows", {table: shLayerT(wall), name: was, rows: []}, true);
+    const jl = await hmRun("define_table_rows", {table: shLayerT(wall), name, rows: layered ? layers.map(r => { const o = {...r}; delete o.Name; return o; }) : []}, true);
+    if (!jl.ok) { formError(d, jl.error); return false; }
+    hm.sec[kind] = name; if (after) after(j); return true;
+  }
+  swatch(); modText(); paint();
+  return d;
+}
+
+// Wall Auto Select List Data (pictured Wall 3a, 3b): Available Properties, Add >> and << Remove, the Auto Select List, and
+// the Starting Property with Modify... (Auto Select Start Property: Median Property by Thickness or one of the list).
+function hmWallAutoList(pd, tables, self, now, start, done) {
+  const walls = pd.shell_sections.filter(s => s.kind === "wall" && s.name !== self).map(s => s.name);
+  let list = now.slice(), st = start;
+  const d = dialog("Wall Auto Select List Data", `<fieldset><legend>Choose Properties in Auto Select List</legend><div style="display:grid;grid-template-columns:1fr 110px 1fr;gap:10px;align-items:center">
+      <div><div>Available Properties</div><select id="waA" size="12" multiple style="width:100%;height:190px"></select></div>
+      <div style="display:flex;flex-direction:column;gap:8px"><button id="waAdd">Add &gt;&gt;</button><button id="waRem">&lt;&lt; Remove</button></div>
+      <div><div>Auto Select List</div><select id="waL" size="12" multiple style="width:100%;height:190px"></select></div></div></fieldset>
+    <fieldset><legend>Starting Property in Auto Select List</legend><div style="display:grid;grid-template-columns:140px 1fr 90px;gap:8px;align-items:center"><span>Starting Property</span><input id="waS" class="grey" readonly><button id="waM">Modify...</button></div></fieldset>`,
+    [["OK", () => done(list, list.includes(st) ? st : "Median Property by Thickness")], ["Cancel"]], {width: 560});
+  const paint = () => {
+    q(d, "#waA").innerHTML = walls.filter(w => !list.includes(w)).map(w => `<option>${esc(w)}</option>`).join("");
+    q(d, "#waL").innerHTML = list.map(w => `<option>${esc(w)}</option>`).join("");
+    if (!list.includes(st)) st = "Median Property by Thickness"; q(d, "#waS").value = st;
+  };
+  const picked = id => [...q(d, id).selectedOptions].map(o => o.value);
+  q(d, "#waAdd").onclick = () => { list.push(...picked("#waA")); paint(); };
+  q(d, "#waRem").onclick = () => { const r = picked("#waL"); list = list.filter(w => !r.includes(w)); paint(); };
+  q(d, "#waM").onclick = () => { const all = ["Median Property by Thickness", ...list];
+    dialog("Auto Select Start Property", `<fieldset><legend>Select</legend><select id="wsP" size="12" style="width:100%;height:220px">${all.map(x => `<option ${x === st ? "selected" : ""}>${esc(x)}</option>`).join("")}</select></fieldset>`,
+      [["OK", x => { st = q(x, "#wsP").value || st; paint(); }], ["Cancel"]], {width: 240}); };
+  paint();
+  return d;
+}
+
+// Slab/Wall Property Layer Definition Data (pictured Slab 5, 5a, Wall 5a): the layer grid (Layer Name, Distance, Thickness,
+// Modeling Type, Number Integration Points, Material, Material Angle, Material Behavior, Material S11/S22/S12) with Add,
+// Add Copy, Delete and the up and down arrows; Calculated Layer Information; the Cross Section with Highlight Selected
+// Layer, Transparency and Vertical Scale; Order Layers; Quick Start's Parametric Quick Start....
+function hmLayers(wall, name, now, pd, dd, u, done) {
+  let rows = now.map(r => ({...r})), sel = rows.length ? 0 : -1;
+  const mats = pd.materials.map(m => m.name), conc = pd.materials.filter(m => /concrete/i.test(m.type)).map(m => m.name);
+  const cols = [["LayerName", "Layer Name", "t", 140], ["Distance", "Distance", "n", 86], ["Thickness", "Thickness", "n", 86], ["ModelType", "Modeling<br>Type", ["Shell", "Membrane", "Plate"], 76],
+    ["NumIntPts", "Number<br>Integration<br>Points", ["1", "2", "3", "4", "5", "6", "7"], 64], ["Material", "Material", mats, 130], ["MatAng", "Material<br>Angle", "n", 70],
+    ["Behavior", "Material<br>Behavior", ["Directional", "Coupled"], 82], ["S11", "Material S11", ["Linear", "Nonlinear", "Inactive"], 74], ["S22", "Material S22", ["Linear", "Nonlinear", "Inactive"], 74], ["S12", "Material S12", ["Linear", "Nonlinear", "Inactive"], 74]];
+  const d = dialog(`${wall ? "Wall" : "Slab"} Property Layer Definition Data - ${name}`, `<fieldset><legend>Layer Definition Data</legend><div style="display:grid;grid-template-columns:1fr 84px;gap:10px">
+      <div style="height:210px;overflow:auto;border:1px solid #333;background:#fff"><table class="grid ly" id="lyG"><thead><tr>${cols.map(c => `<th style="min-width:${c[3]}px">${c[1]}</th>`).join("")}</tr></thead><tbody></tbody></table></div>
+      <div style="display:flex;flex-direction:column;gap:6px"><button id="lyA">Add</button><button id="lyC">Add Copy</button><button id="lyD">Delete</button><span style="flex:1"></span><span style="display:flex;gap:6px"><button id="lyU" title="Move up">&#x2191;</button><button id="lyW" title="Move down">&#x2193;</button></span></div></div>
+    <div style="display:grid;grid-template-columns:1fr 180px 230px 230px;gap:10px;margin-top:8px;align-items:start">
+      <div><u>Calculated Layer Information</u><div id="lyI" style="margin:6px 0 0 30px;line-height:1.9"></div></div>
+      <div style="text-align:center;background:#fff;border:1px solid #ddd"><u>Cross Section</u><svg id="lyX" width="176" height="110"></svg></div>
+      <div><label><input type="checkbox" id="lyH"> Highlight Selected Layer</label><div style="margin-top:8px;white-space:nowrap"><input type="range" id="lyTr" min="0" max="100" value="50" style="width:90px;vertical-align:middle"> Transparency</div><div style="white-space:nowrap"><input type="range" id="lyVs" min="1" max="100" value="100" style="width:90px;vertical-align:middle"> Vertical Scale</div><div class="kv" style="display:flex;justify-content:space-between;width:96px"><span>Min</span><span>Max</span></div></div>
+      <div><u>Order Layers</u><div style="display:flex;flex-direction:column;gap:6px;margin:6px 0 10px"><button id="lyOa">Order Ascending by Distance</button><button id="lyOd">Order Descending by Distance</button></div>
+        <u>Quick Start</u><div style="margin-top:6px"><button id="lyQ" style="width:100%">Parametric Quick Start...</button></div></div></div></fieldset>`,
+    [["OK", () => done(rows.map((r, i) => ({...r, LayerName: r.LayerName || String(i + 1)})))], ["Cancel"]], {width: 1230});
+  const body = q(d, "#lyG tbody"), U = u.l;
+  const cell = (r, i, c) => Array.isArray(c[2]) ? `<select data-i="${i}" data-k="${c[0]}">${opts(c[2], r[c[0]] || c[2][0])}</select>` : `<input data-i="${i}" data-k="${c[0]}" ${c[2] === "n" ? 'type="number" step="any"' : ""} value="${esc(r[c[0]] ?? "")}">`;
+  const nm = x => +(+x).toPrecision(6);
+  const paint = () => {
+    body.innerHTML = rows.map((r, i) => `<tr data-row="${i}" style="${i === sel ? "outline:2px solid #3399ff" : ""}">${cols.map(c => `<td>${cell(r, i, c)}</td>`).join("")}</tr>`).join("");
+    body.querySelectorAll("[data-k]").forEach(x => { x.onchange = () => { rows[+x.dataset.i][x.dataset.k] = x.value; info(); }; x.onfocus = () => { if (sel !== +x.dataset.i) { sel = +x.dataset.i; body.querySelectorAll("tr").forEach((t, k) => t.style.outline = k === sel ? "2px solid #3399ff" : ""); draw(); } }; });
+    ["#lyC", "#lyD"].forEach(b => q(d, b).disabled = sel < 0); q(d, "#lyU").disabled = sel <= 0; q(d, "#lyW").disabled = sel < 0 || sel >= rows.length - 1;
+    q(d, "#lyOa").disabled = q(d, "#lyOd").disabled = rows.length < 2;
+    info();
+  };
+  const span = () => rows.map(r => [(+r.Distance || 0) - (+r.Thickness || 0) / 2, (+r.Distance || 0) + (+r.Thickness || 0) / 2]).sort((a, b) => a[0] - b[0]);
+  const info = () => {
+    const sp = span(); let over = 0, gaps = 0, end = sp.length ? sp[0][1] : 0;
+    for (let i = 1; i < sp.length; i++) { const [a, b] = sp[i]; if (a < end) over += Math.min(b, end) - a; else gaps += a - end; end = Math.max(end, b); }
+    const total = sp.length ? Math.max(...sp.map(x => x[1])) - Math.min(...sp.map(x => x[0])) : 0;
+    q(d, "#lyI").innerHTML = `Number of Layers: ${rows.length}<br>Total Section Thickness: ${nm(total)} ${U}<br>Sum of Layer Overlaps: ${nm(over)} ${U}<br>Sum of Gaps Between Layer: ${nm(gaps)} ${U}`;
+    draw();
+  };
+  const draw = () => {
+    const sp = span(), svg = q(d, "#lyX"); if (!sp.length) { svg.innerHTML = ""; return; }
+    const lo = Math.min(...sp.map(x => x[0])), hi = Math.max(...sp.map(x => x[1])), vs = +q(d, "#lyVs").value / 100, h = Math.max(hi - lo, 1e-9);
+    const y = z => 55 - (z - (lo + hi) / 2) / h * 84 * vs, op = 1 - +q(d, "#lyTr").value / 100 * 0.8;
+    svg.innerHTML = rows.map((r, i) => { const a = (+r.Distance || 0) + (+r.Thickness || 0) / 2, b = a - (+r.Thickness || 0); const hl = q(d, "#lyH").checked && i === sel;
+      return `<rect x="12" y="${y(a)}" width="152" height="${Math.max(y(b) - y(a), 1)}" fill="${hl ? "#ffd200" : r.ModelType === "Membrane" ? "#3c50ff" : "#ff66ff"}" fill-opacity="${op}" stroke="#c000c0"/>`; }).join("")
+      + `<path d="M0 55H176" stroke="#000" stroke-dasharray="6 2 1 2"/>`;
+  };
+  const blank = () => ({LayerName: String(rows.length + 1), Distance: "0", Thickness: String(inTo(1, u)), ModelType: "Shell", NumIntPts: "2", Material: conc[0] || mats[0], MatAng: "0", Behavior: "Directional", S11: "Linear", S22: "Linear", S12: "Linear"});
+  q(d, "#lyA").onclick = () => { rows.push(blank()); sel = rows.length - 1; paint(); };
+  q(d, "#lyC").onclick = () => { if (sel < 0) return; const c = {...rows[sel], LayerName: String(rows.length + 1)}; rows.push(c); sel = rows.length - 1; paint(); };
+  q(d, "#lyD").onclick = () => { if (sel < 0) return; rows.splice(sel, 1); sel = Math.min(sel, rows.length - 1); paint(); };
+  const move = k => { const j = sel + k; if (sel < 0 || j < 0 || j >= rows.length) return; [rows[sel], rows[j]] = [rows[j], rows[sel]]; sel = j; paint(); };
+  q(d, "#lyU").onclick = () => move(-1); q(d, "#lyW").onclick = () => move(1);
+  q(d, "#lyOa").onclick = () => { rows.sort((a, b) => (+a.Distance || 0) - (+b.Distance || 0)); paint(); };
+  q(d, "#lyOd").onclick = () => { rows.sort((a, b) => (+b.Distance || 0) - (+a.Distance || 0)); paint(); };
+  ["#lyH", "#lyTr", "#lyVs"].forEach(x => q(d, x).oninput = draw);
+  q(d, "#lyQ").onclick = () => hmQuickLayers(pd, dd, u, out => { rows = out; sel = rows.length ? 0 : -1; paint(); });
+  paint();
+  return d;
+}
+
+// Quick Layer Definition Data (pictured Slab 6): General Data (Concrete and Rebar Material with "...", Concrete Thickness,
+// Number of Rebar Layers), In-Plane Component Behavior (S11, S22, S12 Nonlinear), Out-of-Plane Component Behavior (Same as
+// In-Plane, Linear), Rebar Size, Spacing and Clear Cover (the bars by face and direction), the 1-3 or 2-3 Section Cut and
+// the Local 1-2 Plane (bars on the positive or negative 3-axis face), Reset to Defaults. OK makes the layers.
+function hmQuickLayers(pd, dd, u, done) {
+  const conc = pd.materials.filter(m => /concrete/i.test(m.type)).map(m => m.name), rebar = pd.materials.filter(m => /rebar/i.test(m.type)).map(m => m.name);
+  const sizes = (dd.rebar_sizes || []).map(r => r.name), size0 = sizes.includes("#5") ? "#5" : sizes.includes("16") ? "16" : sizes[Math.min(2, sizes.length - 1)] || "";
+  const bars = ["Positive 3-Axis Bars - Dir. 1", "Positive 3-Axis Bars - Dir. 2", "Negative 3-Axis Bars - Dir. 1", "Negative 3-Axis Bars - Dir. 2"];
+  const dflt = () => ({conc: conc.includes("4000Psi") ? "4000Psi" : conc[0], reb: rebar.includes("A615Gr60") ? "A615Gr60" : rebar[0], t: inTo(8, u), n: "2", s11: false, s22: false, s12: false, out: "Linear", same: false,
+    rows: bars.map(() => ({size: size0, sp: inTo(12, u), cov: inTo(1.2, u)}))});
+  let o = dflt();
+  const d = dialog("Quick Layer Definition Data", `<div style="display:grid;grid-template-columns:1fr 440px;gap:14px"><div>
+      <fieldset><legend>General Data</legend><div class="ex qlg"><span>Concrete Material</span><select id="qlC"></select><button id="qlCb" class="dots">...</button>
+        <span>Rebar Material</span><select id="qlR"></select><button id="qlRb" class="dots">...</button>
+        <span>Concrete Thickness</span><input id="qlT" type="number" step="any"><span class="un">${u.l}</span>
+        <span>Number of Rebar Layers</span><select id="qlN">${opts(["0", "1", "2"], "2")}</select><span></span></div></fieldset>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><fieldset><legend>In-Plane Component Behavior</legend>${["S11", "S22", "S12"].map(k => `<label style="display:block;margin:4px 0"><input type="checkbox" id="ql${k}"> ${k} Nonlinear</label>`).join("")}</fieldset>
+        <fieldset><legend>Out-of-Plane Component Behavior</legend><label style="display:block;margin:4px 0"><input type="radio" name="qlO" value="Same"> Same as In-Plane</label><label style="display:block;margin:4px 0"><input type="radio" name="qlO" value="Linear"> Linear</label></fieldset></div>
+      <fieldset><legend>Rebar Size, Spacing and Clear Cover</legend><div style="margin-bottom:6px"><button id="qlSz" class="dots">...</button> <label><input type="checkbox" id="qlSame"> Size and Spacing are the Same for All Rebar</label></div>
+        <div style="max-height:130px;overflow:auto;border:1px solid #333"><table class="grid ly" id="qlG"><thead><tr><th style="min-width:190px">Bars</th><th>Bar Size</th><th>Spacing, ${u.l}</th><th>Clear Cover, ${u.l}</th></tr></thead><tbody></tbody></table></div></fieldset></div>
+    <div><u>Section Cut</u><svg id="qlX" width="440" height="160" style="background:#fff;display:block"></svg>
+      <div style="margin:6px 0 10px"><label><input type="radio" name="qlCut" value="13" checked> Show 1-3 Section Cut</label> <label style="margin-left:60px"><input type="radio" name="qlCut" value="23"> Show 2-3 Section Cut</label></div>
+      <div style="display:grid;grid-template-columns:236px 1fr;gap:12px"><div><u>Local 1-2 Plane</u><svg id="qlP" width="236" height="236" style="background:#ddd;display:block"></svg></div>
+        <div><label style="display:block;margin:20px 0 8px"><input type="radio" name="qlF" value="P" checked> Show Bars on Positive 3-Axis Face</label><label style="display:block"><input type="radio" name="qlF" value="N"> Show Bars on Negative 3-Axis Face</label>
+          <div style="text-align:center;margin-top:40px"><button id="qlRst">Reset to Defaults</button></div></div></div></div></div>`,
+    [["OK", () => { read(); done(layersOf()); }], ["Cancel"]], {width: 1130});
+  const read = () => { o.conc = q(d, "#qlC").value; o.reb = q(d, "#qlR").value; o.t = +q(d, "#qlT").value; o.n = q(d, "#qlN").value; o.s11 = q(d, "#qlS11").checked; o.s22 = q(d, "#qlS22").checked; o.s12 = q(d, "#qlS12").checked;
+    o.out = (d.querySelector("[name=qlO]:checked") || {}).value || "Linear"; o.same = q(d, "#qlSame").checked;
+    q(d, "#qlG tbody").querySelectorAll("tr").forEach((tr, i) => { const r = o.rows[i]; r.size = tr.querySelector("select").value; const [a, b] = tr.querySelectorAll("input"); r.sp = +a.value; r.cov = +b.value; }); };
+  const shown = () => o.n === "0" ? [] : o.n === "1" ? [0, 1] : [0, 1, 2, 3];
+  const paint = () => {
+    q(d, "#qlC").innerHTML = opts(conc, o.conc); q(d, "#qlR").innerHTML = opts(rebar, o.reb); q(d, "#qlT").value = o.t; q(d, "#qlN").value = o.n;
+    ["S11", "S22", "S12"].forEach(k => q(d, "#ql" + k).checked = o[k.toLowerCase()]); d.querySelectorAll("[name=qlO]").forEach(r => r.checked = r.value === o.out); q(d, "#qlSame").checked = o.same;
+    q(d, "#qlR").disabled = o.n === "0";
+    q(d, "#qlG tbody").innerHTML = shown().map(i => `<tr><td style="white-space:nowrap">${bars[i]}</td><td><select ${o.same && i ? "disabled" : ""}>${opts(sizes, o.rows[i].size)}</select></td><td><input type="number" step="any" value="${o.rows[i].sp}" ${o.same && i ? "disabled" : ""}></td><td><input type="number" step="any" value="${o.rows[i].cov}"></td></tr>`).join("");
+    q(d, "#qlG tbody").querySelectorAll("select,input").forEach(x => x.onchange = () => { read(); if (o.same) o.rows.forEach(r => { r.size = o.rows[0].size; r.sp = o.rows[0].sp; }); paint(); });
+    draw();
+  };
+  const dia = s => { const r = (dd.rebar_sizes || []).find(x => x.name === s); return r ? r.diameter : inTo(0.625, u); };
+  const area = s => { const r = (dd.rebar_sizes || []).find(x => x.name === s); return r ? r.area : Math.PI * dia(s) ** 2 / 4; };
+  // Each rebar layer is a membrane of the bars' area over their spacing, at the bars' centre, along its direction.
+  const layersOf = () => {
+    const nl = k => o[k] ? "Nonlinear" : "Linear";
+    const out = [{LayerName: "Concrete", Distance: "0", Thickness: String(o.t), ModelType: "Shell", NumIntPts: "2", Material: o.conc, MatAng: "0", Behavior: "Directional", S11: nl("s11"), S22: nl("s22"), S12: nl("s12")}];
+    const top = o.t / 2;
+    for (const i of shown()) {
+      const r = o.rows[i], pos = i < 2, dir1 = i % 2 === 0, db = dia(r.size);
+      const z = (o.n === "1" ? 0 : (pos ? 1 : -1) * (top - r.cov - db / 2 - (dir1 ? 0 : db)));
+      out.push({LayerName: `${pos || o.n === "1" ? "Top" : "Bot"}Bar${dir1 ? 1 : 2}`, Distance: String(+z.toPrecision(6)), Thickness: String(+(area(r.size) / (r.sp || 1)).toPrecision(6)), ModelType: "Membrane", NumIntPts: "1",
+        Material: o.reb, MatAng: dir1 ? "0" : "90", Behavior: "Directional", S11: o.s11 || o.s22 ? "Nonlinear" : "Linear", S22: "Inactive", S12: "Inactive"});
+    }
+    return out;
+  };
+  const draw = () => {
+    const x = q(d, "#qlX"), cut = (d.querySelector("[name=qlCut]:checked") || {}).value, n = shown();
+    let s = `<text x="4" y="14" font-size="12">Positive 3-Axis Side</text><text x="4" y="154" font-size="12">Negative 3-Axis Side</text><rect x="0" y="50" width="440" height="60" fill="#ccc"/>`;
+    for (const i of n) { const y = i < 2 ? 62 : 102, along = (i % 2 === 0) === (cut === "13");
+      s += along ? `<rect x="0" y="${y - (i % 2 ? 6 : 0)}" width="440" height="5" fill="#00f"/>` : [0, 1, 2, 3, 4].map(k => `<circle cx="${28 + k * 98}" cy="${y + (i % 2 ? -6 : 2)}" r="3" fill="#f0f"/>`).join(""); }
+    s += `<path d="M246 76V28M246 76h56" stroke="#e00"/><text x="252" y="32" font-size="12" fill="#e00">3</text><text x="306" y="80" font-size="12" fill="#e00">${cut === "13" ? 1 : 2}</text>`;
+    x.innerHTML = s;
+    const p = q(d, "#qlP"), neg = (d.querySelector("[name=qlF]:checked") || {}).value === "N", h = neg ? [2, 3] : [0, 1];
+    p.innerHTML = (n.includes(h[0]) ? [0, 1, 2, 3, 4, 5, 6].map(k => `<path d="M${14 + k * 34} 0V236" stroke="#f0f" stroke-width="2"/>`).join("") : "")
+      + (n.includes(h[1]) ? [0, 1, 2, 3, 4, 5, 6].map(k => `<path d="M0 ${14 + k * 34}H236" stroke="#00f" stroke-width="2"/>`).join("") : "")
+      + `<path d="M118 118V70M118 118h56" stroke="#e00"/><text x="122" y="72" font-size="12" fill="#e00">2</text><text x="176" y="122" font-size="12" fill="#e00">1</text>`;
+  };
+  q(d, "#qlN").onchange = () => { read(); paint(); }; q(d, "#qlSame").onchange = () => { read(); paint(); };
+  d.querySelectorAll("[name=qlCut],[name=qlF]").forEach(r => r.onchange = draw);
+  q(d, "#qlRst").onclick = () => { o = dflt(); paint(); };
+  q(d, "#qlSz").onclick = () => typeof hmRebarSizes === "function" && hmRebarSizes();
+  const dots = (b, sel, list) => q(d, b).onclick = async () => { const m = await hmMaterials(); if (!m || !m.addEventListener) return;
+    const ob = new MutationObserver(async () => { if (document.body.contains(m)) return; ob.disconnect(); const p2 = (await hmRun("property_definitions", {}, true)).result; if (p2) { pd.materials = p2.materials; read(); const l = list(); q(d, sel).innerHTML = opts(l, l.includes(q(d, sel).value) ? q(d, sel).value : l[0]); } });
+    ob.observe(document.body, {childList: true}); };
+  dots("#qlCb", "#qlC", () => pd.materials.filter(m => /concrete/i.test(m.type)).map(m => m.name)); dots("#qlRb", "#qlR", () => pd.materials.filter(m => /rebar/i.test(m.type)).map(m => m.name));
+  paint();
+  return d;
+}
 // Slab Property Data / Wall Property Data (ETABS, SAFE) and Shell Section Data (SAP2000), field by field.
 async function hmShellSection(s, after, copy, newKind) {
   if (program === "sap2000") return hmSapShellSection(s, after, copy);
+  if (program === "etabs") return hmEtabsShellSection(s, after, copy, newKind);
   const defs = await hmDefs(), u = hmU(), pd = (await hmRun("property_definitions", {}, true)).result;
   const cur = s && pd ? pd.shell_sections.find(x => x.name === s.name) : null, was = s && !copy ? s.name : null;
   let mods = cur ? {...cur.modifiers} : null;
