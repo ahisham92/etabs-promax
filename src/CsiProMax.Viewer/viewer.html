@@ -6047,18 +6047,26 @@ async function hmLateral(p, after) {
   // Only the codes the model's program lists (and the Modeler's own, which go in as joint loads in any program).
   const codes = list.result.codes.filter(c => !c.programs || /Modeler/.test(c.programs) || c.programs.includes(progLabel(program))), now = p.lateral || null;
   let code = now ? now.code : (kind === "wind" ? "ASCE 7-16" : "ASCE 7-16"), values = Object.assign({}, now ? now.values : {});
-  const d = dialog(`${kind === "wind" ? "Wind" : "Seismic"} Load Pattern: ${p.name}`, `<div class="g2" style="margin-bottom:6px"><span>Auto Lateral Load</span><select id="lCode">${opts([["None", "None"], ...codes.map(c => [c.code, c.code])], code)}</select></div>
-      <p class="kv" id="lAbout" style="margin:0 0 6px"></p><fieldset style="margin:0"><legend>Parameters</legend><div class="scroll" style="max-height:38vh"><div class="g2" id="lIn"></div></div></fieldset>
+  // Titled and laid out as the programs' own form of the code ("ASCE 7-16 Seismic Load Pattern"): the code's inputs in
+  // its group boxes (Direction and Eccentricity, Time Period, Story Range, Factors, Seismic Coefficients; for wind
+  // Exposure and Pressure Coefficients, Exposure Height, Wind Coefficients, Wind Case).
+  const word = kind === "wind" ? "Wind" : "Seismic", title = () => code === "None" ? `${word} Load Pattern: ${p.name}` : `${code} ${word} Load Pattern`;
+  const d = dialog(title(), `<div class="g2" style="margin-bottom:6px"><span>Load Pattern</span><b>${esc(p.name)}</b><span>Auto Lateral Load</span><select id="lCode">${opts([["None", "None"], ...codes.map(c => [c.code, c.code])], code)}</select></div>
+      <p class="kv" id="lAbout" style="margin:0 0 6px"></p><div class="scroll" style="max-height:44vh"><div id="lIn" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:6px 10px"></div></div>
       <fieldset style="margin:8px 0 0"><legend>Story forces (worked out by the Modeler)</legend><div class="scroll" style="max-height:26vh"><table class="list" id="lOut"></table></div><p class="kv" id="lSum" style="margin:4px 0 0"></p></fieldset>`,
     [["OK", d => { apply(true); return false; }, true], ["Apply", d => { apply(false); return false; }], ["Cancel"]], {width: 620});
   const u = hmU();
   const paintIn = () => {
     const c = codes.find(x => x.code === code);
     q(d, "#lAbout").textContent = c ? c.method + (c.programs === "Modeler" ? " Worked out by the Modeler; the CSI programs get its story forces." : "") : "No code load: the pattern keeps only the loads you assign.";
-    q(d, "#lIn").innerHTML = !c ? "" : c.inputs.map(i => `<span title="${esc(i.about || "")}">${esc(i.name)}</span>` + (i.choices
+    const field = i => `<span title="${esc(i.about || "")}">${esc(i.name)}</span>` + (i.choices
       ? `<select data-k="${esc(i.key)}">${opts([...(i.type === "story" ? [["", i.key === "TopStory" ? "(top story)" : "(base)"]] : []), ...i.choices.map(x => [x, x])], values[i.key] ?? i.default)}</select>`
       : i.type === "text" ? `<textarea data-k="${esc(i.key)}" rows="2" placeholder="${esc(i.about || "")}">${esc(values[i.key] ?? i.default)}</textarea>`
-      : `<input data-k="${esc(i.key)}" value="${esc(values[i.key] ?? i.default)}" placeholder="${esc(i.about || "")}">`)).join("");
+      : `<input data-k="${esc(i.key)}" value="${esc(values[i.key] ?? i.default)}" placeholder="${esc(i.about || "")}">`);
+    const groups = [];
+    for (const i of (c ? c.inputs : [])) { const g = i.group || "Parameters"; let x = groups.find(y => y[0] === g); if (!x) groups.push(x = [g, []]); x[1].push(i); }
+    q(d, "#lIn").innerHTML = groups.map(([g, list]) => `<fieldset style="margin:0"><legend>${esc(g)}</legend><div class="g2">${list.map(field).join("")}</div></fieldset>`).join("");
+    const t = d.querySelector(".dt b"); if (t) t.textContent = title();
     d.querySelectorAll("#lIn [data-k]").forEach(x => x.onchange = () => { values[x.dataset.k] = x.value; });
   };
   const paintOut = lat => {
