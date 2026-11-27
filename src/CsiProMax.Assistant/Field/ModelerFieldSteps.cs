@@ -258,6 +258,9 @@ public static class ModelerFieldSteps
         ctx.Refused("run_analysis", "{}", "cannot analyse", "tool run_analysis says no in the Modeler");
         ctx.Refused("run_design", "{}", "cannot analyse or design", "tool run_design says no in the Modeler");
 
+        // ETABS's Frame/Wall Nonlinear Hinges forms, read back in the scratch ETABS (EtabsHingeRoundTrip.Check).
+        EtabsHingeRoundTrip.Define(ctx);
+
         // The files the programs open.
         var saved = ctx.Tool("save_model_as", $$"""{"name":"{{ModelName}}","folder":{{folder}}}""", a =>
         {
