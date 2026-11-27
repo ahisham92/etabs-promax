@@ -45,8 +45,9 @@ static class CarryTests
         {
             var link = new CsiProMax.Model.TableCarry.Table(["Name", "DOF", "Fixed", "TransKE"], [["L1", "U1", "No", "100"], ["L1", "U2", "No", "50"]]);
             Check(string.Join("|", TableCarry.KeyFields(link)) == "Name|DOF", "Name|DOF: " + string.Join("|", TableCarry.KeyFields(link)));
-            var plain = new CsiProMax.Model.TableCarry.Table(["Option", "Value", "Count"], [["A", "Yes", "2"]]);
+            var plain = new CsiProMax.Model.TableCarry.Table(["Option", "Value", "Count"], [["A", "Yes", "2"], ["B", "No", "3"]]);
             Check(string.Join("|", TableCarry.KeyFields(plain)) == "Option|Value", "text fields: " + string.Join("|", TableCarry.KeyFields(plain)));
+            Check(TableCarry.KeyFields(new CsiProMax.Model.TableCarry.Table(["Option", "Value"], [["A", "Yes"]])).Count == 0, "a one-row table with nothing naming it has no key");
             Check(TableCarry.Rank("Material Properties - General") < TableCarry.Rank("Frame Section Property Definitions - Summary")
                 && TableCarry.Rank("Frame Section Property Definitions - Summary") < TableCarry.Rank("Frame Assignments - Section Properties"), "definitions before what uses them");
         });
