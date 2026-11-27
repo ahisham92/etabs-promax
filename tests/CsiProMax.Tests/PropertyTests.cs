@@ -117,6 +117,41 @@ static class PropertyTests
             var rect = Run(link, "section_properties", new { shape = "Concrete Rectangular", dims = new { D = 0.6, B = 0.3 } });
             Check(Math.Abs(rect["I33"]!.GetValue<double>() - 0.3 * 0.216 / 12) < 1e-12 && Math.Abs(rect["Z33"]!.GetValue<double>() - 0.3 * 0.36 / 4) < 1e-12, "the rectangle's I33 and Z33");
         });
+        yield return ("properties: every ETABS 23.2 frame section shape is kept with its table's fields: a trapezoid, a nonprismatic section's segments, an auto select list; the .e2k gets a stand-in, ETABS gets the table rows, units convert them (Ahmed 2026-11-27 19:48, 20:12)", () =>
+        {
+            var link = Frame();
+            Run(link, "define_material_data", new { name = "S355", type = "Steel", values = new { WEIGHTPERVOLUME = 77, E = 2.1e8, U = 0.3, FY = 355000, FU = 490000 } });
+            var conc = link.Model.Materials.First(x => x.IsConcrete).Name;
+            Run(link, "define_frame_shape", new { name = "TRAP", shape = "Concrete Trapezoid", material = conc, extras = new Dictionary<string, string> { ["t3"] = "0.6", ["t2"] = "0.4", ["t2b"] = "0.3", ["RigidZone"] = "Yes", ["Color"] = "Red" }, modifiers = new { I3MOD = 0.7 } });
+            var t = link.Model.FrameSections.Single(x => x.Name == "TRAP");
+            Check(t.Shape == "Concrete Trapezoid" && FrameTableShapes.Rows(t)[0]["t2b"] == "0.3" && FrameTableShapes.Rows(t)[0]["Material"] == conc && FrameTableShapes.Rows(t)[0]["I3Mod"] == "0.7", "the trapezoid keeps its fields, material and modifier");
+            Check(FrameTableShapes.Table("Concrete Trapezoid") == "Frame Section Property Definitions - Concrete Trapezoid" && FrameTableShapes.Table("Precast I") == "Frame Section Property Definitions - Concrete Precast I", "each shape goes in ETABS's own table");
+            var e2k = E2kWriter.Write(link.Model);
+            Check(System.Text.RegularExpressions.Regex.IsMatch(e2k, "FRAMESECTION\\s+\"TRAP\"\\s+MATERIAL\\s+\"" + conc + "\"\\s+SHAPE\\s+\"Concrete Rectangular\"\\s+D\\s+0.6\\s+B\\s+0.4"), "the .e2k gets a stand-in of its size");
+            Check(ModelFile.FromJson(ModelFile.ToJson(link.Model)).FrameSections.Single(x => x.Name == "TRAP").Shape == "Concrete Trapezoid", "the .cpm keeps the shape");
+            Run(link, "define_frame_shape", new { name = "W1", shape = "Steel I/Wide Flange", material = "S355", dims = new { D = 0.4, B = 0.18, TF = 0.0135, TW = 0.0086 } });
+            Run(link, "define_frame_shape", new { name = "W2", shape = "Steel I/Wide Flange", material = "S355", dims = new { D = 0.3, B = 0.15, TF = 0.01, TW = 0.007 } });
+            Run(link, "define_frame_shape", new { name = "NP", shape = "Nonprismatic", extras = new Dictionary<string, string> { ["Color"] = "Blue" },
+                rows = new[] { new Dictionary<string, string> { ["StartSect"] = "W1", ["EndSect"] = "W2", ["LengthType"] = "Absolute", ["Length"] = "2", ["EI33Var"] = "Parabolic", ["EI22Var"] = "Linear" },
+                               new Dictionary<string, string> { ["StartSect"] = "W2", ["EndSect"] = "W2", ["LengthType"] = "Proportional", ["Length"] = "1", ["EI33Var"] = "Linear", ["EI22Var"] = "Linear" } } });
+            Check(FrameTableShapes.Rows(link.Model.FrameSections.Single(x => x.Name == "NP")).Count == 2, "a nonprismatic section keeps a row per segment");
+            Run(link, "define_frame_shape", new { name = "AUTO", shape = "Auto Select", extras = new Dictionary<string, string> { ["DesignType"] = "Steel", ["StartSect"] = "W2" }, rows = new[] { new Dictionary<string, string> { ["IncludedSec"] = "W1" }, new Dictionary<string, string> { ["IncludedSec"] = "W2" } } });
+            Check(E2kWriter.Write(link.Model).Contains("SHAPE \"Auto Select\"  AUTOSELECTDESIGNTYPE \"Steel\"") || System.Text.RegularExpressions.Regex.IsMatch(E2kWriter.Write(link.Model), "\"AUTO\"\\s+SHAPE\\s+\"Auto Select\"\\s+AUTOSELECTDESIGNTYPE\\s+\"Steel\""), "an auto select list is written as ETABS writes it");
+            Refused(link, "define_frame_shape", new { name = "NP2", shape = "Nonprismatic", rows = new[] { new Dictionary<string, string> { ["StartSect"] = "NOPE", ["EndSect"] = "W2" } } }, "no frame section 'NOPE'");
+            Refused(link, "define_frame_shape", new { name = "TR2", shape = "Concrete Trapezoid", material = "S355", extras = new Dictionary<string, string> { ["t3"] = "0.6" } }, "concrete shape");
+            Refused(link, "define_frame_shape", new { name = "TR3", shape = "Concrete Trapezoid", material = conc, extras = new Dictionary<string, string> { ["Weight"] = "1" } }, "has no field 'Weight'");
+            var mm = ModelUnits.Convert(link.Model, new CsiProMax.Model.Units { Force = "KN", Length = "MM", Temperature = link.Model.Units.Temperature });
+            var np = FrameTableShapes.Rows(mm.FrameSections.Single(x => x.Name == "NP"));
+            Check(FrameTableShapes.Rows(mm.FrameSections.Single(x => x.Name == "TRAP"))[0]["t2b"] == "300" && np[0]["Length"] == "2000" && np[1]["Length"] == "1", "units convert the fields, an absolute segment length but not a proportional one");
+            Run(link, "frame_section_to_sd", new { name = "W1", convert = false });
+            var sd = link.Model.FrameSections.Single(x => x.Name == "SDW1");
+            Check(sd.Shape == "SD Section" && System.Text.RegularExpressions.Regex.IsMatch(E2kWriter.Write(link.Model), "FRAMESECTION\\s+\"SDW1\"\\s+MATERIAL\\s+\"S355\"\\s+SHAPE\\s+\"Steel I/Wide Flange\"\\s+D\\s+0.4"), "Copy to SD Section: a Section Designer section that reaches ETABS as the section it was");
+            Check(FrameTableShapes.SdSource(ModelUnits.Convert(link.Model, new CsiProMax.Model.Units { Force = "KN", Length = "MM", Temperature = "C" }).FrameSections.Single(x => x.Name == "SDW1"))!.Contains("400"), "its shape converts with the units");
+            Run(link, "frame_section_to_sd", new { name = "TRAP", convert = true });
+            Check(link.Model.FrameSections.Single(x => x.Name == "TRAP").Shape == "SD Section", "Convert to SD Section keeps the name");
+            var pd = Run(link, "property_definitions", new { });
+            Check(pd["frame_extra_fields"]!["Buckling Restrained Brace"]!.AsArray().Any(x => x!.GetValue<string>() == "AreaYC") && pd["frame_sections"]!.AsArray().First(x => x!["name"]!.GetValue<string>() == "NP")!["rows"]!.AsArray().Count == 2, "the form is told each shape's fields and a section's rows");
+        });
         yield return ("properties: Slab, Wall and Shell Section Data's other fields (colour, notes, notional size, a wall's rigid zone, SAP2000's material angle and bending thickness) are kept, written to SAP2000 and read back (Ahmed 2026-11-27)", () =>
         {
             var link = Frame();

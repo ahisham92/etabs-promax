@@ -14,6 +14,9 @@ namespace CsiProMax.Host;
 /// </summary>
 internal static class ModelView
 {
+    /// <summary>Model files double-clicked while this Engine window was open: its page asks for them (pending-open) and opens them.</summary>
+    internal static readonly System.Collections.Concurrent.ConcurrentQueue<string> PendingOpens = new();
+
     public static void Attach(McpHttpServer server)
     {
         server.ViewHandler = Handle;
@@ -160,6 +163,8 @@ internal static class ModelView
         {
             case "":
                 return (Encoding.UTF8.GetBytes(Pack.LiveViewerHtml(Content(link), revision, chat: AiMode.On)), "text/html; charset=utf-8");
+            case "pending-open":
+                return (Encoding.UTF8.GetBytes((PendingOpens.TryDequeue(out var file) ? new JsonObject { ["path"] = file } : new JsonObject()).ToJsonString()), "application/json");
             case "app-menu":
                 return (Encoding.UTF8.GetBytes(MainWindow.AppMenu().ToJsonString()), "application/json");
             case "model":

@@ -125,6 +125,27 @@ public static class CsiFieldSteps
                 FieldContext.Expect(wrong.Count == 0, string.Join(" | ", wrong));
                 return "all there";
             });
+            // Frame sections of the shapes the .e2k has no line for (Frame Section Property Data, every ETABS 23.2 shape): ETABS
+            // takes them from their own tables after the .e2k opens, and reads them back with the Modeler's values.
+            if (program.Key == CsiProgram.Etabs.Key)
+                ctx.Step($"{name} opened the Modeler's trapezoid and nonprismatic sections as those shapes, with their values", () =>
+                {
+                    var tables = link.Tables();
+                    TableData Read(string table) => link.ReadTable((tables.FirstOrDefault(t => t.Name.Equals(table, StringComparison.OrdinalIgnoreCase)) ?? throw new EtabsException($"{name} has no table '{table}'")).Key, null, null);
+                    string Value(TableData t, string section, string field)
+                    {
+                        int n = t.Fields.ToList().FindIndex(x => x == "Name"), f = t.Fields.ToList().FindIndex(x => x.Equals(field, StringComparison.OrdinalIgnoreCase));
+                        var row = t.Rows.FirstOrDefault(r => n >= 0 && n < r.Length && r[n] == section) ?? throw new EtabsException($"no row for {section}");
+                        return f >= 0 && f < row.Length ? row[f] : throw new EtabsException($"no field {field}");
+                    }
+                    var wrong = new List<string>();
+                    try { var v = Value(Read("Frame Section Property Definitions - Concrete Trapezoid"), "CPM-TRAP", "t2b"); if (!double.TryParse(v, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var b) || Math.Abs(b - 0.3) > 1e-6) wrong.Add($"CPM-TRAP's bottom width is '{v}', not 0.3"); }
+                    catch (EtabsException ex) { wrong.Add("CPM-TRAP: " + ex.Message); }
+                    try { var t = Read("Frame Section Property Definitions - Nonprismatic"); var n = t.Fields.ToList().IndexOf("Name"); var rows = t.Rows.Count(r => n >= 0 && n < r.Length && r[n] == "CPM-NP"); if (rows != 2) wrong.Add($"CPM-NP has {rows} segments, not 2"); }
+                    catch (EtabsException ex) { wrong.Add("CPM-NP: " + ex.Message); }
+                    FieldContext.Expect(wrong.Count == 0, string.Join(" | ", wrong));
+                    return "both there, as their own shapes";
+                });
             // Assign > Frame, Shell and Joint > Additional Mass and Frame > Output Stations, kept by the Modeler as rows of ETABS's
             // assignment tables: in ETABS put in through its tables after opening the .e2k; in SAP2000 the mass by the .s2k's
             // tables and the stations by its API after the file opens.

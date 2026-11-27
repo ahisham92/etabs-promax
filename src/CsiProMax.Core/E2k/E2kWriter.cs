@@ -116,7 +116,9 @@ public static class E2kWriter
                 foreach (var line in DefinitionLines("MATERIAL", m.Materials)) yield return line;
                 break;
             case S.FrameSections:
-                foreach (var line in DefinitionLines("FRAMESECTION", m.FrameSections)) yield return line;
+                foreach (var f in m.FrameSections)
+                    foreach (var line in Model.FrameTableShapes.Is(f.Shape) ? Model.FrameTableShapes.E2kLines(f, m) : f.Lines)
+                        yield return Line(["FRAMESECTION", Quote(f.Name)], line);
                 break;
             case S.SlabProperties:
                 foreach (var line in DefinitionLines("SHELLPROP", m.ShellSections.Where(s => !s.IsWall && !IsDeck(s)))) yield return line;

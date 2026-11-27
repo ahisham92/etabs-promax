@@ -570,6 +570,13 @@ function Install-CsiProMax {
                 $icon = Join-Path $Folder 'csi-promax.ico'
                 if (-not (Test-Path -LiteralPath $icon) -and $env:LOCALAPPDATA) { $icon = Join-Path $env:LOCALAPPDATA 'CsiProMax\csi-promax.ico' }
                 $command = '"' + $dotnet + '" "' + (Join-Path $Folder 'CsiProMax.dll') + '" --modeler "%1"'
+                # No console window on a double-click (Ahmed 2026-11-27): dotnet.exe is a console program, so Windows
+                # would open a console for it. Windows' own console host started headless (Windows 10 1809 and later)
+                # gives it one nobody sees. Older Windows keeps the plain command (the Engine lets its console go at once).
+                $conhost = if ($env:SystemRoot) { Join-Path $env:SystemRoot 'System32\conhost.exe' } else { '' }
+                $build = 0
+                try { $build = [Environment]::OSVersion.Version.Build } catch { }
+                if ($conhost -and (Test-Path -LiteralPath $conhost) -and $build -ge 17763) { $command = '"' + $conhost + '" --headless ' + $command }
                 $left = @()
                 foreach ($type in $modelTypes) {
                     $kind = Join-Path $classes $type.Id

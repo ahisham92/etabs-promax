@@ -222,17 +222,21 @@ public static class PropertyDefs
     /// </summary>
     public static string[] FrameExtraFields(string shape)
     {
-        var concrete = new[] { "NotSizeType", "NotAutoFact", "NotUserSize", "RigidZone" };
+        if (FrameTableShapes.All.TryGetValue(shape, out var other)) return other.Fields;
+        var concrete = new[] { "NotSizeType", "NotAutoFact", "NotUserSize", "RigidZone", "DesignType" };
+        string[] file = ["FromFile", "FileName", "SectInFile"];
+        string[] drop = ["ColumnDropPanel", "ColumnDropPanelAxis2", "ColumnDropPanelAxis3", "ColumnDropPanelSlabProperty"];
         string[] own = shape switch
         {
-            "Concrete Rectangular" or "Concrete Circle" => concrete,
-            "Concrete Tee" => [.. concrete, "MirrorAbt3"],
-            "Concrete L" => [.. concrete, "MirrorAbt2", "MirrorAbt3"],
-            "Steel I/Wide Flange" or "Steel Double Channel" => ["FilletRad"],
-            "Steel Channel" => ["FilletRad", "MirrorAbt2"],
-            "Steel Tee" or "Steel Double Angle" => ["FilletRad", "MirrorAbt3"],
-            "Steel Angle" => ["FilletRad", "MirrorAbt2", "MirrorAbt3"],
-            "Steel Tube" => ["CornerRad"],
+            "Concrete Rectangular" or "Concrete Circle" => [.. file, .. concrete],
+            "Concrete Tee" => [.. concrete, "twb", "IgnoreFlangeArea", "MirrorAbt3", .. drop],
+            "Concrete L" => [.. concrete, "twb", "IgnoreFlangeArea", "MirrorAbt2", "MirrorAbt3", .. drop],
+            "Steel I/Wide Flange" or "Steel Double Channel" => [.. file, "FilletRad"],
+            "Steel Channel" => [.. file, "FilletRad", "MirrorAbt2"],
+            "Steel Tee" or "Steel Double Angle" => [.. file, "FilletRad", "MirrorAbt3"],
+            "Steel Angle" => [.. file, "FilletRad", "MirrorAbt2", "MirrorAbt3"],
+            "Steel Tube" => [.. file, "CornerRad"],
+            "Steel Pipe" => file,
             _ => [],
         };
         return [.. own, "Color", "Notes"];
@@ -323,7 +327,10 @@ public static class PropertyDefs
                 ?? throw new ArgumentException($"{what} has no field '{k}'. It has: {string.Join(", ", fields)}.");
             if (v.Trim().Length > 0) row[f] = v.Trim();
         }
+        // Other tables the definition keeps (a concrete section's bar sizes) stay.
+        var keep = d.Tables?.Where(t => t.Key == DefineTables.ColumnReinforcing).ToList() ?? [];
         d.Tables = row.Count > 0 ? new(StringComparer.OrdinalIgnoreCase) { [table] = [row] } : null;
+        foreach (var (k, v) in keep) (d.Tables ??= new(StringComparer.OrdinalIgnoreCase))[k] = v;
     }
 
     private static IReadOnlyDictionary<string, string> Extras(Definition d, string table) =>
@@ -332,13 +339,15 @@ public static class PropertyDefs
     // ---- slab and wall types ----
 
     /// <summary>A ribbed slab's ribs, as ETABS 23.2 writes them: the overall depth (slab and ribs), the rib width at its top and
-    /// bottom, the rib spacing, and the local axis (1 or 2) the ribs run along.</summary>
-    public sealed record Ribs(double OverallDepth, double WidthTop, double WidthBottom, double Spacing, int ParallelTo = 1);
+    /// bottom, the rib spacing, and the local axis (1 or 2) the ribs run along.
+    /// A waffle slab has ribs both ways: Spacing is the spacing of the ribs parallel to the slab's 1 axis and Spacing2 of those parallel to its 2 axis.</summary>
+    public sealed record Ribs(double OverallDepth, double WidthTop, double WidthBottom, double Spacing, int ParallelTo = 1, double? Spacing2 = null);
 
     public static ShellSection SetShellType(StructuralModel m, string name, string? was, bool wall, string slabType, string modeling, double thickness, string material, bool oneWay, Ribs? ribs = null)
     {
         Name(name, "slab or wall section");
-        if (!m.Materials.Exists(x => x.Name == material)) throw new ArgumentException($"There is no material '{material}'.");
+        var layered = string.Equals(modeling, "Layered", StringComparison.OrdinalIgnoreCase);
+        if (!(layered && string.IsNullOrEmpty(material)) && !m.Materials.Exists(x => x.Name == material)) throw new ArgumentException($"There is no material '{material}'.");
         if (!(thickness > 0)) throw new ArgumentException("The thickness must be above 0.");
         var type = SlabTypes.FirstOrDefault(t => t.Equals(slabType, StringComparison.OrdinalIgnoreCase)) ?? throw new ArgumentException($"The slab type is one of {string.Join(", ", SlabTypes)}.");
         var model = ModelingTypes.FirstOrDefault(t => t.Equals(modeling, StringComparison.OrdinalIgnoreCase)) ?? throw new ArgumentException($"The modeling type is one of {string.Join(", ", ModelingTypes)}.");
@@ -348,17 +357,28 @@ public static class PropertyDefs
         var line = wall
             ? new List<string> { "PROPTYPE", Quote("Wall"), "MATERIAL", Quote(material), "MODELINGTYPE", Quote(model), "WALLTHICKNESS", Number(thickness) }
             : new List<string> { "PROPTYPE", Quote("Slab"), "MATERIAL", Quote(material), "MODELINGTYPE", Quote(model) };
+        // A layered section takes its materials from its layers: the form shows "Not Applicable" and the line has none.
+        if (layered && string.IsNullOrEmpty(material)) line.RemoveRange(2, 2);
         if (!wall)
         {
             if (oneWay) line.AddRange(["ONEWAYLOADDIST", Quote("Yes")]);
-            if (type == "Ribbed")
+            if (type is "Ribbed" or "Waffle")
             {
-                if (ribs is null) throw new ArgumentException("A ribbed slab needs its ribs: overall_depth, rib_width_top, rib_width_bottom, rib_spacing (and rib_direction 1 or 2).");
+                if (ribs is null) throw new ArgumentException(type == "Waffle"
+                    ? "A waffle slab needs its ribs: overall_depth, rib_width_top, rib_width_bottom, rib_spacing (ribs parallel to the 1 axis) and rib_spacing_2 (parallel to the 2 axis)."
+                    : "A ribbed slab needs its ribs: overall_depth, rib_width_top, rib_width_bottom, rib_spacing (and rib_direction 1 or 2).");
                 if (!(ribs.OverallDepth > thickness)) throw new ArgumentException("The overall depth of a ribbed slab is more than its slab thickness.");
                 if (!(ribs.WidthTop > 0) || !(ribs.WidthBottom > 0) || ribs.WidthBottom > ribs.WidthTop + 1e-12) throw new ArgumentException("The rib widths are more than 0, the bottom no wider than the top.");
                 if (!(ribs.Spacing > ribs.WidthTop)) throw new ArgumentException("The rib spacing is more than the rib width.");
-                if (ribs.ParallelTo is not (1 or 2)) throw new ArgumentException("The ribs run along local axis 1 or 2.");
-                line.AddRange(["SLABTYPE", Quote(type), "OVERALLDEPTH", Number(ribs.OverallDepth), "SLABTHICKNESS", Number(thickness), "SLABRIBWIDTHTOP", Number(ribs.WidthTop),
+                if (type == "Waffle")
+                {
+                    var two = ribs.Spacing2 ?? ribs.Spacing;
+                    if (!(two > ribs.WidthTop)) throw new ArgumentException("The rib spacing is more than the rib width.");
+                    line.AddRange(["SLABTYPE", Quote(type), "OVERALLDEPTH", Number(ribs.OverallDepth), "SLABTHICKNESS", Number(thickness), "SLABRIBWIDTHTOP", Number(ribs.WidthTop),
+                        "SLABRIBWIDTHBOTTOM", Number(ribs.WidthBottom), "SLABRIBSPACINGDIR1", Number(ribs.Spacing), "SLABRIBSPACINGDIR2", Number(two)]);
+                }
+                else if (ribs.ParallelTo is not (1 or 2)) throw new ArgumentException("The ribs run along local axis 1 or 2.");
+                else line.AddRange(["SLABTYPE", Quote(type), "OVERALLDEPTH", Number(ribs.OverallDepth), "SLABTHICKNESS", Number(thickness), "SLABRIBWIDTHTOP", Number(ribs.WidthTop),
                     "SLABRIBWIDTHBOTTOM", Number(ribs.WidthBottom), "SLABRIBSPACING", Number(ribs.Spacing), "SLABRIBPARALLELTOAXIS", ribs.ParallelTo.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
             }
             else line.AddRange(["SLABTYPE", Quote(type), "SLABTHICKNESS", Number(thickness)]);
