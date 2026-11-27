@@ -72,7 +72,7 @@ public static class CaseTools
               "values":{"type":"object","additionalProperties":{"type":"number"}},"dir":{"type":"string"},"replace":{"type":"boolean"}}}
             """, Ask.Changes, AssignLoads, a => $"Assign {a.Text("kind").Replace('_', ' ')} loads in {a.Text("pattern")}"),
         new("assign_sap_loads",
-            "SAP2000's Assign > Joint, Frame, Cable, Tendon, Area, Solid and Link/Support Loads forms: sets the rows of SAP2000's own table on each object (label@story; joints point@story), " +
+            "SAP2000's Assign > Joint, Frame, Cable, Tendon, Area, Solid and Link/Support Loads forms: sets the rows of SAP2000's own table on each object (label@story; joints point@story; cables, tendons, solids and links by SAP2000 name, e.g. Cable Loads - Distributed, Tendon Loads - Tension Force Or Stress, Solid Loads - Surface Pressure, Link Loads - Gravity), " +
             "with option add (Add to Existing Loads), replace (Replace Existing Loads, the default: the object's loads of this table in that pattern go first) or delete (Delete Existing Loads). " +
             "table is SAP2000's table, e.g. Joint Loads - Force (CoordSys, F1..M3), Frame Loads - Distributed (CoordSys, Type, Dir, DistType, RelDistA, RelDistB, AbsDistA, AbsDistB, FOverLA, FOverLB, MOverLA, MOverLB), " +
             "Frame Loads - Point, Frame Loads - Temperature, Frame Loads - Strain, Frame Loads - Gravity, Frame Loads - Deformation, Frame Loads - Target Force, Overwrites - Auto Wave Loads - Frame, " +
