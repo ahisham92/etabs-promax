@@ -37,6 +37,29 @@ static class DefineTablesTests
 
     public static IEnumerable<(string Name, Action Body)> All()
     {
+        yield return ("define: ETABS's Load Patterns forms keep a code's rows once, set AutoLoad, follow a rename, drop with the pattern, and pass through the .cpm", () =>
+        {
+            var link = Frame();
+            var m = link.Model;
+            EtabsTools.All.Single(x => x.Name == "add_load_pattern").Invoke(JsonDocument.Parse("""{"name":"EQX","type":"Seismic","self_weight":0}""").RootElement, link);
+            const string asce16 = "Load Pattern Definitions - Auto Seismic - ASCE 7-16", user = "Load Pattern Definitions - Auto Seismic - User Coefficient";
+            Run(link, "define_table_rows", new { table = asce16, name = "EQX", rows = new[] { new Dictionary<string, object> { ["XDir"] = "Yes", ["EccRatio"] = "0.05", ["R"] = "7" } } });
+            Check(EtabsLoadTables.AutoLoads(m).GetValueOrDefault("EQX") == "ASCE 7-16", "EQX's AutoLoad is ASCE 7-16: " + string.Join(", ", EtabsLoadTables.AutoLoads(m)));
+            Run(link, "define_table_rows", new { table = user, name = "EQX", rows = new[] { new Dictionary<string, object> { ["C"] = "0.06", ["K"] = "1" } } });
+            Check(m.DefinitionTables?.ContainsKey(asce16) != true, "the other code's rows went when User Coefficient was set");
+            Check(EtabsLoadTables.AutoLoads(m)["EQX"] == "User Coefficient", "EQX's AutoLoad is User Coefficient now");
+            Refused(link, "define_table_rows", new { table = user, name = "EQX", rows = new[] { new Dictionary<string, object> { ["NoSuchField"] = "1" } } }, "NoSuchField");
+            Run(link, "define_table_rows", new { table = "Load Pattern Definitions - Auto Notional Loads", name = "EQX", rows = new[] { new Dictionary<string, object> { ["BasePattern"] = "Dead", ["LoadRatio"] = "0.002", ["LoadDir"] = "Global X" } } });
+            var back = ModelFile.FromJson(ModelFile.ToJson(m));
+            Check(back.DefinitionTables?[user].Single()["C"] == "0.06", "the code's row is in the .cpm");
+            EtabsLoadTables.Rename(m, "pattern", "EQX", "EQX2");
+            Check(m.DefinitionTables![user].Single()["Name"] == "EQX2" && m.DefinitionTables["Load Pattern Definitions - Auto Notional Loads"].Single()["LoadPattern"] == "EQX2", "the rows follow the rename");
+            EtabsLoadTables.Drop(m, "pattern", "EQX2");
+            Check(m.DefinitionTables?.Keys.Any(EtabsLoadTables.Has) != true, "the rows went with the pattern");
+            Check(ProgramOptions.HasDefinitionTable(ProgramOptions.Etabs, user) && !ProgramOptions.HasDefinitionTable(ProgramOptions.Sap2000, user), "ETABS's tables go to ETABS only");
+            Check(EtabsLoadTables.FieldDim(user, "OverEcc") == ModelUnits.Dim.Len && EtabsLoadTables.FieldDim(user, "C") == ModelUnits.Dim.None && EtabsLoadTables.FieldDim("Load Pattern Definitions - Auto Seismic - UBC 97", "Z") == ModelUnits.Dim.None, "a length converts with the units, a coefficient does not");
+        });
+
         yield return ("define: rebar sizes are added, changed and deleted in the .e2k's REBARDEFINITION lines and come back from the file", () =>
         {
             var link = Frame();

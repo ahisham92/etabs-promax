@@ -26,7 +26,7 @@ public static class StructureTools
             """{"type":"object","required":["name"],"properties":{"name":{"type":"string"},"semi_rigid":{"type":"boolean"},"delete":{"type":"boolean"}}}""",
             Ask.Changes, DefineDiaphragm, a => a.Flag("delete") ? $"Delete the diaphragm {a.Text("name")}" : $"Define the diaphragm {a.Text("name")}"),
         new("assign_diaphragm_data",
-            "Gives floors (label@story) or joints (point@story) a diaphragm (Assign > Shell > Diaphragms, Assign > Joint > Diaphragms); \"\" takes it off.",
+            "Gives floors (label@story) or joints (point@story) a diaphragm (Assign > Shell > Diaphragms, Assign > Joint > Diaphragms); \"\" takes it off (a joint: From Shell Object); a joint can also take \"Disconnect\".",
             """{"type":"object","required":["objects","diaphragm"],"properties":{"objects":{"type":"array","items":{"type":"string"}},"joints":{"type":"boolean","description":"The objects are joints. Default false: floors."},"diaphragm":{"type":"string"}}}""",
             Ask.Changes, AssignDiaphragm, a => $"Assign the diaphragm {a.Text("diaphragm")}"),
         new("define_pier_spandrel",
@@ -129,7 +129,9 @@ public static class StructureTools
         var link = Offline(e);
         var m0 = link.Model;
         var d = a.Text("diaphragm");
-        if (d.Length > 0 && !m0.Diaphragms.Exists(x => x.Name == d)) throw new ToolInputException($"There is no diaphragm '{d}'. Define it with define_diaphragm first.");
+        // ETABS's Joint Assignment - Diaphragms lists "Disconnect" (the joint leaves the shell's diaphragm) beside the diaphragms.
+        if (a.Flag("joints") && d.Equals("Disconnect", StringComparison.OrdinalIgnoreCase)) d = "DISCONNECT";
+        else if (d.Length > 0 && !m0.Diaphragms.Exists(x => x.Name == d)) throw new ToolInputException($"There is no diaphragm '{d}'. Define it with define_diaphragm first.");
         var joints = a.Flag("joints");
         var objects = Objects(a);
         foreach (var (l, s) in objects)

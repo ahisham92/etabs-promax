@@ -96,6 +96,14 @@ public sealed class OfflineEtabs : ICsiLink, CsiProMax.Assistant.Tools.IModelDra
         Changed();
     }
 
+    /// <summary>Opens the autosaved copy of a model (Host.AutoSave): its changes are not in its file yet, so it counts as unsaved.</summary>
+    public void Recover(StructuralModel model, string path)
+    {
+        Replace(model, path);
+        CsiProMax.Lateral.LateralLoads.Refresh(Model);
+        Changed();
+    }
+
     private void Changed() { Revision++; Unsaved = true; }
 
     /// <summary>Puts back the model as it was before a tool that failed part way (ToolCall.Invoke): a refused call never
