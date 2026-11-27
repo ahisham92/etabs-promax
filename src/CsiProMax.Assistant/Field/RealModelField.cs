@@ -293,7 +293,11 @@ public static class RealModelField
     public static Dictionary<string, TableData> ModelTables(ICsiLink link)
     {
         var all = new Dictionary<string, TableData>(StringComparer.OrdinalIgnoreCase);
-        foreach (var t in link.Tables().Where(t => t.Import > 0 || t.Import < 0 && !IsResult(t.Key)))
+        // One read session: the tables are listed once and the display selection is set once, where each table read
+        // alone asked for the patterns, the model file and the selection again (the 0.4.70 full test sat 24 minutes in
+        // this step on a 25 KB Verification model). Tables the program lists as empty have no rows to compare.
+        using var session = PackSession.Start(link);
+        foreach (var t in link.Tables().Where(t => !t.Empty && (t.Import > 0 || t.Import < 0 && !IsResult(t.Key))))
             try { Mark("  model table " + t.Key); var d = link.ReadTable(t.Key, null, null); if (d.Rows.Count > 0) all[t.Key] = d; }
             catch (Exception ex) when (ex is EtabsException or InvalidOperationException) { }
         return all;
@@ -303,8 +307,9 @@ public static class RealModelField
     public static Dictionary<string, TableData> ResultTables(ICsiLink link, IReadOnlyCollection<string>? only)
     {
         var all = new Dictionary<string, TableData>(StringComparer.OrdinalIgnoreCase);
+        using var session = PackSession.Start(link);
         var cases = link.LoadCases(); var combos = link.Combos();
-        foreach (var t in link.Tables().Where(t => (t.Import == 0 || t.Import < 0 && IsResult(t.Key)) && (only is null || only.Contains(t.Key))))
+        foreach (var t in link.Tables().Where(t => !t.Empty && (t.Import == 0 || t.Import < 0 && IsResult(t.Key)) && (only is null || only.Contains(t.Key))))
             try { Mark("  result table " + t.Key); var d = link.ReadTable(t.Key, cases, combos); if (d.Rows.Count > 0) all[t.Key] = d; }
             catch (Exception ex) when (ex is EtabsException or InvalidOperationException) { }
         return all;

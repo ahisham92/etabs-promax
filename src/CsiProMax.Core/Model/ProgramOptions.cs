@@ -65,7 +65,9 @@ public static class ProgramOptions
     /// shells go into SAP2000's own tables too; the rest are ETABS's own; SAFE has none of them.</summary>
     public static bool HasDefinitionTable(string target, string table) => ProgramForms.IsForm(table) ? ProgramForms.HasForm(target, table) && !(target != Sap2000 && ProgramForms.IsProgramSetting(table)) : target switch
     {
-        Etabs => !DefineTables.IsSap(table),
+        Etabs => !DefineTables.IsSap(table) && !SafeTables.Has(table),
+        // SAFE's own definition and option tables, as its forms set them (SafeTables, "SAFE | ...").
+        Safe => SafeTables.Has(table),
         // SAP2000's hinges are its own tables ("Hinges Def ..."); the layers and generalized displacements are written into its tables.
         Sap2000 => DefineTables.IsSap(table) || table.EndsWith("- Layers", StringComparison.OrdinalIgnoreCase) || table.Equals("Generalized Displacement Definitions", StringComparison.OrdinalIgnoreCase),
         _ => false,

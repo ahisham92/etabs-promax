@@ -12,6 +12,9 @@ public static class SapObjectTables
 {
     public static readonly IReadOnlyDictionary<string, (string Kind, bool Many, string[] Fields)> Tables = new Dictionary<string, (string, bool, string[])>(StringComparer.OrdinalIgnoreCase)
     {
+        // Also read by the writer's own model (springs from spring properties, mass as ETABS's X-Y and Z): SAP2000's form keeps its own row.
+        ["Joint Added Mass Assignments"] = ("joint", false, ["CoordSys", "Mass1", "Mass2", "Mass3", "MMI1", "MMI2", "MMI3", "AutoBridge", "BridgeObj"]),
+        ["Joint Spring Assignments 1 - Uncoupled"] = ("joint", false, ["CoordSys", "U1", "U2", "U3", "R1", "R2", "R3"]),
         ["Joint Local Axes Assignments 1 - Typical"] = ("joint", false, ["AngleA", "AngleB", "AngleC", "AdvanceAxes"]),
         ["Joint Local Axes Assignments 2 - Advanced"] = ("joint", false, ["LocalPlane", "AxOption1", "AxCoordSys", "AxCoordDir", "AxVecJt1", "AxVecJt2", "PlOption1", "PlCoordSys", "CoordDir1", "CoordDir2", "PlVecJt1", "PlVecJt2", "AxVecX", "AxVecY", "AxVecZ", "PlVecX", "PlVecY", "PlVecZ"]),
         ["Joint Added Mass By Weight Assignments"] = ("joint", false, ["CoordSys", "Weight1", "Weight2", "Weight3", "WMI1", "WMI2", "WMI3", "AutoBridge", "BridgeObj"]),
@@ -48,6 +51,10 @@ public static class SapObjectTables
 
     /// <summary>The field that names the object in each kind's tables.</summary>
     public static string KeyField(string kind) => kind switch { "frame" => "Frame", "area" => "Area", _ => "Joint" };
+
+    /// <summary>Tables the Modeler's own model also carries (a coarser way): S2kReader keeps SAP2000's row on the object too,
+    /// and S2kWriter writes that row in place of the one it makes from the model.</summary>
+    public static readonly string[] AlsoNative = ["Joint Added Mass Assignments", "Joint Spring Assignments 1 - Uncoupled"];
 
     public static bool Has(string table) => Tables.ContainsKey(table);
 

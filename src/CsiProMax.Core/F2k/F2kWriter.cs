@@ -666,6 +666,8 @@ public static class F2kWriter
             tables = F2kSafeTables.Complete(m, story, z, tables,
                 areaRows.GroupBy(a => a.Label).ToDictionary(g => g.Key, g => (g.First().Source.Label, g.First().Source.Story ?? ""), StringComparer.OrdinalIgnoreCase),
                 lineRows.GroupBy(l => l.Label).ToDictionary(g => g.Key, g => (g.First().Source.Label, g.First().Source.Story ?? "", g.First().Type), StringComparer.OrdinalIgnoreCase));
+        // What the Engine's SAFE forms set (SAFE's own definition and option tables, SafeTables): their fields over the written ones.
+        SafeTables.WriteInto(m, tables);
         // A model read from SAFE's own file: what did not change goes back exactly as SAFE wrote it, field for field.
         tables = F2kSource.Merge(m, story, tables);
 

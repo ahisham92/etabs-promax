@@ -240,7 +240,7 @@ public static partial class S2kReader
         SapLoadTables.Read(m, t, known);
         // SAP2000's own per-object assignment and load tables (SapObjectTables) onto each object's Assign.Tables, every
         // field as the file has it, so they follow the object; a table naming an object the Modeler has not got stays kept.
-        foreach (var name in t.Keys.Where(k => !known.Contains(k) && SapObjectTables.Has(k)).ToList())
+        foreach (var name in t.Keys.Where(k => SapObjectTables.Has(k) && (!known.Contains(k) || SapObjectTables.AlsoNative.Contains(k, StringComparer.OrdinalIgnoreCase))).ToList())
         {
             var full = SapObjectTables.Name(name);
             var kind = SapObjectTables.Tables[full].Kind;
