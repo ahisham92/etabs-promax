@@ -47,6 +47,26 @@ public static class SapOtherObjects
         ["Link Property Assignments"] = ("link", false, ["LinkType", "LinkJoints", "LinkProp", "LinkFDProp", "PropMod"]),
         ["Link Local Axes Assignments 1 - Typical"] = ("link", false, ["Angle", "AdvanceAxes"]),
         ["Link Local Axes Assignments 2 - Advanced"] = ("link", false, ["LocalPlane", "AxOption1", "AxCoordSys", "AxCoordDir", "AxVecJt1", "AxVecJt2", "PlOption1", "PlCoordSys", "CoordDir1", "CoordDir2", "PlVecJt1", "PlVecJt2", "AxVecX", "AxVecY", "AxVecZ", "PlVecX", "PlVecY", "PlVecZ"]),
+        // SAP2000's Assign > Cable, Tendon, Solid and Link/Support Loads forms' tables (one row per load pattern, more with Add to Existing Loads).
+        ["Cable Loads - Gravity"] = ("cable", true, ["LoadPat", "CoordSys", "MultiplierX", "MultiplierY", "MultiplierZ"]),
+        ["Cable Loads - Distributed"] = ("cable", true, ["LoadPat", "CoordSys", "Type", "Dir", "FOverL", "MOverL"]),
+        ["Cable Loads - Temperature"] = ("cable", true, ["LoadPat", "Type", "Temp", "TempGrad2", "TempGrad3", "JtPattern", "AutoBridge", "BridgeObj"]),
+        ["Cable Loads - Strain"] = ("cable", true, ["LoadPat", "Component", "Strain", "Curvature", "JtPattern"]),
+        ["Cable Loads - Deformation"] = ("cable", true, ["LoadPat", "IncludeU1", "IncludeU2", "IncludeU3", "IncludeR1", "IncludeR2", "IncludeR3", "U1", "U2", "U3", "R1", "R2", "R3"]),
+        ["Cable Loads - Target Force"] = ("cable", true, ["LoadPat", "IncludeP", "IncludeV2", "IncludeV3", "IncludeT", "IncludeM2", "IncludeM3", "P", "V2", "V3", "T", "M2", "M3", "RelLocP", "RelLocV2", "RelLocV3", "RelLocT", "RelLocM2", "RelLocM3"]),
+        ["Tendon Loads - Gravity"] = ("tendon", true, ["LoadPat", "CoordSys", "MultiplierX", "MultiplierY", "MultiplierZ"]),
+        ["Tendon Loads - Tension Force Or Stress"] = ("tendon", true, ["LoadPat", "LoadType", "Force", "Stress", "JackFrom", "Curvature", "Wobble", "LossAnchor", "LossEShort", "LossCreep", "LossShrink", "LossSRelax", "AutoBridge", "BridgeObj"]),
+        ["Tendon Loads - Temperature"] = ("tendon", true, ["LoadPat", "Type", "Temp", "TempGrad2", "TempGrad3", "JtPattern", "AutoBridge", "BridgeObj"]),
+        ["Tendon Loads - Strain"] = ("tendon", true, ["LoadPat", "Component", "Strain", "Curvature", "JtPattern"]),
+        ["Tendon Loads - Deformation"] = ("tendon", true, ["LoadPat", "IncludeU1", "IncludeU2", "IncludeU3", "IncludeR1", "IncludeR2", "IncludeR3", "U1", "U2", "U3", "R1", "R2", "R3"]),
+        ["Solid Loads - Gravity"] = ("solid", true, ["LoadPat", "CoordSys", "MultiplierX", "MultiplierY", "MultiplierZ"]),
+        ["Solid Loads - Surface Pressure"] = ("solid", true, ["LoadPat", "Face", "JtPattern", "Pressure"]),
+        ["Solid Loads - Pore Pressure"] = ("solid", true, ["LoadPat", "JtPattern", "Pressure"]),
+        ["Solid Loads - Temperature"] = ("solid", true, ["LoadPat", "JtPattern", "Temp"]),
+        ["Solid Loads - Strain"] = ("solid", true, ["LoadPat", "Component", "Strain", "JtPattern"]),
+        ["Link Loads - Gravity"] = ("link", true, ["LoadPat", "CoordSys", "MultiplierX", "MultiplierY", "MultiplierZ"]),
+        ["Link Loads - Deformation"] = ("link", true, ["LoadPat", "IncludeU1", "IncludeU2", "IncludeU3", "IncludeR1", "IncludeR2", "IncludeR3", "U1", "U2", "U3", "R1", "R2", "R3"]),
+        ["Link Loads - Target Force"] = ("link", true, ["LoadPat", "IncludeP", "IncludeV2", "IncludeV3", "IncludeT", "IncludeM2", "IncludeM3", "P", "V2", "V3", "T", "M2", "M3", "RelLocP", "RelLocV2", "RelLocV3", "RelLocT", "RelLocM2", "RelLocM3"]),
     };
 
     public static bool Has(string table) => Tables.ContainsKey(table);
@@ -56,14 +76,22 @@ public static class SapOtherObjects
     {
         "Cable Property Modifiers", "Cable Output Station Assignments", "Cable Added Mass Assignments", "Cable Material Temperatures",
         "Tendon Local Axes Assignments 1 - Typical", "Tendon Tension And Compression Limits", "Tendon Material Temperatures",
+        "Cable Loads - Gravity", "Cable Loads - Temperature", "Cable Loads - Strain", "Cable Loads - Deformation", "Cable Loads - Target Force",
+        "Tendon Loads - Gravity", "Tendon Loads - Temperature", "Tendon Loads - Strain", "Tendon Loads - Deformation",
     };
+
+    /// <summary>The Frame-named tables that carry both the Cable and the Tendon Yes/No fields.</summary>
+    private static bool BothFlags(string table) => table.EndsWith("Material Temperatures", StringComparison.OrdinalIgnoreCase) || table.Contains(" Loads - ", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>A load table (Assign > ... Loads): its rows are set by load pattern (<see cref="SapObjectLoads"/>).</summary>
+    public static bool IsLoad(string table) => Tables.ContainsKey(table) && table.Contains(" Loads - ", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>The field that names the object in this table's rows.</summary>
     public static string KeyOf(string table, string kind) => ByFrame.Contains(table) ? "Frame" : Key(kind);
 
     /// <summary>The Yes/No fields a Frame-named row carries to say it is a cable or a tendon (SAP2000's own shape).</summary>
     private static (string, string)[] Flags(string table, string kind) => !ByFrame.Contains(table) ? []
-        : table.EndsWith("Material Temperatures", StringComparison.OrdinalIgnoreCase) ? [("Cable", kind == "cable" ? "Yes" : "No"), ("Tendon", kind == "tendon" ? "Yes" : "No")]
+        : BothFlags(table) ? [("Cable", kind == "cable" ? "Yes" : "No"), ("Tendon", kind == "tendon" ? "Yes" : "No")]
         : [(Key(kind), "Yes")];
 
     private static string KeptKey(string table) => "sap2000|" + table.ToUpperInvariant();
