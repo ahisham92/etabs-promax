@@ -4957,12 +4957,16 @@ function hmDefineMenu() {
   const springs = [["Point Springs...", "m:spr:point"], ["Line Springs...", "m:spr:line"], ["Area Springs...", "m:spr:area"]];
   const fns = ["Functions", [["Response Spectrum...", "m:fnRS"], only(ES, ["Time History...", "m:fnTH"])]];
   const hinges = hmDefineTableItems().slice(-2);
+  // SAP2000 26.3's Define menu as read on Ahmed's PC (field/reference-forms/sap2000/Define/00 Define menu.jpg and its
+  // Section Properties submenu), item for item. An item the Engine has no form for yet is shown greyed, where SAP2000 has it.
+  const soon = label => [label, "", "", true];
   if (program === "sap2000") return [["Materials...", "m:materials"],
-    ["Section Properties", [["Frame Sections...", "m:frameSections"], ["Tendon Sections...", "m:ex:tendonsections"], ["Area Sections...", "m:shellSections"], ["Link/Support Properties...", "m:links"], ...hinges, dt("Panel Zone Properties..."), ["Reinforcing Bar Sizes...", "m:rebarSizes"], 0,
-      ["Frame Section Rebar (Modify/Show Rebar)...", "m:frameRebar"], dt("Slab Layers..."), dt("Wall Layers..."), dt("Frame Release Definitions..."), ["Spring Properties", springs]]],
-    ["Mass Source...", "m:mass"], ["Coordinate Systems/Grids...", "m:grids"], ["Elevations (Z Grid Lines)...", "m:stories"], ["Joint Constraints...", "m:ex:constraints"], ["Groups...", "m:st:group"], ["Section Cuts...", "m:st:cut"], dt("Generalized Displacements..."), ["Diaphragms...", "m:st:diaphragm"],
-    fns, ["Load Patterns...", "m:patterns"], ["Load Cases...", "m:cases"], ["Load Combinations...", "m:combos"],
-    ["Moving Loads", [["Lanes...", "m:ex:lanes"], ["Vehicles...", "m:ex:vehicles"], ["Vehicle Classes...", "m:ex:classes"], ["Moving Load Cases...", "m:ex:mcases"]]]];
+    ["Section Properties", [["Frame Sections...", "m:frameSections"], ["Tendon Sections...", "m:ex:tendonsections"], soon("Cable Sections..."), 0, ["Area Sections...", "m:shellSections"], 0, soon("Solid Properties..."), 0,
+      ["Reinforcement Bar Sizes...", "m:rebarSizes"], 0, ["Link/Support Properties...", "m:links"], soon("Frequency Dep. Link Props..."), 0, ["Hinge Properties...", "m:sapHinges"]]], 0,
+    soon("Foundation Properties..."), soon("Foundation Assemblies..."), 0, ["Mass Source...", "m:mass"], 0, ["Coordinate Systems/Grids...", "m:grids"], 0, ["Joint Constraints...", "m:ex:constraints"], soon("Joint Patterns..."), 0,
+    ["Groups...", "m:st:group"], ["Section Cuts...", "m:st:cut"], dt("Generalized Displacements..."), 0, fns, 0, ["Load Patterns...", "m:patterns"], ["Load Cases...", "m:cases"], ["Load Combinations...", "m:combos"], 0,
+    ["Moving Loads", [["Lanes...", "m:ex:lanes"], ["Vehicles...", "m:ex:vehicles"], ["Vehicle Classes...", "m:ex:classes"], ["Moving Load Cases...", "m:ex:mcases"]]], ["Floor Vibration", [soon("Floor Vibration...")]], 0,
+    ["Named Property Sets", [soon("Named Property Sets...")]], ["Pushover Parameter Sets", [soon("Pushover Parameter Sets...")]], ["Named Sets", [soon("Named Sets...")]]];
   if (program === "safe") return [["Materials...", "m:materials"],
     ["Section Properties", [["Slab Properties...", "m:shellSections"], ["Beam Properties...", "m:frameSections"], ["Tendon Properties...", "m:ex:tendonsections"], ["Reinforcing Bar Sizes...", "m:rebarSizes"],
       ["Soil Subgrade Properties...", "m:spr:area"], ["Point Spring Properties...", "m:spr:point"], ["Line Spring Properties...", "m:spr:line"], ["Wall Properties...", "m:wallSections"]]],
@@ -5011,6 +5015,7 @@ async function modelAct(a) {
     case "program": return hmProgram();
     case "open": return hmOpen();
     case "materials": return hmMaterials();
+    case "sapHinges": { const d = listForm("Frame Hinge Properties", "Hinge Types", sapHinges.map(x => x[0]), [["Modify/Show Hinge Property...", n => { const x = sapHinges.find(h => h[0] === n); if (x) { d.close(); hmDefineTable(x[1].map(sapHingeTable).join("|")); } }]], n => { const x = sapHinges.find(h => h[0] === n); if (x) { d.close(); hmDefineTable(x[1].map(sapHingeTable).join("|")); } }); return; }
     case "frameSections": return hmFrameSections();
     case "shellSections": return hmShellSections();
     case "wallSections": return hmShellSections("wall");
@@ -5231,10 +5236,10 @@ function submit(d, tool, args, after) {
   return false;
 }
 // The programs' Define list: the names on the left, "Click to:" buttons on the right.
-function listForm(title, what, names, actions, onPick) {
+function listForm(title, what, names, actions, onPick, extra) {
   const d = dialog(title, `<div style="display:flex;gap:10px"><fieldset style="flex:1;margin:0"><legend>${esc(what)}</legend>
       <select id="hmList" size="14" style="width:100%;height:auto;min-width:220px">${names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join("")}</select></fieldset>
-      <fieldset style="width:190px;margin:0"><legend>Click to:</legend><div style="display:flex;flex-direction:column;gap:6px">${actions.map((x, i) => `<button data-a="${i}">${esc(x[0])}</button>`).join("")}</div></fieldset></div>`,
+      <fieldset style="width:190px;margin:0"><legend>Click to:</legend><div style="display:flex;flex-direction:column;gap:6px">${actions.map((x, i) => `<button data-a="${i}">${esc(x[0])}</button>`).join("")}</div>${extra || ""}</fieldset></div>`,
     [["OK"], ["Cancel"]], {width: 480});
   const list = q(d, "#hmList"); if (names.length) list.selectedIndex = 0;
   d.querySelectorAll("[data-a]").forEach(b => b.onclick = () => { const x = actions[+b.dataset.a]; x[1](list.value, d); });
@@ -5246,6 +5251,7 @@ const matOpts = (defs, v) => { const list = defs.materials.filter(m => /concrete
 
 // ---- Define: materials ----
 async function hmMaterials() {
+  if (program === "sap2000") return hmSapMaterials();
   const defs = await hmDefs();
   const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmMaterials(); };
   listForm("Define Materials", "Materials", defs.materials.map(m => m.name), [
@@ -5308,15 +5314,16 @@ function matPreset(region, type, standard, grade, u, taken) {
   let n = name, i = 1; while (taken.includes(n)) n = name + "-" + i++;
   return {name: n, type, grade: gradeName, values, region, standard};
 }
-async function hmMaterialNew(after) {
+async function hmMaterialNew(after, then) {
   const defs = await hmDefs(), pd = (await hmRun("property_definitions", {}, true)).result || {material_types: ["Concrete"]}, u = hmU();
   const types = pd.material_types || ["Concrete"], taken = (defs.materials || []).map(m => m.name);
-  const d = dialog("Add New Material Property", `<fieldset><legend>Material Property Template</legend><div class="g2">
-      <span>Region</span><select id="anR">${opts([...Object.keys(matLib), "User"], "User")}</select>
+  const sap = program === "sap2000"; // SAP2000's "Add Material Property": the four boxes in a plain frame.
+  const d = dialog(sap ? "Add Material Property" : "Add New Material Property", `<fieldset>${sap ? "" : "<legend>Material Property Template</legend>"}<div class="g2">
+      <span>Region</span><select id="anR">${opts([...Object.keys(matLib), "User"], sap ? "United States" : "User")}</select>
       <span>Material Type</span><select id="anT">${opts(types, types[0])}</select>
       <span>Standard</span><select id="anS"></select>
       <span>Grade</span><select id="anG"></select></div></fieldset>`,
-    [["OK", d => { const p = matPreset(q(d, "#anR").value, q(d, "#anT").value, q(d, "#anS").value, q(d, "#anG").value, u, taken); setTimeout(() => hmMaterial(null, after, false, p)); }], ["Cancel"]], {width: 400});
+    [["OK", d => { const p = matPreset(q(d, "#anR").value, q(d, "#anT").value, q(d, "#anS").value, q(d, "#anG").value, u, taken); setTimeout(() => then ? then(p) : hmMaterial(null, after, false, p)); }], ["Cancel"]], {width: 400});
   const fill = (lvl) => {
     const r = q(d, "#anR").value, lib = matLib[r] || {}, tlist = r === "User" ? types : types.filter(t => lib[t]);
     if (lvl < 1) q(d, "#anT").innerHTML = opts(tlist, tlist.includes(q(d, "#anT").value) ? q(d, "#anT").value : tlist[0]);
@@ -5336,6 +5343,7 @@ function hmColor(now, done) {
   return c;
 }
 async function hmMaterial(m, after, copy, preset) {
+  if (program === "sap2000") return hmSapMaterial(m, after, copy, preset);
   const u = hmU(), pd = (await hmRun("property_definitions", {}, true)).result || {materials: [], material_types: ["Concrete"], material_values: [], material_tables: {}, material_nonlinear: {}};
   const cur = m ? pd.materials.find(x => x.name === m.name) || {name: m.name, type: m.type, values: {}} : preset || {name: "", type: "Concrete", grade: "", values: {WEIGHTPERVOLUME: 25, E: 32836568, U: 0.2, A: 9.9e-6, FC: 30000}};
   const was = m && !copy ? cur.name : null;
@@ -5406,6 +5414,156 @@ async function hmMaterial(m, after, copy, preset) {
   q(d, "#mNl").onclick = () => hmMaterialNonlinear(type(), st, V, row, setRow, pd, name());
   q(d, "#mDamp").onclick = () => hmTableForm("Material Damping Properties", "Damping Parameters", [["ModalRatio", "Modal Damping Ratio", "num", "Modal Damping"], ["VisMass", "Mass Coefficient", "num", "Viscous Proportional Damping"], ["VisStiff", "Stiffness Coefficient", "num", "Viscous Proportional Damping"]], row, setRow, "", name());
   q(d, "#mTime").onclick = () => hmMaterialTime(st, row, setRow, pd, name());
+  return d;
+}
+// ---- SAP2000 26.3's own material forms (read on Ahmed's PC 2026-11-27: field/reference-forms/sap2000/Define/Materials *) ----
+// Define Materials has "Show Advanced Properties": off, Modify/Show opens the plain Material Property Data (General Data,
+// Weight and Mass with Units, Isotropic Property Data, Other Properties For <type> Materials, Switch To Advanced Property
+// Display); on, it opens Material Property Options first, then the advanced Material Property Data with its buttons.
+let sapMatAdvanced = false;
+// SAP2000's units sets as its Units boxes list them, and one parsed to the force and length the conversions use.
+const sapUnitNames = sapUnitSets.map(x => x.join(", "));
+const sapUnitOf = s => { const [f, l] = s.split(", "); return {f: ({KN: "kN", Kip: "kip", Kgf: "kgf", Tonf: "tonf"})[f] || f, l}; };
+const sapUnitName = u => `${({kN: "KN", kip: "Kip", kgf: "Kgf", tonf: "Tonf"})[u.f] || u.f}, ${u.l}, ${tempUnit(u)}`;
+// A value in units a, put in units b: force to the power fp, length to the power lp, temperature to the power tp.
+const sapConv = (v, a, b, fp, lp, tp) => { if (!isFinite(v)) return v; let x = toModel(b, v / Math.pow(uForce[a.f] || 1, fp) * Math.pow(uLen[a.l] || 1, lp), fp, lp); const ta = tempUnit(a), tb = tempUnit(b); if (tp && ta !== tb) x *= Math.pow(ta === "C" ? 1 / 1.8 : 1.8, tp); return +x.toPrecision(8); };
+// The SAP2000 strength rows of each type ("Other Properties For Steel Materials"): [value key or table|field, label].
+const sapMatOther = {
+  Concrete: [["FC", "Specified Concrete Compressive Strength, f'c"], ["Concrete Data|eFc", "Expected Concrete Compressive Strength"]],
+  Steel: [["FY", "Minimum Yield Stress, Fy"], ["FU", "Minimum Tensile Stress, Fu"], ["FYE", "Expected Yield Stress, Fye"], ["FUE", "Expected Tensile Stress, Fue"]],
+  Rebar: [["FY", "Minimum Yield Stress, Fy"], ["FU", "Minimum Tensile Stress, Fu"], ["FYE", "Expected Yield Stress, Fye"], ["FUE", "Expected Tensile Stress, Fue"]],
+  Tendon: [["FY", "Minimum Yield Stress, Fy"], ["FU", "Minimum Tensile Stress, Fu"]],
+  ColdFormed: [["Coldformed Data|Fy", "Minimum Yield Stress, Fy"], ["Coldformed Data|Fu", "Minimum Tensile Stress, Fu"]],
+  Aluminum: [["Aluminum Data|Fcy", "Compressive Yield Strength, Fcy"], ["Aluminum Data|Fty", "Tensile Yield Strength, Fty"], ["Aluminum Data|Ftu", "Tensile Ultimate Strength, Ftu"], ["Aluminum Data|Fsu", "Shear Ultimate Strength, Fsu"]],
+  Masonry: [["Masonry Data|Fm", "Specified Compressive Strength, f'm"]]};
+const sapMatTypeName = t => ({ColdFormed: "Cold Formed"})[t] || t;
+async function hmSapMaterial(m, after, copy, preset, options) {
+  const mu = hmU(), pd = (await hmRun("property_definitions", {}, true)).result || {materials: [], material_types: ["Concrete"], material_values: [], material_tables: {}, material_nonlinear: {}};
+  const cur = m ? pd.materials.find(x => x.name === m.name) || {name: m.name, type: m.type, values: {}} : preset || {name: "", type: "Concrete", grade: "", values: {WEIGHTPERVOLUME: 25, E: 32836568, U: 0.2, A: 9.9e-6, FC: 30000}};
+  const st = options || {name: m ? (copy ? cur.name + " copy" : cur.name) : cur.name || "Concrete", was: m && !copy ? cur.name : null, type: cur.type || "Concrete", grade: cur.grade || "",
+    values: {...(cur.values || {})}, texts: {...(cur.texts || {})}, tables: JSON.parse(JSON.stringify(cur.tables || {}))};
+  const row = t => (st.tables[t] && st.tables[t][0]) || {};
+  const setRow = (t, r) => { const clean = {}; for (const k in r) if (r[k] !== "" && r[k] != null) clean[k] = String(r[k]); st.tables[t] = Object.keys(clean).length ? [clean] : []; };
+  if (!row("General").Color) setRow("General", {...row("General"), Color: st.type === "Concrete" ? "Gray8Dark" : /Rebar|Tendon/.test(st.type) ? "Green" : "Blue"});
+  const V = st.values, uni = /Rebar|Tendon/.test(st.type), other = sapMatOther[st.type] || [];
+  const gOf = u => ({m: 9.80665, mm: 9806.65, cm: 980.665, in: 386.0886, ft: 32.174})[u.l] || 9.80665;
+  const getO = k => k.includes("|") ? row(k.split("|")[0])[k.split("|")[1]] ?? "" : V[k] ?? "";
+  const notes = () => {
+    const n = dialog("Material Notes", `<div class="g2" style="margin-bottom:6px"><span>Material Name</span><input class="grey" readonly value="${esc(st.name)}"></div><textarea id="nT" rows="8" style="width:100%;box-sizing:border-box">${esc(row("General").Notes || "")}</textarea>`,
+      [["OK", n => { setRow("General", {...row("General"), Notes: q(n, "#nT").value}); }], ["Cancel"]], {width: 420});
+    return n;
+  };
+  const done = d => submit(d, "define_material_data", {name: st.name.trim(), was: st.was, type: st.type, grade: st.grade || undefined, values: V, texts: st.texts,
+    tables: Object.fromEntries(Object.keys(st.tables).map(t => [t, matTableFits(t, st.type) ? st.tables[t] : []]))}, after);
+  // The numbers of the form, each with its powers of force, length and temperature, read in the Units box's units.
+  const nums = [["mW", "WEIGHTPERVOLUME", 1, -3, 0], ["mE", "E", 1, -2, 0], ["mU", "U", 0, 0, 0], ["mA", "A", 0, 0, -1], ...other.map(([k], i) => ["mO" + i, k, k === "Aluminum Data|AlumType" ? 0 : 1, -2, 0])];
+  const advanced = !!options;
+  // Numbers as SAP2000 shows them: small ones as 9.900E-06.
+  const fmt = v => { const n = typeof v === "number" ? v : parseFloat(v); return v === "" || !isFinite(n) ? String(v) : n !== 0 && Math.abs(n) < 1e-3 ? n.toExponential(3).toUpperCase().replace(/E([+-])(\d)$/, "E$10$2") : String(n); };
+  const box = (id, label, k, cls) => `<span>${esc(label)}</span><input id="${id}" ${cls || ""} value="${esc(fmt(getO(k)))}">`;
+  const unitsBox = `<fieldset style="margin:0"><legend>Units</legend><select id="mUn">${opts(sapUnitNames, sapUnitName(mu))}</select></fieldset>`;
+  const weight = `<fieldset style="margin:0;flex:1"><legend>Weight and Mass</legend><div class="g2">${box("mW", "Weight per Unit Volume", "WEIGHTPERVOLUME")}<span>Mass per Unit Volume</span><input id="mM" ${advanced ? "" : 'class="grey" readonly'}></div></fieldset>`;
+  const otherBox = st.type === "Other" ? "" : `<fieldset><legend>Other Properties For ${esc(sapMatTypeName(st.type))} Materials</legend><div class="g2">${other.map(([k, label], i) => box("mO" + i, label, k)).join("")}
+      ${st.type === "Concrete" ? `<label style="grid-column:1/3"><input type="checkbox" id="mLw" ${row("Concrete Data").LtWtConc === "Yes" ? "checked" : ""}> Lightweight Concrete</label><span style="padding-left:20px">Shear Strength Reduction Factor</span><input id="mLf" value="${esc(row("Concrete Data").LtWtFact || "")}">` : ""}
+      ${st.type === "Aluminum" ? `<span>Aluminum Type</span><select id="mAt">${opts(["Wrought", "Cast-Mold", "Cast-Sand"], row("Aluminum Data").AlumType || "Wrought")}</select><span>Alloy</span><input id="mAl" value="${esc(row("Aluminum Data").Alloy || "")}">` : ""}</div></fieldset>`;
+  const iso = uni
+    ? `<fieldset><legend>Uniaxial Property Data</legend><div class="g2">${box("mE", "Modulus Of Elasticity,  E", "E")}${box("mA", "Coefficient Of Thermal Expansion,  A", "A")}</div></fieldset>`
+    : `<fieldset><legend>Isotropic Property Data</legend><div class="g2">${box("mE", "Modulus Of Elasticity,  E", "E")}${box("mU", "Poisson,  U", "U")}${box("mA", "Coefficient Of Thermal Expansion,  A", "A")}<span>Shear Modulus,  G</span><input id="mGm" class="grey" readonly></div></fieldset>`;
+  const okFn = d => {
+    const u = sapUnitOf(q(d, "#mUn").value);
+    for (const [id, k, fp, lp, tp] of nums) {
+      const b = q(d, "#" + id); if (!b) continue;
+      const raw = parseFloat(b.value), v = isFinite(raw) ? sapConv(raw, u, mu, fp, lp, tp) : undefined;
+      if (k.includes("|")) { const [t, f] = k.split("|"); setRow(t, {...row(t), [f]: v === undefined ? "" : String(v)}); }
+      else if (v === undefined) delete V[k]; else V[k] = v;
+    }
+    if (st.type === "Concrete") setRow("Concrete Data", {...row("Concrete Data"), LtWtConc: q(d, "#mLw").checked ? "Yes" : "", LtWtFact: q(d, "#mLw").checked ? q(d, "#mLf").value.trim() : ""});
+    if (st.type === "Aluminum") setRow("Aluminum Data", {...row("Aluminum Data"), AlumType: q(d, "#mAt").value, Alloy: q(d, "#mAl").value.trim()});
+    if (!advanced) { st.name = q(d, "#mN").value.trim(); st.grade = q(d, "#mGr").value.trim(); setRow("General", {...row("General"), Color: q(d, "#mC").value}); }
+    if (uni) delete V.U;
+    if (advanced) { options.saved = true; return; }
+    if (q(d, "#mAdv").checked) { sapMatAdvanced = true; setTimeout(() => hmSapMaterialOptions(st, after, done)); return; }
+    return done(d);
+  };
+  const d = advanced
+    ? dialog("Material Property Data", `<div class="sapAdv" style="display:grid;grid-template-columns:170px 1fr;gap:8px"><style>.sapAdv input:not([type=checkbox]),.sapAdv select{min-width:0;width:100%;box-sizing:border-box}.sapAdv .g2{grid-template-columns:auto minmax(0,1fr)}</style>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <fieldset style="margin:0"><legend>Material Name</legend><input class="grey" readonly value="${esc(st.name)}"></fieldset>
+          <fieldset style="margin:0"><legend>Modulus of Elasticity</legend><div class="g2"><span>E</span><input id="mE" value="${esc(String(V.E ?? ""))}"></div></fieldset>
+          ${uni ? "" : `<fieldset style="margin:0"><legend>Poisson</legend><div class="g2"><span>U</span><input id="mU" value="${esc(String(V.U ?? ""))}"></div></fieldset>`}
+          <fieldset style="margin:0"><legend>Coeff of Thermal Expansion</legend><div class="g2"><span>A</span><input id="mA" value="${esc(fmt(V.A ?? ""))}"></div></fieldset>
+          ${uni ? "" : `<fieldset style="margin:0"><legend>Shear Modulus</legend><div class="g2"><span>G</span><input id="mGm" class="grey" readonly></div></fieldset>`}</div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div style="display:flex;gap:8px"><fieldset style="margin:0;flex:1"><legend>Material Type</legend><input class="grey" readonly value="${esc(sapMatTypeName(st.type))}"></fieldset><fieldset style="margin:0;flex:1"><legend>Symmetry Type</legend><input class="grey" readonly value="${uni ? "Uniaxial" : "Isotropic"}"></fieldset></div>
+          <div style="display:flex;gap:8px">${weight}${unitsBox}</div>${otherBox}
+          <fieldset style="margin:0"><legend>Advanced Material Property Data</legend><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+            <button id="mNl">Uniaxial Nonlinear Data...</button><button id="mDamp">Material Damping Properties...</button><button id="mCoup" disabled title="Not yet read from SAP2000">Coupled Nonlinear Data...</button><button id="mTime">Time Dependent Properties...</button></div></fieldset></div></div>`,
+      [["OK", okFn], ["Cancel"]], {width: 640})
+    : dialog("Material Property Data", `<fieldset><legend>General Data</legend><div class="g2">
+        <span>Material Name and Display Color</span><span style="display:flex;gap:6px"><input id="mN" style="flex:1" value="${esc(st.name)}"><button id="mCol" title="Display Color" style="width:22px;padding:0"></button></span>
+        <span>Material Type</span><select disabled>${opts([sapMatTypeName(st.type)], sapMatTypeName(st.type))}</select>
+        <span>Material Grade</span><input id="mGr" value="${esc(st.grade || "")}">
+        <span>Material Notes</span><button id="mNotes">Modify/Show Notes...</button></div><input id="mC" type="hidden" value="${esc(row("General").Color || "")}"></fieldset>
+      <div style="display:flex;gap:8px">${weight}${unitsBox}</div>${iso}${otherBox}
+      <label><input type="checkbox" id="mAdv"> Switch To Advanced Property Display</label>`,
+      [["OK", okFn], ["Cancel"]], {width: 540});
+  let shown = mu;
+  const g = () => { const e = parseFloat(q(d, "#mE").value), nu = parseFloat((q(d, "#mU") || {}).value); if (q(d, "#mGm")) q(d, "#mGm").value = isFinite(e) && isFinite(nu) ? +(e / (2 * (1 + nu))).toPrecision(7) : ""; };
+  const w2m = () => { const w = parseFloat(q(d, "#mW").value); q(d, "#mM").value = isFinite(w) ? +(w / gOf(shown)).toPrecision(5) : ""; };
+  // Units changes the numbers shown, as SAP2000's box does; OK puts them back in the model's units.
+  q(d, "#mUn").onchange = () => { const to = sapUnitOf(q(d, "#mUn").value); for (const [id, , fp, lp, tp] of nums) { const b = q(d, "#" + id), v = b && parseFloat(b.value); if (b && isFinite(v)) b.value = sapConv(v, shown, to, fp, lp, tp); } shown = to; g(); w2m(); };
+  q(d, "#mE").oninput = g; if (q(d, "#mU")) q(d, "#mU").oninput = g; q(d, "#mW").oninput = w2m;
+  if (advanced) q(d, "#mM").oninput = () => { const v = parseFloat(q(d, "#mM").value); if (isFinite(v)) q(d, "#mW").value = +(v * gOf(shown)).toPrecision(8); };
+  g(); w2m();
+  if (q(d, "#mLw")) { const lw = () => q(d, "#mLf").disabled = !q(d, "#mLw").checked; q(d, "#mLw").onchange = lw; lw(); }
+  if (!advanced) {
+    const swatch = () => q(d, "#mCol").style.background = matColorCss(q(d, "#mC").value);
+    q(d, "#mCol").onclick = () => hmColor(q(d, "#mC").value, c => { q(d, "#mC").value = c; swatch(); }); swatch();
+    q(d, "#mNotes").onclick = notes;
+  } else {
+    q(d, "#mNl").disabled = !(pd.material_nonlinear[st.type] || {keys: []}).keys.length && !["Aluminum", "ColdFormed", "Masonry", "Other"].includes(st.type);
+    q(d, "#mNl").onclick = () => hmMaterialNonlinear(st.type, st, V, row, setRow, pd, st.name);
+    q(d, "#mDamp").onclick = () => hmTableForm("Material Damping Properties", "Damping Parameters", [["ModalRatio", "Modal Damping Ratio", "num", "Modal Damping"], ["VisMass", "Mass Coefficient", "num", "Viscous Proportional Damping"], ["VisStiff", "Stiffness Coefficient", "num", "Viscous Proportional Damping"]], row, setRow, "", st.name);
+    q(d, "#mTime").disabled = st.type !== "Concrete"; q(d, "#mTime").onclick = () => hmMaterialTime(st, row, setRow, pd, st.name);
+  }
+  st.row = row; st.setRow = setRow; st.notes = notes; st.pd = pd; st.done = done; d._st = st;
+  return d;
+}
+// SAP2000's Material Property Options (advanced display): name, grade, notes, the type and symmetry, the display colour,
+// temperature dependence, and Modify/Show Material Properties... for the advanced Material Property Data.
+async function hmSapMaterialOptions(st, after, done) {
+  if (!st.row) { const h = await hmSapMaterial(null, after, false, null, null); return h; }
+  const uni = /Rebar|Tendon/.test(st.type), row = st.row, setRow = st.setRow;
+  const d = dialog("Material Property Options", `<div class="g2"><b>Material Name</b><input id="oN" value="${esc(st.name)}"><span>Material Grade</span><input id="oG" value="${esc(st.grade || "")}"><span>Material Notes</span><button id="oNo">Modify/Show...</button></div>
+    <fieldset><legend>Options</legend><div class="g2"><span>Material Type</span><select disabled>${opts([sapMatTypeName(st.type)], sapMatTypeName(st.type))}</select>
+      <span>Directional Symmetry Type</span><select id="oS">${opts([uni ? "Uniaxial" : "Isotropic"], uni ? "Uniaxial" : "Isotropic")}</select>
+      <span>Display Color</span><button id="oC" style="height:20px"></button></div>
+      <label class="kv"><input type="checkbox" disabled title="SAP2000's temperature dependent data is not in the Engine yet"> Material Properties are Temperature Dependent</label><input id="mC" type="hidden" value="${esc(row("General").Color || "")}"></fieldset>
+    <div style="text-align:center;margin-top:6px"><button id="oP">Modify/Show Material Properties...</button></div>`,
+    [["OK", x => { st.name = q(x, "#oN").value.trim(); st.grade = q(x, "#oG").value.trim(); setRow("General", {...row("General"), Color: q(x, "#mC").value}); return done(x); }], ["Cancel"]], {width: 420});
+  const swatch = () => q(d, "#oC").style.background = matColorCss(q(d, "#mC").value); swatch();
+  q(d, "#oC").onclick = () => hmColor(q(d, "#mC").value, c => { q(d, "#mC").value = c; swatch(); });
+  q(d, "#oNo").onclick = () => { st.name = q(d, "#oN").value.trim(); st.notes(); };
+  q(d, "#oP").onclick = () => { st.name = q(d, "#oN").value.trim(); hmSapMaterial(null, after, false, null, st); };
+  return d;
+}
+// Define Materials as SAP2000 has it: the list, Click to: buttons and Show Advanced Properties.
+async function hmSapMaterials() {
+  const defs = await hmDefs();
+  const again = () => { document.querySelectorAll(".dlg").forEach(x => x.close && x.close()); hmSapMaterials(); };
+  const open = async (m, copy, preset) => {
+    if (!sapMatAdvanced) return hmSapMaterial(m, again, copy, preset);
+    // Advanced: the plain form's state without showing it, then Material Property Options.
+    const h = await hmSapMaterial(m, again, copy, preset); const st = h && h._st; if (h) h.close();
+    return hmSapMaterialOptions(st, again, x => st.done(x));
+  };
+  const d = listForm("Define Materials", "Materials", defs.materials.map(m => m.name), [
+    ["Add New Material...", () => hmMaterialNew(again, (p) => open(null, false, p))],
+    ["Add Copy of Material...", n => n && open(defs.materials.find(m => m.name === n), true)],
+    ["Modify/Show Material...", n => n && open(defs.materials.find(m => m.name === n))],
+    ["Delete Material", n => n && hmRun("delete_definition", {kind: "material", name: n}).then(j => j.ok && again())],
+  ], n => open(defs.materials.find(m => m.name === n)), `<label class="kv" style="margin-top:8px;display:block"><input type="checkbox" id="mShowAdv" ${sapMatAdvanced ? "checked" : ""}> Show Advanced Properties</label>`);
+  q(d, "#mShowAdv").onchange = e => { sapMatAdvanced = e.target.checked; };
   return d;
 }
 // Which of the program's material tables a material type has.

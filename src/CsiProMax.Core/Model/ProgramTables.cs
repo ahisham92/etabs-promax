@@ -19,7 +19,7 @@ public static class ProgramTables
         ["Aluminum Data"] = ["AlumType", "Alloy", "Fcy", "Fty", "Ftu", "Fsu", "SSHysType"],
         ["Basic Mechanical Properties"] = ["DensityType", "UnitWeight", "UnitMass", "E1", "E2", "E3", "G12", "G13", "G23", "U12", "U13", "U23", "A1", "A2", "A3"],
         ["Coldformed Data"] = ["Fy", "Fu", "SSHysType"],
-        ["Concrete Data"] = ["Fc", "LtWtConc", "LtWtFact", "IsUserFr", "UserFr", "SSCurveOpt", "SSHysType", "SFc", "SCap", "FinalSlope", "FAngle", "DAngle", "TimeType", "TimeE", "EFact", "TimeCreep", "CreepFact", "TimeShrink", "ShrinkFact", "CreepType", "CreepTerms"],
+        ["Concrete Data"] = ["Fc", "eFc", "LtWtConc", "LtWtFact", "IsUserFr", "UserFr", "SSCurveOpt", "SSHysType", "SFc", "SCap", "FinalSlope", "FAngle", "DAngle", "TimeType", "TimeE", "EFact", "TimeCreep", "CreepFact", "TimeShrink", "ShrinkFact", "CreepType", "CreepTerms"],
         ["Damping Parameters"] = ["ModalRatio", "VisMass", "VisStiff"],
         ["General"] = ["Type", "SymType", "Grade", "Color", "GUID", "Notes"],
         ["Hysteresis Parameters - BRB Hardening"] = ["IsSymmetric", "TensHardFac", "TensMaxPDef", "TensAccPDef", "TensProAcc", "CompHardFac", "CompMaxPDef", "CompAccPDef", "CompProAcc"],
@@ -44,6 +44,16 @@ public static class ProgramTables
         ["Time Dependence - User Stiffness"] = ["Age", "Multiplier"],
         ["User Stress-Strain Curves"] = ["Point", "Strain", "Stress", "PointID"],
     };
+
+    /// <summary>Fields only SAP2000's table has (its Expected Concrete Compressive Strength): ETABS and SAFE are not given them.</summary>
+    public static readonly IReadOnlyDictionary<string, string[]> SapOnlyFields = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase) { ["Concrete Data"] = ["eFc"] };
+
+    /// <summary>A material table row without the fields only SAP2000 has.</summary>
+    public static Dictionary<string, string> WithoutSapOnly(string table, IReadOnlyDictionary<string, string> row)
+    {
+        var name = table.StartsWith(MaterialGroup, StringComparison.OrdinalIgnoreCase) ? table[MaterialGroup.Length..] : table;
+        return row.Where(kv => !(SapOnlyFields.TryGetValue(name, out var s) && s.Contains(kv.Key, StringComparer.OrdinalIgnoreCase))).ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
+    }
 
     /// <summary>The tables a material may hold many rows in (a curve, a time series); the others hold one.</summary>
     public static readonly string[] ManyRows = ["User Stress-Strain Curves", "Time Dependence - User Creep", "Time Dependence - User Shrinkage", "Time Dependence - User Stiffness"];

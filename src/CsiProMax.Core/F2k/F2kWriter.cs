@@ -220,7 +220,7 @@ public static class F2kWriter
         // What each material's forms hold beyond its .e2k keywords goes into SAFE's tables of the same names as ETABS's.
         Dictionary<string, string>? Of(Material x, string table) => ProgramTables.MaterialData(x).TryGetValue(table, out var r) && r.Count > 0 ? r[0] : null;
         MaterialData("MATERIAL PROPERTIES - STEEL DATA", x => Is(x, "Steel"), x => ProgramTables.With(Row(("Material", x.Name), ("Fy", N(x.Number("FY") ?? 0)), ("Fu", N(x.Number("FU") ?? 0))), Of(x, "Steel Data")));
-        MaterialData("MATERIAL PROPERTIES - CONCRETE DATA", x => x.IsConcrete, x => ProgramTables.With(Row(("Material", x.Name), ("Fc", N(x.Number("FC") ?? 0)), ("LtWtConc", "No")), Of(x, "Concrete Data")));
+        MaterialData("MATERIAL PROPERTIES - CONCRETE DATA", x => x.IsConcrete, x => ProgramTables.With(Row(("Material", x.Name), ("Fc", N(x.Number("FC") ?? 0)), ("LtWtConc", "No")), Of(x, "Concrete Data") is { } c ? ProgramTables.WithoutSapOnly("Concrete Data", c) : null));
         MaterialData("MATERIAL PROPERTIES - REBAR DATA", x => Is(x, "Rebar"), x => ProgramTables.With(Row(("Material", x.Name), ("Fy", N(x.Number("FY") ?? 0)), ("Fu", N(x.Number("FU") ?? 0))), Of(x, "Rebar Data")));
         MaterialData("MATERIAL PROPERTIES - TENDON DATA", x => Is(x, "Tendon"), x => ProgramTables.With(Row(("Material", x.Name), ("Fy", N(x.Number("FY") ?? 0)), ("Fu", N(x.Number("FU") ?? 0))), Of(x, "Tendon Data")));
         // SAFE's material tables are those six (its own .f2k files): the material's other forms (damping, time dependence,
