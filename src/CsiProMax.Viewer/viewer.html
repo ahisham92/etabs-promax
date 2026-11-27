@@ -140,6 +140,11 @@ body.popbody{display:flex;flex-direction:column;height:100vh;margin:0;overflow:h
 /* Its window is narrow, but it is no narrow screen: the page's small-screen rules (which hide the Model Explorer and the
    table list) don't apply to it. */
 .popped{display:flex!important;flex-direction:column}.popped[hidden]{display:none!important}body.popbody #tlist{display:flex!important}
+/* Its window has no title bar: the panel's caption moves the window (app-region, which CSI ProMax's window host turns
+   on), its buttons stay buttons. The side panel's tabs keep their width, so the rest of the row is caption. */
+body.popbody .dock,body.popbody #tabs{-webkit-app-region:drag;app-region:drag}
+body.popbody .dock button,body.popbody #tabs button{-webkit-app-region:no-drag;app-region:no-drag}
+body.popbody #tabs button[data-tab]{flex:none;padding:3px 12px}body.popbody #rightDD{margin-left:auto}
 .dragging,.dragging *{cursor:move!important;user-select:none}
 .ddm{position:fixed;z-index:60;background:var(--menu);border:1px solid var(--line);box-shadow:var(--shadow);padding:3px 0;min-width:150px}
 .ddm div{padding:3px 24px;white-space:nowrap}.ddm div:hover{background:var(--hot)}.ddm div.off{opacity:.45;pointer-events:none}
@@ -579,8 +584,8 @@ matchMedia("(prefers-color-scheme: dark)").addEventListener("change", themeChang
 function theme() {
   // The model windows: black as analysis programs draw them, or white for printing.
   return bg === "black"
-    ? {canvas: [0, 0, 0], column: "#2f8ff7", beam: "#f0cf34", brace: "#ff8a3c", other: "#c79bff", floor: "#8d9aa4", wall: "#d4625c", grid: [0.42, 0.47, 0.52], gridText: "#c9d2d8", bubble: "#000000", level: [0.25, 0.29, 0.33], text: "#d5dde1", pick: "#ff4df0", support: "#35e06f", lit: "#ffffff", pos: [1, 0.84, 0.24, 0.55], neg: [1, 0.33, 0.33, 0.55], posEdge: "#ffd83c", negEdge: "#ff6a6a", ghost: [0.42, 0.46, 0.5], edge: 0.45, joint: "#d5dde1", dark: true}
-    : {canvas: [1, 1, 1], column: "#4b57a6", beam: "#1f8a4c", brace: "#b86a12", other: "#6a55b0", floor: "#737373", wall: "#c4463c", grid: [0.78, 0.78, 0.78], gridText: "#9a9a9a", bubble: "#ffffff", ground: [0.85, 0.925, 1], support: "#7a7a7a", level: [0.8, 0.83, 0.85], text: "#2f3a40", pick: "#e6007a", lit: "#e2620d", pos: [0.16, 0.43, 0.86, 0.38], neg: [0.84, 0.2, 0.2, 0.38], posEdge: "#1c5fd0", negEdge: "#c62828", ghost: [0.7, 0.74, 0.77], edge: 0.55, joint: "#2f3a40", dark: false};
+    ? {canvas: [0, 0, 0], column: "#2f8ff7", beam: "#f0cf34", brace: "#ff8a3c", other: "#c79bff", floor: "#8d9aa4", wall: "#d4625c", grid: [0.42, 0.47, 0.52], gridText: "#c9d2d8", bubble: "#000000", ground: [0.1, 0.16, 0.25], groundGrid: [0.24, 0.4, 0.6], level: [0.25, 0.29, 0.33], text: "#d5dde1", pick: "#ff4df0", support: "#35e06f", lit: "#ffffff", pos: [1, 0.84, 0.24, 0.55], neg: [1, 0.33, 0.33, 0.55], posEdge: "#ffd83c", negEdge: "#ff6a6a", ghost: [0.42, 0.46, 0.5], edge: 0.45, joint: "#d5dde1", dark: true}
+    : {canvas: [1, 1, 1], column: "#4b57a6", beam: "#1f8a4c", brace: "#b86a12", other: "#6a55b0", floor: "#737373", wall: "#c4463c", grid: [0.78, 0.78, 0.78], gridText: "#9a9a9a", bubble: "#ffffff", ground: [0.85, 0.925, 1], groundGrid: [0.62, 0.8, 0.96], support: "#7a7a7a", level: [0.8, 0.83, 0.85], text: "#2f3a40", pick: "#e6007a", lit: "#e2620d", pos: [0.16, 0.43, 0.86, 0.38], neg: [0.84, 0.2, 0.2, 0.38], posEdge: "#1c5fd0", negEdge: "#c62828", ghost: [0.7, 0.74, 0.77], edge: 0.55, joint: "#2f3a40", dark: false};
 }
 const rgb = hex => { const n = parseInt(hex.slice(1), 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; };
 const css = c => Array.isArray(c) ? `rgba(${Math.round(c[0] * 255)},${Math.round(c[1] * 255)},${Math.round(c[2] * 255)},${c[3] ?? 1})` : c;
@@ -862,7 +867,8 @@ function col(fields, ...names) { for (const n of names) { const i = fields.findI
 const objCount = () => frames.length + areas.length;
 const objOf = id => id <= 0 ? null : id <= frames.length ? frames[id - 1] : areas[id - frames.length - 1] || null;
 function load(pack, keep) {
-  const before = keep && P ? panes.map(p => ({mode: p.mode, story: p.story, line: p.line && p.line.label + p.line.dir, cam: {...p.cam, target: p.cam.target.slice()}})) : null;
+  if (keep) saveView();
+  const before = keep && P ? panes.map(p => ({mode: p.mode, story: p.story, line: p.line && p.line.label + p.line.dir, cam: {...p.cam, target: p.cam.target.slice()}, view: p.view})) : null;
   const selNames = keep ? [...sel].map(objOf).filter(Boolean).map(o => o.type + ":" + o.name) : [], selJNames = keep ? [...selJ] : [];
   if (window.cpmLive) pack = engineWith(pack, keep);
   if (!window.cpmLive && pack && pack.rawPack) pack = pack.rawPack;
@@ -1998,7 +2004,7 @@ function glContextLost(e) {
   }, 5000);
 }
 function glContextRestored() {
-  clearTimeout(glLostTimer); glLost = false; prog = {}; bufs = {};
+  clearTimeout(glLostTimer); glLost = false; prog = {}; bufs = {}; geoSets.clear();
   initGL();
   for (const p of panes) { p.pickOk = false; p.pickData = null; }
   geometryDirty = pointsDirty = colourDirty = true;
@@ -2030,8 +2036,9 @@ function shapeOf(sec) {
     let pts, smooth = false, kind = "rect";
     if (/circ|pipe|round/.test(name)) { pts = []; for (let i = 0; i < 20; i++) { const t = i * Math.PI * 2 / 20; pts.push([Math.cos(t) * h, Math.sin(t) * h]); } smooth = true; kind = "round"; }
     else if (/channel|^c\b|^mc|^c\d/.test(name)) { pts = [[-h, -w], [-h, w], [-h + tf, w], [-h + tf, -w + tw], [h - tf, -w + tw], [h - tf, w], [h, w], [h, -w]]; kind = "c"; }
-    else if (/tee|^wt|^t\b/.test(name)) { pts = [[h, -w], [h, w], [h - tf, w], [h - tf, tw / 2], [-h, tw / 2], [-h, -tw / 2], [h - tf, -tw / 2], [h - tf, -w]]; kind = "t"; }
-    else if (/angle|^l\b|^l\d/.test(name)) { const t = Math.max(tf, tw); pts = [[-h, -w], [h, -w], [h, -w + t], [-h + t, -w + t], [-h + t, w], [-h, w]]; kind = "l"; }
+    // Whole words: "tee" is in "Steel I/Wide Flange" and "angle" in "Rectangle" (every steel I section was drawn as a tee).
+    else if (/\btee\b|^wt|^t\b/.test(name)) { pts = [[h, -w], [h, w], [h - tf, w], [h - tf, tw / 2], [-h, tw / 2], [-h, -tw / 2], [h - tf, -tw / 2], [h - tf, -w]]; kind = "t"; }
+    else if (/\bangle\b|\bl\b|^l\d/.test(name)) { const t = Math.max(tf, tw); pts = [[-h, -w], [h, -w], [h, -w + t], [-h + t, -w + t], [-h + t, w], [-h, w]]; kind = "l"; }
     else if (/\bi\b|wide flange|i\/|^w\d|^w\b|^hp|^s\d|^ipe|^he[abm]|^ub|^uc|i-shape|ishape|i section|^i\d/.test(name)) { pts = [[-h, -w], [-h, w], [-h + tf, w], [-h + tf, tw / 2], [h - tf, tw / 2], [h - tf, w], [h, w], [h, -w], [h - tf, -w], [h - tf, -tw / 2], [-h + tf, -tw / 2], [-h + tf, -w]]; kind = "i"; }
     else pts = [[h, w], [h, -w], [-h, -w], [-h, w]];
     if (frames.length > 9000 && kind !== "rect") { pts = [[h, w], [h, -w], [-h, -w], [-h, w]]; smooth = false; }
@@ -2231,10 +2238,13 @@ function uploadObjects(p) {
   gl.bindTexture(gl.TEXTURE_2D, objTex); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, TEXW, objRows, gl.RGBA, gl.UNSIGNED_BYTE, objData);
 }
 function visOf(p) {
-  // Which objects a window shows, worked out now if it was not yet drawn since its view changed.
+  // Which objects a window shows (by its own display options), worked out now if it was not yet drawn since its view
+  // changed.
   const N = objCount();
-  if (!p.vis || p.vis.length !== N + 1 || p.visSig !== visSig(p)) { p.vis = new Uint8Array(N + 1); for (const o of frames.concat(areas)) p.vis[o.id] = shown(o, p) ? 1 : 0; p.visSig = visSig(p); }
-  return p.vis;
+  return inView(p, () => {
+    if (!p.vis || p.vis.length !== N + 1 || p.visSig !== visSig(p)) { p.vis = new Uint8Array(N + 1); for (const o of frames.concat(areas)) p.vis[o.id] = shown(o, p) ? 1 : 0; p.visSig = visSig(p); }
+    return p.vis;
+  });
 }
 const visSig = p => [p.mode, p.story, p.line ? p.line.dir + p.line.label : "", opt.fill, [...hidden.kind].join(), [...hidden.section].join(), hidden.objs.size, hiddenVersion].join("|");
 let hiddenVersion = 0;
@@ -2305,22 +2315,38 @@ function auxLines(p) {
     else { const b = sp.kind === "roller" ? -13 : -10; sym(sp.p, [[0, 0], [-6, -10], [-6, -10], [6, -10], [6, -10], [0, 0], [-9, b], [9, b]]); }
   }
   const dash = gridsGuessed ? 7 : 0;
+  // A typical bay: the shorter of the middle spacings of the two grid directions (a third of the model without them).
+  const mid = list => { const d = list.slice(1).map((g, i) => g.at - list[i].at).filter(v => v > 1e-6).sort((a, b) => a - b); return d.length ? d[d.length >> 1] : size / 3; };
+  const bay = Math.min(mid(grids.X), mid(grids.Y));
+  // The background grid, as the program's 3-D view draws on the ground: a fine light-blue mesh a quarter of a bay apart,
+  // on the grid lines and reaching far past the model. Here it is in every window, in the window's own plane: the
+  // ground in 3-D, the story in plan, the grid line's plane in elevation. Where a quarter bay would be too fine or too
+  // coarse for the model (grid lines in tight groups, a long building, one bay), the mesh has a round step instead,
+  // about a twentieth of the model, from the origin.
+  const ext = Math.max(bay * 3, size * 2.5), first = (list, k) => list.length ? list[0].at : lo[k], last = (list, k) => list.length ? list[list.length - 1].at : hi[k];
+  const byBay = bay / 4 >= size / 60 && bay / 4 <= size / 8;
+  const round = v => { const e = Math.pow(10, Math.floor(Math.log10(v))), m = v / e; return (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * e; };
+  const mesh = (a0, a1, b0, b1, oa, ob, put) => {
+    let cell = byBay ? bay / 4 : round(size / 20); while ((a1 - a0 + b1 - b0 + 4 * ext) / cell > 1200) cell *= 2;
+    if (!byBay) oa = ob = 0;
+    const A0 = oa + Math.floor((a0 - ext - oa) / cell) * cell, A1 = a1 + ext, B0 = ob + Math.floor((b0 - ext - ob) / cell) * cell, B1 = b1 + ext;
+    for (let a = A0; a <= A1 + 1e-9; a += cell) seg(D, put(a, B0), put(a, B1), 0);
+    for (let b = B0; b <= B1 + 1e-9; b += cell) seg(D, put(A0, b), put(A1, b), 0);
+  };
   if (p.mode === "elev") {
     const along = p.line && p.line.dir === "X" ? grids.Y : grids.X, ax = p.line && p.line.dir === "X" ? 1 : 0, at = p.line ? p.line.at : 0;
     const q = (c, z) => { const v = [at, at, z]; v[ax] = c; return v; }, left = ax ? s.y0 : s.x0, right = ax ? s.y1 : s.x1;
+    mesh(first(along, ax), last(along, ax), s.z0, s.z1, first(along, ax), s.z0, q);
     for (const st of stories) { seg(L, q(left, st.elevation), q(right, st.elevation), 0); lev.push({at: q(left, st.elevation), name: st.name, z: st.elevation}); }
     for (const g of along) { seg(G, q(g.at, s.z0 - s.pad * 0.3), q(g.at, s.z1 + s.pad), dash); bub.push({at: q(g.at, s.z1 + s.pad), from: q(g.at, s.z0), label: g.label}); }
-  } else if (p.mode === "3d" && grids.X.length && grids.Y.length) {
-    // As the program's 3-D view: the grid lies on the ground as a fine light-blue mesh reaching far past the model, its
-    // lines run out to bubbles lying flat on the ground at the near ends.
-    const sp = list => { const d = list.slice(1).map((g, i) => g.at - list[i].at).filter(v => v > 1e-6).sort((a, b) => a - b); return d.length ? d[d.length >> 1] : size / 3; };
-    const bay = Math.min(sp(grids.X), sp(grids.Y)), cell = bay / 4, ext = Math.max(bay * 3, size), z = s.z0, out = bay * 1.1;
+  } else {
+    const z = p.mode === "plan" ? (elevationOf(p.story) ?? lo[2]) : s.z0;
+    mesh(first(grids.X, 0), last(grids.X, 0), first(grids.Y, 1), last(grids.Y, 1), first(grids.X, 0), first(grids.Y, 1), (x, y) => [x, y, z]);
+  }
+  if (p.mode === "3d" && grids.X.length && grids.Y.length) {
+    // As the program's 3-D view: the grid lines run out to bubbles lying flat on the ground at the near ends.
+    const z = s.z0, out = bay * 1.1;
     const X0 = grids.X[0].at, X1 = grids.X[grids.X.length - 1].at, Y0 = grids.Y[0].at, Y1 = grids.Y[grids.Y.length - 1].at;
-    const gx0 = Math.floor((X0 - ext) / cell) * cell, gx1 = X1 + ext, gy0 = Math.floor((Y0 - ext) / cell) * cell, gy1 = Y1 + ext;
-    if ((gx1 - gx0) / cell + (gy1 - gy0) / cell < 1200) {
-      for (let x = gx0; x <= gx1 + 1e-9; x += cell) seg(D, [x, gy0, z], [x, gy1, z], 0);
-      for (let y = gy0; y <= gy1 + 1e-9; y += cell) seg(D, [gx0, y, z], [gx1, y, z], 0);
-    }
     for (const g of grids.X) { seg(G, [g.at, Y0 - out, z], [g.at, Y1 + bay * 0.25, z], dash); bub.push({at: [g.at, Y0 - out, z], from: [g.at, Y1, z], label: g.label, dir: "X", flat: bay * 0.09}); }
     for (const g of grids.Y) { seg(G, [X0 - out, g.at, z], [X1 + bay * 0.25, g.at, z], dash); bub.push({at: [X0 - out, g.at, z], from: [X1, g.at, z], label: g.label, dir: "Y", flat: bay * 0.09}); }
   } else if (p.mode === "plan" || p.mode === "3d") {
@@ -2406,11 +2432,51 @@ function lerpCam(a, b, t) {
   let dy = b.yaw - a.yaw; while (dy > Math.PI) dy -= 2 * Math.PI; while (dy < -Math.PI) dy += 2 * Math.PI;
   return {target: a.target.map((v, i) => v + (b.target[i] - v) * t), yaw: a.yaw + dy * t, pitch: a.pitch + (b.pitch - a.pitch) * t, hh: Math.exp(Math.log(a.hh) + (Math.log(b.hh) - Math.log(a.hh)) * t), persp: t < 0.5 ? a.persp : b.persp};
 }
+// ---- each window's own display options ----
+// Set Display Options applies to the active window, or to every window with Apply to All Windows ticked, as in ETABS.
+// The page reads opt and hidden.kind everywhere, so while a window is drawn or picked from they hold that window's
+// own, and between draws the active window's. viewHolder is the window whose options they hold now: what is changed
+// meanwhile is kept with it.
+const viewKeys = () => Object.keys(opt).filter(k => k !== "explorer" && k !== "side" && k !== "allWin");
+let viewHolder = null;
+function viewNow() { return {opt: Object.fromEntries(viewKeys().map(k => [k, opt[k]])), kind: [...hidden.kind]}; }
+function saveView() { if (viewHolder && panes.includes(viewHolder)) viewHolder.view = viewNow(); }
+function useView(p) {
+  if (!p || viewHolder === p) return;
+  saveView();
+  if (!p.view) p.view = viewNow();
+  for (const k of viewKeys()) if (k in p.view.opt) opt[k] = p.view.opt[k];
+  hidden.kind.clear(); for (const k of p.view.kind) hidden.kind.add(k);
+  viewHolder = p;
+}
+// The active window's options, before a form or a menu reads or changes them.
+function activeView() { useView(panes[active]); }
+// Runs f with one window's options, then puts back the ones held before (safe while another window is being drawn).
+function inView(p, f) { const was = viewHolder; useView(p); try { return f(); } finally { useView(was && panes.includes(was) ? was : panes[active]); } }
+// The active window's options in every window (Apply to All Windows).
+function viewToAll() { saveView(); const v = viewNow(); for (const p of panes) p.view = {opt: {...v.opt}, kind: [...v.kind]}; }
+// The 3D geometry is built from five display options (extrusion of frames and of shells, sections, shrink, the
+// analysis mesh): each combination the windows use has its own buffers, made when a window first needs them and made
+// again after the model changes. A combination no window draws with any more is let go after the frame.
+const geoSets = new Map(); let geoGen = 0;
+function useGeometry(used) {
+  if (!gl || glLost) return;
+  const key = [opt.extrude, opt.extrudeA, opt.sections, opt.shrink, meshWanted()].join();
+  let set = geoSets.get(key);
+  if (!set) geoSets.set(key, set = {bufs: {}, gen: -1});
+  bufs = set.bufs; if (used) used.add(key);
+  if (set.gen !== geoGen) { buildGeometry(); set.gen = geoGen; }
+}
+function dropGeometry(used) {
+  for (const [key, set] of geoSets) if (!used.has(key)) { for (const b of Object.values(set.bufs)) { gl.deleteBuffer(b.b); gl.deleteVertexArray(b.vao); } geoSets.delete(key); }
+}
 function render(now) {
   const views = $("views"), vr = views.getBoundingClientRect(), dpr = window.devicePixelRatio || 1, T = theme();
+  const used = new Set();
   if (gl && !glLost) {
-    if (meshDrawn !== meshWanted()) geometryDirty = true;
-    if (geometryDirty) buildGeometry();
+    if (geometryDirty) { geoGen++; geometryDirty = false; }
+    // The active window's geometry first, so that the colours and points below are made after it.
+    activeView(); useGeometry(used);
     if (colourDirty) buildColours();
     if (pointsDirty) uploadPoints();
     const W = Math.round(vr.width * dpr), H = Math.round(vr.height * dpr);
@@ -2423,7 +2489,9 @@ function render(now) {
   // the docked windows are drawn first and the floating ones last, over them.
   const maxed = panes.find(p => p.el.classList.contains("max"));
   const order = panes.map((p, n) => [p, n]).filter(([p]) => !maxed || p === maxed).sort((a, b) => !!a[0].fl - !!b[0].fl);
-  for (const [p, n] of order) drawPane(p, n, vr, dpr, T, now);
+  for (const [p, n] of order) { useView(p); useGeometry(used); drawPane(p, n, vr, dpr, T, now); }
+  activeView(); useGeometry(used);
+  if (gl && !glLost) dropGeometry(used);
   drawLegend();
 }
 function cssColour(s) { const m = s.match(/[\d.]+/g); return m ? [m[0] / 255, m[1] / 255, m[2] / 255] : [0.5, 0.5, 0.5]; }
@@ -2483,8 +2551,8 @@ function drawScene(p, M, R, dpr, mode) {
     gl.enable(gl.DEPTH_TEST);
     return;
   }
-  // The ground grid first: everything stands on it.
-  if (p.aux && opt.grid && opt.horizon && p.mode === "3d" && T.ground) { gl.depthMask(false); thick(p.aux.ground, 1, 1, T.ground, 1, 0); gl.depthMask(true); }
+  // The background grid first: everything stands on it. Options > Background Grid, or Horizon in Set Display Options.
+  if (p.aux && opt.horizon) { gl.depthMask(false); thick(p.aux.ground, 1, 1, T.ground, 1, 0); gl.depthMask(true); }
   const savedK = curDefK;
   // The shape before loading, faint behind the deformed one.
   if (curDefK && res.ghost) { curDefK = 0; thick(bufs.lines, 1, 1, T.ghost, 1, 0); curDefK = savedK; }
@@ -2496,7 +2564,8 @@ function drawScene(p, M, R, dpr, mode) {
   if (sTr > 0) { gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false); solids(bufs.solidA, 1 - sTr); gl.depthMask(true); gl.disable(gl.BLEND); }
   else if (!see || contourOn) solids(bufs.solidA, 1);
   // Grid lines after the solids, so members hide them; they do not hide anything themselves.
-  if (p.aux) { gl.depthMask(false); if (opt.grid) { thick(p.aux.grid, 1, 1, p.mode === "3d" && T.ground ? [0.62, 0.8, 0.96] : T.grid, 1, 0); if (opt.levels) thick(p.aux.level, 1, 1, T.level, 1, 0); } if (opt.supports) thick(p.aux.sup, 1.4, 1, rgb(T.support), 1, 0.002); gl.depthMask(true); }
+  // Over the background grid the grid lines are blue too (and in the white 3-D view, as before).
+  if (p.aux) { gl.depthMask(false); if (opt.grid) { thick(p.aux.grid, 1, 1, opt.horizon || p.mode === "3d" && !T.dark ? T.groundGrid : T.grid, 1, 0); if (opt.levels) thick(p.aux.level, 1, 1, T.level, 1, 0); } if (opt.supports) thick(p.aux.sup, 1.4, 1, rgb(T.support), 1, 0.002); gl.depthMask(true); }
   if (!extrude) thick(bufs.lines, p.mode === "3d" ? (T.dark ? 1.6 : 0.75) : 2, 1); else thick(bufs.bare, 2, 1);
   if (opt.edges) thin(bufs.edges, extrude ? T.edge : 0.75, !extrude && !T.dark ? [1, 1, 1] : undefined);
   if (see && !contourOn && !under) {
@@ -2961,13 +3030,12 @@ function newPane(mode, n) {
 function buildPanes(before) {
   const modes = layouts[layout] || layouts[1], host = $("views");
   host.querySelectorAll(".pane, .vsplit").forEach(e => e.remove());
-  for (const p of panes) if (gl && p.aux) for (const b of [p.aux.grid, p.aux.level, p.aux.sup, p.aux.ground]) { gl.deleteBuffer(b.b); gl.deleteVertexArray(b.vao); }
-  viewTemplate();
+  for (const p of panes) { paneSizes.unobserve(p.el); if (gl && p.aux) for (const b of [p.aux.grid, p.aux.level, p.aux.sup, p.aux.ground]) { gl.deleteBuffer(b.b); gl.deleteVertexArray(b.vao); } }
   panes = [];
   modes.forEach((mode, n) => {
     const p = newPane(program === "safe" && n === 0 ? "plan" : mode, n), was = before ? before[n] : null;
     if (was) {
-      p.mode = was.mode; p.cam = was.cam;
+      p.mode = was.mode; p.cam = was.cam; if (was.view) p.view = was.view;
       if (stories.some(s => s.name === was.story)) p.story = was.story;
       p.line = allLines().find(g => g.label + g.dir === was.line) || p.line;
     }
@@ -2984,7 +3052,9 @@ function buildPanes(before) {
     wire(p); panes.push(p);
     if (!was) requestAnimationFrame(() => { fit(p, false); draw(); });
   });
-  addViewSplits();
+  // The columns for the windows there are now (made before, the windows closed or replaced were still counted, and a
+  // window left alone filled only its old column).
+  viewTemplate(); addViewSplits();
   if (active >= panes.length) active = 0;
   syncNav();
 }
@@ -3119,7 +3189,8 @@ function placeViewSplits() {
 new ResizeObserver(() => placeViewSplits()).observe(document.getElementById("views"));
 function closePane(p) {
   if (panes.length < 2) return;
-  const keep = panes.filter(q => q !== p).map(q => ({mode: q.mode, story: q.story, line: q.line && q.line.label + q.line.dir, cam: q.cam}));
+  saveView();
+  const keep = panes.filter(q => q !== p).map(q => ({mode: q.mode, story: q.story, line: q.line && q.line.label + q.line.dir, cam: q.cam, view: q.view}));
   layout = keep.length; layouts[layout] = keep.map(k => k.mode); active = 0; buildPanes(keep); syncTools(); draw();
   layouts[2] = ["plan", "3d"]; layouts[3] = ["plan", "3d", "elev"]; layouts[1] = ["3d"];
 }
@@ -3128,7 +3199,7 @@ new ResizeObserver(() => draw()).observe($("views"));
 // ---- the camera ----
 function visiblePoints(p) {
   const out = [];
-  if (P) for (const o of frames.concat(areas)) { if (p.vis ? !p.vis[o.id] : !shown(o, p)) continue; if (o.type === "f") out.push(o.a, o.b); else out.push(...o.pts); }
+  if (P) inView(p, () => { for (const o of frames.concat(areas)) { if (p.vis ? !p.vis[o.id] : !shown(o, p)) continue; if (o.type === "f") out.push(o.a, o.b); else out.push(...o.pts); } });
   return out;
 }
 function fitCam(p, cam) {
@@ -3167,6 +3238,11 @@ function setView3d(p, name) { if (p.mode !== "3d") { p.mode = "3d"; p.sig = ""; 
 function pickRender(p) {
   if (!gl || glLost || !p.M || !p.R) return null;
   if (p.pickOk && p.pickData) return p.pickData;
+  // Picked with the window's own display options and geometry, as it is drawn.
+  useView(p); useGeometry();
+  try { return pickNow(p); } finally { activeView(); useGeometry(); }
+}
+function pickNow(p) {
   const W = glc.width, H = glc.height, dpr = window.devicePixelRatio || 1, R = p.R;
   if (pickSize[0] !== W || pickSize[1] !== H) {
     gl.bindTexture(gl.TEXTURE_2D, pickTex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, W, H, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
@@ -3529,6 +3605,7 @@ buildBars();
 
 function syncTools() {
   const p = panes[active]; if (!p) return;
+  activeView(); // the toolbar shows the active window's options
   const on = (sel, v) => document.querySelectorAll(sel).forEach(b => b.classList.toggle("on", v));
   for (const m of ["plan", "elev", "3d"]) on(`[data-act="v:${m}"]`, p.mode === m);
   for (const t of ["select", "zoom", "pan", "orbit", "iline"]) on(`[data-act="t:${t}"]`, tool === t);
@@ -3585,7 +3662,10 @@ $("colour").addEventListener("input", () => { if (res.mode === "design" || res.m
 $("case").addEventListener("input", () => { res.case = $("case").value; pointsDirty = true; draw(); });
 $("comp").addEventListener("input", () => { res.comp = $("comp").value; pointsDirty = true; res.range = null; draw(); });
 $("scale").addEventListener("input", () => { res.scale = +$("scale").value; res.userScale = 0; draw(); });
-document.querySelectorAll("[data-lay]").forEach(b => b.onclick = () => { layouts[1] = ["3d"]; layouts[2] = ["plan", "3d"]; layouts[3] = ["plan", "3d", "elev"]; layout = +b.dataset.lay; active = 0; buildPanes(null); syncTools(); draw(); try { localStorage.setItem("cpm-layout", layout); savedLayout = layout; } catch (e) {} });
+// View > Windows: the program's tiling for that many windows (3: Plan, 3-D and an elevation side by side; 4: Plan and
+// 3-D over an elevation on the first Y grid line and one on the first X grid line), in equal shares, each window
+// zoomed to the model.
+document.querySelectorAll("[data-lay]").forEach(b => b.onclick = () => { layouts[1] = ["3d"]; layouts[2] = ["plan", "3d"]; layouts[3] = ["plan", "3d", "elev"]; layout = +b.dataset.lay; active = 0; delete viewFr[layout]; buildPanes(null); syncTools(); draw(); try { localStorage.setItem("cpm-layout", layout); localStorage.setItem("cpm-view-fr", JSON.stringify(viewFr)); savedLayout = layout; } catch (e) {} });
 function setRes(mode) {
   if (mode === "ratios") { res.mode = "model"; $("colour").value = "ratio"; }
   else { res.mode = mode; if ($("colour").value === "ratio" && mode !== "model") $("colour").value = "kind"; }
@@ -3597,8 +3677,13 @@ function hideObjs(ids) { ids.forEach(id => hidden.objs.add(id)); hiddenVersion++
 function act(name) {
   const p = panes[active];
   hideMenus();
+  activeView(); // menus act on the active window's display options
   if (name.startsWith("r:")) return setRes(name.slice(2));
-  if (name.startsWith("o:")) { const k = name.slice(2); opt[k] = !opt[k]; if (k === "extrude") opt.extrudeA = opt.extrude; if (k === "extrude" || k === "sections") { geometryDirty = true; geometryStamp++; } if (k === "fill") hiddenVersion++; if (k === "explorer") $("explorer").hidden = !opt.explorer; if (k === "side") $("right").hidden = !opt.side; syncTools(); return draw(); }
+  if (name.startsWith("o:")) {
+    const k = name.slice(2); opt[k] = !opt[k]; if (k === "extrude") opt.extrudeA = opt.extrude;
+    // The Options menu's switches apply to every window (the rest of each window's options stay its own).
+    saveView(); for (const q of panes) if (q.view && k in q.view.opt) { q.view.opt[k] = opt[k]; if (k === "extrude") q.view.opt.extrudeA = opt.extrudeA; }
+    if (k === "extrude" || k === "sections") { geometryDirty = true; geometryStamp++; } if (k === "fill") hiddenVersion++; if (k === "explorer") $("explorer").hidden = !opt.explorer; if (k === "side") $("right").hidden = !opt.side; syncTools(); return draw(); }
   if (name.startsWith("m:")) return modelAct(name.slice(2));
   if (name === "u:consistent") return consistentUnits();
   if (name === "u:form") return unitsForm();
@@ -3735,7 +3820,7 @@ const viewerMenus = () => {
     Design: [...(window.cpmLive ? [["Start Design/Check...", "eng:design", "Shift+F5"], 0] : []), ...(design.length ? [...design.map(f => [f.name, [["Display Design Info...", "des:" + f.key], ...designShows(f).map(s => [designOutputName(f, s), "dshow:" + f.key + ":" + s.id])]]), 0, ["All Design Ratios", "r:ratios", "", !ratio.size], ["Display Design Results...", "des:"], ["Summary of Design Results...", "dlg:designSummary"]]
       : [["No design results in this pack", "", "", true], ["Summary of Design Results...", "dlg:designSummary"]])],
     Detailing: detailingItems(),
-    Options: [["Windows", [1, 2, 3, 4].map(n => [["One", "Two", "Three", "Four"][n - 1] + (n === 1 ? " Window" : " Windows"), "lay:" + n])], 0, ...(window.cpmLive ? [["Program: " + progLabel(program) + " (ETABS, SAP2000 or SAFE)...", "m:program"], 0] : []), ["Theme", [["Light", "theme:light"], ["Dark", "theme:dark"]]], ["Black Background", "bg"], 0, ["Grid Lines", "o:grid"], ["Extruded Sections", "o:extrude"], ["Floors and Walls", "o:fill"], ["See-through Floors and Walls", "o:see"], ["Object Edges", "o:edges"], ["Supports", "o:supports"], ["Joints", "o:joints"], ["Labels", "o:names"], ["Global Axes", "o:axes"]],
+    Options: [["Windows", [1, 2, 3, 4].map(n => [["One", "Two", "Three", "Four"][n - 1] + (n === 1 ? " Window" : " Windows"), "lay:" + n])], 0, ...(window.cpmLive ? [["Program: " + progLabel(program) + " (ETABS, SAP2000 or SAFE)...", "m:program"], 0] : []), ["Theme", [["Light", "theme:light"], ["Dark", "theme:dark"]]], ["Black Background", "bg"], 0, ["Grid Lines", "o:grid"], ["Background Grid", "o:horizon"], ["Extruded Sections", "o:extrude"], ["Floors and Walls", "o:fill"], ["See-through Floors and Walls", "o:see"], ["Object Edges", "o:edges"], ["Supports", "o:supports"], ["Joints", "o:joints"], ["Labels", "o:names"], ["Global Axes", "o:axes"]],
     Help: [["Mouse and Keys", "dlg:keys"], ["About", "about"], ...(appMenu.length ? [0, ...appHelp()] : [])],
   };
 };
@@ -4668,6 +4753,7 @@ const dialogs = {
       [["OK", d => { res.mode = "reactions"; syncResults(); res.case = q(d, "#dCase").value; res.comp = q(d, "[name=comp]:checked").value; syncResults(); syncTools(); draw(); }], ["Close"]], {width: 400}), resCases("reactions"));
   },
   display() {
+    activeView(); // the form shows, and changes, the active window's options
     // Read from the programs on Ahmed's PC (2026-11-27), tab by tab and box by box: ETABS 23.2's Set View Options
     // (General / Object Assignments / Other Assignments; SAFE has the same form) and SAP2000 26.3's Display Options
     // (Object Options / General Options). Pictures: project files field/display-forms.
@@ -4828,6 +4914,7 @@ function applyContour(d) {
   $("case").value = res.case; $("comp").value = res.comp; pointsDirty = true; syncResults(); syncTools(); draw();
 }
 function applyDisplay(d) {
+  activeView();
   // A box shown in two places takes the one the user changed.
   const seen = {};
   d.querySelectorAll("[data-o]").forEach(x => { if (x.disabled) return; const k = x.dataset.o, v = x.dataset.inv ? !x.checked : x.checked; if (k in seen && v === opt[k]) return; seen[k] = v; });
@@ -4838,6 +4925,8 @@ function applyDisplay(d) {
   d.querySelectorAll("[data-nv]:not([disabled])").forEach(x => x.dataset.nv.split(",").forEach(k => x.checked ? hidden.kind.add(k) : hidden.kind.delete(k)));
   if (hidden.kind.has("joint")) opt.joints = false;
   hiddenVersion++;
+  // The active window only, as ETABS does, unless Apply to All Windows is ticked.
+  if (opt.allWin) viewToAll(); else saveView();
   const vbc = q(d, "[name=vbc]:checked"), c = vbc ? vbc.value : q(d, "#dCol").value;
   if (c !== $("colour").value) { $("colour").value = c; if (res.mode === "design" || res.mode === "values" || res.mode === "loads") res.mode = "model"; syncResults(); }
   if (c === "bw" && bg !== "white") act("bg");
@@ -5405,8 +5494,13 @@ function markTree() {
   qsa("#tree [data-story]").forEach(el => el.classList.toggle("cur", !!p && p.mode === "plan" && el.dataset.story === p.story));
   qsa("#tree [data-line]").forEach(el => el.classList.toggle("cur", !!p && p.mode === "elev" && !!p.line && el.dataset.line === p.line.dir + p.line.label));
   qsa("#tree [data-sec]").forEach(el => el.classList.toggle("cur", !!lit && lit.type === el.dataset.sec && lit.name === el.dataset.v));
+  // The object types shown are the active window's own (display options per window).
+  qsa('#tree [data-hide="kind"]').forEach(el => { el.checked = !hidden.kind.has(el.dataset.v); });
 }
-document.querySelectorAll("[data-close]").forEach(b => b.onclick = () => act(b.dataset.close));
+// A panel's ✕ closes it; in a window of its own (which has no title bar) it closes that window and docks the panel
+// back where it was, as closing the window does.
+function closePanel(k, close) { const s = panelState(k); if (s.side === "window") dockPanel(k, s.last || panelInfo[k].home); else close(); }
+document.querySelectorAll("[data-close]").forEach(b => b.onclick = () => closePanel(b.dataset.close === "side" ? "right" : b.dataset.close, () => act(b.dataset.close)));
 
 // ---- side panel ----
 function showTab(name) { qsa("[data-tab]").forEach(x => x.classList.toggle("on", x.dataset.tab === name)); qsa(".tab").forEach(t => t.classList.toggle("on", t.id === name)); }
@@ -5701,7 +5795,7 @@ function showInTable(o) {
   const t = tables[want], nc = nameCol(t); if (nc < 0) return;
   tFilt[nc] = "=" + o.name; const inp = $("grid").querySelector(`[data-f="${nc}"]`); if (inp) inp.value = "=" + o.name; drawTable();
 }
-$("dockClose").onclick = () => showTables(false);
+$("dockClose").onclick = () => closePanel("dock", () => showTables(false));
 $("dockMax").onclick = () => { $("dock").classList.toggle("max"); draw(); };
 $("grip").addEventListener("pointerdown", e => { const d = $("dock"), c = $("center").getBoundingClientRect(); $("grip").setPointerCapture(e.pointerId); $("grip").onpointermove = m => { d.style.height = Math.max(120, Math.min(c.height - 80, c.bottom - m.clientY)) + "px"; draw(); }; $("grip").onpointerup = () => { $("grip").onpointermove = null; panelState("dock").dh = d.offsetHeight; dockSave(); }; });
 
