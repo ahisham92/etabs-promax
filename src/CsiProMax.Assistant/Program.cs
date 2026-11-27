@@ -101,6 +101,19 @@ public static class Program
             var folder = sapTest + 2 < args.Length ? args[sapTest + 2] : Path.Combine(Path.GetTempPath(), "CsiProMax-sap-test");
             return CsiProMax.Assistant.Sap2000.SapScratchTest.Run(s2k, folder);
         }
+        // An update check with no window (the Tools menu keeper runs it hourly): a PC where no CSI ProMax window or
+        // watcher is open still gets the newest version into versions\, which the Tools menu, the tests and the window
+        // then start. On 2026-11-27 Ahmed's PC had none open and 0.4.68 never arrived.
+        if (args.Contains("--check-update"))
+        {
+            try
+            {
+                var said = Updater.CheckAsync(force: true).GetAwaiter().GetResult();
+                Console.WriteLine(said ?? (Updater.NewestDownloaded(Updater.Current) is { } got ? "downloaded: " + got : "up to date"));
+                return 0;
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { Console.Error.WriteLine("The update check did not run: " + ex.Message); return 1; }
+        }
         // The tests from the command line run on the newest version this PC has, like the window: the installed folder
         // keeps the version first installed, and a test of that one reports what is already fixed.
         if ((args.Contains("--fieldtest") || args.Contains("--selftest") || (args.Contains("--packs") && args.Contains("--once"))) && Newer(args) is { } newerTest && Environment.ProcessPath is { } host)

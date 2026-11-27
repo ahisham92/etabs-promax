@@ -827,6 +827,14 @@ static class TesterBugTests
             var steps = src[src.IndexOf("public static JsonObject? AddSteps", StringComparison.Ordinal)..src.IndexOf("private static int Col(", StringComparison.Ordinal)];
             Check(steps.Contains("data = e.ReadTable(t.Key, cases, combos);", StringComparison.Ordinal) && !steps.Contains("Pack.ReadTable(", StringComparison.Ordinal), "the step tables come from the shared reads, which hold the envelopes");
         });
+        yield return ("updates: the Tools menu keeper checks for a new version hourly with no window open (2026-11-27: 0.4.68 never reached a PC with none open)", () =>
+        {
+            var keeper = File.ReadAllText(Path.Combine(SourceText.Root(), "keep-plugins.ps1"));
+            Check(keeper.Contains("try { Invoke-Updates } catch { }", StringComparison.Ordinal) && keeper.Contains("--check-update", StringComparison.Ordinal) && keeper.Contains("AddHours(1)", StringComparison.Ordinal) && keeper.Contains("updates-off.txt", StringComparison.Ordinal),
+                "the keeper does not run the hourly update check");
+            var program = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Program.cs"));
+            Check(program.Contains("args.Contains(\"--check-update\")", StringComparison.Ordinal) && program.IndexOf("--check-update", StringComparison.Ordinal) < program.IndexOf("if (args.Contains(\"--fieldtest\"))", StringComparison.Ordinal), "the program has no window-less update check");
+        });
         yield return ("field test: steps a workaround can test are tested, not left out (Ahmed, 2026-11-26: only a missing program or licence)", () =>
         {
             string Src(string f) => File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant", f));
