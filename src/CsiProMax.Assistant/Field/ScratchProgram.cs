@@ -664,7 +664,7 @@ public sealed class ScratchProgram : IScratchWindow
         {
             ApiFile = EtabsApi.FindApiFile(_program);
             FieldContext.Expect(File.Exists(ApiFile), $"{name} is not installed on this PC, or its API file was not found ({ApiFile}).");
-            loaded = Assembly.LoadFrom(ApiFile);
+            loaded = EtabsApi.Load(ApiFile);
             return $"{ApiFile}: {loaded.FullName}";
         }) is null || loaded is not { } api) return false;
 
@@ -742,7 +742,8 @@ public sealed class ScratchProgram : IScratchWindow
         // A name of this run's own: two tests on one PC (it happened) must never take each other's window for theirs.
         var target = _asIs ? Path.GetFullPath(modelFile) : Path.Combine(ctx.Folder, ScratchName() + ModelExtension(_program));
         var text = build ? File.ReadAllText(modelFile) : "";
-        bool Blank(string why) => ctx.Step($"start a blank model in it ({why})", () =>
+        bool Blank(string why) => ctx.Step($"start a blank model in it ({why})", StartBlank) is not null;
+        string StartBlank()
             {
                 var units = F2kRebuild.UnitsOf(text);
                 // The story at the file's own level: SAFE 22.7 refused every floor of the Modeler's file (at 3.2 m) in a
@@ -759,7 +760,7 @@ public sealed class ScratchProgram : IScratchWindow
                 var stories = level is null ? "" : Convert.ToString(Ask(FileTimeout, "put the story at the file's level", m => SafeStory.AtLevel(m, level.Value),
                     $"{name} did not answer within {FileTimeout.TotalMinutes:0} minutes. A message may be waiting in its window.")) ?? "";
                 return $"blank, in {ComEtabs.UnitNames[units - 1]}, {stories}";
-            }) is not null;
+            }
         if (build && !Blank($"{name} on this PC opens only {ModelExtension(_program)} files through its API, so the Modeler's {Path.GetExtension(modelFile)} is built in it instead")) return false;
         var openedEmpty = false;
         if (!build && ctx.Step($"open {Path.GetFileName(modelFile)} in it{_pass}", () =>
@@ -891,11 +892,17 @@ public sealed class ScratchProgram : IScratchWindow
             try { tables = F2kRebuild.ImportTables(Link, text); }
             catch (EtabsException ex) { tables = new JsonObject { ["error"] = ex.Message }; }
             var held = Convert.ToInt32(Ask(FileTimeout, "count the objects", m => Count(m, "AreaObj.Count") + Count(m, "FrameObj.Count"), $"{name} did not answer within {FileTimeout.TotalMinutes:0} minutes."));
-            if (held > 0) built = new JsonObject { ["through"] = $"{name}'s tables (as File > Import)", ["objects"] = held, ["import"] = tables };
+            var wanted = F2kRebuild.ObjectCount(text);
+            if (TablesBroughtAll(held, wanted)) built = new JsonObject { ["through"] = $"{name}'s tables (as File > Import)", ["objects"] = held, ["import"] = tables };
             else
             {
+                // Some of the file's objects came in and some did not (SAFE 23.1 on 0.4.69: the columns, no floor or beam):
+                // the object calls start again on a blank model, so nothing is there twice.
+                string again = "";
+                if (held > 0) again = StartBlank();
+                if (tables is not null) { tables["objects"] = held; tables["of_the_file"] = wanted; if (again.Length > 0) tables["started_again"] = again; }
                 try { built = F2kRebuild.Build(Link, text); }
-                catch (EtabsException ex) { throw new EtabsException($"{ex.Message} Before that, {name}'s tables brought in nothing: {tables?.ToJsonString()}"); }
+                catch (EtabsException ex) { throw new EtabsException($"{ex.Message} Before that, {name}'s tables did not bring in every object: {tables?.ToJsonString()}"); }
                 if (built is JsonObject o) o["tables_first"] = tables;
             }
             ctx.Facts["safe.built"] = 1;
@@ -1037,6 +1044,9 @@ public sealed class ScratchProgram : IScratchWindow
         $"It answered that it opened it but holds none of its {expected} frames and areas (its blank default model), so nothing runs on it.";
 
     public static bool OpenedEmpty(string fileText, int held) => held == 0 && F2kRebuild.ObjectCount(fileText) > 0;
+
+    /// <summary>Whether the program holds every beam, column, wall and floor of the file after its tables went in.</summary>
+    internal static bool TablesBroughtAll(int held, int wanted) => held > 0 && held >= wanted;
 
     private static int Count(object model, string path)
     {

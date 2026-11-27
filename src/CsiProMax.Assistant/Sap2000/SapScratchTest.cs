@@ -21,7 +21,7 @@ public static class SapScratchTest
         var apiFile = EtabsApi.FindApiFile(program);
         Say(File.Exists(apiFile), "API file " + apiFile);
         if (!File.Exists(apiFile)) return 1;
-        var api = Assembly.LoadFrom(apiFile);
+        var api = EtabsApi.Load(apiFile);
         Console.WriteLine("     " + api.FullName);
 
         // The plug-in, as SAP2000 loads it.
