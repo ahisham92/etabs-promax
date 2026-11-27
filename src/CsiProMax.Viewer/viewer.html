@@ -14929,7 +14929,7 @@ function etaLinkUnit(kind, rot) {
 // pictured in kip-in). An empty list: that direction cannot be nonlinear (Rubber and High Damping Rubber U1, greyed in
 // Links 26 and "Link 6 14a", and an isolator's rotations).
 const etaLinkKipIn = (v, fp, lp, from) => u => sapConv(v, from || {f: "kip", l: "in"}, u, fp, lp, 0);
-const etaLinkSumitomo = ["SR4015-GR4"];
+const etaLinkSumitomo = ["SR4008-GR4", "SR4015-GR4", "SR4020-GR4", "SR4025-GR4"]; // Link 25; SR4015-GR4 the default
 function etaLinkNl(type, dk) {
   const r = dk[0] === "R", T = (t, x) => r ? x : t, u1 = dk === "U1";
   // Fixed Length Damper ("Links 16", "Damper Bilinear U1 fixed length damper"): 48 in, 29000000 lb/in² and 1 in² once ticked.
@@ -14937,12 +14937,12 @@ function etaLinkNl(type, dk) {
     ["FDLModulus", "Modulus of Elasticity", "E", etaLinkKipIn(29000000, 1, -2, {f: "lb", l: "in"}), "fl"], ["FDLArea", "Cross Sectional Area", "A", etaLinkKipIn(1, 0, 2), "fl"]] : [];
   switch (type) {
     case "Damper - Exponential": return [[T("TransK", "RotK"), "Stiffness", "k", 0], [T("TransC", "RotC"), "Damping", "ce", 0], [T("TransCExp", "RotCExp"), "Damping Exponent", "", 1], ...fl];
-    case "Damper - Bilinear": return [[T("TransK", "RotK"), "Stiffness", "k", 0], [T("TransC", "RotC"), "Initial Damping Coefficient", "c", etaLinkKipIn(0.001, 1, -1)],
-      [T("TransCy", "RotCy"), "Yielded Damping Coefficient", "c", 0], [T("ForceLimit", "MomentLimit"), r ? "Linear Moment Limit" : "Linear Force Limit", "f", etaLinkKipIn(0.001, 1, 0)], ...fl];
+    case "Damper - Bilinear": return [[T("TransK", "RotK"), "Stiffness", "k", 0], [T("TransC", "RotC"), "Initial Damping Coefficient", "c", etaLinkKipIn(0.001, 1, r ? 1 : -1)],
+      [T("TransCy", "RotCy"), "Yielded Damping Coefficient", "c", 0], [T("ForceLimit", "MomentLimit"), "Linear Force Limit", "f", r ? etaLinkKipIn(0.0001, 1, 1, {f: "kip", l: "ft"}) : etaLinkKipIn(0.001, 1, 0)], ...fl];
     case "Damper - Friction Spring": return [[T("TransK", "RotK"), "Initial (Nonslipping) Stiffness", "k", 0], [T("TransK1", "RotK1"), "Slipping Stiffness (Loading)", "k", 0], [T("TransK2", "RotK2"), "Slipping Stiffness (Unloading)", "k", 0],
       [T("TransU0", "RotU0"), "Precompression Displacement", "l", 0], [T("TransUs", "RotUs"), "Stop Displacement", "l", 0], ["ActiveDir", "Active Direction", "", "Compression", "select", ["Tension", "Compression", "Both"]]];
     // Damper Dimensions: a Sumitomo Product Model, or User Defined with its Shear Area and Thickness (Link 6 04).
-    case "Damper - Sumitomo Rubber GR4": return r ? [] : [["ProdModel", "Sumitomo Product Model", "", etaLinkSumitomo[0], "sumi"], ["ShearArea", "Shear Area", "A", 0, "ud"], ["Thickness", "Thickness", "L", 0, "ud"],
+    case "Damper - Sumitomo Rubber GR4": return r ? [] : [["ProdModel", "Sumitomo Product Model", "", "SR4015-GR4", "sumi"], ["ShearArea", "Shear Area", "A", 0, "ud"], ["Thickness", "Thickness", "L", 0, "ud"],
       ["Temp", "Temperature", "T", u => tempUnit(u) === "F" ? 36 : 2.2222], ["ExcitFreq", "Excitation Frequency", "hz", 1], ["RigidFluctCoeff", "Rigidity Fluctuation Coefficient", "", 1], ["DampFluctCoeff", "Damping Fluctuation Coefficient", "", 1]];
     case "Gap": case "Hook": return [[T("TransK", "RotK"), "Stiffness", "k", 0], [T("TransOpen", "RotOpen"), "Open", "l", 0]];
     case "Plastic (Wen)": return [[T("TransK", "RotK"), "Stiffness", "k", 0], [T("TransYield", "RotYield"), "Yield Strength", "f", 0], [T("TransRatio", "RotRatio"), "Post Yield Stiffness Ratio", "", 0], [T("TransExp", "RotExp"), "Yielding Exponent", "", 2]];
@@ -14975,13 +14975,17 @@ function etaLinkNl(type, dk) {
 // The types whose rows say Nonlinear? themselves (the others are nonlinear where their nonlinear fields are filled in).
 const etaLinkFlagged = t => ["Damper - Sumitomo Rubber GR4", "Triple Pendulum Isolator", "High Damping Rubber Isolator"].includes(t);
 const etaLinkMulti = t => /^MultiLinear/.test(t);
-// MultiLinear Plastic's hysteresis parameters (Link 6 08a-08g): Pivot's on the form itself (10, 10, 0.7, 0.7, 0), Concrete,
-// BRB Hardening and Degrading behind their Modify/Show ... Parameters button (forms not pictured yet: built from ETABS's table fields).
-const etaLinkHysFields = {Pivot: [["PivotAlpha1", "α 1", "", 10], ["PivotBeta1", "β 1", "", 0.7], ["PivotEta", "η", "", 0], ["PivotAlpha2", "α 2", "", 10], ["PivotBeta2", "β 2", "", 0.7]], Concrete: [["ConcreteFact", "Energy Degradation Factor"]],
-  "BRB Hardening": [["BRBSym", "Symmetric", "check"], ["BRBTensHF", "Tension Hardening Factor"], ["BRBTensMPD", "Tension Max Plastic Deformation Ratio"], ["BRBTensAPD", "Tension Accumulated Plastic Deformation Ratio"], ["BRBTensPro", "Tension Proportion"],
-    ["BRBCompHF", "Compression Hardening Factor"], ["BRBCompMPD", "Compression Max Plastic Deformation Ratio"], ["BRBCompAPD", "Compression Accumulated Plastic Deformation Ratio"], ["BRBCompPro", "Compression Proportion"]],
-  Degrading: [["DegSym", "Symmetric", "check"], ...["Tens", "Comp"].flatMap(s => ["f0", "f1", "f2", "x1", "x2"].map(x => [`Deg${s}${x}`, `${s === "Tens" ? "Tension" : "Compression"} ${x}`]).concat([[`Deg${s}ADWF`, `${s === "Tens" ? "Tension" : "Compression"} Accumulation Deformation Factor`]])),
-    ["DegStiff", "Stiffness Weighting Factor"], ["DegLargeSml", "Larger-Smaller Weighting Factor"]]};
+// MultiLinear Plastic's hysteresis parameters [field, label, kind, default]: Pivot's on the form itself (Link 21: 10, 10,
+// 0.7, 0.7, 0), Concrete, BRB Hardening and Degrading on Hysteresis Parameters for ... (Link 14, 16-17, 19-20), their
+// Compression Parameters following Tension while Parameters are Symmetric.
+const etaLinkHysTC = (p, rows) => ["Tens", "Comp"].flatMap(x => rows.map(([k, l, d]) => [p + x + k, l, x === "Tens" ? "t" : "c", d]));
+const etaLinkHysFields = {Pivot: [["PivotAlpha1", "α 1", "", 10], ["PivotBeta1", "β 1", "", 0.7], ["PivotEta", "η", "", 0], ["PivotAlpha2", "α 2", "", 10], ["PivotBeta2", "β 2", "", 0.7]],
+  Concrete: [["ConcreteFact", "Energy Degradation Factor", "p", 0]],
+  "BRB Hardening": [["BRBSym", "Parameters are Symmetric (Compression Same as Tension)", "check", "Yes"], ...etaLinkHysTC("BRB", [["HF", "Hardening Factor", 1], ["MPD", "Maximum Plastic Deformation at Full Hardening as a Ratio of Yield", 25],
+    ["APD", "Accumulated Plastic Deformation at Full Hardening as a Ratio of Yield", 50], ["Pro", "Proportion of Accumulated Plastic Deformation", 0]])],
+  Degrading: [["DegSym", "Parameters are Symmetric (Compression Same as Tension)", "check", "Yes"], ...etaLinkHysTC("Deg", [["f0", "Energy Factor at Yield, f0", 1], ["f1", "Energy Factor at Moderate Deformation, f1", 1], ["f2", "Energy Factor at Maximum Deformation, f2", 1],
+    ["x1", "Moderate Deformation Level as a Ratio of Yield, x1", 5], ["x2", "Maximum Deformation Level as a Ratio of Yield, x2", 10], ["ADWF", "Accumulation Deformation Weighting Factor", 0]]),
+    ["DegStiff", "Stiffness Weighting Factor", "o", 0], ["DegLargeSml", "Larger-Smaller Weighting Factor", "o", 0]]};
 const etaLinkDefault = v => typeof v === "function" ? String(+(+v(hmU())).toPrecision(6)) : v === "1in" ? String(sapConv(1, {f: "kip", l: "in"}, hmU(), 0, 1, 0)) : String(v);
 
 async function etaLinks() {
@@ -15075,7 +15079,7 @@ async function etaLinks() {
             }
             if (nl && etaLinkMulti(type)) {
               const pts = s.pts.length ? s.pts : [[-10, -1], [-1, -1], [0, 0], [1, 1], [10, 1]];
-              if (type === "MultiLinear Plastic") { base.HysType = s.row.HysType || "Kinematic"; (etaLinkHysFields[base.HysType] || []).forEach(([f]) => { if (s.row[f] != null) base[f] = String(s.row[f]); }); }
+              if (type === "MultiLinear Plastic") { base.HysType = s.row.HysType || "Kinematic"; (etaLinkHysFields[base.HysType] || []).forEach(([f, , , def]) => { if (s.row[f] != null || def != null) base[f] = String(s.row[f] ?? def); }); }
               pts.forEach(([a, b], i) => rows.push(Object.assign(i ? {Direction: x} : Object.assign({}, gen, base), rot ? {RotPoint: String(i + 1), Rotation: String(a), Moment: String(b)} : {TransPoint: String(i + 1), Displ: String(a), Force: String(b)})));
               continue;
             }
@@ -15268,7 +15272,7 @@ function etaLinkDir(st, name, type, dk, after) {
       const t = hy.value, fs = etaLinkHysFields[t] || [], box = q(d, "#dHp");
       d.querySelectorAll("#dHp [data-f]").forEach(i => { if (!i.disabled && i.type !== "checkbox") r[i.dataset.f] = i.value; });
       if (t === "Pivot") box.innerHTML = `<div style="display:grid;grid-template-columns:30px 96px 40px 96px 40px 96px;gap:6px 10px;align-items:center;padding:2px 10px">${fs.map(([f, l, , def]) => `<span style="text-align:center">${l.replace(/ (\d)$/, "<sub>$1</sub>")}</span><input data-f="${f}" type="number" step="any" value="${esc(r[f] ?? def)}" style="width:96px">`).join("")}</div>`;
-      else if (fs.length) { box.innerHTML = `<div style="text-align:center"><button id="dHb" style="width:290px">Modify/Show ${t} Parameters...</button></div>`; q(d, "#dHb").onclick = () => etaLinkHysParams(t, r); }
+      else if (fs.length) { box.innerHTML = `<div style="text-align:center"><button id="dHb" style="width:260px">Modify/Show ${t} Parameters...</button></div>`; q(d, "#dHb").onclick = () => etaLinkHysParams(t, r, name, dk); }
       else box.innerHTML = `<p style="text-align:center;margin:6px 0">No Parameters are Required for this Hysteresis</p>`;
       q(d, "#dHd").innerHTML = etaLinkHysSvg(t);
     };
@@ -15276,12 +15280,29 @@ function etaLinkDir(st, name, type, dk, after) {
   }
   return d;
 }
-// Concrete, BRB Hardening and Degrading parameters (the button on Link 6 08e-08g; their own forms are not pictured yet,
-// so they hold ETABS's table fields). Values go into the direction's working row.
-function etaLinkHysParams(t, r) {
-  const fs = etaLinkHysFields[t];
-  return dialog(t + " Hysteresis Parameters", `<div style="display:grid;grid-template-columns:1fr 96px;gap:5px 8px;align-items:center;padding:4px 10px">${fs.map(([f, l, k]) => k === "check" ? `<label style="grid-column:1/3"><input type="checkbox" data-h="${f}" ${/^y/i.test(r[f] || "Yes") ? "checked" : ""}> ${l}</label>` : `<span>${l}</span><input data-h="${f}" type="number" step="any" value="${esc(r[f] ?? 0)}">`).join("")}</div>`,
-    [["OK", x => { for (const i of x.querySelectorAll("[data-h]")) { if (i.type === "checkbox") { r[i.dataset.h] = i.checked ? "Yes" : "No"; continue; } const v = parseFloat(i.value); if (!isFinite(v)) { formError(x, "Each value is a number."); return false; } r[i.dataset.h] = String(v); } return true; }], ["Cancel"]], {width: 460});
+// Hysteresis Parameters for Concrete / BRB Hardening / Degrading Stiffness (Link 14, 16-17, 19-20): Link Property (with the
+// direction for Degrading), Parameters or Tension/Compression Parameters (Compression greyed and equal to Tension while
+// Parameters are Symmetric), Other Parameters. Values go into the direction's working row.
+function etaLinkHysParams(t, r, name, dk) {
+  const fs = etaLinkHysFields[t], v = ([f, , , def]) => r[f] ?? def, deg = t === "Degrading";
+  const fsx = (l, b) => `<fieldset style="margin:0 0 6px"><legend>${l}</legend>${b}</fieldset>`;
+  const grid = rows => `<div style="display:grid;grid-template-columns:1fr 86px;gap:5px 10px;align-items:center;padding:2px 10px">${rows.map(x => `<span>${x[1]}</span><input data-h="${x[0]}" type="number" step="any" value="${esc(v(x))}">`).join("")}</div>`;
+  const of = k => fs.filter(x => x[2] === k), sym = fs.find(x => x[2] === "check");
+  const body = fsx("", `<div style="display:grid;grid-template-columns:${deg ? "150px" : "180px"} 1fr;align-items:center;padding:4px 10px"><span>Link Property</span><input class="grey" readonly value="${esc(deg ? `${name}    (Direction ${dk})` : name)}" style="width:${deg ? 250 : 190}px"></div>`)
+    + (of("p").length ? fsx("Parameters", grid(of("p"))) : fsx("Tension Parameters", grid(of("t"))) + fsx("Compression Parameters", grid(of("c"))) + (of("o").length ? fsx("Other Parameters", grid(of("o"))) : ""))
+    + (sym ? `<label style="display:block;margin:6px 4px"><input type="checkbox" data-h="${sym[0]}" ${/^y/i.test(v(sym)) ? "checked" : ""}> ${sym[1]}</label>` : "");
+  const x = dialog("Hysteresis Parameters for " + (deg ? "Degrading Stiffness" : t), body, [["OK", x => {
+    const out = {};
+    for (const i of x.querySelectorAll("[data-h]")) { if (i.type === "checkbox") { out[i.dataset.h] = i.checked ? "Yes" : "No"; continue; } const n = parseFloat(i.value); if (!isFinite(n)) { formError(x, "Each value is a number."); return false; } out[i.dataset.h] = String(n); }
+    Object.assign(r, out); return true;
+  }], ["Cancel"]], {width: deg ? 500 : t === "Concrete" ? 420 : 560});
+  if (sym) {
+    const c = q(x, `[data-h="${sym[0]}"]`), pairs = of("c").map(([f]) => [q(x, `[data-h="${f}"]`), q(x, `[data-h="${f.replace("Comp", "Tens")}"]`)]);
+    const sp = () => pairs.forEach(([cc, tt]) => { cc.disabled = c.checked; if (c.checked) cc.value = tt.value; });
+    pairs.forEach(([cc, tt]) => tt.addEventListener("input", () => { if (c.checked) cc.value = tt.value; }));
+    c.onchange = sp; sp();
+  }
+  return x;
 }
 // The Hysteresis Definition Diagram: "<type> Hysteresis Model", Action against Deformation, loops of growing amplitude
 // (pinched for Takeda, Pivot and Degrading; the compression side small for Concrete), as ETABS draws them.
