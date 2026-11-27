@@ -866,9 +866,20 @@ public sealed class ScratchProgram : IScratchWindow
         {
             var link = ProgramTools.Live(com);
             var file = link.Info().File;
-            FieldContext.Expect(SameName(file, target), $"the window that answered has '{Path.GetFileName(file)}' open, not the scratch model, so the test stops here.");
+            // A hidden copy's .EDB that ETABS 23.2 said it opened was "(Untitled)" here (0.4.68 and 0.4.73 full tests, the
+            // pack's hidden copy and the Viewer's): the file is given to it again, as a person would open it again.
+            var again = 0;
+            for (; again < 2 && !SameName(file, target) && File.Exists(target); again++)
+            {
+                Thread.Sleep(TimeSpan.FromSeconds(10));
+                ScratchDialogs.WaitUntilFree(target, TimeSpan.FromSeconds(60));
+                Ask(FileTimeout, "open the file again", m => m.File.OpenFile(Path.GetFullPath(target)),
+                    $"{name} did not finish opening the file within {FileTimeout.TotalMinutes:0} minutes. A message may be waiting in its window.");
+                file = link.Info().File;
+            }
+            FieldContext.Expect(SameName(file, target), $"the window that answered has '{Path.GetFileName(file)}' open, not the scratch model, so the test stops here" + (again > 0 ? $" ({again} more opens of {Path.GetFileName(target)} did not change it)." : "."));
             Link = link;
-            return Path.GetFileName(file);
+            return Path.GetFileName(file) + (again > 0 ? $" (after {again} more open{(again > 1 ? "s" : "")})" : "");
         }) is null) return false;
 
         // The Modeler's table data (material damping, notes, time dependence, ...) goes into ETABS through its tables, as
