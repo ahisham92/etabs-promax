@@ -194,6 +194,7 @@ public static class EngineRun
     private static void Work(CsiProgram program, string folder, string file, bool mustAnalyse, bool analyseAsked, IReadOnlyList<string> kinds, Shapes? only, bool keepOpen, AnalysisModel? check, bool stopOnErrors)
     {
         IScratchWindow? window = null;
+        Packs.PackHelpers? helpers = null;
         var mon = _mon!;
         var ctx = new FieldContext(program, folder, _model!);
         ctx.Offer(ProgramTools.Chat(program));
@@ -288,6 +289,16 @@ public static class EngineRun
                 mon.Skip("analysis", why);
             }
             if (Cancelled()) return;
+            // The helper windows for reading the results start now, in the background, while a design runs.
+            // As many as the model's size needs: none for a small model (Ahmed 2026-11-27).
+            var need = 0;
+            try { need = Math.Min(Packs.PackHelpers.Wanted, Packs.PackHelpers.ForSize(_model!.Frames().Count, _model.Areas().Count, _model.Model.LoadCases.Count + _model.Model.Combos.Count)); }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { need = 0; }
+            if (need > 0 && window.ModelPath.Length > 0 && File.Exists(window.ModelPath))
+            {
+                helpers = Packs.PackHelpers.Open(program, window.ModelPath, need);
+                lock (Gate) Lines.Add($"The model is large: {helpers.Asked} more hidden {program.Name} window{(helpers.Asked == 1 ? "" : "s")} on copies of it will read results beside this one.");
+            }
             if (kinds.Count > 0)
             {
                 mon.Begin("design", string.Join(", ", kinds.Select(k => Kinds[program.Key].First(x => x.Kind == k).Name)));
@@ -325,7 +336,11 @@ public static class EngineRun
             var comments = Packs.PackLife.Comments(packFile);
             // One read session for the pack and, in the field test, the check after it of what the pack lost.
             using var session = PackSession.Start(window.Link);
-            var built = Pack.Build(window.Link, [], [], [], null, comments, by: "CSI ProMax Engine", instabilities: true);
+            Pack.Built built;
+            // Up to two more hidden windows of the program on copies of the analysed model read result tables beside this
+            // one (Ahmed 2026-11-27: three windows on one licence). They were started right after the analysis.
+            try { built = Pack.Build(window.Link, [], [], [], null, comments, by: "CSI ProMax Engine", instabilities: true, helpers: helpers); }
+            finally { if (helpers is not null) { Say($"Closing the {helpers.Asked} helper window{(helpers.Asked == 1 ? "" : "s")}"); helpers.Dispose(); helpers = null; } }
             try { Packs.PackLife.Write(packFile, pageFile, built.Zip, built.Content); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { lock (Gate) Lines.Add($"The review pack could not be saved to {packFile}: {ex.Message}"); packFile = ""; }
             lock (Gate)
@@ -367,6 +382,8 @@ public static class EngineRun
         }
         finally
         {
+            // Helper windows a stopped run left are closed first.
+            if (helpers is not null) try { helpers.Dispose(); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
             // Closed at once, whatever happened: the licence is used only while the job runs. Unless Settings > Runs
             // says to keep it open (Ahmed 2026-11-27, for now): it is then shown with the analysed model, the engineer's
             // to look at, and closed before the next run. A cancelled or stopped run is always closed.
