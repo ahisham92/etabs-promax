@@ -3,8 +3,8 @@ using System.Text.RegularExpressions;
 namespace CsiProMax.Chat;
 
 /// <summary>
-/// Blanks in the home screen's prompts ({level}, {grid}, {sheet_set}, {berth}, {selection}), filled from the open model:
-/// the user taps one of the model's own levels, grids, sheet sets or berths instead of typing it. A blank with no
+/// Blanks in the home screen's prompts ({level}, {grid}, {selection}), filled from the open model:
+/// the user taps one of the model's own levels or grids instead of typing it. A blank with no
 /// choice left in the prompt reads "[level]" for the user to type over. Pure text; ETABS.PromptChoices reads the choices.
 /// </summary>
 internal static class PromptSlots
@@ -18,8 +18,6 @@ internal static class PromptSlots
     [
         new("level", "Which level?", "[level]"),
         new("grid", "Which grid line?", "[grid]"),
-        new("sheet_set", "Which sheet set?", "[sheet set]"),
-        new("berth", "Which berth?", "[berth]"),
         new(Selection, "", $"the elements selected in {Csi.Name}"),
     ];
 

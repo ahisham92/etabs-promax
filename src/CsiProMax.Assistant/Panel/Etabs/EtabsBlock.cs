@@ -97,12 +97,10 @@ internal static class ETABSBlock
     /// </summary>
     public static string Friendly(string tool, bool changes) => tool switch
     {
-        "get_model_context" or "get_elements" or "get_element_parameters" or "list_types" or "list_levels" or "list_views" or "list_sheets"
-            or "run_etabs_query_code" or "check_model" => "reading your model",
+        "get_model_context" or "run_etabs_query_code" or "check_model" => "reading your model",
         "capture_view_image" => "taking a picture of the view",
         "list_etabs_models" or "use_etabs_model" => "finding the open models",
         "open_etabs_model" => "opening the model",
-        "export_pdf" or "export_files" => "exporting",
         "run_etabs_code" => "running the code",
         _ => changes ? "the change you asked for" : "reading your model",
     };
@@ -144,16 +142,6 @@ internal static class ETABSBlock
         };
     }
 
-    /// <summary>True for a ribbon button that ends an edit mode: Finish Edit Mode, Finish (a group), Finish Model (in place).</summary>
-    public static bool IsFinishButton(string? id, string? text)
-    {
-        if (id is { Length: > 0 } && id.IndexOf("FINISH", StringComparison.OrdinalIgnoreCase) >= 0
-            && id.IndexOf("FINISHES", StringComparison.OrdinalIgnoreCase) < 0) return true;
-        var t = (text ?? "").Replace("\r", " ").Replace("\n", " ").Trim();
-        return t.Equals("Finish", StringComparison.OrdinalIgnoreCase) || t.StartsWith("Finish Edit", StringComparison.OrdinalIgnoreCase)
-               || t.Equals("Finish Model", StringComparison.OrdinalIgnoreCase);
-    }
-
     /// <summary>The title of the topmost visible window of this process owned by <paramref name="main"/> (the modal dialog).</summary>
     private static string? DialogTitle(IntPtr main)
     {
@@ -192,23 +180,6 @@ internal static class ETABSBlock
         var sb = new StringBuilder(256);
         // InternalGetWindowText reads the title the window manager keeps: no message to the (possibly busy) owner thread.
         return InternalGetWindowText(hwnd, sb, sb.Capacity) > 0 ? sb.ToString() : "";
-    }
-
-    /// <summary>
-    /// The window class that has the keyboard on ETABS's UI thread ("HwndWrapper..." is a WPF pane such as the chat;
-    /// "AfxFrameOrView..." an ETABS view), for the log of a request ETABS didn't take. Sends ETABS no message.
-    /// </summary>
-    public static string FocusClass(IntPtr mainWindow)
-    {
-        try
-        {
-            var info = new GuiThreadInfo { Size = Marshal.SizeOf<GuiThreadInfo>() };
-            if (mainWindow == IntPtr.Zero || !GetGUIThreadInfo(GetWindowThreadProcessId(mainWindow, out _), ref info)) return "?";
-            if (info.Focus == IntPtr.Zero) return "nothing";
-            var sb = new StringBuilder(128);
-            return GetClassName(info.Focus, sb, sb.Capacity) > 0 ? sb.ToString() : "?";
-        }
-        catch (Exception) { return "?"; }
     }
 
     [StructLayout(LayoutKind.Sequential)]

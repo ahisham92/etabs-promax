@@ -35,7 +35,7 @@ public sealed class ChatJobsTool : IEtabsTool
       "forward": {"type": "boolean", "description": "ask: true to also pass the question on when the job is still working; it messages you the answer when its current run ends."},
       "title": {"type": "string", "description": "start: a few words the user sees on the card, e.g. 'Sheets for levels 1-5'."},
       "task": {"type": "string", "description": "start: the whole task for the job, with every detail it needs (names, levels, types, settings)."},
-      "done_when": {"type": "string", "description": "start (and each part): the finish line, one to three conditions the job can check in the model, e.g. 'every sheet A-101 to A-120 has a filled title block and a plan view; issue_check passes'. The job checks them before it reports and says which held."},
+      "done_when": {"type": "string", "description": "start (and each part): the finish line, one to three conditions the job can check in the model, e.g. 'every column on stories 1 to 10 has section C60x60; the model checks with no warnings'. The job checks them before it reports and says which held."},
       "job": {"type": "integer", "description": "message, stop and ask: the job's number."},
       "text": {"type": "string", "description": "message: what to tell the job, in full."},
       "parts": {"type": "array", "description": "start: divide the work, one job per part, all started at once (each part's task in full; the parts must not overlap, e.g. levels 1-3 and 4-6).", "items": {"type": "object", "properties": {"title": {"type": "string"}, "task": {"type": "string"}, "done_when": {"type": "string"}, "kind": {"type": "string", "enum": ["simple", "everyday", "hard"]}, "model": {"type": "string"}}, "required": ["title", "task"]}},

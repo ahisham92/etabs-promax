@@ -92,9 +92,6 @@ internal sealed class ParallelJobCard : ContentControl
     public static string RunsOn(ChatJob job) =>
         ChatAuto.ModelLabel(job.Model) + (job.Effort.Length > 0 ? ", " + ChatAuto.EffortLabel(job.Effort).ToLowerInvariant() + " effort" : "");
 
-    /// <summary>Presses Open job (for the field test).</summary>
-    internal void PressOpen() => Opened?.Invoke(Number);
-
     /// <summary>Draws the card from <paramref name="job"/> (a copy from JobBoard.Snapshot). Cheap when nothing changed.</summary>
     public void Render(ChatJob job, DateTime now, int limit)
     {

@@ -12,8 +12,8 @@ public enum ApprovalLevel
     /// <summary>Every model change is asked (how it worked before the levels).</summary>
     EveryChange,
     /// <summary>
-    /// Nothing is asked, risky changes included (code, deletes that take others, overwrites, what-ifs, value engineering
-    /// on the open model). Only the issue check's accept and issue-past-open-items still ask: they are a QA sign-off.
+    /// Nothing is asked, risky changes included (code, deletes that take others, overwrites). Only a table edit still
+    /// asks, because it saves the model first.
     /// </summary>
     AlwaysAllow,
 }
@@ -59,9 +59,6 @@ internal static class ApprovalPolicy
         "folder", "output_folder", "report_folder", "file_name", "copy_path",
     };
 
-    /// <summary>Tools whose "path" argument is where they write.</summary>
-    private static readonly HashSet<string> WritesToPath = new(StringComparer.Ordinal) { "save_legend_seed" };
-
     /// <summary>Tools that run code Claude wrote in this call: from the chat, always asked (the chat has no prompts of its own).</summary>
     private static readonly HashSet<string> RunsNewCode = new(StringComparer.Ordinal) { "run_etabs_query_code", "run_etabs_code" };
 
@@ -70,7 +67,7 @@ internal static class ApprovalPolicy
         CsiProMax.Assistant.Tools.EtabsTools.All.Concat(CsiProMax.Assistant.Tools.ModelerTools.All).Concat(CsiProMax.Assistant.Tools.ProgramTools.Every).Where(t => t.Ask == CsiProMax.Assistant.Tools.Ask.Always).Select(t => t.Name), StringComparer.Ordinal);
 
     /// <summary>Tools that run a saved recipe: asked when its steps are new to this PC (<see cref="ApprovalFacts.NewCode"/>).</summary>
-    private static readonly HashSet<string> RunsRecipe = new(StringComparer.Ordinal) { "run_recipe", "batch_run_recipe" };
+    private static readonly HashSet<string> RunsRecipe = new(StringComparer.Ordinal) { "run_recipe" };
 
     /// <summary>
     /// Ask or not, and why. <paramref name="remembered"/>: tools the user said not to ask about again.
@@ -81,10 +78,9 @@ internal static class ApprovalPolicy
         string tool, bool modifiesModel, bool isLearned, IReadOnlyDictionary<string, JsonElement> args, bool fromChat, ApprovalFacts facts,
         ApprovalLevel level, ICollection<string> remembered, bool taskApproved, Func<string, PathState> probe, IReadOnlyList<string> outputRoots)
     {
-        // Whatever the level, wherever it comes from: what_if with confirm, accepting issue items, issuing with open items.
-        // At "Always allow" only the issue gate's (a QA sign-off, not an approval) is left.
+        // Whatever the level, wherever it comes from: a table edit, which saves the model first.
         if (OutputPaths.AlwaysAskReason(tool, args) is { } always)
-            return level != ApprovalLevel.AlwaysAllow || IsIssueGate(tool) || OutputPaths.SavesBeforeEdit(tool, args) ? new(true, AskKind.Always, always) : ApprovalDecision.No;
+            return new(true, AskKind.Always, always);
         if (level == ApprovalLevel.AlwaysAllow) return ApprovalDecision.No;
 
         var risks = new List<string>();
@@ -96,10 +92,6 @@ internal static class ApprovalPolicy
             risks.Add("This learned tool's code has not been allowed on this PC yet, or it changed since. Read it in the details.");
         if (facts.NewCode && RunsRecipe.Contains(tool))
             risks.Add("This recipe's steps have not been allowed on this PC yet, or they changed since. Read them in the details.");
-        if (tool == "redo_steps" && Str(args, "action") == "replay")
-            risks.Add("It runs again model changes the chat made before (code included), as they were. Check the steps in the details.");
-        if (tool == "ve_apply" && Str(args, "target") == "main")
-            risks.Add("It applies value engineering changes to the open model itself.");
         if (facts.DeleteTakes is { Length: > 0 } takes)
             risks.Add("It deletes elements, and other elements go with them. " + takes);
         if (facts.Overwrites is { Length: > 0 } over)
@@ -125,12 +117,9 @@ internal static class ApprovalPolicy
     public static bool IsPreview(string tool, IReadOnlyDictionary<string, JsonElement> args) =>
         false;
 
-    /// <summary>The issue check's ways past an open item, which ask at every level (see OutputPaths.AlwaysAskReason).</summary>
-    public static bool IsIssueGate(string tool) => tool is "issue_check" or "issue_drawings";
-
     /// <summary>The full paths a call writes to (empty values are the tool's default folder, which is ours).</summary>
     public static List<string> WritePaths(string tool, IReadOnlyDictionary<string, JsonElement> args) =>
-        args.Where(a => (WriteKeys.Contains(a.Key) || a.Key == "path" && WritesToPath.Contains(tool))
+        args.Where(a => WriteKeys.Contains(a.Key)
                         && a.Value.ValueKind == JsonValueKind.String && a.Value.GetString() is { Length: > 0 })
             .Select(a => OutputPaths.FullPath(a.Value.GetString()!)).ToList();
 
@@ -156,25 +145,6 @@ internal static class ApprovalPolicy
 
     private static string? Str(IReadOnlyDictionary<string, JsonElement> args, string key) =>
         args.TryGetValue(key, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
-
-    /// <summary>
-    /// How many dialogs a chat task of these calls shows when the user answers Allow each time (the field test and the
-    /// tests use it; at "Ask once per task" the first Allow approves the rest). <paramref name="briefRun"/>: the task
-    /// started from a brief the user ran. Paths are taken as new (nothing is overwritten).
-    /// </summary>
-    public static int CountAsks(IEnumerable<(string Tool, bool Modifies, IReadOnlyDictionary<string, JsonElement> Args)> calls, ApprovalLevel level, bool briefRun)
-    {
-        var approved = briefRun;
-        var asks = 0;
-        foreach (var (tool, modifies, args) in calls)
-        {
-            var d = Decide(tool, modifies, false, args, true, new ApprovalFacts(), level, Array.Empty<string>(), approved, _ => PathState.Missing, []);
-            if (!d.Ask) continue;
-            asks++;
-            if (d.CanSilence && level == ApprovalLevel.OncePerTask) approved = true;
-        }
-        return asks;
-    }
 
     // ---- Names and the setting -----------------------------------------------------------------------------------------
 
@@ -217,7 +187,7 @@ internal static class ApprovalPolicy
     {
         ApprovalLevel.OncePerTask => "The first change of a chat task asks; the rest run",
         ApprovalLevel.EveryChange => "A dialog before every change",
-        ApprovalLevel.AlwaysAllow => "Nothing asks, risky changes and code included; only the issue check's sign-off still asks",
+        ApprovalLevel.AlwaysAllow => "Nothing asks, risky changes and code included; only a table edit, which saves the model first, still asks",
         _ => "Changes just run (Ctrl+Z undoes them); risky ones still ask",
     };
 

@@ -212,15 +212,6 @@ internal static class Brand
         Apply(root, dark);
     }
 
-    /// <summary>Takes this core's styles back off a root it claimed (the core is being replaced).</summary>
-    public static void Unclaim(FrameworkElement root)
-    {
-        ReleaseTheme(root);
-        if (CdtTheme.Styles is { } cdt) root.Resources.MergedDictionaries.Remove(cdt);
-        if (_styles is not null) root.Resources.MergedDictionaries.Remove(_styles);
-        DarkShown.Remove(root);
-    }
-
     private static void Apply(FrameworkElement root, bool dark)
     {
         if (DarkShown.TryGetValue(root, out var was) && (bool)was == dark) return;

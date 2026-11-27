@@ -399,7 +399,7 @@ internal sealed partial class ChatPane
     internal static (JobCardView Card, int ThinkingEvents) CardFromSample(IEnumerable<string> lines)
     {
         var parser = new StreamParser();
-        var model = JobCardModel.FromPlan(["create_sheets", "fill_title_blocks"], DateTime.UtcNow);
+        var model = JobCardModel.FromPlan(["add_frames", "set_member_loads"], DateTime.UtcNow);
         var view = new JobCardView(model, live: true);
         var count = 0;
         foreach (var line in lines)

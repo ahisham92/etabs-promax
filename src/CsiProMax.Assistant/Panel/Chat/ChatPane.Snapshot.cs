@@ -72,7 +72,7 @@ internal sealed partial class ChatPane
         /// <summary>A finished job card: a step done, one skipped, one failed with its reason.</summary>
         private static JobCardModel SampleJob(DateTime started)
         {
-            var job = JobCardModel.FromPlan(["change_type", "tag_elements_in_view", "create_schedule"], started);
+            var job = JobCardModel.FromPlan(["add_frame_section", "add_frames", "set_member_loads"], started);
             job.Steps[0].State = "done";
             job.Steps[0].Done = job.Steps[0].Total = 3;
             job.Steps[1].State = "skipped";

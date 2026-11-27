@@ -104,15 +104,6 @@ internal sealed class HandoffView : StackPanel
         Children.Add(Label($"Where in {Csi.Name}", step.Where, Brand.K.Text, size));
         Children.Add(Label("Why", step.Why, Brand.K.Muted, size));
 
-        if (step.Guide is { } guide && HelpGuides.Read(guide) is { } markdown)
-        {
-            var link = new Hyperlink(new Run("Open the step-by-step guide")) { ToolTip = HelpGuides.Title(markdown) };
-            link.SetResourceReference(TextElement.ForegroundProperty, Brand.K.Link);
-            link.Click += (_, _) => new ResultWindow(HelpGuides.Title(markdown), true, HelpGuides.Title(markdown), markdown).Show();
-            AutomationProperties.SetName(link, "Open the step-by-step guide: " + HelpGuides.Title(markdown));
-            Children.Add(new TextBlock(link) { Margin = new Thickness(0, 2, 0, 6), FontSize = size, MinHeight = 24 });
-        }
-
         // WarningText meets AA on the window's background but not on the chat card's accent tint: DangerText there.
         _note = Brand.Text("", compact ? Brand.K.DangerText : Brand.K.WarningText, size, bold: true);
         _note.Margin = new Thickness(0, 4, 0, 0);

@@ -168,21 +168,6 @@ internal static class FreezeCause
                 ? $"This is {Csi.Name}'s own work, not CSI ProMax."
                 : $"This is {Csi.Name}'s own command, not CSI ProMax.";
 
-    /// <summary>
-    /// Offer "Warn me before this command next time" once ETABS has been frozen a while by a command of its own that
-    /// isn't one people need every day (saving, syncing, opening, undo). Never while CSI ProMax work runs on ETABS's
-    /// thread (<paramref name="ours"/>): then the journal's last command is only what was open, not what froze ETABS
-    /// (27 Oct 2026: a chat task froze ETABS during Create Spot Elevation, and the warning was offered for spot elevations).
-    /// </summary>
-    public static bool OfferWarning(Busy busy, TimeSpan frozen, bool ours = false) =>
-        busy.CommandId is { Length: > 0 } id && !busy.Ours && !ours && frozen >= WarnAfter && !Everyday(id, busy.What);
-
-    /// <summary>
-    /// How long ETABS may be stuck before the Rescue window opens: 20 s, but 1 min for everyday long work (opening a model
-    /// or a link, syncing, saving), so the window doesn't open at every short sync of a big model.
-    /// </summary>
-    public static TimeSpan OpenAfter(Busy busy) => Routine.Contains(busy.What) ? TimeSpan.FromMinutes(1) : TimeSpan.FromSeconds(20);
-
     private static readonly HashSet<string> Routine = new(Brackets.Values, StringComparer.Ordinal);
 
     /// <summary>Long work ETABS is known to do (synchronizing, opening, saving, loading links): worth waiting longer for.</summary>

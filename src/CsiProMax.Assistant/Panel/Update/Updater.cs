@@ -32,7 +32,6 @@ public static class Updater
 
     private static string UpdatesFolder => Path.Combine(LocalRoot, "updates");
     internal static string VersionsFolder => Path.Combine(LocalRoot, "versions");
-    private static string McpFolder => Path.Combine(LocalRoot, "mcp");
     private static string StateFile => Path.Combine(LocalRoot, "update-state.json");
 
     /// <summary>Where a check that could not run says why (the window's activity log), so it can be read on the PC afterwards.</summary>
@@ -238,9 +237,6 @@ public static class Updater
         progress.Report(UpdateStage.RestartNeeded,
             $"CSI ProMax {version} is downloaded. This window closes and opens again on {version} by itself as soon as no work is running; " +
             $"{Csi.Name} stays open and your model is not touched. The window's title shows the version that is running.", version);
-
-    /// <summary>Nothing to settle: CSI ProMax has no add-in manifest (ETABS keeps the plug-in's path itself).</summary>
-    public static int SettleInstall(string? packageFolder = null) => 1;
 
     /// <summary>
     /// The folder of the newest complete downloaded version that is newer than <paramref name="running"/>, or null: what

@@ -48,21 +48,15 @@ internal static class OutputPaths
     /// <summary>Tools that run or save code or recipes of tool calls (left out of the chat when its connector is too old to say it is the chat).</summary>
     public static readonly HashSet<string> CodeTools = new(StringComparer.Ordinal)
     {
-        "run_etabs_query_code", "run_etabs_code", "save_recipe", "run_recipe", "batch_run_recipe",
+        "run_etabs_query_code", "run_etabs_code", "save_recipe", "run_recipe",
     };
 
     /// <summary>
     /// Calls that are asked about in ETABS whatever the settings say and wherever they come from (the chat, the Claude app
-    /// or a recipe), and why: what_if with confirm, which copies the saved model and changes the copy (or a design option);
-    /// accepting issue check items, issuing with open items, and a table edit, which saves the model first.
+    /// or a recipe), and why: a table edit (or a SAP2000 lateral code set through a table), which saves the model first.
     /// </summary>
     public static string? AlwaysAskReason(string tool, IReadOnlyDictionary<string, JsonElement> args)
     {
-        // The issue gate's ways past an open item: only the user decides them, so Claude can't clear the gate on its own.
-        if (tool == "issue_check" && args.TryGetValue("accept", out var acc) && acc.ValueKind == JsonValueKind.Array && acc.GetArrayLength() > 0)
-            return $"CSI ProMax asks to accept {acc.GetArrayLength()} open item(s) of the issue check with the reasons in the details; accepted items no longer block the issue.";
-        if (tool == "issue_drawings" && args.TryGetValue("allow_open_items", out var allow) && allow.ValueKind == JsonValueKind.True)
-            return "CSI ProMax asks to issue these drawings even though the issue check has open items (the reason in the details goes into the issue record).";
         // A table edit saves the model under its own file name first, so that an edit the program refuses can be undone
         // (SAP2000 26 emptied a model's load patterns on a refused edit). Ahmed, 2026-11-25: "Ask me before each save".
         if (SavesBeforeEdit(tool, args))
@@ -76,11 +70,7 @@ internal static class OutputPaths
             var pattern = args.TryGetValue("name", out var n) && n.ValueKind == JsonValueKind.String ? n.GetString() : "the pattern";
             return $"CSI ProMax asks to give {pattern} the code {code}. SAP2000's API has no call for this code, so it goes in through the table 'Load Pattern Definitions'. Before that it saves the model under its own file name, so that the model can be opened again as it was if SAP2000 loses or changes any load pattern. If you say no, the model is not saved and the code is not set.";
         }
-        if (tool != "what_if" || !(args.TryGetValue("confirm", out var c) && c.ValueKind == JsonValueKind.True)) return null;
-        var option = args.TryGetValue("target", out var t) && t.ValueKind == JsonValueKind.String && t.GetString() == "design_option";
-        return option
-            ? "CSI ProMax asks to try a what-if in a design option of the open model: only the elements in that option change (Ctrl+Z undoes it)."
-            : "CSI ProMax asks to try a what-if on a copy of the saved model: the copy is changed, measured, saved and closed; the open model is not changed.";
+        return null;
     }
 
     /// <summary>A table edit that changes the model (add, update, delete): it saves the model first, so it asks at every approval level.</summary>

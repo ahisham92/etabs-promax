@@ -2588,8 +2588,8 @@ internal sealed partial class ChatPane : DockPanel, IHistoryHost
     private static string PdfNote(Attachment a, AttachedSoFar used, List<(string, string)> pdfs)
     {
         var bytes = Tools.SharedRead.AllBytes(a.Path);
-        // PdfPig opens it only when it could still fit, for an exact page count.
-        var check = PdfAttachment.Assess(bytes, used.Pages, used.Bytes, used.Bytes + bytes.Length <= PdfAttachment.MaxBytes ? PdfFiles.PageCount(bytes) : null);
+        // PDFium opens it only when it could still fit, for an exact page count.
+        var check = PdfAttachment.Assess(bytes, used.Pages, used.Bytes, used.Bytes + bytes.Length <= PdfAttachment.MaxBytes ? PdfFiles.PageCount(a.Path) : null);
         if (check.Verdict == PdfAttachment.Verdict.Send)
         {
             pdfs.Add((a.Name, Convert.ToBase64String(bytes)));
@@ -3696,14 +3696,6 @@ internal sealed partial class ChatPane : DockPanel, IHistoryHost
         var path = System.IO.Path.Combine(ClaudeCli.AttachmentsFolder, $"{safe} {stamp}.png");
         File.WriteAllBytes(path, png);
         return path;
-    }
-
-    /// <summary>The ribbon's Send view button (the loader shows the chat first). False when the chat isn't there.</summary>
-    internal static bool AttachCurrentView()
-    {
-        if (_instance is null) return false;
-        _instance.AttachView();
-        return true;
     }
 
     /// <summary>"Send current view": the same capture as capture_view_image (screen when possible), run on ETABS's thread.</summary>

@@ -28,8 +28,6 @@ public sealed class HandoffStep
     /// does the item themselves, so Continue only checks it is there.
     /// </summary>
     public bool RunAgain { get; set; } = true;
-    /// <summary>Optional: the name of a help guide to offer next to the step (see HelpGuides).</summary>
-    public string? Guide { get; set; }
 
     /// <summary>The step as one paragraph, for logs and tool results.</summary>
     public string Text => $"{What}. Where: {Where}. Why: {Why}".Replace("..", ".");

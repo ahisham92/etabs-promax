@@ -26,7 +26,7 @@ internal static class PdfAttachment
     /// <summary>
     /// Whether <paramref name="bytes"/> can go whole, given what this chat already sent (<paramref name="usedPages"/>,
     /// <paramref name="usedBytes"/>): Claude Code sends the whole conversation with each message, earlier PDFs and pictures
-    /// too, and past the API's limit it quietly leaves them out. <paramref name="knownPages"/> is PdfPig's count, when it
+    /// too, and past the API's limit it quietly leaves them out. <paramref name="knownPages"/> is PDFium's count, when it
     /// could open the file. A PDF whose pages can't be counted goes only when it is small, so a long one that hides
     /// its page tree never makes the API refuse the whole message.
     /// </summary>
@@ -97,7 +97,7 @@ internal static class PdfAttachment
 
     /// <summary>
     /// The note on a PDF that is not sent whole: why, and how to read it instead: its text, page by page, in
-    /// <paramref name="textFile"/> (null when it couldn't be read), and any page as a picture with redline_read.
+    /// <paramref name="textFile"/> (null when it couldn't be read), and any page as a picture with read_drawing.
     /// </summary>
     public static string Note(Check check, string? textFile, bool mostlyPictures)
     {
@@ -112,10 +112,10 @@ internal static class PdfAttachment
         if (textFile is null)
             return why + (check.Verdict == Verdict.Locked
                 ? ", and its text couldn't be read either. Ask the user for an unlocked copy, or to export the pages they mean as pictures"
-                : ". Look at the pages that matter with redline_read (file and page): it shows any PDF page as a picture. Tell the user in one line that you are reading it page by page");
+                : ". Look at the pages that matter with read_drawing (file and page): it shows any PDF page as a picture. Tell the user in one line that you are reading it page by page");
         return why + $". Its text, page by page, is in {textFile}: search it with Grep (pages are headed \"=== Page N of M ===\") and read the parts you need with the Read tool. " +
-               (mostlyPictures ? "Most pages have little or no text (drawings or scans), so look at the pages that matter with redline_read (file and page), which shows a PDF page as a picture. "
-                               : "For a page's drawings or layout, look at it with redline_read (file and page), which shows a PDF page as a picture. ") +
+               (mostlyPictures ? "Most pages have little or no text (drawings or scans), so look at the pages that matter with read_drawing (file and page), which shows a PDF page as a picture. "
+                               : "For a page's drawings or layout, look at it with read_drawing (file and page), which shows a PDF page as a picture. ") +
                "Tell the user in one line that the file is large and you read the parts that matter, and that Split PDF in the pane's Activity tab makes parts that can be attached whole";
     }
 

@@ -81,24 +81,6 @@ internal static class Approvals
 
     internal static CallState? Call;
 
-    /// <summary>Tools whose own dialog (the package plan, each redline) is the approval: the bridge leaves a normal change's ask to it.</summary>
-    public static bool OwnDialog(string tool) => tool is "drawing_package" or "redline_apply";
-
-    /// <summary>
-    /// For a tool with its own approval dialog, or a read that makes one change on the side: whether a normal change
-    /// should be asked about now. From the ribbon (the user started it), only at "Ask for every change".
-    /// </summary>
-    public static bool AskOwn(string tool)
-    {
-        var call = Call;
-        if (call is { Asked: true } || Chat.Autopilot.Unattended || Chat.Away.On) return false;
-        if (call?.Decision.Kind == AskKind.Change) return true;
-        var level = Level;
-        if (level is ApprovalLevel.RiskyOnly or ApprovalLevel.AlwaysAllow || Remembered().Contains(tool, StringComparer.Ordinal)) return false;
-        if (call is null) return level == ApprovalLevel.EveryChange;
-        return call.Chat is not { ApprovedForTask: true };
-    }
-
     /// <summary>The decision for a bridge call, with what ETABS and the disk say about it.</summary>
     public static ApprovalDecision Decide(EtabsApp app, IEtabsTool tool, IReadOnlyDictionary<string, JsonElement> args, bool fromChat, JobControl? chat)
     {
@@ -123,10 +105,10 @@ internal static class Approvals
     private static string? Str(IReadOnlyDictionary<string, JsonElement> args, string key) =>
         args.TryGetValue(key, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
 
-    /// <summary>For run_recipe and batch_run_recipe, the recipe file's text (approved like a learned tool's code); null otherwise.</summary>
+    /// <summary>For run_recipe, the recipe file's text (approved like a learned tool's code); null otherwise.</summary>
     internal static string? RecipeText(IEtabsTool tool, IReadOnlyDictionary<string, JsonElement> args)
     {
-        var key = tool.Name switch { "run_recipe" => "name", "batch_run_recipe" => "recipe", _ => null };
+        var key = tool.Name switch { "run_recipe" => "name", _ => null };
         if (key is null || Str(args, key) is not { Length: > 0 } name) return null;
         try
         {
@@ -191,7 +173,7 @@ internal static class Approvals
             return allowed;
         }
         // "Always allow": nothing asks (the bridge already decided so); this catches the dialogs tools and the ribbon
-        // show themselves. Only the issue gate's sign-off (AskKind.Always at this level) is still shown.
+        // show themselves. Only the always-asked calls (AskKind.Always: a table edit's save) are still shown.
         if (level == ApprovalLevel.AlwaysAllow && decision.Kind != AskKind.Always) return true;
         var silence = decision.CanSilence;
         var onceTask = silence && chat is not null && level == ApprovalLevel.OncePerTask;
@@ -218,8 +200,7 @@ internal static class Approvals
             dialog.AddCommandLink(TaskDialogCommandLinkId.CommandLink4, "Don't allow", "Nothing changes. CSI ProMax is told, and asks you what to do.");
             dialog.DefaultButton = silence ? TaskDialogResult.CommandLink1 : TaskDialogResult.CommandLink4;
             // One click to stop being asked at all (the dialog has room for four links, so it is the tick box under them).
-            var gate = decision.Kind == AskKind.Always && ApprovalPolicy.IsIssueGate(tool);
-            if (!gate) dialog.VerificationText = "Always allow: don't ask me again for any change (risky ones included; change it in Settings)";
+            dialog.VerificationText = "Always allow: don't ask me again for any change (risky ones included; change it in Settings)";
             var shown = dialog.Show();
             answer = shown switch
             {
@@ -228,7 +209,7 @@ internal static class Approvals
                 TaskDialogResult.CommandLink3 => Answer.NeverAsk,
                 _ => Answer.No,
             };
-            if (!gate && answer != Answer.No && dialog.WasVerificationChecked()) answer = Answer.AlwaysAllow;
+            if (answer != Answer.No && dialog.WasVerificationChecked()) answer = Answer.AlwaysAllow;
         }
         if (answer == Answer.No) return false;
         if (answer == Answer.AlwaysAllow)

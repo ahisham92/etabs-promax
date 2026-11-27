@@ -85,28 +85,6 @@ internal static class ConnectorTools
              "required":["file","question"]}
             """));
 
-    /// <summary>
-    /// The catalogue ETABS wrote (tools.json): null when there is none yet, empty when it can't be read right now (ETABS
-    /// may be rewriting it, or it is damaged; ETABS writes it again on its next start).
-    /// </summary>
-    public static List<Def>? ReadCatalogue(string file)
-    {
-        if (!File.Exists(file)) return null;
-        try
-        {
-            using var doc = JsonDocument.Parse(File.ReadAllText(file));
-            return doc.RootElement.EnumerateArray().Select(t => new Def(
-                t.GetProperty("name").GetString()!,
-                t.GetProperty("description").GetString(),
-                t.GetProperty("inputSchema").Clone())).ToList();
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException
-                                       or KeyNotFoundException or InvalidOperationException)
-        {
-            return [];
-        }
-    }
-
     /// <summary>The full list from ETABS's tools: connection and job tools first, then ETABS's, read_pdf_part and the learned tools.</summary>
     public static List<Def> Compose(IEnumerable<Def> etabsTools, string learnedFolder)
     {

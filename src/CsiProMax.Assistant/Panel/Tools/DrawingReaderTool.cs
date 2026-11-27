@@ -47,7 +47,7 @@ public sealed class ReadDrawingTool : IEtabsTool
         if (!File.Exists(file)) return ToolResult.Error($"{file} was not found.");
         var ext = Path.GetExtension(file).ToLowerInvariant();
         var isPdf = ext == ".pdf";
-        if (!isPdf && !Pictures.Contains(ext)) return ToolResult.Error($"{Path.GetFileName(file)} is not a PDF or a picture. For DWG or DXF use list_cad_layers or import_cad.");
+        if (!isPdf && !Pictures.Contains(ext)) return ToolResult.Error($"{Path.GetFileName(file)} is not a PDF or a picture. For DWG or DXF use read_cad_drawing.");
         var page = (int)(args.OptLong("page") ?? 1);
         if (page < 1) return ToolResult.Error("page counts from 1.");
         var max = (int)Math.Min(2400, Math.Max(800, args.OptLong("pixel_width") ?? 2000));

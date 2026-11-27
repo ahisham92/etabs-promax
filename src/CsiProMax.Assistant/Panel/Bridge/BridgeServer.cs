@@ -340,12 +340,6 @@ public sealed class BridgeServer
     /// <summary>A read ETABS didn't take is tried this many more times, this long each, before the user is asked.</summary>
     private const int ReadRetries = 2, ReadRetryMs = 8000;
 
-    /// <summary>How long switching models may wait for ETABS (the connector waits 20 s for the answer).</summary>
-    private const int ActivateWaitMs = 12000;
-
-    /// <summary>How long an open_etabs_model call waits for the model before answering that it is still opening.</summary>
-    private const int OpenWaitMs = 50000;
-
     /// <summary>A modal dialog open this long ends the wait early: ETABS runs no add-in work behind one.</summary>
     private const int DialogWaitMs = 4000;
 
@@ -478,8 +472,7 @@ public sealed class BridgeServer
                 // changes per the approval level, unless the task is approved or the user said not to ask about the tool
                 // again. From the chat this dialog is the only prompt the user sees (Claude Code runs there without its own).
                 var decision = Approvals.Decide(app, tool, args, fromChat, chat);
-                // A tool with its own approval dialog (the package plan, each redline) asks a normal change there instead.
-                var askHere = decision.Ask && !(decision.CanSilence && Approvals.OwnDialog(tool.Name));
+                var askHere = decision.Ask;
                 Approvals.Call = new Approvals.CallState(decision, chat, askHere);
                 if (askHere && !Approvals.Ask(tool, args, decision, chat)) return Ended(ToolResult.Error(Approvals.PhoneLine ?? $"The user rejected this change in {Csi.Name}. Ask them how to proceed."));
                 RunningCall.Begin(fromChat ? "the chat" : "Claude", tool.Name, app.ActiveUIDocument.Document.Title, args);

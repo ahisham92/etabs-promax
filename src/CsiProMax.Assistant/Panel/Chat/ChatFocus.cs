@@ -21,9 +21,9 @@ internal static class ChatFocus
         @"\b(selected|selection|selecting|this (view|one|beam|slab|floor|pile|column|wall|section|plan|sheet|tag|dimension|line|element|family|frame|framing)|the one|current view|opened view|open view|active view)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-    /// <summary>Words that make an ask wide whatever is selected ("for all berths", "the whole model").</summary>
+    /// <summary>Words that make an ask wide whatever is selected ("for all stories", "the whole model").</summary>
     private static readonly Regex Wide = new(
-        @"\b(all (the )?(berths|sheets|views|drawings|levels|models)|every (berth|sheet|view|drawing|level)|whole (model|project)|entire (model|project)|all over|allover|submission|package)\b",
+        @"\b(all (the )?(stories|sheets|views|drawings|levels|models)|every (story|sheet|view|drawing|level)|whole (model|project)|entire (model|project)|all over|allover|submission|package)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     private static int Words(string text) => text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
@@ -83,8 +83,7 @@ internal static class ChatFocus
         if (IsExample(text))
             return start + "the user made an example by hand and wants the same. First read the example exactly: which elements or " +
                    "view they changed (the model note lists what the user changed), its types, parameter values, offsets, joins and " +
-                   "graphics, and look at it (capture_view_image). For annotation in a view they set up, learn it first " +
-                   "(drawing_standard action=learn, add=true, that view). Say in one line what the example has, then reproduce exactly " +
+                   "graphics, and look at it (capture_view_image). Say in one line what the example has, then reproduce exactly " +
                    "that: don't improve on it, and what differs from the example in your result is a mistake to fix before you answer.]";
         if (IsSmall(text, selected, attachments))
             return start + "this is a small ask about what is selected or shown. Do it yourself now: no job, and no list of ways to choose from. " +
@@ -117,7 +116,7 @@ internal static class ChatFocus
     public const string QuestionRule =
         "this is a question: answer it yourself in this turn, the answer first (yes or no when it asks yes or no), in one to " +
         "three lines. Don't start a job and don't hand the question to one, and don't say a job will check: if a fact is " +
-        "missing, read it now with a quick read-only tool (get_activity_log, query_elements, get_element_parameters, chat_jobs " +
+        "missing, read it now with a quick read-only tool (get_activity_log, get_model_context, run_etabs_query_code, chat_jobs " +
         "action=ask), then answer. When part of it truly isn't known yet, say what is known and what isn't. Change nothing";
 
     /// <summary>The instructions of the quick run that answers a question while the chat is busy with other work.</summary>

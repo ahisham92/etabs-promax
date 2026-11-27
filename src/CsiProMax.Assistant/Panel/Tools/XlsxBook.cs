@@ -84,8 +84,6 @@ internal sealed class XlsxBook : IDisposable
     private XDocument Sheet(string name) =>
         _parts.TryGetValue(name, out var part) && Load(part) is { } doc ? doc : throw new InvalidDataException($"the workbook has no sheet \"{name}\"");
 
-    public bool HasSheet(string name) => _parts.ContainsKey(name);
-
     // ---- Cell references ---------------------------------------------------------------------------------------------
 
     /// <summary>"C12" from column 2 (zero-based) and row 12.</summary>
@@ -204,37 +202,6 @@ internal sealed class XlsxBook : IDisposable
     {
         if (FindCell(sheet, col, row) is null) return;
         Cell(sheet, col, row);
-    }
-
-    /// <summary>Changes every text in the workbook (shared texts, texts in cells, sheet headers and footers) through <paramref name="change"/>.</summary>
-    public void ReplaceTexts(Func<string, string> change)
-    {
-        if (_sst is not null)
-        {
-            var any = false;
-            foreach (var t in _sst.Descendants(Main + "t"))
-            {
-                var v = change(t.Value);
-                if (v != t.Value) { t.Value = v; any = true; }
-            }
-            if (any)
-            {
-                _changed.Add("xl/sharedStrings.xml");
-                _shared.Clear();
-                foreach (var si in _sst.Root!.Elements(Main + "si")) _shared.Add(string.Concat(si.Descendants(Main + "t").Select(t => t.Value)));
-            }
-        }
-        foreach (var name in SheetNames)
-        {
-            var doc = Sheet(name);
-            var any = false;
-            foreach (var t in doc.Descendants(Main + "is").Descendants(Main + "t").Concat(doc.Descendants(Main + "headerFooter").Elements()))
-            {
-                var v = change(t.Value);
-                if (v != t.Value) { t.Value = v; any = true; }
-            }
-            if (any) _changed.Add(_parts[name]);
-        }
     }
 
     /// <summary>Writes the changed parts, asks Excel to recalculate on open, and drops the calculation chain (Excel rebuilds it).</summary>

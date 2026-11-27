@@ -16,35 +16,13 @@ internal static class StepNames
     {
         ["run_etabs_query_code"] = "Read model data",
         ["run_etabs_code"] = "Change the model",
-        ["query_elements"] = "Find elements",
-        ["query_linked_models"] = "Read linked models",
         ["get_model_context"] = "Look at the model",
-        ["get_element_parameters"] = "Read parameters",
-        ["get_coordinates"] = "Read coordinates",
         ["get_activity_log"] = "Read the activity log",
-        ["get_drawing_package_plan"] = "Plan the drawing package",
         ["capture_view_image"] = "Take a picture of the view",
-        ["select_elements"] = "Select elements",
-        ["set_parameters"] = "Set parameters",
-        ["delete_elements"] = "Delete elements",
-        ["move_copy_rotate"] = "Move, copy or rotate",
         ["wait_for_job"] = "Wait for the job",
         ["cancel_job"] = "Stop the job",
         ["memory_note"] = "Save a note",
         ["read_document_text"] = "Read a document",
-        ["berth_status"] = "Submissions status",
-        ["submission_format"] = "Submission format",
-        ["berth_costing"] = "Berth costing",
-        ["help"] = "Read the guide",
-        ["features"] = "List what it can do",
-        ["diagnostics"] = "Check the setup",
-        ["ve"] = "Value engineering",
-        ["ve_apply"] = "Apply value engineering",
-        ["ve_view"] = "Value engineering view",
-        ["ve_register"] = "Value engineering register",
-        ["ve_opportunities"] = "Find value engineering ideas",
-        ["ve_compare_options"] = "Compare value engineering options",
-        ["what_if"] = "What if",
         ["read_pdf_part"] = "Read a part of the PDF",
         ["chat_jobs"] = "Jobs",
         ["chat_questions"] = "Questions for you",
@@ -156,8 +134,8 @@ internal static class StepNames
     public static bool ReadOnly(string tool)
     {
         tool = Short(tool);
-        return tool is "run_etabs_query_code" or "query_elements" or "query_linked_models" or "capture_view_image" or "select_elements"
-                   or "wait_for_job" or "cancel_job" or "chat_jobs" or "chat_questions" or "ask_user" or "help" or "features" or "memory_note" or "diagnostics" or "make_document"
+        return tool is "run_etabs_query_code" or "capture_view_image"
+                   or "wait_for_job" or "cancel_job" or "chat_jobs" or "chat_questions" or "ask_user" or "memory_note" or "make_document"
                    or "Read" or "Glob" or "Grep" or "LS" or "TodoWrite" or "TaskCreate" or "TaskUpdate" or "WebFetch" or "WebSearch" or "ToolSearch"
                || tool.StartsWith("get_", StringComparison.Ordinal) || tool.StartsWith("list_", StringComparison.Ordinal)
                || tool.StartsWith("find_", StringComparison.Ordinal) || tool.StartsWith("read_", StringComparison.Ordinal);

@@ -137,15 +137,6 @@ internal sealed class UpdateWindow : Window
         _open.Activate();
     }
 
-    /// <summary>Brings back the window of the current run, if any. Returns false when there is none to show.</summary>
-    public static bool ShowCurrent()
-    {
-        // An automatic check that found nothing has no window of its own: the version dialog shows instead.
-        if (UpdateProgress.Current is not { } p || p.Snapshot.Stage == UpdateStage.Idle || !p.Surfaced && p.Snapshot.IsFinal) return false;
-        ShowFor(p);
-        return true;
-    }
-
     /// <summary>A short notice in the same window, for an update this ETABS window followed from another one.</summary>
     public static void Announce(UpdateSnapshot final)
     {

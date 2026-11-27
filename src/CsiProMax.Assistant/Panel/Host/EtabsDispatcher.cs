@@ -75,13 +75,9 @@ public sealed class EtabsDispatcher
     /// <summary>Raised on the window's thread when nothing is running, about four times a second.</summary>
     internal static event Action<EtabsApp>? Idle;
 
-    private static volatile bool _idleAgain;
-    internal static void IdleAgain() => _idleAgain = true;
-
     private void OnIdle()
     {
         if (_stopped || _running || _app is null) return;
-        _idleAgain = false;
         try { Idle?.Invoke(_app); } catch (Exception) { }
         if (_later.TryDequeue(out var work))
         {
@@ -92,8 +88,6 @@ public sealed class EtabsDispatcher
     /// <summary>How many idle moments were seen: proof the window's thread is turning over.</summary>
     internal int Heard => Volatile.Read(ref _heard);
     private int _heard;
-
-    internal void Kick() => Interlocked.Increment(ref _heard);
 
     /// <summary>What holds ETABS's own window (a dialog, a long operation), seen from outside it.</summary>
     internal ETABSBlock.State Blocker() => ETABSBlock.Read(CsiProMax.App.MainWindow);

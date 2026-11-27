@@ -289,6 +289,34 @@ internal static class PdfEngine
 
     private const int Annotations = 0x01; // FPDF_ANNOT: comments and stamps show, as in a viewer
 
+    // ---- Text of pages -------------------------------------------------------------------------------------------
+
+    /// <summary>The text of page <paramref name="index"/> in reading order, or null when it can't be read. On the PDF thread.</summary>
+    public static string? Text(Doc doc, int index)
+    {
+        Ready();
+        var page = Native.FPDF_LoadPage(doc.Handle, index);
+        if (page == IntPtr.Zero) return null;
+        try
+        {
+            var text = Native.FPDFText_LoadPage(page);
+            if (text == IntPtr.Zero) return null;
+            try
+            {
+                var count = Native.FPDFText_CountChars(text);
+                if (count <= 0) return count == 0 ? "" : null;
+                var buffer = new ushort[count + 1];
+                var written = Native.FPDFText_GetText(text, 0, count, buffer);
+                if (written <= 0) return "";
+                var chars = new char[written - 1 > 0 ? written - 1 : 0];
+                for (var i = 0; i < chars.Length; i++) chars[i] = (char)buffer[i];
+                return new string(chars).Replace("\r\n", "\n").Replace('\r', '\n').Replace("\uFFFE", "").Replace("\u0002", "-");
+            }
+            finally { Native.FPDFText_ClosePage(text); }
+        }
+        finally { Native.FPDF_ClosePage(page); }
+    }
+
     // ---- Writing ------------------------------------------------------------------------------------------------
 
     /// <summary>A page to write: page <see cref="Index"/> of <see cref="Doc"/> (null: a blank page of <see cref="Blank"/>'s size), turned <see cref="QuarterTurns"/> clockwise.</summary>
@@ -445,6 +473,10 @@ internal static class PdfEngine
         [DllImport(Library)] public static extern int FPDFBitmap_GetStride(IntPtr bitmap);
         [DllImport(Library)] public static extern void FPDFBitmap_Destroy(IntPtr bitmap);
         [DllImport(Library)] public static extern void FPDF_RenderPageBitmap(IntPtr bitmap, IntPtr page, int x, int y, int width, int height, int rotate, int flags);
+        [DllImport(Library)] public static extern IntPtr FPDFText_LoadPage(IntPtr page);
+        [DllImport(Library)] public static extern void FPDFText_ClosePage(IntPtr textPage);
+        [DllImport(Library)] public static extern int FPDFText_CountChars(IntPtr textPage);
+        [DllImport(Library)] public static extern int FPDFText_GetText(IntPtr textPage, int start, int count, [Out] ushort[] result);
         [DllImport(Library)] public static extern IntPtr FPDF_CreateNewDocument();
         [DllImport(Library)] public static extern IntPtr FPDFPage_New(IntPtr doc, int index, double width, double height);
         [DllImport(Library)] public static extern int FPDF_ImportPagesByIndex(IntPtr dest, IntPtr source, int[] indices, ULong length, int index);

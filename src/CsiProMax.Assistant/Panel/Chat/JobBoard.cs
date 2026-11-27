@@ -1139,11 +1139,6 @@ internal sealed class ChatBoards
         }
     }
 
-    /// <summary>The chat key whose board has job <paramref name="jobKey"/> ("" when none).</summary>
-    public string ChatOf(string jobKey)
-    {
-        lock (_gate) return _boards.FirstOrDefault(p => p.Value.Board.FindKey(jobKey) is not null).Key ?? "";
-    }
 }
 
 /// <summary>
