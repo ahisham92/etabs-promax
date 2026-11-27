@@ -31,6 +31,24 @@ public static class DefineTables
         ["Frame Section Properties 12 - Hybrid Steel U Section"] = ["SectionName", "WebMat", "TFMat", "BFMat", "D1", "B1", "B2", "B3", "B4", "tw", "tf", "tfb"],
         ["Frame Section Properties 17 - PCC Super-T"] = ["SectionName", "OpenFlange", "B1", "B2", "B3", "B4", "B5", "B6", "BL", "BR", "BLBRMax", "BLmax", "BRmax", "D1", "D2", "D3", "D4", "D5", "T1", "T2", "CornerType", "C1", "C2"],
         ["Frame Section Properties 18 - PCC Box Girder"] = ["SectionName", "B", "D", "tf", "tfb", "tw", "twr", "Chamfer"],
+        // Link/Support Property Data as SAP2000 keeps it: the general row and each direction's row in its type's table.
+        ["Link Property Definitions 01 - General"] = ["Link", "LinkType", "Mass", "Weight", "RotInert1", "RotInert2", "RotInert3", "DefLength", "DefArea", "PDM2I", "PDM2J", "PDM3I", "PDM3J", "StiffLOpt", "StiffDOpt", "StiffDFact", "Color", "GUID", "Notes"],
+        ["Link Property Definitions 02 - Linear"] = ["Link", "DOF", "Fixed", "TransKE", "RotKE", "TransRotKE", "TransCE", "RotCE", "TransRotCE", "DJ"],
+        ["Link Property Definitions 03 - MultiLinear"] = ["Link", "DOF", "Fixed", "NonLinear", "TransKE", "RotKE", "TransCE", "RotCE", "DJ", "Point", "Force", "Displ", "Moment", "Rotation"],
+        ["Link Property Definitions 04 - Damper"] = ["Link", "DOF", "Fixed", "NonLinear", "TransKE", "RotKE", "TransCE", "RotCE", "DJ", "TransK", "RotK", "TransC", "RotC", "CExp", "FLDamper", "FLDLength", "FLDModulus", "FLDArea"],
+        ["Link Property Definitions 05 - Gap"] = ["Link", "DOF", "Fixed", "NonLinear", "TransKE", "RotKE", "TransCE", "RotCE", "DJ", "TransK", "RotK", "TransOpen", "RotOpen"],
+        ["Link Property Definitions 06 - Hook"] = ["Link", "DOF", "Fixed", "NonLinear", "TransKE", "RotKE", "TransCE", "RotCE", "DJ", "TransK", "RotK", "TransOpen", "RotOpen"],
+        ["Link Property Definitions 07 - Rubber Isolator"] = ["Link", "DOF", "Fixed", "NonLinear", "TransKE", "RotKE", "TransCE", "RotCE", "DJ", "TransK", "TransYield", "Ratio"],
+        ["Link Property Definitions 08 - Sliding Isolator"] = ["Link", "DOF", "Fixed", "NonLinear", "TransKE", "RotKE", "TransCE", "RotCE", "DJ", "TransK", "TransC", "Slow", "Fast", "Rate", "Radius"],
+        ["Link Property Definitions 09 - TC Sliding Isolator"] = ["Link", "DOF", "Fixed", "NonLinear", "TransKE", "RotKE", "TransCE", "RotCE", "DJ", "TransK", "TransKTens", "GapComp", "GapTens", "TransC", "SlowComp", "SlowTens", "FastComp", "FastTens", "RateComp", "RateTens", "Radius"],
+        ["Link Property Definitions 10 - Plastic (Wen)"] = ["Link", "DOF", "Fixed", "NonLinear", "TransKE", "RotKE", "TransCE", "RotCE", "DJ", "TransK", "RotK", "TransYield", "RotYield", "Ratio", "YieldExp"],
+        ["Link Property Definitions 11 - Multilinear Plastic"] = ["Link", "DOF", "Fixed", "NonLinear", "TransKE", "RotKE", "TransCE", "RotCE", "DJ", "HysType", "PivotAlpha1", "PivotAlpha2", "PivotBeta1", "PivotBeta2", "PivotEta", "Point", "Force", "Displ", "Moment", "Rotation"],
+        ["Link Property Definitions 12 - Triple Pendulum Isolator"] = ["Link", "DOF", "Fixed", "NonLinear", "TransKE", "RotKE", "TransCE", "RotCE", "DJ", "TransK", "TransC", "HeightOut", "HeightIn", "SymOut", "KOutTop", "KOutBot", "KInTop", "SlowOutTop", "SlowOutBot", "SlowInTop", "FastOutTop", "FastOutBot", "FastInTop", "RateOutTop", "RateOutBot", "RateInTop", "RadOutTop", "RadOutBot", "RadInTop", "StopOutTop", "StopOutBot", "StopInTop"],
+        ["Link Property Definitions 13 - Linear Exponential Damper"] = ["Link", "DOF", "Fixed", "NonLinear", "TransKE", "RotKE", "TransCE", "RotCE", "DJ", "TransK", "RotK", "TransC", "RotC", "CExp", "ForceLimit", "MomLimit"],
+        ["Link Property Definitions 14 - Bilinear Damper"] = ["Link", "DOF", "Fixed", "NonLinear", "TransKE", "RotKE", "TransCE", "RotCE", "DJ", "TransK", "RotK", "TransC", "RotC", "TransCy", "RotCy", "ForceLimit", "MomLimit", "FLDamper", "FLDLength", "FLDModulus", "FLDArea"],
+        ["Link Property Definitions 15 - Friction Spring Damper"] = ["Link", "DOF", "Fixed", "NonLinear", "TransKE", "RotKE", "TransCE", "RotCE", "DJ", "TransK", "RotK", "TransK1", "RotK1", "TransK2", "RotK2", "TransU0", "RotU0", "TransUs", "RotUs", "ActiveDir"],
+        ["Link Property Definitions 16 - High Damping Rubber Isolator"] = ["Link", "DOF", "Fixed", "NonLinear", "TransKE", "RotKE", "TransCE", "RotCE", "DJ", "Area", "EffHeight", "AddStiff", "NumHysTerms", "CoStrain1", "CoStrength1", "CoStrain2", "CoStrength2", "CoStrain3", "CoStrength3", "Resistance", "CoStrainDam", "StiffIter"],
+        ["Link Property Definitions 17 - Sumitomo Damper"] = ["Link", "DOF", "Fixed", "NonLinear", "TransKE", "RotKE", "TransCE", "RotCE", "DJ", "ProdModel", "ShearArea", "Thickness", "Temp", "ExcitFreq", "RigidFluctCoeff", "DampFluctCoeff"],
         // Define > Coordinate Systems/Grids: the systems other than GLOBAL and their grid lines (GLOBAL's grids are the model's own).
         ["Coordinate Systems"] = ["Name", "Type", "X", "Y", "Z", "AboutZ", "AboutY", "AboutX"],
         ["Grid Lines"] = ["CoordSys", "AxisDir", "GridID", "XRYZCoord", "TAngle", "LineType", "LineColor", "Visible", "BubbleLoc", "AllVisible", "BubbleSize"],
@@ -141,7 +159,10 @@ public static class DefineTables
 
     /// <summary>The coordinate system and grid line tables: the .s2k writes them with GLOBAL's own, not on their own.</summary>
     public static bool IsGridTable(string table) => table.Equals("Coordinate Systems", StringComparison.OrdinalIgnoreCase) || table.Equals("Grid Lines", StringComparison.OrdinalIgnoreCase)
-        || table.Equals(SapFrameGeneral, StringComparison.OrdinalIgnoreCase) || table.Equals(SapAreaSections, StringComparison.OrdinalIgnoreCase);
+        || table.Equals(SapFrameGeneral, StringComparison.OrdinalIgnoreCase) || table.Equals(SapAreaSections, StringComparison.OrdinalIgnoreCase)
+        || table.Equals(SapLinkGeneral, StringComparison.OrdinalIgnoreCase) || table.Equals(SapLinkLinear, StringComparison.OrdinalIgnoreCase);
+
+    public const string SapLinkGeneral = "Link Property Definitions 01 - General", SapLinkLinear = "Link Property Definitions 02 - Linear";
 
     public const string SapFrameGeneral = "Frame Section Properties 01 - General", SapAreaSections = "Area Section Properties";
 

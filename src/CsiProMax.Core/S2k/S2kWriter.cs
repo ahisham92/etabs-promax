@@ -671,14 +671,21 @@ public static class S2kWriter
             "PLASTIC (WEN)" => "Plastic (Wen)", "MULTILINEAR ELASTIC" => "MultiLinear Elastic", "MULTILINEAR PLASTIC" => "MultiLinear Plastic",
             _ => CultureInfo.InvariantCulture.TextInfo.ToTitleCase(t.ToLowerInvariant()),
         };
-        Add(tables, "LINK PROPERTY DEFINITIONS 01 - GENERAL", links.Select(l => Row(("Link", l.Name), ("LinkType", LinkType(l.Type)), ("Mass", "0"), ("Weight", "0"),
-            ("RotInert1", "0"), ("RotInert2", "0"), ("RotInert3", "0"), ("DefLength", "1"), ("DefArea", "1"), ("PDM2I", "0"), ("PDM2J", "0"), ("PDM3I", "0"), ("PDM3J", "0"))));
+        // A link SAP2000's own rows hold (Link/Support Property Data in SAP2000's words) goes back as those rows.
+        var sapLinks = (m.DefinitionTables?.GetValueOrDefault(DefineTables.SapLinkGeneral) ?? []).Select(r => r.GetValueOrDefault("Link") ?? "").Where(n => n.Length > 0).ToHashSet(StringComparer.Ordinal);
+        var linkRows = links.Where(l => !sapLinks.Contains(l.Name)).Select(l => Row(("Link", l.Name), ("LinkType", LinkType(l.Type)), ("Mass", "0"), ("Weight", "0"),
+            ("RotInert1", "0"), ("RotInert2", "0"), ("RotInert3", "0"), ("DefLength", "1"), ("DefArea", "1"), ("PDM2I", "0"), ("PDM2J", "0"), ("PDM3I", "0"), ("PDM3J", "0"))).ToList();
+        SapRows(m, DefineTables.SapLinkGeneral, "Link", linkRows);
+        Add(tables, "LINK PROPERTY DEFINITIONS 01 - GENERAL", linkRows);
         // "02 - Linear" takes only linear links (SAP2000 26 skipped a rubber isolator's rows there, 0.4.39): the other
         // types' stiffness goes in their own table, not known yet, so it is said in a note.
-        foreach (var l in links.Where(l => LinkType(l.Type) != "Linear" && l.Dofs.Count > 0))
+        foreach (var l in links.Where(l => LinkType(l.Type) != "Linear" && l.Dofs.Count > 0 && !sapLinks.Contains(l.Name)))
             notes.Add($"Link property {l.Name} ({LinkType(l.Type)}) goes across with its type only: set its stiffness and damping in SAP2000 (Define > Section Properties > Link/Support Properties).");
-        Add(tables, "LINK PROPERTY DEFINITIONS 02 - LINEAR", links.Where(l => LinkType(l.Type) == "Linear").SelectMany(l => l.Dofs.Select(d => Row(("Link", l.Name), ("DOF", d.Key), ("Fixed", "No"),
-            (d.Key[0] == 'U' ? "TransKE" : "RotKE", N(d.Value.Stiff)), (d.Key[0] == 'U' ? "TransCE" : "RotCE", N(d.Value.Damp))))));
+        var linearRows = links.Where(l => LinkType(l.Type) == "Linear" && !sapLinks.Contains(l.Name)).SelectMany(l => l.Dofs.Select(d => Row(("Link", l.Name), ("DOF", d.Key), ("Fixed", "No"),
+            (d.Key[0] == 'U' ? "TransKE" : "RotKE", N(d.Value.Stiff)), (d.Key[0] == 'U' ? "TransCE" : "RotCE", N(d.Value.Damp))))).ToList();
+        foreach (var r in m.DefinitionTables?.GetValueOrDefault(DefineTables.SapLinkLinear) ?? [])
+            if (sapLinks.Contains(r.GetValueOrDefault("Link") ?? "")) linearRows.Add(DefineTables.SapHinges[DefineTables.SapLinkLinear].Where(r.ContainsKey).Select(f => (f, r[f])).ToList());
+        Add(tables, "LINK PROPERTY DEFINITIONS 02 - LINEAR", linearRows);
         return shapes;
     }
 
