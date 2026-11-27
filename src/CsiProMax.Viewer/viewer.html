@@ -6385,10 +6385,10 @@ async function hmSapPatterns() {
   const list = () => (hm.defs || defs).load_patterns.map(p => sapPattern(p, sapRowsOf(tables, "Load Pattern Definitions", "LoadPat", p.name)[0]));
   let pick = list().length ? 0 : -1;
   const d = dialog("Define Load Patterns", `<div style="display:flex;gap:10px;align-items:stretch">
-      <fieldset style="flex:1;margin:0"><legend>Load Patterns</legend><table class="list hmgrid" style="width:100%"><thead>
-        <tr><th>Load Pattern Name</th><th>Type</th><th>Self Weight<br>Multiplier</th><th>Auto Lateral<br>Load Pattern</th></tr>
-        <tr class="edit"><td><input id="spN"></td><td><select id="spT" style="min-width:120px"></select></td><td><input id="spS" type="number" step="any" value="0" style="width:80px"></td><td><select id="spA" style="min-width:130px"></select></td></tr></thead></table>
-        <div style="display:flex;gap:8px;margin-top:4px"><div class="scroll" style="flex:1;height:150px;border:1px solid #999"><table class="list hmgrid" style="width:100%"><tbody id="spL"></tbody></table></div>
+      <fieldset style="flex:1;margin:0"><legend>Load Patterns</legend><table class="list hmgrid" style="width:calc(100% - 40px);table-layout:fixed"><colgroup><col style="width:34%"><col style="width:25%"><col style="width:16%"><col style="width:25%"></colgroup><thead>
+        <tr><th style="text-align:center">Load Pattern Name</th><th style="text-align:center">Type</th><th style="text-align:center">Self Weight<br>Multiplier</th><th style="text-align:center">Auto Lateral<br>Load Pattern</th></tr>
+        <tr class="edit"><td><input id="spN" style="width:100%;box-sizing:border-box"></td><td><select id="spT" style="width:100%"></select></td><td><input id="spS" type="number" step="any" value="0" style="width:100%;box-sizing:border-box"></td><td><select id="spA" style="width:100%"></select></td></tr></thead></table>
+        <div style="display:flex;gap:8px;margin-top:4px"><div class="scroll" style="flex:1;height:150px;border:1px solid #999"><table class="list hmgrid" style="width:100%;table-layout:fixed"><colgroup><col style="width:34%"><col style="width:25%"><col style="width:16%"><col style="width:25%"></colgroup><tbody id="spL"></tbody></table></div>
         <div style="display:flex;flex-direction:column;justify-content:center;gap:24px"><button id="spUp" title="Move Up">&#9650;</button><button id="spDn" title="Move Down">&#9660;</button></div></div></fieldset>
       <div style="width:210px;display:flex;flex-direction:column;justify-content:space-between"><fieldset style="margin:0"><legend>Click To:</legend><div style="display:flex;flex-direction:column;gap:6px">
         <button id="spAdd">Add New Load Pattern</button><button id="spCopy">Add Copy of Load Pattern</button><button id="spMod">Modify Load Pattern</button>
