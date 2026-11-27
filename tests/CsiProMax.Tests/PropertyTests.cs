@@ -19,7 +19,7 @@ static class PropertyTests
 
     static JsonObject Run(ICsiLink link, string tool, object args)
     {
-        var t = PropertyTools.All.Concat(CaseTools.All).Concat(HandTools.All).First(x => x.Name == tool);
+        var t = PropertyTools.All.Concat(CaseTools.All).Concat(HandTools.All).Concat(DefineTools.All).First(x => x.Name == tool);
         return (JsonObject)t.Run(JsonDocument.Parse(JsonSerializer.Serialize(args)).RootElement, link);
     }
 
@@ -490,6 +490,38 @@ static class PropertyTests
             Check(pd["links"]!.AsArray().Single(x => x!["name"]!.GetValue<string>() == "L1")!["extras"]!["Mass"]?.GetValue<string>() == "0.5" && pd["springs"]!.AsArray().Any(x => x!["name"]!.GetValue<string>() == "AS1" && x["extras"]!["Color"]?.GetValue<string>() == "#ff0000"), "the forms see them: " + pd["links"]!.ToJsonString() + pd["springs"]!.ToJsonString());
             Run(link, "define_link", new { name = "L1", delete = true });
             Check(StructureExtras.Get(link.Model, "Link Property Definitions - Linear", "L1").Count == 0, "a deleted link leaves no row");
+        });
+        yield return ("properties: ETABS 23.2's Link Property Data keeps every type's rows in ETABS's own tables (per direction, multilinear points, coupled matrix, acceptance criteria), and the Engine's link follows its type and directions (Ahmed 2026-11-27, every form identical)", () =>
+        {
+            var link = Frame();
+            var t = DefineTables.Tables;
+            Check(EtabsLinkTables.Types.Length == 15 && EtabsLinkTables.Types.All(x => t.ContainsKey(x.Table)) && t.ContainsKey(EtabsLinkTables.AcceptForce) && t.ContainsKey(EtabsLinkTables.AcceptDispl), "every ETABS link table is a definition table");
+            Check(!StructureExtras.PerDirection(EtabsLinkTables.AcceptForce) && StructureExtras.PerDirection("Link Property Definitions - Isolator - TC Friction"), "acceptance criteria go in by name, a type's rows by direction");
+            Run(link, "define_table_rows", new { table = "Link Property Definitions - Isolator - Rubber", name = "LR", rows = new object[] {
+                new Dictionary<string, string> { ["Mass"] = "0.5", ["Direction"] = "U1", ["Fixed"] = "No", ["TransKE"] = "10000", ["TransCE"] = "0" },
+                new Dictionary<string, string> { ["Direction"] = "U2", ["Fixed"] = "No", ["TransKE"] = "50", ["TransCE"] = "1", ["DJ"] = "0", ["TransK"] = "100", ["TransYield"] = "10", ["TransRatio"] = "0.1" },
+                new Dictionary<string, string> { ["Direction"] = "R3", ["Fixed"] = "Yes" } } });
+            var l = PropertyDefs.Links(link.Model).Single(x => x.Name == "LR");
+            Check(l.Type == "RUBBER ISOLATOR" && l.Dofs["U1"].Stiff == 10000 && l.Dofs["U2"] == (50, 1) && l.Dofs["R3"].Stiff == EtabsLinkTables.FixedStiffness && l.Dofs.Count == 3, "the Engine's link follows the rows: " + string.Join(",", l.Dofs));
+            Run(link, "define_table_rows", new { table = "Link Property Definitions - Multilinear - Elastic", name = "LR", rows = new object[] {
+                new Dictionary<string, string> { ["Direction"] = "U1", ["Fixed"] = "No", ["TransKE"] = "100", ["TransPoint"] = "1", ["Displ"] = "-1", ["Force"] = "-1" },
+                new Dictionary<string, string> { ["Direction"] = "U1", ["TransPoint"] = "2", ["Displ"] = "1", ["Force"] = "1" } } });
+            Check(PropertyDefs.Links(link.Model).Single(x => x.Name == "LR").Type == "MULTILINEAR ELASTIC" && link.Model.DefinitionTables!.GetValueOrDefault("Link Property Definitions - Isolator - Rubber") is null
+                && link.Model.DefinitionTables!["Link Property Definitions - Multilinear - Elastic"].Count(r => r["Name"] == "LR") == 2, "a new type: the old type's rows go, the points stay");
+            Run(link, "define_table_rows", new { table = "Link Property Definitions - Linear", name = "LL", rows = new object[] { new Dictionary<string, string> { ["U1Status"] = "Active", ["U2Status"] = "Active", ["U3Status"] = "Inactive", ["R1Status"] = "Inactive", ["R2Status"] = "Inactive", ["R3Status"] = "Inactive", ["StiffU1"] = "1000", ["StiffU1U2"] = "30", ["StiffU2"] = "500", ["DampU1"] = "2" } } });
+            Run(link, "define_table_rows", new { table = EtabsLinkTables.AcceptForce, name = "LL", rows = new object[] { new Dictionary<string, string> { ["F1"] = "Yes", ["Symmetric"] = "Yes", ["IOPosF1"] = "1", ["LSPosF1"] = "2", ["CPPosF1"] = "3" } } });
+            var ll = PropertyDefs.Links(link.Model).Single(x => x.Name == "LL");
+            Check(ll.Type == "LINEAR" && ll.Dofs.Count == 2 && ll.Dofs["U1"] == (1000, 2) && ll.Dofs["U2"].Stiff == 500, "a linear link's statuses and matrix: " + string.Join(",", ll.Dofs));
+            Refused(link, "define_table_rows", new { table = "Link Property Definitions - Gap", name = "LX", rows = new object[] { new Dictionary<string, string> { ["Nope"] = "1" } } }, "no field 'Nope'");
+            // define_link (the tools' simple form) on a form's link keeps the link's own fields and replaces its directions.
+            Run(link, "define_link", new { name = "LR", type = "GAP", dofs = new { U1 = new { stiffness = 5, damping = 0 } } });
+            Check(PropertyDefs.Links(link.Model).Single(x => x.Name == "LR").Type == "GAP" && link.Model.DefinitionTables?.GetValueOrDefault("Link Property Definitions - Multilinear - Elastic")?.Exists(r => r["Name"] == "LR") != true, "define_link on a form's link: its type and directions, the form's old rows gone");
+            Run(link, "define_link", new { name = "LL", delete = true });
+            Check(!PropertyDefs.Links(link.Model).Exists(x => x.Name == "LL") && link.Model.DefinitionTables?.GetValueOrDefault(EtabsLinkTables.AcceptForce) is null && link.Model.DefinitionTables?.GetValueOrDefault("Link Property Definitions - Linear")?.Exists(r => r["Name"] == "LL") != true, "a deleted link leaves no row, acceptance criteria too");
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var part in new[] { "\"Define Link Properties\"", "\"Linear Link/Support Directional Properties\"", "\"Link/Support Directional Properties\"", "\"Advanced Link P-Delta Parameters\"", "\"Link Acceptance Criteria Definition\"",
+                "Multilinear ${rot ? \"Moment-Rotation\" : \"Force-Displ\"} Relation", "Upper Stiffness Matrix (Symmetrical) Used For All Analysis Cases", "Damper - Sumitomo Rubber GR4", "if (program === \"etabs\") return etaLinks();" })
+                Check(html.Contains(part), "viewer.html lost " + part);
         });
     }
 }

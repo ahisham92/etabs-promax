@@ -37,6 +37,18 @@ static class DefineTablesTests
 
     public static IEnumerable<(string Name, Action Body)> All()
     {
+        yield return ("define: ETABS's Detailing Drawing Format Properties and Drawing Sheet Setup are kept in the Engine's own tables, pass through the .cpm and never go to ETABS's tables", () =>
+        {
+            var link = Frame();
+            Run(link, "define_table_rows", new { table = EtabsDetailingTables.DrawingFormat, name = "Drawing Format Properties", rows = new[] { new Dictionary<string, string> { ["Group"] = "Beams", ["Tab"] = "Line", ["Item"] = "Top Rebars", ["Color"] = "#ff0000" } } });
+            Run(link, "define_table_rows", new { table = EtabsDetailingTables.SheetSetup, name = "Drawing Sheet Setup", rows = new[] { new Dictionary<string, string> { ["SheetSize"] = "E", ["SheetNoPrefix"] = "A-" } } });
+            var back = ModelFile.FromJson(ModelFile.ToJson(link.Model));
+            Check(back.DefinitionTables?[EtabsDetailingTables.DrawingFormat].Single()["Color"] == "#ff0000", "the format row did not pass through the .cpm");
+            Check(back.DefinitionTables?[EtabsDetailingTables.SheetSetup].Single()["SheetNoPrefix"] == "A-", "the sheet row did not pass through the .cpm");
+            Check(EtabsDetailingTables.IsEngineOnly(EtabsDetailingTables.SheetSetup) && !EtabsDetailingTables.IsEngineOnly("Shell Uniform Load Sets"), "Engine-only tables");
+            Run(link, "define_table_rows", new { table = EtabsDetailingTables.DrawingFormat, name = "Drawing Format Properties", rows = Array.Empty<object>() });
+            Check(link.Model.DefinitionTables?.ContainsKey(EtabsDetailingTables.DrawingFormat) != true, "rows [] (all defaults) did not clear the format table");
+        });
         yield return ("define: ETABS's Load Patterns forms keep a code's rows once, set AutoLoad, follow a rename, drop with the pattern, and pass through the .cpm", () =>
         {
             var link = Frame();
@@ -182,6 +194,40 @@ static class DefineTablesTests
             link.Model.Target = "etabs";
             var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
             foreach (var part in new[] { "Modify/Show Composite Wall Data...", "\"In-Plane Stiffness\"", "\"Out-of-Plane Stiffness\"", "modeling: \"Composite\"" })
+                Check(html.Contains(part), "viewer.html lost " + part);
+        });
+
+        yield return ("define: a Section Designer section keeps its shapes as ETABS 23.2's SDSECTION lines, goes to ETABS as SHAPE \"SD Section\", and an imported one comes back unchanged", () =>
+        {
+            var link = Frame();
+            var conc = link.Model.Materials.First(x => x.IsConcrete).Name;
+            var bar = (link.Model.Materials.FirstOrDefault(x => x.Type.Equals("Rebar", StringComparison.OrdinalIgnoreCase)) ?? link.Model.Materials.First()).Name;
+            string Q(string s) => "\"" + s + "\"";
+            var sd = new List<string> { "TYPE \"FRAME\" DESIGNTYPE \"CONCRETE\" DESIGNCHECK \"CHECK\" NUMSHAPES 1 ANGLE 90",
+                $"SHAPE 1 MATERIAL {Q(conc)} REBARMATERIAL {Q(bar)} SHAPETYPE \"CONCRETE RECTANGULAR\" D 0.6 B 0.6 XC 0 YC 0" };
+            for (var i = 1; i <= 4; i++) sd.Add($"SHAPE 1 EDGE {i} EDGEBARSIZE \"#8\" EDGEBARSPACING 0.15 EDGEBARCOVER 0.05");
+            for (var i = 1; i <= 4; i++) sd.Add($"SHAPE 1 CORNER {i} CORNERBARSIZE \"#8\"");
+            sd.Add("SHAPE 1 TIEBARSIZE \"#4\"");
+            Run(link, "define_frame_shape", new { name = "SD1", shape = "SD Section", material = conc, extras = new Dictionary<string, string> { ["DesignType"] = "Concrete Column" }, sd_lines = sd });
+            var e2k = E2kWriter.Write(link.Model);
+            Check(System.Text.RegularExpressions.Regex.IsMatch(e2k, "FRAMESECTION\\s+\"SD1\"\\s+MATERIAL\\s+\"[^\"]+\"\\s+SHAPE\\s+\"SD Section\""), "the frame section line as ETABS writes it");
+            int fs = e2k.IndexOf("$ FRAME SECTIONS"), sds = e2k.IndexOf("$ SECTION DESIGNER SECTIONS");
+            Check(fs >= 0 && sds > fs, "the Section Designer lines follow the frame sections");
+            Check(System.Text.RegularExpressions.Regex.Matches(e2k, "SDSECTION \"SD1\"").Count == 11, "all 11 lines: " + System.Text.RegularExpressions.Regex.Matches(e2k, "SDSECTION \"SD1\"").Count);
+            var back = ThroughE2k(link.Model);
+            Check(back.FrameSections.Single(s => s.Name == "SD1").Shape == "SD Section" && SectionDesigner.Lines(back, "SD1").Count == 11, "it reads back");
+            var again = E2kWriter.Write(back);
+            string Sd(string text) => string.Join("\n", text.Split('\n').Where(l => l.Contains("SDSECTION") || l.Contains("\"SD1\"")).Select(l => l.Trim()));
+            Check(Sd(again) == Sd(e2k), "an imported Section Designer section goes back unchanged");
+            var pd = Run(link, "property_definitions", new { });
+            Check(pd["frame_sections"]!.AsArray().First(x => x!["name"]!.GetValue<string>() == "SD1")!["sd_lines"]!.AsArray().Count == 11, "the form gets its lines");
+            Run(link, "define_frame_shape", new { name = "SD2", was = "SD1", shape = "SD Section", material = conc });
+            Check(SectionDesigner.Lines(link.Model, "SD2").Count == 11 && SectionDesigner.Lines(link.Model, "SD1").Count == 0, "a renamed section keeps its shapes");
+            Run(link, "delete_definition", new { kind = "frame_section", name = "SD2" });
+            Check(!E2kWriter.Write(link.Model).Contains("SDSECTION"), "a deleted section's shapes go with it");
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var part in new[] { "dialog(\"Section Designer Section Property Data\"", "dialog(\"Section Designer\"", "dialog(\"Section Object Data - \" + kind", "\"CONCRETE CIRCLE\": \"Circle\"", "\"STEEL I/WIDE FLANGE\": \"I Section\"", "\"LINE REBAR\": \"LineBar\"", "POLYCORNER ${k + 1} X", "NBARS ${g.nbars || 0} STARTANGLE", "\"Composite Column\": \"COMPOSITECOLUMN\"", "Clear Cover to Tie", "Actual Bar Spacing", "[\"Change Shape to Poly\", () => toPoly()", "\"CONC BOX\": {k: \"Box\"", "\"CIRCULAR ARC REBAR\": {k: \"CircularArcBar\"", "\"SECTOR\": {k: \"Pie\"", "FILLETRAD ${sdN(s.FR)}", "\"Leg Dir2 Thickness\"", "\"Rebar Dir2 Leg\", \"WEB\"", "dialog(\"Interaction Surface (\"", "[\"Interaction Surface...\", () => sdInteractionForm(sd, base, u, bars)", "Exclude Phi and Increase Fy", "Show Fiber Model Data", "dialog(\"Drawing Options\"", "dialog(\"Section Properties\"",
+                "Concrete Column Check/Design", "Reinforcement to be Designed", "[\"Rubberband Zoom\"", "[\"Check Section for Overlaps\"", "[\"Get Previous Selection\"", "[\"Moment-Curvature Curve...\"", "SHAPETYPE ${sdQ(s.type)} D ${s.D} B ${s.B} XC ${s.XC} YC ${s.YC}" })
                 Check(html.Contains(part), "viewer.html lost " + part);
         });
 
