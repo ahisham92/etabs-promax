@@ -634,6 +634,12 @@ public static class StabilityCheck
             floors.Add(new StiffnessProbe.Floor(live, live.Average(k => c.Xyz(k).X), live.Average(k => c.Xyz(k).Y)));
         }
         bool[] active = a.PlateOnly ? [false, false, true, true, true, false] : [true, true, true, true, true, true];
+        // Ahmed's field test, 2026-11-27: ETABS's Verification "Example 15a7" is solved in the XZ plane only, and the check
+        // called its floor free to slide along Y and turn.
+        if (a.ActiveDof is { Length: 6 } dof && dof.Any(d => d))
+            for (var d = 0; d < 6; d++) active[d] &= dof[d];
+        if (!active.All(x => x) && !a.PlateOnly)
+            c.Notes.Add($"Only {string.Join(" ", Enumerable.Range(0, 6).Where(d => active[d]).Select(d => DofNames[d]))} are solved for (the model's active degrees of freedom); the others are not checked.");
         StiffnessProbe.Result r;
         var holdUnstiffened = a.Program != "sap2000";
         try { r = StiffnessProbe.Run(xyz, fixedDof, spring, bars, floors, active, o.MostEquations, holdUnstiffened: holdUnstiffened); }
