@@ -54,7 +54,7 @@ public static class DetailingTools
         string? values = null;
         if (a.TryGetProperty("values", out var v) && v.ValueKind == JsonValueKind.Object) values = v.GetRawText();
         else if (a.TryGetProperty("values", out v) && v.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined))
-            throw new ToolInputException("values is the form's values as an object, or null for ETABS's defaults.");
+            throw new ToolInputException("values is the form's values as an object, or null for ETABS's defaults."); // ETABS itself
         return Offline(e).Edit<JsonNode>(m =>
         {
             m.Kept ??= new(StringComparer.OrdinalIgnoreCase);
@@ -63,7 +63,7 @@ public static class DetailingTools
             if (values is not null) rows.Add(new Dictionary<string, string> { ["Form"] = form, ["Values"] = values });
             rows.Sort((x, y) => Array.IndexOf(Forms, x["Form"]).CompareTo(Array.IndexOf(Forms, y["Form"])));
             if (rows.Count == 0) m.Kept.Remove(KeptName); else m.Kept[KeptName] = rows;
-            return new JsonObject { ["done"] = values is null ? $"{form}: ETABS's defaults" : $"{form}: set" };
+            return new JsonObject { ["done"] = values is null ? $"{form}: ETABS's defaults" : $"{form}: set" }; // ETABS itself
         });
     }
 }
