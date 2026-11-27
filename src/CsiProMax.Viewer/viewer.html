@@ -4415,7 +4415,7 @@ function modelerMenus(m) {
     of.forEach((f, i) => { const it = [f.item, "m:oform:" + i]; if (!f.group) return items.push(it); let g = groups.find(x => x[0] === f.group); if (!g) groups.push(g = [f.group, []]); g[1].push(it); });
     m.Options = [...groups, ...items, 0, ...(m.Options || [])];
   }
-  if (fm.designs.length) m.Design = [...fm.designs.map(d => [d.name, [["View/Revise Preferences...", "m:pref:" + d.design], ...((d.overwrites || []).length ? [["View/Revise Overwrites...", "m:over:" + d.design, "", !hmSelected(d.design === "slab" ? "a" : "f").length]] : []), ...(window.cpmLive ? [["Start Design/Check...", "eng:design"]] : [])]]), 0, ...(m.Design || [])];
+  if (fm.designs.length) m.Design = [...fm.designs.map(d => [d.name, [["View/Revise Preferences...", "m:pref:" + d.design], ...(d.design === "shear_wall" ? (d.overwrites || []).map(t => [/Spandrel/.test(t) ? "View/Revise Spandrel Overwrites..." : "View/Revise Pier Overwrites...", "m:dt:" + t]) : (d.overwrites || []).length ? [["View/Revise Overwrites...", "m:over:" + d.design, "", !hmSelected(d.design === "slab" ? "a" : "f").length]] : []), ...(window.cpmLive ? [["Start Design/Check...", "eng:design"]] : [])]]), 0, ...(m.Design || [])];
   return m;
 }
 // A design's View/Revise Preferences (ETABS: "Steel Frame Design Preferences for AISC 360-16"): Design Code first, then

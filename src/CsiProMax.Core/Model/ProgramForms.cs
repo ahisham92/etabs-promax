@@ -44,6 +44,7 @@ public static class ProgramForms
         (_, "composite") => ["Composite Beam Design Overwrites - "],
         (_, "composite_column") => ["Composite Column Design Overwrites - "],
         (_, "joist") => ["Steel Joist Design Overwrites - "],
+        (_, "shear_wall") => ["Shear Wall Pier Design Overwrites - ", "Shear Wall Spandrel Design Overwrites - "],
         _ => [],
     };
 
@@ -53,7 +54,7 @@ public static class ProgramForms
     /// </summary>
     public static List<string> OverwriteTables(string target, string kind, string code)
     {
-        var cat = OverwriteCatalog(target);
+        var cat = kind == "shear_wall" && target != ProgramOptions.Sap2000 ? WallOverwriteCatalog() : OverwriteCatalog(target);
         if (target != ProgramOptions.Sap2000 && kind == "slab") return cat.ContainsKey(SlabOverwrites) ? [SlabOverwrites] : [];
         static string Norm(string x) => new(x.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
         var found = new List<string>();
@@ -63,6 +64,14 @@ public static class ProgramForms
                 found.Add(t);
         return found;
     }
+
+    /// <summary>
+    /// ETABS's shear wall design overwrites (Design > Shear Wall Design > View/Revise Pier/Spandrel Overwrites): a row per
+    /// story of each pier or spandrel label, the label first (definition rows by label, not an object's).
+    /// </summary>
+    public static IReadOnlyDictionary<string, List<FormField>> WallOverwriteCatalog() => Load("wall-overwrites-etabs.txt");
+
+    public static bool IsWallOverwrite(string table) => WallOverwriteCatalog().ContainsKey(table);
 
     public const string SlabOverwrites = "Concrete Slab Design Overwrites - Finite Element Based";
 

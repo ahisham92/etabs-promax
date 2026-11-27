@@ -90,6 +90,8 @@ public static class DefineTables
     private static Dictionary<string, (string, string)[]> WithSap(Dictionary<string, (string, string)[]> etabs)
     {
         foreach (var (t, fields) in SapHinges) etabs[t] = fields.Select(f => (f, f)).ToArray();
+        // ETABS's shear wall pier and spandrel overwrites, by label (Ahmed 2026-11-27, every form).
+        foreach (var (t, fields) in ProgramForms.WallOverwriteCatalog()) etabs[t] = fields.Select(f => (f.Key, f.Label)).ToArray();
         return etabs;
     }
 

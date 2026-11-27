@@ -163,7 +163,9 @@ public static class DefineTools
         foreach (var s in m.FrameSections)
             if (DefineTables.Rebar(m, s.Name) is { } r) sections[s.Name] = Obj(r);
         var tables = new JsonObject();
-        foreach (var (name, fields) in DefineTables.Tables.Where(t => ProgramOptions.HasDefinitionTable(m.Target, t.Key)))
+        // The shear wall overwrites only for the code the shear wall design has now (each code has its own table).
+        var walls = ProgramForms.Designs(m.Target).Any(d => d.Kind == "shear_wall") ? ProgramForms.OverwriteTables(m.Target, "shear_wall", ProgramForms.Code(m, "shear_wall") is { Length: > 0 } wc ? wc : ProgramForms.Codes(m.Target, "shear_wall").FirstOrDefault() ?? "") : [];
+        foreach (var (name, fields) in DefineTables.Tables.Where(t => ProgramOptions.HasDefinitionTable(m.Target, t.Key) && (!ProgramForms.IsWallOverwrite(t.Key) || walls.Contains(t.Key))))
             tables[name] = new JsonObject
             {
                 ["fields"] = new JsonArray(fields.Select(f => (JsonNode)new JsonArray(f.Key, f.Label)).ToArray()),

@@ -474,6 +474,25 @@ static class ExtrasTests
             var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
             Check(html.Contains("\"View/Revise Overwrites...\", \"m:over:\" + d.design", StringComparison.Ordinal) && html.Contains("async function hmOverwrites(kind)", StringComparison.Ordinal), "the Design menu has no View/Revise Overwrites");
         });
+        yield return ("Ahmed 2026-11-27: Design > Shear Wall Design > View/Revise Pier and Spandrel Overwrites are ETABS's tables of the code, a row per story of each label, put into ETABS by label and story", () =>
+        {
+            Check(ProgramForms.OverwriteTables("etabs", "shear_wall", "ACI 318-19").SequenceEqual(["Shear Wall Pier Design Overwrites - ACI 318-19", "Shear Wall Spandrel Design Overwrites - ACI 318-19"]), "ETABS's pier and spandrel overwrites: " + string.Join(", ", ProgramForms.OverwriteTables("etabs", "shear_wall", "ACI 318-19")));
+            var pier = DefineTables.Tables["Shear Wall Pier Design Overwrites - ACI 318-19"];
+            Check(pier[0].Key == "Pier" && pier.Any(f => f.Key == "Story") && pier.Any(f => f.Key == "LLRF"), "the pier table is not by label with ETABS's items");
+            Check(CsiProMax.Assistant.Etabs.ModelerTables.KeyOf("Shear Wall Pier Design Overwrites - ACI 318-19") == "Pier|Story" && CsiProMax.Assistant.Etabs.ModelerTables.KeyOf("Shear Wall Spandrel Design Overwrites - ACI 318-19") == "Spandrel|Story", "the overwrites do not go into ETABS by label and story");
+            Check(ProgramOptions.HasDefinitionTable("etabs", "Shear Wall Pier Design Overwrites - ACI 318-19") && !ProgramOptions.HasDefinitionTable("sap2000", "Shear Wall Pier Design Overwrites - ACI 318-19"), "the pier overwrites are ETABS's only");
+            var link = Frame();
+            var code = ProgramForms.Code(link.Model, "shear_wall") is { Length: > 0 } c ? c : ProgramForms.Codes("etabs", "shear_wall")[0];
+            var table = ProgramForms.OverwriteTables("etabs", "shear_wall", code)[0];
+            var story = link.Model.Stories.Last().Name;
+            Run(link, "define_table_rows", new { table, name = "P1", rows = new[] { new Dictionary<string, string> { ["Story"] = story, ["LLRF"] = "0.9" } } });
+            Check(link.Model.DefinitionTables![table].Single()["Pier"] == "P1" && link.Model.DefinitionTables[table].Single()["LLRF"] == "0.9", "the pier's overwrite is not its row");
+            var dd = Run(link, "definition_data", new { });
+            var walls = (dd["tables"] as JsonObject)!.Select(t => t.Key).Where(ProgramForms.IsWallOverwrite).ToList();
+            Check(walls.Count == 2 && walls.Contains(table), "definition_data lists other codes' wall overwrites: " + string.Join(", ", walls));
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            Check(html.Contains("\"View/Revise Pier Overwrites...\"", StringComparison.Ordinal) && html.Contains("\"View/Revise Spandrel Overwrites...\"", StringComparison.Ordinal), "the Shear Wall Design menu has no pier and spandrel overwrites");
+        });
         yield return ("Ahmed 2026-11-27: Releases/Partial Fixity springs and Insertion Point's mirror and joint offsets, as ETABS's tables and SAP2000's .s2k", () =>
         {
             var link = Frame();
