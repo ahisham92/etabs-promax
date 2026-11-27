@@ -40,7 +40,7 @@ public static class SapTableValues
             dynamic m = sap.SapModel;
             m.InitializeNewModel(6); // kN, m, C
             m.File.NewBlank();
-            Build(m, Say);
+            Build((object)m, Say);
             using (var com = new ComEtabs(scratchPid == 0 ? null : scratchPid, program)) Dump(new SapLink(com), "scratch model", Say);
             foreach (var model in models)
             {
