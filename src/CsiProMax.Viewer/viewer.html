@@ -5009,12 +5009,20 @@ function hmDefineMenu() {
       ["Soil Subgrade Properties...", "m:spr:area"], ["Point Spring Properties...", "m:spr:point"], ["Line Spring Properties...", "m:spr:line"], ["Wall Properties...", "m:wallSections"]]],
     ["Load Patterns...", "m:patterns"], ["Load Cases...", "m:cases"], ["Load Combinations...", "m:combos"], ["Hyperstatic Load Cases...", "m:ex:hyperstatic"], 0, ["Groups...", "m:st:group"], ["Section Cuts...", "m:st:cut"], fns, ["Mass Source...", "m:mass"], 0,
     ["Punching Shear Overwrites...", "m:ex:punching"], ["Floor Openings...", "m:ex:openings"], ["Slab Line Releases...", "m:ex:linereleases"]];
+  // ETABS 23.2's Define menu and its Section Properties submenu, item for item and in its order (pictured Define/00 Define
+  // menu, 00 Section Properties submenu). The Engine's own extras the menu does not have follow its last separator, so
+  // nothing they do is lost until they find their ETABS place.
+  // dt gives {only, item}: the same item under ETABS's own label.
+  const relabel = (x, label) => x && x.item ? {only: x.only, item: [label, x.item[1]]} : x;
+  const pzItem = relabel(dt("Panel Zone Properties..."), "Panel Zone...");
   return [["Material Properties...", "m:materials"],
-    ["Section Properties", [["Frame Sections...", "m:frameSections"], ["Deck Sections...", "m:decks"], ["Slab Sections...", "m:shellSections"], ["Wall Sections...", "m:wallSections"], ["Reinforcing Bar Sizes...", "m:rebarSizes"], ["Link/Support Properties...", "m:links"],
-      ...hinges, dt("Panel Zone Properties..."), ["Tendon Sections...", "m:ex:tendonsections"], 0, ["Frame Section Rebar (Modify/Show Rebar)...", "m:frameRebar"], dt("Slab Layers..."), dt("Wall Layers..."), dt("Wall Auto Select Lists..."), dt("Frame Release Definitions...")]],
-    ["Spring Properties", springs], ["Diaphragms...", "m:st:diaphragm"], ["Pier Labels...", "m:st:pier"], ["Spandrel Labels...", "m:st:spandrel"], ["Group Definitions...", "m:st:group"], ["Section Cuts...", "m:st:cut"], dt("Generalized Displacements..."),
-    fns, ["Load Patterns...", "m:patterns"], dt("Shell Uniform Load Sets..."), ["Load Cases...", "m:cases"], ["Load Combinations...", "m:combos"], dt("Auto Construction Sequence..."), dt("Walking Vibrations..."), ["Mass Source...", "m:mass"], ["P-Delta Options...", "m:pdelta"], 0,
-    ["Hyperstatic Load Cases...", "m:ex:hyperstatic"], ["Punching Shear Overwrites...", "m:ex:punching"], ["Floor Openings...", "m:ex:openings"], ["Slab Line Releases...", "m:ex:linereleases"]];
+    ["Section Properties", [["Frame Sections...", "m:frameSections"], ["Slab Sections...", "m:shellSections"], ["Deck Sections...", "m:decks"], ["Wall Sections...", "m:wallSections"], ["Reinforcing Bar Sizes...", "m:rebarSizes"], ["Link/Support Properties...", "m:links"],
+      ...hinges, pzItem]],
+    ["Spring Properties", springs], 0, ["Diaphragms...", "m:st:diaphragm"], 0, ["Pier Labels...", "m:st:pier"], ["Spandrel Labels...", "m:st:spandrel"], 0, ["Group Definitions...", "m:st:group"], ["Section Cuts...", "m:st:cut"], 0,
+    fns, dt("Generalized Displacements..."), 0, ["Mass Source...", "m:mass"], ["P-Delta Options...", "m:pdelta"], 0, ["Load Patterns...", "m:patterns"], dt("Shell Uniform Load Sets..."), 0, ["Load Cases...", "m:cases"], ["Load Combinations...", "m:combos"], 0,
+    relabel(dt("Auto Construction Sequence..."), "Auto Construction Sequence Case..."), dt("Walking Vibrations..."), 0,
+    ["Engine Extras", [["Tendon Sections...", "m:ex:tendonsections"], ["Frame Section Rebar (Modify/Show Rebar)...", "m:frameRebar"], dt("Frame Release Definitions..."), ["Hyperstatic Load Cases...", "m:ex:hyperstatic"],
+      ["Punching Shear Overwrites...", "m:ex:punching"], ["Floor Openings...", "m:ex:openings"], ["Slab Line Releases...", "m:ex:linereleases"]]]];
 }
 // ---- SAFE forms (Ahmed 2026-11-27: every SAFE form identical to SAFE 23's, every option working) ----
 // Each SAFE form of the Engine's SAFE menus, with SAFE's own tables behind it ("SAFE | <table>", by the names SAFE's own
@@ -6578,9 +6586,91 @@ function hmSapJointPatterns(rows) {
   q(d, "#jpDel").onclick = () => { if (L.value === "Default") return; put(L.value, []).then(j => j.ok ? again() : formError(d, j.error)); };
   return d;
 }
+// ETABS 23.2's Generalized Displacements and Generalized Displacement Definition (pictured GenDispl 1, 2): the name, Type
+// (Translational / Rotational), and the Scale Factors grid typed in place (Joint (Unique Name), U1-U3, R1-R3) with Quick Add
+// Selected Joints, Add and Delete. Kept as "Generalized Displacement Definitions" rows.
+function hmEtabsGenDispl(all) {
+  const T = "Generalized Displacement Definitions", dofs = ["U1", "U2", "U3", "R1", "R2", "R3"], u = hmU();
+  const names = [...new Set(all.map(r => r.Name))];
+  const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmDefineTable(T); };
+  const one = n => {
+    const mine = all.filter(r => r.Name === n), rot = mine.length && /^rot/i.test(mine[0].Type || ""), pre = rot ? "Rot" : "Trans";
+    let rows = mine.map(r => [r.PointName || "", ...dofs.map(k => String(+(r[pre + k + "SF"] || 0)))]), at = -1;
+    let k = 1; while (names.includes("GDisp" + k)) k++;
+    const d = dialog("Generalized Displacement Definition", `<div style="display:grid;grid-template-columns:1fr 250px;gap:10px"><fieldset style="margin:0"><div style="display:grid;grid-template-columns:1fr 190px;align-items:center;padding:10px 8px"><span>Generalized Displacement Name</span><input id="gN" value="${esc(n || "GDisp" + k)}"></div></fieldset>
+        <fieldset style="margin:0"><legend>Type</legend><label style="margin-right:30px"><input type="radio" name="gT" value="Translational" ${rot ? "" : "checked"}> Translational</label><label><input type="radio" name="gT" value="Rotational" ${rot ? "checked" : ""}> Rotational</label></fieldset></div>
+      <fieldset style="margin-top:8px"><legend>Scale Factors</legend><div style="height:220px;overflow:auto;border:2px solid #333;background:#a0a0a0"><table class="grid ly" id="gG" style="width:100%"><thead><tr id="gH"></tr></thead><tbody></tbody></table></div>
+        <div style="display:flex;gap:10px;margin-top:10px"><button id="gQ" style="width:200px;margin-left:30px">Quick Add Selected Joints</button><span style="flex:1"></span><button id="gAdd" style="width:64px">Add</button><button id="gDel" style="width:64px;margin-right:30px">Delete</button></div></fieldset>`,
+      [["OK", async d => {
+        read();
+        const name = q(d, "#gN").value.trim(); if (!name) { formError(d, "Give it a name."); return false; }
+        if (rows.some(r => !r[0])) { formError(d, "Each row needs its joint."); return false; }
+        const p = q(d, "[name=gT]:checked").value === "Rotational" ? "Rot" : "Trans", other = p === "Rot" ? "Trans" : "Rot";
+        const out = rows.map(r => Object.assign({Type: p === "Rot" ? "Rotational" : "Translational", PointName: r[0]}, ...dofs.map((x, i) => ({[p + x + "SF"]: String(+r[i + 1] || 0), [other + x + "SF"]: "0"}))));
+        if (n && n !== name) { const j0 = await hmRun("define_table_rows", {table: T, name: n, rows: []}, true); if (!j0.ok) { formError(d, j0.error); return false; } }
+        const j = await hmRun("define_table_rows", {table: T, name, rows: out}, true); if (!j.ok) { formError(d, j.error); return false; }
+        again(); return true;
+      }, true], ["Cancel"]], {width: 780});
+    const body = q(d, "#gG tbody");
+    const read = () => { rows = [...body.querySelectorAll("tr")].map(tr => [...tr.querySelectorAll("input")].map(i => i.value.trim())); };
+    const paint = () => {
+      const r = q(d, "[name=gT]:checked").value === "Rotational";
+      q(d, "#gH").innerHTML = `<th>Joint<br>(Unique Name)</th>` + dofs.map(x => `<th>${x}<br>${x[0] === "R" ? (r ? "" : `${u.l}/rad`) : (r ? `rad/${u.l}` : "")}</th>`).join("");
+      body.innerHTML = rows.map((row, i) => `<tr style="background:#fff;${i === at ? "outline:2px solid #3399ff" : ""}">${row.map((x, j) => `<td><input data-i="${i}" ${j ? 'type="number" step="any" style="text-align:center"' : ""} value="${esc(x)}"></td>`).join("")}</tr>`).join("");
+      body.querySelectorAll("input").forEach(x => { x.onfocus = () => { at = +x.dataset.i; body.querySelectorAll("tr").forEach((t, j) => t.style.outline = j === at ? "2px solid #3399ff" : ""); q(d, "#gDel").disabled = false; }; x.onchange = read; });
+      q(d, "#gDel").disabled = at < 0; q(d, "#gQ").disabled = !selJ.size;
+    };
+    q(d, "#gAdd").onclick = () => { read(); rows.push(["", "0", "0", "0", "0", "0", "0"]); at = rows.length - 1; paint(); };
+    q(d, "#gDel").onclick = () => { read(); if (at < 0) return; rows.splice(at, 1); at = -1; paint(); };
+    q(d, "#gQ").onclick = () => { read(); for (const j of selJ) if (!rows.some(r => r[0] === j)) rows.push([j, "0", "0", "0", "0", "0", "0"]); paint(); };
+    d.querySelectorAll("[name=gT]").forEach(r => r.onchange = () => { read(); paint(); });
+    paint();
+    return d;
+  };
+  const d = listForm("Generalized Displacements", "Generalized Displs", names, [["Add New Gen Displ...", () => one(null)], ["Modify/Show Gen Displ...", n => n && one(n)], ["Delete Gen Displ", n => n && hmRun("define_table_rows", {table: T, name: n, rows: []}).then(j => j.ok && again())]], n => one(n));
+  const b = d.querySelectorAll("[data-a]"); b[1].disabled = b[2].disabled = !names.length;
+  return d;
+}
+// ETABS 23.2's Shell Uniform Load Sets and Shell Uniform Load Set Data (pictured ShellLoadSets 1-3): Uniform Load Set Name,
+// Load Set Loads (Load Pattern, Load Value in force per area, in the gravity direction) with Add and Delete.
+async function hmEtabsLoadSets(all) {
+  const T = "Shell Uniform Load Sets", u = hmU(), defs = await hmDefs(), pats = defs.load_patterns.map(p => p.name);
+  const names = [...new Set(all.map(r => r.Name))];
+  const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmDefineTable(T); };
+  const one = (n, copy) => {
+    let rows = all.filter(r => r.Name === n).map(r => [r.LoadPattern || pats[0], r.LoadValue || "0"]), at = rows.length ? 0 : -1;
+    let k = 1; while (names.includes("ULoadSet" + k)) k++;
+    const d = dialog("Shell Uniform Load Set Data", `<fieldset><div style="display:grid;grid-template-columns:150px 1fr;align-items:center;padding:6px"><span>Uniform Load Set Name</span><input id="lsN" value="${esc(n && !copy ? n : n ? n + " copy" : "ULoadSet" + k)}"></div></fieldset>
+      <fieldset><legend>Load Set Loads</legend><div style="display:grid;grid-template-columns:1fr 70px;gap:10px"><div style="height:150px;overflow:auto;border:1px solid #333;background:#fff"><table class="grid ly" id="lsG" style="width:100%"><thead><tr><th>Load Pattern</th><th>Load Value<br>(${esc(u.f)}/${esc(u.l)}²)</th></tr></thead><tbody></tbody></table></div>
+        <div style="display:flex;flex-direction:column;gap:6px;padding-top:20px"><button id="lsA">Add</button><button id="lsD">Delete</button></div></div>
+        <div style="margin-top:8px">Note:  Loads are in the gravity direction.</div></fieldset>`,
+      [["OK", async d => {
+        read(); const name = q(d, "#lsN").value.trim(); if (!name) { formError(d, "Give the load set a name."); return false; }
+        if (n && !copy && n !== name) { const j0 = await hmRun("define_table_rows", {table: T, name: n, rows: []}, true); if (!j0.ok) { formError(d, j0.error); return false; } }
+        const j = await hmRun("define_table_rows", {table: T, name, rows: rows.map(r => ({LoadPattern: r[0], LoadValue: String(+r[1] || 0)}))}, true); if (!j.ok) { formError(d, j.error); return false; }
+        again(); return true;
+      }, true], ["Cancel"]], {width: 380});
+    const body = q(d, "#lsG tbody");
+    const read = () => { rows = [...body.querySelectorAll("tr")].map(tr => [tr.querySelector("select").value, tr.querySelector("input").value]); };
+    const paint = () => {
+      body.innerHTML = rows.map((r, i) => `<tr><td style="${i === at ? "background:#0078d7" : ""}"><select data-i="${i}" style="text-align:center;${i === at ? "color:#fff" : ""}">${opts(pats, r[0])}</select></td><td><input data-i="${i}" type="number" step="any" style="text-align:center" value="${esc(r[1])}"></td></tr>`).join("");
+      body.querySelectorAll("[data-i]").forEach(x => { x.onfocus = () => { if (at !== +x.dataset.i) { read(); at = +x.dataset.i; paint(); } }; x.onchange = read; });
+      q(d, "#lsD").disabled = at < 0;
+    };
+    q(d, "#lsA").onclick = () => { read(); rows.push([pats.find(p => !rows.some(r => r[0] === p)) || pats[0], "0"]); at = rows.length - 1; paint(); };
+    q(d, "#lsD").onclick = () => { read(); if (at < 0) return; rows.splice(at, 1); at = Math.min(at, rows.length - 1); paint(); };
+    paint();
+    return d;
+  };
+  const d = listForm("Shell Uniform Load Sets", "Uniform Load Sets", names, [["Add New Load Set...", () => one(null)], ["Add Copy of Load Set...", n => n && one(n, true)], ["Modify/Show Load Set...", n => n && one(n)], ["Delete Load Set", n => n && hmRun("define_table_rows", {table: T, name: n, rows: []}).then(j => j.ok && again())]], n => one(n));
+  const b = d.querySelectorAll("[data-a]"); b[1].disabled = b[2].disabled = b[3].disabled = !names.length;
+  return d;
+}
 async function hmDefineTable(spec) {
   const tables = spec.split("|"), dd = (await hmRun("definition_data", {}, true)).result; if (!dd) return;
   if (program === "sap2000" && spec === "Generalized Displacement Definitions" && dd.tables[spec]) return hmSapGenDispl(dd.tables[spec].rows);
+  if (program === "etabs" && spec === "Generalized Displacement Definitions") return hmEtabsGenDispl((dd.tables[spec] || {rows: []}).rows);
+  if (program === "etabs" && spec === "Shell Uniform Load Sets") return hmEtabsLoadSets((dd.tables[spec] || {rows: []}).rows);
   if (program === "sap2000" && spec === "Joint Pattern Definitions" && dd.tables[spec]) return hmSapJointPatterns(dd.tables[spec].rows);
   if (program === "sap2000" && spec === "Cable Section Definitions" && dd.tables[spec]) return hmSapRodSections("cable", null, dd);
   if (program === "sap2000" && spec === "Solid Property Definitions" && dd.tables[spec]) return hmSapRodSections("solid", null, dd);
@@ -6643,9 +6733,21 @@ function hmSapRebarSizes(was) {
   paint();
   return d;
 }
+// Reinforcing Bar Sizes, as ETABS 23.2 has it (pictured Rebar 1, 2): the Current Bar Set grid (Bar ID, Bar Area, Bar
+// Diameter; type in the blank last row to add a bar), Click To: Clear All Bars, Sort Bars By ID, Add Common Bar Set...
+// (Select Common Rebar Set). OK sets the model's bars to the grid.
+const commonBarSets = {
+  "U.S. Customary": ["in", [["#2", .05, .25], ["#3", .11, .375], ["#4", .2, .5], ["#5", .31, .625], ["#6", .44, .75], ["#7", .6, .875], ["#8", .79, 1], ["#9", 1, 1.128], ["#10", 1.27, 1.27], ["#11", 1.56, 1.41], ["#14", 2.25, 1.693], ["#18", 4, 2.257]]],
+  "SI": ["mm", [6, 8, 10, 12, 14, 16, 18, 20, 22, 25, 28, 32, 36, 40, 50].map(x => [String(x), +(Math.PI * x * x / 4).toFixed(1), x])],
+  "Canadian": ["mm", [["10M", 100, 11.3], ["15M", 200, 16], ["20M", 300, 19.5], ["25M", 500, 25.2], ["30M", 700, 29.9], ["35M", 1000, 35.7], ["45M", 1500, 43.7], ["55M", 2500, 56.4]]],
+  "U.S. Soft Metric": ["mm", [["#10", 71, 9.5], ["#13", 129, 12.7], ["#16", 199, 15.9], ["#19", 284, 19.1], ["#22", 387, 22.2], ["#25", 510, 25.4], ["#29", 645, 28.7], ["#32", 819, 32.3], ["#36", 1006, 35.8], ["#43", 1452, 43], ["#57", 2581, 57.3]]],
+  "Australian": ["mm", [["N10", 80, 10], ["N12", 110, 12], ["N16", 200, 16], ["N20", 310, 20], ["N24", 450, 24], ["N28", 620, 28], ["N32", 800, 32], ["N36", 1020, 36], ["N40", 1260, 40]]],
+  "Korean": ["mm", [["D10", 71.33, 9.53], ["D13", 126.7, 12.7], ["D16", 198.6, 15.9], ["D19", 286.5, 19.1], ["D22", 387.1, 22.2], ["D25", 506.7, 25.4], ["D29", 642.4, 28.6], ["D32", 794.2, 31.8], ["D35", 956.6, 34.9], ["D38", 1140, 38.1], ["D41", 1340, 41.3], ["D51", 2027, 50.8]]],
+};
 async function hmRebarSizes() {
   const dd = (await hmRun("definition_data", {}, true)).result; if (!dd) return;
   if (program === "sap2000") return hmSapRebarSizes(dd.rebar_sizes || []);
+  if (program === "etabs") return hmEtabsRebarSizes(dd.rebar_sizes || []);
   const u = hmU();
   const d = dialog("Reinforcing Bar Sizes", `<table class="list hmgrid"><tr><th>Bar ID</th><th>Area${u.l ? " (" + esc(u.l) + "²)" : ""}</th><th>Diameter${u.l ? " (" + esc(u.l) + ")" : ""}</th><th></th></tr>
     <tr class="edit"><td><input id="rbN"></td><td><input id="rbA" type="number" step="any"></td><td><input id="rbD" type="number" step="any"></td><td><button id="rbAdd">Add / Modify</button></td></tr>
@@ -6655,6 +6757,37 @@ async function hmRebarSizes() {
   d.querySelectorAll("[data-b]").forEach(tr => tr.onclick = () => { const b = dd.rebar_sizes.find(x => x.name === tr.dataset.b); q(d, "#rbN").value = b.name; q(d, "#rbA").value = b.area; q(d, "#rbD").value = b.diameter; });
   d.querySelectorAll("[data-del]").forEach(b => b.onclick = e => { e.stopPropagation(); hmRun("define_rebar_size", {name: b.dataset.del, delete: true}).then(j => j.ok ? again() : formError(d, j.error)); });
   q(d, "#rbAdd").onclick = () => hmRun("define_rebar_size", {name: q(d, "#rbN").value.trim(), area: fnum(d, "#rbA"), diameter: fnum(d, "#rbD")}).then(j => j.ok ? again() : formError(d, j.error));
+}
+function hmEtabsRebarSizes(now) {
+  const u = hmU(), n = x => +(+x).toPrecision(6);
+  let bars = now.map(b => [b.name, String(n(b.area)), String(n(b.diameter))]);
+  const d = dialog("Reinforcing Bar Sizes", `<div style="display:grid;grid-template-columns:1fr 170px;gap:12px"><fieldset style="margin:0"><legend>Current Bar Set</legend>
+      <div style="height:230px;overflow:auto;border:1px solid #888;background:#fff"><table class="grid ly" id="rbG"><thead><tr><th style="width:24px"></th><th>Bar ID</th><th>Bar Area&nbsp; (${esc(u.l)}2)</th><th>Bar Diameter&nbsp; (${esc(u.l)})</th></tr></thead><tbody></tbody></table></div></fieldset>
+    <div id="rbR"><fieldset style="margin:0"><legend>Click To:</legend><div style="display:flex;flex-direction:column;gap:6px"><button id="rbClr">Clear All Bars</button><button id="rbSort">Sort Bars By ID</button><button id="rbCom">Add Common Bar Set...</button></div></fieldset></div></div>`,
+    [["OK", d => save(d), true], ["Cancel"]], {width: 640});
+  dfInto(d, "#rbR");
+  const body = q(d, "#rbG tbody");
+  const read = () => { bars = [...body.querySelectorAll("tr")].map(tr => [...tr.querySelectorAll("input")].map(i => i.value.trim())).filter(r => r.some(x => x !== "")); };
+  const paint = () => {
+    body.innerHTML = [...bars, ["", "", ""]].map((b, i) => `<tr><td style="background:#eee;text-align:center">${i < bars.length ? "" : "*"}</td>${b.map((x, k) => `<td><input ${k ? 'type="number" step="any" style="text-align:center"' : 'style="text-align:center"'} value="${esc(x)}"></td>`).join("")}</tr>`).join("");
+    body.querySelectorAll("input").forEach(i => { i.onchange = () => { read(); paint(); }; i.onfocus = () => body.querySelectorAll("tr").forEach(tr => tr.firstChild.textContent = tr.contains(i) ? "\u25B6" : tr === body.lastChild ? "*" : ""); });
+  };
+  q(d, "#rbClr").onclick = () => { bars = []; paint(); };
+  q(d, "#rbSort").onclick = () => { read(); bars.sort((a, b) => a[0].localeCompare(b[0], undefined, {numeric: true})); paint(); };
+  q(d, "#rbCom").onclick = () => dialog("Select Common Rebar Set", `<fieldset><legend>Select</legend><select id="crS" size="14" style="width:100%;height:240px">${Object.keys(commonBarSets).map((k, i) => `<option ${i ? "" : "selected"}>${esc(k)}</option>`).join("")}</select></fieldset>`,
+    [["OK", x => { read(); const [from, set] = commonBarSets[q(x, "#crS").value]; const f = (uLen[u.l] || 1) / (from === "in" ? 39.37008 : 1000);
+      for (const [id, a, di] of set) if (!bars.some(b => b[0] === id)) bars.push([id, String(n(a * f * f)), String(n(di * f))]); paint(); }], ["Cancel"]], {width: 240});
+  async function save(d) {
+    read();
+    const ids = new Set();
+    for (const [id, a, di] of bars) { if (!id || !(+a > 0) || !(+di > 0)) { formError(d, "Each bar needs a Bar ID, an area above 0 and a diameter above 0."); return false; } if (ids.has(id)) { formError(d, "There is a bar " + id + " twice."); return false; } ids.add(id); }
+    for (const b of now) if (!ids.has(b.name)) { const j = await hmRun("define_rebar_size", {name: b.name, delete: true}, true); if (!j.ok) { formError(d, j.error); return false; } }
+    for (const [id, a, di] of bars) { const was = now.find(b => b.name === id); if (was && Math.abs(was.area - a) < 1e-9 * Math.max(1, +a) && Math.abs(was.diameter - di) < 1e-9 * Math.max(1, +di)) continue;
+      const j = await hmRun("define_rebar_size", {name: id, area: +a, diameter: +di}, true); if (!j.ok) { formError(d, j.error); return false; } }
+    hmSay("Reinforcing bar sizes set."); return true;
+  }
+  paint();
+  return d;
 }
 const rebarFields = {
   Column: [["LONGBARMATERIAL", "Longitudinal Bars Material"], ["CONFINEBARMATERIAL", "Confinement Bars Material"], ["PATTERN", "Pattern (R-bars along 3-bars along 2, or C-bars)"], ["TRANSREINF", "Confinement Bars"], ["DESIGNCHECK", "Check/Design"],
@@ -9813,14 +9946,14 @@ async function hmStructure(kind) {
     const one = d0 => dialog("Diaphragm Data", `<div class="g2"><span>Diaphragm</span><input id="zN" value="${esc(d0 ? d0.name : "D" + (sd.diaphragms.length + 1))}" ${d0 ? "disabled" : ""}></div>
       <fieldset><legend>Rigidity</legend><label style="display:block"><input type="radio" name="zR" value="rigid" ${d0 && d0.semi_rigid ? "" : "checked"}> Rigid</label><label style="display:block"><input type="radio" name="zR" value="semi" ${d0 && d0.semi_rigid ? "checked" : ""}> Semi Rigid</label></fieldset>`,
       [["OK", d => submit(d, "define_diaphragm", {name: q(d, "#zN").value.trim(), semi_rigid: q(d, "[name=zR]:checked").value === "semi"}, again)], ["Cancel"]], {width: 340});
-    return listForm("Define Diaphragm", "Diaphragms", sd.diaphragms.map(x => x.name), [["Add New Diaphragm...", () => one(null)], ["Modify/Show Diaphragm...", n => n && one(sd.diaphragms.find(x => x.name === n))], ["Delete Diaphragm", n => n && del("define_diaphragm", {name: n})]], n => one(sd.diaphragms.find(x => x.name === n)));
+    return listForm("Define Diaphragm", "Diaphragms", sd.diaphragms.map(x => x.name), [[program === "etabs" ? "Add New Diaphragm" : "Add New Diaphragm...", () => one(null)], [program === "etabs" ? "Modify/Show Diaphragm" : "Modify/Show Diaphragm...", n => n && one(sd.diaphragms.find(x => x.name === n))], ["Delete Diaphragm", n => n && del("define_diaphragm", {name: n})]], n => one(sd.diaphragms.find(x => x.name === n)));
   }
   if (kind === "pier" || kind === "spandrel") {
     const list = kind === "pier" ? sd.piers : sd.spandrels, T = kind === "pier" ? "Pier" : "Spandrel";
-    const d = dialog(`${T} Labels`, `<div style="display:flex;gap:10px"><fieldset style="flex:1;margin:0"><legend>${T}s</legend>
+    const d = dialog(`${T} Labels`, `<div style="display:flex;gap:10px"><fieldset style="flex:1;margin:0"><legend>${program === "etabs" ? "Wall " : ""}${T}s</legend>
         <input id="zN" style="width:100%;margin-bottom:6px" value="${esc((list[0] || {}).name || (kind === "pier" ? "P1" : "S1"))}">
         <select id="zL" size="12" style="width:100%;height:auto">${list.map(x => `<option value="${esc(x.name)}">${esc(x.name)}</option>`).join("")}</select>
-        ${kind === "spandrel" ? `<label style="display:block;margin-top:6px"><input type="checkbox" id="zM"> Multi-Story Spandrel</label>` : ""}</fieldset>
+        ${kind === "spandrel" ? `<label style="display:block;margin-top:6px"><input type="checkbox" id="zM"> ${program === "etabs" ? "Multistory" : "Multi-Story Spandrel"}</label>` : ""}</fieldset>
       <fieldset style="width:170px;margin:0"><legend>Click to:</legend><div style="display:flex;flex-direction:column;gap:6px"><button id="zAdd">Add New Name</button><button id="zRen">Change Name</button><button id="zDel">Delete Name</button></div></fieldset></div>`,
       [["OK"], ["Cancel"]], {width: 440});
     const L = q(d, "#zL"); if (list.length) L.selectedIndex = 0;
@@ -9859,6 +9992,35 @@ async function hmStructure(kind) {
       const st = () => { delB.disabled = !L.value || L.value === "ALL"; }; L.addEventListener("change", st); st();
       return d;
     }
+    // ETABS 23.2's Define Groups (pictured Groups 1, 2): a grid of Group Name and Color, typed in place, with Add and Delete;
+    // All is always there and cannot be deleted. OK adds, renames, recolours and deletes as the grid says.
+    if (program === "etabs") {
+      let rows = sd.groups.map(g => ({name: g.name, was: g.name, color: g.color})), sel = 0;
+      if (!rows.some(r => /^all$/i.test(r.name))) rows.unshift({name: "All", was: "All", color: "Yellow", fixed: true});
+      const d = dialog("Define Groups", `<fieldset style="margin:0"><legend>Groups</legend><div style="display:grid;grid-template-columns:180px 80px;gap:12px">
+          <div style="height:170px;overflow:auto;border:1px solid #888;background:#fff"><table class="grid ly" id="gG"><thead><tr><th style="text-align:left">Group Name</th><th style="width:40px">Color</th></tr></thead><tbody></tbody></table></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><button id="gA">Add</button><button id="gD">Delete</button></div></div></fieldset>`,
+        [["OK", async d => {
+          const names = rows.map(r => r.name.trim());
+          if (names.some(n => !n)) { formError(d, "Each group needs a name."); return false; }
+          if (new Set(names.map(n => n.toLowerCase())).size !== names.length) { formError(d, "Two groups have the same name."); return false; }
+          for (const g of sd.groups) if (!rows.some(r => r.was === g.name)) { const j = await hmRun("define_group", {name: g.name, delete: true}, true); if (!j.ok) { formError(d, j.error); return false; } }
+          for (const r of rows) { const g = sd.groups.find(x => x.name === r.was); if (g && g.name === r.name.trim() && g.color === r.color) continue; if (!g && r.fixed) continue;
+            const j = await hmRun("define_group", Object.assign({name: r.name.trim(), color: r.color}, g && g.name !== r.name.trim() ? {was: g.name} : {}), true); if (!j.ok) { formError(d, j.error); return false; } }
+          if (hm.defs) hm.defs = null; return true;
+        }, true], ["Cancel"]], {width: 330});
+      const body = q(d, "#gG tbody");
+      const paint = () => {
+        body.innerHTML = rows.map((r, i) => `<tr style="${i === sel ? "background:#0078d7;color:#fff" : ""}"><td><input data-i="${i}" value="${esc(r.name)}" ${r.fixed || /^all$/i.test(r.was || "") ? "readonly" : ""} style="${i === sel ? "background:#0078d7;color:#fff" : ""}"></td><td data-c="${i}" style="background:${matColorCss(r.color)};cursor:pointer"></td></tr>`).join("");
+        body.querySelectorAll("input").forEach(x => { x.onfocus = () => { if (sel !== +x.dataset.i) { sel = +x.dataset.i; paint(); body.querySelector(`input[data-i="${sel}"]`).focus(); } }; x.onchange = () => { rows[+x.dataset.i].name = x.value; }; });
+        body.querySelectorAll("[data-c]").forEach(c => c.onclick = () => { sel = +c.dataset.c; hmColor(rows[sel].color, k => { rows[sel].color = k; paint(); }); });
+        q(d, "#gD").disabled = !rows[sel] || rows[sel].fixed || /^all$/i.test(rows[sel].was || "");
+      };
+      q(d, "#gA").onclick = () => { let i = 1; while (rows.some(r => r.name.toLowerCase() === "group" + i)) i++; rows.push({name: "Group" + i, color: sd.colors[(rows.length + 1) % sd.colors.length] || "Red"}); sel = rows.length - 1; paint(); };
+      q(d, "#gD").onclick = () => { if (q(d, "#gD").disabled) return; rows.splice(sel, 1); sel = Math.max(0, sel - 1); paint(); };
+      paint();
+      return d;
+    }
     // ETABS's Group Definitions have Steel / Concrete / Composite design; SAP2000's Groups 1 - Definitions every use.
     const usesFor = sapX ? [["Selection", "Selection"], ["SectionCut", "Section Cut Definition"], ["Steel", "Steel Design"], ["Concrete", "Concrete Design"], ["Aluminum", "Aluminum Design"], ["ColdFormed", "Cold Formed Design"], ["Stage", "Staged Construction"], ["Bridge", "Bridge Response Output"], ["AutoSeismic", "Auto Seismic Output"], ["AutoWind", "Auto Wind Output"], ["MassWeight", "Mass and Weight"]]
       : [["Steel", "Steel Design"], ["Concrete", "Concrete Design"], ["Composite", "Composite Beam Design"]];
@@ -9872,6 +10034,7 @@ async function hmStructure(kind) {
   }
   const one = c => {
     if (sapX) return hmSapSectionCut(sd, c, again);
+    if (program === "etabs") return hmEtabsSectionCut(sd, c, again);
     const o = (c && c.options) || {}, user = /^user/i.test(o.ResultLoc || "");
     const d = dialog("Section Cut Data", `<div class="g2"><span>Section Cut Name</span><input id="zN" value="${esc(c ? c.name : "SCut" + (sd.section_cuts.length + 1))}" ${c ? "disabled" : ""}></div>
       <fieldset><legend>Define Section Cut By</legend><label style="display:inline-block;margin-right:14px"><input type="radio" name="zB" checked> Group</label><label style="display:inline-block"><input type="radio" name="zB" disabled> Quadrilaterals</label>
@@ -9886,6 +10049,30 @@ async function hmStructure(kind) {
     return d;
   };
   return listForm("Section Cuts", "Section Cuts", sd.section_cuts.map(x => x.name), [["Add Section Cut...", () => one(null)], ["Modify/Show Section Cut...", n => n && one(sd.section_cuts.find(x => x.name === n))], ["Delete Section Cut", n => n && del("define_section_cut", {name: n})]], n => one(sd.section_cuts.find(x => x.name === n)));
+}
+// ETABS 23.2's Section Cut Data (pictured Section Cuts 2, 3): SAP2000's form without its Edit menu, Coordinate System,
+// Units and Advanced Axes; the boxes that do not apply are greyed, not hidden, and the side reported is Top or Bottom.
+function hmEtabsSectionCut(sd, c, again) {
+  const d = hmSapSectionCut(sd, c, again);
+  const hide = el => { if (el) el.style.display = "none"; };
+  hide(d.querySelector(".sapMenu")); hide(q(d, "#zCs") && q(d, "#zCs").closest("fieldset").parentElement);
+  hide(q(d, "#zAdv") && q(d, "#zAdv").closest("div"));
+  q(d, "#zQuad").parentElement.id = "zRight"; dfInto(d, "#zRight");
+  if (!c) q(d, "#zN").value = (() => { let i = 1; while (sd.section_cuts.some(x => x.name === "SCut" + i)) i++; return "SCut" + i; })();
+  d.querySelectorAll("#zAxA span").forEach(s => { s.textContent = s.textContent.replace("about  Y", "about  Y'").replace("about  X", "about  X''").replace("about  Z", "about  Z"); });
+  const sq = d.querySelectorAll("[name=zSd]"), side = (c && c.options && c.options.ElemSide) || "Top";
+  sq.forEach((r, i) => { r.value = i ? "Bottom" : "Top"; r.checked = i ? /^bot/i.test(side) : !/^bot/i.test(side); r.parentElement.lastChild.textContent = i ? " Bottom" : " Top"; });
+  const sideFs = q(d, "#zSide"), quadFs = q(d, "#zQuad");
+  if (sideFs) sideFs.insertAdjacentHTML("beforeend", `<div id="zNA" class="kv" style="text-align:center;padding:10px 0">Not applicable for selected options.</div>`);
+  const grey = (fs, off) => { if (!fs) return; fs.style.display = ""; fs.style.color = off ? "#999" : ""; fs.querySelectorAll("input,button").forEach(x => x.disabled = off); };
+  const sync = () => {
+    const qd = (d.querySelector("[name=zB]:checked") || {}).value === "Quadrilateral", des = (d.querySelector("[name=zT]:checked") || {}).value === "Design";
+    grey(quadFs, !qd); if (sideFs) { sideFs.style.display = ""; sideFs.style.color = qd || des ? "" : "#999"; }
+    q(d, "#zSq").style.display = qd ? "" : "none"; q(d, "#zSt").style.display = !qd && des ? "" : "none"; q(d, "#zNA").style.display = qd || des ? "none" : "";
+    const usr = (d.querySelector("[name=zLc]:checked") || {}).value === "1"; ["#zX", "#zY", "#zZ"].forEach(x => q(d, x).disabled = !usr);
+  };
+  d.querySelectorAll("input[type=radio]").forEach(r => r.addEventListener("change", sync)); sync();
+  return d;
 }
 // SAP2000 26.3's Section Cut Data: Edit menu (Copy/Paste), Coordinate System and Units, Defined By Group or Quadrilateral
 // Cutting Planes, Result Type, location, and the local axes (Analysis: rotations and Advanced Axes; Design: Wall/Spandrel/Slab).
@@ -13042,14 +13229,14 @@ async function hmMass() {
   const a = await hmAnalysis(), ms = a.mass_source;
   const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmMass(); };
   // SAP2000 26.3's "Mass Source" (read on Ahmed's PC): Click to: without Make Default, and a Default Mass Source box below it.
-  const sap = program === "sap2000";
-  const d = listForm(sap ? "Mass Source" : "Mass Sources", "Mass Sources", [ms.name], [
+  const sap = program === "sap2000", one = sap || program === "etabs"; // ETABS 23.2 has the same list (pictured MassSource 1)
+  const d = listForm(one ? "Mass Source" : "Mass Sources", "Mass Sources", [ms.name], [
     ["Add New Mass Source...", () => hmSay("The model keeps one mass source, the default: Modify/Show changes it.", true)],
     ["Add Copy of Mass Source...", () => hmSay("The model keeps one mass source, the default: Modify/Show changes it.", true)],
     ["Modify/Show Mass Source...", () => hmMassData(again)],
     ["Delete Mass Source", () => hmSay("The default mass source cannot be deleted.", true)],
-    ...(sap ? [] : [["Make Default", () => hmSay(ms.name + " is the default mass source.")]]),
-  ], () => hmMassData(again), sap ? `<fieldset style="margin:8px 0 0"><legend>Default Mass Source</legend><select style="width:100%"><option>${esc(ms.name)}</option></select></fieldset>` : "");
+    ...(one ? [] : [["Make Default", () => hmSay(ms.name + " is the default mass source.")]]),
+  ], () => hmMassData(again), one ? `<fieldset style="margin:8px 0 0"><legend>Default Mass Source</legend><select style="width:100%"><option>${esc(ms.name)}</option></select></fieldset>` : "");
   d.querySelectorAll("[data-a]").forEach(b => { if (!/Modify/.test(b.textContent)) b.disabled = !/Default/.test(b.textContent) || false; });
 }
 async function hmMassData(after) {
@@ -13093,11 +13280,22 @@ async function hmMassData(after) {
   q(d, "#mDel").onclick = () => { if (at < 0) return; loads.splice(at, 1); at = -1; paint(); };
   q(d, "#mL").onchange = sync; if (q(d, "#mM")) q(d, "#mM").onchange = sync;
   sync(); paint();
+  // ETABS 23.2 (pictured MassSource 2, 3): the name and Mass Source on the left, the multipliers and Mass Options on the right.
+  if (program === "etabs") {
+    const db = d.querySelector(".db"), [nm, src, mul, opt] = [q(d, "#mN").closest("div"), d.querySelectorAll(".db > fieldset")[0], q(d, "#mMul"), d.querySelectorAll(".db > fieldset")[2]];
+    const L = document.createElement("div"), R = document.createElement("div"), box = document.createElement("fieldset");
+    db.style.cssText = "display:grid;grid-template-columns:1fr 1fr;gap:12px"; box.style.margin = "0 0 8px"; box.appendChild(nm); nm.style.padding = "8px 4px";
+    L.append(box, src); R.append(mul, opt); db.append(L, R); d.style.width = "920px";
+    q(d, "#mT").style.width = "100%"; q(d, "#mT").parentElement.style.cssText = "flex:1;min-height:120px;border:1px solid #888;background:#fff";
+    d.querySelectorAll(".db label").forEach(l => l.style.margin = "6px 0");
+    if (!ms.move && !(ms.move_x || ms.move_y)) { q(d, "#mX").value = 0.05; q(d, "#mY").value = 0.05; }
+  }
 }
 
 async function hmPDelta() {
   const a = await hmAnalysis(), defs = await hmDefs(), pd = a.pdelta;
   let loads = pd.loads.map(l => ({...l}));
+  if (program === "etabs") return hmEtabsPDelta(pd, defs);
   const d = dialog("P-Delta Options", `<fieldset><legend>Automation</legend>${[["none", "None"], ["non-iterative", "Non-iterative, based on mass"], ["iterative", "Iterative, based on loads"]].map(([k, t]) => `<label style="display:block"><input type="radio" name="pM" value="${k}" ${pd.method === k ? "checked" : ""}> ${t}</label>`).join("")}</fieldset>
     <fieldset><legend>Iteration Controls</legend><div class="g2"><span>Maximum iterations</span><input id="pI" type="number" value="${pd.iterations || 5}"><span>Relative tolerance</span><input id="pT" type="number" step="any" value="${pd.tolerance || 0.001}"></div></fieldset>
     <fieldset><legend>Load Patterns (iterative)</legend><table class="list hmgrid" id="pL"></table><button id="pAdd" style="margin-top:6px">Add</button></fieldset>`,
@@ -13109,6 +13307,35 @@ async function hmPDelta() {
   };
   q(d, "#pAdd").onclick = () => { loads.push({pattern: (defs.load_patterns[0] || {}).name, factor: 1}); paint(); };
   paint();
+}
+
+// ETABS 23.2's Preset P-Delta Options (pictured PDelta 1, 2): Automation Method (None, Non-iterative - Based on Mass,
+// Iterative - Based on Loads); Iterative P-Delta Load Case (Load Pattern and Scale Factor with Add, Modify, Delete) and the
+// Relative Convergence Tolerance, greyed unless the method is iterative.
+function hmEtabsPDelta(pd, defs) {
+  let loads = pd.loads.map(l => ({...l})), at = -1;
+  const pats = defs.load_patterns.map(p => p.name);
+  const d = dialog("Preset P-Delta Options", `<fieldset><legend>Automation Method</legend>${[["none", "None"], ["non-iterative", "Non-iterative - Based on Mass"], ["iterative", "Iterative - Based on Loads"]].map(([k, t]) => `<label style="display:block;margin:4px 0"><input type="radio" name="pM" value="${k}" ${(pd.method || "none") === k ? "checked" : ""}> ${t}</label>`).join("")}</fieldset>
+    <fieldset id="pIt"><legend>Iterative P-Delta Load Case</legend><div style="display:grid;grid-template-columns:1fr 80px;gap:10px"><div><div style="display:grid;grid-template-columns:1fr 1fr;text-align:center"><span>Load Pattern</span><span>Scale Factor</span></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr"><select id="pP">${opts(pats, pats[0])}</select><input id="pF" type="number" step="any" value="1"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;height:110px;border:1px solid #888;background:#fff;overflow:auto;align-content:start" id="pL"></div></div>
+      <div style="display:flex;flex-direction:column;gap:6px;padding-top:36px"><button id="pAdd">Add</button><button id="pMod">Modify</button><button id="pDel">Delete</button></div></div>
+      <div style="display:grid;grid-template-columns:1fr 90px;gap:8px;align-items:center;margin-top:12px"><span style="white-space:nowrap">Relative Convergence Tolerance</span><input id="pT" type="number" step="any" value="${pd.tolerance || 0.0001}"></div></fieldset>`,
+    [["OK", d => submit(d, "define_pdelta", {method: q(d, "[name=pM]:checked").value, iterations: pd.iterations || 5, tolerance: fnum(d, "#pT"), loads: loads.map(l => ({pattern: l.pattern, factor: +l.factor}))}), true], ["Cancel"]], {width: 340});
+  const paint = () => {
+    q(d, "#pL").innerHTML = loads.map((l, i) => `<span data-i="${i}" style="padding:1px 4px;${i === at ? "background:#0078d7;color:#fff" : ""}">${esc(l.pattern)}</span><span data-i="${i}" style="padding:1px 4px;${i === at ? "background:#0078d7;color:#fff" : ""}">${esc(String(l.factor))}</span>`).join("");
+    d.querySelectorAll("#pL [data-i]").forEach(s => s.onclick = () => { at = +s.dataset.i; q(d, "#pP").value = loads[at].pattern; q(d, "#pF").value = loads[at].factor; paint(); });
+    const it = q(d, "[name=pM]:checked").value === "iterative";
+    q(d, "#pIt").style.color = it ? "" : "#999"; q(d, "#pIt").querySelectorAll("input,select,button").forEach(x => x.disabled = !it);
+    if (it) q(d, "#pMod").disabled = q(d, "#pDel").disabled = at < 0;
+  };
+  const row = () => ({pattern: q(d, "#pP").value, factor: fnum(d, "#pF")});
+  q(d, "#pAdd").onclick = () => { const r = row(); if (!r.pattern) return; const k = loads.findIndex(l => l.pattern === r.pattern); if (k >= 0) loads[k] = r; else loads.push(r); at = -1; paint(); };
+  q(d, "#pMod").onclick = () => { if (at < 0) return; loads[at] = row(); paint(); };
+  q(d, "#pDel").onclick = () => { if (at < 0) return; loads.splice(at, 1); at = -1; paint(); };
+  d.querySelectorAll("[name=pM]").forEach(r => r.onchange = paint);
+  paint();
+  return d;
 }
 
 // ---- Edit > Model Text: the model in the program's own text, one section at a time (the safety net) ----
