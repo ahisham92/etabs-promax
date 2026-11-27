@@ -38,6 +38,7 @@ internal static class LicenseKey
     internal static readonly string[] OwnerHashes =
     [
         "e20b89e45536d9edd3356fbcec7b6132ec910045122da81533dfea0599deaf4f",
+        "f1efb8e9df4db2bc282510eb677c22eb0f6357a059e6c00c8e5b8e45c0f8885b",
     ];
 
     // Crockford's base 32: no I, L, O or U, so a code read aloud or typed is hard to get wrong.

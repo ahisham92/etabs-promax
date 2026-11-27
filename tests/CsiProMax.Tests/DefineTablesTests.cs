@@ -115,6 +115,76 @@ static class DefineTablesTests
             Check(data["tables"]!["Generalized Displacement Definitions"]!["rows"]!.AsArray().Count == 1, "definition_data shows the rows");
         });
 
+        yield return ("define: ETABS 23.2's spring forms keep every option: Elasto-plastic, single joint links at a point (a row each in ETABS's table), springs from a soil profile and a column footing, soil profiles with their layers, and a row given by the names ETABS shows goes in under its field keys (Ahmed 2026-11-27)", () =>
+        {
+            var link = Frame();
+            Run(link, "define_link", new { name = "Link1", type = "LINEAR", dofs = new Dictionary<string, object> { ["U1"] = new { stiffness = 1000, damping = 0 } } });
+            Run(link, "define_spring", new { kind = "point", name = "PSprEP", values = new { UZ = 1 }, extras = new Dictionary<string, string> { ["Stiffness Option"] = "User", ["Nonlinearity Specification"] = "Quick", ["NonlinOpt"] = "Elasto-Plastic", ["Compression Stiffness"] = "100", ["Compression Strength"] = "50", ["Tension Stiffness"] = "20", ["Tension Strength"] = "5", ["Color"] = "Gray8Dark" } });
+            Run(link, "define_spring", new { kind = "point", name = "PSprLink", values = new { UZ = 0 }, extras = new Dictionary<string, string> { ["Stiffness Option"] = "User", ["Nonlinearity Specification"] = "From Links", ["Link Property"] = "Link1|Link1", ["Link Axial Direction"] = "+Z|-X", ["Link Axis 2 Angle"] = "0|30" } });
+            Run(link, "define_table_rows", new { table = "Spring Property Definitions - Soil Profiles", name = "SoilPr1", rows = new[] {
+                new Dictionary<string, object> { ["Soil Layer Name"] = "Layer1", ["Elevation of Top of Layer"] = 0, ["Unit Weight"] = 18, ["Shear Modulus"] = 300000, ["Poissons Ratio"] = 0.3, ["Cohesion"] = 20, ["Friction Angle"] = 30, ["Shear Wave Velocity"] = 300, ["Layer Color"] = "Blue", ["Shear Modulus Reduction Factor"] = 1, ["Hysteretic Damping Ratio"] = 0.5 },
+                new Dictionary<string, object> { ["Soil Layer Name"] = "Layer2", ["Elevation of Top of Layer"] = -1.5, ["Unit Weight"] = 19, ["Shear Modulus"] = 300000, ["Poissons Ratio"] = 0.3, ["Cohesion"] = 20, ["Friction Angle"] = 30, ["Shear Wave Velocity"] = 300, ["Layer Color"] = "DarkGreen" } } });
+            Run(link, "define_table_rows", new { table = "Spring Property Definitions - Isolated Column Footings", name = "ColFoot1", rows = new[] { new Dictionary<string, object> { ["Length"] = 1.5, ["Width"] = 0.9, ["Thickness"] = 0.45, ["Embedment Source"] = "User Defined", ["User Embedment"] = 1.2, ["Color"] = "Blue" } } });
+            Run(link, "define_spring", new { kind = "point", name = "PSprSoil", values = new { }, extras = new Dictionary<string, string> { ["Stiffness Option"] = "Soil Profile", ["Soil Profile"] = "SoilPr1", ["Isolated Column Footing"] = "ColFoot1", ["First Period"] = "0.1" } });
+            Run(link, "define_spring", new { kind = "area", name = "ASprL", values = new { }, extras = new Dictionary<string, string> { ["Stiffness Option"] = "Link", ["Link Property"] = "Link1" } });
+            Refused(link, "define_spring", new { kind = "point", name = "PSprNone", values = new { UZ = 0 } }, "above 0");
+            var m = ModelFile.FromJson(ModelFile.ToJson(link.Model));
+            var e2k = E2kWriter.Write(link.Model);
+            Check(e2k.Contains("\"PSprSoil\"") && e2k.Contains("\"PSprLink\"") && e2k.Contains("\"ASprL\""), "the springs from a soil profile or links are in the .e2k too (their stiffness comes from those)");
+            var point = m.DefinitionTables!["Spring Property Definitions - Point Springs"];
+            Check(point.Single(r => r["Name"] == "PSprEP") is { } ep && ep["NonlinOpt"] == "Elasto-Plastic" && ep["Tension Strength"] == "5" && ep["Color"] == "Gray8Dark", "the elasto-plastic spring through the .cpm");
+            Check(point.Single(r => r["Name"] == "PSprSoil")["Isolated Column Footing"] == "ColFoot1", "the soil spring's footing");
+            Check(m.DefinitionTables["Spring Property Definitions - Soil Profiles"].Count(r => r["Name"] == "SoilPr1") == 2, "the soil profile's two layers");
+            var rows = ModelerTables.SpringLinkRows(new Dictionary<string, string>(point.Single(r => r["Name"] == "PSprLink"))).ToList();
+            Check(rows.Count == 2 && rows[1]["Link Axial Direction"] == "-X" && rows[1]["Link Axis 2 Angle"] == "30" && rows[0]["Link Property"] == "Link1", "a row per single joint link: " + string.Join(" / ", rows.Select(r => string.Join(",", r))));
+            Check(ProgramOptions.HasDefinitionTable(ProgramOptions.Etabs, DefineTables.SoilProfiles) && ProgramOptions.HasDefinitionTable(ProgramOptions.Etabs, DefineTables.ColumnFootings), "the soil profiles and footings go into ETABS");
+            var keyed = EditableTables.ByKey([new Dictionary<string, string> { ["Name"] = "P", ["Trans NL Stiffness"] = "1000", ["Notes"] = "x" }], ["Name", "TransK", "Notes"], ["Name", "Trans NL Stiffness", "Notes"]);
+            Check(keyed[0].ContainsKey("TransK") && keyed[0]["TransK"] == "1000" && keyed[0].ContainsKey("Name") && !keyed[0].ContainsKey("Trans NL Stiffness"), "a field given by the name ETABS shows goes in under its key");
+        });
+
+        yield return ("define: ETABS 23.2's Panel Zone Data keeps each source (auto elastic, spring, ASCE 41-17, user nonlinear with its positive points, link with its own axis) and the user acceptance criteria, in ETABS's two panel zone tables (Ahmed 2026-11-27)", () =>
+        {
+            var link = Frame();
+            Run(link, "define_table_rows", new { table = "Panel Zone Property Definitions", name = "PZone2", rows = new[] { new Dictionary<string, object> { ["Source"] = "Spring", ["ActiveDir"] = "Both", ["OffsetRigid"] = "Yes", ["SpringMajor"] = 1000000, ["SpringMinor"] = 500000, ["AcceptType"] = "None" } } });
+            Run(link, "define_table_rows", new { table = "Panel Zone Property Definitions", name = "PZone4", rows = new[] { new Dictionary<string, object> { ["Source"] = "User", ["ActiveDir"] = "Major", ["OffsetRigid"] = "Yes", ["AcceptType"] = "User", ["UserAccType"] = "Moment", ["UserIOMomMa"] = 0.0001, ["UserLSMomMa"] = 0.0001, ["UserCPMomMa"] = 0.0001 } } });
+            Run(link, "define_table_rows", new { table = "Panel Zone Property Definitions - User Nonlinear Data", name = "PZone4", rows = new object[] {
+                new Dictionary<string, object> { ["Direction"] = "Major", ["Type"] = "Nonlinear", ["AddBC"] = "Yes", ["AddCD"] = "No", ["Point"] = "B", ["Force"] = 1, ["Displ"] = 1, ["UseYldForce"] = "No", ["UseYldDispl"] = "No", ["FDPosForSF"] = 1000, ["FDPosDispSF"] = 0.002, ["BeyondE"] = "Extrapolated", ["HysType"] = "Pivot", ["PivotAlpha1"] = 10 },
+                new Dictionary<string, object> { ["Direction"] = "Major", ["Point"] = "BC", ["Force"] = 1, ["Displ"] = 7 }, new Dictionary<string, object> { ["Direction"] = "Major", ["Point"] = "C", ["Force"] = 1, ["Displ"] = 13 },
+                new Dictionary<string, object> { ["Direction"] = "Major", ["Point"] = "D", ["Force"] = 1, ["Displ"] = 13 }, new Dictionary<string, object> { ["Direction"] = "Major", ["Point"] = "E", ["Force"] = 1, ["Displ"] = 13 } } });
+            Run(link, "define_table_rows", new { table = "Panel Zone Property Definitions", name = "PZone5", rows = new[] { new Dictionary<string, object> { ["Source"] = "Link", ["ActiveDir"] = "Major", ["OffsetRigid"] = "Yes", ["LinkProp"] = "Link1", ["Connect"] = "Beam-Column", ["AxisSource"] = "User Angle", ["AxialDir"] = "+Z", ["Axis2Angle"] = 0, ["AcceptType"] = "None" } } });
+            var m = ModelFile.FromJson(ModelFile.ToJson(link.Model));
+            var nl = m.DefinitionTables!["Panel Zone Property Definitions - User Nonlinear Data"].Where(r => r["Name"] == "PZone4").ToList();
+            Check(nl.Count == 5 && nl[1]["Point"] == "BC" && nl[1]["Displ"] == "7" && nl[0]["HysType"] == "Pivot" && nl[0]["PivotAlpha1"] == "10", "the user nonlinear points through the .cpm");
+            var pz = m.DefinitionTables["Panel Zone Property Definitions"];
+            Check(pz.Single(r => r["Name"] == "PZone5")["AxisSource"] == "User Angle" && pz.Single(r => r["Name"] == "PZone2")["SpringMinor"] == "500000" && pz.Single(r => r["Name"] == "PZone4")["UserCPMomMa"] == "0.0001", "each source's own fields");
+            Check(ProgramOptions.HasDefinitionTable(ProgramOptions.Etabs, "Panel Zone Property Definitions - User Nonlinear Data"), "they go into ETABS");
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var part in new[] { "dialog(\"Panel Zone Properties\"", "<legend>Defined Panel Zones</legend>", "Auto Nonlinear Properties based on ASCE 41-17 Table 9-7.2 (Steel Only)", "dialog(\"Nonlinear Panel Zone Properties\"", "dialog(\"User Nonlinear Panel Zone Data - \" + name",
+                "dialog(\"User-Defined Panel Zone Acceptance Criteria\"", "Use Acceptance Criteria from Link Property", "fs(\"Single Joint Links at Point\"", "dialog(\"Soil Profile Data\"", "dialog(\"Isolated Column Footing Data\"", "fs(\"Choose Soil Profile and Isolated Footing\"", "dialog(\"Inelastic Properties for a Buckling Restrained Brace\"", "Program default inelastic properties, not editable by user", "pr(\"Force Displacement Type\"", "[\"Trilinear\", \"Elastic Perfectly Plastic\"]", "Accumulated Deformation Ratio", "o.TensFy = o.TensFu0" })
+                Check(html.Contains(part), "viewer.html lost " + part);
+        });
+
+        yield return ("define: ETABS 23.2's composite wall (Composite Shear Wall Data, Wall / Pier or Beam / Spandrel) goes on the wall's own SHELLPROP lines as ETABS writes them, and comes back", () =>
+        {
+            var link = Frame();
+            var conc = link.Model.Materials.First().Name;
+            Run(link, "define_shell_type", new { name = "Wall2", kind = "wall", modeling = "Composite", material = conc, thickness = 0.3, composite = new { concrete = conc, steel = conc, length = 3.81, total_thick = 0.3, plate_thick = 0.019, flange_thick = 0.0127, tie_diameter = 0.0159, tie_spacing = 0.3, in_plane = 0.7, out_of_plane = 1, spandrel = true } });
+            var e2k = E2kWriter.Write(link.Model);
+            Check(System.Text.RegularExpressions.Regex.IsMatch(e2k, "SHELLPROP\\s+\"Wall2\"\\s+PROPTYPE\\s+\"Wall\"\\s+MATERIAL\\s+\"[^\"]+\"\\s+MODELINGTYPE\\s+\"Composite\"\\s+WALLTHICKNESS"), "the first line as ETABS writes it: " + e2k.Split('\n').FirstOrDefault(l => l.Contains("Wall2")));
+            Check(System.Text.RegularExpressions.Regex.IsMatch(e2k, "SHELLPROP\\s+\"Wall2\"\\s+CONCMATERIALCOMP .*STEELMATERIALCOMP .*WALLLENGTH .*TOTALTHICK .*PLATETHICK .*FLANGEPLATETHICK .*TIEBARDIAMETER .*TIEBARSPACING .*CSTIFFNESSMODIFIER1 .*CSTIFFNESSMODIFIER2 .*ISPANDREL\\s+\"Yes\""), "the composite line as ETABS writes it");
+            var back = ThroughE2k(link.Model).ShellSections.Single(s => s.Name == "Wall2");
+            Check(back.Get("MODELINGTYPE") == "Composite" && back.Number("PLATETHICK") is { } p && Math.Abs(p - 0.019) < 1e-9 && back.Number("CSTIFFNESSMODIFIER1") is { } c1 && Math.Abs(c1 - 0.7) < 1e-9 && back.Get("ISPANDREL") == "Yes", "the composite data comes back");
+            var pd = Run(link, "property_definitions", new { });
+            var w = pd["shell_sections"]!.AsArray().First(x => x!["name"]!.GetValue<string>() == "Wall2")!;
+            Check(w["composite"]!["spandrel"]!.GetValue<bool>() && Math.Abs(w["composite"]!["tie_spacing"]!.GetValue<double>() - 0.3) < 1e-9, "the form reads it back");
+            link.Model.Target = "sap2000";
+            Refused(link, "define_shell_type", new { name = "W3", kind = "wall", modeling = "Composite", material = conc, thickness = 0.3, composite = new { concrete = conc, steel = conc, total_thick = 0.3, plate_thick = 0.01, flange_thick = 0.01, tie_diameter = 0.01, tie_spacing = 0.3 } }, "Only an ETABS wall");
+            link.Model.Target = "etabs";
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var part in new[] { "Modify/Show Composite Wall Data...", "\"In-Plane Stiffness\"", "\"Out-of-Plane Stiffness\"", "modeling: \"Composite\"" })
+                Check(html.Contains(part), "viewer.html lost " + part);
+        });
+
         yield return ("program: the forms offer only the model's program's options (SAP2000: no ETABS-only assignment tables or slab types; SAFE: concrete shapes, no table rows), and keep what the model has", () =>
         {
             var link = Frame();

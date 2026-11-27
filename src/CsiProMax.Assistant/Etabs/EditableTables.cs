@@ -71,6 +71,17 @@ public static class EditableTables
         catch (Exception) { /* the table is read as the program shows it */ }
     }
 
+    /// <summary>Renames each given field that is not one of <paramref name="keys"/> but is one of the names the program shows
+    /// (<paramref name="names"/>, matched without case, spaces or punctuation) to that field's key.</summary>
+    public static IReadOnlyList<IReadOnlyDictionary<string, string>> ByKey(IReadOnlyList<IReadOnlyDictionary<string, string>> rows, string[] keys, string[] names)
+    {
+        static string Plain(string x) => new string(x.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
+        var known = keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var byName = new Dictionary<string, string>();
+        for (var i = 0; i < Math.Min(keys.Length, names.Length); i++) if (names[i] is { Length: > 0 } nm) byName.TryAdd(Plain(nm), keys[i]);
+        return rows.Select(r => (IReadOnlyDictionary<string, string>)r.ToDictionary(kv => known.Contains(kv.Key) ? kv.Key : byName.TryGetValue(Plain(kv.Key), out var k) ? k : kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase)).ToList();
+    }
+
     /// <summary>
     /// Puts <paramref name="rows"/> into the table <paramref name="key"/>: a row already there with the same <paramref name="keyField"/>
     /// takes the given fields and keeps its others; the table's other rows are kept. Throws with the program's import log when it does not take them.
@@ -101,6 +112,16 @@ public static class EditableTables
             var readFields = fields.ToArray();
             var readRows = Enumerable.Range(0, records).Select(r => data.Skip(r * readFields.Length).Take(readFields.Length).Select(v => v ?? "").ToArray())
                 .Where(r => r.Length == readFields.Length).ToList();
+
+            // A row given by the names the program shows ("Trans NL Stiffness", as Display > Show Tables heads its columns)
+            // goes in under the program's field keys: ETABS 23.2's link, spring and panel zone forms are kept that way.
+            if (rows.SelectMany(r => r.Keys).Any(k => !fields.Contains(k, StringComparer.OrdinalIgnoreCase)))
+            {
+                int n = 0; string[] keys = [], names = [], about = [], units = []; bool[] importable = [];
+                m.DatabaseTables.GetAllFieldsInTable(key, ref version, ref n, ref keys, ref names, ref about, ref units, ref importable);
+                rows = ByKey(rows, keys ?? [], names ?? []);
+                keyField = string.Join("|", keyField.Split('|').Select(k => ByKey([new Dictionary<string, string> { [k] = "" }], keys ?? [], names ?? [])[0].Keys.First()));
+            }
 
             // A field the editing read leaves out (ETABS 23 leaves out AutoLoad of "Load Pattern Definitions") is added as a column.
             var missing = rows.SelectMany(r => r.Keys).Distinct(StringComparer.OrdinalIgnoreCase)

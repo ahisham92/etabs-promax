@@ -51,11 +51,15 @@ public static class ModelerTables
             catch (EtabsException ex) { refused.Add($"Load Pattern Definitions (Auto Lateral Load codes): {ex.Message}"); }
         }
         // The definitions the .e2k has no keyword for (generalized displacements, hinges, layers, ...), by name.
-        foreach (var (table, rows) in (model.DefinitionTables ?? []).Where(t => ProgramOptions.HasDefinitionTable(ProgramOptions.Etabs, t.Key)).OrderBy(t => t.Key, StringComparer.Ordinal))
+        // Soil profiles and column footings go in ahead of the point springs that name them.
+        foreach (var (table, rows) in (model.DefinitionTables ?? []).Where(t => ProgramOptions.HasDefinitionTable(ProgramOptions.Etabs, t.Key))
+                     .OrderBy(t => t.Key.Equals(DefineTables.SoilProfiles, StringComparison.OrdinalIgnoreCase) || t.Key.Equals(DefineTables.ColumnFootings, StringComparison.OrdinalIgnoreCase) ? 0 : 1).ThenBy(t => t.Key, StringComparer.Ordinal))
         {
             try
             {
                 var put = rows.Select(r => StructureExtras.ForEtabs(table, r)).ToList();
+                // A point spring's single joint links are a row each in ETABS's table (kept as lists split by "|").
+                if (table.Equals("Spring Property Definitions - Point Springs", StringComparison.OrdinalIgnoreCase)) put = put.SelectMany(SpringLinkRows).ToList();
                 // A nonlinear link's table has a row per direction: the same fields on each of the link's directions.
                 if (StructureExtras.PerDirection(table))
                     put = put.SelectMany(r => (PropertyDefs.Links(model).Find(l => l.Name == r.GetValueOrDefault("Name"))?.Dofs.Keys.ToList() ?? []).Select(dof => new Dictionary<string, string>(r) { ["Direction"] = dof })).ToList();
@@ -223,6 +227,17 @@ public static class ModelerTables
 
     private static int IndexOf(TableData t, string field) => t.Fields.ToList().FindIndex(f => f.Equals(field, StringComparison.OrdinalIgnoreCase));
 
+    /// <summary>One row per single joint link of a point spring from link properties ("Link Property" etc. split by "|").</summary>
+    internal static IEnumerable<Dictionary<string, string>> SpringLinkRows(Dictionary<string, string> row)
+    {
+        var links = (row.GetValueOrDefault("Link Property") ?? "").Split('|');
+        if (links.Length < 2) { yield return row; yield break; }
+        string[] Part(string k) => (row.GetValueOrDefault(k) ?? "").Split('|');
+        var (dirs, angles) = (Part("Link Axial Direction"), Part("Link Axis 2 Angle"));
+        for (var i = 0; i < links.Length; i++)
+            yield return new Dictionary<string, string>(row) { ["Link Property"] = links[i], ["Link Axial Direction"] = i < dirs.Length ? dirs[i] : "+Z", ["Link Axis 2 Angle"] = i < angles.Length ? angles[i] : "0" };
+    }
+
     /// <summary>The fields a definition table's row is found by: its name, or the story (Story Definitions), or the
     /// source and its load pattern (Mass Source Definition, one row per pattern).</summary>
     internal static string KeyOf(string table) => table.ToLowerInvariant() switch
@@ -230,6 +245,7 @@ public static class ModelerTables
         "story definitions" => "Story",
         "mass source definition" => "Name|LoadPattern",
         "load pattern definitions - auto notional loads" => "LoadPattern",
+        "spring property definitions - soil profiles" => "Name|Soil Layer Name",
         // A form's table (design preferences, analysis options) has one row and no name: its row is that one.
         _ when ProgramForms.IsWallOverwrite(table) => table.Contains("Pier Design", StringComparison.OrdinalIgnoreCase) ? "Pier|Story" : "Spandrel|Story",
         _ when ProgramForms.IsForm(table) => "",
