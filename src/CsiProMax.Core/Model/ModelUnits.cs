@@ -156,6 +156,11 @@ public static partial class ModelUnits
         foreach (var d in m.Materials.Cast<Definition>().Concat(m.FrameSections).Concat(m.ShellSections))
         {
             foreach (var line in d.Lines) Tokens(line, k => NotInDefinitions.Contains(k) ? Dim.None : KeywordDim(k), K);
+            if (d is FrameSection fs && FrameTableShapes.SdSource(fs) is { } sd)
+            {
+                Tokens(sd, k => NotInDefinitions.Contains(k) ? Dim.None : KeywordDim(k), K);
+                fs.Tables![FrameTableShapes.SdSourceTable][0]["Line"] = string.Join(" ", sd);
+            }
             Tables(d.Tables, K);
         }
         foreach (var a in m.PointAssigns.Cast<Assign>().Concat(m.LineAssigns).Concat(m.AreaAssigns))
@@ -272,7 +277,7 @@ public static partial class ModelUnits
             foreach (var row in rows)
                 foreach (var key in row.Keys.ToList())
                 {
-                    var d = FieldDim(key);
+                    var d = FrameTableShapes.FieldDim(key, row) ?? FieldDim(key);
                     if (d.IsNone || !double.TryParse(row[key], NumberStyles.Float, Inv, out var v)) continue;
                     row[key] = Text(v * k(d));
                 }

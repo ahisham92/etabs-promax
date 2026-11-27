@@ -222,17 +222,21 @@ public static class PropertyDefs
     /// </summary>
     public static string[] FrameExtraFields(string shape)
     {
-        var concrete = new[] { "NotSizeType", "NotAutoFact", "NotUserSize", "RigidZone" };
+        if (FrameTableShapes.All.TryGetValue(shape, out var other)) return other.Fields;
+        var concrete = new[] { "NotSizeType", "NotAutoFact", "NotUserSize", "RigidZone", "DesignType" };
+        string[] file = ["FromFile", "FileName", "SectInFile"];
+        string[] drop = ["ColumnDropPanel", "ColumnDropPanelAxis2", "ColumnDropPanelAxis3", "ColumnDropPanelSlabProperty"];
         string[] own = shape switch
         {
-            "Concrete Rectangular" or "Concrete Circle" => concrete,
-            "Concrete Tee" => [.. concrete, "MirrorAbt3"],
-            "Concrete L" => [.. concrete, "MirrorAbt2", "MirrorAbt3"],
-            "Steel I/Wide Flange" or "Steel Double Channel" => ["FilletRad"],
-            "Steel Channel" => ["FilletRad", "MirrorAbt2"],
-            "Steel Tee" or "Steel Double Angle" => ["FilletRad", "MirrorAbt3"],
-            "Steel Angle" => ["FilletRad", "MirrorAbt2", "MirrorAbt3"],
-            "Steel Tube" => ["CornerRad"],
+            "Concrete Rectangular" or "Concrete Circle" => [.. file, .. concrete],
+            "Concrete Tee" => [.. concrete, "twb", "IgnoreFlangeArea", "MirrorAbt3", .. drop],
+            "Concrete L" => [.. concrete, "twb", "IgnoreFlangeArea", "MirrorAbt2", "MirrorAbt3", .. drop],
+            "Steel I/Wide Flange" or "Steel Double Channel" => [.. file, "FilletRad"],
+            "Steel Channel" => [.. file, "FilletRad", "MirrorAbt2"],
+            "Steel Tee" or "Steel Double Angle" => [.. file, "FilletRad", "MirrorAbt3"],
+            "Steel Angle" => [.. file, "FilletRad", "MirrorAbt2", "MirrorAbt3"],
+            "Steel Tube" => [.. file, "CornerRad"],
+            "Steel Pipe" => file,
             _ => [],
         };
         return [.. own, "Color", "Notes"];
@@ -323,7 +327,10 @@ public static class PropertyDefs
                 ?? throw new ArgumentException($"{what} has no field '{k}'. It has: {string.Join(", ", fields)}.");
             if (v.Trim().Length > 0) row[f] = v.Trim();
         }
+        // Other tables the definition keeps (a concrete section's bar sizes) stay.
+        var keep = d.Tables?.Where(t => t.Key == DefineTables.ColumnReinforcing).ToList() ?? [];
         d.Tables = row.Count > 0 ? new(StringComparer.OrdinalIgnoreCase) { [table] = [row] } : null;
+        foreach (var (k, v) in keep) (d.Tables ??= new(StringComparer.OrdinalIgnoreCase))[k] = v;
     }
 
     private static IReadOnlyDictionary<string, string> Extras(Definition d, string table) =>

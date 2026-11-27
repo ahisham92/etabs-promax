@@ -151,6 +151,33 @@ public static class DefineTables
         if (area is { } a) s.Lines.Add(E2kText.Line(["REBARDEFINITION", E2kText.Quote(name)], ["AREA", E2kText.Number(a), "DIA", E2kText.Number(diameter!.Value)]));
     }
 
+    /// <summary>Where a concrete column's bar sizes by name are kept on its section (the .e2k has only their areas):
+    /// ETABS 23.2's "Frame Section Property Definitions - Concrete Column Reinforcing" fields.</summary>
+    public const string ColumnReinforcing = "Concrete Column Reinforcing";
+    public static readonly string[] ColumnBarSizeFields = ["BarSizeLong", "BarSizeCorn", "BarSizeConf"];
+
+    /// <summary>A concrete column's bar sizes by name (Longitudinal, Corner, Confinement Bar Size), or none.</summary>
+    public static IReadOnlyDictionary<string, string> BarSizes(FrameSection s) =>
+        s.Tables?.GetValueOrDefault(ColumnReinforcing) is { Count: > 0 } r ? r[0] : new Dictionary<string, string>();
+
+    /// <summary>Sets a concrete column's bar sizes by name; each is a bar of Define > Reinforcing Bar Sizes.</summary>
+    public static void SetBarSizes(StructuralModel m, string section, IReadOnlyDictionary<string, string> sizes)
+    {
+        var fs = m.FrameSections.Find(x => x.Name == section) ?? throw new ArgumentException($"There is no frame section '{section}'.");
+        var row = new Dictionary<string, string>(BarSizes(fs), StringComparer.Ordinal);
+        var known = RebarSizes(m).Select(x => x.Name).ToHashSet();
+        foreach (var (k, v) in sizes)
+        {
+            var f = ColumnBarSizeFields.FirstOrDefault(x => x.Equals(k, StringComparison.OrdinalIgnoreCase)) ?? throw new ArgumentException($"A column's bar sizes are {string.Join(", ", ColumnBarSizeFields)}, not '{k}'.");
+            if (v.Trim().Length == 0) { row.Remove(f); continue; }
+            if (known.Count > 0 && !known.Contains(v.Trim())) throw new ArgumentException($"There is no bar size '{v}' (Define > Reinforcing Bar Sizes).");
+            row[f] = v.Trim();
+        }
+        fs.Tables ??= new(StringComparer.OrdinalIgnoreCase);
+        if (row.Count > 0) fs.Tables[ColumnReinforcing] = [row]; else fs.Tables.Remove(ColumnReinforcing);
+        if (fs.Tables.Count == 0) fs.Tables = null;
+    }
+
     /// <summary>The keywords a concrete section's rebar line may carry, by its TYPE.</summary>
     public static readonly string[] ColumnRebarKeys = ["LONGBARMATERIAL", "CONFINEBARMATERIAL", "PATTERN", "TRANSREINF", "DESIGNCHECK", "COVER", "LONGBARAREA", "CONFINEBARAREA", "CONFINEBARSPACING", "NUMCONFINEBARS3", "NUMCONFINEBARS2"];
     public static readonly string[] BeamRebarKeys = ["LONGBARMATERIAL", "CONFINEBARMATERIAL", "COVERTOP", "COVERBOTTOM", "ATI", "ABI", "ATJ", "ABJ"];

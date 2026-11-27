@@ -50,14 +50,26 @@ public static class ModelerTables
             catch (EtabsException ex) { refused.Add($"{table}: {ex.Message}"); }
         }
         // A frame section's other fields (colour, notes, notional size, fillet radius, ...), in its shape's table by name.
-        foreach (var g in model.FrameSections.Where(x => PropertyDefs.FrameExtras(x).Count > 0).GroupBy(x => x.Shape))
+        // The shapes the .e2k has no line for go in whole (FrameTableShapes): every row with its name, material and modifiers.
+        foreach (var g in model.FrameSections.Where(x => PropertyDefs.FrameExtras(x).Count > 0 || FrameTableShapes.Is(x.Shape)).GroupBy(x => x.Shape))
         {
-            var table = "Frame Section Property Definitions - " + g.Key;
+            if (FrameTableShapes.Table(g.Key) is not { } table) continue;
+            // A section made a Section Designer section here goes to ETABS as the section it was (its shapes are drawn there).
+            if (g.Key == "SD Section" && g.All(x => FrameTableShapes.SdSource(x) is not null)) continue;
             try
             {
-                EditableTables.Put(e, table, "Name", g.Select(x => (IReadOnlyDictionary<string, string>)new Dictionary<string, string>(PropertyDefs.FrameExtras(x)) { ["Name"] = x.Name }).ToList(), $"put the Modeler's '{table}' in");
-                done.Add($"{table}: {g.Count()} row{(g.Count() == 1 ? "" : "s")}");
+                var rows = g.SelectMany(x => FrameTableShapes.Is(x.Shape) ? FrameTableShapes.Rows(x) : [new Dictionary<string, string>(PropertyDefs.FrameExtras(x)) { ["Name"] = x.Name }]).ToList();
+                EditableTables.Put(e, table, "Name", rows.Select(x => (IReadOnlyDictionary<string, string>)x).ToList(), $"put the Modeler's '{table}' in");
+                done.Add($"{table}: {rows.Count} row{(rows.Count == 1 ? "" : "s")}");
             }
+            catch (EtabsException ex) { refused.Add($"{table}: {ex.Message}"); }
+        }
+        // A concrete column's bar sizes by name, in "Concrete Column Reinforcing" (the .e2k gives ETABS their areas only).
+        var colBars = model.FrameSections.Where(x => DefineTables.BarSizes(x).Count > 0).Select(x => new Dictionary<string, string>(DefineTables.BarSizes(x)) { ["Name"] = x.Name }).ToList();
+        if (colBars.Count > 0)
+        {
+            var table = "Frame Section Property Definitions - " + DefineTables.ColumnReinforcing;
+            try { EditableTables.Put(e, table, "Name", colBars.Select(x => (IReadOnlyDictionary<string, string>)x).ToList(), $"put the Modeler's '{table}' in"); done.Add($"{table}: {colBars.Count} row{(colBars.Count == 1 ? "" : "s")}"); }
             catch (EtabsException ex) { refused.Add($"{table}: {ex.Message}"); }
         }
         // A slab or wall section's other fields (notional size, colour, notes, a wall's rigid zone), in its table by name.
@@ -114,7 +126,7 @@ public static class ModelerTables
     public static bool HasRows(string cpm, CsiProgram program)
     {
         var model = ModelFile.Load(cpm);
-        return AssignTables.Rows(model).Count > 0 || (program.Key == CsiProgram.Etabs.Key && (model.Materials.Any(x => x.Tables is not null) || (model.DefinitionTables ?? []).Keys.Any(k => ProgramOptions.HasDefinitionTable(ProgramOptions.Etabs, k))))
+        return AssignTables.Rows(model).Count > 0 || (program.Key == CsiProgram.Etabs.Key && (model.Materials.Any(x => x.Tables is not null) || model.FrameSections.Any(x => x.Tables is not null || FrameTableShapes.Is(x.Shape)) || (model.DefinitionTables ?? []).Keys.Any(k => ProgramOptions.HasDefinitionTable(ProgramOptions.Etabs, k))))
             || (program.Key != CsiProgram.Sap2000.Key && SlabDefs.SlabRebars(model).Count > 0);
     }
 
