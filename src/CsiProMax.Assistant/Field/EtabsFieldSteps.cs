@@ -431,7 +431,7 @@ public static class EtabsFieldSteps
             var cases = link.LoadCases();
             var watch = System.Diagnostics.Stopwatch.StartNew();
             var (checks, pack) = PackSpeedField.Build(link, () => ProgramTools.Report(System.Text.Json.JsonDocument.Parse("""{"drift_limit":0.002}""").RootElement, link).AsObject(),
-                c => Pack.Build(link, [], cases, link.Combos(), c, null, mostRows: 20000, by: "CSI ProMax field test"));
+                c => Pack.Build(link, [], cases, link.Combos(), c, null, by: "CSI ProMax field test"));
             packBuilt = pack; took = watch.Elapsed;
             var file = Path.Combine(ctx.Folder, ModelerFieldSteps.ModelName + " ETABS.cpmx");
             File.WriteAllBytes(file, pack.Zip);

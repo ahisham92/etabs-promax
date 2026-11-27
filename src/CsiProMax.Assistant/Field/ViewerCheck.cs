@@ -450,7 +450,7 @@ public static class ViewerCheck
             JsonObject? checks = null;
             try { checks = ProgramTools.Report(JsonDocument.Parse("""{"drift_limit":0.002}""").RootElement, link).AsObject(); }
             catch (Exception ex) when (ex is not (OperationCanceledException or OutOfMemoryException)) { /* the pack goes without checks; the checks have their own steps */ }
-            var pack = Pack.Build(link, [], cases, link.Combos(), checks, null, mostRows: 20000, by: "CSI ProMax field test");
+            var pack = Pack.Build(link, [], cases, link.Combos(), checks, null, by: "CSI ProMax field test");
             content = pack.Content;
             seen = Run(pack.Content, Path.Combine(ctx.Folder, "Viewer"), program, browser);
             if (seen.NotRun is not null) throw new FieldSkipException(seen.NotRun);

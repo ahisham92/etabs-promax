@@ -53,19 +53,25 @@ public static class PackSpeedField
             {
                 using var session = PackSession.Start(from);
                 var checks = ProgramTools.Report(System.Text.Json.JsonDocument.Parse("{}").RootElement, from).AsObject();
-                return Pack.Build(from, [], from.LoadCases(), from.Combos(), checks, null, mostRows: 20000, by: "CSI ProMax field test, from a copy", fileAs: file);
+                return Pack.Build(from, [], from.LoadCases(), from.Combos(), checks, null, by: "CSI ProMax field test, from a copy", fileAs: file);
             });
             FieldContext.Expect(copy.Value is not null, $"the pack was not read from a copy: {copy.Said}");
             got = copy.Value!;
             var timing = got.Content["manifest"]?["timing"];
             FieldContext.Expect(copy.Took <= Pack.MostTime,
                 $"copying, opening in a hidden {link.Program.Name}, reading the pack and closing took {copy.Took.TotalSeconds:0} s, more than {Pack.MostTime.TotalSeconds:0} s (reading alone {timing?["seconds"]} s). Slowest: {timing?["slowest"]?.ToJsonString()}");
+            var cut = Cut(got.Content);
+            FieldContext.Expect(cut.Count == 0, "the pack is not whole: " + string.Join(", ", cut));
             var target = Path.Combine(ctx.Folder, ModelerFieldSteps.ModelName + $" {link.Program.Name} from a copy.cpmx");
             File.WriteAllBytes(target, got.Zip);
             return new { seconds = Math.Round(copy.Took.TotalSeconds, 1), reading = timing?["seconds"]?.ToJsonString(), file = Path.GetFileName(target), frames = got.Frames, areas = got.Areas, tables = got.Tables.Count, notes = got.Notes };
         });
         return got;
     }
+
+    /// <summary>The tables a pack cut short (lossless: none may be).</summary>
+    internal static List<string> Cut(JsonObject content) =>
+        (content["tables"] as JsonObject ?? []).Where(t => t.Value?["left_out"] is not null).Select(t => $"{t.Key} ({t.Value!["left_out"]} rows left out)").ToList();
 
     /// <summary>The large model's size per program: bays each way and stories (SAFE takes one floor, so a wider one).</summary>
     internal static (int Bays, int Stories) LargeSize(CsiProgram program) => program.Key == CsiProgram.Safe.Key ? (20, 1) : (10, 15);
@@ -112,6 +118,8 @@ public static class PackSpeedField
             var load = w.Elapsed.TotalSeconds;
             var tables = (pack["tables"] as JsonObject)?.Count ?? 0;
             var rows = (pack["tables"] as JsonObject)?.Sum(t => (t.Value?["rows"] as JsonArray)?.Count ?? 0) ?? 0;
+            var cut = Cut(pack);
+            FieldContext.Expect(cut.Count == 0, "the results are not whole: " + string.Join(", ", cut));
             var round = At("results") + At("close") + load;
             var slowest = pack["manifest"]?["timing"]?["slowest"]?.ToJsonString();
             FieldContext.Expect(status["closed"]?.GetValue<bool>() == true, $"{program.Name} was not closed after the run, so its licence is still held");

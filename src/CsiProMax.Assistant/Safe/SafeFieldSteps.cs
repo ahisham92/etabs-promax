@@ -280,7 +280,7 @@ public static class SafeFieldSteps
         {
             var watch = System.Diagnostics.Stopwatch.StartNew();
             var (checks, pack) = PackSpeedField.Build(link, () => ProgramTools.Report(System.Text.Json.JsonDocument.Parse("{}").RootElement, link).AsObject(),
-                c => Pack.Build(link, [], link.LoadCases(), link.Combos(), c, null, mostRows: 20000, by: "CSI ProMax field test"));
+                c => Pack.Build(link, [], link.LoadCases(), link.Combos(), c, null, by: "CSI ProMax field test"));
             packBuilt = pack; took = watch.Elapsed;
             var file = Path.Combine(ctx.Folder, ModelerFieldSteps.ModelName + " SAFE.cpmx");
             File.WriteAllBytes(file, pack.Zip);
