@@ -510,7 +510,7 @@ static class ExtrasTests
         yield return ("Ahmed 2026-11-27: a units change shows the whole model in the new units (stories, sections, materials, loads, tables) and it is saved in its own units, exactly as it was", () =>
         {
             static string Text(StructuralModel m) => string.Join("\n", E2kWriter.Write(m).Split('\n').Where(l => !l.StartsWith("$ File", StringComparison.Ordinal)));
-            var m = ModelEdit.New("Units check");
+            var m = Seed.Etabs23();
             m.LineLoads.Add(new LineLoad { Object = "B1", Story = m.Stories[^1].Name, Tokens = ["TYPE", "\"UNIFF\"", "DIR", "\"GRAV\"", "LC", "\"Dead\"", "FVAL", "10"] });
             m.PointLoads.Add(new PointLoad { Object = "1", Story = m.Stories[^1].Name, Tokens = ["TYPE", "\"FORCE\"", "LC", "\"Dead\"", "FX", "5", "MZ", "2"] });
             (m.DefinitionTables ??= [])["Deck Property Definitions"] = [new() { ["Name"] = "D1", ["SlabDepth"] = "0.1", ["DeckUnitWt"] = "0.11", ["Notes"] = "12" }];
