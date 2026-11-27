@@ -92,7 +92,13 @@ public static class MenuCommand
             for (var i = 0; i < path.Count; i++)
             {
                 var item = Find(under, path[i], processId, most);
-                if (item is null) return $"the menu has no \"{path[i]}\"" + (i > 0 ? $" under \"{path[i - 1]}\"" : "");
+                // A WinForms drop-down that Expand did not open (the window not in front) is opened as a click opens it.
+                if (item is null && i > 0 && under.TryGetCurrentPattern(InvokePattern.Pattern, out var click))
+                {
+                    try { ((InvokePattern)click).Invoke(); } catch (InvalidOperationException) { }
+                    item = Find(under, path[i], processId, most);
+                }
+                if (item is null) return $"the menu has no \"{path[i]}\"" + (i > 0 ? $" under \"{path[i - 1]}\"" : "") + Shows(under, processId);
                 if (!item.Current.IsEnabled) return $"\"{string.Join(" > ", path.Take(i + 1))}\" is greyed out";
                 if (i == path.Count - 1)
                 {
@@ -110,6 +116,25 @@ public static class MenuCommand
         {
             return $"the menu could not be picked ({ex.GetType().Name}: {ex.Message})";
         }
+    }
+
+    /// <summary>
+    /// The items the menu showed instead, for the report: on 0.4.73 (Ahmed's PC) "Shear Wall Design" was not found under
+    /// "Design" in ETABS 23.2 Plus, and the report could not say what was there.
+    /// </summary>
+    private static string Shows(AutomationElement under, int processId)
+    {
+        try
+        {
+            var items = new OrCondition(new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.MenuItem), new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.SplitButton));
+            var names = new List<string>();
+            foreach (AutomationElement e in under.FindAll(TreeScope.Descendants, items)) names.Add(e.Current.Name);
+            foreach (AutomationElement top in AutomationElement.RootElement.FindAll(TreeScope.Children, new PropertyCondition(AutomationElement.ProcessIdProperty, processId)))
+                foreach (AutomationElement e in top.FindAll(TreeScope.Descendants, new AndCondition(new PropertyCondition(AutomationElement.ProcessIdProperty, processId), items))) names.Add(e.Current.Name);
+            var shown = names.Where(n => !string.IsNullOrWhiteSpace(n)).Distinct().Take(60).ToList();
+            return shown.Count == 0 ? "; it showed no items at all (its drop-down did not open)" : "; it showed: " + string.Join(" | ", shown);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or ElementNotAvailableException or System.Runtime.InteropServices.COMException) { return ""; }
     }
 
     /// <summary>The largest top-level window of the process with no owner: a hidden program's main window.</summary>

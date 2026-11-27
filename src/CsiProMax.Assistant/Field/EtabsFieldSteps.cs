@@ -58,6 +58,8 @@ public static class EtabsFieldSteps
         });
         // The Frame/Wall Nonlinear Hinges forms' hinges, set in the Modeler's part, read back from ETABS.
         EtabsHingeRoundTrip.Check(ctx);
+        // Link Property Data, every type, and its acceptance criteria, read back from ETABS's own link tables.
+        EtabsLinkRoundTrip.Check(ctx);
         ctx.Step("the fixed supports at the base came across", () =>
         {
             var z0 = link.Stories()[0].Elevation;
@@ -434,10 +436,9 @@ public static class EtabsFieldSteps
         ctx.Step("the review pack of the scratch model is written", () =>
         {
             var cases = link.LoadCases();
-            var watch = System.Diagnostics.Stopwatch.StartNew();
-            var (checks, pack, lost) = PackSpeedField.Build(link, () => ProgramTools.Report(System.Text.Json.JsonDocument.Parse("""{"drift_limit":0.002}""").RootElement, link).AsObject(),
+            var (checks, pack, lost, packTook) = PackSpeedField.Build(link, () => ProgramTools.Report(System.Text.Json.JsonDocument.Parse("""{"drift_limit":0.002}""").RootElement, link).AsObject(),
                 c => Pack.Build(link, [], cases, link.Combos(), c, null, by: "CSI ProMax field test"));
-            packBuilt = pack; packLost = lost; took = watch.Elapsed;
+            packBuilt = pack; packLost = lost; took = packTook;
             var file = Path.Combine(ctx.Folder, ModelerFieldSteps.ModelName + " ETABS.cpmx");
             File.WriteAllBytes(file, pack.Zip);
             FieldContext.Expect(pack.Frames == link.Frames().Count && pack.Areas == link.Areas().Count, $"the pack holds {pack.Frames} frames and {pack.Areas} areas, the model has {link.Frames().Count} and {link.Areas().Count}");

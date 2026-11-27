@@ -180,6 +180,10 @@ public static class FrameTableShapes
         }).ToList();
     }
 
+    /// <summary>A section as ETABS wrote it in its own .e2k (its SHAPE line, no table rows given here): it goes back
+    /// as read, since ETABS reads what it wrote, and nothing is put over it through the shape's table.</summary>
+    public static bool AsRead(FrameSection s) => s.Tables is null && s.Lines.Any(l => l.Contains("SHAPE", StringComparer.OrdinalIgnoreCase));
+
     /// <summary>
     /// The .e2k lines for a section of one of these shapes: an auto select list as ETABS writes it; any other shape as a
     /// stand-in of the same name the .e2k can carry (a concrete rectangle or a steel I of its depth and width, its own
@@ -187,7 +191,15 @@ public static class FrameTableShapes
     /// </summary>
     public static IEnumerable<List<string>> E2kLines(FrameSection s, StructuralModel m)
     {
-        if (s.Shape == "Auto Select") { foreach (var l in s.Lines) yield return l; yield break; }
+        if (s.Shape == "Auto Select" || AsRead(s)) { foreach (var l in s.Lines) yield return l; yield break; }
+        // A Section Designer section with its shapes (SDSECTION lines) goes as ETABS writes it: MATERIAL and SHAPE "SD Section".
+        if (s.Shape == "SD Section" && SectionDesigner.Has(m, s.Name))
+        {
+            if (s.Lines.Any(l => l.Contains("SHAPE") && l.Contains("MATERIAL"))) { foreach (var l in s.Lines) yield return l; yield break; }
+            yield return ["MATERIAL", Quote(s.Material.Length > 0 ? s.Material : m.Materials.First().Name), "SHAPE", Quote("SD Section")];
+            foreach (var l in s.Lines.Where(l => l.Count > 0 && PropertyDefs.FrameModifiers.Contains(l[0]))) yield return l;
+            yield break;
+        }
         // A section turned into a Section Designer section keeps the line it had: ETABS gets the section it was.
         if (SdSource(s) is { } was)
         {

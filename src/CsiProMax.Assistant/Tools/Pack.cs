@@ -296,6 +296,10 @@ public static class Pack
             var kind = PackTables.Kind(t);
             if (kind is null && !DesignResults.IsDesignTable(t.Name) && !DesignResults.IsWallTable(t.Name)) continue;
             var held = tables[t.Name] as JsonObject;
+            // A table the program lists as empty is not the model's (the pack leaves it out the same way): ETABS 23.2 lists
+            // the design preferences of every code not in use as empty and still gives each its row of defaults, and
+            // reading all 249 of them counted them as lost and took the field test's pack past 3 minutes (0.4.73).
+            if (held is null && t.Empty) continue;
             if (held is not null && held["left_out"] is { } cut) { lost.Add($"'{t.Name}': {cut} rows left out"); continue; }
             // A table read a load case at a time is not read whole again to count it: its rows came from the program.
             if (held is not null && parts.Any(n => n.Contains($"'{t.Name}'", StringComparison.Ordinal))) continue;
