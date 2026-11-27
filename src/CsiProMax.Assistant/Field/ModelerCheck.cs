@@ -631,6 +631,55 @@ public static class ModelerCheck
           const off = Object.keys(want).filter(k => JSON.stringify(got[k]) !== JSON.stringify(want[k]));
           return off.length ? {fail: off.map(k => `${k}: ${got[k].join(" | ")}`).join("; ")} : {ok: `Analyze ${an.length} items, Draw ${dr.length} items, in the program's order and words`};
         });
+        // The Detailing menu item by item and its rule forms with every sub-form they open (pictures in
+        // field/reference-forms/etabs/Detailing): titles in the program's words; a value set and OK is kept with the model,
+        // Set to Default Values and OK puts the program's defaults back.
+        await step("Detailing menu and its rule forms, as the program has them (23.2 pictures)", async () => {
+          if (program !== "etabs") { await hmRun("set_model_program", {program: "etabs"}, true); for (let i = 0; i < 30 && program !== "etabs"; i++) { if (window.cpmPull) await window.cpmPull(); await wait(200); } }
+          const m = programMenus(), words = l => (l || []).filter(Boolean).map(x => x[0]), sub = n => ((m.Detailing || []).find(x => x && x[0] === n) || [])[1];
+          const want = {top: ["Bar Selection and Curtailment Rule", "Clear Detailing...", "Concrete Detailing", "Steel Detailing", "Drawing Management", "Generate/Show Beam Groups...", "DetailingComments and Log..."],
+            "Bar Selection and Curtailment Rule": ["Beam Bar Selection and Curtailment Rule...", "Slab/Mat/Footing Bar Selection and Curtailment Rule...", "Column Stack Bar Selection and Curtailment Rule...", "Wall Stack Bar Selection and Curtailment Rule..."],
+            "Concrete Detailing": ["Run/Update Beam Detailing/Check", "Run/Update Slab/Mat/Footing Detailing/Check", "Run/Update Column Stack Detailing/Check", "Run/Update Wall Stack Detailing/Check", "Show/Edit Beam Detailing...", "Show/Edit Slab/Mat/Footing Detailing...", "Show/Edit Column Stack Detailing...", "Show/Edit Wall Stack Detailing...", "Clear Beam Detailing...", "Clear Slab/Mat/Footing Detailing...", "Clear Column Stack Detailing...", "Clear Wall Stack Detailing..."],
+            "Steel Detailing": ["Run/Update Beam Detailing/Check", "Run/Update Column Stack Detailing/Check", "Show/Edit Beam Detailing...", "Show/Edit Column Stack Detailing...", "Clear Beam Detailing...", "Clear Column Stack Detailing..."],
+            "Drawing Management": ["Drawing Sheet Setup...", "Drawing Format Properties...", "Open Drawing Manager...", "Clear Drawing Manager..."]};
+          const got = {top: words(m.Detailing).filter(x => x !== "Engine Extras")}; for (const k of Object.keys(want)) if (k !== "top") got[k] = words(sub(k));
+          const off = Object.keys(want).filter(k => JSON.stringify(got[k]) !== JSON.stringify(want[k]));
+          if (off.length) return {fail: off.map(k => `${k}: ${got[k].join(" | ")}`).join("; ")};
+          const top = () => { const f = document.querySelectorAll(".dlg"); return f[f.length - 1]; }, title = () => (top() && top().querySelector(".dt b") || {}).textContent || "";
+          const forms = [["m:etq:beam", "Concrete Beam: Bar Selection and Curtailment Rule", [["#etqDev", "Bar Development Rules"], ["#etqCur", "Rebar Curtailment Rules"], ["#etqSel", "Rebar Selection Rules"], ["#etqLong", "Longitudinal Rebars in Sections"]]],
+            ["m:etq:slab", "Slab/Mat/Footing: Bar Selection and Curtailment Rule", [["#etqSDev", "Bar Development Rules"], ["#etqSCur", "Slab Rebar Curtailment Rules"], ["#etqSSel", "Rebar Selection Rules for Strip"], ["#etqMSel", "Rebar Selection Rules for Strip"], ["#etqFSel", "Rebar Selection Rules for Footing"]]],
+            ["m:etq:column", "Concrete Column Stack: Bar Layout and Selection Rule", [["#etqCSel", "Rebar Selection Rules", ["#etqConf", "Confinement: Non Seismic Detailing"]], ["#etqCSpl", "Bar Splices"]]],
+            ["m:etq:wall", "Concrete Wall Stack: Detailing Rules", [["#etqSpan", "Spandrel Rebar Rules"]]]];
+          const said = [];
+          for (const [a, name, subs] of forms) {
+            await act(a); await wait(500);
+            if (title() !== name) return {fail: `${a} opened "${title()}", not "${name}"`};
+            const main = top();
+            for (const [b, t, inner] of subs) {
+              const btn = main.querySelector(b); if (!btn || btn.disabled) return {fail: `${name}: no ${b} button`};
+              btn.click(); await wait(250);
+              if (title() !== t) return {fail: `${name}: ${b} opened "${title()}", not "${t}"`};
+              if (inner) { top().querySelector(inner[0]).click(); await wait(250); if (title() !== inner[1]) return {fail: `${t}: opened "${title()}", not "${inner[1]}"`}; top().close(); }
+              top().close(); await wait(100);
+            }
+            said.push(`${name}: ${main.querySelectorAll("[data-p]").length} fields, ${subs.length} sub-forms`);
+            main.close(); await wait(100);
+          }
+          // Wall: Pier Rebar Rules opens once Satisfy Required As using Rules is chosen, as in the program.
+          await act("m:etq:wall"); await wait(500);
+          let main = top(); main.querySelector('[data-p="main.pier"][value="rules"]').click(); await wait(100);
+          main.querySelector("#etqPier").click(); await wait(250);
+          if (title() !== "Pier Rebar Rules") return {fail: "Pier Rebar Rules did not open: " + title()};
+          top().close(); formOk("OK"); await wait(900);
+          await act("m:etq:wall"); await wait(500); main = top();
+          if (!main.querySelector('[data-p="main.pier"][value="rules"]').checked) return {fail: "the wall rule chosen and OK was not kept"};
+          main.querySelector("#etqDef").click(); await wait(100); formOk("OK"); await wait(900);
+          const j = await hmRun("detailing_rules", {}, true);
+          if (!j.ok || (j.result.rules || {}).wall) return {fail: "Set to Default Values and OK did not put the defaults back: " + JSON.stringify(j.result || j.error)};
+          return {ok: `Detailing ${got.top.length} items in the program's order and words; ` + said.join("; ") + "; a wall rule was kept and put back to defaults"};
+        });
+        if (window.cpmForms) for (const [what, label] of [["beam", "Beam"], ["slab", "Slab/Mat/Footing"], ["column", "Column Stack"], ["wall", "Wall Stack"]])
+          window.cpmForms.push({path: `Detailing > Bar Selection and Curtailment Rule > ${label} Bar Selection and Curtailment Rule...`, act: "m:etq:" + what, target: "etabs"});
         for (const it of list) {
           await step("menu: " + it.path, async () => {
             if (it.target && program !== it.target) { await hmRun("set_model_program", {program: it.target}, true); for (let i = 0; i < 30 && program !== it.target; i++) { if (window.cpmPull) await window.cpmPull(); await wait(200); } }
