@@ -81,6 +81,8 @@ public static class FromStructural
         {
             var story = m.StoryIndex(aa.Story);
             if (story < 0 || !areas.TryGetValue(aa.Label, out var area)) continue;
+            // An opening is a hole, not a shell (ETABS: AREAASSIGN ... OPENING "Yes", no section): nothing to analyse.
+            if (Yes(Find(aa.Extra, "OPENING"))) continue;
             var corners = new List<string>();
             for (var k = 0; k < area.PointNames.Count; k++)
             {
@@ -104,7 +106,7 @@ public static class FromStructural
         }
         a.Joints.AddRange(joints.Values);
 
-        var loaded = m.PointLoads.Cast<ObjectLoad>().Concat(m.LineLoads).Concat(m.AreaLoads).Select(l => l.Pattern).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var loaded = m.PointLoads.Cast<ObjectLoad>().Concat(m.LineLoads).Concat(LoadSets.Expanded(m)).Select(l => l.Pattern).ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var p in m.LoadPatterns)
             a.Patterns.Add(new Pattern(p.Name, p.Type, p.SelfWeight, loaded.Contains(p.Name) || p.Extra.Count > 0));
 
@@ -190,6 +192,10 @@ public static class FromStructural
         var loads = new List<(string, double)>();
         foreach (var r in mine)
             if (E2kText.Value(r, "LOADPAT") is { } lp) loads.Add((lp, E2kText.TryNumber(E2kText.Value(r, "MULTIPLIER") ?? E2kText.Value(r, "SF"), out var sf) ? sf : 1));
+        // ETABS 23 writes each pattern of the mass source on a line of its own, by position:
+        // MASSSOURCELOAD "MsSrc1" "Dead" 1 (Ahmed's real model, 2026-11-27: read as no mass at all).
+        foreach (var t in raw.Lines.Select(E2kText.Tokenize).Where(t => t.Count >= 3 && t[0].Equals("MASSSOURCELOAD", StringComparison.OrdinalIgnoreCase) && E2kText.Unquote(t[1]) == chosen))
+            loads.Add((E2kText.Unquote(t[2]), t.Count > 3 && E2kText.TryNumber(t[3], out var f) ? f : 1));
         var fromLoads = Flag("INCLUDELOADS");
         a.Mass = new MassSource(chosen, Flag("INCLUDEELEMENTS"), Flag("INCLUDEADDEDMASS"), fromLoads ? loads : []);
     }

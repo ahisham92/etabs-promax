@@ -130,8 +130,11 @@ public sealed class OfflineEtabs : ICsiLink, CsiProMax.Assistant.Tools.IModelDra
     public IReadOnlyList<FrameRow> Frames() => Physical.Frames(Model)
         .Select(f => new FrameRow(Name(f.Label, f.Story), f.Section ?? "", f.Story, f.Kind.ToString().ToLowerInvariant(), f.I.X, f.I.Y, f.I.Z, f.J.X, f.J.Y, f.J.Z)).ToList();
 
-    public IReadOnlyList<AreaRow> Areas() => Physical.Areas(Model)
+    // An opening is drawn as ETABS draws one (Drawing: "openings"), not as a floor with no section.
+    public IReadOnlyList<AreaRow> Areas() => Physical.Areas(Model).Where(a => !OpeningAt(a.Label, a.Story))
         .Select(a => new AreaRow(Name(a.Label, a.Story), a.Section ?? "", a.Kind == AreaKind.Wall ? "wall" : "floor", a.Corners.Select(c => (c.X, c.Y, c.Z)).ToList())).ToList();
+
+    private bool OpeningAt(string label, string story) => Model.AreaAssigns.Any(x => x.Label == label && x.Story == story && SlabDefs.IsOpening(x));
 
     /// <summary>The pier and spandrel labels the .e2k gives (PIER "P1", SPANDREL "S1" on an assignment line), with the
     /// object's name as <see cref="Frames"/> and <see cref="Areas"/> give it. Type is "a" for an area, "f" for a frame.</summary>
@@ -372,7 +375,7 @@ public sealed class OfflineEtabs : ICsiLink, CsiProMax.Assistant.Tools.IModelDra
                 : Row(l, "Force", Dir(l), "RelDist", V(l, "RDSTART"), V(l, "RDEND", "1"), V(l, "FSTART"), V(l, "FEND"))).ToList(),
             "Frame Loads - Point" => Model.LineLoads.Where(l => Is(l, "POINTF", "POINTM")).Select(l => Row(l, Is(l, "POINTM") ? "Moment" : "Force", Dir(l), V(l, "RDIST", "0.5"), V(l, "FVAL"))).ToList(),
             "Frame Loads - Temperature" => Model.LineLoads.Where(l => Is(l, "TEMP")).Select(l => Row(l, "Temperature", V(l, "TEMP"), V(l, "TEMPGRAD", ""))).ToList(),
-            "Shell Loads - Uniform" => Model.AreaLoads.Where(l => Is(l, "UNIFF")).Select(l => Row(l, Dir(l), V(l, "FVAL"))).ToList(),
+            "Shell Loads - Uniform" => LoadSets.Expanded(Model).Where(l => Is(l, "UNIFF")).Select(l => Row(l, Dir(l), V(l, "FVAL"))).ToList(),
             "Shell Loads - Temperature" => Model.AreaLoads.Where(l => Is(l, "TEMP")).Select(l => Row(l, "Temperature", V(l, "TEMP"), V(l, "TEMPGRAD", ""))).ToList(),
             "Joint Loads - Force" => Model.PointLoads.Where(l => T(l, "TYPE") is "" || Is(l, "FORCE")).Select(l => Row(l, V(l, "FX"), V(l, "FY"), V(l, "FZ"), V(l, "MX"), V(l, "MY"), V(l, "MZ"))).ToList(),
             "Joint Loads - Temperature" => Model.PointLoads.Where(l => Is(l, "TEMP")).Select(l => Row(l, V(l, "TEMP"))).ToList(),
