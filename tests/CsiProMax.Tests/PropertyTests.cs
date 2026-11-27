@@ -19,7 +19,7 @@ static class PropertyTests
 
     static JsonObject Run(ICsiLink link, string tool, object args)
     {
-        var t = PropertyTools.All.Concat(CaseTools.All).Concat(HandTools.All).First(x => x.Name == tool);
+        var t = PropertyTools.All.Concat(CaseTools.All).Concat(HandTools.All).Concat(DefineTools.All).First(x => x.Name == tool);
         return (JsonObject)t.Run(JsonDocument.Parse(JsonSerializer.Serialize(args)).RootElement, link);
     }
 
@@ -515,7 +515,7 @@ static class PropertyTests
             Refused(link, "define_table_rows", new { table = "Link Property Definitions - Gap", name = "LX", rows = new object[] { new Dictionary<string, string> { ["Nope"] = "1" } } }, "no field 'Nope'");
             // define_link (the tools' simple form) on a form's link keeps the link's own fields and replaces its directions.
             Run(link, "define_link", new { name = "LR", type = "GAP", dofs = new { U1 = new { stiffness = 5, damping = 0 } } });
-            Check(StructureExtras.Get(link.Model, "Link Property Definitions - Gap", "LR").Count > 0, "define_link on a form's link");
+            Check(PropertyDefs.Links(link.Model).Single(x => x.Name == "LR").Type == "GAP" && link.Model.DefinitionTables?.GetValueOrDefault("Link Property Definitions - Multilinear - Elastic")?.Exists(r => r["Name"] == "LR") != true, "define_link on a form's link: its type and directions, the form's old rows gone");
             Run(link, "define_link", new { name = "LL", delete = true });
             Check(!PropertyDefs.Links(link.Model).Exists(x => x.Name == "LL") && link.Model.DefinitionTables?.GetValueOrDefault(EtabsLinkTables.AcceptForce) is null && link.Model.DefinitionTables?.GetValueOrDefault("Link Property Definitions - Linear")?.Exists(r => r["Name"] == "LL") != true, "a deleted link leaves no row, acceptance criteria too");
             var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));

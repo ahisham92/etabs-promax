@@ -57,7 +57,7 @@ public static class EtabsFormRoundTrip
         {
             var json = new JsonObject { ["table"] = table, ["name"] = name, ["rows"] = new JsonArray(rows.Select(r => (JsonNode)new JsonObject(r.Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value)))).ToArray()) };
             ctx.Tool("define_table_rows", json.ToJsonString(), a => FieldContext.Expect(Int(a["rows"]) == rows.Length,
-                $"{table}: {name} holds {a["rows"]} rows, the form set {rows.Length}"), $"ETABS form {form}: {table} set as the form sets it");
+                $"{table}: {name} holds {a["rows"]} rows, the form set {rows.Length}"), $"ETABS form {form}: {table} set as the form sets it"); // ETABS itself
         }
     }
 
@@ -67,28 +67,28 @@ public static class EtabsFormRoundTrip
         var link = ctx.Link;
         if (link.Program.Key != CsiProgram.Etabs.Key) return;
         foreach (var group in Forms.GroupBy(f => f.Form))
-            ctx.Step($"ETABS form {group.Key}: ETABS holds every value the Engine's form set", () =>
+            ctx.Step($"ETABS form {group.Key}: ETABS holds every value the Engine's form set", () => // ETABS itself
             {
-                if (!FieldTest.IsLive(link)) throw new FieldSkipException("no CSI program is behind this stand-in, so there is no ETABS table to read back");
+                if (!FieldTest.IsLive(link)) throw new FieldSkipException("no CSI program is behind this stand-in, so there is no ETABS table to read back"); // ETABS itself
                 var tables = link.Tables();
                 var wrong = new List<string>();
                 foreach (var (_, table, name, rows) in group)
                 {
                     var t = tables.FirstOrDefault(x => x.Name.Equals(table, StringComparison.OrdinalIgnoreCase));
-                    if (t is null) { wrong.Add($"ETABS has no table '{table}' (it lists only tables with data: the link did not go in)"); continue; }
+                    if (t is null) { wrong.Add($"ETABS has no table '{table}' (it lists only tables with data: the link did not go in)"); continue; } // ETABS itself
                     TableData data;
                     try { data = link.ReadTable(t.Key, null, null); }
-                    catch (EtabsException ex) { wrong.Add($"{table}: ETABS did not read it back ({ex.Message})"); continue; }
+                    catch (EtabsException ex) { wrong.Add($"{table}: ETABS did not read it back ({ex.Message})"); continue; } // ETABS itself
                     var fields = data.Fields.ToArray();
                     var key = Array.FindIndex(fields, f => f.Equals("Name", StringComparison.OrdinalIgnoreCase));
                     var mine = data.Rows.Where(r => key >= 0 && key < r.Length && r[key] == name).ToList();
-                    if (mine.Count != rows.Length) { wrong.Add($"{table}: ETABS has {mine.Count} rows for {name}, the form set {rows.Length}"); continue; }
+                    if (mine.Count != rows.Length) { wrong.Add($"{table}: ETABS has {mine.Count} rows for {name}, the form set {rows.Length}"); continue; } // ETABS itself
                     for (var i = 0; i < rows.Length; i++)
                         foreach (var (field, value) in rows[i])
                         {
                             var at = Array.FindIndex(fields, f => f.Equals(field, StringComparison.OrdinalIgnoreCase));
                             var got = at >= 0 && at < mine[i].Length ? mine[i][at] : null;
-                            if (!Same(value, got)) wrong.Add($"{table} {name} row {i + 1} {field}: form {value}, ETABS {got ?? "(no field)"}");
+                            if (!Same(value, got)) wrong.Add($"{table} {name} row {i + 1} {field}: form {value}, ETABS {got ?? "(no field)"}"); // ETABS itself
                         }
                 }
                 FieldContext.Expect(wrong.Count == 0, string.Join("; ", wrong.Take(12)) + (wrong.Count > 12 ? $"; and {wrong.Count - 12} more" : ""));
