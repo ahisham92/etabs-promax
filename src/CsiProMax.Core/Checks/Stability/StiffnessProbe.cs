@@ -23,7 +23,8 @@ public static class StiffnessProbe
     /// <summary>A direction that was found free: a joint's (Joint ≥ 0, Dof 0..5) or a rigid floor's (Floor ≥ 0, Dof 0 UX, 1 UY, 5 RZ).</summary>
     public sealed record Free(int Joint, int Floor, int Dof, double Pivot);
 
-    public sealed record Result(bool Ran, string Why, int Equations, long Profile, IReadOnlyList<Free> Free, bool IllConditioned);
+    /// <param name="Held">Joint translations no member gives any stiffness to, held as the program holds them (holdUnstiffened).</param>
+    public sealed record Result(bool Ran, string Why, int Equations, long Profile, IReadOnlyList<Free> Free, bool IllConditioned, int Held = 0);
 
     /// <summary>A rigid floor: its joints move together in plan (UX, UY, RZ) about its centre.</summary>
     public sealed record Floor(IReadOnlyList<int> Joints, double X, double Y);
@@ -32,8 +33,12 @@ public static class StiffnessProbe
     /// <param name="fixedDof">Each joint's 6 restrained directions (a restrained direction has no equation).</param>
     /// <param name="springDof">A support spring in that direction (adds stiffness of the order of the joint's own).</param>
     /// <param name="active">The directions the program solves for (all six; SAFE: UZ, RX, RY).</param>
+    /// <param name="holdUnstiffened">A joint translation no member gives any stiffness to (the corner of a membrane
+    /// floor up and down, a joint only a pinned truss reaches across it) is held, not reported: ETABS and SAFE carry a
+    /// membrane floor's load to its beams and leave such directions out of the analysis, as every CSI program does with
+    /// the rotations of a pinned joint. SAP2000 analyses every joint it is given, so there it is reported.</param>
     public static Result Run(IReadOnlyList<(double X, double Y, double Z)> xyz, bool[][] fixedDof, bool[][] springDof, IReadOnlyList<Bar> bars,
-        IReadOnlyList<Floor> floors, bool[] active, int mostEquations = 60000, long mostProfile = 25_000_000)
+        IReadOnlyList<Floor> floors, bool[] active, int mostEquations = 60000, long mostProfile = 25_000_000, bool holdUnstiffened = false)
     {
         var n = xyz.Count;
         // Equations: a joint's free directions, except those a rigid floor carries, then each floor's UX, UY, RZ.
@@ -174,6 +179,7 @@ public static class StiffnessProbe
         var free = new List<Free>();
         var diag = new double[neq];
         var ill = false;
+        var heldCount = 0;
         for (var pj = 0; pj < neq; pj++)
         {
             var fj = first[pj];
@@ -202,6 +208,11 @@ public static class StiffnessProbe
                 // No member gives this rotation any stiffness (every member is pinned there): the program holds it.
                 diag[pj] = 1;
             }
+            else if (own <= 0 && floor < 0 && holdUnstiffened)
+            {
+                heldCount++;
+                diag[pj] = 1;
+            }
             else if (own <= 0)
             {
                 // A translation, or a floor, with no stiffness at all: it has mass and load, and nothing holds it.
@@ -220,7 +231,7 @@ public static class StiffnessProbe
             }
             k2[col + (pj - fj)] = diag[pj];
         }
-        return new Result(true, "", neq, profile, free, ill);
+        return new Result(true, "", neq, profile, free, ill, heldCount);
     }
 
     /// <summary>Reverse Cuthill-McKee: an order of the equations that keeps the matrix narrow, part by part.</summary>

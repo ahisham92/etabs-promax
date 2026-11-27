@@ -29,6 +29,9 @@ public static partial class S2kReader
         var notes = new List<string>();
         var m = Tables(tables, title, notes, keep: true);
         m.Target = "sap2000";
+        // Every table of the file is kept as it was, and what the writer makes of the model just read is the base the
+        // changes are measured from: the file goes back out as it came in, with only the changes put in.
+        m.Source = SourceTables.Capture("sap2000", text, S2kWriter.WriteOwn(m).Text);
         return new Result(m, false, notes.Distinct().ToList());
     }
 

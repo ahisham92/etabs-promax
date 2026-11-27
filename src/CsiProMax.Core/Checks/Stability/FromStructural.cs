@@ -76,6 +76,28 @@ public static class FromStructural
                 la.Section, releases, Meshed: program != "sap2000", Spring: Has(la.Extra, "SPRINGPROP")));
         }
 
+        // Links: ETABS writes them among the lines (LINE "K1" LINK "1" "2" 0), which the model keeps word for word; each
+        // story its LINEASSIGN names places one. A link with one joint (both ends the same point and story) holds it.
+        foreach (var raw in m.UnparsedLines.Values.SelectMany(x => x).Concat(m.Passthrough.SelectMany(p => p.Lines)))
+        {
+            var t = E2kText.Tokenize(raw);
+            if (t.Count < 4 || !t[0].Equals("LINE", StringComparison.OrdinalIgnoreCase) || !t[2].Equals("LINK", StringComparison.OrdinalIgnoreCase)) continue;
+            var label = E2kText.Unquote(t[1]);
+            string pi = E2kText.Unquote(t[3]), pj = t.Count > 4 ? E2kText.Unquote(t[4]) : pi;
+            var below = t.Count > 5 && E2kText.TryNumber(t[5], out var bl) ? (int)bl : 0;
+            foreach (var la in m.LineAssigns.Where(x => x.Label == label))
+            {
+                var story = m.StoryIndex(la.Story);
+                if (story < 0) continue;
+                var i = Joint(pi, story - below);
+                if (i is null) continue;
+                var one = pi == pj && below == 0;
+                var j = one ? null : Joint(pj, story);
+                if (!one && j is null) continue;
+                a.Links.Add(new Link(Name(label, la.Story), i, j));
+            }
+        }
+
         var areas = m.Areas.GroupBy(x => x.Label).ToDictionary(g => g.Key, g => g.First());
         foreach (var aa in m.AreaAssigns)
         {
