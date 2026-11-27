@@ -335,13 +335,15 @@ public static class FieldTest
         o.Progress?.Invoke("reading the open model");
         // A model that cannot be read at all is one failure that says so, not one for every read that follows.
         string? unread = null;
+        var standIn = false;
         try { link.Info(); }
         catch (Exception ex) when (ex is not OutOfMemoryException) { unread = $"{ex.GetType().Name}: {ex.Message}"; }
         if (unread is null) foreach (var step in SelfTest.Steps(link, o.Changes && !o.Full)) ctx.Record(step);
         else if (o.Full && o.SettingsRoot is null && OperatingSystem.IsWindows() && !CsiProgram.All.Any(p => { try { var r = System.Diagnostics.Process.GetProcessesByName(p.ProcessName); foreach (var x in r) x.Dispose(); return r.Length > 0; } catch (InvalidOperationException) { return false; } }))
-            // No CSI program is open on the PC at all (0.4.60 full test after the company closed ETABS at 4 AM): there is no
-            // engineer's model to read, which is not a fault of CSI ProMax.
-            ctx.Skip("the checks of the open model", "the open model could not be read: no ETABS, SAP2000 or SAFE is open on this PC"); // ETABS itself
+            // No CSI program is open on the PC at all (0.4.60 full test after the company closed ETABS at 4 AM): the checks
+            // are run on a hidden scratch window of their own after the parts below (StandIn), never skipped (Ahmed: the
+            // only skips are "not installed" and "no licence").
+            standIn = true;
         else
         {
             ctx.Fail("read the open model", unread + " Nothing of the open model could be read. Open a model in the program, start CSI ProMax from the program's Tools menu, and run the field test again.");
@@ -352,7 +354,7 @@ public static class FieldTest
         if (o.Full)
         {
             // Whatever a part throws, the report is written: a run that ends without one tells nobody what it found.
-            try { Full(ctx, link, o, ranParts); }
+            try { Full(ctx, link, o, ranParts, standIn); }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 var real = ex is AggregateException { InnerException: { } inner } ? inner : ex;
@@ -398,7 +400,7 @@ public static class FieldTest
 
     private static string PrintOf(Options o, string part) => o.Print is { } print ? print(part) : FieldRetest.Print(part);
 
-    private static void Full(FieldContext ctx, ICsiLink link, Options o, Dictionary<string, string> ran)
+    private static void Full(FieldContext ctx, ICsiLink link, Options o, Dictionary<string, string> ran, bool standIn = false)
     {
         ModelerFieldSteps.Run(ctx); // it writes the file each program's scratch window opens, one program alone too
         var last = o.Retest && ResultsFile(o) is { } kept ? FieldRetest.Load(kept) : [];
@@ -531,11 +533,82 @@ public static class FieldTest
             // CSI ProMax Engine's Run (Ahmed 2026-11-26) in this program, on a real PC only (a test's stand-in window is no program).
             if (finished && o.StartScratch.Method.DeclaringType == typeof(ScratchProgram)) EngineRunStep(ctx, program);
         }
-        if (!panelDone)
+        // With no program open on the PC (the company closes ETABS at 4 AM), the open model's checks and CSI ProMax's own
+        // features that found no answering scratch window run on a hidden scratch window started for them alone.
+        var openDone = !standIn;
+        var panelBefore = panelDone;
+        if (standIn || (!panelDone && !Answers(link)))
+            foreach (var program in programs)
+            {
+                if (openDone && panelDone) break;
+                if (StandIn(ctx, o, program, !openDone, !panelDone) is var (open, panel2)) { openDone |= open; panelDone |= panel2; }
+            }
+        if (!panelBefore) ran[FieldRetest.Panel] = PanelFieldSteps.Section;
+        if (!openDone)
         {
-            ran[FieldRetest.Panel] = PanelFieldSteps.Section;
-            PanelFieldSteps.Run(ctx, link, scratch: false, live: IsLive(link));
+            ctx.Section(OpenSection);
+            ctx.Fail("read the open model", "no ETABS, SAP2000 or SAFE was open on this PC, and no hidden scratch window could be started to run the open model's checks on (see the scratch parts above)."); // ETABS itself
         }
+        if (!panelDone)
+            PanelFieldSteps.Run(ctx, link, scratch: false, live: IsLive(link));
+    }
+
+    /// <summary>Whether the program behind <paramref name="link"/> answers.</summary>
+    private static bool Answers(ICsiLink link)
+    {
+        try { link.Info(); return true; }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return false; }
+    }
+
+    /// <summary>
+    /// A hidden scratch window of <paramref name="program"/> on the Modeler's file, started only to run the open model's
+    /// checks (<paramref name="open"/>) and CSI ProMax's own features (<paramref name="panel"/>) on when no program is open
+    /// on the PC; closed after them. Which of the two ran, or null when no window could be started.
+    /// </summary>
+    internal static (bool Open, bool Panel)? StandIn(FieldContext ctx, Options o, CsiProgram program, bool open, bool panel)
+    {
+        var file = ctx.Files.GetValueOrDefault(program.Key, "");
+        if (file.Length == 0 || !File.Exists(file)) return null;
+        // Its own copy: the program's part above may have changed or still hold the file it opened.
+        var copy = Path.Combine(ctx.Folder, "stand-in", program.Key, Path.GetFileName(file));
+        try { Directory.CreateDirectory(Path.GetDirectoryName(copy)!); File.Copy(file, copy, true); }
+        catch (IOException) { copy = file; }
+        catch (UnauthorizedAccessException) { copy = file; }
+        IScratchWindow? window = null;
+        bool didOpen = false, didPanel = false;
+        ctx.Within(o.ScratchLimit, $"a hidden {program.Name} for the open model's checks", () =>
+        {
+            ctx.Program = program;
+            ctx.Section(OpenSection);
+            window = o.StartScratch(program, ctx, copy);
+            if (window is null) return;
+            ctx.Link = window.Link;
+            if (open)
+            {
+                ctx.Step($"no program was open on this PC, so the open model's checks run on a hidden {program.Name}", () => Path.GetFileName(window.ModelPath));
+                foreach (var step in SelfTest.Steps(window.Link, false)) ctx.Record(step);
+                didOpen = true;
+            }
+            if (panel && Answers(window.Link))
+            {
+                PanelFieldSteps.Run(ctx, window.Link, scratch: true, live: o.LiveScratch);
+                didPanel = true;
+            }
+        });
+        if (window is { } w)
+            try
+            {
+                ctx.Section(OpenSection);
+                ScratchProgram.CloseStep(ctx, w, program);
+                w.Dispose();
+                w.PutBackPlugIns();
+            }
+            catch (Exception ex) when (ex is not (OutOfMemoryException or OperationCanceledException))
+            {
+                var real = ex is AggregateException { InnerException: { } inner } ? inner : ex;
+                ctx.Fail($"let go of the hidden {program.Name} for the open model's checks", $"{real.GetType().Name}: {real.Message}");
+            }
+        return window is null ? null : (didOpen, didPanel);
     }
 
     /// <summary>
