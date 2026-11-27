@@ -549,7 +549,7 @@ public static class FieldTest
                 // Closing and letting go never stop the test: the next program and the report still follow.
                 // The needed things from this program, gathered last, while its window is still open and answering:
                 // not steps, never failures (ReferenceData). After every step, since it saves the scratch model once more.
-                if (finished && o.ReferenceData) ReferenceData.Run(ctx.Folder, program, open.Link, open.ModelPath, (open as ScratchProgram)?.ProcessId ?? 0);
+                if (finished && o.ReferenceData) GatherReference(ctx, o, program, open);
                 try
                 {
                     ScratchProgram.CloseStep(ctx, open, program);
@@ -621,6 +621,44 @@ public static class FieldTest
     /// checks (<paramref name="open"/>) and CSI ProMax's own features (<paramref name="panel"/>) on when no program is open
     /// on the PC; closed after them. Which of the two ran, or null when no window could be started.
     /// </summary>
+    /// <summary>
+    /// The needed things from one program (ReferenceData), on its scratch window while it answers. When a call to it
+    /// never came back, they come from a fresh hidden window of the program, started for them alone, so that the
+    /// testers' zips always bring them: SAFE 23.1 stopped on one call in a tester's run (0.4.69), and every item that
+    /// read the program was lost. The fresh window's own start is not part of the test's steps.
+    /// </summary>
+    internal static void GatherReference(FieldContext ctx, Options o, CsiProgram program, IScratchWindow open)
+    {
+        // A test's stand-in window is no program: a fresh one is started only on a real PC.
+        if (Answers(open.Link) || o.StartScratch.Method.DeclaringType != typeof(ScratchProgram)) { ReferenceData.Run(ctx.Folder, program, open.Link, open.ModelPath, (open as ScratchProgram)?.ProcessId ?? 0); return; }
+        var file = ctx.Files.GetValueOrDefault(program.Key, "");
+        var lines = new List<string>();
+        IScratchWindow? fresh = null;
+        try
+        {
+            if (file.Length == 0 || !File.Exists(file)) throw new FileNotFoundException("the Modeler's file for it is not there");
+            var folder = Path.Combine(ctx.Folder, "reference window", program.Key);
+            Directory.CreateDirectory(folder);
+            var copy = Path.Combine(folder, Path.GetFileName(file));
+            File.Copy(file, copy, true);
+            var quiet = new FieldContext(program, folder, ctx.Link);
+            fresh = o.StartScratch(program, quiet, copy);
+            if (fresh is null || !Answers(fresh.Link)) throw new EtabsException($"a fresh hidden {program.Name} could not be started ({string.Join("; ", quiet.Steps.Where(st => !st.Ok).Select(st => st.Name + ": " + st.Detail).Take(2))})");
+            lines.AddRange(ReferenceData.Run(ctx.Folder, program, fresh.Link, fresh.ModelPath, (fresh as ScratchProgram)?.ProcessId ?? 0, $"The scratch window stopped answering, so these come from a fresh hidden {program.Name} started for them."));
+        }
+        catch (Exception ex) when (ex is not (OutOfMemoryException or OperationCanceledException))
+        {
+            var real = ex is AggregateException { InnerException: { } inner } ? inner : ex;
+            ReferenceData.Note(ctx.Folder, program, $"The scratch window stopped answering, and the needed things could not come from a fresh window either ({real.GetType().Name}: {real.Message}).");
+        }
+        finally
+        {
+            if (fresh is not null)
+                try { fresh.Close(); fresh.Dispose(); fresh.PutBackPlugIns(); }
+                catch (Exception ex) when (ex is not (OutOfMemoryException or OperationCanceledException)) { /* the window's own close step is not this test's */ }
+        }
+    }
+
     internal static (bool Open, bool Panel)? StandIn(FieldContext ctx, Options o, CsiProgram program, bool open, bool panel)
     {
         var file = ctx.Files.GetValueOrDefault(program.Key, "");
