@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using CsiProMax.Assistant.Etabs;
 using CsiProMax.Model;
+using CsiProMax.E2k;
 
 namespace CsiProMax.Assistant.Tools;
 
@@ -70,8 +71,8 @@ public static class PropertyTools
                 return new JsonObject { ["name"] = s.Name, ["shape"] = s.Shape };
             }, a => $"Section Designer section from {a.Text("name")}"),
         new("define_frame_shape",
-            "Adds or changes a frame section of any shape (Define > Section Properties > Frame Sections): Concrete Rectangular, Circle, Tee, L; Steel I/Wide Flange, Channel, Tee, Angle, Double Angle, Double Channel, Tube, Pipe, Rod (with .e2k dims), and every other shape of the program's list by its table fields in extras (Filled Steel Tube/Pipe, BU I Cover Plate, Standard Joist Section, Custom Steel Joist, Steel Plate, Steel Castellated, Steel Cellular, Concrete Trapezoid, Concrete Encasement Rectangle/Circle, Precast I, Concrete Cross, Box, Pipe, Cold Formed C/Z/Hat, Buckling Restrained Brace, General, Nonprismatic (rows: one per segment), Auto Select (rows: IncludedSec one per section), SD Section, Composite Shear Wall). dims are the shape's dimensions (D, B, TF, TW, ... as section_shapes lists them). modifiers (AMOD A2MOD A3MOD JMOD I2MOD I3MOD MMOD WMOD) are the section's property modifiers. extras: the form's other fields, by the program's table field names (Color, Notes; concrete NotSizeType NotAutoFact NotUserSize RigidZone; steel FilletRad, tube CornerRad; MirrorAbt2 MirrorAbt3); given, they replace the ones it has. 'was': its name now; members keep it under a new name.",
-            """{"type":"object","required":["name","shape"],"properties":{"name":{"type":"string"},"was":{"type":"string"},"shape":{"type":"string"},"material":{"type":"string"},"dims":""" + Numbers + ""","modifiers":""" + Numbers + ""","extras":{"type":"object","additionalProperties":{"type":"string"}},"rows":{"type":"array","items":{"type":"object","additionalProperties":{"type":"string"}}}}}""",
+            "Adds or changes a frame section of any shape (Define > Section Properties > Frame Sections): Concrete Rectangular, Circle, Tee, L; Steel I/Wide Flange, Channel, Tee, Angle, Double Angle, Double Channel, Tube, Pipe, Rod (with .e2k dims), and every other shape of the program's list by its table fields in extras (Filled Steel Tube/Pipe, BU I Cover Plate, Standard Joist Section, Custom Steel Joist, Steel Plate, Steel Castellated, Steel Cellular, Concrete Trapezoid, Concrete Encasement Rectangle/Circle, Precast I, Concrete Cross, Box, Pipe, Cold Formed C/Z/Hat, Buckling Restrained Brace, General, Nonprismatic (rows: one per segment), Auto Select (rows: IncludedSec one per section), SD Section, Composite Shear Wall). dims are the shape's dimensions (D, B, TF, TW, ... as section_shapes lists them). modifiers (AMOD A2MOD A3MOD JMOD I2MOD I3MOD MMOD WMOD) are the section's property modifiers. extras: the form's other fields, by the program's table field names (Color, Notes; concrete NotSizeType NotAutoFact NotUserSize RigidZone; steel FilletRad, tube CornerRad; MirrorAbt2 MirrorAbt3); given, they replace the ones it has. 'was': its name now; members keep it under a new name. An SD Section takes sd_lines: its Section Designer shapes, one string per line as the .e2k has it after SDSECTION and the name (header TYPE/DESIGNTYPE/DESIGNCHECK/NUMSHAPES/ANGLE, then SHAPE i ... lines); an empty list takes them away.",
+            """{"type":"object","required":["name","shape"],"properties":{"name":{"type":"string"},"was":{"type":"string"},"shape":{"type":"string"},"material":{"type":"string"},"dims":""" + Numbers + ""","modifiers":""" + Numbers + ""","extras":{"type":"object","additionalProperties":{"type":"string"}},"rows":{"type":"array","items":{"type":"object","additionalProperties":{"type":"string"}}},"sd_lines":{"type":"array","items":{"type":"string"}}}}""",
             Ask.Changes, (a, e) =>
             {
                 var link = Offline(e);
@@ -89,6 +90,13 @@ public static class PropertyTools
                     {
                         var sec = FrameTableShapes.Set(m, a.Need("name"), Was(a), shape, a.Text("material"), fields, rows);
                         if (mods.Count > 0) PropertyDefs.SetModifiers(sec.Lines, PropertyDefs.FrameModifiers, mods);
+                        // A Section Designer section's shapes, as its SDSECTION lines (each without SDSECTION and the name).
+                        if (shape == "SD Section" && a.TryGetProperty("sd_lines", out var sd) && sd.ValueKind == JsonValueKind.Array)
+                        {
+                            var lines = sd.EnumerateArray().Select(x => (IReadOnlyList<string>)E2kText.Tokenize(x.GetString() ?? "")).ToList();
+                            SectionDesigner.Set(m, sec.Name, lines, Was(a));
+                            if (lines.Count > 0) sec.Tables?.Remove(FrameTableShapes.SdSourceTable);
+                        }
                         return sec;
                     }));
                     return new JsonObject { ["section"] = t.Name, ["shape"] = t.Shape };
@@ -628,6 +636,7 @@ public static class PropertyTools
                 ["dims"] = new JsonObject((PropertyDefs.Shape(s.Shape)?.Dims ?? ["D", "B"]).Where(d => s.Number(d) is not null).Select(d => KeyValuePair.Create(d, (JsonNode?)JsonValue.Create(s.Number(d)!.Value)))),
                 ["modifiers"] = Numbers_(PropertyDefs.Modifiers(s.Lines, PropertyDefs.FrameModifiers)),
                 ["extras"] = new JsonObject(PropertyDefs.FrameExtras(s).Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))),
+                ["sd_lines"] = s.Shape == "SD Section" ? new JsonArray(SectionDesigner.Lines(m, s.Name).Select(l => (JsonNode)string.Join(" ", l)).ToArray()) : null,
                 ["rows"] = FrameTableShapes.Is(s.Shape) && s.Tables is not null && s.Tables.TryGetValue(s.Shape, out var fr) && fr.Count > 1 ? JsonSerializer.SerializeToNode(fr) : null,
             }).ToArray()),
             ["frame_extra_fields"] = new JsonObject(PropertyDefs.Shapes.Select(x => x.Name).Concat(FrameTableShapes.All.Keys).Select(x => KeyValuePair.Create(x, (JsonNode?)new JsonArray(PropertyDefs.FrameExtraFields(x).Select(f => (JsonNode)f).ToArray())))),
