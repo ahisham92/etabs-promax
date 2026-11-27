@@ -31,7 +31,7 @@ public static class StructureTools
             Ask.Changes, AssignDiaphragm, a => $"Assign the diaphragm {a.Text("diaphragm")}"),
         new("define_pier_spandrel",
             "Adds or deletes a pier or spandrel label (Define > Pier Labels, Spandrel Labels), for shear wall design. A label in use cannot be deleted.",
-            """{"type":"object","required":["kind","name"],"properties":{"kind":{"type":"string","enum":["pier","spandrel"]},"name":{"type":"string"},"delete":{"type":"boolean"}}}""",
+            """{"type":"object","required":["kind","name"],"properties":{"kind":{"type":"string","enum":["pier","spandrel"]},"name":{"type":"string"},"multistory":{"type":"boolean","description":"A spandrel: Multi-Story Spandrel."},"was":{"type":"string","description":"Change Name: the label's name now."},"delete":{"type":"boolean"}}}""",
             Ask.Changes, DefineLabel, a => $"{(a.Flag("delete") ? "Delete" : "Define")} the {a.Text("kind")} {a.Text("name")}"),
         new("assign_pier_spandrel_data",
             "Labels walls and frames (label@story) as a pier and/or spandrel (Assign > Shell > Pier Label, Spandrel Label); \"\" takes a label off. The label is made when it is not there.",
@@ -39,7 +39,7 @@ public static class StructureTools
             Ask.Changes, AssignLabel, a => "Assign pier and spandrel labels"),
         new("define_group",
             "Adds, changes or deletes a group (Define > Groups), with its color. Deleting a group takes its objects out of it, and refuses while a section cut uses it.",
-            """{"type":"object","required":["name"],"properties":{"name":{"type":"string"},"color":{"type":"string"},"delete":{"type":"boolean"}}}""",
+            """{"type":"object","required":["name"],"properties":{"name":{"type":"string"},"color":{"type":"string"},"delete":{"type":"boolean"},"uses":{"type":"object","additionalProperties":{"type":"boolean"},"description":"What the group is used for, by the program's field names: Steel, Concrete, Composite (design groups); SAP2000 also Selection, SectionCut, Aluminum, ColdFormed, Stage, Bridge, AutoSeismic, AutoWind, MassWeight."}}}""",
             Ask.Changes, DefineGroup, a => $"{(a.Flag("delete") ? "Delete" : "Define")} the group {a.Text("name")}"),
         new("assign_group_data",
             "Puts frames, slabs and walls (label@story) and joints (point@story, with joints) in a group, or takes them out with remove (Assign > Assign Objects to Group). The group is made when it is not there.",
@@ -47,7 +47,7 @@ public static class StructureTools
             Ask.Changes, AssignGroup, a => $"{(a.Flag("remove") ? "Take objects out of" : "Put objects in")} the group {a.Text("group")}"),
         new("define_section_cut",
             "Adds or deletes a section cut (Define > Section Cuts) from a group: the forces across the group's objects are reported after the analysis.",
-            """{"type":"object","required":["name"],"properties":{"name":{"type":"string"},"group":{"type":"string"},"delete":{"type":"boolean"}}}""",
+            """{"type":"object","required":["name"],"properties":{"name":{"type":"string"},"group":{"type":"string"},"delete":{"type":"boolean"},"result_type":{"type":"string","enum":["Analysis","Design"],"description":"Analysis (F1, F2, F3, M1, M2, M3) or Design (P, V2, V3, T, M2, M3)."},"user_location":{"type":"boolean","description":"Section cut force location user defined at x, y, z; default false."},"x":{"type":"number"},"y":{"type":"number"},"z":{"type":"number"},"rot_z":{"type":"number","description":"Rotation of the cut's local axes about Z, Y, X (degrees)."},"rot_y":{"type":"number"},"rot_x":{"type":"number"}}}""",
             Ask.Changes, DefineCut, a => $"{(a.Flag("delete") ? "Delete" : "Define")} the section cut {a.Text("name")}"),
         new("structure_definitions",
             "What the diaphragm, pier, spandrel, group and section cut forms show: each with where it is used.",
@@ -180,10 +180,40 @@ public static class StructureTools
             if (!Labels(link.Model).Contains((kind, name))) throw new ToolInputException($"There is no {kind} '{name}'.");
             var users = LabelUsers(link.Model, kind, name).Take(5).ToList();
             if (users.Count > 0) throw new ToolInputException($"{name} labels {string.Join(", ", users)}: take it off those first.");
-            Core(link, m => { RemoveLines(m, PierHeading, t => t[0] == (kind == "pier" ? "PIERNAME" : "SPANDRELNAME") && Unquote(t[1]) == name); return 0; });
+            Core(link, m => { RemoveLines(m, PierHeading, t => t[0] == (kind == "pier" ? "PIERNAME" : "SPANDRELNAME") && Unquote(t[1]) == name); if (kind == "spandrel") StructureExtras.Remove(m, StructureExtras.SpandrelTable, name); return 0; });
             return new JsonObject { ["deleted"] = name };
         }
-        Core(link, m => { AddLabel(m, kind, name); return 0; });
+        var was = a.Text("was").Trim();
+        if (was.Length > 0 && was != name)
+        {
+            if (!Labels(link.Model).Contains((kind, was))) throw new ToolInputException($"There is no {kind} '{was}'.");
+            if (Labels(link.Model).Contains((kind, name))) throw new ToolInputException($"There is a {kind} '{name}' already.");
+        }
+        Core(link, m =>
+        {
+            if (was.Length > 0 && was != name)
+            {
+                // Change Name: the label and every wall or frame it labels.
+                var key = kind == "pier" ? "PIERNAME" : "SPANDRELNAME";
+                foreach (var r in m.Passthrough.Where(r => r.Heading == PierHeading))
+                    r.Lines = r.Lines.Select(l => Tokenize(l) is { Count: >= 2 } t && t[0] == key && Unquote(t[1]) == was ? "  " + Line([key, Quote(name), .. t.Skip(2)]) : l).ToList();
+                var word = kind == "pier" ? "PIER" : "SPANDREL";
+                foreach (var extra in m.AreaAssigns.Select(x => x.Extra).Concat(m.LineAssigns.Select(x => x.Extra)))
+                    if (PropertyDefs.Value(extra, word) == was) PropertyDefs.Put(extra, word, Quote(name));
+                if (kind == "spandrel" && StructureExtras.Get(m, StructureExtras.SpandrelTable, was) is { Count: > 0 } old)
+                {
+                    StructureExtras.Remove(m, StructureExtras.SpandrelTable, was);
+                    StructureExtras.Set(m, StructureExtras.SpandrelTable, name, old);
+                }
+            }
+            else AddLabel(m, kind, name);
+            if (kind == "spandrel" && a.ValueKind == JsonValueKind.Object && a.TryGetProperty("multistory", out _))
+            {
+                if (a.Flag("multistory")) StructureExtras.Set(m, StructureExtras.SpandrelTable, name, new Dictionary<string, string> { ["MultiStory"] = "Yes" });
+                else StructureExtras.Remove(m, StructureExtras.SpandrelTable, name);
+            }
+            return 0;
+        });
         return new JsonObject { [kind] = name };
     }
 
@@ -228,11 +258,19 @@ public static class StructureTools
             if (!Groups(link.Model).Exists(g => g.Name == name)) throw new ToolInputException($"There is no group '{name}'.");
             var cuts = Cuts(link.Model).Where(c => c.Group == name).Select(c => c.Name).ToList();
             if (cuts.Count > 0) throw new ToolInputException($"The section cut {string.Join(", ", cuts)} uses {name}: delete it first.");
-            Core(link, m => { RemoveLines(m, GroupHeading, t => t[0] == "GROUP" && Unquote(t[1]) == name); return 0; });
+            Core(link, m => { RemoveLines(m, GroupHeading, t => t[0] == "GROUP" && Unquote(t[1]) == name); StructureExtras.Remove(m, StructureExtras.GroupTable, name); return 0; });
             return new JsonObject { ["deleted"] = name };
         }
         var color = Colors.FirstOrDefault(c => c.Equals(a.Text("color", "Red"), StringComparison.OrdinalIgnoreCase)) ?? throw new ToolInputException($"The color is one of {string.Join(", ", Colors)}.");
-        Core(link, m => { SetGroup(m, name, color); return 0; });
+        var uses = new Dictionary<string, string>();
+        if (a.ValueKind == JsonValueKind.Object && a.TryGetProperty("uses", out var u) && u.ValueKind == JsonValueKind.Object)
+            foreach (var p in u.EnumerateObject())
+            {
+                var key = StructureExtras.Fields[StructureExtras.GroupTable].FirstOrDefault(f => f.Equals(p.Name, StringComparison.OrdinalIgnoreCase))
+                    ?? throw new ToolInputException($"'{p.Name}' is not a group use. The uses: {string.Join(", ", StructureExtras.Fields[StructureExtras.GroupTable])}.");
+                uses[key] = p.Value.ValueKind == JsonValueKind.True ? "Yes" : "No";
+            }
+        Core(link, m => { SetGroup(m, name, color); if (uses.Count > 0) StructureExtras.Set(m, StructureExtras.GroupTable, name, uses); return 0; });
         return new JsonObject { ["group"] = name, ["color"] = color };
     }
 
@@ -284,7 +322,7 @@ public static class StructureTools
         if (a.Flag("delete"))
         {
             if (!Cuts(link.Model).Exists(c => c.Name == name)) throw new ToolInputException($"There is no section cut '{name}'.");
-            Core(link, m => { RemoveLines(m, CutHeading, t => t[0] == "SECTIONCUT" && Unquote(t[1]) == name); return 0; });
+            Core(link, m => { RemoveLines(m, CutHeading, t => t[0] == "SECTIONCUT" && Unquote(t[1]) == name); StructureExtras.Remove(m, StructureExtras.CutTable, name); return 0; });
             return new JsonObject { ["deleted"] = name };
         }
         var group = a.Need("group");
@@ -294,6 +332,16 @@ public static class StructureTools
         {
             RemoveLines(m, CutHeading, t => t[0] == "SECTIONCUT" && Unquote(t[1]) == name);
             Section(m, CutHeading, GroupHeading).Lines.Add("  " + Line(["SECTIONCUT", Quote(name), "GROUP", Quote(group)]));
+            // Section Cut Data's other fields: result type, force location, local axes.
+            var user = a.Flag("user_location");
+            string N(string k) => Number(a.Number(k, 0));
+            StructureExtras.Remove(m, StructureExtras.CutTable, name);
+            StructureExtras.Set(m, StructureExtras.CutTable, name, new Dictionary<string, string>
+            {
+                ["ResultType"] = a.Text("result_type", "Analysis").StartsWith("Design", StringComparison.OrdinalIgnoreCase) ? "Design" : "Analysis",
+                ["ResultLoc"] = user ? "User" : "Default", ["LocX"] = user ? N("x") : "0", ["LocY"] = user ? N("y") : "0", ["LocZ"] = user ? N("z") : "0",
+                ["RotAboutZ"] = N("rot_z"), ["RotAboutY"] = N("rot_y"), ["RotAboutX"] = N("rot_x"),
+            });
             return 0;
         });
         return new JsonObject { ["section_cut"] = name, ["group"] = group };
@@ -307,9 +355,17 @@ public static class StructureTools
             ["floors"] = m.AreaAssigns.Count(x => x.Diaphragm == d.Name), ["joints"] = m.PointAssigns.Count(x => x.Diaphragm == d.Name),
         }).ToArray()),
         ["piers"] = new JsonArray(Labels(m).Where(l => l.Kind == "pier").Select(l => (JsonNode)new JsonObject { ["name"] = l.Name, ["used_by"] = LabelUsers(m, "pier", l.Name).Count() }).ToArray()),
-        ["spandrels"] = new JsonArray(Labels(m).Where(l => l.Kind == "spandrel").Select(l => (JsonNode)new JsonObject { ["name"] = l.Name, ["used_by"] = LabelUsers(m, "spandrel", l.Name).Count() }).ToArray()),
-        ["groups"] = new JsonArray(Groups(m).Select(g => (JsonNode)new JsonObject { ["name"] = g.Name, ["color"] = g.Color, ["members"] = g.Members.Count }).ToArray()),
-        ["section_cuts"] = new JsonArray(Cuts(m).Select(c => (JsonNode)new JsonObject { ["name"] = c.Name, ["group"] = c.Group }).ToArray()),
+        ["spandrels"] = new JsonArray(Labels(m).Where(l => l.Kind == "spandrel").Select(l => (JsonNode)new JsonObject { ["name"] = l.Name, ["used_by"] = LabelUsers(m, "spandrel", l.Name).Count(), ["multistory"] = StructureExtras.Yes(StructureExtras.Get(m, StructureExtras.SpandrelTable, l.Name), "MultiStory", false) }).ToArray()),
+        ["groups"] = new JsonArray(Groups(m).Select(g => (JsonNode)new JsonObject
+        {
+            ["name"] = g.Name, ["color"] = g.Color, ["members"] = g.Members.Count,
+            ["uses"] = new JsonObject(StructureExtras.Get(m, StructureExtras.GroupTable, g.Name).Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)(kv.Value == "Yes")))),
+        }).ToArray()),
+        ["section_cuts"] = new JsonArray(Cuts(m).Select(c => (JsonNode)new JsonObject
+        {
+            ["name"] = c.Name, ["group"] = c.Group,
+            ["options"] = new JsonObject(StructureExtras.Get(m, StructureExtras.CutTable, c.Name).Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))),
+        }).ToArray()),
         ["colors"] = new JsonArray(Colors.Select(c => (JsonNode)c).ToArray()),
     };
 }

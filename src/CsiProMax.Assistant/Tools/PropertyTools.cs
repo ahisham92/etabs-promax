@@ -12,6 +12,30 @@ namespace CsiProMax.Assistant.Tools;
 /// </summary>
 public static class PropertyTools
 {
+    /// <summary>Puts a form's other fields (extras) in the program's table row of the definition; blank takes a field off.</summary>
+    private static void SetRowExtras(StructuralModel m, JsonElement a, string table, string name)
+    {
+        if (!a.TryGetProperty("extras", out var x) || x.ValueKind != JsonValueKind.Object) return;
+        var now = new Dictionary<string, string>(StructureExtras.Get(m, table, name));
+        foreach (var p in x.EnumerateObject())
+        {
+            var v = (p.Value.ValueKind == JsonValueKind.String ? p.Value.GetString() ?? "" : p.Value.ToString()).Trim();
+            var key = StructureExtras.Fields[table].First(f => f.Equals(p.Name, StringComparison.OrdinalIgnoreCase));
+            if (v.Length == 0) now.Remove(key); else now[key] = v;
+        }
+        StructureExtras.Remove(m, table, name);
+        if (now.Count > 0) StructureExtras.Set(m, table, name, now);
+    }
+
+    /// <summary>Refuses extras the form has no field for before anything changes (a refusal leaves the model as it was).</summary>
+    private static void CheckExtras(JsonElement a, string[] fields, string what)
+    {
+        if (!a.TryGetProperty("extras", out var x) || x.ValueKind != JsonValueKind.Object) return;
+        foreach (var p in x.EnumerateObject())
+            if (!fields.Contains(p.Name, StringComparer.OrdinalIgnoreCase))
+                throw new ToolInputException($"{what} has no field '{p.Name}'. It has: {string.Join(", ", fields)}.");
+    }
+
     private static OfflineEtabs Offline(ICsiLink e) => e as OfflineEtabs
         ?? throw new ToolInputException("This is the Modeler's own Define or Assign item (no CSI program behind it). In a live program use its own tools or edit_table.");
 
@@ -36,64 +60,103 @@ public static class PropertyTools
                 return new JsonObject { ["material"] = mat.Name, ["type"] = mat.Type };
             }, a => $"Define the material {a.Text("name")}"),
         new("define_frame_shape",
-            "Adds or changes a frame section of any shape (Define > Section Properties > Frame Sections): Concrete Rectangular, Circle, Tee, L; Steel I/Wide Flange, Channel, Tee, Angle, Double Angle, Double Channel, Tube, Pipe, Rod. dims are the shape's dimensions (D, B, TF, TW, ... as section_shapes lists them). modifiers (AMOD A2MOD A3MOD JMOD I2MOD I3MOD MMOD WMOD) are the section's property modifiers. 'was': its name now; members keep it under a new name.",
-            """{"type":"object","required":["name","shape","material","dims"],"properties":{"name":{"type":"string"},"was":{"type":"string"},"shape":{"type":"string"},"material":{"type":"string"},"dims":""" + Numbers + ""","modifiers":""" + Numbers + "}}",
+            "Adds or changes a frame section of any shape (Define > Section Properties > Frame Sections): Concrete Rectangular, Circle, Tee, L; Steel I/Wide Flange, Channel, Tee, Angle, Double Angle, Double Channel, Tube, Pipe, Rod. dims are the shape's dimensions (D, B, TF, TW, ... as section_shapes lists them). modifiers (AMOD A2MOD A3MOD JMOD I2MOD I3MOD MMOD WMOD) are the section's property modifiers. extras: the form's other fields, by the program's table field names (Color, Notes; concrete NotSizeType NotAutoFact NotUserSize RigidZone; steel FilletRad, tube CornerRad; MirrorAbt2 MirrorAbt3); given, they replace the ones it has. 'was': its name now; members keep it under a new name.",
+            """{"type":"object","required":["name","shape","material","dims"],"properties":{"name":{"type":"string"},"was":{"type":"string"},"shape":{"type":"string"},"material":{"type":"string"},"dims":""" + Numbers + ""","modifiers":""" + Numbers + ""","extras":{"type":"object","additionalProperties":{"type":"string"}}}}""",
             Ask.Changes, (a, e) =>
             {
                 var link = Offline(e);
                 var dims = Values(a, "dims", true); var mods = Values(a, "modifiers", true);
                 Core(() => { PropertyDefs.CheckModifiers(PropertyDefs.FrameModifiers, mods); return 0; });
+                CheckExtras(a, PropertyDefs.FrameExtraFields(a.Need("shape")), "A " + a.Need("shape") + " section");
                 var s = Core(() => link.Edit(m =>
                 {
                     var sec = PropertyDefs.SetShape(m, a.Need("name"), Was(a), a.Need("shape"), a.Need("material"), dims);
                     if (mods.Count > 0) PropertyDefs.SetModifiers(sec.Lines, PropertyDefs.FrameModifiers, mods);
+                    if (a.TryGetProperty("extras", out var x) && x.ValueKind == JsonValueKind.Object)
+                        PropertyDefs.SetFrameExtras(sec, x.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.ValueKind == JsonValueKind.String ? p.Value.GetString() ?? "" : p.Value.ToString()));
                     return sec;
                 }));
                 return new JsonObject { ["section"] = s.Name, ["shape"] = s.Shape, ["area"] = s.Area };
             }, a => $"Define the frame section {a.Text("name")}"),
         new("define_shell_type",
-            "Adds or changes a slab or wall section with its type (Define > Section Properties > Slab or Wall Sections): kind slab or wall; slab_type Slab, Drop, Stiff, Ribbed, Waffle, Mat, Footing; modeling ShellThin, ShellThick, Membrane, Layered; one_way load distribution; a Ribbed slab also takes overall_depth, rib_width_top, rib_width_bottom, rib_spacing and rib_direction (local axis 1 or 2 the ribs run along); modifiers F11MOD F22MOD F12MOD M11MOD M22MOD M12MOD V13MOD V23MOD MMOD WMOD (e.g. cracked slabs M11MOD 0.25).",
-            """{"type":"object","required":["name","kind","thickness","material"],"properties":{"name":{"type":"string"},"was":{"type":"string"},"kind":{"type":"string","enum":["slab","wall"]},"slab_type":{"type":"string"},"modeling":{"type":"string"},"thickness":{"type":"number"},"material":{"type":"string"},"one_way":{"type":"boolean"},"overall_depth":{"type":"number"},"rib_width_top":{"type":"number"},"rib_width_bottom":{"type":"number"},"rib_spacing":{"type":"number"},"rib_direction":{"type":"integer"},"modifiers":""" + Numbers + "}}",
+            "Adds or changes a slab or wall section with its type (Define > Section Properties > Slab or Wall Sections): kind slab or wall; slab_type Slab, Drop, Stiff, Ribbed, Waffle, Mat, Footing; modeling ShellThin, ShellThick, Membrane, Layered; one_way load distribution; a Ribbed slab also takes overall_depth, rib_width_top, rib_width_bottom, rib_spacing and rib_direction (local axis 1 or 2 the ribs run along); modifiers F11MOD F22MOD F12MOD M11MOD M22MOD M12MOD V13MOD V23MOD MMOD WMOD (e.g. cracked slabs M11MOD 0.25). extras: the form's other fields (NotSizeType NotAutoFact NotUserSize Color Notes; a wall's RigidZone; MatAngle and BendThick for SAP2000); given, they replace the ones it has.",
+            """{"type":"object","required":["name","kind","thickness","material"],"properties":{"name":{"type":"string"},"was":{"type":"string"},"kind":{"type":"string","enum":["slab","wall"]},"slab_type":{"type":"string"},"modeling":{"type":"string"},"thickness":{"type":"number"},"material":{"type":"string"},"one_way":{"type":"boolean"},"overall_depth":{"type":"number"},"rib_width_top":{"type":"number"},"rib_width_bottom":{"type":"number"},"rib_spacing":{"type":"number"},"rib_direction":{"type":"integer"},"modifiers":""" + Numbers + ""","extras":{"type":"object","additionalProperties":{"type":"string"}}}}""",
             Ask.Changes, (a, e) =>
             {
                 var link = Offline(e);
                 var mods = Values(a, "modifiers", true);
                 Core(() => { PropertyDefs.CheckModifiers(PropertyDefs.ShellModifiers, mods); return 0; });
                 var wall = a.Need("kind").Equals("wall", StringComparison.OrdinalIgnoreCase);
+                CheckExtras(a, PropertyDefs.ShellExtraFields(wall), wall ? "A wall section" : "A slab section");
                 var s = Core(() => link.Edit(m =>
                 {
                     var sec = PropertyDefs.SetShellType(m, a.Need("name"), Was(a), wall, a.Text("slab_type", "Slab"), a.Text("modeling", wall ? "ShellThin" : "ShellThin"), a.Number("thickness"), a.Need("material"), a.Flag("one_way"),
                         a.TryGetProperty("overall_depth", out _) ? new PropertyDefs.Ribs(a.Number("overall_depth"), a.Number("rib_width_top"), a.Number("rib_width_bottom", a.Number("rib_width_top")), a.Number("rib_spacing"), a.Whole("rib_direction", 1)) : null);
                     if (mods.Count > 0) PropertyDefs.SetModifiers(sec.Lines, PropertyDefs.ShellModifiers, mods);
+                    if (a.TryGetProperty("extras", out var x) && x.ValueKind == JsonValueKind.Object)
+                        PropertyDefs.SetShellExtras(sec, x.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.ValueKind == JsonValueKind.String ? p.Value.GetString() ?? "" : p.Value.ToString()));
                     return sec;
                 }));
                 return new JsonObject { ["section"] = s.Name, ["wall"] = s.IsWall, ["thickness"] = s.Thickness };
             }, a => $"Define the section {a.Text("name")}"),
+        new("define_deck",
+            "Adds or changes a deck section (Define > Section Properties > Deck Sections, the Deck Property Data form): deck_type Filled, Unfilled or Solid Slab; slab_material (concrete) and deck_material (steel); slab_depth (tc, above the ribs), rib_depth (hr), rib_width_top (wrt), rib_width_bottom (wrb), rib_spacing (sr), shear_thickness and unit_weight of the deck; stud_diameter, stud_height and stud_fu of the shear studs; modifiers as a slab's; extras Color and Notes.",
+            """{"type":"object","required":["name","deck_type"],"properties":{"name":{"type":"string"},"was":{"type":"string"},"deck_type":{"type":"string","enum":["Filled","Unfilled","Solid Slab"]},"slab_material":{"type":"string"},"deck_material":{"type":"string"},"slab_depth":{"type":"number"},"rib_depth":{"type":"number"},"rib_width_top":{"type":"number"},"rib_width_bottom":{"type":"number"},"rib_spacing":{"type":"number"},"shear_thickness":{"type":"number"},"unit_weight":{"type":"number"},"stud_diameter":{"type":"number"},"stud_height":{"type":"number"},"stud_fu":{"type":"number"},"modifiers":""" + Numbers + ""","extras":{"type":"object","additionalProperties":{"type":"string"}}}}""",
+            Ask.Changes, (a, e) =>
+            {
+                var link = Offline(e);
+                var mods = Values(a, "modifiers", true);
+                Core(() => { PropertyDefs.CheckModifiers(PropertyDefs.ShellModifiers, mods); return 0; });
+                CheckExtras(a, PropertyDefs.DeckExtraFields, "A deck section");
+                var d = new PropertyDefs.Deck(a.Need("deck_type"), a.Text("slab_material"), a.Text("deck_material"), a.Number("slab_depth", 0), a.Number("rib_depth", 0), a.Number("rib_width_top", 0), a.Number("rib_width_bottom", 0),
+                    a.Number("rib_spacing", 0), a.Number("shear_thickness", 0), a.Number("unit_weight", 0), a.Number("stud_diameter", 0), a.Number("stud_height", 0), a.Number("stud_fu", 0));
+                var s = Core(() => link.Edit(m =>
+                {
+                    var sec = PropertyDefs.SetDeck(m, a.Need("name"), Was(a), d);
+                    if (mods.Count > 0) PropertyDefs.SetModifiers(sec.Lines, PropertyDefs.ShellModifiers, mods);
+                    if (a.TryGetProperty("extras", out var x) && x.ValueKind == JsonValueKind.Object)
+                        PropertyDefs.SetShellExtras(sec, x.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.ValueKind == JsonValueKind.String ? p.Value.GetString() ?? "" : p.Value.ToString()));
+                    return sec;
+                }));
+                return new JsonObject { ["section"] = s.Name, ["deck"] = true, ["slab_depth"] = s.Number("DECKSLABDEPTH") };
+            }, a => $"Define the deck {a.Text("name")}"),
         new("define_spring",
             "Adds or changes a spring property (Define > Spring Properties): kind point (UX UY UZ RX RY RZ, force per length or moment per radian), line (U1 U2 U3 R1, per length of member) or area (U1 U2 U3, per area, e.g. a soil subgrade modulus). delete: take it away (refused while assigned).",
-            """{"type":"object","required":["kind","name"],"properties":{"kind":{"type":"string","enum":["point","line","area"]},"name":{"type":"string"},"values":""" + Numbers + ""","delete":{"type":"boolean"}}}""",
+            """{"type":"object","required":["kind","name"],"properties":{"kind":{"type":"string","enum":["point","line","area"]},"name":{"type":"string"},"values":""" + Numbers + ""","delete":{"type":"boolean"},"extras":{"type":"object","additionalProperties":{"type":"string"},"description":"The form's other fields: point NonlinOpt (None, Compression Only, Tension Only), line NonlinOpt2 and NonlinOpt3, area NonlinOpt3; Color, Notes."}}}""",
             Ask.Changes, (a, e) =>
             {
                 var link = Offline(e);
                 var kind = a.Need("kind").ToLowerInvariant(); var name = a.Need("name");
-                if (a.Flag("delete")) { Core(() => link.Edit(m => { PropertyDefs.DeleteSpring(m, kind, name); return 0; })); return new JsonObject { ["deleted"] = name }; }
+                var table = StructureExtras.SpringTable(kind);
+                if (a.Flag("delete")) { Core(() => link.Edit(m => { PropertyDefs.DeleteSpring(m, kind, name); StructureExtras.Remove(m, table, name); return 0; })); return new JsonObject { ["deleted"] = name }; }
                 var values = Values(a, "values", false);
-                Core(() => link.Edit(m => { PropertyDefs.SetSpring(m, kind, name, values); return 0; }));
+                CheckExtras(a, StructureExtras.Fields[table].ToArray(), "A " + kind + " spring");
+                Core(() => link.Edit(m => { PropertyDefs.SetSpring(m, kind, name, values); SetRowExtras(m, a, table, name); return 0; }));
                 return new JsonObject { ["spring"] = name, ["kind"] = kind };
             }, a => a.Flag("delete") ? $"Delete the spring {a.Text("name")}" : $"Define the spring {a.Text("name")}"),
         new("define_link",
             "Adds, changes or deletes a link property (Define > Section Properties > Link/Support Properties): type LINEAR, DAMPER, GAP, HOOK, PLASTIC (WEN), RUBBER ISOLATOR, FRICTION ISOLATOR, MULTILINEAR ELASTIC or MULTILINEAR PLASTIC, and per direction (U1 U2 U3 R1 R2 R3) its effective stiffness and damping, which the linear analysis uses. A nonlinear type's own curve goes in by Edit > Model Text.",
-            """{"type":"object","required":["name"],"properties":{"name":{"type":"string"},"type":{"type":"string"},"dofs":{"type":"object","additionalProperties":{"type":"object","properties":{"stiffness":{"type":"number"},"damping":{"type":"number"}}}},"delete":{"type":"boolean"}}}""",
+            """{"type":"object","required":["name"],"properties":{"name":{"type":"string"},"type":{"type":"string"},"dofs":{"type":"object","additionalProperties":{"type":"object","properties":{"stiffness":{"type":"number"},"damping":{"type":"number"}}}},"delete":{"type":"boolean"},"extras":{"type":"object","additionalProperties":{"type":"string"},"description":"Mass, Weight, RotInert1, RotInert2, RotInert3 (Total Mass and Weight), DefLength, DefArea (Factors For Line and Area Springs), Notes."}}}""",
             Ask.Changes, (a, e) =>
             {
                 var link = Offline(e);
                 var name = a.Need("name");
-                if (a.Flag("delete")) { Core(() => link.Edit(m => { PropertyDefs.DeleteLink(m, name); return 0; })); return new JsonObject { ["deleted"] = name }; }
+                if (a.Flag("delete")) { Core(() => link.Edit(m => { PropertyDefs.DeleteLink(m, name); StructureExtras.RemoveLink(m, name); return 0; })); return new JsonObject { ["deleted"] = name }; }
+                CheckExtras(a, StructureExtras.LinkFields, "A link property");
                 var dofs = new Dictionary<string, (double, double)>();
                 if (a.TryGetProperty("dofs", out var d) && d.ValueKind == JsonValueKind.Object)
                     foreach (var x in d.EnumerateObject())
                         dofs[x.Name.ToUpperInvariant()] = (x.Value.Number("stiffness", 0), x.Value.Number("damping", 0));
-                Core(() => link.Edit(m => { PropertyDefs.SetLink(m, name, a.Text("type", "LINEAR"), dofs); return 0; }));
+                Core(() => link.Edit(m =>
+                {
+                    PropertyDefs.SetLink(m, name, a.Text("type", "LINEAR"), dofs);
+                    var kept = StructureExtras.Fields.Keys.Where(StructureExtras.IsLinkTable).Select(t => StructureExtras.Get(m, t, name)).FirstOrDefault(r => r.Count > 0) ?? new Dictionary<string, string>();
+                    StructureExtras.RemoveLink(m, name);
+                    var table = StructureExtras.LinkTable(a.Text("type", "LINEAR"));
+                    if (kept.Count > 0) StructureExtras.Set(m, table, name, kept);
+                    SetRowExtras(m, a, table, name);
+                    return 0;
+                }));
                 return new JsonObject { ["link"] = name, ["directions"] = dofs.Count };
             }, a => a.Flag("delete") ? $"Delete the link {a.Text("name")}" : $"Define the link {a.Text("name")}"),
         new("assign_frame_data",
@@ -113,6 +176,20 @@ public static class PropertyTools
             "What the property forms show: material types and each material's values, every section shape with its dimensions, the frame and shell sections with their modifiers, slab and modeling types, the spring properties with where they are used; with objects (label@story), what is assigned to each.",
             """{"type":"object","properties":{"objects":{"type":"array","items":{"type":"string"}}}}""",
             Ask.Never, (a, e) => Definitions(Offline(e).Model, a.Texts("objects"))),
+        new("section_properties",
+            "The section properties of a frame shape and its dimensions in the model's units (Frame Section Property Data > Show Section Properties): area, torsional constant, moments and product of inertia, shear areas, section and plastic moduli, radii of gyration.",
+            """{"type":"object","required":["shape","dims"],"properties":{"shape":{"type":"string"},"dims":""" + Numbers + "}}",
+            Ask.Never, (a, e) =>
+            {
+                var p = CsiProMax.S2k.S2kWriter.PropsOf(a.Need("shape"), Values(a, "dims", true)) ?? throw new ToolInputException("These dimensions do not make a section of that shape.");
+                var v = p;
+                return new JsonObject
+                {
+                    ["A"] = v.A, ["J"] = v.J, ["I33"] = v.I33, ["I22"] = v.I22, ["I23"] = v.I23, ["As2"] = v.As2, ["As3"] = v.As3,
+                    ["S33Top"] = v.S33Top > 0 ? v.S33Top : v.S33, ["S33Bot"] = v.S33Bot > 0 ? v.S33Bot : v.S33, ["S22Left"] = v.S22Left > 0 ? v.S22Left : v.S22, ["S22Right"] = v.S22Right > 0 ? v.S22Right : v.S22,
+                    ["Z33"] = v.Z33, ["Z22"] = v.Z22, ["R33"] = Math.Sqrt(v.I33 / v.A), ["R22"] = Math.Sqrt(v.I22 / v.A),
+                };
+            }),
     ];
 
     private static Dictionary<string, string>? Texts(JsonElement a)
@@ -374,15 +451,25 @@ public static class PropertyTools
                 ["name"] = s.Name, ["shape"] = s.Shape, ["material"] = s.Material,
                 ["dims"] = new JsonObject((PropertyDefs.Shape(s.Shape)?.Dims ?? ["D", "B"]).Where(d => s.Number(d) is not null).Select(d => KeyValuePair.Create(d, (JsonNode?)JsonValue.Create(s.Number(d)!.Value)))),
                 ["modifiers"] = Numbers_(PropertyDefs.Modifiers(s.Lines, PropertyDefs.FrameModifiers)),
+                ["extras"] = new JsonObject(PropertyDefs.FrameExtras(s).Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))),
             }).ToArray()),
+            ["frame_extra_fields"] = new JsonObject(PropertyDefs.Shapes.Select(x => KeyValuePair.Create(x.Name, (JsonNode?)new JsonArray(PropertyDefs.FrameExtraFields(x.Name).Select(f => (JsonNode)f).ToArray())))),
             ["shell_sections"] = new JsonArray(m.ShellSections.Select(s => (JsonNode)new JsonObject
             {
                 ["name"] = s.Name, ["wall"] = s.IsWall, ["material"] = s.Material, ["thickness"] = s.Thickness,
+                ["deck"] = s.IsDeck ? new JsonObject
+                {
+                    ["deck_type"] = s.Get("DECKTYPE") == "SolidSlab" ? "Solid Slab" : s.Get("DECKTYPE"), ["slab_material"] = s.Get("CONCMATERIAL"), ["deck_material"] = s.Get("DECKMATERIAL"), ["slab_depth"] = s.Number("DECKSLABDEPTH"),
+                    ["rib_depth"] = s.Number("DECKRIBDEPTH"), ["rib_width_top"] = s.Number("DECKRIBWIDTHTOP"), ["rib_width_bottom"] = s.Number("DECKRIBWIDTHBOTTOM"), ["rib_spacing"] = s.Number("DECKRIBSPACING"),
+                    ["shear_thickness"] = s.Number("DECKSHEARTHICKNESS"), ["unit_weight"] = s.Number("DECKUNITWEIGHT"), ["stud_diameter"] = s.Number("SHEARSTUDDIAM"), ["stud_height"] = s.Number("SHEARSTUDHEIGHT"), ["stud_fu"] = s.Number("SHEARSTUDFU"),
+                } : null,
                 ["slab_type"] = s.Get("SLABTYPE"), ["modeling"] = s.Get("MODELINGTYPE"), ["one_way"] = s.Get("ONEWAYLOADDIST") == "Yes",
                 ["overall_depth"] = s.Number("OVERALLDEPTH"), ["rib_width_top"] = s.Number("SLABRIBWIDTHTOP"), ["rib_width_bottom"] = s.Number("SLABRIBWIDTHBOTTOM"),
                 ["rib_spacing"] = s.Number("SLABRIBSPACING"), ["rib_direction"] = s.Number("SLABRIBPARALLELTOAXIS"),
                 ["modifiers"] = Numbers_(PropertyDefs.Modifiers(s.Lines, PropertyDefs.ShellModifiers)),
+                ["extras"] = new JsonObject(PropertyDefs.ShellExtras(s).Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))),
             }).ToArray()),
+            ["shell_extra_fields"] = new JsonObject { ["slab"] = new JsonArray(PropertyDefs.ShellExtraFields(false).Select(f => (JsonNode)f).ToArray()), ["wall"] = new JsonArray(PropertyDefs.ShellExtraFields(true).Select(f => (JsonNode)f).ToArray()) },
             ["slab_types"] = new JsonArray(ProgramOptions.SlabTypes(m.Target).Select(t => (JsonNode)t).ToArray()),
             ["modeling_types"] = new JsonArray(ProgramOptions.ModelingTypes(m.Target).Select(t => (JsonNode)t).ToArray()),
             ["frame_modifiers"] = new JsonArray(PropertyDefs.FrameModifiers.Select(t => (JsonNode)t).ToArray()),
@@ -391,12 +478,13 @@ public static class PropertyTools
             ["link_types"] = new JsonArray(PropertyDefs.LinkTypes.Select(t => (JsonNode)t).ToArray()),
             ["links"] = new JsonArray(PropertyDefs.Links(m).Select(l => (JsonNode)new JsonObject
             {
-                ["name"] = l.Name, ["type"] = l.Type,
+                ["name"] = l.Name, ["type"] = l.Type, ["extras"] = new JsonObject(StructureExtras.Get(m, StructureExtras.LinkTable(l.Type), l.Name).Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))),
                 ["dofs"] = new JsonObject(l.Dofs.Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)new JsonObject { ["stiffness"] = kv.Value.Stiff, ["damping"] = kv.Value.Damp }))),
             }).ToArray()),
             ["springs"] = new JsonArray(springs.Select(s => (JsonNode)new JsonObject
             {
                 ["kind"] = s.Kind, ["name"] = s.Name, ["values"] = Numbers_(s.Values), ["used_by"] = PropertyDefs.SpringUsers(m, s.Kind, s.Name).Count(),
+                ["extras"] = new JsonObject(StructureExtras.Get(m, StructureExtras.SpringTable(s.Kind), s.Name).Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))),
             }).ToArray()),
         };
         if (objects.Count > 0)

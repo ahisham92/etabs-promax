@@ -27,11 +27,13 @@ public static class CaseTools
     public static IReadOnlyList<Tool> All { get; } =
     [
         new("define_function",
-            "Adds or changes a response spectrum or time history function (Define > Functions). from 'points': the [x, y] pairs given (period and Sa in g, or time and value). from 'code': a code's spectrum (ASCE 7, IBC, Eurocode 8, ECP 201, IS 1893, UBC 97, NBCC, with the inputs lateral_codes lists for it). from 'sine', 'cosine' or 'ramp': a time history wave of the given period, cycles, amplitude and steps.",
+            "Adds or changes a response spectrum or time history function (Define > Functions). from 'points': the [x, y] pairs given (period and Sa in g, or time and value). from 'code': a code's spectrum (ASCE 7, IBC, Eurocode 8, ECP 201, IS 1893, UBC 97, NBCC, with the inputs lateral_codes lists for it). from 'sine', 'cosine' or 'ramp': a time history wave of the given period, cycles, amplitude and steps (a ramp with ramp_time and max_time: up to the amplitude at ramp_time, held to max_time). 'sawtooth' (period, ramp_time, cycles, amplitude), 'triangular' (period, cycles, amplitude), 'periodic' (points of one cycle, repeated cycles times). 'file': points read from a file by the form (file, header_lines, prefix_chars, ... kept with it). preview true returns the points and changes nothing (the form's Function Graph and Convert to User Defined).",
             """
             {"type":"object","required":["name","kind"],"properties":{
               "name":{"type":"string"},"was":{"type":"string"},"kind":{"type":"string","enum":["spectrum","history"]},
-              "from":{"type":"string","enum":["points","code","sine","cosine","ramp"],"description":"Default points."},
+              "from":{"type":"string","enum":["points","code","sine","cosine","ramp","sawtooth","triangular","periodic","file"],"description":"Default points."},
+              "ramp_time":{"type":"number"},"max_time":{"type":"number"},"preview":{"type":"boolean"},
+              "file":{"type":"object","additionalProperties":{"type":["string","number","boolean"]},"description":"The From File form's fields, kept with the function."},
               "points":{"type":"array","items":{"type":"array","items":{"type":"number"}}},
               "code":{"type":"string"},"values":{"type":"object","additionalProperties":{"type":["string","number"]}},
               "damping":{"type":"number","description":"Spectrum damping ratio. Default 0.05."},
@@ -48,8 +50,8 @@ public static class CaseTools
               "steps":{"type":"integer"},"step_size":{"type":"number"},"geometric":{"type":"string","enum":["None","P-Delta","P-Delta and Large Displacements"]}}}
             """, Ask.Changes, DefineCase, a => $"Define the load case {a.Text("name")}"),
         new("define_mass_source",
-            "Sets the mass source (Define > Mass Source): the elements' own mass, the added mass, and load patterns with their factors (e.g. Dead 1, SDL 1, Live 0.25). The seismic loads by code are worked out from it again.",
-            """{"type":"object","properties":{"elements":{"type":"boolean","description":"Default true."},"added_mass":{"type":"boolean","description":"Default true."},"loads":{"type":"array","items":{"type":"object","required":["pattern","factor"],"properties":{"pattern":{"type":"string"},"factor":{"type":"number"}}}}}}""",
+            "Sets the mass source (Define > Mass Source): its name, the elements' own mass, the added mass, and load patterns with their factors (e.g. Dead 1, SDL 1, Live 0.25), and the mass options (lateral, vertical, lumped at the stories, centroid moved by a ratio of the diaphragm width). The seismic loads by code are worked out from it again.",
+            """{"type":"object","properties":{"elements":{"type":"boolean","description":"Default true."},"added_mass":{"type":"boolean","description":"Default true."},"name":{"type":"string","description":"Mass Source Name; default the current one."},"lateral":{"type":"boolean","description":"Include Lateral Mass; default true."},"vertical":{"type":"boolean","description":"Include Vertical Mass; default false."},"lump":{"type":"boolean","description":"Lump Lateral Mass at Story Levels; default true."},"move":{"type":"boolean","description":"Adjust Diaphragm Lateral Mass to Move Mass Centroid by move_x and move_y (ratios of the diaphragm width)."},"move_x":{"type":"number"},"move_y":{"type":"number"},"loads":{"type":"array","items":{"type":"object","required":["pattern","factor"],"properties":{"pattern":{"type":"string"},"factor":{"type":"number"}}}}}}""",
             Ask.Changes, DefineMassSource, a => "Set the mass source"),
         new("define_pdelta",
             "Sets the P-Delta option (Define > P-Delta Options): none, non-iterative based on the mass, or iterative based on load patterns with factors (e.g. Dead 1.2, Live 0.5), with the iterations and tolerance.",
@@ -76,7 +78,7 @@ public static class CaseTools
         var kind = a.Need("kind").ToLowerInvariant();
         var from = a.Text("from", "points").ToLowerInvariant();
         List<(double, double)> points;
-        if (from == "points")
+        if (from is "points" or "periodic" or "file")
         {
             points = [];
             if (a.TryGetProperty("points", out var p) && p.ValueKind == JsonValueKind.Array)
@@ -95,6 +97,29 @@ public static class CaseTools
                 foreach (var x in v.EnumerateObject()) values[x.Name] = x.Value.ValueKind == JsonValueKind.String ? x.Value.GetString() ?? "" : x.Value.GetRawText();
             points = Core(() => LateralLoads.SpectrumPoints(a.Need("code"), values, a.Number("last_period", 8)));
         }
+        else if (from is not ("sine" or "cosine" or "ramp" or "sawtooth" or "triangular"))
+            throw new ToolInputException($"There is no function type '{from}'.");
+        else if (from == "ramp" && a.TryGetProperty("ramp_time", out _))
+        {
+            // ETABS's Ramp: Ramp Time, Amplitude, Maximum Time.
+            double rt = a.Number("ramp_time", 1), max = a.Number("max_time", 2), amp = a.Number("amplitude", 1);
+            if (kind != "history") throw new ToolInputException("A ramp is a time history: use kind history.");
+            if (rt <= 0 || max <= rt) throw new ToolInputException("A ramp needs a ramp time above 0 and a maximum time above the ramp time.");
+            points = [(0, 0), (rt, amp), (max, amp)];
+        }
+        else if (from is "sawtooth" or "triangular")
+        {
+            if (kind != "history") throw new ToolInputException($"A {from} wave is a time history: use kind history.");
+            double period = a.Number("period", 1), cycles = a.Number("cycles", 1), amp = a.Number("amplitude", 1), rt = a.Number("ramp_time", period / 8);
+            if (period <= 0 || cycles < 1 || cycles > 100000) throw new ToolInputException("A wave needs a period above 0 and 1 to 100000 cycles.");
+            if (from == "sawtooth" && (rt <= 0 || rt > period / 4)) throw new ToolInputException("The sawtooth ramp time is above 0 and at most a quarter of the period.");
+            var one = from == "sawtooth"
+                ? new (double T, double Y)[] { (rt, amp), (period / 2 - rt, amp), (period / 2 + rt, -amp), (period - rt, -amp), (period, 0) }
+                : new (double T, double Y)[] { (period / 4, amp), (3 * period / 4, -amp), (period, 0) };
+            points = [(0, 0)];
+            for (var c = 0; c < (int)Math.Round(cycles); c++)
+                foreach (var (t, y) in one) points.Add((Math.Round(c * period + t, 9), y));
+        }
         else
         {
             if (kind != "history") throw new ToolInputException($"A {from} wave is a time history: use kind history.");
@@ -111,8 +136,31 @@ public static class CaseTools
                 return (Math.Round(t, 9), Math.Round(amp * y, 9));
             }).ToList();
         }
+        if (from == "periodic")
+        {
+            // User Periodic: one cycle of points, repeated Number of Cycles times.
+            if (kind != "history") throw new ToolInputException("A user periodic function is a time history: use kind history.");
+            var cycles = a.Number("cycles", 1);
+            if (points.Count < 2 || points[0].Item1 != 0) throw new ToolInputException("One cycle of a user periodic function starts at time 0 and has two points at least.");
+            if (cycles < 1 || cycles * points.Count > 100000) throw new ToolInputException("A user periodic function has 1 cycle at least and 100000 points at most.");
+            var one = points; var span = one[^1].Item1;
+            points = [.. one];
+            for (var c = 1; c < (int)Math.Round(cycles); c++) points.AddRange(one.Skip(1).Select(p => (Math.Round(c * span + p.Item1, 9), p.Item2)));
+        }
+        if (a.Flag("preview"))
+        {
+            if (points.Count == 0) throw new ToolInputException("The function has no points.");
+            return new JsonObject { ["points"] = new JsonArray(points.Select(p => (JsonNode)Pair(p)).ToArray()) };
+        }
         var f = new FunctionDef(name, kind, points, a.Number("damping", 0.05));
         var was = a.Text("was").Trim();
+        // What the definition form showed, so Modify/Show opens it again with the same fields.
+        var source = new Dictionary<string, string> { ["Type"] = from };
+        if (from == "code") { source["Code"] = a.Text("code"); if (a.TryGetProperty("values", out var vs) && vs.ValueKind == JsonValueKind.Object) foreach (var x in vs.EnumerateObject()) source["v:" + x.Name] = x.Value.ValueKind == JsonValueKind.String ? x.Value.GetString() ?? "" : x.Value.GetRawText(); }
+        foreach (var k in new[] { "period", "cycles", "amplitude", "steps_per_cycle", "ramp_time", "max_time", "last_period" })
+            if (a.TryGetProperty(k, out var x) && x.ValueKind == JsonValueKind.Number) source[k] = x.GetRawText();
+        if (from == "periodic" && a.TryGetProperty("points", out var cyc)) source["cycle"] = cyc.GetRawText();
+        if (from == "file" && a.TryGetProperty("file", out var fl) && fl.ValueKind == JsonValueKind.Object) foreach (var x in fl.EnumerateObject()) source["f:" + x.Name] = x.Value.ValueKind == JsonValueKind.String ? x.Value.GetString() ?? "" : x.Value.GetRawText();
         return link.Edit(m => Core(() =>
         {
             if (was.Length > 0 && was != name)
@@ -121,6 +169,7 @@ public static class CaseTools
                 foreach (var c in m.LoadCases) foreach (var l in c.Lines) for (var i = 0; i + 1 < l.Count; i++) if (l[i] == "FUNC" && E2kText.Unquote(l[i + 1]) == was) l[i + 1] = E2kText.Quote(name);
             }
             AnalysisDefs.SetFunction(m, f);
+            AnalysisDefs.SetFunctionSource(m, name, source);
             return (JsonNode)new JsonObject { ["done"] = $"The {kind} function {name}, {points.Count} points.", ["points"] = points.Count, ["first"] = Pair(points[0]), ["last"] = Pair(points[^1]) };
         }));
     }
@@ -180,8 +229,12 @@ public static class CaseTools
         if (!elements && loads.Count == 0 && !a.Flag("added_mass", true)) throw new ToolInputException("A mass source with nothing in it gives the model no mass.");
         return link.Edit(m =>
         {
-            var name = MassSource.Of(m).Name;
-            new MassSource(name, elements, a.Flag("added_mass", true), loads).WriteTo(m);
+            var now = MassSource.Of(m);
+            var name = a.Text("name", now.Name).Trim();
+            if (name.Length == 0) name = now.Name;
+            var move = a.Flag("move", now.Move);
+            new MassSource(name, elements, a.Flag("added_mass", true), loads, a.Flag("lateral", now.Lateral), a.Flag("vertical", now.Vertical), a.Flag("lump", now.Lump),
+                move, move ? a.Number("move_x", now.MoveX) : 0, move ? a.Number("move_y", now.MoveY) : 0).WriteTo(m);
             return (JsonNode)new JsonObject { ["done"] = $"The mass source {name}: {(elements ? "the elements, " : "")}{string.Join(", ", loads.Select(l => $"{l.Item1} × {E2kText.Number(l.Item2)}"))}".TrimEnd(',', ' ') };
         });
     }
@@ -268,6 +321,7 @@ public static class CaseTools
             ["functions"] = new JsonArray(AnalysisDefs.ListFunctions(m).Select(f => (JsonNode)new JsonObject
             {
                 ["name"] = f.Name, ["kind"] = f.Kind, ["damping"] = f.Damping, ["points"] = new JsonArray(f.Points.Select(p => (JsonNode)Pair(p)).ToArray()),
+                ["source"] = AnalysisDefs.FunctionSource(m, f.Name) is { } src ? new JsonObject(src.Where(x => x.Key != "Name").Select(x => KeyValuePair.Create(x.Key, (JsonNode?)x.Value))) : null,
                 ["used_by"] = new JsonArray(AnalysisDefs.UsersOfFunction(m, f.Name).Select(x => (JsonNode)x).ToArray()),
             }).ToArray()),
             ["load_cases"] = new JsonArray(m.LoadCases.Select(c =>
@@ -290,6 +344,7 @@ public static class CaseTools
             ["mass_source"] = new JsonObject
             {
                 ["name"] = ms.Name, ["elements"] = ms.Elements, ["added_mass"] = ms.AddedMass,
+                ["lateral"] = ms.Lateral, ["vertical"] = ms.Vertical, ["lump"] = ms.Lump, ["move"] = ms.Move, ["move_x"] = ms.MoveX, ["move_y"] = ms.MoveY,
                 ["loads"] = new JsonArray(ms.Loads.Select(l => (JsonNode)new JsonObject { ["pattern"] = l.Pattern, ["factor"] = l.Factor }).ToArray()),
             },
             ["pdelta"] = new JsonObject

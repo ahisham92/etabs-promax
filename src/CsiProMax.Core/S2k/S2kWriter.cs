@@ -394,11 +394,26 @@ public static class S2kWriter
         if (groups.Count > 0)
         {
             var colors = GroupDefs.Groups(m).GroupBy(g => g.Name).ToDictionary(g => g.Key, g => g.First().Color);
-            Add(tables, "GROUPS 1 - DEFINITIONS", groups.Keys.Select(name => Row(("GroupName", name), ("Selection", "Yes"), ("Color", colors.GetValueOrDefault(name, "Yellow")),
-                ("SectionCut", "Yes"), ("Steel", "Yes"), ("Concrete", "Yes"), ("Aluminum", "Yes"), ("ColdFormed", "Yes"), ("Stage", "Yes"), ("Bridge", "Yes"),
-                ("AutoSeismic", "No"), ("AutoWind", "No"), ("SelDesSteel", "No"), ("SelDesAlum", "No"), ("SelDesCold", "No"), ("MassWeight", "Yes"))));
+            // Each group's uses as its Group Definition form set them (Use Group For), the program's defaults otherwise.
+            string Use(string name, string key, bool fallback) => StructureExtras.Yes(StructureExtras.Get(m, StructureExtras.GroupTable, name), key, fallback) ? "Yes" : "No";
+            Add(tables, "GROUPS 1 - DEFINITIONS", groups.Keys.Select(name => Row(("GroupName", name), ("Selection", Use(name, "Selection", true)), ("Color", colors.GetValueOrDefault(name, "Yellow")),
+                ("SectionCut", Use(name, "SectionCut", true)), ("Steel", Use(name, "Steel", true)), ("Concrete", Use(name, "Concrete", true)), ("Aluminum", Use(name, "Aluminum", true)), ("ColdFormed", Use(name, "ColdFormed", true)), ("Stage", Use(name, "Stage", true)), ("Bridge", Use(name, "Bridge", true)),
+                ("AutoSeismic", Use(name, "AutoSeismic", false)), ("AutoWind", Use(name, "AutoWind", false)), ("SelDesSteel", "No"), ("SelDesAlum", "No"), ("SelDesCold", "No"), ("MassWeight", Use(name, "MassWeight", true)))));
             Add(tables, "GROUPS 2 - ASSIGNMENTS", groups.SelectMany(g => g.Value.Distinct().Select(o => Row(("GroupName", g.Key), ("ObjectType", o.Type), ("ObjectLabel", o.Label)))));
         }
+
+        // Section cuts by group, with the result type, location and axes their Section Cut Data form set.
+        var cuts = StructureExtras.Cuts(m).Where(c => groups.ContainsKey(c.Group)).ToList();
+        if (cuts.Count > 0)
+            Add(tables, "SECTION CUTS 1 - GENERAL", cuts.Select(c =>
+            {
+                var x = StructureExtras.Get(m, StructureExtras.CutTable, c.Name);
+                string V(string k, string d) => x.TryGetValue(k, out var v) && v.Length > 0 ? v : d;
+                var user = V("ResultLoc", "Default").Equals("User", StringComparison.OrdinalIgnoreCase) || V("ResultLoc", "Default").StartsWith("User", StringComparison.OrdinalIgnoreCase);
+                return Row(("CutName", c.Name), ("DefinedBy", "Group"), ("Group", c.Group), ("ResultType", V("ResultType", "Analysis").StartsWith("Design", StringComparison.OrdinalIgnoreCase) ? "Design" : "Analysis"),
+                    ("DefaultLoc", user ? "No" : "Yes"), ("GlobalX", V("LocX", "0")), ("GlobalY", V("LocY", "0")), ("GlobalZ", V("LocZ", "0")),
+                    ("AngleA", V("RotAboutZ", "0")), ("AngleB", V("RotAboutY", "0")), ("AngleC", V("RotAboutX", "0")), ("AdvanceAxes", "No"), ("NumQuads", "0"));
+            }));
 
         // Loads.
         var patternTypes = m.LoadPatterns.ToDictionary(p => p.Name, p => DesignType(p.Type), StringComparer.OrdinalIgnoreCase);
@@ -605,7 +620,8 @@ public static class S2kWriter
                 ("Area", N(p.Value.A)), ("TorsConst", N(p.Value.J)), ("I33", N(p.Value.I33)), ("I22", N(p.Value.I22)), ("I23", N(pv.I23)),
                 ("AS2", N(p.Value.As2)), ("AS3", N(p.Value.As3)), ("S33Top", N(pv.S33Top > 0 ? pv.S33Top : pv.S33)), ("S33Bot", N(pv.S33Bot > 0 ? pv.S33Bot : pv.S33)), ("S22Left", N(pv.S22Left > 0 ? pv.S22Left : pv.S22)), ("S22Right", N(pv.S22Right > 0 ? pv.S22Right : pv.S22)), ("Z33", N(p.Value.Z33)), ("Z22", N(p.Value.Z22)),
                 ("R33", N(Math.Sqrt(p.Value.I33 / p.Value.A))), ("R22", N(Math.Sqrt(p.Value.I22 / p.Value.A))),
-                ("ConcCol", YesNo(concrete && !isBeam)), ("ConcBeam", YesNo(concrete && isBeam)), ("Color", "Yellow"),
+                ("ConcCol", YesNo(concrete && !isBeam)), ("ConcBeam", YesNo(concrete && isBeam)), ("Color", PropertyDefs.FrameExtras(s).GetValueOrDefault("Color") ?? "Yellow"),
+                ("Notes", PropertyDefs.FrameExtras(s).GetValueOrDefault("Notes") ?? ""), ("FilletRadius", PropertyDefs.FrameExtras(s).GetValueOrDefault("FilletRad") ?? "0"),
                 ("AMod", N(fm["AMOD"])), ("A2Mod", N(fm["A2MOD"])), ("A3Mod", N(fm["A3MOD"])), ("JMod", N(fm["JMOD"])), ("I2Mod", N(fm["I2MOD"])), ("I3Mod", N(fm["I3MOD"])), ("MMod", N(fm["MMOD"])), ("WMod", N(fm["WMOD"]))));
         }
         Add(tables, "FRAME SECTION PROPERTIES 01 - GENERAL", rows);
@@ -661,8 +677,9 @@ public static class S2kWriter
                     ("MatBehave", r.GetValueOrDefault("Behavior", "Directional")), ("S11Opt", r.GetValueOrDefault("S11", "Nonlinear")), ("S22Opt", r.GetValueOrDefault("S22", "Nonlinear")), ("S12Opt", r.GetValueOrDefault("S12", "Linear"))));
             names.Add(s.Name);
             var sm = PropertyDefs.Modifiers(s.Lines, PropertyDefs.ShellModifiers);
-            rows.Add(Row(("Section", s.Name), ("Material", s.Material), ("MatAngle", "0"), ("AreaType", "Shell"), ("Type", modelling), ("DrillDOF", "Yes"),
-                ("Thickness", N(t)), ("BendThick", N(t)), ("Color", s.IsWall ? "Red" : "Cyan"),
+            var sx = PropertyDefs.ShellExtras(s);
+            rows.Add(Row(("Section", s.Name), ("Material", s.Material), ("MatAngle", sx.GetValueOrDefault("MatAngle") ?? "0"), ("AreaType", "Shell"), ("Type", modelling), ("DrillDOF", "Yes"),
+                ("Thickness", N(t)), ("BendThick", sx.GetValueOrDefault("BendThick") ?? N(t)), ("Color", sx.GetValueOrDefault("Color") ?? (s.IsWall ? "Red" : "Cyan")), ("Notes", sx.GetValueOrDefault("Notes") ?? ""),
                 ("F11Mod", N(sm["F11MOD"])), ("F22Mod", N(sm["F22MOD"])), ("F12Mod", N(sm["F12MOD"])), ("M11Mod", N(sm["M11MOD"])), ("M22Mod", N(sm["M22MOD"])), ("M12Mod", N(sm["M12MOD"])), ("V13Mod", N(sm["V13MOD"])), ("V23Mod", N(sm["V23MOD"])), ("MMod", N(sm["MMOD"])), ("WMod", N(sm["WMOD"]))));
         }
         Add(tables, "AREA SECTION PROPERTIES", rows);
@@ -813,6 +830,21 @@ public static class S2kWriter
         public double S22Left { get; init; }
         public double S22Right { get; init; }
         public double I23 { get; init; }
+    }
+
+    /// <summary>The section properties ETABS's Section Properties form shows for one of the Modeler's shapes and its
+    /// dimensions (D, B, TF, TW, BBOTTOM, TFBOTTOM, DIS), or null when the dimensions do not make one.</summary>
+    public static Props? PropsOf(string shape, IReadOnlyDictionary<string, double> dims)
+    {
+        double V(string k) => dims.TryGetValue(k, out var v) ? v : 0;
+        double d = V("D"), b = V("B"), tf = V("TF"), tw = V("TW"), bb = V("BBOTTOM") > 0 ? V("BBOTTOM") : b, tfb = V("TFBOTTOM") > 0 ? V("TFBOTTOM") : tf;
+        var s = shape.ToLowerInvariant();
+        if (s.Contains("rectangular") && d > 0 && b > 0) return Rectangle(d, b);
+        if ((s.Contains("circle") || s.Contains("rod")) && d > 0) return Circle(d);
+        if (s.Contains("i/wide flange") && d > 0 && b > 0 && tf > 0 && tw > 0 && tf + tfb < d) return ISection(d, b, tf, tw, bb, tfb);
+        if (s.Contains("tube") && d > 2 * tf && b > 2 * tw && tf > 0 && tw > 0) return Tube(d, b, tf, tw);
+        if (s.Contains("pipe") && d > 2 * tw && tw > 0) return Pipe(d, tw);
+        return OpenName(s) is { } open && OpenShape(open, d, b, tf, tw, V("DIS")) is { } parts ? Composite(parts) : null;
     }
 
     /// <summary>A section made of rectangles (x along local 3, the width; y along local 2, the depth), as SAP2000's

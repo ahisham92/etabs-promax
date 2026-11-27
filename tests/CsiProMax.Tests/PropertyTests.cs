@@ -90,6 +90,44 @@ static class PropertyTests
             Check(pd["material_tables"]!["Damping Parameters"]!.AsArray().Count == 3 && pd["material_nonlinear"]!["Steel"]!["keys"]!.AsArray().Count > 5, "property_definitions lists the tables and the nonlinear keys");
             Check(pd["materials"]!.AsArray().First(x => x!["name"]!.GetValue<string>() == "C40B")!["tables"]!["General"] is not null, "property_definitions gives the material's rows");
         });
+        yield return ("properties: Frame Section Property Data's other fields (colour, notes, fillet radius, notional size) are kept, renamed with the section, written to SAP2000, and Show Section Properties gives the shape's properties (Ahmed 2026-11-27)", () =>
+        {
+            var link = Frame();
+            Run(link, "define_material_data", new { name = "S355", type = "Steel", values = new { WEIGHTPERVOLUME = 77, E = 2.1e8, U = 0.3, FY = 355000, FU = 490000 } });
+            Run(link, "define_frame_shape", new { name = "IPE400", shape = "Steel I/Wide Flange", material = "S355", dims = new { D = 0.4, B = 0.18, TF = 0.0135, TW = 0.0086 }, extras = new Dictionary<string, string> { ["Color"] = "Cyan", ["Notes"] = "secondary", ["FilletRad"] = "0.021" } });
+            var s = link.Model.FrameSections.Single(x => x.Name == "IPE400");
+            Check(PropertyDefs.FrameExtras(s)["FilletRad"] == "0.021" && PropertyDefs.FrameExtras(s)["Color"] == "Cyan", "the section keeps its other fields");
+            var cpm = ModelFile.FromJson(ModelFile.ToJson(link.Model)).FrameSections.Single(x => x.Name == "IPE400");
+            Check(PropertyDefs.FrameExtras(cpm)["Notes"] == "secondary", "the .cpm keeps them");
+            var s2k = S2kWriter.Write(link.Model, "a.s2k").Text;
+            Check(s2k.Contains("Color=Cyan") && s2k.Contains("FilletRadius=0.021") && s2k.Contains("Notes=secondary"), "SAP2000's frame section row takes the colour, fillet radius and notes");
+            Run(link, "define_frame_shape", new { name = "IPE400B", was = "IPE400", shape = "Steel I/Wide Flange", material = "S355", dims = new { D = 0.4, B = 0.18, TF = 0.0135, TW = 0.0086 } });
+            Check(PropertyDefs.FrameExtras(link.Model.FrameSections.Single(x => x.Name == "IPE400B"))["Color"] == "Cyan", "renamed without extras: they are kept");
+            Refused(link, "define_frame_shape", new { name = "IPE400B", was = "IPE400B", shape = "Steel I/Wide Flange", material = "S355", dims = new { D = 0.4, B = 0.18, TF = 0.0135, TW = 0.0086 }, extras = new Dictionary<string, string> { ["NotSizeType"] = "Auto" } }, "has no field 'NotSizeType'");
+            var pd = Run(link, "property_definitions", new { });
+            Check(pd["frame_sections"]!.AsArray().First(x => x!["name"]!.GetValue<string>() == "IPE400B")!["extras"]!["Notes"]!.GetValue<string>() == "secondary", "property_definitions gives them to the form");
+            Check(pd["frame_extra_fields"]!["Concrete Rectangular"]!.AsArray().Any(x => x!.GetValue<string>() == "NotSizeType"), "the form is told each shape's fields");
+            var props = Run(link, "section_properties", new { shape = "Steel I/Wide Flange", dims = new { D = 0.4, B = 0.18, TF = 0.0135, TW = 0.0086 } });
+            Check(Math.Abs(props["A"]!.GetValue<double>() - (2 * 0.18 * 0.0135 + (0.4 - 0.027) * 0.0086)) < 1e-12, "the I's area");
+            var rect = Run(link, "section_properties", new { shape = "Concrete Rectangular", dims = new { D = 0.6, B = 0.3 } });
+            Check(Math.Abs(rect["I33"]!.GetValue<double>() - 0.3 * 0.216 / 12) < 1e-12 && Math.Abs(rect["Z33"]!.GetValue<double>() - 0.3 * 0.36 / 4) < 1e-12, "the rectangle's I33 and Z33");
+        });
+        yield return ("properties: Slab, Wall and Shell Section Data's other fields (colour, notes, notional size, a wall's rigid zone, SAP2000's material angle and bending thickness) are kept, written to SAP2000 and read back (Ahmed 2026-11-27)", () =>
+        {
+            var link = Frame();
+            var mat = link.Model.Materials.First(x => x.IsConcrete).Name;
+            Run(link, "define_shell_type", new { name = "W300", kind = "wall", thickness = 0.3, material = mat, extras = new Dictionary<string, string> { ["RigidZone"] = "Yes", ["Color"] = "Magenta", ["Notes"] = "core", ["BendThick"] = "0.25" } });
+            var w = link.Model.ShellSections.Single(x => x.Name == "W300");
+            Check(PropertyDefs.ShellExtras(w)["RigidZone"] == "Yes" && PropertyDefs.ShellTable(w) == "Wall Property Definitions - Specified", "the wall keeps its rigid zone under its table");
+            Check(PropertyDefs.ShellExtras(ModelFile.FromJson(ModelFile.ToJson(link.Model)).ShellSections.Single(x => x.Name == "W300"))["Notes"] == "core", "the .cpm keeps them");
+            var s2k = S2kWriter.Write(link.Model, "a.s2k").Text;
+            Check(s2k.Contains("Color=Magenta") && s2k.Contains("BendThick=0.25") && s2k.Contains("Notes=core"), "SAP2000's area section row takes the colour, bending thickness and notes");
+            var back = S2kReader.Read(s2k).Model.ShellSections.Single(x => x.Name == "W300");
+            Check(PropertyDefs.ShellExtras(back)["BendThick"] == "0.25" && PropertyDefs.ShellExtras(back)["Color"] == "Magenta", "the .s2k gives them back");
+            Refused(link, "define_shell_type", new { name = "S1", kind = "slab", thickness = 0.2, material = mat, extras = new Dictionary<string, string> { ["RigidZone"] = "Yes" } }, "has no field 'RigidZone'");
+            var pd = Run(link, "property_definitions", new { });
+            Check(pd["shell_sections"]!.AsArray().First(x => x!["name"]!.GetValue<string>() == "W300")!["extras"]!["Color"]!.GetValue<string>() == "Magenta" && pd["shell_extra_fields"]!["wall"]!.AsArray().Count == 8, "property_definitions gives them to the form");
+        });
         yield return ("properties: a steel, a rebar and a tendon material go in with their strengths, and come back from the .e2k and .s2k", () =>
         {
             var link = Frame();
@@ -364,6 +402,54 @@ static class PropertyTests
             Check(PropertyDefs.Value(link.Model.LineAssigns.Single(y => y.Label == beam[..at] && y.Story == beam[(at + 1)..]).Extra, "ANG") == "45", "the angle is on");
             Do(new { undo = true });
             Check(PropertyDefs.Value(link.Model.LineAssigns.Single(y => y.Label == beam[..at] && y.Story == beam[(at + 1)..]).Extra, "ANG") is null, "undo takes it off");
+        });
+
+        yield return ("properties: Deck Property Data (filled, unfilled, solid slab) is written as ETABS writes $ DECK PROPERTIES, read back, kept apart from the slabs, and refusals leave the model as it was (Ahmed 2026-11-27, every form)", () =>
+        {
+            var link = Frame();
+            var mat = link.Model.Materials[0].Name;
+            Run(link, "define_deck", new { name = "Deck1", deck_type = "Filled", slab_material = mat, deck_material = mat, slab_depth = 0.0875, rib_depth = 0.075, rib_width_top = 0.175, rib_width_bottom = 0.125, rib_spacing = 0.3,
+                shear_thickness = 0.001, unit_weight = 0.11, stud_diameter = 0.019, stud_height = 0.15, stud_fu = 400000, modifiers = new { M11MOD = 0.5 }, extras = new { Color = "#bfa0ff", Notes = "composite floor" } });
+            var e2k = E2kWriter.Write(link.Model);
+            Check(e2k.Contains("$ DECK PROPERTIES") && e2k.Contains("PROPTYPE  \"Deck\"") && e2k.Contains("DECKRIBSPACING  0.3") && e2k.Contains("SHEARSTUDFU  400000"), "the deck line as ETABS writes it");
+            var back = ViaE2k(link.Model).ShellSections.Single(x => x.Name == "Deck1");
+            Check(back.IsDeck && back.Number("DECKSLABDEPTH") == 0.0875 && back.Get("CONCMATERIAL") == mat && PropertyDefs.Modifiers(back.Lines, PropertyDefs.ShellModifiers)["M11MOD"] == 0.5, "the deck reads back");
+            Check(PropertyDefs.ShellExtras(link.Model.ShellSections.Single(x => x.Name == "Deck1"))["Notes"] == "composite floor" && PropertyDefs.ShellTable(back) == PropertyDefs.DeckTable, "colour and notes in Deck Property Definitions");
+            var pd = Run(link, "property_definitions", new { })["shell_sections"]!.AsArray().Single(x => x!["name"]!.GetValue<string>() == "Deck1")!;
+            Check(pd["deck"]!["deck_type"]!.GetValue<string>() == "Filled" && pd["deck"]!["rib_depth"]!.GetValue<double>() == 0.075, "the form sees the deck");
+            Check(Run(link, "model_definitions", new { })["shell_sections"]!.AsArray().Single(x => x!["name"]!.GetValue<string>() == "Deck1")!["kind"]!.GetValue<string>() == "deck", "a deck is not a slab in the lists");
+            Run(link, "define_deck", new { name = "Solid", deck_type = "Solid Slab", slab_material = mat, slab_depth = 0.15, stud_diameter = 0.019, stud_height = 0.1, stud_fu = 400000 });
+            var solid = link.Model.ShellSections.Single(x => x.Name == "Solid");
+            Check(solid.Get("DECKTYPE") == "SolidSlab" && solid.Get("DECKMATERIAL") is null && solid.Thickness == 0.15, "a solid slab has no deck");
+            Run(link, "define_deck", new { name = "Bare", deck_type = "Unfilled", deck_material = mat, rib_depth = 0.075, rib_width_top = 0.175, rib_width_bottom = 0.125, rib_spacing = 0.3, shear_thickness = 0.001, unit_weight = 0.11 });
+            Check(link.Model.ShellSections.Single(x => x.Name == "Bare").Get("CONCMATERIAL") is null, "an unfilled deck has no concrete");
+            Run(link, "define_deck", new { name = "Deck2", was = "Deck1", deck_type = "Filled", slab_material = mat, deck_material = mat, slab_depth = 0.1, rib_depth = 0.075, rib_width_top = 0.175, rib_width_bottom = 0.125, rib_spacing = 0.3, shear_thickness = 0.001 });
+            Check(link.Model.ShellSections.Exists(x => x.Name == "Deck2") && !link.Model.ShellSections.Exists(x => x.Name == "Deck1"), "a rename");
+            Refused(link, "define_deck", new { name = "X", deck_type = "Filled", slab_material = "nope", deck_material = mat, slab_depth = 0.1, rib_depth = 0.075, rib_width_top = 0.175, rib_width_bottom = 0.125, rib_spacing = 0.3, shear_thickness = 0.001 }, "no material");
+            Refused(link, "define_deck", new { name = "X", deck_type = "Filled", slab_material = mat, deck_material = mat, slab_depth = 0.1, rib_depth = 0.075, rib_width_top = 0.175, rib_width_bottom = 0.125, rib_spacing = 0.1, shear_thickness = 0.001 }, "rib spacing");
+            Refused(link, "define_deck", new { name = "X", deck_type = "Corrugated" }, "deck type");
+            Refused(link, "define_deck", new { name = "X", deck_type = "Unfilled", deck_material = mat, rib_depth = 0.075, rib_width_top = 0.175, rib_width_bottom = 0.125, rib_spacing = 0.3, shear_thickness = 0.001, extras = new { Thickness = "1" } }, "no field");
+            var slab = link.Model.ShellSections.First(x => !x.IsDeck && !x.IsWall).Name;
+            Refused(link, "define_deck", new { name = slab, deck_type = "Solid Slab", slab_material = mat, slab_depth = 0.15 }, "not a deck");
+        });
+
+        yield return ("properties: Spring and Link/Support Property Data's other fields (nonlinear options, colour, notes; mass, weight, inertia, line and area factors) are kept by the program's tables, and a link's row follows its type (Ahmed 2026-11-27, every field)", () =>
+        {
+            var link = Frame();
+            Run(link, "define_spring", new { kind = "area", name = "AS1", values = new { U3 = 20000 }, extras = new Dictionary<string, string> { ["NonlinOpt3"] = "Compression Only", ["Color"] = "#ff0000", ["Notes"] = "soil" } });
+            var sp = StructureExtras.Get(link.Model, "Spring Property Definitions - Area Springs", "AS1");
+            Check(sp["NonlinOpt3"] == "Compression Only" && sp["Notes"] == "soil", "the area spring's row: " + string.Join(",", sp));
+            Refused(link, "define_spring", new { kind = "area", name = "AS2", values = new { U3 = 1 }, extras = new Dictionary<string, string> { ["NonlinOpt2"] = "Tension Only" } }, "has no field 'NonlinOpt2'");
+            Check(!PropertyDefs.Springs(link.Model).Exists(x => x.Name == "AS2"), "a refused spring is not made");
+            Run(link, "define_link", new { name = "L1", type = "GAP", dofs = new { U1 = new { stiffness = 1e6, damping = 0 } }, extras = new Dictionary<string, string> { ["Mass"] = "0.5", ["Notes"] = "bearing" } });
+            Check(StructureExtras.Get(link.Model, "Link Property Definitions - Gap", "L1")["Mass"] == "0.5", "the gap link's row");
+            Check(StructureExtras.PerDirection("Link Property Definitions - Gap") && !StructureExtras.PerDirection("Link Property Definitions - Linear"), "a nonlinear link's rows go in by direction");
+            Run(link, "define_link", new { name = "L1", type = "LINEAR", dofs = new { U1 = new { stiffness = 1e6, damping = 0 } } });
+            Check(StructureExtras.Get(link.Model, "Link Property Definitions - Linear", "L1")["Notes"] == "bearing" && StructureExtras.Get(link.Model, "Link Property Definitions - Gap", "L1").Count == 0, "the row moves with the type");
+            var pd = Run(link, "property_definitions", new { });
+            Check(pd["links"]!.AsArray().Single(x => x!["name"]!.GetValue<string>() == "L1")!["extras"]!["Mass"]?.GetValue<string>() == "0.5" && pd["springs"]!.AsArray().Any(x => x!["name"]!.GetValue<string>() == "AS1" && x["extras"]!["Color"]?.GetValue<string>() == "#ff0000"), "the forms see them: " + pd["links"]!.ToJsonString() + pd["springs"]!.ToJsonString());
+            Run(link, "define_link", new { name = "L1", delete = true });
+            Check(StructureExtras.Get(link.Model, "Link Property Definitions - Linear", "L1").Count == 0, "a deleted link leaves no row");
         });
     }
 }

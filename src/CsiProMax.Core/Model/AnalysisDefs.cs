@@ -100,7 +100,28 @@ public static class AnalysisDefs
     public static bool DeleteFunction(StructuralModel m, string name)
     {
         var s = m.Passthrough.Find(x => x.Heading == Functions);
+        SetFunctionSource(m, name, null);
         return s is not null && s.Lines.RemoveAll(l => Tokenize(l) is { Count: > 1 } t && t[0] == "FUNCTION" && Unquote(t[1]) == name) > 0;
+    }
+
+    /// <summary>How a function was made in its definition form (Ahmed 2026-11-27, every field): the function type
+    /// chosen at "Choose Function Type to Add" (a code, From File, User, Sine, Cosine, Ramp, Sawtooth, Triangular,
+    /// User Periodic) and that form's parameters, so Modify/Show opens the same form with the same values. The
+    /// programs get the points (a user function, as their own Convert to User Defined makes it); this row stays in the
+    /// .cpm only ("model|" is no program's table).</summary>
+    public const string FunctionSources = "model|FUNCTION SOURCES";
+
+    public static IReadOnlyDictionary<string, string>? FunctionSource(StructuralModel m, string name) =>
+        m.Kept is not null && m.Kept.TryGetValue(FunctionSources, out var rows) ? rows.Find(r => r.GetValueOrDefault("Name") == name) : null;
+
+    /// <summary>Sets (or with null removes) a function's source row.</summary>
+    public static void SetFunctionSource(StructuralModel m, string name, IReadOnlyDictionary<string, string>? row)
+    {
+        m.Kept ??= new(StringComparer.OrdinalIgnoreCase);
+        var rows = m.Kept.TryGetValue(FunctionSources, out var have) ? have : m.Kept[FunctionSources] = [];
+        rows.RemoveAll(r => r.GetValueOrDefault("Name") == name);
+        if (row is not null) rows.Add(new Dictionary<string, string>(row) { ["Name"] = name });
+        if (rows.Count == 0) m.Kept.Remove(FunctionSources);
     }
 
     /// <summary>The load cases that use a function.</summary>

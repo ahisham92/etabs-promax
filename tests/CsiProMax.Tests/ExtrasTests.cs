@@ -215,6 +215,69 @@ static class ExtrasTests
             // ETABS has no Material Grade box in Material Property Data: the grade comes from Add New Material Property.
             Check(!html.Contains("<span>Material Grade</span>"), "Material Property Data shows a Material Grade box ETABS does not have");
         });
+        yield return ("extras: the frame section forms match ETABS 23.2 field by field: Frame Properties with its filter and Click to: buttons, Frame Property Shape Type, Import New Properties, Frame Section Property Data with notional size, colour, notes, source, dimensions by ETABS's names with units, fillet radius, mirror, modifiers, rebar, and Show Section Properties (Ahmed 2026-11-27)", () =>
+        {
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var part in new[] { "dialog(\"Frame Properties\"", "<legend>Filter Properties List</legend>", "[\"Import New Properties...\", () => hmFrameImport(again)]", "[\"Delete Multiple Properties...\"", "dialog(\"Frame Property Shape Type\"",
+                "dialog(\"Frame Section Property Import Data\"", "<button id=\"sNot\">Modify/Show Notional Size...</button>", "dialog(\"Notional Size Data\"", "<legend>Section Property Source</legend>", "<button id=\"sProps\">Show Section Properties...</button>",
+                "hmRun(\"section_properties\", {shape, dims}, true)", "<button id=\"sMod\" style=\"width:100%\">Modify/Show Modifiers...</button>", "<button id=\"sRebar\" style=\"width:100%\">Modify/Show Rebar...</button>", "\"Steel I/Wide Flange\": {D: \"Total Depth\", B: \"Top Flange Width\"",
+                "<span>Fillet Radius</span>", "Mirror About ${f.slice(-1)}-Axis", "dialog(\"Property/Stiffness Modification Factors\"", "function shapeSvg(shape, v)" })
+                Check(html.Contains(part), "viewer.html lost " + part);
+        });
+        yield return ("extras: the slab and wall forms match ETABS 23.2 and SAP2000 26.3 field by field: Slab Properties and Wall Properties lists of their own, Slab Property Data with notional size, modeling type, modifiers, colour, notes, one-way load and rib data, Wall Property Data with the automatic rigid zone, SAP2000's Shell Section Data with type, material angle and membrane/bending thickness (Ahmed 2026-11-27)", () =>
+        {
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var part in new[] { "kind === \"wall\" ? \"Wall Properties\" : \"Slab Properties\"", "[\"Slab Sections...\", \"m:shellSections\"], [\"Wall Sections...\", \"m:wallSections\"]", "case \"wallSections\": return hmShellSections(\"wall\");",
+                "sap ? \"Shell Section Data\" : wall ? \"Wall Property Data\" : \"Slab Property Data\"", "<button id=\"aNot\">Modify/Show Notional Size...</button>", "Include Automatic Rigid Zone Area Over Wall", "Use Special One-Way Load Distribution",
+                "<span data-rib>Rib Spacing (Perpendicular to Rib Direction)</span>", "<span data-rib>Stem Width at Top</span>", "<span>Material Angle</span><input id=\"aMA\"", "<span>Bending</span><input id=\"aBT\"", "<legend>Select Section Type To Add</legend>" })
+                Check(html.Contains(part), "viewer.html lost " + part);
+            Check(!html.Contains("\"Slab or Wall Property Data\""), "ETABS has no Slab or Wall Property Data window: a slab and a wall have forms of their own");
+        });
+        yield return ("extras: the load forms match ETABS 23.2 and SAP2000 26.3 field by field: Define Load Patterns with each program's words, Load Cases as a table with Show Load Case Tree, Load Case Data's General, sub-type and Initial Condition, Load Combinations with Add Default Design Combos, Mass Sources then Mass Source Data with the move ratios and Mass Options (Ahmed 2026-11-27)", () =>
+        {
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var part in new[] { "add: \"Add New Load\", mod: \"Modify Load\", lat: \"Modify Lateral Load...\"", "<button id=\"pCopy\">Add Copy of Load Pattern</button>", "<th>Load Case Name</th><th>Load Case Type</th>", "<button data-k=\"tree\">Show Load Case Tree...</button>",
+                "Zero Initial Conditions - Start from Unstressed State", "Continue from State at End of Nonlinear Case", "<span>Exclude Objects in this Group</span>", "Add Code-Generated Load Combinations", "Define Combination of Load Case/Combo Results",
+                "\"Mass Sources\", \"Mass Sources\"", "<span>Mass Source Name</span><input id=\"mN\"", "Adjust Diaphragm Lateral Mass to Move Mass Centroid by:", "This Ratio of Diaphragm Width in X Direction", "<legend>Mass Options</legend>", "Lump Lateral Mass at Story Levels", "Element Self Mass and Additional Mass" })
+                Check(html.Contains(part), "viewer.html lost " + part);
+        });
+        yield return ("extras: Story Data, Grid System Data, diaphragms, pier and spandrel labels, groups and section cuts match ETABS 23.2 and SAP2000 26.3 field by field (Ahmed 2026-11-27)", () =>
+        {
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var part in new[] { "<th>Master Story</th><th>Similar To</th><th>Splice Story</th><th>Splice Height (${u.l})</th><th>Story Color</th>", "<button id=\"stColor\">Reset to Default Color</button>",
+                "sapG ? \"Define Grid System Data\" : \"Grid System Data\"", "<legend>Story Range Option</legend>", "Display Grid Data as", "Quick Start New Rectangular Grids", "sapG ? \"Bubble Loc\" : \"Bubble Location\"",
+                "<legend>Rigidity</legend>", "<button id=\"zRen\">Change Name</button>", "Multi-Story Spandrel", "sapX ? \"Use Group For\" : \"Group Design Usage\"", "[\"Composite\", \"Composite Beam Design\"]", "[\"MassWeight\", \"Mass and Weight\"]",
+                "<legend>Define Section Cut By</legend>", "Design (P, V2, V3, T, M2, M3)", "<legend>Section Cut Force Location</legend>", "<legend>Rotation of Section Cut Local Axes</legend>" })
+                Check(html.Contains(part), "viewer.html lost " + part);
+        });
+        yield return ("extras: Link/Support Property Data and the spring forms match ETABS 23.2 and SAP2000 26.3 field by field: Total Mass and Weight, Factors For Line and Area Springs, Directional Properties, Nonlinearity Specification, Display Color and Property Notes (Ahmed 2026-11-27)", () =>
+        {
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var part in new[] { "<legend>Total Mass and Weight</legend>", "<legend>Factors For Line and Area Springs</legend>", "<legend>Directional Properties</legend>", "<span>Property is Defined for This Length In a Line Spring</span>",
+                "<span>Rotational Inertia 1</span>", "<legend>Nonlinearity Specification</legend>", "<legend>Stiffness Options</legend>", "<span>Display Color</span>", "<span>Link/Support Type</span>", "\"Link/Support Property Data\"" })
+                Check(html.Contains(part), "viewer.html lost " + part);
+        });
+        yield return ("extras: Define Functions match ETABS 23.2 and SAP2000 26.3: Choose Function Type to Add, each type's definition form with its own fields, the Function Graph and Convert to User Defined (Ahmed 2026-11-27)", () =>
+        {
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var part in new[] { "<legend>Choose Function Type to Add</legend>", "\"Modify/Show Spectrum...\" : \"Modify/Show Function...\"", "[\"periodic\", \"User Periodic\"]", "[\"sawtooth\", \"Sawtooth\"]",
+                "\"Response Spectrum Function Definition\" : \"Time History Function Definition\"", "<span>Function Damping Ratio</span>", "<legend>Function File</legend>", "<span>Header Lines to Skip</span>", "<span>Prefix Characters per Line to Skip</span>",
+                "Values at Equal Intervals of", "<legend>Function Graph</legend>", "<button id=\"fConv\">Convert to User Defined</button>", "[\"ramp_time\", \"Ramp Time\", 1], [\"amplitude\", \"Amplitude\", 1], [\"max_time\", \"Maximum Time\", 2]", "[\"steps_per_cycle\", \"Number of Steps per Cycle\", 16]" })
+                Check(html.Contains(part), "viewer.html lost " + part);
+        });
+        yield return ("extras: Define is each program's own menu in its order and words (Section Properties, Spring Properties, Group Definitions / Groups, Coordinate Systems/Grids in SAP2000), stories and grids from ETABS's Edit menu, strips, tendons and slab rebar under Draw (Ahmed 2026-11-27)", () =>
+        {
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var part in new[] { "m.Define = hmDefineMenu();", "[\"Edit Stories and Grid Systems...\", \"m:storyGrid\"]", "dialog(\"Edit Story and Grid System Data\"", "[\"Coordinate Systems/Grids...\", \"m:grids\"]",
+                "[\"Group Definitions...\", \"m:st:group\"]", "[\"Soil Subgrade Properties...\", \"m:spr:area\"]", "dt(\"Shell Uniform Load Sets...\")", "only([\"etabs\", \"safe\"], [\"Design Strips...\", \"m:ex:strips\"]), [\"Tendons...\", \"m:ex:tendons\"]" })
+                Check(html.Contains(part), "viewer.html lost " + part);
+        });
+        yield return ("extras: Deck Sections and Deck Property Data match ETABS 23.2 field by field (Ahmed 2026-11-27)", () =>
+        {
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var part in new[] { "[\"Deck Sections...\", \"m:decks\"]", "listForm(\"Deck Properties\"", "dialog(\"Deck Property Data\"", "\"Slab Depth, tc\"", "\"Rib Width Bottom, wrb\"", "\"Deck Shear Thickness\"", "\"Shear Stud Tensile Strength, Fu\"", "submit(d, \"define_deck\"" })
+                Check(html.Contains(part), "viewer.html lost " + part);
+        });
         yield return ("extras: the views and toolbars are drawn as ETABS draws them: grey see-through slabs with white edges, thin columns, solid grid, light-blue ground grid with flat bubbles, the axes at the origin, column squares in plan, captions as tabs, the toolbar and strip in the program's order (Ahmed 2026-11-26 22:19)", () =>
         {
             var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));

@@ -40,10 +40,36 @@ public static class ModelerTables
         {
             try
             {
-                EditableTables.Put(e, table, "Name", rows.Select(r => (IReadOnlyDictionary<string, string>)r).ToList(), $"put the Modeler's '{table}' in");
+                var put = rows.Select(r => StructureExtras.ForEtabs(table, r)).ToList();
+                // A nonlinear link's table has a row per direction: the same fields on each of the link's directions.
+                if (StructureExtras.PerDirection(table))
+                    put = put.SelectMany(r => (PropertyDefs.Links(model).Find(l => l.Name == r.GetValueOrDefault("Name"))?.Dofs.Keys.ToList() ?? []).Select(dof => new Dictionary<string, string>(r) { ["Direction"] = dof })).ToList();
+                EditableTables.Put(e, table, KeyOf(table), put.Select(r => (IReadOnlyDictionary<string, string>)r).ToList(), $"put the Modeler's '{table}' in");
                 done.Add($"{table}: {rows.Count} row{(rows.Count == 1 ? "" : "s")}");
             }
             catch (EtabsException ex) { refused.Add($"{table}: {ex.Message}"); }
+        }
+        // A frame section's other fields (colour, notes, notional size, fillet radius, ...), in its shape's table by name.
+        foreach (var g in model.FrameSections.Where(x => PropertyDefs.FrameExtras(x).Count > 0).GroupBy(x => x.Shape))
+        {
+            var table = "Frame Section Property Definitions - " + g.Key;
+            try
+            {
+                EditableTables.Put(e, table, "Name", g.Select(x => (IReadOnlyDictionary<string, string>)new Dictionary<string, string>(PropertyDefs.FrameExtras(x)) { ["Name"] = x.Name }).ToList(), $"put the Modeler's '{table}' in");
+                done.Add($"{table}: {g.Count()} row{(g.Count() == 1 ? "" : "s")}");
+            }
+            catch (EtabsException ex) { refused.Add($"{table}: {ex.Message}"); }
+        }
+        // A slab or wall section's other fields (notional size, colour, notes, a wall's rigid zone), in its table by name.
+        foreach (var g in model.ShellSections.Where(x => PropertyDefs.ShellExtras(x).Keys.Except(PropertyDefs.SapOnlyShellFields).Any()).GroupBy(PropertyDefs.ShellTable))
+        {
+            try
+            {
+                EditableTables.Put(e, g.Key, "Name", g.Select(x => (IReadOnlyDictionary<string, string>)PropertyDefs.ShellExtras(x).Where(kv => !PropertyDefs.SapOnlyShellFields.Contains(kv.Key))
+                    .Append(KeyValuePair.Create("Name", x.Name)).ToDictionary(kv => kv.Key, kv => kv.Value)).ToList(), $"put the Modeler's '{g.Key}' in");
+                done.Add($"{g.Key}: {g.Count()} row{(g.Count() == 1 ? "" : "s")}");
+            }
+            catch (EtabsException ex) { refused.Add($"{g.Key}: {ex.Message}"); }
         }
         // The objects' assignments the .e2k has no keyword for, by story and label (AssignTables). A new row names its
         // object's UniqueName too, read from the program's summary of that kind of object.
@@ -169,4 +195,14 @@ public static class ModelerTables
     }
 
     private static int IndexOf(TableData t, string field) => t.Fields.ToList().FindIndex(f => f.Equals(field, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>The fields a definition table's row is found by: its name, or the story (Story Definitions), or the
+    /// source and its load pattern (Mass Source Definition, one row per pattern).</summary>
+    internal static string KeyOf(string table) => table.ToLowerInvariant() switch
+    {
+        "story definitions" => "Story",
+        "mass source definition" => "Name|LoadPattern",
+        _ when StructureExtras.PerDirection(table) => "Name|Direction",
+        _ => "Name",
+    };
 }

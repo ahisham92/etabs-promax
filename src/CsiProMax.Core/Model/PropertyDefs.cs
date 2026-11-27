@@ -213,6 +213,122 @@ public static class PropertyDefs
         return sec;
     }
 
+    /// <summary>
+    /// What ETABS 23.2's Frame Section Property Data form holds beside the shape's size (its display colour, notes,
+    /// notional size, fillet or corner radius, mirroring and rigid zone): the fields of its "Frame Section Property
+    /// Definitions - (shape)" table the .e2k has no keyword for, kept in the section's <see cref="Definition.Tables"/>
+    /// under its shape and put into ETABS through that table (SAP2000 takes the colour, notes and fillet radius in its
+    /// "Frame Section Properties 01 - General").
+    /// </summary>
+    public static string[] FrameExtraFields(string shape)
+    {
+        var concrete = new[] { "NotSizeType", "NotAutoFact", "NotUserSize", "RigidZone" };
+        string[] own = shape switch
+        {
+            "Concrete Rectangular" or "Concrete Circle" => concrete,
+            "Concrete Tee" => [.. concrete, "MirrorAbt3"],
+            "Concrete L" => [.. concrete, "MirrorAbt2", "MirrorAbt3"],
+            "Steel I/Wide Flange" or "Steel Double Channel" => ["FilletRad"],
+            "Steel Channel" => ["FilletRad", "MirrorAbt2"],
+            "Steel Tee" or "Steel Double Angle" => ["FilletRad", "MirrorAbt3"],
+            "Steel Angle" => ["FilletRad", "MirrorAbt2", "MirrorAbt3"],
+            "Steel Tube" => ["CornerRad"],
+            _ => [],
+        };
+        return [.. own, "Color", "Notes"];
+    }
+
+    /// <summary>Sets a frame section's other fields (<see cref="FrameExtraFields"/>); empty values are taken off.</summary>
+    public static void SetFrameExtras(FrameSection s, IReadOnlyDictionary<string, string> extras) => SetExtras(s, s.Shape, FrameExtraFields(s.Shape), extras, $"A {s.Shape} section");
+
+    /// <summary>A frame section's other fields, or an empty row.</summary>
+    public static IReadOnlyDictionary<string, string> FrameExtras(FrameSection s) => Extras(s, s.Shape);
+
+    /// <summary>
+    /// What ETABS 23.2's Slab and Wall Property Data forms hold beside the .e2k's line (notional size, colour, notes; a
+    /// wall's automatic rigid zone), by its "Slab Property Definitions" and "Wall Property Definitions - Specified"
+    /// fields, and SAP2000's Shell Section Data material angle and bending thickness (its "Area Section Properties").
+    /// </summary>
+    public static string[] ShellExtraFields(bool wall) => wall
+        ? ["RigidZone", "NotSizeType", "NotAutoFact", "NotUserSize", "Color", "Notes", "MatAngle", "BendThick"]
+        : ["NotSizeType", "NotAutoFact", "NotUserSize", "Color", "Notes", "MatAngle", "BendThick"];
+
+    /// <summary>The fields of <see cref="ShellExtraFields"/> that are SAP2000's only.</summary>
+    public static readonly string[] SapOnlyShellFields = ["MatAngle", "BendThick"];
+
+    /// <summary>ETABS 23.2's table for a slab or a wall section's row.</summary>
+    public static string ShellTable(ShellSection s) => s.IsDeck ? DeckTable : s.IsWall ? "Wall Property Definitions - Specified" : "Slab Property Definitions";
+
+    public static void SetShellExtras(ShellSection s, IReadOnlyDictionary<string, string> extras)
+    {
+        if (s.IsDeck) SetExtras(s, DeckTable, DeckExtraFields, extras, "A deck section");
+        else SetExtras(s, ShellTable(s), ShellExtraFields(s.IsWall), extras, s.IsWall ? "A wall section" : "A slab section");
+    }
+
+    // ---- deck sections (ETABS 23.2: Define > Section Properties > Deck Sections, its Deck Property Data form) ----
+
+    public const string DeckTable = "Deck Property Definitions";
+    public static readonly string[] DeckTypes = ["Filled", "Unfilled", "Solid Slab"];
+    /// <summary>Deck Property Data's fields the .e2k line has no keyword for.</summary>
+    public static readonly string[] DeckExtraFields = ["Color", "Notes"];
+
+    /// <summary>A deck's geometry and studs as the Deck Property Data form has them (lengths in the model's units, the stud
+    /// strength in its force over length squared, the deck unit weight in force over length squared).</summary>
+    public sealed record Deck(string Type, string SlabMaterial, string DeckMaterial, double SlabDepth, double RibDepth, double RibWidthTop, double RibWidthBottom,
+        double RibSpacing, double ShearThickness, double UnitWeight, double StudDiameter, double StudHeight, double StudFu);
+
+    /// <summary>Adds or changes a deck section, written as ETABS 23 writes it in $ DECK PROPERTIES (SHELLPROP ... PROPTYPE
+    /// "Deck" DECKTYPE ...): a filled deck has the concrete, the deck and the studs, an unfilled deck the deck only, a solid
+    /// slab the concrete and the studs.</summary>
+    public static ShellSection SetDeck(StructuralModel m, string name, string? was, Deck d)
+    {
+        Name(name, "deck section");
+        var type = DeckTypes.FirstOrDefault(t => t.Replace(" ", "").Equals(d.Type.Replace(" ", ""), StringComparison.OrdinalIgnoreCase)) ?? throw new ArgumentException($"The deck type is one of {string.Join(", ", DeckTypes)}.");
+        bool concrete = type != "Unfilled", deck = type != "Solid Slab";
+        if (concrete && !m.Materials.Exists(x => x.Name == d.SlabMaterial)) throw new ArgumentException($"There is no material '{d.SlabMaterial}' for the slab.");
+        if (deck && !m.Materials.Exists(x => x.Name == d.DeckMaterial)) throw new ArgumentException($"There is no material '{d.DeckMaterial}' for the deck.");
+        if (concrete && !(d.SlabDepth > 0)) throw new ArgumentException("The slab depth (tc) is above 0.");
+        if (deck && (!(d.RibDepth > 0) || !(d.RibWidthTop > 0) || !(d.RibWidthBottom > 0) || !(d.RibSpacing > d.RibWidthTop) || !(d.ShearThickness > 0)))
+            throw new ArgumentException("The deck needs a rib depth, rib widths and a shear thickness above 0, and a rib spacing above the top rib width.");
+        if (new[] { d.UnitWeight, d.StudDiameter, d.StudHeight, d.StudFu }.Any(x => x < 0 || double.IsNaN(x))) throw new ArgumentException("The unit weight and the stud values are 0 or more.");
+        var old = m.ShellSections.Find(x => x.Name == (was ?? name));
+        if (was is not null && old is null) throw new ArgumentException($"There is no deck section '{was}'.");
+        if (old is not null && !old.IsDeck) throw new ArgumentException($"'{old.Name}' is a slab or wall section, not a deck.");
+        if (was is not null && was != name && m.ShellSections.Exists(x => x.Name == name)) throw new ArgumentException($"A section is already named '{name}'.");
+        if (old is null && m.ShellSections.Exists(x => x.Name == name)) throw new ArgumentException($"A section is already named '{name}'.");
+        var line = new List<string> { "PROPTYPE", Quote("Deck"), "DECKTYPE", Quote(type == "Solid Slab" ? "SolidSlab" : type) };
+        if (concrete) line.AddRange(["CONCMATERIAL", Quote(d.SlabMaterial)]);
+        if (deck) line.AddRange(["DECKMATERIAL", Quote(d.DeckMaterial)]);
+        if (concrete) line.AddRange(["DECKSLABDEPTH", Number(d.SlabDepth)]);
+        if (deck) line.AddRange(["DECKRIBDEPTH", Number(d.RibDepth), "DECKRIBWIDTHTOP", Number(d.RibWidthTop), "DECKRIBWIDTHBOTTOM", Number(d.RibWidthBottom), "DECKRIBSPACING", Number(d.RibSpacing),
+            "DECKSHEARTHICKNESS", Number(d.ShearThickness), "DECKUNITWEIGHT", Number(d.UnitWeight)]);
+        if (concrete) line.AddRange(["SHEARSTUDDIAM", Number(d.StudDiameter), "SHEARSTUDHEIGHT", Number(d.StudHeight), "SHEARSTUDFU", Number(d.StudFu)]);
+        var sec = old ?? new ShellSection();
+        if (old is null) m.ShellSections.Add(sec);
+        var mods = old?.Lines.Where(l => l.Count > 0 && ShellModifiers.Contains(l[0])).ToList() ?? [];
+        sec.Name = name;
+        sec.Lines = [line, .. mods];
+        if (was is not null && was != name) foreach (var a in m.AreaAssigns.Where(x => x.Section == was)) a.Section = name;
+        return sec;
+    }
+
+    public static IReadOnlyDictionary<string, string> ShellExtras(ShellSection s) => Extras(s, ShellTable(s));
+
+    private static void SetExtras(Definition d, string table, string[] fields, IReadOnlyDictionary<string, string> extras, string what)
+    {
+        var row = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (k, v) in extras)
+        {
+            var f = fields.FirstOrDefault(x => x.Equals(k, StringComparison.OrdinalIgnoreCase))
+                ?? throw new ArgumentException($"{what} has no field '{k}'. It has: {string.Join(", ", fields)}.");
+            if (v.Trim().Length > 0) row[f] = v.Trim();
+        }
+        d.Tables = row.Count > 0 ? new(StringComparer.OrdinalIgnoreCase) { [table] = [row] } : null;
+    }
+
+    private static IReadOnlyDictionary<string, string> Extras(Definition d, string table) =>
+        d.Tables is not null && d.Tables.TryGetValue(table, out var rows) && rows.Count > 0 ? rows[0] : new Dictionary<string, string>();
+
     // ---- slab and wall types ----
 
     /// <summary>A ribbed slab's ribs, as ETABS 23.2 writes them: the overall depth (slab and ribs), the rib width at its top and
