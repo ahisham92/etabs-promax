@@ -419,6 +419,30 @@ static class ExtrasTests
             }
             finally { EngineRun.KeepOpenSetting = old; }
         });
+        yield return ("Ahmed 2026-11-27: the Options menu forms carry each program's items: Preferences (Dimensions/Tolerances, Graphics), Colors (Display, Output), Miscellaneous Options; colours stay with the model for ETABS and go into SAP2000's .s2k", () =>
+        {
+            Check(ProgramForms.OptionForms("etabs").Select(f => f.Table).SequenceEqual(["Preferences - Tolerance", "Preferences - Graphics", "Options - Colors - Display", "Options - Colors - Output", "Miscellaneous Options"]), "ETABS's Options forms");
+            Check(ProgramForms.OptionForms("sap2000").Select(f => f.Table).SequenceEqual(["Preferences - Dimensional", "Options - Colors - Display", "Options - Colors - Output"]), "SAP2000's Options forms");
+            foreach (var target in new[] { "etabs", "sap2000", "safe" })
+                foreach (var f in ProgramForms.OptionForms(target))
+                    Check(ProgramForms.Fields(target, f.Table).Count > 0, $"{target} has no items for {f.Table}");
+            Check(ProgramForms.Fields("etabs", "Options - Colors - Display").Exists(f => f.Key == "ColorBeams" && f.Label == "Beams") && ProgramForms.Fields("etabs", "Preferences - Tolerance").Exists(f => f.Key == "MergeTol" && f.Label == "Auto Merge Tolerance"), "the Options items do not have readable names");
+            Check(ProgramForms.Fields("sap2000", "Preferences - Dimensional").Exists(f => f.Key == "MergeTol" && f.Label == "Auto Merge Tolerance"), "SAP2000's tolerance names");
+            Check(!ProgramOptions.HasDefinitionTable("etabs", "Options - Colors - Display") && ProgramOptions.HasDefinitionTable("sap2000", "Options - Colors - Display") && ProgramOptions.HasDefinitionTable("etabs", "Preferences - Tolerance"), "the colours are not kept for ETABS and written for SAP2000");
+            var link = Frame();
+            var forms = Run(link, "program_forms", new { });
+            Check((forms["options"] as JsonArray)!.Count == 5, "program_forms does not list the Options forms");
+            Run(link, "set_program_form", new { table = "Options - Colors - Display", values = new Dictionary<string, string> { ["Beams"] = "255" } });
+            Check(link.Model.DefinitionTables!["Options - Colors - Display"].Single()["ColorBeams"] == "255", "the colour is not the table's row");
+            link.Model.Target = "sap2000";
+            Run(link, "set_program_form", new { table = "Preferences - Dimensional", values = new Dictionary<string, string> { ["MergeTol"] = "0.002" } });
+            var text = CsiProMax.S2k.S2kWriter.Write(link.Model).Text;
+            Check(text.Contains("TABLE:  \"PREFERENCES - DIMENSIONAL\"", StringComparison.Ordinal) && text.Contains("MergeTol=0.002", StringComparison.Ordinal), "the .s2k has no tolerance preferences");
+            var read = CsiProMax.S2k.S2kReader.Read(text, "Extras").Model;
+            Check(read.DefinitionTables?.GetValueOrDefault("Preferences - Dimensional")?.Single()["MergeTol"] == "0.002" && read.DefinitionTables?.GetValueOrDefault("Options - Colors - Display")?.Single()["ColorBeams"] is null, "the .s2k's preferences do not come back");
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            Check(html.Contains("\"m:oform:\" + i", StringComparison.Ordinal) && html.Contains("hmProgForm(+a.slice(6), \"options\")", StringComparison.Ordinal) && html.Contains("Assign ${word} Colors", StringComparison.Ordinal), "the Options menu does not open the forms");
+        });
         yield return ("Ahmed 2026-11-27: Releases/Partial Fixity springs and Insertion Point's mirror and joint offsets, as ETABS's tables and SAP2000's .s2k", () =>
         {
             var link = Frame();

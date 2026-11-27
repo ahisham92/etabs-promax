@@ -689,6 +689,11 @@ public static class ModelerFieldSteps
         if (dofTable is not null)
             ctx.Tool("set_program_form", $$$"""{"table":{{{Q(dofTable)}}},"values":{"UX":"Yes","UY":"Yes","UZ":"Yes","RX":"Yes","RY":"Yes","RZ":"Yes"}}""", null, "tool set_program_form, Set Active Degrees of Freedom");
         ctx.Refused("set_program_form", $$$"""{"table":{{{Q(fTable)}}},"values":{"No Such Item":"1"}}""", "no item", "tool set_program_form says no to an item the form does not have");
+        // The Options menu's forms (Preferences, Colors) are forms of the same kind; a blank value goes back to the default.
+        var tolTable = modeler.Model.Target == CsiProMax.Model.ProgramOptions.Sap2000 ? "Preferences - Dimensional" : "Preferences - Tolerance";
+        ctx.Tool("set_program_form", $$$"""{"table":{{{Q(tolTable)}}},"values":{"Auto Merge Tolerance":"0.001"}}""", null, "tool set_program_form, Options > Preferences > Dimensions/Tolerances");
+        ctx.Tool("set_program_form", $$$"""{"table":"Options - Colors - Display","values":{"Darkness":"0.5"}}""", null, "tool set_program_form, Options > Colors > Display");
+        ctx.Tool("set_program_form", $$$"""{"table":"Options - Colors - Display","values":{"Darkness":""}}""", null, "tool set_program_form, a colour form back to the program's default");
         ctx.Tool("define_spring", """{"kind":"point","name":"CPM-PS","values":{"UX":1000,"UY":1000,"UZ":50000}}""", null, "tool define_spring, a point spring");
         ctx.Tool("define_spring", """{"kind":"area","name":"CPM-AS","values":{"U3":20000}}""", null, "tool define_spring, an area spring");
         ctx.Refused("define_spring", """{"kind":"line","name":"CPM-BAD","values":{"UX":5}}""", "not 'UX'", "tool define_spring says no to a value the kind does not have");
