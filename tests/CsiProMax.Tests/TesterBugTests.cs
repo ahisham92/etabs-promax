@@ -238,6 +238,7 @@ static class TesterBugTests
                 ["src/CsiProMax.Assistant/Etabs/OfflineEtabs.cs"] = "the Modeler: it writes ETABS's files and says so",
                 ["src/CsiProMax.Assistant/Tools/ModelerTools.cs"] = "the Modeler's tools",
                 ["src/CsiProMax.Assistant/Field/EtabsFieldSteps.cs"] = "the field test's steps for ETABS",
+                ["src/CsiProMax.Assistant/Field/EtabsFunctionRoundTrip.cs"] = "the field test's ETABS function forms, read back from ETABS",
                 ["src/CsiProMax.Assistant/Panel/Agent/SystemPrompt.cs"] = "the shared prompt: ProgramPrompt.Reword puts it into the program's words (checked below)",
                 ["src/CsiProMax.Assistant/Safe/SafePrompt.cs"] = "tells the chat it is SAFE, not ETABS",
                 ["src/CsiProMax.Assistant/Sap2000/SapPrompt.cs"] = "tells the chat it is SAP2000, not ETABS",

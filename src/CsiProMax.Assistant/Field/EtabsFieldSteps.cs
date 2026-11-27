@@ -32,6 +32,8 @@ public static class EtabsFieldSteps
 
         // ---- what ETABS read from the file the Modeler wrote ----
         var written = ctx.Written;
+        // The function forms: each function in ETABS's own table of its code or type, every parameter as the Engine wrote it.
+        EtabsFunctionRoundTrip.Check(ctx, link);
         ctx.Step("ETABS read every story, frame and area the Modeler wrote", () =>
         {
             var (stories, frames, areas) = (link.Stories().Count - 1, link.Frames().Count, link.Areas().Count);
