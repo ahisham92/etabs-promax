@@ -16,6 +16,8 @@ public static class SafeFieldSteps
     /// <summary>In the Modeler's part: one floor saved as a SAFE text file, for the scratch window to open.</summary>
     public static void Modeler(FieldContext ctx)
     {
+        // The SAFE forms' values (SafeFormRoundTrip), so SAFE reads them back from the .f2k in Scratch.
+        SafeFormRoundTrip.Define(ctx);
         var answer = ctx.Tool("save_safe_file", $$"""{"story":"Story1","name":"{{ModelerFieldSteps.ModelName}}","folder":{{Q(ctx.Folder)}},"strips":true}""", a =>
         {
             var file = a["file"]!.GetValue<string>();
@@ -110,6 +112,8 @@ public static class SafeFieldSteps
             FieldContext.Expect(have.area_sections.Count > 0 && have.materials.Count > 0 && have.patterns.Count >= 2, "slab sections, materials and the Dead and Live patterns were expected");
             return have;
         });
+        // The SAFE forms: every value the Engine's forms set, read back from SAFE's own tables.
+        SafeFormRoundTrip.Check(ctx);
         if (built && !ctx.Facts.ContainsKey("safe.strips_built"))
             ctx.Fail("the design strips came across", "SAFE did not take the strips through its strip table (see the step that put them in, which names its fields).");
         else ctx.Step(built ? "the design strips came across (through SAFE's strip table)" : "the design strips came across", () =>

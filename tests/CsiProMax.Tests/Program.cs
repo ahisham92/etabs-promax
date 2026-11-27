@@ -1005,6 +1005,7 @@ foreach (var (name, body) in OpenFileTests.All()) Test(name, body);
 foreach (var (name, body) in LosslessTests.All()) Test(name, body);
 foreach (var (name, body) in CarryTests.All()) Test(name, body);
 foreach (var (name, body) in SafeLosslessTests.All()) Test(name, body);
+foreach (var (name, body) in SafeFormTests.All()) Test(name, body);
 Test("set_section: a frame or area that is not in the model is reported as failed (ETABS 23 says done to it)", () =>
 {
     var e = new MemoryEtabs();

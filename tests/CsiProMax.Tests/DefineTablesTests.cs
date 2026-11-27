@@ -107,7 +107,7 @@ static class DefineTablesTests
             link.Model.Target = "safe";
             var safe = Run(link, "property_definitions", new { });
             Check(Names(safe["shapes"]!).All(s => s.StartsWith("Concrete")), "SAFE: concrete shapes only");
-            Check(safe["assign_tables"]!.AsObject().Count == 0 && Run(link, "definition_data", new { })["tables"]!.AsObject().Count == 0, "SAFE: no ETABS table rows");
+            Check(safe["assign_tables"]!.AsObject().Count == 0 && Run(link, "definition_data", new { })["tables"]!.AsObject().All(t => SafeTables.Has(t.Key)), "SAFE: no ETABS table rows (only SAFE's own tables)");
             Check(!Names(safe["modeling_types"]!).Contains("Layered") && !Names(safe["material_types"]!).Contains("Aluminum"), "SAFE: no layered shells or aluminum");
         });
         yield return ("excel: a material's other data, the assignment rows and the definition rows go out to Excel and back with nothing lost; a row for a missing object is refused", () =>

@@ -252,6 +252,8 @@ public static class DefineTables
     /// <summary>Sets the rows of one definition (by its name) in a table; no rows takes the definition out of it.</summary>
     public static void Set(StructuralModel m, string table, string name, IReadOnlyList<Dictionary<string, string>> rows)
     {
+        // SAFE's own definition and option tables ("SAFE | ..."): SafeTables, by SAFE's field names.
+        if (SafeTables.Full(table) is { } safe) { SafeTables.Set(m, safe, name, rows); return; }
         // SAP2000's own load tables (Define > Load Patterns, Load Cases, Load Combinations): SapLoadTables.
         if (SapLoadTables.Full(table) is { } sapLoad) { Set(m, sapLoad, SapLoadTables.Fields[sapLoad].Select(f => (f, f)).ToArray(), name, rows); return; }
         if (!Tables.TryGetValue(table, out var fields)) throw new ArgumentException($"There is no definition table '{table}'. The tables: {string.Join(", ", Tables.Keys)}.");
@@ -259,10 +261,10 @@ public static class DefineTables
     }
 
     /// <summary>The name of a definition table as the model keeps it (SAP2000's load tables too), or null.</summary>
-    public static string? FullName(string table) => SapLoadTables.Full(table) ?? Tables.Keys.FirstOrDefault(k => k.Equals(table, StringComparison.OrdinalIgnoreCase));
+    public static string? FullName(string table) => SafeTables.Full(table) ?? SapLoadTables.Full(table) ?? Tables.Keys.FirstOrDefault(k => k.Equals(table, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>The key field (the definition's name) of a definition table.</summary>
-    public static string KeyField(string table) => SapLoadTables.Full(table) is { } t ? SapLoadTables.Fields[t][0] : Tables[table][0].Key;
+    public static string KeyField(string table) => SafeTables.Full(table) is { } safe ? SafeTables.KeyField(safe) ?? "" : SapLoadTables.Full(table) is { } t ? SapLoadTables.Fields[t][0] : Tables[table][0].Key;
 
     private static void Set(StructuralModel m, string full, (string Key, string Label)[] fields, string name, IReadOnlyList<Dictionary<string, string>> rows)
     {
