@@ -68,14 +68,14 @@ public static class EtabsFormRoundTrip
             var name = JsonNode.Parse(json)!["name"]!.GetValue<string>();
             if (tool == "add_load_pattern" && modeler.LoadPatterns().Any(p => p.Name == name)) continue;
             if (tool == "define_load_case" && modeler.Model.LoadCases.Exists(c => c.Name == name)) continue;
-            ctx.Tool(tool, json, null, $"ETABS forms: {name} made for the form round trip");
+            ctx.Tool(tool, json, null, $"ETABS forms: {name} made for the form round trip"); // ETABS itself
         }
         var (top, bottom) = Stories(modeler);
         foreach (var (form, table, name, rows) in Forms(top, bottom))
         {
             var json = new JsonObject { ["table"] = table, ["name"] = name, ["rows"] = new JsonArray(rows.Select(r => (JsonNode)new JsonObject(r.Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value)))).ToArray()) };
             ctx.Tool("define_table_rows", json.ToJsonString(), a => FieldContext.Expect(Int(a["rows"]) == rows.Length,
-                $"{table}: {name} holds {a["rows"]} rows, the form set {rows.Length}"), $"ETABS form {form}: {table} set as the form sets it");
+                $"{table}: {name} holds {a["rows"]} rows, the form set {rows.Length}"), $"ETABS form {form}: {table} set as the form sets it"); // ETABS itself
         }
     }
 
@@ -85,9 +85,9 @@ public static class EtabsFormRoundTrip
         var link = ctx.Link;
         var (top, bottom) = FieldTest.IsLive(link) ? Stories(link) : ("", "");
         foreach (var group in Forms(top, bottom).GroupBy(f => f.Form))
-            ctx.Step($"ETABS form {group.Key}: ETABS holds every value the Engine's form set", () =>
+            ctx.Step($"ETABS form {group.Key}: ETABS holds every value the Engine's form set", () => // ETABS itself
             {
-                if (!FieldTest.IsLive(link)) throw new FieldSkipException("no CSI program is behind this stand-in, so there is no ETABS table to read back");
+                if (!FieldTest.IsLive(link)) throw new FieldSkipException("no CSI program is behind this stand-in, so there is no ETABS table to read back"); // ETABS itself
                 var tables = link.Tables();
                 var wrong = new List<string>();
                 foreach (var (_, table, name, rows) in group)
@@ -95,20 +95,20 @@ public static class EtabsFormRoundTrip
                     TableData data;
                     try
                     {
-                        var key = (tables.FirstOrDefault(t => t.Name.Equals(table, StringComparison.OrdinalIgnoreCase)) ?? throw new EtabsException($"ETABS has no table '{table}'")).Key;
+                        var key = (tables.FirstOrDefault(t => t.Name.Equals(table, StringComparison.OrdinalIgnoreCase)) ?? throw new EtabsException($"ETABS has no table '{table}'")).Key; // ETABS itself
                         data = link.ReadTable(key, null, null);
                     }
-                    catch (EtabsException ex) { wrong.Add($"{table}: ETABS did not read it back ({ex.Message})"); continue; }
+                    catch (EtabsException ex) { wrong.Add($"{table}: ETABS did not read it back ({ex.Message})"); continue; } // ETABS itself
                     var fields = data.Fields.ToArray();
                     var at = Array.FindIndex(fields, f => f.Equals(DefineKey(table), StringComparison.OrdinalIgnoreCase));
                     var mine = data.Rows.Where(r => at >= 0 && at < r.Length && r[at] == name).ToList();
-                    if (mine.Count != rows.Length) { wrong.Add($"{table}: ETABS has {mine.Count} rows for {name}, the form set {rows.Length}"); continue; }
+                    if (mine.Count != rows.Length) { wrong.Add($"{table}: ETABS has {mine.Count} rows for {name}, the form set {rows.Length}"); continue; } // ETABS itself
                     for (var i = 0; i < rows.Length; i++)
                         foreach (var (field, value) in rows[i])
                         {
                             var f = Array.FindIndex(fields, x => x.Equals(field, StringComparison.OrdinalIgnoreCase));
                             var got = f >= 0 && f < mine[i].Length ? mine[i][f] : null;
-                            if (!Same(value, got)) wrong.Add($"{table} {name} row {i + 1} {field}: form {value}, ETABS {got ?? "(no field)"}");
+                            if (!Same(value, got)) wrong.Add($"{table} {name} row {i + 1} {field}: form {value}, ETABS {got ?? "(no field)"}"); // ETABS itself
                         }
                 }
                 FieldContext.Expect(wrong.Count == 0, string.Join("; ", wrong.Take(12)) + (wrong.Count > 12 ? $"; and {wrong.Count - 12} more" : ""));

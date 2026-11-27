@@ -420,8 +420,8 @@ public static class ModelerCheck
           instList(); instGo(0); await wait(300);
           return sel.has(frames[0].id) && inst.cur === 0 ? {ok: "selected and ringed"} : {fail: "the finding's frame was not selected"};
         });
-        await step("Define > Load Patterns (ETABS 23.2's form): a seismic pattern takes ASCE 7-16 from Auto Lateral Load, Modify Lateral Load opens its form, and the code's table rows are kept", async () => {
-          if (program !== "etabs") return {ok: "ETABS's form; " + program + " shows its own (checked by its own steps)"};
+        await step("Define > Load Patterns (the 23.2 program's own form): a seismic pattern takes ASCE 7-16 from Auto Lateral Load, Modify Lateral Load opens its form, and the code's table rows are kept", async () => {
+          if (program !== "etabs") return {ok: "the form of the etabs target; " + program + " shows its own (checked by its own steps)"};
           await act("m:patterns"); await wait(800);
           const d = [...document.querySelectorAll(".dlg")].pop(), set = (s, v) => { const x = d.querySelector(s); x.value = v; x.dispatchEvent(new Event(x.tagName === "SELECT" ? "change" : "input", {bubbles: true})); };
           if (!d.querySelector("#pA")) return {fail: "the Define Load Patterns form has no Auto Lateral Load box"};
