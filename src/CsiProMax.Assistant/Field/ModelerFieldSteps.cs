@@ -83,6 +83,7 @@ public static class ModelerFieldSteps
         ctx.Offer(EditTools.All);
         ctx.Offer(DefineTools.All);
         ctx.Offer(EtabsDefineTools.All);
+        ctx.Offer(DetailingTools.All);
         ctx.Offer(EtabsDesignTools.All);
         var folder = Q(ctx.Folder);
 
@@ -103,6 +104,13 @@ public static class ModelerFieldSteps
         if (context is null) { ctx.Fail("the Modeler's model", "the model could not be started, so the Modeler's other tools were not run"); ctx.Coverage("every Modeler tool was run"); return; }
         var beamSection = modeler.Frames().First(f => f.Kind == "beam").Section;
         var cases = modeler.LoadCases();
+
+        // Detailing > Bar Selection and Curtailment Rule (ETABS 23.2 pictures in field/reference-forms/etabs/Detailing): a rule
+        // set from its form is kept with the model and reads back the same; null puts ETABS's defaults back.
+        ctx.Tool("set_detailing_rules", """{"form":"beam","values":{"main":{"curt":"rules","checkDev":true},"long":{"maxSp":0.2}}}""", _ => { });
+        ctx.Tool("detailing_rules", "{}", a => FieldContext.Expect(a["rules"]?["beam"]?["main"]?["curt"]?.GetValue<string>() == "rules" && a["rules"]?["beam"]?["long"]?["maxSp"]?.GetValue<double>() == 0.2, "the beam rule did not read back: " + a.ToJsonString()));
+        ctx.Tool("set_detailing_rules", """{"form":"beam","values":null}""", _ => { });
+        ctx.Tool("detailing_rules", "{}", a => FieldContext.Expect(a["rules"]?["beam"] is null, "the beam rule is still set after defaults: " + a.ToJsonString()));
 
         // What ETABS's dialogs define.
         ctx.Tool("add_concrete", """{"name":"CPM-C35","fc":35000,"elastic_modulus":32000000,"unit_weight":25}""", _ => FieldContext.Expect(modeler.Materials().Contains("CPM-C35"), "the material CPM-C35 is not in the model"));
