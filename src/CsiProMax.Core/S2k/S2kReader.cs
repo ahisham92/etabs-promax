@@ -389,7 +389,10 @@ public static partial class S2kReader
                 sec = new FrameSection { Name = name, Lines = [["MATERIAL", Quote(material), "SHAPE", Quote("General"), "D", Number(d > 0 ? d : 1), "B", Number(b > 0 ? b : 1),
                     "AREA", Number(D(r, "Area")), "AS2", Number(D(r, "AS2")), "AS3", Number(D(r, "AS3")), "I33", Number(D(r, "I33")), "I22", Number(D(r, "I22")), "J", Number(D(r, "TorsConst"))]] };
                 m.FrameSections.Add(sec);
-                if (etabs is null && shape != "General") notes.Add($"Frame section {name} is SAP2000's {shape} shape: it opens as a general section with its area and inertias.");
+                // SAP2000's own row is kept, so the section goes back to SAP2000 as it was and its form shows it.
+                var fgFields = DefineTables.SapHinges[DefineTables.SapFrameGeneral];
+                DefineTables.Set(m, DefineTables.SapFrameGeneral, name, [r.Where(kv => kv.Value.Length > 0 && fgFields.Contains(kv.Key, StringComparer.OrdinalIgnoreCase))
+                    .ToDictionary(kv => fgFields.First(f => f.Equals(kv.Key, StringComparison.OrdinalIgnoreCase)), kv => kv.Value, StringComparer.Ordinal)]);
             }
             Modifiers(sec, r);
             Extras(sec, r);
@@ -434,8 +437,17 @@ public static partial class S2kReader
             var name = S(r, "Section");
             var modelling = S(r, "Type") switch { "Shell-Thick" => "ShellThick", "Membrane" => "Membrane", "Shell-Layered/Nonlinear" => "Layered", _ => "ShellThin" };
             var thickness = D(r, "Thickness", D(r, "BendThick"));
-            if (!S(r, "AreaType", "Shell").Equals("Shell", StringComparison.OrdinalIgnoreCase) || thickness <= 0)
-            { notes.Add($"Area section {name} ({S(r, "AreaType")}) has no Modeler form yet; areas using it open without a section."); continue; }
+            // Plane, Asolid and the plate shells: an Engine shell section of the same name (so the areas keep it) and
+            // SAP2000's own row, which goes back to SAP2000 as it was.
+            var sapOnlyArea = !S(r, "AreaType", "Shell").Equals("Shell", StringComparison.OrdinalIgnoreCase) || S(r, "Type").StartsWith("Plate", StringComparison.OrdinalIgnoreCase);
+            if (sapOnlyArea)
+            {
+                var asFields = DefineTables.SapHinges[DefineTables.SapAreaSections];
+                DefineTables.Set(m, DefineTables.SapAreaSections, name, [r.Where(kv => kv.Value.Length > 0 && asFields.Contains(kv.Key, StringComparer.OrdinalIgnoreCase))
+                    .ToDictionary(kv => asFields.First(f => f.Equals(kv.Key, StringComparison.OrdinalIgnoreCase)), kv => kv.Value, StringComparer.Ordinal)]);
+                if (thickness <= 0) thickness = 1;
+                modelling = S(r, "Type").Equals("Plate-Thick", StringComparison.OrdinalIgnoreCase) ? "ShellThick" : S(r, "Type").StartsWith("Plate", StringComparison.OrdinalIgnoreCase) ? "ShellThin" : "Membrane";
+            }
             try
             {
                 var sec = PropertyDefs.SetShellType(m, name, m.ShellSections.Exists(x => x.Name == name) ? name : null, upright.Contains(name), PropertyDefs.SlabTypes.FirstOrDefault(x => x.Equals(S(r, "SlabType"), StringComparison.OrdinalIgnoreCase)) ?? "Slab", modelling, thickness, S(r, "Material"), false);

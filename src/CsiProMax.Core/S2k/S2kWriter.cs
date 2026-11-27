@@ -640,7 +640,7 @@ public static class S2kWriter
             else if (OpenName(shape) is { } open && OpenShape(open, d, b, tf, tw, s.Number("DIS") ?? 0) is { } parts) { name = open is "Concrete Tee" or "Concrete L" ? "General" : open; p = Composite(parts); }
             else
             {
-                if (m.LineAssigns.Exists(x => x.Section == s.Name))
+                if (m.LineAssigns.Exists(x => x.Section == s.Name) && !DefineTables.HasRow(m, DefineTables.SapFrameGeneral, s.Name))
                     notes.Add($"Frame section {s.Name} ({s.Shape}) has no plain SAP2000 shape here and was left out: define it in SAP2000 (Define > Section Properties > Frame Sections).");
                 continue;
             }
@@ -661,6 +661,7 @@ public static class S2kWriter
                 ("Notes", PropertyDefs.FrameExtras(s).GetValueOrDefault("Notes") ?? ""), ("FilletRadius", PropertyDefs.FrameExtras(s).GetValueOrDefault("FilletRad") ?? "0"),
                 ("AMod", N(fm["AMOD"])), ("A2Mod", N(fm["A2MOD"])), ("A3Mod", N(fm["A3MOD"])), ("JMod", N(fm["JMOD"])), ("I2Mod", N(fm["I2MOD"])), ("I3Mod", N(fm["I3MOD"])), ("MMod", N(fm["MMOD"])), ("WMod", N(fm["WMOD"]))));
         }
+        SapRows(m, DefineTables.SapFrameGeneral, "SectionName", rows, (n, r) => shapes[n] = r.GetValueOrDefault("Shape") ?? "General");
         Add(tables, "FRAME SECTION PROPERTIES 01 - GENERAL", rows);
 
         // Link properties: their type and each direction's effective (linear) stiffness and damping.
@@ -697,7 +698,7 @@ public static class S2kWriter
         {
             if (s.Thickness is not { } t || t <= 0 || s.Material.Length == 0)
             {
-                if (m.AreaAssigns.Exists(x => x.Section == s.Name))
+                if (m.AreaAssigns.Exists(x => x.Section == s.Name) && !DefineTables.HasRow(m, DefineTables.SapAreaSections, s.Name))
                     notes.Add($"Slab or wall section {s.Name} has no plain SAP2000 equal here (a deck, say) and was left out.");
                 continue;
             }
@@ -719,6 +720,7 @@ public static class S2kWriter
                 ("Thickness", N(t)), ("BendThick", sx.GetValueOrDefault("BendThick") ?? N(t)), ("Color", sx.GetValueOrDefault("Color") ?? (s.IsWall ? "Red" : "Cyan")), ("Notes", sx.GetValueOrDefault("Notes") ?? ""),
                 ("F11Mod", N(sm["F11MOD"])), ("F22Mod", N(sm["F22MOD"])), ("F12Mod", N(sm["F12MOD"])), ("M11Mod", N(sm["M11MOD"])), ("M22Mod", N(sm["M22MOD"])), ("M12Mod", N(sm["M12MOD"])), ("V13Mod", N(sm["V13MOD"])), ("V23Mod", N(sm["V23MOD"])), ("MMod", N(sm["MMOD"])), ("WMod", N(sm["WMOD"]))));
         }
+        SapRows(m, DefineTables.SapAreaSections, "Section", rows, (n, _) => names.Add(n));
         Add(tables, "AREA SECTION PROPERTIES", rows);
         Add(tables, "AREA SECTION PROPERTY LAYERS", layers);
         return names;
@@ -1034,6 +1036,22 @@ public static class S2kWriter
     private static string N(double v) => CsiTableText.Number(v);
     private static string YesNo(bool v) => v ? "Yes" : "No";
     private static IReadOnlyList<(string, string)> Row(params (string, string)[] pairs) => pairs;
+
+    /// <summary>SAP2000's own rows of a section table (DefineTables.SapHinges) put over the rows the writer made: a
+    /// section SAP2000 holds in a shape the Engine has no geometry for goes back as SAP2000 had it.</summary>
+    private static void SapRows(StructuralModel m, string table, string key, List<IReadOnlyList<(string, string)>> rows, Action<string, Dictionary<string, string>>? each = null)
+    {
+        foreach (var r in m.DefinitionTables?.GetValueOrDefault(table) ?? [])
+        {
+            var name = r.GetValueOrDefault(key) ?? "";
+            if (name.Length == 0) continue;
+            var row = DefineTables.SapHinges[table].Where(r.ContainsKey).Select(f => (f, r[f])).ToList();
+            var i = rows.FindIndex(x => x.Any(p => p.Item1 == key && p.Item2 == name));
+            if (i >= 0) rows[i] = row; else rows.Add(row);
+            each?.Invoke(name, r);
+        }
+    }
+
 
     /// <summary>A section cut's quadrilaterals, kept as "x,y,z;x,y,z;x,y,z;x,y,z" with "|" between them.</summary>
     private static List<string[][]> Quads(IReadOnlyDictionary<string, string> cut) =>

@@ -17,6 +17,20 @@ public static class DefineTables
     /// in them, and the .s2k writes them back as they are.</summary>
     public static readonly IReadOnlyDictionary<string, string[]> SapHinges = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
     {
+        // SAP2000's frame and area sections of the kinds the Engine has no geometry for (steel joist, cold formed, precast,
+        // hybrid, aluminum, plane, asolid, plate ...): SAP2000's own rows, written into the .s2k as they are. The Engine keeps a
+        // General section (or a shell section) of the same name, so the members and areas keep their section.
+        ["Area Section Properties"] = ["Section", "Material", "MatAngle", "AreaType", "Type", "DrillDOF", "Thickness", "BendThick", "Arc", "CoordSys", "InComp", "Color", "TotalWt", "TotalMass", "F11Mod", "F22Mod", "F12Mod", "M11Mod", "M22Mod", "M12Mod", "V13Mod", "V23Mod", "MMod", "WMod", "GUID", "Notes"],
+        ["Frame Section Properties 01 - General"] = ["SectionName", "Material", "FromFile", "FileName", "SectInFile", "Shape", "AutoType", "t3", "t2", "SngAngWid", "SngChnWid", "tf", "tw", "t2b", "tfb", "dis", "FilletRadius", "Radius", "LipDepth", "LipAngle", "Area", "TorsConst", "I33", "I22", "I23", "AS2", "AS3", "S33Top", "S33Bot", "S22Left", "S22Right", "Z33", "Z22", "R33", "R22", "CGOffset3", "CGOffset2", "EccV2", "EccV3", "Cw", "IncludeSCAn", "ConcCol", "ConcBeam", "Color", "TotalWt", "TotalMass", "AMod", "A2Mod", "A3Mod", "JMod", "I2Mod", "I3Mod", "MMod", "WMod", "GUID", "Notes"],
+        ["Frame Section Properties 06 - Polygon Data"] = ["SectionName", "Polygon", "Point", "X", "Y", "Opening", "Material", "RefPtX", "RefPtY"],
+        ["Frame Section Properties 07 - Built Up I"] = ["SectionName", "ItemType", "ISection", "FyTF", "FyW", "FyBF", "Material", "Width", "Thick"],
+        ["Frame Section Properties 08 - PCC I Girder"] = ["SectionName", "B1", "B2", "B3", "B4", "D1", "D2", "D3", "D4", "D5", "D6", "D7", "T1", "T2", "C1"],
+        ["Frame Section Properties 09 - PCC U Girder"] = ["SectionName", "B1", "B2", "B3", "B4", "B5", "B6", "D1", "D2", "D3", "D4", "D5", "D6", "D7"],
+        ["Frame Section Properties 10 - Steel Joist General"] = ["SectionName", "Material", "Color", "JoistType", "Depth", "UnitWt", "AnalysisI33", "MomCap", "ShearCap", "MinSpan", "MaxSpan"],
+        ["Frame Section Properties 11 - Steel Joist Data"] = ["SectionName", "SpanLength", "TLCap", "LLDeflCap", "I33"],
+        ["Frame Section Properties 12 - Hybrid Steel U Section"] = ["SectionName", "WebMat", "TFMat", "BFMat", "D1", "B1", "B2", "B3", "B4", "tw", "tf", "tfb"],
+        ["Frame Section Properties 17 - PCC Super-T"] = ["SectionName", "OpenFlange", "B1", "B2", "B3", "B4", "B5", "B6", "BL", "BR", "BLBRMax", "BLmax", "BRmax", "D1", "D2", "D3", "D4", "D5", "T1", "T2", "CornerType", "C1", "C2"],
+        ["Frame Section Properties 18 - PCC Box Girder"] = ["SectionName", "B", "D", "tf", "tfb", "tw", "twr", "Chamfer"],
         // Define > Coordinate Systems/Grids: the systems other than GLOBAL and their grid lines (GLOBAL's grids are the model's own).
         ["Coordinate Systems"] = ["Name", "Type", "X", "Y", "Z", "AboutZ", "AboutY", "AboutX"],
         ["Grid Lines"] = ["CoordSys", "AxisDir", "GridID", "XRYZCoord", "TAngle", "LineType", "LineColor", "Visible", "BubbleLoc", "AllVisible", "BubbleSize"],
@@ -126,7 +140,52 @@ public static class DefineTables
     public static bool IsSap(string table) => SapHinges.ContainsKey(table);
 
     /// <summary>The coordinate system and grid line tables: the .s2k writes them with GLOBAL's own, not on their own.</summary>
-    public static bool IsGridTable(string table) => table.Equals("Coordinate Systems", StringComparison.OrdinalIgnoreCase) || table.Equals("Grid Lines", StringComparison.OrdinalIgnoreCase);
+    public static bool IsGridTable(string table) => table.Equals("Coordinate Systems", StringComparison.OrdinalIgnoreCase) || table.Equals("Grid Lines", StringComparison.OrdinalIgnoreCase)
+        || table.Equals(SapFrameGeneral, StringComparison.OrdinalIgnoreCase) || table.Equals(SapAreaSections, StringComparison.OrdinalIgnoreCase);
+
+    public const string SapFrameGeneral = "Frame Section Properties 01 - General", SapAreaSections = "Area Section Properties";
+
+    /// <summary>After SAP2000's own row of a frame or area section changes: the Engine's section of that name follows it (a
+    /// General frame section with the row's depth, width, area and inertias; a shell section for Plane, Asolid and the
+    /// plates), so the members and areas keep their section. No row: the Engine's section goes, unless objects use it.</summary>
+    public static void SyncSapSection(StructuralModel m, string table, string name)
+    {
+        var row = m.DefinitionTables?.GetValueOrDefault(table)?.Find(r => r.GetValueOrDefault(SapHinges[table][0]) == name);
+        double D(string k) => row is not null && double.TryParse(row.GetValueOrDefault(k), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : 0;
+        if (table.Equals(SapFrameGeneral, StringComparison.OrdinalIgnoreCase))
+        {
+            if (row is null)
+            {
+                if (m.LineAssigns.Exists(x => x.Section == name)) throw new ArgumentException($"Frame section {name} is used by members: give them another section first.");
+                m.FrameSections.RemoveAll(x => x.Name == name);
+                return;
+            }
+            var material = row.GetValueOrDefault("Material") ?? "";
+            if (!m.Materials.Exists(x => x.Name == material)) throw new ArgumentException($"There is no material '{material}'.");
+            var sec = m.FrameSections.Find(x => x.Name == name);
+            if (sec is null) m.FrameSections.Add(sec = new FrameSection { Name = name });
+            var mods = sec.Lines.Where(l => l.Count > 0 && PropertyDefs.FrameModifiers.Contains(l[0])).ToList();
+            sec.Lines = [["MATERIAL", E2kText.Quote(material), "SHAPE", E2kText.Quote("General"), "D", E2kText.Number(D("t3") > 0 ? D("t3") : 1), "B", E2kText.Number(D("t2") > 0 ? D("t2") : 1),
+                "AREA", E2kText.Number(D("Area")), "AS2", E2kText.Number(D("AS2")), "AS3", E2kText.Number(D("AS3")), "I33", E2kText.Number(D("I33")), "I22", E2kText.Number(D("I22")), "J", E2kText.Number(D("TorsConst"))], .. mods];
+        }
+        else if (table.Equals(SapAreaSections, StringComparison.OrdinalIgnoreCase))
+        {
+            if (row is null)
+            {
+                if (m.AreaAssigns.Exists(x => x.Section == name)) throw new ArgumentException($"Area section {name} is used by areas: give them another section first.");
+                m.ShellSections.RemoveAll(x => x.Name == name);
+                return;
+            }
+            var type = row.GetValueOrDefault("Type") ?? "";
+            var modelling = type.Equals("Plate-Thick", StringComparison.OrdinalIgnoreCase) ? "ShellThick" : type.StartsWith("Plate", StringComparison.OrdinalIgnoreCase) ? "ShellThin" : "Membrane";
+            var t = D("Thickness") > 0 ? D("Thickness") : 1;
+            PropertyDefs.SetShellType(m, name, m.ShellSections.Exists(x => x.Name == name) ? name : null, false, "Slab", modelling, t, row.GetValueOrDefault("Material") ?? "", false);
+        }
+    }
+
+    /// <summary>True when the table keeps a row named so (by its first field).</summary>
+    public static bool HasRow(StructuralModel m, string table, string name) =>
+        m.DefinitionTables?.GetValueOrDefault(table)?.Exists(r => r.GetValueOrDefault(SapHinges[table][0]) == name) == true;
 
     /// <summary>Sets the rows of one definition (by its name) in a table; no rows takes the definition out of it.</summary>
     public static void Set(StructuralModel m, string table, string name, IReadOnlyList<Dictionary<string, string>> rows)
