@@ -43,7 +43,7 @@ public static class StructureTools
             Ask.Changes, DefineGroup, a => $"{(a.Flag("delete") ? "Delete" : "Define")} the group {a.Text("name")}"),
         new("assign_group_data",
             "Puts frames, slabs and walls (label@story) and joints (point@story, with joints) in a group, or takes them out with remove (Assign > Assign Objects to Group). The group is made when it is not there.",
-            """{"type":"object","required":["group","objects"],"properties":{"group":{"type":"string"},"objects":{"type":"array","items":{"type":"string"}},"joints":{"type":"boolean"},"remove":{"type":"boolean"}}}""",
+            """{"type":"object","required":["group","objects"],"properties":{"group":{"type":"string"},"objects":{"type":"array","items":{"type":"string"}},"joints":{"type":"boolean"},"remove":{"type":"boolean"},"replace":{"type":"boolean","description":"Replace Group: the group's other objects leave it first."}}}""",
             Ask.Changes, AssignGroup, a => $"{(a.Flag("remove") ? "Take objects out of" : "Put objects in")} the group {a.Text("group")}"),
         new("define_section_cut",
             "Adds or deletes a section cut (Define > Section Cuts) from a group: the forces across the group's objects are reported after the analysis.",
@@ -301,6 +301,7 @@ public static class StructureTools
         {
             SetGroup(m, group, null);
             var raw = m.Passthrough.First(r => r.Heading == GroupHeading);
+            if (a.Flag("replace") && !remove) raw.Lines.RemoveAll(l => Tokenize(l) is { Count: >= 5 } t && t[0] == "GROUP" && Unquote(t[1]) == group);
             foreach (var (type, label, story) in objects)
             {
                 raw.Lines.RemoveAll(l => Tokenize(l) is { Count: >= 5 } t && t[0] == "GROUP" && Unquote(t[1]) == group && t[2] == type && Unquote(t[3]) == label && Unquote(t[4]) == story);

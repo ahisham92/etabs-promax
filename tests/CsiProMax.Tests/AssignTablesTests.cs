@@ -64,6 +64,43 @@ static class AssignTablesTests
             Check(!(back.Kept ?? []).Keys.Any(k => k.Contains("SKEW", StringComparison.OrdinalIgnoreCase)), "not kept apart from the frame");
             Check(!ProgramOptions.HasAssignTable("etabs", "Frame End Skew Angle Assignments") && ProgramOptions.HasAssignTable("sap2000", "Frame Loads - Gravity"), "SAP2000's own, not ETABS's");
         });
+        yield return ("sap2000: Assign > Frame forms' rows (advanced axes, material temperature, hinge distribution and user hinges, offsets) round-trip once each, and Reverse Connectivity keeps the ends' releases in place", () =>
+        {
+            var link = Frame();
+            var m = link.Model;
+            m.Target = "sap2000";
+            var beam = m.LineAssigns.First(a => m.Line(a.Label)!.Kind == LineKind.Beam && a.Story == "Story1");
+            Refused(link, "assign_frame_data", new { objects = new[] { beam.Label + "@Story1" }, reverse = "global" }, "more than one story");
+            m.LineAssigns.RemoveAll(a => a.Label == beam.Label && a.Story != "Story1");
+            var b = beam.Label + "@Story1";
+            Run(link, "assign_frame_data", new { objects = new[] { b }, offset_i = 0.2, offset_j = 0.3, rigid_zone = 0.5, tables = new Dictionary<string, object>
+            {
+                ["Frame Local Axes Assignments 2 - Advanced"] = new[] { new { LocalPlane = "12", PlOption1 = "Coord Dir", PlCoordSys = "GLOBAL", CoordDir1 = "+Y", CoordDir2 = "+X" } },
+                ["Frame Material Temperatures"] = new[] { new { Temp = "35" } },
+                ["Frame Offset Along Length Assignments"] = new[] { new { Type = "User", LengthI = "0.2", LengthJ = "0.3", RigidFactor = "0.5" } },
+                ["Frame Hinge Assigns 00 - Hinge Distribution Type"] = new[] { new { HgeDistrTyp = "User Defined", IsHgeLenRel = "No", HgeLenRel = "0", HgeLenAbs = "0" } },
+                ["Frame Hinge Assigns 02 - User Defined Properties"] = new[] { new { HgeDistrTyp = "User Defined", AssignProp = "FH1", SaveFibResp = "Yes", DistType = "RelDist", RelDist = "0.25", AbsDist = "0", LenOWType = "None" } },
+            } });
+            var text = S2kWriter.Write(m, "frame.s2k").Text;
+            int Rows(string table) { var at = text.IndexOf("TABLE:  \"" + table + "\"", StringComparison.Ordinal); if (at < 0) return 0; var end = text.IndexOf("TABLE:", at + 8, StringComparison.Ordinal); return text[at..(end < 0 ? text.Length : end)].Split('\n').Count(l => l.TrimStart().StartsWith("Frame=" + "", StringComparison.Ordinal)); }
+            Check(Rows("FRAME OFFSET ALONG LENGTH ASSIGNMENTS") >= 1 && System.Text.RegularExpressions.Regex.Matches(text, @"TABLE:  ""FRAME OFFSET ALONG LENGTH ASSIGNMENTS""").Count == 1, "one offsets table");
+            Check(System.Text.RegularExpressions.Regex.IsMatch(text, @"AdvanceAxes=Yes"), "the typical axes row says advanced");
+            foreach (var t in new[] { "FRAME MATERIAL TEMPERATURES", "FRAME HINGE ASSIGNS 00 - HINGE DISTRIBUTION TYPE", "FRAME HINGE ASSIGNS 02 - USER DEFINED PROPERTIES", "FRAME LOCAL AXES ASSIGNMENTS 2 - ADVANCED" })
+                Check(System.Text.RegularExpressions.Regex.Matches(text, "TABLE:  \"" + System.Text.RegularExpressions.Regex.Escape(t) + "\"").Count == 1, "the .s2k has " + t + " once");
+            var back = S2kReader.Read(text, "Frame").Model;
+            var b2 = back.LineAssigns.First(a => a.Label == beam.Label && a.Story == beam.Story);
+            Check(AssignTables.Row(b2, "Frame Material Temperatures").GetValueOrDefault("Temp") == "35", "the material temperature came back");
+            Check(AssignTables.Row(b2, "Frame Hinge Assigns 02 - User Defined Properties").GetValueOrDefault("RelDist") == "0.25", "the user hinge came back");
+            Check(AssignTables.Row(b2, "Frame Local Axes Assignments 2 - Advanced").GetValueOrDefault("CoordDir1") == "+Y", "the advanced axes came back");
+            Run(link, "assign_frame_data", new { objects = new[] { b }, release_i = new[] { "M3" }, release_j = Array.Empty<string>() });
+            var (pi, pj) = (m.Line(beam.Label)!.PointI, m.Line(beam.Label)!.PointJ);
+            Run(link, "assign_frame_data", new { objects = new[] { b }, reverse = "global" });
+            var x = link.Model.LineAssigns.First(a => a.Label == beam.Label && a.Story == "Story1");
+            Check(link.Model.Line(beam.Label)!.PointI == pj && link.Model.Line(beam.Label)!.PointJ == pi, "the ends swapped");
+            var (ri, rj) = PropertyDefs.ReleasesOf(x);
+            Check(ri.Count == 0 && rj.SequenceEqual(new[] { "M3" }), "the M3 release stayed at the same joint: now end J");
+            Check(PropertyDefs.Value(x.Extra, "LENGTHOFFI") == "0.3" && PropertyDefs.Value(x.Extra, "LENGTHOFFJ") == "0.2", "the offsets stayed at their joints");
+        });
         yield return ("assign tables: added mass, output stations, T/C limits, edge releases and an opening reach the model, the .cpm, Replicate and SAP2000's tables", () =>
         {
             var link = Frame();

@@ -179,6 +179,16 @@ public static class Program
         }
         // The version, printed, and no window: on 2026-11-27 "--version" on Ahmed's PC opened a CSI ProMax window instead.
         if (args.Contains("--version")) { Console.WriteLine(VersionText()); return 0; }
+        // Asks the full field test running on this PC to stop at its next step and write its report (FieldTest.StopFileFor).
+        if (args.Contains("--fieldtest-stop"))
+        {
+            var stop = FieldTest.StopFileFor(null);
+            if (!FieldTest.RunningOnThisPc()) { Console.WriteLine("No full field test is running on this PC."); return 1; }
+            Directory.CreateDirectory(Path.GetDirectoryName(stop)!);
+            File.WriteAllText(stop, DateTime.Now.ToString("u"));
+            Console.WriteLine("Asked the running field test to stop at its next step: " + stop);
+            return 0;
+        }
         if (args.Contains("--check-update"))
         {
             try
