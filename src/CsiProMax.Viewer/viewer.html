@@ -10980,7 +10980,7 @@ async function hmOpenFile(path, d) {
   if (!r.needs_choice) { hmSay("Opened " + path); return j; }
   return new Promise(done => {
     const go = convert => { hmRun("open_model_file", {path, for_program: program, convert}).then(k => { if (k.ok) hmSay(convert ? `Opened ${path}, converted from ${r.file_program} to ${r.window_program}.` : `Opened ${path} for ${r.file_program}.`); done(k); }); };
-    const f = dialog("Open Model", `<p class="kv" style="max-width:440px;margin-top:0"><b>${esc(path.split(/[\/]/).pop())}</b> is a ${esc(r.file_program)} model, and this window works in ${esc(r.window_program)}.</p>
+    const f = dialog("Open Model", `<p class="kv" style="max-width:440px;margin-top:0"><b>${esc(path.split(/[\\/]/).pop())}</b> is a ${esc(r.file_program)} model, and this window works in ${esc(r.window_program)}.</p>
       <p class="kv" style="max-width:440px">Convert it to ${esc(r.window_program)}: the menus, forms and Save follow ${esc(r.window_program)}, and nothing in the model is removed. The file itself is not changed.</p>`,
       [[`Convert to ${r.window_program}`, () => go(true)], [`Open for ${r.file_program}`, () => go(false)], ["Cancel", () => done({ok: false, cancelled: true})]], {width: 480});
     f.dataset.otherProgram = r.file_program_key || "";

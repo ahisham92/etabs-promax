@@ -12,6 +12,10 @@ public static class ModelFile
 {
     /// <summary>The one extension of the files saved before each program had its own. Opened, never written.</summary>
     public const string Legacy = ".cpm";
+    /// <summary>The old name of <see cref="Legacy"/>, kept so code written before the per-program extensions still
+    /// builds. New code saves with <see cref="PathFor"/> and finds a file with <see cref="Beside"/>.</summary>
+    [Obsolete("Use ModelFile.PathFor(file, model.Target) to save and ModelFile.Beside(file) to find.")]
+    public const string Extension = Legacy;
     public const string Etabs = ".cpme", Sap2000 = ".cpms", Safe = ".cpmf";
     public const int FormatVersion = 1;
 
