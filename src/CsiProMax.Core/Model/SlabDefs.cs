@@ -717,6 +717,9 @@ public static class SlabDefs
     private static IEnumerable<(string Line, List<string> Tokens)> OpeningLines(StructuralModel m) =>
         (m.UnparsedLines.GetValueOrDefault(AreaConnect) ?? []).Select(l => (l, Tokenize(l))).Where(x => x.Item2.Count > 3 && x.Item2[0] == "AREA" && x.Item2[2] == "AREA");
 
+    /// <summary>An area assignment that makes the area an opening (OPENING "Yes").</summary>
+    public static bool IsOpening(AreaAssign a) => a.Extra.Any(e => Value(e, "OPENING") is { } v && Unquote(v).Equals("Yes", StringComparison.OrdinalIgnoreCase));
+
     public static List<Opening> Openings(StructuralModel m)
     {
         var list = new List<Opening>();
@@ -728,6 +731,12 @@ public static class SlabDefs
             foreach (var a in m.AreaAssigns.Where(a => a.Label == name && a.Extra.Any(e => Value(e, "OPENING") is { } v && Unquote(v).Equals("Yes", StringComparison.OrdinalIgnoreCase))))
                 list.Add(new Opening(name, a.Story, plan));
         }
+        // ETABS's own export writes an opening as a floor area marked an opening (AREA "A1" FLOOR 4 ...,
+        // AREAASSIGN "A1" "LVL 05-TOC" OPENING "Yes"): 307 of them in Ahmed's real model, 2026-11-27.
+        var areas = m.Areas.GroupBy(a => a.Label).ToDictionary(g => g.Key, g => g.First());
+        foreach (var a in m.AreaAssigns.Where(IsOpening))
+            if (areas.TryGetValue(a.Label, out var area) && !list.Any(o => o.Name == a.Label && o.Story == a.Story))
+                list.Add(new Opening(a.Label, a.Story, area.PointNames.Select(pn => m.Point(pn)).Where(p => p is not null).Select(p => new[] { p!.X, p.Y }).ToList()));
         return list;
     }
 

@@ -569,7 +569,7 @@ public static class FieldTest
                 }
             }
             // CSI ProMax Engine's Run (Ahmed 2026-11-26) in this program, on a real PC only (a test's stand-in window is no program).
-            if (finished && o.StartScratch.Method.DeclaringType == typeof(ScratchProgram)) { EngineRunStep(ctx, program); PackSpeedField.Large(ctx, program); }
+            if (finished && o.StartScratch.Method.DeclaringType == typeof(ScratchProgram)) { EngineRunStep(ctx, program); PackSpeedField.Large(ctx, program); RealModelField.Run(ctx, program); }
         }
         // With no program open on the PC (the company closes ETABS at 4 AM), the open model's checks and CSI ProMax's own
         // features that found no answering scratch window run on a hidden scratch window started for them alone.
@@ -880,7 +880,10 @@ public static class FieldTest
                 if (start == "done") { cancel = EngineRun.Cancel(); break; }
                 Thread.Sleep(200);
             }
-            FieldContext.Expect(cancel?["ok"]?.GetValue<bool>() == true, "the run ended before Cancel could be pressed, or Cancel was refused: " + cancel?.ToJsonString());
+            // When the run ended first, why it ended is the failure (0.4.68 full test: only "ended before Cancel").
+            FieldContext.Expect(cancel is not null, "the run ended before the program was open, so there was nothing to cancel: " +
+                (EngineRun.Status(true)["monitor"]?["report"] is JsonObject r ? $"{r["headline"]} {r["error"]}" : EngineRun.Status(false)["phase"]?.ToString()));
+            FieldContext.Expect(cancel!["ok"]?.GetValue<bool>() == true, "Cancel was refused: " + cancel.ToJsonString());
             var status = Done(new JsonObject { ["ok"] = true }, 3);
             var report = Report(status);
             FieldContext.Expect(report["cancelled"]?.GetValue<bool>() == true, "the Run Report does not say it was cancelled: " + report["headline"]);

@@ -476,7 +476,7 @@ public static class F2kWriter
         // Loads on objects
         var loads = 0;
         var areaOf = areaRows.ToDictionary(a => a.Source.Label, a => a.Label, StringComparer.Ordinal);
-        var surface = m.AreaLoads.Where(l => string.Equals(l.Story, story, StringComparison.OrdinalIgnoreCase) && areaOf.ContainsKey(l.Object))
+        var surface = LoadSets.Expanded(m).Where(l => string.Equals(l.Story, story, StringComparison.OrdinalIgnoreCase) && areaOf.ContainsKey(l.Object))
             .Select(l => (Area: areaOf[l.Object], l.Pattern, Value: Num(E2kText.Value(l.Tokens, "FVAL")), Type: E2kText.Value(l.Tokens, "TYPE") ?? "")).Where(l => l.Value is not null && l.Type.Equals("UNIFF", StringComparison.OrdinalIgnoreCase)).ToList();
         if (surface.Count > 0)
             tables.Add(CsiTableText.Table("AREA LOAD ASSIGNMENTS - UNIFORM", surface.Select(l => (IReadOnlyList<(string, string)>)Row(("UniqueName", l.Area), ("Load Pattern", l.Pattern), ("Direction", "Gravity"), ("Load", N(l.Value!.Value))))));
@@ -492,7 +492,7 @@ public static class F2kWriter
             tables.Add(CsiTableText.Table("JOINT LOADS ASSIGNMENTS - FORCE", pointLoads.Select(l => (IReadOnlyList<(string, string)>)Row(("UniqueName", l.Point), ("Load Pattern", l.Pattern),
                 ("FX", N(l.Values[0])), ("FY", N(l.Values[1])), ("FZ", N(l.Values[2])), ("MX", N(l.Values[3])), ("MY", N(l.Values[4])), ("MZ", N(l.Values[5]))))));
         loads += pointLoads.Count;
-        var skipped = m.AreaLoads.Count(l => string.Equals(l.Story, story, StringComparison.OrdinalIgnoreCase)) + m.LineLoads.Count(l => string.Equals(l.Story, story, StringComparison.OrdinalIgnoreCase))
+        var skipped = LoadSets.Expanded(m).Count(l => string.Equals(l.Story, story, StringComparison.OrdinalIgnoreCase)) + m.LineLoads.Count(l => string.Equals(l.Story, story, StringComparison.OrdinalIgnoreCase))
             - surface.Count - lineLoads.Count;
         if (skipped > 0) notes.Add($"{skipped} load(s) on {story} are not uniform gravity loads on slabs or beams and were left out; add them in SAFE.");
 

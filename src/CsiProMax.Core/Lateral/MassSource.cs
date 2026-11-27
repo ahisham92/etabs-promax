@@ -26,6 +26,13 @@ public sealed record MassSource(string Name, bool Elements, bool AddedMass, IRea
         foreach (var raw in lines)
         {
             var t = E2kText.Tokenize(raw);
+            // ETABS 23 writes each pattern on a line of its own, by position: MASSSOURCELOAD "MsSrc1" "Dead" 1
+            // (Ahmed's real model, 2026-11-27); taken once the source's own line has named the source.
+            if (t.Count >= 3 && t[0].Equals("MASSSOURCELOAD", StringComparison.OrdinalIgnoreCase))
+            {
+                if (E2kText.Unquote(t[1]) == (name ?? E2kText.Unquote(t[1]))) list.Add((E2kText.Unquote(t[2]), t.Count > 3 && E2kText.TryNumber(t[3], out var f) ? f : 1));
+                continue;
+            }
             if (t.Count < 2 || !t[0].Equals("MASSSOURCE", StringComparison.OrdinalIgnoreCase)) continue;
             var here = E2kText.Unquote(t[1]);
             // The default source is the one that counts; the first one when none says so.
@@ -65,7 +72,7 @@ public sealed record MassSource(string Name, bool Elements, bool AddedMass, IRea
                 "INCLUDEMOVE", YesNo(Move), "INCLUDELATERALMASS", YesNo(Lateral), "INCLUDEVERTICALMASS", YesNo(Vertical), "LUMPATSTORIES", YesNo(Lump), "ISDEFAULT", YesNo(true)]),
         };
         foreach (var (pattern, factor) in Loads)
-            lines.Add(E2kText.Line(["MASSSOURCE", E2kText.Quote(Name), "LOADPAT", E2kText.Quote(pattern), "SF", E2kText.Number(factor)]));
+            lines.Add(E2kText.Line(["MASSSOURCELOAD", E2kText.Quote(Name), E2kText.Quote(pattern), E2kText.Number(factor)]));
         var section = m.Passthrough.Find(s => s.Heading == Heading);
         if (section is null) m.Passthrough.Add(new RawSection { Heading = Heading, After = "ANALYSIS OPTIONS", Lines = lines });
         else section.Lines = lines;

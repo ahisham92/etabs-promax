@@ -172,7 +172,7 @@ public static class LateralLoads
                 && E2kText.TryNumber(E2kText.Value(l.Tokens, "FVAL"), out var v) ? v : 0;
             var frameAt = Physical.Frames(m).ToDictionary(f => (f.Label, f.Story));
             var areaAt = Physical.Areas(m).ToDictionary(f => (f.Label, f.Story));
-            foreach (var l in m.AreaLoads)
+            foreach (var l in LoadSets.Expanded(m))
                 if (factor.TryGetValue(l.Pattern, out var k) && areaAt.TryGetValue((l.Object, l.Story), out var ar))
                     Mass(Level(ar.Corners.Max(c => c.Z)), Grav(l) * ar.Area * k, ar.Corners.Average(c => c.X), ar.Corners.Average(c => c.Y));
             foreach (var l in m.LineLoads)
