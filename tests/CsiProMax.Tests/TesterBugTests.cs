@@ -976,6 +976,15 @@ static class TesterBugTests
             }
             finally { field.SetValue(null, null); File.Delete(stop); }
         });
+        yield return ("e2k: a table set's ETABS-internal ~LLRF pattern and case are not written (ETABS 23.2 ignores the lines with a box)", () =>
+        {
+            var text = "$ PROGRAM INFORMATION\r\n  PROGRAM  \"ETABS\"  VERSION \"23.2.0\"\r\n\r\n$ LOAD PATTERNS\r\n  LOADPATTERN \"DEAD\"  TYPE  \"Dead\"  SELFWEIGHT  1\r\n\r\n"
+                + "$ DATABASE TABLE NAMED SETS\r\n  DBTABLESET \"Test\"  EXPOSEALL  \"Yes\"\r\n  DBTABLESETLOADPATTERN \"Test\"  \"DEAD\"\r\n  DBTABLESETLOADPATTERN \"Test\"  \"~LLRF\"\r\n  DBTABLESETLOADCASE \"Test\"  \"~LLRF\"\r\n  DBTABLESETLOADCASE \"Test\"  \"DEAD\"\r\n\r\n  END\r\n";
+            var written = CsiProMax.E2k.E2kWriter.Write(CsiProMax.E2k.E2kReader.Read(text));
+            Check(!written.Contains("~LLRF", StringComparison.Ordinal), "~LLRF is still written");
+            Check(written.Contains("DBTABLESETLOADPATTERN \"Test\"  \"DEAD\"", StringComparison.Ordinal) || written.Contains("DBTABLESETLOADPATTERN", StringComparison.Ordinal), "the table set's own pattern went missing");
+            Check(written.Contains("DBTABLESETLOADCASE", StringComparison.Ordinal), "the table set's own case went missing");
+        });
         yield return ("field test: steps a workaround can test are tested, not left out (Ahmed, 2026-11-26: only a missing program or licence)", () =>
         {
             string Src(string f) => File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant", f));
@@ -1658,6 +1667,23 @@ static class TesterBugTests
             Check(com.Contains("catch (OutOfMemoryException) { return ReadInPages(key, cases, combos); }", StringComparison.Ordinal), "a table read that runs out of memory is read in pages");
             Check(com.Contains("catch (OutOfMemoryException ex) { done.SetException(ex); }", StringComparison.Ordinal), "and out of memory is not wrapped on the program's thread, so the pages are tried");
             Check(com.Contains("ReadTableNow(key, isCase ? [one] : [], isCase ? [] : [one])", StringComparison.Ordinal), "one load case or combination a page");
+        });
+
+        yield return ("SAFE 22.7 tester (0.4.71): '(Untitled)' after opening the .f2k builds the model; the SAFE data comes without a scratch window; own features keep off the engineer's model; run_self_test on a waiting update", () =>
+        {
+            var scratch = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));
+            var untitled = scratch.IndexOf("but holds '{Path.GetFileName(OpenFileName())}': the model is built through", StringComparison.Ordinal);
+            Check(untitled > 0 && scratch.LastIndexOf("openedEmpty = true;", untitled, StringComparison.Ordinal) > scratch.LastIndexOf("if (answer == 0 && refused.Length == 0 && !Holds(modelFile))", untitled, StringComparison.Ordinal),
+                "a SAFE that holds '(Untitled)' after the .f2k goes on to build it through its tables");
+            Check(scratch.Contains("!Holds(modelFile) && !BuildsThroughApi(_program, modelFile)); again++)", StringComparison.Ordinal), "and is not asked three more times first");
+            var field = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/FieldTest.cs"));
+            Check(field.Contains("if (window is null && o.ReferenceData && o.StartScratch.Method.DeclaringType == typeof(ScratchProgram)) GatherReference(ctx, o, program, null);", StringComparison.Ordinal),
+                "the needed things are gathered when the scratch window could not start");
+            Check(field.IndexOf("if (StandIn(ctx, o, program, false, true) is var (_, panel2)) panelDone |= panel2;", StringComparison.Ordinal) is var hidden and > 0
+                && hidden < field.IndexOf("PanelFieldSteps.Run(ctx, link, scratch: false, live: IsLive(link));", StringComparison.Ordinal), "own features take a hidden window before the engineer's open model");
+            var old = CsiProMax.Update.Updater.Behind(new Version(0, 4, 71), "0.4.72", null, "0.4.72");
+            Check(old is not null && PanelFieldSteps.OldVersionAnswer(old), "the waiting-update answer is told apart: " + old);
+            Check(!PanelFieldSteps.OldVersionAnswer("SAFE has still not come back from the last call"), "and nothing else is");
         });
 
         yield return ("SAFE reference data (for 0.4.71): the testers' zips bring SAFE's own .f2k round trip with its differences, even when the scratch window stopped answering", () =>

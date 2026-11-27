@@ -449,7 +449,7 @@ public sealed class OfflineEtabs : ICsiLink, CsiProMax.Assistant.Tools.IModelDra
             // The Modeler's own file goes beside it: what the .e2k, .s2k or .f2k has no place for (the forms' table
             // rows, what the program's model held that its text file does not carry) goes in from it once the program
             // has opened the file. Without it a run lost all of that.
-            ModelFile.Save(Model, System.IO.Path.ChangeExtension(e2k, ModelFile.Extension));
+            ModelFile.Save(Model, ModelFile.PathFor(e2k, Model.Target));
             var own = WriteProgramFile(e2k, Model);
             if (Model.Target is not ("sap2000" or "safe")) return e2k;
             if (own.Length == 0) throw new EtabsException("SAFE takes one floor, and this model has no floor SAFE can take (slabs on one story).");

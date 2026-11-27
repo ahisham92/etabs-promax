@@ -100,6 +100,34 @@ static class StabilityTests
                 }
         });
 
+        yield return ("stability: a model solved in the XZ plane only (active DOF UX UZ RY) is not free along Y", () =>
+        {
+            // ETABS's Verification "Example 15a7": one wall in the XZ plane under a rigid floor, analysed as a plane model.
+            var a = new AnalysisModel { Program = "etabs" };
+            a.Materials["C"] = new MaterialProp("C", 3e7, 25);
+            a.ShellProps["W"] = new ShellProp("W", "C", 0.3, "Membrane", "Wall");
+            a.RigidDiaphragms.Add("D1");
+            a.Joints.Add(new Joint("1", "1", "Base", 0, 0, 0, [true, true, true, true, true, true]));
+            a.Joints.Add(new Joint("2", "2", "Base", 6, 0, 0, [true, true, true, true, true, true]));
+            a.Joints.Add(new Joint("3", "3", "1ST", 6, 0, 3, new bool[6], Diaphragm: "D1"));
+            a.Joints.Add(new Joint("4", "4", "1ST", 0, 0, 3, new bool[6], Diaphragm: "D1"));
+            a.Shells.Add(new Shell("W1", "W1", "1ST", "wall", ["1", "2", "3", "4"], "W"));
+            a.Patterns.Add(new Pattern("Dead", "Dead", 1, true));
+            a.Cases.Add(new Case("Dead", "Linear Static", ["Dead"], [], []));
+            var all = StabilityCheck.Run(a);
+            Check(all.Findings.Any(f => f.Check == "mechanism"), "in 3D the floor is free along Y: " + Text(all));
+            a.ActiveDof = [true, false, true, false, true, false];
+            var plane = StabilityCheck.Run(a);
+            Check(plane.Errors == 0, "in the XZ plane nothing is free: " + Text(plane));
+        });
+
+        yield return ("stability: ACTIVEDOF of an .e2k is read", () =>
+        {
+            var file = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "samples", "etabs23-default.e2k")).Replace("ACTIVEDOF \"UX UY UZ RX RY RZ\"", "ACTIVEDOF \"UX UZ RY\"");
+            var a = FromStructural.Read(CsiProMax.E2k.E2kReader.Read(file), "etabs");
+            Check(a.ActiveDof is [true, false, true, false, true, false], "read: " + string.Join(",", a.ActiveDof ?? []));
+        });
+
         yield return ("stability: a membrane floor's corner off the beams is held in ETABS and SAFE, reported in SAP2000", () =>
         {
             var a = Bay("etabs");

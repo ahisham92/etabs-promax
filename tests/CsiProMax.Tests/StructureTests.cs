@@ -96,7 +96,13 @@ static class StructureTests
             Refused(link, "define_group", new { name = "G-X", color = "Puce" }, "color");
             Run(link, "assign_group_data", new { group = "G-CORE", objects = members.Take(2).ToArray(), remove = true });
             Check(GroupDefs.Groups(link.Model).Single(x => x.Name == "G-CORE").Members.Count == 3, "two taken out");
+            Refused(link, "define_group", new { name = "G-RENAMED", was = "G-CORE" }, "SC1");
             Run(link, "define_section_cut", new { name = "SC1", delete = true });
+            // ETABS 23.2's Define Groups renames a group in its grid: the group keeps its objects.
+            Run(link, "define_group", new { name = "G-RENAMED", was = "G-CORE", color = "Green" });
+            Check(!GroupDefs.Groups(link.Model).Exists(x => x.Name == "G-CORE") && GroupDefs.Groups(link.Model).Single(x => x.Name == "G-RENAMED").Members.Count == 3, "renamed with its 3 objects");
+            Refused(link, "define_group", new { name = "G-EMPTY", was = "G-RENAMED" }, "already");
+            Run(link, "define_group", new { name = "G-CORE", was = "G-RENAMED" });
             Run(link, "define_group", new { name = "G-CORE", delete = true });
             Check(!GroupDefs.Groups(link.Model).Exists(x => x.Name == "G-CORE"), "deleted with its members");
         });

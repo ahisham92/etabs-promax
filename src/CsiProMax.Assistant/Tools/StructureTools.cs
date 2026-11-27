@@ -38,8 +38,8 @@ public static class StructureTools
             """{"type":"object","required":["objects"],"properties":{"objects":{"type":"array","items":{"type":"string"}},"pier":{"type":"string"},"spandrel":{"type":"string"}}}""",
             Ask.Changes, AssignLabel, a => "Assign pier and spandrel labels"),
         new("define_group",
-            "Adds, changes or deletes a group (Define > Groups), with its color. Deleting a group takes its objects out of it, and refuses while a section cut uses it.",
-            """{"type":"object","required":["name"],"properties":{"name":{"type":"string"},"color":{"type":"string"},"delete":{"type":"boolean"},"uses":{"type":"object","additionalProperties":{"type":"boolean"},"description":"What the group is used for, by the program's field names: Steel, Concrete, Composite (design groups); SAP2000 also Selection, SectionCut, Aluminum, ColdFormed, Stage, Bridge, AutoSeismic, AutoWind, MassWeight, ConcShell (Concrete Shell Design Group, held by the Engine)."}}}""",
+            "Adds, changes, renames (was) or deletes a group (Define > Groups), with its color. A renamed group keeps its objects and uses. Deleting a group takes its objects out of it, and refuses while a section cut uses it.",
+            """{"type":"object","required":["name"],"properties":{"name":{"type":"string"},"was":{"type":"string"},"color":{"type":"string"},"delete":{"type":"boolean"},"uses":{"type":"object","additionalProperties":{"type":"boolean"},"description":"What the group is used for, by the program's field names: Steel, Concrete, Composite (design groups); SAP2000 also Selection, SectionCut, Aluminum, ColdFormed, Stage, Bridge, AutoSeismic, AutoWind, MassWeight, ConcShell (Concrete Shell Design Group, held by the Engine)."}}}""",
             Ask.Changes, DefineGroup, a => $"{(a.Flag("delete") ? "Delete" : "Define")} the group {a.Text("name")}"),
         new("assign_group_data",
             "Puts frames, slabs and walls (label@story) and joints (point@story, with joints) in a group, or takes them out with remove (Assign > Assign Objects to Group). The group is made when it is not there.",
@@ -260,6 +260,25 @@ public static class StructureTools
             if (cuts.Count > 0) throw new ToolInputException($"The section cut {string.Join(", ", cuts)} uses {name}: delete it first.");
             Core(link, m => { RemoveLines(m, GroupHeading, t => t[0] == "GROUP" && Unquote(t[1]) == name); StructureExtras.Remove(m, StructureExtras.GroupTable, name); return 0; });
             return new JsonObject { ["deleted"] = name };
+        }
+        var was = a.Text("was", "");
+        if (was.Length > 0 && was != name)
+        {
+            if (!Groups(link.Model).Exists(g => g.Name == was)) throw new ToolInputException($"There is no group '{was}'.");
+            if (was.Equals("All", StringComparison.OrdinalIgnoreCase)) throw new ToolInputException("The group All cannot be renamed.");
+            if (Groups(link.Model).Exists(g => g.Name == name)) throw new ToolInputException($"A group is already named '{name}'.");
+            var cuts = Cuts(link.Model).Where(c => c.Group == was).Select(c => c.Name).ToList();
+            if (cuts.Count > 0) throw new ToolInputException($"The section cut {string.Join(", ", cuts)} uses {was}: change it first.");
+            Core(link, m =>
+            {
+                foreach (var r in m.Passthrough.Where(r => r.Heading == GroupHeading))
+                    for (var i = 0; i < r.Lines.Count; i++)
+                        if (Tokenize(r.Lines[i]) is { Count: >= 2 } t && t[0] == "GROUP" && Unquote(t[1]) == was) { t[1] = Quote(name); r.Lines[i] = "  " + Line(t); }
+                var old = StructureExtras.Get(m, StructureExtras.GroupTable, was);
+                StructureExtras.Remove(m, StructureExtras.GroupTable, was);
+                if (old.Count > 0) StructureExtras.Set(m, StructureExtras.GroupTable, name, old);
+                return 0;
+            });
         }
         var color = Colors.FirstOrDefault(c => c.Equals(a.Text("color", "Red"), StringComparison.OrdinalIgnoreCase)) ?? throw new ToolInputException($"The color is one of {string.Join(", ", Colors)}.");
         var uses = new Dictionary<string, string>();
