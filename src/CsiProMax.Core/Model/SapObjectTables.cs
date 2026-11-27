@@ -52,6 +52,21 @@ public static class SapObjectTables
         ["Frame Loads - Deformation"] = ("frame", true, ["Cable", "Tendon", "LoadPat", "IncludeU1", "IncludeU2", "IncludeU3", "IncludeR1", "IncludeR2", "IncludeR3", "U1", "U2", "U3", "R1", "R2", "R3"]),
         ["Frame Loads - Target Force"] = ("frame", true, ["Cable", "Tendon", "LoadPat", "IncludeP", "IncludeV2", "IncludeV3", "IncludeT", "IncludeM2", "IncludeM3", "P", "V2", "V3", "T", "M2", "M3", "RelLocP", "RelLocV2", "RelLocV3", "RelLocT", "RelLocM2", "RelLocM3"]),
         ["Frame Loads - Open Structure Wind"] = ("frame", true, ["Cable", "LoadPat", "CoordSys", "Type", "Dir", "DistType", "RelDistA", "RelDistB", "AbsDistA", "AbsDistB", "FOverLA", "FOverLB"]),
+        // Assign > Frame Loads > Auto Wave Loading Parameters and Open Structure Wind Parameters (SAP2000 26.3's forms).
+        ["Overwrites - Auto Wave Loads - Frame"] = ("frame", false, ["Cable", "LoadByWave", "LoadDisc", "MarineGrow", "DimForce2", "DimForce3", "DragCoeff", "InerCoeff", "Flooded", "LoadByWind", "ShapeCoeff", "IceThick", "ShieldFact"]),
+        ["Overwrites - Auto Wind Loads - Frame"] = ("frame", false, ["Cable", "LoadByWind", "IceThick", "Cf"]),
+        // The load tables the Modeler also has its own loads for (Native): a row it cannot hold as its own load (another
+        // coordinate system, a distributed moment, a joint pattern, a gradient, a curvature) is kept here, written into
+        // the same SAP2000 table beside the Modeler's own rows.
+        ["Joint Loads - Force" + Kept] = ("joint", true, ["LoadPat", "CoordSys", "F1", "F2", "F3", "M1", "M2", "M3"]),
+        ["Joint Loads - Ground Displacement" + Kept] = ("joint", true, ["LoadPat", "CoordSys", "U1", "U2", "U3", "R1", "R2", "R3"]),
+        ["Frame Loads - Distributed" + Kept] = ("frame", true, ["LoadPat", "CoordSys", "Type", "Dir", "DistType", "RelDistA", "RelDistB", "AbsDistA", "AbsDistB", "FOverLA", "FOverLB", "MOverLA", "MOverLB"]),
+        ["Frame Loads - Point" + Kept] = ("frame", true, ["LoadPat", "CoordSys", "Type", "Dir", "DistType", "RelDist", "AbsDist", "Force", "Moment"]),
+        ["Frame Loads - Temperature" + Kept] = ("frame", true, ["Cable", "Tendon", "LoadPat", "Type", "Temp", "TempGrad2", "TempGrad3", "JtPattern", "AutoBridge", "BridgeObj"]),
+        ["Frame Loads - Strain" + Kept] = ("frame", true, ["Cable", "Tendon", "LoadPat", "Component", "Strain", "Curvature", "JtPattern"]),
+        ["Area Loads - Uniform" + Kept] = ("area", true, ["LoadPat", "CoordSys", "Dir", "UnifLoad"]),
+        ["Area Loads - Temperature" + Kept] = ("area", true, ["LoadPat", "Type", "JtPattern", "Temp", "TempGrad3"]),
+        ["Area Loads - Strain" + Kept] = ("area", true, ["LoadPat", "Component", "Strain", "Curvature", "JtPattern"]),
         ["Area Auto Mesh Assignments"] = ("area", false, ["MeshType", "MeshGroup", "Number1", "Number2", "Max1", "Max2", "PtsFromLine", "PtsFromPt", "RotAngle", "GenMaxSize", "LocalEdge", "LocalFace", "SuppEdge", "SuppFace", "SubMesh", "SubMeshSize"]),
         ["Area Edge Constraint Assignments"] = ("area", true, ["Edge", "Constrained"]),
         ["Area Local Axes Assignments 2 - Advanced"] = ("area", false, ["LocalPlane", "PlOption1", "PlCoordSys", "CoordDir1", "CoordDir2", "PlVecJt1", "PlVecJt2", "PlVecX", "PlVecY", "PlVecZ"]),
@@ -67,6 +82,15 @@ public static class SapObjectTables
         ["Area Loads - Uniform To Frame"] = ("area", true, ["LoadPat", "CoordSys", "Dir", "UnifLoad", "DistType"]),
         ["Area Loads - Wind Pressure Coefficients"] = ("area", true, ["LoadPat", "Windward", "Cp", "DistType", "XComponent", "YComponent", "ZComponent"]),
     };
+
+    /// <summary>The load tables the Modeler also writes from its own loads keep their other rows under the table's name
+    /// with this after it, so they never mix with the Modeler's own load tables; they go into the same SAP2000 table.</summary>
+    public const string Kept = " (kept)";
+
+    public static bool IsNative(string table) => table.EndsWith(Kept, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The SAP2000 table a kept table's rows go into.</summary>
+    public static string SapName(string table) => IsNative(table) ? Name(table)[..^Kept.Length] : Name(table);
 
     /// <summary>The field that names the object in each kind's tables.</summary>
     public static string KeyField(string kind) => kind switch { "frame" => "Frame", "area" => "Area", _ => "Joint" };

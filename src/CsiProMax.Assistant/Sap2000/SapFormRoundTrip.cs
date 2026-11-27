@@ -47,6 +47,77 @@ public static class SapFormRoundTrip
             [R(("Material", "CPM-C35"), ("MatAngle", "0"), ("AreaType", "Shell"), ("Type", "Plate-Thick"), ("Thickness", "0.25"), ("BendThick", "0.25"))]),
     ];
 
+    /// <summary>The pattern the Assign > ... Loads forms' rows are set in, so they are found again in SAP2000's tables.</summary>
+    public const string LoadPattern = "CPM-ASGL";
+
+    /// <summary>(form, table, object kind, rows): what each Assign > Joint/Frame Loads form sets on one object (assign_sap_loads).</summary>
+    public static readonly (string Form, string Table, string Kind, Dictionary<string, string>[] Rows)[] Loads =
+    [
+        ("Assign Joint Forces", "Joint Loads - Force", "joint", [R(("CoordSys", "GLOBAL"), ("F1", "0"), ("F2", "0"), ("F3", "-12"), ("M1", "0"), ("M2", "0"), ("M3", "1.5"))]),
+        ("Assign Joint Ground Displacements", "Joint Loads - Ground Displacement", "joint", [R(("CoordSys", "GLOBAL"), ("U1", "0.002"), ("U2", "0"), ("U3", "0"), ("R1", "0"), ("R2", "0"), ("R3", "0"))]),
+        ("Assign Frame Gravity Loads", "Frame Loads - Gravity", "frame", [R(("CoordSys", "GLOBAL"), ("MultiplierX", "0"), ("MultiplierY", "0"), ("MultiplierZ", "-1.2"))]),
+        ("Assign Frame Point Loads", "Frame Loads - Point", "frame", [R(("CoordSys", "GLOBAL"), ("Type", "Moment"), ("Dir", "Y"), ("DistType", "RelDist"), ("RelDist", "0.25"), ("Moment", "4"))]),
+        ("Assign Frame Distributed Loads", "Frame Loads - Distributed", "frame",
+            [R(("CoordSys", "Local"), ("Type", "Force"), ("Dir", "2"), ("DistType", "RelDist"), ("RelDistA", "0.25"), ("RelDistB", "0.75"), ("FOverLA", "2"), ("FOverLB", "6")),
+             R(("CoordSys", "GLOBAL"), ("Type", "Moment"), ("Dir", "Z"), ("DistType", "RelDist"), ("RelDistA", "0"), ("RelDistB", "1"), ("MOverLA", "1.5"), ("MOverLB", "1.5"))]),
+        ("Assign Frame Temperature Loads", "Frame Loads - Temperature", "frame", [R(("Type", "Temperature"), ("Temp", "25"))]),
+        ("Assign Frame Strain Loads", "Frame Loads - Strain", "frame", [R(("Component", "Strain11"), ("Strain", "0.0002"))]),
+        ("Assign Frame Deformation Loads", "Frame Loads - Deformation", "frame", [R(("IncludeU1", "Yes"), ("U1", "0.001"))]),
+        ("Assign Frame Target Force Loads", "Frame Loads - Target Force", "frame", [R(("IncludeP", "Yes"), ("P", "40"), ("RelLocP", "0.5"))]),
+        ("Assign Frame Auto Wind Load (Open Structure) Overwrites", "Overwrites - Auto Wind Loads - Frame", "frame", [R(("LoadByWind", "No"))]),
+        ("Assign Area Gravity Loads", "Area Loads - Gravity", "area", [R(("CoordSys", "GLOBAL"), ("MultiplierX", "0"), ("MultiplierY", "0"), ("MultiplierZ", "-1"))]),
+        ("Assign Area Uniform Loads", "Area Loads - Uniform", "area", [R(("CoordSys", "GLOBAL"), ("Dir", "Z Projected"), ("UnifLoad", "1.5"))]),
+        ("Assign Area Uniform Loads to Frames", "Area Loads - Uniform To Frame", "area", [R(("CoordSys", "GLOBAL"), ("Dir", "Gravity"), ("UnifLoad", "2"), ("DistType", "Two Way"))]),
+        ("Assign Area Temperature Loads", "Area Loads - Temperature", "area", [R(("Type", "Temperature"), ("Temp", "15"))]),
+    ];
+
+    /// <summary>In the Modeler's part: each Assign > ... Loads form's rows set on a beam or a joint, as the form sets them.</summary>
+    public static void DefineLoads(FieldContext ctx)
+    {
+        if (ctx.Link is not OfflineEtabs off) return;
+        var m = off.Model;
+        var beam = m.LineAssigns.FirstOrDefault(x => m.Line(x.Label)?.Kind == CsiProMax.Model.LineKind.Beam);
+        var joint = beam is not null ? m.Line(beam.Label)?.PointI : null;
+        if (beam is null || string.IsNullOrEmpty(joint)) return;
+        if (!m.LoadPatterns.Exists(p => p.Name == LoadPattern))
+            ctx.Tool("define_load_pattern", new JsonObject { ["name"] = LoadPattern, ["type"] = "Other", ["self_weight"] = 0 }.ToJsonString(), null, "tool define_load_pattern, the pattern of the SAP2000 load forms");
+        var area = m.AreaAssigns.FirstOrDefault();
+        foreach (var (form, table, kind, rows) in Loads)
+        {
+            if (kind == "area" && area is null) continue;
+            var json = new JsonObject
+            {
+                ["table"] = table, ["pattern"] = LoadPattern, ["option"] = "replace",
+                ["objects"] = new JsonArray(kind == "joint" ? joint + "@" + beam.Story : kind == "area" ? area!.Label + "@" + area.Story : beam.Label + "@" + beam.Story),
+                ["rows"] = new JsonArray(rows.Select(r => (JsonNode)new JsonObject(r.Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value)))).ToArray()),
+            };
+            ctx.Tool("assign_sap_loads", json.ToJsonString(), a => FieldContext.Expect(Int(a["objects"]) == 1, $"{table}: set on {a["objects"]} objects"), $"tool assign_sap_loads, SAP2000 form {form}: {table} set as the form sets it");
+        }
+    }
+
+    /// <summary>In the scratch SAP2000: every load form's row is in SAP2000's table, in its pattern, field by field.</summary>
+    public static void CheckLoads(FieldContext ctx)
+    {
+        var link = ctx.Link;
+        foreach (var (form, table, _, rows) in Loads)
+            ctx.Step($"SAP2000 form {form}: SAP2000 holds every value the Engine's form set", () =>
+            {
+                if (!FieldTest.IsLive(link)) throw new FieldSkipException("no CSI program is behind this stand-in, so there is no SAP2000 table to read back");
+                TableData data;
+                try { data = link.ReadTable(table, null, null); }
+                catch (EtabsException ex) { throw new FieldCheckException($"{table}: SAP2000 did not read it back ({ex.Message})"); }
+                var fields = data.Fields.ToArray();
+                var pat = Array.FindIndex(fields, f => f.Equals("LoadPat", StringComparison.OrdinalIgnoreCase));
+                var mine = data.Rows.Where(r => pat < 0 || (pat < r.Length && r[pat] == LoadPattern)).ToList();
+                var wrong = new List<string>();
+                foreach (var want in rows)
+                    if (!mine.Any(r => want.All(kv => Array.FindIndex(fields, f => f.Equals(kv.Key, StringComparison.OrdinalIgnoreCase)) is var at && at >= 0 && at < r.Length && Same(kv.Value, r[at]))))
+                        wrong.Add($"no row with {string.Join(", ", want.Select(kv => kv.Key + "=" + kv.Value))}; SAP2000 has {(mine.Count == 0 ? "none" : string.Join(" | ", mine.Take(3).Select(r => string.Join(", ", fields.Zip(r, (f, v) => f + "=" + v)))))}");
+                FieldContext.Expect(wrong.Count == 0, $"{table}: " + string.Join("; ", wrong));
+                return $"{rows.Length} row{(rows.Length == 1 ? "" : "s")}, every field the same";
+            });
+    }
+
     /// <summary>
     /// (form, the table SAP2000 reads back, assign_shell_data's arguments as the form sends them, what SAP2000 must hold):
     /// SAP2000's Assign > Area forms, set on one area of the field model. {mat} is a concrete material of the model.
