@@ -4969,77 +4969,200 @@ function hmMaterialTime(st, row, setRow, pd, name) {
 }
 
 // ---- Define: frame sections ----
+// Frame Properties, as ETABS lists them: a filter by type and a find box above the list, and its Click to: buttons.
 async function hmFrameSections() {
-  const defs = await hmDefs();
+  const defs = await hmDefs(), pd = (await hmRun("property_definitions", {}, true)).result || {frame_sections: []};
   const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmFrameSections(); };
   const find = n => defs.frame_sections.find(s => s.name === n);
-  listForm("Frame Properties", "Properties", defs.frame_sections.map(s => s.name), [
-    ["Add New Property...", () => hmFrameSection(null, again)],
-    ["Add Copy of Property...", n => n && hmFrameSection(find(n), again, true)],
-    ["Modify/Show Property...", n => n && hmFrameSection(find(n), again)],
-    ["Delete Property", n => n && hmRun("delete_definition", {kind: "frame_section", name: n}).then(j => j.ok && again())],
-  ], n => hmFrameSection(find(n), again));
+  const kindOf = n => { const s = (pd.frame_sections || []).find(x => x.name === n); return s && /^Concrete/.test(s.shape) ? "Concrete" : s && /^Steel/.test(s.shape) ? "Steel" : "Other"; };
+  const all = defs.frame_sections.map(s => s.name);
+  const acts = [["Import New Properties...", () => hmFrameImport(again)], ["Add New Property...", () => hmFrameShapeType(again)],
+    ["Add Copy of Property...", n => n && hmFrameSection(find(n), again, true)], ["Modify/Show Property...", n => n && hmFrameSection(find(n), again)],
+    ["Delete Property", n => n && hmRun("delete_definition", {kind: "frame_section", name: n}).then(j => j.ok ? again() : hmSay(j.error, true))],
+    ["Delete Multiple Properties...", () => hmDeleteMany("Delete Multiple Frame Properties", all, "frame_section", again)]];
+  const d = dialog("Frame Properties", `<div style="display:flex;gap:10px"><div style="flex:1;min-width:240px">
+      <fieldset style="margin:0 0 6px"><legend>Filter Properties List</legend><div class="g2"><span>Type</span><select id="fpT">${opts(["All", "Concrete", "Steel", "Other"], "All")}</select><span>Find this property</span><input id="fpF"></div></fieldset>
+      <fieldset style="margin:0"><legend>Properties</legend><select id="hmList" size="14" style="width:100%;height:auto"></select></fieldset></div>
+      <fieldset style="width:200px;margin:0"><legend>Click to:</legend><div style="display:flex;flex-direction:column;gap:6px">${acts.map((x, i) => `<button data-a="${i}">${esc(x[0])}</button>`).join("")}</div></fieldset></div>`,
+    [["OK"], ["Cancel"]], {width: 520});
+  const list = q(d, "#hmList");
+  const fill = () => { const t = q(d, "#fpT").value, f = q(d, "#fpF").value.trim().toLowerCase(); const names = all.filter(n => (t === "All" || kindOf(n) === t) && (!f || n.toLowerCase().includes(f))); list.innerHTML = names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join(""); if (names.length) list.selectedIndex = 0; };
+  q(d, "#fpT").onchange = fill; q(d, "#fpF").oninput = fill; fill();
+  d.querySelectorAll("[data-a]").forEach(b => b.onclick = () => acts[+b.dataset.a][1](list.value, d));
+  list.ondblclick = () => list.value && hmFrameSection(find(list.value), again);
+  return d;
 }
+// Delete Multiple Properties: tick the ones to delete.
+function hmDeleteMany(title, names, kind, after) {
+  return dialog(title, `<fieldset><legend>Properties</legend><div id="dmL" style="max-height:300px;overflow:auto">${names.map(n => `<label style="display:block"><input type="checkbox" value="${esc(n)}"> ${esc(n)}</label>`).join("")}</div></fieldset>`,
+    [["OK", d => { const pick = [...d.querySelectorAll("#dmL input:checked")].map(x => x.value); (async () => { for (const n of pick) { const j = await hmRun("delete_definition", {kind, name: n}, true); if (!j.ok) { formError(d, n + ": " + j.error); return; } } d.close(); hmSay(`Deleted ${pick.length}. Edit > Undo steps back.`); if (after) after(); })(); return false; }, true], ["Cancel"]], {width: 340});
+}
+// The shapes' pictures on the Frame Property Shape Type buttons.
+function shapeIcon(shape) {
+  const p = {"Concrete Rectangular": "M10 6h20v28H10z", "Concrete Circle": "M20 6a14 14 0 1 0 .01 0z", "Concrete Tee": "M6 6h28v8H24v20h-8V14H6z", "Concrete L": "M10 6h8v20h16v8H10z",
+    "Steel I/Wide Flange": "M8 6h24v5H23v18h9v5H8v-5h9V11H8z", "Steel Channel": "M10 6h20v5H16v18h14v5H10z", "Steel Tee": "M6 6h28v5H22v23h-4V11H6z", "Steel Angle": "M10 6h5v23h17v5H10z",
+    "Steel Double Angle": "M4 6h5v23h9v5H4zM36 6h-5v23h-9v5h14z", "Steel Double Channel": "M4 6h13v4H8v20h9v4H4zM36 6H23v4h9v20h-9v4h13z", "Steel Tube": "M8 6h24v28H8zM12 10v20h16V10z",
+    "Steel Pipe": "M20 6a14 14 0 1 0 .01 0zM20 10a10 10 0 1 1-.01 0z", "Steel Rod": "M20 8a12 12 0 1 0 .01 0z"}[shape] || "M8 8h24v24H8z";
+  const c = /^Concrete/.test(shape) ? "#b9b9b9" : "#6f8fb3";
+  return `<svg width="40" height="40" viewBox="0 0 40 40"><path d="${p}" fill="${c}" fill-rule="evenodd" stroke="#333" stroke-width=".8"/></svg>`;
+}
+// Frame Property Shape Type: pick the shape, then Frame Section Property Data for it.
+async function hmFrameShapeType(after) {
+  const pd = (await hmRun("property_definitions", {}, true)).result || {shapes: [{shape: "Concrete Rectangular", concrete: true}]};
+  const group = (title, list) => list.length ? `<fieldset><legend>${title}</legend><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px">${list.map(s => `<button data-s="${esc(s.shape)}" title="${esc(s.shape)}" style="display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px">${shapeIcon(s.shape)}<span style="font-size:11px">${esc(s.shape.replace(/^(Steel|Concrete) /, ""))}</span></button>`).join("")}</div></fieldset>` : "";
+  const d = dialog("Frame Property Shape Type", `<fieldset><legend>Frame Section Property Type</legend><div class="g2"><span>Section Shape</span><select id="stS">${opts(pd.shapes.map(s => s.shape), "Concrete Rectangular")}</select></div></fieldset>
+    ${group("Steel", pd.shapes.filter(s => !s.concrete))}${group("Concrete", pd.shapes.filter(s => s.concrete))}`,
+    [["OK", d => { const sh = q(d, "#stS").value; setTimeout(() => hmFrameSection(null, after, false, sh)); }], ["Cancel"]], {width: 470});
+  d.querySelectorAll("[data-s]").forEach(b => b.onclick = () => { q(d, "#stS").value = b.dataset.s; d.close(); hmFrameSection(null, after, false, b.dataset.s); });
+  return d;
+}
+// The section files' I shapes (depth, flange width, flange and web thickness, fillet radius), in mm or in.
+const sectionFiles = {
+  "Euro.xml": {unit: "mm", shapes: {"IPE200": [200, 100, 8.5, 5.6, 12], "IPE240": [240, 120, 9.8, 6.2, 15], "IPE300": [300, 150, 10.7, 7.1, 15], "IPE360": [360, 170, 12.7, 8, 18], "IPE400": [400, 180, 13.5, 8.6, 21], "IPE450": [450, 190, 14.6, 9.4, 21], "IPE500": [500, 200, 16, 10.2, 21], "IPE600": [600, 220, 19, 12, 24],
+    "HE200A": [190, 200, 10, 6.5, 18], "HE240A": [230, 240, 12, 7.5, 21], "HE300A": [290, 300, 14, 8.5, 27], "HE400A": [390, 300, 19, 11, 27], "HE200B": [200, 200, 15, 9, 18], "HE300B": [300, 300, 19, 11, 27], "HE400B": [400, 300, 24, 13.5, 27]}},
+  "AISC16.xml": {unit: "in", shapes: {"W8X31": [8, 8, 0.435, 0.285], "W10X49": [10, 10, 0.56, 0.34], "W12X26": [12.2, 6.49, 0.38, 0.23], "W12X65": [12.1, 12, 0.605, 0.39], "W14X90": [14, 14.5, 0.71, 0.44], "W16X31": [15.9, 5.53, 0.44, 0.275],
+    "W18X50": [18, 7.5, 0.57, 0.355], "W21X44": [20.7, 6.5, 0.45, 0.35], "W24X55": [23.6, 7.01, 0.505, 0.395], "W24X76": [23.9, 8.99, 0.68, 0.44]}},
+};
+// Import New Properties: an I/Wide Flange from a section file, in the model's units, of a steel material.
+async function hmFrameImport(after) {
+  const pd = (await hmRun("property_definitions", {}, true)).result || {materials: []}, u = hmU();
+  const steels = pd.materials.filter(m => /Steel/i.test(m.type)).map(m => m.name);
+  const d = dialog("Frame Section Property Import Data", `<div class="g2"><span>Section Shape Type</span><select disabled><option>Steel I/Wide Flange</option></select>
+      <span>Property File</span><select id="imF">${opts(Object.keys(sectionFiles), "Euro.xml")}</select><span>Material</span><select id="imM">${opts(steels, steels[0])}</select></div>
+    <fieldset><legend>Properties (Ctrl or Shift to pick several)</legend><select id="imL" multiple size="12" style="width:100%"></select></fieldset>${steels.length ? "" : '<p class="kv">Define a steel material first (Define > Material Properties).</p>'}`,
+    [["OK", d => {
+      const f = sectionFiles[q(d, "#imF").value], k = (uLen[u.l] || 1) / (f.unit === "in" ? 39.37008 : 1000), pick = [...q(d, "#imL").selectedOptions].map(o => o.value);
+      (async () => { for (const n of pick) { const [D, B, TF, TW, R] = f.shapes[n]; const j = await hmRun("define_frame_shape", {name: n, shape: "Steel I/Wide Flange", material: q(d, "#imM").value, dims: {D: D * k, B: B * k, TF: TF * k, TW: TW * k}, extras: R ? {FilletRad: String(+(R * k).toPrecision(6))} : undefined}, true); if (!j.ok) { formError(d, n + ": " + j.error); return; } }
+        d.close(); hmSay(`Imported ${pick.length}. Edit > Undo steps back.`); if (after) after(); })();
+      return false;
+    }, true], ["Cancel"]], {width: 420});
+  const fill = () => { q(d, "#imL").innerHTML = Object.keys(sectionFiles[q(d, "#imF").value].shapes).map(n => `<option>${n}</option>`).join(""); };
+  q(d, "#imF").onchange = fill; fill();
+  return d;
+}
+// Show Section Properties: what ETABS's Property Data window lists for the section, from section_properties.
+async function hmSectionProps(name, shape, dims) {
+  const j = await hmRun("section_properties", {shape, dims}, true), u = hmU(), l = u.l;
+  if (!j.ok) return hmSay(j.error, true);
+  const p = j.result, n = v => v == null ? "" : +(+v).toPrecision(6);
+  const rows = [["Cross-section (axial) area", p.A, `${l}²`], ["Torsional constant", p.J, `${l}⁴`], ["Moment of Inertia about 3 axis", p.I33, `${l}⁴`], ["Moment of Inertia about 2 axis", p.I22, `${l}⁴`], ["Product of Inertia about 2-3", p.I23, `${l}⁴`],
+    ["Shear area in 2 direction", p.As2, `${l}²`], ["Shear area in 3 direction", p.As3, `${l}²`], ["Section modulus about 3 axis, top", p.S33Top, `${l}³`], ["Section modulus about 3 axis, bottom", p.S33Bot, `${l}³`],
+    ["Section modulus about 2 axis, left", p.S22Left, `${l}³`], ["Section modulus about 2 axis, right", p.S22Right, `${l}³`], ["Plastic modulus about 3 axis", p.Z33, `${l}³`], ["Plastic modulus about 2 axis", p.Z22, `${l}³`],
+    ["Radius of Gyration about 3 axis", p.R33, l], ["Radius of Gyration about 2 axis", p.R22, l]];
+  return dialog("Property Data", `<fieldset><legend>Section Name</legend><input class="grey" readonly style="width:100%" value="${esc(name)}"></fieldset><fieldset><legend>Properties</legend><div class="gu">${rows.map(([k, v, un]) => `<span>${k}</span><input class="grey" readonly value="${n(v)}"><span class="un">${un}</span>`).join("")}</div></fieldset>`, [["OK"]], {width: 460});
+}
+// The property modifiers of a section or a selection: one row per factor, 1 where not changed.
+function hmModifiers(keys, now, done) {
+  const label = {AMOD: "Cross-section (axial) Area", A2MOD: "Shear Area in 2 direction", A3MOD: "Shear Area in 3 direction", JMOD: "Torsional Constant", I2MOD: "Moment of Inertia about 2 axis", I3MOD: "Moment of Inertia about 3 axis", MMOD: "Mass", WMOD: "Weight",
+    F11MOD: "Membrane f11 direction", F22MOD: "Membrane f22 direction", F12MOD: "Membrane f12 direction", M11MOD: "Bending m11 direction", M22MOD: "Bending m22 direction", M12MOD: "Bending m12 direction", V13MOD: "Shear v13 direction", V23MOD: "Shear v23 direction"};
+  const d = dialog("Property/Stiffness Modification Factors", `<fieldset><legend>Property/Stiffness Modifiers for Analysis</legend><div class="g2" id="pmV">${keys.map(k => `<span>${esc(label[k] || k)}</span><input data-k="${k}" type="number" step="any" value="${now && now[k] != null ? now[k] : 1}">`).join("")}</div></fieldset>`,
+    [["OK", d => { const o = {}; d.querySelectorAll("#pmV [data-k]").forEach(x => { const v = parseFloat(x.value); if (isFinite(v)) o[x.dataset.k] = v; }); done(o); }], ["Cancel"]], {width: 380});
+  return d;
+}
+// Frame Section Property Data, as ETABS 23.2 lays it out: General Data (name, material, notional size, colour, notes),
+// Shape, Section Property Source, Section Dimensions with the units on the right, Property Modifiers and, for concrete,
+// Reinforcement; Show Section Properties lists what the shape gives.
+const frameDimLabels = {
+  "Concrete Rectangular": {D: "Depth", B: "Width"}, "Concrete Circle": {D: "Diameter"}, "Concrete Tee": {D: "Total Depth", B: "Total Width", TF: "Flange Thickness", TW: "Web Thickness"},
+  "Concrete L": {D: "Total Depth", B: "Total Width", TF: "Horizontal Leg Thickness", TW: "Vertical Leg Thickness"},
+  "Steel I/Wide Flange": {D: "Total Depth", B: "Top Flange Width", TF: "Top Flange Thickness", TW: "Web Thickness", BBOTTOM: "Bottom Flange Width", TFBOTTOM: "Bottom Flange Thickness"},
+  "Steel Channel": {D: "Total Depth", B: "Flange Width", TF: "Flange Thickness", TW: "Web Thickness"}, "Steel Tee": {D: "Total Depth", B: "Flange Width", TF: "Flange Thickness", TW: "Web Thickness"},
+  "Steel Angle": {D: "Total Depth", B: "Total Width", TF: "Horizontal Leg Thickness", TW: "Vertical Leg Thickness"}, "Steel Double Angle": {D: "Total Depth", B: "Width of Single Angle", TF: "Horizontal Leg Thickness", TW: "Vertical Leg Thickness", DIS: "Back to Back Distance"},
+  "Steel Double Channel": {D: "Total Depth", B: "Width of Single Channel", TF: "Flange Thickness", TW: "Web Thickness", DIS: "Back to Back Distance"}, "Steel Tube": {D: "Total Depth", B: "Total Width", TF: "Flange Thickness", TW: "Web Thickness"},
+  "Steel Pipe": {D: "Outside Diameter", TW: "Wall Thickness"}, "Steel Rod": {D: "Diameter"}};
 function sectionSvg(dep, wid) {
   const k = 70 / Math.max(dep || 1, wid || 1), h = Math.max(4, (dep || 0) * k), w = Math.max(4, (wid || 0) * k);
   return `<svg width="110" height="100" viewBox="0 0 110 100"><rect x="${55 - w / 2}" y="${50 - h / 2}" width="${w}" height="${h}" fill="#b8c4cc" stroke="#3a4650"/><path d="M55 8v84M8 50h94" stroke="#7a8890" stroke-dasharray="3 2"/><text x="60" y="12" font-size="10" fill="#555">3</text><text x="96" y="46" font-size="10" fill="#555">2</text></svg>`;
 }
-// The property modifiers of a section or a selection: one row per factor, 1 where not changed.
-function hmModifiers(keys, now, done) {
-  const label = {AMOD: "Cross-section (axial) area", A2MOD: "Shear area in 2 direction", A3MOD: "Shear area in 3 direction", JMOD: "Torsional constant", I2MOD: "Moment of inertia about 2 axis", I3MOD: "Moment of inertia about 3 axis", MMOD: "Mass", WMOD: "Weight",
-    F11MOD: "Membrane f11 direction", F22MOD: "Membrane f22 direction", F12MOD: "Membrane f12 direction", M11MOD: "Bending m11 direction", M22MOD: "Bending m22 direction", M12MOD: "Bending m12 direction", V13MOD: "Shear v13 direction", V23MOD: "Shear v23 direction"};
-  const d = dialog("Property/Stiffness Modifiers", `<div class="g2" id="pmV">${keys.map(k => `<span>${esc(label[k] || k)}</span><input data-k="${k}" type="number" step="any" value="${now && now[k] != null ? now[k] : 1}">`).join("")}</div>`,
-    [["OK", d => { const o = {}; d.querySelectorAll("#pmV [data-k]").forEach(x => { const v = parseFloat(x.value); if (isFinite(v)) o[x.dataset.k] = v; }); done(o); }, true], ["Cancel"]], {width: 380});
-  return d;
+// The section drawn to scale from its dimensions, with its 2 and 3 axes.
+function shapeSvg(shape, v) {
+  const D = v.D || 0, B = v.B || D, TF = v.TF || 0, TW = v.TW || 0, BB = v.BBOTTOM || B, TFB = v.TFBOTTOM || TF, DIS = v.DIS || 0;
+  const span = /Double/.test(shape) ? 2 * B + DIS : /Circle|Pipe|Rod/.test(shape) ? D : Math.max(B, BB);
+  const k = 120 / Math.max(D || 1, span || 1), X = x => 80 + x * k, Y = y => 75 - y * k, R = (x, y, w, h) => `M${X(x)} ${Y(y + h)}h${w * k}v${h * k}h${-w * k}z`;
+  let p = "";
+  if (/Circle|Rod/.test(shape)) p = `M${X(0)} ${Y(D / 2)}a${D * k / 2} ${D * k / 2} 0 1 0 .01 0z`;
+  else if (/Pipe/.test(shape)) p = `M${X(0)} ${Y(D / 2)}a${D * k / 2} ${D * k / 2} 0 1 0 .01 0zM${X(0)} ${Y(D / 2 - TW)}a${(D / 2 - TW) * k} ${(D / 2 - TW) * k} 0 1 1 -.01 0z`;
+  else if (/Rectangular/.test(shape)) p = R(-B / 2, -D / 2, B, D);
+  else if (/Tube/.test(shape)) p = R(-B / 2, -D / 2, B, D) + R(-B / 2 + TW, -D / 2 + TF, B - 2 * TW, D - 2 * TF).replace(/h([-\d.]+)v([-\d.]+)h([-\d.]+)/, (m, a, b, c) => `v${b}h${a}v${-b}`);
+  else if (/I\/Wide/.test(shape)) p = R(-B / 2, D / 2 - TF, B, TF) + R(-TW / 2, -D / 2 + TFB, TW, D - TF - TFB) + R(-BB / 2, -D / 2, BB, TFB);
+  else if (/Tee/.test(shape)) p = R(-B / 2, D / 2 - TF, B, TF) + R(-TW / 2, -D / 2, TW, D - TF);
+  else if (/Channel/.test(shape)) { const one = o => R(o, D / 2 - TF, B, TF) + R(o, -D / 2 + TF, TW, D - 2 * TF) + R(o, -D / 2, B, TF); p = /Double/.test(shape) ? one(DIS / 2) + R(-DIS / 2 - B, D / 2 - TF, B, TF) + R(-DIS / 2 - TW, -D / 2 + TF, TW, D - 2 * TF) + R(-DIS / 2 - B, -D / 2, B, TF) : one(-B / 2); }
+  else if (/Angle|Concrete L/.test(shape)) { const one = o => (/Concrete L/.test(shape) ? R(o, D / 2 - TF, B, TF) + R(o, -D / 2, TW, D - TF) : R(o, -D / 2, B, TF) + R(o, -D / 2 + TF, TW, D - TF)); p = /Double/.test(shape) ? one(DIS / 2) + R(-DIS / 2 - B, -D / 2, B, TF) + R(-DIS / 2 - TW, -D / 2 + TF, TW, D - TF) : one(-B / 2); }
+  return `<svg width="160" height="150" viewBox="0 0 160 150"><path d="M80 8v134M10 75h140" stroke="#7a8890" stroke-dasharray="3 2"/><path d="${p}" fill="${/^Concrete/.test(shape) ? "#c8c8c8" : "#9fb4cc"}" stroke="#3a4650" fill-rule="evenodd"/><text x="84" y="16" font-size="11" fill="#555">3</text><text x="144" y="70" font-size="11" fill="#555">2</text></svg>`;
 }
-async function hmFrameSection(s, after, copy) {
+async function hmFrameSection(s, after, copy, newShape) {
   const defs = await hmDefs(), u = hmU(), pd = (await hmRun("property_definitions", {}, true)).result;
   const cur = s && pd ? pd.frame_sections.find(x => x.name === s.name) : null, was = s && !copy ? s.name : null;
   if (cur && pd && !pd.shapes.some(x => x.shape === cur.shape)) return dialog("Frame Section Property Data", `<p class="kv" style="max-width:360px">${esc(cur.name)} is a ${esc(cur.shape)} section. The Modeler keeps it as the file has it and draws with it; Edit > Model Text changes it.</p>`, [["OK"]], {width: 400});
-  let mods = cur ? {...cur.modifiers} : null;
+  let mods = cur ? {...cur.modifiers} : null, kind = s && s.kind === "beam" ? "beam" : "column";
+  const extras = {...((cur && cur.extras) || {})};
   const shapes = pd ? pd.shapes : [{shape: "Concrete Rectangular", dims: ["D", "B"], concrete: true}];
-  const shape0 = cur && shapes.some(x => x.shape === cur.shape) ? cur.shape : "Concrete Rectangular";
-  const dimLabel = {D: "Depth (t3)", B: "Width (t2)", TF: "Flange thickness (tf)", TW: "Web thickness (tw)", BBOTTOM: "Bottom flange width (t2b)", TFBOTTOM: "Bottom flange thickness (tfb)", DIS: "Back to back distance (dis)"};
+  const shape = cur && shapes.some(x => x.shape === cur.shape) ? cur.shape : newShape && shapes.some(x => x.shape === newShape) ? newShape : "Concrete Rectangular";
+  const sh = shapes.find(x => x.shape === shape) || shapes[0], fields = (pd && pd.frame_extra_fields && pd.frame_extra_fields[shape]) || ["Color", "Notes"];
   const mats = pd ? pd.materials : defs.materials.map(m => ({name: m.name, type: m.type}));
-  const d = dialog("Frame Section Property Data", `<div style="display:flex;gap:10px"><div style="flex:1"><fieldset><legend>General Data</legend><div class="g2">
-      <span>Property Name</span><input id="sN" value="${esc(s ? (copy ? s.name + " copy" : s.name) : "C400X400")}">
-      <span>Shape</span><select id="sS">${opts(shapes.map(x => x.shape), shape0)}</select>
-      <span>Material</span><select id="sM"></select></div></fieldset>
-    <fieldset><legend>Section Dimensions, ${u.l}</legend><div class="g2" id="sDims"></div></fieldset>
-    <fieldset id="sDes"><legend>Design Type</legend><label><input type="radio" name="sK" value="column" ${!s || s.kind !== "beam" ? "checked" : ""}>Column</label> &nbsp; <label><input type="radio" name="sK" value="beam" ${s && s.kind === "beam" ? "checked" : ""}>Beam</label></fieldset>
-    <button id="sMod">Property Modifiers...</button> <span class="kv" id="sModT"></span></div>
-    <fieldset style="margin:0"><legend>Section</legend><div id="sP">${sectionSvg(s && s.depth, s && s.width)}</div></fieldset></div>`,
+  const list = mats.filter(m => sh.concrete ? /concrete/i.test(m.type) : !/concrete/i.test(m.type)).map(m => m.name);
+  const old = cur ? cur.dims : {}, def = {D: s && s.depth || (sh.concrete ? 0.5 : 0.3), B: s && s.width || (sh.concrete ? 0.3 : 0.15), TF: sh.concrete ? 0.15 : 0.012, TW: sh.concrete ? 0.3 : 0.008, DIS: 0.01};
+  const lab = frameDimLabels[shape] || {}, un = `<span class="un">${u.l}</span>`;
+  if (!extras.Color) extras.Color = sh.concrete ? "Gray8Dark" : "Blue";
+  const name0 = s ? (copy ? s.name + " copy" : s.name) : ({"Concrete Rectangular": "ConcBm", "Concrete Circle": "ConcCol"}[shape] || "FSec") + (defs.frame_sections.length + 1);
+  const dimRows = sh.dims.map(k => `<span>${esc(lab[k] || k)}</span><input data-k="${k}" type="number" step="any" value="${old[k] != null ? old[k] : /BOTTOM/.test(k) ? "" : def[k]}" ${/BOTTOM/.test(k) ? 'placeholder="as the top"' : ""}>${un}`).join("")
+    + (fields.includes("FilletRad") ? `<span>Fillet Radius</span><input data-x="FilletRad" type="number" step="any" value="${esc(extras.FilletRad || "0")}">${un}` : "")
+    + (fields.includes("CornerRad") ? `<span>Corner Radius</span><input data-x="CornerRad" type="number" step="any" value="${esc(extras.CornerRad || "0")}">${un}` : "");
+  const mirrors = ["MirrorAbt2", "MirrorAbt3"].filter(f => fields.includes(f)).map(f => `<label style="margin-right:14px"><input type="checkbox" data-x="${f}" ${extras[f] === "Yes" ? "checked" : ""}> Mirror About ${f.slice(-1)}-Axis</label>`).join("");
+  const d = dialog("Frame Section Property Data", `<div style="display:flex;gap:10px"><div style="flex:1">
+    <fieldset><legend>General Data</legend><div class="gu">
+      <span>Property Name</span><input id="sN" value="${esc(name0)}"><span></span>
+      <span>Material</span><select id="sM">${opts(list, cur && list.includes(cur.material) ? cur.material : list[0])}</select><span></span>
+      ${sh.concrete ? `<span>Notional Size Data</span><button id="sNot">Modify/Show Notional Size...</button><span></span>` : ""}
+      <span>Display Color</span><span id="sSw" style="height:20px;border:1px solid #888;display:block"></span><button id="sCol">Change...</button>
+      <span>Notes</span><button id="sNotes">Modify/Show Notes...</button><span></span></div></fieldset>
+    <fieldset><legend>Shape</legend><div class="g2"><span>Section Shape</span><select id="sS" disabled>${opts(shapes.map(x => x.shape), shape)}</select></div></fieldset>
+    <fieldset><legend>Section Property Source</legend><span class="kv">Source: ${esc(extras.Source || "User Defined")}</span></fieldset>
+    <fieldset><legend>Section Dimensions</legend><div class="gu" id="sDims">${dimRows}</div>${mirrors ? `<div style="margin-top:6px">${mirrors}</div>` : ""}</fieldset></div>
+    <div style="width:180px;display:flex;flex-direction:column;gap:6px"><fieldset style="margin:0"><legend>Section</legend><div id="sP" style="display:flex;justify-content:center"></div></fieldset>
+      <button id="sProps">Show Section Properties...</button>
+      <fieldset style="margin:0"><legend>Property Modifiers</legend><button id="sMod" style="width:100%">Modify/Show Modifiers...</button><div class="kv" id="sModT" style="margin-top:4px"></div></fieldset>
+      ${sh.concrete ? `<fieldset style="margin:0"><legend>Reinforcement</legend><button id="sRebar" style="width:100%">Modify/Show Rebar...</button><div class="kv" id="sKind" style="margin-top:4px"></div></fieldset>` : ""}</div></div>`,
     [["OK", d => {
-      const name = q(d, "#sN").value.trim(), shape = q(d, "#sS").value, material = q(d, "#sM").value, dims = {};
-      d.querySelectorAll("#sDims [data-k]").forEach(x => { const v = parseFloat(x.value); if (isFinite(v)) dims[x.dataset.k] = v; });
-      const changed = mods && Object.values(mods).some(v => Math.abs(v - 1) > 1e-12) || cur && Object.values(cur.modifiers).some(v => Math.abs(v - 1) > 1e-12);
+      const name = q(d, "#sN").value.trim(), material = q(d, "#sM").value, dims = dimsNow();
+      d.querySelectorAll("[data-x]").forEach(x => extras[x.dataset.x] = x.type === "checkbox" ? (x.checked ? "Yes" : "") : x.value.trim());
+      const ex = {}; for (const f of fields) if (extras[f] != null) ex[f] = String(extras[f]);
+      if (ex.FilletRad === "0") ex.FilletRad = ""; if (ex.CornerRad === "0") ex.CornerRad = "";
       if (shape === "Concrete Rectangular") {
-        const kind = q(d, "[name=sK]:checked").value;
         formError(d, "");
         hmRun("define_frame_section", {name, was, kind, depth: dims.D, width: dims.B, material}, true).then(async j => {
           if (!j.ok) return formError(d, j.error);
-          if (changed) { const k = await hmRun("define_frame_shape", {name, was: name, shape, material, dims, modifiers: mods || {}}, true); if (!k.ok) return formError(d, k.error); }
+          const k = await hmRun("define_frame_shape", {name, was: name, shape, material, dims, modifiers: mods || {}, extras: ex}, true); if (!k.ok) return formError(d, k.error);
           hm.sec[kind] = name; d.close(); hmSay("Done. Edit > Undo steps back."); if (after) after(j);
         });
         return false;
       }
-      return submit(d, "define_frame_shape", {name, was, shape, material, dims, modifiers: mods || undefined}, after);
-    }, true], ["Cancel"]], {width: 560});
-  const paint = () => {
-    const sh = shapes.find(x => x.shape === q(d, "#sS").value) || shapes[0], old = cur && cur.shape === sh.shape ? cur.dims : {};
-    const def = {D: s && s.depth || 0.4, B: s && s.width || 0.4, TF: sh.concrete ? 0.15 : 0.016, TW: sh.concrete ? 0.3 : 0.01, DIS: 0.01};
-    q(d, "#sDims").innerHTML = sh.dims.map(k => `<span>${esc(dimLabel[k] || k)}</span><input data-k="${k}" type="number" step="any" value="${old[k] != null ? old[k] : /BOTTOM/.test(k) ? "" : def[k]}" ${/BOTTOM/.test(k) ? 'placeholder="as the top"' : ""}>`).join("");
-    const list = mats.filter(m => sh.concrete ? /concrete/i.test(m.type) : !/concrete/i.test(m.type)).map(m => m.name);
-    q(d, "#sM").innerHTML = opts(list, cur && list.includes(cur.material) ? cur.material : list[0]);
-    q(d, "#sDes").hidden = sh.shape !== "Concrete Rectangular";
-    if (!list.length) formError(d, sh.concrete ? "Define a concrete material first." : "Define a steel material first (Define > Material Properties)."); else formError(d, "");
-    d.querySelectorAll("#sDims [data-k]").forEach(x => x.oninput = redraw); redraw();
+      return submit(d, "define_frame_shape", {name, was, shape, material, dims, modifiers: mods || undefined, extras: ex}, after);
+    }, true], ["Cancel"]], {width: 640});
+  const dimsNow = () => { const o = {}; d.querySelectorAll("#sDims [data-k]").forEach(x => { const v = parseFloat(x.value); if (isFinite(v)) o[x.dataset.k] = v; }); return o; };
+  const redraw = () => q(d, "#sP").innerHTML = shapeSvg(shape, dimsNow());
+  const swatch = () => q(d, "#sSw").style.background = matColorCss(extras.Color);
+  const modText = () => { const m = mods || (cur && cur.modifiers) || {}; q(d, "#sModT").textContent = Object.values(m).some(v => Math.abs(v - 1) > 1e-12) ? "Currently User Specified" : "Currently Default"; };
+  const kindText = () => { const k = d.querySelector("#sKind"); if (k) k.textContent = kind === "beam" ? "M3 Design Only (Beam)" : "P-M2-M3 Design (Column)"; };
+  d.querySelectorAll("#sDims [data-k]").forEach(x => x.oninput = redraw);
+  q(d, "#sCol").onclick = () => hmColor(extras.Color, c => { extras.Color = c; swatch(); });
+  q(d, "#sNotes").onclick = () => dialog("Notes", `<div class="g2" style="margin-bottom:6px"><span>Property Name</span><input class="grey" readonly value="${esc(q(d, "#sN").value)}"></div><textarea id="nT" rows="8" style="width:100%;box-sizing:border-box">${esc(extras.Notes || "")}</textarea>`, [["OK", n => { extras.Notes = q(n, "#nT").value; }], ["Cancel"]], {width: 420});
+  if (sh.concrete) q(d, "#sNot").onclick = () => {
+    const t = extras.NotSizeType || "Auto";
+    dialog("Notional Size Data", `<fieldset><legend>Notional Size Type</legend><label style="display:block"><input type="radio" name="nsT" value="Auto" ${t !== "User" ? "checked" : ""}> Auto (Program Determined)</label><div class="g2" style="margin:4px 0 8px 22px"><span>Scale Factor</span><input id="nsF" type="number" step="any" value="${esc(extras.NotAutoFact || "1")}"></div>
+      <label style="display:block"><input type="radio" name="nsT" value="User" ${t === "User" ? "checked" : ""}> User Defined</label><div class="gu" style="margin:4px 0 0 22px"><span>Notional Size</span><input id="nsU" type="number" step="any" value="${esc(extras.NotUserSize || "")}"><span class="un">${u.l}</span></div></fieldset>`,
+      [["OK", n => { const user = q(n, "input[name=nsT]:checked").value === "User"; extras.NotSizeType = user ? "User" : "Auto"; extras.NotAutoFact = user ? "" : q(n, "#nsF").value; extras.NotUserSize = user ? q(n, "#nsU").value : ""; }], ["Cancel"]], {width: 360});
   };
-  const redraw = () => { const D = parseFloat((q(d, '#sDims [data-k="D"]') || {}).value), B = parseFloat((q(d, '#sDims [data-k="B"]') || {}).value); q(d, "#sP").innerHTML = sectionSvg(D, isFinite(B) ? B : D); };
-  const modText = () => { const m = mods || (cur && cur.modifiers) || {}; const o = Object.entries(m).filter(([, v]) => Math.abs(v - 1) > 1e-12); q(d, "#sModT").textContent = o.length ? o.map(([k, v]) => k + " " + v).join(", ") : "none"; };
-  q(d, "#sS").onchange = paint;
+  q(d, "#sProps").onclick = () => hmSectionProps(q(d, "#sN").value, shape, dimsNow());
   q(d, "#sMod").onclick = () => hmModifiers(pd.frame_modifiers, mods || (cur && cur.modifiers), o => { mods = o; modText(); });
-  paint(); modText();
+  if (sh.concrete) q(d, "#sRebar").onclick = () => {
+    if (shape === "Concrete Rectangular" && was && was === q(d, "#sN").value.trim()) return hmFrameRebar(was);
+    dialog("Frame Section Property Reinforcement Data", `<fieldset><legend>Design Type</legend><label style="display:block"><input type="radio" name="rkT" value="column" ${kind !== "beam" ? "checked" : ""}> P-M2-M3 Design (Column)</label><label style="display:block"><input type="radio" name="rkT" value="beam" ${kind === "beam" ? "checked" : ""}> M3 Design Only (Beam)</label></fieldset><p class="kv">The bars themselves are set here once the section is in the model (OK, then Modify/Show Rebar again).</p>`,
+      [["OK", n => { kind = q(n, "input[name=rkT]:checked").value; kindText(); }], ["Cancel"]], {width: 380});
+  };
+  if (!list.length) formError(d, sh.concrete ? "Define a concrete material first." : "Define a steel material first (Define > Material Properties).");
+  redraw(); swatch(); modText(); kindText();
+  return d;
 }
 
 // ---- Define: slab and wall sections ----

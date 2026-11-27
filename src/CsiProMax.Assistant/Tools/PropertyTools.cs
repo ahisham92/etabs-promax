@@ -36,8 +36,8 @@ public static class PropertyTools
                 return new JsonObject { ["material"] = mat.Name, ["type"] = mat.Type };
             }, a => $"Define the material {a.Text("name")}"),
         new("define_frame_shape",
-            "Adds or changes a frame section of any shape (Define > Section Properties > Frame Sections): Concrete Rectangular, Circle, Tee, L; Steel I/Wide Flange, Channel, Tee, Angle, Double Angle, Double Channel, Tube, Pipe, Rod. dims are the shape's dimensions (D, B, TF, TW, ... as section_shapes lists them). modifiers (AMOD A2MOD A3MOD JMOD I2MOD I3MOD MMOD WMOD) are the section's property modifiers. 'was': its name now; members keep it under a new name.",
-            """{"type":"object","required":["name","shape","material","dims"],"properties":{"name":{"type":"string"},"was":{"type":"string"},"shape":{"type":"string"},"material":{"type":"string"},"dims":""" + Numbers + ""","modifiers":""" + Numbers + "}}",
+            "Adds or changes a frame section of any shape (Define > Section Properties > Frame Sections): Concrete Rectangular, Circle, Tee, L; Steel I/Wide Flange, Channel, Tee, Angle, Double Angle, Double Channel, Tube, Pipe, Rod. dims are the shape's dimensions (D, B, TF, TW, ... as section_shapes lists them). modifiers (AMOD A2MOD A3MOD JMOD I2MOD I3MOD MMOD WMOD) are the section's property modifiers. extras: the form's other fields, by the program's table field names (Color, Notes; concrete NotSizeType NotAutoFact NotUserSize RigidZone; steel FilletRad, tube CornerRad; MirrorAbt2 MirrorAbt3); given, they replace the ones it has. 'was': its name now; members keep it under a new name.",
+            """{"type":"object","required":["name","shape","material","dims"],"properties":{"name":{"type":"string"},"was":{"type":"string"},"shape":{"type":"string"},"material":{"type":"string"},"dims":""" + Numbers + ""","modifiers":""" + Numbers + ""","extras":{"type":"object","additionalProperties":{"type":"string"}}}}""",
             Ask.Changes, (a, e) =>
             {
                 var link = Offline(e);
@@ -47,6 +47,8 @@ public static class PropertyTools
                 {
                     var sec = PropertyDefs.SetShape(m, a.Need("name"), Was(a), a.Need("shape"), a.Need("material"), dims);
                     if (mods.Count > 0) PropertyDefs.SetModifiers(sec.Lines, PropertyDefs.FrameModifiers, mods);
+                    if (a.TryGetProperty("extras", out var x) && x.ValueKind == JsonValueKind.Object)
+                        PropertyDefs.SetFrameExtras(sec, x.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.ValueKind == JsonValueKind.String ? p.Value.GetString() ?? "" : p.Value.ToString()));
                     return sec;
                 }));
                 return new JsonObject { ["section"] = s.Name, ["shape"] = s.Shape, ["area"] = s.Area };
@@ -113,6 +115,20 @@ public static class PropertyTools
             "What the property forms show: material types and each material's values, every section shape with its dimensions, the frame and shell sections with their modifiers, slab and modeling types, the spring properties with where they are used; with objects (label@story), what is assigned to each.",
             """{"type":"object","properties":{"objects":{"type":"array","items":{"type":"string"}}}}""",
             Ask.Never, (a, e) => Definitions(Offline(e).Model, a.Texts("objects"))),
+        new("section_properties",
+            "The section properties of a frame shape and its dimensions in the model's units (Frame Section Property Data > Show Section Properties): area, torsional constant, moments and product of inertia, shear areas, section and plastic moduli, radii of gyration.",
+            """{"type":"object","required":["shape","dims"],"properties":{"shape":{"type":"string"},"dims":""" + Numbers + "}}",
+            Ask.Never, (a, e) =>
+            {
+                var p = CsiProMax.S2k.S2kWriter.PropsOf(a.Need("shape"), Values(a, "dims", true)) ?? throw new ToolInputException("These dimensions do not make a section of that shape.");
+                var v = p;
+                return new JsonObject
+                {
+                    ["A"] = v.A, ["J"] = v.J, ["I33"] = v.I33, ["I22"] = v.I22, ["I23"] = v.I23, ["As2"] = v.As2, ["As3"] = v.As3,
+                    ["S33Top"] = v.S33Top > 0 ? v.S33Top : v.S33, ["S33Bot"] = v.S33Bot > 0 ? v.S33Bot : v.S33, ["S22Left"] = v.S22Left > 0 ? v.S22Left : v.S22, ["S22Right"] = v.S22Right > 0 ? v.S22Right : v.S22,
+                    ["Z33"] = v.Z33, ["Z22"] = v.Z22, ["R33"] = Math.Sqrt(v.I33 / v.A), ["R22"] = Math.Sqrt(v.I22 / v.A),
+                };
+            }),
     ];
 
     private static Dictionary<string, string>? Texts(JsonElement a)
@@ -374,7 +390,9 @@ public static class PropertyTools
                 ["name"] = s.Name, ["shape"] = s.Shape, ["material"] = s.Material,
                 ["dims"] = new JsonObject((PropertyDefs.Shape(s.Shape)?.Dims ?? ["D", "B"]).Where(d => s.Number(d) is not null).Select(d => KeyValuePair.Create(d, (JsonNode?)JsonValue.Create(s.Number(d)!.Value)))),
                 ["modifiers"] = Numbers_(PropertyDefs.Modifiers(s.Lines, PropertyDefs.FrameModifiers)),
+                ["extras"] = new JsonObject(PropertyDefs.FrameExtras(s).Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))),
             }).ToArray()),
+            ["frame_extra_fields"] = new JsonObject(PropertyDefs.Shapes.Select(x => KeyValuePair.Create(x.Name, (JsonNode?)new JsonArray(PropertyDefs.FrameExtraFields(x.Name).Select(f => (JsonNode)f).ToArray())))),
             ["shell_sections"] = new JsonArray(m.ShellSections.Select(s => (JsonNode)new JsonObject
             {
                 ["name"] = s.Name, ["wall"] = s.IsWall, ["material"] = s.Material, ["thickness"] = s.Thickness,

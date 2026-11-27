@@ -213,6 +213,49 @@ public static class PropertyDefs
         return sec;
     }
 
+    /// <summary>
+    /// What ETABS 23.2's Frame Section Property Data form holds beside the shape's size (its display colour, notes,
+    /// notional size, fillet or corner radius, mirroring and rigid zone): the fields of its "Frame Section Property
+    /// Definitions - (shape)" table the .e2k has no keyword for, kept in the section's <see cref="Definition.Tables"/>
+    /// under its shape and put into ETABS through that table (SAP2000 takes the colour, notes and fillet radius in its
+    /// "Frame Section Properties 01 - General").
+    /// </summary>
+    public static string[] FrameExtraFields(string shape)
+    {
+        var concrete = new[] { "NotSizeType", "NotAutoFact", "NotUserSize", "RigidZone" };
+        string[] own = shape switch
+        {
+            "Concrete Rectangular" or "Concrete Circle" => concrete,
+            "Concrete Tee" => [.. concrete, "MirrorAbt3"],
+            "Concrete L" => [.. concrete, "MirrorAbt2", "MirrorAbt3"],
+            "Steel I/Wide Flange" or "Steel Double Channel" => ["FilletRad"],
+            "Steel Channel" => ["FilletRad", "MirrorAbt2"],
+            "Steel Tee" or "Steel Double Angle" => ["FilletRad", "MirrorAbt3"],
+            "Steel Angle" => ["FilletRad", "MirrorAbt2", "MirrorAbt3"],
+            "Steel Tube" => ["CornerRad"],
+            _ => [],
+        };
+        return [.. own, "Color", "Notes"];
+    }
+
+    /// <summary>Sets a frame section's other fields (<see cref="FrameExtraFields"/>); empty values are taken off.</summary>
+    public static void SetFrameExtras(FrameSection s, IReadOnlyDictionary<string, string> extras)
+    {
+        var fields = FrameExtraFields(s.Shape);
+        var row = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (k, v) in extras)
+        {
+            var f = fields.FirstOrDefault(x => x.Equals(k, StringComparison.OrdinalIgnoreCase))
+                ?? throw new ArgumentException($"A {s.Shape} section has no field '{k}'. It has: {string.Join(", ", fields)}.");
+            if (v.Trim().Length > 0) row[f] = v.Trim();
+        }
+        s.Tables = row.Count > 0 ? new(StringComparer.OrdinalIgnoreCase) { [s.Shape] = [row] } : null;
+    }
+
+    /// <summary>A frame section's other fields, or an empty row.</summary>
+    public static IReadOnlyDictionary<string, string> FrameExtras(FrameSection s) =>
+        s.Tables is not null && s.Tables.TryGetValue(s.Shape, out var rows) && rows.Count > 0 ? rows[0] : new Dictionary<string, string>();
+
     // ---- slab and wall types ----
 
     /// <summary>A ribbed slab's ribs, as ETABS 23.2 writes them: the overall depth (slab and ribs), the rib width at its top and

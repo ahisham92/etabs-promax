@@ -45,6 +45,17 @@ public static class ModelerTables
             }
             catch (EtabsException ex) { refused.Add($"{table}: {ex.Message}"); }
         }
+        // A frame section's other fields (colour, notes, notional size, fillet radius, ...), in its shape's table by name.
+        foreach (var g in model.FrameSections.Where(x => PropertyDefs.FrameExtras(x).Count > 0).GroupBy(x => x.Shape))
+        {
+            var table = "Frame Section Property Definitions - " + g.Key;
+            try
+            {
+                EditableTables.Put(e, table, "Name", g.Select(x => (IReadOnlyDictionary<string, string>)new Dictionary<string, string>(PropertyDefs.FrameExtras(x)) { ["Name"] = x.Name }).ToList(), $"put the Modeler's '{table}' in");
+                done.Add($"{table}: {g.Count()} row{(g.Count() == 1 ? "" : "s")}");
+            }
+            catch (EtabsException ex) { refused.Add($"{table}: {ex.Message}"); }
+        }
         // The objects' assignments the .e2k has no keyword for, by story and label (AssignTables). A new row names its
         // object's UniqueName too, read from the program's summary of that kind of object.
         var unique = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);

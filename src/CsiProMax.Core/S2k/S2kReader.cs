@@ -329,6 +329,7 @@ public static partial class S2kReader
                     m.Passthrough.Find(p => p.Heading == "CONCRETE SECTIONS")?.Lines.RemoveAll(l => l.Contains(Quote(name) + " ", StringComparison.Ordinal));
                     m.AddRectangularSection(name, material, d, b, beams.Contains(name));
                     Modifiers(m.FrameSections[^1], r);
+                    Extras(m.FrameSections[^1], r);
                     continue;
                 case "Rectangular": etabs = "Steel Tube"; notes.Add($"Frame section {name} is a solid {material} rectangle in SAP2000; it opens as a tube of that size, set its real shape in Define > Section Properties."); dims = new() { ["D"] = d, ["B"] = b, ["TF"] = d / 2.01, ["TW"] = b / 2.01 }; break;
                 case "Circle": etabs = concrete ? "Concrete Circle" : "Steel Rod"; dims["D"] = d; break;
@@ -356,7 +357,19 @@ public static partial class S2kReader
                 if (etabs is null && shape != "General") notes.Add($"Frame section {name} is SAP2000's {shape} shape: it opens as a general section with its area and inertias.");
             }
             Modifiers(sec, r);
+            Extras(sec, r);
         }
+    }
+
+    /// <summary>A frame section's colour, notes and fillet radius as SAP2000 keeps them, into the section's other fields.</summary>
+    private static void Extras(FrameSection s, Dictionary<string, string> r)
+    {
+        var fields = PropertyDefs.FrameExtraFields(s.Shape);
+        var x = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (S(r, "Color") is { Length: > 0 } c && c != "Yellow") x["Color"] = c;
+        if (S(r, "Notes") is { Length: > 0 } n) x["Notes"] = n;
+        if (fields.Contains("FilletRad") && D(r, "FilletRadius") > 0) x["FilletRad"] = S(r, "FilletRadius");
+        if (x.Count > 0) PropertyDefs.SetFrameExtras(s, x);
     }
 
     private static void Modifiers(FrameSection sec, Dictionary<string, string> r)

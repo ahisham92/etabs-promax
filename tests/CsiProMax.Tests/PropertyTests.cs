@@ -90,6 +90,28 @@ static class PropertyTests
             Check(pd["material_tables"]!["Damping Parameters"]!.AsArray().Count == 3 && pd["material_nonlinear"]!["Steel"]!["keys"]!.AsArray().Count > 5, "property_definitions lists the tables and the nonlinear keys");
             Check(pd["materials"]!.AsArray().First(x => x!["name"]!.GetValue<string>() == "C40B")!["tables"]!["General"] is not null, "property_definitions gives the material's rows");
         });
+        yield return ("properties: Frame Section Property Data's other fields (colour, notes, fillet radius, notional size) are kept, renamed with the section, written to SAP2000, and Show Section Properties gives the shape's properties (Ahmed 2026-11-27)", () =>
+        {
+            var link = Frame();
+            Run(link, "define_material_data", new { name = "S355", type = "Steel", values = new { WEIGHTPERVOLUME = 77, E = 2.1e8, U = 0.3, FY = 355000, FU = 490000 } });
+            Run(link, "define_frame_shape", new { name = "IPE400", shape = "Steel I/Wide Flange", material = "S355", dims = new { D = 0.4, B = 0.18, TF = 0.0135, TW = 0.0086 }, extras = new Dictionary<string, string> { ["Color"] = "Cyan", ["Notes"] = "secondary", ["FilletRad"] = "0.021" } });
+            var s = link.Model.FrameSections.Single(x => x.Name == "IPE400");
+            Check(PropertyDefs.FrameExtras(s)["FilletRad"] == "0.021" && PropertyDefs.FrameExtras(s)["Color"] == "Cyan", "the section keeps its other fields");
+            var cpm = ModelFile.FromJson(ModelFile.ToJson(link.Model)).FrameSections.Single(x => x.Name == "IPE400");
+            Check(PropertyDefs.FrameExtras(cpm)["Notes"] == "secondary", "the .cpm keeps them");
+            var s2k = S2kWriter.Write(link.Model, "a.s2k").Text;
+            Check(s2k.Contains("Color=Cyan") && s2k.Contains("FilletRadius=0.021") && s2k.Contains("Notes=secondary"), "SAP2000's frame section row takes the colour, fillet radius and notes");
+            Run(link, "define_frame_shape", new { name = "IPE400B", was = "IPE400", shape = "Steel I/Wide Flange", material = "S355", dims = new { D = 0.4, B = 0.18, TF = 0.0135, TW = 0.0086 } });
+            Check(PropertyDefs.FrameExtras(link.Model.FrameSections.Single(x => x.Name == "IPE400B"))["Color"] == "Cyan", "renamed without extras: they are kept");
+            Refused(link, "define_frame_shape", new { name = "IPE400B", was = "IPE400B", shape = "Steel I/Wide Flange", material = "S355", dims = new { D = 0.4, B = 0.18, TF = 0.0135, TW = 0.0086 }, extras = new Dictionary<string, string> { ["NotSizeType"] = "Auto" } }, "has no field 'NotSizeType'");
+            var pd = Run(link, "property_definitions", new { });
+            Check(pd["frame_sections"]!.AsArray().First(x => x!["name"]!.GetValue<string>() == "IPE400B")!["extras"]!["Notes"]!.GetValue<string>() == "secondary", "property_definitions gives them to the form");
+            Check(pd["frame_extra_fields"]!["Concrete Rectangular"]!.AsArray().Any(x => x!.GetValue<string>() == "NotSizeType"), "the form is told each shape's fields");
+            var props = Run(link, "section_properties", new { shape = "Steel I/Wide Flange", dims = new { D = 0.4, B = 0.18, TF = 0.0135, TW = 0.0086 } });
+            Check(Math.Abs(props["A"]!.GetValue<double>() - (2 * 0.18 * 0.0135 + (0.4 - 0.027) * 0.0086)) < 1e-12, "the I's area");
+            var rect = Run(link, "section_properties", new { shape = "Concrete Rectangular", dims = new { D = 0.6, B = 0.3 } });
+            Check(Math.Abs(rect["I33"]!.GetValue<double>() - 0.3 * 0.216 / 12) < 1e-12 && Math.Abs(rect["Z33"]!.GetValue<double>() - 0.3 * 0.36 / 4) < 1e-12, "the rectangle's I33 and Z33");
+        });
         yield return ("properties: a steel, a rebar and a tendon material go in with their strengths, and come back from the .e2k and .s2k", () =>
         {
             var link = Frame();

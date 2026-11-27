@@ -215,6 +215,15 @@ static class ExtrasTests
             // ETABS has no Material Grade box in Material Property Data: the grade comes from Add New Material Property.
             Check(!html.Contains("<span>Material Grade</span>"), "Material Property Data shows a Material Grade box ETABS does not have");
         });
+        yield return ("extras: the frame section forms match ETABS 23.2 field by field: Frame Properties with its filter and Click to: buttons, Frame Property Shape Type, Import New Properties, Frame Section Property Data with notional size, colour, notes, source, dimensions by ETABS's names with units, fillet radius, mirror, modifiers, rebar, and Show Section Properties (Ahmed 2026-11-27)", () =>
+        {
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var part in new[] { "dialog(\"Frame Properties\"", "<legend>Filter Properties List</legend>", "[\"Import New Properties...\", () => hmFrameImport(again)]", "[\"Delete Multiple Properties...\"", "dialog(\"Frame Property Shape Type\"",
+                "dialog(\"Frame Section Property Import Data\"", "<button id=\"sNot\">Modify/Show Notional Size...</button>", "dialog(\"Notional Size Data\"", "<legend>Section Property Source</legend>", "<button id=\"sProps\">Show Section Properties...</button>",
+                "hmRun(\"section_properties\", {shape, dims}, true)", "<button id=\"sMod\" style=\"width:100%\">Modify/Show Modifiers...</button>", "<button id=\"sRebar\" style=\"width:100%\">Modify/Show Rebar...</button>", "\"Steel I/Wide Flange\": {D: \"Total Depth\", B: \"Top Flange Width\"",
+                "<span>Fillet Radius</span>", "Mirror About ${f.slice(-1)}-Axis", "dialog(\"Property/Stiffness Modification Factors\"", "function shapeSvg(shape, v)" })
+                Check(html.Contains(part), "viewer.html lost " + part);
+        });
         yield return ("extras: the views and toolbars are drawn as ETABS draws them: grey see-through slabs with white edges, thin columns, solid grid, light-blue ground grid with flat bubbles, the axes at the origin, column squares in plan, captions as tabs, the toolbar and strip in the program's order (Ahmed 2026-11-26 22:19)", () =>
         {
             var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));

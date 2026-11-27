@@ -174,9 +174,13 @@ public static class ModelerCheck
         });
         await step("Define > Frame Sections: a section is added through the form", async () => {
           await act("m:frameSections"); await wait(500);
-          const addNew = document.querySelector('.dlg button[data-a="0"]');
-          if (!addNew) return {fail: "the Frame Sections form has no Add button"};
+          const addNew = [...document.querySelectorAll('.dlg button[data-a]')].find(b => b.textContent === "Add New Property...");
+          if (!addNew) return {fail: "the Frame Properties form has no Add New Property button"};
           addNew.click(); await wait(1000);
+          // Frame Property Shape Type comes first, as in the programs.
+          const rect = document.querySelector('.dlg button[data-s="Concrete Rectangular"]');
+          if (!rect) return {fail: "Add New Property... did not open Frame Property Shape Type"};
+          rect.click(); await wait(1000);
           const set = (sel, v) => { const e = document.querySelector(sel); if (!e) throw new Error("the form has no " + sel); e.value = v; e.dispatchEvent(new Event("input", {bubbles: true})); e.dispatchEvent(new Event("change", {bubbles: true})); };
           set("#sN", "CPM-CHK450"); set('#sDims [data-k="D"]', "0.45"); set('#sDims [data-k="B"]', "0.3");
           const forms = document.querySelectorAll(".dlg"); forms[forms.length - 1].querySelector(".df button.primary").click();

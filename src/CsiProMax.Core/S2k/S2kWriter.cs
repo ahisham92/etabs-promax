@@ -605,7 +605,8 @@ public static class S2kWriter
                 ("Area", N(p.Value.A)), ("TorsConst", N(p.Value.J)), ("I33", N(p.Value.I33)), ("I22", N(p.Value.I22)), ("I23", N(pv.I23)),
                 ("AS2", N(p.Value.As2)), ("AS3", N(p.Value.As3)), ("S33Top", N(pv.S33Top > 0 ? pv.S33Top : pv.S33)), ("S33Bot", N(pv.S33Bot > 0 ? pv.S33Bot : pv.S33)), ("S22Left", N(pv.S22Left > 0 ? pv.S22Left : pv.S22)), ("S22Right", N(pv.S22Right > 0 ? pv.S22Right : pv.S22)), ("Z33", N(p.Value.Z33)), ("Z22", N(p.Value.Z22)),
                 ("R33", N(Math.Sqrt(p.Value.I33 / p.Value.A))), ("R22", N(Math.Sqrt(p.Value.I22 / p.Value.A))),
-                ("ConcCol", YesNo(concrete && !isBeam)), ("ConcBeam", YesNo(concrete && isBeam)), ("Color", "Yellow"),
+                ("ConcCol", YesNo(concrete && !isBeam)), ("ConcBeam", YesNo(concrete && isBeam)), ("Color", PropertyDefs.FrameExtras(s).GetValueOrDefault("Color") ?? "Yellow"),
+                ("Notes", PropertyDefs.FrameExtras(s).GetValueOrDefault("Notes") ?? ""), ("FilletRadius", PropertyDefs.FrameExtras(s).GetValueOrDefault("FilletRad") ?? "0"),
                 ("AMod", N(fm["AMOD"])), ("A2Mod", N(fm["A2MOD"])), ("A3Mod", N(fm["A3MOD"])), ("JMod", N(fm["JMOD"])), ("I2Mod", N(fm["I2MOD"])), ("I3Mod", N(fm["I3MOD"])), ("MMod", N(fm["MMOD"])), ("WMod", N(fm["WMOD"]))));
         }
         Add(tables, "FRAME SECTION PROPERTIES 01 - GENERAL", rows);
@@ -813,6 +814,21 @@ public static class S2kWriter
         public double S22Left { get; init; }
         public double S22Right { get; init; }
         public double I23 { get; init; }
+    }
+
+    /// <summary>The section properties ETABS's Section Properties form shows for one of the Modeler's shapes and its
+    /// dimensions (D, B, TF, TW, BBOTTOM, TFBOTTOM, DIS), or null when the dimensions do not make one.</summary>
+    public static Props? PropsOf(string shape, IReadOnlyDictionary<string, double> dims)
+    {
+        double V(string k) => dims.TryGetValue(k, out var v) ? v : 0;
+        double d = V("D"), b = V("B"), tf = V("TF"), tw = V("TW"), bb = V("BBOTTOM") > 0 ? V("BBOTTOM") : b, tfb = V("TFBOTTOM") > 0 ? V("TFBOTTOM") : tf;
+        var s = shape.ToLowerInvariant();
+        if (s.Contains("rectangular") && d > 0 && b > 0) return Rectangle(d, b);
+        if ((s.Contains("circle") || s.Contains("rod")) && d > 0) return Circle(d);
+        if (s.Contains("i/wide flange") && d > 0 && b > 0 && tf > 0 && tw > 0 && tf + tfb < d) return ISection(d, b, tf, tw, bb, tfb);
+        if (s.Contains("tube") && d > 2 * tf && b > 2 * tw && tf > 0 && tw > 0) return Tube(d, b, tf, tw);
+        if (s.Contains("pipe") && d > 2 * tw && tw > 0) return Pipe(d, tw);
+        return OpenName(s) is { } open && OpenShape(open, d, b, tf, tw, V("DIS")) is { } parts ? Composite(parts) : null;
     }
 
     /// <summary>A section made of rectangles (x along local 3, the width; y along local 2, the depth), as SAP2000's
