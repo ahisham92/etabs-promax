@@ -456,7 +456,7 @@ static class ExtrasTests
             Run(link, "set_program_form", new { design = "steel", code = "EN 1993-1-1-2005", table = "Steel Frame Design Preferences - EN 1993-1-1-2005", values = new Dictionary<string, string> { ["Pattern Live Load Factor"] = "0.8" } });
             Check(ProgramForms.Code(link.Model, "steel") == "EN 1993-1-1-2005", "the code did not change");
             var e2k = CsiProMax.E2k.E2kWriter.Write(link.Model);
-            Check(e2k.Contains("STEELPREFERENCE  CODE  \"EN 1993-1-1-2005\"", StringComparison.Ordinal) && !e2k.Contains("CODE \"AISC 360-16\"  THDESIGN", StringComparison.Ordinal), "the .e2k does not carry the new steel code");
+            Check(e2k.Contains("STEELPREFERENCE  CODE  \"EN 1993-1-1-2005\"", StringComparison.Ordinal) && !e2k.Contains("STEELPREFERENCE  CODE \"AISC 360-16\"", StringComparison.Ordinal), "the .e2k does not carry the new steel code");
             Check(link.Model.DefinitionTables!["Steel Frame Design Preferences - EN 1993-1-1-2005"].Single()["PatLLF"] == "0.8", "the preference is not the table's row");
             var one = Run(link, "program_forms", new { design = "steel" });
             Check(((one["items"] as JsonArray)!.First(i => i!["field"]!.GetValue<string>() == "PatLLF"))!["value"]!.GetValue<string>() == "0.8", "the form does not show the value set");

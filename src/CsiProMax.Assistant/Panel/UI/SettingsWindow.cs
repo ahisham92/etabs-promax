@@ -934,6 +934,17 @@ public sealed class SettingsWindow : Window
         var page = new StackPanel();
         page.Children.Add(Place("AutoUpdate", _autoUpdate));
         page.Children.Add(Hint($"New versions install while {Csi.Name} stays open and switch over when no job is running."));
+        page.Children.Add(SubHeading("Background work"));
+        page.Children.Add(Brand.Text($"CSI ProMax does nothing in {Csi.Name} until you open it from Tools > CSI ProMax, and it never asks a program anything while that program is busy with a run or a design."));
+        var packs = Check("Write the review pack beside each model by itself after every analysis and design");
+        packs.IsChecked = !CsiProMax.Assistant.Packs.PackWatcher.Off;
+        packs.Click += (_, _) =>
+        {
+            try { CsiProMax.Assistant.Packs.PackWatcher.SetAutomatic(packs.IsChecked == true); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { packs.IsChecked = !CsiProMax.Assistant.Packs.PackWatcher.Off; }
+        };
+        page.Children.Add(packs);
+        page.Children.Add(Hint("Off by default: after every run it reads every result table, which keeps a large model busy for a long time. It takes effect at once, with nothing to restart. Off, a pack is still made whenever you ask for one in the chat."));
         page.Children.Add(SubHeading("This version"));
         string state;
         try { state = Update.Updater.Describe(); }
