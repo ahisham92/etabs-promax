@@ -21,6 +21,12 @@ New-Item -ItemType Directory (Split-Path $Out) -Force | Out-Null
 function Say($t) { $t | Tee-Object -FilePath $Out -Append }
 function Time($label, [scriptblock]$b) { $w = [Diagnostics.Stopwatch]::StartNew(); try { $r = & $b } catch { $r = "ERROR " + $_.Exception.Message }; Say ("{0,8:N0} ms  {1}  -> {2}" -f $w.ElapsedMilliseconds, $label, $r) }
 
+# What the API offers for reading many tables at once.
+Say ("cDatabaseTables: " + (([ETABSv1.cDatabaseTables].GetMethods() | ForEach-Object Name | Sort-Object -Unique) -join ", "))
+Say ("cFile: " + (([ETABSv1.cFile].GetMethods() | ForEach-Object Name | Sort-Object -Unique) -join ", "))
+try { Say ("eFileTypeIO: " + ([enum]::GetNames([ETABSv1.eFileTypeIO]) -join ", ")) } catch { Say "no eFileTypeIO" }
+foreach ($mm in [ETABSv1.cDatabaseTables].GetMethods() | Where-Object { $_.Name -match "CSV|XML|Export|Excel|Access" }) { Say ("  " + $mm.ToString()) }
+foreach ($mm in [ETABSv1.cFile].GetMethods() | Where-Object { $_.Name -match "Export" }) { Say ("  " + $mm.ToString()) }
 $helper = New-Object ETABSv1.Helper
 $app = $helper.CreateObjectProgID("CSI.ETABS.API.ETABSObject")
 $app.ApplicationStart() | Out-Null
@@ -54,6 +60,13 @@ try {
   # The same table again after a pause: does the floor come from a timer in ETABS's message loop?
   Start-Sleep -Seconds 3
   Time "Array 'Load Pattern Definitions' after 3 s idle" { [string[]]$f=$null; [string[]]$fl=$null; [string[]]$d=$null; $v=0; $r=0; $m.DatabaseTables.GetTableForDisplayArray("Load Pattern Definitions", [ref]$fl, "", [ref]$v, [ref]$f, [ref]$r, [ref]$d) }
+  # Every table in one call, if the program can export them to a file.
+  foreach ($kind in @("DBTablesXML", "DBTablesAccess", "DBTablesExcel", "DBTablesText", "TextFile")) {
+    try { $ft = [ETABSv1.eFileTypeIO]$kind } catch { continue }
+    $ext = @{ DBTablesXML = ".xml"; DBTablesAccess = ".mdb"; DBTablesExcel = ".xlsx"; DBTablesText = ".txt"; TextFile = ".e2k" }[$kind]
+    $file = Join-Path $work ("all" + $ext)
+    Time "File.ExportFile $kind" { $ret = $m.File.ExportFile($file, $ft); "ret $ret bytes " + $(if (Test-Path $file) { (Get-Item $file).Length } else { "no file" }) }
+  }
   # Only some fields of the springs table.
   Time "GetAllFieldsInTable Springs" { $v=0;$k=0;[string[]]$a=$null;[string[]]$b=$null;[string[]]$c=$null;[string[]]$d=$null;[string[]]$e=$null;[bool[]]$g=$null; $m.DatabaseTables.GetAllFieldsInTable("Joint Assignments - Springs",[ref]$v,[ref]$k,[ref]$a,[ref]$b,[ref]$c,[ref]$d,[ref]$e,[ref]$g) }
 } catch { Say ("ERROR: " + $_.Exception.Message + " at " + $_.InvocationInfo.PositionMessage) }
