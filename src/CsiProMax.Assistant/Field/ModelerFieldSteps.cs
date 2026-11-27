@@ -83,6 +83,7 @@ public static class ModelerFieldSteps
         ctx.Offer(EditTools.All);
         ctx.Offer(DefineTools.All);
         ctx.Offer(EtabsDefineTools.All);
+        ctx.Offer(EtabsDesignTools.All);
         var folder = Q(ctx.Folder);
 
         // A new model from the template: three stories, two bays each way.
@@ -724,6 +725,9 @@ public static class ModelerFieldSteps
         // ETABS's Define > Load Combinations, Auto Construction Sequence Case, Walking Vibrations, Floor Vibrations, Table Named
         // Sets and Named Assignment Sets, as the forms set them; the ETABS part reads each back (EtabsDefineRoundTrip.Check).
         EtabsDefineRoundTrip.Define(ctx, modeler);
+        // ETABS's Design > Live Load Reduction Factors, Steel Connection Design preferences and the design targets, as the
+        // forms set them; the ETABS part reads the targets back (EtabsDesignRoundTrip.Check).
+        EtabsDesignRoundTrip.Define(ctx, modeler);
         var conc = modeler.Model.Materials.FirstOrDefault(m => m.IsConcrete)?.Name ?? "";
         ctx.Tool("define_shell_type", """{"name":"CPM-DROP","kind":"slab","slab_type":"Drop","modeling":"ShellThick","thickness":0.3,"material":""" + Q(conc) + ""","modifiers":{"M11MOD":0.25,"M22MOD":0.25}}""", null, "tool define_shell_type, a cracked drop panel");
         ctx.Tool("define_shell_type", """{"name":"CPM-RIB","kind":"slab","slab_type":"Ribbed","modeling":"ShellThin","thickness":0.1,"material":""" + Q(conc) + ""","overall_depth":0.4,"rib_width_top":0.15,"rib_width_bottom":0.125,"rib_spacing":0.9,"rib_direction":1}""", null, "tool define_shell_type, a ribbed slab");

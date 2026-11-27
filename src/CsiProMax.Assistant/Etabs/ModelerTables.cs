@@ -278,6 +278,8 @@ public static class ModelerTables
         "story definitions" => "Story",
         "mass source definition" => "Name|LoadPattern",
         "load pattern definitions - auto notional loads" => "LoadPattern",
+        "design optimization - lateral displacement targets" => "StaticCase|Story|Label",
+        "design optimization - time period targets" => "ModalCase|ModeNum",
         "spring property definitions - soil profiles" => "Name|Soil Layer Name",
         // A form's table (design preferences, analysis options) has one row and no name: its row is that one.
         _ when ProgramForms.IsWallOverwrite(table) => table.Contains("Pier Design", StringComparison.OrdinalIgnoreCase) ? "Pier|Story" : "Spandrel|Story",

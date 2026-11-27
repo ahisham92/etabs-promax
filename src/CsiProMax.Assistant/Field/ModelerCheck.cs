@@ -631,13 +631,62 @@ public static class ModelerCheck
           const off = Object.keys(want).filter(k => JSON.stringify(got[k]) !== JSON.stringify(want[k]));
           return off.length ? {fail: off.map(k => `${k}: ${got[k].join(" | ")}`).join("; ")} : {ok: `Analyze ${an.length} items, Draw ${dr.length} items, in the program's order and words`};
         });
+        // Design > Steel Connection Design (its submenu and View/Revise Preferences), Live Load Reduction Factors and the
+        // lateral displacement and time period targets, as the 23.2 pictures show them (field/reference-forms/etabs/Design):
+        // each form set as an engineer sets it, OK, and the model holds what was set.
+        await step("Steel Connection Design, Live Load Reduction and design target forms, as the program has them (23.2 pictures)", async () => {
+          if (typeof etcPrefs !== "function") return {fail: "the forms are not on the page"};
+          const said = [], last = () => { const f = document.querySelectorAll(".dlg"); return f[f.length - 1]; };
+          const read = async () => { const j = await hmPost({tool: "design_settings", args: {}}); return j && j.ok ? j.result : {}; };
+          const words = l => (l || []).filter(Boolean).map(x => x[0]);
+          const sub = words(etcConnectionMenu()), want = ["View/Revise Preferences...", "Select Design Combinations...", "Start Design/Check", "Interactive Design", "Display Design Info...", "Verify All Connections Passed...", "Reset All Overwrites...", "Delete Design Results..."];
+          if (JSON.stringify(sub) !== JSON.stringify(want)) return {fail: "Steel Connection Design submenu: " + sub.join(" | ")};
+          await etcPrefs(); await wait(300);
+          let d = last(), title = d ? d.querySelector(".dt b").textContent : "";
+          if (!/^Steel Connection Design Preferences for AISC 360-/.test(title)) return {fail: "the preferences form is titled " + title};
+          const tabs = [...d.querySelectorAll("#etcT [data-t]")].map(b => b.textContent), types = d.querySelector("#etcTy").options.length, rows = d.querySelectorAll("#etcB tr").length;
+          if (tabs.join("|") !== "Beam-Beam|Beam-Column|Column-Footing" || types !== 4 || rows !== 18) return {fail: `tabs ${tabs.join("|")}, ${types} types, ${rows} rows (want 3 tabs, 4 types, 18 rows)`};
+          const spacing = [...d.querySelectorAll("#etcB tr")].find(tr => /^Bolt Spacing, S/.test(tr.children[1].textContent)).querySelector("input");
+          spacing.value = etcUS() ? "3.5" : "88.9"; spacing.dispatchEvent(new Event("change"));
+          formOk("OK"); await wait(1500);
+          let st = await read();
+          const kept = (st.connection || []).find(r => r.Group === "Beam-Beam|Partial Depth" && r.Item === "Bolt Spacing, S");
+          if (!kept || Math.abs(Number(kept.Value) - 3.5) > 1e-6) return {fail: "the bolt spacing was not kept: " + JSON.stringify(st.connection || [])};
+          said.push("connection preferences kept");
+          await etcLiveLoadReduction(); await wait(300); d = last();
+          const radios = d.querySelectorAll("input[name=llM]").length, codes = d.querySelector("#llC").options.length;
+          if (radios !== 5 || codes !== 13) return {fail: `Live Load Reduction Factor has ${radios} methods and ${codes} codes (want 5 and 13)`};
+          d.querySelector("input[name=llM][value=User]").click(); d.querySelector("input[name=llM][value=User]").dispatchEvent(new Event("change"));
+          formOk("OK"); await wait(1500); st = await read();
+          const llrf = (st.live_load_reduction || []).find(r => r.Row === "Form");
+          if (!llrf || llrf.Method !== "User") return {fail: "User Parameters was not kept: " + JSON.stringify(st.live_load_reduction || [])};
+          await hmRun("set_live_load_reduction", {method: "Code", code: "ASCE7-10", default_min: true}, true);
+          said.push("live load reduction kept");
+          await etcDisplacementTargets(); await wait(300); d = last();
+          d.querySelector("#dtA").click(); await wait(100);
+          const target = d.querySelectorAll("#dtG tbody tr").length;
+          if (target !== 1) return {fail: "Add made " + target + " displacement targets"};
+          formOk("OK"); await wait(1500); st = await read();
+          if ((st.displacement_targets || []).length !== 1) return {fail: "the displacement target was not kept: " + JSON.stringify(st.displacement_targets || [])};
+          for (const c of new Set(st.displacement_targets.map(r => r.StaticCase))) await hmRun("define_table_rows", {table: "Design Optimization - Lateral Displacement Targets", name: c, rows: []}, true);
+          said.push("a displacement target kept");
+          hm.defs = null; if (!((await hmDefs()).load_cases || []).some(c => /^Modal/i.test(c.type || ""))) { said.push("no modal case for a time period target"); return {ok: said.join("; ")}; }
+          await etcPeriodTargets(); await wait(300); d = last();
+          d.querySelector("#ptA").click(); await wait(100);
+          if (d.querySelectorAll("#ptG tbody tr").length !== 1) return {fail: "Add made no time period target"};
+          formOk("OK"); await wait(1500); st = await read();
+          if ((st.period_targets || []).length !== 1) return {fail: "the time period target was not kept: " + JSON.stringify(st.period_targets || [])};
+          for (const c of new Set(st.period_targets.map(r => r.ModalCase))) await hmRun("define_table_rows", {table: "Design Optimization - Time Period Targets", name: c, rows: []}, true);
+          said.push("a time period target kept");
+          return {ok: said.join("; ")};
+        });
         for (const it of list) {
           await step("menu: " + it.path, async () => {
             if (it.target && program !== it.target) { await hmRun("set_model_program", {program: it.target}, true); for (let i = 0; i < 30 && program !== it.target; i++) { if (window.cpmPull) await window.cpmPull(); await wait(200); } }
             pick();
             if (it.act === "m:redo" && offNow(it.act)) { await hmRun("define_load_pattern", {name: "CPM-CHKREDO", type: "Other", self_weight: 0}, true); await hmRun("undo"); await wait(400); }
             // Items the program itself greys in this state (SAP2000 26.3 pictures: Assign > Frame > Path... with no path defined, Update All Generated Hinge Properties with no generated hinges, Paste Assigns before Copy Assigns; the 23.2 Assign menu greys its Paste Assigns items the same way).
-            if (offNow(it.act) && ["m:sapa:fPath", "m:sapa:updateHinges", "m:sapa:paste", "m:etn:geometry", "m:etn:messages", "m:etn:log", "m:eta:pasteJ", "m:eta:pasteF", "m:eta:pasteA", "m:eta:pasteL"].includes(it.act)) return {ok: "greyed out, as the program greys it"};
+            if (offNow(it.act) && ["m:sapa:fPath", "m:sapa:updateHinges", "m:sapa:paste", "m:etn:geometry", "m:etn:messages", "m:etn:log", "m:etc:start", "m:etc:interactive", "m:etc:info", "m:etc:verify", "m:etc:resetOw", "m:etc:delete", "m:eta:pasteJ", "m:eta:pasteF", "m:eta:pasteA", "m:eta:pasteL"].includes(it.act)) return {ok: "greyed out, as the program greys it"};
             if (offNow(it.act) && it.act !== "eng:clear") return {fail: "greyed out, although the check selected a beam and a floor for it first"};
             if (OTHER_WAY[it.act]) return await OTHER_WAY[it.act](it);
             const before = dialogsOpen();
