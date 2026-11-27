@@ -54,6 +54,10 @@ public static class Drawing
         if (tendons is { Count: > 0 })
             model["tendons"] = new JsonArray(tendons.Take(MostSupports).Select(t => (JsonNode)new JsonArray(t.Name, t.Story,
                 new JsonArray(t.Item3.Select(p => (JsonNode)new JsonArray(R(p[0]), R(p[1]), R(p[2]))).ToArray()))).ToArray());
+        // SAP2000's cables, tendons, solids and links of a model opened from a .s2k (kept as its tables): [kind, name, [[x, y, z], ...]].
+        var others = Try(() => e is OfflineEtabs oo ? CsiProMax.Model.SapOtherObjects.List(oo.Model) : null);
+        if (others is { Count: > 0 })
+            model["sap_objects"] = new JsonArray(others.Select(x => (JsonNode)new JsonArray(x.Kind, x.Name, new JsonArray(x.Points.Select(p => (JsonNode)new JsonArray(R(p[0]), R(p[1]), R(p[2]))).ToArray()))).ToArray());
         var strips = Try(() => e is OfflineEtabs o ? o.Model is var mm ? CsiProMax.Model.SlabDefs.Strips(mm).Select(s => (s.Name, s.Layer, s.WidthLeft, s.WidthRight, Z: StripZ(mm, s.Story), s.Plan)).ToList() : null : null);
         if (strips is { Count: > 0 })
             model["strips"] = new JsonArray(strips.Select(s => (JsonNode)new JsonArray(s.Name, s.Layer, R(s.WidthLeft), R(s.WidthRight),

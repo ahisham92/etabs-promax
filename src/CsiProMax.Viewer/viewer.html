@@ -782,10 +782,15 @@ function load(pack, keep) {
   pointXyz = new Map(points.map(p => [String(p[0]), [p[1], p[2], p[3]]]));
   const idxAt = q => { const n = pointAt.get(key(q[0], q[1], q[2])); return n === undefined ? -1 : pointIdx.get(String(n)); };
   frames = (m.frames || []).map((f, i) => ({id: i + 1, type: "f", name: String(f[0]), kind: f[1], section: f[2], story: f[3], a: [f[4], f[5], f[6]], b: [f[7], f[8], f[9]]}));
+  // SAP2000's cables, tendons and links (kept as its tables) drawn and picked as lines, marked with what they are.
+  for (const o of m.sap_objects || []) if (o[0] !== "solid" && (o[2] || []).length) frames.push({id: frames.length + 1, type: "f", name: String(o[1]), kind: o[0], section: "", story: "", a: o[2][0], b: o[2][1] || o[2][0], other: o[0]});
   frames.forEach(f => { f.ia = idxAt(f.a); f.ib = idxAt(f.b); });
   assign = Object.assign({f: {}, a: {}, j: {}}, m.assign || {});
   // An area assigned as an opening, or a ramp, keeps its own kind: the form turns each on and off (ETABS's Object Present in View).
   areas = (m.areas || []).map((a, i) => ({id: frames.length + i + 1, type: "a", name: String(a.n), kind: (assign.a[String(a.n)] || {}).kind || a.k, section: a.s, pts: chunk(a.c)}));
+  // SAP2000's solids: their six faces (SAP2000's face order, corners 1 3 7 5 and so on), each picking the solid.
+  for (const o of m.sap_objects || []) if (o[0] === "solid" && (o[2] || []).length === 8)
+    for (const f of [[1, 3, 5, 7], [2, 4, 6, 8], [1, 2, 5, 6], [3, 4, 7, 8], [1, 2, 3, 4], [5, 6, 7, 8]]) areas.push({id: frames.length + areas.length + 1, type: "a", name: String(o[1]), kind: "solid", section: "", pts: [0, 1, 3, 2].map(k => o[2][f[k] - 1]), other: "solid"});
   areas.forEach(a => { a.idx = a.pts.map(idxAt); a.story = storyAt(a, m.stories || []); });
   stories = (m.stories || []).slice().sort((a, b) => a.elevation - b.elevation);
   sizes = m.frame_sizes || {}; slabT = m.area_sizes || {};
@@ -5172,7 +5177,9 @@ async function modelAct(a) {
     case "frameRebar": return hmFrameRebar();
   }
 }
-const hmSelected = t => [...sel].map(objOf).filter(o => o && o.type === t).map(o => o.name);
+const hmSelected = t => [...sel].map(objOf).filter(o => o && o.type === t && !o.other).map(o => o.name);
+// The selected SAP2000 cables, tendons, solids or links (each once, a solid picked by any face).
+const sapOtherSelected = kind => [...new Set([...sel].map(objOf).filter(o => o && o.other === kind).map(o => o.name))];
 async function hmDelete() {
   const frames_ = hmSelected("f"), areas_ = hmSelected("a");
   if (!frames_.length && !areas_.length) return hmSay("Select the objects to delete first.", true);
@@ -8072,6 +8079,642 @@ async function hmSapAreaSections() {
   list.ondblclick = () => list.value && hmSapShellSection(find(list.value), again);
   return d;
 }
+document.head.insertAdjacentHTML("beforeend", `<style>.sapx-l{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:4px 0}.sapx-b{display:inline-flex;align-items:center;gap:4px}.sapx-u{min-width:64px;font-size:12px}
+.sapx-r{display:block;margin:4px 0}.sapx-in{padding-left:30px}.sapx-off{opacity:.45}.sapx-plus{width:26px;padding:0}</style>`);
+// ---- SAP2000 Assign > Area, Cable, Tendon, Solid and Link/Support: SAP2000 26.3's own forms, item for item, as the
+// pictures in field/reference-forms/sap2000/Assign/<Area|Cable|Tendon|Solid|Link> show them (2026-11-27). Each keeps
+// what it sets as SAP2000's own assignment table rows on the object (SapObjectTables, AssignTables), so the .s2k
+// carries them. OK applies and closes, Apply applies and stays open, Close closes, as in SAP2000. ----
+const sapXNum = v => { const x = parseFloat(v); return isFinite(x) ? x : null; };
+const sapXFmt = v => v === undefined || v === null || v === "" ? "" : String(v);
+const sapXErr = j => j && j.ok ? null : (j && j.error) || "The change was not made.";
+async function sapXRun(tool, args) { return sapXErr(await hmRun(tool, args, true)); }
+function sapXForm(title, body, apply, o) {
+  o = o || {};
+  let d;
+  const go = async close => {
+    formError(d, "");
+    const err = await apply(d);
+    if (err) { formError(d, err); return; }
+    hmSay((hm.state && hm.state.undo ? "Done: " + hm.state.undo : "Done") + ". Edit > Undo steps back.");
+    if (close) d.close(); else ap.disabled = true;
+  };
+  d = dialog(title, body + (o.reset ? `<div style="text-align:center;margin-top:8px"><button data-reset type="button">Reset Form to Default Values</button></div>` : "") + (o.after || ""),
+    [["OK", () => { go(true); return false; }, true], ["Close"], ["Apply", () => { go(false); return false; }, true]], {width: o.width || 420});
+  const ap = d.querySelector('.df [data-b="2"]'); ap.disabled = true; ap.classList.remove("primary");
+  const dirty = () => { ap.disabled = false; };
+  d.addEventListener("input", dirty); d.addEventListener("change", dirty);
+  if (o.reset) q(d, "[data-reset]").onclick = () => { o.reset(d); if (o.sync) o.sync(d); dirty(); };
+  if (o.sync) { d.addEventListener("change", () => o.sync(d)); o.sync(d); }
+  return d;
+}
+// The selected cables, tendons, solids or links (SAP2000's other objects; none until the Engine holds them).
+function sapXSelected(kind) { return typeof sapOtherSelected === "function" ? sapOtherSelected(kind) : []; }
+// The selected objects of a kind, with SAP2000's words when none is.
+function sapXPick(kind) {
+  const names = kind === "area" ? hmSelected("a") : kind === "frame" ? hmSelected("f") : sapXSelected(kind);
+  if (!names.length) hmSay({area: "Select the area objects first.", cable: "Select the cable objects first.", tendon: "Select the tendon objects first.", solid: "Select the solid objects first.", link: "Select the link/support objects first."}[kind] || "Select the objects first.", true);
+  return names;
+}
+// The first selected object's rows (and the property lists), and every selected object's rows by name.
+const sapXOther = kind => !["area", "frame", "joint"].includes(kind);
+async function sapXNow(names, kind) {
+  if (kind && sapXOther(kind)) { const pd = (await hmRun("property_definitions", {}, true)).result, sd = (await hmRun("sap_object_data", {kind, objects: names.slice(0, 1)}, true)).result; return {pd, obj: ((sd && sd.objects) || [])[0] || {tables: {}}}; }
+  const pd = (await hmRun("property_definitions", {objects: names.slice(0, 1)}, true)).result; return {pd, obj: ((pd && pd.objects) || [])[0] || {tables: {}}};
+}
+async function sapXAll(names, kind) {
+  const r = sapXOther(kind) ? (await hmRun("sap_object_data", {kind, objects: names}, true)).result : (await hmRun("property_definitions", {objects: names}, true)).result;
+  const by = {}; ((r && r.objects) || []).forEach((o, i) => by[o.object || names[i]] = o); return by;
+}
+const sapXTool = kind => kind === "area" ? "assign_shell_data" : kind === "frame" ? "assign_frame_data" : "assign_sap_object_data";
+const sapXArgs = (kind, a) => sapXOther(kind) ? Object.assign({kind}, a) : a;
+const sapXRow = (obj, t) => (((obj && obj.tables) || {})[t] || [])[0] || {};
+const sapXRows = (obj, t) => ((obj && obj.tables) || {})[t] || [];
+// A labelled row of a SAP2000 form: the label on the left, the box and its unit on the right.
+const sapXLine = (label, box, unit, cls) => `<div class="sapx-l${cls ? " " + cls : ""}"><span>${label}</span><span class="sapx-b">${box}${unit !== undefined ? `<span class="sapx-u">${unit}</span>` : ""}</span></div>`;
+const sapXIn = (id, v, w) => `<input id="${id}" value="${esc(sapXFmt(v))}" style="width:${w || 110}px">`;
+const sapXRadio = (name, val, label, on) => `<label class="sapx-r"><input type="radio" name="${name}" value="${esc(val)}" ${on ? "checked" : ""}> ${label}</label>`;
+const sapXRadioVal = (d, name) => (d.querySelector(`input[name="${name}"]:checked`) || {}).value;
+const sapXPlus = (id, list, v, w) => `<span style="display:inline-flex;gap:4px;align-items:center"><button type="button" class="sapx-plus" data-plus="${id}">+</button><select id="${id}" style="width:${w || 220}px">${opts(list, v || list[0] || "")}</select></span>`;
+const sapXEnable = (d, ids, on) => ids.forEach(id => { const x = q(d, "#" + id); if (x) { x.disabled = !on; const row = x.closest(".sapx-l"); if (row) row.classList.toggle("sapx-off", !on); } });
+const sapXUnits = () => { const u = hmU(), t = ((hm.defs && hm.defs.units) || {}).temperature || "C"; return {...u, t, mass: u.f + "-s²/" + u.l, perArea: u.f + "/" + u.l + "/" + u.l + "²"}; };
+async function sapXJointPatterns() { const dd = (await hmRun("definition_data", {}, true)).result || {tables: {}}; return ["Default", ...(((dd.tables || {})["Joint Pattern Definitions"] || {}).rows || []).map(r => r.Pattern).filter(n => n && n !== "Default")]; }
+function sapXWirePlus(d, act) { d.querySelectorAll("[data-plus]").forEach(b => b.onclick = () => act(b.dataset.plus)); }
+// Assign to every object one call, or one per object when each keeps its own value (Add to Existing).
+async function sapXEach(names, tool, argsOf) {
+  for (const n of names) { const err = await sapXRun(tool, Object.assign({objects: [n]}, await argsOf(n))); if (err) return err; }
+  return null;
+}
+
+// Assign > Area > Sections... ("Assign Area Sections": the list of names, Define Area Sections...).
+async function hmSapAreaSectionsAssign() {
+  const names = sapXPick("area"); if (!names.length) return;
+  const defs = await hmDefs(), list = defs.shell_sections.map(s => s.name);
+  const now = (objOf([...sel].find(id => (objOf(id) || {}).type === "a")) || {}).section;
+  const d = sapXForm("Assign Area Sections", `<fieldset style="margin:0"><legend>Name</legend><select id="sxS" size="12" style="width:100%;height:auto;min-width:240px">${opts(list, now || list[0] || "")}</select></fieldset>
+    <div style="text-align:center;margin-top:8px"><button id="sxDef" type="button">Define Area Sections...</button></div>`,
+    d => q(d, "#sxS").value ? sapXRun("set_section", {areas: names, section: q(d, "#sxS").value}) : "Pick a section.", {width: 300});
+  q(d, "#sxDef").onclick = () => hmSapAreaSections();
+  return d;
+}
+
+// Assign > Area > Area Stiffness Modifiers (Shell)...: "Assign Area Stiffness Modifiers".
+const sapAreaMods = [["F11MOD", "Membrane f11 Modifier"], ["F22MOD", "Membrane f22 Modifier"], ["F12MOD", "Membrane f12 Modifier"], ["M11MOD", "Bending m11 Modifier"], ["M22MOD", "Bending m22 Modifier"],
+  ["M12MOD", "Bending m12 Modifier"], ["V13MOD", "Shear v13 Modifier"], ["V23MOD", "Shear v23 Modifier"], ["MMOD", "Mass"], ["WMOD", "Weight"]];
+async function hmSapAreaModifiers() {
+  const names = sapXPick("area"); if (!names.length) return;
+  const {obj} = await sapXNow(names), now = obj.modifiers || {};
+  return sapXForm("Assign Area Stiffness Modifiers", `<fieldset style="margin:0"><legend>Stiffness Modifiers for Analysis</legend>${sapAreaMods.map(([k, l]) => sapXLine(l, sapXIn("sxm" + k, now[k] ?? 1))).join("")}</fieldset>`,
+    d => { const m = {}; for (const [k, l] of sapAreaMods) { const v = sapXNum(q(d, "#sxm" + k).value); if (v === null || v < 0) return l + " needs a number of 0 or more."; m[k] = v; } return sapXRun("assign_shell_data", {objects: names, modifiers: m}); },
+    {width: 400, reset: d => sapAreaMods.forEach(([k]) => q(d, "#sxm" + k).value = 1)});
+}
+
+// Assign > Area > Area Material Property Overwrites...: "Assign Area Material Overwrites".
+async function hmSapAreaMaterial() {
+  const names = sapXPick("area"); if (!names.length) return;
+  const defs = await hmDefs(), {obj} = await sapXNow(names), now = sapXRow(obj, "Area Assignments - Material Overwrites").Material || "";
+  const mats = defs.materials.map(m => m.name);
+  const d = sapXForm("Assign Area Material Overwrites", `<fieldset style="margin:0"><legend>Options</legend>${sapXRadio("sxMo", "section", "Use Material Specified in Section Property", !now)}
+    <div class="sapx-l"><span>${sapXRadio("sxMo", "over", "Overwrite Material", !!now)}</span><span class="sapx-b">${sapXPlus("sxMat", mats, now)}</span></div></fieldset>`,
+    d => sapXRun("assign_shell_data", {objects: names, tables: {"Area Assignments - Material Overwrites": sapXRadioVal(d, "sxMo") === "over" ? [{Material: q(d, "#sxMat").value}] : []}}),
+    {width: 440, sync: d => sapXEnable(d, ["sxMat"], sapXRadioVal(d, "sxMo") === "over")});
+  sapXWirePlus(d, () => hmMaterials());
+  return d;
+}
+
+// Assign > Area > Area Thickness Overwrites (Shells)...: "Assign Area Thickness and Joint Offset Overwrites".
+// SAP2000's "Area Overwrites - Thickness" and "Area Overwrites - Joint Offsets" rows: None, by joint pattern (with its
+// scale factor) or by points (a value per corner, 0 = from the section).
+async function hmSapAreaThickness() {
+  const names = sapXPick("area"); if (!names.length) return;
+  const u = sapXUnits(), pats = await sapXJointPatterns(), {obj} = await sapXNow(names);
+  const th = sapXRow(obj, "Area Overwrites - Thickness"), of = sapXRow(obj, "Area Overwrites - Joint Offsets");
+  const thMode = th.ThickOver === "Joint Pattern" ? "pat" : th.ThickOver === "User" || th.Thick1 !== undefined && th.ThickOver !== "None" && th.ThickOver !== undefined ? "pts" : "none";
+  const ofMode = of.OffsetOver === "Joint Pattern" ? "pat" : of.OffsetOver === "User" ? "pts" : "none";
+  const thick = [1, 2, 3, 4].map(i => th["Thick" + i] ?? "0"), offs = [1, 2, 3, 4].map(i => of["Offset" + i] ?? "0");
+  const ptsBox = (id, v) => `<input id="${id}" type="number" min="1" max="4" step="1" value="${v}" style="width:90px">`;
+  const body = `<fieldset style="margin:0 0 6px"><legend>Area Object Thickness</legend>
+      ${sapXRadio("sxTh", "none", "Use Thickness Specified for Area Object Section Property", thMode === "none")}
+      ${sapXRadio("sxTh", "pat", "User Defined Thickness Specified by Joint Pattern", thMode === "pat")}
+      ${sapXLine("Joint Pattern", sapXPlus("sxThP", pats, th.ThickPat), undefined, "sapx-in")}${sapXLine("Scale Factor", sapXIn("sxThF", th.ThickPatSF ?? 0), u.l, "sapx-in")}
+      ${sapXRadio("sxTh", "pts", "User Defined Thickness Specified by Points", thMode === "pts")}
+      ${sapXLine("Point Number", ptsBox("sxThN", 1), undefined, "sapx-in")}${sapXLine("Thickness  (0 means from section property)", sapXIn("sxThV", thick[0]), u.l, "sapx-in")}
+      <div style="text-align:center"><button id="sxThT" type="button">Show Thicknesses at Points in Table...</button></div></fieldset>
+    <fieldset style="margin:0"><legend>Area Object Joint Offsets in Thickness Direction</legend>
+      ${sapXRadio("sxOf", "none", "None", ofMode === "none")}
+      ${sapXRadio("sxOf", "pat", "User Defined Joint Offsets Specified by Joint Pattern", ofMode === "pat")}
+      ${sapXLine("Joint Pattern", sapXPlus("sxOfP", pats, of.OffsetPat), undefined, "sapx-in")}${sapXLine("Scale Factor", sapXIn("sxOfF", of.OffsetPatSF ?? 0), u.l, "sapx-in")}
+      ${sapXRadio("sxOf", "pts", "User Defined Joint Offsets Specified by Points", ofMode === "pts")}
+      ${sapXLine("Point Number", ptsBox("sxOfN", 1), undefined, "sapx-in")}${sapXLine("Joint Offset", sapXIn("sxOfV", offs[0]), u.l, "sapx-in")}
+      <div style="text-align:center"><button id="sxOfT" type="button">Show Joint Offsets at Points in Table...</button></div></fieldset>`;
+  const keep = d => { const n = (+q(d, "#sxThN").value || 1) - 1, m = (+q(d, "#sxOfN").value || 1) - 1; thick[n] = q(d, "#sxThV").value.trim() || "0"; offs[m] = q(d, "#sxOfV").value.trim() || "0"; };
+  const d = sapXForm("Assign Area Thickness and Joint Offset Overwrites", body, d => {
+    keep(d);
+    const t = sapXRadioVal(d, "sxTh"), o = sapXRadioVal(d, "sxOf"), rows = {};
+    for (const v of [...thick, ...offs]) if (sapXNum(v) === null) return "Each thickness and offset needs a number.";
+    if (t === "pat" && sapXNum(q(d, "#sxThF").value) === null) return "Scale Factor needs a number.";
+    if (o === "pat" && sapXNum(q(d, "#sxOfF").value) === null) return "Scale Factor needs a number.";
+    rows["Area Overwrites - Thickness"] = t === "none" ? [] : [t === "pat" ? {ThickOver: "Joint Pattern", ThickPat: q(d, "#sxThP").value, ThickPatSF: q(d, "#sxThF").value.trim()} : {ThickOver: "User", Thick1: thick[0], Thick2: thick[1], Thick3: thick[2], Thick4: thick[3]}];
+    rows["Area Overwrites - Joint Offsets"] = o === "none" ? [] : [o === "pat" ? {OffsetOver: "Joint Pattern", OffsetPat: q(d, "#sxOfP").value, OffsetPatSF: q(d, "#sxOfF").value.trim()} : {OffsetOver: "User", Offset1: offs[0], Offset2: offs[1], Offset3: offs[2], Offset4: offs[3]}];
+    return sapXRun("assign_shell_data", {objects: names, tables: rows});
+  }, {width: 560, reset: d => { d.querySelector('input[name="sxTh"][value="none"]').checked = true; d.querySelector('input[name="sxOf"][value="none"]').checked = true; thick.fill("0"); offs.fill("0"); q(d, "#sxThV").value = q(d, "#sxOfV").value = "0"; q(d, "#sxThF").value = q(d, "#sxOfF").value = "0"; },
+    sync: d => {
+      const t = sapXRadioVal(d, "sxTh"), o = sapXRadioVal(d, "sxOf");
+      sapXEnable(d, ["sxThP", "sxThF"], t === "pat"); sapXEnable(d, ["sxThN", "sxThV", "sxThT"], t === "pts");
+      sapXEnable(d, ["sxOfP", "sxOfF"], o === "pat"); sapXEnable(d, ["sxOfN", "sxOfV", "sxOfT"], o === "pts");
+      d.querySelectorAll('[data-plus="sxThP"]').forEach(b => b.disabled = t !== "pat"); d.querySelectorAll('[data-plus="sxOfP"]').forEach(b => b.disabled = o !== "pat");
+    }});
+  let thAt = 0, ofAt = 0;
+  q(d, "#sxThN").oninput = () => { thick[thAt] = q(d, "#sxThV").value.trim() || "0"; thAt = Math.min(3, Math.max(0, (+q(d, "#sxThN").value || 1) - 1)); q(d, "#sxThV").value = thick[thAt]; };
+  q(d, "#sxOfN").oninput = () => { offs[ofAt] = q(d, "#sxOfV").value.trim() || "0"; ofAt = Math.min(3, Math.max(0, (+q(d, "#sxOfN").value || 1) - 1)); q(d, "#sxOfV").value = offs[ofAt]; };
+  q(d, "#sxThV").oninput = () => thick[thAt] = q(d, "#sxThV").value.trim() || "0";
+  q(d, "#sxOfV").oninput = () => offs[ofAt] = q(d, "#sxOfV").value.trim() || "0";
+  const table = (title, label, vals) => dialog(title, `<table class="list"><tr><th>Point Number</th><th>${esc(label)}</th></tr>${vals.map((v, i) => `<tr><td>${i + 1}</td><td>${esc(v)}</td></tr>`).join("")}</table>`, [["OK"]], {width: 300});
+  q(d, "#sxThT").onclick = () => table("Thicknesses at Points", "Thickness", thick);
+  q(d, "#sxOfT").onclick = () => table("Joint Offsets at Points", "Joint Offset", offs);
+  sapXWirePlus(d, () => hmDefineTable("Joint Pattern Definitions"));
+  return d;
+}
+
+// Assign > Area > Local Axes...: "Assign Area Local Axes", with Modify/Show Advanced Parameters... ("Area Advanced Axes").
+const sapAreaAdvT = "Area Local Axes Assignments 2 - Advanced";
+async function hmSapAreaAxes() {
+  const names = sapXPick("area"); if (!names.length) return;
+  const {obj} = await sapXNow(names), adv0 = sapXRow(obj, sapAreaAdvT), ang = sapXRow(obj, "Area Assignments - Local Axes").Angle ?? obj.angle ?? 0;
+  let adv = Object.keys(adv0).length ? {...adv0} : {LocalPlane: "32", PlOption1: "Coord Dir", PlCoordSys: "GLOBAL", CoordDir1: "Z", CoordDir2: "Y"};
+  const sum = () => `Local Plane = Plane ${(adv.LocalPlane || "32").split("").join("-")}<br><br>Plane Reference Vector Type: ${/Two|Joint/i.test(adv.PlOption1 || "") ? "Two Joints" : /Vec|User/i.test(adv.PlOption1 || "") ? "User Vector" : "Coordinate Direction"}<br>&nbsp;&nbsp;&nbsp;Primary: ${esc(adv.PlCoordSys || "GLOBAL")} ${esc(sapXDir(adv.CoordDir1 || "Z"))}&nbsp;&nbsp;&nbsp;Secondary: ${esc(adv.PlCoordSys || "GLOBAL")} ${esc(sapXDir(adv.CoordDir2 || "Y"))}`;
+  const d = sapXForm("Assign Area Local Axes", `<fieldset style="margin:0 0 6px"><legend>Options</legend>${sapXRadio("sxAx", "std", "Specify Standard Local Axes", !Object.keys(adv0).length)}${sapXRadio("sxAx", "adv", "Specify Advanced Local Axes", !!Object.keys(adv0).length)}${sapXRadio("sxAx", "reset", "Reset Local Axes to Default", false)}</fieldset>
+    <fieldset style="margin:0 0 6px"><legend>Angle from Default Orientation</legend>${sapXLine("Angle", sapXIn("sxAng", ang), "deg")}</fieldset>
+    <fieldset style="margin:0" id="sxAdvF"><legend>Advanced</legend><div id="sxAdvS" class="kv" style="min-height:70px"></div><div style="text-align:center"><button id="sxAdvB" type="button">Modify/Show Advanced Parameters...</button></div></fieldset>`,
+    d => {
+      const mode = sapXRadioVal(d, "sxAx"), a = sapXNum(q(d, "#sxAng").value);
+      if (mode !== "reset" && a === null) return "Angle needs a number.";
+      const tables = {"Area Assignments - Local Axes": mode === "reset" || a === 0 ? [] : [{Angle: String(a)}], [sapAreaAdvT]: mode === "adv" ? [adv] : []};
+      return sapXRun("assign_shell_data", {objects: names, tables});
+    }, {width: 420, sync: d => { const m = sapXRadioVal(d, "sxAx"); sapXEnable(d, ["sxAng"], m !== "reset"); q(d, "#sxAdvB").disabled = m !== "adv"; q(d, "#sxAdvF").classList.toggle("sapx-off", m !== "adv"); q(d, "#sxAdvS").innerHTML = m === "adv" ? sum() : ""; }});
+  q(d, "#sxAdvB").onclick = () => sapXAdvancedAxes("Area Advanced Axes", adv, false, v => { adv = v; q(d, "#sxAdvS").innerHTML = sum(); q(d, '.df [data-b="2"]').disabled = false; });
+  return d;
+}
+const sapXDir = v => /^[+-]/.test(v) ? v : "+" + v;
+// "Area/Solid/Link Advanced Axes": the local plane, how its reference vector is given (coordinate direction, two joints
+// or a user vector) and the plane's primary and secondary directions, as SAP2000's Advanced tables hold them. With
+// withAxis (solids and links), the axis reference vector above it.
+function sapXAdvancedAxes(title, now, withAxis, done) {
+  const v = {...now}, planes = ["12", "13", "21", "23", "31", "32"];
+  const csys = ["GLOBAL", ...(((hm.defs || {}).coordinate_systems) || []).filter(c => c !== "GLOBAL")];
+  const optOf = x => /Two|Joint/i.test(x || "") ? "joints" : /Vec|User/i.test(x || "") ? "vector" : "dir";
+  const block = (p, label) => `<fieldset style="margin:0 0 6px"><legend>${label} Reference Vector Specified By</legend>
+      ${sapXRadio(p + "O", "dir", "Coordinate Direction", optOf(v[p === "ax" ? "AxOption1" : "PlOption1"]) === "dir")}${sapXRadio(p + "O", "joints", "Two Joints", optOf(v[p === "ax" ? "AxOption1" : "PlOption1"]) === "joints")}${sapXRadio(p + "O", "vector", "User Vector", optOf(v[p === "ax" ? "AxOption1" : "PlOption1"]) === "vector")}
+      ${sapXLine("Coordinate System", `<select id="${p}C" style="width:180px">${opts(csys, v[p === "ax" ? "AxCoordSys" : "PlCoordSys"] || "GLOBAL")}</select>`)}</fieldset>
+    <fieldset style="margin:0 0 6px" id="${p}Dir"><legend>${label} Coordinate Direction</legend>${p === "ax" ? sapXLine("Direction", `<select id="axD1" style="width:110px">${opts(sapDirs, sapXDir(v.AxCoordDir || "X"))}</select>`) : sapXLine("Primary Direction", `<select id="plD1" style="width:110px">${opts(sapDirs, sapXDir(v.CoordDir1 || "Z"))}</select>`) + sapXLine("Secondary Direction", `<select id="plD2" style="width:110px">${opts(sapDirs, sapXDir(v.CoordDir2 || "Y"))}</select>`)}</fieldset>
+    <fieldset style="margin:0 0 6px" id="${p}Jt"><legend>${label} Two Joints</legend>${sapXLine("Joint 1", sapXIn(p + "J1", v[p === "ax" ? "AxVecJt1" : "PlVecJt1"]))}${sapXLine("Joint 2", sapXIn(p + "J2", v[p === "ax" ? "AxVecJt2" : "PlVecJt2"]))}</fieldset>
+    <fieldset style="margin:0 0 6px" id="${p}Vec"><legend>${label} User Vector</legend>${["X", "Y", "Z"].map(c => sapXLine(c, sapXIn(p + "V" + c, v[(p === "ax" ? "AxVec" : "PlVec") + c] ?? 0))).join("")}</fieldset>`;
+  const body = `<fieldset style="margin:0 0 6px"><legend>Local Plane</legend>${sapXLine("Plane", `<select id="sxPl" style="width:120px">${opts(planes.map(p => [p, "Plane " + p.split("").join("-")]), v.LocalPlane || "32")}</select>`)}</fieldset>${withAxis ? block("ax", "Axis") : ""}${block("pl", "Plane")}`;
+  const d = dialog(title, body + `<div style="text-align:center;margin-top:8px"><button id="sxAdvR" type="button">Reset Form to Default Values</button></div>`, [["OK", d => {
+    const out = {LocalPlane: q(d, "#sxPl").value};
+    for (const p of withAxis ? ["ax", "pl"] : ["pl"]) {
+      const o = sapXRadioVal(d, p + "O"), A = p === "ax";
+      out[A ? "AxOption1" : "PlOption1"] = o === "joints" ? "Two Joints" : o === "vector" ? "User Vector" : "Coord Dir";
+      out[A ? "AxCoordSys" : "PlCoordSys"] = q(d, "#" + p + "C").value;
+      if (A) out.AxCoordDir = q(d, "#axD1").value; else { out.CoordDir1 = q(d, "#plD1").value; out.CoordDir2 = q(d, "#plD2").value; }
+      if (o === "joints") { out[A ? "AxVecJt1" : "PlVecJt1"] = q(d, "#" + p + "J1").value.trim(); out[A ? "AxVecJt2" : "PlVecJt2"] = q(d, "#" + p + "J2").value.trim(); }
+      if (o === "vector") for (const c of ["X", "Y", "Z"]) { const n = sapXNum(q(d, "#" + p + "V" + c).value); if (n === null) { formError(d, c + " needs a number."); return false; } out[(A ? "AxVec" : "PlVec") + c] = String(n); }
+    }
+    if (!withAxis && out.CoordDir1.replace(/^-/, "") === out.CoordDir2.replace(/^-/, "")) { formError(d, "The primary and secondary directions must not be parallel."); return false; }
+    done(out);
+  }], ["Cancel"]], {width: 400});
+  const sync = () => { for (const p of withAxis ? ["ax", "pl"] : ["pl"]) { const o = sapXRadioVal(d, p + "O"); q(d, "#" + p + "Dir").hidden = o !== "dir"; q(d, "#" + p + "Jt").hidden = o !== "joints"; q(d, "#" + p + "Vec").hidden = o !== "vector"; q(d, "#" + p + "C").disabled = o === "joints"; } };
+  d.addEventListener("change", sync); sync();
+  q(d, "#sxAdvR").onclick = () => { q(d, "#sxPl").value = "32"; d.querySelectorAll('input[value="dir"]').forEach(x => x.checked = true); if (q(d, "#plD1")) { q(d, "#plD1").value = "+Z"; q(d, "#plD2").value = "+Y"; } if (q(d, "#axD1")) q(d, "#axD1").value = "+X"; sync(); };
+  return d;
+}
+
+// Assign > Area > Reverse Local 3...: "Assign Area Reverse Local 3 Axis". Reverses the area's corner order; the
+// assignments keep their global orientation (local values negated where they flip) or their local one.
+async function hmSapAreaReverse() {
+  const names = sapXPick("area"); if (!names.length) return;
+  return sapXForm("Assign Area Reverse Local 3 Axis", `<fieldset style="margin:0"><legend>Options</legend>${sapXRadio("sxRv", "global", "Keep Assigns in Same Global Orientation", true)}${sapXRadio("sxRv", "local", "Keep Assigns in Same Local Orientation", false)}</fieldset>`,
+    d => sapXRun("reverse_objects", {objects: names, keep: sapXRadioVal(d, "sxRv")}), {width: 340});
+}
+
+// Assign > Area > Area Springs...: "Assign Springs to Area Object Face" (SAP2000's "Area Spring Assignments" rows).
+const sapSpringResists = ["Tension and Compression", "Compression Only", "Tension Only"];
+async function hmSapAreaSprings() { return sapXFaceSprings("area"); }
+async function sapXFaceSprings(kind) {
+  const names = sapXPick(kind); if (!names.length) return;
+  const area = kind === "area", T = area ? "Area Spring Assignments" : "Solid Spring Assignments", u = sapXUnits();
+  const pd0 = await sapXNow(names, kind), now = sapXRows(pd0.obj, T)[0] || {}, links = ((pd0.pd || {}).links || []).map(l => l.name);
+  const csys = ["GLOBAL", ...(((hm.defs || {}).coordinate_systems) || []).filter(c => c !== "GLOBAL")];
+  const faces = area ? ["Top", "Bottom", "Edge"] : [1, 2, 3, 4, 5, 6].map(i => [String(i), "Face " + i]);
+  const dir0 = now.Dir1Type === "Local Axis" || now.Dir1Type === "Parallel" ? "axis" : now.Dir1Type === "User Vector" || now.Dir1Type === "User" ? "vector" : "normal";
+  const body = `<fieldset style="margin:0 0 6px"><legend>Spring Type</legend>
+      ${sapXRadio("sxSt", "simple", "Simple", now.Type !== "Link")}
+      ${sapXLine("Spring Stiffness per Unit Area", sapXIn("sxK", now.Stiffness ?? 0), u.perArea, "sapx-in")}
+      ${sapXLine("Simple Spring Resists", `<select id="sxRes" style="width:220px">${opts(sapSpringResists, now.SimpleType || sapSpringResists[0])}</select>`, undefined, "sapx-in")}
+      <div class="sapx-l"><span>${sapXRadio("sxSt", "link", "Link Property", now.Type === "Link")}</span><span class="sapx-b">${sapXPlus("sxLink", links, now.LinkProp)}</span></div>
+      ${sapXLine("Local 2 Axis Angle from Default Orientation", sapXIn("sxA2", now.Axis2Angle ?? 0), "deg", "sapx-in")}</fieldset>
+    <fieldset style="margin:0 0 6px"><legend>Spring Location (${area ? "Area" : "Solid"} Object Face)</legend>
+      ${area ? sapXLine("Area Object Face", `<select id="sxFace" style="width:110px">${opts(faces, now.Face === "-1" || now.Face === "Bottom" ? "Bottom" : /^\d+$/.test(now.Face || "") && +now.Face > 0 ? "Edge" : "Top")}</select>`) + sapXLine("Area Object Edge Number", sapXIn("sxEdge", /^\d+$/.test(now.Face || "") && +now.Face > 0 ? now.Face : "")) : sapXLine("Solid Object Face", `<select id="sxFace" style="width:110px">${opts(faces, now.Face || "1")}</select>`)}</fieldset>
+    <fieldset style="margin:0 0 6px"><legend>Spring Tension Direction</legend>
+      <div class="sapx-l"><span>${sapXRadio("sxDir", "axis", `Parallel to ${area ? "Area" : "Solid"} Object Local Axis`, dir0 === "axis")}</span><span class="sapx-b"><select id="sxAxis" style="width:110px">${opts(["1 Axis", "2 Axis", "3 Axis"].map((l, i) => [String(i + 1), l]), /^-?[123]$/.test(now.Dir || "") ? String(Math.abs(+now.Dir)) : "1")}</select></span></div>
+      <div class="sapx-l"><span>${sapXRadio("sxDir", "normal", `Normal to Specified ${area ? "Area" : "Solid"} Object Face`, dir0 === "normal")}</span><span class="sapx-b"><select id="sxNorm" style="width:110px">${opts(["Inward", "Outward"], now.NormalDir || "Inward")}</select></span></div>
+      ${sapXRadio("sxDir", "vector", "User Specified Direction Vector", dir0 === "vector")}
+      ${sapXLine("Coordinate System", `<select id="sxCs" style="width:180px">${opts([[area ? "Local" : "Local", area ? "Area Local Axes" : "Solid Local Axes"], ...csys], now.CoordSys || "Local")}</select>`, undefined, "sapx-in")}
+      ${["1", "2", "3"].map((c, i) => sapXLine(`Local ${c} Component`, sapXIn("sxV" + c, now["Vec" + "XYZ"[i]] ?? (i === 0 ? 1 : 0)), undefined, "sapx-in")).join("")}</fieldset>
+    <fieldset style="margin:0"><legend>Options</legend>${sapXRadio("sxOpt", "add", "Add to Existing Springs", false)}${sapXRadio("sxOpt", "replace", "Replace Existing Springs", true)}${sapXRadio("sxOpt", "delete", "Delete Existing Springs", false)}</fieldset>`;
+  const rowOf = d => {
+    const simple = sapXRadioVal(d, "sxSt") === "simple", dir = sapXRadioVal(d, "sxDir"), r = {Type: simple ? "Simple" : "Link"};
+    if (simple) { const k = sapXNum(q(d, "#sxK").value); if (k === null || k < 0) return "Spring Stiffness per Unit Area needs a number of 0 or more."; r.Stiffness = String(k); r.SimpleType = q(d, "#sxRes").value; }
+    else { if (!q(d, "#sxLink").value) return "Pick a link property."; r.LinkProp = q(d, "#sxLink").value; const a = sapXNum(q(d, "#sxA2").value); if (a === null) return "Local 2 Axis Angle needs a number."; r.Axis2Angle = String(a); }
+    if (area) { const f = q(d, "#sxFace").value; if (f === "Edge") { const e = parseInt(q(d, "#sxEdge").value); if (!(e >= 1)) return "Area Object Edge Number needs a whole number of 1 or more."; r.Face = String(e); } else r.Face = f === "Bottom" ? "-1" : "0"; }
+    else r.Face = q(d, "#sxFace").value;
+    r.Dir1Type = dir === "axis" ? "Local Axis" : dir === "normal" ? "Normal To Face" : "User Vector";
+    if (dir === "axis") r.Dir = q(d, "#sxAxis").value;
+    if (dir === "normal") r.NormalDir = q(d, "#sxNorm").value;
+    if (dir === "vector") { r.CoordSys = q(d, "#sxCs").value; for (const [i, c] of ["X", "Y", "Z"].entries()) { const n = sapXNum(q(d, "#sxV" + (i + 1)).value); if (n === null) return `Local ${i + 1} Component needs a number.`; r["Vec" + c] = String(n); } }
+    return r;
+  };
+  const tool = area ? "assign_shell_data" : "assign_sap_object_data";
+  const d = sapXForm(area ? "Assign Springs to Area Object Face" : "Assign Springs to Solid Object Face", body, async d => {
+    const opt = sapXRadioVal(d, "sxOpt");
+    if (opt === "delete") return sapXRun(tool, Object.assign(area ? {} : {kind}, {objects: names, tables: {[T]: []}}));
+    const r = rowOf(d); if (typeof r === "string") return r;
+    if (opt === "replace") return sapXRun(tool, Object.assign(area ? {} : {kind}, {objects: names, tables: {[T]: [r]}}));
+    const all = await sapXAll(names, kind);
+    return sapXEach(names, tool, n => Object.assign(area ? {} : {kind}, {tables: {[T]: [...sapXRows(all[n] || {}, T), r]}}));
+  }, {width: 600, reset: d => { d.querySelector('input[name="sxSt"][value="simple"]').checked = true; q(d, "#sxK").value = 0; q(d, "#sxRes").value = sapSpringResists[0]; q(d, "#sxA2").value = 0; q(d, "#sxFace").value = area ? "Top" : "1"; if (q(d, "#sxEdge")) q(d, "#sxEdge").value = "";
+      d.querySelector('input[name="sxDir"][value="normal"]').checked = true; q(d, "#sxNorm").value = "Inward"; q(d, "#sxV1").value = 1; q(d, "#sxV2").value = q(d, "#sxV3").value = 0; d.querySelector('input[name="sxOpt"][value="replace"]').checked = true; },
+    sync: d => {
+      const simple = sapXRadioVal(d, "sxSt") === "simple", dir = sapXRadioVal(d, "sxDir");
+      const linkR = d.querySelector('input[name="sxSt"][value="link"]'); linkR.disabled = !links.length; linkR.closest(".sapx-r").classList.toggle("sapx-off", !links.length);
+      sapXEnable(d, ["sxK", "sxRes"], simple); sapXEnable(d, ["sxLink", "sxA2"], !simple); d.querySelectorAll('[data-plus="sxLink"]').forEach(b => b.disabled = simple);
+      if (area) sapXEnable(d, ["sxEdge"], q(d, "#sxFace").value === "Edge");
+      sapXEnable(d, ["sxAxis"], dir === "axis"); sapXEnable(d, ["sxNorm"], dir === "normal"); sapXEnable(d, ["sxCs", "sxV1", "sxV2", "sxV3"], dir === "vector");
+      if (area && q(d, "#sxFace").value === "Edge" && dir === "normal") d.querySelector('input[name="sxDir"][value="vector"]').checked = true;
+      d.querySelector('input[name="sxDir"][value="normal"]').disabled = area && q(d, "#sxFace").value === "Edge";
+    }});
+  sapXWirePlus(d, () => modelAct("links"));
+  return d;
+}
+
+// Assign > Area > Area Mass...: "Assign Area Mass" (Mass per Unit Area; Add to, Replace or Delete Existing Masses).
+async function hmSapAreaMass() {
+  const names = sapXPick("area"); if (!names.length) return;
+  const u = sapXUnits(), T = "Area Assignments - Additional Mass";
+  return sapXForm("Assign Area Mass", `<fieldset style="margin:0 0 6px"><legend>Mass</legend>${sapXLine("Mass per Unit Area", sapXIn("sxMass", 0), u.f + "-s²/" + u.l + "³")}</fieldset>
+    <fieldset style="margin:0"><legend>Options</legend>${sapXRadio("sxMo", "add", "Add to Existing Masses", false)}${sapXRadio("sxMo", "replace", "Replace Existing Masses", true)}${sapXRadio("sxMo", "delete", "Delete Existing Masses", false)}</fieldset>`,
+    async d => {
+      const opt = sapXRadioVal(d, "sxMo"), v = sapXNum(q(d, "#sxMass").value);
+      if (opt === "delete") return sapXRun("assign_shell_data", {objects: names, tables: {[T]: []}});
+      if (v === null) return "Mass per Unit Area needs a number.";
+      if (opt === "replace") return sapXRun("assign_shell_data", {objects: names, tables: {[T]: v === 0 ? [] : [{AddedMass: String(v)}]}});
+      const all = (await hmRun("property_definitions", {objects: names}, true)).result;
+      return sapXEach(names, "assign_shell_data", n => { const o = ((all && all.objects) || []).find(x => x.object === n) || {}, t = (sapXNum(sapXRow(o, T).AddedMass) || 0) + v; return {tables: {[T]: t === 0 ? [] : [{AddedMass: String(t)}]}}; });
+    }, {width: 400, sync: d => sapXEnable(d, ["sxMass"], sapXRadioVal(d, "sxMo") !== "delete")});
+}
+
+// Assign > Area/Cable/Tendon/Solid > Material Temperatures...: "Assign <Kind> Material Temperature" (Temperature and
+// Joint Pattern; SAP2000's "<Kind> Material Temperatures" rows).
+async function hmSapAreaTemperature() { return sapXTemperature("area"); }
+async function sapXTemperature(kind) {
+  const names = sapXPick(kind); if (!names.length) return;
+  const K = kind[0].toUpperCase() + kind.slice(1), T = K + " Material Temperatures", u = sapXUnits(), pats = ["None", ...(await sapXJointPatterns())];
+  const {obj} = await sapXNow(names, kind), now = sapXRow(obj, T);
+  const d = sapXForm(`Assign ${K} Material Temperature`, `<fieldset style="margin:0"><legend>Temperature Data</legend>${sapXLine("Temperature", sapXIn("sxT", now.Temp ?? 0), u.t)}${sapXLine("Joint Pattern", sapXPlus("sxTP", pats, now.JtPattern || "None"))}</fieldset>`,
+    d => { const t = sapXNum(q(d, "#sxT").value); if (t === null) return "Temperature needs a number."; const r = {Temp: String(t)}; if (q(d, "#sxTP").value !== "None") r.JtPattern = q(d, "#sxTP").value;
+      return sapXRun(sapXTool(kind), sapXArgs(kind, {objects: names, tables: {[T]: t === 0 && !r.JtPattern ? [] : [r]}})); }, {width: 420});
+  sapXWirePlus(d, () => hmDefineTable("Joint Pattern Definitions"));
+  return d;
+}
+
+// Assign > Area > Automatic Area Mesh...: "Assign Automatic Area Mesh", every option, SAP2000's "Area Auto Mesh Assignments".
+const sapMeshTypes = [["None", "None"], ["Number", "Auto Mesh Area Into This Number of Objects  (Quads and Triangles Only)"], ["Maximum Size", "Auto Mesh Area Into Objects of This Maximum Size  (Quads and Triangles Only)"],
+  ["Points On Edges", "Auto Mesh Area Based on Points on Area Edges  (Quads and Triangles Only)"], ["Cookie Cut Lines", "Auto Mesh Area Using Cookie Cut Based on Straight Line Objects in Meshing Group"],
+  ["Cookie Cut Points", "Auto Mesh Area Using Cookie Cut Based on Point Objects in Meshing Group"], ["General Divide", "Auto Mesh Area Using General Divide Tool Based on Points and Lines in Meshing Group"]];
+async function hmSapAreaMesh() {
+  const names = sapXPick("area"); if (!names.length) return;
+  const u = sapXUnits(), T = "Area Auto Mesh Assignments", {obj} = await sapXNow(names), r = sapXRow(obj, T);
+  const sd = (await hmRun("structure_definitions", {}, true)).result || {groups: []}, groups = ["ALL", ...(sd.groups || []).map(g => g.name).filter(g => g !== "ALL")];
+  const type = (sapMeshTypes.find(t => t[0].replace(/ /g, "").toLowerCase() === String(r.MeshType || "None").replace(/ /g, "").toLowerCase()) || sapMeshTypes[0])[0];
+  const yes = k => r[k] === "Yes", chk = (id, k, l) => `<label class="sapx-r sapx-in"><input type="checkbox" id="${id}" ${yes(k) ? "checked" : ""}> ${l}</label>`;
+  const left = `<fieldset style="margin:0;height:100%;box-sizing:border-box"><legend>Mesh Option</legend>
+    ${sapXRadio("sxMt", "None", "None", type === "None")}
+    ${sapXRadio("sxMt", "Number", sapMeshTypes[1][1], type === "Number")}${sapXLine("Along Edge from Point 1 to 2", sapXIn("sxN1", r.Number1 ?? 2, 110), "", "sapx-in")}${sapXLine("Along Edge from Point 1 to 3", sapXIn("sxN2", r.Number2 ?? 2, 110), "", "sapx-in")}
+    ${sapXRadio("sxMt", "Maximum Size", sapMeshTypes[2][1], type === "Maximum Size")}${sapXLine("Along Edge from Point 1 to 2", sapXIn("sxM1", r.Max1 ?? 1.2, 110), u.l, "sapx-in")}${sapXLine("Along Edge from Point 1 to 3", sapXIn("sxM2", r.Max2 ?? 1.2, 110), u.l, "sapx-in")}
+    ${sapXRadio("sxMt", "Points On Edges", sapMeshTypes[3][1], type === "Points On Edges")}<div class="sapx-in kv">Points Determined from:</div>
+    ${chk("sxPL", "PtsFromLine", "Intersections of Straight Line Objects in Meshing Group with Area Edges")}${chk("sxPP", "PtsFromPt", "Point Objects in Meshing Group that are on Area Edges")}
+    ${sapXRadio("sxMt", "Cookie Cut Lines", sapMeshTypes[4][1], type === "Cookie Cut Lines")}${chk("sxExt", "ExtendLines", "Extend All Lines to Intersect Area Edges")}
+    ${sapXRadio("sxMt", "Cookie Cut Points", sapMeshTypes[5][1], type === "Cookie Cut Points")}${sapXLine("Rotation of Cut Lines from Area Local Axes", sapXIn("sxRot", r.RotAngle ?? 0, 110), "deg", "sapx-in")}
+    ${sapXRadio("sxMt", "General Divide", sapMeshTypes[6][1], type === "General Divide")}${sapXLine("Maximum Size of Divided Object", sapXIn("sxGen", r.GenMaxSize ?? 1.2, 110), u.l, "sapx-in")}</fieldset>`;
+  const right = `<fieldset style="margin:0 0 6px"><legend>Select Meshing Group</legend>${sapXLine("Meshing Group", sapXPlus("sxGrp", groups, r.MeshGroup || "ALL", 200))}</fieldset>
+    <fieldset style="margin:0 0 6px"><legend>Local Axes for Added Points</legend><label class="sapx-r"><input type="checkbox" id="sxLE" ${yes("LocalEdge") ? "checked" : ""}> Make same on EDGE if adjacent corner points have same local axes definition</label><label class="sapx-r"><input type="checkbox" id="sxLF" ${yes("LocalFace") ? "checked" : ""}> Make same on FACE if all corner points have same local axes definition</label></fieldset>
+    <fieldset style="margin:0 0 6px"><legend>Restraints and Constraints for Added Points</legend><label class="sapx-r"><input type="checkbox" id="sxSE" ${yes("SuppEdge") ? "checked" : ""}> Add on EDGE when restraints/constraints exist at adjacent corner points<br><span class="kv">(Applies when added edge point and adjacent corner points have same local axes definition)</span></label>
+      <label class="sapx-r"><input type="checkbox" id="sxSF" ${yes("SuppFace") ? "checked" : ""}> Add on FACE when restraints/constraints exist at all corner points<br><span class="kv">(Applies when added face point and all corner points have same local axes definition)</span></label></fieldset>
+    <fieldset style="margin:0"><legend>Submesh Option</legend><label class="sapx-r"><input type="checkbox" id="sxSub" ${yes("SubMesh") ? "checked" : ""}> Submesh as required to obtain elements no larger than the specified maximum size</label>${sapXLine("Maximum Submeshed Size", sapXIn("sxSubS", r.SubMeshSize ?? "", 110), u.l, "sapx-in")}</fieldset>`;
+  const num = (d, id, l, int) => { const v = int ? parseInt(q(d, "#" + id).value) : sapXNum(q(d, "#" + id).value); if (v === null || isNaN(v) || v <= 0 && id !== "sxRot") throw l + " needs a " + (int ? "whole number of 1 or more." : "number above 0."); return String(v); };
+  const d = sapXForm("Assign Automatic Area Mesh", `<div style="display:grid;grid-template-columns:1.1fr 1fr;gap:10px">${left}<div>${right}</div></div>`, d => {
+    try {
+      const t = sapXRadioVal(d, "sxMt");
+      if (t === "None") return sapXRun("assign_shell_data", {objects: names, tables: {[T]: []}});
+      const row = {MeshType: t};
+      if (t === "Number") { row.Number1 = num(d, "sxN1", "Along Edge from Point 1 to 2", true); row.Number2 = num(d, "sxN2", "Along Edge from Point 1 to 3", true); }
+      if (t === "Maximum Size") { row.Max1 = num(d, "sxM1", "Along Edge from Point 1 to 2"); row.Max2 = num(d, "sxM2", "Along Edge from Point 1 to 3"); }
+      if (t === "Points On Edges") { row.PtsFromLine = q(d, "#sxPL").checked ? "Yes" : "No"; row.PtsFromPt = q(d, "#sxPP").checked ? "Yes" : "No"; }
+      if (t === "Cookie Cut Lines") row.ExtendLines = q(d, "#sxExt").checked ? "Yes" : "No";
+      if (t === "Cookie Cut Points") row.RotAngle = num(d, "sxRot", "Rotation of Cut Lines");
+      if (t === "General Divide") row.GenMaxSize = num(d, "sxGen", "Maximum Size of Divided Object");
+      if (/Points On|Cookie|General/.test(t)) row.MeshGroup = q(d, "#sxGrp").value;
+      row.LocalEdge = q(d, "#sxLE").checked ? "Yes" : "No"; row.LocalFace = q(d, "#sxLF").checked ? "Yes" : "No"; row.SuppEdge = q(d, "#sxSE").checked ? "Yes" : "No"; row.SuppFace = q(d, "#sxSF").checked ? "Yes" : "No";
+      row.SubMesh = q(d, "#sxSub").checked ? "Yes" : "No"; if (q(d, "#sxSub").checked) row.SubMeshSize = num(d, "sxSubS", "Maximum Submeshed Size");
+      return sapXRun("assign_shell_data", {objects: names, tables: {[T]: [row]}});
+    } catch (e) { return String(e); }
+  }, {width: 1040, reset: d => { d.querySelector('input[name="sxMt"][value="None"]').checked = true; d.querySelectorAll('input[type="checkbox"]').forEach(x => x.checked = false); q(d, "#sxGrp").value = "ALL"; },
+    sync: d => {
+      const t = sapXRadioVal(d, "sxMt"), none = t === "None";
+      sapXEnable(d, ["sxN1", "sxN2"], t === "Number"); sapXEnable(d, ["sxM1", "sxM2"], t === "Maximum Size"); sapXEnable(d, ["sxRot"], t === "Cookie Cut Points"); sapXEnable(d, ["sxGen"], t === "General Divide");
+      for (const [id, on] of [["sxPL", t === "Points On Edges"], ["sxPP", t === "Points On Edges"], ["sxExt", t === "Cookie Cut Lines"], ["sxLE", !none], ["sxLF", !none], ["sxSE", !none], ["sxSF", !none], ["sxSub", !none]]) { q(d, "#" + id).disabled = !on; q(d, "#" + id).closest("label").classList.toggle("sapx-off", !on); }
+      sapXEnable(d, ["sxGrp"], /Points On|Cookie|General/.test(t)); d.querySelectorAll('[data-plus="sxGrp"]').forEach(b => b.disabled = !/Points On|Cookie|General/.test(t));
+      sapXEnable(d, ["sxSubS"], !none && q(d, "#sxSub").checked);
+      d.querySelectorAll("fieldset").forEach((f, i) => { if (i > 0) f.classList.toggle("sapx-off", none && i !== 0 && !f.contains(d.querySelector('input[name="sxMt"]'))); });
+    }});
+  sapXWirePlus(d, () => modelAct("st:group"));
+  return d;
+}
+
+// Assign > Area > Edge Releases...: "Assign Area Edge Releases" (SAP2000's "Area Edge Release Assignments": a row per
+// released direction of an edge, with its partial fixity spring).
+const sapEdgeDofs = [["In-plane", "In-plane Shear Force Along Edge (1)", "StiffTrans"], ["Direct", "In-plane Direct Force Normal to Edge (2)", "StiffTrans"], ["Out-of-plane", "Out-of-plane Shear Force Along Edge (3)", "StiffTrans"],
+  ["Moment", "Bending Moment About Edge (1)", "StiffRot"], ["Twisting", "Twisting Moment Along Edge (2)", "StiffRot"]];
+async function hmSapAreaEdgeReleases() {
+  const names = sapXPick("area"); if (!names.length) return;
+  const T = "Area Edge Release Assignments", {obj} = await sapXNow(names), rows = sapXRows(obj, T).map(r => ({...r}));
+  const one = names.length === 1, a = one ? areas.find(x => x.name === names[0]) : null, corners = a ? a.pts.map(p => { const n = pointAt.get(key(p[0], p[1], p[2])); return n === undefined ? "?" : String(n); }) : [];
+  const edges = one ? corners.length : 0;
+  const body = `<fieldset style="margin:0 0 6px"><legend>Edge Release Options</legend>${sapXRadio("sxEo", "none", "No Edge Releases - Delete Any Existing Edge Releases", !rows.length)}
+      ${sapXRadio("sxEo", "selected", "Edge Releases on Selected Area Object Edges", false)}${sapXRadio("sxEo", "each", "Edge Releases Specified Edge-By-Edge", !!rows.length)}
+      ${sapXLine("Edge Number", `<input id="sxEn" type="number" min="1" max="${Math.max(1, edges)}" value="1" style="width:110px">`, undefined, "sapx-in")}${sapXLine("Edge End Point Labels", `<input id="sxEl" readonly style="width:240px">`, undefined, "sapx-in")}</fieldset>
+    <fieldset style="margin:0"><legend>Edge Release Data</legend><div class="sapx-l"><span></span><span class="sapx-b" style="gap:30px"><b style="font-weight:normal">Release</b><b style="font-weight:normal;width:130px">Partial Fixity Springs</b></span></div>
+      ${sapEdgeDofs.map(([k, l], i) => sapXLine(l, `<input type="checkbox" id="sxEr${i}" style="margin-right:40px"><input id="sxEs${i}" style="width:110px">`)).join("")}
+      <div style="text-align:center"><button id="sxEc" type="button">Clear All Edge Releases</button></div></fieldset>`;
+  const byEdge = {};
+  for (const r of rows) (byEdge[r.Edge || "1"] = byEdge[r.Edge || "1"] || {})[r.ReleasedDOF] = r;
+  let at = "1";
+  const show = d => { const e = byEdge[at] || {}; sapEdgeDofs.forEach(([k, , s], i) => { q(d, "#sxEr" + i).checked = !!e[k]; q(d, "#sxEs" + i).value = e[k] ? e[k][s] ?? 0 : ""; }); q(d, "#sxEl").value = edges ? corners[+at - 1] + " " + corners[at % edges] : ""; };
+  const keep = d => { const e = {}; sapEdgeDofs.forEach(([k, , s], i) => { if (q(d, "#sxEr" + i).checked) e[k] = {Edge: at, ReleasedDOF: k, StiffTrans: s === "StiffTrans" ? (q(d, "#sxEs" + i).value.trim() || "0") : "0", StiffRot: s === "StiffRot" ? (q(d, "#sxEs" + i).value.trim() || "0") : "0"}; }); byEdge[at] = e; };
+  const d = sapXForm("Assign Area Edge Releases", body, d => {
+    const o = sapXRadioVal(d, "sxEo");
+    if (o === "none") return sapXRun("assign_shell_data", {objects: names, tables: {[T]: []}});
+    keep(d);
+    const out = Object.values(byEdge).flatMap(e => Object.values(e));
+    for (const r of out) if (sapXNum(r.StiffTrans) === null || sapXNum(r.StiffRot) === null) return "Each partial fixity spring needs a number.";
+    return sapXRun("assign_shell_data", {objects: names, tables: {[T]: out}});
+  }, {width: 620, after: `<div style="text-align:center;margin-top:6px"><button id="sxEg" type="button">Get Values from Currently Selected Area Object</button></div>`,
+    reset: d => { d.querySelector('input[name="sxEo"][value="none"]').checked = true; for (const k in byEdge) delete byEdge[k]; at = "1"; q(d, "#sxEn").value = 1; show(d); },
+    sync: d => {
+      const o = sapXRadioVal(d, "sxEo"), each = o === "each";
+      const sr = d.querySelector('input[name="sxEo"][value="selected"]'); sr.disabled = true; sr.closest(".sapx-r").classList.add("sapx-off");
+      const er = d.querySelector('input[name="sxEo"][value="each"]'); er.disabled = !one; er.closest(".sapx-r").classList.toggle("sapx-off", !one);
+      sapXEnable(d, ["sxEn", "sxEl"], each);
+      sapEdgeDofs.forEach((x, i) => { q(d, "#sxEr" + i).disabled = !each; sapXEnable(d, ["sxEs" + i], each && q(d, "#sxEr" + i).checked); });
+      q(d, "#sxEc").disabled = !each; q(d, "#sxEg").disabled = !one;
+    }});
+  q(d, "#sxEn").oninput = () => { keep(d); at = String(Math.min(Math.max(1, edges), Math.max(1, parseInt(q(d, "#sxEn").value) || 1))); show(d); };
+  q(d, "#sxEc").onclick = () => { for (const k in byEdge) delete byEdge[k]; show(d); };
+  q(d, "#sxEg").onclick = () => { for (const k in byEdge) delete byEdge[k]; for (const r of rows) (byEdge[r.Edge || "1"] = byEdge[r.Edge || "1"] || {})[r.ReleasedDOF] = r; show(d); };
+  show(d);
+  return d;
+}
+
+// Assign > Area > Generate Edge Constraints...: "Assign Area Edge Constraints" (SAP2000's "Area Edge Constraint
+// Assignments", a row per edge).
+async function hmSapAreaEdgeConstraints() {
+  const names = sapXPick("area"); if (!names.length) return;
+  const T = "Area Edge Constraint Assignments", {obj} = await sapXNow(names), on = sapXRows(obj, T).some(r => r.Constrained === "Yes");
+  return sapXForm("Assign Area Edge Constraints", `<fieldset style="margin:0"><legend>Options</legend>${sapXRadio("sxEc", "no", "Do NOT Create Edge Constraints", !on)}${sapXRadio("sxEc", "yes", "Create Constraints Around Area Object Edges", on)}</fieldset>`,
+    d => sapXEach(names, "assign_shell_data", n => { const a = areas.find(x => x.name === n), e = a ? a.pts.length : 4; return {tables: {[T]: sapXRadioVal(d, "sxEc") === "yes" ? Array.from({length: e}, (x, i) => ({Edge: String(i + 1), Constrained: "Yes"})) : []}}; }),
+    {width: 340});
+}
+
+// Assign > Area > Rebar Ratio for Creep Analysis...: "Assign Area Rebar Ratio for Creep Analysis". SAP2000 greys From
+// Design for areas; the User Specified Ratio goes in "Area Rebar Ratio For Creep Analysis Assignments".
+async function hmSapAreaCreep() {
+  const names = sapXPick("area"); if (!names.length) return;
+  const T = "Area Rebar Ratio For Creep Analysis Assignments", {obj} = await sapXNow(names), now = sapXRow(obj, T).UserRatio ?? "0.0025";
+  return sapXForm("Assign Area Rebar Ratio for Creep Analysis", `<fieldset style="margin:0"><legend>Vertical Rebar Ratio</legend><label class="sapx-r sapx-off"><input type="radio" name="sxCr" value="design" disabled> From Design</label>
+      <div class="sapx-l"><span>${sapXRadio("sxCr", "user", "User Specified Ratio", true)}</span><span class="sapx-b">${sapXIn("sxCrV", now)}</span></div></fieldset>`,
+    d => { const v = sapXNum(q(d, "#sxCrV").value); if (v === null || v < 0) return "User Specified Ratio needs a number of 0 or more."; return sapXRun("assign_shell_data", {objects: names, tables: {[T]: [{UserRatio: String(v)}]}}); },
+    {width: 380, reset: d => q(d, "#sxCrV").value = "0.0025"});
+}
+
+// The Assign menu's items these forms answer (hmSapAssignMenu, keys of the Assign forms thread).
+Object.assign(hmSapAssignForms, {aSections: () => hmSapAreaSectionsAssign(), aModifiers: () => hmSapAreaModifiers(), aMaterial: () => hmSapAreaMaterial(), aThickness: () => hmSapAreaThickness(),
+  aAxes: () => hmSapAreaAxes(), aReverse3: () => hmSapAreaReverse(), aSprings: () => hmSapAreaSprings(), aMass: () => hmSapAreaMass(), aMatTemp: () => hmSapAreaTemperature(),
+  aMesh: () => hmSapAreaMesh(), aEdgeReleases: () => hmSapAreaEdgeReleases(), aEdgeConstraints: () => hmSapAreaEdgeConstraints(), aCreep: () => hmSapAreaCreep()});
+
+// A SAP2000 "Assign <X> Properties" list form: the names (None first where SAP2000 lists it), Define <X>..., OK/Close/Apply.
+async function sapXListAssign(kind, title, list, now, defLabel, defOpen, rowOf, none) {
+  const names = sapXPick(kind); if (!names.length) return;
+  const all = none ? ["None", ...list] : list;
+  const d = sapXForm(title, `<select id="sxL" size="14" style="width:100%;height:auto;min-width:240px">${opts(all, now || all[0] || "")}</select>
+    <div style="text-align:center;margin-top:8px"><button id="sxDef" type="button">${esc(defLabel)}</button></div>`,
+    d => q(d, "#sxL").value ? sapXRun(sapXTool(kind), sapXArgs(kind, {objects: names, tables: rowOf(q(d, "#sxL").value)})) : "Pick one.", {width: 300});
+  q(d, "#sxDef").onclick = () => defOpen();
+  return d;
+}
+async function sapXDefRows(table, key) { const dd = (await hmRun("definition_data", {}, true)).result || {tables: {}}; return (((dd.tables || {})[table] || {}).rows || []).map(r => r[key]).filter(Boolean); }
+const sapXFirst = async (kind, T, f) => { const names = sapXOther(kind) ? sapOtherSelected(kind) : []; if (!names.length) return ""; const {obj} = await sapXNow(names, kind); return sapXRow(obj, T)[f] || ""; };
+
+// ---- Assign > Cable ----
+async function hmSapCableProperties() {
+  const list = await sapXDefRows("Cable Section Definitions", "CableSect"), now = await sapXFirst("cable", "Cable Section Assignments", "CableSect");
+  return sapXListAssign("cable", "Assign Cable Properties", list, now, "Define Cable Properties...", () => hmSapRodSections("cable"), v => ({"Cable Section Assignments": [{CableSect: v}]}));
+}
+async function hmSapCableModifiers() {
+  const names = sapXPick("cable"); if (!names.length) return;
+  const T = "Cable Property Modifiers", {obj} = await sapXNow(names, "cable"), r = sapXRow(obj, T), f = [["AMod", "Cross-section (Axial) Area"], ["MassMod", "Mass"], ["WeightMod", "Weight"]];
+  return sapXForm("Assign Cable Property Modifiers", `<fieldset style="margin:0"><legend>Property Modifiers for Analysis</legend>${f.map(([k, l]) => sapXLine(l, sapXIn("sxc" + k, r[k] ?? 1))).join("")}</fieldset>`,
+    d => { const row = {}; for (const [k, l] of f) { const v = sapXNum(q(d, "#sxc" + k).value); if (v === null || v < 0) return l + " needs a number of 0 or more."; row[k] = String(v); } return sapXRun("assign_sap_object_data", {kind: "cable", objects: names, tables: {[T]: [row]}}); },
+    {width: 360, reset: d => f.forEach(([k]) => q(d, "#sxc" + k).value = 1)});
+}
+async function hmSapCableMaterial() {
+  const names = sapXPick("cable"); if (!names.length) return;
+  const defs = await hmDefs(), T = "Cable Section Assignments", {obj} = await sapXNow(names, "cable"), m0 = sapXRow(obj, T).MatProp, now = m0 && m0 !== "Default" ? m0 : "";
+  const d = sapXForm("Assign Cable Material Overwrites", `<fieldset style="margin:0"><legend>Options</legend>${sapXRadio("sxMo", "section", "Use Material Specified in Section Property", !now)}
+    <div class="sapx-l"><span>${sapXRadio("sxMo", "over", "Overwrite Material", !!now)}</span><span class="sapx-b">${sapXPlus("sxMat", defs.materials.map(m => m.name), now)}</span></div></fieldset>`,
+    d => sapXRun("assign_sap_object_data", {kind: "cable", objects: names, tables: {[T]: [{MatProp: sapXRadioVal(d, "sxMo") === "over" ? q(d, "#sxMat").value : "Default"}]}}),
+    {width: 440, sync: d => sapXEnable(d, ["sxMat"], sapXRadioVal(d, "sxMo") === "over")});
+  sapXWirePlus(d, () => hmMaterials());
+  return d;
+}
+async function hmSapCableReverse() {
+  const names = sapXPick("cable"); if (!names.length) return;
+  return sapXForm("Assign Cable Reverse Connectivity", `<fieldset style="margin:0"><legend>Options</legend>${sapXRadio("sxRv", "global", "Keep Assigns in Same Global Orientation", true)}${sapXRadio("sxRv", "local", "Keep Assigns in Same Local Orientation", false)}</fieldset>`,
+    d => sapXRun("reverse_objects", {kind: "cable", objects: names, keep: sapXRadioVal(d, "sxRv")}), {width: 340});
+}
+async function hmSapCableStations() {
+  const names = sapXPick("cable"); if (!names.length) return;
+  const T = "Cable Output Station Assignments", u = sapXUnits(), {obj} = await sapXNow(names, "cable"), r = sapXRow(obj, T), max = r.StationType === "MaxStaSpcg";
+  return sapXForm("Assign Cable Output Stations", `<fieldset style="margin:0"><legend>Output Station Specification Options</legend>
+      <div class="sapx-l"><span>${sapXRadio("sxOs", "MaxStaSpcg", "Maximum Station Spacing", max)}</span><span class="sapx-b">${sapXIn("sxOsS", r.MaxStaSpcg ?? "")}<span class="sapx-u">${u.l}</span></span></div>
+      <div class="sapx-l"><span>${sapXRadio("sxOs", "MinNumSta", "Minimum Number of Stations", !max)}</span><span class="sapx-b">${sapXIn("sxOsN", r.MinNumSta ?? 9)}<span class="sapx-u"></span></span></div></fieldset>`,
+    d => {
+      const t = sapXRadioVal(d, "sxOs"), row = {StationType: t};
+      if (t === "MaxStaSpcg") { const v = sapXNum(q(d, "#sxOsS").value); if (v === null || v <= 0) return "Maximum Station Spacing needs a number above 0."; row.MaxStaSpcg = String(v); }
+      else { const v = parseInt(q(d, "#sxOsN").value); if (!(v >= 1)) return "Minimum Number of Stations needs a whole number of 1 or more."; row.MinNumSta = String(v); }
+      return sapXRun("assign_sap_object_data", {kind: "cable", objects: names, tables: {[T]: [row]}});
+    }, {width: 420, reset: d => { d.querySelector('input[name="sxOs"][value="MinNumSta"]').checked = true; q(d, "#sxOsN").value = 9; q(d, "#sxOsS").value = ""; },
+      sync: d => { const t = sapXRadioVal(d, "sxOs"); q(d, "#sxOsS").disabled = t !== "MaxStaSpcg"; q(d, "#sxOsN").disabled = t !== "MinNumSta"; }});
+}
+async function hmSapCableMass() {
+  const names = sapXPick("cable"); if (!names.length) return;
+  const u = sapXUnits(), T = "Cable Added Mass Assignments";
+  return sapXForm("Assign Cable Mass", `<fieldset style="margin:0 0 6px"><legend>Mass</legend>${sapXLine("Mass per Unit Length", sapXIn("sxMass", 0), u.f + "-s²/" + u.l + "²")}</fieldset>
+    <fieldset style="margin:0"><legend>Options</legend>${sapXRadio("sxMo", "add", "Add to Existing Masses", false)}${sapXRadio("sxMo", "replace", "Replace Existing Masses", true)}${sapXRadio("sxMo", "delete", "Delete Existing Masses", false)}</fieldset>`,
+    async d => {
+      const opt = sapXRadioVal(d, "sxMo"), v = sapXNum(q(d, "#sxMass").value);
+      if (opt === "delete") return sapXRun("assign_sap_object_data", {kind: "cable", objects: names, tables: {[T]: []}});
+      if (v === null) return "Mass per Unit Length needs a number.";
+      if (opt === "replace") return sapXRun("assign_sap_object_data", {kind: "cable", objects: names, tables: {[T]: v === 0 ? [] : [{MassPerLen: String(v)}]}});
+      const all = await sapXAll(names, "cable");
+      return sapXEach(names, "assign_sap_object_data", n => { const t = (sapXNum(sapXRow(all[n] || {}, T).MassPerLen) || 0) + v; return {kind: "cable", tables: {[T]: t === 0 ? [] : [{MassPerLen: String(t)}]}}; });
+    }, {width: 400, sync: d => sapXEnable(d, ["sxMass"], sapXRadioVal(d, "sxMo") !== "delete")});
+}
+async function hmSapCableTemperature() { return sapXTemperature("cable"); }
+
+// ---- Assign > Tendon ----
+async function hmSapTendonProperties() {
+  const xd = (await hmRun("extra_definitions", {}, true)).result || {tendon_sections: []};
+  const list = [...new Set([...(await sapXDefRows("Tendon Section Definitions", "TendonSect")), ...(xd.tendon_sections || []).map(t => t.name)])], now = await sapXFirst("tendon", "Tendon Section Assignments", "TendonSect");
+  return sapXListAssign("tendon", "Assign Tendon Properties", list, now, "Define Tendon Properties...", () => hmSapRodSections("tendon"), v => ({"Tendon Section Assignments": v === "None" ? [] : [{TendonSect: v}]}), true);
+}
+async function hmSapTendonAxes() {
+  const names = sapXPick("tendon"); if (!names.length) return;
+  const T = "Tendon Local Axes Assignments 1 - Typical", {obj} = await sapXNow(names, "tendon"), r = sapXRow(obj, T);
+  return sapXForm("Assign Tendon Local Axes", `<fieldset style="margin:0 0 6px"><legend>Options</legend>${sapXRadio("sxAx", "std", "Specify Standard Local Axes", true)}${sapXRadio("sxAx", "reset", "Reset Local Axes to Default", false)}</fieldset>
+    <fieldset style="margin:0"><legend>Angle from Default Orientation</legend>${sapXLine("Angle", sapXIn("sxAng", r.Angle ?? 0), "deg")}</fieldset>`,
+    d => { const reset = sapXRadioVal(d, "sxAx") === "reset", a = sapXNum(q(d, "#sxAng").value); if (!reset && a === null) return "Angle needs a number.";
+      return sapXRun("assign_sap_object_data", {kind: "tendon", objects: names, tables: {[T]: reset || a === 0 ? [] : [{Angle: String(a), AdvanceAxes: "No"}]}}); },
+    {width: 400, sync: d => sapXEnable(d, ["sxAng"], sapXRadioVal(d, "sxAx") !== "reset")});
+}
+async function hmSapTendonLimits() {
+  const names = sapXPick("tendon"); if (!names.length) return;
+  const T = "Tendon Tension And Compression Limits", u = sapXUnits(), {obj} = await sapXNow(names, "tendon"), r = sapXRow(obj, T);
+  return sapXForm("Assign Tendon Tension/Compression Limits", `<fieldset style="margin:0"><legend>Limits Settings</legend>
+      <div class="sapx-l"><label><input type="checkbox" id="sxTl" ${r.TensLimit === "Yes" ? "checked" : ""}> Include Tension Limit</label><span class="sapx-b">${sapXIn("sxTv", r.TensLimit === "Yes" ? r.Tension : "")}<span class="sapx-u">${u.f}</span></span></div>
+      <div class="sapx-l"><label><input type="checkbox" id="sxCl" ${r.CompLimit === "Yes" ? "checked" : ""}> Include Compression Limit</label><span class="sapx-b">${sapXIn("sxCv", r.CompLimit === "Yes" ? r.Compression : "")}<span class="sapx-u">${u.f}</span></span></div></fieldset>`,
+    d => {
+      const t = q(d, "#sxTl").checked, c = q(d, "#sxCl").checked, tv = sapXNum(q(d, "#sxTv").value), cv = sapXNum(q(d, "#sxCv").value);
+      if (t && (tv === null || tv < 0)) return "The tension limit needs a number of 0 or more.";
+      if (c && (cv === null || cv < 0)) return "The compression limit needs a number of 0 or more.";
+      return sapXRun("assign_sap_object_data", {kind: "tendon", objects: names, tables: {[T]: !t && !c ? [] : [{TensLimit: t ? "Yes" : "No", CompLimit: c ? "Yes" : "No", Tension: t ? String(tv) : "0", Compression: c ? String(cv) : "0"}]}});
+    }, {width: 420, sync: d => { q(d, "#sxTv").disabled = !q(d, "#sxTl").checked; q(d, "#sxCv").disabled = !q(d, "#sxCl").checked; }});
+}
+async function hmSapTendonTemperature() { return sapXTemperature("tendon"); }
+
+// ---- Assign > Solid ----
+async function hmSapSolidProperties() {
+  const list = await sapXDefRows("Solid Property Definitions", "SolidProp"), now = await sapXFirst("solid", "Solid Property Assignments", "SolidProp");
+  return sapXListAssign("solid", "Assign Solid Properties", list, now, "Define Solid Properties...", () => hmSapRodSections("solid"), v => ({"Solid Property Assignments": [{SolidProp: v}]}));
+}
+// Solid and Link Local Axes: Standard (rotations, or the link's angle), Advanced (Solid/Link Advanced Axes) or Reset to Default (Global).
+async function sapXAxes(kind) {
+  const names = sapXPick(kind); if (!names.length) return;
+  const K = kind === "solid" ? "Solid" : "Link", T1 = K + " Local Axes Assignments 1 - Typical", T2 = K + " Local Axes Assignments 2 - Advanced";
+  const csys = await sapCsys(), {obj} = await sapXNow(names, kind), r1 = sapXRow(obj, T1), r2 = sapXRow(obj, T2);
+  const dflt = kind === "solid" ? {...sapAdvDefault, LocalPlane: "31", AxCoordDir: "+Z", CoordDir1: "+X", CoordDir2: "+Y"} : {...sapAdvDefault, LocalPlane: "12", AxCoordDir: "+Z", CoordDir1: "+Z", CoordDir2: "+X"};
+  let adv = Object.keys(r2).length ? {...dflt, ...r2} : {...dflt};
+  const rot = kind === "solid" ? [["AngleA", "Rotation about Z"], ["AngleB", "Rotation about Y"], ["AngleC", "Rotation about X"]] : [["Angle", "Angle"]];
+  const d = sapXForm(`Assign ${K} Local Axes`, `<fieldset style="margin:0 0 6px"><legend>Options</legend>${sapXRadio("sxAx", "std", "Specify Standard Local Axes", r1.AdvanceAxes !== "Yes")}${sapXRadio("sxAx", "adv", "Specify Advanced Local Axes", r1.AdvanceAxes === "Yes")}${sapXRadio("sxAx", "reset", "Reset Local Axes to Default  (Global)", false)}</fieldset>
+    <fieldset style="margin:0 0 6px"><legend>Rotation</legend>${rot.map(([k, l]) => sapXLine(l, sapXIn("sxR" + k, r1[k] ?? 0), "deg")).join("")}</fieldset>
+    <fieldset style="margin:0;min-height:170px;display:flex;flex-direction:column" id="sxAdvF"><legend>Advanced</legend><div id="sxAdvS" class="kv" style="flex:1"></div><div style="text-align:center"><button id="sxAdvB" type="button">Modify/Show Advanced Parameters...</button></div></fieldset>`,
+    d => {
+      const o = sapXRadioVal(d, "sxAx"), row = {};
+      for (const [k, l] of rot) { const v = sapXNum(q(d, "#sxR" + k).value); if (o !== "reset" && v === null) return l + " needs a number."; row[k] = String(v ?? 0); }
+      row.AdvanceAxes = o === "adv" ? "Yes" : "No";
+      return sapXRun("assign_sap_object_data", {kind, objects: names, tables: {[T1]: o === "reset" ? [] : [row], [T2]: o === "adv" ? [adv] : []}});
+    }, {width: 420, reset: d => { d.querySelector('input[name="sxAx"][value="std"]').checked = true; rot.forEach(([k]) => q(d, "#sxR" + k).value = 0); adv = {...dflt}; },
+      sync: d => { const o = sapXRadioVal(d, "sxAx"); sapXEnable(d, rot.map(([k]) => "sxR" + k), o !== "reset"); q(d, "#sxAdvB").disabled = o !== "adv"; q(d, "#sxAdvF").classList.toggle("sapx-off", o !== "adv"); q(d, "#sxAdvS").innerHTML = o === "adv" ? sapAdvSummary(adv) : ""; }});
+  q(d, "#sxAdvB").onclick = () => hmSapAdvancedAxes(`${K} Advanced Axes`, adv, csys, a => { adv = a; q(d, "#sxAdvS").innerHTML = sapAdvSummary(adv); q(d, '.df [data-b="2"]').disabled = false; });
+  return d;
+}
+async function hmSapSolidAxes() { return sapXAxes("solid"); }
+async function hmSapSolidSprings() { return sapXFaceSprings("solid"); }
+async function hmSapSolidTemperature() { return sapXTemperature("solid"); }
+// Assign > Solid > Switch Faces...: "Modify Solid Faces".
+async function hmSapSolidSwitch() {
+  const names = sapXPick("solid"); if (!names.length) return;
+  const faces = [1, 2, 3, 4, 5, 6].map(i => [String(i), "Face " + i]);
+  return sapXForm("Modify Solid Faces", `<fieldset style="margin:0 0 6px"><legend>Select Faces to Switch</legend>${sapXLine("Switch Face", `<select id="sxF1" style="width:110px">${opts(faces, "1")}</select>`)}${sapXLine("With Face", `<select id="sxF2" style="width:110px">${opts(faces, "5")}</select>`)}</fieldset>
+    <fieldset style="margin:0"><legend>Options</legend>${sapXRadio("sxMv", "move", "Move Assignments with Face", true)}${sapXRadio("sxMv", "stay", "Do Not Move Assignments with Face", false)}</fieldset>`,
+    d => sapXRun("switch_solid_faces", {objects: names, face: +q(d, "#sxF1").value, with: +q(d, "#sxF2").value, move: sapXRadioVal(d, "sxMv") === "move"}),
+    {width: 360, reset: d => { q(d, "#sxF1").value = "1"; q(d, "#sxF2").value = "5"; d.querySelector('input[name="sxMv"][value="move"]').checked = true; }});
+}
+// Assign > Solid > Automatic Solid Mesh...: "Assign Automatic Solid Mesh" (SAP2000's "Solid Auto Mesh Assignments").
+async function hmSapSolidMesh() {
+  const names = sapXPick("solid"); if (!names.length) return;
+  const T = "Solid Auto Mesh Assignments", u = sapXUnits(), {obj} = await sapXNow(names, "solid"), r = sapXRow(obj, T);
+  const t0 = r.AutoMesh === "Yes" ? (r.MeshType === "Maximum Size" ? "Maximum Size" : "Number") : "None";
+  const e = ["2", "3", "5"];
+  const d = sapXForm("Assign Automatic Solid Mesh", `<fieldset style="margin:0 0 6px"><legend>Mesh Option</legend>${sapXRadio("sxMt", "None", "None", t0 === "None")}
+      ${sapXRadio("sxMt", "Number", "Auto Mesh Solid Into This Number of Objects", t0 === "Number")}${e.map((p, i) => sapXLine(`Along Edge from Point 1 to ${p}`, sapXIn("sxN" + i, r["Number" + (i + 1)] ?? 2), "", "sapx-in")).join("")}
+      ${sapXRadio("sxMt", "Maximum Size", "Auto Mesh Solid Into Objects of This Maximum Size", t0 === "Maximum Size")}${e.map((p, i) => sapXLine(`Along Edge from Point 1 to ${p}`, sapXIn("sxM" + i, r["Max" + (i + 1)] ?? ""), u.l, "sapx-in")).join("")}</fieldset>
+    <fieldset style="margin:0"><legend>Restraint and Constraint Settings</legend><label class="sapx-r"><input type="checkbox" id="sxAS" ${r.AddSupport !== "No" ? "checked" : ""}> Add restraints/constraints on edge if corners have restraints/constraints</label>
+      <label class="sapx-r"><input type="checkbox" id="sxAF" ${r.AddSuppSurf !== "No" ? "checked" : ""}> Add restraints/constraints on face if corners have restraints/constraints</label></fieldset>`,
+    d => {
+      const t = sapXRadioVal(d, "sxMt");
+      if (t === "None") return sapXRun("assign_sap_object_data", {kind: "solid", objects: names, tables: {[T]: []}});
+      const row = {AutoMesh: "Yes", MeshType: t};
+      for (let i = 0; i < 3; i++) {
+        if (t === "Number") { const v = parseInt(q(d, "#sxN" + i).value); if (!(v >= 1)) return `Along Edge from Point 1 to ${e[i]} needs a whole number of 1 or more.`; row["Number" + (i + 1)] = String(v); }
+        else { const v = sapXNum(q(d, "#sxM" + i).value); if (v === null || v <= 0) return `Along Edge from Point 1 to ${e[i]} needs a number above 0.`; row["Max" + (i + 1)] = String(v); }
+      }
+      row.AddSupport = q(d, "#sxAS").checked ? "Yes" : "No"; row.AddSuppSurf = q(d, "#sxAF").checked ? "Yes" : "No";
+      return sapXRun("assign_sap_object_data", {kind: "solid", objects: names, tables: {[T]: [row]}});
+    }, {width: 520, reset: d => { d.querySelector('input[name="sxMt"][value="None"]').checked = true; q(d, "#sxAS").checked = q(d, "#sxAF").checked = true; },
+      sync: d => { const t = sapXRadioVal(d, "sxMt"); sapXEnable(d, ["sxN0", "sxN1", "sxN2"], t === "Number"); sapXEnable(d, ["sxM0", "sxM1", "sxM2"], t === "Maximum Size");
+        for (const id of ["sxAS", "sxAF"]) { q(d, "#" + id).disabled = t === "None"; q(d, "#" + id).closest("label").classList.toggle("sapx-off", t === "None"); } }});
+  return d;
+}
+async function hmSapSolidEdgeConstraints() {
+  const names = sapXPick("solid"); if (!names.length) return;
+  const T = "Solid Edge Constraint Assignments", {obj} = await sapXNow(names, "solid"), on = sapXRows(obj, T).some(r => r.Constrained === "Yes");
+  return sapXForm("Assign Solid Edge Constraints", `<fieldset style="margin:0"><legend>Options</legend>${sapXRadio("sxEc", "no", "Do NOT Create Edge Constraints", !on)}${sapXRadio("sxEc", "yes", "Create Constraints Around Solid Object Edges", on)}</fieldset>`,
+    d => sapXRun("assign_sap_object_data", {kind: "solid", objects: names, tables: {[T]: sapXRadioVal(d, "sxEc") === "yes" ? Array.from({length: 12}, (x, i) => ({Edge: String(i + 1), Constrained: "Yes"})) : []}}),
+    {width: 360});
+}
+
+// ---- Assign > Link/Support ----
+async function hmSapLinkProperties() {
+  const pd = (await hmRun("property_definitions", {}, true)).result || {links: []}, list = (pd.links || []).map(l => l.name), now = await sapXFirst("link", "Link Property Assignments", "LinkProp");
+  return sapXListAssign("link", "Assign Link Properties", list, now, "Define Link Properties...", () => modelAct("links"), v => ({"Link Property Assignments": [{LinkProp: v === "None" ? "" : v}]}), true);
+}
+async function hmSapLinkFreq() {
+  const list = await sapXDefRows("Link Frequency Dependent Properties 01 - General", "Link"), now = await sapXFirst("link", "Link Property Assignments", "LinkFDProp");
+  return sapXListAssign("link", "Assign Link Frequency Dependent Properties", [...new Set(list)], now && now !== "None" ? now : "None", "Define Link Frequency Dependent Properties...", () => hmSapFreqLinks(), v => ({"Link Property Assignments": [{LinkFDProp: v}]}), true);
+}
+async function hmSapLinkModifier() {
+  const names = sapXPick("link"); if (!names.length) return;
+  const T = "Link Property Assignments", {obj} = await sapXNow(names, "link"), now = sapXRow(obj, T).PropMod ?? 1;
+  return sapXForm("Assign Link Property Modifier", `<fieldset style="margin:0"><legend>Property Modifier for Analysis</legend>${sapXLine("Property Modifier", sapXIn("sxPm", now))}</fieldset>`,
+    d => { const v = sapXNum(q(d, "#sxPm").value); if (v === null || v < 0) return "Property Modifier needs a number of 0 or more."; return sapXRun("assign_sap_object_data", {kind: "link", objects: names, tables: {[T]: [{PropMod: String(v)}]}}); },
+    {width: 340, reset: d => q(d, "#sxPm").value = 1});
+}
+async function hmSapLinkAxes() { return sapXAxes("link"); }
+// Assign > Link/Support > Reverse Connectivity: SAP2000 opens no form ("NLLink Reverse Connectivity" picking); the links
+// picked (selected) change ends at once.
+async function hmSapLinkReverse() {
+  const names = sapXPick("link"); if (!names.length) return;
+  const err = await sapXRun("reverse_objects", {kind: "link", objects: names});
+  hmSay(err || `NLLink Reverse Connectivity: ${names.length} link${names.length === 1 ? "" : "s"} reversed. Edit > Undo steps back.`, !!err);
+}
+
+Object.assign(hmSapAssignForms, {cSections: () => hmSapCableProperties(), cModifiers: () => hmSapCableModifiers(), cMaterial: () => hmSapCableMaterial(), cReverse: () => hmSapCableReverse(),
+  cStations: () => hmSapCableStations(), cMass: () => hmSapCableMass(), cMatTemp: () => hmSapCableTemperature(),
+  tSections: () => hmSapTendonProperties(), tAxes: () => hmSapTendonAxes(), tTCLimits: () => hmSapTendonLimits(), tMatTemp: () => hmSapTendonTemperature(),
+  sSections: () => hmSapSolidProperties(), sAxes: () => hmSapSolidAxes(), sSprings: () => hmSapSolidSprings(), sMatTemp: () => hmSapSolidTemperature(), sSwitch: () => hmSapSolidSwitch(),
+  sMesh: () => hmSapSolidMesh(), sEdgeConstraints: () => hmSapSolidEdgeConstraints(),
+  lSections: () => hmSapLinkProperties(), lFreq: () => hmSapLinkFreq(), lModifiers: () => hmSapLinkModifier(), lAxes: () => hmSapLinkAxes(), lReverse: () => hmSapLinkReverse()});
+
 const sapShellTypes = [["ShellThin", "Shell - Thin"], ["ShellThick", "Shell - Thick"], ["PlateThin", "Plate - Thin"], ["PlateThick", "Plate Thick"], ["Membrane", "Membrane"], ["Layered", "Shell - Layered/Nonlinear"]];
 async function hmSapShellSection(s, after, copy) {
   const defs = await hmDefs(), u = hmU(), pd = (await hmRun("property_definitions", {}, true)).result, dd = (await hmRun("definition_data", {}, true)).result || {tables: {}};

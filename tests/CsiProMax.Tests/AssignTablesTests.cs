@@ -104,6 +104,47 @@ static class AssignTablesTests
             Check(ri.Count == 0 && rj.SequenceEqual(new[] { "M3" }), "the M3 release stayed at the same joint: now end J");
             Check(PropertyDefs.Value(x.Extra, "LENGTHOFFI") == "0.3" && PropertyDefs.Value(x.Extra, "LENGTHOFFJ") == "0.2", "the offsets stayed at their joints");
         });
+        yield return ("sap2000 Assign > Area forms: every form's rows (SapFormRoundTrip.AreaAssigns) go into the .s2k as SAP2000's own tables and come back on the area; Reverse Local 3 reverses the corners", () =>
+        {
+            var link = Frame();
+            var m = link.Model;
+            m.Target = "sap2000";
+            var slab = m.AreaAssigns.First(a => a.Story == "Story1");
+            var mat = m.Materials.First(x => x.IsConcrete).Name;
+            var obj = slab.Label + "@Story1";
+            foreach (var (form, _, args, _) in CsiProMax.Assistant.Sap2000.SapFormRoundTrip.AreaAssigns)
+            {
+                var json = JsonNode.Parse(args.Replace("{mat}", mat))!.AsObject();
+                json["objects"] = new JsonArray(obj);
+                PropertyTools.All.Single(x => x.Name == "assign_shell_data").Invoke(JsonDocument.Parse(json.ToJsonString()).RootElement, link);
+            }
+            var text = S2kWriter.Write(m, "area.s2k").Text;
+            var name = S2kWriter.Name(slab.Label, slab.Story);
+            var tables = CsiProMax.CsiTables.CsiTableText.Parse(text);
+            foreach (var (form, table, _, row) in CsiProMax.Assistant.Sap2000.SapFormRoundTrip.AreaAssigns)
+            {
+                var rows = tables.FirstOrDefault(t => t.Key.Equals(table, StringComparison.OrdinalIgnoreCase)).Value ?? [];
+                var mine = rows.Where(r => r.GetValueOrDefault("Area") == name).ToList();
+                Check(mine.Count > 0, $"{form}: the .s2k has no {table} row for {name}");
+                Check(mine.Exists(r => row.All(kv => double.TryParse(kv.Value.Replace("{mat}", mat), System.Globalization.CultureInfo.InvariantCulture, out var want) && double.TryParse(r.GetValueOrDefault(kv.Key), System.Globalization.CultureInfo.InvariantCulture, out var got) ? Math.Abs(want - got) < 1e-9 : r.GetValueOrDefault(kv.Key) == kv.Value.Replace("{mat}", mat))),
+                    $"{form}: {table} for {name} is {string.Join(" | ", mine.Select(r => string.Join(" ", r.Select(kv => kv.Key + "=" + kv.Value))))}");
+            }
+            var back = S2kReader.Read(text, "Area").Model;
+            var a2 = back.AreaAssigns.First(a => a.Label == slab.Label && a.Story == slab.Story);
+            Check(AssignTables.Row(a2, "Area Overwrites - Thickness").GetValueOrDefault("Thick3") == "0.35", "the thickness overwrite came back");
+            Check(AssignTables.Row(a2, "Area Assignments - Material Overwrites").GetValueOrDefault("Material") == mat, "the material overwrite came back");
+            Check(AssignTables.Row(a2, "Area Assignments - Additional Mass").GetValueOrDefault("AddedMass") == "0.03", "the area mass came back");
+            Check(AssignTables.Row(a2, "Area Assignments - Local Axes").GetValueOrDefault("Angle") == "30", "the local axis angle came back");
+            Check(Math.Abs(PropertyDefs.Modifiers(a2.Extra, PropertyDefs.ShellModifiers)["M11MOD"] - 0.25) < 1e-9, "the stiffness modifiers came back");
+            Check(AssignTables.Row(a2, "Area Material Temperatures").GetValueOrDefault("Temp") == "20", "the material temperature came back");
+            // Reverse Local 3: corner 1 stays, the others run the other way.
+            var before = m.Area(slab.Label)!.PointNames.ToList();
+            var others = m.AreaAssigns.Where(a => a.Label == slab.Label).Select(a => a.Label + "@" + a.Story).ToArray();
+            PropertyTools.All.Single(x => x.Name == "reverse_objects").Invoke(JsonDocument.Parse(JsonSerializer.Serialize(new { objects = others })).RootElement, link);
+            var after = m.Area(slab.Label)!.PointNames;
+            Check(after[0] == before[0] && after[1] == before[^1] && after[^1] == before[1], "Reverse Local 3 runs the corners the other way: " + string.Join(",", after));
+            if (others.Length > 1) Refused(link, "reverse_objects", new { objects = new[] { obj } }, "select it on each");
+        });
         yield return ("assign tables: added mass, output stations, T/C limits, edge releases and an opening reach the model, the .cpm, Replicate and SAP2000's tables", () =>
         {
             var link = Frame();
