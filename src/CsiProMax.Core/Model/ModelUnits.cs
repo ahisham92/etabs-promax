@@ -188,6 +188,7 @@ public static partial class ModelUnits
         m.Controls = m.Controls.Select(l => RawLine(l, "CONTROLS", K)).ToList();
         Tables(m.DefinitionTables, K);
         Tables(m.Kept, K);
+        if (m.Carried is { } carried) Tables(carried.Rows, K);
         if (m.Extras is { } x)
         {
             foreach (var c in x.Constraints) c.Tolerance = S(c.Tolerance, Dim.Len);
