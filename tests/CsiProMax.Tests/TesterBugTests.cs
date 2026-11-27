@@ -1557,6 +1557,26 @@ static class TesterBugTests
             Check(com.Contains("ReadTableNow(key, isCase ? [one] : [], isCase ? [] : [one])", StringComparison.Ordinal), "one load case or combination a page");
         });
 
+        yield return ("Out of memory box (0.4.68): a large model's results table is read one load case or combination at a time from the start, with repeated values kept once", () =>
+        {
+            Check(ComEtabs.IsCaseTable(["Story", "Joint", "OutputCase", "CaseType", "UX"]), "a table with OutputCase is read by case");
+            Check(ComEtabs.IsCaseTable(["Frame", "Station", "Combo", "P"]), "a table with Combo is read by case");
+            Check(!ComEtabs.IsCaseTable(["Story", "Height", "Elevation"]), "a table without cases is read whole");
+            Check(!ComEtabs.PagesNeeded(1_000, 10, 20), "a small table stays one read");
+            Check(ComEtabs.PagesNeeded(50_000, 20, 10), "one case of 50,000 rows x 20 fields over 10 cases is read in pages");
+            var repeats = new Repeats(2);
+            var a = repeats.Kept(0, new string("DEAD".ToCharArray()));
+            var b = repeats.Kept(0, new string("DEAD".ToCharArray()));
+            Check(ReferenceEquals(a, b), "a value repeated down a column is kept once");
+            for (var i = 0; i < 5000; i++) repeats.Kept(1, i.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            var c = repeats.Kept(1, new string("x1".ToCharArray()));
+            var d = repeats.Kept(1, new string("x1".ToCharArray()));
+            Check(!ReferenceEquals(c, d), "a column of mostly distinct numbers stops being tracked");
+            var com = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Etabs/ComEtabs.cs"));
+            Check(com.IndexOf("if (Paged(key, cases, combos) is { } paged) return paged;", StringComparison.Ordinal) is var paged and > 0
+                && paged < com.IndexOf("return ReadTableKept(key, cases, combos);", StringComparison.Ordinal), "the size is checked before any whole-table read");
+        });
+
         yield return ("SAFE tester (0.4.68): a field test started from a Modeler window with no program expects the Modeler to name itself in get_model_context", () =>
         {
             var self = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/SelfTest.cs"));
