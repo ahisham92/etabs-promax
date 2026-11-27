@@ -280,6 +280,27 @@ public static class ViewerCheck
             if (types.length !== 9) fails.push(`Story Response lists ${types.length} display types, the program lists 9`); else done.push("Story Response (" + d.querySelector("#srMM").textContent + ")");
             closeDialogs();
           }
+          // Show Tables (Ctrl+T): Choose Tables for Display, the table window with its menus and Record line, and the Format form.
+          closeDialogs(); act("tables"); await wait(200);
+          let ct = [...document.querySelectorAll(".dlg")].pop();
+          if (!ct || ct.querySelector(".dt b").textContent !== "Choose Tables for Display") fails.push("Show Tables opened " + (ct ? ct.querySelector(".dt b").textContent : "nothing"));
+          else {
+            ct.querySelectorAll("details").forEach(x => x.open = true);
+            const leaf = [...ct.querySelectorAll("[data-t]")].find(x => (tables[x.dataset.t] || {}).rows && tables[x.dataset.t].rows.length);
+            if (!leaf) fails.push("Choose Tables for Display lists no table with rows");
+            else {
+              leaf.checked = true; leaf.onchange(); ct = [...document.querySelectorAll(".dlg")].pop(); ct.querySelector("#ctOK").click(); await wait(250);
+              const tv = [...document.querySelectorAll(".dlg")].pop(), menus = [...tv.querySelectorAll(".etrMenu button")].map(b => b.textContent).join(",");
+              if (menus !== "File,Edit,Format-Filter-Sort,Select,Options") fails.push("the table window's menus are " + menus);
+              else if (!tv.querySelector("#tvG tbody tr")) fails.push(`the table window shows no rows of ${leaf.dataset.t}`);
+              else {
+                etrTableFormat(tables[leaf.dataset.t], "Format"); await wait(150);
+                const tf = [...document.querySelectorAll(".dlg")].pop(), tabs = [...tf.querySelectorAll(".itabs button")].map(b => b.textContent).join(",");
+                if (tabs !== "Format,Filter,Sort") fails.push("Modify/Show Database Table Format tabs are " + tabs); else done.push(`Show Tables: ${leaf.dataset.t}, ${tv.querySelector("#tvOf").textContent} records`);
+              }
+            }
+          }
+          closeDialogs();
           act("r:model"); await wait(100);
           return fails.length ? {fail: fails.join("; ")} : {ok: done.join("; ")};
         });

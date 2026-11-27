@@ -292,6 +292,21 @@ footer #fbFilter{display:flex;align-items:center;gap:4px;border:0;border-left:1p
 .dlg .etrSRb{display:flex;gap:6px}.dlg .etrPG{width:180px;display:flex;flex-direction:column;justify-content:space-between;border:1px solid var(--fgroup)}
 .dlg .etrPG table{width:100%;border-collapse:collapse;font-size:12px}.dlg .etrPG td{border-bottom:1px solid var(--fgroup);padding:1px 3px}.dlg .etrPG tr.h td{font-weight:bold;background:var(--fgroup)}.dlg .etrPG select,.dlg .etrPG input{width:100%;font-size:12px}
 .dlg .etrHelp{font-size:12px;padding:4px;border-top:1px solid var(--fgroup)}.dlg .etrPlot{flex:1;background:#d9d9d9;padding:4px}.dlg .etrPlot canvas{width:100%;background:#fff}
+/* ETABS 23.2 Show Tables: Choose Tables for Display, the table viewer, Modify/Show Database Table Format */
+.dlg .etrMenu{display:flex;gap:2px;margin:-4px 0 4px}.dlg .etrMenu button{border:0;background:none;padding:2px 8px}.dlg .etrMenu button:hover{background:var(--sel)}.dlg .etrMenu button.off{opacity:.5}
+.etrPop{position:fixed;z-index:9999;background:var(--panel,#fff);border:1px solid #999;box-shadow:2px 2px 6px #0003;min-width:220px;font-size:12.5px;padding:2px 0}.etrPop div{padding:4px 22px 4px 26px;cursor:default;display:flex;justify-content:space-between;gap:18px}.etrPop div:hover{background:var(--sel)}.etrPop div.off{opacity:.5}.etrPop hr{margin:2px 0;border:0;border-top:1px solid #ccc}
+.dlg .etrCTb{display:grid;grid-template-columns:1fr 200px;gap:8px}.dlg .etrTree{height:480px;overflow:auto;border:1px solid #999;background:#fff;color:#000;padding:4px;font-size:12.5px}
+.dlg .etrTree details{padding-left:16px}.dlg .etrTree > details{padding-left:0}.dlg .etrTree summary{cursor:default;list-style:none;display:flex;align-items:center;gap:3px}.dlg .etrTree summary::before{content:"\229E";font-size:12px;color:#666}.dlg .etrTree details[open] > summary::before{content:"\229F"}
+.dlg .etrTree .blue{color:#00c}.dlg .etrTree .leaf{padding-left:34px;display:flex;align-items:center;gap:3px}
+.dlg .etrCTr{display:flex;flex-direction:column}.dlg .etrCTr fieldset{display:flex;flex-direction:column;gap:3px}.dlg .etrCTr > span{flex:1}.dlg .etrOkC{display:flex;gap:10px;justify-content:center}.dlg .etrOkC button{min-width:70px}
+.dlg .etrCTf{display:flex;align-items:center;gap:10px;margin-top:6px}
+.dlg .etrTVh{display:flex;justify-content:space-between;gap:10px;font-size:12px}.dlg .etrTVh > div span{margin-right:24px}.dlg .etrTVh select{min-width:300px;align-self:flex-start}
+.dlg .etrGrid{height:340px;overflow:auto;background:#a0a0a0;border:1px solid #666;margin:4px 0}.dlg .etrGrid table{border-collapse:collapse;background:#fff;color:#000;font-size:12px}.dlg .etrGrid table.auto td{white-space:nowrap}
+.dlg .etrGrid th{background:#fff;border:1px solid #333;padding:4px 8px;font-weight:600;position:sticky;top:0}.dlg .etrGrid td{border:1px solid #888;padding:2px 8px;height:17px;min-width:60px}.dlg .etrGrid td.rs,.dlg .etrGrid th.rs{min-width:16px;width:16px}.dlg .etrGrid tr.on td{background:#cce4ff}.dlg .etrGrid td.fn{background:#ddd}
+.dlg .etrTVf{display:flex;align-items:center;gap:4px}.dlg .etrTVf input{width:70px;text-align:center}.dlg .etrTVf > span:nth-last-of-type(1){flex:1}
+.dlg .etrTF{display:grid;grid-template-columns:1fr 220px;gap:8px}.dlg .etrTFr{display:flex;flex-direction:column}.dlg .etrTFr fieldset{display:flex;flex-direction:column;gap:5px}.dlg .etrTFr > span{flex:1}
+.dlg .etrFG{display:grid;grid-template-columns:1fr 44px;gap:8px;align-items:center}.dlg .etrUD{display:flex;flex-direction:column;gap:10px}.dlg .etrUD button{font-size:22px}.dlg .etrTFb{display:flex;gap:16px}
+.dlg .etr4{display:grid;grid-template-columns:repeat(4,1fr)}.dlg .etrQF{display:grid;grid-template-columns:100px 160px;gap:6px 10px;width:50%}.dlg .etrSort{display:grid;grid-template-columns:70px 160px auto;gap:6px 10px;width:50%;align-items:center}
 .dlg .g4{display:grid;grid-template-columns:1fr 1fr 1fr;gap:3px 14px}
 .dlg label{white-space:nowrap}
 .dlg select,.dlg input[type=text],.dlg input[type=number]{width:100%}
@@ -3501,7 +3516,7 @@ function act(name) {
     case "theme:light": case "theme:dark": return setTheme(name === "theme:dark");
     case "bg": bg = bg === "black" ? "white" : "black"; bgSaved = true; try { localStorage.setItem("cpm-bg", bg); } catch (e) {} colourDirty = true; if (P) buildTree(); syncTools(); return draw();
     case "plot": if (p) setMode(p, p.mode === "plot" ? "3d" : "plot"); return;
-    case "tables": return showTables($("dock").hidden);
+    case "tables": if (etrOn() && P) return etrChooseTables(); return showTables($("dock").hidden);
     case "anim": res.anim = !res.anim && res.mode === "deformed"; syncResults(); return draw();
     case "selAll": for (const o of frames.concat(areas)) if (!p || !p.vis || p.vis[o.id]) sel.add(o.id); return selChanged();
     case "selNone": if (sel.size || selJ.size) prevSel = {f: [...sel], j: [...selJ]}; sel.clear(); selJ.clear(); return selChanged();
@@ -4192,6 +4207,290 @@ function etrStoryResponse() {
   });
   grid(); plot();
   return d;
+}
+// ---- ETABS 23.2's Display > Show Tables (Ctrl+T): Choose Tables for Display, the table viewer window and
+// Modify/Show Database Table Format, item for item as pictured on Ahmed's PC (field/reference-forms/etabs/Display:
+// Show Tables 1-6, Table Viewer 1-5, Table Format 1-6). SAP2000 and SAFE keep the tables dock.
+// The tree's MODEL DEFINITION branches are ETABS's own (pictured); the ANALYSIS RESULTS and DESIGN RESULTS branch
+// names are UNVERIFIED until the capture thread's after-analysis pictures arrive.
+const etrTreeRules = [
+  ["MODEL DEFINITION", "System Data", "Control Data", /^(program control|project information|units|preferences - (?!dimensions))/],
+  ["MODEL DEFINITION", "System Data", "Towers, Stories and Grids", /tower|stor(y|ies) definitions|grid|^story/],
+  ["MODEL DEFINITION", "Property Definitions", "Material Properties", /^material/],
+  ["MODEL DEFINITION", "Property Definitions", "Frame Section Properties", /^frame (section|property)|section designer|frame sections/],
+  ["MODEL DEFINITION", "Property Definitions", "Tendon Properties", /^tendon (section|propert)/],
+  ["MODEL DEFINITION", "Property Definitions", "Area Section Properties", /^(slab|wall|deck|shell|area) (property|section)|area sections/],
+  ["MODEL DEFINITION", "Property Definitions", "Link Properties", /^link property/],
+  ["MODEL DEFINITION", "Property Definitions", "Rebar Sizes", /rebar size|reinforcing bar/],
+  ["MODEL DEFINITION", "Property Definitions", "Panel Zones", /^panel zone property/],
+  ["MODEL DEFINITION", "Property Definitions", "Spring Properties", /^spring property/],
+  ["MODEL DEFINITION", "Property Definitions", "Hinge Properties", /^(hinge definitions|generated hinges)/],
+  ["MODEL DEFINITION", "Load Pattern Definitions", "Load Patterns", /^load pattern|^shell uniform load sets/],
+  ["MODEL DEFINITION", "Load Pattern Definitions", "Response Spectrum Functions", /response spectrum/],
+  ["MODEL DEFINITION", "Load Pattern Definitions", "Time History Functions", /time history|^functions/],
+  ["MODEL DEFINITION", "Other Definitions", "Group Data", /^group/],
+  ["MODEL DEFINITION", "Other Definitions", "Miscellaneous", /^(diaphragm definitions|pier label|spandrel label|section cut|named|strip|design strip|wall stack)/],
+  ["MODEL DEFINITION", "Load Case Definitions", "Load Case Definitions", /^load case|^load combination|combination definitions|^mass source/],
+  ["MODEL DEFINITION", "Connectivity Data", "Bays", /bays$/],
+  ["MODEL DEFINITION", "Connectivity Data", "Object Connectivity", /connectivity|curve data|^objects and elements/],
+  ["MODEL DEFINITION", "Joint Assignments", "Joint Load Assignments", /^joint load/],
+  ["MODEL DEFINITION", "Joint Assignments", "Joint Item Assignments", /^joint assignments/],
+  ["MODEL DEFINITION", "Frame Assignments", "Frame Load Assignments", /^frame load/],
+  ["MODEL DEFINITION", "Frame Assignments", "Frame Item Assignments", /^frame assignments/],
+  ["MODEL DEFINITION", "Area Assignments", "Area Load Assignments", /^(area|shell) load/],
+  ["MODEL DEFINITION", "Area Assignments", "Area Item Assignments", /^(area|shell) assignments/],
+  ["MODEL DEFINITION", "Link Assignments", "Link Item Assignments", /^link assignments/],
+  ["MODEL DEFINITION", "Options and Preferences Data", "Analysis Options", /^analysis options|degrees of freedom|p-delta/],
+  ["MODEL DEFINITION", "Options and Preferences Data", "Dimensions and Graphics Preferences", /preferences - dimensions|graphics/],
+  ["MODEL DEFINITION", "Miscellaneous Data", "Miscellaneous", /^$/],
+  ["DESIGN DATA", "Design Definition Data", "Design Preferences", /design preferences/],
+  ["DESIGN DATA", "Design Definition Data", "Design Overwrites", /design overwrites/],
+  ["DESIGN DATA", "Design Definition Data", "Design Load Combinations", /design load combination|load combinations for design/],
+  ["DESIGN RESULTS", "Design Results", "Steel Frame Design", /^steel (frame )?design/],
+  ["DESIGN RESULTS", "Design Results", "Concrete Frame Design", /^concrete (frame |serviceability )?(design|beam|column)/],
+  ["DESIGN RESULTS", "Design Results", "Composite Beam Design", /^composite (beam|column) design/],
+  ["DESIGN RESULTS", "Design Results", "Shear Wall Design", /^shear wall/],
+  ["DESIGN RESULTS", "Design Results", "Slab Design", /^(concrete slab|slab|strip|punching)/],
+  ["DESIGN RESULTS", "Design Results", "Other Design", /design/],
+  ["ANALYSIS RESULTS", "Structure Output", "Base Reactions", /^base reactions/],
+  ["ANALYSIS RESULTS", "Structure Output", "Modal Results", /^modal|^buckling/],
+  ["ANALYSIS RESULTS", "Structure Output", "Story Results", /^stor(y|ies)|^diaphragm|^centers of mass|^tabulated/],
+  ["ANALYSIS RESULTS", "Structure Output", "Other Output Items", /energy|^assembled|^analysis messages|^material list|^mass summary/],
+  ["ANALYSIS RESULTS", "Joint Output", "Joint Results", /^joint|^point|^soil pressure/],
+  ["ANALYSIS RESULTS", "Frame Output", "Element Forces", /^element forces - (beams|columns|braces)|^frame/],
+  ["ANALYSIS RESULTS", "Area Output", "Area Results", /area shells|^element (stresses|strains)|^shell/],
+  ["ANALYSIS RESULTS", "Wall Output", "Pier and Spandrel Results", /^pier|^spandrel|wall/],
+  ["ANALYSIS RESULTS", "Link Output", "Link Results", /link|panel zone/],
+  ["ANALYSIS RESULTS", "Other Output", "Other Results", /./],
+];
+const etrTopOrder = ["MODEL DEFINITION", "ANALYSIS RESULTS", "DESIGN DATA", "DESIGN RESULTS"];
+function etrTablePlace(name, t) {
+  const n = String(name).toLowerCase(), result = !!(P.tables[name] && P.tables[name].from !== "input");
+  for (const r of etrTreeRules) { const isRes = /RESULTS/.test(r[0]); if (isRes !== result && !(r[0] === "DESIGN DATA" && !result)) continue; if (r[3].test(n)) return r; }
+  return result ? ["ANALYSIS RESULTS", "Other Output", "Other Results"] : ["MODEL DEFINITION", "Miscellaneous Data", "Miscellaneous"];
+}
+let etrPicked = new Set(), etrPatSel = null, etrCaseSel = null, etrFormatFile = null;
+const etrFmt = {}; // per table: field order, visible, alignment, repeat at split, force split after, filter and sort
+function etrAllTables() { if (!tables || !Object.keys(tables).length) fillTables(); return tables; }
+function etrChooseTables() {
+  const all = etrAllTables(), names = Object.keys(all).sort();
+  const pats = (P.model.load_patterns || []).map(p => typeof p === "string" ? p : p.name).filter(Boolean);
+  const cases = [...new Set(Object.values(P.tables).flatMap(t => tableCases(t).map(c => casePart(c).base)))].sort();
+  if (!etrPatSel) etrPatSel = new Set(pats); if (!etrCaseSel) etrCaseSel = new Set(cases);
+  const hasRes = Object.values(P.tables).some(t => t.from !== "input" && t.rows && t.rows.length);
+  const d = dialog("Choose Tables for Display", `<div class="etrCT"><div class="etrMenu"><button data-m="edit">Edit</button></div>
+    <div class="etrCTb"><div class="etrTree" id="ctT"></div>
+      <div class="etrCTr"><fieldset><legend>Load Patterns (Model Def.)</legend><button id="ctP">Select Load Patterns...</button><div id="ctPn"></div></fieldset>
+        ${hasRes ? `<fieldset><legend>Load Cases (Results)</legend><button id="ctC">Select Load Cases...</button><div id="ctCn"></div></fieldset>` : ""}
+        <fieldset><legend>Options</legend><label><input type="checkbox" id="ctSel" ${sel.size || selJ.size ? "" : "disabled"}>Selection Only</label><label><input type="checkbox" id="ctUsed">Show if Used in Model</label><label><input type="checkbox" id="ctUnf">Show Unformatted</label></fieldset>
+        <fieldset><legend>Named Sets</legend><button id="ctNS" disabled>Show Named Set...</button></fieldset>
+        <span></span><div class="etrOkC"><button id="ctOK" class="primary" disabled>OK</button><button id="ctCa">Cancel</button></div></div></div>
+    <div class="etrCTf"><button id="ctFF">Table Format File...</button><span id="ctFn">Current Table Format File:  ${esc(etrFormatFile ? etrFormatFile.name : "None - Program Default")}</span></div></div>`, [], {width: 760});
+  const used = () => q(d, "#ctUsed").checked;
+  const tree = () => {
+    const top = new Map();
+    for (const n of names) { const t = all[n]; if (used() && !(t.rows && t.rows.length)) continue; const [a, b, c] = etrTablePlace(n, t);
+      if (!top.has(a)) top.set(a, new Map()); const A = top.get(a); if (!A.has(b)) A.set(b, new Map()); const B = A.get(b); if (!B.has(c)) B.set(c, []); B.get(c).push(n); }
+    // ETABS's own order of the branches (the rules' order), not the alphabet.
+    const rank = (lvl, name) => { const i = etrTreeRules.findIndex(r => r[lvl] === name); return i < 0 ? 999 : i; };
+    for (const [a, A] of top) { const As = new Map([...A.entries()].sort((x, y) => rank(1, x[0]) - rank(1, y[0]))); for (const [b, B] of As) As.set(b, new Map([...B.entries()].sort((x, y) => rank(2, x[0]) - rank(2, y[0])))); top.set(a, As); }
+    const box = (key, kids) => { const on = kids.filter(k => etrPicked.has(k)).length; return `<input type="checkbox" data-node="${esc(key)}" ${on && on === kids.length ? "checked" : ""} data-part="${on && on < kids.length ? 1 : 0}">`; };
+    const leaves = m => m instanceof Map ? [...m.values()].flatMap(leaves) : m;
+    q(d, "#ctT").innerHTML = etrTopOrder.filter(a => top.has(a)).map(a => { const A = top.get(a);
+      return `<details open><summary>${box(a, leaves(A))}${a}</summary>${[...A.entries()].map(([b, B]) => `<details open><summary>${box(a + "/" + b, leaves(B))}${esc(b)}</summary>${[...B.entries()].map(([c, list]) =>
+        `<details><summary class="blue">${box(a + "/" + b + "/" + c, list)}${esc(c)}</summary>${list.map(n => `<div class="leaf"><input type="checkbox" data-t="${esc(n)}" ${etrPicked.has(n) ? "checked" : ""}><span class="blue" data-tn="${esc(n)}">${esc(n)}</span></div>`).join("")}</details>`).join("")}</details>`).join("")}</details>`; }).join("");
+    q(d, "#ctT").querySelectorAll("[data-part='1']").forEach(x => x.indeterminate = true);
+    q(d, "#ctT").querySelectorAll("summary input").forEach(x => { x.onclick = e => e.stopPropagation(); x.onchange = () => { const det = x.closest("details"); det.querySelectorAll("[data-t]").forEach(l => x.checked ? etrPicked.add(l.dataset.t) : etrPicked.delete(l.dataset.t)); tree(); }; });
+    q(d, "#ctT").querySelectorAll("[data-t]").forEach(x => x.onchange = () => { x.checked ? etrPicked.add(x.dataset.t) : etrPicked.delete(x.dataset.t); tree(); });
+    q(d, "#ctT").querySelectorAll("[data-tn]").forEach(x => x.onclick = () => { const c = x.previousElementSibling; c.checked = !c.checked; c.onchange(); });
+    q(d, "#ctOK").disabled = !etrPicked.size;
+  };
+  const counts = () => { q(d, "#ctPn").textContent = `${[...etrPatSel].filter(p => pats.includes(p)).length} of ${pats.length} Selected`; if (q(d, "#ctCn")) q(d, "#ctCn").textContent = `${[...etrCaseSel].filter(c => cases.includes(c)).length} of ${cases.length} Selected`; };
+  const pickPats = () => etrSelectList("Select Load Patterns", pats, etrPatSel, s => { etrPatSel = s; counts(); });
+  q(d, "#ctP").onclick = pickPats; if (q(d, "#ctC")) q(d, "#ctC").onclick = () => etrSelectList("Select Load Cases", cases, etrCaseSel, s => { etrCaseSel = s; counts(); });
+  q(d, "#ctUsed").onchange = tree;
+  const pickFile = () => { const inp = document.createElement("input"); inp.type = "file"; inp.onchange = () => { const f = inp.files[0]; if (!f) return; f.text().then(txt => { try { const j = JSON.parse(txt); Object.assign(etrFmt, j.formats || {}); etrFormatFile = {name: f.name}; q(d, "#ctFn").textContent = "Current Table Format File:  " + f.name; } catch (e) { $("hint").textContent = f.name + " is not a table formats file."; } }); }; inp.click(); };
+  q(d, "#ctFF").onclick = pickFile;
+  q(d, "[data-m=edit]").onclick = e => popMenu(e.target, [["Select Load Patterns...", pickPats], ["Set Table Formats File...", pickFile]]);
+  q(d, "#ctCa").onclick = () => d.close();
+  q(d, "#ctOK").onclick = () => { const list = names.filter(n => etrPicked.has(n)); d.close(); etrTableViewer(list, {selOnly: q(d, "#ctSel").checked, unformatted: q(d, "#ctUnf").checked}); };
+  counts(); tree();
+  return d;
+}
+function popMenu(at, items) {
+  // A drop-down menu under a form's own menu word, as ETABS's form menus (Edit, File, Format-Filter-Sort...).
+  document.querySelectorAll(".etrPop").forEach(x => x.remove());
+  const r = at.getBoundingClientRect(), m = document.createElement("div"); m.className = "etrPop"; m.style.left = r.left + "px"; m.style.top = r.bottom + "px";
+  m.innerHTML = items.map((it, i) => !it ? "<hr>" : `<div data-i="${i}" class="${it[2] === false ? "off" : ""}">${it[3] ? (it[3]() ? "&#10003; " : "&nbsp;&nbsp; ") : ""}${esc(it[0])}${it[4] ? `<span>${esc(it[4])}</span>` : ""}${Array.isArray(it[1]) ? "<span>&#9656;</span>" : ""}</div>`).join("");
+  document.body.appendChild(m);
+  m.querySelectorAll("[data-i]").forEach(x => x.onclick = e => { const it = items[+x.dataset.i]; if (it[2] === false) return; if (Array.isArray(it[1])) { popMenu(x, it[1]); const s = document.querySelector(".etrPop:last-child"); if (s) { const rr = x.getBoundingClientRect(); s.style.left = rr.right + "px"; s.style.top = rr.top + "px"; } e.stopPropagation(); return; } m.remove(); it[1](); });
+  setTimeout(() => document.addEventListener("click", function off(e) { if (!e.target.closest(".etrPop")) { document.querySelectorAll(".etrPop").forEach(x => x.remove()); document.removeEventListener("click", off); } }), 0);
+  return m;
+}
+function etrSelectList(title, list, chosen, done) {
+  // ETABS's Select Load Patterns / Select Load Cases: a list to pick from, OK, Cancel, Clear All.
+  const d = dialog(title, `<div class="etr etrSel"><fieldset><legend>Select</legend><select id="slL" multiple size="8">${list.map(n => `<option ${chosen.has(n) ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></fieldset>
+    <div class="etrSelB"><button id="slOK">OK</button><button id="slCa">Cancel</button><span></span><button id="slClr">Clear All</button></div></div>`, [], {width: 330});
+  q(d, "#slOK").onclick = () => { done(new Set([...q(d, "#slL").selectedOptions].map(o => o.value))); d.close(); };
+  q(d, "#slCa").onclick = () => d.close(); q(d, "#slClr").onclick = () => [...q(d, "#slL").options].forEach(o => o.selected = false);
+  return d;
+}
+function etrFormatOf(t) {
+  let f = etrFmt[t.name];
+  if (!f || f.order.length !== t.fields.length) {
+    const num = t.fields.map((_, i) => t.rows.slice(0, 200).every(r => r[i] === "" || r[i] === undefined || isNum(r[i])) && t.rows.length);
+    f = etrFmt[t.name] = {order: t.fields.map((_, i) => i), visible: t.fields.map(() => true), align: num.map(n => n ? "Right" : "Center"), repeat: t.fields.map((_, i) => i === 0), split: t.fields.map(() => false),
+      filterType: "None", quick: {field: t.fields[0], op: "None", value: ""}, basic: t.fields.map(() => ({op: "None", value: ""})), sql: "", sort: [0, 1, 2, 3, 4].map(() => ({field: "", desc: false}))};
+  }
+  return f;
+}
+const etrOps = ["None", "=", "<>", "<", "<=", ">", ">=", "Like", "Not Like"]; // UNVERIFIED: the Operator list (picture asked for)
+function etrTest(op, v, x) {
+  if (op === "None" || v === "") return true;
+  const a = parseFloat(x), b = parseFloat(v), num = !isNaN(a) && !isNaN(b) && isFinite(x) && isFinite(v);
+  const like = () => new RegExp("^" + String(v).replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/%/g, ".*").replace(/\*/g, ".*").replace(/_/g, ".") + "$", "i").test(String(x));
+  switch (op) { case "=": return num ? a === b : String(x).toLowerCase() === String(v).toLowerCase(); case "<>": return num ? a !== b : String(x).toLowerCase() !== String(v).toLowerCase();
+    case "<": return num ? a < b : String(x) < v; case "<=": return num ? a <= b : String(x) <= v; case ">": return num ? a > b : String(x) > v; case ">=": return num ? a >= b : String(x) >= v;
+    case "Like": return like(); case "Not Like": return !like(); }
+  return true;
+}
+function etrSql(t, sql) {
+  // Advanced Filter - SQL String: a WHERE clause over the table's fields ([Field] or Field, = <> < <= > >= LIKE, AND OR NOT, brackets).
+  const toks = String(sql).match(/\[[^\]]+\]|'[^']*'|"[^"]*"|<>|<=|>=|!=|[=<>()]|[^\s=<>()]+/g) || []; let i = 0;
+  const peek = () => toks[i], next = () => toks[i++], word = w => peek() && peek().toUpperCase() === w;
+  const val = (tk, r) => { if (tk === undefined) return ""; if (/^\[.*\]$/.test(tk)) tk = tk.slice(1, -1); else if (/^['"].*['"]$/.test(tk)) return tk.slice(1, -1); const k = t.fields.findIndex(f => f.toLowerCase() === tk.toLowerCase()); return k >= 0 ? r[k] : tk; };
+  const cmp = () => { if (peek() === "(") { next(); const e = or(); next(); return e; } if (word("NOT")) { next(); const e = cmp(); return r => !e(r); }
+    const l = next(); let op = next() || ""; if (op.toUpperCase() === "NOT" && word("LIKE")) { next(); op = "Not Like"; } else if (op.toUpperCase() === "LIKE") op = "Like"; else if (op === "!=") op = "<>";
+    const rt = next(); return r => etrTest(op, String(val(rt, r)), val(l, r)); };
+  const and = () => { let e = cmp(); while (word("AND")) { next(); const a = e, b = cmp(); e = r => a(r) && b(r); } return e; };
+  const or = () => { let e = and(); while (word("OR")) { next(); const a = e, b = and(); e = r => a(r) || b(r); } return e; };
+  try { return toks.length ? or() : () => true; } catch (e) { return () => true; }
+}
+function etrRowsOf(t, opt) {
+  const f = etrFormatOf(t), c = caseCol(t.fields), names = opt && opt.selOnly ? new Set([...sel].map(objOf).filter(Boolean).map(o => o.name)) : null, nc = nameCol(t);
+  const lp = col(t.fields, "LoadPattern", "Load Pattern", "Pattern");
+  let rows = t.rows.filter(r => (c < 0 || !etrCaseSel || !etrCaseSel.size || etrCaseSel.has(casePart(caseKey(t, r, c, stepCol(t.fields), stepNumCol(t.fields))).base) || !P.tables[t.name]) && (lp < 0 || !etrPatSel || etrPatSel.has(String(r[lp]))) && (!names || nc < 0 || names.has(String(r[nc]))));
+  if (f.filterType === "Quick") { const k = t.fields.indexOf(f.quick.field); if (k >= 0) rows = rows.filter(r => etrTest(f.quick.op, f.quick.value, r[k])); }
+  else if (f.filterType === "Basic") rows = rows.filter(r => f.basic.every((b, k) => etrTest(b.op, b.value, r[k])));
+  else if (f.filterType === "Advanced" && f.sql.trim()) { const e = etrSql(t, f.sql); rows = rows.filter(e); }
+  const keys = f.sort.filter(s => s.field).map(s => ({k: t.fields.indexOf(s.field), desc: s.desc})).filter(s => s.k >= 0);
+  if (keys.length) rows = rows.slice().sort((a, b) => { for (const s of keys) { const x = a[s.k], y = b[s.k], d = isNum(x) && isNum(y) ? parseFloat(x) - parseFloat(y) : String(x).localeCompare(String(y), undefined, {numeric: true}); if (d) return s.desc ? -d : d; } return 0; });
+  return rows;
+}
+function etrTableViewer(list, opt) {
+  if (!list.length) return;
+  const all = etrAllTables(); let cur = list[0], rows = [], at = 0, wide = false;
+  const prn = {landscape: false, filterAfter: false, links: false};
+  const d = dialog(cur, `<div class="etrTV"><div class="etrMenu"><button data-m="file">File</button><button data-m="edit">Edit</button><button data-m="ffs">Format-Filter-Sort</button><button data-m="select" id="tvSelM">Select</button><button data-m="opts">Options</button></div>
+    <div class="etrTVh"><div><span>Units:&nbsp; As Noted</span><span id="tvHid"></span><span id="tvSort"></span><div id="tvFilt"></div></div><select id="tvPick">${opts(list, cur)}</select></div>
+    <div class="etrGrid" id="tvG"></div>
+    <div class="etrTVf"><span>Record:</span><button id="tvF">&lt;&lt;</button><button id="tvP">&lt;</button><input id="tvN" value="1"><button id="tvX">&gt;</button><button id="tvL">&gt;&gt;</button><span id="tvOf"></span><span></span><button id="tvAdd">Add Tables...</button><button id="tvDone">Done</button></div></div>`, [], {width: 900, float: true});
+  const ROWH = 22;
+  const show = () => {
+    const t = all[cur], f = etrFormatOf(t), cols = f.order.filter(i => f.visible[i]);
+    rows = etrRowsOf(t, opt); d.querySelector(".dt b").textContent = cur;
+    q(d, "#tvHid").textContent = `Hidden Columns:  ${cols.length < t.fields.length ? "Yes" : "No"}`;
+    const srt = f.sort.filter(s => s.field); q(d, "#tvSort").textContent = `Sort:  ${srt.length ? srt.map(s => s.field + (s.desc ? " (Descending)" : "")).join(", ") : "None"}`;
+    q(d, "#tvFilt").textContent = `Filter:  ${f.filterType === "None" ? "None" : f.filterType === "Quick" ? (f.quick.op === "None" ? "None" : `[${f.quick.field}] ${f.quick.op} ${f.quick.value}`) : f.filterType === "Advanced" ? f.sql || "None" : f.basic.map((b, k) => b.op !== "None" && b.value !== "" ? `[${t.fields[k]}] ${b.op} ${b.value}` : "").filter(Boolean).join(" AND ") || "None"}`;
+    const P0 = P.tables[cur], linkable = P0 && nameCol(t) >= 0; q(d, "#tvSelM").disabled = !linkable; q(d, "#tvSelM").classList.toggle("off", !linkable);
+    q(d, "#tvG").innerHTML = `<table><thead><tr><th class="rs"></th>${cols.map(i => `<th>${esc(opt && opt.unformatted ? t.fields[i] : t.fields[i].replace(/([a-z])([A-Z])/g, "$1 $2"))}</th>`).join("")}</tr></thead><tbody></tbody></table><div class="pad"></div>`;
+    q(d, "#tvOf").textContent = "of " + rows.length; paint();
+  };
+  const paint = () => {
+    const t = all[cur], f = etrFormatOf(t), cols = f.order.filter(i => f.visible[i]), g = q(d, "#tvG"), body = g.querySelector("tbody"); if (!body) return;
+    const first = Math.max(0, Math.floor(g.scrollTop / ROWH) - 5), last = Math.min(rows.length, first + Math.ceil((g.clientHeight || 400) / ROWH) + 12);
+    g.querySelector(".pad").style.height = Math.max(0, (rows.length - last) * ROWH) + "px";
+    body.innerHTML = (first ? `<tr style="height:${first * ROWH}px"><td colspan="${cols.length + 1}"></td></tr>` : "") + rows.slice(first, last).map((r, k) => `<tr data-r="${first + k}" class="${first + k === at ? "on" : ""}"><td class="rs">${first + k === at ? "&#9654;" : ""}</td>${cols.map(i => `<td style="text-align:${f.align[i].toLowerCase()}">${esc(r[i] ?? "")}</td>`).join("")}</tr>`).join("");
+    body.querySelectorAll("[data-r]").forEach(tr => tr.onclick = () => go(+tr.dataset.r));
+    q(d, "#tvN").value = rows.length ? at + 1 : 0;
+  };
+  const go = n => { at = Math.max(0, Math.min(rows.length - 1, n)); const g = q(d, "#tvG"); if (at * ROWH < g.scrollTop || at * ROWH > g.scrollTop + g.clientHeight - 2 * ROWH) g.scrollTop = Math.max(0, at * ROWH - ROWH); paint(); };
+  q(d, "#tvG").onscroll = paint;
+  q(d, "#tvF").onclick = () => go(0); q(d, "#tvP").onclick = () => go(at - 1); q(d, "#tvX").onclick = () => go(at + 1); q(d, "#tvL").onclick = () => go(rows.length - 1);
+  q(d, "#tvN").onchange = () => go((parseInt(q(d, "#tvN").value, 10) || 1) - 1);
+  q(d, "#tvPick").onchange = () => { cur = q(d, "#tvPick").value; at = 0; show(); };
+  q(d, "#tvDone").onclick = () => d.close();
+  const add = () => { d.close(); etrChooseTables(); };
+  q(d, "#tvAdd").onclick = add;
+  const text = names => names.map(n => { const t = all[n], f = etrFormatOf(t), cols = f.order.filter(i => f.visible[i]), rs = etrRowsOf(t, opt); return `TABLE:  "${n}"${prn.filterAfter && f.filterType !== "None" ? "\n" + q(d, "#tvFilt").textContent : ""}\n` + [cols.map(i => t.fields[i]).join("\t"), ...rs.map(r => cols.map(i => r[i] ?? "").join("\t"))].join("\n"); }).join("\n\n");
+  const save = (body, name, type) => { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([body], {type})); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); };
+  const csv = n => { const t = all[n], f = etrFormatOf(t), cols = f.order.filter(i => f.visible[i]); return [cols.map(i => t.fields[i]), ...etrRowsOf(t, opt).map(r => cols.map(i => r[i] ?? ""))].map(r => r.map(v => /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : v).join(",")).join("\r\n"); };
+  const model = ((P.manifest || {}).model || "model").replace(/[\\/:*?"<>|]/g, "-"), fileOf = n => n.replace(/[\\/:*?"<>|]/g, "-");
+  const exportTo = names => [["To Excel", () => names.forEach(n => save(csv(n), `${model} - ${fileOf(n)}.csv`, "text/csv"))], ["To Text File", () => save(text(names), `${model} - ${names.length > 1 ? "Tables" : fileOf(names[0])}.txt`, "text/plain")]]; // UNVERIFIED: the submenu items (picture asked for)
+  const display = names => [["As Text", () => { const w = window.open(""); if (w) { w.document.write(`<pre>${esc(text(names))}</pre>`); w.document.close(); } }]]; // UNVERIFIED
+  const fmtFile = (names) => save(JSON.stringify({program: "ETABS", formats: Object.fromEntries(names.map(n => [n, etrFormatOf(all[n])]))}, null, 1), `${model} table formats.json`, "application/json");
+  const loadFmt = names => { const inp = document.createElement("input"); inp.type = "file"; inp.onchange = () => inp.files[0] && inp.files[0].text().then(s => { try { const j = JSON.parse(s).formats || {}; names.forEach(n => { if (j[n]) etrFmt[n] = j[n]; }); show(); } catch (e) { } }); inp.click(); };
+  const menus = {
+    file: () => [["Export Current Table", exportTo([cur])], ["Display Current Table", display([cur])], ["Print Current Table as Text File", () => save(text([cur]), `${model} - ${fileOf(cur)}.txt`, "text/plain")], 0,
+      ["Export All Tables", exportTo(list)], ["Display All Tables", display(list)], ["Print All Tables as Text File", () => save(text(list), `${model} - Tables.txt`, "text/plain")], 0,
+      ["Save Current Table Format to Table Formats File", () => fmtFile([cur])], ["Save All Table Formats to Table Formats File", () => fmtFile(list)], 0,
+      ["Apply Format from File to Current Table", () => loadFmt([cur])], ["Apply Formats from File to All Tables", () => loadFmt(list)], 0,
+      ["Apply Default Format to Current Table", () => { delete etrFmt[cur]; show(); }], ["Apply Default Format to All Tables", () => { list.forEach(n => delete etrFmt[n]); show(); }], 0,
+      ["Add Tables", add], ["Remove Current Table", () => { list = list.filter(n => n !== cur); if (!list.length) return d.close(); cur = list[0]; q(d, "#tvPick").innerHTML = opts(list, cur); show(); }]],
+    edit: () => [["Auto Width for All Columns", () => q(d, "#tvG table").classList.add("auto"), true, null, "Ctrl+W"], ["Reset Default Column Widths", () => q(d, "#tvG table").classList.remove("auto")], 0,
+      ["Maximize Form Size (Toggle)", () => { wide = !wide; Object.assign(d.style, wide ? {left: "4px", top: "4px", width: (innerWidth - 8) + "px", height: (innerHeight - 8) + "px"} : {width: "900px", height: ""}); paint(); }, true, null, "Ctrl+M"]],
+    ffs: () => [["Format Table...", () => etrTableFormat(all[cur], "Format", show)], ["Filter Table...", () => etrTableFormat(all[cur], "Filter", show)], ["Sort Table...", () => etrTableFormat(all[cur], "Sort", show)]],
+    select: () => [["Select Objects in Table", () => { const t = all[cur], nc = nameCol(t); if (nc < 0) return; const want = new Set(rows.map(r => String(r[nc]))); sel.clear(); for (const o of frames.concat(areas)) if (want.has(o.name)) sel.add(o.id); selChanged(); draw(); }]], // UNVERIFIED: greyed in the pictured model-definition table
+    opts: () => [["Print Landscape", () => prn.landscape = !prn.landscape, true, () => prn.landscape], ["Print Filter After Table Title", () => prn.filterAfter = !prn.filterAfter, true, () => prn.filterAfter], ["Print Hyperlinked Contents", () => prn.links = !prn.links, true, () => prn.links]],
+  };
+  d.querySelectorAll("[data-m]").forEach(b => b.onclick = e => { if (b.disabled) return; popMenu(b, menus[b.dataset.m]()); });
+  d.addEventListener("keydown", e => { if (e.ctrlKey && e.key.toLowerCase() === "m") { e.preventDefault(); menus.edit()[3][1](); } if (e.ctrlKey && e.key.toLowerCase() === "w") { e.preventDefault(); e.stopPropagation(); menus.edit()[0][1](); } });
+  show();
+  return d;
+}
+function etrTableFormat(t, tab, done) {
+  // Modify/Show Database Table Format - <table>: Format, Filter and Sort tabs; Apply Format from File, Apply Default
+  // Format, Save Table Format to File; OK, Cancel.
+  const f0 = etrFormatOf(t), f = JSON.parse(JSON.stringify(f0)); let selRow = 0;
+  const d = dialog("Modify/Show Database Table Format - " + t.name, `<div class="etrTF"><div class="etrTFl"><div class="itabs">${["Format", "Filter", "Sort"].map(k => `<button data-page="${k}" class="${k === tab ? "on" : ""}">${k}</button>`).join("")}</div>
+      <div class="ipage ${tab === "Format" ? "on" : ""}" data-page="Format"><div class="etrFG"><div class="etrGrid" id="tfG"></div><div class="etrUD"><button id="tfUp">&#8679;</button><button id="tfDn">&#8681;</button></div></div><p class="kv">Use up and down arrows to set field display order</p>
+        <div class="etrTFb"><button id="tfR1">Reset Selected Field to Default</button><button id="tfR2">Reset All Fields to Default</button><button id="tfR3">Reset Display Order to Default</button></div></div>
+      <div class="ipage ${tab === "Filter" ? "on" : ""}" data-page="Filter"><fieldset><legend>Filter Type</legend><div class="etr4">${["None", "Quick", "Basic", "Advanced"].map(k => `<label><input type="radio" name="ft" value="${k}" ${f.filterType === k ? "checked" : ""}>${k}</label>`).join("")}</div></fieldset><div id="tfF"></div></div>
+      <div class="ipage ${tab === "Sort" ? "on" : ""}" data-page="Sort"><fieldset class="etrSort"><legend>Table Sorting - Sort by These Fields</legend>${f.sort.map((s, k) => `<span>${k ? "Then By" : "Sort By"}</span><select data-sf="${k}">${opts([["", ""], ...t.fields], s.field)}</select><label><input type="checkbox" data-sd="${k}" ${s.desc ? "checked" : ""}>Descending</label>`).join("")}</fieldset></div></div>
+    <div class="etrTFr"><fieldset><legend>Apply Format to Table</legend><button id="tfAF">Apply Format from File</button><button id="tfAD">Apply Default Format</button></fieldset><fieldset><legend>Save to Table Formats File</legend><button id="tfSF">Save Table Format to File</button></fieldset>
+      <span></span><div class="etrOkC"><button id="tfOK" class="primary">OK</button><button id="tfCa">Cancel</button></div></div></div>`, [], {width: 1000});
+  const grid = () => {
+    q(d, "#tfG").innerHTML = `<table><thead><tr><th class="rs"></th><th></th><th>Field Name</th><th>Is Visible</th><th>Alignment</th><th>Repeat at Split</th><th>Force Split After</th></tr></thead><tbody>${f.order.map((i, k) =>
+      `<tr data-k="${k}" class="${k === selRow ? "on" : ""}"><td class="rs">${k === selRow ? "&#9654;" : ""}</td><td>${k + 1}</td><td class="fn">${esc(t.fields[i])}</td><td><input type="checkbox" data-v="${i}" ${f.visible[i] ? "checked" : ""}></td><td><select data-a="${i}">${opts(["Left", "Center", "Right"], f.align[i])}</select></td><td><input type="checkbox" data-rp="${i}" ${f.repeat[i] ? "checked" : ""}></td><td><input type="checkbox" data-sp="${i}" ${f.split[i] ? "checked" : ""}></td></tr>`).join("")}</tbody></table>`;
+    q(d, "#tfG").querySelectorAll("tr[data-k]").forEach(tr => tr.onclick = e => { if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return; selRow = +tr.dataset.k; grid(); });
+    q(d, "#tfG").querySelectorAll("[data-v]").forEach(x => x.onchange = () => f.visible[+x.dataset.v] = x.checked);
+    q(d, "#tfG").querySelectorAll("[data-a]").forEach(x => x.onchange = () => f.align[+x.dataset.a] = x.value);
+    q(d, "#tfG").querySelectorAll("[data-rp]").forEach(x => x.onchange = () => f.repeat[+x.dataset.rp] = x.checked);
+    q(d, "#tfG").querySelectorAll("[data-sp]").forEach(x => x.onchange = () => f.split[+x.dataset.sp] = x.checked);
+  };
+  const def = () => { const keep = etrFmt[t.name]; delete etrFmt[t.name]; const x = etrFormatOf(t); etrFmt[t.name] = keep; return x; };
+  const filt = () => {
+    const ft = q(d, "[name=ft]:checked").value; f.filterType = ft;
+    q(d, "#tfF").innerHTML = ft === "Quick" ? `<fieldset class="etrQF"><legend>Quick Filter</legend><span>Field</span><select id="qfF">${opts(t.fields, f.quick.field)}</select><span>Operator</span><select id="qfO">${opts(etrOps, f.quick.op)}</select><span>Value</span><input id="qfV" value="${esc(f.quick.value)}"></fieldset>`
+      : ft === "Basic" ? `<fieldset><legend>Database Table Filters</legend><div class="etrGrid"><table><thead><tr><th class="rs"></th><th></th><th>Is Visible</th><th>Field Name</th><th>Operator</th><th>Filter Value</th><th>Units</th></tr></thead><tbody>${t.fields.map((n, i) => `<tr><td class="rs"></td><td>${i + 1}</td><td><input type="checkbox" data-bv="${i}" ${f.visible[i] ? "checked" : ""}></td><td class="fn">${esc(n)}</td><td><select data-bo="${i}">${opts(etrOps, f.basic[i].op)}</select></td><td><input data-bx="${i}" value="${esc(f.basic[i].value)}"></td><td class="fn">${esc(etrFieldUnit(t, i))}</td></tr>`).join("")}</tbody></table></div><div class="etrTFb" style="justify-content:flex-end"><button id="bfClr">Clear All Filters</button></div></fieldset>`
+      : ft === "Advanced" ? `<fieldset><legend>Advanced Filter - SQL String</legend><textarea id="afS" rows="3" style="width:100%">${esc(f.sql)}</textarea></fieldset>` : "";
+    if (ft === "Quick") { q(d, "#qfF").onchange = () => f.quick.field = q(d, "#qfF").value; q(d, "#qfO").onchange = () => f.quick.op = q(d, "#qfO").value; q(d, "#qfV").oninput = () => f.quick.value = q(d, "#qfV").value; }
+    if (ft === "Basic") { d.querySelectorAll("[data-bv]").forEach(x => x.onchange = () => f.visible[+x.dataset.bv] = x.checked); d.querySelectorAll("[data-bo]").forEach(x => x.onchange = () => f.basic[+x.dataset.bo].op = x.value); d.querySelectorAll("[data-bx]").forEach(x => x.oninput = () => f.basic[+x.dataset.bx].value = x.value);
+      q(d, "#bfClr").onclick = () => { f.basic = t.fields.map(() => ({op: "None", value: ""})); filt(); }; }
+    if (ft === "Advanced") q(d, "#afS").oninput = () => f.sql = q(d, "#afS").value;
+  };
+  d.querySelectorAll("[name=ft]").forEach(x => x.onchange = filt);
+  d.querySelectorAll("[data-sf]").forEach(x => x.onchange = () => f.sort[+x.dataset.sf].field = x.value);
+  d.querySelectorAll("[data-sd]").forEach(x => x.onchange = () => f.sort[+x.dataset.sd].desc = x.checked);
+  const move = k => { const j = selRow + k; if (j < 0 || j >= f.order.length) return; [f.order[selRow], f.order[j]] = [f.order[j], f.order[selRow]]; selRow = j; grid(); };
+  q(d, "#tfUp").onclick = () => move(-1); q(d, "#tfDn").onclick = () => move(1);
+  q(d, "#tfR1").onclick = () => { const i = f.order[selRow], x = def(); f.visible[i] = x.visible[i]; f.align[i] = x.align[i]; f.repeat[i] = x.repeat[i]; f.split[i] = x.split[i]; grid(); };
+  q(d, "#tfR2").onclick = () => { const x = def(); f.visible = x.visible; f.align = x.align; f.repeat = x.repeat; f.split = x.split; grid(); };
+  q(d, "#tfR3").onclick = () => { f.order = def().order; grid(); };
+  q(d, "#tfAD").onclick = () => { Object.assign(f, JSON.parse(JSON.stringify(def()))); grid(); filt(); };
+  q(d, "#tfAF").onclick = () => { const inp = document.createElement("input"); inp.type = "file"; inp.onchange = () => inp.files[0] && inp.files[0].text().then(s => { try { const j = (JSON.parse(s).formats || {})[t.name]; if (j) { Object.assign(f, j); grid(); filt(); } } catch (e) { } }); inp.click(); };
+  q(d, "#tfSF").onclick = () => { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([JSON.stringify({program: "ETABS", formats: {[t.name]: f}}, null, 1)], {type: "application/json"})); a.download = t.name.replace(/[\\/:*?"<>|]/g, "-") + " table format.json"; a.click(); };
+  q(d, "#tfOK").onclick = () => { etrFmt[t.name] = f; d.close(); if (done) done(); };
+  q(d, "#tfCa").onclick = () => d.close();
+  grid(); filt();
+  return d;
+}
+function etrFieldUnit(t, i) {
+  // The Units column of Database Table Filters: Unitless for words, Yes/No for Yes/No fields, else the model's units by the field's kind.
+  const v = t.rows.slice(0, 50).map(r => String(r[i] ?? "")).filter(Boolean), U = etrUnits(), n = t.fields[i];
+  if (v.length && v.every(x => /^(yes|no)$/i.test(x)) || /^is[A-Z ]/.test(n)) return "Yes/No";
+  if (!v.length || !v.every(isNum)) return "Unitless";
+  return /^(u[xyz123]?|displ|x|y|z|globalx|globaly|globalz|station|length|height|elevation)$/i.test(n.replace(/\s/g, "")) ? U.l : /^(p|v[23xy]?|f[xyz123]?|fx|fy|fz)$/i.test(n) ? U.f : /^(m[23xyz]?|t)$/i.test(n) ? U.f + "-" + U.l : "Unitless";
 }
 const dialogs = {
   modes() { openModes(); },
