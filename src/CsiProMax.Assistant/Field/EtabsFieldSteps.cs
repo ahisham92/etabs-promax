@@ -56,6 +56,8 @@ public static class EtabsFieldSteps
             FieldContext.Expect(missing.Count == 0, "not in ETABS after the import: " + string.Join(", ", missing));
             return "all there";
         });
+        // The Frame/Wall Nonlinear Hinges forms' hinges, set in the Modeler's part, read back from ETABS.
+        EtabsHingeRoundTrip.Check(ctx);
         ctx.Step("the fixed supports at the base came across", () =>
         {
             var z0 = link.Stories()[0].Elevation;
