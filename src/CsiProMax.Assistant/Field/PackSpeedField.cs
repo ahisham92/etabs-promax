@@ -91,11 +91,11 @@ public static class PackSpeedField
     /// Ahmed 2026-11-27: "however how big it is it needs not to exceed 2-3 minutes". The Engine's Run on a large model
     /// (thousands of frames and slabs): the program starts hidden, analyses, every result comes back and the program
     /// is closed. Reading the results, writing the pack and closing the program must take no more than
-    /// <see cref="Pack.MostTime"/>; the analysis itself is the solver's and is reported beside it.
+    /// <see cref="Pack.LargeMostTime"/> (Ahmed: more than 3 minutes for such a model "is fine but not much"); the analysis itself is the solver's and is reported beside it.
     /// </summary>
     public static void Large(FieldContext ctx, CsiProgram program)
     {
-        var name = $"a large model in {program.Name}: its results are read, the pack written and {program.Name} closed within {Pack.MostTime.TotalMinutes:0} minutes";
+        var name = $"a large model in {program.Name}: its results are read, the pack written and {program.Name} closed within {Pack.LargeMostTime.TotalMinutes:0} minutes";
         if (ctx.NoPack) { ctx.LeftOutOfRerun(name); return; }
         ctx.Step(name, () =>
         {
@@ -120,14 +120,18 @@ public static class PackSpeedField
             var rows = (pack["tables"] as JsonObject)?.Sum(t => (t.Value?["rows"] as JsonArray)?.Count ?? 0) ?? 0;
             var cut = Cut(pack);
             FieldContext.Expect(cut.Count == 0, "the results are not whole: " + string.Join(", ", cut));
+            var left = pack["manifest"]?["left_out_tables"] as JsonArray ?? [];
+            FieldContext.Expect(left.Count == 0, "tables were left out of the pack: " + left.ToJsonString());
+            var unread = (pack["manifest"]?["notes"] as JsonArray ?? []).Select(n => n?.ToString() ?? "").Where(n => n.Contains("could not be read", StringComparison.Ordinal)).ToList();
+            FieldContext.Expect(unread.Count == 0, "tables could not be read: " + string.Join(" | ", unread));
             var round = At("results") + At("close") + load;
             var slowest = pack["manifest"]?["timing"]?["slowest"]?.ToJsonString();
             FieldContext.Expect(status["closed"]?.GetValue<bool>() == true, $"{program.Name} was not closed after the run, so its licence is still held");
-            FieldContext.Expect(round <= Pack.MostTime.TotalSeconds,
-                $"reading the results ({At("results"):0} s), closing {program.Name} ({At("close"):0} s) and giving them to the model ({load:0.0} s) took {round:0} s, more than {Pack.MostTime.TotalSeconds:0} s, for {frames} frames and {areas} areas. Slowest tables: {slowest}");
+            FieldContext.Expect(round <= Pack.LargeMostTime.TotalSeconds,
+                $"reading the results ({At("results"):0} s), closing {program.Name} ({At("close"):0} s) and giving them to the model ({load:0.0} s) took {round:0} s, more than {Pack.LargeMostTime.TotalSeconds:0} s, for {frames} frames and {areas} areas. Slowest tables: {slowest}");
             return new
             {
-                frames, areas, tables, rows, megabytes = Math.Round(text.Length / 1e6, 1),
+                frames, areas, tables, rows, left_out = pack["manifest"]?["left_out_tables"]?.ToJsonString(), megabytes = Math.Round(text.Length / 1e6, 1),
                 results_seconds = Math.Round(At("results"), 1), close_seconds = Math.Round(At("close"), 1), load_seconds = Math.Round(load, 1),
                 start_seconds = Math.Round(At("start"), 1), analysis_seconds = Math.Round(At("analysis"), 1), slowest,
             };

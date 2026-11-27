@@ -689,6 +689,14 @@ public sealed class ComEtabs : ICsiLink, IDisposable
         return data;
     }
 
+    /// <summary>Sets a display selection; an empty one the program will not take is left as it is (best effort).</summary>
+    private static void Unselectable(Func<object> set, int count)
+    {
+        if (count > 0) { set(); return; }
+        try { set(); }
+        catch (Exception ex) when (ex is COMException or ArgumentException or InvalidCastException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException) { }
+    }
+
     private TableData ReadTableNow(string key, IReadOnlyList<string>? cases, IReadOnlyList<string>? combos) => On("read a table", m =>
     {
         // The display selection is set only when it changes: set before every one of a pack's 230 tables, ETABS 23 took
@@ -704,8 +712,11 @@ public sealed class ComEtabs : ICsiLink, IDisposable
         var shown = string.Join("\u0001", cases ?? []) + "\u0002" + string.Join("\u0001", combos ?? []) + "\u0002" + string.Join("\u0001", patterns ?? None) + "\u0002" + ModelFileOf(m);
         if (!string.Equals(shown, _shown, StringComparison.Ordinal))
         {
-            if (cases is { Count: > 0 }) { string[] list = cases.ToArray(); m.DatabaseTables.SetLoadCasesSelectedForDisplay(ref list); }
-            if (combos is { Count: > 0 }) { string[] list = combos.ToArray(); m.DatabaseTables.SetLoadCombinationsSelectedForDisplay(ref list); }
+            // Cases or combinations asked: those, and none of the other kind (a table read a case at a time must not bring
+            // every combination the last read selected with each case). Neither asked: the program's own selection.
+            var some = cases is { Count: > 0 } || combos is { Count: > 0 };
+            if (some) { string[] list = (cases ?? []).ToArray(); Unselectable(() => m.DatabaseTables.SetLoadCasesSelectedForDisplay(ref list), list.Length); }
+            if (some) { string[] list = (combos ?? []).ToArray(); Unselectable(() => m.DatabaseTables.SetLoadCombinationsSelectedForDisplay(ref list), list.Length); }
             // Load assignment and pattern tables list only the patterns selected for display: SAP2000 26 gave a pack none of
             // its frame, area or joint loads (0.4.51 field test, Display > Load Assigns greyed out). Every pattern, then.
             EditableTables.ShowEveryPattern(m);

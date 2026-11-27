@@ -136,6 +136,28 @@ static class PackSpeedTests
             link.ReadTable("Story Drifts", ["DEAD"], []);
             Equal(5, model.Tables.Read, "out of a session every read goes to the program");
         });
+        yield return ("pack speed: SAP2000's frame stresses are read whole; when they would be millions of rows, one load case or combination at a time", () =>
+        {
+            (System.Text.Json.Nodes.JsonObject Content, IReadOnlyList<string> Notes) Make(int forceRows)
+            {
+                var m = new MemoryEtabs { ModelFile = @"C:\Jobs\T\T.EDB" };
+                m.AddFrame(0, 0, 0, 0, 0, 3, "C1");
+                m.Locked = true;
+                var forces = Enumerable.Range(0, forceRows).Select(i => new[] { "C1", (i * 0.1).ToString(), "Dead", "1" }).ToList();
+                m.ResultTables[Pack.StressesFrom] = new(["Frame", "Station", "OutputCase", "P"], forces);
+                m.ResultTables[Pack.Stresses] = new(["Frame", "Station", "OutputCase", "S11"], [["C1", "0", "Dead", "5"]]);
+                var built = Pack.Build(m, [], [], [], null, null);
+                return (built.Content, built.Notes);
+            }
+            var small = Make(20);
+            Check(small.Content["tables"]![Pack.Stresses] is not null, "the stresses of a small model are in the pack");
+            Check(!small.Notes.Any(n => n.Contains("at a time", StringComparison.Ordinal)), "a small table is read in one call");
+            var big = Make(200_000);
+            Check(big.Content["tables"]![Pack.Stresses] is not null, "the stresses of a large model are in the pack");
+            Check(big.Notes.Any(n => n.Contains(Pack.Stresses, StringComparison.Ordinal) && n.Contains("one load case or combination at a time", StringComparison.Ordinal)), "read a case at a time: " + string.Join(" | ", big.Notes));
+            Check(big.Content["manifest"]?["left_out_tables"]?.ToJsonString().Contains(Pack.Stresses) != true, "nothing is left out");
+            Equal(6.0, Pack.LargeMostTime.TotalMinutes, "a large model's limit");
+        });
         yield return ("pack speed: the manifest says how long the pack took and which tables were slowest, against 3 minutes", () =>
         {
             var m = new MemoryEtabs { ModelFile = @"C:\Jobs\T\T.EDB" };
