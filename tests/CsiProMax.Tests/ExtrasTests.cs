@@ -395,6 +395,30 @@ static class ExtrasTests
             var program = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Program.cs"));
             Check(program.Contains("WebPages.RemovedPageFor(file)", StringComparison.Ordinal), "a Viewer window on a removed pack does not say it was removed");
         });
+        yield return ("Ahmed 2026-11-27 12:37: a setting (Settings > Runs, and the Run form) keeps the CSI program open with the analysed model after a Run, for now; the next run closes it first", () =>
+        {
+            Check(new CsiProMax.Settings.AgentSettings().KeepProgramOpenAfterRun, "keeping the program open is not on by default for now");
+            Check(CsiProMax.UI.SettingsLayout.Settings.TryGetValue("KeepProgramOpenAfterRun", out var tab) && tab == CsiProMax.UI.SettingsLayout.Runs, "the setting is not on the Runs tab");
+            var root = SourceText.Root();
+            var html = File.ReadAllText(Path.Combine(root, "src", "CsiProMax.Viewer", "viewer.html"));
+            Check(html.Contains("id=\"rKeep\"", StringComparison.Ordinal) && html.Contains("keep_open: !!(q(d, \"#rKeep\")", StringComparison.Ordinal), "the Run form has no Keep open choice sent with the run");
+            var view = File.ReadAllText(Path.Combine(root, "src", "CsiProMax.Assistant", "Panel", "Host", "ModelView.cs"));
+            Check(view.Contains("keepOpen: keepOpen", StringComparison.Ordinal) && view.Contains("st.KeepProgramOpenAfterRun = kv", StringComparison.Ordinal), "the Engine does not pass or remember the Keep open choice");
+            var run = File.ReadAllText(Path.Combine(root, "src", "CsiProMax.Assistant", "Tools", "EngineRun.cs"));
+            Check(run.Contains("kept.Reveal()", StringComparison.Ordinal) && run.Contains("CloseKept();", StringComparison.Ordinal), "the run does not leave the program shown, or does not close it before the next run");
+            var scratch = File.ReadAllText(Path.Combine(root, "src", "CsiProMax.Assistant", "Field", "ScratchProgram.cs"));
+            var reveal = scratch[scratch.IndexOf("public bool Reveal()", StringComparison.Ordinal)..];
+            Check(reveal[..reveal.IndexOf("public bool Running", StringComparison.Ordinal)].Contains("_watch?.Dispose()", StringComparison.Ordinal), "the program left open would still have its close question answered No");
+            var field = File.ReadAllText(Path.Combine(root, "src", "CsiProMax.Assistant", "FieldTest.cs"));
+            Check(field.Contains("keepOpen: true), keptOpen: true)", StringComparison.Ordinal) && field.Contains("the last run left open", StringComparison.Ordinal), "the field test does not check Keep open");
+            var old = EngineRun.KeepOpenSetting;
+            try
+            {
+                EngineRun.KeepOpenSetting = () => true;
+                Check(EngineRun.Status(false)["keep_open"]?.GetValue<bool>() == true, "the Run form is not told the setting");
+            }
+            finally { EngineRun.KeepOpenSetting = old; }
+        });
         yield return ("Ahmed 2026-11-27: Releases/Partial Fixity springs and Insertion Point's mirror and joint offsets, as ETABS's tables and SAP2000's .s2k", () =>
         {
             var link = Frame();
@@ -408,7 +432,7 @@ static class ExtrasTests
             link.Model.Target = "sap2000";
             var text = CsiProMax.S2k.S2kWriter.Write(link.Model, "a.s2k").Text;
             Check(text.Contains("FRAME RELEASE ASSIGNMENTS 2 - PARTIAL FIXITY", StringComparison.Ordinal) && text.Contains("PartialFix=Yes", StringComparison.Ordinal) && text.Contains("Mirror2=Yes", StringComparison.Ordinal) && text.Contains("JtOffsetZI=0.05", StringComparison.Ordinal), "the .s2k does not carry them");
-            var read = CsiProMax.S2k.S2kReader.Read(text, "Extras");
+            var read = CsiProMax.S2k.S2kReader.Read(text, "Extras").Model;
             var rb = read.LineAssigns.First(x => x.Label == b.Label && x.Story == b.Story);
             Check(PropertyDefs.PartialFixity(rb).GetValueOrDefault("M3J") == 4000 && AssignTables.Row(rb, AssignTables.Insertion).GetValueOrDefault("Mirror2") == "Yes" && AssignTables.Row(rb, AssignTables.Insertion).GetValueOrDefault("ZI") == "0.05", "the .s2k's springs or insertion point did not come back");
             link.Model.Target = "etabs";
@@ -450,7 +474,7 @@ static class ExtrasTests
             Run(sap, "set_program_form", new { table = "Active Degrees of Freedom", values = new Dictionary<string, string> { ["RZ"] = "No" } });
             var text = CsiProMax.S2k.S2kWriter.Write(sap.Model, "a.s2k").Text;
             Check(text.Contains("TABLE:  \"PREFERENCES - CONCRETE DESIGN - ACI 318-19\"", StringComparison.Ordinal) && text.Contains("TABLE:  \"ACTIVE DEGREES OF FREEDOM\"", StringComparison.Ordinal), "the .s2k has no preference or DOF table");
-            var read = CsiProMax.S2k.S2kReader.Read(text, "Extras");
+            var read = CsiProMax.S2k.S2kReader.Read(text, "Extras").Model;
             Check(read.DefinitionTables?.GetValueOrDefault("Preferences - Concrete Design - ACI 318-19")?.Single().GetValueOrDefault("PatLLF") == "0.7" && read.DefinitionTables?.GetValueOrDefault("Active Degrees of Freedom")?.Single().GetValueOrDefault("RZ") == "No", "the .s2k's forms did not come back");
             Check(ProgramForms.Code(sap.Model, "concrete") == "ACI 318-19", "SAP2000's code is not kept");
             var engine = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Tools", "EngineRun.cs"));

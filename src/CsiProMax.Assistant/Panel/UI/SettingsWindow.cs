@@ -26,6 +26,7 @@ public sealed class SettingsWindow : Window
     private readonly List<string> _noAsk;
     private readonly StackPanel _noAskList = new();
     private readonly CheckBox _autoUpdate = Check("Update CSI ProMax automatically");
+    private readonly CheckBox _keepOpen = Check("Keep the CSI program open with the analysed model after a Run (it holds its licence until you close it)");
     private readonly CheckBox _openItems = Check("Allow issue with open items (each such issue says so, with the reason, in its issue record)");
     private readonly TextBox _standards = new()
     {
@@ -82,6 +83,7 @@ public sealed class SettingsWindow : Window
 
         _noAsk = [.. _settings.NoAskTools ?? []];
         _autoUpdate.IsChecked = _settings.AutoUpdate;
+        _keepOpen.IsChecked = _settings.KeepProgramOpenAfterRun;
         _openItems.IsChecked = _settings.AllowIssueWithOpenItems;
         _standards.Text = _settings.FirmStandards;
         _legendSeed.Text = _settings.LegendSeedPath ?? "";
@@ -133,7 +135,7 @@ public sealed class SettingsWindow : Window
         TabStyles(_tabs);
         AutomationProperties.SetName(_tabs, "Settings sections");
         // CSI ProMax has no drawings to issue, no sign-off sheets, no Lifeline and no time log: those pages stay out.
-        foreach (var tab in SettingsLayout.Tabs.Where(t => t.Key is SettingsLayout.Approvals or SettingsLayout.Chat or SettingsLayout.Standards or SettingsLayout.Updates))
+        foreach (var tab in SettingsLayout.Tabs.Where(t => t.Key is SettingsLayout.Approvals or SettingsLayout.Chat or SettingsLayout.Standards or SettingsLayout.Runs or SettingsLayout.Updates))
         {
             var page = tab.Key switch
             {
@@ -145,6 +147,7 @@ public sealed class SettingsWindow : Window
                 SettingsLayout.SignOff => SignOffPage(),
                 SettingsLayout.Recovery => RecoveryPage(),
                 SettingsLayout.Storage => StoragePage(),
+                SettingsLayout.Runs => RunsPage(),
                 _ => UpdatesPage(),
             };
             page.Children.Insert(0, Heading(tab.Name));
@@ -916,6 +919,15 @@ public sealed class SettingsWindow : Window
         return panel;
     }
 
+    /// <summary>Runs: whether the Engine's Run leaves the CSI program open after the run (Ahmed 2026-11-27).</summary>
+    private StackPanel RunsPage()
+    {
+        var page = new StackPanel();
+        page.Children.Add(Place("KeepProgramOpenAfterRun", _keepOpen));
+        page.Children.Add(Hint("On: after Run, the program stays open and shown with the model it analysed and designed, to look at the results there. The next Run closes it first. Off: it is closed as soon as the run is done, so its licence is free at once. The Run form has the same choice."));
+        return page;
+    }
+
     /// <summary>Automatic updates, the version installed and the last check, and Check now.</summary>
     private StackPanel UpdatesPage()
     {
@@ -1125,6 +1137,7 @@ public sealed class SettingsWindow : Window
         _settings.Approvals = _levels.FirstOrDefault(l => l.Button.IsChecked == true).Level;
         _settings.NoAskTools = _noAsk.Count > 0 ? _noAsk : null;
         _settings.AutoUpdate = _autoUpdate.IsChecked == true;
+        _settings.KeepProgramOpenAfterRun = _keepOpen.IsChecked == true;
         _settings.AllowIssueWithOpenItems = _openItems.IsChecked == true;
         _settings.FirmStandards = _standards.Text;
         _settings.LegendSeedPath = _legendSeed.Text.Trim().Trim('"');

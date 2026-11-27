@@ -631,7 +631,7 @@ public static class FieldTest
         model.Model.Target = program.Key;
         model.SaveAs(Path.Combine(ctx.Folder, "engine", "cpm-engine-run.e2k"));
         var (pack, _) = EngineRun.PackFiles(model);
-        JsonObject Wait(JsonObject started)
+        JsonObject Wait(JsonObject started, bool keptOpen = false)
         {
             FieldContext.Expect(started["ok"]?.GetValue<bool>() == true, "the run did not start: " + started["error"]);
             var until = DateTime.UtcNow.AddMinutes(20);
@@ -639,6 +639,11 @@ public static class FieldTest
             var status = EngineRun.Status(true);
             FieldContext.Expect(status["done"]?.GetValue<bool>() == true, "the run did not finish within 20 minutes: " + status["phase"]);
             FieldContext.Expect(string.IsNullOrEmpty(status["error"]?.GetValue<string>()), "the run stopped: " + status["error"]);
+            if (keptOpen)
+            {
+                FieldContext.Expect(status["kept_open"]?.GetValue<bool>() == true && Said(status, "was left open with the analysed model"), $"{program.Name} was not left open after the job: " + Last(status));
+                return status;
+            }
             FieldContext.Expect(Said(status, "was closed; its licence is free"), $"{program.Name} was not closed after the job: " + Last(status));
             FieldContext.Expect(status["closed"]?.GetValue<bool>() == true, $"{program.Name}'s process did not end after the job, so its licence is still held: " + Last(status));
             return status;
@@ -650,7 +655,7 @@ public static class FieldTest
 
         var ran = ctx.Step(steps + "Run Analysis brings the results back, writes the pack beside the model, and closes the program", () =>
         {
-            var status = Wait(EngineRun.Start(model, analyse: true, kinds: []));
+            var status = Wait(EngineRun.Start(model, analyse: true, kinds: [], keepOpen: false));
             var tables = (status["pack"] as JsonObject)?["tables"] as JsonObject;
             var results = tables?.Select(t => t.Key).Where(n => ResultTools.Norm(n).Contains("displacement") || ResultTools.Norm(n).Contains("reaction") || ResultTools.Norm(n).Contains("forces")).ToList() ?? [];
             FieldContext.Expect(results.Count > 0, "no result table came back: " + string.Join(", ", tables?.Select(t => t.Key) ?? []));
@@ -661,7 +666,7 @@ public static class FieldTest
 
         ctx.Step(steps + "a design alone on the unchanged model is not analysed again, and the program closes after it", () =>
         {
-            var started = EngineRun.Start(model, analyse: false, kinds: kinds);
+            var started = EngineRun.Start(model, analyse: false, kinds: kinds, keepOpen: false);
             FieldContext.Expect(started["analyses"]?.GetValue<bool>() == false, "the design would analyse the unchanged model again");
             var status = Wait(started);
             FieldContext.Expect(!Said(status, "Running the analysis"), "the analysis ran again: " + Last(status));
@@ -671,7 +676,7 @@ public static class FieldTest
         ctx.Step(steps + "a design of the selected objects selects them in the program first", () =>
         {
             var two = model.Frames().Take(2).Select(f => f.Name).Concat(model.Areas().Take(1).Select(a => a.Name)).ToList();
-            var status = Wait(EngineRun.Start(model, analyse: false, kinds: kinds, selected: two));
+            var status = Wait(EngineRun.Start(model, analyse: false, kinds: kinds, selected: two, keepOpen: false));
             var line = (status["lines"] as JsonArray ?? []).Select(l => l?.GetValue<string>() ?? "").FirstOrDefault(l => l.StartsWith("Selected in ", StringComparison.Ordinal)) ?? "";
             FieldContext.Expect(line.Length > 0, "the selection was not passed to the program: " + Last(status));
             var frames = Math.Min(2, model.Frames().Count);
@@ -693,7 +698,7 @@ public static class FieldTest
 
         ctx.Step(steps + "Run again after the change analyses again, and the pack comes back with the comments", () =>
         {
-            var started = EngineRun.Start(model, analyse: false, kinds: kinds.Take(1).ToList());
+            var started = EngineRun.Start(model, analyse: false, kinds: kinds.Take(1).ToList(), keepOpen: false);
             FieldContext.Expect(started["analyses"]?.GetValue<bool>() == true, "a design on the changed model would use the old analysis");
             var status = Wait(started);
             FieldContext.Expect(Said(status, "Running the analysis"), "the changed model was not analysed: " + Last(status));
@@ -717,7 +722,7 @@ public static class FieldTest
             {
                 var one = kinds.Last();
                 var name = EngineRun.Kinds[program.Key].First(k => k.Kind == one).Name;
-                var started = EngineRun.Start(model, analyse: true, kinds: [one]);
+                var started = EngineRun.Start(model, analyse: true, kinds: [one], keepOpen: false);
                 var status = Wait(started);
                 var lines = (status["lines"] as JsonArray ?? []).Select(l => l?.GetValue<string>() ?? "").ToList();
                 FieldContext.Expect(lines.Any(l => l.StartsWith("Running the analysis", StringComparison.Ordinal)), "the analysis did not run: " + Last(status));
@@ -727,6 +732,18 @@ public static class FieldTest
                 FieldContext.Expect(status["pack"] is JsonObject, "the results did not come back");
                 FieldContext.Expect(File.Exists(pack), "no review pack beside the model: " + pack);
                 return $"{name}; {Last(status)}";
+            });
+
+        // Settings > Runs, keep the program open after a run (Ahmed 2026-11-27, for now): the program is shown with the
+        // analysed model and left running; the next run closes it first, so two never hold licences at once.
+        if (kinds.Count > 0)
+            ctx.Step(steps + "with Keep the program open, the run leaves it open with the analysed model, and the next run closes it first", () =>
+            {
+                var status = Wait(EngineRun.Start(model, analyse: false, kinds: [kinds.First()], keepOpen: true), keptOpen: true);
+                var next = Wait(EngineRun.Start(model, analyse: false, kinds: [kinds.First()], keepOpen: false));
+                FieldContext.Expect(Said(next, "the last run left open"), "the next run did not close the program left open: " + Last(next));
+                FieldContext.Expect(next["starts"]?.GetValue<int>() == status["starts"]?.GetValue<int>() + 1, "the next run did not start one program of its own");
+                return Last(status) + " | " + Last(next);
             });
     }
 

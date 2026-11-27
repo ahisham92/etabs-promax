@@ -480,13 +480,14 @@ async function engineRun(mode) {
       ${kinds.length ? kinds.map(k => `<label class="kv" style="display:block"><input type="checkbox" data-kind="${esc(k.kind)}" checked> ${esc(k.name)}</label>`).join("") + `<div style="margin:4px 0"><button type="button" id="rAll">Select All</button> <button type="button" id="rNone">Clear All</button></div>` : `<p class="kv">${esc(name)} has no design to run from here.</p>`}
       <div style="margin-top:6px"><label class="kv"><input type="radio" name="rS" value="all" checked> All objects</label>
       <label class="kv" style="margin-left:12px"><input type="radio" name="rS" value="sel" ${picked.length ? "" : "disabled"}> Selected objects only (${picked.length})</label></div></fieldset>
-    <p class="kv" style="margin:6px 0 0;max-width:460px">${esc(name)} starts hidden in a window of its own (yours, if open, is not touched), runs only what is asked, and is closed as soon as it is done, so its licence is free again; the results come back here.</p>`;
+    <label class="kv" style="display:block;margin-top:6px"><input type="checkbox" id="rKeep" ${st.keep_open ? "checked" : ""}> Keep ${esc(name)} open with the analysed model after the run (Settings &gt; Runs)</label>
+    <p class="kv" id="rKeepNote" style="margin:6px 0 0;max-width:460px"></p>`;
   const d = dialog("Run Options", body, [["Run Now", d => {
     const m = (d.querySelector("input[name=rM]:checked") || {}).value || "a";
     const ks = m === "a" ? [] : [...d.querySelectorAll("[data-kind]")].filter(x => x.checked).map(x => x.dataset.kind);
     if (m !== "a" && !ks.length) { hmSay("Tick at least one design to run.", true); return false; }
     const only = ks.length && (d.querySelector("input[name=rS]:checked") || {}).value === "sel" ? picked : [];
-    engineStart({analyse: m !== "d", kinds: ks, selected: only});
+    engineStart({analyse: m !== "d", kinds: ks, selected: only, keep_open: !!(q(d, "#rKeep") || {}).checked});
   }], ["Cancel"]], {width: 520});
   const sync = () => {
     const m = (d.querySelector("input[name=rM]:checked") || {}).value || "a";
@@ -494,6 +495,11 @@ async function engineRun(mode) {
     q(d, "#rD").style.opacity = m === "a" ? 0.5 : 1;
     q(d, "#rNote").textContent = m === "a" ? "The analysis runs; no design." : m === "d" ? (analysed ? "The design runs on the analysis the model has now." : "The model is not analysed as it is now, so it is analysed first, then designed.") : "The analysis runs, then the designs ticked below, in one job.";
   };
+  // Ahmed 2026-11-27: for now the program may stay open after the run, to look at the results in it; the next run closes it.
+  const keepNote = () => { q(d, "#rKeepNote").textContent = q(d, "#rKeep").checked
+    ? `${name} starts hidden in a window of its own (yours, if open, is not touched), runs only what is asked, and is then shown with the analysed model and left open: it holds its licence until you close it, and the next run closes it first. The results come back here too.`
+    : `${name} starts hidden in a window of its own (yours, if open, is not touched), runs only what is asked, and is closed as soon as it is done, so its licence is free again; the results come back here.`; };
+  q(d, "#rKeep").addEventListener("change", keepNote); keepNote();
   d.querySelectorAll("input[name=rM]").forEach(x => x.addEventListener("change", sync));
   const all = v => d.querySelectorAll("[data-kind]").forEach(x => { x.checked = v; });
   const ba = d.querySelector("#rAll"), bn = d.querySelector("#rNone"); if (ba) ba.onclick = () => all(true); if (bn) bn.onclick = () => all(false);
@@ -512,7 +518,7 @@ async function engineStart(ask) {
     if (!st.done) continue;
     if (st.error) { hmSay(st.error, true); return; }
     if (st.model_changed) { hmSay("The model changed while it ran, so its results were not put on it. Run again.", true); return; }
-    if (st.pack) { engine.res = st.pack; engine.from = st.pack_file || "the run"; load(engine.base || P, true); hmSay(`${what} in ${st.program}: the results are shown (Display and Design menus); ${st.program} was closed${st.pack_file ? "; review pack " + st.pack_file : ""}.`); buildTree(); }
+    if (st.pack) { engine.res = st.pack; engine.from = st.pack_file || "the run"; load(engine.base || P, true); hmSay(`${what} in ${st.program}: the results are shown (Display and Design menus); ${st.program} ${st.kept_open ? "was left open with the analysed model" : "was closed"}${st.pack_file ? "; review pack " + st.pack_file : ""}.`); buildTree(); }
     return;
   }
 }

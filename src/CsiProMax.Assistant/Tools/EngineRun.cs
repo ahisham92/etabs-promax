@@ -43,7 +43,13 @@ public static class EngineRun
     private static string _analysedFile = "", _analysedProgram = "";
     private static int _starts;
     /// <summary>Whether the last job's program was seen to end (its process gone), so its licence is free.</summary>
-    private static bool _closed;
+    private static bool _closed, _keptOpen;
+    /// <summary>The program left open after the last run (Settings &gt; Runs, keep it open), closed before the next one.</summary>
+    private static IScratchWindow? _kept;
+    private static string _keptName = "";
+
+    /// <summary>Settings &gt; Runs: whether a Run leaves the program open with the analysed model (Ahmed 2026-11-27, for now).</summary>
+    public static Func<bool> KeepOpenSetting { get; set; } = () => { try { return CsiProMax.Settings.AgentSettings.Load().KeepProgramOpenAfterRun; } catch (Exception ex) when (ex is not OutOfMemoryException) { return false; } };
 
     // The pack written by the last run: of which model, at which revision (removed when the model moves on).
     private static OfflineEtabs? _packModel;
@@ -75,7 +81,7 @@ public static class EngineRun
     /// background. <paramref name="analyse"/>: run the analysis (skipped when the program holds this model unchanged
     /// and analysed). <paramref name="kinds"/>: the designs to run after it.
     /// </summary>
-    public static JsonObject Start(OfflineEtabs model, bool analyse, IReadOnlyList<string> kinds, Func<CsiProgram, string>? apiFile = null, IReadOnlyList<string>? selected = null)
+    public static JsonObject Start(OfflineEtabs model, bool analyse, IReadOnlyList<string> kinds, Func<CsiProgram, string>? apiFile = null, IReadOnlyList<string>? selected = null, bool? keepOpen = null)
     {
         var program = ProgramOf(model);
         var unknown = kinds.Where(k => !Kinds[program.Key].Any(x => x.Kind == k)).ToList();
@@ -87,13 +93,14 @@ public static class EngineRun
             var api = (apiFile ?? (p => EtabsApi.FindApiFile(p)))(program);
             if (!File.Exists(api))
                 return new JsonObject { ["ok"] = false, ["error"] = $"{program.Name} is not installed on this PC, so the model cannot be run here. Save it (File > Save) and open the {(program.Key == "etabs" ? ".e2k" : program.Key == "sap2000" ? ".s2k" : ".f2k")} on a PC with {program.Name}, or run it there and open its review pack with File > Import > Results." };
+            var keep = keepOpen ?? KeepOpenSetting();
             var current = AnalysedNow(model, program);
             string file = "";
             var folder = RunFolder(model);
             if (!current)
                 try { file = model.WriteForRun(Path.Combine(folder, Safe(model.Model.Title) + ".e2k")); }
                 catch (EtabsException ex) { return new JsonObject { ["ok"] = false, ["error"] = ex.Message }; }
-            Lines.Clear(); _error = ""; _pack = null; _done = false; _running = true; _closed = false;
+            Lines.Clear(); _error = ""; _pack = null; _done = false; _running = true; _closed = false; _keptOpen = false;
             _program = program.Name; _model = model; _startRevision = model.Revision;
             _phase = $"Starting {program.Name} in the background";
             if (file.Length > 0) Lines.Add($"The model was written for {program.Name}: {file}");
@@ -102,8 +109,8 @@ public static class EngineRun
             var analysed = _analysedFile;
             var only = kinds.Count > 0 && selected is { Count: > 0 } ? Places(model, selected) : null;
             if (only is not null) Lines.Add($"The design is for the {selected!.Count} selected objects only.");
-            Post(() => Work(program, folder, mustAnalyse ? file : analysed, mustAnalyse, analyse, kinds, only));
-            return new JsonObject { ["ok"] = true, ["program"] = program.Name, ["file"] = file, ["analyses"] = mustAnalyse };
+            Post(() => Work(program, folder, mustAnalyse ? file : analysed, mustAnalyse, analyse, kinds, only, keep));
+            return new JsonObject { ["ok"] = true, ["program"] = program.Name, ["file"] = file, ["analyses"] = mustAnalyse, ["keep_open"] = keep };
         }
     }
 
@@ -159,13 +166,15 @@ public static class EngineRun
         return (frames, areas);
     }
 
-    private static void Work(CsiProgram program, string folder, string file, bool mustAnalyse, bool analyseAsked, IReadOnlyList<string> kinds, Shapes? only)
+    private static void Work(CsiProgram program, string folder, string file, bool mustAnalyse, bool analyseAsked, IReadOnlyList<string> kinds, Shapes? only, bool keepOpen = false)
     {
         IScratchWindow? window = null;
         var ctx = new FieldContext(program, folder, _model!);
         ctx.Offer(ProgramTools.Chat(program));
         try
         {
+            // The program the last run left open is closed first: it holds a licence and has the run's files open.
+            CloseKept();
             // The analysed file can be gone by the time the job starts (0.4.57 full test: SAP2000 was given
             // cpm-field-test-3795ee.sdb, which no longer existed, and waited on its "Open Model File" box). The model is
             // then written again and analysed first, never handed to the program as a missing file.
@@ -243,8 +252,19 @@ public static class EngineRun
         catch (Exception ex) when (ex is not OutOfMemoryException) { Fail($"The run stopped: {ex.Message} {Failed(ctx)}"); }
         finally
         {
-            // Closed at once, whatever happened: the licence is used only while the job runs.
-            if (window is not null)
+            // Closed at once, whatever happened: the licence is used only while the job runs. Unless Settings > Runs
+            // says to keep it open (Ahmed 2026-11-27, for now): it is then shown with the analysed model, the engineer's
+            // to look at, and closed before the next run.
+            if (window is ScratchProgram kept && keepOpen && kept.Reveal())
+            {
+                try { kept.PutBackPlugIns(); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
+                lock (Gate)
+                {
+                    _kept = kept; _keptName = program.Name; _keptOpen = true; _closed = false;
+                    Lines.Add($"{program.Name} was left open with the analysed model (Settings > Runs: keep the program open after a run). It holds a licence until you close it; the next run closes it first.");
+                }
+            }
+            else if (window is not null)
             {
                 Say($"Closing {program.Name}");
                 var said = "";
@@ -263,6 +283,19 @@ public static class EngineRun
             }
             lock (Gate) { _running = false; _done = true; _phase = _error.Length > 0 ? "Stopped" : "Done"; }
         }
+    }
+
+    /// <summary>Closes the program the last run left open, if it is still there, and says so.</summary>
+    private static void CloseKept()
+    {
+        IScratchWindow? kept; string name;
+        lock (Gate) { kept = _kept; name = _keptName; _kept = null; }
+        if (kept is null) return;
+        if (kept is ScratchProgram sp && !sp.Running) { try { kept.Dispose(); } catch (Exception ex) when (ex is not OutOfMemoryException) { } return; }
+        Say($"Closing the {name} the last run left open");
+        try { kept.Close(); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
+        try { kept.Dispose(); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
+        if (!Ended(kept)) lock (Gate) Lines.Add($"The {name} the last run left open did not end; close it yourself without saving.");
     }
 
     /// <summary>True when the job's program process has ended (waited for up to a minute after it was told to close).</summary>
@@ -345,6 +378,8 @@ public static class EngineRun
                 ["analysed"] = _analysedModel is not null && _analysedRevision == _analysedModel.Revision && File.Exists(_analysedFile),
                 ["starts"] = _starts,
                 ["closed"] = _closed,
+                ["kept_open"] = _keptOpen,
+                ["keep_open"] = KeepOpenSetting(),
                 ["kinds"] = new JsonObject(Kinds.Select(p => KeyValuePair.Create(p.Key, (JsonNode?)new JsonArray(p.Value.Select(k => (JsonNode)new JsonObject { ["kind"] = k.Kind, ["name"] = k.Name }).ToArray())))),
             };
             if (take && _done && _pack is not null) { o["pack"] = _pack; _pack = null; }

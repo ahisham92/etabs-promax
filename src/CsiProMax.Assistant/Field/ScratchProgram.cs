@@ -809,6 +809,8 @@ public sealed class ScratchProgram : IScratchWindow
         var name = _program.Name;
         if (_app is null) return "it was not started";
         if (_closed) return $"the scratch {name} window was already closed";
+        // Kept open after a Run and closed by the engineer since (Settings: keep the program open after a Run).
+        if (ProcessId != 0 && Gone(TimeSpan.Zero)) { _closed = true; return $"the {name} window had already been closed"; }
         if (_left) return Said($"the scratch {name} window stopped answering, so it was left as it is; close it yourself without saving");
         _closing = true;
         try
@@ -1036,6 +1038,26 @@ public sealed class ScratchProgram : IScratchWindow
         }
         catch (Exception ex) when (ex is not OutOfMemoryException) { return false; }
     }
+
+    /// <summary>
+    /// Hands the program's window, with the model it ran, to the engineer: shown again and no longer answered by
+    /// CSI ProMax (its watcher would answer No to the engineer's own "close?" question). For Settings &gt; Runs, keep the
+    /// program open after a Run (Ahmed 2026-11-27). False when the window is not there to show.
+    /// </summary>
+    public bool Reveal()
+    {
+        if (_app is null || _closed || _left) return false;
+        try { _watch?.Dispose(); _watch = null; } catch (Exception ex) when (ex is not OutOfMemoryException) { }
+        try
+        {
+            Ask(TimeSpan.FromSeconds(30), "show the window", _ => { _app.Unhide(); return null; }, $"the {_program.Name} window did not show within 30 seconds");
+            return true;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return false; }
+    }
+
+    /// <summary>True while the program's process is still running.</summary>
+    public bool Running => ProcessId != 0 && !Gone(TimeSpan.Zero);
 
     public void Dispose()
     {
