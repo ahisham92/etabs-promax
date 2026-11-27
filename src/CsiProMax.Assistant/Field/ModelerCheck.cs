@@ -525,6 +525,26 @@ public static class ModelerCheck
             if (back !== own || isFinite(h0) && Math.abs(h2 - h0) > 1e-9 * Math.abs(h0)) return {fail: `back in the model's units it reads ${h2} ${back}, it was ${h0} ${own}`};
             return {ok: "the menu's five items; U.S. Defaults shows the model in ft, Consistent Units in mm (story height " + h0 + " -> " + h1 + "), then back to the model's"};
           });
+          // Set Display Options as each program has it (Ahmed 2026-11-27): its own title and tabs, Openings among the
+          // objects, and every box ticked and OK draws without an error; the options are put back after.
+          await step(`Set Display Options, as ${target} has it`, async () => {
+            const keep = JSON.stringify(opt), keepKinds = [...hidden.kind];
+            dialogs.display(); await wait(200);
+            const d = document.querySelector(".dlg:last-of-type"), title = d && d.querySelector(".dt b") ? d.querySelector(".dt b").textContent : "";
+            const want = target === "sap2000" ? "Display Options" : "Set View Options";
+            if (!d || title !== want) { if (d) d.close(); return {fail: "the form is not titled " + want + ": " + title}; }
+            const boxes = d.querySelectorAll("input[type=checkbox]").length, hasOpen = !!d.querySelector('[data-k="opening"], [data-nv*="opening"]');
+            if (!hasOpen) { d.close(); return {fail: "the form has no Openings box"}; }
+            for (const page of target === "sap2000" ? ["Object Options", "General Options"] : ["General", "Object Assignments", "Other Assignments"]) if (![...d.querySelectorAll(".itabs button")].some(b => b.textContent === page)) { d.close(); return {fail: "the form has no " + page + " tab"}; }
+            d.querySelectorAll("[data-o]").forEach(x => { if (!x.dataset.inv) x.checked = true; });
+            let err = ""; try { formOk("OK"); draw(); } catch (e) { err = String(e && e.message || e); }
+            await wait(300);
+            const on = ["shrink", "fReleases", "fAxes", "aAxes"].filter(k => !opt[k]);
+            Object.assign(opt, JSON.parse(keep)); hidden.kind.clear(); keepKinds.forEach(k => hidden.kind.add(k)); hiddenVersion++; geometryDirty = true; geometryStamp++; draw();
+            if (err) return {fail: "ticking every box and OK failed: " + err};
+            if (on.length) return {fail: "OK did not turn on " + on.join(", ")};
+            return {ok: want + ": " + boxes + " boxes, Openings among them; all ticked draw without an error"};
+          });
           if (target !== "sap2000") window.cpmForms.push({path: "Units > Consistent Units...", act: "u:consistent", target}, {path: "Units > Show Units Form...", act: "u:form", target});
         }
         if (typeof forProgram === "function") { await hmRun("set_model_program", {program: "etabs"}, true); if (window.cpmPull) await window.cpmPull(); await wait(400); }
