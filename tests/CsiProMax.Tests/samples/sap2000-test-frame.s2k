@@ -1,0 +1,307 @@
+File test-frame.s2k was saved on 11/25/26 at 6:39:42 by CSI ProMax
+ 
+TABLE:  "PROGRAM CONTROL"
+   ProgramName=SAP2000   Version=24.0.0   CurrUnits="KN, m, C"
+
+TABLE:  "ACTIVE DEGREES OF FREEDOM"
+   UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
+
+TABLE:  "COORDINATE SYSTEMS"
+   Name=GLOBAL   Type=Cartesian   X=0   Y=0   Z=0   AboutZ=0   AboutY=0   AboutX=0
+
+TABLE:  "GRID LINES"
+   CoordSys=GLOBAL   AxisDir=X   GridID=A   XRYZCoord=0   LineType=Primary   LineColor=Gray8Dark   Visible=Yes   BubbleLoc=End
+   CoordSys=GLOBAL   AxisDir=X   GridID=B   XRYZCoord=6   LineType=Primary   LineColor=Gray8Dark   Visible=Yes   BubbleLoc=End
+   CoordSys=GLOBAL   AxisDir=X   GridID=C   XRYZCoord=12   LineType=Primary   LineColor=Gray8Dark   Visible=Yes   BubbleLoc=End
+   CoordSys=GLOBAL   AxisDir=Y   GridID=1   XRYZCoord=0   LineType=Primary   LineColor=Gray8Dark   Visible=Yes   BubbleLoc=Start
+   CoordSys=GLOBAL   AxisDir=Y   GridID=2   XRYZCoord=5   LineType=Primary   LineColor=Gray8Dark   Visible=Yes   BubbleLoc=Start
+   CoordSys=GLOBAL   AxisDir=Z   GridID=Base   XRYZCoord=0   LineType=Primary   LineColor=Gray8Dark   Visible=Yes   BubbleLoc=End
+   CoordSys=GLOBAL   AxisDir=Z   GridID=Story1   XRYZCoord=3.5   LineType=Primary   LineColor=Gray8Dark   Visible=Yes   BubbleLoc=End
+   CoordSys=GLOBAL   AxisDir=Z   GridID=Story2   XRYZCoord=7   LineType=Primary   LineColor=Gray8Dark   Visible=Yes   BubbleLoc=End
+   CoordSys=GLOBAL   AxisDir=Z   GridID=Story3   XRYZCoord=10.5   LineType=Primary   LineColor=Gray8Dark   Visible=Yes   BubbleLoc=End
+
+TABLE:  "MATERIAL PROPERTIES 01 - GENERAL"
+   Material=S355   Type=Steel   SymType=Isotropic   TempDepend=No   Color=Blue
+   Material=C30/37   Type=Concrete   SymType=Isotropic   TempDepend=No   Color=Gray8Dark
+   Material=DefaultRebar_500   Type=Rebar   SymType=Uniaxial   TempDepend=No   Color=Blue
+
+TABLE:  "MATERIAL PROPERTIES 02 - BASIC MECHANICAL PROPERTIES"
+   Material=S355   UnitWeight=76.97286   UnitMass=7.8490473301   E1=210000000   G12=80769230.7692308   U12=0.3   A1=0.0000117
+   Material=C30/37   UnitWeight=24.992619   UnitMass=2.5485378799   E1=33000000   G12=13750000   U12=0.2   A1=0.00001
+   Material=DefaultRebar_500   UnitWeight=77   UnitMass=7.8518148399   E1=200000000   A1=0.000012
+
+TABLE:  "MATERIAL PROPERTIES 03A - STEEL DATA"
+   Material=S355   Fy=355000   Fu=510000   EffFy=390500   EffFu=561000   SSCurveOpt=Simple   SSHysType=Kinematic   SHard=0.015   SMax=0.11   SRup=0.17   FinalSlope=-0.1
+
+TABLE:  "MATERIAL PROPERTIES 03B - CONCRETE DATA"
+   Material=C30/37   Fc=30000   LtWtConc=No   SSCurveOpt=Mander   SSHysType=Takeda   SFc=0.002   SCap=0.005   FinalSlope=-0.1   FAngle=0   DAngle=0
+
+TABLE:  "MATERIAL PROPERTIES 03E - REBAR DATA"
+   Material=DefaultRebar_500   Fy=500000   Fu=630000   EffFy=550000   EffFu=690000   SSCurveOpt=Simple   SSHysType=Kinematic   SHard=0.01   SCap=0.09   FinalSlope=-0.1   UseCTDef=No
+
+TABLE:  "FRAME SECTION PROPERTIES 01 - GENERAL"
+   SectionName=SteelCol   Material=S355   Shape="I/Wide Flange"   t3=0.5   t2=0.5   tf=0.025   tw=0.0125   t2b=0.5   tfb=0.025   Area=0.030625   TorsConst=0.0000055176   I33=0.0015063802   I22=0.0005209066   I23=0   AS2=0.00625   AS3=0.0208333333   S33=0.0060255208   S22=0.0020836263   Z33=0.0065703125   Z22=0.0031425781   R33=0.2217835097   R22=0.1304193019   ConcCol=No   ConcBeam=No   Color=Yellow   AMod=1   A2Mod=1   A3Mod=1   JMod=1   I2Mod=1   I3Mod=1   MMod=1   WMod=1
+   SectionName=SteelBm   Material=S355   Shape="I/Wide Flange"   t3=0.5   t2=0.16666667   tf=0.0125   tw=0.00625   t2b=0.16666667   tfb=0.0125   Area=0.0071354168   TorsConst=0.0000002567   I33=0.0003034315   I22=0.0000096547   I23=0   AS2=0.003125   AS3=0.0034722223   S33=0.0012137261   S22=0.0001158567   Z33=0.0013681641   Z22=0.0001782498   R33=0.2062152062   R22=0.0367841148   ConcCol=No   ConcBeam=No   Color=Yellow   AMod=1   A2Mod=1   A3Mod=1   JMod=1   I2Mod=1   I3Mod=1   MMod=1   WMod=1
+   SectionName=ConcCol   Material=C30/37   Shape=Rectangular   t3=0.375   t2=0.375   tf=0   tw=0   t2b=0   tfb=0   Area=0.140625   TorsConst=0.0027850342   I33=0.0016479492   I22=0.0016479492   I23=0   AS2=0.1171875   AS3=0.1171875   S33=0.0087890625   S22=0.0087890625   Z33=0.0131835938   Z22=0.0131835938   R33=0.1082531755   R22=0.1082531755   ConcCol=Yes   ConcBeam=No   Color=Yellow   AMod=1   A2Mod=1   A3Mod=1   JMod=1   I2Mod=1   I3Mod=1   MMod=1   WMod=1
+   SectionName=ConcBm   Material=C30/37   Shape=Rectangular   t3=0.5   t2=0.375   tf=0   tw=0   t2b=0   tfb=0   Area=0.1875   TorsConst=0.004745729   I33=0.00390625   I22=0.0021972656   I23=0   AS2=0.15625   AS3=0.15625   S33=0.015625   S22=0.01171875   Z33=0.0234375   Z22=0.017578125   R33=0.1443375673   R22=0.1082531755   ConcCol=No   ConcBeam=Yes   Color=Yellow   AMod=1   A2Mod=1   A3Mod=1   JMod=1   I2Mod=1   I3Mod=1   MMod=1   WMod=1
+   SectionName=ConcCol1   Material=C30/37   Shape=Rectangular   t3=0.3   t2=0.3   tf=0   tw=0   t2b=0   tfb=0   Area=0.09   TorsConst=0.00114075   I33=0.000675   I22=0.000675   I23=0   AS2=0.075   AS3=0.075   S33=0.0045   S22=0.0045   Z33=0.00675   Z22=0.00675   R33=0.0866025404   R22=0.0866025404   ConcCol=Yes   ConcBeam=No   Color=Yellow   AMod=1   A2Mod=1   A3Mod=1   JMod=1   I2Mod=1   I3Mod=1   MMod=1   WMod=1
+   SectionName=C500x500   Material=C30/37   Shape=Rectangular   t3=0.5   t2=0.5   tf=0   tw=0   t2b=0   tfb=0   Area=0.25   TorsConst=0.0088020833   I33=0.0052083333   I22=0.0052083333   I23=0   AS2=0.2083333333   AS3=0.2083333333   S33=0.0208333333   S22=0.0208333333   Z33=0.03125   Z22=0.03125   R33=0.1443375673   R22=0.1443375673   ConcCol=Yes   ConcBeam=No   Color=Yellow   AMod=1   A2Mod=1   A3Mod=1   JMod=1   I2Mod=1   I3Mod=1   MMod=1   WMod=1
+   SectionName=B300x600   Material=C30/37   Shape=Rectangular   t3=0.6   t2=0.3   tf=0   tw=0   t2b=0   tfb=0   Area=0.18   TorsConst=0.0037078594   I33=0.0054   I22=0.00135   I23=0   AS2=0.15   AS3=0.15   S33=0.018   S22=0.009   Z33=0.027   Z22=0.0135   R33=0.1732050808   R22=0.0866025404   ConcCol=No   ConcBeam=Yes   Color=Yellow   AMod=1   A2Mod=1   A3Mod=1   JMod=1   I2Mod=1   I3Mod=1   MMod=1   WMod=1
+
+TABLE:  "AREA SECTION PROPERTIES"
+   Section=Slab1   Material=C30/37   MatAngle=0   AreaType=Shell   Type=Shell-Thin   DrillDOF=Yes   Thickness=0.2   BendThick=0.2   Color=Cyan   F11Mod=1   F22Mod=1   F12Mod=1   M11Mod=1   M22Mod=1   M12Mod=1   V13Mod=1   V23Mod=1   MMod=1   WMod=1
+   Section=Plank1   Material=C30/37   MatAngle=0   AreaType=Shell   Type=Membrane   DrillDOF=Yes   Thickness=0.2   BendThick=0.2   Color=Cyan   F11Mod=1   F22Mod=1   F12Mod=1   M11Mod=1   M22Mod=1   M12Mod=1   V13Mod=1   V23Mod=1   MMod=1   WMod=1
+   Section=Drop1   Material=C30/37   MatAngle=0   AreaType=Shell   Type=Shell-Thin   DrillDOF=Yes   Thickness=0.35   BendThick=0.35   Color=Cyan   F11Mod=1   F22Mod=1   F12Mod=1   M11Mod=1   M22Mod=1   M12Mod=1   V13Mod=1   V23Mod=1   MMod=1   WMod=1
+   Section=Wall1   Material=C30/37   MatAngle=0   AreaType=Shell   Type=Shell-Thin   DrillDOF=Yes   Thickness=0.25   BendThick=0.25   Color=Red   F11Mod=1   F22Mod=1   F12Mod=1   M11Mod=1   M22Mod=1   M12Mod=1   V13Mod=1   V23Mod=1   MMod=1   WMod=1
+   Section=S200   Material=C30/37   MatAngle=0   AreaType=Shell   Type=Shell-Thin   DrillDOF=Yes   Thickness=0.2   BendThick=0.2   Color=Cyan   F11Mod=1   F22Mod=1   F12Mod=1   M11Mod=1   M22Mod=1   M12Mod=1   V13Mod=1   V23Mod=1   MMod=1   WMod=1
+
+TABLE:  "JOINT COORDINATES"
+   Joint=1   CoordSys=GLOBAL   CoordType=Cartesian   XorR=0   Y=0   Z=0   SpecialJt=No   GlobalX=0   GlobalY=0   GlobalZ=0
+   Joint=2   CoordSys=GLOBAL   CoordType=Cartesian   XorR=0   Y=0   Z=3.5   SpecialJt=No   GlobalX=0   GlobalY=0   GlobalZ=3.5
+   Joint=3   CoordSys=GLOBAL   CoordType=Cartesian   XorR=0   Y=5   Z=0   SpecialJt=No   GlobalX=0   GlobalY=5   GlobalZ=0
+   Joint=4   CoordSys=GLOBAL   CoordType=Cartesian   XorR=0   Y=5   Z=3.5   SpecialJt=No   GlobalX=0   GlobalY=5   GlobalZ=3.5
+   Joint=5   CoordSys=GLOBAL   CoordType=Cartesian   XorR=6   Y=0   Z=0   SpecialJt=No   GlobalX=6   GlobalY=0   GlobalZ=0
+   Joint=6   CoordSys=GLOBAL   CoordType=Cartesian   XorR=6   Y=0   Z=3.5   SpecialJt=No   GlobalX=6   GlobalY=0   GlobalZ=3.5
+   Joint=7   CoordSys=GLOBAL   CoordType=Cartesian   XorR=6   Y=5   Z=0   SpecialJt=No   GlobalX=6   GlobalY=5   GlobalZ=0
+   Joint=8   CoordSys=GLOBAL   CoordType=Cartesian   XorR=6   Y=5   Z=3.5   SpecialJt=No   GlobalX=6   GlobalY=5   GlobalZ=3.5
+   Joint=9   CoordSys=GLOBAL   CoordType=Cartesian   XorR=12   Y=0   Z=0   SpecialJt=No   GlobalX=12   GlobalY=0   GlobalZ=0
+   Joint=10   CoordSys=GLOBAL   CoordType=Cartesian   XorR=12   Y=0   Z=3.5   SpecialJt=No   GlobalX=12   GlobalY=0   GlobalZ=3.5
+   Joint=11   CoordSys=GLOBAL   CoordType=Cartesian   XorR=12   Y=5   Z=0   SpecialJt=No   GlobalX=12   GlobalY=5   GlobalZ=0
+   Joint=12   CoordSys=GLOBAL   CoordType=Cartesian   XorR=12   Y=5   Z=3.5   SpecialJt=No   GlobalX=12   GlobalY=5   GlobalZ=3.5
+   Joint=13   CoordSys=GLOBAL   CoordType=Cartesian   XorR=0   Y=0   Z=7   SpecialJt=No   GlobalX=0   GlobalY=0   GlobalZ=7
+   Joint=14   CoordSys=GLOBAL   CoordType=Cartesian   XorR=0   Y=5   Z=7   SpecialJt=No   GlobalX=0   GlobalY=5   GlobalZ=7
+   Joint=15   CoordSys=GLOBAL   CoordType=Cartesian   XorR=6   Y=0   Z=7   SpecialJt=No   GlobalX=6   GlobalY=0   GlobalZ=7
+   Joint=16   CoordSys=GLOBAL   CoordType=Cartesian   XorR=6   Y=5   Z=7   SpecialJt=No   GlobalX=6   GlobalY=5   GlobalZ=7
+   Joint=17   CoordSys=GLOBAL   CoordType=Cartesian   XorR=12   Y=0   Z=7   SpecialJt=No   GlobalX=12   GlobalY=0   GlobalZ=7
+   Joint=18   CoordSys=GLOBAL   CoordType=Cartesian   XorR=12   Y=5   Z=7   SpecialJt=No   GlobalX=12   GlobalY=5   GlobalZ=7
+   Joint=19   CoordSys=GLOBAL   CoordType=Cartesian   XorR=0   Y=0   Z=10.5   SpecialJt=No   GlobalX=0   GlobalY=0   GlobalZ=10.5
+   Joint=20   CoordSys=GLOBAL   CoordType=Cartesian   XorR=0   Y=5   Z=10.5   SpecialJt=No   GlobalX=0   GlobalY=5   GlobalZ=10.5
+   Joint=21   CoordSys=GLOBAL   CoordType=Cartesian   XorR=6   Y=0   Z=10.5   SpecialJt=No   GlobalX=6   GlobalY=0   GlobalZ=10.5
+   Joint=22   CoordSys=GLOBAL   CoordType=Cartesian   XorR=6   Y=5   Z=10.5   SpecialJt=No   GlobalX=6   GlobalY=5   GlobalZ=10.5
+   Joint=23   CoordSys=GLOBAL   CoordType=Cartesian   XorR=12   Y=0   Z=10.5   SpecialJt=No   GlobalX=12   GlobalY=0   GlobalZ=10.5
+   Joint=24   CoordSys=GLOBAL   CoordType=Cartesian   XorR=12   Y=5   Z=10.5   SpecialJt=No   GlobalX=12   GlobalY=5   GlobalZ=10.5
+
+TABLE:  "CONNECTIVITY - FRAME"
+   Frame=C1_Story1   JointI=1   JointJ=2   IsCurved=No
+   Frame=C2_Story1   JointI=3   JointJ=4   IsCurved=No
+   Frame=C3_Story1   JointI=5   JointJ=6   IsCurved=No
+   Frame=C4_Story1   JointI=7   JointJ=8   IsCurved=No
+   Frame=C5_Story1   JointI=9   JointJ=10   IsCurved=No
+   Frame=C6_Story1   JointI=11   JointJ=12   IsCurved=No
+   Frame=B1_Story1   JointI=2   JointJ=6   IsCurved=No
+   Frame=B2_Story1   JointI=6   JointJ=10   IsCurved=No
+   Frame=B3_Story1   JointI=4   JointJ=8   IsCurved=No
+   Frame=B4_Story1   JointI=8   JointJ=12   IsCurved=No
+   Frame=B5_Story1   JointI=2   JointJ=4   IsCurved=No
+   Frame=B6_Story1   JointI=6   JointJ=8   IsCurved=No
+   Frame=B7_Story1   JointI=10   JointJ=12   IsCurved=No
+   Frame=C1_Story2   JointI=2   JointJ=13   IsCurved=No
+   Frame=C2_Story2   JointI=4   JointJ=14   IsCurved=No
+   Frame=C3_Story2   JointI=6   JointJ=15   IsCurved=No
+   Frame=C4_Story2   JointI=8   JointJ=16   IsCurved=No
+   Frame=C5_Story2   JointI=10   JointJ=17   IsCurved=No
+   Frame=C6_Story2   JointI=12   JointJ=18   IsCurved=No
+   Frame=B1_Story2   JointI=13   JointJ=15   IsCurved=No
+   Frame=B2_Story2   JointI=15   JointJ=17   IsCurved=No
+   Frame=B3_Story2   JointI=14   JointJ=16   IsCurved=No
+   Frame=B4_Story2   JointI=16   JointJ=18   IsCurved=No
+   Frame=B5_Story2   JointI=13   JointJ=14   IsCurved=No
+   Frame=B6_Story2   JointI=15   JointJ=16   IsCurved=No
+   Frame=B7_Story2   JointI=17   JointJ=18   IsCurved=No
+   Frame=C1_Story3   JointI=13   JointJ=19   IsCurved=No
+   Frame=C2_Story3   JointI=14   JointJ=20   IsCurved=No
+   Frame=C3_Story3   JointI=15   JointJ=21   IsCurved=No
+   Frame=C4_Story3   JointI=16   JointJ=22   IsCurved=No
+   Frame=C5_Story3   JointI=17   JointJ=23   IsCurved=No
+   Frame=C6_Story3   JointI=18   JointJ=24   IsCurved=No
+   Frame=B1_Story3   JointI=19   JointJ=21   IsCurved=No
+   Frame=B2_Story3   JointI=21   JointJ=23   IsCurved=No
+   Frame=B3_Story3   JointI=20   JointJ=22   IsCurved=No
+   Frame=B4_Story3   JointI=22   JointJ=24   IsCurved=No
+   Frame=B5_Story3   JointI=19   JointJ=20   IsCurved=No
+   Frame=B6_Story3   JointI=21   JointJ=22   IsCurved=No
+   Frame=B7_Story3   JointI=23   JointJ=24   IsCurved=No
+
+TABLE:  "CONNECTIVITY - AREA"
+   Area=F1_Story1   NumJoints=4   Joint1=2   Joint2=6   Joint3=8   Joint4=4
+   Area=F2_Story1   NumJoints=4   Joint1=6   Joint2=10   Joint3=12   Joint4=8
+   Area=F1_Story2   NumJoints=4   Joint1=13   Joint2=15   Joint3=16   Joint4=14
+   Area=F2_Story2   NumJoints=4   Joint1=15   Joint2=17   Joint3=18   Joint4=16
+   Area=F1_Story3   NumJoints=4   Joint1=19   Joint2=21   Joint3=22   Joint4=20
+   Area=F2_Story3   NumJoints=4   Joint1=21   Joint2=23   Joint3=24   Joint4=22
+
+TABLE:  "FRAME SECTION ASSIGNMENTS"
+   Frame=C1_Story1   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=C500x500   MatProp=Default
+   Frame=C2_Story1   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=C500x500   MatProp=Default
+   Frame=C3_Story1   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=C500x500   MatProp=Default
+   Frame=C4_Story1   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=C500x500   MatProp=Default
+   Frame=C5_Story1   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=C500x500   MatProp=Default
+   Frame=C6_Story1   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=C500x500   MatProp=Default
+   Frame=B1_Story1   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=B300x600   MatProp=Default
+   Frame=B2_Story1   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=B300x600   MatProp=Default
+   Frame=B3_Story1   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=B300x600   MatProp=Default
+   Frame=B4_Story1   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=B300x600   MatProp=Default
+   Frame=B5_Story1   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=B300x600   MatProp=Default
+   Frame=B6_Story1   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=B300x600   MatProp=Default
+   Frame=B7_Story1   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=B300x600   MatProp=Default
+   Frame=C1_Story2   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=C500x500   MatProp=Default
+   Frame=C2_Story2   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=C500x500   MatProp=Default
+   Frame=C3_Story2   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=C500x500   MatProp=Default
+   Frame=C4_Story2   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=C500x500   MatProp=Default
+   Frame=C5_Story2   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=C500x500   MatProp=Default
+   Frame=C6_Story2   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=C500x500   MatProp=Default
+   Frame=B1_Story2   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=B300x600   MatProp=Default
+   Frame=B2_Story2   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=B300x600   MatProp=Default
+   Frame=B3_Story2   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=B300x600   MatProp=Default
+   Frame=B4_Story2   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=B300x600   MatProp=Default
+   Frame=B5_Story2   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=B300x600   MatProp=Default
+   Frame=B6_Story2   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=B300x600   MatProp=Default
+   Frame=B7_Story2   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=B300x600   MatProp=Default
+   Frame=C1_Story3   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=C500x500   MatProp=Default
+   Frame=C2_Story3   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=C500x500   MatProp=Default
+   Frame=C3_Story3   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=C500x500   MatProp=Default
+   Frame=C4_Story3   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=C500x500   MatProp=Default
+   Frame=C5_Story3   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=C500x500   MatProp=Default
+   Frame=C6_Story3   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=C500x500   MatProp=Default
+   Frame=B1_Story3   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=B300x600   MatProp=Default
+   Frame=B2_Story3   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=B300x600   MatProp=Default
+   Frame=B3_Story3   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=B300x600   MatProp=Default
+   Frame=B4_Story3   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=B300x600   MatProp=Default
+   Frame=B5_Story3   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=B300x600   MatProp=Default
+   Frame=B6_Story3   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=B300x600   MatProp=Default
+   Frame=B7_Story3   SectionType=Rectangular   AutoSelect=N.A.   AnalSect=B300x600   MatProp=Default
+
+TABLE:  "AREA SECTION ASSIGNMENTS"
+   Area=F1_Story1   Section=S200   MatProp=Default
+   Area=F2_Story1   Section=S200   MatProp=Default
+   Area=F1_Story2   Section=S200   MatProp=Default
+   Area=F2_Story2   Section=S200   MatProp=Default
+   Area=F1_Story3   Section=S200   MatProp=Default
+   Area=F2_Story3   Section=S200   MatProp=Default
+
+TABLE:  "JOINT RESTRAINT ASSIGNMENTS"
+   Joint=1   U1=Yes   U2=Yes   U3=Yes   R1=Yes   R2=Yes   R3=Yes
+   Joint=3   U1=Yes   U2=Yes   U3=Yes   R1=Yes   R2=Yes   R3=Yes
+   Joint=5   U1=Yes   U2=Yes   U3=Yes   R1=Yes   R2=Yes   R3=Yes
+   Joint=7   U1=Yes   U2=Yes   U3=Yes   R1=Yes   R2=Yes   R3=Yes
+   Joint=9   U1=Yes   U2=Yes   U3=Yes   R1=Yes   R2=Yes   R3=Yes
+   Joint=11   U1=Yes   U2=Yes   U3=Yes   R1=Yes   R2=Yes   R3=Yes
+
+TABLE:  "CONSTRAINT DEFINITIONS - DIAPHRAGM"
+   Name=D1_Story1   CoordSys=GLOBAL   Axis=Z   MultiLevel=No
+   Name=D1_Story2   CoordSys=GLOBAL   Axis=Z   MultiLevel=No
+   Name=D1_Story3   CoordSys=GLOBAL   Axis=Z   MultiLevel=No
+
+TABLE:  "JOINT CONSTRAINT ASSIGNMENTS"
+   Joint=2   Constraint=D1_Story1   Type=Diaphragm
+   Joint=6   Constraint=D1_Story1   Type=Diaphragm
+   Joint=8   Constraint=D1_Story1   Type=Diaphragm
+   Joint=4   Constraint=D1_Story1   Type=Diaphragm
+   Joint=10   Constraint=D1_Story1   Type=Diaphragm
+   Joint=12   Constraint=D1_Story1   Type=Diaphragm
+   Joint=13   Constraint=D1_Story2   Type=Diaphragm
+   Joint=15   Constraint=D1_Story2   Type=Diaphragm
+   Joint=16   Constraint=D1_Story2   Type=Diaphragm
+   Joint=14   Constraint=D1_Story2   Type=Diaphragm
+   Joint=17   Constraint=D1_Story2   Type=Diaphragm
+   Joint=18   Constraint=D1_Story2   Type=Diaphragm
+   Joint=19   Constraint=D1_Story3   Type=Diaphragm
+   Joint=21   Constraint=D1_Story3   Type=Diaphragm
+   Joint=22   Constraint=D1_Story3   Type=Diaphragm
+   Joint=20   Constraint=D1_Story3   Type=Diaphragm
+   Joint=23   Constraint=D1_Story3   Type=Diaphragm
+   Joint=24   Constraint=D1_Story3   Type=Diaphragm
+
+TABLE:  "GROUPS 1 - DEFINITIONS"
+   GroupName=Base   Selection=Yes   SectionCut=Yes   Steel=Yes   Concrete=Yes   Aluminum=Yes   ColdFormed=Yes   Stage=Yes   Bridge=Yes   AutoSeismic=No   AutoWind=No   SelDesSteel=No   SelDesAlum=No   SelDesCold=No   MassWeight=Yes
+   GroupName=Story1   Selection=Yes   SectionCut=Yes   Steel=Yes   Concrete=Yes   Aluminum=Yes   ColdFormed=Yes   Stage=Yes   Bridge=Yes   AutoSeismic=No   AutoWind=No   SelDesSteel=No   SelDesAlum=No   SelDesCold=No   MassWeight=Yes
+   GroupName=Story2   Selection=Yes   SectionCut=Yes   Steel=Yes   Concrete=Yes   Aluminum=Yes   ColdFormed=Yes   Stage=Yes   Bridge=Yes   AutoSeismic=No   AutoWind=No   SelDesSteel=No   SelDesAlum=No   SelDesCold=No   MassWeight=Yes
+   GroupName=Story3   Selection=Yes   SectionCut=Yes   Steel=Yes   Concrete=Yes   Aluminum=Yes   ColdFormed=Yes   Stage=Yes   Bridge=Yes   AutoSeismic=No   AutoWind=No   SelDesSteel=No   SelDesAlum=No   SelDesCold=No   MassWeight=Yes
+
+TABLE:  "GROUPS 2 - ASSIGNMENTS"
+   GroupName=Story1   ObjectType=Frame   ObjectLabel=C1_Story1
+   GroupName=Story1   ObjectType=Frame   ObjectLabel=C2_Story1
+   GroupName=Story1   ObjectType=Frame   ObjectLabel=C3_Story1
+   GroupName=Story1   ObjectType=Frame   ObjectLabel=C4_Story1
+   GroupName=Story1   ObjectType=Frame   ObjectLabel=C5_Story1
+   GroupName=Story1   ObjectType=Frame   ObjectLabel=C6_Story1
+   GroupName=Story1   ObjectType=Frame   ObjectLabel=B1_Story1
+   GroupName=Story1   ObjectType=Frame   ObjectLabel=B2_Story1
+   GroupName=Story1   ObjectType=Frame   ObjectLabel=B3_Story1
+   GroupName=Story1   ObjectType=Frame   ObjectLabel=B4_Story1
+   GroupName=Story1   ObjectType=Frame   ObjectLabel=B5_Story1
+   GroupName=Story1   ObjectType=Frame   ObjectLabel=B6_Story1
+   GroupName=Story1   ObjectType=Frame   ObjectLabel=B7_Story1
+   GroupName=Story1   ObjectType=Area   ObjectLabel=F1_Story1
+   GroupName=Story1   ObjectType=Area   ObjectLabel=F2_Story1
+   GroupName=Story2   ObjectType=Frame   ObjectLabel=C1_Story2
+   GroupName=Story2   ObjectType=Frame   ObjectLabel=C2_Story2
+   GroupName=Story2   ObjectType=Frame   ObjectLabel=C3_Story2
+   GroupName=Story2   ObjectType=Frame   ObjectLabel=C4_Story2
+   GroupName=Story2   ObjectType=Frame   ObjectLabel=C5_Story2
+   GroupName=Story2   ObjectType=Frame   ObjectLabel=C6_Story2
+   GroupName=Story2   ObjectType=Frame   ObjectLabel=B1_Story2
+   GroupName=Story2   ObjectType=Frame   ObjectLabel=B2_Story2
+   GroupName=Story2   ObjectType=Frame   ObjectLabel=B3_Story2
+   GroupName=Story2   ObjectType=Frame   ObjectLabel=B4_Story2
+   GroupName=Story2   ObjectType=Frame   ObjectLabel=B5_Story2
+   GroupName=Story2   ObjectType=Frame   ObjectLabel=B6_Story2
+   GroupName=Story2   ObjectType=Frame   ObjectLabel=B7_Story2
+   GroupName=Story2   ObjectType=Area   ObjectLabel=F1_Story2
+   GroupName=Story2   ObjectType=Area   ObjectLabel=F2_Story2
+   GroupName=Story3   ObjectType=Frame   ObjectLabel=C1_Story3
+   GroupName=Story3   ObjectType=Frame   ObjectLabel=C2_Story3
+   GroupName=Story3   ObjectType=Frame   ObjectLabel=C3_Story3
+   GroupName=Story3   ObjectType=Frame   ObjectLabel=C4_Story3
+   GroupName=Story3   ObjectType=Frame   ObjectLabel=C5_Story3
+   GroupName=Story3   ObjectType=Frame   ObjectLabel=C6_Story3
+   GroupName=Story3   ObjectType=Frame   ObjectLabel=B1_Story3
+   GroupName=Story3   ObjectType=Frame   ObjectLabel=B2_Story3
+   GroupName=Story3   ObjectType=Frame   ObjectLabel=B3_Story3
+   GroupName=Story3   ObjectType=Frame   ObjectLabel=B4_Story3
+   GroupName=Story3   ObjectType=Frame   ObjectLabel=B5_Story3
+   GroupName=Story3   ObjectType=Frame   ObjectLabel=B6_Story3
+   GroupName=Story3   ObjectType=Frame   ObjectLabel=B7_Story3
+   GroupName=Story3   ObjectType=Area   ObjectLabel=F1_Story3
+   GroupName=Story3   ObjectType=Area   ObjectLabel=F2_Story3
+   GroupName=Base   ObjectType=Joint   ObjectLabel=1
+   GroupName=Base   ObjectType=Joint   ObjectLabel=3
+   GroupName=Base   ObjectType=Joint   ObjectLabel=5
+   GroupName=Base   ObjectType=Joint   ObjectLabel=7
+   GroupName=Base   ObjectType=Joint   ObjectLabel=9
+   GroupName=Base   ObjectType=Joint   ObjectLabel=11
+
+TABLE:  "LOAD PATTERN DEFINITIONS"
+   LoadPat=Dead   DesignType=Dead   SelfWtMult=1
+   LoadPat=Live   DesignType=Live   SelfWtMult=0
+
+TABLE:  "AREA LOADS - UNIFORM"
+   Area=F1_Story1   LoadPat=Dead   CoordSys=GLOBAL   Dir=Gravity   UnifLoad=2
+   Area=F1_Story1   LoadPat=Live   CoordSys=GLOBAL   Dir=Gravity   UnifLoad=3
+   Area=F2_Story1   LoadPat=Dead   CoordSys=GLOBAL   Dir=Gravity   UnifLoad=2
+   Area=F2_Story1   LoadPat=Live   CoordSys=GLOBAL   Dir=Gravity   UnifLoad=3
+   Area=F1_Story2   LoadPat=Dead   CoordSys=GLOBAL   Dir=Gravity   UnifLoad=2
+   Area=F1_Story2   LoadPat=Live   CoordSys=GLOBAL   Dir=Gravity   UnifLoad=3
+   Area=F2_Story2   LoadPat=Dead   CoordSys=GLOBAL   Dir=Gravity   UnifLoad=2
+   Area=F2_Story2   LoadPat=Live   CoordSys=GLOBAL   Dir=Gravity   UnifLoad=3
+   Area=F1_Story3   LoadPat=Dead   CoordSys=GLOBAL   Dir=Gravity   UnifLoad=2
+   Area=F1_Story3   LoadPat=Live   CoordSys=GLOBAL   Dir=Gravity   UnifLoad=3
+   Area=F2_Story3   LoadPat=Dead   CoordSys=GLOBAL   Dir=Gravity   UnifLoad=2
+   Area=F2_Story3   LoadPat=Live   CoordSys=GLOBAL   Dir=Gravity   UnifLoad=3
+
+TABLE:  "LOAD CASE DEFINITIONS"
+   Case=Modal   Type=LinModal   InitialCond=Zero   DesignType=Other   RunCase=Yes
+   Case=Dead   Type=LinStatic   InitialCond=Zero   DesignType=Dead   RunCase=Yes
+   Case=Live   Type=LinStatic   InitialCond=Zero   DesignType=Live   RunCase=Yes
+
+TABLE:  "CASE - STATIC 1 - LOAD ASSIGNMENTS"
+   Case=Dead   LoadType="Load pattern"   LoadName=Dead   LoadSF=1
+   Case=Live   LoadType="Load pattern"   LoadName=Live   LoadSF=1
+
+TABLE:  "CASE - MODAL 1 - GENERAL"
+   Case=Modal   ModeType=Eigen   MaxNumModes=12   MinNumModes=1   EigenShift=0   EigenCutoff=0   EigenTol=1E-09   AutoShift=Yes
+
+TABLE:  "MASS SOURCE"
+   MassSource=MSSSRC1   Elements=Yes   Masses=Yes   Loads=No   IsDefault=Yes
+
+END TABLE DATA
