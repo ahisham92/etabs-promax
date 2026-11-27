@@ -4988,7 +4988,7 @@ async function hmProgForm(i, list) {
 // SAP2000's Define (Coordinate Systems/Grids...). Design strips, tendons and slab rebar are drawn objects: Draw has them.
 function hmDefineMenu() {
   const dt = label => { const x = defTables.find(t => t[0] === label); return x ? only(x[2] || ["etabs"], [program === "sap2000" && x[3] || x[0], "m:dt:" + x[1].join("|")]) : 0; };
-  const springs = [["Point Springs...", "m:spr:point"], ["Line Springs...", "m:spr:line"], ["Area Springs...", "m:spr:area"]];
+  const springs = [["Point Springs...", "m:spr:point"], ["Line Springs...", "m:spr:line"], ["Area Springs...", "m:spr:area"], only(["etabs"], 0), only(["etabs"], ["Soil Profiles...", "m:spr:soil"]), only(["etabs"], ["Isolated Column Footings...", "m:spr:footing"])];
   const fns = ["Functions", [["Response Spectrum...", "m:fnRS"], only(ES, ["Time History...", "m:fnTH"]), only(["sap2000"], ["Power Spectral Density...", "m:fnPSD"]), only(["sap2000"], ["Steady State...", "m:fnSS"])]];
   // ETABS 23.2: one item, Frame/Wall Nonlinear Hinges..., opening Define Frame/Wall Hinge Properties (hmEtHinges).
   const hinges = [["Frame/Wall Nonlinear Hinges...", "m:etHinges"]];
@@ -8186,6 +8186,7 @@ async function hmEtabsLoadSets(all) {
 async function hmDefineTable(spec) {
   const tables = spec.split("|"), dd = (await hmRun("definition_data", {}, true)).result; if (!dd) return;
   if (program === "sap2000" && spec === "Generalized Displacement Definitions" && dd.tables[spec]) return hmSapGenDispl(dd.tables[spec].rows);
+  if (program === "etabs" && /^Panel Zone Property Definitions/.test(spec)) return hmEtabsPanelZones();
   if (program === "etabs" && spec === "Generalized Displacement Definitions") return hmEtabsGenDispl((dd.tables[spec] || {rows: []}).rows);
   if (program === "etabs" && spec === "Shell Uniform Load Sets") return hmEtabsLoadSets((dd.tables[spec] || {rows: []}).rows);
   if (program === "sap2000" && spec === "Joint Pattern Definitions" && dd.tables[spec]) return hmSapJointPatterns(dd.tables[spec].rows);
@@ -9239,7 +9240,7 @@ async function hmFrameSection(s, after, copy, newShape) {
       <span>Web Members</span>${sel("jWeb", secs(), extras.WebMembers)}<span></span><span></span></div></fieldset>
       <fieldset><legend>Geometry</legend><div class="ex" style="grid-template-columns:auto 90px auto;justify-content:start">${[["Depth", "Depth", "L", 10], ["PanelWidth", "Panel Width", "L", 120]].map(dimRow).join("")}</div></fieldset>`;
     else if (sp.special === "brb") own = `<fieldset><legend>BRB Weight</legend><div class="ex">${dimRow(["Weight", "Total BRB Weight", "F", 0.9468])}</div></fieldset>
-      <fieldset><legend>BRB Section Dimensions</legend><div class="ex">${[["t3", "Overall Depth (for drawing only)", "L", 6], ["t2", "Overall Width (for drawing only)", "L", 6], ["AreaYC", "Area of Yielding Core", "L2", 1], ["StiffES", "Stiffness of Elastic Segment", "FpL", 2329.7245], ["LengthYC", "Length of Yielding Core", "L", 168], ["LengthES", "Length of Elastic Segment", "L", 56.736]].map(dimRow).join("")}</div>
+      <fieldset><legend>BRB Section Dimensions</legend><div class="ex">${[["t3", "Overall Depth (for drawing only)", "L", 6], ["t2", "Overall Width (for drawing only)", "L", 6], ["AreaYC", "Area of Yielding Core", "L2", 1], ["StiffES", "Stiffness of Elastic Segment", "FpL", 2329.7245], ["LengthYC", "Length of Yielding Core", "L", 168], ["LengthES", "Length of Elastic Segment", "L", 56.7456]].map(dimRow).join("")}</div>
         <div id="brbK" style="margin:6px 0 4px 10px"></div><div class="cbtn"><button id="sProps">Show Elastic Section Properties...</button></div></fieldset>
       <fieldset><legend>Inelastic Data</legend><label style="display:block"><input type="radio" name="bIn" value="No" ${extras.UserInElast !== "Yes" ? "checked" : ""}> Program Default from Section Dimensions</label><label style="display:block"><input type="radio" name="bIn" value="Yes" ${extras.UserInElast === "Yes" ? "checked" : ""}> User Specified</label>
         <div class="cbtn"><button id="bInB">Modify/Show Inelastic Section Properties...</button></div></fieldset>`;
@@ -9367,7 +9368,7 @@ async function hmFrameSection(s, after, copy, newShape) {
     const mb = d.querySelector("#sMod"), modText = () => { const t = d.querySelector("#sModT"); if (t) { const m = mods || (cur && cur.modifiers) || {}; t.textContent = Object.values(m).some(v => Math.abs(v - 1) > 1e-12) ? "Currently User Specified" : "Currently Default"; } };
     if (mb) mb.onclick = () => hmModifiers(pd.frame_modifiers || ["AMOD", "A2MOD", "A3MOD", "JMOD", "I2MOD", "I3MOD", "MMOD", "WMOD"], mods || (cur && cur.modifiers), o => { mods = o; modText(); }); modText();
     const rb = d.querySelector("#sRebar"); if (rb) rb.onclick = () => hmFrameRebarForm(q(d, "#sN").value.trim(), shape, kind, extras, mats, k => kind = k, was, rebar && {...rebar.values, ...Object.fromEntries(Object.entries(rebar.sizes).map(([k, v]) => ["SIZE:" + k, v]))}, r => rebar = r);
-    const bi = d.querySelector("#bInB"); if (bi) bi.onclick = () => hmBrbInelastic(brbInel || extras, o => brbInel = o, u);
+    const bi = d.querySelector("#bInB"); if (bi) bi.onclick = () => hmBrbInelastic(brbInel || extras, o => brbInel = o, u, q(d, "#sN").value.trim(), (d.querySelector("input[name=bIn]:checked") || {}).value === "Yes");
     const so = d.querySelector("#sdOpen"); if (so) so.onclick = () => hmSectionDesigner(q(d, "#sN").value.trim(), extras, cur, pd);
     if (sp.special === "nonprismatic") npWire(); if (sp.special === "auto") autoWire(); if (sp.special === "csw") cswWire();
     redraw();
@@ -9378,7 +9379,7 @@ async function hmFrameSection(s, after, copy, newShape) {
 // Composite Shear Wall Data (pictured 36a, 36b): Usage Wall / Pier or Beam / Spandrel with its sketch, the concrete and
 // steel, the Property Data and the Cracked Concrete Stiffness Modifiers.
 const cswFields = ["Usage", "ConcMat", "SteelMat", "Lw", "tsc", "tpw", "tpf", "dtie", "TieSpacing", "EAMod", "EIMod"];
-function hmCswData(now, mats, u, done) {
+function hmCswData(now, mats, u, done, wallForm) {
   const conc = mats.filter(m => /concrete/i.test(m.type)).map(m => m.name), steel = mats.filter(m => /steel/i.test(m.type)).map(m => m.name), wall = (now.Usage || "Wall") !== "Beam";
   const val = (k, dflt) => now[k] !== "" && now[k] != null ? now[k] : dflt, L = `<span class="un">${u.l}</span>`, i = '<span class="info">i</span>';
   const pic = w => w ? `<svg width="420" height="190" viewBox="0 0 420 190" style="background:#fff"><path d="M40 40h310v8H40zM40 160h310v8H40zM350 30h8v148h-8z" fill="#e5a4a4" stroke="#933"/><path d="M40 48h310v112H40z" fill="#eee" stroke="#999"/>${[90, 140, 190, 240, 290].map(x => `<path d="M${x} 52v104" stroke="#333" stroke-dasharray="8 5" stroke-width="2"/>`).join("")}<path d="M180 105h50M180 105V60" stroke="#0a0" stroke-width="2"/><path d="M180 105V60" stroke="#00f" stroke-width="2"/><text x="182" y="58" fill="#00f" font-size="13">3</text><text x="232" y="110" fill="#0a0" font-size="13">2</text><text x="190" y="20" font-size="14">L</text><text x="199" y="24" font-size="9">w</text><text x="8" y="108" font-size="13">t</text><text x="15" y="112" font-size="9">sc</text><text x="248" y="34" font-size="12">s</text><g font-size="12" font-family="monospace"><text x="364" y="96">Infill</text><text x="364" y="110">concrete</text><text x="364" y="175">Flange</text><text x="364" y="188">plate</text><text x="160" y="184">Web    Tie</text><text x="160" y="196">plate  bars</text></g></svg>`
@@ -9386,11 +9387,11 @@ function hmCswData(now, mats, u, done) {
   const d = dialog("Composite Shear Wall Data", `<div id="cwP" style="display:flex;justify-content:center;border:1px solid #ccc;margin-bottom:6px">${pic(wall)}</div>
     <fieldset><legend>General Data</legend><div class="cwg">${i}<span>Usage</span><span class="rowb" style="gap:18px"><label><input type="radio" name="cwU" value="Wall" ${wall ? "checked" : ""}> Wall / Pier</label><label><input type="radio" name="cwU" value="Beam" ${wall ? "" : "checked"}> Beam / Spandrel</label></span><span></span>
       <span></span><span>Concrete Material</span><select id="cwC">${opts(conc, val("ConcMat", conc[0]))}</select><span></span><span></span><span>Steel Material</span><select id="cwS">${opts(steel, val("SteelMat", steel[0]))}</select><span></span></div></fieldset>
-    <fieldset><legend>Property Data</legend><div class="cwg">${i}<span id="cwL1">Length, Lw</span><input data-k="Lw" type="number" step="any" value="${esc(val("Lw", inTo(150, u)))}">${L}<span></span><span id="cwL2">Overall Thickness, tsc</span><input data-k="tsc" type="number" step="any" value="${esc(val("tsc", inTo(12, u)))}">${L}
+    <fieldset><legend>Property Data</legend><div class="cwg">${i}<span id="cwL1">Length, Lw</span><input data-k="Lw" type="number" step="any" value="${wallForm ? "" : esc(val("Lw", inTo(150, u)))}" ${wallForm ? "disabled" : ""}>${wallForm ? `<span class="un" style="color:#999">${u.l}</span>` : L}<span></span><span id="cwL2">Overall Thickness, tsc</span><input data-k="tsc" type="number" step="any" value="${esc(val("tsc", inTo(12, u)))}">${L}
       <span></span><span>Web Plate Thickness, tpw</span><input data-k="tpw" type="number" step="any" value="${esc(val("tpw", inTo(0.5, u)))}">${L}<span></span><span>Flange Plate Thickness, tpf</span><input data-k="tpf" type="number" step="any" value="${esc(val("tpf", inTo(0.5, u)))}">${L}
       <span></span><span>Tie Bar Diameter, dtie</span><input data-k="dtie" type="number" step="any" value="${esc(val("dtie", inTo(0.625, u)))}">${L}<span></span><span>Tie Bar Spacing, S</span><input data-k="TieSpacing" type="number" step="any" value="${esc(val("TieSpacing", inTo(12, u)))}">${L}</div></fieldset>
-    <fieldset><legend>Cracked Concrete Stiffness Modifiers</legend><div class="cwg">${i}<span>Axial Stiffness (EA)</span><input data-k="EAMod" type="number" step="any" value="${esc(val("EAMod", 1))}"><span></span><span></span><span>Bending Stiffness (EI)</span><input data-k="EIMod" type="number" step="any" value="${esc(val("EIMod", 1))}"><span></span></div></fieldset>`,
-    [["Ok", x => { const o = {Usage: q(x, "input[name=cwU]:checked").value, ConcMat: q(x, "#cwC").value, SteelMat: q(x, "#cwS").value}; x.querySelectorAll("[data-k]").forEach(n => o[n.dataset.k] = n.value.trim()); done(o); }], ["Cancel"]], {width: 500});
+    <fieldset><legend>Cracked Concrete Stiffness Modifiers</legend><div class="cwg">${i}<span>${wallForm ? "In-Plane Stiffness" : "Axial Stiffness (EA)"}</span><input data-k="EAMod" type="number" step="any" value="${esc(val("EAMod", 1))}"><span></span><span></span><span>${wallForm ? "Out-of-Plane Stiffness" : "Bending Stiffness (EI)"}</span><input data-k="EIMod" type="number" step="any" value="${esc(val("EIMod", 1))}"><span></span></div></fieldset>`,
+    [["Ok", x => { const o = {Usage: q(x, "input[name=cwU]:checked").value, ConcMat: q(x, "#cwC").value, SteelMat: q(x, "#cwS").value}; x.querySelectorAll("[data-k]").forEach(n => o[n.dataset.k] = n.value.trim()); if (wallForm) o.Lw = val("Lw", inTo(150, u)); done(o); }], ["Cancel"]], {width: 500});
   const on = () => { const w = q(d, "input[name=cwU]:checked").value === "Wall"; q(d, "#cwP").innerHTML = pic(w); q(d, "#cwL1").textContent = w ? "Length, Lw" : "Height, hcb"; q(d, "#cwL2").textContent = w ? "Overall Thickness, tsc" : "Overall Thickness, bcb"; };
   d.querySelectorAll("input[name=cwU]").forEach(r => r.onchange = on); on();
   return d;
@@ -9489,18 +9490,78 @@ async function hmFrameRebarForm(name, shape, kind, extras, mats, setKind, was, p
 }
 // Buckling Restrained Brace: Modify/Show Inelastic Section Properties... the brace's force-deformation (its table's
 // fields): the backbone in tension and compression, the acceptance criteria and the hardening.
-function hmBrbInelastic(now, done, u) {
-  const F = u.f, L = u.l, cell = (k, un) => `<input data-k="${k}" type="number" step="any" value="${esc(now[k] ?? "")}"><span class="un">${un}</span>`;
-  const sym = (now.Symmetric || "Yes") === "Yes";
-  const d = dialog("Buckling Restrained Brace Inelastic Properties", `<fieldset><legend>Force-Deformation</legend><div style="display:grid;grid-template-columns:auto 1fr;gap:4px 8px;align-items:center"><span>Type</span><select data-k="FDType">${opts(["Force-Deformation", "Stress-Strain"], now.FDType || "Force-Deformation")}</select></div>
-      <label style="display:block;margin-top:4px"><input type="checkbox" id="bSym" ${sym ? "checked" : ""}> Symmetric</label>
-      <div style="display:grid;grid-template-columns:150px 90px 40px;gap:4px 8px;align-items:center;margin-top:6px"><span>Initial Stiffness</span>${cell("InitStiff", `${F}/${L}`)}<span>Final Stiffness Ratio</span>${cell("FinalStiff", "")}</div></fieldset>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 10px">${["Tens", "Comp"].map(s => `<fieldset class="bS${s}"><legend>${s === "Tens" ? "Tension" : "Compression"}</legend><div style="display:grid;grid-template-columns:1fr 90px 40px;gap:4px 8px;align-items:center">
-      <span>Yield Force</span>${cell(s + "Fy", F)}<span>Ultimate Force</span>${cell(s + "Fu0", F)}<span>Ultimate Deformation</span>${cell(s + "Du", L)}<span>Maximum Deformation</span>${cell(s + "Dx", L)}
-      <span>Immediate Occupancy</span>${cell(s + "IO", "")}<span>Life Safety</span>${cell(s + "LS", "")}<span>Collapse Prevention</span>${cell(s + "CP", "")}
-      <span>Hardening Factor</span>${cell(s + "HF", "")}<span>Maximum Plastic Deformation</span>${cell(s + "MaxDef", L)}<span>Accumulated Plastic Deformation</span>${cell(s + "AccDef", L)}<span>Proportion</span>${cell(s + "ProDef", "")}</div></fieldset>`).join("")}</div>`,
-    [["OK", x => { const o = {Symmetric: q(x, "#bSym").checked ? "Yes" : "No"}; x.querySelectorAll("[data-k]").forEach(i => { if (i.value.trim() !== "") o[i.dataset.k] = i.value.trim(); }); if (o.Symmetric === "Yes") for (const k in o) if (/^Comp/.test(k)) o[k] = o["Tens" + k.slice(4)] ?? o[k]; done(o); }], ["Cancel"]], {width: 700});
-  const on = () => d.querySelectorAll(".bSComp input").forEach(i => i.disabled = q(d, "#bSym").checked); q(d, "#bSym").onchange = on; on();
+// ETABS 23.2's Inelastic Properties for a Buckling Restrained Brace (pictured BRB 06-15): Property Name with "Program default
+// inelastic properties, not editable by user" or "User specified inelastic properties", the Trilinear or Elastic Perfectly
+// Plastic definition plot, Show Definition Plot / Show Data Plot (after Check Data) with IO, LS and CP marks, and Property
+// Data with Basic Properties, Acceptance Criteria and Hysteresis Data. Elastic Perfectly Plastic leaves out Fy and Du;
+// Symmetric Yes leaves out the compression rows (ETABS then writes Fy = Fu0 for Elastic Perfectly Plastic). The grid can be typed into only when Inelastic Data is User Specified.
+const brbDefaults = {FDType: "Trilinear", Symmetric: "No", InitStiff: [172.619, 1, -1], FinalStiff: [2.9345, 1, -1], TensFy: [44.5, 1, 0], TensFu0: [52.5, 1, 0], CompFy: [44, 1, 0], CompFu0: [52, 1, 0],
+  TensDu: [0.6552, 0, 1], TensDx: [6.72, 0, 1], CompDu: [0.6552, 0, 1], CompDx: [6.72, 0, 1], TensIO: [1, 0, 1], TensLS: [3, 0, 1], TensCP: [5, 0, 1], CompIO: [1, 0, 1], CompLS: [3, 0, 1], CompCP: [5, 0, 1],
+  TensHF: 1.25, TensMaxDef: 16, TensAccDef: 32, TensProDef: 0, CompHF: 1.25, CompMaxDef: 16, CompAccDef: 32, CompProDef: 0};
+const brbDesc = {"Force Displacement Type": "Indicates the shape of the force-displacement curve.", "Symmetric": "Indicates if the force-displacement relationship is symmetric.",
+  "Initial Stiffness, K0": "The initial stiffness, K0.", "Final Stiffness, Kf": "The final stiffness, Kf.",
+  "Tension Yield Strength, Fy": "The yield strength in tension, Fy.", "Tension Strength, Fu0": "The strength in tension, Fu0.", "Compression Yield Strength, Fy": "The yield strength in compression, Fy.", "Compression Strength, Fu0": "The strength in compression, Fu0.",
+  "Tension Deformation, Du": "The deformation in tension at Fu0, Du.", "Tension Deformation, Dx": "The maximum deformation in tension, Dx.", "Compression Deformation, Du": "The deformation in compression at Fu0, Du.", "Compression Deformation, Dx": "The maximum deformation in compression, Dx.",
+  "Hardening Factor": "The hardening factor.", "Maximum Deformation Ratio": "The maximum deformation ratio.", "Accumulated Deformation Ratio": "The accumulated deformation ratio.", "Proportion of Deformation": "The proportion of deformation."};
+function hmBrbInelastic(now, done, u, name, user) {
+  const F = u.f, L = u.l, s = {};
+  for (const [k, v] of Object.entries(brbDefaults)) s[k] = now[k] != null && now[k] !== "" ? now[k] : Array.isArray(v) ? etKipIn(v[0], v[1], v[2], u) : v;
+  if (s.FDType !== "Elastic Perfectly Plastic") s.FDType = "Trilinear";
+  if (s.Symmetric !== "Yes") s.Symmetric = "No";
+  const r = (n, k, un) => pr(n, s[k], null, {key: k, type: "num"}, {unit: un});
+  const basic = () => { const epp = s.FDType === "Elastic Perfectly Plastic", sym = s.Symmetric === "Yes", sides = sym ? ["Tension"] : ["Tension", "Compression"], k = n => n === "Tension" ? "Tens" : "Comp";
+    return [pr("General", "", [pr("Force Displacement Type", s.FDType, null, {key: "FDType", type: "select", options: ["Trilinear", "Elastic Perfectly Plastic"]}), pr("Symmetric", s.Symmetric, null, {key: "Symmetric", type: "select", options: ["Yes", "No"]})], null, {head: true}),
+      pr("Stiffness Values", "", [r("Initial Stiffness, K0", "InitStiff", `${F}/${L}`), r("Final Stiffness, Kf", "FinalStiff", `${F}/${L}`)], null, {head: true}),
+      pr("Force Values", "", sides.flatMap(n => [epp ? null : r(`${n} Yield Strength, Fy`, k(n) + "Fy", F), r(`${n} Strength, Fu0`, k(n) + "Fu0", F)]).filter(Boolean), null, {head: true}),
+      pr("Deformation Values", "", sides.flatMap(n => [epp ? null : r(`${n} Deformation, Du`, k(n) + "Du", L), r(`${n} Deformation, Dx`, k(n) + "Dx", L)]).filter(Boolean), null, {head: true})]; };
+  const accept = () => ["Tension", "Compression"].map(n => pr(`Maximum ${n} Deformation`, "", [["Immediate Occupancy, IO", "IO"], ["Life Safety, LS", "LS"], ["Collapse Prevention, CP", "CP"]].map(([t, k]) => r(t, n.slice(0, 4) + k, L)), null, {head: true}));
+  const hyst = () => ["Tension", "Compression"].map(n => pr(`${n} Parameters`, "", [["Hardening Factor", "HF"], ["Maximum Deformation Ratio", "MaxDef"], ["Accumulated Deformation Ratio", "AccDef"], ["Proportion of Deformation", "ProDef"]].map(([t, k]) => r(t, n.slice(0, 4) + k, "")), null, {head: true}));
+  const tabs = [["Basic Properties", basic], ["Acceptance Criteria", accept], ["Hysteresis Data", hyst]];
+  const d = dialog("Inelastic Properties for a Buckling Restrained Brace", `<div style="display:grid;grid-template-columns:470px 500px;gap:10px">
+    <div><fieldset><div style="display:grid;grid-template-columns:200px 1fr;align-items:center"><span>Property Name</span><input value="${esc(name || "")}" readonly class="pgg"></div>
+      <div class="note">${user ? "User specified inelastic properties" : "Program default inelastic properties, not editable by user"}</div></fieldset>
+      <fieldset><div id="bTl" style="font-weight:600;margin:4px 0"></div><div id="bPl" style="height:280px;border:1px solid var(--line);background:#fff"></div>
+      <div style="display:flex;gap:16px;align-items:center;margin-top:6px"><label><input type="radio" name="bPv" value="def" checked> Show Definition Plot</label><label><input type="radio" name="bPv" value="data" disabled> Show Data Plot</label><span style="flex:1"></span><button id="bChk">Check Data</button></div></fieldset></div>
+    <fieldset><legend>Property Data</legend><div class="itabs">${tabs.map((t, i) => `<button data-page="b${i}" class="${i ? "" : "on"}">${t[0]}</button>`).join("")}</div>
+      ${tabs.map((t, i) => `<div class="ipage${i ? "" : " on"}" data-page="b${i}"><div class="pgwrap" style="height:340px" id="bG${i}"></div></div>`).join("")}<div class="pgdesc"><b></b></div></fieldset></div>`,
+    [["OK", x => { if (!user) return; read(); const o = {...s}; if (o.FDType === "Elastic Perfectly Plastic") { o.TensFy = o.TensFu0; o.CompFy = o.CompFu0; } if (o.Symmetric === "Yes") for (const k in o) if (/^Comp(Fy|Fu0|Du|Dx)$/.test(k)) o[k] = o["Tens" + k.slice(4)]; done(o); }], ["Cancel"]], {width: 1010});
+  const read = () => d.querySelectorAll("[data-ed]").forEach(i => { s[i.dataset.ed] = i.tagName === "SELECT" ? i.value : i.value.trim(); });
+  const n = k => parseFloat(s[k]) || 0;
+  const plot = () => {
+    const epp = s.FDType === "Elastic Perfectly Plastic", data = (d.querySelector("input[name=bPv]:checked") || {}).value === "data", box = q(d, "#bPl");
+    q(d, "#bTl").textContent = (epp ? "Elastic Perfectly Plastic" : "Trilinear") + " Force-Deformation";
+    if (!data) {
+      const pts = epp ? "50,250 80,100 400,82" : "50,250 80,150 170,100 400,82";
+      box.innerHTML = `<svg viewBox="0 0 450 280" width="100%" height="100%"><g stroke="#000" fill="none"><path d="M50 250V30M50 250H425" stroke-width="2.5"/><path d="M44 38l6-12 6 12M417 244l12 6-12 6" fill="#000"/><polyline points="${pts}" stroke-width="1.2"/>
+        <path d="M50 100H${epp ? 80 : 170}${epp ? "" : "M50 150H80M170 100V250"}M400 82V250" stroke-dasharray="3 3" stroke-width=".7"/></g><g font-size="13" font-family="Arial"><text x="45" y="28">F</text><text x="432" y="255">D</text>
+        <text x="22" y="105">Fu0</text>${epp ? "" : `<text x="30" y="155">Fy</text><text x="160" y="270">Du</text>`}<text x="390" y="270">Dx</text><text x="${epp ? 72 : 76}" y="${epp ? 170 : 200}">K0</text><text x="285" y="105">Kf</text></g></svg>`;
+      return;
+    }
+    const side = c => { const K0 = n("InitStiff"), Kf = n("FinalStiff"), sym = s.Symmetric === "Yes", p = c && !sym ? "Comp" : "Tens", Fu0 = n(p + "Fu0"), Dx = n(p + "Dx");
+      const a = epp ? [[0, 0], [Fu0 / (K0 || 1), Fu0]] : [[0, 0], [n(p + "Fy") / (K0 || 1), n(p + "Fy")], [n(p + "Du"), Fu0]], last = a[a.length - 1];
+      a.push([Dx, last[1] + Kf * (Dx - last[0])]); return a; };
+    const at = (pts, x) => { for (let i = 1; i < pts.length; i++) if (x <= pts[i][0]) { const [a, b] = [pts[i - 1], pts[i]]; return a[1] + (b[1] - a[1]) * (x - a[0]) / ((b[0] - a[0]) || 1); } return pts[pts.length - 1][1]; };
+    const t = side(false), c = side(true), xm = Math.max(t[t.length - 1][0], c[c.length - 1][0]) * 1.1 || 1, ym = Math.max(t[t.length - 1][1], c[c.length - 1][1]) * 1.05 || 1;
+    const X = x => 225 + x / xm * 175, Y = y => 125 - y / ym * 105, line = pts => pts.map(([x, y]) => `${X(x).toFixed(1)},${Y(y).toFixed(1)}`).join(" ");
+    const marks = ["IO", "LS", "CP"].map((m, i) => [["Tens", 1, t], ["Comp", -1, c]].map(([p, g, pts]) => { const x = n(p + m); if (!(x > 0)) return ""; const px = X(g * x), py = Y(g * at(pts, x)); return `<path d="M${px} ${py - 6}V${py + 6}" stroke="${["#0c0", "#0cc", "#e00"][i]}" stroke-width="4"/>`; }).join("")).join("");
+    const tick = k => `<text x="${X(k * xm / 1.1 / 4 * 1).toFixed(0)}" y="248" font-size="9" text-anchor="middle">${(k * xm / 1.1 / 4).toFixed(2)}</text>`;
+    box.innerHTML = `<svg viewBox="0 0 450 280" width="100%" height="100%"><rect x="50" y="20" width="350" height="210" fill="#fff" stroke="#999"/><path d="M50 125H400M225 20V230" stroke="#00c"/>
+      <polyline points="${line(t)}" fill="none" stroke="#e00" stroke-width="2"/><polyline points="${line(c.map(([x, y]) => [-x, -y]))}" fill="none" stroke="#e00" stroke-width="2"/>${marks}
+      ${[-4, -2, 0, 2, 4].map(tick).join("")}${[-1, 0, 1].map(k => `<text x="46" y="${Y(k * ym / 1.05) + 3}" font-size="9" text-anchor="end">${(k * ym / 1.05).toFixed(1)}</text>`).join("")}
+      <text x="225" y="268" font-size="13" font-weight="bold" text-anchor="middle">Axial Deformation ${esc(L)}</text><text transform="translate(16 125) rotate(-90)" font-size="13" font-weight="bold" text-anchor="middle">Axial Force ${esc(F)}</text>
+      ${["IO", "LS", "CP"].map((m, i) => `<rect x="420" y="${4 + i * 16}" width="4" height="12" fill="${["#0c0", "#0cc", "#e00"][i]}"/><text x="428" y="${14 + i * 16}" font-size="11">${m}</text>`).join("")}</svg>`;
+  };
+  const paint = () => {
+    tabs.forEach(([, rows], i) => { q(d, "#bG" + i).innerHTML = gridHtml(rows(), user); });
+    const all = {}; tabs.forEach(([, rows], i) => all["b" + i] = rows()); wireGrid(d, all, brbDesc);
+    d.querySelectorAll("#bG0 select[data-ed]").forEach(x => x.onchange = () => { read(); paint(); });
+    d.querySelectorAll("[data-ed]").forEach(x => x.addEventListener("change", () => { read(); d.querySelector("input[name=bPv][value=data]").disabled = true; q(d, "input[name=bPv][value=def]").checked = true; plot(); }));
+    plot();
+  };
+  d.querySelectorAll(".itabs button").forEach(b => b.onclick = () => { d.querySelectorAll(".itabs button").forEach(x => x.classList.toggle("on", x === b)); d.querySelectorAll(".ipage").forEach(p => p.classList.toggle("on", p.dataset.page === b.dataset.page)); });
+  d.querySelectorAll("input[name=bPv]").forEach(x => x.onchange = plot);
+  q(d, "#bChk").onclick = () => { read(); const bad = ["InitStiff", "TensFu0", "TensDx"].filter(k => !(n(k) > 0)); if (bad.length) return formError(d, "The stiffness, strength and deformation values must be greater than zero."); formError(d, ""); const r2 = d.querySelector("input[name=bPv][value=data]"); r2.disabled = false; r2.checked = true; plot(); };
+  paint();
   return d;
 }
 // Section Designer...: ETABS draws the section in its Section Designer window; here its base material and design
@@ -10583,7 +10644,11 @@ async function hmEtabsShellSection(s, after, copy, newKind) {
   const ribRow = (id, label, val) => `<span data-r>${label}</span><input data-r id="${id}" type="number" step="any" value="${val}"><span data-r class="un">${u.l}</span>`;
   const types = (pd.slab_types || ["Slab", "Drop", "Stiff", "Ribbed", "Waffle", "Mat", "Footing"]);
   const modelLabel = {ShellThin: "Shell-Thin", ShellThick: "Shell-Thick", Membrane: "Membrane", Layered: "Layered"};
-  const modeling = (pd.modeling_types || ["ShellThin", "ShellThick", "Membrane", "Layered"]).map(k => [k, modelLabel[k] || k]);
+  const modeling = (pd.modeling_types || ["ShellThin", "ShellThick", "Membrane", "Layered"]).map(k => [k, modelLabel[k] || k]).concat(wall && program === "etabs" ? [["Composite", "Composite"]] : []);
+  // ETABS 23.2's Composite modeling type of a wall (pictured Wall Composite 1b-6): Wall Material Not Applicable, Notional Size
+  // greyed, and Property Data's Modify/Show Composite Wall Data... (its Composite Shear Wall Data with Lw greyed).
+  const cc = cur && cur.composite || {};
+  let csw = {Usage: cc.spandrel ? "Beam" : "Wall", ConcMat: cc.concrete || "", SteelMat: cc.steel || "", Lw: cc.length ?? "", tsc: cc.total_thick ?? "", tpw: cc.plate_thick ?? "", tpf: cc.flange_thick ?? "", dtie: cc.tie_diameter ?? "", TieSpacing: cc.tie_spacing ?? "", EAMod: cc.in_plane ?? "", EIMod: cc.out_of_plane ?? ""};
   const matNow = cur && cur.material || (concs().includes("4000Psi") ? "4000Psi" : concs()[0]);
   const isAuto = wall && autoRows.length > 0;
   const d = dialog(wall ? "Wall Property Data" : "Slab Property Data", `<fieldset><legend>General Data</legend><div class="ex shg">
@@ -10600,18 +10665,20 @@ async function hmEtabsShellSection(s, after, copy, newKind) {
   const pdBox = q(d, "#aPD");
   // The Property Data box for the choices made: a layered or auto select section has one button and its count.
   const paint = () => {
-    const auto = wall && q(d, "#aPT").value === "Auto Select List", layered = !auto && q(d, "#aG").value === "Layered";
+    const auto = wall && q(d, "#aPT").value === "Auto Select List", layered = !auto && q(d, "#aG").value === "Layered", comp = !auto && wall && q(d, "#aG").value === "Composite";
     const wasRib = !!pdBox.querySelector("#aRD"), keep = {}; pdBox.querySelectorAll("input,select").forEach(i => { if (i.id) keep[i.id] = i.type === "checkbox" ? i.checked : i.value; });
-    q(d, "#aMW").innerHTML = auto || layered ? na : `<select id="aM">${opts(concs(), q(d, "#aM") ? q(d, "#aM").value : matNow)}</select>`;
-    q(d, "#aMb").style.visibility = auto || layered ? "hidden" : "";
-    q(d, "#aNot").disabled = auto || layered; q(d, "#aNotL").style.color = layered ? "#999" : "";
+    q(d, "#aMW").innerHTML = auto || layered || comp ? na : `<select id="aM">${opts(concs(), q(d, "#aM") ? q(d, "#aM").value : matNow)}</select>`;
+    q(d, "#aMb").style.visibility = auto || layered || comp ? "hidden" : "";
+    q(d, "#aNot").disabled = auto || layered || comp; q(d, "#aNotL").style.color = layered || comp ? "#999" : "";
     if (auto) { q(d, "#aNotW").innerHTML = na; q(d, "#aGW").innerHTML = na; q(d, "#aModW").innerHTML = na; q(d, "#aModL").textContent = "Modifiers"; }
     else {
-      if (!q(d, "#aNot")) { q(d, "#aNotW").innerHTML = `<button id="aNot" style="width:100%" ${layered ? "disabled" : ""}>Modify/Show Notional Size...</button>`; q(d, "#aNot").onclick = notional; }
+      if (!q(d, "#aNot")) { q(d, "#aNotW").innerHTML = `<button id="aNot" style="width:100%" ${layered || comp ? "disabled" : ""}>Modify/Show Notional Size...</button>`; q(d, "#aNot").onclick = notional; }
       if (!q(d, "#aG")) { q(d, "#aGW").innerHTML = `<select id="aG">${opts(modeling, cur && cur.modeling || "ShellThin")}</select>`; q(d, "#aG").onchange = paint; }
       if (!q(d, "#aMod")) { q(d, "#aModW").innerHTML = `<button id="aMod" style="width:100%">Modify/Show...</button>`; q(d, "#aModL").innerHTML = `Modifiers (Currently <span id="aModT"></span>)`; q(d, "#aMod").onclick = modify; modText(); }
     }
     if (auto) pdBox.innerHTML = `<div style="text-align:center;padding:10px 0"><button id="aAS" style="min-width:220px">Modify/Show Auto Select List...</button><div style="margin-top:4px">Current Number of Properties in List: ${auto ? autoCount() : 0}</div></div>`;
+    else if (comp) pdBox.innerHTML = `<div style="text-align:center;padding:14px 0 6px"><button id="aCW" style="min-width:220px">Modify/Show Composite Wall Data...</button></div>
+      <label style="display:block;margin-top:10px"><input type="checkbox" id="aRZ" ${ex.RigidZone === "Yes" ? "checked" : ""}> Include Automatic Rigid Zone Area Over Wall</label>`;
     else if (layered) pdBox.innerHTML = `<div style="text-align:center;padding:28px 0 10px"><button id="aLy" style="min-width:220px">Modify/Show Layered ${wall ? "Wall" : "Slab"} Data</button><div style="margin-top:4px">Current Number of Layers: ${layers.length}</div></div>`
       + (wall ? `<label style="display:block;margin-top:10px"><input type="checkbox" id="aRZ" ${ex.RigidZone === "Yes" ? "checked" : ""}> Include Automatic Rigid Zone Area Over Wall</label>` : "");
     else if (wall) pdBox.innerHTML = `<div class="ex shg"><span>Thickness</span><input id="aT" type="number" step="any" value="${th}">${L}</div>
@@ -10628,6 +10695,7 @@ async function hmEtabsShellSection(s, after, copy, newKind) {
       q(d, "#aY").onchange = paint;
     }
     for (const [id, val] of Object.entries(keep)) { const i = pdBox.querySelector("#" + id); if (i && id !== "aY") { if (i.type === "checkbox") i.checked = val; else i.value = val; } }
+    const cw = q(d, "#aCW"); if (cw) cw.onclick = () => hmCswData(csw, pd.materials || [], u, o => csw = o, true);
     const ly = q(d, "#aLy"); if (ly) ly.onclick = () => hmLayers(wall, q(d, "#aN").value, layers, pd, dd, u, out => { layers = out; paint(); });
     const as = q(d, "#aAS"); if (as) as.onclick = () => hmWallAutoList(pd, tables, q(d, "#aN").value, auto0(), start, (list, st) => { auto = list; start = st; paint(); });
   };
@@ -10658,6 +10726,18 @@ async function hmEtabsShellSection(s, after, copy, newKind) {
       hm.sec[kind] = name; if (after) after(j); return true;
     }
     const g = q(d, "#aG").value, layered = g === "Layered";
+    if (g === "Composite") {
+      const conc = (pd.materials || []).filter(m => /concrete/i.test(m.type)).map(m => m.name), steel = (pd.materials || []).filter(m => /steel/i.test(m.type)).map(m => m.name);
+      const n = (k, dflt) => { const x = parseFloat(csw[k]); return isFinite(x) ? x : dflt; };
+      const comp = {concrete: csw.ConcMat || (conc.includes("4000Psi") ? "4000Psi" : conc[0]), steel: csw.SteelMat || (steel.includes("A992Fy50") ? "A992Fy50" : steel[0]), length: n("Lw", inTo(150, u)), total_thick: n("tsc", inTo(12, u)),
+        plate_thick: n("tpw", inTo(0.5, u)), flange_thick: n("tpf", inTo(0.5, u)), tie_diameter: n("dtie", inTo(0.625, u)), tie_spacing: n("TieSpacing", inTo(12, u)), in_plane: n("EAMod", 1), out_of_plane: n("EIMod", 1), spandrel: csw.Usage === "Beam"};
+      const e = {Color: ex.Color, Notes: ex.Notes || "", RigidZone: q(d, "#aRZ") && q(d, "#aRZ").checked ? "Yes" : ""};
+      const j = await hmRun("define_shell_type", {name, was: was || undefined, kind, modeling: "Composite", material: comp.concrete, thickness: comp.total_thick, composite: comp, modifiers: mods || undefined, extras: e}, true);
+      if (!j.ok) { formError(d, j.error); return false; }
+      if (was && autoRows.length) await hmRun("define_table_rows", {table: shAutoT, name: was, rows: []}, true);
+      if (layers.length) await hmRun("define_table_rows", {table: shLayerT(wall), name: was || name, rows: []}, true);
+      hm.sec[kind] = name; if (after) after(j); return true;
+    }
     const total = layers.reduce((a, r) => a + (+r.Thickness || 0), 0);
     if (layered && !layers.length) { formError(d, "A layered section needs its layers: Modify/Show Layered " + (wall ? "Wall" : "Slab") + " Data."); return false; }
     const args = {name, was: was || undefined, kind, modeling: g, material: layered ? "" : q(d, "#aM").value, thickness: layered ? total : fnum(d, "#aT"), modifiers: mods || undefined};
@@ -11177,6 +11257,7 @@ function hmLink(pd, l, after) {
 
 // ---- Define: spring properties ----
 async function hmSprings(kind) {
+  if (program === "etabs" || kind === "soil" || kind === "footing") return hmEtabsSprings(kind);
   const pd = (await hmRun("property_definitions", {}, true)).result; if (!pd) return;
   const list = pd.springs.filter(x => x.kind === kind);
   const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmSprings(kind); };
@@ -11205,6 +11286,438 @@ function hmSpring(kind, sp, after) {
     [["OK", d => { const values = {}; d.querySelectorAll("#kV [data-k]").forEach(x => { const v = parseFloat(x.value); if (isFinite(v)) values[x.dataset.k] = v; });
       const extras = {Color: q(d, "#kC").value, Notes: q(d, "#kNo").value}; d.querySelectorAll("[data-n]").forEach(s => extras[s.dataset.n] = s.value);
       return submit(d, "define_spring", {kind, name: q(d, "#kN").value.trim(), values, extras}, after); }], ["Cancel"]], {width: 460});
+  return d;
+}
+
+// ETABS 23.2's Define > Spring Properties, read box by box on Ahmed's PC (field/reference-forms/etabs/Define/Springs and
+// the Show Tables pictures in Define/Tables): Point, Line and Area Spring Properties with their Property Data (General Data,
+// Spring Stiffness Options, the stiffnesses, Nonlinearity Specifications, Elasto-plastic, Single Joint Links at Point,
+// Link Property), Soil Profiles with Soil Profile Data and Isolated Column Footing Specifications with their data.
+const etSprWords = {
+  point: {list: "Point Spring Properties", legend: "Point Spring Property", title: "Point Spring Property Data", pre: "PSpr", color: "Yellow"},
+  line: {list: "Line Spring Properties", legend: "Line Spring Property", title: "Line Spring Property Data", pre: "LSpr", color: "Blue"},
+  area: {list: "Area Spring Properties", legend: "Area Spring Property", title: "Area Spring Property Data", pre: "ASpr", color: "Green"},
+};
+// A value from kip and inch (ETABS's own defaults, pictured in kip-in) into the model's units: force^f length^l.
+const etKipIn = (v, f, l, u) => +(v * ((uForce[u.f] || 1) / uForce.kip) ** f * ((uLen[u.l] || 1) / uLen.in) ** l).toPrecision(6);
+const etLbFt = (v, f, l, u) => +(v * ((uForce[u.f] || 1) / uForce.lb) ** f * ((uLen[u.l] || 1) / uLen.ft) ** l).toPrecision(6);
+function etColorRow(id, now) { return `<span style="display:grid;grid-template-columns:1fr 1fr;gap:6px"><span id="${id}Sw" style="height:20px;border:1px solid #888;display:block;background:${matColorCss(now)}"></span><button id="${id}">Change...</button></span>`; }
+function etColorWire(d, id, get, set) { q(d, "#" + id).onclick = () => hmColor(get(), c => { set(c); q(d, "#" + id + "Sw").style.background = matColorCss(c); }); }
+function etNotes(title, get, set) { dialog(title, `<textarea id="nT" rows="5" maxlength="255" style="width:100%;box-sizing:border-box">${esc(get() || "")}</textarea>`, [["OK", n => { set(q(n, "#nT").value); }], ["Cancel"]], {width: 420}); }
+async function hmEtabsSprings(kind) {
+  if (kind === "soil") return hmEtabsSoilProfiles();
+  if (kind === "footing") return hmEtabsFootings();
+  const pd = (await hmRun("property_definitions", {}, true)).result; if (!pd) return;
+  const W = etSprWords[kind], list = pd.springs.filter(x => x.kind === kind), names = list.map(x => x.name);
+  const again = () => { document.querySelectorAll(".dlg").forEach(x => x.close && x.close()); hmEtabsSprings(kind); };
+  const d = listForm(W.list, W.legend, names, [
+    ["Add New Property...", () => hmEtabsSpring(kind, pd, null, false, again)],
+    ["Add Copy of Property...", n => n && hmEtabsSpring(kind, pd, list.find(x => x.name === n), true, again)],
+    ["Modify/Show Property...", n => n && hmEtabsSpring(kind, pd, list.find(x => x.name === n), false, again)],
+    ["Delete Property", n => n && hmRun("define_spring", {kind, name: n, delete: true}, true).then(j => j.ok ? again() : hmSay(j.error, true))],
+  ], n => hmEtabsSpring(kind, pd, list.find(x => x.name === n), false, again));
+  const b = d.querySelectorAll("[data-a]"); b[1].disabled = b[2].disabled = b[3].disabled = !names.length;
+  return d;
+}
+async function hmEtabsSpring(kind, pd, sp, copy, after) {
+  const u = hmU(), W = etSprWords[kind], x = Object.assign({}, (sp && sp.extras) || {}), names = pd.springs.filter(s => s.kind === kind).map(s => s.name);
+  const links = pd.links.map(l => l.name);
+  const dd = kind === "point" ? (await hmRun("definition_data", {}, true)).result || {tables: {}} : {tables: {}};
+  const rowsOf = t => (dd.tables[t] && dd.tables[t].rows) || [];
+  const soils = [...new Set(rowsOf("Spring Property Definitions - Soil Profiles").map(r => r.Name))], foots = [...new Set(rowsOf("Spring Property Definitions - Isolated Column Footings").map(r => r.Name))];
+  let k = 1; while (names.includes(W.pre + k)) k++;
+  const name0 = !sp ? W.pre + k : copy ? sp.name + " copy" : sp.name;
+  let color = x.Color && !/^#/.test(x.Color) ? x.Color : W.color, notes = x.Notes || "";
+  const fs = (legend, body, id) => `<fieldset ${id ? `id="${id}"` : ""} style="margin:0 0 8px"><legend>${legend}</legend>${body}</fieldset>`;
+  const g = body => `<div style="display:grid;grid-template-columns:1fr 160px 90px;gap:5px 10px;align-items:center;padding:2px 10px">${body}</div>`;
+  const val = (key, def) => sp ? +(sp.values[key] || 0) : def;
+  const num = (id, v) => `<input id="${id}" type="number" step="any" value="${esc(v ?? "")}">`;
+  const fu = `${u.f}/${u.l}`, mu = `${u.f}-${u.l}/rad`;
+  const keys = {point: [["UX", "Translation  X", fu], ["UY", "Translation  Y", fu], ["UZ", "Translation  Z", fu], ["RX", "Rotation about  X-Axis", mu], ["RY", "Rotation about  Y-Axis", mu], ["RZ", "Rotation about  Z-Axis", mu]],
+    line: [["U1", "Local 1 Direction", `${u.f}/${u.l}/${u.l}`], ["U2", "Local 2 Direction", `${u.f}/${u.l}/${u.l}`], ["U3", "Local 3 Direction", `${u.f}/${u.l}/${u.l}`], ["R1", "Rotational About Local 1", `${u.f}/rad`]],
+    area: [["U1", "Local 1 Direction", `${u.f}/${u.l}/${u.l}²`], ["U2", "Local 2 Direction", `${u.f}/${u.l}/${u.l}²`], ["U3", "Local 3 Direction", `${u.f}/${u.l}/${u.l}²`]]}[kind];
+  const defs = {point: {UZ: etKipIn(1, 1, -1, u)}, line: {U2: etKipIn(0.001, 1, -2, u)}, area: {U3: etKipIn(0.1, 1, -3, u)}}[kind];
+  const nlKey = {point: "NonlinOpt", area: "NonlinOpt3"}[kind];
+  const epUnits = kind === "point" ? [fu, u.f] : [`${u.f}/${u.l}/${u.l}²`, `${u.f}/${u.l}²`];
+  const ep = [["Compression Stiffness", epUnits[0]], ["Compression Strength", epUnits[1]], ["Tension Stiffness", epUnits[0]], ["Tension Strength", epUnits[1]]];
+  const soil = (x["Stiffness Option"] || "") === "Soil Profile", viaLink = /^Link/i.test(x["Stiffness Option"] || ""), fromLinks = /^From Link/i.test(x["Nonlinearity Specification"] || "");
+  const nlNow = x[nlKey] || "None";
+  const general = fs("General Data", g(`<span>Property Name</span><input id="sN" value="${esc(name0)}"><span></span>
+      <span>${kind === "line" ? "Property Display Color" : "Display Color"}</span>${etColorRow("sCol", color)}<span></span>
+      <span>${kind === "line" ? "Line Spring Notes" : "Property Notes"}</span><button id="sNo">Modify/Show Notes...</button><span></span>`));
+  const opt = kind === "point"
+    ? fs("Spring Stiffness Options", `<div style="display:flex;gap:40px;padding:4px 10px"><label><input type="radio" name="sO" value="User" ${soil ? "" : "checked"}> User Specified/Link Properties</label><label><input type="radio" name="sO" value="Soil Profile" ${soil ? "checked" : ""} ${soils.length && foots.length ? "" : "disabled"}> Based on Soil Profile and Footing Dimensions</label></div>`)
+    : fs("Spring Stiffness Options", `<div style="padding:4px 10px"><label style="display:block;margin:3px 0"><input type="radio" name="sO" value="User" ${viaLink ? "" : "checked"}> User Specified Stiffness and Nonlinearity</label><label style="display:block;margin:3px 0"><input type="radio" name="sO" value="Link" ${viaLink ? "checked" : ""}> Link Property (Link local axes ${kind === "line" ? "is same as Line" : "are same as Area"} local axes)</label></div>`);
+  const stiff = fs({point: "Simple Spring Stiffness in Global Directions", line: "Spring Constants / Unit Length", area: "Property"}[kind], g(keys.map(([key, l, un]) => `<span data-l="${key}">${l}</span>${num("k" + key, val(key, defs[key] || 0))}<span>${un}</span>`).join("")), "sK");
+  const nlSpec = kind === "point" ? fs("Nonlinearity Specifications", `<div style="display:flex;gap:90px;padding:4px 10px"><label><input type="radio" name="sS" value="Quick" ${fromLinks ? "" : "checked"}> Quick Specification</label><label><input type="radio" name="sS" value="From Links" ${fromLinks ? "checked" : ""}> From Link Properties</label></div>`, "sSpec") : "";
+  const radios = (nm, list, now) => list.map(([v, l]) => `<label style="display:block;margin:4px 0"><input type="radio" name="${nm}" value="${v}" ${now === v ? "checked" : ""}> ${l}</label>`).join("");
+  const nlOpts = [["None", "None (Linear)"], ["Tension Only", "Tension Only"], ["Compression Only", "Compression Only"], ["Elasto-Plastic", kind === "point" ? "Elasto-plastic" : "Elasto-Plastic"]];
+  const epBox = `<div style="display:grid;grid-template-columns:150px 90px 80px;gap:5px 10px;align-items:center;margin-left:44px">${ep.map(([l, un], i) => `<span data-ep>${l}</span><input data-epv="${l}" type="number" step="any" value="${esc(x[l] ?? "")}"><span data-ep>${un}</span>`).join("")}</div>`;
+  const nlBox = kind === "line"
+    ? ["2", "3"].map(n => fs(`Nonlinear Option for Local ${n} Direction`, `<div style="display:flex;gap:50px;padding:4px 10px">${[["None", "None (Linear)"], ["Compression Only", "Compression Only"], ["Tension Only", "Tension Only"]].map(([v, l]) => `<label><input type="radio" name="sL${n}" value="${v}" ${(x["NonlinOpt" + n] || "None") === v ? "checked" : ""}> ${l}</label>`).join("")}</div>`, "sNl" + n)).join("")
+    : fs(kind === "point" ? "Nonlinear Option  (Applies to Translation Z Only)" : "Nonlinear Option (Nonlinear Cases Only)", `<div style="padding:2px 10px">${radios("sNl", nlOpts, nlNow)}${epBox}</div>`, "sNl");
+  const lk = (x["Link Property"] || "").split("|").filter(Boolean), la = (x["Link Axial Direction"] || "").split("|"), l2 = (x["Link Axis 2 Angle"] || "").split("|");
+  let jl = lk.map((l, i) => [l, la[i] || "+Z", l2[i] || "0"]), at = -1;
+  const joints = kind === "point" ? fs("Single Joint Links at Point", `<div style="display:flex;gap:14px;padding:4px 10px"><div style="flex:1;height:160px;overflow:auto;border:1px solid #888;background:#fff"><table class="grid ly" id="sJ" style="width:100%"><thead><tr><th>Link Property</th><th>Axial Direction</th><th>Axis 2 Angle</th></tr></thead><tbody></tbody></table></div>
+      <div style="display:flex;flex-direction:column;gap:6px;width:70px"><button id="sJA">Add</button><button id="sJD">Delete</button></div></div>`, "sJl") : "";
+  const linkBox = kind === "point" ? "" : fs("Specified Link Property", g(`<span>Link Property</span><select id="sLk">${opts(links, x["Link Property"] || links[0])}</select><button id="sLkM" style="width:28px">...</button>`), "sLkF");
+  const soilBox = kind === "point" ? fs("Choose Soil Profile and Isolated Footing", g(`<span>Soil Profile</span><select id="sSo">${opts(soils, x["Soil Profile"] || soils[0])}</select><button id="sSoM" style="width:28px">...</button>
+      <span>Isolated Column Footing</span><select id="sFo">${opts(foots, x["Isolated Column Footing"] || foots[0])}</select><button id="sFoM" style="width:28px">...</button>
+      <span>First-Mode Time Period</span><input id="sFp" type="number" step="any" value="${esc(x["First Period"] ?? 0.1)}"><span>sec</span>`), "sSoil") : "";
+  const d = dialog(W.title, general + opt + stiff + nlSpec + nlBox + joints + linkBox + soilBox,
+    [["OK", d => {
+      const nm = q(d, "#sN").value.trim(); if (!nm) { formError(d, "Give it a name."); return false; }
+      if ((!sp || copy || nm !== sp.name) && names.includes(nm)) { formError(d, "There is one named " + nm + " already."); return false; }
+      const o = q(d, "[name=sO]:checked").value, values = {}, extras = {Color: color, Notes: notes};
+      for (const key of keys.map(z => z[0])) values[key] = o === "User" ? (fnum(d, "#k" + key) || 0) : 0;
+      for (const f of ["Stiffness Option", "Nonlinearity Specification", "Compression Stiffness", "Compression Strength", "Tension Stiffness", "Tension Strength", "Link Property", "Link Axial Direction", "Link Axis 2 Angle", "Soil Profile", "Isolated Column Footing", "First Period"]) extras[f] = "";
+      extras["Stiffness Option"] = o;
+      if (kind === "point" && o === "User") {
+        extras["Nonlinearity Specification"] = q(d, "[name=sS]:checked").value;
+        if (extras["Nonlinearity Specification"] === "From Links") { readJ(); if (!jl.length) { formError(d, "Add at least one single joint link."); return false; }
+          extras["Link Property"] = jl.map(r => r[0]).join("|"); extras["Link Axial Direction"] = jl.map(r => r[1]).join("|"); extras["Link Axis 2 Angle"] = jl.map(r => String(+r[2] || 0)).join("|"); extras.NonlinOpt = ""; }
+      }
+      if (kind === "point" && o === "Soil Profile") { extras["Soil Profile"] = q(d, "#sSo").value; extras["Isolated Column Footing"] = q(d, "#sFo").value; extras["First Period"] = String(fnum(d, "#sFp") || 0); }
+      if (kind !== "point" && o === "Link") { if (!q(d, "#sLk").value) { formError(d, "Define a link property first."); return false; } extras["Link Property"] = q(d, "#sLk").value; }
+      if (o === "User" && !(kind === "point" && extras["Nonlinearity Specification"] === "From Links")) {
+        if (kind === "line") { extras.NonlinOpt2 = q(d, "[name=sL2]:checked").value; extras.NonlinOpt3 = q(d, "[name=sL3]:checked").value; }
+        else { extras[nlKey] = q(d, "[name=sNl]:checked").value; if (extras[nlKey] === "Elasto-Plastic") for (const [l] of ep) { const v = parseFloat(q(d, `[data-epv="${l}"]`).value); if (!isFinite(v)) { formError(d, l + " needs a value."); return false; } extras[l] = String(v); } }
+        if (!Object.values(values).some(v => v > 0)) { formError(d, "Give at least one stiffness above 0."); return false; }
+      } else if (kind === "line") { extras.NonlinOpt2 = extras.NonlinOpt3 = ""; } else if (o !== "User") extras[nlKey] = "";
+      if (sp && !copy && nm !== sp.name) hmRun("define_spring", {kind, name: sp.name, delete: true}, true);
+      return submit(d, "define_spring", {kind, name: nm, values, extras}, after);
+    }, true], ["Cancel"]], {width: kind === "point" ? 600 : 520});
+  etColorWire(d, "sCol", () => color, c => color = c);
+  q(d, "#sNo").onclick = () => etNotes(kind === "line" ? "Line Spring Notes" : "Property Notes", () => notes, v => notes = v);
+  const body = q(d, "#sJ tbody");
+  const readJ = () => { if (body) jl = [...body.querySelectorAll("tr")].map(tr => [tr.querySelector("select[data-c='0']").value, tr.querySelector("select[data-c='1']").value, tr.querySelector("input").value]); };
+  const paintJ = () => { if (!body) return;
+    body.innerHTML = jl.map((r, i) => `<tr data-i="${i}" style="${i === at ? "outline:2px solid #3399ff" : ""}"><td><select data-c="0">${opts(links.includes(r[0]) ? links : [r[0], ...links], r[0])}</select></td><td><select data-c="1">${opts(["-X", "-Y", "-Z", "+X", "+Y", "+Z"], r[1])}</select></td><td><input type="number" step="any" value="${esc(r[2])}"></td></tr>`).join("");
+    body.querySelectorAll("tr").forEach(tr => tr.onclick = () => { readJ(); at = +tr.dataset.i; body.querySelectorAll("tr").forEach(t => t.style.outline = t === tr ? "2px solid #3399ff" : ""); q(d, "#sJD").disabled = false; });
+    q(d, "#sJD").disabled = at < 0; q(d, "#sJA").disabled = !links.length; };
+  const paint = () => {
+    const o = q(d, "[name=sO]:checked").value, spec = kind === "point" && q(d, "[name=sS]:checked") ? q(d, "[name=sS]:checked").value : "Quick";
+    const show = (id, on) => { const e = q(d, "#" + id); if (e) e.style.display = on ? "" : "none"; };
+    show("sK", o === "User"); show("sSpec", o === "User"); show("sSoil", o === "Soil Profile"); show("sLkF", o === "Link");
+    show("sJl", o === "User" && spec === "From Links"); show("sNl", o === "User" && spec !== "From Links"); show("sNl2", o === "User"); show("sNl3", o === "User");
+    if (kind === "line") for (const n of ["2", "3"]) { const v = q(d, `[name=sL${n}]:checked`).value; q(d, `[data-l="U${n}"]`).textContent = `Local ${n} Direction  (${v === "None" ? "Linear" : v})`; }
+    else { const nlOn = q(d, "#sNl").style.display !== "none", v = q(d, "[name=sNl]:checked").value, key = kind === "point" ? "UZ" : "U3", base = keys.find(z => z[0] === key)[1];
+      q(d, `[data-l="${key}"]`).textContent = !nlOn ? base : `${base}  (${v === "None" ? "Linear" : v === "Elasto-Plastic" ? "Effective Linear" : v})`;
+      d.querySelectorAll("[data-epv]").forEach(i => { i.disabled = v !== "Elasto-Plastic"; if (i.disabled) i.value = ""; }); d.querySelectorAll("[data-ep]").forEach(s => s.style.color = v === "Elasto-Plastic" ? "" : "#999"); }
+  };
+  d.querySelectorAll("[name=sO],[name=sS],[name=sNl],[name=sL2],[name=sL3]").forEach(r => r.onchange = paint);
+  if (body) { q(d, "#sJA").onclick = () => { readJ(); jl.push([links[0], "+Z", "0"]); at = jl.length - 1; paintJ(); }; q(d, "#sJD").onclick = () => { readJ(); if (at < 0) return; jl.splice(at, 1); at = -1; paintJ(); }; paintJ(); }
+  if (q(d, "#sLkM")) q(d, "#sLkM").onclick = () => hmLinks();
+  if (q(d, "#sSoM")) { q(d, "#sSoM").onclick = () => hmEtabsSoilProfiles(); q(d, "#sFoM").onclick = () => hmEtabsFootings(); }
+  // Elasto-plastic values kept while another option is picked show again when it is picked back.
+  d.querySelectorAll("[name=sNl]").forEach(r => r.addEventListener("change", () => { if (r.value === "Elasto-Plastic" && r.checked) d.querySelectorAll("[data-epv]").forEach(i => { if (i.value === "") i.value = x[i.dataset.epv] ?? ""; }); }));
+  paint();
+  if (q(d, "[name=sNl]:checked") && q(d, "[name=sNl]:checked").value === "Elasto-Plastic") d.querySelectorAll("[data-epv]").forEach(i => i.value = x[i.dataset.epv] ?? "");
+  return d;
+}
+// Soil Profiles and Soil Profile Data: the layers (name, elevation of the top, unit weight, shear modulus, Poisson's ratio,
+// cohesion, friction angle, shear wave velocity, colour) drawn as bands, the shear modulus reduction factor and damping ratio.
+async function hmEtabsSoilProfiles() {
+  const T = "Spring Property Definitions - Soil Profiles", dd = (await hmRun("definition_data", {}, true)).result || {tables: {}};
+  const all = (dd.tables[T] && dd.tables[T].rows) || [], names = [...new Set(all.map(r => r.Name))];
+  const again = () => { document.querySelectorAll(".dlg").forEach(x => x.close && x.close()); hmEtabsSoilProfiles(); };
+  const d = listForm("Soil Profiles", "Soil Profile", names, [
+    ["Add New Soil Profile...", () => hmEtabsSoilProfile(all, names, null, false, again)],
+    ["Add Copy of Soil Profile...", n => n && hmEtabsSoilProfile(all, names, n, true, again)],
+    ["Modify/Show Soil Profile...", n => n && hmEtabsSoilProfile(all, names, n, false, again)],
+    ["Delete Soil Profile", n => n && hmRun("define_table_rows", {table: T, name: n, rows: []}, true).then(j => j.ok ? again() : hmSay(j.error, true))],
+  ], n => hmEtabsSoilProfile(all, names, n, false, again));
+  const b = d.querySelectorAll("[data-a]"); b[1].disabled = b[2].disabled = b[3].disabled = !names.length;
+  return d;
+}
+function hmEtabsSoilProfile(all, names, n, copy, after) {
+  const T = "Spring Property Definitions - Soil Profiles", u = hmU(), mine = all.filter(r => r.Name === n);
+  let k = 1; while (names.includes("SoilPr" + k)) k++;
+  const name0 = !n ? "SoilPr" + k : copy ? n + " copy" : n, first = mine[0] || {};
+  const cols = [["Soil Layer Name", "Soil Layer Name", ""], ["Elevation of Top of Layer", "Elevation Of Top Of Layer", `(${u.l})`], ["Unit Weight", "Unit Weight", `(${u.f}/${u.l}³)`], ["Shear Modulus", "Shear Modulus", `(${u.f}/${u.l}²)`], ["Poissons Ratio", "Poisson's Ratio", ""],
+    ["Cohesion", "Cohesion", `(${u.f}/${u.l}²)`], ["Friction Angle", "Friction Angle", "(deg)"], ["Shear Wave Velocity", "Shear Wave Velocity", `(${u.l}/sec)`]];
+  let layers = mine.map(r => [...cols.map(c => r[c[0]] ?? ""), r["Layer Color"] || "Blue"]), at = -1, notes = first.Notes || "";
+  const d = dialog("Soil Profile Data", `<div style="display:grid;grid-template-columns:1fr 340px;gap:14px"><fieldset style="margin:0"><div style="display:flex;gap:20px;align-items:center;justify-content:center;padding:10px"><span>Soil Profile Name</span><input id="soN" value="${esc(name0)}" style="width:240px"></div></fieldset>
+      <fieldset style="margin:0"><legend>Soil Profile Notes</legend><div style="text-align:center;padding:4px"><button id="soNo" style="width:240px">Modify/Show Notes...</button></div></fieldset></div>
+    <fieldset style="margin-top:8px"><legend>Soil Layers Data</legend><div style="display:grid;grid-template-columns:1fr 180px;gap:14px;align-items:start"><svg id="soPic" viewBox="0 0 680 190" style="width:100%;height:190px;background:#fff;border:1px solid #888"></svg>
+      <div><label style="display:flex;gap:8px;align-items:center;margin-top:30px"><input id="soTr" type="range" min="0" max="100" value="50" style="width:90px"> Transparency</label><label style="display:block;margin-top:40px"><input type="checkbox" id="soHi"> Highlight Selected Layer</label></div></div>
+      <div style="height:190px;overflow:auto;border:2px solid #333;background:#a0a0a0;margin-top:6px"><table class="grid ly" id="soG" style="width:100%"><thead><tr>${cols.map(c => `<th>${esc(c[1])}${c[2] ? "<br>" + esc(c[2]) : ""}</th>`).join("")}<th>Color</th></tr></thead><tbody></tbody></table></div>
+      <div style="display:grid;grid-template-columns:330px 100px 1fr 150px;gap:8px 10px;align-items:center;margin-top:10px"><span>Shear Modulus Reduction Factor for Large Strain Effects</span><input id="soR" type="number" step="any" value="${esc(first["Shear Modulus Reduction Factor"] ?? 1)}"><span></span><button id="soA">Add Soil Layer</button>
+        <span>Soil Hysteretic Damping Ratio</span><input id="soD" type="number" step="any" value="${esc(first["Hysteretic Damping Ratio"] ?? 0.5)}"><span></span><button id="soDel">Delete Soil layer</button></div></fieldset>`,
+    [["OK", async d => {
+      read(); const nm = q(d, "#soN").value.trim(); if (!nm) { formError(d, "Give it a name."); return false; }
+      if ((!n || copy || nm !== n) && names.includes(nm)) { formError(d, "There is one named " + nm + " already."); return false; }
+      if (!layers.length) { formError(d, "Add at least one soil layer."); return false; }
+      if (new Set(layers.map(l => l[0])).size !== layers.length || layers.some(l => !l[0])) { formError(d, "Each layer needs a name of its own."); return false; }
+      const rows = layers.map((l, i) => Object.assign({}, ...cols.map((c, j) => ({[c[0]]: j ? String(+l[j] || 0) : l[j]})), {"Layer Color": l[8]}, i ? {} : {"Shear Modulus Reduction Factor": String(fnum(d, "#soR")), "Hysteretic Damping Ratio": String(fnum(d, "#soD")), Notes: notes}));
+      if (n && !copy && nm !== n) { const j0 = await hmRun("define_table_rows", {table: T, name: n, rows: []}, true); if (!j0.ok) { formError(d, j0.error); return false; } }
+      const j = await hmRun("define_table_rows", {table: T, name: nm, rows}, true); if (!j.ok) { formError(d, j.error); return false; }
+      after(); return true;
+    }, true], ["Cancel"]], {width: 960});
+  const body = q(d, "#soG tbody");
+  const read = () => { layers = [...body.querySelectorAll("tr")].map((tr, i) => [...[...tr.querySelectorAll("input")].map(x => x.value.trim()), layers[i][8]]); };
+  const draw = () => {
+    const svg = q(d, "#soPic"), op = 1 - (+q(d, "#soTr").value) / 150, hi = q(d, "#soHi").checked;
+    if (!layers.length) { svg.innerHTML = `<text x="660" y="184" font-size="10" text-anchor="end">0 ,0</text>`; return; }
+    const tops = layers.map(l => +l[1] || 0), top = Math.max(...tops), low = Math.min(...tops), span = Math.max(top - low, 1) * (layers.length > 1 ? 1 + 1 / (layers.length - 1) : 1), h = 140 / span;
+    svg.innerHTML = layers.map((l, i) => { const y0 = 20 + (top - (+l[1] || 0)) * h, y1 = i + 1 < layers.length ? 20 + (top - (+layers[i + 1][1] || 0)) * h : 160;
+      return `<rect x="100" y="${y0}" width="480" height="${Math.max(y1 - y0, 2)}" fill="${matColorCss(l[8])}" fill-opacity="${op}" stroke="${hi && i === at ? "#ff0" : "none"}" stroke-width="3"/>`; }).join("") + `<line x1="90" y1="160" x2="590" y2="160" stroke="#000"/>`;
+  };
+  const paint = () => {
+    body.innerHTML = layers.map((l, i) => `<tr data-i="${i}" style="background:${i === at ? "#1e78d7" : "#fff"}">${cols.map((c, j) => `<td><input ${j ? 'type="number" step="any"' : ""} style="text-align:center;${i === at ? "background:#1e78d7;color:#fff" : ""}" value="${esc(l[j])}"></td>`).join("")}<td data-col="${i}" style="background:${matColorCss(l[8])};width:40px;cursor:pointer"></td></tr>`).join("");
+    body.querySelectorAll("tr").forEach(tr => { tr.onclick = e => { if (e.target.dataset.col != null) return; read(); at = +tr.dataset.i; paint(); }; tr.querySelectorAll("input").forEach(x => x.onchange = () => { read(); draw(); }); });
+    body.querySelectorAll("[data-col]").forEach(c => c.onclick = () => { read(); const i = +c.dataset.col; hmColor(layers[i][8], v => { layers[i][8] = v; paint(); }); });
+    q(d, "#soDel").disabled = at < 0; draw();
+  };
+  q(d, "#soA").onclick = () => { read(); const last = layers[layers.length - 1];
+    let j = layers.length + 1; while (layers.some(l => l[0] === "Layer" + j)) j++;
+    const z = last ? +(+last[1] - etLbFt(5, 0, 1, u)).toPrecision(6) : 0;
+    layers.push(["Layer" + j, String(z), String(etLbFt(125, 1, -3, u)), String(etLbFt(6336000, 1, -2, u)), "0.3", String(etLbFt(417.71, 1, -2, u)), "30", String(etKipIn(11811.02, 0, 1, u)), ["Blue", "DarkGreen", "Brown", "Orange", "Magenta", "Cyan"][layers.length % 6]]);
+    at = layers.length - 1; paint(); };
+  q(d, "#soDel").onclick = () => { read(); if (at < 0) return; layers.splice(at, 1); at = -1; paint(); };
+  q(d, "#soTr").oninput = draw; q(d, "#soHi").onchange = draw;
+  q(d, "#soNo").onclick = () => etNotes("Soil Profile Notes", () => notes, v => notes = v);
+  paint();
+  return d;
+}
+// Isolated Column Footing Specifications and Isolated Column Footing Data: General Data, the footing's dimensions and
+// its embedment depth (Program Determined, or User Defined with the depth).
+async function hmEtabsFootings() {
+  const T = "Spring Property Definitions - Isolated Column Footings", dd = (await hmRun("definition_data", {}, true)).result || {tables: {}};
+  const all = (dd.tables[T] && dd.tables[T].rows) || [], names = all.map(r => r.Name);
+  const again = () => { document.querySelectorAll(".dlg").forEach(x => x.close && x.close()); hmEtabsFootings(); };
+  const one = (n, copy) => {
+    const u = hmU(), r = all.find(x => x.Name === n) || {};
+    let k = 1; while (names.includes("ColFoot" + k)) k++;
+    const name0 = !n ? "ColFoot" + k : copy ? n + " copy" : n;
+    let color = r.Color || "Blue", notes = r.Notes || "";
+    const user = /^User/i.test(r["Embedment Source"] || "");
+    const g = body => `<div style="display:grid;grid-template-columns:1fr 150px 40px;gap:5px 10px;align-items:center;padding:2px 10px">${body}</div>`;
+    const dim = (f, l, def) => `<span>${l}</span><input data-f="${f}" type="number" step="any" value="${esc(r[f] ?? inTo(def, u))}"><span>${u.l}</span>`;
+    const d = dialog("Isolated Column Footing Data", `<fieldset style="margin:0 0 8px"><legend>General Data</legend>${g(`<span>Property Name</span><input id="fN" value="${esc(name0)}"><span></span><span>Display Color</span>${etColorRow("fCol", color)}<span></span><span>Property Notes</span><button id="fNo">Modify/Show Notes...</button><span></span>`)}</fieldset>
+      <fieldset style="margin:0 0 8px"><legend>Isolated Column Footing Dimensions</legend>${g(dim("Length", "Length (along column major axis)", 60) + dim("Width", "Width (along column minor axis)", 36) + dim("Thickness", "Thickness", 18))}</fieldset>
+      <fieldset style="margin:0"><legend>Footing Embedment Depth</legend>${g(`<label><input type="radio" name="fE" value="Program Determined" ${user ? "" : "checked"}> Program Determined</label><span></span><span></span>
+        <label><input type="radio" name="fE" value="User Defined" ${user ? "checked" : ""}> User Defined</label><input id="fU" type="number" step="any" value="${esc(r["User Embedment"] ?? "")}"><span id="fUu">${u.l}</span>`)}</fieldset>`,
+      [["OK", async d => {
+        const nm = q(d, "#fN").value.trim(); if (!nm) { formError(d, "Give it a name."); return false; }
+        if ((!n || copy || nm !== n) && names.includes(nm)) { formError(d, "There is one named " + nm + " already."); return false; }
+        const row = {Color: color, Notes: notes, "Embedment Source": q(d, "[name=fE]:checked").value};
+        for (const i of d.querySelectorAll("[data-f]")) { const v = parseFloat(i.value); if (!(v > 0)) { formError(d, i.dataset.f + " is above 0."); return false; } row[i.dataset.f] = String(v); }
+        if (row["Embedment Source"] === "User Defined") { const v = fnum(d, "#fU"); if (!(v >= 0)) { formError(d, "Give the embedment depth."); return false; } row["User Embedment"] = String(v); }
+        if (n && !copy && nm !== n) { const j0 = await hmRun("define_table_rows", {table: T, name: n, rows: []}, true); if (!j0.ok) { formError(d, j0.error); return false; } }
+        const j = await hmRun("define_table_rows", {table: T, name: nm, rows: [row]}, true); if (!j.ok) { formError(d, j.error); return false; }
+        again(); return true;
+      }, true], ["Cancel"]], {width: 480});
+    etColorWire(d, "fCol", () => color, c => color = c);
+    q(d, "#fNo").onclick = () => etNotes("Property Notes", () => notes, v => notes = v);
+    const paint = () => { const on = q(d, "[name=fE]:checked").value === "User Defined"; q(d, "#fU").disabled = !on; if (!on) q(d, "#fU").value = ""; else if (q(d, "#fU").value === "") q(d, "#fU").value = r["User Embedment"] ?? inTo(48, u); q(d, "#fUu").style.color = on ? "" : "#999"; };
+    d.querySelectorAll("[name=fE]").forEach(x => x.onchange = paint); paint();
+    return d;
+  };
+  const d = listForm("Isolated Column Footing Specifications", "Isolated Column Footings", names, [
+    ["Add New Property...", () => one(null)], ["Add Copy of Property...", n => n && one(n, true)], ["Modify/Show Property...", n => n && one(n)],
+    ["Delete Property", n => n && hmRun("define_table_rows", {table: T, name: n, rows: []}, true).then(j => j.ok ? again() : hmSay(j.error, true))],
+  ], n => one(n));
+  const b = d.querySelectorAll("[data-a]"); b[1].disabled = b[2].disabled = b[3].disabled = !names.length;
+  return d;
+}
+
+// ETABS 23.2's Define > Section Properties > Panel Zone, read box by box on Ahmed's PC (field/reference-forms/etabs/Define/
+// Panel Zones and the Panel Zone Property Definitions tables in Define/Tables): Panel Zone Properties (Defined Panel Zones
+// with Generated and From), Panel Zone Data (General, Properties, Auto Properties, Connectivity, Local Axis, Active
+// Directions, Acceptance Criteria), Nonlinear Panel Zone Properties, User Nonlinear Panel Zone Data and the User-Defined
+// Panel Zone Acceptance Criteria. Kept as the rows of ETABS's two Panel Zone Property Definitions tables.
+const pzT = "Panel Zone Property Definitions", pzNT = "Panel Zone Property Definitions - User Nonlinear Data";
+async function hmEtabsPanelZones() {
+  const [dd, pd] = [(await hmRun("definition_data", {}, true)).result || {tables: {}}, (await hmRun("property_definitions", {}, true)).result || {links: []}];
+  const R = t => (dd.tables[t] && dd.tables[t].rows) || [], all = R(pzT), nl = R(pzNT), names = all.map(r => r.Name);
+  const again = () => { document.querySelectorAll(".dlg").forEach(x => x.close && x.close()); hmEtabsPanelZones(); };
+  let at = names.length ? names.length - 1 : -1;
+  const d = dialog("Panel Zone Properties", `<div style="display:grid;grid-template-columns:1fr 270px;gap:12px"><fieldset style="margin:0"><legend>Defined Panel Zones</legend>
+      <div style="height:250px;overflow:auto;border:1px solid #333;background:#a0a0a0"><table class="grid ly" id="pzL" style="width:100%;background:#fff"><thead><tr><th>Name</th><th style="width:60px">Generated</th><th>From</th></tr></thead><tbody></tbody></table></div></fieldset>
+    <div id="pzR"><fieldset style="margin:0"><legend>Click to:</legend><div style="display:flex;flex-direction:column;gap:6px"><button data-p="add">Add New Panel Zone Property...</button><button data-p="copy">Add Copy of Panel Zone Property...</button><button data-p="mod">Modify/Show Panel Zone Property...</button><button data-p="del">Delete Panel Zone Property</button></div>
+      <label style="display:block;margin:16px 0 6px"><input type="checkbox" id="pzG"> Show Generated Properties</label></fieldset></div></div>`, [["OK"], ["Cancel"]], {width: 700});
+  dfInto(d, "#pzR");
+  const paint = () => { q(d, "#pzL tbody").innerHTML = names.map((n, i) => `<tr data-i="${i}" style="${i === at ? "background:#1e78d7;color:#fff" : "background:#e8e8e8"}"><td>${esc(n)}</td><td>No</td><td>N.A.</td></tr>`).join("");
+    q(d, "#pzL tbody").querySelectorAll("tr").forEach(tr => { tr.onclick = () => { at = +tr.dataset.i; paint(); }; tr.ondblclick = () => hmEtabsPanelZone(all, nl, pd, names[+tr.dataset.i], false, again); });
+    d.querySelectorAll("[data-p=copy],[data-p=mod],[data-p=del]").forEach(b => b.disabled = at < 0); };
+  d.querySelector("[data-p=add]").onclick = () => hmEtabsPanelZone(all, nl, pd, null, false, again);
+  d.querySelector("[data-p=copy]").onclick = () => at >= 0 && hmEtabsPanelZone(all, nl, pd, names[at], true, again);
+  d.querySelector("[data-p=mod]").onclick = () => at >= 0 && hmEtabsPanelZone(all, nl, pd, names[at], false, again);
+  d.querySelector("[data-p=del]").onclick = async () => { if (at < 0) return; const n = names[at];
+    let j = await hmRun("define_table_rows", {table: pzNT, name: n, rows: []}, true); if (j.ok) j = await hmRun("define_table_rows", {table: pzT, name: n, rows: []}, true); j.ok ? again() : hmSay(j.error, true); };
+  paint();
+  return d;
+}
+function hmEtabsPanelZone(all, nlRows, pd, n, copy, after) {
+  const u = hmU(), names = all.map(r => r.Name), r0 = Object.assign({}, all.find(r => r.Name === n) || {});
+  let k = 1; while (names.includes("PZone" + k)) k++;
+  const name0 = !n ? "PZone" + k : copy ? n + " copy" : n;
+  let notes = r0.Notes || "";
+  // The user nonlinear rows by direction: {type, stiff, gen: first row, pts: [[point, moment, rotation]]}.
+  const dirs = {};
+  for (const dr of ["Major", "Minor"]) { const rs = nlRows.filter(r => r.Name === n && r.Direction === dr);
+    if (rs.length) dirs[dr] = {type: rs[0].Type || "Nonlinear", stiff: rs[0].LinearStiff || "", gen: Object.assign({}, rs[0]), pts: rs.filter(r => r.Point).map(r => [r.Point, r.Force ?? "", r.Displ ?? ""])}; }
+  const acc = {type: r0.UserAccType || "Moment"};
+  for (const f of ["IO", "LS", "CP"]) for (const m of ["Ma", "Mi"]) { acc["Mom" + f + m] = r0[`User${f}Mom${m}`] ?? ""; acc["Rot" + f + m] = r0[`User${f}Rot${m}`] ?? ""; }
+  const src = r0.Source || "Column", links = pd.links.map(l => l.name);
+  const fs = (legend, body, id) => `<fieldset ${id ? `id="${id}"` : ""} style="margin:0 0 8px"><legend>${legend}</legend>${body}</fieldset>`;
+  const rad = (nm, v, l, now) => `<label style="display:block;margin:5px 0"><input type="radio" name="${nm}" value="${v}" ${now === v ? "checked" : ""}> ${l}</label>`;
+  const sub = (l, id, v, un) => `<div style="display:grid;grid-template-columns:186px 90px 1fr;gap:6px;align-items:center;margin:3px 0 3px 22px"><span data-sl="${id}">${l}</span><input id="${id}" type="number" step="any" value="${esc(v ?? "")}"><span data-sl="${id}">${un || ""}</span></div>`;
+  const d = dialog("Panel Zone Data", `<div style="display:grid;grid-template-columns:1fr 340px;gap:12px">
+    <div>${fs("General", `<div style="display:grid;grid-template-columns:140px 1fr;gap:6px 10px;align-items:center;padding:2px 10px"><span>Property Name</span><input id="zN" value="${esc(name0)}"><span>Property Notes</span><button id="zNo">Modify/Show...</button></div>`)}
+      ${fs("Properties", `<div style="padding:0 8px">${rad("zS", "Column", "Auto Elastic Properties (Steel Only)", src)}${rad("zS", "Spring", "Specified Spring Properties", src)}${sub("Major Moment/Rotation", "zKa", r0.SpringMajor, `${u.f}-${u.l}/rad`)}${sub("Minor Moment/Rotation", "zKi", r0.SpringMinor, `${u.f}-${u.l}/rad`)}
+        ${rad("zS", "ASCE 41-17", "Auto Nonlinear Properties based on ASCE 41-17 Table 9-7.2 (Steel Only)", src)}<div style="display:flex;justify-content:space-between;align-items:center">${rad("zS", "User", "User-defined Nonlinear Properties", src)}<button id="zUM" style="width:96px">Modify/Show...</button></div>
+        <input id="zUs" class="grey" readonly style="margin:0 0 4px 22px;width:calc(100% - 30px)">${rad("zS", "Link", "Specified Link Property", src)}
+        <div style="display:grid;grid-template-columns:110px 1fr;gap:6px;align-items:center;margin:3px 0 6px 22px"><span data-sl="zL">Link Property</span><select id="zL">${opts(links, r0.LinkProp || links[0])}</select></div></div>`)}
+      ${fs("Auto Properties", `<div style="padding:0 8px">${sub("Doubler Plate Thickness, Major Direction", "zDp", r0.DblPlThick ?? 0, u.l).replace("margin:3px 0 3px 22px", "margin:3px 0").replace("186px", "270px")}${sub("Axial Load Ratio, P / Py for Column", "zAx", r0.AxLoadRatio ?? 0.2, "").replace("margin:3px 0 3px 22px", "margin:3px 0").replace("186px", "270px")}</div>`)}</div>
+    <div>${fs("Connectivity", `<div style="padding:0 8px">${rad("zC", "Beam-Column", "Beam - Column", r0.Connect || "Beam-Column")}${rad("zC", "Beam-Brace", "Beam - Brace", r0.Connect)}${rad("zC", "Brace-Column", "Brace - Column", r0.Connect)}<label style="display:block;margin:5px 0"><input type="checkbox" id="zOff" ${/^n/i.test(r0.OffsetRigid || "") ? "" : "checked"}> Set Adjacent End Offsets to Rigid</label></div>`)}
+      ${fs("Local Axis", `<div style="padding:0 8px">${rad("zA", "Column", "From Column", /^User/i.test(r0.AxisSource || "") ? "" : "Column")}${rad("zA", "User", "User Defined", /^User/i.test(r0.AxisSource || "") ? "User" : "")}
+        <div style="display:grid;grid-template-columns:1fr 90px 30px;gap:6px;align-items:center;margin-left:22px"><span data-sl="zA2">Axis 2 Angle</span><input id="zA2" type="number" step="any" value="${esc(r0.Axis2Angle ?? "")}"><span data-sl="zA2">deg</span><span data-sl="zAd">Axial Direction</span><select id="zAd">${opts(["-X", "-Y", "-Z", "+X", "+Y", "+Z"], r0.AxialDir || "+Z")}</select><span></span></div></div>`)}
+      ${fs("Active Directions", `<div style="padding:0 8px">${rad("zD", "Major", "Major Moment / Rotation Only", r0.ActiveDir || "Major")}${rad("zD", "Minor", "Minor Moment / Rotation Only", r0.ActiveDir)}${rad("zD", "Both", "Both Major and Minor Moment / Rotation", r0.ActiveDir)}</div>`)}
+      ${fs("Acceptance Criteria", `<div id="zAcc" style="padding:0 8px"></div>`)}</div></div>`,
+    [["OK", async d => {
+      const nm = q(d, "#zN").value.trim(); if (!nm) { formError(d, "Give it a name."); return false; }
+      if ((!n || copy || nm !== n) && names.includes(nm)) { formError(d, "There is one named " + nm + " already."); return false; }
+      const s = q(d, "[name=zS]:checked").value, link = s === "Link", dir = link ? "Major" : q(d, "[name=zD]:checked").value;
+      const row = {Source: s, ActiveDir: dir, OffsetRigid: q(d, "#zOff").checked ? "Yes" : "No", Notes: notes, AcceptType: q(d, "[name=zAc]:checked").value};
+      if (s === "Column" || s === "ASCE 41-17") row.DblPlThick = String(fnum(d, "#zDp") || 0);
+      if (s === "ASCE 41-17") row.AxLoadRatio = String(fnum(d, "#zAx"));
+      if (s === "Spring") { if (dir !== "Minor") row.SpringMajor = String(fnum(d, "#zKa")); if (dir !== "Major") row.SpringMinor = String(fnum(d, "#zKi"));
+        if ([row.SpringMajor, row.SpringMinor].some(v => v !== undefined && !(+v > 0))) { formError(d, "Give the spring's moment per rotation."); return false; } }
+      if (link) { if (!q(d, "#zL").value) { formError(d, "Define a link property first."); return false; }
+        Object.assign(row, {LinkProp: q(d, "#zL").value, Connect: q(d, "[name=zC]:checked").value, AxisSource: q(d, "[name=zA]:checked").value === "User" ? "User Angle" : "Column"});
+        if (row.AxisSource === "User Angle") Object.assign(row, {AxialDir: q(d, "#zAd").value, Axis2Angle: String(fnum(d, "#zA2") || 0)}); }
+      if (row.AcceptType === "User") { row.UserAccType = acc.type; const p = acc.type === "Moment" ? "Mom" : "Rot";
+        for (const f of ["IO", "LS", "CP"]) for (const m of ["Ma", "Mi"]) if ((m === "Ma" ? dir !== "Minor" : dir !== "Major") && acc[p + f + m] !== "") row[`User${f}${p}${m}`] = String(acc[p + f + m]); }
+      const nlOut = [];
+      if (s === "User") for (const dr of ["Major", "Minor"]) { if ((dr === "Major" && dir === "Minor") || (dr === "Minor" && dir === "Major")) continue;
+        const x = dirs[dr] || {type: "Linear", stiff: ""};
+        if (x.type === "Linear") { if (!(+x.stiff > 0)) { formError(d, `Give the ${dr.toLowerCase()} direction's linear stiffness (Modify/Show...).`); return false; } nlOut.push({Direction: dr, Type: "Linear", LinearStiff: String(x.stiff)}); }
+        else x.pts.forEach((p, i) => nlOut.push(Object.assign(i ? {} : Object.assign({}, x.gen, {Type: "Nonlinear"}), {Direction: dr, Point: p[0], Force: String(p[1]), Displ: String(p[2])}))); }
+      nlOut.forEach(r => { delete r.Name; if (r.Type === "Linear") ["Point", "Force", "Displ"].forEach(f => delete r[f]); });
+      if (n && !copy && nm !== n) for (const t of [pzNT, pzT]) { const j0 = await hmRun("define_table_rows", {table: t, name: n, rows: []}, true); if (!j0.ok) { formError(d, j0.error); return false; } }
+      let j = await hmRun("define_table_rows", {table: pzT, name: nm, rows: [row]}, true); if (!j.ok) { formError(d, j.error); return false; }
+      j = await hmRun("define_table_rows", {table: pzNT, name: nm, rows: nlOut}, true); if (!j.ok) { formError(d, j.error); return false; }
+      after(); return true;
+    }, true], ["Cancel"]], {width: 860});
+  q(d, "#zNo").onclick = () => etNotes("Property Notes", () => notes, v => notes = v);
+  const scaled = () => { const x = dirs.Major || dirs.Minor; return x && x.type !== "Linear" && (/^y/i.test(x.gen.UseYldForce || "") || /^y/i.test(x.gen.UseYldDispl || "")) ? "Auto Scaling" : "No Auto Scaling"; };
+  const paint = () => {
+    const s = q(d, "[name=zS]:checked").value, link = s === "Link", dir = q(d, "[name=zD]:checked").value;
+    const en = (id, on) => { const e = q(d, "#" + id); e.disabled = !on; if (!on && e.tagName === "INPUT" && e.type === "number") e.dataset.keep = e.value || e.dataset.keep || "", e.value = ""; else if (on && e.value === "" && e.dataset.keep) e.value = e.dataset.keep; d.querySelectorAll(`[data-sl="${id}"]`).forEach(x => x.style.color = on ? "" : "#999"); };
+    en("zKa", s === "Spring" && dir !== "Minor"); en("zKi", s === "Spring" && dir !== "Major"); en("zL", link); en("zDp", s === "Column" || s === "ASCE 41-17"); en("zAx", s === "ASCE 41-17");
+    q(d, "#zUM").disabled = s !== "User"; q(d, "#zUs").value = s === "User" ? scaled() : "";
+    d.querySelectorAll("[name=zC]").forEach(r => { r.disabled = !link && r.value !== "Beam-Column"; if (!link && r.value === "Beam-Column") r.checked = true; });
+    d.querySelectorAll("[name=zA]").forEach(r => { r.disabled = !link && r.value === "User"; if (!link && r.value === "Column") r.checked = true; });
+    const user = link && q(d, "[name=zA]:checked").value === "User"; en("zA2", user); en("zAd", user); if (user && q(d, "#zA2").value === "") q(d, "#zA2").value = 0;
+    d.querySelectorAll("[name=zD]").forEach(r => r.disabled = link);
+    const now = q(d, "[name=zAc]:checked") ? q(d, "[name=zAc]:checked").value : (r0.AcceptType || "None");
+    q(d, "#zAcc").innerHTML = link ? rad("zAc", "None", "None", now === "Link" ? "" : "None") + rad("zAc", "Link", "Use Acceptance Criteria from Link Property", now === "Link" ? "Link" : "")
+      : rad("zAc", "None", "None", ["None", "User", "Auto"].includes(now) ? now : "None") + `<div style="display:flex;justify-content:space-between;align-items:center">${rad("zAc", "User", "User Defined", now)}<button id="zAcM" style="width:110px">Modify/Show...</button></div>` + rad("zAc", "Auto", "Auto Based on ASCE 41-17 Table 9-7.2 (Steel Only)", now);
+    if (!q(d, "[name=zAc]:checked")) q(d, "[name=zAc]").checked = true;
+    d.querySelectorAll("[name=zAc]").forEach(r => r.onchange = paint);
+    if (q(d, "#zAcM")) { q(d, "#zAcM").disabled = q(d, "[name=zAc]:checked").value !== "User"; q(d, "#zAcM").onclick = () => hmEtabsPzAcceptance(acc, dir, u); }
+  };
+  d.querySelectorAll("[name=zS],[name=zD],[name=zA]").forEach(r => r.onchange = paint);
+  q(d, "#zUM").onclick = () => hmEtabsPzNonlinear(q(d, "#zN").value, dirs, q(d, "[name=zD]:checked").value, u, paint);
+  paint();
+  return d;
+}
+function hmEtabsPzAcceptance(acc, dir, u) {
+  const p = () => q(d, "[name=aT]:checked").value === "Moment" ? "Mom" : "Rot";
+  const d = dialog("User-Defined Panel Zone Acceptance Criteria", `<fieldset style="margin:0 0 8px"><legend>Acceptance Criteria Type</legend><div style="display:flex;gap:80px;padding:2px 14px"><label><input type="radio" name="aT" value="Moment" ${acc.type === "Moment" ? "checked" : ""}> Moment</label><label><input type="radio" name="aT" value="Rotation" ${acc.type === "Rotation" ? "checked" : ""}> Rotation</label></div></fieldset>
+    <fieldset style="margin:0"><legend>Acceptance Criteria Data</legend><div style="display:grid;grid-template-columns:40px 90px 90px 50px;gap:6px 12px;align-items:center;padding:2px 14px"><span></span><span style="text-align:center">Major</span><span id="aMiH" style="text-align:center">Minor</span><span></span>
+      ${["IO", "LS", "CP"].map(f => `<span>${f}</span><input data-a="${f}Ma" type="number" step="any"><input data-a="${f}Mi" type="number" step="any"><span data-au></span>`).join("")}</div></fieldset>`,
+    [["OK", d => { read(); acc.type = q(d, "[name=aT]:checked").value; }], ["Cancel"]], {width: 380});
+  const read = () => d.querySelectorAll("[data-a]").forEach(i => { if (!i.disabled) acc[p() + i.dataset.a] = i.value; });
+  const fill = () => { const def = p() === "Mom" ? +(0.0001 * ((uForce[u.f] || 1) / uForce.kip) * ((uLen[u.l] || 1) / uLen.ft)).toPrecision(6) : 1;
+    d.querySelectorAll("[data-a]").forEach(i => { const on = i.dataset.a.endsWith("Ma") ? dir !== "Minor" : dir !== "Major"; i.disabled = !on; i.value = on ? (acc[p() + i.dataset.a] !== "" && acc[p() + i.dataset.a] != null ? acc[p() + i.dataset.a] : def) : ""; });
+    q(d, "#aMiH").style.color = dir === "Major" ? "#999" : ""; d.querySelectorAll("[data-au]").forEach(s => s.textContent = p() === "Mom" ? `${u.f}-${u.l}` : "rad"); };
+  let last = p(); d.querySelectorAll("[name=aT]").forEach(r => r.onchange = () => { const now = p(); const was = last; last = now;
+    d.querySelectorAll("[data-a]").forEach(i => { if (!i.disabled) acc[was + i.dataset.a] = i.value; }); fill(); });
+  fill();
+  return d;
+}
+function hmEtabsPzNonlinear(name, dirs, active, u, after) {
+  const st = {Major: Object.assign({type: "Linear", stiff: "", gen: {}, pts: []}, dirs.Major ? JSON.parse(JSON.stringify(dirs.Major)) : {}), Minor: Object.assign({type: "Linear", stiff: "", gen: {}, pts: []}, dirs.Minor ? JSON.parse(JSON.stringify(dirs.Minor)) : {})};
+  const block = dr => `<fieldset id="nf${dr}" style="margin:0 0 8px"><legend>${dr} Direction</legend><div style="display:grid;grid-template-columns:150px 1fr;gap:8px;align-items:center;padding:2px 14px">
+      <label><input type="radio" name="n${dr}" value="Linear"> Linear</label><span style="display:flex;gap:8px;align-items:center;justify-content:flex-end"><span data-nl="${dr}">Stiffness</span><input id="nk${dr}" type="number" step="any" style="width:100px"><span data-nl="${dr}">${u.f}-${u.l}/rad</span></span>
+      <label><input type="radio" name="n${dr}" value="Nonlinear"> Nonlinear</label><button id="nm${dr}" style="width:130px;justify-self:center">Modify/Show...</button>
+      <span></span><button id="nc${dr}" style="width:190px">Copy from ${dr === "Major" ? "Minor" : "Major"} Direction</button></div></fieldset>`;
+  const d = dialog("Nonlinear Panel Zone Properties", `<fieldset style="margin:0 0 8px"><legend>General</legend><div style="display:grid;grid-template-columns:140px 1fr;gap:6px;align-items:center;padding:2px 14px"><span>Panel Zone Name</span><input class="grey" readonly value="${esc(name)}"></div></fieldset>${block("Major")}${block("Minor")}`,
+    [["OK", d => { read(); dirs.Major = st.Major; dirs.Minor = st.Minor; after(); }], ["Cancel"]], {width: 500});
+  const on = dr => dr === "Major" ? active !== "Minor" : active !== "Major";
+  const read = () => { for (const dr of ["Major", "Minor"]) if (on(dr)) { st[dr].type = q(d, `[name=n${dr}]:checked`).value; if (st[dr].type === "Linear") st[dr].stiff = q(d, "#nk" + dr).value; } };
+  const paint = () => { for (const dr of ["Major", "Minor"]) { const a = on(dr), lin = st[dr].type === "Linear";
+    d.querySelectorAll(`[name=n${dr}]`).forEach(r => { r.disabled = !a; r.checked = a && r.value === st[dr].type; });
+    q(d, "#nk" + dr).disabled = !a || !lin; q(d, "#nk" + dr).value = a && lin ? st[dr].stiff : ""; q(d, "#nm" + dr).disabled = !a || lin; q(d, "#nc" + dr).disabled = !a || !on(dr === "Major" ? "Minor" : "Major");
+    d.querySelectorAll(`[data-nl="${dr}"]`).forEach(s => s.style.color = a && lin ? "" : "#999"); q(d, "#nf" + dr).style.color = a ? "" : "#999"; } };
+  for (const dr of ["Major", "Minor"]) {
+    d.querySelectorAll(`[name=n${dr}]`).forEach(r => r.onchange = () => { read(); st[dr].type = r.value; paint(); });
+    q(d, "#nm" + dr).onclick = () => { read(); hmEtabsPzCurve(name, st[dr], u, paint); };
+    q(d, "#nc" + dr).onclick = () => { read(); const o = dr === "Major" ? "Minor" : "Major"; st[dr] = JSON.parse(JSON.stringify(st[o])); paint(); };
+  }
+  paint();
+  return d;
+}
+// User Nonlinear Panel Zone Data: the backbone's positive points (B, BC, C, CD, D, E; ETABS keeps only those, the negative
+// side mirrors them), the curve, Additional Backbone Curve Points, Scaling for Moment and Rotation, Load Carrying Capacity
+// Beyond Point E and the Hysteresis Type and Parameters.
+function hmEtabsPzCurve(name, s, u, after) {
+  const g = s.gen = s.gen || {}, mu = `${u.f}-${u.l}`;
+  let pts = s.pts && s.pts.length ? s.pts.map(p => p.slice()) : [["B", "1", "1"], ["C", "1", "13"], ["D", "1", "13"], ["E", "1", "13"]];
+  const col = {A: "#e8e8e8", B: "#3c3", BC: "#ff0", C: "#0ff", CD: "#f90", D: "#f0f", E: "#f00"};
+  const hysList = ["Isotropic", "Kinematic", "Takeda", "Pivot", "Concrete", "BRB Hardening", "Degrading"];
+  const hysPars = {Pivot: [["PivotAlpha1", "Alpha 1"], ["PivotAlpha2", "Alpha 2"], ["PivotBeta1", "Beta 1"], ["PivotBeta2", "Beta 2"], ["PivotEta", "Eta"]], Concrete: [["ConcreteFact", "Energy Degradation Factor"]],
+    "BRB Hardening": [["BRBTensHF", "BRB Hardening Factor"], ["BRBTensMPD", "BRB Max Plastic Deformation Ratio"], ["BRBTensAPD", "BRB Accumulated Plastic Deformation Ratio"], ["BRBTensPro", "BRB Proportion"]],
+    Degrading: [["DegTensf0", "Degrading f0"], ["DegTensf1", "Degrading f1"], ["DegTensf2", "Degrading f2"], ["DegTensx1", "Degrading x1"], ["DegTensx2", "Degrading x2"], ["DegTensADWF", "Degrading Accumulation Deformation Factor"], ["DegStiff", "Degrading Stiffness Weighting Factor"], ["DegLargeSml", "Degrading Larger-Smaller Weighting Factor"]]};
+  const d = dialog("User Nonlinear Panel Zone Data - " + name, `<div style="display:grid;grid-template-columns:1fr 270px;gap:12px"><div>
+      <fieldset style="margin:0 0 8px"><legend>Moment-Rotation Relation</legend><div style="display:grid;grid-template-columns:270px 1fr;gap:16px">
+        <div style="height:300px;overflow:auto;border:2px solid #333;background:#a0a0a0"><table class="grid ly" id="cT" style="width:100%;background:#fff"><thead><tr><th style="width:44px">Point</th><th>Moment/SF</th><th>Rotation/SF</th></tr></thead><tbody></tbody></table></div>
+        <div><canvas id="cP" width="150" height="120" style="border:1px solid #888;background:#fff;display:block;margin:0 auto"></canvas><p style="margin:14px 0 4px">Additional Backbone Curve Points</p>
+          <label style="display:block;margin:4px 0"><input type="checkbox" id="cBC"> BC - Between Points B and C</label><label style="display:block;margin:4px 0"><input type="checkbox" id="cCD"> CD - Between Points C and D</label></div></div></fieldset>
+      <fieldset style="margin:0"><legend>Scaling for Moment and Rotation</legend><div style="display:grid;grid-template-columns:1fr 100px 40px;gap:6px 10px;align-items:center;padding:4px 10px">
+        <label><input type="checkbox" id="cYm" ${/^y/i.test(g.UseYldForce ?? "Yes") ? "checked" : ""}> Use Yield Moment from ASCE 41-17 (Steel Only)</label><input id="cMs" type="number" step="any" value="${esc(g.FDPosForSF ?? "")}"><span>${mu}</span>
+        <label><input type="checkbox" id="cYr" ${/^y/i.test(g.UseYldDispl ?? "Yes") ? "checked" : ""}> Use Yield Rotation from ASCE 41-17 (Steel Only)</label><input id="cRs" type="number" step="any" value="${esc(g.FDPosDispSF ?? "")}"><span></span></div></fieldset></div>
+    <div id="cRt"><fieldset style="margin:0 0 8px"><legend>Load Carrying Capacity Beyond Point E</legend><div style="padding:2px 10px"><label style="display:block;margin:4px 0"><input type="radio" name="cE" value="Drops To Zero" ${/^drop/i.test(g.BeyondE || "") ? "checked" : ""}> Drops To Zero</label><label style="display:block;margin:4px 0"><input type="radio" name="cE" value="Extrapolated" ${/^drop/i.test(g.BeyondE || "") ? "" : "checked"}> Is Extrapolated</label></div></fieldset>
+      <fieldset style="margin:0"><legend>Hysteresis Type and Parameters</legend><div style="display:grid;grid-template-columns:90px 1fr;gap:6px;align-items:center;padding:2px 10px"><span>Hysteresis</span><select id="cH">${opts(hysList.includes(g.HysType) || !g.HysType ? hysList : [g.HysType, ...hysList], g.HysType || "Isotropic")}</select></div><div id="cHp" style="padding:4px 10px;min-height:110px"></div></fieldset></div></div>`,
+    [["OK", d => { readAll(); const ys = q(d, "#cYm").checked, yr = q(d, "#cYr").checked;
+      if (!ys && !(fnum(d, "#cMs") > 0) || !yr && !(fnum(d, "#cRs") > 0)) { formError(d, "Give the moment and rotation scale factors that are not taken from ASCE 41-17."); return false; }
+      for (let i = 1; i < pts.length; i++) if (+pts[i][2] < +pts[i - 1][2]) { formError(d, "Each point's rotation is at least the one before it."); return false; }
+      Object.keys(g).forEach(k => { if (/^(Pivot|Concrete|BRB|Deg)/.test(k)) delete g[k]; });
+      Object.assign(g, {AddBC: q(d, "#cBC").checked ? "Yes" : "No", AddCD: q(d, "#cCD").checked ? "Yes" : "No", UseYldForce: ys ? "Yes" : "No", UseYldDispl: yr ? "Yes" : "No", BeyondE: q(d, "[name=cE]:checked").value, HysType: q(d, "#cH").value});
+      if (ys) delete g.FDPosForSF; else g.FDPosForSF = String(fnum(d, "#cMs")); if (yr) delete g.FDPosDispSF; else g.FDPosDispSF = String(fnum(d, "#cRs"));
+      d.querySelectorAll("[data-hp]").forEach(i => g[i.dataset.hp] = String(parseFloat(i.value) || 0));
+      s.type = "Nonlinear"; s.pts = pts; after(); }], ["Cancel"]], {width: 900});
+  dfInto(d, "#cRt");
+  q(d, "#cBC").checked = pts.some(p => p[0] === "BC"); q(d, "#cCD").checked = pts.some(p => p[0] === "CD");
+  const body = q(d, "#cT tbody");
+  const readAll = () => { body.querySelectorAll("[data-m]").forEach(i => { const p = pts.find(x => x[0] === i.dataset.m); if (p) p[1] = i.value; }); body.querySelectorAll("[data-r]").forEach(i => { const p = pts.find(x => x[0] === i.dataset.r); if (p) p[2] = i.value; }); };
+  const paint = () => {
+    const neg = pts.slice().reverse().map(p => [p[0] + "-", -(+p[1] || 0), -(+p[2] || 0)]);
+    body.innerHTML = neg.map(p => `<tr><td style="background:${col[p[0].slice(0, -1)]};text-align:center">${p[0]}</td><td style="background:#ddd;text-align:center">${p[1]}</td><td style="background:#ddd;text-align:center">${p[2]}</td></tr>`).join("")
+      + `<tr><td style="background:#e8e8e8;text-align:center">A</td><td style="background:#ddd;text-align:center">0</td><td style="background:#ddd;text-align:center">0</td></tr>`
+      + pts.map(p => `<tr><td style="background:${col[p[0]]};text-align:center">${p[0]}</td><td><input data-m="${p[0]}" type="number" step="any" style="text-align:center;height:18px;padding:0" value="${esc(p[1])}"></td><td><input data-r="${p[0]}" type="number" step="any" style="text-align:center;height:18px;padding:0" value="${esc(p[2])}"></td></tr>`).join("");
+    body.querySelectorAll("input").forEach(i => i.onchange = () => { readAll(); paint(); });
+    const c = q(d, "#cP"), x = c.getContext("2d"), W = c.width, H = c.height, all = [...neg.map(p => [p[2], p[1], p[0]]), [0, 0, "A"], ...pts.map(p => [+p[2] || 0, +p[1] || 0, p[0]])];
+    const mx = Math.max(...all.map(p => Math.abs(p[0])), 1e-9) * 1.15, my = Math.max(...all.map(p => Math.abs(p[1])), 1e-9) * 2.2, X = v => W / 2 + v / mx * W / 2, Y = v => H / 2 - v / my * H / 2;
+    x.clearRect(0, 0, W, H); x.strokeStyle = "#ddd"; for (let i = 0; i <= W; i += 8) { x.beginPath(); x.moveTo(i, 0); x.lineTo(i, H); x.stroke(); } for (let i = 0; i <= H; i += 8) { x.beginPath(); x.moveTo(0, i); x.lineTo(W, i); x.stroke(); }
+    x.strokeStyle = "#f66"; x.beginPath(); x.moveTo(0, H / 2); x.lineTo(W, H / 2); x.moveTo(W / 2, 0); x.lineTo(W / 2, H); x.stroke();
+    x.strokeStyle = "#000"; x.lineWidth = 2; x.beginPath(); all.forEach((p, i) => i ? x.lineTo(X(p[0]), Y(p[1])) : x.moveTo(X(p[0]), Y(p[1]))); x.stroke(); x.lineWidth = 1;
+    all.forEach(p => { const k = String(p[2]).replace("-", ""); if (k === "A" || k === "D") return; x.fillStyle = col[k]; x.beginPath(); x.arc(X(p[0]), Y(p[1]), 3, 0, 7); x.fill(); });
+  };
+  const toggle = (k, after0, before0) => { readAll(); const on = q(d, "#c" + k).checked; if (on && !pts.some(p => p[0] === k)) { const i = pts.findIndex(p => p[0] === before0), a = pts[i - 1] || ["", "0", "0"], b = pts[i];
+      pts.splice(i, 0, [k, String(+(((+a[1] || 0) + (+b[1] || 0)) / 2).toPrecision(6)), String(+(((+a[2] || 0) + (+b[2] || 0)) / 2).toPrecision(6))]); }
+    if (!on) pts = pts.filter(p => p[0] !== k); paint(); };
+  q(d, "#cBC").onchange = () => toggle("BC", "B", "C"); q(d, "#cCD").onchange = () => toggle("CD", "C", "D");
+  const sc = () => { for (const [cb, id] of [["#cYm", "#cMs"], ["#cYr", "#cRs"]]) { const off = q(d, cb).checked; q(d, id).disabled = off; if (off) q(d, id).value = ""; else if (q(d, id).value === "") q(d, id).value = id === "#cMs" ? +(0.0001 * ((uForce[u.f] || 1) / uForce.kip) * ((uLen[u.l] || 1) / uLen.ft)).toPrecision(6) : 1; } };
+  q(d, "#cYm").onchange = q(d, "#cYr").onchange = sc;
+  const hp = () => { const h = q(d, "#cH").value, ps = hysPars[h];
+    q(d, "#cHp").innerHTML = ps ? `<div style="display:grid;grid-template-columns:1fr 80px;gap:4px;align-items:center">${ps.map(([f, l]) => `<span>${l}</span><input data-hp="${f}" type="number" step="any" value="${esc(g[f] ?? (/Alpha|Beta/.test(f) ? 10 : 0))}">`).join("")}</div>`
+      : `<p style="text-align:center;margin:6px 0">No Parameters Are Required For This Hysteresis Type</p>`; };
+  q(d, "#cH").onchange = hp;
+  sc(); hp(); paint();
   return d;
 }
 
