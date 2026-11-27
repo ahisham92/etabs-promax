@@ -3474,7 +3474,8 @@ function setLine(g) {
   if (turned) p.cam = fitCam(p, p.cam); else { const t = p.cam.target.slice(); t[g.dir === "X" ? 0 : 1] = g.at; p.cam.target = t; }
   syncTools(); draw();
 }
-function stepStory(d) { const p = panes[active]; if (!p || p.mode !== "plan") return; const i = stories.findIndex(s => s.name === p.story), j = Math.max(0, Math.min(stories.length - 1, i + d)); if (stories[j]) setStory(stories[j].name); }
+// Move Up/Down in List goes round: Up from the top story comes back to the bottom one (Base), Down from the bottom goes to the top.
+function stepStory(d) { const p = panes[active], n = stories.length; if (!p || p.mode !== "plan" || !n) return; const i = stories.findIndex(s => s.name === p.story), j = i < 0 ? (d > 0 ? 0 : n - 1) : (i + d + n) % n; setStory(stories[j].name); }
 function stepLine(d) { const p = panes[active]; if (!p || p.mode !== "elev") return; const lines = p.line ? grids[p.line.dir] : allLines(), i = lines.indexOf(p.line), j = Math.max(0, Math.min(lines.length - 1, i + d)); if (lines[j]) setLine(lines[j]); }
 $("story").onchange = () => setStory($("story").value);
 $("line").onchange = () => { const g = allLines().find(g => g.dir + g.label === $("line").value); if (g) setLine(g); };
