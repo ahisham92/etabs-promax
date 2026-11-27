@@ -1,17 +1,16 @@
 using System.Globalization;
 using System.Text.Json.Nodes;
-using CsiProMax.Assistant.Etabs;
 using static CsiProMax.Assistant.FieldParts;
 
-namespace CsiProMax.Assistant;
+namespace CsiProMax.Assistant.Etabs;
 
 /// <summary>
-/// The Engine's ETABS forms, proved in ETABS itself (Ahmed 2026-11-27: every form must work exactly as ETABS's): in the
+/// The Engine's ETABS Link Property Data forms, proved in ETABS itself (Ahmed 2026-11-27: every form must work exactly as ETABS's): in the
 /// Modeler's part each form's values are set as the form sets them (ETABS's own table rows, through define_table_rows),
 /// the .e2k is written, and in the scratch ETABS each table is read back from ETABS's database and every field must hold
 /// the value the form set. A form thread adds its tables to <see cref="Forms"/>.
 /// </summary>
-public static class EtabsFormRoundTrip
+public static class EtabsLinkRoundTrip
 {
     private const string L = "Link Property Definitions - ";
 

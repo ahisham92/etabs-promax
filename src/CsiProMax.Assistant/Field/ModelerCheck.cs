@@ -385,7 +385,7 @@ public static class ModelerCheck
           if (!n && !grid) return {fail: "the Reinforcing Bar Sizes form did not open"};
           if (n) { n.value = "CPMB"; document.querySelector(".dlg #rbA").value = 0.0001; document.querySelector(".dlg #rbD").value = 0.0113; document.querySelector(".dlg #rbAdd").click(); }
           else {
-            // ETABS 23.2's form: a grid with a blank last row to type the new bar into, then OK.
+            // The 23.2 form (Etabs): a grid with a blank last row to type the new bar into, then OK.
             const cells = [...grid.lastElementChild.querySelectorAll("input")];
             [["CPMB"], [0.0001], [0.0113]].forEach(([v], k) => { cells[k].value = v; });
             const ok = [...document.querySelectorAll(".dlg button")].find(b => b.textContent.trim() === "OK");
@@ -398,7 +398,7 @@ public static class ModelerCheck
           if (!dd.rebar_sizes.some(b => b.name === "CPMB")) return {fail: "the bar CPMB did not reach the model: " + (hm.lastError || "")};
           await act("m:undo"); await wait(1200);
           await act("m:dt:Generalized Displacement Definitions"); await wait(900);
-          // ETABS 23.2 lists the definitions first (Generalized Displacements); Add New Gen Displ... opens the data form.
+          // Etabs 23.2 lists the definitions first (Generalized Displacements); Add New Gen Displ... opens the data form.
           const addNew = [...document.querySelectorAll(".dlg button")].find(b => b.textContent.trim() === "Add New Gen Displ...");
           if (addNew) { addNew.click(); await wait(300); }
           const gd = document.querySelector(".dlg #dtB input, .dlg #gN");
@@ -431,28 +431,25 @@ public static class ModelerCheck
           instList(); instGo(0); await wait(300);
           return sel.has(frames[0].id) && inst.cur === 0 ? {ok: "selected and ringed"} : {fail: "the finding's frame was not selected"};
         });
-        await step("Define > Load Patterns > Modify Lateral Load: a seismic pattern takes ASCE 7-16, and its story forces show", async () => {
-          const made = await hmRun("define_load_pattern", {name: "CPM-CHKEQ", type: "Seismic", self_weight: 0}, true);
-          if (!made.ok) return {fail: "the seismic pattern was not added: " + made.error};
-          await act("m:patterns"); await wait(600);
-          const row = [...document.querySelectorAll(".dlg #pL tr")].find(tr => tr.textContent.includes("CPM-CHKEQ"));
-          if (!row) return {fail: "CPM-CHKEQ is not in the Load Patterns form"};
-          row.click(); await wait(200);
-          const lat = document.querySelector(".dlg #pLat");
-          if (!lat || lat.disabled) return {fail: "Modify Lateral Load Pattern is not there, or greyed out, for a seismic pattern"};
-          lat.click(); await wait(1200);
-          const code = document.querySelector(".dlg #lCode");
-          if (!code) return {fail: "the lateral load form did not open"};
-          code.value = "ASCE 7-16"; code.dispatchEvent(new Event("change", {bubbles: true})); await wait(200);
-          const forms = document.querySelectorAll(".dlg"); forms[forms.length - 1].querySelector(".df button.primary").click();
-          await wait(2000);
-          const defs = await hmDefs(), p = (defs.load_patterns || []).find(x => x.name === "CPM-CHKEQ");
+        await step("Define > Load Patterns (the 23.2 program's own form): a seismic pattern takes ASCE 7-16 from Auto Lateral Load, Modify Lateral Load opens its form, and the code's table rows are kept", async () => {
+          if (program !== "etabs") return {ok: "the form of the etabs target; " + program + " shows its own (checked by its own steps)"};
+          await act("m:patterns"); await wait(800);
+          const d = [...document.querySelectorAll(".dlg")].pop(), set = (s, v) => { const x = d.querySelector(s); x.value = v; x.dispatchEvent(new Event(x.tagName === "SELECT" ? "change" : "input", {bubbles: true})); };
+          if (!d.querySelector("#pA")) return {fail: "the Define Load Patterns form has no Auto Lateral Load box"};
+          set("#pN", "CPM-CHKEQ"); set("#pT", "Seismic"); await wait(100); set("#pA", "ASCE 7-16");
+          d.querySelector("#pAdd").click(); await wait(2500);
+          const lat = d.querySelector("#pLat");
+          if (!lat || lat.disabled) return {fail: "Modify Lateral Load... is greyed for a seismic pattern with ASCE 7-16: " + (hm.lastError || "")};
+          lat.click(); await wait(1500);
+          const f = [...document.querySelectorAll(".dlg")].pop(), title = f.querySelector(".dt b").textContent;
+          const r = f.querySelector('[data-k="R"]'); if (r) { r.value = "7"; r.dispatchEvent(new Event("input", {bubbles: true})); }
+          f.querySelector(".df button.primary").click(); await wait(2000);
+          const rows = (((await hmRun("definition_data", {}, true)).result || {}).tables || {})["Load Pattern Definitions - Auto Seismic - ASCE 7-16"], mine = rows ? rows.rows.filter(x => x.Name === "CPM-CHKEQ") : [];
           closeDialogs(); await wait(150);
-          await hmRun("undo"); await wait(800); await hmRun("undo"); await wait(800);
-          const back = ((await hmDefs()).load_patterns || []).some(x => x.name === "CPM-CHKEQ");
-          if (!p || !p.lateral || p.lateral.code !== "ASCE 7-16") return {fail: "the code did not reach the pattern: " + (hm.lastError || JSON.stringify(p && p.lateral))};
-          if (p.lateral.error || !(p.lateral.story_forces || []).some(f => f.fx > 0)) return {fail: "no story forces: " + (p.lateral.error || "")};
-          return back ? {fail: "two undos did not take the pattern out again"} : {ok: `V = ${p.lateral.results.V} on ${p.lateral.story_forces.length} stories, then undone`};
+          const del = await hmRun("delete_definition", {kind: "load_pattern", name: "CPM-CHKEQ"}, true);
+          if (!mine.length) return {fail: "no ASCE 7-16 row for CPM-CHKEQ (form '" + title + "'): " + (hm.lastError || "")};
+          if (mine[0].R !== "7") return {fail: "the form's R did not reach the row: " + JSON.stringify(mine[0])};
+          return del.ok ? {ok: `'${title}' kept ${Object.keys(mine[0]).length} fields, then the pattern was deleted`} : {fail: "the pattern could not be deleted again: " + del.error};
         });
         await step("Edit > Model Text: a combination written in the program's own text goes into the model, and undo takes it out", async () => {
           await act("m:text"); await wait(900);
@@ -595,8 +592,8 @@ public static class ModelerCheck
             if (it.target && program !== it.target) { await hmRun("set_model_program", {program: it.target}, true); for (let i = 0; i < 30 && program !== it.target; i++) { if (window.cpmPull) await window.cpmPull(); await wait(200); } }
             pick();
             if (it.act === "m:redo" && offNow(it.act)) { await hmRun("define_load_pattern", {name: "CPM-CHKREDO", type: "Other", self_weight: 0}, true); await hmRun("undo"); await wait(400); }
-            // Items the program itself greys in this state (SAP2000 26.3 pictures: Assign > Frame > Path... with no path defined, Update All Generated Hinge Properties with no generated hinges, Paste Assigns before Copy Assigns).
-            if (offNow(it.act) && ["m:sapa:fPath", "m:sapa:updateHinges", "m:sapa:paste"].includes(it.act)) return {ok: "greyed out, as the program greys it"};
+            // Items the program itself greys in this state (SAP2000 26.3 pictures: Assign > Frame > Path... with no path defined, Update All Generated Hinge Properties with no generated hinges, Paste Assigns before Copy Assigns; the 23.2 Assign menu greys its Paste Assigns items the same way).
+            if (offNow(it.act) && ["m:sapa:fPath", "m:sapa:updateHinges", "m:sapa:paste", "m:eta:pasteJ", "m:eta:pasteF", "m:eta:pasteA", "m:eta:pasteL"].includes(it.act)) return {ok: "greyed out, as the program greys it"};
             if (offNow(it.act) && it.act !== "eng:clear") return {fail: "greyed out, although the check selected a beam and a floor for it first"};
             if (OTHER_WAY[it.act]) return await OTHER_WAY[it.act](it);
             const before = dialogsOpen();

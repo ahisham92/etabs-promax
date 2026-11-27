@@ -343,9 +343,39 @@ public static class PropertyDefs
     /// A waffle slab has ribs both ways: Spacing is the spacing of the ribs parallel to the slab's 1 axis and Spacing2 of those parallel to its 2 axis.</summary>
     public sealed record Ribs(double OverallDepth, double WidthTop, double WidthBottom, double Spacing, int ParallelTo = 1, double? Spacing2 = null);
 
-    public static ShellSection SetShellType(StructuralModel m, string name, string? was, bool wall, string slabType, string modeling, double thickness, string material, bool oneWay, Ribs? ribs = null)
+    /// <summary>ETABS 23.2's Composite Shear Wall Data (a wall with modeling type Composite), as ETABS writes it on the
+    /// wall's second SHELLPROP line: the concrete and steel, the length (Wall / Pier) or height (Beam / Spandrel), the overall
+    /// thickness, the web and flange plates, the tie bars, and the cracked in-plane and out-of-plane stiffness modifiers.</summary>
+    public sealed record CompositeWall(string Concrete, string Steel, double? Length, double TotalThick, double PlateThick, double FlangeThick, double TieDiameter, double TieSpacing,
+        double InPlane = 1, double OutOfPlane = 1, bool Spandrel = false);
+
+    public static ShellSection SetShellType(StructuralModel m, string name, string? was, bool wall, string slabType, string modeling, double thickness, string material, bool oneWay, Ribs? ribs = null, CompositeWall? composite = null)
     {
         Name(name, "slab or wall section");
+        if (string.Equals(modeling, "Composite", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!wall || m.Target is ProgramOptions.Sap2000 or ProgramOptions.Safe) throw new ArgumentException("Only an ETABS wall has the Composite modeling type.");
+            var c = composite ?? throw new ArgumentException("A composite wall needs its Composite Shear Wall Data: concrete, steel, overall thickness, web and flange plate thickness, tie bar diameter and spacing.");
+            if (!m.Materials.Exists(x => x.Name == c.Concrete)) throw new ArgumentException($"There is no material '{c.Concrete}'.");
+            if (!m.Materials.Exists(x => x.Name == c.Steel)) throw new ArgumentException($"There is no material '{c.Steel}'.");
+            if (new[] { c.TotalThick, c.PlateThick, c.FlangeThick, c.TieDiameter, c.TieSpacing }.Any(x => !(x > 0))) throw new ArgumentException("The overall thickness, plate thicknesses and tie bar diameter and spacing are above 0.");
+            if (!(c.TotalThick > 2 * c.PlateThick)) throw new ArgumentException("The overall thickness is more than the two web plates.");
+            if (c.InPlane < 0 || c.OutOfPlane < 0) throw new ArgumentException("The cracked stiffness modifiers are 0 or more.");
+            var oldC = m.ShellSections.Find(x => x.Name == (was ?? name));
+            if (was is not null && oldC is null) throw new ArgumentException($"There is no slab or wall section '{was}'.");
+            if (was is not null && was != name && m.ShellSections.Exists(x => x.Name == name)) throw new ArgumentException($"A section is already named '{name}'.");
+            var two = new List<string> { "CONCMATERIALCOMP", Quote(c.Concrete), "STEELMATERIALCOMP", Quote(c.Steel) };
+            if (c.Length is { } len) two.AddRange(["WALLLENGTH", Number(len)]);
+            two.AddRange(["TOTALTHICK", Number(c.TotalThick), "PLATETHICK", Number(c.PlateThick), "FLANGEPLATETHICK", Number(c.FlangeThick), "TIEBARDIAMETER", Number(c.TieDiameter),
+                "TIEBARSPACING", Number(c.TieSpacing), "CSTIFFNESSMODIFIER1", Number(c.InPlane), "CSTIFFNESSMODIFIER2", Number(c.OutOfPlane), "ISPANDREL", Quote(c.Spandrel ? "Yes" : "No")]);
+            var secC = oldC ?? new ShellSection();
+            if (oldC is null) m.ShellSections.Add(secC);
+            var modsC = oldC?.Lines.Where(l => l.Count > 0 && ShellModifiers.Contains(l[0])).ToList() ?? [];
+            secC.Name = name;
+            secC.Lines = [["PROPTYPE", Quote("Wall"), "MATERIAL", Quote(c.Concrete), "MODELINGTYPE", Quote("Composite"), "WALLTHICKNESS", Number(c.TotalThick)], two, .. modsC];
+            if (was is not null && was != name) foreach (var a in m.AreaAssigns.Where(x => x.Section == was)) a.Section = name;
+            return secC;
+        }
         var layered = string.Equals(modeling, "Layered", StringComparison.OrdinalIgnoreCase);
         if (!(layered && string.IsNullOrEmpty(material)) && !m.Materials.Exists(x => x.Name == material)) throw new ArgumentException($"There is no material '{material}'.");
         if (!(thickness > 0)) throw new ArgumentException("The thickness must be above 0.");
@@ -520,7 +550,7 @@ public static class PropertyDefs
         return list;
     }
 
-    public static void SetSpring(StructuralModel m, string kind, string name, IReadOnlyDictionary<string, double> values)
+    public static void SetSpring(StructuralModel m, string kind, string name, IReadOnlyDictionary<string, double> values, bool stiffnessElsewhere = false)
     {
         if (!SpringKinds.TryGetValue(kind, out var k)) throw new ArgumentException("The spring kind is point, line or area.");
         Name(name, "spring property");
@@ -529,7 +559,8 @@ public static class PropertyDefs
             if (!k.Keys.Contains(key)) throw new ArgumentException($"A {kind} spring has {string.Join(", ", k.Keys)}, not '{key}'.");
             if (double.IsNaN(v) || double.IsInfinity(v) || v < 0) throw new ArgumentException($"{key} must be a stiffness, 0 or more.");
         }
-        if (!values.Values.Any(v => v > 0)) throw new ArgumentException("Give at least one stiffness above 0.");
+        // A spring from a soil profile or from link properties takes its stiffness from those (ETABS 23.2's Spring Stiffness Options).
+        if (!stiffnessElsewhere && !values.Values.Any(v => v > 0)) throw new ArgumentException("Give at least one stiffness above 0.");
         var raw = m.Passthrough.Find(r => r.Heading == k.Heading);
         if (raw is null)
         {
@@ -696,6 +727,41 @@ public static class PropertyDefs
         var at = raw.Lines.FindIndex(Mine);
         raw.Lines.RemoveAll(Mine);
         var lines = hinges.OrderBy(h => h.At).Select(h => "  " + Line(["HINGEASSIGN", Quote(label), Quote(story), "AUTO", Quote(h.Dof), "RELDIST", Number(h.At)])).ToList();
+        raw.Lines.InsertRange(at < 0 ? raw.Lines.Count : Math.Min(at, raw.Lines.Count), lines);
+        m.Passthrough.RemoveAll(r => r.Heading == HingeHeading && r.Lines.Count == 0);
+    }
+
+    /// <summary>The hinge lines of one frame as ETABS's own .e2k has them after the label and story (HINGEDISTRTYPE ...,
+    /// AUTOHINGETYPE ... TABLEITEM ... DOF ... RDISTANCE ..., HYSTYPE ...), each kept word for word.</summary>
+    public static List<string> HingeLinesOf(StructuralModel m, string label, string story) =>
+        m.Passthrough.Where(r => r.Heading == HingeHeading).SelectMany(r => r.Lines)
+            .Select(l => (l, t: Tokenize(l))).Where(x => x.t.Count >= 4 && x.t[0] == "HINGEASSIGN" && Unquote(x.t[1]) == label && Unquote(x.t[2]) == story)
+            .Select(x => string.Join("  ", x.t.Skip(3))).ToList();
+
+    /// <summary>Replaces the hinge lines of one frame with lines in ETABS's own form (Assign > Frame > Hinges as ETABS 23.2
+    /// has it); none takes the frame's hinges off.</summary>
+    public static void CheckHingeLines(IReadOnlyList<string> tails)
+    {
+        foreach (var t in tails)
+        {
+            var w = Tokenize(t);
+            if (w.Count < 2 || w[0] is not ("HINGEDISTRTYPE" or "AUTOHINGETYPE" or "HINGEPROP" or "HYSTYPE" or "HINGELENGTH" or "INTEGRATIONTYPE" or "SPACINGTYPE")) throw new ArgumentException($"'{t}' is not a hinge line of ETABS's .e2k.");
+        }
+    }
+
+    public static void SetHingeLines(StructuralModel m, string label, string story, IReadOnlyList<string> tails)
+    {
+        CheckHingeLines(tails);
+        bool Mine(string l) => Tokenize(l) is { Count: >= 3 } t && t[0] == "HINGEASSIGN" && Unquote(t[1]) == label && Unquote(t[2]) == story;
+        var raw = m.Passthrough.Find(r => r.Heading == HingeHeading);
+        if (raw is null)
+        {
+            if (tails.Count == 0) return;
+            m.Passthrough.Add(raw = new RawSection { Heading = HingeHeading, After = "LINE ASSIGNS" });
+        }
+        var at = raw.Lines.FindIndex(Mine);
+        raw.Lines.RemoveAll(Mine);
+        var lines = tails.Select(t => $"  HINGEASSIGN {Quote(label)}  {Quote(story)}  {t.Trim()}").ToList();
         raw.Lines.InsertRange(at < 0 ? raw.Lines.Count : Math.Min(at, raw.Lines.Count), lines);
         m.Passthrough.RemoveAll(r => r.Heading == HingeHeading && r.Lines.Count == 0);
     }

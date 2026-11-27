@@ -167,7 +167,18 @@ internal sealed class WebPane : Border, IDisposable
 
     public void Dispose()
     {
+        CsiProMax.UI.Brand.ThemeChanged -= ShowTheme;
         try { _web.Dispose(); } catch (InvalidOperationException) { }
+    }
+
+    private void ShowTheme(bool dark)
+    {
+        try
+        {
+            if (_web.CoreWebView2 is { } core)
+                core.Profile.PreferredColorScheme = dark ? CoreWebView2PreferredColorScheme.Dark : CoreWebView2PreferredColorScheme.Light;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException) { }
     }
 
     /// <summary>Loads the page again (View > Reload, or after its process failed).</summary>
@@ -213,6 +224,19 @@ internal sealed class WebPane : Border, IDisposable
         settings.IsStatusBarEnabled = false;
         settings.IsGeneralAutofillEnabled = false;
         settings.IsPasswordAutosaveEnabled = false;
+        // The page in CSI ProMax's theme (its CSS follows the colour scheme), and its Options > Theme switches every window.
+        ShowTheme(CsiProMax.UI.Brand.IsDark);
+        CsiProMax.UI.Brand.ThemeChanged += ShowTheme;
+        core.WebMessageReceived += (_, m) =>
+        {
+            try
+            {
+                using var json = System.Text.Json.JsonDocument.Parse(m.WebMessageAsJson);
+                if (json.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object && json.RootElement.TryGetProperty("theme", out var theme))
+                    CsiProMax.UI.Brand.SetTheme(theme.GetString() == "dark");
+            }
+            catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidOperationException) { }
+        };
         var page = new Uri(_address);
         core.NavigationStarting += (_, n) =>
         {

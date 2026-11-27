@@ -103,6 +103,8 @@ public static class AnalysisDefs
         SetFunctionSource(m, name, null);
         // SAP2000's own rows of it (its code, type and parameters; a power spectral density or steady state function lives there only).
         var sap = SapFunctions.Remove(m, name);
+        // ETABS's own rows of it (its code or type and parameters, from the Engine's ETABS forms).
+        sap |= EtabsFunctions.Remove(m, name);
         return (s is not null && s.Lines.RemoveAll(l => Tokenize(l) is { Count: > 1 } t && t[0] == "FUNCTION" && Unquote(t[1]) == name) > 0) | sap;
     }
 
@@ -207,6 +209,7 @@ public static class AnalysisDefs
         {
             existing.Name = c.Name; existing.Lines = lines;
             SapLoadTables.Rename(m, "case", old, c.Name);
+            EtabsLoadTables.Rename(m, "case", old, c.Name);
             if (c.Name != old)
                 foreach (var combo in m.Combos)
                     foreach (var line in combo.Lines)
@@ -295,8 +298,9 @@ public static class AnalysisDefs
                 [.. new[] { "TYPE", Quote("TEMP") }, .. lc, "TEMP", Number(G("temperature")), .. v.ContainsKey("gradient") ? new[] { "TEMPGRAD", Number(G("gradient")) } : []],
             "frame_strain" or "shell_strain" => [.. new[] { "TYPE", Quote("STRAIN") }, .. lc, "STRAIN", Number(G("strain")), "COMPONENT", Quote(dir.Length > 0 ? dir : "11")],
             "frame_point" => [.. new[] { "TYPE", Quote(v.ContainsKey("moment") ? "POINTM" : "POINTF"), "DIR", Quote(dir) }, .. lc, "FVAL", Number(v.ContainsKey("moment") ? G("moment") : G("value")), "RDIST", Number(G("distance", 0.5))],
-            "frame_trapezoid" => [.. new[] { "TYPE", Quote("TRAPF"), "DIR", Quote(dir) }, .. lc, "FSTART", Number(G("start")), "FEND", Number(G("end")), "RDSTART", Number(G("from", 0)), "RDEND", Number(G("to", 1))],
-            "frame_uniform" or "shell_uniform" => [.. new[] { "TYPE", Quote("UNIFF"), "DIR", Quote(dir) }, .. lc, "FVAL", Number(G("value"))],
+            // moments (any value): ETABS's Load Type "Moments" of Frame Load Assignment - Distributed (TRAPM, UNIFM).
+            "frame_trapezoid" => [.. new[] { "TYPE", Quote(v.ContainsKey("moments") ? "TRAPM" : "TRAPF"), "DIR", Quote(dir) }, .. lc, "FSTART", Number(G("start")), "FEND", Number(G("end")), "RDSTART", Number(G("from", 0)), "RDEND", Number(G("to", 1))],
+            "frame_uniform" or "shell_uniform" => [.. new[] { "TYPE", Quote(kind == "frame_uniform" && v.ContainsKey("moments") ? "UNIFM" : "UNIFF"), "DIR", Quote(dir) }, .. lc, "FVAL", Number(G("value"))],
             _ => throw new ArgumentException($"There is no load kind '{kind}'. Kinds: {string.Join(", ", LoadKinds)}."),
         };
     }

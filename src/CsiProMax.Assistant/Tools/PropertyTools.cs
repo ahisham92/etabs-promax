@@ -104,8 +104,8 @@ public static class PropertyTools
                 return new JsonObject { ["section"] = s.Name, ["shape"] = s.Shape, ["area"] = s.Area };
             }, a => $"Define the frame section {a.Text("name")}"),
         new("define_shell_type",
-            "Adds or changes a slab or wall section with its type (Define > Section Properties > Slab or Wall Sections): kind slab or wall; slab_type Slab, Drop, Stiff, Ribbed, Waffle, Mat, Footing; modeling ShellThin, ShellThick, Membrane, Layered; one_way load distribution; a Ribbed slab also takes overall_depth, rib_width_top, rib_width_bottom, rib_spacing and rib_direction (local axis 1 or 2 the ribs run along); a Waffle slab takes the same with rib_spacing for the ribs parallel to the 1 axis and rib_spacing_2 for those parallel to the 2 axis; a Layered section may leave material empty (its layers carry the materials); modifiers F11MOD F22MOD F12MOD M11MOD M22MOD M12MOD V13MOD V23MOD MMOD WMOD (e.g. cracked slabs M11MOD 0.25). extras: the form's other fields (NotSizeType NotAutoFact NotUserSize Color Notes; a wall's RigidZone; MatAngle and BendThick for SAP2000); given, they replace the ones it has.",
-            """{"type":"object","required":["name","kind","thickness"],"properties":{"name":{"type":"string"},"was":{"type":"string"},"kind":{"type":"string","enum":["slab","wall"]},"slab_type":{"type":"string"},"modeling":{"type":"string"},"thickness":{"type":"number"},"material":{"type":"string"},"one_way":{"type":"boolean"},"overall_depth":{"type":"number"},"rib_width_top":{"type":"number"},"rib_width_bottom":{"type":"number"},"rib_spacing":{"type":"number"},"rib_spacing_2":{"type":"number"},"rib_direction":{"type":"integer"},"modifiers":""" + Numbers + ""","extras":{"type":"object","additionalProperties":{"type":"string"}}}}""",
+            "Adds or changes a slab or wall section with its type (Define > Section Properties > Slab or Wall Sections): kind slab or wall; slab_type Slab, Drop, Stiff, Ribbed, Waffle, Mat, Footing; modeling ShellThin, ShellThick, Membrane, Layered (a wall also Composite where the model's program has it, with composite: concrete, steel, length (Wall / Pier; left out for Beam / Spandrel), total_thick, plate_thick (web), flange_thick, tie_diameter, tie_spacing, in_plane and out_of_plane cracked modifiers, spandrel); one_way load distribution; a Ribbed slab also takes overall_depth, rib_width_top, rib_width_bottom, rib_spacing and rib_direction (local axis 1 or 2 the ribs run along); a Waffle slab takes the same with rib_spacing for the ribs parallel to the 1 axis and rib_spacing_2 for those parallel to the 2 axis; a Layered section may leave material empty (its layers carry the materials); modifiers F11MOD F22MOD F12MOD M11MOD M22MOD M12MOD V13MOD V23MOD MMOD WMOD (e.g. cracked slabs M11MOD 0.25). extras: the form's other fields (NotSizeType NotAutoFact NotUserSize Color Notes; a wall's RigidZone; MatAngle and BendThick for SAP2000); given, they replace the ones it has.",
+            """{"type":"object","required":["name","kind","thickness"],"properties":{"name":{"type":"string"},"was":{"type":"string"},"kind":{"type":"string","enum":["slab","wall"]},"slab_type":{"type":"string"},"modeling":{"type":"string"},"thickness":{"type":"number"},"material":{"type":"string"},"one_way":{"type":"boolean"},"overall_depth":{"type":"number"},"rib_width_top":{"type":"number"},"rib_width_bottom":{"type":"number"},"rib_spacing":{"type":"number"},"rib_spacing_2":{"type":"number"},"rib_direction":{"type":"integer"},"composite":{"type":"object","properties":{"concrete":{"type":"string"},"steel":{"type":"string"},"length":{"type":"number"},"total_thick":{"type":"number"},"plate_thick":{"type":"number"},"flange_thick":{"type":"number"},"tie_diameter":{"type":"number"},"tie_spacing":{"type":"number"},"in_plane":{"type":"number"},"out_of_plane":{"type":"number"},"spandrel":{"type":"boolean"}}},"modifiers":""" + Numbers + ""","extras":{"type":"object","additionalProperties":{"type":"string"}}}}""",
             Ask.Changes, (a, e) =>
             {
                 var link = Offline(e);
@@ -117,7 +117,8 @@ public static class PropertyTools
                 {
                     var sec = PropertyDefs.SetShellType(m, a.Need("name"), Was(a), wall, a.Text("slab_type", "Slab"), a.Text("modeling", wall ? "ShellThin" : "ShellThin"), a.Number("thickness"), a.Text("material", ""), a.Flag("one_way"),
                         a.TryGetProperty("overall_depth", out _) ? new PropertyDefs.Ribs(a.Number("overall_depth"), a.Number("rib_width_top"), a.Number("rib_width_bottom", a.Number("rib_width_top")), a.Number("rib_spacing"), a.Whole("rib_direction", 1),
-                            a.TryGetProperty("rib_spacing_2", out _) ? a.Number("rib_spacing_2") : null) : null);
+                            a.TryGetProperty("rib_spacing_2", out _) ? a.Number("rib_spacing_2") : null) : null,
+                        a.TryGetProperty("composite", out var cw) && cw.ValueKind == JsonValueKind.Object ? CompositeOf(cw) : null);
                     if (mods.Count > 0) PropertyDefs.SetModifiers(sec.Lines, PropertyDefs.ShellModifiers, mods);
                     if (a.TryGetProperty("extras", out var x) && x.ValueKind == JsonValueKind.Object)
                         PropertyDefs.SetShellExtras(sec, x.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.ValueKind == JsonValueKind.String ? p.Value.GetString() ?? "" : p.Value.ToString()));
@@ -157,7 +158,10 @@ public static class PropertyTools
                 if (a.Flag("delete")) { Core(() => link.Edit(m => { PropertyDefs.DeleteSpring(m, kind, name); StructureExtras.Remove(m, table, name); return 0; })); return new JsonObject { ["deleted"] = name }; }
                 var values = Values(a, "values", false);
                 CheckExtras(a, StructureExtras.Fields[table].ToArray(), "A " + kind + " spring");
-                Core(() => link.Edit(m => { PropertyDefs.SetSpring(m, kind, name, values); SetRowExtras(m, a, table, name); return 0; }));
+                var elsewhere = a.TryGetProperty("extras", out var ex) && ex.ValueKind == JsonValueKind.Object
+                    && ((ex.TryGetProperty("Stiffness Option", out var so) && so.ValueKind == JsonValueKind.String && !so.GetString()!.Equals("User", StringComparison.OrdinalIgnoreCase))
+                        || (ex.TryGetProperty("Nonlinearity Specification", out var ns) && ns.ValueKind == JsonValueKind.String && ns.GetString()!.StartsWith("From Link", StringComparison.OrdinalIgnoreCase)));
+                Core(() => link.Edit(m => { PropertyDefs.SetSpring(m, kind, name, values, elsewhere); SetRowExtras(m, a, table, name); return 0; }));
                 return new JsonObject { ["spring"] = name, ["kind"] = kind };
             }, a => a.Flag("delete") ? $"Delete the spring {a.Text("name")}" : $"Define the spring {a.Text("name")}"),
         new("define_link",
@@ -189,9 +193,9 @@ public static class PropertyTools
                 return new JsonObject { ["link"] = name, ["directions"] = dofs.Count };
             }, a => a.Flag("delete") ? $"Delete the link {a.Text("name")}" : $"Define the link {a.Text("name")}"),
         new("assign_frame_data",
-            "Assigns to frames (label@story) what Assign > Frame offers: release_i and release_j (any of P V2 V3 T M2 M3; [] takes them off), partial_fixity (Frame Partial Fixity Springs on released ends, e.g. {\"M3I\": 5000, \"M3J\": 5000}, stiffness in the model's units; 0 takes one off), angle (local axis 2 rotation, degrees), cardinal (insertion point 1 to 11: 10 centroid, 8 top center), offset_i, offset_j and rigid_zone (end length offsets, rigid zone factor 0 to 1), modifiers (AMOD A2MOD A3MOD JMOD I2MOD I3MOD MMOD WMOD), spring (a line spring property; \"\" takes it off) hinges (Assign > Frame > Hinges: auto hinges from the code's tables, each {at: relative distance 0 to 1, dof: M3 M2 P V2 V3 T P-M2-M3 P-M3 M3-V2}; [] takes them off; for a pushover) and reverse (Assign > Frame > Reverse Connectivity: global keeps the assigns in the same global orientation, local in the same local orientation)." +
+            "Assigns to frames (label@story) what Assign > Frame offers: release_i and release_j (any of P V2 V3 T M2 M3; [] takes them off), partial_fixity (Frame Partial Fixity Springs on released ends, e.g. {\"M3I\": 5000, \"M3J\": 5000}, stiffness in the model's units; 0 takes one off), angle (local axis 2 rotation, degrees), cardinal (insertion point 1 to 11: 10 centroid, 8 top center), offset_i, offset_j and rigid_zone (end length offsets, rigid zone factor 0 to 1), modifiers (AMOD A2MOD A3MOD JMOD I2MOD I3MOD MMOD WMOD), spring (a line spring property; \"\" takes it off) hinges (Assign > Frame > Hinges: auto hinges from the code's tables, each {at: relative distance 0 to 1, dof: M3 M2 P V2 V3 T P-M2-M3 P-M3 M3-V2}; [] takes them off; for a pushover), hinge_lines (the frame's hinges in the program's own .e2k words after HINGEASSIGN label story, e.g. [\"HINGEDISTRTYPE \\\"User Defined\\\"\", \"AUTOHINGETYPE \\\"ASCE41-17\\\"  TABLEITEM \\\"Steel Beams\\\"  DOF \\\"M3\\\"  LOCATIONTYPE \\\"RelDist\\\"  RDISTANCE 0.05\"]; [] takes them off) and reverse (Assign > Frame > Reverse Connectivity: global keeps the assigns in the same global orientation, local in the same local orientation)." +
             " tables: rows of the program's own assignment tables the other fields do not cover, by full table name, e.g. {\"Frame Assignments - Output Stations\": [{\"StationOpt\": \"Min Stations\", \"MinStations\": \"5\"}]} (property_definitions lists them under assign_tables; [] takes a table off). Only what is given changes.",
-            """{"type":"object","required":["objects"],"properties":{"objects":{"type":"array","items":{"type":"string"}},"release_i":{"type":"array","items":{"type":"string"}},"release_j":{"type":"array","items":{"type":"string"}},"partial_fixity":{"type":"object","additionalProperties":{"type":"number"}},"angle":{"type":"number"},"cardinal":{"type":"integer"},"offset_i":{"type":"number"},"offset_j":{"type":"number"},"rigid_zone":{"type":"number"},"modifiers":""" + Numbers + ""","spring":{"type":"string"},"hinges":{"type":"array","items":{"type":"object","required":["at","dof"],"properties":{"at":{"type":"number"},"dof":{"type":"string"}}}},"tables":{"type":"object"},"reverse":{"type":"string","enum":["global","local"]}}}""",
+            """{"type":"object","required":["objects"],"properties":{"objects":{"type":"array","items":{"type":"string"}},"release_i":{"type":"array","items":{"type":"string"}},"release_j":{"type":"array","items":{"type":"string"}},"partial_fixity":{"type":"object","additionalProperties":{"type":"number"}},"angle":{"type":"number"},"cardinal":{"type":"integer"},"offset_i":{"type":"number"},"offset_j":{"type":"number"},"rigid_zone":{"type":"number"},"modifiers":""" + Numbers + ""","spring":{"type":"string"},"hinges":{"type":"array","items":{"type":"object","required":["at","dof"],"properties":{"at":{"type":"number"},"dof":{"type":"string"}}}},"hinge_lines":{"type":"array","items":{"type":"string"}},"tables":{"type":"object"},"reverse":{"type":"string","enum":["global","local"]}}}""",
             Ask.Changes, AssignFrames, a => "Assign frame data"),
         new("assign_shell_data",
             "Assigns to slabs and walls (label@story) what Assign > Shell offers: modifiers (F11MOD F22MOD F12MOD M11MOD M22MOD M12MOD V13MOD V23MOD MMOD WMOD) and spring (an area spring property, e.g. soil under a mat; \"\" takes it off); opening (Assign > Shell > Opening: true makes the area an opening, false a slab or wall again); tables: rows of the program's own assignment tables the other fields do not cover, by full table name, e.g. {\"Area Assignments - Additional Mass\": [{\"AddedMass\": \"0.1\"}]} (property_definitions lists them under assign_tables; [] takes a table off).",
@@ -271,6 +275,9 @@ public static class PropertyTools
 
     private static string? Was(JsonElement a) => a.Text("was") is { Length: > 0 } w ? w : null;
 
+    private static PropertyDefs.CompositeWall CompositeOf(JsonElement c) => new(c.Text("concrete", ""), c.Text("steel", ""), c.TryGetProperty("length", out var l) && l.ValueKind == JsonValueKind.Number ? l.GetDouble() : null,
+        c.Number("total_thick"), c.Number("plate_thick"), c.Number("flange_thick"), c.Number("tie_diameter"), c.Number("tie_spacing"), c.Number("in_plane", 1), c.Number("out_of_plane", 1), c.Flag("spandrel"));
+
     private static Dictionary<string, double> Values(JsonElement a, string name, bool upper)
     {
         var o = new Dictionary<string, double>(StringComparer.Ordinal);
@@ -326,11 +333,12 @@ public static class PropertyTools
         var mods = Values(a, "modifiers", true);
         var spring = Spring(a, m0, "line");
         var hinges = Hinges(a);
+        List<string>? hingeLines = a.TryGetProperty("hinge_lines", out var hl) && hl.ValueKind == JsonValueKind.Array ? hl.EnumerateArray().Select(x => x.GetString() ?? "").ToList() : null;
         var tables = AssignRows(a);
         Dictionary<string, double>? fixity = Has(a, "partial_fixity") ? Values(a, "partial_fixity", true).ToDictionary(kv => kv.Key.Trim().ToUpperInvariant(), kv => kv.Value, StringComparer.Ordinal) : null;
         var reverse = a.Text("reverse", "").Trim().ToLowerInvariant();
         if (reverse is not ("" or "global" or "local")) throw new ToolInputException("reverse is global (keep assigns in the same global orientation) or local (keep them in the same local orientation).");
-        if (ri is null && rj is null && fixity is null && angle is null && cardinal is null && oi is null && oj is null && rz is null && mods.Count == 0 && spring is null && hinges is null && tables is null && reverse.Length == 0)
+        if (ri is null && rj is null && fixity is null && angle is null && cardinal is null && oi is null && oj is null && rz is null && mods.Count == 0 && spring is null && hinges is null && hingeLines is null && tables is null && reverse.Length == 0)
             throw new ToolInputException("Give what to assign: release_i, release_j, partial_fixity, angle, cardinal, offset_i, offset_j, rigid_zone, modifiers, spring, hinges, tables or reverse.");
         if (reverse.Length > 0)
             foreach (var (label, story) in objects)
@@ -341,7 +349,7 @@ public static class PropertyTools
                 if (m0.LineAssigns.Count(y => y.Label == label) > 1) throw new ToolInputException($"{label} is on more than one story: reversing it would reverse every one of them. Select it on every story, or give it its own label first.");
             }
         if (tables is not null) Core(() => { AssignTables.Set(new LineAssign(), tables); return 0; });
-        Core(() => { PropertyDefs.CheckModifiers(PropertyDefs.FrameModifiers, mods); if (hinges is not null) PropertyDefs.CheckHinges(hinges); return 0; });
+        Core(() => { PropertyDefs.CheckModifiers(PropertyDefs.FrameModifiers, mods); if (hinges is not null) PropertyDefs.CheckHinges(hinges); if (hingeLines is not null) PropertyDefs.CheckHingeLines(hingeLines); return 0; });
         foreach (var (label, story) in objects)
         {
             var (i0, j0) = PropertyDefs.ReleasesOf(m0.LineAssigns.First(y => y.Label == label && y.Story == story));
@@ -371,6 +379,7 @@ public static class PropertyTools
                 if (mods.Count > 0) PropertyDefs.SetModifiers(x.Extra, PropertyDefs.FrameModifiers, mods);
                 if (spring is not null) PropertyDefs.Put(x.Extra, "SPRINGPROP", spring.Length == 0 ? null : E2k.E2kText.Quote(spring));
                 if (hinges is not null) PropertyDefs.SetHinges(m, label, story, hinges);
+                if (hingeLines is not null) PropertyDefs.SetHingeLines(m, label, story, hingeLines);
                 if (tables is not null) AssignTables.Set(x, tables);
                 if (reverse.Length > 0 && m.Line(label) is { } ln)
                 {
@@ -637,6 +646,12 @@ public static class PropertyTools
                     ["shear_thickness"] = s.Number("DECKSHEARTHICKNESS"), ["unit_weight"] = s.Number("DECKUNITWEIGHT"), ["stud_diameter"] = s.Number("SHEARSTUDDIAM"), ["stud_height"] = s.Number("SHEARSTUDHEIGHT"), ["stud_fu"] = s.Number("SHEARSTUDFU"),
                 } : null,
                 ["slab_type"] = s.Get("SLABTYPE"), ["modeling"] = s.Get("MODELINGTYPE"), ["one_way"] = s.Get("ONEWAYLOADDIST") == "Yes",
+                ["composite"] = s.Get("MODELINGTYPE") == "Composite" ? new JsonObject
+                {
+                    ["concrete"] = s.Get("CONCMATERIALCOMP"), ["steel"] = s.Get("STEELMATERIALCOMP"), ["length"] = s.Number("WALLLENGTH"), ["total_thick"] = s.Number("TOTALTHICK"), ["plate_thick"] = s.Number("PLATETHICK"),
+                    ["flange_thick"] = s.Number("FLANGEPLATETHICK"), ["tie_diameter"] = s.Number("TIEBARDIAMETER"), ["tie_spacing"] = s.Number("TIEBARSPACING"),
+                    ["in_plane"] = s.Number("CSTIFFNESSMODIFIER1"), ["out_of_plane"] = s.Number("CSTIFFNESSMODIFIER2"), ["spandrel"] = s.Get("ISPANDREL") == "Yes",
+                } : null,
                 ["overall_depth"] = s.Number("OVERALLDEPTH"), ["rib_width_top"] = s.Number("SLABRIBWIDTHTOP"), ["rib_width_bottom"] = s.Number("SLABRIBWIDTHBOTTOM"),
                 ["rib_spacing"] = s.Number("SLABRIBSPACING") ?? s.Number("SLABRIBSPACINGDIR1"), ["rib_spacing_2"] = s.Number("SLABRIBSPACINGDIR2"), ["rib_direction"] = s.Number("SLABRIBPARALLELTOAXIS"),
                 ["modifiers"] = Numbers_(PropertyDefs.Modifiers(s.Lines, PropertyDefs.ShellModifiers)),
@@ -680,6 +695,7 @@ public static class PropertyTools
                         ["offset_i"] = Num(PropertyDefs.Value(l.Extra, "LENGTHOFFI")), ["offset_j"] = Num(PropertyDefs.Value(l.Extra, "LENGTHOFFJ")), ["rigid_zone"] = Num(PropertyDefs.Value(l.Extra, "RIGIDZONE")),
                         ["modifiers"] = Numbers_(PropertyDefs.Modifiers(l.Extra, PropertyDefs.FrameModifiers)), ["spring"] = PropertyDefs.Value(l.Extra, "SPRINGPROP") ?? "",
                         ["hinges"] = new JsonArray(PropertyDefs.HingesOf(m, label, story).Select(h => (JsonNode)new JsonObject { ["at"] = h.At, ["dof"] = h.Dof }).ToArray()),
+                        ["hinge_lines"] = new JsonArray(PropertyDefs.HingeLinesOf(m, label, story).Select(x => (JsonNode)x).ToArray()),
                         ["pier"] = PropertyDefs.Value(l.Extra, "PIER")?.Trim('"') ?? "", ["spandrel"] = PropertyDefs.Value(l.Extra, "SPANDREL")?.Trim('"') ?? "", ["groups"] = GroupsOf(m, "LINE", label, story),
                         ["tables"] = TablesOf(l),
                     });

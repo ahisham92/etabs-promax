@@ -258,8 +258,10 @@ public static class ModelerFieldSteps
         ctx.Refused("run_analysis", "{}", "cannot analyse", "tool run_analysis says no in the Modeler");
         ctx.Refused("run_design", "{}", "cannot analyse or design", "tool run_design says no in the Modeler");
 
-        // The ETABS forms kept as ETABS's own tables (Link Property Data, every type), read back from ETABS field by field.
-        EtabsFormRoundTrip.Define(ctx);
+        // ETABS's Frame/Wall Nonlinear Hinges forms, read back in the scratch ETABS (EtabsHingeRoundTrip.Check).
+        EtabsHingeRoundTrip.Define(ctx);
+        // ETABS's Link Property Data forms (every type), kept as ETABS's own tables and read back field by field (EtabsLinkRoundTrip.Check).
+        EtabsLinkRoundTrip.Define(ctx);
 
         // The files the programs open.
         var saved = ctx.Tool("save_model_as", $$"""{"name":"{{ModelName}}","folder":{{folder}}}""", a =>
@@ -523,6 +525,8 @@ public static class ModelerFieldSteps
         ctx.Tool("define_function", """{"name":"CPM-RS","kind":"spectrum","from":"code","code":"ASCE 7-16","values":{"Ss":"1.0","S1":"0.4","SiteClass":"D"}}""", a => FieldContext.Expect(Int(a["points"]) > 50, "the spectrum has few points: " + a.ToJsonString()), "tool define_function, the ASCE 7-16 spectrum");
         ctx.Tool("define_function", """{"name":"CPM-TH","kind":"history","from":"sine","period":0.5,"cycles":4,"amplitude":0.2}""", a => FieldContext.Expect(Int(a["points"]) == 65, "4 cycles of 16 steps: " + a.ToJsonString()), "tool define_function, a sine history");
         ctx.Refused("define_function", """{"name":"CPM-BAD","kind":"spectrum","points":[[1,1],[0.5,1]]}""", "must go up", "tool define_function says no to periods that go back");
+        // ETABS's own function forms' tables, read back by ETABS's scratch part (EtabsFunctionRoundTrip.Check).
+        EtabsFunctionRoundTrip.Define(ctx);
         if (!modeler.Model.LoadCases.Exists(c => c.Name == "Modal"))
             ctx.Tool("define_load_case", """{"name":"Modal","type":"Modal - Eigen","max_modes":12}""", null, "tool define_load_case, the modal case");
         ctx.Tool("define_load_case", """{"name":"CPM-RSX","type":"Response Spectrum","modal_case":"Modal","modal_combo":"CQC","dir_combo":"SRSS","damping":0.05,"eccentricity":0.05,"loads":[{"accel":"U1","factor":9.80665,"function":"CPM-RS"}]}""", null, "tool define_load_case, a response spectrum case");
@@ -542,6 +546,18 @@ public static class ModelerFieldSteps
             var obj = Q(beam.Label + "@" + beam.Story);
             ctx.Tool("assign_object_loads", """{"kind":"frame_temperature","pattern":"CPM-TEMP","objects":[""" + obj + """],"values":{"temperature":20}}""", null, "tool assign_object_loads, a temperature on a beam");
             ctx.Tool("assign_object_loads", """{"kind":"frame_point","pattern":"Live","objects":[""" + obj + """],"values":{"value":10,"distance":0.5}}""", null, "tool assign_object_loads, a point load mid-span");
+            // Assign > Paste Assigns > Frame: the beam's point loads go on another beam, word for word.
+            var other = modeler.Model.LineAssigns.FirstOrDefault(x => x != beam && modeler.Model.Line(x.Label)?.Kind == CsiProMax.Model.LineKind.Beam);
+            if (other is not null)
+                ctx.Tool("paste_object_loads", """{"from":""" + obj + ""","objects":[""" + Q(other.Label + "@" + other.Story) + """],"types":["POINTF","POINTM"]}""",
+                    _ => FieldContext.Expect(modeler.Model.LineLoads.Exists(x => x.Object == other.Label && x.Story == other.Story && (CsiProMax.E2k.E2kText.Value(x.Tokens, "TYPE") ?? "").Contains("POINTF")), "the point load was not pasted"),
+                    "tool paste_object_loads, a beam's point load pasted on another beam");
+        }
+        // Assign > Shell Loads > Uniform Load Sets: None takes a slab's load set off.
+        var slab = modeler.Model.AreaAssigns.FirstOrDefault();
+        if (slab is not null)
+        {
+            ctx.Tool("assign_shell_load_set", """{"set":"","objects":[""" + Q(slab.Label + "@" + slab.Story) + """]}""", null, "tool assign_shell_load_set, None on a slab");
         }
         ctx.Tool("analysis_definitions", "{}", a =>
         {
@@ -701,6 +717,9 @@ public static class ModelerFieldSteps
             _ => FieldContext.Expect(CsiProMax.Model.FrameTableShapes.Rows(modeler.Model.FrameSections.Find(s => s.Name == "CPM-NP")!).Count == 2, "CPM-NP does not have its 2 segments"), "tool define_frame_shape, a nonprismatic section of 2 segments");
         ctx.Tool("frame_section_to_sd", """{"name":"CPM-ANGLE","convert":false}""",
             _ => FieldContext.Expect(modeler.Model.FrameSections.Find(s => s.Name == "SDCPM-ANGLE")?.Shape == "SD Section", "Copy to SD Section made no SDCPM-ANGLE"), "tool frame_section_to_sd, Copy to SD Section");
+        // ETABS's Define > Load Patterns (every auto seismic and wind code) and Define > Load Cases forms, as the forms set them;
+        // the ETABS part reads every value back (EtabsFormRoundTrip.Check).
+        EtabsFormRoundTrip.Define(ctx, modeler);
         var conc = modeler.Model.Materials.FirstOrDefault(m => m.IsConcrete)?.Name ?? "";
         ctx.Tool("define_shell_type", """{"name":"CPM-DROP","kind":"slab","slab_type":"Drop","modeling":"ShellThick","thickness":0.3,"material":""" + Q(conc) + ""","modifiers":{"M11MOD":0.25,"M22MOD":0.25}}""", null, "tool define_shell_type, a cracked drop panel");
         ctx.Tool("define_shell_type", """{"name":"CPM-RIB","kind":"slab","slab_type":"Ribbed","modeling":"ShellThin","thickness":0.1,"material":""" + Q(conc) + ""","overall_depth":0.4,"rib_width_top":0.15,"rib_width_bottom":0.125,"rib_spacing":0.9,"rib_direction":1}""", null, "tool define_shell_type, a ribbed slab");

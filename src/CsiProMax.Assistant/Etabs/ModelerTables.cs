@@ -39,12 +39,27 @@ public static class ModelerTables
             }
             catch (EtabsException ex) { refused.Add($"{table}: {ex.Message}"); }
         }
+        // A pattern given an Auto Lateral Load code in the Engine's form takes the code first (ETABS 23 makes no code row
+        // from the AutoLoad alone, and takes no code row for a pattern without the code: LateralTools, 0.4.34 field test).
+        if (EtabsLoadTables.AutoLoads(model) is { Count: > 0 } auto)
+        {
+            try
+            {
+                EditableTables.Put(e, "Load Pattern Definitions", "Name", auto.Select(kv => (IReadOnlyDictionary<string, string>)new Dictionary<string, string> { ["Name"] = kv.Key, ["AutoLoad"] = kv.Value }).ToList(), "give the Modeler's patterns their Auto Lateral Load codes");
+                done.Add($"Load Pattern Definitions: {auto.Count} Auto Lateral Load code{(auto.Count == 1 ? "" : "s")}");
+            }
+            catch (EtabsException ex) { refused.Add($"Load Pattern Definitions (Auto Lateral Load codes): {ex.Message}"); }
+        }
         // The definitions the .e2k has no keyword for (generalized displacements, hinges, layers, ...), by name.
-        foreach (var (table, rows) in (model.DefinitionTables ?? []).Where(t => ProgramOptions.HasDefinitionTable(ProgramOptions.Etabs, t.Key)).OrderBy(t => t.Key, StringComparer.Ordinal))
+        // Soil profiles and column footings go in ahead of the point springs that name them.
+        foreach (var (table, rows) in (model.DefinitionTables ?? []).Where(t => ProgramOptions.HasDefinitionTable(ProgramOptions.Etabs, t.Key))
+                     .OrderBy(t => t.Key.Equals(DefineTables.SoilProfiles, StringComparison.OrdinalIgnoreCase) || t.Key.Equals(DefineTables.ColumnFootings, StringComparison.OrdinalIgnoreCase) ? 0 : 1).ThenBy(t => t.Key, StringComparer.Ordinal))
         {
             try
             {
                 var put = rows.Select(r => StructureExtras.ForEtabs(table, r)).ToList();
+                // A point spring's single joint links are a row each in ETABS's table (kept as lists split by "|").
+                if (table.Equals("Spring Property Definitions - Point Springs", StringComparison.OrdinalIgnoreCase)) put = put.SelectMany(SpringLinkRows).ToList();
                 // A nonlinear link's table has a row per direction: the same fields on each of the link's directions.
                 if (StructureExtras.PerDirection(table))
                     // A row the Link/Support Property Data form wrote already names its direction (and a multilinear point).
@@ -93,7 +108,7 @@ public static class ModelerTables
         var unique = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
         Dictionary<string, string> UniqueOf(string table)
         {
-            var summary = table.Split(" - ")[0] + " - Summary";
+            var summary = System.Text.RegularExpressions.Regex.Replace(table.Split(" - ")[0], " Loads? Assignments$", " Assignments") + " - Summary";
             if (unique.TryGetValue(summary, out var map)) return map;
             map = new(StringComparer.Ordinal);
             try
@@ -115,7 +130,8 @@ public static class ModelerTables
                 if (table.Equals(SlabDefs.LineReleaseTable, StringComparison.OrdinalIgnoreCase))
                     foreach (var r in rows.Where(r => !r.ContainsKey("UniqueName")))
                         if (Tools.SlabTables.LineIn(e, model, r["Label"]) is { } line) r["UniqueName"] = line;
-                EditableTables.Put(e, table, "Story|Label", rows.Select(r => (IReadOnlyDictionary<string, string>)r).ToList(), $"put the Modeler's '{table}' in");
+                // A load table holds a row per load pattern of the object.
+                EditableTables.Put(e, table, rows.All(r => r.ContainsKey("LoadPattern")) ? "Story|Label|LoadPattern" : "Story|Label", rows.Select(r => (IReadOnlyDictionary<string, string>)r).ToList(), $"put the Modeler's '{table}' in");
                 done.Add($"{table}: {rows.Count} row{(rows.Count == 1 ? "" : "s")}");
             }
             catch (EtabsException ex) { refused.Add($"{table}: {ex.Message}"); }
@@ -213,12 +229,25 @@ public static class ModelerTables
 
     private static int IndexOf(TableData t, string field) => t.Fields.ToList().FindIndex(f => f.Equals(field, StringComparison.OrdinalIgnoreCase));
 
+    /// <summary>One row per single joint link of a point spring from link properties ("Link Property" etc. split by "|").</summary>
+    internal static IEnumerable<Dictionary<string, string>> SpringLinkRows(Dictionary<string, string> row)
+    {
+        var links = (row.GetValueOrDefault("Link Property") ?? "").Split('|');
+        if (links.Length < 2) { yield return row; yield break; }
+        string[] Part(string k) => (row.GetValueOrDefault(k) ?? "").Split('|');
+        var (dirs, angles) = (Part("Link Axial Direction"), Part("Link Axis 2 Angle"));
+        for (var i = 0; i < links.Length; i++)
+            yield return new Dictionary<string, string>(row) { ["Link Property"] = links[i], ["Link Axial Direction"] = i < dirs.Length ? dirs[i] : "+Z", ["Link Axis 2 Angle"] = i < angles.Length ? angles[i] : "0" };
+    }
+
     /// <summary>The fields a definition table's row is found by: its name, or the story (Story Definitions), or the
     /// source and its load pattern (Mass Source Definition, one row per pattern).</summary>
     internal static string KeyOf(string table) => table.ToLowerInvariant() switch
     {
         "story definitions" => "Story",
         "mass source definition" => "Name|LoadPattern",
+        "load pattern definitions - auto notional loads" => "LoadPattern",
+        "spring property definitions - soil profiles" => "Name|Soil Layer Name",
         // A form's table (design preferences, analysis options) has one row and no name: its row is that one.
         _ when ProgramForms.IsWallOverwrite(table) => table.Contains("Pier Design", StringComparison.OrdinalIgnoreCase) ? "Pier|Story" : "Spandrel|Story",
         _ when ProgramForms.IsForm(table) => "",

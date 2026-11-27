@@ -86,6 +86,14 @@ internal sealed class MainWindow : Window
         if (CsiProMax.App.Modeler) layout.Children.Add(ModelerBody());
         else layout.Children.Add(CsiProMax.AiMode.On ? Chat.ChatPane.Get() : NoAiPane.Build(CsiProMax.App.Reopened));
         Content = layout;
+        // The Modeler's model is autosaved to a recovery file, offered back at the next start if the window closed unsaved.
+        if (CsiProMax.App.Etabs?.Link is CsiProMax.Assistant.Etabs.OfflineEtabs offline)
+        {
+            AutoSave.Start(offline);
+            var offered = false;
+            ContentRendered += (_, _) => { if (offered) return; offered = true; AutoSave.Offer(offline); };
+            Closed += (_, _) => AutoSave.Stop(offline);
+        }
         SourceInitialized += (_, _) => Handle = new WindowInteropHelper(this).Handle;
         Closing += (_, _) => Remember();
         Closed += (_, _) => { Handle = IntPtr.Zero; _open = null; };
@@ -311,6 +319,16 @@ internal sealed class MainWindow : Window
         {
             view.Items.Add(new Separator());
             Add(view, $"Open the _Modeler (no {Csi.Name} needed)", ModelView.StartModeler);
+        }
+        // One theme for every CSI ProMax window and page (light unless dark is picked); the Engine has it under Options > Theme.
+        var themes = new MenuItem { Header = "_Theme" };
+        view.Items.Add(themes);
+        foreach (var (header, dark) in new[] { ("_Light", false), ("_Dark", true) })
+        {
+            var item = new MenuItem { Header = header, IsCheckable = true, Foreground = SystemColors.MenuTextBrush };
+            item.Click += (_, _) => Brand.SetTheme(dark);
+            themes.Items.Add(item);
+            themes.SubmenuOpened += (_, _) => item.IsChecked = Brand.IsDark == dark;
         }
         Add(view, "Make the CSI ProMax Engine _shortcut again", () => TaskDialog.Show("CSI ProMax", "The CSI ProMax Engine shortcut is on your desktop and in the Start menu (CSI ProMax):\n" + string.Join("\n", Shortcuts.MakeAll())));
 
