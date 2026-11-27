@@ -733,6 +733,7 @@ public sealed class ScratchProgram : IScratchWindow
             ProcessId = mine.Count == 1 ? mine[0] : 0;
             if (ProcessId != 0) com.Known = ProcessId;
             if (ProcessId != 0) Remember(ProcessId);
+            if (ProcessId != 0) FailurePictures.StartedProcess(ProcessId);
             // From here to the window's end, an "analysis complete" notice of this process is closed as it appears.
             if (ProcessId != 0) _watch = new Timer(_ => { try { lock (_noticesClosed) _noticesClosed.AddRange(ScratchDialogs.CloseNotices(ProcessId, _program)); var closing = _closing; if (ScratchDialogs.AnswerCloseQuestion(ProcessId, closing) > 0) { if (closing) _closeAnswered = true; else Interlocked.Increment(ref _keptOpen); } } catch (Exception ex) when (ex is not OutOfMemoryException) { /* the next look tries again */ } }, null, 1000, 1000);
             return mine.Count == 1 ? $"{name} process {ProcessId}, through {Path.GetFileName(ApiFile)}"
@@ -1000,6 +1001,8 @@ public sealed class ScratchProgram : IScratchWindow
         }
         catch (AggregateException ex) when (ex.InnerException is { } inner) { System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(inner).Throw(); }
         _left = true;
+        // A picture of this very window while whatever holds it is still showing, before the step gives up on it.
+        if (FailurePictures.WorkFolder is { } folder && ProcessId > 0) FailurePictures.Take(folder, _program, ProcessId, what + " did not answer");
         throw new EtabsException(late);
     }
 
