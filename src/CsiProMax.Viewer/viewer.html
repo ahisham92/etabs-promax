@@ -444,7 +444,7 @@ const engine = {res: null, from: "", base: null, rev: 0};
 const engineKinds = t => !(t.from === "input") && !/^(griddefinitions|frameassignmentssectionproperties|areaassignmentssectionproperties|modelchecks|quantities)$/.test(norm(t.name));
 function engineWith(pack, keep) {
   if (!pack || pack.engine) return pack;
-  if (keep && engine.res && engine.base && engine.base !== pack) {
+  if (keep && engine.res && engine.base && engine.base !== pack && !engine.unitsOnly) {
     // The live model moved on (a hand edit or the chat): its results no longer belong to it.
     engine.res = null; setTimeout(() => { if (typeof hmSay === "function") hmSay("The model changed, so its results and their review pack were removed, as ETABS does when a model is unlocked. Run the analysis again to see them."); buildTree(); }, 0);
     enginePost({changed: true}).catch(() => {});
@@ -452,7 +452,9 @@ function engineWith(pack, keep) {
   engine.base = pack;
   if (!engine.res) return pack;
   const out = Object.assign({}, pack, {tables: Object.assign({}, pack.tables || {}), manifest: Object.assign({}, pack.manifest || {}, {analysis_run: true, results_from: engine.from}), engine: true});
-  for (const [n, t] of Object.entries(engine.res.tables || {})) if (engineKinds(t) || !out.tables[n]) out.tables[n] = t;
+  // Results from a run in other units read in the units the model is shown in (the units control at the bottom right).
+  const ru = (engine.res.manifest || {}).units, mu = (pack.manifest || {}).units, rt = ru && mu ? convertTables(engine.res.tables || {}, ru, mu) : engine.res.tables || {};
+  for (const [n, t] of Object.entries(rt)) if (engineKinds(t) || !out.tables[n]) out.tables[n] = t;
   if (engine.res.instabilities) out.instabilities = engine.res.instabilities;
   return out;
 }
@@ -692,6 +694,8 @@ function load(pack, keep) {
   const before = keep && P ? panes.map(p => ({mode: p.mode, story: p.story, line: p.line && p.line.label + p.line.dir, cam: {...p.cam, target: p.cam.target.slice()}})) : null;
   const selNames = keep ? [...sel].map(objOf).filter(Boolean).map(o => o.type + ":" + o.name) : [], selJNames = keep ? [...selJ] : [];
   if (window.cpmLive) pack = engineWith(pack, keep);
+  if (!window.cpmLive && pack && pack.rawPack) pack = pack.rawPack;
+  if (!window.cpmLive && dispU && pack && pack.manifest && pack.manifest.units) pack = Object.assign({}, pack, {rawPack: pack, tables: convertTables(pack.tables || {}, pack.manifest.units, dispU)});
   P = pack; P.comments = P.comments || []; P.tables = P.tables || {};
   const m = P.model, man = P.manifest || {};
   // In the Modeler the model is made for one program, chosen at New Model (Ahmed 2026-11-26): the page offers what it has.
@@ -745,7 +749,9 @@ function load(pack, keep) {
   $("meta").textContent = [man.model || "Model", man.etabs ? (/modeler/i.test(man.etabs) ? man.etabs : (man.program || "ETABS") + " " + man.etabs) : "", !window.cpmLive && man.created ? "packed " + String(man.created).replace("T", " ").slice(0, 16) : "", man.by && /sample/i.test(man.by) ? man.by : ""].filter(Boolean).join(" · ");
   document.title = (man.model || "Model") + " · " + $("app").textContent;
   unitsText = u.force && u.length ? u.force + ", " + u.length + (u.temperature ? ", " + u.temperature : "") : "";
-  dispU = null; syncUnits();
+  if (!keep) dispU = null;
+  if (window.cpmLive) { const su = man.saved_units; ownU = su && su.force ? {force: su.force, length: su.length, temperature: su.temperature || ""} : null; if (!ownU) unitSet = null; }
+  syncUnits();
   $("story").innerHTML = stories.slice().reverse().map(s => `<option value="${esc(s.name)}">${esc(s.name)}</option>`).join("");
   $("line").innerHTML = allLines().map(g => `<option value="${esc(g.dir + g.label)}">${esc(g.label)}</option>`).join("");
   readRatios(); readDisplacements(); readMarks(); readForces(); readReactions(); readDrifts(); readMesh(); readShells(); derivePushover(); if (plotSpec && !P.tables[plotSpec.table]) plotSpec = null; syncResults();
@@ -4115,19 +4121,60 @@ function L(x) { const m = lenK[String(modelU().length).toLowerCase()], d = lenK[
 function lu() { return showU().length || unit; }
 function unitsWord(u) { return u && u.force && u.length ? u.force + ", " + u.length + (u.temperature ? ", " + u.temperature : "") : ""; }
 function setDispUnits(u) {
+  // In the Engine's window the model itself is shown in the new units: every form, table, load and result then reads
+  // in them, and the model is saved in its own units (as the CSI programs do).
+  if (window.cpmLive) { liveUnits(u); return; }
   const m = modelU();
   dispU = u && !(String(u.force).toLowerCase() === String(m.force).toLowerCase() && String(u.length).toLowerCase() === String(m.length).toLowerCase() && !u.name) ? u : null;
   if (dispU && (!lenK[String(dispU.length).toLowerCase()] || !lenK[String(m.length).toLowerCase()])) dispU = null;
-  syncUnits(); if (P) { draw(); showPick(); }
+  syncUnits(); if (P) { load(P.rawPack || P, true); draw(); showPick(); }
+}
+let ownU = null, unitSet = null;
+async function liveUnits(u) {
+  const own = !u || (ownU && String(u.force).toLowerCase() === String(ownU.force).toLowerCase() && String(u.length).toLowerCase() === String(ownU.length).toLowerCase() && !u.name);
+  engine.unitsOnly = true;
+  const j = await hmRun("set_display_units", own ? {own: true} : {force: u.force, length: u.length, temperature: u.temperature || "C"}, true);
+  engine.unitsOnly = false;
+  if (!j.ok) { hmSay("The units could not be changed: " + (j.error || ""), true); return; }
+  unitSet = own ? null : u;
+  syncUnits(); draw(); showPick();
+  hmSay("Shown in " + unitsWord(modelU()) + (ownU && !own ? "; the model is saved in its own units, " + unitsWord(ownU) : "") + ".");
+}
+// The CSI programs' result and table fields by kind, by their names: [force power, length power]. A field not here
+// keeps its numbers (ratios, rotations, periods, names).
+const resultDims = (() => {
+  const d = {}, put = (k, names) => names.split(" ").forEach(n => d[n.toLowerCase()] = k);
+  put([0, 1], "U1 U2 U3 UX UY UZ Station ObjSta ElemSta ElemStation Disp DispX DispY Elevation Height X Y Z GlobalX GlobalY GlobalZ CentroidX CentroidY CentroidZ XCM YCM XCR YCR XCCM YCCM Length CumulativeX CumulativeY");
+  put([1, 0], "P V2 V3 F1 F2 F3 FX FY FZ VX VY Pu Vu2 Vu3 Vu Force Weight");
+  put([1, 1], "T M1 M2 M3 MX MY MZ Mu2 Mu3 Tu Mu");
+  put([1, -1], "F11 F22 F12 FMax FMin FVM V13 V23 VMax MassX MassY MassZ Mass");
+  put([1, 0], "M11 M22 M12 MMax MMin");
+  put([1, -2], "S11 S22 S12 S13 S23 SMax SMin SVM");
+  put([0, 2], "AsTop AsBot AsMin AsMax Ast TopArea BotArea");
+  return d;
+})();
+const forceK2 = f => ({kn: 1, n: 0.001, kip: 4.4482216152605, lb: 0.0044482216152605, kgf: 0.00980665, tonf: 9.80665, ton: 9.80665})[String(f).toLowerCase()];
+const lenM = l => ({m: 1, mm: 0.001, cm: 0.01, in: 0.0254, ft: 0.3048})[String(l).toLowerCase()];
+function convertTables(tables, from, to) {
+  const ff = forceK2(from.force), tf = forceK2(to.force), fl = lenM(from.length), tl = lenM(to.length);
+  if (!ff || !tf || !fl || !tl || ff === tf && fl === tl) return tables;
+  const out = {};
+  for (const [n, t] of Object.entries(tables || {})) {
+    const k = (t.fields || []).map(f => { const d = resultDims[String(f).toLowerCase()]; return d ? Math.pow(ff / tf, d[0]) * Math.pow(fl / tl, d[1]) : 0; });
+    if (!k.some(Boolean)) { out[n] = t; continue; }
+    out[n] = Object.assign({}, t, {rows: (t.rows || []).map(r => r.map((v, i) => { if (!k[i] || v === "" || v === null) return v; const x = typeof v === "number" ? v : parseFloat(v); return isFinite(x) && (typeof v === "number" || /^\s*-?[\d.]/.test(v)) ? +(x * k[i]).toPrecision(12) : v; }))});
+  }
+  return out;
 }
 function syncUnits() {
   const sap = program === "sap2000", b = $("units"), s = $("unitsSap"), m = modelU();
   b.hidden = sap; s.hidden = !sap;
-  b.textContent = "Units..."; b.title = "Units: " + (unitsWord(showU()) || "none") + (dispU ? " (the model's own: " + unitsWord(m) + ")" : "");
+  const own = window.cpmLive ? ownU : dispU ? m : null;
+  b.textContent = "Units..."; b.title = "Units: " + (unitsWord(showU()) || "none") + (own && unitsWord(own) !== unitsWord(showU()) ? " (the model is saved in " + unitsWord(own) + ")" : "");
   const now = showU(), at = sapUnitSets.findIndex(x => x[0].toLowerCase() === String(now.force).toLowerCase().replace(/^ton$/, "tonf") && x[1].toLowerCase() === String(now.length).toLowerCase());
   s.innerHTML = sapUnitSets.map((x, i) => `<option value="${i}">${esc(x.join(", "))}</option>`).join("") + (at < 0 && unitsWord(now) ? `<option value="-1">${esc(unitsWord(now))}</option>` : "");
   s.value = String(at);
-  s.title = "Units" + (dispU ? " (the model's own: " + unitsWord(m) + ")" : "");
+  s.title = "Units" + (own && unitsWord(own) !== unitsWord(showU()) ? " (the model is saved in " + unitsWord(own) + ")" : "");
 }
 $("unitsSap").onchange = e => { const x = sapUnitSets[+e.target.value]; if (x) setDispUnits({force: x[0], length: x[1], temperature: x[2]}); };
 $("units").onclick = e => {
@@ -4149,15 +4196,15 @@ function consistentUnits() {
 }
 // ETABS's Units form: the units set and what each kind of value is shown in.
 function unitsForm() {
-  const sets = {model: null, si: unitDefaults.si, us: unitDefaults.us, mks: unitDefaults.mks}, cur = !dispU ? "model" : Object.keys(unitDefaults).find(k => unitDefaults[k] === dispU) || "consistent";
+  const sets = {model: null, si: unitDefaults.si, us: unitDefaults.us, mks: unitDefaults.mks}, shownSet = window.cpmLive ? (ownU ? unitSet || showU() : null) : dispU, own = window.cpmLive ? ownU || modelU() : modelU(), cur = !shownSet ? "model" : Object.keys(unitDefaults).find(k => unitDefaults[k] === shownSet) || "consistent";
   const rowsOf = u => { const f = u.force, l = u.length, sec = u.section || l; return [["Structure Dimensions", "Length", l], ["", "Absolute Distance", l], ["", "Elevation", l], ["Section Dimensions", "Length", sec], ["", "Area", sec + "²"], ["Displacements", "Translational", sec === "mm" || sec === "in" ? sec : l], ["", "Rotational", "rad"], ["Forces", "Force", f], ["", "Moment", u.moment || f + "-" + l], ["Stresses", "Stress", u.stress || f + "/" + l + "²"], ["Temperature", "Temperature", u.temperature || ""]]; };
   const table = u => `<table class="list" id="ufT"><tr><th>Group</th><th>Item</th><th>Units</th></tr>${rowsOf(u).map(r => `<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td><td>${esc(r[2])}</td></tr>`).join("")}</table>`;
-  const d = dialog("Units", `<fieldset><legend>Units Set</legend><select id="ufS"><option value="model">Model Units (${esc(unitsWord(modelU()))})</option><option value="si">Metric SI Defaults</option><option value="us">U.S. Defaults</option><option value="mks">Metric MKS Defaults</option>${cur === "consistent" ? `<option value="consistent">Consistent (${esc(unitsWord(dispU))})</option>` : ""}</select></fieldset>
-    <fieldset><legend>Units</legend><div id="ufB">${table(showU())}</div></fieldset>
-    <p class="kv">The views read out in these units; the model is kept, and its forms are, in the units it was saved in (${esc(unitsWord(modelU()))}).</p>`,
+  const d = dialog("Units", `<fieldset><legend>Units Set</legend><select id="ufS"><option value="model">Model Units (${esc(unitsWord(own))})</option><option value="si">Metric SI Defaults</option><option value="us">U.S. Defaults</option><option value="mks">Metric MKS Defaults</option>${cur === "consistent" ? `<option value="consistent">Consistent (${esc(unitsWord(shownSet))})</option>` : ""}</select></fieldset>
+    <fieldset><legend>Units</legend><div id="ufB">${table(shownSet || showU())}</div></fieldset>
+    <p class="kv">${window.cpmLive ? "Every form, table, load and result reads in these units; the model is saved in its own units" : "The views and results read out in these units; the model is kept in the units it was saved in"} (${esc(unitsWord(own))}).</p>`,
     [["OK", d => { const v = d.querySelector("#ufS").value; if (v !== "consistent") setDispUnits(sets[v]); }], ["Cancel"]], {width: 400});
   const s = d.querySelector("#ufS"); s.value = cur;
-  s.onchange = () => { d.querySelector("#ufB").innerHTML = table(s.value === "model" ? modelU() : s.value === "consistent" ? dispU : sets[s.value]); };
+  s.onchange = () => { d.querySelector("#ufB").innerHTML = table(s.value === "model" ? own : s.value === "consistent" ? shownSet : sets[s.value]); };
 }
 function showPick() {
   const el = $("props");

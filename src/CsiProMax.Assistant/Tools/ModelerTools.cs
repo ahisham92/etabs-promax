@@ -37,6 +37,11 @@ public static class ModelerTools
             """{"type":"object","required":["program"],"properties":{"program":{"type":"string","enum":["etabs","sap2000","safe"]}}}""",
             Ask.Changes, SetProgram, a => $"Make the model for {StructuralModel.TargetName(a.Text("program"))}"),
 
+        new("set_display_units",
+            "Shows the Modeler's model in other units, as the CSI programs' units control at the bottom right does: every form, table, load and result then reads in these units, and the model is still saved in its own units. 'force' one of lb, kip, N, kN, kgf, tonf; 'length' one of in, ft, mm, cm, m; 'temperature' C or F. 'own' true: back to the model's own units.",
+            """{"type":"object","properties":{"force":{"type":"string"},"length":{"type":"string"},"temperature":{"type":"string","enum":["C","F"]},"own":{"type":"boolean"}}}""",
+            Ask.Never, SetDisplayUnits),
+
         new("open_model_file",
             "Opens a model file in the Modeler: an ETABS text file (.e2k, .$et), a SAP2000 text file (.s2k, .$2k), a SAFE text file (.f2k, .$fk) or a Modeler file (.cpm). A .s2k or .f2k the Modeler saved opens exactly as it was saved; one SAP2000 or SAFE wrote is read from its tables (levels from the Z grid lines, members on the level of their top end), and what has no place in the Modeler yet comes back in not_read. Everything in an .e2k is kept, also what the Modeler does not show, and is written back on save. The model in the Modeler now is replaced.",
             """{"type":"object","required":["path"],"properties":{"path":{"type":"string","description":"The file's full path."}}}""",
@@ -115,6 +120,27 @@ public static class ModelerTools
 
     private static string Target(string program) => StructuralModel.Targets.Contains(program.ToLowerInvariant())
         ? program.ToLowerInvariant() : throw new ToolInputException($"'program' is one of {string.Join(", ", StructuralModel.Targets)}, not '{program}'.");
+
+    private static JsonNode SetDisplayUnits(JsonElement a, ICsiLink e)
+    {
+        var o = Offline(e);
+        if (a.Flag("own", false)) o.ShowIn(null);
+        else
+        {
+            var force = a.Text("force"); var length = a.Text("length");
+            if (force.Length == 0 || length.Length == 0) throw new ToolInputException("Give 'force' and 'length' (or 'own': true).");
+            if (ModelUnits.ForceKn(force) is null) throw new ToolInputException($"'force' is one of lb, kip, N, kN, kgf, tonf, not '{force}'.");
+            if (ModelUnits.LengthM(length) is null) throw new ToolInputException($"'length' is one of in, ft, mm, cm, m, not '{length}'.");
+            var t = a.Text("temperature");
+            o.ShowIn(new CsiProMax.Model.Units { Force = force, Length = length, Temperature = t.Length > 0 ? t.ToUpperInvariant() : o.Model.Units.Temperature });
+        }
+        var own = o.SavedUnits ?? o.Model.Units;
+        return new JsonObject
+        {
+            ["shown_in"] = $"{o.Model.Units.Force}, {o.Model.Units.Length}, {o.Model.Units.Temperature}",
+            ["saved_in"] = $"{own.Force}, {own.Length}, {own.Temperature}",
+        };
+    }
 
     private static JsonNode SetProgram(JsonElement a, ICsiLink e)
     {

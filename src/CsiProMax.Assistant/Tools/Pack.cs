@@ -183,6 +183,8 @@ public static class Pack
             // The Modeler's model is made for one program (Ahmed 2026-11-26): the page offers what that one has.
             ["target"] = e is OfflineEtabs { Model: var tm } ? tm.Target : null,
             ["units"] = new JsonObject { ["force"] = info.Force, ["length"] = info.Length, ["temperature"] = info.Temperature },
+            // The Modeler's model shown in other units than its own (the units control): the units it is saved in.
+            ["saved_units"] = e is OfflineEtabs { SavedUnits: { } su } ? new JsonObject { ["force"] = su.Force, ["length"] = su.Length, ["temperature"] = su.Temperature } : null,
             ["analysis_run"] = info.Locked,
             ["created"] = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture),
             ["by"] = by,

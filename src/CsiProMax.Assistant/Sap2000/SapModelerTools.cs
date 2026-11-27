@@ -31,7 +31,7 @@ public static class SapModelerTools
         try
         {
             Directory.CreateDirectory(folder);
-            result = S2kWriter.WriteFile(offline.Model, path);
+            result = S2kWriter.WriteFile(offline.ForSave, path);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
         {

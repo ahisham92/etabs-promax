@@ -39,13 +39,39 @@ public sealed class OfflineEtabs : ICsiLink, CsiProMax.Assistant.Tools.IModelDra
 
     public void Replace(StructuralModel model, string path)
     {
-        Model = model; Path = path; _selected.Clear(); Revision++; Unsaved = false;
+        Model = model; Path = path; _selected.Clear(); Revision++; Unsaved = false; SavedUnits = null;
     }
+
+    /// <summary>The model's own units while it is shown in others (the units control at the bottom right; Ahmed
+    /// 2026-11-27: a units change shows every form, table and result in the new units, as the CSI programs do, and the
+    /// model is saved in its own). Null while it is shown in its own units.</summary>
+    public CsiProMax.Model.Units? SavedUnits { get; private set; }
+
+    /// <summary>The model as it is saved: in its own units.</summary>
+    public StructuralModel ForSave => SavedUnits is { } u && !ModelUnits.Same(u, Model.Units) ? ModelUnits.Convert(Model, u) : Model;
+
+    /// <summary>Shows the model in other units: every number is converted, and saving converts it back. Null or the
+    /// model's own units: back to them.</summary>
+    public void ShowIn(CsiProMax.Model.Units? units)
+    {
+        var own = SavedUnits ?? Model.Units;
+        var to = units ?? own;
+        if (!ModelUnits.Known(to)) throw new EtabsException($"CSI ProMax does not know the units {to.Force}, {to.Length}.");
+        if (ModelUnits.Same(to, Model.Units)) { if (ModelUnits.Same(to, own)) SavedUnits = null; return; }
+        var unsaved = Unsaved;
+        Model = ModelUnits.Convert(Model, to);
+        SavedUnits = ModelUnits.Same(to, own) ? null : new CsiProMax.Model.Units { Force = own.Force, Length = own.Length, Temperature = own.Temperature };
+        Revision++; Unsaved = unsaved;
+    }
+
+    // A model put back (undo, a refused tool) is shown in the units the window shows now.
+    private StructuralModel Shown(StructuralModel model) =>
+        !ModelUnits.Same(model.Units, Model.Units) && ModelUnits.Known(model.Units) && ModelUnits.Known(Model.Units) ? ModelUnits.Convert(model, Model.Units) : model;
 
     /// <summary>Puts back a model from before a change (the Modeler's undo and redo): it counts as a change, so it is saved again.</summary>
     public void Restore(StructuralModel model, string path)
     {
-        Model = model; Path = path; _selected.Clear();
+        Model = Shown(model); Path = path; _selected.Clear();
         CsiProMax.Lateral.LateralLoads.Refresh(Model);
         Changed();
     }
@@ -56,7 +82,7 @@ public sealed class OfflineEtabs : ICsiLink, CsiProMax.Assistant.Tools.IModelDra
     /// leaves half an edit behind. The view redraws; the file's saved state is as it was.</summary>
     public void Rollback(StructuralModel model, bool unsaved)
     {
-        Model = model; Unsaved = unsaved; Revision++;
+        Model = Shown(model); Unsaved = unsaved; Revision++;
         CsiProMax.Lateral.LateralLoads.Refresh(Model);
     }
 
@@ -375,9 +401,10 @@ public sealed class OfflineEtabs : ICsiLink, CsiProMax.Assistant.Tools.IModelDra
         try
         {
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
-            E2kWriter.WriteFile(Model, path);
-            ModelFile.Save(Model, System.IO.Path.ChangeExtension(path, ModelFile.Extension));
-            ProgramFile = WriteProgramFile(path);
+            var saved = ForSave;
+            E2kWriter.WriteFile(saved, path);
+            ModelFile.Save(saved, System.IO.Path.ChangeExtension(path, ModelFile.Extension));
+            ProgramFile = WriteProgramFile(path, saved);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { throw new EtabsException($"The model could not be saved to {path}: {ex.Message}"); }
         Path = path; Unsaved = false; Revision++;
@@ -395,7 +422,7 @@ public sealed class OfflineEtabs : ICsiLink, CsiProMax.Assistant.Tools.IModelDra
         {
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(e2k)!);
             E2kWriter.WriteFile(Model, e2k);
-            var own = WriteProgramFile(e2k);
+            var own = WriteProgramFile(e2k, Model);
             if (Model.Target is not ("sap2000" or "safe")) return e2k;
             if (own.Length == 0) throw new EtabsException("SAFE takes one floor, and this model has no floor SAFE can take (slabs on one story).");
             return own;
@@ -407,14 +434,14 @@ public sealed class OfflineEtabs : ICsiLink, CsiProMax.Assistant.Tools.IModelDra
     /// .f2k (the floor with the most slab) for SAFE; "" for ETABS, whose file is the .e2k.</summary>
     public string ProgramFile { get; private set; } = "";
 
-    private string WriteProgramFile(string e2k)
+    private static string WriteProgramFile(string e2k, StructuralModel model)
     {
-        switch (Model.Target)
+        switch (model.Target)
         {
             case "sap2000":
             {
                 var s2k = System.IO.Path.ChangeExtension(e2k, ".s2k");
-                CsiProMax.S2k.S2kWriter.WriteFile(Model, s2k);
+                CsiProMax.S2k.S2kWriter.WriteFile(model, s2k);
                 return s2k;
             }
             case "safe":
@@ -425,13 +452,13 @@ public sealed class OfflineEtabs : ICsiLink, CsiProMax.Assistant.Tools.IModelDra
                     var f2k = System.IO.Path.ChangeExtension(e2k, ".f2k");
                     // SAFE takes one floor to a file: the busiest floor is the model's .f2k, and every other floor
                     // with slabs goes beside it as "<model> <story>.f2k", so no floor is left out.
-                    var floors = CsiProMax.F2k.F2kWriter.WriteEveryFloor(Model, new CsiProMax.F2k.F2kOptions());
+                    var floors = CsiProMax.F2k.F2kWriter.WriteEveryFloor(model, new CsiProMax.F2k.F2kOptions());
                     // Each floor's file carries the whole model, so opening any of them in the Modeler loses nothing.
-                    File.WriteAllText(f2k, CsiProMax.CsiTables.EmbeddedModel.Attach(floors[0].Text, Model), new System.Text.UTF8Encoding(false));
+                    File.WriteAllText(f2k, CsiProMax.CsiTables.EmbeddedModel.Attach(floors[0].Text, model), new System.Text.UTF8Encoding(false));
                     foreach (var floor in floors.Skip(1))
                     {
                         var name = System.IO.Path.GetFileNameWithoutExtension(e2k) + " " + string.Concat(floor.Story.Select(c => System.IO.Path.GetInvalidFileNameChars().Contains(c) ? '_' : c)) + ".f2k";
-                        File.WriteAllText(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(f2k) ?? "", name), CsiProMax.CsiTables.EmbeddedModel.Attach(floor.Text, Model), new System.Text.UTF8Encoding(false));
+                        File.WriteAllText(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(f2k) ?? "", name), CsiProMax.CsiTables.EmbeddedModel.Attach(floor.Text, model), new System.Text.UTF8Encoding(false));
                     }
                     return f2k;
                 }

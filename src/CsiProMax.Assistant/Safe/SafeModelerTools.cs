@@ -37,7 +37,7 @@ public static class SafeModelerTools
         if (a.Text("story").Equals("all", StringComparison.OrdinalIgnoreCase))
         {
             IReadOnlyList<F2kResult> floors;
-            try { floors = F2kWriter.WriteEveryFloor(o.Model, options); }
+            try { floors = F2kWriter.WriteEveryFloor(o.ForSave, options); }
             catch (ArgumentException ex) { throw new ToolInputException(ex.Message); }
             var everyFolder = a.Text("folder") is { Length: > 0 } ff ? ff.Trim().Trim('"') : OfflineEtabs.DefaultFolder;
             Directory.CreateDirectory(everyFolder);
@@ -47,13 +47,13 @@ public static class SafeModelerTools
                 var stemAll = string.Concat($"{(a.Text("name") is { Length: > 0 } nn ? nn : o.Model.Title.Length > 0 ? o.Model.Title : "Untitled")} {floor.Story}".Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
                 var file = Path.Combine(everyFolder, stemAll + ".f2k");
                 for (var i = 2; File.Exists(file); i++) file = Path.Combine(everyFolder, $"{stemAll} ({i}).f2k");
-                File.WriteAllText(file, CsiProMax.CsiTables.EmbeddedModel.Attach(floor.Text, o.Model), new UTF8Encoding(false));
+                File.WriteAllText(file, CsiProMax.CsiTables.EmbeddedModel.Attach(floor.Text, o.ForSave), new UTF8Encoding(false));
                 files.Add(new JsonObject { ["file"] = file, ["story"] = floor.Story, ["slabs"] = floor.Slabs, ["beams"] = floor.Beams, ["columns"] = floor.Columns, ["loads"] = floor.Loads });
             }
             return new JsonObject { ["files"] = files, ["floors"] = floors.Count, ["next"] = "In licensed SAFE: File > Import > SAFE .F2K file, one floor at a time." };
         }
         F2kResult result;
-        try { result = F2kWriter.Write(o.Model, options); }
+        try { result = F2kWriter.Write(o.ForSave, options); }
         catch (ArgumentException ex) { throw new ToolInputException(ex.Message); }
         var name = a.Text("name");
         if (name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0) throw new ToolInputException("'name' is a file name without a folder. Give the folder in 'folder'.");
@@ -63,7 +63,7 @@ public static class SafeModelerTools
         stem = string.Concat(stem.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
         var path = Path.Combine(folder, stem + ".f2k");
         for (var i = 2; File.Exists(path); i++) path = Path.Combine(folder, $"{stem} ({i}).f2k");
-        File.WriteAllText(path, CsiProMax.CsiTables.EmbeddedModel.Attach(result.Text, o.Model), new UTF8Encoding(false));
+        File.WriteAllText(path, CsiProMax.CsiTables.EmbeddedModel.Attach(result.Text, o.ForSave), new UTF8Encoding(false));
         return new JsonObject
         {
             ["file"] = path, ["story"] = result.Story,
