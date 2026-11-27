@@ -99,6 +99,27 @@ public static class PropertyTools
                 }));
                 return new JsonObject { ["section"] = s.Name, ["wall"] = s.IsWall, ["thickness"] = s.Thickness };
             }, a => $"Define the section {a.Text("name")}"),
+        new("define_deck",
+            "Adds or changes a deck section (Define > Section Properties > Deck Sections, the Deck Property Data form): deck_type Filled, Unfilled or Solid Slab; slab_material (concrete) and deck_material (steel); slab_depth (tc, above the ribs), rib_depth (hr), rib_width_top (wrt), rib_width_bottom (wrb), rib_spacing (sr), shear_thickness and unit_weight of the deck; stud_diameter, stud_height and stud_fu of the shear studs; modifiers as a slab's; extras Color and Notes.",
+            """{"type":"object","required":["name","deck_type"],"properties":{"name":{"type":"string"},"was":{"type":"string"},"deck_type":{"type":"string","enum":["Filled","Unfilled","Solid Slab"]},"slab_material":{"type":"string"},"deck_material":{"type":"string"},"slab_depth":{"type":"number"},"rib_depth":{"type":"number"},"rib_width_top":{"type":"number"},"rib_width_bottom":{"type":"number"},"rib_spacing":{"type":"number"},"shear_thickness":{"type":"number"},"unit_weight":{"type":"number"},"stud_diameter":{"type":"number"},"stud_height":{"type":"number"},"stud_fu":{"type":"number"},"modifiers":""" + Numbers + ""","extras":{"type":"object","additionalProperties":{"type":"string"}}}}""",
+            Ask.Changes, (a, e) =>
+            {
+                var link = Offline(e);
+                var mods = Values(a, "modifiers", true);
+                Core(() => { PropertyDefs.CheckModifiers(PropertyDefs.ShellModifiers, mods); return 0; });
+                CheckExtras(a, PropertyDefs.DeckExtraFields, "A deck section");
+                var d = new PropertyDefs.Deck(a.Need("deck_type"), a.Text("slab_material"), a.Text("deck_material"), a.Number("slab_depth", 0), a.Number("rib_depth", 0), a.Number("rib_width_top", 0), a.Number("rib_width_bottom", 0),
+                    a.Number("rib_spacing", 0), a.Number("shear_thickness", 0), a.Number("unit_weight", 0), a.Number("stud_diameter", 0), a.Number("stud_height", 0), a.Number("stud_fu", 0));
+                var s = Core(() => link.Edit(m =>
+                {
+                    var sec = PropertyDefs.SetDeck(m, a.Need("name"), Was(a), d);
+                    if (mods.Count > 0) PropertyDefs.SetModifiers(sec.Lines, PropertyDefs.ShellModifiers, mods);
+                    if (a.TryGetProperty("extras", out var x) && x.ValueKind == JsonValueKind.Object)
+                        PropertyDefs.SetShellExtras(sec, x.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.ValueKind == JsonValueKind.String ? p.Value.GetString() ?? "" : p.Value.ToString()));
+                    return sec;
+                }));
+                return new JsonObject { ["section"] = s.Name, ["deck"] = true, ["slab_depth"] = s.Number("DECKSLABDEPTH") };
+            }, a => $"Define the deck {a.Text("name")}"),
         new("define_spring",
             "Adds or changes a spring property (Define > Spring Properties): kind point (UX UY UZ RX RY RZ, force per length or moment per radian), line (U1 U2 U3 R1, per length of member) or area (U1 U2 U3, per area, e.g. a soil subgrade modulus). delete: take it away (refused while assigned).",
             """{"type":"object","required":["kind","name"],"properties":{"kind":{"type":"string","enum":["point","line","area"]},"name":{"type":"string"},"values":""" + Numbers + ""","delete":{"type":"boolean"},"extras":{"type":"object","additionalProperties":{"type":"string"},"description":"The form's other fields: point NonlinOpt (None, Compression Only, Tension Only), line NonlinOpt2 and NonlinOpt3, area NonlinOpt3; Color, Notes."}}}""",
@@ -436,6 +457,12 @@ public static class PropertyTools
             ["shell_sections"] = new JsonArray(m.ShellSections.Select(s => (JsonNode)new JsonObject
             {
                 ["name"] = s.Name, ["wall"] = s.IsWall, ["material"] = s.Material, ["thickness"] = s.Thickness,
+                ["deck"] = s.IsDeck ? new JsonObject
+                {
+                    ["deck_type"] = s.Get("DECKTYPE") == "SolidSlab" ? "Solid Slab" : s.Get("DECKTYPE"), ["slab_material"] = s.Get("CONCMATERIAL"), ["deck_material"] = s.Get("DECKMATERIAL"), ["slab_depth"] = s.Number("DECKSLABDEPTH"),
+                    ["rib_depth"] = s.Number("DECKRIBDEPTH"), ["rib_width_top"] = s.Number("DECKRIBWIDTHTOP"), ["rib_width_bottom"] = s.Number("DECKRIBWIDTHBOTTOM"), ["rib_spacing"] = s.Number("DECKRIBSPACING"),
+                    ["shear_thickness"] = s.Number("DECKSHEARTHICKNESS"), ["unit_weight"] = s.Number("DECKUNITWEIGHT"), ["stud_diameter"] = s.Number("SHEARSTUDDIAM"), ["stud_height"] = s.Number("SHEARSTUDHEIGHT"), ["stud_fu"] = s.Number("SHEARSTUDFU"),
+                } : null,
                 ["slab_type"] = s.Get("SLABTYPE"), ["modeling"] = s.Get("MODELINGTYPE"), ["one_way"] = s.Get("ONEWAYLOADDIST") == "Yes",
                 ["overall_depth"] = s.Number("OVERALLDEPTH"), ["rib_width_top"] = s.Number("SLABRIBWIDTHTOP"), ["rib_width_bottom"] = s.Number("SLABRIBWIDTHBOTTOM"),
                 ["rib_spacing"] = s.Number("SLABRIBSPACING"), ["rib_direction"] = s.Number("SLABRIBPARALLELTOAXIS"),

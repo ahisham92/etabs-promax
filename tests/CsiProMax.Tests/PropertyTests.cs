@@ -404,6 +404,35 @@ static class PropertyTests
             Check(PropertyDefs.Value(link.Model.LineAssigns.Single(y => y.Label == beam[..at] && y.Story == beam[(at + 1)..]).Extra, "ANG") is null, "undo takes it off");
         });
 
+        yield return ("properties: Deck Property Data (filled, unfilled, solid slab) is written as ETABS writes $ DECK PROPERTIES, read back, kept apart from the slabs, and refusals leave the model as it was (Ahmed 2026-11-27, every form)", () =>
+        {
+            var link = Frame();
+            var mat = link.Model.Materials[0].Name;
+            Run(link, "define_deck", new { name = "Deck1", deck_type = "Filled", slab_material = mat, deck_material = mat, slab_depth = 0.0875, rib_depth = 0.075, rib_width_top = 0.175, rib_width_bottom = 0.125, rib_spacing = 0.3,
+                shear_thickness = 0.001, unit_weight = 0.11, stud_diameter = 0.019, stud_height = 0.15, stud_fu = 400000, modifiers = new { M11MOD = 0.5 }, extras = new { Color = "#bfa0ff", Notes = "composite floor" } });
+            var e2k = E2kWriter.Write(link.Model);
+            Check(e2k.Contains("$ DECK PROPERTIES") && e2k.Contains("PROPTYPE  \"Deck\"") && e2k.Contains("DECKRIBSPACING  0.3") && e2k.Contains("SHEARSTUDFU  400000"), "the deck line as ETABS writes it");
+            var back = ViaE2k(link.Model).ShellSections.Single(x => x.Name == "Deck1");
+            Check(back.IsDeck && back.Number("DECKSLABDEPTH") == 0.0875 && back.Get("CONCMATERIAL") == mat && PropertyDefs.Modifiers(back.Lines, PropertyDefs.ShellModifiers)["M11MOD"] == 0.5, "the deck reads back");
+            Check(PropertyDefs.ShellExtras(link.Model.ShellSections.Single(x => x.Name == "Deck1"))["Notes"] == "composite floor" && PropertyDefs.ShellTable(back) == PropertyDefs.DeckTable, "colour and notes in Deck Property Definitions");
+            var pd = Run(link, "property_definitions", new { })["shell_sections"]!.AsArray().Single(x => x!["name"]!.GetValue<string>() == "Deck1")!;
+            Check(pd["deck"]!["deck_type"]!.GetValue<string>() == "Filled" && pd["deck"]!["rib_depth"]!.GetValue<double>() == 0.075, "the form sees the deck");
+            Check(Run(link, "model_definitions", new { })["shell_sections"]!.AsArray().Single(x => x!["name"]!.GetValue<string>() == "Deck1")!["kind"]!.GetValue<string>() == "deck", "a deck is not a slab in the lists");
+            Run(link, "define_deck", new { name = "Solid", deck_type = "Solid Slab", slab_material = mat, slab_depth = 0.15, stud_diameter = 0.019, stud_height = 0.1, stud_fu = 400000 });
+            var solid = link.Model.ShellSections.Single(x => x.Name == "Solid");
+            Check(solid.Get("DECKTYPE") == "SolidSlab" && solid.Get("DECKMATERIAL") is null && solid.Thickness == 0.15, "a solid slab has no deck");
+            Run(link, "define_deck", new { name = "Bare", deck_type = "Unfilled", deck_material = mat, rib_depth = 0.075, rib_width_top = 0.175, rib_width_bottom = 0.125, rib_spacing = 0.3, shear_thickness = 0.001, unit_weight = 0.11 });
+            Check(link.Model.ShellSections.Single(x => x.Name == "Bare").Get("CONCMATERIAL") is null, "an unfilled deck has no concrete");
+            Run(link, "define_deck", new { name = "Deck2", was = "Deck1", deck_type = "Filled", slab_material = mat, deck_material = mat, slab_depth = 0.1, rib_depth = 0.075, rib_width_top = 0.175, rib_width_bottom = 0.125, rib_spacing = 0.3, shear_thickness = 0.001 });
+            Check(link.Model.ShellSections.Exists(x => x.Name == "Deck2") && !link.Model.ShellSections.Exists(x => x.Name == "Deck1"), "a rename");
+            Refused(link, "define_deck", new { name = "X", deck_type = "Filled", slab_material = "nope", deck_material = mat, slab_depth = 0.1, rib_depth = 0.075, rib_width_top = 0.175, rib_width_bottom = 0.125, rib_spacing = 0.3, shear_thickness = 0.001 }, "no material");
+            Refused(link, "define_deck", new { name = "X", deck_type = "Filled", slab_material = mat, deck_material = mat, slab_depth = 0.1, rib_depth = 0.075, rib_width_top = 0.175, rib_width_bottom = 0.125, rib_spacing = 0.1, shear_thickness = 0.001 }, "rib spacing");
+            Refused(link, "define_deck", new { name = "X", deck_type = "Corrugated" }, "deck type");
+            Refused(link, "define_deck", new { name = "X", deck_type = "Unfilled", deck_material = mat, rib_depth = 0.075, rib_width_top = 0.175, rib_width_bottom = 0.125, rib_spacing = 0.3, shear_thickness = 0.001, extras = new { Thickness = "1" } }, "no field");
+            var slab = link.Model.ShellSections.First(x => !x.IsDeck && !x.IsWall).Name;
+            Refused(link, "define_deck", new { name = slab, deck_type = "Solid Slab", slab_material = mat, slab_depth = 0.15 }, "not a deck");
+        });
+
         yield return ("properties: Spring and Link/Support Property Data's other fields (nonlinear options, colour, notes; mass, weight, inertia, line and area factors) are kept by the program's tables, and a link's row follows its type (Ahmed 2026-11-27, every field)", () =>
         {
             var link = Frame();

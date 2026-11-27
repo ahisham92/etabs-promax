@@ -257,9 +257,58 @@ public static class PropertyDefs
     public static readonly string[] SapOnlyShellFields = ["MatAngle", "BendThick"];
 
     /// <summary>ETABS 23.2's table for a slab or a wall section's row.</summary>
-    public static string ShellTable(ShellSection s) => s.IsWall ? "Wall Property Definitions - Specified" : "Slab Property Definitions";
+    public static string ShellTable(ShellSection s) => s.IsDeck ? DeckTable : s.IsWall ? "Wall Property Definitions - Specified" : "Slab Property Definitions";
 
-    public static void SetShellExtras(ShellSection s, IReadOnlyDictionary<string, string> extras) => SetExtras(s, ShellTable(s), ShellExtraFields(s.IsWall), extras, s.IsWall ? "A wall section" : "A slab section");
+    public static void SetShellExtras(ShellSection s, IReadOnlyDictionary<string, string> extras) => s.IsDeck
+        ? SetExtras(s, DeckTable, DeckExtraFields, extras, "A deck section")
+        : SetExtras(s, ShellTable(s), ShellExtraFields(s.IsWall), extras, s.IsWall ? "A wall section" : "A slab section");
+
+    // ---- deck sections (ETABS 23.2: Define > Section Properties > Deck Sections, its Deck Property Data form) ----
+
+    public const string DeckTable = "Deck Property Definitions";
+    public static readonly string[] DeckTypes = ["Filled", "Unfilled", "Solid Slab"];
+    /// <summary>Deck Property Data's fields the .e2k line has no keyword for.</summary>
+    public static readonly string[] DeckExtraFields = ["Color", "Notes"];
+
+    /// <summary>A deck's geometry and studs as the Deck Property Data form has them (lengths in the model's units, the stud
+    /// strength in its force over length squared, the deck unit weight in force over length squared).</summary>
+    public sealed record Deck(string Type, string SlabMaterial, string DeckMaterial, double SlabDepth, double RibDepth, double RibWidthTop, double RibWidthBottom,
+        double RibSpacing, double ShearThickness, double UnitWeight, double StudDiameter, double StudHeight, double StudFu);
+
+    /// <summary>Adds or changes a deck section, written as ETABS 23 writes it in $ DECK PROPERTIES (SHELLPROP ... PROPTYPE
+    /// "Deck" DECKTYPE ...): a filled deck has the concrete, the deck and the studs, an unfilled deck the deck only, a solid
+    /// slab the concrete and the studs.</summary>
+    public static ShellSection SetDeck(StructuralModel m, string name, string? was, Deck d)
+    {
+        Name(name, "deck section");
+        var type = DeckTypes.FirstOrDefault(t => t.Replace(" ", "").Equals(d.Type.Replace(" ", ""), StringComparison.OrdinalIgnoreCase)) ?? throw new ArgumentException($"The deck type is one of {string.Join(", ", DeckTypes)}.");
+        bool concrete = type != "Unfilled", deck = type != "Solid Slab";
+        if (concrete && !m.Materials.Exists(x => x.Name == d.SlabMaterial)) throw new ArgumentException($"There is no material '{d.SlabMaterial}' for the slab.");
+        if (deck && !m.Materials.Exists(x => x.Name == d.DeckMaterial)) throw new ArgumentException($"There is no material '{d.DeckMaterial}' for the deck.");
+        if (concrete && !(d.SlabDepth > 0)) throw new ArgumentException("The slab depth (tc) is above 0.");
+        if (deck && (!(d.RibDepth > 0) || !(d.RibWidthTop > 0) || !(d.RibWidthBottom > 0) || !(d.RibSpacing > d.RibWidthTop) || !(d.ShearThickness > 0)))
+            throw new ArgumentException("The deck needs a rib depth, rib widths and a shear thickness above 0, and a rib spacing above the top rib width.");
+        if (new[] { d.UnitWeight, d.StudDiameter, d.StudHeight, d.StudFu }.Any(x => x < 0 || double.IsNaN(x))) throw new ArgumentException("The unit weight and the stud values are 0 or more.");
+        var old = m.ShellSections.Find(x => x.Name == (was ?? name));
+        if (was is not null && old is null) throw new ArgumentException($"There is no deck section '{was}'.");
+        if (old is not null && !old.IsDeck) throw new ArgumentException($"'{old.Name}' is a slab or wall section, not a deck.");
+        if (was is not null && was != name && m.ShellSections.Exists(x => x.Name == name)) throw new ArgumentException($"A section is already named '{name}'.");
+        if (old is null && m.ShellSections.Exists(x => x.Name == name)) throw new ArgumentException($"A section is already named '{name}'.");
+        var line = new List<string> { "PROPTYPE", Quote("Deck"), "DECKTYPE", Quote(type == "Solid Slab" ? "SolidSlab" : type) };
+        if (concrete) line.AddRange(["CONCMATERIAL", Quote(d.SlabMaterial)]);
+        if (deck) line.AddRange(["DECKMATERIAL", Quote(d.DeckMaterial)]);
+        if (concrete) line.AddRange(["DECKSLABDEPTH", Number(d.SlabDepth)]);
+        if (deck) line.AddRange(["DECKRIBDEPTH", Number(d.RibDepth), "DECKRIBWIDTHTOP", Number(d.RibWidthTop), "DECKRIBWIDTHBOTTOM", Number(d.RibWidthBottom), "DECKRIBSPACING", Number(d.RibSpacing),
+            "DECKSHEARTHICKNESS", Number(d.ShearThickness), "DECKUNITWEIGHT", Number(d.UnitWeight)]);
+        if (concrete) line.AddRange(["SHEARSTUDDIAM", Number(d.StudDiameter), "SHEARSTUDHEIGHT", Number(d.StudHeight), "SHEARSTUDFU", Number(d.StudFu)]);
+        var sec = old ?? new ShellSection();
+        if (old is null) m.ShellSections.Add(sec);
+        var mods = old?.Lines.Where(l => l.Count > 0 && ShellModifiers.Contains(l[0])).ToList() ?? [];
+        sec.Name = name;
+        sec.Lines = [line, .. mods];
+        if (was is not null && was != name) foreach (var a in m.AreaAssigns.Where(x => x.Section == was)) a.Section = name;
+        return sec;
+    }
 
     public static IReadOnlyDictionary<string, string> ShellExtras(ShellSection s) => Extras(s, ShellTable(s));
 

@@ -272,6 +272,12 @@ static class ExtrasTests
                 "[\"Group Definitions...\", \"m:st:group\"]", "[\"Soil Subgrade Properties...\", \"m:spr:area\"]", "dt(\"Shell Uniform Load Sets...\")", "only([\"etabs\", \"safe\"], [\"Design Strips...\", \"m:ex:strips\"]), [\"Tendons...\", \"m:ex:tendons\"]" })
                 Check(html.Contains(part), "viewer.html lost " + part);
         });
+        yield return ("extras: Deck Sections and Deck Property Data match ETABS 23.2 field by field (Ahmed 2026-11-27)", () =>
+        {
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var part in new[] { "[\"Deck Sections...\", \"m:decks\"]", "listForm(\"Deck Properties\"", "dialog(\"Deck Property Data\"", "\"Slab Depth, tc\"", "\"Rib Width Bottom, wrb\"", "\"Deck Shear Thickness\"", "\"Shear Stud Tensile Strength, Fu\"", "submit(d, \"define_deck\"" })
+                Check(html.Contains(part), "viewer.html lost " + part);
+        });
         yield return ("extras: the views and toolbars are drawn as ETABS draws them: grey see-through slabs with white edges, thin columns, solid grid, light-blue ground grid with flat bubbles, the axes at the origin, column squares in plan, captions as tabs, the toolbar and strip in the program's order (Ahmed 2026-11-26 22:19)", () =>
         {
             var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));

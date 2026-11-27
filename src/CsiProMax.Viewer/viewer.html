@@ -4401,7 +4401,7 @@ function hmDefineMenu() {
     ["Load Patterns...", "m:patterns"], ["Load Cases...", "m:cases"], ["Load Combinations...", "m:combos"], ["Hyperstatic Load Cases...", "m:ex:hyperstatic"], 0, ["Groups...", "m:st:group"], ["Section Cuts...", "m:st:cut"], fns, ["Mass Source...", "m:mass"], 0,
     ["Punching Shear Overwrites...", "m:ex:punching"], ["Floor Openings...", "m:ex:openings"], ["Slab Line Releases...", "m:ex:linereleases"]];
   return [["Material Properties...", "m:materials"],
-    ["Section Properties", [["Frame Sections...", "m:frameSections"], ["Slab Sections...", "m:shellSections"], ["Wall Sections...", "m:wallSections"], ["Reinforcing Bar Sizes...", "m:rebarSizes"], ["Link/Support Properties...", "m:links"],
+    ["Section Properties", [["Frame Sections...", "m:frameSections"], ["Deck Sections...", "m:decks"], ["Slab Sections...", "m:shellSections"], ["Wall Sections...", "m:wallSections"], ["Reinforcing Bar Sizes...", "m:rebarSizes"], ["Link/Support Properties...", "m:links"],
       ...hinges, dt("Panel Zone Properties..."), ["Tendon Sections...", "m:ex:tendonsections"], 0, ["Frame Section Rebar (Modify/Show Rebar)...", "m:frameRebar"], dt("Slab Layers..."), dt("Wall Layers..."), dt("Wall Auto Select Lists..."), dt("Frame Release Definitions...")]],
     ["Spring Properties", springs], ["Diaphragms...", "m:st:diaphragm"], ["Pier Labels...", "m:st:pier"], ["Spandrel Labels...", "m:st:spandrel"], ["Group Definitions...", "m:st:group"], ["Section Cuts...", "m:st:cut"], dt("Generalized Displacements..."),
     fns, ["Load Patterns...", "m:patterns"], dt("Shell Uniform Load Sets..."), ["Load Cases...", "m:cases"], ["Load Combinations...", "m:combos"], dt("Auto Construction Sequence..."), dt("Walking Vibrations..."), ["Mass Source...", "m:mass"], ["P-Delta Options...", "m:pdelta"], 0,
@@ -4441,6 +4441,7 @@ async function modelAct(a) {
     case "frameSections": return hmFrameSections();
     case "shellSections": return hmShellSections();
     case "wallSections": return hmShellSections("wall");
+    case "decks": return hmDecks();
     case "stories": return hmStories();
     case "storyGrid": await hmDefs(); return hmStoryGrid();
     case "grids": return hmGrids();
@@ -5200,12 +5201,62 @@ async function hmFrameSection(s, after, copy, newShape) {
 // ---- Define: slab and wall sections ----
 // Slab Properties and Wall Properties, each a list of its own as ETABS and SAFE have them (Define > Section
 // Properties > Slab Sections / Wall Sections); SAP2000 has one Area Sections list of shell sections.
+// Define > Section Properties > Deck Sections, as ETABS 23.2 has it (Ahmed 2026-11-27, every form): Deck Properties
+// with Click to:, then Deck Property Data with General Data (name, type, slab and deck materials, modeling type,
+// modifiers, display color, notes) and Property Data (tc, hr, wrt, wrb, sr, shear thickness, unit weight, the studs).
+async function hmDecks() {
+  const pd = (await hmRun("property_definitions", {}, true)).result; if (!pd) return;
+  const decks = pd.shell_sections.filter(s => s.deck), find = n => decks.find(s => s.name === n);
+  const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmDecks(); };
+  listForm("Deck Properties", "Properties", decks.map(s => s.name), [
+    ["Add New Property...", () => hmDeck(null, pd, again)],
+    ["Add Copy of Property...", n => n && hmDeck(find(n), pd, again, true)],
+    ["Modify/Show Property...", n => n && hmDeck(find(n), pd, again)],
+    ["Delete Property", n => n && hmRun("delete_definition", {kind: "shell_section", name: n}).then(j => j.ok ? again() : hmSay(j.error, true))],
+  ], n => hmDeck(find(n), pd, again));
+}
+function hmDeck(s, pd, after, copy) {
+  const u = hmU(), k = (s && s.deck) || {}, x = (s && s.extras) || {}, mats = t => pd.materials.filter(m => t.test(m.type)).map(m => m.name);
+  const conc = mats(/concrete/i), steel = mats(/steel/i);
+  let mods = s ? {...s.modifiers} : {}, notes = x.Notes || "";
+  const f = (id, label, v, unit) => `<span>${label}</span><input id="${id}" type="number" step="any" value="${v ?? ""}"><span class="un">${unit}</span>`;
+  const d = dialog("Deck Property Data", `<fieldset><legend>General Data</legend><div class="g2">
+      <span>Property Name</span><input id="dkN" value="${esc(s ? (copy ? s.name + " copy" : s.name) : "Deck1")}">
+      <span>Type</span><select id="dkT">${opts(["Filled", "Unfilled", "Solid Slab"], k.deck_type || "Filled")}</select>
+      <span>Slab Material</span><select id="dkS">${opts(conc, k.slab_material || conc[0])}</select>
+      <span>Deck Material</span><select id="dkD">${opts(steel, k.deck_material || steel[0])}</select>
+      <span>Modeling Type</span><select disabled><option>Membrane</option></select>
+      <span>Modifiers (Currently ${s && Object.values(s.modifiers || {}).some(v => v !== 1) ? "User Specified" : "Default"})</span><button id="dkM">Modify/Show...</button>
+      <span>Display Color</span><input id="dkC" type="color" value="${/^#[0-9a-f]{6}$/i.test(x.Color || "") ? x.Color : "#bfa0ff"}" style="width:60px;padding:0">
+      <span>Property Notes</span><button id="dkNo">Modify/Show...</button></div></fieldset>
+    <fieldset><legend>Property Data</legend><div class="gu">
+      ${f("dk1", "Slab Depth, tc", k.slab_depth ?? 0.0875, u.l)}${f("dk2", "Rib Depth, hr", k.rib_depth ?? 0.075, u.l)}${f("dk3", "Rib Width Top, wrt", k.rib_width_top ?? 0.175, u.l)}${f("dk4", "Rib Width Bottom, wrb", k.rib_width_bottom ?? 0.125, u.l)}
+      ${f("dk5", "Rib Spacing, sr", k.rib_spacing ?? 0.3, u.l)}${f("dk6", "Deck Shear Thickness", k.shear_thickness ?? 0.001, u.l)}${f("dk7", "Deck Unit Weight", k.unit_weight ?? 0.11, `${u.f}/${u.l}²`)}
+      ${f("dk8", "Shear Stud Diameter", k.stud_diameter ?? 0.019, u.l)}${f("dk9", "Shear Stud Height, hs", k.stud_height ?? 0.15, u.l)}${f("dk10", "Shear Stud Tensile Strength, Fu", k.stud_fu ?? 400000, `${u.f}/${u.l}²`)}</div></fieldset>`,
+    [["OK", d => {
+      const name = q(d, "#dkN").value.trim();
+      const args = {name, was: s && !copy && s.name !== name ? s.name : undefined, deck_type: q(d, "#dkT").value, slab_material: q(d, "#dkS").value, deck_material: q(d, "#dkD").value,
+        slab_depth: fnum(d, "#dk1"), rib_depth: fnum(d, "#dk2"), rib_width_top: fnum(d, "#dk3"), rib_width_bottom: fnum(d, "#dk4"), rib_spacing: fnum(d, "#dk5"), shear_thickness: fnum(d, "#dk6"),
+        unit_weight: fnum(d, "#dk7"), stud_diameter: fnum(d, "#dk8"), stud_height: fnum(d, "#dk9"), stud_fu: fnum(d, "#dk10"), modifiers: mods, extras: {Color: q(d, "#dkC").value, Notes: notes}};
+      for (const key in args) if (typeof args[key] === "number" && isNaN(args[key])) delete args[key];
+      return submit(d, "define_deck", args, after);
+    }, true], ["Cancel"]], {width: 520});
+  // A filled deck has every field; an unfilled deck no concrete or studs; a solid slab no deck.
+  const paint = () => {
+    const t = q(d, "#dkT").value, concrete = t !== "Unfilled", deck = t !== "Solid Slab";
+    q(d, "#dkS").disabled = !concrete; q(d, "#dkD").disabled = !deck;
+    ["#dk1", "#dk8", "#dk9", "#dk10"].forEach(id => q(d, id).disabled = !concrete); ["#dk2", "#dk3", "#dk4", "#dk5", "#dk6", "#dk7"].forEach(id => q(d, id).disabled = !deck);
+  };
+  q(d, "#dkT").onchange = paint; paint();
+  q(d, "#dkM").onclick = () => hmModifiers(pd.shell_modifiers, mods, o => { mods = o; });
+  q(d, "#dkNo").onclick = () => { const n = dialog("Property Notes", `<textarea id="nT" rows="8" style="width:100%">${esc(notes)}</textarea>`, [["OK", n => { notes = q(n, "#nT").value; }], ["Cancel"]], {width: 420}); };
+}
 async function hmShellSections(kind) {
   const defs = await hmDefs(), sap = program === "sap2000";
   if (!sap && !kind) kind = "slab";
   const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmShellSections(kind); };
   const find = n => defs.shell_sections.find(s => s.name === n);
-  const names = defs.shell_sections.filter(s => sap || (kind === "wall") === (s.kind === "wall")).map(s => s.name);
+  const names = defs.shell_sections.filter(s => sap ? s.kind !== "deck" : s.kind === kind).map(s => s.name);
   const title = sap ? "Area Sections" : kind === "wall" ? "Wall Properties" : "Slab Properties";
   const d = listForm(title, sap ? "Sections" : "Properties", names, [
     [sap ? "Add New Section..." : "Add New Property...", () => hmShellSection(null, again, false, sap ? "slab" : kind)],
@@ -6481,7 +6532,7 @@ function bayAt(p, x, y) {
 }
 async function drawSection(kind) {
   if (kind === "joint" || kind === "reshape") return {list: [], now: ""};
-  const defs = await hmDefs(), list = kind === "slab" || kind === "wall" ? defs.shell_sections.filter(s => s.kind === kind).map(s => s.name) : defs.frame_sections.map(s => s.name);
+  const defs = await hmDefs(), list = kind === "slab" || kind === "wall" ? defs.shell_sections.filter(s => s.kind === kind || (kind === "slab" && s.kind === "deck")).map(s => s.name) : defs.frame_sections.map(s => s.name);
   if (!hm.sec[kind] || !list.includes(hm.sec[kind])) {
     // A concrete section made for this kind first (ETABS's own ConcCol and ConcBm in a new model), then any.
     const pref = kind === "column" || kind === "beam" || kind === "brace" ? defs.frame_sections.find(s => s.kind === kind && s.editable) || defs.frame_sections.find(s => s.kind === kind) || defs.frame_sections.find(s => s.kind === "column") : null;

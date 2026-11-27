@@ -166,6 +166,7 @@ public sealed class ShellSection : Definition
 {
     [JsonIgnore] public string Material => Get("MATERIAL") ?? "";
     [JsonIgnore] public bool IsWall => string.Equals(Get("PROPTYPE"), "Wall", StringComparison.OrdinalIgnoreCase);
+    [JsonIgnore] public bool IsDeck => string.Equals(Get("PROPTYPE"), "Deck", StringComparison.OrdinalIgnoreCase);
     [JsonIgnore] public double? Thickness => Number("SLABTHICKNESS") ?? Number("WALLTHICKNESS") ?? Number("DECKSLABDEPTH");
 }
 

@@ -97,7 +97,7 @@ public static class HandTools
             }).ToArray()),
             ["shell_sections"] = new JsonArray(m.ShellSections.Select(x => (JsonNode)new JsonObject
             {
-                ["name"] = x.Name, ["kind"] = x.IsWall ? "wall" : "slab", ["material"] = x.Material, ["thickness"] = x.Thickness, ["used"] = used.GetValueOrDefault(x.Name),
+                ["name"] = x.Name, ["kind"] = x.IsWall ? "wall" : x.IsDeck ? "deck" : "slab", ["material"] = x.Material, ["thickness"] = x.Thickness, ["used"] = used.GetValueOrDefault(x.Name),
                 ["type"] = x.Get("SLABTYPE") ?? x.Get("PROPTYPE") ?? "",
             }).ToArray()),
             ["load_patterns"] = new JsonArray(m.LoadPatterns.Select(p => (JsonNode)new JsonObject
