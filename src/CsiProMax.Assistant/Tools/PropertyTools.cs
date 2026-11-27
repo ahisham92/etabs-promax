@@ -59,18 +59,43 @@ public static class PropertyTools
                 var mat = Core(() => link.Edit(m => PropertyDefs.SetMaterial(m, a.Need("name"), Was(a), a.Need("type"), a.Text("grade") is { Length: > 0 } g ? g : null, Values(a, "values", true), Texts(a), RowsOf(a))));
                 return new JsonObject { ["material"] = mat.Name, ["type"] = mat.Type };
             }, a => $"Define the material {a.Text("name")}"),
+        new("frame_section_to_sd",
+            "Define > Frame Sections > Convert to SD Section (convert true: the section itself becomes a Section Designer section, its members keep it) or Copy to SD Section (convert false: a new Section Designer section named SD + its name).",
+            """{"type":"object","required":["name"],"properties":{"name":{"type":"string"},"convert":{"type":"boolean"}}}""",
+            Ask.Changes, (a, e) =>
+            {
+                var link = Offline(e);
+                var convert = a.TryGetProperty("convert", out var c) && c.ValueKind == JsonValueKind.True;
+                var s = Core(() => link.Edit(m => FrameTableShapes.ToSd(m, a.Need("name"), convert)));
+                return new JsonObject { ["name"] = s.Name, ["shape"] = s.Shape };
+            }, a => $"Section Designer section from {a.Text("name")}"),
         new("define_frame_shape",
-            "Adds or changes a frame section of any shape (Define > Section Properties > Frame Sections): Concrete Rectangular, Circle, Tee, L; Steel I/Wide Flange, Channel, Tee, Angle, Double Angle, Double Channel, Tube, Pipe, Rod. dims are the shape's dimensions (D, B, TF, TW, ... as section_shapes lists them). modifiers (AMOD A2MOD A3MOD JMOD I2MOD I3MOD MMOD WMOD) are the section's property modifiers. extras: the form's other fields, by the program's table field names (Color, Notes; concrete NotSizeType NotAutoFact NotUserSize RigidZone; steel FilletRad, tube CornerRad; MirrorAbt2 MirrorAbt3); given, they replace the ones it has. 'was': its name now; members keep it under a new name.",
-            """{"type":"object","required":["name","shape","material","dims"],"properties":{"name":{"type":"string"},"was":{"type":"string"},"shape":{"type":"string"},"material":{"type":"string"},"dims":""" + Numbers + ""","modifiers":""" + Numbers + ""","extras":{"type":"object","additionalProperties":{"type":"string"}}}}""",
+            "Adds or changes a frame section of any shape (Define > Section Properties > Frame Sections): Concrete Rectangular, Circle, Tee, L; Steel I/Wide Flange, Channel, Tee, Angle, Double Angle, Double Channel, Tube, Pipe, Rod (with .e2k dims), and every other shape of the program's list by its table fields in extras (Filled Steel Tube/Pipe, BU I Cover Plate, Standard Joist Section, Custom Steel Joist, Steel Plate, Steel Castellated, Steel Cellular, Concrete Trapezoid, Concrete Encasement Rectangle/Circle, Precast I, Concrete Cross, Box, Pipe, Cold Formed C/Z/Hat, Buckling Restrained Brace, General, Nonprismatic (rows: one per segment), Auto Select (rows: IncludedSec one per section), SD Section, Composite Shear Wall). dims are the shape's dimensions (D, B, TF, TW, ... as section_shapes lists them). modifiers (AMOD A2MOD A3MOD JMOD I2MOD I3MOD MMOD WMOD) are the section's property modifiers. extras: the form's other fields, by the program's table field names (Color, Notes; concrete NotSizeType NotAutoFact NotUserSize RigidZone; steel FilletRad, tube CornerRad; MirrorAbt2 MirrorAbt3); given, they replace the ones it has. 'was': its name now; members keep it under a new name.",
+            """{"type":"object","required":["name","shape"],"properties":{"name":{"type":"string"},"was":{"type":"string"},"shape":{"type":"string"},"material":{"type":"string"},"dims":""" + Numbers + ""","modifiers":""" + Numbers + ""","extras":{"type":"object","additionalProperties":{"type":"string"}},"rows":{"type":"array","items":{"type":"object","additionalProperties":{"type":"string"}}}}}""",
             Ask.Changes, (a, e) =>
             {
                 var link = Offline(e);
                 var dims = Values(a, "dims", true); var mods = Values(a, "modifiers", true);
                 Core(() => { PropertyDefs.CheckModifiers(PropertyDefs.FrameModifiers, mods); return 0; });
                 CheckExtras(a, PropertyDefs.FrameExtraFields(a.Need("shape")), "A " + a.Need("shape") + " section");
+                var shape = a.Need("shape");
+                var fields = a.TryGetProperty("extras", out var ex0) && ex0.ValueKind == JsonValueKind.Object
+                    ? ex0.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.ValueKind == JsonValueKind.String ? p.Value.GetString() ?? "" : p.Value.ToString()) : new Dictionary<string, string>();
+                if (FrameTableShapes.Is(shape))
+                {
+                    var rows = a.TryGetProperty("rows", out var rs) && rs.ValueKind == JsonValueKind.Array
+                        ? rs.EnumerateArray().Where(r => r.ValueKind == JsonValueKind.Object).Select(r => (IReadOnlyDictionary<string, string>)r.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.ValueKind == JsonValueKind.String ? p.Value.GetString() ?? "" : p.Value.ToString())).ToList() : null;
+                    var t = Core(() => link.Edit(m =>
+                    {
+                        var sec = FrameTableShapes.Set(m, a.Need("name"), Was(a), shape, a.Text("material"), fields, rows);
+                        if (mods.Count > 0) PropertyDefs.SetModifiers(sec.Lines, PropertyDefs.FrameModifiers, mods);
+                        return sec;
+                    }));
+                    return new JsonObject { ["section"] = t.Name, ["shape"] = t.Shape };
+                }
                 var s = Core(() => link.Edit(m =>
                 {
-                    var sec = PropertyDefs.SetShape(m, a.Need("name"), Was(a), a.Need("shape"), a.Need("material"), dims);
+                    var sec = PropertyDefs.SetShape(m, a.Need("name"), Was(a), shape, a.Need("material"), dims);
                     if (mods.Count > 0) PropertyDefs.SetModifiers(sec.Lines, PropertyDefs.FrameModifiers, mods);
                     if (a.TryGetProperty("extras", out var x) && x.ValueKind == JsonValueKind.Object)
                         PropertyDefs.SetFrameExtras(sec, x.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.ValueKind == JsonValueKind.String ? p.Value.GetString() ?? "" : p.Value.ToString()));
@@ -484,8 +509,9 @@ public static class PropertyTools
                 ["dims"] = new JsonObject((PropertyDefs.Shape(s.Shape)?.Dims ?? ["D", "B"]).Where(d => s.Number(d) is not null).Select(d => KeyValuePair.Create(d, (JsonNode?)JsonValue.Create(s.Number(d)!.Value)))),
                 ["modifiers"] = Numbers_(PropertyDefs.Modifiers(s.Lines, PropertyDefs.FrameModifiers)),
                 ["extras"] = new JsonObject(PropertyDefs.FrameExtras(s).Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))),
+                ["rows"] = FrameTableShapes.Is(s.Shape) && s.Tables is not null && s.Tables.TryGetValue(s.Shape, out var fr) && fr.Count > 1 ? JsonSerializer.SerializeToNode(fr) : null,
             }).ToArray()),
-            ["frame_extra_fields"] = new JsonObject(PropertyDefs.Shapes.Select(x => KeyValuePair.Create(x.Name, (JsonNode?)new JsonArray(PropertyDefs.FrameExtraFields(x.Name).Select(f => (JsonNode)f).ToArray())))),
+            ["frame_extra_fields"] = new JsonObject(PropertyDefs.Shapes.Select(x => x.Name).Concat(FrameTableShapes.All.Keys).Select(x => KeyValuePair.Create(x, (JsonNode?)new JsonArray(PropertyDefs.FrameExtraFields(x).Select(f => (JsonNode)f).ToArray())))),
             ["shell_sections"] = new JsonArray(m.ShellSections.Select(s => (JsonNode)new JsonObject
             {
                 ["name"] = s.Name, ["wall"] = s.IsWall, ["material"] = s.Material, ["thickness"] = s.Thickness,
