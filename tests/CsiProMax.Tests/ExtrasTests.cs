@@ -257,6 +257,14 @@ static class ExtrasTests
                 "<span>Rotational Inertia 1</span>", "<legend>Nonlinearity Specification</legend>", "<legend>Stiffness Options</legend>", "<span>Display Color</span>", "<span>Link/Support Type</span>", "\"Link/Support Property Data\"" })
                 Check(html.Contains(part), "viewer.html lost " + part);
         });
+        yield return ("extras: Define Functions match ETABS 23.2 and SAP2000 26.3: Choose Function Type to Add, each type's definition form with its own fields, the Function Graph and Convert to User Defined (Ahmed 2026-11-27)", () =>
+        {
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var part in new[] { "<legend>Choose Function Type to Add</legend>", "\"Modify/Show Spectrum...\" : \"Modify/Show Function...\"", "[\"periodic\", \"User Periodic\"]", "[\"sawtooth\", \"Sawtooth\"]",
+                "\"Response Spectrum Function Definition\" : \"Time History Function Definition\"", "<span>Function Damping Ratio</span>", "<legend>Function File</legend>", "<span>Header Lines to Skip</span>", "<span>Prefix Characters per Line to Skip</span>",
+                "Values at Equal Intervals of", "<legend>Function Graph</legend>", "<button id=\"fConv\">Convert to User Defined</button>", "[\"ramp_time\", \"Ramp Time\", 1], [\"amplitude\", \"Amplitude\", 1], [\"max_time\", \"Maximum Time\", 2]", "[\"steps_per_cycle\", \"Number of Steps per Cycle\", 16]" })
+                Check(html.Contains(part), "viewer.html lost " + part);
+        });
         yield return ("extras: the views and toolbars are drawn as ETABS draws them: grey see-through slabs with white edges, thin columns, solid grid, light-blue ground grid with flat bubbles, the axes at the origin, column squares in plan, captions as tabs, the toolbar and strip in the program's order (Ahmed 2026-11-26 22:19)", () =>
         {
             var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));

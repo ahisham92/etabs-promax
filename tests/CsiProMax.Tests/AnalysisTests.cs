@@ -55,6 +55,36 @@ static class AnalysisTests
             Refused(link, "define_function", new { name = "BAD", kind = "history", from = "code", code = "ASCE 7-16" }, "spectrum");
         });
 
+        yield return ("analysis: the function forms' types (Ramp, Sawtooth, Triangular, User Periodic, From File) make their points, the form's type and fields are kept for Modify/Show, and a preview changes nothing (Ahmed 2026-11-27, every field)", () =>
+        {
+            var link = Frame();
+            var p = Run(link, "define_function", new { name = "R", kind = "history", from = "ramp", ramp_time = 0.5, amplitude = 2, max_time = 3, preview = true });
+            Check(p["points"]!.AsArray().Count == 3 && AnalysisDefs.ListFunctions(link.Model).Count == 0, "a preview gives the points and defines nothing");
+            Run(link, "define_function", new { name = "R", kind = "history", from = "ramp", ramp_time = 0.5, amplitude = 2, max_time = 3 });
+            Run(link, "define_function", new { name = "SAW", kind = "history", from = "sawtooth", period = 1, ramp_time = 0.1, cycles = 2, amplitude = 1 });
+            Run(link, "define_function", new { name = "TRI", kind = "history", from = "triangular", period = 2, cycles = 3, amplitude = 0.5 });
+            Run(link, "define_function", new { name = "PER", kind = "history", from = "periodic", cycles = 3, points = new[] { new[] { 0.0, 0.0 }, new[] { 0.5, 1.0 }, new[] { 1.0, 0.0 } } });
+            Run(link, "define_function", new { name = "FILE", kind = "history", from = "file", points = new[] { new[] { 0.0, 0.0 }, new[] { 0.01, 0.2 } }, file = new { name = "elcentro.txt", header_lines = 2, values = "equal", interval = 0.01 } });
+            var f = AnalysisDefs.ListFunctions(ViaE2k(link.Model)).ToDictionary(x => x.Name);
+            Check(f["R"].Points.SequenceEqual(new[] { (0.0, 0.0), (0.5, 2.0), (3.0, 2.0) }), "the ramp: up at the ramp time, held to the maximum time");
+            Check(f["SAW"].Points.Count == 11 && f["SAW"].Points[^1] == (2.0, 0.0) && f["SAW"].Points.Max(x => x.Y) == 1, "the sawtooth, 2 cycles of 5 points after 0");
+            Check(f["TRI"].Points.Count == 10 && f["TRI"].Points[1] == (0.5, 0.5) && f["TRI"].Points[2] == (1.5, -0.5), "the triangle, 3 cycles");
+            Check(f["PER"].Points.Count == 7 && f["PER"].Points[^1] == (3.0, 0.0), "one cycle repeated 3 times");
+            var defs = Run(link, "analysis_definitions", new { })["functions"]!.AsArray().ToDictionary(x => x!["name"]!.GetValue<string>());
+            Check(defs["SAW"]!["source"]!["Type"]!.GetValue<string>() == "sawtooth" && defs["SAW"]!["source"]!["ramp_time"]!.GetValue<string>() == "0.1", "the sawtooth form's fields come back");
+            Check(defs["FILE"]!["source"]!["f:name"]!.GetValue<string>() == "elcentro.txt" && defs["FILE"]!["source"]!["f:header_lines"]!.GetValue<string>() == "2", "the From File fields come back");
+            Check(defs["PER"]!["source"]!["cycle"]!.GetValue<string>().Contains("0.5"), "the one cycle comes back");
+            Check(!E2kWriter.Write(link.Model).Contains("elcentro"), "the form's fields stay in the .cpm: the programs get a user function");
+            Run(link, "define_function", new { name = "SAW2", was = "SAW", kind = "history", from = "sawtooth", period = 1, ramp_time = 0.1, cycles = 2, amplitude = 1 });
+            Check(AnalysisDefs.FunctionSource(link.Model, "SAW") is null && AnalysisDefs.FunctionSource(link.Model, "SAW2") is not null, "a rename moves the fields");
+            Refused(link, "define_function", new { name = "BAD", kind = "history", from = "sawtooth", period = 1, ramp_time = 0.5 }, "quarter");
+            Refused(link, "define_function", new { name = "BAD", kind = "history", from = "ramp", ramp_time = 2, max_time = 1 }, "maximum time");
+            Refused(link, "define_function", new { name = "BAD", kind = "history", from = "periodic", points = new[] { new[] { 0.5, 0.0 }, new[] { 1.0, 1.0 } } }, "time 0");
+            Refused(link, "define_function", new { name = "BAD", kind = "history", from = "wavy" }, "no function type");
+            Run(link, "delete_definition", new { kind = "function", name = "FILE" });
+            Check(AnalysisDefs.FunctionSource(link.Model, "FILE") is null, "a deleted function loses its fields");
+        });
+
         yield return ("analysis: every load case type is written, read back from the .e2k, and goes to the .s2k", () =>
         {
             var link = Frame();

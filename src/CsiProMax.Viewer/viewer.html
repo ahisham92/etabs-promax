@@ -5850,44 +5850,145 @@ async function hmAnalysis() {
 const pairsText = pts => pts.map(p => num(p[0]) + "\t" + num(p[1])).join("\n");
 const readPairs = text => text.split(/\r?\n/).map(l => l.trim()).filter(Boolean).map(l => l.split(/[\s,;]+/).map(Number)).filter(p => p.length >= 2 && p.every(x => !isNaN(x))).map(p => [p[0], p[1]]);
 
-async function hmFunctions(kind) {
-  const a = await hmAnalysis(), list = a.functions.filter(f => f.kind === kind);
-  const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmFunctions(kind); };
-  listForm(kind === "spectrum" ? "Define Response Spectrum Functions" : "Define Time History Functions", "Functions", list.map(f => f.name), [
-    ["Add New Function...", () => hmFunction(kind, null, again)],
-    ["Modify/Show Function...", n => n && hmFunction(kind, list.find(f => f.name === n), again)],
-    ["Delete Function", n => n && hmRun("delete_definition", {kind: "function", name: n}, true).then(j => j.ok ? again() : hmSay(j.error, true))],
-  ]);
+// Define > Functions as ETABS 23.2 and SAP2000 26.3 show them (Ahmed 2026-11-27, every field): Define Response Spectrum
+// Functions / Define Time History Functions with the functions list, Choose Function Type to Add, and Click to:; then the
+// definition form of the chosen type (a code, From File, User, Sine, Cosine, Ramp, Sawtooth, Triangular, User Periodic)
+// with its own fields and the Function Graph. The programs get the points; the form's type and fields are kept with it.
+const fnTypes = (spectrum, codes) => spectrum ? [...codes.map(c => [c, c]), ["file", "From File"], ["points", "User"]]
+  : [["file", "From File"], ["points", "User Defined"], ["sine", "Sine"], ["cosine", "Cosine"], ["ramp", "Ramp"], ["sawtooth", "Sawtooth"], ["triangular", "Triangular"], ["periodic", "User Periodic"]];
+async function fnCodes() {
+  const r = ((await hmPost({tool: "lateral_codes", args: {kind: "seismic"}}).catch(() => null)) || {}).result;
+  return r ? r.codes.filter(c => !["User Coefficient", "User Loads"].includes(c.code)) : [];
 }
-async function hmFunction(kind, f, after) {
-  const spectrum = kind === "spectrum";
-  const codes = spectrum ? ((await hmPost({tool: "lateral_codes", args: {kind: "seismic"}}).catch(() => null)) || {}).result : null;
-  const withSpectrum = codes ? codes.codes.filter(c => !["User Coefficient", "User Loads"].includes(c.code)) : [];
-  let from = "points", code = "ASCE 7-16", values = {};
-  const srcs = spectrum ? [["points", "User: periods and values"], ["code", "From a code"]] : [["points", "User: times and values"], ["sine", "Sine wave"], ["cosine", "Cosine wave"], ["ramp", "Ramp"]];
-  const d = dialog(spectrum ? "Response Spectrum Function" : "Time History Function", `<div class="g2"><span>Function Name</span><input id="fN" value="${esc(f ? f.name : spectrum ? "RS1" : "TH1")}"><span>Define by</span><select id="fF">${opts(srcs, from)}</select>
-      ${spectrum ? `<span>Damping ratio</span><input id="fD" type="number" step="any" value="${f ? f.damping : 0.05}">` : ""}</div>
-    <fieldset id="fPts"><legend>${spectrum ? "Period (s) and value (g), one pair a line" : "Time (s) and value, one pair a line"}</legend><textarea id="fP" rows="10" style="width:100%">${f ? pairsText(f.points) : spectrum ? "0\t0.4\n0.2\t1\n0.6\t1\n2\t0.3\n4\t0.15" : "0\t0\n0.5\t1\n1\t0"}</textarea></fieldset>
-    <fieldset id="fCode" hidden><legend>Code</legend><div class="g2"><span>Code</span><select id="fC">${opts(withSpectrum.map(c => [c.code, c.code]), code)}</select></div><div class="g2" id="fCI" style="margin-top:6px"></div></fieldset>
-    <fieldset id="fWave" hidden><legend>Wave</legend><div class="g2"><span>Period (s)</span><input id="wP" type="number" step="any" value="1"><span>Cycles</span><input id="wC" type="number" step="any" value="4"><span>Amplitude</span><input id="wA" type="number" step="any" value="1"><span>Steps a cycle</span><input id="wS" type="number" value="16"></div></fieldset>`,
+async function hmFunctions(kind) {
+  const spectrum = kind === "spectrum", a = await hmAnalysis(), list = a.functions.filter(f => f.kind === kind), codes = spectrum ? await fnCodes() : [];
+  const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmFunctions(kind); };
+  const types = fnTypes(spectrum, codes.map(c => c.code));
+  const d = dialog(spectrum ? "Define Response Spectrum Functions" : "Define Time History Functions", `<div style="display:flex;gap:10px">
+      <fieldset style="flex:1;margin:0"><legend>${spectrum ? "Response Spectrum Functions" : "Functions"}</legend>
+      <select id="fL" size="14" style="width:100%;height:auto;min-width:200px">${list.map(f => `<option value="${esc(f.name)}">${esc(f.name)}</option>`).join("")}</select></fieldset>
+      <div style="width:220px;display:flex;flex-direction:column;gap:8px">
+      <fieldset style="margin:0"><legend>Choose Function Type to Add</legend><select id="fT" style="width:100%">${opts(types, spectrum ? (types[0] || [])[0] : "points")}</select></fieldset>
+      <fieldset style="margin:0"><legend>Click to:</legend><div style="display:flex;flex-direction:column;gap:6px">
+      <button id="fAdd">Add New Function...</button><button id="fMod">${spectrum ? "Modify/Show Spectrum..." : "Modify/Show Function..."}</button><button id="fDel">${spectrum ? "Delete Spectrum" : "Delete Function"}</button></div></fieldset></div></div>`,
+    [["OK"], ["Cancel"]], {width: 520});
+  const L = q(d, "#fL"); if (list.length) L.selectedIndex = 0;
+  const mod = () => { const f = list.find(x => x.name === L.value); if (f) hmFunction(kind, f, again, null, codes); };
+  q(d, "#fAdd").onclick = () => hmFunction(kind, null, again, q(d, "#fT").value, codes);
+  q(d, "#fMod").onclick = mod; L.ondblclick = mod;
+  q(d, "#fDel").onclick = () => L.value && hmRun("delete_definition", {kind: "function", name: L.value}, true).then(j => j.ok ? again() : hmSay(j.error, true));
+}
+// The Function Graph: the points as the programs draw them, axes through zero.
+function fnGraph(el, pts) {
+  if (!pts || pts.length < 2) { el.innerHTML = ""; return; }
+  const W = 440, H = 150, xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+  const x0 = Math.min(0, ...xs), x1 = Math.max(...xs), y0 = Math.min(0, ...ys), y1 = Math.max(0, ...ys) || 1;
+  const X = x => 30 + (x - x0) / ((x1 - x0) || 1) * (W - 40), Y = y => H - 18 - (y - y0) / ((y1 - y0) || 1) * (H - 30);
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;background:#000"><line x1="30" x2="${W - 10}" y1="${Y(0)}" y2="${Y(0)}" stroke="#888"/><line x1="${X(x0)}" x2="${X(x0)}" y1="12" y2="${H - 18}" stroke="#888"/>
+    <polyline fill="none" stroke="#ff0" stroke-width="1.5" points="${pts.map(p => X(p[0]).toFixed(1) + "," + Y(p[1]).toFixed(1)).join(" ")}"/>
+    <text x="${W - 10}" y="${H - 4}" fill="#ccc" font-size="10" text-anchor="end">${num(x1)}</text><text x="2" y="14" fill="#ccc" font-size="10">${num(y1)}</text><text x="2" y="${H - 18}" fill="#ccc" font-size="10">${num(y0)}</text></svg>`;
+}
+async function hmFunction(kind, f, after, type, codesIn) {
+  const spectrum = kind === "spectrum", codes = codesIn || (spectrum ? await fnCodes() : []), src = (f && f.source) || {};
+  let from = type || src.Type || "points", code = src.Code || "";
+  if (codes.some(c => c.code === from)) { code = from; from = "code"; }
+  if (from === "code" && !code) code = (codes[0] || {}).code || "ASCE 7-16";
+  let pts = f ? f.points.map(p => [p[0], p[1]]) : spectrum ? [[0, 0.4], [0.2, 1], [0.6, 1], [2, 0.3], [4, 0.15]] : [[0, 0], [0.5, 1], [1, 0]];
+  if (from === "periodic" && src.cycle) try { pts = JSON.parse(src.cycle); } catch (e) {}
+  if (from === "file" && !f) pts = [];
+  const values = {}; for (const k in src) if (k.startsWith("v:")) values[k.slice(2)] = src[k];
+  const fv = (k, dflt) => src[k] ?? dflt, file = k => src["f:" + k];
+  const label = Object.fromEntries(fnTypes(spectrum, codes.map(c => c.code)));
+  const kindName = from === "code" ? code : label[from] || from;
+  const xh = spectrum ? (program === "sap2000" ? "Period" : "Period (sec)") : program === "sap2000" ? "Time" : "Time (sec)", yh = spectrum && program === "sap2000" ? "Acceleration" : "Value";
+  const waveP = {sine: [["period", "Sine Period", 1], ["steps_per_cycle", "Number of Steps per Cycle", 16], ["cycles", "Number of Cycles", 1], ["amplitude", "Amplitude", 1]],
+    cosine: [["period", "Cosine Period", 1], ["steps_per_cycle", "Number of Steps per Cycle", 16], ["cycles", "Number of Cycles", 1], ["amplitude", "Amplitude", 1]],
+    ramp: [["ramp_time", "Ramp Time", 1], ["amplitude", "Amplitude", 1], ["max_time", "Maximum Time", 2]],
+    sawtooth: [["period", "Period", 1], ["ramp_time", "Ramp Time", 0.125], ["cycles", "Number of Cycles", 1], ["amplitude", "Amplitude", 1]],
+    triangular: [["period", "Period", 1], ["cycles", "Number of Cycles", 1], ["amplitude", "Amplitude", 1]],
+    periodic: [["cycles", "Number of Cycles", 1]]}[from];
+  const table = from === "points" || from === "periodic";
+  const d = dialog(`${spectrum ? "Response Spectrum Function Definition" : "Time History Function Definition"} - ${kindName}`, `<div class="g2"><span>Function Name</span><input id="fN" value="${esc(f ? f.name : spectrum ? "FUNC1" : "FUNC1")}">
+      ${spectrum ? `<span>Function Damping Ratio</span><input id="fD" type="number" step="any" value="${f ? f.damping : 0.05}">` : ""}</div>
+    ${from === "file" ? `<fieldset><legend>Function File</legend><div class="g2"><span>File Name</span><span style="display:flex;gap:4px"><input id="ffN" readonly value="${esc(file("name") || "")}" style="flex:1"><button id="ffB">Browse...</button></span>
+      <span>Header Lines to Skip</span><input id="ffH" type="number" value="${esc(file("header_lines") ?? 0)}"><span>Prefix Characters per Line to Skip</span><input id="ffP" type="number" value="${esc(file("prefix_chars") ?? 0)}">
+      <span>Number of Points per Line</span><input id="ffK" type="number" value="${esc(file("points_per_line") ?? 1)}"></div></fieldset>
+      <fieldset><legend>Values are:</legend><label><input type="radio" name="ffV" value="pairs" ${file("values") !== "equal" ? "checked" : ""}> ${spectrum ? "Period vs Value" : "Time and Function Values"}</label><br>
+      ${spectrum ? `<label><input type="radio" name="ffV" value="freq" ${file("values") === "freq" ? "checked" : ""}> Frequency vs Value</label>` : `<label><input type="radio" name="ffV" value="equal" ${file("values") === "equal" ? "checked" : ""}> Values at Equal Intervals of</label> <input id="ffDt" type="number" step="any" style="width:80px" value="${esc(file("interval") ?? 0.01)}">`}</fieldset>
+      <fieldset><legend>Format Type</legend><label><input type="radio" name="ffF" value="free" checked> Free Format</label></fieldset>` : ""}
+    ${table ? `<fieldset><legend>${from === "periodic" ? "Define One Cycle" : "Define Function"}</legend><div style="display:flex;gap:8px"><div class="scroll" style="max-height:200px;flex:1"><table class="list hmgrid"><thead><tr><th>${xh}</th><th>${yh}</th></tr></thead><tbody id="fRows"></tbody></table></div>
+      <div style="display:flex;flex-direction:column;gap:6px;width:90px"><input id="fX" type="number" step="any"><input id="fY" type="number" step="any"><button id="fRA">Add</button><button id="fRM">Modify</button><button id="fRD">Delete</button></div></div></fieldset>` : ""}
+    ${waveP ? `<fieldset><legend>Parameters</legend><div class="g2">${waveP.map(([k, t, v]) => `<span>${t}</span><input data-w="${k}" type="number" step="any" value="${esc(fv(k, v))}">`).join("")}</div></fieldset>` : ""}
+    ${from === "code" ? `<fieldset><legend>Parameters</legend><div class="g2" id="fCI"></div></fieldset>` : ""}
+    <fieldset><legend>Function Graph</legend><div id="fG"></div></fieldset>
+    ${from === "code" || from === "file" ? `<button id="fConv">Convert to User Defined</button>` : `<button id="fShow">Display Graph</button>`}`,
     [["OK", d => {
-      const name = q(d, "#fN").value.trim(), args = {name, kind, from, was: f && f.name !== name ? f.name : undefined};
-      if (spectrum) args.damping = fnum(d, "#fD");
-      if (from === "points") args.points = readPairs(q(d, "#fP").value);
-      if (from === "code") { args.code = code; args.values = values; }
-      if (["sine", "cosine", "ramp"].includes(from)) Object.assign(args, {period: fnum(d, "#wP"), cycles: fnum(d, "#wC"), amplitude: fnum(d, "#wA"), steps_per_cycle: parseInt(q(d, "#wS").value) || 16});
+      const args = make(); if (!args) return false;
       return submit(d, "define_function", args, after);
-    }, true], ["Cancel"]], {width: 520});
-  const paint = () => {
-    q(d, "#fPts").hidden = from !== "points"; q(d, "#fCode").hidden = from !== "code"; q(d, "#fWave").hidden = !["sine", "cosine", "ramp"].includes(from);
-    const c = withSpectrum.find(x => x.code === code);
+    }, true], ["Cancel"]], {width: 560});
+  let pick = -1;
+  const make = (preview) => {
+    const name = q(d, "#fN").value.trim(), args = {name, kind, from, was: f && f.name !== name ? f.name : undefined};
+    if (preview) args.preview = true;
+    if (spectrum) args.damping = fnum(d, "#fD");
+    if (table || from === "file") { if (!readFile()) return null; if (from === "file" && pts.length < 2) { hmSay("Choose the function file (Browse...): it has no points yet.", true); return null; } args.points = pts; }
+    if (from === "code") { args.code = code; args.values = values; }
+    d.querySelectorAll("[data-w]").forEach(x => { const v = parseFloat(x.value); if (isFinite(v)) args[x.dataset.w] = x.dataset.w === "steps_per_cycle" ? Math.round(v) : v; });
+    if (from === "file") args.file = {name: q(d, "#ffN").value, header_lines: +q(d, "#ffH").value || 0, prefix_chars: +q(d, "#ffP").value || 0, points_per_line: +q(d, "#ffK").value || 1,
+      values: (d.querySelector("[name=ffV]:checked") || {}).value || "pairs", interval: d.querySelector("#ffDt") ? fnum(d, "#ffDt") : undefined};
+    return args;
+  };
+  // From File: the numbers of the chosen file, read the way the form says (header lines, prefix characters, points per line).
+  let fileText = null;
+  const readFile = () => {
+    if (from !== "file" || fileText === null) return true;
+    const skip = +q(d, "#ffH").value || 0, pre = +q(d, "#ffP").value || 0, mode = (d.querySelector("[name=ffV]:checked") || {}).value;
+    const nums = fileText.split(/\r?\n/).slice(skip).flatMap(l => l.slice(pre).trim().split(/[\s,;]+/).filter(Boolean).map(Number)).filter(x => isFinite(x));
+    if (mode === "equal") { const dt = fnum(d, "#ffDt"); if (!(dt > 0)) { hmSay("The equal interval is above 0.", true); return false; } pts = nums.map((y, i) => [Math.round(i * dt * 1e9) / 1e9, y]); }
+    else { pts = []; for (let i = 0; i + 1 < nums.length; i += 2) pts.push(mode === "freq" ? [nums[i] ? 1 / nums[i] : 0, nums[i + 1]] : [nums[i], nums[i + 1]]); if (mode === "freq") pts.sort((x, y) => x[0] - y[0]); }
+    return true;
+  };
+  const rows = () => {
+    if (!table) return;
+    q(d, "#fRows").innerHTML = pts.map((p, i) => `<tr data-i="${i}" style="cursor:default${i === pick ? ";background:var(--sel,#cce4f7)" : ""}"><td>${num(p[0])}</td><td>${num(p[1])}</td></tr>`).join("");
+    d.querySelectorAll("#fRows tr").forEach(r => r.onclick = () => { pick = +r.dataset.i; q(d, "#fX").value = pts[pick][0]; q(d, "#fY").value = pts[pick][1]; rows(); });
+    fnGraph(q(d, "#fG"), pts);
+  };
+  const preview = async () => {
+    const args = make(true); if (!args) return;
+    if (table) return fnGraph(q(d, "#fG"), pts);
+    const j = (await hmPost({tool: "define_function", args}).catch(() => null)) || {};
+    const p = j.ok && j.result ? j.result.points : null;
+    fnGraph(q(d, "#fG"), p); if (!p && j.error) hmSay(j.error, true);
+    return p;
+  };
+  if (table) {
+    const xy = () => [fnum(d, "#fX"), fnum(d, "#fY")];
+    const put = (p, at) => { if (p.some(isNaN)) return; if (at >= 0) pts[at] = p; else pts.push(p); pts.sort((x, y) => x[0] - y[0]); rows(); };
+    q(d, "#fRA").onclick = () => put(xy(), -1);
+    q(d, "#fRM").onclick = () => pick >= 0 && put(xy(), pick);
+    q(d, "#fRD").onclick = () => { if (pick >= 0) { pts.splice(pick, 1); pick = -1; rows(); } };
+    rows();
+  }
+  if (from === "code") {
+    const c = codes.find(x => x.code === code);
     q(d, "#fCI").innerHTML = !c ? "" : c.inputs.filter(i => !["Dir", "Ecc", "TopStory", "BottomStory", "Period", "System", "Ct", "x", "UserT", "R", "I", "Omega", "Cd", "CuCap", "K", "Min"].includes(i.key)).map(i => `<span title="${esc(i.about || "")}">${esc(i.name)}</span>` +
       (i.choices ? `<select data-k="${esc(i.key)}">${opts(i.choices.map(x => [x, x]), values[i.key] ?? i.default)}</select>` : `<input data-k="${esc(i.key)}" value="${esc(values[i.key] ?? i.default)}">`)).join("");
-    d.querySelectorAll("#fCI [data-k]").forEach(x => x.onchange = () => { values[x.dataset.k] = x.value; });
-  };
-  q(d, "#fF").onchange = () => { from = q(d, "#fF").value; paint(); };
-  q(d, "#fC").onchange = () => { code = q(d, "#fC").value; values = {}; paint(); };
-  paint();
+    d.querySelectorAll("#fCI [data-k]").forEach(x => x.onchange = () => { values[x.dataset.k] = x.value; preview(); });
+  }
+  if (from === "file") {
+    q(d, "#ffB").onclick = () => { const i = document.createElement("input"); i.type = "file"; i.onchange = () => { const fl = i.files[0]; if (!fl) return; q(d, "#ffN").value = fl.name; fl.text().then(t => { fileText = t; readFile(); fnGraph(q(d, "#fG"), pts); }); }; i.click(); };
+    d.querySelectorAll("#ffH,#ffP,#ffK,#ffDt,[name=ffV]").forEach(x => x.onchange = () => { readFile(); fnGraph(q(d, "#fG"), pts); });
+  }
+  d.querySelectorAll("[data-w]").forEach(x => x.onchange = preview);
+  // Convert to User Defined: the same points, now a table to edit.
+  const conv = d.querySelector("#fConv");
+  if (conv) conv.onclick = async () => { const p = from === "file" ? (readFile() && pts) : await preview(); if (!p || p.length < 2) return;
+    const nm = q(d, "#fN").value.trim(), damp = spectrum ? fnum(d, "#fD") : 0.05; d.close();
+    await hmFunction(kind, {name: f ? f.name : nm, damping: damp, points: p, source: {Type: "points"}}, after, "points", codes);
+    const nd = document.querySelector(".dlg:last-of-type #fN"); if (nd) nd.value = nm; };
+  const show = d.querySelector("#fShow"); if (show) show.onclick = preview;
+  if (!table && from !== "file") preview(); else fnGraph(q(d, "#fG"), pts);
 }
 
 // Define > Load Cases as the programs show it: a table of Load Case Name and Load Case Type, and Click to: Add New Case,
