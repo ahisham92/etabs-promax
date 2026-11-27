@@ -12558,6 +12558,202 @@ const sdTok = l => (String(l).match(/"[^"]*"|\S+/g) || []), sdUnq = t => String(
 const sdKinds = {"CONCRETE RECTANGULAR": "Rectangle", "CONCRETE CIRCLE": "Circle", "STEEL I/WIDE FLANGE": "I Section", "POLYGON": "Polygon", "REBAR": "Bar", "LINE REBAR": "LineBar"};
 const sdDesign = {"No Check/Design": "OTHER", "Concrete Column": "CONCRETE", "General Steel Section": "STEEL", "Composite Column": "COMPOSITECOLUMN"};
 const sdN = v => String(+(+v || 0).toPrecision(8));
+// The other ETABS 23.2 Section Designer shapes (pictured SD 72-114, their .e2k read from ETABS 23.2's own export): each one's
+// lines are kept word by word, and its form changes only the words ETABS wrote. Rows: [label, word, {unit, bar}] where bar adds
+// the bar's diameter (a bar cage's Height is its bars' centres plus one bar, as ETABS shows it).
+const sdX = {
+  "STEEL CHANNEL": {k: "Channel", steel: 1, rot: "ROT", mir: ["2"], geo: [["Height", "D"], ["Flange Width", "B"], ["Flange Thickness", "TF"], ["Web Thickness", "TW"], ["Fillet Radius", "FILLETRAD"]], def: {D: 12, B: 6, TF: 1, TW: 0.5}},
+  "STEEL TEE": {k: "Tee", steel: 1, rot: "ROT", mir: ["3"], geo: [["Height", "D"], ["Flange Width", "B"], ["Flange Thickness", "TF"], ["Web Thickness", "TW"], ["Fillet Radius", "FILLETRAD"]], def: {D: 12, B: 12, TF: 1, TW: 0.5}},
+  "STEEL ANGLE": {k: "Angle", steel: 1, rot: "ROT", mir: ["2", "3"], geo: [["Height", "D"], ["Width", "B"], ["Flange Thickness", "TF"], ["Web Thickness", "TW"], ["Fillet Radius", "FILLETRAD"]], def: {D: 8, B: 8, TF: 1, TW: 1}},
+  "STEEL TUBE": {k: "Tube", steel: 1, rot: "ROT", geo: [["Height", "D"], ["Flange Width", "B"], ["Flange Thickness", "TF"], ["Web Thickness", "TW"], ["Corner Radius", "CORNERRAD"]], def: {D: 24, B: 24, TF: 1, TW: 1}},
+  "STEEL PIPE": {k: "Pipe", steel: 1, geo: [["Diameter", "D"], ["Thickness", "T"]], def: {D: 24, T: 1}},
+  "PLATE": {k: "Plate", steel: 1, rot: "ROT", geo: [["Width", "B"], ["Thickness", "T"]], def: {B: 24, T: 1}},
+  "STEEL ROD": {k: "Rod", steel: 1, geo: [["Diameter", "D"]], def: {D: 1}},
+  "CONC TEE": {k: "Concrete Tee", n: "ConcTee", rot: "ROT", mir: ["3"], geo: [["Height", "D"], ["Flange Width", "B"], ["Flange Thickness", "TF"], ["Web Thickness", "TW"]], groups: [["Web Rebar", "WEB"], ["Flange Rebar", "FLANGE"]], def: {D: 30, B: 30, TF: 8, TW: 8}},
+  "CONC L": {k: "L-Shape", n: "LShape", rot: "ROT", mir: ["2", "3"], mirYes: ["3"], geo: [["Height", "D"], ["Width", "B"], ["Flange Thickness", "TF"], ["Web Thickness", "TW"]], groups: [["Web Rebar", "WEB"], ["Flange Rebar", "FLANGE"]], def: {D: 30, B: 30, TF: 8, TW: 8}},
+  "CONC BOX": {k: "Box", rot: "ROT", geo: [["Height", "D"], ["Flange Width", "B"], ["Flange Thickness", "TF"], ["Web Thickness", "TW"]], groups: [["Left Web Rebar", "LEFTWEB"], ["Right Web Rebar", "RIGHTWEB"], ["Top Flange Rebar", "TOPFLANGE"], ["Bottom Flange Rebar", "BOTFLANGE"]], def: {D: 30, B: 30, TF: 8, TW: 8}},
+  "CONC PIPE": {k: "Concrete Pipe", n: "ConcPipe", geo: [["Diameter", "D"], ["Thickness", "T"]], pipe: 1, def: {D: 30, T: 8}},
+  "CONC CROSS": {k: "Cross", rot: "ROT", geo: [["Height", "D"], ["Width", "B"], ["Leg Dir2 Thickness", "TW"], ["Leg Dir3 Thickness", "TF"]], groups: [["Rebar Dir2 Leg", "WEB"], ["Flange Rebar", "FLANGE"]], def: {D: 30, B: 30, TW: 8, TF: 8}},
+  "WALL STRAIGHT": {k: "Straight Wall", n: "StraightWall", rot: "ROT", geo: [["Length", "B"], ["Width", "T"]], wall: 1, def: {B: 144, T: 12}},
+  "SECTOR": {k: "Pie", rot: "ROTN", geo: [["Radius", "R"], ["Subtended Angle", "SA", {unit: "deg"}]], def: {R: 12, SA: 120, ROTN: 90}},
+  "RECT REBAR": {k: "RectBar", bar: 1, rot: "ROT", geo: [["Height", "D", {bar: 1}], ["Width", "B", {bar: 1}]], cage: 1, def: {D: 23, B: 23}},
+  "CIRCULAR REBAR": {k: "CircleBar", bar: 1, geo: [["Diameter", "D", {bar: 1}]], ring: 1, def: {D: 23}},
+  "CIRCULAR ARC REBAR": {k: "CircularArcBar", bar: 1, rot: "ROTN", geo: [["Radius", "R"], ["Subtended Angle", "SA", {unit: "deg"}]], arc: 1, def: {R: 12, SA: 120, ROTN: 90}}};
+// A word's place in a line of word/value pairs, its value, and setting it (after another word when it is new).
+const sdAt = (t, k) => { for (let i = 0; i + 1 < t.length; i += 2) if (t[i] === k) return i; return -1; };
+const sdGet = (t, k) => { const i = sdAt(t || [], k); return i >= 0 ? t[i + 1] : undefined; };
+const sdNum = (t, k) => +sdUnq(sdGet(t, k)) || 0;
+const sdSet = (t, k, v, after) => { const i = sdAt(t, k); if (i >= 0) { t[i + 1] = v; return; } const j = after ? sdAt(t, after) : -1; if (j >= 0) t.splice(j + 2, 0, k, v); else t.push(k, v); };
+const sdSub = (s, k, n) => (s.subs || []).find(t => t[0] === k && (n == null || t[1] === String(n)));
+// A rebar group's rectangle (left, bottom, right, top about the shape's centre) for each shape with groups.
+function sdGroupRect(s, P) {
+  const g = k => sdNum(s.main, k), D = g("D"), B = g("B"), TF = g("TF"), TW = g("TW"), h = D / 2, w = B / 2;
+  const r = {"CONC TEE": {WEB: [-TW / 2, -h, TW / 2, h], FLANGE: [-w, h - TF, w, h]}, "CONC L": {WEB: [-w, -h, -w + TW, h], FLANGE: [-w, h - TF, w, h]},
+    "CONC CROSS": {WEB: [-TW / 2, -h, TW / 2, h], FLANGE: [-w, -TF / 2, w, TF / 2]},
+    "CONC BOX": {LEFTWEB: [-w, -h, -w + TW, h], RIGHTWEB: [w - TW, -h, w, h], TOPFLANGE: [-w, h - TF, w, h], BOTFLANGE: [-w, -h, w, -h + TF]}}[s.type];
+  return r && r[P];
+}
+// A rectangle of bars: its corners in from each edge by the edge's cover and half a corner bar, and on each edge (1 top, 2 left,
+// 3 bottom, 4 right) as many bars as the edge's spacing leaves between its corners. ETABS's cover is to the bars' surface.
+function sdCage(rect, edge, corner, dia) {
+  const [x0, y0, x1, y1] = rect, e = [1, 2, 3, 4].map(i => edge(i) || {}), rc = i => dia(corner(i)) / 2;
+  const off = (i, c) => (+e[i - 1].cover || 0) + rc(c);
+  const cs = [[x1 - off(4, 1), y1 - off(1, 1)], [x0 + off(2, 2), y1 - off(1, 2)], [x0 + off(2, 3), y0 + off(3, 3)], [x1 - off(4, 4), y0 + off(3, 4)]];
+  const pts = cs.map((p, i) => ({x: p[0], y: p[1], size: corner(i + 1)})), counts = [], actual = [];
+  cs.forEach((p, i) => { const q2 = cs[(i + 1) % 4], g = e[i], L = Math.hypot(q2[0] - p[0], q2[1] - p[1]), sp = +g.spacing || 0, k = sp > 0 ? Math.max(0, Math.ceil(L / sp - 1e-9) - 1) : 0;
+    counts.push(k); actual.push(L / (k + 1));
+    for (let j = 1; j <= k; j++) pts.push({x: p[0] + (q2[0] - p[0]) * j / (k + 1), y: p[1] + (q2[1] - p[1]) * j / (k + 1), size: g.size}); });
+  return {pts, counts, actual, len: cs.map((p, i) => { const q2 = cs[(i + 1) % 4]; return Math.hypot(q2[0] - p[0], q2[1] - p[1]); })};
+}
+const sdSubEdge = (s, k) => i => { const t = sdSub(s, k, i); return t && {size: sdUnq(sdGet(t, "EDGEBARSIZE")), spacing: sdNum(t, "EDGEBARSPACING"), cover: sdNum(t, "EDGEBARCOVER")}; };
+const sdSubCorner = (s, k) => i => sdUnq(sdGet(sdSub(s, k, i), "CORNERBARSIZE"));
+const sdReinforced = s => s.ext ? (s.subs || []).some(t => t.length > 0) : s.reinf;
+// Bars on a ring: n of them from a start angle at a radius.
+const sdRing = (cx, cy, r, n, start) => Array.from({length: Math.max(0, n)}, (_, k) => { const a = (start + 360 * k / n) * Math.PI / 180; return [cx + r * Math.cos(a), cy + r * Math.sin(a)]; });
+// An arc's bars: as many as the spacing leaves along it, and its end bars when it has them.
+function sdArcBars(R, SA, sp, ends) { const L = R * SA * Math.PI / 180, k = sp > 0 ? Math.max(0, Math.ceil(L / sp - 1e-9) - 1) : 0, out = [];
+  for (let j = ends ? 0 : 1; j <= (ends ? k + 1 : k); j++) { const a = (-SA / 2 + SA * j / (k + 1)) * Math.PI / 180; out.push([R * Math.cos(a), R * Math.sin(a)]); }
+  return {pts: out, n: out.length, actual: L / (k + 1), L}; }
+function sdExtBars(s, dia) {
+  const x = sdX[s.type], g = k => sdNum(s.main, k), out = [], at = (px, py, size) => { const [X, Y] = sdRot(s, px, py); out.push({x: X, y: Y, size}); };
+  if (x.cage) { const c = sdCage([-g("B") / 2, -g("D") / 2, g("B") / 2, g("D") / 2], i => Object.assign({cover: 0}, sdSubEdge(s, "EDGE")(i) || {}, {cover: 0}), sdSubCorner(s, "CORNER"), () => 0); c.pts.forEach(p => at(p.x, p.y, p.size)); return out; }
+  if (x.ring) { const t = sdSub(s, "EDGE", 1) || []; sdRing(0, 0, g("D") / 2, sdNum(t, "NBARS"), sdNum(t, "STARTANGLE")).forEach(([a, b]) => at(a, b, sdUnq(sdGet(t, "EDGEBARSIZE")))); return out; }
+  if (x.arc) { sdArcBars(g("R"), g("SA"), g("SPACING"), sdUnq(g("ENDBAR")) === "YES").pts.forEach(([a, b]) => at(a, b, sdUnq(sdGet(s.main, "BARSIZE")))); return out; }
+  if (!sdReinforced(s)) return out;
+  if (x.groups) x.groups.forEach(([, P]) => { const r = sdGroupRect(s, P); if (r) sdCage(r, sdSubEdge(s, P + "EDGE"), sdSubCorner(s, P + "CORNER"), dia).pts.forEach(p => at(p.x, p.y, p.size)); });
+  if (x.pipe) [[1, "OUTERTIEBARSIZE", 1], [2, "INNERTIEBARSIZE", -1]].forEach(([n, , side]) => { const t = sdSub(s, "PIPEEDGE", n); if (!t) return; const size = sdUnq(sdGet(t, "EDGEBARSIZE")), r = side > 0 ? g("D") / 2 - sdNum(t, "EDGEBARCOVER") - dia(size) / 2 : g("D") / 2 - g("T") + sdNum(t, "EDGEBARCOVER") + dia(size) / 2;
+    sdRing(0, 0, r, sdNum(t, "NBARS"), sdNum(t, "STARTANGLE")).forEach(([a, b]) => at(a, b, size)); });
+  if (x.wall) { const t1 = sdSub(s, "EDGE", 1) || [], sp = sdNum(t1, "EDGEBARSPACING"), cv = sdNum(t1, "EDGEBARCOVER"), d = dia("#8") || dia(""), hw = g("T") / 2 - cv - d / 2, hl = g("B") / 2 - cv - d / 2;
+    const L = 2 * hl, k = sp > 0 ? Math.max(0, Math.ceil(L / sp - 1e-9) - 1) : 0; [-hw, hw].forEach(xx => { for (let j = 0; j <= k + 1; j++) at(xx, -hl + L * j / (k + 1), "#8"); }); }
+  return out;
+}
+// A shape's outline in its own axes (centre at 0, 0) before its rotation; a hole is marked.
+function sdExtOutline(s) {
+  const x = sdX[s.type], g = k => sdNum(s.main, k), D = g("D"), B = g("B"), TF = g("TF"), TW = g("TW"), T = g("T"), h = D / 2, w = B / 2;
+  const rect = (a, b, c, d) => [[c, d], [a, d], [a, b], [c, b]], hole = p => Object.assign(p.reverse(), {hole: true});
+  const circ = r => { const st = +sdOpt.disc || 11.25, o = []; for (let a = 0; a < 360 - 1e-9; a += st) o.push([r * Math.cos(a * Math.PI / 180), r * Math.sin(a * Math.PI / 180)]); return o; };
+  switch (s.type) {
+    case "STEEL CHANNEL": return [[[w, h], [-w, h], [-w, -h], [w, -h], [w, -h + TF], [-w + TW, -h + TF], [-w + TW, h - TF], [w, h - TF]]];
+    case "STEEL TEE": case "CONC TEE": return [[[w, h], [-w, h], [-w, h - TF], [-TW / 2, h - TF], [-TW / 2, -h], [TW / 2, -h], [TW / 2, h - TF], [w, h - TF]]];
+    case "STEEL ANGLE": return [[[-w, h], [-w, -h], [w, -h], [w, -h + TF], [-w + TW, -h + TF], [-w + TW, h]]];
+    case "CONC L": return [[[w, h], [-w, h], [-w, -h], [-w + TW, -h], [-w + TW, h - TF], [w, h - TF]]];
+    case "STEEL TUBE": case "CONC BOX": return [rect(-w, -h, w, h), hole(rect(-w + TW, -h + TF, w - TW, h - TF))];
+    case "STEEL PIPE": case "CONC PIPE": return [circ(h), hole(circ(h - T))];
+    case "PLATE": return [rect(-w, -T / 2, w, T / 2)];
+    case "STEEL ROD": return [circ(h)];
+    case "CONC CROSS": { const a = TW / 2, b = TF / 2; return [[[a, h], [-a, h], [-a, b], [-w, b], [-w, -b], [-a, -b], [-a, -h], [a, -h], [a, -b], [w, -b], [w, b], [a, b]]]; }
+    case "WALL STRAIGHT": return [rect(-T / 2, -w, T / 2, w)];
+    case "SECTOR": { const R = g("R"), SA = g("SA"), st = +sdOpt.disc || 11.25, n = Math.max(1, Math.ceil(SA / st)), o = [[0, 0]]; for (let i = 0; i <= n; i++) { const a = (-SA / 2 + SA * i / n) * Math.PI / 180; o.push([R * Math.cos(a), R * Math.sin(a)]); } return [o]; }
+    default: return [];
+  }
+}
+// A new shape as ETABS 23.2 writes it when drawn (its values from ETABS's own defaults).
+function sdExtNew(type, mat, rmat, xc, yc, u) {
+  const x = sdX[type], main = ["MATERIAL", sdQ(mat)];
+  if (!x.steel && !x.bar) main.push("REBARMATERIAL", sdQ(rmat));
+  main.push("SHAPETYPE", sdQ(type));
+  for (const [k, v] of Object.entries(x.def)) main.push(k, sdN(k === "SA" || k === "ROTN" ? v : inTo(v, u)));
+  if (x.arc) main.splice(main.indexOf("ROTN") + 2, 0, "BARSIZE", sdQ("#8"), "SPACING", sdN(inTo(6, u)), "ENDBAR", sdQ("NO"));
+  main.push("XC", sdN(xc), "YC", sdN(yc));
+  const subs = x.cage ? [1, 2, 3, 4].map(i => ["EDGE", String(i), "EDGEBARSIZE", sdQ("#8"), "EDGEBARSPACING", sdN(inTo(6, u))]).concat([1, 2, 3, 4].map(i => ["CORNER", String(i), "CORNERBARSIZE", sdQ("#8")]), [["TIEBARSIZE", sdQ("#4")]])
+    : x.ring ? [["EDGE", "1", "EDGEBARSIZE", sdQ("#8"), "NBARS", "8", "STARTANGLE", "0"], ["TIEBARSIZE", sdQ("#4")]] : [];
+  return {known: true, ext: true, type, main, subs, raw: [], edges: [], corners: [], poly: []};
+}
+// Reinforcing Yes on a concrete shape: its groups as ETABS starts them (#8 at 6 with cover 2, #4 ties; a pipe's two rings of 8).
+function sdExtRebar(s, u) {
+  const x = sdX[s.type], b = (k, i, rest) => [k, String(i)].concat(rest), cv = sdN(inTo(2, u)), sp = sdN(inTo(6, u));
+  if (x.groups) s.subs = x.groups.flatMap(([, P]) => [1, 2, 3, 4].map(i => b(P + "EDGE", i, ["EDGEBARSIZE", sdQ("#8"), "EDGEBARSPACING", sp, "EDGEBARCOVER", cv]))
+    .concat([1, 2, 3, 4].map(i => b(P + "CORNER", i, ["CORNERBARSIZE", sdQ("#8")])), [[P + "TIEBARSIZE", sdQ("#4")]]));
+  else if (x.pipe) s.subs = [b("PIPEEDGE", 1, ["EDGEBARSIZE", sdQ("#8"), "NBARS", "8", "STARTANGLE", "0", "EDGEBARCOVER", cv]), ["OUTERTIEBARSIZE", sdQ("#4")], b("PIPEEDGE", 2, ["EDGEBARSIZE", sdQ("#8"), "NBARS", "8", "STARTANGLE", "0", "EDGEBARCOVER", cv]), ["INNERTIEBARSIZE", sdQ("#4")]];
+  else if (x.wall) { const c = sdN(inTo(1.5, u)), sp12 = sdN(inTo(12, u)); s.subs = [["EDGE", "1", "EDGEBARSPACING", sp12, "EDGEBARCOVER", c], ["EDGE", "3", "EDGEBARSPACING", sp12, "EDGEBARCOVER", c], ["CORNER", "4"], ["CORNER", "4"], ["CORNER", "4"], ["CORNER", "4"], []]; }
+}
+// A polygon's bars (SD 105, 113): each corner in from its two edges by their covers and half a bar, and each edge's bars between.
+function sdPolyBars(s, dia) {
+  const p = s.poly, n = p.length; if (n < 3 || !s.reinf) return [];
+  let a2 = 0; for (let i = 0; i < n; i++) a2 += p[i][0] * p[(i + 1) % n][1] - p[(i + 1) % n][0] * p[i][1];
+  const sg = a2 > 0 ? 1 : -1, line = i => { const [x0, y0] = p[i], [x1, y1] = p[(i + 1) % n], L = Math.hypot(x1 - x0, y1 - y0) || 1, nx = -(y1 - y0) / L * sg, ny = (x1 - x0) / L * sg, e = s.edges[i] || s.edges[0] || {}, o = (+e.cover || 0) + dia(s.corners[i] || s.corners[0]) / 2;
+    return {x: x0 + nx * o, y: y0 + ny * o, dx: (x1 - x0) / L, dy: (y1 - y0) / L}; };
+  const meet = (a, b) => { const den = a.dx * b.dy - a.dy * b.dx; if (Math.abs(den) < 1e-12) return [b.x, b.y]; const t = ((b.x - a.x) * b.dy - (b.y - a.y) * b.dx) / den; return [a.x + a.dx * t, a.y + a.dy * t]; };
+  const cs = p.map((_, i) => meet(line((i - 1 + n) % n), line(i))), out = cs.map((c, i) => ({x: c[0], y: c[1], size: s.corners[i] || s.corners[0]}));
+  cs.forEach((c, i) => { const q2 = cs[(i + 1) % n], e = s.edges[i] || s.edges[0] || {}, L = Math.hypot(q2[0] - c[0], q2[1] - c[1]), k = e.spacing > 0 ? Math.max(0, Math.ceil(L / e.spacing - 1e-9) - 1) : 0;
+    for (let j = 1; j <= k; j++) out.push({x: c[0] + (q2[0] - c[0]) * j / (k + 1), y: c[1] + (q2[1] - c[1]) * j / (k + 1), size: e.size}); });
+  return out;
+}
+// Torsion constants: thin parts for open shapes, Bredt for closed ones, exact for round ones, and an estimate for a pie.
+function sdExtJ(s) {
+  const g = k => sdNum(s.main, k), D = g("D"), B = g("B"), TF = g("TF"), TW = g("TW"), T = g("T");
+  switch (s.type) {
+    case "STEEL CHANNEL": return (2 * B * TF ** 3 + (D - 2 * TF) * TW ** 3) / 3;
+    case "STEEL TEE": case "CONC TEE": case "STEEL ANGLE": case "CONC L": return (B * TF ** 3 + (D - TF) * TW ** 3) / 3;
+    case "CONC CROSS": return (D * TW ** 3 + (B - TW) * TF ** 3) / 3;
+    case "PLATE": case "WALL STRAIGHT": { const l = Math.max(B, T), t = Math.min(B, T); return l * t ** 3 * (1 / 3 - 0.21 * t / l * (1 - t ** 4 / (12 * l ** 4))); }
+    case "STEEL TUBE": case "CONC BOX": { const a = (B - TW) * (D - TF); return 4 * a * a / (2 * (B - TW) / TF + 2 * (D - TF) / TW); }
+    case "STEEL PIPE": case "CONC PIPE": return Math.PI * (D ** 4 - (D - 2 * T) ** 4) / 32;
+    case "STEEL ROD": return Math.PI * D ** 4 / 32;
+    case "SECTOR": { const R = g("R"), a = g("SA") * Math.PI / 180, A = R * R * a / 2, Ip = R ** 4 * a / 4; return A ** 4 / (40 * Ip); }
+    default: return 0;
+  }
+}
+// Section Object Data for these shapes (SD 73-113): the rows each one shows, kept on the words ETABS wrote.
+function sdExtForm(s, mats, rmats, bars, u, done, smats) {
+  const o = JSON.parse(JSON.stringify(s)), x = sdX[o.type], L = u.l, dia = n => ((bars.find(b => b.name === n) || {}).diameter) || 0;
+  const ro = (n, v, unit) => pr(n, v, null, null, {grey: true, unit}), num = (n, k, unit) => pr(n, sdN(sdNum(o.main, k)), null, {key: "m|" + k, type: "num"}, {unit: unit === undefined ? L : unit});
+  const barRow = (n, key, size) => { const b = bars.find(z => z.name === size) || {}; return pr(n, size, [pr("Rebar Size", size, null, key ? {key, type: "select", options: bars.map(z => z.name)} : null), pr("Diameter", b.diameter ?? "", null, null, {unit: L, grey: true}), pr("Area", b.area ?? "", null, null, {unit: L + "²", grey: true})]); };
+  const sz = (k, i, w) => sdUnq(sdGet(sdSub(o, k, i), w));
+  const edgeRows = (k, i, c, tieD, clear) => { const t = sdSub(o, k, i) || [], size = sdUnq(sdGet(t, "EDGEBARSIZE"));
+    return pr("Edge Bar " + i, `${c.counts[i - 1]} ${size} bars`, [barRow("Bar Size", `sq|${k}|${i}|EDGEBARSIZE`, size), ro("BarLayoutType", "BarSpacing"), pr("Max Bar Spacing", sdN(sdNum(t, "EDGEBARSPACING")), null, {key: `s|${k}|${i}|EDGEBARSPACING`, type: "num"}, {unit: L}),
+      pr("Number of Bars", String(c.counts[i - 1]), null, {key: `nb|${k}|${i}|${c.len[i - 1]}`, type: "num"}), ro("Actual Bar Spacing", sdN(c.actual[i - 1]), L)].concat(clear ? [pr("Clear Cover to Tie", sdN(sdNum(t, "EDGEBARCOVER") - tieD), null, {key: `cc|${k}|${i}|${tieD}`, type: "num"}, {unit: L})] : [])); };
+  const cageRows = (P, rect, clear) => { const tie = sz(P + "TIEBARSIZE", null, P + "TIEBARSIZE"), c = sdCage(rect, clear ? sdSubEdge(o, P + "EDGE") : i => Object.assign({}, sdSubEdge(o, P + "EDGE")(i), {cover: 0}), sdSubCorner(o, P + "CORNER"), clear ? dia : () => 0);
+    return {c, rows: [barRow("Tie Bar", `st|${P}TIEBARSIZE`, tie), ...[1, 2, 3, 4].map(i => barRow("Corner Bar " + i, `sq|${P}CORNER|${i}|CORNERBARSIZE`, sz(P + "CORNER", i, "CORNERBARSIZE"))), ...[1, 2, 3, 4].map(i => edgeRows(P + "EDGE", i, c, dia(tie), clear))]}; };
+  const rows = () => {
+    const out = [pr("Name", "", [pr("Shape Name", o.name, null, {key: "name", type: "text"}), ro("Shape Type", x.k)], null, {head: true})];
+    out.push(pr("General", "", (x.bar ? [] : [pr("Color", "DimGray")]).concat([pr("Material", sdUnq(sdGet(o.main, "MATERIAL")), null, {key: "mq|MATERIAL", type: "select", options: x.bar ? rmats : x.steel ? (smats && smats.length ? smats : mats) : mats})]), null, {head: true}));
+    out.push(pr("Location", "", [num("X Center", "XC"), num("Y Center", "YC")].concat(x.rot ? [num("Rotation", x.rot, "deg")] : x.ring ? [ro("Rotation", "0", "deg")] : [], (x.mir || []).map(m => pr("Mirror about " + m, (x.mirYes || []).includes(m) ? "Yes" : "No"))), null, {head: true}));
+    const cd = x.cage ? dia(sz("CORNER", 1, "CORNERBARSIZE")) : x.ring ? dia(sz("EDGE", 1, "EDGEBARSIZE")) : 0;
+    out.push(pr("Geometry", "", x.geo.map(([n, k, op]) => op && op.bar ? pr(n, sdN(sdNum(o.main, k) + cd), null, {key: `mb|${k}|${cd}`, type: "num"}, {unit: L}) : num(n, k, op && op.unit)), null, {head: true}));
+    if (x.steel || o.type === "SECTOR") return out;
+    if (x.cage) { const {rows: r} = cageRows("", [-sdNum(o.main, "B") / 2, -sdNum(o.main, "D") / 2, sdNum(o.main, "B") / 2, sdNum(o.main, "D") / 2], false); out.push(pr("Rebar", "", r, null, {head: true})); return out; }
+    if (x.ring) { const t = sdSub(o, "EDGE", 1) || []; out.push(pr("Rebar", "", [pr("Number of Bars", String(sdNum(t, "NBARS")), null, {key: "s|EDGE|1|NBARS", type: "num"}), barRow("Tie Bar", "st|TIEBARSIZE", sz("TIEBARSIZE", null, "TIEBARSIZE")), barRow("Bar Size", "sq|EDGE|1|EDGEBARSIZE", sdUnq(sdGet(t, "EDGEBARSIZE")))], null, {head: true})); return out; }
+    if (x.arc) { const a = sdArcBars(sdNum(o.main, "R"), sdNum(o.main, "SA"), sdNum(o.main, "SPACING"), sdUnq(sdGet(o.main, "ENDBAR")) === "YES");
+      out.push(pr("Rebar", "", [barRow("Bar Size", "mq|BARSIZE", sdUnq(sdGet(o.main, "BARSIZE"))), pr("Has End Bars", sdUnq(sdGet(o.main, "ENDBAR")) === "YES" ? "Yes" : "No", null, {key: "endbar", type: "select", options: ["Yes", "No"]}), num("Max Bar Spacing", "SPACING"),
+        pr("Number of Bars", String(a.n), null, {key: `arcn|${a.L}`, type: "num"}), ro("Actual Bar Spacing", sdN(a.actual), L)], null, {head: true}), pr("Misc", "", [ro("BarLayoutType", "BarSpacing")], null, {head: true})); return out; }
+    const on = sdReinforced(o), rb = [pr("Reinforcing", on ? "Yes" : "No", null, {key: "reinf", type: "select", options: ["Yes", "No"]})];
+    if (on) {
+      rb.push(pr("Rebar Material", sdUnq(sdGet(o.main, "REBARMATERIAL")), null, {key: "mq|REBARMATERIAL", type: "select", options: rmats}));
+      if (x.groups) x.groups.forEach(([n, P]) => { const r = sdGroupRect(o, P); if (!r) return; const {c, rows: kids} = cageRows(P, r, true); rb.push(pr(n, c.pts.length + " bars", kids, null, {open: false})); });
+      if (x.pipe) { [["Outer Rebar", 1, "OUTERTIEBARSIZE"], ["Inner Rebar", 2, "INNERTIEBARSIZE"]].forEach(([n, i, tk]) => { const t = sdSub(o, "PIPEEDGE", i) || [], tie = sz(tk, null, tk);
+          rb.push(pr(n, sdNum(t, "NBARS") + " bars", [pr("Number of Bars", String(sdNum(t, "NBARS")), null, {key: `s|PIPEEDGE|${i}|NBARS`, type: "num"}), barRow("Tie Bar", "st|" + tk, tie), barRow("Bar Size", `sq|PIPEEDGE|${i}|EDGEBARSIZE`, sdUnq(sdGet(t, "EDGEBARSIZE"))),
+            pr("Clear Cover to Tie", sdN(sdNum(t, "EDGEBARCOVER") - dia(tie)), null, {key: `cc|PIPEEDGE|${i}|${dia(tie)}`, type: "num"}, {unit: L})], null, {open: false})); });
+        rb.push(pr("Rebar Rotation", sdN(sdNum(sdSub(o, "PIPEEDGE", 1), "STARTANGLE")), null, {key: "pipeang", type: "num"}, {unit: "deg"})); }
+      if (x.wall) { const t = sdSub(o, "EDGE", 1) || [], bl = sdExtBars(o, dia).length / 2, Lw = sdNum(o.main, "B") - 2 * sdNum(t, "EDGEBARCOVER") - dia("#8");
+        rb.push(barRow("Corner Bar", null, "#8"), barRow("Edge Bar", null, "#8"), pr("Bar Spacing", sdN(sdNum(t, "EDGEBARSPACING")), null, {key: "wallsp", type: "num"}, {unit: L}), ro("Actual Bar Spacing", sdN(bl > 1 ? Lw / (bl - 1) : 0), L),
+          pr("Clear Cover", sdN(sdNum(t, "EDGEBARCOVER")), null, {key: "wallcv", type: "num"}, {unit: L}), pr("Reinforcing Shape", "Rectangle")); }
+    }
+    out.push(pr("Rebar", "", rb, null, {head: true}));
+    return out;
+  };
+  const d = dialog("Section Object Data - " + x.k, `<fieldset><legend>Properties</legend><div class="pgwrap" id="soG" style="height:320px"></div><div class="pgdesc"><b></b></div></fieldset>`, [["OK", () => { read(); done(o); }], ["Cancel"]], {width: 300});
+  const after = {FILLETRAD: "TW", CORNERRAD: "TW", REBARMATERIAL: "MATERIAL"};
+  const read = () => d.querySelectorAll("[data-ed]").forEach(el => { const [k, a, b, c] = el.dataset.ed.split("|"), v = el.value, n = parseFloat(v), fin = isFinite(n);
+    if (k === "name") o.name = v;
+    else if (k === "m") { if (fin && (sdAt(o.main, a) >= 0 || n !== 0)) sdSet(o.main, a, sdN(n), after[a] || "YC"); }
+    else if (k === "mb") { if (fin) sdSet(o.main, a, sdN(n - +b)); }
+    else if (k === "mq") { if (v) sdSet(o.main, a, sdQ(v), after[a]); }
+    else if (k === "s" || k === "sq") { const t = sdSub(o, a, b); if (t && (k === "sq" || fin)) sdSet(t, c, k === "sq" ? sdQ(v) : sdN(c === "NBARS" ? Math.max(1, Math.round(n)) : n)); }
+    else if (k === "st") { const t = sdSub(o, a); if (t) t[1] = sdQ(v); }
+    else if (k === "nb") { const t = sdSub(o, a, b); if (t && fin && n >= 0 && Math.round(n) !== Math.max(0, Math.ceil(+c / (sdNum(t, "EDGEBARSPACING") || Infinity) - 1e-9) - 1)) sdSet(t, "EDGEBARSPACING", sdN(+c / (Math.round(n) + 1))); }
+    else if (k === "cc") { const t = sdSub(o, a, b); if (t && fin) sdSet(t, "EDGEBARCOVER", sdN(n + +c)); }
+    else if (k === "endbar") sdSet(o.main, "ENDBAR", sdQ(v === "Yes" ? "YES" : "NO"));
+    else if (k === "arcn") { if (fin && n >= 1) { const ends = sdUnq(sdGet(o.main, "ENDBAR")) === "YES", cur = sdArcBars(sdNum(o.main, "R"), sdNum(o.main, "SA"), sdNum(o.main, "SPACING"), ends).n; if (Math.round(n) !== cur) sdSet(o.main, "SPACING", sdN(+a / (ends ? Math.max(1, n - 1) : n + 1))); } }
+    else if (k === "pipeang") { if (fin) [1, 2].forEach(i => { const t = sdSub(o, "PIPEEDGE", i); if (t) sdSet(t, "STARTANGLE", sdN(n)); }); }
+    else if (k === "wallsp" || k === "wallcv") { if (fin) [1, 3].forEach(i => { const t = sdSub(o, "EDGE", i); if (t) sdSet(t, k === "wallsp" ? "EDGEBARSPACING" : "EDGEBARCOVER", sdN(n)); }); }
+    else if (k === "reinf") { const on = v === "Yes"; if (on && !sdReinforced(o)) { if (sdAt(o.main, "REBARMATERIAL") < 0) sdSet(o.main, "REBARMATERIAL", sdQ(rmats[0] || ""), "MATERIAL"); sdExtRebar(o, u); } else if (!on) o.subs = []; } });
+  const paint = () => { const r = rows(); q(d, "#soG").innerHTML = gridHtml(r, true); wireGrid(d, {r}, {"Shape Name": "The shape name.", "Tie Bar": "Tie bar size data.", "Reinforcing": "Indicates if the shape is reinforced.", "Material": x.bar ? "The material property for the rebar." : "The material property for the shape.",
+      "Web Rebar": "The web rebar size and spacing data.", "Flange Rebar": "The flange rebar size and spacing data.", "Outer Rebar": "The outer rebar size and spacing data.", "Inner Rebar": "The inner rebar size and spacing data."});
+    d.querySelectorAll("[data-ed]").forEach(el => el.addEventListener("change", () => { read(); paint(); })); };
+  paint();
+  return d;
+}
 function sdParse(lines) {
   const head = [], shapes = new Map();
   for (const l of lines || []) {
@@ -12566,18 +12762,20 @@ function sdParse(lines) {
     const n = +t[1], r = t.slice(2), kv = {}; for (let i = 0; i + 1 < r.length; i += 2) kv[r[i]] = r[i + 1];
     if (!shapes.has(n)) shapes.set(n, {raw: [], edges: [], corners: [], poly: []});
     const s = shapes.get(n);
+    if (s.ext) { s.subs.push(r); s.raw.push(l); continue; }
+    if (kv.SHAPETYPE && sdX[sdUnq(kv.SHAPETYPE)]) { Object.assign(s, {ext: true, type: sdUnq(kv.SHAPETYPE), main: r, subs: []}); s.raw.push(l); continue; }
     if (r[0] === "EDGE") s.edges[+r[1] - 1] = Object.assign({size: sdUnq(kv.EDGEBARSIZE), spacing: +kv.EDGEBARSPACING || 0, cover: +kv.EDGEBARCOVER || 0}, kv.NBARS != null ? {nbars: +kv.NBARS, start: +kv.STARTANGLE || 0} : {});
     else if (r[0] === "CORNER") s.corners[+r[1] - 1] = sdUnq(kv.CORNERBARSIZE);
     else if (r[0] === "TIEBARSIZE") s.tie = sdUnq(r[1]);
     else if (r[0] === "POLYCORNER") s.poly[+r[1] - 1] = [+kv.X || 0, +kv.Y || 0];
     else if (kv.SHAPETYPE) Object.assign(s, {type: sdUnq(kv.SHAPETYPE), material: sdUnq(kv.MATERIAL), rebarMat: sdUnq(kv.REBARMATERIAL), D: +kv.D || 0, B: +kv.B || 0, TF: +kv.TF || 0, TW: +kv.TW || 0,
-      BB: kv.BBOTTOM != null ? +kv.BBOTTOM : null, TFB: kv.TFBOTTOM != null ? +kv.TFBOTTOM : null, FR: +kv.FILLETRADIUS || 0, XC: +kv.XC || 0, YC: +kv.YC || 0, ROT: +kv.ROT || 0,
+      BB: kv.BB != null ? +kv.BB : null, TFB: kv.TFB != null ? +kv.TFB : null, FR: +kv.FILLETRAD || 0, XC: +kv.XC || 0, YC: +kv.YC || 0, ROT: +kv.ROT || 0,
       barSize: sdUnq(kv.BARSIZE), spacing: +kv.SPACING || 0, endBar: sdUnq(kv.ENDBAR).toUpperCase() === "YES", X1: +kv.X1 || 0, Y1: +kv.Y1 || 0, X2: +kv.X2 || 0, Y2: +kv.Y2 || 0, main: r});
     s.raw.push(l);
   }
   const count = {};
-  const list = [...shapes.values()].map(s => { const k = sdKinds[s.type] || sdUnq(s.type) || "Shape"; count[k] = (count[k] || 0) + 1;
-    return Object.assign(s, {known: !!sdKinds[s.type], reinf: s.corners.length > 0 || s.edges.length > 0, name: k.replace(/\s/g, "") + count[k]}); });
+  const list = [...shapes.values()].map(s => { const k = s.ext ? (sdX[s.type].n || sdX[s.type].k) : sdKinds[s.type] || sdUnq(s.type) || "Shape"; count[k] = (count[k] || 0) + 1;
+    return Object.assign(s, {known: !!(sdKinds[s.type] || s.ext), reinf: s.corners.length > 0 || s.edges.length > 0, name: k.replace(/[\s-]/g, "") + count[k]}); });
   return {head, shapes: list};
 }
 // The design type the file's header names (DESIGNTYPE, DESIGNCHECK).
@@ -12593,6 +12791,7 @@ function sdCompose(sd, designType, designed) {
   sd.shapes.forEach((s, i) => {
     const n = i + 1, P = `SHAPE ${n} `;
     if (!s.known) { s.raw.forEach(l => { const t = sdTok(l); t[1] = String(n); out.push(t.join(" ")); }); return; }
+    if (s.ext) { out.push(P + s.main.join(" ")); (s.subs || []).forEach(t => out.push((P + t.join(" ")).trim())); return; }
     if (s.type === "CONCRETE RECTANGULAR") {
       out.push(P + `MATERIAL ${sdQ(s.material)} REBARMATERIAL ${sdQ(s.rebarMat)} SHAPETYPE ${sdQ(s.type)} D ${s.D} B ${s.B} XC ${s.XC} YC ${s.YC}` + (s.ROT ? ` ROT ${sdN(s.ROT)}` : ""));
       if (s.reinf) {
@@ -12604,19 +12803,21 @@ function sdCompose(sd, designType, designed) {
       out.push(P + `MATERIAL ${sdQ(s.material)} REBARMATERIAL ${sdQ(s.rebarMat)} SHAPETYPE ${sdQ(s.type)} D ${sdN(s.D)} XC ${sdN(s.XC)} YC ${sdN(s.YC)}`);
       if (s.reinf) { const g = s.edges[0]; out.push(P + `EDGE 1 EDGEBARSIZE ${sdQ(g.size)} EDGEBARCOVER ${sdN(g.cover)} NBARS ${g.nbars || 0} STARTANGLE ${sdN(g.start)}`); out.push(P + `TIEBARSIZE ${sdQ(s.tie || "")}`); }
     } else if (s.type === "STEEL I/WIDE FLANGE") {
-      // A bottom flange unlike the top, a fillet and a rotation are written with the words ETABS's frame sections use for them.
-      out.push(P + `MATERIAL ${sdQ(s.material)} SHAPETYPE ${sdQ(s.type)} D ${sdN(s.D)} B ${sdN(s.B)} TF ${sdN(s.TF)} TW ${sdN(s.TW)}` + (s.BB != null && s.BB !== s.B ? ` BBOTTOM ${sdN(s.BB)}` : "") + (s.TFB != null && s.TFB !== s.TF ? ` TFBOTTOM ${sdN(s.TFB)}` : "")
-        + (s.FR ? ` FILLETRADIUS ${sdN(s.FR)}` : "") + ` XC ${sdN(s.XC)} YC ${sdN(s.YC)}` + (s.ROT ? ` ROT ${sdN(s.ROT)}` : ""));
+      // A fillet and a bottom flange unlike the top follow the web, as ETABS 23.2 writes them (FILLETRAD 0.5 BB 10 TFB 0.75).
+      out.push(P + `MATERIAL ${sdQ(s.material)} SHAPETYPE ${sdQ(s.type)} D ${sdN(s.D)} B ${sdN(s.B)} TF ${sdN(s.TF)} TW ${sdN(s.TW)}` + (s.FR ? ` FILLETRAD ${sdN(s.FR)}` : "") + (s.BB != null && s.BB !== s.B ? ` BB ${sdN(s.BB)}` : "") + (s.TFB != null && s.TFB !== s.TF ? ` TFB ${sdN(s.TFB)}` : "")
+        + ` XC ${sdN(s.XC)} YC ${sdN(s.YC)}` + (s.ROT ? ` ROT ${sdN(s.ROT)}` : ""));
     } else if (s.type === "POLYGON") {
-      out.push(P + `MATERIAL ${sdQ(s.material)} SHAPETYPE ${sdQ(s.type)} NUMCORNERPTS ${s.poly.length}`);
+      out.push(P + `MATERIAL ${sdQ(s.material)}` + (s.reinf ? ` REBARMATERIAL ${sdQ(s.rebarMat)}` : "") + ` SHAPETYPE ${sdQ(s.type)} NUMCORNERPTS ${s.poly.length}`);
       s.poly.forEach(([x, y], k) => out.push(P + `POLYCORNER ${k + 1} X ${sdN(x)} Y ${sdN(y)}`));
+      if (s.reinf) { s.poly.forEach((_, k) => { const g = s.edges[k] || s.edges[0]; out.push(P + `EDGE ${k + 1} EDGEBARSIZE ${sdQ(g.size)} EDGEBARSPACING ${sdN(g.spacing)} EDGEBARCOVER ${sdN(g.cover)}`); });
+        s.poly.forEach((_, k) => out.push(P + `CORNER ${k + 1} CORNERBARSIZE ${sdQ(s.corners[k] || s.corners[0])}`)); out.push(P + `TIEBARSIZE ${sdQ(s.tie || "")}`); }
     } else if (s.type === "REBAR") out.push(P + `MATERIAL ${sdQ(s.material)} SHAPETYPE ${sdQ(s.type)} BARSIZE ${sdQ(s.barSize)} XC ${sdN(s.XC)} YC ${sdN(s.YC)}`);
     else if (s.type === "LINE REBAR") out.push(P + `MATERIAL ${sdQ(s.material)} SHAPETYPE ${sdQ(s.type)} BARSIZE ${sdQ(s.barSize)} SPACING ${sdN(s.spacing)} ENDBAR ${sdQ(s.endBar ? "YES" : "NO")} X1 ${sdN(s.X1)} Y1 ${sdN(s.Y1)} X2 ${sdN(s.X2)} Y2 ${sdN(s.Y2)}`);
   });
   return sd.shapes.length ? out : [];
 }
 // A point of a shape turned by its rotation about its centre.
-const sdRot = (s, x, y) => { const a = (s.ROT || 0) * Math.PI / 180, c = Math.cos(a), n = Math.sin(a); return [s.XC + x * c - y * n, s.YC + x * n + y * c]; };
+const sdRot = (s, x, y) => { const e = s.ext, a = (e ? (sdX[s.type].rot ? sdNum(s.main, sdX[s.type].rot) : 0) : s.ROT || 0) * Math.PI / 180, c = Math.cos(a), n = Math.sin(a), xc = e ? sdNum(s.main, "XC") : s.XC, yc = e ? sdNum(s.main, "YC") : s.YC; return [xc + x * c - y * n, yc + x * n + y * c]; };
 // A line bar's bars: as many as the spacing leaves between its ends, and the end bars when it has them.
 function sdLineBars(s) { const L = Math.hypot(s.X2 - s.X1, s.Y2 - s.Y1), k = s.spacing > 0 ? Math.max(0, Math.ceil(L / s.spacing - 1e-9) - 1) : 0, out = [];
   for (let j = s.endBar ? 0 : 1; j <= (s.endBar ? k + 1 : k); j++) out.push([s.X1 + (s.X2 - s.X1) * j / (k + 1), s.Y1 + (s.Y2 - s.Y1) * j / (k + 1)]);
@@ -12627,21 +12828,19 @@ function sdBars(s, bars) {
   const dia = n => ((bars.find(b => b.name === n) || {}).diameter) || 0, area = n => ((bars.find(b => b.name === n) || {}).area) || 0;
   if (s.type === "REBAR") return [{x: s.XC, y: s.YC, d: dia(s.barSize), a: area(s.barSize)}];
   if (s.type === "LINE REBAR") return sdLineBars(s).pts.map(([x, y]) => ({x, y, d: dia(s.barSize), a: area(s.barSize)}));
+  if (s.ext) return sdExtBars(s, dia).map(b => ({x: b.x, y: b.y, d: dia(b.size), a: area(b.size)}));
+  if (s.type === "POLYGON") return sdPolyBars(s, dia).map(b => ({x: b.x, y: b.y, d: dia(b.size), a: area(b.size)}));
   if (!s.known || !s.reinf) return [];
-  if (s.type === "CONCRETE CIRCLE") { const g = s.edges[0] || {}, r = s.D / 2 - (g.cover || 0), out = [];
+  if (s.type === "CONCRETE CIRCLE") { const g = s.edges[0] || {}, r = s.D / 2 - (g.cover || 0) - dia(g.size) / 2, out = [];
     for (let k = 0; k < (g.nbars || 0); k++) { const a = ((g.start || 0) + 360 * k / g.nbars) * Math.PI / 180; out.push({x: s.XC + r * Math.cos(a), y: s.YC + r * Math.sin(a), d: dia(g.size), a: area(g.size)}); }
     return out; }
   if (s.type !== "CONCRETE RECTANGULAR") return [];
-  const cv = s.edges[0] ? s.edges[0].cover : 0, w = s.B / 2 - cv, h = s.D / 2 - cv, out = [];
-  const cs = [[w, h], [-w, h], [-w, -h], [w, -h]], at = (x, y) => sdRot(s, x, y);
-  cs.forEach(([x, y], i) => { const [px, py] = at(x, y); out.push({x: px, y: py, d: dia(s.corners[i] || s.corners[0]), a: area(s.corners[i] || s.corners[0])}); });
-  cs.forEach((p, i) => { const q2 = cs[(i + 1) % 4], g = s.edges[i] || s.edges[0], L = Math.hypot(q2[0] - p[0], q2[1] - p[1]), k = g.spacing > 0 ? Math.max(0, Math.ceil(L / g.spacing - 1e-9) - 1) : 0;
-    for (let j = 1; j <= k; j++) { const [px, py] = at(p[0] + (q2[0] - p[0]) * j / (k + 1), p[1] + (q2[1] - p[1]) * j / (k + 1)); out.push({x: px, y: py, d: dia(g.size), a: area(g.size)}); } });
-  return out;
+  return sdCage([-s.B / 2, -s.D / 2, s.B / 2, s.D / 2], i => s.edges[i - 1] || s.edges[0], i => s.corners[i - 1] || s.corners[0], dia).pts.map(p => { const [x, y] = sdRot(s, p.x, p.y); return {x, y, d: dia(p.size), a: area(p.size)}; });
 }
-function sdEdgeCount(s, i) { const cv = s.edges[0] ? s.edges[0].cover : 0, L = (i % 2 ? s.D : s.B) - 2 * cv, g = s.edges[i] || s.edges[0]; return g && g.spacing > 0 ? Math.max(0, Math.ceil(L / g.spacing - 1e-9) - 1) : 0; }
+function sdEdgeCage(s, bars) { const dia = n => ((bars.find(b => b.name === n) || {}).diameter) || 0; return sdCage([-s.B / 2, -s.D / 2, s.B / 2, s.D / 2], i => s.edges[i - 1] || s.edges[0], i => s.corners[i - 1] || s.corners[0], dia); }
 // A shape's outline as polygons (a circle cut into the Drawing Options' arc increment, an I as its two flanges and web).
 function sdOutline(s) {
+  if (s.ext) return sdExtOutline(s).map(p => Object.assign(p.map(([x, y]) => sdRot(s, x, y)), {hole: !!p.hole}));
   if (s.type === "CONCRETE RECTANGULAR") return [[[1, 1], [-1, 1], [-1, -1], [1, -1]].map(([a, b]) => sdRot(s, a * s.B / 2, b * s.D / 2))];
   if (s.type === "CONCRETE CIRCLE") { const st = +sdOpt.disc || 11.25, out = []; for (let a = 0; a < 360 - 1e-9; a += st) out.push([s.XC + s.D / 2 * Math.cos(a * Math.PI / 180), s.YC + s.D / 2 * Math.sin(a * Math.PI / 180)]); return [out]; }
   if (s.type === "POLYGON") return s.poly.length > 2 ? [s.poly.map(p => [...p])] : [];
@@ -12649,7 +12848,7 @@ function sdOutline(s) {
     return [r(-s.B / 2, h - s.TF, s.B / 2, h), r(-s.TW / 2, -h + tb, s.TW / 2, h - s.TF), r(-bb / 2, -h, bb / 2, -h + tb)]; }
   return [];
 }
-function sdBox(s) { const pts = sdOutline(s).flat(); if (s.type === "REBAR") pts.push([s.XC, s.YC]); if (s.type === "LINE REBAR") pts.push([s.X1, s.Y1], [s.X2, s.Y2]);
+function sdBox(s) { const pts = sdOutline(s).flat(); if (s.ext && !pts.length) sdExtBars(s, () => 0).forEach(b => pts.push([b.x, b.y])); if (s.type === "REBAR") pts.push([s.XC, s.YC]); if (s.type === "LINE REBAR") pts.push([s.X1, s.Y1], [s.X2, s.Y2]);
   return pts.length ? pts.reduce((b, [x, y]) => [Math.min(b[0], x), Math.max(b[1], x), Math.min(b[2], y), Math.max(b[3], y)], [Infinity, -Infinity, Infinity, -Infinity]) : null; }
 // Section Properties (SD 26, 27): the gross section of the area shapes about their centre of gravity.
 function sdProps(sd, angle) {
@@ -12659,12 +12858,13 @@ function sdProps(sd, angle) {
     for (let i = 0; i < p.length; i++) { const [x0, y0] = p[i], [x1, y1] = p[(i + 1) % p.length], c = x0 * y1 - x1 * y0; a += c / 2; cx += (x0 + x1) * c / 6; cy += (y0 + y1) * c / 6;
       ix += (y0 * y0 + y0 * y1 + y1 * y1) * c / 12; iy += (x0 * x0 + x0 * x1 + x1 * x1) * c / 12; ixy += (x0 * y1 + 2 * x0 * y0 + 2 * x1 * y1 + x1 * y0) * c / 24;
       xmin = Math.min(xmin, x0); xmax = Math.max(xmax, x0); ymin = Math.min(ymin, y0); ymax = Math.max(ymax, y0); }
-    const sg = a < 0 ? -1 : 1; A += a * sg; Sx += cx * sg; Sy += cy * sg; Ix0 += ix * sg; Iy0 += iy * sg; Ixy0 += ixy * sg; });
+    const sg = (a < 0 ? -1 : 1) * (p.hole ? -1 : 1); A += a * sg; Sx += cx * sg; Sy += cy * sg; Ix0 += ix * sg; Iy0 += iy * sg; Ixy0 += ixy * sg; });
   if (!A) return null;
   const xc = Sx / A, yc = Sy / A, Ixx = Ix0 - A * yc * yc, Iyy = Iy0 - A * xc * xc, Ixy = Ixy0 - A * xc * yc;
   sd.shapes.filter(s => s.known).forEach(s => {
     if (s.type === "CONCRETE RECTANGULAR") { const l = Math.max(s.B, s.D), t = Math.min(s.B, s.D); J += l * t ** 3 * (1 / 3 - 0.21 * t / l * (1 - t ** 4 / (12 * l ** 4))); }
     else if (s.type === "CONCRETE CIRCLE") J += Math.PI * s.D ** 4 / 32;
+    else if (s.ext) J += sdExtJ(s);
     else if (s.type === "STEEL I/WIDE FLANGE") J += (s.B * s.TF ** 3 + (s.BB ?? s.B) * (s.TFB ?? s.TF) ** 3 + (s.D - s.TF - (s.TFB ?? s.TF)) * s.TW ** 3) / 3;
     else if (s.type === "POLYGON" && s.poly.length > 2) { const p = s.poly; let a = 0, cx = 0, cy = 0, ix = 0, iy = 0;
       for (let i = 0; i < p.length; i++) { const [x0, y0] = p[i], [x1, y1] = p[(i + 1) % p.length], c = x0 * y1 - x1 * y0; a += c / 2; cx += (x0 + x1) * c / 6; cy += (y0 + y1) * c / 6; ix += (y0 * y0 + y0 * y1 + y1 * y1) * c / 12; iy += (x0 * x0 + x0 * x1 + x1 * x1) * c / 12; }
@@ -12673,8 +12873,9 @@ function sdProps(sd, angle) {
   // The plastic moduli from strips of the section about its plastic neutral axes.
   const strips = (horiz) => { const n = 400, lo = horiz ? ymin : xmin, hi = horiz ? ymax : xmax, w = (hi - lo) / n, out = [];
     for (let k = 0; k < n; k++) { const c = lo + (k + 0.5) * w; let len = 0;
-      polys.forEach(({p}) => { const xs = []; for (let i = 0; i < p.length; i++) { const [x0, y0] = p[i], [x1, y1] = p[(i + 1) % p.length], a0 = horiz ? y0 : x0, a1 = horiz ? y1 : x1, b0 = horiz ? x0 : y0, b1 = horiz ? x1 : y1;
-        if ((a0 <= c) !== (a1 <= c)) xs.push(b0 + (c - a0) / (a1 - a0) * (b1 - b0)); } xs.sort((a, b) => a - b); for (let i = 0; i + 1 < xs.length; i += 2) len += xs[i + 1] - xs[i]; });
+      const byShape = new Map(); polys.forEach(({p, s}) => { if (!byShape.has(s)) byShape.set(s, []); byShape.get(s).push(p); });
+      byShape.forEach(ps => { const xs = []; ps.forEach(p => { for (let i = 0; i < p.length; i++) { const [x0, y0] = p[i], [x1, y1] = p[(i + 1) % p.length], a0 = horiz ? y0 : x0, a1 = horiz ? y1 : x1, b0 = horiz ? x0 : y0, b1 = horiz ? x1 : y1;
+        if ((a0 <= c) !== (a1 <= c)) xs.push(b0 + (c - a0) / (a1 - a0) * (b1 - b0)); } }); xs.sort((a, b) => a - b); for (let i = 0; i + 1 < xs.length; i += 2) len += xs[i + 1] - xs[i]; });
       out.push([c, len * w]); } return out; };
   const plastic = horiz => { const st = strips(horiz), half = st.reduce((t, [, a]) => t + a, 0) / 2; let acc = 0, pna = st[0][0];
     for (const [c, a] of st) { if (acc + a >= half) { pna = c; break; } acc += a; } return st.reduce((t, [c, a]) => t + a * Math.abs(c - pna), 0); };
@@ -12708,6 +12909,7 @@ function sdPropsForm(sd, base, u) {
 // X/Y Center, Rotation, Length, Bar Size, Has End Bars, Max Bar Spacing, Number of Bars, Actual Bar Spacing, Misc
 // BarLayoutType. Polygon: Name, Color, Material, Reinforcing.
 function sdObjectForm(s, mats, rmats, bars, u, done, smats) {
+  if (s.ext) return sdExtForm(s, mats, rmats, bars, u, done, smats);
   const L = u.l, o = JSON.parse(JSON.stringify(s)), num = (n, k) => pr(n, sdN(o[k] ?? 0), null, {key: k, type: "num"}, {unit: L}), deg = (n, k) => pr(n, sdN(o[k] || 0), null, {key: k, type: "num"}, {unit: "deg"});
   const kind = sdKinds[o.type], ro = (n, v, unit) => pr(n, v, null, null, {grey: true, unit});
   const bar = (n, k, size) => { const b = bars.find(x => x.name === size) || {}; return pr(n, size, [pr("Rebar Size", size, null, {key: k, type: "select", options: bars.map(x => x.name)}), pr("Diameter", b.diameter ?? "", null, null, {unit: L, grey: true}), pr("Area", b.area ?? "", null, null, {unit: L + "²", grey: true})]); };
@@ -12723,7 +12925,7 @@ function sdObjectForm(s, mats, rmats, bars, u, done, smats) {
         pr("Rebar", "", [bar("Bar Size", "barSize", o.barSize), pr("Has End Bars", o.endBar ? "Yes" : "No", null, {key: "endBar", type: "select", options: ["Yes", "No"]}), num("Max Bar Spacing", "spacing"),
           pr("Number of Bars", String(lb.n), null, {key: "lnum", type: "num"}), ro("Actual Bar Spacing", sdN(lb.actual), L)], null, {head: true}),
         pr("Misc", "", [ro("BarLayoutType", "BarSpacing")], null, {head: true})]; }
-    if (kind === "Polygon") return [nameRow(), general(mats), pr("Rebar", "", [pr("Reinforcing", "No")], null, {head: true})];
+    if (kind === "Polygon") return [nameRow(), general(mats), pr("Rebar", "", [pr("Reinforcing", o.reinf ? "Yes" : "No", null, {key: "reinf", type: "select", options: ["Yes", "No"]})].concat(o.reinf ? [pr("Rebar Material", o.rebarMat, null, {key: "rebarMat", type: "select", options: rmats}), bar("Tie Bar", "tie", o.tie)] : []), null, {head: true})];
     if (kind === "I Section") return [nameRow(), general(smats || mats), pr("Location", "", [num("X Center", "XC"), num("Y Center", "YC"), deg("Rotation", "ROT")], null, {head: true}),
       pr("Geometry", "", [num("Height", "D"), num("Top Width", "B"), num("Top Thickness", "TF"), num("Web Thickness", "TW"), pr("Bottom Width", sdN(o.BB ?? o.B), null, {key: "BB", type: "num"}, {unit: L}),
         pr("Bottom Thickness", sdN(o.TFB ?? o.TF), null, {key: "TFB", type: "num"}, {unit: L}), num("Fillet Radius", "FR")], null, {head: true})];
@@ -12737,13 +12939,15 @@ function sdObjectForm(s, mats, rmats, bars, u, done, smats) {
       pr("Rebar", "", [pr("Reinforcing", o.reinf ? "Yes" : "No", null, {key: "reinf", type: "select", options: ["Yes", "No"]})].concat(o.reinf ? [pr("Reinforcing Shape", "Rectangle", null, {key: "rshape", type: "select", options: ["Circle", "Rectangle"]}),
         pr("Rebar Data", (sdBars(o, bars).length) + " bars", [pr("Material", o.rebarMat, null, {key: "rebarMat", type: "select", options: rmats}), bar("Tie Bar", "tie", o.tie),
           ...[0, 1, 2, 3].map(i => bar("Corner Bar " + (i + 1), "c" + i, o.corners[i])),
-          ...[0, 1, 2, 3].map(i => pr("Edge Bar " + (i + 1), `${sdEdgeCount(o, i)} ${o.edges[i].size} bars`, [bar("Bar Size", "es" + i, o.edges[i].size), pr("Bar Spacing", o.edges[i].spacing, null, {key: "ep" + i, type: "num"}, {unit: L}), pr("Clear Cover", o.edges[i].cover, null, {key: "ec" + i, type: "num"}, {unit: L})]))], {open: false})] : []), null, {head: true})];
+          ...[0, 1, 2, 3].map(i => { const c = sdEdgeCage(o, bars), td = (bars.find(b => b.name === o.tie) || {}).diameter || 0; return pr("Edge Bar " + (i + 1), `${c.counts[i]} ${o.edges[i].size} bars`, [bar("Bar Size", "es" + i, o.edges[i].size), ro("BarLayoutType", "BarSpacing"), pr("Max Bar Spacing", sdN(o.edges[i].spacing), null, {key: "ep" + i, type: "num"}, {unit: L}),
+            pr("Number of Bars", String(c.counts[i]), null, {key: "en" + i, type: "num"}), ro("Actual Bar Spacing", sdN(c.actual[i]), L), pr("Clear Cover to Tie", sdN(o.edges[i].cover - td), null, {key: "ec" + i, type: "num"}, {unit: L})]); })], {open: false})] : []), null, {head: true})];
   };
   const d = dialog("Section Object Data - " + kind, `<fieldset><legend>Properties</legend><div class="pgwrap" id="soG" style="height:320px"></div><div class="pgdesc"><b></b></div></fieldset>`,
     [["OK", () => { read(); done(o); }], ["Cancel"]], {width: 300});
   const b8 = () => bars.find(x2 => x2.name === "#8") ? "#8" : (bars[0] || {}).name || "", b4 = () => bars.find(x2 => x2.name === "#4") ? "#4" : b8();
   const read = () => d.querySelectorAll("[data-ed]").forEach(x => { const k = x.dataset.ed, v = x.value, n = parseFloat(v), fin = isFinite(n);
     if (k === "reinf") { o.reinf = v === "Yes"; if (o.reinf && kind === "Circle" && !o.edges.length) { const tie = b4(), td = (bars.find(b => b.name === tie) || {}).diameter || 0; o.edges = [{size: b8(), spacing: 0, cover: inTo(1.5, u) + td, nbars: 8, start: 0}]; o.tie = tie; o.rebarMat = o.rebarMat || rmats[0] || ""; }
+      else if (o.reinf && !o.corners.length && kind === "Polygon") { const b = b8(); o.corners = o.poly.map(() => b); o.edges = o.poly.map(() => ({size: b, spacing: inTo(6, u), cover: inTo(2, u)})); o.tie = b4(); o.rebarMat = o.rebarMat || rmats[0] || ""; }
       else if (o.reinf && !o.corners.length && kind === "Rectangle") { const b = b8(); o.corners = [b, b, b, b]; o.edges = [0, 1, 2, 3].map(() => ({size: b, spacing: inTo(6, u), cover: inTo(2, u)})); o.tie = b4(); o.rebarMat = o.rebarMat || rmats[0] || ""; }
       if (!o.reinf) { o.edges = []; o.corners = []; } }
     else if (k === "name" || k === "material" || k === "rebarMat" || k === "tie" || k === "barSize") o[k] = v;
@@ -12755,9 +12959,91 @@ function sdObjectForm(s, mats, rmats, bars, u, done, smats) {
       const r = nc[3] * Math.PI / 180, hx = nc[2] / 2 * Math.cos(r), hy = nc[2] / 2 * Math.sin(r); Object.assign(o, {X1: nc[0] - hx, Y1: nc[1] - hy, X2: nc[0] + hx, Y2: nc[1] + hy}); }
     else if (k === "lnum") { if (fin && n >= 1) { const L2 = Math.hypot(o.X2 - o.X1, o.Y2 - o.Y1), gaps = o.endBar ? Math.max(1, n - 1) : n + 1; if (Math.round(n) !== sdLineBars(o).n) o.spacing = L2 / gaps; } }
     else if (/^c\d$/.test(k)) o.corners[+k[1]] = v; else if (/^es\d$/.test(k)) o.edges[+k[2]].size = v; else if (/^ep\d$/.test(k)) o.edges[+k[2]].spacing = parseFloat(v) || 0;
-    else if (/^ec\d$/.test(k)) o.edges.forEach(e => e.cover = parseFloat(v) || 0); else if (k !== "rshape") { if (fin) o[k] = n; } });
+    else if (/^ec\d$/.test(k)) { if (fin) o.edges[+k[2]].cover = n + ((bars.find(b => b.name === o.tie) || {}).diameter || 0); }
+    else if (/^en\d$/.test(k)) { const c = sdEdgeCage(o, bars), e = +k[2]; if (fin && n >= 0 && Math.round(n) !== c.counts[e]) o.edges[e].spacing = c.len[e] / (Math.round(n) + 1); } else if (k !== "rshape") { if (fin) o[k] = n; } });
   const paint = () => { const r = rows(); q(d, "#soG").innerHTML = gridHtml(r, true); wireGrid(d, {r}, {"Shape Name": "The shape name.", "Tie Bar": "Tie bar size data.", "Reinforcing": "Indicates if the shape is reinforced.", "Material": kind === "Bar" || kind === "LineBar" ? "The material property for the rebar." : "The material property for the shape.", "Rebar Data": kind === "Circle" ? "The rebar size and number data." : "The rebar size and spacing data."});
     d.querySelectorAll("[data-ed]").forEach(x => x.addEventListener("change", () => { read(); paint(); })); };
+  paint();
+  return d;
+}
+// Interaction Surface (SD 115-122): ETABS 23.2's design code curves for a concrete Section Designer section, checked point by
+// point against ETABS on SD1 (ACI 318-19; curves at 0, 15 and 345 deg, Include and Exclude Phi). 24 curves, one each 15 deg of
+// the neutral axis; 11 points each: the capped axial load, four neutral axis depths from the balanced one (c_b) to the depth over
+// beta1 in fifths, five from c_b down in fifths, and pure tension. Whitney block (0.85 f'c over beta1 c) less the bars inside it,
+// bars elastic-plastic, phi from the extreme bar's strain (0.65 to 0.90), and P no more than 0.80 phi Po.
+let sdMatTable = [];
+function sdPMData(sd, u, base, mode) {
+  const mat = n => (sdMatTable.find(m => m.name === n) || {}).values || {}, conc = sd.shapes.filter(s => s.known && sdOutline(s).length && !(s.type === "STEEL I/WIDE FLANGE" || (s.ext && sdX[s.type].steel)));
+  const rmName = (sd.shapes.find(s => s.rebarMat) || {}).rebarMat || (sd.shapes.find(s => s.ext && sdX[s.type].bar) || {}).material || (sd.shapes.find(s => s.type === "REBAR" || s.type === "LINE REBAR") || {}).material;
+  const ksi = etKipIn(1, 1, -2, u), cm = mat(base), rm = mat(rmName), fc = +cm.FC || 0, Es = +rm.E || etKipIn(29000, 1, -2, u), fy0 = +rm.FY || etKipIn(60, 1, -2, u);
+  const bars = [], dd = sdPMData.bars || [];
+  sd.shapes.forEach(s => sdBars(s, dd).forEach(b => bars.push(b)));
+  const polys = conc.flatMap(s => sdOutline(s));
+  if (!polys.length || !fc) return null;
+  const fy = mode === 2 ? 1.25 * fy0 : fy0, ety = fy / Es, ecu = 0.003, psi = fc / ksi * 1000, b1 = Math.max(0.65, Math.min(0.85, 0.85 - 0.05 * (psi - 4000) / 1000));
+  const signed = p => { let a = 0, sx = 0, sy = 0; for (let i = 0; i < p.length; i++) { const [x0, y0] = p[i], [x1, y1] = p[(i + 1) % p.length], c = x0 * y1 - x1 * y0; a += c / 2; sx += (x0 + x1) * c / 6; sy += (y0 + y1) * c / 6; } return [a, sx, sy]; };
+  const area = (ps, f) => ps.reduce((t, p) => { const q2 = f ? f(p) : p; if (q2.length < 3) return t; const [a, sx, sy] = signed(q2), sg = (a < 0 ? -1 : 1) * (p.hole ? -1 : 1); return [t[0] + a * sg, t[1] + sx * sg, t[2] + sy * sg]; }, [0, 0, 0]);
+  const As = bars.reduce((t, b) => t + b.a, 0), Ag = area(polys)[0], Po = 0.85 * fc * (Ag - As) + fy * As, inc = mode === 0, Pmax = 0.8 * (inc ? 0.65 : 1) * Po;
+  const mS = {in: 12, mm: 1000, cm: 100}[u.l] || 1, curves = [];
+  for (let k = 0; k < 24; k++) {
+    const th = k * 15 * Math.PI / 180, nx = -Math.sin(th), ny = Math.cos(th), v = (x, y) => x * nx + y * ny;
+    const pv = polys.flat().map(([x, y]) => v(x, y)), top = Math.max(...pv), D = top - Math.min(...pv), dt = Math.max(...bars.map(b => top - v(b.x, b.y)), 0), cb = dt * ecu / (ecu + ety);
+    const clip = (p, lim) => { const out = []; for (let i = 0; i < p.length; i++) { const a = p[i], b = p[(i + 1) % p.length], ia = v(...a) >= lim, ib = v(...b) >= lim; if (ia) out.push(a);
+      if (ia !== ib) { const t = (lim - v(...a)) / (v(...b) - v(...a)); out.push([a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])]); } } return out; };
+    const at = c => { const a = b1 * c, [Ac, Sx, Sy] = area(polys, p => clip(p, top - a)); let P = 0.85 * fc * Ac, Mx = 0.85 * fc * Sy, My = 0.85 * fc * Sx;
+      bars.forEach(b => { const d = top - v(b.x, b.y), e = ecu * (c - d) / c; let s = Math.max(-fy, Math.min(fy, e * Es)); if (d <= a) s -= 0.85 * fc; P += s * b.a; Mx += s * b.a * b.y; My += s * b.a * b.x; });
+      const et = ecu * (dt - c) / c, phi = inc ? (et <= ety ? 0.65 : et >= ety + 0.003 ? 0.9 : 0.65 + 0.25 * (et - ety) / 0.003) : 1;
+      return [Math.min(P * phi, Pmax), -My * phi / mS, Mx * phi / mS]; };
+    const s = (D / b1 - cb) / 5;
+    curves.push({ang: k * 15, pts: [[Pmax, 0, 0], ...[4, 3, 2, 1].map(j => at(cb + j * s)), ...[5, 4, 3, 2, 1].map(j => at(cb * j / 5)), [-(inc ? 0.9 : 1) * fy * As, 0, 0]]});
+  }
+  return {curves, Pmax, fU: u.f, mU: u.f + "-" + ({in: "ft", mm: "m", cm: "m"}[u.l] || u.l)};
+}
+function sdInteractionForm(sd, base, u, bars) {
+  sdPMData.bars = bars;
+  let mode = 0, fiber = false, cur = 0, plan = 315, elev = 35, data = sdPMData(sd, u, base, mode);
+  // ETABS shows P to 3 decimals and the moments to 4 (SD 116, 117).
+  const fx = (x, n) => { const v = +(+x).toFixed(n); return String(Object.is(v, -0) ? 0 : v); };
+  const d = dialog("Interaction Surface (" + ((hm.defs && hm.defs.concrete_code) || "ACI 318-19") + ")", `<div style="display:grid;grid-template-columns:340px 250px 280px;gap:10px">
+    <div><fieldset><legend>Display Options</legend><div style="display:grid;grid-template-columns:1fr 1fr">
+      <label><input type="radio" name="isK" value="d" checked> Show Design Code Data</label><label><input type="radio" name="isK" value="f"> Show Fiber Model Data</label></div>
+      <div style="margin-left:22px"><label style="display:block"><input type="radio" name="isP" value="0" checked> Include Phi</label><label style="display:block"><input type="radio" name="isP" value="1"> Exclude Phi</label><label style="display:block"><input type="radio" name="isP" value="2"> Exclude Phi and Increase Fy</label></div></fieldset>
+      <fieldset><legend>Curve Data</legend><div class="pgwrap" style="height:250px"><table class="grid" id="isT" style="width:100%"></table></div>
+      <div style="display:flex;justify-content:center;gap:6px;align-items:center;margin-top:6px"><button id="isF">|◀</button><button id="isB">◀</button><span id="isC" style="min-width:110px;text-align:center"></span><button id="isN">▶</button><button id="isL">▶|</button></div></fieldset></div>
+    <fieldset><legend>3D Interaction Surface</legend><svg id="is3" width="230" height="230" style="background:#fff"></svg>
+      <div class="g2" style="margin-top:6px"><span>Plan</span><span><input id="isPl" type="number" value="315" style="width:80px"> deg</span><span>Elevation</span><span><input id="isEl" type="number" value="35" style="width:80px"> deg</span></div>
+      <div style="display:flex;gap:6px;justify-content:center;margin-top:6px"><button id="is3D">3D</button><button id="isMM">MM</button><button id="isPM3">PM3</button><button id="isPM2">PM2</button></div></fieldset>
+    <fieldset><legend>Current Interaction Curve</legend><svg id="isP2" width="260" height="230" style="background:#fff"></svg><div id="isS" style="height:14px;border:1px solid #ccc;margin:4px 0"></div>
+      <label><input type="checkbox" id="isD"> <span id="isDL">Superimpose Dashed Fiber Curve</span></label><p class="note">Note:&nbsp; Compression is positive in this form.</p></fieldset></div>`, [["Done"]], {width: 920});
+  const paint = () => {
+    q(d, "#isDL").textContent = fiber ? "Superimpose Dashed Nominal Curve" : "Superimpose Dashed Fiber Curve";
+    d.querySelectorAll("input[name=isP]").forEach(r => r.disabled = fiber);
+    if (fiber || !data) { q(d, "#isT").innerHTML = `<tr><th>Point</th><th>P ${esc(u.f)}</th><th>M2</th><th>M3</th></tr>`; q(d, "#isC").textContent = fiber ? "Fiber model: comes next" : "No concrete shape"; q(d, "#is3").innerHTML = ""; q(d, "#isP2").innerHTML = ""; return; }
+    const c = data.curves[cur];
+    q(d, "#isT").innerHTML = `<tr><th>Point</th><th>P&nbsp; ${esc(data.fU)}</th><th>M2&nbsp; ${esc(data.mU)}</th><th>M3&nbsp; ${esc(data.mU)}</th></tr>` + c.pts.map((p, i) => `<tr><td>${i + 1}</td><td>${fx(p[0], 3)}</td><td>${fx(p[1], 4)}</td><td>${fx(p[2], 4)}</td></tr>`).join("");
+    q(d, "#isC").textContent = `Curve #${cur + 1}  ${c.ang} deg`;
+    // The 3D surface: every curve and every point's ring, the current curve in magenta, seen from the plan and elevation angles.
+    const all = data.curves.flatMap(k => k.pts), mm = Math.max(...all.map(p => Math.hypot(p[1], p[2])), 1e-9), pm = Math.max(...all.map(p => Math.abs(p[0])), 1e-9);
+    const a = plan * Math.PI / 180, e = elev * Math.PI / 180, prj = p => { const x = p[1] / mm, y = p[2] / mm, z = p[0] / pm; const xr = x * Math.cos(a) - y * Math.sin(a), yr = x * Math.sin(a) + y * Math.cos(a); return [115 + 80 * xr, 115 - 80 * (z * Math.cos(e) - yr * Math.sin(e))]; };
+    const path = ps => "M" + ps.map(p => prj(p).map(v => v.toFixed(1)).join(" ")).join("L");
+    let h = data.curves.map((k, i) => `<path d="${path(k.pts)}" fill="none" stroke="#1a5fb4" stroke-width=".6"/>`).join("") + c.pts.map((_, j) => `<path d="${path(data.curves.map(k => k.pts[j]).concat([data.curves[0].pts[j]]))}" fill="none" stroke="#1a5fb4" stroke-width=".5"/>`).join("");
+    h += `<path d="${path(c.pts)}" fill="none" stroke="#e000e0" stroke-width="2.4"/>`;
+    const ax = (p, t) => { const [x, y] = prj(p); return `<path d="M115 ${prj([0, 0, 0])[1]}L${x} ${y}" stroke="#c00" stroke-width=".8"/><text x="${x}" y="${y}" fill="#c00" font-size="11">${t}</text>`; };
+    q(d, "#is3").innerHTML = `<rect width="230" height="230" fill="#e8f6ff" opacity=".4"/>` + h + ax([pm * 1.15, 0, 0], "P") + ax([-pm * 1.15, 0, 0], "-P") + ax([0, 0, mm * 1.2], "M3") + ax([0, 0, -mm * 1.2], "-M3") + ax([0, mm * 1.2, 0], "M2") + ax([0, -mm * 1.2, 0], "-M2");
+    // The current curve: P against the resultant moment.
+    const W = 260, H = 230, px = m => 50 + (m / (mm * 1.2)) * (W - 70), py = P => 20 + (1 - (P + pm * 1.1) / (2.2 * pm)) * (H - 50);
+    q(d, "#isP2").innerHTML = `<rect x="50" y="20" width="${W - 70}" height="${H - 50}" fill="none" stroke="#999"/>` + [0.25, 0.5, 0.75].map(t => `<path d="M${50 + t * (W - 70)} 20V${H - 30}M50 ${20 + t * (H - 50)}H${W - 20}" stroke="#ddd"/>`).join("")
+      + `<path d="M${c.pts.map(p => px(Math.hypot(p[1], p[2])).toFixed(1) + " " + py(p[0]).toFixed(1)).join("L")}" fill="none" stroke="#000" stroke-width="2"/>`
+      + [0, 0.25, 0.5, 0.75, 1].map(t => `<text x="46" y="${20 + t * (H - 50) + 4}" font-size="9" text-anchor="end">${+((1.1 - 2.2 * t) * pm).toPrecision(3)}</text><text x="${50 + t * (W - 70)}" y="${H - 18}" font-size="9" text-anchor="middle">${+(t * mm * 1.2).toPrecision(3)}</text>`).join("")
+      + `<text x="12" y="${H / 2}" font-size="11" transform="rotate(-90 12 ${H / 2})">P (${esc(data.fU)})</text><text x="${W / 2}" y="${H - 6}" font-size="11">M (${esc(data.mU)})</text>`;
+  };
+  const go = i => { cur = (i + 24) % 24; paint(); };
+  q(d, "#isF").onclick = () => go(0); q(d, "#isB").onclick = () => go(cur - 1); q(d, "#isN").onclick = () => go(cur + 1); q(d, "#isL").onclick = () => go(23);
+  d.querySelectorAll("input[name=isP]").forEach(r => r.onchange = () => { mode = +r.value; data = sdPMData(sd, u, base, mode); paint(); });
+  d.querySelectorAll("input[name=isK]").forEach(r => r.onchange = () => { fiber = r.value === "f"; paint(); });
+  const view = (p, e) => { plan = p; elev = e; q(d, "#isPl").value = p; q(d, "#isEl").value = e; paint(); };
+  q(d, "#isPl").onchange = () => view(+q(d, "#isPl").value || 0, elev); q(d, "#isEl").onchange = () => view(plan, +q(d, "#isEl").value || 0);
+  q(d, "#is3D").onclick = () => view(315, 35); q(d, "#isMM").onclick = () => view(-90, 90); q(d, "#isPM3").onclick = () => view(0, 0); q(d, "#isPM2").onclick = () => view(90, 0);
   paint();
   return d;
 }
@@ -12784,15 +13070,15 @@ function hmSdWindow(lines, base, mats, rmats, bars, u, done, smats) {
     View: [["Rubberband Zoom", () => { mode = "zoom"; }], ["Restore Full View", () => { prevView.push({...view}); fit(); draw(); }], ["Previous Zoom", () => { if (prevView.length) { view = prevView.pop(); draw(); } }], ["Zoom In One Step", () => zoom(1.25)], ["Zoom Out One Step", () => zoom(0.8)], 0,
       ["Pan", () => { mode = "pan"; }], 0, ["Show Guidelines", () => { show.guides = !show.guides; draw(); }, "", false, () => show.guides], ["Show Axes", () => { show.axes = !show.axes; draw(); }, "", false, () => show.axes], 0, ["Refresh Window", () => draw()]],
     Draw: [["Select Mode", () => { mode = "select"; }], ["Reshape Mode", () => { mode = "select"; }], 0,
-      ["Steel", [["I/Wide Flange", () => setMode("isec", "Click where the I section's center goes")], "Channel", "Tee", 0, "Angle", 0, "Tube", "Pipe", 0, "Plate", "Arc", 0, "Rod", 0, "Defined Section"].map(n => Array.isArray(n) ? n : n && [n, () => notYet(n)])],
-      ["Concrete Shape", [["Rectangle", () => { mode = "rect"; status("Click where the rectangle's center goes"); }], ["Circle", () => setMode("circle", "Click where the circle's center goes")], ["Polygon", () => setMode("poly", "Click the polygon's corners; click the first corner again or press Enter to close it")], 0, ...["Tee", "L Shape", "Box", "Pipe", "Cross", 0, "Straight Wall", "Flanged Wall", "Curved Wall", 0, "Pie Arc", "Pie"].map(n => n && [n, () => notYet(n)])]],
-      ["Rebar Shape", [["Single Bar", () => setMode("bar", "Click where the bar goes")], 0, ["Line Bar", () => setMode("line", "Click the line bar's start, then its end")], ...["Rectangle Bar", "Circle Bar", "Circular Arc Bar"].map(n => [n, () => notYet(n)])]], 0,
+      ["Steel", [["I/Wide Flange", () => setMode("isec", "Click where the I section's center goes")], ["Channel", "STEEL CHANNEL"], ["Tee", "STEEL TEE"], 0, ["Angle", "STEEL ANGLE"], 0, ["Tube", "STEEL TUBE"], ["Pipe", "STEEL PIPE"], 0, ["Plate", "PLATE"], "Arc", 0, ["Rod", "STEEL ROD"], 0, "Defined Section"].map(n => Array.isArray(n) ? (typeof n[1] === "string" ? [n[0], () => setMode("x:" + n[1], `Click where the ${n[0].toLowerCase()}'s center goes`)] : n) : n && [n, () => notYet(n)])],
+      ["Concrete Shape", [["Rectangle", () => { mode = "rect"; status("Click where the rectangle's center goes"); }], ["Circle", () => setMode("circle", "Click where the circle's center goes")], ["Polygon", () => setMode("poly", "Click the polygon's corners; click the first corner again or press Enter to close it")], 0, ...[["Tee", "CONC TEE"], ["L Shape", "CONC L"], ["Box", "CONC BOX"], ["Pipe", "CONC PIPE"], ["Cross", "CONC CROSS"], 0, ["Straight Wall", "WALL STRAIGHT"], "Flanged Wall", "Curved Wall", 0, "Pie Arc", ["Pie", "SECTOR"]].map(n => Array.isArray(n) ? [n[0], () => setMode("x:" + n[1], `Click where the ${n[0].toLowerCase()}'s center goes`)] : n && [n, () => notYet(n)])]],
+      ["Rebar Shape", [["Single Bar", () => setMode("bar", "Click where the bar goes")], 0, ["Line Bar", () => setMode("line", "Click the line bar's start, then its end")], ...[["Rectangle Bar", "RECT REBAR"], ["Circle Bar", "CIRCULAR REBAR"], ["Circular Arc Bar", "CIRCULAR ARC REBAR"]].map(n => [n[0], () => setMode("x:" + n[1], `Click where the ${n[0].toLowerCase()}'s center goes`)])]], 0,
       ["Reference Line", ["Point", "Line", "Circle"].map(n => [n, () => notYet("Reference " + n)])], 0,
       ["Snap To", ["Points and Guideline Intersections", "Line Ends and Midpoints", "Line Intersections", "Perpendicular Projections", "Lines and Edges", "Fine Grids"].map(n => [n, () => { snapTo = n; }, "", false, () => snapTo === n])], 0, ["Settings...", () => sdDrawingOptions(u, draw)]],
     Select: [["Pointer/Window", () => { mode = "select"; }], ["Intersecting Line", () => { mode = "select"; }], ["All", () => { sel = new Set(sd.shapes.map((_, i) => i)); draw(); }, "Ctrl+A"], 0, ["Deselect Intersecting Line"], ["Deselect Window"], ["Clear Selection", () => { prevSel = [...sel]; sel.clear(); draw(); }], 0, ["Get Previous Selection", () => { sel = new Set(prevSel); draw(); }, "Ctrl+J"]],
-    Display: [["Section Properties...", () => sdPropsForm(sd, base, u), "", () => !hasArea()], 0, ["Interaction Surface...", () => notYet("Interaction Surface"), "", () => !hasArea()], ["Moment-Curvature Curve...", () => notYet("Moment-Curvature Curve"), "", () => !hasArea()]]};
+    Display: [["Section Properties...", () => sdPropsForm(sd, base, u), "", () => !hasArea()], 0, ["Interaction Surface...", () => sdInteractionForm(sd, base, u, bars), "", () => !hasArea()], ["Moment-Curvature Curve...", () => notYet("Moment-Curvature Curve"), "", () => !hasArea()]]};
   let snapTo = "Points and Guideline Intersections";
-  const tools = [["undo", "Undo", () => step(undo, redo)], ["redo", "Redo", () => step(redo, undo)], ["pen", "Refresh Window", () => draw()], ["zr", "Rubberband Zoom", () => { mode = "zoom"; }], ["zf", "Restore Full View", () => { fit(); draw(); }], ["zp", "Previous Zoom", () => { if (prevView.length) { view = prevView.pop(); draw(); } }], ["zi", "Zoom In One Step", () => zoom(1.25)], ["zo", "Zoom Out One Step", () => zoom(0.8)], ["pan", "Pan", () => { mode = "pan"; }], ["sp", "Section Properties...", () => sdPropsForm(sd, base, u)], ["is", "Interaction Surface...", () => notYet("Interaction Surface")], ["mc", "Moment-Curvature Curve...", () => notYet("Moment-Curvature Curve")]];
+  const tools = [["undo", "Undo", () => step(undo, redo)], ["redo", "Redo", () => step(redo, undo)], ["pen", "Refresh Window", () => draw()], ["zr", "Rubberband Zoom", () => { mode = "zoom"; }], ["zf", "Restore Full View", () => { fit(); draw(); }], ["zp", "Previous Zoom", () => { if (prevView.length) { view = prevView.pop(); draw(); } }], ["zi", "Zoom In One Step", () => zoom(1.25)], ["zo", "Zoom Out One Step", () => zoom(0.8)], ["pan", "Pan", () => { mode = "pan"; }], ["sp", "Section Properties...", () => sdPropsForm(sd, base, u)], ["is", "Interaction Surface...", () => hasArea() && sdInteractionForm(sd, base, u, bars)], ["mc", "Moment-Curvature Curve...", () => notYet("Moment-Curvature Curve")]];
   const side = [["Select Mode", () => { mode = "select"; }], ["Reshape Mode", () => { mode = "select"; }], 0, ["Draw Steel Shape ▾", () => setMode("isec", "Click where the I section's center goes")], ["Draw Concrete Shape ▾", () => { mode = "rect"; status("Click where the rectangle's center goes"); }], ["Draw Rebar Shape ▾", () => setMode("bar", "Click where the bar goes")], ["Draw Reference Line ▾", () => notYet("reference lines")], 0,
     ["all", () => { sel = new Set(sd.shapes.map((_, i) => i)); draw(); }], ["ps", () => { sel = new Set(prevSel); draw(); }], ["clr", () => { prevSel = [...sel]; sel.clear(); draw(); }], 0, ...["Points and Guideline Intersections", "Line Ends and Midpoints", "Line Intersections", "Perpendicular Projections", "Lines and Edges", "Fine Grids"].map(n => [n, () => { snapTo = n; }])];
   const d = dialog("Section Designer", `<div class="sdw"><div class="sdm">${Object.keys(menu).map(k => `<button data-m="${k}">${k}</button>`).join("")}</div>
@@ -12802,7 +13088,7 @@ function hmSdWindow(lines, base, mats, rmats, bars, u, done, smats) {
     [["OK", () => done(sd)], ["Cancel"]], {width: 820});
   const svg = q(d, "#sdC"), W = 740, H = 430, X = x => W / 2 + (x - view.x) * view.s, Y = y => H / 2 - (y - view.y) * view.s, ux = px => (px - W / 2) / view.s + view.x, uy = py => -(py - H / 2) / view.s + view.y;
   const status = t => q(d, "#sdSt").textContent = t;
-  const notYet = n => status(`${n}: the Engine draws rectangles, circles, polygons, I sections, single bars and line bars for now; this shape comes once its .e2k form is read from the program.`);
+  const notYet = n => status(`${n}: this shape comes once its .e2k form is read from ETABS.`);
   const setMode = (m, t) => { mode = m; poly = []; status(t); };
   const hasArea = () => sd.shapes.some(s => s.known && sdOutline(s).length);
   const fit = () => { const bx = sd.shapes.filter(s => s.known).map(sdBox).filter(Boolean); if (!bx.length) { view = {s: 6 / inTo(1, u), x: 0, y: 0}; return; } const a = Math.min(...bx.map(b => b[0])), b = Math.max(...bx.map(b => b[1])), c = Math.min(...bx.map(b => b[2])), e = Math.max(...bx.map(b => b[3])); view = {s: Math.min(W / Math.max(b - a, 1e-6), H / Math.max(e - c, 1e-6)) * 0.45, x: (a + b) / 2, y: (c + e) / 2}; };
@@ -12815,11 +13101,15 @@ function hmSdWindow(lines, base, mats, rmats, bars, u, done, smats) {
       if (fine * view.s > 3) for (let y = Math.floor(y0 / fine) * fine; y <= y1; y += fine) h += `<path d="M0 ${Y(y)}H${W}" stroke="#e2e2e2"/>`;
       for (let x = Math.floor(x0 / g) * g; x <= x1; x += g) h += `<path d="M${X(x)} 0V${H}" stroke="#8a8a8a"/>`;
       for (let y = Math.floor(y0 / g) * g; y <= y1; y += g) h += `<path d="M0 ${Y(y)}H${W}" stroke="#8a8a8a"/>`; }
-    sd.shapes.forEach((s, i) => { if (!s.known) return; const on = sel.has(i), steel = s.type === "STEEL I/WIDE FLANGE", st = `stroke="${on ? "#d00" : "#222"}" stroke-width="${on ? 2 : 1}" ${on ? 'stroke-dasharray="6 3"' : ""}`;
+    sd.shapes.forEach((s, i) => { if (!s.known) return; const on = sel.has(i), steel = s.type === "STEEL I/WIDE FLANGE" || (s.ext && sdX[s.type].steel), st = `stroke="${on ? "#d00" : "#222"}" stroke-width="${on ? 2 : 1}" ${on ? 'stroke-dasharray="6 3"' : ""}`;
       const fill = steel ? "#d3d3d3" : sdOpt.transp ? "rgba(105,105,105,.25)" : "#696969";
-      if (steel) h += `<path data-i="${i}" d="${sdOutline(s).map(p => "M" + p.map(([x, y]) => X(x) + " " + Y(y)).join("L") + "Z").join("")}" fill="${fill}" ${st}/>`;
+      if (steel || sdOutline(s).some(p => p.hole)) h += `<path data-i="${i}" fill-rule="evenodd" d="${sdOutline(s).map(p => "M" + p.map(([x, y]) => X(x) + " " + Y(y)).join("L") + "Z").join("")}" fill="${fill}" ${st}/>`;
       else sdOutline(s).forEach(p => h += `<polygon data-i="${i}" points="${p.map(([x, y]) => X(x) + "," + Y(y)).join(" ")}" fill="${fill}" ${st}/>`);
       if (s.type === "LINE REBAR") h += `<path d="M${X(s.X1)} ${Y(s.Y1)}L${X(s.X2)} ${Y(s.Y2)}" stroke="${on ? "#d00" : "#555"}" stroke-dasharray="4 3"/>`;
+      // A bar cage, ring or arc is drawn as the dotted line its bars sit on.
+      if (s.ext && sdX[s.type].bar) { const g = k => sdNum(s.main, k), x2 = sdX[s.type], pts = x2.cage ? [[g("B") / 2, g("D") / 2], [-g("B") / 2, g("D") / 2], [-g("B") / 2, -g("D") / 2], [g("B") / 2, -g("D") / 2], [g("B") / 2, g("D") / 2]]
+          : Array.from({length: 49}, (_, k) => { const R2 = x2.ring ? g("D") / 2 : g("R"), a = x2.ring ? 2 * Math.PI * k / 48 : (-g("SA") / 2 + g("SA") * k / 48) * Math.PI / 180; return [R2 * Math.cos(a), R2 * Math.sin(a)]; });
+        h += `<path data-i="${i}" d="M${pts.map(([a, b]) => { const [p1, p2] = sdRot(s, a, b); return X(p1) + " " + Y(p2); }).join("L")}" fill="none" stroke="${on ? "#d00" : "#555"}" stroke-width="${on ? 2 : 1}" stroke-dasharray="4 3"/>`; }
       sdBars(s, bars).forEach(b => h += `<circle cx="${X(b.x)}" cy="${Y(b.y)}" r="${Math.max(2.5, b.d / 2 * view.s)}" fill="#c00010" stroke="${on && !sdOutline(s).length ? "#d00" : "#000"}" stroke-width="${on && !sdOutline(s).length ? 2 : .6}"/>`); });
     if (poly.length) h += `<path d="M${poly.map(([x, y]) => X(x) + " " + Y(y)).join("L")}" fill="none" stroke="#d00" stroke-dasharray="4 3"/>` + poly.map(([x, y]) => `<circle cx="${X(x)}" cy="${Y(y)}" r="3" fill="#d00"/>`).join("");
     if (show.axes) h += `<g stroke-width="1.4" font-family="Arial" font-size="13"><path d="M${X(0)} ${Y(0)}h70" stroke="#080"/><path d="M${X(0) + 62} ${Y(0) - 5}l9 5-9 5" stroke="#080" fill="none"/><text x="${X(0) + 76}" y="${Y(0) + 5}" fill="#080">X</text>
@@ -12833,7 +13123,7 @@ function hmSdWindow(lines, base, mats, rmats, bars, u, done, smats) {
   const order = k => { if (!sel.size) return; push(); const pick = sd.shapes.filter((_, i) => sel.has(i)), rest = sd.shapes.filter((_, i) => !sel.has(i)); sd.shapes = k === 2 ? rest.concat(pick) : k === -2 ? pick.concat(rest) : sd.shapes; sel.clear(); draw(); };
   // Shapes of the same kind of material that overlap (a steel shape inside concrete, as a composite column has it, is not an overlap).
   const overlaps = () => { const k = sd.shapes.filter(s => s.known && sdOutline(s).length); let n = 0; for (let i = 0; i < k.length; i++) for (let j = i + 1; j < k.length; j++) { const a = sdBox(k[i]), b = sdBox(k[j]);
-    if ((k[i].type === "STEEL I/WIDE FLANGE") === (k[j].type === "STEEL I/WIDE FLANGE") && a[0] < b[1] - 1e-9 && b[0] < a[1] - 1e-9 && a[2] < b[3] - 1e-9 && b[2] < a[3] - 1e-9) n++; } status(n ? `${n} pair${n > 1 ? "s" : ""} of shapes overlap.` : "No shapes overlap."); };
+    const stl = z => z.type === "STEEL I/WIDE FLANGE" || (z.ext && sdX[z.type].steel); if (stl(k[i]) === stl(k[j]) && a[0] < b[1] - 1e-9 && b[0] < a[1] - 1e-9 && a[2] < b[3] - 1e-9 && b[2] < a[3] - 1e-9) n++; } status(n ? `${n} pair${n > 1 ? "s" : ""} of shapes overlap.` : "No shapes overlap."); };
   // Edit > Change Shape to Poly: a rectangle or circle becomes a polygon with its corners (its bars go, as a polygon has none).
   const toPoly = () => { const pick = [...sel].filter(i => ["CONCRETE RECTANGULAR", "CONCRETE CIRCLE"].includes(sd.shapes[i].type)); if (!pick.length) return; push();
     pick.forEach(i => { const s = sd.shapes[i]; sd.shapes[i] = {known: true, type: "POLYGON", name: "Polygon" + (i + 1), material: s.material, poly: sdOutline(s)[0].map(([x, y]) => [+x.toPrecision(8), +y.toPrecision(8)]), edges: [], corners: [], reinf: false, raw: []}; }); draw(); };
@@ -12862,6 +13152,8 @@ function hmSdWindow(lines, base, mats, rmats, bars, u, done, smats) {
     if (mode === "rect") { const [sx, sy] = snapPt(x, y); return add({type: "CONCRETE RECTANGULAR", material: conc, rebarMat: rmats[0] || "", D: inTo(24, u), B: inTo(24, u), XC: sx, YC: sy}); }
     if (mode === "circle") { const [sx, sy] = snapPt(x, y); return add({type: "CONCRETE CIRCLE", material: conc, rebarMat: rmats[0] || "", D: inTo(24, u), XC: sx, YC: sy}); }
     if (mode === "isec") { const [sx, sy] = snapPt(x, y), st = (smats || []).includes(base) ? base : (smats || [])[0] || mats[0]; return add({type: "STEEL I/WIDE FLANGE", material: st, D: inTo(24, u), B: inTo(12, u), TF: inTo(1, u), TW: inTo(0.5, u), BB: null, TFB: null, FR: 0, XC: sx, YC: sy}); }
+    if (mode.startsWith("x:")) { const [sx, sy] = snapPt(x, y), t = mode.slice(2), x2 = sdX[t], st = (smats || []).includes(base) ? base : (smats || [])[0] || mats[0], o = sdExtNew(t, x2.bar ? rmats[0] || "" : x2.steel ? st : conc, rmats[0] || "", sx, sy, u), k = (x2.n || x2.k).replace(/[\s-]/g, "");
+      push(); let n = 1; while (sd.shapes.some(s2 => s2.name === k + n)) n++; o.name = k + n; sd.shapes.push(o); mode = "select"; status("Ready"); draw(); return; }
     if (mode === "bar") { const [sx, sy] = snapPt(x, y); return add({type: "REBAR", material: rmats[0] || "", barSize: b8, XC: sx, YC: sy}); }
     if (mode === "line") { const p = snapPt(x, y); if (!poly.length) { poly = [p]; status("Click the line bar's end"); draw(); return; } const [a0] = poly; poly = []; return add({type: "LINE REBAR", material: rmats[0] || "", barSize: b8, spacing: inTo(6, u), endBar: false, X1: a0[0], Y1: a0[1], X2: p[0], Y2: p[1]}); }
     if (mode === "poly") { const p = snapPt(x, y); if (poly.length > 2 && Math.hypot(p[0] - poly[0][0], p[1] - poly[0][1]) * view.s < 6) return closePoly(); poly.push(p); draw(); return; }
@@ -12878,8 +13170,10 @@ function hmSdWindow(lines, base, mats, rmats, bars, u, done, smats) {
   const hitAt = (x, y) => { const tol = 5 / view.s;
     for (let i = sd.shapes.length - 1; i >= 0; i--) { const s = sd.shapes[i]; if (!s.known) continue;
       if (s.type === "REBAR" && Math.hypot(x - s.XC, y - s.YC) <= tol * 1.5) return i;
-      if (s.type === "LINE REBAR") { const dx = s.X2 - s.X1, dy = s.Y2 - s.Y1, t = Math.max(0, Math.min(1, ((x - s.X1) * dx + (y - s.Y1) * dy) / (dx * dx + dy * dy || 1))); if (Math.hypot(x - s.X1 - t * dx, y - s.Y1 - t * dy) <= tol) return i; } }
-    for (let i = sd.shapes.length - 1; i >= 0; i--) { const s = sd.shapes[i]; if (s.known && sdOutline(s).some(p => inPoly(p, x, y))) return i; } return null; };
+      if (s.type === "LINE REBAR") { const dx = s.X2 - s.X1, dy = s.Y2 - s.Y1, t = Math.max(0, Math.min(1, ((x - s.X1) * dx + (y - s.Y1) * dy) / (dx * dx + dy * dy || 1))); if (Math.hypot(x - s.X1 - t * dx, y - s.Y1 - t * dy) <= tol) return i; }
+      if (s.ext && sdX[s.type].bar) { const [a, b, c, e] = sdBox(s); if ((Math.abs(x - a) <= tol || Math.abs(x - b) <= tol || Math.abs(y - c) <= tol || Math.abs(y - e) <= tol || sdBars(s, bars).some(z => Math.hypot(x - z.x, y - z.y) <= tol * 1.5)) && x >= a - tol && x <= b + tol && y >= c - tol && y <= e + tol) return i; } }
+    // Inside a shape counts its holes: a point in a box's or a pipe's hollow is not on it.
+    for (let i = sd.shapes.length - 1; i >= 0; i--) { const s = sd.shapes[i]; if (s.known && sdOutline(s).filter(p => inPoly(p, x, y)).length % 2 === 1) return i; } return null; };
   let lastClick = null;
   const openShape = i => sdObjectForm(sd.shapes[i], mats, rmats, bars, u, o => { push(); sd.shapes[i] = o; draw(); }, smats);
   // Enter closes the polygon being drawn and Escape drops it, before the window's own Enter (OK) and Escape (Cancel).
@@ -12903,6 +13197,7 @@ function sdIcon(k) {
 // Composite Column), Concrete Column Check/Design, Section Designer..., Properties... and Set Modifiers... OK once the section has a shape.
 async function hmEtabsSdSection(s, cur, was, copy, pd, after) {
   const u = hmU(), dd = (await hmRun("definition_data", {}, true)).result || {}, bars = dd.rebar_sizes || [];
+  sdMatTable = pd.materials || [];
   const mats = (pd.materials || []).filter(m => !/rebar|tendon/i.test(m.type)).map(m => m.name), rmats = (pd.materials || []).filter(m => /rebar/i.test(m.type)).map(m => m.name), conc = (pd.materials || []).filter(m => /concrete/i.test(m.type)).map(m => m.name), smats = (pd.materials || []).filter(m => /steel/i.test(m.type)).map(m => m.name);
   const extras = {...((cur && cur.extras) || {})}; let mods = cur ? {...cur.modifiers} : null, lines = (cur && cur.sd_lines) || [];
   if (!extras.Color) extras.Color = "Green";
@@ -14634,7 +14929,7 @@ function etaLinkUnit(kind, rot) {
 // pictured in kip-in). An empty list: that direction cannot be nonlinear (Rubber and High Damping Rubber U1, greyed in
 // Links 26 and "Link 6 14a", and an isolator's rotations).
 const etaLinkKipIn = (v, fp, lp, from) => u => sapConv(v, from || {f: "kip", l: "in"}, u, fp, lp, 0);
-const etaLinkSumitomo = ["SR4015-GR4"];
+const etaLinkSumitomo = ["SR4008-GR4", "SR4015-GR4", "SR4020-GR4", "SR4025-GR4"]; // Link 25; SR4015-GR4 the default
 function etaLinkNl(type, dk) {
   const r = dk[0] === "R", T = (t, x) => r ? x : t, u1 = dk === "U1";
   // Fixed Length Damper ("Links 16", "Damper Bilinear U1 fixed length damper"): 48 in, 29000000 lb/in² and 1 in² once ticked.
@@ -14642,12 +14937,12 @@ function etaLinkNl(type, dk) {
     ["FDLModulus", "Modulus of Elasticity", "E", etaLinkKipIn(29000000, 1, -2, {f: "lb", l: "in"}), "fl"], ["FDLArea", "Cross Sectional Area", "A", etaLinkKipIn(1, 0, 2), "fl"]] : [];
   switch (type) {
     case "Damper - Exponential": return [[T("TransK", "RotK"), "Stiffness", "k", 0], [T("TransC", "RotC"), "Damping", "ce", 0], [T("TransCExp", "RotCExp"), "Damping Exponent", "", 1], ...fl];
-    case "Damper - Bilinear": return [[T("TransK", "RotK"), "Stiffness", "k", 0], [T("TransC", "RotC"), "Initial Damping Coefficient", "c", etaLinkKipIn(0.001, 1, -1)],
-      [T("TransCy", "RotCy"), "Yielded Damping Coefficient", "c", 0], [T("ForceLimit", "MomentLimit"), r ? "Linear Moment Limit" : "Linear Force Limit", "f", etaLinkKipIn(0.001, 1, 0)], ...fl];
+    case "Damper - Bilinear": return [[T("TransK", "RotK"), "Stiffness", "k", 0], [T("TransC", "RotC"), "Initial Damping Coefficient", "c", etaLinkKipIn(0.001, 1, r ? 1 : -1)],
+      [T("TransCy", "RotCy"), "Yielded Damping Coefficient", "c", 0], [T("ForceLimit", "MomentLimit"), "Linear Force Limit", "f", r ? etaLinkKipIn(0.0001, 1, 1, {f: "kip", l: "ft"}) : etaLinkKipIn(0.001, 1, 0)], ...fl];
     case "Damper - Friction Spring": return [[T("TransK", "RotK"), "Initial (Nonslipping) Stiffness", "k", 0], [T("TransK1", "RotK1"), "Slipping Stiffness (Loading)", "k", 0], [T("TransK2", "RotK2"), "Slipping Stiffness (Unloading)", "k", 0],
       [T("TransU0", "RotU0"), "Precompression Displacement", "l", 0], [T("TransUs", "RotUs"), "Stop Displacement", "l", 0], ["ActiveDir", "Active Direction", "", "Compression", "select", ["Tension", "Compression", "Both"]]];
     // Damper Dimensions: a Sumitomo Product Model, or User Defined with its Shear Area and Thickness (Link 6 04).
-    case "Damper - Sumitomo Rubber GR4": return r ? [] : [["ProdModel", "Sumitomo Product Model", "", etaLinkSumitomo[0], "sumi"], ["ShearArea", "Shear Area", "A", 0, "ud"], ["Thickness", "Thickness", "L", 0, "ud"],
+    case "Damper - Sumitomo Rubber GR4": return r ? [] : [["ProdModel", "Sumitomo Product Model", "", "SR4015-GR4", "sumi"], ["ShearArea", "Shear Area", "A", 0, "ud"], ["Thickness", "Thickness", "L", 0, "ud"],
       ["Temp", "Temperature", "T", u => tempUnit(u) === "F" ? 36 : 2.2222], ["ExcitFreq", "Excitation Frequency", "hz", 1], ["RigidFluctCoeff", "Rigidity Fluctuation Coefficient", "", 1], ["DampFluctCoeff", "Damping Fluctuation Coefficient", "", 1]];
     case "Gap": case "Hook": return [[T("TransK", "RotK"), "Stiffness", "k", 0], [T("TransOpen", "RotOpen"), "Open", "l", 0]];
     case "Plastic (Wen)": return [[T("TransK", "RotK"), "Stiffness", "k", 0], [T("TransYield", "RotYield"), "Yield Strength", "f", 0], [T("TransRatio", "RotRatio"), "Post Yield Stiffness Ratio", "", 0], [T("TransExp", "RotExp"), "Yielding Exponent", "", 2]];
@@ -14680,13 +14975,17 @@ function etaLinkNl(type, dk) {
 // The types whose rows say Nonlinear? themselves (the others are nonlinear where their nonlinear fields are filled in).
 const etaLinkFlagged = t => ["Damper - Sumitomo Rubber GR4", "Triple Pendulum Isolator", "High Damping Rubber Isolator"].includes(t);
 const etaLinkMulti = t => /^MultiLinear/.test(t);
-// MultiLinear Plastic's hysteresis parameters (Link 6 08a-08g): Pivot's on the form itself (10, 10, 0.7, 0.7, 0), Concrete,
-// BRB Hardening and Degrading behind their Modify/Show ... Parameters button (forms not pictured yet: built from ETABS's table fields).
-const etaLinkHysFields = {Pivot: [["PivotAlpha1", "α 1", "", 10], ["PivotBeta1", "β 1", "", 0.7], ["PivotEta", "η", "", 0], ["PivotAlpha2", "α 2", "", 10], ["PivotBeta2", "β 2", "", 0.7]], Concrete: [["ConcreteFact", "Energy Degradation Factor"]],
-  "BRB Hardening": [["BRBSym", "Symmetric", "check"], ["BRBTensHF", "Tension Hardening Factor"], ["BRBTensMPD", "Tension Max Plastic Deformation Ratio"], ["BRBTensAPD", "Tension Accumulated Plastic Deformation Ratio"], ["BRBTensPro", "Tension Proportion"],
-    ["BRBCompHF", "Compression Hardening Factor"], ["BRBCompMPD", "Compression Max Plastic Deformation Ratio"], ["BRBCompAPD", "Compression Accumulated Plastic Deformation Ratio"], ["BRBCompPro", "Compression Proportion"]],
-  Degrading: [["DegSym", "Symmetric", "check"], ...["Tens", "Comp"].flatMap(s => ["f0", "f1", "f2", "x1", "x2"].map(x => [`Deg${s}${x}`, `${s === "Tens" ? "Tension" : "Compression"} ${x}`]).concat([[`Deg${s}ADWF`, `${s === "Tens" ? "Tension" : "Compression"} Accumulation Deformation Factor`]])),
-    ["DegStiff", "Stiffness Weighting Factor"], ["DegLargeSml", "Larger-Smaller Weighting Factor"]]};
+// MultiLinear Plastic's hysteresis parameters [field, label, kind, default]: Pivot's on the form itself (Link 21: 10, 10,
+// 0.7, 0.7, 0), Concrete, BRB Hardening and Degrading on Hysteresis Parameters for ... (Link 14, 16-17, 19-20), their
+// Compression Parameters following Tension while Parameters are Symmetric.
+const etaLinkHysTC = (p, rows) => ["Tens", "Comp"].flatMap(x => rows.map(([k, l, d]) => [p + x + k, l, x === "Tens" ? "t" : "c", d]));
+const etaLinkHysFields = {Pivot: [["PivotAlpha1", "α 1", "", 10], ["PivotBeta1", "β 1", "", 0.7], ["PivotEta", "η", "", 0], ["PivotAlpha2", "α 2", "", 10], ["PivotBeta2", "β 2", "", 0.7]],
+  Concrete: [["ConcreteFact", "Energy Degradation Factor", "p", 0]],
+  "BRB Hardening": [["BRBSym", "Parameters are Symmetric (Compression Same as Tension)", "check", "Yes"], ...etaLinkHysTC("BRB", [["HF", "Hardening Factor", 1], ["MPD", "Maximum Plastic Deformation at Full Hardening as a Ratio of Yield", 25],
+    ["APD", "Accumulated Plastic Deformation at Full Hardening as a Ratio of Yield", 50], ["Pro", "Proportion of Accumulated Plastic Deformation", 0]])],
+  Degrading: [["DegSym", "Parameters are Symmetric (Compression Same as Tension)", "check", "Yes"], ...etaLinkHysTC("Deg", [["f0", "Energy Factor at Yield, f0", 1], ["f1", "Energy Factor at Moderate Deformation, f1", 1], ["f2", "Energy Factor at Maximum Deformation, f2", 1],
+    ["x1", "Moderate Deformation Level as a Ratio of Yield, x1", 5], ["x2", "Maximum Deformation Level as a Ratio of Yield, x2", 10], ["ADWF", "Accumulation Deformation Weighting Factor", 0]]),
+    ["DegStiff", "Stiffness Weighting Factor", "o", 0], ["DegLargeSml", "Larger-Smaller Weighting Factor", "o", 0]]};
 const etaLinkDefault = v => typeof v === "function" ? String(+(+v(hmU())).toPrecision(6)) : v === "1in" ? String(sapConv(1, {f: "kip", l: "in"}, hmU(), 0, 1, 0)) : String(v);
 
 async function etaLinks() {
@@ -14780,7 +15079,7 @@ async function etaLinks() {
             }
             if (nl && etaLinkMulti(type)) {
               const pts = s.pts.length ? s.pts : [[-10, -1], [-1, -1], [0, 0], [1, 1], [10, 1]];
-              if (type === "MultiLinear Plastic") { base.HysType = s.row.HysType || "Kinematic"; (etaLinkHysFields[base.HysType] || []).forEach(([f]) => { if (s.row[f] != null) base[f] = String(s.row[f]); }); }
+              if (type === "MultiLinear Plastic") { base.HysType = s.row.HysType || "Kinematic"; (etaLinkHysFields[base.HysType] || []).forEach(([f, , , def]) => { if (s.row[f] != null || def != null) base[f] = String(s.row[f] ?? def); }); }
               pts.forEach(([a, b], i) => rows.push(Object.assign(i ? {Direction: x} : Object.assign({}, gen, base), rot ? {RotPoint: String(i + 1), Rotation: String(a), Moment: String(b)} : {TransPoint: String(i + 1), Displ: String(a), Force: String(b)})));
               continue;
             }
@@ -14973,7 +15272,7 @@ function etaLinkDir(st, name, type, dk, after) {
       const t = hy.value, fs = etaLinkHysFields[t] || [], box = q(d, "#dHp");
       d.querySelectorAll("#dHp [data-f]").forEach(i => { if (!i.disabled && i.type !== "checkbox") r[i.dataset.f] = i.value; });
       if (t === "Pivot") box.innerHTML = `<div style="display:grid;grid-template-columns:30px 96px 40px 96px 40px 96px;gap:6px 10px;align-items:center;padding:2px 10px">${fs.map(([f, l, , def]) => `<span style="text-align:center">${l.replace(/ (\d)$/, "<sub>$1</sub>")}</span><input data-f="${f}" type="number" step="any" value="${esc(r[f] ?? def)}" style="width:96px">`).join("")}</div>`;
-      else if (fs.length) { box.innerHTML = `<div style="text-align:center"><button id="dHb" style="width:290px">Modify/Show ${t} Parameters...</button></div>`; q(d, "#dHb").onclick = () => etaLinkHysParams(t, r); }
+      else if (fs.length) { box.innerHTML = `<div style="text-align:center"><button id="dHb" style="width:260px">Modify/Show ${t} Parameters...</button></div>`; q(d, "#dHb").onclick = () => etaLinkHysParams(t, r, name, dk); }
       else box.innerHTML = `<p style="text-align:center;margin:6px 0">No Parameters are Required for this Hysteresis</p>`;
       q(d, "#dHd").innerHTML = etaLinkHysSvg(t);
     };
@@ -14981,12 +15280,29 @@ function etaLinkDir(st, name, type, dk, after) {
   }
   return d;
 }
-// Concrete, BRB Hardening and Degrading parameters (the button on Link 6 08e-08g; their own forms are not pictured yet,
-// so they hold ETABS's table fields). Values go into the direction's working row.
-function etaLinkHysParams(t, r) {
-  const fs = etaLinkHysFields[t];
-  return dialog(t + " Hysteresis Parameters", `<div style="display:grid;grid-template-columns:1fr 96px;gap:5px 8px;align-items:center;padding:4px 10px">${fs.map(([f, l, k]) => k === "check" ? `<label style="grid-column:1/3"><input type="checkbox" data-h="${f}" ${/^y/i.test(r[f] || "Yes") ? "checked" : ""}> ${l}</label>` : `<span>${l}</span><input data-h="${f}" type="number" step="any" value="${esc(r[f] ?? 0)}">`).join("")}</div>`,
-    [["OK", x => { for (const i of x.querySelectorAll("[data-h]")) { if (i.type === "checkbox") { r[i.dataset.h] = i.checked ? "Yes" : "No"; continue; } const v = parseFloat(i.value); if (!isFinite(v)) { formError(x, "Each value is a number."); return false; } r[i.dataset.h] = String(v); } return true; }], ["Cancel"]], {width: 460});
+// Hysteresis Parameters for Concrete / BRB Hardening / Degrading Stiffness (Link 14, 16-17, 19-20): Link Property (with the
+// direction for Degrading), Parameters or Tension/Compression Parameters (Compression greyed and equal to Tension while
+// Parameters are Symmetric), Other Parameters. Values go into the direction's working row.
+function etaLinkHysParams(t, r, name, dk) {
+  const fs = etaLinkHysFields[t], v = ([f, , , def]) => r[f] ?? def, deg = t === "Degrading";
+  const fsx = (l, b) => `<fieldset style="margin:0 0 6px"><legend>${l}</legend>${b}</fieldset>`;
+  const grid = rows => `<div style="display:grid;grid-template-columns:1fr 86px;gap:5px 10px;align-items:center;padding:2px 10px">${rows.map(x => `<span>${x[1]}</span><input data-h="${x[0]}" type="number" step="any" value="${esc(v(x))}">`).join("")}</div>`;
+  const of = k => fs.filter(x => x[2] === k), sym = fs.find(x => x[2] === "check");
+  const body = fsx("", `<div style="display:grid;grid-template-columns:${deg ? "150px" : "180px"} 1fr;align-items:center;padding:4px 10px"><span>Link Property</span><input class="grey" readonly value="${esc(deg ? `${name}    (Direction ${dk})` : name)}" style="width:${deg ? 250 : 190}px"></div>`)
+    + (of("p").length ? fsx("Parameters", grid(of("p"))) : fsx("Tension Parameters", grid(of("t"))) + fsx("Compression Parameters", grid(of("c"))) + (of("o").length ? fsx("Other Parameters", grid(of("o"))) : ""))
+    + (sym ? `<label style="display:block;margin:6px 4px"><input type="checkbox" data-h="${sym[0]}" ${/^y/i.test(v(sym)) ? "checked" : ""}> ${sym[1]}</label>` : "");
+  const x = dialog("Hysteresis Parameters for " + (deg ? "Degrading Stiffness" : t), body, [["OK", x => {
+    const out = {};
+    for (const i of x.querySelectorAll("[data-h]")) { if (i.type === "checkbox") { out[i.dataset.h] = i.checked ? "Yes" : "No"; continue; } const n = parseFloat(i.value); if (!isFinite(n)) { formError(x, "Each value is a number."); return false; } out[i.dataset.h] = String(n); }
+    Object.assign(r, out); return true;
+  }], ["Cancel"]], {width: deg ? 500 : t === "Concrete" ? 420 : 560});
+  if (sym) {
+    const c = q(x, `[data-h="${sym[0]}"]`), pairs = of("c").map(([f]) => [q(x, `[data-h="${f}"]`), q(x, `[data-h="${f.replace("Comp", "Tens")}"]`)]);
+    const sp = () => pairs.forEach(([cc, tt]) => { cc.disabled = c.checked; if (c.checked) cc.value = tt.value; });
+    pairs.forEach(([cc, tt]) => tt.addEventListener("input", () => { if (c.checked) cc.value = tt.value; }));
+    c.onchange = sp; sp();
+  }
+  return x;
 }
 // The Hysteresis Definition Diagram: "<type> Hysteresis Model", Action against Deformation, loops of growing amplitude
 // (pinched for Takeda, Pivot and Degrading; the compression side small for Concrete), as ETABS draws them.
