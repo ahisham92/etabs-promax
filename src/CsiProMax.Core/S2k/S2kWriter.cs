@@ -33,7 +33,21 @@ public static class S2kWriter
         return result;
     }
 
+    /// <summary>The model as SAP2000's tables. A model opened from a SAP2000 file is written as that file, with only
+    /// what was changed since put in (<see cref="SourceTables"/>), so nothing of the file is lost.</summary>
     public static Result Write(StructuralModel m, string fileName = "model.s2k")
+    {
+        var own = WriteOwn(m, fileName);
+        if (m.Source is not { Program: "sap2000" } source) return own;
+        try { return own with { Text = SourceTables.Merge(source, own.Text) }; }
+        catch (Exception ex) when (ex is FormatException or InvalidDataException or IOException)
+        {
+            return own with { Notes = [.. own.Notes, $"The SAP2000 file this model was opened from could not be read back ({ex.Message}); its tables were written from the model."] };
+        }
+    }
+
+    /// <summary>The model as CSI ProMax writes it, without the file it was opened from.</summary>
+    public static Result WriteOwn(StructuralModel m, string fileName = "model.s2k")
     {
         var notes = new List<string>();
         var tables = new List<string>();

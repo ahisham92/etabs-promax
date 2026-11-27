@@ -44,6 +44,10 @@ public sealed class StructuralModel
     /// <summary>What ETABS's .e2k has no place for (SAP2000 joint constraints and moving loads, SAFE design strips):
     /// kept in the .cpm and written into the .s2k and .f2k. Null until one is defined.</summary>
     public ProgramExtras? Extras { get; set; }
+    /// <summary>The SAP2000 (or SAFE) file the model was opened from, every table as the file had it, and what CSI ProMax
+    /// wrote of the model as it was read (<see cref="CsiProMax.CsiTables.SourceTables"/>): the program's file is written
+    /// back as the original, with only what was changed since put in, so nothing is lost. Null for other models.</summary>
+    public ModelSource? Source { get; set; }
     /// <summary>Tables of a SAP2000 or SAFE file the Modeler opened that it has no form for (design preferences and
     /// overwrites, punching checks, insertion points, ...), kept as the file had them, by "program|TABLE NAME", and
     /// written back into that program's file, so nothing of the file is lost. Null when there are none.</summary>
@@ -279,4 +283,13 @@ public sealed class RawSection
     /// <summary>The heading of the section before it in the file it came from ("" for the first), to put it back in place.</summary>
     public string After { get; set; } = "";
     public List<string> Lines { get; set; } = [];
+}
+
+/// <summary>The program file a model was opened from, kept packed (gzip, base64): the original tables, and the
+/// tables CSI ProMax wrote of the model just after reading it (the base the changes since are measured from).</summary>
+public sealed class ModelSource
+{
+    public string Program { get; set; } = "";
+    public string Original { get; set; } = "";
+    public string Written { get; set; } = "";
 }
