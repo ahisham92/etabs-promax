@@ -499,6 +499,8 @@ public sealed class ComEtabs : ICsiLink, IDisposable
     internal sealed class ReadCache
     {
         public IReadOnlyList<TableName>? Tables;
+        /// <summary>The cases and combinations the display selection was set for in this session.</summary>
+        public string? ShownFor;
         public readonly Dictionary<string, TableData> Reads = new(StringComparer.Ordinal);
         public int Depth = 1;
     }
@@ -519,7 +521,7 @@ public sealed class ComEtabs : ICsiLink, IDisposable
     /// <summary>Forgets what the session read (the program's output options changed), keeping the session.</summary>
     internal void Forget()
     {
-        if (_session is { } s) lock (_work) { s.Tables = null; s.Reads.Clear(); }
+        if (_session is { } s) lock (_work) { s.Tables = null; s.ShownFor = null; s.Reads.Clear(); }
     }
 
     private sealed class Ending(ComEtabs link) : IDisposable
@@ -633,6 +635,11 @@ public sealed class ComEtabs : ICsiLink, IDisposable
     {
         // The display selection is set only when it changes: set before every one of a pack's 230 tables, ETABS 23 took
         // 2.3 s a table and up to 11 minutes for one (0.4.60 full test, pack trace), and the ETABS part ran out of time.
+        // In a read session the model does not change: once the selection is set for these cases and combinations, the
+        // patterns and the model file are not asked for again before every table (GetModelFilename was never timed, and
+        // 0.4.61's packs still had a 2.4 s floor a table where ETABS itself gives a small table in 0.2-0.5 s, 2026-11-27).
+        var asked = string.Join("\u0001", cases ?? []) + "\u0002" + string.Join("\u0001", combos ?? []);
+        if (_session is { } inSession && inSession.ShownFor == asked && _shown is not null) goto read;
         int patternCount = 0; string[] patterns = None;
         try { if (Convert.ToInt32(m.LoadPatterns.GetNameList(ref patternCount, ref patterns)) != 0) patterns = None; }
         catch (Exception ex) when (ex is not COMException) { patterns = None; }
@@ -646,6 +653,8 @@ public sealed class ComEtabs : ICsiLink, IDisposable
             EditableTables.ShowEveryPattern(m);
             _shown = shown;
         }
+        if (_session is { } setIn) setIn.ShownFor = asked;
+        read:
         // Section cut forces are given only for the cuts selected for display; none is selected at first (ETABS 23
         // answered no rows for a cut that was defined and analysed), so every cut is selected. Best effort.
         if (key.Contains("Section Cut Forces", StringComparison.OrdinalIgnoreCase))

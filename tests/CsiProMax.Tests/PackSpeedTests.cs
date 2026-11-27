@@ -29,6 +29,17 @@ static class PackSpeedTests
             link.ReadTable("Refused 0", null, null);
             Equal(2, model.Tables.Listed, "out of a session the list is asked for again");
         });
+        yield return ("pack speed: in a read session the patterns and model file are asked for once, not before every table", () =>
+        {
+            var model = new CpmFakes.PackTablesModel();
+            using var link = new ComEtabs(CsiProgram.Etabs, () => model);
+            using (PackSession.Start(link))
+                for (var i = 0; i < 10; i++) link.ReadTable("Story Drifts", ["DEAD", "C" + (i % 2 == 0 ? "" : "x")], []);
+            Equal(2, model.FileAsked, "model file asked (once per cases asked for)");
+            var before = model.FileAsked;
+            for (var i = 0; i < 3; i++) link.ReadTable("Story Drifts", ["DEAD"], []);
+            Equal(before + 3, model.FileAsked, "out of a session it is asked before every table");
+        });
         yield return ("pack speed: a table is read once in a session; a change or a new output setting reads it again", () =>
         {
             var model = new CpmFakes.PackTablesModel();
@@ -92,7 +103,8 @@ namespace CpmFakes
     }
     public sealed class PackPatterns
     {
-        public int GetNameList(ref int n, ref string[] names) { n = 1; names = ["DEAD"]; return 0; }
+        public int Asked;
+        public int GetNameList(ref int n, ref string[] names) { Asked++; n = 1; names = ["DEAD"]; return 0; }
         public int Add(string name, int type, double selfWeight, bool addCase) => 0;
     }
     public sealed class PackTablesModel
@@ -100,6 +112,7 @@ namespace CpmFakes
         public PackCountingTables Tables { get; } = new();
         public PackCountingTables DatabaseTables => Tables;
         public PackPatterns LoadPatterns { get; } = new();
-        public string GetModelFilename(bool path) => @"C:\x\cpm.EDB";
+        public int FileAsked;
+        public string GetModelFilename(bool path) { FileAsked++; return @"C:\x\cpm.EDB"; }
     }
 }
