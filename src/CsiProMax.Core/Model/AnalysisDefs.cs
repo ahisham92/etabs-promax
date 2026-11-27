@@ -103,6 +103,8 @@ public static class AnalysisDefs
         SetFunctionSource(m, name, null);
         // SAP2000's own rows of it (its code, type and parameters; a power spectral density or steady state function lives there only).
         var sap = SapFunctions.Remove(m, name);
+        // ETABS's own rows of it (its code or type and parameters, from the Engine's ETABS forms).
+        sap |= EtabsFunctions.Remove(m, name);
         return (s is not null && s.Lines.RemoveAll(l => Tokenize(l) is { Count: > 1 } t && t[0] == "FUNCTION" && Unquote(t[1]) == name) > 0) | sap;
     }
 

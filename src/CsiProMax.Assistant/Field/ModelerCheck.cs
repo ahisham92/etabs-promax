@@ -385,7 +385,7 @@ public static class ModelerCheck
           if (!n && !grid) return {fail: "the Reinforcing Bar Sizes form did not open"};
           if (n) { n.value = "CPMB"; document.querySelector(".dlg #rbA").value = 0.0001; document.querySelector(".dlg #rbD").value = 0.0113; document.querySelector(".dlg #rbAdd").click(); }
           else {
-            // ETABS 23.2's form: a grid with a blank last row to type the new bar into, then OK.
+            // The 23.2 form (Etabs): a grid with a blank last row to type the new bar into, then OK.
             const cells = [...grid.lastElementChild.querySelectorAll("input")];
             [["CPMB"], [0.0001], [0.0113]].forEach(([v], k) => { cells[k].value = v; });
             const ok = [...document.querySelectorAll(".dlg button")].find(b => b.textContent.trim() === "OK");
@@ -398,7 +398,7 @@ public static class ModelerCheck
           if (!dd.rebar_sizes.some(b => b.name === "CPMB")) return {fail: "the bar CPMB did not reach the model: " + (hm.lastError || "")};
           await act("m:undo"); await wait(1200);
           await act("m:dt:Generalized Displacement Definitions"); await wait(900);
-          // ETABS 23.2 lists the definitions first (Generalized Displacements); Add New Gen Displ... opens the data form.
+          // Etabs 23.2 lists the definitions first (Generalized Displacements); Add New Gen Displ... opens the data form.
           const addNew = [...document.querySelectorAll(".dlg button")].find(b => b.textContent.trim() === "Add New Gen Displ...");
           if (addNew) { addNew.click(); await wait(300); }
           const gd = document.querySelector(".dlg #dtB input, .dlg #gN");
