@@ -215,7 +215,14 @@ public static class EngineRun
                 ? $"Starting {program.Name} in a window of its own, in the background (yours, if open, is not touched)"
                 : $"Starting {program.Name} on the model it analysed ({Path.GetFileName(file)}), in the background");
             window = ScratchProgram.Start(program, ctx, file, asIs: !mustAnalyse);
-            if (window is null) { Fail($"{program.Name} could not be started with the model. {Failed(ctx)}"); return; }
+            if (window is null)
+            {
+                // A file the program rejected is the headline, in its own words (Ahmed's real model, 2026-11-27: the report
+                // led with "the model must be saved first" while ETABS had said "May not be a valid ETABS 23.2.0 text file").
+                var open = ctx.Steps.FirstOrDefault(s => !s.Ok && !s.Skipped && s.Name.StartsWith("open ", StringComparison.Ordinal));
+                Fail(open is not null ? $"{program.Name} could not open the model: {open.Detail}" : $"{program.Name} could not be started with the model. {Failed(ctx)}");
+                return;
+            }
             lock (Gate) { _starts++; _window = window; }
             if (window.ModelPath.Length > 0) mon.ModelFile = window.ModelPath;
             tail.File = RunLog.FileOf(mon.ModelFile); mon.LogFile = tail.File;

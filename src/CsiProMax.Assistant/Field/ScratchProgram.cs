@@ -193,6 +193,10 @@ public static class ScratchDialogs
         (text.Contains("Error decompressing file", StringComparison.OrdinalIgnoreCase) || text.Contains("Error in performing miOpen", StringComparison.OrdinalIgnoreCase)
             // ETABS 23 on a line of a text file it cannot read: "Error reading line 348. Line Ignored." (2026-11-26).
             || text.Contains("Line Ignored", StringComparison.OrdinalIgnoreCase)
+            // ETABS 23.2 on a whole .e2k it rejects: "Error importing from file. May not be a valid ETABS 23.2.0 text file"
+            // (Ahmed's real model in the Engine, 2026-11-27; File.OpenFile still answered 0 and left a blank model).
+            || text.Contains("Error importing from file", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("not be a valid", StringComparison.OrdinalIgnoreCase)
             // The file picker the test cancelled (IsOpenFileBox): the call that opened it did not get its file.
             || text.Contains("asked for a file to open", StringComparison.OrdinalIgnoreCase))
         && !text.Contains("licen", StringComparison.OrdinalIgnoreCase);
@@ -777,6 +781,18 @@ public sealed class ScratchProgram : IScratchWindow
             if (answer != 0 || refused.Length > 0)
                 throw new EtabsException($"{name} could not open the file the Modeler wrote (it answered {answer})." + (refused.Length > 0 ? $" It said: {string.Join(" | ", refused)}; the test pressed OK." : ""));
             Ask(FileTimeout, "use the model's own units", m => { CsiProMax.Assistant.Etabs.EditableTables.PresentAsDatabase(m); return 0; }, $"{name} did not answer within {FileTimeout.TotalMinutes:0} minutes.");
+            // ETABS 23.2 answered 0 to an .e2k it rejected ("Error importing from file. May not be a valid ETABS 23.2.0 text
+            // file") and held its blank default model; the Engine then saved and ran that (Ahmed's real model, 2026-11-27).
+            // A text file whose objects did not come in stops here, with the program's own words, never runs on a blank model.
+            if (!BuildsThroughApi(_program, modelFile) && TextObjectCount(_program, modelFile) is var expected and > 0)
+            {
+                var held = Convert.ToInt32(Ask(FileTimeout, "count the objects", m => Count(m, "AreaObj.Count") + Count(m, "FrameObj.Count"), $"{name} did not answer within {FileTimeout.TotalMinutes:0} minutes."));
+                if (held == 0)
+                {
+                    lock (_noticesClosed) refused = _noticesClosed.Where(n => ScratchDialogs.IsFileRefused(n)).ToArray();
+                    throw new EtabsException(ImportRejected(name, Path.GetFileName(modelFile), expected, refused));
+                }
+            }
             // SAFE 23.1 answered 0 to the Modeler's .f2k and held a new default model, with none of the file's slabs,
             // beams or strips (tester's PC, 0.4.56, 2026-11-26). A file the test can build is then built instead.
             if (BuildsThroughApi(_program, modelFile))
@@ -968,6 +984,30 @@ public sealed class ScratchProgram : IScratchWindow
     /// The program said it opened the text file but holds none of its objects (<paramref name="held"/>: its areas and
     /// frames): SAFE 23.1 does so with the Modeler's .f2k (0.4.56, 2026-11-26).
     /// </summary>
+    /// <summary>The objects (frames and areas) an .e2k or .s2k holds; 0 for any other file.</summary>
+    public static int TextObjectCount(CsiProgram program, string file)
+    {
+        var ext = Path.GetExtension(file).ToLowerInvariant();
+        if (ext is not (".e2k" or ".$et" or ".s2k" or ".$2k")) return 0;
+        try
+        {
+            var text = File.ReadAllText(file);
+            if (ext is ".e2k" or ".$et")
+            {
+                var m = CsiProMax.E2k.E2kReader.Read(text);
+                return m.Lines.Count + m.Areas.Count;
+            }
+            var t = CsiProMax.CsiTables.CsiTableText.Parse(text);
+            return new[] { "CONNECTIVITY - FRAME", "CONNECTIVITY - AREA" }.Sum(x => t.TryGetValue(x, out var rows) ? rows.Count : 0);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or CsiProMax.E2k.E2kFormatException) { return 0; }
+    }
+
+    /// <summary>The words of a failed open: the program's own message first, so the Run Report leads with it.</summary>
+    public static string ImportRejected(string program, string file, int expected, IReadOnlyList<string> said) =>
+        (said.Count > 0 ? $"{program} rejected {file}: {string.Join(" | ", said)}. " : $"{program} rejected {file}. ") +
+        $"It answered that it opened it but holds none of its {expected} frames and areas (its blank default model), so nothing runs on it.";
+
     public static bool OpenedEmpty(string fileText, int held) => held == 0 && F2kRebuild.ObjectCount(fileText) > 0;
 
     private static int Count(object model, string path)
