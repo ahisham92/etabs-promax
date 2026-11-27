@@ -304,6 +304,7 @@ public static class FieldTest
         var target = o.Folder ?? Folder;
         var work = o.WorkFolder ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CsiProMax", "Field test", $"{ReportName(link.Program, o.OnlyProgram)} {now:yyyy-MM-dd HHmmss}");
         if (o.Full) Directory.CreateDirectory(work);
+        if (o.Full && o.SettingsRoot is null) Tools.Pack.TraceFile = Path.Combine(work, "pack trace.txt");
         var ctx = new FieldContext(link.Program, work, link) { Progress = o.Progress, Outcome = o.Outcome };
         try { o.OnWorkFolder?.Invoke(work); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
         // Test copies an earlier run left open go first: they would count as the program being open below.

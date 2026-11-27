@@ -70,13 +70,23 @@ public static class ScratchDialogs
         foreach (var (window, title) in Of(processId))
         {
             if (MayClose(title) && Button(window, "OK") is { } ok && IsWindowEnabled(ok) && PostMessageW(ok, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero)) closed.Add(title);
+            else if (program is not null && IsProgramBox(title, program) && IsDialog(window) && Button(window, "No") is { } no && IsWindowEnabled(no)
+                     && LongWords(window).ToList() is var asked && IsReiterateQuestion(asked)
+                     && PostMessageW(no, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero))
+                // ETABS 23's steel design by the Direct Analysis Method asks whether to analyse and design again when the
+                // stiffness reduction factors changed; it held the 0.4.59 full test 10 minutes. The test's own design is
+                // one pass: No.
+                closed.Add($"{title}: asked whether to reiterate the analysis and design (No)");
             else if (program is not null && IsProgramBox(title, program) && IsDialog(window) && Button(window, "OK") is { } fine && IsWindowEnabled(fine)
                      && LongWords(window).ToList() is var words && !words.Any(w => w.Contains("licen", StringComparison.OrdinalIgnoreCase))
                      && PostMessageW(fine, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero))
                 // Every message box of the program itself is answered OK and said (Ahmed, 2026-11-26: "please handle the
                 // pop ups"; SAP2000's "Error getting text file version!", "Error reading line"): never a licence message.
                 closed.Add($"{title}: {(words.FirstOrDefault(IsFileRefused) ?? string.Join(" ", words.Where(w => w.Trim().Length > 0).Take(3))).Trim()} (OK)");
-            else if (program is not null && IsOpenFileBox(title) && Button(window, "Cancel") is { } cancel && IsWindowEnabled(cancel)
+            // Only the real file picker, told by its Open button: ETABS 23 may also show its open progress under the same
+            // title with a Cancel button, and cancelling that stopped the Engine's design-only open of an .edb that was
+            // there (0.4.59 full test: "it answered 0 ... Open Model File (Cancel)").
+            else if (program is not null && IsOpenFileBox(title) && Button(window, "Open") is not null && Button(window, "Cancel") is { } cancel && IsWindowEnabled(cancel)
                      && PostMessageW(cancel, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero))
                 closed.Add($"{title}: {program.Name} asked for a file to open (Cancel)");
             else if (IsMaintenanceReminder(title, Words(window))) closed.AddRange(AnswerMaintenanceReminder([processId]));
@@ -127,6 +137,14 @@ public static class ScratchDialogs
         || title.Trim().Equals("Open", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>ETABS's "Analysis Messages" window (warnings while it makes auto lateral loads or runs).</summary>
+    /// <summary>ETABS's question after a Direct Analysis Method steel design ("...reduction factors... Do you want to
+    /// reiterate analysis and design?"). Never a licence message.</summary>
+    public static bool IsReiterateQuestion(IEnumerable<string> words)
+    {
+        var all = string.Join(" ", words);
+        return all.Contains("reiterate analysis and design", StringComparison.OrdinalIgnoreCase) && !all.Contains("licen", StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>ETABS's plain "Log" window, shown when it opens a .e2k it had to change (duplicated lines).</summary>
     public static bool IsLineLog(string title) => title.Trim().Equals("Log", StringComparison.OrdinalIgnoreCase);
 
@@ -556,6 +574,7 @@ public sealed class ScratchProgram : IScratchWindow
             var mine = Process.GetProcessesByName(_program.ProcessName).Select(p => p.Id).Where(id => !before.Contains(id)).ToList();
             ProcessId = mine.Count == 1 ? mine[0] : 0;
             if (ProcessId != 0) com.Known = ProcessId;
+            if (ProcessId != 0) Remember(ProcessId);
             // From here to the window's end, an "analysis complete" notice of this process is closed as it appears.
             if (ProcessId != 0) _watch = new Timer(_ => { try { lock (_noticesClosed) _noticesClosed.AddRange(ScratchDialogs.CloseNotices(ProcessId, _program)); var closing = _closing; if (ScratchDialogs.AnswerCloseQuestion(ProcessId, closing) > 0) { if (closing) _closeAnswered = true; else Interlocked.Increment(ref _keptOpen); } } catch (Exception ex) when (ex is not OutOfMemoryException) { /* the next look tries again */ } }, null, 1000, 1000);
             return mine.Count == 1 ? $"{name} process {ProcessId}, through {Path.GetFileName(ApiFile)}"
@@ -596,6 +615,7 @@ public sealed class ScratchProgram : IScratchWindow
             lock (_noticesClosed) refused = _noticesClosed.Where(n => ScratchDialogs.IsFileRefused(n)).ToArray();
             if (answer != 0 || refused.Length > 0)
                 throw new EtabsException($"{name} could not open the file the Modeler wrote (it answered {answer})." + (refused.Length > 0 ? $" It said: {string.Join(" | ", refused)}; the test pressed OK." : ""));
+            Ask(FileTimeout, "use the model's own units", m => { CsiProMax.Assistant.Etabs.EditableTables.PresentAsDatabase(m); return 0; }, $"{name} did not answer within {FileTimeout.TotalMinutes:0} minutes.");
             // SAFE 23.1 answered 0 to the Modeler's .f2k and held a new default model, with none of the file's slabs,
             // beams or strips (tester's PC, 0.4.56, 2026-11-26). A file the test can build is then built instead.
             if (BuildsThroughApi(_program, modelFile))
@@ -647,6 +667,14 @@ public sealed class ScratchProgram : IScratchWindow
                 var (done, refused) = ModelerTables.Apply(Link, cpm);
                 var answer = Convert.ToInt32(Ask(FileTimeout, "save the scratch model", m => m.File.Save(target),
                     $"{name} did not finish saving the scratch model within {FileTimeout.TotalMinutes:0} minutes. A message may be waiting in its window."));
+                // ETABS Plus takes no slab rebar object at all (ETABS Ultimate and SAFE do): a limit of this PC's licence,
+                // said as not tested, not as a refusal of the Modeler's data.
+                var edition = refused.Where(r => r.Contains(Tools.SlabTables.RebarRefused, StringComparison.Ordinal)).ToList();
+                if (edition.Count > 0)
+                {
+                    refused = refused.Except(edition).ToList();
+                    ctx.Skip($"{name} takes the Modeler's slab rebar objects", $"this PC's {name} licence (ETABS Plus) has no slab rebar objects; ETABS Ultimate and SAFE take them ({edition.Count} refused)"); // ETABS itself
+                }
                 FieldContext.Expect(refused.Count == 0, "refused: " + string.Join(" | ", refused));
                 return string.Join("; ", done);
             }) is null && _left) return false;
@@ -837,9 +865,14 @@ public sealed class ScratchProgram : IScratchWindow
     /// </summary>
     public static bool IsLeftCopy(IEnumerable<string> titles)
     {
+        // Windows the test answers itself also count (ETABS's "Log", the file picker, its own message boxes): the 0.4.58
+        // run left two ETABS on their "Log" window and the 0.4.59 run did not end them.
+        static bool Scratch(string t) => t.Contains("cpm-field-test-", StringComparison.OrdinalIgnoreCase);
+        static bool Answered(string t) => ScratchDialogs.MayClose(t) || ScratchDialogs.IsStoryPicker(t) || ScratchDialogs.IsImportLog(t)
+            || ScratchDialogs.IsLineLog(t) || ScratchDialogs.IsOpenFileBox(t) || ScratchDialogs.IsAnalysisMessages(t)
+            || t.Trim() is "ETABS" or "SAP2000" or "SAFE"; // ETABS itself: the program's own message boxes
         var all = titles.Where(t => !string.IsNullOrWhiteSpace(t)).ToList();
-        return all.Any(t => t.Contains("cpm-field-test-", StringComparison.OrdinalIgnoreCase))
-            && all.All(t => t.Contains("cpm-field-test-", StringComparison.OrdinalIgnoreCase) || ScratchDialogs.MayClose(t) || ScratchDialogs.IsStoryPicker(t) || ScratchDialogs.IsImportLog(t));
+        return all.Any(Scratch) && all.All(t => Scratch(t) || Answered(t));
     }
 
     /// <summary>
@@ -848,10 +881,92 @@ public sealed class ScratchProgram : IScratchWindow
     /// ("ETABS 23 is open"). Only a process <see cref="IsLeftCopy"/> names; it is ended without saving (Ahmed's choice,
     /// 2026-11-25: the test may end "only its own test copy"). Returns one line for each.
     /// </summary>
+    /// <summary>The scratch processes the test started, by process id and start time, so a later run knows its own.</summary>
+    internal static string StartedFile { get; set; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CsiProMax", "Field test", "scratch processes.txt");
+
+    private static void Remember(int processId)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            Directory.CreateDirectory(Path.GetDirectoryName(StartedFile)!);
+            File.AppendAllText(StartedFile, $"{processId}|{process.StartTime.ToUniversalTime().Ticks}{Environment.NewLine}");
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or NotSupportedException) { /* only a memory */ }
+    }
+
+    /// <summary>Whether this process is one the test started (same id, same start time), from <see cref="StartedFile"/>.</summary>
+    internal static bool Started(int processId, DateTime startTime, IEnumerable<string> lines) =>
+        lines.Select(l => l.Split('|')).Any(p => p.Length == 2 && p[0] == processId.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            && long.TryParse(p[1], out var ticks) && Math.Abs(ticks - startTime.ToUniversalTime().Ticks) < TimeSpan.TicksPerSecond);
+
+    /// <summary>
+    /// A process the test itself started (<see cref="Started"/>) that shows only its scratch model, the Modeler's file it
+    /// was opening, or windows the test answers itself: a licence message keeps it alive.
+    /// </summary>
+    public static bool IsOwnLeftCopy(IEnumerable<string> titles) =>
+        titles.Any(t => t.Contains("cpm-field-test", StringComparison.OrdinalIgnoreCase)) && titles.Where(t => !string.IsNullOrWhiteSpace(t)).All(t => !t.Contains("licen", StringComparison.OrdinalIgnoreCase)
+            && (t.Contains("cpm-field-test", StringComparison.OrdinalIgnoreCase) || ScratchDialogs.MayClose(t) || ScratchDialogs.IsStoryPicker(t) || ScratchDialogs.IsImportLog(t)
+                || ScratchDialogs.IsLineLog(t) || ScratchDialogs.IsOpenFileBox(t) || ScratchDialogs.IsAnalysisMessages(t) || t.Trim() is "ETABS" or "SAP2000" or "SAFE" // ETABS itself
+                || t.TrimStart().StartsWith("ETABS", StringComparison.OrdinalIgnoreCase) || t.TrimStart().StartsWith("SAP2000", StringComparison.OrdinalIgnoreCase) || t.TrimStart().StartsWith("SAFE", StringComparison.OrdinalIgnoreCase))); // ETABS itself
+
+    /// <summary>
+    /// The CSI processes started through the API ("...ETABSv1" /A on their command line) whose starter is gone, from
+    /// Windows' own process list: an API-started program whose caller ended can serve no one. The 0.4.57 and 0.4.58 runs
+    /// left such copies on "(Untitled)" windows (on ETABS's Log and SAP2000's file picker) that no title told apart.
+    /// </summary>
+    internal static HashSet<int> OrphanedApiCopies()
+    {
+        var found = new HashSet<int>();
+        if (!OperatingSystem.IsWindows()) return found;
+        try
+        {
+            var info = new ProcessStartInfo("powershell.exe") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true };
+            foreach (var a in new[] { "-NoProfile", "-NonInteractive", "-Command",
+                         "Get-CimInstance Win32_Process | Where-Object { $_.Name -in 'ETABS.exe','SAP2000.exe','SAFE.exe' } | ForEach-Object { \"$($_.ProcessId)|$($_.ParentProcessId)|$($_.CommandLine)\" }" }) // ETABS itself
+                info.ArgumentList.Add(a);
+            using var ps = Process.Start(info);
+            if (ps is null) return found;
+            var output = ps.StandardOutput.ReadToEnd();
+            ps.WaitForExit(15000);
+            foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                if (OrphanLine(line, ParentAlive) is { } pid) found.Add(pid);
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or IOException) { }
+        return found;
+    }
+
+    private static bool ParentAlive(int parent)
+    {
+        try { using var p = Process.GetProcessById(parent); return !p.HasExited; }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception) { return false; }
+    }
+
+    /// <summary>The process id of a "pid|parent|command line" row when it was started through the API and its parent is gone.</summary>
+    internal static int? OrphanLine(string line, Func<int, bool> parentAlive)
+    {
+        var parts = line.Split('|', 3);
+        if (parts.Length != 3 || !int.TryParse(parts[0], out var pid) || !int.TryParse(parts[1], out var parent)) return null;
+        var command = parts[2];
+        var api = System.Text.RegularExpressions.Regex.IsMatch(command, @"""(ETABS|SAP2000|SAFE|CSI)v1""\s+/A\s*$", System.Text.RegularExpressions.RegexOptions.IgnoreCase); // ETABS itself
+        return api && !parentAlive(parent) ? pid : null;
+    }
+
+    /// <summary>The windows of an orphaned API copy that may be ended: an empty or scratch model, and windows the test answers itself.</summary>
+    public static bool IsOrphanedCopy(IEnumerable<string> titles) =>
+        titles.Where(t => !string.IsNullOrWhiteSpace(t)).All(t => !t.Contains("licen", StringComparison.OrdinalIgnoreCase)
+            && (t.Contains("(Untitled)", StringComparison.OrdinalIgnoreCase) || t.Contains("cpm-field-test", StringComparison.OrdinalIgnoreCase)
+                || ScratchDialogs.MayClose(t) || ScratchDialogs.IsStoryPicker(t) || ScratchDialogs.IsImportLog(t) || ScratchDialogs.IsLineLog(t)
+                || ScratchDialogs.IsOpenFileBox(t) || ScratchDialogs.IsAnalysisMessages(t) || t.Trim() is "ETABS" or "SAP2000" or "SAFE" // ETABS itself
+                || t.Trim().StartsWith("Cancel ", StringComparison.OrdinalIgnoreCase)));
+
     public static List<string> EndLeftCopies()
     {
         var said = new List<string>();
         if (!OperatingSystem.IsWindows()) return said;
+        var orphans = OrphanedApiCopies();
+        string[] started;
+        try { started = File.Exists(StartedFile) ? File.ReadAllLines(StartedFile) : []; } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { started = []; }
         foreach (var program in CsiProgram.All)
         {
             Process[] running;
@@ -862,8 +977,9 @@ public sealed class ScratchProgram : IScratchWindow
                     try
                     {
                         var titles = ScratchDialogs.Of(process.Id).Select(w => w.Title).ToList();
-                        if (!IsLeftCopy(titles)) continue;
-                        var name = titles.First(t => t.Contains("cpm-field-test-", StringComparison.OrdinalIgnoreCase));
+                        var own = (Started(process.Id, process.StartTime, started) && IsOwnLeftCopy(titles)) || (orphans.Contains(process.Id) && IsOrphanedCopy(titles));
+                        if (!own && !IsLeftCopy(titles)) continue;
+                        var name = titles.FirstOrDefault(t => t.Contains("cpm-field-test", StringComparison.OrdinalIgnoreCase)) ?? $"a scratch {program.Name} this test started";
                         process.Kill();
                         said.Add(process.WaitForExit(15000) ? $"'{name}' (process id {process.Id}) was closed without saving" : $"'{name}' (process id {process.Id}) was told to end and is still there");
                     }

@@ -322,6 +322,12 @@ public static class EtabsTools
         var asked = a.Need("table");
         var known = e.Tables();
         var table = known.FirstOrDefault(t => string.Equals(t.Key, asked, StringComparison.OrdinalIgnoreCase) || string.Equals(t.Name, asked, StringComparison.OrdinalIgnoreCase));
+        if (table is null && asked.Trim().Length > 0)
+        {
+            // A table the program's list leaves out may still be read by its key (ETABS 23's "Story Definitions", 0.4.59).
+            try { if (e.ReadTable(asked.Trim(), a.Texts("cases"), a.Texts("combinations")) is { Fields.Count: > 0, Rows.Count: > 0 }) table = new TableName(asked.Trim(), asked.Trim(), false, -1); }
+            catch (EtabsException) { /* not a table of the program's */ }
+        }
         if (table is null)
         {
             var close = known.Where(t => t.Name.Contains(asked, StringComparison.OrdinalIgnoreCase)).Take(8).Select(t => t.Name).ToList();
