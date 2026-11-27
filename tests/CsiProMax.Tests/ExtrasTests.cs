@@ -203,14 +203,15 @@ static class ExtrasTests
                 Check(html.Contains(part), "viewer.html lost " + part);
             Check(html.Contains("det.hidden = program === \"sap2000\""), "SAP2000 has no Detailing menu");
         });
-        yield return ("extras: the material forms match ETABS 23.2 field by field: Add New Material Property (Region, Material Type, Standard, Grade), Material Property Data with units on the right and a Change... colour, the design, nonlinear, damping and time dependent forms with their own headings (Ahmed 2026-11-27 07:34)", () =>
+        yield return ("extras: the material forms are ETABS 23.2's as pictured on Ahmed's PC: Add New Material Property with its 13 regions, Material Property Data with a type that can be changed and orthotropic data, Design Data with the grade, Nonlinear Material Data with hysteresis parameters and acceptance strains, Additional Material Damping with Make Other Damping Similar, Time Dependent Properties for Concrete (Ahmed 2026-11-27 07:34, 19:48)", () =>
         {
             var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
             foreach (var part in new[] { "dialog(\"Add New Material Property\"", "<span>Region</span><select id=\"anR\">", "<span>Standard</span><select id=\"anS\">", "<span>Grade</span><select id=\"anG\">", "[\"Add New Material...\", () => hmMaterialNew(again)]",
-                "<select id=\"mT\" disabled>", "<button id=\"mCol\">Change...</button>", "function hmColor(now, done)", ".dlg .gu{display:grid;grid-template-columns:auto 1fr auto", "<legend>Material Name and Type</legend>", "<legend>Design Properties for ${esc(label)} Materials</legend>",
-                "<legend>Hysteresis Type And Drucker-Prager Parameters</legend>", "<legend>Stress-Strain Curve Definition Options</legend>", "<legend>Parametric Strain Data</legend>", "<b style=\"text-align:center\">Tension</b><b style=\"text-align:center\">Compression</b>",
-                "<button id=\"nPlot\">Show Stress-Strain Plot...</button>", "<button id=\"nConv\">Convert To User Defined</button>", "<legend>Creep Analysis Type</legend>", "<legend>Time Dependence Parameters</legend>", "\"Viscous Proportional Damping\"]",
-                "[[\"OK\"], [\"Cancel\"]], {width: 480});" })
+                "<select id=\"mT\" class=\"w2\">", "<button id=\"mCol\">Change...</button>", "function hmColor(now, done)", ".dlg .ex{display:grid;grid-template-columns:1fr 150px 50px", "<legend>Material Name and Type</legend>", "<legend>Design Properties for ${esc(label)} Materials</legend>",
+                "<legend>Miscellaneous Parameters</legend>", "<legend>Stress Strain Curve Definition Options</legend>", "<legend>Parametric Strain Data</legend>", "<legend>Acceptance Criteria Strains</legend>", "Ignore Tension Acceptance Criteria",
+                "<button id=\"nPlot\">Show Stress-Strain Plot...</button>", "<button id=\"nConv\">Convert to User Defined</button>", "Modify/Show Hysteresis Parameters...", "<legend>Creep Analysis Type</legend>", "<legend>Time Dependence Considered For</legend>", "Current Time Dependent Type",
+                "dialog(\"Additional Material Damping\"", "Make Other Damping Similar...", "<legend>Viscous Proportional Damping</legend>", "<span>Grade</span><input id=\"dGr\"", "Effective Tensile Strength, Fue", "Modify/Show Mechanical Property Data...",
+                "\"Australia\", \"Canada\", \"China\", \"Europe\", \"India\", \"Italy\", \"Korea\", \"New Zealand\", \"Russia\", \"Spain\", \"United States\", \"User\", \"Vietnam\"" })
                 Check(html.Contains(part), "viewer.html lost " + part);
             // ETABS has no Material Grade box in Material Property Data: the grade comes from Add New Material Property.
             Check(!html.Contains("<span>Material Grade</span>"), "Material Property Data shows a Material Grade box ETABS does not have");

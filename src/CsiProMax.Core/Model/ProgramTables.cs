@@ -15,7 +15,8 @@ public static class ProgramTables
     /// <summary>ETABS 23's material tables and their fields (the Material field left out): every material form's data.</summary>
     public static readonly IReadOnlyDictionary<string, string[]> MaterialTables = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
     {
-        ["Acceptance Criteria"] = ["IOTens", "LSTens", "CPTens", "IOComp", "LSComp", "CPComp"],
+        // IgnoreTens: Nonlinear Material Data's "Ignore Tension Acceptance Criteria" (concrete); no ETABS 23.2 table field, kept in the .cpm.
+        ["Acceptance Criteria"] = ["IOTens", "LSTens", "CPTens", "IOComp", "LSComp", "CPComp", "IgnoreTens"],
         ["Aluminum Data"] = ["AlumType", "Alloy", "Fcy", "Fty", "Ftu", "Fsu", "SSHysType"],
         ["Basic Mechanical Properties"] = ["DensityType", "UnitWeight", "UnitMass", "E1", "E2", "E3", "G12", "G13", "G23", "U12", "U13", "U23", "A1", "A2", "A3"],
         ["Coldformed Data"] = ["Fy", "Fu", "SSHysType"],

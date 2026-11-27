@@ -61,6 +61,9 @@ public static class ReferenceData
         new("the program, its version and its files", null, ProgramFacts),
         new("every table with its fields", null, TablesAndFields),
         new("the Verification examples the program came with", null, VerificationExamples),
+        // The forms' lists (Add New Material's regions, standards and grades; Frame Sections' Import databases) must be
+        // the program's own, with nothing missing (Ahmed 2026-11-27): the Engine is built from these copies.
+        new("the program's material and section libraries (Property Libraries)", null, PropertyLibraries),
         new("every table of the scratch model that has data", null, ScratchTables),
         new("the status of every load case after the analysis", null, CaseStatus),
         // Before the text copy, so the program's own syntax for them is in it (their .e2k words are not known yet).
@@ -203,6 +206,35 @@ public static class ReferenceData
         if (folder.Length == 0 || !Directory.Exists(folder)) return $"no Verification folder beside {g.Program.Name} ({(install.Length == 0 ? "its folder was not found" : install)})";
         return CopyExamples(g, folder);
     }
+
+    /// <summary>Lists every file of the install's "Property Libraries" folder and copies them (originals only read).</summary>
+    private static string PropertyLibraries(Gather g)
+    {
+        var install = g.InstallFolder();
+        var folder = install.Length == 0 ? "" : Path.Combine(install, "Property Libraries");
+        if (folder.Length == 0 || !Directory.Exists(folder)) return $"no Property Libraries folder beside {g.Program.Name} ({(install.Length == 0 ? "its folder was not found" : install)})";
+        var all = Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories).OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList();
+        var list = new StringBuilder(Csv("file", "bytes")).AppendLine();
+        var target = Path.Combine(g.Folder, "Property Libraries");
+        long total = 0; var copied = 0;
+        foreach (var file in all)
+            try
+            {
+                var rel = Path.GetRelativePath(folder, file);
+                var size = new FileInfo(file).Length;
+                list.AppendLine(Csv(rel, size.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+                if (size > LibraryMostOne || total + size > LibraryMost) continue;
+                var to = Path.Combine(target, rel);
+                Directory.CreateDirectory(Path.GetDirectoryName(to)!);
+                File.Copy(file, to, true);
+                total += size; copied++;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* the next file */ }
+        g.Write("property library files.csv", list.ToString());
+        return $"{all.Count} files listed in property library files.csv, {copied} copied ({total / 1024} KB) into Property Libraries";
+    }
+
+    private const long LibraryMostOne = 4L * 1024 * 1024, LibraryMost = 15L * 1024 * 1024;
 
     /// <summary>
     /// Lists every file of the examples folder, and copies its text model files (the originals are only read): the
