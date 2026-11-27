@@ -374,6 +374,21 @@ public static class S2kWriter
             native.RemoveAll(r => r.Count > 0 && who.Contains(r[0].Item2));
             native.AddRange(mine);
         }
+        // An object with SAP2000's advanced local axes row says so in its typical row (AdvanceAxes=Yes), as SAP2000 writes it.
+        void Advanced(string advTable, string key, List<IReadOnlyList<(string, string)>> typical)
+        {
+            var hit = own.Keys.FirstOrDefault(k => k.Equals(advTable, StringComparison.OrdinalIgnoreCase));
+            if (hit is null) return;
+            foreach (var who in own[hit].Select(r => r[0].Item2).Distinct(StringComparer.OrdinalIgnoreCase).ToList())
+            {
+                var i = typical.FindIndex(r => r.Count > 0 && r[0].Item2.Equals(who, StringComparison.OrdinalIgnoreCase));
+                var angle = i >= 0 ? typical[i].FirstOrDefault(f => f.Item1 == "Angle").Item2 ?? "0" : "0";
+                var row = Row((key, who), ("Angle", angle), ("AdvanceAxes", "Yes"));
+                if (i >= 0) typical[i] = row; else typical.Add(row);
+            }
+        }
+        Advanced("Frame Local Axes Assignments 2 - Advanced", "Frame", axes);
+        Advanced("Area Local Axes Assignments 2 - Advanced", "Area", areaAxes);
         Merge("Joint Spring Assignments 1 - Uncoupled", springs);
         Merge("Joint Added Mass Assignments", jointMass);
         Merge("Joint Panel Zone Assignments", panelZones);
@@ -389,6 +404,7 @@ public static class S2kWriter
         Merge("Frame Property Modifiers", frameMods);
         Merge("Area Stiffness Modifiers", areaMods);
         Merge("Joint Restraint Assignments", restraints);
+        Merge("Frame Hinge Assigns 00 - Hinge Distribution Type", hingeTypes);
         foreach (var (ownTable, ownRows) in own) Add(tables, SapObjectTables.Name(ownTable).ToUpperInvariant(), ownRows);
 
         Add(tables, "JOINT COORDINATES", jointRows);
