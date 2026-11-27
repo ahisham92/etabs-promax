@@ -1041,7 +1041,10 @@ public sealed class ScratchProgram : IScratchWindow
     {
         var open = OpenFileName();
         if (open.Length == 0 || SameName(open, file)) return true;
-        var inFile = TextObjectCount(_program, file);
+        // A text file CSI ProMax cannot count (2222.$et, 0.4.73 full test) is still held when the program holds objects:
+        // opening it again over the changed "(Untitled)" model made ETABS ask "Save current changes?" and wait 3 minutes.
+        var text = Path.GetExtension(file).ToLowerInvariant() is ".e2k" or ".$et" or ".s2k" or ".$2k";
+        var inFile = text ? Math.Max(1, TextObjectCount(_program, file)) : 0;
         if (inFile == 0) return false;
         int held;
         try { held = Convert.ToInt32(Ask(TimeSpan.FromMinutes(1), "count the objects", m => Count(m, "AreaObj.Count") + Count(m, "FrameObj.Count"), $"{_program.Name} did not answer.")); }
@@ -1187,7 +1190,15 @@ public sealed class ScratchProgram : IScratchWindow
     /// </summary>
     public static bool MayEnd(DateTime processStarted, DateTime testAsked, IEnumerable<string> titles) =>
         testAsked != default && processStarted >= testAsked.AddSeconds(-2)
-        && titles.All(t => t.Contains("cpm-field-test", StringComparison.OrdinalIgnoreCase));
+        && titles.All(t => t.Contains("cpm-field-test", StringComparison.OrdinalIgnoreCase) || OwnBlank(t));
+
+    /// <summary>
+    /// A window of the blank model the test itself starts in its scratch window at its end (the program's defaults,
+    /// never saved): its "(Untitled)" main window, and the "New Model Quick Templates" form ETABS 23.2 opened on it, which
+    /// kept the 0.4.73 test's own ETABS running with a licence (2026-11-27).
+    /// </summary>
+    private static bool OwnBlank(string title) =>
+        title.TrimEnd().EndsWith("- (Untitled)", StringComparison.OrdinalIgnoreCase) || title.Trim().Equals("New Model Quick Templates", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// True when the windows of a process show it is a test copy an earlier run left open: one of them names a scratch
