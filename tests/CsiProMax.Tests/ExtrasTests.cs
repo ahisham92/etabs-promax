@@ -241,6 +241,15 @@ static class ExtrasTests
                 "\"Mass Sources\", \"Mass Sources\"", "<span>Mass Source Name</span><input id=\"mN\"", "Adjust Diaphragm Lateral Mass to Move Mass Centroid by:", "This Ratio of Diaphragm Width in X Direction", "<legend>Mass Options</legend>", "Lump Lateral Mass at Story Levels", "Element Self Mass and Additional Mass" })
                 Check(html.Contains(part), "viewer.html lost " + part);
         });
+        yield return ("extras: Story Data, Grid System Data, diaphragms, pier and spandrel labels, groups and section cuts match ETABS 23.2 and SAP2000 26.3 field by field (Ahmed 2026-11-27)", () =>
+        {
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var part in new[] { "<th>Master Story</th><th>Similar To</th><th>Splice Story</th><th>Splice Height (${u.l})</th><th>Story Color</th>", "<button id=\"stColor\">Reset to Default Color</button>",
+                "sapG ? \"Define Grid System Data\" : \"Grid System Data\"", "<legend>Story Range Option</legend>", "Display Grid Data as", "Quick Start New Rectangular Grids", "sapG ? \"Bubble Loc\" : \"Bubble Location\"",
+                "<legend>Rigidity</legend>", "<button id=\"zRen\">Change Name</button>", "Multi-Story Spandrel", "sapX ? \"Use Group For\" : \"Group Design Usage\"", "[\"Composite\", \"Composite Beam Design\"]", "[\"MassWeight\", \"Mass and Weight\"]",
+                "<legend>Define Section Cut By</legend>", "Design (P, V2, V3, T, M2, M3)", "<legend>Section Cut Force Location</legend>", "<legend>Rotation of Section Cut Local Axes</legend>" })
+                Check(html.Contains(part), "viewer.html lost " + part);
+        });
         yield return ("extras: the views and toolbars are drawn as ETABS draws them: grey see-through slabs with white edges, thin columns, solid grid, light-blue ground grid with flat bubbles, the axes at the origin, column squares in plan, captions as tabs, the toolbar and strip in the program's order (Ahmed 2026-11-26 22:19)", () =>
         {
             var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));

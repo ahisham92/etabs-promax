@@ -100,5 +100,50 @@ static class StructureTests
             Run(link, "define_group", new { name = "G-CORE", delete = true });
             Check(!GroupDefs.Groups(link.Model).Exists(x => x.Name == "G-CORE"), "deleted with its members");
         });
+
+        yield return ("structure: Group Definition's uses, Section Cut Data's result type, location and axes, a multi-story spandrel and Change Name are kept and written (Ahmed 2026-11-27, every field)", () =>
+        {
+            var link = Frame();
+            Run(link, "define_group", new { name = "G-CORE", color = "Blue", uses = new { Steel = false, Concrete = true, Composite = false, AutoSeismic = true } });
+            Run(link, "assign_group_data", new { group = "G-CORE", objects = Floors(link.Model).Take(2).ToArray() });
+            Run(link, "define_section_cut", new { name = "SC1", group = "G-CORE", result_type = "Design", user_location = true, x = 1.5, y = 2, z = 3.2, rot_z = 90 });
+            var row = StructureExtras.Get(link.Model, StructureExtras.GroupTable, "G-CORE");
+            Check(row["Steel"] == "No" && row["Concrete"] == "Yes" && row["AutoSeismic"] == "Yes", "the group's uses: " + string.Join(",", row));
+            Check(!StructureExtras.ForEtabs(StructureExtras.GroupTable, row).ContainsKey("AutoSeismic"), "a use only SAP2000 has stays out of the program's row");
+            var cut = StructureExtras.Get(link.Model, StructureExtras.CutTable, "SC1");
+            Check(cut["ResultType"] == "Design" && cut["ResultLoc"] == "User" && cut["LocX"] == "1.5" && cut["RotAboutZ"] == "90", "the cut's options: " + string.Join(",", cut));
+            var s2k = S2kWriter.Write(link.Model, "a.s2k").Text;
+            Check(s2k.Contains("GroupName=G-CORE") && s2k.Contains("Steel=No") && s2k.Contains("AutoSeismic=Yes"), "the .s2k group has its uses");
+            Check(s2k.Contains("CutName=SC1") && s2k.Contains("ResultType=Design") && s2k.Contains("DefaultLoc=No") && s2k.Contains("AngleA=90"), "the .s2k has the section cut");
+            var defs = Run(link, "structure_definitions", new { });
+            Check(defs["groups"]![0]!["uses"]!["Concrete"]!.GetValue<bool>() && defs["section_cuts"]![0]!["options"]!["ResultType"]!.GetValue<string>() == "Design", "structure_definitions: " + defs.ToJsonString());
+            Run(link, "define_pier_spandrel", new { kind = "spandrel", name = "S1", multistory = true });
+            Run(link, "assign_pier_spandrel_data", new { objects = Beams(link.Model).Take(1).ToArray(), spandrel = "S1" });
+            Run(link, "define_pier_spandrel", new { kind = "spandrel", name = "S2", was = "S1" });
+            Check(StructureExtras.Yes(StructureExtras.Get(link.Model, StructureExtras.SpandrelTable, "S2"), "MultiStory", false), "the renamed spandrel stays multi-story");
+            Check(E2kWriter.Write(link.Model).Contains("SPANDREL  \"S2\"") && !E2kWriter.Write(link.Model).Contains("\"S1\""), "Change Name renames the label and what it labels");
+            Run(link, "define_section_cut", new { name = "SC1", delete = true });
+            Check(StructureExtras.Get(link.Model, StructureExtras.CutTable, "SC1").Count == 0, "a deleted cut leaves no row");
+        });
+
+        yield return ("structure: Story Data's master, similar, splice and colour and Grid System Data's visibility, bubble and system read back (Ahmed 2026-11-27, every field)", () =>
+        {
+            var link = Frame();
+            var st = link.Model.Stories.Skip(1).Select(x => x.Name).ToList();
+            Run(link, "define_stories", new { stories = new object[] {
+                new { name = st[0], height = 3.2, was = st[0], master = false, similar_to = st[2], splice = true, splice_height = 1.1, color = "#ff8000" },
+                new { name = st[1], height = 3.2, was = st[1], master = false, similar_to = st[2] },
+                new { name = st[2], height = 3.2, was = st[2], master = true } } });
+            var back = E2kReader.Read(E2kWriter.Write(link.Model));
+            Check(StoryGridOptions.IsMaster(back.Stories[3]) && StoryGridOptions.SimilarTo(back.Stories[1]) == st[2], "master and similar read back from the .e2k");
+            var sp = StoryGridOptions.Splice(link.Model, st[0]);
+            Check(sp.Splice && sp.Height == 1.1 && sp.Color == "#ff8000", "splice and colour kept as the program's table row");
+            var grids = link.Model.Grids.Select(g => new { label = g.Label, direction = g.Direction, coordinate = g.Coordinate, visible = g.Label != link.Model.Grids[0].Label, bubble = "Start" }).ToArray();
+            Run(link, "define_grids", new { grids, system_name = "G2", bubble_size = 1.5 });
+            var g2 = E2kReader.Read(E2kWriter.Write(link.Model));
+            Check(g2.GridSystem == "G2" && !StoryGridOptions.Visible(g2.Grids[0]) && StoryGridOptions.Bubble(g2.Grids[1]) == "Start" && StoryGridOptions.BubbleSize(g2) == 1.5, "grid options read back");
+            var defs = Run(link, "model_definitions", new { });
+            Check(defs["stories"]![2]!["master"]!.GetValue<bool>() && defs["grids"]![0]!["visible"]!.GetValue<bool>() == false && defs["grid_system"]!["name"]!.GetValue<string>() == "G2", "the forms see them: " + defs["grid_system"]!.ToJsonString());
+        });
     }
 }

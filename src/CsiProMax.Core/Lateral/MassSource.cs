@@ -75,7 +75,9 @@ public sealed record MassSource(string Name, bool Elements, bool AddedMass, IRea
         if (Move)
         {
             m.DefinitionTables ??= new(StringComparer.OrdinalIgnoreCase);
-            m.DefinitionTables[Table] = [new() { ["Name"] = Name, ["MoveMass"] = "Yes", ["RatioX"] = E2kText.Number(MoveX), ["RatioY"] = E2kText.Number(MoveY) }];
+            // One row per load pattern, as the program's table has them, so putting it back loses none.
+            m.DefinitionTables[Table] = (Loads.Count > 0 ? Loads.Select(l => l.Pattern) : new[] { "" }).Select(p => new Dictionary<string, string>
+                { ["Name"] = Name, ["LoadPattern"] = p, ["MoveMass"] = "Yes", ["RatioX"] = E2kText.Number(MoveX), ["RatioY"] = E2kText.Number(MoveY) }).ToList();
         }
         if (m.DefinitionTables is { Count: 0 }) m.DefinitionTables = null;
     }

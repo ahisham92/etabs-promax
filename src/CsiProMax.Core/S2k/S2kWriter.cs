@@ -394,11 +394,26 @@ public static class S2kWriter
         if (groups.Count > 0)
         {
             var colors = GroupDefs.Groups(m).GroupBy(g => g.Name).ToDictionary(g => g.Key, g => g.First().Color);
-            Add(tables, "GROUPS 1 - DEFINITIONS", groups.Keys.Select(name => Row(("GroupName", name), ("Selection", "Yes"), ("Color", colors.GetValueOrDefault(name, "Yellow")),
-                ("SectionCut", "Yes"), ("Steel", "Yes"), ("Concrete", "Yes"), ("Aluminum", "Yes"), ("ColdFormed", "Yes"), ("Stage", "Yes"), ("Bridge", "Yes"),
-                ("AutoSeismic", "No"), ("AutoWind", "No"), ("SelDesSteel", "No"), ("SelDesAlum", "No"), ("SelDesCold", "No"), ("MassWeight", "Yes"))));
+            // Each group's uses as its Group Definition form set them (Use Group For), the program's defaults otherwise.
+            string Use(string name, string key, bool fallback) => StructureExtras.Yes(StructureExtras.Get(m, StructureExtras.GroupTable, name), key, fallback) ? "Yes" : "No";
+            Add(tables, "GROUPS 1 - DEFINITIONS", groups.Keys.Select(name => Row(("GroupName", name), ("Selection", Use(name, "Selection", true)), ("Color", colors.GetValueOrDefault(name, "Yellow")),
+                ("SectionCut", Use(name, "SectionCut", true)), ("Steel", Use(name, "Steel", true)), ("Concrete", Use(name, "Concrete", true)), ("Aluminum", Use(name, "Aluminum", true)), ("ColdFormed", Use(name, "ColdFormed", true)), ("Stage", Use(name, "Stage", true)), ("Bridge", Use(name, "Bridge", true)),
+                ("AutoSeismic", Use(name, "AutoSeismic", false)), ("AutoWind", Use(name, "AutoWind", false)), ("SelDesSteel", "No"), ("SelDesAlum", "No"), ("SelDesCold", "No"), ("MassWeight", Use(name, "MassWeight", true)))));
             Add(tables, "GROUPS 2 - ASSIGNMENTS", groups.SelectMany(g => g.Value.Distinct().Select(o => Row(("GroupName", g.Key), ("ObjectType", o.Type), ("ObjectLabel", o.Label)))));
         }
+
+        // Section cuts by group, with the result type, location and axes their Section Cut Data form set.
+        var cuts = StructureExtras.Cuts(m).Where(c => groups.ContainsKey(c.Group)).ToList();
+        if (cuts.Count > 0)
+            Add(tables, "SECTION CUTS 1 - GENERAL", cuts.Select(c =>
+            {
+                var x = StructureExtras.Get(m, StructureExtras.CutTable, c.Name);
+                string V(string k, string d) => x.TryGetValue(k, out var v) && v.Length > 0 ? v : d;
+                var user = V("ResultLoc", "Default").Equals("User", StringComparison.OrdinalIgnoreCase) || V("ResultLoc", "Default").StartsWith("User", StringComparison.OrdinalIgnoreCase);
+                return Row(("CutName", c.Name), ("DefinedBy", "Group"), ("Group", c.Group), ("ResultType", V("ResultType", "Analysis").StartsWith("Design", StringComparison.OrdinalIgnoreCase) ? "Design" : "Analysis"),
+                    ("DefaultLoc", user ? "No" : "Yes"), ("GlobalX", V("LocX", "0")), ("GlobalY", V("LocY", "0")), ("GlobalZ", V("LocZ", "0")),
+                    ("AngleA", V("RotAboutZ", "0")), ("AngleB", V("RotAboutY", "0")), ("AngleC", V("RotAboutX", "0")), ("AdvanceAxes", "No"), ("NumQuads", "0"));
+            }));
 
         // Loads.
         var patternTypes = m.LoadPatterns.ToDictionary(p => p.Name, p => DesignType(p.Type), StringComparer.OrdinalIgnoreCase);

@@ -5419,30 +5419,68 @@ async function hmExtras(what) {
   }
 }
 
-// ---- Define: diaphragms, pier and spandrel labels, groups, section cuts ----
+// ---- Define: diaphragms, pier and spandrel labels, groups, section cuts, as the programs show them ----
+// Diaphragm Data: Diaphragm and Rigidity (Rigid / Semi Rigid). Pier Labels and Spandrel Labels: the name box over the
+// list, Add New Name / Change Name / Delete Name, and a spandrel's Multi-Story Spandrel. Group Definition: Group Name,
+// Group Color and what the group is used for. Section Cut Data: name, Define Section Cut By, Group, Result Type,
+// Section Cut Force Location and the rotation of its local axes.
 async function hmStructure(kind) {
   const sd = (await hmRun("structure_definitions", {}, true)).result; if (!sd) return;
+  const u = hmU(), sapX = program === "sap2000";
   const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmStructure(kind); };
   const del = (tool, args) => hmRun(tool, Object.assign(args, {delete: true}), true).then(j => j.ok ? again() : hmSay(j.error, true));
-  const name = (title, label, v, extra, run) => dialog(title, `<div class="g2"><span>${label}</span><input id="zN" value="${esc(v || "")}">${extra || ""}</div>`, [["OK", d => run(d), true], ["Cancel"]], {width: 380});
   if (kind === "diaphragm") {
-    const one = (d0) => name("Diaphragm Data", "Diaphragm", d0 ? d0.name : "D" + (sd.diaphragms.length + 1), `<span>Rigidity</span><select id="zR">${opts([["rigid", "Rigid"], ["semi", "Semi Rigid"]], d0 && d0.semi_rigid ? "semi" : "rigid")}</select>`,
-      d => submit(d, "define_diaphragm", {name: q(d, "#zN").value.trim(), semi_rigid: q(d, "#zR").value === "semi"}, again));
+    const one = d0 => dialog("Diaphragm Data", `<div class="g2"><span>Diaphragm</span><input id="zN" value="${esc(d0 ? d0.name : "D" + (sd.diaphragms.length + 1))}" ${d0 ? "disabled" : ""}></div>
+      <fieldset><legend>Rigidity</legend><label style="display:block"><input type="radio" name="zR" value="rigid" ${d0 && d0.semi_rigid ? "" : "checked"}> Rigid</label><label style="display:block"><input type="radio" name="zR" value="semi" ${d0 && d0.semi_rigid ? "checked" : ""}> Semi Rigid</label></fieldset>`,
+      [["OK", d => submit(d, "define_diaphragm", {name: q(d, "#zN").value.trim(), semi_rigid: q(d, "[name=zR]:checked").value === "semi"}, again)], ["Cancel"]], {width: 340});
     return listForm("Define Diaphragm", "Diaphragms", sd.diaphragms.map(x => x.name), [["Add New Diaphragm...", () => one(null)], ["Modify/Show Diaphragm...", n => n && one(sd.diaphragms.find(x => x.name === n))], ["Delete Diaphragm", n => n && del("define_diaphragm", {name: n})]], n => one(sd.diaphragms.find(x => x.name === n)));
   }
   if (kind === "pier" || kind === "spandrel") {
     const list = kind === "pier" ? sd.piers : sd.spandrels, T = kind === "pier" ? "Pier" : "Spandrel";
-    const one = () => name(T + " Label", T + " label", (kind === "pier" ? "P" : "S") + (list.length + 1), "", d => submit(d, "define_pier_spandrel", {kind, name: q(d, "#zN").value.trim()}, again));
-    return listForm(`${T} Labels`, T + "s", list.map(x => x.name), [["Add New Name...", one], ["Delete Name", n => n && del("define_pier_spandrel", {kind, name: n})]], () => {});
+    const d = dialog(`${T} Labels`, `<div style="display:flex;gap:10px"><fieldset style="flex:1;margin:0"><legend>${T}s</legend>
+        <input id="zN" style="width:100%;margin-bottom:6px" value="${esc((list[0] || {}).name || (kind === "pier" ? "P1" : "S1"))}">
+        <select id="zL" size="12" style="width:100%;height:auto">${list.map(x => `<option value="${esc(x.name)}">${esc(x.name)}</option>`).join("")}</select>
+        ${kind === "spandrel" ? `<label style="display:block;margin-top:6px"><input type="checkbox" id="zM"> Multi-Story Spandrel</label>` : ""}</fieldset>
+      <fieldset style="width:170px;margin:0"><legend>Click to:</legend><div style="display:flex;flex-direction:column;gap:6px"><button id="zAdd">Add New Name</button><button id="zRen">Change Name</button><button id="zDel">Delete Name</button></div></fieldset></div>`,
+      [["OK"], ["Cancel"]], {width: 440});
+    const L = q(d, "#zL"); if (list.length) L.selectedIndex = 0;
+    const show = () => { const x = list.find(y => y.name === L.value); if (x) q(d, "#zN").value = x.name; if (q(d, "#zM")) q(d, "#zM").checked = !!(x && x.multistory); };
+    L.onchange = show; show();
+    const ms = () => q(d, "#zM") ? {multistory: q(d, "#zM").checked} : {};
+    const go = args => hmRun("define_pier_spandrel", Object.assign({kind}, args, ms()), true).then(j => j.ok ? again() : formError(d, j.error));
+    q(d, "#zAdd").onclick = () => go({name: q(d, "#zN").value.trim()});
+    q(d, "#zRen").onclick = () => L.value && go({name: q(d, "#zN").value.trim(), was: L.value});
+    q(d, "#zDel").onclick = () => L.value && hmRun("define_pier_spandrel", {kind, name: L.value, delete: true}, true).then(j => j.ok ? again() : formError(d, j.error));
+    if (q(d, "#zM")) q(d, "#zM").onchange = () => L.value && hmRun("define_pier_spandrel", {kind, name: L.value, multistory: q(d, "#zM").checked}, true).then(j => j.ok || formError(d, j.error));
+    return d;
   }
   if (kind === "group") {
-    const one = g => name("Group Definition", "Group name", g ? g.name : "Group" + (sd.groups.length + 1), `<span>Color</span><select id="zC">${opts(sd.colors, g ? g.color : "Red")}</select>`,
-      d => submit(d, "define_group", {name: q(d, "#zN").value.trim(), color: q(d, "#zC").value}, again));
-    return listForm("Define Groups", "Groups", sd.groups.map(x => x.name), [["Add New Group...", () => one(null)], ["Modify/Show Group...", n => n && one(sd.groups.find(x => x.name === n))], ["Delete Group", n => n && del("define_group", {name: n})]], n => one(sd.groups.find(x => x.name === n)));
+    // ETABS's Group Definitions have Steel / Concrete / Composite design; SAP2000's Groups 1 - Definitions every use.
+    const usesFor = sapX ? [["Selection", "Selection"], ["SectionCut", "Section Cut Definition"], ["Steel", "Steel Design"], ["Concrete", "Concrete Design"], ["Aluminum", "Aluminum Design"], ["ColdFormed", "Cold Formed Design"], ["Stage", "Staged Construction"], ["Bridge", "Bridge Response Output"], ["AutoSeismic", "Auto Seismic Output"], ["AutoWind", "Auto Wind Output"], ["MassWeight", "Mass and Weight"]]
+      : [["Steel", "Steel Design"], ["Concrete", "Concrete Design"], ["Composite", "Composite Beam Design"]];
+    const deflt = k => !["AutoSeismic", "AutoWind", "Steel", "Concrete", "Composite"].includes(k) || sapX && (k === "Steel" || k === "Concrete");
+    const one = (g, copy) => dialog("Group Definition", `<div class="g2"><span>Group Name</span><input id="zN" value="${esc(g ? (copy ? g.name + " copy" : g.name) : "Group" + (sd.groups.length + 1))}" ${g && !copy ? "disabled" : ""}>
+        <span>Group Color</span><select id="zC">${opts(sd.colors, g ? g.color : "Red")}</select></div>
+      <fieldset><legend>${sapX ? "Use Group For" : "Group Design Usage"}</legend><div class="g3">${usesFor.map(([k, t]) => `<label><input type="checkbox" data-u="${k}" ${(g && g.uses && k in g.uses ? g.uses[k] : deflt(k)) ? "checked" : ""}> ${t}</label>`).join("")}</div></fieldset>`,
+      [["OK", d => submit(d, "define_group", {name: q(d, "#zN").value.trim(), color: q(d, "#zC").value, uses: Object.fromEntries([...d.querySelectorAll("[data-u]")].map(x => [x.dataset.u, x.checked]))}, again)], ["Cancel"]], {width: 440});
+    const find = n => sd.groups.find(x => x.name === n);
+    return listForm("Define Groups", "Groups", sd.groups.map(x => x.name), [["Add New Group...", () => one(null)], ["Add Copy of Group...", n => n && one(find(n), true)], ["Modify/Show Group...", n => n && one(find(n))], ["Delete Group", n => n && del("define_group", {name: n})]], n => one(find(n)));
   }
-  const one = c => name("Section Cut Data", "Section cut name", c ? c.name : "SCut" + (sd.section_cuts.length + 1), `<span>Group</span><select id="zG">${opts(sd.groups.map(g => g.name), c ? c.group : (sd.groups[0] || {}).name)}</select>`,
-    d => submit(d, "define_section_cut", {name: q(d, "#zN").value.trim(), group: q(d, "#zG").value}, again));
-  return listForm("Section Cuts", "Section cuts", sd.section_cuts.map(x => x.name), [["Add Section Cut...", () => one(null)], ["Modify/Show Section Cut...", n => n && one(sd.section_cuts.find(x => x.name === n))], ["Delete Section Cut", n => n && del("define_section_cut", {name: n})]], n => one(sd.section_cuts.find(x => x.name === n)));
+  const one = c => {
+    const o = (c && c.options) || {}, user = /^user/i.test(o.ResultLoc || "");
+    const d = dialog("Section Cut Data", `<div class="g2"><span>Section Cut Name</span><input id="zN" value="${esc(c ? c.name : "SCut" + (sd.section_cuts.length + 1))}" ${c ? "disabled" : ""}></div>
+      <fieldset><legend>Define Section Cut By</legend><label style="display:inline-block;margin-right:14px"><input type="radio" name="zB" checked> Group</label><label style="display:inline-block"><input type="radio" name="zB" disabled> Quadrilaterals</label>
+        <div class="g2" style="margin-top:6px"><span>Group</span><select id="zG">${opts(sd.groups.map(g => g.name), c ? c.group : (sd.groups[0] || {}).name)}</select></div></fieldset>
+      <fieldset><legend>Result Type</legend><label style="display:block"><input type="radio" name="zT" value="Analysis" ${o.ResultType === "Design" ? "" : "checked"}> Analysis (F1, F2, F3, M1, M2, M3)</label><label style="display:block"><input type="radio" name="zT" value="Design" ${o.ResultType === "Design" ? "checked" : ""}> Design (P, V2, V3, T, M2, M3)</label></fieldset>
+      <fieldset><legend>Section Cut Force Location</legend><label style="display:inline-block;margin-right:14px"><input type="radio" name="zLc" value="0" ${user ? "" : "checked"}> Default</label><label style="display:inline-block"><input type="radio" name="zLc" value="1" ${user ? "checked" : ""}> User Specified</label>
+        <div class="gu" style="margin-top:6px"><span>X</span><input id="zX" type="number" step="any" value="${o.LocX || 0}"><span class="un">${u.l}</span><span>Y</span><input id="zY" type="number" step="any" value="${o.LocY || 0}"><span class="un">${u.l}</span><span>Z</span><input id="zZ" type="number" step="any" value="${o.LocZ || 0}"><span class="un">${u.l}</span></div></fieldset>
+      <fieldset><legend>Rotation of Section Cut Local Axes</legend><div class="gu"><span>About Z</span><input id="zRz" type="number" step="any" value="${o.RotAboutZ || 0}"><span class="un">deg</span><span>About Y</span><input id="zRy" type="number" step="any" value="${o.RotAboutY || 0}"><span class="un">deg</span><span>About X</span><input id="zRx" type="number" step="any" value="${o.RotAboutX || 0}"><span class="un">deg</span></div></fieldset>`,
+      [["OK", d => { const usr = q(d, "[name=zLc]:checked").value === "1"; return submit(d, "define_section_cut", {name: q(d, "#zN").value.trim(), group: q(d, "#zG").value, result_type: q(d, "[name=zT]:checked").value, user_location: usr, x: fnum(d, "#zX"), y: fnum(d, "#zY"), z: fnum(d, "#zZ"), rot_z: fnum(d, "#zRz"), rot_y: fnum(d, "#zRy"), rot_x: fnum(d, "#zRx")}, again); }], ["Cancel"]], {width: 460});
+    const sync = () => ["#zX", "#zY", "#zZ"].forEach(x => q(d, x).disabled = q(d, "[name=zLc]:checked").value !== "1");
+    d.querySelectorAll("[name=zLc]").forEach(r => r.onchange = sync); sync();
+    return d;
+  };
+  return listForm("Section Cuts", "Section Cuts", sd.section_cuts.map(x => x.name), [["Add Section Cut...", () => one(null)], ["Modify/Show Section Cut...", n => n && one(sd.section_cuts.find(x => x.name === n))], ["Delete Section Cut", n => n && del("define_section_cut", {name: n})]], n => one(sd.section_cuts.find(x => x.name === n)));
 }
 async function hmAssignStructure(what) {
   const sd = (await hmRun("structure_definitions", {}, true)).result; if (!sd) return;
@@ -5510,59 +5548,95 @@ async function hmAssignData(what) {
 }
 
 // ---- Define: stories (ETABS's Story Data, edited in the grid) ----
+// Story Data as ETABS 23 shows it: Name, Height, Elevation, Master Story, Similar To, Splice Story, Splice Height and
+// Story Color, top story first with the base at the bottom; SAP2000's Z grid lines (its elevations) take the same rows.
 async function hmStories() {
-  const defs = await hmDefs(), u = hmU();
-  let rows = defs.stories.map(s => ({name: s.name, height: s.height, was: s.name})).reverse(), base = {...defs.base};
-  const d = dialog("Story Data", `<p class="kv" style="margin:0 0 6px">Top story first, as ETABS lists them. Type in the cells. Deleting a story deletes what stands on it.</p>
-    <div style="display:flex;gap:10px"><div class="scroll" style="max-height:52vh;flex:1"><table class="list hmgrid" id="stT"></table></div>
+  const defs = await hmDefs(), u = hmU(), sapS = program === "sap2000";
+  let rows = defs.stories.map(s => ({name: s.name, height: s.height, was: s.name, master: !!s.master, similar: s.similar_to || "", splice: !!s.splice, spliceH: s.splice_height || 0, color: s.color || ""})).reverse(), base = {...defs.base};
+  const d = dialog(sapS ? "Define Grid System Data - Z Grid Data" : "Story Data", `<div style="display:flex;gap:10px"><div class="scroll" style="max-height:52vh;flex:1"><table class="list hmgrid" id="stT"></table></div>
     <fieldset style="width:170px;margin:0"><legend>Click to:</legend><div style="display:flex;flex-direction:column;gap:6px">
-      <button id="stAbove">Add Story Above</button><button id="stBelow">Insert Story Below</button><button id="stDel">Delete Story</button>
+      <button id="stAbove">Add Story Above</button><button id="stBelow">Insert Story Below</button><button id="stDel">Delete Story</button>${sapS ? "" : `<button id="stColor">Reset to Default Color</button>`}
       <span class="kv" style="margin-top:6px">Several stories at once:</span><label>Count <input id="stN" type="number" value="1" min="1" style="width:60px"></label><label>Height <input id="stH" type="number" step="any" value="3" style="width:60px"></label><button id="stMany">Add on Top</button></div></fieldset></div>`,
     [["OK", d => {
       const names = new Set(defs.stories.map(s => s.name));
-      return submit(d, "define_stories", {base_name: base.name, base_elevation: base.elevation, stories: rows.slice().reverse().map(r => ({name: r.name.trim(), height: r.height, was: r.was && names.has(r.was) ? r.was : undefined}))});
-    }, true], ["Cancel"]], {width: 600});
+      return submit(d, "define_stories", {base_name: base.name, base_elevation: base.elevation, stories: rows.slice().reverse().map(r => ({name: r.name.trim(), height: r.height, was: r.was && names.has(r.was) ? r.was : undefined,
+        ...(sapS ? {} : {master: r.master, similar_to: r.master ? "None" : r.similar || "None", splice: r.splice, splice_height: r.splice ? +r.spliceH || 0 : 0, color: r.color || ""})}))});
+    }], ["Cancel"]], {width: sapS ? 620 : 900});
   let at = 0;
   const next = () => { let i = rows.length + 1; const used = new Set(rows.map(r => r.name)); while (used.has("Story" + i)) i++; return "Story" + i; };
+  const yn = (k, v) => `<select data-k="${k}">${opts([["Yes", "Yes"], ["No", "No"]], v ? "Yes" : "No")}</select>`;
   const paint = () => {
     let z = base.elevation; const elev = rows.slice().reverse().map(r => (z += +r.height || 0)).reverse();
-    q(d, "#stT").innerHTML = `<tr><th>Story</th><th>Height (${u.l})</th><th>Elevation (${u.l})</th></tr>` + rows.map((r, i) => `<tr data-i="${i}" class="${i === at ? "on" : ""}"><td><input data-k="name" value="${esc(r.name)}"></td><td><input data-k="height" type="number" step="any" value="${r.height}"></td><td class="r">${num(elev[i])}</td></tr>`).join("") +
-      `<tr data-base="1"><td><input data-b="name" value="${esc(base.name)}"></td><td class="kv">base</td><td><input data-b="elevation" type="number" step="any" value="${base.elevation}"></td></tr>`;
+    const masters = rows.filter(r => r.master).map(r => r.name);
+    q(d, "#stT").innerHTML = (sapS ? `<tr><th>Grid ID</th><th>Height (${u.l})</th><th>Ordinate (${u.l})</th></tr>`
+      : `<tr><th>Name</th><th>Height (${u.l})</th><th>Elevation (${u.l})</th><th>Master Story</th><th>Similar To</th><th>Splice Story</th><th>Splice Height (${u.l})</th><th>Story Color</th></tr>`)
+      + rows.map((r, i) => `<tr data-i="${i}" class="${i === at ? "on" : ""}"><td><input data-k="name" value="${esc(r.name)}"></td><td><input data-k="height" type="number" step="any" value="${r.height}"></td><td class="r">${num(elev[i])}</td>`
+        + (sapS ? "" : `<td>${yn("master", r.master)}</td><td><select data-k="similar" style="min-width:90px" ${r.master ? "disabled" : ""}>${opts([["", "None"], ...masters.filter(n => n !== r.name).map(n => [n, n])], r.master ? "" : r.similar)}</select></td>
+          <td>${yn("splice", r.splice)}</td><td><input data-k="spliceH" type="number" step="any" value="${r.splice ? r.spliceH : 0}" ${r.splice ? "" : "disabled"}></td><td><input data-k="color" type="color" value="${/^#[0-9a-f]{6}$/i.test(r.color) ? r.color : "#c0c0c0"}" style="width:46px;padding:0"></td>`) + `</tr>`).join("") +
+      `<tr data-base="1"><td><input data-b="name" value="${esc(base.name)}"></td><td class="kv">${sapS ? "" : "0"}</td><td><input data-b="elevation" type="number" step="any" value="${base.elevation}"></td>${sapS ? "" : `<td>No</td><td>None</td><td>No</td><td>0</td><td></td>`}</tr>`;
     d.querySelectorAll("[data-i]").forEach(tr => { tr.onclick = () => { at = +tr.dataset.i; d.querySelectorAll("[data-i]").forEach(x => x.classList.toggle("on", x === tr)); }; });
-    d.querySelectorAll("[data-k]").forEach(inp => inp.onchange = () => { const r = rows[+inp.closest("tr").dataset.i]; r[inp.dataset.k] = inp.dataset.k === "height" ? parseFloat(inp.value) : inp.value; paint(); });
+    d.querySelectorAll("[data-k]").forEach(inp => inp.onchange = () => {
+      const r = rows[+inp.closest("tr").dataset.i], k = inp.dataset.k;
+      r[k] = k === "height" ? parseFloat(inp.value) : k === "master" || k === "splice" ? inp.value === "Yes" : k === "spliceH" ? parseFloat(inp.value) || 0 : inp.value;
+      if (k === "master" && !r.master) rows.forEach(x => { if (x.similar === r.name) x.similar = ""; });
+      if (k === "name") rows.forEach(x => { if (x !== r && x.similar && !rows.some(y => y.master && y.name === x.similar)) x.similar = ""; });
+      paint();
+    });
     d.querySelectorAll("[data-b]").forEach(inp => inp.onchange = () => { base[inp.dataset.b] = inp.dataset.b === "elevation" ? parseFloat(inp.value) || 0 : inp.value; paint(); });
   };
-  q(d, "#stAbove").onclick = () => { rows.splice(at, 0, {name: next(), height: rows[at] ? rows[at].height : 3}); paint(); };
-  q(d, "#stBelow").onclick = () => { rows.splice(Math.min(at + 1, rows.length), 0, {name: next(), height: rows[at] ? rows[at].height : 3}); at = Math.min(at + 1, rows.length - 1); paint(); };
+  q(d, "#stAbove").onclick = () => { rows.splice(at, 0, {name: next(), height: rows[at] ? rows[at].height : 3, similar: "", color: ""}); paint(); };
+  q(d, "#stBelow").onclick = () => { rows.splice(Math.min(at + 1, rows.length), 0, {name: next(), height: rows[at] ? rows[at].height : 3, similar: "", color: ""}); at = Math.min(at + 1, rows.length - 1); paint(); };
   q(d, "#stDel").onclick = () => { if (rows.length > 1) { rows.splice(at, 1); at = Math.max(0, Math.min(at, rows.length - 1)); paint(); } };
-  q(d, "#stMany").onclick = () => { const n = Math.max(1, Math.min(200, parseInt(q(d, "#stN").value) || 1)), h = parseFloat(q(d, "#stH").value) || 3; for (let i = 0; i < n; i++) rows.unshift({name: next(), height: h}); at = 0; paint(); };
+  if (q(d, "#stColor")) q(d, "#stColor").onclick = () => { rows.forEach(r => r.color = ""); paint(); };
+  q(d, "#stMany").onclick = () => { const n = Math.max(1, Math.min(200, parseInt(q(d, "#stN").value) || 1)), h = parseFloat(q(d, "#stH").value) || 3; for (let i = 0; i < n; i++) rows.unshift({name: next(), height: h, similar: "", color: ""}); at = 0; paint(); };
   paint();
 }
 
-// ---- Define: grids (SAP2000's Define Grid System Data: X and Y grid data, ordinates) ----
+// Grid System Data as ETABS 23 shows it: Grid System Name, Story Range Option, Options (Bubble Size, Grid Color),
+// Display Grid Data as Ordinates or Spacing, then X and Y Grid Data with Grid ID, Ordinate, Visible and Bubble Location.
+// SAP2000's Define Grid System Data: System Name, X and Y Grid Data with Grid ID, Ordinate, Line Type, Visible, Bubble Loc.
 async function hmGrids() {
-  const defs = await hmDefs(), u = hmU();
-  const data = {X: defs.grids.filter(g => g.direction === "X").map(g => ({label: g.label, at: g.coordinate})), Y: defs.grids.filter(g => g.direction === "Y").map(g => ({label: g.label, at: g.coordinate}))};
-  const table = dir => `<fieldset style="flex:1;margin:0"><legend>${dir} Grid Data</legend><div class="scroll" style="max-height:40vh"><table class="list hmgrid" id="g${dir}"></table></div>
-      <div style="display:flex;gap:6px;margin-top:6px"><button data-add="${dir}">Add Line</button><button data-del="${dir}">Delete Line</button></div></fieldset>`;
-  const d = dialog("Define Grid System Data", `<p class="kv" style="margin:0 0 6px">X grid lines stand at an X ordinate (lettered A, B, C), Y grid lines at a Y ordinate (numbered 1, 2, 3), as ETABS and SAP2000 number them.</p>
-    <div style="display:flex;gap:10px">${table("X")}${table("Y")}</div>
-    <fieldset style="margin-top:8px"><legend>Quick Start: uniform spacing</legend><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-      <label>X lines <input id="qxN" type="number" value="${Math.max(data.X.length, 4)}" style="width:55px"></label><label>X spacing <input id="qxS" type="number" step="any" value="6" style="width:60px"></label>
-      <label>Y lines <input id="qyN" type="number" value="${Math.max(data.Y.length, 4)}" style="width:55px"></label><label>Y spacing <input id="qyS" type="number" step="any" value="6" style="width:60px"></label><button id="qGo">Fill the tables</button></div></fieldset>`,
-    [["OK", d => submit(d, "define_grids", {grids: ["X", "Y"].flatMap(dir => data[dir].map(g => ({label: String(g.label).trim(), direction: dir, coordinate: g.at})))}), true], ["Cancel"]], {width: 640});
+  const defs = await hmDefs(), u = hmU(), sapG = program === "sap2000", gs = defs.grid_system || {name: "G1", bubble_size: 0};
+  const data = {X: defs.grids.filter(g => g.direction === "X").map(g => ({label: g.label, at: g.coordinate, visible: g.visible !== false, bubble: g.bubble || "End"})).sort((a, b) => a.at - b.at),
+    Y: defs.grids.filter(g => g.direction === "Y").map(g => ({label: g.label, at: g.coordinate, visible: g.visible !== false, bubble: g.bubble || "Start"})).sort((a, b) => a.at - b.at)};
+  let spacing = false;
+  const table = dir => `<fieldset style="flex:1;margin:0"><legend>${dir} Grid Data</legend><div class="scroll" style="max-height:36vh"><table class="list hmgrid" id="g${dir}"></table></div>
+      <div style="display:flex;gap:6px;margin-top:6px"><button data-add="${dir}">Add</button><button data-del="${dir}">Delete</button></div></fieldset>`;
+  const d = dialog(sapG ? "Define Grid System Data" : "Grid System Data", `<div class="g2"><span>${sapG ? "System Name" : "Grid System Name"}</span><input id="gN" value="${esc(gs.name || "G1")}"></div>
+    ${sapG ? "" : `<fieldset><legend>Story Range Option</legend><label style="display:block"><input type="radio" name="gR" checked> Default - All Stories</label><label style="display:block"><input type="radio" name="gR" disabled> User Specified Story Range</label></fieldset>`}
+    <div style="display:flex;gap:10px"><fieldset style="flex:1;margin:0"><legend>Options</legend><div class="gu"><span>Bubble Size</span><input id="gB" type="number" step="any" value="${gs.bubble_size || ""}" placeholder="default"><span class="un">${u.l}</span>
+      ${sapG ? "" : `<span>Grid Color</span><input type="color" value="#a0a0a0" disabled style="width:46px;padding:0"><span class="un"></span>`}</div></fieldset>
+      <fieldset style="flex:1;margin:0"><legend>${sapG ? "Display Grids as" : "Display Grid Data as"}</legend><label style="display:block"><input type="radio" name="gD" value="0" checked> Ordinates</label><label style="display:block"><input type="radio" name="gD" value="1"> Spacing</label></fieldset></div>
+    <fieldset style="margin-top:6px"><legend>${sapG ? "Grid Data" : "Rectangular Grids"}</legend><div style="display:flex;gap:10px">${table("X")}${table("Y")}</div></fieldset>
+    <fieldset style="margin-top:8px"><legend>Quick Start New Rectangular Grids</legend><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <label>Number of X Grid Lines <input id="qxN" type="number" value="${Math.max(data.X.length, 4)}" style="width:55px"></label><label>X Grid Spacing <input id="qxS" type="number" step="any" value="6" style="width:60px"></label>
+      <label>Number of Y Grid Lines <input id="qyN" type="number" value="${Math.max(data.Y.length, 4)}" style="width:55px"></label><label>Y Grid Spacing <input id="qyS" type="number" step="any" value="6" style="width:60px"></label><button id="qGo">Fill the tables</button></div></fieldset>`,
+    [["OK", d => submit(d, "define_grids", {system_name: q(d, "#gN").value.trim() || "G1", bubble_size: fnum(d, "#gB") || undefined,
+      grids: ["X", "Y"].flatMap(dir => data[dir].map(g => ({label: String(g.label).trim(), direction: dir, coordinate: g.at, visible: g.visible, bubble: g.bubble})))})], ["Cancel"]], {width: 860});
   const sel_ = {X: 0, Y: 0};
   const letters = i => { let s = ""; i++; while (i > 0) { s = String.fromCharCode(65 + (i - 1) % 26) + s; i = Math.floor((i - 1) / 26); } return s; };
   const paint = dir => {
-    q(d, "#g" + dir).innerHTML = `<tr><th>Grid ID</th><th>Ordinate (${u.l})</th></tr>` + data[dir].map((g, i) => `<tr data-i="${i}" class="${i === sel_[dir] ? "on" : ""}"><td><input data-k="label" value="${esc(g.label)}"></td><td><input data-k="at" type="number" step="any" value="${g.at}"></td></tr>`).join("");
+    const L = data[dir];
+    q(d, "#g" + dir).innerHTML = `<tr><th>Grid ID</th><th>${spacing ? "Spacing" : (sapG ? "Ordinate" : dir + " Ordinate")} (${u.l})</th>${sapG ? "<th>Line Type</th>" : ""}<th>${sapG ? "Visible" : "Visibility"}</th><th>${sapG ? "Bubble Loc" : "Bubble Location"}</th></tr>`
+      + L.map((g, i) => `<tr data-i="${i}" class="${i === sel_[dir] ? "on" : ""}"><td><input data-k="label" value="${esc(g.label)}"></td><td><input data-k="at" type="number" step="any" value="${spacing ? (i + 1 < L.length ? +(L[i + 1].at - g.at).toFixed(6) : 0) : g.at}"></td>
+        ${sapG ? `<td>Primary</td>` : ""}<td><select data-k="visible" style="min-width:72px">${opts(sapG ? [["1", "Yes"], ["0", "No"]] : [["1", "Show"], ["0", "Hide"]], g.visible ? "1" : "0")}</select></td><td><select data-k="bubble">${opts([["End", "End"], ["Start", "Start"]], g.bubble)}</select></td></tr>`).join("");
     q(d, "#g" + dir).querySelectorAll("[data-i]").forEach(tr => tr.onclick = () => { sel_[dir] = +tr.dataset.i; q(d, "#g" + dir).querySelectorAll("[data-i]").forEach(x => x.classList.toggle("on", x === tr)); });
-    q(d, "#g" + dir).querySelectorAll("[data-k]").forEach(inp => inp.onchange = () => { const g = data[dir][+inp.closest("tr").dataset.i]; g[inp.dataset.k] = inp.dataset.k === "at" ? parseFloat(inp.value) : inp.value; });
+    q(d, "#g" + dir).querySelectorAll("[data-k]").forEach(inp => inp.onchange = () => {
+      const i = +inp.closest("tr").dataset.i, g = L[i], k = inp.dataset.k;
+      if (k === "at" && spacing) { const sp = parseFloat(inp.value) || 0, shift = (L[i].at + sp) - (i + 1 < L.length ? L[i + 1].at : L[i].at + sp); for (let j = i + 1; j < L.length; j++) L[j].at = +(L[j].at + shift).toFixed(6); }
+      else if (k === "at") g.at = parseFloat(inp.value);
+      else if (k === "visible") g.visible = inp.value === "1";
+      else g[k] = inp.value;
+      paint(dir);
+    });
   };
-  d.querySelectorAll("[data-add]").forEach(b => b.onclick = () => { const dir = b.dataset.add, L = data[dir], last = L.length ? L[L.length - 1].at : 0, gap = L.length > 1 ? L[L.length - 1].at - L[L.length - 2].at : 6; L.push({label: dir === "X" ? letters(L.length) : String(L.length + 1), at: L.length ? last + gap : 0}); sel_[dir] = L.length - 1; paint(dir); });
+  d.querySelectorAll("[name=gD]").forEach(r => r.onchange = () => { spacing = q(d, "[name=gD]:checked").value === "1"; paint("X"); paint("Y"); });
+  d.querySelectorAll("[data-add]").forEach(b => b.onclick = () => { const dir = b.dataset.add, L = data[dir], last = L.length ? L[L.length - 1].at : 0, gap = L.length > 1 ? L[L.length - 1].at - L[L.length - 2].at : 6;
+    L.push({label: dir === "X" ? letters(L.length) : String(L.length + 1), at: L.length ? +(last + gap).toFixed(6) : 0, visible: true, bubble: dir === "X" ? "End" : "Start"}); sel_[dir] = L.length - 1; paint(dir); });
   d.querySelectorAll("[data-del]").forEach(b => b.onclick = () => { const dir = b.dataset.del; data[dir].splice(sel_[dir], 1); sel_[dir] = Math.max(0, sel_[dir] - 1); paint(dir); });
   q(d, "#qGo").onclick = () => {
     const nx = Math.max(1, Math.min(100, parseInt(q(d, "#qxN").value) || 1)), ny = Math.max(1, Math.min(100, parseInt(q(d, "#qyN").value) || 1)), sx = parseFloat(q(d, "#qxS").value) || 6, sy = parseFloat(q(d, "#qyS").value) || 6;
-    data.X = Array.from({length: nx}, (_, i) => ({label: letters(i), at: +(i * sx).toFixed(6)})); data.Y = Array.from({length: ny}, (_, i) => ({label: String(i + 1), at: +(i * sy).toFixed(6)})); paint("X"); paint("Y");
+    data.X = Array.from({length: nx}, (_, i) => ({label: letters(i), at: +(i * sx).toFixed(6), visible: true, bubble: "End"})); data.Y = Array.from({length: ny}, (_, i) => ({label: String(i + 1), at: +(i * sy).toFixed(6), visible: true, bubble: "Start"})); paint("X"); paint("Y");
   };
   paint("X"); paint("Y");
 }

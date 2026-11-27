@@ -12,6 +12,15 @@ namespace CsiProMax.Assistant.Tools;
 /// </summary>
 public static class PropertyTools
 {
+    /// <summary>Refuses extras the form has no field for before anything changes (a refusal leaves the model as it was).</summary>
+    private static void CheckExtras(JsonElement a, string[] fields, string what)
+    {
+        if (!a.TryGetProperty("extras", out var x) || x.ValueKind != JsonValueKind.Object) return;
+        foreach (var p in x.EnumerateObject())
+            if (!fields.Contains(p.Name, StringComparer.OrdinalIgnoreCase))
+                throw new ToolInputException($"{what} has no field '{p.Name}'. It has: {string.Join(", ", fields)}.");
+    }
+
     private static OfflineEtabs Offline(ICsiLink e) => e as OfflineEtabs
         ?? throw new ToolInputException("This is the Modeler's own Define or Assign item (no CSI program behind it). In a live program use its own tools or edit_table.");
 
@@ -43,6 +52,7 @@ public static class PropertyTools
                 var link = Offline(e);
                 var dims = Values(a, "dims", true); var mods = Values(a, "modifiers", true);
                 Core(() => { PropertyDefs.CheckModifiers(PropertyDefs.FrameModifiers, mods); return 0; });
+                CheckExtras(a, PropertyDefs.FrameExtraFields(a.Need("shape")), "A " + a.Need("shape") + " section");
                 var s = Core(() => link.Edit(m =>
                 {
                     var sec = PropertyDefs.SetShape(m, a.Need("name"), Was(a), a.Need("shape"), a.Need("material"), dims);
@@ -62,6 +72,7 @@ public static class PropertyTools
                 var mods = Values(a, "modifiers", true);
                 Core(() => { PropertyDefs.CheckModifiers(PropertyDefs.ShellModifiers, mods); return 0; });
                 var wall = a.Need("kind").Equals("wall", StringComparison.OrdinalIgnoreCase);
+                CheckExtras(a, PropertyDefs.ShellExtraFields(wall), wall ? "A wall section" : "A slab section");
                 var s = Core(() => link.Edit(m =>
                 {
                     var sec = PropertyDefs.SetShellType(m, a.Need("name"), Was(a), wall, a.Text("slab_type", "Slab"), a.Text("modeling", wall ? "ShellThin" : "ShellThin"), a.Number("thickness"), a.Need("material"), a.Flag("one_way"),

@@ -22,12 +22,12 @@ public static class HandTools
     public static IReadOnlyList<Tool> All { get; } =
     [
         new("define_stories",
-            "Sets the model's stories, bottom first (the base level is kept): each with a name and a height, and 'was' for a story that is renamed or kept. Objects on a story left out are deleted with it.",
-            """{"type":"object","required":["stories"],"properties":{"base_name":{"type":"string"},"base_elevation":{"type":"number"},"stories":{"type":"array","items":{"type":"object","required":["name","height"],"properties":{"name":{"type":"string"},"height":{"type":"number"},"was":{"type":"string"}}}}}}""",
+            "Sets the model's stories, bottom first (the base level is kept), as Story Data shows them: each with a name and a height, master story or similar to one, splice story with its splice height, and its colour; 'was' for a story that is renamed or kept. Objects on a story left out are deleted with it.",
+            """{"type":"object","required":["stories"],"properties":{"base_name":{"type":"string"},"base_elevation":{"type":"number"},"stories":{"type":"array","items":{"type":"object","required":["name","height"],"properties":{"name":{"type":"string"},"height":{"type":"number"},"was":{"type":"string"},"master":{"type":"boolean","description":"Master Story."},"similar_to":{"type":"string","description":"Similar To: a master story, or None."},"splice":{"type":"boolean","description":"Splice Story."},"splice_height":{"type":"number"},"color":{"type":"string","description":"Story Color, a name or #rrggbb."}}}}}}""",
             Ask.Changes, DefineStories, a => "Change the story data"),
         new("define_grids",
-            "Sets the model's grid lines: each with a label, direction (X: a line at x = coordinate; Y: a line at y = coordinate) and coordinate. Lines left out are deleted.",
-            """{"type":"object","required":["grids"],"properties":{"grids":{"type":"array","items":{"type":"object","required":["label","direction","coordinate"],"properties":{"label":{"type":"string"},"direction":{"type":"string","enum":["X","Y"]},"coordinate":{"type":"number"}}}}}}""",
+            "Sets the model's grid lines as Grid System Data shows them: each with its Grid ID (label), direction (X: a line at x = coordinate; Y: a line at y = coordinate), ordinate, visible and bubble location; the system's name and bubble size. Lines left out are deleted.",
+            """{"type":"object","required":["grids"],"properties":{"grids":{"type":"array","items":{"type":"object","required":["label","direction","coordinate"],"properties":{"label":{"type":"string"},"direction":{"type":"string","enum":["X","Y"]},"coordinate":{"type":"number"},"visible":{"type":"boolean","description":"Default true."},"bubble":{"type":"string","enum":["End","Start"],"description":"Bubble Location; default End for X lines, Start for Y lines."}}}},"system_name":{"type":"string","description":"The grid system's name."},"bubble_size":{"type":"number"}}}""",
             Ask.Changes, DefineGrids, a => "Change the grid data"),
         new("define_material",
             "Adds a concrete material, or changes one ('was': its name now): fc, modulus of elasticity, unit weight and Poisson's ratio in the model's units.",
@@ -78,8 +78,13 @@ public static class HandTools
         {
             ["units"] = new JsonObject { ["force"] = m.Units.Force, ["length"] = m.Units.Length },
             ["base"] = new JsonObject { ["name"] = m.Stories[0].Name, ["elevation"] = m.Stories[0].Elevation },
-            ["stories"] = new JsonArray(m.Stories.Skip(1).Select((s, i) => (JsonNode)new JsonObject { ["name"] = s.Name, ["height"] = s.Height, ["elevation"] = m.Elevation(i + 1) }).ToArray()),
-            ["grids"] = new JsonArray(m.Grids.Select(g => (JsonNode)new JsonObject { ["label"] = g.Label, ["direction"] = g.Direction, ["coordinate"] = g.Coordinate }).ToArray()),
+            ["stories"] = new JsonArray(m.Stories.Skip(1).Select((s, i) =>
+            {
+                var sp = StoryGridOptions.Splice(m, s.Name);
+                return (JsonNode)new JsonObject { ["name"] = s.Name, ["height"] = s.Height, ["elevation"] = m.Elevation(i + 1), ["master"] = StoryGridOptions.IsMaster(s), ["similar_to"] = StoryGridOptions.SimilarTo(s), ["splice"] = sp.Splice, ["splice_height"] = sp.Height, ["color"] = sp.Color };
+            }).ToArray()),
+            ["grids"] = new JsonArray(m.Grids.Select(g => (JsonNode)new JsonObject { ["label"] = g.Label, ["direction"] = g.Direction, ["coordinate"] = g.Coordinate, ["visible"] = StoryGridOptions.Visible(g), ["bubble"] = StoryGridOptions.Bubble(g) }).ToArray()),
+            ["grid_system"] = new JsonObject { ["name"] = m.GridSystem, ["bubble_size"] = StoryGridOptions.BubbleSize(m) },
             ["materials"] = new JsonArray(m.Materials.Select(x => (JsonNode)new JsonObject
             {
                 ["name"] = x.Name, ["type"] = x.Type, ["fc"] = x.Number("FC"), ["fy"] = x.Number("FY"), ["elastic_modulus"] = x.Number("E"), ["unit_weight"] = x.Number("WEIGHTPERVOLUME"), ["poisson"] = x.Number("U"),
@@ -152,16 +157,30 @@ public static class HandTools
             foreach (var x in m.PointLoads) x.Story = R(x.Story);
             var old = m.Stories.ToDictionary(s => s.Name, StringComparer.Ordinal);
             var list = new List<Story> { new() { Name = baseName, Elevation = Num(a, "base_elevation") ?? oldBase.Elevation, Extra = oldBase.Extra } };
-            foreach (var r in rows)
-                list.Add(new Story { Name = r.Name, Height = r.Height, Extra = r.Was is not null && old.TryGetValue(r.Was, out var s) ? s.Extra : [] });
+            var given = a.GetProperty("stories").EnumerateArray().ToList();
+            var splices = new List<(string, bool, double, string?)>();
+            for (var i = 0; i < rows.Count; i++)
+            {
+                var r = rows[i]; var g = given[i];
+                var was = r.Was is not null && old.TryGetValue(r.Was, out var s) ? s : null;
+                var story = new Story { Name = r.Name, Height = r.Height, Extra = was?.Extra.ToList() ?? [] };
+                if (g.TryGetProperty("master", out _) || g.TryGetProperty("similar_to", out _))
+                    StoryGridOptions.SetMaster(story, g.Flag("master", StoryGridOptions.IsMaster(story)), Opt(g, "similar_to") is { } sim && !sim.Equals("None", StringComparison.OrdinalIgnoreCase) ? sim : null);
+                else if (StoryGridOptions.SimilarTo(story) is { } sim2 && rename.TryGetValue(sim2, out var to)) StoryGridOptions.SetMaster(story, false, to);
+                var before = was is null ? (false, 0d, (string?)null) : StoryGridOptions.Splice(m, was.Name);
+                splices.Add((r.Name, g.Flag("splice", before.Item1), Num(g, "splice_height") ?? before.Item2, g.TryGetProperty("color", out _) ? Opt(g, "color") : before.Item3));
+                list.Add(story);
+            }
             m.Stories = list;
+            StoryGridOptions.SetSplices(m, splices);
             return Done($"{rows.Count} stories above {baseName}" + (gone.Count > 0 ? $"; {gone.Count} deleted with {removed} objects on them" : ""));
         });
     }
 
     private static JsonNode DefineGrids(JsonElement a, ICsiLink e)
     {
-        var rows = a.GetProperty("grids").EnumerateArray().Select(g => (Label: Need(g, "label"), Dir: Need(g, "direction").ToUpperInvariant(), At: NeedNum(g, "coordinate"))).ToList();
+        var rows = a.GetProperty("grids").EnumerateArray().Select(g => (Label: Need(g, "label"), Dir: Need(g, "direction").ToUpperInvariant(), At: NeedNum(g, "coordinate"),
+            Visible: g.TryGetProperty("visible", out var v) && v.ValueKind is JsonValueKind.True or JsonValueKind.False ? v.GetBoolean() : (bool?)null, Bubble: Opt(g, "bubble"))).ToList();
         if (rows.FirstOrDefault(r => r.Dir is not ("X" or "Y")) is { Label.Length: > 0 } bad) throw new ToolInputException($"Grid {bad.Label}: the direction is X or Y.");
         if (rows.GroupBy(r => r.Label, StringComparer.OrdinalIgnoreCase).FirstOrDefault(g => g.Count() > 1) is { } twice) throw new ToolInputException($"Two grid lines are labelled '{twice.Key}'.");
         return Offline(e).Edit(m =>
@@ -172,7 +191,11 @@ public static class HandTools
             {
                 m.AddGrid(r.Label, r.Dir, r.At);
                 if (old.TryGetValue(r.Label + "|" + r.Dir, out var was)) m.Grids[^1].Extra = was.Extra;
+                if (r.Visible is not null || r.Bubble is not null)
+                    StoryGridOptions.SetGrid(m.Grids[^1], r.Visible ?? StoryGridOptions.Visible(m.Grids[^1]), r.Bubble ?? StoryGridOptions.Bubble(m.Grids[^1]));
             }
+            if (Opt(a, "system_name") is { } sys) m.GridSystem = sys;
+            if (Num(a, "bubble_size") is double size && size > 0) StoryGridOptions.Set(m.GridSystemExtra, "BUBBLESIZE", E2kText.Number(size), quoted: false);
             return Done($"{rows.Count(r => r.Dir == "X")} X and {rows.Count(r => r.Dir == "Y")} Y grid lines");
         });
     }
