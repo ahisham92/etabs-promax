@@ -567,6 +567,12 @@ public static class FieldTest
         // features that found no answering scratch window run on a hidden scratch window started for them alone.
         var openDone = !standIn;
         var panelBefore = panelDone;
+        if (!standIn && !panelDone && IsLive(link) && Unanswered(link) is { } silent && silent.Contains("come back", StringComparison.Ordinal))
+        {
+            // Said once, with what the program showed, before the steps that would each fail on it.
+            ctx.Section(OpenSection);
+            ctx.Fail($"the open {link.Program.Name} window answers before CSI ProMax's own features", silent);
+        }
         if (standIn || (!panelDone && !Answers(link)))
             foreach (var program in programs)
             {
@@ -581,6 +587,13 @@ public static class FieldTest
         }
         if (!panelDone)
             PanelFieldSteps.Run(ctx, link, scratch: false, live: IsLive(link));
+    }
+
+    /// <summary>Why the program behind <paramref name="link"/> does not answer; null when it does.</summary>
+    internal static string? Unanswered(ICsiLink link)
+    {
+        try { link.Info(); return null; }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return (ex is AggregateException { InnerException: { } inner } ? inner : ex).Message; }
     }
 
     /// <summary>Whether the program behind <paramref name="link"/> answers.</summary>
@@ -958,7 +971,9 @@ public static class FieldTest
         sb.AppendLine();
 
         // What failed, then what was left out, each under the part of the test it belongs to (a tool has the same name in every program).
-        void Listed(string title, IReadOnlyList<FieldStep> which)
+        // A failure is listed with its own words only: the bracketed kind is the reason a step was left out, and a
+        // failure's text that mentions "a licence notice" read as "[the program's licence]" (tester's SAFE run, 0.4.66).
+        void Listed(string title, IReadOnlyList<FieldStep> which, bool why)
         {
             if (which.Count == 0) return;
             sb.AppendLine("## " + title);
@@ -966,12 +981,12 @@ public static class FieldTest
             foreach (var part in which.GroupBy(s => s.Section))
             {
                 if (part.Key.Length > 0) sb.AppendLine(part.Key + ":").AppendLine();
-                foreach (var s in part) sb.AppendLine($"- {s.Name}: [{SkipAudit.Words(SkipAudit.Of(s.Detail))}] {Short(Regex.Replace(s.Detail, "^skipped: ", ""), 400)}");
+                foreach (var s in part) sb.AppendLine(why ? $"- {s.Name}: [{SkipAudit.Words(SkipAudit.Of(s.Detail))}] {Short(Regex.Replace(s.Detail, "^skipped: ", ""), 400)}" : $"- {s.Name}: {Short(s.Detail, 400)}");
                 sb.AppendLine();
             }
         }
-        Listed("Not working", bad);
-        Listed("Not tested", skipped);
+        Listed("Not working", bad, false);
+        Listed("Not tested", skipped, true);
         sb.Append(ReferenceData.Section(work));
         if (o.Full)
         {

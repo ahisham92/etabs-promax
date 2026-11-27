@@ -19,8 +19,10 @@ public sealed class ComEtabs : ICsiLink, IDisposable
     /// </summary>
     public static ApartmentState Apartment { get; set; } = ApartmentState.STA;
 
-    private readonly BlockingCollection<Action> _work = new();
-    private readonly Thread _thread;
+    private BlockingCollection<Action> _work = new();
+    private Thread _thread;
+    /// <summary>The lock of the read session (its own object: <see cref="_work"/> is replaced by <see cref="Renew"/>).</summary>
+    private readonly object _gate = new();
     private dynamic? _model;
 
     private readonly int? _pid;
@@ -33,9 +35,15 @@ public sealed class ComEtabs : ICsiLink, IDisposable
     {
         _pid = pid;
         Program = program ?? CsiProgram.Etabs;
-        _thread = new Thread(() => { foreach (var job in _work.GetConsumingEnumerable()) job(); }) { IsBackground = true, Name = Program.ProcessName };
-        if (OperatingSystem.IsWindows()) _thread.SetApartmentState(Apartment);
-        _thread.Start();
+        _thread = Worker(_work);
+    }
+
+    private Thread Worker(BlockingCollection<Action> work)
+    {
+        var thread = new Thread(() => { foreach (var job in work.GetConsumingEnumerable()) job(); }) { IsBackground = true, Name = Program.ProcessName };
+        if (OperatingSystem.IsWindows()) thread.SetApartmentState(Apartment);
+        thread.Start();
+        return thread;
     }
 
     private readonly Func<dynamic>? _start;
@@ -75,6 +83,51 @@ public sealed class ComEtabs : ICsiLink, IDisposable
     /// <summary>The call the program has not come back from, while it is still out ("" when none).</summary>
     private volatile string _stuck = "";
 
+    /// <summary>What the program's windows showed when the call was given up on ("" when not read).</summary>
+    private volatile string _stuckSeen = "";
+
+    /// <summary>Which worker thread the calls are on: a call of an earlier one that comes back late changes nothing.</summary>
+    private int _generation;
+
+    /// <summary>Whether this stuck call was already given a fresh thread and a fresh attach (once per stuck call).</summary>
+    private bool _renewed;
+
+    /// <summary>
+    /// The engineer's SAFE 22.7 never came back from one "read the model" while the field test ran, and every tool after
+    /// it failed at once for the rest of the run (tester's SAFE-only test, 0.4.66). When the program's window still
+    /// answers Windows, the link leaves the thread waiting on that call, starts a fresh one and attaches again, once
+    /// per stuck call; a scratch window the test started is not attached again (it has no other way in).
+    /// </summary>
+    private bool Renew()
+    {
+        if (_renewed || _start is not null || _work.IsAddingCompleted) return false;
+        if (!OperatingSystem.IsWindows() || ProcessId is not int pid || !Packs.PackWatcher.Responding(pid)) return false;
+        _renewed = true;
+        var old = _work;
+        Interlocked.Increment(ref _generation);
+        _work = new BlockingCollection<Action>();
+        _thread = Worker(_work);
+        old.CompleteAdding();
+        _model = null;
+        // The pipe of a program on the .NET Framework is opened again too; the old one is let go of on the side.
+        if (_pipe is { } pipe) { _pipe = null; _ = Task.Run(() => { try { pipe.Dispose(); } catch (Exception) { } }); }
+        _stuck = "";
+        Interlocked.Exchange(ref _refreshing, 0);
+        return true;
+    }
+
+    /// <summary>The titles of the program's windows, for a message about a call that did not come back.</summary>
+    private string Seen()
+    {
+        try
+        {
+            if (!OperatingSystem.IsWindows() || ProcessId is not int pid) return "";
+            var titles = ScratchDialogs.Of(pid).Select(w => "'" + w.Title + "'").Where(t => t.Length > 2).Take(8).ToList();
+            return titles.Count == 0 ? "" : $" {Program.Name}'s windows then: {string.Join(", ", titles)}.";
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return ""; }
+    }
+
     internal static bool IsLong(string what) =>
         new[] { "run ", "start ", "open ", "save ", "import " }.Any(w => what.StartsWith(w, StringComparison.OrdinalIgnoreCase));
 
@@ -87,14 +140,17 @@ public sealed class ComEtabs : ICsiLink, IDisposable
     private T On<T>(string what, Func<dynamic, T> body)
     {
         var app = Program.Name;
-        if (_stuck is { Length: > 0 } stuck)
+        if (_stuck is { Length: > 0 } stuck && !Renew())
             throw new EtabsException($"{app} has still not come back from the last call ({stuck}). A message may be waiting in {app}'s window " +
-                "(such as \"Analysis Complete\" or a licence notice): answer or close it there, then try again.");
+                "(such as \"Analysis Complete\" or a licence notice): answer or close it there, then try again." + _stuckSeen);
         // A call made from inside another call (a tool's Raw work that asks the link for the load cases) is already on
         // the program's thread: it runs at once. Queued, it would wait for the call it is part of, which never ends.
         if (Thread.CurrentThread == _thread) return body(Model());
         var done = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _work.Add(() =>
+        var generation = Volatile.Read(ref _generation);
+        try { _work.Add(Job); }
+        catch (InvalidOperationException) { throw new EtabsException($"The link to {app} was closed."); }
+        void Job()
         {
             try { done.SetResult(body(Model())); }
             catch (EtabsException ex) { done.SetException(ex); }
@@ -105,18 +161,20 @@ public sealed class ComEtabs : ICsiLink, IDisposable
                 done.SetException(new EtabsException($"{app} did not answer ({what}). Is {app} still open? {ex.Message}"));
             }
             catch (Exception ex) { done.SetException(new EtabsException($"{app} could not {what}: {ex.Message}")); }
-            finally { _stuck = ""; }
-        });
+            finally { if (generation == Volatile.Read(ref _generation)) _stuck = ""; }
+        }
         var limit = IsLong(what) ? AnalysisLimit : CallLimit;
         // Waits without throwing: a call that failed must come out as its own EtabsException below, never wrapped
         // in an AggregateException that no "catch (EtabsException)" would take.
         if (!((IAsyncResult)done.Task).AsyncWaitHandle.WaitOne(limit))
         {
             _stuck = Volatile.Read(ref _refreshing) == 1 ? "refresh the view" : what;
+            _stuckSeen = Seen();
             // The call may still come back later; the next call works again from then on.
             throw new EtabsException($"{app} did not come back from \"{what}\" within {Span(limit)}. A message may be waiting in {app}'s window " +
-                "(such as \"Analysis Complete\" or a licence notice): answer or close it there, then try again.");
+                "(such as \"Analysis Complete\" or a licence notice): answer or close it there, then try again." + _stuckSeen);
         }
+        _renewed = false;
         try { return done.Task.GetAwaiter().GetResult(); }
         catch (EtabsException) { throw; }
     }
@@ -510,7 +568,7 @@ public sealed class ComEtabs : ICsiLink, IDisposable
     /// <summary>Starts a read session (nested ones share the outer one). Every change through this link ends what it kept.</summary>
     internal IDisposable StartSession()
     {
-        lock (_work)
+        lock (_gate)
         {
             if (_session is { } s) s.Depth++;
             else _session = new ReadCache();
@@ -521,7 +579,7 @@ public sealed class ComEtabs : ICsiLink, IDisposable
     /// <summary>Forgets what the session read (the program's output options changed), keeping the session.</summary>
     internal void Forget()
     {
-        if (_session is { } s) lock (_work) { s.Tables = null; s.ShownFor = null; s.Reads.Clear(); }
+        if (_session is { } s) lock (_gate) { s.Tables = null; s.ShownFor = null; s.Reads.Clear(); }
     }
 
     private sealed class Ending(ComEtabs link) : IDisposable
@@ -531,7 +589,7 @@ public sealed class ComEtabs : ICsiLink, IDisposable
         {
             if (_done) return;
             _done = true;
-            lock (link._work)
+            lock (link._gate)
                 if (link._session is { } s && --s.Depth <= 0) link._session = null;
         }
     }
@@ -625,9 +683,9 @@ public sealed class ComEtabs : ICsiLink, IDisposable
     {
         if (_session is not { } session) return ReadTableNow(key, cases, combos);
         var id = key + "\u0002" + string.Join("\u0001", cases ?? []) + "\u0002" + string.Join("\u0001", combos ?? []);
-        lock (_work) if (session.Reads.TryGetValue(id, out var kept)) return kept;
+        lock (_gate) if (session.Reads.TryGetValue(id, out var kept)) return kept;
         var data = ReadTableNow(key, cases, combos);
-        lock (_work) if (_session == session) session.Reads[id] = data;
+        lock (_gate) if (_session == session) session.Reads[id] = data;
         return data;
     }
 

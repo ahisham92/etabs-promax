@@ -6,6 +6,7 @@ using CsiProMax;
 using CsiProMax.Assistant;
 using CsiProMax.Assistant.Etabs;
 using CsiProMax.Assistant.Tools;
+using CsiProMax.CsiTables;
 
 /// <summary>
 /// One test for each bug a tester sent back, and one for the kind of mistake behind it, so that neither the bug nor
@@ -1374,6 +1375,75 @@ static class TesterBugTests
             }
             finally { Directory.Delete(root, true); }
         });
+
+        yield return ("SAFE 22.7 tester (0.4.66): the blank model's story is at the .f2k's level, so SAFE takes its floors; a refused floor says why", () =>
+        {
+            var text = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "samples", "safe22-tester-cpm-field-test.f2k"));
+            Equal(3.2, CsiProMax.Assistant.Safe.F2kRebuild.StoryHeightOf(text), "the story height the blank model takes (the file's Story Height Below)");
+            Equal(3.2, CsiProMax.Assistant.Safe.F2kRebuild.FloorLevelOf(text), "the floors' level");
+            Equal(3.0, CsiProMax.Assistant.Safe.F2kRebuild.StoryHeightOf("TABLE:  \"PROGRAM CONTROL\"\r\n   ProgramName=SAFE\r\n"), "3 when the file names none");
+            Equal(4.5, CsiProMax.Assistant.Safe.F2kRebuild.StoryHeightOf("TABLE:  \"GRID DEFINITIONS - GENERAL\"\r\n   Name=G1   \"Model Datum\"=4.5\r\n"), "the datum when no height below is given");
+            var off = CsiProMax.Assistant.Safe.F2kRebuild.LevelProblem([new StoryRow("Base", 0, 0), new StoryRow("Story1", 3, 3)], 3.2);
+            Check(off.Contains("Z = 3.2", StringComparison.Ordinal) && off.Contains("Story1 3", StringComparison.Ordinal), "a story at 3 m with floors at 3.2 m is named: " + off);
+            Equal("", CsiProMax.Assistant.Safe.F2kRebuild.LevelProblem([new StoryRow("Base", 0, 0), new StoryRow("Story1", 3.2, 3.2)], 3.2), "a story at the floors' level is no problem");
+
+            // SAFE refuses a floor where no story is (as the tester's SAFE 22.7 did): the build says so, with the levels.
+            var memory = new MemoryEtabs { Program = CsiProgram.Safe };
+            var refusing = new StoryBound(new SafeMemory(memory, program: CsiProgram.Safe) { Api = new OldProgramTests.ApiRecorder() }, [new StoryRow("Base", 0, 0), new StoryRow("Story1", 3, 3)]);
+            try { CsiProMax.Assistant.Safe.F2kRebuild.Build(refusing, text); throw new Exception("the floors at 3.2 m were taken at a story at 3 m"); }
+            catch (EtabsException ex) { Check(ex.Message.Contains("no story is at the floors' level", StringComparison.Ordinal) && ex.Message.Contains("S200", StringComparison.Ordinal), ex.Message); }
+            var level = new StoryBound(new SafeMemory(new MemoryEtabs { Program = CsiProgram.Safe }, program: CsiProgram.Safe) { Api = new OldProgramTests.ApiRecorder() }, [new StoryRow("Base", 0, 0), new StoryRow("Story1", 3.2, 3.2)]);
+            var built = CsiProMax.Assistant.Safe.F2kRebuild.Build(level, text);
+            Equal(4, built["slabs"]!.GetValue<int>(), "the file's four floors at a story at their level");
+
+            // The story moves to the file's level through the API when NewBlank put it elsewhere.
+            var api = new StoryApi(3);
+            var said = CsiProMax.Assistant.Safe.SafeStory.AtLevel(api, 3.2);
+            Check(Math.Abs(api.Story.Elevation - 3.2) < 1e-9 && said.Contains("moved", StringComparison.Ordinal), "the story is moved to 3.2: " + said);
+            Check(CsiProMax.Assistant.Safe.SafeStory.AtLevel(api, 3.2).Contains("is at the file's level", StringComparison.Ordinal), "and then left as it is");
+
+            var scratch = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));
+            Check(scratch.Contains("(\"TypicalStoryHeight\", height), (\"BottomStoryHeight\", height)", StringComparison.Ordinal) && scratch.Contains("F2kRebuild.StoryHeightOf(text)", StringComparison.Ordinal),
+                "the blank model takes the file's story height, not 3");
+            Check(scratch.Contains("SafeStory.AtLevel(m, level.Value)", StringComparison.Ordinal), "and its story is put at the file's level");
+        });
+
+        yield return ("SAFE 22.7 tester (0.4.66): when SAFE opens the Modeler's .f2k empty, the test opens other forms of it and SAFE's own export, to say why", () =>
+        {
+            var text = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "samples", "safe22-tester-cpm-field-test.f2k"));
+            var forms = CsiProMax.Assistant.Safe.F2kProbe.Forms(text, "22.7.0");
+            Equal(4, forms.Count, "four forms of the Modeler's file");
+            foreach (var (name, body) in forms)
+            {
+                var t = CsiTableText.Parse(body);
+                Equal("Standard", t["PROGRAM CONTROL"].Single()["ProgLevel"], $"{name}: SAFE Standard, as SAFE 23.1's own PT export says");
+                Equal(4, t["FLOOR OBJECT CONNECTIVITY"].Count, $"{name}: the four floors are still in it");
+            }
+            Equal("20.1.0", CsiTableText.Parse(forms[0].Text)["PROGRAM CONTROL"].Single()["Version"], "the first keeps the file's version");
+            Equal("22.7.0", CsiTableText.Parse(forms[1].Text)["PROGRAM CONTROL"].Single()["Version"], "the second is at the running SAFE's");
+            Check(forms[2].Text.StartsWith("File ", StringComparison.Ordinal) && forms[2].Text.Split("\r\n")[0].Contains(" saved ", StringComparison.Ordinal), "the third starts as SAFE's own file does");
+            Check(!CsiTableText.Parse(forms[3].Text).ContainsKey("TENDON OBJECT CONNECTIVITY") && forms[3].Text.TrimEnd().EndsWith("END TABLE DATA", StringComparison.Ordinal), "the fourth has only what the slabs need");
+            var own = CsiProMax.Assistant.Safe.F2kProbe.Control() ?? throw new Exception("SAFE's own export is not in CsiProMax.dll");
+            Check(CsiTableText.Parse(own)["FLOOR OBJECT CONNECTIVITY"].Count > 0, "SAFE's own export, the control, has floors");
+            var scratch = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));
+            Check(scratch.IndexOf("Probe(ctx, name, text)", StringComparison.Ordinal) is var probe and > 0 && probe > scratch.IndexOf("if (openedEmpty)", StringComparison.Ordinal), "the probe runs after an empty open");
+        });
+
+        yield return ("SAFE 22.7 tester (0.4.66): one call the engineer's program never came back from does not fail every later tool; the report gives a failure no skip reason", () =>
+        {
+            var com = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Etabs/ComEtabs.cs"));
+            Check(com.Contains("if (_stuck is { Length: > 0 } stuck && !Renew())", StringComparison.Ordinal), "a stuck link tries a fresh thread and attach before it says no");
+            Check(com.Contains("if (_renewed || _start is not null || _work.IsAddingCompleted) return false;", StringComparison.Ordinal), "once per stuck call, never for a scratch window the test started");
+            Check(com.Contains("Packs.PackWatcher.Responding(pid)", StringComparison.Ordinal), "only while the program's window still answers Windows");
+            Check(com.Contains("if (generation == Volatile.Read(ref _generation)) _stuck = \"\";", StringComparison.Ordinal), "a late answer on the old thread does not clear a new stuck call");
+            Check(com.Contains("+ _stuckSeen", StringComparison.Ordinal), "the message names the program's windows then");
+            Check(!com.Contains("lock (_work)", StringComparison.Ordinal), "the read session's lock is not the queue that is replaced");
+            var field = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/FieldTest.cs"));
+            Check(field.Contains("Listed(\"Not working\", bad, false);", StringComparison.Ordinal), "a failure is listed without a skip reason ('[the program's licence]' for a failure that mentions a licence notice)");
+            Check(field.Contains("the open {link.Program.Name} window answers before CSI ProMax's own features", StringComparison.Ordinal), "the open program not answering is said once, before the steps that would each fail on it");
+            Equal("SAFE has still not come back", CsiProMax.Assistant.FieldTest.Unanswered(new Silent(new MemoryEtabs { Program = CsiProgram.Safe })), "the reason is the program's own words");
+            Equal<string?>(null, CsiProMax.Assistant.FieldTest.Unanswered(new MemoryEtabs { Program = CsiProgram.Safe }), "an answering program has none");
+        });
     }
 
     /// <summary>The analysed SAFE stand-in with the tester's two input tables added.</summary>
@@ -1391,12 +1461,45 @@ static class TesterBugTests
             key is Overwrites or Combinations ? new(["Name", "Status"], [["ULS1", "OK"]]) : base.ReadTable(key, cases, combos);
     }
 
+    /// <summary>SAFE as the tester's SAFE 22.7 answered: a floor is refused where no story is.</summary>
+    sealed class StoryBound(ICsiLink inner, IReadOnlyList<StoryRow> stories) : Forward(inner)
+    {
+        public override IReadOnlyList<StoryRow> Stories() => stories;
+        public override string AddArea(IReadOnlyList<(double X, double Y, double Z)> corners, string section) =>
+            corners.All(c => Math.Abs(c.Z - corners[0].Z) < 1e-9) && !stories.Any(s => Math.Abs(s.Elevation - corners[0].Z) < 1e-4)
+                ? throw new EtabsException($"SAFE refused to add an area with section {section}.") : base.AddArea(corners, section);
+    }
+
+    /// <summary>A program that never came back from a call.</summary>
+    sealed class Silent(ICsiLink inner) : Forward(inner)
+    {
+        public override ModelInfo Info() => throw new EtabsException("SAFE has still not come back");
+    }
+
+    /// <summary>SAFE's cStory as far as SafeStory asks it: one story, moved by SetElevation.</summary>
+    public sealed class StoryApi(double elevation)
+    {
+        public Stories Story { get; } = new() { Elevation = elevation };
+        public sealed class Stories
+        {
+            public double Elevation;
+            public int GetStories_2(ref double BaseElevation, ref int NumberStories, ref string[] StoryNames, ref double[] StoryElevations, ref double[] StoryHeights,
+                ref bool[] IsMasterStory, ref string[] SimilarToStory, ref bool[] SpliceAbove, ref double[] SpliceHeight, ref int[] color)
+            {
+                BaseElevation = 0; NumberStories = 1; StoryNames = ["Story1"]; StoryElevations = [Elevation]; StoryHeights = [Elevation];
+                IsMasterStory = [true]; SimilarToStory = ["None"]; SpliceAbove = [false]; SpliceHeight = [0]; color = [0];
+                return 0;
+            }
+            public int SetElevation(string Name, double Elevation) { this.Elevation = Elevation; return 0; }
+        }
+    }
+
     /// <summary>A link that passes everything on, for a stand-in that changes one answer.</summary>
     class Forward(ICsiLink inner) : ICsiLink
     {
         public CsiProgram Program => inner.Program;
         public virtual ModelInfo Info() => inner.Info();
-        public IReadOnlyList<StoryRow> Stories() => inner.Stories();
+        public virtual IReadOnlyList<StoryRow> Stories() => inner.Stories();
         public IReadOnlyList<FrameRow> Frames() => inner.Frames();
         public IReadOnlyList<AreaRow> Areas() => inner.Areas();
         public IReadOnlyList<PointRow> Points() => inner.Points();
@@ -1411,7 +1514,7 @@ static class TesterBugTests
         public IReadOnlyList<string> LoadCases() => inner.LoadCases();
         public IReadOnlyList<string> Combos() => inner.Combos();
         public string AddFrame(double x1, double y1, double z1, double x2, double y2, double z2, string section) => inner.AddFrame(x1, y1, z1, x2, y2, z2, section);
-        public string AddArea(IReadOnlyList<(double X, double Y, double Z)> corners, string section) => inner.AddArea(corners, section);
+        public virtual string AddArea(IReadOnlyList<(double X, double Y, double Z)> corners, string section) => inner.AddArea(corners, section);
         public void SetFrameSection(string name, string section) => inner.SetFrameSection(name, section);
         public void SetAreaSection(string name, string section) => inner.SetAreaSection(name, section);
         public void Delete(string kind, string name) => inner.Delete(kind, name);

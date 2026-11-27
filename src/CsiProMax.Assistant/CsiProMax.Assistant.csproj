@@ -39,6 +39,8 @@
     <EmbeddedResource Include="Panel/Chat/chat-prompts.json" LogicalName="CsiProMax.chat-prompts.json" />
     <!-- Keeps CSI ProMax in the Tools menus when CSI ProMax is not open (MenuKeeper): the same file as the repository's. -->
     <EmbeddedResource Include="../../keep-plugins.ps1" LogicalName="CsiProMax.keep-plugins.ps1" />
+    <!-- SAFE 23.1's own .f2k export, the control of the field test's .f2k probe (F2kProbe). -->
+    <EmbeddedResource Include="../../tests/CsiProMax.Tests/samples/safe-RC-PN-v23.f2k" LogicalName="CsiProMax.safe-own-export.f2k" />
     <!-- PDFium (BSD-3/Apache 2.0, Chrome's PDF engine) draws PDF pages so the chat can read drawings. Only the 64-bit
          Windows library is shipped, as CsiProMax.pdfium.dll next to the assistant. It is a .dll, not a program. -->
     <PackageReference Include="bblanchon.PDFium.Win32" Version="157.0.8086" ExcludeAssets="all" PrivateAssets="all" GeneratePathProperty="true" />

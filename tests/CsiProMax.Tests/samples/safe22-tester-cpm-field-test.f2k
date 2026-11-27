@@ -1,0 +1,322 @@
+File written by CSI ProMax Modeler on 2026-11-27 15:26: story Story1 of CPM field test
+
+TABLE:  "PROGRAM CONTROL"
+   ProgramName=SAFE   Version=20.1.0   ProgLevel="Post Tensioning"   CurrUnits="KN, m, C"   ConcSlbCode="ACI 318-19"
+
+TABLE:  "GRID DEFINITIONS - GENERAL"
+   Name=G1   Type=Cartesian   Ux=0   Uy=0   Rz=0   "Datum Name"=Story1   "Story Name Below"=Base   "Model Datum"=3.2   "Story Height Below"=3.2
+
+TABLE:  "GRID DEFINITIONS - GRID LINES"
+   Name=G1   "Grid Line Type"="X (Cartesian)"   ID=A   Ordinate=0   "Bubble Location"=End   Visible=Yes
+   Name=G1   "Grid Line Type"="X (Cartesian)"   ID=B   Ordinate=6   "Bubble Location"=End   Visible=Yes
+   Name=G1   "Grid Line Type"="X (Cartesian)"   ID=C   Ordinate=12   "Bubble Location"=End   Visible=Yes
+   Name=G1   "Grid Line Type"="X (Cartesian)"   ID=CPM-X   Ordinate=18   "Bubble Location"=End   Visible=Yes
+   Name=G1   "Grid Line Type"="Y (Cartesian)"   ID=1   Ordinate=0   "Bubble Location"=Start   Visible=Yes
+   Name=G1   "Grid Line Type"="Y (Cartesian)"   ID=2   Ordinate=5   "Bubble Location"=Start   Visible=Yes
+   Name=G1   "Grid Line Type"="Y (Cartesian)"   ID=3   Ordinate=10   "Bubble Location"=Start   Visible=Yes
+   Name=G1   "Grid Line Type"="Y (Cartesian)"   ID=CPM-Y   Ordinate=15   "Bubble Location"=Start   Visible=Yes
+
+TABLE:  "MATERIAL PROPERTIES - GENERAL"
+   Material=C30/37   Type=Concrete   SymType=Isotropic
+   Material=DefaultRebar_500   Type=Rebar   SymType=Uniaxial
+   Material=CPM-C35   Type=Concrete   SymType=Isotropic
+   Material=CPM-A416   Type=Tendon   SymType=Uniaxial
+   Material=CPM-REBAR   Type=Rebar   SymType=Uniaxial
+
+TABLE:  "MATERIAL PROPERTIES - BASIC MECHANICAL PROPERTIES"
+   Material=C30/37   DensityType=Weight   UnitWeight=24.992619   E1=33000000   U12=0.2   A1=0.00001
+   Material=DefaultRebar_500   DensityType=Weight   UnitWeight=77   E1=200000000   U12=0.3   A1=0.000012
+   Material=CPM-C35   DensityType=Weight   UnitWeight=25   E1=32000000   U12=0.2   A1=0.0000099
+   Material=CPM-A416   DensityType=Weight   UnitWeight=0   E1=196500000   U12=0.3   A1=0.0000117
+   Material=CPM-REBAR   DensityType=Weight   UnitWeight=0   E1=200000000   U12=0.3   A1=0.0000117
+
+TABLE:  "MATERIAL PROPERTIES - CONCRETE DATA"
+   Material=C30/37   Fc=30000   LtWtConc=No   SSCurveOpt=Mander   SSHysType=Concrete   SFc=0.00181818   SCap=0.005   FinalSlope=-0.1
+   Material=CPM-C35   Fc=35000   LtWtConc=No
+
+TABLE:  "MATERIAL PROPERTIES - REBAR DATA"
+   Material=DefaultRebar_500   Fy=500000   Fu=630000   SSCurveOpt=Simple   SSHysType=Kinematic   SHard=0.01   SCap=0.1   FinalSlope=-0.1
+   Material=CPM-REBAR   Fy=420000   Fu=620000
+
+TABLE:  "MATERIAL PROPERTIES - TENDON DATA"
+   Material=CPM-A416   Fy=1675000   Fu=1862000
+
+TABLE:  "FRAME SECTION PROPERTY DEFINITIONS - SUMMARY"
+   Name=C500x500   Shape="Concrete Rectangular"
+   Name=B300x600   Shape="Concrete Rectangular"
+
+TABLE:  "FRAME SECTION PROPERTY DEFINITIONS - CONCRETE RECTANGULAR"
+   Name=C500x500   Material=C30/37   "From File?"=No   Depth=0.5   Width=0.5   "Design Type"=Column
+   Name=B300x600   Material=C30/37   "From File?"=No   Depth=0.6   Width=0.3   "Design Type"=Beam
+
+TABLE:  "TENDON SECTION PROPERTIES"
+   Name=CPM-T15   Material=CPM-A416   StrandArea=0.00014
+
+TABLE:  "AREA SECTION PROPERTY DEFINITIONS - SUMMARY"
+   Name=S200   Type=Slab   "Element Type"=Shell-Thin   Material=C30/37   "Total Thickness"=0.2
+   Name=CPM-W200   Type=Wall   "Element Type"=Shell-Thin   Material=CPM-C35   "Total Thickness"=0.2
+
+TABLE:  "SLAB PROPERTY DEFINITIONS"
+   Name=S200   "Modeling Type"=Shell-Thin   "Property Type"=Slab   Material=C30/37   "Slab Thickness"=0.2
+
+TABLE:  "WALL PROPERTY DEFINITIONS - SPECIFIED"
+   Name=CPM-W200   "Modeling Type"=Shell-Thin   Material=CPM-C35   "Wall Thickness"=0.2   "Include Auto Rigid Zone?"=No
+
+TABLE:  "LOAD PATTERN DEFINITIONS"
+   Name=Dead   "Is Auto Load"=No   Type=Dead   "Self Weight Multiplier"=1
+   Name=Live   "Is Auto Load"=No   Type=Live   "Self Weight Multiplier"=0
+   Name=CPM-SDL   "Is Auto Load"=No   Type="Super Dead"   "Self Weight Multiplier"=0
+   Name=CPM-TEMP   "Is Auto Load"=No   Type=Temperature   "Self Weight Multiplier"=0
+   Name=CPM-PTT   "Is Auto Load"=No   Type=Prestress-Transfer   "Self Weight Multiplier"=0
+   Name=CPM-PTF   "Is Auto Load"=No   Type=Prestress-Final   "Self Weight Multiplier"=0
+
+TABLE:  "MASS SOURCE DEFINITION"
+   Name=MsSrc1   "Is Default"=Yes   "Include Lateral Mass?"=Yes   "Include Vertical Mass?"=No   "Lump Mass?"=Yes   "Source Self Mass?"=Yes   "Source Added Mass?"=Yes   "Source Load Patterns?"=No   "Move Mass Centroid?"=No
+
+TABLE:  "LOAD CASE DEFINITIONS - SUMMARY"
+   Name=Dead   Type="Linear Static"
+   Name=Live   Type="Linear Static"
+   Name=CPM-SDL   Type="Linear Static"
+   Name=CPM-TEMP   Type="Linear Static"
+   Name=CPM-PTT   Type="Linear Static"
+   Name=CPM-PTF   Type="Linear Static"
+   Name=Modal   Type="Modal - Eigen"
+   Name=CPM-PTF-HP   Type=Hyperstatic
+
+TABLE:  "MODAL CASE DEFINITIONS - EIGEN"
+   Name=Modal   "Exclude Group"=None   "Mass Source"=MsSrc1   "Initial Condition"=Unstressed   "Max Modes"=12   "Min Modes"=1   "Freq Shift"=0   "Cutoff Freq"=0   "Convergence Tol"=1E-09   "Auto Shift?"=Yes   "Design Type"="Program Determined"
+
+TABLE:  "LOAD CASE DEFINITIONS - LINEAR STATIC"
+   Name=Dead   "Exclude Group"=None   "Initial Condition"=Unstressed   "Load Type"=Load   "Load Name"=Dead   "Load SF"=1   "Design Type"="Program Determined"
+   Name=Live   "Exclude Group"=None   "Initial Condition"=Unstressed   "Load Type"=Load   "Load Name"=Live   "Load SF"=1   "Design Type"="Program Determined"
+   Name=CPM-SDL   "Exclude Group"=None   "Initial Condition"=Unstressed   "Load Type"=Load   "Load Name"=CPM-SDL   "Load SF"=1   "Design Type"="Program Determined"
+   Name=CPM-TEMP   "Exclude Group"=None   "Initial Condition"=Unstressed   "Load Type"=Load   "Load Name"=CPM-TEMP   "Load SF"=1   "Design Type"="Program Determined"
+   Name=CPM-PTT   "Exclude Group"=None   "Initial Condition"=Unstressed   "Load Type"=Load   "Load Name"=CPM-PTT   "Load SF"=1   "Design Type"="Program Determined"
+   Name=CPM-PTF   "Exclude Group"=None   "Initial Condition"=Unstressed   "Load Type"=Load   "Load Name"=CPM-PTF   "Load SF"=1   "Design Type"="Program Determined"
+
+TABLE:  "LOAD CASE DEFINITIONS - HYPERSTATIC"
+   Name=CPM-PTF-HP   "Base Case"=CPM-PTF   "Support Type"=Springs   "Relative SF"=1   "Design Type"="Program Determined"
+
+TABLE:  "LOAD COMBINATION DEFINITIONS"
+   Name=CPM-ULS   Type="Linear Add"   "Is Auto"=No   "Load Name"=Modal   SF=1.4
+   Name=CPM-ULS   "Load Name"=Dead   SF=1.4
+   Name=CPM-ULS   "Load Name"=CPM-SDL   SF=1.4
+   Name=CPM-TXT   Type="Linear Add"   "Is Auto"=No   "Load Name"=Dead   SF=1.4
+
+TABLE:  "CONCRETE SLAB DESIGN LOAD COMBINATION DATA"
+   "Combo Type"=Strength   "Combo Name"=CPM-ULS
+   "Combo Type"=Strength   "Combo Name"=CPM-TXT
+
+TABLE:  "POINT OBJECT CONNECTIVITY"
+   UniqueName=1   "Is Auto Point"=No   IsSpecial=No   X=0   Y=0   Z=3.2
+   UniqueName=2   "Is Auto Point"=No   IsSpecial=No   X=6   Y=0   Z=3.2
+   UniqueName=3   "Is Auto Point"=No   IsSpecial=No   X=6   Y=5   Z=3.2
+   UniqueName=4   "Is Auto Point"=No   IsSpecial=No   X=0   Y=5   Z=3.2
+   UniqueName=5   "Is Auto Point"=No   IsSpecial=No   X=6   Y=10   Z=3.2
+   UniqueName=6   "Is Auto Point"=No   IsSpecial=No   X=0   Y=10   Z=3.2
+   UniqueName=7   "Is Auto Point"=No   IsSpecial=No   X=12   Y=0   Z=3.2
+   UniqueName=8   "Is Auto Point"=No   IsSpecial=No   X=12   Y=5   Z=3.2
+   UniqueName=9   "Is Auto Point"=No   IsSpecial=No   X=12   Y=10   Z=3.2
+   UniqueName=10   "Is Auto Point"=No   IsSpecial=No   X=0   Y=0   Z=0
+   UniqueName=11   "Is Auto Point"=No   IsSpecial=No   X=0   Y=5   Z=0
+   UniqueName=12   "Is Auto Point"=No   IsSpecial=No   X=0   Y=10   Z=0
+   UniqueName=13   "Is Auto Point"=No   IsSpecial=No   X=6   Y=0   Z=0
+   UniqueName=14   "Is Auto Point"=No   IsSpecial=No   X=6   Y=5   Z=0
+   UniqueName=15   "Is Auto Point"=No   IsSpecial=No   X=6   Y=10   Z=0
+   UniqueName=16   "Is Auto Point"=No   IsSpecial=No   X=12   Y=0   Z=0
+   UniqueName=17   "Is Auto Point"=No   IsSpecial=No   X=12   Y=5   Z=0
+   UniqueName=18   "Is Auto Point"=No   IsSpecial=No   X=12   Y=10   Z=0
+   UniqueName=19   "Is Auto Point"=No   IsSpecial=No   X=0   Y=0   Z=6.4
+   UniqueName=20   "Is Auto Point"=No   IsSpecial=No   X=0   Y=5   Z=6.4
+   UniqueName=21   "Is Auto Point"=No   IsSpecial=No   X=0   Y=10   Z=6.4
+   UniqueName=22   "Is Auto Point"=No   IsSpecial=No   X=6   Y=0   Z=6.4
+   UniqueName=23   "Is Auto Point"=No   IsSpecial=No   X=6   Y=5   Z=6.4
+   UniqueName=24   "Is Auto Point"=No   IsSpecial=No   X=6   Y=10   Z=6.4
+   UniqueName=25   "Is Auto Point"=No   IsSpecial=No   X=12   Y=0   Z=6.4
+   UniqueName=26   "Is Auto Point"=No   IsSpecial=No   X=12   Y=5   Z=6.4
+   UniqueName=27   "Is Auto Point"=No   IsSpecial=No   X=12   Y=10   Z=6.4
+   UniqueName=28   "Is Auto Point"=No   IsSpecial=No   X=0   Y=2.5   Z=3.2
+   UniqueName=29   "Is Auto Point"=No   IsSpecial=No   X=12   Y=2.5   Z=3.2
+   UniqueName=30   "Is Auto Point"=No   IsSpecial=No   X=3   Y=0   Z=3.2
+   UniqueName=31   "Is Auto Point"=No   IsSpecial=No   X=3   Y=5   Z=3.2
+   UniqueName=32   "Is Auto Point"=No   IsSpecial=No   X=0   Y=3.5   Z=3.2
+   UniqueName=33   "Is Auto Point"=No   IsSpecial=No   X=12   Y=3.5   Z=3.2
+   UniqueName=34   "Is Auto Point"=No   IsSpecial=No   X=4   Y=1   Z=3.2
+   UniqueName=35   "Is Auto Point"=No   IsSpecial=No   X=5   Y=1   Z=3.2
+   UniqueName=36   "Is Auto Point"=No   IsSpecial=No   X=5   Y=2   Z=3.2
+   UniqueName=37   "Is Auto Point"=No   IsSpecial=No   X=4   Y=2   Z=3.2
+
+TABLE:  "COLUMN OBJECT CONNECTIVITY"
+   "Unique Name"=C1   UniquePtI=10   UniquePtJ=1   Length=3.2
+   "Unique Name"=C2   UniquePtI=11   UniquePtJ=4   Length=3.2
+   "Unique Name"=C3   UniquePtI=12   UniquePtJ=6   Length=3.2
+   "Unique Name"=C4   UniquePtI=13   UniquePtJ=2   Length=3.2
+   "Unique Name"=C5   UniquePtI=14   UniquePtJ=3   Length=3.2
+   "Unique Name"=C6   UniquePtI=15   UniquePtJ=5   Length=3.2
+   "Unique Name"=C7   UniquePtI=16   UniquePtJ=7   Length=3.2
+   "Unique Name"=C8   UniquePtI=17   UniquePtJ=8   Length=3.2
+   "Unique Name"=C9   UniquePtI=18   UniquePtJ=9   Length=3.2
+   "Unique Name"=C1A   UniquePtI=1   UniquePtJ=19   Length=3.2
+   "Unique Name"=C2A   UniquePtI=4   UniquePtJ=20   Length=3.2
+   "Unique Name"=C3A   UniquePtI=6   UniquePtJ=21   Length=3.2
+   "Unique Name"=C4A   UniquePtI=2   UniquePtJ=22   Length=3.2
+   "Unique Name"=C5A   UniquePtI=3   UniquePtJ=23   Length=3.2
+   "Unique Name"=C6A   UniquePtI=5   UniquePtJ=24   Length=3.2
+   "Unique Name"=C7A   UniquePtI=7   UniquePtJ=25   Length=3.2
+   "Unique Name"=C8A   UniquePtI=8   UniquePtJ=26   Length=3.2
+   "Unique Name"=C9A   UniquePtI=9   UniquePtJ=27   Length=3.2
+
+TABLE:  "BEAM OBJECT CONNECTIVITY"
+   "Unique Name"=B1   UniquePtI=1   UniquePtJ=2   Length=6
+   "Unique Name"=B2   UniquePtI=2   UniquePtJ=7   Length=6
+   "Unique Name"=B3   UniquePtI=4   UniquePtJ=3   Length=6
+   "Unique Name"=B4   UniquePtI=3   UniquePtJ=8   Length=6
+   "Unique Name"=B5   UniquePtI=6   UniquePtJ=5   Length=6
+   "Unique Name"=B6   UniquePtI=5   UniquePtJ=9   Length=6
+   "Unique Name"=B7   UniquePtI=1   UniquePtJ=4   Length=5
+   "Unique Name"=B8   UniquePtI=4   UniquePtJ=6   Length=5
+   "Unique Name"=B9   UniquePtI=2   UniquePtJ=3   Length=5
+   "Unique Name"=B10   UniquePtI=3   UniquePtJ=5   Length=5
+   "Unique Name"=B11   UniquePtI=7   UniquePtJ=8   Length=5
+   "Unique Name"=B12   UniquePtI=8   UniquePtJ=9   Length=5
+
+TABLE:  "FLOOR OBJECT CONNECTIVITY"
+   "Unique Name"=F1   UniquePt1=1   UniquePt2=2   UniquePt3=3   UniquePt4=4
+   "Unique Name"=F2   UniquePt1=4   UniquePt2=3   UniquePt3=5   UniquePt4=6
+   "Unique Name"=F3   UniquePt1=2   UniquePt2=7   UniquePt3=8   UniquePt4=3
+   "Unique Name"=F4   UniquePt1=3   UniquePt2=8   UniquePt3=9   UniquePt4=5
+
+TABLE:  "WALL OBJECT CONNECTIVITY"
+   UniqueName=W1   UniquePt1=17   UniquePt2=16   UniquePt3=7   UniquePt4=8
+
+TABLE:  "NULL LINE OBJECT CONNECTIVITY"
+   "Unique Name"=CPM-LR   UniquePtI=30   UniquePtJ=31
+
+TABLE:  "NULL AREA OBJECT CONNECTIVITY"
+   "Unique Name"=CPM-OPEN   UniquePt1=34   UniquePt2=35   UniquePt3=36   UniquePt4=37
+
+TABLE:  "TENDON OBJECT CONNECTIVITY"
+   Name=CPM-TEN   "Number Points"=2   "Point Name"=28   "Horizontal Segment Number"=1   "Horizontal Curve Type"=Straight   "Number Control Points"=2   "Curve Point Number"=1   "Global X"=0   "Global Y"=2.5   "Number Vertical Spans"=1   "Datum Offset"=0   "First Support Type"=None   "Span Number"=1   "Span ID"="Span 1"   "End Support Type"=None   "Span Profile"="Reverse Parabola"   RD=1   L=12   A=1.2   B=1.2   C=6   ZL=-0.05   ZC=-0.1   ZR=-0.05   Layer=Other
+   Name=CPM-TEN   "Point Name"=29   "Horizontal Segment Number"=1   "Curve Point Number"=2   "Global X"=12   "Global Y"=2.5
+   Name=CPM-TEN2   "Number Points"=2   "Point Name"=32   "Horizontal Segment Number"=1   "Horizontal Curve Type"=Straight   "Number Control Points"=2   "Curve Point Number"=1   "Global X"=0   "Global Y"=3.5   "Number Vertical Spans"=1   "Datum Offset"=0   "First Support Type"=None   "Span Number"=1   "Span ID"="Span 1"   "End Support Type"=None   "Span Profile"="Reverse Parabola"   RD=1   L=12   A=0   B=0   C=6   ZL=-0.05   ZC=-0.1   ZR=-0.05   Layer=Other
+   Name=CPM-TEN2   "Point Name"=33   "Horizontal Segment Number"=1   "Curve Point Number"=2   "Global X"=12   "Global Y"=3.5
+
+TABLE:  "STRIP OBJECT CONNECTIVITY"
+   Name=CSA1   "Number Segments"=1   "Strip Start Point"=1   "Segment End Point"=7   "Start Width Left"=2.5   "Start Width Right"=2.5   "End Width Left"=2.5   "End Width Right"=2.5   "Auto Widen"=No   Layer=A
+   Name=CSA2   "Number Segments"=1   "Strip Start Point"=4   "Segment End Point"=8   "Start Width Left"=2.5   "Start Width Right"=2.5   "End Width Left"=2.5   "End Width Right"=2.5   "Auto Widen"=No   Layer=A
+   Name=CSA3   "Number Segments"=1   "Strip Start Point"=6   "Segment End Point"=9   "Start Width Left"=2.5   "Start Width Right"=2.5   "End Width Left"=2.5   "End Width Right"=2.5   "Auto Widen"=No   Layer=A
+   Name=CSBA   "Number Segments"=1   "Strip Start Point"=1   "Segment End Point"=6   "Start Width Left"=3   "Start Width Right"=3   "End Width Left"=3   "End Width Right"=3   "Auto Widen"=No   Layer=B
+   Name=CSBB   "Number Segments"=1   "Strip Start Point"=2   "Segment End Point"=5   "Start Width Left"=3   "Start Width Right"=3   "End Width Left"=3   "End Width Right"=3   "Auto Widen"=No   Layer=B
+   Name=CSBC   "Number Segments"=1   "Strip Start Point"=7   "Segment End Point"=9   "Start Width Left"=3   "Start Width Right"=3   "End Width Left"=3   "End Width Right"=3   "Auto Widen"=No   Layer=B
+   Name=CPM-STRIP   "Number Segments"=1   "Strip Start Point"=28   "Segment End Point"=29   "Start Width Left"=1   "Start Width Right"=1   "End Width Left"=1   "End Width Right"=1   "Auto Widen"=No   Layer=A
+
+TABLE:  "JOINT ASSIGNMENTS - RESTRAINTS"
+   UniqueName=10   UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
+   UniqueName=11   UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
+   UniqueName=12   UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
+   UniqueName=13   UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
+   UniqueName=14   UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
+   UniqueName=15   UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
+   UniqueName=16   UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
+   UniqueName=17   UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
+   UniqueName=18   UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
+   UniqueName=19   UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
+   UniqueName=20   UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
+   UniqueName=21   UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
+   UniqueName=22   UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
+   UniqueName=23   UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
+   UniqueName=24   UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
+   UniqueName=25   UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
+   UniqueName=26   UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
+   UniqueName=27   UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
+
+TABLE:  "FRAME ASSIGNMENTS - SECTION PROPERTIES"
+   UniqueName=B1   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=B300x600
+   UniqueName=B2   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=B300x600
+   UniqueName=B3   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=B300x600
+   UniqueName=B4   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=B300x600
+   UniqueName=B5   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=B300x600
+   UniqueName=B6   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=B300x600
+   UniqueName=B7   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=B300x600
+   UniqueName=B8   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=B300x600
+   UniqueName=B9   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=B300x600
+   UniqueName=B10   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=B300x600
+   UniqueName=B11   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=B300x600
+   UniqueName=B12   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=B300x600
+   UniqueName=C1   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=C500x500
+   UniqueName=C2   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=C500x500
+   UniqueName=C3   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=C500x500
+   UniqueName=C4   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=C500x500
+   UniqueName=C5   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=C500x500
+   UniqueName=C6   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=C500x500
+   UniqueName=C7   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=C500x500
+   UniqueName=C8   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=C500x500
+   UniqueName=C9   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=C500x500
+   UniqueName=C1A   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=C500x500
+   UniqueName=C2A   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=C500x500
+   UniqueName=C3A   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=C500x500
+   UniqueName=C4A   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=C500x500
+   UniqueName=C5A   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=C500x500
+   UniqueName=C6A   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=C500x500
+   UniqueName=C7A   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=C500x500
+   UniqueName=C8A   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=C500x500
+   UniqueName=C9A   Shape="Concrete Rectangular"   "Auto Select List"=N.A.   "Section Property"=C500x500
+
+TABLE:  "AREA ASSIGNMENTS - SECTION PROPERTIES"
+   UniqueName=F1   "Section Property"=S200   "Property Type"=Slab
+   UniqueName=F2   "Section Property"=S200   "Property Type"=Slab
+   UniqueName=F3   "Section Property"=S200   "Property Type"=Slab
+   UniqueName=F4   "Section Property"=S200   "Property Type"=Slab
+   UniqueName=W1   "Section Property"=CPM-W200   "Property Type"=Wall
+   UniqueName=CPM-OPEN   "Section Property"=Opening   "Property Type"=Opening
+
+TABLE:  "TENDON ASSIGNMENTS - PROPERTIES"
+   Name=CPM-TEN   "Tendon Property"=CPM-T15   "Number Strands"=4   "Bonding Options"=Unbonded
+   Name=CPM-TEN2   "Tendon Property"=CPM-T15   "Number Strands"=2   "Bonding Options"=Unbonded
+
+TABLE:  "TENDON LOAD ASSIGNMENTS - JACKING STRESS"
+   Name=CPM-TEN   "Transfer Load Pattern"=CPM-PTT   "Final Load Pattern"=CPM-PTF   "Jacking Stress"=1400000   "Jacking Location"="Both Ends"
+   Name=CPM-TEN2   "Transfer Load Pattern"=CPM-PTT   "Final Load Pattern"=CPM-PTF   "Jacking Stress"=1400000   "Jacking Location"="I End"
+
+TABLE:  "TENDON LOAD ASSIGNMENTS - LOSS OPTIONS"
+   Name=CPM-TEN   "Loss Method"=Fixed   "Stressing Loss Fixed"=100000   "Long Term Loss Fixed"=150000
+   Name=CPM-TEN2   "Loss Method"=Detailed   "Curvature Coefficient"=0.07   "Wobble Coefficient"=0.0003   "Anchorage Set Slip"=0.006   "Shortening Stress"=7000   "Creep Stress"=48000   "Shrinkage Stress"=41000   "Relaxation Stress"=21000
+
+TABLE:  "AREA LOAD ASSIGNMENTS - UNIFORM"
+   UniqueName=F1   "Load Pattern"=Dead   Direction=Gravity   Load=2
+   UniqueName=F1   "Load Pattern"=Live   Direction=Gravity   Load=3
+   UniqueName=F2   "Load Pattern"=Dead   Direction=Gravity   Load=2
+   UniqueName=F2   "Load Pattern"=Live   Direction=Gravity   Load=3
+   UniqueName=F3   "Load Pattern"=Dead   Direction=Gravity   Load=2
+   UniqueName=F3   "Load Pattern"=Live   Direction=Gravity   Load=3
+   UniqueName=F4   "Load Pattern"=Dead   Direction=Gravity   Load=2
+   UniqueName=F4   "Load Pattern"=Live   Direction=Gravity   Load=3
+
+TABLE:  "CONCRETE SLAB DESIGN OVERWRITES - STRIP BASED"
+   "Strip Name"=CPM-STRIP   "Strip Layer"=A   "Strip Design Type"="Column Strip"   Design?=Yes   "Ignote PT?"=No   "Rebar Material"=DefaultRebar_500   "Cover Specification Type"="From Preferences"   LLRF=1
+
+TABLE:  "AREA ASSIGNMENTS - SLAB LINE RELEASES"
+   UniqueName=CPM-LR   "Shear Left"=Yes   "Moment Left"=Yes   "Shear Right"=No   "Moment Right"=No
+
+TABLE:  "SLAB REBAR OBJECT GEOMETRY"
+   Name=CPM-SR   X1=1   Y1=1.5   X2=11   Y2=1.5   "Vertical Offset"=0.03   "Width Left"=0.5   "Width Right"=0.5   Layer=A
+
+TABLE:  "SLAB REBAR PROPERTY ASSIGNMENTS"
+   Name=CPM-SR   "Rebar Size"=6   Material=CPM-REBAR   "Bar Number Type"="Total Bars"   "Total Bars"=6
+
+TABLE:  "CONCRETE SLAB DESIGN OVERWRITES - PUNCHING SHEAR - GENERAL"
+   "Unique Name"=28   "Check Punching Shear?"="Program Determined"   "Location Type"=Edge   "Perimeter Type"="User Perimeter"   "Effective Depth Type"=Auto   "Opening Definition"=Auto   "Reinforcement Type"="Stud Rails"   "Reinforcement Pattern"=Radial   "Reinforcement Diameter"=420000   "Reinforcement Fy"=0.01   "Reinforcement Spacing"=0.08
+
+TABLE:  "CONCRETE SLAB DESIGN OVERWRITES - PUNCHING SHEAR - PERIMETER"
+   "Unique Name"=28   "Point Number"=1   "X Coord"=-0.3   "Y Coord"=-0.3   Radius=0   "Is Null?"=No
+   "Unique Name"=28   "Point Number"=2   "X Coord"=0.3   "Y Coord"=-0.3   Radius=0   "Is Null?"=No
+   "Unique Name"=28   "Point Number"=3   "X Coord"=0.3   "Y Coord"=0.3   Radius=0   "Is Null?"=No
+   "Unique Name"=28   "Point Number"=4   "X Coord"=-0.3   "Y Coord"=0.3   Radius=0   "Is Null?"=No
+
+END TABLE DATA
+$ CSI ProMax model C516B576EDB68BB6E15CC10B
+$ H4sIAAAAAAACCu19W3OjSBbm+0bsfyAcMW9lDwlCl3laBEimCgEDyLfdjgnKwi5Ny5ID4e6qne3/vnkBxCVBiYRKdg3VM1UiLydPfnny5MmTt//8z//BcRdPm/DFjy7+wV08bpeXr+Hmxf9++bJZBKuLTzjBH0G4XW7WMAUgASTyH9x/0Bf8jpbRKkAEFHvGPS2D1YKLgm1EssN4SPM59F9uUjoXgnglXPFpgrf1MtruCBKmHjHJL2aSCoaugvVz9A0FzzKhUfDyGoR+9BYSJi5IzF8J9cfNOgo3K1TA//4tCdxGm3AZ4LCEUFo6jF77L5jY2N8Gu6JgxLdg+fwNocVnQ4NV8IcfkcrlI75HoY8LTgL/+lRXngvZ+gHoJULMTlemcIYyxZ9bJpTOS2ezeaoo9dAyyY9UsJ7D5cL9sYVCicqcpm2ZidASIqkIe/e2lpHo//PG84KgyI6nubpsks9M/Hg+Hhsw6iGbCVwJ0gWFmUoZX/lfcTe+kHOILJZh8BjX/eIuF/W42YSL5dqPgkpcdmEw9EZ3dcholkZau/tgW6xXpm6GpVBzaetFnGsXuaf502qOD6pm/6NVUzmomkD4cPWE3fnusLoOP1pdQXU9799ZD3UjP4wOrqhwUEWlj1dR8aCKgg/YpKif3h9W23fZroUhdrH0X7+F/vPLXltSzffi6McrDnb0qa5esJswqkAl42ozvUCqwCm08oNw6a/2MuqKkpQrY7Vc501l9Cf3UbJhCpAGwYrWFDDF1JHVynyQkYpst5o+vfZszbmxjPmsTGDQvxoNhGH/Ihv+26e6Crj3s5o66NsNnEW8Lh8rGCrnEwBP/pRi5qUQ/koshcmlEHAF+iP8RxrxI9CX+tolLzWo4uS+RBNCTGNxUuZRAtTKTO7LVRdHvEQlWk4q9RHZBnW4vndrmukLFFUo6JXN5NZldpcvr6ugKqfnyLope9eyo2qmbk4pjcgDqTLfTL6DPzXXpeQDoDKbM7e9uaPRMg3KAMMchmtYlBpewgylQN3yNNPVLZNal1Kg4dYkLyOm2DXJJQozijWzEUIVWSh5DHdPHkDhak8WIS+MzCNeqqRF/u/ioFUFqmzWj2EQBQfoUMLNgVpU6F2NRkIfjM6oRkWxgRYVGLTo6Iro0EFvIA6GA0mASrTJODFRyjzyzXSYp880VYOCaCqKVd102nii2yO+ZIwcpyL3CJNmas70XtWmE1nxyhA306gzf70Iwj0alQIo6u1giP6rzDU3IIqypzFqil9cNYrNVSMU+sa6EUhHKkc1ePLfVpETfPXDfxVshKPVJKZ6gI6chv4i4CA3hxqbg9b043y99L9DI53dyuSrrEya/Rin7gm9nsQLffF4+1GiF06xH/sis/2IbVI2+7E/4n8l+/EQdQc6O/Bd2oFwsq6I0rsxBAk7h1qC0jlNQKFlExAJEfwzGh1p9kkl1XOQlPwSDpfBL+VqIRICwKDzrryf0VHonCtsg2r/Aw6qOae2/3UV5HaE4GDVf3ldrp852w+h9oyCsKQjuXwOnGu2WfgrBy3nI31b4iF1lNO6x8U0WAehv2Ipx9xEmOfCNhhui5RxbZG7j7/YBw25B/qtDhpesF5s1geMGrUZ940b/PmmTmDUl1inTi2NB6A/YB0QwLAvsI4IYNgTWIcEge8NhVbMFkcby867mMDX5XvHAthk7t6SAPYE5um6wGyQ9CoklTZdHwpMNnNh7fIJKXyXrBrvX79EClfZrJqLJppgO7psNDeP3Wu53hrn9L/fLhcBN1n56+cqK0ilNHt5XB4zpfIm1PGXkvCWOrYLx7r6cLXHL/9NrQD6+M+AsTEAc2vw/aObA7kOTtEpaheY6hok8WVwDuzXsDneVpU6nNYi4oCtTVC645E7gRyfC7ifCRsUOPDrSBwbcK1I23tEzQuaaMw+E1ojojF7bBpTYFOXIiXZmCmdPjUtR5sYsjnVZEeTKyDZ7Sw7sq2h0f79oFWwD61bjtUsYxHC1v+FYOv/HM2CVgB6p4CtdmnhhLj1mHDrtYDbGM6vT9NTz4UdW1c93uyE9bs9CWrveB4gsE4A+qyzsQazfnlmlTkvu2plgTGdyJbuM1synbFYnVosNBhKYTM2grf0ZEe4oymSxOInhjbxJsRd44e/LnKU9SMTH/Ljt+Dxd0qyyXK1CiLHX8RebSC072O29Xw3eh99116+BkeZ7Ux97CBNB+1G4x0iJq+fV00gA2zeDlYt114DFNyC22/BasXsFlz5Xw+YVtmOZdetakKqFcgeY2xCZaUZujmtKxlV3vu2rFp5cQ15fBjjOOe1rnwx6Suqx057bKgrf/+VmmIWvHwN/XVVF7NM7Va+NyxZVXXX2zun/DgNqYab165LpdkRHAe2hHi0t104ZHLSKbfW+wQerMHwXTVG7RzzXbcGGB694fzxBEMNolplT2nKl5qc2GxfVORFB0KO6Vio7MNXz1Bu1B6qZnvXNANtSFlyQZkcvTpPdZZbXfWuPcum7r6qzzW2PM+a0TIKlRldW1bo+8pEOhLXmuzUiSZPMWxRxrmpe2TTAXUzGpyo9foUGx6W5npzaCHIM6pxPKrOc11ZmlSdibLk3+P54ze03vqrVfsdDlF9nyPRrWwYteNJKx60U4zuR2B66gFlL6gtYKo6ed3zi1hMlQPTCY3XJnuSAGDz100ERk/hBDAmnNGLxl20lJZeOj0tKwM3gNGXeiMwJjyN77PBFkB93E060l2Iy69fK00760ZzoFKrspN6zS1jao49dpVUm6mRWRVnrDarRlVZbBkhoRmeJd/p7knkEtlhndHPnr8z+09t9n9Ii5/lTAbsFJwNbYcgjH5wavC0XC9L7viqpbDCUhe+NbTpIlZhSeB1s1xHe9cC8hOU78XL0n4UA74Gq82fKJBNBQn7yUtHkBf3kwfHsN8r0e+3iY60n/wx6PT3kz8KnUGJfv7yxGPhGTLQPwafEQP9owAC/H75FK6OqQIADHU4sgiGPiweV4LIUIkjiyj35F6pqY+hX+7KUqv0+/vpC8fQH+zH5yj65b4stqkqwGg//T3yUxg+S3Yy/U7HfP/7fbnGu1AeN6u3l9yWFjIc6+UhF4d/LofH93KPEZ8oG2C9ZVJozpFQwZHQDkdic47ECo7EdjjqNeeoV8FRrx2OpOYcSRUcSe1w1G/OUb+Co347HA2aczSo4GjQDkfD5hwNKzgatsPRqDlHowqORq1wNKZryK+B/9JQP9b3NJ6VH6EpP72DZIiZH7EpP8JB/Z6Zn15TfqSDJJqZH6kpP+JBWoiZn35TfvoH9S9mfgZt9S+hHX6Gbcmz2A4/o7b6e0v9qzApPKKDtSTQoLGGHpy2x4PGKnp4ZBcr2P5+GPj7bf8JHben1WYTlvkx4Uyl5AosrlBdFFY/LgpOzIvcTexVdSuWwn9i/mp+q/1EOB4FYU+tC7tELsT3h4J4PArFti8cnr8YllB6dyj0jkdB2lPrUUk23hsKt3S98Ke/WrGCMNwjCmXROAAE8Kn6iwEE2nKDvN0un6sPIOA0ZRMkDLZR6MdR8ztufs/NHzjnjnPuOeehpMJ/UN8jo76KUbq2xnZ0c2o7lEW33X4e291zpJlhMegzqilH4HgJ1tGWu+TkxQIvCPkrbuZv2W7sgunu7jFi5QN3cfwDPvbUzpGntIGEEzbQb4w8iO+Ah9474EF6Bzz03wEPg3fAw/Ad8DB6BzwAOmHKq4070sxq0/bXwYp72KyDrAZl0Zf2wyTc4PcGtZW/jZaPFJ2pbt5g2aG9InrzE4WIslmvg0dc0TGcdGy5aMNZ0bcg5Kyv/4YRW0ou+XuwTQpXiLvtyAV8tAKxZ0CtWofY7p6Vot6swdRgtec0ddOcz1yvfC8I5U7ZuWfNNPe66riX5lZtVIOZZE83Pc1xNcXTLdPdS+OwHVNVqycdjofiKHY4toJjr8OxFRylDsdWcOx3OLaC46DDsRUchx2OreA46nBsA8dxpR1OvarteBzRdf+y
+$ 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
+$ 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
+$ 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
+$ end of the CSI ProMax model
