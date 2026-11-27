@@ -173,6 +173,53 @@ static class PackSpeedTests
             Check(back["manifest"]!["timing"] is not null && back["manifest"]!["notes"] is not null, "the manifest is in the zip");
             Check(ReferenceEquals(zipped, Pack.Zipped(zipped)), "a zipped pack is not zipped again");
         });
+        yield return ("pack complete: every result and design table the program has is in the pack, every row and field; what is not is named", () =>
+        {
+            var m = new MemoryEtabs { ModelFile = @"C:\Jobs\T\T.EDB" };
+            m.AddFrame(0, 0, 0, 0, 0, 3, "C1");
+            m.Locked = true;
+            m.ResultTables["Joint Displacements"] = new(["Joint", "OutputCase", "Ux"], [["1", "Dead", "0.1"], ["2", "Dead", "0.2"]]);
+            m.ResultTables["Concrete Frame Design - Summary"] = new(["Story", "Label", "Status"], [["S1", "C1", "OK"]]);
+            var built = Pack.Build(m, [], [], [], null, null);
+            var none = Pack.Missing(m, built.Content, [], []);
+            Check(none.Count == 0, "nothing lost: " + string.Join("; ", none));
+            var tables = (System.Text.Json.Nodes.JsonObject)built.Content["tables"]!;
+            tables.Remove("Concrete Frame Design - Summary");
+            ((System.Text.Json.Nodes.JsonArray)tables["Joint Displacements"]!["rows"]!).RemoveAt(1);
+            tables["Joint Displacements"]!["fields"] = new System.Text.Json.Nodes.JsonArray("Joint", "OutputCase");
+            var lost = Pack.Missing(m, built.Content, [], []);
+            Check(lost.Any(l => l.Contains("Concrete Frame Design - Summary") && l.Contains("not in the pack")), "a design table left out is named: " + string.Join("; ", lost));
+            Check(lost.Any(l => l.Contains("1 of 2 rows")), "a row lost is named: " + string.Join("; ", lost));
+            Check(lost.Any(l => l.Contains("fields Ux")), "a field lost is named: " + string.Join("; ", lost));
+        });
+        yield return ("pack memory: a large table goes into the pack and its Viewer page in parts, written as it goes, and reads back whole", () =>
+        {
+            var old = Pack.PartRows;
+            var oldWindow = Pack.WindowMostRows;
+            try
+            {
+                Pack.PartRows = 10;
+                Pack.WindowMostRows = 20;
+                var m = new MemoryEtabs { ModelFile = @"C:\Jobs\T\T.EDB" };
+                m.AddFrame(0, 0, 0, 0, 0, 3, "C1");
+                m.Locked = true;
+                m.ResultTables["Joint Displacements"] = new(["Joint", "OutputCase", "Ux"], Enumerable.Range(0, 35).Select(i => new[] { i.ToString(), "</script><!--", "0." + i }).ToList());
+                var built = Pack.Build(m, [], [], [], null, null);
+                var back = Pack.Read(built.Zip);
+                var rows = (System.Text.Json.Nodes.JsonArray)back["tables"]!["Joint Displacements"]!["rows"]!;
+                Equal(35, rows.Count, "rows read back from the parts");
+                Equal("34", rows[34]![0]!.GetValue<string>(), "the last row");
+                var page = Pack.ViewerHtml(built.Content);
+                Equal(3, System.Text.RegularExpressions.Regex.Matches(page, "class=\"pack-rows\"").Count, "the rows past the first part in their own script elements");
+                var json = page[(page.IndexOf("<script id=\"pack\"", StringComparison.Ordinal) + 40)..];
+                Check(!json[..json.IndexOf("</script>", StringComparison.Ordinal)].Contains("<!--"), "nothing in the pack's JSON can end its script element");
+                Check(Pack.JsonSize(built.Content) > 1000, "the size is counted");
+                var window = Pack.ForWindow(built.Content);
+                Equal(10, ((System.Text.Json.Nodes.JsonArray)window["tables"]!["Joint Displacements"]!["rows"]!).Count, "the window is given the first part of a pack too large for it");
+                Equal(35, window["tables"]!["Joint Displacements"]!["rows_total"]!.GetValue<int>(), "with the whole row count");
+            }
+            finally { Pack.PartRows = old; Pack.WindowMostRows = oldWindow; }
+        });
         yield return ("pack speed: the manifest says how long the pack took and which tables were slowest, against 3 minutes", () =>
         {
             var m = new MemoryEtabs { ModelFile = @"C:\Jobs\T\T.EDB" };

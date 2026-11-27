@@ -272,6 +272,7 @@ public static class SafeFieldSteps
         ctx.Tool("list_snapshots", "{}", a => FieldContext.Expect(Int(a["count"]) >= 1, "the snapshot is not listed"));
         ctx.Tool("compare_snapshots", """{"from":"cpm-before-analysis"}""");
         Pack.Built? packBuilt = null;
+        List<string>? packLost = null;
         var took = TimeSpan.Zero;
         // Left out of a rerun of what failed, as in ETABS (Ahmed 2026-11-27: what he says of ETABS holds for all three).
         if (ctx.NoPack) ctx.LeftOutOfRerun("the review pack of the scratch model is written");
@@ -279,15 +280,16 @@ public static class SafeFieldSteps
         ctx.Step("the review pack of the scratch model is written", () =>
         {
             var watch = System.Diagnostics.Stopwatch.StartNew();
-            var (checks, pack) = PackSpeedField.Build(link, () => ProgramTools.Report(System.Text.Json.JsonDocument.Parse("{}").RootElement, link).AsObject(),
+            var (checks, pack, lost) = PackSpeedField.Build(link, () => ProgramTools.Report(System.Text.Json.JsonDocument.Parse("{}").RootElement, link).AsObject(),
                 c => Pack.Build(link, [], link.LoadCases(), link.Combos(), c, null, by: "CSI ProMax field test"));
-            packBuilt = pack; took = watch.Elapsed;
+            packBuilt = pack; packLost = lost; took = watch.Elapsed;
             var file = Path.Combine(ctx.Folder, ModelerFieldSteps.ModelName + " SAFE.cpmx");
             File.WriteAllBytes(file, pack.Zip);
             FieldContext.Expect(pack.Areas == link.Areas().Count, $"the pack holds {pack.Areas} areas, the model has {link.Areas().Count}");
             return new { file = Path.GetFileName(file), kilobytes = pack.Zip.Length / 1024, frames = pack.Frames, areas = pack.Areas, tables = pack.Tables, notes = pack.Notes };
         });
         PackSpeedField.Timed(ctx, packBuilt, took, link.Program.Name);
+        PackSpeedField.Whole(ctx, link.Program.Name, "review pack", packLost);
         // The pack as it is written by itself after a run: from a copy in a hidden program, closed after, within 3 minutes.
         if (!ctx.NoPack) PackSpeedField.FromCopy(ctx, link);
 
