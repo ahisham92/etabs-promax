@@ -4890,7 +4890,7 @@ function modelerMenus(m) {
   m.Assign = [...(program === "sap2000" ? [] : [["Frame Section...", "m:asgFrame", "", !fr], ["Slab or Wall Section...", "m:asgShell", "", !ar], 0, ["Joint Restraints (Supports)...", "m:asgSupport"], 0]),
     program === "sap2000" ? hmSapAssignMenu()[0] : ["Joint", [["Springs...", "m:ad:joint", "", !any], only(["etabs", "sap2000"], ["Diaphragms...", "m:sa:jdiaph", "", !any]), only(["sap2000"], ["Constraints...", "m:ex:jconstraint", "", !any]), 0, ...hmTableItems("Joint", !any)]],
     program === "sap2000" ? hmSapAssignMenu()[1] : ["Frame", [["Releases...", "m:ad:releases", "", !fr], ["Local Axes...", "m:ad:axes", "", !fr], ["Insertion Point...", "m:ad:insertion", "", !fr], ["End Length Offsets...", "m:ad:offsets", "", !fr], ["Property Modifiers...", "m:ad:fmods", "", !fr], ["Line Springs...", "m:ad:lspring", "", !fr], only(["etabs", "sap2000"], ["Hinges...", "m:ad:hinges", "", !fr]), 0, ...hmTableItems("Frame", !fr)]],
-    ...(program === "sap2000" ? [hmSapAssignMenu()[4]] : [[program === "sap2000" ? "Area" : "Shell", [["Property Modifiers...", "m:ad:smods", "", !ar], ["Area Springs...", "m:ad:aspring", "", !ar], only(["etabs", "sap2000"], ["Diaphragms...", "m:sa:diaph", "", !ar]), only(["etabs"], ["Pier Label...", "m:sa:pier", "", !any]), only(["etabs"], ["Spandrel Label...", "m:sa:spandrel", "", !any]), 0, only(["etabs"], ["Opening...", "m:at:opening", "", !ar]), ...hmTableItems("Area", !ar)]]]),
+    ...(program === "sap2000" ? hmSapAssignMenu().slice(2, 7) : [[program === "sap2000" ? "Area" : "Shell", [["Property Modifiers...", "m:ad:smods", "", !ar], ["Area Springs...", "m:ad:aspring", "", !ar], only(["etabs", "sap2000"], ["Diaphragms...", "m:sa:diaph", "", !ar]), only(["etabs"], ["Pier Label...", "m:sa:pier", "", !any]), only(["etabs"], ["Spandrel Label...", "m:sa:spandrel", "", !any]), 0, only(["etabs"], ["Opening...", "m:at:opening", "", !ar]), ...hmTableItems("Area", !ar)]]]),
     ...(program === "sap2000" ? hmSapAssignTail() : [["Assign Objects to Group...", "m:sa:group", "", !any]]), 0,
     ["Joint Loads", [["Forces...", "m:ld:joint_force", "", !any], ["Ground Displacements...", "m:ld:joint_displacement", "", !any], only(ES, ["Temperature...", "m:ld:joint_temperature", "", !any])]],
     ["Frame Loads", [["Distributed...", "m:asgFrameLoad", "", !fr], ["Uniform in any direction...", "m:ld:frame_uniform", "", !fr], ["Point...", "m:ld:frame_point", "", !fr], ["Trapezoidal...", "m:ld:frame_trapezoid", "", !fr], ["Temperature...", "m:ld:frame_temperature", "", !fr], only(ES, ["Strain...", "m:ld:frame_strain", "", !fr])]],
@@ -5011,12 +5011,20 @@ function hmDefineMenu() {
       ["Soil Subgrade Properties...", "m:spr:area"], ["Point Spring Properties...", "m:spr:point"], ["Line Spring Properties...", "m:spr:line"], ["Wall Properties...", "m:wallSections"]]],
     ["Load Patterns...", "m:patterns"], ["Load Cases...", "m:cases"], ["Load Combinations...", "m:combos"], ["Hyperstatic Load Cases...", "m:ex:hyperstatic"], 0, ["Groups...", "m:st:group"], ["Section Cuts...", "m:st:cut"], fns, ["Mass Source...", "m:mass"], 0,
     ["Punching Shear Overwrites...", "m:ex:punching"], ["Floor Openings...", "m:ex:openings"], ["Slab Line Releases...", "m:ex:linereleases"]];
+  // ETABS 23.2's Define menu and its Section Properties submenu, item for item and in its order (pictured Define/00 Define
+  // menu, 00 Section Properties submenu). The Engine's own extras the menu does not have follow its last separator, so
+  // nothing they do is lost until they find their ETABS place.
+  // dt gives {only, item}: the same item under ETABS's own label.
+  const relabel = (x, label) => x && x.item ? {only: x.only, item: [label, x.item[1]]} : x;
+  const pzItem = relabel(dt("Panel Zone Properties..."), "Panel Zone...");
   return [["Material Properties...", "m:materials"],
-    ["Section Properties", [["Frame Sections...", "m:frameSections"], ["Deck Sections...", "m:decks"], ["Slab Sections...", "m:shellSections"], ["Wall Sections...", "m:wallSections"], ["Reinforcing Bar Sizes...", "m:rebarSizes"], ["Link/Support Properties...", "m:links"],
-      ...hinges, dt("Panel Zone Properties..."), ["Tendon Sections...", "m:ex:tendonsections"], 0, ["Frame Section Rebar (Modify/Show Rebar)...", "m:frameRebar"], dt("Slab Layers..."), dt("Wall Layers..."), dt("Wall Auto Select Lists..."), dt("Frame Release Definitions...")]],
-    ["Spring Properties", springs], ["Diaphragms...", "m:st:diaphragm"], ["Pier Labels...", "m:st:pier"], ["Spandrel Labels...", "m:st:spandrel"], ["Group Definitions...", "m:st:group"], ["Section Cuts...", "m:st:cut"], dt("Generalized Displacements..."),
-    fns, ["Load Patterns...", "m:patterns"], dt("Shell Uniform Load Sets..."), ["Load Cases...", "m:cases"], ["Load Combinations...", "m:combos"], dt("Auto Construction Sequence..."), dt("Walking Vibrations..."), ["Mass Source...", "m:mass"], ["P-Delta Options...", "m:pdelta"], 0,
-    ["Hyperstatic Load Cases...", "m:ex:hyperstatic"], ["Punching Shear Overwrites...", "m:ex:punching"], ["Floor Openings...", "m:ex:openings"], ["Slab Line Releases...", "m:ex:linereleases"]];
+    ["Section Properties", [["Frame Sections...", "m:frameSections"], ["Slab Sections...", "m:shellSections"], ["Deck Sections...", "m:decks"], ["Wall Sections...", "m:wallSections"], ["Reinforcing Bar Sizes...", "m:rebarSizes"], ["Link/Support Properties...", "m:links"],
+      ...hinges, pzItem]],
+    ["Spring Properties", springs], 0, ["Diaphragms...", "m:st:diaphragm"], 0, ["Pier Labels...", "m:st:pier"], ["Spandrel Labels...", "m:st:spandrel"], 0, ["Group Definitions...", "m:st:group"], ["Section Cuts...", "m:st:cut"], 0,
+    fns, dt("Generalized Displacements..."), 0, ["Mass Source...", "m:mass"], ["P-Delta Options...", "m:pdelta"], 0, ["Load Patterns...", "m:patterns"], dt("Shell Uniform Load Sets..."), 0, ["Load Cases...", "m:cases"], ["Load Combinations...", "m:combos"], 0,
+    relabel(dt("Auto Construction Sequence..."), "Auto Construction Sequence Case..."), dt("Walking Vibrations..."), 0,
+    ["Engine Extras", [["Tendon Sections...", "m:ex:tendonsections"], ["Frame Section Rebar (Modify/Show Rebar)...", "m:frameRebar"], dt("Frame Release Definitions..."), ["Hyperstatic Load Cases...", "m:ex:hyperstatic"],
+      ["Punching Shear Overwrites...", "m:ex:punching"], ["Floor Openings...", "m:ex:openings"], ["Slab Line Releases...", "m:ex:linereleases"]]]];
 }
 // ---- SAFE forms (Ahmed 2026-11-27: every SAFE form identical to SAFE 23's, every option working) ----
 // Each SAFE form of the Engine's SAFE menus, with SAFE's own tables behind it ("SAFE | <table>", by the names SAFE's own
@@ -5361,6 +5369,559 @@ async function sapObjRows(names) {
   const pd = (await hmRun("property_definitions", {objects: names}, true)).result; if (!pd) return null;
   const by = {}; (pd.objects || []).forEach((o, i) => by[names[i]] = o.tables || {}); return {pd, by};
 }
+
+// ---- SAP2000 26.3's Assign > Joint Loads and Frame Loads forms, each built from SAP2000's own form (pictures in
+// project files field/reference-forms/sap2000/Assign/JointLoads and FrameLoads, Frame/Frame Fireproofing *). Every
+// form sets SAP2000's own table rows on the selected objects through assign_sap_loads, with SAP2000's Add to Existing,
+// Replace Existing and Delete Existing options; the rows go into the .s2k as SAP2000 has them.
+const sapLdTemp = () => ((hm.defs && hm.defs.units) || {}).temperature || (/^(ft|in)$/.test(hmU().l) ? "F" : "C");
+const sapLdOpts = (id, del, what) => `<fieldset><legend>Options</legend>${del ? "" : `<label><input type="radio" name="${id}" value="add"> Add to Existing ${what || "Loads"}</label>`}<label><input type="radio" name="${id}" value="replace" checked> Replace Existing ${what || "Loads"}</label><label><input type="radio" name="${id}" value="delete"> Delete Existing ${what || "Loads"}</label></fieldset>`;
+const sapLdPat = (defs, id) => `<select id="${id}" style="width:225px">${opts(defs.load_patterns.map(p => p.name), hm.pattern && defs.load_patterns.some(p => p.name === hm.pattern) ? hm.pattern : (defs.load_patterns[0] || {}).name)}</select>`;
+const sapLdGrid = rows => `<div style="display:grid;grid-template-columns:190px 230px;gap:6px 8px;align-items:center">${rows.map(([l, c]) => `<span>${l}</span>${c}`).join("")}</div>`;
+async function sapLdStart(t) {
+  const names = t === "joint" ? hmJoints() : t === "frame" ? hmSelected("f") : t === "area" ? hmSelected("a") : sapXSelected(t);
+  // SAP2000 26.3 keeps the Cable, Tendon, Solid and Link/Support Loads items enabled with none selected: the form opens and OK applies to nothing.
+  if (!names.length && ["joint", "frame", "area"].includes(t)) { hmSay({joint: "Select the joints first.", frame: "Select the frames first.", area: "Select the areas first.", cable: "Select the cable objects first.", tendon: "Select the tendon objects first.", solid: "Select the solid objects first.", link: "Select the link/support objects first."}[t], true); return null; }
+  const defs = await hmDefs();
+  if (!defs.load_patterns.length) { hmSay("Define a load pattern first (Define > Load Patterns).", true); return null; }
+  return {names, defs, u: sapUnits()};
+}
+// Sets the rows; option is SAP2000's Options choice. True when it worked.
+async function sapLdSet(d, table, names, pattern, option, rows) {
+  if (pattern) hm.pattern = pattern;
+  if (!names.length) return true;
+  const j = await hmRun("assign_sap_loads", {table, objects: names, pattern: pattern || undefined, option, rows: option === "delete" ? [] : rows}, true);
+  if (!j.ok) { formError(d, j.error); return false; }
+  hmSay("Done. Edit > Undo steps back."); return true;
+}
+const sapLdNum = (d, id) => { const v = q(d, id).value.trim(); return v === "" ? "0" : v; };
+const sapJointPatterns = async () => { const dd = (await hmRun("definition_data", {}, true)).result || {tables: {}}; return ["Default", ...((((dd.tables || {})["Joint Pattern Definitions"] || {}).rows || []).map(r => r.Pattern).filter(n => n && n !== "Default"))]; };
+
+// Assign > Joint Loads > Forces and Displacements: General (Load Pattern, Coordinate System), the six values, Options.
+async function sapJointLoad(force) {
+  const s = await sapLdStart("joint"); if (!s) return; const {names, defs, u} = s, cs = await sapCsys();
+  const labels = force ? ["Force Global X", "Force Global Y", "Force Global Z", "Moment about Global X", "Moment about Global Y", "Moment about Global Z"]
+    : ["Translation Global X", "Translation Global Y", "Translation Global Z", "Rotation about Global X", "Rotation about Global Y", "Rotation about Global Z"];
+  const units = force ? [u.f, u.f, u.f, u.fl, u.fl, u.fl] : [u.l, u.l, u.l, "rad", "rad", "rad"];
+  const keys = force ? ["F1", "F2", "F3", "M1", "M2", "M3"] : ["U1", "U2", "U3", "R1", "R2", "R3"];
+  const d = dialog(force ? "Assign Joint Forces" : "Assign Joint Ground Displacements", `${sapFormCss}<div class="sapF">
+    <fieldset><legend>General</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, "jlP")], ["Coordinate System", `<select id="jlC" style="width:225px">${opts(cs, "GLOBAL")}</select>`]])}</fieldset>
+    <fieldset><legend>${force ? "Forces" : "Ground Displacements"}</legend><div class="g3">${labels.map((l, i) => sapRow(l, "jl" + i, 0, units[i])).join("")}</div></fieldset>
+    ${sapLdOpts("jlO")}<button id="jlR" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => sapLdSet(d, force ? "Joint Loads - Force" : "Joint Loads - Ground Displacement", names, q(d, "#jlP").value, q(d, "[name=jlO]:checked").value,
+      [Object.assign({CoordSys: q(d, "#jlC").value}, ...keys.map((k, i) => ({[k]: sapLdNum(d, "#jl" + i)})))])), {width: 470});
+  q(d, "#jlR").onclick = () => { q(d, "#jlC").value = "GLOBAL"; keys.forEach((_, i) => q(d, "#jl" + i).value = "0"); q(d, "[name=jlO][value=replace]").checked = true; };
+  return d;
+}
+function hmSapJointForces() { return sapJointLoad(true); }
+function hmSapJointDisplacements() { return sapJointLoad(false); }
+
+// Assign > Frame Loads > Gravity: General (Load Pattern, Coordinate System), Gravity Multipliers, Options.
+async function hmSapFrameGravity() {
+  const s = await sapLdStart("frame"); if (!s) return; const {names, defs} = s, cs = await sapCsys();
+  const d = dialog("Assign Frame Gravity Loads", `${sapFormCss}<div class="sapF">
+    <fieldset><legend>General</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, "fgP")], ["Coordinate System", `<select id="fgC" style="width:225px">${opts(cs, "GLOBAL")}</select>`]])}</fieldset>
+    <fieldset><legend>Gravity Multipliers</legend><div class="g3">${["X", "Y", "Z"].map(x => sapRow("Global " + x, "fg" + x, 0, "")).join("")}</div></fieldset>
+    ${sapLdOpts("fgO")}<button id="fgR" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => sapLdSet(d, "Frame Loads - Gravity", names, q(d, "#fgP").value, q(d, "[name=fgO]:checked").value,
+      [{CoordSys: q(d, "#fgC").value, MultiplierX: sapLdNum(d, "#fgX"), MultiplierY: sapLdNum(d, "#fgY"), MultiplierZ: sapLdNum(d, "#fgZ")}])), {width: 450});
+  q(d, "#fgR").onclick = () => { q(d, "#fgC").value = "GLOBAL"; ["X", "Y", "Z"].forEach(x => q(d, "#fg" + x).value = "0"); q(d, "[name=fgO][value=replace]").checked = true; };
+  return d;
+}
+
+// Assign > Frame Loads > Point and Distributed: General (Load Pattern, Coordinate System with Local, Load Direction,
+// Load Type), Options, (Uniform Load,) the four distances and loads, Relative or Absolute Distance from End-I.
+async function sapFrameAlong(dist) {
+  const s = await sapLdStart("frame"); if (!s) return; const {names, defs, u} = s, cs = [...await sapCsys(), "Local"];
+  const dirsOf = c => c === "Local" ? ["1", "2", "3"] : ["X", "Y", "Z", "Gravity"];
+  const unitOf = type => dist ? (type === "Moment" ? `${u.fl}/${u.l}` : u.kl) : (type === "Moment" ? u.fl : u.f);
+  const p = dist ? "fd" : "fp", rel = [0, 0.25, 0.75, 1];
+  const cols = `<div style="display:grid;grid-template-columns:120px repeat(4,125px) 50px;gap:4px 8px;align-items:center;text-align:center"><span></span>${[1, 2, 3, 4].map(i => `<span>${i}.</span>`).join("")}<span></span>
+      <span id="${p}DL" style="text-align:left">Relative Distance</span>${rel.map((v, i) => `<input id="${p}D${i}" value="${v}" style="width:115px">`).join("")}<span></span>
+      <span style="text-align:left">Loads</span>${rel.map((_, i) => `<input id="${p}L${i}" value="0" style="width:115px">`).join("")}<span class="u" style="text-align:left">${unitOf("Force")}</span></div>
+    <div style="display:flex;gap:70px;margin:8px 0 0 18px"><label><input type="radio" name="${p}T" value="rel" checked> Relative Distance from End-I</label><label><input type="radio" name="${p}T" value="abs"> Absolute Distance from End-I</label></div>`;
+  const d = dialog(dist ? "Assign Frame Distributed Loads" : "Assign Frame Point Loads", `${sapFormCss}<div class="sapF">
+    <div style="display:grid;grid-template-columns:1fr 260px;gap:0 12px">
+      <fieldset><legend>General</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, p + "P")], ["Coordinate System", `<select id="${p}C" style="width:225px">${opts(cs, "GLOBAL")}</select>`],
+        ["Load Direction", `<select id="${p}Dir" style="width:225px"></select>`], ["Load Type", `<select id="${p}Ty" style="width:225px">${opts(["Force", "Moment"], "Force")}</select>`]])}</fieldset>
+      <div>${sapLdOpts(p + "O")}${dist ? `<fieldset><legend>Uniform Load</legend><input id="fdU" value="0" style="width:110px"> <span class="u" id="fdUU">${unitOf("Force")}</span></fieldset>` : ""}</div></div>
+    <fieldset><legend>${dist ? "Trapezoidal Loads" : "Point Loads"}</legend>${cols}</fieldset>
+    <button id="${p}R" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => {
+      const c = q(d, `#${p}C`).value, dir = q(d, `#${p}Dir`).value, type = q(d, `#${p}Ty`).value, abs = q(d, `[name=${p}T]:checked`).value === "abs";
+      const D = [0, 1, 2, 3].map(i => +q(d, `#${p}D${i}`).value || 0), L = [0, 1, 2, 3].map(i => +q(d, `#${p}L${i}`).value || 0);
+      if (!abs && D.some(x => x < 0 || x > 1)) { formError(d, "A relative distance is from 0 to 1."); return false; }
+      const base = {CoordSys: c, Type: type, Dir: dir, DistType: abs ? "AbsDist" : "RelDist"}, rows = [];
+      if (dist) {
+        const fa = type === "Moment" ? "MOverLA" : "FOverLA", fb = type === "Moment" ? "MOverLB" : "FOverLB";
+        const uni = +q(d, "#fdU").value || 0;
+        if (uni) rows.push({...base, DistType: "RelDist", RelDistA: "0", RelDistB: "1", [fa]: String(uni), [fb]: String(uni)});
+        for (let i = 0; i < 3; i++) if ((L[i] || L[i + 1]) && D[i + 1] > D[i])
+          rows.push({...base, [abs ? "AbsDistA" : "RelDistA"]: String(D[i]), [abs ? "AbsDistB" : "RelDistB"]: String(D[i + 1]), [fa]: String(L[i]), [fb]: String(L[i + 1])});
+      } else for (let i = 0; i < 4; i++) if (L[i]) rows.push({...base, [abs ? "AbsDist" : "RelDist"]: String(D[i]), [type === "Moment" ? "Moment" : "Force"]: String(L[i])});
+      const how = q(d, `[name=${p}O]:checked`).value;
+      if (how !== "delete" && !rows.length) { formError(d, "Give a load that is not 0."); return false; }
+      return sapLdSet(d, dist ? "Frame Loads - Distributed" : "Frame Loads - Point", names, q(d, `#${p}P`).value, how, rows);
+    }), {width: 820});
+  const syncDir = () => { const c = q(d, `#${p}C`).value, was = q(d, `#${p}Dir`).value, list = dirsOf(c); q(d, `#${p}Dir`).innerHTML = opts(list, list.includes(was) ? was : c === "Local" ? "1" : "Gravity"); };
+  const syncUnit = () => { const t = q(d, `#${p}Ty`).value; d.querySelectorAll(".sapF .u").forEach(x => x.textContent = unitOf(t)); };
+  q(d, `#${p}C`).onchange = syncDir; q(d, `#${p}Ty`).onchange = syncUnit;
+  d.querySelectorAll(`[name=${p}T]`).forEach(r => r.onchange = () => { q(d, `#${p}DL`).textContent = q(d, `[name=${p}T]:checked`).value === "abs" ? "Distance" : "Relative Distance"; });
+  q(d, `#${p}R`).onclick = () => { q(d, `#${p}C`).value = "GLOBAL"; syncDir(); q(d, `#${p}Dir`).value = "Gravity"; q(d, `#${p}Ty`).value = "Force"; syncUnit(); q(d, `[name=${p}O][value=replace]`).checked = true;
+    rel.forEach((v, i) => { q(d, `#${p}D${i}`).value = v; q(d, `#${p}L${i}`).value = 0; }); if (dist) q(d, "#fdU").value = 0; q(d, `[name=${p}T][value=rel]`).checked = true; q(d, `#${p}DL`).textContent = "Relative Distance"; };
+  syncDir();
+  return d;
+}
+function hmSapFramePoint() { return sapFrameAlong(false); }
+function hmSapFrameDistributed() { return sapFrameAlong(true); }
+
+// Assign > Frame Loads > Temperature: Load Pattern, Type (Temperature, Gradient 2-2, 3-3), Temperature By Element or
+// By Joint Pattern (Joint Pattern, Multiplier), Options.
+async function hmSapFrameTemperature() {
+  const s = await sapLdStart("frame"); if (!s) return; const {names, defs, u} = s, jp = await sapJointPatterns(), T = sapLdTemp();
+  const d = dialog("Assign Frame Temperature Loads", `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Load Pattern</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, "ftP")]])}</fieldset>
+    <fieldset><legend>Type</legend><label><input type="radio" name="ftT" value="Temperature" checked> Temperature</label><label><input type="radio" name="ftT" value="Gradient2"> Temperature Gradient 2-2</label><label><input type="radio" name="ftT" value="Gradient3"> Temperature Gradient 3-3</label></fieldset>
+    <fieldset><legend>Temperature</legend>${sapJpBlock("ft", "Temperature", T, jp)}</fieldset>
+    ${sapLdOpts("ftO")}<button id="ftR" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => {
+      const type = q(d, "[name=ftT]:checked").value, {v, jp} = w.value(), field = {Temperature: "Temp", Gradient2: "TempGrad2", Gradient3: "TempGrad3"}[type];
+      return sapLdSet(d, "Frame Loads - Temperature", names, q(d, "#ftP").value, q(d, "[name=ftO]:checked").value, [{Type: type, [field]: v, ...(jp ? {JtPattern: jp} : {})}]);
+    }), {width: 470});
+  const w = sapJpWire(d, "ft", () => q(d, "[name=ftT]:checked").value === "Temperature" ? T : `${T}/${u.l}`);
+  d.querySelectorAll("[name=ftT]").forEach(r => r.onchange = w.sync);
+  q(d, "#ftR").onclick = () => { q(d, "[name=ftT][value=Temperature]").checked = q(d, "[name=ftO][value=replace]").checked = true; w.reset(); };
+  return d;
+}
+
+// Assign > Frame Loads > Strain: Load Pattern, Strain Load By Element or By Joint Pattern, Component, Joint Pattern, Strain.
+async function hmSapFrameStrain() {
+  const s = await sapLdStart("frame"); if (!s) return; const {names, defs, u} = s, jp = await sapJointPatterns();
+  const comps = [["Strain11", "Strain11"], ["Strain12", "Strain12  (straight frames only)"], ["Strain13", "Strain13  (straight frames only)"], ["Curvature1", "Curvature1  (straight frames only)"], ["Curvature2", "Curvature2  (straight frames only)"], ["Curvature3", "Curvature3  (straight frames only)"]];
+  const d = dialog("Assign Frame Strain Loads", `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Load Pattern</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, "fsP")]])}</fieldset>
+    <fieldset><legend>Strain Load</legend><label><input type="radio" name="fsB" value="el" checked> By Element</label><label><input type="radio" name="fsB" value="jp"> By Joint Pattern</label>
+      <div style="display:grid;grid-template-columns:110px 150px 110px 40px;gap:6px 8px;align-items:center;margin-left:22px">
+        <span>Component</span><select id="fsC" style="grid-column:span 2">${opts(comps, "Strain11")}</select><span></span>
+        <span>Joint Pattern</span><select id="fsJ" style="grid-column:span 2">${opts(jp, "Default")}</select><span></span>
+        <span>Strain</span><span></span><input id="fsV" value="0"><span class="u" id="fsU">${u.l}/${u.l}</span></div></fieldset>
+    ${sapLdOpts("fsO")}<button id="fsR" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => {
+      const c = q(d, "#fsC").value, jpOn = q(d, "[name=fsB]:checked").value === "jp";
+      const row = {Component: c, [/^Curv/.test(c) ? "Curvature" : "Strain"]: sapLdNum(d, "#fsV"), ...(jpOn ? {JtPattern: q(d, "#fsJ").value} : {})};
+      return sapLdSet(d, "Frame Loads - Strain", names, q(d, "#fsP").value, q(d, "[name=fsO]:checked").value, [row]);
+    }), {width: 470});
+  const sync = () => { const jpOn = q(d, "[name=fsB]:checked").value === "jp"; q(d, "#fsJ").disabled = !jpOn; if (!jpOn) q(d, "#fsJ").selectedIndex = -1; else if (q(d, "#fsJ").selectedIndex < 0) q(d, "#fsJ").value = "Default";
+    q(d, "#fsU").textContent = /^Curv/.test(q(d, "#fsC").value) ? `rad/${u.l}` : `${u.l}/${u.l}`; };
+  d.querySelectorAll("[name=fsB]").forEach(r => r.onchange = sync); q(d, "#fsC").onchange = sync;
+  q(d, "#fsR").onclick = () => { q(d, "[name=fsB][value=el]").checked = q(d, "[name=fsO][value=replace]").checked = true; q(d, "#fsC").value = "Strain11"; q(d, "#fsV").value = "0"; sync(); };
+  sync();
+  return d;
+}
+
+// Assign > Frame Loads > Deformation and Target Force: the axial one only (ticked and fixed, as SAP2000 shows it),
+// Replace or Delete.
+async function hmSapFrameDeformation() {
+  const s = await sapLdStart("frame"); if (!s) return; const {names, defs, u} = s;
+  const d = dialog("Assign Frame Deformation Loads", `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Load Pattern</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, "fdfP")]])}</fieldset>
+    <fieldset><legend>Deformation Loads</legend><div style="display:grid;grid-template-columns:190px 110px 40px;gap:6px 8px;align-items:center"><label><input type="checkbox" checked disabled> Axial Deformation, U1</label><input id="fdfV" value="0"><span class="u">${u.l}</span></div></fieldset>
+    ${sapLdOpts("fdfO", true)}<button id="fdfR" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => sapLdSet(d, "Frame Loads - Deformation", names, q(d, "#fdfP").value, q(d, "[name=fdfO]:checked").value, [{IncludeU1: "Yes", U1: sapLdNum(d, "#fdfV")}])), {width: 400});
+  q(d, "#fdfR").onclick = () => { q(d, "#fdfV").value = "0"; q(d, "[name=fdfO][value=replace]").checked = true; };
+  return d;
+}
+async function hmSapFrameTargetForce() {
+  const s = await sapLdStart("frame"); if (!s) return; const {names, defs, u} = s;
+  const d = dialog("Assign Frame Target Force Loads", `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Load Pattern</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, "ftfP")]])}</fieldset>
+    <fieldset><legend>Target Force</legend><div style="display:grid;grid-template-columns:130px 100px 40px 100px;gap:4px 8px;align-items:center"><span></span><span style="text-align:center">Target Force</span><span></span><span style="text-align:center">Relative Distance</span>
+      <label><input type="checkbox" checked disabled> Axial Force, P</label><input id="ftfV" value="0"><span class="u">${u.f}</span><input id="ftfD" value="0.5"></div></fieldset>
+    ${sapLdOpts("ftfO", true)}<button id="ftfR" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => {
+      const at = +q(d, "#ftfD").value; if (!(at >= 0 && at <= 1)) { formError(d, "The relative distance is from 0 to 1."); return false; }
+      return sapLdSet(d, "Frame Loads - Target Force", names, q(d, "#ftfP").value, q(d, "[name=ftfO]:checked").value, [{IncludeP: "Yes", P: sapLdNum(d, "#ftfV"), RelLocP: String(at)}]);
+    }), {width: 460});
+  q(d, "#ftfR").onclick = () => { q(d, "#ftfV").value = "0"; q(d, "#ftfD").value = "0.5"; q(d, "[name=ftfO][value=replace]").checked = true; };
+  return d;
+}
+
+// Assign > Frame Loads > Auto Wave Loading Parameters and Open Structure Wind Parameters: each overwrite with its
+// Program Default tick (ticked: SAP2000's own value, the field left out of the row), Yes/No choices, Replace or Delete
+// Existing Overwrites, Fill Form ... from Selected Frame Object (one frame with overwrites selected) and Reset.
+async function sapFrameOverwrites(wave) {
+  const s = await sapLdStart("frame"); if (!s) return; const {names, u} = s;
+  const table = wave ? "Overwrites - Auto Wave Loads - Frame" : "Overwrites - Auto Wind Loads - Frame";
+  const yn = (id, k, v) => [id, k, "yn", v];
+  const val = (id, k, label, unit, v) => [id, k, label, unit, v];
+  const groups = wave ? [["Wave Overwrites", [yn("Element is Loaded by Wave", "LoadByWave", "Yes"), val("Max. Load Discretization Length", "LoadDisc", "", u.l, 0), val("Marine Growth Thickness", "MarineGrow", "", u.l, 0.05),
+      val("Dimension for Local 2 Force", "DimForce2", "", u.l, 0), val("Dimension for Local 3 Force", "DimForce3", "", u.l, 0), val("Drag Coefficient", "DragCoeff", "", "", 0), val("Inertia Coefficient", "InerCoeff", "", "", 0), yn("Element is Flooded", "Flooded", "No")]],
+    ["Wave Wind Overwrites", [yn("Element is Loaded by Wind", "LoadByWind", "Yes"), val("Ice Thickness", "IceThick", "", u.l, 0), val("Shape Coefficient", "ShapeCoeff", "", "", 0), val("Shielding Factor", "ShieldFact", "", "", 0)]]]
+    : [["Wind Overwrites", [yn("Element is Loaded by Wind", "LoadByWind", "Yes"), val("Ice Thickness", "IceThick", "", u.l, 0), val("Net Force/Shape Coefficient", "Cf", "", "", 0)]]];
+  const items = groups.flatMap(g => g[1]);
+  const row = it => it[2] === "yn" ? `<span>${it[0]}</span><span></span><select data-k="${it[1]}" style="width:125px">${opts(["Yes", "No"], it[3])}</select><span></span>`
+    : `<span>${it[0]}</span><input type="checkbox" data-pd="${it[1]}" checked style="justify-self:center"><input data-k="${it[1]}" data-def="${it[4]}" value="Program Default" disabled style="width:125px"><span class="u">${esc(it[3])}</span>`;
+  const one = names.length === 1 ? ((await sapObjRows(names)) || {by: {}}).by[names[0]] : null, have = one && (one[table] || [])[0];
+  const what = wave ? "Wave" : "Wind";
+  const d = dialog(wave ? "Assign Frame Auto Wave Load Overwrites" : "Assign Frame Auto Wind Load (Open Structure) Overwrites", `${sapFormCss}<div class="sapF">
+    ${groups.map(([legend, its]) => `<fieldset><legend>${legend}</legend><div style="display:grid;grid-template-columns:230px 60px 130px 30px;gap:6px 8px;align-items:center"><span></span><span style="text-align:center">Program<br>Default</span><span></span><span></span>${its.map(row).join("")}</div></fieldset>`).join("")}
+    ${sapLdOpts("owO", true, "Overwrites")}
+    <button id="owF" class="reset" style="width:430px" ${have ? "" : "disabled"}>Fill Form with Auto ${what} Overwrites from Selected Frame Object</button><button id="owR" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => {
+      const r = {};
+      for (const it of items) { const x = d.querySelector(`[data-k="${it[1]}"]`); if (it[2] === "yn") r[it[1]] = x.value; else if (!d.querySelector(`[data-pd="${it[1]}"]`).checked) r[it[1]] = x.value.trim() || "0"; }
+      return sapLdSet(d, table, names, null, q(d, "[name=owO]:checked").value, [r]);
+    }), {width: wave ? 520 : 460});
+  const tick = (k, on, v) => { const x = d.querySelector(`[data-k="${k}"]`); d.querySelector(`[data-pd="${k}"]`).checked = on; x.disabled = on; x.value = on ? "Program Default" : (v ?? x.dataset.def); };
+  d.querySelectorAll("[data-pd]").forEach(c => c.onchange = () => tick(c.dataset.pd, c.checked));
+  const reset = () => { for (const it of items) if (it[2] === "yn") d.querySelector(`[data-k="${it[1]}"]`).value = it[3]; else tick(it[1], true); q(d, "[name=owO][value=replace]").checked = true; };
+  q(d, "#owR").onclick = reset;
+  q(d, "#owF").onclick = () => { if (!have) return; for (const it of items) { const v = have[it[1]]; if (it[2] === "yn") { if (v) d.querySelector(`[data-k="${it[1]}"]`).value = v; } else tick(it[1], v === undefined || v === "", v); } };
+  return d;
+}
+function hmSapFrameWave() { return sapFrameOverwrites(true); }
+function hmSapFrameWind() { return sapFrameOverwrites(false); }
+
+// Assign > Frame Loads > Fireproofing: Fireproofing Type (Sprayed On with Auto Perimeter, with User Perimeter, Encased
+// in Concrete Box), Parameters (weight per volume, thickness or cover thickness, the user perimeter or Fireproofing on
+// Top Flange), Load Options (self weight, frame gravity loads, this load pattern) and Replace or Delete.
+const sapFireTypes = [["Sprayed Auto", "Sprayed On Fireproofing with Auto Perimeter"], ["Sprayed User", "Sprayed On Fireproofing with User Perimeter"], ["Concrete Box", "Encased in Concrete Box"]];
+async function hmSapFrameFireproofing() {
+  const s = await sapLdStart("frame"); if (!s) return; const {names, defs, u} = s;
+  const si = u.f === "kN" && u.l === "m", dW = si ? 2.3563 : 0, dT = si ? 0.05 : 0, dP = si ? 0.6 : 0;
+  const d = dialog("Assign Frame Fireproofing", `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Fireproofing Type</legend>${sapFireTypes.map(([v, l], i) => `<label><input type="radio" name="fpT" value="${v}" ${i ? "" : "checked"}> ${l}</label>`).join("")}</fieldset>
+    <fieldset><legend>Parameters</legend><div style="display:grid;grid-template-columns:345px 110px 50px;gap:6px 8px;align-items:center">
+      <span>Fireproofing Weight per Unit Volume</span><input id="fpW" value="${dW}"><span class="u">${u.f}/${u.l}³</span>
+      <span id="fpTL">Fireproofing Thickness</span><input id="fpTh" value="${dT}"><span class="u">${u.l}</span>
+      <span class="fpUP">Fireproofing Perimeter (at center of fireproofing)</span><input class="fpUP" id="fpPe" value="${dP}"><span class="u fpUP">${u.l}</span></div>
+      <label id="fpTF"><input type="checkbox" id="fpTop"> Fireproofing on Top Flange</label></fieldset>
+    <fieldset><legend>Load Options</legend><label><input type="checkbox" id="fpSW" checked> Include in Self Weight</label><label><input type="checkbox" id="fpGL" checked> Include in Frame Object Gravity Loads</label>
+      <div style="display:flex;align-items:center;gap:4px"><label style="margin:0"><input type="checkbox" id="fpLP"> Include in this Load Pattern</label><select id="fpPat" style="width:225px"></select></div></fieldset>
+    ${sapLdOpts("fpO", true)}<button id="fpR" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => {
+      const type = q(d, "[name=fpT]:checked").value, inPat = q(d, "#fpLP").checked;
+      const row = {Type: type, Density: sapLdNum(d, "#fpW"), Thickness: sapLdNum(d, "#fpTh"), SelfWt: q(d, "#fpSW").checked ? "Yes" : "No", GravLoad: q(d, "#fpGL").checked ? "Yes" : "No",
+        ...(type === "Sprayed User" ? {UserPerim: sapLdNum(d, "#fpPe")} : {TopFlange: q(d, "#fpTop").checked ? "Yes" : "No"}), ...(inPat ? {LoadPat: q(d, "#fpPat").value} : {})};
+      return sapLdSet(d, "Frame Fireproofing Assignments", names, null, q(d, "[name=fpO]:checked").value, [row]);
+    }), {width: 560});
+  const pats = defs.load_patterns.map(p => p.name);
+  const sync = () => {
+    const t = q(d, "[name=fpT]:checked").value, user = t === "Sprayed User";
+    d.querySelectorAll(".fpUP").forEach(x => x.style.display = user ? "" : "none"); q(d, "#fpTF").style.display = user ? "none" : "";
+    q(d, "#fpTL").textContent = t === "Concrete Box" ? "Fireproofing Cover Thickness" : "Fireproofing Thickness";
+    const on = q(d, "#fpLP").checked, P = q(d, "#fpPat"); P.disabled = !on; P.innerHTML = on ? opts(pats, P.value || pats[0]) : "";
+  };
+  d.querySelectorAll("[name=fpT]").forEach(r => r.onchange = sync); q(d, "#fpLP").onchange = sync;
+  q(d, "#fpR").onclick = () => { q(d, "[name=fpT][value='Sprayed Auto']").checked = q(d, "[name=fpO][value=replace]").checked = true; q(d, "#fpW").value = dW; q(d, "#fpTh").value = dT; q(d, "#fpPe").value = dP;
+    q(d, "#fpTop").checked = q(d, "#fpLP").checked = false; q(d, "#fpSW").checked = q(d, "#fpGL").checked = true; sync(); };
+  sync();
+  return d;
+}
+Object.assign(hmSapAssignForms, {
+  jlForces: () => hmSapJointForces(), jlDispl: () => hmSapJointDisplacements(),
+  flGravity: () => hmSapFrameGravity(), flPoint: () => hmSapFramePoint(), flDistributed: () => hmSapFrameDistributed(), flTemperature: () => hmSapFrameTemperature(),
+  flStrain: () => hmSapFrameStrain(), flDeformation: () => hmSapFrameDeformation(), flTarget: () => hmSapFrameTargetForce(), flWave: () => hmSapFrameWave(), flWind: () => hmSapFrameWind(),
+  flFireproofing: () => hmSapFrameFireproofing(),
+});
+
+// SAP2000's "By Element / By Joint Pattern" block (Temperature, Pressure): the value, or a joint pattern and its
+// multiplier; the boxes of the other choice are empty and greyed, and the unit stands by the box in use.
+function sapJpBlock(p, label, unit, jp) {
+  return `<label><input type="radio" name="${p}B" value="el" checked> By Element</label>
+    <div style="display:grid;grid-template-columns:110px 110px 110px 50px;gap:6px 8px;align-items:center;margin-left:22px">
+      <span>${label}</span><span></span><input id="${p}V" value="0"><span class="u" id="${p}UV">${esc(unit)}</span></div>
+    <label><input type="radio" name="${p}B" value="jp"> By Joint Pattern</label>
+    <div style="display:grid;grid-template-columns:110px 110px 110px 50px;gap:6px 8px;align-items:center;margin-left:22px">
+      <span>Joint Pattern</span><select id="${p}J" style="grid-column:span 2">${opts(jp, "Default")}</select><span></span>
+      <span>Multiplier</span><span></span><input id="${p}M" value=""><span class="u" id="${p}UM"></span></div>`;
+}
+// Wires the block: sync(unit) after a change; value(d) gives the row's value and joint pattern.
+function sapJpWire(d, p, unitOf) {
+  const sync = () => {
+    const jp = q(d, `[name=${p}B]:checked`).value === "jp", u = unitOf();
+    q(d, `#${p}V`).disabled = jp; q(d, `#${p}J`).disabled = q(d, `#${p}M`).disabled = !jp;
+    if (jp) { q(d, `#${p}V`).value = ""; if (q(d, `#${p}M`).value === "") q(d, `#${p}M`).value = "0"; if (q(d, `#${p}J`).selectedIndex < 0) q(d, `#${p}J`).value = "Default"; }
+    else { q(d, `#${p}M`).value = ""; q(d, `#${p}J`).selectedIndex = -1; if (q(d, `#${p}V`).value === "") q(d, `#${p}V`).value = "0"; }
+    q(d, `#${p}UV`).textContent = jp ? "" : u; q(d, `#${p}UM`).textContent = jp ? u : "";
+  };
+  d.querySelectorAll(`[name=${p}B]`).forEach(r => r.addEventListener("change", sync));
+  const reset = () => { q(d, `[name=${p}B][value=el]`).checked = true; q(d, `#${p}V`).value = "0"; q(d, `#${p}M`).value = ""; sync(); };
+  const value = () => { const jp = q(d, `[name=${p}B]:checked`).value === "jp"; return {v: sapLdNum(d, jp ? `#${p}M` : `#${p}V`), jp: jp ? q(d, `#${p}J`).value : null}; };
+  sync();
+  return {sync, reset, value};
+}
+const sapGravDirs = ["X", "Y", "Z", "X Projected", "Y Projected", "Z Projected", "Gravity", "Gravity Projected"];
+
+// ---- Assign > Area Loads (SAP2000 26.3, pictures Assign/AreaLoads) ----
+// Gravity (All): General (Load Pattern, Coordinate System), Gravity Multipliers, Options.
+async function hmSapAreaGravity() {
+  const s = await sapLdStart("area"); if (!s) return; const {names, defs} = s, cs = await sapCsys();
+  const d = dialog("Assign Area Gravity Loads", `${sapFormCss}<div class="sapF">
+    <fieldset><legend>General</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, "agP")], ["Coordinate System", `<select id="agC" style="width:225px">${opts(cs, "GLOBAL")}</select>`]])}</fieldset>
+    <fieldset><legend>Gravity Multipliers</legend><div class="g3">${["X", "Y", "Z"].map(x => sapRow("Global " + x, "ag" + x, 0, "")).join("")}</div></fieldset>
+    ${sapLdOpts("agO")}<button id="agR" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => sapLdSet(d, "Area Loads - Gravity", names, q(d, "#agP").value, q(d, "[name=agO]:checked").value,
+      [{CoordSys: q(d, "#agC").value, MultiplierX: sapLdNum(d, "#agX"), MultiplierY: sapLdNum(d, "#agY"), MultiplierZ: sapLdNum(d, "#agZ")}])), {width: 450});
+  q(d, "#agR").onclick = () => { q(d, "#agC").value = "GLOBAL"; ["X", "Y", "Z"].forEach(x => q(d, "#ag" + x).value = "0"); q(d, "[name=agO][value=replace]").checked = true; };
+  return d;
+}
+// Uniform (Shell) and Uniform to Frame (Shell): General (Load Pattern, Coordinate System with Local, Load Direction,
+// and Load Distribution One Way / Two Way for frames), Uniform Load, Options.
+async function sapAreaUniform(toFrame) {
+  const s = await sapLdStart("area"); if (!s) return; const {names, defs, u} = s, cs = [...await sapCsys(), "Local"], p = toFrame ? "auf" : "au";
+  const d = dialog(toFrame ? "Assign Area Uniform Loads to Frames" : "Assign Area Uniform Loads", `${sapFormCss}<div class="sapF">
+    <fieldset><legend>General</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, p + "P")], ["Coordinate System", `<select id="${p}C" style="width:225px">${opts(cs, "GLOBAL")}</select>`],
+      ["Load Direction", `<select id="${p}D" style="width:225px"></select>`], ...(toFrame ? [["Load Distribution", `<select id="${p}T" style="width:225px">${opts(["One Way", "Two Way"], "One Way")}</select>`]] : [])])}</fieldset>
+    <fieldset><legend>Uniform Load</legend><div class="g3">${sapRow("Load", p + "V", 0, `${u.f}/${u.l}²`)}</div></fieldset>
+    ${sapLdOpts(p + "O")}<button id="${p}R" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => sapLdSet(d, toFrame ? "Area Loads - Uniform To Frame" : "Area Loads - Uniform", names, q(d, `#${p}P`).value, q(d, `[name=${p}O]:checked`).value,
+      [{CoordSys: q(d, `#${p}C`).value, Dir: q(d, `#${p}D`).value, UnifLoad: sapLdNum(d, `#${p}V`), ...(toFrame ? {DistType: q(d, `#${p}T`).value} : {})}])), {width: 470});
+  const syncDir = () => { const c = q(d, `#${p}C`).value, was = q(d, `#${p}D`).value, list = c === "Local" ? ["1", "2", "3"] : sapGravDirs; q(d, `#${p}D`).innerHTML = opts(list, list.includes(was) ? was : c === "Local" ? "1" : "Gravity"); };
+  q(d, `#${p}C`).onchange = syncDir;
+  q(d, `#${p}R`).onclick = () => { q(d, `#${p}C`).value = "GLOBAL"; q(d, `#${p}D`).innerHTML = ""; syncDir(); if (toFrame) q(d, `#${p}T`).value = "One Way"; q(d, `#${p}V`).value = "0"; q(d, `[name=${p}O][value=replace]`).checked = true; };
+  syncDir();
+  return d;
+}
+function hmSapAreaUniform() { return sapAreaUniform(false); }
+function hmSapAreaUniformToFrame() { return sapAreaUniform(true); }
+// Surface Pressure (All): Load Pattern, Loaded Face (Top, Bottom, Edge with its Edge Face Number), Pressure By Element
+// or By Joint Pattern, Options. Solid: the Face list 1 to 6 in place of the loaded face.
+async function sapSurfacePressure(solid) {
+  const s = await sapLdStart(solid ? "solid" : "area"); if (!s) return; const {names, defs, u} = s, jp = await sapJointPatterns(), p = solid ? "ssp" : "asp";
+  const face = solid ? `<fieldset><legend>Loaded Face</legend>${sapLdGrid([["Face", `<select id="${p}F" style="width:110px">${opts(["1", "2", "3", "4", "5", "6"], "6")}</select>`]])}</fieldset>`
+    : `<fieldset><legend>Loaded Face</legend><label><input type="radio" name="${p}F" value="Top" checked> Top</label><label><input type="radio" name="${p}F" value="Bottom"> Bottom</label><label><input type="radio" name="${p}F" value="Edge"> Edge</label>
+      <div style="display:grid;grid-template-columns:270px 110px;gap:6px 8px;align-items:center;margin-left:22px"><span>Edge Face Number</span><input id="${p}E" value="" disabled></div></fieldset>`;
+  const d = dialog(solid ? "Assign Solid Surface Pressure Loads" : "Assign Area Surface Pressure Loads", `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Load Pattern</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, p + "P")]])}</fieldset>${face}
+    <fieldset><legend>Pressure</legend>${sapJpBlock(p, "Pressure", `${u.f}/${u.l}²`, jp)}</fieldset>
+    ${sapLdOpts(p + "O")}<button id="${p}R" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => {
+      const {v, jp} = w.value(); let f;
+      if (solid) f = q(d, `#${p}F`).value;
+      else { f = q(d, `[name=${p}F]:checked`).value; if (f === "Edge") { f = q(d, `#${p}E`).value.trim(); if (!/^\d+$/.test(f) || +f < 1) { formError(d, "Give the edge face number (1 or more)."); return false; } } }
+      return sapLdSet(d, solid ? "Solid Loads - Surface Pressure" : "Area Loads - Surface Pressure", names, q(d, `#${p}P`).value, q(d, `[name=${p}O]:checked`).value, [{Face: f, Pressure: v, ...(jp ? {JtPattern: jp} : {})}]);
+    }), {width: 470});
+  const w = sapJpWire(d, p, () => `${u.f}/${u.l}²`);
+  const edge = () => { if (solid) return; const on = q(d, `[name=${p}F]:checked`).value === "Edge"; q(d, `#${p}E`).disabled = !on; q(d, `#${p}E`).value = on ? (q(d, `#${p}E`).value || "1") : ""; };
+  if (!solid) d.querySelectorAll(`[name=${p}F]`).forEach(r => r.onchange = edge);
+  q(d, `#${p}R`).onclick = () => { if (solid) q(d, `#${p}F`).value = "6"; else { q(d, `[name=${p}F][value=Top]`).checked = true; edge(); } w.reset(); q(d, `[name=${p}O][value=replace]`).checked = true; };
+  return d;
+}
+function hmSapAreaSurfacePressure() { return sapSurfacePressure(false); }
+// Pore Pressure (Plane, Asolid) and the Solid one: Load Pattern, Pressure By Element or By Joint Pattern, Options.
+async function sapPorePressure(solid) {
+  const s = await sapLdStart(solid ? "solid" : "area"); if (!s) return; const {names, defs, u} = s, jp = await sapJointPatterns(), p = solid ? "spp" : "app";
+  const d = dialog(solid ? "Assign Solid Pore Pressure Loads" : "Assign Area Pore Pressure Loads", `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Load Pattern</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, p + "P")]])}</fieldset>
+    <fieldset><legend>Pressure</legend>${sapJpBlock(p, "Pressure", `${u.f}/${u.l}²`, jp)}</fieldset>
+    ${sapLdOpts(p + "O")}<button id="${p}R" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => { const {v, jp} = w.value(); return sapLdSet(d, solid ? "Solid Loads - Pore Pressure" : "Area Loads - Pore Pressure", names, q(d, `#${p}P`).value, q(d, `[name=${p}O]:checked`).value, [{Pressure: v, ...(jp ? {JtPattern: jp} : {})}]); }), {width: 470});
+  const w = sapJpWire(d, p, () => `${u.f}/${u.l}²`);
+  q(d, `#${p}R`).onclick = () => { w.reset(); q(d, `[name=${p}O][value=replace]`).checked = true; };
+  return d;
+}
+function hmSapAreaPorePressure() { return sapPorePressure(false); }
+// Temperature (All): Load Pattern, Type (Temperature, Temperature Gradient 3-3), By Element or By Joint Pattern, Options.
+async function hmSapAreaTempLoads() {
+  const s = await sapLdStart("area"); if (!s) return; const {names, defs, u} = s, jp = await sapJointPatterns(), T = sapLdTemp();
+  const d = dialog("Assign Area Temperature Loads", `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Load Pattern</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, "atP")]])}</fieldset>
+    <fieldset><legend>Type</legend><label><input type="radio" name="atT" value="Temperature" checked> Temperature</label><label><input type="radio" name="atT" value="Gradient3"> Temperature Gradient 3-3</label></fieldset>
+    <fieldset><legend>Temperature</legend>${sapJpBlock("at", "Temperature", T, jp)}</fieldset>
+    ${sapLdOpts("atO")}<button id="atR" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => { const {v, jp} = w.value(), type = q(d, "[name=atT]:checked").value;
+      return sapLdSet(d, "Area Loads - Temperature", names, q(d, "#atP").value, q(d, "[name=atO]:checked").value, [{Type: type, [type === "Temperature" ? "Temp" : "TempGrad3"]: v, ...(jp ? {JtPattern: jp} : {})}]); }), {width: 470});
+  const w = sapJpWire(d, "at", () => q(d, "[name=atT]:checked").value === "Temperature" ? T : `${T}/${u.l}`);
+  d.querySelectorAll("[name=atT]").forEach(r => r.onchange = w.sync);
+  q(d, "#atR").onclick = () => { q(d, "[name=atT][value=Temperature]").checked = q(d, "[name=atO][value=replace]").checked = true; w.reset(); };
+  return d;
+}
+// Strain (All): Load Pattern, By Element or By Joint Pattern, Component, Joint Pattern, Strain, Options.
+async function sapAreaStrain(solid) {
+  const s = await sapLdStart(solid ? "solid" : "area"); if (!s) return; const {names, defs, u} = s, jp = await sapJointPatterns(), p = solid ? "sst" : "ast";
+  const comps = solid ? ["Strain11", "Strain22", "Strain33", "Strain12", "Strain13", "Strain23"].map(c => [c, c])
+    : [["Strain11", "Strain11"], ["Strain22", "Strain22"], ["Strain12", "Strain12"], ["Strain13", "Strain13"], ["Strain23", "Strain23"], ["Strain33", "Strain33 (not for shells)"], ["Curvature11", "Curvature11"], ["Curvature22", "Curvature22"], ["Curvature12", "Curvature12"]];
+  const d = dialog(solid ? "Assign Solid Strain Loads" : "Assign Area Strain Loads", `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Load Pattern</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, p + "P")]])}</fieldset>
+    <fieldset><legend>Strain Load</legend><div style="display:flex;gap:60px"><label><input type="radio" name="${p}B" value="el" checked> By Element</label><label><input type="radio" name="${p}B" value="jp"> By Joint Pattern</label></div>
+      <div style="display:grid;grid-template-columns:110px 150px 110px 40px;gap:6px 8px;align-items:center">
+        <span>Component</span><select id="${p}C" style="grid-column:span 2">${opts(comps, "Strain11")}</select><span></span>
+        <span>Joint Pattern</span><select id="${p}J" style="grid-column:span 2">${opts(jp, "Default")}</select><span></span>
+        <span>Strain</span><span></span><input id="${p}V" value="0"><span class="u" id="${p}U"></span></div></fieldset>
+    ${sapLdOpts(p + "O")}<button id="${p}R" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => {
+      const c = q(d, `#${p}C`).value, jpOn = q(d, `[name=${p}B]:checked`).value === "jp";
+      return sapLdSet(d, solid ? "Solid Loads - Strain" : "Area Loads - Strain", names, q(d, `#${p}P`).value, q(d, `[name=${p}O]:checked`).value,
+        [{Component: c, [/^Curv/.test(c) ? "Curvature" : "Strain"]: sapLdNum(d, `#${p}V`), ...(jpOn ? {JtPattern: q(d, `#${p}J`).value} : {})}]);
+    }), {width: 470});
+  const sync = () => { const jpOn = q(d, `[name=${p}B]:checked`).value === "jp"; q(d, `#${p}J`).disabled = !jpOn; if (!jpOn) q(d, `#${p}J`).selectedIndex = -1; else if (q(d, `#${p}J`).selectedIndex < 0) q(d, `#${p}J`).value = "Default";
+    q(d, `#${p}U`).textContent = /^Curv/.test(q(d, `#${p}C`).value) ? `rad/${u.l}` : `${u.l}/${u.l}`; };
+  d.querySelectorAll(`[name=${p}B]`).forEach(r => r.onchange = sync); q(d, `#${p}C`).onchange = sync;
+  q(d, `#${p}R`).onclick = () => { q(d, `[name=${p}B][value=el]`).checked = q(d, `[name=${p}O][value=replace]`).checked = true; q(d, `#${p}C`).value = "Strain11"; q(d, `#${p}V`).value = "0"; sync(); };
+  sync();
+  return d;
+}
+function hmSapAreaStrain() { return sapAreaStrain(false); }
+// Rotate (Asolid): Load Pattern, Angular Velocity (cyc/sec), Options.
+async function hmSapAreaRotate() {
+  const s = await sapLdStart("area"); if (!s) return; const {names, defs} = s;
+  const d = dialog("Assign Area Rotate Loads", `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Load Pattern</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, "arP")]])}</fieldset>
+    <fieldset><legend>Load Value</legend><div class="g3">${sapRow("Angular Velocity", "arV", 0, "cyc/sec")}</div></fieldset>
+    ${sapLdOpts("arO")}<button id="arR" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => sapLdSet(d, "Area Loads - Rotate", names, q(d, "#arP").value, q(d, "[name=arO]:checked").value, [{AngularVel: sapLdNum(d, "#arV")}])), {width: 450});
+  q(d, "#arR").onclick = () => { q(d, "#arV").value = "0"; q(d, "[name=arO][value=replace]").checked = true; };
+  return d;
+}
+// Wind Pressure Coefficients (Shell): Load Pattern, Pressure Type (Windward / Other), Cp, Load Distribution, Replace or Delete.
+async function hmSapAreaWindCp() {
+  const s = await sapLdStart("area"); if (!s) return; const {names, defs} = s;
+  const d = dialog("Assign Area Wind Pressure Coefficient Loads", `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Load Pattern</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, "awP")]])}</fieldset>
+    <fieldset><legend>Pressure Type</legend><label><input type="radio" name="awT" value="Yes" checked> Windward&nbsp; (pressure varies over height)</label><label><input type="radio" name="awT" value="No"> Other&nbsp; (pressure constant over height)</label></fieldset>
+    <fieldset><legend>Load Value</legend><div class="g3">${sapRow("Pressure Coefficient, Cp", "awV", 0, "")}</div></fieldset>
+    <fieldset><legend>Load Distribution</legend><select id="awD" style="width:225px">${opts(["To Joints", "To Frames - One-Way", "To Frames - Two-Way"], "To Joints")}</select></fieldset>
+    ${sapLdOpts("awO", true)}<button id="awR" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => sapLdSet(d, "Area Loads - Wind Pressure Coefficients", names, q(d, "#awP").value, q(d, "[name=awO]:checked").value,
+      [{Windward: q(d, "[name=awT]:checked").value, Cp: sapLdNum(d, "#awV"), DistType: q(d, "#awD").value}])), {width: 450});
+  q(d, "#awR").onclick = () => { q(d, "[name=awT][value=Yes]").checked = q(d, "[name=awO][value=replace]").checked = true; q(d, "#awV").value = "0"; q(d, "#awD").value = "To Joints"; };
+  return d;
+}
+Object.assign(hmSapAssignForms, {
+  alGravity: () => hmSapAreaGravity(), alUniform: () => hmSapAreaUniform(), alToFrame: () => hmSapAreaUniformToFrame(), alSurface: () => hmSapAreaSurfacePressure(),
+  alPore: () => hmSapAreaPorePressure(), alTemperature: () => hmSapAreaTempLoads(), alStrain: () => hmSapAreaStrain(), alRotate: () => hmSapAreaRotate(), alWindCp: () => hmSapAreaWindCp(),
+});
+
+// ---- Assign > Cable, Tendon, Solid and Link/Support Loads (SAP2000 26.3, pictures Assign/CableLoads, TendonLoads,
+// SolidLoads, LinkLoads). Their objects are SAP2000's own (a model opened from a .s2k), named as SAP2000 names them; the
+// rows go into SAP2000's tables (Cable Loads - Distributed, Tendon Loads - Tension Force Or Stress, ...).
+const sapKindWord = {frame: "Frame", area: "Area", cable: "Cable", tendon: "Tendon", solid: "Solid", link: "Link/Support"};
+const sapLdTable = (kind, what) => `${kind === "link" ? "Link" : sapKindWord[kind]} Loads - ${what}`;
+// Gravity: General (Load Pattern, Coordinate System), Gravity Multipliers, Options.
+async function sapGravityForm(kind) {
+  const s = await sapLdStart(kind); if (!s) return; const {names, defs} = s, cs = await sapCsys(), p = "gv" + kind[0];
+  const d = dialog(`Assign ${sapKindWord[kind]} Gravity Loads`, `${sapFormCss}<div class="sapF">
+    <fieldset><legend>General</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, p + "P")], ["Coordinate System", `<select id="${p}C" style="width:225px">${opts(cs, "GLOBAL")}</select>`]])}</fieldset>
+    <fieldset><legend>Gravity Multipliers</legend><div class="g3">${["X", "Y", "Z"].map(x => sapRow("Global " + x, p + x, 0, "")).join("")}</div></fieldset>
+    ${sapLdOpts(p + "O")}<button id="${p}R" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => sapLdSet(d, sapLdTable(kind, "Gravity"), names, q(d, `#${p}P`).value, q(d, `[name=${p}O]:checked`).value,
+      [{CoordSys: q(d, `#${p}C`).value, MultiplierX: sapLdNum(d, `#${p}X`), MultiplierY: sapLdNum(d, `#${p}Y`), MultiplierZ: sapLdNum(d, `#${p}Z`)}])), {width: 450});
+  q(d, `#${p}R`).onclick = () => { q(d, `#${p}C`).value = "GLOBAL"; ["X", "Y", "Z"].forEach(x => q(d, `#${p}${x}`).value = "0"); q(d, `[name=${p}O][value=replace]`).checked = true; };
+  return d;
+}
+// Cable Distributed: General (Load Pattern, Coordinate System with Local, Load Direction, Load Type), Options, Uniform Load.
+async function hmSapCableDistributed() {
+  const s = await sapLdStart("cable"); if (!s) return; const {names, defs, u} = s, cs = [...await sapCsys(), "Local"];
+  const unitOf = t => t === "Moment" ? `${u.fl}/${u.l}` : u.kl;
+  const d = dialog("Assign Cable Distributed Loads", `${sapFormCss}<div class="sapF"><div style="display:grid;grid-template-columns:1fr 190px;gap:0 12px">
+      <fieldset><legend>General</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, "cdP")], ["Coordinate System", `<select id="cdC" style="width:165px">${opts(cs, "GLOBAL")}</select>`],
+        ["Load Direction", `<select id="cdD" style="width:165px"></select>`], ["Load Type", `<select id="cdT" style="width:165px">${opts(["Force", "Moment"], "Force")}</select>`]])}</fieldset>
+      <div>${sapLdOpts("cdO")}<fieldset><legend>Uniform Load</legend><input id="cdV" value="0" style="width:90px"> <span class="u" id="cdU">${unitOf("Force")}</span></fieldset></div></div>
+    <button id="cdR" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => { const t = q(d, "#cdT").value;
+      return sapLdSet(d, "Cable Loads - Distributed", names, q(d, "#cdP").value, q(d, "[name=cdO]:checked").value, [{CoordSys: q(d, "#cdC").value, Type: t, Dir: q(d, "#cdD").value, [t === "Moment" ? "MOverL" : "FOverL"]: sapLdNum(d, "#cdV")}]); }), {width: 690});
+  const syncDir = () => { const c = q(d, "#cdC").value, was = q(d, "#cdD").value, list = c === "Local" ? ["1", "2", "3"] : sapGravDirs; q(d, "#cdD").innerHTML = opts(list, list.includes(was) ? was : c === "Local" ? "1" : "Gravity"); };
+  q(d, "#cdC").onchange = syncDir; q(d, "#cdT").onchange = () => q(d, "#cdU").textContent = unitOf(q(d, "#cdT").value);
+  q(d, "#cdR").onclick = () => { q(d, "#cdC").value = "GLOBAL"; q(d, "#cdD").innerHTML = ""; syncDir(); q(d, "#cdT").value = "Force"; q(d, "#cdU").textContent = unitOf("Force"); q(d, "#cdV").value = "0"; q(d, "[name=cdO][value=replace]").checked = true; };
+  syncDir();
+  return d;
+}
+// Temperature (Cable, Tendon, Solid): Load Pattern, Temperature By Element or By Joint Pattern (Joint Pattern, Multiplier), Options.
+async function sapTempForm(kind) {
+  const s = await sapLdStart(kind); if (!s) return; const {names, defs} = s, jp = await sapJointPatterns(), T = sapLdTemp(), p = "tm" + kind[0];
+  const d = dialog(`Assign ${sapKindWord[kind]} Temperature Loads`, `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Load Pattern</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, p + "P")]])}</fieldset>
+    <fieldset><legend>Temperature</legend>${sapJpBlock(p, "Temperature", T, jp)}</fieldset>
+    ${sapLdOpts(p + "O")}<button id="${p}R" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => { const {v, jp} = w.value();
+      return sapLdSet(d, sapLdTable(kind, "Temperature"), names, q(d, `#${p}P`).value, q(d, `[name=${p}O]:checked`).value, [{...(kind === "solid" ? {} : {Type: "Temperature"}), Temp: v, ...(jp ? {JtPattern: jp} : {})}]); }), {width: 470});
+  const w = sapJpWire(d, p, () => T);
+  q(d, `#${p}R`).onclick = () => { q(d, `[name=${p}O][value=replace]`).checked = true; w.reset(); };
+  return d;
+}
+// Strain (Cable, Tendon: the component is Strain11 only, greyed; Solid: Strain11 to Strain23): Load Pattern, Strain Load
+// By Element or By Joint Pattern, Component, Joint Pattern, Strain, Options.
+async function sapStrainForm(kind) {
+  const s = await sapLdStart(kind); if (!s) return; const {names, defs, u} = s, jp = await sapJointPatterns(), p = "sn" + kind[0], solid = kind === "solid";
+  const comp = solid ? `<select id="${p}C" style="grid-column:span 2">${opts(["Strain11", "Strain22", "Strain33", "Strain12", "Strain13", "Strain23"], "Strain11")}</select>` : `<input id="${p}C" value="Strain11" disabled style="grid-column:span 2">`;
+  const d = dialog(`Assign ${sapKindWord[kind]} Strain Loads`, `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Load Pattern</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, p + "P")]])}</fieldset>
+    <fieldset><legend>Strain Load</legend><label><input type="radio" name="${p}B" value="el" checked> By Element</label><label><input type="radio" name="${p}B" value="jp"> By Joint Pattern</label>
+      <div style="display:grid;grid-template-columns:110px 150px 110px 40px;gap:6px 8px;align-items:center;margin-left:22px">
+        <span>Component</span>${comp}<span></span>
+        <span>Joint Pattern</span><select id="${p}J" style="grid-column:span 2">${opts(jp, "Default")}</select><span></span>
+        <span>Strain</span><span></span><input id="${p}V" value="0"><span class="u">${u.l}/${u.l}</span></div></fieldset>
+    ${sapLdOpts(p + "O")}<button id="${p}R" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => { const jpOn = q(d, `[name=${p}B]:checked`).value === "jp";
+      return sapLdSet(d, sapLdTable(kind, "Strain"), names, q(d, `#${p}P`).value, q(d, `[name=${p}O]:checked`).value, [{Component: q(d, `#${p}C`).value, Strain: sapLdNum(d, `#${p}V`), ...(jpOn ? {JtPattern: q(d, `#${p}J`).value} : {})}]); }), {width: 470});
+  const sync = () => { const jpOn = q(d, `[name=${p}B]:checked`).value === "jp"; q(d, `#${p}J`).disabled = !jpOn; if (!jpOn) q(d, `#${p}J`).selectedIndex = -1; else if (q(d, `#${p}J`).selectedIndex < 0) q(d, `#${p}J`).value = "Default"; };
+  d.querySelectorAll(`[name=${p}B]`).forEach(r => r.onchange = sync);
+  q(d, `#${p}R`).onclick = () => { q(d, `[name=${p}B][value=el]`).checked = q(d, `[name=${p}O][value=replace]`).checked = true; if (solid) q(d, `#${p}C`).value = "Strain11"; q(d, `#${p}V`).value = "0"; sync(); };
+  sync();
+  return d;
+}
+// Deformation (Cable, Tendon): Load Pattern, Axial Deformation U1, Replace or Delete.
+async function sapDeformForm(kind) {
+  const s = await sapLdStart(kind); if (!s) return; const {names, defs, u} = s, p = "df" + kind[0];
+  const d = dialog(`Assign ${sapKindWord[kind]} Deformation Loads`, `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Load Pattern</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, p + "P")]])}</fieldset>
+    <fieldset><legend>Deformation Loads</legend><div style="display:grid;grid-template-columns:190px 110px 40px;gap:6px 8px;align-items:center"><span>Axial Deformation, U1</span><input id="${p}V" value="0"><span class="u">${u.l}</span></div></fieldset>
+    ${sapLdOpts(p + "O", true)}<button id="${p}R" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => sapLdSet(d, sapLdTable(kind, "Deformation"), names, q(d, `#${p}P`).value, q(d, `[name=${p}O]:checked`).value, [{IncludeU1: "Yes", U1: sapLdNum(d, `#${p}V`)}])), {width: 400});
+  q(d, `#${p}R`).onclick = () => { q(d, `#${p}V`).value = "0"; q(d, `[name=${p}O][value=replace]`).checked = true; };
+  return d;
+}
+// Cable Target Force: Load Pattern, Axial Force P with its Relative Distance, Replace or Delete.
+async function hmSapCableTargetForce() {
+  const s = await sapLdStart("cable"); if (!s) return; const {names, defs, u} = s;
+  const d = dialog("Assign Cable Target Force Loads", `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Load Pattern</legend>${sapLdGrid([["Load Pattern", sapLdPat(defs, "ctP")]])}</fieldset>
+    <fieldset><legend>Target Force</legend><div style="display:grid;grid-template-columns:130px 100px 40px 100px;gap:4px 8px;align-items:center"><span></span><span style="text-align:center">Target Force</span><span></span><span style="text-align:center">Relative Distance</span>
+      <span>Axial Force, P</span><input id="ctV" value="0"><span class="u">${u.f}</span><input id="ctD" value="0.5"></div></fieldset>
+    ${sapLdOpts("ctO", true)}<button id="ctR" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => {
+      const at = +q(d, "#ctD").value; if (!(at >= 0 && at <= 1)) { formError(d, "The relative distance is from 0 to 1."); return false; }
+      return sapLdSet(d, "Cable Loads - Target Force", names, q(d, "#ctP").value, q(d, "[name=ctO]:checked").value, [{IncludeP: "Yes", P: sapLdNum(d, "#ctV"), RelLocP: String(at)}]);
+    }), {width: 460});
+  q(d, "#ctR").onclick = () => { q(d, "#ctV").value = "0"; q(d, "#ctD").value = "0.5"; q(d, "[name=ctO][value=replace]").checked = true; };
+  return d;
+}
+// Tendon Force/Stress ("Assign Tendon Load"): Tendon Load (Load Pattern, Jack from this Location, Tendon Load Type
+// Force or Stress, the force or stress), Friction and Anchorage Losses, Other Loss Parameters, Replace or Delete,
+// Show Prestress Losses on Tendon Object..., Reset.
+async function hmSapTendonForce() {
+  const s = await sapLdStart("tendon"); if (!s) return; const {names, defs, u} = s, st = `${u.f}/${u.l}²`;
+  const si = u.f === "kN" && u.l === "m", def = {stress: si ? 1500000 : 0, curv: 0.15, wob: si ? 0.003 : 0, slip: si ? 0.006 : 0, es: 0, cr: si ? 35000 : 0, sh: si ? 48000 : 0, re: si ? 35000 : 0};
+  const jack = [["I-End", "I-End (Start) of Tendon"], ["J-End", "J-End (End) of Tendon"], ["Both Ends", "Both Ends Simultaneously"]];
+  const row = (l, id, v, unit) => `<span>${l}</span><input id="${id}" value="${v}" style="width:95px"><span class="u">${esc(unit)}</span>`;
+  const g = rows => `<div style="display:grid;grid-template-columns:270px 100px 50px;gap:6px 8px;align-items:center">${rows}</div>`;
+  const d = dialog("Assign Tendon Load", `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Tendon Load</legend><div style="display:grid;grid-template-columns:170px 205px 50px;gap:6px 8px;align-items:center">
+      <span>Load Pattern</span>${sapLdPat(defs, "tfP").replace('style="width:225px"', 'style="width:200px"')}<span></span>
+      <span>Jack from this Location</span><select id="tfJ" style="width:200px">${opts(jack, "I-End")}</select><span></span>
+      <span>Tendon Load Type</span><select id="tfT" style="width:200px">${opts(["Force", "Stress"], "Force")}</select><span></span>
+      <span id="tfVL">Tendon Force</span><input id="tfV" value="0" style="width:95px;justify-self:end"><span class="u" id="tfVU">${u.f}</span></div></fieldset>
+    <fieldset><legend>Friction and Anchorage Losses</legend>${g(row("Curvature Coefficient", "tfK", def.curv, "") + row("Wobble Coefficient", "tfW", def.wob, `1/${u.l}`) + row("Anchorage Set Slip", "tfA", def.slip, u.l))}</fieldset>
+    <fieldset><legend>Other Loss Parameters</legend><p style="margin:2px 0 8px;font-size:12px">Note:  When tendons are modeled as elements, the Other Loss Parameters (elastic, creep, shrinkage and relaxation losses) apply in addition to the losses computed by analysis.</p>
+      ${g(row("Elastic Shortening Stress", "tfE", def.es, st) + row("Creep Stress", "tfC", def.cr, st) + row("Shrinkage Stress", "tfS", def.sh, st) + row("Steel Relaxation Stress", "tfR2", def.re, st))}</fieldset>
+    ${sapLdOpts("tfO", true)}<button id="tfShow" class="reset" style="width:280px">Show Prestress Losses on Tendon Object...</button><button id="tfR" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => { const t = q(d, "#tfT").value;
+      return sapLdSet(d, "Tendon Loads - Tension Force Or Stress", names, q(d, "#tfP").value, q(d, "[name=tfO]:checked").value, [{LoadType: t, [t === "Stress" ? "Stress" : "Force"]: sapLdNum(d, "#tfV"), JackFrom: q(d, "#tfJ").value,
+        Curvature: sapLdNum(d, "#tfK"), Wobble: sapLdNum(d, "#tfW"), LossAnchor: sapLdNum(d, "#tfA"), LossEShort: sapLdNum(d, "#tfE"), LossCreep: sapLdNum(d, "#tfC"), LossShrink: sapLdNum(d, "#tfS"), LossSRelax: sapLdNum(d, "#tfR2")}]); }), {width: 500});
+  const syncT = () => { const str = q(d, "#tfT").value === "Stress"; q(d, "#tfVL").textContent = str ? "Tendon Stress" : "Tendon Force"; q(d, "#tfVU").textContent = str ? st : u.f; q(d, "#tfV").value = str ? def.stress : 0; };
+  q(d, "#tfT").onchange = syncT;
+  q(d, "#tfShow").onclick = () => sapXSelected("tendon").length ? hmSay("SAP2000 shows the prestress losses of a tendon after the analysis has run (Display > Show Tables).") : hmSay("This command requires at least one tendon object to exist in the model.  The command will be aborted.", true);
+  q(d, "#tfR").onclick = () => { q(d, "#tfJ").value = "I-End"; q(d, "#tfT").value = "Force"; syncT(); [["tfK", def.curv], ["tfW", def.wob], ["tfA", def.slip], ["tfE", def.es], ["tfC", def.cr], ["tfS", def.sh], ["tfR2", def.re]].forEach(([id, v]) => q(d, "#" + id).value = v); q(d, "[name=tfO][value=replace]").checked = true; };
+  return d;
+}
+Object.assign(hmSapAssignForms, {
+  clGravity: () => sapGravityForm("cable"), clDistributed: () => hmSapCableDistributed(), clTemperature: () => sapTempForm("cable"), clStrain: () => sapStrainForm("cable"),
+  clDeformation: () => sapDeformForm("cable"), clTarget: () => hmSapCableTargetForce(),
+  tlGravity: () => sapGravityForm("tendon"), tlForce: () => hmSapTendonForce(), tlTemperature: () => sapTempForm("tendon"), tlStrain: () => sapStrainForm("tendon"), tlDeformation: () => sapDeformForm("tendon"),
+  slGravity: () => sapGravityForm("solid"), slSurface: () => sapSurfacePressure(true), slPore: () => sapPorePressure(true), slTemperature: () => sapTempForm("solid"), slStrain: () => sapStrainForm("solid"),
+  llGravity: () => sapGravityForm("link"),
+});
 
 // Assign > Joint > Restraints (SAP2000 26.3: Restraints in Joint Local Directions, Fast Restraints, OK/Close/Apply).
 function hmSapRestraints() {
@@ -7542,9 +8103,91 @@ function hmSapJointPatterns(rows) {
   q(d, "#jpDel").onclick = () => { if (L.value === "Default") return; put(L.value, []).then(j => j.ok ? again() : formError(d, j.error)); };
   return d;
 }
+// ETABS 23.2's Generalized Displacements and Generalized Displacement Definition (pictured GenDispl 1, 2): the name, Type
+// (Translational / Rotational), and the Scale Factors grid typed in place (Joint (Unique Name), U1-U3, R1-R3) with Quick Add
+// Selected Joints, Add and Delete. Kept as "Generalized Displacement Definitions" rows.
+function hmEtabsGenDispl(all) {
+  const T = "Generalized Displacement Definitions", dofs = ["U1", "U2", "U3", "R1", "R2", "R3"], u = hmU();
+  const names = [...new Set(all.map(r => r.Name))];
+  const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmDefineTable(T); };
+  const one = n => {
+    const mine = all.filter(r => r.Name === n), rot = mine.length && /^rot/i.test(mine[0].Type || ""), pre = rot ? "Rot" : "Trans";
+    let rows = mine.map(r => [r.PointName || "", ...dofs.map(k => String(+(r[pre + k + "SF"] || 0)))]), at = -1;
+    let k = 1; while (names.includes("GDisp" + k)) k++;
+    const d = dialog("Generalized Displacement Definition", `<div style="display:grid;grid-template-columns:1fr 250px;gap:10px"><fieldset style="margin:0"><div style="display:grid;grid-template-columns:1fr 190px;align-items:center;padding:10px 8px"><span>Generalized Displacement Name</span><input id="gN" value="${esc(n || "GDisp" + k)}"></div></fieldset>
+        <fieldset style="margin:0"><legend>Type</legend><label style="margin-right:30px"><input type="radio" name="gT" value="Translational" ${rot ? "" : "checked"}> Translational</label><label><input type="radio" name="gT" value="Rotational" ${rot ? "checked" : ""}> Rotational</label></fieldset></div>
+      <fieldset style="margin-top:8px"><legend>Scale Factors</legend><div style="height:220px;overflow:auto;border:2px solid #333;background:#a0a0a0"><table class="grid ly" id="gG" style="width:100%"><thead><tr id="gH"></tr></thead><tbody></tbody></table></div>
+        <div style="display:flex;gap:10px;margin-top:10px"><button id="gQ" style="width:200px;margin-left:30px">Quick Add Selected Joints</button><span style="flex:1"></span><button id="gAdd" style="width:64px">Add</button><button id="gDel" style="width:64px;margin-right:30px">Delete</button></div></fieldset>`,
+      [["OK", async d => {
+        read();
+        const name = q(d, "#gN").value.trim(); if (!name) { formError(d, "Give it a name."); return false; }
+        if (rows.some(r => !r[0])) { formError(d, "Each row needs its joint."); return false; }
+        const p = q(d, "[name=gT]:checked").value === "Rotational" ? "Rot" : "Trans", other = p === "Rot" ? "Trans" : "Rot";
+        const out = rows.map(r => Object.assign({Type: p === "Rot" ? "Rotational" : "Translational", PointName: r[0]}, ...dofs.map((x, i) => ({[p + x + "SF"]: String(+r[i + 1] || 0), [other + x + "SF"]: "0"}))));
+        if (n && n !== name) { const j0 = await hmRun("define_table_rows", {table: T, name: n, rows: []}, true); if (!j0.ok) { formError(d, j0.error); return false; } }
+        const j = await hmRun("define_table_rows", {table: T, name, rows: out}, true); if (!j.ok) { formError(d, j.error); return false; }
+        again(); return true;
+      }, true], ["Cancel"]], {width: 780});
+    const body = q(d, "#gG tbody");
+    const read = () => { rows = [...body.querySelectorAll("tr")].map(tr => [...tr.querySelectorAll("input")].map(i => i.value.trim())); };
+    const paint = () => {
+      const r = q(d, "[name=gT]:checked").value === "Rotational";
+      q(d, "#gH").innerHTML = `<th>Joint<br>(Unique Name)</th>` + dofs.map(x => `<th>${x}<br>${x[0] === "R" ? (r ? "" : `${u.l}/rad`) : (r ? `rad/${u.l}` : "")}</th>`).join("");
+      body.innerHTML = rows.map((row, i) => `<tr style="background:#fff;${i === at ? "outline:2px solid #3399ff" : ""}">${row.map((x, j) => `<td><input data-i="${i}" ${j ? 'type="number" step="any" style="text-align:center"' : ""} value="${esc(x)}"></td>`).join("")}</tr>`).join("");
+      body.querySelectorAll("input").forEach(x => { x.onfocus = () => { at = +x.dataset.i; body.querySelectorAll("tr").forEach((t, j) => t.style.outline = j === at ? "2px solid #3399ff" : ""); q(d, "#gDel").disabled = false; }; x.onchange = read; });
+      q(d, "#gDel").disabled = at < 0; q(d, "#gQ").disabled = !selJ.size;
+    };
+    q(d, "#gAdd").onclick = () => { read(); rows.push(["", "0", "0", "0", "0", "0", "0"]); at = rows.length - 1; paint(); };
+    q(d, "#gDel").onclick = () => { read(); if (at < 0) return; rows.splice(at, 1); at = -1; paint(); };
+    q(d, "#gQ").onclick = () => { read(); for (const j of selJ) if (!rows.some(r => r[0] === j)) rows.push([j, "0", "0", "0", "0", "0", "0"]); paint(); };
+    d.querySelectorAll("[name=gT]").forEach(r => r.onchange = () => { read(); paint(); });
+    paint();
+    return d;
+  };
+  const d = listForm("Generalized Displacements", "Generalized Displs", names, [["Add New Gen Displ...", () => one(null)], ["Modify/Show Gen Displ...", n => n && one(n)], ["Delete Gen Displ", n => n && hmRun("define_table_rows", {table: T, name: n, rows: []}).then(j => j.ok && again())]], n => one(n));
+  const b = d.querySelectorAll("[data-a]"); b[1].disabled = b[2].disabled = !names.length;
+  return d;
+}
+// ETABS 23.2's Shell Uniform Load Sets and Shell Uniform Load Set Data (pictured ShellLoadSets 1-3): Uniform Load Set Name,
+// Load Set Loads (Load Pattern, Load Value in force per area, in the gravity direction) with Add and Delete.
+async function hmEtabsLoadSets(all) {
+  const T = "Shell Uniform Load Sets", u = hmU(), defs = await hmDefs(), pats = defs.load_patterns.map(p => p.name);
+  const names = [...new Set(all.map(r => r.Name))];
+  const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmDefineTable(T); };
+  const one = (n, copy) => {
+    let rows = all.filter(r => r.Name === n).map(r => [r.LoadPattern || pats[0], r.LoadValue || "0"]), at = rows.length ? 0 : -1;
+    let k = 1; while (names.includes("ULoadSet" + k)) k++;
+    const d = dialog("Shell Uniform Load Set Data", `<fieldset><div style="display:grid;grid-template-columns:150px 1fr;align-items:center;padding:6px"><span>Uniform Load Set Name</span><input id="lsN" value="${esc(n && !copy ? n : n ? n + " copy" : "ULoadSet" + k)}"></div></fieldset>
+      <fieldset><legend>Load Set Loads</legend><div style="display:grid;grid-template-columns:1fr 70px;gap:10px"><div style="height:150px;overflow:auto;border:1px solid #333;background:#fff"><table class="grid ly" id="lsG" style="width:100%"><thead><tr><th>Load Pattern</th><th>Load Value<br>(${esc(u.f)}/${esc(u.l)}²)</th></tr></thead><tbody></tbody></table></div>
+        <div style="display:flex;flex-direction:column;gap:6px;padding-top:20px"><button id="lsA">Add</button><button id="lsD">Delete</button></div></div>
+        <div style="margin-top:8px">Note:  Loads are in the gravity direction.</div></fieldset>`,
+      [["OK", async d => {
+        read(); const name = q(d, "#lsN").value.trim(); if (!name) { formError(d, "Give the load set a name."); return false; }
+        if (n && !copy && n !== name) { const j0 = await hmRun("define_table_rows", {table: T, name: n, rows: []}, true); if (!j0.ok) { formError(d, j0.error); return false; } }
+        const j = await hmRun("define_table_rows", {table: T, name, rows: rows.map(r => ({LoadPattern: r[0], LoadValue: String(+r[1] || 0)}))}, true); if (!j.ok) { formError(d, j.error); return false; }
+        again(); return true;
+      }, true], ["Cancel"]], {width: 380});
+    const body = q(d, "#lsG tbody");
+    const read = () => { rows = [...body.querySelectorAll("tr")].map(tr => [tr.querySelector("select").value, tr.querySelector("input").value]); };
+    const paint = () => {
+      body.innerHTML = rows.map((r, i) => `<tr><td style="${i === at ? "background:#0078d7" : ""}"><select data-i="${i}" style="text-align:center;${i === at ? "color:#fff" : ""}">${opts(pats, r[0])}</select></td><td><input data-i="${i}" type="number" step="any" style="text-align:center" value="${esc(r[1])}"></td></tr>`).join("");
+      body.querySelectorAll("[data-i]").forEach(x => { x.onfocus = () => { if (at !== +x.dataset.i) { read(); at = +x.dataset.i; paint(); } }; x.onchange = read; });
+      q(d, "#lsD").disabled = at < 0;
+    };
+    q(d, "#lsA").onclick = () => { read(); rows.push([pats.find(p => !rows.some(r => r[0] === p)) || pats[0], "0"]); at = rows.length - 1; paint(); };
+    q(d, "#lsD").onclick = () => { read(); if (at < 0) return; rows.splice(at, 1); at = Math.min(at, rows.length - 1); paint(); };
+    paint();
+    return d;
+  };
+  const d = listForm("Shell Uniform Load Sets", "Uniform Load Sets", names, [["Add New Load Set...", () => one(null)], ["Add Copy of Load Set...", n => n && one(n, true)], ["Modify/Show Load Set...", n => n && one(n)], ["Delete Load Set", n => n && hmRun("define_table_rows", {table: T, name: n, rows: []}).then(j => j.ok && again())]], n => one(n));
+  const b = d.querySelectorAll("[data-a]"); b[1].disabled = b[2].disabled = b[3].disabled = !names.length;
+  return d;
+}
 async function hmDefineTable(spec) {
   const tables = spec.split("|"), dd = (await hmRun("definition_data", {}, true)).result; if (!dd) return;
   if (program === "sap2000" && spec === "Generalized Displacement Definitions" && dd.tables[spec]) return hmSapGenDispl(dd.tables[spec].rows);
+  if (program === "etabs" && spec === "Generalized Displacement Definitions") return hmEtabsGenDispl((dd.tables[spec] || {rows: []}).rows);
+  if (program === "etabs" && spec === "Shell Uniform Load Sets") return hmEtabsLoadSets((dd.tables[spec] || {rows: []}).rows);
   if (program === "sap2000" && spec === "Joint Pattern Definitions" && dd.tables[spec]) return hmSapJointPatterns(dd.tables[spec].rows);
   if (program === "sap2000" && spec === "Cable Section Definitions" && dd.tables[spec]) return hmSapRodSections("cable", null, dd);
   if (program === "sap2000" && spec === "Solid Property Definitions" && dd.tables[spec]) return hmSapRodSections("solid", null, dd);
@@ -7607,9 +8250,21 @@ function hmSapRebarSizes(was) {
   paint();
   return d;
 }
+// Reinforcing Bar Sizes, as ETABS 23.2 has it (pictured Rebar 1, 2): the Current Bar Set grid (Bar ID, Bar Area, Bar
+// Diameter; type in the blank last row to add a bar), Click To: Clear All Bars, Sort Bars By ID, Add Common Bar Set...
+// (Select Common Rebar Set). OK sets the model's bars to the grid.
+const commonBarSets = {
+  "U.S. Customary": ["in", [["#2", .05, .25], ["#3", .11, .375], ["#4", .2, .5], ["#5", .31, .625], ["#6", .44, .75], ["#7", .6, .875], ["#8", .79, 1], ["#9", 1, 1.128], ["#10", 1.27, 1.27], ["#11", 1.56, 1.41], ["#14", 2.25, 1.693], ["#18", 4, 2.257]]],
+  "SI": ["mm", [6, 8, 10, 12, 14, 16, 18, 20, 22, 25, 28, 32, 36, 40, 50].map(x => [String(x), +(Math.PI * x * x / 4).toFixed(1), x])],
+  "Canadian": ["mm", [["10M", 100, 11.3], ["15M", 200, 16], ["20M", 300, 19.5], ["25M", 500, 25.2], ["30M", 700, 29.9], ["35M", 1000, 35.7], ["45M", 1500, 43.7], ["55M", 2500, 56.4]]],
+  "U.S. Soft Metric": ["mm", [["#10", 71, 9.5], ["#13", 129, 12.7], ["#16", 199, 15.9], ["#19", 284, 19.1], ["#22", 387, 22.2], ["#25", 510, 25.4], ["#29", 645, 28.7], ["#32", 819, 32.3], ["#36", 1006, 35.8], ["#43", 1452, 43], ["#57", 2581, 57.3]]],
+  "Australian": ["mm", [["N10", 80, 10], ["N12", 110, 12], ["N16", 200, 16], ["N20", 310, 20], ["N24", 450, 24], ["N28", 620, 28], ["N32", 800, 32], ["N36", 1020, 36], ["N40", 1260, 40]]],
+  "Korean": ["mm", [["D10", 71.33, 9.53], ["D13", 126.7, 12.7], ["D16", 198.6, 15.9], ["D19", 286.5, 19.1], ["D22", 387.1, 22.2], ["D25", 506.7, 25.4], ["D29", 642.4, 28.6], ["D32", 794.2, 31.8], ["D35", 956.6, 34.9], ["D38", 1140, 38.1], ["D41", 1340, 41.3], ["D51", 2027, 50.8]]],
+};
 async function hmRebarSizes() {
   const dd = (await hmRun("definition_data", {}, true)).result; if (!dd) return;
   if (program === "sap2000") return hmSapRebarSizes(dd.rebar_sizes || []);
+  if (program === "etabs") return hmEtabsRebarSizes(dd.rebar_sizes || []);
   const u = hmU();
   const d = dialog("Reinforcing Bar Sizes", `<table class="list hmgrid"><tr><th>Bar ID</th><th>Area${u.l ? " (" + esc(u.l) + "²)" : ""}</th><th>Diameter${u.l ? " (" + esc(u.l) + ")" : ""}</th><th></th></tr>
     <tr class="edit"><td><input id="rbN"></td><td><input id="rbA" type="number" step="any"></td><td><input id="rbD" type="number" step="any"></td><td><button id="rbAdd">Add / Modify</button></td></tr>
@@ -7619,6 +8274,37 @@ async function hmRebarSizes() {
   d.querySelectorAll("[data-b]").forEach(tr => tr.onclick = () => { const b = dd.rebar_sizes.find(x => x.name === tr.dataset.b); q(d, "#rbN").value = b.name; q(d, "#rbA").value = b.area; q(d, "#rbD").value = b.diameter; });
   d.querySelectorAll("[data-del]").forEach(b => b.onclick = e => { e.stopPropagation(); hmRun("define_rebar_size", {name: b.dataset.del, delete: true}).then(j => j.ok ? again() : formError(d, j.error)); });
   q(d, "#rbAdd").onclick = () => hmRun("define_rebar_size", {name: q(d, "#rbN").value.trim(), area: fnum(d, "#rbA"), diameter: fnum(d, "#rbD")}).then(j => j.ok ? again() : formError(d, j.error));
+}
+function hmEtabsRebarSizes(now) {
+  const u = hmU(), n = x => +(+x).toPrecision(6);
+  let bars = now.map(b => [b.name, String(n(b.area)), String(n(b.diameter))]);
+  const d = dialog("Reinforcing Bar Sizes", `<div style="display:grid;grid-template-columns:1fr 170px;gap:12px"><fieldset style="margin:0"><legend>Current Bar Set</legend>
+      <div style="height:230px;overflow:auto;border:1px solid #888;background:#fff"><table class="grid ly" id="rbG"><thead><tr><th style="width:24px"></th><th>Bar ID</th><th>Bar Area&nbsp; (${esc(u.l)}2)</th><th>Bar Diameter&nbsp; (${esc(u.l)})</th></tr></thead><tbody></tbody></table></div></fieldset>
+    <div id="rbR"><fieldset style="margin:0"><legend>Click To:</legend><div style="display:flex;flex-direction:column;gap:6px"><button id="rbClr">Clear All Bars</button><button id="rbSort">Sort Bars By ID</button><button id="rbCom">Add Common Bar Set...</button></div></fieldset></div></div>`,
+    [["OK", d => save(d), true], ["Cancel"]], {width: 640});
+  dfInto(d, "#rbR");
+  const body = q(d, "#rbG tbody");
+  const read = () => { bars = [...body.querySelectorAll("tr")].map(tr => [...tr.querySelectorAll("input")].map(i => i.value.trim())).filter(r => r.some(x => x !== "")); };
+  const paint = () => {
+    body.innerHTML = [...bars, ["", "", ""]].map((b, i) => `<tr><td style="background:#eee;text-align:center">${i < bars.length ? "" : "*"}</td>${b.map((x, k) => `<td><input ${k ? 'type="number" step="any" style="text-align:center"' : 'style="text-align:center"'} value="${esc(x)}"></td>`).join("")}</tr>`).join("");
+    body.querySelectorAll("input").forEach(i => { i.onchange = () => { read(); paint(); }; i.onfocus = () => body.querySelectorAll("tr").forEach(tr => tr.firstChild.textContent = tr.contains(i) ? "\u25B6" : tr === body.lastChild ? "*" : ""); });
+  };
+  q(d, "#rbClr").onclick = () => { bars = []; paint(); };
+  q(d, "#rbSort").onclick = () => { read(); bars.sort((a, b) => a[0].localeCompare(b[0], undefined, {numeric: true})); paint(); };
+  q(d, "#rbCom").onclick = () => dialog("Select Common Rebar Set", `<fieldset><legend>Select</legend><select id="crS" size="14" style="width:100%;height:240px">${Object.keys(commonBarSets).map((k, i) => `<option ${i ? "" : "selected"}>${esc(k)}</option>`).join("")}</select></fieldset>`,
+    [["OK", x => { read(); const [from, set] = commonBarSets[q(x, "#crS").value]; const f = (uLen[u.l] || 1) / (from === "in" ? 39.37008 : 1000);
+      for (const [id, a, di] of set) if (!bars.some(b => b[0] === id)) bars.push([id, String(n(a * f * f)), String(n(di * f))]); paint(); }], ["Cancel"]], {width: 240});
+  async function save(d) {
+    read();
+    const ids = new Set();
+    for (const [id, a, di] of bars) { if (!id || !(+a > 0) || !(+di > 0)) { formError(d, "Each bar needs a Bar ID, an area above 0 and a diameter above 0."); return false; } if (ids.has(id)) { formError(d, "There is a bar " + id + " twice."); return false; } ids.add(id); }
+    for (const b of now) if (!ids.has(b.name)) { const j = await hmRun("define_rebar_size", {name: b.name, delete: true}, true); if (!j.ok) { formError(d, j.error); return false; } }
+    for (const [id, a, di] of bars) { const was = now.find(b => b.name === id); if (was && Math.abs(was.area - a) < 1e-9 * Math.max(1, +a) && Math.abs(was.diameter - di) < 1e-9 * Math.max(1, +di)) continue;
+      const j = await hmRun("define_rebar_size", {name: id, area: +a, diameter: +di}, true); if (!j.ok) { formError(d, j.error); return false; } }
+    hmSay("Reinforcing bar sizes set."); return true;
+  }
+  paint();
+  return d;
 }
 const rebarFields = {
   Column: [["LONGBARMATERIAL", "Longitudinal Bars Material"], ["CONFINEBARMATERIAL", "Confinement Bars Material"], ["PATTERN", "Pattern (R-bars along 3-bars along 2, or C-bars)"], ["TRANSREINF", "Confinement Bars"], ["DESIGNCHECK", "Check/Design"],
@@ -9052,7 +9738,8 @@ document.head.insertAdjacentHTML("beforeend", `<style>.sapx-l{display:flex;justi
 const sapXNum = v => { const x = parseFloat(v); return isFinite(x) ? x : null; };
 const sapXFmt = v => v === undefined || v === null || v === "" ? "" : String(v);
 const sapXErr = j => j && j.ok ? null : (j && j.error) || "The change was not made.";
-async function sapXRun(tool, args) { return sapXErr(await hmRun(tool, args, true)); }
+// With none of the objects selected, OK applies to nothing, as in SAP2000 26.3.
+async function sapXRun(tool, args) { if (args && Array.isArray(args.objects) && !args.objects.length) return null; return sapXErr(await hmRun(tool, args, true)); }
 function sapXForm(title, body, apply, o) {
   o = o || {};
   let d;
@@ -9077,7 +9764,8 @@ function sapXSelected(kind) { return typeof sapOtherSelected === "function" ? sa
 // The selected objects of a kind, with SAP2000's words when none is.
 function sapXPick(kind) {
   const names = kind === "area" ? hmSelected("a") : kind === "frame" ? hmSelected("f") : sapXSelected(kind);
-  if (!names.length) hmSay({area: "Select the area objects first.", cable: "Select the cable objects first.", tendon: "Select the tendon objects first.", solid: "Select the solid objects first.", link: "Select the link/support objects first."}[kind] || "Select the objects first.", true);
+  // SAP2000 26.3 keeps the cable, tendon, solid and link items enabled with none selected: the form opens and OK applies to nothing.
+  if (!names.length && !sapXOther(kind)) hmSay({area: "Select the area objects first.", cable: "Select the cable objects first.", tendon: "Select the tendon objects first.", solid: "Select the solid objects first.", link: "Select the link/support objects first."}[kind] || "Select the objects first.", true);
   return names;
 }
 // The first selected object's rows (and the property lists), and every selected object's rows by name.
@@ -9265,7 +9953,7 @@ async function hmSapAreaReverse() {
 const sapSpringResists = ["Tension and Compression", "Compression Only", "Tension Only"];
 async function hmSapAreaSprings() { return sapXFaceSprings("area"); }
 async function sapXFaceSprings(kind) {
-  const names = sapXPick(kind); if (!names.length) return;
+  const names = sapXPick(kind); if (!names.length && !sapXOther(kind)) return;
   const area = kind === "area", T = area ? "Area Spring Assignments" : "Solid Spring Assignments", u = sapXUnits();
   const pd0 = await sapXNow(names, kind), now = sapXRows(pd0.obj, T)[0] || {}, links = ((pd0.pd || {}).links || []).map(l => l.name);
   const csys = ["GLOBAL", ...(((hm.defs || {}).coordinate_systems) || []).filter(c => c !== "GLOBAL")];
@@ -9341,7 +10029,7 @@ async function hmSapAreaMass() {
 // Joint Pattern; SAP2000's "<Kind> Material Temperatures" rows).
 async function hmSapAreaTemperature() { return sapXTemperature("area"); }
 async function sapXTemperature(kind) {
-  const names = sapXPick(kind); if (!names.length) return;
+  const names = sapXPick(kind); if (!names.length && !sapXOther(kind)) return;
   const K = kind[0].toUpperCase() + kind.slice(1), T = K + " Material Temperatures", u = sapXUnits(), pats = ["None", ...(await sapXJointPatterns())];
   const {obj} = await sapXNow(names, kind), now = sapXRow(obj, T);
   const d = sapXForm(`Assign ${K} Material Temperature`, `<fieldset style="margin:0"><legend>Temperature Data</legend>${sapXLine("Temperature", sapXIn("sxT", now.Temp ?? 0), u.t)}${sapXLine("Joint Pattern", sapXPlus("sxTP", pats, now.JtPattern || "None"))}</fieldset>`,
@@ -9477,7 +10165,7 @@ Object.assign(hmSapAssignForms, {aSections: () => hmSapAreaSectionsAssign(), aMo
 
 // A SAP2000 "Assign <X> Properties" list form: the names (None first where SAP2000 lists it), Define <X>..., OK/Close/Apply.
 async function sapXListAssign(kind, title, list, now, defLabel, defOpen, rowOf, none) {
-  const names = sapXPick(kind); if (!names.length) return;
+  const names = sapXPick(kind); if (!names.length && !sapXOther(kind)) return;
   const all = none ? ["None", ...list] : list;
   const d = sapXForm(title, `<select id="sxL" size="14" style="width:100%;height:auto;min-width:240px">${opts(all, now || all[0] || "")}</select>
     <div style="text-align:center;margin-top:8px"><button id="sxDef" type="button">${esc(defLabel)}</button></div>`,
@@ -9494,14 +10182,14 @@ async function hmSapCableProperties() {
   return sapXListAssign("cable", "Assign Cable Properties", list, now, "Define Cable Properties...", () => hmSapRodSections("cable"), v => ({"Cable Section Assignments": [{CableSect: v}]}));
 }
 async function hmSapCableModifiers() {
-  const names = sapXPick("cable"); if (!names.length) return;
+  const names = sapXPick("cable");
   const T = "Cable Property Modifiers", {obj} = await sapXNow(names, "cable"), r = sapXRow(obj, T), f = [["AMod", "Cross-section (Axial) Area"], ["MassMod", "Mass"], ["WeightMod", "Weight"]];
   return sapXForm("Assign Cable Property Modifiers", `<fieldset style="margin:0"><legend>Property Modifiers for Analysis</legend>${f.map(([k, l]) => sapXLine(l, sapXIn("sxc" + k, r[k] ?? 1))).join("")}</fieldset>`,
     d => { const row = {}; for (const [k, l] of f) { const v = sapXNum(q(d, "#sxc" + k).value); if (v === null || v < 0) return l + " needs a number of 0 or more."; row[k] = String(v); } return sapXRun("assign_sap_object_data", {kind: "cable", objects: names, tables: {[T]: [row]}}); },
     {width: 360, reset: d => f.forEach(([k]) => q(d, "#sxc" + k).value = 1)});
 }
 async function hmSapCableMaterial() {
-  const names = sapXPick("cable"); if (!names.length) return;
+  const names = sapXPick("cable");
   const defs = await hmDefs(), T = "Cable Section Assignments", {obj} = await sapXNow(names, "cable"), m0 = sapXRow(obj, T).MatProp, now = m0 && m0 !== "Default" ? m0 : "";
   const d = sapXForm("Assign Cable Material Overwrites", `<fieldset style="margin:0"><legend>Options</legend>${sapXRadio("sxMo", "section", "Use Material Specified in Section Property", !now)}
     <div class="sapx-l"><span>${sapXRadio("sxMo", "over", "Overwrite Material", !!now)}</span><span class="sapx-b">${sapXPlus("sxMat", defs.materials.map(m => m.name), now)}</span></div></fieldset>`,
@@ -9511,12 +10199,12 @@ async function hmSapCableMaterial() {
   return d;
 }
 async function hmSapCableReverse() {
-  const names = sapXPick("cable"); if (!names.length) return;
+  const names = sapXPick("cable");
   return sapXForm("Assign Cable Reverse Connectivity", `<fieldset style="margin:0"><legend>Options</legend>${sapXRadio("sxRv", "global", "Keep Assigns in Same Global Orientation", true)}${sapXRadio("sxRv", "local", "Keep Assigns in Same Local Orientation", false)}</fieldset>`,
     d => sapXRun("reverse_objects", {kind: "cable", objects: names, keep: sapXRadioVal(d, "sxRv")}), {width: 340});
 }
 async function hmSapCableStations() {
-  const names = sapXPick("cable"); if (!names.length) return;
+  const names = sapXPick("cable");
   const T = "Cable Output Station Assignments", u = sapXUnits(), {obj} = await sapXNow(names, "cable"), r = sapXRow(obj, T), max = r.StationType === "MaxStaSpcg";
   return sapXForm("Assign Cable Output Stations", `<fieldset style="margin:0"><legend>Output Station Specification Options</legend>
       <div class="sapx-l"><span>${sapXRadio("sxOs", "MaxStaSpcg", "Maximum Station Spacing", max)}</span><span class="sapx-b">${sapXIn("sxOsS", r.MaxStaSpcg ?? "")}<span class="sapx-u">${u.l}</span></span></div>
@@ -9530,7 +10218,7 @@ async function hmSapCableStations() {
       sync: d => { const t = sapXRadioVal(d, "sxOs"); q(d, "#sxOsS").disabled = t !== "MaxStaSpcg"; q(d, "#sxOsN").disabled = t !== "MinNumSta"; }});
 }
 async function hmSapCableMass() {
-  const names = sapXPick("cable"); if (!names.length) return;
+  const names = sapXPick("cable");
   const u = sapXUnits(), T = "Cable Added Mass Assignments";
   return sapXForm("Assign Cable Mass", `<fieldset style="margin:0 0 6px"><legend>Mass</legend>${sapXLine("Mass per Unit Length", sapXIn("sxMass", 0), u.f + "-s²/" + u.l + "²")}</fieldset>
     <fieldset style="margin:0"><legend>Options</legend>${sapXRadio("sxMo", "add", "Add to Existing Masses", false)}${sapXRadio("sxMo", "replace", "Replace Existing Masses", true)}${sapXRadio("sxMo", "delete", "Delete Existing Masses", false)}</fieldset>`,
@@ -9552,7 +10240,7 @@ async function hmSapTendonProperties() {
   return sapXListAssign("tendon", "Assign Tendon Properties", list, now, "Define Tendon Properties...", () => hmSapRodSections("tendon"), v => ({"Tendon Section Assignments": v === "None" ? [] : [{TendonSect: v}]}), true);
 }
 async function hmSapTendonAxes() {
-  const names = sapXPick("tendon"); if (!names.length) return;
+  const names = sapXPick("tendon");
   const T = "Tendon Local Axes Assignments 1 - Typical", {obj} = await sapXNow(names, "tendon"), r = sapXRow(obj, T);
   return sapXForm("Assign Tendon Local Axes", `<fieldset style="margin:0 0 6px"><legend>Options</legend>${sapXRadio("sxAx", "std", "Specify Standard Local Axes", true)}${sapXRadio("sxAx", "reset", "Reset Local Axes to Default", false)}</fieldset>
     <fieldset style="margin:0"><legend>Angle from Default Orientation</legend>${sapXLine("Angle", sapXIn("sxAng", r.Angle ?? 0), "deg")}</fieldset>`,
@@ -9561,7 +10249,7 @@ async function hmSapTendonAxes() {
     {width: 400, sync: d => sapXEnable(d, ["sxAng"], sapXRadioVal(d, "sxAx") !== "reset")});
 }
 async function hmSapTendonLimits() {
-  const names = sapXPick("tendon"); if (!names.length) return;
+  const names = sapXPick("tendon");
   const T = "Tendon Tension And Compression Limits", u = sapXUnits(), {obj} = await sapXNow(names, "tendon"), r = sapXRow(obj, T);
   return sapXForm("Assign Tendon Tension/Compression Limits", `<fieldset style="margin:0"><legend>Limits Settings</legend>
       <div class="sapx-l"><label><input type="checkbox" id="sxTl" ${r.TensLimit === "Yes" ? "checked" : ""}> Include Tension Limit</label><span class="sapx-b">${sapXIn("sxTv", r.TensLimit === "Yes" ? r.Tension : "")}<span class="sapx-u">${u.f}</span></span></div>
@@ -9582,7 +10270,7 @@ async function hmSapSolidProperties() {
 }
 // Solid and Link Local Axes: Standard (rotations, or the link's angle), Advanced (Solid/Link Advanced Axes) or Reset to Default (Global).
 async function sapXAxes(kind) {
-  const names = sapXPick(kind); if (!names.length) return;
+  const names = sapXPick(kind); if (!names.length && !sapXOther(kind)) return;
   const K = kind === "solid" ? "Solid" : "Link", T1 = K + " Local Axes Assignments 1 - Typical", T2 = K + " Local Axes Assignments 2 - Advanced";
   const csys = await sapCsys(), {obj} = await sapXNow(names, kind), r1 = sapXRow(obj, T1), r2 = sapXRow(obj, T2);
   const dflt = kind === "solid" ? {...sapAdvDefault, LocalPlane: "31", AxCoordDir: "+Z", CoordDir1: "+X", CoordDir2: "+Y"} : {...sapAdvDefault, LocalPlane: "12", AxCoordDir: "+Z", CoordDir1: "+Z", CoordDir2: "+X"};
@@ -9606,7 +10294,7 @@ async function hmSapSolidSprings() { return sapXFaceSprings("solid"); }
 async function hmSapSolidTemperature() { return sapXTemperature("solid"); }
 // Assign > Solid > Switch Faces...: "Modify Solid Faces".
 async function hmSapSolidSwitch() {
-  const names = sapXPick("solid"); if (!names.length) return;
+  const names = sapXPick("solid");
   const faces = [1, 2, 3, 4, 5, 6].map(i => [String(i), "Face " + i]);
   return sapXForm("Modify Solid Faces", `<fieldset style="margin:0 0 6px"><legend>Select Faces to Switch</legend>${sapXLine("Switch Face", `<select id="sxF1" style="width:110px">${opts(faces, "1")}</select>`)}${sapXLine("With Face", `<select id="sxF2" style="width:110px">${opts(faces, "5")}</select>`)}</fieldset>
     <fieldset style="margin:0"><legend>Options</legend>${sapXRadio("sxMv", "move", "Move Assignments with Face", true)}${sapXRadio("sxMv", "stay", "Do Not Move Assignments with Face", false)}</fieldset>`,
@@ -9615,7 +10303,7 @@ async function hmSapSolidSwitch() {
 }
 // Assign > Solid > Automatic Solid Mesh...: "Assign Automatic Solid Mesh" (SAP2000's "Solid Auto Mesh Assignments").
 async function hmSapSolidMesh() {
-  const names = sapXPick("solid"); if (!names.length) return;
+  const names = sapXPick("solid");
   const T = "Solid Auto Mesh Assignments", u = sapXUnits(), {obj} = await sapXNow(names, "solid"), r = sapXRow(obj, T);
   const t0 = r.AutoMesh === "Yes" ? (r.MeshType === "Maximum Size" ? "Maximum Size" : "Number") : "None";
   const e = ["2", "3", "5"];
@@ -9640,7 +10328,7 @@ async function hmSapSolidMesh() {
   return d;
 }
 async function hmSapSolidEdgeConstraints() {
-  const names = sapXPick("solid"); if (!names.length) return;
+  const names = sapXPick("solid");
   const T = "Solid Edge Constraint Assignments", {obj} = await sapXNow(names, "solid"), on = sapXRows(obj, T).some(r => r.Constrained === "Yes");
   return sapXForm("Assign Solid Edge Constraints", `<fieldset style="margin:0"><legend>Options</legend>${sapXRadio("sxEc", "no", "Do NOT Create Edge Constraints", !on)}${sapXRadio("sxEc", "yes", "Create Constraints Around Solid Object Edges", on)}</fieldset>`,
     d => sapXRun("assign_sap_object_data", {kind: "solid", objects: names, tables: {[T]: sapXRadioVal(d, "sxEc") === "yes" ? Array.from({length: 12}, (x, i) => ({Edge: String(i + 1), Constrained: "Yes"})) : []}}),
@@ -9657,7 +10345,7 @@ async function hmSapLinkFreq() {
   return sapXListAssign("link", "Assign Link Frequency Dependent Properties", [...new Set(list)], now && now !== "None" ? now : "None", "Define Link Frequency Dependent Properties...", () => hmSapFreqLinks(), v => ({"Link Property Assignments": [{LinkFDProp: v}]}), true);
 }
 async function hmSapLinkModifier() {
-  const names = sapXPick("link"); if (!names.length) return;
+  const names = sapXPick("link");
   const T = "Link Property Assignments", {obj} = await sapXNow(names, "link"), now = sapXRow(obj, T).PropMod ?? 1;
   return sapXForm("Assign Link Property Modifier", `<fieldset style="margin:0"><legend>Property Modifier for Analysis</legend>${sapXLine("Property Modifier", sapXIn("sxPm", now))}</fieldset>`,
     d => { const v = sapXNum(q(d, "#sxPm").value); if (v === null || v < 0) return "Property Modifier needs a number of 0 or more."; return sapXRun("assign_sap_object_data", {kind: "link", objects: names, tables: {[T]: [{PropMod: String(v)}]}}); },
@@ -9667,7 +10355,8 @@ async function hmSapLinkAxes() { return sapXAxes("link"); }
 // Assign > Link/Support > Reverse Connectivity: SAP2000 opens no form ("NLLink Reverse Connectivity" picking); the links
 // picked (selected) change ends at once.
 async function hmSapLinkReverse() {
-  const names = sapXPick("link"); if (!names.length) return;
+  const names = sapXPick("link");
+  if (!names.length) return hmSay("NLLink Reverse Connectivity: no link/support objects are selected, so none was reversed.");
   const err = await sapXRun("reverse_objects", {kind: "link", objects: names});
   hmSay(err || `NLLink Reverse Connectivity: ${names.length} link${names.length === 1 ? "" : "s"} reversed. Edit > Undo steps back.`, !!err);
 }
@@ -10777,14 +11466,14 @@ async function hmStructure(kind) {
     const one = d0 => dialog("Diaphragm Data", `<div class="g2"><span>Diaphragm</span><input id="zN" value="${esc(d0 ? d0.name : "D" + (sd.diaphragms.length + 1))}" ${d0 ? "disabled" : ""}></div>
       <fieldset><legend>Rigidity</legend><label style="display:block"><input type="radio" name="zR" value="rigid" ${d0 && d0.semi_rigid ? "" : "checked"}> Rigid</label><label style="display:block"><input type="radio" name="zR" value="semi" ${d0 && d0.semi_rigid ? "checked" : ""}> Semi Rigid</label></fieldset>`,
       [["OK", d => submit(d, "define_diaphragm", {name: q(d, "#zN").value.trim(), semi_rigid: q(d, "[name=zR]:checked").value === "semi"}, again)], ["Cancel"]], {width: 340});
-    return listForm("Define Diaphragm", "Diaphragms", sd.diaphragms.map(x => x.name), [["Add New Diaphragm...", () => one(null)], ["Modify/Show Diaphragm...", n => n && one(sd.diaphragms.find(x => x.name === n))], ["Delete Diaphragm", n => n && del("define_diaphragm", {name: n})]], n => one(sd.diaphragms.find(x => x.name === n)));
+    return listForm("Define Diaphragm", "Diaphragms", sd.diaphragms.map(x => x.name), [[program === "etabs" ? "Add New Diaphragm" : "Add New Diaphragm...", () => one(null)], [program === "etabs" ? "Modify/Show Diaphragm" : "Modify/Show Diaphragm...", n => n && one(sd.diaphragms.find(x => x.name === n))], ["Delete Diaphragm", n => n && del("define_diaphragm", {name: n})]], n => one(sd.diaphragms.find(x => x.name === n)));
   }
   if (kind === "pier" || kind === "spandrel") {
     const list = kind === "pier" ? sd.piers : sd.spandrels, T = kind === "pier" ? "Pier" : "Spandrel";
-    const d = dialog(`${T} Labels`, `<div style="display:flex;gap:10px"><fieldset style="flex:1;margin:0"><legend>${T}s</legend>
+    const d = dialog(`${T} Labels`, `<div style="display:flex;gap:10px"><fieldset style="flex:1;margin:0"><legend>${program === "etabs" ? "Wall " : ""}${T}s</legend>
         <input id="zN" style="width:100%;margin-bottom:6px" value="${esc((list[0] || {}).name || (kind === "pier" ? "P1" : "S1"))}">
         <select id="zL" size="12" style="width:100%;height:auto">${list.map(x => `<option value="${esc(x.name)}">${esc(x.name)}</option>`).join("")}</select>
-        ${kind === "spandrel" ? `<label style="display:block;margin-top:6px"><input type="checkbox" id="zM"> Multi-Story Spandrel</label>` : ""}</fieldset>
+        ${kind === "spandrel" ? `<label style="display:block;margin-top:6px"><input type="checkbox" id="zM"> ${program === "etabs" ? "Multistory" : "Multi-Story Spandrel"}</label>` : ""}</fieldset>
       <fieldset style="width:170px;margin:0"><legend>Click to:</legend><div style="display:flex;flex-direction:column;gap:6px"><button id="zAdd">Add New Name</button><button id="zRen">Change Name</button><button id="zDel">Delete Name</button></div></fieldset></div>`,
       [["OK"], ["Cancel"]], {width: 440});
     const L = q(d, "#zL"); if (list.length) L.selectedIndex = 0;
@@ -10823,6 +11512,35 @@ async function hmStructure(kind) {
       const st = () => { delB.disabled = !L.value || L.value === "ALL"; }; L.addEventListener("change", st); st();
       return d;
     }
+    // ETABS 23.2's Define Groups (pictured Groups 1, 2): a grid of Group Name and Color, typed in place, with Add and Delete;
+    // All is always there and cannot be deleted. OK adds, renames, recolours and deletes as the grid says.
+    if (program === "etabs") {
+      let rows = sd.groups.map(g => ({name: g.name, was: g.name, color: g.color})), sel = 0;
+      if (!rows.some(r => /^all$/i.test(r.name))) rows.unshift({name: "All", was: "All", color: "Yellow", fixed: true});
+      const d = dialog("Define Groups", `<fieldset style="margin:0"><legend>Groups</legend><div style="display:grid;grid-template-columns:180px 80px;gap:12px">
+          <div style="height:170px;overflow:auto;border:1px solid #888;background:#fff"><table class="grid ly" id="gG"><thead><tr><th style="text-align:left">Group Name</th><th style="width:40px">Color</th></tr></thead><tbody></tbody></table></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><button id="gA">Add</button><button id="gD">Delete</button></div></div></fieldset>`,
+        [["OK", async d => {
+          const names = rows.map(r => r.name.trim());
+          if (names.some(n => !n)) { formError(d, "Each group needs a name."); return false; }
+          if (new Set(names.map(n => n.toLowerCase())).size !== names.length) { formError(d, "Two groups have the same name."); return false; }
+          for (const g of sd.groups) if (!rows.some(r => r.was === g.name)) { const j = await hmRun("define_group", {name: g.name, delete: true}, true); if (!j.ok) { formError(d, j.error); return false; } }
+          for (const r of rows) { const g = sd.groups.find(x => x.name === r.was); if (g && g.name === r.name.trim() && g.color === r.color) continue; if (!g && r.fixed) continue;
+            const j = await hmRun("define_group", Object.assign({name: r.name.trim(), color: r.color}, g && g.name !== r.name.trim() ? {was: g.name} : {}), true); if (!j.ok) { formError(d, j.error); return false; } }
+          if (hm.defs) hm.defs = null; return true;
+        }, true], ["Cancel"]], {width: 330});
+      const body = q(d, "#gG tbody");
+      const paint = () => {
+        body.innerHTML = rows.map((r, i) => `<tr style="${i === sel ? "background:#0078d7;color:#fff" : ""}"><td><input data-i="${i}" value="${esc(r.name)}" ${r.fixed || /^all$/i.test(r.was || "") ? "readonly" : ""} style="${i === sel ? "background:#0078d7;color:#fff" : ""}"></td><td data-c="${i}" style="background:${matColorCss(r.color)};cursor:pointer"></td></tr>`).join("");
+        body.querySelectorAll("input").forEach(x => { x.onfocus = () => { if (sel !== +x.dataset.i) { sel = +x.dataset.i; paint(); body.querySelector(`input[data-i="${sel}"]`).focus(); } }; x.onchange = () => { rows[+x.dataset.i].name = x.value; }; });
+        body.querySelectorAll("[data-c]").forEach(c => c.onclick = () => { sel = +c.dataset.c; hmColor(rows[sel].color, k => { rows[sel].color = k; paint(); }); });
+        q(d, "#gD").disabled = !rows[sel] || rows[sel].fixed || /^all$/i.test(rows[sel].was || "");
+      };
+      q(d, "#gA").onclick = () => { let i = 1; while (rows.some(r => r.name.toLowerCase() === "group" + i)) i++; rows.push({name: "Group" + i, color: sd.colors[(rows.length + 1) % sd.colors.length] || "Red"}); sel = rows.length - 1; paint(); };
+      q(d, "#gD").onclick = () => { if (q(d, "#gD").disabled) return; rows.splice(sel, 1); sel = Math.max(0, sel - 1); paint(); };
+      paint();
+      return d;
+    }
     // ETABS's Group Definitions have Steel / Concrete / Composite design; SAP2000's Groups 1 - Definitions every use.
     const usesFor = sapX ? [["Selection", "Selection"], ["SectionCut", "Section Cut Definition"], ["Steel", "Steel Design"], ["Concrete", "Concrete Design"], ["Aluminum", "Aluminum Design"], ["ColdFormed", "Cold Formed Design"], ["Stage", "Staged Construction"], ["Bridge", "Bridge Response Output"], ["AutoSeismic", "Auto Seismic Output"], ["AutoWind", "Auto Wind Output"], ["MassWeight", "Mass and Weight"]]
       : [["Steel", "Steel Design"], ["Concrete", "Concrete Design"], ["Composite", "Composite Beam Design"]];
@@ -10836,6 +11554,7 @@ async function hmStructure(kind) {
   }
   const one = c => {
     if (sapX) return hmSapSectionCut(sd, c, again);
+    if (program === "etabs") return hmEtabsSectionCut(sd, c, again);
     const o = (c && c.options) || {}, user = /^user/i.test(o.ResultLoc || "");
     const d = dialog("Section Cut Data", `<div class="g2"><span>Section Cut Name</span><input id="zN" value="${esc(c ? c.name : "SCut" + (sd.section_cuts.length + 1))}" ${c ? "disabled" : ""}></div>
       <fieldset><legend>Define Section Cut By</legend><label style="display:inline-block;margin-right:14px"><input type="radio" name="zB" checked> Group</label><label style="display:inline-block"><input type="radio" name="zB" disabled> Quadrilaterals</label>
@@ -10850,6 +11569,30 @@ async function hmStructure(kind) {
     return d;
   };
   return listForm("Section Cuts", "Section Cuts", sd.section_cuts.map(x => x.name), [["Add Section Cut...", () => one(null)], ["Modify/Show Section Cut...", n => n && one(sd.section_cuts.find(x => x.name === n))], ["Delete Section Cut", n => n && del("define_section_cut", {name: n})]], n => one(sd.section_cuts.find(x => x.name === n)));
+}
+// ETABS 23.2's Section Cut Data (pictured Section Cuts 2, 3): SAP2000's form without its Edit menu, Coordinate System,
+// Units and Advanced Axes; the boxes that do not apply are greyed, not hidden, and the side reported is Top or Bottom.
+function hmEtabsSectionCut(sd, c, again) {
+  const d = hmSapSectionCut(sd, c, again);
+  const hide = el => { if (el) el.style.display = "none"; };
+  hide(d.querySelector(".sapMenu")); hide(q(d, "#zCs") && q(d, "#zCs").closest("fieldset").parentElement);
+  hide(q(d, "#zAdv") && q(d, "#zAdv").closest("div"));
+  q(d, "#zQuad").parentElement.id = "zRight"; dfInto(d, "#zRight");
+  if (!c) q(d, "#zN").value = (() => { let i = 1; while (sd.section_cuts.some(x => x.name === "SCut" + i)) i++; return "SCut" + i; })();
+  d.querySelectorAll("#zAxA span").forEach(s => { s.textContent = s.textContent.replace("about  Y", "about  Y'").replace("about  X", "about  X''").replace("about  Z", "about  Z"); });
+  const sq = d.querySelectorAll("[name=zSd]"), side = (c && c.options && c.options.ElemSide) || "Top";
+  sq.forEach((r, i) => { r.value = i ? "Bottom" : "Top"; r.checked = i ? /^bot/i.test(side) : !/^bot/i.test(side); r.parentElement.lastChild.textContent = i ? " Bottom" : " Top"; });
+  const sideFs = q(d, "#zSide"), quadFs = q(d, "#zQuad");
+  if (sideFs) sideFs.insertAdjacentHTML("beforeend", `<div id="zNA" class="kv" style="text-align:center;padding:10px 0">Not applicable for selected options.</div>`);
+  const grey = (fs, off) => { if (!fs) return; fs.style.display = ""; fs.style.color = off ? "#999" : ""; fs.querySelectorAll("input,button").forEach(x => x.disabled = off); };
+  const sync = () => {
+    const qd = (d.querySelector("[name=zB]:checked") || {}).value === "Quadrilateral", des = (d.querySelector("[name=zT]:checked") || {}).value === "Design";
+    grey(quadFs, !qd); if (sideFs) { sideFs.style.display = ""; sideFs.style.color = qd || des ? "" : "#999"; }
+    q(d, "#zSq").style.display = qd ? "" : "none"; q(d, "#zSt").style.display = !qd && des ? "" : "none"; q(d, "#zNA").style.display = qd || des ? "none" : "";
+    const usr = (d.querySelector("[name=zLc]:checked") || {}).value === "1"; ["#zX", "#zY", "#zZ"].forEach(x => q(d, x).disabled = !usr);
+  };
+  d.querySelectorAll("input[type=radio]").forEach(r => r.addEventListener("change", sync)); sync();
+  return d;
 }
 // SAP2000 26.3's Section Cut Data: Edit menu (Copy/Paste), Coordinate System and Units, Defined By Group or Quadrilateral
 // Cutting Planes, Result Type, location, and the local axes (Analysis: rotations and Advanced Axes; Design: Wall/Spandrel/Slab).
@@ -14006,14 +14749,14 @@ async function hmMass() {
   const a = await hmAnalysis(), ms = a.mass_source;
   const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmMass(); };
   // SAP2000 26.3's "Mass Source" (read on Ahmed's PC): Click to: without Make Default, and a Default Mass Source box below it.
-  const sap = program === "sap2000";
-  const d = listForm(sap ? "Mass Source" : "Mass Sources", "Mass Sources", [ms.name], [
+  const sap = program === "sap2000", one = sap || program === "etabs"; // ETABS 23.2 has the same list (pictured MassSource 1)
+  const d = listForm(one ? "Mass Source" : "Mass Sources", "Mass Sources", [ms.name], [
     ["Add New Mass Source...", () => hmSay("The model keeps one mass source, the default: Modify/Show changes it.", true)],
     ["Add Copy of Mass Source...", () => hmSay("The model keeps one mass source, the default: Modify/Show changes it.", true)],
     ["Modify/Show Mass Source...", () => hmMassData(again)],
     ["Delete Mass Source", () => hmSay("The default mass source cannot be deleted.", true)],
-    ...(sap ? [] : [["Make Default", () => hmSay(ms.name + " is the default mass source.")]]),
-  ], () => hmMassData(again), sap ? `<fieldset style="margin:8px 0 0"><legend>Default Mass Source</legend><select style="width:100%"><option>${esc(ms.name)}</option></select></fieldset>` : "");
+    ...(one ? [] : [["Make Default", () => hmSay(ms.name + " is the default mass source.")]]),
+  ], () => hmMassData(again), one ? `<fieldset style="margin:8px 0 0"><legend>Default Mass Source</legend><select style="width:100%"><option>${esc(ms.name)}</option></select></fieldset>` : "");
   d.querySelectorAll("[data-a]").forEach(b => { if (!/Modify/.test(b.textContent)) b.disabled = !/Default/.test(b.textContent) || false; });
 }
 async function hmMassData(after) {
@@ -14057,11 +14800,22 @@ async function hmMassData(after) {
   q(d, "#mDel").onclick = () => { if (at < 0) return; loads.splice(at, 1); at = -1; paint(); };
   q(d, "#mL").onchange = sync; if (q(d, "#mM")) q(d, "#mM").onchange = sync;
   sync(); paint();
+  // ETABS 23.2 (pictured MassSource 2, 3): the name and Mass Source on the left, the multipliers and Mass Options on the right.
+  if (program === "etabs") {
+    const db = d.querySelector(".db"), [nm, src, mul, opt] = [q(d, "#mN").closest("div"), d.querySelectorAll(".db > fieldset")[0], q(d, "#mMul"), d.querySelectorAll(".db > fieldset")[2]];
+    const L = document.createElement("div"), R = document.createElement("div"), box = document.createElement("fieldset");
+    db.style.cssText = "display:grid;grid-template-columns:1fr 1fr;gap:12px"; box.style.margin = "0 0 8px"; box.appendChild(nm); nm.style.padding = "8px 4px";
+    L.append(box, src); R.append(mul, opt); db.append(L, R); d.style.width = "920px";
+    q(d, "#mT").style.width = "100%"; q(d, "#mT").parentElement.style.cssText = "flex:1;min-height:120px;border:1px solid #888;background:#fff";
+    d.querySelectorAll(".db label").forEach(l => l.style.margin = "6px 0");
+    if (!ms.move && !(ms.move_x || ms.move_y)) { q(d, "#mX").value = 0.05; q(d, "#mY").value = 0.05; }
+  }
 }
 
 async function hmPDelta() {
   const a = await hmAnalysis(), defs = await hmDefs(), pd = a.pdelta;
   let loads = pd.loads.map(l => ({...l}));
+  if (program === "etabs") return hmEtabsPDelta(pd, defs);
   const d = dialog("P-Delta Options", `<fieldset><legend>Automation</legend>${[["none", "None"], ["non-iterative", "Non-iterative, based on mass"], ["iterative", "Iterative, based on loads"]].map(([k, t]) => `<label style="display:block"><input type="radio" name="pM" value="${k}" ${pd.method === k ? "checked" : ""}> ${t}</label>`).join("")}</fieldset>
     <fieldset><legend>Iteration Controls</legend><div class="g2"><span>Maximum iterations</span><input id="pI" type="number" value="${pd.iterations || 5}"><span>Relative tolerance</span><input id="pT" type="number" step="any" value="${pd.tolerance || 0.001}"></div></fieldset>
     <fieldset><legend>Load Patterns (iterative)</legend><table class="list hmgrid" id="pL"></table><button id="pAdd" style="margin-top:6px">Add</button></fieldset>`,
@@ -14073,6 +14827,35 @@ async function hmPDelta() {
   };
   q(d, "#pAdd").onclick = () => { loads.push({pattern: (defs.load_patterns[0] || {}).name, factor: 1}); paint(); };
   paint();
+}
+
+// ETABS 23.2's Preset P-Delta Options (pictured PDelta 1, 2): Automation Method (None, Non-iterative - Based on Mass,
+// Iterative - Based on Loads); Iterative P-Delta Load Case (Load Pattern and Scale Factor with Add, Modify, Delete) and the
+// Relative Convergence Tolerance, greyed unless the method is iterative.
+function hmEtabsPDelta(pd, defs) {
+  let loads = pd.loads.map(l => ({...l})), at = -1;
+  const pats = defs.load_patterns.map(p => p.name);
+  const d = dialog("Preset P-Delta Options", `<fieldset><legend>Automation Method</legend>${[["none", "None"], ["non-iterative", "Non-iterative - Based on Mass"], ["iterative", "Iterative - Based on Loads"]].map(([k, t]) => `<label style="display:block;margin:4px 0"><input type="radio" name="pM" value="${k}" ${(pd.method || "none") === k ? "checked" : ""}> ${t}</label>`).join("")}</fieldset>
+    <fieldset id="pIt"><legend>Iterative P-Delta Load Case</legend><div style="display:grid;grid-template-columns:1fr 80px;gap:10px"><div><div style="display:grid;grid-template-columns:1fr 1fr;text-align:center"><span>Load Pattern</span><span>Scale Factor</span></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr"><select id="pP">${opts(pats, pats[0])}</select><input id="pF" type="number" step="any" value="1"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;height:110px;border:1px solid #888;background:#fff;overflow:auto;align-content:start" id="pL"></div></div>
+      <div style="display:flex;flex-direction:column;gap:6px;padding-top:36px"><button id="pAdd">Add</button><button id="pMod">Modify</button><button id="pDel">Delete</button></div></div>
+      <div style="display:grid;grid-template-columns:1fr 90px;gap:8px;align-items:center;margin-top:12px"><span style="white-space:nowrap">Relative Convergence Tolerance</span><input id="pT" type="number" step="any" value="${pd.tolerance || 0.0001}"></div></fieldset>`,
+    [["OK", d => submit(d, "define_pdelta", {method: q(d, "[name=pM]:checked").value, iterations: pd.iterations || 5, tolerance: fnum(d, "#pT"), loads: loads.map(l => ({pattern: l.pattern, factor: +l.factor}))}), true], ["Cancel"]], {width: 340});
+  const paint = () => {
+    q(d, "#pL").innerHTML = loads.map((l, i) => `<span data-i="${i}" style="padding:1px 4px;${i === at ? "background:#0078d7;color:#fff" : ""}">${esc(l.pattern)}</span><span data-i="${i}" style="padding:1px 4px;${i === at ? "background:#0078d7;color:#fff" : ""}">${esc(String(l.factor))}</span>`).join("");
+    d.querySelectorAll("#pL [data-i]").forEach(s => s.onclick = () => { at = +s.dataset.i; q(d, "#pP").value = loads[at].pattern; q(d, "#pF").value = loads[at].factor; paint(); });
+    const it = q(d, "[name=pM]:checked").value === "iterative";
+    q(d, "#pIt").style.color = it ? "" : "#999"; q(d, "#pIt").querySelectorAll("input,select,button").forEach(x => x.disabled = !it);
+    if (it) q(d, "#pMod").disabled = q(d, "#pDel").disabled = at < 0;
+  };
+  const row = () => ({pattern: q(d, "#pP").value, factor: fnum(d, "#pF")});
+  q(d, "#pAdd").onclick = () => { const r = row(); if (!r.pattern) return; const k = loads.findIndex(l => l.pattern === r.pattern); if (k >= 0) loads[k] = r; else loads.push(r); at = -1; paint(); };
+  q(d, "#pMod").onclick = () => { if (at < 0) return; loads[at] = row(); paint(); };
+  q(d, "#pDel").onclick = () => { if (at < 0) return; loads.splice(at, 1); at = -1; paint(); };
+  d.querySelectorAll("[name=pM]").forEach(r => r.onchange = paint);
+  paint();
+  return d;
 }
 
 // ---- Edit > Model Text: the model in the program's own text, one section at a time (the safety net) ----
