@@ -64,6 +64,10 @@ public static class CaseTools
               "kind":{"type":"string"},"pattern":{"type":"string"},"objects":{"type":"array","items":{"type":"string"}},
               "values":{"type":"object","additionalProperties":{"type":"number"}},"dir":{"type":"string"},"replace":{"type":"boolean"}}}
             """, Ask.Changes, AssignLoads, a => $"Assign {a.Text("kind").Replace('_', ' ')} loads in {a.Text("pattern")}"),
+        new("set_load_cases_to_run",
+            "Analyze > Set Load Cases to Run: which load cases the next run runs. run lists the cases to run, not_run the cases to leave out; all true runs every case, all false none. A case not named keeps its choice. The run sets the program's own run flags before it starts (SAP2000's file gets RunCase=No).",
+            """{"type":"object","properties":{"run":{"type":"array","items":{"type":"string"}},"not_run":{"type":"array","items":{"type":"string"}},"all":{"type":"boolean"}}}""",
+            Ask.Changes, SetCasesToRun, a => "Set the load cases to run"),
         new("analysis_definitions",
             "What the analysis Define forms show: the functions with their points, every load case with its type, loads and options, the mass source and the P-Delta option.",
             """{"type":"object","properties":{}}""", Ask.Never, (_, e) => Definitions(Offline(e).Model)),
@@ -201,7 +205,9 @@ public static class CaseTools
         var was = a.Text("was") is { Length: > 0 } w ? w : null;
         return link.Edit(m => Core(() =>
         {
+            var wasOff = was is not null && was != c.Name && !RunCases.Runs(m, was);
             AnalysisDefs.SetCase(m, c, was);
+            if (wasOff) RunCases.Set(m, c.Name, false); // a renamed case keeps its Set Load Cases to Run choice
             return (JsonNode)new JsonObject { ["done"] = $"The {AnalysisDefs.CaseType(m.LoadCases.First(x => x.Name == c.Name))} case {c.Name}, {loads.Count} load{(loads.Count == 1 ? "" : "s")}." };
         }));
     }
@@ -310,6 +316,32 @@ public static class CaseTools
         });
     }
 
+    // ---- Analyze > Set Load Cases to Run ----
+
+    private static JsonNode SetCasesToRun(JsonElement a, ICsiLink e)
+    {
+        static List<string> Given(JsonElement a, string key) =>
+            a.ValueKind == JsonValueKind.Object && a.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.Array ? v.EnumerateArray().Select(x => x.GetString() ?? "").Where(x => x.Length > 0).ToList() : [];
+        var run = Given(a, "run");
+        var notRun = Given(a, "not_run");
+        bool? all = a.ValueKind == JsonValueKind.Object && a.TryGetProperty("all", out var al) && al.ValueKind is JsonValueKind.True or JsonValueKind.False ? al.GetBoolean() : null;
+        return Offline(e).Edit(m => Core(() =>
+        {
+            var cases = RunCases.List(m);
+            if (run.Concat(notRun).FirstOrDefault(n => !cases.Exists(c => c.Name == n)) is { } bad) throw new ArgumentException($"The model has no load case {bad}.");
+            var off = all switch { true => new HashSet<string>(StringComparer.Ordinal), false => cases.Select(c => c.Name).ToHashSet(StringComparer.Ordinal), _ => RunCases.NotRun(m) };
+            foreach (var n in run) off.Remove(n);
+            foreach (var n in notRun) off.Add(n);
+            RunCases.SetNotRun(m, cases.Select(c => c.Name).Where(off.Contains));
+            var count = cases.Count - off.Count;
+            return (JsonNode)new JsonObject
+            {
+                ["done"] = $"{count} of {cases.Count} load case{(cases.Count == 1 ? "" : "s")} set to run.",
+                ["not_run"] = new JsonArray(cases.Where(c => off.Contains(c.Name)).Select(c => (JsonNode)c.Name).ToArray()),
+            };
+        }));
+    }
+
     // ---- what the forms show ----
 
     public static JsonObject Definitions(StructuralModel m)
@@ -331,13 +363,14 @@ public static class CaseTools
                 {
                     ["name"] = d.Name, ["type"] = d.Type, ["initial_case"] = d.InitialCase, ["max_modes"] = d.MaxModes, ["min_modes"] = d.MinModes,
                     ["modal_case"] = d.ModalCase, ["modal_combo"] = d.ModalCombo, ["dir_combo"] = d.DirCombo, ["damping"] = d.Damping, ["eccentricity"] = d.Eccentricity,
-                    ["steps"] = d.Steps, ["step_size"] = d.StepSize, ["geometric"] = d.Geometric,
+                    ["steps"] = d.Steps, ["step_size"] = d.StepSize, ["geometric"] = d.Geometric, ["run"] = RunCases.Runs(m, d.Name),
                     ["loads"] = new JsonArray(d.Loads.Select(l => (JsonNode)new JsonObject
                     {
                         [l.Kind == "accel" ? "accel" : "pattern"] = l.Name, ["factor"] = l.Factor, ["function"] = l.Function, ["angle"] = l.Angle, ["arrival"] = l.Arrival,
                     }).ToArray()),
                 };
             }).ToArray()),
+            ["cases_to_run"] = new JsonArray(RunCases.List(m).Select(c => (JsonNode)new JsonObject { ["name"] = c.Name, ["type"] = c.Type, ["run"] = c.Run }).ToArray()),
             ["case_types"] = new JsonArray(ProgramOptions.CaseTypes(m.Target).Select(t => (JsonNode)t).ToArray()),
             ["modal_combos"] = new JsonArray(AnalysisDefs.ModalCombos.Select(t => (JsonNode)t).ToArray()),
             ["dir_combos"] = new JsonArray(AnalysisDefs.DirCombos.Select(t => (JsonNode)t).ToArray()),

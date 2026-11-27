@@ -235,6 +235,15 @@ public static class EngineRun
                 Say($"Putting the slab line releases and slab rebar into {program.Name} through its tables");
                 foreach (var line in SlabTables.PutInto(window.Link, _model!.Model)) lock (Gate) Lines.Add(line);
             }
+            if (mustAnalyse && RunCases.NotRun(_model!.Model) is { Count: > 0 } notRun)
+            {
+                // Analyze > Set Load Cases to Run: the cases set not to run are left out of this run.
+                Say($"Setting {notRun.Count} load case{(notRun.Count == 1 ? "" : "s")} not to run");
+                var set = ctx.Tool("set_run_cases", JsonSerializer.Serialize(new { all = true, not_run = notRun.ToArray() }));
+                lock (Gate) Lines.Add(set is null
+                    ? $"{program.Name} would not take the cases set not to run, so every case runs. {Failed(ctx)}"
+                    : $"Not run, as Set Load Cases to Run says: {string.Join(", ", notRun)}.");
+            }
             if (mustAnalyse)
             {
                 mon.Begin("analysis", mon.CaseCount > 0 ? $"{mon.CaseCount} load cases" : "");

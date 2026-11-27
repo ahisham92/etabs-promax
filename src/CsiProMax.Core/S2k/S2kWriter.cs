@@ -753,6 +753,10 @@ public static class S2kWriter
                     movingLanes.Add(Row(("Case", c.Name), ("AssignNum", (i + 1).ToString(CultureInfo.InvariantCulture)), ("Lane", lane)));
             }
         }
+        // Analyze > Set Load Cases to Run: a case set not to run goes in with RunCase=No.
+        var notRun = RunCases.NotRun(m);
+        defs = defs.Select(r => notRun.Contains(r.FirstOrDefault(p => p.Item1 == "Case").Item2 ?? "")
+            ? (IReadOnlyList<(string, string)>)r.Select(p => p.Item1 == "RunCase" ? ("RunCase", "No") : p).ToList() : r).ToList();
         Add(tables, "LOAD CASE DEFINITIONS", defs);
         Add(tables, "CASE - MOVING LOAD 1 - LANE ASSIGNMENTS", moving);
         Add(tables, "CASE - MOVING LOAD 2 - LANES LOADED", movingLanes);

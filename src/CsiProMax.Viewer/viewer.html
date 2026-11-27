@@ -4531,7 +4531,7 @@ function modelerMenus(m) {
   // Analyze and Design as the program has them (Ahmed 2026-11-27, every form): its option forms first, then the checks and
   // the Run; each design's View/Revise Preferences (its code and the code's items) above the results.
   const fm = hm.forms || {designs: [], analysis: []};
-  m.Analyze = [...fm.analysis.map((f, i) => [f.item, "m:pform:" + i]), ...(fm.analysis.length ? [0] : []), ...(m.Analyze || [])];
+  m.Analyze = [...fm.analysis.map((f, i) => [f.item, "m:pform:" + i]), ["Set Load Cases to Run...", "m:runCases"], 0, ...(m.Analyze || [])];
   // Options as the program has them: Preferences (Dimensions/Tolerances, Graphics), Colors (Display, Output) and
   // Miscellaneous Options, then the Engine's own view options.
   const of = fm.options || [];
@@ -4663,6 +4663,7 @@ async function modelAct(a) {
   if (a.startsWith("pform:")) { await hmDefs(); return hmProgForm(+a.slice(6)); }
   if (a.startsWith("over:")) { await hmDefs(); return hmOverwrites(a.slice(5)); }
   if (a.startsWith("oform:")) { await hmDefs(); return hmProgForm(+a.slice(6), "options"); }
+  if (a === "runCases") return hmRunCases();
   switch (a) {
     case "undo": case "redo": { const j = await hmRun(a); if (j.ok) hmSay(j.did || "Done."); return; }
     case "delete": return hmDelete();
@@ -6201,6 +6202,36 @@ async function hmAssignLoad(t) {
     <fieldset><legend>Options</legend><label style="display:block"><input type="radio" name="lO" value="add">Add to Existing Loads</label><label style="display:block"><input type="radio" name="lO" value="replace" checked>Replace Existing Loads</label><label style="display:block"><input type="radio" name="lO" value="delete">Delete Existing Loads</label></fieldset>
     <p class="kv">${names.length} selected ${t === "f" ? "frames" : "floors and walls"}.</p>`,
     [["OK", d => { hm.pattern = q(d, "#lP").value; const o = q(d, "[name=lO]:checked").value; return submit(d, "set_loads", {[t === "f" ? "frames" : "areas"]: names, pattern: hm.pattern, value: o === "delete" ? 0 : fnum(d, "#lV"), add: o === "add"}); }, true], ["Cancel"]], {width: 400});
+}
+
+// Analyze > Set Load Cases to Run as ETABS 23.2, SAP2000 26.3 and SAFE show it: Case, Type, Status and Action for every
+// load case; Run/Do Not Run Case flips the selected cases, Run/Do Not Run All all of them. The Engine's Run sets the
+// program's own run flags from it before it analyses.
+async function hmRunCases() {
+  const a = await hmAnalysis(), list = (a.cases_to_run || []).map(c => ({...c}));
+  if (!list.length) return hmSay("Define a load case first (Define > Load Cases).", true);
+  const status = c => engine.res && c.run ? "Finished" : "Not Run";
+  const rows = () => list.map((c, i) => `<tr data-i="${i}" class="${c.sel ? "sel" : ""}" style="cursor:default${c.sel ? ";background:var(--sel,#cfe3ff)" : ""}"><td>${esc(c.name)}</td><td>${esc(c.type)}</td><td>${status(c)}</td><td>${c.run ? "Run" : "Do not Run"}</td></tr>`).join("");
+  const d = dialog("Set Load Cases to Run", `<div style="display:flex;gap:10px"><fieldset style="flex:1;margin:0"><legend>Load Cases</legend>
+      <div class="scroll" style="max-height:320px"><table class="list" id="rcT"><thead><tr><th>Case</th><th>Type</th><th>Status</th><th>Action</th></tr></thead><tbody>${rows()}</tbody></table></div></fieldset>
+      <fieldset style="width:190px;margin:0"><legend>Click to:</legend><div style="display:flex;flex-direction:column;gap:6px">
+      <button id="rcOne">Run/Do Not Run Case</button><button id="rcAll">Run/Do Not Run All</button></div></fieldset></div>
+      <p class="kv" id="rcN"></p>`,
+    [["OK", d => submit(d, "set_load_cases_to_run", {run: list.filter(c => c.run).map(c => c.name), not_run: list.filter(c => !c.run).map(c => c.name)}), true], ["Cancel"]], {width: 620});
+  const body = q(d, "#rcT tbody"), count = () => { q(d, "#rcN").textContent = `${list.filter(c => c.run).length} of ${list.length} cases set to run.`; };
+  const paint = () => { body.innerHTML = rows(); count(); };
+  let last = -1;
+  body.onclick = ev => {
+    const tr = ev.target.closest("tr"); if (!tr) return; const i = +tr.dataset.i;
+    if (ev.shiftKey && last >= 0) { const [x, y] = [Math.min(last, i), Math.max(last, i)]; list.forEach((c, k) => c.sel = k >= x && k <= y); }
+    else if (ev.ctrlKey || ev.metaKey) list[i].sel = !list[i].sel;
+    else list.forEach((c, k) => c.sel = k === i);
+    last = i; paint();
+  };
+  body.ondblclick = ev => { const tr = ev.target.closest("tr"); if (tr) { const c = list[+tr.dataset.i]; c.run = !c.run; paint(); } };
+  q(d, "#rcOne").onclick = () => { const s = list.filter(c => c.sel); if (!s.length) return hmSay("Select a load case in the list first.", true); s.forEach(c => c.run = !c.run); paint(); };
+  q(d, "#rcAll").onclick = () => { const on = !list.every(c => c.run); list.forEach(c => c.run = on); paint(); };
+  count();
 }
 
 // ---- Define: the analysis (functions, load cases, mass source, P-Delta), as the programs' Define forms ----

@@ -521,6 +521,9 @@ public static class ModelerFieldSteps
         ctx.Refused("define_load_case", """{"name":"CPM-BAD","type":"Response Spectrum","loads":[{"accel":"U1","factor":1,"function":"CPM-TH"}]}""", "spectrum function", "tool define_load_case says no to a history in a spectrum case");
         ctx.Tool("define_mass_source", """{"elements":true,"loads":[{"pattern":"Live","factor":0.25}]}""", _ => FieldContext.Expect(CsiProMax.Lateral.MassSource.Of(modeler.Model).Loads.Count == 1, "the mass source has no Live"), "tool define_mass_source, the elements and a quarter of the live load");
         ctx.Tool("define_pdelta", """{"method":"non-iterative"}""", _ => FieldContext.Expect(CsiProMax.Model.AnalysisDefs.PDelta(modeler.Model).Method == "non-iterative", "P-Delta was not set"), "tool define_pdelta, non-iterative from the mass");
+        // Analyze > Set Load Cases to Run: the buckling case left out, then every case runs again.
+        ctx.Tool("set_load_cases_to_run", """{"not_run":["CPM-BUCK"]}""", _ => FieldContext.Expect(!CsiProMax.Model.RunCases.Runs(modeler.Model, "CPM-BUCK") && CsiProMax.Model.RunCases.NotRun(modeler.Model).Count == 1, "CPM-BUCK is still set to run"), "tool set_load_cases_to_run leaves the buckling case out");
+        ctx.Tool("set_load_cases_to_run", """{"all":true}""", _ => FieldContext.Expect(CsiProMax.Model.RunCases.NotRun(modeler.Model).Count == 0, "a case is still set not to run"), "tool set_load_cases_to_run runs every case again");
         var beam = modeler.Model.LineAssigns.FirstOrDefault(x => modeler.Model.Line(x.Label)?.Kind == CsiProMax.Model.LineKind.Beam);
         if (beam is not null)
         {
