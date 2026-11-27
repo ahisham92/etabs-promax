@@ -187,6 +187,9 @@ public static class AutoPack
     /// pack there are carried into the new one. Each file is written beside its place first and then moved in, so a
     /// Viewer that reads it never gets half a file.
     /// </summary>
+    /// <summary>Whether a pack after an analysis is read from a copy of the model in a hidden program (<see cref="PackCopy"/>).</summary>
+    public static bool ReadFromCopy { get; set; } = true;
+
     public static Written Write(ICsiLink link, PackLook look, string why)
     {
         var watch = Stopwatch.StartNew();
@@ -194,11 +197,6 @@ public static class AutoPack
         var page = PageFile(look.File);
         // The reviewer's comments: those in the pack there now and those kept beside the model when a pack was taken away.
         var comments = KeepComments(look.File);
-        // The checks and the pack read the same tables: each is read from the program once.
-        using var session = PackSession.Start(link);
-        JsonObject checks;
-        try { checks = ProgramTools.Report(JsonDocument.Parse("{}").RootElement, link).AsObject(); }
-        catch (Exception ex) when (ex is EtabsException or InvalidOperationException or ToolInputException) { checks = new JsonObject { ["note"] = "The checks could not be made: " + ex.Message }; }
         var auto = new JsonObject
         {
             ["why"] = why,
@@ -206,8 +204,28 @@ public static class AutoPack
             ["design"] = look.Design,
             ["made_at"] = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture),
         };
-        var built = Pack.Build(link, [], [], [], checks, comments, by: why == "design" ? "CSI ProMax, by itself after the design" : "CSI ProMax, by itself after the analysis",
-            instabilities: true, auto: auto);
+        var by = why == "design" ? "CSI ProMax, by itself after the design" : "CSI ProMax, by itself after the analysis";
+        Pack.Built Make(ICsiLink from)
+        {
+            // The checks and the pack read the same tables: each is read from the program once.
+            using var session = PackSession.Start(from);
+            JsonObject checks;
+            try { checks = ProgramTools.Report(JsonDocument.Parse("{}").RootElement, from).AsObject(); }
+            catch (Exception ex) when (ex is EtabsException or InvalidOperationException or ToolInputException) { checks = new JsonObject { ["note"] = "The checks could not be made: " + ex.Message }; }
+            return Pack.Build(from, [], [], [], checks, comments, by: by, instabilities: true, auto: auto, fileAs: look.File);
+        }
+        Pack.Built? built = null;
+        // After an analysis the results are in the saved files: they are read from a copy in a hidden program, so the
+        // engineer's window is not held while the pack is read (Ahmed 2026-11-27). A design is only in the engineer's
+        // window until it is saved, so it is read there.
+        if (why != "design" && ReadFromCopy && FieldTest.IsLive(link))
+        {
+            var copy = PackCopy.Read(link.Program, look.File, Make);
+            built = copy.Value;
+            auto["read"] = copy.Value is not null ? copy.Said : $"the engineer's {link.Program.Name}, because {copy.Said}";
+            auto["copy_seconds"] = Math.Round(copy.Took.TotalSeconds, 1);
+        }
+        built ??= Make(link);
         lock (LockFor(pack)) PackLife.Write(pack, page, built.Zip, Pack.ViewerHtml(built.Content));
         return new Written(pack, page, why, built.Frames, built.Areas, built.Tables.Count, comments.Count, watch.Elapsed, built.Notes);
     }

@@ -293,29 +293,27 @@ public static class SapFieldSteps
         // ---- snapshots and the review pack ----
         ctx.Tool("list_snapshots", "{}", a => FieldContext.Expect(Int(a["count"]) >= 1, "the snapshot is not listed"));
         ctx.Tool("compare_snapshots", """{"from":"cpm-before-analysis"}""");
-        Pack.Built? packBuilt = null;
-        var took = TimeSpan.Zero;
         // Left out of a rerun of what failed, as in ETABS (Ahmed 2026-11-27: what he says of ETABS holds for all three).
         if (ctx.NoPack) ctx.LeftOutOfRerun("the review pack of the scratch model is written");
         else
-        ctx.Step("the review pack of the scratch model is written", () =>
         {
-            var watch = System.Diagnostics.Stopwatch.StartNew();
-            var (checks, pack) = PackSpeedField.Build(link, () => ProgramTools.Report(System.Text.Json.JsonDocument.Parse("{}").RootElement, link).AsObject(),
-                c => Pack.Build(link, [], link.LoadCases(), link.Combos(), c, null, mostRows: 20000, by: "CSI ProMax field test"));
-            packBuilt = pack; took = watch.Elapsed;
-            var file = Path.Combine(ctx.Folder, ModelerFieldSteps.ModelName + " SAP2000.cpmx");
-            File.WriteAllBytes(file, pack.Zip);
-            FieldContext.Expect(pack.Frames == link.Frames().Count && pack.Areas == link.Areas().Count, $"the pack holds {pack.Frames} frames and {pack.Areas} areas, the model has {link.Frames().Count} and {link.Areas().Count}");
-            return new { file = Path.GetFileName(file), kilobytes = pack.Zip.Length / 1024, frames = pack.Frames, areas = pack.Areas, tables = pack.Tables, notes = pack.Notes };
-        });
-        PackSpeedField.Timed(ctx, packBuilt, took, link.Program.Name);
+            // Read from a copy in a fresh hidden SAP2000, never in this long session: SAP2000 26.3 corrupted its heap and
+            // died reading result tables here four times (0.4.58, 0.4.59, 0.4.60, 0.4.64), while a fresh process read them
+            // all (the Engine's runs). It is also the way a pack is written after a run, so the 3 minutes cover it all.
+            var pack = PackSpeedField.FromCopy(ctx, link, "the review pack of the scratch model is written (from a copy in a hidden SAP2000, closed after, within 3 minutes)");
+            if (pack is not null)
+                ctx.Step("the pack from the copy holds the scratch model's frames and areas", () =>
+                {
+                    FieldContext.Expect(pack.Frames == link.Frames().Count && pack.Areas == link.Areas().Count, $"the pack holds {pack.Frames} frames and {pack.Areas} areas, the model has {link.Frames().Count} and {link.Areas().Count}");
+                    return new { frames = pack.Frames, areas = pack.Areas, tables = pack.Tables, notes = pack.Notes };
+                });
+        }
 
         // ---- the tools every program has through the same API (the whole API, lateral loads, checkpoints, a building) ----
         CsiFieldSteps.Run(ctx);
 
-        // ---- how fast the program gives its tables, each way (last: ETABS's export of every table may take a while) ----
-        PackSpeedField.Probe(ctx, link, link.Program.Name);
+        // (No table-speed probe in SAP2000's long session: its reads take about 0.1 s each (0.4.64), and reading result
+        // tables in this session is what corrupted its heap; its pack is timed from a copy above.)
 
         // ---- an engineer's SAP2000 that opened an .s2k (last: from here on this window takes no table import itself) ----
         // SAP2000 26 refuses every table import in a session that opened an .s2k (experiment N, 2026-11-26), as an

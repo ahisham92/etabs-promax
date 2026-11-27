@@ -165,7 +165,7 @@ public static class Pack
     /// <param name="extraTables">More tables to take, by name or key (for example "Element Forces - Beams").</param>
     public static Built Build(ICsiLink e, IReadOnlyList<string> extraTables, IReadOnlyList<string> cases, IReadOnlyList<string> combos,
         JsonObject? checks, JsonArray? comments, int mostRows = DefaultMostRows, string by = "", bool withTables = true,
-        IReadOnlyList<string>? designFiles = null, bool instabilities = false, JsonObject? auto = null)
+        IReadOnlyList<string>? designFiles = null, bool instabilities = false, JsonObject? auto = null, string? fileAs = null)
     {
         // Every table is listed once and read once while the pack is written (with the checks before it, when the caller
         // started the session): the program is not asked again for what it gave already.
@@ -178,7 +178,8 @@ public static class Pack
         {
             ["format"] = "cpmx", ["version"] = Version,
             ["model"] = file.Length > 0 ? Path.GetFileNameWithoutExtension(file) : e is OfflineEtabs { Model.Title.Length: > 0 } own ? own.Model.Title : "Unsaved model",
-            ["file"] = info.File, ["etabs"] = info.Version, ["program"] = e.Program.Name,
+            // fileAs: the engineer's model, when the pack was read from a copy of it (PackCopy).
+            ["file"] = fileAs ?? info.File, ["etabs"] = info.Version, ["program"] = e.Program.Name,
             // The Modeler's model is made for one program (Ahmed 2026-11-26): the page offers what that one has.
             ["target"] = e is OfflineEtabs { Model: var tm } ? tm.Target : null,
             ["units"] = new JsonObject { ["force"] = info.Force, ["length"] = info.Length, ["temperature"] = info.Temperature },

@@ -35,6 +35,38 @@ public static class PackSpeedField
         });
     }
 
+    /// <summary>
+    /// The pack as the program writes it by itself after a run: read from a copy of the saved scratch model in a hidden
+    /// program of its own, which is closed after (Ahmed 2026-11-27: read, convert and load the results and close the
+    /// program, within 3 minutes). Fails when the copy could not be read or the whole round took longer than
+    /// <see cref="Pack.MostTime"/>. Gives the pack back, or null.
+    /// </summary>
+    public static Pack.Built? FromCopy(FieldContext ctx, ICsiLink link, string? name = null)
+    {
+        if (!FieldTest.IsLive(link)) return null;
+        Pack.Built? got = null;
+        ctx.Step(name ?? $"the review pack is read from a copy of the scratch model in a hidden {link.Program.Name}, which is closed after, within {Pack.MostTime.TotalMinutes:0} minutes", () =>
+        {
+            var file = link.Info().File;
+            FieldContext.Expect(file.Length > 0 && File.Exists(file), $"the scratch model has no saved file to copy ({file})");
+            var copy = Packs.PackCopy.Read(link.Program, file, from =>
+            {
+                using var session = PackSession.Start(from);
+                var checks = ProgramTools.Report(System.Text.Json.JsonDocument.Parse("{}").RootElement, from).AsObject();
+                return Pack.Build(from, [], from.LoadCases(), from.Combos(), checks, null, mostRows: 20000, by: "CSI ProMax field test, from a copy", fileAs: file);
+            });
+            FieldContext.Expect(copy.Value is not null, $"the pack was not read from a copy: {copy.Said}");
+            got = copy.Value!;
+            var timing = got.Content["manifest"]?["timing"];
+            FieldContext.Expect(copy.Took <= Pack.MostTime,
+                $"copying, opening in a hidden {link.Program.Name}, reading the pack and closing took {copy.Took.TotalSeconds:0} s, more than {Pack.MostTime.TotalSeconds:0} s (reading alone {timing?["seconds"]} s). Slowest: {timing?["slowest"]?.ToJsonString()}");
+            var target = Path.Combine(ctx.Folder, ModelerFieldSteps.ModelName + $" {link.Program.Name} from a copy.cpmx");
+            File.WriteAllBytes(target, got.Zip);
+            return new { seconds = Math.Round(copy.Took.TotalSeconds, 1), reading = timing?["seconds"]?.ToJsonString(), file = Path.GetFileName(target), frames = got.Frames, areas = got.Areas, tables = got.Tables.Count, notes = got.Notes };
+        });
+        return got;
+    }
+
     /// <summary>The tables measured: a small input table, a story result and an element result, the first with data of each.</summary>
     private static readonly string[][] Probes =
     [

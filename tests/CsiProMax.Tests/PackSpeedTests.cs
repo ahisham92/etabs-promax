@@ -14,8 +14,65 @@ static class PackSpeedTests
         if (!EqualityComparer<T>.Default.Equals(expected, actual)) throw new Exception($"{what}: expected {expected}, got {actual}");
     }
 
+    sealed class CopyWindow(ICsiLink link, string path) : IScratchWindow
+    {
+        public int Closed;
+        public ICsiLink Link => link;
+        public string ModelPath => path;
+        public string Close() { Closed++; return "closed without saving"; }
+        public void Dispose() { }
+    }
+
     public static IEnumerable<(string, Action)> All()
     {
+        yield return ("pack speed: a pack after a run is read from a copy of the model and its results in a hidden program, which is closed, and the copy removed", () =>
+        {
+            var dir = Path.Combine(Path.GetTempPath(), "cpm-copy-test-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            var oldRoot = CsiProMax.Assistant.Packs.PackCopy.Root;
+            var oldStart = CsiProMax.Assistant.Packs.PackCopy.Start;
+            try
+            {
+                var model = Path.Combine(dir, "Tower.EDB");
+                foreach (var f in new[] { "Tower.EDB", "Tower.Y01", "Tower.LOG", "Tower.cpmx", "Tower viewer.html", "Other.EDB" }) File.WriteAllText(Path.Combine(dir, f), f);
+                var names = CsiProMax.Assistant.Packs.PackCopy.FilesOf(model).Select(Path.GetFileName).OrderBy(n => n).ToList();
+                Equal("Tower.EDB,Tower.LOG,Tower.Y01", string.Join(",", names), "the model's own files");
+                CsiProMax.Assistant.Packs.PackCopy.Root = Path.Combine(dir, "copies");
+                CopyWindow? window = null;
+                string? opened = null;
+                CsiProMax.Assistant.Packs.PackCopy.Start = (p, ctx, f) =>
+                {
+                    opened = f;
+                    Check(File.Exists(Path.ChangeExtension(f, ".Y01")), "the results were copied beside the copy");
+                    Check(!File.Exists(Path.ChangeExtension(f, ".cpmx")), "the pack is not copied");
+                    var m = new MemoryEtabs { ModelFile = f };
+                    m.AddFrame(0, 0, 0, 0, 0, 3, "C1");
+                    m.Locked = true;
+                    return window = new CopyWindow(m, f);
+                };
+                var got = CsiProMax.Assistant.Packs.PackCopy.Read(CsiProgram.Etabs, model, l => Pack.Build(l, [], [], [], null, null, fileAs: model));
+                Check(got.Value is not null, "read: " + got.Said);
+                Check(opened is not null && !opened.StartsWith(dir + Path.DirectorySeparatorChar + "Tower", StringComparison.Ordinal), "the copy, not the model, was opened");
+                Equal(1, window!.Closed, "the hidden program is closed");
+                Equal(model, got.Value!.Content["manifest"]!["file"]!.GetValue<string>(), "the pack names the engineer's model");
+                Check(!Directory.EnumerateDirectories(Path.Combine(dir, "copies")).Any(), "the copy is removed");
+                Equal("Tower.EDB", File.ReadAllText(model), "the model is untouched");
+
+                CsiProMax.Assistant.Packs.PackCopy.Start = (p, ctx, f) => window = new CopyWindow(new MemoryEtabs { ModelFile = f }, f);
+                var none = CsiProMax.Assistant.Packs.PackCopy.Read(CsiProgram.Etabs, model, l => Pack.Build(l, [], [], [], null, null));
+                Check(none.Value is null && none.Said.Contains("without its analysis results"), "a copy with no results is said: " + none.Said);
+                Equal(1, window!.Closed, "closed then too");
+                CsiProMax.Assistant.Packs.PackCopy.Start = (p, ctx, f) => null;
+                var refused = CsiProMax.Assistant.Packs.PackCopy.Read(CsiProgram.Sap2000, model, l => Pack.Build(l, [], [], [], null, null));
+                Check(refused.Value is null && refused.Said.Contains("could not open the copy"), "no second program is said: " + refused.Said);
+            }
+            finally
+            {
+                CsiProMax.Assistant.Packs.PackCopy.Root = oldRoot;
+                CsiProMax.Assistant.Packs.PackCopy.Start = oldStart;
+                try { Directory.Delete(dir, true); } catch (IOException) { }
+            }
+        });
         yield return ("pack speed: in a read session the table list is asked for once, though the program refuses tables it lists", () =>
         {
             var model = new CpmFakes.PackTablesModel();
