@@ -55,6 +55,45 @@ static class AnalysisTests
             Refused(link, "define_function", new { name = "BAD", kind = "history", from = "code", code = "ASCE 7-16" }, "spectrum");
         });
 
+        yield return ("analysis: SAP2000's own function forms keep their code or type and every parameter in SAP2000's function tables, back and forth through the .s2k; power spectral density and steady state functions too (Ahmed 2026-11-27, identical forms)", () =>
+        {
+            var link = Frame();
+            var m = link.Model;
+            m.Target = "sap2000";
+            var pts = new[] { new[] { 0.0, 0.5496 }, new[] { 0.0675, 1.374 }, new[] { 0.3373, 1.374 }, new[] { 1.0, 0.4635 } };
+            Run(link, "define_function", new { name = "RS716", kind = "spectrum", points = pts, damping = 0.05, sap_table = "Function - Response Spectrum - ASCE 7-16",
+                sap_values = new Dictionary<string, object> { ["Ss"] = "2.29", ["S1"] = "0.869", ["TL"] = "8", ["SiteClass"] = "B", ["Fa"] = "0.9", ["Fv"] = "0.8", ["SDS"] = "1.374", ["SD1"] = "0.4635" } });
+            Run(link, "define_function", new { name = "SIN", kind = "history", points = new[] { new[] { 0.0, 0.0 }, new[] { 0.25, 1.0 }, new[] { 0.5, 0.0 } }, sap_table = "Function - Time History - Sine",
+                sap_values = new Dictionary<string, object> { ["Period"] = "1", ["StepsPerCyc"] = "4", ["NumCycles"] = "0.5", ["Amplitude"] = "1" } });
+            Run(link, "define_function", new { name = "PSD1", kind = "psd", points = new[] { new[] { 1.0, 0.1 }, new[] { 10.0, 0.2 } }, sap_table = "Function - Power Spectral Density - User", units = "RPM" });
+            Run(link, "define_function", new { name = "SS1", kind = "steady", points = new[] { new[] { 0.5, 1.0 }, new[] { 5.0, 1.0 } }, sap_table = "Function - Steady State - User" });
+            var defs = Run(link, "analysis_definitions", new { })["functions"]!.AsArray().ToDictionary(x => x!["name"]!.GetValue<string>());
+            Check(defs["RS716"]!["sap_table"]!.GetValue<string>() == "Function - Response Spectrum - ASCE 7-16" && defs["RS716"]!["sap_values"]!["SiteClass"]!.GetValue<string>() == "B", "the code and its parameters come back to the form");
+            Check(defs["PSD1"]!["kind"]!.GetValue<string>() == "psd" && defs["PSD1"]!["points"]!.AsArray().Count == 2 && defs["PSD1"]!["source"]!["units"]!.GetValue<string>() == "RPM", "the power spectral density function is listed with its points and units");
+            Check(defs["SS1"]!["kind"]!.GetValue<string>() == "steady", "the steady state function is listed");
+            var text = S2kWriter.Write(m, "a.s2k").Text;
+            Check(text.Contains("TABLE:  \"FUNCTION - RESPONSE SPECTRUM - ASCE 7-16\"") && System.Text.RegularExpressions.Regex.IsMatch(text, @"Name=RS716\s+Period=0\s+Accel=0.5496\s+FuncDamp=0.05\s+Ss=2.29"), "the .s2k has the ASCE 7-16 table with the parameters on the first row");
+            Check(!System.Text.RegularExpressions.Regex.IsMatch(text, @"RESPONSE SPECTRUM - USER""[^T]*Name=RS716"), "the code function is not also a user function");
+            Check(text.Contains("FUNCTION - TIME HISTORY - SINE") && text.Contains("FUNCTION - POWER SPECTRAL DENSITY - USER") && text.Contains("FUNCTION - STEADY STATE - USER"), "the sine, PSD and steady state tables");
+            var tablesOnly = string.Join("\n", text.Split('\n').Where(l => !l.StartsWith("$ ")));
+            var back = S2kReader.Read(tablesOnly, "Funcs").Model;
+            Check(SapFunctions.Find(back, "RS716") == "Function - Response Spectrum - ASCE 7-16" && SapFunctions.Parameters(back, "Function - Response Spectrum - ASCE 7-16", "RS716")["Fv"] == "0.8", "read back as the ASCE 7-16 function with its parameters");
+            Check(AnalysisDefs.ListFunctions(back).Find(f => f.Name == "RS716")?.Points.Count == 4, "and as a spectrum of the model with its points");
+            Check(SapFunctions.Others(back).Count(f => f.Name is "PSD1" or "SS1") == 2 && SapFunctions.Points(back, "Function - Power Spectral Density - User", "PSD1")[1] == (10.0, 0.2), "PSD and steady state read back");
+            var again = S2kWriter.Write(back, "b.s2k").Text;
+            static string Funcs(string s2k) => string.Join("\n", System.Text.RegularExpressions.Regex.Matches(s2k, @"TABLE:  ""FUNCTION - [^""]*""[^T]*").Select(x => x.Value.Trim()));
+            Check(Funcs(again) == Funcs(text), "a second trip writes the same function tables:\n" + Funcs(again) + "\n----\n" + Funcs(text));
+            // A plain change of the function (not through the SAP2000 form) makes it a user function again.
+            Run(link, "define_function", new { name = "RS716", kind = "spectrum", points = pts });
+            Check(SapFunctions.Find(m, "RS716") is null && S2kWriter.Write(m, "c.s2k").Text.Contains("Name=RS716"), "a plain change drops the code rows");
+            Refused(link, "define_function", new { name = "PSD2", kind = "psd", points = pts }, "sap_table");
+            Refused(link, "define_function", new { name = "X", kind = "spectrum", points = pts, sap_table = "Function - Time History - Sine" }, "history");
+            Refused(link, "define_function", new { name = "X", kind = "spectrum", points = pts, sap_table = "Function - Response Spectrum - UBC97", sap_values = new Dictionary<string, object> { ["Nope"] = "1" } }, "no field");
+            Refused(link, "define_function", new { name = "SS1", kind = "spectrum", points = pts }, "already");
+            Run(link, "delete_definition", new { kind = "function", name = "PSD1" });
+            Check(SapFunctions.Find(m, "PSD1") is null, "deleting a PSD function takes its rows");
+        });
+
         yield return ("analysis: the function forms' types (Ramp, Sawtooth, Triangular, User Periodic, From File) make their points, the form's type and fields are kept for Modify/Show, and a preview changes nothing (Ahmed 2026-11-27, every field)", () =>
         {
             var link = Frame();
