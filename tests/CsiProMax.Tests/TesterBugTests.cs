@@ -945,6 +945,13 @@ static class TesterBugTests
             Check(!CsiProMax.Assistant.ScratchProgram.HoldsText(@"C:\x\(Untitled)", @"C:\t\model.edb", 0, 50), "an .EDB still has to be held by its name");
             Check(CsiProMax.Assistant.ScratchProgram.HoldsText(@"C:\t\model.EDB", @"C:\t\model.edb", 0, 0), "the same name is held");
         });
+        yield return ("field test: the real-model run notes each part and table read as it starts, so a stall names its call", () =>
+        {
+            var src = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Field", "RealModelField.cs"));
+            Check(src.Contains("\"progress.txt\"", StringComparison.Ordinal), "no progress file");
+            foreach (var part in new[] { "read every model table", "run the analysis", "run the design", "read every result and design table", "  model table ", "  result table " })
+                Check(src.Contains("Mark(\"" + part, StringComparison.Ordinal), "not noted: " + part);
+        });
         yield return ("field test: steps a workaround can test are tested, not left out (Ahmed, 2026-11-26: only a missing program or licence)", () =>
         {
             string Src(string f) => File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant", f));
