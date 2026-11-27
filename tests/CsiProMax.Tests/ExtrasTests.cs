@@ -529,7 +529,9 @@ static class ExtrasTests
             var deck = mm.DefinitionTables!["Deck Property Definitions"][0];
             Check(deck["SlabDepth"] == "100" && deck["Notes"] == "12" && deck["Name"] == "D1", "a table's lengths are not in mm, or its words changed");
             Check(mm.Passthrough.SelectMany(r => r.Lines).Any(l => l.Contains("REBARDEFINITION  \"12\"  AREA  113.099995", StringComparison.Ordinal)), "the rebar sizes are not in mm2: " + string.Join(" | ", mm.Passthrough.SelectMany(r => r.Lines).Where(l => l.Contains("\"12\"", StringComparison.Ordinal))));
-            var kip = ModelUnits.Convert(m, new CsiProMax.Model.Units { Force = "kip", Length = "ft", Temperature = "F" });
+            var kip = ModelUnits.Convert(m, new CsiProMax.Model.Units { Force = "kip", Length = "ft", Temperature = "C" });
+            var fahrenheit = ModelUnits.Convert(m, new CsiProMax.Model.Units { Force = "kip", Length = "ft", Temperature = "F" });
+            Check(Math.Abs(fahrenheit.Materials.Find(x => x.Name == "S355")!.Number("A")!.Value - m.Materials.Find(x => x.Name == "S355")!.Number("A")!.Value * 5 / 9) < 1e-15, "the thermal coefficient per degree F is wrong");
             Check(Math.Abs(kip.Materials.Find(x => x.Name == "C30/37")!.Number("FC")!.Value - 30000 / 4.4482216152605 * 0.3048 * 0.3048) < 1e-6, "fc in kip/ft2 is wrong");
             Check(Text(ModelUnits.Convert(mm, m.Units)) == before && Text(ModelUnits.Convert(kip, m.Units)) == before, "the model is not the same after going to N, mm (or kip, ft) and back");
             Check(Text(m) == before, "converting changed the model it was given");

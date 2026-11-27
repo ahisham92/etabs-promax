@@ -39,7 +39,7 @@ public sealed class OfflineEtabs : ICsiLink, CsiProMax.Assistant.Tools.IModelDra
 
     public void Replace(StructuralModel model, string path)
     {
-        Model = model; Path = path; _selected.Clear(); Revision++; Unsaved = false; SavedUnits = null;
+        Model = model; Path = path; _selected.Clear(); Revision++; Unsaved = false; SavedUnits = null; _own = null;
     }
 
     /// <summary>The model's own units while it is shown in others (the units control at the bottom right; Ahmed
@@ -48,7 +48,13 @@ public sealed class OfflineEtabs : ICsiLink, CsiProMax.Assistant.Tools.IModelDra
     public CsiProMax.Model.Units? SavedUnits { get; private set; }
 
     /// <summary>The model as it is saved: in its own units.</summary>
-    public StructuralModel ForSave => SavedUnits is { } u && !ModelUnits.Same(u, Model.Units) ? ModelUnits.Convert(Model, u) : Model;
+    public StructuralModel ForSave => SavedUnits is { } u && !ModelUnits.Same(u, Model.Units)
+        ? _own is { } own && own.Revision == Revision ? ModelFile.FromJson(own.Json) : ModelUnits.Convert(Model, u)
+        : Model;
+
+    // The model in its own units as it was when it was first shown in others, while nothing has changed since: saved
+    // and put back word for word (a number of 17 digits converted there and back keeps 15).
+    private (string Json, int Revision)? _own;
 
     /// <summary>Shows the model in other units: every number is converted, and saving converts it back. Null or the
     /// model's own units: back to them.</summary>
@@ -57,11 +63,14 @@ public sealed class OfflineEtabs : ICsiLink, CsiProMax.Assistant.Tools.IModelDra
         var own = SavedUnits ?? Model.Units;
         var to = units ?? own;
         if (!ModelUnits.Known(to)) throw new EtabsException($"CSI ProMax does not know the units {to.Force}, {to.Length}.");
-        if (ModelUnits.Same(to, Model.Units)) { if (ModelUnits.Same(to, own)) SavedUnits = null; return; }
+        if (ModelUnits.Same(to, Model.Units)) { if (ModelUnits.Same(to, own)) { SavedUnits = null; _own = null; } return; }
         var unsaved = Unsaved;
-        Model = ModelUnits.Convert(Model, to);
+        var exact = ModelUnits.Same(to, own) && _own is { } kept && kept.Revision == Revision ? kept.Json : null;
+        var ownJson = SavedUnits is null ? ModelFile.ToJson(Model) : _own is { } k2 && k2.Revision == Revision ? k2.Json : null;
+        Model = exact is not null ? ModelFile.FromJson(exact) : ModelUnits.Convert(Model, to);
         SavedUnits = ModelUnits.Same(to, own) ? null : new CsiProMax.Model.Units { Force = own.Force, Length = own.Length, Temperature = own.Temperature };
         Revision++; Unsaved = unsaved;
+        _own = SavedUnits is not null && ownJson is not null ? (ownJson, Revision) : null;
     }
 
     // A model put back (undo, a refused tool) is shown in the units the window shows now.
