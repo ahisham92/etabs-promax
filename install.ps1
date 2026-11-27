@@ -28,8 +28,9 @@
 #                     no Claude Code used or installed. The same as this line:
 #                       irm https://raw.githubusercontent.com/ahisham92/etabs-promax/main/install-no-ai.ps1 | iex
 #     -WithAI         the AI chat on again (the default for a first install)
-#     -NoPacks        do not keep the review pack beside each model up to date after every analysis and design
-#                     (on by default; puts packs-off.txt in %LOCALAPPDATA%\CsiProMax). -Packs turns it on again.
+#     -Packs          keep the review pack beside each model up to date by itself after every analysis and design
+#                     (off by default: it reads every result table after each run, which keeps a large model busy;
+#                     puts packs-on.txt in %LOCALAPPDATA%\CsiProMax). -NoPacks turns it off again.
 #   Without -NoAI or -WithAI, a PC keeps the choice it has. It can also be switched in the CSI ProMax window
 #   (CSI ProMax menu, Turn the AI chat on/off), without closing ETABS, SAFE or SAP2000.
 #
@@ -471,18 +472,27 @@ function Install-CsiProMax {
         }
 
         # 3a. The review pack beside each model, written again by itself after every analysis and design (dotnet
-        # CsiProMax.dll --packs, started at sign-in by the Tools menu keeper and by the CSI ProMax window). It only
-        # reads the programs: it never saves, unlocks or changes a model. packs.txt says where it is; packs-off.txt stops it.
+        # CsiProMax.dll --packs, started at sign-in by the Tools menu keeper and by the CSI ProMax window). Off unless
+        # turned on with -Packs (packs-on.txt): after every run it reads all result tables through the program's API,
+        # which kept large models busy for a long time on PCs where nobody used CSI ProMax. It only reads the programs:
+        # it never saves, unlocks or changes a model. packs.txt says where it is; packs-off.txt stops it.
         if ($onWindows -and -not $SettingsRoot -and -not $Preview -and $env:LOCALAPPDATA) {
             try {
                 $state = Join-Path $env:LOCALAPPDATA 'CsiProMax'
                 if (-not (Test-Path -LiteralPath $state)) { New-Item -ItemType Directory -Path $state -Force | Out-Null }
                 $offFile = Join-Path $state 'packs-off.txt'
-                if ($NoPacks) { [IO.File]::WriteAllText($offFile, 'off') }
-                elseif ($Packs -and (Test-Path -LiteralPath $offFile)) { Remove-Item -LiteralPath $offFile -Force }
+                $chosenFile = Join-Path $state 'packs-on.txt'
+                if ($NoPacks) {
+                    [IO.File]::WriteAllText($offFile, 'off')
+                    if (Test-Path -LiteralPath $chosenFile) { Remove-Item -LiteralPath $chosenFile -Force }
+                }
+                elseif ($Packs) {
+                    [IO.File]::WriteAllText($chosenFile, 'on')
+                    if (Test-Path -LiteralPath $offFile) { Remove-Item -LiteralPath $offFile -Force }
+                }
                 $packRuntime = Find-DesktopRuntime
                 if ($packRuntime) { [IO.File]::WriteAllText((Join-Path $state 'packs.txt'), ('on|' + (Join-Path $packRuntime.Root 'dotnet.exe') + '|' + $Folder)) }
-                if (Test-Path -LiteralPath $offFile) { Say '  Review packs are not updated by themselves (packs-off.txt). To turn it on: run this line with -Packs.' }
+                if ((Test-Path -LiteralPath $offFile) -or -not (Test-Path -LiteralPath $chosenFile)) { Say '  Review packs are made when you ask for them (export pack in the chat), not after every run. To have them written after every run: run this line with -Packs.' }
                 else { Say '  After every analysis and design, the review pack (.cpmx) beside the model is written again by itself.' 'Green' }
             }
             catch { Say "  (The review pack watcher could not be set up: $($_.Exception.Message))" 'Yellow' }

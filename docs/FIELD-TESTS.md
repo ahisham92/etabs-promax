@@ -79,15 +79,22 @@ CSI ProMax keeps `<model>.cpmx` and `<model> viewer.html` beside the model up to
 watcher (`dotnet CsiProMax.dll --packs`, no window) looks at each open ETABS, SAP2000 and SAFE window every 10 seconds
 and writes the pack again when the model got new results (its `.LOG`/`.OUT` beside the model is newer than the pack,
 or the model became analysed) or when a design ran (a design table got data, or the API says the design has results).
-It only reads: the model is never saved, unlocked or changed. It is started by the CSI ProMax window and at every
-sign-in by the Tools menu keeper; `-NoPacks` on the install line (or `packs-off.txt` in `%LOCALAPPDATA%\CsiProMax`)
-turns it off. What it did is in `%LOCALAPPDATA%\CsiProMax\packs.log`, what it watches in `packs.json`.
+It only reads: the model is never saved, unlocked or changed.
+
+**Off by default (2026-11-27).** After each run it reads every result table through the program's API, and the program
+answers those calls on its own window's thread: on large models ETABS stayed busy for 30 to 60 minutes after every run,
+and designs started meanwhile crashed, on PCs where nobody had opened CSI ProMax. So it now runs only when the engineer
+turns it on: `-Packs` on the install line (it puts `packs-on.txt` in `%LOCALAPPDATA%\CsiProMax`). Then it is started by
+the CSI ProMax window and at every sign-in by the Tools menu keeper. `-NoPacks` (or `packs-off.txt` there) turns it off
+again, and an older watcher still running stops within 10 seconds of `packs-off.txt` appearing, or when it hands over
+to this version. Even when on, it asks nothing of a program whose window does not answer. Off, a pack is made on
+demand: export pack in the chat, or `--packs --once` below. What it did is in `%LOCALAPPDATA%\CsiProMax\packs.log`, what it watches in `packs.json`.
 
 The full field test checks it on each program's scratch model while it has results (steps "... review pack is written
 by itself after its analysis", "... writes nothing again when nothing changed", "... written again after a design,
 and keeps the reviewer's comments", "the watcher leaves the field test's own ... model to the field test").
 
-By hand, once per program (ETABS 23, SAP2000 26, SAFE; and ETABS 20 / SAFE 20 after opening Tools > CSI ProMax once):
+By hand, with the watcher turned on (`-Packs`), once per program (ETABS 23, SAP2000 26, SAFE; and ETABS 20 / SAFE 20 after opening Tools > CSI ProMax once):
 1. Open a saved model, run the analysis. Expected: within about 30 s of the analysis ending, `<model>.cpmx` and
    `<model> viewer.html` appear beside the model, and `packs.log` says "pack written after the analysis".
 2. Open the pack in the CSI ProMax Viewer and leave it open. Run a design (Design > ... > Start Design/Check).
