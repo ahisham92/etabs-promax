@@ -37,6 +37,18 @@ static class DefineTablesTests
 
     public static IEnumerable<(string Name, Action Body)> All()
     {
+        yield return ("define: ETABS's Detailing Drawing Format Properties and Drawing Sheet Setup are kept in the Engine's own tables, pass through the .cpm and never go to ETABS's tables", () =>
+        {
+            var link = Frame();
+            Run(link, "define_table_rows", new { table = EtabsDetailingTables.DrawingFormat, name = "Drawing Format Properties", rows = new[] { new Dictionary<string, string> { ["Group"] = "Beams", ["Tab"] = "Line", ["Item"] = "Top Rebars", ["Color"] = "#ff0000" } } });
+            Run(link, "define_table_rows", new { table = EtabsDetailingTables.SheetSetup, name = "Drawing Sheet Setup", rows = new[] { new Dictionary<string, string> { ["SheetSize"] = "E", ["SheetNoPrefix"] = "A-" } } });
+            var back = ModelFile.FromJson(ModelFile.ToJson(link.Model));
+            Check(back.DefinitionTables?[EtabsDetailingTables.DrawingFormat].Single()["Color"] == "#ff0000", "the format row did not pass through the .cpm");
+            Check(back.DefinitionTables?[EtabsDetailingTables.SheetSetup].Single()["SheetNoPrefix"] == "A-", "the sheet row did not pass through the .cpm");
+            Check(EtabsDetailingTables.IsEngineOnly(EtabsDetailingTables.SheetSetup) && !EtabsDetailingTables.IsEngineOnly("Shell Uniform Load Sets"), "Engine-only tables");
+            Run(link, "define_table_rows", new { table = EtabsDetailingTables.DrawingFormat, name = "Drawing Format Properties", rows = Array.Empty<object>() });
+            Check(link.Model.DefinitionTables?.ContainsKey(EtabsDetailingTables.DrawingFormat) != true, "rows [] (all defaults) did not clear the format table");
+        });
         yield return ("define: ETABS's Load Patterns forms keep a code's rows once, set AutoLoad, follow a rename, drop with the pattern, and pass through the .cpm", () =>
         {
             var link = Frame();
