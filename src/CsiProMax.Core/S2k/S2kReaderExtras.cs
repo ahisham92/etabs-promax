@@ -142,7 +142,7 @@ public static partial class S2kReader
                 dofs[dof] = (Math.Max(0, D(d, "TransKE", D(d, "RotKE"))), Math.Max(0, D(d, "TransCE", D(d, "RotCE"))));
             }
             if (dofs.Count == 0) dofs["U1"] = (0, 0);
-            try { PropertyDefs.SetLink(m, name, type, dofs); }
+            try { PropertyDefs.SetLink(m, name, PropertyDefs.EngineLinkType(type), dofs); }
             catch (ArgumentException ex) { notes.Add($"Link property {name}: {ex.Message}"); }
         }
     }

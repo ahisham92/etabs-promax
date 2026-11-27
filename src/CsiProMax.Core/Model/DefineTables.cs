@@ -204,6 +204,47 @@ public static class DefineTables
         }
     }
 
+    /// <summary>The table each SAP2000 link type keeps its directions in (Link/Support Property Data, Link/Support Type).</summary>
+    public static readonly Dictionary<string, string> SapLinkTypeTables = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Linear"] = "Link Property Definitions 02 - Linear", ["MultiLinear Elastic"] = "Link Property Definitions 03 - MultiLinear",
+        ["MultiLinear Plastic"] = "Link Property Definitions 11 - Multilinear Plastic", ["Damper"] = "Link Property Definitions 04 - Damper",
+        ["Damper - Exponential"] = "Link Property Definitions 04 - Damper", ["Damper - Bilinear"] = "Link Property Definitions 14 - Bilinear Damper",
+        ["Damper - Friction Spring"] = "Link Property Definitions 15 - Friction Spring Damper", ["Damper - Sumitomo Rubber QR4"] = "Link Property Definitions 17 - Sumitomo Damper",
+        ["Gap"] = "Link Property Definitions 05 - Gap", ["Hook"] = "Link Property Definitions 06 - Hook", ["Plastic (Wen)"] = "Link Property Definitions 10 - Plastic (Wen)",
+        ["Rubber Isolator"] = "Link Property Definitions 07 - Rubber Isolator", ["Friction Isolator"] = "Link Property Definitions 08 - Sliding Isolator",
+        ["T/C Friction Isolator"] = "Link Property Definitions 09 - TC Sliding Isolator", ["Triple Pendulum Isolator"] = "Link Property Definitions 12 - Triple Pendulum Isolator",
+        ["High Damping Rubber Isolator"] = "Link Property Definitions 16 - High Damping Rubber Isolator", ["Linear Exponential Damper"] = "Link Property Definitions 13 - Linear Exponential Damper",
+    };
+
+    /// <summary>After a SAP2000 link's "01 - General" row changes: its directions stay only in its type's table, and the
+    /// Engine's link of that name (the one analysis and assignments use) follows, with each direction's effective
+    /// stiffness and damping. No row takes the link out.</summary>
+    public static void SyncSapLink(StructuralModel m, string name)
+    {
+        var row = m.DefinitionTables?.GetValueOrDefault(SapLinkGeneral)?.Find(r => r.GetValueOrDefault("Link") == name);
+        var own = row is null ? null : SapLinkTypeTables.GetValueOrDefault(row.GetValueOrDefault("LinkType") ?? "");
+        foreach (var t in SapHinges.Keys.Where(k => k.StartsWith("Link Property Definitions ", StringComparison.Ordinal) && k != SapLinkGeneral && k != own).ToList())
+            if (HasRow(m, t, name)) Set(m, t, name, []);
+        if (row is null)
+        {
+            if (PropertyDefs.Links(m).Exists(x => x.Name == name)) PropertyDefs.DeleteLink(m, name);
+            return;
+        }
+        static double D(Dictionary<string, string> r, string k) => double.TryParse(r.GetValueOrDefault(k), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? Math.Max(0, v) : 0;
+        var dofs = new Dictionary<string, (double, double)>();
+        var ownRows = own is null ? null : m.DefinitionTables?.GetValueOrDefault(own);
+        foreach (var r in (ownRows ?? []).Where(x => x.GetValueOrDefault("Link") == name))
+        {
+            var dof = (r.GetValueOrDefault("DOF") ?? "").ToUpperInvariant();
+            if (!PropertyDefs.LinkDofs.Contains(dof) || dofs.ContainsKey(dof)) continue;
+            var rot = dof[0] == 'R';
+            dofs[dof] = (D(r, rot ? "RotKE" : "TransKE"), D(r, rot ? "RotCE" : "TransCE"));
+        }
+        if (dofs.Count == 0) dofs["U1"] = (0, 0);
+        PropertyDefs.SetLink(m, name, PropertyDefs.EngineLinkType(row.GetValueOrDefault("LinkType") ?? ""), dofs);
+    }
+
     /// <summary>True when the table keeps a row named so (by its first field).</summary>
     public static bool HasRow(StructuralModel m, string table, string name) =>
         m.DefinitionTables?.GetValueOrDefault(table)?.Exists(r => r.GetValueOrDefault(SapHinges[table][0]) == name) == true;
