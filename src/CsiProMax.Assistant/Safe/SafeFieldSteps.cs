@@ -283,10 +283,9 @@ public static class SafeFieldSteps
         else
         ctx.Step("the review pack of the scratch model is written", () =>
         {
-            var watch = System.Diagnostics.Stopwatch.StartNew();
-            var (checks, pack, lost) = PackSpeedField.Build(link, () => ProgramTools.Report(System.Text.Json.JsonDocument.Parse("{}").RootElement, link).AsObject(),
+            var (checks, pack, lost, packTook) = PackSpeedField.Build(link, () => ProgramTools.Report(System.Text.Json.JsonDocument.Parse("{}").RootElement, link).AsObject(),
                 c => Pack.Build(link, [], link.LoadCases(), link.Combos(), c, null, by: "CSI ProMax field test"));
-            packBuilt = pack; packLost = lost; took = watch.Elapsed;
+            packBuilt = pack; packLost = lost; took = packTook;
             var file = Path.Combine(ctx.Folder, ModelerFieldSteps.ModelName + " SAFE.cpmx");
             File.WriteAllBytes(file, pack.Zip);
             FieldContext.Expect(pack.Areas == link.Areas().Count, $"the pack holds {pack.Areas} areas, the model has {link.Areas().Count}");
