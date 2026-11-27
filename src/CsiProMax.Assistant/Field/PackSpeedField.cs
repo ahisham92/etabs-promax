@@ -67,6 +67,65 @@ public static class PackSpeedField
         return got;
     }
 
+    /// <summary>The large model's size per program: bays each way and stories (SAFE takes one floor, so a wider one).</summary>
+    internal static (int Bays, int Stories) LargeSize(CsiProgram program) => program.Key == CsiProgram.Safe.Key ? (20, 1) : (10, 15);
+
+    /// <summary>The large model the round is timed on: a concrete frame of <see cref="LargeSize"/>, for <paramref name="program"/>.</summary>
+    internal static OfflineEtabs LargeModel(CsiProgram program, string folder)
+    {
+        var (bays, stories) = LargeSize(program);
+        var spans = Enumerable.Repeat(6.0, bays).ToArray();
+        var model = new OfflineEtabs(CsiProMax.Model.Templates.ConcreteFrame("cpm-large-pack", spans, spans, stories, 3.2), "");
+        model.Model.Target = program.Key;
+        model.SaveAs(Path.Combine(folder, "large", "cpm-large-pack.e2k"));
+        return model;
+    }
+
+    /// <summary>
+    /// Ahmed 2026-11-27: "however how big it is it needs not to exceed 2-3 minutes". The Engine's Run on a large model
+    /// (thousands of frames and slabs): the program starts hidden, analyses, every result comes back and the program
+    /// is closed. Reading the results, writing the pack and closing the program must take no more than
+    /// <see cref="Pack.MostTime"/>; the analysis itself is the solver's and is reported beside it.
+    /// </summary>
+    public static void Large(FieldContext ctx, CsiProgram program)
+    {
+        var name = $"a large model in {program.Name}: its results are read, the pack written and {program.Name} closed within {Pack.MostTime.TotalMinutes:0} minutes";
+        if (ctx.NoPack) { ctx.LeftOutOfRerun(name); return; }
+        ctx.Step(name, () =>
+        {
+            var model = LargeModel(program, ctx.Folder);
+            var frames = model.Frames().Count;
+            var areas = model.Areas().Count;
+            var started = EngineRun.Start(model, analyse: true, kinds: [], keepOpen: false);
+            FieldContext.Expect(started["ok"]?.GetValue<bool>() == true, "the run did not start: " + started["error"]);
+            var until = DateTime.UtcNow.AddMinutes(40);
+            while (EngineRun.Status(false)["done"]?.GetValue<bool>() != true && DateTime.UtcNow < until) Thread.Sleep(2000);
+            var status = EngineRun.Status(true);
+            FieldContext.Expect(status["done"]?.GetValue<bool>() == true, "the run did not finish within 40 minutes: " + status["phase"]);
+            FieldContext.Expect(string.IsNullOrEmpty(status["error"]?.GetValue<string>()), "the run stopped: " + status["error"]);
+            var steps = (status["monitor"]?["steps"] as JsonArray ?? []).Where(x => x is not null).ToDictionary(x => x!["key"]!.GetValue<string>(), x => x!["seconds"]?.GetValue<double>() ?? 0);
+            double At(string key) => steps.GetValueOrDefault(key);
+            var pack = status["pack"] as JsonObject;
+            FieldContext.Expect(pack is not null, "no results came back to the model");
+            var w = Stopwatch.StartNew();
+            var text = pack!.ToJsonString();
+            var load = w.Elapsed.TotalSeconds;
+            var tables = (pack["tables"] as JsonObject)?.Count ?? 0;
+            var rows = (pack["tables"] as JsonObject)?.Sum(t => (t.Value?["rows"] as JsonArray)?.Count ?? 0) ?? 0;
+            var round = At("results") + At("close") + load;
+            var slowest = pack["manifest"]?["timing"]?["slowest"]?.ToJsonString();
+            FieldContext.Expect(status["closed"]?.GetValue<bool>() == true, $"{program.Name} was not closed after the run, so its licence is still held");
+            FieldContext.Expect(round <= Pack.MostTime.TotalSeconds,
+                $"reading the results ({At("results"):0} s), closing {program.Name} ({At("close"):0} s) and giving them to the model ({load:0.0} s) took {round:0} s, more than {Pack.MostTime.TotalSeconds:0} s, for {frames} frames and {areas} areas. Slowest tables: {slowest}");
+            return new
+            {
+                frames, areas, tables, rows, megabytes = Math.Round(text.Length / 1e6, 1),
+                results_seconds = Math.Round(At("results"), 1), close_seconds = Math.Round(At("close"), 1), load_seconds = Math.Round(load, 1),
+                start_seconds = Math.Round(At("start"), 1), analysis_seconds = Math.Round(At("analysis"), 1), slowest,
+            };
+        });
+    }
+
     /// <summary>The tables measured: a small input table, a story result and an element result, the first with data of each.</summary>
     private static readonly string[][] Probes =
     [
