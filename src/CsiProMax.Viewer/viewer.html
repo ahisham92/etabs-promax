@@ -372,7 +372,7 @@ body.chaton #right{width:380px;max-width:42%}
     </div>
   </div>
 </main>
-<footer><span id="vname"></span><span id="hint">Ready</span><span id="sel"></span><span id="coords"></span><span id="similarWrap" hidden><select id="similar" title="Draw on one story or on all stories" style="height:19px;padding:0 2px"><option value="one">One Story</option><option value="all">All Stories</option></select></span><select id="csys" title="Coordinate system" style="height:19px;padding:0 2px"><option>Global</option></select><button id="units" title="Units"></button><button id="fbFilter" disabled title="Filter: the selected objects by kind (Check All / Check None)"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M1.5 2h13l-5 6v5l-3 1.5V8z" fill="currentColor"/></svg><b id="fbN">0</b></button></footer>
+<footer><span id="vname"></span><span id="hint">Ready</span><span id="sel"></span><span id="coords"></span><span id="similarWrap" hidden><select id="similar" title="Draw on one story or on all stories" style="height:19px;padding:0 2px"><option value="one">One Story</option><option value="all">All Stories</option></select></span><select id="csys" title="Coordinate system" style="height:19px;padding:0 2px"><option>Global</option></select><select id="unitsSap" hidden title="Units" style="height:19px;padding:0 2px"></select><button id="units" title="Units"></button><button id="fbFilter" disabled title="Filter: the selected objects by kind (Check All / Check None)"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M1.5 2h13l-5 6v5l-3 1.5V8z" fill="currentColor"/></svg><b id="fbN">0</b></button></footer>
 <div id="rubber"></div><div id="tip"></div>
 <script id="pack" type="application/json"></script>
 <script>
@@ -386,6 +386,14 @@ function fmt(v) { const a = Math.abs(v); return a === 0 ? "0" : a >= 1000 ? v.to
 const inst = {answer: null, cur: -1, show: false, busy: false, dlg: null, only: "all"};
 let P = null, frames = [], areas = [], stories = [], grids = {X: [], Y: []}, gridsGuessed = false, sizes = {}, slabT = {}, supports = [], points = [], tendons = [], dstrips = [], openings = [], slabLines = [];
 let supportOf = new Map(), ratio = new Map(), marks = {punching: [], soil: []}, pointXyz = new Map(), pointIdx = new Map(), disp = new Map(), pointAt = new Map(), newComments = [], lit = null;
+// The units the views read out (the bottom-right units control); null: the model's own.
+const lenK = {m: 1, mm: 1000, cm: 100, in: 39.37008, ft: 3.28084}, forceK = {kn: 1, n: 1000, kip: 0.2248089, lb: 224.8089, tonf: 0.1019716, ton: 0.1019716, kgf: 101.9716};
+const sapUnitSets = [["lb", "in", "F"], ["lb", "ft", "F"], ["Kip", "in", "F"], ["Kip", "ft", "F"], ["KN", "mm", "C"], ["KN", "m", "C"], ["Kgf", "mm", "C"], ["Kgf", "m", "C"], ["N", "mm", "C"], ["N", "m", "C"], ["Tonf", "mm", "C"], ["Tonf", "m", "C"], ["KN", "cm", "C"], ["Kgf", "cm", "C"], ["N", "cm", "C"], ["Tonf", "cm", "C"]];
+const unitDefaults = {
+  us: {name: "U.S. Defaults", force: "kip", length: "ft", temperature: "F", section: "in", stress: "kip/in²", moment: "kip-ft"},
+  si: {name: "Metric SI Defaults", force: "kN", length: "m", temperature: "C", section: "mm", stress: "MPa", moment: "kN-m"},
+  mks: {name: "Metric MKS Defaults", force: "tonf", length: "m", temperature: "C", section: "cm", stress: "kgf/cm²", moment: "tonf-m"}};
+let dispU = null;
 let unitsText = "", lo = [0, 0, 0], hi = [1, 1, 1], size = 1, unit = "", program = "etabs", sectionMat = new Map();
 const opt = {grid: true, extrude: false, fill: true, supports: true, names: false, axes: true, joints: false, edges: true, see: true, sections: true, explorer: true, side: true};
 const hidden = {kind: new Set(), section: new Set(), objs: new Set()};
@@ -737,7 +745,7 @@ function load(pack, keep) {
   $("meta").textContent = [man.model || "Model", man.etabs ? (/modeler/i.test(man.etabs) ? man.etabs : (man.program || "ETABS") + " " + man.etabs) : "", !window.cpmLive && man.created ? "packed " + String(man.created).replace("T", " ").slice(0, 16) : "", man.by && /sample/i.test(man.by) ? man.by : ""].filter(Boolean).join(" · ");
   document.title = (man.model || "Model") + " · " + $("app").textContent;
   unitsText = u.force && u.length ? u.force + ", " + u.length + (u.temperature ? ", " + u.temperature : "") : "";
-  $("units").textContent = "Units..."; $("units").title = unitsText ? "Units: " + unitsText : "Units";
+  dispU = null; syncUnits();
   $("story").innerHTML = stories.slice().reverse().map(s => `<option value="${esc(s.name)}">${esc(s.name)}</option>`).join("");
   $("line").innerHTML = allLines().map(g => `<option value="${esc(g.dir + g.label)}">${esc(g.label)}</option>`).join("");
   readRatios(); readDisplacements(); readMarks(); readForces(); readReactions(); readDrifts(); readMesh(); readShells(); derivePushover(); if (plotSpec && !P.tables[plotSpec.table]) plotSpec = null; syncResults();
@@ -2351,7 +2359,7 @@ function drawDims(g, to, T, bub) {
       // The program's ticks: short slashes across the line at each grid line.
       for (const q of [a, b]) { g.moveTo(q[0] - 4, q[1] + 4); g.lineTo(q[0] + 4, q[1] - 4); }
       g.stroke();
-      const text = num(d) + (unit ? " (" + unit + ")" : ""), mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
+      const text = num(L(d)) + (lu() ? " (" + lu() + ")" : ""), mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
       g.textAlign = "center"; g.textBaseline = "bottom";
       if (dir === "X") g.fillText(text, mx, my - 2); else { g.save(); g.translate(mx - 2, my); g.rotate(-Math.PI / 2); g.fillText(text, 0, 0); g.restore(); }
     }
@@ -2588,7 +2596,7 @@ function ddMenu(btn, items) {
 function paneTitle(p) {
   const what = res.mode === "design" && dview ? "Design: " + dview.title : res.mode === "deformed" ? (periodOf(res.case) ? `Mode Shape (${res.case} · ${periodOf(res.case)})` : `Deformed Shape (${res.case})`) : res.mode === "forces" ? `${compName()} Diagram (${res.case})` : res.mode === "shell" ? `Shell ${res.comp} (${res.case})` : res.mode === "values" && dview ? dview.title : res.mode === "loads" ? loadTitle() : res.mode === "contour" ? `Joint Displacement Contours (${res.case})` : res.mode === "reactions" ? `Joint Reactions (${res.case})` : $("colour").value === "ratio" ? "Design Ratios" : "";
   let t;
-  if (p.mode === "plan") { const z = elevationOf(p.story); t = "Plan View - " + (p.story || "no stories") + (z === null ? "" : " - Z = " + num(z) + (unit ? " (" + unit + ")" : "")); }
+  if (p.mode === "plan") { const z = elevationOf(p.story); t = "Plan View - " + (p.story || "no stories") + (z === null ? "" : " - Z = " + num(L(z)) + (lu() ? " (" + lu() + ")" : "")); }
   else if (p.mode === "elev") t = "Elevation View - " + (p.line ? p.line.label + (gridsGuessed ? " (column line)" : "") : "whole model");
   else if (p.mode === "plot") return plotSpec && plotSpec.kind === "xy" ? "Plot Functions - " + plotSpec.title : "Story Response Plot - " + ((plotSpec || defaultStorySpec() || {}).title || "");
   else t = "3-D View";
@@ -2865,7 +2873,7 @@ function showCoords(p, x, y) {
   const q = p.M.back(x, y);
   if (p.mode === "plan") { const z = elevationOf(p.story); q[2] = z ?? q[2]; }
   if (p.mode === "elev" && p.line) q[p.line.dir === "X" ? 0 : 1] = p.line.at;
-  $("coords").textContent = p.mode === "3d" ? "" : `X ${num(q[0])}  Y ${num(q[1])}  Z ${num(q[2])}` + (unit ? " (" + unit + ")" : "");
+  $("coords").textContent = p.mode === "3d" ? "" : `X ${num(L(q[0]))}  Y ${num(L(q[1]))}  Z ${num(L(q[2]))}` + (lu() ? " (" + lu() + ")" : "");
 }
 function scheduleHover(p, x, y, cx, cy) {
   clearTimeout(tipTimer); hideTip();
@@ -2883,7 +2891,7 @@ const kindWord = o => o ? ({column: "Column", beam: "Beam", brace: "Brace", floo
 function describe(o) { return o ? `${kindWord(o)} ${o.name} · ${o.section || "no section"}${o.story ? " · " + o.story : ""}` : ""; }
 function tipText(o) {
   const lines = [describe(o)];
-  if (o.type === "f") lines.push("Length " + num(len(sub(o.b, o.a))) + (unit ? " " + unit : ""));
+  if (o.type === "f") lines.push("Length " + num(L(len(sub(o.b, o.a)))) + (lu() ? " " + lu() : ""));
   if (ratio.has(o.id)) lines.push("Design ratio " + ratio.get(o.id).toFixed(3));
   if (o.pier || o.spandrel) lines.push([o.pier ? "Pier " + o.pier : "", o.spandrel ? "Spandrel " + o.spandrel : ""].filter(Boolean).join(" · "));
   if (dview && dview.byObj.has(o.id) && !dview.show.ratio && isFinite(dview.byObj.get(o.id))) lines.push(dview.show.name.replace(/ \(.*\)$/, "") + " " + fmt(dview.byObj.get(o.id) * dview.k) + dview.suffix);
@@ -3132,6 +3140,9 @@ function act(name) {
   if (name.startsWith("r:")) return setRes(name.slice(2));
   if (name.startsWith("o:")) { const k = name.slice(2); opt[k] = !opt[k]; if (k === "extrude" || k === "sections") { geometryDirty = true; geometryStamp++; } if (k === "fill") hiddenVersion++; if (k === "explorer") $("explorer").hidden = !opt.explorer; if (k === "side") $("right").hidden = !opt.side; syncTools(); return draw(); }
   if (name.startsWith("m:")) return modelAct(name.slice(2));
+  if (name === "u:consistent") return consistentUnits();
+  if (name === "u:form") return unitsForm();
+  if (name.startsWith("u:set:")) return setDispUnits(unitDefaults[name.slice(6)] || null);
   if (name.startsWith("dd:")) return ddOpen(name.slice(3));
   if (name === "eng:import") { const f = document.createElement("input"); f.type = "file"; f.accept = ".cpmx,.zip,.json"; f.onchange = () => { if (f.files[0]) engineImport(f.files[0]); }; return f.click(); }
   if (name === "eng:clear") return engineClear();
@@ -3212,6 +3223,7 @@ function programLook() {
   const similar = $("similarWrap"); if (similar && program === "sap2000") similar.hidden = true;
   // ETABS and SAFE have a Detailing menu (after Design); SAP2000 has none.
   const det = document.querySelector('[data-menu="Detailing"]'); if (det) det.hidden = program === "sap2000";
+  try { syncUnits(); } catch (e) { /* before the page's footer is wired */ }
   buildBars();
 }
 function forProgram(m) {
@@ -4092,14 +4104,61 @@ $("explorerDD").onclick = e => { e.stopPropagation(); ddMenu(e.currentTarget, [[
 function showTab(name) { document.querySelectorAll("[data-tab]").forEach(x => x.classList.toggle("on", x.dataset.tab === name)); document.querySelectorAll(".tab").forEach(t => t.classList.toggle("on", t.id === name)); }
 document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => showTab(b.dataset.tab));
 $("fbFilter").onclick = () => selFilter();
-// The units button at the bottom right, as in the programs: their Units form, here for the units the model is in.
-$("units").onclick = () => {
-  const u = (P && P.manifest && P.manifest.units) || {}, f = u.force || "", l = u.length || "", t = u.temperature || "";
-  if (!f && !l) return;
-  const rows = [["Length", l], ["Force", f], ["Temperature", t], ["Moment", f && l ? f + "-" + l : ""], ["Stress", f && l ? f + "/" + l + "²" : ""], ["Area", l ? l + "²" : ""], ["Section Dimensions", l], ["Displacement", l], ["Rotation", "rad"]].filter(r => r[1]);
-  dialog("Units", `<fieldset><legend>Consistent Units</legend><table class="list"><tr><th>Item</th><th>Unit</th></tr>${rows.map(r => `<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td></tr>`).join("")}</table></fieldset>
-    <p class="kv">The model is shown in the units it was saved in by ${esc({etabs: "ETABS", sap2000: "SAP2000", safe: "SAFE"}[program])}; every value here is in these units.</p>`, [["OK"]], {width: 340});
+// The units at the bottom right, as each program has them (Ahmed 2026-11-27): ETABS and SAFE a "Units..." button with
+// its menu (U.S. Defaults, Metric SI Defaults, Metric MKS Defaults, Consistent Units..., Show Units Form...), SAP2000
+// its units drop-down of its sixteen sets ("KN, m, C", ...). The choice is the units the views read out (coordinates,
+// dimensions, lengths, story levels); the model and its forms keep the units the model was saved in.
+function modelU() { const u = (P && P.manifest && P.manifest.units) || {}; return {force: u.force || "", length: u.length || unit || "", temperature: u.temperature || ""}; }
+function showU() { return dispU || modelU(); }
+// A length of the model in the units the views read out, and that unit's name.
+function L(x) { const m = lenK[String(modelU().length).toLowerCase()], d = lenK[String(showU().length).toLowerCase()]; return m && d && typeof x === "number" ? x * d / m : x; }
+function lu() { return showU().length || unit; }
+function unitsWord(u) { return u && u.force && u.length ? u.force + ", " + u.length + (u.temperature ? ", " + u.temperature : "") : ""; }
+function setDispUnits(u) {
+  const m = modelU();
+  dispU = u && !(String(u.force).toLowerCase() === String(m.force).toLowerCase() && String(u.length).toLowerCase() === String(m.length).toLowerCase() && !u.name) ? u : null;
+  if (dispU && (!lenK[String(dispU.length).toLowerCase()] || !lenK[String(m.length).toLowerCase()])) dispU = null;
+  syncUnits(); if (P) { draw(); showPick(); }
+}
+function syncUnits() {
+  const sap = program === "sap2000", b = $("units"), s = $("unitsSap"), m = modelU();
+  b.hidden = sap; s.hidden = !sap;
+  b.textContent = "Units..."; b.title = "Units: " + (unitsWord(showU()) || "none") + (dispU ? " (the model's own: " + unitsWord(m) + ")" : "");
+  const now = showU(), at = sapUnitSets.findIndex(x => x[0].toLowerCase() === String(now.force).toLowerCase().replace(/^ton$/, "tonf") && x[1].toLowerCase() === String(now.length).toLowerCase());
+  s.innerHTML = sapUnitSets.map((x, i) => `<option value="${i}">${esc(x.join(", "))}</option>`).join("") + (at < 0 && unitsWord(now) ? `<option value="-1">${esc(unitsWord(now))}</option>` : "");
+  s.value = String(at);
+  s.title = "Units" + (dispU ? " (the model's own: " + unitsWord(m) + ")" : "");
+}
+$("unitsSap").onchange = e => { const x = sapUnitSets[+e.target.value]; if (x) setDispUnits({force: x[0], length: x[1], temperature: x[2]}); };
+$("units").onclick = e => {
+  document.querySelectorAll(".ddm").forEach(m => m.remove());
+  const m = document.createElement("div"), r = e.currentTarget.getBoundingClientRect(); m.className = "ddm"; m.id = "unitsMenu";
+  const items = [["U.S. Defaults", () => setDispUnits(unitDefaults.us)], ["Metric SI Defaults", () => setDispUnits(unitDefaults.si)], ["Metric MKS Defaults", () => setDispUnits(unitDefaults.mks)], 0, ["Consistent Units...", consistentUnits], ["Show Units Form...", unitsForm]];
+  for (const it of items) { const d = document.createElement("div"); if (!it) { d.className = "sep"; d.style.cssText = "border-top:1px solid var(--line2);margin:2px 0;padding:0"; m.appendChild(d); continue; } d.textContent = it[0]; d.onclick = () => { m.remove(); it[1](); }; m.appendChild(d); }
+  document.body.appendChild(m);
+  m.style.left = Math.max(0, Math.min(innerWidth - 190, r.right - 190)) + "px"; m.style.top = Math.max(0, r.top - m.getBoundingClientRect().height) + "px";
+  setTimeout(() => addEventListener("pointerdown", function off(ev) { if (!m.contains(ev.target)) { m.remove(); removeEventListener("pointerdown", off, true); } }, true));
 };
+// ETABS's Consistent Units form: one length, force and temperature for everything.
+function consistentUnits() {
+  const now = showU(), opt = (list, v) => list.map(x => `<option${x.toLowerCase() === String(v).toLowerCase().replace(/^ton$/, "tonf") ? " selected" : ""}>${x}</option>`).join("");
+  dialog("Consistent Units", `<div class="g2"><span>Length Units</span><select id="cuL">${opt(["in", "ft", "mm", "cm", "m"], now.length)}</select>
+    <span>Force Units</span><select id="cuF">${opt(["lb", "kip", "N", "kN", "kgf", "tonf"], now.force)}</select>
+    <span>Temperature Units</span><select id="cuT">${opt(["F", "C"], now.temperature || "C")}</select></div>`,
+    [["OK", d => setDispUnits({force: d.querySelector("#cuF").value, length: d.querySelector("#cuL").value, temperature: d.querySelector("#cuT").value})], ["Cancel"]], {width: 300});
+}
+// ETABS's Units form: the units set and what each kind of value is shown in.
+function unitsForm() {
+  const sets = {model: null, si: unitDefaults.si, us: unitDefaults.us, mks: unitDefaults.mks}, cur = !dispU ? "model" : Object.keys(unitDefaults).find(k => unitDefaults[k] === dispU) || "consistent";
+  const rowsOf = u => { const f = u.force, l = u.length, sec = u.section || l; return [["Structure Dimensions", "Length", l], ["", "Absolute Distance", l], ["", "Elevation", l], ["Section Dimensions", "Length", sec], ["", "Area", sec + "²"], ["Displacements", "Translational", sec === "mm" || sec === "in" ? sec : l], ["", "Rotational", "rad"], ["Forces", "Force", f], ["", "Moment", u.moment || f + "-" + l], ["Stresses", "Stress", u.stress || f + "/" + l + "²"], ["Temperature", "Temperature", u.temperature || ""]]; };
+  const table = u => `<table class="list" id="ufT"><tr><th>Group</th><th>Item</th><th>Units</th></tr>${rowsOf(u).map(r => `<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td><td>${esc(r[2])}</td></tr>`).join("")}</table>`;
+  const d = dialog("Units", `<fieldset><legend>Units Set</legend><select id="ufS"><option value="model">Model Units (${esc(unitsWord(modelU()))})</option><option value="si">Metric SI Defaults</option><option value="us">U.S. Defaults</option><option value="mks">Metric MKS Defaults</option>${cur === "consistent" ? `<option value="consistent">Consistent (${esc(unitsWord(dispU))})</option>` : ""}</select></fieldset>
+    <fieldset><legend>Units</legend><div id="ufB">${table(showU())}</div></fieldset>
+    <p class="kv">The views read out in these units; the model is kept, and its forms are, in the units it was saved in (${esc(unitsWord(modelU()))}).</p>`,
+    [["OK", d => { const v = d.querySelector("#ufS").value; if (v !== "consistent") setDispUnits(sets[v]); }], ["Cancel"]], {width: 400});
+  const s = d.querySelector("#ufS"); s.value = cur;
+  s.onchange = () => { d.querySelector("#ufB").innerHTML = table(s.value === "model" ? modelU() : s.value === "consistent" ? dispU : sets[s.value]); };
+}
 function showPick() {
   const el = $("props");
   if (!P) return;
@@ -4112,7 +4171,7 @@ function showPick() {
   const filterBtn = `<button id="pFilter" title="Keep only some kinds of the selected objects">Filter...</button>`, wireFilter = () => { const b = $("pFilter"); if (b) b.onclick = selFilter; };
   if (!list.length && joints.length === 1) {
     const n = joints[0], at = pointXyz.get(n), sup = supportOf.get(n), lds = loadRowsOf(n).flatMap(x => x.rows.map(r => loadLine(x.t, r)));
-    const rows = [["Label", n], ["Object", sup ? "Joint (support)" : "Joint"], ["X, Y, Z", at.map(num).join(", ") + (unit ? " " + unit : "")], ["Restraint", sup ? sup.kind : "none"], ["Connected objects", jointLinks(n).length]];
+    const rows = [["Label", n], ["Object", sup ? "Joint (support)" : "Joint"], ["X, Y, Z", at.map(v => num(L(v))).join(", ") + (lu() ? " " + lu() : "")], ["Restraint", sup ? sup.kind : "none"], ["Connected objects", jointLinks(n).length]];
     lds.slice(0, 8).forEach((l, i) => rows.push([i ? "" : "Loads", l])); if (lds.length > 8) rows.push(["", "... " + (lds.length - 8) + " more in its information"]);
     const dc = disp.has(res.case) ? res.case : [...disp.keys()][0], dv = dc && disp.get(dc).get(n); if (dv) rows.push(["Displacement, " + dc, dv.map(fmt).join(", ")]);
     el.innerHTML = table(rows) + `<div class="row" style="margin-top:8px"><button id="pInfo">Joint information...</button></div>`;
@@ -4122,9 +4181,9 @@ function showPick() {
   }
   if (!list.length && !joints.length) {
     const man = P.manifest || {}, count = k => frames.filter(f => f.kind === k).length;
-    el.innerHTML = table([["Model", man.model || ""], ["Program", (man.program || "") + " " + (man.etabs || "")], ["Units", unitsText], ["Stories", Math.max(stories.length - 1, 0)], ["Grid lines", gridsGuessed ? "none in the file (column lines shown)" : grids.X.length + grids.Y.length],
+    el.innerHTML = table([["Model", man.model || ""], ["Program", (man.program || "") + " " + (man.etabs || "")], ["Units", unitsWord(showU()) + (dispU ? " (model: " + unitsText + ")" : "")], ["Stories", Math.max(stories.length - 1, 0)], ["Grid lines", gridsGuessed ? "none in the file (column lines shown)" : grids.X.length + grids.Y.length],
       ["Columns", count("column")], ["Beams", count("beam")], ["Braces", count("brace")], ["Floors", areas.filter(a => a.kind !== "wall").length], ["Walls", areas.filter(a => a.kind === "wall").length], ["Joints", points.length], ["Supports", supports.length],
-      ["Size X, Y, Z", [0, 1, 2].map(i => num(hi[i] - lo[i])).join(", ") + (unit ? " " + unit : "")], ["Result tables", Object.keys(P.tables).length]]) + `<p class="kv">Click an object in a view to see it here. Double click it, or right click it, for its full information.</p>`;
+      ["Size X, Y, Z", [0, 1, 2].map(i => num(L(hi[i] - lo[i]))).join(", ") + (lu() ? " " + lu() : "")], ["Result tables", Object.keys(P.tables).length]]) + `<p class="kv">Click an object in a view to see it here. Double click it, or right click it, for its full information.</p>`;
     $("target").textContent = "Comment on the whole model. Click a member in a view to comment on it.";
     return;
   }
@@ -4140,7 +4199,7 @@ function showPick() {
   const rows = [["Label", f.name], ["Object", kindWord(f)], ["Section", f.section || "(none)"], ["Story", f.story || ""]];
   if (isFrame) {
     if (s) rows.push(["Shape", s[0] || ""], ["Depth x width", num(s[1]) + (s[2] ? " x " + num(s[2]) : "") + (unit ? " " + unit : "")]);
-    rows.push(["Length", num(len(sub(f.b, f.a))) + (unit ? " " + unit : "")], ["Start X, Y, Z", f.a.map(num).join(", ")], ["End X, Y, Z", f.b.map(num).join(", ")]);
+    rows.push(["Length", num(L(len(sub(f.b, f.a)))) + (lu() ? " " + lu() : "")], ["Start X, Y, Z", f.a.map(v => num(L(v))).join(", ")], ["End X, Y, Z", f.b.map(v => num(L(v))).join(", ")]);
     if (ratio.has(f.id)) rows.push(["Design ratio", ratio.get(f.id).toFixed(3)]);
     const rs = res.mode === "forces" && (forces.get(res.case) || new Map()).get(f.name);
     if (rs) { const v = rs.map(r => r[res.comp]); rows.push([compName() + " max", fmt(Math.max(...v))], [compName() + " min", fmt(Math.min(...v))]); }

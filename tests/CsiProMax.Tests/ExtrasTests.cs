@@ -498,6 +498,15 @@ static class ExtrasTests
             foreach (var marker in new[] { "hostPick({kind: \"open\", title: \"Open Model\"", "hostPick({kind: \"save\", title: \"Save Model As\"", "title: \"Export SAP2000 .s2k Text File\"", "title: \"Export SAFE .f2k Text File\"", "title: \"Export Tables to Excel\"", "title: \"Import Tables from Excel\"" })
                 Check(html.Contains(marker, StringComparison.Ordinal), "the page does not use Windows' picker for: " + marker);
         });
+        yield return ("Ahmed 2026-11-27: the units at the bottom right are each program's own: the Units... button with U.S./Metric SI/Metric MKS Defaults, Consistent Units and the Units form, SAP2000's units drop-down of its 16 sets", () =>
+        {
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var marker in new[] { "<select id=\"unitsSap\"", "[\"U.S. Defaults\", () => setDispUnits(unitDefaults.us)]", "[\"Metric SI Defaults\"", "[\"Metric MKS Defaults\"", "[\"Consistent Units...\", consistentUnits]", "[\"Show Units Form...\", unitsForm]", "dialog(\"Consistent Units\"", "[\"Tonf\", \"cm\", \"C\"]]", "b.hidden = sap; s.hidden = !sap;" })
+                Check(html.Contains(marker, StringComparison.Ordinal), "the units control lacks: " + marker);
+            Check(CsiProMax.Assistant.ReferenceForms.PathFor("etabs", "Units > Consistent Units...").SequenceEqual([CsiProMax.Assistant.Etabs.MenuCommand.StatusBar, "Units...", "Consistent Units..."]), "the program's Consistent Units form is not opened from its status bar");
+            Check(CsiProMax.Assistant.ReferenceForms.PathFor("safe", "Units > Show Units Form...")[0] == CsiProMax.Assistant.Etabs.MenuCommand.StatusBar, "SAFE's Units form is not opened from its status bar");
+            Check(CsiProMax.Assistant.ModelerCheck.Script.Contains("the units at the bottom right, as ${target} has them", StringComparison.Ordinal), "the window check does not try the units control");
+        });
         yield return ("Ahmed 2026-11-27: Design > View/Revise Overwrites is each code's overwrite table of the program (ETABS 23.2, SAP2000 26.3), the selected frames' rows; SAP2000's go into its .s2k and come back", () =>
         {
             Check(ProgramForms.OverwriteTables("etabs", "steel", "AISC 360-16").SequenceEqual(["Steel Frame Design Overwrites - AISC 360-16"]), "ETABS's steel overwrites: " + string.Join(", ", ProgramForms.OverwriteTables("etabs", "steel", "AISC 360-16")));
