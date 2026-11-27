@@ -151,6 +151,8 @@ public static class DefineTables
         foreach (var (t, fields) in SapHinges) etabs[t] = fields.Select(f => (f, f)).ToArray();
         // ETABS's shear wall pier and spandrel overwrites, by label (Ahmed 2026-11-27, every form).
         foreach (var (t, fields) in ProgramForms.WallOverwriteCatalog()) etabs[t] = fields.Select(f => (f.Key, f.Label)).ToArray();
+        // ETABS's own load pattern (auto seismic, wind, notional) and load case tables (Ahmed 2026-11-27, every form).
+        foreach (var (t, fields) in EtabsLoadTables.Fields) etabs[t] = fields;
         return etabs;
     }
 
@@ -257,7 +259,10 @@ public static class DefineTables
         // SAP2000's own load tables (Define > Load Patterns, Load Cases, Load Combinations): SapLoadTables.
         if (SapLoadTables.Full(table) is { } sapLoad) { Set(m, sapLoad, SapLoadTables.Fields[sapLoad].Select(f => (f, f)).ToArray(), name, rows); return; }
         if (!Tables.TryGetValue(table, out var fields)) throw new ArgumentException($"There is no definition table '{table}'. The tables: {string.Join(", ", Tables.Keys)}.");
-        Set(m, Tables.Keys.First(k => k.Equals(table, StringComparison.OrdinalIgnoreCase)), fields, name, rows);
+        var full = Tables.Keys.First(k => k.Equals(table, StringComparison.OrdinalIgnoreCase));
+        // An ETABS Auto Lateral Load code: a pattern has one code, so the rows of its other codes go (no rows: None, all go).
+        if (EtabsLoadTables.Code(full) is not null) EtabsLoadTables.ClearCode(m, name, rows.Count > 0 ? full : null);
+        Set(m, full, fields, name, rows);
     }
 
     /// <summary>The name of a definition table as the model keeps it (SAP2000's load tables too), or null.</summary>
@@ -287,6 +292,13 @@ public static class DefineTables
         }
         if (list.Count == 0) m.DefinitionTables.Remove(full);
         if (m.DefinitionTables.Count == 0) m.DefinitionTables = null;
+        // What a form sets now wins over the rows measured when the model came from the program (CarriedTables), which
+        // would otherwise go in after these and put the old values back.
+        if (m.Carried?.Rows.TryGetValue(full, out var carried) == true)
+        {
+            carried.RemoveAll(r => r.GetValueOrDefault(key) == name);
+            if (carried.Count == 0) m.Carried.Rows.Remove(full);
+        }
     }
 
     // ---- rebar sizes and a concrete section's rebar, by the .e2k's own keywords ----

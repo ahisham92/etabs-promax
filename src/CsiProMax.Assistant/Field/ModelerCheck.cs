@@ -420,28 +420,25 @@ public static class ModelerCheck
           instList(); instGo(0); await wait(300);
           return sel.has(frames[0].id) && inst.cur === 0 ? {ok: "selected and ringed"} : {fail: "the finding's frame was not selected"};
         });
-        await step("Define > Load Patterns > Modify Lateral Load: a seismic pattern takes ASCE 7-16, and its story forces show", async () => {
-          const made = await hmRun("define_load_pattern", {name: "CPM-CHKEQ", type: "Seismic", self_weight: 0}, true);
-          if (!made.ok) return {fail: "the seismic pattern was not added: " + made.error};
-          await act("m:patterns"); await wait(600);
-          const row = [...document.querySelectorAll(".dlg #pL tr")].find(tr => tr.textContent.includes("CPM-CHKEQ"));
-          if (!row) return {fail: "CPM-CHKEQ is not in the Load Patterns form"};
-          row.click(); await wait(200);
-          const lat = document.querySelector(".dlg #pLat");
-          if (!lat || lat.disabled) return {fail: "Modify Lateral Load Pattern is not there, or greyed out, for a seismic pattern"};
-          lat.click(); await wait(1200);
-          const code = document.querySelector(".dlg #lCode");
-          if (!code) return {fail: "the lateral load form did not open"};
-          code.value = "ASCE 7-16"; code.dispatchEvent(new Event("change", {bubbles: true})); await wait(200);
-          const forms = document.querySelectorAll(".dlg"); forms[forms.length - 1].querySelector(".df button.primary").click();
-          await wait(2000);
-          const defs = await hmDefs(), p = (defs.load_patterns || []).find(x => x.name === "CPM-CHKEQ");
+        await step("Define > Load Patterns (ETABS 23.2's form): a seismic pattern takes ASCE 7-16 from Auto Lateral Load, Modify Lateral Load opens its form, and the code's table rows are kept", async () => {
+          if (program !== "etabs") return {ok: "ETABS's form; " + program + " shows its own (checked by its own steps)"};
+          await act("m:patterns"); await wait(800);
+          const d = [...document.querySelectorAll(".dlg")].pop(), set = (s, v) => { const x = d.querySelector(s); x.value = v; x.dispatchEvent(new Event(x.tagName === "SELECT" ? "change" : "input", {bubbles: true})); };
+          if (!d.querySelector("#pA")) return {fail: "the Define Load Patterns form has no Auto Lateral Load box"};
+          set("#pN", "CPM-CHKEQ"); set("#pT", "Seismic"); await wait(100); set("#pA", "ASCE 7-16");
+          d.querySelector("#pAdd").click(); await wait(2500);
+          const lat = d.querySelector("#pLat");
+          if (!lat || lat.disabled) return {fail: "Modify Lateral Load... is greyed for a seismic pattern with ASCE 7-16: " + (hm.lastError || "")};
+          lat.click(); await wait(1500);
+          const f = [...document.querySelectorAll(".dlg")].pop(), title = f.querySelector(".dt b").textContent;
+          const r = f.querySelector('[data-k="R"]'); if (r) { r.value = "7"; r.dispatchEvent(new Event("input", {bubbles: true})); }
+          f.querySelector(".df button.primary").click(); await wait(2000);
+          const rows = (((await hmRun("definition_data", {}, true)).result || {}).tables || {})["Load Pattern Definitions - Auto Seismic - ASCE 7-16"], mine = rows ? rows.rows.filter(x => x.Name === "CPM-CHKEQ") : [];
           closeDialogs(); await wait(150);
-          await hmRun("undo"); await wait(800); await hmRun("undo"); await wait(800);
-          const back = ((await hmDefs()).load_patterns || []).some(x => x.name === "CPM-CHKEQ");
-          if (!p || !p.lateral || p.lateral.code !== "ASCE 7-16") return {fail: "the code did not reach the pattern: " + (hm.lastError || JSON.stringify(p && p.lateral))};
-          if (p.lateral.error || !(p.lateral.story_forces || []).some(f => f.fx > 0)) return {fail: "no story forces: " + (p.lateral.error || "")};
-          return back ? {fail: "two undos did not take the pattern out again"} : {ok: `V = ${p.lateral.results.V} on ${p.lateral.story_forces.length} stories, then undone`};
+          const del = await hmRun("delete_definition", {kind: "load_pattern", name: "CPM-CHKEQ"}, true);
+          if (!mine.length) return {fail: "no ASCE 7-16 row for CPM-CHKEQ (form '" + title + "'): " + (hm.lastError || "")};
+          if (mine[0].R !== "7") return {fail: "the form's R did not reach the row: " + JSON.stringify(mine[0])};
+          return del.ok ? {ok: `'${title}' kept ${Object.keys(mine[0]).length} fields, then the pattern was deleted`} : {fail: "the pattern could not be deleted again: " + del.error};
         });
         await step("Edit > Model Text: a combination written in the program's own text goes into the model, and undo takes it out", async () => {
           await act("m:text"); await wait(900);

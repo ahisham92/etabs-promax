@@ -698,6 +698,9 @@ public static class ModelerFieldSteps
             _ => FieldContext.Expect(CsiProMax.Model.FrameTableShapes.Rows(modeler.Model.FrameSections.Find(s => s.Name == "CPM-NP")!).Count == 2, "CPM-NP does not have its 2 segments"), "tool define_frame_shape, a nonprismatic section of 2 segments");
         ctx.Tool("frame_section_to_sd", """{"name":"CPM-ANGLE","convert":false}""",
             _ => FieldContext.Expect(modeler.Model.FrameSections.Find(s => s.Name == "SDCPM-ANGLE")?.Shape == "SD Section", "Copy to SD Section made no SDCPM-ANGLE"), "tool frame_section_to_sd, Copy to SD Section");
+        // ETABS's Define > Load Patterns (every auto seismic and wind code) and Define > Load Cases forms, as the forms set them;
+        // the ETABS part reads every value back (EtabsFormRoundTrip.Check).
+        EtabsFormRoundTrip.Define(ctx, modeler);
         var conc = modeler.Model.Materials.FirstOrDefault(m => m.IsConcrete)?.Name ?? "";
         ctx.Tool("define_shell_type", """{"name":"CPM-DROP","kind":"slab","slab_type":"Drop","modeling":"ShellThick","thickness":0.3,"material":""" + Q(conc) + ""","modifiers":{"M11MOD":0.25,"M22MOD":0.25}}""", null, "tool define_shell_type, a cracked drop panel");
         ctx.Tool("define_shell_type", """{"name":"CPM-RIB","kind":"slab","slab_type":"Ribbed","modeling":"ShellThin","thickness":0.1,"material":""" + Q(conc) + ""","overall_depth":0.4,"rib_width_top":0.15,"rib_width_bottom":0.125,"rib_spacing":0.9,"rib_direction":1}""", null, "tool define_shell_type, a ribbed slab");
