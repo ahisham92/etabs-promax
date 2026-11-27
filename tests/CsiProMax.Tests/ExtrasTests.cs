@@ -224,6 +224,15 @@ static class ExtrasTests
                 "<span>Fillet Radius</span>", "Mirror About ${f.slice(-1)}-Axis", "dialog(\"Property/Stiffness Modification Factors\"", "function shapeSvg(shape, v)" })
                 Check(html.Contains(part), "viewer.html lost " + part);
         });
+        yield return ("extras: the slab and wall forms match ETABS 23.2 and SAP2000 26.3 field by field: Slab Properties and Wall Properties lists of their own, Slab Property Data with notional size, modeling type, modifiers, colour, notes, one-way load and rib data, Wall Property Data with the automatic rigid zone, SAP2000's Shell Section Data with type, material angle and membrane/bending thickness (Ahmed 2026-11-27)", () =>
+        {
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var part in new[] { "kind === \"wall\" ? \"Wall Properties\" : \"Slab Properties\"", "[\"Slab Sections...\", \"m:shellSections\"], [\"Wall Sections...\", \"m:wallSections\"]", "case \"wallSections\": return hmShellSections(\"wall\");",
+                "sap ? \"Shell Section Data\" : wall ? \"Wall Property Data\" : \"Slab Property Data\"", "<button id=\"aNot\">Modify/Show Notional Size...</button>", "Include Automatic Rigid Zone Area Over Wall", "Use Special One-Way Load Distribution",
+                "<span data-rib>Rib Spacing (Perpendicular to Rib Direction)</span>", "<span data-rib>Stem Width at Top</span>", "<span>Material Angle</span><input id=\"aMA\"", "<span>Bending</span><input id=\"aBT\"", "<legend>Select Section Type To Add</legend>" })
+                Check(html.Contains(part), "viewer.html lost " + part);
+            Check(!html.Contains("\"Slab or Wall Property Data\""), "ETABS has no Slab or Wall Property Data window: a slab and a wall have forms of their own");
+        });
         yield return ("extras: the views and toolbars are drawn as ETABS draws them: grey see-through slabs with white edges, thin columns, solid grid, light-blue ground grid with flat bubbles, the axes at the origin, column squares in plan, captions as tabs, the toolbar and strip in the program's order (Ahmed 2026-11-26 22:19)", () =>
         {
             var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));

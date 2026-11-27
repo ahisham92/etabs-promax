@@ -4366,7 +4366,7 @@ function modelerMenus(m) {
     ["Export", [["Tables to Excel (.xlsx)...", "m:xlsxOut"], 0, only(["etabs", "sap2000"], ["SAP2000 .s2k Text File...", "m:s2k"]), only(["etabs", "safe"], ["SAFE .f2k Text File (one floor)...", "m:f2k"])]], 0, ["Print the active window...", "print", "Ctrl+P"]];
   m.Edit = [[s.undo ? "Undo " + s.undo : "Undo", "m:undo", "Ctrl+Z", !s.undo], [s.redo ? "Redo " + s.redo : "Redo", "m:redo", "Ctrl+Y", !s.redo], 0,
     ["Delete", "m:delete", "Del", !any], 0, ["Replicate...", "m:replicate", "", !any], ["Move...", "m:move", "", !any], ["Divide Frames...", "m:divide", "", !hmSelected("f").length], 0, ["Copy names of the selected objects", "copyNames", "Ctrl+C", !any], 0, ["Hide the selected objects", "hideSel", "", !any], ["Show all objects", "showAll"], 0, ["Model Text...", "m:text"]];
-  m.Define = [["Material Properties...", "m:materials"], ["Frame Sections...", "m:frameSections"], [({sap2000: "Area Sections...", safe: "Slab and Wall Properties..."})[program] || "Slab and Wall Sections...", "m:shellSections"], ["Reinforcing Bar Sizes...", "m:rebarSizes"], ["Frame Section Rebar (Modify/Show Rebar)...", "m:frameRebar"], only(["etabs", "sap2000"], ["Link/Support Properties...", "m:links"]), ["Spring Properties", [["Point Springs...", "m:spr:point"], ["Line Springs...", "m:spr:line"], ["Area Springs...", "m:spr:area"]]], 0,
+  m.Define = [["Material Properties...", "m:materials"], ["Frame Sections...", "m:frameSections"], ...(program === "sap2000" ? [["Area Sections...", "m:shellSections"]] : [["Slab Sections...", "m:shellSections"], ["Wall Sections...", "m:wallSections"]]), ["Reinforcing Bar Sizes...", "m:rebarSizes"], ["Frame Section Rebar (Modify/Show Rebar)...", "m:frameRebar"], only(["etabs", "sap2000"], ["Link/Support Properties...", "m:links"]), ["Spring Properties", [["Point Springs...", "m:spr:point"], ["Line Springs...", "m:spr:line"], ["Area Springs...", "m:spr:area"]]], 0,
     only(["etabs", "sap2000"], ["Diaphragms...", "m:st:diaphragm"]), only(["etabs"], ["Pier Labels...", "m:st:pier"]), only(["etabs"], ["Spandrel Labels...", "m:st:spandrel"]), ["Groups...", "m:st:group"], ["Section Cuts...", "m:st:cut"], only(["sap2000"], ["Joint Constraints...", "m:ex:constraints"]), only(["etabs", "safe"], ["Design Strips...", "m:ex:strips"]), ["Tendon Sections...", "m:ex:tendonsections"], ["Tendons...", "m:ex:tendons"], only(["etabs", "safe"], ["Hyperstatic Load Cases...", "m:ex:hyperstatic"]), only(["etabs", "safe"], ["Punching Shear Overwrites...", "m:ex:punching"]), only(["etabs", "safe"], ["Floor Openings...", "m:ex:openings"]), only(["etabs", "safe"], ["Slab Line Releases...", "m:ex:linereleases"]), only(["etabs", "safe"], ["Slab Rebar...", "m:ex:slabrebar"]), 0,
     ...hmDefineTableItems(), 0,
     [program === "sap2000" ? "Elevations (Z Grid Lines)..." : "Story Data...", "m:stories"], [program === "sap2000" ? "Coordinate Systems/Grids..." : "Grid Data...", "m:grids"], 0, ["Functions", [["Response Spectrum...", "m:fnRS"], only(ES, ["Time History...", "m:fnTH"])]],
@@ -4410,6 +4410,7 @@ async function modelAct(a) {
     case "materials": return hmMaterials();
     case "frameSections": return hmFrameSections();
     case "shellSections": return hmShellSections();
+    case "wallSections": return hmShellSections("wall");
     case "stories": return hmStories();
     case "grids": return hmGrids();
     case "patterns": return hmPatterns();
@@ -5166,44 +5167,96 @@ async function hmFrameSection(s, after, copy, newShape) {
 }
 
 // ---- Define: slab and wall sections ----
-async function hmShellSections() {
-  const defs = await hmDefs();
-  const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmShellSections(); };
+// Slab Properties and Wall Properties, each a list of its own as ETABS and SAFE have them (Define > Section
+// Properties > Slab Sections / Wall Sections); SAP2000 has one Area Sections list of shell sections.
+async function hmShellSections(kind) {
+  const defs = await hmDefs(), sap = program === "sap2000";
+  if (!sap && !kind) kind = "slab";
+  const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmShellSections(kind); };
   const find = n => defs.shell_sections.find(s => s.name === n);
-  listForm("Slab and Wall Properties", "Properties", defs.shell_sections.map(s => s.name + (s.kind === "wall" ? "  (wall)" : "")), [
-    ["Add New Property...", () => hmShellSection(null, again)],
-    ["Add Copy of Property...", n => n && hmShellSection(find(n.replace(/  \(wall\)$/, "")), again, true)],
-    ["Modify/Show Property...", n => n && hmShellSection(find(n.replace(/  \(wall\)$/, "")), again)],
-    ["Delete Property", n => n && hmRun("delete_definition", {kind: "shell_section", name: n.replace(/  \(wall\)$/, "")}).then(j => j.ok && again())],
-  ], n => hmShellSection(find(n.replace(/  \(wall\)$/, "")), again));
+  const names = defs.shell_sections.filter(s => sap || (kind === "wall") === (s.kind === "wall")).map(s => s.name);
+  const title = sap ? "Area Sections" : kind === "wall" ? "Wall Properties" : "Slab Properties";
+  const d = listForm(title, sap ? "Sections" : "Properties", names, [
+    [sap ? "Add New Section..." : "Add New Property...", () => hmShellSection(null, again, false, sap ? "slab" : kind)],
+    [sap ? "Add Copy of Section..." : "Add Copy of Property...", n => n && hmShellSection(find(n), again, true)],
+    [sap ? "Modify/Show Section..." : "Modify/Show Property...", n => n && hmShellSection(find(n), again)],
+    [sap ? "Delete Section" : "Delete Property", n => n && hmRun("delete_definition", {kind: "shell_section", name: n}).then(j => j.ok ? again() : hmSay(j.error, true))],
+  ], n => hmShellSection(find(n), again));
+  // SAP2000's Area Sections asks the section type first: Shell (the Modeler's areas are shells).
+  if (sap) { const f = d.querySelector(".db > div"); f.insertAdjacentHTML("beforebegin", `<fieldset style="margin:0 0 6px"><legend>Select Section Type To Add</legend><select disabled style="width:100%"><option>Shell</option></select></fieldset>`); }
+  return d;
 }
-async function hmShellSection(s, after, copy) {
+// Slab Property Data / Wall Property Data (ETABS, SAFE) and Shell Section Data (SAP2000), field by field.
+async function hmShellSection(s, after, copy, newKind) {
   const defs = await hmDefs(), u = hmU(), pd = (await hmRun("property_definitions", {}, true)).result;
   const cur = s && pd ? pd.shell_sections.find(x => x.name === s.name) : null, was = s && !copy ? s.name : null;
   let mods = cur ? {...cur.modifiers} : null;
-  // SAP2000's areas are shells by modelling type only (no slab type, one-way distribution or ribs).
-  const sap = program === "sap2000";
-  const d = dialog(sap ? "Shell Section Data" : program === "safe" ? "Slab Property Data" : "Slab or Wall Property Data", `<fieldset><legend>General Data</legend><div class="g2">
-      <span>Property Name</span><input id="aN" value="${esc(s ? (copy ? s.name + " copy" : s.name) : "Slab200")}">
-      <span>Type</span><select id="aK" ${s && !copy ? "disabled" : ""}>${opts(sap ? [["slab", "Shell (floor)"], ["wall", "Shell (wall)"]] : [["slab", "Slab"], ["wall", "Wall"]], s ? s.kind : "slab")}</select>
-      <span data-slab>Slab Type</span><select data-slab id="aY">${opts((pd && pd.slab_types) || ["Slab"], cur && cur.slab_type || "Slab")}</select>
-      <span>Modeling Type</span><select id="aG">${opts((pd && pd.modeling_types) || ["ShellThin"], cur && cur.modeling || "ShellThin")}</select>
-      <span>Material</span><select id="aM">${matOpts(defs, s ? s.material : "")}</select>
-      <span>Thickness, ${u.l}</span><input id="aT" type="number" step="any" value="${s && s.thickness != null ? s.thickness : 0.2}"></div>
-      <label data-slab style="display:block;margin-top:6px"><input type="checkbox" id="aO" ${cur && cur.one_way ? "checked" : ""}> Use special one-way load distribution</label></fieldset>
-    <fieldset data-slab id="aRib"><legend>Ribs (Ribbed slab)</legend><div class="g2"><span>Overall depth, ${u.l}</span><input id="aRD" type="number" step="any" value="${cur && cur.overall_depth || ""}"><span>Rib width at top, ${u.l}</span><input id="aRT" type="number" step="any" value="${cur && cur.rib_width_top || ""}"><span>Rib width at bottom, ${u.l}</span><input id="aRB" type="number" step="any" value="${cur && cur.rib_width_bottom || ""}"><span>Rib spacing, ${u.l}</span><input id="aRS" type="number" step="any" value="${cur && cur.rib_spacing || ""}"><span>Ribs parallel to local axis</span><select id="aRA">${opts(["1", "2"], String(cur && cur.rib_direction || 1))}</select></div></fieldset>
-    <button id="aMod">Stiffness Modifiers...</button> <span class="kv" id="aModT"></span>`,
+  const sap = program === "sap2000", kind = s ? s.kind : newKind || "slab", wall = kind === "wall";
+  const ex = {...((cur && cur.extras) || {})};
+  if (!ex.Color) ex.Color = sap ? (wall ? "Red" : "Cyan") : wall ? "Red" : "Green";
+  const un = `<span class="un">${u.l}</span>`, th = s && s.thickness != null ? s.thickness : wall ? 0.25 : 0.2;
+  const name0 = s ? (copy ? s.name + " copy" : s.name) : (wall ? "Wall" : "Slab") + (defs.shell_sections.length + 1);
+  const modeling = (pd && pd.modeling_types) || ["ShellThin", "ShellThick", "Membrane", "Layered"];
+  const modelLabel = sap ? {ShellThin: "Shell - Thin", ShellThick: "Shell - Thick", Membrane: "Membrane", Layered: "Shell - Layered/Nonlinear"} : {ShellThin: "Shell-Thin", ShellThick: "Shell-Thick", Membrane: "Membrane", Layered: "Layered"};
+  const mat = matOpts(defs, s ? s.material : "");
+  const general = sap ? `<div class="gu">
+      <span>Section Name</span><input id="aN" value="${esc(name0)}"><span></span>
+      <span>Section Notes</span><button id="aNotes">Modify/Show...</button><span></span>
+      <span>Display Color</span><span id="aSw" style="height:20px;border:1px solid #888;display:block"></span><button id="aCol">Change...</button>
+      <span>Use</span><select id="aK" ${s && !copy ? "disabled" : ""}>${opts([["slab", "Floor (horizontal areas)"], ["wall", "Wall (vertical areas)"]], kind)}</select><span></span></div>`
+    : `<div class="gu">
+      <span>Property Name</span><input id="aN" value="${esc(name0)}"><span></span>
+      <span>${wall ? "Property Type" : "Slab Material"}</span>${wall ? `<select disabled><option>Specified</option></select>` : `<select id="aM">${mat}</select>`}<span></span>
+      ${wall ? `<span>Wall Material</span><select id="aM">${mat}</select><span></span>` : ""}
+      <span>Notional Size Data</span><button id="aNot">Modify/Show Notional Size...</button><span></span>
+      <span>Modeling Type</span><select id="aG">${opts(modeling.map(k => [k, modelLabel[k] || k]), cur && cur.modeling || "ShellThin")}</select><span></span>
+      <span>Modifiers (Currently <span id="aModT"></span>)</span><button id="aMod">Modify/Show...</button><span></span>
+      <span>Display Color</span><span id="aSw" style="height:20px;border:1px solid #888;display:block"></span><button id="aCol">Change...</button>
+      <span>Property Notes</span><button id="aNotes">Modify/Show...</button><span></span></div>
+      ${wall ? "" : `<label style="display:block;margin-top:6px"><input type="checkbox" id="aO" ${cur && cur.one_way ? "checked" : ""}> Use Special One-Way Load Distribution</label>`}`;
+  const data = sap ? `<fieldset><legend>Type</legend>${modeling.map(k => `<label style="display:block"><input type="radio" name="aG" value="${k}" ${(cur && cur.modeling || "ShellThin") === k ? "checked" : ""}> ${modelLabel[k] || k}</label>`).join("")}</fieldset>
+      <fieldset><legend>Material</legend><div class="gu"><span>Material Name</span><select id="aM">${mat}</select><span></span><span>Material Angle</span><input id="aMA" type="number" step="any" value="${esc(ex.MatAngle || "0")}"><span class="un">deg</span></div></fieldset>
+      <fieldset><legend>Thickness</legend><div class="gu"><span>Membrane</span><input id="aT" type="number" step="any" value="${th}">${un}<span>Bending</span><input id="aBT" type="number" step="any" value="${esc(ex.BendThick || th)}">${un}</div></fieldset>
+      <fieldset><legend>Stiffness Modifiers</legend><button id="aMod">Set Modifiers...</button> <span class="kv">Currently <span id="aModT"></span></span></fieldset>`
+    : wall ? `<fieldset><legend>Property Data</legend><div class="gu"><span>Thickness</span><input id="aT" type="number" step="any" value="${th}">${un}</div>
+      <label style="display:block;margin-top:6px"><input type="checkbox" id="aRZ" ${ex.RigidZone === "Yes" ? "checked" : ""}> Include Automatic Rigid Zone Area Over Wall</label></fieldset>`
+    : `<fieldset><legend>Property Data</legend><div class="gu"><span>Type</span><select id="aY">${opts((pd && pd.slab_types) || ["Slab"], cur && cur.slab_type || "Slab")}</select><span></span>
+      <span id="aTL">Thickness</span><input id="aT" type="number" step="any" value="${th}">${un}
+      <span data-rib>Overall Depth</span><input data-rib id="aRD" type="number" step="any" value="${cur && cur.overall_depth || ""}"><span data-rib class="un">${u.l}</span>
+      <span data-rib>Stem Width at Top</span><input data-rib id="aRT" type="number" step="any" value="${cur && cur.rib_width_top || ""}"><span data-rib class="un">${u.l}</span>
+      <span data-rib>Stem Width at Bottom</span><input data-rib id="aRB" type="number" step="any" value="${cur && cur.rib_width_bottom || ""}"><span data-rib class="un">${u.l}</span>
+      <span data-rib>Rib Spacing (Perpendicular to Rib Direction)</span><input data-rib id="aRS" type="number" step="any" value="${cur && cur.rib_spacing || ""}"><span data-rib class="un">${u.l}</span>
+      <span data-rib>Rib Direction is Parallel to</span><select data-rib id="aRA">${opts([["1", "Local 1 Axis"], ["2", "Local 2 Axis"]], String(cur && cur.rib_direction || 1))}</select><span data-rib></span></div></fieldset>`;
+  const title = sap ? "Shell Section Data" : wall ? "Wall Property Data" : "Slab Property Data";
+  const d = dialog(title, `<fieldset><legend>General Data</legend>${general}</fieldset>${data}`,
     [["OK", d => {
-      const kind = q(d, "#aK").value, name = q(d, "#aN").value.trim();
-      const args = {name, was, kind, thickness: fnum(d, "#aT"), material: q(d, "#aM").value, modeling: q(d, "#aG").value, modifiers: mods || undefined};
-      if (kind === "slab" && !sap) { args.slab_type = q(d, "#aY").value; args.one_way = q(d, "#aO").checked; }
-      if (kind === "slab" && args.slab_type === "Ribbed") Object.assign(args, {overall_depth: fnum(d, "#aRD"), rib_width_top: fnum(d, "#aRT"), rib_width_bottom: fnum(d, "#aRB"), rib_spacing: fnum(d, "#aRS"), rib_direction: parseInt(q(d, "#aRA").value) || 1});
-      return submit(d, "define_shell_type", args, j => { hm.sec[kind] = name; if (after) after(j); });
-    }, true], ["Cancel"]], {width: 440});
-  const show = () => d.querySelectorAll("[data-slab]").forEach(x => x.hidden = sap || q(d, "#aK").value === "wall");
-  const modText = () => { const m = mods || {}; const o = Object.entries(m).filter(([, v]) => Math.abs(v - 1) > 1e-12); q(d, "#aModT").textContent = o.length ? o.map(([k, v]) => k + " " + v).join(", ") : "none"; };
-  q(d, "#aK").onchange = show; show(); modText();
+      const name = q(d, "#aN").value.trim(), k = sap ? q(d, "#aK").value : kind;
+      const g = sap ? q(d, "input[name=aG]:checked").value : q(d, "#aG").value;
+      const args = {name, was, kind: k, thickness: fnum(d, "#aT"), material: q(d, "#aM").value, modeling: g, modifiers: mods || undefined};
+      if (k === "slab" && !sap) { args.slab_type = q(d, "#aY").value; args.one_way = q(d, "#aO").checked; }
+      if (k === "slab" && args.slab_type === "Ribbed") Object.assign(args, {overall_depth: fnum(d, "#aRD"), rib_width_top: fnum(d, "#aRT"), rib_width_bottom: fnum(d, "#aRB"), rib_spacing: fnum(d, "#aRS"), rib_direction: parseInt(q(d, "#aRA").value) || 1});
+      const e = {Color: ex.Color, Notes: ex.Notes || ""};
+      if (sap) { e.MatAngle = q(d, "#aMA").value === "0" ? "" : q(d, "#aMA").value; e.BendThick = Math.abs(fnum(d, "#aBT") - fnum(d, "#aT")) > 1e-12 ? q(d, "#aBT").value : ""; for (const f of ["NotSizeType", "NotAutoFact", "NotUserSize", "RigidZone"]) if (ex[f] && (f !== "RigidZone" || k === "wall")) e[f] = ex[f]; }
+      else { for (const f of ["NotSizeType", "NotAutoFact", "NotUserSize", "MatAngle", "BendThick"]) if (ex[f]) e[f] = ex[f]; if (wall) e.RigidZone = q(d, "#aRZ").checked ? "Yes" : ""; }
+      args.extras = e;
+      return submit(d, "define_shell_type", args, j => { hm.sec[k] = name; if (after) after(j); });
+    }, true], ["Cancel"]], {width: sap ? 460 : 520});
+  const swatch = () => q(d, "#aSw").style.background = matColorCss(ex.Color);
+  const modText = () => { q(d, "#aModT").textContent = Object.values(mods || {}).some(v => Math.abs(v - 1) > 1e-12) ? "User Specified" : "Default"; };
+  const ribs = () => { if (sap || wall) return; const t = q(d, "#aY").value, rib = t === "Ribbed" || t === "Waffle"; d.querySelectorAll("[data-rib]").forEach(x => x.hidden = !rib); q(d, "#aTL").textContent = rib ? "Slab Thickness" : "Thickness"; };
+  q(d, "#aCol").onclick = () => hmColor(ex.Color, c => { ex.Color = c; swatch(); });
+  q(d, "#aNotes").onclick = () => dialog(sap ? "Section Notes" : "Property Notes", `<div class="g2" style="margin-bottom:6px"><span>${sap ? "Section" : "Property"} Name</span><input class="grey" readonly value="${esc(q(d, "#aN").value)}"></div><textarea id="nT" rows="8" style="width:100%;box-sizing:border-box">${esc(ex.Notes || "")}</textarea>`, [["OK", n => { ex.Notes = q(n, "#nT").value; }], ["Cancel"]], {width: 420});
+  const notional = d.querySelector("#aNot");
+  if (notional) notional.onclick = () => {
+    const t = ex.NotSizeType || "Auto";
+    dialog("Notional Size Data", `<fieldset><legend>Notional Size Type</legend><label style="display:block"><input type="radio" name="nsT" value="Auto" ${t !== "User" ? "checked" : ""}> Auto (Program Determined)</label><div class="g2" style="margin:4px 0 8px 22px"><span>Scale Factor</span><input id="nsF" type="number" step="any" value="${esc(ex.NotAutoFact || "1")}"></div>
+      <label style="display:block"><input type="radio" name="nsT" value="User" ${t === "User" ? "checked" : ""}> User Defined</label><div class="gu" style="margin:4px 0 0 22px"><span>Notional Size</span><input id="nsU" type="number" step="any" value="${esc(ex.NotUserSize || "")}"><span class="un">${u.l}</span></div></fieldset>`,
+      [["OK", n => { const user = q(n, "input[name=nsT]:checked").value === "User"; ex.NotSizeType = user ? "User" : "Auto"; ex.NotAutoFact = user ? "" : q(n, "#nsF").value; ex.NotUserSize = user ? q(n, "#nsU").value : ""; }], ["Cancel"]], {width: 360});
+  };
   q(d, "#aMod").onclick = () => hmModifiers((pd && pd.shell_modifiers) || [], mods, o => { mods = o; modText(); });
+  if (!sap && !wall) q(d, "#aY").onchange = ribs;
+  swatch(); modText(); ribs();
+  return d;
 }
 
 // ---- Define: link/support properties ----

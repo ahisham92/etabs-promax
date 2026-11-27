@@ -112,6 +112,22 @@ static class PropertyTests
             var rect = Run(link, "section_properties", new { shape = "Concrete Rectangular", dims = new { D = 0.6, B = 0.3 } });
             Check(Math.Abs(rect["I33"]!.GetValue<double>() - 0.3 * 0.216 / 12) < 1e-12 && Math.Abs(rect["Z33"]!.GetValue<double>() - 0.3 * 0.36 / 4) < 1e-12, "the rectangle's I33 and Z33");
         });
+        yield return ("properties: Slab, Wall and Shell Section Data's other fields (colour, notes, notional size, a wall's rigid zone, SAP2000's material angle and bending thickness) are kept, written to SAP2000 and read back (Ahmed 2026-11-27)", () =>
+        {
+            var link = Frame();
+            var mat = link.Model.Materials.First(x => x.IsConcrete).Name;
+            Run(link, "define_shell_type", new { name = "W300", kind = "wall", thickness = 0.3, material = mat, extras = new Dictionary<string, string> { ["RigidZone"] = "Yes", ["Color"] = "Magenta", ["Notes"] = "core", ["BendThick"] = "0.25" } });
+            var w = link.Model.ShellSections.Single(x => x.Name == "W300");
+            Check(PropertyDefs.ShellExtras(w)["RigidZone"] == "Yes" && PropertyDefs.ShellTable(w) == "Wall Property Definitions - Specified", "the wall keeps its rigid zone under its table");
+            Check(PropertyDefs.ShellExtras(ModelFile.FromJson(ModelFile.ToJson(link.Model)).ShellSections.Single(x => x.Name == "W300"))["Notes"] == "core", "the .cpm keeps them");
+            var s2k = S2kWriter.Write(link.Model, "a.s2k").Text;
+            Check(s2k.Contains("Color=Magenta") && s2k.Contains("BendThick=0.25") && s2k.Contains("Notes=core"), "SAP2000's area section row takes the colour, bending thickness and notes");
+            var back = S2kReader.Read(s2k).Model.ShellSections.Single(x => x.Name == "W300");
+            Check(PropertyDefs.ShellExtras(back)["BendThick"] == "0.25" && PropertyDefs.ShellExtras(back)["Color"] == "Magenta", "the .s2k gives them back");
+            Refused(link, "define_shell_type", new { name = "S1", kind = "slab", thickness = 0.2, material = mat, extras = new Dictionary<string, string> { ["RigidZone"] = "Yes" } }, "has no field 'RigidZone'");
+            var pd = Run(link, "property_definitions", new { });
+            Check(pd["shell_sections"]!.AsArray().First(x => x!["name"]!.GetValue<string>() == "W300")!["extras"]!["Color"]!.GetValue<string>() == "Magenta" && pd["shell_extra_fields"]!["wall"]!.AsArray().Count == 8, "property_definitions gives them to the form");
+        });
         yield return ("properties: a steel, a rebar and a tendon material go in with their strengths, and come back from the .e2k and .s2k", () =>
         {
             var link = Frame();

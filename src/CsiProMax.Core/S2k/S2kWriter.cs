@@ -662,8 +662,9 @@ public static class S2kWriter
                     ("MatBehave", r.GetValueOrDefault("Behavior", "Directional")), ("S11Opt", r.GetValueOrDefault("S11", "Nonlinear")), ("S22Opt", r.GetValueOrDefault("S22", "Nonlinear")), ("S12Opt", r.GetValueOrDefault("S12", "Linear"))));
             names.Add(s.Name);
             var sm = PropertyDefs.Modifiers(s.Lines, PropertyDefs.ShellModifiers);
-            rows.Add(Row(("Section", s.Name), ("Material", s.Material), ("MatAngle", "0"), ("AreaType", "Shell"), ("Type", modelling), ("DrillDOF", "Yes"),
-                ("Thickness", N(t)), ("BendThick", N(t)), ("Color", s.IsWall ? "Red" : "Cyan"),
+            var sx = PropertyDefs.ShellExtras(s);
+            rows.Add(Row(("Section", s.Name), ("Material", s.Material), ("MatAngle", sx.GetValueOrDefault("MatAngle") ?? "0"), ("AreaType", "Shell"), ("Type", modelling), ("DrillDOF", "Yes"),
+                ("Thickness", N(t)), ("BendThick", sx.GetValueOrDefault("BendThick") ?? N(t)), ("Color", sx.GetValueOrDefault("Color") ?? (s.IsWall ? "Red" : "Cyan")), ("Notes", sx.GetValueOrDefault("Notes") ?? ""),
                 ("F11Mod", N(sm["F11MOD"])), ("F22Mod", N(sm["F22MOD"])), ("F12Mod", N(sm["F12MOD"])), ("M11Mod", N(sm["M11MOD"])), ("M22Mod", N(sm["M22MOD"])), ("M12Mod", N(sm["M12MOD"])), ("V13Mod", N(sm["V13MOD"])), ("V23Mod", N(sm["V23MOD"])), ("MMod", N(sm["MMOD"])), ("WMod", N(sm["WMOD"]))));
         }
         Add(tables, "AREA SECTION PROPERTIES", rows);

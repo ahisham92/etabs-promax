@@ -56,6 +56,17 @@ public static class ModelerTables
             }
             catch (EtabsException ex) { refused.Add($"{table}: {ex.Message}"); }
         }
+        // A slab or wall section's other fields (notional size, colour, notes, a wall's rigid zone), in its table by name.
+        foreach (var g in model.ShellSections.Where(x => PropertyDefs.ShellExtras(x).Keys.Except(PropertyDefs.SapOnlyShellFields).Any()).GroupBy(PropertyDefs.ShellTable))
+        {
+            try
+            {
+                EditableTables.Put(e, g.Key, "Name", g.Select(x => (IReadOnlyDictionary<string, string>)PropertyDefs.ShellExtras(x).Where(kv => !PropertyDefs.SapOnlyShellFields.Contains(kv.Key))
+                    .Append(KeyValuePair.Create("Name", x.Name)).ToDictionary(kv => kv.Key, kv => kv.Value)).ToList(), $"put the Modeler's '{g.Key}' in");
+                done.Add($"{g.Key}: {g.Count()} row{(g.Count() == 1 ? "" : "s")}");
+            }
+            catch (EtabsException ex) { refused.Add($"{g.Key}: {ex.Message}"); }
+        }
         // The objects' assignments the .e2k has no keyword for, by story and label (AssignTables). A new row names its
         // object's UniqueName too, read from the program's summary of that kind of object.
         var unique = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);

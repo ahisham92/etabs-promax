@@ -239,22 +239,44 @@ public static class PropertyDefs
     }
 
     /// <summary>Sets a frame section's other fields (<see cref="FrameExtraFields"/>); empty values are taken off.</summary>
-    public static void SetFrameExtras(FrameSection s, IReadOnlyDictionary<string, string> extras)
+    public static void SetFrameExtras(FrameSection s, IReadOnlyDictionary<string, string> extras) => SetExtras(s, s.Shape, FrameExtraFields(s.Shape), extras, $"A {s.Shape} section");
+
+    /// <summary>A frame section's other fields, or an empty row.</summary>
+    public static IReadOnlyDictionary<string, string> FrameExtras(FrameSection s) => Extras(s, s.Shape);
+
+    /// <summary>
+    /// What ETABS 23.2's Slab and Wall Property Data forms hold beside the .e2k's line (notional size, colour, notes; a
+    /// wall's automatic rigid zone), by its "Slab Property Definitions" and "Wall Property Definitions - Specified"
+    /// fields, and SAP2000's Shell Section Data material angle and bending thickness (its "Area Section Properties").
+    /// </summary>
+    public static string[] ShellExtraFields(bool wall) => wall
+        ? ["RigidZone", "NotSizeType", "NotAutoFact", "NotUserSize", "Color", "Notes", "MatAngle", "BendThick"]
+        : ["NotSizeType", "NotAutoFact", "NotUserSize", "Color", "Notes", "MatAngle", "BendThick"];
+
+    /// <summary>The fields of <see cref="ShellExtraFields"/> that are SAP2000's only.</summary>
+    public static readonly string[] SapOnlyShellFields = ["MatAngle", "BendThick"];
+
+    /// <summary>ETABS 23.2's table for a slab or a wall section's row.</summary>
+    public static string ShellTable(ShellSection s) => s.IsWall ? "Wall Property Definitions - Specified" : "Slab Property Definitions";
+
+    public static void SetShellExtras(ShellSection s, IReadOnlyDictionary<string, string> extras) => SetExtras(s, ShellTable(s), ShellExtraFields(s.IsWall), extras, s.IsWall ? "A wall section" : "A slab section");
+
+    public static IReadOnlyDictionary<string, string> ShellExtras(ShellSection s) => Extras(s, ShellTable(s));
+
+    private static void SetExtras(Definition d, string table, string[] fields, IReadOnlyDictionary<string, string> extras, string what)
     {
-        var fields = FrameExtraFields(s.Shape);
         var row = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var (k, v) in extras)
         {
             var f = fields.FirstOrDefault(x => x.Equals(k, StringComparison.OrdinalIgnoreCase))
-                ?? throw new ArgumentException($"A {s.Shape} section has no field '{k}'. It has: {string.Join(", ", fields)}.");
+                ?? throw new ArgumentException($"{what} has no field '{k}'. It has: {string.Join(", ", fields)}.");
             if (v.Trim().Length > 0) row[f] = v.Trim();
         }
-        s.Tables = row.Count > 0 ? new(StringComparer.OrdinalIgnoreCase) { [s.Shape] = [row] } : null;
+        d.Tables = row.Count > 0 ? new(StringComparer.OrdinalIgnoreCase) { [table] = [row] } : null;
     }
 
-    /// <summary>A frame section's other fields, or an empty row.</summary>
-    public static IReadOnlyDictionary<string, string> FrameExtras(FrameSection s) =>
-        s.Tables is not null && s.Tables.TryGetValue(s.Shape, out var rows) && rows.Count > 0 ? rows[0] : new Dictionary<string, string>();
+    private static IReadOnlyDictionary<string, string> Extras(Definition d, string table) =>
+        d.Tables is not null && d.Tables.TryGetValue(table, out var rows) && rows.Count > 0 ? rows[0] : new Dictionary<string, string>();
 
     // ---- slab and wall types ----
 

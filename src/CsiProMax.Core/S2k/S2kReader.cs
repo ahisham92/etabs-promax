@@ -408,6 +408,12 @@ public static partial class S2kReader
                 foreach (var (k, key) in new[] { ("F11MOD", "F11Mod"), ("F22MOD", "F22Mod"), ("F12MOD", "F12Mod"), ("M11MOD", "M11Mod"), ("M22MOD", "M22Mod"), ("M12MOD", "M12Mod"), ("V13MOD", "V13Mod"), ("V23MOD", "V23Mod"), ("MMOD", "MMod"), ("WMOD", "WMod") })
                     mods[k] = D(r, key, 1);
                 PropertyDefs.SetModifiers(sec.Lines, PropertyDefs.ShellModifiers, mods);
+                var x = new Dictionary<string, string>(StringComparer.Ordinal);
+                if (S(r, "Color") is { Length: > 0 } c && c != (sec.IsWall ? "Red" : "Cyan")) x["Color"] = c;
+                if (S(r, "Notes") is { Length: > 0 } n) x["Notes"] = n;
+                if (D(r, "MatAngle") != 0) x["MatAngle"] = S(r, "MatAngle");
+                if (D(r, "BendThick") > 0 && Math.Abs(D(r, "BendThick") - thickness) > 1e-12) x["BendThick"] = S(r, "BendThick");
+                if (x.Count > 0) PropertyDefs.SetShellExtras(sec, x);
             }
             catch (ArgumentException ex) { notes.Add($"Area section {name}: {ex.Message}"); }
         }
