@@ -569,7 +569,12 @@ public static class FieldTest
                 }
             }
             // CSI ProMax Engine's Run (Ahmed 2026-11-26) in this program, on a real PC only (a test's stand-in window is no program).
-            if (finished && o.StartScratch.Method.DeclaringType == typeof(ScratchProgram)) { EngineRunStep(ctx, program); PackSpeedField.Large(ctx, program); RealModelField.Run(ctx, program); }
+            if (finished && o.StartScratch.Method.DeclaringType == typeof(ScratchProgram)) {
+                // Every run checks that its results came back whole (Ahmed 2026-11-27), only while the field test runs.
+                EngineRun.CheckLoss = true;
+                try { EngineRunStep(ctx, program); PackSpeedField.Large(ctx, program); RealModelField.Run(ctx, program); }
+                finally { EngineRun.CheckLoss = false; }
+            }
         }
         // With no program open on the PC (the company closes ETABS at 4 AM), the open model's checks and CSI ProMax's own
         // features that found no answering scratch window run on a hidden scratch window started for them alone.
@@ -688,6 +693,9 @@ public static class FieldTest
             var status = EngineRun.Status(true);
             FieldContext.Expect(status["done"]?.GetValue<bool>() == true, "the run did not finish within 20 minutes: " + status["phase"]);
             FieldContext.Expect(string.IsNullOrEmpty(status["error"]?.GetValue<string>()), "the run stopped: " + status["error"]);
+            // The analysis and design results came back complete: nothing the program has is missing from them.
+            if (status["lost"] is JsonArray { Count: > 0 } lost)
+                throw new FieldCheckException($"the results that came back lost what {program.Name} has: " + string.Join("; ", lost.Take(30).Select(l => l?.GetValue<string>())));
             if (keptOpen)
             {
                 FieldContext.Expect(status["kept_open"]?.GetValue<bool>() == true && Said(status, "was left open with the analysed model"), $"{program.Name} was not left open after the job: " + Last(status));
