@@ -307,17 +307,17 @@ public static class LateralLoads
             case "asce7":
             {
                 var site = a.Text("SiteClass");
-                double ss = a.Num("Ss"), s1 = a.Num("S1"), rr = a.Num("R"), ie = a.Num("I"), tl = a.Num("TL");
-                var fa = a.Opt("Fa") ?? Asce.Fa(site, ss);
-                var fv = a.Opt("Fv") ?? Asce.Fv(site, s1);
-                var sds = a.Opt("SDS") ?? 2.0 / 3 * fa * ss;
-                var sd1 = a.Opt("SD1") ?? 2.0 / 3 * fv * s1;
+                // ASCE 7-22 has no Ss parameter (SDS and SD1 come from the USGS geodatabase), so Ss is optional here.
+                double ss = a.Opt("Ss") ?? 0, s1 = a.Num("S1"), rr = a.Num("R"), ie = a.Num("I"), tl = a.Num("TL");
+                var (fa, fv, sds, sd1) = Asce.Design(a, site, ss, s1);
                 if (user && a.Text("CuCap").Equals("Yes", StringComparison.OrdinalIgnoreCase)) t = Math.Min(t, Asce.Cu(sd1) * ta);
                 var cs = sds / (rr / ie);
                 cs = Math.Min(cs, t <= tl ? sd1 / (t * rr / ie) : sd1 * tl / (t * t * rr / ie));
                 cs = Math.Max(cs, Math.Max(0.044 * sds * ie, 0.01));
                 if (s1 >= 0.6) cs = Math.Max(cs, 0.5 * s1 / (rr / ie));
-                r["Fa"] = fa; r["Fv"] = fv; r["SDS"] = sds; r["SD1"] = sd1; r["T"] = t; r["Cs"] = cs;
+                if (fa is { } faUsed) r["Fa"] = faUsed;
+                if (fv is { } fvUsed) r["Fv"] = fvUsed;
+                r["SDS"] = sds; r["SD1"] = sd1; r["T"] = t; r["Cs"] = cs;
                 return (cs, KFromT(t), 0);
             }
             case "ubc97":
@@ -359,7 +359,8 @@ public static class LateralLoads
                 var cs = S(t) * mv * ie / (rd * ro);
                 var older = a.Code.Name.EndsWith("2005") || a.Code.Name.EndsWith("2010");
                 cs = Math.Max(cs, S(older ? 2.0 : 4.0) * mv * ie / (rd * ro));
-                if (rd >= 1.5) cs = Math.Min(cs, 2.0 / 3 * S(0.2) * ie / (rd * ro));
+                // 4.1.8.11 (2)(c): for Rd >= 1.5, V need not exceed 2/3 S(0.2); NBCC 2015 and 2020 take the larger of that and S(0.5).
+                if (rd >= 1.5) cs = Math.Min(cs, (older ? 2.0 / 3 * S(0.2) : Math.Max(2.0 / 3 * S(0.2), S(0.5))) * ie / (rd * ro));
                 var ft = t > 0.7 ? Math.Min(0.07 * t, 0.25) : 0;
                 r["T"] = t; r["S(T)"] = S(t); r["Cs"] = cs;
                 return (cs, 1, ft);
@@ -377,7 +378,8 @@ public static class LateralLoads
                     r["Ta"] = ta;
                 }
                 double z = a.Num("Z"), ie = a.Num("I"), rr = a.Num("R");
-                var sa = Is.Sa(t, soil);
+                // 7.6.1: the equivalent static method takes Sa/g at its plateau for T below 0.1 s (no ramp to 1.0 at T = 0).
+                var sa = Is.Sa(Math.Max(t, 0.1), soil);
                 var ah = z / 2 * ie / rr * sa;
                 if (a.Code.Name.Contains("2016")) ah = Math.Max(ah, z switch { <= 0.10 => 0.007, <= 0.16 => 0.011, <= 0.24 => 0.016, _ => 0.024 });
                 r["T"] = t; r["Sa/g"] = sa; r["Ah"] = ah; r["Cs"] = ah;
@@ -479,7 +481,13 @@ public static class LateralLoads
                     var iv = 1 / (co * Math.Log(zz / z0));
                     return (1 + 7 * iv) * 0.5 * rho * vm * vm;
                 }
-                windward = z => Qp(z) * cscd * cpw;
+                // EN 1991-1-4 7.2.2 and figure 7.4: the reference height ze for the windward wall from h and the width b.
+                var bM = width * g.LengthToM;
+                double Ze(double z) =>
+                    hTopM <= bM ? hTopM
+                    : hTopM <= 2 * bM ? (z <= bM ? bM : hTopM)
+                    : z <= bM ? bM : z >= hTopM - bM ? hTopM : z;
+                windward = z => Qp(Ze(z)) * cscd * cpw;
                 leeward = _ => Qp(hTopM) * cscd * cpl;
                 r["qp(h)"] = Qp(hTopM) * toModel;
                 break;
@@ -509,15 +517,54 @@ public static class LateralLoads
             default: throw new ArgumentException($"{a.Code.Name} is not a wind code the Modeler computes.");
         }
         var fx = new double[levels.Count]; var fy = new double[levels.Count]; var mz = new double[levels.Count];
+        var along = new double[levels.Count];
         var total = 0.0;
         for (var i = 0; i < levels.Count; i++)
         {
             var p = (windward(h[i] * g.LengthToM) + leeward(h[i] * g.LengthToM)) * toModel;
-            var f = p * width * trib[i];
-            fx[i] = f * dx; fy[i] = f * dy; total += f;
+            along[i] = p * width * trib[i];
+            fx[i] = along[i] * dx; fy[i] = along[i] * dy; total += along[i];
         }
         r["V"] = total;
+        if (a.Code.Family == "asce7-wind") AsceWindCase(a, joints, dx, dy, width, along, fx, fy, mz, r);
         return (fx, fy, mz);
+    }
+
+    /// <summary>
+    /// The design wind load cases of ASCE 7 (Fig. 27.3-8 in 7-16 and 7-22, Fig. 27.4-8 in 7-10, Fig. 6-9 in 7-05), on the
+    /// direction of the wind and the direction 90° from it. The pressures have no part that depends on the width, so the
+    /// other direction is the same pressures on the other width.
+    /// 1: the full pressures along the wind. 2: 0.75 of them with the torsion 0.75 F e1 B (e1 = ±0.15). 3: 0.75 along both
+    /// directions at once. 4: 0.563 along both with the torsion 0.563 (Fx e1 Bx + Fy e2 By). 5 (CSI's "all"): the pattern
+    /// holds case 1, and the base shear and torsion of every case are listed.
+    /// </summary>
+    private static void AsceWindCase(In a, List<(double X, double Y)> joints, double dx, double dy, double width, double[] along,
+        double[] fx, double[] fy, double[] mz, Dictionary<string, double> r)
+    {
+        var text = a.Text("ASCECase");
+        var c = text.Length == 0 ? 1 : int.TryParse(text, NumberStyles.Integer, Inv, out var n) && n is >= 1 and <= 5 ? n
+            : throw new ArgumentException("The ASCE wind case is 1, 2, 3, 4 or 5 (all).");
+        double e1 = a.Opt("ASCEe1") ?? 0.15, e2 = a.Opt("ASCEe2") ?? 0.15;
+        // The width of the face the 90° wind meets: the plan size along the wind.
+        var other = joints.Count == 0 ? 0 : joints.Max(j => j.X * dx + j.Y * dy) - joints.Min(j => j.X * dx + j.Y * dy);
+        var otherWidth = other > 0 ? other : width;
+        double v1 = along.Sum(), v2 = v1 * otherWidth / width;
+        r["ASCECase"] = c;
+        r["V case 1"] = v1; r["Mz case 2"] = 0.75 * v1 * e1 * width;
+        r["V case 3"] = 0.75 * Math.Sqrt(v1 * v1 + v2 * v2); r["Mz case 4"] = 0.563 * (v1 * e1 * width + v2 * e2 * otherWidth);
+        if (c is 1 or 5) return;
+        var k = c == 4 ? 0.563 : 0.75;
+        var total = 0.0;
+        for (var i = 0; i < along.Length; i++)
+        {
+            var f = along[i]; var f2 = f * otherWidth / width;
+            // The 90° direction (-dy, dx) for cases 3 and 4.
+            fx[i] = k * (f * dx + (c >= 3 ? -f2 * dy : 0));
+            fy[i] = k * (f * dy + (c >= 3 ? f2 * dx : 0));
+            mz[i] = c == 2 ? k * f * e1 * width : c == 4 ? k * (f * e1 * width + f2 * e2 * otherWidth) : 0;
+            total += k * f;
+        }
+        r["V"] = total;
     }
 
     // ---- a code's spectrum as a function ----
@@ -542,9 +589,8 @@ public static class LateralLoads
             case "asce7":
             {
                 var site = a.Text("SiteClass");
-                double ss = a.Num("Ss"), s1 = a.Num("S1"), tl = a.Num("TL");
-                var sds = a.Opt("SDS") ?? 2.0 / 3 * (a.Opt("Fa") ?? Asce.Fa(site, ss)) * ss;
-                var sd1 = a.Opt("SD1") ?? 2.0 / 3 * (a.Opt("Fv") ?? Asce.Fv(site, s1)) * s1;
+                double ss = a.Opt("Ss") ?? 0, s1 = a.Num("S1"), tl = a.Num("TL");
+                var (_, _, sds, sd1) = Asce.Design(a, site, ss, s1);
                 double ts = sd1 / sds, t0 = 0.2 * ts;
                 marks.AddRange([t0, ts, tl]);
                 sa = t => t < t0 ? sds * (0.4 + 0.6 * t / t0) : t <= ts ? sds : t <= tl ? sd1 / t : sd1 * tl / (t * t);
@@ -602,30 +648,17 @@ public static class LateralLoads
 
     private static class Asce
     {
-        private static readonly double[] SsAt = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5];
-        private static readonly double[] S1At = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6];
-        private static readonly Dictionary<string, double?[]> FaT = new(StringComparer.OrdinalIgnoreCase)
+        /// <summary>Fa and Fv (when the table gave them) and SDS, SD1 (11.4.4, 11.4.5): the values given, else from the
+        /// edition's tables (<see cref="SiteCoefficients"/>). ASCE 7-22 has no tables, so it needs SDS and SD1.</summary>
+        public static (double? Fa, double? Fv, double Sds, double Sd1) Design(In a, string site, double ss, double s1)
         {
-            ["A"] = [0.8, 0.8, 0.8, 0.8, 0.8, 0.8], ["B"] = [0.9, 0.9, 0.9, 0.9, 0.9, 0.9], ["C"] = [1.3, 1.3, 1.2, 1.2, 1.2, 1.2],
-            ["D"] = [1.6, 1.4, 1.2, 1.1, 1.0, 1.0], ["E"] = [2.4, 1.7, 1.3, null, null, null],
-        };
-        private static readonly Dictionary<string, double?[]> FvT = new(StringComparer.OrdinalIgnoreCase)
-        {
-            ["A"] = [0.8, 0.8, 0.8, 0.8, 0.8, 0.8], ["B"] = [0.8, 0.8, 0.8, 0.8, 0.8, 0.8], ["C"] = [1.5, 1.5, 1.5, 1.5, 1.5, 1.4],
-            ["D"] = [2.4, 2.2, 2.0, 1.9, 1.8, 1.7], ["E"] = [4.2, null, null, null, null, null],
-        };
-        public static double Fa(string site, double ss) => Look(FaT, SsAt, site, ss, "Fa");
-        public static double Fv(string site, double s1) => Look(FvT, S1At, site, s1, "Fv");
-        private static double Look(Dictionary<string, double?[]> table, double[] at, string site, double value, string what)
-        {
-            if (!table.TryGetValue(site, out var row)) throw new ArgumentException($"Site class {site} has no {what} in the table: give {what}.");
-            var i = Array.FindIndex(at, x => value <= x);
-            if (i < 0) return row[^1] ?? throw Needs(site, what);
-            if (i == 0) return row[0] ?? throw Needs(site, what);
-            if (row[i - 1] is not { } lo || row[i] is not { } hi) throw Needs(site, what);
-            return lo + (hi - lo) * (value - at[i - 1]) / (at[i] - at[i - 1]);
+            var code = a.Code.Name;
+            double? fa = null, fv = null;
+            var sds = a.Opt("SDS") ?? 2.0 / 3 * (fa = a.Opt("Fa") ?? SiteCoefficients.Fa(code, site, ss)).Value * ss;
+            var sd1 = a.Opt("SD1") ?? 2.0 / 3 * (fv = a.Opt("Fv") ?? SiteCoefficients.Fv(code, site, s1)).Value * s1;
+            return (fa, fv, sds, sd1);
         }
-        private static ArgumentException Needs(string site, string what) => new($"The code gives no {what} for site class {site} at this value (a site-specific study): give {what}.");
+
         public static double Cu(double sd1) => sd1 >= 0.4 ? 1.4 : sd1 >= 0.3 ? 1.4 : sd1 >= 0.2 ? 1.5 - (sd1 - 0.2) : sd1 >= 0.15 ? 1.6 - (sd1 - 0.15) * 2 : sd1 >= 0.1 ? 1.7 - (sd1 - 0.1) * 2 : 1.7;
     }
 

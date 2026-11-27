@@ -482,7 +482,9 @@ public static class ModelerFieldSteps
         foreach (var code in CsiProMax.Lateral.LateralCodes.All)
         {
             var name = code.Kind == CsiProMax.Lateral.LateralCodes.Wind ? "CPM-WIND" : "CPM-EQ";
-            ctx.Tool("set_lateral_load", $$"""{"name":"{{name}}","kind":"{{code.Kind.ToLowerInvariant()}}","code":{{Q(code.Name)}}}""", a =>
+            // ASCE 7-22 has no Fa and Fv tables: its SDS and SD1 are given (the USGS geodatabase's in a real model).
+            var values = code.Name == "ASCE 7-22" && code.Kind == CsiProMax.Lateral.LateralCodes.Seismic ? ""","values":{"SDS":"1.0","SD1":"0.6"}""" : "";
+            ctx.Tool("set_lateral_load", $$"""{"name":"{{name}}","kind":"{{code.Kind.ToLowerInvariant()}}","code":{{Q(code.Name)}}{{values}}}""", a =>
             {
                 FieldContext.Expect(a["error"] is null, $"{code.Name} could not be computed: {a["error"]}");
                 var forces = a["story_forces"]!.AsArray();

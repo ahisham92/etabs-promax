@@ -213,7 +213,7 @@ public static class HandTools
             var material = Existing(m.Materials, was, x => x.Name, "material");
             if (material is null)
             {
-                m.AddConcrete(name, fc, modulus, Num(a, "unit_weight") ?? 25);
+                m.AddConcrete(name, fc, modulus, Num(a, "unit_weight") ?? m.ConcreteUnitWeight());
                 material = m.Materials[^1];
             }
             else

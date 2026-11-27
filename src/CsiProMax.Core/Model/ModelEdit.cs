@@ -47,6 +47,20 @@ public static class ModelEdit
             Extra = ["VISIBLE", "\"Yes\"", "BUBBLELOC", direction.Equals("X", StringComparison.OrdinalIgnoreCase) ? "\"End\"" : "\"Start\""],
         });
 
+    /// <summary>A length given in metres, in the model's length unit (a model in mm or in takes its covers in mm or in).</summary>
+    public static double FromMetres(this StructuralModel m, double metres) =>
+        metres / (CsiProMax.CsiTables.ModelTables.UnitFactor(m.Units.Length) ?? 1);
+
+    /// <summary>A weight per volume given in kN/m³, in the model's force per length³.</summary>
+    public static double FromKnPerM3(this StructuralModel m, double knPerM3)
+    {
+        double toN = CsiProMax.CsiTables.ModelTables.UnitFactor(m.Units.Force) ?? 1000, toM = CsiProMax.CsiTables.ModelTables.UnitFactor(m.Units.Length) ?? 1;
+        return knPerM3 * 1000 / toN * toM * toM * toM;
+    }
+
+    /// <summary>The usual normal-weight concrete, 25 kN/m³, in the model's units.</summary>
+    public static double ConcreteUnitWeight(this StructuralModel m) => m.FromKnPerM3(25);
+
     public static Material AddConcrete(this StructuralModel m, string name, double fc, double elasticModulus, double weightPerVolume)
     {
         var material = new Material
@@ -75,10 +89,14 @@ public static class ModelEdit
         m.FrameSections.Add(section);
         var rebar = m.Materials.Find(x => x.Type.Equals("Rebar", StringComparison.OrdinalIgnoreCase))?.Name ?? DefaultRebar;
         string[] bars = ["CONCRETESECTION", E2kText.Quote(name), "LONGBARMATERIAL", E2kText.Quote(rebar), "CONFINEBARMATERIAL", E2kText.Quote(rebar)];
+        // ETABS's defaults in SI (covers 60 and 40 mm, a 20 mm bar, 10 mm ties at 150 mm), in the model's own units: ETABS
+        // reads these numbers in the model's units, so a model in mm or kip-in would otherwise get 0.06 mm covers.
+        string L(double metres) => E2kText.Number(m.FromMetres(metres));
+        string A(double squareMetres) => E2kText.Number(m.FromMetres(1) * m.FromMetres(1) * squareMetres);
         var line = beam
-            ? E2kText.Line(bars, ["TYPE", "\"Beam\"", "COVERTOP", "0.06", "COVERBOTTOM", "0.06", "ATI", "0", "ABI", "0", "ATJ", "0", "ABJ", "0"])
-            : E2kText.Line(bars, ["TYPE", "\"Column\"", "PATTERN", "\"R-5-3\"", "TRANSREINF", "\"TIES\"", "DESIGNCHECK", "\"DESIGN\"", "COVER", "0.04",
-                "LONGBARAREA", "0.0003142", "CONFINEBARAREA", "7.85E-05", "CONFINEBARSPACING", "0.15", "NUMCONFINEBARS3", "3", "NUMCONFINEBARS2", "3"]);
+            ? E2kText.Line(bars, ["TYPE", "\"Beam\"", "COVERTOP", L(0.06), "COVERBOTTOM", L(0.06), "ATI", "0", "ABI", "0", "ATJ", "0", "ABJ", "0"])
+            : E2kText.Line(bars, ["TYPE", "\"Column\"", "PATTERN", "\"R-5-3\"", "TRANSREINF", "\"TIES\"", "DESIGNCHECK", "\"DESIGN\"", "COVER", L(0.04),
+                "LONGBARAREA", A(0.0003142), "CONFINEBARAREA", A(7.85E-05), "CONFINEBARSPACING", L(0.15), "NUMCONFINEBARS3", "3", "NUMCONFINEBARS2", "3"]);
         var concrete = m.Passthrough.Find(s => s.Heading == "CONCRETE SECTIONS");
         if (concrete is null) m.Passthrough.Add(concrete = new RawSection { Heading = "CONCRETE SECTIONS", After = "FRAME SECTIONS" });
         concrete.Lines.Add(line);

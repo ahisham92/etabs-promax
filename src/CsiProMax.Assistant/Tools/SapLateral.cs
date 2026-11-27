@@ -120,7 +120,7 @@ internal static class SapLateral
         // user
         ["C"] = 0.1, ["K"] = 1.0,
         // wind
-        ["ExposureFrom"] = 2, ["DirAngle"] = 0.0, ["Cpw"] = 0.8, ["Cpl"] = 0.5, ["Cp"] = 1.4, ["ASCECase"] = 1, ["ASCEe1"] = 0.15, ["ASCEe2"] = 0.15,
+        ["ExposureFrom"] = 2, ["DirAngle"] = 0.0, ["Cpw"] = 0.8, ["Cpl"] = 0.5, ["Cp"] = 1.4, ["ASCECase"] = 5, ["ASCEe1"] = 0.15, ["ASCEe2"] = 0.15,
         ["WindSpeed"] = 100.0, ["ExposureType"] = 2, ["ImportanceFactor"] = 1.0, ["Kzt"] = 1.0, ["GustFactor"] = 0.85, ["Kd"] = 0.85, ["SolidGrossRatio"] = 0.2,
         ["UserExposure"] = false, ["UserGust"] = false, ["SSLFactor"] = 1.0, ["ShieldingFactor"] = 1.0, ["Ka"] = 1.0, ["Kc"] = 1.0, ["Kl"] = 1.0, ["Kp"] = 1.0,
         ["Cat"] = 2, ["CycloneRegion"] = false, ["Md"] = 1.0, ["Ms"] = 1.0, ["Mt"] = 1.0, ["Cdyn"] = 1.0, ["Ve"] = 30.0, ["Ca"] = 1.0, ["Cr"] = 1.0,
@@ -153,7 +153,7 @@ internal static class SapLateral
         ["SetNZS11702004"] = new(StringComparer.OrdinalIgnoreCase) { ["PeriodFlag"] = 2, ["NZS2004R"] = 1.3, ["NZS2004Mu"] = 3.0 },
         ["SetNZS11702004_1"] = new(StringComparer.OrdinalIgnoreCase) { ["PeriodFlag"] = 2, ["NZS2004R"] = 1.3, ["NZS2004Mu"] = 3.0 },
         ["SetNZS11702004_2"] = new(StringComparer.OrdinalIgnoreCase) { ["PeriodFlag"] = 2, ["NZS2004R"] = 1.3, ["NZS2004Mu"] = 3.0 },
-        ["SetASCE716"] = new(StringComparer.OrdinalIgnoreCase) { ["ExposureFrom"] = 1, ["ASCECase"] = 1 },
+        ["SetASCE716"] = new(StringComparer.OrdinalIgnoreCase) { ["ExposureFrom"] = 1, ["ASCECase"] = 5 },
     };
 
     /// <summary>The arguments for one Set call: the seeds, and 1 / false / "" for anything not named.</summary>
