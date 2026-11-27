@@ -5164,8 +5164,53 @@ function hmDefineTableItems() {
     only(["etabs"], ["Hinge Definitions", hingeKinds.map(k => [k + "...", "m:dt:Hinge Definitions - " + k])]),
     only(["sap2000"], ["Hinge Properties", sapHinges.map(([label, nums]) => [label + "...", "m:dt:" + nums.map(n => sapHingeTable(n)).join("|")])])];
 }
+// SAP2000 26.3's Generalized Displacements and Generalized Displacement Definition: name, Type (Translational/Rotational),
+// and the Scale Factors grid of Joint, U1, U2, U3, R1, R2, R3 with Add / Modify / Delete. Kept as the model's table rows.
+function hmSapGenDispl(all) {
+  const T = "Generalized Displacement Definitions", dofs = ["U1", "U2", "U3", "R1", "R2", "R3"];
+  const names = [...new Set(all.map(r => r.Name))];
+  const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmDefineTable(T); };
+  const one = (n) => {
+    const mine = all.filter(r => r.Name === n), rot = mine.length && /^rot/i.test(mine[0].Type || "");
+    const pre = rot ? "Rot" : "Trans";
+    const rows = mine.map(r => [r.PointName || "", ...dofs.map(k => +(r[pre + k + "SF"] || 0))]);
+    let at = -1;
+    let k = 1; while (names.includes("GDISP" + k)) k++;
+    const col = "width:74px;text-align:right;box-sizing:border-box";
+    const d = dialog("Generalized Displacement Definition", `<div style="display:flex;gap:10px;align-items:stretch"><fieldset style="flex:1;margin:0"><div style="display:flex;justify-content:space-between;align-items:center;padding:10px 8px"><b>Generalized Displacement Name</b><input id="gN" style="width:130px" value="${esc(n || "GDISP" + k)}" ${n ? "disabled" : ""}></div></fieldset>
+        <fieldset style="width:130px;margin:0"><legend>Type</legend><label style="display:block"><input type="radio" name="gT" value="Translational" ${rot ? "" : "checked"}> Translational</label><label style="display:block"><input type="radio" name="gT" value="Rotational" ${rot ? "checked" : ""}> Rotational</label></fieldset></div>
+      <fieldset style="margin-top:8px"><legend>Scale Factors</legend>
+        <div style="display:grid;grid-template-columns:74px repeat(6,74px);gap:0 2px;justify-content:center;text-align:center"><span>Joint</span>${dofs.map(x => `<span>${x}</span>`).join("")}
+          <input id="gJ" style="width:74px;box-sizing:border-box">${dofs.map(x => `<input data-sf="${x}" type="number" step="any" value="0" style="${col}">`).join("")}</div>
+        <div style="display:flex;justify-content:center"><div style="width:${76 * 7}px;height:110px;overflow:auto;border:1px solid #888;background:#fff"><table id="gL" style="border-collapse:collapse;table-layout:fixed;width:100%"></table></div></div>
+        <div style="display:flex;justify-content:center;gap:24px;margin-top:8px"><button id="gAdd">Add</button><button id="gMod">Modify</button><button id="gDel">Delete</button></div></fieldset>`,
+      [["OK", d => {
+        const name = q(d, "#gN").value.trim(); if (!name) { formError(d, "Give it a name."); return false; }
+        const p = q(d, "[name=gT]:checked").value === "Rotational" ? "Rot" : "Trans", other = p === "Rot" ? "Trans" : "Rot";
+        const out = rows.map(r => Object.assign({Name: name, Type: p === "Rot" ? "Rotational" : "Translational", PointName: r[0]}, ...dofs.map((x, i) => ({[p + x + "SF"]: String(r[i + 1]), [other + x + "SF"]: "0"}))));
+        return submit(d, "define_table_rows", {table: T, name, rows: out}, again);
+      }], ["Cancel"]], {width: 640});
+    const L = q(d, "#gL");
+    const paint = () => {
+      L.innerHTML = rows.map((r, i) => `<tr data-i="${i}" style="cursor:default;${i === at ? "background:#3399ff;color:#fff" : ""}">${r.map((v, j) => `<td style="border-right:1px solid #ccc;padding:1px 4px;text-align:${j ? "right" : "left"};overflow:hidden">${esc(String(v))}</td>`).join("")}</tr>`).join("");
+      L.querySelectorAll("tr").forEach(tr => tr.onclick = () => pick(+tr.dataset.i)); sync();
+    };
+    const sync = () => { q(d, "#gMod").disabled = q(d, "#gDel").disabled = !(at >= 0 && at < rows.length); };
+    const entry = () => [q(d, "#gJ").value.trim(), ...dofs.map(x => +d.querySelector(`[data-sf="${x}"]`).value || 0)];
+    const pick = i => { at = i; const r = rows[at]; if (!r) return; q(d, "#gJ").value = r[0]; dofs.forEach((x, k) => d.querySelector(`[data-sf="${x}"]`).value = r[k + 1]); paint(); };
+    q(d, "#gAdd").onclick = () => { const e = entry(); if (!e[0]) return formError(d, "Name the joint."); rows.push(e); at = rows.length - 1; paint(); };
+    q(d, "#gMod").onclick = () => { const e = entry(); if (at < 0 || !e[0]) return; rows[at] = e; paint(); };
+    q(d, "#gDel").onclick = () => { if (at < 0) return; rows.splice(at, 1); at = -1; paint(); };
+    paint();
+    return d;
+  };
+  const d = listForm("Generalized Displacements", "Gen Displacements", names, [["Add New Gen Displ...", () => one(null)], ["Modify/Show Gen Displ...", n => n && one(n)], ["Delete Gen Displ", n => n && hmRun("define_table_rows", {table: T, name: n, rows: []}).then(j => j.ok && again())]], n => one(n));
+  const b = d.querySelectorAll("[data-a]"); b[1].disabled = b[2].disabled = !names.length;
+  return d;
+}
 async function hmDefineTable(spec) {
   const tables = spec.split("|"), dd = (await hmRun("definition_data", {}, true)).result; if (!dd) return;
+  if (program === "sap2000" && spec === "Generalized Displacement Definitions" && dd.tables[spec]) return hmSapGenDispl(dd.tables[spec].rows);
   const defs = tables.map(t => dd.tables[t]); if (defs.some(x => !x)) return hmSay("The " + progLabel(program) + " model has no " + tables[0] + ".", true);
   const key = t => dd.tables[t].fields[0][0];
   const names = [...new Set(tables.flatMap(t => dd.tables[t].rows.map(r => r[key(t)])))];
