@@ -531,7 +531,7 @@ static class ExtrasTests
             Run(link, "assign_frame_data", new { objects = new[] { obj }, tables = new Dictionary<string, object[]> { [AssignTables.Insertion] = [new Dictionary<string, string> { ["Mirror2"] = "Yes", ["OffsetCSys"] = "Global", ["ZI"] = "0.05" }] } });
             link.Model.Target = "sap2000";
             var text = CsiProMax.S2k.S2kWriter.Write(link.Model, "a.s2k").Text;
-            Check(text.Contains("FRAME RELEASE ASSIGNMENTS 2 - PARTIAL FIXITY", StringComparison.Ordinal) && text.Contains("PartialFix=Yes", StringComparison.Ordinal) && text.Contains("Mirror2=Yes", StringComparison.Ordinal) && text.Contains("JtOffsetZI=0.05", StringComparison.Ordinal), "the .s2k does not carry them");
+            Check(text.Contains("FRAME RELEASE ASSIGNMENTS 2 - PARTIAL FIXITY", StringComparison.Ordinal) && !text.Contains("PartialFix", StringComparison.Ordinal) && !text.Contains("V2I=0", StringComparison.Ordinal) && text.Contains("Mirror2=Yes", StringComparison.Ordinal) && text.Contains("JtOffsetZI=0.05", StringComparison.Ordinal), "the .s2k does not carry them");
             var read = CsiProMax.S2k.S2kReader.Read(text, "Extras").Model;
             var rb = read.LineAssigns.First(x => x.Label == b.Label && x.Story == b.Story);
             Check(PropertyDefs.PartialFixity(rb).GetValueOrDefault("M3J") == 4000 && AssignTables.Row(rb, AssignTables.Insertion).GetValueOrDefault("Mirror2") == "Yes" && AssignTables.Row(rb, AssignTables.Insertion).GetValueOrDefault("ZI") == "0.05", "the .s2k's springs or insertion point did not come back");

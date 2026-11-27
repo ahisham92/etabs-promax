@@ -206,10 +206,12 @@ public static class S2kWriter
             var (ri, rj) = PropertyDefs.ReleasesOf(x);
             if (ri.Count + rj.Count > 0)
                 releases.Add(Row(("Frame", name), ("PI", YesNo(ri.Contains("P"))), ("V2I", YesNo(ri.Contains("V2"))), ("V3I", YesNo(ri.Contains("V3"))), ("TI", YesNo(ri.Contains("T"))), ("M2I", YesNo(ri.Contains("M2"))), ("M3I", YesNo(ri.Contains("M3"))),
-                    ("PJ", YesNo(rj.Contains("P"))), ("V2J", YesNo(rj.Contains("V2"))), ("V3J", YesNo(rj.Contains("V3"))), ("TJ", YesNo(rj.Contains("T"))), ("M2J", YesNo(rj.Contains("M2"))), ("M3J", YesNo(rj.Contains("M3"))), ("PartialFix", YesNo(PropertyDefs.PartialFixity(x).Count > 0))));
-            // Partial fixity springs, as SAP2000's own table (0 where the end has none).
+                    ("PJ", YesNo(rj.Contains("P"))), ("V2J", YesNo(rj.Contains("V2"))), ("V3J", YesNo(rj.Contains("V3"))), ("TJ", YesNo(rj.Contains("T"))), ("M2J", YesNo(rj.Contains("M2"))), ("M3J", YesNo(rj.Contains("M3")))));
+            // Partial fixity springs in SAP2000 26.3's own form (its .$2k beside the 0.4.65 field test's .sdb): no
+            // PartialFix field in table 1, and table 2 with the released ends' springs only. The 0.4.65 run wrote the
+            // field and all twelve values, and the next SAP2000 could not open the .sdb saved from it.
             if (ri.Count + rj.Count > 0 && PropertyDefs.PartialFixity(x) is { Count: > 0 } pf)
-                partial.Add(new[] { ("Frame", name) }.Concat(new[] { "I", "J" }.SelectMany(pfEnd => PropertyDefs.Releases.Select(pfDof => (pfDof + pfEnd, N(pf.GetValueOrDefault(pfDof + pfEnd)))))).ToList());
+                partial.Add(new[] { ("Frame", name) }.Concat(new[] { ("I", ri), ("J", rj) }.SelectMany(pfEnd => PropertyDefs.Releases.Where(pfDof => pfEnd.Item2.Contains(pfDof) && pf.GetValueOrDefault(pfDof + pfEnd.Item1) != 0).Select(pfDof => (pfDof + pfEnd.Item1, N(pf.GetValueOrDefault(pfDof + pfEnd.Item1)))))).ToList());
             if (PropertyDefs.Value(x.Extra, "ANG") is { } ang) axes.Add(Row(("Frame", name), ("Angle", ang), ("AdvanceAxes", "No")));
             var ip = AssignTables.Row(x, AssignTables.Insertion);
             var cpt = PropertyDefs.Value(x.Extra, "CARDINALPT") ?? "10";

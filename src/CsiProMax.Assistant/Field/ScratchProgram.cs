@@ -252,13 +252,37 @@ public static class ScratchDialogs
             && !t.Contains("licen", StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>The error lines of an import log's text (not its counts), at most ten.</summary>
-    public static List<string> ImportErrors(IEnumerable<string> texts) =>
-        texts.SelectMany(t => t.Split('\n')).Select(l => l.Trim())
-            .Where(l => l.Contains("error", StringComparison.OrdinalIgnoreCase) && !l.StartsWith("Number of errors", StringComparison.OrdinalIgnoreCase)
+    /// <summary>
+    /// The errors of an import log's text (not its counts), at most ten. SAP2000 26.3 heads each error with a line of its
+    /// own ("*** Error Message 1 ***") and gives the message on the lines after it: the 0.4.65 SAP2000 run kept only ten
+    /// such headers, so nobody could tell what the import did not take. A header now carries the lines up to the next
+    /// "***" line with it.
+    /// </summary>
+    public static List<string> ImportErrors(IEnumerable<string> texts)
+    {
+        var lines = texts.SelectMany(t => t.Split('\n')).Select(l => l.Trim()).ToList();
+        var found = new List<string>();
+        for (var i = 0; i < lines.Count; i++)
+        {
+            var l = lines[i];
+            if (System.Text.RegularExpressions.Regex.IsMatch(l, @"^\*+\s*Error Message\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+            {
+                var body = new List<string>();
+                for (var j = i + 1; j < lines.Count && !lines[j].StartsWith("***", StringComparison.Ordinal) && body.Count < 6; j++)
+                    if (lines[j].Length > 0) body.Add(lines[j]);
+                var said = string.Join(" ", body);
+                found.Add(said.Length == 0 ? l : said.Length > 300 ? said[..300] + "..." : said);
+                continue;
+            }
+            if (l.StartsWith("***", StringComparison.Ordinal)) continue;
+            if (l.Contains("error", StringComparison.OrdinalIgnoreCase) && !l.StartsWith("Number of errors", StringComparison.OrdinalIgnoreCase)
                 && !l.StartsWith("Import Control for Errors", StringComparison.OrdinalIgnoreCase) && !System.Text.RegularExpressions.Regex.IsMatch(l, @"^\d+\s+errors?$", System.Text.RegularExpressions.RegexOptions.IgnoreCase)
-                && !l.Equals("Error", StringComparison.OrdinalIgnoreCase) && !l.Equals("Error or Warning", StringComparison.OrdinalIgnoreCase))
-            .Distinct().Take(10).ToList();
+                && !l.Equals("Error", StringComparison.OrdinalIgnoreCase) && !l.Equals("Error or Warning", StringComparison.OrdinalIgnoreCase)
+                && !found.Any(f => f.Contains(l, StringComparison.Ordinal)))
+                found.Add(l);
+        }
+        return found.Distinct().Take(10).ToList();
+    }
 
     /// <summary>The whole texts of a window's child controls, read with WM_GETTEXT so a long log comes whole.</summary>
     private static List<string> LongWords(IntPtr window)
@@ -463,6 +487,7 @@ public sealed class ScratchProgram : IScratchWindow
         // The Modeler's .cpm beside the text file: the .sdb made from it has none beside it, and its rows (SAP2000's output
         // stations, set by the API) were never put in (0.4.57 full test: "'Frame Output Station Assignments' has no row with 7").
         var modelerFile = ModelerTables.ModelerFileBeside(modelFile);
+        string? text = null;
         if (OpensTextInOwnProcess(program, modelFile))
         {
             var first = new ScratchProgram(program) { _pass = $" (turning {Path.GetFileName(modelFile)} into a {ModelExtension(program)} first)" };
@@ -483,6 +508,7 @@ public sealed class ScratchProgram : IScratchWindow
                 finally { first.Dispose(); }
             }
             if (converted is null) return null;
+            text = modelFile;
             modelFile = converted;
         }
         var scratch = new ScratchProgram(program) { _asIs = asIs, _modelerFile = modelerFile };
@@ -490,7 +516,7 @@ public sealed class ScratchProgram : IScratchWindow
         try
         {
             ok = scratch.Open(ctx, modelFile);
-            return ok ? scratch : null;
+            if (ok) return scratch;
         }
         finally
         {
@@ -501,6 +527,106 @@ public sealed class ScratchProgram : IScratchWindow
                 finally { scratch.Dispose(); }
             }
         }
+        if (text is not null && !_pinpointing) Pinpoint(ctx, program, text);
+        return null;
+    }
+
+    /// <summary>True while <see cref="Pinpoint"/> runs: its own opens never pinpoint again.</summary>
+    private static volatile bool _pinpointing;
+
+    /// <summary>
+    /// The items of the Modeler's .s2k that SAP2000 can save but its next process cannot open again, each tried alone.
+    /// 0.4.65 SAP2000 run (Ahmed's PC, 2026-11-27): the .sdb the first SAP2000 saved from the Modeler's .s2k made the
+    /// second one show its "Open Model File" box, and the only new content was a beam's partial fixity springs, its
+    /// insertion point's Mirror2 and its global joint offsets. Each one is put back alone on a copy without all of them,
+    /// so the report names the one SAP2000 cannot reopen.
+    /// </summary>
+    private static void Pinpoint(FieldContext ctx, CsiProgram program, string s2k)
+    {
+        string original;
+        try { original = File.ReadAllText(s2k); } catch (IOException) { return; }
+        var items = ReopenSuspects(original);
+        if (items.Count == 0) return;
+        var folder = Path.Combine(ctx.Folder, "reopen-check");
+        Directory.CreateDirectory(folder);
+        var bare = items.Aggregate(original, (t, item) => item.Strip(t));
+        var refused = new List<string>();
+        _pinpointing = true;
+        try
+        {
+            foreach (var item in items)
+            {
+                var kept = items.Where(i => i != item).Aggregate(original, (t, i) => i.Strip(t));
+                if (kept == bare) continue;
+                var file = Path.Combine(folder, "only-" + item.Key + ".s2k");
+                File.WriteAllText(file, kept);
+                IScratchWindow? window = null;
+                try
+                {
+                    window = Start(program, ctx, file);
+                    if (window is null) refused.Add(item.Name);
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException) { refused.Add(item.Name + " (" + ex.Message + ")"); }
+                finally
+                {
+                    if (window is not null) { try { CloseStep(ctx, window, program); } finally { window.Dispose(); } }
+                }
+            }
+        }
+        finally { _pinpointing = false; }
+        var said = refused.Count > 0
+            ? $"{program.Name} saves but cannot open again a model with: {string.Join("; ", refused)} (each tried alone, copies in {folder})"
+            : $"{program.Name} opens again a model with each of {string.Join(", ", items.Select(i => i.Name))} alone, so only them together stop it (copies in {folder})";
+        ctx.Fail($"which part of the Modeler's {Path.GetExtension(s2k)} {program.Name} cannot open again after saving it", said);
+    }
+
+    /// <summary>One item of a .s2k the reopen check puts back alone: a short key, its name for the report, and how to take it out.</summary>
+    public sealed record ReopenSuspect(string Key, string Name, Func<string, string> Strip);
+
+    /// <summary>The items <see cref="Pinpoint"/> tries one at a time, those the text has.</summary>
+    public static List<ReopenSuspect> ReopenSuspects(string text)
+    {
+        var all = new List<ReopenSuspect>
+        {
+            new("partial-fixity", "frame partial fixity springs (FRAME RELEASE ASSIGNMENTS 2 - PARTIAL FIXITY)", t =>
+                WithoutTable(t, "FRAME RELEASE ASSIGNMENTS 2 - PARTIAL FIXITY").Replace("PartialFix=Yes", "PartialFix=No", StringComparison.Ordinal)),
+            new("mirror", "frame insertion point Mirror2/Mirror3=Yes", t => InTable(t, "FRAME INSERTION POINT ASSIGNMENTS", l =>
+                l.Replace("Mirror2=Yes", "Mirror2=No", StringComparison.Ordinal).Replace("Mirror3=Yes", "Mirror3=No", StringComparison.Ordinal))),
+            new("joint-offsets", "frame insertion point joint offsets", t => InTable(t, "FRAME INSERTION POINT ASSIGNMENTS", l =>
+                System.Text.RegularExpressions.Regex.Replace(l, @"(JtOffset[XYZ][IJ])=\S+", "$1=0").Replace("CoordSys=GLOBAL", "CoordSys=Local", StringComparison.Ordinal))),
+        };
+        return all.Where(i => i.Strip(text) != text).ToList();
+    }
+
+    /// <summary>The text without the named table (its TABLE line and rows, up to the next table or the end).</summary>
+    public static string WithoutTable(string text, string table)
+    {
+        var lines = text.Split('\n');
+        var kept = new List<string>();
+        var skip = false;
+        foreach (var line in lines)
+        {
+            var t = line.TrimStart();
+            if (t.StartsWith("TABLE:", StringComparison.OrdinalIgnoreCase) || t.StartsWith("END TABLE DATA", StringComparison.OrdinalIgnoreCase))
+                skip = t.StartsWith("TABLE:", StringComparison.OrdinalIgnoreCase) && t.Contains("\"" + table + "\"", StringComparison.OrdinalIgnoreCase);
+            if (!skip) kept.Add(line);
+        }
+        return string.Join("\n", kept);
+    }
+
+    /// <summary>The text with <paramref name="change"/> applied to the rows of the named table only.</summary>
+    public static string InTable(string text, string table, Func<string, string> change)
+    {
+        var lines = text.Split('\n');
+        var inside = false;
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var t = lines[i].TrimStart();
+            if (t.StartsWith("TABLE:", StringComparison.OrdinalIgnoreCase) || t.StartsWith("END TABLE DATA", StringComparison.OrdinalIgnoreCase))
+                inside = t.StartsWith("TABLE:", StringComparison.OrdinalIgnoreCase) && t.Contains("\"" + table + "\"", StringComparison.OrdinalIgnoreCase);
+            else if (inside) lines[i] = change(lines[i]);
+        }
+        return string.Join("\n", lines);
     }
 
     /// <summary>Closes a scratch window as a step of the report: a window that had to be left open is a failure the tester must see.</summary>

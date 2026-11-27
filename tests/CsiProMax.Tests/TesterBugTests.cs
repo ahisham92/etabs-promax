@@ -745,6 +745,10 @@ static class TesterBugTests
             var errors = ScratchDialogs.ImportErrors(["Number of errors = 1\nNumber of warnings = 13", "Error\n1 errors\nImport Control for Errors", "ERROR: Frame section \"FSEC1\" not found, line 212\nWARNING: default material used"]);
             Equal(1, errors.Count, "error lines of the log: " + string.Join(" | ", errors));
             Check(errors[0].Contains("FSEC1", StringComparison.Ordinal), "the error line is not kept whole");
+            // 0.4.65 SAP2000 run: only "*** Error Message n ***" was kept. The message under each header comes with it.
+            var headed = ScratchDialogs.ImportErrors(["*** Error Message 1 ***\nTable: FRAME RELEASE ASSIGNMENTS 2 - PARTIAL FIXITY\nField M3I is not valid\n*** Error Message 2 ***\nTable: FRAME INSERTION POINT ASSIGNMENTS\nBad value\n*** Warning Message 1 ***\nsome warning"]);
+            Equal(2, headed.Count, "headed errors: " + string.Join(" | ", headed));
+            Check(headed[0].Contains("PARTIAL FIXITY", StringComparison.Ordinal) && headed[0].Contains("M3I", StringComparison.Ordinal) && headed[1].Contains("INSERTION", StringComparison.Ordinal) && !headed[1].Contains("warning", StringComparison.Ordinal), "an error's message is not kept with its header: " + string.Join(" | ", headed));
             Check(SandboxedLeftCopy(), "a left copy showing only its import log is not known as the test's own");
             var scratch = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));
             var notices = scratch[scratch.IndexOf("public static List<string> CloseNotices", StringComparison.Ordinal)..scratch.IndexOf("public static bool IsStoryPicker", StringComparison.Ordinal)];
@@ -752,6 +756,20 @@ static class TesterBugTests
             Check(log.Contains("Button(window, \"Done\")", StringComparison.Ordinal) && log.Contains("IsWindowEnabled(done)", StringComparison.Ordinal) && log.Contains("PostMessageW(done, 0x00F5 /* BM_CLICK */", StringComparison.Ordinal)
                 && log.IndexOf("ImportErrors(", StringComparison.Ordinal) < log.IndexOf("PostMessageW(done", StringComparison.Ordinal) && !notices.Contains("0x0010", StringComparison.Ordinal), "the log is answered by its Done button after its errors are read, and never closed");
             static bool SandboxedLeftCopy() => ScratchProgram.IsLeftCopy(["SAP2000 - cpm-field-test-ab12cd", "Access Database Import Log"]);
+        });
+        yield return ("SAP2000 field test: when its next process cannot open the saved .sdb, each new item of the .s2k is tried alone (0.4.65 run)", () =>
+        {
+            var s2k = "File x.s2k\r\n\r\nTABLE:  \"FRAME RELEASE ASSIGNMENTS 1 - GENERAL\"\r\n   Frame=B1   M3I=Yes   M3J=Yes   PartialFix=Yes\r\n\r\nTABLE:  \"FRAME RELEASE ASSIGNMENTS 2 - PARTIAL FIXITY\"\r\n   Frame=B1   M3I=5000   M3J=5000\r\n\r\n"
+                + "TABLE:  \"FRAME INSERTION POINT ASSIGNMENTS\"\r\n   Frame=B1   CardinalPt=\"8 (Top center)\"   CoordSys=GLOBAL   JtOffsetZI=0.05   JtOffsetZJ=0.05   Mirror2=Yes   Mirror3=No\r\n\r\nTABLE:  \"JOINT COORDINATES\"\r\n   Joint=1   CoordSys=GLOBAL\r\n\r\nEND TABLE DATA\r\n";
+            var items = ScratchProgram.ReopenSuspects(s2k);
+            Equal(3, items.Count, "suspects: " + string.Join(", ", items.Select(i => i.Key)));
+            var bare = items.Aggregate(s2k, (x, i) => i.Strip(x));
+            Check(!bare.Contains("PARTIAL FIXITY", StringComparison.Ordinal) && bare.Contains("PartialFix=No", StringComparison.Ordinal) && bare.Contains("Mirror2=No", StringComparison.Ordinal)
+                && bare.Contains("JtOffsetZI=0 ", StringComparison.Ordinal) && bare.Contains("CoordSys=Local", StringComparison.Ordinal), "the items are not all taken out: " + bare);
+            Check(bare.Contains("Joint=1   CoordSys=GLOBAL", StringComparison.Ordinal) && bare.Contains("JOINT COORDINATES", StringComparison.Ordinal) && bare.Contains("END TABLE DATA", StringComparison.Ordinal), "another table was changed: " + bare);
+            Equal(0, ScratchProgram.ReopenSuspects(bare).Count, "a stripped text still has suspects");
+            var scratch = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));
+            Check(scratch.Contains("if (text is not null && !_pinpointing) Pinpoint(ctx, program, text);", StringComparison.Ordinal), "a failed reopen of a converted .s2k is not pinpointed");
         });
         yield return ("field test: steps a workaround can test are tested, not left out (Ahmed, 2026-11-26: only a missing program or licence)", () =>
         {
