@@ -315,6 +315,36 @@ function Invoke-Packs {
     } catch { Note "The review pack watcher could not start: $($_.Exception.Message)" }
 }
 
+# An update check with no window, once an hour (dotnet CsiProMax.dll --check-update, hidden): with no CSI ProMax window
+# or watcher open nothing looked for updates, and 0.4.68 never reached a PC where nobody opened CSI ProMax
+# (2026-11-27). It only downloads into %LOCALAPPDATA%\CsiProMax\versions; nothing running is changed or closed.
+# updates-off.txt in %LOCALAPPDATA%\CsiProMax stops it.
+$script:nextUpdateCheck = (Get-Date).AddMinutes(2)
+function Find-Dotnet {
+    $packs = if ($StateRoot) { Join-Path $StateRoot 'packs.txt' } else { $null }
+    if ($packs -and (Test-Path -LiteralPath $packs)) { $p = @(([IO.File]::ReadAllText($packs)).Trim() -split '\|'); if ($p.Count -ge 2 -and (Test-Path -LiteralPath $p[1])) { return $p[1] } }
+    $roots = @()
+    if ($env:DOTNET_ROOT) { $roots += $env:DOTNET_ROOT }
+    foreach ($pair in @(@($env:ProgramW6432, 'dotnet'), @($env:ProgramFiles, 'dotnet'), @($local, 'Microsoft\dotnet'), @($env:USERPROFILE, '.dotnet'))) { if ($pair[0]) { $roots += (Join-Path $pair[0] $pair[1]) } }
+    foreach ($root in $roots) { if (Test-Path -LiteralPath (Join-Path $root 'dotnet.exe')) { return (Join-Path $root 'dotnet.exe') } }
+    $found = Get-Command dotnet -ErrorAction SilentlyContinue
+    if ($found) { return $found.Source }
+    return $null
+}
+function Invoke-Updates {
+    if (-not $onWindows -or -not $Folder -or -not $StateRoot) { return }
+    if ((Get-Date) -lt $script:nextUpdateCheck) { return }
+    $script:nextUpdateCheck = (Get-Date).AddHours(1)
+    if (Test-Path -LiteralPath (Join-Path $StateRoot 'updates-off.txt')) { return }
+    $dll = Join-Path $Folder 'CsiProMax.dll'
+    $dotnet = Find-Dotnet
+    if (-not $dotnet -or -not (Test-Path -LiteralPath $dll)) { return }
+    try {
+        Start-Process -FilePath $dotnet -ArgumentList ('"' + $dll + '" --check-update') -WorkingDirectory $Folder -WindowStyle Hidden
+        Note 'The hourly update check is started.'
+    } catch { Note "The update check could not start: $($_.Exception.Message)" }
+}
+
 function Invoke-Watch {
     $mutex = $null
     if ($onWindows) {
@@ -326,6 +356,7 @@ function Invoke-Watch {
     try {
         while ($true) {
             try { Invoke-Packs } catch { }
+            try { Invoke-Updates } catch { }
             try { Invoke-Look | Out-Null } catch { }
             Start-Sleep -Seconds ([Math]::Max(5, $Every))
             # A newer CSI ProMax replaced this script: the new one takes over.
