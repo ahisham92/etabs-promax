@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.IO.Compression;
 using System.Reflection;
@@ -129,6 +130,17 @@ public static class Pack
         private readonly JsonObject _steps = new();
         private readonly List<(string Table, int Rows, long Ms)> _tables = [];
 
+        /// <summary>What the helper windows did (PackHelpers), when there were any.</summary>
+        public JsonNode? Helpers { get; set; }
+
+        /// <summary>The rows each table had as the program gave it, by table name (Missing checks the pack against them).</summary>
+        public JsonObject ReadRows()
+        {
+            var o = new JsonObject();
+            lock (_tables) foreach (var t in _tables) if (t.Rows >= 0) o[t.Table] = (o[t.Table]?.GetValue<int>() ?? 0) < t.Rows ? t.Rows : o[t.Table]?.GetValue<int>() ?? 0;
+            return o;
+        }
+
         public void Step(string name) { _steps[name] = (_steps[name]?.GetValue<long>() ?? 0) + _step.ElapsedMilliseconds; _step.Restart(); }
 
         public TableData Read(ICsiLink e, TableName t, IReadOnlyList<string>? cases, IReadOnlyList<string>? combos)
@@ -139,7 +151,7 @@ public static class Pack
             try { var data = ReadTable(e, t.Key, cases, combos); rows = data.Rows.Count; return data; }
             finally
             {
-                _tables.Add((t.Name, rows, watch.ElapsedMilliseconds));
+                lock (_tables) _tables.Add((t.Name, rows, watch.ElapsedMilliseconds));
                 Trace(e, $"  {t.Key}: {watch.ElapsedMilliseconds} ms, {rows} rows");
             }
         }
@@ -156,6 +168,7 @@ public static class Pack
                 ["tables_ms"] = _tables.Sum(t => t.Ms),
                 // The slowest reads first: what to look at when a pack is slow.
                 ["slowest"] = new JsonArray(_tables.OrderByDescending(t => t.Ms).Take(25).Select(t => (JsonNode)new JsonArray(t.Table, t.Rows, t.Ms)).ToArray()),
+                ["helpers"] = Helpers,
             };
         }
     }
@@ -165,7 +178,7 @@ public static class Pack
     /// <param name="extraTables">More tables to take, by name or key (for example "Element Forces - Beams").</param>
     public static Built Build(ICsiLink e, IReadOnlyList<string> extraTables, IReadOnlyList<string> cases, IReadOnlyList<string> combos,
         JsonObject? checks, JsonArray? comments, int mostRows = DefaultMostRows, string by = "", bool withTables = true,
-        IReadOnlyList<string>? designFiles = null, bool instabilities = false, JsonObject? auto = null, string? fileAs = null, bool zip = true)
+        IReadOnlyList<string>? designFiles = null, bool instabilities = false, JsonObject? auto = null, string? fileAs = null, bool zip = true, Packs.PackHelpers? helpers = null)
     {
         // Every table is listed once and read once while the pack is written (with the checks before it, when the caller
         // started the session): the program is not asked again for what it gave already.
@@ -238,7 +251,7 @@ public static class Pack
             tables[t.Name] = TableJson(t.Name, data, DesignResults.IsDesignTable(t.Name) ? Math.Max(mostRows, DesignMostRows) : mostRows, notes, null);
         }
         timing.Step("usual tables");
-        if (withTables) AddEverything(e, known, wanted, cases, combos, tables, mostRows, notes, manifest, timing);
+        if (withTables) AddEverything(e, known, wanted, cases, combos, tables, mostRows, notes, manifest, timing, helpers);
         timing.Step("every other table");
         if (withTables && tables.Count <= 1 && !info.Locked) notes.Add("The analysis has not been run, so the pack holds the model without results.");
         if (withTables) manifest["design"] = AddDesign(e, info, known, tables, designFiles ?? [], Math.Max(mostRows, DesignMostRows), notes);
@@ -256,6 +269,7 @@ public static class Pack
         }
         timing.Step("labels and instabilities");
         manifest["timing"] = timing.Json();
+        manifest["read_rows"] = timing.ReadRows();
         if (withTables && manifest["timing"]!["seconds"]!.GetValue<double>() > MostTime.TotalSeconds)
             notes.Add($"The pack took {manifest["timing"]!["seconds"]} s to read from {e.Program.Name}, more than {MostTime.TotalMinutes:0} minutes: manifest.json's \"timing\" names the slowest tables.");
         // What the pack says about itself (tables read in parts, cut, left out or refused), for the Viewer and the checks.
@@ -274,6 +288,7 @@ public static class Pack
     {
         if (cases.Count == 0 && combos.Count == 0) { cases = e.LoadCases(); combos = e.Combos(); }
         var tables = content["tables"] as JsonObject ?? [];
+        var read = content["manifest"]?["read_rows"] as JsonObject;
         var parts = (content["manifest"]?["notes"] as JsonArray ?? []).Select(n => n?.ToString() ?? "").Where(n => n.Contains("at a time", StringComparison.Ordinal)).ToList();
         var lost = new List<string>();
         foreach (var t in e.Tables().DistinctBy(t => t.Key))
@@ -284,6 +299,13 @@ public static class Pack
             if (held is not null && held["left_out"] is { } cut) { lost.Add($"'{t.Name}': {cut} rows left out"); continue; }
             // A table read a load case at a time is not read whole again to count it: its rows came from the program.
             if (held is not null && parts.Any(n => n.Contains($"'{t.Name}'", StringComparison.Ordinal))) continue;
+            // A table the pack read from the program (it or a helper window): the pack must hold every row it was given.
+            if (held is not null && read?[t.Name]?.GetValue<int>() is int given)
+            {
+                var have = (held["rows"] as JsonArray)?.Count ?? 0;
+                if (have < given) lost.Add($"'{t.Name}': {have} of {given} rows");
+                continue;
+            }
             TableData data;
             try { data = ReadTable(e, t.Key, cases, combos); }
             catch (EtabsException) { if (held is null && !t.Empty) lost.Add($"'{t.Name}': not in the pack, and the program would not give it"); continue; }
@@ -327,8 +349,9 @@ public static class Pack
     /// the Viewer can say which tables to ask for.
     /// </summary>
     private static void AddEverything(ICsiLink e, IReadOnlyList<TableName> known, IReadOnlyList<TableName> wanted, IReadOnlyList<string> cases,
-        IReadOnlyList<string> combos, JsonObject tables, int mostRows, List<string> notes, JsonObject manifest, Timing timing)
+        IReadOnlyList<string> combos, JsonObject tables, int mostRows, List<string> notes, JsonObject manifest, Timing timing, Packs.PackHelpers? helpers = null)
     {
+        if (helpers is { Asked: > 0 }) ReadTogether(e, known, wanted, cases, combos, tables, notes, timing, helpers);
         var left = new JsonArray();
         // The results and the inputs beside them each have their own total, so that a model with many result rows
         // still brings its load assignments and design inputs (0.4.49: SAP2000's Load Assigns were greyed out).
@@ -354,6 +377,80 @@ public static class Pack
             manifest["left_out_tables"] = left;
             notes.Add($"{left.Count} more result tables did not fit in the pack ({string.Join(", ", left.Take(8).Select(n => n!.GetValue<string>()))}{(left.Count > 8 ? ", ..." : "")}): make the pack again with those tables named, or with fewer load cases.");
         }
+    }
+
+    /// <summary>
+    /// The result tables read by the window that ran the model and the helper windows at once, each a different table
+    /// (<see cref="Packs.PackHelpers"/>), the largest first, into <paramref name="tables"/> in the pack's usual order.
+    /// Design and input tables stay with the window that ran the model: a design is in it alone until it is saved. A
+    /// table a helper could not give is read by that window. Whatever is left is read after, as before.
+    /// </summary>
+    private static void ReadTogether(ICsiLink e, IReadOnlyList<TableName> known, IReadOnlyList<TableName> wanted, IReadOnlyList<string> cases,
+        IReadOnlyList<string> combos, JsonObject tables, List<string> notes, Timing timing, Packs.PackHelpers helpers)
+    {
+        var todo = PackTables.More(known, wanted).Where(t => !tables.ContainsKey(t.Name)).ToList();
+        bool Shared(TableName t) => PackTables.Kind(t) == "result" && !DesignResults.IsDesignTable(t.Name) && !DesignResults.IsWallTable(t.Name);
+        var shared = new ConcurrentQueue<TableName>(todo.Where(Shared).OrderByDescending(Heavy));
+        var own = new ConcurrentQueue<TableName>(); // what a helper could not give
+        var got = new ConcurrentDictionary<string, TableData>(StringComparer.Ordinal);
+        var byHelper = 0;
+        void Note(string n) { lock (notes) notes.Add(n); }
+        TableData ReadOne(ICsiLink by, TableName t) =>
+            TooBig(by, t, known, cases, combos, new JsonObject(), timing) is { } guess ? ByCase(by, t, cases, combos, timing, guess, notes) : timing.Read(by, t, cases, combos);
+        var helperThreads = new List<Thread>();
+        var feeder = new Thread(() =>
+        {
+            foreach (var link in helpers.AsReady())
+            {
+                var h = new Thread(() =>
+                {
+                    using var session = Etabs.PackSession.Start(link);
+                    while (shared.TryDequeue(out var t))
+                    {
+                        try { got[t.Name] = ReadOne(link, t); Interlocked.Increment(ref byHelper); }
+                        catch (Exception ex) when (ex is EtabsException or System.Runtime.InteropServices.COMException or InvalidOperationException)
+                        {
+                            own.Enqueue(t);
+                            if (ex is not EtabsException) break; // the helper went away: it takes no more
+                        }
+                    }
+                }) { IsBackground = true, Name = "CSI ProMax pack helper read" };
+                lock (helperThreads) helperThreads.Add(h);
+                h.Start();
+            }
+        }) { IsBackground = true, Name = "CSI ProMax pack helpers" };
+        feeder.Start();
+        // The window that ran the model reads too, from the same queue, then what only it can give.
+        while (shared.TryDequeue(out var t) || own.TryDequeue(out t))
+        {
+            try { got[t.Name] = ReadOne(e, t); }
+            catch (EtabsException ex) { Note($"'{t.Name}' could not be read ({ex.Message})."); }
+        }
+        // Helpers still starting are not waited for once the queue is empty; those reading are.
+        List<Thread> reading;
+        lock (helperThreads) reading = helperThreads.ToList();
+        foreach (var h in reading) h.Join();
+        while (own.TryDequeue(out var t))
+        {
+            try { got[t.Name] = ReadOne(e, t); }
+            catch (EtabsException ex) { Note($"'{t.Name}' could not be read ({ex.Message})."); }
+        }
+        foreach (var t in todo)
+            if (got.TryGetValue(t.Name, out var data) && data.Rows.Count > 0)
+                tables[t.Name] = TableJson(t.Name, data, int.MaxValue, notes, null);
+        timing.Helpers = new JsonObject
+        {
+            ["asked"] = helpers.Asked, ["tables_by_helpers"] = byHelper,
+            ["said"] = new JsonArray(helpers.Said.Select(x => (JsonNode)x).ToArray()),
+        };
+        timing.Step("results read together");
+    }
+
+    /// <summary>How large a result table is likely to be, to read the largest first: shell, then frame, then joint element results.</summary>
+    private static int Heavy(TableName t)
+    {
+        var n = ResultTools.Norm(t.Name);
+        return (n.Contains("shell") || n.Contains("area") ? 4 : 0) + (n.StartsWith("element", StringComparison.Ordinal) ? 2 : 0) + (n.Contains("frame") ? 1 : 0) + (n.StartsWith("joint", StringComparison.Ordinal) ? 1 : 0);
     }
 
     /// <summary>
@@ -389,7 +486,7 @@ public static class Pack
         void Add(TableData part) { fields ??= part.Fields.ToArray(); rows.AddRange(part.Rows); }
         foreach (var c in caseList) Add(timing.Read(e, t, [c], []));
         foreach (var c in comboList) Add(timing.Read(e, t, [], [c]));
-        notes.Add($"'{t.Name}' ({rows.Count:N0} rows) was read one load case or combination at a time ({caseList.Count + comboList.Count} parts).");
+        lock (notes) notes.Add($"'{t.Name}' ({rows.Count:N0} rows) was read one load case or combination at a time ({caseList.Count + comboList.Count} parts).");
         return new TableData(fields ?? [], rows);
     }
 
