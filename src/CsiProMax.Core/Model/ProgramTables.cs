@@ -81,6 +81,19 @@ public static class ProgramTables
         _ => null,
     };
 
+    /// <summary>
+    /// A material table value as SAP2000 26.3 takes it: the compression acceptance strains (IOComp, LSComp, CPComp) are
+    /// negative there. 0.4.67-test1 field test: its import log said "IOComp can not be positive; default value used" for
+    /// each of them, so the Modeler's values were lost. The Modeler keeps them positive, as its .e2k does; the
+    /// .s2k gives them negative and reads them back positive.
+    /// </summary>
+    public static string SapValue(string table, string field, string value, bool toSap)
+    {
+        if (!table.Equals("Acceptance Criteria", StringComparison.OrdinalIgnoreCase) || field is not ("IOComp" or "LSComp" or "CPComp")) return value;
+        if (!double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) || v == 0) return value;
+        return N(toSap ? -Math.Abs(v) : Math.Abs(v));
+    }
+
     /// <summary>SAP2000 26's name for an ETABS 23 field where they differ (its expected strengths).</summary>
     public static string SapField(string field) => field switch { "Fye" => "EffFy", "Fue" => "EffFu", _ => field };
 

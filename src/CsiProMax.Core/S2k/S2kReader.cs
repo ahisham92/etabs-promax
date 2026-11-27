@@ -322,7 +322,7 @@ public static partial class S2kReader
                 {
                     if (ProgramTables.SapMaterialTable(table) is not { } sap) continue;
                     var mine = use(sap).Where(x => S(x, "Material") == name)
-                        .Select(x => fields.Where(f => x.ContainsKey(ProgramTables.SapField(f)) && f is not "Type" and not "SymType" and not "GUID").ToDictionary(f => f, f => x[ProgramTables.SapField(f)], StringComparer.Ordinal))
+                        .Select(x => fields.Where(f => x.ContainsKey(ProgramTables.SapField(f)) && f is not "Type" and not "SymType" and not "GUID").ToDictionary(f => f, f => ProgramTables.SapValue(table, f, x[ProgramTables.SapField(f)], toSap: false), StringComparer.Ordinal))
                         .Where(x => x.Count > 0).ToList();
                     if (mine.Count == 0) continue;
                     rows[table] = ProgramTables.ManyRows.Contains(table) ? mine : [mine[0]];

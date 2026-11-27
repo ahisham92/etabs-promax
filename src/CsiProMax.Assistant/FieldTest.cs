@@ -460,10 +460,32 @@ public static class FieldTest
                 {
                     // The Viewer's pack and the watcher's are of the same analysed model: its tables are read once.
                     if (o.NoPack) { ctx.Skip($"the Viewer and the review pack watcher on the scratch {program.Name} model", FieldContext.NoPackWhy); return; }
-                    using var sameModel = Tools.Pack.SameModel();
-                    if (o.Viewer) { var at = ctx.Watched; ctx.Watched = null; try { ViewerCheck.FieldSteps(ctx, window.Link, program.Name); } finally { ctx.Watched = at; } }
-                    // The pack beside the model written by itself after the run and the design (the watcher's rule).
-                    AutoPackFieldSteps.FieldSteps(ctx, window.Link, program.Name);
+                    // Both read the pack from a copy of the saved scratch model in a hidden program of its own, closed after, as
+                    // a pack is written after a run: SAP2000 26.3 corrupted its heap and died reading tables in the long, much
+                    // edited scratch session five times (0.4.58 to 0.4.67-test1, the last on "Mass Source", a definition
+                    // table), while every fresh process that only opened and read survived. The same for all three programs.
+                    void Both(ICsiLink on)
+                    {
+                        using var sameModel = Tools.Pack.SameModel();
+                        if (o.Viewer) { var at = ctx.Watched; ctx.Watched = null; try { ViewerCheck.FieldSteps(ctx, on, program.Name); } finally { ctx.Watched = at; } }
+                        // The pack beside the model written by itself after the run and the design (the watcher's rule).
+                        AutoPackFieldSteps.FieldSteps(ctx, on, program.Name);
+                    }
+                    if (!IsLive(window.Link)) { Both(window.Link); return; }
+                    var saved = "";
+                    try { saved = window.Link.Info().File; } catch (EtabsException) { }
+                    var read = Packs.PackCopy.Read(program, saved, from =>
+                    {
+                        // A program keeps no design results in its file (SAP2000's copy said "run Design" and the Viewer's
+                        // design items were greyed, 0.4.67-test1): the frame designs the scratch model ran are run again.
+                        try { Tools.DesignResults.RunDesign(from, ["steel", "concrete"]); }
+                        catch (Exception ex) when (ex is EtabsException or ToolInputException) { }
+                        var at = ctx.Watched; ctx.Watched = null;
+                        try { Both(from); } finally { ctx.Watched = at; }
+                        return "read";
+                    });
+                    if (read.Value is null)
+                        ctx.Fail($"the Viewer and the review pack watcher read a copy of the scratch {program.Name} model in a hidden {program.Name}", read.Said);
                 };
                 try { ScratchSteps(program)(ctx); }
                 catch (Exception ex) when (ex is not (OperationCanceledException or OutOfMemoryException))

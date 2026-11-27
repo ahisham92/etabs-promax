@@ -780,6 +780,14 @@ static class TesterBugTests
             Check(step.Contains("-ge $installedVersion) { continue }", StringComparison.Ordinal) && step.Contains("Rename-Item", StringComparison.Ordinal) && step.Contains("'.del'", StringComparison.Ordinal) && !step.Contains("-Force -Recurse -LiteralPath $old", StringComparison.Ordinal),
                 "only older copies are retired, by renaming (a copy in use stays)");
         });
+        yield return ("field test: the Viewer's and the watcher's packs are read from a copy in a fresh hidden program, never in the long scratch session (SAP2000 heap crash, 0.4.67-test1)", () =>
+        {
+            var ft = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/FieldTest.cs"));
+            var at = ft.IndexOf("ctx.WhileAnalysed = () =>", StringComparison.Ordinal);
+            var body = ft[at..ft.IndexOf("try { ScratchSteps(program)(ctx); }", at, StringComparison.Ordinal)];
+            Check(body.Contains("Packs.PackCopy.Read(program, saved,", StringComparison.Ordinal) && body.Contains("if (!IsLive(window.Link)) { Both(window.Link); return; }", StringComparison.Ordinal)
+                && body.Contains("RunDesign(from,", StringComparison.Ordinal) && !body.Contains("ViewerCheck.FieldSteps(ctx, window.Link", StringComparison.Ordinal), "a live program's Viewer and watcher packs are not read from a copy");
+        });
         yield return ("field test: steps a workaround can test are tested, not left out (Ahmed, 2026-11-26: only a missing program or licence)", () =>
         {
             string Src(string f) => File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant", f));
