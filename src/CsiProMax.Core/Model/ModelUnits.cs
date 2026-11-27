@@ -81,7 +81,8 @@ public static partial class ModelUnits
         ["R33"] = Dim.Len, ["R22"] = Dim.Len, ["COVER"] = Dim.Len, ["COVERTOP"] = Dim.Len, ["COVERBOTTOM"] = Dim.Len, ["COVERBOT"] = Dim.Len,
         ["CONFINEBARSPACING"] = Dim.Len, ["SLABTHICKNESS"] = Dim.Len, ["WALLTHICKNESS"] = Dim.Len, ["DECKSLABDEPTH"] = Dim.Len, ["DECKRIBDEPTH"] = Dim.Len,
         ["DECKRIBWIDTHTOP"] = Dim.Len, ["DECKRIBWIDTHBOTTOM"] = Dim.Len, ["DECKRIBSPACING"] = Dim.Len, ["DECKSHEARTHICKNESS"] = Dim.Len,
-        ["SLABRIBWIDTHTOP"] = Dim.Len, ["SLABRIBWIDTHBOTTOM"] = Dim.Len, ["SLABRIBSPACING"] = Dim.Len, ["OVERALLDEPTH"] = Dim.Len,
+        ["SLABRIBWIDTHTOP"] = Dim.Len, ["SLABRIBWIDTHBOTTOM"] = Dim.Len, ["SLABRIBSPACING"] = Dim.Len, ["SLABRIBSPACINGDIR1"] = Dim.Len, ["SLABRIBSPACINGDIR2"] = Dim.Len, ["OVERALLDEPTH"] = Dim.Len,
+        ["WALLLENGTH"] = Dim.Len, ["TOTALTHICK"] = Dim.Len, ["PLATETHICK"] = Dim.Len, ["FLANGEPLATETHICK"] = Dim.Len, ["TIEBARDIAMETER"] = Dim.Len, ["TIEBARSPACING"] = Dim.Len,
         ["SHEARSTUDDIAM"] = Dim.Len, ["SHEARSTUDHEIGHT"] = Dim.Len, ["MEMBRANETHICKNESS"] = Dim.Len, ["BENDINGTHICKNESS"] = Dim.Len, ["DIA"] = Dim.Len,
         ["ANCHORSLIP"] = Dim.Len, ["LENGTHOFFI"] = Dim.Len, ["LENGTHOFFJ"] = Dim.Len, ["MAXSTASPC"] = Dim.Len, ["FLOORMESHMAXSIZE"] = Dim.Len,
         ["WALLMESHMAXSIZE"] = Dim.Len, ["MERGETOL"] = Dim.Len, ["MINLONGSPACING"] = Dim.Len, ["MAXLONGSPACING"] = Dim.Len, ["MINTRANSSPACING"] = Dim.Len,
@@ -283,11 +284,11 @@ public static partial class ModelUnits
     private static void Tables(Dictionary<string, List<Dictionary<string, string>>>? tables, Func<Dim, double> k)
     {
         if (tables is null) return;
-        foreach (var rows in tables.Values)
+        foreach (var (table, rows) in tables)
             foreach (var row in rows)
                 foreach (var key in row.Keys.ToList())
                 {
-                    var d = FrameTableShapes.FieldDim(key, row) ?? FieldDim(key);
+                    var d = EtabsLoadTables.FieldDim(table, key) ?? FrameTableShapes.FieldDim(key, row) ?? FieldDim(key);
                     if (d.IsNone || !double.TryParse(row[key], NumberStyles.Float, Inv, out var v)) continue;
                     row[key] = Text(v * k(d));
                 }

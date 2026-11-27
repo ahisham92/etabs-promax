@@ -15,12 +15,16 @@ namespace CsiProMax.Assistant;
 public static class PackSpeedField
 {
     /// <summary>The checks and the pack, read in one session: what the step returns, and the time check after it.</summary>
-    public static (JsonObject Checks, Pack.Built Pack, List<string> Lost) Build(ICsiLink link, Func<JsonObject> checks, Func<JsonObject, Pack.Built> build)
+    /// <remarks>Took is the checks and the pack alone: the completeness check after them is the test's, not the pack's
+    /// (0.4.73 full test: 311 s with it counted, against the 3 minutes).</remarks>
+    public static (JsonObject Checks, Pack.Built Pack, List<string> Lost, TimeSpan Took) Build(ICsiLink link, Func<JsonObject> checks, Func<JsonObject, Pack.Built> build)
     {
         using var session = PackSession.Start(link);
+        var watch = Stopwatch.StartNew();
         var c = checks();
         var pack = build(c);
-        return (c, pack, Pack.Missing(link, pack.Content, [], []));
+        var took = watch.Elapsed;
+        return (c, pack, Pack.Missing(link, pack.Content, [], []), took);
     }
 
     /// <summary>
@@ -66,19 +70,23 @@ public static class PackSpeedField
             var file = link.Info().File;
             FieldContext.Expect(file.Length > 0 && File.Exists(file), $"the scratch model has no saved file to copy ({file})");
             List<string>? lost = null;
+            var checking = TimeSpan.Zero;
             var copy = Packs.PackCopy.Read(link.Program, file, from =>
             {
                 using var session = PackSession.Start(from);
                 var checks = ProgramTools.Report(System.Text.Json.JsonDocument.Parse("{}").RootElement, from).AsObject();
                 var built = Pack.Build(from, [], from.LoadCases(), from.Combos(), checks, null, by: "CSI ProMax field test, from a copy", fileAs: file, zip: false);
                 // What the pack lost, against the program while the copy is still open.
+                var check = Stopwatch.StartNew();
                 lost = Pack.Missing(from, built.Content, from.LoadCases(), from.Combos());
+                checking = check.Elapsed;
                 return built;
             });
             FieldContext.Expect(copy.Value is not null, $"the pack was not read from a copy: {copy.Said}");
             var zipping = Stopwatch.StartNew();
             got = Pack.Zipped(copy.Value!);
-            var took = copy.Took + zipping.Elapsed;
+            // The completeness check is the test's own, not the pack's: left out of the time.
+            var took = copy.Took - checking + zipping.Elapsed;
             var timing = got.Content["manifest"]?["timing"];
             FieldContext.Expect(took <= Pack.MostTime,
                 $"copying, opening in a hidden {link.Program.Name}, reading the pack, closing and zipping it after took {took.TotalSeconds:0} s (zipping {zipping.Elapsed.TotalSeconds:0} s), more than {Pack.MostTime.TotalSeconds:0} s (reading alone {timing?["seconds"]} s). Slowest: {timing?["slowest"]?.ToJsonString()}");

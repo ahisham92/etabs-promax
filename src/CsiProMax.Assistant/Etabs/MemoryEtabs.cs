@@ -134,7 +134,10 @@ public sealed class MemoryEtabs : ICsiLink
 
     public IReadOnlyList<TableName> Tables() =>
         [new("Story Definitions", "Story Definitions", false), new("Story Drifts", "Story Drifts", !ResultTables.ContainsKey("Story Drifts")), new("Frame Assignments - Section Properties", "Frame Assignments - Section Properties", _frames.Count == 0),
-         .. ResultTables.Where(t => t.Key != "Story Drifts").Select(t => new TableName(t.Key, t.Key, t.Value.Rows.Count == 0))];
+         .. ResultTables.Where(t => t.Key != "Story Drifts").Select(t => new TableName(t.Key, t.Key, t.Value.Rows.Count == 0 || ListedEmpty.Contains(t.Key)))];
+
+    /// <summary>Tables listed as empty that still give rows when read, as ETABS 23.2 lists the design preferences of codes not in use.</summary>
+    public HashSet<string> ListedEmpty { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     public TableData ReadTable(string key, IReadOnlyList<string>? cases, IReadOnlyList<string>? combos) => ResultTables.TryGetValue(key, out var given) ? given : key switch
     {

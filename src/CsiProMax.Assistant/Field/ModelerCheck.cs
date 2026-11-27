@@ -78,6 +78,37 @@ public static class ModelerCheck
           await act("eng:clear"); await wait(400);
           return engine.res || P.tables["Joint Displacements"] ? {fail: "the results are still on the model"} : {ok: "the results were cleared; the model is unlocked"};
         },
+        // The Analyze and Draw toggles and forms of the program's own menus: run here without starting the program or
+        // changing the model.
+        "m:etn:alive": async it => {
+          await act(it.act); const on = ticked(it.act); await act(it.act); const off = !ticked(it.act);
+          return on && off ? {ok: "Model Alive ticks on and off (no change made meanwhile, so no run)"} : {fail: "Model Alive does not tick on and off"};
+        },
+        "m:etn:snapOnly": async it => {
+          await act(it.act); const on = ticked(it.act); await act(it.act); const off = !ticked(it.act);
+          return on && off ? {ok: "Draw Using Snap Only ticks on and off"} : {fail: "Draw Using Snap Only does not tick on and off"};
+        },
+        "m:etn:lock": async it => {
+          if (engine.res) engineClear();
+          await act(it.act); await wait(200);
+          const refused = await hmRun("define_load_pattern", {name: "CPM-CHKLOCK", type: "Other", self_weight: 0}, true);
+          const box = [...document.querySelectorAll(".dlg .dt b")].some(b => b.textContent === progLabel(program));
+          closeDialogs(); await act(it.act); await wait(200);
+          if (refused.ok) { await hmRun("undo"); return {fail: "a locked model took a new load pattern"}; }
+          if (!box) return {fail: "a change to the locked model showed no box of the program's"};
+          return hm.userLock ? {fail: "Unlock Model did not unlock it"} : {ok: "Lock Model refuses a change with the program's box; Unlock Model lets changes in again"};
+        },
+        "m:etn:merge": async it => {
+          await act(it.act); await wait(300);
+          const box = document.querySelector(".dlg #emF"); closeDialogs();
+          if (!box) return {fail: "Merge Analysis Results opened no form with a file box"};
+          const bad = await engineIn(); if (bad) return {fail: bad};
+          const more = new File([JSON.stringify({manifest: {}, model: P.model, tables: {"Joint Displacements": {name: "Joint Displacements", fields: ["Label", "Story", "OutputCase", "Ux", "Uy", "Uz"], rows: [["CPM-CHK", "", "Live", "0.002", "0", "0"]]}}})], "cpm-merge.json");
+          await etnMerge(more); await wait(400);
+          const rows = ((engine.res || {}).tables || {})["Joint Displacements"]; const n = rows ? rows.rows.length : 0;
+          engineClear(); await wait(300);
+          return n === 2 ? {ok: "a second run's Live case was merged into the Dead results (2 rows), then cleared"} : {fail: `after the merge the table has ${n} rows, not 2`};
+        },
         "eng:runDesign": async it => OTHER_WAY["eng:run"](it),
         "eng:design": async it => OTHER_WAY["eng:run"](it),
         "eng:run": async it => {
@@ -381,16 +412,27 @@ public static class ModelerCheck
         });
         await step("Define > Reinforcing Bar Sizes and the definition table forms open and reach the model; the menus show only the model's program's items", async () => {
           await act("m:rebarSizes"); await wait(900);
-          const n = document.querySelector(".dlg #rbN");
-          if (!n) return {fail: "the Reinforcing Bar Sizes form did not open"};
-          n.value = "CPMB"; document.querySelector(".dlg #rbA").value = 0.0001; document.querySelector(".dlg #rbD").value = 0.0113;
-          document.querySelector(".dlg #rbAdd").click(); await wait(1500);
+          const n = document.querySelector(".dlg #rbN"), grid = document.querySelector(".dlg #rbG tbody");
+          if (!n && !grid) return {fail: "the Reinforcing Bar Sizes form did not open"};
+          if (n) { n.value = "CPMB"; document.querySelector(".dlg #rbA").value = 0.0001; document.querySelector(".dlg #rbD").value = 0.0113; document.querySelector(".dlg #rbAdd").click(); }
+          else {
+            // The 23.2 form (Etabs): a grid with a blank last row to type the new bar into, then OK.
+            const cells = [...grid.lastElementChild.querySelectorAll("input")];
+            [["CPMB"], [0.0001], [0.0113]].forEach(([v], k) => { cells[k].value = v; });
+            const ok = [...document.querySelectorAll(".dlg button")].find(b => b.textContent.trim() === "OK");
+            if (!ok) return {fail: "the Reinforcing Bar Sizes form has no OK"};
+            ok.click();
+          }
+          await wait(1500);
           const dd = (await hmRun("definition_data", {}, true)).result || {rebar_sizes: []};
           closeDialogs(); await wait(150);
           if (!dd.rebar_sizes.some(b => b.name === "CPMB")) return {fail: "the bar CPMB did not reach the model: " + (hm.lastError || "")};
           await act("m:undo"); await wait(1200);
           await act("m:dt:Generalized Displacement Definitions"); await wait(900);
-          const gd = document.querySelector(".dlg #dtB input");
+          // Etabs 23.2 lists the definitions first (Generalized Displacements); Add New Gen Displ... opens the data form.
+          const addNew = [...document.querySelectorAll(".dlg button")].find(b => b.textContent.trim() === "Add New Gen Displ...");
+          if (addNew) { addNew.click(); await wait(300); }
+          const gd = document.querySelector(".dlg #dtB input, .dlg #gN");
           closeDialogs(); await wait(150);
           if (!gd) return {fail: "the Generalized Displacements form did not open"};
           const labels = list => list.flatMap(i => !i ? [] : Array.isArray(i[1]) ? [i[0], ...labels(i[1])] : [i[0]]);
@@ -420,28 +462,25 @@ public static class ModelerCheck
           instList(); instGo(0); await wait(300);
           return sel.has(frames[0].id) && inst.cur === 0 ? {ok: "selected and ringed"} : {fail: "the finding's frame was not selected"};
         });
-        await step("Define > Load Patterns > Modify Lateral Load: a seismic pattern takes ASCE 7-16, and its story forces show", async () => {
-          const made = await hmRun("define_load_pattern", {name: "CPM-CHKEQ", type: "Seismic", self_weight: 0}, true);
-          if (!made.ok) return {fail: "the seismic pattern was not added: " + made.error};
-          await act("m:patterns"); await wait(600);
-          const row = [...document.querySelectorAll(".dlg #pL tr")].find(tr => tr.textContent.includes("CPM-CHKEQ"));
-          if (!row) return {fail: "CPM-CHKEQ is not in the Load Patterns form"};
-          row.click(); await wait(200);
-          const lat = document.querySelector(".dlg #pLat");
-          if (!lat || lat.disabled) return {fail: "Modify Lateral Load Pattern is not there, or greyed out, for a seismic pattern"};
-          lat.click(); await wait(1200);
-          const code = document.querySelector(".dlg #lCode");
-          if (!code) return {fail: "the lateral load form did not open"};
-          code.value = "ASCE 7-16"; code.dispatchEvent(new Event("change", {bubbles: true})); await wait(200);
-          const forms = document.querySelectorAll(".dlg"); forms[forms.length - 1].querySelector(".df button.primary").click();
-          await wait(2000);
-          const defs = await hmDefs(), p = (defs.load_patterns || []).find(x => x.name === "CPM-CHKEQ");
+        await step("Define > Load Patterns (the 23.2 program's own form): a seismic pattern takes ASCE 7-16 from Auto Lateral Load, Modify Lateral Load opens its form, and the code's table rows are kept", async () => {
+          if (program !== "etabs") return {ok: "the form of the etabs target; " + program + " shows its own (checked by its own steps)"};
+          await act("m:patterns"); await wait(800);
+          const d = [...document.querySelectorAll(".dlg")].pop(), set = (s, v) => { const x = d.querySelector(s); x.value = v; x.dispatchEvent(new Event(x.tagName === "SELECT" ? "change" : "input", {bubbles: true})); };
+          if (!d.querySelector("#pA")) return {fail: "the Define Load Patterns form has no Auto Lateral Load box"};
+          set("#pN", "CPM-CHKEQ"); set("#pT", "Seismic"); await wait(100); set("#pA", "ASCE 7-16");
+          d.querySelector("#pAdd").click(); await wait(2500);
+          const lat = d.querySelector("#pLat");
+          if (!lat || lat.disabled) return {fail: "Modify Lateral Load... is greyed for a seismic pattern with ASCE 7-16: " + (hm.lastError || "")};
+          lat.click(); await wait(1500);
+          const f = [...document.querySelectorAll(".dlg")].pop(), title = f.querySelector(".dt b").textContent;
+          const r = f.querySelector('[data-k="R"]'); if (r) { r.value = "7"; r.dispatchEvent(new Event("input", {bubbles: true})); }
+          f.querySelector(".df button.primary").click(); await wait(2000);
+          const rows = (((await hmRun("definition_data", {}, true)).result || {}).tables || {})["Load Pattern Definitions - Auto Seismic - ASCE 7-16"], mine = rows ? rows.rows.filter(x => x.Name === "CPM-CHKEQ") : [];
           closeDialogs(); await wait(150);
-          await hmRun("undo"); await wait(800); await hmRun("undo"); await wait(800);
-          const back = ((await hmDefs()).load_patterns || []).some(x => x.name === "CPM-CHKEQ");
-          if (!p || !p.lateral || p.lateral.code !== "ASCE 7-16") return {fail: "the code did not reach the pattern: " + (hm.lastError || JSON.stringify(p && p.lateral))};
-          if (p.lateral.error || !(p.lateral.story_forces || []).some(f => f.fx > 0)) return {fail: "no story forces: " + (p.lateral.error || "")};
-          return back ? {fail: "two undos did not take the pattern out again"} : {ok: `V = ${p.lateral.results.V} on ${p.lateral.story_forces.length} stories, then undone`};
+          const del = await hmRun("delete_definition", {kind: "load_pattern", name: "CPM-CHKEQ"}, true);
+          if (!mine.length) return {fail: "no ASCE 7-16 row for CPM-CHKEQ (form '" + title + "'): " + (hm.lastError || "")};
+          if (mine[0].R !== "7") return {fail: "the form's R did not reach the row: " + JSON.stringify(mine[0])};
+          return del.ok ? {ok: `'${title}' kept ${Object.keys(mine[0]).length} fields, then the pattern was deleted`} : {fail: "the pattern could not be deleted again: " + del.error};
         });
         await step("Edit > Model Text: a combination written in the program's own text goes into the model, and undo takes it out", async () => {
           await act("m:text"); await wait(900);
@@ -579,13 +618,79 @@ public static class ModelerCheck
           if (target !== "sap2000") window.cpmForms.push({path: "Units > Consistent Units...", act: "u:consistent", target}, {path: "Units > Show Units Form...", act: "u:form", target});
         }
         if (typeof forProgram === "function") { await hmRun("set_model_program", {program: "etabs"}, true); if (window.cpmPull) await window.cpmPull(); await wait(400); }
+        // The Analyze and Draw menus item by item in the program's order (pictures in field/reference-forms/<program>/Analyze, /Draw).
+        await step("Analyze and Draw menus, as the program has them (23.2 pictures)", async () => {
+          if (program !== "etabs") { await hmRun("set_model_program", {program: "etabs"}, true); for (let i = 0; i < 30 && program !== "etabs"; i++) { if (window.cpmPull) await window.cpmPull(); await wait(200); } }
+          const m = programMenus(), words = l => (l || []).filter(Boolean).map(x => x[0]);
+          const an = words(m.Analyze), dr = words(m.Draw), sub = (l, n) => words(((l || []).find(x => x && x[0] === n) || [])[1]);
+          const want = {Analyze: ["Check Model...", "Set Active Degrees of Freedom...", "Set Load Cases To Run...", "Advanced SAPFire Options...", "Advanced Design and Response Recovery Options...", "Automatic Mesh Settings for Floors...", "Automatic Rectangular Mesh Settings for Walls...", "Analysis Model for Nonlinear Hinges...", "Cracking Analysis Options...", "Run Analysis", "Model Alive", "Merge Analysis Results", "Modify Undeformed Geometry...", "Show Analysis Messages...", "Last Analysis Run Log...", engine.res || hm.userLock ? "Unlock Model" : "Lock Model"],
+            Draw: ["Select Object", "Reshape Object", "Draw Joint Objects", "Draw Beam/Column/Brace Objects", "Draw Floor/Wall Objects", "Draw Grids", "Draw Section Cut...", "Snap Options...", "Draw Using Snap Only"],
+            "Draw Beam/Column/Brace Objects": ["Draw Beam/Column/Brace (Plan, Elev, 3D)", "Quick Draw Beams/Columns (Plan, Elev, 3D)", "Quick Draw Columns (Plan, 3D)", "Quick Draw Secondary Beams (Plan, 3D)", "Quick Draw Braces (Plan, Elev, 3D)"],
+            "Draw Floor/Wall Objects": ["Draw Floor/Wall (Plan, Elev, 3D)", "Draw Rectangular Floor/Wall (Plan, Elev)", "Quick Draw Floor/Wall (Plan, Elev, 3D)", "Quick Draw Area Around Point (Plan)", "Draw Walls (Plan)", "Quick Draw Walls (Plan)", "Draw Wall Openings (Plan, Elev, 3D)"]};
+          const got = {Analyze: an.filter(x => x !== "Engine Extras"), Draw: dr.filter(x => x !== "Engine Extras"), "Draw Beam/Column/Brace Objects": sub(m.Draw, "Draw Beam/Column/Brace Objects"), "Draw Floor/Wall Objects": sub(m.Draw, "Draw Floor/Wall Objects")};
+          const off = Object.keys(want).filter(k => JSON.stringify(got[k]) !== JSON.stringify(want[k]));
+          return off.length ? {fail: off.map(k => `${k}: ${got[k].join(" | ")}`).join("; ")} : {ok: `Analyze ${an.length} items, Draw ${dr.length} items, in the program's order and words`};
+        });
+        // The Select menu in the program's order and words (pictures in field/reference-forms/<program>/Select): its
+        // Select > Object Type... form selects every beam, and Deselect takes them off again.
+        await step("Select menu, as the program has it (23.2 pictures), and Select by Object Type selects the beams", async () => {
+          const m = programMenus(), words = l => (l || []).filter(Boolean).map(x => x[0]), sub = (l, n) => ((l || []).find(x => x && x[0] === n) || [])[1];
+          const top = words(m.Select), s1 = words(sub(m.Select, "Select"));
+          const wantTop = ["Select", "Deselect", "Invert Selection", "Get Previous Selection", "Clear Selection"], want1 = ["Pointer/Window", "Intersecting Line", "Object Type...", "Properties", "Labels", "Groups...", "Stories...", "All"];
+          if (JSON.stringify(top) !== JSON.stringify(wantTop) || JSON.stringify(s1) !== JSON.stringify(want1)) return {fail: "Select: " + top.join(" | ") + "; Select >: " + s1.join(" | ")};
+          sel.clear(); selJ.clear(); selChanged();
+          await act("m:ets:type"); await wait(600);
+          const d = [...document.querySelectorAll(".dlg")].pop(), l = d && d.querySelector("#esL");
+          if (!l) return {fail: "Object Type... opened no Select by Object Type form"};
+          [...l.options].forEach(o => { o.selected = o.value === "Beams"; });
+          const press = label => [...d.querySelectorAll(".df button")].find(b => b.textContent === label).click();
+          press("Select"); await wait(400);
+          const beams = frames.filter(f => f.kind === "beam").length, got = [...sel].filter(id => (objOf(id) || {}).kind === "beam").length;
+          press("Deselect"); await wait(400); const left = sel.size; closeDialogs();
+          if (!beams) return {fail: "the model has no beam"};
+          if (got !== beams || sel.size !== 0 && left) return {fail: `Select chose ${got} of ${beams} beams; Deselect left ${left}`};
+          return {ok: `menu in order; Object Type > Beams selected all ${beams} beams, Deselect took them off`};
+        });
+        // The View menu in the program's order and words (pictures in field/reference-forms/<program>/View), and
+        // Set Building View Limits hiding what lies outside its plan box.
+        await step("View menu, as the program has it (23.2 pictures), and Set Building View Limits hides what is outside", async () => {
+          const m = programMenus(), words = (m.View || []).filter(Boolean).map(x => x[0]);
+          const want = ["Set 3D View...", "Set Plan View...", "Set Elevation View...", "Set Building View Limits...", "Set Display Options...", "Rubber Band Zoom", "Restore Full View", "Previous Zoom", "Zoom In One Step", "Zoom Out One Step", "Pan", "Walk", "Measure", "Set Grid System Visibility...", "Show Axes", "Change Axes Location...", "Show Selected Objects Only", "Invert Visibility of Objects", "Make Selected Objects Invisible", "Restore Visibility of Previous Selection", "Show All Objects", "Refresh Window", "Refresh View", "Show Rendered View (Ray Tracing)", "DirectX View Settings"];
+          if (JSON.stringify(words) !== JSON.stringify(want)) return {fail: "View: " + words.join(" | ")};
+          const all = frames.concat(areas); if (!all.length) return {fail: "the model has no objects"};
+          const xs = all.flatMap(o => (o.type === "f" ? [o.a, o.b] : o.pts).map(q => q[0])), x0 = Math.min(...xs), x1 = Math.max(...xs);
+          if (!(x1 - x0 > 0)) return {fail: "the model has no width in X"};
+          await act("m:etv:limits"); await wait(500);
+          let d = [...document.querySelectorAll(".dlg")].pop(); if (!d || !d.querySelector("#blX1")) return {fail: "Set Building View Limits... opened no form"};
+          d.querySelector("#blX1").value = String(L(x0 + (x1 - x0) / 2)); [...d.querySelectorAll(".df button")].find(b => b.textContent === "OK").click(); await wait(400);
+          const kept = all.filter(o => etvInLimits(o)).length;
+          await act("m:etv:limits"); await wait(400); d = [...document.querySelectorAll(".dlg")].pop();
+          d.querySelector("#blI").checked = true; [...d.querySelectorAll(".df button")].find(b => b.textContent === "OK").click(); await wait(300);
+          const back = all.filter(o => etvInLimits(o)).length; etv.limits = null; closeDialogs(); draw();
+          if (!(kept < all.length && kept >= 0) || back !== all.length) return {fail: `limits kept ${kept} of ${all.length}; Ignore Limits showed ${back}`};
+          return {ok: `menu in order; the half-width limits showed ${kept} of ${all.length} objects, Ignore Limits all of them`};
+        });
+        // The Options menu in the program's order and words (pictures in field/reference-forms/<program>/Options), and
+        // Set Tolerances read back from the model after OK.
+        await step("Options menu, as the program has it (23.2 pictures), and Set Tolerances reaches the model", async () => {
+          const m = programMenus(), words = (m.Options || []).filter(Boolean).map(x => x[0]).filter(x => x !== "Engine Extras");
+          const want = ["Display Units...", "Database", "Tolerances...", "Arrange Windows...", "Graphics Preferences...", "Architectural Plan Options...", "Graphics Colors", "Graphics Mode", "Allow Multiple Towers", "Show Start Page at Startup", "Show Value at Cursor for Assign/Design", "Show Frame Information in Local Plane", "Show Bounding Plane", "Architectural Dimensioning", "Moment Diagrams on Tension Side", "Animation Sound", "Auto Save Model...", "Save User Default Settings", "Reset User Default Settings", "Customize Toolbars", "Reset Default Toolbars", "Show Crosshairs", "Show Model Explorer"];
+          if (JSON.stringify(words) !== JSON.stringify(want)) return {fail: "Options: " + words.join(" | ")};
+          await act("m:eto:tolerances"); await wait(700);
+          const box = document.querySelector('.dlg [data-f="MaxInclVertCol"]'); if (!box) return {fail: "Tolerances... opened no Set Tolerances form"};
+          box.value = "2"; formOk("OK"); await wait(1200);
+          const j = await hmPost({tool: "program_forms", args: {table: "Preferences - Tolerance"}});
+          const got = j.ok ? (j.result.items.find(i => i.field === "MaxInclVertCol") || {}).value : "";
+          await hmRun("set_program_form", {table: "Preferences - Tolerance", values: {MaxInclVertCol: ""}}, true);
+          return String(got) === "2" ? {ok: `${words.length} items in order; Maximum Inclination from Vertical for Columns 2 reached the model, then back to the default`} : {fail: "Set Tolerances OK left " + got};
+        });
         for (const it of list) {
           await step("menu: " + it.path, async () => {
             if (it.target && program !== it.target) { await hmRun("set_model_program", {program: it.target}, true); for (let i = 0; i < 30 && program !== it.target; i++) { if (window.cpmPull) await window.cpmPull(); await wait(200); } }
             pick();
             if (it.act === "m:redo" && offNow(it.act)) { await hmRun("define_load_pattern", {name: "CPM-CHKREDO", type: "Other", self_weight: 0}, true); await hmRun("undo"); await wait(400); }
-            // Items the program itself greys in this state (SAP2000 26.3 pictures: Assign > Frame > Path... with no path defined, Update All Generated Hinge Properties with no generated hinges, Paste Assigns before Copy Assigns).
-            if (offNow(it.act) && ["m:sapa:fPath", "m:sapa:updateHinges", "m:sapa:paste"].includes(it.act)) return {ok: "greyed out, as the program greys it"};
+            // Items the program itself greys in this state (SAP2000 26.3 pictures: Assign > Frame > Path... with no path defined, Update All Generated Hinge Properties with no generated hinges, Paste Assigns before Copy Assigns; the 23.2 Assign menu greys its Paste Assigns items the same way).
+            if (offNow(it.act) && ["m:sapa:fPath", "m:sapa:updateHinges", "m:sapa:paste", "m:etn:geometry", "m:etn:messages", "m:etn:log", "m:eto:archPlan", "m:eta:pasteJ", "m:eta:pasteF", "m:eta:pasteA", "m:eta:pasteL"].includes(it.act)) return {ok: "greyed out, as the program greys it"};
             if (offNow(it.act) && it.act !== "eng:clear") return {fail: "greyed out, although the check selected a beam and a floor for it first"};
             if (OTHER_WAY[it.act]) return await OTHER_WAY[it.act](it);
             const before = dialogsOpen();

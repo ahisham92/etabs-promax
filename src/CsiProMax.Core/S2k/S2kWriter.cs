@@ -137,7 +137,7 @@ public static class S2kWriter
             areaConnect.Add(row);
             Group(a.Story, "Area", name);
             if (a.Section is { Length: > 0 } section && shells.Contains(section))
-                areaSections.Add(Row(("Area", name), ("Section", section), ("MatProp", "Default")));
+                areaSections.Add(Row(("Area", name), ("Section", section), ("MatProp", m.AreaAssigns.Find(y => y.Label == a.Label && y.Story == a.Story) is { } amoA && AssignTables.Row(amoA, "Area Assignments - Material Overwrites").GetValueOrDefault("Material") is { Length: > 0 } amo ? amo : "Default")));
             else notes.Add($"Area {name} has no section that went across ({a.Section ?? "none"}); SAP2000 gives it its default.");
             // A slab on a rigid diaphragm: its corners join that story's diaphragm constraint.
             var assign = m.AreaAssigns.Find(x => x.Label == a.Label && x.Story == a.Story);
@@ -275,7 +275,8 @@ public static class S2kWriter
         {
             if (!areaNames.TryGetValue((x.Label, x.Story), out var name)) continue;
             if (AssignTables.Row(x, "Area Assignments - Additional Mass").TryGetValue("AddedMass", out var mpa)) areaMass.Add(Row(("Area", name), ("MassPerArea", mpa)));
-            if (AssignTables.Row(x, "Area Assignments - Local Axes").TryGetValue("Angle", out var aang)) areaAxes.Add(Row(("Area", name), ("Angle", aang), ("AdvanceAxes", "No")));
+            if (AssignTables.Row(x, "Area Assignments - Local Axes").TryGetValue("Angle", out var aang)) areaAxes.Add(Row(("Area", name), ("Angle", aang), ("AdvanceAxes", x.Tables?.ContainsKey("Area Local Axes Assignments 2 - Advanced") == true ? "Yes" : "No")));
+            else if (x.Tables?.ContainsKey("Area Local Axes Assignments 2 - Advanced") == true) areaAxes.Add(Row(("Area", name), ("Angle", "0"), ("AdvanceAxes", "Yes")));
             var am = PropertyDefs.Modifiers(x.Extra, PropertyDefs.ShellModifiers);
             if (am.Values.Any(v => Math.Abs(v - 1) > 1e-12))
                 areaMods.Add(Row(("Area", name), ("f11", N(am["F11MOD"])), ("f22", N(am["F22MOD"])), ("f12", N(am["F12MOD"])), ("m11", N(am["M11MOD"])), ("m22", N(am["M22MOD"])), ("m12", N(am["M12MOD"])), ("v13", N(am["V13MOD"])), ("v23", N(am["V23MOD"])), ("MassMod", N(am["MMOD"])), ("WeightMod", N(am["WMOD"]))));
@@ -393,6 +394,9 @@ public static class S2kWriter
         }
         Advanced("Frame Local Axes Assignments 2 - Advanced", "Frame", axes);
         Advanced("Area Local Axes Assignments 2 - Advanced", "Area", areaAxes);
+        // A frame with SAP2000's own auto hinge rows (Auto Hinge Assignment Data) writes those, not the ones made from the model.
+        var autoOwn = own.Where(kv => SapObjectTables.AutoHinges.Contains(kv.Key, StringComparer.OrdinalIgnoreCase)).SelectMany(kv => kv.Value.Select(r => r[0].Item2)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        hingeRows.RemoveAll(r => r.Count > 0 && autoOwn.Contains(r[0].Item2));
         Merge("Joint Spring Assignments 1 - Uncoupled", springs);
         Merge("Joint Added Mass Assignments", jointMass);
         Merge("Joint Panel Zone Assignments", panelZones);
@@ -409,7 +413,9 @@ public static class S2kWriter
         Merge("Area Stiffness Modifiers", areaMods);
         Merge("Joint Restraint Assignments", restraints);
         Merge("Frame Hinge Assigns 00 - Hinge Distribution Type", hingeTypes);
-        foreach (var (ownTable, ownRows) in own) Add(tables, SapObjectTables.Name(ownTable).ToUpperInvariant(), ownRows);
+        // The kept rows of a load table the Modeler also writes go into that table, beside its own rows (below).
+        foreach (var (ownTable, ownRows) in own) if (!SapObjectTables.IsNative(ownTable)) Add(tables, SapObjectTables.Name(ownTable).ToUpperInvariant(), ownRows);
+        List<IReadOnlyList<(string, string)>> KeptRows(string sapTable) => own.TryGetValue(sapTable + SapObjectTables.Kept, out var k) ? k : [];
 
         Add(tables, "JOINT COORDINATES", jointRows);
         Add(tables, "CONNECTIVITY - FRAME", connect);
@@ -543,14 +549,14 @@ public static class S2kWriter
                 case "POINTF" or "POINTM":
                 {
                     var rel = T("RDIST", 0.5);
-                    framePoints.Add(Row(("Frame", frame), ("LoadPat", load.Pattern), ("CoordSys", "GLOBAL"), ("Type", type.Equals("POINTM", StringComparison.OrdinalIgnoreCase) ? "Moment" : "Force"),
+                    framePoints.Add(Row(("Frame", frame), ("LoadPat", load.Pattern), ("CoordSys", CoordSys(dir)), ("Type", type.Equals("POINTM", StringComparison.OrdinalIgnoreCase) ? "Moment" : "Force"),
                         ("Dir", Direction(dir)), ("DistType", "RelDist"), ("RelDist", N(rel)), ("AbsDist", N(rel * lengths[frame])), ("Force", N(T("FVAL")))));
                     continue;
                 }
                 case "TRAPF":
                 {
                     double a0 = T("RDSTART", 0), b0 = T("RDEND", 1);
-                    frameLoads.Add(Row(("Frame", frame), ("LoadPat", load.Pattern), ("CoordSys", "GLOBAL"), ("Type", "Force"), ("Dir", Direction(dir)),
+                    frameLoads.Add(Row(("Frame", frame), ("LoadPat", load.Pattern), ("CoordSys", CoordSys(dir)), ("Type", "Force"), ("Dir", Direction(dir)),
                         ("DistType", "RelDist"), ("RelDistA", N(a0)), ("RelDistB", N(b0)), ("AbsDistA", N(a0 * lengths[frame])), ("AbsDistB", N(b0 * lengths[frame])), ("FOverLA", N(T("FSTART"))), ("FOverLB", N(T("FEND")))));
                     continue;
                 }
@@ -559,18 +565,18 @@ public static class S2kWriter
                     if (T("TEMPGRAD") != 0) frameTemps.Add(Row(("Frame", frame), ("LoadPat", load.Pattern), ("Type", "Gradient2"), ("Temp", N(T("TEMPGRAD")))));
                     continue;
                 case "STRAIN":
-                    frameStrains.Add(Row(("Frame", frame), ("LoadPat", load.Pattern), ("Component", "Strain" + (E2kText.Value(load.Tokens, "COMPONENT") ?? "11")), ("Value", N(T("STRAIN")))));
+                    frameStrains.Add(Row(("Frame", frame), ("LoadPat", load.Pattern), ("Component", "Strain" + E2kText.Unquote(E2kText.Value(load.Tokens, "COMPONENT") ?? "11")), ("Strain", N(T("STRAIN")))));
                     continue;
             }
             if (!type.Equals("UNIFF", StringComparison.OrdinalIgnoreCase) || !E2kText.TryNumber(E2kText.Value(load.Tokens, "FVAL"), out var value))
             { notes.Add($"A {type} line load on {frame} has no plain SAP2000 equal here and was left out."); continue; }
-            frameLoads.Add(Row(("Frame", frame), ("LoadPat", load.Pattern), ("CoordSys", "GLOBAL"), ("Type", "Force"), ("Dir", Direction(dir)),
+            frameLoads.Add(Row(("Frame", frame), ("LoadPat", load.Pattern), ("CoordSys", CoordSys(dir)), ("Type", "Force"), ("Dir", Direction(dir)),
                 ("DistType", "RelDist"), ("RelDistA", "0"), ("RelDistB", "1"), ("AbsDistA", "0"), ("AbsDistB", N(lengths[frame])), ("FOverLA", N(value)), ("FOverLB", N(value))));
         }
-        Add(tables, "FRAME LOADS - DISTRIBUTED", frameLoads);
-        Add(tables, "FRAME LOADS - POINT", framePoints);
-        Add(tables, "FRAME LOADS - TEMPERATURE", frameTemps);
-        Add(tables, "FRAME LOADS - STRAIN", frameStrains);
+        Add(tables, "FRAME LOADS - DISTRIBUTED", frameLoads.Concat(KeptRows("Frame Loads - Distributed")));
+        Add(tables, "FRAME LOADS - POINT", framePoints.Concat(KeptRows("Frame Loads - Point")));
+        Add(tables, "FRAME LOADS - TEMPERATURE", frameTemps.Concat(KeptRows("Frame Loads - Temperature")));
+        Add(tables, "FRAME LOADS - STRAIN", frameStrains.Concat(KeptRows("Frame Loads - Strain")));
 
         var areaLoads = new List<IReadOnlyList<(string, string)>>();
         var areaTemps = new List<IReadOnlyList<(string, string)>>();
@@ -590,18 +596,18 @@ public static class S2kWriter
             }
             if (type.Equals("STRAIN", StringComparison.OrdinalIgnoreCase))
             {
-                areaStrains.Add(Row(("Area", area), ("LoadPat", load.Pattern), ("Component", "Strain" + (E2kText.Value(load.Tokens, "COMPONENT") ?? "11")), ("Value", N(T("STRAIN")))));
+                areaStrains.Add(Row(("Area", area), ("LoadPat", load.Pattern), ("Component", "Strain" + E2kText.Unquote(E2kText.Value(load.Tokens, "COMPONENT") ?? "11")), ("Strain", N(T("STRAIN")))));
                 continue;
             }
             if (!type.Equals("UNIFF", StringComparison.OrdinalIgnoreCase) || !E2kText.TryNumber(E2kText.Value(load.Tokens, "FVAL"), out var value))
             { notes.Add($"A {type} area load on {area} has no plain SAP2000 equal here and was left out."); continue; }
-            areaLoads.Add(Row(("Area", area), ("LoadPat", load.Pattern), ("CoordSys", "GLOBAL"), ("Dir", Direction(dir)), ("UnifLoad", N(value))));
+            areaLoads.Add(Row(("Area", area), ("LoadPat", load.Pattern), ("CoordSys", CoordSys(dir)), ("Dir", Direction(dir)), ("UnifLoad", N(value))));
         }
-        Add(tables, "AREA LOADS - UNIFORM", areaLoads);
-        Add(tables, "AREA LOADS - TEMPERATURE", areaTemps);
-        Add(tables, "AREA LOADS - STRAIN", areaStrains);
-        Add(tables, "JOINT LOADS - FORCE", jointLoads);
-        Add(tables, "JOINT LOADS - GROUND DISPLACEMENT", jointDisps);
+        Add(tables, "AREA LOADS - UNIFORM", areaLoads.Concat(KeptRows("Area Loads - Uniform")));
+        Add(tables, "AREA LOADS - TEMPERATURE", areaTemps.Concat(KeptRows("Area Loads - Temperature")));
+        Add(tables, "AREA LOADS - STRAIN", areaStrains.Concat(KeptRows("Area Loads - Strain")));
+        Add(tables, "JOINT LOADS - FORCE", jointLoads.Concat(KeptRows("Joint Loads - Force")));
+        Add(tables, "JOINT LOADS - GROUND DISPLACEMENT", jointDisps.Concat(KeptRows("Joint Loads - Ground Displacement")));
 
         Functions(m, tables);
         LoadCases(m, tables, notes, patternTypes);
@@ -1095,6 +1101,9 @@ public static class S2kWriter
         "pattern live" or "pattern live - auto" => "Pattern Live", "prestress-final" or "prestress-transfer" => "Prestress", "construction" => "Construction",
         _ => "Other",
     };
+
+    /// <summary>A load along a local axis (1, 2, 3) is in SAP2000's "Local" coordinate system.</summary>
+    private static string CoordSys(string etabsDir) => etabsDir is "1" or "2" or "3" ? "Local" : "GLOBAL";
 
     private static string Direction(string etabsDir) => etabsDir.ToUpperInvariant() switch
     {

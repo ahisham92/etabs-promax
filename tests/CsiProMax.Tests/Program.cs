@@ -470,7 +470,8 @@ Test("pack: the model, ETABS's tables and the checks go into one file and the Vi
         Check(seen.Pictures.Count == CsiProMax.Assistant.ViewerCheck.Shots.Length, $"a picture of each view: {seen.Pictures.Count}");
         // Seen on 2026-11-25 with 0.4.20: the story, grid line and animation buttons were "not tested" on every
         // model, because they only work in a plan, an elevation or on the deformed shape and were pressed in 3-D.
-        var left = seen.Items.Where(i => i.Skipped && (i.Name.Contains("story", StringComparison.OrdinalIgnoreCase) || i.Name.Contains("grid line", StringComparison.OrdinalIgnoreCase) || i.Name.Contains("Animate", StringComparison.Ordinal))).ToList();
+        // ETABS 23.2 greys Display > Combined Story Response Plots... after a plain analysis too (picture Display/02), so it may be skipped.
+        var left = seen.Items.Where(i => i.Skipped && !i.Name.Contains("Combined Story Response", StringComparison.Ordinal) && (i.Name.Contains("story", StringComparison.OrdinalIgnoreCase) || i.Name.Contains("grid line", StringComparison.OrdinalIgnoreCase) || i.Name.Contains("Animate", StringComparison.Ordinal))).ToList();
         Check(left.Count == 0, "buttons left untested on a model that has stories, grid lines and results: " + string.Join("; ", left.Select(i => i.Name + ": " + i.Detail)));
 
         // 0.4.40 field test: SAP2000 names its base reactions GlobalFX and GlobalFY, its joints Joint and U1 U2, and
@@ -511,7 +512,8 @@ Test("pack: the model, ETABS's tables and the checks go into one file and the Vi
         var meshSeen = CsiProMax.Assistant.ViewerCheck.Run(meshed, shots, "mesh and loads").Items;
         foreach (var (item, says) in new[] { ("menu: Frame...", "load diagrams"), ("menu: Joint...", "load arrows"), ("menu: Shell Forces/Stresses...", "program's mesh") })
         {
-            var it = meshSeen.FirstOrDefault(i => i.Name == item);
+            // ETABS 23.2 names it Shell Stresses/Forces... (picture Display/03); SAP2000 and SAFE Shell Forces/Stresses...
+            var it = meshSeen.FirstOrDefault(i => i.Name == item) ?? (item.Contains("Shell Forces/Stresses", StringComparison.Ordinal) ? meshSeen.FirstOrDefault(i => i.Name == "menu: Shell Stresses/Forces...") : null);
             Check(it is { Ok: true, Skipped: false } && it.Detail.Contains(says, StringComparison.Ordinal), $"{item} shows {says}: " + (it is null ? "no such menu item" : it.Detail));
         }
 
@@ -1124,6 +1126,8 @@ foreach (var (name, body) in ModelTablesTests.All()) Test(name, body);
 foreach (var (name, body) in ModelerWindowTests.All()) Test(name, body);
 foreach (var (name, body) in LateralTests.All()) Test(name, body);
 foreach (var (name, body) in AnalysisTests.All()) Test(name, body);
+foreach (var (name, body) in EtabsAssignFormTests.All()) Test(name, body);
+foreach (var (name, body) in EtabsDefineFormTests.All()) Test(name, body);
 foreach (var (name, body) in ModelTextTests.All()) Test(name, body);
 foreach (var (name, body) in PropertyTests.All()) Test(name, body);
 foreach (var (name, body) in StructureTests.All()) Test(name, body);
@@ -1131,8 +1135,10 @@ foreach (var (name, body) in ExtrasTests.All()) Test(name, body);
 foreach (var (name, body) in SapSourceTests.All()) Test(name, body);
 foreach (var (name, body) in EditTests.All()) Test(name, body);
 foreach (var (name, body) in AssignTablesTests.All()) Test(name, body);
+foreach (var (name, body) in SapOtherObjectsTests.All()) Test(name, body);
 foreach (var (name, body) in DefineTablesTests.All()) Test(name, body);
 foreach (var (name, body) in SapLoadTablesTests.All()) Test(name, body);
+foreach (var (name, body) in SapObjectLoadsTests.All()) Test(name, body);
 foreach (var (name, body) in ReadableTests.All()) Test(name, body);
 foreach (var (name, body) in SlabTests.All()) Test(name, body);
 foreach (var (name, body) in FuzzTests.All()) Test(name, body);

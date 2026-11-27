@@ -113,24 +113,38 @@ internal static class Brand
 
     // ---- Theme -------------------------------------------------------------------------------------------------
 
-    /// <summary>True when ETABS's UI theme is dark (ETABS 2024+). The last theme read when it can't be read now (light at first).</summary>
-    private static bool _lastDark;
+    /// <summary>
+    /// True when CSI ProMax's windows are dark. One theme for every window and page, light unless the engineer picks
+    /// dark (Options > Theme in the Engine, View > Theme in the chat's window); the choice is kept in theme.txt.
+    /// </summary>
+    public static bool IsDark => _dark ??= ReadDark();
 
-    public static bool IsDark
-    {
-        get
-        {
-            try { return _lastDark = ReadDark(); }
-            catch (Exception) { return _lastDark; } // not readable right now: keep the last theme read
-        }
-    }
+    private static bool? _dark;
 
-    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static string ThemeFile => System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CsiProMax", "theme.txt");
+
     private static bool ReadDark()
     {
-        // ETABS has one look, so the windows follow Windows' own app mode (Settings > Personalisation > Colours).
-        using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
-        return key?.GetValue("AppsUseLightTheme") is int light && light == 0;
+        try { return System.IO.File.Exists(ThemeFile) && System.IO.File.ReadAllText(ThemeFile).Trim() == "dark"; }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException) { return false; }
+    }
+
+    /// <summary>Raised on the window's thread when the theme changed: the pages (WebPane) take it up.</summary>
+    public static event Action<bool>? ThemeChanged;
+
+    /// <summary>Switches every CSI ProMax window and page to the light or the dark theme, and keeps the choice.</summary>
+    public static void SetTheme(bool dark)
+    {
+        try
+        {
+            System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(ThemeFile)!);
+            System.IO.File.WriteAllText(ThemeFile, dark ? "dark" : "light");
+        }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException) { /* this session still switches */ }
+        if (_dark == dark) return;
+        _dark = dark;
+        Recheck();
+        ThemeChanged?.Invoke(dark);
     }
 
     private static readonly List<FrameworkElement> Themed = [];

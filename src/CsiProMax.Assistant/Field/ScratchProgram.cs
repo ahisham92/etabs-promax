@@ -785,7 +785,7 @@ public sealed class ScratchProgram : IScratchWindow
             // ETABS 23.2 answered 0 and asked for a file in its own "Open Model File" box, or held "(Untitled)", for an
             // .EDB that was there, just after the program before it had closed with it (0.4.68 full test: the Engine's
             // second run on the analysed model, and the hidden copy of the pack). The file is given again, up to 3 times.
-            for (var again = 0; again < 3 && answer == 0 && File.Exists(modelFile) && (refused.Any(ScratchDialogs.AskedForFile) || !Holds(modelFile)); again++)
+            for (var again = 0; again < 3 && answer == 0 && File.Exists(modelFile) && (refused.Any(ScratchDialogs.AskedForFile) || !Holds(modelFile) && !BuildsThroughApi(_program, modelFile)); again++)
             {
                 Thread.Sleep(TimeSpan.FromSeconds(10));
                 lock (_noticesClosed) _noticesClosed.RemoveAll(ScratchDialogs.AskedForFile);
@@ -796,7 +796,16 @@ public sealed class ScratchProgram : IScratchWindow
                 lock (_noticesClosed) refused = _noticesClosed.Where(n => ScratchDialogs.IsFileRefused(n)).ToArray();
             }
             if (answer == 0 && refused.Length == 0 && !Holds(modelFile))
+            {
+                // SAFE 22.7 answered 0 to the Modeler's .f2k and held '(Untitled)' (tester's SAFE-only run, 0.4.71): its
+                // File.OpenFile takes no .f2k, as SAFE 23.1's holds an empty model. A file the test can build is built.
+                if (BuildsThroughApi(_program, modelFile))
+                {
+                    openedEmpty = true;
+                    return $"{name} answered that it opened it, but holds '{Path.GetFileName(OpenFileName())}': the model is built through {name}'s tables instead";
+                }
                 throw new EtabsException($"{name} answered that it opened {Path.GetFileName(modelFile)}, but it holds '{Path.GetFileName(OpenFileName())}' (3 more tries).");
+            }
             if (answer != 0 || refused.Length > 0)
                 throw new EtabsException($"{name} could not open the file the Modeler wrote (it answered {answer})." + (refused.Length > 0 ? $" It said: {string.Join(" | ", refused)}; the test pressed OK." : ""));
             Ask(FileTimeout, "use the model's own units", m => { CsiProMax.Assistant.Etabs.EditableTables.PresentAsDatabase(m); return 0; }, $"{name} did not answer within {FileTimeout.TotalMinutes:0} minutes.");
@@ -857,9 +866,20 @@ public sealed class ScratchProgram : IScratchWindow
         {
             var link = ProgramTools.Live(com);
             var file = link.Info().File;
-            FieldContext.Expect(SameName(file, target), $"the window that answered has '{Path.GetFileName(file)}' open, not the scratch model, so the test stops here.");
+            // A hidden copy's .EDB that ETABS 23.2 said it opened was "(Untitled)" here (0.4.68 and 0.4.73 full tests, the
+            // pack's hidden copy and the Viewer's): the file is given to it again, as a person would open it again.
+            var again = 0;
+            for (; again < 2 && !SameName(file, target) && File.Exists(target); again++)
+            {
+                Thread.Sleep(TimeSpan.FromSeconds(10));
+                ScratchDialogs.WaitUntilFree(target, TimeSpan.FromSeconds(60));
+                Ask(FileTimeout, "open the file again", m => m.File.OpenFile(Path.GetFullPath(target)),
+                    $"{name} did not finish opening the file within {FileTimeout.TotalMinutes:0} minutes. A message may be waiting in its window.");
+                file = link.Info().File;
+            }
+            FieldContext.Expect(SameName(file, target), $"the window that answered has '{Path.GetFileName(file)}' open, not the scratch model, so the test stops here" + (again > 0 ? $" ({again} more opens of {Path.GetFileName(target)} did not change it)." : "."));
             Link = link;
-            return Path.GetFileName(file);
+            return Path.GetFileName(file) + (again > 0 ? $" (after {again} more open{(again > 1 ? "s" : "")})" : "");
         }) is null) return false;
 
         // The Modeler's table data (material damping, notes, time dependence, ...) goes into ETABS through its tables, as
@@ -1021,7 +1041,10 @@ public sealed class ScratchProgram : IScratchWindow
     {
         var open = OpenFileName();
         if (open.Length == 0 || SameName(open, file)) return true;
-        var inFile = TextObjectCount(_program, file);
+        // A text file CSI ProMax cannot count (2222.$et, 0.4.73 full test) is still held when the program holds objects:
+        // opening it again over the changed "(Untitled)" model made ETABS ask "Save current changes?" and wait 3 minutes.
+        var text = Path.GetExtension(file).ToLowerInvariant() is ".e2k" or ".$et" or ".s2k" or ".$2k";
+        var inFile = text ? Math.Max(1, TextObjectCount(_program, file)) : 0;
         if (inFile == 0) return false;
         int held;
         try { held = Convert.ToInt32(Ask(TimeSpan.FromMinutes(1), "count the objects", m => Count(m, "AreaObj.Count") + Count(m, "FrameObj.Count"), $"{_program.Name} did not answer.")); }
@@ -1167,7 +1190,15 @@ public sealed class ScratchProgram : IScratchWindow
     /// </summary>
     public static bool MayEnd(DateTime processStarted, DateTime testAsked, IEnumerable<string> titles) =>
         testAsked != default && processStarted >= testAsked.AddSeconds(-2)
-        && titles.All(t => t.Contains("cpm-field-test", StringComparison.OrdinalIgnoreCase));
+        && titles.All(t => t.Contains("cpm-field-test", StringComparison.OrdinalIgnoreCase) || OwnBlank(t));
+
+    /// <summary>
+    /// A window of the blank model the test itself starts in its scratch window at its end (the program's defaults,
+    /// never saved): its "(Untitled)" main window, and the "New Model Quick Templates" form ETABS 23.2 opened on it, which
+    /// kept the 0.4.73 test's own ETABS running with a licence (2026-11-27).
+    /// </summary>
+    private static bool OwnBlank(string title) =>
+        title.TrimEnd().EndsWith("- (Untitled)", StringComparison.OrdinalIgnoreCase) || title.Trim().Equals("New Model Quick Templates", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// True when the windows of a process show it is a test copy an earlier run left open: one of them names a scratch

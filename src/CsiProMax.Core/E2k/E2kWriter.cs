@@ -31,6 +31,11 @@ public static class E2kWriter
         // a box that waits for OK on every open, 2026-11-26): its own export writes GROUP "name" alone. The model keeps the colour.
         passthrough = passthrough.Select(r => r.Heading != GroupDefs.Heading ? r
             : new RawSection { Heading = r.Heading, After = r.After, Lines = r.Lines.Select(l => Tokenize(l) is { Count: >= 3 } t && t[0] == "GROUP" && t[2] == "COLOR" ? "  GROUP " + t[1] : l).ToList() }).ToList();
+        // ETABS 23.2 writes its internal live load reduction pattern and case into a named table set
+        // (DBTABLESETLOADPATTERN "Test" "~LLRF") but cannot read them back: "Error reading line 250. Line Ignored.", a box
+        // on every open (Verification example KBC 2009 Ex002, 0.4.70 full test). They name nothing the model defines.
+        passthrough = passthrough.Select(r => !r.Lines.Any(InternalTableSetName) ? r
+            : new RawSection { Heading = r.Heading, After = r.After, Lines = r.Lines.Where(l => !InternalTableSetName(l)).ToList() }).ToList();
         EmitPassthroughAfter(text, passthrough, "");
 
         var anchors = new List<string>();
@@ -59,6 +64,10 @@ public static class E2kWriter
 
     /// <summary>Headings ETABS writes even when nothing is under them.</summary>
     private static readonly string[] AlwaysWritten = [S.PointLoads, S.FrameLoads, S.ShellLoads];
+
+    /// <summary>A table set's pattern, case or combination line that names one of ETABS's own internal items ("~LLRF").</summary>
+    public static bool InternalTableSetName(string line) =>
+        Tokenize(line) is { Count: >= 3 } t && t[0] is "DBTABLESETLOADPATTERN" or "DBTABLESETLOADCASE" or "DBTABLESETCOMBO" && t[2].Trim('"').StartsWith('~');
 
     private static void EmitPassthroughAfter(StringBuilder text, List<RawSection> left, string heading)
     {
@@ -180,7 +189,9 @@ public static class E2kWriter
                     foreach (var line in c.Lines) yield return Line(["LOADCASE", Quote(c.Name)], line);
                 break;
             case S.Combos:
-                foreach (var c in m.Combos)
+                // ETABS 23.2 writes its user combinations only: a default design combination (Auto) is not a COMBO line
+                // (field/reference-forms/etabs/Define/Combos/notes.md); it goes in through ETABS's table instead.
+                foreach (var c in m.Combos.Where(c => !c.Auto))
                     foreach (var line in c.Lines) yield return Line(["COMBO", Quote(c.Name)], line);
                 break;
         }

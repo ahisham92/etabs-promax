@@ -47,7 +47,7 @@ public static class HandTools
             Ask.Changes, DefineLoadPattern, a => $"Define the load pattern {Text(a, "name")}"),
         new("define_combination",
             "Adds a load combination, or changes one ('was': its name now): its type (Linear Add, Envelope, Absolute Add, SRSS, Range Add) and each load case or combination with its scale factor.",
-            """{"type":"object","required":["name","cases"],"properties":{"name":{"type":"string"},"was":{"type":"string"},"type":{"type":"string"},"cases":{"type":"array","items":{"type":"object","required":["case","factor"],"properties":{"case":{"type":"string"},"factor":{"type":"number"}}}}}}""",
+            """{"type":"object","required":["name","cases"],"properties":{"name":{"type":"string"},"was":{"type":"string"},"type":{"type":"string"},"notes":{"type":"string","description":"The Load Combination Notes."},"auto":{"type":"boolean","description":"A default design combination (Auto Combination: Yes, not editable)."},"cases":{"type":"array","items":{"type":"object","required":["case","factor"],"properties":{"case":{"type":"string"},"factor":{"type":"number"}}}}}}""",
             Ask.Changes, DefineCombination, a => $"Define the combination {Text(a, "name")}"),
         new("delete_definition",
             "Deletes a material, frame section, slab or wall section, load pattern (with its loads and case), load case, function or combination. One still in use is not deleted, and the answer says what uses it.",
@@ -106,10 +106,12 @@ public static class HandTools
                 ["loads"] = m.LineLoads.Count(l => l.Pattern == p.Name) + m.AreaLoads.Count(l => l.Pattern == p.Name) + m.PointLoads.Count(l => l.Pattern == p.Name),
             }).ToArray()),
             ["pattern_types"] = new JsonArray(ProgramOptions.PatternTypes(m.Target).Select(t => (JsonNode)t).ToArray()),
+            // The shell uniform load sets the .e2k holds (Assign > Shell Loads > Uniform Load Sets lists them).
+            ["load_sets"] = new JsonArray(LoadSets.Sets(m).Keys.Select(k => (JsonNode)k).ToArray()),
             ["load_cases"] = new JsonArray(m.LoadCases.Select(c => (JsonNode)new JsonObject { ["name"] = c.Name, ["type"] = Value(c.Lines, "TYPE") ?? "" }).ToArray()),
             ["combinations"] = new JsonArray(m.Combos.Select(c => (JsonNode)new JsonObject
             {
-                ["name"] = c.Name, ["type"] = Value(c.Lines, "TYPE") ?? "Linear Add",
+                ["name"] = c.Name, ["type"] = Value(c.Lines, "TYPE") ?? "Linear Add", ["notes"] = c.Notes ?? "", ["auto"] = c.Auto,
                 ["cases"] = new JsonArray(c.Lines.Where(l => l.Count >= 2 && l[0] is "LOADCASE" or "LOADCOMBO").Select(l => (JsonNode)new JsonObject
                 {
                     ["case"] = E2kText.Unquote(l[1]), ["factor"] = E2kText.TryNumber(E2kText.Value(l, "SF"), out var f) ? f : 1,
@@ -353,6 +355,8 @@ public static class HandTools
                 pattern.Name = name;
                 SapLoadTables.Rename(m, "pattern", was!, name);
                 SapLoadTables.Rename(m, "case", was!, name);
+                EtabsLoadTables.Rename(m, "pattern", was!, name);
+                EtabsLoadTables.Rename(m, "case", was!, name);
                 foreach (var l in m.LineLoads) Retag(l.Tokens, was!, name);
                 foreach (var l in m.AreaLoads) Retag(l.Tokens, was!, name);
                 foreach (var l in m.PointLoads) Retag(l.Tokens, was!, name);
@@ -391,7 +395,11 @@ public static class HandTools
                 lines.Add([isCase ? "LOADCASE" : "LOADCOMBO", E2kText.Quote(loadCase), "SF", N(factor)]);
             }
             var combo = Existing(m.Combos, was, c => c.Name, "combination");
-            if (combo is null) { m.Combos.Add(new LoadCombo { Name = name, Lines = lines }); return Done($"added {name}"); }
+            var notes = a.TryGetProperty("notes", out var nv) && nv.ValueKind == JsonValueKind.String ? nv.GetString() : null;
+            var auto = a.TryGetProperty("auto", out var av) && av.ValueKind == JsonValueKind.True;
+            if (combo is null) { m.Combos.Add(new LoadCombo { Name = name, Lines = lines, Notes = notes is { Length: > 0 } ? notes : null, Auto = auto }); return Done($"added {name}"); }
+            if (combo.Auto && !auto) throw new ToolInputException($"'{was}' is a default design combination (Auto Combination: Yes, Not Editable).");
+            if (notes is not null) combo.Notes = notes.Length > 0 ? notes : null;
             // What ETABS keeps on a combination beyond its type and cases (design use, ...) stays.
             combo.Lines = lines.Concat(combo.Lines.Skip(1).Where(l => l.Count > 0 && l[0] is not ("LOADCASE" or "LOADCOMBO" or "TYPE"))).ToList();
             if (was != name) { combo.Name = name; RenameCase(m, was!, name); SapLoadTables.Rename(m, "combo", was!, name); }
@@ -414,6 +422,7 @@ public static class HandTools
                 case "frame_section":
                     InUse(m.LineAssigns.Count(x => x.Section == name), "members");
                     if (m.FrameSections.RemoveAll(x => x.Name == name) == 0) throw new ToolInputException($"There is no frame section named '{name}'.");
+                    SectionDesigner.Set(m, name, []);
                     if (m.Passthrough.Find(s => s.Heading == "CONCRETE SECTIONS") is { } raw) raw.Lines.RemoveAll(l => l.Contains("CONCRETESECTION \"" + name + "\"", StringComparison.Ordinal) || l.Contains("CONCRETESECTION  \"" + name + "\"", StringComparison.Ordinal));
                     break;
                 case "shell_section":
@@ -429,6 +438,7 @@ public static class HandTools
                     InUse(AnalysisDefs.PDelta(m).Loads.Count(l => l.Pattern == name), "the P-Delta option (take it out first)");
                     m.LoadPatterns.RemoveAll(p => p.Name == name);
                     m.LoadCases.RemoveAll(c => c.Name == name);
+                    EtabsLoadTables.Drop(m, "pattern", name); EtabsLoadTables.Drop(m, "case", name);
                     m.LineLoads.RemoveAll(l => l.Pattern == name); m.AreaLoads.RemoveAll(l => l.Pattern == name); m.PointLoads.RemoveAll(l => l.Pattern == name);
                     break;
                 case "combination":
@@ -439,6 +449,7 @@ public static class HandTools
                     InUse(m.Combos.Count(c => c.Lines.Any(l => l.Count >= 2 && l[0] == "LOADCASE" && E2kText.Unquote(l[1]) == name)), "combinations (take it out of them first)");
                     InUse(m.LoadCases.Count(c => c.Lines.Any(l => (E2kText.Value(l, "MODALCASE") == name || E2kText.Value(l, "INITCOND") == name) && c.Name != name)), "other load cases (as their modal case or initial conditions)");
                     if (m.LoadCases.RemoveAll(c => c.Name == name) == 0) throw new ToolInputException($"There is no load case named '{name}'.");
+                    EtabsLoadTables.Drop(m, "case", name);
                     break;
                 case "function":
                     InUse(AnalysisDefs.UsersOfFunction(m, name).Count(), "load cases");

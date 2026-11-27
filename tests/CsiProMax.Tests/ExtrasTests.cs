@@ -194,6 +194,25 @@ static class ExtrasTests
                 Check(html.Contains(part), "viewer.html lost " + part);
             Check(html.Contains("[[\"OK\", d => applyDeformed(d)], [\"Close\"], [\"Apply\"") && html.Contains("[[\"OK\", d => applyForces(d)], [\"Close\"], [\"Apply\""), "OK, Close, Apply as the programs");
         });
+        yield return ("extras: ETABS's Display result forms are ETABS 23.2's as pictured on Ahmed's PC: Deformed Shape, Reactions, Member Force Diagram for Frames/Piers/Spandrels/Links, Shell Forces/Stresses with Select Groups, Energy/Virtual Work Diagram, Story Response (2026-11-27)", () =>
+        {
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var part in new[] { "<legend>Load Case/Load Combination/Modal Case</legend>", "value=\"case\">Case</label>", "value=\"combo\">Combo</label>", "value=\"mode\">Mode</label>",
+                "dialog(\"Deformed Shape\"", "Draw Contours on Objects", "Show Contours for", "Minimum Value for Contour Range", "Cubic Curve", "Hinge State Colored Dots are For", "IO, LS and CP Acceptance Points", "<legend>Animation Controls</legend>", "Time Increment",
+                "dialog(\"Reactions\"", "Integrated Wall Reactions", "Reset Tabulation Location", "Force Min/Max Range", "Moment Min/Max Range", "Display Results for These Components",
+                "dialog(\"Member Force Diagram for Frames/Piers/Spandrels/Links\"", "\"Inplane Shear\"", "\"Inplane Moment\"", "Show Values at Controlling Stations on Diagram", "<legend>Frame Contours</legend>", "<legend>Include</legend>",
+                "dialog(\"Shell Forces/Stresses\"", "\"Resultant Forces\"", "\"Shell Stresses\"", "\"Shell Strains\"", "\"Visible Face\", \"Top Face\", \"Bottom Face\", \"Maximum\", \"Minimum\", \"Absolute Maximum\"", "\"Display on Undeformed Shape\", \"Display on Deformed Shape\", \"Display in Extruded Form\"",
+                "Contour Averaging at Nodes", "\"None\", \"By Objects\", \"By Selected Groups\"", "dialog(\"Select Groups\"", "User Scale Factor", "\"0.0\", \"0.1\", \"0.2\"",
+                "dialog(\"Energy/Virtual Work Diagram\"", "value=\"Not Applicable\"", "energyvirtualwork",
+                "dialog(\"Story Response\"", "\"Max story displ\"", "\"Max story drifts\"", "\"Story shears\"", "\"Overturning moments\"", "\"Story stiffness\"", "\"Diaph CM displ\"", "\"Diaph drifts\"", "Indicates the type of story response to be displayed.",
+                "dialog(\"Choose Tables for Display\"", "Load Patterns (Model Def.)", "Select Load Patterns...", "Show if Used in Model", "Show Unformatted", "Show Named Set...", "Table Format File...", "Current Table Format File:", "\"Set Table Formats File...\"",
+                "\"Export Current Table\"", "\"Print All Tables as Text File\"", "\"Save All Table Formats to Table Formats File\"", "\"Apply Default Format to All Tables\"", "\"Remove Current Table\"", "\"Auto Width for All Columns\"", "\"Maximize Form Size (Toggle)\"", "\"Format Table...\"", "\"Filter Table...\"", "\"Sort Table...\"", "\"Print Hyperlinked Contents\"", "Add Tables...", "Record:",
+                "Modify/Show Database Table Format - ", "Use up and down arrows to set field display order", "Reset Display Order to Default", "<legend>Filter Type</legend>", "<legend>Quick Filter</legend>", "<legend>Database Table Filters</legend>", "Clear All Filters", "Advanced Filter - SQL String", "Table Sorting - Sort by These Fields", "Save Table Format to File",
+                "case \"tables\": if (etrOn() && P) return etrChooseTables();",
+                "shells() { if (etrOn()) return etrShells(); openShells(); }", "if (etrOn()) return etrForces();", "if (etrOn()) return etrReactions();", "if (etrOn()) return etrDeformed(" })
+                Check(html.Contains(part), "viewer.html lost " + part);
+            Check(ViewerCheck.Script.Contains("Display result forms as the program draws them: Deformed Shape, Reactions, Member Force Diagram"), "the field test lost the ETABS Display result forms step");
+        });
         yield return ("extras: Display Design Info as the programs (Design Output and Design Input lists by their names), the Detailing menu's schedules and the Units button (Ahmed 2026-11-26)", () =>
         {
             var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
@@ -235,7 +254,7 @@ static class ExtrasTests
         yield return ("extras: the slab and wall forms match ETABS 23.2 and SAP2000 26.3 field by field: Slab Properties and Wall Properties lists of their own, Slab Property Data with notional size, modeling type, modifiers, colour, notes, one-way load and rib data, Wall Property Data with the automatic rigid zone, SAP2000's Shell Section Data with type, material angle and membrane/bending thickness (Ahmed 2026-11-27)", () =>
         {
             var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
-            foreach (var part in new[] { "kind === \"wall\" ? \"Wall Properties\" : \"Slab Properties\"", "[\"Slab Sections...\", \"m:shellSections\"], [\"Wall Sections...\", \"m:wallSections\"]", "case \"wallSections\": return hmShellSections(\"wall\");",
+            foreach (var part in new[] { "kind === \"wall\" ? \"Wall Properties\" : \"Slab Properties\"", "[\"Slab Sections...\", \"m:shellSections\"], [\"Deck Sections...\", \"m:decks\"], [\"Wall Sections...\", \"m:wallSections\"]", "case \"wallSections\": return hmShellSections(\"wall\");",
                 "sap ? \"Shell Section Data\" : wall ? \"Wall Property Data\" : \"Slab Property Data\"", "<button id=\"aNot\">Modify/Show Notional Size...</button>", "Include Automatic Rigid Zone Area Over Wall", "Use Special One-Way Load Distribution",
                 "<span data-rib>Rib Spacing (Perpendicular to Rib Direction)</span>", "<span data-rib>Stem Width at Top</span>", "<span>Material Angle</span><input id=\"aMA\"", "<span>Bending</span><input id=\"aBT\"", "<legend>Select Section Type To Add</legend>" })
                 Check(html.Contains(part), "viewer.html lost " + part);

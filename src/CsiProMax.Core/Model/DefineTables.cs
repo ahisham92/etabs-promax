@@ -111,6 +111,11 @@ public static class DefineTables
         ["Deck Property Definitions"] = [("Name", "Name"), ("DeckType", "Deck Type"), ("MaterialSlb", "Slab Material"), ("MaterialDck", "Deck Material"), ("SlabDepth", "Slab Depth"), ("RibDepth", "Rib Depth"), ("RibWidthTop", "Rib Width Top"), ("RibWidthBot", "Rib Width Bottom"), ("RibSpacing", "Rib Spacing"), ("DeckShrThk", "Deck Shear Thickness"), ("DeckUnitWt", "Deck Unit Weight"), ("StudDiam", "Shear Stud Diameter"), ("StudHeight", "Shear Stud Height"), ("StudFu", "Shear Stud Tensile Strength"), ("f11Mod", "f11 Modifier"), ("f22Mod", "f22 Modifier"), ("f12Mod", "f12 Modifier"), ("m11Mod", "m11 Modifier"), ("m22Mod", "m22 Modifier"), ("m12Mod", "m12 Modifier"), ("v13Mod", "v13 Modifier"), ("v23Mod", "v23 Modifier"), ("MMod", "Mass Modifier"), ("WMod", "Weight Modifier"), ("Color", "Color"), ("Notes", "Notes")],
         ["Generalized Displacement Definitions"] = [("Name", "Name"), ("Type", "Type"), ("PointName", "PointName"), ("TransU1SF", "Translational U1 SF"), ("TransU2SF", "Translational U2 SF"), ("TransU3SF", "Translational U3 SF"), ("TransR1SF", "Translational R1 SF"), ("TransR2SF", "Translational R2 SF"), ("TransR3SF", "Translational R3 SF"), ("RotU1SF", "Rotational U1 SF"), ("RotU2SF", "Rotational U2 SF"), ("RotU3SF", "Rotational U3 SF"), ("RotR1SF", "Rotational R1 SF"), ("RotR2SF", "Rotational R2 SF"), ("RotR3SF", "Rotational R3 SF")],
         ["Shell Uniform Load Sets"] = [("Name", "Name"), ("LoadPattern", "Load Pattern"), ("LoadValue", "Load Value")],
+        // ETABS 23.2's Define > Spring Properties > Soil Profiles and Isolated Column Footings, by the names its
+        // Show Tables heads the columns with (field/reference-forms/etabs/Define/Tables, Spring Soil Profiles and
+        // Spring Isolated Column Footings); EditableTables.Put finds each one's field key by that name.
+        [SoilProfiles] = L("Name", "Soil Layer Name", "Elevation of Top of Layer", "Unit Weight", "Shear Modulus", "Poissons Ratio", "Cohesion", "Friction Angle", "Shear Wave Velocity", "Layer Color", "Shear Modulus Reduction Factor", "Hysteretic Damping Ratio", "Notes"),
+        [ColumnFootings] = L("Name", "Length", "Width", "Thickness", "Embedment Source", "User Embedment", "Color", "Notes"),
         ["Auto Construction Sequence Definition"] = [("Name", "Name"), ("IsActive", "Is Active"), ("GeoNonlin", "Geometric Nonlinearity"), ("NumStories", "Number Stories"), ("Group", "Exclude Group"), ("LoadPattern", "Load Pattern"), ("ScaleFactor", "ScaleFactor"), ("ReplaceDead", "Replace Dead")],
         ["Walking Vibration Definitions"] = [("Name", "Name"), ("Story", "Story"), ("X", "X"), ("Y", "Y"), ("ModalOpt", "Modal Case Option"), ("ModePerStep", "Modes per Step"), ("ModalCase", "Modal Case"), ("DampRatio", "Damping Ratio"), ("Weight", "Weight"), ("LoadFactor", "Load Factor"), ("Frequency", "Frequency"), ("Speed", "Speed"), ("Duration", "Duration"), ("ThreshOpt", "Threshold Option"), ("UserThresh", "User Threshold"), ("Color", "Color"), ("Notes", "Notes")],
         ["Panel Zone Property Definitions"] = [("Name", "Name"), ("Source", "Source"), ("ActiveDir", "Active Direction"), ("OffsetRigid", "Offsets Rigid?"), ("DblPlThick", "Doubler Plate Thickness"), ("AxLoadRatio", "Axial Load Ratio"), ("SpringMajor", "Spring Major Stiffness"), ("SpringMinor", "Spring Minor Stiffness"), ("LinkProp", "Link Property"), ("Connect", "Connectivity"), ("AxisSource", "Local Axis Source"), ("AxialDir", "User Axial Direction"), ("Axis2Angle", "User Axis 2 Angle"), ("AcceptType", "Acceptance Type"), ("UserAccType", "User Acceptance Type"), ("UserIOMomMa", "User IO Moment Major"), ("UserLSMomMa", "User LS Moment Major"), ("UserCPMomMa", "User CP Moment Major"), ("UserIOMomMi", "User IO Moment Minor"), ("UserLSMomMi", "User LS Moment Minor"), ("UserCPMomMi", "User CP Moment Minor"), ("UserIORotMa", "User IO Rotation Major"), ("UserLSRotMa", "User LS Rotation Major"), ("UserCPRotMa", "User CP Rotation Major"), ("UserIORotMi", "User IO Rotation Minor"), ("UserLSRotMi", "User LS Rotation Minor"), ("UserCPRotMi", "User CP Rotation Minor"), ("Notes", "Notes")],
@@ -146,11 +151,21 @@ public static class DefineTables
     });
 
 
+    public const string SoilProfiles = "Spring Property Definitions - Soil Profiles", ColumnFootings = "Spring Property Definitions - Isolated Column Footings";
+
+    private static (string, string)[] L(params string[] labels) => labels.Select(x => (x, x)).ToArray();
+
     private static Dictionary<string, (string, string)[]> WithSap(Dictionary<string, (string, string)[]> etabs)
     {
         foreach (var (t, fields) in SapHinges) etabs[t] = fields.Select(f => (f, f)).ToArray();
+        // ETABS 23.2's Link/Support Property Data, every type's table and the acceptance criteria (EtabsLinkTables).
+        foreach (var (t, fields) in EtabsLinkTables.Tables) etabs[t] = fields;
         // ETABS's shear wall pier and spandrel overwrites, by label (Ahmed 2026-11-27, every form).
         foreach (var (t, fields) in ProgramForms.WallOverwriteCatalog()) etabs[t] = fields.Select(f => (f.Key, f.Label)).ToArray();
+        // ETABS's own load pattern (auto seismic, wind, notional) and load case tables (Ahmed 2026-11-27, every form).
+        foreach (var (t, fields) in EtabsLoadTables.Fields) etabs[t] = fields;
+        // ETABS's Detailing > Drawing Management forms, kept by the Engine only (EtabsDetailingTables).
+        foreach (var (t, fields) in EtabsDetailingTables.Tables) etabs[t] = fields;
         return etabs;
     }
 
@@ -257,7 +272,10 @@ public static class DefineTables
         // SAP2000's own load tables (Define > Load Patterns, Load Cases, Load Combinations): SapLoadTables.
         if (SapLoadTables.Full(table) is { } sapLoad) { Set(m, sapLoad, SapLoadTables.Fields[sapLoad].Select(f => (f, f)).ToArray(), name, rows); return; }
         if (!Tables.TryGetValue(table, out var fields)) throw new ArgumentException($"There is no definition table '{table}'. The tables: {string.Join(", ", Tables.Keys)}.");
-        Set(m, Tables.Keys.First(k => k.Equals(table, StringComparison.OrdinalIgnoreCase)), fields, name, rows);
+        var full = Tables.Keys.First(k => k.Equals(table, StringComparison.OrdinalIgnoreCase));
+        // An ETABS Auto Lateral Load code: a pattern has one code, so the rows of its other codes go (no rows: None, all go).
+        if (EtabsLoadTables.Code(full) is not null) EtabsLoadTables.ClearCode(m, name, rows.Count > 0 ? full : null);
+        Set(m, full, fields, name, rows);
     }
 
     /// <summary>The name of a definition table as the model keeps it (SAP2000's load tables too), or null.</summary>
@@ -287,6 +305,13 @@ public static class DefineTables
         }
         if (list.Count == 0) m.DefinitionTables.Remove(full);
         if (m.DefinitionTables.Count == 0) m.DefinitionTables = null;
+        // What a form sets now wins over the rows measured when the model came from the program (CarriedTables), which
+        // would otherwise go in after these and put the old values back.
+        if (m.Carried?.Rows.TryGetValue(full, out var carried) == true)
+        {
+            carried.RemoveAll(r => r.GetValueOrDefault(key) == name);
+            if (carried.Count == 0) m.Carried.Rows.Remove(full);
+        }
     }
 
     // ---- rebar sizes and a concrete section's rebar, by the .e2k's own keywords ----

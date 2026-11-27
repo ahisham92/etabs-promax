@@ -34,6 +34,10 @@ public static class CaseTools
               "sap_table":{"type":"string","description":"SAP2000's own function table the function is kept in, e.g. 'Function - Response Spectrum - ASCE 7-16' (its code or type and parameters go back to SAP2000 as they are)."},
               "sap_values":{"type":"object","additionalProperties":{"type":["string","number"]},"description":"That table's parameter fields (SAP2000 field names) for this function."},
               "sap_points":{"type":"array","items":{"type":"array","items":{"type":"number"}},"description":"The points SAP2000's table keeps when they differ from the function's own (User Periodic: one cycle)."},
+              "etabs_table":{"type":"string","description":"The etabs target's own function table the function is kept in, e.g. 'Functions - Response Spectrum - ASCE7-16' (its code or type and every parameter go back through its database tables)."},
+              "etabs_values":{"type":"object","additionalProperties":{"type":["string","number"]},"description":"That table's parameter fields (the etabs table's field names) for this function."},
+              "etabs_points":{"type":"array","items":{"type":"array","items":{"type":"number"}},"description":"The points the etabs table keeps when they differ from the function's own (User Periodic: one cycle)."},
+              "etabs_form":{"type":"object","additionalProperties":{"type":["string","number"]},"description":"What the etabs form shows that its table has no field for (kept in the .cpm only)."},
               "from":{"type":"string","enum":["points","code","sine","cosine","ramp","sawtooth","triangular","periodic","file"],"description":"Default points."},
               "ramp_time":{"type":"number"},"max_time":{"type":"number"},"preview":{"type":"boolean"},"units":{"type":"string","description":"Frequency Units Hz or RPM (power spectral density, steady state), as the form shows the frequencies."},
               "file":{"type":"object","additionalProperties":{"type":["string","number","boolean"]},"description":"The From File form's fields, kept with the function."},
@@ -61,12 +65,29 @@ public static class CaseTools
             """{"type":"object","required":["method"],"properties":{"method":{"type":"string","enum":["none","non-iterative","iterative"]},"loads":{"type":"array","items":{"type":"object","required":["pattern","factor"],"properties":{"pattern":{"type":"string"},"factor":{"type":"number"}}}},"iterations":{"type":"integer"},"tolerance":{"type":"number"}}}""",
             Ask.Changes, DefinePDelta, a => $"Set P-Delta to {a.Text("method")}"),
         new("assign_object_loads",
-            "Assigns a load of any kind to joints, frames or shells (Assign > Joint, Frame or Shell Loads), names as label@story (joints: point@story): joint_force (fx..mz), joint_displacement (ux..rz), joint_temperature, frame_point (value or moment at relative distance), frame_trapezoid (start, end, from, to as relative distances), frame_uniform and shell_uniform in any direction, frame_temperature and shell_temperature (temperature change, gradient), frame_strain and shell_strain. dir: GRAV, X, Y, Z or a local axis 1, 2, 3. replace (default true) takes off the same kind of load in that pattern first.",
+            "Assigns a load of any kind to joints, frames or shells (Assign > Joint, Frame or Shell Loads), names as label@story (joints: point@story): joint_force (fx..mz), joint_displacement (ux..rz), joint_temperature, frame_point (value or moment at relative distance), frame_trapezoid (start, end, from, to as relative distances), frame_uniform and shell_uniform in any direction, frame_temperature and shell_temperature (temperature change, gradient), frame_strain and shell_strain. dir: GRAV, X, Y, Z or a local axis 1, 2, 3. replace (default true) takes off the same kind of load in that pattern first. how (the Options of the Assign form): add (Add to Existing: a joint load's values are added to the joint's load of that kind in the pattern; a frame or shell load is added beside the ones there), replace (Replace Existing) or delete (Delete Existing: the load of that kind in that pattern is taken off; no values needed).",
             """
             {"type":"object","required":["kind","pattern","objects"],"properties":{
               "kind":{"type":"string"},"pattern":{"type":"string"},"objects":{"type":"array","items":{"type":"string"}},
-              "values":{"type":"object","additionalProperties":{"type":"number"}},"dir":{"type":"string"},"replace":{"type":"boolean"}}}
+              "values":{"type":"object","additionalProperties":{"type":"number"}},"dir":{"type":"string"},"replace":{"type":"boolean"},"how":{"type":"string","enum":["add","replace","delete"]}}}
             """, Ask.Changes, AssignLoads, a => $"Assign {a.Text("kind").Replace('_', ' ')} loads in {a.Text("pattern")}"),
+        new("assign_shell_load_set",
+            "Assign > Shell Loads > Uniform Load Sets: gives slabs and walls (label@story) a shell uniform load set (Define > Shell Uniform Load Sets), in place of the one they had; \"\" (None) takes it off.",
+            """{"type":"object","required":["objects","set"],"properties":{"objects":{"type":"array","items":{"type":"string"}},"set":{"type":"string"}}}""",
+            Ask.Changes, AssignLoadSet, a => a.Text("set") is { Length: > 0 } t ? $"Assign the load set {t}" : "Take the load sets off"),
+        new("paste_object_loads",
+            "Assign > Paste Assigns, its Loads items: puts the loads of one joint, frame or shell (from, label@story; joints point@story) on other objects of the same kind, in every load pattern, each kept exactly as the object has it. types: the loads' TYPE values to copy (FORCE, GROUNDDISP, TEMP for joints; POINTF, POINTM, UNIFF, UNIFM, TRAPF, TRAPM, TEMP for frames; UNIFF, TEMP for shells); the objects' loads of those types are replaced.",
+            """{"type":"object","required":["from","objects","types"],"properties":{"from":{"type":"string"},"objects":{"type":"array","items":{"type":"string"}},"types":{"type":"array","items":{"type":"string"}}}}""",
+            Ask.Changes, PasteLoads, a => $"Paste the loads of {a.Text("from")}"),
+        new("assign_sap_loads",
+            "SAP2000's Assign > Joint, Frame, Cable, Tendon, Area, Solid and Link/Support Loads forms: sets the rows of SAP2000's own table on each object (label@story; joints point@story; cables, tendons, solids and links by SAP2000 name, e.g. Cable Loads - Distributed, Tendon Loads - Tension Force Or Stress, Solid Loads - Surface Pressure, Link Loads - Gravity), " +
+            "with option add (Add to Existing Loads), replace (Replace Existing Loads, the default: the object's loads of this table in that pattern go first) or delete (Delete Existing Loads). " +
+            "table is SAP2000's table, e.g. Joint Loads - Force (CoordSys, F1..M3), Frame Loads - Distributed (CoordSys, Type, Dir, DistType, RelDistA, RelDistB, AbsDistA, AbsDistB, FOverLA, FOverLB, MOverLA, MOverLB), " +
+            "Frame Loads - Point, Frame Loads - Temperature, Frame Loads - Strain, Frame Loads - Gravity, Frame Loads - Deformation, Frame Loads - Target Force, Overwrites - Auto Wave Loads - Frame, " +
+            "Overwrites - Auto Wind Loads - Frame, Frame Fireproofing Assignments, Area Loads - Gravity, ...; rows give its fields by SAP2000's names (LoadPat comes from pattern). " +
+            "Rows the Modeler holds as its own loads become them; every other row is kept as SAP2000 has it and goes into the .s2k.",
+            """{"type":"object","required":["table","objects"],"properties":{"table":{"type":"string"},"objects":{"type":"array","items":{"type":"string"}},"pattern":{"type":"string"},"option":{"type":"string","enum":["add","replace","delete"]},"rows":{"type":"array","items":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}}}}}""",
+            Ask.Changes, AssignSapLoads, a => $"Assign {a.Text("table")}{(a.Text("pattern").Length > 0 ? " in " + a.Text("pattern") : "")}"),
         new("set_load_cases_to_run",
             "Analyze > Set Load Cases to Run: which load cases the next run runs. run lists the cases to run, not_run the cases to leave out; all true runs every case, all false none. A case not named keeps its choice. The run sets the program's own run flags before it starts (SAP2000's file gets RunCase=No).",
             """{"type":"object","properties":{"run":{"type":"array","items":{"type":"string"}},"not_run":{"type":"array","items":{"type":"string"}},"all":{"type":"boolean"}}}""",
@@ -96,6 +117,19 @@ public static class CaseTools
         var sapValues = new Dictionary<string, string>(StringComparer.Ordinal);
         if (a.TryGetProperty("sap_values", out var sv) && sv.ValueKind == JsonValueKind.Object)
             foreach (var x in sv.EnumerateObject()) sapValues[x.Name] = x.Value.ValueKind == JsonValueKind.String ? x.Value.GetString() ?? "" : x.Value.GetRawText();
+        // ETABS's own table for the function (its code or type and every parameter, put into ETABS through its tables).
+        var etabsTable = a.Text("etabs_table").Trim();
+        if (etabsTable.Length > 0)
+        {
+            etabsTable = EtabsFunctions.Table(etabsTable) ?? throw new ToolInputException($"There is no ETABS function table '{etabsTable}'."); // ETABS itself
+            if (EtabsFunctions.KindOf(etabsTable) != kind) throw new ToolInputException($"The table \"{etabsTable}\" is for {EtabsFunctions.KindOf(etabsTable)} functions, not {kind}.");
+            if (kind is "psd" or "steady") throw new ToolInputException("The Engine's ETABS forms make response spectrum and time history functions."); // ETABS itself
+        }
+        var etabsValues = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (a.TryGetProperty("etabs_values", out var ev) && ev.ValueKind == JsonValueKind.Object)
+            foreach (var x in ev.EnumerateObject()) etabsValues[x.Name] = x.Value.ValueKind == JsonValueKind.String ? x.Value.GetString() ?? "" : x.Value.GetRawText();
+        if (etabsTable.Length > 0 && etabsValues.Keys.FirstOrDefault(k => !EtabsFunctions.Tables[etabsTable].Contains(k, StringComparer.Ordinal) || k == "Name" || k == EtabsFunctions.PointFields(etabsTable).X || k == EtabsFunctions.PointFields(etabsTable).Y) is { } badField)
+            throw new ToolInputException($"The table \"{etabsTable}\" has no field \"{badField}\" to set (its fields: {string.Join(", ", EtabsFunctions.Tables[etabsTable])}).");
         if (kind is "psd" or "steady" && from is not ("points" or "file")) throw new ToolInputException("A power spectral density or steady state function is from points or a file.");
         List<(double, double)> points;
         if (from is "points" or "periodic" or "file")
@@ -207,6 +241,7 @@ public static class CaseTools
             if (a.TryGetProperty(k, out var x) && x.ValueKind == JsonValueKind.Number) source[k] = x.GetRawText();
         if (from == "periodic" && a.TryGetProperty("points", out var cyc)) source["cycle"] = cyc.GetRawText();
         if (from == "file" && a.TryGetProperty("file", out var fl) && fl.ValueKind == JsonValueKind.Object) foreach (var x in fl.EnumerateObject()) source["f:" + x.Name] = x.Value.ValueKind == JsonValueKind.String ? x.Value.GetString() ?? "" : x.Value.GetRawText();
+        if (a.TryGetProperty("etabs_form", out var efm) && efm.ValueKind == JsonValueKind.Object) foreach (var x in efm.EnumerateObject()) source["e:" + x.Name] = x.Value.ValueKind == JsonValueKind.String ? x.Value.GetString() ?? "" : x.Value.GetRawText();
         return link.Edit(m => Core(() =>
         {
             if (was.Length > 0 && was != name)
@@ -226,6 +261,16 @@ public static class CaseTools
                 if (a.TryGetProperty("sap_points", out var sp) && sp.ValueKind == JsonValueKind.Array)
                     rowPoints = sp.EnumerateArray().Select(x => x.EnumerateArray().Select(y => y.GetDouble()).ToArray()).Where(x => x.Length == 2).Select(x => (x[0], x[1])).ToList();
                 SapFunctions.Set(m, sapTable, name, sapValues, rowPoints);
+            }
+            // ETABS's own rows, the same way: set by the ETABS form, any other change makes the function a plain one again.
+            EtabsFunctions.Remove(m, name);
+            if (etabsTable.Length > 0)
+            {
+                if (kind == "spectrum" && !etabsValues.ContainsKey("DampRatio") && EtabsFunctions.Tables[etabsTable].Contains("DampRatio")) etabsValues["DampRatio"] = f.Damping.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+                var rowPoints = points;
+                if (a.TryGetProperty("etabs_points", out var ep) && ep.ValueKind == JsonValueKind.Array)
+                    rowPoints = ep.EnumerateArray().Select(x => x.EnumerateArray().Select(y => y.GetDouble()).ToArray()).Where(x => x.Length == 2).Select(x => (x[0], x[1])).ToList();
+                EtabsFunctions.Set(m, etabsTable, name, etabsValues, rowPoints);
             }
             return (JsonNode)new JsonObject { ["done"] = $"The {kind} function {name}, {points.Count} points.", ["points"] = points.Count, ["first"] = Pair(points[0]), ["last"] = Pair(points[^1]) };
         }));
@@ -327,13 +372,18 @@ public static class CaseTools
         if (a.TryGetProperty("values", out var v) && v.ValueKind == JsonValueKind.Object)
             foreach (var x in v.EnumerateObject())
                 values[x.Name.ToLowerInvariant()] = x.Value.ValueKind == JsonValueKind.Number ? x.Value.GetDouble() : throw new ToolInputException($"'{x.Name}' needs a number.");
+        var how = a.Text("how", a.Flag("replace", true) ? "replace" : "add").ToLowerInvariant();
+        if (how is not ("add" or "replace" or "delete")) throw new ToolInputException("how is add, replace or delete.");
+        if (how == "delete") values["delete"] = 0;
         if (values.Count == 0) throw new ToolInputException("Give the load's values, e.g. {\"fx\":10} or {\"temperature\":20}.");
         if (values.Values.Any(d => double.IsNaN(d) || double.IsInfinity(d))) throw new ToolInputException("A value is not a number.");
         foreach (var k in new[] { "distance", "from", "to" })
             if (values.TryGetValue(k, out var r) && (r < 0 || r > 1)) throw new ToolInputException($"'{k}' is a relative distance, from 0 to 1.");
         var dir = a.Text("dir", kind.EndsWith("strain") ? "11" : "GRAV").ToUpperInvariant();
         if (!kind.EndsWith("strain") && !Dirs.Contains(dir)) throw new ToolInputException($"dir is one of {string.Join(", ", Dirs)}.");
-        var tokens = AnalysisDefs.LoadTokens(kind, pattern, values, dir);
+        values.Remove("delete");
+        var given = AnalysisDefs.LoadTokens(kind, pattern, values, dir);
+        var tokens = given;
         var type = E2kText.Value(tokens, "TYPE");
         var objects = a.Texts("objects");
         if (objects.Count == 0) throw new ToolInputException("Name the objects, as label@story.");
@@ -348,25 +398,128 @@ public static class CaseTools
                 : m0.AreaAssigns.Exists(x => x.Label == label && x.Story == story);
             if (!ok) throw new ToolInputException($"There is no {kind.Split('_')[0]} {o}.");
         }
-        var replace = a.Flag("replace", true);
+        var replace = how != "add";
         return link.Edit(m =>
         {
             foreach (var o in objects)
             {
                 var at = o.LastIndexOf('@');
                 var (label, story) = (o[..at], o[(at + 1)..]);
-                IList<ObjectLoad> list = kind.StartsWith("joint") ? m.PointLoads.Cast<ObjectLoad>().ToList() : kind.StartsWith("frame") ? m.LineLoads.Cast<ObjectLoad>().ToList() : m.AreaLoads.Cast<ObjectLoad>().ToList();
-                if (replace)
+                bool Same(ObjectLoad l) => l.Object == label && l.Story == story && l.Pattern == pattern && E2kText.Value(l.Tokens, "TYPE") == type;
+                var mine = tokens;
+                // ETABS's Add to Existing Loads on a joint adds the values to the joint's load of that kind in the pattern.
+                if (how == "add" && kind.StartsWith("joint") && m.PointLoads.Find(l => Same(l)) is { } had)
                 {
-                    bool Same(ObjectLoad l) => l.Object == label && l.Story == story && l.Pattern == pattern && E2kText.Value(l.Tokens, "TYPE") == type;
+                    mine = [.. tokens];
+                    for (var i = 0; i + 1 < had.Tokens.Count; i++)
+                    {
+                        var k = had.Tokens[i];
+                        if (k is "TYPE" or "LC" or "DIR" || !double.TryParse(had.Tokens[i + 1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var hv)) continue;
+                        var j = mine.IndexOf(k);
+                        if (j >= 0 && j + 1 < mine.Count && double.TryParse(mine[j + 1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var nv)) mine[j + 1] = E2kText.Number(nv + hv);
+                        else if (j < 0) mine.AddRange([k, had.Tokens[i + 1]]);
+                        i++;
+                    }
+                    m.PointLoads.RemoveAll(Same);
+                }
+                else if (replace)
+                {
                     if (kind.StartsWith("joint")) m.PointLoads.RemoveAll(Same); else if (kind.StartsWith("frame")) m.LineLoads.RemoveAll(Same); else m.AreaLoads.RemoveAll(Same);
                 }
-                if (kind.StartsWith("joint")) m.PointLoads.Add(new PointLoad { Object = label, Story = story, Tokens = [.. tokens] });
-                else if (kind.StartsWith("frame")) m.LineLoads.Add(new LineLoad { Object = label, Story = story, Tokens = [.. tokens] });
-                else m.AreaLoads.Add(new AreaLoad { Object = label, Story = story, Tokens = [.. tokens] });
+                if (how == "delete") continue;
+                if (kind.StartsWith("joint")) m.PointLoads.Add(new PointLoad { Object = label, Story = story, Tokens = [.. mine] });
+                else if (kind.StartsWith("frame")) m.LineLoads.Add(new LineLoad { Object = label, Story = story, Tokens = [.. mine] });
+                else m.AreaLoads.Add(new AreaLoad { Object = label, Story = story, Tokens = [.. mine] });
             }
             return (JsonNode)new JsonObject { ["done"] = $"{kind.Replace('_', ' ')} loads in {pattern} on {objects.Count} object{(objects.Count == 1 ? "" : "s")}.", ["objects"] = objects.Count };
         });
+    }
+
+    private static JsonNode AssignLoadSet(JsonElement a, ICsiLink e)
+    {
+        var link = Offline(e);
+        var set = a.Text("set");
+        // A set the .e2k holds (SHELLUNIFORMLOADSET) is named by the AREALOAD line; one defined in the Engine (Define >
+        // Shell Uniform Load Sets, the program's table) goes in by the program's assignment table, after its definition.
+        var inFile = set.Length > 0 && LoadSets.Sets(link.Model).ContainsKey(set);
+        var inTable = set.Length > 0 && (link.Model.DefinitionTables?.GetValueOrDefault("Shell Uniform Load Sets") ?? []).Exists(r => string.Equals(r.GetValueOrDefault("Name"), set, StringComparison.OrdinalIgnoreCase));
+        if (set.Length > 0 && !inFile && !inTable) throw new ToolInputException($"There is no shell uniform load set '{set}'. Define it with Define > Shell Uniform Load Sets first.");
+        var objects = a.Texts("objects");
+        if (objects.Count == 0) throw new ToolInputException("Name the slabs and walls, as label@story.");
+        var at = objects.Select(o => { var i = o.LastIndexOf('@'); return i <= 0 ? throw new ToolInputException($"'{o}' is not label@story.") : (o[..i], o[(i + 1)..]); }).ToList();
+        foreach (var (l, s) in at) if (!link.Model.AreaAssigns.Exists(x => x.Label == l && x.Story == s)) throw new ToolInputException($"There is no slab or wall {l}@{s}.");
+        return link.Edit(m =>
+        {
+            foreach (var (l, s) in at)
+            {
+                m.AreaLoads.RemoveAll(x => x.Object == l && x.Story == s && LoadSets.SetOf(x) is not null);
+                var ar = m.AreaAssigns.First(x => x.Label == l && x.Story == s);
+                ar.Tables?.Remove(AssignTables.AreaLoadSet);
+                if (inFile) m.AreaLoads.Add(new AreaLoad { Object = l, Story = s, Tokens = ["TYPE", "\"UNIFLOADSET\"", E2kText.Quote(set)] });
+                else if (inTable) (ar.Tables ??= new(StringComparer.OrdinalIgnoreCase))[AssignTables.AreaLoadSet] = [new(StringComparer.Ordinal) { ["LoadSet"] = set }];
+            }
+            return (JsonNode)new JsonObject { ["done"] = set.Length > 0 ? $"{set} on {at.Count} object{(at.Count == 1 ? "" : "s")}." : $"Load sets off {at.Count} object{(at.Count == 1 ? "" : "s")}.", ["objects"] = at.Count };
+        });
+    }
+
+    private static JsonNode PasteLoads(JsonElement a, ICsiLink e)
+    {
+        var link = Offline(e);
+        var from = a.Need("from");
+        var types = a.Texts("types").Select(t => t.Trim('"').ToUpperInvariant()).ToHashSet(StringComparer.Ordinal);
+        var objects = a.Texts("objects");
+        if (objects.Count == 0) throw new ToolInputException("Name the objects, as label@story.");
+        static (string, string) Split(string o) { var at = o.LastIndexOf('@'); if (at <= 0) throw new ToolInputException($"'{o}' is not label@story."); return (o[..at], o[(at + 1)..]); }
+        var (fl, fs) = Split(from);
+        var m0 = link.Model;
+        string kind = m0.LineAssigns.Exists(x => x.Label == fl && x.Story == fs) ? "frame" : m0.AreaAssigns.Exists(x => x.Label == fl && x.Story == fs) ? "shell" : m0.Point(fl) is not null ? "joint" : throw new ToolInputException($"There is no object {from}.");
+        foreach (var o in objects)
+        {
+            var (l, s) = Split(o);
+            var ok = kind == "joint" ? m0.Point(l) is not null && m0.StoryIndex(s) >= 0 : kind == "frame" ? m0.LineAssigns.Exists(x => x.Label == l && x.Story == s) : m0.AreaAssigns.Exists(x => x.Label == l && x.Story == s);
+            if (!ok) throw new ToolInputException($"There is no {kind} {o}: loads are pasted on objects of the same kind.");
+        }
+        return link.Edit(m =>
+        {
+            List<T> Paste<T>(List<T> list, Func<string, string, List<string>, T> make) where T : ObjectLoad
+            {
+                bool Typed(ObjectLoad x) => types.Contains((E2kText.Value(x.Tokens, "TYPE") ?? "").Trim('"').ToUpperInvariant());
+                var src = list.Where(x => x.Object == fl && x.Story == fs && Typed(x)).ToList();
+                foreach (var o in objects)
+                {
+                    var (l, s) = Split(o);
+                    if (l == fl && s == fs) continue;
+                    list.RemoveAll(x => x.Object == l && x.Story == s && Typed(x));
+                    list.AddRange(src.Select(x => make(l, s, [.. x.Tokens])));
+                }
+                return src;
+            }
+            var n = kind == "joint" ? Paste(m.PointLoads, (l, s, t) => new PointLoad { Object = l, Story = s, Tokens = t }).Count
+                : kind == "frame" ? Paste(m.LineLoads, (l, s, t) => new LineLoad { Object = l, Story = s, Tokens = t }).Count
+                : Paste(m.AreaLoads, (l, s, t) => new AreaLoad { Object = l, Story = s, Tokens = t }).Count;
+            return (JsonNode)new JsonObject { ["done"] = $"{n} load{(n == 1 ? "" : "s")} of {from} pasted on {objects.Count} object{(objects.Count == 1 ? "" : "s")}.", ["loads"] = n };
+        });
+    }
+
+    private static JsonNode AssignSapLoads(JsonElement a, ICsiLink e)
+    {
+        var link = Offline(e);
+        var rows = new List<Dictionary<string, string>>();
+        if (a.TryGetProperty("rows", out var rs) && rs.ValueKind == JsonValueKind.Array)
+            foreach (var r in rs.EnumerateArray())
+                rows.Add(r.ValueKind == JsonValueKind.Object ? r.EnumerateObject().ToDictionary(x => x.Name, x => x.Value.ValueKind switch
+                {
+                    JsonValueKind.String => x.Value.GetString() ?? "", JsonValueKind.True => "Yes", JsonValueKind.False => "No", _ => x.Value.GetRawText(),
+                }, StringComparer.Ordinal) : throw new ToolInputException("Each row is an object of SAP2000's fields."));
+        var option = a.Text("option", "replace");
+        var table = a.Need("table");
+        var objects = a.Texts("objects");
+        var pattern = a.Text("pattern");
+        if (option != "delete" && rows.Count == 0) throw new ToolInputException("Give the rows the form sets.");
+        // Checked on a copy first: a refusal leaves the model as it was.
+        Core(() => SapObjectLoads.Assign(ModelFile.FromJson(ModelFile.ToJson(link.Model)), table, objects, pattern.Length > 0 ? pattern : null, rows, option));
+        var n = link.Edit(m => SapObjectLoads.Assign(m, table, objects, pattern.Length > 0 ? pattern : null, rows, option));
+        return new JsonObject { ["done"] = $"{table}: {option} on {n} object{(n == 1 ? "" : "s")}{(pattern.Length > 0 ? " in " + pattern : "")}.", ["objects"] = n };
     }
 
     // ---- Analyze > Set Load Cases to Run ----
@@ -410,6 +563,9 @@ public static class CaseTools
                 ["used_by"] = new JsonArray(AnalysisDefs.UsersOfFunction(m, f.Name).Select(x => (JsonNode)x).ToArray()),
                 ["sap_table"] = SapFunctions.Find(m, f.Name),
                 ["sap_values"] = SapFunctions.Find(m, f.Name) is { } st ? new JsonObject(SapFunctions.Parameters(m, st, f.Name).Select(x => KeyValuePair.Create(x.Key, (JsonNode?)x.Value))) : null,
+                ["etabs_table"] = EtabsFunctions.Find(m, f.Name),
+                ["etabs_values"] = EtabsFunctions.Find(m, f.Name) is { } et ? new JsonObject(EtabsFunctions.Parameters(m, et, f.Name).Select(x => KeyValuePair.Create(x.Key, (JsonNode?)x.Value))) : null,
+                ["etabs_points"] = EtabsFunctions.Find(m, f.Name) is { } et2 ? new JsonArray(EtabsFunctions.Points(m, et2, f.Name).Select(p => (JsonNode)Pair(p)).ToArray()) : null,
             }).Concat(SapFunctions.Others(m).Select(f => (JsonNode)new JsonObject
             {
                 // SAP2000's power spectral density and steady state functions.

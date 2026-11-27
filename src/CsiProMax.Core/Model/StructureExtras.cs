@@ -23,9 +23,14 @@ public static class StructureExtras
         [GroupTable] = ["Steel", "Concrete", "Composite", "Selection", "SectionCut", "Aluminum", "ColdFormed", "Stage", "Bridge", "AutoSeismic", "AutoWind", "MassWeight", "ConcShell"],
         [CutTable] = ["ResultType", "ResultLoc", "LocX", "LocY", "LocZ", "RotAboutZ", "RotAboutY", "RotAboutX", "DefinedBy", "DesignType", "DesignAngle", "ElemSide", "AdvanceAxes", "Quads"],
         [SpandrelTable] = ["MultiStory"],
-        ["Spring Property Definitions - Point Springs"] = ["NonlinOpt", "Color", "Notes"],
-        ["Spring Property Definitions - Line Springs"] = ["NonlinOpt2", "NonlinOpt3", "Color", "Notes"],
-        ["Spring Property Definitions - Area Springs"] = ["NonlinOpt3", "Color", "Notes"],
+        // ETABS 23.2's Point, Line and Area Spring Property Data beyond the stiffnesses, by the names its Show Tables heads
+        // the columns with (field/reference-forms/etabs/Define/Tables): Elasto-Plastic's four values, the springs from
+        // link properties (a point spring's single joint links: one row each, kept here as lists split by "|") and the
+        // springs from a soil profile and an isolated column footing.
+        ["Spring Property Definitions - Point Springs"] = ["NonlinOpt", "Color", "Notes", "Stiffness Option", "Nonlinearity Specification", "Compression Stiffness", "Compression Strength", "Tension Stiffness", "Tension Strength",
+            "Link Property", "Link Axial Direction", "Link Axis 2 Angle", "Soil Profile", "Isolated Column Footing", "First Period"],
+        ["Spring Property Definitions - Line Springs"] = ["NonlinOpt2", "NonlinOpt3", "Color", "Notes", "Stiffness Option", "Link Property"],
+        ["Spring Property Definitions - Area Springs"] = ["NonlinOpt3", "Color", "Notes", "Stiffness Option", "Compression Stiffness", "Compression Strength", "Tension Stiffness", "Tension Strength", "Link Property"],
         ["Link Property Definitions - Linear"] = LinkFields,
         ["Link Property Definitions - Damper - Exponential"] = LinkFields,
         ["Link Property Definitions - Gap"] = LinkFields,
@@ -48,7 +53,8 @@ public static class StructureExtras
     };
 
     /// <summary>A nonlinear link's table has a row per direction: its rows are put in by name and direction.</summary>
-    public static bool PerDirection(string table) => table.StartsWith("Link Property Definitions - ", StringComparison.OrdinalIgnoreCase) && !table.EndsWith("- Linear", StringComparison.OrdinalIgnoreCase);
+    public static bool PerDirection(string table) => table.StartsWith("Link Property Definitions - ", StringComparison.OrdinalIgnoreCase) && !table.EndsWith("- Linear", StringComparison.OrdinalIgnoreCase)
+        && !table.Contains("Acceptance Criteria", StringComparison.OrdinalIgnoreCase) && !table.EndsWith("- Summary", StringComparison.OrdinalIgnoreCase);
 
     public static bool IsLinkTable(string table) => table.StartsWith("Link Property Definitions - ", StringComparison.OrdinalIgnoreCase);
 
@@ -56,6 +62,8 @@ public static class StructureExtras
     public static void RemoveLink(StructuralModel m, string name)
     {
         foreach (var t in Fields.Keys.Where(k => k.StartsWith("Link Property Definitions - ", StringComparison.OrdinalIgnoreCase)).ToList()) Remove(m, t, name);
+        // ETABS's other link types and the acceptance criteria (the Link/Support Property Data form's own rows).
+        EtabsLinkTables.Remove(m, name);
     }
 
     /// <summary>Fields only SAP2000's table has; left out of the row put into ETABS.</summary>

@@ -238,6 +238,7 @@ static class TesterBugTests
                 ["src/CsiProMax.Assistant/Etabs/OfflineEtabs.cs"] = "the Modeler: it writes ETABS's files and says so",
                 ["src/CsiProMax.Assistant/Tools/ModelerTools.cs"] = "the Modeler's tools",
                 ["src/CsiProMax.Assistant/Field/EtabsFieldSteps.cs"] = "the field test's steps for ETABS",
+                ["src/CsiProMax.Assistant/Field/EtabsFunctionRoundTrip.cs"] = "the field test's ETABS function forms, read back from ETABS",
                 ["src/CsiProMax.Assistant/Panel/Agent/SystemPrompt.cs"] = "the shared prompt: ProgramPrompt.Reword puts it into the program's words (checked below)",
                 ["src/CsiProMax.Assistant/Safe/SafePrompt.cs"] = "tells the chat it is SAFE, not ETABS",
                 ["src/CsiProMax.Assistant/Sap2000/SapPrompt.cs"] = "tells the chat it is SAP2000, not ETABS",
@@ -646,6 +647,8 @@ static class TesterBugTests
             Check(!ScratchProgram.MayEnd(asked.AddSeconds(5), asked, ["SAP2000 26.3.0 Ultimate - Tower B"]), "a window with another model would be ended");
             Check(!ScratchProgram.MayEnd(asked.AddSeconds(5), asked, ["SAP2000 26.3.0 Ultimate - cpm-field-test", "Maintenance Expiring"]), "a process with a message that is not the scratch model's would be ended");
             Check(!ScratchProgram.MayEnd(asked.AddSeconds(5), default, []), "a process would be ended although the test never asked for one");
+            Check(ScratchProgram.MayEnd(asked.AddSeconds(5), asked, ["ETABS Plus v23.2.0 - (Untitled)", "New Model Quick Templates"]), "its own process on the blank model it started at its end is not ended");
+            Check(!ScratchProgram.MayEnd(asked.AddSeconds(5), asked, ["ETABS Plus v23.2.0 - (Untitled)", "Save Model File As"]), "a process with another form of its own would be ended");
             // Ending a process is written in one place only, behind that rule.
             var kills = SourceText.Files("src").Where(f => f.Text.Contains(".Kill(", StringComparison.Ordinal)).Select(f => f.Path).ToList();
             var source = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));
@@ -974,6 +977,36 @@ static class TesterBugTests
                 Check(CsiProMax.Assistant.FieldTest.StopFileFor(@"C:\a\field-test.lock").EndsWith("field-test.stop", StringComparison.Ordinal), "the stop file sits beside the lock");
             }
             finally { field.SetValue(null, null); File.Delete(stop); }
+        });
+        yield return ("e2k: a table set's ETABS-internal ~LLRF pattern and case are not written (ETABS 23.2 ignores the lines with a box)", () =>
+        {
+            var text = "$ PROGRAM INFORMATION\r\n  PROGRAM  \"ETABS\"  VERSION \"23.2.0\"\r\n\r\n$ LOAD PATTERNS\r\n  LOADPATTERN \"DEAD\"  TYPE  \"Dead\"  SELFWEIGHT  1\r\n\r\n"
+                + "$ DATABASE TABLE NAMED SETS\r\n  DBTABLESET \"Test\"  EXPOSEALL  \"Yes\"\r\n  DBTABLESETLOADPATTERN \"Test\"  \"DEAD\"\r\n  DBTABLESETLOADPATTERN \"Test\"  \"~LLRF\"\r\n  DBTABLESETLOADCASE \"Test\"  \"~LLRF\"\r\n  DBTABLESETLOADCASE \"Test\"  \"DEAD\"\r\n\r\n  END\r\n";
+            var written = CsiProMax.E2k.E2kWriter.Write(CsiProMax.E2k.E2kReader.Read(text));
+            Check(!written.Contains("~LLRF", StringComparison.Ordinal), "~LLRF is still written");
+            Check(written.Contains("DBTABLESETLOADPATTERN \"Test\"  \"DEAD\"", StringComparison.Ordinal) || written.Contains("DBTABLESETLOADPATTERN", StringComparison.Ordinal), "the table set's own pattern went missing");
+            Check(written.Contains("DBTABLESETLOADCASE", StringComparison.Ordinal), "the table set's own case went missing");
+        });
+        yield return ("field test: an ETABS that holds (Untitled) after opening the scratch copy is given the file again, and a menu that did not open is clicked open and says what it shows", () =>
+        {
+            var scratch = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Field", "ScratchProgram.cs"));
+            var at = scratch.IndexOf("\"the link reads the scratch model, and no other\"", StringComparison.Ordinal);
+            Check(at > 0 && scratch.IndexOf("\"open the file again\"", at, StringComparison.Ordinal) is var again && again > at && again < scratch.IndexOf("Link = link;", at, StringComparison.Ordinal), "the link step does not open the file again");
+            var menu = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Etabs", "MenuCommand.cs"));
+            Check(menu.Contains("+ Shows(under, processId)", StringComparison.Ordinal), "a missing menu item does not say what the menu showed");
+            Check(menu.Contains("((InvokePattern)click).Invoke()", StringComparison.Ordinal), "a drop-down that did not open is not clicked open");
+        });
+        yield return ("field test: a reference-data item the program never answers (ETABS's New Model Quick Templates form) is given up on, not waited for", () =>
+        {
+            var src = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Field", "ReferenceData.cs"));
+            Check(src.Contains("BlankDefaults, TimeSpan.FromMinutes(2))", StringComparison.Ordinal), "the blank-model item has no limit of its own");
+            Check(src.Contains("if (!work.Wait(limit))", StringComparison.Ordinal), "an item is waited for without a limit");
+            Check(!src.Contains("m.InitializeNewModel(); return m.File.NewBlank();", StringComparison.Ordinal), "the blank model is still started with no units");
+        });
+        yield return ("field test: a text model the program holds objects of is not opened again over its changed (Untitled) model (ETABS asked to save and waited)", () =>
+        {
+            var src = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Field", "ScratchProgram.cs"));
+            Check(src.Contains("Math.Max(1, TextObjectCount(_program, file))", StringComparison.Ordinal), "a text file CSI ProMax cannot count is opened again although the program holds its objects");
         });
         yield return ("field test: steps a workaround can test are tested, not left out (Ahmed, 2026-11-26: only a missing program or licence)", () =>
         {
@@ -1657,6 +1690,23 @@ static class TesterBugTests
             Check(com.Contains("catch (OutOfMemoryException) { return ReadInPages(key, cases, combos); }", StringComparison.Ordinal), "a table read that runs out of memory is read in pages");
             Check(com.Contains("catch (OutOfMemoryException ex) { done.SetException(ex); }", StringComparison.Ordinal), "and out of memory is not wrapped on the program's thread, so the pages are tried");
             Check(com.Contains("ReadTableNow(key, isCase ? [one] : [], isCase ? [] : [one])", StringComparison.Ordinal), "one load case or combination a page");
+        });
+
+        yield return ("SAFE 22.7 tester (0.4.71): '(Untitled)' after opening the .f2k builds the model; the SAFE data comes without a scratch window; own features keep off the engineer's model; run_self_test on a waiting update", () =>
+        {
+            var scratch = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));
+            var untitled = scratch.IndexOf("but holds '{Path.GetFileName(OpenFileName())}': the model is built through", StringComparison.Ordinal);
+            Check(untitled > 0 && scratch.LastIndexOf("openedEmpty = true;", untitled, StringComparison.Ordinal) > scratch.LastIndexOf("if (answer == 0 && refused.Length == 0 && !Holds(modelFile))", untitled, StringComparison.Ordinal),
+                "a SAFE that holds '(Untitled)' after the .f2k goes on to build it through its tables");
+            Check(scratch.Contains("!Holds(modelFile) && !BuildsThroughApi(_program, modelFile)); again++)", StringComparison.Ordinal), "and is not asked three more times first");
+            var field = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/FieldTest.cs"));
+            Check(field.Contains("if (window is null && o.ReferenceData && o.StartScratch.Method.DeclaringType == typeof(ScratchProgram)) GatherReference(ctx, o, program, null);", StringComparison.Ordinal),
+                "the needed things are gathered when the scratch window could not start");
+            Check(field.IndexOf("if (StandIn(ctx, o, program, false, true) is var (_, panel2)) panelDone |= panel2;", StringComparison.Ordinal) is var hidden and > 0
+                && hidden < field.IndexOf("PanelFieldSteps.Run(ctx, link, scratch: false, live: IsLive(link));", StringComparison.Ordinal), "own features take a hidden window before the engineer's open model");
+            var old = CsiProMax.Update.Updater.Behind(new Version(0, 4, 71), "0.4.72", null, "0.4.72");
+            Check(old is not null && PanelFieldSteps.OldVersionAnswer(old), "the waiting-update answer is told apart: " + old);
+            Check(!PanelFieldSteps.OldVersionAnswer("SAFE has still not come back from the last call"), "and nothing else is");
         });
 
         yield return ("SAFE reference data (for 0.4.71): the testers' zips bring SAFE's own .f2k round trip with its differences, even when the scratch window stopped answering", () =>
