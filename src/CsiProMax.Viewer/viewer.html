@@ -1301,7 +1301,7 @@ function ptShown(p, at) {
 const valuePresets = {
   pier: [/^pierforces/, /^m3$/], spandrel: [/^spandrelforces/, /^v2$/], link: [/link.*(force|deform)|(force|deform).*link/, /^(p|u1)$/],
   spring: [/spring|soilpressure/, /^(f3|fz|pressure)$/], hinge: [/hinge/, /state|^(rotation|r3plastic|r2plastic)$/], cut: [/sectioncut/, /^(f1|fx|p)$/],
-  joint: [/^joint(?!displacement|reaction)/, /./], tendon: [/tendon|cable/, /^(p|f)$/],
+  diaphragm: [/diaphragmforce/, /^(f1|fx|p|vx)$/], joint: [/^joint(?!displacement|reaction)/, /./], tendon: [/tendon|cable/, /^(p|f)$/],
 };
 function openValues(kind) {
   const list = valueTables(); if (!list.length) return;
@@ -1309,7 +1309,7 @@ function openValues(kind) {
   let cur = P.tables[res.vt] && list.includes(P.tables[res.vt]) && !pre ? P.tables[res.vt] : (pre && list.find(t => pre[0].test(norm(t.name)))) || list[0];
   const fieldOpts = t => { const ns = numericCols(t, new Set()); const want = pre ? ns.find(n => pre[1].test(norm(n.name))) : null; const pick = t.name === res.vt && ns.some(n => n.name === res.vf) ? res.vf : (want || ns[0] || {}).name; return opts(ns.map(n => n.name), pick); };
   const caseOpts = t => { const cs = tableCases(t); return cs.length ? `<option value="">All cases (largest value)</option>` + opts(cs, cs.includes(res.vcase) ? res.vcase : cs.find(c => !/mode/i.test(c)) || cs[0]) : `<option value="">(this table has no load cases)</option>`; };
-  const title = {pier: "Pier Forces", spandrel: "Spandrel Forces", link: "Link Forces and Deformations", spring: "Spring Forces and Soil Pressures", hinge: "Hinge Results", cut: "Section Cut Forces", joint: "Joint Results", tendon: "Tendon and Cable Results"}[kind] || "Table Values on Model";
+  const title = {diaphragm: "Diaphragm Forces", pier: "Pier Forces", spandrel: "Spandrel Forces", link: "Link Forces and Deformations", spring: "Spring Forces and Soil Pressures", hinge: "Hinge Results", cut: "Section Cut Forces", joint: "Joint Results", tendon: "Tendon and Cable Results"}[kind] || "Table Values on Model";
   const d = dialog(title, `
     <fieldset><legend>Table</legend><div class="g2"><span>Table</span><select id="vT">${opts(list.map(t => t.name), cur.name)}</select><span>Value</span><select id="vF">${fieldOpts(cur)}</select><span>Case/Combo</span><select id="vC">${caseOpts(cur)}</select></div></fieldset>
     <fieldset><legend>Options</legend><div class="g3"><label><input type="checkbox" id="vVals" ${res.dvalues ? "checked" : ""}>Show values on the model</label><label><input type="checkbox" id="vNames" ${res.dnames ? "checked" : ""}>Names with the values</label></div></fieldset>
@@ -3318,6 +3318,7 @@ function act(name) {
   if (name.startsWith("lay:")) { const b = document.querySelector(`[data-lay="${name.slice(4)}"]`); if (b) b.click(); return; }
   if (name.startsWith("vals:")) return openValues(name.slice(5));
   if (name.startsWith("loads:")) return openLoads(name.slice(6));
+  if (name.startsWith("edl:")) return etaDisplay(name.slice(4));
   if (name.startsWith("xy:")) return openPlotFunctions(name.slice(3));
   if (name.startsWith("dshow:")) { const [, k, id] = name.split(":"); return showDesign(k, id); }
   if (name.startsWith("lay")) return document.querySelector(`[data-lay="${name.slice(3)}"]`).click();
@@ -3421,6 +3422,7 @@ const viewerMenus = () => {
     Tools: [["Tables...", "tables", "Ctrl+T"], ["Model Explorer", "explorer"], ["Side Panel", "side"], ...(window.cpmChat ? [["Chat", "chat"]] : []), 0, ["Results Coverage...", "dlg:coverage", "", !P], ["Summary of Design Results...", "dlg:designSummary", "", !P], ...(appMenu.length ? [0, ...appItems(["CSI ProMax", "Chat", "View"])] : [])],
     Display: (() => {
       const has = re => Object.values(P ? P.tables : {}).some(t => t.rows && t.rows.length && re.test(norm(t.name))), plots = P ? Object.values(P.tables).some(t => t.rows && t.rows.length > 1) : false;
+      if (program === "etabs") return etaDisplayMenu(has);
       return [["Undeformed Shape", "r:model", "F4"], [program === "sap2000" ? "Show Load Assigns" : "Load Assigns", ["joint", "frame", "shell"].map(k => [loadWord(k) + "...", "loads:" + k, "", !loadTables(k).length])], 0, ["Deformed Shape...", "dlg:deformed", "F6", !disp.size], only(["etabs", "sap2000"], ["Mode Shapes...", "dlg:modes", "", !P || !modeCases().length]), ["Animate Deformed Shape", "anim", "", res.mode !== "deformed"], 0,
         ["Force/Stress Diagrams", [["Support/Spring Reactions...", "dlg:reactions", "", !reacts.size], ["Frame Forces and Moments...", "dlg:forces", "F8", !forces.size], ["Shell Forces/Stresses...", "dlg:shells", "", !shellRes.size],
           ...(program === "sap2000" ? [] : [["Pier and Spandrel Forces...", "vals:pier", "", !has(/pierforces|spandrelforces/)]]), only(["etabs", "sap2000"], ["Link Forces and Deformations...", "vals:link", "", !has(/link/)]), ["Spring Forces and Soil Pressures...", "vals:spring", "", !has(/spring|soilpressure/)],
@@ -4854,6 +4856,8 @@ function modelerMenus(m) {
     ["Draw Floors (click corners)", "d:floor"], ["Draw Rectangular Floors (two corners)", "d:rect"], ["Quick Draw Floors (click in a bay)", "d:qfloor"], ["Draw Circular Floors (centre, then edge)", "d:circ"], 0,
     ["Draw Walls (click start and end)", "d:wall"], ["Quick Draw Walls (click a grid line)", "d:qwall"], 0,
     only(ES, ["Draw Braces (click bottom and top)", "d:brace"]), ["Draw Joints (click a point)", "d:joint"], 0, only(["etabs", "safe"], ["Design Strips...", "m:ex:strips"]), ["Tendons...", "m:ex:tendons"], only(["etabs", "safe"], ["Slab Rebar...", "m:ex:slabrebar"]), 0, ["Snap and Story Options...", "m:drawHelp"]];
+  // ETABS 23.2's own Assign menu, item for item (hmEtabsAssignMenu); SAP2000's and SAFE's below.
+  if (program === "etabs") m.Assign = hmEtabsAssignMenu(); else
   m.Assign = [["Frame Section...", "m:asgFrame", "", !fr], [program === "sap2000" ? "Area Section..." : "Slab or Wall Section...", "m:asgShell", "", !ar], 0, ["Joint Restraints (Supports)...", "m:asgSupport"], 0,
     program === "sap2000" ? hmSapAssignMenu()[0] : ["Joint", [["Springs...", "m:ad:joint", "", !any], only(["etabs", "sap2000"], ["Diaphragms...", "m:sa:jdiaph", "", !any]), only(["sap2000"], ["Constraints...", "m:ex:jconstraint", "", !any]), 0, ...hmTableItems("Joint", !any)]],
     program === "sap2000" ? hmSapAssignMenu()[1] : ["Frame", [["Releases...", "m:ad:releases", "", !fr], ["Local Axes...", "m:ad:axes", "", !fr], ["Insertion Point...", "m:ad:insertion", "", !fr], ["End Length Offsets...", "m:ad:offsets", "", !fr], ["Property Modifiers...", "m:ad:fmods", "", !fr], ["Line Springs...", "m:ad:lspring", "", !fr], only(["etabs", "sap2000"], ["Hinges...", "m:ad:hinges", "", !fr]), 0, ...hmTableItems("Frame", !fr)]],
@@ -5087,6 +5091,7 @@ async function modelAct(a) {
   if (a.startsWith("ld:")) return hmObjectLoad(a.slice(3));
   if (a.startsWith("spr:")) return hmSprings(a.slice(4));
   if (a.startsWith("sapa:")) return hmSapAssign(a.slice(5));
+  if (a.startsWith("eta:")) return hmEtabsAssign(a.slice(4));
   if (a.startsWith("ad:")) return hmAssignData(a.slice(3));
   if (a.startsWith("at:")) return hmAssignTable(a.slice(3));
   if (a.startsWith("dt:")) return hmDefineTable(a.slice(3));
@@ -6124,6 +6129,1308 @@ async function hmSapPasteAssigns() {
   sapDone(j);
 }
 Object.assign(hmSapAssignForms, {jPatterns: () => hmSapAssignJointPatterns(), group: () => hmSapAssignGroups(), clearDisplay: () => hmSapClearAssignDisplay(), copy: () => hmSapCopyAssigns(), paste: () => hmSapPasteAssigns()});
+
+// ---- ETABS 23.2's own Assign menu and forms (Ahmed 2026-11-27: every form identical to ETABS, every option there and
+// working). The menu is item for item ETABS's (pictures field/reference-forms/etabs/Assign/00 *.jpg and each submenu's
+// 00 picture); each item opens ETABS's own form ("eta:<key>", etaAssignForms), drawn from the pictures of that form. What
+// the .e2k has no keyword for is kept as rows of ETABS's own assignment tables (Core AssignTables), which go into ETABS
+// through its database tables. ----
+function hmEtabsAssignMenu() {
+  const any = sel.size > 0 || selJ.size > 0, it = (label, key, off) => [label, "m:eta:" + key, "", !!off];
+  return [
+    ["Joint", [it("Restraints...", "jRestraints"), it("Springs...", "jSprings"), it("Diaphragms...", "jDiaphragms"), it("Panel Zone...", "jPanelZone"), 0, it("Additional Mass...", "jMass"), it("Joint Floor Meshing Options...", "jFloorMesh")]],
+    ["Frame", [it("Section Property...", "fSection"), it("Property Modifiers...", "fModifiers"), 0, it("Releases/Partial Fixity...", "fReleases"), it("End Length Offsets...", "fOffsets"), it("Insertion Point...", "fInsertion"), 0,
+      it("Local Axes...", "fAxes"), 0, it("Output Stations...", "fStations"), 0, it("Tension/Compression Limits...", "fTCLimits"), it("Hinges...", "fHinges"), 0, it("Line Springs...", "fSprings"), it("Additional Mass...", "fMass"), 0,
+      it("Pier Label...", "fPier"), it("Spandrel Label...", "fSpandrel"), 0, it("Frame Auto Mesh Options...", "fAutoMesh"), it("Frame Floor Meshing Options...", "fFloorMesh"), 0,
+      it("Moment Frame Beam Connection Type...", "fBeamConn"), it("Column Splice Overwrite...", "fSplice"), it("Nonprismatic Property Parameters...", "fNonprismatic"), 0,
+      it("Material Overwrite...", "fMaterial"), it("Column/Brace Rebar Ratio for Creep Analysis...", "fCreep"), it("Floor Cracking...", "fCracking")]],
+    ["Shell", [it("Slab Section...", "aSlab"), it("Deck Section...", "aDeck"), it("Wall Section...", "aWall"), it("Openings...", "aOpenings"), 0,
+      it("Stiffness Modifiers...", "aModifiers"), it("Thickness Overwrites...", "aThickness"), it("Insertion Point...", "aInsertion"), 0,
+      it("Diaphragms...", "aDiaphragms"), it("Edge Releases...", "aEdgeReleases"), it("Line Releases...", "aLineReleases"), 0, it("Rib Locations...", "aRibs"), 0, it("Local Axes...", "aAxes"), 0,
+      it("Area Springs...", "aSprings"), it("Additional Mass...", "aMass"), 0, it("Pier Label...", "aPier"), it("Spandrel Label...", "aSpandrel"), 0, it("Wall Hinge...", "aWallHinge"), it("Reinforcement for Wall Hinge...", "aWallHingeRebar"), 0,
+      it("Floor Auto Mesh Options...", "aFloorMesh"), it("Wall Auto Mesh Options...", "aWallMesh"), it("Auto Edge Constraint...", "aEdgeConstraint"), 0,
+      it("Material Overwrite...", "aMaterial"), it("Wall Rebar Ratio for Creep Analysis...", "aCreep"), it("Floor Cracking...", "aCracking")]],
+    ["Link", [it("Link Properties...", "lProperty"), it("Local Axes...", "lAxes")]], 0,
+    ["Joint Loads", [it("Force...", "jlForce"), it("Ground Displacement...", "jlDispl"), it("Temperature...", "jlTemp")]],
+    ["Frame Loads", [it("Point...", "flPoint"), it("Distributed...", "flDistributed"), it("Temperature...", "flTemp"), 0, it("Open Structure Wind Parameters...", "flWind")]],
+    ["Shell Loads", [it("Uniform Load Sets...", "alLoadSets"), it("Uniform...", "alUniform"), it("Non-uniform...", "alNonUniform"), it("Temperature...", "alTemp"), 0, it("Wind Pressure Coefficient...", "alWindCp")]], 0,
+    it("Assign Objects to Group...", "group", !any), 0,
+    it("Clear Display of Assigns", "clearDisplay"), 0,
+    it("Copy Assigns", "copy", !any),
+    ["Paste Assigns", [it("Joint...", "pasteJ", !etaCopied("j")), it("Frame...", "pasteF", !etaCopied("f")), it("Shell...", "pasteA", !etaCopied("a")), it("Link...", "pasteL", !etaCopied("l"))], "", !hm.copiedAssigns]];
+}
+const etaCopied = k => !!(hm.copiedAssigns && hm.copiedAssigns.etabs && hm.copiedAssigns.etabs[k]);
+// The forms behind it; an item whose ETABS form is still being rebuilt opens the Engine's form for the same assignment.
+const etaAssignForms = {};
+const etaAssignOld = {
+  fSection: "asgFrame", fModifiers: "ad:fmods", fReleases: "ad:releases", fOffsets: "ad:offsets", fInsertion: "ad:insertion", fAxes: "ad:axes", fStations: "at:Frame Assignments - Output Stations",
+  fTCLimits: "at:Frame Assignments - Tension and Compression Limits", fHinges: "ad:hinges", fSprings: "ad:lspring", fMass: "at:Frame Assignments - Additional Mass", fPier: "sa:pier", fSpandrel: "sa:spandrel",
+  fAutoMesh: "at:Frame Assignments - Frame Auto Mesh Options", fFloorMesh: "at:Frame Assignments - Frame Floor Meshing Option", fBeamConn: "at:Frame Assignments - Moment Frame Beam Connection Type",
+  fSplice: "at:Frame Assignments - Column Splice Overwrites", fNonprismatic: "at:Frame Assignments - Advanced Nonprismatic Section Parameters", fMaterial: "at:Frame Assignments - Material Overwrites",
+  fCreep: "at:Frame Assignments - Rebar Ratio For Creep Analysis", fCracking: "at:Frame Assignments - Floor Cracking",
+  aSlab: "asgShell", aDeck: "asgShell", aWall: "asgShell", aOpenings: "at:opening", aModifiers: "ad:smods", aThickness: "at:Area Assignments - Thickness Overwrites", aInsertion: "at:Area Assignments - Insertion Point",
+  aDiaphragms: "sa:diaph", aEdgeReleases: "at:Area Assignments - Edge Releases", aLineReleases: "ex:linereleases", aRibs: "at:Area Assignments - Slab Rib Locations", aAxes: "at:Area Assignments - Local Axes",
+  aSprings: "ad:aspring", aMass: "at:Area Assignments - Additional Mass", aPier: "sa:pier", aSpandrel: "sa:spandrel", aFloorMesh: "at:Area Assignments - Floor Auto Mesh Options",
+  aWallMesh: "at:Area Assignments - Wall Auto Mesh Options", aEdgeConstraint: "at:Area Assignments - Auto Edge Constraints", aMaterial: "at:Area Assignments - Material Overwrites",
+  aCreep: "at:Area Assignments - Wall Rebar Ratio for Creep Analysis", aCracking: "at:Area Assignments - Floor Cracking",
+  flPoint: "ld:frame_point", flDistributed: "asgFrameLoad", flTemp: "ld:frame_temperature", alUniform: "asgShellLoad", alTemp: "ld:shell_temperature",
+};
+function hmEtabsAssign(key) {
+  if (etaAssignForms[key]) return etaAssignForms[key]();
+  if (etaAssignOld[key]) return modelAct(etaAssignOld[key]);
+  hmSay("ETABS's form for this item is being rebuilt from ETABS 23.2's own form.", true);
+}
+// ETABS's units as its forms print them: mass force-s²/length, mass moment of inertia force-length-s².
+function etaUnits() { const u = hmU(); return {f: u.f, l: u.l, mass: `${u.f}-s²/${u.l}`, mmi: `${u.f}-${u.l}-s²`, fl: `${u.f}-${u.l}`, temp: (hm.defs && hm.defs.units && hm.defs.units.temperature) || (u.f === "kip" || u.f === "lb" ? "F" : "C")}; }
+const etaCss = `<style>.etaF fieldset{margin:0 0 8px}.etaF legend{color:#1f3fbf}.etaF label{display:block;margin:4px 0}.etaF .g3{display:grid;grid-template-columns:1fr 120px 70px;gap:5px 8px;align-items:center}.etaF .g3 input{width:120px}.etaF .mid{display:block;margin:8px auto 0}</style>`;
+const etaRow = (label, id, v, unit, dis) => `<span>${label}</span><input id="${id}" value="${esc(String(v ?? 0))}" ${dis ? "disabled" : ""}><span class="u">${esc(unit || "")}</span>`;
+// Opens a definitions form (Modify/Show Definitions...) and calls back once it is closed, to list what it now holds.
+function etaThen(open, after) {
+  const before = document.querySelectorAll(".dlg").length;
+  Promise.resolve(open()).then(() => {
+    const ob = new MutationObserver(() => { if (document.querySelectorAll(".dlg").length <= before) { ob.disconnect(); after(); } });
+    ob.observe(document.body, {childList: true});
+  });
+}
+// A list form as ETABS draws its Joint/Link/Frame assignment pickers: one list in a frame, Modify/Show Definitions...,
+// then OK, Close, Apply. list() gives the items; apply(value) does the work and says whether it worked.
+async function etaListForm(title, legend, list, now, define, apply, width) {
+  const items = await list();
+  const d = dialog(title, `${etaCss}<div class="etaF"><fieldset><legend>${esc(legend)}</legend><select id="eL" size="14" style="width:100%;height:270px">${opts(items, items.includes(now) ? now : items[0])}</select></fieldset>
+    ${define ? `<button id="eDef" class="mid" style="width:180px">Modify/Show Definitions...</button>` : ""}</div>`,
+    sapOkCloseApply(async d => apply(q(d, "#eL").value)), {width: width || 300});
+  if (define) q(d, "#eDef").onclick = () => etaThen(define, async () => { const v = q(d, "#eL").value, l2 = await list(); q(d, "#eL").innerHTML = opts(l2, l2.includes(v) ? v : l2[0]); });
+  return d;
+}
+const etaDone = j => { if (!j.ok) hmSay(j.error, true); else hmSay("Done. Edit > Undo steps back."); return j.ok; };
+const etaNeed = (names, what) => { if (names.length) return true; hmSay(`No ${what} are selected. Select them, then Apply.`, true); return false; };
+
+// Assign > Joint > Restraints: Restraints in Global Directions and the four Fast Restraints (fixed, pinned, roller, free).
+async function etaJointRestraints() {
+  const names = hmJoints(), got = names.length ? await sapObjRows(names.slice(0, 1)) : null;
+  const now = got ? String(((got.pd.objects || [])[0] || {}).restraint || "").split(/[\s,]+/).filter(Boolean) : ["UX", "UY", "UZ"];
+  const dofs = ["UX", "UY", "UZ", "RX", "RY", "RZ"], lab = ["Translation&nbsp; X", "Translation&nbsp; Y", "Translation&nbsp; Z", "Rotation about&nbsp; X", "Rotation about&nbsp; Y", "Rotation about&nbsp; Z"];
+  const fast = [["fixed", dofs], ["pinned", ["UX", "UY", "UZ"]], ["roller", ["UZ"]], ["free", []]];
+  const icons = {fixed: '<path d="M12 3v13" stroke="#333" stroke-width="2"/><path d="M4 16h16" stroke="#333" stroke-width="2"/>', pinned: '<path d="M12 4L5 17h14z" fill="#7fb2c4" stroke="#335" stroke-width="1"/>',
+    roller: '<path d="M12 3L6 13h12z" fill="#7fb2c4" stroke="#335"/><circle cx="9" cy="16" r="2.2" fill="#7fb2c4" stroke="#335"/><circle cx="15" cy="16" r="2.2" fill="#7fb2c4" stroke="#335"/>', free: '<circle cx="12" cy="12" r="3.5" fill="#333"/>'};
+  const d = dialog("Joint Assignment - Restraints", `${etaCss}<div class="etaF"><fieldset><legend>Restraints in Global Directions</legend><div style="display:grid;grid-auto-flow:column;grid-template-rows:repeat(3,auto);gap:4px 40px">${dofs.map((k, i) => `<label><input type="checkbox" data-r="${k}" ${now.includes(k) ? "checked" : ""}> ${lab[i]}</label>`).join("")}</div></fieldset>
+    <fieldset><legend>Fast Restraints</legend><div style="display:flex;justify-content:center;gap:12px">${fast.map(([k]) => `<button data-f="${k}" title="${k}" style="width:36px;height:34px;padding:2px"><svg width="26" height="24" viewBox="0 0 24 22">${icons[k]}</svg></button>`).join("")}</div></fieldset></div>`,
+    sapOkCloseApply(async d => { const n = hmJoints(); if (!etaNeed(n, "joints")) return false; return etaDone(await hmRun("assign_joint_data", {objects: n, restraint: [...d.querySelectorAll("[data-r]:checked")].map(x => x.dataset.r)})); }), {width: 300});
+  d.querySelectorAll("[data-f]").forEach(b => b.onclick = () => { const on = fast.find(f => f[0] === b.dataset.f)[1]; d.querySelectorAll("[data-r]").forEach(x => x.checked = on.includes(x.dataset.r)); });
+  return d;
+}
+// Assign > Joint > Springs: None and the point spring properties.
+async function etaJointSprings() {
+  const names = hmJoints(), got = names.length ? await sapObjRows(names.slice(0, 1)) : null, now = got ? ((got.pd.objects || [])[0] || {}).spring || "None" : "None";
+  const list = async () => ["None", ...((await hmRun("property_definitions", {}, true)).result || {springs: []}).springs.filter(x => x.kind === "point").map(x => x.name)];
+  return etaListForm("Joint Assignment - Springs", "Springs", list, now, () => modelAct("spr:point"),
+    async v => { const n = hmJoints(); if (!etaNeed(n, "joints")) return false; return etaDone(await hmRun("assign_joint_data", {objects: n, spring: v === "None" ? "" : v})); });
+}
+// Assign > Joint > Diaphragms: From Shell Object, Disconnect and the diaphragms.
+async function etaJointDiaphragms() {
+  const names = hmJoints(), got = names.length ? await sapObjRows(names.slice(0, 1)) : null, d0 = got ? ((got.pd.objects || [])[0] || {}).diaphragm || "" : "";
+  const now = !d0 ? "From Shell Object" : /^disconnect$/i.test(d0) ? "Disconnect" : d0;
+  const list = async () => ["From Shell Object", "Disconnect", ...(((await hmRun("structure_definitions", {}, true)).result || {}).diaphragms || []).map(x => x.name)];
+  return etaListForm("Joint Assignment - Diaphragms", "Diaphragm Assignments", list, now, () => modelAct("st:diaphragm"),
+    async v => { const n = hmJoints(); if (!etaNeed(n, "joints")) return false; return etaDone(await hmRun("assign_diaphragm_data", {objects: n, joints: true, diaphragm: v === "From Shell Object" ? "" : v})); });
+}
+// Assign > Joint > Panel Zone: None and the panel zone properties (Define > Section Properties > Panel Zone).
+const etaPZTables = "Panel Zone Property Definitions|Panel Zone Property Definitions - User Nonlinear Data";
+async function etaJointPanelZone() {
+  const names = hmJoints(), got = names.length ? await sapObjRows(names.slice(0, 1)) : null;
+  const now = got ? ((((got.pd.objects || [])[0] || {}).tables || {})["Joint Assignments - Panel Zone"] || [])[0] : null;
+  const list = async () => ["None", ...((((await hmRun("definition_data", {}, true)).result || {tables: {}}).tables || {})["Panel Zone Property Definitions"] || {rows: []}).rows.map(r => r.Name).filter(Boolean)];
+  return etaListForm("Joint Assignment - Panel Zone Property", "Panel Zones", list, now && now.PanelZone || "None", () => modelAct("dt:" + etaPZTables),
+    async v => { const n = hmJoints(); if (!etaNeed(n, "joints")) return false; return etaDone(await hmRun("assign_joint_data", {objects: n, tables: {"Joint Assignments - Panel Zone": v === "None" ? [] : [{PanelZone: v}]}})); });
+}
+// Assign > Joint > Additional Mass: Masses and Mass Moment of Inertia in Global Directions; Add to, Replace or Delete Existing Masses.
+async function etaJointMass() {
+  const u = etaUnits(), T = "Joint Assignments - Additional Mass", F = ["MassXY", "MassZ", "MMIX", "MMIY", "MMIZ"];
+  const d = dialog("Joint Assignment - Additional Mass", `${etaCss}<div class="etaF">
+    <fieldset><legend>Masses in Global Directions</legend><div class="g3">${etaRow("Direction&nbsp; X, Y", "jm0", 0, u.mass)}${etaRow("Direction&nbsp; Z", "jm1", 0, u.mass)}</div></fieldset>
+    <fieldset><legend>Mass Moment of Inertia in Global Directions</legend><div class="g3">${etaRow("Rotation about&nbsp; X", "jm2", 0, u.mmi)}${etaRow("Rotation about&nbsp; Y", "jm3", 0, u.mmi)}${etaRow("Rotation about&nbsp; Z", "jm4", 0, u.mmi)}</div></fieldset>
+    <fieldset><legend>Options</legend><label><input type="radio" name="jmO" value="add"> Add to Existing Masses</label><label><input type="radio" name="jmO" value="replace" checked> Replace Existing Masses</label><label><input type="radio" name="jmO" value="delete"> Delete Existing Masses</label></fieldset></div>`,
+    sapOkCloseApply(async d => {
+      const n = hmJoints(); if (!etaNeed(n, "joints")) return false;
+      const how = q(d, "[name=jmO]:checked").value, v = F.map((k, i) => q(d, "#jm" + i).value.trim() || "0");
+      if (v.some(x => !isFinite(+x))) { formError(d, "Each mass is a number."); return false; }
+      const got = await sapObjRows(n); if (!got) return false;
+      return sapSetEach("assign_joint_data", n, j => {
+        if (how === "delete") return {[T]: []};
+        const h = ((got.by[j] || {})[T] || [])[0] || {}, row = {};
+        F.forEach((k, i) => { const x = +v[i] + (how === "add" ? +h[k] || 0 : 0); row[k] = String(+x.toPrecision(12)); });
+        return {[T]: F.some(k => +row[k]) ? [row] : []};
+      });
+    }), {width: 340});
+  d.querySelectorAll("[name=jmO]").forEach(r => r.onchange = () => d.querySelectorAll(".g3 input").forEach(x => x.disabled = q(d, "[name=jmO]:checked").value === "delete"));
+  return d;
+}
+// Assign > Joint > Joint Floor Meshing Options: Include Selected Joint Objects In Mesh.
+async function etaJointFloorMesh() {
+  const names = hmJoints(), got = names.length ? await sapObjRows(names.slice(0, 1)) : null, T = "Joint Assignments - Floor Meshing Option";
+  const on = got ? /^yes$/i.test((((((got.pd.objects || [])[0] || {}).tables || {})[T] || [])[0] || {}).IncludeInMesh || "") : false;
+  return dialog("Joint Assignment - Joint Floor Meshing Option", `${etaCss}<div class="etaF"><fieldset style="padding:10px 14px"><label><input type="checkbox" id="jfM" ${on ? "checked" : ""}> Include Selected Joint Objects In Mesh</label>
+    <p style="margin:10px 0 4px">Note:&nbsp; Joint objects attached to structural elements (slabs, beams, supports, etc.) are always included in the analysis mesh, even if they are specified to be excluded here.</p></fieldset></div>`,
+    sapOkCloseApply(async d => { const n = hmJoints(); if (!etaNeed(n, "joints")) return false; return etaDone(await hmRun("assign_joint_data", {objects: n, tables: {[T]: q(d, "#jfM").checked ? [{IncludeInMesh: "Yes"}] : []}})); }), {width: 340});
+}
+
+// Assign > Link > Link Properties and Local Axes. The Engine has no link objects of its own: a link drawn in ETABS
+// stays in the .e2k as ETABS wrote it, so these forms take the selected links when the model has them.
+async function etaLinkProperty() {
+  const list = async () => [...((await hmRun("property_definitions", {}, true)).result || {}).links || [], "None"].map(x => typeof x === "string" ? x : x.name);
+  return etaListForm("Link Assignment - Link Property", "Links", list, "", () => modelAct("links"), async () => etaNeed([], "links"));
+}
+function etaLinkAxes() {
+  return dialog("Link Assignment - Local Axes", `${etaCss}<div class="etaF"><fieldset><legend>Angle from Default Direction</legend><div class="g3">${etaRow("Local Axes Angle", "laA", 0, "deg")}</div></fieldset></div>`,
+    sapOkCloseApply(async () => etaNeed([], "links")), {width: 300});
+}
+
+// Assign > Joint Loads > Force, Ground Displacement and Temperature: Load Pattern Name, the values in Global
+// directions, and Add to, Replace or Delete Existing Loads (Values). Force also has Size of Load for Punching Shear.
+async function etaJointLoad(kind) {
+  const defs = await hmDefs(), u = etaUnits(), S = hmU().l === "ft" ? "in" : hmU().l === "m" ? "mm" : hmU().l;
+  if (!defs.load_patterns.length) return hmSay("Define a load pattern first (Define > Load Patterns).", true);
+  const spec = {
+    force: {title: "Force", legend: "Loads", keys: ["fx", "fy", "fz", "mx", "my", "mz"], labels: ["Force Global X", "Force Global Y", "Force Global Z", "Moment Global XX", "Moment Global YY", "Moment Global ZZ"], units: [u.f, u.f, u.f, u.fl, u.fl, u.fl], word: "Loads"},
+    displacement: {title: "Ground Displacement", legend: "Displacements", keys: ["ux", "uy", "uz", "rx", "ry", "rz"], labels: ["Translation X", "Translation Y", "Translation Z", "Rotation about XX", "Rotation about YY", "Rotation about ZZ"], units: [u.l, u.l, u.l, "rad", "rad", "rad"], word: "Loads"},
+    temperature: {title: "Temperature", legend: "Temperature", keys: ["temperature"], labels: ["Temperature"], units: [u.temp], word: "Values"},
+  }[kind];
+  const T = "Joint Loads Assignments - Force";
+  const d = dialog("Joint Load Assignment - " + spec.title, `${etaCss}<div class="etaF">
+    <fieldset style="padding:10px 14px"><div style="display:grid;grid-template-columns:1fr 190px;align-items:center"><span>Load Pattern Name</span><select id="jlP">${opts(defs.load_patterns.map(p => p.name), hm.pattern || defs.load_patterns[0].name)}</select></div></fieldset>
+    <div style="display:grid;grid-template-columns:1fr 170px;gap:0 10px"><div><fieldset><legend>${spec.legend}</legend><div class="g3">${spec.keys.map((k, i) => etaRow(spec.labels[i], "jl" + i, 0, spec.units[i])).join("")}</div></fieldset>
+      ${kind === "force" ? `<fieldset><legend>Size of Load for Punching Shear</legend><div class="g3">${etaRow("X Dimension", "jlX", 0, S)}${etaRow("Y Dimension", "jlY", 0, S)}</div></fieldset>` : ""}</div>
+    <fieldset style="align-self:start"><legend>Options</legend><label><input type="radio" name="jlO" value="add"> Add to Existing ${spec.word}</label><label><input type="radio" name="jlO" value="replace" checked> Replace Existing ${spec.word}</label><label><input type="radio" name="jlO" value="delete"> Delete Existing ${spec.word}</label></fieldset></div></div>`,
+    sapOkCloseApply(async d => {
+      const n = hmJoints(); if (!etaNeed(n, "joints")) return false;
+      const pat = hm.pattern = q(d, "#jlP").value, how = q(d, "[name=jlO]:checked").value, lk = "joint_" + kind;
+      const v = spec.keys.map((k, i) => q(d, "#jl" + i).value.trim() || "0");
+      if (v.some(x => !isFinite(+x))) { formError(d, "Each value is a number."); return false; }
+      const vals = Object.fromEntries(spec.keys.map((k, i) => [k, +v[i]]).filter(([k, x]) => x || kind === "temperature"));
+      const j = how === "replace" && !Object.keys(vals).length ? await hmRun("assign_object_loads", {kind: lk, pattern: pat, objects: n, how: "delete"}, true)
+        : await hmRun("assign_object_loads", {kind: lk, pattern: pat, objects: n, how, values: how === "delete" ? {} : vals}, true);
+      if (!j.ok) { hmSay(j.error, true); return false; }
+      if (kind === "force") {
+        const x = q(d, "#jlX").value.trim() || "0", y = q(d, "#jlY").value.trim() || "0", got = await sapObjRows(n); if (!got) return false;
+        const ok = await sapSetEach("assign_joint_data", n, jn => {
+          const rows = ((got.by[jn] || {})[T] || []).filter(r => r.LoadPattern !== pat);
+          if (how !== "delete" && (+x || +y)) rows.push({LoadPattern: pat, XDim: String(+x), YDim: String(+y)});
+          return {[T]: rows};
+        });
+        if (!ok) return false;
+      }
+      hmSay("Done. Edit > Undo steps back."); return true;
+    }), {width: kind === "temperature" ? 520 : 510});
+  d.querySelectorAll("[name=jlO]").forEach(r => r.onchange = () => d.querySelectorAll(".g3 input").forEach(x => x.disabled = q(d, "[name=jlO]:checked").value === "delete"));
+  return d;
+}
+
+// Assign > Assign Objects to Group: Filter (Clear Filter), the groups, Add to Group / Replace Group / Delete from Group,
+// Modify/Show Definitions..., OK, Close, Apply.
+async function etaAssignGroup() {
+  const groupsOf = async () => ((((await hmRun("structure_definitions", {}, true)).result || {}).groups) || []).map(g => g.name).filter(n => n !== "ALL");
+  let groups = await groupsOf();
+  const d = dialog("Assign Objects to Group", `${etaCss}<div class="etaF"><fieldset><legend>Filter</legend><div style="display:flex;gap:6px"><input id="gF" style="flex:1"><button id="gFC">Clear Filter</button></div></fieldset>
+    <fieldset><legend>Groups</legend><select id="gL" multiple size="14" style="width:100%;height:260px"></select></fieldset>
+    <fieldset><legend>Options</legend><label><input type="radio" name="gO" value="add"> Add to Group</label><label><input type="radio" name="gO" value="replace" checked> Replace Group</label><label><input type="radio" name="gO" value="delete"> Delete from Group</label></fieldset>
+    <button id="gDef" class="mid" style="width:180px">Modify/Show Definitions...</button></div>`,
+    sapOkCloseApply(async d => {
+      const fr = hmSelected("f"), ar = hmSelected("a"), jt = [...selJ].filter(n => pointIdx.has(n)), picked = [...q(d, "#gL").selectedOptions].map(o => o.value), o = q(d, "[name=gO]:checked").value;
+      if (!fr.length && !ar.length && !jt.length) return etaNeed([], "objects");
+      if (!picked.length) { formError(d, "Pick a group."); return false; }
+      for (const g of picked) {
+        let first = true;
+        for (const [objects, joints] of [[[...fr, ...ar], false], [jt, true]]) {
+          if (!objects.length) continue;
+          const j = await hmRun("assign_group_data", {group: g, objects, joints, remove: o === "delete", replace: o === "replace" && first}, true);
+          if (!j.ok) { hmSay(j.error, true); return false; }
+          first = false;
+        }
+      }
+      hmSay("Done. Edit > Undo steps back."); return true;
+    }), {width: 300});
+  const paint = () => { const f = q(d, "#gF").value.trim().toLowerCase(); q(d, "#gL").innerHTML = groups.filter(g => !f || g.toLowerCase().includes(f)).map(g => `<option>${esc(g)}</option>`).join(""); };
+  q(d, "#gF").oninput = paint; q(d, "#gFC").onclick = () => { q(d, "#gF").value = ""; paint(); };
+  q(d, "#gDef").onclick = () => etaThen(() => modelAct("st:group"), async () => { groups = await groupsOf(); paint(); });
+  paint();
+  return d;
+}
+
+// Assign > Copy Assigns: ETABS copies the assignments of the one selected object of each kind, with no form; Paste
+// Assigns > Joint, Frame, Shell or Link opens "Paste <kind> Assigns" with every item ticked (Set To Default Values ticks
+// them all again) and pastes what is ticked on the selected objects of that kind.
+async function etaCopyAssigns() {
+  const pick = {j: [...selJ].filter(n => pointIdx.has(n)), f: hmSelected("f"), a: hmSelected("a")}, got = {};
+  for (const [k, list] of Object.entries(pick)) {
+    if (list.length !== 1) continue;
+    const pd = (await hmRun("property_definitions", {objects: list}, true)).result || {}, o = (pd.objects || [])[0];
+    if (o) got[k] = {from: list[0], o};
+  }
+  if (!Object.keys(got).length) return hmSay("Select one joint, frame or shell (one of each kind at most) to copy its assignments from.", true);
+  hm.copiedAssigns = {etabs: got}; hmSay(`Copied the assignments of ${Object.values(got).map(x => x.from).join(", ")}. Assign > Paste Assigns puts them on the selection.`);
+}
+// The Assigns and Loads items of each kind's Paste form, as ETABS lists them, and the tables or fields each item carries.
+const etaPasteItems = {
+  f: {label: "Frames", groups: [["Assigns", [["Section Properties", ["section"]], ["Property Modifiers", ["modifiers"]], ["Releases and Partial Fixity", ["release_i", "release_j", "partial_fixity", "Frame Assignments - Releases and Partial Fixity"]], ["End Length Offsets", ["offset_i", "offset_j", "rigid_zone"]],
+      ["Insertion Point", ["cardinal", "Frame Assignments - Insertion Point"]], ["Local Axes", ["angle"]], ["OutputStations", ["Frame Assignments - Output Stations"]], ["Tension and Compression Limits", ["Frame Assignments - Tension and Compression Limits"]], ["Hinges", ["hinges"]],
+      ["Line Springs", ["spring"]], ["Additional Mass", ["Frame Assignments - Additional Mass"]], ["Pier Labels", ["pier"]], ["Spandrel Labels", ["spandrel"]], ["Automatic Frame Subdivide", ["Frame Assignments - Frame Auto Mesh Options"]],
+      ["Floor Meshing Options", ["Frame Assignments - Frame Floor Meshing Option"]], ["Moment Frame Beam Types", ["Frame Assignments - Moment Frame Beam Connection Type"]], ["Column Splice Overwrites", ["Frame Assignments - Column Splice Overwrites"]], ["Material Overwrites", ["Frame Assignments - Material Overwrites"]]]],
+    ["Loads", [["Point", ["load:frame_point"]], ["Distributed", ["load:frame_uniform", "load:frame_trapezoid"]], ["Temperature", ["load:frame_temperature"]], ["Open Structure Wind", ["Frame Loads Assignments - Open Structure Wind Parameters"]]]],
+    ["Design Overwrites", [["Design Procedure", ["design:procedure"]], ["Steel Frame", ["design:steel"]], ["Concrete Frame", ["design:concrete"]], ["Composite Beam", ["design:composite_beam"]], ["Composite Column", ["design:composite_column"]], ["Steel Joist", ["design:joist"]], ["Steel Connection", ["design:connection"]]]]]},
+  a: {label: "Shells", groups: [["Assigns", [["Section Properties", ["section"]], ["Stiffness Modifiers", ["modifiers"]], ["Thickness Overwrites", ["Area Assignments - Thickness Overwrites"]], ["Insertion Point", ["Area Assignments - Insertion Point"]], ["Diaphragms", ["diaphragm"]],
+      ["Edge Releases", ["Area Assignments - Edge Releases"]], ["Rib Locations", ["Area Assignments - Slab Rib Locations"]], ["Local Axes", ["Area Assignments - Local Axes"]], ["Area Springs", ["spring"]], ["Additional Mass", ["Area Assignments - Additional Mass"]], ["Pier Labels", ["pier"]], ["Spandrel Labels", ["spandrel"]],
+      ["Wall Hinges", ["Area Assignments - Wall Hinges"]], ["Reinforcement for Wall Hinges", ["Area Assignments - Wall Hinge Reinforcement"]], ["Floor Auto Mesh Options", ["Area Assignments - Floor Auto Mesh Options"]], ["Wall Auto Mesh Options", ["Area Assignments - Wall Auto Mesh Options"]],
+      ["Auto Edge Constraints", ["Area Assignments - Auto Edge Constraints"]], ["Material Overwrites", ["Area Assignments - Material Overwrites"]], ["Wall Rebar Ratio for Creep Analysis", ["Area Assignments - Wall Rebar Ratio for Creep Analysis"]], ["Floor Cracking", ["Area Assignments - Floor Cracking"]]]],
+    ["Loads", [["Uniform Load Sets", ["Area Load Assignments - Uniform Load Sets"]], ["Uniform", ["load:shell_uniform"]], ["Non-uniform", ["Area Load Assignments - Non-uniform"]], ["Temperature", ["load:shell_temperature"]], ["Wind Pressure Coefficient", ["Area Load Assignments - Wind Pressure Coefficients"]]]],
+    ["Design Overwrites", [["Concrete Slab", ["design:slab"]]]]]},
+  j: {label: "Joints", groups: [["Assigns", [["Restraints", ["restraint"]], ["Springs", ["spring"]], ["Diaphragms", ["diaphragm"]], ["Panel Zone", ["Joint Assignments - Panel Zone"]], ["Additional Mass", ["Joint Assignments - Additional Mass"]], ["Floor Meshing Options", ["Joint Assignments - Floor Meshing Option"]]]],
+    ["Loads", [["Force", ["load:joint_force", "Joint Loads Assignments - Force"]], ["Ground Displacement", ["load:joint_displacement"]], ["Temperature", ["load:joint_temperature"]]]]]},
+  l: {label: "Links", groups: [["Assigns", [["Link Properties", []], ["Local Axes", []]]]]},
+};
+function etaPaste(kind) {
+  const c = etaCopied(kind) ? hm.copiedAssigns.etabs[kind] : null, spec = etaPasteItems[kind];
+  if (!c) return hmSay("Copy the assignments of an object of this kind first (Assign > Copy Assigns).", true);
+  const all = spec.groups.flatMap(g => g[1]).length;
+  const tree = spec.groups.map(([g, items], gi) => `<div style="margin-left:18px"><label><input type="checkbox" data-g="${gi}" checked> <span data-gc="${gi}">${esc(g)}&nbsp; (${items.length} of ${items.length} items selected)</span></label>
+    <div style="margin-left:22px">${items.map(([l], ii) => `<label><input type="checkbox" data-i="${gi}.${ii}" checked> ${esc(l)}</label>`).join("")}</div></div>`).join("");
+  const title = {f: "Frame", a: "Shell", j: "Joint", l: "Link"}[kind];
+  const d = dialog(`Paste ${title} Assigns`, `${etaCss}<div class="etaF"><fieldset><legend>Assign Options</legend><div style="border:1px solid #bbb;display:inline-block;padding:2px 8px;margin-bottom:-1px;background:#fff">${spec.label} (<span id="pN">${all}</span> of ${all})</div>
+    <div style="border:1px solid #bbb;background:#fff;height:370px;overflow:auto;padding:4px"><label><input type="checkbox" id="pAll" checked> <span id="pAC">${spec.label}&nbsp; (${all} of ${all} items selected)</span></label>${tree}</div></fieldset>
+    <button id="pDef" class="mid" style="width:150px">Set To Default Values</button></div>`,
+    [["OK", d => { etaDoPaste(kind, c, [...d.querySelectorAll("[data-i]:checked")].map(x => { const [g, i] = x.dataset.i.split(".").map(Number); return spec.groups[g][1][i][1]; }).flat()); return true; }], ["Cancel"]], {width: 420});
+  const count = () => {
+    const on = d.querySelectorAll("[data-i]:checked").length; q(d, "#pN").textContent = on; q(d, "#pAC").innerHTML = `${spec.label}&nbsp; (${on} of ${all} items selected)`; q(d, "#pAll").checked = on === all;
+    spec.groups.forEach(([g, items], gi) => { const n = d.querySelectorAll(`[data-i^="${gi}."]:checked`).length; q(d, `[data-g="${gi}"]`).checked = n === items.length; q(d, `[data-gc="${gi}"]`).innerHTML = `${esc(g)}&nbsp; (${n} of ${items.length} items selected)`; });
+  };
+  d.querySelectorAll("[data-i]").forEach(x => x.onchange = count);
+  d.querySelectorAll("[data-g]").forEach(x => x.onchange = () => { d.querySelectorAll(`[data-i^="${x.dataset.g}."]`).forEach(y => y.checked = x.checked); count(); });
+  q(d, "#pAll").onchange = () => { d.querySelectorAll("[data-i],[data-g]").forEach(y => y.checked = q(d, "#pAll").checked); count(); };
+  q(d, "#pDef").onclick = () => { d.querySelectorAll("[data-i],[data-g]").forEach(y => y.checked = true); count(); };
+  return d;
+}
+async function etaDoPaste(kind, c, keys) {
+  const to = kind === "j" ? [...selJ].filter(n => pointIdx.has(n)) : kind === "l" ? [] : hmSelected(kind), o = c.o, has = k => keys.includes(k);
+  if (!to.length) return hmSay(`Select the ${({j: "joints", f: "frames", a: "shells", l: "links"})[kind]} to paste on first.`, true);
+  const tables = Object.fromEntries(keys.filter(k => / - /.test(k) && !/Loads? Assignments/.test(k)).map(k => [k, (o.tables || {})[k] || []]));
+  const loadTables = Object.fromEntries(keys.filter(k => /Loads? Assignments/.test(k)).map(k => [k, (o.tables || {})[k] || []]));
+  const args = {objects: to, tables: {...tables, ...loadTables}};
+  let j;
+  if (kind === "f") {
+    if (has("section") && o.section) { j = await hmRun("set_section", {frames: to, section: o.section}, true); if (!j.ok) return hmSay(j.error, true); }
+    if (has("release_i")) Object.assign(args, {release_i: o.release_i || [], release_j: o.release_j || [], partial_fixity: o.partial_fixity || {}});
+    if (has("offset_i")) Object.assign(args, {offset_i: o.offset_i || 0, offset_j: o.offset_j || 0, rigid_zone: o.rigid_zone || 0});
+    if (has("cardinal")) args.cardinal = o.cardinal || 10; if (has("angle")) args.angle = o.angle || 0; if (has("modifiers")) args.modifiers = o.modifiers || {};
+    if (has("spring")) args.spring = o.spring || ""; if (has("hinges")) args.hinges = o.hinges || [];
+    j = await hmRun("assign_frame_data", args, true);
+  } else if (kind === "a") {
+    if (has("section") && o.section) { j = await hmRun("set_section", {areas: to, section: o.section}, true); if (!j.ok) return hmSay(j.error, true); }
+    if (has("modifiers")) args.modifiers = o.modifiers || {}; if (has("spring")) args.spring = o.spring || "";
+    j = await hmRun("assign_shell_data", args, true);
+    if (j.ok && has("diaphragm")) j = await hmRun("assign_diaphragm_data", {objects: to.filter(n => (objOf([...sel].find(id => (objOf(id) || {}).name === n)) || {}).kind !== "wall"), diaphragm: o.diaphragm || ""}, true);
+  } else {
+    if (has("restraint")) args.restraint = String(o.restraint || "").split(/[\s,]+/).filter(Boolean); if (has("spring")) args.spring = o.spring || "";
+    j = await hmRun("assign_joint_data", args, true);
+    if (j.ok && has("diaphragm")) j = await hmRun("assign_diaphragm_data", {objects: to, joints: true, diaphragm: o.diaphragm || ""}, true);
+  }
+  const ps = {...(has("pier") && "pier" in o ? {pier: o.pier || ""} : {}), ...(has("spandrel") && "spandrel" in o ? {spandrel: o.spandrel || ""} : {})};
+  if (j && j.ok && Object.keys(ps).length && kind !== "j") j = await hmRun("assign_pier_spandrel_data", {objects: to, ...ps}, true);
+  // The loads ticked, each kept exactly as the copied object has it (paste_object_loads), in every load pattern.
+  const types = keys.filter(k => k.startsWith("load:")).flatMap(k => etaLoadTypes[k.slice(5)] || []);
+  if (j && j.ok && types.length) j = await hmRun("paste_object_loads", {from: c.from, objects: to, types}, true);
+  etaDone(j || {ok: true});
+}
+const etaLoadTypes = {joint_force: ["FORCE"], joint_displacement: ["GROUNDDISP"], joint_temperature: ["TEMP"], frame_point: ["POINTF", "POINTM"], frame_uniform: ["UNIFF", "UNIFM"], frame_trapezoid: ["TRAPF", "TRAPM"],
+  frame_temperature: ["TEMP"], shell_uniform: ["UNIFF"], shell_temperature: ["TEMP"]};
+// Assign > Clear Display of Assigns: the view stops showing assignments.
+const etaClearDisplay = () => hmSapClearAssignDisplay();
+Object.assign(etaAssignForms, {
+  jRestraints: etaJointRestraints, jSprings: etaJointSprings, jDiaphragms: etaJointDiaphragms, jPanelZone: etaJointPanelZone, jMass: etaJointMass, jFloorMesh: etaJointFloorMesh,
+  lProperty: etaLinkProperty, lAxes: etaLinkAxes, jlForce: () => etaJointLoad("force"), jlDispl: () => etaJointLoad("displacement"), jlTemp: () => etaJointLoad("temperature"),
+  group: etaAssignGroup, clearDisplay: etaClearDisplay, copy: etaCopyAssigns, pasteJ: () => etaPaste("j"), pasteF: () => etaPaste("f"), pasteA: () => etaPaste("a"), pasteL: () => etaPaste("l"),
+});
+
+// ---- ETABS 23.2's Assign > Frame Loads and Shell Loads forms (pictures Assign/FrameLoads, Assign/ShellLoads). A load
+// the .e2k has lines for (LINELOAD, AREALOAD) is written as one; temperature gradients, joint temperatures, non-uniform
+// shell loads, wind pressure coefficients and open structure wind go as rows of ETABS's own load tables. ----
+const etaDirs = [["Local-1", "1"], ["Local-2", "2"], ["Local-3", "3"], ["Global-X", "X"], ["Global-Y", "Y"], ["Gravity", "GRAV"], ["Global-X Proj", "XPROJ"], ["Global-Y Proj", "YPROJ"], ["Gravity Proj", "GRAVPROJ"]];
+const etaPatternRow = (defs, label, list) => `<fieldset style="padding:10px 14px"><div style="display:grid;grid-template-columns:1fr 220px;align-items:center"><span style="padding-left:20px">${label || "Load Pattern Name"}</span><select id="lP">${opts(list || defs.load_patterns.map(p => p.name), hm.pattern || (list || defs.load_patterns.map(p => p.name))[0])}</select></div></fieldset>`;
+const etaOptions = (word, legend, addOff) => `<fieldset style="align-self:start"><legend>${legend || "Options"}</legend><label class="${addOff ? "dis" : ""}"><input type="radio" name="lO" value="add" ${addOff ? "disabled" : ""}> Add to Existing ${word}</label><label><input type="radio" name="lO" value="replace" checked> Replace Existing ${word}</label><label><input type="radio" name="lO" value="delete"> Delete Existing ${word}</label></fieldset>`;
+const etaLen = name => { const id = [...sel].find(i => (objOf(i) || {}).name === name), o = id && objOf(id); return o && o.a ? Math.hypot(o.b[0] - o.a[0], o.b[1] - o.a[1], o.b[2] - o.a[2]) : 0; };
+async function etaLoadCall(args) { const j = await hmRun("assign_object_loads", args, true); if (!j.ok) hmSay(j.error, true); return j.ok; }
+
+// Frame Load Assignment - Point and - Distributed: Forces or Moments and the Direction of Load Application, four
+// distances and loads (Relative or Absolute Distance from End-I); Distributed has the Uniform Load too.
+async function etaFrameLoad(dist) {
+  const defs = await hmDefs(), u = etaUnits();
+  if (!defs.load_patterns.length) return hmSay("Define a load pattern first (Define > Load Patterns).", true);
+  const title = dist ? "Distributed" : "Point", legend = dist ? "Trapezoidal Loads" : "Point Loads";
+  const unit = m => dist ? (m ? `${u.f}-${u.l}/${u.l}` : `${u.f}/${u.l}`) : (m ? u.fl : u.f);
+  const d = dialog("Frame Load Assignment - " + title, `${etaCss}<div class="etaF">${etaPatternRow(defs)}
+    <div style="display:grid;grid-template-columns:1fr 240px;gap:0 10px"><fieldset><legend>Load Type and Direction</legend><div style="display:flex;gap:60px;margin:6px 10px"><label><input type="radio" name="lT" value="f" checked> Forces</label><label><input type="radio" name="lT" value="m"> Moments</label></div>
+      <div style="display:grid;grid-template-columns:1fr 120px;align-items:center;margin:4px 10px"><span>Direction of Load Application</span><select id="lD"></select></div></fieldset>${etaOptions("Loads")}</div>
+    <fieldset><legend>${legend}</legend><div style="display:grid;grid-template-columns:60px repeat(4,1fr) 70px;gap:4px 6px;align-items:center;text-align:center"><span></span><span>1.</span><span>2.</span><span>3.</span><span>4.</span><span></span>
+      <span style="text-align:left">Distance</span>${[0, 0.25, 0.75, 1].map((v, i) => `<input id="lX${i}" value="${v}">`).join("")}<span id="lXu" style="text-align:left"></span>
+      <span style="text-align:left">Load</span>${[0, 1, 2, 3].map(i => `<input id="lV${i}" value="0">`).join("")}<span id="lVu" style="text-align:left"></span></div>
+      <div style="display:flex;justify-content:center;gap:40px;margin-top:6px"><label><input type="radio" name="lR" value="rel" checked> Relative Distance from End-I</label><label><input type="radio" name="lR" value="abs"> Absolute Distance from End-I</label></div></fieldset>
+    ${dist ? `<fieldset style="width:260px"><legend>Uniform Load</legend><div style="display:grid;grid-template-columns:50px 110px 1fr;gap:6px;align-items:center"><span>Load</span><input id="lU" value="0"><span id="lUu"></span></div></fieldset>` : ""}</div>`,
+    sapOkCloseApply(async d => {
+      const n = hmSelected("f"); if (!etaNeed(n, "frames")) return false;
+      const pat = hm.pattern = q(d, "#lP").value, how = q(d, "[name=lO]:checked").value, m = q(d, "[name=lT]:checked").value === "m", dir = q(d, "#lD").value, abs = q(d, "[name=lR]:checked").value === "abs";
+      const xs = [0, 1, 2, 3].map(i => +(q(d, "#lX" + i).value.trim() || 0)), vs = [0, 1, 2, 3].map(i => +(q(d, "#lV" + i).value.trim() || 0)), uni = dist ? +(q(d, "#lU").value.trim() || 0) : 0;
+      if ([...xs, ...vs, uni].some(x => !isFinite(x))) { formError(d, "Each distance and load is a number."); return false; }
+      if (xs.some((x, i) => i && x < xs[i - 1])) { formError(d, "The distances go from End-I to End-J, each at or after the one before."); return false; }
+      if (!abs && xs.some(x => x < 0 || x > 1)) { formError(d, "A relative distance is from 0 to 1."); return false; }
+      const mk = m ? {moments: 1} : {};
+      // Replace and Delete take off the frame's loads of this kind in the pattern (forces and moments alike).
+      if (how !== "add") for (const kind of dist ? ["frame_uniform", "frame_trapezoid"] : ["frame_point"]) for (const mm of [{}, dist ? {moments: 1} : {moment: 0}]) if (!await etaLoadCall({kind, pattern: pat, objects: n, how: "delete", values: mm, dir})) return false;
+      if (how === "delete") { hmSay("Done. Edit > Undo steps back."); return true; }
+      for (const f of abs ? n.map(x => [x]) : [n]) {
+        const L = abs ? etaLen(f[0]) : 1; if (abs && !(L > 0)) { formError(d, "The length of " + f[0] + " is not known."); return false; }
+        const r = xs.map(x => Math.min(1, Math.max(0, x / L)));
+        if (dist && uni && !await etaLoadCall({kind: "frame_uniform", pattern: pat, objects: f, how: "add", dir, values: {value: uni, ...mk}})) return false;
+        for (let i = 0; i < 4; i++) {
+          if (!dist && vs[i]) { if (!await etaLoadCall({kind: "frame_point", pattern: pat, objects: f, how: "add", dir, values: m ? {moment: vs[i], distance: r[i]} : {value: vs[i], distance: r[i]}})) return false; }
+          if (dist && i < 3 && (vs[i] || vs[i + 1]) && r[i + 1] > r[i]) { if (!await etaLoadCall({kind: "frame_trapezoid", pattern: pat, objects: f, how: "add", dir, values: {start: vs[i], end: vs[i + 1], from: r[i], to: r[i + 1], ...mk}})) return false; }
+        }
+      }
+      hmSay("Done. Edit > Undo steps back."); return true;
+    }), {width: 640});
+  const sync = () => {
+    const m = q(d, "[name=lT]:checked").value === "m", abs = q(d, "[name=lR]:checked").value === "abs", was = q(d, "#lD").value || "GRAV";
+    // Moments of a point load have no projected directions (the ETABS list stops at Gravity).
+    const list = dist || !m ? etaDirs : etaDirs.slice(0, 6);
+    q(d, "#lD").innerHTML = opts(list.map(([l, v]) => [v, l]), list.some(x => x[1] === was) ? was : "GRAV");
+    q(d, "#lXu").textContent = abs ? u.l : ""; q(d, "#lVu").textContent = unit(m); if (dist) q(d, "#lUu").textContent = unit(m);
+  };
+  d.querySelectorAll("[name=lT]").forEach(r => r.onchange = sync);
+  d.querySelectorAll("[name=lR]").forEach(r => r.onchange = () => { const abs = q(d, "[name=lR]:checked").value === "abs"; [0, 0.25, 0.75, 1].forEach((v, i) => q(d, "#lX" + i).value = abs ? 0 : v); sync(); });
+  d.querySelectorAll("[name=lO]").forEach(r => r.onchange = () => d.querySelectorAll("#lX0,#lX1,#lX2,#lX3,#lV0,#lV1,#lV2,#lV3,#lU").forEach(x => x.disabled = q(d, "[name=lO]:checked").value === "delete"));
+  sync();
+  return d;
+}
+
+// Frame and Shell Load Assignment - Temperature: Object Temperature Type (Uniform Temperature Change, Temperature
+// Gradient 2-2 for frames, 3-3), the Temperature Value, Include Effects of Joint Temperatures (uniform only), and the
+// Object Temperature Options. A uniform change without joint temperatures is the .e2k's TEMP load; the rest is a row of
+// ETABS's temperature load table.
+async function etaTemperature(shell) {
+  const defs = await hmDefs(), u = etaUnits();
+  if (!defs.load_patterns.length) return hmSay("Define a load pattern first (Define > Load Patterns).", true);
+  const T = shell ? "Area Load Assignments - Temperature" : "Frame Loads Assignments - Temperature", types = shell ? [["u", "Uniform Temperature Change"], ["g3", "Temperature Gradient 3-3"]] : [["u", "Uniform Temperature Change"], ["g2", "Temperature Gradient 2-2"], ["g3", "Temperature Gradient 3-3"]];
+  const d = dialog((shell ? "Shell" : "Frame") + " Load Assignment - Temperature", `${etaCss}<div class="etaF">${etaPatternRow(defs)}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 10px"><div><fieldset><legend>Object Temperature Type</legend>${types.map(([v, l], i) => `<label><input type="radio" name="tT" value="${v}" ${i ? "" : "checked"}> ${l}</label>`).join("")}</fieldset>
+      <fieldset><legend>Object Temperature</legend><div style="display:grid;grid-template-columns:1fr 110px 40px;gap:6px;align-items:center"><span>Temperature Value</span><input id="tV" value="0"><span id="tU"></span></div></fieldset></div>
+    <div><fieldset id="tJF"><legend>${shell ? "Corner" : "End"} Joint Temperature Option</legend><label><input type="checkbox" id="tJ"> Include Effects of Joint Temperatures</label></fieldset>${etaOptions("Temperature", "Object Temperature Options")}</div></div></div>`,
+    sapOkCloseApply(async d => {
+      const n = hmSelected(shell ? "a" : "f"); if (!etaNeed(n, shell ? "shells" : "frames")) return false;
+      const pat = hm.pattern = q(d, "#lP").value, how = q(d, "[name=lO]:checked").value, t = q(d, "[name=tT]:checked").value, joint = t === "u" && q(d, "#tJ").checked, v = +(q(d, "#tV").value.trim() || 0);
+      if (!isFinite(v)) { formError(d, "The temperature is a number."); return false; }
+      const kind = shell ? "shell_temperature" : "frame_temperature", got = await sapObjRows(n); if (!got) return false;
+      const native = t === "u" && !joint;
+      // What each object has in the pattern now: the .e2k's TEMP load or the table's row.
+      if (how !== "add" || !native) if (!await etaLoadCall({kind, pattern: pat, objects: n, how: "delete", values: {}})) return false;
+      if (native && how !== "delete" && v) if (!await etaLoadCall({kind, pattern: pat, objects: n, how, values: {temperature: v}})) return false;
+      return sapSetEach(shell ? "assign_shell_data" : "assign_frame_data", n, o => {
+        const rows = ((got.by[o] || {})[T] || []).filter(r => r.LoadPattern !== pat), had = ((got.by[o] || {})[T] || []).find(r => r.LoadPattern === pat);
+        if (how === "delete" || native) return {[T]: rows};
+        const type = t === "u" ? "Temperature" : t === "g2" ? "Temperature Gradient 2-2" : "Temperature Gradient 3-3", same = had && had.TempType === type && how === "add";
+        const key = shell ? (t === "u" ? "TempChange" : "TempGrad3") : (t === "u" ? "Temp" : t === "g2" ? "TempGrad2" : "TempGrad3");
+        const row = shell ? {LoadPattern: pat, TempType: type, TempChange: "0", TempGrad3: "0", IncludeJts: joint ? "Yes" : "No"} : {LoadPattern: pat, TempType: type, Temp: "0", TempGrad2: "0", TempGrad3: "0", JointTemp: joint ? "Yes" : "No"};
+        row[key] = String(+(v + (same ? +had[key] || 0 : 0)).toPrecision(12));
+        return {[T]: [...rows, row]};
+      });
+    }), {width: 620});
+  const sync = () => { const t = q(d, "[name=tT]:checked").value; q(d, "#tU").textContent = t === "u" ? u.temp : `${u.temp}/${u.l}`; q(d, "#tJ").disabled = t !== "u"; if (t !== "u") q(d, "#tJ").checked = false; q(d, "#tJF").classList.toggle("dis", t !== "u"); };
+  d.querySelectorAll("[name=tT]").forEach(r => r.onchange = sync); sync();
+  return d;
+}
+
+// Frame Load Assignment - Open Structure Wind Parameters: Object Is Loaded by Wind, Ice Thickness, Program Calculated or
+// User Net Force Coefficient.
+async function etaOpenWind() {
+  const n0 = hmSelected("f"), got = n0.length ? await sapObjRows(n0.slice(0, 1)) : null, T = "Frame Loads Assignments - Open Structure Wind Parameters", S = hmU().l === "ft" ? "in" : hmU().l === "m" ? "mm" : hmU().l;
+  const r = got ? ((got.by[n0[0]] || {})[T] || [])[0] || {} : {}, user = /user/i.test(r.CoeffType || "");
+  const d = dialog("Frame Load Assignment - Open Structure Wind Parameters", `${etaCss}<div class="etaF"><fieldset><legend>Overwrites</legend>
+    <div style="display:grid;grid-template-columns:1fr 90px;gap:6px 10px;align-items:center;margin:4px 10px"><span>Object Is Loaded by Wind</span><select id="wL">${opts(["Yes", "No"], r.IsLoaded || "Yes")}</select>
+      <span>Ice Thickness</span><span style="display:flex;gap:4px"><input id="wI" value="${esc(r.IceThick || "0")}" style="width:90px"><span>${S}</span></span>
+      <label><input type="radio" name="wC" value="p" ${user ? "" : "checked"}> Program Calculated Net Force Coefficient</label><span></span>
+      <label><input type="radio" name="wC" value="u" ${user ? "checked" : ""}> User Net Force Coefficient</label><input id="wU" value="${esc(r.UserCoeff || "")}" style="width:90px"></div></fieldset></div>`,
+    sapOkCloseApply(async d => {
+      const n = hmSelected("f"); if (!etaNeed(n, "frames")) return false;
+      const user = q(d, "[name=wC]:checked").value === "u", ice = q(d, "#wI").value.trim() || "0", uc = q(d, "#wU").value.trim();
+      if (!isFinite(+ice) || user && (uc === "" || !isFinite(+uc))) { formError(d, "Give the ice thickness and the user coefficient as numbers."); return false; }
+      const row = {IsLoaded: q(d, "#wL").value, IceThick: String(+ice), CoeffType: user ? "User" : "Program Calculated", UserCoeff: user ? String(+uc) : ""};
+      return etaDone(await hmRun("assign_frame_data", {objects: n, tables: {[T]: [row]}}));
+    }), {width: 400});
+  const sync = () => { const user = q(d, "[name=wC]:checked").value === "u"; q(d, "#wU").disabled = !user; if (user && !q(d, "#wU").value) q(d, "#wU").value = "1"; if (!user) q(d, "#wU").value = ""; };
+  d.querySelectorAll("[name=wC]").forEach(x => x.onchange = sync); sync();
+  return d;
+}
+
+// Shell Assignment - Uniform Load Set: None and the shell uniform load sets.
+async function etaLoadSets() {
+  const n0 = hmSelected("a"), got = n0.length ? await sapObjRows(n0.slice(0, 1)) : null;
+  const now = got ? ((((got.by[n0[0]] || {})["Area Load Assignments - Uniform Load Sets"] || [])[0] || {}).LoadSet || "None") : "None";
+  const list = async () => {
+    const dd = (await hmRun("definition_data", {}, true)).result || {tables: {}}, fromTable = (((dd.tables || {})["Shell Uniform Load Sets"] || {}).rows || []).map(r => r.Name);
+    hm.defs = null; const fromFile = (await hmDefs()).load_sets || [];
+    return ["None", ...new Set([...fromFile, ...fromTable].filter(Boolean))];
+  };
+  return etaListForm("Shell Assignment - Uniform Load Set", "Uniform Load Sets", list, now, () => modelAct("dt:Shell Uniform Load Sets"),
+    async v => { const n = hmSelected("a"); if (!etaNeed(n, "shells")) return false; return etaDone(await hmRun("assign_shell_load_set", {objects: n, set: v === "None" ? "" : v})); });
+}
+// Shell Load Assignment - Uniform: Load and Direction (Local-1 ... Gravity Proj); Add to, Replace or Delete Existing Loads.
+async function etaShellUniform() {
+  const defs = await hmDefs(), u = etaUnits();
+  if (!defs.load_patterns.length) return hmSay("Define a load pattern first (Define > Load Patterns).", true);
+  const d = dialog("Shell Load Assignment - Uniform", `${etaCss}<div class="etaF">${etaPatternRow(defs)}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 10px"><fieldset><legend>Uniform Load</legend><div style="display:grid;grid-template-columns:70px 120px 1fr;gap:10px 6px;align-items:center;margin:6px">
+      <span>Load</span><input id="sV" value="0"><span>${u.f}/${u.l}²</span><span>Direction</span><select id="sD">${opts(etaDirs.map(([l, v]) => [v, l]), "GRAV")}</select><span></span></div></fieldset>${etaOptions("Loads")}</div></div>`,
+    sapOkCloseApply(async d => {
+      const n = hmSelected("a"); if (!etaNeed(n, "shells")) return false;
+      const pat = hm.pattern = q(d, "#lP").value, how = q(d, "[name=lO]:checked").value, v = +(q(d, "#sV").value.trim() || 0), dir = q(d, "#sD").value;
+      if (!isFinite(v)) { formError(d, "The load is a number."); return false; }
+      if (how !== "add" && !await etaLoadCall({kind: "shell_uniform", pattern: pat, objects: n, how: "delete", values: {}, dir})) return false;
+      if (how !== "delete" && v && !await etaLoadCall({kind: "shell_uniform", pattern: pat, objects: n, how: "add", values: {value: v}, dir})) return false;
+      hmSay("Done. Edit > Undo steps back."); return true;
+    }), {width: 520});
+  return d;
+}
+// Shell Load Assignment - Non-uniform: Direction, Load at Point(x,y,z) = Ax + By + Cz + D (Global), Restrictions, Options.
+async function etaShellNonUniform() {
+  const defs = await hmDefs(), u = etaUnits(), T = "Area Load Assignments - Non-uniform";
+  if (!defs.load_patterns.length) return hmSay("Define a load pattern first (Define > Load Patterns).", true);
+  const restr = ["Use All Values", "Zero Negative Values", "Zero Positive Values"];
+  const d = dialog("Shell Load Assignment -  Non-uniform", `${etaCss}<div class="etaF">${etaPatternRow(defs)}
+    <div style="display:grid;grid-template-columns:1fr 190px;gap:0 10px"><div><fieldset style="padding:10px"><div style="display:grid;grid-template-columns:90px 1fr;align-items:center"><span>Direction</span><select id="nD">${opts(etaDirs.map(x => x[0]), "Gravity")}</select></div></fieldset>
+      <fieldset><legend>Non-uniform Load</legend><div style="margin:0 6px 6px">Load at Point(x,y,z) = Ax + By + Cz + D<br>x, y and z are in the Global coordinate system</div>
+      <div style="display:grid;grid-template-columns:40px 110px 1fr;gap:6px;align-items:center">${["A", "B", "C", "D"].map(k => `<span>${k}</span><input id="n${k}" value="0"><span>${k === "D" ? `${u.f}/${u.l}²` : `${u.f}/${u.l}³`}</span>`).join("")}</div></fieldset></div>
+    <div><fieldset><legend>Restrictions</legend>${restr.map((r, i) => `<label><input type="radio" name="nR" value="${r}" ${i ? "" : "checked"}> ${r}</label>`).join("")}</fieldset>${etaOptions("Loads")}</div></div></div>`,
+    sapOkCloseApply(async d => {
+      const n = hmSelected("a"); if (!etaNeed(n, "shells")) return false;
+      const pat = hm.pattern = q(d, "#lP").value, how = q(d, "[name=lO]:checked").value, v = Object.fromEntries(["A", "B", "C", "D"].map(k => [k, +(q(d, "#n" + k).value.trim() || 0)]));
+      if (Object.values(v).some(x => !isFinite(x))) { formError(d, "A, B, C and D are numbers."); return false; }
+      const got = await sapObjRows(n); if (!got) return false;
+      return sapSetEach("assign_shell_data", n, o => {
+        const all = (got.by[o] || {})[T] || [], rows = all.filter(r => r.LoadPattern !== pat), had = all.find(r => r.LoadPattern === pat);
+        if (how === "delete") return {[T]: rows};
+        const add = how === "add" && had, row = {LoadPattern: pat, Dir: q(d, "#nD").value, Restriction: q(d, "[name=nR]:checked").value};
+        for (const k of ["A", "B", "C", "D"]) row[k] = String(+(v[k] + (add ? +had[k] || 0 : 0)).toPrecision(12));
+        return {[T]: Object.values(v).some(x => x) || add ? [...rows, row] : rows};
+      });
+    }), {width: 520});
+  return d;
+}
+// Shell Load Assignment - Wind Pressure Coefficient: Wind Load Pattern Name (wind patterns), Coefficient Cp, Windward
+// (varies) or Leeward or Sides (constant); Add to Existing Loads is greyed as in ETABS.
+async function etaShellWindCp() {
+  const defs = await hmDefs(), T = "Area Load Assignments - Wind Pressure Coefficients";
+  const wind = defs.load_patterns.filter(p => /wind/i.test(p.type || "")).map(p => p.name);
+  const d = dialog("Shell Load Assignment - Wind Pressure Coefficient", `${etaCss}<div class="etaF">${etaPatternRow(defs, "Wind Load Pattern Name", wind.length ? wind : [""])}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 10px"><fieldset><legend>Wind pressure</legend><div style="display:grid;grid-template-columns:100px 1fr;gap:6px;align-items:center;margin:4px 6px"><span>Coefficient, Cp</span><input id="cV" value="0"></div>
+      <label><input type="radio" name="cW" value="Windward" checked> Windward (varies)</label><label><input type="radio" name="cW" value="Leeward"> Leeward or Sides (constant)</label></fieldset>${etaOptions("Loads", "Options", true)}</div></div>`,
+    sapOkCloseApply(async d => {
+      const n = hmSelected("a"); if (!etaNeed(n, "shells")) return false;
+      const pat = q(d, "#lP").value, how = q(d, "[name=lO]:checked").value, cp = q(d, "#cV").value.trim() || "0";
+      if (!pat) { formError(d, "Define a wind load pattern first (Define > Load Patterns, type Wind)."); return false; }
+      if (!isFinite(+cp)) { formError(d, "Cp is a number."); return false; }
+      const got = await sapObjRows(n); if (!got) return false;
+      return sapSetEach("assign_shell_data", n, o => {
+        const rows = ((got.by[o] || {})[T] || []).filter(r => r.LoadPattern !== pat);
+        return {[T]: how === "delete" ? rows : [...rows, {LoadPattern: pat, Dir: q(d, "[name=cW]:checked").value, Cp: String(+cp)}]};
+      });
+    }), {width: 520});
+  q(d, ".etaF fieldset:last-child legend") && q(d, ".etaF fieldset:last-child legend").classList.add("dis");
+  return d;
+}
+Object.assign(etaAssignForms, {
+  flPoint: () => etaFrameLoad(false), flDistributed: () => etaFrameLoad(true), flTemp: () => etaTemperature(false), flWind: etaOpenWind,
+  alLoadSets: etaLoadSets, alUniform: etaShellUniform, alNonUniform: etaShellNonUniform, alTemp: () => etaTemperature(true), alWindCp: etaShellWindCp,
+});
+
+// ---- ETABS 23.2's Assign > Frame forms (pictures Assign/Frame). ----
+// ETABS prints small lengths (offsets, ice, punching sizes) in inches or millimetres; the model keeps its own length.
+function etaSmall() { const l = hmU().l, s = l === "ft" ? "in" : l === "m" ? "mm" : l, k = l === "ft" ? 12 : l === "m" ? 1000 : 1; return {unit: s, in: x => +(+x / k).toPrecision(12), out: x => +(+x * k).toPrecision(12)}; }
+async function etaFirst(kind) {
+  const names = kind === "j" ? hmJoints() : hmSelected(kind);
+  const got = names.length ? await sapObjRows(names.slice(0, 1)) : null;
+  return {names, o: got ? (got.pd.objects || [])[0] || {} : {}, t: got ? ((got.pd.objects || [])[0] || {}).tables || {} : {}};
+}
+const etaFrames = () => hmSelected("f");
+const etaYes = v => /^yes$/i.test(v || "");
+// A frame form that sets one table: rows(d) gives the rows ([] takes the table off) or false when the form is not right.
+const etaTableApply = (tool, sel, T, rows) => sapOkCloseApply(async d => { const n = sel(); if (!etaNeed(n, tool === "assign_frame_data" ? "frames" : "shells")) return false; const r = rows(d); if (r === false) return false; return etaDone(await hmRun(tool, {objects: n, tables: {[T]: r}})); });
+
+// Frame Assignment - Section Property: Filter (Clear Filter), Frame Sections, Modify/Show Definitions...
+async function etaFrameSection() {
+  const f = await etaFirst("f"), list = async () => { hm.defs = null; return [...(await hmDefs()).frame_sections.map(s => s.name), "None"].sort((a, b) => a.localeCompare(b, undefined, {sensitivity: "base"})); };
+  let all = await list();
+  const d = dialog("Frame Assignment - Section Property", `${etaCss}<div class="etaF"><fieldset><legend>Filter</legend><div style="display:flex;gap:6px"><input id="fsF" style="flex:1"><button id="fsC">Clear Filter</button></div></fieldset>
+    <fieldset><legend>Frame Sections</legend><select id="fsL" size="16" style="width:100%;height:330px"></select></fieldset><button id="fsD" class="mid" style="width:180px">Modify/Show Definitions...</button></div>`,
+    sapOkCloseApply(async d => { const n = etaFrames(); if (!etaNeed(n, "frames")) return false; const v = q(d, "#fsL").value; if (!v) { formError(d, "Pick a section."); return false; } return etaDone(await hmRun("set_section", {frames: n, section: v})); }), {width: 300});
+  const paint = () => { const ft = q(d, "#fsF").value.trim().toLowerCase(), was = q(d, "#fsL").value || f.o.section || all[0]; const l = all.filter(x => !ft || x.toLowerCase().includes(ft)); q(d, "#fsL").innerHTML = opts(l, l.includes(was) ? was : l[0]); };
+  q(d, "#fsF").oninput = paint; q(d, "#fsC").onclick = () => { q(d, "#fsF").value = ""; paint(); };
+  q(d, "#fsD").onclick = () => etaThen(() => modelAct("frameSections"), async () => { all = await list(); paint(); });
+  paint();
+  return d;
+}
+// Frame Assignment - Property Modifiers: Property/Stiffness Modifiers for Analysis.
+async function etaFrameModifiers() {
+  const f = await etaFirst("f"), m = f.o.modifiers || {};
+  const rows = [["AMOD", "Cross-section (axial) Area"], ["A2MOD", "Shear Area in 2 direction"], ["A3MOD", "Shear Area in 3 direction"], ["JMOD", "Torsional Constant"], ["I2MOD", "Moment of Inertia about 2 axis"], ["I3MOD", "Moment of Inertia about 3 axis"], ["MMOD", "Mass"], ["WMOD", "Weight"]];
+  return dialog("Frame Assignment - Property Modifiers", `${etaCss}<div class="etaF"><fieldset><legend>Property/Stiffness Modifiers for Analysis</legend><div style="display:grid;grid-template-columns:1fr 90px;gap:6px 10px;align-items:center;margin:4px 10px">${rows.map(([k, l]) => `<span>${l}</span><input data-m="${k}" value="${esc(String(m[k] ?? 1))}">`).join("")}</div></fieldset></div>`,
+    sapOkCloseApply(async d => {
+      const n = etaFrames(); if (!etaNeed(n, "frames")) return false;
+      const o = {}; for (const x of d.querySelectorAll("[data-m]")) { const v = +(x.value.trim() || 1); if (!isFinite(v) || v < 0) { formError(d, "Each modifier is a number, 0 or more."); return false; } o[x.dataset.m] = v; }
+      return etaDone(await hmRun("assign_frame_data", {objects: n, modifiers: o}));
+    }), {width: 380});
+}
+// Frame Assignment - Releases/Partial Fixity: Release Start and End, the Frame Partial Fixity Springs of a released end,
+// and No Releases.
+async function etaFrameReleases() {
+  const f = await etaFirst("f"), u = hmU(), pf = f.o.partial_fixity || {}, ri = f.o.release_i || [], rj = f.o.release_j || [];
+  const rel = [["P", "Axial Load"], ["V2", "Shear Force 2 (Major)"], ["V3", "Shear Force 3 (Minor)"], ["T", "Torsion"], ["M2", "Moment 22 (Minor)"], ["M3", "Moment 33 (Major)"]];
+  const unit = r => /^[PV]/.test(r) ? `${u.f}/${u.l}` : `${u.f}-${u.l}/rad`;
+  const d = dialog("Frame Assignment - Releases/Partial Fixity", `${etaCss}<div class="etaF"><fieldset><legend>Frame Releases</legend>
+    <div style="display:grid;grid-template-columns:150px 34px 34px 110px 110px 1fr;gap:6px 6px;align-items:center;text-align:center"><span></span><span style="grid-column:span 2">Release<br>Start&nbsp;&nbsp; End</span><span style="grid-column:span 2">Frame Partial Fixity Springs<br>Start&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; End</span><span></span>
+    ${rel.map(([k, l]) => `<span style="text-align:left">${l}</span><input type="checkbox" data-i="${k}" ${ri.includes(k) ? "checked" : ""}><input type="checkbox" data-j="${k}" ${rj.includes(k) ? "checked" : ""}><input data-si="${k}" value="${pf[k + "I"] || 0}"><input data-sj="${k}" value="${pf[k + "J"] || 0}"><span style="text-align:left">${unit(k)}</span>`).join("")}</div>
+    <label style="margin-top:10px"><input type="checkbox" id="rN"> No Releases</label></fieldset></div>`,
+    sapOkCloseApply(async d => {
+      const n = etaFrames(); if (!etaNeed(n, "frames")) return false;
+      const i = [...d.querySelectorAll("[data-i]:checked")].map(x => x.dataset.i), j = [...d.querySelectorAll("[data-j]:checked")].map(x => x.dataset.j);
+      // A frame released at both ends in the same direction is unstable for P, V2, V3 and T, as ETABS says.
+      const both = i.filter(k => j.includes(k) && ["P", "V2", "V3", "T"].includes(k)); if (both.length) { formError(d, `${both.join(", ")} released at both ends makes the frame unstable.`); return false; }
+      const p = {}; for (const [k] of rel) for (const e of ["I", "J"]) { const on = (e === "I" ? i : j).includes(k), x = q(d, `[data-s${e.toLowerCase()}="${k}"]`).value.trim() || "0"; if (!isFinite(+x) || +x < 0) { formError(d, "A spring stiffness is a number, 0 or more."); return false; } p[k + e] = on ? +x : 0; }
+      return etaDone(await hmRun("assign_frame_data", {objects: n, release_i: i, release_j: j, partial_fixity: p}));
+    }), {width: 560});
+  const sync = () => {
+    const none = q(d, "#rN").checked;
+    d.querySelectorAll("[data-i],[data-j]").forEach(x => { if (none) x.checked = false; x.disabled = none; });
+    for (const [k] of rel) for (const e of ["i", "j"]) { const on = q(d, `[data-${e}="${k}"]`).checked, b = q(d, `[data-s${e}="${k}"]`); b.disabled = !on; if (!on) b.value = ""; else if (b.value === "") b.value = "0"; }
+  };
+  d.querySelectorAll("[data-i],[data-j],#rN").forEach(x => x.onchange = sync); sync();
+  return d;
+}
+// Frame Assignment - End Length Offsets: Automatic from Connectivity or Define Lengths (End-I, End-J), Rigid-zone factor,
+// and the Frame Self Weight Option (Auto, Full Length, Clear Length).
+async function etaFrameOffsets() {
+  const f = await etaFirst("f"), s = etaSmall(), T = "Frame Assignments - End Length Offsets", r = (f.t[T] || [])[0] || {}, user = !!(+f.o.offset_i || +f.o.offset_j) || /user|define/i.test(r.OffsetOpt || "");
+  const sw = /full/i.test(r.SelfWtOpt || "") ? "full" : /clear/i.test(r.SelfWtOpt || "") ? "clear" : "auto";
+  const d = dialog("Frame Assignment - End Length Offsets", `${etaCss}<div class="etaF"><fieldset><legend>End Offset Along Length</legend><label><input type="radio" name="oA" value="auto" ${user ? "" : "checked"}> Automatic from Connectivity</label><label><input type="radio" name="oA" value="user" ${user ? "checked" : ""}> Define Lengths</label>
+    <div style="display:grid;grid-template-columns:70px 110px 30px;gap:6px;align-items:center;margin-left:30px"><span>End-I</span><input id="oI" value="${s.out(f.o.offset_i || 0)}"><span>${s.unit}</span><span>End-J</span><input id="oJ" value="${s.out(f.o.offset_j || 0)}"><span>${s.unit}</span></div>
+    <div style="display:grid;grid-template-columns:110px 110px;gap:6px;align-items:center;margin:10px 0 4px 8px"><span>Rigid-zone factor</span><input id="oR" value="${f.o.rigid_zone || 0}"></div></fieldset>
+    <fieldset><legend>Frame Self Weight Option</legend><label><input type="radio" name="oW" value="auto" ${sw === "auto" ? "checked" : ""}> Auto</label><label><input type="radio" name="oW" value="full" ${sw === "full" ? "checked" : ""}> Weight Based on Full Length</label><label><input type="radio" name="oW" value="clear" ${sw === "clear" ? "checked" : ""}> Weight Based on Clear Length</label></fieldset></div>`,
+    sapOkCloseApply(async d => {
+      const n = etaFrames(); if (!etaNeed(n, "frames")) return false;
+      const user = q(d, "[name=oA]:checked").value === "user", i = user ? s.in(q(d, "#oI").value.trim() || 0) : 0, j = user ? s.in(q(d, "#oJ").value.trim() || 0) : 0, rz = +(q(d, "#oR").value.trim() || 0), w = q(d, "[name=oW]:checked").value;
+      if (![i, j, rz].every(isFinite) || i < 0 || j < 0) { formError(d, "The lengths are numbers, 0 or more."); return false; }
+      if (rz < 0 || rz > 1) { formError(d, "The rigid-zone factor is from 0 to 1."); return false; }
+      const row = user || w !== "auto" ? [{OffsetOpt: user ? "User" : "Auto", OffsetI: String(i), OffsetJ: String(j), RigidFact: String(rz), SelfWtOpt: w === "full" ? "Full Length" : w === "clear" ? "Clear Length" : "Auto"}] : [];
+      return etaDone(await hmRun("assign_frame_data", {objects: n, offset_i: i, offset_j: j, rigid_zone: rz, tables: {[T]: row}}));
+    }), {width: 290});
+  const sync = () => { const user = q(d, "[name=oA]:checked").value === "user"; ["#oI", "#oJ"].forEach(id => { q(d, id).disabled = !user; if (!user) q(d, id).value = ""; else if (q(d, id).value === "") q(d, id).value = "0"; }); };
+  d.querySelectorAll("[name=oA]").forEach(x => x.onchange = sync); sync();
+  return d;
+}
+// Frame Assignment - Insertion Point: Cardinal Point (1 to 11), Mirror about Local 2 and 3, Frame Joint Offsets from
+// Cardinal Point (Local or Global, End-I and End-J), Do not transform frame stiffness..., Reset Defaults.
+async function etaFrameInsertion() {
+  const f = await etaFirst("f"), s = etaSmall(), T = "Frame Assignments - Insertion Point", r = (f.t[T] || [])[0] || {};
+  const cp = ["Bottom Left", "Bottom Center", "Bottom Right", "Middle Left", "Middle Center", "Middle Right", "Top Left", "Top Center", "Top Right", "Centroid", "Shear Center"];
+  const off = (k) => s.out(+r[k] || 0);
+  const d = dialog("Frame Assignment - Insertion Point", `${etaCss}<div class="etaF"><fieldset><legend>Cardinal Point</legend><select id="iC" style="width:170px;margin-left:30px">${opts(cp.map((t, i) => [String(i + 1), `${i + 1} (${t})`]), String(f.o.cardinal || 10))}</select>
+      <label style="margin-left:30px"><input type="checkbox" id="iM2" ${etaYes(r.Mirror2) ? "checked" : ""}> Mirror about Local 2</label><label style="margin-left:30px"><input type="checkbox" id="iM3" ${etaYes(r.Mirror3) ? "checked" : ""}> Mirror about Local 3</label></fieldset>
+    <fieldset><legend>Frame Joint Offsets from Cardinal Point</legend><div style="display:grid;grid-template-columns:110px 110px;gap:6px;align-items:center;margin:4px"><span>Coordinate System</span><select id="iS">${opts(["Local", "Global"], /global/i.test(r.OffsetCSys || "") ? "Global" : "Local")}</select></div>
+      <div style="display:grid;grid-template-columns:16px 1fr 1fr 20px;gap:6px;align-items:center;text-align:center"><span></span><span>End-I</span><span>End-J</span><span></span>
+      ${["X", "Y", "Z"].map((a, i) => `<span class="iL" data-a="${i}">${i + 1}</span><input id="i${a}I" value="${off(a + "I")}"><input id="i${a}J" value="${off(a + "J")}"><span>${s.unit}</span>`).join("")}</div></fieldset>
+    <label><input type="checkbox" id="iT" ${r.NoTransform === undefined || etaYes(r.NoTransform) ? "checked" : ""}> Do not transform frame stiffness for offsets<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;from centroid for non-P/T floors</label>
+    <button id="iR" class="mid" style="width:120px">Reset Defaults</button></div>`,
+    sapOkCloseApply(async d => {
+      const n = etaFrames(); if (!etaNeed(n, "frames")) return false;
+      const row = {Mirror2: q(d, "#iM2").checked ? "Yes" : "No", Mirror3: q(d, "#iM3").checked ? "Yes" : "No", OffsetCSys: q(d, "#iS").value, NoTransform: q(d, "#iT").checked ? "Yes" : "No"};
+      for (const a of ["X", "Y", "Z"]) for (const e of ["I", "J"]) { const v = q(d, `#i${a}${e}`).value.trim() || "0"; if (!isFinite(+v)) { formError(d, "The offsets are numbers."); return false; } row[a + e] = String(s.in(v)); }
+      const plain = row.Mirror2 === "No" && row.Mirror3 === "No" && row.NoTransform === "Yes" && ["XI", "YI", "ZI", "XJ", "YJ", "ZJ"].every(k => +row[k] === 0);
+      return etaDone(await hmRun("assign_frame_data", {objects: n, cardinal: +q(d, "#iC").value, tables: {[T]: plain ? [] : [row]}}));
+    }), {width: 310});
+  const labels = () => { const g = q(d, "#iS").value === "Global"; d.querySelectorAll(".iL").forEach(x => x.textContent = g ? "XYZ"[+x.dataset.a] : String(+x.dataset.a + 1)); };
+  q(d, "#iS").onchange = labels; labels();
+  q(d, "#iR").onclick = () => { q(d, "#iC").value = "10"; q(d, "#iM2").checked = q(d, "#iM3").checked = false; q(d, "#iS").value = "Local"; d.querySelectorAll("[id^=i][id$=I],[id^=i][id$=J]").forEach(x => { if (x.tagName === "INPUT" && x.type !== "checkbox") x.value = "0"; }); q(d, "#iT").checked = true; labels(); };
+  return d;
+}
+// Frame Assignment - Local Axes: General Orientation (Angle or Rotate by Angle) or Orient with Grid System (vertical
+// frames: major direction X, Y, Radial or Tangential).
+async function etaFrameAxes() {
+  const defs = await hmDefs(), f = await etaFirst("f"), gs = [(defs.grid_system || {}).name || "G1"];
+  const d = dialog("Frame Assignment - Local Axes", `${etaCss}<div class="etaF"><fieldset><legend>Define Orientation</legend>
+    <label><input type="radio" name="xO" value="g" checked> General Orientation - Applies to All Frame Objects</label>
+    <div style="display:grid;grid-template-columns:1fr 100px 30px;gap:6px;align-items:center;margin-left:28px"><label><input type="radio" name="xG" value="a" checked> Angle</label><input id="xA" value="${f.o.angle || 0}"><span>deg</span><label><input type="radio" name="xG" value="r"> Rotate by Angle</label><input id="xR" value="0"><span>deg</span></div>
+    <label><input type="radio" name="xO" value="s"> Orient with Grid System - Applies to Vertical Frame Objects Only</label>
+    <div style="margin-left:28px"><div style="display:grid;grid-template-columns:130px 190px;gap:6px;align-items:center"><span>Grid System</span><select id="xS">${opts(gs, gs[0])}</select></div>
+      ${[["X", "X"], ["Y", "Y"], ["R", "Radial"], ["T", "Tangential"]].map(([v, l], i) => `<label><input type="radio" name="xD" value="${v}" ${i ? "" : "checked"}> Frame object major direction is ${l}</label>`).join("")}</div></fieldset></div>`,
+    sapOkCloseApply(async d => {
+      const n = etaFrames(); if (!etaNeed(n, "frames")) return false;
+      const how = q(d, "[name=xO]:checked").value, g = q(d, "[name=xG]:checked").value;
+      if (how === "g" && g === "a") { const a = +(q(d, "#xA").value.trim() || 0); if (!isFinite(a)) { formError(d, "The angle is a number."); return false; } return etaDone(await hmRun("assign_frame_data", {objects: n, angle: a})); }
+      const got = await sapObjRows(n); if (!got) return false;
+      const each = new Map();
+      for (const name of n) {
+        const o = (got.pd.objects || [])[n.indexOf(name)] || {}, id = [...sel].find(i => (objOf(i) || {}).name === name), ob = id && objOf(id);
+        let a;
+        if (how === "g") { const r = +(q(d, "#xR").value.trim() || 0); if (!isFinite(r)) { formError(d, "The angle is a number."); return false; } a = (+o.angle || 0) + r; }
+        else {
+          if (!ob || Math.hypot(ob.b[0] - ob.a[0], ob.b[1] - ob.a[1]) > 1e-6 * Math.max(1, Math.abs(ob.b[2] - ob.a[2]))) continue;  // vertical frames only
+          const dir = q(d, "[name=xD]:checked").value, t = Math.atan2(ob.a[1], ob.a[0]) * 180 / Math.PI;
+          a = dir === "X" ? 0 : dir === "Y" ? 90 : dir === "R" ? t : t + 90;
+        }
+        a = +(((a % 360) + 360) % 360).toPrecision(12); if (!each.has(a)) each.set(a, []); each.get(a).push(name);
+      }
+      if (!each.size) { formError(d, "None of the selected frames is vertical."); return false; }
+      for (const [a, objs] of each) { const j = await hmRun("assign_frame_data", {objects: objs, angle: a}, true); if (!j.ok) { hmSay(j.error, true); return false; } }
+      hmSay("Done. Edit > Undo steps back."); return true;
+    }), {width: 470});
+  const sync = () => {
+    const how = q(d, "[name=xO]:checked").value, g = q(d, "[name=xG]:checked").value;
+    d.querySelectorAll("[name=xG]").forEach(x => x.disabled = how !== "g"); q(d, "#xA").disabled = how !== "g" || g !== "a"; q(d, "#xR").disabled = how !== "g" || g !== "r";
+    q(d, "#xS").disabled = how !== "s"; d.querySelectorAll("[name=xD]").forEach(x => x.disabled = how !== "s");
+  };
+  d.querySelectorAll("[name=xO],[name=xG]").forEach(x => x.onchange = sync); sync();
+  return d;
+}
+// Frame Assignment - Output Stations: Max Station Spacing or Min Number Stations.
+async function etaFrameStations() {
+  const f = await etaFirst("f"), T = "Frame Assignments - Output Stations", r = (f.t[T] || [])[0] || {}, sp = /spac/i.test(r.StationOpt || ""), u = hmU();
+  const d = dialog("Frame Assignment - Output Stations", `${etaCss}<div class="etaF"><fieldset style="padding:10px"><div style="display:grid;grid-template-columns:1fr 90px 24px;gap:8px;align-items:center">
+    <label><input type="radio" name="sO" value="s" ${sp ? "checked" : ""}> Max Station Spacing</label><input id="sS" value="${esc(r.MaxSpacing || "")}"><span>${u.l}</span>
+    <label><input type="radio" name="sO" value="n" ${sp ? "" : "checked"}> Min Number Stations</label><input id="sN" value="${esc(r.MinStations || "3")}"><span></span></div></fieldset></div>`,
+    etaTableApply("assign_frame_data", etaFrames, T, d => {
+      const s = q(d, "[name=sO]:checked").value === "s", v = q(d, s ? "#sS" : "#sN").value.trim();
+      if (!(+v > 0) || (!s && !Number.isInteger(+v))) { formError(d, s ? "The spacing is a length over 0." : "The number of stations is a whole number over 0."); return false; }
+      return [s ? {StationOpt: "Max Spacing", MaxSpacing: String(+v), MinStations: ""} : {StationOpt: "Min Stations", MinStations: String(+v), MaxSpacing: ""}];
+    }), {width: 330});
+  const sync = () => { const s = q(d, "[name=sO]:checked").value === "s"; q(d, "#sS").disabled = !s; q(d, "#sN").disabled = s; if (s && !q(d, "#sS").value) q(d, "#sS").value = String(+(hmU().l === "ft" ? 2 : 0.5)); };
+  d.querySelectorAll("[name=sO]").forEach(x => x.onchange = sync); sync();
+  return d;
+}
+// Frame Assignment - Tension/Compression Limits.
+async function etaFrameTC() {
+  const f = await etaFirst("f"), T = "Frame Assignments - Tension and Compression Limits", r = (f.t[T] || [])[0] || {}, u = hmU();
+  const d = dialog("Frame Assignment - Tension/Compression Limits", `${etaCss}<div class="etaF"><fieldset style="padding:12px"><div style="display:grid;grid-template-columns:130px 110px 30px;gap:10px 6px;align-items:center">
+    <label><input type="checkbox" id="tT" ${etaYes(r.IncludeTens) ? "checked" : ""}> Tension Limit</label><input id="tTV" value="${esc(r.TensLimit || "0")}"><span>${u.f}</span>
+    <label><input type="checkbox" id="tC" ${etaYes(r.IncludeComp) ? "checked" : ""}> Compression Limit</label><input id="tCV" value="${esc(r.CompLimit || "0")}"><span>${u.f}</span></div></fieldset></div>`,
+    etaTableApply("assign_frame_data", etaFrames, T, d => {
+      const t = q(d, "#tT").checked, c = q(d, "#tC").checked, tv = q(d, "#tTV").value.trim() || "0", cv = q(d, "#tCV").value.trim() || "0";
+      if (t && !(+tv >= 0) || c && !(+cv >= 0)) { formError(d, "A limit is a force, 0 or more."); return false; }
+      return t || c ? [{IncludeTens: t ? "Yes" : "No", TensLimit: t ? String(+tv) : "", IncludeComp: c ? "Yes" : "No", CompLimit: c ? String(+cv) : ""}] : [];
+    }), {width: 290});
+  const sync = () => { for (const [b, v] of [["#tT", "#tTV"], ["#tC", "#tCV"]]) { q(d, v).disabled = !q(d, b).checked; if (!q(d, b).checked) q(d, v).value = ""; else if (q(d, v).value === "") q(d, v).value = "0"; } };
+  d.querySelectorAll("#tT,#tC").forEach(x => x.onchange = sync); sync();
+  return d;
+}
+// Frame Assignment - Line Springs: None and the line spring properties.
+async function etaFrameSprings() {
+  const f = await etaFirst("f"), list = async () => ["None", ...((await hmRun("property_definitions", {}, true)).result || {springs: []}).springs.filter(x => x.kind === "line").map(x => x.name)];
+  return etaListForm("Frame Assignment - Line Springs", "Springs", list, f.o.spring || "None", () => modelAct("spr:line"),
+    async v => { const n = etaFrames(); if (!etaNeed(n, "frames")) return false; return etaDone(await hmRun("assign_frame_data", {objects: n, spring: v === "None" ? "" : v})); });
+}
+// Frame and Shell Assignment - Additional Mass: mass per length (area); Add to, Replace or Delete Existing Masses.
+async function etaAddedMass(shell) {
+  const u = hmU(), T = shell ? "Area Assignments - Additional Mass" : "Frame Assignments - Additional Mass", sel_ = () => hmSelected(shell ? "a" : "f");
+  const d = dialog((shell ? "Shell" : "Frame") + " Assignment - Additional Mass", `${etaCss}<div class="etaF"><fieldset><legend>${shell ? "Mass/Area" : "Frame Mass/Length"}</legend><div style="display:grid;grid-template-columns:100px 1fr;gap:6px;align-items:center;margin:4px 14px"><input id="mV" value="0"><span>${u.f}-s²/${u.l}${shell ? "³" : "²"}</span></div></fieldset>
+    <fieldset><legend>Options</legend><label><input type="radio" name="mO" value="add"> Add to Existing Masses</label><label><input type="radio" name="mO" value="replace" checked> Replace Existing Masses</label><label><input type="radio" name="mO" value="delete"> Delete Existing Masses</label></fieldset></div>`,
+    sapOkCloseApply(async d => {
+      const n = sel_(); if (!etaNeed(n, shell ? "shells" : "frames")) return false;
+      const how = q(d, "[name=mO]:checked").value, v = +(q(d, "#mV").value.trim() || 0); if (!isFinite(v) || v < 0) { formError(d, "The mass is a number, 0 or more."); return false; }
+      const got = await sapObjRows(n); if (!got) return false;
+      return sapSetEach(shell ? "assign_shell_data" : "assign_frame_data", n, o => {
+        if (how === "delete") return {[T]: []};
+        const x = v + (how === "add" ? +(((got.by[o] || {})[T] || [])[0] || {}).AddedMass || 0 : 0);
+        return {[T]: x ? [{AddedMass: String(+x.toPrecision(12))}] : []};
+      });
+    }), {width: 260});
+  d.querySelectorAll("[name=mO]").forEach(x => x.onchange = () => q(d, "#mV").disabled = q(d, "[name=mO]:checked").value === "delete");
+  return d;
+}
+// Frame and Shell Assignment - Pier Label and Spandrel Label: None and the labels.
+async function etaLabel(kind, shell) {
+  const f = await etaFirst(shell ? "a" : "f"), sel_ = () => hmSelected(shell ? "a" : "f");
+  const list = async () => ["None", ...((((await hmRun("structure_definitions", {}, true)).result || {})[kind === "pier" ? "piers" : "spandrels"]) || []).map(x => x.name)];
+  return etaListForm(`${shell ? "Shell" : "Frame"} Assignment - ${kind === "pier" ? "Pier" : "Spandrel"} Label`, kind === "pier" ? "Piers" : "Spandrels", list, f.o[kind] || "None", () => modelAct("st:" + kind),
+    async v => { const n = sel_(); if (!etaNeed(n, shell ? "shells" : "frames")) return false; return etaDone(await hmRun("assign_pier_spandrel_data", {objects: n, [kind]: v === "None" ? "" : v})); });
+}
+// Frame Assignment - Frame Auto Mesh Options: No Auto Meshing or Auto Mesh Frame Objects, and the Auto Meshing Parameters.
+async function etaFrameAutoMesh() {
+  const f = await etaFirst("f"), T = "Frame Assignments - Frame Auto Mesh Options", r = (f.t[T] || [])[0], u = hmU();
+  const d = dialog("Frame Assignment - Frame Auto Mesh Options", `${etaCss}<div class="etaF"><fieldset><legend>Mesh Options</legend><label><input type="radio" name="aM" value="no"> No Auto Meshing</label><label><input type="radio" name="aM" value="yes"> Auto Mesh Frame Objects</label></fieldset>
+    <fieldset><legend>Auto Meshing Parameters</legend><div style="display:grid;grid-template-columns:1fr 95px 24px;gap:6px;align-items:center">
+      <label style="grid-column:span 3"><input type="checkbox" id="aJ"> Mesh at Intermediate Joints</label><label style="grid-column:span 3"><input type="checkbox" id="aI"> Mesh at Intersections with Other Frames and Area Edges</label>
+      <label><input type="checkbox" id="aN"> Minimum Number of Segments</label><input id="aNV"><span></span><label><input type="checkbox" id="aL"> Maximum Segment Length</label><input id="aLV"><span>${u.l}</span></div></fieldset>
+    <button id="aR" class="mid" style="width:190px">Reset Form to Default Values</button></div>`,
+    etaTableApply("assign_frame_data", etaFrames, T, d => {
+      const on = q(d, "[name=aM]:checked").value === "yes", nn = q(d, "#aN").checked, ll = q(d, "#aL").checked, nv = q(d, "#aNV").value.trim(), lv = q(d, "#aLV").value.trim();
+      if (nn && !(Number.isInteger(+nv) && +nv > 0) || ll && !(+lv > 0)) { formError(d, "Give the number of segments (a whole number) and the length, over 0."); return false; }
+      const row = {AutoMesh: on ? "Yes" : "No", AtIntJoints: on && q(d, "#aJ").checked ? "Yes" : "No", AtIntersect: on && q(d, "#aI").checked ? "Yes" : "No", MinNumber: on && nn ? "Yes" : "No", NumSegments: on && nn ? String(+nv) : "", MaxLength: on && ll ? "Yes" : "No", SegLength: on && ll ? String(+lv) : ""};
+      const deflt = on && row.AtIntJoints === "Yes" && row.AtIntersect === "Yes" && row.MinNumber === "No" && row.MaxLength === "No";
+      return deflt ? [] : [row];
+    }), {width: 440});
+  const set = x => { q(d, `[name=aM][value=${x.AutoMesh === "No" ? "no" : "yes"}]`).checked = true; q(d, "#aJ").checked = x.AtIntJoints !== "No"; q(d, "#aI").checked = x.AtIntersect !== "No"; q(d, "#aN").checked = etaYes(x.MinNumber); q(d, "#aL").checked = etaYes(x.MaxLength); q(d, "#aNV").value = x.NumSegments || ""; q(d, "#aLV").value = x.SegLength || ""; sync(); };
+  const sync = () => {
+    const on = q(d, "[name=aM]:checked").value === "yes";
+    d.querySelectorAll("#aJ,#aI,#aN,#aL").forEach(x => x.disabled = !on);
+    for (const [b, v, dv] of [["#aN", "#aNV", "2"], ["#aL", "#aLV", hmU().l === "ft" ? "4" : "1.2"]]) { const k = on && q(d, b).checked; q(d, v).disabled = !k; if (!k) q(d, v).value = ""; else if (!q(d, v).value) q(d, v).value = dv; }
+  };
+  d.querySelectorAll("[name=aM],#aN,#aL").forEach(x => x.onchange = sync);
+  q(d, "#aR").onclick = () => set({});
+  set(r || {});
+  return d;
+}
+// Frame Assignment - Frame Floor Meshing Option: Program Determined, Include or Do Not Include Selected Frame Objects in Mesh.
+async function etaFrameFloorMesh() {
+  const f = await etaFirst("f"), T = "Frame Assignments - Frame Floor Meshing Option", v = ((f.t[T] || [])[0] || {}).MeshOption || "";
+  const now = /not/i.test(v) ? "no" : /include/i.test(v) ? "yes" : "pd";
+  return dialog("Frame Assignment - Frame Floor Meshing Option", `${etaCss}<div class="etaF"><fieldset><legend>Options for Inclusion in Analysis Mesh</legend>${[["pd", "Program Determined"], ["yes", "Include Selected Frame Objects in Mesh"], ["no", "Do Not Include Selected Frame Objects in Mesh"]].map(([k, l]) => `<label><input type="radio" name="fM" value="${k}" ${k === now ? "checked" : ""}> ${l}</label>`).join("")}</fieldset></div>`,
+    etaTableApply("assign_frame_data", etaFrames, T, d => { const k = q(d, "[name=fM]:checked").value; return k === "pd" ? [] : [{MeshOption: k === "yes" ? "Include in Mesh" : "Do Not Include in Mesh"}]; }), {width: 340});
+}
+// Frame Assignment - Moment Frame Beam Connection Type: Standard, Reduced Beam Section or SidePlate, the Connection
+// Location and the Reduced Beam Section Options (x1, x2, x3).
+async function etaBeamConnection() {
+  const f = await etaFirst("f"), T = "Frame Assignments - Moment Frame Beam Connection Type", r = (f.t[T] || [])[0] || {};
+  const type = /reduced|rbs/i.test(r.Type || "") ? "rbs" : /side/i.test(r.Type || "") ? "sp" : "std", loc = /^i/i.test(r.ConnLoc || "") ? "i" : /^j/i.test(r.ConnLoc || "") ? "j" : "both";
+  const rbs = /absolute/i.test(r.RBSOption || "") ? "abs" : /user/i.test(r.RBSOption || "") ? "ratio" : "def", sideOpts = ["PLUS SMF (R=8)", "MF (R=3)", "PLUS OMF (R=3.5)", "PLUS IMF (R=4.5)", "Welded SMF (R=8)"];
+  const pic = `<svg width="270" height="120" viewBox="0 0 270 120"><g fill="none" stroke="#333"><rect x="8" y="10" width="16" height="100" fill="url(#hh)"/><rect x="58" y="10" width="12" height="100"/><path d="M24 58h34M24 64h34"/><path d="M70 22h40l14 12h34l14-12h120M70 98h40l14-12h34l14 12h120M70 58h196" stroke-dasharray="4 3"/><path d="M262 10l-6 8 6 8"/></g>
+    <defs><pattern id="hh" width="6" height="6" patternUnits="userSpaceOnUse"><path d="M0 6L6 0" stroke="#333"/></pattern></defs><text x="78" y="12" font-size="12">a</text><text x="132" y="12" font-size="12">b</text><path d="M70 16h40M110 16h48" stroke="#333" marker-end=""/><text x="136" y="110" font-size="12">c</text></svg>`;
+  const d = dialog("Frame Assignment - Moment Frame Beam Connection Type", `${etaCss}<div class="etaF"><div style="display:grid;grid-template-columns:1fr 290px;gap:0 12px">
+    <fieldset><legend>Moment Frame Beam Connection Type</legend><div style="display:grid;grid-template-columns:1fr 1fr;align-items:center"><label><input type="radio" name="cT" value="std"> Standard Moment Connection</label><label><input type="radio" name="cT" value="rbs"> Reduced Beam Section</label>
+      <label><input type="radio" name="cT" value="sp"> SidePlate® Option</label><span style="display:flex;gap:6px;align-items:center"><select id="cS" style="width:200px">${opts(sideOpts, r.SidePlOpt || sideOpts[0])}</select><span title="SidePlate Systems, Inc. www.sideplate.com" style="color:#1f5fbf">&#9432;</span></span></div></fieldset>
+    <fieldset id="cLF"><legend>Connection Location</legend><div style="display:grid;grid-template-columns:1fr 1fr"><label><input type="radio" name="cL" value="both"> Both Ends</label><label><input type="radio" name="cL" value="i"> I-End Only</label><label><input type="radio" name="cL" value="j"> J-End Only</label></div></fieldset>
+    <fieldset id="cRF"><legend>Reduced Beam Section Options</legend><div style="display:grid;grid-template-columns:1.6fr 0.8fr 0.8fr 0.8fr;gap:6px;align-items:center">
+      <label><input type="radio" name="cR" value="def"> Program Defaults:</label><span>a = 0.625 bf</span><span>b = 0.75 db</span><span>c = 0.20 bf</span>
+      <label><input type="radio" name="cR" value="ratio"> User Specify x1,&nbsp; x2 and x3 where:</label><span>a = x1 * bf</span><span>b = x2 * db</span><span>c = x3 * bf</span>
+      <label><input type="radio" name="cR" value="abs"> User Specify x1,&nbsp; x2 and x3 where:</label><span>a = x1</span><span>b = x2</span><span>c = x3</span></div>
+      <div style="display:flex;gap:14px;margin-top:8px">${[1, 2, 3].map(i => `<span style="display:flex;gap:6px;align-items:center">x${i}<input id="cX${i}" style="width:110px"></span>`).join("")}</div></fieldset>
+    <fieldset style="display:flex;align-items:center;justify-content:center"><div id="cPic"></div></fieldset></div></div>`,
+    etaTableApply("assign_frame_data", etaFrames, T, d => {
+      const t = q(d, "[name=cT]:checked").value; if (t === "std") return [];
+      const l = q(d, "[name=cL]:checked").value, row = {Type: t === "rbs" ? "Reduced Beam Section" : "SidePlate", ConnLoc: l === "i" ? "I-End Only" : l === "j" ? "J-End Only" : "Both Ends", SidePlOpt: t === "sp" ? q(d, "#cS").value : "", RBSOption: "", x1: "", x2: "", x3: "", a: "", b: "", c: ""};
+      if (t === "rbs") {
+        const o = q(d, "[name=cR]:checked").value; row.RBSOption = o === "def" ? "Program Defaults" : o === "ratio" ? "User Ratios" : "User Absolute";
+        if (o !== "def") for (const i of [1, 2, 3]) { const v = q(d, "#cX" + i).value.trim(); if (!(+v > 0)) { formError(d, "x1, x2 and x3 are numbers over 0."); return false; } row["x" + i] = String(+v); }
+      }
+      return [row];
+    }), {width: 880});
+  q(d, `[name=cT][value=${type}]`).checked = true; q(d, `[name=cL][value=${loc}]`).checked = true; q(d, `[name=cR][value=${rbs}]`).checked = true;
+  [1, 2, 3].forEach(i => q(d, "#cX" + i).value = r["x" + i] || "");
+  const sync = () => {
+    const t = q(d, "[name=cT]:checked").value, o = q(d, "[name=cR]:checked").value;
+    q(d, "#cS").disabled = t !== "sp"; d.querySelectorAll("[name=cL]").forEach(x => x.disabled = t === "std"); q(d, "#cLF").classList.toggle("dis", t === "std");
+    d.querySelectorAll("[name=cR]").forEach(x => x.disabled = t !== "rbs"); q(d, "#cRF").classList.toggle("dis", t !== "rbs");
+    [1, 2, 3].forEach(i => { const on = t === "rbs" && o !== "def", b = q(d, "#cX" + i); b.disabled = !on; if (!on) b.value = ""; else if (!b.value) b.value = o === "ratio" ? ["0.625", "0.75", "0.2"][i - 1] : ""; });
+    q(d, "#cPic").innerHTML = t === "sp" ? `<div style="text-align:center">SidePlate Systems, Inc.<br>www.sideplate.com</div>` : pic;
+  };
+  d.querySelectorAll("[name=cT],[name=cR]").forEach(x => x.onchange = sync); sync();
+  return d;
+}
+// Assign Column Splice Overwrites to Column Objects: From Story Data (Default), No Splice, or a height above the story.
+async function etaColumnSplice() {
+  const f = await etaFirst("f"), T = "Frame Assignments - Column Splice Overwrites", r = (f.t[T] || [])[0] || {}, u = hmU();
+  const now = /no splice/i.test(r.SpliceOpt || "") ? "no" : /height/i.test(r.SpliceOpt || "") ? "h" : "story";
+  const d = dialog("Assign Column Splice Overwrites to Column Objects", `${etaCss}<div class="etaF"><fieldset><legend>Options</legend><label><input type="radio" name="pO" value="story" ${now === "story" ? "checked" : ""}> From Story Data (Default)</label><label><input type="radio" name="pO" value="no" ${now === "no" ? "checked" : ""}> No Splice</label>
+    <div style="display:grid;grid-template-columns:1fr 100px 24px;gap:6px;align-items:center"><label><input type="radio" name="pO" value="h" ${now === "h" ? "checked" : ""}> Splice at this Height Above Story at Bottom of Column Object</label><input id="pH" value="${esc(r.SpliceHt || "")}"><span>${u.l}</span></div></fieldset></div>`,
+    etaTableApply("assign_frame_data", () => etaFrames(), T, d => {
+      const o = q(d, "[name=pO]:checked").value; if (o === "story") return [];
+      if (o === "no") return [{SpliceOpt: "No Splice", SpliceHt: ""}];
+      const h = q(d, "#pH").value.trim(); if (!(+h >= 0) || h === "") { formError(d, "The height is a length, 0 or more."); return false; }
+      return [{SpliceOpt: "Splice at Height", SpliceHt: String(+h)}];
+    }), {width: 570});
+  const sync = () => { const h = q(d, "[name=pO]:checked").value === "h"; q(d, "#pH").disabled = !h; if (!h) q(d, "#pH").value = ""; else if (!q(d, "#pH").value) q(d, "#pH").value = String(hmU().l === "ft" ? 4 : 1.2); };
+  d.querySelectorAll("[name=pO]").forEach(x => x.onchange = sync); sync();
+  return d;
+}
+// Frame Assignment - Nonprismatic Property Parameters: Default Parameters or Advanced User Specified Parameters.
+async function etaNonprismatic() {
+  const f = await etaFirst("f"), T = "Frame Assignments - Advanced Nonprismatic Section Parameters", r = (f.t[T] || [])[0], u = hmU();
+  const d = dialog("Frame Assignment - Nonprismatic Property Parameters", `${etaCss}<div class="etaF"><fieldset><legend>Parameters</legend><label><input type="radio" name="nP" value="d" ${r ? "" : "checked"}> Default Parameters</label><label><input type="radio" name="nP" value="a" ${r ? "checked" : ""}> Advanced User Specified Parameters</label>
+    <div style="display:grid;grid-template-columns:1fr 95px 24px;gap:4px 6px;align-items:center;margin-left:30px"><span>Total Nonprismatic Section Clear Length</span><input id="nL" value="${esc((r || {}).ClearLength || "")}"><span>${u.l}</span><span>Relative Distance along the Nonprismatic Section to the</span><input id="nR" value="${esc((r || {}).RelDist || "")}"><span></span></div></fieldset></div>`,
+    etaTableApply("assign_frame_data", etaFrames, T, d => {
+      if (q(d, "[name=nP]:checked").value === "d") return [];
+      const l = q(d, "#nL").value.trim(), x = q(d, "#nR").value.trim();
+      if (!(+l > 0) || !(+x >= 0 && +x <= 1) || x === "") { formError(d, "The clear length is over 0 and the relative distance from 0 to 1."); return false; }
+      return [{ClearLength: String(+l), RelDist: String(+x)}];
+    }), {width: 580});
+  const sync = () => { const a = q(d, "[name=nP]:checked").value === "a"; q(d, "#nL").disabled = q(d, "#nR").disabled = !a; if (!a) q(d, "#nL").value = q(d, "#nR").value = ""; else { if (!q(d, "#nL").value) q(d, "#nL").value = String(+(etaLen(etaFrames()[0]) || 0).toPrecision(6)); if (!q(d, "#nR").value) q(d, "#nR").value = "0"; } };
+  d.querySelectorAll("[name=nP]").forEach(x => x.onchange = sync); sync();
+  return d;
+}
+// Frame and Shell Assignment - Material Overwrite: the materials and None.
+async function etaMaterialOverwrite(shell) {
+  const f = await etaFirst(shell ? "a" : "f"), T = (shell ? "Area" : "Frame") + " Assignments - Material Overwrites", now = ((f.t[T] || [])[0] || {}).Material || "None";
+  const list = async () => { hm.defs = null; return [...(await hmDefs()).materials.map(m => m.name), "None"]; };
+  return etaListForm(`${shell ? "Shell" : "Frame"} Assignment - Material Overwrite`, "Materials", list, now, () => modelAct("materials"),
+    async v => { const n = hmSelected(shell ? "a" : "f"); if (!etaNeed(n, shell ? "shells" : "frames")) return false; return etaDone(await hmRun(shell ? "assign_shell_data" : "assign_frame_data", {objects: n, tables: {[T]: v === "None" ? [] : [{Material: v}]}})); });
+}
+// Frame (Column/Brace) and Wall Rebar Ratio for Creep Analysis: From Design or a User Specified Ratio.
+async function etaCreep(shell) {
+  const f = await etaFirst(shell ? "a" : "f"), T = shell ? "Area Assignments - Wall Rebar Ratio for Creep Analysis" : "Frame Assignments - Rebar Ratio For Creep Analysis", r = (f.t[T] || [])[0];
+  const d = dialog((shell ? "Shell" : "Frame") + " Assignment - " + (shell ? "Wall " : "") + "Rebar Ratio for Creep Analysis", `${etaCss}<div class="etaF"><fieldset><legend>${shell ? "Vertical" : "Longitudinal"} Rebar Ratio</legend><div style="display:grid;grid-template-columns:1fr 90px;gap:6px;align-items:center">
+    <label><input type="radio" name="cR" value="d" ${r ? "" : "checked"}> From Design</label><span></span><label><input type="radio" name="cR" value="u" ${r ? "checked" : ""}> User Specified Ratio</label><input id="cV" value="${esc((r || {}).UserRatio || "")}"></div></fieldset></div>`,
+    etaTableApply(shell ? "assign_shell_data" : "assign_frame_data", () => hmSelected(shell ? "a" : "f"), T, d => {
+      if (q(d, "[name=cR]:checked").value === "d") return [];
+      const v = q(d, "#cV").value.trim(); if (!(+v >= 0 && +v < 1) || v === "") { formError(d, "The ratio is from 0 to 1."); return false; }
+      return [{[shell ? "RebarOption" : "RebarOpt"]: "User", UserRatio: String(+v)}];
+    }), {width: 330});
+  const sync = () => { const u = q(d, "[name=cR]:checked").value === "u"; q(d, "#cV").disabled = !u; if (!u) q(d, "#cV").value = ""; else if (!q(d, "#cV").value) q(d, "#cV").value = "0.01"; };
+  d.querySelectorAll("[name=cR]").forEach(x => x.onchange = sync); sync();
+  return d;
+}
+// Assign Floor Cracking Option to Beam (Slab) Objects.
+async function etaCracking(shell) {
+  const f = await etaFirst(shell ? "a" : "f"), T = (shell ? "Area" : "Frame") + " Assignments - Floor Cracking", on = etaYes(((f.t[T] || [])[0] || {}).Consider);
+  return dialog(`Assign Floor Cracking Option to ${shell ? "Slab" : "Beam"} Objects`, `${etaCss}<div class="etaF"><fieldset style="padding:14px"><label><input type="checkbox" id="kC" ${on ? "checked" : ""}> Consider Selected ${shell ? "Slab" : "Beam"} Objects in Floor Cracking Analysis</label></fieldset></div>`,
+    etaTableApply(shell ? "assign_shell_data" : "assign_frame_data", () => hmSelected(shell ? "a" : "f"), T, d => q(d, "#kC").checked ? [{Consider: "Yes"}] : []), {width: 390});
+}
+Object.assign(etaAssignForms, {
+  fSection: etaFrameSection, fModifiers: etaFrameModifiers, fReleases: etaFrameReleases, fOffsets: etaFrameOffsets, fInsertion: etaFrameInsertion, fAxes: etaFrameAxes, fStations: etaFrameStations,
+  fTCLimits: etaFrameTC, fSprings: etaFrameSprings, fMass: () => etaAddedMass(false), fPier: () => etaLabel("pier", false), fSpandrel: () => etaLabel("spandrel", false), fAutoMesh: etaFrameAutoMesh,
+  fFloorMesh: etaFrameFloorMesh, fBeamConn: etaBeamConnection, fSplice: etaColumnSplice, fNonprismatic: etaNonprismatic, fMaterial: () => etaMaterialOverwrite(false), fCreep: () => etaCreep(false), fCracking: () => etaCracking(false),
+  aMass: () => etaAddedMass(true), aPier: () => etaLabel("pier", true), aSpandrel: () => etaLabel("spandrel", true), aMaterial: () => etaMaterialOverwrite(true), aCreep: () => etaCreep(true), aCracking: () => etaCracking(true),
+});
+
+// ---- ETABS 23.2's Assign > Shell > Wall Hinge... and Reinforcement for Wall Hinge... (pictures Assign/Shell). ----
+// A Vertical Shear Wall hinge is a row of "Area Assignments - Wall Hinge - Auto Fiber PM3"; a General Shear Wall hinge a
+// row of "Area Assignments - Wall Hinges". The rows go to ETABS's own tables, like the program keeps them.
+const etaWH = {V: "Area Assignments - Wall Hinge - Auto Fiber PM3", G: "Area Assignments - Wall Hinges", R: "Area Assignments - Wall Hinge Reinforcement", auto: "Auto Fiber P-M3"};
+async function etaWallHinge() {
+  const n0 = hmSelected("a"), rd = async () => (await etaFirst("a")).t;
+  let list = [];
+  const d = dialog("Shell Assignment - Hinges", `${etaCss}<div class="etaF">
+    <fieldset><legend>Wall Hinge Type</legend><div style="display:flex;gap:60px;margin:4px 14px"><label><input type="radio" name="whT" value="V" checked> Vertical Shear Wall</label><label><input type="radio" name="whT" value="G"> General Shear Wall</label></div></fieldset>
+    <fieldset id="whA" style="display:none"><legend>Hinge Aligned With</legend><div style="display:flex;gap:60px;margin:4px 14px"><label><input type="radio" name="whA" value="Global" checked> Global Axes</label><label><input type="radio" name="whA" value="Local"> Wall Object Local Axes</label></div></fieldset>
+    <fieldset><legend>Shell Hinge Assignment Data</legend>
+      <div id="whV"><div style="display:grid;grid-template-columns:230px 1fr;gap:6px 20px;align-items:start"><div style="text-align:center">Hinge Property<select id="whP" style="width:100%">${opts([etaWH.auto], etaWH.auto)}</select><select id="whL" size="7" style="width:100%;height:110px"></select></div>
+        <div style="padding-top:22px"><button id="whAdd" style="width:60px">Add</button><br><br><button id="whDel" style="width:60px">Delete</button></div></div></div>
+      <div id="whG" style="display:none"><div style="display:grid;grid-template-columns:120px 210px;gap:8px 10px;align-items:center;margin:4px 10px"><span>Direction</span><span style="text-align:center">Nonlinear Properties</span>
+        <span id="whG1">Vertical P-M3</span><select id="whS1">${opts(["None", etaWH.auto], "None")}</select><span id="whG2">Horizontal P-M3</span><select id="whS2">${opts(["None", etaWH.auto], "None")}</select><span>Shear Material</span><select id="whS3">${opts(["None"], "None")}</select></div>
+        <div style="display:flex;gap:10px;align-items:center;margin:14px 0 4px" class="dis"><span style="flex:1;color:#999">Rotation about Wall Object 3-axis</span><input id="whRot" disabled style="width:90px"><span style="color:#999">deg</span></div></div>
+      <label style="margin-top:10px"><input type="checkbox" id="whF" checked> Save Individual Fiber Response for Fiber Hinges</label></fieldset>
+    <fieldset><legend>Options</legend><label><input type="radio" name="whO" value="add"> Add Specified Assigns to Existing Assigns</label><label><input type="radio" name="whO" value="rep" checked> Replace Existing Assigns with Specified Assigns</label></fieldset>
+    <button id="whFill" class="mid" style="width:300px" ${n0.length ? "" : "disabled"}>Fill Form with Selected Area Object Assignment</button></div>`,
+    sapOkCloseApply(async d => {
+      const n = hmSelected("a"); if (!etaNeed(n, "shells")) return false;
+      const g = q(d, "[name=whT]:checked").value === "G", add = q(d, "[name=whO]:checked").value === "add", fib = q(d, "#whF").checked ? "Yes" : "No";
+      const p = await sapObjRows(n), out = {};
+      for (const o of p.pd.objects || []) {
+        const t = o.tables || {}, rows = {};
+        if (g) {
+          const loc = q(d, "[name=whA]:checked").value === "Local", s1 = q(d, "#whS1").value, s2 = q(d, "#whS2").value, s3 = q(d, "#whS3").value, was = add ? (t[etaWH.G] || [])[0] || {} : {};
+          const pick = (k, v) => v !== "None" ? v : was[k] || "None";
+          rows[etaWH.G] = [{AlignedWith: loc ? "Wall Object Local Axes" : "Global Axes", VertPM3: loc ? "None" : pick("VertPM3", s1), HorizPM3: loc ? "None" : pick("HorizPM3", s2), S11PM3: loc ? pick("S11PM3", s1) : "None", S22PM3: loc ? pick("S22PM3", s2) : "None", ShearMat: pick("ShearMat", s3), SaveFibResp: fib}];
+          if (!add) rows[etaWH.V] = [];
+        } else {
+          if (!list.length && add) continue;
+          rows[etaWH.V] = list.length ? list.map(h => ({HingeProp: h, HingeType: etaWH.auto, SaveFibResp: fib})) : [];
+          if (!add) rows[etaWH.G] = [];
+        }
+        out[o.name] = rows;
+      }
+      for (const [name, tables] of Object.entries(out)) if (!etaDone(await hmRun("assign_shell_data", {objects: [name], tables}))) return false;
+      return true;
+    }), {width: 470});
+  const paintL = () => { q(d, "#whL").innerHTML = opts(list, list[list.length - 1]); q(d, "#whDel").disabled = !list.length; };
+  const sync = () => { const g = q(d, "[name=whT]:checked").value === "G", loc = q(d, "[name=whA]:checked").value === "Local"; q(d, "#whV").style.display = g ? "none" : ""; q(d, "#whG").style.display = q(d, "#whA").style.display = g ? "" : "none"; q(d, "#whG1").textContent = loc ? "S11 P-M3" : "Vertical P-M3"; q(d, "#whG2").textContent = loc ? "S22 P-M3" : "Horizontal P-M3"; };
+  d.querySelectorAll("[name=whT],[name=whA]").forEach(x => x.onchange = sync);
+  q(d, "#whAdd").onclick = () => { const v = q(d, "#whP").value; if (!list.includes(v)) list.push(v); paintL(); };
+  q(d, "#whDel").onclick = () => { const v = q(d, "#whL").value; list = list.filter(x => x !== v); paintL(); };
+  q(d, "#whFill").onclick = async () => {
+    const t = await rd(), g = (t[etaWH.G] || [])[0], v = t[etaWH.V] || [];
+    if (g) { q(d, `[name=whT][value=G]`).checked = true; const loc = /local/i.test(g.AlignedWith || ""); q(d, `[name=whA][value=${loc ? "Local" : "Global"}]`).checked = true; q(d, "#whS1").value = (loc ? g.S11PM3 : g.VertPM3) || "None"; q(d, "#whS2").value = (loc ? g.S22PM3 : g.HorizPM3) || "None"; q(d, "#whF").checked = !/^no$/i.test(g.SaveFibResp || ""); }
+    else { q(d, `[name=whT][value=V]`).checked = true; list = v.map(r => r.HingeProp || etaWH.auto); if (v[0]) q(d, "#whF").checked = !/^no$/i.test(v[0].SaveFibResp || ""); }
+    sync(); paintL();
+  };
+  paintL(); sync();
+  return d;
+}
+
+// Wall Hinge Reinforcement Selection: From Current Design, Uniform Rebar Ratio (vertical and horizontal ratio and
+// material), or Specified Rebar Layout (More... opens Wall Hinge Reinforcement with the Pier or Spandrel layout).
+async function etaWallHingeRebar() {
+  const n0 = hmSelected("a"), f = await etaFirst("a"), r0 = (f.t[etaWH.R] || [])[0] || {}, defs = await hmDefs();
+  const mats = defs.materials.filter(m => /rebar/i.test(m.type)).map(m => m.name), m0 = mats[0] || "";
+  const opt0 = /uniform/i.test(r0.ReinfOption || "") ? "u" : /specified|layout/i.test(r0.ReinfOption || "") ? "s" : "d";
+  let lay = opt0 === "s" ? {...r0} : null;
+  const d = dialog("Wall Hinge Reinforcement Selection", `${etaCss}<div class="etaF"><fieldset style="padding:10px 14px">
+    <div style="display:grid;grid-template-columns:150px 95px 115px;gap:6px 8px;align-items:center">
+      <label style="grid-column:span 3"><input type="radio" name="wrO" value="d" ${opt0 === "d" ? "checked" : ""}> From Current Design</label>
+      <label style="grid-column:span 3"><input type="radio" name="wrO" value="u" ${opt0 === "u" ? "checked" : ""}> Uniform Rebar Ratio:</label>
+      <span></span><span style="text-align:center">Rebar Ratio</span><span style="text-align:center">Rebar Material</span>
+      <span style="padding-left:30px">Vertical Rebar</span><input id="wrV" value="${esc(r0.VertRebar || "2.500E-03")}"><select id="wrVM">${opts(mats, r0.VertRebarMat || m0)}</select>
+      <span style="padding-left:30px">Horizontal Rebar</span><input id="wrH" value="${esc(r0.HorizRebar || "2.500E-03")}"><select id="wrHM">${opts(mats, r0.HorizRebarMat || m0)}</select>
+      <label><input type="radio" name="wrO" value="s" ${opt0 === "s" ? "checked" : ""}> Specified Rebar Layout</label><button id="wrM">More...</button><span></span></div></fieldset></div>`,
+    sapOkCloseApply(async d => {
+      const n = hmSelected("a"); if (!etaNeed(n, "shells")) return false;
+      const o = q(d, "[name=wrO]:checked").value;
+      if (o === "d") return etaDone(await hmRun("assign_shell_data", {objects: n, tables: {[etaWH.R]: []}}));
+      if (o === "u") {
+        const v = q(d, "#wrV").value.trim(), h = q(d, "#wrH").value.trim();
+        if (!(+v >= 0 && +v < 1) || !(+h >= 0 && +h < 1) || v === "" || h === "") { formError(d, "Each rebar ratio is from 0 to 1."); return false; }
+        return etaDone(await hmRun("assign_shell_data", {objects: n, tables: {[etaWH.R]: [{ReinfOption: "Uniform Rebar Ratio", VertRebar: String(+v), VertRebarMat: q(d, "#wrVM").value, HorizRebar: String(+h), HorizRebarMat: q(d, "#wrHM").value}]}}));
+      }
+      if (!lay) { formError(d, "Click More... to give the rebar layout."); return false; }
+      return etaDone(await hmRun("assign_shell_data", {objects: n, tables: {[etaWH.R]: [{...lay, ReinfOption: "Specified Rebar Layout"}]}}));
+    }), {width: 470});
+  const sync = () => { const o = q(d, "[name=wrO]:checked").value; ["#wrV", "#wrVM", "#wrH", "#wrHM"].forEach(s => q(d, s).disabled = o !== "u"); q(d, "#wrM").disabled = o !== "s"; };
+  d.querySelectorAll("[name=wrO]").forEach(x => x.onchange = sync); sync();
+  // ETABS greys OK and Apply until shells are selected.
+  if (!n0.length) d.querySelectorAll("button").forEach(b => { if (/^(OK|Apply)$/.test(b.textContent.trim())) b.disabled = true; });
+  q(d, "#wrM").onclick = async () => { const got = await etaWallHingeLayout(lay || r0, mats); if (got) lay = got; };
+  return d;
+}
+// Wall Hinge Reinforcement: Wall Design Type Pier or Spandrel, materials and cover, the wall geometry, and the
+// flexural and shear/confinement details of each zone, as ETABS 23.2 shows them.
+async function etaWallHingeLayout(r, mats) {
+  const s = etaSmall(), dd = (await hmRun("definition_data", {}, true)).result || {rebar_sizes: []}, bars = (dd.rebar_sizes || []).map(b => b.name);
+  const bar = (v, want) => opts(bars, v && bars.includes(v) ? v : bars.includes(want) ? want : bars[0]);
+  const a = areas.find(x => x.name === hmSelected("a")[0]), low = a ? a.pts.filter(p => Math.abs(p[2] - Math.min(...a.pts.map(q => q[2]))) < 1e-6) : [];
+  const p1 = low[0] || [0, 0, 0], p2 = low[low.length - 1] || p1, L = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]), th = a && slabT[a.section] || 0;
+  const S = v => v === undefined || v === "" ? "" : String(s.out(+v)), M = v => String(s.in(+v));
+  const z0 = s.out(L / 6), sp = r.WallDesignType === "Spandrel";
+  const cell = (id, v, ro) => `<input id="${id}" value="${esc(v)}" ${ro ? "readonly style='background:#eee'" : ""}>`;
+  const yn = (id, v) => `<select id="${id}">${opts(["Yes", "No"], v)}</select>`;
+  const g = (cols, rows) => `<table class="list" style="width:100%"><tr>${cols.map(c => `<th>${c}</th>`).join("")}</tr>${rows.map(rr => `<tr>${rr.map(c => `<td>${c}</td>`).join("")}</tr>`).join("")}</table>`;
+  return new Promise(done => {
+    const d = dialog("Wall Hinge Reinforcement", `${etaCss}<div class="etaF"><div style="display:grid;grid-template-columns:230px 1fr;gap:8px">
+      <div><fieldset><legend>Wall Design Type</legend><label><input type="radio" name="wlT" value="Pier" ${sp ? "" : "checked"}> Pier</label><label><input type="radio" name="wlT" value="Spandrel" ${sp ? "checked" : ""}> Spandrel</label></fieldset>
+      <fieldset><legend>Rebar Material and Clear Cover</legend><div style="display:grid;grid-template-columns:100px 1fr 24px;gap:6px;align-items:center"><span>Material Flexure</span><select id="wlMF">${opts(mats, r.RebarMatFlex || mats[0])}</select><span></span><span>Material Shear</span><select id="wlMS">${opts(mats, r.RebarMatShear || mats[0])}</select><span></span>
+        <span class="wlP">Bar Clear Cover</span><input class="wlP" id="wlC" value="${esc(S(r.ClearCover) || "1.5")}"><span class="wlP">${s.unit}</span></div></fieldset></div>
+      <fieldset><legend>Rebar Layout</legend><svg id="wlSvg" viewBox="0 0 400 190" style="width:100%;height:190px;background:#fff;border:1px solid #999"></svg></fieldset></div>
+      <fieldset class="wlP"><legend>Geometry</legend>${g([`Start X (${hmU().l})`, `Start Y (${hmU().l})`, `End X (${hmU().l})`, `End Y (${hmU().l})`, `Length (${hmU().l})`, `Thickness (${s.unit})`, `Start Zone Size (${s.unit})`, `End Zone Size (${s.unit})`],
+        [[cell("wlX1", +p1[0].toPrecision(8), 1), cell("wlY1", +p1[1].toPrecision(8), 1), cell("wlX2", +p2[0].toPrecision(8), 1), cell("wlY2", +p2[1].toPrecision(8), 1), cell("wlL", +L.toPrecision(8), 1), cell("wlTh", +s.out(th).toPrecision(6), 1), cell("wlZS", S(r.StartZoneSize) || +z0.toPrecision(6)), cell("wlZE", S(r.EndZoneSize) || +z0.toPrecision(6))]])}</fieldset>
+      <fieldset><legend>Reinforcement</legend>
+        <div class="wlP" style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div><b style="color:#1f3fbf;font-weight:normal">Flexural Detail - Each Face</b>${g(["Station", "Bar Size", `Bar Spacing (${s.unit})`, "Number of Bars"], [
+            ["Start", `<select id="wlFbS">${bar(r.FlexBarSizeS, "#8")}</select>`, "", cell("wlFnS", r.FlexNumBarsS || "11")],
+            ["Center", `<select id="wlFbC">${bar(r.FlexBarSizeC, "#5")}</select>`, cell("wlFsC", S(r.FlexBarSpacingC) || "12"), ""],
+            ["End", `<select id="wlFbE">${bar(r.FlexBarSizeE, "#8")}</select>`, "", cell("wlFnE", r.FlexNumBarsE || "11")]])}
+          <b style="color:#1f3fbf;font-weight:normal">Shear/Confinement Detail</b>${g(["Station", "Bar Size", `Bar Spacing (${s.unit})`, "Confined"], [
+            ["Start", `<select id="wlSbS">${bar(r.ShearBarSizeS, "#5")}</select>`, cell("wlSsS", S(r.ShearBarSpacingS) || "6"), yn("wlScS", r.ShearRebarConfinedS || "Yes")],
+            ["Center", `<select id="wlSbC">${bar(r.ShearBarSizeC, "#5")}</select>`, cell("wlSsC", S(r.ShearBarSpacingC) || "12"), yn("wlScC", r.ShearRebarConfinedC || "No")],
+            ["End", `<select id="wlSbE">${bar(r.ShearBarSizeE, "#5")}</select>`, cell("wlSsE", S(r.ShearBarSpacingE) || "6"), yn("wlScE", r.ShearRebarConfinedE || "Yes")]])}</div>
+          <div><b style="color:#1f3fbf;font-weight:normal">Flexural Detail (Additional Individual Bars)</b>${g(["Material", `Distance (${s.unit})`, `Area (${s.unit}2)`], [[`<select>${opts(["", ...mats], "")}</select>`, "<input>", "<input>"]])}</div></div>
+        <div class="wlS" style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div><b style="color:#1f3fbf;font-weight:normal">Flexural Detail</b>${g(["Location", "Bar Size", "Number of Bars", `Cover to Centroid (${s.unit})`], [
+            ["Top", `<select id="wlTb">${bar(r.FlexBarSizeT, "#8")}</select>`, cell("wlTn", r.FlexNumBarsT || "12"), cell("wlTc", S(r.CoverToCenterT) || "3.625")],
+            ["Bottom", `<select id="wlBb">${bar(r.FlexBarSizeB, "#8")}</select>`, cell("wlBn", r.FlexNumBarsB || "12"), cell("wlBc", S(r.CoverToCenterB) || "3.625")]])}</div>
+          <div><b style="color:#1f3fbf;font-weight:normal">Shear Detail</b>${g(["Bar Size", `Bar Spacing (${s.unit})`], [[`<select id="wlSpb">${bar(r.ShearBarSizeSpand, "#5")}</select>`, cell("wlSps", S(r.ShearBarSpacingSpand) || "6")]])}</div></div></fieldset></div>`,
+      [["OK", d => {
+        const v = id => q(d, "#" + id).value.trim(), num = id => +v(id), bad = [];
+        const pier = q(d, "[name=wlT]:checked").value === "Pier";
+        const row = {WallDesignType: pier ? "Pier" : "Spandrel", RebarMatFlex: v("wlMF"), RebarMatShear: v("wlMS")};
+        if (pier) {
+          for (const id of ["wlC", "wlZS", "wlZE", "wlFsC", "wlSsS", "wlSsC", "wlSsE"]) if (!(num(id) > 0)) bad.push(id);
+          for (const id of ["wlFnS", "wlFnE"]) if (!(Number.isInteger(num(id)) && num(id) >= 0)) bad.push(id);
+          Object.assign(row, {ClearCover: M(v("wlC")), StartZoneSize: M(v("wlZS")), EndZoneSize: M(v("wlZE")), FlexBarSizeS: v("wlFbS"), FlexNumBarsS: v("wlFnS"), FlexBarSizeC: v("wlFbC"), FlexBarSpacingC: M(v("wlFsC")), FlexBarSizeE: v("wlFbE"), FlexNumBarsE: v("wlFnE"),
+            ShearBarSizeS: v("wlSbS"), ShearBarSpacingS: M(v("wlSsS")), ShearRebarConfinedS: v("wlScS"), ShearBarSizeC: v("wlSbC"), ShearBarSpacingC: M(v("wlSsC")), ShearRebarConfinedC: v("wlScC"), ShearBarSizeE: v("wlSbE"), ShearBarSpacingE: M(v("wlSsE")), ShearRebarConfinedE: v("wlScE")});
+        } else {
+          for (const id of ["wlTc", "wlBc", "wlSps"]) if (!(num(id) > 0)) bad.push(id);
+          for (const id of ["wlTn", "wlBn"]) if (!(Number.isInteger(num(id)) && num(id) >= 0)) bad.push(id);
+          Object.assign(row, {FlexBarSizeT: v("wlTb"), FlexNumBarsT: v("wlTn"), CoverToCenterT: M(v("wlTc")), FlexBarSizeB: v("wlBb"), FlexNumBarsB: v("wlBn"), CoverToCenterB: M(v("wlBc")), ShearBarSizeSpand: v("wlSpb"), ShearBarSpacingSpand: M(v("wlSps"))});
+        }
+        if (bad.length) { formError(d, "Sizes, covers and spacings are over 0, and bar counts whole numbers."); return false; }
+        done(row); return true;
+      }], ["Cancel", () => { done(null); return true; }]], {width: 900});
+    const draw = () => {
+      const pier = q(d, "[name=wlT]:checked").value === "Pier", svg = q(d, "#wlSvg"), ln = (x1, y1, x2, y2, c) => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${c}" stroke-width="1"/>`;
+      let h = "";
+      if (pier) { h += `<rect x="60" y="20" width="280" height="10" fill="none" stroke="#000"/><rect x="60" y="70" width="280" height="90" fill="none" stroke="#000"/>`; for (let i = 0; i <= 28; i++) h += ln(60 + i * 10, 70, 60 + i * 10, 160, i < 5 || i > 23 ? "#c00" : "#c00"); for (let j = 0; j <= 9; j++) h += ln(60, 70 + j * 10, 340, 70 + j * 10, "#080"); }
+      else { h += `<rect x="70" y="40" width="250" height="110" fill="none" stroke="#000"/>`; for (let i = 0; i <= 40; i++) h += ln(76 + i * 6, 46, 76 + i * 6, 144, "#080"); h += ln(72, 48, 318, 48, "#c00") + ln(72, 142, 318, 142, "#c00") + `<rect x="355" y="40" width="10" height="110" fill="none" stroke="#000"/>`; }
+      svg.innerHTML = h;
+      d.querySelectorAll(".wlP").forEach(x => x.style.display = pier ? "" : "none"); d.querySelectorAll(".wlS").forEach(x => x.style.display = pier ? "none" : "");
+    };
+    d.querySelectorAll("[name=wlT]").forEach(x => x.onchange = draw); draw();
+  });
+}
+Object.assign(etaAssignForms, {aWallHinge: etaWallHinge, aWallHingeRebar: etaWallHingeRebar});
+
+// ---- ETABS 23.2's Display menu (pictures Display/00-03): its items in its order, greyed as ETABS greys them until
+// the results they show are there. ----
+function etaDisplayMenu(has) {
+  const hist = has(/timehistory|historycase|plotfunction/);
+  return [["Undeformed Shape", "r:model", "F4"], ["Load Assigns", [["Joint...", "edl:joint"], ["Frame...", "edl:frame"], ["Shell...", "edl:shell"]]], 0,
+    ["Deformed Shape...", "dlg:deformed", "F6", !disp.size],
+    ["Force/Stress Diagrams", [["Support/Spring Reactions...", "dlg:reactions", "F7", !reacts.size], ["Soil Pressure...", "vals:spring", "", !has(/soilpressure/)], 0,
+      ["Frame/Pier/Spandrel/Link Forces...", "dlg:forces", "F8", !forces.size], 0, ["Shell Stresses/Forces...", "dlg:shells", "F9", !shellRes.size], 0, ["Diaphragm Forces...", "vals:diaphragm", "", !has(/diaphragmforce/)]]],
+    ["Display Performance Check...", "vals:hinge", "", !has(/performance|acceptance/)], ["Display Performance Check Usage Ratio Diagram...", "vals:hinge", "", !has(/performance|acceptance/)], 0,
+    ["Energy/Virtual Work Diagram...", "edl:energy", "", !forces.size], ["Cumulative Energy Components...", "xy:energy", "", !has(/cumulativeenergy|energycomponent/)], 0,
+    ["Story Response Plots...", "dlg:storyPlot", "", !P || !storyTables().length], ["Combined Story Response Plots...", "dlg:storyPlot", "", !has(/combinedstory/)], 0,
+    ["Response Spectrum Curves...", "xy:spectrum", "", !has(/responsespectrumcurve|spectrumcurve/)], ["Plot Functions...", "xy:history", "F12", !hist],
+    ["Quick Hysteresis", [["Links...", "vals:link", "", !has(/hysteresis/)], ["Hinges...", "vals:hinge", "", !has(/hysteresis/)]]], 0,
+    ["Static Pushover Curve...", "xy:pushover", "", !has(/pushover|capacitycurve/)], ["Hinge Results...", "vals:hinge", "", !has(/hinge/)], ["Floor Vibration Results", [["Vibration Response...", "vals:", "", !has(/floorvibration|walkingvibration/)]]], 0,
+    ["Save Named Display...", "edl:save"], ["Show Named Display...", "edl:show", "", !etaNamed().length], 0, ["Show Tables...", "tables", "Ctrl+T"]];
+}
+function etaDisplay(k) {
+  if (["joint", "frame", "shell"].includes(k)) return etaShowLoads(k);
+  if (k === "energy") return dialogs.forces ? dialogs.forces() : null;
+  if (k === "save") return etaNamedDisplays();
+  if (k === "show") return etaShowNamed();
+}
+// Show Joint/Frame/Shell Loads: the load pattern, then the load type ETABS offers for that kind, each open only where the
+// model has such loads in that pattern; Show Loading Values (and Include Joint Loads for frames).
+function etaShowLoads(kind) {
+  const list = loadTables(kind), u = hmU ? hmU() : {};
+  const pats = [...new Set([...((P && P.model && P.model.load_patterns) || []).map(x => typeof x === "string" ? x : x.name || x[0]).filter(Boolean), ...loadPatterns(kind)])];
+  const types = {
+    joint: [["force", "Forces", /force/], ["disp", "Displacements", /displ/], ["temp", "Temperature Values", /temp/]],
+    frame: [["span", "Span Loading Applied Directly to the Frame Object (Forces)", /point|distributed|trapezoid|uniform/, "force"], ["spanm", "Span Loading Applied Directly to the Frame Object (Moments)", /point|distributed|trapezoid|uniform/, "moment"],
+      ["trib", "All Loading that is Tributary to the Frame Object (Forces)", /tributary/], ["tribm", "All Loading that is Tributary to the Frame Object (Moments)", /tributary/], ["temp", "Temperature Values", /temp/, "temperature"],
+      ["g22", "Temperature Gradient 2-2 Values", /temp/, "gradient22"], ["g33", "Temperature Gradient 3-3 values", /temp/, "gradient33"], ["wind", "Open Structure Wind Loads", /openstructurewind|windparam/]],
+    shell: [["unif", "Uniform  Load Values", /uniform(?!loadset)/], ["temp", "Temperature Values", /temp/, "temperature"], ["g33", "Temperature Gradient 3-3 values", /temp/, "gradient"], ["wind", "Wind Pressure", /windpressure|windcoef/], ["nonu", "Non-Uniform Load", /nonuniform/], ["cont", "Show Contours in Plan View for Floor", /uniform|nonuniform/]],
+  }[kind];
+  const dirs = ["Gravity", "X", "Y", "Z", "Local-1", "Local-2", "Local-3", "X Projected", "Y Projected", "Gravity Projected"];
+  const rowsOf = (t, pat) => { const c = patCol(t.fields); return t.rows.filter(r => c < 0 || String(r[c]) === pat); };
+  const word = (t, r, w) => { if (!w) return true; const s = t.fields.map((f, i) => norm(f) + "=" + norm(r[i])).join("|"); return w === "force" ? !/moment/.test(s) : w === "moment" ? /moment/.test(s) : w === "temperature" ? !/gradient/.test(s) : w === "gradient22" ? /gradient22/.test(s) : w === "gradient33" || w === "gradient" ? /gradient33/.test(s) : true; };
+  const tablesFor = (ty, pat) => list.filter(t => ty[2].test(norm(t.name)) && rowsOf(t, pat).some(r => word(t, r, ty[3])));
+  const title = "Show " + {joint: "Joint", frame: "Frame", shell: "Shell"}[kind] + " Loads";
+  const d = dialog(title, `${etaCss}<div class="etaF"><fieldset style="padding:10px 18px"><div style="display:grid;grid-template-columns:90px 1fr;align-items:center"><span>Load Pattern</span><select id="slP">${opts(pats.length ? pats : [""], pats.includes(res.lpat) ? res.lpat : pats[0])}</select></div></fieldset>
+    <fieldset><legend>Load Type</legend>${types.map(ty => `<label><input type="radio" name="slT" value="${ty[0]}"> ${esc(ty[1])}</label>${kind === "shell" && (ty[0] === "unif" || ty[0] === "nonu" || ty[0] === "cont") ? `<div style="display:grid;grid-template-columns:110px 130px;margin-left:24px;align-items:center"><span>Direction</span><select data-dir="${ty[0]}">${opts(ty[0] === "nonu" ? ["", ...dirs] : dirs, ty[0] === "nonu" ? "" : "Gravity")}</select></div>` : ""}${ty[0] === "cont" ? `<label style="margin-left:24px"><input type="checkbox" id="slCU"> Include Uniform Load Assignment</label><label style="margin-left:24px"><input type="checkbox" id="slCN"> Include Non-Uniform Load Assignment</label>` : ""}`).join("")}</fieldset>
+    ${kind === "frame" ? `<label><input type="checkbox" id="slJ" checked> Include Joint Loads</label>` : ""}${kind === "shell" ? "" : `<label><input type="checkbox" id="slV" ${res.dvalues !== false ? "checked" : ""}> Show Loading Values</label>`}</div>`,
+    sapOkCloseApply(async d => {
+      const pat = q(d, "#slP").value, on = q(d, "[name=slT]:checked"); if (!on) return false;
+      const ty = types.find(x => x[0] === on.value), dir = q(d, `[data-dir="${ty[0]}"]`);
+      let ts = tablesFor(ty, pat); if (dir && dir.value) { const dc = t => col(t.fields, "Dir", "Direction"); const pick = ts.filter(t => dc(t) < 0 || rowsOf(t, pat).some(r => norm(r[dc(t)]) === norm(dir.value))); if (pick.length) ts = pick; }
+      const t = ts[0]; if (!t) { hmSay("There are no such loads in " + pat + ".", true); return false; }
+      res.mode = "loads"; res.lt = t.name; res.lpat = pat; const ns = loadValueCols(t); res.lf = (ns.find(n => /^(foverla|unifload|load|value|temp|temperature|force|fz|f3)$/.test(norm(n.name))) || ns[0] || {}).name || "";
+      res.dvalues = res.values = q(d, "#slV") ? q(d, "#slV").checked : true;
+      if ($("colour").value === "ratio") $("colour").value = "kind";
+      colourDirty = true; buildLoadsView(); syncResults(); panes.forEach(p => p.diagSig = null); syncTools(); draw();
+      return true;
+    }), {width: kind === "frame" ? 400 : 330});
+  // Each load type is open only where the model has it in the pattern, as ETABS greys the rest; OK greys with none.
+  const sync = () => {
+    const pat = q(d, "#slP").value; let first = null;
+    for (const ty of types) { const r = q(d, `[name=slT][value="${ty[0]}"]`), ok = tablesFor(ty, pat).length > 0 || (ty[0] === "cont" && tablesFor(types[0], pat).length > 0); r.disabled = !ok; r.parentElement.style.color = ok ? "" : "#999"; if (!ok && r.checked) r.checked = false; if (ok && !first) first = r; }
+    if (!q(d, "[name=slT]:checked") && first) first.checked = true;
+    const any = !!q(d, "[name=slT]:checked"); d.querySelectorAll(".df button").forEach(b => { if (/^(OK|Apply)$/.test(b.textContent.trim())) b.disabled = !any; });
+    d.querySelectorAll("[data-dir]").forEach(s => s.disabled = !(q(d, "[name=slT]:checked") || {}).value || q(d, "[name=slT]:checked").value !== s.dataset.dir);
+    ["#slCU", "#slCN"].forEach(id => { const x = q(d, id); if (x) x.disabled = (q(d, "[name=slT]:checked") || {}).value !== "cont"; });
+  };
+  q(d, "#slP").onchange = sync; d.querySelectorAll("[name=slT]").forEach(x => x.onchange = sync); sync();
+  return d;
+}
+// Named Displays: Add New Display, Change Display, Delete Display Name; Select Named Display shows one (or only its view
+// direction and zoom). Kept with the model in this window and in the browser's storage for the model.
+const etaNamedKey = () => "cpm-named-displays:" + ((P && P.manifest && (P.manifest.model || P.manifest.name)) || "model");
+function etaNamed() { try { return JSON.parse(localStorage.getItem(etaNamedKey()) || "[]"); } catch { return etaNamed.mem || []; } }
+function etaNamedSave(list) { etaNamed.mem = list; try { localStorage.setItem(etaNamedKey(), JSON.stringify(list)); } catch {} }
+function etaSnap(name) { const p = panes[active] || {}; const {anim, ...r} = res; return {name, res: JSON.parse(JSON.stringify(r)), colour: $("colour").value, pane: {mode: p.mode, story: p.story, cam: p.cam ? JSON.parse(JSON.stringify(p.cam)) : null}}; }
+function etaNamedDisplays() {
+  let list = etaNamed();
+  const d = dialog("Named Displays", `${etaCss}<div class="etaF"><div style="display:grid;grid-template-columns:120px 1fr;gap:12px"><fieldset><legend>Displays</legend><input id="ndN" style="width:100%"><select id="ndL" size="8" style="width:100%;height:130px"></select></fieldset>
+    <div><fieldset><legend>Click to:</legend><button id="ndA" style="width:100%">Add New Display</button><button id="ndC" style="width:100%;margin-top:6px">Change Display</button><button id="ndD" style="width:100%;margin-top:6px">Delete Display Name</button></fieldset></div></div></div>`,
+    [["OK", () => { etaNamedSave(list); hmSay(`${list.length} named display${list.length === 1 ? "" : "s"} kept.`); }], ["Cancel"]], {width: 300});
+  const paint = v => { q(d, "#ndL").innerHTML = opts(list.map(x => x.name), v || (list[0] || {}).name); };
+  q(d, "#ndL").onchange = () => q(d, "#ndN").value = q(d, "#ndL").value;
+  q(d, "#ndA").onclick = () => { const n = q(d, "#ndN").value.trim() || "Display" + (list.length + 1); if (list.some(x => x.name === n)) return formError(d, "There is a display named " + n + "."); list.push(etaSnap(n)); paint(n); };
+  q(d, "#ndC").onclick = () => { const was = q(d, "#ndL").value, n = q(d, "#ndN").value.trim() || was; const i = list.findIndex(x => x.name === was); if (i < 0) return; list[i] = {...list[i], name: n}; paint(n); };
+  q(d, "#ndD").onclick = () => { list = list.filter(x => x.name !== q(d, "#ndL").value); paint(); };
+  q(d, "#ndN").value = (res.mode === "loads" && res.lpat ? res.lpat + " loads" : ""); paint();
+  return d;
+}
+function etaShowNamed() {
+  const list = etaNamed();
+  const d = dialog("Select Named Display", `${etaCss}<div class="etaF"><fieldset><legend>Named Displays</legend><select id="snL" size="10" style="width:100%;height:200px">${opts(list.map(x => x.name), (list[0] || {}).name)}</select></fieldset>
+    <label><input type="checkbox" id="snV"> Set View Direction and Zoom Only</label></div>`,
+    [["OK", d => {
+      const x = list.find(y => y.name === q(d, "#snL").value); if (!x) return;
+      const p = panes[active];
+      if (p && x.pane && x.pane.cam) { if (x.pane.mode && x.pane.mode !== p.mode) setMode(p, x.pane.mode); Object.assign(p.cam, x.pane.cam); }
+      if (!q(d, "#snV").checked) { Object.assign(res, x.res); if (x.colour) $("colour").value = x.colour; if (res.mode === "loads") buildLoadsView(); colourDirty = true; syncResults(); panes.forEach(q2 => q2.diagSig = null); syncTools(); }
+      draw();
+    }], ["Cancel"]], {width: 280});
+  return d;
+}
+
+// ---- ETABS 23.2's Assign > Shell forms (pictures Assign/Shell). ----
+const etaShells = () => hmSelected("a");
+const etaShellTable = (T, rows) => sapOkCloseApply(async d => { const n = etaShells(); if (!etaNeed(n, "shells")) return false; const r = rows(d); if (r === false) return false; return etaDone(await hmRun("assign_shell_data", {objects: n, tables: {[T]: r}})); });
+// Shell Assignment - Slab Section, Deck Section, Wall Section: None and the sections of that kind.
+async function etaShellSection(kind) {
+  const f = await etaFirst("a"), title = {slab: "Slab", deck: "Deck", wall: "Wall"}[kind];
+  const list = async () => { hm.defs = null; return ["None", ...(await hmDefs()).shell_sections.filter(s => (s.kind || "slab") === kind).map(s => s.name)]; };
+  return etaListForm(`Shell Assignment - ${title} Section`, title + "s", list, f.o.section || "None", () => modelAct(kind === "slab" ? "shellSections" : kind === "deck" ? "decks" : "wallSections"),
+    async v => { const n = etaShells(); if (!etaNeed(n, "shells")) return false; if (v === "None") { hmSay("ETABS keeps a section on each shell: pick a section, or delete the shell.", true); return false; } return etaDone(await hmRun("set_section", {areas: n, section: v})); });
+}
+// Shell Assignment - Openings: Opening Types, Not an Opening or Opening.
+async function etaShellOpenings() {
+  const f = await etaFirst("a"), now = f.o.opening === false ? "Not an Opening" : "Opening";
+  return dialog("Shell Assignment - Openings", `${etaCss}<div class="etaF"><fieldset style="padding:10px 30px"><legend>Opening Types</legend><select id="opT" style="width:100%">${opts(["Not an Opening", "Opening"], now)}</select></fieldset></div>`,
+    sapOkCloseApply(async d => { const n = etaShells(); if (!etaNeed(n, "shells")) return false; return etaDone(await hmRun("assign_shell_data", {objects: n, opening: q(d, "#opT").value === "Opening"})); }), {width: 270});
+}
+// Shell Assignment - Stiffness Modifiers: Property/Stiffness Modifiers for Analysis.
+async function etaShellModifiers() {
+  const f = await etaFirst("a"), m = f.o.modifiers || {};
+  const rows = [["F11MOD", "Membrane f11 Direction"], ["F22MOD", "Membrane f22 Direction"], ["F12MOD", "Membrane f12 Direction"], ["M11MOD", "Bending m11 Direction"], ["M22MOD", "Bending m22 Direction"], ["M12MOD", "Bending m12 Direction"], ["V13MOD", "Shear v13 Direction"], ["V23MOD", "Shear v23 Direction"], ["MMOD", "Mass"], ["WMOD", "Weight"]];
+  return dialog("Shell Assignment - Stiffness Modifiers", `${etaCss}<div class="etaF"><fieldset><legend>Property/Stiffness Modifiers for Analysis</legend><div style="display:grid;grid-template-columns:1fr 90px;gap:6px 10px;align-items:center;margin:4px 10px">${rows.map(([k, l]) => `<span>${l}</span><input data-m="${k}" value="${esc(String(m[k] ?? 1))}">`).join("")}</div></fieldset></div>`,
+    sapOkCloseApply(async d => {
+      const n = etaShells(); if (!etaNeed(n, "shells")) return false;
+      const o = {}; for (const x of d.querySelectorAll("[data-m]")) { const v = +(x.value.trim() || 1); if (!isFinite(v) || v < 0) { formError(d, "Each modifier is a number, 0 or more."); return false; } o[x.dataset.m] = v; }
+      return etaDone(await hmRun("assign_shell_data", {objects: n, modifiers: o}));
+    }), {width: 380});
+}
+// Shell Assignment - Diaphragms: None and the diaphragms.
+async function etaShellDiaphragms() {
+  const f = await etaFirst("a");
+  const list = async () => ["None", ...(((await hmRun("structure_definitions", {}, true)).result || {}).diaphragms || []).map(x => x.name)];
+  return etaListForm("Shell Assignment - Diaphragms", "Diaphragm Assignments", list, f.o.diaphragm || "None", () => modelAct("st:diaphragm"),
+    async v => { const n = etaShells(); if (!etaNeed(n, "shells")) return false; return etaDone(await hmRun("assign_diaphragm_data", {objects: n, diaphragm: v === "None" ? "" : v})); });
+}
+// Shell Assignment - Area Springs: None and the area springs.
+async function etaShellSprings() {
+  const f = await etaFirst("a");
+  const list = async () => ["None", ...((await hmRun("property_definitions", {}, true)).result || {springs: []}).springs.filter(x => x.kind === "area").map(x => x.name)];
+  return etaListForm("Shell Assignment - Area Springs", "Springs", list, f.o.spring || "None", () => modelAct("spr:area"),
+    async v => { const n = etaShells(); if (!etaNeed(n, "shells")) return false; return etaDone(await hmRun("assign_shell_data", {objects: n, spring: v === "None" ? "" : v})); });
+}
+// Shell Assignment - Local Axes: Rotation Angle from Default or from Current Orientation, or Normal to Selected Beam
+// (open when one beam is selected with the shells).
+async function etaShellAxes() {
+  const T = "Area Assignments - Local Axes", f = await etaFirst("a"), cur = +(((f.t[T] || [])[0] || {}).Angle || 0);
+  const beam = hmSelected("f").length === 1 ? frames.find(x => x.name === hmSelected("f")[0]) : null;
+  const d = dialog("Shell Assignment - Local Axes", `${etaCss}<div class="etaF"><fieldset><legend>Local Axes Orientation</legend><div style="display:grid;grid-template-columns:1fr 90px 30px;gap:6px 8px;align-items:center">
+    <label><input type="radio" name="laO" value="d"> Rotation Angle from Default Orientation</label><input id="laD"><span>deg</span>
+    <label><input type="radio" name="laO" value="c" checked> Rotation Angle from Current Orientation</label><input id="laC" value="0"><span>deg</span>
+    <label ${beam ? "" : 'style="color:#999"'}><input type="radio" name="laO" value="b" ${beam ? "" : "disabled"}> Normal to Selected Beam</label><span></span><span></span></div></fieldset></div>`,
+    sapOkCloseApply(async d => {
+      const n = etaShells(); if (!etaNeed(n, "shells")) return false;
+      const o = q(d, "[name=laO]:checked").value;
+      if (o === "b") { const a = (Math.atan2(beam.b[1] - beam.a[1], beam.b[0] - beam.a[0]) * 180 / Math.PI + 90 + 360) % 360; return etaDone(await hmRun("assign_shell_data", {objects: n, tables: {[T]: a ? [{Angle: String(+a.toFixed(6))}] : []}})); }
+      const v = q(d, o === "d" ? "#laD" : "#laC").value.trim(); if (v === "" || !isFinite(+v)) { formError(d, "The angle is a number of degrees."); return false; }
+      if (o === "d") return etaDone(await hmRun("assign_shell_data", {objects: n, tables: {[T]: +v ? [{Angle: String(+v)}] : []}}));
+      // From the current orientation: each shell turns by the angle from its own angle.
+      const p = await sapObjRows(n);
+      return sapSetEach("assign_shell_data", n, name => { const ob = (p.pd.objects || []).find(x => x.name === name) || {}, a = ((+((((ob.tables || {})[T] || [])[0] || {}).Angle || 0) + +v) % 360 + 360) % 360; return {[T]: a ? [{Angle: String(+a.toFixed(6))}] : []}; });
+    }), {width: 470});
+  const sync = () => { const o = q(d, "[name=laO]:checked").value; q(d, "#laD").disabled = o !== "d"; q(d, "#laC").disabled = o !== "c"; if (o === "d" && !q(d, "#laD").value) q(d, "#laD").value = String(cur); if (o !== "d") q(d, "#laD").value = ""; };
+  d.querySelectorAll("[name=laO]").forEach(x => x.onchange = sync); sync();
+  return d;
+}
+// Shell Assignment - Rib Locations: Point Location on Rib, X and Y (waffle and ribbed slabs).
+async function etaShellRibs() {
+  const T = "Area Assignments - Slab Rib Locations", f = await etaFirst("a"), r = (f.t[T] || [])[0] || {}, u = hmU();
+  return dialog("Shell Assignment - Rib Locations", `${etaCss}<div class="etaF"><fieldset><legend>Point Location on Rib</legend><div style="display:grid;grid-template-columns:1fr 90px 30px;gap:6px 8px;align-items:center;margin:4px 20px">
+    <span>Point X</span><input id="rbX" value="${esc(r.X || "0")}"><span>${u.l}</span><span>Point Y</span><input id="rbY" value="${esc(r.Y || "0")}"><span>${u.l}</span></div>
+    <p style="margin:10px 20px 4px">Note:&nbsp; Assignment only applies to waffle and ribbed slabs</p></fieldset></div>`,
+    etaShellTable(T, d => { const x = q(d, "#rbX").value.trim(), y = q(d, "#rbY").value.trim(); if (x === "" || y === "" || !isFinite(+x) || !isFinite(+y)) { formError(d, "Point X and Y are numbers."); return false; } return [{X: String(+x), Y: String(+y)}]; }), {width: 390});
+}
+// Shell Assignment - Auto Edge Constraints: Do NOT Create, or Create around Walls and/or Floors; Apply to Full Structure.
+async function etaShellEdgeConstraint() {
+  const T = "Area Assignments - Auto Edge Constraints";
+  const d = dialog("Shell Assignment - Auto Edge Constraints", `${etaCss}<div class="etaF"><fieldset><legend>Select Options</legend><label><input type="radio" name="ecO" value="n"> Do NOT Create Edge Constraints</label><label><input type="radio" name="ecO" value="y" checked> Create Edge Constraints around</label>
+    <label style="margin-left:24px"><input type="checkbox" id="ecW" checked> Walls</label><label style="margin-left:24px"><input type="checkbox" id="ecF" checked> Floors</label></fieldset>
+    <label><input type="checkbox" id="ecA" checked> Apply to Full Structure (not just Selection)</label></div>`,
+    sapOkCloseApply(async d => {
+      const full = q(d, "#ecA").checked, all = full ? areas.filter(a => a.kind !== "opening").map(a => a.name) : etaShells();
+      if (!etaNeed(all, "shells")) return false;
+      const make = q(d, "[name=ecO]:checked").value === "y", w = q(d, "#ecW").checked, fl = q(d, "#ecF").checked;
+      const kindOf = name => ((areas.find(a => a.name === name) || {}).kind === "wall" ? "wall" : "floor");
+      return sapSetEach("assign_shell_data", all, name => ({[T]: [{Constraint: make && (kindOf(name) === "wall" ? w : fl) ? "Yes" : "No"}]}));
+    }), {width: 290});
+  const sync = () => { const y = q(d, "[name=ecO]:checked").value === "y"; q(d, "#ecW").disabled = q(d, "#ecF").disabled = !y; };
+  d.querySelectorAll("[name=ecO]").forEach(x => x.onchange = sync); sync();
+  return d;
+}
+Object.assign(etaAssignForms, {
+  aSlab: () => etaShellSection("slab"), aDeck: () => etaShellSection("deck"), aWall: () => etaShellSection("wall"), aOpenings: etaShellOpenings, aModifiers: etaShellModifiers,
+  aDiaphragms: etaShellDiaphragms, aSprings: etaShellSprings, aAxes: etaShellAxes, aRibs: etaShellRibs, aEdgeConstraint: etaShellEdgeConstraint,
+});
+
+// ---- Assign > Shell > Thickness Overwrites, Edge Releases and Slab Line Releases (pictures Assign/Shell). ----
+const etaCorners = name => { const a = areas.find(x => x.name === name); return a ? a.pts.map(e => { const n = pointAt.get(key(e[0], e[1], e[2])); return n === undefined ? "" : String(n); }) : []; };
+const etaPickedJoint = label => [...selJ].some(n => String(n).replace(/@.*$/, "") === label);
+async function etaShellThickness() {
+  const T = "Area Assignments - Thickness Overwrites", s = etaSmall(), n0 = etaShells(), c0 = etaCorners(n0[0] || "");
+  const d = dialog("Shell Assignment - Thickness Overwrites", `${etaCss}<div class="etaF"><fieldset><legend>Thickness Options</legend>
+    <label><input type="radio" name="toO" value="n"> No Thickness Overwrites - Delete Any Existing Overwrites</label>
+    <label><input type="radio" name="toO" value="c" checked> Thickness Overwrites at Selected Point Objects that are Corner Points of Selected Shell Objects</label>
+    <label><input type="radio" name="toO" value="p"> Thickness Overwrites Specified Point-By-Point</label>
+    <div style="display:grid;grid-template-columns:1fr 200px;gap:6px;margin-left:34px;align-items:center"><span>Point Number</span><input id="toN" style="width:100px"><span>Point Label;&nbsp; Point Unique Name</span><input id="toL" readonly></div></fieldset>
+    <fieldset><legend>Thickness Overwrite</legend><div style="display:grid;grid-template-columns:1fr 100px 30px;gap:6px;align-items:center"><span>Thickness (0 means from section property)</span><input id="toT" value="0"><span>${s.unit}</span></div></fieldset>
+    <button id="toR" class="mid" style="width:210px">Reset Form to Default Values</button><button id="toG" class="mid" style="width:290px" ${n0.length === 1 ? "" : "disabled"}>Get Values from Currently Selected Shell Object</button></div>`,
+    sapOkCloseApply(async d => {
+      const n = etaShells(); if (!etaNeed(n, "shells")) return false;
+      const o = q(d, "[name=toO]:checked").value, t = q(d, "#toT").value.trim();
+      if (o === "n") return sapSetEach("assign_shell_data", n, () => ({[T]: []}));
+      if (t === "" || !(+t >= 0)) { formError(d, "The thickness is 0 or more."); return false; }
+      const th = String(s.in(+t)), num = +q(d, "#toN").value;
+      if (o === "p" && !(Number.isInteger(num) && num >= 1)) { formError(d, "Give the point number, 1 for the shell's first corner."); return false; }
+      const p = await sapObjRows(n);
+      return sapSetEach("assign_shell_data", n, name => {
+        const have = (p.by[name] || {})[T] || [], cs = etaCorners(name), rows = new Map(have.map(r => [String(r.PointNumber), r]));
+        cs.forEach((lab, i) => { if (o === "c" ? etaPickedJoint(lab) : i + 1 === num) rows.set(String(i + 1), {PointNumber: String(i + 1), PointLabel: lab, Thickness: th}); });
+        return {[T]: [...rows.values()].filter(r => +r.Thickness > 0)};
+      });
+    }), {width: 600});
+  const sync = () => { const o = q(d, "[name=toO]:checked").value; q(d, "#toN").disabled = o !== "p"; q(d, "#toT").disabled = o === "n"; q(d, "#toL").value = o === "p" && c0[+q(d, "#toN").value - 1] ? c0[+q(d, "#toN").value - 1] : ""; if (o === "p" && !q(d, "#toN").value) q(d, "#toN").value = "1"; if (o !== "p") q(d, "#toN").value = ""; q(d, "#toL").value = o === "p" && c0[+q(d, "#toN").value - 1] ? c0[+q(d, "#toN").value - 1] : ""; };
+  d.querySelectorAll("[name=toO]").forEach(x => x.onchange = sync); q(d, "#toN").oninput = sync;
+  q(d, "#toR").onclick = () => { q(d, "[name=toO][value=c]").checked = true; q(d, "#toT").value = "0"; sync(); };
+  q(d, "#toG").onclick = async () => { const f = await etaFirst("a"), r = (f.t[T] || [])[0]; if (r) { q(d, "[name=toO][value=p]").checked = true; q(d, "#toN").value = r.PointNumber; q(d, "#toT").value = String(+s.out(+r.Thickness).toPrecision(6)); } sync(); };
+  sync();
+  return d;
+}
+// Shell Assignment - Edge Releases: none, on the selected edges (both end joints selected), or edge by edge, with the
+// release and partial fixity spring of each of the five edge forces.
+async function etaShellEdgeReleases() {
+  const T = "Area Assignments - Edge Releases", u = hmU(), n0 = etaShells(), c0 = etaCorners(n0[0] || ""), ne = Math.max(c0.length, 1);
+  const kinds = [["InShear", "In-plane Shear Force Along Edge (1)"], ["DirForce", "In-plane Direct Force Normal to&nbsp; Edge (2)"], ["OutShear", "Out-of-plane Shear Force Along the Edge (3)"], ["Bending", "Bending Moment About Edge (1)"], ["Twisting", "Twisting Moment Along Edge (2)"]];
+  const unit = k => /Shear|DirForce/.test(k) ? `${u.f}/${u.l}/${u.l}` : `${u.f}-${u.l}/${u.l}/rad`;
+  const blank = () => Object.fromEntries(kinds.map(([k]) => [k, {r: false, s: 0}]));
+  const f = await etaFirst("a"), have = f.t[T] || [], edges = [...Array(ne)].map((_, i) => { const r = have.find(x => +x.EdgeNumber === i + 1), e = blank(); if (r) kinds.forEach(([k]) => e[k] = {r: etaYes(r["R" + k]), s: +(r["S" + k] || 0)}); return e; });
+  let cur = 0, single = blank();
+  const d = dialog("Shell Assignment - Edge Releases", `${etaCss}<div class="etaF"><fieldset><legend>Edge Release Options</legend>
+    <label><input type="radio" name="erO" value="n"> No Edge Releases - Delete Any Existing Edge Releases</label><label><input type="radio" name="erO" value="s" checked> Edge Releases on Selected Shell Object Edges</label><label><input type="radio" name="erO" value="e"> Edge Releases Specified Edge-By-Edge</label>
+    <div style="display:grid;grid-template-columns:1fr 95px auto;gap:6px;margin-left:34px;align-items:center"><span>Edge Number</span><input id="erN" readonly><span><button data-nv="first">&lt;&lt;</button> <button data-nv="prev">&lt;</button> <button data-nv="next">&gt;</button> <button data-nv="last">&gt;&gt;</button></span><span>Edge End Point Labels</span><input id="erL" readonly style="grid-column:span 2"></div></fieldset>
+    <fieldset><legend>Edge Release Data</legend><div style="display:grid;grid-template-columns:1fr 60px 100px 90px;gap:6px;align-items:center"><span></span><span>Release</span><span>Partial Fixity Springs</span><span></span>
+      ${kinds.map(([k, l]) => `<span>${l}</span><input type="checkbox" data-r="${k}"><input data-s="${k}"><span>${unit(k)}</span>`).join("")}</div>
+      <button id="erC" class="mid" style="width:240px">Clear All Edge Releases for this Edge</button></fieldset>
+    <button id="erR" class="mid" style="width:210px">Reset Form to Default Values</button><button id="erG" class="mid" style="width:290px" ${n0.length === 1 ? "" : "disabled"}>Get Values from Currently Selected Shell Object</button></div>`,
+    sapOkCloseApply(async d => {
+      const n = etaShells(); if (!etaNeed(n, "shells")) return false; save();
+      const o = q(d, "[name=erO]:checked").value;
+      const row = (i, lab, e) => ({EdgeNumber: String(i + 1), PointLabels: lab, ...Object.fromEntries(kinds.flatMap(([k]) => [["R" + k, e[k].r ? "Yes" : "No"], ["S" + k, String(e[k].r ? +e[k].s || 0 : 0)]]))});
+      const any = e => kinds.some(([k]) => e[k].r);
+      if (o === "n") return sapSetEach("assign_shell_data", n, () => ({[T]: []}));
+      const p = await sapObjRows(n);
+      return sapSetEach("assign_shell_data", n, name => {
+        const cs = etaCorners(name), rows = new Map(((p.by[name] || {})[T] || []).map(r => [String(r.EdgeNumber), r]));
+        cs.forEach((a, i) => { const b = cs[(i + 1) % cs.length], lab = a + ";" + b, e = o === "e" ? edges[i] : etaPickedJoint(a) && etaPickedJoint(b) ? single : null; if (!e) return; if (any(e)) rows.set(String(i + 1), row(i, lab, e)); else rows.delete(String(i + 1)); });
+        return {[T]: [...rows.values()]};
+      });
+    }), {width: 620});
+  const now = () => q(d, "[name=erO]:checked").value === "e" ? edges[cur] : single;
+  const save = () => { const e = now(); kinds.forEach(([k]) => e[k] = {r: q(d, `[data-r="${k}"]`).checked, s: +q(d, `[data-s="${k}"]`).value || 0}); };
+  const paint = () => { const o = q(d, "[name=erO]:checked").value, e = now(); q(d, "#erN").value = o === "e" ? String(cur + 1) : ""; q(d, "#erL").value = o === "e" ? (c0.length ? c0[cur] + ";" + c0[(cur + 1) % c0.length] : "") : "Multiple";
+    d.querySelectorAll("[data-nv]").forEach(b => b.disabled = o !== "e"); const off = o === "n";
+    kinds.forEach(([k]) => { const r = q(d, `[data-r="${k}"]`), s = q(d, `[data-s="${k}"]`); r.checked = !off && e[k].r; r.disabled = off; s.disabled = off || !r.checked; s.value = !off && r.checked ? String(e[k].s) : ""; }); };
+  d.querySelectorAll("[name=erO]").forEach(x => x.onchange = () => { paint(); });
+  kinds.forEach(([k]) => q(d, `[data-r="${k}"]`).onchange = () => { save(); paint(); });
+  d.querySelectorAll("[data-s]").forEach(x => x.onchange = save);
+  d.querySelectorAll("[data-nv]").forEach(b => b.onclick = () => { save(); cur = {first: 0, prev: Math.max(0, cur - 1), next: Math.min(ne - 1, cur + 1), last: ne - 1}[b.dataset.nv]; paint(); });
+  q(d, "#erC").onclick = () => { const e = now(); kinds.forEach(([k]) => e[k] = {r: false, s: 0}); paint(); };
+  q(d, "#erR").onclick = () => { q(d, "[name=erO][value=s]").checked = true; single = blank(); edges.forEach((_, i) => edges[i] = blank()); cur = 0; paint(); };
+  q(d, "#erG").onclick = () => { q(d, "[name=erO][value=e]").checked = true; cur = 0; paint(); };
+  paint();
+  return d;
+}
+// Shell Assignment - Slab Line Releases: the left and right side's shear and moment releases of the selected lines.
+async function etaShellLineReleases() {
+  const T = "Area Assignments - Slab Line Releases", f = await etaFirst("f"), r = (f.t[T] || [])[0] || {};
+  const box = (k, l) => `<label><input type="checkbox" data-k="${k}" ${etaYes(r[k]) ? "checked" : ""}> ${l}</label>`;
+  const d = dialog("Shell Assignment - Slab Line Releases", `${etaCss}<div class="etaF"><fieldset><legend>Select Releases - Left Side</legend>${box("ShearL", "Vertical Displacement (Shear)")}${box("MomentL", "Rotation About Line (Moment)")}</fieldset>
+    <fieldset><legend>Select Releases - Right Side</legend>${box("ShearR", "Vertical Displacement (Shear)")}${box("MomentR", "Rotation About Line (Moment)")}</fieldset></div>`,
+    [["OK", d => { go(d).then(ok => ok && d.close()); return false; }, true], ["Cancel"], ["Apply", d => { go(d); return false; }, true]], {width: 300});
+  const go = async d => {
+    const n = etaFrames(); if (!n.length) { hmSay("Select the slab lines (null lines or beams in the slab) first, then Apply.", true); return false; }
+    const v = Object.fromEntries([...d.querySelectorAll("[data-k]")].map(x => [x.dataset.k, x.checked ? "Yes" : "No"]));
+    return etaDone(await hmRun("assign_frame_data", {objects: n, tables: {[T]: Object.values(v).includes("Yes") ? [v] : []}}));
+  };
+  return d;
+}
+Object.assign(etaAssignForms, {aThickness: etaShellThickness, aEdgeReleases: etaShellEdgeReleases, aLineReleases: etaShellLineReleases});
 
 // ---- Define: the items kept as rows of the program's own definition tables, rebar sizes and a section's rebar ----
 // label, table(s), the programs that have it (ETABS when left out), SAP2000's own name.

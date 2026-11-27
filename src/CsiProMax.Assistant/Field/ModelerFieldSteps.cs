@@ -539,6 +539,18 @@ public static class ModelerFieldSteps
             var obj = Q(beam.Label + "@" + beam.Story);
             ctx.Tool("assign_object_loads", """{"kind":"frame_temperature","pattern":"CPM-TEMP","objects":[""" + obj + """],"values":{"temperature":20}}""", null, "tool assign_object_loads, a temperature on a beam");
             ctx.Tool("assign_object_loads", """{"kind":"frame_point","pattern":"Live","objects":[""" + obj + """],"values":{"value":10,"distance":0.5}}""", null, "tool assign_object_loads, a point load mid-span");
+            // Assign > Paste Assigns > Frame: the beam's point loads go on another beam, word for word.
+            var other = modeler.Model.LineAssigns.FirstOrDefault(x => x != beam && modeler.Model.Line(x.Label)?.Kind == CsiProMax.Model.LineKind.Beam);
+            if (other is not null)
+                ctx.Tool("paste_object_loads", """{"from":""" + obj + ""","objects":[""" + Q(other.Label + "@" + other.Story) + """],"types":["POINTF","POINTM"]}""",
+                    _ => FieldContext.Expect(modeler.Model.LineLoads.Exists(x => x.Object == other.Label && x.Story == other.Story && (CsiProMax.E2k.E2kText.Value(x.Tokens, "TYPE") ?? "").Contains("POINTF")), "the point load was not pasted"),
+                    "tool paste_object_loads, a beam's point load pasted on another beam");
+        }
+        // Assign > Shell Loads > Uniform Load Sets: None takes a slab's load set off.
+        var slab = modeler.Model.AreaAssigns.FirstOrDefault();
+        if (slab is not null)
+        {
+            ctx.Tool("assign_shell_load_set", """{"set":"","objects":[""" + Q(slab.Label + "@" + slab.Story) + """]}""", null, "tool assign_shell_load_set, None on a slab");
         }
         ctx.Tool("analysis_definitions", "{}", a =>
         {

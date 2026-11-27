@@ -80,7 +80,7 @@ public static class ModelerTables
         var unique = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
         Dictionary<string, string> UniqueOf(string table)
         {
-            var summary = table.Split(" - ")[0] + " - Summary";
+            var summary = System.Text.RegularExpressions.Regex.Replace(table.Split(" - ")[0], " Loads? Assignments$", " Assignments") + " - Summary";
             if (unique.TryGetValue(summary, out var map)) return map;
             map = new(StringComparer.Ordinal);
             try
@@ -102,7 +102,8 @@ public static class ModelerTables
                 if (table.Equals(SlabDefs.LineReleaseTable, StringComparison.OrdinalIgnoreCase))
                     foreach (var r in rows.Where(r => !r.ContainsKey("UniqueName")))
                         if (Tools.SlabTables.LineIn(e, model, r["Label"]) is { } line) r["UniqueName"] = line;
-                EditableTables.Put(e, table, "Story|Label", rows.Select(r => (IReadOnlyDictionary<string, string>)r).ToList(), $"put the Modeler's '{table}' in");
+                // A load table holds a row per load pattern of the object.
+                EditableTables.Put(e, table, rows.All(r => r.ContainsKey("LoadPattern")) ? "Story|Label|LoadPattern" : "Story|Label", rows.Select(r => (IReadOnlyDictionary<string, string>)r).ToList(), $"put the Modeler's '{table}' in");
                 done.Add($"{table}: {rows.Count} row{(rows.Count == 1 ? "" : "s")}");
             }
             catch (EtabsException ex) { refused.Add($"{table}: {ex.Message}"); }
