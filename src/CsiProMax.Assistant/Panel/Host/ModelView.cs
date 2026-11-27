@@ -29,7 +29,8 @@ internal static class ModelView
 
     /// <summary>
     /// CSI ProMax Engine's Analyze > Run (EngineRun): the Run form's {"analyse","kinds","selected"} (or {"design":bool}) starts it, on the window's thread for the model;
-    /// {"status":true} (or {"take":true} once done, which hands over the results) says how it goes.
+    /// {"status":true} (or {"take":true} once done, which hands over the results) says how it goes, with the Run Monitor;
+    /// {"cancel"}, {"show_program"}, {"open_in_program"}, {"open_folder"} are the monitor's and the Run Report's buttons.
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private static async Task<(byte[] Body, string ContentType)?> RunAsync(byte[] body)
@@ -39,6 +40,11 @@ internal static class ModelView
         bool Flag(string name) => root.ValueKind == System.Text.Json.JsonValueKind.Object && root.TryGetProperty(name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.True;
         JsonObject answer;
         if (Flag("status") || Flag("take")) answer = EngineRun.Status(Flag("take"));
+        // The Run Monitor's and the Run Report's buttons.
+        else if (Flag("cancel")) answer = await Task.Run(EngineRun.Cancel).ConfigureAwait(false);
+        else if (Flag("show_program")) answer = await Task.Run(EngineRun.ShowProgram).ConfigureAwait(false);
+        else if (Flag("open_in_program")) answer = await Task.Run(() => EngineRun.OpenInProgram()).ConfigureAwait(false);
+        else if (Flag("open_folder")) answer = EngineRun.OpenFolder();
         else if (Flag("unlock") || Flag("changed"))
         {
             // Analyze > Unlock Model, or the page saw the model move on: the results and their pack are removed.
@@ -62,7 +68,7 @@ internal static class ModelView
                 try { var st = CsiProMax.Settings.AgentSettings.Load(); if (st.KeepProgramOpenAfterRun != kv) { st.KeepProgramOpenAfterRun = kv; st.Save(); } }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
             answer = await App.Dispatcher.InvokeAsync(app => app.Link is OfflineEtabs offline
-                ? form ? EngineRun.Start(offline, analyse, kinds, selected: selected, keepOpen: keepOpen) : EngineRun.Start(offline, design)
+                ? form ? EngineRun.Start(offline, analyse, kinds, selected: selected, keepOpen: keepOpen, stopOnErrors: Flag("stop_on_errors")) : EngineRun.Start(offline, design)
                 : new JsonObject { ["ok"] = false, ["error"] = "Run is the Engine's own: in a CSI program, run the analysis there." }).ConfigureAwait(false);
         }
         return (Encoding.UTF8.GetBytes(answer.ToJsonString()), "application/json");

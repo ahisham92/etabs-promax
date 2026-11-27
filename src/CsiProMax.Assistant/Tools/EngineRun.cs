@@ -4,6 +4,7 @@ using System.Text.Json;
 using CsiProMax.Model;
 using System.Text.Json.Nodes;
 using CsiProMax.Assistant.Etabs;
+using CsiProMax.Checks.Stability;
 
 namespace CsiProMax.Assistant.Tools;
 
@@ -48,6 +49,11 @@ public static class EngineRun
     private static IScratchWindow? _kept;
     private static string _keptName = "";
 
+    // The Run Monitor of the job going on (or the last one), its program window, and whether Cancel was pressed.
+    private static RunMonitor? _mon;
+    private static IScratchWindow? _window;
+    private static bool _cancel;
+
     /// <summary>Settings &gt; Runs: whether a Run leaves the program open with the analysed model (Ahmed 2026-11-27, for now).</summary>
     public static Func<bool> KeepOpenSetting { get; set; } = () => { try { return CsiProMax.Settings.AgentSettings.Load().KeepProgramOpenAfterRun; } catch (Exception ex) when (ex is not OutOfMemoryException) { return false; } };
 
@@ -79,9 +85,12 @@ public static class EngineRun
     /// <summary>
     /// Starts a run on the Modeler's model. Called on the window's thread (it reads the model); the run goes on in the
     /// background. <paramref name="analyse"/>: run the analysis (skipped when the program holds this model unchanged
-    /// and analysed). <paramref name="kinds"/>: the designs to run after it.
+    /// and analysed). <paramref name="kinds"/>: the designs to run after it. <paramref name="stopOnErrors"/>: the Run
+    /// form's "stop before the run when the check finds errors": the instability check runs first either way, and with
+    /// this a model it finds errors in is not given to the program at all (no licence used); the Run Report lists them,
+    /// and Run anyway runs it.
     /// </summary>
-    public static JsonObject Start(OfflineEtabs model, bool analyse, IReadOnlyList<string> kinds, Func<CsiProgram, string>? apiFile = null, IReadOnlyList<string>? selected = null, bool? keepOpen = null)
+    public static JsonObject Start(OfflineEtabs model, bool analyse, IReadOnlyList<string> kinds, Func<CsiProgram, string>? apiFile = null, IReadOnlyList<string>? selected = null, bool? keepOpen = null, bool stopOnErrors = false)
     {
         var program = ProgramOf(model);
         var unknown = kinds.Where(k => !Kinds[program.Key].Any(x => x.Kind == k)).ToList();
@@ -100,7 +109,11 @@ public static class EngineRun
             if (!current)
                 try { file = model.WriteForRun(Path.Combine(folder, Safe(model.Model.Title) + ".e2k")); }
                 catch (EtabsException ex) { return new JsonObject { ["ok"] = false, ["error"] = ex.Message }; }
-            Lines.Clear(); _error = ""; _pack = null; _done = false; _running = true; _closed = false; _keptOpen = false;
+            Lines.Clear(); _error = ""; _pack = null; _done = false; _running = true; _closed = false; _keptOpen = false; _cancel = false; _window = null; _seenNotices = 0;
+            _mon = new RunMonitor(program) { CaseCount = CasesOf(model) };
+            // The model as the instability check reads it, taken here on the window's thread; checked in the background.
+            AnalysisModel? check = null;
+            try { check = FromStructural.Read(model.Model, program.Key); } catch (Exception ex) when (ex is not OutOfMemoryException) { _mon.Skip("check", "the model could not be read for the check: " + ex.Message); }
             _program = program.Name; _model = model; _startRevision = model.Revision;
             _phase = $"Starting {program.Name} in the background";
             if (file.Length > 0) Lines.Add($"The model was written for {program.Name}: {file}");
@@ -109,12 +122,15 @@ public static class EngineRun
             var analysed = _analysedFile;
             var only = kinds.Count > 0 && selected is { Count: > 0 } ? Places(model, selected) : null;
             if (only is not null) Lines.Add($"The design is for the {selected!.Count} selected objects only.");
-            Post(() => Work(program, folder, mustAnalyse ? file : analysed, mustAnalyse, analyse, kinds, only, keep));
+            if (file.Length > 0) _mon.ModelFile = file;
+            Post(() => Work(program, folder, mustAnalyse ? file : analysed, mustAnalyse, analyse, kinds, only, keep, check, stopOnErrors));
             return new JsonObject { ["ok"] = true, ["program"] = program.Name, ["file"] = file, ["analyses"] = mustAnalyse, ["keep_open"] = keep };
         }
     }
 
     /// <summary>Whether the program's saved analysis is of this model as it is now (same model, same revision, file still there).</summary>
+    private static int CasesOf(OfflineEtabs model) { try { return model.Model.LoadCases.Count; } catch (Exception ex) when (ex is not OutOfMemoryException) { return 0; } }
+
     private static bool AnalysedNow(OfflineEtabs model, CsiProgram program) =>
         ReferenceEquals(_analysedModel, model) && _analysedRevision == model.Revision && _analysedProgram == program.Key && File.Exists(_analysedFile);
 
@@ -166,15 +182,23 @@ public static class EngineRun
         return (frames, areas);
     }
 
-    private static void Work(CsiProgram program, string folder, string file, bool mustAnalyse, bool analyseAsked, IReadOnlyList<string> kinds, Shapes? only, bool keepOpen = false)
+    private static void Work(CsiProgram program, string folder, string file, bool mustAnalyse, bool analyseAsked, IReadOnlyList<string> kinds, Shapes? only, bool keepOpen, AnalysisModel? check, bool stopOnErrors)
     {
         IScratchWindow? window = null;
+        var mon = _mon!;
         var ctx = new FieldContext(program, folder, _model!);
         ctx.Offer(ProgramTools.Chat(program));
+        // The monitor's eyes while the job runs: the program's analysis log as it is written, the boxes the run
+        // answered, and a box nobody answered when the program goes quiet. Every second, on a thread of its own, so a
+        // program busy in a long call is still watched.
+        var tail = new LogTail();
+        using var watch = new Timer(_ => Watch(mon, tail), null, 1000, 1000);
         try
         {
             // The program the last run left open is closed first: it holds a licence and has the run's files open.
             CloseKept();
+            if (!Check(mon, program, check, stopOnErrors)) return;
+            if (Cancelled()) return;
             // The analysed file can be gone by the time the job starts (0.4.57 full test: SAP2000 was given
             // cpm-field-test-3795ee.sdb, which no longer existed, and waited on its "Open Model File" box). The model is
             // then written again and analysed first, never handed to the program as a missing file.
@@ -185,13 +209,19 @@ public static class EngineRun
                 mustAnalyse = true;
                 Say($"The analysed model file is gone, so {program.Name} analyses the model again first");
             }
+            mon.ModelFile = file;
+            mon.Begin("start", Path.GetFileName(file));
             Say(mustAnalyse
                 ? $"Starting {program.Name} in a window of its own, in the background (yours, if open, is not touched)"
                 : $"Starting {program.Name} on the model it analysed ({Path.GetFileName(file)}), in the background");
             window = ScratchProgram.Start(program, ctx, file, asIs: !mustAnalyse);
             if (window is null) { Fail($"{program.Name} could not be started with the model. {Failed(ctx)}"); return; }
-            lock (Gate) _starts++;
+            lock (Gate) { _starts++; _window = window; }
+            if (window.ModelPath.Length > 0) mon.ModelFile = window.ModelPath;
+            tail.File = RunLog.FileOf(mon.ModelFile); mon.LogFile = tail.File;
             if (window is ScratchProgram sp) Say(sp.Hide() ? $"{program.Name} is running hidden" : $"{program.Name} is running (it could not be hidden)");
+            mon.End("start", "done", $"{program.Name} opened {Path.GetFileName(mon.ModelFile)}");
+            if (Cancelled()) return;
             ctx.Link = window.Link;
             if (!mustAnalyse && !Locked(window.Link))
             {
@@ -207,16 +237,35 @@ public static class EngineRun
             }
             if (mustAnalyse)
             {
+                mon.Begin("analysis", mon.CaseCount > 0 ? $"{mon.CaseCount} load cases" : "");
+                // A new run writes a new log: what an earlier run left is not this run's.
+                tail.Restart();
                 Say("Running the analysis");
-                if (ctx.Tool("run_analysis") is null) { Fail($"The analysis did not run. {Failed(ctx)}"); return; }
+                if (ctx.Tool("run_analysis") is null)
+                {
+                    tail.Read(mon);
+                    Fail($"The analysis did not run. {Failed(ctx)}");
+                    return;
+                }
+                tail.Read(mon);
+                var trouble = RunLog.Trouble(mon.LogLines);
+                mon.End("analysis", trouble.Any(t => t?["level"]?.GetValue<string>() is "error" or "warning") ? "warning" : "done",
+                    trouble.Count > 0 ? string.Join("; ", trouble.Select(t => t?["meaning"]?.GetValue<string>())) : RunLog.Complete(mon.LogLines) ? "analysis complete" : "");
                 var saved = window is ScratchProgram s2 ? s2.ModelPath : "";
                 string before;
                 lock (Gate) { before = _analysedFile; _analysedModel = _model; _analysedRevision = _startRevision; _analysedFile = saved; _analysedProgram = program.Key; }
                 Forget(before, saved);
             }
-            else lock (Gate) Lines.Add(analyseAsked ? $"The model has not changed since its analysis in {program.Name}, so it is not analysed again." : $"The analysis in {program.Name} is kept; only the design runs.");
+            else
+            {
+                var why = analyseAsked ? $"The model has not changed since its analysis in {program.Name}, so it is not analysed again." : $"The analysis in {program.Name} is kept; only the design runs.";
+                lock (Gate) Lines.Add(why);
+                mon.Skip("analysis", why);
+            }
+            if (Cancelled()) return;
             if (kinds.Count > 0)
             {
+                mon.Begin("design", string.Join(", ", kinds.Select(k => Kinds[program.Key].First(x => x.Kind == k).Name)));
                 if (only is not null)
                 {
                     // The selected objects are selected in the program, as an engineer would before Start Design/Check.
@@ -233,8 +282,17 @@ public static class EngineRun
                         lock (Gate) Lines.Add("Design codes set: " + string.Join(", ", codes.Select(c => $"{c.Key} {c.Value}")) + ".");
                 }
                 Say("Running the design: " + string.Join(", ", kinds.Select(k => Kinds[program.Key].First(x => x.Kind == k).Name)) + (only is not null ? " (selected objects)" : ""));
-                if (ctx.Tool("run_design", DesignArgs(program, kinds)) is null) lock (Gate) Lines.Add("The design did not run: " + Failed(ctx));
+                if (ctx.Tool("run_design", DesignArgs(program, kinds)) is null)
+                {
+                    var why = Failed(ctx);
+                    lock (Gate) Lines.Add("The design did not run: " + why);
+                    mon.End("design", "failed", why);
+                }
+                else mon.End("design");
             }
+            else mon.Skip("design", "no design was asked");
+            if (Cancelled()) return;
+            mon.Begin("results");
             Say("Reading every result and design table");
             // The pack beside the model (the same file every run, as the pack written after a run in the program), with
             // the comments a reviewer made on the last one carried in.
@@ -248,14 +306,20 @@ public static class EngineRun
                 _pack = built.Content; _packFile = packFile; _packPage = packFile.Length > 0 ? pageFile : ""; _packModel = _model; _packRevision = _startRevision;
                 Lines.Add($"{built.Tables.Count} tables read ({built.Frames} frames, {built.Areas} areas)" + (packFile.Length > 0 ? $"; review pack: {packFile}" + (comments.Count > 0 ? $" ({comments.Count} comments kept)" : "") : ""));
             }
+            var design = RunLog.DesignTrouble(built.Content["tables"] as JsonObject);
+            mon.End("results", design.Count > 0 ? "warning" : "done", $"{built.Tables.Count} tables" + (design.Count > 0 ? "; the design has members to look at" : ""));
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException) { Fail($"The run stopped: {ex.Message} {Failed(ctx)}"); }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            tail.Read(mon);
+            Fail(_cancel ? "Cancelled." : $"The run stopped: {ex.Message} {Failed(ctx)}");
+        }
         finally
         {
             // Closed at once, whatever happened: the licence is used only while the job runs. Unless Settings > Runs
             // says to keep it open (Ahmed 2026-11-27, for now): it is then shown with the analysed model, the engineer's
-            // to look at, and closed before the next run.
-            if (window is ScratchProgram kept && keepOpen && kept.Reveal())
+            // to look at, and closed before the next run. A cancelled or stopped run is always closed.
+            if (window is ScratchProgram kept && keepOpen && !_cancel && kept.Reveal())
             {
                 try { kept.PutBackPlugIns(); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
                 lock (Gate)
@@ -263,9 +327,11 @@ public static class EngineRun
                     _kept = kept; _keptName = program.Name; _keptOpen = true; _closed = false;
                     Lines.Add($"{program.Name} was left open with the analysed model (Settings > Runs: keep the program open after a run). It holds a licence until you close it; the next run closes it first.");
                 }
+                mon.Skip("close", $"{program.Name} was left open with the analysed model (Settings > Runs)");
             }
             else if (window is not null)
             {
+                mon.Begin("close");
                 Say($"Closing {program.Name}");
                 var said = "";
                 try { said = window.Close(); } catch (Exception ex) when (ex is not OutOfMemoryException) { said = ex.Message; }
@@ -280,9 +346,229 @@ public static class EngineRun
                     Lines.Add(ended ? $"{program.Name} was closed; its licence is free." + why : $"{program.Name} did not end after the job, so its licence may still be held." + why);
                     if (!ended && _error.Length == 0) _error = $"{program.Name} did not end after the job.{why}";
                 }
+                mon.End("close", ended ? "done" : "failed", ended ? "the licence is free" : said);
             }
-            lock (Gate) { _running = false; _done = true; _phase = _error.Length > 0 ? "Stopped" : "Done"; }
+            else { lock (Gate) _closed = true; mon.Skip("close", "the program was not started"); }
+            watch.Dispose();
+            tail.Read(mon);
+            Notices(mon, window);
+            lock (Gate) { _window = null; }
+            mon.Report = Report(mon, program);
+            mon.Finish();
+            lock (Gate) { _running = false; _done = true; _phase = _error.Length > 0 ? (_cancel ? "Cancelled" : "Stopped") : "Done"; }
         }
+    }
+
+    /// <summary>
+    /// The instability check before the program is started (the pre-run checker, Analyze > Check Model for
+    /// Instabilities): what it finds is in the monitor and the Run Report. False when the run must stop here (errors
+    /// found and the Run form asked to stop on them): the program is then never started, so no licence is used.
+    /// </summary>
+    private static bool Check(RunMonitor mon, CsiProgram program, AnalysisModel? check, bool stopOnErrors)
+    {
+        if (check is null) return true;
+        mon.Begin("check");
+        Say("Checking the model for instabilities");
+        try
+        {
+            var report = StabilityCheck.Run(check, new StabilityCheck.Options(MostFindings: 200));
+            mon.Instabilities = StabilityTools.Json(report, program, modeler: true);
+            var summary = mon.Instabilities["summary"]?.GetValue<string>() ?? "";
+            lock (Gate) Lines.Add(summary);
+            if (report.Errors > 0 && stopOnErrors)
+            {
+                mon.End("check", "failed", $"{report.Errors} error(s), {report.Warnings} warning(s)");
+                Fail($"The instability check found {report.Errors} error(s) that would stop the analysis or make it unstable, so {program.Name} was not started (no licence was used). Fix them (Show on model), or press Run anyway.");
+                return false;
+            }
+            mon.End("check", report.Errors + report.Warnings > 0 ? "warning" : "done", report.Errors + report.Warnings > 0 ? $"{report.Errors} error(s), {report.Warnings} warning(s)" : "no problems found");
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { mon.End("check", "warning", "the check could not be made: " + ex.Message); }
+        return true;
+    }
+
+    /// <summary>True when Cancel was pressed: the job stops here (the program, if started, is ended in the finally).</summary>
+    private static bool Cancelled()
+    {
+        if (!_cancel) return false;
+        Fail("Cancelled.");
+        return true;
+    }
+
+    /// <summary>The program's analysis log read as it grows.</summary>
+    private sealed class LogTail
+    {
+        private readonly object _gate = new();
+        private long _offset;
+        private string _partial = "";
+        public string File { get; set; } = "";
+
+        /// <summary>From the end of what is there now: the log an earlier run wrote is not this one's.</summary>
+        public void Restart()
+        {
+            lock (_gate)
+            {
+                _partial = "";
+                try { _offset = File.Length > 0 && System.IO.File.Exists(File) ? new FileInfo(File).Length : 0; } catch (IOException) { _offset = 0; }
+            }
+        }
+
+        public void Read(RunMonitor mon)
+        {
+            List<string> lines;
+            lock (_gate)
+            {
+                if (File.Length == 0) return;
+                // The program may start a log of another case of the name (ETABS writes MODEL.LOG; SAP2000 MODEL.LOG or .OUT).
+                if (!System.IO.File.Exists(File) && RunLog.FileOf(mon.ModelFile) is { Length: > 0 } other && System.IO.File.Exists(other)) { File = other; mon.LogFile = other; _offset = 0; }
+                lines = RunLog.Tail(File, ref _offset, ref _partial);
+            }
+            if (lines.Count > 0) mon.Log(lines);
+        }
+    }
+
+    private static int _seenNotices;
+
+    /// <summary>One look of the monitor: new log lines, the boxes answered, and a box the program waits on.</summary>
+    private static void Watch(RunMonitor mon, LogTail tail)
+    {
+        try
+        {
+            tail.Read(mon);
+            IScratchWindow? window;
+            lock (Gate) window = _window;
+            Notices(mon, window);
+            if (window is not ScratchProgram sp) { mon.Wait(""); return; }
+            var quiet = (DateTime.Now - mon.LastHeard).TotalSeconds;
+            if (quiet < 30) { mon.Wait(""); return; }
+            // Quiet for half a minute: what the program shows is said, so a box nobody answered is never a silent wait.
+            var open = sp.OpenWindows();
+            mon.Wait(open.Count == 0 ? "" : open.Any(t => t.Contains("licen", StringComparison.OrdinalIgnoreCase))
+                ? $"{mon.Program} is showing a licence message: " + string.Join(" | ", open) + ". Press Show program window and answer it there."
+                : $"{mon.Program} has written nothing for {quiet:0} s. Its open windows: " + string.Join(" | ", open) + ". If one waits for an answer, press Show program window.");
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { /* the next look tries again */ }
+    }
+
+    private static void Notices(RunMonitor mon, IScratchWindow? window)
+    {
+        if (window is not ScratchProgram sp) return;
+        var all = sp.Answered();
+        lock (Gate)
+        {
+            if (all.Count < _seenNotices) _seenNotices = 0;
+            foreach (var n in all.Skip(_seenNotices)) { mon.Notice(n); Lines.Add($"{mon.Program} showed a box, answered by the run: {n}"); }
+            _seenNotices = all.Count;
+        }
+    }
+
+    /// <summary>
+    /// The Run Report: whether the job finished, the step it stopped at, what the program said (its log, its boxes) in
+    /// plain words with what to do, the instability check's findings, the design's members that do not pass, and the
+    /// files to open. Made for every job, so a run that finished with warnings says so too.
+    /// </summary>
+    internal static JsonObject Report(RunMonitor mon, CsiProgram program)
+    {
+        string error;
+        lock (Gate) error = _error;
+        var steps = mon.All;
+        var failed = steps.FirstOrDefault(s => s.State == "failed");
+        var trouble = RunLog.Trouble(mon.LogLines);
+        if (!mon.Cancelled && RunLog.Plain(error) is { } plain && !trouble.Any(t => t?["kind"]?.GetValue<string>() == plain["kind"]?.GetValue<string>())) trouble.Insert(0, plain);
+        JsonArray design;
+        lock (Gate) design = RunLog.DesignTrouble((_pack ?? new JsonObject())["tables"] as JsonObject);
+        var inst = mon.Instabilities;
+        var instErrors = inst?["errors"]?.GetValue<int>() ?? 0;
+        var instWarnings = inst?["warnings"]?.GetValue<int>() ?? 0;
+        var ok = error.Length == 0;
+        var warn = trouble.Count > 0 || design.Count > 0 || instErrors + instWarnings > 0 || mon.Notices.Count > 0;
+        var headline = mon.Cancelled ? $"Cancelled. {program.Name} was ended without saving; your model is as it was."
+            : !ok ? $"The run stopped at \"{failed?.Name ?? "the run"}\"."
+            : warn ? $"The run finished in {program.Name}, with things to look at below."
+            : $"The run finished in {program.Name} with no warnings.";
+        var report = new JsonObject
+        {
+            ["ok"] = ok, ["cancelled"] = mon.Cancelled, ["headline"] = headline, ["error"] = error,
+            ["step"] = failed?.Name ?? "", ["program"] = program.Name,
+            ["trouble"] = trouble, ["design"] = design, ["notices"] = new JsonArray(mon.Notices.Select(n => (JsonNode)n).ToArray()),
+            ["log_file"] = mon.LogFile, ["model_file"] = mon.ModelFile,
+            ["can_open"] = mon.ModelFile.Length > 0 && File.Exists(mon.ModelFile),
+            ["log_tail"] = new JsonArray(mon.LogLines.TakeLast(60).Select(l => (JsonNode)l).ToArray()),
+        };
+        if (inst is not null && instErrors + instWarnings > 0) report["instabilities"] = inst.DeepClone();
+        return report;
+    }
+
+    /// <summary>The Run Monitor's Cancel: the job stops, and the program it started is ended at once (its licence freed).</summary>
+    public static JsonObject Cancel()
+    {
+        IScratchWindow? window;
+        RunMonitor? mon;
+        lock (Gate)
+        {
+            if (!_running) return new JsonObject { ["ok"] = false, ["error"] = "No run is going." };
+            _cancel = true; window = _window; mon = _mon;
+        }
+        mon?.Stop("cancelled", cancelled: true);
+        var said = window is ScratchProgram sp ? sp.Kill() : $"{mon?.Program ?? "The program"} is not open yet; the run stops as soon as it answers, and it is ended then";
+        lock (Gate) Lines.Add("Cancel pressed: " + said + ".");
+        return new JsonObject { ["ok"] = true, ["said"] = said };
+    }
+
+    /// <summary>The Run Monitor's Show program window: the hidden program comes on the screen, to read and answer a box there.</summary>
+    public static JsonObject ShowProgram()
+    {
+        IScratchWindow? window;
+        lock (Gate) window = _window;
+        if (window is not ScratchProgram sp) return new JsonObject { ["ok"] = false, ["error"] = "The program of the run is not open." };
+        var shown = sp.Show();
+        return shown ? new JsonObject { ["ok"] = true, ["said"] = $"{_program} is on the screen. Answer what it shows there; the run carries on (and closes it after the job)." }
+            : new JsonObject { ["ok"] = false, ["error"] = $"{_program} did not come on the screen: it may be held by a box. Look for its window on the taskbar." };
+    }
+
+    /// <summary>
+    /// The Run Report's Open in the program: a copy of the model as the job ran it (its results files too) opens in the
+    /// real program, visible, to inspect what it says. A copy, so nothing done there changes the run's own files.
+    /// </summary>
+    public static JsonObject OpenInProgram(Func<CsiProgram, string>? apiFile = null)
+    {
+        RunMonitor? mon;
+        lock (Gate) { if (_running) return new JsonObject { ["ok"] = false, ["error"] = "The run is still going: wait for it, or Cancel it first." }; mon = _mon; }
+        if (mon is null || mon.ModelFile.Length == 0 || !File.Exists(mon.ModelFile)) return new JsonObject { ["ok"] = false, ["error"] = "The run left no model file to open." };
+        var program = CsiProgram.All.FirstOrDefault(p => p.Name == mon.Program) ?? CsiProgram.Etabs;
+        var api = (apiFile ?? (p => EtabsApi.FindApiFile(p)))(program);
+        var exe = Path.Combine(Path.GetDirectoryName(api) ?? "", program.ProcessName + ".exe");
+        if (!File.Exists(exe)) return new JsonObject { ["ok"] = false, ["error"] = $"{program.Name} was not found on this PC ({exe})." };
+        string copy;
+        try { copy = CopyForInspection(mon.ModelFile); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return new JsonObject { ["ok"] = false, ["error"] = "The model could not be copied to open: " + ex.Message }; }
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(exe, "\"" + copy + "\"") { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(copy)! }); }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) { return new JsonObject { ["ok"] = false, ["error"] = $"{program.Name} could not be started: {ex.Message}" }; }
+        return new JsonObject { ["ok"] = true, ["file"] = copy, ["said"] = $"{program.Name} is opening a copy of the model as it ran ({copy}). It is yours to look at; the run's own files are not touched." };
+    }
+
+    /// <summary>The model file and its sidecar files (same name, any extension: results, log) copied into "inspect HHmmss" beside them.</summary>
+    internal static string CopyForInspection(string modelFile)
+    {
+        var dir = Path.GetDirectoryName(Path.GetFullPath(modelFile))!;
+        var stem = Path.GetFileNameWithoutExtension(modelFile);
+        var to = Path.Combine(dir, "inspect " + DateTime.Now.ToString("HHmmss", System.Globalization.CultureInfo.InvariantCulture));
+        Directory.CreateDirectory(to);
+        foreach (var f in Directory.EnumerateFiles(dir, stem + ".*"))
+            File.Copy(f, Path.Combine(to, Path.GetFileName(f)), overwrite: true);
+        return Path.Combine(to, Path.GetFileName(modelFile));
+    }
+
+    /// <summary>The Run Report's Open run folder: Windows Explorer on the run's folder, the model file picked.</summary>
+    public static JsonObject OpenFolder()
+    {
+        RunMonitor? mon;
+        lock (Gate) mon = _mon;
+        var file = mon?.ModelFile ?? "";
+        if (file.Length == 0) return new JsonObject { ["ok"] = false, ["error"] = "No run yet." };
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", File.Exists(file) ? $"/select,\"{file}\"" : $"\"{Path.GetDirectoryName(file)}\"") { UseShellExecute = false }); }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) { return new JsonObject { ["ok"] = false, ["error"] = ex.Message }; }
+        return new JsonObject { ["ok"] = true };
     }
 
     /// <summary>Closes the program the last run left open, if it is still there, and says so.</summary>
@@ -362,6 +648,7 @@ public static class EngineRun
         // A licence message is the engineer's to answer: said plainly, never pressed.
         var licence = why.Contains("licen", StringComparison.OrdinalIgnoreCase) || why.Contains("did not start within", StringComparison.OrdinalIgnoreCase);
         lock (Gate) { _error = why + (licence ? " If a licence message is showing in the program's window, answer it there, close that window and run again." : ""); Lines.Add(_error); }
+        _mon?.Stop(why, cancelled: _cancel);
     }
 
     /// <summary>What the page shows while it waits, and the results once the run is done (taken once).</summary>
@@ -379,6 +666,7 @@ public static class EngineRun
                 ["starts"] = _starts,
                 ["closed"] = _closed,
                 ["kept_open"] = _keptOpen,
+                ["monitor"] = _mon?.Json(),
                 ["keep_open"] = KeepOpenSetting(),
                 ["kinds"] = new JsonObject(Kinds.Select(p => KeyValuePair.Create(p.Key, (JsonNode?)new JsonArray(p.Value.Select(k => (JsonNode)new JsonObject { ["kind"] = k.Kind, ["name"] = k.Name }).ToArray())))),
             };

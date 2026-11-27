@@ -993,6 +993,7 @@ Test("plug-in: the assistant is started with the dotnet ETABS runs on", () =>
 });
 
 foreach (var (name, body) in SafeTests.All()) Test(name, body);
+foreach (var (name, body) in RunMonitorTests.All()) Test(name, body);
 foreach (var (name, body) in CsiToolsTests.All()) Test(name, body);
 foreach (var (name, body) in CsiFieldStepsTests.All()) Test(name, body);
 foreach (var (name, body) in TesterBugTests.All()) Test(name, body);
