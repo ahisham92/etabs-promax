@@ -13,7 +13,7 @@ namespace CsiProMax.Chat;
 internal static class ChatFiles
 {
     /// <summary>The file types shown as a card.</summary>
-    public static readonly string[] Kinds = [".xlsx", ".xlsm", ".xls", ".csv", ".docx", ".pptx", ".pdf", ".dxf", ".dwg", ".txt", ".md", ".json", ".e2k", ".zip", ".cpmx", ".cpm", ".html"];
+    public static readonly string[] Kinds = [".xlsx", ".xlsm", ".xls", ".csv", ".docx", ".pptx", ".pdf", ".dxf", ".dwg", ".txt", ".md", ".json", ".e2k", ".zip", ".cpmx", ".cpme", ".cpms", ".cpmf", ".cpm", ".html"];
 
     /// <summary>At most this many files per step; the rest are in the same folder (Show in folder).</summary>
     public const int Most = 6;
@@ -68,6 +68,9 @@ internal static class ChatFiles
         ".json" => "JSON file",
         ".e2k" => "ETABS text file", // ETABS itself
         ".cpmx" => "CSI ProMax review pack",
+        ".cpme" => "CSI ProMax model for ETABS", // ETABS itself
+        ".cpms" => "CSI ProMax model for SAP2000",
+        ".cpmf" => "CSI ProMax model for SAFE",
         ".cpm" => "CSI ProMax model",
         ".html" => "Web page (opens in the browser)",
         ".zip" => "Zip folder",

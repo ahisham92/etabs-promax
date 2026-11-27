@@ -8,7 +8,7 @@ const string Help = """
 
       cpm new-frame <out> --x 6,6,6 --y 5,5 --stories 4 [--height 3.2] [--sdl 2] [--live 3] [--title "Name"]
             A regular concrete frame building (kN, m), ready to import into ETABS.
-      cpm convert <in> <out>     Between ETABS text files (.e2k, .$et) and CSI ProMax models (.cpm), either way, or to SAP2000 (.s2k).
+      cpm convert <in> <out>     Between ETABS text files (.e2k, .$et) and CSI ProMax models (.cpme, .cpms, .cpmf), either way, or to SAP2000 (.s2k).
       cpm info <file>            What is in a model.
       cpm check <file>           Completeness and connectivity checks. Exit code 1 when there are errors.
       cpm quantities <file>      Lengths, areas and concrete volumes by section.
@@ -16,7 +16,8 @@ const string Help = """
             What would stop the analysis from completing, found without running it: floating parts, missing
             supports, sections and materials, mechanisms, releases, duplicates, load cases and mass. Exit code 1 on errors.
 
-    <out> ending in .cpm is a CSI ProMax model, .s2k a SAP2000 text file; anything else is written as an ETABS text file.
+    <out> ending in .cpme, .cpms or .cpmf is a CSI ProMax model for ETABS, SAP2000 or SAFE (.cpm: for the model's own
+    program; an old .cpm is read as well), .s2k a SAP2000 text file; anything else is written as an ETABS text file.
     In ETABS: File > Import > ETABS .e2k Text File. In SAP2000: File > Import > SAP2000 .s2k Text File.
     """;
 
@@ -35,7 +36,7 @@ try
                 (int)Number(Option("--stories") ?? throw new UserError("Give the number of stories, e.g. --stories 4."), "--stories"),
                 Number(Option("--height") ?? "3.2", "--height"),
                 Number(Option("--sdl") ?? "2", "--sdl"), Number(Option("--live") ?? "3", "--live"));
-            Save(model, output);
+            output = Save(model, output);
             Console.WriteLine($"Wrote {output}: {Summary(model)}");
             return 0;
         }
@@ -43,7 +44,7 @@ try
         {
             var model = Load(Positional(1, "the file to read"));
             var output = Positional(2, "the file to write");
-            Save(model, output);
+            output = Save(model, output);
             Console.WriteLine($"Wrote {output}: {Summary(model)}");
             return 0;
         }
@@ -116,7 +117,7 @@ static double[] Numbers(string text) => text.Split(',', StringSplitOptions.Remov
 
 static string F(double value) => value.ToString("0.###", CultureInfo.InvariantCulture);
 
-static bool IsEpm(string path) => path.EndsWith(ModelFile.Extension, StringComparison.OrdinalIgnoreCase);
+static bool IsEpm(string path) => ModelFile.IsModelFile(path);
 
 static StructuralModel Load(string path)
 {
@@ -124,12 +125,20 @@ static StructuralModel Load(string path)
     return IsEpm(path) ? ModelFile.Load(path) : E2kReader.ReadFile(path);
 }
 
-static void Save(StructuralModel model, string path)
+// A CSI ProMax model is written with its program's extension: .cpme, .cpms or .cpmf names the program, and the old
+// .cpm (which every program shared) becomes the extension of the model's own program. Gives back the file written.
+static string Save(StructuralModel model, string path)
 {
-    if (IsEpm(path)) ModelFile.Save(model, path);
+    if (IsEpm(path))
+    {
+        if (ModelFile.TargetOfExtension(path) is { } target) model.Target = target;
+        else path = ModelFile.PathFor(path, model.Target);
+        ModelFile.Save(model, path);
+    }
     else if (path.EndsWith(".s2k", StringComparison.OrdinalIgnoreCase))
         foreach (var note in CsiProMax.S2k.S2kWriter.WriteFile(model, path).Notes) Console.WriteLine("  left out: " + note);
     else E2kWriter.WriteFile(model, path);
+    return path;
 }
 
 static string Summary(StructuralModel m)

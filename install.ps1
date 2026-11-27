@@ -12,6 +12,8 @@
 #      program is closed and has no other plug-in. A copy of the program's settings file is kept beside it first.
 #   5. Keeps it there: a small hidden task at every sign-in (keep-plugins.ps1) adds it back when a program has emptied
 #      its plug-in list. To remove CSI ProMax: irm https://raw.githubusercontent.com/ahisham92/etabs-promax/main/uninstall.ps1 | iex
+#   Also: the Modeler's model files (.cpme for ETABS, .cpms for SAP2000, .cpmf for SAFE, and the older .cpm) open in
+#   CSI ProMax Engine with a double-click, registered for this Windows user only.
 # It never starts, closes, licenses or changes a CSI program or a model. Running it again is safe.
 #
 # With options (all optional):
@@ -55,7 +57,9 @@ function Install-CsiProMax {
         [switch]$NoRuntime,
         [switch]$Preview,
         [switch]$NoPacks,
-        [switch]$Packs
+        [switch]$Packs,
+        # For tests: a registry key that stands in for HKCU:\Software\Classes, where the model file types are registered.
+        [string]$ClassesRoot
     )
 
     $ErrorActionPreference = 'Stop'
@@ -67,6 +71,13 @@ function Install-CsiProMax {
         @{ Program = 'ETABS';   Name = 'CsiProMaxPlugin';     Dll = 'CsiProMaxPlugin.dll';     Oldest = 18 },
         @{ Program = 'SAFE';    Name = 'CsiProMaxSafePlugin'; Dll = 'CsiProMaxSafePlugin.dll'; Oldest = 20 },
         @{ Program = 'SAP2000'; Name = 'CsiProMaxSapPlugin';  Dll = 'CsiProMaxSapPlugin.dll';  Oldest = 20 }
+    )
+    # The Modeler's own files, one type per program (Ahmed 2026-11-27), and the old .cpm that every program shared.
+    $modelTypes = @(
+        @{ Ext = '.cpme'; Id = 'CsiProMax.Model.Etabs';   Name = 'CSI ProMax model for ETABS' },
+        @{ Ext = '.cpms'; Id = 'CsiProMax.Model.Sap2000'; Name = 'CSI ProMax model for SAP2000' },
+        @{ Ext = '.cpmf'; Id = 'CsiProMax.Model.Safe';    Name = 'CSI ProMax model for SAFE' },
+        @{ Ext = '.cpm';  Id = 'CsiProMax.Model';         Name = 'CSI ProMax model' }
     )
 
     # Whether a CSI program is really installed, not only its settings left behind after it was removed (Ahmed,
@@ -544,6 +555,46 @@ function Install-CsiProMax {
                 }
             }
             catch { Say "  (The Modeler shortcut could not be made: $($_.Exception.Message) Double-click 'Open the Modeler.cmd' in $Folder instead.)" }
+        }
+
+        # 3c. The Modeler's own files open in the Engine with a double-click, each with CSI ProMax's icon: .cpme (ETABS),
+        # .cpms (SAP2000), .cpmf (SAFE) and the old .cpm. The Engine then works in the program the file is for and asks
+        # nothing. Only for this Windows user (HKCU), so no administrator is needed. An extension another program already
+        # opens is left to it, so nothing of someone else's is taken; CSI ProMax's own entries are pointed at this folder.
+        $classes = $ClassesRoot
+        if (-not $classes -and $onWindows -and -not $SettingsRoot) { $classes = 'HKCU:\Software\Classes' }
+        if ($classes -and -not $Preview) {
+            try {
+                $runtimeRoot = Find-DesktopRuntime
+                $dotnet = if ($runtimeRoot) { Join-Path $runtimeRoot.Root 'dotnet.exe' } else { 'dotnet.exe' }
+                $icon = Join-Path $Folder 'csi-promax.ico'
+                if (-not (Test-Path -LiteralPath $icon) -and $env:LOCALAPPDATA) { $icon = Join-Path $env:LOCALAPPDATA 'CsiProMax\csi-promax.ico' }
+                $command = '"' + $dotnet + '" "' + (Join-Path $Folder 'CsiProMax.dll') + '" --modeler "%1"'
+                $left = @()
+                foreach ($type in $modelTypes) {
+                    $kind = Join-Path $classes $type.Id
+                    foreach ($pair in @(@($kind, $type.Name), @((Join-Path $kind 'DefaultIcon'), ('"' + $icon + '",0')), @((Join-Path $kind 'shell\open\command'), $command))) {
+                        if (-not (Test-Path -LiteralPath $pair[0])) { New-Item -Path $pair[0] -Force | Out-Null }
+                        Set-ItemProperty -LiteralPath $pair[0] -Name '(default)' -Value $pair[1]
+                    }
+                    $extension = Join-Path $classes $type.Ext
+                    if (-not (Test-Path -LiteralPath $extension)) { New-Item -Path $extension -Force | Out-Null }
+                    $owner = [string](Get-ItemProperty -LiteralPath $extension -Name '(default)' -ErrorAction SilentlyContinue).'(default)'
+                    if (-not $owner -or $owner -like 'CsiProMax.*') { Set-ItemProperty -LiteralPath $extension -Name '(default)' -Value $type.Id }
+                    else { $left += $type.Ext }
+                }
+                # Explorer shows the new icons at once, not after the next sign-in.
+                if (-not $ClassesRoot) {
+                    try {
+                        Add-Type -Namespace CsiProMaxInstall -Name Shell -MemberDefinition '[DllImport("shell32.dll")] public static extern void SHChangeNotify(int eventId, int flags, System.IntPtr item1, System.IntPtr item2);'
+                        [CsiProMaxInstall.Shell]::SHChangeNotify(0x08000000, 0, [IntPtr]::Zero, [IntPtr]::Zero)
+                    }
+                    catch { }
+                }
+                Say '  Model files (.cpme for ETABS, .cpms for SAP2000, .cpmf for SAFE, and the older .cpm) open in CSI ProMax Engine with a double-click.'
+                if ($left.Count -gt 0) { Say "  ($($left -join ', ') already open in another program, so that is left as it is.)" }
+            }
+            catch { Say "  (The model file types could not be registered: $($_.Exception.Message) Open them from File > Open in CSI ProMax Engine.)" }
         }
 
         # 4. The Tools menu of each program.

@@ -27,7 +27,9 @@ function Uninstall-CsiProMax {
         [string]$StateRoot,
         [string]$KeeperFile,
         [switch]$NoProcessCheck,
-        [switch]$NoShortcuts
+        [switch]$NoShortcuts,
+        # For tests: a registry key that stands in for HKCU:\Software\Classes, where install.ps1 registered the model file types.
+        [string]$ClassesRoot
     )
     $ErrorActionPreference = 'Stop'
     if ($Everything) { $Files = $true }
@@ -68,6 +70,27 @@ function Uninstall-CsiProMax {
             if ($menu -and (Test-Path -LiteralPath $menu) -and -not (Get-ChildItem -LiteralPath $menu -Force)) { try { Remove-Item -LiteralPath $menu -Force } catch { } }
             if ($StateRoot) { $mark = Join-Path $StateRoot 'shortcuts.txt'; if (Test-Path -LiteralPath $mark) { try { Remove-Item -LiteralPath $mark -Force } catch { } } }
             Write-Host '  The Modeler and Viewer shortcuts are deleted.'
+        }
+
+        # 3b. The model file types install.ps1 registered (.cpme, .cpms, .cpmf, .cpm): only CSI ProMax's own entries go;
+        # an extension another program has taken since is left to it. The model files themselves are never touched.
+        $classes = $ClassesRoot
+        if (-not $classes -and -not $SettingsRoot -and $env:OS -eq 'Windows_NT') { $classes = 'HKCU:\Software\Classes' }
+        if ($classes) {
+            try {
+                foreach ($ext in '.cpme', '.cpms', '.cpmf', '.cpm') {
+                    $key = Join-Path $classes $ext
+                    if (-not (Test-Path -LiteralPath $key)) { continue }
+                    $owner = [string](Get-ItemProperty -LiteralPath $key -Name '(default)' -ErrorAction SilentlyContinue).'(default)'
+                    if ($owner -like 'CsiProMax.*') { Remove-Item -LiteralPath $key -Recurse -Force }
+                }
+                foreach ($id in 'CsiProMax.Model.Etabs', 'CsiProMax.Model.Sap2000', 'CsiProMax.Model.Safe', 'CsiProMax.Model') {
+                    $key = Join-Path $classes $id
+                    if (Test-Path -LiteralPath $key) { Remove-Item -LiteralPath $key -Recurse -Force }
+                }
+                Write-Host '  The model file types (.cpme, .cpms, .cpmf, .cpm) no longer open in CSI ProMax. Your model files are kept.'
+            }
+            catch { Write-Host "  (The model file types could not all be removed: $($_.Exception.Message))" -ForegroundColor Yellow }
         }
 
         # 4. The files, only when asked.

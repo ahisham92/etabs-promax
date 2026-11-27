@@ -1253,7 +1253,7 @@ public static class CsiTools
             ["opened"] = Path.GetFileName(path), ["model"] = now.File, ["closed"] = before.Length > 0 ? Path.GetFileName(before) : "an untitled model",
             ["units"] = $"{now.Force}, {now.Length}", ["locked"] = now.Locked,
         };
-        // A Modeler .e2k: what its forms hold beyond the .e2k's keywords is in the .cpm beside it, and goes in by the tables.
+        // A Modeler .e2k: what its forms hold beyond the .e2k's keywords is in the Modeler's own file beside it, and goes in by the tables.
         if ((e.Program.Key == CsiProgram.Etabs.Key && Path.GetExtension(path).Equals(".e2k", StringComparison.OrdinalIgnoreCase)
              || e.Program.Key == CsiProgram.Sap2000.Key && Path.GetExtension(path).Equals(".s2k", StringComparison.OrdinalIgnoreCase))
             && ModelerTables.ModelerFileBeside(path) is { } cpm && ModelerTables.HasRows(cpm, e.Program))

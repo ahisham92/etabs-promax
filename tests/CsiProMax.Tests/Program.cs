@@ -758,7 +758,7 @@ Test("modeler: a building is modelled with no ETABS and saved as an ETABS text f
         var revision = o.Revision;
         var saved = Call(mcp, "save_model_as", """{"name":"office"}""");
         var file = (string)saved["file"]!;
-        Check(file.EndsWith("office.e2k") && File.Exists(file) && File.Exists(Path.ChangeExtension(file, ".cpm")), "both files written");
+        Check(file.EndsWith("office.e2k") && File.Exists(file) && File.Exists(Path.ChangeExtension(file, ".cpme")), "both files written (the .e2k and the ETABS model's .cpme)");
         Check(o.Revision > revision && !o.Unsaved, "saved");
         var back = E2kReader.ReadFile(file);
         Equal(15, back.LineAssigns.Count, "frames in the ETABS file"); Equal(4, back.AreaAssigns.Count, "areas in the ETABS file");
@@ -1142,6 +1142,7 @@ foreach (var (name, body) in FieldRun048Tests.All()) Test(name, body);
 foreach (var (name, body) in FieldQuietTests.All()) Test(name, body);
 foreach (var (name, body) in TeamLibraryTests.All()) Test(name, body);
 foreach (var (name, body) in ChatDefaultsTests.All()) Test(name, body);
+foreach (var (name, body) in FileTypeTests.All()) Test(name, body);
 
 var failed = 0;
 // ---- SAP2000 ----

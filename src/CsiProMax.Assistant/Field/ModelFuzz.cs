@@ -17,7 +17,7 @@ namespace CsiProMax.Assistant;
 /// <list type="bullet">
 /// <item>a refusal is a <see cref="ToolInputException"/> or <see cref="EtabsException"/> (a plain message), never any
 /// other exception, and leaves the model exactly as it was;</item>
-/// <item>a call that went through leaves a model that still saves (.cpm), writes and reads back as .e2k, and writes as
+/// <item>a call that went through leaves a model that still saves as the Modeler's own file, writes and reads back as .e2k, and writes as
 /// .s2k and .f2k without throwing.</item>
 /// </list>
 /// The same seed gives the same calls, so a finding can be run again.
@@ -116,7 +116,7 @@ public static class ModelFuzz
     /// <summary>Why the model no longer saves or writes, or null when it does.</summary>
     public static string? Broken(StructuralModel m)
     {
-        string step = "save as .cpm";
+        string step = "save as the Modeler's own file";
         try
         {
             ModelFile.FromJson(ModelFile.ToJson(m));
