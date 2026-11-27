@@ -67,6 +67,15 @@ public static class CaseTools
               "kind":{"type":"string"},"pattern":{"type":"string"},"objects":{"type":"array","items":{"type":"string"}},
               "values":{"type":"object","additionalProperties":{"type":"number"}},"dir":{"type":"string"},"replace":{"type":"boolean"}}}
             """, Ask.Changes, AssignLoads, a => $"Assign {a.Text("kind").Replace('_', ' ')} loads in {a.Text("pattern")}"),
+        new("assign_sap_loads",
+            "SAP2000's Assign > Joint, Frame, Cable, Tendon, Area, Solid and Link/Support Loads forms: sets the rows of SAP2000's own table on each object (label@story; joints point@story), " +
+            "with option add (Add to Existing Loads), replace (Replace Existing Loads, the default: the object's loads of this table in that pattern go first) or delete (Delete Existing Loads). " +
+            "table is SAP2000's table, e.g. Joint Loads - Force (CoordSys, F1..M3), Frame Loads - Distributed (CoordSys, Type, Dir, DistType, RelDistA, RelDistB, AbsDistA, AbsDistB, FOverLA, FOverLB, MOverLA, MOverLB), " +
+            "Frame Loads - Point, Frame Loads - Temperature, Frame Loads - Strain, Frame Loads - Gravity, Frame Loads - Deformation, Frame Loads - Target Force, Overwrites - Auto Wave Loads - Frame, " +
+            "Overwrites - Auto Wind Loads - Frame, Frame Fireproofing Assignments, Area Loads - Gravity, ...; rows give its fields by SAP2000's names (LoadPat comes from pattern). " +
+            "Rows the Modeler holds as its own loads become them; every other row is kept as SAP2000 has it and goes into the .s2k.",
+            """{"type":"object","required":["table","objects"],"properties":{"table":{"type":"string"},"objects":{"type":"array","items":{"type":"string"}},"pattern":{"type":"string"},"option":{"type":"string","enum":["add","replace","delete"]},"rows":{"type":"array","items":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}}}}}""",
+            Ask.Changes, AssignSapLoads, a => $"Assign {a.Text("table")}{(a.Text("pattern").Length > 0 ? " in " + a.Text("pattern") : "")}"),
         new("set_load_cases_to_run",
             "Analyze > Set Load Cases to Run: which load cases the next run runs. run lists the cases to run, not_run the cases to leave out; all true runs every case, all false none. A case not named keeps its choice. The run sets the program's own run flags before it starts (SAP2000's file gets RunCase=No).",
             """{"type":"object","properties":{"run":{"type":"array","items":{"type":"string"}},"not_run":{"type":"array","items":{"type":"string"}},"all":{"type":"boolean"}}}""",
@@ -367,6 +376,27 @@ public static class CaseTools
             }
             return (JsonNode)new JsonObject { ["done"] = $"{kind.Replace('_', ' ')} loads in {pattern} on {objects.Count} object{(objects.Count == 1 ? "" : "s")}.", ["objects"] = objects.Count };
         });
+    }
+
+    private static JsonNode AssignSapLoads(JsonElement a, ICsiLink e)
+    {
+        var link = Offline(e);
+        var rows = new List<Dictionary<string, string>>();
+        if (a.TryGetProperty("rows", out var rs) && rs.ValueKind == JsonValueKind.Array)
+            foreach (var r in rs.EnumerateArray())
+                rows.Add(r.ValueKind == JsonValueKind.Object ? r.EnumerateObject().ToDictionary(x => x.Name, x => x.Value.ValueKind switch
+                {
+                    JsonValueKind.String => x.Value.GetString() ?? "", JsonValueKind.True => "Yes", JsonValueKind.False => "No", _ => x.Value.GetRawText(),
+                }, StringComparer.Ordinal) : throw new ToolInputException("Each row is an object of SAP2000's fields."));
+        var option = a.Text("option", "replace");
+        var table = a.Need("table");
+        var objects = a.Texts("objects");
+        var pattern = a.Text("pattern");
+        if (option != "delete" && rows.Count == 0) throw new ToolInputException("Give the rows the form sets.");
+        // Checked on a copy first: a refusal leaves the model as it was.
+        Core(() => SapObjectLoads.Assign(ModelFile.FromJson(ModelFile.ToJson(link.Model)), table, objects, pattern.Length > 0 ? pattern : null, rows, option));
+        var n = link.Edit(m => SapObjectLoads.Assign(m, table, objects, pattern.Length > 0 ? pattern : null, rows, option));
+        return new JsonObject { ["done"] = $"{table}: {option} on {n} object{(n == 1 ? "" : "s")}{(pattern.Length > 0 ? " in " + pattern : "")}.", ["objects"] = n };
     }
 
     // ---- Analyze > Set Load Cases to Run ----
