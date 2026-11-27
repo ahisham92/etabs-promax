@@ -328,6 +328,7 @@ public static class CaseTools
         return Offline(e).Edit(m => Core(() =>
         {
             var cases = RunCases.List(m);
+            if (run.Concat(notRun).FirstOrDefault(n => !cases.Exists(c => c.Name == n)) is { } bad) throw new ArgumentException($"The model has no load case {bad}.");
             var off = all switch { true => new HashSet<string>(StringComparer.Ordinal), false => cases.Select(c => c.Name).ToHashSet(StringComparer.Ordinal), _ => RunCases.NotRun(m) };
             foreach (var n in run) off.Remove(n);
             foreach (var n in notRun) off.Add(n);
