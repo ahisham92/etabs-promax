@@ -38,8 +38,15 @@ public static class E2kText
     public static bool IsQuoted(string token) => token.Length > 0 && token[0] == '"';
 
     /// <summary>A number as ETABS writes it: a point for decimals, no thousands separators, no trailing zeros.</summary>
-    public static string Number(double value) =>
-        value == 0 ? "0" : value.ToString("0.############", CultureInfo.InvariantCulture);
+    public static string Number(double value)
+    {
+        if (value == 0) return "0";
+        // Twelve decimals as before; a number they would change by more than a part in 10^12 (a very small one, such
+        // as a coefficient of 1.2E-10, written "0.000000000123" before) is written in full instead.
+        var text = value.ToString("0.############", CultureInfo.InvariantCulture);
+        return double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var back) && Math.Abs(back - value) <= 1e-12 * Math.Abs(value)
+            ? text : value.ToString("R", CultureInfo.InvariantCulture);
+    }
 
     public static bool TryNumber(string? token, out double value) =>
         double.TryParse(token is null ? null : Unquote(token), NumberStyles.Float, CultureInfo.InvariantCulture, out value);

@@ -18,6 +18,7 @@ public static class E2kReader
         var previous = "";
         RawSection? raw = null;
         var sawHeading = false;
+        var state = new ReadState();
 
         foreach (var fullLine in text.Split('\n'))
         {
@@ -42,7 +43,11 @@ public static class E2kReader
             if (line.Trim().Length == 0) continue;
             if (raw is not null) { raw.Lines.Add(line); continue; }
             if (heading.Length == 0) continue;
-            if (!ReadLine(model, storiesTopFirst, line))
+            // A line this version cannot make sense of (a newer ETABS's form of it) is kept as read, never the whole file refused.
+            bool understood;
+            try { understood = ReadLine(model, storiesTopFirst, line, state); }
+            catch (E2kFormatException) { understood = false; }
+            if (!understood)
             {
                 if (!model.UnparsedLines.TryGetValue(heading, out var list)) model.UnparsedLines[heading] = list = [];
                 list.Add(line);
@@ -58,7 +63,7 @@ public static class E2kReader
         return model;
     }
 
-    private static bool ReadLine(StructuralModel model, List<Story> stories, string line)
+    private static bool ReadLine(StructuralModel model, List<Story> stories, string line, ReadState state)
     {
         var t = Tokenize(line);
         if (t.Count == 0) return true;
@@ -95,20 +100,35 @@ public static class E2kReader
                 return true;
             }
             case "GRIDSYSTEM":
-                model.GridSystem = Name(0);
-                model.GridSystemExtra = rest.Skip(1).ToList();
+                // ETABS keeps any number of grid systems: the first is the model's, the others are kept with their lines.
+                if (!state.SawGridSystem)
+                {
+                    state.SawGridSystem = true;
+                    model.GridSystem = Name(0);
+                    model.GridSystemExtra = rest.Skip(1).ToList();
+                }
+                else model.MoreGridSystems.Add(new GridSystemDef { Name = Name(0), Extra = rest.Skip(1).ToList() });
                 return true;
             case "GRID":
             {
                 var extra = rest.Skip(1).ToList();
                 var label = Take(extra, "LABEL"); var dir = Take(extra, "DIR"); var coord = Take(extra, "COORD");
-                if (label is null || dir is null || coord is null) return false;
-                model.Grids.Add(new GridLine { Label = label, Direction = dir, Coordinate = ToNumber(coord, line), Extra = extra });
+                if (label is null || dir is null || !TryNumber(coord, out var at)) return false;
+                var system = rest.Count > 0 ? Unquote(rest[0]) : "";
+                model.Grids.Add(new GridLine
+                {
+                    Label = label, Direction = dir, Coordinate = at, Extra = extra,
+                    System = state.SawGridSystem && system != model.GridSystem ? system : null,
+                });
                 return true;
             }
             case "DIAPHRAGM":
-                model.Diaphragms.Add(new Diaphragm { Name = Name(0), Type = Value(rest, "TYPE") ?? "RIGID" });
+            {
+                var extra = rest.Skip(1).ToList();
+                var type = Take(extra, "TYPE");
+                model.Diaphragms.Add(new Diaphragm { Name = Name(0), Type = type ?? "RIGID", Extra = extra });
                 return true;
+            }
             case "MATERIAL":
                 Definition(model.Materials, Name(0)).Lines.Add(rest.Skip(1).ToList());
                 return true;
@@ -119,18 +139,24 @@ public static class E2kReader
                 Definition(model.ShellSections, Name(0)).Lines.Add(rest.Skip(1).ToList());
                 return true;
             case "POINT" when rest.Count >= 3:
+            {
+                // The third number (how far below the story) is optional; anything after it is kept as read.
+                var below = rest.Count > 3 && !IsQuoted(rest[3]) && TryNumber(rest[3], out var z);
                 model.Points.Add(new PlanPoint
                 {
                     Name = Name(0), X = ToNumber(rest[1], line), Y = ToNumber(rest[2], line),
-                    Below = rest.Count > 3 ? ToNumber(rest[3], line) : 0,
+                    Below = below ? ToNumber(rest[3], line) : 0,
+                    Extra = rest.Skip(below ? 4 : 3).ToList(),
                 });
                 return true;
+            }
             case "LINE" when rest.Count >= 5:
             {
-                if (!Enum.TryParse<LineKind>(rest[1], true, out var kind)) return false;
+                if (!Enum.TryParse<LineKind>(rest[1], true, out var kind) || !Enum.IsDefined(kind)) return false;
                 model.Lines.Add(new LineObject
                 {
                     Label = Name(0), Kind = kind, PointI = Name(2), PointJ = Name(3), StoriesBelowI = (int)ToNumber(rest[4], line),
+                    Extra = rest.Skip(5).ToList(),
                 });
                 return true;
             }
@@ -151,14 +177,18 @@ public static class E2kReader
                     Label = Name(0), Kind = kind,
                     PointNames = rest.Skip(3).Take(count).Select(Unquote).ToList(),
                     StoriesBelow = rest.Skip(3 + count).Take(count).Select(o => (int)ToNumber(o, line)).ToList(),
+                    Extra = rest.Skip(3 + 2 * count).ToList(),
                 });
                 return true;
             }
             case "POINTASSIGN" when rest.Count >= 2:
             {
                 var extra = rest.Skip(2).ToList();
-                var assign = model.PointAssigns.Find(a => a.Point == Name(0) && a.Story == Name(1));
-                if (assign is null) model.PointAssigns.Add(assign = new PointAssign { Point = Name(0), Story = Name(1) });
+                if (!state.PointAssigns.TryGetValue((Name(0), Name(1)), out var assign))
+                {
+                    model.PointAssigns.Add(assign = new PointAssign { Point = Name(0), Story = Name(1) });
+                    state.PointAssigns[(Name(0), Name(1))] = assign;
+                }
                 assign.Restraint = Take(extra, "RESTRAINT") ?? assign.Restraint;
                 assign.Diaphragm = Take(extra, "DIAPH") ?? assign.Diaphragm;
                 if (extra.Count > 0) assign.Extra.Add(extra);
@@ -167,8 +197,11 @@ public static class E2kReader
             case "LINEASSIGN" when rest.Count >= 2:
             {
                 var extra = rest.Skip(2).ToList();
-                var assign = model.LineAssigns.Find(a => a.Label == Name(0) && a.Story == Name(1));
-                if (assign is null) model.LineAssigns.Add(assign = new LineAssign { Label = Name(0), Story = Name(1) });
+                if (!state.LineAssigns.TryGetValue((Name(0), Name(1)), out var assign))
+                {
+                    model.LineAssigns.Add(assign = new LineAssign { Label = Name(0), Story = Name(1) });
+                    state.LineAssigns[(Name(0), Name(1))] = assign;
+                }
                 assign.Section = Take(extra, "SECTION") ?? assign.Section;
                 EtabsModifiers.FromEtabs(extra, EtabsModifiers.Frame);
                 if (extra.Count > 0) assign.Extra.Add(extra);
@@ -177,8 +210,11 @@ public static class E2kReader
             case "AREAASSIGN" when rest.Count >= 2:
             {
                 var extra = rest.Skip(2).ToList();
-                var assign = model.AreaAssigns.Find(a => a.Label == Name(0) && a.Story == Name(1));
-                if (assign is null) model.AreaAssigns.Add(assign = new AreaAssign { Label = Name(0), Story = Name(1) });
+                if (!state.AreaAssigns.TryGetValue((Name(0), Name(1)), out var assign))
+                {
+                    model.AreaAssigns.Add(assign = new AreaAssign { Label = Name(0), Story = Name(1) });
+                    state.AreaAssigns[(Name(0), Name(1))] = assign;
+                }
                 assign.Section = Take(extra, "SECTION") ?? assign.Section;
                 EtabsModifiers.FromEtabs(extra, EtabsModifiers.Area);
                 assign.Diaphragm = Take(extra, "DIAPH") ?? assign.Diaphragm;
@@ -206,14 +242,14 @@ public static class E2kReader
                 return true;
             case "LOADCASE":
             {
-                var item = model.LoadCases.Find(c => c.Name == Name(0));
+                var item = model.LoadCases.Count > 0 && model.LoadCases[^1].Name == Name(0) ? model.LoadCases[^1] : model.LoadCases.Find(c => c.Name == Name(0));
                 if (item is null) model.LoadCases.Add(item = new LoadCase { Name = Name(0) });
                 item.Lines.Add(rest.Skip(1).ToList());
                 return true;
             }
             case "COMBO":
             {
-                var item = model.Combos.Find(c => c.Name == Name(0));
+                var item = model.Combos.Count > 0 && model.Combos[^1].Name == Name(0) ? model.Combos[^1] : model.Combos.Find(c => c.Name == Name(0));
                 if (item is null) model.Combos.Add(item = new LoadCombo { Name = Name(0) });
                 item.Lines.Add(rest.Skip(1).ToList());
                 return true;
@@ -223,9 +259,20 @@ public static class E2kReader
         }
     }
 
+    /// <summary>What one read keeps between lines: whether the first grid system was read, and each object's assignment by
+    /// (name, story), so a model of many thousand objects reads in one pass.</summary>
+    private sealed class ReadState
+    {
+        public bool SawGridSystem;
+        public readonly Dictionary<(string, string), PointAssign> PointAssigns = [];
+        public readonly Dictionary<(string, string), LineAssign> LineAssigns = [];
+        public readonly Dictionary<(string, string), AreaAssign> AreaAssigns = [];
+    }
+
     private static T Definition<T>(List<T> list, string name) where T : Definition, new()
     {
-        var item = list.Find(d => d.Name == name);
+        // A definition's lines follow each other in the file: the last one read is almost always the one.
+        var item = list.Count > 0 && list[^1].Name == name ? list[^1] : list.Find(d => d.Name == name);
         if (item is null) list.Add(item = new T { Name = name });
         return item;
     }
