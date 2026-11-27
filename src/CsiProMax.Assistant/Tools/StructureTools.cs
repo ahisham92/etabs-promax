@@ -39,7 +39,7 @@ public static class StructureTools
             Ask.Changes, AssignLabel, a => "Assign pier and spandrel labels"),
         new("define_group",
             "Adds, changes or deletes a group (Define > Groups), with its color. Deleting a group takes its objects out of it, and refuses while a section cut uses it.",
-            """{"type":"object","required":["name"],"properties":{"name":{"type":"string"},"color":{"type":"string"},"delete":{"type":"boolean"},"uses":{"type":"object","additionalProperties":{"type":"boolean"},"description":"What the group is used for, by the program's field names: Steel, Concrete, Composite (design groups); SAP2000 also Selection, SectionCut, Aluminum, ColdFormed, Stage, Bridge, AutoSeismic, AutoWind, MassWeight."}}}""",
+            """{"type":"object","required":["name"],"properties":{"name":{"type":"string"},"color":{"type":"string"},"delete":{"type":"boolean"},"uses":{"type":"object","additionalProperties":{"type":"boolean"},"description":"What the group is used for, by the program's field names: Steel, Concrete, Composite (design groups); SAP2000 also Selection, SectionCut, Aluminum, ColdFormed, Stage, Bridge, AutoSeismic, AutoWind, MassWeight, ConcShell (Concrete Shell Design Group, held by the Engine)."}}}""",
             Ask.Changes, DefineGroup, a => $"{(a.Flag("delete") ? "Delete" : "Define")} the group {a.Text("name")}"),
         new("assign_group_data",
             "Puts frames, slabs and walls (label@story) and joints (point@story, with joints) in a group, or takes them out with remove (Assign > Assign Objects to Group). The group is made when it is not there.",
@@ -47,7 +47,7 @@ public static class StructureTools
             Ask.Changes, AssignGroup, a => $"{(a.Flag("remove") ? "Take objects out of" : "Put objects in")} the group {a.Text("group")}"),
         new("define_section_cut",
             "Adds or deletes a section cut (Define > Section Cuts) from a group: the forces across the group's objects are reported after the analysis.",
-            """{"type":"object","required":["name"],"properties":{"name":{"type":"string"},"group":{"type":"string"},"delete":{"type":"boolean"},"result_type":{"type":"string","enum":["Analysis","Design"],"description":"Analysis (F1, F2, F3, M1, M2, M3) or Design (P, V2, V3, T, M2, M3)."},"user_location":{"type":"boolean","description":"Section cut force location user defined at x, y, z; default false."},"x":{"type":"number"},"y":{"type":"number"},"z":{"type":"number"},"rot_z":{"type":"number","description":"Rotation of the cut's local axes about Z, Y, X (degrees)."},"rot_y":{"type":"number"},"rot_x":{"type":"number"}}}""",
+            """{"type":"object","required":["name"],"properties":{"name":{"type":"string"},"group":{"type":"string"},"delete":{"type":"boolean"},"result_type":{"type":"string","enum":["Analysis","Design"],"description":"Analysis (F1, F2, F3, M1, M2, M3) or Design (P, V2, V3, T, M2, M3)."},"user_location":{"type":"boolean","description":"Section cut force location user defined at x, y, z; default false."},"x":{"type":"number"},"y":{"type":"number"},"z":{"type":"number"},"rot_z":{"type":"number","description":"Rotation of the cut's local axes about Z, Y, X (degrees)."},"rot_y":{"type":"number"},"rot_x":{"type":"number"},"defined_by":{"type":"string","enum":["Group","Quadrilateral"],"description":"SAP2000: the cut by the group, or by quadrilateral cutting planes."},"quads":{"type":"array","description":"SAP2000 quadrilateral cutting planes: each 4 points [x, y, z].","items":{"type":"array","items":{"type":"array","items":{"type":"number"}}}},"elem_side":{"type":"string","description":"SAP2000: side reported, Positive or Negative (quadrilaterals), Top or Bottom (design by group)."},"design_type":{"type":"string","enum":["Wall","Spandrel","Slab"],"description":"SAP2000 design cut local axes."},"design_angle":{"type":"number","description":"SAP2000: angle from global X to local 2 (deg), design cuts."},"advanced_axes":{"type":"boolean"}}}""",
             Ask.Changes, DefineCut, a => $"{(a.Flag("delete") ? "Delete" : "Define")} the section cut {a.Text("name")}"),
         new("structure_definitions",
             "What the diaphragm, pier, spandrel, group and section cut forms show: each with where it is used.",
@@ -326,8 +326,15 @@ public static class StructureTools
             return new JsonObject { ["deleted"] = name };
         }
         var group = a.Need("group");
-        var g = Groups(link.Model).Find(x => x.Name == group) ?? throw new ToolInputException($"There is no group '{group}'. Make it with define_group and put the objects to cut in it.");
-        if (g.Members.Count == 0) throw new ToolInputException($"The group {group} is empty: put the objects to cut in it first.");
+        var quads = a.Text("defined_by", "Group").StartsWith("Quad", StringComparison.OrdinalIgnoreCase);
+        // SAP2000's own ALL group holds every object: a quadrilateral cut may name it.
+        var g = Groups(link.Model).Find(x => x.Name == group);
+        if (g is null && !(quads && group.Equals("ALL", StringComparison.OrdinalIgnoreCase))) throw new ToolInputException($"There is no group '{group}'. Make it with define_group and put the objects to cut in it.");
+        if (g is not null && g.Members.Count == 0 && !quads) throw new ToolInputException($"The group {group} is empty: put the objects to cut in it first.");
+        // A quadrilateral is 4 points; kept as "x,y,z;x,y,z;x,y,z;x,y,z" with "|" between quadrilaterals.
+        var quadText = "";
+        if (quads && a.TryGetProperty("quads", out var qa) && qa.ValueKind == JsonValueKind.Array)
+            quadText = string.Join("|", qa.EnumerateArray().Select(qd => string.Join(";", qd.EnumerateArray().Select(pt => string.Join(",", pt.EnumerateArray().Select(v => Number(v.GetDouble())))))));
         Core(link, m =>
         {
             RemoveLines(m, CutHeading, t => t[0] == "SECTIONCUT" && Unquote(t[1]) == name);
@@ -342,6 +349,14 @@ public static class StructureTools
                 ["ResultLoc"] = user ? "User" : "Default", ["LocX"] = user ? N("x") : "0", ["LocY"] = user ? N("y") : "0", ["LocZ"] = user ? N("z") : "0",
                 ["RotAboutZ"] = N("rot_z"), ["RotAboutY"] = N("rot_y"), ["RotAboutX"] = N("rot_x"),
             });
+            // SAP2000's own Section Cut Data fields, only when given.
+            var sap = new Dictionary<string, string>();
+            if (quads) { sap["DefinedBy"] = "Quadrilateral"; sap["Quads"] = quadText; }
+            if (a.Text("design_type", "") is { Length: > 0 } dt) sap["DesignType"] = dt;
+            if (a.TryGetProperty("design_angle", out _)) sap["DesignAngle"] = N("design_angle");
+            if (a.Text("elem_side", "") is { Length: > 0 } es) sap["ElemSide"] = es;
+            if (a.Flag("advanced_axes")) sap["AdvanceAxes"] = "Yes";
+            if (sap.Count > 0) StructureExtras.Set(m, StructureExtras.CutTable, name, sap);
             return 0;
         });
         return new JsonObject { ["section_cut"] = name, ["group"] = group };

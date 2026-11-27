@@ -150,6 +150,8 @@ public static class DefineTools
         {
             DefineTables.Set(m, table, name, rows);
             var full = DefineTables.FullName(table)!;
+            if (full == DefineTables.SapFrameGeneral || full == DefineTables.SapAreaSections) DefineTables.SyncSapSection(m, full, name);
+            else if (full == DefineTables.SapLinkGeneral) DefineTables.SyncSapLink(m, name);
             return (JsonNode)new JsonObject { ["table"] = full, ["name"] = name, ["rows"] = m.DefinitionTables?.GetValueOrDefault(full)?.Count(x => x.GetValueOrDefault(DefineTables.KeyField(full)) == name) ?? 0 };
         }));
     }

@@ -30,6 +30,7 @@ public static class SapFieldSteps
 
     public static void Modeler(FieldContext ctx)
     {
+        SapFormRoundTrip.Define(ctx);
         // The SAP2000 function forms' functions, so SAP2000 reads them back (Scratch: "SAP2000 read the function forms' tables").
         foreach (var (name, kind, table, values, points) in Functions)
             ctx.Tool("define_function", new JsonObject
@@ -169,6 +170,9 @@ public static class SapFieldSteps
             FieldContext.Expect(missing.Count == 0, "not in SAP2000 after the import: " + string.Join(", ", missing));
             return "all there";
         });
+
+        // ---- each SAP2000 form of the Engine, read back from SAP2000 field by field ----
+        SapFormRoundTrip.Check(ctx);
 
         // ---- every read of the link ----
         LinkReads(ctx, stories: false);

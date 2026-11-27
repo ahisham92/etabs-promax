@@ -30,7 +30,7 @@ public static class ModelerTables
         {
             try
             {
-                EditableTables.Put(e, table, "Material", rows.Select(r => (IReadOnlyDictionary<string, string>)r).ToList(), $"put the Modeler's '{table}' in");
+                EditableTables.Put(e, table, "Material", rows.Select(r => (IReadOnlyDictionary<string, string>)ProgramTables.WithoutSapOnly(table, r)).ToList(), $"put the Modeler's '{table}' in");
                 done.Add($"{table}: {rows.Count} row{(rows.Count == 1 ? "" : "s")}");
             }
             catch (EtabsException ex) { refused.Add($"{table}: {ex.Message}"); }

@@ -17,6 +17,41 @@ public static class DefineTables
     /// in them, and the .s2k writes them back as they are.</summary>
     public static readonly IReadOnlyDictionary<string, string[]> SapHinges = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
     {
+        // SAP2000's frame and area sections of the kinds the Engine has no geometry for (steel joist, cold formed, precast,
+        // hybrid, aluminum, plane, asolid, plate ...): SAP2000's own rows, written into the .s2k as they are. The Engine keeps a
+        // General section (or a shell section) of the same name, so the members and areas keep their section.
+        ["Area Section Properties"] = ["Section", "Material", "MatAngle", "AreaType", "Type", "DrillDOF", "Thickness", "BendThick", "Arc", "CoordSys", "InComp", "Color", "TotalWt", "TotalMass", "F11Mod", "F22Mod", "F12Mod", "M11Mod", "M22Mod", "M12Mod", "V13Mod", "V23Mod", "MMod", "WMod", "GUID", "Notes"],
+        ["Frame Section Properties 01 - General"] = ["SectionName", "Material", "FromFile", "FileName", "SectInFile", "Shape", "AutoType", "t3", "t2", "SngAngWid", "SngChnWid", "tf", "tw", "t2b", "tfb", "dis", "FilletRadius", "Radius", "LipDepth", "LipAngle", "Area", "TorsConst", "I33", "I22", "I23", "AS2", "AS3", "S33Top", "S33Bot", "S22Left", "S22Right", "Z33", "Z22", "R33", "R22", "CGOffset3", "CGOffset2", "EccV2", "EccV3", "Cw", "IncludeSCAn", "ConcCol", "ConcBeam", "Color", "TotalWt", "TotalMass", "AMod", "A2Mod", "A3Mod", "JMod", "I2Mod", "I3Mod", "MMod", "WMod", "GUID", "Notes"],
+        ["Frame Section Properties 06 - Polygon Data"] = ["SectionName", "Polygon", "Point", "X", "Y", "Opening", "Material", "RefPtX", "RefPtY"],
+        ["Frame Section Properties 07 - Built Up I"] = ["SectionName", "ItemType", "ISection", "FyTF", "FyW", "FyBF", "Material", "Width", "Thick"],
+        ["Frame Section Properties 08 - PCC I Girder"] = ["SectionName", "B1", "B2", "B3", "B4", "D1", "D2", "D3", "D4", "D5", "D6", "D7", "T1", "T2", "C1"],
+        ["Frame Section Properties 09 - PCC U Girder"] = ["SectionName", "B1", "B2", "B3", "B4", "B5", "B6", "D1", "D2", "D3", "D4", "D5", "D6", "D7"],
+        ["Frame Section Properties 10 - Steel Joist General"] = ["SectionName", "Material", "Color", "JoistType", "Depth", "UnitWt", "AnalysisI33", "MomCap", "ShearCap", "MinSpan", "MaxSpan"],
+        ["Frame Section Properties 11 - Steel Joist Data"] = ["SectionName", "SpanLength", "TLCap", "LLDeflCap", "I33"],
+        ["Frame Section Properties 12 - Hybrid Steel U Section"] = ["SectionName", "WebMat", "TFMat", "BFMat", "D1", "B1", "B2", "B3", "B4", "tw", "tf", "tfb"],
+        ["Frame Section Properties 17 - PCC Super-T"] = ["SectionName", "OpenFlange", "B1", "B2", "B3", "B4", "B5", "B6", "BL", "BR", "BLBRMax", "BLmax", "BRmax", "D1", "D2", "D3", "D4", "D5", "T1", "T2", "CornerType", "C1", "C2"],
+        ["Frame Section Properties 18 - PCC Box Girder"] = ["SectionName", "B", "D", "tf", "tfb", "tw", "twr", "Chamfer"],
+        // Link/Support Property Data as SAP2000 keeps it: the general row and each direction's row in its type's table.
+        ["Link Property Definitions 01 - General"] = ["Link", "LinkType", "Mass", "Weight", "RotInert1", "RotInert2", "RotInert3", "DefLength", "DefArea", "PDM2I", "PDM2J", "PDM3I", "PDM3J", "StiffLOpt", "StiffDOpt", "StiffDFact", "Color", "GUID", "Notes"],
+        ["Link Property Definitions 02 - Linear"] = ["Link", "DOF", "Fixed", "TransKE", "RotKE", "TransRotKE", "TransCE", "RotCE", "TransRotCE", "DJ"],
+        ["Link Property Definitions 03 - MultiLinear"] = ["Link", "DOF", "Fixed", "NonLinear", "TransKE", "RotKE", "TransCE", "RotCE", "DJ", "Point", "Force", "Displ", "Moment", "Rotation"],
+        ["Link Property Definitions 04 - Damper"] = ["Link", "DOF", "Fixed", "NonLinear", "TransKE", "RotKE", "TransCE", "RotCE", "DJ", "TransK", "RotK", "TransC", "RotC", "CExp", "FLDamper", "FLDLength", "FLDModulus", "FLDArea"],
+        ["Link Property Definitions 05 - Gap"] = ["Link", "DOF", "Fixed", "NonLinear", "TransKE", "RotKE", "TransCE", "RotCE", "DJ", "TransK", "RotK", "TransOpen", "RotOpen"],
+        ["Link Property Definitions 06 - Hook"] = ["Link", "DOF", "Fixed", "NonLinear", "TransKE", "RotKE", "TransCE", "RotCE", "DJ", "TransK", "RotK", "TransOpen", "RotOpen"],
+        ["Link Property Definitions 07 - Rubber Isolator"] = ["Link", "DOF", "Fixed", "NonLinear", "TransKE", "RotKE", "TransCE", "RotCE", "DJ", "TransK", "TransYield", "Ratio"],
+        ["Link Property Definitions 08 - Sliding Isolator"] = ["Link", "DOF", "Fixed", "NonLinear", "TransKE", "RotKE", "TransCE", "RotCE", "DJ", "TransK", "TransC", "Slow", "Fast", "Rate", "Radius"],
+        ["Link Property Definitions 09 - TC Sliding Isolator"] = ["Link", "DOF", "Fixed", "NonLinear", "TransKE", "RotKE", "TransCE", "RotCE", "DJ", "TransK", "TransKTens", "GapComp", "GapTens", "TransC", "SlowComp", "SlowTens", "FastComp", "FastTens", "RateComp", "RateTens", "Radius"],
+        ["Link Property Definitions 10 - Plastic (Wen)"] = ["Link", "DOF", "Fixed", "NonLinear", "TransKE", "RotKE", "TransCE", "RotCE", "DJ", "TransK", "RotK", "TransYield", "RotYield", "Ratio", "YieldExp"],
+        ["Link Property Definitions 11 - Multilinear Plastic"] = ["Link", "DOF", "Fixed", "NonLinear", "TransKE", "RotKE", "TransCE", "RotCE", "DJ", "HysType", "PivotAlpha1", "PivotAlpha2", "PivotBeta1", "PivotBeta2", "PivotEta", "Point", "Force", "Displ", "Moment", "Rotation"],
+        ["Link Property Definitions 12 - Triple Pendulum Isolator"] = ["Link", "DOF", "Fixed", "NonLinear", "TransKE", "RotKE", "TransCE", "RotCE", "DJ", "TransK", "TransC", "HeightOut", "HeightIn", "SymOut", "KOutTop", "KOutBot", "KInTop", "SlowOutTop", "SlowOutBot", "SlowInTop", "FastOutTop", "FastOutBot", "FastInTop", "RateOutTop", "RateOutBot", "RateInTop", "RadOutTop", "RadOutBot", "RadInTop", "StopOutTop", "StopOutBot", "StopInTop"],
+        ["Link Property Definitions 13 - Linear Exponential Damper"] = ["Link", "DOF", "Fixed", "NonLinear", "TransKE", "RotKE", "TransCE", "RotCE", "DJ", "TransK", "RotK", "TransC", "RotC", "CExp", "ForceLimit", "MomLimit"],
+        ["Link Property Definitions 14 - Bilinear Damper"] = ["Link", "DOF", "Fixed", "NonLinear", "TransKE", "RotKE", "TransCE", "RotCE", "DJ", "TransK", "RotK", "TransC", "RotC", "TransCy", "RotCy", "ForceLimit", "MomLimit", "FLDamper", "FLDLength", "FLDModulus", "FLDArea"],
+        ["Link Property Definitions 15 - Friction Spring Damper"] = ["Link", "DOF", "Fixed", "NonLinear", "TransKE", "RotKE", "TransCE", "RotCE", "DJ", "TransK", "RotK", "TransK1", "RotK1", "TransK2", "RotK2", "TransU0", "RotU0", "TransUs", "RotUs", "ActiveDir"],
+        ["Link Property Definitions 16 - High Damping Rubber Isolator"] = ["Link", "DOF", "Fixed", "NonLinear", "TransKE", "RotKE", "TransCE", "RotCE", "DJ", "Area", "EffHeight", "AddStiff", "NumHysTerms", "CoStrain1", "CoStrength1", "CoStrain2", "CoStrength2", "CoStrain3", "CoStrength3", "Resistance", "CoStrainDam", "StiffIter"],
+        ["Link Property Definitions 17 - Sumitomo Damper"] = ["Link", "DOF", "Fixed", "NonLinear", "TransKE", "RotKE", "TransCE", "RotCE", "DJ", "ProdModel", "ShearArea", "Thickness", "Temp", "ExcitFreq", "RigidFluctCoeff", "DampFluctCoeff"],
+        // Define > Coordinate Systems/Grids: the systems other than GLOBAL and their grid lines (GLOBAL's grids are the model's own).
+        ["Coordinate Systems"] = ["Name", "Type", "X", "Y", "Z", "AboutZ", "AboutY", "AboutX"],
+        ["Grid Lines"] = ["CoordSys", "AxisDir", "GridID", "XRYZCoord", "TAngle", "LineType", "LineColor", "Visible", "BubbleLoc", "AllVisible", "BubbleSize"],
         ["Hinges Def 01 - Overview"] = ["HingeName", "AssignHinge", "DOFType", "Behavior"],
         ["Hinges Def 02 - Noninteracting - Deform Control - General"] = ["HingeName", "AssignHinge", "DOFType", "Symmetric", "BeyondE", "FDType", "UseYldForce", "UseYldDispl", "FDPosForSF", "FDPosDisSF", "FDNegForSF", "FDNegDisSF", "MRPosMoSF", "MRPosRoSF", "MRNegMoSF", "MRNegRoSF", "SSPosStrsSF", "SSPosStnSF", "SSNegStrsSF", "SSNegStnSF", "MCPosMoSF", "MCPosCuSF", "MCNegMoSF", "MCNegCuSF", "LengthType", "SSAbsLen", "SSRelLen", "HysType", "PivotAlpha1", "PivotAlpha2", "PivotBeta1", "PivotBeta2", "PivotEta"],
         ["Hinges Def 03 - Noninteracting - Deform Control - Force-Deform"] = ["HingeName", "AssignHinge", "DOFType", "FDPoint", "Force", "Displ"],
@@ -44,6 +79,30 @@ public static class DefineTables
         ["Hinges Def 19c - Steel Parametric PM2M3 - Force Deformation"] = ["HingeName", "AssignHinge", "CurveShape", "StrngthLoss", "PUpper", "PLower", "FUOverB", "FDOverBAxPu", "FDOvBBendPu", "FDOverBAxPl", "FDOvBBendPl", "DUTens", "DUComp", "DUBend2", "DUBend3", "DCPuBend2", "DCPuBend3", "DCPlBend2", "DCPlBend3", "DETens", "DEComp", "DEBend2", "DEBend3", "DOvCBendPu", "DOvCBendPl"],
         ["Hinges Def 19d - Steel Parametric PM2M3 - Cyclic Degradation"] = ["HingeName", "AssignHinge", "CycDegType", "BDegFact", "OneBend2", "OneBend3", "Uor1DegFact", "TwoBend2", "TwoBend3", "Cor2DegFact", "ThreeBend2", "ThreeBend3", "Dor3DegFact", "EDegFact"],
         ["Hinges Def 19e - Steel Parametric PM2M3 - Deformation Capacity"] = ["HingeName", "AssignHinge", "DefCapType", "PUpper", "PLower", "IOInd", "LSInd", "CPInd", "IOatPUDep", "LSatPUDep", "CPatPUDep", "IOatPLDep", "LSatPLDep", "CPatPLDep", "RatioAxis2"],
+        // SAP2000's Shell Section Data sub-forms, kept the same way: Concrete Shell Section Design Parameters and Time Dependent Properties.
+        ["Area Section Property Design Parameters"] = ["Section", "RebarMat", "RebarOpt", "CoverTop1", "CoverTop2", "CoverBot1", "CoverBot2"],
+        ["Area Section Property - Time Dependent"] = ["Section", "TypeSize", "AutoSFSize", "UserValSize"],
+        // SAP2000 26.3 Define items the Engine keeps as its own table rows (Define menu read on Ahmed's PC 2026-11-27), every field.
+        // Tendon Section Data's SAP2000 fields (modeling option, diameter or area, colour, notes); the Engine's own tendon
+        // section (name, material, strand area) is kept as for ETABS and SAFE.
+        ["Tendon Section Definitions"] = ["TendonSect", "ModelOpt", "PreType", "Material", "Specify", "Diameter", "Area", "TorsConst", "I", "AS", "Color", "TotalWt", "TotalMass", "AMod", "A2Mod", "A3Mod", "JMod", "I2Mod", "I3Mod", "MMod", "WMod", "GUID", "Notes"],
+        ["Cable Section Definitions"] = ["CableSect", "Material", "Specify", "Diameter", "Area", "TorsConst", "I", "AS", "Color", "TotalWt", "TotalMass", "AMod", "A2Mod", "A3Mod", "JMod", "I2Mod", "I3Mod", "MMod", "WMod", "GUID", "Notes"],
+        ["Solid Property Definitions"] = ["SolidProp", "Material", "MatAngleA", "MatAngleB", "MatAngleC", "InComp", "Color", "GUID", "Notes", "TotalWt", "TotalMass"],
+        ["Link Frequency Dependent Properties 01 - General"] = ["Link", "Color", "GUID", "Notes"],
+        ["Link Frequency Dependent Properties 02 - Details"] = ["Link", "DOF", "Frequency", "TransK", "RotK", "TransRotK", "TransC", "RotC", "TransRotC"],
+        ["Foundation Property Definitions"] = ["Name", "FndType"],
+        ["Foundation Assemblies 1 - Definitions"] = ["Name", "FndProp", "Angle", "IntermedPts", "NCtrlPts", "CtrlPt1", "CtrlPt2"],
+        ["Foundation Assemblies 2 - Connection Points"] = ["Name", "PointType", "PointName"],
+        ["Joint Pattern Definitions"] = ["Pattern", "AutoBridge", "BridgeObj", "BridgePType", "BridgeLPat"],
+        ["Floor Vibration Excitation Sets"] = ["Name", "Type", "Ejoint", "Rjoint", "Function", "ModalCase", "Damping", "LastFreq"],
+        ["Frame Property Modifier Definitions"] = ["Name", "AMod", "AS2Mod", "AS3Mod", "JMod", "I22Mod", "I33Mod", "MassMod", "WeightMod"],
+        ["Cable Property Modifier Definitions"] = ["Name", "AMod", "MassMod", "WeightMod"],
+        ["Pushover Parameters - ATC40"] = ["ParamName", "PlotAxes", "DemandFrom", "Function", "FuncSF", "Ca", "Cv", "AddDamp", "StructType", "BetaZero1", "Kappa1", "BetaZero2", "Kappa2", "PlotCap", "PlotDemand", "PlotLocus", "PlotPeriod", "CapColor", "DemandColor", "LocusColor", "PeriodColor", "Damp1", "Damp2", "Damp3", "Damp4", "Period1", "Period2", "Period3", "Period4"],
+        ["Pushover Parameters - FEMA356"] = ["ParamName", "Beff", "DemandFrom", "Function", "FuncSF", "FuncTs", "Ss", "S1", "SiteClass", "UserC2", "C2", "UserC3", "C3", "UserCm", "Cm", "PlotCap", "PlotBiLin", "CapColor", "BiLinColor"],
+        ["Pushover Parameters - ASCE 41-13 NSP"] = ["ParamName", "Beff", "DemandFrom", "Function", "FuncSF", "FuncTs", "Ss", "S1", "SiteClass", "Tl", "IncludeSSI", "UserC2", "C2", "UserCm", "Cm", "PlotCap", "PlotBiLin", "CapColor", "BiLinColor"],
+        ["Pushover Parameters - FEMA440 Equivalent Linearization"] = ["ParamName", "PlotAxes", "DemandFrom", "Function", "FuncSF", "Ca", "Cv", "IncludeSSI", "AddDamp", "UserBeff", "A", "B", "C", "D", "E", "F", "UserTeff", "G", "H", "I", "J", "K", "L", "PlotCap", "PlotDemand", "PlotLocus", "PlotPeriod", "CapColor", "DemandColor", "LocusColor", "PeriodColor", "DuctRatio1", "DuctRatio2", "DuctRatio3", "DuctRatio4", "Period1", "Period2", "Period3", "Period4"],
+        ["Pushover Parameters - Force Displacement"] = ["ParamName", "CapColor"],
+        ["Named Sets - Pushover"] = ["PONamedSet", "Case", "PlotType", "ParamName"],
     };
 
     /// <summary>Each table and its fields with the names the program shows; the first field is the definition's name.</summary>
@@ -97,6 +156,98 @@ public static class DefineTables
 
     /// <summary>True for a table of SAP2000's own (written to the .s2k as it is), not one of ETABS's.</summary>
     public static bool IsSap(string table) => SapHinges.ContainsKey(table) || SapLoadTables.Has(table);
+
+    /// <summary>The coordinate system and grid line tables: the .s2k writes them with GLOBAL's own, not on their own.</summary>
+    public static bool IsGridTable(string table) => table.Equals("Coordinate Systems", StringComparison.OrdinalIgnoreCase) || table.Equals("Grid Lines", StringComparison.OrdinalIgnoreCase)
+        || table.Equals(SapFrameGeneral, StringComparison.OrdinalIgnoreCase) || table.Equals(SapAreaSections, StringComparison.OrdinalIgnoreCase)
+        || table.Equals(SapLinkGeneral, StringComparison.OrdinalIgnoreCase) || table.Equals(SapLinkLinear, StringComparison.OrdinalIgnoreCase);
+
+    public const string SapLinkGeneral = "Link Property Definitions 01 - General", SapLinkLinear = "Link Property Definitions 02 - Linear";
+
+    public const string SapFrameGeneral = "Frame Section Properties 01 - General", SapAreaSections = "Area Section Properties";
+
+    /// <summary>After SAP2000's own row of a frame or area section changes: the Engine's section of that name follows it (a
+    /// General frame section with the row's depth, width, area and inertias; a shell section for Plane, Asolid and the
+    /// plates), so the members and areas keep their section. No row: the Engine's section goes, unless objects use it.</summary>
+    public static void SyncSapSection(StructuralModel m, string table, string name)
+    {
+        var row = m.DefinitionTables?.GetValueOrDefault(table)?.Find(r => r.GetValueOrDefault(SapHinges[table][0]) == name);
+        double D(string k) => row is not null && double.TryParse(row.GetValueOrDefault(k), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : 0;
+        if (table.Equals(SapFrameGeneral, StringComparison.OrdinalIgnoreCase))
+        {
+            if (row is null)
+            {
+                if (m.LineAssigns.Exists(x => x.Section == name)) throw new ArgumentException($"Frame section {name} is used by members: give them another section first.");
+                m.FrameSections.RemoveAll(x => x.Name == name);
+                return;
+            }
+            var material = row.GetValueOrDefault("Material") ?? "";
+            if (!m.Materials.Exists(x => x.Name == material)) throw new ArgumentException($"There is no material '{material}'.");
+            var sec = m.FrameSections.Find(x => x.Name == name);
+            if (sec is null) m.FrameSections.Add(sec = new FrameSection { Name = name });
+            var mods = sec.Lines.Where(l => l.Count > 0 && PropertyDefs.FrameModifiers.Contains(l[0])).ToList();
+            sec.Lines = [["MATERIAL", E2kText.Quote(material), "SHAPE", E2kText.Quote("General"), "D", E2kText.Number(D("t3") > 0 ? D("t3") : 1), "B", E2kText.Number(D("t2") > 0 ? D("t2") : 1),
+                "AREA", E2kText.Number(D("Area")), "AS2", E2kText.Number(D("AS2")), "AS3", E2kText.Number(D("AS3")), "I33", E2kText.Number(D("I33")), "I22", E2kText.Number(D("I22")), "J", E2kText.Number(D("TorsConst"))], .. mods];
+        }
+        else if (table.Equals(SapAreaSections, StringComparison.OrdinalIgnoreCase))
+        {
+            if (row is null)
+            {
+                if (m.AreaAssigns.Exists(x => x.Section == name)) throw new ArgumentException($"Area section {name} is used by areas: give them another section first.");
+                m.ShellSections.RemoveAll(x => x.Name == name);
+                return;
+            }
+            var type = row.GetValueOrDefault("Type") ?? "";
+            var modelling = type.Equals("Plate-Thick", StringComparison.OrdinalIgnoreCase) ? "ShellThick" : type.StartsWith("Plate", StringComparison.OrdinalIgnoreCase) ? "ShellThin" : "Membrane";
+            var t = D("Thickness") > 0 ? D("Thickness") : 1;
+            PropertyDefs.SetShellType(m, name, m.ShellSections.Exists(x => x.Name == name) ? name : null, false, "Slab", modelling, t, row.GetValueOrDefault("Material") ?? "", false);
+        }
+    }
+
+    /// <summary>The table each SAP2000 link type keeps its directions in (Link/Support Property Data, Link/Support Type).</summary>
+    public static readonly Dictionary<string, string> SapLinkTypeTables = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Linear"] = "Link Property Definitions 02 - Linear", ["MultiLinear Elastic"] = "Link Property Definitions 03 - MultiLinear",
+        ["MultiLinear Plastic"] = "Link Property Definitions 11 - Multilinear Plastic", ["Damper"] = "Link Property Definitions 04 - Damper",
+        ["Damper - Exponential"] = "Link Property Definitions 04 - Damper", ["Damper - Bilinear"] = "Link Property Definitions 14 - Bilinear Damper",
+        ["Damper - Friction Spring"] = "Link Property Definitions 15 - Friction Spring Damper", ["Damper - Sumitomo Rubber QR4"] = "Link Property Definitions 17 - Sumitomo Damper",
+        ["Gap"] = "Link Property Definitions 05 - Gap", ["Hook"] = "Link Property Definitions 06 - Hook", ["Plastic (Wen)"] = "Link Property Definitions 10 - Plastic (Wen)",
+        ["Rubber Isolator"] = "Link Property Definitions 07 - Rubber Isolator", ["Friction Isolator"] = "Link Property Definitions 08 - Sliding Isolator",
+        ["T/C Friction Isolator"] = "Link Property Definitions 09 - TC Sliding Isolator", ["Triple Pendulum Isolator"] = "Link Property Definitions 12 - Triple Pendulum Isolator",
+        ["High Damping Rubber Isolator"] = "Link Property Definitions 16 - High Damping Rubber Isolator", ["Linear Exponential Damper"] = "Link Property Definitions 13 - Linear Exponential Damper",
+    };
+
+    /// <summary>After a SAP2000 link's "01 - General" row changes: its directions stay only in its type's table, and the
+    /// Engine's link of that name (the one analysis and assignments use) follows, with each direction's effective
+    /// stiffness and damping. No row takes the link out.</summary>
+    public static void SyncSapLink(StructuralModel m, string name)
+    {
+        var row = m.DefinitionTables?.GetValueOrDefault(SapLinkGeneral)?.Find(r => r.GetValueOrDefault("Link") == name);
+        var own = row is null ? null : SapLinkTypeTables.GetValueOrDefault(row.GetValueOrDefault("LinkType") ?? "");
+        foreach (var t in SapHinges.Keys.Where(k => k.StartsWith("Link Property Definitions ", StringComparison.Ordinal) && k != SapLinkGeneral && k != own).ToList())
+            if (HasRow(m, t, name)) Set(m, t, name, []);
+        if (row is null)
+        {
+            if (PropertyDefs.Links(m).Exists(x => x.Name == name)) PropertyDefs.DeleteLink(m, name);
+            return;
+        }
+        static double D(Dictionary<string, string> r, string k) => double.TryParse(r.GetValueOrDefault(k), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? Math.Max(0, v) : 0;
+        var dofs = new Dictionary<string, (double, double)>();
+        var ownRows = own is null ? null : m.DefinitionTables?.GetValueOrDefault(own);
+        foreach (var r in (ownRows ?? []).Where(x => x.GetValueOrDefault("Link") == name))
+        {
+            var dof = (r.GetValueOrDefault("DOF") ?? "").ToUpperInvariant();
+            if (!PropertyDefs.LinkDofs.Contains(dof) || dofs.ContainsKey(dof)) continue;
+            var rot = dof[0] == 'R';
+            dofs[dof] = (D(r, rot ? "RotKE" : "TransKE"), D(r, rot ? "RotCE" : "TransCE"));
+        }
+        if (dofs.Count == 0) dofs["U1"] = (0, 0);
+        PropertyDefs.SetLink(m, name, PropertyDefs.EngineLinkType(row.GetValueOrDefault("LinkType") ?? ""), dofs);
+    }
+
+    /// <summary>True when the table keeps a row named so (by its first field).</summary>
+    public static bool HasRow(StructuralModel m, string table, string name) =>
+        m.DefinitionTables?.GetValueOrDefault(table)?.Exists(r => r.GetValueOrDefault(SapHinges[table][0]) == name) == true;
 
     /// <summary>Sets the rows of one definition (by its name) in a table; no rows takes the definition out of it.</summary>
     public static void Set(StructuralModel m, string table, string name, IReadOnlyList<Dictionary<string, string>> rows)

@@ -109,6 +109,9 @@ public static class Program
             var folder = sapTest + 2 < args.Length ? args[sapTest + 2] : Path.Combine(Path.GetTempPath(), "CsiProMax-sap-test");
             return CsiProMax.Assistant.Sap2000.SapScratchTest.Run(s2k, folder);
         }
+        // The values SAP2000 writes in its own definition tables, for the Engine's SAP2000 forms (Ahmed 2026-11-27: no guessed names).
+        if (Array.IndexOf(args, "--sap2000-table-values") is var tv and >= 0 && tv + 1 < args.Length)
+            return CsiProMax.Assistant.Sap2000.SapTableValues.Run(args[tv + 1], args.Skip(tv + 2).TakeWhile(a => !a.StartsWith("--", StringComparison.Ordinal)).ToList());
         // An update check with no window (the Tools menu keeper runs it hourly): a PC where no CSI ProMax window or
         // watcher is open still gets the newest version into versions\, which the Tools menu, the tests and the window
         // then start. On 2026-11-27 Ahmed's PC had none open and 0.4.68 never arrived.

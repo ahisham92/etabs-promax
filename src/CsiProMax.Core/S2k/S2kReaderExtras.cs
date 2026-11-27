@@ -117,6 +117,16 @@ public static partial class S2kReader
     {
         var general = use("LINK PROPERTY DEFINITIONS 01 - GENERAL");
         if (general.Count == 0) return;
+        // SAP2000's own link rows are kept as they are (every type's every field), for Link/Support Property Data.
+        foreach (var table in DefineTables.SapHinges.Keys.Where(k => k.StartsWith("Link Property Definitions ", StringComparison.OrdinalIgnoreCase) && char.IsDigit(k["Link Property Definitions ".Length])))
+        {
+            var fields = DefineTables.SapHinges[table];
+            var kept = use(table.ToUpperInvariant()).Select(r => r.Where(kv => kv.Value.Length > 0 && fields.Contains(kv.Key, StringComparer.OrdinalIgnoreCase))
+                .ToDictionary(kv => fields.First(f => f.Equals(kv.Key, StringComparison.OrdinalIgnoreCase)), kv => kv.Value, StringComparer.Ordinal)).Where(r => r.Count > 0).ToList();
+            if (kept.Count == 0) continue;
+            m.DefinitionTables ??= new(StringComparer.OrdinalIgnoreCase);
+            m.DefinitionTables[table] = kept;
+        }
         // Each direction's effective stiffness and damping, from whichever of SAP2000's link tables holds it.
         var dofRows = t.Keys.Where(k => k.StartsWith("LINK PROPERTY DEFINITIONS", StringComparison.OrdinalIgnoreCase) && k != "LINK PROPERTY DEFINITIONS 01 - GENERAL")
             .SelectMany(k => use(k)).Where(r => S(r, "DOF").Length > 0).ToList();
@@ -132,7 +142,7 @@ public static partial class S2kReader
                 dofs[dof] = (Math.Max(0, D(d, "TransKE", D(d, "RotKE"))), Math.Max(0, D(d, "TransCE", D(d, "RotCE"))));
             }
             if (dofs.Count == 0) dofs["U1"] = (0, 0);
-            try { PropertyDefs.SetLink(m, name, type, dofs); }
+            try { PropertyDefs.SetLink(m, name, PropertyDefs.EngineLinkType(type), dofs); }
             catch (ArgumentException ex) { notes.Add($"Link property {name}: {ex.Message}"); }
         }
     }
