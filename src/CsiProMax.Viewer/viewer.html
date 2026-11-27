@@ -25466,7 +25466,7 @@ function etfFileMenu() {
     ["Save", "m:save", "Ctrl+S"], ["Save As...", "m:saveAs", "Shift+Ctrl+S"], 0,
     ["Import", [["Tables from Excel (.xlsx)...", "m:xlsxIn"]]],
     ["Export", [["ETABS .e2k Text File...", "m:etf:xE2k"], 0,
-      ["ETABS Database Tables to Excel...", "m:xlsxOut"], ["ETABS Database Tables to Text...", "m:etf:xTxt"], ["ETABS Database Tables to XML...", "m:etf:xXml"], 0,
+      ["ETABS Database Tables to Excel...", "m:etf:xXls"], ["ETABS Database Tables to Access...", "m:etf:xMdb"], ["ETABS Database Tables to Text...", "m:etf:xTxt"], ["ETABS Database Tables to XML...", "m:etf:xXml"], 0,
       ["Story as SAFE V12 .f2k File...", "m:f2k"], 0,
       [".DXF/.DWG File...", "m:etf:xDxf"], 0,
       ["IFC File...", "m:etf:xIfc"], ["IGES .igs File...", "m:etf:xIges"], ["3D Printing .stl File...", "m:etf:xStl"], ["3D Image .obj File...", "m:etf:xObj"], 0,
@@ -25499,6 +25499,8 @@ async function etfDo(a) {
     case "exit": return etfExit();
     case "print": return etfPrintGraphics();
     case "xE2k": return etfExportE2k();
+    case "xXls": return etfExportTables("excel");
+    case "xMdb": return etfExportTables("access");
     case "xTxt": return etfExportTables("text");
     case "xXml": return etfExportTables("xml");
     case "xDxf": return etfExportGeometry("dxf");
@@ -25567,25 +25569,72 @@ async function etfExportE2k() {
       <tr><td style="padding:1px 6px">Temperature Unit</td><td><select id="ecT" style="width:100%">${pick(["F", "C"], T)}</select></td></tr></table>`,
     [["OK", d => submit(d, "export_e2k", {path, length: q(d, "#ecL").value, force: q(d, "#ecF").value, temperature: q(d, "#ecT").value}, j => etfSaid(j, path))], ["Cancel"]], {width: 300});
 }
-// ETABS Database Tables to Text / XML: the tables to take (all with rows ticked), then Windows' Save As.
+// ETABS Database Tables to Excel / Access / Text / XML: ETABS's Choose Tables for Export form (pictures 70-73, AN-AP):
+// Edit > Select Load Patterns...; the tree of MODEL DEFINITION and DESIGN DATA (Expose All Input Tables adds the
+// assignment branches ETABS hides); Load Patterns (Model Def.); Options Selection Only (on with a selection), Show if
+// Used in Model, Open File After Export (Text: Use Text Editor / Use Microsoft Word), Expose All Input Tables; Named
+// Sets; OK, Cancel. OK asks where (Windows' Save As) and writes the file (tool export_tables_file).
+const etfBranches = ["System Data", "Property Definitions", "Load Pattern Definitions", "Other Definitions", "Load Case Definitions", "Connectivity Data", "Joint Assignments", "Frame Assignments", "Area Assignments", "Options and Preferences Data", "Miscellaneous Data"];
+const etfExposed = ["System Data", "Property Definitions", "Load Pattern Definitions", "Other Definitions", "Load Case Definitions", "Connectivity Data", "Joint Assignments", "Frame Assignments", "Tendon Assignments", "Area Assignments", "Link Assignments", "Line Gauge Assignments", "Quad Gauge Assignments", "Slab Rebar Assignments", "Options and Preferences Data", "Miscellaneous Data"];
+let etfPicked = null, etfPats = null;
 async function etfExportTables(format) {
-  const j = await hmPost({tool: "model_tables", args: {}}).catch(() => null);
+  const j = await hmPost({tool: "export_table_list", args: {}}).catch(() => null);
   if (!j || !j.ok) return hmSay((j && j.error) || "The Engine is not answering.", true);
-  const list = j.result.tables;
-  const d = dialog(format === "xml" ? "Choose Tables for Export to XML" : "Choose Tables for Export to Text File", `<div style="display:flex;gap:10px">
-      <fieldset style="flex:1;margin:0;max-height:380px;overflow:auto"><legend>Tables</legend>${list.map(t => `<label style="display:flex;gap:6px;white-space:nowrap"><input type="checkbox" data-t="${esc(t.name)}" ${t.rows ? "checked" : ""}>${esc(t.name)}<span style="margin-left:auto;padding-left:12px;opacity:.7">${t.rows}</span></label>`).join("")}</fieldset>
-      <fieldset style="width:150px;margin:0"><legend>Options</legend><div style="display:flex;flex-direction:column;gap:6px"><button id="etA">Select All</button><button id="etN">Select None</button></div></fieldset></div>`,
-    [["OK", f => {
-      const tables = [...f.querySelectorAll("[data-t]")].filter(c => c.checked).map(c => c.dataset.t);
-      if (!tables.length) { formError(f, "Pick a table at least."); return false; }
-      const ext = format === "xml" ? "xml" : "txt";
-      etfSaveAs(format === "xml" ? "Export Tables to XML File" : "Export Tables to Text File", [[format === "xml" ? "XML Files (*.xml)" : "Text Files (*.txt)", ext]], etfModelName()).then(path => {
-        if (path) submit(f, "export_tables_file", {path, format, tables}, k => etfSaid(k, path));
-      });
-      return false;
-    }], ["Cancel"]], {width: 560});
-  q(d, "#etA").onclick = () => d.querySelectorAll("[data-t]").forEach(c => c.checked = true);
-  q(d, "#etN").onclick = () => d.querySelectorAll("[data-t]").forEach(c => c.checked = false);
+  const list = j.result.tables, rows = Object.fromEntries(list.map(t => [t.name, t.rows]));
+  const pats = (P.model.load_patterns || []).map(p => typeof p === "string" ? p : p.name).filter(Boolean);
+  if (!etfPats) etfPats = new Set(pats);
+  const place = n => { const r = etrTablePlace(n, {}); return r[0] === "DESIGN DATA" ? ["DESIGN DATA", "Design Definition Data", r[2]] : /^(Tendon|Link|Line Gauge|Quad Gauge|Slab Rebar) Assignments$/.test(r[1]) || etfBranches.includes(r[1]) ? ["MODEL DEFINITION", r[1], r[2]] : ["MODEL DEFINITION", "Miscellaneous Data", r[2]]; };
+  if (!etfPicked) etfPicked = new Set(list.filter(t => place(t.name)[1] === "Other Definitions").map(t => t.name));
+  const word = {excel: "Excel", access: "Access", text: "Text File", xml: "XML File"}[format];
+  const any = sel.size > 0 || selJ.size > 0;
+  const d = dialog("Choose Tables for Export to " + word, `<div class="etrCT"><div class="etrMenu"><button data-m="edit">Edit</button></div>
+    <div class="etrCTb"><div class="etrTree" id="ftT"></div>
+      <div class="etrCTr"><fieldset><legend>Load Patterns (Model Def.)</legend><button id="ftP">Select Load Patterns...</button><div id="ftPn"></div></fieldset>
+        <fieldset><legend>Options</legend><label><input type="checkbox" id="ftSel" ${any ? "" : "disabled"}>Selection Only</label><label><input type="checkbox" id="ftUsed">Show if Used in Model</label>
+          <label><input type="checkbox" id="ftOpen">Open File After Export</label>
+          ${format === "text" ? `<label style="padding-left:22px"><input type="radio" name="ftHow" value="editor" checked disabled>Use Text Editor</label><label style="padding-left:22px"><input type="radio" name="ftHow" value="word" disabled>Use Microsoft Word</label>` : `<span style="height:34px"></span>`}
+          <label><input type="checkbox" id="ftExp">Expose All Input Tables</label></fieldset>
+        <fieldset><legend>Named Sets</legend><button id="ftNS" disabled>Show Named Set...</button></fieldset>
+        <span></span><div class="etrOkC"><button id="ftOK" class="primary">OK</button><button id="ftCa">Cancel</button></div></div></div></div>`, [], {width: 900});
+  d.classList.add("etfCT");
+  const tree = () => {
+    const exp = q(d, "#ftExp").checked, used = q(d, "#ftUsed").checked;
+    const top = [["MODEL DEFINITION", exp ? etfExposed : etfBranches], ["DESIGN DATA", ["Design Definition Data"]]];
+    const of = (a, b) => list.filter(t => { const p = place(t.name); return p[0] === a && p[1] === b && (!used || t.rows); });
+    const box = (key, kids) => { const on = kids.filter(k => etfPicked.has(k)).length; return `<input type="checkbox" data-node="${esc(key)}" ${on && on === kids.length ? "checked" : ""} data-part="${on && on < kids.length ? 1 : 0}">`; };
+    q(d, "#ftT").innerHTML = top.map(([a, bs]) => { const all = bs.flatMap(b => of(a, b).map(t => t.name));
+      return `<details open><summary>${box(a, all)}${a}</summary>${bs.map(b => { const ts = of(a, b), subs = [...new Set(ts.map(t => place(t.name)[2]))];
+        return `<details><summary>${box(a + "/" + b, ts.map(t => t.name))}${esc(b)}</summary>${subs.map(c => { const leaf = ts.filter(t => place(t.name)[2] === c);
+          return `<details><summary class="blue">${box(a + "/" + b + "/" + c, leaf.map(t => t.name))}${esc(c)}</summary>${leaf.map(t => `<div class="leaf"><input type="checkbox" data-t="${esc(t.name)}" ${etfPicked.has(t.name) ? "checked" : ""}><span class="blue" data-tn="${esc(t.name)}">${esc(t.name)}</span></div>`).join("")}</details>`; }).join("")}</details>`; }).join("")}</details>`; }).join("");
+    q(d, "#ftT").querySelectorAll("[data-part='1']").forEach(x => x.indeterminate = true);
+    q(d, "#ftT").querySelectorAll("summary input").forEach(x => { x.onclick = e => e.stopPropagation(); x.onchange = () => { x.closest("details").querySelectorAll("[data-t]").forEach(l => x.checked ? etfPicked.add(l.dataset.t) : etfPicked.delete(l.dataset.t)); keep(); }; });
+    q(d, "#ftT").querySelectorAll("[data-t]").forEach(x => x.onchange = () => { x.checked ? etfPicked.add(x.dataset.t) : etfPicked.delete(x.dataset.t); keep(); });
+    q(d, "#ftT").querySelectorAll("[data-tn]").forEach(x => x.onclick = () => { const c = x.previousElementSibling; c.checked = !c.checked; c.onchange(); });
+  };
+  // The tree is drawn again with the branches open as they were.
+  const keep = () => { const open = [...q(d, "#ftT").querySelectorAll("details")].map(x => x.open); tree(); q(d, "#ftT").querySelectorAll("details").forEach((x, i) => { if (i < open.length) x.open = open[i]; }); };
+  const counts = () => { q(d, "#ftPn").textContent = `${[...etfPats].filter(p => pats.includes(p)).length} of ${pats.length} Selected`; };
+  const pickPats = () => etrSelectList("Select Load Patterns", pats, etfPats, x => { etfPats = x; counts(); });
+  q(d, "#ftP").onclick = pickPats;
+  q(d, "[data-m=edit]").onclick = e => popMenu(e.target, [["Select Load Patterns...", pickPats]]);
+  q(d, "#ftUsed").onchange = keep; q(d, "#ftExp").onchange = tree;
+  q(d, "#ftOpen").onchange = e => d.querySelectorAll("[name=ftHow]").forEach(r => r.disabled = !e.target.checked);
+  q(d, "#ftCa").onclick = () => d.close();
+  q(d, "#ftOK").onclick = () => {
+    const tables = list.filter(t => etfPicked.has(t.name)).map(t => t.name);
+    if (!tables.length) return hmSay("Pick a table at least.", true);
+    const open = q(d, "#ftOpen").checked ? (format === "text" ? q(d, "[name=ftHow]:checked").value : "file") : "";
+    const selected = q(d, "#ftSel").checked ? [...sel].map(objOf).filter(Boolean).map(o => o.name).concat([...selJ].map(String)) : [];
+    const patterns = etfPats.size === pats.length ? [] : [...etfPats];
+    const types = {excel: [["Excel Files (*.xlsx)", "xlsx"]], access: [["MS Access Files (*.accdb)", "accdb"], ["MS Access Files (*.mdb)", "mdb"]], text: [["Text Files (*.txt)", "txt"]], xml: [["XML Files (*.xml)", "xml"]]}[format];
+    d.close();
+    etfSaveAs({excel: "Export Tables to Excel", access: "Export Tables to Access", text: "Export Tables to Text File", xml: "Export Tables to XML File"}[format], types, etfModelName()).then(path => {
+      if (!path) return;
+      hmRun("export_tables_file", {path, format, tables, patterns, selected, open}).then(k => { if (!etfSaid(k, path)) hmSay(k.error || "The tables were not written.", true); });
+    });
+  };
+  counts(); tree();
+  return d;
 }
 // The model as solids, as the window draws it extruded: each frame its section's outline along it, each floor and wall
 // its thickness. Gives [{name, kind, section, story, tris: [[p, q, r], ...]}] in the model's units.

@@ -31,9 +31,13 @@ public static class FileMenuTools
             "Writes the model as an ETABS text file (.e2k) at 'path', as ETABS's File > Export > ETABS .e2k Text File does, in the units of its Consistent Units form ('length' in, ft, mm, cm or m; 'force' lb, kip, N, kN, kgf or tonf; 'temperature' F or C; default the model's own). The model open keeps its own file and units.", // ETABS itself
             """{"type":"object","required":["path"],"properties":{"path":{"type":"string"},"length":{"type":"string"},"force":{"type":"string"},"temperature":{"type":"string","enum":["F","C"]}}}""",
             Ask.Always, ExportE2k, a => $"Export the model to {Path.GetFileName(a.Text("path"))}"),
+        new("export_table_list",
+            "Every database table the model can be exported as (File > Export > Database Tables), with its row count: the model's own tables and the program's tables it keeps.",
+            """{"type":"object","properties":{}}""",
+            Ask.Never, (_, e) => new JsonObject { ["tables"] = new JsonArray(ModelTables.Export(Offline(e).ForSave).Select(t => (JsonNode)new JsonObject { ["name"] = t.Name, ["rows"] = t.Rows.Count }).ToArray()) }),
         new("export_tables_file",
-            "Writes the model's database tables to a file at 'path', as ETABS's File > Export > ETABS Database Tables to Text (format text: each table as TABLE: \"name\" then one line of Field=Value pairs per row) or to XML (format xml). 'tables' picks some by name (default every table with rows).", // ETABS itself
-            """{"type":"object","required":["path","format"],"properties":{"path":{"type":"string"},"format":{"type":"string","enum":["text","xml"]},"tables":{"type":"array","items":{"type":"string"}}}}""",
+            "Writes the model's database tables to a file at 'path', as ETABS's File > Export > ETABS Database Tables to Excel (format excel, .xlsx), Access (format access, .accdb or .mdb, needs the Microsoft Access Database Engine), Text (format text: each table as TABLE: \"name\" then one line of Field=Value pairs per row) or XML (format xml). 'tables' picks some by name (default every table with rows); 'patterns' keeps only those load patterns' rows; 'selected' keeps only the rows of those objects (Selection Only); 'open' editor or word opens the file after export.", // ETABS itself
+            """{"type":"object","required":["path","format"],"properties":{"path":{"type":"string"},"format":{"type":"string","enum":["excel","access","text","xml"]},"tables":{"type":"array","items":{"type":"string"}},"patterns":{"type":"array","items":{"type":"string"}},"selected":{"type":"array","items":{"type":"string"}},"open":{"type":"string","enum":["","file","editor","word"]}}}""",
             Ask.Always, ExportTables, a => $"Export the model's tables to {Path.GetFileName(a.Text("path"))}"),
         new("write_export_file",
             "Writes a file the Engine's page made of the model (File > Export: .dxf, .igs, .stl, .obj, .ifc, .sdnf, .html) at 'path'. Only those file types.",
@@ -84,23 +88,102 @@ public static class FileMenuTools
         return new JsonObject { ["saved"] = path, ["units"] = $"{model.Units.Force}, {model.Units.Length}, {model.Units.Temperature}" };
     }
 
-    private static List<ModelTable> Tables(StructuralModel m, JsonElement a)
+    private static List<string> Texts(JsonElement a, string key) =>
+        a.TryGetProperty(key, out var t) && t.ValueKind == JsonValueKind.Array ? t.EnumerateArray().Select(x => x.GetString() ?? "").Where(x => x.Length > 0).ToList() : [];
+
+    // The fields that name the object a row is of, and the load pattern it is of, as the programs' tables name them.
+    private static readonly string[] ObjectFields = ["UniqueName", "Label", "Frame", "Area", "Joint", "Point", "Object", "Link", "Tendon", "Wall", "Floor", "Beam", "Column"];
+    private static readonly string[] PatternFields = ["LoadPattern", "LoadPat", "Pattern"];
+
+    /// <summary>The tables picked, with only the rows of the load patterns and objects asked for (ETABS's Select Load
+    /// Patterns and Selection Only).</summary>
+    public static List<ModelTable> Tables(StructuralModel m, IReadOnlyCollection<string> picked, IReadOnlyCollection<string> patterns, IReadOnlyCollection<string> selected)
     {
-        var picked = a.TryGetProperty("tables", out var t) && t.ValueKind == JsonValueKind.Array ? t.EnumerateArray().Select(x => x.GetString() ?? "").Where(x => x.Length > 0).ToList() : [];
         var tables = ModelTables.Export(m, picked);
         if (picked.Count == 0) tables = tables.Where(x => x.Rows.Count > 0).ToList();
         if (tables.Count == 0) throw new ToolInputException("No table was picked.");
-        return tables;
+        List<ModelTable> Keep(List<ModelTable> list, string[] fields, IReadOnlyCollection<string> only)
+        {
+            if (only.Count == 0) return list;
+            var set = only.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            return list.Select(t =>
+            {
+                var at = fields.Select(t.Field).FirstOrDefault(i => i >= 0, -1);
+                return at < 0 ? t : t with { Rows = t.Rows.Where(r => at < r.Count && set.Contains(r[at])).ToList() };
+            }).ToList();
+        }
+        return Keep(Keep(tables, PatternFields, patterns), ObjectFields, selected);
     }
 
     private static JsonNode ExportTables(JsonElement a, ICsiLink e)
     {
         var o = Offline(e);
-        var xml = a.Text("format").Equals("xml", StringComparison.OrdinalIgnoreCase);
-        var path = FilePath(a, xml ? ".xml" : ".txt");
-        var tables = Tables(o.ForSave, a);
-        Write(path, p => File.WriteAllText(p, xml ? Xml(o.Model.Title, tables) : Text(Path.GetFileName(path), tables), new UTF8Encoding(false)));
+        var format = a.Text("format").ToLowerInvariant();
+        var path = FilePath(a, format switch { "xml" => ".xml", "excel" => ".xlsx", "access" => "", _ => ".txt" });
+        if (format == "access" && !path.EndsWith(".accdb", StringComparison.OrdinalIgnoreCase) && !path.EndsWith(".mdb", StringComparison.OrdinalIgnoreCase)) path += ".accdb";
+        var tables = Tables(o.ForSave, Texts(a, "tables"), Texts(a, "patterns"), Texts(a, "selected"));
+        Write(path, p =>
+        {
+            switch (format)
+            {
+                case "excel": TableTools.Write(p, tables); break;
+                case "access": Access(p, tables); break;
+                case "xml": File.WriteAllText(p, Xml(o.Model.Title, tables), new UTF8Encoding(false)); break;
+                default: File.WriteAllText(p, Text(Path.GetFileName(p), tables), new UTF8Encoding(false)); break;
+            }
+        });
+        var open = a.Text("open");
+        if (open.Length > 0 && OperatingSystem.IsWindows())
+        {
+            try
+            {
+                var start = open == "word" ? new System.Diagnostics.ProcessStartInfo("winword.exe", "\"" + path + "\"") { UseShellExecute = true }
+                    : open == "editor" ? new System.Diagnostics.ProcessStartInfo("notepad.exe", "\"" + path + "\"") { UseShellExecute = true }
+                    : new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true };
+                System.Diagnostics.Process.Start(start)?.Dispose();
+            }
+            catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) { }
+        }
         return new JsonObject { ["saved"] = path, ["tables"] = new JsonArray(tables.Select(x => (JsonNode)new JsonObject { ["name"] = x.Name, ["rows"] = x.Rows.Count }).ToArray()) };
+    }
+
+    /// <summary>An Access database of the tables (one per table, its fields as text, the ones with units as numbers), made
+    /// through the Microsoft Access Database Engine (ACE) that Office and the CSI programs install.</summary>
+    private static void Access(string path, List<ModelTable> tables)
+    {
+        if (!OperatingSystem.IsWindows()) throw new ToolInputException("An Access database is written on Windows only.");
+        var catalogType = Type.GetTypeFromProgID("ADOX.Catalog");
+        var connectionType = Type.GetTypeFromProgID("ADODB.Connection");
+        if (catalogType is null || connectionType is null) throw new ToolInputException("Windows has no ADO here, so the Access database cannot be written.");
+        if (File.Exists(path)) File.Delete(path);
+        var provider = "Provider=Microsoft.ACE.OLEDB.12.0;Data Source=" + path + ";" + (path.EndsWith(".mdb", StringComparison.OrdinalIgnoreCase) ? "Jet OLEDB:Engine Type=5;" : "");
+        dynamic? catalog = null, connection = null;
+        try
+        {
+            catalog = Activator.CreateInstance(catalogType)!;
+            try { catalog.Create(provider); }
+            catch (Exception ex) { throw new ToolInputException("The Microsoft Access Database Engine is not installed, so the Access database cannot be written (" + ex.Message + ")."); }
+            connection = Activator.CreateInstance(connectionType)!;
+            connection.Open(provider);
+            static string Name(string n) => "[" + new string(n.Select(c => c is '.' or '!' or '[' or ']' or '`' ? '_' : c).ToArray()) + "]";
+            foreach (var t in tables)
+            {
+                var name = t.Name.Length > 64 ? t.Name[..64] : t.Name;
+                var numeric = t.Fields.Select((field, i) => i < t.Units.Count && t.Units[i].Length > 0 && t.Rows.All(r => i >= r.Count || r[i].Length == 0 || double.TryParse(r[i], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _))).ToList();
+                connection.Execute($"CREATE TABLE {Name(name)} ({string.Join(", ", t.Fields.Select((f, i) => Name(f) + (numeric[i] ? " DOUBLE" : " MEMO")))})");
+                foreach (var row in t.Rows)
+                {
+                    var values = t.Fields.Select((_, i) => i >= row.Count || row[i].Length == 0 ? "NULL" : numeric[i] ? row[i] : "'" + row[i].Replace("'", "''") + "'");
+                    connection.Execute($"INSERT INTO {Name(name)} VALUES ({string.Join(", ", values)})");
+                }
+            }
+        }
+        finally
+        {
+            try { connection?.Close(); } catch (Exception) { }
+            if (connection is not null) System.Runtime.InteropServices.Marshal.FinalReleaseComObject(connection);
+            if (catalog is not null) System.Runtime.InteropServices.Marshal.FinalReleaseComObject(catalog);
+        }
     }
 
     /// <summary>CSI's text table layout (as in .$et and .s2k files): TABLE: "name", then one line per row of Field=Value.</summary>
