@@ -36,7 +36,7 @@ public static class ProgramTools
     }
 
     /// <summary>Tools the Modeler adds for writing other programs' files. Always offered in the Modeler.</summary>
-    public static IReadOnlyList<Tool> Modeler { get; } = [.. Safe.SafeModelerTools.All, .. Sap2000.SapModelerTools.All];
+    public static IReadOnlyList<Tool> Modeler { get; } = [.. Safe.SafeModelerTools.All, .. Sap2000.SapModelerTools.All, .. FileMenuTools.All];
 
     /// <summary>Every program's own tools, for lists that must know them all (which tools always ask first).</summary>
     public static IEnumerable<Tool> Every => CsiProgram.All.SelectMany(For).Concat(CsiTools.Every).Concat(Modeler).Concat(LateralTools.All).DistinctBy(t => t.Name);

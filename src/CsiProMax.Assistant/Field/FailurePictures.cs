@@ -17,7 +17,37 @@ public static class FailurePictures
     internal const int Most = 40;
     private static int _taken;
 
-    internal static void Reset() => Volatile.Write(ref _taken, 0);
+    internal static void Reset() { Volatile.Write(ref _taken, 0); lock (Started) Started.Clear(); }
+
+    /// <summary>The work folder of the running field test, so a scratch window can picture itself when a call to it
+    /// does not come back (the 0.4.73 run pictured a leftover blank ETABS four times instead of the stuck one).</summary>
+    internal static string? WorkFolder { get; set; }
+
+    /// <summary>Every scratch process the test started, oldest first.</summary>
+    private static readonly List<int> Started = [];
+
+    /// <summary>A scratch process the test started (the main scratch window, a hidden copy, a real-model copy).</summary>
+    internal static void StartedProcess(int processId) { if (processId > 0) lock (Started) { Started.Remove(processId); Started.Add(processId); } }
+
+    /// <summary>A new program's part: processes an earlier part left are not this part's windows.</summary>
+    internal static void NewPart(int main) { lock (Started) { Started.Clear(); if (main > 0) Started.Add(main); } }
+
+    /// <summary>The process a failed step's picture is of: the newest test-started process still running, so a
+    /// step that worked in its own copy is pictured there, else the main scratch window.</summary>
+    internal static int PictureOf(int main, Func<int, bool>? running = null)
+    {
+        running ??= Running;
+        lock (Started)
+            for (var i = Started.Count - 1; i >= 0; i--)
+                if (running(Started[i])) return Started[i];
+        return main;
+    }
+
+    private static bool Running(int processId)
+    {
+        try { using var process = System.Diagnostics.Process.GetProcessById(processId); return !process.HasExited; }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return false; }
+    }
 
     /// <summary>The file name for a step's picture: its number, the program, and the step's name made safe.</summary>
     internal static string NameFor(int number, CsiProgram program, string step, int window)

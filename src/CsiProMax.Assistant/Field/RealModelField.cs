@@ -209,6 +209,9 @@ public static class RealModelField
         // First what the text file alone carries; what it does not is then put in through the program's tables (the
         // carry step, as every later run does) and must leave nothing different.
         Dictionary<string, TableData>? throughText = null;
+        // The results of the run with the carried rows, once there is one: that run is the one every later run makes,
+        // and the first run's results lack what only the carry puts back (HK CP-2013 Ex002: a link's DefLength 1000, not 1).
+        JsonObject? carriedPack = null;
         var lostByText = new List<string>();
         ctx.Step(title + "the model tables after the round trip through the text file alone are read and compared", () =>
         {
@@ -235,6 +238,7 @@ public static class RealModelField
                 while (EngineRun.Status(false)["done"]?.GetValue<bool>() != true && DateTime.UtcNow < until) Thread.Sleep(2000);
                 var st = EngineRun.Status(true);
                 FieldContext.Expect(string.IsNullOrEmpty(st["error"]?.GetValue<string>()), "the run with the carried rows stopped: " + st["error"]);
+                if (st["pack"] is JsonObject p2) carriedPack = p2;
                 var file = st["analysed_file"]?.GetValue<string>() ?? "";
                 var b = Packs.PackCopy.Read(program, file, ModelTables);
                 FieldContext.Expect(b.Value is not null, "the Engine's model could not be read from a copy: " + b.Said);
@@ -245,7 +249,7 @@ public static class RealModelField
             });
         ctx.Step(title + "the Engine's analysis and design results match the program's own run of your model", () =>
         {
-            var b = FromPack(pack);
+            var b = FromPack(carriedPack ?? pack);
             var shared = a.Results.Keys.Where(b.ContainsKey).ToList();
             FieldContext.Expect(shared.Count > 0, $"no result table to compare: the program's run gave {string.Join(", ", a.Results.Keys.Take(10))}; the Engine's {string.Join(", ", b.Keys.Take(10))}");
             var missing = a.Results.Keys.Where(k => !b.ContainsKey(k) && a.Results[k].Rows.Count > 0).ToList();
@@ -341,10 +345,15 @@ public static class RealModelField
     public static List<string> Compare(Dictionary<string, TableData> a, Dictionary<string, TableData> b, bool model)
     {
         var out_ = new List<string>();
+        if (model) { var auto = AutoPoints(a).Concat(AutoPoints(b)).ToHashSet(StringComparer.OrdinalIgnoreCase); a = WithoutAuto(a, auto); b = WithoutAuto(b, auto); a = SetsAsItems(a); b = SetsAsItems(b); }
         foreach (var (key, ta) in a)
         {
+            if (!model && OnlyTheRun(key)) continue;
             if (!b.TryGetValue(key, out var tb)) { out_.Add($"{key}: the table is gone ({ta.Rows.Count} rows)"); continue; }
-            var fields = ta.Fields.Where(f => !NotCompared.Contains(f)).ToList();
+            // An object's unique name and its points' are the program's numbering, given again on each open
+            // (AISC-360-10 Ex003: C1 is 1, not 2), where its story and label name it: those are compared, not the number.
+            var named = model && IndexOf(ta.Fields, "Story") >= 0 && LabelField(ta.Fields) >= 0;
+            var fields = ta.Fields.Where(f => !NotCompared.Contains(f) && !(named && f.StartsWith("Unique", StringComparison.OrdinalIgnoreCase))).ToList();
             var missingFields = fields.Where(f => !tb.Fields.Contains(f, StringComparer.OrdinalIgnoreCase)).ToList();
             if (missingFields.Count > 0) out_.Add($"{key}: field(s) gone: {string.Join(", ", missingFields)}");
             var common = fields.Except(missingFields).ToList();
@@ -358,18 +367,124 @@ public static class RealModelField
                 var rowsA = g.ToList();
                 if (rowsA.Count != rowsB.Count) out_.Add($"{key}: row {Show(g.Key)} has {rowsB.Count} line(s), not {rowsA.Count}");
                 for (var n = 0; n < Math.Min(rowsA.Count, rowsB.Count); n++)
+                {
+                    // A mode shape's sign is the solver's choice: a mode's results are the same at either sign.
+                    var modal = !model && IsModal(common, rowsA[n], ia);
                     for (var k = 0; k < common.Count; k++)
                     {
                         var va = ia[k] < rowsA[n].Length ? rowsA[n][ia[k]] : ""; var vb = ib[k] < rowsB[n].Length ? rowsB[n][ib[k]] : "";
+                        if (modal) { va = va.TrimStart('-'); vb = vb.TrimStart('-'); }
                         if (!Same(va, vb, scale[k], model)) out_.Add($"{key}: {Show(g.Key)} {common[k]} is '{vb}', not '{va}'");
                     }
+                }
                 groupsB.Remove(g.Key);
             }
-            foreach (var extra in groupsB.Keys.Take(5)) out_.Add($"{key}: row {Show(extra)} was added");
+            foreach (var extra in groupsB.Keys.Where(k => !model || !MadeByTheProgram(key, k)).Take(5)) out_.Add($"{key}: row {Show(extra)} was added");
         }
-        if (model) foreach (var key in b.Keys.Where(k => !a.ContainsKey(k))) out_.Add($"{key}: a table the original does not have ({b[key].Rows.Count} rows)");
+        if (model) foreach (var key in b.Keys.Where(k => !a.ContainsKey(k) && !DesignOnly(k))) out_.Add($"{key}: a table the original does not have ({b[key].Rows.Count} rows)");
         return out_;
     }
+
+    /// <summary>The points ETABS makes itself (a rigid diaphragm's centre point, "Is Auto Point" Yes), as story|label:
+    /// it numbers and places them again each time it opens the model, and the text file has no line for them (saved-4).</summary>
+    internal static IEnumerable<string> AutoPoints(Dictionary<string, TableData> tables)
+    {
+        foreach (var t in tables.Values)
+        {
+            int auto = AutoField(t.Fields), story = IndexOf(t.Fields, "Story"), label = LabelField(t.Fields);
+            if (auto < 0 || story < 0 || label < 0) continue;
+            foreach (var r in t.Rows) if (auto < r.Length && Yes(r[auto]) && story < r.Length && label < r.Length) yield return r[story] + "|" + r[label];
+        }
+    }
+
+    private static int AutoField(IReadOnlyList<string> fields)
+    {
+        for (var i = 0; i < fields.Count; i++) if (fields[i].Replace(" ", "").Equals("IsAutoPoint", StringComparison.OrdinalIgnoreCase) || fields[i].Equals("IsAuto", StringComparison.OrdinalIgnoreCase)) return i;
+        return -1;
+    }
+
+    private static int LabelField(IReadOnlyList<string> fields) => IndexOf(fields, "Label") is >= 0 and var l ? l : IndexOf(fields, "PointBay");
+    private static bool Yes(string v) => v.Trim().Equals("Yes", StringComparison.OrdinalIgnoreCase) || v.Trim() == "1" || v.Trim().Equals("True", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The tables with the program's own points left out: rows marked auto, and rows of point tables (story and
+    /// label) that name one.</summary>
+    internal static Dictionary<string, TableData> WithoutAuto(Dictionary<string, TableData> tables, HashSet<string> auto)
+    {
+        if (auto.Count == 0) return tables;
+        var result = new Dictionary<string, TableData>(tables.Comparer);
+        foreach (var (key, t) in tables)
+        {
+            int flag = AutoField(t.Fields), story = IndexOf(t.Fields, "Story"), label = LabelField(t.Fields);
+            if (flag < 0 && (story < 0 || label < 0)) { result[key] = t; continue; }
+            result[key] = new TableData(t.Fields, t.Rows.Where(r => !(flag >= 0 && flag < r.Length && Yes(r[flag])) && !(story >= 0 && label >= 0 && story < r.Length && label < r.Length && auto.Contains(r[story] + "|" + r[label]))).ToList());
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// A named set table (Database Table Named Set Definitions: a set's tables, patterns, cases and combinations listed
+    /// down its rows) as one row for each item a set holds in each column: the program packs the lists into rows its own
+    /// way each time, and its internal items ("~LLRF") it cannot read back (HK CP-2013 Ex002, 0.4.73).
+    /// </summary>
+    internal static Dictionary<string, TableData> SetsAsItems(Dictionary<string, TableData> tables)
+    {
+        var key = tables.Keys.FirstOrDefault(k => k.Contains("Named Set Definitions", StringComparison.OrdinalIgnoreCase));
+        if (key is null) return tables;
+        var t = tables[key];
+        var rows = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        var name = "";
+        foreach (var r in t.Rows)
+        {
+            if (r.Length > 0 && r[0].Trim().Length > 0) name = r[0].Trim();
+            for (var i = 1; i < Math.Min(r.Length, t.Fields.Count); i++)
+                if (r[i].Trim() is { Length: > 0 } v && !v.StartsWith('~')) rows.Add(name + "\u0001" + t.Fields[i] + "\u0001" + v);
+        }
+        var copy = new Dictionary<string, TableData>(tables, tables.Comparer)
+        {
+            [key] = new TableData(["Name", "Field", "Item"], rows.Select(x => x.Split('\u0001')).ToList()),
+        };
+        return copy;
+    }
+
+    /// <summary>A result table that holds the run itself, not the model's results (Analysis Messages: the time of each
+    /// message), so two runs of the same model never match.</summary>
+    internal static bool OnlyTheRun(string table) => table.Equals("Analysis Messages", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>A row of a modal case (ETABS: StepType "Mode"; SAP2000/SAFE: a modal case type).</summary>
+    internal static bool IsModal(IReadOnlyList<string> fields, string[] row, int[] at)
+    {
+        for (var k = 0; k < fields.Count; k++)
+        {
+            var v = at[k] >= 0 && at[k] < row.Length ? row[at[k]] : "";
+            if (fields[k].Equals("StepType", StringComparison.OrdinalIgnoreCase) && v.Equals("Mode", StringComparison.OrdinalIgnoreCase)) return true;
+            if (fields[k].Equals("CaseType", StringComparison.OrdinalIgnoreCase) && v.Contains("Modal", StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return false;
+    }
+
+    /// <summary>A row the program adds itself when it runs, so the round trip's run adds it too and it is no loss: its
+    /// own internal items ("~LLRF", "~Default"), and the design combinations it builds on each design run (DConS1,
+    /// DStlS1, DWal1, ...) in the combination definitions.</summary>
+    internal static bool MadeByTheProgram(string table, string rowKey)
+    {
+        var name = rowKey.Split('|')[0].Trim();
+        if (name.StartsWith('~')) return true;
+        // ETABS's own default tendon material, added with the tendon tables above.
+        if (name.Equals("A416Gr270", StringComparison.OrdinalIgnoreCase) && table.StartsWith("Material Properties", StringComparison.OrdinalIgnoreCase)) return true;
+        return table.Contains("Combination Definitions", StringComparison.OrdinalIgnoreCase)
+            && System.Text.RegularExpressions.Regex.IsMatch(name, @"^D(Con|Stl|Wal|Cmp|Alum|Cold|Slb)[A-Za-z]*\d+$");
+    }
+
+    /// <summary>A table the design run writes (design overwrites and design combination data the program fills in
+    /// when it designs): the original model, read before its own design run, does not have it yet.</summary>
+    internal static bool DesignOnly(string table) =>
+        table.Contains("Overwrites", StringComparison.OrdinalIgnoreCase) || table.Contains("Design Load Combination Data", StringComparison.OrdinalIgnoreCase)
+        || ProgramDefaultTables.Contains(table);
+
+    /// <summary>Tables ETABS 23.2 fills with its own defaults when it opens a text file in a new window (HK CP-2013 Ex002:
+    /// tendon material A416Gr270 and its tendon section, a rebar ratio for creep), not anything in the file.</summary>
+    private static readonly HashSet<string> ProgramDefaultTables = new(StringComparer.OrdinalIgnoreCase)
+        { "Material Properties - Tendon Data", "Tendon Section Properties", "Frame Assignments - Rebar Ratio For Creep Analysis" };
 
     private static string Show(string key) => key.Length == 0 ? "(the only row)" : key.Length > 120 ? key[..120] + "..." : key;
 
