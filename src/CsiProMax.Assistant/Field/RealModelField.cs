@@ -186,6 +186,8 @@ public static class RealModelField
             var b = Packs.PackCopy.Read(program, analysed, ModelTables);
             FieldContext.Expect(b.Value is not null, "the Engine's model could not be read from a copy: " + b.Said);
             var lost = Compare(a.Model, b.Value!, model: true);
+            // Every difference, not only the first ones the step names, goes beside the model's folder (the lossless thread's list of what to put back).
+            try { File.WriteAllLines(Path.Combine(folder, "round trip differences.txt"), lost); } catch (IOException) { }
             FieldContext.Expect(lost.Count == 0, $"{lost.Count} difference(s): " + string.Join(" | ", lost.Take(25)));
             return $"{a.Model.Count} tables, {a.Model.Sum(t => t.Value.Rows.Count):N0} rows, all the same";
         });
