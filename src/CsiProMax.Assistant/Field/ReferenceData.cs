@@ -53,7 +53,7 @@ public static class ReferenceData
     /// <param name="Name">What it gathers, in a few words.</param>
     /// <param name="For">The programs it is for; null: every program.</param>
     /// <param name="Run">Writes its files and says in one line what it wrote.</param>
-    public sealed record Item(string Name, Func<CsiProgram, bool>? For, Func<Gather, string> Run);
+    public sealed record Item(string Name, Func<CsiProgram, bool>? For, Func<Gather, string> Run, TimeSpan? Limit = null);
 
     /// <summary>Everything gathered. Any thread adds what it needs here.</summary>
     public static List<Item> Items { get; } =
@@ -79,8 +79,13 @@ public static class ReferenceData
         // Opens copies of the slab examples and new blank models in the scratch window (never saved): after every item that reads the scratch model.
         new("SAFE's own .f2k of its examples and of a blank model, and each one read, written, imported and exported again by CSI ProMax, with the differences", p => p.Key == "safe", SafeRoundTrip.Gather),
         // Last: it replaces the scratch model in the scratch window with a new blank one (never saved).
-        new("the program's defaults, from a new blank model", null, BlankDefaults),
+        // ETABS 23.2 opened its own "New Model Quick Templates" form on this and waited for a person, so the whole test
+        // waited (0.4.68 and 0.4.73 full tests): it is given 2 minutes, and nothing after it needs the window.
+        new("the program's defaults, from a new blank model", null, BlankDefaults, TimeSpan.FromMinutes(2)),
     ];
+
+    /// <summary>Longest one item may take before it is left unanswered (Item.Limit when it has its own).</summary>
+    internal static TimeSpan ItemLimit { get; set; } = TimeSpan.FromMinutes(15);
 
     /// <summary>Longest one item may read tables for; what is left is said.</summary>
     internal static TimeSpan TableLimit { get; set; } = TimeSpan.FromMinutes(3);
@@ -98,8 +103,22 @@ public static class ReferenceData
             foreach (var item in Items.ToList())
             {
                 if (item.For is { } only && !only(program)) continue;
-                try { lines.Add($"- {item.Name}: {item.Run(gather)}"); }
-                catch (Exception ex) when (ex is not OutOfMemoryException) { lines.Add($"- {item.Name}: not gathered ({ex.GetType().Name}: {Short(ex.Message)})"); }
+                // Each item in its own time: one call the program never answers (a form of its own waiting for a person)
+                // leaves that item unanswered and the rest of the program's items out, never the whole test waiting.
+                var limit = item.Limit ?? ItemLimit;
+                var work = Task.Run(() => item.Run(gather));
+                try
+                {
+                    if (!work.Wait(limit))
+                    {
+                        lines.Add($"- {item.Name}: not gathered ({program.Name} did not answer within {limit.TotalMinutes:0} minutes; a window of its own may be waiting in it)");
+                        foreach (var rest in Items.SkipWhile(i => i != item).Skip(1).Where(i => i.For is not { } f || f(program)))
+                            lines.Add($"- {rest.Name}: not gathered ({program.Name} was still busy with the item before)");
+                        break;
+                    }
+                    lines.Add($"- {item.Name}: {work.Result}");
+                }
+                catch (AggregateException ex) when (ex.InnerException is { } inner && inner is not OutOfMemoryException) { lines.Add($"- {item.Name}: not gathered ({inner.GetType().Name}: {Short(inner.Message)})"); }
             }
             gather.Write("gathered.md", $"# Reference data from {program.Name}\n\nNeeded things the field test gathered by itself. These are not test results and not bugs.{(note.Length > 0 ? " " + note : "")}\n\n{string.Join("\n", lines)}\n");
         }
@@ -667,7 +686,9 @@ public static class ReferenceData
     private static string BlankDefaults(Gather g)
     {
         if (g.ModelPath.Length == 0) return "not made: only in the test's own scratch window";
-        var answer = Convert.ToInt32(g.Link.Raw("start a blank model", m => { m.InitializeNewModel(); return m.File.NewBlank(); }));
+        // With its units named, as the scratch window's own blank model is started (InitializeNewModel with no units
+        // was followed by ETABS 23.2's New Model Quick Templates form).
+        var answer = Convert.ToInt32(g.Link.Raw("start a blank model", m => { object model = m; CsiProMax.Assistant.Tools.ApiCall.Must(model, "InitializeNewModel", CsiProMax.Assistant.Tools.CsiTools.D(("Units", 6)), "start a new model"); return CsiProMax.Assistant.Tools.ApiCall.Must(model, "File.NewBlank", null, "start a blank model"); }));
         if (answer != 0) return $"not made: NewBlank answered {answer}";
         var blank = new Gather(g.Program, g.Link, Path.Combine(g.Folder, "blank model"), "");
         return "blank model/" + ScratchTables(blank);

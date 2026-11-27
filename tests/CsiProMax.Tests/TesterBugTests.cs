@@ -994,6 +994,13 @@ static class TesterBugTests
             Check(menu.Contains("+ Shows(under, processId)", StringComparison.Ordinal), "a missing menu item does not say what the menu showed");
             Check(menu.Contains("((InvokePattern)click).Invoke()", StringComparison.Ordinal), "a drop-down that did not open is not clicked open");
         });
+        yield return ("field test: a reference-data item the program never answers (ETABS's New Model Quick Templates form) is given up on, not waited for", () =>
+        {
+            var src = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Field", "ReferenceData.cs"));
+            Check(src.Contains("BlankDefaults, TimeSpan.FromMinutes(2))", StringComparison.Ordinal), "the blank-model item has no limit of its own");
+            Check(src.Contains("if (!work.Wait(limit))", StringComparison.Ordinal), "an item is waited for without a limit");
+            Check(!src.Contains("m.InitializeNewModel(); return m.File.NewBlank();", StringComparison.Ordinal), "the blank model is still started with no units");
+        });
         yield return ("field test: steps a workaround can test are tested, not left out (Ahmed, 2026-11-26: only a missing program or licence)", () =>
         {
             string Src(string f) => File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant", f));

@@ -6115,9 +6115,12 @@ function hmDefineMenu() {
       ...hinges, pzItem]],
     ["Spring Properties", springs], 0, ["Diaphragms...", "m:st:diaphragm"], 0, ["Pier Labels...", "m:st:pier"], ["Spandrel Labels...", "m:st:spandrel"], 0, ["Group Definitions...", "m:st:group"], ["Section Cuts...", "m:st:cut"], 0,
     fns, dt("Generalized Displacements..."), 0, ["Mass Source...", "m:mass"], ["P-Delta Options...", "m:pdelta"], 0, ["Load Patterns...", "m:patterns"], dt("Shell Uniform Load Sets..."), 0, ["Load Cases...", "m:cases"], ["Load Combinations...", "m:combos"], 0,
-    relabel(dt("Auto Construction Sequence..."), "Auto Construction Sequence Case..."), dt("Walking Vibrations..."), 0,
-    ["Engine Extras", [["Tendon Sections...", "m:ex:tendonsections"], ["Frame Section Rebar (Modify/Show Rebar)...", "m:frameRebar"], dt("Frame Release Definitions..."), ["Hyperstatic Load Cases...", "m:ex:hyperstatic"],
-      ["Punching Shear Overwrites...", "m:ex:punching"], ["Floor Openings...", "m:ex:openings"], ["Slab Line Releases...", "m:ex:linereleases"]]]];
+    ["Auto Construction Sequence Case...", "m:etdSeq"], ["Walking Vibrations...", "m:etdWalk"], ["Floor Vibrations", [["Excitation Sets...", "m:etdExSets"]]], 0,
+    ["Table Named Sets...", "m:etdTableSets"], ["Named Assignment Sets", [["Frame Modifiers...", "m:etdFMod"], ["Shell Modifiers...", "m:etdShMod"], ["Frame Releases...", "m:etdFRel"]]], 0,
+    // Floor Openings and Slab Line Releases are ETABS's Assign > Shell forms, Frame Release Definitions its Named
+    // Assignment Sets > Frame Releases: they left Engine Extras when those landed.
+    ["Engine Extras", [["Tendon Sections...", "m:ex:tendonsections"], ["Frame Section Rebar (Modify/Show Rebar)...", "m:frameRebar"], ["Hyperstatic Load Cases...", "m:ex:hyperstatic"],
+      ["Punching Shear Overwrites...", "m:ex:punching"]]]];
 }
 // ---- SAFE forms (Ahmed 2026-11-27: every SAFE form identical to SAFE 23's, every option working) ----
 // Each SAFE form of the Engine's SAFE menus, with SAFE's own tables behind it ("SAFE | <table>", by the names SAFE's own
@@ -6730,6 +6733,13 @@ async function modelAct(a) {
     case "grids": return hmGrids();
     case "patterns": return hmPatterns();
     case "combos": return hmCombos();
+    case "etdSeq": return hmEtabsAutoSeq();
+    case "etdWalk": return hmEtabsWalking();
+    case "etdExSets": return hmEtabsExcitationSets();
+    case "etdTableSets": return hmEtabsTableSets();
+    case "etdFMod": return hmEtabsNamedSets("fmod");
+    case "etdShMod": return hmEtabsNamedSets("shmod");
+    case "etdFRel": return hmEtabsNamedSets("frel");
     case "asgFrame": return hmAssignSection("f");
     case "asgShell": return hmAssignSection("a");
     case "asgSupport": return program === "sap2000" ? hmSapRestraints() : hmAssignSupport();
@@ -14912,37 +14922,52 @@ const etaLinkHys = ["Isotropic", "Kinematic", "Takeda", "Pivot", "Concrete", "BR
 function etaLinkUnit(kind, rot) {
   const u = hmU();
   return ({k: rot ? `${u.f}-${u.l}/rad` : `${u.f}/${u.l}`, c: rot ? `${u.f}-${u.l}-s/rad` : `${u.f}-s/${u.l}`, ce: rot ? `${u.f}-${u.l}*(s/rad)^Cexp` : `${u.f}*(s/${u.l})^Cexp`,
-    l: rot ? "rad" : u.l, L: u.l, f: rot ? `${u.f}-${u.l}` : u.f, r: `sec/${u.l}`, E: `${u.f}/${u.l}²`, A: `${u.l}²`})[kind] || "";
+    l: rot ? "rad" : u.l, L: u.l, f: rot ? `${u.f}-${u.l}` : u.f, r: `sec/${u.l}`, E: `${u.f}/${u.l}²`, A: `${u.l}²`, T: tempUnit(u), hz: "cyc/sec", s: `${u.l}/${u.l}`})[kind] || "";
 }
-// Each type's Nonlinear Properties for one direction (pictured Links 15-30; the types not pictured from ETABS's own table
-// fields): [field, label, unit kind, default, control]. An empty list: that direction cannot be nonlinear (Rubber Isolator
-// U1 and an isolator's rotations, greyed in Links 26 and 31).
+// Each type's Nonlinear Properties for one direction (pictured Define/Link "Link 6 01" to "Link 6 14b" and Links 15-30):
+// [field, label, unit kind, default, control, extra]. A default may be a function of the units (ETABS's own defaults are
+// pictured in kip-in). An empty list: that direction cannot be nonlinear (Rubber and High Damping Rubber U1, greyed in
+// Links 26 and "Link 6 14a", and an isolator's rotations).
+const etaLinkKipIn = (v, fp, lp, from) => u => sapConv(v, from || {f: "kip", l: "in"}, u, fp, lp, 0);
+const etaLinkSumitomo = ["SR4015-GR4"];
 function etaLinkNl(type, dk) {
   const r = dk[0] === "R", T = (t, x) => r ? x : t, u1 = dk === "U1";
-  const fl = u1 ? [["FLDamper", "Fixed Length Damper", "", "No", "check"], ["FLDLength", "Damper Length", "L", 0, "fl"], ["", "Extender Properties", "", "", "head"], ["FDLModulus", "Modulus of Elasticity", "E", 0, "fl"], ["FDLArea", "Cross Sectional Area", "A", 0, "fl"]] : [];
+  // Fixed Length Damper ("Links 16", "Damper Bilinear U1 fixed length damper"): 48 in, 29000000 lb/in² and 1 in² once ticked.
+  const fl = u1 ? [["FLDamper", "Fixed Length Damper", "", "No", "check"], ["FLDLength", "Damper Length", "L", etaLinkKipIn(48, 0, 1), "fl"], ["", "Extender Properties", "", "", "head"],
+    ["FDLModulus", "Modulus of Elasticity", "E", etaLinkKipIn(29000000, 1, -2, {f: "lb", l: "in"}), "fl"], ["FDLArea", "Cross Sectional Area", "A", etaLinkKipIn(1, 0, 2), "fl"]] : [];
   switch (type) {
     case "Damper - Exponential": return [[T("TransK", "RotK"), "Stiffness", "k", 0], [T("TransC", "RotC"), "Damping", "ce", 0], [T("TransCExp", "RotCExp"), "Damping Exponent", "", 1], ...fl];
-    case "Damper - Bilinear": return [[T("TransK", "RotK"), "Stiffness", "k", 0], [T("TransC", "RotC"), "Initial Damping", "c", 0], [T("TransCy", "RotCy"), "Yielded Damping", "c", 0], [T("ForceLimit", "MomentLimit"), r ? "Moment Limit" : "Force Limit", "f", 0], ...fl];
-    case "Damper - Friction Spring": return [[T("TransK", "RotK"), "Initial Stiffness", "k", 0], [T("TransK1", "RotK1"), "Slipping Stiffness for Loading", "k", 0], [T("TransK2", "RotK2"), "Slipping Stiffness for Unloading", "k", 0],
-      [T("TransU0", "RotU0"), "Precompression Displacement", "l", 0], [T("TransUs", "RotUs"), "Stop Displacement", "l", 0], ["ActiveDir", "Active Direction", "", "", "text"]];
-    case "Damper - Sumitomo Rubber GR4": return r ? [] : [["ProdModel", "Product Model", "", "", "text"], ["ShearArea", "Shear Area", "A", 0], ["Thickness", "Thickness", "L", 0], ["Temp", "Temperature", "", 20], ["ExcitFreq", "Excitation Frequency", "", 0],
-      ["RigidFluctCoeff", "Rigidity Fluctuation Coefficient", "", 0], ["DampFluctCoeff", "Damping Fluctuation Coefficient", "", 0]];
+    case "Damper - Bilinear": return [[T("TransK", "RotK"), "Stiffness", "k", 0], [T("TransC", "RotC"), "Initial Damping Coefficient", "c", etaLinkKipIn(0.001, 1, -1)],
+      [T("TransCy", "RotCy"), "Yielded Damping Coefficient", "c", 0], [T("ForceLimit", "MomentLimit"), r ? "Linear Moment Limit" : "Linear Force Limit", "f", etaLinkKipIn(0.001, 1, 0)], ...fl];
+    case "Damper - Friction Spring": return [[T("TransK", "RotK"), "Initial (Nonslipping) Stiffness", "k", 0], [T("TransK1", "RotK1"), "Slipping Stiffness (Loading)", "k", 0], [T("TransK2", "RotK2"), "Slipping Stiffness (Unloading)", "k", 0],
+      [T("TransU0", "RotU0"), "Precompression Displacement", "l", 0], [T("TransUs", "RotUs"), "Stop Displacement", "l", 0], ["ActiveDir", "Active Direction", "", "Compression", "select", ["Tension", "Compression", "Both"]]];
+    // Damper Dimensions: a Sumitomo Product Model, or User Defined with its Shear Area and Thickness (Link 6 04).
+    case "Damper - Sumitomo Rubber GR4": return r ? [] : [["ProdModel", "Sumitomo Product Model", "", etaLinkSumitomo[0], "sumi"], ["ShearArea", "Shear Area", "A", 0, "ud"], ["Thickness", "Thickness", "L", 0, "ud"],
+      ["Temp", "Temperature", "T", u => tempUnit(u) === "F" ? 36 : 2.2222], ["ExcitFreq", "Excitation Frequency", "hz", 1], ["RigidFluctCoeff", "Rigidity Fluctuation Coefficient", "", 1], ["DampFluctCoeff", "Damping Fluctuation Coefficient", "", 1]];
     case "Gap": case "Hook": return [[T("TransK", "RotK"), "Stiffness", "k", 0], [T("TransOpen", "RotOpen"), "Open", "l", 0]];
     case "Plastic (Wen)": return [[T("TransK", "RotK"), "Stiffness", "k", 0], [T("TransYield", "RotYield"), "Yield Strength", "f", 0], [T("TransRatio", "RotRatio"), "Post Yield Stiffness Ratio", "", 0], [T("TransExp", "RotExp"), "Yielding Exponent", "", 2]];
     case "Rubber Isolator": return r || u1 ? [] : [["TransK", "Stiffness", "k", 0], ["TransYield", "Yield Strength", "f", 0], ["TransRatio", "Post Yield Stiffness Ratio", "", 0]];
     case "Friction Isolator": return r ? [] : u1 ? [["TransK", "Stiffness", "k", 0], ["TransC", "Damping Coefficient", "c", 0]]
       : [["TransK", "Stiffness", "k", 0], ["Slow", "Friction Coefficient, Slow", "", 0], ["Fast", "Friction Coefficient, Fast", "", 0], ["Rate", "Rate Parameter", "r", 0], ["Radius", "Net Pendulum Radius", "L", "1in"]];
-    case "T/C Friction Isolator": return r ? [] : u1 ? [["U1TransKComp", "Stiffness, Compression", "k", 0], ["U1TransTens", "Stiffness, Tension", "k", 0], ["U1GapComp", "Gap, Compression", "L", 0], ["U1GapTens", "Gap, Tension", "L", 0], ["U1TransC", "Damping Coefficient", "c", 0]]
-      : [["TransK", "Stiffness", "k", 0], ["SlowComp", "Friction Coefficient, Slow, Compression", "", 0], ["FastComp", "Friction Coefficient, Fast, Compression", "", 0], ["RateComp", "Rate Parameter, Compression", "r", 0], ["Radius", "Net Pendulum Radius", "L", "1in"],
-        ["SlowTens", "Friction Coefficient, Slow, Tension", "", 0], ["FastTens", "Friction Coefficient, Fast, Tension", "", 0], ["RateTens", "Rate Parameter, Tension", "r", 0]];
+    // T/C Friction Isolator (Link 6 12a, 12b): U2 and U3 in two columns, When U1 is in Compression / in Tension.
+    case "T/C Friction Isolator": return r ? [] : u1 ? [["U1TransKComp", "Stiffness for Compression", "k", 0], ["U1TransTens", "Stiffness for Tension", "k", 0], ["U1GapComp", "Gap Opening for Compression", "L", 0], ["U1GapTens", "Gap Opening for Tension", "L", 0], ["U1TransC", "Damping Coefficient", "c", 0]]
+      : [["TransK", "Stiffness", "k", 0, "tc"], ["SlowComp", "Friction Coefficient, Slow", "", 0, "tc"], ["FastComp", "Friction Coefficient, Fast", "", 0, "tc"], ["RateComp", "Rate Parameter", "r", 0, "tc"], ["Radius", "Net Pendulum Radius", "L", "1in", "tc"],
+        ["SlowTens", "", "", 0, "tcT"], ["FastTens", "", "", 0, "tcT"], ["RateTens", "", "r", 0, "tcT"]];
+    // Triple Pendulum Isolator (Link 6 13a, 13b): U2 and U3 on one form, the four sliding surfaces in columns.
     case "Triple Pendulum Isolator": {
       if (r) return [];
       if (u1) return [["U1TransK", "Stiffness", "k", 0], ["U1TransC", "Damping Coefficient", "c", 0]];
-      const s = (p, w) => [[p + "Stiff", w + " Stiffness", "k", 0], [p + "Slow", w + " Slow Friction Coefficient", "", 0], [p + "Fast", w + " Fast Friction Coefficient", "", 0], [p + "Rate", w + " Rate Parameter", "r", 0], [p + "Rad", w + " Sliding Surface Radius", "L", 0], [p + "Stop", w + " Stop Distance", "L", 0]];
-      return [["TransK", "Stiffness", "k", 0], ["OuterSym", "Outer Surface Symmetric", "", "No", "check"], ["OutSurfHt", "Outer Surface Height", "L", 0], ["InSurfHt", "Inner Surface Height", "L", 0], ...s("OutTop", "Outer Top"), ...s("OutBot", "Outer Bottom"), ...s("InTop", "Inner Top")];
+      const s = (p, w, k) => [[p + "Stiff", w + " Stiffness", "k", 0, k], [p + "Slow", w + " Slow Friction Coefficient", "", 0, k], [p + "Fast", w + " Fast Friction Coefficient", "", 0, k], [p + "Rate", w + " Rate Parameter", "r", 0, k], [p + "Rad", w + " Sliding Surface Radius", "L", 0, k], [p + "Stop", w + " Stop Distance", "L", 0, k]];
+      return [["OuterSym", "Outer Bottom Surface is Symmetric to Outer Top Surface", "", "Yes", "check"], ["OutSurfHt", "Height for Outer Surfaces", "L", 0], ["InSurfHt", "Height for Inner Surfaces", "L", 0], ...s("OutTop", "Outer Top"), ...s("OutBot", "Outer Bottom", "ob"), ...s("InTop", "Inner Top")];
     }
-    case "High Damping Rubber Isolator": return r || u1 ? [] : [["IsoArea", "Isolator Area", "A", 0], ["IsoEffHt", "Isolator Effective Height", "L", 0], ["AddStiff", "Added Elastic Stiffness", "k", 0], ["NumHysTerms", "Number of Hysteretic Terms", "", 3],
-      ...[1, 2, 3].flatMap(i => [["ContStrain" + i, "Control Strain #" + i, "", 0], ["ContStrgth" + i, "Control Strength #" + i, "", 0]]), ["DamResRatio", "Damage Resistance Ratio", "", 0], ["DamContStr", "Damage Control Strain", "", 0], ["StiffIter", "Stiffness for Iteration", "", "", "text"]];
+    // High Damping Rubber Isolator (Link 6 14b): 1 in², 1 in, 145.04 lb/in², one term (0.1, 725.19 lb/in²), damage 0.3 and 0.3.
+    case "High Damping Rubber Isolator": {
+      if (r || u1) return [];
+      const psi = v => etaLinkKipIn(v, 1, -2, {f: "lb", l: "in"});
+      return [["IsoArea", "Isolator Cross-Sectional Area", "A", etaLinkKipIn(1, 0, 2)], ["IsoEffHt", "Isolator Effective Height", "L", etaLinkKipIn(1, 0, 1)], ["AddStiff", "Added Elastic Stiffness", "E", psi(145.04)], ["NumHysTerms", "Number of Terms", "", 1],
+        ...[1, 2, 3].flatMap(i => [["ContStrain" + i, "Control Strain", "s", i === 1 ? 0.1 : 0, "term", i], ["ContStrgth" + i, "Control Strength", "E", i === 1 ? psi(725.19) : 0, "term", i]]),
+        ["DamResRatio", "Resistance Ratio", "", 0.3], ["DamContStr", "Control Strain", "s", 0.3], ["StiffIter", "Stiffness for Iteration", "", "Elastic Stiffness", "radio", ["Elastic Stiffness", "Incremental Secant"]]];
+    }
     case "MultiLinear Elastic": case "MultiLinear Plastic": return [[T("TransPoint", "RotPoint"), "points", "", 0, "points"]];
   }
   return [];
@@ -14950,12 +14975,14 @@ function etaLinkNl(type, dk) {
 // The types whose rows say Nonlinear? themselves (the others are nonlinear where their nonlinear fields are filled in).
 const etaLinkFlagged = t => ["Damper - Sumitomo Rubber GR4", "Triple Pendulum Isolator", "High Damping Rubber Isolator"].includes(t);
 const etaLinkMulti = t => /^MultiLinear/.test(t);
-const etaLinkHysFields = {Pivot: [["PivotAlpha1", "Alpha 1"], ["PivotAlpha2", "Alpha 2"], ["PivotBeta1", "Beta 1"], ["PivotBeta2", "Beta 2"], ["PivotEta", "Eta"]], Concrete: [["ConcreteFact", "Energy Degradation Factor"]],
+// MultiLinear Plastic's hysteresis parameters (Link 6 08a-08g): Pivot's on the form itself (10, 10, 0.7, 0.7, 0), Concrete,
+// BRB Hardening and Degrading behind their Modify/Show ... Parameters button (forms not pictured yet: built from ETABS's table fields).
+const etaLinkHysFields = {Pivot: [["PivotAlpha1", "α 1", "", 10], ["PivotBeta1", "β 1", "", 0.7], ["PivotEta", "η", "", 0], ["PivotAlpha2", "α 2", "", 10], ["PivotBeta2", "β 2", "", 0.7]], Concrete: [["ConcreteFact", "Energy Degradation Factor"]],
   "BRB Hardening": [["BRBSym", "Symmetric", "check"], ["BRBTensHF", "Tension Hardening Factor"], ["BRBTensMPD", "Tension Max Plastic Deformation Ratio"], ["BRBTensAPD", "Tension Accumulated Plastic Deformation Ratio"], ["BRBTensPro", "Tension Proportion"],
     ["BRBCompHF", "Compression Hardening Factor"], ["BRBCompMPD", "Compression Max Plastic Deformation Ratio"], ["BRBCompAPD", "Compression Accumulated Plastic Deformation Ratio"], ["BRBCompPro", "Compression Proportion"]],
   Degrading: [["DegSym", "Symmetric", "check"], ...["Tens", "Comp"].flatMap(s => ["f0", "f1", "f2", "x1", "x2"].map(x => [`Deg${s}${x}`, `${s === "Tens" ? "Tension" : "Compression"} ${x}`]).concat([[`Deg${s}ADWF`, `${s === "Tens" ? "Tension" : "Compression"} Accumulation Deformation Factor`]])),
     ["DegStiff", "Stiffness Weighting Factor"], ["DegLargeSml", "Larger-Smaller Weighting Factor"]]};
-const etaLinkDefault = v => v === "1in" ? String(sapConv(1, {f: "kip", l: "in"}, hmU(), 0, 1, 0)) : String(v);
+const etaLinkDefault = v => typeof v === "function" ? String(+(+v(hmU())).toPrecision(6)) : v === "1in" ? String(sapConv(1, {f: "kip", l: "in"}, hmU(), 0, 1, 0)) : String(v);
 
 async function etaLinks() {
   const [pd, dd] = [(await hmRun("property_definitions", {}, true)).result, (await hmRun("definition_data", {}, true)).result || {tables: {}}]; if (!pd) return;
@@ -15041,7 +15068,10 @@ async function etaLinks() {
             if (nl && (x === "U2" || x === "U3")) base.DJ = String(s.row.DJ ?? 0);
             if (nl && !etaLinkMulti(type)) {
               const flOn = /^y/i.test(s.row.FLDamper || "");
-              for (const [f, , , def, kind] of nlf) { if (!f) continue; if (kind === "fl" && !flOn) continue; base[f] = String(s.row[f] ?? (kind === "check" ? def : etaLinkDefault(def))); }
+              for (const [f, , , def, kind, x2] of nlf) {
+                if (!f || (kind === "fl" && !flOn) || (kind === "ud" && s.row.ProdModel !== "User Defined") || (kind === "term" && x2 > +(s.row.NumHysTerms ?? 1))) continue;
+                base[f] = String(s.row[f] ?? (kind === "check" ? def : etaLinkDefault(def)));
+              }
             }
             if (nl && etaLinkMulti(type)) {
               const pts = s.pts.length ? s.pts : [[-10, -1], [-1, -1], [0, 0], [1, 1], [10, 1]];
@@ -15160,25 +15190,38 @@ function etaLinkLinear(st, name, after) {
 // MultiLinear the Multilinear Force-Displ Relation with Add Row, Delete Row, Reorder Rows and its graph.
 function etaLinkDir(st, name, type, dk, after) {
   const s = st.dofs[dk], r = Object.assign({}, s.row), rot = dk[0] === "R", nl = !!(s.nl && etaLinkNl(type, dk).length), multi = etaLinkMulti(type), shear = dk === "U2" || dk === "U3";
-  const ke = rot ? "RotKE" : "TransKE", ce = rot ? "RotCE" : "TransCE", nlf = nl && !multi ? etaLinkNl(type, dk) : [];
+  if (nl && shear && /Triple Pendulum|High Damping/.test(type)) return etaLinkIso2(st, name, type, dk, after);
+  const ke = rot ? "RotKE" : "TransKE", ce = rot ? "RotCE" : "TransCE", nlf = nl && !multi ? etaLinkNl(type, dk) : [], wide = nl && type === "MultiLinear Plastic";
   let pts = (s.pts.length ? s.pts : [[-10, -1], [-1, -1], [0, 0], [1, 1], [10, 1]]).map(p => p.slice()), sel = 0;
-  const g = body => `<div style="display:grid;grid-template-columns:176px 86px auto;gap:5px 8px;align-items:center;padding:2px 10px">${body}</div>`;
+  const su = nl && type === "Damper - Sumitomo Rubber GR4";
+  const g = body => `<div style="display:grid;grid-template-columns:${su ? "210px 96px" : "176px 86px"} auto;gap:5px 8px;align-items:center;padding:2px 10px">${body}</div>`;
   const fsx = (l, b, grey) => `<fieldset style="margin:0 0 6px${grey ? ";color:#999" : ""}"><legend${grey ? ' style="color:#999"' : ""}>${l}</legend>${b}</fieldset>`;
-  const ro = v => `<input class="grey" readonly value="${esc(v)}" style="width:136px">`;
-  const inp = (f, v, kind) => `<input data-f="${f}" type="number" step="any" value="${esc(v)}" style="width:86px">`;
-  const nlRows = nlf.map(([f, l, uk, def, kind]) => kind === "head" ? `<span style="grid-column:1/4;text-decoration:underline" data-fl>${l}</span>`
+  const ro = v => `<input class="grey" readonly value="${esc(v)}" style="width:${su ? 210 : 136}px">`;
+  const inp = (f, v, w) => `<input data-f="${f}" type="number" step="any" value="${esc(v)}" style="width:${w || 86}px">`;
+  const val = (f, def) => r[f] ?? etaLinkDefault(def);
+  const nlRows = nlf.map(([f, l, uk, def, kind, x]) => kind === "head" ? `<span style="grid-column:1/4;text-decoration:underline" data-fl>${l}</span>`
     : kind === "check" ? `<label style="grid-column:1/4"><input type="checkbox" data-f="${f}" ${/^y/i.test(r[f] ?? def) ? "checked" : ""}> ${l}</label>`
-    : kind === "text" ? `<span>${l}</span><input data-f="${f}" data-t="1" value="${esc(r[f] ?? def)}" style="width:86px"><span></span>`
-    : `<span ${kind === "fl" ? "data-fl" : ""} style="${kind === "fl" && f !== "FLDLength" ? "padding-left:10px" : ""}">${l}</span>${inp(f, r[f] ?? etaLinkDefault(def))}<span ${kind === "fl" ? "data-fl" : ""}>${etaLinkUnit(uk, rot)}</span>`).join("");
+    : kind === "select" ? `<span>${l}</span><select data-f="${f}" data-t="1" style="width:122px">${opts(x, r[f] || def)}</select><span></span>`
+    : kind === "sumi" ? `<span style="grid-column:1/4">Damper Dimensions:</span><label style="padding-left:22px"><input type="radio" name="dSu" value="p" ${r[f] !== "User Defined" ? "checked" : ""}> ${l}</label><select data-f="${f}" data-t="1" style="width:122px">${opts(etaLinkSumitomo, etaLinkSumitomo.includes(r[f]) ? r[f] : def)}</select><span></span>
+        <label style="grid-column:1/4;padding-left:22px"><input type="radio" name="dSu" value="u" ${r[f] === "User Defined" ? "checked" : ""}> User Defined</label>`
+    : `<span ${/^(fl|ud)$/.test(kind) ? "data-fl" : ""} style="${kind === "fl" && f !== "FLDLength" ? "padding-left:10px" : kind === "ud" ? "padding-left:66px" : ""}">${l}</span>${inp(f, val(f, def))}<span ${/^(fl|ud)$/.test(kind) ? "data-fl" : ""}>${etaLinkUnit(uk, rot)}</span>`).join("");
+  // T/C Friction Isolator U2/U3 (Link 6 12b): When U1 is in Compression / in Tension; Stiffness and Net Pendulum Radius are one
+  // value for both (the Tension column shows it greyed).
+  const tc = nl && type === "T/C Friction Isolator" && shear, tcRow = (l, c, t, uk) => `<span>${l}</span>${inp(c, val(c, nlf.find(z => z[0] === c)[3]), 82)}${t ? inp(t, val(t, 0), 82) : `<input class="grey" readonly data-mirror="${c}" value="${esc(val(c, nlf.find(z => z[0] === c)[3]))}" style="width:82px">`}<span>${etaLinkUnit(uk, rot)}</span>`;
+  const tcBody = tc ? `<div style="display:grid;grid-template-columns:160px 96px 96px auto;gap:5px 6px;align-items:center;padding:2px 10px;white-space:nowrap"><span></span><span style="text-align:center;white-space:normal">When U1 is in Compression</span><span style="text-align:center;white-space:normal">When U1 is in Tension</span><span></span>
+      ${tcRow("Stiffness", "TransK", "", "k")}${tcRow("Friction Coefficient, Slow", "SlowComp", "SlowTens", "")}${tcRow("Friction Coefficient, Fast", "FastComp", "FastTens", "")}${tcRow("Rate Parameter", "RateComp", "RateTens", "r")}${tcRow("Net Pendulum Radius", "Radius", "", "L")}</div>` : "";
   const unitL = rot ? "rad" : hmU().l, unitF = rot ? `${hmU().f}-${hmU().l}` : hmU().f;
-  const hys = type === "MultiLinear Plastic" ? g(`<span>Hysteresis Type</span><select data-f="HysType" data-t="1">${opts(etaLinkHys, r.HysType || "Kinematic")}</select><span></span>`) + `<div id="dHp"></div>` : "";
-  const d = dialog("Link/Support Directional Properties", fsx("Identification", g(`<span>Property Name</span>${ro(name)}<span></span><span>Direction</span>${ro(dk)}<span></span><span>Type</span>${ro(type)}<span></span><span>NonLinear</span>${ro(nl ? "Yes" : "No")}<span></span>`))
+  const left = fsx("Identification", g(`<span>Property Name</span>${ro(name)}<span></span><span>Direction</span>${ro(dk)}<span></span><span>Type</span>${ro(type)}<span></span><span>NonLinear</span>${ro(nl ? "Yes" : "No")}<span></span>`))
     + fsx("Linear Properties", g(`<span>Effective Stiffness</span>${inp(ke, r[ke] ?? 0)}<span>${etaLinkUnit("k", rot)}</span><span>Effective Damping</span>${inp(ce, r[ce] ?? 0)}<span>${etaLinkUnit("c", rot)}</span>`))
     + (nl && (shear || multi) ? fsx("Shear Deformation Location", g(`<span>Distance from End-J</span><input data-f="DJ" type="number" step="any" style="width:86px" ${shear ? `value="${esc(r.DJ ?? 0)}"` : "disabled"}><span>${hmU().l}</span>`), !shear) : "")
-    + (nl && multi ? fsx(`Multilinear ${rot ? "Moment-Rotation" : "Force-Displ"} Relation`, hys + `<div style="display:grid;grid-template-columns:170px 160px;gap:8px;padding:4px 6px"><div><div id="dP" style="height:120px;overflow:auto;border:2px solid #333;background:#fff"></div>
+    + (nl && multi ? fsx(`Multilinear ${rot ? "Moment-Rotation" : "Force-Displ"} Relation`, `<div style="display:grid;grid-template-columns:170px 160px;gap:8px;padding:4px 6px"><div><div id="dP" style="height:120px;overflow:auto;border:2px solid #333;background:#fff"></div>
         <div style="display:flex;justify-content:space-between;margin-top:6px"><button id="dPa" style="width:72px">Add Row</button><button id="dPd" style="width:80px">Delete Row</button></div><button id="dPr" style="width:100%;margin-top:4px">Reorder Rows</button></div>
         <div><svg id="dG" viewBox="0 0 150 120" style="width:150px;height:120px;background:#fff;border:1px solid #bbb"></svg><div id="dM" class="grey" style="font-size:11px;padding:2px 4px;margin-top:4px;border:1px solid #ccc"></div></div></div>`) : "")
-    + (nl && !multi ? fsx("Nonlinear Properties", g(nlRows)) : ""),
+    + (nl && !multi ? fsx("Nonlinear Properties", tc ? tcBody : g(nlRows)) : "");
+  // MultiLinear Plastic (Link 6 08-08g): Hysteresis Type and Associated Parameters and the Hysteresis Definition Diagram on the right.
+  const right = wide ? fsx("Hysteresis Type and Associated Parameters", `<div style="text-align:center;margin:4px 0 8px">Hysteresis Type&nbsp;&nbsp;&nbsp;<select data-f="HysType" data-t="1" style="width:160px">${opts(etaLinkHys, r.HysType || "Kinematic")}</select></div><div id="dHp" style="min-height:52px"></div>`)
+    + fsx("Hysteresis Definition Diagram", `<svg id="dHd" viewBox="0 0 520 330" style="width:100%;background:#e6e6e6;border:1px solid #999"></svg>`) : "";
+  const d = dialog("Link/Support Directional Properties", wide ? `<div style="display:grid;grid-template-columns:380px 1fr;gap:12px">${`<div>${left}</div><div>${right}</div>`}</div>` : left,
     [["OK", d => {
       if (multi && nl) savePts();
       for (const i of d.querySelectorAll("[data-f]")) {
@@ -15187,11 +15230,16 @@ function etaLinkDir(st, name, type, dk, after) {
         if (i.dataset.t) { r[i.dataset.f] = i.value; continue; }
         const v = parseFloat(i.value); if (!isFinite(v)) { formError(d, "Each value is a number."); return false; } r[i.dataset.f] = String(v);
       }
+      const ud = d.querySelector('input[name="dSu"][value="u"]');
+      if (ud) { if (ud.checked) r.ProdModel = "User Defined"; else { delete r.ShearArea; delete r.Thickness; } }
       if (multi && nl) { if (pts.length < 2) { formError(d, "Give at least two points."); return false; } if (pts.some(p => !p.every(isFinite))) { formError(d, "Each point is two numbers."); return false; } s.pts = pts.map(p => p.slice()); }
       s.row = r; after(); return true;
-    }], ["Cancel"]], {width: multi && nl ? 440 : 440});
-  const flPaint = () => { const c = d.querySelector('[data-f="FLDamper"]'); if (!c) return; const on = c.checked; d.querySelectorAll('[data-f="FLDLength"],[data-f="FDLModulus"],[data-f="FDLArea"]').forEach(i => { i.disabled = !on; if (!on) i.value = ""; else if (i.value === "") i.value = r[i.dataset.f] ?? 0; }); d.querySelectorAll("[data-fl]").forEach(x => x.style.color = on ? "" : "#999"); };
+    }], ["Cancel"]], {width: wide ? 1000 : su || tc ? 480 : 440});
+  const flPaint = () => { const c = d.querySelector('[data-f="FLDamper"]'); if (!c) return; const on = c.checked; d.querySelectorAll('[data-f="FLDLength"],[data-f="FDLModulus"],[data-f="FDLArea"]').forEach(i => { i.disabled = !on; if (!on) i.value = ""; else if (i.value === "") i.value = val(i.dataset.f, nlf.find(z => z[0] === i.dataset.f)[3]); }); d.querySelectorAll("[data-fl]").forEach(x => x.style.color = on ? "" : "#999"); };
   const fl = d.querySelector('[data-f="FLDamper"]'); if (fl) { fl.onchange = flPaint; flPaint(); }
+  const suPaint = () => { const u = q(d, 'input[name="dSu"][value="u"]').checked; q(d, '[data-f="ProdModel"]').disabled = u; d.querySelectorAll('[data-f="ShearArea"],[data-f="Thickness"]').forEach(i => { i.disabled = !u; if (!u) i.value = ""; else if (i.value === "") i.value = r[i.dataset.f] ?? 0; }); d.querySelectorAll("[data-fl]").forEach(x => x.style.color = u ? "" : "#999"); };
+  if (d.querySelector('input[name="dSu"]')) { d.querySelectorAll('input[name="dSu"]').forEach(b => b.onchange = suPaint); suPaint(); }
+  d.querySelectorAll("[data-mirror]").forEach(m => { const src = q(d, `[data-f="${m.dataset.mirror}"]`); src.addEventListener("input", () => m.value = src.value); });
   const savePts = () => d.querySelectorAll("[data-px]").forEach(i => { const k = +i.dataset.px; pts[k] = [parseFloat(i.value), parseFloat(q(d, `[data-pf="${k}"]`).value)]; });
   const plot = () => {
     const ok = pts.filter(p => p.every(isFinite)); if (!ok.length) return;
@@ -15213,10 +15261,100 @@ function etaLinkDir(st, name, type, dk, after) {
     q(d, "#dPd").onclick = () => { savePts(); if (pts.length > 1) { pts.splice(sel, 1); sel = Math.min(sel, pts.length - 1); } table(); };
     q(d, "#dPr").onclick = () => { savePts(); pts.sort((a, b) => a[0] - b[0]); sel = 0; table(); };
     table();
-    const hy = d.querySelector('[data-f="HysType"]');
-    if (hy) { const hp = () => { q(d, "#dHp").innerHTML = (etaLinkHysFields[hy.value] || []).length ? `<div style="display:grid;grid-template-columns:1fr 86px;gap:4px 8px;align-items:center;padding:2px 10px">${etaLinkHysFields[hy.value].map(([f, l, k]) => k === "check" ? `<label style="grid-column:1/3"><input type="checkbox" data-f="${f}" ${/^y/i.test(r[f] || "Yes") ? "checked" : ""}> ${l}</label>` : `<span>${l}</span><input data-f="${f}" type="number" step="any" value="${esc(r[f] ?? 0)}">`).join("")}</div>` : `<p class="kv" style="margin:2px 10px">No Parameters Are Required For This Hysteresis Type</p>`; };
-      hy.onchange = hp; hp(); }
   }
+  const hy = d.querySelector('[data-f="HysType"]');
+  if (hy) {
+    const hp = () => {
+      const t = hy.value, fs = etaLinkHysFields[t] || [], box = q(d, "#dHp");
+      d.querySelectorAll("#dHp [data-f]").forEach(i => { if (!i.disabled && i.type !== "checkbox") r[i.dataset.f] = i.value; });
+      if (t === "Pivot") box.innerHTML = `<div style="display:grid;grid-template-columns:30px 96px 40px 96px 40px 96px;gap:6px 10px;align-items:center;padding:2px 10px">${fs.map(([f, l, , def]) => `<span style="text-align:center">${l.replace(/ (\d)$/, "<sub>$1</sub>")}</span><input data-f="${f}" type="number" step="any" value="${esc(r[f] ?? def)}" style="width:96px">`).join("")}</div>`;
+      else if (fs.length) { box.innerHTML = `<div style="text-align:center"><button id="dHb" style="width:290px">Modify/Show ${t} Parameters...</button></div>`; q(d, "#dHb").onclick = () => etaLinkHysParams(t, r); }
+      else box.innerHTML = `<p style="text-align:center;margin:6px 0">No Parameters are Required for this Hysteresis</p>`;
+      q(d, "#dHd").innerHTML = etaLinkHysSvg(t);
+    };
+    hy.onchange = hp; hp();
+  }
+  return d;
+}
+// Concrete, BRB Hardening and Degrading parameters (the button on Link 6 08e-08g; their own forms are not pictured yet,
+// so they hold ETABS's table fields). Values go into the direction's working row.
+function etaLinkHysParams(t, r) {
+  const fs = etaLinkHysFields[t];
+  return dialog(t + " Hysteresis Parameters", `<div style="display:grid;grid-template-columns:1fr 96px;gap:5px 8px;align-items:center;padding:4px 10px">${fs.map(([f, l, k]) => k === "check" ? `<label style="grid-column:1/3"><input type="checkbox" data-h="${f}" ${/^y/i.test(r[f] || "Yes") ? "checked" : ""}> ${l}</label>` : `<span>${l}</span><input data-h="${f}" type="number" step="any" value="${esc(r[f] ?? 0)}">`).join("")}</div>`,
+    [["OK", x => { for (const i of x.querySelectorAll("[data-h]")) { if (i.type === "checkbox") { r[i.dataset.h] = i.checked ? "Yes" : "No"; continue; } const v = parseFloat(i.value); if (!isFinite(v)) { formError(x, "Each value is a number."); return false; } r[i.dataset.h] = String(v); } return true; }], ["Cancel"]], {width: 460});
+}
+// The Hysteresis Definition Diagram: "<type> Hysteresis Model", Action against Deformation, loops of growing amplitude
+// (pinched for Takeda, Pivot and Degrading; the compression side small for Concrete), as ETABS draws them.
+function etaLinkHysSvg(t) {
+  const X = x => 260 + x * 230, Y = y => 185 - y * 125, P = [[0, 0]];
+  for (const a of [0.35, 0.65, 0.95]) {
+    const y = 0.55 + 0.4 * a;
+    if (t === "Concrete") { P.push([0, 0.6 * y], [a * 0.7, y], [a * 0.6, 0], [-a * 0.4, -0.2 * a], [0, 0]); continue; }
+    const pinch = /Takeda|Pivot|Degrading/.test(t), k = t === "Isotropic" ? 1 + a * 0.3 : 1;
+    P.push([a, y * k], [a - 0.3, pinch ? 0.05 : y * k - 0.9]); if (pinch) P.push([0, -0.25]);
+    P.push([-a, -y * k], [-a + 0.3, pinch ? -0.05 : -y * k + 0.9]); if (pinch) P.push([0, 0.25]);
+  }
+  let grid = ""; for (let i = 0; i <= 10; i++) grid += `<line x1="${30 + i * 46}" y1="30" x2="${30 + i * 46}" y2="310" stroke="#ddd"/>`; for (let i = 0; i <= 10; i++) grid += `<line x1="30" y1="${30 + i * 28}" x2="490" y2="${30 + i * 28}" stroke="#ddd"/>`;
+  return `<rect x="10" y="22" width="500" height="296" fill="#fff"/><rect x="10" y="10" width="500" height="16" fill="#ccc"/><text x="260" y="22" text-anchor="middle" font-size="12" font-style="italic" font-weight="bold">${esc(t)} Hysteresis Model</text>${grid}
+    <line x1="${X(0)}" y1="30" x2="${X(0)}" y2="310" stroke="#d00"/><line x1="30" y1="${Y(0)}" x2="490" y2="${Y(0)}" stroke="#d00"/><circle cx="${X(0)}" cy="${Y(0)}" r="3" fill="#d00"/>
+    <polyline fill="none" stroke="#33c" stroke-width="1.4" points="${P.map(p => X(p[0]) + "," + Y(Math.max(-1.25, Math.min(1.25, p[1])))).join(" ")}"/>
+    <text x="20" y="170" font-size="11" font-weight="bold" transform="rotate(-90 20 170)" text-anchor="middle">Action</text><text x="260" y="326" font-size="11" font-weight="bold" text-anchor="middle">Deformation</text>`;
+}
+// Triple Pendulum Isolator and High Damping Rubber Isolator, U2 and U3 on one form (Link 6 13b, 14b): the other shear
+// direction's linear values and shear location beside (greyed while it is off), the nonlinear properties shared by both.
+function etaLinkIso2(st, name, type, dk, after) {
+  const o = dk === "U2" ? "U3" : "U2", s = st.dofs[dk], so = st.dofs[o], oOn = !!(so && so.on && !so.fixed), r = Object.assign({}, s.row), r2 = Object.assign({}, so ? so.row : {});
+  const tp = /Triple/.test(type), nlf = etaLinkNl(type, dk), def = f => (nlf.find(z => z[0] === f) || [])[3] ?? 0, val = f => r[f] ?? etaLinkDefault(def(f)), U = k => etaLinkUnit(k, false);
+  const fsx = (l, b) => `<fieldset style="margin:0 0 6px"><legend>${l}</legend>${b}</fieldset>`;
+  const ro = (v, w) => `<input class="grey" readonly value="${esc(v)}" style="width:${w || 130}px">`;
+  const box = (f, v, w) => `<input data-f="${f}" type="number" step="any" value="${esc(v)}" style="width:${w || 82}px">`;
+  const grey = t => `<span style="${oOn ? "" : "color:#999"}">${t}</span>`;
+  const oth = f => `<input data-o="${f}" type="number" step="any" style="width:82px" ${oOn ? `value="${esc(r2[f] ?? 0)}"` : "disabled"}>`;
+  const g4 = body => `<div style="display:grid;grid-template-columns:150px 86px 70px 150px 86px auto;gap:5px 6px;align-items:center;padding:2px 10px">${body}</div>`;
+  const head = fsx("Identification", `<div style="display:grid;grid-template-columns:110px 140px 1fr 90px 150px;gap:5px 8px;align-items:center;padding:2px 10px"><span>Property Name</span>${ro(name)}<span></span><span>Type</span>${ro(type, 150)}<span>Direction</span>${ro(dk)}<span></span><span>NonLinear</span>${ro("Yes", 150)}</div>`)
+    + fsx("Linear Properties", g4(`<span>Effective Stiffness - ${dk}</span>${box("TransKE", r.TransKE ?? 0)}<span>${U("k")}</span>${grey(`Effective Stiffness -${o}`)}${oth("TransKE")}${grey(U("k"))}
+        <span>Effective Damping - ${dk}</span>${box("TransCE", r.TransCE ?? 0)}<span>${U("c")}</span>${grey(`Effective Damping -${o}`)}${oth("TransCE")}${grey(U("c"))}`))
+    + fsx("Shear Deformation Location", g4(`<span>Distance from End-J - ${dk}</span>${box("DJ", r.DJ ?? 0)}<span>${U("L")}</span>${grey(`Distance from End-J - ${o}`)}${oth("DJ")}${grey(U("L"))}`));
+  let body;
+  if (tp) {
+    const surf = [["OutTop", "Outer Top"], ["OutBot", "Outer Bottom"], ["InTop", "Inner Top"], ["InBot", "Inner Bottom"]], rows = [["Stiff", "Stiffness", "k"], ["Slow", "Friction Coefficient, Slow", ""], ["Fast", "Friction Coefficient, Fast", ""], ["Rate", "Rate Parameter", "r"], ["Rad", "Radius of Sliding Surface", "L"], ["Stop", "Stop Distance", "L"]];
+    body = fsx("Height and Symmetry of Sliding Surfaces", `<div style="display:grid;grid-template-columns:150px 86px 40px auto;gap:5px 6px;align-items:center;padding:2px 10px;white-space:nowrap"><span>Height for Outer Surfaces</span>${box("OutSurfHt", val("OutSurfHt"))}<span>${U("L")}</span><label><input type="checkbox" data-f="OuterSym" ${/^y/i.test(r.OuterSym ?? "Yes") ? "checked" : ""}> Outer Bottom Surface is Symmetric to Outer Top Surface</label>
+        <span>Height for Inner Surfaces</span>${box("InSurfHt", val("InSurfHt"))}<span>${U("L")}</span><label style="color:#999"><input type="checkbox" checked disabled> Inner Bottom Surface is Symmetric to Inner Top Surface</label></div>`)
+      + fsx(`Nonlinear Properties for Direction ${dk}`, `<div style="display:grid;grid-template-columns:150px repeat(4,90px) auto;gap:5px 6px;align-items:center;padding:2px 10px;white-space:nowrap"><span></span>${surf.map(([, l]) => `<span style="text-align:center">${l}</span>`).join("")}<span></span>
+        ${rows.map(([k, l, uk]) => `<span>${l}</span>${box("OutTop" + k, val("OutTop" + k), 88)}<input data-f="OutBot${k}" data-ob="OutTop${k}" type="number" step="any" value="${esc(val("OutBot" + k))}" style="width:88px">${box("InTop" + k, val("InTop" + k), 88)}<input class="grey" readonly data-mirror="InTop${k}" value="${esc(val("InTop" + k))}" style="width:88px"><span>${U(uk)}</span>`).join("")}</div>`);
+  } else {
+    const n0 = Math.min(3, Math.max(1, +(r.NumHysTerms ?? 1) || 1));
+    body = fsx(`Nonlinear Properties for Direction ${dk}`, `<div style="display:grid;grid-template-columns:170px 100px 60px 86px 60px 86px auto;gap:5px 6px;align-items:center;padding:2px 10px;white-space:nowrap">
+        ${[["IsoArea", "A"], ["IsoEffHt", "L"], ["AddStiff", "E"]].map(([f, uk]) => `<span>${nlf.find(z => z[0] === f)[1]}</span>${box(f, val(f))}<span style="grid-column:3/8">${U(uk)}</span>`).join("")}
+        <span>Hysteretic Parameters:</span><span style="text-align:right">Number of Terms</span><input data-f="NumHysTerms" type="number" min="1" max="3" step="1" value="${n0}" style="width:50px"><span style="grid-column:4/8"></span>
+        <span></span>${[1, 2, 3].map(i => `<span style="text-align:center">Terms #${i}</span><span></span>`).join("")}
+        ${[["ContStrain", "Control Strain", "s"], ["ContStrgth", "Control Strength", "E"]].map(([p, l, uk]) => `<span>${l}</span>${[1, 2, 3].map(i => `<input data-f="${p}${i}" data-term="${i}" type="number" step="any" value="${esc(val(p + i))}" style="width:82px"><span>${i === 1 ? U(uk) : ""}</span>`).join("")}`).join("")}
+        <span style="grid-column:1/8">Damage Parameters:</span><span style="padding-left:10px">Resistance Ratio</span>${box("DamResRatio", val("DamResRatio"))}<span style="grid-column:3/8"></span>
+        <span style="padding-left:10px">Control Strain</span>${box("DamContStr", val("DamContStr"))}<span style="grid-column:3/8">${U("s")}</span>
+        <span>Stiffness for Iteration:</span><label style="grid-column:2/8"><input type="radio" name="dSi" value="Elastic Stiffness" ${!/secant/i.test(r.StiffIter || "") ? "checked" : ""}> Elastic Stiffness</label>
+        <span></span><label style="grid-column:2/8"><input type="radio" name="dSi" value="Incremental Secant" ${/secant/i.test(r.StiffIter || "") ? "checked" : ""}> Incremental Secant</label></div>`);
+  }
+  const d = dialog(tp ? "Link/Support Directional Properties" : "High Damping Rubber Link/Support Direction Properties", head + body, [["OK", d => {
+    for (const i of d.querySelectorAll("[data-f]")) {
+      if (i.disabled) { if (i.dataset.term) delete r[i.dataset.f]; continue; }
+      if (i.type === "checkbox") { r[i.dataset.f] = i.checked ? "Yes" : "No"; continue; }
+      const v = parseFloat(i.value); if (!isFinite(v)) { formError(d, "Each value is a number."); return false; } r[i.dataset.f] = String(v);
+    }
+    if (!tp) { r.NumHysTerms = String(Math.round(+r.NumHysTerms)); if (!(+r.NumHysTerms >= 1 && +r.NumHysTerms <= 3)) { formError(d, "Number of Terms is 1, 2 or 3."); return false; } r.StiffIter = q(d, 'input[name="dSi"]:checked').value; }
+    if (tp && /^y/i.test(r.OuterSym)) ["Stiff", "Slow", "Fast", "Rate", "Rad", "Stop"].forEach(k => r["OutBot" + k] = r["OutTop" + k]);
+    if (oOn) {
+      for (const i of d.querySelectorAll("[data-o]")) { const v = parseFloat(i.value); if (!isFinite(v)) { formError(d, "Each value is a number."); return false; } r2[i.dataset.o] = String(v); }
+      nlf.forEach(([f]) => { if (f && r[f] != null) r2[f] = r[f]; else if (f) delete r2[f]; });
+      so.row = r2;
+    }
+    s.row = r; after(); return true;
+  }], ["Cancel"]], {width: tp ? 780 : 760});
+  d.querySelectorAll("[data-mirror]").forEach(m => { const src = q(d, `[data-f="${m.dataset.mirror}"]`); src.addEventListener("input", () => m.value = src.value); });
+  const sym = d.querySelector('[data-f="OuterSym"]');
+  if (sym) { const sp = () => d.querySelectorAll("[data-ob]").forEach(i => { i.disabled = sym.checked; if (sym.checked) i.value = q(d, `[data-f="${i.dataset.ob}"]`).value; }); sym.onchange = sp; sp();
+    d.querySelectorAll("[data-ob]").forEach(i => q(d, `[data-f="${i.dataset.ob}"]`).addEventListener("input", () => { if (sym.checked) i.value = q(d, `[data-f="${i.dataset.ob}"]`).value; })); }
+  const nt = d.querySelector('[data-f="NumHysTerms"]');
+  if (nt) { const tp2 = () => { const n = Math.min(3, Math.max(1, Math.round(+nt.value) || 1)); d.querySelectorAll("[data-term]").forEach(i => { const on = +i.dataset.term <= n; i.disabled = !on; if (!on) i.value = ""; else if (i.value === "") i.value = val(i.dataset.f); }); }; nt.oninput = tp2; tp2(); }
   return d;
 }
 // Advanced Link P-Delta Parameters (pictured Links 7): Fraction of P-Delta Moment to Each End of Link, M2 and M3 to the
@@ -18700,6 +18838,7 @@ async function hmLateral(p, after) {
 // ---- Define: load combinations (SAP2000's Define Load Combinations, then Load Combination Data) ----
 async function hmCombos() {
   if (program === "safe" && safeVia !== "loadCombinations") return hmSafe("loadCombinations", hmCombos);
+  if (program === "etabs") return hmEtabsCombos();
   const defs = await hmDefs();
   const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmCombos(); };
   const find = n => defs.combinations.find(c => c.name === n);
@@ -18761,6 +18900,559 @@ async function hmCombo(c, after, copy) {
   q(d, "#cMod").onclick = () => { if (rows[pick]) { rows[pick] = {case: q(d, "#cC").value, factor: fnum(d, "#cF")}; paint(); } };
   q(d, "#cDel").onclick = () => { if (rows[pick]) { rows.splice(pick, 1); pick = Math.min(pick, rows.length - 1); paint(); } };
   paint();
+}
+
+// ======== ETABS 23.2 Define: Load Combinations, Auto Construction Sequence Case, Walking Vibrations, Floor Vibrations,
+// Table Named Sets, Named Assignment Sets (pictured in field/reference-forms/etabs/Define/Combos, ConstructionSeq, Walking,
+// FloorVib, NamedSets, Tables; ETABS's own .e2k lines from e2k/cpm-forms-scratch-define.e2k) ========
+// What ETABS's .e2k holds as lines of their own section is kept as those lines (e2k_items / define_e2k_item), so the
+// Engine's file is ETABS's own. A value the .e2k has no word for (a walking vibration's colour and notes, the
+// construction sequence's geometric nonlinearity) also goes in as ETABS's table rows (define_table_rows).
+// A word marked UNVERIFIED is not shown by a picture: the field test (EtabsDefineRoundTrip) proves or corrects it.
+const e2q = s => '"' + String(s).replace(/"/g, "'") + '"';
+const e2n = v => { const x = Number(v); return Number.isFinite(x) ? String(+x.toPrecision(12)) : "0"; };
+const e2u = s => String(s == null ? "" : s).replace(/^"(.*)"$/, "$1");
+const e2v = (t, k) => { const i = t.indexOf(k); return i >= 0 && i + 1 < t.length ? e2u(t[i + 1]) : undefined; };
+// Read only, so not through hmRun (which takes one change at a time and refreshes the view after it).
+async function etdItems(section) { const j = await hmPost({tool: "e2k_items", args: {section}}).catch(() => null); return j && j.ok ? j.result : {lines: []}; }
+// The items of a section by name (the second word of each line), in the file's order.
+function etdByName(lines) { const m = new Map(); for (const t of lines) { const n = e2u(t[1]); if (!m.has(n)) m.set(n, []); m.get(n).push(t); } return m; }
+function etdNext(names, base) { let n = 1; while (names.includes(base + n)) n++; return base + n; }
+// An ETABS 23.2 list form: the names on the left, the "Click to:" buttons (each greyed as ETABS greys it for the name
+// picked), the buttons ETABS puts under them, then OK and Cancel (pictured Load Combinations 1-6, Walking Vibrations 1-2,
+// Define Excitation Set 1, Table Named Sets 1, Named Frame Property Modifiers 1-2).
+function etdList(title, legend, names, acts, more, okText) {
+  const d = dialog(title, `<div style="display:flex;gap:12px"><fieldset style="flex:1;margin:0"><legend>${esc(legend)}</legend>
+      <select id="etdL" size="12" style="width:100%;height:auto;min-width:170px">${names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join("")}</select></fieldset>
+      <div id="etdR" style="display:flex;flex-direction:column;gap:10px;min-width:200px"><fieldset style="margin:0"><legend>Click to:</legend><div style="display:flex;flex-direction:column;gap:6px">${acts.map((x, i) => `<button data-a="${i}">${esc(x[0])}</button>`).join("")}</div></fieldset>
+      ${(more || []).length ? `<div style="display:flex;flex-direction:column;gap:6px">${more.map((x, i) => `<button data-m="${i}">${esc(x[0])}</button>`).join("")}</div>` : ""}</div></div>`,
+    [[okText || "OK"], ["Cancel"]], {width: 500});
+  dfInto(d, "#etdR", true);
+  const list = q(d, "#etdL"); if (names.length) list.selectedIndex = 0;
+  const grey = () => {
+    d.querySelectorAll("[data-a]").forEach(b => { const x = acts[+b.dataset.a]; b.disabled = x[2] ? !x[2](list.value) : false; });
+    d.querySelectorAll("[data-m]").forEach(b => { const x = more[+b.dataset.m]; b.disabled = x[2] ? !x[2](list.value) : false; });
+  };
+  d.querySelectorAll("[data-a]").forEach(b => b.onclick = () => acts[+b.dataset.a][1](list.value, d));
+  d.querySelectorAll("[data-m]").forEach(b => b.onclick = () => more[+b.dataset.m][1](list.value, d));
+  list.onchange = grey; grey();
+  return d;
+}
+const etdAgain = (d, f) => () => { if (d && d.close) d.close(); f(); };
+// A grid typed in place, as ETABS's Define forms have it (Loads Applied, Define Combination of Load Case/Combo Results,
+// Walking Path): one row picked (highlighted), Add copies the last row, Delete takes the picked one.
+function etdGrid(d, sel, cols, rows, blank, disabled) {
+  let pick = rows.length ? rows.length - 1 : -1;
+  const host = q(d, sel);
+  const paint = () => {
+    host.innerHTML = `<table class="list hmgrid" style="width:100%"><thead><tr>${cols.map(c => `<th>${c.head}</th>`).join("")}</tr></thead><tbody>${rows.map((r, i) => `<tr data-i="${i}" class="${i === pick ? "on" : ""}">${cols.map((c, k) =>
+      `<td>${c.list ? `<select data-k="${k}" ${disabled ? "disabled" : ""}>${opts(c.list(), r[c.key])}</select>` : c.fixed ? esc(c.fixed(i)) : `<input data-k="${k}" type="number" step="any" value="${esc(r[c.key])}" ${disabled ? "disabled" : ""} style="width:100%;box-sizing:border-box;text-align:right">`}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+    host.querySelectorAll("tr[data-i]").forEach(tr => {
+      tr.onclick = () => { pick = +tr.dataset.i; host.querySelectorAll("tr[data-i]").forEach(x => x.classList.toggle("on", +x.dataset.i === pick)); };
+      tr.querySelectorAll("[data-k]").forEach(x => x.onchange = () => { const c = cols[+x.dataset.k]; rows[+tr.dataset.i][c.key] = c.list ? x.value : x.value; });
+    });
+  };
+  paint();
+  return {
+    add: () => { rows.push(rows.length ? {...rows[rows.length - 1]} : blank()); pick = rows.length - 1; paint(); },
+    del: () => { if (pick >= 0 && rows[pick]) { rows.splice(pick, 1); pick = Math.min(pick, rows.length - 1); paint(); } },
+    paint, rows,
+  };
+}
+function etdNotes(title, now, done) {
+  // ETABS 23.2's Load Combination Notes: a box of several lines, OK and Cancel (pictured Load Combination Notes).
+  dialog(title, `<textarea id="nT" rows="4" style="width:100%;box-sizing:border-box">${esc(now || "")}</textarea>`, [["OK", x => { done(q(x, "#nT").value); }], ["Cancel"]], {width: 420});
+}
+
+// ---- Define > Load Combinations (ETABS 23.2: Load Combinations, Load Combination Data, Load Combination Notes,
+// Add Default Design Combinations; Convert Combos to Nonlinear Cases has no form) ----
+async function hmEtabsCombos() {
+  hm.defs = null;
+  const defs = await hmDefs(), combos = defs.combinations || [];
+  const find = n => combos.find(c => c.name === n);
+  // ETABS greys Delete for a combination another one uses (Comb1 in Env1), and Convert for an Envelope.
+  const used = n => combos.some(c => c.name !== n && (c.cases || []).some(x => x.case === n));
+  let d;
+  const again = () => { if (d) d.close(); hmEtabsCombos(); };
+  // ETABS lists the combinations in name order, numbers counted (Comb1, DConS1 ... DConS10, DStlD1, Env1; pictured 3-5).
+  const order = combos.map(c => c.name).sort((a, b) => a.localeCompare(b, undefined, {numeric: true, sensitivity: "base"}));
+  d = etdList("Load Combinations", "Combinations", order, [
+    ["Add New Combo...", () => hmEtabsCombo(null, again)],
+    ["Add Copy of Combo...", n => hmEtabsCombo(find(n), again, true), n => !!n],
+    ["Modify/Show Combo...", n => hmEtabsCombo(find(n), again), n => !!n],
+    ["Delete Combo", n => hmRun("delete_definition", {kind: "combination", name: n}).then(j => j.ok ? again() : hmSay(j.error, true)), n => !!n && !used(n)],
+  ], [
+    ["Add Default Design Combos...", () => etdDefaultCombos(defs, again)],
+    ["Convert Combos to Nonlinear Cases...", n => hmRun("convert_combo_to_nonlinear", {name: n}, true).then(j => j.ok ? (hmSay("Done: " + j.result.done + ". Edit > Undo steps back."), again()) : hmSay(j.error, true)),
+      n => !!n && (find(n) || {}).type !== "Envelope"],
+  ]);
+  d.querySelector("#etdL").ondblclick = () => { const n = q(d, "#etdL").value; if (n) hmEtabsCombo(find(n), again); };
+}
+async function hmEtabsCombo(c, after, copy) {
+  const defs = await hmDefs(), combos = defs.combinations || [], was = c && !copy ? c.name : null;
+  const auto = !!(c && c.auto && !copy);
+  // The Load Name list: the combinations first, then the load cases (pictured Load Combination Data 7).
+  const names = () => combos.map(x => x.name).filter(n => n !== was).concat((defs.load_cases || []).map(x => x.name));
+  const rows = c ? c.cases.map(x => ({case: x.case, factor: x.factor})) : [];
+  let notes = c ? c.notes || "" : "";
+  const name0 = c ? (copy ? etdNext(combos.map(x => x.name), c.name + "-") : c.name) : etdNext(combos.map(x => x.name), "Comb");
+  const dis = auto ? "disabled" : "";
+  const d = dialog("Load Combination Data", `<fieldset><legend>General Data</legend><div class="g2" style="grid-template-columns:160px 1fr">
+      <span>Load Combination Name</span><input id="ecN" value="${esc(name0)}" ${dis}>
+      <span>Combination Type</span><select id="ecT" ${dis}>${opts(["Linear Add", "Envelope", "Absolute Add", "SRSS", "Range Add"], c ? c.type : "Linear Add")}</select>
+      <span>Notes</span><button id="ecNo" ${dis}>Modify/Show Notes...</button>
+      <span>Auto Combination</span><input class="grey" readonly value="${auto ? "Yes (Not Editable)" : "No"}"></div></fieldset>
+    <fieldset><legend>Define Combination of Load Case/Combo Results</legend><div style="display:flex;gap:10px"><div id="ecG" class="scroll" style="flex:1;max-height:40vh;min-height:150px;border:1px solid #888"></div>
+      <div style="display:flex;flex-direction:column;gap:6px;width:80px"><button id="ecAdd" ${dis}>Add</button><button id="ecDel" ${dis}>Delete</button></div></div></fieldset>`,
+    [["OK", d => {
+      if (auto) return false;
+      const name = q(d, "#ecN").value.trim();
+      if (!name) { formError(d, "Give the combination a name."); return false; }
+      if (!g.rows.length) { formError(d, "Add a load case or combination."); return false; }
+      const cases = g.rows.map(r => ({case: r.case, factor: parseFloat(r.factor)}));
+      if (cases.some(x => !isFinite(x.factor))) { formError(d, "Each scale factor is a number."); return false; }
+      return submit(d, "define_combination", {name, was, type: q(d, "#ecT").value, notes, cases}, after);
+    }, true], ["Cancel"]], {width: 470});
+  if (auto) d.querySelectorAll(".df button").forEach(b => { if (/^OK$/i.test(b.textContent.trim())) b.disabled = true; });
+  const g = etdGrid(d, "#ecG", [{head: "Load Name", key: "case", list: names}, {head: "Scale Factor", key: "factor"}], rows, () => ({case: ((defs.load_cases || []).find(x => !/^Modal/i.test(x.type)) || {}).name || names()[0] || "", factor: 1}), auto);
+  q(d, "#ecAdd").onclick = g.add; q(d, "#ecDel").onclick = g.del;
+  q(d, "#ecNo").onclick = () => etdNotes("Load Combination Notes", notes, v => { notes = v; });
+}
+// Add Default Design Combinations (ETABS 23.2): five design types and "Convert to User Combinations (Editable)". The
+// codes come from the design preferences. The Engine works the strength combinations out from the load patterns by type
+// (ASCE 7-16, as the design preferences' default codes): concrete DConS1..., steel DStlS1... (with the notional loads)
+// and DStlD1/DStlD2 for deflection, as ETABS names them (pictured Load Combinations 3-5: DConS1-10, DStlD1-2, DStlS1-12).
+// Composite beam, shear wall and slab names (DCmpS/DCmpD, DWal, DSlb) are UNVERIFIED. Not converted, they stay ETABS's
+// own default combinations (Auto Combination "Yes (Not Editable)"), which ETABS's .e2k does not write.
+function etdDefaultCombos(defs, after) {
+  const by = t => defs.load_patterns.filter(p => t.includes(p.type)).map(p => p.name);
+  const D = by(["Dead", "Super Dead"]), L = by(["Live", "Reducible Live"]), Lr = by(["Roof Live"]), S = by(["Snow"]), W = by(["Wind"]), E = by(["Seismic"]), N = by(["Notional"]);
+  const sum = parts => parts.flatMap(([names, f]) => names.map(n => ({case: n, factor: f})));
+  const both = (list, make) => list.flatMap(x => [make(x, 1), make(x, -1)]);
+  const strength = notional => [sum([[D, 1.4]]), sum([[D, 1.2], [L, 1.6], [Lr, 0.5], [S, 0.5]]), ...(Lr.length || S.length ? [sum([[D, 1.2], [Lr, 1.6], [S, 1.6], [L, 1]])] : []),
+    ...(notional ? N.map(n => sum([[D, 1.4], [[n], 1]])).concat(N.map(n => sum([[D, 1.2], [L, 1.6], [[n], 1]]))) : []),
+    ...both(W, (w, s) => sum([[D, 1.2], [[w], s], [L, 1], [Lr, 0.5], [S, 0.5]])), ...both(E, (e, s) => sum([[D, 1.2], [[e], s], [L, 1], [S, 0.2]])),
+    ...both(W, (w, s) => sum([[D, 0.9], [[w], s]])), ...both(E, (e, s) => sum([[D, 0.9], [[e], s]]))].filter(c => c.length);
+  const deflection = () => [sum([[D, 1]]), sum([[D, 1], [L, 1]])].filter(c => c.length);
+  const kinds = [["stl", "Steel Frame Design", () => [["DStlS", strength(true)], ["DStlD", deflection()]]], ["cmp", "Composite Beam Design", () => [["DCmpS", strength(false)], ["DCmpD", deflection()]]],
+    ["con", "Concrete Frame Design", () => [["DConS", strength(false)]]], ["wal", "Shear Wall Design", () => [["DWal", strength(false)]]], ["slb", "Concrete Slab Design", () => [["DSlb", strength(false)]]]];
+  dialog("Add Default Design Combinations", `<fieldset><legend>Select Design Type for Load Combinations</legend>${kinds.map(([k, l]) => `<label style="display:block;margin:4px 0"><input type="checkbox" data-k="${k}"> ${l}</label>`).join("")}</fieldset>
+    <label style="display:block;margin:8px 4px"><input type="checkbox" id="adU"> Convert to User Combinations (Editable)</label>`,
+    [["OK", d => {
+      const pick = kinds.filter(([k]) => q(d, `[data-k="${k}"]`).checked);
+      if (!pick.length) return true;
+      const auto = !q(d, "#adU").checked, made = pick.flatMap(([, , f]) => f()).flatMap(([base, list]) => list.map((cases, i) => ({name: base + (i + 1), cases})));
+      if (!made.length) { formError(d, "There is nothing to combine: define Dead and Live load patterns first."); return false; }
+      (async () => {
+        for (const m of made) {
+          const was = (defs.combinations || []).some(c => c.name === m.name) ? m.name : undefined;
+          const j = await hmRun("define_combination", {name: m.name, was, type: "Linear Add", cases: m.cases, auto}, true);
+          if (!j.ok) { formError(d, m.name + ": " + j.error); return; }
+        }
+        d.close(); hmSay(`Added ${made.length} default design combinations. Edit > Undo steps back.`); if (after) after();
+      })();
+      return false;
+    }, true], ["Cancel"]], {width: 340});
+}
+
+// ---- Define > Auto Construction Sequence Case (ETABS 23.2: one case, AutoSeq; pictured ConstructionSeq 1-6) ----
+async function hmEtabsAutoSeq() {
+  hm.defs = null;
+  const defs = await hmDefs(), it = await etdItems("AUTO CONSTRUCTION SEQUENCE CASE"), sd = await hmPost({tool: "structure_definitions", args: {}}).catch(() => ({}));
+  const groups = ["All", ...(((sd.result || {}).groups) || []).map(g => g.name).filter(n => !/^all$/i.test(n))];
+  const pats = defs.load_patterns.map(p => p.name).sort((a, b) => a.localeCompare(b));
+  const head = it.lines.find(t => t[1] === "NAME"), old = (it.table_rows || [])[0] || {};
+  const now = head ? {active: true, name: e2v(head, "NAME"), stories: e2v(head, "NUMBERSTORIES") || "1", group: e2v(head, "EXCLUDEDGROUP"), replace: e2v(head, "USEINDESIGNCOMBOS") === "Yes",
+      geo: {PDelta: "P-Delta", "PDelta+LargeDispl": "P-Delta plus Large Displacements"}[e2v(head, "NLGEOMTYPE")] || old.GeoNonlin || "None",
+      loads: it.lines.filter(t => t[1] === "LOADPAT").map(t => ({pattern: e2u(t[2]), sf: t[3] || "1"}))}
+    : old.Name ? {active: old.IsActive !== "No", name: old.Name, stories: old.NumStories || "1", group: old.Group || undefined, replace: old.ReplaceDead === "Yes", geo: old.GeoNonlin || "None",
+      loads: (it.table_rows || []).filter(r => r.LoadPattern).map(r => ({pattern: r.LoadPattern, sf: r.ScaleFactor || "1"}))}
+    : {active: false, name: "AutoSeq", stories: "1", group: undefined, replace: false, geo: "None", loads: []};
+  const firstDead = (defs.load_patterns.find(p => p.type === "Dead") || {}).name || pats[0] || "";
+  const rows = now.loads.length ? now.loads : [{pattern: firstDead, sf: "1"}];
+  const d = dialog("Auto Construction Sequence Load Case", `<fieldset><legend>General</legend><label style="display:block"><input type="checkbox" id="asA" ${now.active ? "checked" : ""}> Case is Active</label>
+      <div class="g2" style="grid-template-columns:1fr 180px;margin-left:18px"><span>Auto Construction Sequence Load Case Name</span><input class="grey" readonly value="${esc(now.name || "AutoSeq")}">
+      <span>Geometric Nonlinearity Option</span><select id="asG">${opts(["None", "P-Delta", "P-Delta plus Large Displacements"], now.geo)}</select></div></fieldset>
+    <fieldset id="asCS"><legend>Construction Sequence</legend><div class="g2" style="grid-template-columns:1fr 180px"><span>Combine this number of Stories in each Construction Sequence Group</span><input id="asN" type="number" min="1" step="1" value="${esc(now.stories)}">
+      <label><input type="checkbox" id="asX" ${now.group ? "checked" : ""}> Exclude this Group Until the Last Step</label><select id="asXG">${opts(groups, now.group || "All")}</select></div></fieldset>
+    <fieldset id="asLA"><legend>Loads Applied</legend><div style="display:flex;gap:10px"><div id="asGr" class="scroll" style="flex:1;max-height:30vh;min-height:140px;border:1px solid #888"></div>
+      <div style="display:flex;flex-direction:column;gap:6px;width:80px"><button id="asAdd">Add</button><button id="asDel">Delete</button></div></div></fieldset>
+    <fieldset id="asDC"><legend>Design Combinations</legend><label><input type="checkbox" id="asR" ${now.replace ? "checked" : ""}> Replace Dead Type Load Cases with this Load Case in all Default Design Combinations</label></fieldset>`,
+    [["OK", d => {
+      const active = q(d, "#asA").checked, name = now.name || "AutoSeq";
+      if (!active) {
+        hmRun("define_e2k_item", {section: "AUTO CONSTRUCTION SEQUENCE CASE", lines: []}, true).then(j => j.ok ? (d.close(), hmSay("The auto construction sequence case is not active.")) : formError(d, j.error));
+        return false;
+      }
+      const n = parseInt(q(d, "#asN").value, 10);
+      if (!(n >= 1)) { formError(d, "The number of stories in each group is 1 or more."); return false; }
+      if (!g.rows.length || g.rows.some(r => !r.pattern)) { formError(d, "Add a load pattern."); return false; }
+      if (g.rows.some(r => !isFinite(parseFloat(r.sf)))) { formError(d, "Each scale factor is a number."); return false; }
+      const geo = q(d, "#asG").value, grp = q(d, "#asX").checked ? q(d, "#asXG").value : "", rep = q(d, "#asR").checked;
+      // ETABS's own lines (pictured e2k AUTO CONSTRUCTION SEQUENCE CASE); EXCLUDEDGROUP left out when no group is excluded,
+      // USEINDESIGNCOMBOS "No" unticked (UNVERIFIED).
+      const lines = [`AUTOCONSTRUCTIONCASE NAME  ${e2q(name)}  NUMBERSTORIES  ${n}${grp ? ` EXCLUDEDGROUP  ${e2q(grp)}` : ""}  USEINDESIGNCOMBOS  ${e2q(rep ? "Yes" : "No")}`,
+        ...g.rows.map(r => `AUTOCONSTRUCTIONCASE LOADPAT  ${e2q(r.pattern)}  ${e2n(r.sf)}`)];
+      (async () => {
+        let j = await hmRun("define_e2k_item", {section: "AUTO CONSTRUCTION SEQUENCE CASE", lines}, true);
+        // The .e2k has no word for the geometric nonlinearity: then the case goes in as ETABS's table rows too.
+        if (j.ok && geo !== "None") j = await hmRun("define_table_rows", {table: "Auto Construction Sequence Definition", name, rows: g.rows.map((r, i) => i === 0
+          ? {Name: name, IsActive: "Yes", GeoNonlin: geo, NumStories: String(n), Group: grp, LoadPattern: r.pattern, ScaleFactor: e2n(r.sf), ReplaceDead: rep ? "Yes" : "No"}
+          : {Name: name, LoadPattern: r.pattern, ScaleFactor: e2n(r.sf)})}, true);
+        if (!j.ok) return formError(d, j.error);
+        d.close(); hmSay("Done: the auto construction sequence case " + name + ". Edit > Undo steps back.");
+      })();
+      return false;
+    }, true], ["Cancel"]], {width: 560});
+  const g = etdGrid(d, "#asGr", [{head: "Load Pattern Name", key: "pattern", list: () => pats}, {head: "Scale Factor", key: "sf"}], rows, () => ({pattern: firstDead, sf: "1"}));
+  q(d, "#asAdd").onclick = g.add; q(d, "#asDel").onclick = g.del;
+  // Not active: everything under General's tick box is greyed and blank (pictured Auto Construction Sequence 1).
+  const sync = () => {
+    const on = q(d, "#asA").checked;
+    ["#asG", "#asN", "#asX", "#asR", "#asAdd", "#asDel"].forEach(s => q(d, s).disabled = !on);
+    q(d, "#asXG").disabled = !on || !q(d, "#asX").checked;
+    q(d, "#asGr").style.visibility = on ? "" : "hidden";
+    ["#asCS", "#asLA", "#asDC"].forEach(s => q(d, s).style.opacity = on ? "" : "0.6");
+  };
+  q(d, "#asA").onchange = sync; q(d, "#asX").onchange = sync; sync();
+}
+
+// ---- Define > Walking Vibrations (ETABS 23.2: Walking Vibrations, Walking Vibration Data; pictured Walking 1-4) ----
+const etdThresholds = [["Offices", "Offices, Residences", 0.5], ["Dining", "Dining & Dancing, Shopping Malls", 1.5], ["Rhythmic", "Rhythmic Activities, Footbridges", 5], ["User", "User Specified", null]];
+async function hmEtabsWalking() {
+  hm.defs = null;
+  const it = await etdItems("WALKING VIBRATIONS"), items = etdByName(it.lines.filter(t => t[0] === "WALKINGVIBRATION" || t[0] === "WALKINGVIBRATIONPOINT"));
+  // A walking vibration the Engine's table form kept before (no .e2k lines yet) is shown too.
+  for (const r of it.table_rows || []) if (r.Name && !items.has(r.Name)) items.set(r.Name, null);
+  const names = [...items.keys()];
+  let d;
+  const again = () => { if (d) d.close(); hmEtabsWalking(); };
+  d = etdList("Walking Vibrations", "Walking Vibrations", names, [
+    ["Add Walking Vibration...", () => hmEtabsWalk(null, names, it, again)],
+    ["Add Copy of Walking Vibration...", n => hmEtabsWalk(n, names, it, again, true), n => !!n],
+    ["Modify/Show Walking Vibration...", n => hmEtabsWalk(n, names, it, again), n => !!n],
+    ["Delete Walking Vibration", n => etdDeleteItem("WALKING VIBRATIONS", n, again, "Walking Vibration Definitions"), n => !!n],
+  ]);
+}
+async function etdDeleteItem(section, name, after, table) {
+  let j = await hmRun("define_e2k_item", {section, name, lines: []}, true);
+  if (j.ok && table) j = await hmRun("define_table_rows", {table, name, rows: []}, true).catch(() => j);
+  if (!j.ok) return hmSay(j.error, true);
+  hmSay("Deleted " + name + ". Edit > Undo steps back."); after();
+}
+async function hmEtabsWalk(name, names, it, after, copy) {
+  const defs = await hmDefs(), U = modelU(), F = U.force || "kip", Lu = U.length || "in";
+  const fk = forceK2(F), lk = lenM(Lu), lb = forceK2("lb"), inch = lenM("in");
+  const lines = it.lines.filter(t => e2u(t[1]) === name), head = lines.find(t => t[0] === "WALKINGVIBRATION");
+  const tr = (it.table_rows || []).filter(r => r.Name === name), t0 = tr[0] || {};
+  const stories = (defs.stories || []).map(s => s.name).reverse(), modal = (defs.load_cases || []).filter(c => /^Modal/i.test(c.type)).map(c => c.name);
+  const xs = (defs.grids || []).filter(g => g.direction === "X").map(g => g.coordinate).sort((a, b) => a - b), ys = (defs.grids || []).filter(g => g.direction === "Y").map(g => g.coordinate).sort((a, b) => a - b);
+  const conv = (v, k) => +(v * k).toPrecision(6);
+  // New: ETABS's defaults (pictured Walking Vibration Data 1): 165 lb (0.165 kip), 1.4, 2 steps/s, 60 in/s, 0.45 s,
+  // Ritz 2 modes per step, damping 0.03, Offices; the path along mid-bay between the first two grid lines (UNVERIFIED).
+  const ymid = ys.length > 1 ? (ys[0] + ys[1]) / 2 : 0;
+  const w = head ? {
+      name: copy ? etdNext(names, "Walk") : name, story: e2v(head, "STORY"), modalOpt: e2v(head, "USERMODALCASE") ? "User" : "Program", ritz: e2v(head, "RITZMODESPERSTEP") || "2", modalCase: e2v(head, "USERMODALCASE") || modal[0] || "",
+      damp: e2v(head, "MODALDAMPING") || "0.03", weight: e2v(head, "PERSONWEIGHT"), factor: e2v(head, "PEAKLOADFACTOR") || "1.4", freq: e2v(head, "WALKINGFREQUENCY") || "2", speed: e2v(head, "FORWARDSPEED"),
+      dur: e2v(head, "DURATIONOFIMPACT") || "0.45", thr: e2v(head, "PEAKACCELTHRESHHOLDOPTION") || "Offices", user: e2v(head, "PEAKACCELTHRESHHOLD") || "",
+      color: t0.Color || "Green", notes: t0.Notes || "", path: lines.filter(t => t[0] === "WALKINGVIBRATIONPOINT").map(t => ({x: t[2], y: t[3]}))}
+    : name && tr.length ? {
+      name: copy ? etdNext(names, "Walk") : name, story: t0.Story, modalOpt: /user/i.test(t0.ModalOpt || "") ? "User" : "Program", ritz: t0.ModePerStep || "2", modalCase: t0.ModalCase || modal[0] || "", damp: t0.DampRatio || "0.03",
+      weight: t0.Weight, factor: t0.LoadFactor || "1.4", freq: t0.Frequency || "2", speed: t0.Speed, dur: t0.Duration || "0.45", thr: t0.ThreshOpt || "Offices", user: t0.UserThresh || "", color: t0.Color || "Green", notes: t0.Notes || "",
+      path: tr.map(r => ({x: r.X, y: r.Y}))}
+    : {name: etdNext(names, "Walk"), story: stories[0], modalOpt: "Program", ritz: "2", modalCase: modal[0] || "", damp: "0.03", weight: String(conv(165, lb / fk)), factor: "1.4", freq: "2", speed: String(conv(60, inch / lk)), dur: "0.45",
+      thr: "Offices", user: "", color: "Green", notes: "", path: [{x: xs[0] || 0, y: ymid}, {x: xs.length > 1 ? xs[1] : 0, y: ymid}]};
+  if (w.weight == null) w.weight = String(conv(165, lb / fk)); if (w.speed == null) w.speed = String(conv(60, inch / lk));
+  const rows = w.path.map(p => ({x: p.x, y: p.y}));
+  const was = name && !copy ? name : null;
+  const d = dialog("Walking Vibration Data", `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><div>
+      <fieldset><legend>General</legend><div class="g2" style="grid-template-columns:130px 1fr"><span>Name</span><input id="wvN" value="${esc(w.name)}"><span>Story</span><select id="wvS">${opts(stories, w.story)}</select>
+        <span>Display Color</span>${etColorRow("wvC", w.color)}<span>Notes</span><button id="wvNo">Modify/Show Notes...</button></div></fieldset>
+      <fieldset><legend>Modal Case and Modal Damping</legend><div class="g2" style="grid-template-columns:130px 1fr"><label><input type="radio" name="wvM" value="Program" ${w.modalOpt === "Program" ? "checked" : ""}> Program Default</label><span></span>
+        <span style="padding-left:30px">Ritz Modes per Step</span><input id="wvR" type="number" min="1" step="1" value="${esc(w.ritz)}">
+        <label><input type="radio" name="wvM" value="User" ${w.modalOpt === "User" ? "checked" : ""}> User Specified</label><select id="wvMC">${opts(modal, w.modalCase)}</select>
+        <span>Modal Damping Ratio</span><input id="wvD" type="number" step="any" value="${esc(w.damp)}"></div></fieldset>
+      <fieldset><legend>Walking Path</legend><div style="display:flex;gap:10px"><div id="wvP" class="scroll" style="flex:1;max-height:24vh;min-height:110px;border:1px solid #888"></div>
+        <div style="display:flex;flex-direction:column;gap:6px;width:80px;justify-content:center"><button id="wvAdd">Add</button><button id="wvDel">Delete</button></div></div></fieldset></div>
+    <div><fieldset><legend>Walking Parameters</legend><div class="g2" style="grid-template-columns:1fr 100px 50px"><span>Weight of Person Walking</span><input id="wvW" type="number" step="any" value="${esc(w.weight)}"><span>${esc(F)}</span>
+        <span>Peak Load Factor</span><input id="wvF" type="number" step="any" value="${esc(w.factor)}"><span></span>
+        <span>Walking Frequency (Steps/sec)</span><input id="wvQ" type="number" step="any" value="${esc(w.freq)}"><span>cyc/sec</span>
+        <span>Forward Speed</span><input id="wvV" type="number" step="any" value="${esc(w.speed)}"><span>${esc(Lu)}/sec</span>
+        <span>Duration of Impact</span><input id="wvT" type="number" step="any" value="${esc(w.dur)}"><span>sec</span></div></fieldset>
+      <fieldset><legend>Peak Acceleration Threshold&nbsp; (Percentage of Gravity)</legend><div class="g2" style="grid-template-columns:1fr 100px 20px">${etdThresholds.map(([k, l, v]) =>
+        `<label><input type="radio" name="wvTh" value="${k}" ${w.thr === k ? "checked" : ""}> ${esc(l)}</label>${v == null ? `<input id="wvU" type="number" step="any" value="${esc(w.user)}">` : `<input class="grey" readonly value="${v === 5 ? "5." : v}">`}<span>%</span>`).join("")}</div></fieldset>
+      <div id="wvOk" style="display:flex;justify-content:center;gap:16px;padding-top:30px"></div></div></div>`,
+    [["OK", d => {
+      const nm = q(d, "#wvN").value.trim();
+      if (!nm) { formError(d, "Give the walking vibration a name."); return false; }
+      if (nm !== was && names.includes(nm)) { formError(d, `'${nm}' is already defined.`); return false; }
+      if (g.rows.length < 2) { formError(d, "The walking path needs two points at least."); return false; }
+      const user = d.querySelector('[name="wvM"]:checked').value === "User", th = d.querySelector('[name="wvTh"]:checked').value;
+      const num = s => { const v = parseFloat(q(d, s).value); return isFinite(v) ? v : NaN; };
+      const vals = [num("#wvD"), num("#wvW"), num("#wvF"), num("#wvQ"), num("#wvV"), num("#wvT")];
+      if (vals.some(v => !isFinite(v) || v < 0) || g.rows.some(r => !isFinite(parseFloat(r.x)) || !isFinite(parseFloat(r.y)))) { formError(d, "Every value is a number, 0 or more."); return false; }
+      if (th === "User" && !(num("#wvU") > 0)) { formError(d, "Give the user specified threshold."); return false; }
+      // ETABS's own lines (pictured e2k WALKING VIBRATIONS). Program Default writes RITZMODESPERSTEP and the threshold
+      // words other than "User" (Offices, Dining, Rhythmic) are UNVERIFIED.
+      const head = `WALKINGVIBRATION ${e2q(nm)}  STORY ${e2q(q(d, "#wvS").value)}  ${user ? `USERMODALCASE ${e2q(q(d, "#wvMC").value)}` : `RITZMODESPERSTEP ${e2n(num("#wvR"))}`}  MODALDAMPING ${e2n(vals[0])}  PERSONWEIGHT ${e2n(vals[1])}  PEAKLOADFACTOR ${e2n(vals[2])}  WALKINGFREQUENCY ${e2n(vals[3])}  FORWARDSPEED ${e2n(vals[4])}  DURATIONOFIMPACT ${e2n(vals[5])}  PEAKACCELTHRESHHOLDOPTION ${e2q(th)}${th === "User" ? `  PEAKACCELTHRESHHOLD ${e2n(num("#wvU"))}` : ""}`;
+      const lines = [head, ...g.rows.map(r => `WALKINGVIBRATIONPOINT ${e2q(nm)}  ${e2n(r.x)}  ${e2n(r.y)}`)];
+      (async () => {
+        let j = await hmRun("define_e2k_item", {section: "WALKING VIBRATIONS", name: nm, was: was || undefined, lines}, true);
+        // The colour and notes have no .e2k word: then the whole definition goes in as ETABS's table rows too.
+        if (j.ok && (w.color !== "Green" || w.notes)) j = await hmRun("define_table_rows", {table: "Walking Vibration Definitions", name: nm, rows: g.rows.map((r, i) => i === 0 ? {
+          Name: nm, Story: q(d, "#wvS").value, X: e2n(r.x), Y: e2n(r.y), ModalOpt: user ? "User Specified" : "Program Default", ModePerStep: user ? "" : e2n(num("#wvR")), ModalCase: user ? q(d, "#wvMC").value : "",
+          DampRatio: e2n(vals[0]), Weight: e2n(vals[1]), LoadFactor: e2n(vals[2]), Frequency: e2n(vals[3]), Speed: e2n(vals[4]), Duration: e2n(vals[5]), ThreshOpt: th, UserThresh: th === "User" ? e2n(num("#wvU")) : "",
+          Color: String(w.color), Notes: w.notes} : {Name: nm, X: e2n(r.x), Y: e2n(r.y)})}, true);
+        if (!j.ok) return formError(d, j.error);
+        d.close(); hmSay("Done: walking vibration " + nm + ". Edit > Undo steps back."); after();
+      })();
+      return false;
+    }, true], ["Cancel"]], {width: 900});
+  dfInto(d, "#wvOk", true);
+  const g = etdGrid(d, "#wvP", [{head: "Point", key: "i", fixed: i => String(i + 1)}, {head: `X<br>${esc(Lu)}`, key: "x"}, {head: `Y<br>${esc(Lu)}`, key: "y"}], rows, () => ({x: 0, y: 0}));
+  q(d, "#wvAdd").onclick = g.add; q(d, "#wvDel").onclick = g.del;
+  etColorWire(d, "wvC", () => w.color, c => { w.color = c; });
+  q(d, "#wvNo").onclick = () => etdNotes("Walking Vibration Notes", w.notes, v => { w.notes = v; });
+  // Program Default greys the modal case list, User Specified the Ritz modes; only User Specified's threshold is typed.
+  const sync = () => {
+    const user = d.querySelector('[name="wvM"]:checked').value === "User";
+    q(d, "#wvR").disabled = user; q(d, "#wvMC").disabled = !user;
+    q(d, "#wvU").disabled = d.querySelector('[name="wvTh"]:checked').value !== "User";
+  };
+  d.querySelectorAll('[name="wvM"], [name="wvTh"]').forEach(r => r.onchange = sync); sync();
+}
+
+// ---- Define > Floor Vibrations > Excitation Sets (ETABS 23.2: Define Excitation Set, Edit Excitation Set; its four
+// buttons stay enabled with an empty list; pictured FloorVib 1-5) ----
+async function hmEtabsExcitationSets() {
+  hm.defs = null;
+  const it = await etdItems("FLOOR VIBRATION EXCITATION SET"), items = etdByName(it.lines);
+  for (const r of it.table_rows || []) if (r.Name && !items.has(r.Name)) items.set(r.Name, null);
+  const names = [...items.keys()];
+  let d;
+  const again = () => { if (d) d.close(); hmEtabsExcitationSets(); };
+  const need = (n, f) => n ? f(n) : hmSay("Pick an excitation set first.", true);
+  d = etdList("Define Excitation Set", "Excitation Sets", names, [
+    ["Add New Excitation Set...", () => hmEtabsExcitationSet(null, names, it, again)],
+    ["Add Copy of Excitation Set...", n => need(n, () => hmEtabsExcitationSet(n, names, it, again, true))],
+    ["Modify/Show Excitation Set...", n => need(n, () => hmEtabsExcitationSet(n, names, it, again))],
+    ["Delete Excitation Set", n => need(n, () => etdDeleteItem("FLOOR VIBRATION EXCITATION SET", n, again, "Floor Vibration Excitation Sets"))],
+  ], [], "Ok");
+}
+async function hmEtabsExcitationSet(name, names, it, after, copy) {
+  const defs = await hmDefs(), modal = (defs.load_cases || []).filter(c => /^Modal/i.test(c.type)).map(c => c.name);
+  const t = it.lines.find(x => e2u(x[1]) === name) || null, r = (it.table_rows || []).find(x => x.Name === name) || {};
+  const s = t ? {name: e2u(t[1]), type: e2v(t, "TYPE") || "Walking", e: e2v(t, "EXCITATIONPOINT") || "", r: e2v(t, "RESPONSEPOINT") || "", active: e2v(t, "STEADYSTATEFUNC") !== undefined, fn: e2v(t, "STEADYSTATEFUNC") || "UnifSS",
+      modal: e2v(t, "MODALCASE") || modal[0] || "", damp: e2v(t, "HYSTERETICDAMPINGSTIFFNESSCOEF") || "0.05", last: e2v(t, "LASTFREQUENCY") || "20", story: e2v(t, "STORY")}
+    : name ? {name, type: r.Type || "Walking", e: r.Ejoint || "", r: r.Rjoint || "", active: !!r.Function, fn: r.Function || "UnifSS", modal: r.ModalCase || modal[0] || "", damp: r.Damping || "0.05", last: r.LastFreq || "20"}
+    : {name: "exset", type: "Walking", e: "", r: "", active: true, fn: "UnifSS", modal: modal[0] || "", damp: "0.05", last: "20"};
+  if (copy || !name) { let n = s.name, k = 1; while (names.includes(n)) n = (name || "exset") + "-" + k++; s.name = n; }
+  const was = name && !copy ? name : null;
+  // The story ETABS writes is the excitation joint's story; the Engine takes the top story (UNVERIFIED).
+  const story = s.story || ((defs.stories || []).slice(-1)[0] || {}).name || "";
+  const d = dialog("Edit Excitation Set", `<fieldset><legend>Properties</legend><div class="g2" style="grid-template-columns:110px 1fr"><span style="text-align:right">Name</span><input id="xsN" value="${esc(s.name)}">
+      <span style="text-align:right">Excitation Type</span><select id="xsT">${opts(["Walking"], s.type)}</select></div></fieldset>
+    <fieldset><legend>Associated Joints</legend><div class="g2" style="grid-template-columns:110px 1fr"><span style="text-align:right">Excitation Joint</span><input id="xsE" value="${esc(s.e)}"><span style="text-align:right">Response Joint</span><input id="xsR" value="${esc(s.r)}"></div></fieldset>
+    <fieldset><legend>Steady-State Analysis Options</legend><div class="g2" style="grid-template-columns:110px 1fr 50px"><span style="text-align:right">Analysis</span><label><input type="checkbox" id="xsA" ${s.active ? "checked" : ""}> Active</label><span></span>
+      <span style="text-align:right">Function</span><select id="xsF" disabled>${opts(["UnifSS"], s.fn)}</select><span></span>
+      <span style="text-align:right">Modal Case</span><select id="xsM">${opts(modal, s.modal)}</select><span></span>
+      <span style="text-align:right" title="The hysteretic damping stiffness coefficient of the steady state analysis">&#9432; Damping</span><input id="xsD" type="number" step="any" value="${esc(s.damp)}"><span>sec</span>
+      <span style="text-align:right">Last Frequency</span><input id="xsL" type="number" step="any" value="${esc(s.last)}"><span>cyc/sec</span></div></fieldset>`,
+    [["Ok", d => {
+      const nm = q(d, "#xsN").value.trim(), e = q(d, "#xsE").value.trim(), rj = q(d, "#xsR").value.trim();
+      if (!nm) { formError(d, "Give the excitation set a name."); return false; }
+      if (nm !== was && names.includes(nm)) { formError(d, `'${nm}' is already defined.`); return false; }
+      if (!e || !rj) { formError(d, "Give the excitation joint and the response joint."); return false; }
+      const damp = parseFloat(q(d, "#xsD").value), last = parseFloat(q(d, "#xsL").value);
+      if (!(damp >= 0) || !(last > 0)) { formError(d, "The damping is 0 or more and the last frequency above 0."); return false; }
+      // ETABS's own line (pictured e2k FLOOR VIBRATION EXCITATION SET); with Analysis not active STEADYSTATEFUNC is left out (UNVERIFIED).
+      const line = `FLOORVIBRATIONEXCITATIONSET  ${e2q(nm)}  STORY ${e2q(story)}  TYPE ${e2q(q(d, "#xsT").value)}  EXCITATIONPOINT ${e2q(e)}  RESPONSEPOINT ${e2q(rj)}  MODALCASE ${e2q(q(d, "#xsM").value)}${q(d, "#xsA").checked ? `  STEADYSTATEFUNC ${e2q("UnifSS")}` : ""}  HYSTERETICDAMPINGSTIFFNESSCOEF ${e2n(damp)}  LASTFREQUENCY ${e2n(last)}`;
+      hmRun("define_e2k_item", {section: "FLOOR VIBRATION EXCITATION SET", name: nm, was: was || undefined, lines: [line]}, true)
+        .then(j => j.ok ? (d.close(), hmSay("Done: excitation set " + nm + ". Edit > Undo steps back."), after()) : formError(d, j.error));
+      return false;
+    }, true], ["Cancel"]], {width: 380});
+}
+
+// ---- Define > Named Assignment Sets > Frame Modifiers / Shell Modifiers / Frame Releases (ETABS 23.2; pictured NamedSets) ----
+const etdNamedKinds = {
+  fmod: {section: "NAMED FRAME MODIFIERS", word: "NAMEDFMODIFIER", list: "Named Frame Property Modifiers", legend: "Modifier", data: "Named Frame Property Modifier Data", label: "Modifier Name", base: "FMod", noun: "Modifier",
+    rows: [["PROPMODA", "Cross-section (axial) Area"], ["PROPMODA2", "Shear Area in 2 direction"], ["PROPMODA3", "Shear Area in 3 direction"], ["PROPMODT", "Torsional Constant"], ["PROPMODI22", "Moment of Inertia about 2 axis"],
+      ["PROPMODI33", "Moment of Inertia about 3 axis"], ["PROPMODM", "Mass"], ["PROPMODW", "Weight"]]},
+  shmod: {section: "NAMED SHELL MODIFIERS", word: "NAMEDSHMODIFIER", list: "Named Shell Property Modifiers", legend: "Modifier", data: "Named Shell Property Modifier Data", label: "Modifier Name", base: "ShMod", noun: "Modifier",
+    rows: [["PROPMODF11", "Membrane f11 Direction"], ["PROPMODF22", "Membrane f22 Direction"], ["PROPMODF12", "Membrane f12 Direction"], ["PROPMODM11", "Bending m11 Direction"], ["PROPMODM22", "Bending m22 Direction"],
+      ["PROPMODM12", "Bending m12 Direction"], ["PROPMODV13", "Shear v13 Direction"], ["PROPMODV23", "Shear v23 Direction"], ["PROPMODM", "Mass"], ["PROPMODW", "Weight"]]},
+  frel: {section: "NAMED FRAME RELEASES", word: "NAMEDFRELEASE", list: "Named Frame End Releases", legend: "Releases", data: "Named Frame Release Data", label: "Frame Release Name", base: "FRel", noun: "Release"},
+};
+async function hmEtabsNamedSets(kind) {
+  const k = etdNamedKinds[kind], it = await etdItems(k.section), items = etdByName(it.lines), names = [...items.keys()];
+  let d;
+  const again = () => { if (d) d.close(); hmEtabsNamedSets(kind); };
+  const open = (n, copy) => (kind === "frel" ? hmEtabsNamedRelease : hmEtabsNamedModifier)(kind, n, items.get(n) || [], names, again, copy);
+  d = etdList(k.list, k.legend, names, [
+    [`Add New ${k.noun}...`, () => open(null)],
+    [`Add Copy of ${k.noun}...`, n => open(n, true), n => !!n],
+    [`Modify/Show ${k.noun}...`, n => open(n), n => !!n],
+    [`Delete ${k.noun}`, n => etdDeleteItem(k.section, n, again), n => !!n],
+  ]);
+}
+function hmEtabsNamedModifier(kind, name, lines, names, after, copy) {
+  const k = etdNamedKinds[kind], tokens = lines.flat(), val = w => e2v(tokens, w) || "1";
+  const nm0 = name && !copy ? name : etdNext(names, k.base), was = name && !copy ? name : null;
+  const d = dialog(k.data, `<fieldset><div class="g2" style="grid-template-columns:150px 1fr"><span>${k.label}</span><input id="nmN" value="${esc(nm0)}"></div></fieldset>
+    <fieldset><legend>Property Modifiers</legend><div class="g2" style="grid-template-columns:1fr 90px">${k.rows.map(([w, l]) => `<span>${esc(l)}</span><input data-w="${w}" type="number" step="any" value="${esc(val(w))}">`).join("")}</div></fieldset>`,
+    [["OK", d => {
+      const nm = q(d, "#nmN").value.trim();
+      if (!nm) { formError(d, "Give the modifier a name."); return false; }
+      if (nm !== was && names.includes(nm)) { formError(d, `'${nm}' is already defined.`); return false; }
+      const parts = [];
+      for (const [w] of k.rows) { const v = parseFloat(q(d, `[data-w="${w}"]`).value); if (!(v >= 0)) { formError(d, "Each modifier is a number, 0 or more."); return false; } if (v !== 1) parts.push(`${w} ${e2n(v)}`); }
+      // ETABS writes the modifiers that are not 1 (pictured e2k: NAMEDFMODIFIER "FMod1" PROPMODI33 0.35).
+      hmRun("define_e2k_item", {section: k.section, name: nm, was: was || undefined, lines: [`${k.word}  ${e2q(nm)}  ${parts.join(" ")}`]}, true)
+        .then(j => j.ok ? (d.close(), hmSay("Done: " + nm + ". Edit > Undo steps back."), after()) : formError(d, j.error));
+      return false;
+    }, true], ["Cancel"]], {width: 340});
+}
+// Named Frame Release Data: Release Start/End per DOF, the partial fixity springs of a released end, No Releases.
+// ETABS's lines: NAMEDFRELEASE "FRel1" RELEASE "M3J", then a second NAMEDFRELEASE "FRel1" line with the springs (empty when
+// they are 0; the spring words PISPRING ... M3JSPRING are UNVERIFIED).
+function hmEtabsNamedRelease(kind, name, lines, names, after, copy) {
+  const k = etdNamedKinds[kind], tokens = lines.flat(), rel = (e2v(tokens, "RELEASE") || "").split(/\s+/).filter(Boolean);
+  const dofs = [["P", "Axial Load", "F/L"], ["V2", "Shear Force 2 (Major)", "F/L"], ["V3", "Shear Force 3 (Minor)", "F/L"], ["T", "Torsion", "FL/rad"], ["M2", "Moment 22 (Minor)", "FL/rad"], ["M3", "Moment 33 (Major)", "FL/rad"]];
+  const U = modelU(), unitOf = u => u === "F/L" ? `${U.force || "kip"}/${U.length || "in"}` : `${U.force || "kip"}-${U.length || "in"}/rad`;
+  const nm0 = name && !copy ? name : etdNext(names, k.base), was = name && !copy ? name : null;
+  const d = dialog(k.data, `<fieldset><div class="g2" style="grid-template-columns:150px 1fr"><span style="text-align:right">${k.label}</span><input id="frN" value="${esc(nm0)}"></div></fieldset>
+    <fieldset><legend>Frame Releases</legend><div style="display:grid;grid-template-columns:150px 40px 40px 90px 90px auto;gap:4px 6px;align-items:center">
+      <span></span><span style="grid-column:span 2;text-align:center">Release</span><span style="grid-column:span 2;text-align:center">Frame Partial Fixity Springs</span><span></span>
+      <span></span><span style="text-align:center">Start</span><span style="text-align:center">End</span><span style="text-align:center">Start</span><span style="text-align:center">End</span><span></span>
+      ${dofs.map(([c, l, u]) => `<span>${esc(l)}</span><input type="checkbox" data-r="${c}I" ${rel.includes(c + "I") ? "checked" : ""}><input type="checkbox" data-r="${c}J" ${rel.includes(c + "J") ? "checked" : ""}>
+        <input data-s="${c}I" type="number" min="0" step="any" value="${esc(e2v(tokens, c + "ISPRING") || "0")}"><input data-s="${c}J" type="number" min="0" step="any" value="${esc(e2v(tokens, c + "JSPRING") || "0")}"><span>${esc(unitOf(u))}</span>`).join("")}
+      </div><label style="display:block;margin-top:8px"><input type="checkbox" id="frNo" ${rel.length ? "" : ""}> No Releases</label></fieldset>`,
+    [["OK", d => {
+      const nm = q(d, "#frN").value.trim();
+      if (!nm) { formError(d, "Give the release a name."); return false; }
+      if (nm !== was && names.includes(nm)) { formError(d, `'${nm}' is already defined.`); return false; }
+      const on = [...d.querySelectorAll("[data-r]:checked")].map(x => x.dataset.r);
+      const springs = on.map(r => [r, parseFloat(q(d, `[data-s="${r}"]`).value)]);
+      if (springs.some(([, v]) => !(v >= 0))) { formError(d, "Each partial fixity spring is a stiffness, 0 or more."); return false; }
+      const sp = springs.filter(([, v]) => v > 0).map(([r, v]) => `${r}SPRING ${e2n(v)}`).join(" ");
+      const lines = [`${k.word}  ${e2q(nm)}  ${on.length ? `RELEASE ${e2q(on.join(" "))}` : ""}`, `${k.word}  ${e2q(nm)}  ${sp}`];
+      hmRun("define_e2k_item", {section: k.section, name: nm, was: was || undefined, lines}, true)
+        .then(j => j.ok ? (d.close(), hmSay("Done: " + nm + ". Edit > Undo steps back."), after()) : formError(d, j.error));
+      return false;
+    }, true], ["Cancel"]], {width: 600});
+  // A spring is typed only for a released end (pictured Named Frame Release Data 1-2); No Releases clears every tick.
+  const sync = () => d.querySelectorAll("[data-r]").forEach(x => { q(d, `[data-s="${x.dataset.r}"]`).disabled = !x.checked; });
+  d.querySelectorAll("[data-r]").forEach(x => x.onchange = () => { if (x.checked) q(d, "#frNo").checked = false; sync(); });
+  q(d, "#frNo").onchange = () => { if (q(d, "#frNo").checked) d.querySelectorAll("[data-r]").forEach(x => x.checked = false); sync(); };
+  sync();
+}
+
+// ---- Define > Table Named Sets (ETABS 23.2: Define Table Named Sets, Define Database Table Named Sets with its Edit menu
+// and table tree, Database Table Output Options; pictured NamedSets) ----
+async function hmEtabsTableSets() {
+  hm.defs = null;
+  const it = await etdItems("DATABASE TABLE NAMED SETS"), items = etdByName(it.lines), names = [...items.keys()];
+  let d;
+  const again = () => { if (d) d.close(); hmEtabsTableSets(); };
+  d = etdList("Define Table Named Sets", "Table Named Sets", names, [
+    ["Add New Set...", () => hmEtabsTableSet(null, [], names, again)],
+    ["Add Copy of Set...", n => hmEtabsTableSet(n, items.get(n), names, again, true), n => !!n],
+    ["Modify/Show Set...", n => hmEtabsTableSet(n, items.get(n), names, again), n => !!n],
+    ["Delete Set", n => etdDeleteItem("DATABASE TABLE NAMED SETS", n, again), n => !!n],
+  ]);
+}
+// The output options' words in DBTABLESET (pictured e2k: Step-by-step is "Stepped"; "Last Step", "Multiple Values" and the
+// user base reaction words are UNVERIFIED). Steady State and Power Spectral Density have no .e2k word: they stay as the form shows.
+const etdStepWords = [["Envelopes", "Envelopes"], ["Stepped", "Step-by-step"], ["Last", "Last Step"]];
+async function hmEtabsTableSet(name, lines, names, after, copy) {
+  const defs = await hmDefs(), head = (lines || []).find(t => t[0] === "DBTABLESET") || [];
+  const pats = defs.load_patterns.map(p => p.name), cases = (defs.load_cases || []).map(c => c.name), combos = (defs.combinations || []).map(c => c.name);
+  const of = w => (lines || []).filter(t => t[0] === w).map(t => e2u(t[2]));
+  const picked = new Set(of("DBTABLESETTABLEKEY"));
+  const sp = name ? new Set(of("DBTABLESETLOADPATTERN")) : new Set(pats), sc = name ? new Set(of("DBTABLESETLOADCASE")) : new Set(cases), sk = name ? new Set(of("DBTABLESETCOMBO")) : new Set(combos);
+  const o = {userBase: e2v(head, "ISUSERBASEREAC") === "Yes", bx: e2v(head, "BASEREACX") || "", by: e2v(head, "BASEREACY") || "", bz: e2v(head, "BASEREACZ") || "",
+    allModes: e2v(head, "ISALLMODES") === "Yes", m1: e2v(head, "STARTMODE") || "1", m2: e2v(head, "ENDMODE") || "12", allBuck: e2v(head, "ISALLBUCKLINGMODES") === "Yes", b1: e2v(head, "STARTBUCKLINGMODE") || "1", b2: e2v(head, "ENDBUCKLINGMODE") || "6",
+    multi: e2v(head, "MULTISTEP") || "Stepped", nl: e2v(head, "NLSTATIC") || "Envelopes", modal: e2v(head, "MODALHIST") || "Envelopes", direct: e2v(head, "DIRECTHIST") || "Envelopes", combo: e2v(head, "LOADCOMBO") || "Envelopes",
+    steady: "Envelopes", steadyPart: "In and Out of Phase", psd: "RMS"};
+  const nm0 = name && !copy ? name : etdNext(names, "DBNSet"), was = name && !copy ? name : null;
+  // The table tree: the model's definition tables placed as Choose Tables places them (MODEL DEFINITION, DESIGN DATA).
+  const all = etrAllTables(), tnames = Object.keys(all).filter(n => { const p = etrTablePlace(n, all[n]); return p[0] === "MODEL DEFINITION" || p[0] === "DESIGN DATA"; }).sort();
+  for (const n of picked) if (!tnames.includes(n)) tnames.push(n);
+  const d = dialog("Define Database Table Named Sets", `<div class="etrCT"><div class="etrMenu"><button data-m="edit">Edit</button></div>
+    <div class="etrCTb"><div class="etrTree" id="nsT"></div>
+      <div class="etrCTr"><fieldset><legend>Named Set Name</legend><input id="nsN" value="${esc(nm0)}" style="width:100%;box-sizing:border-box"></fieldset>
+        <fieldset><legend>Load Patterns (Model Def.)</legend><button id="nsP">Select Load Patterns...</button><div id="nsPn"></div></fieldset>
+        <fieldset><legend>Load Cases (Results)</legend><button id="nsC">Select Load Cases...</button><div id="nsCn"></div><button id="nsK">Select Combos...</button><div id="nsKn"></div>
+          <button id="nsO">Modify/Show Options...</button><button id="nsS" disabled>Set Output Selections...</button></fieldset>
+        <fieldset><legend>Options</legend><label><input type="checkbox" id="nsU" ${e2v(head, "UNFORMATTED") === "Yes" ? "checked" : ""}> Show Unformatted</label><div style="height:60px"></div>
+          <label><input type="checkbox" id="nsX" ${e2v(head, "EXPOSEALL") === "Yes" ? "checked" : ""}> Expose All Tables</label></fieldset>
+        <span></span><div class="etrOkC"><button id="nsOK" class="primary">OK</button><button id="nsCa">Cancel</button></div></div></div></div>`, [], {width: 900});
+  const tree = () => {
+    const top = new Map();
+    for (const n of tnames) { const [a, b] = etrTablePlace(n, all[n] || {}); if (!top.has(a)) top.set(a, new Map()); const A = top.get(a); if (!A.has(b)) A.set(b, []); A.get(b).push(n); }
+    const rank = (lvl, nm) => { const i = etrTreeRules.findIndex(r => r[lvl] === nm); return i < 0 ? 999 : i; };
+    const box = (key, kids) => { const on = kids.filter(k => picked.has(k)).length; return `<input type="checkbox" data-node="${esc(key)}" ${on && on === kids.length ? "checked" : ""} data-part="${on && on < kids.length ? 1 : 0}">`; };
+    q(d, "#nsT").innerHTML = ["MODEL DEFINITION", "DESIGN DATA"].filter(a => top.has(a)).map(a => { const A = top.get(a), kids = [...A.values()].flat();
+      return `<details open><summary>${box(a, kids)}${a}</summary>${[...A.entries()].sort((x, y) => rank(1, x[0]) - rank(1, y[0])).map(([b, list]) =>
+        `<details><summary>${box(a + "/" + b, list)}${esc(b)}</summary>${list.map(n => `<div class="leaf"><input type="checkbox" data-t="${esc(n)}" ${picked.has(n) ? "checked" : ""}><span class="blue" data-tn="${esc(n)}">${esc(n)}</span></div>`).join("")}</details>`).join("")}</details>`; }).join("");
+    q(d, "#nsT").querySelectorAll("[data-part='1']").forEach(x => x.indeterminate = true);
+    q(d, "#nsT").querySelectorAll("summary input").forEach(x => { x.onclick = e => e.stopPropagation(); x.onchange = () => { x.closest("details").querySelectorAll("[data-t]").forEach(l => x.checked ? picked.add(l.dataset.t) : picked.delete(l.dataset.t)); tree(); }; });
+    q(d, "#nsT").querySelectorAll("[data-t]").forEach(x => x.onchange = () => { x.checked ? picked.add(x.dataset.t) : picked.delete(x.dataset.t); tree(); });
+    q(d, "#nsT").querySelectorAll("[data-tn]").forEach(x => x.onclick = () => { const c = x.previousElementSibling; c.checked = !c.checked; c.onchange(); });
+  };
+  const counts = () => {
+    q(d, "#nsPn").textContent = `${[...sp].filter(p => pats.includes(p)).length} of ${pats.length} Selected`;
+    q(d, "#nsCn").textContent = `${[...sc].filter(p => cases.includes(p)).length} of ${cases.length} Selected`;
+    q(d, "#nsKn").textContent = `${[...sk].filter(p => combos.includes(p)).length} of ${combos.length} Selected`;
+  };
+  const pickPats = () => etrSelectList("Select Load Patterns", pats, sp, s => { sp.clear(); s.forEach(x => sp.add(x)); counts(); });
+  q(d, "#nsP").onclick = pickPats;
+  q(d, "#nsC").onclick = () => etrSelectList("Select Load Cases", cases, sc, s => { sc.clear(); s.forEach(x => sc.add(x)); counts(); });
+  q(d, "#nsK").onclick = () => etrSelectList("Select Combos", combos, sk, s => { sk.clear(); s.forEach(x => sk.add(x)); counts(); });
+  q(d, "#nsO").onclick = () => etdOutputOptions(o);
+  q(d, "[data-m=edit]").onclick = e => popMenu(e.target, [["Select Load Patterns...", pickPats], ["Select All Tables", () => { tnames.forEach(n => picked.add(n)); tree(); }], ["Clear All Tables", () => { picked.clear(); tree(); }]]);
+  q(d, "#nsCa").onclick = () => d.close();
+  q(d, "#nsOK").onclick = () => {
+    const nm = q(d, "#nsN").value.trim();
+    if (!nm) return formError(d, "Give the named set a name.");
+    if (nm !== was && names.includes(nm)) return formError(d, `'${nm}' is already defined.`);
+    const yn = b => e2q(b ? "Yes" : "No");
+    // ETABS's own lines (pictured e2k DATABASE TABLE NAMED SETS).
+    const lines = [`DBTABLESET ${e2q(nm)}  ISUSERBASEREAC  ${yn(o.userBase)}${o.userBase ? `  BASEREACX  ${e2n(o.bx)}  BASEREACY  ${e2n(o.by)}  BASEREACZ  ${e2n(o.bz)}` : ""}  ISALLMODES  ${yn(o.allModes)}  STARTMODE  ${e2n(o.m1)} ENDMODE  ${e2n(o.m2)} ISALLBUCKLINGMODES  ${yn(o.allBuck)}  STARTBUCKLINGMODE  ${e2n(o.b1)} ENDBUCKLINGMODE  ${e2n(o.b2)} MULTISTEP  ${e2q(o.multi)}  NLSTATIC  ${e2q(o.nl)}  MODALHIST  ${e2q(o.modal)}  DIRECTHIST  ${e2q(o.direct)}  LOADCOMBO  ${e2q(o.combo)}  UNFORMATTED  ${yn(q(d, "#nsU").checked)}  EXPOSEALL  ${yn(q(d, "#nsX").checked)}`,
+      ...tnames.filter(n => picked.has(n)).map(n => `DBTABLESETTABLEKEY ${e2q(nm)}  ${e2q(n)}`),
+      ...pats.filter(p => sp.has(p)).map(p => `DBTABLESETLOADPATTERN ${e2q(nm)}  ${e2q(p)}`),
+      ...cases.filter(p => sc.has(p)).map(p => `DBTABLESETLOADCASE ${e2q(nm)}  ${e2q(p)}`),
+      ...combos.filter(p => sk.has(p)).map(p => `DBTABLESETCOMBO ${e2q(nm)}  ${e2q(p)}`)];
+    hmRun("define_e2k_item", {section: "DATABASE TABLE NAMED SETS", name: nm, was: was || undefined, lines}, true)
+      .then(j => j.ok ? (d.close(), hmSay("Done: table named set " + nm + ". Edit > Undo steps back."), after()) : formError(d, j.error));
+  };
+  counts(); tree();
+}
+function etdOutputOptions(o) {
+  const radio = (n, list, v) => list.map(([w, l]) => `<label style="display:block;margin:3px 0"><input type="radio" name="${n}" value="${esc(w)}" ${v === w ? "checked" : ""}> ${esc(l)}</label>`).join("");
+  const d = dialog("Database Table Output Options", `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px"><div>
+      <fieldset><legend>Base Reaction Location</legend>${radio("ooB", [["No", "Program Determined"], ["Yes", "User Specified"]], o.userBase ? "Yes" : "No")}
+        <div class="g2" style="grid-template-columns:40px 1fr;margin-left:20px"><span>X</span><input id="ooX" type="number" step="any" value="${esc(o.bx)}"><span>Y</span><input id="ooY" type="number" step="any" value="${esc(o.by)}"><span>Z</span><input id="ooZ" type="number" step="any" value="${esc(o.bz)}"></div></fieldset>
+      <fieldset><legend>Mode Shapes</legend>${radio("ooM", [["Yes", "All Modes"], ["No", "Some Modes"]], o.allModes ? "Yes" : "No")}<div class="g2" style="grid-template-columns:90px 1fr;margin-left:20px"><span>Start Mode</span><input id="ooM1" type="number" min="1" step="1" value="${esc(o.m1)}"><span>End Mode</span><input id="ooM2" type="number" min="1" step="1" value="${esc(o.m2)}"></div></fieldset>
+      <fieldset><legend>Buckling Modes</legend>${radio("ooK", [["Yes", "All Modes"], ["No", "Some Modes"]], o.allBuck ? "Yes" : "No")}<div class="g2" style="grid-template-columns:90px 1fr;margin-left:20px"><span>Start Mode</span><input id="ooB1" type="number" min="1" step="1" value="${esc(o.b1)}"><span>End Mode</span><input id="ooB2" type="number" min="1" step="1" value="${esc(o.b2)}"></div></fieldset></div>
+    <div><fieldset><legend>Multistep Static Results</legend>${radio("ooS", etdStepWords, o.multi)}</fieldset><fieldset><legend>Nonlinear Static Results</legend>${radio("ooN", etdStepWords, o.nl)}</fieldset>
+      <fieldset><legend>Modal History Results</legend>${radio("ooH", etdStepWords, o.modal)}</fieldset><fieldset><legend>Direct History Results</legend>${radio("ooD", etdStepWords, o.direct)}</fieldset></div>
+    <div><fieldset><legend>Load Combination Results</legend>${radio("ooC", [["Envelopes", "Envelopes"], ["Multiple", "Multiple Values, If Possible"]], o.combo)}</fieldset>
+      <fieldset><legend>Steady State Results</legend>${radio("ooSS", [["Envelopes", "Envelopes"], ["Frequencies", "At Frequencies"]], o.steady)}<select id="ooSP" style="width:100%">${opts(["In and Out of Phase", "Magnitude", "All"], o.steadyPart)}</select></fieldset>
+      <fieldset><legend>Power Spectral Density Results</legend>${radio("ooP", [["RMS", "RMS"], ["sqrt", "sqrt(PSD)"]], o.psd)}</fieldset></div></div>`,
+    [["OK", d => {
+      const r = n => d.querySelector(`[name="${n}"]:checked`).value;
+      Object.assign(o, {userBase: r("ooB") === "Yes", bx: q(d, "#ooX").value, by: q(d, "#ooY").value, bz: q(d, "#ooZ").value, allModes: r("ooM") === "Yes", m1: q(d, "#ooM1").value, m2: q(d, "#ooM2").value,
+        allBuck: r("ooK") === "Yes", b1: q(d, "#ooB1").value, b2: q(d, "#ooB2").value, multi: r("ooS"), nl: r("ooN"), modal: r("ooH"), direct: r("ooD"), combo: r("ooC"), steady: r("ooSS"), steadyPart: q(d, "#ooSP").value, psd: r("ooP")});
+    }, true], ["Cancel"]], {width: 780});
+  // Program Determined greys X, Y, Z; All Modes greys the mode range (pictured Database Table Output Options).
+  const sync = () => {
+    const r = n => d.querySelector(`[name="${n}"]:checked`).value;
+    ["#ooX", "#ooY", "#ooZ"].forEach(s => q(d, s).disabled = r("ooB") !== "Yes");
+    ["#ooM1", "#ooM2"].forEach(s => q(d, s).disabled = r("ooM") === "Yes");
+    ["#ooB1", "#ooB2"].forEach(s => q(d, s).disabled = r("ooK") === "Yes");
+  };
+  d.querySelectorAll("input[type=radio]").forEach(x => x.addEventListener("change", sync)); sync();
 }
 
 // ---- Assign ----

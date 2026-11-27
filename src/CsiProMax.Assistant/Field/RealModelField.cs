@@ -297,7 +297,9 @@ public static class RealModelField
         // alone asked for the patterns, the model file and the selection again (the 0.4.70 full test sat 24 minutes in
         // this step on a 25 KB Verification model). Tables the program lists as empty have no rows to compare.
         using var session = PackSession.Start(link);
-        foreach (var t in link.Tables().Where(t => !t.Empty && (t.Import > 0 || t.Import < 0 && !IsResult(t.Key))))
+        // Except the design preferences: ETABS 23.2 lists those of every code not in use as empty and still gives each a
+        // row, which the model holds and the round trip must bring back too (0.4.73).
+        foreach (var t in link.Tables().Where(t => (!t.Empty || t.Name.Contains("Preferences", StringComparison.OrdinalIgnoreCase)) && (t.Import > 0 || t.Import < 0 && !IsResult(t.Key))))
             try { Mark("  model table " + t.Key); var d = link.ReadTable(t.Key, null, null); if (d.Rows.Count > 0) all[t.Key] = d; }
             catch (Exception ex) when (ex is EtabsException or InvalidOperationException) { }
         return all;
