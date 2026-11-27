@@ -83,10 +83,39 @@ public static class ProgramForms
         ],
     };
 
+    /// <summary>
+    /// The Options menu's forms of each program (Ahmed 2026-11-27, every form): ETABS 23.2's Preferences
+    /// (Dimensions/Tolerances, Graphics), Colors (Display, Output) and Miscellaneous Options; SAP2000 26.3's
+    /// Preferences > Dimensions/Tolerances and Colors. SAFE has ETABS's. Group is the submenu the item is in.
+    /// </summary>
+    public static IReadOnlyList<(string Group, string Item, string Table)> OptionForms(string target) => target switch
+    {
+        ProgramOptions.Sap2000 =>
+        [
+            ("Preferences", "Dimensions/Tolerances...", "Preferences - Dimensional"),
+            ("Colors", "Display...", "Options - Colors - Display"),
+            ("Colors", "Output...", "Options - Colors - Output"),
+        ],
+        _ =>
+        [
+            ("Preferences", "Dimensions/Tolerances...", "Preferences - Tolerance"),
+            ("Preferences", "Graphics...", "Preferences - Graphics"),
+            ("Colors", "Display...", "Options - Colors - Display"),
+            ("Colors", "Output...", "Options - Colors - Output"),
+            ("", "Miscellaneous Options...", "Miscellaneous Options"),
+        ],
+    };
+
+    /// <summary>True for an Options menu form that is the program's own setting (colours, start page...), not the model's:
+    /// ETABS keeps those in its settings, so they stay with the model in CSI ProMax and are not put into ETABS's tables.</summary>
+    public static bool IsProgramSetting(string table) =>
+        table.StartsWith("Options - ", StringComparison.OrdinalIgnoreCase) || table.Equals("Miscellaneous Options", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>True for a table of these forms (one row, no name to key it by).</summary>
     public static bool IsForm(string table) =>
         table.Contains("Design Preferences - ", StringComparison.OrdinalIgnoreCase) || table.StartsWith("Preferences - ", StringComparison.OrdinalIgnoreCase)
-        || table.StartsWith("Analysis Options", StringComparison.OrdinalIgnoreCase) || table.Equals("Active Degrees of Freedom", StringComparison.OrdinalIgnoreCase);
+        || table.StartsWith("Analysis Options", StringComparison.OrdinalIgnoreCase) || table.Equals("Active Degrees of Freedom", StringComparison.OrdinalIgnoreCase)
+        || IsProgramSetting(table);
 
     /// <summary>True when the program's own file or tables take this form's table (ETABS's tables for ETABS and SAFE).</summary>
     public static bool HasForm(string target, string table) => IsForm(table) && Catalog(target).ContainsKey(table);

@@ -4407,6 +4407,14 @@ function modelerMenus(m) {
   // the Run; each design's View/Revise Preferences (its code and the code's items) above the results.
   const fm = hm.forms || {designs: [], analysis: []};
   m.Analyze = [...fm.analysis.map((f, i) => [f.item, "m:pform:" + i]), ...(fm.analysis.length ? [0] : []), ...(m.Analyze || [])];
+  // Options as the program has them: Preferences (Dimensions/Tolerances, Graphics), Colors (Display, Output) and
+  // Miscellaneous Options, then the Engine's own view options.
+  const of = fm.options || [];
+  if (of.length) {
+    const groups = [], items = [];
+    of.forEach((f, i) => { const it = [f.item, "m:oform:" + i]; if (!f.group) return items.push(it); let g = groups.find(x => x[0] === f.group); if (!g) groups.push(g = [f.group, []]); g[1].push(it); });
+    m.Options = [...groups, ...items, 0, ...(m.Options || [])];
+  }
   if (fm.designs.length) m.Design = [...fm.designs.map(d => [d.name, [["View/Revise Preferences...", "m:pref:" + d.design], ...(window.cpmLive ? [["Start Design/Check...", "eng:design"]] : [])]]), 0, ...(m.Design || [])];
   return m;
 }
@@ -4440,26 +4448,33 @@ async function hmPrefs(kind, code, changed) {
     ["Cancel"]], {width: 600});
   q(dlg, "#pCode").onchange = e => { const c = e.target.value; dlg.close(); hmPrefs(kind, c, true); };
 }
+const hmIsColor = field => !/^(DeviceType|Darkness|Trans|RatioVal|Transpare)/i.test(field);
+const hmColorHex = v => { const n = Number(v); if (!(v !== "" && Number.isFinite(n) && n >= 0)) return "#808080"; const r = n & 255, g = (n >> 8) & 255, b = (n >> 16) & 255; return "#" + [r, g, b].map(x => x.toString(16).padStart(2, "0")).join(""); };
+const hmColorNumber = hex => { const x = parseInt(hex.slice(1), 16); return ((x >> 16) & 255) + ((x >> 8) & 255) * 256 + (x & 255) * 65536; };
 // An Analyze option form (Set Active Degrees of Freedom, Set Analysis Options, the mesh settings, SAPFire): the program's
 // items; the degrees of freedom as its check boxes with its Fast DOFs.
-async function hmProgForm(i) {
-  const f = ((hm.forms || {}).analysis || [])[i]; if (!f) return;
+async function hmProgForm(i, list) {
+  const f = ((hm.forms || {})[list || "analysis"] || [])[i]; if (!f) return;
   const j = await hmPost({tool: "program_forms", args: {table: f.table}});
   if (!j.ok) return hmSay(j.error, true);
-  const items = j.result.items, dof = /Degrees of Freedom/i.test(f.table), was = Object.fromEntries(items.map(it => [it.field, it.value]));
+  const items = j.result.items, dof = /Degrees of Freedom/i.test(f.table), colors = /Colors/i.test(f.table), was = Object.fromEntries(items.map(it => [it.field, it.value]));
   const yes = v => !/^(no|false|0)$/i.test(v || "yes");
   const body = dof
     ? `<fieldset><legend>Available DOFs</legend><div class="g3">${items.map(it => `<label class="kv"><input type="checkbox" data-d="${esc(it.field)}" ${yes(it.value) ? "checked" : ""}> ${esc(it.name)}</label>`).join("")}</div></fieldset>
        <fieldset><legend>Fast DOFs</legend>${[["Space Frame", "UX UY UZ RX RY RZ"], ["Plane Frame", "UX UZ RY"], ["Plane Grid", "UZ RX RY"], ["Space Truss", "UX UY UZ"]].map(([n, on]) => `<button type="button" data-fast="${on}">${n}</button>`).join(" ")}</fieldset>`
-    : `<div class="gu" style="grid-template-columns:auto 220px">${items.map(it => `<label class="kv">${esc(it.name)}</label><input data-f="${esc(it.field)}" value="${esc(it.value)}" placeholder="Program default">`).join("")}</div>
+    : `<div class="gu" style="grid-template-columns:auto 220px${colors ? " 40px" : ""};max-height:440px;overflow:auto">${items.map(it => `<label class="kv">${esc(it.name)}</label><input data-f="${esc(it.field)}" value="${esc(it.value)}" placeholder="Program default">${colors ? (hmIsColor(it.field) ? `<input type="color" data-c="${esc(it.field)}" value="${hmColorHex(it.value)}" title="Pick the colour">` : "<span></span>") : ""}`).join("")}</div>
        <p class="kv" style="margin:6px 0 0;max-width:460px">An item left blank takes ${esc(progLabel(program))}'s own default.</p>`;
-  const dlg = dialog(f.item.replace(/\.\.\.$/, "").replace(/^Set /, "").replace(/^Advanced /, ""), body, [["OK", x => {
+  const word = f.item.replace(/\.\.\.$/, "");
+  const title = f.group === "Preferences" ? word + " Preferences" : f.group === "Colors" ? `Assign ${word} Colors` : word.replace(/^Set /, "").replace(/^Advanced /, "");
+  const dlg = dialog(title, body, [["OK", x => {
     const values = {};
     if (dof) x.querySelectorAll("[data-d]").forEach(b => { const v = b.checked ? "Yes" : "No"; if (v !== (was[b.dataset.d] || "Yes")) values[b.dataset.d] = v; });
     else x.querySelectorAll("[data-f]").forEach(b => { if (b.value !== was[b.dataset.f]) values[b.dataset.f] = b.value; });
     if (!Object.keys(values).length) return;
     hmRun("set_program_form", {table: f.table, values}).then(r => { if (r.ok) hmSay(f.item.replace(/\.\.\.$/, "") + ": set."); });
-  }], ["Cancel"]], {width: dof ? 420 : 520});
+  }], ["Cancel"]], {width: dof ? 420 : colors ? 580 : 520});
+  // A colour is the program's number for it (red + green*256 + blue*65536), as its tables hold it; the picker sets it.
+  dlg.querySelectorAll("[data-c]").forEach(c => c.oninput = () => { const b = dlg.querySelector(`[data-f="${CSS.escape(c.dataset.c)}"]`); if (b) b.value = String(hmColorNumber(c.value)); });
   dlg.querySelectorAll("[data-fast]").forEach(b => b.onclick = () => { const on = b.dataset.fast.split(" "); dlg.querySelectorAll("[data-d]").forEach(c => { c.checked = on.includes(c.dataset.d); }); });
 }
 // Define as each program has it, in its order and words (Ahmed 2026-11-27, every form): ETABS 23.2 Define, SAP2000 26.3
@@ -4508,6 +4523,7 @@ async function modelAct(a) {
   if (a.startsWith("ex:")) return hmExtras(a.slice(3));
   if (a.startsWith("pref:")) { await hmDefs(); return hmPrefs(a.slice(5)); }
   if (a.startsWith("pform:")) { await hmDefs(); return hmProgForm(+a.slice(6)); }
+  if (a.startsWith("oform:")) { await hmDefs(); return hmProgForm(+a.slice(6), "options"); }
   switch (a) {
     case "undo": case "redo": { const j = await hmRun(a); if (j.ok) hmSay(j.did || "Done."); return; }
     case "delete": return hmDelete();

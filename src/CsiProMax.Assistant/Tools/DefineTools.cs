@@ -38,11 +38,11 @@ public static class DefineTools
             """{"type":"object","required":["table","name","rows"],"properties":{"table":{"type":"string"},"name":{"type":"string"},"rows":{"type":"array","items":{"type":"object"}}}}""",
             Ask.Changes, TableRows, a => $"{a.Text("table")}: {a.Text("name")}"),
         new("program_forms",
-            "Analyze and Design menu forms of the model's program, with the program's own items: each design (Steel Frame, Concrete Frame, Composite Beam, Shear Wall, Concrete Slab, ...) with its code and the codes it has, and the Analyze options (active degrees of freedom, SAPFire solver, mesh settings, nonlinear hinges, cracking). With 'table' it gives that form's items (field, the name the program shows, value; blank = the program's default). With 'code' it gives the preferences form of that design's code.",
+            "Analyze, Design and Options menu forms of the model's program, with the program's own items: each design (Steel Frame, Concrete Frame, Composite Beam, Shear Wall, Concrete Slab, ...) with its code and the codes it has, the Analyze options (active degrees of freedom, SAPFire solver, mesh settings, nonlinear hinges, cracking), and the Options menu forms (Preferences: dimensions/tolerances and graphics; Colors: display and output; Miscellaneous Options). With 'table' it gives that form's items (field, the name the program shows, value; blank = the program's default). With 'code' it gives the preferences form of that design's code.",
             """{"type":"object","properties":{"table":{"type":"string"},"design":{"type":"string"},"code":{"type":"string"}}}""",
             Ask.Never, Forms),
         new("set_program_form",
-            "Sets a form of the Analyze or Design menu (program_forms lists them): 'design' with 'code' sets that design's code (Design > ... > View/Revise Preferences, Design Code); 'table' with 'values' (item by field or by the name the program shows; blank = the program's default) sets that form's items, e.g. a design code's preferences or Analyze > Set Active Degrees of Freedom.",
+            "Sets a form of the Analyze, Design or Options menu (program_forms lists them): 'design' with 'code' sets that design's code (Design > ... > View/Revise Preferences, Design Code); 'table' with 'values' (item by field or by the name the program shows; blank = the program's default) sets that form's items, e.g. a design code's preferences or Analyze > Set Active Degrees of Freedom.",
             """{"type":"object","properties":{"design":{"type":"string"},"code":{"type":"string"},"table":{"type":"string"},"values":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}}}}""",
             Ask.Changes, SetForm, a => a.Text("table") is { Length: > 0 } t ? t : $"{a.Text("design")} design code {a.Text("code")}"),
         new("definition_data",
@@ -76,6 +76,7 @@ public static class DefineTools
                 ["codes"] = new JsonArray(ProgramForms.Codes(m.Target, d.Kind).Select(c => (JsonNode)c).ToArray()),
             }).ToArray()),
             ["analysis"] = new JsonArray(ProgramForms.AnalysisForms(m.Target).Select(f => (JsonNode)new JsonObject { ["item"] = f.Item, ["table"] = f.Table, ["set"] = ProgramForms.Values(m, f.Table).Count(v => v.Value.Length > 0) }).ToArray()),
+            ["options"] = new JsonArray(ProgramForms.OptionForms(m.Target).Select(f => (JsonNode)new JsonObject { ["group"] = f.Group, ["item"] = f.Item, ["table"] = f.Table, ["set"] = ProgramForms.Values(m, f.Table).Count(v => v.Value.Length > 0) }).ToArray()),
         };
     }
 

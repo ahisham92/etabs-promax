@@ -522,7 +522,7 @@ public static class S2kWriter
             Add(tables, t.ToUpperInvariant(), rows.Select(r => (IReadOnlyList<(string, string)>)DefineTables.SapHinges[t].Where(r.ContainsKey).Select(f => (f, r[f])).ToList()));
         // The preference and analysis option forms (ProgramForms), as SAP2000's own tables.
         foreach (var (t, rows) in (m.DefinitionTables ?? []).Where(x => ProgramForms.HasForm(ProgramOptions.Sap2000, x.Key) && !x.Key.Equals("Active Degrees of Freedom", StringComparison.OrdinalIgnoreCase)).OrderBy(x => x.Key, StringComparer.Ordinal))
-            Add(tables, t.ToUpperInvariant(), rows.Take(1).Select(r => (IReadOnlyList<(string, string)>)ProgramForms.Fields(ProgramOptions.Sap2000, t).Where(f => r.ContainsKey(f.Key)).Select(f => (f.Key, r[f.Key])).ToList()));
+            Add(tables, t.ToUpperInvariant(), rows.Take(1).Select(r => (IReadOnlyList<(string, string)>)ProgramForms.Fields(ProgramOptions.Sap2000, t).Where(f => r.ContainsKey(f.Key)).Select(f => (f.Key, r[f.Key])).ToList()).Where(r => r.Count > 0));
         KeptTables.WriteInto(m, "sap2000", tables);
 
         var at = SavedAt ?? DateTime.Now;
