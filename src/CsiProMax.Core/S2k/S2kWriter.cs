@@ -42,8 +42,8 @@ public static class S2kWriter
 
         Add(tables, "PROGRAM CONTROL", Row(("ProgramName", "SAP2000"), ("Version", ProgramVersion), ("CurrUnits", $"{force}, {length}, {(m.Units.Temperature.StartsWith('F') ? "F" : "C")}")));
         // Analyze > Set Active Degrees of Freedom (the form's row; each one on when not set).
-        var dof = m.DefinitionTables?.GetValueOrDefault("Active Degrees of Freedom")?.FirstOrDefault();
-        Add(tables, "ACTIVE DEGREES OF FREEDOM", new[] { "UX", "UY", "UZ", "RX", "RY", "RZ" }.Select(d => (d, dof?.GetValueOrDefault(d) is { Length: > 0 } v ? v : "Yes")).ToList());
+        var activeDof = m.DefinitionTables?.GetValueOrDefault("Active Degrees of Freedom")?.FirstOrDefault();
+        Add(tables, "ACTIVE DEGREES OF FREEDOM", new[] { "UX", "UY", "UZ", "RX", "RY", "RZ" }.Select(dofKey => (dofKey, activeDof?.GetValueOrDefault(dofKey) is { Length: > 0 } dofOn ? dofOn : "Yes")).ToList());
         Add(tables, "COORDINATE SYSTEMS", Row(("Name", "GLOBAL"), ("Type", "Cartesian"), ("X", "0"), ("Y", "0"), ("Z", "0"), ("AboutZ", "0"), ("AboutY", "0"), ("AboutX", "0")));
 
         // Grids: the plan grids, and a Z grid line at each story level so the levels can still be found in SAP2000.
@@ -205,13 +205,13 @@ public static class S2kWriter
                     ("PJ", YesNo(rj.Contains("P"))), ("V2J", YesNo(rj.Contains("V2"))), ("V3J", YesNo(rj.Contains("V3"))), ("TJ", YesNo(rj.Contains("T"))), ("M2J", YesNo(rj.Contains("M2"))), ("M3J", YesNo(rj.Contains("M3"))), ("PartialFix", YesNo(PropertyDefs.PartialFixity(x).Count > 0))));
             // Partial fixity springs, as SAP2000's own table (0 where the end has none).
             if (ri.Count + rj.Count > 0 && PropertyDefs.PartialFixity(x) is { Count: > 0 } pf)
-                partial.Add(new[] { ("Frame", name) }.Concat(new[] { "I", "J" }.SelectMany(end => PropertyDefs.Releases.Select(r => (r + end, N(pf.GetValueOrDefault(r + end)))))).ToList());
+                partial.Add(new[] { ("Frame", name) }.Concat(new[] { "I", "J" }.SelectMany(pfEnd => PropertyDefs.Releases.Select(pfDof => (pfDof + pfEnd, N(pf.GetValueOrDefault(pfDof + pfEnd)))))).ToList());
             if (PropertyDefs.Value(x.Extra, "ANG") is { } ang) axes.Add(Row(("Frame", name), ("Angle", ang), ("AdvanceAxes", "No")));
             var ip = AssignTables.Row(x, AssignTables.Insertion);
             var cpt = PropertyDefs.Value(x.Extra, "CARDINALPT") ?? "10";
             if (cpt != "10" || ip.Count > 0)
             {
-                string O(string k) => ip.GetValueOrDefault(k) is { Length: > 0 } v ? v : "0";
+                string O(string ipKey) => ip.GetValueOrDefault(ipKey) is { Length: > 0 } ipValue ? ipValue : "0";
                 insertion.Add(Row(("Frame", name), ("CardinalPt", Cardinal(cpt)), ("CoordSys", (ip.GetValueOrDefault("OffsetCSys") ?? "Local").Equals("Global", StringComparison.OrdinalIgnoreCase) ? "GLOBAL" : "Local"),
                     ("JtOffsetXI", O("XI")), ("JtOffsetYI", O("YI")), ("JtOffsetZI", O("ZI")), ("JtOffsetXJ", O("XJ")), ("JtOffsetYJ", O("YJ")), ("JtOffsetZJ", O("ZJ")),
                     ("Mirror2", ip.GetValueOrDefault("Mirror2") ?? "No"), ("Mirror3", ip.GetValueOrDefault("Mirror3") ?? "No"), ("Transform", (ip.GetValueOrDefault("NoTransform") ?? "No").Equals("Yes", StringComparison.OrdinalIgnoreCase) ? "No" : "Yes")));
