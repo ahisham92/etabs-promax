@@ -160,9 +160,9 @@ public static class PropertyTools
                 return new JsonObject { ["link"] = name, ["directions"] = dofs.Count };
             }, a => a.Flag("delete") ? $"Delete the link {a.Text("name")}" : $"Define the link {a.Text("name")}"),
         new("assign_frame_data",
-            "Assigns to frames (label@story) what Assign > Frame offers: release_i and release_j (any of P V2 V3 T M2 M3; [] takes them off), angle (local axis 2 rotation, degrees), cardinal (insertion point 1 to 11: 10 centroid, 8 top center), offset_i, offset_j and rigid_zone (end length offsets, rigid zone factor 0 to 1), modifiers (AMOD A2MOD A3MOD JMOD I2MOD I3MOD MMOD WMOD), spring (a line spring property; \"\" takes it off) and hinges (Assign > Frame > Hinges: auto hinges from the code's tables, each {at: relative distance 0 to 1, dof: M3 M2 P V2 V3 T P-M2-M3 P-M3 M3-V2}; [] takes them off; for a pushover)." +
+            "Assigns to frames (label@story) what Assign > Frame offers: release_i and release_j (any of P V2 V3 T M2 M3; [] takes them off), partial_fixity (Frame Partial Fixity Springs on released ends, e.g. {\"M3I\": 5000, \"M3J\": 5000}, stiffness in the model's units; 0 takes one off), angle (local axis 2 rotation, degrees), cardinal (insertion point 1 to 11: 10 centroid, 8 top center), offset_i, offset_j and rigid_zone (end length offsets, rigid zone factor 0 to 1), modifiers (AMOD A2MOD A3MOD JMOD I2MOD I3MOD MMOD WMOD), spring (a line spring property; \"\" takes it off) and hinges (Assign > Frame > Hinges: auto hinges from the code's tables, each {at: relative distance 0 to 1, dof: M3 M2 P V2 V3 T P-M2-M3 P-M3 M3-V2}; [] takes them off; for a pushover)." +
             " tables: rows of the program's own assignment tables the other fields do not cover, by full table name, e.g. {\"Frame Assignments - Output Stations\": [{\"StationOpt\": \"Min Stations\", \"MinStations\": \"5\"}]} (property_definitions lists them under assign_tables; [] takes a table off). Only what is given changes.",
-            """{"type":"object","required":["objects"],"properties":{"objects":{"type":"array","items":{"type":"string"}},"release_i":{"type":"array","items":{"type":"string"}},"release_j":{"type":"array","items":{"type":"string"}},"angle":{"type":"number"},"cardinal":{"type":"integer"},"offset_i":{"type":"number"},"offset_j":{"type":"number"},"rigid_zone":{"type":"number"},"modifiers":""" + Numbers + ""","spring":{"type":"string"},"hinges":{"type":"array","items":{"type":"object","required":["at","dof"],"properties":{"at":{"type":"number"},"dof":{"type":"string"}}}},"tables":{"type":"object"}}}""",
+            """{"type":"object","required":["objects"],"properties":{"objects":{"type":"array","items":{"type":"string"}},"release_i":{"type":"array","items":{"type":"string"}},"release_j":{"type":"array","items":{"type":"string"}},"partial_fixity":{"type":"object","additionalProperties":{"type":"number"}},"angle":{"type":"number"},"cardinal":{"type":"integer"},"offset_i":{"type":"number"},"offset_j":{"type":"number"},"rigid_zone":{"type":"number"},"modifiers":""" + Numbers + ""","spring":{"type":"string"},"hinges":{"type":"array","items":{"type":"object","required":["at","dof"],"properties":{"at":{"type":"number"},"dof":{"type":"string"}}}},"tables":{"type":"object"}}}""",
             Ask.Changes, AssignFrames, a => "Assign frame data"),
         new("assign_shell_data",
             "Assigns to slabs and walls (label@story) what Assign > Shell offers: modifiers (F11MOD F22MOD F12MOD M11MOD M22MOD M12MOD V13MOD V23MOD MMOD WMOD) and spring (an area spring property, e.g. soil under a mat; \"\" takes it off); opening (Assign > Shell > Opening: true makes the area an opening, false a slab or wall again); tables: rows of the program's own assignment tables the other fields do not cover, by full table name, e.g. {\"Area Assignments - Additional Mass\": [{\"AddedMass\": \"0.1\"}]} (property_definitions lists them under assign_tables; [] takes a table off).",
@@ -282,14 +282,15 @@ public static class PropertyTools
         var spring = Spring(a, m0, "line");
         var hinges = Hinges(a);
         var tables = AssignRows(a);
-        if (ri is null && rj is null && angle is null && cardinal is null && oi is null && oj is null && rz is null && mods.Count == 0 && spring is null && hinges is null && tables is null)
-            throw new ToolInputException("Give what to assign: release_i, release_j, angle, cardinal, offset_i, offset_j, rigid_zone, modifiers, spring, hinges or tables.");
+        Dictionary<string, double>? fixity = Has(a, "partial_fixity") ? Values(a, "partial_fixity", true).ToDictionary(kv => kv.Key.Trim().ToUpperInvariant(), kv => kv.Value, StringComparer.Ordinal) : null;
+        if (ri is null && rj is null && fixity is null && angle is null && cardinal is null && oi is null && oj is null && rz is null && mods.Count == 0 && spring is null && hinges is null && tables is null)
+            throw new ToolInputException("Give what to assign: release_i, release_j, partial_fixity, angle, cardinal, offset_i, offset_j, rigid_zone, modifiers, spring, hinges or tables.");
         if (tables is not null) Core(() => { AssignTables.Set(new LineAssign(), tables); return 0; });
         Core(() => { PropertyDefs.CheckModifiers(PropertyDefs.FrameModifiers, mods); if (hinges is not null) PropertyDefs.CheckHinges(hinges); return 0; });
         foreach (var (label, story) in objects)
         {
             var (i0, j0) = PropertyDefs.ReleasesOf(m0.LineAssigns.First(y => y.Label == label && y.Story == story));
-            Core(() => { PropertyDefs.CheckReleases(ri ?? i0, rj ?? j0); return 0; });
+            Core(() => { PropertyDefs.CheckReleases(ri ?? i0, rj ?? j0); if (fixity is not null) PropertyDefs.CheckPartialFixity(fixity, ri ?? i0, rj ?? j0); return 0; });
             var line = m0.Line(label);
             if (line is null) continue;
             var len = Physical.Frames(m0).FirstOrDefault(f => f.Label == label && f.Story == story)?.Length ?? double.MaxValue;
@@ -305,6 +306,8 @@ public static class PropertyTools
                     var (i0, j0) = PropertyDefs.ReleasesOf(x);
                     PropertyDefs.SetReleases(x, ri ?? i0, rj ?? j0);
                 }
+                // The springs stay only on released ends: a release taken off takes its spring with it.
+                if (fixity is not null || ri is not null || rj is not null) PropertyDefs.SetPartialFixity(x, fixity);
                 if (angle is { } ang) PropertyDefs.Put(x.Extra, "ANG", Math.Abs(ang % 360) < 1e-12 ? null : E2k.E2kText.Number(ang));
                 if (cardinal is { } c) PropertyDefs.Put(x.Extra, "CARDINALPT", c.ToString(System.Globalization.CultureInfo.InvariantCulture));
                 if (oi is { } a1) PropertyDefs.Put(x.Extra, "LENGTHOFFI", E2k.E2kText.Number(a1));
@@ -501,6 +504,7 @@ public static class PropertyTools
                     {
                         ["object"] = x, ["kind"] = "frame", ["section"] = l.Section,
                         ["release_i"] = new JsonArray(i.Select(r => (JsonNode)r).ToArray()), ["release_j"] = new JsonArray(j.Select(r => (JsonNode)r).ToArray()),
+                        ["partial_fixity"] = new JsonObject(PropertyDefs.PartialFixity(l).Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))),
                         ["angle"] = double.TryParse(PropertyDefs.Value(l.Extra, "ANG"), System.Globalization.CultureInfo.InvariantCulture, out var ang) ? ang : 0,
                         ["cardinal"] = int.TryParse(PropertyDefs.Value(l.Extra, "CARDINALPT"), out var c) ? c : 10,
                         ["offset_i"] = Num(PropertyDefs.Value(l.Extra, "LENGTHOFFI")), ["offset_j"] = Num(PropertyDefs.Value(l.Extra, "LENGTHOFFJ")), ["rigid_zone"] = Num(PropertyDefs.Value(l.Extra, "RIGIDZONE")),

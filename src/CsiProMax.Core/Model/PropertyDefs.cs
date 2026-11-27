@@ -441,6 +441,34 @@ public static class PropertyDefs
         foreach (var r in Releases) if (i.Contains(r) && j.Contains(r) && r is "P" or "T") throw new ArgumentException($"{r} released at both ends leaves the member unstable.");
     }
 
+    /// <summary>The partial fixity springs of a frame, by release and end ("M3I" = M3 at the start), from its table row.</summary>
+    public static Dictionary<string, double> PartialFixity(LineAssign a) =>
+        AssignTables.Row(a, AssignTables.PartialFixity).Where(kv => kv.Key.EndsWith("Spring", StringComparison.Ordinal) && TryNumber(kv.Value, out var v) && v > 0)
+            .ToDictionary(kv => kv.Key[..^"Spring".Length], kv => double.Parse(kv.Value, System.Globalization.CultureInfo.InvariantCulture), StringComparer.Ordinal);
+
+    /// <summary>Checks partial fixity springs ("M3I": stiffness, 0 or more) against the releases the frame will have.</summary>
+    public static void CheckPartialFixity(IReadOnlyDictionary<string, double> springs, IReadOnlyCollection<string> i, IReadOnlyCollection<string> j)
+    {
+        foreach (var (key, value) in springs)
+        {
+            var end = key.Length > 1 ? key[^1] : ' ';
+            var dof = key.Length > 1 ? key[..^1] : "";
+            if (!Releases.Contains(dof) || end is not ('I' or 'J')) throw new ArgumentException($"There is no partial fixity '{key}'. They are a release and its end: {string.Join(", ", Releases.SelectMany(r => new[] { r + "I", r + "J" }))}.");
+            if (value < 0 || double.IsNaN(value)) throw new ArgumentException($"The partial fixity spring {key} is a stiffness, 0 or more.");
+            if (value > 0 && !(end == 'I' ? i : j).Contains(dof)) throw new ArgumentException($"A partial fixity spring needs its release: {dof} is not released at the {(end == 'I' ? "start" : "end")}.");
+        }
+    }
+
+    /// <summary>Sets a frame's partial fixity springs (0 takes one off), keeping only those on released ends.</summary>
+    public static void SetPartialFixity(LineAssign a, IReadOnlyDictionary<string, double>? springs)
+    {
+        var now = PartialFixity(a);
+        foreach (var (k, v) in springs ?? new Dictionary<string, double>()) if (v > 0) now[k] = v; else now.Remove(k);
+        var (i, j) = ReleasesOf(a);
+        var row = now.Where(kv => (kv.Key[^1] == 'I' ? i : j).Contains(kv.Key[..^1])).ToDictionary(kv => kv.Key + "Spring", kv => Number(kv.Value), StringComparer.Ordinal);
+        AssignTables.Set(a, new Dictionary<string, List<Dictionary<string, string>>> { [AssignTables.PartialFixity] = row.Count == 0 ? [] : [row] });
+    }
+
     public static (List<string> I, List<string> J) ReleasesOf(LineAssign a)
     {
         var words = (Value(a.Extra, "RELEASE") ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries);

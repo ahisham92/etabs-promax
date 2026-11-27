@@ -698,6 +698,10 @@ public static class ModelerFieldSteps
             var obj = Q(beam.Label + "@" + beam.Story);
             ctx.Tool("assign_frame_data", """{"objects":[""" + obj + """],"release_i":["M3"],"release_j":["M3"],"angle":0,"cardinal":8,"modifiers":{"I3MOD":0.35,"JMOD":0.01}}""", null, "tool assign_frame_data, pinned ends, top center and cracked");
             ctx.Refused("assign_frame_data", """{"objects":[""" + obj + """],"release_i":["T"],"release_j":["T"]}""", "unstable", "tool assign_frame_data says no to torsion released at both ends");
+            // Releases/Partial Fixity springs on the released ends, and Insertion Point's mirror and joint offsets (Ahmed 2026-11-27).
+            ctx.Tool("assign_frame_data", """{"objects":[""" + obj + """],"partial_fixity":{"M3I":5000,"M3J":5000}}""", null, "tool assign_frame_data, partial fixity springs on the released ends");
+            ctx.Refused("assign_frame_data", """{"objects":[""" + obj + """],"partial_fixity":{"M2I":100}}""", "needs its release", "tool assign_frame_data says no to a partial fixity spring on an end not released");
+            ctx.Tool("assign_frame_data", """{"objects":[""" + obj + """],"tables":{"Frame Assignments - Insertion Point":[{"Mirror2":"Yes","OffsetCSys":"Global","ZI":"0.05","ZJ":"0.05"}]}}""", null, "tool assign_frame_data, insertion point mirror and joint offsets");
             ctx.Tool("assign_frame_data", """{"objects":[""" + obj + """],"hinges":[{"at":0.05,"dof":"M3"},{"at":0.95,"dof":"M3"},{"at":0.5,"dof":"V2"}]}""", null, "tool assign_frame_data, auto hinges at both ends and a shear hinge");
             ctx.Refused("assign_frame_data", """{"objects":[""" + obj + """],"hinges":[{"at":1.5,"dof":"M3"}]}""", "0 to 1", "tool assign_frame_data says no to a hinge beyond the member");
             ctx.Tool("property_definitions", """{"objects":[""" + obj + """]}""", a =>

@@ -395,6 +395,29 @@ static class ExtrasTests
             var program = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Assistant", "Program.cs"));
             Check(program.Contains("WebPages.RemovedPageFor(file)", StringComparison.Ordinal), "a Viewer window on a removed pack does not say it was removed");
         });
+        yield return ("Ahmed 2026-11-27: Releases/Partial Fixity springs and Insertion Point's mirror and joint offsets, as ETABS's tables and SAP2000's .s2k", () =>
+        {
+            var link = Frame();
+            var b = link.Model.LineAssigns.First(x => link.Model.Line(x.Label)?.Kind == LineKind.Beam);
+            var obj = b.Label + "@" + b.Story;
+            Refused(link, "assign_frame_data", new { objects = new[] { obj }, partial_fixity = new Dictionary<string, double> { ["M3I"] = 5000 } }, "needs its release");
+            Run(link, "assign_frame_data", new { objects = new[] { obj }, release_i = new[] { "M3" }, release_j = new[] { "M3" }, partial_fixity = new Dictionary<string, double> { ["M3I"] = 5000, ["M3J"] = 4000 } });
+            Check(PropertyDefs.PartialFixity(b)["M3I"] == 5000 && AssignTables.Row(b, AssignTables.PartialFixity)["M3JSpring"] == "4000", "the springs are not ETABS's table row");
+            Refused(link, "assign_frame_data", new { objects = new[] { obj }, partial_fixity = new Dictionary<string, double> { ["X3I"] = 1 } }, "no partial fixity");
+            Run(link, "assign_frame_data", new { objects = new[] { obj }, tables = new Dictionary<string, object[]> { [AssignTables.Insertion] = [new Dictionary<string, string> { ["Mirror2"] = "Yes", ["OffsetCSys"] = "Global", ["ZI"] = "0.05" }] } });
+            link.Model.Target = "sap2000";
+            var text = CsiProMax.S2k.S2kWriter.Write(link.Model, "a.s2k").Text;
+            Check(text.Contains("FRAME RELEASE ASSIGNMENTS 2 - PARTIAL FIXITY", StringComparison.Ordinal) && text.Contains("PartialFix=Yes", StringComparison.Ordinal) && text.Contains("Mirror2=Yes", StringComparison.Ordinal) && text.Contains("JtOffsetZI=0.05", StringComparison.Ordinal), "the .s2k does not carry them");
+            var read = CsiProMax.S2k.S2kReader.Read(text, "Extras");
+            var rb = read.LineAssigns.First(x => x.Label == b.Label && x.Story == b.Story);
+            Check(PropertyDefs.PartialFixity(rb).GetValueOrDefault("M3J") == 4000 && AssignTables.Row(rb, AssignTables.Insertion).GetValueOrDefault("Mirror2") == "Yes" && AssignTables.Row(rb, AssignTables.Insertion).GetValueOrDefault("ZI") == "0.05", "the .s2k's springs or insertion point did not come back");
+            link.Model.Target = "etabs";
+            Run(link, "assign_frame_data", new { objects = new[] { obj }, release_j = Array.Empty<string>() });
+            Check(!PropertyDefs.PartialFixity(b).ContainsKey("M3J") && PropertyDefs.PartialFixity(b).ContainsKey("M3I"), "taking a release off did not take its spring");
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var marker in new[] { "Frame Partial Fixity Springs", "Mirror about Local 2 Axis", "Frame Joint Offsets to Cardinal Point", "Do not transform frame stiffness for offsets from centroid" })
+                Check(html.Contains(marker, StringComparison.Ordinal), "the page has no " + marker);
+        });
         yield return ("Ahmed 2026-11-27: the Analyze and Design forms carry the program's own items (ETABS 23.2, SAP2000 26.3): design codes, each code's preferences, active DOF; kept as the program's table rows, the code in the .e2k", () =>
         {
             Check(ProgramForms.Codes("etabs", "steel").Contains("AISC 360-16") && ProgramForms.Codes("etabs", "concrete").Contains("ACI 318-19") && ProgramForms.Codes("etabs", "shear_wall").Contains("ACI 318-19"), "ETABS's design codes: " + string.Join(", ", ProgramForms.Codes("etabs", "steel")));

@@ -171,6 +171,7 @@ public static class S2kWriter
         // What Assign > Frame, Shell and Joint set beyond sections: releases, local axes, insertion points, end offsets,
         // modifiers and springs.
         var releases = new List<IReadOnlyList<(string, string)>>();
+        var partial = new List<IReadOnlyList<(string, string)>>();
         var axes = new List<IReadOnlyList<(string, string)>>();
         var insertion = new List<IReadOnlyList<(string, string)>>();
         var offsets = new List<IReadOnlyList<(string, string)>>();
@@ -201,10 +202,20 @@ public static class S2kWriter
             var (ri, rj) = PropertyDefs.ReleasesOf(x);
             if (ri.Count + rj.Count > 0)
                 releases.Add(Row(("Frame", name), ("PI", YesNo(ri.Contains("P"))), ("V2I", YesNo(ri.Contains("V2"))), ("V3I", YesNo(ri.Contains("V3"))), ("TI", YesNo(ri.Contains("T"))), ("M2I", YesNo(ri.Contains("M2"))), ("M3I", YesNo(ri.Contains("M3"))),
-                    ("PJ", YesNo(rj.Contains("P"))), ("V2J", YesNo(rj.Contains("V2"))), ("V3J", YesNo(rj.Contains("V3"))), ("TJ", YesNo(rj.Contains("T"))), ("M2J", YesNo(rj.Contains("M2"))), ("M3J", YesNo(rj.Contains("M3"))), ("PartialFix", "No")));
+                    ("PJ", YesNo(rj.Contains("P"))), ("V2J", YesNo(rj.Contains("V2"))), ("V3J", YesNo(rj.Contains("V3"))), ("TJ", YesNo(rj.Contains("T"))), ("M2J", YesNo(rj.Contains("M2"))), ("M3J", YesNo(rj.Contains("M3"))), ("PartialFix", YesNo(PropertyDefs.PartialFixity(x).Count > 0))));
+            // Partial fixity springs, as SAP2000's own table (0 where the end has none).
+            if (ri.Count + rj.Count > 0 && PropertyDefs.PartialFixity(x) is { Count: > 0 } pf)
+                partial.Add(new[] { ("Frame", name) }.Concat(new[] { "I", "J" }.SelectMany(end => PropertyDefs.Releases.Select(r => (r + end, N(pf.GetValueOrDefault(r + end)))))).ToList());
             if (PropertyDefs.Value(x.Extra, "ANG") is { } ang) axes.Add(Row(("Frame", name), ("Angle", ang), ("AdvanceAxes", "No")));
-            if (PropertyDefs.Value(x.Extra, "CARDINALPT") is { } cp && cp != "10")
-                insertion.Add(Row(("Frame", name), ("CardinalPt", Cardinal(cp)), ("CoordSys", "Local"), ("JtOffsetXI", "0"), ("JtOffsetYI", "0"), ("JtOffsetZI", "0"), ("JtOffsetXJ", "0"), ("JtOffsetYJ", "0"), ("JtOffsetZJ", "0"), ("Mirror2", "No"), ("Mirror3", "No"), ("Transform", "Yes")));
+            var ip = AssignTables.Row(x, AssignTables.Insertion);
+            var cpt = PropertyDefs.Value(x.Extra, "CARDINALPT") ?? "10";
+            if (cpt != "10" || ip.Count > 0)
+            {
+                string O(string k) => ip.GetValueOrDefault(k) is { Length: > 0 } v ? v : "0";
+                insertion.Add(Row(("Frame", name), ("CardinalPt", Cardinal(cpt)), ("CoordSys", (ip.GetValueOrDefault("OffsetCSys") ?? "Local").Equals("Global", StringComparison.OrdinalIgnoreCase) ? "GLOBAL" : "Local"),
+                    ("JtOffsetXI", O("XI")), ("JtOffsetYI", O("YI")), ("JtOffsetZI", O("ZI")), ("JtOffsetXJ", O("XJ")), ("JtOffsetYJ", O("YJ")), ("JtOffsetZJ", O("ZJ")),
+                    ("Mirror2", ip.GetValueOrDefault("Mirror2") ?? "No"), ("Mirror3", ip.GetValueOrDefault("Mirror3") ?? "No"), ("Transform", (ip.GetValueOrDefault("NoTransform") ?? "No").Equals("Yes", StringComparison.OrdinalIgnoreCase) ? "No" : "Yes")));
+            }
             var oi = PropertyDefs.Value(x.Extra, "LENGTHOFFI"); var oj = PropertyDefs.Value(x.Extra, "LENGTHOFFJ"); var rz = PropertyDefs.Value(x.Extra, "RIGIDZONE");
             if (oi is not null || oj is not null || rz is not null)
                 offsets.Add(Row(("Frame", name), ("LengthType", "User Defined"), ("Offset1", oi ?? "0"), ("Offset2", oj ?? "0"), ("RZ", rz ?? "0"), ("FixedRZ", "No")));
@@ -320,6 +331,7 @@ public static class S2kWriter
         Add(tables, "JOINT RESTRAINT ASSIGNMENTS", restraints);
         Add(tables, "JOINT SPRING ASSIGNMENTS 1 - UNCOUPLED", springs);
         Add(tables, "FRAME RELEASE ASSIGNMENTS 1 - GENERAL", releases);
+        Add(tables, "FRAME RELEASE ASSIGNMENTS 2 - PARTIAL FIXITY", partial);
         Add(tables, "FRAME LOCAL AXES ASSIGNMENTS 1 - TYPICAL", axes);
         Add(tables, "FRAME INSERTION POINT ASSIGNMENTS", insertion);
         Add(tables, "FRAME OFFSET ALONG LENGTH ASSIGNMENTS", offsets);

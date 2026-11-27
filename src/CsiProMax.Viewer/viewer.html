@@ -5693,15 +5693,35 @@ async function hmAssignData(what) {
   let body = "", read;
   if (what === "releases") {
     const rel = ["P", "V2", "V3", "T", "M2", "M3"], lab = {P: "Axial Load", V2: "Shear Force 2 (Major)", V3: "Shear Force 3 (Minor)", T: "Torsion", M2: "Moment 22 (Minor)", M3: "Moment 33 (Major)"};
-    body = `<fieldset><legend>Release</legend><table class="list hmgrid"><tr><th></th><th>Start</th><th>End</th></tr>${rel.map(r => `<tr><td>${lab[r]}</td><td><input type="checkbox" data-i="${r}" ${(now.release_i || []).includes(r) ? "checked" : ""}></td><td><input type="checkbox" data-j="${r}" ${(now.release_j || []).includes(r) ? "checked" : ""}></td></tr>`).join("")}</table></fieldset>`;
-    read = d => ({release_i: [...d.querySelectorAll("[data-i]:checked")].map(x => x.dataset.i), release_j: [...d.querySelectorAll("[data-j]:checked")].map(x => x.dataset.j)});
+    // ETABS's Releases/Partial Fixity: Release Start/End check boxes and the Frame Partial Fixity Springs beside them,
+    // open only on a released end (force/length for P, V2, V3; force-length/rad for T, M2, M3).
+    const pf = now.partial_fixity || {}, unit = r => /^[PV]/.test(r) ? `${u.f}/${u.l}` : `${u.f}-${u.l}/rad`;
+    body = `<table class="list hmgrid"><tr><th></th><th colspan="2">Release</th><th colspan="2">Frame Partial Fixity Springs</th><th></th></tr><tr><th></th><th>Start</th><th>End</th><th>Start</th><th>End</th><th></th></tr>${rel.map(r => `<tr><td>${lab[r]}</td><td><input type="checkbox" data-i="${r}" ${(now.release_i || []).includes(r) ? "checked" : ""}></td><td><input type="checkbox" data-j="${r}" ${(now.release_j || []).includes(r) ? "checked" : ""}></td><td><input type="number" step="any" min="0" data-si="${r}" value="${pf[r + "I"] || 0}" style="width:90px"></td><td><input type="number" step="any" min="0" data-sj="${r}" value="${pf[r + "J"] || 0}" style="width:90px"></td><td class="kv">${unit(r)}</td></tr>`).join("")}</table>`;
+    read = d => ({release_i: [...d.querySelectorAll("[data-i]:checked")].map(x => x.dataset.i), release_j: [...d.querySelectorAll("[data-j]:checked")].map(x => x.dataset.j),
+      partial_fixity: Object.fromEntries(rel.flatMap(r => [[r + "I", d.querySelector(`[data-i="${r}"]`).checked ? +d.querySelector(`[data-si="${r}"]`).value || 0 : 0], [r + "J", d.querySelector(`[data-j="${r}"]`).checked ? +d.querySelector(`[data-sj="${r}"]`).value || 0 : 0]]))});
+    setTimeout(() => { const d = [...document.querySelectorAll(".dlg")].pop(); if (!d) return;
+      const sync = () => rel.forEach(r => { d.querySelector(`[data-si="${r}"]`).disabled = !d.querySelector(`[data-i="${r}"]`).checked; d.querySelector(`[data-sj="${r}"]`).disabled = !d.querySelector(`[data-j="${r}"]`).checked; });
+      d.querySelectorAll("[data-i],[data-j]").forEach(c => c.addEventListener("change", sync)); sync(); }, 0);
   } else if (what === "axes") {
     body = `<fieldset><legend>${program === "sap2000" ? "Angle in Degrees" : "Rotation by Angle"}</legend><div class="g2"><span>Angle (deg)</span><input id="xA" type="number" step="any" value="${now.angle || 0}"></div></fieldset>`;
     read = d => ({angle: fnum(d, "#xA")});
   } else if (what === "insertion") {
     const cp = ["Bottom Left", "Bottom Center", "Bottom Right", "Middle Left", "Middle Center", "Middle Right", "Top Left", "Top Center", "Top Right", "Centroid", "Shear Center"];
-    body = `<fieldset><legend>Cardinal Point</legend><div class="g2"><span>Cardinal Point</span><select id="xC">${opts(cp.map((t, i) => [String(i + 1), `${i + 1} (${t})`]), String(now.cardinal || 10))}</select></div></fieldset>`;
-    read = d => ({cardinal: parseInt(q(d, "#xC").value)});
+    // ETABS's form: Cardinal Point with Mirror about Local 2/3, Frame Joint Offsets to Cardinal Point (Global or Local,
+    // End-I and End-J X Y Z) and "Do not transform frame stiffness for offsets from centroid".
+    const ip = ((now.tables || {})["Frame Assignments - Insertion Point"] || [])[0] || {}, yn = k => /^yes$/i.test(ip[k] || "");
+    const off = (k, l) => `<span>${l} (${u.l})</span><input data-o="${k}" type="number" step="any" value="${+ip[k] || 0}">`;
+    body = `<fieldset><legend>Cardinal Point</legend><div class="g2"><span>Cardinal Point</span><select id="xC">${opts(cp.map((t, i) => [String(i + 1), `${i + 1} (${t})`]), String(now.cardinal || 10))}</select></div>
+        <label class="kv" style="display:block"><input type="checkbox" id="xM2" ${yn("Mirror2") ? "checked" : ""}> Mirror about Local 2 Axis</label><label class="kv" style="display:block"><input type="checkbox" id="xM3" ${yn("Mirror3") ? "checked" : ""}> Mirror about Local 3 Axis</label></fieldset>
+      <fieldset><legend>Frame Joint Offsets to Cardinal Point</legend><div class="g2"><span>Coordinate System</span><select id="xCs">${opts(["Global", "Local"], ip.OffsetCSys || "Global")}</select></div>
+        <div style="display:flex;gap:12px"><fieldset style="flex:1"><legend>End-I</legend><div class="g2">${off("XI", "Global X")}${off("YI", "Global Y")}${off("ZI", "Global Z")}</div></fieldset><fieldset style="flex:1"><legend>End-J</legend><div class="g2">${off("XJ", "Global X")}${off("YJ", "Global Y")}${off("ZJ", "Global Z")}</div></fieldset></div></fieldset>
+      <label class="kv" style="display:block"><input type="checkbox" id="xNT" ${yn("NoTransform") ? "checked" : ""}> Do not transform frame stiffness for offsets from centroid</label>`;
+    read = d => {
+      const row = {}; d.querySelectorAll("[data-o]").forEach(b => { if (+b.value) row[b.dataset.o] = String(+b.value); });
+      if (q(d, "#xM2").checked) row.Mirror2 = "Yes"; if (q(d, "#xM3").checked) row.Mirror3 = "Yes"; if (q(d, "#xNT").checked) row.NoTransform = "Yes";
+      if (Object.keys(row).length) row.OffsetCSys = q(d, "#xCs").value;
+      return {cardinal: parseInt(q(d, "#xC").value), tables: {"Frame Assignments - Insertion Point": Object.keys(row).length ? [row] : []}};
+    };
   } else if (what === "offsets") {
     body = `<fieldset><legend>End Offset Along Length</legend><div class="g2"><span>End-I (${u.l})</span><input id="xI" type="number" step="any" value="${now.offset_i || 0}"><span>End-J (${u.l})</span><input id="xJ" type="number" step="any" value="${now.offset_j || 0}"><span>Rigid-zone factor</span><input id="xR" type="number" step="any" min="0" max="1" value="${now.rigid_zone || 0}"></div></fieldset>`;
     read = d => ({offset_i: fnum(d, "#xI"), offset_j: fnum(d, "#xJ"), rigid_zone: fnum(d, "#xR")});
@@ -5731,7 +5751,7 @@ async function hmAssignData(what) {
   const title = (program === "sap2000" ? {releases: "Assign Frame Releases", axes: "Assign Frame Local Axes", insertion: "Assign Frame Insertion Point", offsets: "Assign Frame End Length Offsets", lspring: "Assign Frame Line Springs", hinges: "Assign Frame Hinges", aspring: "Assign Area Springs", joint: "Assign Joint Springs"}
     : {releases: "Frame Assignment - Releases/Partial Fixity", axes: "Frame Assignment - Local Axes", insertion: "Frame Assignment - Insertion Point", offsets: "Frame Assignment - End Length Offsets", lspring: "Frame Assignment - Line Springs", hinges: "Frame Assignment - Hinges", aspring: "Shell Assignment - Area Springs", joint: "Joint Assignment - Springs"})[what];
   return dialog(title, body + `<p class="kv">${names.length} selected ${joint ? "joints" : shell ? "floors and walls" : "frames"}.</p>`,
-    [["OK", d => submit(d, tool, Object.assign({objects: names}, read(d))), true], ["Cancel"]], {width: 420});
+    [["OK", d => submit(d, tool, Object.assign({objects: names}, read(d))), true], ["Cancel"]], {width: what === "releases" ? 620 : what === "insertion" ? 560 : 420});
 }
 
 // ---- Define: stories (ETABS's Story Data, edited in the grid) ----

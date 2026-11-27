@@ -480,10 +480,27 @@ public static partial class S2kReader
             try { PropertyDefs.SetReleases(a, keys.Where(k => Yes(r, k.Item1 + "I")).Select(k => k.Item2).ToList(), keys.Where(k => Yes(r, k.Item1 + "J")).Select(k => k.Item2).ToList()); }
             catch (ArgumentException ex) { notes.Add($"Frame {S(r, "Frame")}: {ex.Message}"); }
         }
+        foreach (var r in use("FRAME RELEASE ASSIGNMENTS 2 - PARTIAL FIXITY"))
+        {
+            if (Of(r) is not { } a) continue;
+            var springs = new[] { "I", "J" }.SelectMany(end => PropertyDefs.Releases.Select(dof => dof + end)).ToDictionary(k => k, k => D(r, k), StringComparer.Ordinal);
+            PropertyDefs.SetPartialFixity(a, springs);
+        }
         foreach (var r in use("FRAME LOCAL AXES ASSIGNMENTS 1 - TYPICAL"))
             if (Of(r) is { } a && D(r, "Angle") != 0) PropertyDefs.Put(a.Extra, "ANG", Number(D(r, "Angle")));
         foreach (var r in use("FRAME INSERTION POINT ASSIGNMENTS"))
-            if (Of(r) is { } a && Cardinal(S(r, "CardinalPt")) is { } cp) { PropertyDefs.Remove(a.Extra, "CARDINALPT"); if (cp != "10") a.Extra.Insert(0, ["CARDINALPT", cp]); }
+        {
+            if (Of(r) is not { } a) continue;
+            if (Cardinal(S(r, "CardinalPt")) is { } cp) { PropertyDefs.Remove(a.Extra, "CARDINALPT"); if (cp != "10") a.Extra.Insert(0, ["CARDINALPT", cp]); }
+            // Mirror, joint offsets and the stiffness transform, kept as ETABS's insertion point row when any is not the default.
+            var row = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var (from, to) in new[] { ("JtOffsetXI", "XI"), ("JtOffsetYI", "YI"), ("JtOffsetZI", "ZI"), ("JtOffsetXJ", "XJ"), ("JtOffsetYJ", "YJ"), ("JtOffsetZJ", "ZJ") })
+                if (D(r, from) != 0) row[to] = Number(D(r, from));
+            if (Yes(r, "Mirror2")) row["Mirror2"] = "Yes";
+            if (Yes(r, "Mirror3")) row["Mirror3"] = "Yes";
+            if (S(r, "Transform").Equals("No", StringComparison.OrdinalIgnoreCase)) row["NoTransform"] = "Yes";
+            if (row.Count > 0) { row["OffsetCSys"] = S(r, "CoordSys").Equals("GLOBAL", StringComparison.OrdinalIgnoreCase) ? "Global" : "Local"; AssignTables.Set(a, new Dictionary<string, List<Dictionary<string, string>>> { [AssignTables.Insertion] = [row] }); }
+        }
         foreach (var r in use("FRAME OFFSET ALONG LENGTH ASSIGNMENTS"))
         {
             if (Of(r) is not { } a) continue;
