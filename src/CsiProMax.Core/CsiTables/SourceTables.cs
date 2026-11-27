@@ -32,8 +32,10 @@ public static class SourceTables
     /// The file to write: the original tables with the changes from the base to <paramref name="written"/> put in.
     /// The first line (what wrote the file) is <paramref name="written"/>'s.
     /// </summary>
-    public static string Merge(ModelSource source, string written)
+    /// <param name="asFiled">Tables written as the file had them (kept tables): their names are the file's already.</param>
+    public static string Merge(ModelSource source, string written, IReadOnlyCollection<string>? asFiled = null)
     {
+        var filed = new HashSet<string>(asFiled ?? [], StringComparer.OrdinalIgnoreCase);
         var original = Read(Unpack(source.Original));
         var baseTables = Read(Unpack(source.Written));
         var now = Read(written);
@@ -43,8 +45,8 @@ public static class SourceTables
         // (Each set by where its objects are: the writer numbers joints afresh, so its "12" before and after a change
         // need not be the same joint.)
         var names = new NewNames(original);
-        Translate(baseTables, Names(original, baseTables, names));
-        Translate(now, Names(original, now, names));
+        Translate(baseTables, Names(original, baseTables, names), filed);
+        Translate(now, Names(original, now, names), filed);
 
         var o = original.ToDictionary(t => t.Name, StringComparer.OrdinalIgnoreCase);
         var b = baseTables.ToDictionary(t => t.Name, StringComparer.OrdinalIgnoreCase);
@@ -389,9 +391,9 @@ public static class SourceTables
         return map;
     }
 
-    private static void Translate(List<Table> tables, Dictionary<Kind, Dictionary<string, string>> map)
+    private static void Translate(List<Table> tables, Dictionary<Kind, Dictionary<string, string>> map, HashSet<string> filed)
     {
-        foreach (var t in tables)
+        foreach (var t in tables.Where(t => !filed.Contains(t.Name)))
             foreach (var r in t.Rows)
                 for (var i = 0; i < r.Pairs.Count; i++)
                 {

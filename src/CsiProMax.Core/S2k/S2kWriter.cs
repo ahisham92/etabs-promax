@@ -21,7 +21,11 @@ public static class S2kWriter
     /// <summary>Fixed by the tests so the header line does not change.</summary>
     public static DateTime? SavedAt { get; set; }
 
-    public sealed record Result(string Text, int Joints, int Frames, int Areas, IReadOnlyList<string> Notes);
+    public sealed record Result(string Text, int Joints, int Frames, int Areas, IReadOnlyList<string> Notes)
+    {
+        /// <summary>The tables written as the file had them (kept tables): their rows already use the file's names.</summary>
+        public IReadOnlyList<string> AsFiled { get; init; } = [];
+    }
 
     private const double Tol = 1e-6;
 
@@ -39,7 +43,7 @@ public static class S2kWriter
     {
         var own = WriteOwn(m, fileName);
         if (m.Source is not { Program: "sap2000" } source) return own;
-        try { return own with { Text = SourceTables.Merge(source, own.Text) }; }
+        try { return own with { Text = SourceTables.Merge(source, own.Text, own.AsFiled) }; }
         catch (Exception ex) when (ex is FormatException or InvalidDataException or IOException)
         {
             return own with { Notes = [.. own.Notes, $"The SAP2000 file this model was opened from could not be read back ({ex.Message}); its tables were written from the model."] };
@@ -574,11 +578,11 @@ public static class S2kWriter
             Add(tables, t.ToUpperInvariant(), rows.Take(1).Select(r => (IReadOnlyList<(string, string)>)ProgramForms.Fields(ProgramOptions.Sap2000, t).Where(f => r.ContainsKey(f.Key)).Select(f => (f.Key, r[f.Key])).ToList()).Where(r => r.Count > 0));
         // SAP2000's own load tables: every Load Pattern, Load Case and Load Combination field its forms have.
         SapLoadTables.MergeInto(m, tables);
-        KeptTables.WriteInto(m, "sap2000", tables);
+        var asFiled = KeptTables.WriteInto(m, "sap2000", tables);
 
         var at = SavedAt ?? DateTime.Now;
         var header = $"File {fileName} was saved on {at.ToString("M/d/yy", CultureInfo.InvariantCulture)} at {at.ToString("H:mm:ss", CultureInfo.InvariantCulture)} by CSI ProMax";
-        return new Result(CsiTableText.Document(header, tables), joints.Count, connect.Count, areaConnect.Count, notes.Distinct().ToList());
+        return new Result(CsiTableText.Document(header, tables), joints.Count, connect.Count, areaConnect.Count, notes.Distinct().ToList()) { AsFiled = asFiled };
     }
 
     private static void Materials(StructuralModel m, List<string> tables, List<string> notes, string lengthUnit)

@@ -182,6 +182,25 @@ static class SapSourceTests
             Console.WriteLine($"      ({Rows(text, "CONNECTIVITY - FRAME").Count:N0} frames, {text.Length / 1024:N0} KB, read and written in {took:0.0} s)");
         });
 
+        yield return ("SAP2000 file: a kept table's changed row keeps the file's joint names, though the writer uses the same names for other joints", () =>
+        {
+            // The file's joints are numbered as CSI ProMax's writer numbers others: joint n is "n+1" (the last is "1").
+            var count = Rows(sap, "JOINT COORDINATES").Count;
+            var shifted = Regex.Replace(sap, @"=J(\d+)\b", m => "=" + (int.Parse(m.Groups[1].Value) % count + 1));
+            shifted = shifted.Replace("END TABLE DATA", "TABLE:  \"CONNECTIVITY - CABLE\"\r\n   Cable=C1   JointI=3   JointJ=4   IsCurved=No\r\n\r\nEND TABLE DATA");
+            var m = S2kReader.Read(shifted, "Cable").Model;
+            var kept = m.Kept!.First(k => k.Key.EndsWith("CONNECTIVITY - CABLE", StringComparison.OrdinalIgnoreCase)).Value;
+            kept[0]["IsCurved"] = "Yes";
+            kept.Add(new Dictionary<string, string> { ["Cable"] = "C2", ["JointI"] = "5", ["JointJ"] = "6", ["IsCurved"] = "No" });
+            var back = S2kWriter.Write(m).Text;
+            var cables = Rows(back, "CONNECTIVITY - CABLE");
+            Check(cables.Count == 2 && cables[1]["JointI"] == "5" && cables[1]["JointJ"] == "6", "the new cable on the joints it names: " + string.Join(" | ", cables.Select(c => string.Join(" ", c.Select(kv => kv.Key + "=" + kv.Value)))));
+            var cable = cables[0];
+            Check(cable["JointI"] == "3" && cable["JointJ"] == "4" && cable["IsCurved"] == "Yes", "the cable as edited, on the file's joints: " + string.Join(" ", cable.Select(kv => kv.Key + "=" + kv.Value)));
+            var lost = Differences(shifted, back);
+            Check(lost.Count == 1 && lost[0] == "CONNECTIVITY - CABLE: 2 rows, not 1", "only the cable table: " + string.Join(" | ", lost.Take(10)));
+        });
+
         yield return ("SAP2000 file: a model with no file behind it is written as before", () =>
         {
             var m = Templates.ConcreteFrame("Plain", [6], [5], 2, 3);
