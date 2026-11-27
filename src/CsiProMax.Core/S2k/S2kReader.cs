@@ -54,7 +54,13 @@ public static partial class S2kReader
             m.Units.Length = u[1].ToUpperInvariant();
             if (u.Length > 2) m.Units.Temperature = u[2].ToUpperInvariant();
         }
-        Use("ACTIVE DEGREES OF FREEDOM"); Use("COORDINATE SYSTEMS");
+        // Analyze > Set Active Degrees of Freedom: kept as the form's row when one of them is off.
+        if (Use("ACTIVE DEGREES OF FREEDOM").FirstOrDefault() is { } activeDofRow && activeDofRow.Any(dofKv => dofKv.Value.Equals("No", StringComparison.OrdinalIgnoreCase)))
+        {
+            m.DefinitionTables ??= new(StringComparer.OrdinalIgnoreCase);
+            m.DefinitionTables["Active Degrees of Freedom"] = [activeDofRow.Where(dofKv => dofKv.Value.Length > 0).ToDictionary(dofKv => dofKv.Key.ToUpperInvariant(), dofKv => dofKv.Value, StringComparer.Ordinal)];
+        }
+        Use("COORDINATE SYSTEMS");
 
         // Joints.
         var joints = new Dictionary<string, Xyz>(StringComparer.OrdinalIgnoreCase);
@@ -221,6 +227,18 @@ public static partial class S2kReader
             if (rows.Count == 0) continue;
             m.DefinitionTables ??= new(StringComparer.OrdinalIgnoreCase);
             m.DefinitionTables[full] = rows;
+        }
+        // SAP2000's preference and analysis option tables go into the Modeler's forms of them (ProgramForms), as the file has them.
+        foreach (var name in t.Keys.Where(k => !known.Contains(k) && ProgramForms.HasForm(ProgramOptions.Sap2000, k)).ToList())
+        {
+            known.Add(name);
+            var full = ProgramForms.Catalog(ProgramOptions.Sap2000).Keys.First(k => k.Equals(name, StringComparison.OrdinalIgnoreCase));
+            var formFields = ProgramForms.Fields(ProgramOptions.Sap2000, full);
+            var formRow = (t[name].FirstOrDefault() ?? []).Where(fkv => fkv.Value.Length > 0 && formFields.Exists(ff => ff.Key.Equals(fkv.Key, StringComparison.OrdinalIgnoreCase)))
+                .ToDictionary(fkv => formFields.First(ff => ff.Key.Equals(fkv.Key, StringComparison.OrdinalIgnoreCase)).Key, fkv => fkv.Value, StringComparer.Ordinal);
+            if (formRow.Count == 0) continue;
+            m.DefinitionTables ??= new(StringComparer.OrdinalIgnoreCase);
+            m.DefinitionTables[full] = [formRow];
         }
         // A table the Modeler has no form for is kept as the file has it, and goes back into the .s2k.
         foreach (var name in t.Keys.Where(k => !known.Contains(k)).OrderBy(k => k, StringComparer.Ordinal))
@@ -462,10 +480,27 @@ public static partial class S2kReader
             try { PropertyDefs.SetReleases(a, keys.Where(k => Yes(r, k.Item1 + "I")).Select(k => k.Item2).ToList(), keys.Where(k => Yes(r, k.Item1 + "J")).Select(k => k.Item2).ToList()); }
             catch (ArgumentException ex) { notes.Add($"Frame {S(r, "Frame")}: {ex.Message}"); }
         }
+        foreach (var r in use("FRAME RELEASE ASSIGNMENTS 2 - PARTIAL FIXITY"))
+        {
+            if (Of(r) is not { } a) continue;
+            var pfSprings = new[] { "I", "J" }.SelectMany(pfEnd => PropertyDefs.Releases.Select(pfDof => pfDof + pfEnd)).ToDictionary(pfKey => pfKey, pfKey => D(r, pfKey), StringComparer.Ordinal);
+            PropertyDefs.SetPartialFixity(a, pfSprings);
+        }
         foreach (var r in use("FRAME LOCAL AXES ASSIGNMENTS 1 - TYPICAL"))
             if (Of(r) is { } a && D(r, "Angle") != 0) PropertyDefs.Put(a.Extra, "ANG", Number(D(r, "Angle")));
         foreach (var r in use("FRAME INSERTION POINT ASSIGNMENTS"))
-            if (Of(r) is { } a && Cardinal(S(r, "CardinalPt")) is { } cp) { PropertyDefs.Remove(a.Extra, "CARDINALPT"); if (cp != "10") a.Extra.Insert(0, ["CARDINALPT", cp]); }
+        {
+            if (Of(r) is not { } a) continue;
+            if (Cardinal(S(r, "CardinalPt")) is { } cp) { PropertyDefs.Remove(a.Extra, "CARDINALPT"); if (cp != "10") a.Extra.Insert(0, ["CARDINALPT", cp]); }
+            // Mirror, joint offsets and the stiffness transform, kept as ETABS's insertion point row when any is not the default.
+            var ipRow = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var (ipFrom, ipTo) in new[] { ("JtOffsetXI", "XI"), ("JtOffsetYI", "YI"), ("JtOffsetZI", "ZI"), ("JtOffsetXJ", "XJ"), ("JtOffsetYJ", "YJ"), ("JtOffsetZJ", "ZJ") })
+                if (D(r, ipFrom) != 0) ipRow[ipTo] = Number(D(r, ipFrom));
+            if (Yes(r, "Mirror2")) ipRow["Mirror2"] = "Yes";
+            if (Yes(r, "Mirror3")) ipRow["Mirror3"] = "Yes";
+            if (S(r, "Transform").Equals("No", StringComparison.OrdinalIgnoreCase)) ipRow["NoTransform"] = "Yes";
+            if (ipRow.Count > 0) { ipRow["OffsetCSys"] = S(r, "CoordSys").Equals("GLOBAL", StringComparison.OrdinalIgnoreCase) ? "Global" : "Local"; AssignTables.Set(a, new Dictionary<string, List<Dictionary<string, string>>> { [AssignTables.Insertion] = [ipRow] }); }
+        }
         foreach (var r in use("FRAME OFFSET ALONG LENGTH ASSIGNMENTS"))
         {
             if (Of(r) is not { } a) continue;

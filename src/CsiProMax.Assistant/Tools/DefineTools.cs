@@ -37,11 +37,76 @@ public static class DefineTools
             "Define items kept as rows of the program's own definition tables (definition_data lists every table and its fields): generalized displacements, shell uniform load sets, auto construction sequence, walking vibrations, panel zone properties, frame release definitions, slab and wall layers, wall auto select lists and every hinge definition. Sets the rows of one definition by name; rows [] deletes it.",
             """{"type":"object","required":["table","name","rows"],"properties":{"table":{"type":"string"},"name":{"type":"string"},"rows":{"type":"array","items":{"type":"object"}}}}""",
             Ask.Changes, TableRows, a => $"{a.Text("table")}: {a.Text("name")}"),
+        new("program_forms",
+            "Analyze and Design menu forms of the model's program, with the program's own items: each design (Steel Frame, Concrete Frame, Composite Beam, Shear Wall, Concrete Slab, ...) with its code and the codes it has, and the Analyze options (active degrees of freedom, SAPFire solver, mesh settings, nonlinear hinges, cracking). With 'table' it gives that form's items (field, the name the program shows, value; blank = the program's default). With 'code' it gives the preferences form of that design's code.",
+            """{"type":"object","properties":{"table":{"type":"string"},"design":{"type":"string"},"code":{"type":"string"}}}""",
+            Ask.Never, Forms),
+        new("set_program_form",
+            "Sets a form of the Analyze or Design menu (program_forms lists them): 'design' with 'code' sets that design's code (Design > ... > View/Revise Preferences, Design Code); 'table' with 'values' (item by field or by the name the program shows; blank = the program's default) sets that form's items, e.g. a design code's preferences or Analyze > Set Active Degrees of Freedom.",
+            """{"type":"object","properties":{"design":{"type":"string"},"code":{"type":"string"},"table":{"type":"string"},"values":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}}}}""",
+            Ask.Changes, SetForm, a => a.Text("table") is { Length: > 0 } t ? t : $"{a.Text("design")} design code {a.Text("code")}"),
         new("definition_data",
             "Reads the Define items above: rebar sizes, each concrete section's rebar, the definition tables with their fields, and the rows the model has.",
             """{"type":"object","properties":{}}""",
             Ask.Never, Read),
     ];
+
+    private static JsonObject FormJson(StructuralModel m, string table) => new()
+    {
+        ["table"] = table,
+        ["items"] = new JsonArray(ProgramForms.Values(m, table).Select(v => (JsonNode)new JsonObject { ["field"] = v.Field.Key, ["name"] = v.Field.Label, ["value"] = v.Value }).ToArray()),
+    };
+
+    private static JsonNode Forms(JsonElement a, ICsiLink e)
+    {
+        var m = Offline(e).Model;
+        if (a.Text("table") is { Length: > 0 } table) return Core(() => FormJson(m, table));
+        if (a.Text("design") is { Length: > 0 } kind)
+        {
+            var d = Core(() => ProgramForms.Design(m.Target, kind));
+            var code = a.Text("code") is { Length: > 0 } c ? c : ProgramForms.Code(m, kind);
+            if (code.Length == 0) code = ProgramForms.Codes(m.Target, kind).FirstOrDefault() ?? "";
+            return Core(() => FormJson(m, d.TablePrefix + code));
+        }
+        return new JsonObject
+        {
+            ["designs"] = new JsonArray(ProgramForms.Designs(m.Target).Select(d => (JsonNode)new JsonObject
+            {
+                ["design"] = d.Kind, ["name"] = d.Name, ["code"] = ProgramForms.Code(m, d.Kind), ["table_prefix"] = d.TablePrefix,
+                ["codes"] = new JsonArray(ProgramForms.Codes(m.Target, d.Kind).Select(c => (JsonNode)c).ToArray()),
+            }).ToArray()),
+            ["analysis"] = new JsonArray(ProgramForms.AnalysisForms(m.Target).Select(f => (JsonNode)new JsonObject { ["item"] = f.Item, ["table"] = f.Table, ["set"] = ProgramForms.Values(m, f.Table).Count(v => v.Value.Length > 0) }).ToArray()),
+        };
+    }
+
+    private static JsonNode SetForm(JsonElement a, ICsiLink e)
+    {
+        var link = Offline(e);
+        var table = a.Text("table") ?? "";
+        var kind = a.Text("design") ?? "";
+        var code = a.Text("code") ?? "";
+        if (table.Length == 0 && (kind.Length == 0 || code.Length == 0)) throw new ToolInputException("Give 'table' with 'values', or 'design' with 'code'.");
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (a.TryGetProperty("values", out var v) && v.ValueKind == JsonValueKind.Object)
+            foreach (var p in v.EnumerateObject())
+                values[p.Name] = p.Value.ValueKind switch { JsonValueKind.String => p.Value.GetString() ?? "", JsonValueKind.True => "Yes", JsonValueKind.False => "No", _ => p.Value.ToString() };
+        if (table.Length > 0 && values.Count == 0) throw new ToolInputException("Give the form's 'values'.");
+        // Checked whole on a copy first: a refusal leaves the model as it was.
+        Core(() =>
+        {
+            var copy = ModelFile.FromJson(ModelFile.ToJson(link.Model));
+            if (kind.Length > 0 && code.Length > 0) ProgramForms.SetCode(copy, kind, code);
+            if (table.Length > 0) ProgramForms.Set(copy, table, values);
+            return 0;
+        });
+        return Core(() => link.Edit(m =>
+        {
+            var o = new JsonObject();
+            if (kind.Length > 0 && code.Length > 0) { ProgramForms.SetCode(m, kind, code); o["design"] = kind; o["code"] = ProgramForms.Code(m, kind); }
+            if (table.Length > 0) { ProgramForms.Set(m, table, values); o["form"] = FormJson(m, table); }
+            return (JsonNode)o;
+        }));
+    }
 
     private static JsonNode RebarSize(JsonElement a, ICsiLink e)
     {

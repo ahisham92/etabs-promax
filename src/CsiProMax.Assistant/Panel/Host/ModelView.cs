@@ -56,8 +56,13 @@ internal static class ModelView
             var form = root.ValueKind == System.Text.Json.JsonValueKind.Object && (root.TryGetProperty("analyse", out _) || root.TryGetProperty("kinds", out _));
             var analyse = !form || Flag("analyse");
             List<string> kinds = Texts("kinds"), selected = Texts("selected");
+            // The Run form's "Keep the program open after the run": used for this run and kept as Settings > Runs.
+            bool? keepOpen = root.ValueKind == System.Text.Json.JsonValueKind.Object && root.TryGetProperty("keep_open", out var ko) && ko.ValueKind is System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False ? ko.GetBoolean() : null;
+            if (keepOpen is bool kv)
+                try { var st = CsiProMax.Settings.AgentSettings.Load(); if (st.KeepProgramOpenAfterRun != kv) { st.KeepProgramOpenAfterRun = kv; st.Save(); } }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
             answer = await App.Dispatcher.InvokeAsync(app => app.Link is OfflineEtabs offline
-                ? form ? EngineRun.Start(offline, analyse, kinds, selected: selected) : EngineRun.Start(offline, design)
+                ? form ? EngineRun.Start(offline, analyse, kinds, selected: selected, keepOpen: keepOpen) : EngineRun.Start(offline, design)
                 : new JsonObject { ["ok"] = false, ["error"] = "Run is the Engine's own: in a CSI program, run the analysis there." }).ConfigureAwait(false);
         }
         return (Encoding.UTF8.GetBytes(answer.ToJsonString()), "application/json");
