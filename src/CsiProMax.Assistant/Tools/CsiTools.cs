@@ -1148,6 +1148,8 @@ public static class CsiTools
             try { Call(e, what, "File.OpenFile", D(("FileName", path))); }
             catch (EtabsException) { throw new EtabsException(first.Message + " It said no again from an empty model."); }
         }
+        try { e.Raw("use the model's own units", m => { CsiProMax.Assistant.Etabs.EditableTables.PresentAsDatabase(m); return (object?)null; }); }
+        catch (Exception ex) when (ex is EtabsException or InvalidOperationException or NotSupportedException) { /* the units stay as they are */ }
     }
 
     private static JsonNode RestoreCheckpoint(JsonElement a, ICsiLink e)

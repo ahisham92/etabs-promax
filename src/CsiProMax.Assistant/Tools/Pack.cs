@@ -61,6 +61,20 @@ public static class Pack
         return rows;
     }
 
+    /// <summary>
+    /// A file each table's name is written to just before it is read, when set (the field test sets it in its work
+    /// folder): SAP2000 26.3 crashed in the middle of writing the pack (0.4.59 full test, heap corruption in ntdll), and
+    /// the file says which table it was reading.
+    /// </summary>
+    public static string? TraceFile { get; set; }
+
+    private static void Trace(ICsiLink e, string table)
+    {
+        if (TraceFile is not { Length: > 0 } file) return;
+        try { File.AppendAllText(file, $"{DateTime.Now:HH:mm:ss.fff} {e.Program.Name} {table}{Environment.NewLine}"); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* only a trace */ }
+    }
+
     public sealed record Built(byte[] Zip, JsonObject Content, int Frames, int Areas, IReadOnlyList<string> Tables, IReadOnlyList<string> Notes);
 
     /// <param name="extraTables">More tables to take, by name or key (for example "Element Forces - Beams").</param>
@@ -123,6 +137,7 @@ public static class Pack
         foreach (var t in wanted.DistinctBy(t => t.Key))
         {
             TableData data;
+            Trace(e, t.Key);
             try { data = e.ReadTable(t.Key, cases, combos); }
             catch (EtabsException ex) { notes.Add($"'{t.Name}' could not be read ({ex.Message})."); continue; }
             if (data.Rows.Count == 0) continue;
@@ -174,6 +189,7 @@ public static class Pack
             var kind = PackTables.Kind(t) ?? "result";
             if (budget[kind] <= 0) { left.Add((JsonNode)t.Name); continue; }
             TableData data;
+            Trace(e, t.Key);
             try { data = e.ReadTable(t.Key, cases, combos); }
             catch (EtabsException ex) { notes.Add($"'{t.Name}' could not be read ({ex.Message})."); continue; }
             if (data.Rows.Count == 0) continue;

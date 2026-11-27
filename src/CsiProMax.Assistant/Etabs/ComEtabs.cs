@@ -286,6 +286,9 @@ public sealed class ComEtabs : ICsiLink, IDisposable
             ref angle, ref o1x, ref o2x, ref o1y, ref o2y, ref o1z, ref o2z, ref cardinal, "Global"), "list the frames");
         var rows = new List<FrameRow>(n);
         for (var i = 0; i < n; i++)
+            // A null line (section "None", which the API answers as "") is no frame: ETABS 23 listed the Modeler's slab
+            // line release line CPM-LR as frame 72 with no section (0.4.59 full field test).
+            if (!IsNullLine(sections[i]))
             rows.Add(new FrameRow(names[i], sections[i], stories[i], EtabsWords.FrameKind(x1[i], y1[i], z1[i], x2[i], y2[i], z2[i]), x1[i], y1[i], z1[i], x2[i], y2[i], z2[i]));
         return (IReadOnlyList<FrameRow>)rows;
     });
@@ -315,6 +318,9 @@ public sealed class ComEtabs : ICsiLink, IDisposable
         }
         return (IReadOnlyList<AreaRow>)rows;
     });
+
+    /// <summary>A line object with no section: ETABS's null line ("None", answered as "" by GetAllFrames).</summary>
+    internal static bool IsNullLine(string? section) => string.IsNullOrWhiteSpace(section) || section.Trim().Equals("None", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Whether the program marks the area an opening (AreaObj.GetOpening); a program without the call has none.</summary>
     private static bool IsOpening(dynamic m, string name)
@@ -488,7 +494,9 @@ public sealed class ComEtabs : ICsiLink, IDisposable
             if (available != 0) throw new EtabsException($"{program} refused to list the tables (GetAllTables answered {all}, GetAvailableTables {available}).");
         }
         keys ??= None; names ??= None; empty ??= []; import ??= [];
-        n = Math.Min(n, Math.Min(keys.Length, names.Length));
+        // The arrays are what the program filled; a count below them is not trusted (ETABS 23 listed no table from
+        // "Story Definitions" on in the 0.4.59 full test, although it reads it).
+        n = keys.Length == names.Length ? keys.Length : Math.Min(n, Math.Min(keys.Length, names.Length));
         return Enumerable.Range(0, n).Select(i => new TableName(keys[i], names[i], i < empty.Length && empty[i], i < import.Length ? import[i] : -1)).ToList();
     }
 

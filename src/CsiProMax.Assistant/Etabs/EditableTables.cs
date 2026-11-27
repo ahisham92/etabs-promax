@@ -164,6 +164,13 @@ public static class EditableTables
                 // A field blank in every row is left out too: ETABS 23 skipped the Modeler's joint mass row for its blank
                 // MMI X ("Field name: MMI X ... Error reading field; record skipped", 0.4.57 full test). Blank means the
                 // program's default, which leaving the field out gives as well.
+                // A field the table's own field list does not name is left out as well: ETABS 23 lists Story, Label,
+                // UniqueName, MassXY and MassZ for 'Joint Assignments - Additional Mass' but its edit array carries MMIX,
+                // MMIY and MMIZ, and refused the row at MMI X however they were filled (0.4.57 and 0.4.59 full tests).
+                if (e.Program.Key == CsiProgram.Etabs.Key && keys.Length > 0)
+                    foreach (var i in Enumerable.Range(0, fields.Length).Where(i => !keyFields.Contains(fields[i], StringComparer.OrdinalIgnoreCase)
+                                 && !keys.Any(k => string.Equals(k, fields[i], StringComparison.OrdinalIgnoreCase))))
+                        drop.Add(i);
                 if (e.Program.Key == CsiProgram.Etabs.Key)
                 foreach (var i in Enumerable.Range(0, fields.Length).Where(i => !keyFields.Contains(fields[i], StringComparer.OrdinalIgnoreCase)
                              && !fields[i].Equals("UniqueName", StringComparison.OrdinalIgnoreCase) && kept.Count > 0 && kept.All(r => i < r.Length && r[i].Trim().Length == 0)))
@@ -202,6 +209,23 @@ public static class EditableTables
                 throw;
             }
         })!;
+    }
+
+    /// <summary>
+    /// Makes the present units the model's own (its database units) after a file is opened: ETABS 23 kept its start-up
+    /// lb, in, F as the present units after opening the Modeler's kN, m .e2k (0.4.57 and 0.4.59 full tests,
+    /// get_model_context), and every tool after reads and writes in the present units.
+    /// </summary>
+    internal static void PresentAsDatabase(dynamic m)
+    {
+        try
+        {
+            object database = m.GetDatabaseUnits();
+            if (Convert.ToInt32(database) <= 0) return;
+            object now = m.GetPresentUnits();
+            if (Convert.ToInt32(now) != Convert.ToInt32(database)) m.SetPresentUnits(database);
+        }
+        catch (Exception ex) when (ex is not System.Runtime.InteropServices.COMException) { /* a program without the calls keeps its units */ }
     }
 
     /// <summary>The program's present units (its eUnits value), or null when it does not say.</summary>

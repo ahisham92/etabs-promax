@@ -1198,6 +1198,19 @@ static class TesterBugTests
             Check(!ScratchProgram.IsLeftCopy(["ETABS Plus v23.2.0 - cpm-field-test-400277", "License"]), "a copy showing a licence message would be closed");
             Check(!ScratchProgram.IsLeftCopy([]) && !ScratchProgram.IsLeftCopy([""]) && !ScratchProgram.IsLeftCopy(["Select Stories for Slab Design"]), "a process with no scratch model would be closed");
             Check(!ScratchProgram.IsLeftCopy(["ETABS Plus v23.2.0 - cpm-field-test"]), "the Modeler's own model name is taken for a scratch copy");
+            // 0.4.58/0.4.59: copies left on ETABS's "Log", its file picker or its reiterate question are ended by the next run;
+            // one opening the Modeler's own file is ended only when the test itself started that process.
+            Check(ScratchProgram.IsLeftCopy(["ETABS Plus v23.2.0 - cpm-field-test-256eaf", "Log"]) && ScratchProgram.IsLeftCopy(["SAP2000 26.3.0 Ultimate - cpm-field-test-3795ee", "Open Model File"]), "a leftover on the Log window or the file picker is not known");
+            Check(ScratchProgram.IsOwnLeftCopy(["ETABS Plus v23.2.0 - cpm-field-test", "Log"]) && !ScratchProgram.IsOwnLeftCopy(["ETABS Plus v23.2.0 - Tower A"]) && !ScratchProgram.IsOwnLeftCopy(["ETABS Plus v23.2.0 - cpm-field-test", "License Error"]), "the test's own started copy is told apart, never an engineer's model or a licence message");
+            var t0 = new DateTime(2026, 11, 27, 1, 16, 0, DateTimeKind.Utc);
+            Check(ScratchProgram.Started(51208, t0, [$"51208|{t0.Ticks}"]) && !ScratchProgram.Started(51208, t0.AddMinutes(5), [$"51208|{t0.Ticks}"]) && !ScratchProgram.Started(50884, t0, [$"51208|{t0.Ticks}"]), "a process the test started is known by its id and start time, not by its id alone");
+            const string Api = "56164|44064|\"C:\\Program Files\\Computers and Structures\\ETABS 23\\ETABS.exe\" \"{8f0c}\" \"{9a1b}\" \"ETABSv1\" /A";
+            Check(ScratchProgram.OrphanLine(Api, _ => false) == 56164 && ScratchProgram.OrphanLine(Api, _ => true) is null
+                && ScratchProgram.OrphanLine("50884|7012|\"C:\\Program Files\\Computers and Structures\\ETABS 23\\ETABS.exe\"", _ => false) is null,
+                "only a program started through the API whose starter is gone is an orphan, never one started from Explorer");
+            Check(ScratchProgram.IsOrphanedCopy(["ETABS Plus v23.2.0 - (Untitled)  ", "Log"]) && ScratchProgram.IsOrphanedCopy(["SAP2000 v26.3.0 Plus 64-bit - (Untitled)  ", "Open Model File"])
+                && !ScratchProgram.IsOrphanedCopy(["ETABS Plus v23.2.0 - Tower A"]) && !ScratchProgram.IsOrphanedCopy(["ETABS Plus v23.2.0 - (Untitled)", "License Manager"]),
+                "an orphaned copy on an empty model and the test's own boxes may end; a named model or a licence message never");
             var runner = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/FieldTest.cs"));
             Check(runner.IndexOf("o.EndLeftCopies()", StringComparison.Ordinal) is var at and > 0 && at < runner.IndexOf("menus = ToolsMenu.Repair(", StringComparison.Ordinal), "leftovers are not closed before the Tools menu is looked at");
             Check(runner.Contains("Tools > CSI ProMax is still in each program after the test", StringComparison.Ordinal), "the Tools menu is not looked at again after the scratch windows closed");
