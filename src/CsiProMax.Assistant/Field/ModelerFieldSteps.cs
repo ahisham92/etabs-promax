@@ -334,6 +334,12 @@ public static class ModelerFieldSteps
         var target = modeler.Model.Target;
         ctx.Tool("set_model_program", """{"program":"sap2000"}""", a => FieldContext.Expect(modeler.Model.Target == "sap2000" && a["was"]?.GetValue<string>() == CsiProMax.Model.StructuralModel.TargetName(target), "the model is not made for SAP2000 now: " + a.ToJsonString()), "tool set_model_program, to SAP2000");
         ctx.Tool("set_model_program", $$"""{"program":{{Q(target)}}}""", a => FieldContext.Expect(modeler.Model.Target == target, "the model's program did not come back: " + a.ToJsonString()), "tool set_model_program, back");
+        // A units change (Ahmed 2026-11-27): the model shown in N, mm, saved in its own units, and back exactly.
+        var ownText = CsiProMax.E2k.E2kWriter.Write(modeler.Model);
+        var ownLength = modeler.Model.Units.Length;
+        var height = modeler.Model.Stories.Count > 1 ? modeler.Model.Stories[1].Height : 0;
+        ctx.Tool("set_display_units", """{"force":"N","length":"mm","temperature":"C"}""", a => FieldContext.Expect(modeler.Model.Units.Length == "mm" && modeler.SavedUnits is not null && (height == 0 || Math.Abs(modeler.Model.Stories[1].Height - height * CsiProMax.Model.ModelUnits.Factor(CsiProMax.Model.ModelUnits.Dim.Len, new CsiProMax.Model.Units { Force = "N", Length = ownLength }, new CsiProMax.Model.Units { Force = "N", Length = "mm" })) < 1e-6 * Math.Max(1, Math.Abs(modeler.Model.Stories[1].Height))), "the model is not shown in N, mm: " + a.ToJsonString()), "tool set_display_units, N mm");
+        ctx.Tool("set_display_units", """{"own":true}""", a => FieldContext.Expect(modeler.SavedUnits is null && Same(CsiProMax.E2k.E2kWriter.Write(modeler.Model), ownText), "back in its own units the model is not as it was: " + a.ToJsonString()), "tool set_display_units, back");
         var stories = modeler.Model.Stories.Skip(1).Select(x => $$"""{"name":{{Q(x.Name)}},"height":{{CsiProMax.E2k.E2kText.Number(x.Height)}},"was":{{Q(x.Name)}}}""");
         var frames = modeler.Frames().Count;
         ctx.Tool("define_stories", $$"""{"stories":[{{string.Join(",", stories)}}]}""", a => FieldContext.Expect(modeler.Frames().Count == frames, $"the story data was sent back as it is, and {frames - modeler.Frames().Count} objects went missing"));
@@ -810,4 +816,11 @@ public static class ModelerFieldSteps
     /// <summary>The value of a load as the Modeler keeps it (the number after FVAL); 0 when it has none.</summary>
     private static double Fval(CsiProMax.Model.ObjectLoad load) =>
         CsiProMax.E2k.E2kText.TryNumber(CsiProMax.E2k.E2kText.Value(load.Tokens, "FVAL"), out var value) ? value : 0;
+
+    // Two .e2k texts the same but for the line with the time they were written.
+    private static bool Same(string a, string b)
+    {
+        static string Body(string t) => string.Join("\n", t.Split('\n').Where(l => !l.StartsWith("$ File", StringComparison.Ordinal)));
+        return Body(a) == Body(b);
+    }
 }

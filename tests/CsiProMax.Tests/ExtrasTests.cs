@@ -507,6 +507,47 @@ static class ExtrasTests
             Check(CsiProMax.Assistant.ReferenceForms.PathFor("safe", "Units > Show Units Form...")[0] == CsiProMax.Assistant.Etabs.MenuCommand.StatusBar, "SAFE's Units form is not opened from its status bar");
             Check(CsiProMax.Assistant.ModelerCheck.Script.Contains("the units at the bottom right, as ${target} has them", StringComparison.Ordinal), "the window check does not try the units control");
         });
+        yield return ("Ahmed 2026-11-27: a units change shows the whole model in the new units (stories, sections, materials, loads, tables) and it is saved in its own units, exactly as it was", () =>
+        {
+            static string Text(StructuralModel m) => string.Join("\n", E2kWriter.Write(m).Split('\n').Where(l => !l.StartsWith("$ File", StringComparison.Ordinal)));
+            var m = Seed.Etabs23();
+            m.LineLoads.Add(new LineLoad { Object = "B1", Story = m.Stories[^1].Name, Tokens = ["TYPE", "\"UNIFF\"", "DIR", "\"GRAV\"", "LC", "\"Dead\"", "FVAL", "10"] });
+            m.PointLoads.Add(new PointLoad { Object = "1", Story = m.Stories[^1].Name, Tokens = ["TYPE", "\"FORCE\"", "LC", "\"Dead\"", "FX", "5", "MZ", "2"] });
+            (m.DefinitionTables ??= [])["Deck Property Definitions"] = [new() { ["Name"] = "D1", ["SlabDepth"] = "0.1", ["DeckUnitWt"] = "0.11", ["Notes"] = "12" }];
+            var before = Text(m);
+            var mm = ModelUnits.Convert(m, new CsiProMax.Model.Units { Force = "N", Length = "mm", Temperature = "C" });
+            Check(mm.Units.Length == "mm" && mm.Units.Force == "N", "the copy is not in N, mm");
+            Check(Math.Abs(mm.Stories[1].Height - m.Stories[1].Height * 1000) < 1e-6, $"a story height {m.Stories[1].Height} m reads {mm.Stories[1].Height} mm");
+            Check(Math.Abs(mm.Grids[1].Coordinate - m.Grids[1].Coordinate * 1000) < 1e-6 && Math.Abs(mm.Points[1].X - m.Points[1].X * 1000) < 1e-6, "grids and points are not in mm");
+            Check(mm.FrameSections.Find(f => f.Name == "ConcCol")!.Number("D") == 375, "a 0.375 m column depth reads " + mm.FrameSections.Find(f => f.Name == "ConcCol")!.Number("D") + " mm");
+            Check(Math.Abs(mm.Materials.Find(x => x.Name == "C30/37")!.Number("FC")!.Value - 30) < 1e-9, "fc 30000 kN/m2 reads " + mm.Materials.Find(x => x.Name == "C30/37")!.Number("FC") + " N/mm2");
+            Check(Math.Abs(mm.Materials.Find(x => x.Name == "C30/37")!.Number("WEIGHTPERVOLUME")!.Value - 24.992619e-6) < 1e-12, "the unit weight is not in N/mm3");
+            Check(mm.ShellSections.Find(x => x.Name == "Slab1")!.Number("SLABTHICKNESS") == 200, "a 0.2 m slab reads " + mm.ShellSections.Find(x => x.Name == "Slab1")!.Number("SLABTHICKNESS"));
+            Check(E2kText.Value(mm.LineLoads[^1].Tokens, "FVAL") == "10", "a 10 kN/m line load reads " + E2kText.Value(mm.LineLoads[^1].Tokens, "FVAL") + " N/mm");
+            Check(E2kText.Value(mm.PointLoads[^1].Tokens, "FX") == "5000" && E2kText.Value(mm.PointLoads[^1].Tokens, "MZ") == "2000000", "a point load of 5 kN and 2 kN-m does not read 5000 N and 2000000 N-mm");
+            Check(mm.AreaLoads.Count == 0 || E2kText.Value(mm.AreaLoads[0].Tokens, "FVAL") == (double.Parse(E2kText.Value(m.AreaLoads[0].Tokens, "FVAL")!, System.Globalization.CultureInfo.InvariantCulture) * 0.001).ToString("G15", System.Globalization.CultureInfo.InvariantCulture), "an area load in kN/m2 does not read in N/mm2");
+            var deck = mm.DefinitionTables!["Deck Property Definitions"][0];
+            Check(deck["SlabDepth"] == "100" && deck["Notes"] == "12" && deck["Name"] == "D1", "a table's lengths are not in mm, or its words changed");
+            Check(mm.Passthrough.SelectMany(r => r.Lines).Any(l => l.Contains("REBARDEFINITION  \"12\"  AREA  113.099995", StringComparison.Ordinal)), "the rebar sizes are not in mm2: " + string.Join(" | ", mm.Passthrough.SelectMany(r => r.Lines).Where(l => l.Contains("\"12\"", StringComparison.Ordinal))));
+            var kip = ModelUnits.Convert(m, new CsiProMax.Model.Units { Force = "kip", Length = "ft", Temperature = "C" });
+            var fahrenheit = ModelUnits.Convert(m, new CsiProMax.Model.Units { Force = "kip", Length = "ft", Temperature = "F" });
+            Check(Math.Abs(fahrenheit.Materials.Find(x => x.Name == "S355")!.Number("A")!.Value - m.Materials.Find(x => x.Name == "S355")!.Number("A")!.Value * 5 / 9) < 1e-15, "the thermal coefficient per degree F is wrong");
+            Check(Math.Abs(kip.Materials.Find(x => x.Name == "C30/37")!.Number("FC")!.Value - 30000 / 4.4482216152605 * 0.3048 * 0.3048) < 1e-6, "fc in kip/ft2 is wrong");
+            Check(Text(ModelUnits.Convert(mm, m.Units)) == before && Text(ModelUnits.Convert(kip, m.Units)) == before, "the model is not the same after going to N, mm (or kip, ft) and back");
+            Check(Text(m) == before, "converting changed the model it was given");
+            // The Modeler: shown in mm, saved in m, back to m exactly.
+            var o = new OfflineEtabs(ModelFile.FromJson(ModelFile.ToJson(m)));
+            o.ShowIn(new CsiProMax.Model.Units { Force = "kN", Length = "mm", Temperature = "C" });
+            Check(o.Model.Units.Length == "mm" && o.SavedUnits is { Length: "M" } && Math.Abs(o.Model.Stories[1].Height - m.Stories[1].Height * 1000) < 1e-6, "the Modeler does not show its model in mm with its own units kept");
+            Check(Text(o.ForSave) == before, "the Modeler does not save its model in its own units");
+            o.ShowIn(null);
+            Check(o.SavedUnits is null && Text(o.Model) == before, "back to its own units the model is not as it was");
+            var tools = HandModel.Tools;
+            Check(tools.ContainsKey("set_display_units") && tools["set_display_units"].Ask == Ask.Never, "the window cannot change the units shown (set_display_units)");
+            var html = File.ReadAllText(Path.Combine(SourceText.Root(), "src", "CsiProMax.Viewer", "viewer.html"));
+            foreach (var marker in new[] { "hmRun(\"set_display_units\"", "function convertTables(tables, from, to)", "!engine.unitsOnly", "man.saved_units" })
+                Check(html.Contains(marker, StringComparison.Ordinal), "the page does not show everything in the new units: " + marker);
+        });
         yield return ("Ahmed 2026-11-27: Design > View/Revise Overwrites is each code's overwrite table of the program (ETABS 23.2, SAP2000 26.3), the selected frames' rows; SAP2000's go into its .s2k and come back", () =>
         {
             Check(ProgramForms.OverwriteTables("etabs", "steel", "AISC 360-16").SequenceEqual(["Steel Frame Design Overwrites - AISC 360-16"]), "ETABS's steel overwrites: " + string.Join(", ", ProgramForms.OverwriteTables("etabs", "steel", "AISC 360-16")));

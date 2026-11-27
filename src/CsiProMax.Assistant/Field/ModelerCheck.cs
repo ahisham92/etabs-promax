@@ -491,14 +491,21 @@ public static class ModelerCheck
             if (typeof forProgram === "function" && program !== target) { await hmRun("set_model_program", {program: target}, true); for (let i = 0; i < 30 && program !== target; i++) { if (window.cpmPull) await window.cpmPull(); await wait(200); } }
             const b = document.getElementById("units"), s = document.getElementById("unitsSap");
             if (!b || !s) return {fail: "the footer has no units control"};
-            const coords = () => document.getElementById("coords").textContent;
+            const len = () => String(lu()).toLowerCase(), until = async want => { for (let i = 0; i < 40 && len() !== want; i++) { if (window.cpmPull) await window.cpmPull(); await wait(150); } return len(); };
+            const own = len(), height = () => { const d = hm.defs || {}; const st = (d.stories || []).find(x => +x.height > 0); return st ? +st.height : NaN; };
+            // A units change shows the model itself in them (Ahmed 2026-11-27): a story height in m reads 1000 times more in mm, and back.
+            await hmDefs(); const h0 = height();
             if (target === "sap2000") {
               if (!b.hidden || s.hidden) return {fail: "SAP2000's units drop-down is not the one shown"};
               const opts = [...s.options].map(o => o.textContent);
               if (opts.length < 16 || !opts.includes("KN, m, C") || !opts.includes("lb, in, F")) return {fail: "the drop-down lists " + opts.join(" / ")};
-              s.value = String(opts.indexOf("KN, mm, C")); s.dispatchEvent(new Event("change")); await wait(200);
-              const shown = lu(); setDispUnits(null); await wait(100);
-              return shown === "mm" ? {ok: opts.length + " unit sets; KN, mm, C picked, then back to the model's"} : {fail: "picking KN, mm, C shows " + shown};
+              s.value = String(opts.indexOf("KN, mm, C")); s.dispatchEvent(new Event("change"));
+              const mm = await until("mm"); await hmDefs(); const h1 = height();
+              setDispUnits(null); const back = await until(own); await hmDefs(); const h2 = height();
+              if (mm !== "mm") return {fail: "picking KN, mm, C shows " + mm};
+              if (own === "m" && isFinite(h0) && Math.abs(h1 - h0 * 1000) > 1e-6 * Math.abs(h1)) return {fail: `a story height of ${h0} m reads ${h1} in mm`};
+              if (back !== own || isFinite(h0) && Math.abs(h2 - h0) > 1e-9 * Math.abs(h0)) return {fail: `back in the model's units it reads ${h2} ${back}, it was ${h0} ${own}`};
+              return {ok: opts.length + " unit sets; KN, mm, C shows the model in mm (story height " + h0 + " -> " + h1 + "), then back to the model's"};
             }
             if (b.hidden || !s.hidden) return {fail: "the Units... button is not the one shown"};
             b.click(); await wait(200);
@@ -506,12 +513,17 @@ public static class ModelerCheck
             const want = ["U.S. Defaults", "Metric SI Defaults", "Metric MKS Defaults", "Consistent Units...", "Show Units Form..."];
             const missing = want.filter(w => !words.includes(w));
             if (missing.length) return {fail: "the Units... menu lacks " + missing.join(", ")};
-            [...menu.children].find(x => x.textContent === "U.S. Defaults").click(); await wait(200);
-            const us = lu(); act("u:consistent"); await wait(200);
+            [...menu.children].find(x => x.textContent === "U.S. Defaults").click();
+            const us = await until("ft");
+            act("u:consistent"); await wait(200);
             const f = document.querySelector(".dlg #cuL"); if (!f) return {fail: "Consistent Units... opened no form"};
-            f.value = "mm"; formOk("OK"); await wait(200);
-            const mm = lu(); setDispUnits(null); await wait(100);
-            return us === "ft" && mm === "mm" ? {ok: "the menu's five items; U.S. Defaults reads out in ft, Consistent Units in mm, then back to the model's"} : {fail: `U.S. Defaults read out in ${us}, Consistent Units in ${mm}`};
+            f.value = "mm"; document.querySelector(".dlg #cuF").value = "kN"; formOk("OK");
+            const mm = await until("mm"); await hmDefs(); const h1 = height();
+            setDispUnits(null); const back = await until(own); await hmDefs(); const h2 = height();
+            if (us !== "ft" || mm !== "mm") return {fail: `U.S. Defaults shows the model in ${us}, Consistent Units in ${mm}`};
+            if (own === "m" && isFinite(h0) && Math.abs(h1 - h0 * 1000) > 1e-6 * Math.abs(h1)) return {fail: `a story height of ${h0} m reads ${h1} in mm`};
+            if (back !== own || isFinite(h0) && Math.abs(h2 - h0) > 1e-9 * Math.abs(h0)) return {fail: `back in the model's units it reads ${h2} ${back}, it was ${h0} ${own}`};
+            return {ok: "the menu's five items; U.S. Defaults shows the model in ft, Consistent Units in mm (story height " + h0 + " -> " + h1 + "), then back to the model's"};
           });
           if (target !== "sap2000") window.cpmForms.push({path: "Units > Consistent Units...", act: "u:consistent", target}, {path: "Units > Show Units Form...", act: "u:form", target});
         }
