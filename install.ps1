@@ -430,6 +430,27 @@ function Install-CsiProMax {
         }
         if ($pluginVersions.Count -gt 0) { Say "  Tools-menu plug-ins now in the folder: $($pluginVersions -join ', ')." 'Green' }
 
+        # 2a. Downloaded copies older than what was just installed are retired. A plug-in already loaded in an open ETABS,
+        # SAP2000 or SAFE starts the newest copy in versions\ (Launcher.NewestApp, Newest.Hand) and never looks at what
+        # this line put in the folder: on Ahmed's PC on 2026-11-27, v0.4.67-test1 was installed while ETABS was open, and
+        # Tools > CSI ProMax still opened versions\0.4.65. A copy in use cannot be renamed and is left as it is.
+        if ($onWindows -and $env:LOCALAPPDATA) {
+            $versionsRoot = Join-Path $env:LOCALAPPDATA 'CsiProMax\versions'
+            $installedVersion = $null
+            try { $installedVersion = [Version](([string](Get-Item -LiteralPath (Join-Path $Folder 'CsiProMax.dll')).VersionInfo.ProductVersion -replace '[+-].*$', '')) } catch { }
+            if ($installedVersion -and (Test-Path -LiteralPath $versionsRoot -PathType Container)) {
+                $retired = @()
+                foreach ($old in (Get-ChildItem -LiteralPath $versionsRoot -Directory)) {
+                    $named = $null
+                    if (-not [Version]::TryParse($old.Name, [ref]$named)) { continue }
+                    if ([Version]::new($named.Major, $named.Minor, [Math]::Max($named.Build, 0)) -ge $installedVersion) { continue }
+                    try { Rename-Item -LiteralPath $old.FullName -NewName ($old.Name + '.del') -ErrorAction Stop; $retired += $old.Name } catch { }
+                }
+                foreach ($gone in (Get-ChildItem -LiteralPath $versionsRoot -Directory -Filter '*.del')) { try { Remove-Item -LiteralPath $gone.FullName -Recurse -Force -ErrorAction Stop } catch { } }
+                if ($retired.Count -gt 0) { Say "  Older downloaded copies retired ($($retired -join ', ')), so an open program's Tools menu opens $versionText." }
+            }
+        }
+
         # 2b. With the AI chat or without it: one word in a file every version of CSI ProMax reads (AiMode).
         if (-not $AiFile) {
             $local = $env:LOCALAPPDATA

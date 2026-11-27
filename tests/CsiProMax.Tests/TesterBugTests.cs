@@ -771,6 +771,15 @@ static class TesterBugTests
             var scratch = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Field/ScratchProgram.cs"));
             Check(scratch.Contains("if (text is not null && !_pinpointing) Pinpoint(ctx, program, text);", StringComparison.Ordinal), "a failed reopen of a converted .s2k is not pinpointed");
         });
+        yield return ("install line: downloaded copies older than the installed version are retired, so an open program's Tools menu opens the installed one (2026-11-27, v0.4.67-test1)", () =>
+        {
+            var install = File.ReadAllText(Path.Combine(SourceText.Root(), "install.ps1"));
+            var at = install.IndexOf("# 2a. Downloaded copies older than what was just installed are retired", StringComparison.Ordinal);
+            Check(at > 0 && at < install.IndexOf("# 2b. With the AI chat", StringComparison.Ordinal) && at > install.IndexOf("files added or replaced", StringComparison.Ordinal), "the retire step is not after the copy into the folder");
+            var step = install[at..install.IndexOf("# 2b. With the AI chat", StringComparison.Ordinal)];
+            Check(step.Contains("-ge $installedVersion) { continue }", StringComparison.Ordinal) && step.Contains("Rename-Item", StringComparison.Ordinal) && step.Contains("'.del'", StringComparison.Ordinal) && !step.Contains("-Force -Recurse -LiteralPath $old", StringComparison.Ordinal),
+                "only older copies are retired, by renaming (a copy in use stays)");
+        });
         yield return ("field test: steps a workaround can test are tested, not left out (Ahmed, 2026-11-26: only a missing program or licence)", () =>
         {
             string Src(string f) => File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant", f));
