@@ -5,7 +5,8 @@ public static class Templates
 {
     /// <summary>
     /// A regular concrete frame building in kN and m: columns on every grid crossing, beams along every grid line,
-    /// one slab per bay, fixed supports, and ETABS's own Dead (self weight plus the superimposed dead load) and Live patterns.
+    /// one slab per bay, fixed supports, and ETABS's own Dead (self weight plus the superimposed dead load) and Live patterns,
+    /// with the mass from the Dead pattern.
     /// <paramref name="xSpans"/> and <paramref name="ySpans"/> are the bay sizes; grids are lettered along X and numbered along Y.
     /// </summary>
     public static StructuralModel ConcreteFrame(string title, double[] xSpans, double[] ySpans, int stories, double storyHeight,
@@ -37,6 +38,10 @@ public static class Templates
                     if (live != 0) m.AddAreaLoad(slab.Label, story, "Live", live);
                 }
         }
+        // The seismic weight takes the superimposed dead load too (ASCE 7 12.7.2, EN 1998-1 3.2.4): the mass from the Dead
+        // pattern (self weight plus the superimposed dead), not from the elements as well, which would count the self
+        // weight twice. With no superimposed dead load ETABS's own default (the elements) stays.
+        if (sdl != 0) new CsiProMax.Lateral.MassSource("MsSrc1", false, true, [("Dead", 1.0)]).WriteTo(m);
         return m;
     }
 

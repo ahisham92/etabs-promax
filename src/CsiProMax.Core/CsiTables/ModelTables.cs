@@ -464,7 +464,7 @@ public static class ModelTables
                     if (x.Fc <= 0 || x.E <= 0) throw new ArgumentException($"{r.Name}, row {x.Row}: Fc and E are above 0.");
                     var material = Find(m.Materials, y => y.Name, x.Name);
                     if (material is not null && !material.IsConcrete) throw new ArgumentException($"{r.Name}, row {x.Row}: '{x.Name}' is a {material.Type} material, not concrete.");
-                    if (material is null) { m.AddConcrete(x.Name, x.Fc, x.E, x.W ?? 25); material = m.Materials[^1]; }
+                    if (material is null) { m.AddConcrete(x.Name, x.Fc, x.E, x.W ?? m.ConcreteUnitWeight()); material = m.Materials[^1]; }
                     Set(material.Lines, "FC", E2kText.Number(x.Fc)); Set(material.Lines, "E", E2kText.Number(x.E));
                     if (x.W is { } w) Set(material.Lines, "WEIGHTPERVOLUME", E2kText.Number(w));
                     if (x.U is { } u) Set(material.Lines, "U", E2kText.Number(u));

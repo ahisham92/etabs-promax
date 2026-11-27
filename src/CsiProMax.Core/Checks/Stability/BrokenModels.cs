@@ -92,6 +92,8 @@ public static class BrokenModels
             foreach (var mat in m.Materials)
                 foreach (var line in mat.Lines)
                     for (var i = 0; i + 1 < line.Count; i++) if (line[i] is "WEIGHTPERVOLUME" or "MASSPERVOLUME") line[i + 1] = "0";
+            // The template takes its mass from the Dead pattern: this sample takes it from the elements only.
+            new CsiProMax.Lateral.MassSource("MsSrc1", true, true, []).WriteTo(m);
             return m;
         }),
         new("combo-missing-case", "A load combination adds a load case that does not exist", "cases", "", () =>

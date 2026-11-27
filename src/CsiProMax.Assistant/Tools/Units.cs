@@ -54,41 +54,15 @@ public static class Units
 /// </summary>
 public static class Spectrum
 {
-    private static readonly double[] SsAt = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5];
-    private static readonly double[] S1At = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6];
+    // The tables are CsiProMax.Lateral.SiteCoefficients', shared with the Modeler's loads so they agree.
+    public static double Fa(string site, double ss) => Site(() => CsiProMax.Lateral.SiteCoefficients.Fa("ASCE 7-16", site, ss));
+    public static double Fv(string site, double s1) => Site(() => CsiProMax.Lateral.SiteCoefficients.Fv("ASCE 7-16", site, s1));
 
-    private static readonly Dictionary<string, double?[]> FaTable = new(StringComparer.OrdinalIgnoreCase)
+    private static double Site(Func<double> look)
     {
-        ["A"] = [0.8, 0.8, 0.8, 0.8, 0.8, 0.8], ["B"] = [0.9, 0.9, 0.9, 0.9, 0.9, 0.9], ["C"] = [1.3, 1.3, 1.2, 1.2, 1.2, 1.2],
-        ["D"] = [1.6, 1.4, 1.2, 1.1, 1.0, 1.0], ["E"] = [2.4, 1.7, 1.3, null, null, null],
-    };
-
-    private static readonly Dictionary<string, double?[]> FvTable = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["A"] = [0.8, 0.8, 0.8, 0.8, 0.8, 0.8], ["B"] = [0.8, 0.8, 0.8, 0.8, 0.8, 0.8], ["C"] = [1.5, 1.5, 1.5, 1.5, 1.5, 1.4],
-        // Site class E from S1 0.2 up as Supplement 1 to ASCE 7-16 gives it back; 11.4.8 then asks for a site-specific
-        // study unless an exception applies (SiteSpecificNote says so).
-        ["D"] = [2.4, 2.2, 2.0, 1.9, 1.8, 1.7], ["E"] = [4.2, 3.3, 2.8, 2.4, 2.2, 2.0],
-    };
-
-    public static double Fa(string site, double ss) => Interpolate(FaTable, SsAt, site, ss, "Fa");
-    public static double Fv(string site, double s1) => Interpolate(FvTable, S1At, site, s1, "Fv");
-
-    private static double Interpolate(Dictionary<string, double?[]> table, double[] at, string site, double value, string what)
-    {
-        if (!table.TryGetValue(site, out var row)) throw new ToolInputException($"The site class is A, B, C, D or E (F needs a site-specific study); give {what} yourself for any other.");
-        if (value <= at[0]) return row[0] ?? throw Needs(site, what);
-        for (var i = 1; i < at.Length; i++)
-            if (value <= at[i])
-            {
-                if (row[i - 1] is not { } lo || row[i] is not { } hi) throw Needs(site, what);
-                return lo + (hi - lo) * (value - at[i - 1]) / (at[i] - at[i - 1]);
-            }
-        return row[^1] ?? throw Needs(site, what);
+        try { return look(); }
+        catch (ArgumentException ex) { throw new ToolInputException(ex.Message); }
     }
-
-    private static ToolInputException Needs(string site, string what) =>
-        new($"ASCE 7-16 gives no {what} for site class {site} at this value (a site-specific study, 11.4.8): give {what.ToLowerInvariant()} yourself.");
 
     /// <summary>
     /// What ASCE 7-16 11.4.8 says about this site, or null: a ground motion hazard analysis is required for site class D

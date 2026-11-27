@@ -147,7 +147,7 @@ public static class CaseTools
             InitialCase = a.Text("initial_case") is { Length: > 0 } i ? i : null,
             MaxModes = a.Whole("max_modes", 12), MinModes = a.Whole("min_modes", 1), ModalCase = a.Text("modal_case", "Modal"),
             ModalCombo = a.Text("modal_combo", "CQC"), DirCombo = a.Text("dir_combo", "SRSS"), Damping = a.Number("damping", 0.05),
-            Eccentricity = a.Number("eccentricity", 0), Steps = a.Whole("steps", 100), StepSize = a.Number("step_size", 0.01), Geometric = a.Text("geometric", "None"),
+            Eccentricity = a.Number("eccentricity", 0.05), Steps = a.Whole("steps", 100), StepSize = a.Number("step_size", 0.01), Geometric = a.Text("geometric", "None"),
         };
         var was = a.Text("was") is { Length: > 0 } w ? w : null;
         return link.Edit(m => Core(() =>

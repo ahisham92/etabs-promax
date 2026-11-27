@@ -207,7 +207,7 @@ public static class ModelerTools
         Fresh(e.Materials(), name, "material");
         double fc = a.Number("fc"), modulus = a.Number("elastic_modulus");
         if (fc <= 0 || modulus <= 0) throw new ToolInputException("fc and elastic_modulus are above 0, in the model's units.");
-        o.Edit(m => m.AddConcrete(name, fc, modulus, a.Number("unit_weight", 25)));
+        o.Edit(m => m.AddConcrete(name, fc, modulus, a.Number("unit_weight", m.ConcreteUnitWeight())));
         return new JsonObject { ["added"] = name };
     }
 
