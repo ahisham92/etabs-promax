@@ -131,12 +131,27 @@ main{flex:1;display:flex;min-height:0}
 /* Floating panels (dragged off their edge, or Window Position > Float): over the views, moved by their caption, sized
    from their corner; dropped near an edge they dock there again. */
 .float{position:fixed!important;z-index:50;box-shadow:var(--shadow);border:1px solid var(--line)!important;resize:both;overflow:hidden;min-width:180px;min-height:140px;max-width:none!important}
-#dock.float{border-top:1px solid var(--line)}#dock.float .grip{display:none}
-#dockHint{position:fixed;z-index:49;background:var(--accent);opacity:.25;pointer-events:none;display:none}
+#dock.float{border-top:1px solid var(--line)}
+#dockHint{position:fixed;z-index:79;background:var(--accent);opacity:.25;pointer-events:none;display:none}
+/* Docked panels (dockTree): splits side by side or stacked with splitters between, groups of panels as tabs (their
+   tabs under them, as Revit's), the views in the middle. A group or split with nothing to show folds away. */
+main{position:relative}
+#dockroot{flex:1;display:flex;min-width:0;min-height:0}#dockroot>*{flex:1 1 0}
+.dsplit{display:flex;min-width:0;min-height:0}.dsplit.dcol{flex-direction:column}
+.dgroup{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--field)}
+.dgone{display:none!important}.dgroup>.doff{display:none!important}
+.dgroup>#explorer,.dgroup>#right,.dgroup>#dock{flex:1 1 0;width:auto;height:auto;max-width:none;min-width:0;min-height:0;border:0}
+.dtabs{display:flex;gap:2px;padding:0 4px 3px;background:var(--cap);border-top:1px solid var(--capline)}.dtabs[hidden],.dtabs button[hidden]{display:none}
+.dtabs button{border:1px solid var(--capline);border-top:0;border-radius:0 0 3px 3px;margin-top:-1px;background:var(--captab);color:var(--capink);padding:2px 12px}.dtabs button.on{background:var(--captabon);font-weight:600}
+.dsplitter{flex:none;background:var(--chrome);touch-action:none}.dsplitter[hidden]{display:none}
+.dsplitter.drow{width:5px;cursor:ew-resize;border-left:1px solid var(--line2);border-right:1px solid var(--line2)}.dsplitter.dcol{height:5px;cursor:ns-resize;border-top:1px solid var(--line2);border-bottom:1px solid var(--line2)}
+.dsplitter:hover,.dsplitter.on{background:var(--hotline)}
+/* The drop guides while a panel is dragged, and the dragged panel seen through. */
+.dguide{position:fixed;z-index:80;width:30px;height:30px;display:flex;align-items:center;justify-content:center;background:var(--menu);color:var(--accent);border:1px solid var(--line);border-radius:4px;box-shadow:var(--shadow);pointer-events:none}
+.dguide.on{background:var(--accent);color:#fff}.float.dragged{opacity:.75}
 /* A panel in a window of its own (popOut) fills that window. */
 body.popbody{display:flex;flex-direction:column;height:100vh;margin:0;overflow:hidden}
 .popped{position:static!important;flex:1;width:auto!important;height:auto!important;max-width:none!important;min-width:0;min-height:0;border:0!important;box-shadow:none!important;resize:none!important}
-#dock.popped .grip{display:none}
 /* Its window is narrow, but it is no narrow screen: the page's small-screen rules (which hide the Model Explorer and the
    table list) don't apply to it. */
 .popped{display:flex!important;flex-direction:column}.popped[hidden]{display:none!important}body.popbody #tlist{display:flex!important}
@@ -177,9 +192,8 @@ html.live #menubar .brand{display:none}
 /* tables window */
 #dock{height:38%;min-height:140px;display:flex;flex-direction:column;border-top:3px solid var(--line);background:var(--field);position:relative}
 #dock[hidden]{display:none}
-#dock.max{position:absolute;inset:0;height:auto;z-index:5;border-top:0}
+#dock.max{position:absolute;inset:0;height:auto;z-index:6;border-top:0}
 #dock .dock{font-weight:600}
-#dock .grip{position:absolute;left:0;right:0;top:-5px;height:7px;cursor:ns-resize;z-index:2}
 #tbody{flex:1;display:flex;min-height:0}
 #tlist{width:240px;border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0;background:var(--field)}
 #tlist input{margin:4px;width:auto}
@@ -460,16 +474,15 @@ body.chaton #right{width:380px;max-width:42%}
 </div>
 <main>
   <div id="strip"></div>
+  <div id="dockroot"></div>
   <div id="explorer">
     <div class="dock"><span>Model Explorer</span><button class="dd" id="explorerDD" title="Window Position">&#9660;</button><button class="x" data-close="explorer" title="Close">&#10005;</button></div>
     <div id="tree"></div>
     <div id="legend" hidden></div>
   </div>
-  <div class="split" id="splitExplorer" title="Drag to widen or narrow"></div>
   <div id="center">
     <div id="views"><canvas id="gl"></canvas><div id="pobj" hidden></div></div>
     <div id="dock" hidden>
-      <div class="grip" id="grip"></div>
       <div class="dock" id="dockCap">Tables<span style="flex:1"></span><button class="x" id="dockDD" title="Window Position" style="font-size:11px">&#9660;</button><button class="x" id="dockMax" title="Fill the window" style="font-size:12px">&#9634;</button><button class="x" id="dockClose" title="Close the tables">&#10005;</button></div>
       <div id="tbody">
         <div id="tlist"><input id="tfind" placeholder="Find a table"><div id="tnames"></div></div>
@@ -482,7 +495,6 @@ body.chaton #right{width:380px;max-width:42%}
     </div>
     <div id="drop"><div><b>Open a CSI ProMax pack (.cpmx)</b><br>Use File, Open, or drop the file here. Nothing is uploaded: the file is read on this computer only, and no CSI program is needed.</div></div>
   </div>
-  <div class="split" id="splitRight" title="Drag to widen or narrow"></div>
   <div id="right">
     <div id="tabs"><button data-tab="props" class="on">Properties</button><button data-tab="checks">Checks</button><button data-tab="comments">Comments</button><button data-tab="chat" hidden>Chat</button><button class="x" id="rightDD" title="Window Position" style="flex:none;width:22px;font-size:11px">&#9660;</button><button class="x" data-close="side" title="Close" style="flex:none;width:26px">&#10005;</button></div>
     <div class="tab on" id="props"><p class="kv">Open a pack to see the model.</p></div>
@@ -3716,6 +3728,7 @@ function act(name) {
   if (name.startsWith("det:")) return openSchedule(name.slice(4));
   if (name.startsWith("app:")) { appRun(name.slice(4)).then(j => { if (!j.ok) $("hint").textContent = "That item is not in this window."; }); return; }
   if (name.startsWith("lay:")) { const b = document.querySelector(`[data-lay="${name.slice(4)}"]`); if (b) b.click(); return; }
+  if (name === "panels:reset") return resetPanels();
   if (name.startsWith("vals:")) return openValues(name.slice(5));
   if (name.startsWith("loads:")) return openLoads(name.slice(6));
   if (name.startsWith("edl:")) return etaDisplay(name.slice(4));
@@ -3816,7 +3829,7 @@ const viewerMenus = () => {
     View: [["Set 3-D View...", "dlg:view3d"], ["Set Plan View...", "dlg:plan"], ["Set Elevation View...", "dlg:elev"], 0, ["Restore Full View", "fitActive", "F3"], ["Rubber Band Zoom", "t:zoom", "F2"], ["Zoom In One Step", "zin"], ["Zoom Out One Step", "zout"], ["Pan", "t:pan"], ["Rotate 3-D View", "t:orbit"], ["Perspective", "persp"], 0,
       only(["etabs", "safe"], ["Move Up a Story", "storyUp", "PgUp", !plan]), only(["etabs", "safe"], ["Move Down a Story", "storyDown", "PgDn", !plan]), ["Previous Elevation", "linePrev", "", !elev], ["Next Elevation", "lineNext", "", !elev], 0,
       ["Set Display Options...", "dlg:display", "Ctrl+W"], ["Model Explorer", "explorer"], ["Side Panel", "side"], ...(window.cpmChat ? [["Chat", "chat"]] : []), 0,
-      ["Windows", [["One window", "lay1"], ["Two windows", "lay2"], ["Three windows", "lay3"], ["Four windows", "lay4"]]]],
+      ["Windows", [["One window", "lay1"], ["Two windows", "lay2"], ["Three windows", "lay3"], ["Four windows", "lay4"], ["Reset Panel Layout", "panels:reset"]]]],
     Define: [["Material Properties...", "dlg:materials"], ["Frame Sections...", "dlg:frameSections"], ["Slab and Wall Sections...", "dlg:areaSections"], 0, only(["etabs", "safe"], ["Story Data...", "dlg:stories"]), ["Grid Data...", "dlg:grids"], 0, ["Load Patterns...", "dlg:patterns"], ["Load Cases...", "dlg:cases"], ["Load Combinations...", "dlg:combos"]],
     Select: [["All", "selAll", "Ctrl+A"], ["Using Intersecting Line", "t:iline"], ["Get Previous Selection", "selPrev", "", !prevSel.f.length && !prevSel.j.length], only(["etabs", "safe"], ["All on This Story", "selStory", "", !plan]), ["By Section...", "dlg:bySection"], ["By Object Type...", "dlg:byType"], ["Joints", "selJoints"], ["Supports (Restraints and Springs)", "selSupports"], ["Invert", "selInvert"], 0, ["Filter Selection...", "selFilter", "", !sel.size && !selJ.size], 0, ["Clear Selection", "selNone", "Esc"]],
     Analyze: [["Check Model for Instabilities...", "inst", "F7"], ["Show the Last Check's Marks", "instMarks", "", !inst.answer], 0, ["What the check looks for", "instHelp"],
@@ -5752,7 +5765,7 @@ function markTree() {
 }
 // A panel's ✕ closes it; in a window of its own (which has no title bar) it closes that window and docks the panel
 // back where it was, as closing the window does.
-function closePanel(k, close) { const s = panelState(k); if (s.side === "window") dockPanel(k, s.last || panelInfo[k].home); else close(); }
+function closePanel(k, close) { if (panelState(k).side === "window") dockBack(k); else close(); }
 document.querySelectorAll("[data-close]").forEach(b => b.onclick = () => closePanel(b.dataset.close === "side" ? "right" : b.dataset.close, () => act(b.dataset.close)));
 
 // ---- side panel ----
@@ -6050,56 +6063,309 @@ function showInTable(o) {
 }
 $("dockClose").onclick = () => closePanel("dock", () => showTables(false));
 $("dockMax").onclick = () => { $("dock").classList.toggle("max"); draw(); };
-$("grip").addEventListener("pointerdown", e => { const d = $("dock"), c = $("center").getBoundingClientRect(); $("grip").setPointerCapture(e.pointerId); $("grip").onpointermove = m => { d.style.height = Math.max(120, Math.min(c.height - 80, c.bottom - m.clientY)) + "px"; draw(); }; $("grip").onpointerup = () => { $("grip").onpointermove = null; panelState("dock").dh = d.offsetHeight; dockSave(); }; });
 
-// ---- docking: the Model Explorer, the side panel and the Tables, as ETABS's docked windows ----
-// Each one sits on an edge with a splitter to size it, or floats over the views. Drag its caption off the edge to float
-// it; drop it near the window's left or right edge (the Tables: near the bottom of the views) to dock it there again.
-// Window Position (the small arrow) does the same from a menu, and a double-click on the caption floats or docks it.
-// Where each one is and its size are kept between visits.
+// ---- docking: the Model Explorer, the side panel and the Tables, docked anywhere as Revit's panels are ----
+// The docked panels and the views make one layout tree in main (dockTree):
+// - a split ("row" side by side, "col" stacked) has a splitter between each two of its children;
+// - a group holds one or more panels as tabs (with more than one, their tabs show under it, as Revit's do);
+// - the views are one leaf.
+// Beside the views a panel keeps its width (or height) in pixels and the views take the rest; panels side by side or
+// stacked among themselves share their room by weight. A panel is docked in its place in the tree, floats over the
+// window, or is in a window of its own (dockState[k].side: "dock", "float" or "window"). Away, it keeps its place, and
+// a double-click on its caption puts it back there. Dragging a panel's caption (or its tab) floats it and shows the drop
+// guides. The tree, the sizes and where each panel is are kept between visits.
 const panelInfo = {
-  explorer: {el: () => $("explorer"), cap: () => $("explorer").querySelector(".dock"), split: () => $("splitExplorer"), home: "left", close: () => act("explorer")},
-  right: {el: () => $("right"), cap: () => $("tabs"), split: () => $("splitRight"), home: "right", close: () => act("side")},
-  dock: {el: () => $("dock"), cap: () => $("dockCap"), split: () => null, home: "bottom", close: () => showTables(false)},
+  explorer: {el: () => $("explorer"), cap: () => $("explorer").querySelector(".dock"), basis: "clamp(230px,21vw,420px)", close: () => act("explorer")},
+  right: {el: () => $("right"), cap: () => $("tabs"), basis: "310px", close: () => act("side")},
+  dock: {el: () => $("dock"), cap: () => $("dockCap"), basis: "38%", close: () => showTables(false)},
 };
-let dockState = {};
-try { dockState = JSON.parse(localStorage.getItem("cpm-dock") || "{}") || {}; } catch (e) { dockState = {}; }
-function dockSave() { try { localStorage.setItem("cpm-dock", JSON.stringify(dockState)); } catch (e) {} }
-function panelState(k) { return dockState[k] = dockState[k] || {side: panelInfo[k].home}; }
+const panelTitles = {explorer: "Model Explorer", right: "Properties", dock: "Tables"};
+let dockState = {}, dockTree = null;
+try { dockState = JSON.parse(localStorage.getItem("cpm-dock") || "{}") || {}; dockTree = JSON.parse(localStorage.getItem("cpm-dock-tree") || "null"); } catch (e) { dockState = {}; dockTree = null; }
+function dockSave() { try { localStorage.setItem("cpm-dock", JSON.stringify(dockState)); localStorage.setItem("cpm-dock-tree", JSON.stringify(dockTree)); } catch (e) {} }
+function panelState(k) { return dockState[k] = dockState[k] || {side: "dock"}; }
+// The layout as the program opens it: the Model Explorer left of the views, the side panel right of them and the
+// Tables under them. A side kept from before the tree (left or right with its width, the Tables' height) still counts.
+function homeTree() {
+  const was = k => dockState[k] || {}, at = k => { const s = was(k), a = s.side === "float" || s.side === "window" ? s.last : s.side; return a === "left" || a === "right" ? a : {explorer: "left", right: "right"}[k]; };
+  const group = k => ({t: "group", panels: [k], on: k, size: k === "dock" ? was(k).dh : was(k).w});
+  const side = a => ["explorer", "right"].filter(k => at(k) === a).map(group);
+  return {t: "split", dir: "row", kids: [...side("left"), {t: "split", dir: "col", kids: [{t: "views"}, group("dock")]}, ...side("right")]};
+}
+// A kept tree is used only when it is whole: the views once, each panel once, every split with two children or more.
+function treeOk(t) {
+  const seen = [];
+  const ok = n => !!n && (n.t === "views" ? seen.push("views") > 0
+    : n.t === "group" ? Array.isArray(n.panels) && n.panels.length > 0 && n.panels.every(k => panelInfo[k] && seen.push(k) > 0)
+    : n.t === "split" && (n.dir === "row" || n.dir === "col") && Array.isArray(n.kids) && n.kids.length > 1 && n.kids.every(ok));
+  return ok(t) && seen.length === Object.keys(panelInfo).length + 1 && new Set(seen).size === seen.length;
+}
+if (!treeOk(dockTree)) dockTree = homeTree();
+// A floating panel floats again; one docked, or in a window of its own last time, opens in its place.
+for (const k of Object.keys(panelInfo)) { const s = panelState(k); s.side = s.side === "float" ? "float" : "dock"; delete s.last; delete s.w; delete s.dh; }
+
+// ---- the tree ----
+const hasViews = n => n.t === "views" || n.t === "split" && n.kids.some(hasViews);
+// A node's parent split and its place there (null for the root).
+function parentOf(n, at = dockTree) {
+  if (at.t !== "split") return null;
+  for (let i = 0; i < at.kids.length; i++) { if (at.kids[i] === n) return {p: at, i}; const r = parentOf(n, at.kids[i]); if (r) return r; }
+  return null;
+}
+function dockGroupOf(k, at = dockTree) { return at.t === "group" ? (at.panels.includes(k) ? at : null) : at.t === "split" ? at.kids.map(c => dockGroupOf(k, c)).find(Boolean) || null : null; }
+function viewsNode(at = dockTree) { return at.t === "views" ? at : at.t === "split" ? at.kids.map(c => viewsNode(c)).find(Boolean) : null; }
+function replaceNode(n, by) { const at = parentOf(n); if (at) at.p.kids[at.i] = by; else dockTree = by; }
+// A panel out of its place: an empty group goes, and a split left with one child gives way to it.
+function unplace(k) {
+  const g = dockGroupOf(k); if (!g) return;
+  g.panels = g.panels.filter(x => x !== k); if (g.on === k) g.on = g.panels[0];
+  if (g.panels.length) return;
+  const at = parentOf(g); if (!at) return;
+  at.p.kids.splice(at.i, 1);
+  if (at.p.kids.length === 1) replaceNode(at.p, Object.assign(at.p.kids[0], {size: at.p.size}));
+}
+// A panel put beside a node (side: left, right, top or bottom), or with a group as a tab (side: center). Beside a node in
+// a split the same way, it joins that split; otherwise the node and the panel make a new split in the node's place.
+function place(k, n, side) {
+  if (side === "center") { n.panels.push(k); n.on = k; return; }
+  const dir = side === "left" || side === "right" ? "row" : "col", first = side === "left" || side === "top", g = {t: "group", panels: [k], on: k};
+  const at = parentOf(n), root = n === dockTree && n.t === "split" && n.dir === dir;
+  if (root || at && at.p.dir === dir) {
+    const sp = root ? n : at.p; g.size = newSize(k, sp, dir);
+    sp.kids.splice(root ? (first ? 0 : n.kids.length) : at.i + (first ? 0 : 1), 0, g);
+    return;
+  }
+  const sp = {t: "split", dir, kids: first ? [g, n] : [n, g], size: n.size};
+  delete n.size; replaceNode(n, sp);
+  if (hasViews(sp)) g.size = newSize(k, sp, dir); else n.size = g.size = 1;
+}
+// A new place's size: beside the views, the panel's floating size across the split (in pixels, within reason); among
+// panels, an even share.
+function newSize(k, sp, dir) {
+  const s = panelState(k), m = document.querySelector("main").getBoundingClientRect(), room = dir === "row" ? m.width : m.height, want = dir === "row" ? s.fw : s.fh;
+  if (hasViews(sp)) return Math.round(Math.max(150, Math.min(room * 0.45, want || room * 0.25)));
+  const kept = sp.kids.filter(c => c.size > 0);
+  return kept.length ? kept.reduce((a, c) => a + c.size, 0) / kept.length : 1;
+}
+
+// ---- the tree on the page ----
+const elOf = new WeakMap(), nodeOf = new WeakMap();
+// Wrappers for the splits and groups, with the panels and the views moved into them (handlers and all). The panels
+// come found already (panel): one inside a wrapper that is not on the page can't be found by id.
+function renderDock(panel) {
+  const center = $("center");
+  const build = n => {
+    let el;
+    if (n.t === "views") el = center;
+    else if (n.t === "group") {
+      el = document.createElement("div"); el.className = "dgroup";
+      for (const k of n.panels) { const pe = panel[k]; if (panelState(k).side === "dock" && pe.ownerDocument === document && pe.parentElement !== popStage) el.appendChild(pe); }
+      const tabs = document.createElement("div"); tabs.className = "dtabs";
+      for (const k of n.panels) {
+        const b = document.createElement("button"); b.textContent = panelTitles[k]; b.dataset.k = k;
+        b.onclick = () => { n.on = k; syncDock(); dockSave(); draw(); };
+        b.onpointerdown = e => startPanelDrag(k, e);
+        tabs.appendChild(b);
+      }
+      el.appendChild(tabs);
+    } else {
+      el = document.createElement("div"); el.className = "dsplit d" + n.dir;
+      n.kids.forEach((c, i) => { if (i) el.appendChild(splitterFor(n)); el.appendChild(build(c)); });
+    }
+    elOf.set(n, el); nodeOf.set(el, n);
+    return el;
+  };
+  $("dockroot").replaceChildren(build(dockTree));
+}
+const basisOf = n => n.t === "group" ? panelInfo[n.panels[0]].basis : basisOf(n.kids[0]);
+// What shows: a group with no panel to show (hidden, floating or in its own window) folds away, so does a split with
+// nothing showing, and a splitter shows only between two children that show. Each child's share of its split, too.
+function syncDock() {
+  const narrow = matchMedia("(max-width:1000px)").matches; // the page's narrow-window rule hides the Model Explorer
+  const here = k => { const el = panelInfo[k].el(); return panelState(k).side === "dock" && el.ownerDocument === document && !el.hidden && !(narrow && k === "explorer"); };
+  const walk = n => {
+    const el = elOf.get(n); let shows = true;
+    if (n.t === "group") {
+      const vis = n.panels.filter(here); if (vis.length && !vis.includes(n.on)) n.on = vis[0];
+      for (const k of n.panels) panelInfo[k].el().classList.toggle("doff", here(k) && k !== n.on);
+      const tabs = el.lastElementChild; tabs.hidden = vis.length < 2;
+      for (const b of tabs.children) { b.hidden = !vis.includes(b.dataset.k); b.classList.toggle("on", b.dataset.k === n.on); }
+      shows = vis.length > 0;
+    } else if (n.t === "split") {
+      const kids = n.kids.map(walk), parts = [...el.children], views = hasViews(n);
+      let before = false;
+      n.kids.forEach((c, i) => {
+        if (i) parts[2 * i - 1].hidden = !(before && kids[i]);
+        if (kids[i]) before = true;
+        elOf.get(c).style.flex = hasViews(c) ? "1 1 0" : views ? "0 0 " + (c.size >= 60 ? c.size + "px" : basisOf(c)) : (c.size > 0 ? c.size : 1) + " 1 0";
+      });
+      shows = kids.some(Boolean);
+    }
+    el.classList.toggle("dgone", !shows);
+    return shows;
+  };
+  walk(dockTree);
+}
+// The splitter between two children of a split: dragged, they share their room anew. Beside the views a panel takes its
+// size in pixels; among panels their weights change, so stacked panels keep their shares when the window is resized.
+function splitterFor(n) {
+  const sp = document.createElement("div"); sp.className = "dsplitter d" + n.dir; sp.title = "Drag to resize";
+  sp.onpointerdown = e => {
+    const parts = [...sp.parentElement.children], i = parts.indexOf(sp), row = n.dir === "row";
+    const shown = (j, step) => { for (; j >= 0 && j < parts.length; j += step) if (!parts[j].classList.contains("dsplitter") && !parts[j].classList.contains("dgone")) return parts[j]; return null; };
+    const ea = shown(i - 1, -1), eb = shown(i + 1, 1), a = ea && nodeOf.get(ea), b = eb && nodeOf.get(eb);
+    if (!a || !b) return;
+    e.preventDefault(); sp.setPointerCapture(e.pointerId); sp.classList.add("on");
+    const ra = ea.getBoundingClientRect(), rb = eb.getBoundingClientRect(), start = row ? ra.left : ra.top;
+    const room = (row ? rb.right - ra.left : rb.bottom - ra.top) - (row ? rb.left - ra.right : rb.top - ra.bottom), weight = (a.size > 0 ? a.size : 1) + (b.size > 0 ? b.size : 1);
+    sp.onpointermove = m => {
+      const x = Math.max(80, Math.min(room - 80, (row ? m.clientX : m.clientY) - start)), y = room - x;
+      if (hasViews(a)) b.size = Math.round(y);
+      else if (hasViews(b)) a.size = Math.round(x);
+      else if (hasViews(n)) { a.size = Math.round(x); b.size = Math.round(y); }
+      else { a.size = weight * x / room; b.size = weight - a.size; }
+      syncDock(); placeViewSplits(); draw();
+    };
+    sp.onpointerup = () => { sp.onpointermove = null; sp.classList.remove("on"); dockSave(); };
+  };
+  return sp;
+}
+// Every panel where its state says: docked ones in the tree, floating ones over the window; the views take the rest.
+function placePanels() {
+  const main = document.querySelector("main"), panel = Object.fromEntries(Object.keys(panelInfo).map(k => [k, panelInfo[k].el()]));
+  renderDock(panel);
+  for (const k of Object.keys(panelInfo)) {
+    const s = panelState(k), el = panel[k], float = s.side === "float";
+    if (el.ownerDocument !== document || el.parentElement === popStage) continue; // in a window of its own
+    el.classList.toggle("float", float);
+    if (float) { el.classList.remove("max", "doff"); main.appendChild(el); floatAt(el, s); }
+    else Object.assign(el.style, {left: "", top: "", width: "", height: ""});
+  }
+  syncDock(); placeViewSplits(); draw();
+}
 // A floating panel where its state says, kept inside the window so its caption can always be reached.
 function floatAt(el, s) {
   s.fw = Math.max(180, Math.min(s.fw || 320, innerWidth - 20)); s.fh = Math.max(140, Math.min(s.fh || 420, innerHeight - 20));
   s.x = Math.max(0, Math.min(s.x ?? (innerWidth - s.fw) / 2, innerWidth - 80)); s.y = Math.max(0, Math.min(s.y ?? 90, innerHeight - 40));
   Object.assign(el.style, {left: s.x + "px", top: s.y + "px", width: s.fw + "px", height: s.fh + "px"});
 }
-function unfloat(el, k, s) {
-  el.style.left = el.style.top = "";
-  if (k === "dock") { el.style.width = ""; el.style.height = s.dh ? s.dh + "px" : ""; }
-  else { el.style.height = ""; el.style.width = s.w ? s.w + "px" : ""; }
+// Float a panel (at its docked size the first time); dock one back in its place; move one to a new place.
+function floatPanel(k, r) {
+  const s = panelState(k), el = panelInfo[k].el();
+  if (popWins[k]) bringBack(k);
+  r = r || el.getBoundingClientRect();
+  if (s.side === "dock" && r.width) { s.fw = s.fw || Math.round(r.width); s.fh = s.fh || Math.round(Math.min(r.height, innerHeight * 0.7)); }
+  s.side = "float"; placePanels(); dockSave();
 }
-// Puts every panel where its state says: docked ones on their edge, each beside its splitter; floating ones over the views.
-function placePanels() {
-  const put = (after, el) => { if (after.nextElementSibling !== el) after.after(el); return el; };
-  let left = $("strip"), right = $("center");
-  for (const k of ["explorer", "right"]) {
-    const s = panelState(k), el = panelInfo[k].el(), sp = panelInfo[k].split(), float = s.side === "float";
-    if (s.side === "window") continue; // in a window of its own
-    el.classList.toggle("float", float);
-    if (float) { floatAt(el, s); continue; }
-    unfloat(el, k, s);
-    if (s.side === "left") left = put(put(left, el), sp);
-    else right = put(put(right, sp), el);
-  }
-  const s = panelState("dock"), d = $("dock"), float = s.side === "float";
-  if (s.side !== "window") {
-    if (float) d.classList.remove("max");
-    d.classList.toggle("float", float);
-    if (float) floatAt(d, s); else unfloat(d, "dock", s);
-  }
-  syncSplits(); placeViewSplits();
+function dockBack(k) { if (popWins[k]) bringBack(k); panelState(k).side = "dock"; placePanels(); dockSave(); }
+// where: {kind: "edge"} the window's edge (outermost), {kind: "views"} next to the views, or {kind: "group", node} beside
+// or with a docked group; side: left, right, top, bottom (or center, with a group).
+function movePanel(k, where) {
+  if (popWins[k]) bringBack(k);
+  unplace(k);
+  place(k, where.kind === "edge" ? dockTree : where.kind === "views" ? viewsNode() : where.node, where.side);
+  panelState(k).side = "dock"; placePanels(); dockSave();
 }
-function syncSplits() {
-  for (const k of ["explorer", "right"]) { const el = panelInfo[k].el(); panelInfo[k].split().hidden = el.hidden || el.classList.contains("float") || el.classList.contains("popped"); }
+// Window Position > Dock Left, Right, Top or Bottom: next to the views on that side.
+function dockPanel(k, side) { movePanel(k, {kind: "views", side}); }
+// View > Windows > Reset Panel Layout (also in each panel's Window Position): the layout as the program opens it.
+function resetPanels() {
+  for (const k of Object.keys(panelInfo)) { if (popWins[k]) bringBack(k); dockState[k] = {side: "dock", lw: panelState(k).lw}; }
+  dockTree = homeTree(); placePanels(); dockSave();
+}
+
+// ---- dragging a panel: the drop guides ----
+// Four on the window's edges dock it outermost, four around the middle of the views dock it next to the views, and the
+// compass on the docked group under the pointer puts it beside that group or with it as a tab. The room it would take is
+// lit; dropped anywhere else it floats, and dropped outside the window it goes into a window of its own.
+let guides = null; // while a panel is dragged: the guides on the screen, and the group the compass is on
+const guideIcon = side => `<svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true"><rect x="2.5" y="2.5" width="15" height="15" fill="none" stroke="currentColor"/>${{left: '<rect x="3" y="3" width="6" height="14"', right: '<rect x="11" y="3" width="6" height="14"', top: '<rect x="3" y="3" width="14" height="6"', bottom: '<rect x="3" y="11" width="14" height="6"', center: '<rect x="6" y="6" width="8" height="8"'}[side]} fill="currentColor"/></svg>`;
+function guide(t) {
+  const b = document.createElement("div"); b.className = "dguide"; b.innerHTML = guideIcon(t.side);
+  Object.assign(b.style, {left: t.x - 15 + "px", top: t.y - 15 + "px"}); document.body.appendChild(b); t.el = b; return t;
+}
+function guidesShow() {
+  const m = document.querySelector("main").getBoundingClientRect(), v = $("views").getBoundingClientRect(), mx = (m.left + m.right) / 2, my = (m.top + m.bottom) / 2, vx = (v.left + v.right) / 2, vy = (v.top + v.bottom) / 2;
+  guides = {group: null, compass: [], fixed: [
+    ["edge", "left", m.left + 22, my], ["edge", "right", m.right - 22, my], ["edge", "top", mx, m.top + 22], ["edge", "bottom", mx, m.bottom - 22],
+    ["views", "left", vx - 34, vy], ["views", "right", vx + 34, vy], ["views", "top", vx, vy - 34], ["views", "bottom", vx, vy + 34],
+  ].map(([kind, side, x, y]) => guide({kind, side, x, y}))};
+}
+function guidesHide() { if (guides) for (const t of [...guides.fixed, ...guides.compass]) t.el.remove(); guides = null; litRoom(null); }
+// The guide under the pointer (null if none), with the compass moved onto the docked group under it.
+function guidesAt(x, y, k) {
+  if (!guides) return null;
+  const inside = (r, px, py) => px >= r.left && px <= r.right && py >= r.top && py <= r.bottom;
+  const grp = [...document.querySelectorAll("#dockroot .dgroup:not(.dgone)")].find(e => inside(e.getBoundingClientRect(), x, y)) || null;
+  if (grp !== guides.group) {
+    for (const t of guides.compass) t.el.remove();
+    guides.group = grp; guides.compass = [];
+    if (grp) {
+      const r = grp.getBoundingClientRect(), cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2;
+      guides.compass = [["center", 0, 0], ["left", -34, 0], ["right", 34, 0], ["top", 0, -34], ["bottom", 0, 34]].map(([side, dx, dy]) => guide({kind: "group", node: nodeOf.get(grp), side, x: cx + dx, y: cy + dy}));
+    }
+  }
+  const all = [...guides.compass, ...guides.fixed], hit = all.find(t => Math.abs(x - t.x) <= 15 && Math.abs(y - t.y) <= 15) || null;
+  for (const t of all) t.el.classList.toggle("on", t === hit);
+  litRoom(hit, k);
+  return hit;
+}
+// The room a panel dropped on guide t would take, lit.
+function litRoom(t, k) {
+  const h = $("dockHint"); if (!t) { h.style.display = "none"; return; }
+  const r = (t.kind === "edge" ? document.querySelector("main") : t.kind === "views" ? $("views") : guides.group).getBoundingClientRect();
+  let {left, top, width, height} = r;
+  if (t.side !== "center") {
+    const row = t.side === "left" || t.side === "right", s = panelState(k), across = row ? width : height;
+    const part = t.kind === "group" ? across / 2 : Math.min(across * 0.4, (row ? s.fw : s.fh) || across * 0.25);
+    if (row) { if (t.side === "right") left += width - part; width = part; } else { if (t.side === "bottom") top += height - part; height = part; }
+  }
+  Object.assign(h.style, {display: "block", left: left + "px", top: top + "px", width: width + "px", height: height + "px"});
+}
+// A caption (or a group's tab) dragged more than a few pixels floats its panel under the pointer and shows the guides; a
+// plain click stays a click. In a window of its own, the panel moves with that window.
+function startPanelDrag(k, e) {
+  const el = panelInfo[k].el();
+  if (e.button !== 0 || e.target.closest(".x, .dd, input, select, textarea") || el.ownerDocument !== document) return;
+  const x0 = e.clientX, y0 = e.clientY;
+  let moving = false, offX = 0, offY = 0, target = null;
+  const move = m => {
+    if (!moving) {
+      if (Math.hypot(m.clientX - x0, m.clientY - y0) < 6) return;
+      moving = true; document.body.classList.add("dragging");
+      const r = el.getBoundingClientRect();
+      if (panelState(k).side !== "float") floatPanel(k, r);
+      const s = panelState(k);
+      offX = Math.max(10, Math.min(x0 - r.left, s.fw - 40)); offY = Math.max(5, Math.min(y0 - r.top, 20));
+      el.classList.add("dragged"); guidesShow();
+    }
+    const s = panelState(k); s.x = m.clientX - offX; s.y = m.clientY - offY; floatAt(el, s);
+    target = guidesAt(m.clientX, m.clientY, k);
+  };
+  const up = m => {
+    removeEventListener("pointermove", move); removeEventListener("pointerup", up);
+    if (!moving) return;
+    document.body.classList.remove("dragging"); el.classList.remove("dragged"); guidesHide();
+    // The click that ends the drag doesn't also press the tab or button under it.
+    const eat = ev => { ev.stopPropagation(); ev.preventDefault(); };
+    addEventListener("click", eat, true); setTimeout(() => removeEventListener("click", eat, true), 0);
+    // Dropped outside CSI ProMax's window (on another screen, say): the panel goes into a window of its own there.
+    if (m.clientX < 0 || m.clientY < 0 || m.clientX >= innerWidth || m.clientY >= innerHeight) return popOut(k, m.screenX - offX, m.screenY - offY);
+    if (target) movePanel(k, target); else dockSave();
+  };
+  addEventListener("pointermove", move); addEventListener("pointerup", up);
+}
+function panelMenu(k, btn) {
+  const s = panelState(k);
+  ddMenu(btn, [["Dock Left", () => dockPanel(k, "left")], ["Dock Right", () => dockPanel(k, "right")], ["Dock Top", () => dockPanel(k, "top")], ["Dock Bottom", () => dockPanel(k, "bottom")],
+    ["Float", () => floatPanel(k), s.side === "float"], ["Separate Window", () => popOut(k), s.side === "window"], ["Close", panelInfo[k].close], ["Reset Panel Layout", resetPanels]]);
+}
+function wireCaption(k) {
+  const cap = panelInfo[k].cap();
+  cap.addEventListener("pointerdown", e => startPanelDrag(k, e));
+  // A double-click on the caption floats a docked panel and docks a floating one back in its place (the side panel's
+  // caption is its tabs: a double-click there is for them).
+  cap.addEventListener("dblclick", e => { if (e.target.closest(".x, .dd, input, select, textarea") || k === "right") return; if (panelState(k).side === "dock") floatPanel(k); else dockBack(k); });
 }
 // ---- a panel in a window of its own ----
 // Dropped outside CSI ProMax's window (or Window Position > Separate Window), a panel moves into a window of its own
@@ -6110,7 +6376,6 @@ function syncSplits() {
 // closing or being replaced: it waits in popStage (here, hidden) while its window's page changes, and comes back before
 // its window closes (the host asks first: cpmBeforeClose).
 const popWins = {}; // panel -> {win, doc, el}
-const panelTitles = {explorer: "Model Explorer", right: "Properties", dock: "Tables"};
 const popStage = document.createElement("div"); popStage.hidden = true; document.body.appendChild(popStage);
 // The host says when a panel's window has its own page (it may replace the first one): the panel goes in then.
 const popReady = new Set();
@@ -6141,22 +6406,21 @@ function popOut(k, sx, sy) {
     for (const st of document.querySelectorAll("style")) doc.head.appendChild(st.cloneNode(true));
     for (const a of ["data-theme", "data-program", "class"]) { const v = document.documentElement.getAttribute(a); if (v != null) doc.documentElement.setAttribute(a, v); }
     doc.body.dataset.prog = document.body.dataset.prog || "";
-    if (s.side !== "window") s.last = s.side === "float" ? s.last || panelInfo[k].home : s.side;
     s.side = "window";
-    el.classList.remove("float", "max"); el.classList.add("popped");
+    el.classList.remove("float", "max", "doff"); el.classList.add("popped");
     Object.assign(el.style, {left: "", top: "", width: "", height: ""});
     doc.body.appendChild(el);
     p.doc = doc; popDocs.add(doc);
     win.addEventListener("pagehide", rescue); // a page leaving without the host asking first (a browser's own window)
     win.cpmBeforeClose = () => { rescue(); back(); }; // the host asks before it closes the window
-    placePanels(); dockSave(); draw();
+    placePanels(); dockSave();
   };
-  // Its window closed: the panel docks where it was.
+  // Its window closed: the panel docks back in its place.
   const back = () => {
     if (popWins[k] !== p) return;
     bringBack(k);
-    const st = panelState(k); if (st.side === "window") st.side = st.last || panelInfo[k].home;
-    placePanels(); dockSave(); draw();
+    if (panelState(k).side === "window") panelState(k).side = "dock";
+    placePanels(); dockSave();
   };
   p.fill = fill;
   if (!hosted || popReady.has(k)) fill(true);
@@ -6169,107 +6433,22 @@ function popOut(k, sx, sy) {
 // The panel's elements back in this window, where placePanels then puts them; its own window closes.
 function bringBack(k) {
   const p = popWins[k], el = p ? p.el : panelInfo[k].el();
-  if (el.ownerDocument !== document || el.parentElement === popStage) (k === "dock" ? $("views") : $("center")).after(el);
+  if (el.ownerDocument !== document || el.parentElement === popStage) document.querySelector("main").appendChild(el);
   el.classList.remove("popped");
   if (p) { delete popWins[k]; popDocs.delete(p.doc); try { p.win.close(); } catch (e) {} }
 }
 addEventListener("pagehide", () => { for (const k of Object.keys(popWins)) try { popWins[k].win.close(); } catch (e) {} });
-function dockPanel(k, side) {
-  const s = panelState(k), el = panelInfo[k].el();
-  if (s.side === "window" && side !== "window") { bringBack(k); s.side = s.last || panelInfo[k].home; }
-  if (side === "float" && s.side !== "float") {
-    const r = el.getBoundingClientRect();
-    if (k === "dock") s.dh = el.offsetHeight;
-    s.fw = s.fw || Math.round(r.width); s.fh = s.fh || Math.round(Math.min(r.height, innerHeight * 0.7));
-    s.last = s.side;
-  }
-  if (side !== "float") s.last = side;
-  s.side = side;
-  placePanels(); dockSave(); draw();
-}
-// Where a panel dragged to (x, y) would dock, or null to leave it floating.
-function edgeAt(k, x, y) {
-  if (k === "dock") { const c = $("center").getBoundingClientRect(); return x > c.left && x < c.right && y > c.bottom - 60 && y < c.bottom + 10 ? "bottom" : null; }
-  const m = document.querySelector("main").getBoundingClientRect();
-  if (y < m.top || y > m.bottom) return null;
-  return x < m.left + 60 ? "left" : x > m.right - 60 ? "right" : null;
-}
-function showHint(k, edge) {
-  const h = $("dockHint");
-  if (!edge) { h.style.display = "none"; return; }
-  const r = (edge === "bottom" ? $("center") : document.querySelector("main")).getBoundingClientRect(), w = Math.min(panelState(k).w || 300, r.width / 2);
-  Object.assign(h.style, {display: "block", top: (edge === "bottom" ? r.bottom - r.height * 0.35 : r.top) + "px", height: (edge === "bottom" ? r.height * 0.35 : r.height) + "px",
-    left: (edge === "right" ? r.right - w : r.left) + "px", width: (edge === "bottom" ? r.width : w) + "px"});
-}
-function panelMenu(k, btn) {
-  const s = panelState(k), items = k === "dock"
-    ? [["Dock at the Bottom", () => dockPanel(k, "bottom"), s.side === "bottom"]]
-    : [["Dock Left", () => dockPanel(k, "left"), s.side === "left"], ["Dock Right", () => dockPanel(k, "right"), s.side === "right"]];
-  ddMenu(btn, [...items, ["Float", () => dockPanel(k, "float"), s.side === "float"], ["Separate Window", () => popOut(k), s.side === "window"], ["Close", panelInfo[k].close]]);
-}
-// A caption dragged more than a few pixels floats its panel under the pointer; a plain click stays a click (the side
-// panel's caption is its row of tabs).
-function wireCaption(k) {
-  const cap = panelInfo[k].cap(), el = panelInfo[k].el(), skip = ".x, .dd, input, select, textarea";
-  cap.addEventListener("pointerdown", e => {
-    // In a window of its own, the panel moves with that window's title bar.
-    if (e.button !== 0 || e.target.closest(skip) || el.ownerDocument !== document) return;
-    const x0 = e.clientX, y0 = e.clientY;
-    let moving = false, offX = 0, offY = 0;
-    const move = m => {
-      if (!moving) {
-        if (Math.hypot(m.clientX - x0, m.clientY - y0) < 6) return;
-        moving = true; document.body.classList.add("dragging");
-        const r = el.getBoundingClientRect();
-        dockPanel(k, "float");
-        const s = panelState(k);
-        offX = Math.max(10, Math.min(x0 - r.left, s.fw - 40)); offY = Math.max(5, Math.min(y0 - r.top, 20));
-      }
-      const s = panelState(k); s.x = m.clientX - offX; s.y = m.clientY - offY; floatAt(el, s);
-      showHint(k, edgeAt(k, m.clientX, m.clientY));
-    };
-    const up = m => {
-      removeEventListener("pointermove", move); removeEventListener("pointerup", up);
-      if (!moving) return;
-      document.body.classList.remove("dragging"); showHint(k, null);
-      // The click that ends the drag doesn't also press the tab under it.
-      const eat = ev => { ev.stopPropagation(); ev.preventDefault(); };
-      addEventListener("click", eat, true); setTimeout(() => removeEventListener("click", eat, true), 0);
-      // Dropped outside CSI ProMax's window (on another screen, say): the panel goes into a window of its own there.
-      if (m.clientX < 0 || m.clientY < 0 || m.clientX >= innerWidth || m.clientY >= innerHeight) return popOut(k, m.screenX - offX, m.screenY - offY);
-      const edge = edgeAt(k, m.clientX, m.clientY);
-      if (edge) dockPanel(k, edge); else dockSave();
-    };
-    addEventListener("pointermove", move); addEventListener("pointerup", up);
-  });
-  cap.addEventListener("dblclick", e => {
-    if (e.target.closest(skip) || k === "right") return; // the side panel's caption is its tabs: a double-click there is for them
-    const s = panelState(k);
-    dockPanel(k, s.side === "float" || s.side === "window" ? s.last || panelInfo[k].home : "float");
-  });
-}
-// The splitter beside a docked side panel: dragged, the panel takes that width (the views the rest).
-for (const k of ["explorer", "right"]) {
-  const sp = panelInfo[k].split(), el = panelInfo[k].el();
-  sp.onpointerdown = e => {
-    e.preventDefault(); sp.setPointerCapture(e.pointerId); sp.classList.add("on");
-    const s = panelState(k), room = document.querySelector("main").getBoundingClientRect().width;
-    sp.onpointermove = m => {
-      const r = el.getBoundingClientRect(), w = s.side === "left" ? m.clientX - r.left : r.right - m.clientX;
-      s.w = Math.round(Math.max(150, Math.min(room * 0.6, w))); el.style.width = s.w + "px"; draw();
-    };
-    sp.onpointerup = () => { sp.onpointermove = null; sp.classList.remove("on"); dockSave(); };
-  };
-  new MutationObserver(syncSplits).observe(el, {attributes: true, attributeFilter: ["hidden"]});
-}
-// A panel closed while it is in a window of its own (its close button, or the menu that hides it) docks back where it
-// was, so that window doesn't stay open empty.
-for (const k of ["explorer", "right", "dock"]) {
+// Shown or hidden by the menus (Options > Model Explorer, the Tables button...): its group folds away or comes back, in
+// front of the tabs it shares. Closed while in a window of its own, it docks back in its place.
+for (const k of Object.keys(panelInfo)) {
   const el = panelInfo[k].el();
-  new MutationObserver(() => { const s = panelState(k); if (el.hidden && s.side === "window") dockPanel(k, s.last || panelInfo[k].home); }).observe(el, {attributes: true, attributeFilter: ["hidden"]});
+  new MutationObserver(() => {
+    if (el.hidden && panelState(k).side === "window") return dockBack(k);
+    const g = dockGroupOf(k); if (!el.hidden && g) g.on = k;
+    syncDock(); placeViewSplits(); draw();
+  }).observe(el, {attributes: true, attributeFilter: ["hidden"]});
 }
-// A separate window opens only on a click: one left over from the last visit docks where the panel was.
-for (const k of Object.keys(panelInfo)) { const s = panelState(k); if (s.side === "window") s.side = s.last || panelInfo[k].home; }
+matchMedia("(max-width:1000px)").addEventListener("change", () => { syncDock(); placeViewSplits(); draw(); });
 // The Tables' list of table names, sized against the table beside it.
 $("splitTables").onpointerdown = e => {
   const sp = $("splitTables"), list = $("tlist");
@@ -6286,7 +6465,7 @@ const panelSizes = new ResizeObserver(entries => {
     if (s && s.side === "float" && en.target.offsetWidth) { s.fw = en.target.offsetWidth; s.fh = en.target.offsetHeight; clearTimeout(dockSaveSoon); dockSaveSoon = setTimeout(dockSave, 300); }
   }
 });
-for (const k of ["explorer", "right", "dock"]) { panelSizes.observe(panelInfo[k].el()); wireCaption(k); }
+for (const k of Object.keys(panelInfo)) { panelSizes.observe(panelInfo[k].el()); wireCaption(k); }
 $("explorerDD").onclick = e => { e.stopPropagation(); panelMenu("explorer", e.currentTarget); };
 $("rightDD").onclick = e => { e.stopPropagation(); panelMenu("right", e.currentTarget); };
 $("dockDD").onclick = e => { e.stopPropagation(); panelMenu("dock", e.currentTarget); };
