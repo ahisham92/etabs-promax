@@ -110,8 +110,8 @@ public static class Program
             try
             {
                 var model = OfflineEtabs.Load(args[ins + 1]);
-                var program = Array.IndexOf(args, "--program") is var pr and >= 0 && pr + 1 < args.Length ? args[pr + 1] : model.Target is { Length: > 0 } t ? t : "etabs";
-                var report = CsiProMax.Checks.Stability.StabilityCheck.Run(CsiProMax.Checks.Stability.FromStructural.Read(model, program));
+                var checkFor = Array.IndexOf(args, "--program") is var pr and >= 0 && pr + 1 < args.Length ? args[pr + 1] : model.Target is { Length: > 0 } t ? t : "etabs";
+                var report = CsiProMax.Checks.Stability.StabilityCheck.Run(CsiProMax.Checks.Stability.FromStructural.Read(model, checkFor));
                 foreach (var f in report.Findings)
                     Console.WriteLine($"{f.Level.ToString().ToUpperInvariant(),-8} {f.Check,-13} {f.Message} | at {string.Join(", ", f.Objects.Take(8).Select(o => o.Kind + " " + o.Name))}");
                 foreach (var n in report.Notes) Console.WriteLine("note: " + n);
