@@ -5,8 +5,9 @@ Times are Cairo. Every PC takes a release through the live updater (hourly check
 
 ## Still to do
 
+0. **On hold (Ahmed, 2026-11-28 01:09):** form capturing and all other jobs stop after 0.4.75 until Ahmed says to continue.
 1. **ETABS first (Ahmed's order).** Every remaining ETABS 23.2 form and menu identical field by field, each with a field round trip that reads the values back in ETABS. Pending forms are listed by the field test in `field/forms-check.md` on the test PC.
-2. **Field test to 0 FAIL.** Rerun only the failed checks on each new release until 0, then one full run. Open on 0.4.73: the scratch copy ETABS holds as "(Untitled)" (fixed by PR 331) and two pack failures (PR 330, pack thread).
+2. **Field test to 0 FAIL.** Rerun only the failed checks on each new release until 0, then one full run. Fixes for the 0.4.73 failures are in 0.4.75 (PR 330, 331, 336, 342); field runs are on hold until Ahmed restarts them.
 3. **Lossless real-model round trip.** ETABS .e2k / SAP2000 .s2k / SAFE .f2k in and out with nothing lost on the real example models; `model table differences.txt` and `result differences.txt` must come back empty.
 4. **Results pack timing.** Read, convert and load every result in 3 minutes for small models and 6 minutes for large ones, with no table left out and the PC never locked.
 5. **SAP2000 and SAFE (paused, ETABS first).** SAP2000: remaining Define/Analyze/Display forms. SAFE: forms and the tester's SAFE 22.7/23.1 reruns (the reference data gathering stays in every release until the data is received).
@@ -16,8 +17,8 @@ Standing rules: never change or remove anything another user added unless Ahmed 
 
 ## Releases
 
-### 0.4.75
-PR 325 ETABS Display > Show Tables (Choose Tables, table window, Table Format). PR 326 BRB and Section Designer sections written back to .e2k exactly as ETABS wrote them. PR 327 ETABS Section Designer (Property Data, the window, shapes, design types). PR 328 ETABS Link/Support Properties, all 15 link types, with EtabsLinkRoundTrip. PR 331 scratch copy held as "(Untitled)" opened again; shear wall design menu fallback. PR 332 ETABS Analyze and Draw menus, Analyzing window, Analysis Messages, Lock Model. PR 333 ETABS Load Combinations, Auto Construction Sequence, Walking and Floor Vibrations, Named Sets, with EtabsDefineRoundTrip.
+### 0.4.75 (2026-11-28, published on Ahmed's order; everything else on hold after it)
+ETABS forms: Display > Show Tables (325); Section Designer with every shape and the Interaction Surface (327, 337, 338); BRB and Section Designer sections written back to .e2k exactly as ETABS wrote them (326); Link/Support Properties, all 15 link types, directional and hysteresis forms, with EtabsLinkRoundTrip (328, 334, 340); Analyze and Draw menus, Analyzing window, Analysis Messages, Lock Model (332); Load Combinations, Auto Construction Sequence, Walking and Floor Vibrations, Named Sets, with EtabsDefineRoundTrip (333); Detailing drawing format and sheet setup (343); Options, Select and View menus (344); Steel Connection Design, Live Load Reduction, displacement and period targets, with EtabsDesignRoundTrip (346); File menu item for item with working exports (347). Field test: pack timing and lost-table count fixed (330); scratch copy held as "(Untitled)" reopened (331); reference data items time-limited (336); the test ends its own blank-model ETABS (342).
 
 ### 0.4.74 (23:20, 2026-11-27)
 ETABS: Materials and all 37 Frame Section shapes (277); Define forms: rebar sizes, groups, section cuts, mass source, P-Delta, generalized displacements, shell load sets (312); Define > Functions (315); Load Patterns with 30 seismic and 27 wind codes, Load Cases (316); Assign and Display menus with every Assign form (317); Nonlinear Hinges with EtabsHingeRoundTrip (319); Display result forms (320); Springs, Soil Profiles, Footings, Panel Zone, BRB (321). SAP2000: Assign tail, Area/Cable/Tendon/Solid/Link forms, Auto Hinges, every Assign > Loads form (299-301, 304, 306, 308, 310, 311, 314). Instability checker solves only active DOF (309). SAFE built through tables when it holds "(Untitled)" (313). Double-clicking a model file opens it in the open Engine (303). Engine runs write .cpme/.cpms/.cpmf (302). ~LLRF lines left out (307).
