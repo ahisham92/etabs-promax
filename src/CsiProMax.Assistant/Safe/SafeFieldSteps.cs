@@ -288,6 +288,8 @@ public static class SafeFieldSteps
             return new { file = Path.GetFileName(file), kilobytes = pack.Zip.Length / 1024, frames = pack.Frames, areas = pack.Areas, tables = pack.Tables, notes = pack.Notes };
         });
         PackSpeedField.Timed(ctx, packBuilt, took, link.Program.Name);
+        // The pack as it is written by itself after a run: from a copy in a hidden program, closed after, within 3 minutes.
+        if (!ctx.NoPack) PackSpeedField.FromCopy(ctx, link);
 
         // ---- the link with GeoProMax: the pressures out, the springs back in (the model is unlocked for them) ----
         GeoProMaxFieldSteps.Run(ctx);

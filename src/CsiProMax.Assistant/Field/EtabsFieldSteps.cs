@@ -443,6 +443,8 @@ public static class EtabsFieldSteps
             return new { file = Path.GetFileName(file), kilobytes = pack.Zip.Length / 1024, frames = pack.Frames, areas = pack.Areas, tables = pack.Tables, design = design?.ToJsonString(), notes = pack.Notes };
         });
         PackSpeedField.Timed(ctx, packBuilt, took, link.Program.Name);
+        // The pack as it is written by itself after a run: from a copy in a hidden program, closed after, within 3 minutes.
+        if (!ctx.NoPack) PackSpeedField.FromCopy(ctx, link);
 
         // The Viewer's check runs here, while the model still has its results (it is unlocked next).
         if (analysed) ctx.WithResults();
