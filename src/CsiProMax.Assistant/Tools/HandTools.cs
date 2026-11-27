@@ -418,6 +418,7 @@ public static class HandTools
                 case "frame_section":
                     InUse(m.LineAssigns.Count(x => x.Section == name), "members");
                     if (m.FrameSections.RemoveAll(x => x.Name == name) == 0) throw new ToolInputException($"There is no frame section named '{name}'.");
+                    SectionDesigner.Set(m, name, []);
                     if (m.Passthrough.Find(s => s.Heading == "CONCRETE SECTIONS") is { } raw) raw.Lines.RemoveAll(l => l.Contains("CONCRETESECTION \"" + name + "\"", StringComparison.Ordinal) || l.Contains("CONCRETESECTION  \"" + name + "\"", StringComparison.Ordinal));
                     break;
                 case "shell_section":
