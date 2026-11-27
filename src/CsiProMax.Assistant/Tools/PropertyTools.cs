@@ -424,6 +424,7 @@ public static class PropertyTools
     private static JsonNode Definitions(StructuralModel m, List<string> objects)
     {
         var springs = PropertyDefs.Springs(m);
+        var current = ProgramForms.CurrentOverwriteTables(m);
         var o = new JsonObject
         {
             ["program"] = m.Target,
@@ -436,7 +437,8 @@ public static class PropertyTools
                 ["defaults"] = JsonSerializer.SerializeToNode(PropertyDefs.NonlinearKeys(t).Length > 0 ? PropertyDefs.NonlinearDefaults(t) : new()),
             }))),
             ["material_tables"] = JsonSerializer.SerializeToNode(ProgramTables.MaterialTables),
-            ["assign_tables"] = new JsonObject(AssignTables.Tables.Where(t => ProgramOptions.HasAssignTable(m.Target, t.Key)).Select(t => KeyValuePair.Create(t.Key, (JsonNode?)new JsonObject
+            // The design overwrite tables only for the codes the designs have now (each code has its own).
+            ["assign_tables"] = new JsonObject(AssignTables.Tables.Where(t => ProgramOptions.HasAssignTable(m.Target, t.Key) && (!ProgramForms.IsOverwrite(t.Key) || current.Contains(t.Key))).Select(t => KeyValuePair.Create(t.Key, (JsonNode?)new JsonObject
             {
                 ["kind"] = t.Value.Kind, ["many"] = AssignTables.ManyRows.Contains(t.Key),
                 ["fields"] = new JsonArray(t.Value.Fields.Select(f => (JsonNode)new JsonArray(f.Key, f.Label)).ToArray()),

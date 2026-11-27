@@ -13,6 +13,9 @@
     <!-- A new model as ETABS 23 itself exports it (File > New Model, defaults): the settings every file needs. -->
     <EmbeddedResource Include="Seeds/etabs23.e2k" LogicalName="etabs23.e2k" />
     <EmbeddedResource Include="Seeds/forms-etabs.txt" LogicalName="forms-etabs.txt" />
+    <EmbeddedResource Include="Seeds/overwrites-etabs.txt" LogicalName="overwrites-etabs.txt" />
+    <EmbeddedResource Include="Seeds/overwrites-sap2000.txt" LogicalName="overwrites-sap2000.txt" />
+    <EmbeddedResource Include="Seeds/wall-overwrites-etabs.txt" LogicalName="wall-overwrites-etabs.txt" />
     <EmbeddedResource Include="Seeds/forms-sap2000.txt" LogicalName="forms-sap2000.txt" />
   </ItemGroup>
 </Project>

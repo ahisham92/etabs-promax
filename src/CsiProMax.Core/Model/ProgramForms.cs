@@ -23,9 +23,70 @@ public static class ProgramForms
     private static readonly Dictionary<string, Dictionary<string, List<FormField>>> Catalogs = new(StringComparer.Ordinal);
 
     /// <summary>The program's form tables (SAFE's are ETABS's, as SAFE 23 names its tables as ETABS does).</summary>
-    public static IReadOnlyDictionary<string, List<FormField>> Catalog(string target)
+    public static IReadOnlyDictionary<string, List<FormField>> Catalog(string target) => Load(target == ProgramOptions.Sap2000 ? "forms-sap2000.txt" : "forms-etabs.txt");
+
+    /// <summary>
+    /// The design overwrite tables of each object (Design > ... > View/Revise Overwrites), with the program's items, by
+    /// table, without the object's own key fields (ETABS's Story, Label, UniqueName; SAP2000's Frame).
+    /// </summary>
+    public static IReadOnlyDictionary<string, List<FormField>> OverwriteCatalog(string target) => Load(target == ProgramOptions.Sap2000 ? "overwrites-sap2000.txt" : "overwrites-etabs.txt");
+
+    /// <summary>The overwrite table prefixes of a design (ETABS's concrete frames have one for beams, one for columns).</summary>
+    private static string[] OverwritePrefixes(string target, string kind) => (target, kind) switch
     {
-        var file = target == ProgramOptions.Sap2000 ? "forms-sap2000.txt" : "forms-etabs.txt";
+        (ProgramOptions.Sap2000, "steel") => ["Overwrites - Steel Design - "],
+        (ProgramOptions.Sap2000, "concrete") => ["Overwrites - Concrete Design - "],
+        (ProgramOptions.Sap2000, "aluminum") => ["Overwrites - Aluminum Design - "],
+        (ProgramOptions.Sap2000, "cold_formed") => ["Overwrites - Cold Formed Design - "],
+        (ProgramOptions.Sap2000, _) => [],
+        (_, "steel") => ["Steel Frame Design Overwrites - "],
+        (_, "concrete") => ["Concrete Beam Overwrites - ", "Concrete Column Overwrites - "],
+        (_, "composite") => ["Composite Beam Design Overwrites - "],
+        (_, "composite_column") => ["Composite Column Design Overwrites - "],
+        (_, "joist") => ["Steel Joist Design Overwrites - "],
+        (_, "shear_wall") => ["Shear Wall Pier Design Overwrites - ", "Shear Wall Spandrel Design Overwrites - "],
+        _ => [],
+    };
+
+    /// <summary>
+    /// The overwrite tables of a design for a code, as the program names them (the code written as the table has it:
+    /// "IS 11384:2022" is "IS 11384_2022"). ETABS's slab design (finite element based) has one table for every code.
+    /// </summary>
+    public static List<string> OverwriteTables(string target, string kind, string code)
+    {
+        var cat = kind == "shear_wall" && target != ProgramOptions.Sap2000 ? WallOverwriteCatalog() : OverwriteCatalog(target);
+        if (target != ProgramOptions.Sap2000 && kind == "slab") return cat.ContainsKey(SlabOverwrites) ? [SlabOverwrites] : [];
+        static string Norm(string x) => new(x.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+        var found = new List<string>();
+        foreach (var prefix in OverwritePrefixes(target, kind))
+            if ((cat.Keys.FirstOrDefault(k => k.Equals(prefix + code, StringComparison.OrdinalIgnoreCase))
+                ?? cat.Keys.FirstOrDefault(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && Norm(k[prefix.Length..]) == Norm(code))) is { } t)
+                found.Add(t);
+        return found;
+    }
+
+    /// <summary>
+    /// ETABS's shear wall design overwrites (Design > Shear Wall Design > View/Revise Pier/Spandrel Overwrites): a row per
+    /// story of each pier or spandrel label, the label first (definition rows by label, not an object's).
+    /// </summary>
+    public static IReadOnlyDictionary<string, List<FormField>> WallOverwriteCatalog() => Load("wall-overwrites-etabs.txt");
+
+    public static bool IsWallOverwrite(string table) => WallOverwriteCatalog().ContainsKey(table);
+
+    public const string SlabOverwrites = "Concrete Slab Design Overwrites - Finite Element Based";
+
+    /// <summary>The overwrite tables for the codes the model's designs have now.</summary>
+    public static HashSet<string> CurrentOverwriteTables(StructuralModel m) =>
+        Designs(m.Target).SelectMany(d => OverwriteTables(m.Target, d.Kind, Code(m, d.Kind) is { Length: > 0 } c ? c : Codes(m.Target, d.Kind).FirstOrDefault() ?? "")).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>True for a design overwrite table of either program.</summary>
+    public static bool IsOverwrite(string table) => OverwriteCatalog(ProgramOptions.Etabs).ContainsKey(table) || OverwriteCatalog(ProgramOptions.Sap2000).ContainsKey(table);
+
+    /// <summary>True for SAP2000's own overwrite tables (keyed by Frame).</summary>
+    public static bool IsSapOverwrite(string table) => OverwriteCatalog(ProgramOptions.Sap2000).ContainsKey(table);
+
+    private static IReadOnlyDictionary<string, List<FormField>> Load(string file)
+    {
         lock (Catalogs)
         {
             if (Catalogs.TryGetValue(file, out var have)) return have;
