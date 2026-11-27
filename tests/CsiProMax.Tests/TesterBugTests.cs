@@ -815,6 +815,12 @@ static class TesterBugTests
             Check(body.Contains("Packs.PackCopy.Read(program, saved,", StringComparison.Ordinal) && body.Contains("if (!IsLive(window.Link)) { Both(window.Link); return; }", StringComparison.Ordinal)
                 && body.Contains("RunDesign(from,", StringComparison.Ordinal) && !body.Contains("ViewerCheck.FieldSteps(ctx, window.Link", StringComparison.Ordinal), "a live program's Viewer and watcher packs are not read from a copy");
         });
+        yield return ("pack: the step by step tables are read from the program again, not from the shared reads of the same model (0.4.67-test4: no pushover curve)", () =>
+        {
+            var src = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Tools/PackTables.cs"));
+            var steps = src[src.IndexOf("public static JsonObject? AddSteps", StringComparison.Ordinal)..src.IndexOf("private static int Col(", StringComparison.Ordinal)];
+            Check(steps.Contains("data = e.ReadTable(t.Key, cases, combos);", StringComparison.Ordinal) && !steps.Contains("Pack.ReadTable(", StringComparison.Ordinal), "the step tables come from the shared reads, which hold the envelopes");
+        });
         yield return ("field test: steps a workaround can test are tested, not left out (Ahmed, 2026-11-26: only a missing program or licence)", () =>
         {
             string Src(string f) => File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant", f));

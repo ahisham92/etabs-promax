@@ -347,7 +347,7 @@ public static class SapFieldSteps
         File cpm-field-test-text.s2k
 
         TABLE:  "PROGRAM CONTROL"
-           ProgramName=SAP2000   Version=26.3.0   CurrUnits="KN, m, C"   SteelCode=AISC360-16   ConcCode="ACI 318-19"
+           ProgramName=SAP2000   Version=26.3.0   CurrUnits="KN, m, C"   SteelCode="AISC 360-16"   ConcCode="ACI 318-19"
 
         TABLE:  "JOINT COORDINATES"
            Joint=1   CoordSys=GLOBAL   CoordType=Cartesian   XorR=0   Y=0   Z=0   SpecialJt=No
