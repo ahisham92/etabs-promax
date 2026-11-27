@@ -205,6 +205,13 @@ public static class ModelerTools
         var path = a.Need("path").Trim().Trim('"');
         if (!File.Exists(path)) throw new ToolInputException($"There is no file at {path}.");
         OfflineEtabs.Opened opened;
+        // ETABS's own model file: read through a hidden ETABS, with what its .e2k does not carry kept (ProgramModelOpen).
+        if (ProgramModelOpen.Takes(path))
+        {
+            try { var r = ProgramModelOpen.Open(path); opened = new OfflineEtabs.Opened(r.Model, false, r.Notes); }
+            catch (Exception ex) when (ex is EtabsException or FieldCheckException or IOException or UnauthorizedAccessException) { throw new ToolInputException($"The model could not be opened: {ex.Message}"); }
+        }
+        else
         try { opened = OfflineEtabs.Open(path); }
         catch (Exception ex) when (ex is E2k.E2kFormatException or JsonException or IOException or InvalidDataException) { throw new ToolInputException($"The file could not be read: {ex.Message}"); }
         o.Replace(opened.Model, OfflineEtabs.SavesTo(path, opened));

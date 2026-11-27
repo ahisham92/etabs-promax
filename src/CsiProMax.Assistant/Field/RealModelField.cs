@@ -206,17 +206,43 @@ public static class RealModelField
         if (status?["pack"] is not JsonObject pack) return;
 
         var analysed = status["analysed_file"]?.GetValue<string>() ?? "";
-        ctx.Step(title + "every model table is the same after the round trip, row by row and field by field", () =>
+        // First what the text file alone carries; what it does not is then put in through the program's tables (the
+        // carry step, as every later run does) and must leave nothing different.
+        Dictionary<string, TableData>? throughText = null;
+        var lostByText = new List<string>();
+        ctx.Step(title + "the model tables after the round trip through the text file alone are read and compared", () =>
         {
             FieldContext.Expect(File.Exists(analysed), $"the Engine's analysed model is not there to compare ({analysed})");
             var b = Packs.PackCopy.Read(program, analysed, ModelTables);
             FieldContext.Expect(b.Value is not null, "the Engine's model could not be read from a copy: " + b.Said);
-            var lost = Compare(a.Model, b.Value!, model: true);
+            throughText = b.Value!;
+            lostByText = Compare(a.Model, throughText, model: true);
             // The whole list beside the model, for the lossless threads: every table, row and field, before and after.
-            File.WriteAllLines(Path.Combine(folder, "model table differences.txt"), lost.Count > 0 ? lost : ["none"]);
-            FieldContext.Expect(lost.Count == 0, $"{lost.Count} difference(s): " + string.Join(" | ", lost.Take(25)));
-            return $"{a.Model.Count} tables, {a.Model.Sum(t => t.Value.Rows.Count):N0} rows, all the same";
+            File.WriteAllLines(Path.Combine(folder, "model table differences.txt"), lostByText.Count > 0 ? lostByText : ["none"]);
+            return lostByText.Count == 0 ? $"{a.Model.Count} tables, {a.Model.Sum(t => t.Value.Rows.Count):N0} rows, all the same"
+                : $"{lostByText.Count} difference(s) the text file does not carry, put in through the tables next: " + string.Join(" | ", lostByText.Take(10));
         });
+        if (throughText is not null)
+            ctx.Step(title + "every model table is the same after the round trip, row by row and field by field", () =>
+            {
+                if (lostByText.Count == 0) return "the text file carried every table";
+                var carried = ProgramCarry.Measure(program, a.Model, throughText);
+                FieldContext.Expect(carried is not null, $"{lostByText.Count} difference(s), and no row to put back was found: " + string.Join(" | ", lostByText.Take(25)));
+                mine.Edit(m => m.Carried = carried);
+                var again = EngineRun.Start(mine, analyse: true, kinds: kinds, keepOpen: false);
+                FieldContext.Expect(again["ok"]?.GetValue<bool>() == true, "the run with the carried rows did not start: " + again["error"]);
+                var until = DateTime.UtcNow.AddMinutes(60);
+                while (EngineRun.Status(false)["done"]?.GetValue<bool>() != true && DateTime.UtcNow < until) Thread.Sleep(2000);
+                var st = EngineRun.Status(true);
+                FieldContext.Expect(string.IsNullOrEmpty(st["error"]?.GetValue<string>()), "the run with the carried rows stopped: " + st["error"]);
+                var file = st["analysed_file"]?.GetValue<string>() ?? "";
+                var b = Packs.PackCopy.Read(program, file, ModelTables);
+                FieldContext.Expect(b.Value is not null, "the Engine's model could not be read from a copy: " + b.Said);
+                var lost = Compare(a.Model, b.Value!, model: true);
+                File.WriteAllLines(Path.Combine(folder, "model table differences after the carry step.txt"), lost.Count > 0 ? lost : ["none"]);
+                FieldContext.Expect(lost.Count == 0, $"{lost.Count} difference(s) after putting back {carried!.Count} row(s) of {carried.Rows.Count} table(s): " + string.Join(" | ", lost.Take(25)));
+                return $"{a.Model.Count} tables, {a.Model.Sum(t => t.Value.Rows.Count):N0} rows, all the same; {carried!.Count} row(s) of {carried.Rows.Count} table(s) the text file does not carry went in through the tables";
+            });
         ctx.Step(title + "the Engine's analysis and design results match the program's own run of your model", () =>
         {
             var b = FromPack(pack);
@@ -233,7 +259,7 @@ public static class RealModelField
 
     /// <summary>The model as text for CSI ProMax: ETABS's own export of it (File > Export > ETABS .e2k, through the
     /// API), or the .$2k SAP2000 keeps beside it, or else SAP2000's own tables of it written as a .s2k.</summary>
-    private static string TextFor(CsiProgram program, ICsiLink link, string copy, string folder)
+    internal static string TextFor(CsiProgram program, ICsiLink link, string copy, string folder)
     {
         if (TwinOf(program, copy) is { } twin) return twin;
         if (program.Key == CsiProgram.Sap2000.Key)
