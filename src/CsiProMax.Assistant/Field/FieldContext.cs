@@ -98,6 +98,13 @@ public sealed class FieldContext(CsiProgram program, string folder, ICsiLink lin
     public T? Step<T>(string name, Func<T> body)
     {
         StillWanted();
+        if (FieldTest.StopRequested)
+        {
+            var stopped = new FieldStep(_section, name, true, "skipped: the run was stopped on request (field-test.stop) before this step", null, true);
+            lock (_gate) Steps.Add(stopped);
+            Live(stopped);
+            return default;
+        }
         if (_gone is { } why && Watched is not null)
         {
             // The window stopped answering earlier in this part: what is left is not tested, said once per step with
