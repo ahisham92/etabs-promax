@@ -6598,6 +6598,30 @@ async function hmStructure(kind) {
     return d;
   }
   if (kind === "group") {
+    if (sapX) {
+      // SAP2000 26.3's Define Group Names and Group Definition: Group Uses in two columns, Check/Uncheck All, Display Color.
+      const left = [["Selection", "Selection"], ["SectionCut", "Section Cut Definition"], ["Steel", "Steel Frame Design Group"], ["Concrete", "Concrete Frame Design Group"], ["Aluminum", "Aluminum Design Group"], ["ColdFormed", "Cold Formed Design Group"], ["ConcShell", "Concrete Shell Design Group"]];
+      const right = [["Stage", "StaticNL Structure Stage"], ["Bridge", "Bridge Response Output"], ["AutoSeismic", "Auto Seismic Force Output"], ["AutoWind", "Auto Wind Force Output"], ["MassWeight", "Mass and Weight Output"]];
+      const on = (g, k) => g && g.uses && k in g.uses ? g.uses[k] : !["AutoSeismic", "AutoWind"].includes(k);
+      const box = (g, [k, t]) => `<label style="display:block;margin:3px 0"><input type="checkbox" data-u="${k}" ${on(g, k) ? "checked" : ""}> ${t}</label>`;
+      const find = n => sd.groups.find(x => x.name === n);
+      const sap = (g, copy) => {
+        let color = g ? g.color : matColors[sd.groups.length % matColors.length];
+        const d = dialog("Group Definition", `<fieldset><div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px"><span>Group Name</span><input id="zN" style="width:150px" value="${esc(g ? (copy ? g.name + " copy" : g.name) : "GROUP" + sd.groups.length)}" ${g && !copy ? "disabled" : ""}></div></fieldset>
+          <fieldset><legend>Group Uses</legend><div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px"><div>${left.map(x => box(g, x)).join("")}</div><div>${right.map(x => box(g, x)).join("")}</div></div>
+            <div style="text-align:center;margin-top:8px"><button id="zAll">Check/Uncheck All</button></div></fieldset>
+          <div style="display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-top:6px">Display Color <button id="zC" style="width:22px;height:18px;padding:0;background:${matColorCss(color)}"></button></div>`,
+          [["OK", d => submit(d, "define_group", {name: q(d, "#zN").value.trim(), color, uses: Object.fromEntries([...d.querySelectorAll("[data-u]")].map(x => [x.dataset.u, x.checked]))}, again)], ["Cancel"]], {width: 460});
+        q(d, "#zAll").onclick = () => { const b = [...d.querySelectorAll("[data-u]")], v = !b.every(x => x.checked); b.forEach(x => x.checked = v); };
+        q(d, "#zC").onclick = () => hmColor(color, c => { color = c; q(d, "#zC").style.background = matColorCss(c); });
+        return d;
+      };
+      const d = listForm("Define Group Names", "Groups", sd.groups.map(x => x.name), [["Add New Group...", () => sap(null)], ["Modify/Show Group...", n => n && sap(find(n))], ["Modify Multiple...", () => {}], ["Delete Group", n => n && n !== "ALL" && del("define_group", {name: n})]], n => sap(find(n)));
+      d.querySelectorAll("[data-a]")[2].disabled = true;
+      const L = q(d, "#hmList"), delB = d.querySelectorAll("[data-a]")[3];
+      const st = () => { delB.disabled = !L.value || L.value === "ALL"; }; L.addEventListener("change", st); st();
+      return d;
+    }
     // ETABS's Group Definitions have Steel / Concrete / Composite design; SAP2000's Groups 1 - Definitions every use.
     const usesFor = sapX ? [["Selection", "Selection"], ["SectionCut", "Section Cut Definition"], ["Steel", "Steel Design"], ["Concrete", "Concrete Design"], ["Aluminum", "Aluminum Design"], ["ColdFormed", "Cold Formed Design"], ["Stage", "Staged Construction"], ["Bridge", "Bridge Response Output"], ["AutoSeismic", "Auto Seismic Output"], ["AutoWind", "Auto Wind Output"], ["MassWeight", "Mass and Weight"]]
       : [["Steel", "Steel Design"], ["Concrete", "Concrete Design"], ["Composite", "Composite Beam Design"]];
@@ -7319,13 +7343,15 @@ async function hmCase(c, a, after, copy) {
 async function hmMass() {
   const a = await hmAnalysis(), ms = a.mass_source;
   const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmMass(); };
-  const d = listForm(program === "sap2000" ? "Define Mass Source" : "Mass Sources", "Mass Sources", [ms.name], [
+  // SAP2000 26.3's "Mass Source" (read on Ahmed's PC): Click to: without Make Default, and a Default Mass Source box below it.
+  const sap = program === "sap2000";
+  const d = listForm(sap ? "Mass Source" : "Mass Sources", "Mass Sources", [ms.name], [
     ["Add New Mass Source...", () => hmSay("The model keeps one mass source, the default: Modify/Show changes it.", true)],
     ["Add Copy of Mass Source...", () => hmSay("The model keeps one mass source, the default: Modify/Show changes it.", true)],
     ["Modify/Show Mass Source...", () => hmMassData(again)],
     ["Delete Mass Source", () => hmSay("The default mass source cannot be deleted.", true)],
-    ["Make Default", () => hmSay(ms.name + " is the default mass source.")],
-  ], () => hmMassData(again));
+    ...(sap ? [] : [["Make Default", () => hmSay(ms.name + " is the default mass source.")]]),
+  ], () => hmMassData(again), sap ? `<fieldset style="margin:8px 0 0"><legend>Default Mass Source</legend><select style="width:100%"><option>${esc(ms.name)}</option></select></fieldset>` : "");
   d.querySelectorAll("[data-a]").forEach(b => { if (!/Modify/.test(b.textContent)) b.disabled = !/Default/.test(b.textContent) || false; });
 }
 async function hmMassData(after) {

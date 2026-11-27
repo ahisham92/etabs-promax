@@ -20,7 +20,7 @@ public static class StructureExtras
     /// <summary>The fields each table keeps, by the program's field names.</summary>
     public static readonly IReadOnlyDictionary<string, string[]> Fields = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
     {
-        [GroupTable] = ["Steel", "Concrete", "Composite", "Selection", "SectionCut", "Aluminum", "ColdFormed", "Stage", "Bridge", "AutoSeismic", "AutoWind", "MassWeight"],
+        [GroupTable] = ["Steel", "Concrete", "Composite", "Selection", "SectionCut", "Aluminum", "ColdFormed", "Stage", "Bridge", "AutoSeismic", "AutoWind", "MassWeight", "ConcShell"],
         [CutTable] = ["ResultType", "ResultLoc", "LocX", "LocY", "LocZ", "RotAboutZ", "RotAboutY", "RotAboutX"],
         [SpandrelTable] = ["MultiStory"],
         ["Spring Property Definitions - Point Springs"] = ["NonlinOpt", "Color", "Notes"],
@@ -61,7 +61,7 @@ public static class StructureExtras
     /// <summary>Fields only SAP2000's table has; left out of the row put into ETABS.</summary>
     public static readonly IReadOnlyDictionary<string, string[]> SapOnly = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
     {
-        [GroupTable] = ["Selection", "SectionCut", "Aluminum", "ColdFormed", "Stage", "Bridge", "AutoSeismic", "AutoWind", "MassWeight"],
+        [GroupTable] = ["Selection", "SectionCut", "Aluminum", "ColdFormed", "Stage", "Bridge", "AutoSeismic", "AutoWind", "MassWeight", "ConcShell"],
     };
 
     public static IReadOnlyDictionary<string, string> Get(StructuralModel m, string table, string name) =>

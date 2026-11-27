@@ -39,7 +39,7 @@ public static class StructureTools
             Ask.Changes, AssignLabel, a => "Assign pier and spandrel labels"),
         new("define_group",
             "Adds, changes or deletes a group (Define > Groups), with its color. Deleting a group takes its objects out of it, and refuses while a section cut uses it.",
-            """{"type":"object","required":["name"],"properties":{"name":{"type":"string"},"color":{"type":"string"},"delete":{"type":"boolean"},"uses":{"type":"object","additionalProperties":{"type":"boolean"},"description":"What the group is used for, by the program's field names: Steel, Concrete, Composite (design groups); SAP2000 also Selection, SectionCut, Aluminum, ColdFormed, Stage, Bridge, AutoSeismic, AutoWind, MassWeight."}}}""",
+            """{"type":"object","required":["name"],"properties":{"name":{"type":"string"},"color":{"type":"string"},"delete":{"type":"boolean"},"uses":{"type":"object","additionalProperties":{"type":"boolean"},"description":"What the group is used for, by the program's field names: Steel, Concrete, Composite (design groups); SAP2000 also Selection, SectionCut, Aluminum, ColdFormed, Stage, Bridge, AutoSeismic, AutoWind, MassWeight, ConcShell (Concrete Shell Design Group, held by the Engine)."}}}""",
             Ask.Changes, DefineGroup, a => $"{(a.Flag("delete") ? "Delete" : "Define")} the group {a.Text("name")}"),
         new("assign_group_data",
             "Puts frames, slabs and walls (label@story) and joints (point@story, with joints) in a group, or takes them out with remove (Assign > Assign Objects to Group). The group is made when it is not there.",
