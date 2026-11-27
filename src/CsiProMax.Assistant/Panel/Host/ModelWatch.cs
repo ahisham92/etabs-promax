@@ -51,6 +51,12 @@ internal static class ModelWatch
     internal static void Read()
     {
         if (_link is not { } link || Interlocked.Exchange(ref _busy, 1) == 1) return;
+        // A program busy with a run, a design or a long command is not asked anything: the next look comes in 3 s.
+        if (CsiProMax.App.EtabsPid is { } pid && OperatingSystem.IsWindows() && !CsiProMax.Assistant.Packs.PackWatcher.Responding(pid))
+        {
+            Volatile.Write(ref _busy, 0);
+            return;
+        }
         try
         {
             var file = link.Info().File ?? "";

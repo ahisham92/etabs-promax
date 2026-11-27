@@ -47,6 +47,26 @@ public static class PackWatcher
     /// <summary>Off unless the engineer turned it on, and off whenever packs-off.txt is there.</summary>
     public static bool Off => File.Exists(OffFile) || !File.Exists(ChosenFile);
 
+    /// <summary>
+    /// The switch in Settings (Background work): on writes packs-on.txt and removes packs-off.txt, and starts the watcher;
+    /// off does the opposite. A running watcher looks at <see cref="Off"/> every round, so it stops within one round.
+    /// </summary>
+    public static void SetAutomatic(bool on)
+    {
+        Directory.CreateDirectory(StateRoot);
+        if (on)
+        {
+            File.WriteAllText(ChosenFile, "on");
+            if (File.Exists(OffFile)) File.Delete(OffFile);
+            EnsureRunning();
+        }
+        else
+        {
+            File.WriteAllText(OffFile, "off");
+            if (File.Exists(ChosenFile)) File.Delete(ChosenFile);
+        }
+    }
+
     /// <summary>How often each program is looked at.</summary>
     public static TimeSpan Every { get; set; } = TimeSpan.FromSeconds(10);
 
@@ -144,7 +164,7 @@ public static class PackWatcher
     }
 
     /// <summary>Whether the program's window answers now (Windows asks it with a short wait). A process that is gone answers false.</summary>
-    private static bool Responding(int pid)
+    internal static bool Responding(int pid)
     {
         try { using var p = Process.GetProcessById(pid); return !p.HasExited && p.Responding; }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException) { return false; }

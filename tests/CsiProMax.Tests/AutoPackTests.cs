@@ -207,5 +207,27 @@ static class AutoPackTests
             }
             finally { PackWatcher.StateRoot = keep; Directory.Delete(folder, true); }
         });
+
+        yield return ("auto pack: the switch in Settings turns the watcher off and on at once, and the window never asks a busy program anything", () =>
+        {
+            var keep = PackWatcher.StateRoot;
+            var folder = Path.Combine(Path.GetTempPath(), "cpm-packs-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(folder);
+            try
+            {
+                PackWatcher.StateRoot = folder;
+                PackWatcher.SetAutomatic(false);
+                Check(PackWatcher.Off && File.Exists(PackWatcher.OffFile) && !File.Exists(PackWatcher.ChosenFile), "off writes packs-off.txt and removes packs-on.txt");
+                PackWatcher.SetAutomatic(true);
+                Check(!PackWatcher.Off && !File.Exists(PackWatcher.OffFile) && File.Exists(PackWatcher.ChosenFile), "on writes packs-on.txt and removes packs-off.txt");
+                PackWatcher.SetAutomatic(false);
+                Check(PackWatcher.Off, "off again after on");
+            }
+            finally { PackWatcher.StateRoot = keep; Directory.Delete(folder, true); }
+            var settings = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Panel/UI/SettingsWindow.cs"));
+            Check(settings.Contains("PackWatcher.SetAutomatic(") && settings.Contains("Background work"), "Settings has the Background work switch");
+            var watch = File.ReadAllText(Path.Combine(SourceText.Root(), "src/CsiProMax.Assistant/Panel/Host/ModelWatch.cs"));
+            Check(watch.Contains("PackWatcher.Responding(pid)"), "the window's model watch skips a program that does not answer");
+        });
     }
 }
