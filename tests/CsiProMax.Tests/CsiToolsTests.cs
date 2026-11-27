@@ -648,6 +648,7 @@ public sealed class FakeApi
 
     public sealed class AreaApi(FakeApi o)
     {
+        public int GetNameFromLabel(string Label, string Story, ref string Name) { Name = Label == "F1" && Story == "Story3" ? "9" : ""; return Name.Length > 0 ? 0 : 1; }
         public int SetDiaphragm(string Name, string DiaphragmName) { o.AreaDiaphragm[Name] = DiaphragmName; return 0; }
         public int GetDiaphragm(string Name, ref string DiaphragmName) { DiaphragmName = o.AreaDiaphragm.GetValueOrDefault(Name, ""); return 0; }
         public int SetGroupAssign(string Name, string GroupName, bool Remove = false, int ItemType = 0) { o.Group.Add(Name); return 0; }
