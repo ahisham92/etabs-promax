@@ -1002,6 +1002,7 @@ foreach (var (name, body) in AutoPackTests.All()) Test(name, body);
 foreach (var (name, body) in PackSpeedTests.All()) Test(name, body);
 foreach (var (name, body) in LargeModelTests.All()) Test(name, body);
 foreach (var (name, body) in OpenFileTests.All()) Test(name, body);
+foreach (var (name, body) in LosslessTests.All()) Test(name, body);
 foreach (var (name, body) in SafeLosslessTests.All()) Test(name, body);
 Test("set_section: a frame or area that is not in the model is reported as failed (ETABS 23 says done to it)", () =>
 {
@@ -1129,6 +1130,7 @@ foreach (var (name, body) in SapSourceTests.All()) Test(name, body);
 foreach (var (name, body) in EditTests.All()) Test(name, body);
 foreach (var (name, body) in AssignTablesTests.All()) Test(name, body);
 foreach (var (name, body) in DefineTablesTests.All()) Test(name, body);
+foreach (var (name, body) in SapLoadTablesTests.All()) Test(name, body);
 foreach (var (name, body) in ReadableTests.All()) Test(name, body);
 foreach (var (name, body) in SlabTests.All()) Test(name, body);
 foreach (var (name, body) in FuzzTests.All()) Test(name, body);

@@ -223,6 +223,8 @@ public static partial class S2kReader
         if (notRun.Count > 0) RunCases.SetNotRun(m, notRun);
         Loads(m, Use, joints, frameAt, areaAt, Where, storyNames, notes);
 
+        // SAP2000's own load tables (every Load Pattern, Load Case and Load Combination field) go into its load forms.
+        SapLoadTables.Read(m, t, known);
         // SAP2000's own per-object assignment and load tables (SapObjectTables) onto each object's Assign.Tables, every
         // field as the file has it, so they follow the object; a table naming an object the Modeler has not got stays kept.
         foreach (var name in t.Keys.Where(k => !known.Contains(k) && SapObjectTables.Has(k)).ToList())
@@ -583,8 +585,6 @@ public static partial class S2kReader
             var name = S(r, "LoadPat");
             if (name.Length == 0 || m.LoadPatterns.Exists(p => p.Name == name)) continue;
             m.LoadPatterns.Add(new LoadPattern { Name = name, Type = PatternType(S(r, "DesignType")), SelfWeight = D(r, "SelfWtMult") });
-            if (S(r, "AutoLoad") is { Length: > 0 } auto && !auto.Equals("None", StringComparison.OrdinalIgnoreCase))
-                notes.Add($"Load pattern {name} has SAP2000's automatic {auto} load: set it again in the Modeler (Define > Load Patterns > Modify Lateral Load).");
         }
     }
 
