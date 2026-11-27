@@ -17,5 +17,7 @@
     <EmbeddedResource Include="Seeds/overwrites-sap2000.txt" LogicalName="overwrites-sap2000.txt" />
     <EmbeddedResource Include="Seeds/wall-overwrites-etabs.txt" LogicalName="wall-overwrites-etabs.txt" />
     <EmbeddedResource Include="Seeds/forms-sap2000.txt" LogicalName="forms-sap2000.txt" />
+    <!-- SAFE's own tables and fields, from SAFE's own .f2k exports (SafeTables). -->
+    <EmbeddedResource Include="Seeds/tables-safe.txt" LogicalName="tables-safe.txt" />
   </ItemGroup>
 </Project>

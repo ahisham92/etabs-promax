@@ -145,7 +145,8 @@ public static class DefineTools
     {
         var link = Offline(e);
         var table = a.Need("table");
-        var name = a.Need("name").Trim();
+        // A one-row options table of SAFE's (preferences, analysis options) has no definition name.
+        var name = SafeTables.Full(table) is { } safe && SafeTables.KeyField(safe) is null ? a.Text("name").Trim() : a.Need("name").Trim();
         if (!a.TryGetProperty("rows", out var r) || r.ValueKind != JsonValueKind.Array) throw new ToolInputException("rows is a list of {field: value}.");
         using var wrap = JsonDocument.Parse(new JsonObject { ["tables"] = new JsonObject { [table] = JsonNode.Parse(r.GetRawText()) } }.ToJsonString());
         var rows = PropertyTools.AssignRows(wrap.RootElement)![table];
@@ -155,7 +156,8 @@ public static class DefineTools
             var full = DefineTables.FullName(table)!;
             if (full == DefineTables.SapFrameGeneral || full == DefineTables.SapAreaSections) DefineTables.SyncSapSection(m, full, name);
             else if (full == DefineTables.SapLinkGeneral) DefineTables.SyncSapLink(m, name);
-            return (JsonNode)new JsonObject { ["table"] = full, ["name"] = name, ["rows"] = m.DefinitionTables?.GetValueOrDefault(full)?.Count(x => x.GetValueOrDefault(DefineTables.KeyField(full)) == name) ?? 0 };
+            var key = DefineTables.KeyField(full);
+            return (JsonNode)new JsonObject { ["table"] = full, ["name"] = name, ["rows"] = m.DefinitionTables?.GetValueOrDefault(full)?.Count(x => key.Length == 0 || x.GetValueOrDefault(key) == name) ?? 0 };
         }));
     }
 
@@ -176,6 +178,23 @@ public static class DefineTools
                 ["fields"] = new JsonArray(fields.Select(f => (JsonNode)new JsonArray(f.Key, f.Label)).ToArray()),
                 ["rows"] = new JsonArray((m.DefinitionTables?.GetValueOrDefault(name) ?? []).Select(x => (JsonNode)Obj(x)).ToArray()),
             };
+        // SAFE's own definition and option tables (the Engine's SAFE forms): every one SAFE writes, with SAFE's field names
+        // (as [name, name]; the rows are kept by them), the API key of each field, the choices SAFE wrote, the rows the forms
+        // set, and the rows of SAFE's own file the model was read from (file_rows: what SAFE has where a form set nothing).
+        if (m.Target == ProgramOptions.Safe)
+            foreach (var t in SafeTables.FormTables)
+            {
+                var full = SafeTables.Prefix + t;
+                tables[full] = new JsonObject
+                {
+                    ["fields"] = new JsonArray(SafeTables.All[t].Select(f => (JsonNode)new JsonArray(f.Label, f.Label)).ToArray()),
+                    ["keys"] = new JsonArray(SafeTables.All[t].Select(f => (JsonNode)f.Key).ToArray()),
+                    ["key_field"] = SafeTables.KeyField(full),
+                    ["choices"] = new JsonObject(SafeTables.Seen[t].Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)new JsonArray(kv.Value.Select(v => (JsonNode)v).ToArray())))),
+                    ["rows"] = new JsonArray((m.DefinitionTables?.GetValueOrDefault(full) ?? []).Select(x => (JsonNode)Obj(x)).ToArray()),
+                    ["file_rows"] = new JsonArray((m.Kept?.GetValueOrDefault("model|SAFE SOURCE|" + t.ToUpperInvariant()) ?? []).Select(x => (JsonNode)Obj(x)).ToArray()),
+                };
+            }
         // SAP2000's own load tables (Define > Load Patterns, Load Cases, Load Combinations) the model has rows of.
         if (m.Target == ProgramOptions.Sap2000)
             foreach (var (name, rows) in (m.DefinitionTables ?? []).Where(t => SapLoadTables.Has(t.Key)))

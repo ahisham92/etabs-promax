@@ -4901,6 +4901,7 @@ function modelerMenus(m) {
     of.forEach((f, i) => { const it = [f.item, "m:oform:" + i]; if (!f.group) return items.push(it); let g = groups.find(x => x[0] === f.group); if (!g) groups.push(g = [f.group, []]); g[1].push(it); });
     m.Options = [...groups, ...items, 0, ...(m.Options || [])];
   }
+  if (program === "safe") m.Tools = [...(m.Tools || []), 0, ["SAFE Definition Tables...", "m:sf:"]];
   if (fm.designs.length) m.Design = [...fm.designs.map(d => [d.name, [["View/Revise Preferences...", "m:pref:" + d.design], ...(d.design === "shear_wall" ? (d.overwrites || []).map(t => [/Spandrel/.test(t) ? "View/Revise Spandrel Overwrites..." : "View/Revise Pier Overwrites...", "m:dt:" + t]) : (d.overwrites || []).length ? [["View/Revise Overwrites...", "m:over:" + d.design, "", !hmSelected(d.design === "slab" ? "a" : "f").length]] : []), ...(window.cpmLive ? [["Start Design/Check...", "eng:design"]] : [])]]), 0, ...(m.Design || [])];
   return m;
 }
@@ -5010,6 +5011,96 @@ function hmDefineMenu() {
     fns, ["Load Patterns...", "m:patterns"], dt("Shell Uniform Load Sets..."), ["Load Cases...", "m:cases"], ["Load Combinations...", "m:combos"], dt("Auto Construction Sequence..."), dt("Walking Vibrations..."), ["Mass Source...", "m:mass"], ["P-Delta Options...", "m:pdelta"], 0,
     ["Hyperstatic Load Cases...", "m:ex:hyperstatic"], ["Punching Shear Overwrites...", "m:ex:punching"], ["Floor Openings...", "m:ex:openings"], ["Slab Line Releases...", "m:ex:linereleases"]];
 }
+// ---- SAFE forms (Ahmed 2026-11-27: every SAFE form identical to SAFE 23's, every option working) ----
+// Each SAFE form of the Engine's SAFE menus, with SAFE's own tables behind it ("SAFE | <table>", by the names SAFE's own
+// .f2k gives them: Core Seeds/tables-safe.txt). A form gets its "build" (laid out as SAFE shows it) only from a real SAFE
+// screenshot (field/reference-forms/safe); until then hmSafe opens the form the Engine has (ETABS's layout), and every
+// field of the form's SAFE tables can be set in hmSafeTable (Tools > SAFE Definition Tables...).
+const safeForms = {
+  materials: {title: null, tables: ["SAFE | Material Properties - General", "SAFE | Material Properties - Basic Mechanical Properties", "SAFE | Material Properties - Concrete Data", "SAFE | Material Properties - Rebar Data", "SAFE | Material Properties - Tendon Data", "SAFE | Material Properties - Steel Data"], pictured: false},
+  slabProperties: {title: null, tables: ["SAFE | Slab Property Definitions", "SAFE | Deck Property Definitions"], pictured: false},
+  beamProperties: {title: null, tables: ["SAFE | Frame Section Property Definitions - Concrete Rectangular", "SAFE | Frame Section Property Definitions - Steel I/Wide Flange", "SAFE | Frame Section Property Definitions - Auto Select List"], pictured: false},
+  tendonProperties: {title: null, tables: ["SAFE | Tendon Section Properties"], pictured: false},
+  rebarSizes: {title: "Reinforcement Bar Sizes", tables: ["SAFE | Reinforcing Bar Sizes"], pictured: true},
+  soilProperties: {title: null, tables: [], pictured: false},
+  pointSprings: {title: null, tables: [], pictured: false},
+  lineSprings: {title: null, tables: [], pictured: false},
+  wallProperties: {title: null, tables: ["SAFE | Wall Property Definitions - Specified"], pictured: false},
+  linkProperties: {title: null, tables: ["SAFE | Link Property Definitions - Linear"], pictured: false},
+  loadPatterns: {title: null, tables: ["SAFE | Load Pattern Definitions"], pictured: false},
+  loadCases: {title: null, tables: ["SAFE | Load Case Definitions - Linear Static", "SAFE | Modal Case Definitions - Eigen", "SAFE | Load Case Definitions - Hyperstatic"], pictured: false},
+  loadCombinations: {title: null, tables: ["SAFE | Load Combination Definitions"], pictured: false},
+  hyperstatic: {title: null, tables: ["SAFE | Load Case Definitions - Hyperstatic"], pictured: false},
+  groups: {title: "Define Group Names", tables: ["SAFE | Group Definitions"], pictured: true},
+  sectionCuts: {title: "Section Cut Data", tables: [], pictured: true},
+  massSource: {title: null, tables: ["SAFE | Mass Source Definition"], pictured: true},
+  responseSpectrum: {title: null, tables: [], pictured: false},
+  punching: {title: null, tables: [], pictured: false},
+  openings: {title: null, tables: [], pictured: false},
+  lineReleases: {title: null, tables: [], pictured: false},
+  namedSets: {title: null, tables: ["SAFE | Database Table Named Set Definitions"], pictured: false},
+  projectInfo: {title: null, tables: ["SAFE | Project Information"], pictured: false},
+  analysisModeling: {title: null, tables: ["SAFE | Analysis Modeling Options"], pictured: false},
+  analysisOptions: {title: null, tables: ["SAFE | Analysis Options - SAPFire Options", "SAFE | Analysis Options - Design and Response Recovery Options"], pictured: false},
+  meshFloors: {title: null, tables: ["SAFE | Analysis Options - Automatic Mesh Settings for Floors"], pictured: false},
+  meshWalls: {title: null, tables: ["SAFE | Analysis Options - Automatic Rectangular Mesh Options for Walls"], pictured: false},
+  cracking: {title: null, tables: ["SAFE | Analysis Options - Cracking Analysis Options"], pictured: false},
+  slabDesignPrefs: {title: null, tables: ["SAFE | Concrete Slab Design Preferences - ACI 318-19"], pictured: false},
+  slabDesignCombos: {title: null, tables: ["SAFE | Concrete Slab Design Load Combination Data"], pictured: false},
+  concreteFramePrefs: {title: null, tables: ["SAFE | Concrete Frame Design Preferences - ACI 318-19", "SAFE | Concrete Design Preferences - ACI 318-19"], pictured: false},
+  compositeBeamPrefs: {title: null, tables: ["SAFE | Composite Beam Design Preferences - AISC 360-10"], pictured: false},
+  tolerances: {title: null, tables: ["SAFE | Preferences - Tolerance"], pictured: false},
+  graphics: {title: null, tables: ["SAFE | Preferences - Graphics"], pictured: false},
+  colorsDisplay: {title: null, tables: ["SAFE | Options - Colors - Display"], pictured: false},
+  colorsOutput: {title: null, tables: ["SAFE | Options - Colors - Output"], pictured: false},
+  misc: {title: null, tables: ["SAFE | Miscellaneous Options"], pictured: false},
+};
+// The form a SAFE menu item opens: SAFE's own (its build) once it is made from SAFE's picture, else the Engine's.
+// safeVia names the form being opened through its fallback, so the fallback's own SAFE check does not come back here.
+let safeVia = "";
+function hmSafe(key, fallback) {
+  const f = safeForms[key];
+  if (f && typeof f.build === "function") return f.build();
+  safeVia = key;
+  try { return fallback(); } finally { safeVia = ""; }
+}
+// Tools > SAFE Definition Tables...: SAFE's own definition and option tables, each opening hmSafeTable.
+async function hmSafeTables(pick) {
+  const dd = (await hmRun("definition_data", {}, true)).result; if (!dd) return;
+  const all = Object.keys(dd.tables || {}).filter(t => t.startsWith("SAFE | "));
+  if (!all.length) return hmSay("The model has no SAFE tables (Options > Program: SAFE first).", true);
+  if (pick && all.includes(pick)) return hmSafeTable(pick, "", dd);
+  const d = dialog("SAFE Definition Tables", `<p class="kv" style="margin-top:0">SAFE's own tables, by the names SAFE gives them. A value left blank is SAFE's own default.</p>
+    <select id="sfT" size="16" style="width:100%">${all.map(t => `<option value="${esc(t)}">${esc(t.slice(7))}</option>`).join("")}</select>`,
+    [["Open...", d => { const t = q(d, "#sfT").value; if (t) hmSafeTable(t, "", null); return false; }, 1], ["Close"]], {width: 520});
+  q(d, "#sfT").ondblclick = () => { const t = q(d, "#sfT").value; if (t) hmSafeTable(t, "", null); };
+}
+// One SAFE table as a form: every field SAFE has, the value the Engine's form set, else what SAFE's own file had, else
+// blank (SAFE's default). A choice field offers the values SAFE writes. A definition table asks which definition first.
+async function hmSafeTable(full, name, dd) {
+  dd = dd || (await hmRun("definition_data", {}, true)).result; if (!dd) return;
+  const t = (dd.tables || {})[full]; if (!t) return hmSay("SAFE has no table " + full.replace(/^SAFE \| /, "") + ".", true);
+  const kf = t.key_field || null, rows = t.rows || [], file = t.file_rows || [];
+  if (kf && !name) {
+    const names = [...new Set([...rows, ...file].map(r => r[kf]).filter(Boolean))];
+    const again = () => hmSafeTable(full, "", null);
+    return listForm(full.slice(7), kf === "Material" ? "Materials" : "Names", names, [
+      ["Add New...", () => dialog("Add New", `<div class="g2"><span>${esc(kf)}</span><input id="sfN"></div>`, [["OK", d => { const v = q(d, "#sfN").value.trim(); if (!v) return false; hmSafeTable(full, v, null); }], ["Cancel"]], {width: 340})],
+      ["Modify/Show...", n => n && hmSafeTable(full, n, null)],
+      ["Delete", n => n && hmRun("define_table_rows", {table: full, name: n, rows: []}).then(j => j.ok && again())],
+    ], n => hmSafeTable(full, n, null));
+  }
+  const mine = rows.filter(r => !kf || r[kf] === name), theirs = file.filter(r => !kf || r[kf] === name), n = Math.max(1, mine.length, theirs.length);
+  const fields = (t.fields || []).map(f => f[0]).filter(f => f !== kf && !/GUID/i.test(f)), ch = t.choices || {};
+  const cell = (f, i) => { const v = ((mine[i] || {})[f] ?? (theirs[i] || {})[f] ?? "") + "";
+    return ch[f] && ch[f].length ? `<select data-f="${esc(f)}" data-r="${i}"><option value=""${v ? "" : " selected"}>(SAFE default)</option>${opts(ch[f], v)}</select>` : `<input data-f="${esc(f)}" data-r="${i}" value="${esc(v)}">`; };
+  const body = Array.from({length: n}, (_, i) => `<fieldset>${n > 1 ? `<legend>Row ${i + 1}</legend>` : ""}<div class="g2">${fields.map(f => `<span>${esc(f)}</span>${cell(f, i)}`).join("")}</div></fieldset>`).join("");
+  dialog(full.slice(7) + (kf ? " - " + name : ""), `<div class="scroll" style="max-height:60vh">${body}</div>`, [["OK", d => {
+    const out = Array.from({length: n}, () => ({}));
+    d.querySelectorAll("[data-f]").forEach(e => { if (e.value.trim()) out[+e.dataset.r][e.dataset.f] = e.value.trim(); });
+    hmRun("define_table_rows", {table: full, name: kf ? name : "", rows: out.filter(r => Object.keys(r).length)}).then(j => { if (j.ok) hmSay(full.slice(7) + (kf ? " " + name : "") + " set."); });
+  }], ["Cancel"]], {width: 560});
+}
 // ETABS's Edit > Edit Stories and Grid Systems...: the stories and the grid systems, each with its Modify/Show button.
 function hmStoryGrid() {
   const defs = hm.defs || {}, gs = (defs.grid_system || {}).name || "G1";
@@ -5028,6 +5119,7 @@ async function modelAct(a) {
   if (a.startsWith("st:")) return hmStructure(a.slice(3));
   if (a.startsWith("sa:")) return hmAssignStructure(a.slice(3));
   if (a.startsWith("ex:")) return hmExtras(a.slice(3));
+  if (a.startsWith("sf:")) return hmSafeTables(a.slice(3));
   if (a.startsWith("pref:")) { await hmDefs(); return hmPrefs(a.slice(5)); }
   if (a.startsWith("pform:")) { await hmDefs(); return hmProgForm(+a.slice(6)); }
   if (a.startsWith("over:")) { await hmDefs(); return hmOverwrites(a.slice(5)); }
@@ -5582,6 +5674,7 @@ const matOpts = (defs, v) => { const list = defs.materials.filter(m => /concrete
 // ---- Define: materials ----
 async function hmMaterials() {
   if (program === "sap2000") return hmSapMaterials();
+  if (program === "safe" && safeVia !== "materials") return hmSafe("materials", hmMaterials);
   const defs = await hmDefs();
   const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmMaterials(); };
   listForm("Define Materials", "Materials", defs.materials.map(m => m.name), [
@@ -6238,6 +6331,7 @@ const usTo = (v, k, u) => { const l = (uLen[u.l] || 1) / 39.37008, f = (uForce[u
 // and Copy to SD Section; Export to XML File) with OK and Cancel under them.
 async function hmFrameSections() {
   if (program === "sap2000") return hmSapFrameSections();
+  if (program === "safe" && safeVia !== "beamProperties") return hmSafe("beamProperties", hmFrameSections);
   const defs = await hmDefs(), pd = (await hmRun("property_definitions", {}, true)).result || {frame_sections: []};
   const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmFrameSections(); };
   const find = n => defs.frame_sections.find(s => s.name === n);
@@ -7084,6 +7178,7 @@ function hmDeck(s, pd, after, copy) {
 }
 async function hmShellSections(kind) {
   if (program === "sap2000") return hmSapAreaSections();
+  if (program === "safe" && !["slabProperties", "wallProperties"].includes(safeVia)) return hmSafe(kind === "wall" ? "wallProperties" : "slabProperties", () => hmShellSections(kind));
   const defs = await hmDefs(), sap = program === "sap2000";
   if (!sap && !kind) kind = "slab";
   const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmShellSections(kind); };
@@ -8328,6 +8423,7 @@ function sapNotes(title, name, text, save) {
 // ---- Define: load patterns (SAP2000's Define Load Patterns: the edit row, then the list) ----
 async function hmPatterns() {
   if (program === "sap2000") return hmSapPatterns();
+  if (program === "safe" && safeVia !== "loadPatterns") return hmSafe("loadPatterns", hmPatterns);
   const defs = await hmDefs(), sapP = program === "sap2000";
   // The words each program's Define Load Patterns uses: ETABS "Load" and "Add New Load"; SAP2000 "Load Pattern Name" and "Add New Load Pattern".
   const W = sapP ? {name: "Load Pattern Name", auto: "Auto Lateral Load Pattern", add: "Add New Load Pattern", mod: "Modify Load Pattern", lat: "Modify Lateral Load Pattern...", del: "Delete Load Pattern"}
@@ -8407,6 +8503,7 @@ async function hmLateral(p, after) {
 
 // ---- Define: load combinations (SAP2000's Define Load Combinations, then Load Combination Data) ----
 async function hmCombos() {
+  if (program === "safe" && safeVia !== "loadCombinations") return hmSafe("loadCombinations", hmCombos);
   const defs = await hmDefs();
   const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmCombos(); };
   const find = n => defs.combinations.find(c => c.name === n);
@@ -10814,6 +10911,7 @@ SAP_RS["Venezuela COVENIN 1756-2:2019"] = {
 // Define > Load Cases as the programs show it: a table of Load Case Name and Load Case Type, and Click to: Add New Case,
 // Add Copy of Case, Modify/Show Case, Delete Case, Show Load Case Tree.
 async function hmCases() {
+  if (program === "safe" && safeVia !== "loadCases") return hmSafe("loadCases", hmCases);
   const a = await hmAnalysis();
   const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmCases(); };
   const find = n => a.load_cases.find(c => c.name === n);
@@ -10941,6 +11039,7 @@ async function hmCase(c, a, after, copy) {
 // Add / Modify / Delete); Mass Options (Include Lateral Mass, Include Vertical Mass, Lump Lateral Mass at Story Levels).
 // SAP2000: the name, Element Self Mass and Additional Mass, Specified Load Patterns, and the multipliers.
 async function hmMass() {
+  if (program === "safe" && safeVia !== "massSource") return hmSafe("massSource", hmMass);
   const a = await hmAnalysis(), ms = a.mass_source;
   const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmMass(); };
   // SAP2000 26.3's "Mass Source" (read on Ahmed's PC): Click to: without Make Default, and a Default Mass Source box below it.
