@@ -150,8 +150,17 @@ public static partial class ModelUnits
             s.Height = S(s.Height, Dim.Len); s.Elevation = S(s.Elevation, Dim.Len);
             Tokens(s.Extra, k => k.Equals("SPLICEHEIGHT", StringComparison.OrdinalIgnoreCase) ? Dim.Len : Dim.None, K);
         }
-        foreach (var g in m.Grids) g.Coordinate = S(g.Coordinate, Dim.Len);
+        // A cylindrical system's T lines are at angles, which no units change touches.
+        foreach (var g in m.Grids) g.Coordinate = g.Direction.Equals("T", StringComparison.OrdinalIgnoreCase) ? g.Coordinate : S(g.Coordinate, Dim.Len);
         Tokens(m.GridSystemExtra, k => k.Equals("BUBBLESIZE", StringComparison.OrdinalIgnoreCase) ? Dim.Len : Dim.None, K);
+        foreach (var system in m.MoreGridSystems)
+        {
+            Tokens(system.Extra, k => k.Equals("BUBBLESIZE", StringComparison.OrdinalIgnoreCase) ? Dim.Len : Dim.None, K);
+            // ORIGIN takes two lengths (x and y of the system's origin).
+            var at = system.Extra.FindIndex(t => t.Equals("ORIGIN", StringComparison.OrdinalIgnoreCase));
+            for (var i = at + 1; at >= 0 && i <= at + 2 && i < system.Extra.Count; i++)
+                if (double.TryParse(system.Extra[i], NumberStyles.Float, Inv, out var v)) system.Extra[i] = Text(v * K(Dim.Len));
+        }
         foreach (var p in m.Points) { p.X = S(p.X, Dim.Len); p.Y = S(p.Y, Dim.Len); p.Below = S(p.Below, Dim.Len); }
         foreach (var d in m.Materials.Cast<Definition>().Concat(m.FrameSections).Concat(m.ShellSections))
         {

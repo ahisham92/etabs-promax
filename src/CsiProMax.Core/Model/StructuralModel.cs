@@ -21,6 +21,9 @@ public sealed class StructuralModel
     public string GridSystem { get; set; } = "G1";
     public List<string> GridSystemExtra { get; set; } = ["TYPE", "\"CARTESIAN\"", "BUBBLESIZE", "1.25"];
     public List<GridLine> Grids { get; set; } = [];
+    /// <summary>The model's other grid systems (ETABS keeps any number; the first one is <see cref="GridSystem"/>), each
+    /// with the rest of its GRIDSYSTEM line as read. Their grid lines are in <see cref="Grids"/>, named by <see cref="GridLine.System"/>.</summary>
+    public List<GridSystemDef> MoreGridSystems { get; set; } = [];
     public List<Diaphragm> Diaphragms { get; set; } = [];
     public List<Material> Materials { get; set; } = [];
     public List<FrameSection> FrameSections { get; set; } = [];
@@ -105,12 +108,23 @@ public sealed class GridLine
     public string Direction { get; set; } = "X";
     public double Coordinate { get; set; }
     public List<string> Extra { get; set; } = [];
+    /// <summary>The grid system the line belongs to when it is not the model's first one (<see cref="StructuralModel.MoreGridSystems"/>); null for the first.</summary>
+    public string? System { get; set; }
+}
+
+/// <summary>A grid system after the model's first: its name and the rest of its GRIDSYSTEM line (TYPE, ORIGIN, ROTATION, ...).</summary>
+public sealed class GridSystemDef
+{
+    public string Name { get; set; } = "";
+    public List<string> Extra { get; set; } = [];
 }
 
 public sealed class Diaphragm
 {
     public string Name { get; set; } = "";
     public string Type { get; set; } = "RIGID";
+    /// <summary>The rest of the DIAPHRAGM line as read (what a newer ETABS writes after TYPE), written back as it was.</summary>
+    public List<string> Extra { get; set; } = [];
 }
 
 /// <summary>A material, a frame section or a slab/wall section. ETABS spreads one over several lines of keywords;
@@ -177,6 +191,8 @@ public sealed class PlanPoint
     public double Y { get; set; }
     /// <summary>How far below its story level the point sits (ETABS's third number); 0 for almost every point.</summary>
     public double Below { get; set; }
+    /// <summary>What follows the coordinates on the POINT line, as read (written back after them, the third number included).</summary>
+    public List<string> Extra { get; set; } = [];
 }
 
 public enum LineKind { Column, Beam, Brace }
@@ -189,6 +205,8 @@ public sealed class LineObject
     public string PointJ { get; set; } = "";
     /// <summary>How many stories below the assigned story end I is: 1 for a column or brace, 0 for a beam.</summary>
     public int StoriesBelowI { get; set; }
+    /// <summary>What follows on the LINE line, as read.</summary>
+    public List<string> Extra { get; set; } = [];
 }
 
 public enum AreaKind { Floor, Wall, Ramp }
@@ -200,6 +218,8 @@ public sealed class AreaObject
     public List<string> PointNames { get; set; } = [];
     /// <summary>Per corner: how many stories below the assigned story it is (a wall's bottom corners are 1).</summary>
     public List<int> StoriesBelow { get; set; } = [];
+    /// <summary>What follows the story offsets on the AREA line, as read.</summary>
+    public List<string> Extra { get; set; } = [];
 }
 
 public abstract class Assign
