@@ -229,9 +229,18 @@ public static class PackSpeedField
                 catch (Exception ex) when (ex is not OutOfMemoryException) { return "error: " + (ex.InnerException ?? ex).Message; }
             }) as string ?? "";
             long lines = 0, bytes = 0;
-            try { if (File.Exists(csv)) { bytes = new FileInfo(csv).Length; using var r = new StreamReader(csv); while (r.ReadLine() is not null) lines++; File.Delete(csv); } }
+            var head = new List<string>();
+            try
+            {
+                if (File.Exists(csv))
+                {
+                    bytes = new FileInfo(csv).Length;
+                    using (var r = new StreamReader(csv)) while (r.ReadLine() is { } line) { if (lines++ < 4) head.Add(line.Length > 300 ? line[..300] : line); }
+                    File.Delete(csv);
+                }
+            }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { said += "; " + ex.Message; }
-            o["csv_file " + table] = $"{said}, {lines} lines, {bytes / 1e6:0.0} MB";
+            o["csv_file " + table] = $"{said}, {lines} lines, {bytes / 1e6:0.0} MB; first lines: {string.Join(" ⏎ ", head)}";
         }
         return o;
     }
