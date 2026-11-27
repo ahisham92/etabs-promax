@@ -144,6 +144,10 @@ public static class StabilityTools
                 if (!api || many) continue;
                 if (CsiTools.Try(e, "read a joint's spring", "PointObj.GetSpring", CsiTools.D(("Name", p.Name))) is { } sp && ApiCall.Value(sp, "k") is JsonArray k && k.Any(v => ApiCall.Number(v) is > 0))
                     springs.Add(p.Name);
+                // ETABS: a named point spring property (Assign > Joint > Springs) is not in GetSpring's numbers.
+                else if (program == CsiProgram.Etabs.Key && CsiTools.Try(e, "read a joint's spring property", "PointObj.GetSpringAssignment", CsiTools.D(("Name", p.Name))) is { } spa
+                         && ApiCall.Value(spa, "SpringProp")?.ToString() is { Length: > 0 } spn && spn != "None")
+                    springs.Add(p.Name);
                 if (program == CsiProgram.Etabs.Key && CsiTools.Try(e, "read a joint's diaphragm", "PointObj.GetDiaphragm", CsiTools.D(("Name", p.Name))) is { } dp
                     && ApiCall.Value(dp, "DiaphragmName")?.ToString() is { Length: > 0 } dn && !(ApiCall.Value(dp, "DiaphragmOption")?.ToString() ?? "").Contains("Disconnect", StringComparison.OrdinalIgnoreCase))
                     diaphragms[p.Name] = dn;
@@ -164,8 +168,13 @@ public static class StabilityTools
                 var (i, j) = ends.TryGetValue(f.Name, out var pair) ? pair : (At(f.X1, f.Y1, f.Z1) ?? "", At(f.X2, f.Y2, f.Z2) ?? "");
                 var releases = new bool[12];
                 var meshed = false;
+                var lineSpring = false;
                 if (api && !manyFrames)
                 {
+                    // A line spring (Assign > Frame > Line Springs) holds the frame along its length.
+                    if (CsiTools.Try(e, "read a frame's line spring", "FrameObj.GetSpringAssignment", CsiTools.D(("Name", f.Name))) is { } fs
+                        && ApiCall.Value(fs, "SpringProp")?.ToString() is { Length: > 0 } fsp && fsp != "None")
+                        lineSpring = true;
                     if (CsiTools.Try(e, "read a frame's releases", "FrameObj.GetReleases", CsiTools.D(("Name", f.Name))) is { } rel)
                     {
                         if (ApiCall.Value(rel, "II") is JsonArray ii) for (var k = 0; k < 6 && k < ii.Count; k++) releases[k] = ii[k]?.GetValue<bool>() == true;
@@ -175,7 +184,7 @@ public static class StabilityTools
                         meshed = ApiCall.Value(mesh, "AutoMesh")?.ToString() == "true" && ApiCall.Value(mesh, "AutoMeshAtPoints")?.ToString() != "false";
                 }
                 var story = f.Story.Length > 0 ? f.Story : null;
-                a.Frames.Add(new Frame(f.Name, f.Name, story, f.Kind, i, j, f.Section.Length > 0 ? f.Section : null, releases, meshed || program != CsiProgram.Sap2000.Key));
+                a.Frames.Add(new Frame(f.Name, f.Name, story, f.Kind, i, j, f.Section.Length > 0 ? f.Section : null, releases, meshed || program != CsiProgram.Sap2000.Key, lineSpring));
             }
 
             // Areas, by their corners.
@@ -197,6 +206,9 @@ public static class StabilityTools
                 a.Shells.Add(new Shell(ar.Name, ar.Name, null, ar.Kind, corners, ar.Section.Length > 0 ? ar.Section : null, spring, diaphragm));
                 if (diaphragm is not null) foreach (var c in corners) diaphragms.TryAdd(c, diaphragm);
             }
+
+            // Links (one joint: to the ground) and, in SAP2000, joint constraints: what they join counts as joined.
+            if (api) LinksAndConstraints(e, a, program, diaphragms);
 
             // SAFE holds the far end of the columns and walls below a slab.
             var held = new HashSet<string>(StringComparer.Ordinal);
@@ -232,6 +244,39 @@ public static class StabilityTools
             }
             foreach (var p in e.LoadPatterns()) a.Patterns.Add(new Pattern(p.Name, p.Type, p.SelfWeight, HasLoads: true));
             return a;
+        }
+
+        private static void LinksAndConstraints(ICsiLink e, AnalysisModel a, string program, Dictionary<string, string> diaphragms)
+        {
+            if (CsiTools.Try(e, "list the links", "LinkObj.GetNameList") is { } list)
+                foreach (var name in CsiTools.Names(list, "MyName"))
+                    if (CsiTools.Try(e, "read a link's joints", "LinkObj.GetPoints", CsiTools.D(("Name", name))) is { } pts
+                        && ApiCall.Value(pts, "Point1")?.ToString() is { Length: > 0 } p1)
+                    {
+                        var p2 = ApiCall.Value(pts, "Point2")?.ToString();
+                        a.Links.Add(new Link(name, p1, p2 is { Length: > 0 } && p2 != p1 ? p2 : null));
+                    }
+            if (program != CsiProgram.Sap2000.Key) return;
+            // SAP2000's constraints, every joint's at once (ItemType Group, "All"). A diaphragm is a rigid floor; the
+            // others (body, weld, equal...) join their joints.
+            if (CsiTools.Try(e, "read the joints' constraints", "PointObj.GetConstraint", CsiTools.D(("Name", "All"), ("ItemType", 1))) is not { } got) return;
+            var points = CsiTools.Names(got, "PointName");
+            var names = CsiTools.Names(got, "ConstraintName");
+            var types = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            string Type(string c) => types.TryGetValue(c, out var t) ? t
+                : types[c] = CsiTools.Try(e, "read a constraint's type", "ConstraintDef.GetConstraintType", CsiTools.D(("Name", c))) is { } ct ? ApiCall.Value(ct, "ConstraintType")?.ToString() ?? "" : "";
+            foreach (var g in points.Zip(names).GroupBy(x => x.Second, StringComparer.OrdinalIgnoreCase))
+            {
+                var joints = g.Select(x => x.First).Distinct(StringComparer.Ordinal).ToList();
+                if (joints.Count < 2) continue;
+                if (Type(g.Key) is "2" or "Diaphragm" or "CONSTRAINT_DIAPHRAGM")
+                {
+                    a.RigidDiaphragms.Add(g.Key);
+                    foreach (var j in joints) diaphragms.TryAdd(j, g.Key);
+                    continue;
+                }
+                foreach (var j in joints.Skip(1)) a.Links.Add(new Link(g.Key, joints[0], j, "constraint"));
+            }
         }
 
         private static bool HasApi(ICsiLink e)
