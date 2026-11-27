@@ -4856,7 +4856,7 @@ function modelerMenus(m) {
     only(ES, ["Draw Braces (click bottom and top)", "d:brace"]), ["Draw Joints (click a point)", "d:joint"], 0, only(["etabs", "safe"], ["Design Strips...", "m:ex:strips"]), ["Tendons...", "m:ex:tendons"], only(["etabs", "safe"], ["Slab Rebar...", "m:ex:slabrebar"]), 0, ["Snap and Story Options...", "m:drawHelp"]];
   m.Assign = [["Frame Section...", "m:asgFrame", "", !fr], [program === "sap2000" ? "Area Section..." : "Slab or Wall Section...", "m:asgShell", "", !ar], 0, ["Joint Restraints (Supports)...", "m:asgSupport"], 0,
     program === "sap2000" ? hmSapAssignMenu()[0] : ["Joint", [["Springs...", "m:ad:joint", "", !any], only(["etabs", "sap2000"], ["Diaphragms...", "m:sa:jdiaph", "", !any]), only(["sap2000"], ["Constraints...", "m:ex:jconstraint", "", !any]), 0, ...hmTableItems("Joint", !any)]],
-    ["Frame", [["Releases...", "m:ad:releases", "", !fr], ["Local Axes...", "m:ad:axes", "", !fr], ["Insertion Point...", "m:ad:insertion", "", !fr], ["End Length Offsets...", "m:ad:offsets", "", !fr], ["Property Modifiers...", "m:ad:fmods", "", !fr], ["Line Springs...", "m:ad:lspring", "", !fr], only(["etabs", "sap2000"], ["Hinges...", "m:ad:hinges", "", !fr]), 0, ...hmTableItems("Frame", !fr)]],
+    program === "sap2000" ? hmSapAssignMenu()[1] : ["Frame", [["Releases...", "m:ad:releases", "", !fr], ["Local Axes...", "m:ad:axes", "", !fr], ["Insertion Point...", "m:ad:insertion", "", !fr], ["End Length Offsets...", "m:ad:offsets", "", !fr], ["Property Modifiers...", "m:ad:fmods", "", !fr], ["Line Springs...", "m:ad:lspring", "", !fr], only(["etabs", "sap2000"], ["Hinges...", "m:ad:hinges", "", !fr]), 0, ...hmTableItems("Frame", !fr)]],
     [program === "sap2000" ? "Area" : "Shell", [["Property Modifiers...", "m:ad:smods", "", !ar], ["Area Springs...", "m:ad:aspring", "", !ar], only(["etabs", "sap2000"], ["Diaphragms...", "m:sa:diaph", "", !ar]), only(["etabs"], ["Pier Label...", "m:sa:pier", "", !any]), only(["etabs"], ["Spandrel Label...", "m:sa:spandrel", "", !any]), 0, only(["etabs"], ["Opening...", "m:at:opening", "", !ar]), ...hmTableItems("Area", !ar)]],
     ["Assign Objects to Group...", "m:sa:group", "", !any], 0,
     ["Joint Loads", [["Forces...", "m:ld:joint_force", "", !any], ["Ground Displacements...", "m:ld:joint_displacement", "", !any], only(ES, ["Temperature...", "m:ld:joint_temperature", "", !any])]],
@@ -5252,7 +5252,7 @@ function hmSapAssignMenu() {
     ["Joint", [it("Restraints...", "jRestraints"), it("Constraints...", "jConstraints"), it("Springs...", "jSprings"), it("Masses...", "jMasses"), it("Local Axes...", "jAxes"), it("Panel Zones...", "jPanelZones"), it("Merge Number...", "jMerge")]],
     ["Frame", [it("Frame Sections...", "fSections"), it("Property Modifiers...", "fModifiers"), it("Material Property Overwrites...", "fMaterial"), 0,
       it("Releases/Partial Fixity...", "fReleases"), it("Local Axes...", "fAxes"), it("Reverse Connectivity...", "fReverse"), it("End (Length) Offsets...", "fOffsets"), it("Insertion Point...", "fInsertion"), 0,
-      it("Output Stations...", "fStations"), 0, it("P-Delta Force...", "fPDelta"), 0, it("Path...", "fPath"), 0,
+      it("Output Stations...", "fStations"), 0, it("P-Delta Force...", "fPDelta"), 0, [...it("Path...", "fPath"), true], 0,
       it("Tension/Compression Limits...", "fTCLimits"), it("Hinges...", "fHinges"), it("Hinge Overwrites...", "fHingeOverwrites"), 0,
       it("Line Springs...", "fSprings"), it("Line Mass...", "fMass"), 0, it("Material Temperatures...", "fMatTemp"), 0, it("Automatic Frame Mesh...", "fMesh"), 0,
       it("Rebar Ratio for Creep Analysis...", "fCreep"), 0, it("Load Transfer Options...", "fTransfer")]],
@@ -5480,28 +5480,29 @@ async function hmSapJointLocalAxes() {
 // Joint (and Frame/Area/Solid/Link) Advanced Axes: the local plane, its axial and plane reference vectors each by
 // Coordinate Direction, Two Joints or User Vector.
 function hmSapAdvancedAxes(title, now, csys, done, opt) {
-  const joints = ["None", ...[...pointXyz.keys()]], a = {...now};
+  opt = opt || {};
+  const joints = ["None", ...[...pointXyz.keys()]], a = {...now}, sides = opt.planeOnly ? ["Pl"] : ["Ax", "Pl"], reset = opt.reset || sapAdvDefault;
   const side = (k, label) => {
     const p = k === "Ax" ? "Ax" : "Pl";
     return `<fieldset><legend>${label} Reference Vector Specified By</legend>${["Coord Dir", "Two Joints", "User Vector"].map(v => `<label><input type="radio" name="${p}O" value="${v}" ${a[p + "Option1"] === v ? "checked" : ""}> ${sapOptLabel[v]}</label>`).join("")}
       <div style="display:flex;gap:20px;align-items:center;margin-top:6px"><span style="width:120px">Coordinate System</span><select id="${p}CS" style="width:240px">${opts(csys, a[p === "Ax" ? "AxCoordSys" : "PlCoordSys"])}</select></div></fieldset>
       <fieldset id="${p}Box" style="min-height:120px"></fieldset>`;
   };
-  const d = dialog(title, `<div class="sapF">${sapFormCss}<fieldset><legend>Local Plane</legend><div style="display:flex;gap:60px;align-items:center"><span>Plane</span><select id="xP" style="width:150px">${opts(sapPlanes.map(p => [p, `Plane ${p[0]}-${p[1]}`]), a.LocalPlane)}</select></div></fieldset>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px"><div>${side("Ax", "Axial")}</div><div>${side("Pl", "Plane")}</div></div>
+  const d = dialog(title, `<div class="sapF">${sapFormCss}<fieldset><legend>Local Plane</legend><div style="display:flex;gap:60px;align-items:center"><span>Plane</span><select id="xP" style="width:150px">${opts((opt.planes || sapPlanes).map(p => [p, `Plane ${p[0]}-${p[1]}`]), a.LocalPlane)}</select></div></fieldset>
+    ${opt.planeOnly ? side("Pl", "Plane") : `<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px"><div>${side("Ax", "Axial")}</div><div>${side("Pl", "Plane")}</div></div>`}
     <button id="xR" class="reset">Reset Form to Default Values</button></div>`,
-    [["OK", d => { read(); done(a); return true; }, true], ["Cancel"]], {width: 880});
+    [["OK", d => { read(); done(a); return true; }, true], ["Cancel"]], {width: opt.planeOnly ? 480 : 880});
   const sel = (id, list, v) => `<select id="${id}" style="width:150px">${opts(list, v)}</select>`, inp = (id, v) => `<input id="${id}" style="width:110px" value="${esc(String(v))}">`;
   const line = (l, c) => `<div style="display:flex;justify-content:space-between;align-items:center;margin:6px 0"><span>${l}</span>${c}</div>`;
   function read() {
     a.LocalPlane = q(d, "#xP").value;
-    for (const p of ["Ax", "Pl"]) {
+    for (const p of sides) {
       a[p + "Option1"] = q(d, `[name=${p}O]:checked`).value; a[p === "Ax" ? "AxCoordSys" : "PlCoordSys"] = q(d, `#${p}CS`).value;
       d.querySelectorAll(`#${p}Box [data-f]`).forEach(x => a[x.dataset.f] = x.value === "None" ? "" : x.value.trim());
     }
   }
   function paint() {
-    for (const p of ["Ax", "Pl"]) {
+    for (const p of sides) {
       const o = a[p + "Option1"], box = q(d, `#${p}Box`), ax = p === "Ax";
       q(d, `#${p}CS`).disabled = o === "Two Joints";
       box.innerHTML = o === "Coord Dir" ? (ax ? `<legend>Axial Coordinate Direction</legend>${line("Direction", sel("AxD", sapDirs, a.AxCoordDir))}` : `<legend>Plane Coordinate Direction</legend>${line("Primary Direction", sel("PlD1", sapDirs, a.CoordDir1))}${line("Secondary Direction", sel("PlD2", sapDirs, a.CoordDir2))}`)
@@ -5511,8 +5512,8 @@ function hmSapAdvancedAxes(title, now, csys, done, opt) {
       box.querySelectorAll("select,input").forEach(x => x.dataset.f = tag[x.id]);
     }
   }
-  d.querySelectorAll("[name=AxO],[name=PlO]").forEach(r => r.onchange = () => { read(); paint(); });
-  q(d, "#xR").onclick = () => { Object.assign(a, sapAdvDefault); q(d, "#xP").value = a.LocalPlane; for (const p of ["Ax", "Pl"]) { q(d, `[name=${p}O][value="Coord Dir"]`).checked = true; q(d, `#${p}CS`).value = "GLOBAL"; } paint(); };
+  d.querySelectorAll(sides.map(p => `[name=${p}O]`).join(",")).forEach(r => r.onchange = () => { read(); paint(); });
+  q(d, "#xR").onclick = () => { Object.assign(a, reset); q(d, "#xP").value = a.LocalPlane; for (const p of sides) { q(d, `[name=${p}O][value="Coord Dir"]`).checked = true; q(d, `#${p}CS`).value = "GLOBAL"; } paint(); };
   paint();
   return d;
 }
@@ -5569,6 +5570,457 @@ function hmSapMergeNumber() {
       return sapSetEach("assign_joint_data", names, () => ({"Joint Merge Number Assignments": v === "0" ? [] : [{MergeNumber: v}]})); }), {width: 330});
   return d;
 }
+
+// ---- SAP2000 26.3's Assign > Frame forms (pictures Assign/Frame/). Native fields go through assign_frame_data's own
+// arguments; what only SAP2000 has goes into SAP2000's own tables (SapObjectTables). ----
+const sapFrames = () => { const n = hmSelected("f"); if (!n.length) hmSay("Select the frames first.", true); return n; };
+const sapDone = j => { if (!j.ok) hmSay(j.error, true); else hmSay("Done. Edit > Undo steps back."); return j.ok; };
+// Assign > Frame > Frame Sections: the sections (None last) and Define Sections...
+async function hmSapFrameSectionsAssign() {
+  const names = sapFrames(); if (!names.length) return;
+  const defs = await hmDefs(), list = [...defs.frame_sections.map(s => s.name), "None"];
+  const now = (objOf([...sel].find(id => (objOf(id) || {}).type === "f")) || {}).section;
+  const d = dialog("Assign Frame Sections", `<select id="fsL" size="16" style="width:100%;height:330px">${opts(list, now || list[0])}</select>
+    <div style="text-align:center;margin-top:10px"><button id="fsD" style="width:220px">Define Sections...</button></div>`,
+    sapOkCloseApply(async d => { const s = q(d, "#fsL").value; if (s === "None") { hmSay("SAP2000's None leaves a frame with no section; the Engine keeps each frame's section. Pick a section.", true); return false; } return sapDone(await hmRun("set_section", {frames: names, section: s})); }), {width: 340});
+  q(d, "#fsD").onclick = () => modelAct("frameSections");
+  return d;
+}
+// Assign > Frame > Property Modifiers: Property Modifiers for Analysis, Reset Form.
+async function hmSapFrameModifiers() {
+  const names = sapFrames(); if (!names.length) return;
+  const rows = [["AMOD", "Cross-section (Axial) Area"], ["A2MOD", "Shear Area in 2 Direction"], ["A3MOD", "Shear Area in 3 Direction"], ["JMOD", "Torsional Constant"], ["I2MOD", "Moment of Inertia about 2-Axis"], ["I3MOD", "Moment of Inertia about 3-Axis"], ["MMOD", "Mass"], ["WMOD", "Weight"]];
+  const d = dialog("Assign Frame Property Modifiers", `${sapFormCss}<div class="sapF"><fieldset><legend>Property Modifiers for Analysis</legend><div style="display:grid;grid-template-columns:1fr 110px;gap:6px 12px;align-items:center">${rows.map(([k, l]) => `<span>${l}</span><input data-m="${k}" value="1">`).join("")}</div></fieldset>
+    <button id="fmR" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => { const m = {}; d.querySelectorAll("[data-m]").forEach(x => m[x.dataset.m] = +x.value || 0); return sapDone(await hmRun("assign_frame_data", {objects: names, modifiers: m})); }), {width: 440});
+  q(d, "#fmR").onclick = () => d.querySelectorAll("[data-m]").forEach(x => x.value = "1");
+  return d;
+}
+// Assign > Frame > Material Property Overwrites.
+async function hmSapFrameMaterial() {
+  const names = sapFrames(); if (!names.length) return;
+  const defs = await hmDefs(), mats = defs.materials.map(m => m.name);
+  const d = dialog("Assign Frame Material Overwrites", `<fieldset><legend>Options</legend><label style="display:block;margin:4px 0"><input type="radio" name="mo" value="sec" checked> Use Material Specified in Section Property</label>
+    <div style="display:flex;align-items:center;gap:8px"><label style="width:170px"><input type="radio" name="mo" value="ow"> Overwrite Material</label><button id="moP" style="width:28px;padding:0">+</button><select id="moM" style="width:180px">${opts(mats, mats[0])}</select></div></fieldset>`,
+    sapOkCloseApply(async d => sapDone(await hmRun("assign_frame_data", {objects: names, tables: {"Frame Assignments - Material Overwrites": q(d, "[name=mo]:checked").value === "ow" ? [{Material: q(d, "#moM").value}] : []}}))), {width: 420});
+  const sync = () => { const ow = q(d, "[name=mo]:checked").value === "ow"; q(d, "#moM").disabled = q(d, "#moP").disabled = !ow; if (!ow) q(d, "#moM").style.visibility = "hidden"; else q(d, "#moM").style.visibility = ""; };
+  d.querySelectorAll("[name=mo]").forEach(r => r.onchange = sync); q(d, "#moP").onclick = () => modelAct("materials"); sync();
+  return d;
+}
+// Assign > Frame > Releases/Partial Fixity: Release Start/End and the Frame Partial Fixity Springs, open on a released end.
+function hmSapFrameReleases() {
+  const names = sapFrames(); if (!names.length) return;
+  const u = sapUnits(), rel = ["P", "V2", "V3", "T", "M2", "M3"], lab = ["Axial Load", "Shear Force 2 (Major)", "Shear Force 3 (Minor)", "Torsion", "Moment 22 (Minor)", "Moment 33 (Major)"], unit = r => /^[PV]/.test(r) ? u.kl : u.kr;
+  const spring = (r, e) => `<span style="display:flex;gap:4px;align-items:center"><input data-s${e}="${r}" style="width:110px" disabled><span class="u" data-u${e}="${r}" style="width:80px;visibility:hidden">${unit(r)}</span></span>`;
+  const d = dialog("Assign Frame Releases and Partial Fixity", `<fieldset><legend>Frame Releases</legend><div style="display:grid;grid-template-columns:180px 40px 40px 1fr 1fr;gap:8px 6px;align-items:center">
+    <span></span><b style="grid-column:2/4;text-align:center;font-weight:normal;border-bottom:1px solid var(--line)">Release</b><b style="grid-column:4/6;text-align:center;font-weight:normal;border-bottom:1px solid var(--line)">Frame Partial Fixity Springs</b>
+    <span></span><span style="text-align:center">Start</span><span style="text-align:center">End</span><span>Start</span><span>End</span>
+    ${rel.map((r, i) => `<span>${lab[i]}</span><input type="checkbox" data-i="${r}"><input type="checkbox" data-j="${r}">${spring(r, "i")}${spring(r, "j")}`).join("")}</div></fieldset>
+    <div style="text-align:center"><button id="rlC" style="width:250px">Clear All Releases in Form</button></div>`,
+    sapOkCloseApply(async d => {
+      const ri = [...d.querySelectorAll("[data-i]:checked")].map(x => x.dataset.i), rj = [...d.querySelectorAll("[data-j]:checked")].map(x => x.dataset.j);
+      const pf = Object.fromEntries(rel.flatMap(r => [[r + "I", ri.includes(r) ? +q(d, `[data-si="${r}"]`).value || 0 : 0], [r + "J", rj.includes(r) ? +q(d, `[data-sj="${r}"]`).value || 0 : 0]]));
+      return sapDone(await hmRun("assign_frame_data", {objects: names, release_i: ri, release_j: rj, partial_fixity: pf}));
+    }), {width: 820});
+  const sync = () => rel.forEach(r => { for (const e of ["i", "j"]) { const on = q(d, `[data-${e}="${r}"]`).checked, x = q(d, `[data-s${e}="${r}"]`); x.disabled = !on; if (!on) x.value = ""; else if (x.value === "") x.value = "0"; q(d, `[data-u${e}="${r}"]`).style.visibility = on ? "" : "hidden"; } });
+  d.querySelectorAll("[data-i],[data-j]").forEach(c => c.onchange = sync);
+  q(d, "#rlC").onclick = () => { d.querySelectorAll("[data-i],[data-j]").forEach(c => c.checked = false); sync(); };
+  return d;
+}
+// Assign > Frame > Local Axes: Standard (Angle from Default Orientation), Advanced (Frame Advanced Axes: the local plane
+// and its plane reference vector) or Reset to Default. Advanced goes in SAP2000's Frame Local Axes Assignments 2.
+const sapFAx2 = "Frame Local Axes Assignments 2 - Advanced";
+const sapFrameAdvDefault = {LocalPlane: "12", PlOption1: "Coord Dir", PlCoordSys: "GLOBAL", CoordDir1: "+Z", CoordDir2: "+X", PlVecJt1: "", PlVecJt2: "", PlVecX: "1", PlVecY: "0", PlVecZ: "0"};
+async function hmSapFrameLocalAxes() {
+  const names = sapFrames(); if (!names.length) return;
+  const csys = await sapCsys(); let adv = {...sapFrameAdvDefault};
+  const d = dialog("Assign Frame Local Axes", `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Options</legend><label><input type="radio" name="aO" value="std" checked> Specify Standard Local Axes</label><label><input type="radio" name="aO" value="adv"> Specify Advanced Local Axes</label><label><input type="radio" name="aO" value="reset"> Reset Local Axes to Default</label></fieldset>
+    <fieldset id="aRot"><legend>Angle from Default Orientation</legend><div class="g3">${sapRow("Angle", "aA", 0, "deg")}</div></fieldset>
+    <fieldset id="aAdv" style="min-height:140px;display:flex;flex-direction:column"><legend>Advanced</legend><div id="aSum" style="flex:1"></div><button id="aMod" class="reset" style="width:300px">Modify/Show Advanced Parameters...</button></fieldset></div>`,
+    sapOkCloseApply(async d => {
+      const o = q(d, "[name=aO]:checked").value, angle = o === "reset" ? 0 : +q(d, "#aA").value || 0;
+      return sapDone(await hmRun("assign_frame_data", {objects: names, angle, tables: {[sapFAx2]: o === "adv" ? [{...adv}] : []}}));
+    }), {width: 500});
+  const summary = a => `<p>Local Plane = Plane ${a.LocalPlane[0]}-${a.LocalPlane[1]}</p><p>Plane Reference Vector Type:&nbsp; ${sapOptLabel[a.PlOption1]}<br>&nbsp;&nbsp;&nbsp;&nbsp;${a.PlOption1 === "Coord Dir" ? `Primary:&nbsp; ${a.PlCoordSys} ${a.CoordDir1}&nbsp;&nbsp;&nbsp;&nbsp;Secondary:&nbsp; ${a.PlCoordSys} ${a.CoordDir2}` : a.PlOption1 === "Two Joints" ? `Joints ${a.PlVecJt1 || "None"} to ${a.PlVecJt2 || "None"}` : `(${a.PlVecX}, ${a.PlVecY}, ${a.PlVecZ})`}</p>`;
+  const sync = () => { const o = q(d, "[name=aO]:checked").value; q(d, "#aA").disabled = o === "reset"; q(d, "#aRot").classList.toggle("dis", o === "reset"); q(d, "#aMod").disabled = o !== "adv"; q(d, "#aAdv").classList.toggle("dis", o !== "adv"); q(d, "#aSum").innerHTML = o === "adv" ? summary(adv) : ""; };
+  d.querySelectorAll("[name=aO]").forEach(r => r.onchange = sync);
+  q(d, "#aMod").onclick = () => hmSapAdvancedAxes("Frame Advanced Axes", adv, csys, a => { adv = Object.fromEntries(Object.keys(sapFrameAdvDefault).map(k => [k, a[k]])); sync(); }, {planeOnly: true, planes: ["12", "13"], reset: sapFrameAdvDefault});
+  sync();
+  return d;
+}
+// Assign > Frame > End (Length) Offsets: Automatic from Connectivity or User Defined Lengths, and the Rigid Zone Factor
+// (SAP2000's Frame Offset Along Length Assignments).
+function hmSapFrameOffsets() {
+  const names = sapFrames(); if (!names.length) return;
+  const u = sapUnits();
+  const d = dialog("Assign Frame End Length Offsets", `${sapFormCss}<div class="sapF"><fieldset><legend>Options for End Offset Along Length</legend><label><input type="radio" name="oO" value="auto" checked> Automatic from Connectivity</label><label><input type="radio" name="oO" value="user"> User Defined Lengths</label></fieldset>
+    <fieldset><legend>Parameters</legend><div class="g3" style="grid-template-columns:1fr 110px 30px">${sapRow("User Defined Length Offset at End-I", "oI", "Auto", u.l)}${sapRow("User Defined Length Offset at End-J", "oJ", "Auto", u.l)}${sapRow("Rigid Zone Factor", "oR", "0.5", "")}</div></fieldset>
+    <button id="oRst" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => {
+      const user = q(d, "[name=oO]:checked").value === "user", rz = q(d, "#oR").value.trim() || "0";
+      if (!(+rz >= 0 && +rz <= 1)) { formError(d, "The rigid zone factor is from 0 to 1."); return false; }
+      const row = {Type: user ? "User" : "Auto", LengthI: user ? q(d, "#oI").value.trim() || "0" : "0", LengthJ: user ? q(d, "#oJ").value.trim() || "0" : "0", RigidFactor: rz};
+      return sapDone(await hmRun("assign_frame_data", {objects: names, offset_i: +row.LengthI, offset_j: +row.LengthJ, rigid_zone: +rz, tables: {"Frame Offset Along Length Assignments": [row]}}));
+    }), {width: 470});
+  const sync = () => { const user = q(d, "[name=oO]:checked").value === "user"; for (const id of ["#oI", "#oJ"]) { const x = q(d, id); x.disabled = !user; x.value = user ? (x.value === "Auto" ? "0" : x.value) : "Auto"; } d.querySelectorAll(".g3 .u").forEach((x, i) => { if (i < 2) x.style.visibility = user ? "" : "hidden"; }); };
+  d.querySelectorAll("[name=oO]").forEach(r => r.onchange = sync);
+  q(d, "#oRst").onclick = () => { q(d, "[name=oO][value=auto]").checked = true; q(d, "#oR").value = "0.5"; sync(); };
+  sync();
+  return d;
+}
+// Assign > Frame > Insertion Point: Cardinal Point (11), mirror about local 2 and 3, Frame Joint Offsets to Cardinal Point
+// (Local or a coordinate system, End-I and End-J) and Do Not Transform Frame Stiffness.
+async function hmSapFrameInsertion() {
+  const names = sapFrames(); if (!names.length) return;
+  const csys = await sapCsys(), u = sapUnits();
+  const cp = ["Bottom Left", "Bottom Center", "Bottom Right", "Middle Left", "Middle Center", "Middle Right", "Top Left", "Top Center", "Top Right", "Centroid", "Shear Center"];
+  const axis = cs => cs === "Local" ? ["Local 1", "Local 2", "Local 3"] : ["Global X", "Global Y", "Global Z"];
+  const d = dialog("Assign Frame Insertion Point", `${sapFormCss}<div class="sapF"><fieldset><legend>Cardinal Point</legend><div style="display:flex;justify-content:space-between;align-items:center"><span>Cardinal Point</span><select id="iC" style="width:225px">${opts(cp.map((t, i) => [String(i + 1), `${i + 1}&nbsp; (${t})`]), "10")}</select></div>
+      <label><input type="checkbox" id="iM2"> Mirror about Local 2 Axis</label><label><input type="checkbox" id="iM3"> Mirror about Local 3 Axis</label></fieldset>
+    <fieldset><legend>Frame Joint Offsets to Cardinal Point</legend><div style="display:flex;justify-content:space-between;align-items:center"><span>Coordinate System</span><select id="iCS" style="width:225px">${opts(["Local", ...csys], "Local")}</select></div>
+      <div style="display:grid;grid-template-columns:90px 1fr 1fr;gap:6px;align-items:center;margin-top:8px"><span></span><span style="text-align:center">End-I</span><span style="text-align:center">End-J</span>
+      ${[0, 1, 2].map(k => `<span data-ax="${k}"></span><span><input data-o="I${k}" value="0" style="width:110px"> ${u.l}</span><span><input data-o="J${k}" value="0" style="width:110px"> ${u.l}</span>`).join("")}</div></fieldset>
+    <fieldset><legend>Stiffness Transformation</legend><label><input type="checkbox" id="iNT"> Do Not Transform Frame Stiffness for Offsets from Centroid</label></fieldset>
+    <button id="iR" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => {
+      const o = k => q(d, `[data-o="${k}"]`).value.trim() || "0", cs = q(d, "#iCS").value;
+      const row = {Mirror2: q(d, "#iM2").checked ? "Yes" : "No", Mirror3: q(d, "#iM3").checked ? "Yes" : "No", OffsetCSys: cs, XI: o("I0"), YI: o("I1"), ZI: o("I2"), XJ: o("J0"), YJ: o("J1"), ZJ: o("J2"), NoTransform: q(d, "#iNT").checked ? "Yes" : "No"};
+      const plain = row.Mirror2 === "No" && row.Mirror3 === "No" && row.NoTransform === "No" && cs === "Local" && ["XI", "YI", "ZI", "XJ", "YJ", "ZJ"].every(k => +row[k] === 0);
+      return sapDone(await hmRun("assign_frame_data", {objects: names, cardinal: +q(d, "#iC").value, tables: {"Frame Assignments - Insertion Point": plain ? [] : [row]}}));
+    }), {width: 520});
+  const sync = () => d.querySelectorAll("[data-ax]").forEach(x => x.textContent = axis(q(d, "#iCS").value)[+x.dataset.ax]);
+  q(d, "#iCS").onchange = sync;
+  q(d, "#iR").onclick = () => { q(d, "#iC").value = "10"; q(d, "#iM2").checked = q(d, "#iM3").checked = q(d, "#iNT").checked = false; q(d, "#iCS").value = "Local"; d.querySelectorAll("[data-o]").forEach(x => x.value = "0"); sync(); };
+  sync();
+  return d;
+}
+// Assign > Frame > Output Stations: Maximum Station Spacing or Minimum Number of Stations, and the additional stations
+// (SAP2000's Frame Output Station Assignments).
+function hmSapFrameStations() {
+  const names = sapFrames(); if (!names.length) return;
+  const u = sapUnits();
+  const d = dialog("Assign Frame Output Stations", `${sapFormCss}<div class="sapF"><fieldset><legend>Output Station Specification Options</legend><div style="display:grid;grid-template-columns:1fr 110px 30px;gap:6px;align-items:center">
+      <label><input type="radio" name="sO" value="MaxStaSpcg"> Maximum Station Spacing</label><input id="sMax"><span class="u">${u.l}</span><label><input type="radio" name="sO" value="MinNumSta" checked> Minimum Number of Stations</label><input id="sMin" value="9"><span></span></div></fieldset>
+    <fieldset><legend>Additional Output and Design Stations</legend><label><input type="checkbox" id="sInt" checked> At Intersections with Other Elements</label><label><input type="checkbox" id="sPt" checked> At Concentrated Load Locations</label></fieldset>
+    <button id="sR" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => {
+      const t = q(d, "[name=sO]:checked").value, v = q(d, t === "MaxStaSpcg" ? "#sMax" : "#sMin").value.trim();
+      if (!(+v > 0)) { formError(d, t === "MaxStaSpcg" ? "The spacing is more than 0." : "The number of stations is 1 or more."); return false; }
+      const row = {StationType: t, [t]: v, AddAtElmInt: q(d, "#sInt").checked ? "Yes" : "No", AddAtPtLoad: q(d, "#sPt").checked ? "Yes" : "No"};
+      return sapDone(await hmRun("assign_frame_data", {objects: names, tables: {"Frame Output Station Assignments": [row], "Frame Assignments - Output Stations": []}}));
+    }), {width: 470});
+  const sync = () => { const t = q(d, "[name=sO]:checked").value; const mx = q(d, "#sMax"), mn = q(d, "#sMin"); mx.disabled = t !== "MaxStaSpcg"; mn.disabled = t !== "MinNumSta"; if (mx.disabled) mx.value = ""; else if (!mx.value) mx.value = "0.5"; if (mn.disabled) mn.value = ""; else if (!mn.value) mn.value = "9"; };
+  d.querySelectorAll("[name=sO]").forEach(r => r.onchange = sync);
+  q(d, "#sR").onclick = () => { q(d, "[name=sO][value=MinNumSta]").checked = true; q(d, "#sMin").value = "9"; q(d, "#sInt").checked = q(d, "#sPt").checked = true; sync(); };
+  sync();
+  return d;
+}
+// Assign > Frame > P-Delta Force: Force or its X, Y or Z projection in a coordinate system; Add, Replace or Delete.
+async function hmSapFramePDelta() {
+  const names = sapFrames(); if (!names.length) return;
+  const csys = await sapCsys(), u = sapUnits(), T = "Frame P-Delta Force Assignments";
+  const d = dialog("Assign Frame Initial P-Delta Forces", `${sapFormCss}<div class="sapF"><fieldset><legend>P-Delta Force Type</legend>${[["Force", "Force"], ["X", "X Projection"], ["Y", "Y Projection"], ["Z", "Z Projection"]].map(([v, l], i) => `<label><input type="radio" name="pT" value="${v}" ${i ? "" : "checked"}> ${l}</label>`).join("")}</fieldset>
+    <fieldset><legend>Coordinate System for Projected Forces</legend><div style="display:flex;gap:30px;align-items:center"><span>Direction</span><select id="pC" style="width:225px">${opts(csys, "GLOBAL")}</select></div></fieldset>
+    <fieldset><legend>Initial Force</legend><div class="g3">${sapRow("Force", "pF", 0, u.f)}</div></fieldset>
+    <fieldset><legend>Options</legend><label><input type="radio" name="pO" value="add"> Add to Existing Forces</label><label><input type="radio" name="pO" value="replace" checked> Replace Existing Forces</label><label><input type="radio" name="pO" value="delete"> Delete Existing Forces</label></fieldset>
+    <button id="pR" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => {
+      const how = q(d, "[name=pO]:checked").value, t = q(d, "[name=pT]:checked").value, got = await sapObjRows(names); if (!got) return false;
+      const row = {CoordSys: t === "Force" ? "" : q(d, "#pC").value, Direction: t === "Force" ? "Axial" : t, Force: q(d, "#pF").value.trim() || "0"};
+      return sapSetEach("assign_frame_data", names, n => ({[T]: how === "delete" ? [] : how === "add" ? [...((got.by[n] || {})[T] || []), row] : [row]}));
+    }), {width: 500});
+  const sync = () => { const f = q(d, "[name=pT]:checked").value === "Force", c = q(d, "#pC"); c.disabled = f; c.style.visibility = f ? "hidden" : ""; };
+  d.querySelectorAll("[name=pT]").forEach(r => r.onchange = sync);
+  q(d, "#pR").onclick = () => { q(d, "[name=pT][value=Force]").checked = true; q(d, "#pC").value = "GLOBAL"; q(d, "#pF").value = "0"; q(d, "[name=pO][value=replace]").checked = true; sync(); };
+  sync();
+  return d;
+}
+// Assign > Frame > Tension/Compression Limits.
+function hmSapFrameTCLimits() {
+  const names = sapFrames(); if (!names.length) return;
+  const u = sapUnits();
+  const d = dialog("Assign Frame Tension and Compression Limits", `<fieldset><legend>Limits Settings</legend><div style="display:grid;grid-template-columns:1fr 110px 30px;gap:6px;align-items:center">
+    <label><input type="checkbox" id="tT" checked> Include Tension Limit</label><input id="tTv" value="0"><span>${u.f}</span><label><input type="checkbox" id="tC"> Include Compression Limit</label><input id="tCv"><span>${u.f}</span></div></fieldset>`,
+    sapOkCloseApply(async d => {
+      const t = q(d, "#tT").checked, c = q(d, "#tC").checked;
+      const row = t || c ? [{IncludeTens: t ? "Yes" : "No", TensLimit: t ? q(d, "#tTv").value.trim() || "0" : "0", IncludeComp: c ? "Yes" : "No", CompLimit: c ? q(d, "#tCv").value.trim() || "0" : "0"}] : [];
+      return sapDone(await hmRun("assign_frame_data", {objects: names, tables: {"Frame Assignments - Tension and Compression Limits": row}}));
+    }), {width: 430});
+  const sync = () => [["#tT", "#tTv"], ["#tC", "#tCv"]].forEach(([c, v]) => { const on = q(d, c).checked, x = q(d, v); x.disabled = !on; if (!on) x.value = ""; else if (!x.value) x.value = "0"; });
+  q(d, "#tT").onchange = q(d, "#tC").onchange = sync; sync();
+  return d;
+}
+// Assign > Frame > Line Springs: Simple (stiffness per unit length, resisting tension and compression or one of them) or a
+// Link Property, the spring tension direction (local axis, in the 2-3 plane, or a user vector); Add, Replace or Delete.
+async function hmSapFrameSprings() {
+  const names = sapFrames(); if (!names.length) return;
+  const csys = await sapCsys(), u = sapUnits(), T = "Frame Spring Assignments";
+  const pd = (await hmRun("property_definitions", {}, true)).result || {}, links = (pd.links || []).map(l => l.name);
+  const ln = (l, c) => `<div style="display:flex;justify-content:space-between;align-items:center;margin:4px 0 4px 46px"><span>${l}</span>${c}</div>`;
+  const d = dialog("Assign Springs Along Frame Object", `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Spring Type</legend><label><input type="radio" name="lT" value="Simple" checked> Simple</label>
+      ${ln("Spring Stiffness per Unit Length", `<span><input id="lK" value="0" style="width:110px"> <span class="u" style="display:inline-block;width:60px">${u.f}/${u.l}/${u.l}</span></span>`)}
+      ${ln("Simple Spring Resists", `<select id="lR" style="width:225px;margin-right:64px">${opts(["Tension and Compression", "Compression Only", "Tension Only"], "Tension and Compression")}</select>`)}
+      <div style="display:flex;justify-content:space-between;align-items:center"><label><input type="radio" name="lT" value="Link" ${links.length ? "" : "disabled"}> Link Property</label><span style="display:flex;gap:4px;margin-right:64px"><button id="lP" style="width:28px;padding:0">+</button><select id="lL" style="width:193px">${opts(links, links[0] || "")}</select></span></div>
+      ${ln("Local 2 Axis Angle from Default Orientation", `<input id="lA" style="width:110px;margin-right:64px">`)}</fieldset>
+    <fieldset><legend>Spring Tension Direction</legend>
+      <div style="display:flex;justify-content:space-between;align-items:center"><label><input type="radio" name="lD" value="Local" checked> Parallel to Line Object Local Axis</label><select id="lAx" style="width:110px;margin-right:64px">${opts(["1 Axis", "2 Axis", "3 Axis"], "2 Axis")}</select></div>
+      <label><input type="radio" name="lD" value="Plane"> In Frame Object 2-3 Plane</label>${ln("Counterclockwise Angle from Frame +2 Axis", `<input id="lAng" style="width:110px;margin-right:64px">`)}
+      <label><input type="radio" name="lD" value="Vector"> User Specified Direction Vector</label>${ln("Coordinate System", `<select id="lCS" style="width:225px;margin-right:64px">${opts(["Line Local Axes", ...csys], "Line Local Axes")}</select>`)}
+      ${["1", "2", "3"].map((c, i) => ln(`<span data-vc="${i}">Local ${c} Component</span>`, `<input id="lV${i}" style="width:110px;margin-right:64px">`)).join("")}</fieldset>
+    <fieldset><legend>Options</legend><label><input type="radio" name="lO" value="add"> Add to Existing Springs</label><label><input type="radio" name="lO" value="replace" checked> Replace Existing Springs</label><label><input type="radio" name="lO" value="delete"> Delete Existing Springs</label></fieldset>
+    <button id="lRst" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => {
+      const how = q(d, "[name=lO]:checked").value, got = await sapObjRows(names); if (!got) return false;
+      const link = q(d, "[name=lT]:checked").value === "Link", dir = q(d, "[name=lD]:checked").value, cs = q(d, "#lCS").value;
+      const row = {Type: link ? "Link" : "Simple", Stiffness: link ? "0" : q(d, "#lK").value.trim() || "0", SimpleType: link ? "" : q(d, "#lR").value, LinkProp: link ? q(d, "#lL").value : "", Axis2Angle: link ? q(d, "#lA").value.trim() || "0" : "0",
+        Dir1Type: {Local: "Parallel to Local Axis", Plane: "In 2-3 Plane", Vector: "User Vector"}[dir], Dir: dir === "Local" ? q(d, "#lAx").value[0] : "", Axis1Angle: dir === "Plane" ? q(d, "#lAng").value.trim() || "0" : "0",
+        CoordSys: dir === "Vector" ? (cs === "Line Local Axes" ? "Local" : cs) : "", VecX: dir === "Vector" ? q(d, "#lV0").value.trim() || "0" : "0", VecY: dir === "Vector" ? q(d, "#lV1").value.trim() || "0" : "0", VecZ: dir === "Vector" ? q(d, "#lV2").value.trim() || "0" : "0"};
+      return sapSetEach("assign_frame_data", names, n => ({[T]: how === "delete" ? [] : how === "add" ? [...((got.by[n] || {})[T] || []), row] : [row]}), {spring: ""});
+    }), {width: 720});
+  const on = (id, yes, v) => { const x = q(d, id); x.disabled = !yes; if (!yes) x.value = x.tagName === "SELECT" ? x.value : ""; else if (x.tagName !== "SELECT" && x.value === "" && v != null) x.value = v; };
+  const sync = () => {
+    const link = q(d, "[name=lT]:checked").value === "Link", dir = q(d, "[name=lD]:checked").value;
+    on("#lK", !link, "0"); on("#lR", !link); on("#lL", link); q(d, "#lP").disabled = false; on("#lA", link, "0");
+    on("#lAx", dir === "Local"); q(d, "#lAx").style.visibility = dir === "Local" ? "" : "hidden"; on("#lAng", dir === "Plane", "0"); on("#lCS", dir === "Vector"); q(d, "#lCS").style.visibility = dir === "Vector" ? "" : "hidden";
+    [0, 1, 2].forEach(i => on("#lV" + i, dir === "Vector", i ? "0" : "1"));
+    const loc = q(d, "#lCS").value === "Line Local Axes"; d.querySelectorAll("[data-vc]").forEach(x => x.textContent = (loc ? "Local " + (1 + +x.dataset.vc) : "Global " + "XYZ"[+x.dataset.vc]) + " Component");
+  };
+  d.querySelectorAll("[name=lT],[name=lD]").forEach(r => r.onchange = sync); q(d, "#lCS").onchange = sync;
+  q(d, "#lP").onclick = () => modelAct("links");
+  q(d, "#lRst").onclick = () => { q(d, "[name=lT][value=Simple]").checked = true; q(d, "#lK").value = "0"; q(d, "#lR").value = "Tension and Compression"; q(d, "[name=lD][value=Local]").checked = true; q(d, "#lAx").value = "2 Axis"; q(d, "#lCS").value = "Line Local Axes"; q(d, "[name=lO][value=replace]").checked = true; sync(); };
+  sync();
+  return d;
+}
+// Assign > Frame > Line Mass: Mass per Unit Length; Add, Replace or Delete.
+function hmSapFrameMass() {
+  const names = sapFrames(); if (!names.length) return;
+  const u = sapUnits(), T = "Frame Assignments - Additional Mass";
+  const d = dialog("Assign Frame Mass", `${sapFormCss}<div class="sapF"><fieldset><legend>Mass</legend><div class="g3" style="grid-template-columns:1fr 110px 90px">${sapRow("Mass per Unit Length", "fmM", 0, `${u.f}-s²/${u.l}²`)}</div></fieldset>
+    <fieldset><legend>Options</legend><label><input type="radio" name="fmO" value="add"> Add to Existing Masses</label><label><input type="radio" name="fmO" value="replace" checked> Replace Existing Masses</label><label><input type="radio" name="fmO" value="delete"> Delete Existing Masses</label></fieldset></div>`,
+    sapOkCloseApply(async d => {
+      const how = q(d, "[name=fmO]:checked").value, v = q(d, "#fmM").value.trim() || "0", got = await sapObjRows(names); if (!got) return false;
+      return sapSetEach("assign_frame_data", names, n => { const was = +(((got.by[n] || {})[T] || [])[0] || {}).AddedMass || 0; return {[T]: how === "delete" ? [] : [{AddedMass: String(how === "add" ? was + (+v || 0) : +v || 0)}]}; });
+    }), {width: 420});
+  return d;
+}
+// Assign > Frame > Material Temperatures: the temperature and an optional joint pattern (SAP2000's Frame Material Temperatures).
+async function hmSapFrameMatTemp() {
+  const names = sapFrames(); if (!names.length) return;
+  const dd = (await hmRun("definition_data", {}, true)).result || {tables: {}}, pats = ["None", ...new Set((((dd.tables || {})["Joint Pattern Definitions"] || {}).rows || []).map(r => r.Pattern || r.Name).filter(Boolean))];
+  const d = dialog("Assign Frame Material Temperature", `<fieldset><legend>Temperature Data</legend><div style="display:grid;grid-template-columns:1fr auto 30px;gap:6px;align-items:center"><span>Temperature</span><input id="mtT" value="0" style="width:110px"><span>${/^(kip|lb)/.test(hmU().f) ? "F" : "C"}</span>
+    <span>Joint Pattern</span><span style="display:flex;gap:4px"><button id="mtP" style="width:28px;padding:0">+</button><select id="mtJ" style="width:180px">${opts(pats, "None")}</select></span><span></span></div></fieldset>`,
+    sapOkCloseApply(async d => { const t = q(d, "#mtT").value.trim() || "0", jp = q(d, "#mtJ").value; return sapDone(await hmRun("assign_frame_data", {objects: names, tables: {"Frame Material Temperatures": +t === 0 && jp === "None" ? [] : [{Temp: t, JtPattern: jp === "None" ? "" : jp}]}})); }), {width: 430});
+  q(d, "#mtP").onclick = () => modelAct("dt:Joint Pattern Definitions");
+  return d;
+}
+// Assign > Frame > Automatic Frame Mesh.
+function hmSapFrameMesh() {
+  const names = sapFrames(); if (!names.length) return;
+  const u = sapUnits();
+  const d = dialog("Assign Automatic Frame Mesh", `${sapFormCss}<div class="sapF"><fieldset><legend>Mesh Options</legend><label><input type="radio" name="mO" value="No"> No Auto Meshing</label><label><input type="radio" name="mO" value="Yes" checked> Auto Mesh Frame Objects</label></fieldset>
+    <fieldset id="mP"><legend>Auto Meshing Parameters</legend><label><input type="checkbox" id="mJ" checked> Mesh at Intermediate Joints</label><label><input type="checkbox" id="mF"> Mesh at Intersections with Other Frames, Area Edges and Solid Edges</label>
+      <div style="display:grid;grid-template-columns:1fr 110px 30px;gap:6px;align-items:center"><label><input type="checkbox" id="mN" checked> Minimum Number of Segments</label><input id="mNv" value="2"><span></span><label><input type="checkbox" id="mL" checked> Maximum Segment Length</label><input id="mLv" value="2"><span>${u.l}</span></div></fieldset>
+    <button id="mR" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => {
+      const yes = q(d, "[name=mO]:checked").value === "Yes";
+      const row = {AutoMesh: yes ? "Yes" : "No", AtJoints: yes && q(d, "#mJ").checked ? "Yes" : "No", AtFrames: yes && q(d, "#mF").checked ? "Yes" : "No", NumSegments: yes && q(d, "#mN").checked ? q(d, "#mNv").value.trim() || "0" : "0", MaxLength: yes && q(d, "#mL").checked ? q(d, "#mLv").value.trim() || "0" : "0", MaxDegrees: "0"};
+      return sapDone(await hmRun("assign_frame_data", {objects: names, tables: {"Frame Auto Mesh Assignments": [row], "Frame Assignments - Frame Auto Mesh Options": []}}));
+    }), {width: 600});
+  const sync = () => { const yes = q(d, "[name=mO]:checked").value === "Yes"; q(d, "#mP").classList.toggle("dis", !yes); ["#mJ", "#mF", "#mN", "#mL"].forEach(i => q(d, i).disabled = !yes); [["#mN", "#mNv"], ["#mL", "#mLv"]].forEach(([c, v]) => q(d, v).disabled = !yes || !q(d, c).checked); };
+  d.querySelectorAll("[name=mO]").forEach(r => r.onchange = sync); q(d, "#mN").onchange = q(d, "#mL").onchange = sync;
+  q(d, "#mR").onclick = () => { q(d, "[name=mO][value=Yes]").checked = true; q(d, "#mJ").checked = true; q(d, "#mF").checked = false; q(d, "#mN").checked = q(d, "#mL").checked = true; q(d, "#mNv").value = "2"; q(d, "#mLv").value = "2"; sync(); };
+  sync();
+  return d;
+}
+// Assign > Frame > Rebar Ratio for Creep Analysis.
+function hmSapFrameCreep() {
+  const names = sapFrames(); if (!names.length) return;
+  const d = dialog("Assign Frame Rebar Ratio for Creep Analysis", `${sapFormCss}<div class="sapF"><fieldset><legend>Longitudinal Rebar Ratio</legend><label><input type="radio" name="cO" value="No"> From Design</label><div style="display:flex;justify-content:space-between;align-items:center"><label><input type="radio" name="cO" value="Yes" checked> User Specified Ratio</label><input id="cR" value="0.01" style="width:110px"></div></fieldset>
+    <button id="cRst" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => { const user = q(d, "[name=cO]:checked").value === "Yes"; return sapDone(await hmRun("assign_frame_data", {objects: names, tables: {"Frame Rebar Ratio For Creep Analysis Assignments": [{IsUser: user ? "Yes" : "No", UserRatio: user ? q(d, "#cR").value.trim() || "0" : "0"}], "Frame Assignments - Rebar Ratio For Creep Analysis": []}})); }), {width: 400});
+  const sync = () => { const user = q(d, "[name=cO]:checked").value === "Yes", x = q(d, "#cR"); x.disabled = !user; if (!user) x.value = ""; else if (!x.value) x.value = "0.01"; };
+  d.querySelectorAll("[name=cO]").forEach(r => r.onchange = sync); q(d, "#cRst").onclick = () => { q(d, "[name=cO][value=Yes]").checked = true; q(d, "#cR").value = "0.01"; sync(); }; sync();
+  return d;
+}
+// Assign > Frame > Load Transfer Options.
+function hmSapFrameTransfer() {
+  const names = sapFrames(); if (!names.length) return;
+  return dialog("Assign Frame Load Transfer Options", `<fieldset><legend>Options</legend><label><input type="checkbox" id="trA" checked> Allow Load Transfer from Area Objects</label></fieldset>`,
+    sapOkCloseApply(async d => sapDone(await hmRun("assign_frame_data", {objects: names, tables: {"Frame Load Transfer Options": q(d, "#trA").checked ? [] : [{Transfer: "No"}]}}))), {width: 300});
+}
+// Assign > Frame > Hinge Overwrites (SAP2000's Frame Hinge Assigns 09 - Hinge Overwrites).
+function hmSapFrameHingeOverwrites() {
+  const names = sapFrames(); if (!names.length) return;
+  const d = dialog("Assign Frame Hinge Overwrites", `${sapFormCss}<div class="sapF"><fieldset><legend>Allow Changes to These Items</legend><label><input type="checkbox" id="hoA" checked> Auto Subdivide Parameters</label><label><input type="checkbox" id="hoB" checked> Hinge Behavior Parameters</label></fieldset>
+    <fieldset id="hoAF"><legend>Auto Subdivide</legend><label><input type="checkbox" id="hoD"> Auto Subdivide Line Objects at Hinges</label><div style="display:flex;justify-content:space-between;align-items:center;margin-left:46px"><span>Relative Length of Line Element at Hinge</span><input id="hoL" style="width:110px"></div>
+      <label style="margin-left:24px"><input type="checkbox" id="hoU" checked> Use Hinge Length Overwrite Instead, if Available</label></fieldset>
+    <fieldset id="hoBF"><legend>Hinge Behavior&nbsp; (Does Not Apply to Fiber Hinges)</legend><label><input type="checkbox" id="hoN"> Do Not Allow Hinges to Drop Load</label><div style="display:flex;justify-content:space-between;align-items:center;margin-left:46px"><span>Limiting Negative Stiffness Ratio</span><input id="hoS" value="0.1" style="width:110px"></div></fieldset>
+    <button id="hoR" class="reset">Reset Form to Default Values</button></div>`,
+    sapOkCloseApply(async d => {
+      const T = "Frame Hinge Assigns 09 - Hinge Overwrites", got = await sapObjRows(names); if (!got) return false;
+      return sapSetEach("assign_frame_data", names, n => {
+        const row = {...(((got.by[n] || {})[T] || [])[0] || {})};
+        if (q(d, "#hoA").checked) Object.assign(row, {AutoDivide: q(d, "#hoD").checked ? "Yes" : "No", RelLength: q(d, "#hoD").checked ? q(d, "#hoL").value.trim() || "0.02" : "0", UseHngLenOW: q(d, "#hoU").checked ? "Yes" : "No"});
+        if (q(d, "#hoB").checked) Object.assign(row, {NoLoadDrop: q(d, "#hoN").checked ? "Yes" : "No", LimNegStiff: q(d, "#hoN").checked ? "0" : q(d, "#hoS").value.trim() || "0.1"});
+        return {[T]: Object.keys(row).length ? [row] : []};
+      });
+    }), {width: 470});
+  const sync = () => {
+    const a = q(d, "#hoA").checked, b = q(d, "#hoB").checked, div = q(d, "#hoD").checked, nd = q(d, "#hoN").checked;
+    q(d, "#hoAF").classList.toggle("dis", !a); q(d, "#hoBF").classList.toggle("dis", !b);
+    q(d, "#hoD").disabled = !a; q(d, "#hoL").disabled = !a || !div; if (q(d, "#hoL").disabled) q(d, "#hoL").value = ""; else if (!q(d, "#hoL").value) q(d, "#hoL").value = "0.02";
+    q(d, "#hoU").disabled = !a || !div; q(d, "#hoN").disabled = !b; q(d, "#hoS").disabled = !b || nd; if (q(d, "#hoS").disabled) q(d, "#hoS").value = ""; else if (!q(d, "#hoS").value) q(d, "#hoS").value = "0.1";
+  };
+  ["#hoA", "#hoB", "#hoD", "#hoN"].forEach(i => q(d, i).onchange = sync);
+  q(d, "#hoR").onclick = () => { q(d, "#hoA").checked = q(d, "#hoB").checked = true; q(d, "#hoD").checked = false; q(d, "#hoU").checked = true; q(d, "#hoN").checked = false; q(d, "#hoS").value = "0.1"; sync(); };
+  sync();
+  return d;
+}
+// Assign > Frame > Hinges (pictures Assign/Frame/Frame Hinges 1-6): the five Frame Hinge Distribution Types, each with
+// its own Frame Hinge Assignment Data, Add/Replace options and the existing hinge counts. Kept as SAP2000's Frame Hinge
+// Assigns 00 - Hinge Distribution Type and 02 - User Defined Properties rows; auto hinges go through the native hinges.
+const sapHgeTypes = [["Nonlinear Beam Column", "Nonlinear Beam Column"], ["Distributed Plasticity", "Distributed Plasticity"], ["Equal Spacing", "Equal Spacing"], ["Continuous Spring Support", "Continuous Spring Support (Piles or Grade Beams)"], ["User Defined", "User Defined"]];
+const sapHgeLoc = ["Relative To Clear Length", "Distance From I End Offset", "Distance From J End Offset"], sapHgeLen = ["None", "Relative", "Absolute"];
+const sapHgePic = {
+  "Nonlinear Beam Column": `<line x1="40" y1="30" x2="400" y2="30" stroke="#000" stroke-width="5"/><circle cx="80" cy="30" r="9" fill="#999" stroke="#000" stroke-width="3"/><circle cx="360" cy="30" r="9" fill="#999" stroke="#000" stroke-width="3"/><path d="M40 52v14M40 59h80M120 52v14M320 52v14M320 59h80M400 52v14" stroke="#000"/><text x="45" y="72" font-size="11">Hinge Length</text><text x="325" y="72" font-size="11">Hinge Length</text>`,
+  "Distributed Plasticity": `<line x1="40" y1="30" x2="400" y2="30" stroke="#000" stroke-width="5"/>${[40, 112, 220, 328, 400].map(x => `<circle cx="${x}" cy="30" r="9" fill="#999" stroke="#000" stroke-width="3"/>`).join("")}<path d="M40 60h360${[40, 50, 140, 300, 390, 400].map(x => `M${x} 54v12`).join("")}" stroke="#000"/><text x="200" y="76" font-size="11">Weights</text>`,
+  "Equal Spacing": `<line x1="40" y1="30" x2="400" y2="30" stroke="#000" stroke-width="5"/>${[76, 148, 220, 292, 364].map(x => `<circle cx="${x}" cy="30" r="9" fill="#999" stroke="#000" stroke-width="3"/>`).join("")}<path d="M40 60h360${[40, 112, 184, 256, 328, 400].map(x => `M${x} 54v12`).join("")}" stroke="#000"/><text x="205" y="76" font-size="11">Spacing</text>`,
+  "Continuous Spring Support": `<line x1="40" y1="22" x2="400" y2="22" stroke="#000" stroke-width="5"/>${[76, 148, 220, 292, 364].map(x => `<circle cx="${x}" cy="22" r="9" fill="#999" stroke="#000" stroke-width="3"/>`).join("")}${[40, 112, 184, 256, 328, 400].map(x => `<path d="M${x} 22v8l-5 4 10 4-10 4 10 4-5 4v6M${x - 10} 56h20M${x - 10} 62l6-6M${x - 4} 62l6-6M${x + 2} 62l6-6" stroke="#000" fill="none"/>`).join("")}`,
+};
+async function hmSapFrameHinges() {
+  const names = sapFrames(); if (!names.length) return;
+  const u = sapUnits(), dd = (await hmRun("definition_data", {}, true)).result || {tables: {}};
+  const props = ((dd.tables[sapHingeTable("01")] || {}).rows || []).filter(r => !/^y/i.test(r.AssignHinge || "")).map(r => r.HingeName);
+  const pd = (await hmRun("property_definitions", {objects: names}, true)).result || {}, now = pd.objects || [];
+  const own = n => (now.find(o => o.object === n) || {}).tables || {};
+  const T0 = "Frame Hinge Assigns 00 - Hinge Distribution Type", T2 = "Frame Hinge Assigns 02 - User Defined Properties";
+  const count = now.reduce((s, o) => s + ((o.hinges || []).length || ((o.tables || {})[T2] || []).length), 0);
+  const first = names.length === 1 ? own(names[0]) : {}, r0 = (first[T0] || [])[0] || {};
+  let type = (sapHgeTypes.find(t => t[0] === r0.HgeDistrTyp) || sapHgeTypes[0])[0], rows = names.length === 1 ? (first[T2] || []).map(r => ({...r})) : [], pick = -1, adv = false;
+  const avail = v => `<select id="hAv" style="width:220px">${opts(["None", ...props], v || "None")}</select>`;
+  const hingePart = `<div class="hgS" style="display:grid;grid-template-columns:110px 220px 1fr;gap:8px 10px;align-items:center"><span>Selected Hinge</span><span id="hSel" style="border:1px solid #444;padding:3px 6px;background:#f0f0f0">No Hinge Is Selected</span><button disabled style="width:230px">Modify/Show Auto Properties...</button>
+    <span>Available Hinges</span>${avail()}<span></span><span></span><label style="grid-column:2/4"><input type="checkbox" id="hFib" checked> Save individual fiber response for Fiber Hinges</label></div>`;
+  const d = dialog("Assign Frame Hinges", `${sapFormCss}<div class="sapF">
+    <fieldset><legend>Frame Hinge Distribution Type</legend><div style="display:grid;grid-template-columns:1fr 470px;gap:10px"><div>${sapHgeTypes.map(([v, l]) => `<label><input type="radio" name="hT" value="${v}" ${v === type ? "checked" : ""}> ${l}</label>`).join("")}</div>
+      <div><svg id="hPic" viewBox="0 0 440 86" style="width:440px;height:86px;background:#fff"></svg><div style="text-align:right;margin-top:8px"><button id="hConv" style="width:180px">Convert to User Hinge</button></div></div></div></fieldset>
+    <fieldset id="hData" style="min-height:150px"></fieldset>
+    <fieldset><legend>Options</legend><label><input type="radio" name="hO" value="add"> Add Specified Hinge Assigns to Existing Hinge Assigns&nbsp; (All hinges will be converted to User Defined)</label><label><input type="radio" name="hO" value="replace" checked> Replace Existing Hinge Assigns with Specified Hinge Assigns</label>
+      <p style="margin:8px 0 0;text-decoration:underline">Existing Hinge Assignments on Currently Selected Frame Objects</p><p style="margin:2px 0">Number of Selected Frame Objects:&nbsp; ${names.length}</p><p style="margin:2px 0">Total Number of Hinges on All Selected Frame Objects:&nbsp; ${count}</p>
+      <div style="text-align:center"><button id="hFill" style="width:440px" ${names.length === 1 && count ? "" : "disabled"}>Fill Form with Hinges on Selected Frame Object</button></div></fieldset></div>`,
+    sapOkCloseApply(async d => {
+      keep();
+      const fib = q(d, "#hFib") ? (q(d, "#hFib").checked ? "Yes" : "No") : "Yes", add = q(d, "[name=hO]:checked").value === "add";
+      const t0 = {HgeDistrTyp: type, IsHgeLenRel: "No", HgeLenRel: "0", HgeLenAbs: "0"};
+      let list = [];
+      if (type === "User Defined") {
+        if (!rows.length) { formError(d, "Add a hinge first (Add Hinge...)."); return false; }
+        list = rows.map(r => ({...r, HgeDistrTyp: type}));
+      } else {
+        const av = q(d, "#hAv").value;
+        if (type === "Nonlinear Beam Column") { const rel = q(d, "#hRel").checked, len = q(d, "#hLen").value.trim() || "0"; if (!(+len > 0)) { formError(d, "The expected hinge length is more than 0."); return false; } Object.assign(t0, {IsHgeLenRel: rel ? "Yes" : "No", HgeLenRel: rel ? len : "0", HgeLenAbs: rel ? "0" : len}); }
+        if (type === "Distributed Plasticity") t0.IntgrType = q(d, "[name=hI]:checked").value;
+        if (type === "Equal Spacing") { const n = q(d, "[name=hS]:checked").value === "num"; t0.SpaceType = n ? "Number of Hinges" : "Maximum Spacing"; t0.MaxSpace = n ? "0" : q(d, "#hMax").value.trim() || "0"; t0.NumHgeSpace = n ? q(d, "#hNum").value.trim() || "0" : "0"; t0.HngAtEnds = q(d, "#hEnds").checked ? "Yes" : "No"; if (!(+(n ? t0.NumHgeSpace : t0.MaxSpace) > 0)) { formError(d, n ? "The number of hinges is 1 or more." : "The maximum spacing is more than 0."); return false; } }
+        if (av !== "None") list = [{HgeDistrTyp: type, AssignProp: av, GenHinge: "", SaveFibResp: fib, DistType: "RelDist", RelDist: "0", AbsDist: "0", LenOWType: "None", LenOWRel: "0", LenOWAbs: "0"}];
+      }
+      const auto = list.filter(r => r.AssignProp === "Auto").map(r => ({at: +r.RelDist || 0, dof: r.AutoDof || "M3"}));
+      const user = list.filter(r => r.AssignProp !== "Auto").map(r => { const x = {...r}; delete x.AutoDof; return x; });
+      return sapSetEach("assign_frame_data", names, n => ({[T0]: [t0], [T2]: add ? [...(own(n)[T2] || []), ...user] : user}), {hinges: add && auto.length === 0 ? undefined : auto});
+    }), {width: 1000});
+  function keep() { if (type === "User Defined" && pick >= 0) rowFrom(pick); }
+  const cell = (id, html) => `<span id="${id}">${html}</span>`;
+  function rowFrom(i) { const r = rows[i]; if (!r) return; const v = id => q(d, id) ? q(d, id).value : ""; Object.assign(r, {AssignProp: v("#uP"), DistType: v("#uL") === sapHgeLoc[0] ? "RelDist" : v("#uL") === sapHgeLoc[1] ? "AbsDistI" : "AbsDistJ"}); }
+  function paint() {
+    q(d, "#hPic").innerHTML = sapHgePic[type] || "";
+    q(d, "#hConv").disabled = !/^(Nonlinear|Distributed|Equal)/.test(type);
+    q(d, "[name=hO][value=add]").disabled = type !== "User Defined"; if (type !== "User Defined") q(d, "[name=hO][value=replace]").checked = true;
+    const box = q(d, "#hData"), lg = `<legend>Frame Hinge Assignment Data - ${type === "Nonlinear Beam Column" ? "Nonlinear Beam/Column" : type}</legend>`;
+    const av = (rows.find(r => r.AssignProp && r.AssignProp !== "Auto") || {}).AssignProp;
+    if (type === "Nonlinear Beam Column") box.innerHTML = lg + `<div style="display:grid;grid-template-columns:380px 1fr;gap:10px"><div><div style="display:flex;gap:10px;align-items:center"><span style="width:150px">Expected Hinge Length</span><input id="hLen" style="width:110px" value="${esc(r0.IsHgeLenRel === "Yes" ? r0.HgeLenRel : r0.HgeLenAbs && +r0.HgeLenAbs ? r0.HgeLenAbs : "0.3")}"><span id="hLu">${r0.IsHgeLenRel === "Yes" ? "" : u.l}</span></div><label style="margin-top:8px"><input type="checkbox" id="hRel" ${r0.IsHgeLenRel === "Yes" ? "checked" : ""}> Relative Length</label></div>${hingePart}</div>`;
+    else if (type === "Distributed Plasticity") box.innerHTML = lg + `<div style="display:grid;grid-template-columns:380px 1fr;gap:10px"><div style="display:grid;grid-template-columns:110px 1fr"><span>Integration Type:</span><div>${["5 point Gauss-Lobatto", "5 point Gauss-Legendre", "7 point Gauss-Lobatto", "7 point Gauss-Legendre"].map((v, i) => `<label><input type="radio" name="hI" value="${v}" ${(r0.IntgrType || "5 point Gauss-Lobatto") === v ? "checked" : ""}> ${v}</label>`).join("")}</div></div>${hingePart}</div>`;
+    else if (type === "Equal Spacing") box.innerHTML = lg + `<div style="display:grid;grid-template-columns:380px 1fr;gap:10px"><div><p style="margin:0 0 6px">Spacing Type</p><div style="display:grid;grid-template-columns:200px 120px 30px;gap:6px;align-items:center"><label><input type="radio" name="hS" value="max" ${r0.SpaceType === "Number of Hinges" ? "" : "checked"}> Maximum Spacing</label><input id="hMax" value="${esc(+r0.MaxSpace ? r0.MaxSpace : "1.2")}"><span>${u.l}</span><label><input type="radio" name="hS" value="num" ${r0.SpaceType === "Number of Hinges" ? "checked" : ""}> Number of Hinges</label><input id="hNum" value="${esc(+r0.NumHgeSpace ? r0.NumHgeSpace : "")}"><span></span></div><label style="margin-top:8px"><input type="checkbox" id="hEnds" ${r0.HngAtEnds === "Yes" ? "checked" : ""}> Place Hinges at the Two Ends</label></div>${hingePart}</div>`;
+    else if (type === "Continuous Spring Support") box.innerHTML = lg + hingePart;
+    else {
+      const head = ["Hinge Property", "Location Type", "Relative<br>Distance", `Absolute<br>Distance<br>${u.l}`, ...(adv ? ["Length<br>Overwrite Type", "Relative<br>Length", `Absolute<br>Length<br>${u.l}`, "Save Individual<br>Fiber Response?"] : [])];
+      const cols = adv ? "170px 180px 90px 90px 110px 90px 90px 110px" : "190px 220px 100px 100px";
+      const loc = r => r.DistType === "AbsDistI" ? sapHgeLoc[1] : r.DistType === "AbsDistJ" ? sapHgeLoc[2] : sapHgeLoc[0];
+      const fmt = r => [r.AssignProp === "Auto" ? `Auto ${r.AutoDof || ""}`.trim() : r.AssignProp, loc(r), r.DistType === "RelDist" ? r.RelDist : "", r.DistType === "RelDist" ? "" : r.AbsDist, ...(adv ? [r.LenOWType || "None", r.LenOWType === "Relative" ? r.LenOWRel : "", r.LenOWType === "Absolute" ? r.LenOWAbs : "", r.SaveFibResp || "Yes"] : [])];
+      box.innerHTML = lg + `<div style="display:flex;gap:16px"><div><div style="display:grid;grid-template-columns:${cols};text-align:center;font-size:12px;align-items:end">${head.map(h => `<span>${h}</span>`).join("")}</div>
+        <div id="uIn" style="display:grid;grid-template-columns:${cols};gap:1px"><select id="uP">${opts(["Auto", ...props], "Auto")}</select><select id="uL">${opts(sapHgeLoc, sapHgeLoc[0])}</select><input id="uR" value="0"><input id="uA" disabled>${adv ? `<select id="uO">${opts(sapHgeLen, "None")}</select><input id="uOR" disabled><input id="uOA" disabled><select id="uF">${opts(["Yes", "No"], "Yes")}</select>` : ""}</div>
+        <div id="uList" style="border:1px solid #7a9ab8;height:200px;overflow:auto;background:#fff">${rows.map((r, i) => `<div data-i="${i}" style="display:grid;grid-template-columns:${cols};cursor:default;${i === pick ? "background:#cce4f7" : ""}">${fmt(r).map(c => `<span style="padding:1px 4px">${esc(String(c))}</span>`).join("")}</div>`).join("")}</div>
+        <p style="margin:8px 0 0;text-decoration:underline">Current Hinge Information</p><p style="margin:2px 0">${pick >= 0 ? `Hinge ${pick + 1} of ${rows.length}` : "No hinge is currently selected"}</p></div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:60px"><button id="uAdd" style="width:190px">Add Hinge...</button><button id="uMod" style="width:190px" ${pick >= 0 ? "" : "disabled"}>Modify Hinge...</button><button id="uDel" style="width:190px" ${pick >= 0 ? "" : "disabled"}>Delete Hinge</button>
+        <label style="margin-top:auto"><input type="checkbox" id="uAdv" ${adv ? "checked" : ""}> Show Advanced Parameters</label></div></div>`;
+      const ins = () => { const l = q(d, "#uL").value, rel = l === sapHgeLoc[0]; q(d, "#uR").disabled = !rel; q(d, "#uA").disabled = rel; if (rel) q(d, "#uA").value = ""; else q(d, "#uR").value = "";
+        if (adv) { const o = q(d, "#uO").value; q(d, "#uOR").disabled = o !== "Relative"; q(d, "#uOA").disabled = o !== "Absolute"; } };
+      q(d, "#uL").onchange = ins; if (adv) q(d, "#uO").onchange = ins;
+      const read = async old => {
+        const l = q(d, "#uL").value, rel = l === sapHgeLoc[0], R = q(d, "#uR").value.trim(), A = q(d, "#uA").value.trim();
+        if (rel && !(+R >= 0 && +R <= 1 && R !== "")) { formError(d, "The relative distance is from 0 to 1."); return null; }
+        if (!rel && !(+A >= 0 && A !== "")) { formError(d, "The absolute distance is 0 or more."); return null; }
+        const r = {AssignProp: q(d, "#uP").value, GenHinge: "", DistType: rel ? "RelDist" : l === sapHgeLoc[1] ? "AbsDistI" : "AbsDistJ", RelDist: rel ? R : "0", AbsDist: rel ? "0" : A,
+          LenOWType: adv ? q(d, "#uO").value : old?.LenOWType || "None", LenOWRel: adv && q(d, "#uO").value === "Relative" ? q(d, "#uOR").value.trim() || "0" : old?.LenOWRel || "0",
+          LenOWAbs: adv && q(d, "#uO").value === "Absolute" ? q(d, "#uOA").value.trim() || "0" : old?.LenOWAbs || "0", SaveFibResp: adv ? q(d, "#uF").value : old?.SaveFibResp || "Yes"};
+        if (r.AssignProp === "Auto") { if (!rel) { formError(d, "An auto hinge is placed by its relative distance."); return null; } r.AutoDof = await sapAutoHinge(old?.AutoDof); if (!r.AutoDof) return null; }
+        return r;
+      };
+      q(d, "#uAdd").onclick = async () => { const r = await read(); if (r) { rows.push(r); pick = rows.length - 1; paint(); } };
+      q(d, "#uMod").onclick = async () => { if (pick < 0) return; const r = await read(rows[pick]); if (r) { rows[pick] = r; paint(); } };
+      q(d, "#uDel").onclick = () => { if (pick < 0) return; rows.splice(pick, 1); pick = -1; paint(); };
+      q(d, "#uAdv").onchange = () => { adv = q(d, "#uAdv").checked; paint(); };
+      d.querySelectorAll("#uList [data-i]").forEach(x => x.onclick = () => { pick = +x.dataset.i; const r = rows[pick]; paint();
+        q(d, "#uP").value = r.AssignProp; q(d, "#uL").value = r.DistType === "AbsDistI" ? sapHgeLoc[1] : r.DistType === "AbsDistJ" ? sapHgeLoc[2] : sapHgeLoc[0];
+        if (adv) { q(d, "#uO").value = r.LenOWType || "None"; q(d, "#uOR").value = r.LenOWRel || ""; q(d, "#uOA").value = r.LenOWAbs || ""; q(d, "#uF").value = r.SaveFibResp || "Yes"; }
+        ins(); if (r.DistType === "RelDist") q(d, "#uR").value = r.RelDist; else q(d, "#uA").value = r.AbsDist; });
+      ins();
+      return;
+    }
+    if (q(d, "#hAv")) {
+      q(d, "#hAv").value = props.includes(av) ? av : "None";
+      const sel = () => q(d, "#hSel").textContent = q(d, "#hAv").value === "None" ? "No Hinge Is Selected" : q(d, "#hAv").value;
+      q(d, "#hAv").onchange = sel; sel();
+      const f = rows.find(r => r.AssignProp && r.AssignProp !== "Auto"); if (f) q(d, "#hFib").checked = f.SaveFibResp !== "No";
+    }
+    if (q(d, "#hRel")) q(d, "#hRel").onchange = () => { const rel = q(d, "#hRel").checked; q(d, "#hLu").textContent = rel ? "" : u.l; q(d, "#hLen").value = rel ? "0.1" : "0.3"; };
+    if (q(d, "[name=hS]")) { const sp = () => { const n = q(d, "[name=hS]:checked").value === "num"; q(d, "#hMax").disabled = n; q(d, "#hNum").disabled = !n; if (n && !q(d, "#hNum").value) q(d, "#hNum").value = "5"; }; d.querySelectorAll("[name=hS]").forEach(r => r.onchange = sp); sp(); }
+  }
+  d.querySelectorAll("[name=hT]").forEach(r => r.onchange = () => { keep(); type = r.value; pick = -1; paint(); });
+  // Convert to User Hinge: the hinges the chosen distribution places, as User Defined rows.
+  q(d, "#hConv").onclick = () => {
+    const av = q(d, "#hAv") ? q(d, "#hAv").value : "None", p = av === "None" ? "Auto" : av, at = [];
+    if (type === "Nonlinear Beam Column") at.push(0, 1);
+    else if (type === "Distributed Plasticity") at.push(...(/^7/.test(q(d, "[name=hI]:checked").value) ? [0, 0.0848, 0.2655, 0.5, 0.7345, 0.9152, 1] : [0, 0.1727, 0.5, 0.8273, 1]));
+    else { const n = q(d, "[name=hS]:checked").value === "num" ? Math.max(1, Math.round(+q(d, "#hNum").value || 1)) : 5, ends = q(d, "#hEnds").checked;
+      for (let i = 0; i < n; i++) at.push(ends ? (n === 1 ? 0.5 : i / (n - 1)) : (i + 0.5) / n); }
+    rows = at.map(a => ({AssignProp: p, AutoDof: p === "Auto" ? "M3" : undefined, GenHinge: "", DistType: "RelDist", RelDist: String(+a.toFixed(4)), AbsDist: "0", LenOWType: "None", LenOWRel: "0", LenOWAbs: "0", SaveFibResp: "Yes"}));
+    type = "User Defined"; q(d, "[name=hT][value='User Defined']").checked = true; pick = -1; paint();
+  };
+  q(d, "#hFill").onclick = () => { type = "User Defined"; q(d, "[name=hT][value='User Defined']").checked = true; rows = (first[T2] || []).map(r => ({...r})); const nat = (now[0] || {}).hinges || []; for (const h of nat) rows.push({AssignProp: "Auto", AutoDof: h.dof, GenHinge: "", DistType: "RelDist", RelDist: String(h.at), AbsDist: "0", LenOWType: "None", LenOWRel: "0", LenOWAbs: "0", SaveFibResp: "Yes"}); pick = -1; paint(); };
+  paint();
+  return d;
+}
+// The degree of freedom of an auto hinge placed from the User Defined grid (the Engine's auto hinges by degree of freedom).
+function sapAutoHinge(now) {
+  return new Promise(res => {
+    let done = false;
+    dialog("Auto Hinge Assignment Data", `${sapFormCss}<div class="sapF"><fieldset><legend>Degree of Freedom</legend>${["M3", "M2", "P", "V2", "V3", "T", "P-M2-M3", "P-M3", "M3-V2"].map(v => `<label><input type="radio" name="ahD" value="${v}" ${v === (now || "M3") ? "checked" : ""}> ${v}</label>`).join("")}</fieldset></div>`,
+      [["OK", x => { done = true; res(q(x, "[name=ahD]:checked").value); return true; }, true], ["Cancel", () => { if (!done) res(null); return true; }]], {width: 300, onClose: () => { if (!done) res(null); }});
+  });
+}
+// Assign > Frame > Reverse Connectivity: keep the assigns in the same global or the same local orientation.
+function hmSapFrameReverse() {
+  const names = sapFrames(); if (!names.length) return;
+  return dialog("Assign Frame Reverse Connectivity", `${sapFormCss}<div class="sapF"><fieldset><legend>Options</legend><label><input type="radio" name="rO" value="global" checked> Keep Assigns in Same Global Orientation</label><label><input type="radio" name="rO" value="local"> Keep Assigns in Same Local Orientation</label></fieldset></div>`,
+    sapOkCloseApply(async d => sapDone(await hmRun("assign_frame_data", {objects: names, reverse: q(d, "[name=rO]:checked").value}))), {width: 360});
+}
+Object.assign(hmSapAssignForms, {
+  fReverse: () => hmSapFrameReverse(), fHinges: () => hmSapFrameHinges(),
+  fSections: () => hmSapFrameSectionsAssign(), fModifiers: () => hmSapFrameModifiers(), fMaterial: () => hmSapFrameMaterial(), fReleases: () => hmSapFrameReleases(), fAxes: () => hmSapFrameLocalAxes(),
+  fOffsets: () => hmSapFrameOffsets(), fInsertion: () => hmSapFrameInsertion(), fStations: () => hmSapFrameStations(), fPDelta: () => hmSapFramePDelta(), fTCLimits: () => hmSapFrameTCLimits(),
+  fSprings: () => hmSapFrameSprings(), fMass: () => hmSapFrameMass(), fMatTemp: () => hmSapFrameMatTemp(), fMesh: () => hmSapFrameMesh(), fCreep: () => hmSapFrameCreep(), fTransfer: () => hmSapFrameTransfer(),
+  fHingeOverwrites: () => hmSapFrameHingeOverwrites(),
+});
 
 // ---- Define: the items kept as rows of the program's own definition tables, rebar sizes and a section's rebar ----
 // label, table(s), the programs that have it (ETABS when left out), SAP2000's own name.
