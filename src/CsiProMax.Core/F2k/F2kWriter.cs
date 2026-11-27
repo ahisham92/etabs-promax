@@ -192,8 +192,13 @@ public static class F2kWriter
         var openings = SlabDefs.Openings(m).Where(o => string.Equals(o.Story, story, StringComparison.OrdinalIgnoreCase) && o.Plan.Count >= 3)
             .Select(o => (Label: AreaName(o.Name), Points: o.Plan.Select(p => Point(p[0], p[1], z)).ToList())).ToList();
         var punching = new List<(string Point, SlabDefs.Punching P)>();
-        foreach (var p in SlabDefs.PunchingList(m).Where(p => string.Equals(p.Story, story, StringComparison.OrdinalIgnoreCase)))
-            if (m.Point(p.Point) is { } pp) punching.Add((Point(pp.X, pp.Y, z - pp.Below), p));
+        // ETABS can keep a column's punching overwrite on its bottom joint, at the story below the slab: in SAFE it is the slab's point above it.
+        var storyBelow = level > 0 ? m.Stories[level - 1].Name : "Base";
+        var allPunching = SlabDefs.PunchingList(m);
+        var onSlab = allPunching.Where(p => string.Equals(p.Story, story, StringComparison.OrdinalIgnoreCase)).Select(p => p.Point).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var p in allPunching.Where(p => string.Equals(p.Story, story, StringComparison.OrdinalIgnoreCase)
+            || (string.Equals(p.Story, storyBelow, StringComparison.OrdinalIgnoreCase) && !onSlab.Contains(p.Point))))
+            if (m.Point(p.Point) is { } pp) punching.Add((Point(pp.X, pp.Y, string.Equals(p.Story, story, StringComparison.OrdinalIgnoreCase) ? z - pp.Below : z), p));
 
         // ---- what is used ----
         var usedSlab = areaRows.Select(r => r.Section).Where(s => s.Length > 0).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -636,7 +641,6 @@ public static class F2kWriter
 
         // Groups, with the members that are in this floor's file (Define > Groups).
         var groups = GroupDefs.Groups(m);
-        if (groups.Count > 0)
         {
             // SAFE's own group of everything comes first in its files.
             if (!groups.Exists(g => g.Name.Equals("All", StringComparison.OrdinalIgnoreCase))) groups.Insert(0, new Group("All", "Yellow", []));
@@ -657,6 +661,11 @@ public static class F2kWriter
 
         // The tables of a SAFE file the Modeler opened that it has no form for, as the file had them.
         KeptTables.WriteInto(m, "safe", tables);
+        // A model that did not come from SAFE: the tables SAFE itself would write (defaults, display, summaries), the way SAFE writes them.
+        if (!F2kSource.Has(m))
+            tables = F2kSafeTables.Complete(m, story, z, tables,
+                areaRows.GroupBy(a => a.Label).ToDictionary(g => g.Key, g => (g.First().Source.Label, g.First().Source.Story ?? ""), StringComparer.OrdinalIgnoreCase),
+                lineRows.GroupBy(l => l.Label).ToDictionary(g => g.Key, g => (g.First().Source.Label, g.First().Source.Story ?? "", g.First().Type), StringComparer.OrdinalIgnoreCase));
         // A model read from SAFE's own file: what did not change goes back exactly as SAFE wrote it, field for field.
         tables = F2kSource.Merge(m, story, tables);
 

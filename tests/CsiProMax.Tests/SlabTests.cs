@@ -451,6 +451,8 @@ static class SlabTests
                 if (seen.TryGetValue("MATERIAL PROPERTIES - " + k.ToUpperInvariant(), out var have)) have.UnionWith(v);
             seen["FRAME SECTION PROPERTY DEFINITIONS - STEEL I/WIDE FLANGE"].UnionWith(["File Name", "Section in File"]);
             seen["TENDON LOAD ASSIGNMENTS - LOSS OPTIONS"].UnionWith(["Stressing Loss", "Long Term Loss", "Curvature Coefficient", "Wobble Coefficient", "Anchorage Set Slip", "Shortening Stress", "Creep Stress", "Shrinkage Stress", "Relaxation Stress"]);
+            // A frame's maximum station spacing, as the keys name it (the two examples only use minimum stations).
+            if (seen.TryGetValue("FRAME ASSIGNMENTS - OUTPUT STATIONS", out var stations)) stations.Add("Max Spacing");
             seen["CONCRETE SLAB DESIGN OVERWRITES - PUNCHING SHEAR - GENERAL"].UnionWith(["Reinforcement Pattern", "Reinforcement Fy", "Reinforcement Diameter", "Reinforcement Spacing"]);
             seen["SLAB PROPERTY DEFINITIONS"].UnionWith(["Overall Depth", "Rib Width at Top", "Rib Width at Bottom", "Rib Spacing 1", "Rib Spacing 2"]);
             seen["STRIP OBJECT CONNECTIVITY"].UnionWith(["Segment End Point", "End Width Left", "End Width Right"]);
@@ -492,7 +494,8 @@ static class SlabTests
             Check(tendon[0]["Number Points"] == "3" && tendon[0]["Number Vertical Spans"] == "2" && tendon.Any(x => x.GetValueOrDefault("Span Number") == "2"), "three points and two spans");
             Check(t["TENDON LOAD ASSIGNMENTS - JACKING STRESS"].Single()["Jacking Location"] == "Both Ends", "jacked from both ends");
             Check(t["STRIP OBJECT CONNECTIVITY"].Count(x => x["Name"] == "CSA1") == 2 && t["CONCRETE SLAB DESIGN OVERWRITES - STRIP BASED"].Single(x => x["Strip Name"] == "CSA1")["Strip Design Type"] == "Middle Strip", "the strip of two segments and its overwrites");
-            Check(!r.Text.Contains("OBJECT GEOMETRY", StringComparison.Ordinal) && !r.Text.Contains("16.0.0", StringComparison.Ordinal), "nothing of SAFE 16's format is left");
+            // SAFE 16's tables began "OBJECT GEOMETRY - ..."; SAFE 20+'s own "DIMENSION LINE OBJECT GEOMETRY" is not one of them.
+            Check(!t.Keys.Any(k => k.StartsWith("OBJECT GEOMETRY", StringComparison.OrdinalIgnoreCase)) && !r.Text.Contains("16.0.0", StringComparison.Ordinal), "nothing of SAFE 16's format is left");
         });
 
         yield return ("slabs: ETABS 20's PT example written as a .f2k gives the tendon, its profile, jacking, losses, strip and hyperstatic case that SAFE 20 itself exports for it", () =>
