@@ -120,9 +120,10 @@ internal static class F2kSafeTables
             {
                 case "DBTABLESET": foreach (var (k, v) in Pairs(t, 2)) set.Options[k] = v; break;
                 case "DBTABLESETTABLEKEY": set.Keys.Add(Unquote(t[2])); break;
-                case "DBTABLESETLOADPATTERN": set.Patterns.Add(Unquote(t[2])); break;
-                case "DBTABLESETLOADCASE": set.Cases.Add(Unquote(t[2])); break;
-                case "DBTABLESETCOMBO": set.Combos.Add(Unquote(t[2])); break;
+                // ETABS's internal live load reduction items ("~LLRF") name nothing a program can read back (KBC 2009 Ex002, 0.4.70).
+                case "DBTABLESETLOADPATTERN": if (!Unquote(t[2]).StartsWith('~')) set.Patterns.Add(Unquote(t[2])); break;
+                case "DBTABLESETLOADCASE": if (!Unquote(t[2]).StartsWith('~')) set.Cases.Add(Unquote(t[2])); break;
+                case "DBTABLESETCOMBO": if (!Unquote(t[2]).StartsWith('~')) set.Combos.Add(Unquote(t[2])); break;
             }
         }
         if (sets.Count > 0)

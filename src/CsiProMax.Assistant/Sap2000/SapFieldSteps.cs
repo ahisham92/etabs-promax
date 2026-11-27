@@ -32,6 +32,7 @@ public static class SapFieldSteps
     {
         SapFormRoundTrip.Define(ctx);
         SapFormRoundTrip.DefineLoads(ctx);
+        SapFormRoundTrip.AssignAreas(ctx);
         SapAssignRoundTrip.Define(ctx);
         // The SAP2000 function forms' functions, so SAP2000 reads them back (Scratch: "SAP2000 read the function forms' tables").
         foreach (var (name, kind, table, values, points) in Functions)
@@ -176,6 +177,7 @@ public static class SapFieldSteps
         // ---- each SAP2000 form of the Engine, read back from SAP2000 field by field ----
         SapFormRoundTrip.Check(ctx);
         SapFormRoundTrip.CheckLoads(ctx);
+        SapFormRoundTrip.CheckAssigns(ctx);
         SapAssignRoundTrip.Check(ctx);
 
         // ---- every read of the link ----

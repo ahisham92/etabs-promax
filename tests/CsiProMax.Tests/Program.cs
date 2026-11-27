@@ -1131,6 +1131,7 @@ foreach (var (name, body) in ExtrasTests.All()) Test(name, body);
 foreach (var (name, body) in SapSourceTests.All()) Test(name, body);
 foreach (var (name, body) in EditTests.All()) Test(name, body);
 foreach (var (name, body) in AssignTablesTests.All()) Test(name, body);
+foreach (var (name, body) in SapOtherObjectsTests.All()) Test(name, body);
 foreach (var (name, body) in DefineTablesTests.All()) Test(name, body);
 foreach (var (name, body) in SapLoadTablesTests.All()) Test(name, body);
 foreach (var (name, body) in SapObjectLoadsTests.All()) Test(name, body);
