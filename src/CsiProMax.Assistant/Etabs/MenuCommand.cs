@@ -32,6 +32,9 @@ public static class MenuCommand
     /// Picks path (e.g. Design, Shear Wall Design, Start Design/Check) in the main menu of the process. Returns null when
     /// it was picked, else why not, in words for the report. It never closes, types into or picks anything else.
     /// </summary>
+    /// <summary>A path's first word for a button in the program's status bar instead of its main menu.</summary>
+    public const string StatusBar = "Status Bar";
+
     public static string? Pick(int processId, IReadOnlyList<string> path, TimeSpan? wait = null)
     {
         if (!OperatingSystem.IsWindows()) return "menus are picked on Windows only";
@@ -60,6 +63,28 @@ public static class MenuCommand
         try
         {
             var main = AutomationElement.FromHandle(window);
+            // "Status Bar", then a button there (ETABS's and SAFE's "Units..."), then the items of the menu it opens.
+            if (path[0] == StatusBar)
+            {
+                if (path.Count < 2) return "no status bar button given";
+                var button = FindIn(main, path[1], processId, most, ControlType.Button, ControlType.SplitButton, ControlType.MenuItem);
+                if (button is null) return $"the status bar has no \"{path[1]}\"";
+                if (button.TryGetCurrentPattern(InvokePattern.Pattern, out var press)) ((InvokePattern)press).Invoke();
+                else if (button.TryGetCurrentPattern(ExpandCollapsePattern.Pattern, out var drop)) ((ExpandCollapsePattern)drop).Expand();
+                else return $"\"{path[1]}\" cannot be pressed";
+                for (var i = 2; i < path.Count; i++)
+                {
+                    var item = Find(main, path[i], processId, most);
+                    if (item is null) return $"\"{path[1]}\" shows no \"{path[i]}\"";
+                    if (i == path.Count - 1)
+                    {
+                        if (item.TryGetCurrentPattern(InvokePattern.Pattern, out var inv)) { ((InvokePattern)inv).Invoke(); return null; }
+                        return $"\"{path[i]}\" cannot be picked";
+                    }
+                    if (item.TryGetCurrentPattern(ExpandCollapsePattern.Pattern, out var ec)) ((ExpandCollapsePattern)ec).Expand();
+                }
+                return null;
+            }
             var menu = main.FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.AutomationIdProperty, "msMain"))
                 ?? main.FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.MenuBar));
             if (menu is null) return "no main menu was found in the program's window";
@@ -115,10 +140,12 @@ public static class MenuCommand
 
     /// <summary>The item under a menu (its drop-down opens in a window of its own, so the program's windows are looked in
     /// too), looked for until it shows or the wait is over.</summary>
-    private static AutomationElement? Find(AutomationElement under, string name, int processId, TimeSpan most)
+    private static AutomationElement? Find(AutomationElement under, string name, int processId, TimeSpan most) =>
+        FindIn(under, name, processId, most, ControlType.MenuItem, ControlType.SplitButton);
+
+    private static AutomationElement? FindIn(AutomationElement under, string name, int processId, TimeSpan most, params ControlType[] types)
     {
-        var items = new OrCondition(new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.MenuItem),
-            new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.SplitButton));
+        var items = new OrCondition(types.Select(t => (Condition)new PropertyCondition(AutomationElement.ControlTypeProperty, t)).Append(Condition.FalseCondition).ToArray());
         var until = DateTime.UtcNow + most;
         do
         {

@@ -27,6 +27,11 @@ public static class ReferenceForms
         ["sap2000|Define > Grid Data"] = ["Define", "Coordinate Systems/Grids"],
         ["safe|Define > Frame Sections"] = ["Define", "Section Properties", "Frame Sections"],
         ["safe|Define > Slab and Wall Sections"] = ["Define", "Section Properties", "Slab Properties"],
+        // The units at the bottom right (Ahmed 2026-11-27): ETABS's and SAFE's "Units..." button and its menu.
+        ["etabs|Units > Consistent Units"] = [MenuCommand.StatusBar, "Units...", "Consistent Units..."],
+        ["etabs|Units > Show Units Form"] = [MenuCommand.StatusBar, "Units...", "Show Units Form..."],
+        ["safe|Units > Consistent Units"] = [MenuCommand.StatusBar, "Units...", "Consistent Units..."],
+        ["safe|Units > Show Units Form"] = [MenuCommand.StatusBar, "Units...", "Show Units Form..."],
     };
 
     /// <summary>The program's menu path for an Engine path ("Define > Load Patterns..."): an alias, else the same words.</summary>

@@ -484,6 +484,38 @@ public static class ModelerCheck
         }
         if (typeof forProgram === "function") { await hmRun("set_model_program", {program: "etabs"}, true); if (window.cpmPull) await window.cpmPull(); await wait(400); }
         window.cpmForms = list.filter(it => it.label.endsWith("...") && !OTHER_WAY[it.act]).map(it => ({path: it.path, act: it.act, target: it.target || "etabs"}));
+        // The units at the bottom right, as each program has them (Ahmed 2026-11-27): a "Units..." button with its menu
+        // and forms, or SAP2000's units drop-down. Their forms are pictured beside the programs' too.
+        for (const target of typeof forProgram === "function" ? ["etabs", "sap2000", "safe"] : ["etabs"]) {
+          await step(`the units at the bottom right, as ${target} has them`, async () => {
+            if (typeof forProgram === "function" && program !== target) { await hmRun("set_model_program", {program: target}, true); for (let i = 0; i < 30 && program !== target; i++) { if (window.cpmPull) await window.cpmPull(); await wait(200); } }
+            const b = document.getElementById("units"), s = document.getElementById("unitsSap");
+            if (!b || !s) return {fail: "the footer has no units control"};
+            const coords = () => document.getElementById("coords").textContent;
+            if (target === "sap2000") {
+              if (!b.hidden || s.hidden) return {fail: "SAP2000's units drop-down is not the one shown"};
+              const opts = [...s.options].map(o => o.textContent);
+              if (opts.length < 16 || !opts.includes("KN, m, C") || !opts.includes("lb, in, F")) return {fail: "the drop-down lists " + opts.join(" / ")};
+              s.value = String(opts.indexOf("KN, mm, C")); s.dispatchEvent(new Event("change")); await wait(200);
+              const shown = lu(); setDispUnits(null); await wait(100);
+              return shown === "mm" ? {ok: opts.length + " unit sets; KN, mm, C picked, then back to the model's"} : {fail: "picking KN, mm, C shows " + shown};
+            }
+            if (b.hidden || !s.hidden) return {fail: "the Units... button is not the one shown"};
+            b.click(); await wait(200);
+            const menu = document.getElementById("unitsMenu"), words = menu ? [...menu.children].map(x => x.textContent).filter(Boolean) : [];
+            const want = ["U.S. Defaults", "Metric SI Defaults", "Metric MKS Defaults", "Consistent Units...", "Show Units Form..."];
+            const missing = want.filter(w => !words.includes(w));
+            if (missing.length) return {fail: "the Units... menu lacks " + missing.join(", ")};
+            [...menu.children].find(x => x.textContent === "U.S. Defaults").click(); await wait(200);
+            const us = lu(); act("u:consistent"); await wait(200);
+            const f = document.querySelector(".dlg #cuL"); if (!f) return {fail: "Consistent Units... opened no form"};
+            f.value = "mm"; formOk("OK"); await wait(200);
+            const mm = lu(); setDispUnits(null); await wait(100);
+            return us === "ft" && mm === "mm" ? {ok: "the menu's five items; U.S. Defaults reads out in ft, Consistent Units in mm, then back to the model's"} : {fail: `U.S. Defaults read out in ${us}, Consistent Units in ${mm}`};
+          });
+          if (target !== "sap2000") window.cpmForms.push({path: "Units > Consistent Units...", act: "u:consistent", target}, {path: "Units > Show Units Form...", act: "u:form", target});
+        }
+        if (typeof forProgram === "function") { await hmRun("set_model_program", {program: "etabs"}, true); if (window.cpmPull) await window.cpmPull(); await wait(400); }
         for (const it of list) {
           await step("menu: " + it.path, async () => {
             if (it.target && program !== it.target) { await hmRun("set_model_program", {program: it.target}, true); for (let i = 0; i < 30 && program !== it.target; i++) { if (window.cpmPull) await window.cpmPull(); await wait(200); } }
