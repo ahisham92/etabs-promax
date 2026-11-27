@@ -246,6 +246,7 @@ footer #fbFilter{display:flex;align-items:center;gap:4px;border:0;border-left:1p
 .dlg .tile{width:76px;height:76px;padding:4px;display:flex;align-items:center;justify-content:center;background:#fff}
 .dlg table.grid{border-collapse:collapse;width:100%;background:#fff}.dlg table.grid th,.dlg table.grid td{border:1px solid #bbb;padding:1px 4px;font-weight:400;text-align:left}.dlg table.grid th{background:#eef1f5}
 .dlg table.grid td input,.dlg table.grid td select{width:100%;box-sizing:border-box;border:0}.dlg table.grid tr.on td{background:#dbe8f8}
+.dlg table.etlgrid td.sel{background:#0078d7;color:#fff}.dlg table.etlgrid td{height:20px}
 .dlg .rbg>span{white-space:nowrap}.dlg .rbg{display:grid;grid-template-columns:330px auto 120px 30px;gap:4px 8px;align-items:center}.dlg .cwg{display:grid;grid-template-columns:18px 1fr 170px 26px;gap:6px 8px;align-items:center}
 .dlg .info{display:inline-flex;width:14px;height:14px;border-radius:50%;background:#3a6ea5;color:#fff;font:700 10px serif;align-items:center;justify-content:center}
 .dlg .ex .w2{grid-column:span 1}
@@ -5164,6 +5165,239 @@ function openSchedule(what) {
   const title = {beam: "Beam Schedule", column: "Column Schedule", pier: "Shear Wall Schedule", slab: "Slab Reinforcing Schedule", steel: "Steel Member Schedule"}[what];
   dialog(title, `<p class="kv" style="margin:0 0 6px">${esc(fam.name)}: ${rows.length} ${what === "pier" ? "piers" : "members"}, from ${esc(fam.tables.join("; "))}.</p><div class="scroll" style="max-height:60vh"><table class="list"><tr>${head.map(h => `<th>${esc(h)}</th>`).join("")}</tr>${rows.map(r => `<tr>${r.map(v => `<td class="${isNum(v) ? "r" : ""}">${esc(v)}</td>`).join("")}</tr>`).join("") || `<tr><td colspan="${head.length}" class="kv">None in this pack.</td></tr>`}</table></div>`,
     [["Copy to Clipboard", () => { copyText([head, ...rows].map(r => r.join("\t")).join("\n")); return false; }, true], ["Close"]], {width: Math.min(900, 200 + head.length * 95), float: true});
+}
+// ======== ETABS 23.2 Detailing > Drawing Management > Drawing Format Properties and Drawing Sheet Setup ========
+// Built from the pictures in field/reference-forms/etabs/Detailing ("Drawing Format Properties 01-23", "Drawing Sheet
+// Setup"). ETABS keeps both in its detailing data, which its .e2k and its tables do not carry, so the Engine keeps them
+// in tables of its own (Core EtabsDetailingTables): the format items changed from ETABS's defaults, and the sheet setup.
+// Colours are read from the pictures' pixels. Rows and list choices no picture shows yet are asked of the capture thread
+// (grids cut at row 12-13: General Line/Fill/Text, Beams Line, Slab/Mat Text/Fill; every drop-down list).
+const ETL_FMT_TABLE = "Engine - Detailing Drawing Format Properties", ETL_SHEET_TABLE = "Engine - Detailing Drawing Sheet Setup";
+const etlGroups = [["General", "General"], ["Tables", "Tables"], ["Imported Drawings", "Imported Drawings"], ["Slab/Mat", "Slab/Mat"], ["Beams", "Beams"]];
+const etlTabs = ["Line", "Fill", "Text", "Arrowheads"];
+// The choices the pictures show (pictures 01-23). UNVERIFIED: whether ETABS's lists hold more.
+const etlThick = ["0.5-Thin", "1.0-Normal", "1.5-Thick", "2.0-Double", "2.5-Thicker", "3.0-Triple"];
+const etlStyle = ["Solid", "Dash", "Dot", "DashDot", "DashDotDot"];
+const etlFonts = ["Arial"], etlSizes = ["8", "9", "10", "11", "12", "14", "18", "24"], etlAlign = ["FullAuto"];
+const etlArrow = ["Triangle"], etlArrowSize = ["Normal", "Small"];
+const EK = "#000000", EG = "#787878", ED = "#505050", EL = "#b4b4b4", EV = "#c8c8c8", EB = "#00008b", EO = "#ff8c00", EA = "#ffa500", EBr = "#a52a2a", ER = "#8b0000";
+// Line rows: [item, colour, thickness, style, visible]; Fill: [item, colour, transparency, filled, texture];
+// Text: [item, colour, font size, bold, all upper, visible] (Arial, FullAuto); Arrowheads: [item, size] (Triangle, both
+// sides filled with leaders).
+const etlL = (item, c, t, s, v) => ({item, Color: c, Thickness: t, Style: s || "Solid", Visible: v === false ? "No" : "Yes"});
+const etlF = (item, c, tr, f, x) => ({item, Color: c, Transparency: String(tr), Filled: f ? "Yes" : "No", Texture: x ? "Yes" : "No"});
+const etlT = (item, c, size, b, up, v) => ({item, Color: c, Font: "Arial", Size: String(size), Alignment: "FullAuto", Bold: b ? "Yes" : "No", AllUpper: up ? "Yes" : "No", Visible: v === false ? "No" : "Yes"});
+const etlA = (item, size) => ({item, LeftStyle: "Triangle", LeftSize: size, LeftFilled: "Yes", LeftLeader: "Yes", RightStyle: "Triangle", RightSize: size, RightFilled: "Yes", RightLeader: "Yes"});
+const etlStripNames = ["Layer-Other (Odd)", "Layer-A (Odd)", "Layer-B (Odd)", "Layer-Other (Even)", "Layer-A (Even)", "Layer-B (Even)"];
+const etlStripColor = [EO, EA, EBr, EO, EA, EBr];
+const etlFormatDefaults = {
+  "General": {
+    Line: [etlL("Grid Lines", EG, "1.0-Normal", "DashDot"), etlL("Grid Line Dimensions", EG, "1.0-Normal"), etlL("View Captions", EK, "2.0-Double"), etlL("View Caption, Small", EK, "2.0-Double"),
+      etlL("View Scale", EK, "1.0-Normal"), etlL("View Cut Line", EK, "2.0-Double"), etlL("North Symbol", EK, "2.0-Double"), etlL("Required Ast Profile, Top", EO, "1.0-Normal"),
+      etlL("Computed Ast Profile, Top", EO, "1.0-Normal"), etlL("Provided Ast Profile, Top", EO, "2.0-Double"), etlL("Required Ast Profile, Bot", ER, "1.0-Normal"),
+      etlL("Computed Ast Profile, Bot", ER, "1.0-Normal"), etlL("Provided Ast Profile, Bot", ER, "2.0-Double")],
+    Fill: [etlF("Required Ast Profile, Top", "#787800", 255), etlF("Computed Ast Profile, Top", "#32320a", 255), etlF("Provided Ast Profile, Top", "#dcdc0a", 255),
+      etlF("Required Ast Profile, Bot", "#780a0a", 255), etlF("Computed Ast Profile, Bot", "#500a0a", 255), etlF("Provided Ast Profile, Bot", "#dc0a0a", 255),
+      etlF("Required Ast Profile, Shear", "#14143c", 255), etlF("Computed Ast Profile, Shear", "#3c3c78", 255), etlF("Provided Ast Profile, Shear", "#6464dc", 255),
+      etlF("Provided Ast Profile, Wall", "#6464fa", 255, true), etlF("Required-Provided Ast Profile, Wall", "#fa3232", 255, true), etlF("Required-Provided Ast Profile, Wall", "#32fa32", 255, true)],
+    Text: [etlT("Grid Lines", EG, 24, false, true), etlT("Grid Line Dimensions", EG, 14, false, true), etlT("View Captions", EK, 14, true, false), etlT("View Caption, Small", EK, 12, true, false),
+      etlT("View Scale", EK, 11, false, false), etlT("View Cut Line", EK, 18, true, true), etlT("North Symbol", EK, 18, true, true), etlT("Story Caption", EG, 11, false, true),
+      etlT("Story Elevation", EG, 10, false, true), etlT("Member Description", EK, 10), etlT("Member Data2", EK, 10), etlT("Member Data1", EK, 10)],
+    Arrowheads: [etlA("Grid Line Dimensions", "Normal")],
+  },
+  "Tables": {
+    Line: [etlL("Table Border Lines", EK, "2.0-Double"), etlL("Table Inside Lines", EK, "0.5-Thin"), etlL("Table Header Text", EK, "1.0-Normal"), etlL("Table Text", EK, "1.0-Normal")],
+    Fill: [etlF("Table Border Lines", EK, 255), etlF("Table Inside Lines", EK, 255)],
+    Text: [etlT("Table Header Text", EK, 14, true, false), etlT("Table Text", ED, 10, false, true)],
+    Arrowheads: [],
+  },
+  "Imported Drawings": {
+    Line: [etlL("Section Lines", EG, "2.0-Double"), etlL("Elevation Lines", EK, "1.0-Normal"), etlL("Plan Lines", EG, "1.0-Normal", "DashDot"), etlL("Dimension Lines", EG, "1.0-Normal"),
+      etlL("Grid Lines", EL, "0.5-Thin", "DashDot"), etlL("Rebars", EB, "1.5-Thick"), etlL("Callout", EL, "0.5-Thin"), etlL("Comments", EL, "0.5-Thin"), etlL("Captions", EL, "0.5-Thin")],
+    Fill: [etlF("Section Lines", EV, 255, true), etlF("Rebars", EB, 255, true), etlF("Callout", EV, 255), etlF("Comments", EV, 255), etlF("Captions", EV, 255)],
+    Text: ["Section Lines", "Elevation Lines", "Plan Lines", "Dimension Lines", "Grid Lines", "Rebars", "Callout", "Comments", "Captions"].map(n => etlT(n, EK, 8)),
+    Arrowheads: [],
+  },
+  "Slab/Mat": {
+    Line: [etlL("Slab Outline", EK, "1.0-Normal"), etlL("Slab Dimensions", EG, "1.0-Normal"), etlL("Slab Labels", EG, "1.0-Normal"), etlL("Slab Thickness", EG, "1.0-Normal"),
+      etlL("Section Dimensions", EK, "1.0-Normal"), etlL("Opening Outline", EK, "1.0-Normal"), etlL("Opening Dimensions", EG, "1.0-Normal"), etlL("Drop Panel Outline", EK, "1.5-Thick", "Dot"),
+      etlL("Rib Centerline", EG, "1.0-Normal", "DashDot"), etlL("Rib Outline", EL, "1.0-Normal", "Dash"), etlL("Rebar Strip Outline", EL, "1.0-Normal", "Dash"), etlL("Rebar Strip Cline", ED, "1.0-Normal", "Dash"),
+      etlL("Rebar Strip Dimensions", EG, "1.0-Normal"), etlL("Rebar Strip Number", EG, "1.0-Normal"), etlL("All Bars (Top)", EB, "2.0-Double"), etlL("Top Rebars in Plan", EB, "2.0-Double", "Dash"),
+      etlL("Bottom Rebar in Plans", EB, "2.0-Double"), etlL("Rebar Dimensions in Plan", EG, "1.0-Normal"), etlL("Rebar Calls in Plan", EG, "1.0-Normal"), etlL("Rebars in Section", EB, "1.0-Normal"),
+      etlL("Rebars in Elevation", EB, "2.0-Double"), etlL("Rebar Dimensions in Section", EG, "1.0-Normal"), etlL("Rebar Calls in Section", EK, "1.0-Normal"), etlL("Rebar Strip Quad", "#ff0000", "1.0-Normal", "Dash"),
+      etlL("Rebar Strip Quad Number", EG, "1.0-Normal"), etlL("Tendons in Plan", "#e9967a", "3.0-Triple"), etlL("Tendon End Symbol", EK, "1.0-Normal"), etlL("Tendon Force - Left", EG, "1.0-Normal"),
+      etlL("Tendon Force - Right", EG, "1.0-Normal"), etlL("Tendon Station, X", EG, "1.0-Normal"), etlL("Tendon Station, Z", EG, "1.0-Normal"), etlL("Section Mark", EK, "3.0-Triple"),
+      ...etlStripNames.map((n, i) => etlL("Rebar Strips, " + n, etlStripColor[i], "1.0-Normal")),
+      ...etlStripNames.map((n, i) => etlL("Rebar Strips Centerline, " + n, etlStripColor[i], "1.0-Normal", "DashDot"))],
+    // The last two centreline rows are below picture 13's edge; the Line tab (picture 17) lists all six.
+    Fill: [etlF("Rebars in Section", EB, 255, true), etlF("Tendon End Symbol", EV, 255),
+      ...etlStripNames.map((n, i) => etlF("Rebar Strips, " + n, ["#b4b464", "#dcc896", "#c8dc96", "#a0a050", "#c89664", "#b4c864"][i], 100, true)),
+      ...etlStripNames.map(n => etlF("Rebar Strips Centerline, " + n, "#ffffff", 0))],
+    Text: [etlT("Slab Labels", EG, 10, false, false), etlT("Slab Thickness", EG, 11, false, false), etlT("Section Dimensions", EK, 12, false, true), etlT("Opening Dimensions", EK, 10, false, true),
+      etlT("Rebar Strip Outline", EG, 10, false, true), etlT("Rebar Strip Dimensions", EG, 8, false, true), etlT("Rebar Strip Number", EG, 11, true, true), etlT("Rebar Dimensions in Plan", EG, 8, false, true),
+      etlT("Rebar Calls in Plan", EG, 8, false, false), etlT("Rebar Dimensions in Section", EG, 8, false, true), etlT("Rebar Calls in Section", EG, 8, false, true), etlT("Rebar Strip Quad Number", ER, 11, true, true)],
+    Arrowheads: [etlA("Slab Dimensions", "Normal"), etlA("Section Dimensions", "Normal"), etlA("Opening Dimensions", "Normal"), etlA("Rebar Strip Dimensions", "Small"),
+      etlA("Rebar Dimensions in Plan", "Small"), etlA("Rebar Calls in Plan", "Small"), etlA("Rebar Dimensions in Section", "Small"), etlA("Rebar Calls in Section", "Small")],
+  },
+  "Beams": {
+    Line: [etlL("Slab Section In Elevation", EK, "1.5-Thick"), etlL("Beam Centerline", ED, "2.0-Double", "DashDotDot"), etlL("Beam Outline", EL, "1.0-Normal"), etlL("Beam Elevation", ED, "1.0-Normal"),
+      etlL("Beam Sections", EG, "2.0-Double"), etlL("Steel Beam Sections", EG, "2.0-Double"), etlL("Beam Dimensions", EG, "1.0-Normal"), etlL("Beam Section Dimensions", EG, "1.0-Normal"),
+      etlL("Beam in Framing Plan", EK, "2.5-Thicker"), etlL("Steel Beam Centerline", ED, "2.0-Double"), etlL("Top Rebars", EB, "1.5-Thick"), etlL("Stirrups", EB, "1.5-Thick"), etlL("Bottom Rebars", EB, "1.5-Thick")],
+    Fill: [etlF("Slab Section In Elevation", EV, 255, true), etlF("Beam Sections", "#e6e6e6", 255, true), etlF("Steel Beam Sections", EG, 255, true), etlF("Top Rebars", EB, 255, true),
+      etlF("Stirrups", EB, 255), etlF("Bottom Rebars", EB, 255), etlF("Mid Rebars", EB, 255, true), etlF("Rebars in Section", EB, 255, true)],
+    Text: [etlT("Beam Dimensions", EG, 9, false, true), etlT("Beam Section Dimensions", EG, 10, false, true), etlT("Beam Number", EK, 10, true, false), etlT("Beam Span Number", EK, 9, false, false),
+      etlT("Rebar Dimensions", EG, 8, false, true), etlT("Rebar Calls", EG, 8, false, true), etlT("Stirrups", EG, 8, false, false), etlT("Section Mark", EG, 12, true, true)],
+    Arrowheads: [etlA("Beam Dimensions", "Normal"), etlA("Beam Section Dimensions", "Normal"), etlA("Rebar Dimensions", "Small"), etlA("Rebar Calls", "Small"), etlA("Stirrups", "Small")],
+  },
+};
+// The columns of each tab, as ETABS heads them: [field, heading, kind, choices].
+const etlCols = {
+  Line: [["Color", "Color", "color"], ["Thickness", "Thickness", "list", etlThick], ["Style", "Style", "list", etlStyle], ["Visible", "Visible", "check"]],
+  Fill: [["Color", "Color", "color"], ["Transparency", "Transparency<br>(0-255)", "text"], ["Filled", "Filled", "check"], ["Texture", "Texture", "check"]],
+  Text: [["Color", "Color", "color"], ["Font", "Font", "list", etlFonts], ["Size", "Size", "list", etlSizes], ["Alignment", "Alignment", "list", etlAlign], ["Bold", "Bold", "check"], ["AllUpper", "All<br>Upper", "check"], ["Visible", "Visible", "check"]],
+  Arrowheads: [["LeftStyle", "Left<br>Arrow<br>Style", "list", etlArrow], ["LeftSize", "Left Size", "list", etlArrowSize], ["LeftFilled", "Left<br>Filled", "check"], ["LeftLeader", "Left<br>Leader", "check"],
+    ["RightStyle", "Right Style", "list", etlArrow], ["RightSize", "Right Size", "list", etlArrowSize], ["RightFilled", "Right<br>Filled", "check"], ["RightLeader", "Right<br>Leader", "check"]],
+};
+// The model's rows for a table of the Engine's own (definition_data), or [].
+async function etlRows(table) { const dd = (await hmRun("definition_data", {}, true)).result || {tables: {}}; return ((dd.tables || {})[table] || {}).rows || []; }
+// Detailing > Drawing Management > Drawing Format Properties (pictures 01-23): the five groups as radio buttons, the
+// Line/Fill/Text/Arrowheads tabs (the tab stays when the group changes, as in ETABS), and each tab's grid. OK keeps the
+// items changed from ETABS's defaults; Cancel drops every change.
+async function etlDrawingFormatForm() {
+  const saved = await etlRows(ETL_FMT_TABLE);
+  // Every item's values: the defaults, then what the model keeps (a repeated name is matched in order).
+  const data = {};
+  for (const [g] of etlGroups) { data[g] = {}; for (const t of etlTabs) data[g][t] = etlFormatDefaults[g][t].map(r => ({...r})); }
+  for (const s of saved) {
+    const list = data[s.Group] && data[s.Group][s.Tab]; if (!list) continue;
+    const nth = +(s.Item.match(/ #(\d+)$/) || [0, 1])[1], name = s.Item.replace(/ #\d+$/, "");
+    const hit = list.filter(r => r.item === name)[nth - 1]; if (!hit) continue;
+    for (const [f] of etlCols[s.Tab]) if (s[f] !== undefined && s[f] !== "") hit[f] = s[f];
+  }
+  let group = "General", tab = "Line", at = 0;
+  const d = dialog("Drawing Format Properties", `
+    <div class="etlgrp" style="display:flex;gap:22px;margin:4px 0 8px">${etlGroups.map(([g, l]) => `<label><input type="radio" name="etlG" value="${esc(g)}" ${g === group ? "checked" : ""}>${esc(l)}</label>`).join("")}</div>
+    <div class="itabs etlt">${etlTabs.map(t => `<button data-page="${t}" class="${t === tab ? "on" : ""}">${t}</button>`).join("")}</div>
+    <div id="etlGrid" class="scroll" style="height:330px;overflow:auto;border:1px solid var(--line);background:var(--field)"></div>`,
+    [["OK", d => { etlFormatSave(d, data); return false; }, true], ["Cancel"]], {width: 760});
+  const cell = (r, i, [f, , kind, list]) => kind === "color" ? `<td style="padding:0;width:56px"><input type="color" data-i="${i}" data-f="${f}" value="${esc(r[f])}" style="width:56px;height:20px;border:0;padding:0;display:block" title="Click to pick the colour"></td>`
+    : kind === "check" ? `<td style="text-align:center"><input type="checkbox" data-i="${i}" data-f="${f}" ${r[f] === "Yes" ? "checked" : ""}></td>`
+    : kind === "list" ? `<td style="padding:0"><select data-i="${i}" data-f="${f}" style="border:0;width:100%;min-width:${f === "Size" ? 46 : f === "Font" ? 56 : 92}px">${opts(list, r[f])}</select></td>`
+    : `<td style="padding:0"><input data-i="${i}" data-f="${f}" value="${esc(r[f])}" style="border:0;width:100%;min-width:110px"></td>`;
+  const paint = () => {
+    const rows = data[group][tab], cols = etlCols[tab];
+    q(d, "#etlGrid").innerHTML = `<table class="list etlgrid" style="width:auto"><tr><th style="width:18px"></th><th>Item</th>${cols.map(c => `<th>${c[1]}</th>`).join("")}</tr>`
+      + rows.map((r, i) => `<tr data-r="${i}"><td class="kv">${i === at ? "&#9656;" : ""}</td><td class="${i === at ? "sel" : ""}">${esc(r.item)}</td>${cols.map(c => cell(r, i, c)).join("")}</tr>`).join("") + `</table>`;
+    d.querySelectorAll("#etlGrid [data-r]").forEach(tr => tr.onclick = () => { if (at !== +tr.dataset.r) { at = +tr.dataset.r; d.querySelectorAll("#etlGrid [data-r]").forEach(x => { const on = +x.dataset.r === at; x.cells[0].innerHTML = on ? "&#9656;" : ""; x.cells[1].classList.toggle("sel", on); }); } });
+    d.querySelectorAll("#etlGrid [data-f]").forEach(inp => inp.onchange = () => {
+      const r = rows[+inp.dataset.i], f = inp.dataset.f;
+      if (inp.type === "checkbox") r[f] = inp.checked ? "Yes" : "No";
+      else if (f === "Transparency") { const v = Math.round(+inp.value); if (!/^\s*\d+\s*$/.test(inp.value) || v < 0 || v > 255) { formError(d, "Transparency is a whole number from 0 to 255."); inp.value = r[f]; return; } formError(d, ""); r[f] = String(v); }
+      else r[f] = inp.value;
+    });
+  };
+  d.querySelectorAll("[name=etlG]").forEach(rb => rb.onchange = () => { group = rb.value; at = 0; paint(); });
+  // The tabs keep their place across groups (dialog()'s own tab handler only switches pages, so the grid is redrawn here).
+  d.querySelectorAll(".etlt button").forEach(b => b.addEventListener("click", () => { tab = b.dataset.page; at = 0; paint(); }));
+  paint();
+  return d;
+}
+// The rows to keep: each item that differs from ETABS's default (a repeated name gets " #n" for the n-th).
+function etlFormatRows(data) {
+  const out = [];
+  for (const [g] of etlGroups) for (const t of etlTabs) {
+    const seen = {};
+    data[g][t].forEach((r, i) => {
+      const n = (seen[r.item] = (seen[r.item] || 0) + 1), def = etlFormatDefaults[g][t][i], ch = {};
+      for (const [f] of etlCols[t]) if (String(r[f]).toLowerCase() !== String(def[f]).toLowerCase()) ch[f] = r[f];
+      if (Object.keys(ch).length) out.push({Group: g, Tab: t, Item: r.item + (n > 1 ? " #" + n : ""), ...ch});
+    });
+  }
+  return out;
+}
+async function etlFormatSave(d, data) {
+  const j = await hmRun("define_table_rows", {table: ETL_FMT_TABLE, name: "Drawing Format Properties", rows: etlFormatRows(data)}, true);
+  if (j.ok) d.close(); else formError(d, j.error);
+}
+// Detailing > Drawing Management > Drawing Sheet Setup (picture "Drawing Sheet Setup"): sheet, margins, view placement,
+// border and title block, text/symbol/gap sizes with Restore Defaults, and the sheet's picture. Lengths are kept in
+// inches; a metric model shows them in mm (UNVERIFIED: the picture is of a model in ft, where ETABS shows in).
+const etlSheetDefaults = {SheetType: "ANSI Engineering", SheetSize: "E", SheetWidth: "40", SheetHeight: "30", MarginTop: "0.5", MarginLeft: "1", MarginRight: "0.5", MarginBottom: "0.5",
+  Plans: "Scale to fit", Tables: "Autowrap", Elevations: "Autowrap", BeamElevNewLine: "Yes", Border: "Predefined", Position: "Right", TitleBlockSize: "4", UserFile: "",
+  SheetNoPrefix: "S-", SheetTitlePrefix: "Drawing-", TextHeight: "0.2", SymbolSize: "0.15", LineThickness: "0.15", ViewGapDx: "0.15", ViewGapDy: "0.15"};
+const etlSheetLengths = ["SheetWidth", "SheetHeight", "MarginTop", "MarginLeft", "MarginRight", "MarginBottom", "TitleBlockSize", "TextHeight", "SymbolSize", "LineThickness", "ViewGapDx", "ViewGapDy"];
+// The choices the picture shows. UNVERIFIED: ETABS's full lists (asked of the capture thread).
+const etlSheetLists = {SheetType: ["ANSI Engineering"], SheetSize: [["E", "E", 40, 30]], Plans: ["Scale to fit"], Tables: ["Autowrap"], Elevations: ["Autowrap"], Position: ["Right"]};
+async function etlSheetSetupForm() {
+  const row = (await etlRows(ETL_SHEET_TABLE))[0] || {}, v = {...etlSheetDefaults};
+  for (const k of Object.keys(v)) if (row[k] !== undefined && row[k] !== "") v[k] = row[k];
+  const metric = !/^(ft|in|inch|feet)$/i.test(hmU().l), un = metric ? "mm" : "in", k = metric ? 25.4 : 1;
+  const show = x => String(+(+x * k).toPrecision(10));
+  const num = (id, label) => `<span>${label}</span><input id="es${id}" value="${esc(show(v[id]))}" style="width:130px"><span class="un">${un}</span>`;
+  const sel = (id, label) => `<span>${label}</span><select id="es${id}" style="width:150px">${opts(etlSheetLists[id].map(x => Array.isArray(x) ? [x[0], x[1]] : x), v[id])}</select><span></span>`;
+  const d = dialog("Drawing Sheet Setup", `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 10px">
+      <fieldset><legend>Drawing Units and Size</legend><div class="g3" style="display:grid;grid-template-columns:auto 1fr auto;gap:5px 10px;align-items:center">
+        ${sel("SheetType", "Sheet Type")}${sel("SheetSize", "Sheet Size")}${num("SheetWidth", "Sheet Width")}${num("SheetHeight", "Sheet Height")}</div></fieldset>
+      <fieldset><legend>Margin</legend><div style="display:grid;grid-template-columns:auto 1fr auto;gap:5px 10px;align-items:center">
+        ${num("MarginTop", "Top")}${num("MarginLeft", "Left")}${num("MarginRight", "Right")}${num("MarginBottom", "Bottom")}</div></fieldset>
+      <fieldset><legend>View Placement Options</legend><div style="display:grid;grid-template-columns:auto 1fr auto;gap:5px 10px;align-items:center">
+        ${sel("Plans", "Plans")}${sel("Tables", "Tables")}${sel("Elevations", "Elevations")}</div>
+        <label style="display:block;margin-top:6px"><input type="checkbox" id="esBeamElevNewLine" ${v.BeamElevNewLine === "Yes" ? "checked" : ""}>Beam Elevation on New Line</label></fieldset>
+      <fieldset><legend>Border and Title Block</legend><div style="display:grid;grid-template-columns:auto 1fr auto;gap:5px 10px;align-items:center">
+        <label style="grid-column:1/4"><input type="radio" name="esB" value="None" ${v.Border === "None" ? "checked" : ""}>None</label>
+        <label><input type="radio" name="esB" value="Predefined" ${v.Border === "Predefined" ? "checked" : ""}>Predefined</label><select id="esPosition" style="width:130px">${opts(etlSheetLists.Position, v.Position)}</select><span></span>
+        ${num("TitleBlockSize", "&nbsp;&nbsp;&nbsp;&nbsp;Title Block Size")}
+        <label><input type="radio" name="esB" value="User Defined" disabled>User Defined</label><button id="esImport" disabled>Click to Import...</button><span></span>
+        <span>Sheet No. Prefix</span><input id="esSheetNoPrefix" value="${esc(v.SheetNoPrefix)}" style="width:130px"><span></span>
+        <span>Sheet Title Prefix</span><input id="esSheetTitlePrefix" value="${esc(v.SheetTitlePrefix)}" style="width:130px"><span></span></div></fieldset>
+      <fieldset><legend>Text, Symbol, and Gap Sizes</legend><div style="display:grid;grid-template-columns:auto 1fr auto;gap:5px 10px;align-items:center">
+        ${num("TextHeight", "Basic Text Height")}${num("SymbolSize", "Basic Symbol Size")}${num("LineThickness", "Line Thickness")}${num("ViewGapDx", "View Gap - Dx")}${num("ViewGapDy", "View Gap - Dy")}
+        <span></span><button id="esRestore" style="width:130px">Restore Defaults</button><span></span></div></fieldset>
+      <div id="esPic" style="border:1px solid var(--line);margin:0 0 9px;background:#fff;display:flex;align-items:center;justify-content:center;min-height:190px"></div>
+    </div>`,
+    [["OK", d => { etlSheetSave(d, un, k); return false; }, true], ["Cancel"]], {width: 690});
+  const read = id => { const x = parseFloat(q(d, "#es" + id).value); return Number.isFinite(x) ? x / k : NaN; };
+  // The sheet's picture: the sheet, its margins, and the border with the title block on the side picked.
+  const pic = () => {
+    const W = read("SheetWidth"), H = read("SheetHeight"); if (!(W > 0 && H > 0)) { q(d, "#esPic").innerHTML = ""; return; }
+    const s = Math.min(236 / W, 182 / H), w = W * s, h = H * s, m = id => Math.max(0, read(id) || 0) * s;
+    const none = q(d, "[name=esB][value=None]").checked, tb = Math.min(m("TitleBlockSize") * 0.55, w / 3);
+    const bx = m("MarginLeft"), by = m("MarginTop"), bw = w - bx - m("MarginRight"), bh = h - by - m("MarginBottom");
+    let g = `<rect x="0.5" y="0.5" width="${w - 1}" height="${h - 1}" fill="#fff" stroke="#000"/>`;
+    if (!none && bw > 0 && bh > 0) {
+      g += `<rect x="${bx}" y="${by}" width="${bw}" height="${bh}" fill="none" stroke="#000"/><rect x="${bx + 2}" y="${by + 2}" width="${bw - 4}" height="${bh - 4}" fill="none" stroke="#000"/>`;
+      const tx = bx + bw - 2 - tb; g += `<rect x="${tx}" y="${by + 2}" width="${tb}" height="${bh - 4}" fill="none" stroke="#000"/>`;
+      for (let i = 0; i < 4; i++) g += `<line x1="${tx}" x2="${tx + tb}" y1="${by + 2 + (bh - 4) * (0.12 + i * 0.03)}" y2="${by + 2 + (bh - 4) * (0.12 + i * 0.03)}" stroke="#000" stroke-width="0.5"/>`;
+      for (let i = 0; i < 16; i++) g += `<line x1="${tx}" x2="${tx + tb}" y1="${by + 2 + (bh - 4) * (0.6 + i * 0.016)}" y2="${by + 2 + (bh - 4) * (0.6 + i * 0.016)}" stroke="#000" stroke-width="0.5"/>`;
+      g += `<rect x="${tx}" y="${by + 2 + (bh - 4) * 0.88}" width="${tb}" height="${(bh - 4) * 0.06}" fill="#000" opacity="0.6"/>`;
+    }
+    q(d, "#esPic").innerHTML = `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${g}</svg>`;
+  };
+  const sync = () => { const none = q(d, "[name=esB][value=None]").checked; q(d, "#esPosition").disabled = q(d, "#esTitleBlockSize").disabled = none; pic(); };
+  q(d, "#esSheetSize").onchange = () => { const s = etlSheetLists.SheetSize.find(x => x[0] === q(d, "#esSheetSize").value); if (s) { q(d, "#esSheetWidth").value = show(s[2]); q(d, "#esSheetHeight").value = show(s[3]); } pic(); };
+  q(d, "#esRestore").onclick = () => { for (const id of ["TextHeight", "SymbolSize", "LineThickness", "ViewGapDx", "ViewGapDy"]) q(d, "#es" + id).value = show(etlSheetDefaults[id]); };
+  d.querySelectorAll("[name=esB]").forEach(r => r.onchange = sync);
+  d.querySelectorAll("input:not([type=radio]):not([type=checkbox])").forEach(i => i.addEventListener("input", pic));
+  sync();
+  return d;
+}
+async function etlSheetSave(d, un, k) {
+  const r = {}, bad = [];
+  for (const id of Object.keys(etlSheetDefaults)) {
+    const el = q(d, "#es" + id);
+    if (id === "Border") r[id] = (d.querySelector("[name=esB]:checked") || {}).value || "Predefined";
+    else if (id === "UserFile") r[id] = "";
+    else if (el.type === "checkbox") r[id] = el.checked ? "Yes" : "No";
+    else if (etlSheetLengths.includes(id)) { const x = parseFloat(el.value); if (!Number.isFinite(x) || x < 0 || (/^Sheet(Width|Height)$/.test(id) && x <= 0)) bad.push(el.closest("div").querySelector(`#es${id}`).previousElementSibling.textContent.trim()); else r[id] = String(+(x / k).toPrecision(10)); }
+    else r[id] = el.value;
+  }
+  if (bad.length) return formError(d, `Give a number for ${bad.join(", ")} (${un}).`);
+  if (+r.MarginLeft + +r.MarginRight >= +r.SheetWidth || +r.MarginTop + +r.MarginBottom >= +r.SheetHeight) return formError(d, "The margins leave no room on the sheet.");
+  // All at ETABS's defaults: nothing to keep.
+  const same = Object.keys(etlSheetDefaults).every(id => String(r[id]) === String(etlSheetDefaults[id]) || (etlSheetLengths.includes(id) && +r[id] === +etlSheetDefaults[id]));
+  const j = await hmRun("define_table_rows", {table: ETL_SHEET_TABLE, name: "Drawing Sheet Setup", rows: same ? [] : [r]}, true);
+  if (j.ok) d.close(); else formError(d, j.error);
 }
 function openDesign(key) {
   if (!design.length) return dialogs.designSummary();
