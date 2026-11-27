@@ -212,6 +212,27 @@ public static class PackSpeedField
             }
             o[call] = new JsonObject { ["rows"] = rows, ["ms"] = ms, ["rows_per_second"] = ms > 0 ? Math.Round(rows * 1000.0 / ms) : 0, ["cases"] = parts };
         }
+        // The program writing a whole table to a CSV file itself: nothing is carried over COM but the file's name (a
+        // table given as one array of 30 million texts is carried between the two programs text by text).
+        foreach (var table in new[] { "Element Forces - Area Shells", "Element Forces - Frames" })
+        {
+            var csv = Path.Combine(Path.GetTempPath(), "cpm-probe-" + Guid.NewGuid().ToString("N") + ".csv");
+            var said = link.Raw($"time {table} to a CSV file", m =>
+            {
+                try
+                {
+                    string[] ask = []; int version = 0;
+                    var w = Stopwatch.StartNew();
+                    int ret = Convert.ToInt32(m.DatabaseTables.GetTableForDisplayCSVFile(table, ref ask, "", ref version, csv, ","));
+                    return (object)$"{w.ElapsedMilliseconds} ms, answer {ret}";
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException) { return "error: " + (ex.InnerException ?? ex).Message; }
+            }) as string ?? "";
+            long lines = 0, bytes = 0;
+            try { if (File.Exists(csv)) { bytes = new FileInfo(csv).Length; using var r = new StreamReader(csv); while (r.ReadLine() is not null) lines++; File.Delete(csv); } }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { said += "; " + ex.Message; }
+            o["csv_file " + table] = $"{said}, {lines} lines, {bytes / 1e6:0.0} MB";
+        }
         return o;
     }
 
