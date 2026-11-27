@@ -14403,9 +14403,398 @@ function hmSapLinkDir(st, name, type, dk, fields) {
   return d;
 }
 
+// ---- ETABS 23.2 Define > Section Properties > Link/Support Properties ----
+// Pictured field/reference-forms/etabs/Define/Links 0-32 and Define/Tables Link*: Define Link Properties, Link Property Data,
+// Linear Link/Support Directional Properties (uncoupled / coupled), Link/Support Directional Properties for each nonlinear
+// type, Advanced Link P-Delta Parameters and Link Acceptance Criteria Definition. Every link is kept as rows of ETABS's own
+// table for its type (Core EtabsLinkTables): Linear one row per link, the others one row per direction (a multilinear
+// direction one row per point), the link's own fields on its first row.
+const etaLinkTypes = ["Linear", "Damper - Exponential", "Damper - Bilinear", "Damper - Friction Spring", "Damper - Sumitomo Rubber GR4", "Gap", "Hook", "MultiLinear Elastic", "MultiLinear Plastic", "Plastic (Wen)", "Rubber Isolator", "Friction Isolator", "T/C Friction Isolator", "Triple Pendulum Isolator", "High Damping Rubber Isolator"];
+const etaLinkTables = {"Linear": "Linear", "Damper - Exponential": "Damper - Exponential", "Damper - Bilinear": "Damper - Bilinear", "Damper - Friction Spring": "Damper - Friction Spring", "Damper - Sumitomo Rubber GR4": "Damper - Sumitomo Viscoelastic", "Gap": "Gap", "Hook": "Hook",
+  "MultiLinear Elastic": "Multilinear - Elastic", "MultiLinear Plastic": "Multilinear - Plastic", "Plastic (Wen)": "Plastic Wen", "Rubber Isolator": "Isolator - Rubber", "Friction Isolator": "Isolator - Friction", "T/C Friction Isolator": "Isolator - TC Friction",
+  "Triple Pendulum Isolator": "Isolator - Triple Pendulum", "High Damping Rubber Isolator": "Isolator - High Damping Rubber"};
+const etaLinkTable = t => "Link Property Definitions - " + (etaLinkTables[t] || "Linear");
+const etaLinkAccept = k => "Link Property Definitions - Acceptance Criteria - " + k;
+const etaLinkFromEngine = {LINEAR: "Linear", DAMPER: "Damper - Exponential", GAP: "Gap", HOOK: "Hook", "PLASTIC (WEN)": "Plastic (Wen)", "RUBBER ISOLATOR": "Rubber Isolator", "FRICTION ISOLATOR": "Friction Isolator", "MULTILINEAR ELASTIC": "MultiLinear Elastic", "MULTILINEAR PLASTIC": "MultiLinear Plastic"};
+const etaLinkDofs = ["U1", "U2", "U3", "R1", "R2", "R3"];
+// The link's own fields (first row): Total Mass and Weight, line/area spring factors, P-Delta, stiffness options, notes.
+const etaLinkGen = ["Mass", "Weight", "RotInert1", "RotInert2", "RotInert3", "DefLength", "DefArea", "PDM2I", "PDM2J", "PDM3I", "PDM3J", "StiffLOpt", "StiffDOpt", "StiffDFact", "GUID", "Notes"];
+// Stiffness Options as the lists show them (pictured Links 13, 14) and the words ETABS's table holds (Damper - Exponential 2).
+const etaLinkStiffL = [["Effective", "Effective Stiffness"], ["Effective from Zero", "Effective Stiffness from Zero, Else Nonlinear"], ["Nonlinear", "Nonlinear Stiffness"]];
+const etaLinkStiffD = [["Initial", "Initial Stiffness (K0)"], ["Tangent", "Tangent Stiffness (KT)"], ["Effective", "Effective Stiffness (KE)"]];
+const etaLinkHys = ["Isotropic", "Kinematic", "Takeda", "Pivot", "Concrete", "BRB Hardening", "Degrading"];
+// A unit by kind: k stiffness, c damping, ce damping with exponent, l length (rad for a rotation), f force (moment), r rate, E modulus, A area.
+function etaLinkUnit(kind, rot) {
+  const u = hmU();
+  return ({k: rot ? `${u.f}-${u.l}/rad` : `${u.f}/${u.l}`, c: rot ? `${u.f}-${u.l}-s/rad` : `${u.f}-s/${u.l}`, ce: rot ? `${u.f}-${u.l}*(s/rad)^Cexp` : `${u.f}*(s/${u.l})^Cexp`,
+    l: rot ? "rad" : u.l, L: u.l, f: rot ? `${u.f}-${u.l}` : u.f, r: `sec/${u.l}`, E: `${u.f}/${u.l}²`, A: `${u.l}²`})[kind] || "";
+}
+// Each type's Nonlinear Properties for one direction (pictured Links 15-30; the types not pictured from ETABS's own table
+// fields): [field, label, unit kind, default, control]. An empty list: that direction cannot be nonlinear (Rubber Isolator
+// U1 and an isolator's rotations, greyed in Links 26 and 31).
+function etaLinkNl(type, dk) {
+  const r = dk[0] === "R", T = (t, x) => r ? x : t, u1 = dk === "U1";
+  const fl = u1 ? [["FLDamper", "Fixed Length Damper", "", "No", "check"], ["FLDLength", "Damper Length", "L", 0, "fl"], ["", "Extender Properties", "", "", "head"], ["FDLModulus", "Modulus of Elasticity", "E", 0, "fl"], ["FDLArea", "Cross Sectional Area", "A", 0, "fl"]] : [];
+  switch (type) {
+    case "Damper - Exponential": return [[T("TransK", "RotK"), "Stiffness", "k", 0], [T("TransC", "RotC"), "Damping", "ce", 0], [T("TransCExp", "RotCExp"), "Damping Exponent", "", 1], ...fl];
+    case "Damper - Bilinear": return [[T("TransK", "RotK"), "Stiffness", "k", 0], [T("TransC", "RotC"), "Initial Damping", "c", 0], [T("TransCy", "RotCy"), "Yielded Damping", "c", 0], [T("ForceLimit", "MomentLimit"), r ? "Moment Limit" : "Force Limit", "f", 0], ...fl];
+    case "Damper - Friction Spring": return [[T("TransK", "RotK"), "Initial Stiffness", "k", 0], [T("TransK1", "RotK1"), "Slipping Stiffness for Loading", "k", 0], [T("TransK2", "RotK2"), "Slipping Stiffness for Unloading", "k", 0],
+      [T("TransU0", "RotU0"), "Precompression Displacement", "l", 0], [T("TransUs", "RotUs"), "Stop Displacement", "l", 0], ["ActiveDir", "Active Direction", "", "", "text"]];
+    case "Damper - Sumitomo Rubber GR4": return r ? [] : [["ProdModel", "Product Model", "", "", "text"], ["ShearArea", "Shear Area", "A", 0], ["Thickness", "Thickness", "L", 0], ["Temp", "Temperature", "", 20], ["ExcitFreq", "Excitation Frequency", "", 0],
+      ["RigidFluctCoeff", "Rigidity Fluctuation Coefficient", "", 0], ["DampFluctCoeff", "Damping Fluctuation Coefficient", "", 0]];
+    case "Gap": case "Hook": return [[T("TransK", "RotK"), "Stiffness", "k", 0], [T("TransOpen", "RotOpen"), "Open", "l", 0]];
+    case "Plastic (Wen)": return [[T("TransK", "RotK"), "Stiffness", "k", 0], [T("TransYield", "RotYield"), "Yield Strength", "f", 0], [T("TransRatio", "RotRatio"), "Post Yield Stiffness Ratio", "", 0], [T("TransExp", "RotExp"), "Yielding Exponent", "", 2]];
+    case "Rubber Isolator": return r || u1 ? [] : [["TransK", "Stiffness", "k", 0], ["TransYield", "Yield Strength", "f", 0], ["TransRatio", "Post Yield Stiffness Ratio", "", 0]];
+    case "Friction Isolator": return r ? [] : u1 ? [["TransK", "Stiffness", "k", 0], ["TransC", "Damping Coefficient", "c", 0]]
+      : [["TransK", "Stiffness", "k", 0], ["Slow", "Friction Coefficient, Slow", "", 0], ["Fast", "Friction Coefficient, Fast", "", 0], ["Rate", "Rate Parameter", "r", 0], ["Radius", "Net Pendulum Radius", "L", "1in"]];
+    case "T/C Friction Isolator": return r ? [] : u1 ? [["U1TransKComp", "Stiffness, Compression", "k", 0], ["U1TransTens", "Stiffness, Tension", "k", 0], ["U1GapComp", "Gap, Compression", "L", 0], ["U1GapTens", "Gap, Tension", "L", 0], ["U1TransC", "Damping Coefficient", "c", 0]]
+      : [["TransK", "Stiffness", "k", 0], ["SlowComp", "Friction Coefficient, Slow, Compression", "", 0], ["FastComp", "Friction Coefficient, Fast, Compression", "", 0], ["RateComp", "Rate Parameter, Compression", "r", 0], ["Radius", "Net Pendulum Radius", "L", "1in"],
+        ["SlowTens", "Friction Coefficient, Slow, Tension", "", 0], ["FastTens", "Friction Coefficient, Fast, Tension", "", 0], ["RateTens", "Rate Parameter, Tension", "r", 0]];
+    case "Triple Pendulum Isolator": {
+      if (r) return [];
+      if (u1) return [["U1TransK", "Stiffness", "k", 0], ["U1TransC", "Damping Coefficient", "c", 0]];
+      const s = (p, w) => [[p + "Stiff", w + " Stiffness", "k", 0], [p + "Slow", w + " Slow Friction Coefficient", "", 0], [p + "Fast", w + " Fast Friction Coefficient", "", 0], [p + "Rate", w + " Rate Parameter", "r", 0], [p + "Rad", w + " Sliding Surface Radius", "L", 0], [p + "Stop", w + " Stop Distance", "L", 0]];
+      return [["TransK", "Stiffness", "k", 0], ["OuterSym", "Outer Surface Symmetric", "", "No", "check"], ["OutSurfHt", "Outer Surface Height", "L", 0], ["InSurfHt", "Inner Surface Height", "L", 0], ...s("OutTop", "Outer Top"), ...s("OutBot", "Outer Bottom"), ...s("InTop", "Inner Top")];
+    }
+    case "High Damping Rubber Isolator": return r || u1 ? [] : [["IsoArea", "Isolator Area", "A", 0], ["IsoEffHt", "Isolator Effective Height", "L", 0], ["AddStiff", "Added Elastic Stiffness", "k", 0], ["NumHysTerms", "Number of Hysteretic Terms", "", 3],
+      ...[1, 2, 3].flatMap(i => [["ContStrain" + i, "Control Strain #" + i, "", 0], ["ContStrgth" + i, "Control Strength #" + i, "", 0]]), ["DamResRatio", "Damage Resistance Ratio", "", 0], ["DamContStr", "Damage Control Strain", "", 0], ["StiffIter", "Stiffness for Iteration", "", "", "text"]];
+    case "MultiLinear Elastic": case "MultiLinear Plastic": return [[T("TransPoint", "RotPoint"), "points", "", 0, "points"]];
+  }
+  return [];
+}
+// The types whose rows say Nonlinear? themselves (the others are nonlinear where their nonlinear fields are filled in).
+const etaLinkFlagged = t => ["Damper - Sumitomo Rubber GR4", "Triple Pendulum Isolator", "High Damping Rubber Isolator"].includes(t);
+const etaLinkMulti = t => /^MultiLinear/.test(t);
+const etaLinkHysFields = {Pivot: [["PivotAlpha1", "Alpha 1"], ["PivotAlpha2", "Alpha 2"], ["PivotBeta1", "Beta 1"], ["PivotBeta2", "Beta 2"], ["PivotEta", "Eta"]], Concrete: [["ConcreteFact", "Energy Degradation Factor"]],
+  "BRB Hardening": [["BRBSym", "Symmetric", "check"], ["BRBTensHF", "Tension Hardening Factor"], ["BRBTensMPD", "Tension Max Plastic Deformation Ratio"], ["BRBTensAPD", "Tension Accumulated Plastic Deformation Ratio"], ["BRBTensPro", "Tension Proportion"],
+    ["BRBCompHF", "Compression Hardening Factor"], ["BRBCompMPD", "Compression Max Plastic Deformation Ratio"], ["BRBCompAPD", "Compression Accumulated Plastic Deformation Ratio"], ["BRBCompPro", "Compression Proportion"]],
+  Degrading: [["DegSym", "Symmetric", "check"], ...["Tens", "Comp"].flatMap(s => ["f0", "f1", "f2", "x1", "x2"].map(x => [`Deg${s}${x}`, `${s === "Tens" ? "Tension" : "Compression"} ${x}`]).concat([[`Deg${s}ADWF`, `${s === "Tens" ? "Tension" : "Compression"} Accumulation Deformation Factor`]])),
+    ["DegStiff", "Stiffness Weighting Factor"], ["DegLargeSml", "Larger-Smaller Weighting Factor"]]};
+const etaLinkDefault = v => v === "1in" ? String(sapConv(1, {f: "kip", l: "in"}, hmU(), 0, 1, 0)) : String(v);
+
+async function etaLinks() {
+  const [pd, dd] = [(await hmRun("property_definitions", {}, true)).result, (await hmRun("definition_data", {}, true)).result || {tables: {}}]; if (!pd) return;
+  const T = t => (dd.tables[t] || {}).rows || [];
+  const names = [...new Set([...pd.links.map(l => l.name), ...etaLinkTypes.flatMap(t => T(etaLinkTable(t)).map(r => r.Name))])].sort((a, b) => a.localeCompare(b, undefined, {sensitivity: "base"}));
+  const again = () => { document.querySelectorAll(".dlg").forEach(x => x.close && x.close()); etaLinks(); };
+  // One link's state: its type, its own fields, each direction (on, fixed, nonlinear, its row, multilinear points) and the
+  // Linear table's matrix, and its acceptance criteria.
+  const load = n => {
+    const st = {type: "Linear", gen: {}, dofs: {}, lin: {}, acc: null}, l = pd.links.find(x => x.name === n);
+    const own = etaLinkTypes.map(t => [t, T(etaLinkTable(t)).filter(r => r.Name === n)]).find(x => x[1].length);
+    if (own) {
+      st.type = own[0]; const rows = own[1];
+      etaLinkGen.forEach(k => { if (rows[0][k] != null) st.gen[k] = rows[0][k]; });
+      if (st.type === "Linear") {
+        st.lin = Object.assign({}, rows[0]);
+        etaLinkDofs.forEach(k => { const s = rows[0][k + "Status"] || ""; if (s && !/^inactive/i.test(s)) st.dofs[k] = {on: true, fixed: /^fixed/i.test(s), nl: false, row: {}, pts: []}; });
+      } else for (const k of etaLinkDofs) {
+        const rs = rows.filter(r => (r.Direction || "").toUpperCase() === k); if (!rs.length) continue;
+        const r0 = Object.assign({}, rs[0]), nlf = etaLinkNl(st.type, k), multi = etaLinkMulti(st.type);
+        const nl = etaLinkFlagged(st.type) ? /^y/i.test(r0.Nonlinear || "") : multi ? rs.some(r => r.Displ != null || r.Rotation != null) : nlf.some(f => f[0] && f[4] !== "check" && r0[f[0]] != null && r0[f[0]] !== "");
+        st.dofs[k] = {on: true, fixed: /^y/i.test(r0.Fixed || ""), nl, row: r0, pts: multi ? rs.filter(r => r.Displ != null || r.Rotation != null).map(r => [+(r.Displ ?? r.Rotation ?? 0), +(r.Force ?? r.Moment ?? 0)]) : []};
+      }
+    } else if (l) {
+      st.type = etaLinkFromEngine[l.type] || "Linear"; const x = l.extras || {};
+      etaLinkGen.forEach(k => { if (x[k] != null) st.gen[k] = String(x[k]); });
+      for (const [k, v] of Object.entries(l.dofs || {})) {
+        st.dofs[k] = {on: true, fixed: false, nl: false, row: {[k[0] === "U" ? "TransKE" : "RotKE"]: String(v.stiffness), [k[0] === "U" ? "TransCE" : "RotCE"]: String(v.damping)}, pts: []};
+        const i = etaLinkDofs.indexOf(k) + 1; st.lin["StiffU" + i] = String(v.stiffness); st.lin["DampU" + i] = String(v.damping);
+      }
+    }
+    for (const kind of ["Force", "Displacement"]) { const r = T(etaLinkAccept(kind)).find(x => x.Name === n); if (r) st.acc = {kind, row: Object.assign({}, r)}; }
+    return st;
+  };
+  const one = (n, copy) => {
+    const st = n ? load(n) : {type: "Linear", gen: {}, dofs: {}, lin: {}, acc: null}, was = n && !copy ? st.type : null, u = hmU(), G = st.gen;
+    let k = 1; while (names.includes("Link" + k)) k++;
+    const name0 = !n ? "Link" + k : copy ? n + " copy" : n;
+    const fs = (legend, body) => `<fieldset style="margin:0 0 6px"><legend>${legend}</legend>${body}</fieldset>`;
+    const num = (id, v, w) => `<input id="${id}" type="number" step="any" style="width:${w || 86}px" value="${esc(v ?? 0)}">`;
+    const un = t => `<span class="un" style="min-width:58px">${t}</span>`;
+    const d = dialog("Link Property Data", fs("General", `<div style="display:grid;grid-template-columns:130px 176px 1fr 136px 148px;gap:5px 8px;align-items:center;padding:2px 6px">
+        <span>Link Property Name</span><input id="lN" value="${esc(name0)}"><span></span><span>P-Delta Parameters</span><button id="lPd">Modify/Show...</button>
+        <span>Link Type</span><select id="lT">${opts(etaLinkTypes, st.type)}</select><span></span><span>Acceptance Criteria</span><button id="lAc">Modify/Show...</button>
+        <span>Link Property Notes</span><button id="lNo">Modify/Show Notes...</button><span></span><span></span><span id="lAcS"></span></div>`)
+      + fs("Total Mass and Weight", `<div style="display:grid;grid-template-columns:110px 86px 1fr 120px 86px auto;gap:5px 8px;align-items:center;padding:2px 6px">
+        <span>Mass</span>${num("lMa", G.Mass)}${un(`${u.f}-s²/${u.l}`)}<span>Rotational Inertia 1</span>${num("lR1", G.RotInert1)}${un(`${u.f}-${u.l}-s²`)}
+        <span>Weight</span>${num("lWe", G.Weight)}${un(u.f)}<span>Rotational Inertia 2</span>${num("lR2", G.RotInert2)}${un(`${u.f}-${u.l}-s²`)}
+        <span></span><span></span><span></span><span>Rotational Inertia 3</span>${num("lR3", G.RotInert3)}${un(`${u.f}-${u.l}-s²`)}</div>`)
+      + fs("Factors for Line and Area Springs", `<div style="display:grid;grid-template-columns:1fr 86px 40px;gap:5px 8px;align-items:center;padding:2px 6px">
+        <span>Link/Support Property is Defined for This Length When Used in a Line Spring Property</span>${num("lDL", G.DefLength ?? 1)}${un(u.l)}
+        <span>Link/Support Property is Defined for This Area When Used in an Area Spring Property</span>${num("lDA", G.DefArea ?? 1)}${un(u.l + "²")}</div>`)
+      + fs("Directional Properties", `<div id="lDir"></div><div style="display:flex;justify-content:center;gap:60px;margin:6px 0 2px"><button id="lFix" style="width:76px;white-space:nowrap">Fix All</button><button id="lClr" style="width:76px;white-space:nowrap">Clear All</button></div>`)
+      + fs("Stiffness Options", `<div style="display:grid;grid-template-columns:1fr 290px;gap:5px 8px;align-items:center;padding:2px 6px"><span>Stiffness Used for Linear and Modal Load Cases</span><select id="lSL"></select>
+        <span>Stiffness Used for Stiffness-proportional Viscous Damping</span><select id="lSD"></select><span style="white-space:nowrap">Stiffness-proportional Viscous Damping Coefficient Modification Factor</span><span style="text-align:right">${num("lSF", G.StiffDFact ?? 1)}</span></div>`),
+      [["OK", async d => {
+        const nm = q(d, "#lN").value.trim(); if (!nm) { formError(d, "Give the link property a name."); return false; }
+        if ((!n || copy || nm !== n) && names.includes(nm)) { formError(d, `There is a link property named ${nm} already.`); return false; }
+        const type = q(d, "#lT").value, lin = type === "Linear", on = etaLinkDofs.filter(x => st.dofs[x] && st.dofs[x].on);
+        if (!lin && !on.length) { formError(d, "Tick at least one direction."); return false; }
+        const nums = [["#lMa", "Mass"], ["#lWe", "Weight"], ["#lR1", "RotInert1"], ["#lR2", "RotInert2"], ["#lR3", "RotInert3"], ["#lDL", "DefLength"], ["#lDA", "DefArea"], ["#lSF", "StiffDFact"]];
+        for (const [s, f] of nums) { const v = fnum(d, s); if (!isFinite(v) || v < 0) { formError(d, "Mass, weight, inertias, factors are numbers, 0 or more."); return false; } G[f] = String(v); }
+        if (!(+G.DefLength > 0) || !(+G.DefArea > 0)) { formError(d, "The length and area the property is defined for are more than 0."); return false; }
+        const anyNl = !lin && on.some(x => !st.dofs[x].fixed && st.dofs[x].nl);
+        if (anyNl) { G.StiffLOpt = q(d, "#lSL").value; G.StiffDOpt = q(d, "#lSD").value; } else { delete G.StiffLOpt; delete G.StiffDOpt; }
+        ["PDM2I", "PDM2J", "PDM3I", "PDM3J"].forEach(x => { if (G[x] == null) G[x] = "0"; });
+        const gen = {}; etaLinkGen.forEach(x => { if (G[x] != null && G[x] !== "" && !(copy && x === "GUID")) gen[x] = G[x]; });
+        const rows = [];
+        if (lin) {
+          const r = Object.assign({}, gen); const L = st.lin;
+          etaLinkDofs.forEach((x, i) => { const s = st.dofs[x]; r[x + "Status"] = !s || !s.on ? "Inactive" : s.fixed ? "Fixed" : "Active"; });
+          const act = i => { const s = st.dofs[etaLinkDofs[i - 1]]; return s && s.on && !s.fixed; };
+          for (let i = 1; i <= 6; i++) for (let j = 1; j <= i; j++) { const key = i === j ? "U" + i : `U${j}U${i}`; if (act(i) && act(j)) { if (L["Stiff" + key] != null) r["Stiff" + key] = String(L["Stiff" + key]); if (L["Damp" + key] != null) r["Damp" + key] = String(L["Damp" + key]); } }
+          for (let i = 1; i <= 6; i++) if (act(i)) { r["StiffU" + i] = String(L["StiffU" + i] ?? 0); r["DampU" + i] = String(L["DampU" + i] ?? 0); }
+          if (act(2)) r.DJ2 = String(L.DJ2 ?? 0); if (act(3)) r.DJ3 = String(L.DJ3 ?? 0);
+          rows.push(r);
+        } else for (const x of on) {
+          const s = st.dofs[x], rot = x[0] === "R", base = {Direction: x, Fixed: s.fixed ? "Yes" : "No"};
+          if (!s.fixed) {
+            base[rot ? "RotKE" : "TransKE"] = String(s.row[rot ? "RotKE" : "TransKE"] ?? 0); base[rot ? "RotCE" : "TransCE"] = String(s.row[rot ? "RotCE" : "TransCE"] ?? 0);
+            const nlf = etaLinkNl(type, x), nl = s.nl && nlf.length;
+            if (etaLinkFlagged(type)) base.Nonlinear = nl ? "Yes" : "No";
+            if (nl && (x === "U2" || x === "U3")) base.DJ = String(s.row.DJ ?? 0);
+            if (nl && !etaLinkMulti(type)) {
+              const flOn = /^y/i.test(s.row.FLDamper || "");
+              for (const [f, , , def, kind] of nlf) { if (!f) continue; if (kind === "fl" && !flOn) continue; base[f] = String(s.row[f] ?? (kind === "check" ? def : etaLinkDefault(def))); }
+            }
+            if (nl && etaLinkMulti(type)) {
+              const pts = s.pts.length ? s.pts : [[-10, -1], [-1, -1], [0, 0], [1, 1], [10, 1]];
+              if (type === "MultiLinear Plastic") { base.HysType = s.row.HysType || "Kinematic"; (etaLinkHysFields[base.HysType] || []).forEach(([f]) => { if (s.row[f] != null) base[f] = String(s.row[f]); }); }
+              pts.forEach(([a, b], i) => rows.push(Object.assign(i ? {Direction: x} : Object.assign({}, gen, base), rot ? {RotPoint: String(i + 1), Rotation: String(a), Moment: String(b)} : {TransPoint: String(i + 1), Displ: String(a), Force: String(b)})));
+              continue;
+            }
+          }
+          rows.push(Object.assign(rows.length ? {} : Object.assign({}, gen), base));
+        }
+        rows.forEach((r, i) => { if (i) etaLinkGen.forEach(x => delete r[x]); });
+        if (rows.length && etaLinkGen.some(x => gen[x] != null)) Object.assign(rows[0], gen);
+        const run = async (table, name, rs) => { const j = await hmRun("define_table_rows", {table, name, rows: rs}, true); if (!j.ok) { formError(d, j.error); return false; } return true; };
+        if (!await run(etaLinkTable(type), nm, rows)) return false;
+        if (was && was !== type && !await run(etaLinkTable(was), nm, [])) return false;
+        // Renamed: the old name's rows and Engine link go.
+        if (n && !copy && nm !== n) { const j = await hmRun("define_link", {name: n, delete: true}, true); if (!j.ok) { formError(d, j.error); return false; } }
+        for (const kind of ["Force", "Displacement"]) {
+          const mine = st.acc && st.acc.kind === kind ? [Object.assign({}, st.acc.row, {Type: type})] : [];
+          mine.forEach(r => delete r.Name);
+          if ((mine.length || T(etaLinkAccept(kind)).some(r => r.Name === nm || r.Name === n)) && !await run(etaLinkAccept(kind), nm, mine)) return false;
+        }
+        again(); return true;
+      }, true], ["Cancel"]], {width: 800});
+    const dofRow = (dk, lin) => `<div style="display:grid;grid-template-columns:${lin ? "66px 48px" : "66px 48px 72px 160px"};align-items:center;height:26px"><label><input type="checkbox" data-on="${dk}"> ${dk}</label><input type="checkbox" data-fx="${dk}" style="justify-self:start">${lin ? "" : `<input type="checkbox" data-nl="${dk}" style="justify-self:center"><button data-ms="${dk}">Modify/Show for ${dk}...</button>`}</div>`;
+    const head = lin => `<div style="display:grid;grid-template-columns:${lin ? "66px 48px" : "66px 48px 72px 160px"};color:#333"><span>Direction</span><span>Fixed</span>${lin ? "" : `<span>NonLinear</span><span style="text-align:center">Properties</span>`}</div>`;
+    const paint = () => {
+      const t = q(d, "#lT").value, lin = t === "Linear";
+      // T/C, rubber and the rest: a direction that cannot be nonlinear has its box greyed (Links 26, 31); a friction
+      // isolator's U1 follows its shear directions (Links 31: ticked and greyed).
+      const can = x => etaLinkNl(t, x).length > 0;
+      const shearNl = ["U2", "U3"].some(x => st.dofs[x] && st.dofs[x].on && !st.dofs[x].fixed && st.dofs[x].nl);
+      if (/Friction Isolator|Pendulum/.test(t) && st.dofs.U1 && shearNl) st.dofs.U1.nl = true;
+      q(d, "#lDir").innerHTML = `<div style="display:grid;grid-template-columns:${lin ? "90px 1fr 90px" : "1fr 1fr"};gap:14px;padding:0 6px">
+        <div>${head(lin)}${["U1", "U2", "U3"].map(x => dofRow(x, lin)).join("")}</div>${lin ? `<div style="text-align:center"><div style="color:#333">Properties</div><button id="lAll" style="margin-top:6px">Modify/Show for All...</button></div>` : ""}<div>${head(lin)}${["R1", "R2", "R3"].map(x => dofRow(x, lin)).join("")}</div></div>`;
+      d.querySelectorAll("#lDir [data-on]").forEach(b => {
+        const dk = b.dataset.on, s = st.dofs[dk], fx = q(d, `[data-fx="${dk}"]`), nl = q(d, `[data-nl="${dk}"]`), ms = q(d, `[data-ms="${dk}"]`);
+        b.checked = !!(s && s.on); fx.checked = !!(s && s.on && s.fixed); fx.disabled = !b.checked;
+        if (nl) { nl.checked = !!(s && s.on && s.nl && can(dk)); nl.disabled = !b.checked || fx.checked || !can(dk) || (dk === "U1" && /Friction Isolator|Pendulum/.test(t) && shearNl); }
+        if (ms) ms.disabled = !b.checked || fx.checked;
+        b.onchange = () => { st.dofs[dk] = Object.assign(st.dofs[dk] || {fixed: false, nl: false, row: {}, pts: []}, {on: b.checked}); paint(); };
+        fx.onchange = () => { st.dofs[dk].fixed = fx.checked; paint(); };
+        if (nl) nl.onchange = () => { st.dofs[dk].nl = nl.checked; paint(); };
+        if (ms) ms.onclick = () => etaLinkDir(st, q(d, "#lN").value, t, dk, paint);
+      });
+      if (lin) { const all = q(d, "#lAll"); all.disabled = !etaLinkDofs.some(x => st.dofs[x] && st.dofs[x].on && !st.dofs[x].fixed); all.onclick = () => etaLinkLinear(st, q(d, "#lN").value, paint); }
+      const anyNl = !lin && etaLinkDofs.some(x => st.dofs[x] && st.dofs[x].on && !st.dofs[x].fixed && st.dofs[x].nl && can(x));
+      q(d, "#lSL").innerHTML = anyNl ? opts(etaLinkStiffL, G.StiffLOpt || "Effective from Zero") : ""; q(d, "#lSD").innerHTML = anyNl ? opts(etaLinkStiffD, G.StiffDOpt || "Initial") : "";
+      q(d, "#lSL").disabled = q(d, "#lSD").disabled = !anyNl;
+      q(d, "#lAcS").textContent = st.acc ? st.acc.kind + " criteria specified" : "None specified";
+    };
+    q(d, "#lT").onchange = paint;
+    q(d, "#lFix").onclick = () => { etaLinkDofs.forEach(x => st.dofs[x] = Object.assign(st.dofs[x] || {nl: false, row: {}, pts: []}, {on: true, fixed: true})); paint(); };
+    q(d, "#lClr").onclick = () => { etaLinkDofs.forEach(x => { if (st.dofs[x]) Object.assign(st.dofs[x], {on: false, fixed: false}); }); paint(); };
+    q(d, "#lNo").onclick = () => dialog("Link Property Notes", `<textarea id="nT" rows="6" maxlength="255" style="width:100%;box-sizing:border-box">${esc(G.Notes || "")}</textarea><p class="kv" style="margin:4px 0 0">Note: Notes are limited to 255 characters maximum.</p>`,
+      [["OK", x => { G.Notes = q(x, "#nT").value; }], ["Cancel"]], {width: 420});
+    q(d, "#lPd").onclick = () => etaLinkPDelta(G);
+    q(d, "#lAc").onclick = () => etaLinkAcceptance(st, q(d, "#lN").value, paint);
+    paint();
+    return d;
+  };
+  const d = listForm("Define Link Properties", "Link Properties", names, [
+    ["Add New Property...", () => one(null)],
+    ["Add Copy of Property...", n => n && one(n, true)],
+    ["Modify/Show Property...", n => n && one(n)],
+    ["Delete Property", n => n && hmRun("define_link", {name: n, delete: true}, true).then(j => j.ok ? again() : hmSay(j.error, true))],
+  ], n => one(n));
+  // Delete Property is greyed while the model has one link property only (pictured Links 0: Link1 alone).
+  const b = d.querySelectorAll("[data-a]"); b[1].disabled = b[2].disabled = !names.length; b[3].disabled = names.length < 2;
+  return d;
+}
+// Linear Link/Support Directional Properties (pictured Links 4, 5, 6): Link/Support Property Name, Directional Control
+// (Direction, Fixed Yes), Shear Distance (U2, U3, from the J-end), and the stiffness and damping uncoupled (one value per
+// direction) or coupled (the upper symmetric matrix).
+function etaLinkLinear(st, name, after) {
+  const u = hmU(), L = Object.assign({}, st.lin), dofs = JSON.parse(JSON.stringify(st.dofs));
+  const coupled = p => etaLinkDofs.some((a, i) => etaLinkDofs.some((b, j) => j > i && +(L[`${p}U${i + 1}U${j + 1}`] || 0) !== 0));
+  const act = i => { const s = dofs[etaLinkDofs[i - 1]]; return !!(s && s.on && !s.fixed); };
+  const legend = (p, c) => p === "Stiff" ? (c ? "Upper Stiffness Matrix (Symmetrical) Used For All Analysis Cases" : "Stiffness Values Used For All Load Cases") : (c ? "Upper Damping Matrix (Symmetrical) Used For All Analysis Cases" : "Damping Values Used For All Load Cases");
+  const box = (p, w) => `<fieldset style="margin:0 0 8px;min-height:190px"><legend id="lg${p}"></legend><div style="display:grid;grid-template-columns:1fr 1fr 24px;padding:2px 30px"><label><input type="radio" name="c${p}" value="0"> ${w} Is Uncoupled</label><label><input type="radio" name="c${p}" value="1"> ${w} Is Coupled</label><span title="${w} values use the model's units" style="color:#1565c0;font-weight:bold">&#9432;</span></div><div id="g${p}"></div></fieldset>`;
+  const d = dialog("Linear Link/Support Directional Properties", `<div style="display:grid;grid-template-columns:170px 1fr;gap:10px"><div>
+      <fieldset style="margin:0 0 8px"><legend>Link/Support Property Name</legend><input class="grey" readonly value="${esc(name)}" style="width:100%;box-sizing:border-box"></fieldset>
+      <fieldset style="margin:0 0 8px"><legend>Directional Control</legend><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px 6px;align-items:center"><span>Direction</span><span>Fixed</span>${etaLinkDofs.map(x => `<label><input type="checkbox" data-on="${x}"> ${x}</label><label><input type="checkbox" data-fx="${x}"> Yes</label>`).join("")}</div></fieldset>
+      <fieldset style="margin:0"><legend>Shear Distance</legend><div style="display:grid;grid-template-columns:24px 1fr 20px;gap:8px 6px;align-items:center"><span>U2</span><input id="dj2" type="number" step="any"><span>${u.l}</span><span>U3</span><input id="dj3" type="number" step="any"><span>${u.l}</span></div>
+        <p class="kv" style="margin:8px 0 0">Note: Distance is measured with respect to J-End of the link object</p></fieldset></div>
+    <div>${box("Stiff", "Stiffness")}${box("Damp", "Damping")}</div></div>`,
+    [["OK", d => {
+      read();
+      for (const p of ["Stiff", "Damp"]) for (const k of Object.keys(L).filter(k => k.startsWith(p + "U"))) if (!isFinite(+L[k])) { formError(d, "Each value is a number."); return false; }
+      st.dofs = dofs; st.lin = L; after(); return true;
+    }], ["Cancel"]], {width: 760});
+  const mode = {Stiff: coupled("Stiff"), Damp: coupled("Damp")};
+  const read = () => {
+    d.querySelectorAll("[data-m]").forEach(i => { if (!i.disabled) L[i.dataset.m] = i.value.trim() === "" ? "0" : i.value.trim(); });
+    if (!q(d, "#dj2").disabled) L.DJ2 = q(d, "#dj2").value || "0"; if (!q(d, "#dj3").disabled) L.DJ3 = q(d, "#dj3").value || "0";
+  };
+  const grid = p => {
+    const c = mode[p], cell = (i, j) => { const key = i === j ? `${p}U${i}` : `${p}U${i}U${j}`, on = act(i) && act(j); return `<input data-m="${key}" type="number" step="any" style="width:64px" ${on ? `value="${esc(L[key] ?? 0)}"` : "disabled"}>`; };
+    if (!c) return `<div style="display:grid;grid-template-columns:repeat(6,72px);gap:2px 4px;text-align:center;padding:4px 30px">${etaLinkDofs.map(x => `<span>${x}</span>`).join("")}${[1, 2, 3, 4, 5, 6].map(i => cell(i, i)).join("")}</div>`;
+    return `<table style="border-spacing:3px;margin:2px 10px"><tr><th></th>${etaLinkDofs.map(x => `<th style="font-weight:normal">${x}</th>`).join("")}</tr>${etaLinkDofs.map((a, i) => `<tr><td>${a}</td>${etaLinkDofs.map((b, j) => j < i ? `<td><input disabled style="width:64px;background:#c8c8c8"></td>` : `<td>${cell(i + 1, j + 1)}</td>`).join("")}</tr>`).join("")}</table>`;
+  };
+  const paint = () => {
+    for (const p of ["Stiff", "Damp"]) { q(d, "#lg" + p).textContent = legend(p, mode[p]); d.querySelectorAll(`[name=c${p}]`).forEach(r => r.checked = (r.value === "1") === mode[p]); q(d, "#g" + p).innerHTML = grid(p); }
+    d.querySelectorAll("[data-on]").forEach(b => { const x = b.dataset.on, s = dofs[x]; b.checked = !!(s && s.on); const f = q(d, `[data-fx="${x}"]`); f.checked = !!(s && s.on && s.fixed); f.disabled = !b.checked; });
+    q(d, "#dj2").disabled = !act(2); q(d, "#dj2").value = act(2) ? (L.DJ2 ?? 0) : ""; q(d, "#dj3").disabled = !act(3); q(d, "#dj3").value = act(3) ? (L.DJ3 ?? 0) : "";
+  };
+  d.querySelectorAll("[data-on]").forEach(b => b.onchange = () => { read(); const x = b.dataset.on; dofs[x] = Object.assign(dofs[x] || {fixed: false, nl: false, row: {}, pts: []}, {on: b.checked}); paint(); });
+  d.querySelectorAll("[data-fx]").forEach(b => b.onchange = () => { read(); dofs[b.dataset.fx].fixed = b.checked; paint(); });
+  // Uncoupled again: the values off the diagonal go (the matrix keeps only its diagonal).
+  ["Stiff", "Damp"].forEach(p => d.querySelectorAll(`[name=c${p}]`).forEach(r => r.onchange = () => { read(); mode[p] = r.value === "1"; if (!mode[p]) Object.keys(L).filter(k => new RegExp(`^${p}U\\dU\\d$`).test(k)).forEach(k => delete L[k]); paint(); }));
+  paint();
+  return d;
+}
+// Link/Support Directional Properties for a nonlinear type's direction (pictured Links 12, 15-30): Identification,
+// Linear Properties, Shear Deformation Location (U2 and U3 when nonlinear), and the type's Nonlinear Properties; for
+// MultiLinear the Multilinear Force-Displ Relation with Add Row, Delete Row, Reorder Rows and its graph.
+function etaLinkDir(st, name, type, dk, after) {
+  const s = st.dofs[dk], r = Object.assign({}, s.row), rot = dk[0] === "R", nl = !!(s.nl && etaLinkNl(type, dk).length), multi = etaLinkMulti(type), shear = dk === "U2" || dk === "U3";
+  const ke = rot ? "RotKE" : "TransKE", ce = rot ? "RotCE" : "TransCE", nlf = nl && !multi ? etaLinkNl(type, dk) : [];
+  let pts = (s.pts.length ? s.pts : [[-10, -1], [-1, -1], [0, 0], [1, 1], [10, 1]]).map(p => p.slice()), sel = 0;
+  const g = body => `<div style="display:grid;grid-template-columns:176px 86px auto;gap:5px 8px;align-items:center;padding:2px 10px">${body}</div>`;
+  const fsx = (l, b, grey) => `<fieldset style="margin:0 0 6px${grey ? ";color:#999" : ""}"><legend${grey ? ' style="color:#999"' : ""}>${l}</legend>${b}</fieldset>`;
+  const ro = v => `<input class="grey" readonly value="${esc(v)}" style="width:136px">`;
+  const inp = (f, v, kind) => `<input data-f="${f}" type="number" step="any" value="${esc(v)}" style="width:86px">`;
+  const nlRows = nlf.map(([f, l, uk, def, kind]) => kind === "head" ? `<span style="grid-column:1/4;text-decoration:underline" data-fl>${l}</span>`
+    : kind === "check" ? `<label style="grid-column:1/4"><input type="checkbox" data-f="${f}" ${/^y/i.test(r[f] ?? def) ? "checked" : ""}> ${l}</label>`
+    : kind === "text" ? `<span>${l}</span><input data-f="${f}" data-t="1" value="${esc(r[f] ?? def)}" style="width:86px"><span></span>`
+    : `<span ${kind === "fl" ? "data-fl" : ""} style="${kind === "fl" && f !== "FLDLength" ? "padding-left:10px" : ""}">${l}</span>${inp(f, r[f] ?? etaLinkDefault(def))}<span ${kind === "fl" ? "data-fl" : ""}>${etaLinkUnit(uk, rot)}</span>`).join("");
+  const unitL = rot ? "rad" : hmU().l, unitF = rot ? `${hmU().f}-${hmU().l}` : hmU().f;
+  const hys = type === "MultiLinear Plastic" ? g(`<span>Hysteresis Type</span><select data-f="HysType" data-t="1">${opts(etaLinkHys, r.HysType || "Kinematic")}</select><span></span>`) + `<div id="dHp"></div>` : "";
+  const d = dialog("Link/Support Directional Properties", fsx("Identification", g(`<span>Property Name</span>${ro(name)}<span></span><span>Direction</span>${ro(dk)}<span></span><span>Type</span>${ro(type)}<span></span><span>NonLinear</span>${ro(nl ? "Yes" : "No")}<span></span>`))
+    + fsx("Linear Properties", g(`<span>Effective Stiffness</span>${inp(ke, r[ke] ?? 0)}<span>${etaLinkUnit("k", rot)}</span><span>Effective Damping</span>${inp(ce, r[ce] ?? 0)}<span>${etaLinkUnit("c", rot)}</span>`))
+    + (nl && (shear || multi) ? fsx("Shear Deformation Location", g(`<span>Distance from End-J</span><input data-f="DJ" type="number" step="any" style="width:86px" ${shear ? `value="${esc(r.DJ ?? 0)}"` : "disabled"}><span>${hmU().l}</span>`), !shear) : "")
+    + (nl && multi ? fsx(`Multilinear ${rot ? "Moment-Rotation" : "Force-Displ"} Relation`, hys + `<div style="display:grid;grid-template-columns:170px 160px;gap:8px;padding:4px 6px"><div><div id="dP" style="height:120px;overflow:auto;border:2px solid #333;background:#fff"></div>
+        <div style="display:flex;justify-content:space-between;margin-top:6px"><button id="dPa" style="width:72px">Add Row</button><button id="dPd" style="width:80px">Delete Row</button></div><button id="dPr" style="width:100%;margin-top:4px">Reorder Rows</button></div>
+        <div><svg id="dG" viewBox="0 0 150 120" style="width:150px;height:120px;background:#fff;border:1px solid #bbb"></svg><div id="dM" class="grey" style="font-size:11px;padding:2px 4px;margin-top:4px;border:1px solid #ccc"></div></div></div>`) : "")
+    + (nl && !multi ? fsx("Nonlinear Properties", g(nlRows)) : ""),
+    [["OK", d => {
+      if (multi && nl) savePts();
+      for (const i of d.querySelectorAll("[data-f]")) {
+        if (i.disabled) continue;
+        if (i.type === "checkbox") { r[i.dataset.f] = i.checked ? "Yes" : "No"; continue; }
+        if (i.dataset.t) { r[i.dataset.f] = i.value; continue; }
+        const v = parseFloat(i.value); if (!isFinite(v)) { formError(d, "Each value is a number."); return false; } r[i.dataset.f] = String(v);
+      }
+      if (multi && nl) { if (pts.length < 2) { formError(d, "Give at least two points."); return false; } if (pts.some(p => !p.every(isFinite))) { formError(d, "Each point is two numbers."); return false; } s.pts = pts.map(p => p.slice()); }
+      s.row = r; after(); return true;
+    }], ["Cancel"]], {width: multi && nl ? 440 : 440});
+  const flPaint = () => { const c = d.querySelector('[data-f="FLDamper"]'); if (!c) return; const on = c.checked; d.querySelectorAll('[data-f="FLDLength"],[data-f="FDLModulus"],[data-f="FDLArea"]').forEach(i => { i.disabled = !on; if (!on) i.value = ""; else if (i.value === "") i.value = r[i.dataset.f] ?? 0; }); d.querySelectorAll("[data-fl]").forEach(x => x.style.color = on ? "" : "#999"); };
+  const fl = d.querySelector('[data-f="FLDamper"]'); if (fl) { fl.onchange = flPaint; flPaint(); }
+  const savePts = () => d.querySelectorAll("[data-px]").forEach(i => { const k = +i.dataset.px; pts[k] = [parseFloat(i.value), parseFloat(q(d, `[data-pf="${k}"]`).value)]; });
+  const plot = () => {
+    const ok = pts.filter(p => p.every(isFinite)); if (!ok.length) return;
+    const xs = ok.map(p => p[0]), ys = ok.map(p => p[1]), x0 = Math.min(0, ...xs), x1 = Math.max(0, ...xs), y0 = Math.min(0, ...ys), y1 = Math.max(0, ...ys);
+    const X = x => 4 + (x - x0) / ((x1 - x0) || 1) * 142, Y = y => 116 - (y - y0) / ((y1 - y0) || 1) * 112;
+    let grid = ""; for (let i = 0; i <= 15; i++) grid += `<line x1="${i * 10}" y1="0" x2="${i * 10}" y2="120" stroke="#ddd" stroke-width=".5"/>`; for (let i = 0; i <= 12; i++) grid += `<line x1="0" y1="${i * 10}" x2="150" y2="${i * 10}" stroke="#ddd" stroke-width=".5"/>`;
+    q(d, "#dG").innerHTML = grid + `<line x1="${X(0)}" y1="0" x2="${X(0)}" y2="120" stroke="#c00" stroke-width=".8"/><line x1="0" y1="${Y(0)}" x2="150" y2="${Y(0)}" stroke="#c00" stroke-width=".8"/><polyline fill="none" stroke="#000" stroke-width="1.6" points="${ok.map(p => X(p[0]) + "," + Y(p[1])).join(" ")}"/>`;
+    // Max and Min as ETABS shows them (pictured Links 12): the first point with the largest and with the smallest value.
+    const mx = ok.reduce((a, p) => p[1] > a[1] ? p : a), mn = ok.reduce((a, p) => p[1] < a[1] ? p : a);
+    q(d, "#dM").textContent = `Max: (${mx[0]}, ${mx[1]});  Min: (${mn[0]}, ${mn[1]})`;
+  };
+  const table = () => {
+    q(d, "#dP").innerHTML = `<table class="grid" style="width:100%;border-collapse:collapse"><tr><th>Pt</th><th>${rot ? "Rotation" : "Displ"}<br>(${unitL})</th><th>${rot ? "Moment" : "Force"}<br>(${unitF})</th></tr>${pts.map((p, i) => `<tr><td style="text-align:center;${i === sel ? "background:#0078d7;color:#fff" : ""}">${i + 1}</td><td><input data-px="${i}" type="number" step="any" value="${p[0]}" style="width:56px;text-align:center"></td><td><input data-pf="${i}" type="number" step="any" value="${p[1]}" style="width:56px;text-align:center"></td></tr>`).join("")}</table>`;
+    d.querySelectorAll("[data-px],[data-pf]").forEach(i => { i.onfocus = () => { if (sel !== +(i.dataset.px ?? i.dataset.pf)) { savePts(); sel = +(i.dataset.px ?? i.dataset.pf); table(); q(d, `[data-${i.dataset.px != null ? "px" : "pf"}="${sel}"]`).focus(); } }; i.oninput = () => { savePts(); plot(); }; });
+    plot();
+  };
+  if (multi && nl) {
+    q(d, "#dPa").onclick = () => { savePts(); const p = pts[sel] || pts[pts.length - 1]; pts.splice(sel + 1, 0, [p[0], p[1]]); sel++; table(); };
+    q(d, "#dPd").onclick = () => { savePts(); if (pts.length > 1) { pts.splice(sel, 1); sel = Math.min(sel, pts.length - 1); } table(); };
+    q(d, "#dPr").onclick = () => { savePts(); pts.sort((a, b) => a[0] - b[0]); sel = 0; table(); };
+    table();
+    const hy = d.querySelector('[data-f="HysType"]');
+    if (hy) { const hp = () => { q(d, "#dHp").innerHTML = (etaLinkHysFields[hy.value] || []).length ? `<div style="display:grid;grid-template-columns:1fr 86px;gap:4px 8px;align-items:center;padding:2px 10px">${etaLinkHysFields[hy.value].map(([f, l, k]) => k === "check" ? `<label style="grid-column:1/3"><input type="checkbox" data-f="${f}" ${/^y/i.test(r[f] || "Yes") ? "checked" : ""}> ${l}</label>` : `<span>${l}</span><input data-f="${f}" type="number" step="any" value="${esc(r[f] ?? 0)}">`).join("")}</div>` : `<p class="kv" style="margin:2px 10px">No Parameters Are Required For This Hysteresis Type</p>`; };
+      hy.onchange = hp; hp(); }
+  }
+  return d;
+}
+// Advanced Link P-Delta Parameters (pictured Links 7): Fraction of P-Delta Moment to Each End of Link, M2 and M3 to the
+// I- and J-ends as moments and the rest as a shear couple, worked out by Update Values.
+function etaLinkPDelta(G) {
+  const row = (l, id) => `<span>${l}</span><input id="${id}" type="number" step="any" style="width:52px" value="${+(G[id] || 0)}">`;
+  const d = dialog("Advanced Link P-Delta Parameters", `<fieldset style="margin:0"><legend>Fraction of P-Delta Moment to Each End of Link</legend><div style="display:grid;grid-template-columns:1fr 52px;gap:4px 8px;align-items:center;padding:4px 8px">
+    ${row("M2 P-delta to I-end of link as moment (M2I)", "PDM2I")}${row("M2 P-delta to J-end of link as moment (M2J)", "PDM2J")}<span>M2 P-delta as shear couple</span><span id="p2" style="color:#666"></span>
+    <span style="height:10px"></span><span></span>${row("M3 P-delta to I-end of link as moment (M3I)", "PDM3I")}${row("M3 P-delta to J-end of link as moment (M3J)", "PDM3J")}<span>M3 P-delta as shear couple</span><span id="p3" style="color:#666"></span></div></fieldset>
+    <div style="text-align:center;margin-top:10px"><button id="pU" style="width:130px">Update Values</button></div>`,
+    [["OK", p => {
+      const f = ["PDM2I", "PDM2J", "PDM3I", "PDM3J"].map(x => fnum(p, "#" + x));
+      if (f.some(x => !isFinite(x) || x < 0) || f[0] + f[1] > 1 || f[2] + f[3] > 1) { formError(p, "Each fraction is 0 or more, and each pair adds up to 1 or less."); return false; }
+      ["PDM2I", "PDM2J", "PDM3I", "PDM3J"].forEach((x, i) => G[x] = String(f[i]));
+    }], ["Cancel"]], {width: 360});
+  const sc = () => { q(d, "#p2").textContent = +(1 - (fnum(d, "#PDM2I") || 0) - (fnum(d, "#PDM2J") || 0)).toFixed(6); q(d, "#p3").textContent = +(1 - (fnum(d, "#PDM3I") || 0) - (fnum(d, "#PDM3J") || 0)).toFixed(6); };
+  q(d, "#pU").onclick = sc; sc();
+  return d;
+}
+// Link Acceptance Criteria Definition (pictured Links 8, 9): Acceptance Criteria Type Force or Displacement, the directions
+// the link has active (F1-M3 or U1-R3), Symmetric, and IO, LS and CP for Positive and Negative.
+function etaLinkAcceptance(st, name, after) {
+  const u = hmU(), acc = st.acc ? {kind: st.acc.kind, row: Object.assign({}, st.acc.row)} : {kind: "Force", row: {Symmetric: "Yes"}};
+  const keys = k => k === "Force" ? ["F1", "F2", "F3", "M1", "M2", "M3"] : ["U1", "U2", "U3", "R1", "R2", "R3"];
+  const units = k => k === "Force" ? [u.f, u.f, u.f, `${u.f}-${u.l}`, `${u.f}-${u.l}`, `${u.f}-${u.l}`] : [u.l, u.l, u.l, "rad", "rad", "rad"];
+  const ok = i => { const s = st.dofs[etaLinkDofs[i]]; return !!(s && s.on && !s.fixed); };
+  const d = dialog("Link Acceptance Criteria Definition", `<div style="display:grid;grid-template-columns:260px 1fr;gap:10px"><fieldset style="margin:0"><legend>Link/Support Property Name</legend><input class="grey" readonly value="${esc(name)}" style="width:100%;box-sizing:border-box"></fieldset>
+      <fieldset style="margin:0"><legend>Acceptance Criteria Type</legend><label style="margin:0 120px 0 14px"><input type="radio" name="aK" value="Force"> Force</label><label><input type="radio" name="aK" value="Displacement"> Displacement</label></fieldset></div>
+    <div style="display:grid;grid-template-columns:96px 1fr;gap:10px;margin-top:8px"><fieldset style="margin:0"><legend>Direction Control</legend><div id="aD" style="display:flex;flex-direction:column;gap:9px"></div><label style="display:block;margin-top:40px"><input type="checkbox" id="aS"> Symmetric</label></fieldset>
+      <fieldset style="margin:0"><legend>Acceptance Criteria</legend><div id="aG"></div></fieldset></div>`,
+    [["OK", d => {
+      read();
+      const r = acc.row, k = acc.kind, on = keys(k).filter(x => /^y/i.test(r[x] || ""));
+      for (const x of on) for (const s of ["Pos", ...(/^y/i.test(r.Symmetric || "") ? [] : ["Neg"])]) for (const l of ["IO", "LS", "CP"]) if (!isFinite(parseFloat(r[l + s + x]))) { formError(d, "Each criterion is a number."); return false; }
+      const out = {Symmetric: r.Symmetric || "Yes"}; keys(k).forEach(x => out[x] = on.includes(x) ? "Yes" : "No");
+      for (const x of on) for (const s of ["Pos", "Neg"]) for (const l of ["IO", "LS", "CP"]) { const v = /^y/i.test(out.Symmetric) && s === "Neg" ? r[l + "Pos" + x] : r[l + s + x]; out[l + s + x] = String(parseFloat(v)); }
+      st.acc = on.length ? {kind: k, row: out} : null; after(); return true;
+    }], ["Cancel"]], {width: 780});
+  const read = () => {
+    d.querySelectorAll("[data-c]").forEach(i => { if (!i.disabled) acc.row[i.dataset.c] = i.value; });
+    d.querySelectorAll("[data-ad]").forEach(b => acc.row[b.dataset.ad] = b.checked ? "Yes" : "No");
+    acc.row.Symmetric = q(d, "#aS").checked ? "Yes" : "No";
+  };
+  const paint = () => {
+    const k = acc.kind, ks = keys(k), us = units(k), sym = /^y/i.test(acc.row.Symmetric || "");
+    d.querySelectorAll("[name=aK]").forEach(r => r.checked = r.value === k); q(d, "#aS").checked = sym;
+    q(d, "#aD").innerHTML = ks.map((x, i) => `<label><input type="checkbox" data-ad="${x}" ${ok(i) ? "" : "disabled"} ${ok(i) && /^y/i.test(acc.row[x] || "") ? "checked" : ""}> ${x}</label>`).join("");
+    const cell = (l, s, x, i) => { const on = ok(i) && /^y/i.test(acc.row[x] || "") && !(sym && s === "Neg"), key = l + s + x; return `<input data-c="${key}" type="number" step="any" style="width:84px" ${on ? `value="${esc(acc.row[key] ?? 0.001)}"` : "disabled"}>`; };
+    q(d, "#aG").innerHTML = `<div style="display:grid;grid-template-columns:60px repeat(6,90px);gap:6px 4px;align-items:center;text-align:center"><span></span>${ks.map((x, i) => `<span>${x}<br>${us[i]}</span>`).join("")}
+      <span style="grid-column:1/8;text-align:left">Positive:</span>${["IO", "LS", "CP"].map(l => `<span>${l}</span>${ks.map((x, i) => cell(l, "Pos", x, i)).join("")}`).join("")}
+      <span style="grid-column:1/8;text-align:left">Negative:</span>${["IO", "LS", "CP"].map(l => `<span>${l}</span>${ks.map((x, i) => cell(l, "Neg", x, i)).join("")}`).join("")}</div>`;
+    d.querySelectorAll("[data-ad]").forEach(b => b.onchange = () => { read(); paint(); });
+  };
+  d.querySelectorAll("[name=aK]").forEach(r => r.onchange = () => { read(); if (acc.kind !== r.value) acc.row = {Symmetric: acc.row.Symmetric}; acc.kind = r.value; paint(); });
+  q(d, "#aS").onchange = () => { read(); paint(); };
+  paint();
+  return d;
+}
+
 // ---- Define: link/support properties ----
 async function hmLinks() {
   if (program === "sap2000") return hmSapLinks();
+  if (program === "etabs") return etaLinks();
   const pd = (await hmRun("property_definitions", {}, true)).result; if (!pd) return;
   const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmLinks(); };
   const find = n => pd.links.find(x => x.name === n);

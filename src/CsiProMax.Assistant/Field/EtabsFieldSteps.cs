@@ -58,6 +58,8 @@ public static class EtabsFieldSteps
         });
         // The Frame/Wall Nonlinear Hinges forms' hinges, set in the Modeler's part, read back from ETABS.
         EtabsHingeRoundTrip.Check(ctx);
+        // Link Property Data, every type, and its acceptance criteria, read back from ETABS's own link tables.
+        EtabsLinkRoundTrip.Check(ctx);
         ctx.Step("the fixed supports at the base came across", () =>
         {
             var z0 = link.Stories()[0].Elevation;

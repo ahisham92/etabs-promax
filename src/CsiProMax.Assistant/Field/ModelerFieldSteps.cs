@@ -260,6 +260,8 @@ public static class ModelerFieldSteps
 
         // ETABS's Frame/Wall Nonlinear Hinges forms, read back in the scratch ETABS (EtabsHingeRoundTrip.Check).
         EtabsHingeRoundTrip.Define(ctx);
+        // ETABS's Link Property Data forms (every type), kept as ETABS's own tables and read back field by field (EtabsLinkRoundTrip.Check).
+        EtabsLinkRoundTrip.Define(ctx);
 
         // The files the programs open.
         var saved = ctx.Tool("save_model_as", $$"""{"name":"{{ModelName}}","folder":{{folder}}}""", a =>
