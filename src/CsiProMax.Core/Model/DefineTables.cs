@@ -44,6 +44,27 @@ public static class DefineTables
         ["Hinges Def 19c - Steel Parametric PM2M3 - Force Deformation"] = ["HingeName", "AssignHinge", "CurveShape", "StrngthLoss", "PUpper", "PLower", "FUOverB", "FDOverBAxPu", "FDOvBBendPu", "FDOverBAxPl", "FDOvBBendPl", "DUTens", "DUComp", "DUBend2", "DUBend3", "DCPuBend2", "DCPuBend3", "DCPlBend2", "DCPlBend3", "DETens", "DEComp", "DEBend2", "DEBend3", "DOvCBendPu", "DOvCBendPl"],
         ["Hinges Def 19d - Steel Parametric PM2M3 - Cyclic Degradation"] = ["HingeName", "AssignHinge", "CycDegType", "BDegFact", "OneBend2", "OneBend3", "Uor1DegFact", "TwoBend2", "TwoBend3", "Cor2DegFact", "ThreeBend2", "ThreeBend3", "Dor3DegFact", "EDegFact"],
         ["Hinges Def 19e - Steel Parametric PM2M3 - Deformation Capacity"] = ["HingeName", "AssignHinge", "DefCapType", "PUpper", "PLower", "IOInd", "LSInd", "CPInd", "IOatPUDep", "LSatPUDep", "CPatPUDep", "IOatPLDep", "LSatPLDep", "CPatPLDep", "RatioAxis2"],
+        // SAP2000's Shell Section Data sub-forms, kept the same way: Concrete Shell Section Design Parameters and Time Dependent Properties.
+        ["Area Section Property Design Parameters"] = ["Section", "RebarMat", "RebarOpt", "CoverTop1", "CoverTop2", "CoverBot1", "CoverBot2"],
+        ["Area Section Property - Time Dependent"] = ["Section", "TypeSize", "AutoSFSize", "UserValSize"],
+        // SAP2000 26.3 Define items the Engine keeps as its own table rows (Define menu read on Ahmed's PC 2026-11-27), every field.
+        ["Cable Section Definitions"] = ["CableSect", "Material", "Specify", "Diameter", "Area", "TorsConst", "I", "AS", "Color", "TotalWt", "TotalMass", "AMod", "A2Mod", "A3Mod", "JMod", "I2Mod", "I3Mod", "MMod", "WMod", "GUID", "Notes"],
+        ["Solid Property Definitions"] = ["SolidProp", "Material", "MatAngleA", "MatAngleB", "MatAngleC", "InComp", "Color", "GUID", "Notes", "TotalWt", "TotalMass"],
+        ["Link Frequency Dependent Properties 01 - General"] = ["Link", "Color", "GUID", "Notes"],
+        ["Link Frequency Dependent Properties 02 - Details"] = ["Link", "DOF", "Frequency", "TransK", "RotK", "TransRotK", "TransC", "RotC", "TransRotC"],
+        ["Foundation Property Definitions"] = ["Name", "FndType"],
+        ["Foundation Assemblies 1 - Definitions"] = ["Name", "FndProp", "Angle", "IntermedPts", "NCtrlPts", "CtrlPt1", "CtrlPt2"],
+        ["Foundation Assemblies 2 - Connection Points"] = ["Name", "PointType", "PointName"],
+        ["Joint Pattern Definitions"] = ["Pattern", "AutoBridge", "BridgeObj", "BridgePType", "BridgeLPat"],
+        ["Floor Vibration Excitation Sets"] = ["Name", "Type", "Ejoint", "Rjoint", "Function", "ModalCase", "Damping", "LastFreq"],
+        ["Frame Property Modifier Definitions"] = ["Name", "AMod", "AS2Mod", "AS3Mod", "JMod", "I22Mod", "I33Mod", "MassMod", "WeightMod"],
+        ["Cable Property Modifier Definitions"] = ["Name", "AMod", "MassMod", "WeightMod"],
+        ["Pushover Parameters - ATC40"] = ["ParamName", "PlotAxes", "DemandFrom", "Function", "FuncSF", "Ca", "Cv", "AddDamp", "StructType", "BetaZero1", "Kappa1", "BetaZero2", "Kappa2", "PlotCap", "PlotDemand", "PlotLocus", "PlotPeriod", "CapColor", "DemandColor", "LocusColor", "PeriodColor", "Damp1", "Damp2", "Damp3", "Damp4", "Period1", "Period2", "Period3", "Period4"],
+        ["Pushover Parameters - FEMA356"] = ["ParamName", "Beff", "DemandFrom", "Function", "FuncSF", "FuncTs", "Ss", "S1", "SiteClass", "UserC2", "C2", "UserC3", "C3", "UserCm", "Cm", "PlotCap", "PlotBiLin", "CapColor", "BiLinColor"],
+        ["Pushover Parameters - ASCE 41-13 NSP"] = ["ParamName", "Beff", "DemandFrom", "Function", "FuncSF", "FuncTs", "Ss", "S1", "SiteClass", "Tl", "IncludeSSI", "UserC2", "C2", "UserCm", "Cm", "PlotCap", "PlotBiLin", "CapColor", "BiLinColor"],
+        ["Pushover Parameters - FEMA440 Equivalent Linearization"] = ["ParamName", "PlotAxes", "DemandFrom", "Function", "FuncSF", "Ca", "Cv", "IncludeSSI", "AddDamp", "UserBeff", "A", "B", "C", "D", "E", "F", "UserTeff", "G", "H", "I", "J", "K", "L", "PlotCap", "PlotDemand", "PlotLocus", "PlotPeriod", "CapColor", "DemandColor", "LocusColor", "PeriodColor", "DuctRatio1", "DuctRatio2", "DuctRatio3", "DuctRatio4", "Period1", "Period2", "Period3", "Period4"],
+        ["Pushover Parameters - Force Displacement"] = ["ParamName", "CapColor"],
+        ["Named Sets - Pushover"] = ["PONamedSet", "Case", "PlotType", "ParamName"],
     };
 
     /// <summary>Each table and its fields with the names the program shows; the first field is the definition's name.</summary>

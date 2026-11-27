@@ -4959,14 +4959,18 @@ function hmDefineMenu() {
   const hinges = hmDefineTableItems().slice(-2);
   // SAP2000 26.3's Define menu as read on Ahmed's PC (field/reference-forms/sap2000/Define/00 Define menu.jpg and its
   // Section Properties submenu), item for item. An item the Engine has no form for yet is shown greyed, where SAP2000 has it.
-  const soon = label => [label, "", "", true];
+  // The items the Engine keeps as SAP2000's own table rows open the form of those rows (hmDefineTable).
+  const tab = (label, ...tables) => [label, "m:dt:" + tables.join("|")];
   if (program === "sap2000") return [["Materials...", "m:materials"],
-    ["Section Properties", [["Frame Sections...", "m:frameSections"], ["Tendon Sections...", "m:ex:tendonsections"], soon("Cable Sections..."), 0, ["Area Sections...", "m:shellSections"], 0, soon("Solid Properties..."), 0,
-      ["Reinforcement Bar Sizes...", "m:rebarSizes"], 0, ["Link/Support Properties...", "m:links"], soon("Frequency Dep. Link Props..."), 0, ["Hinge Properties...", "m:sapHinges"]]], 0,
-    soon("Foundation Properties..."), soon("Foundation Assemblies..."), 0, ["Mass Source...", "m:mass"], 0, ["Coordinate Systems/Grids...", "m:grids"], 0, ["Joint Constraints...", "m:ex:constraints"], soon("Joint Patterns..."), 0,
+    ["Section Properties", [["Frame Sections...", "m:frameSections"], ["Tendon Sections...", "m:ex:tendonsections"], tab("Cable Sections...", "Cable Section Definitions"), 0, ["Area Sections...", "m:shellSections"], 0, tab("Solid Properties...", "Solid Property Definitions"), 0,
+      ["Reinforcement Bar Sizes...", "m:rebarSizes"], 0, ["Link/Support Properties...", "m:links"], tab("Frequency Dep. Link Props...", "Link Frequency Dependent Properties 01 - General", "Link Frequency Dependent Properties 02 - Details"), 0, ["Hinge Properties...", "m:sapHinges"]]], 0,
+    tab("Foundation Properties...", "Foundation Property Definitions"), tab("Foundation Assemblies...", "Foundation Assemblies 1 - Definitions", "Foundation Assemblies 2 - Connection Points"), 0, ["Mass Source...", "m:mass"], 0, ["Coordinate Systems/Grids...", "m:grids"], 0,
+    ["Joint Constraints...", "m:ex:constraints"], tab("Joint Patterns...", "Joint Pattern Definitions"), 0,
     ["Groups...", "m:st:group"], ["Section Cuts...", "m:st:cut"], dt("Generalized Displacements..."), 0, fns, 0, ["Load Patterns...", "m:patterns"], ["Load Cases...", "m:cases"], ["Load Combinations...", "m:combos"], 0,
-    ["Moving Loads", [["Lanes...", "m:ex:lanes"], ["Vehicles...", "m:ex:vehicles"], ["Vehicle Classes...", "m:ex:classes"], ["Moving Load Cases...", "m:ex:mcases"]]], ["Floor Vibration", [soon("Floor Vibration...")]], 0,
-    ["Named Property Sets", [soon("Named Property Sets...")]], ["Pushover Parameter Sets", [soon("Pushover Parameter Sets...")]], ["Named Sets", [soon("Named Sets...")]]];
+    ["Moving Loads", [["Lanes...", "m:ex:lanes"], ["Vehicles...", "m:ex:vehicles"], ["Vehicle Classes...", "m:ex:classes"], ["Moving Load Cases...", "m:ex:mcases"]]], ["Floor Vibration", [tab("Excitation Sets...", "Floor Vibration Excitation Sets")]], 0,
+    ["Named Property Sets", [tab("Frame Property Modifiers...", "Frame Property Modifier Definitions"), tab("Cable Property Modifiers...", "Cable Property Modifier Definitions")]],
+    ["Pushover Parameter Sets", [tab("ATC 40 Capacity Spectrum...", "Pushover Parameters - ATC40"), tab("FEMA 356 Coefficient Method...", "Pushover Parameters - FEMA356"), tab("ASCE 41-13 NSP...", "Pushover Parameters - ASCE 41-13 NSP"),
+      tab("FEMA 440 Equivalent Linearization...", "Pushover Parameters - FEMA440 Equivalent Linearization"), tab("Force Displacement...", "Pushover Parameters - Force Displacement")]], ["Named Sets", [tab("Pushover Curves...", "Named Sets - Pushover")]]];
   if (program === "safe") return [["Materials...", "m:materials"],
     ["Section Properties", [["Slab Properties...", "m:shellSections"], ["Beam Properties...", "m:frameSections"], ["Tendon Properties...", "m:ex:tendonsections"], ["Reinforcing Bar Sizes...", "m:rebarSizes"],
       ["Soil Subgrade Properties...", "m:spr:area"], ["Point Spring Properties...", "m:spr:point"], ["Line Spring Properties...", "m:spr:line"], ["Wall Properties...", "m:wallSections"]]],
@@ -5976,7 +5980,7 @@ const sapShapeDefaults = {"Steel I/Wide Flange": {D: 0.3048, B: 0.127, TF: 9.652
 const sapFmt = v => { const n = typeof v === "number" ? v : parseFloat(v); return v === "" || v == null || !isFinite(n) ? "" : n !== 0 && Math.abs(n) < 1e-2 ? n.toExponential(3).toUpperCase().replace(/E([+-])(\d)$/, "E$10$2") : String(+n.toPrecision(7)); };
 async function hmSapFrameSections() {
   const defs = await hmDefs();
-  const again = () => { document.querySelectorAll(".dlg").forEach(x => x.close && x.close()); hm.defs = null; hmSapFrameSections(); };
+  const again = () => { document.querySelectorAll(".dlg").forEach(x => x.close && x.close()); hmSapFrameSections(); };
   const find = n => defs.frame_sections.find(s => s.name === n), all = defs.frame_sections.map(s => s.name);
   const acts = [["Import New Property...", () => hmFrameImport(again)], ["Add New Property...", () => hmSapFrameAdd(again)],
     ["Add Copy of Property...", n => n && hmSapFrameSection(find(n), again, true)], ["Modify/Show Property...", n => n && hmSapFrameSection(find(n), again)],
@@ -6131,6 +6135,102 @@ function hmSapReinforcement(shape, now, sizes, rebars, done) {
   paint();
   return d;
 }
+// ---- SAP2000 26.3's own area section forms (read on Ahmed's PC 2026-11-27: field/reference-forms/sap2000/Define/Area Sections *) ----
+// Area Sections: the Sections list, Select Section Type To Add (Shell, Plane, Asolid) and Click to:. Shell Section Data:
+// Section Name, Notes, Display Color; Type (the six shell types, Modify/Show Layer Definition for Layered); Thickness
+// (Membrane, Bending); Material (+, Material Angle); Time Dependent Properties; Concrete Shell Section Design Parameters;
+// Stiffness Modifiers; Temp Dependent Properties. Plane and Asolid sections are not in the Engine yet: their type is greyed.
+async function hmSapAreaSections() {
+  const defs = await hmDefs();
+  const again = () => { document.querySelectorAll(".dlg").forEach(x => x.close && x.close()); hmSapAreaSections(); };
+  const find = n => defs.shell_sections.find(s => s.name === n), names = defs.shell_sections.filter(s => s.kind !== "deck").map(s => s.name);
+  const acts = [["Add New Section...", () => hmSapShellSection(null, again)], ["Add Copy of Section...", n => n && hmSapShellSection(find(n), again, true)],
+    ["Modify/Show Section...", n => n && hmSapShellSection(find(n), again)], ["Delete Section", n => n && hmRun("delete_definition", {kind: "shell_section", name: n}).then(j => j.ok ? again() : hmSay(j.error, true))]];
+  const d = dialog("Area Sections", `<div style="display:flex;gap:10px"><fieldset style="flex:1;margin:0"><legend>Sections</legend><select id="hmList" size="10" style="width:100%;height:auto">${(names.length ? names : ["None"]).map(n => `<option value="${names.length ? esc(n) : ""}">${esc(n)}</option>`).join("")}</select></fieldset>
+      <div style="width:190px"><fieldset style="margin:0 0 6px"><legend>Select Section Type To Add</legend><select id="asT" style="width:100%"><option>Shell</option><option disabled>Plane</option><option disabled>Asolid</option></select></fieldset>
+      <fieldset style="margin:0"><legend>Click to:</legend><div style="display:flex;flex-direction:column;gap:6px">${acts.map((x, i) => `<button data-a="${i}">${esc(x[0])}</button>`).join("")}</div></fieldset></div></div>`,
+    [["OK"], ["Cancel"]], {width: 430});
+  const list = q(d, "#hmList"); list.selectedIndex = 0;
+  d.querySelectorAll("[data-a]").forEach(b => { b.disabled = +b.dataset.a > 0 && !names.length; b.onclick = () => acts[+b.dataset.a][1](list.value, d); });
+  list.ondblclick = () => list.value && hmSapShellSection(find(list.value), again);
+  return d;
+}
+const sapShellTypes = [["ShellThin", "Shell - Thin"], ["ShellThick", "Shell - Thick"], ["PlateThin", "Plate - Thin"], ["PlateThick", "Plate Thick"], ["Membrane", "Membrane"], ["Layered", "Shell - Layered/Nonlinear"]];
+async function hmSapShellSection(s, after, copy) {
+  const defs = await hmDefs(), u = hmU(), pd = (await hmRun("property_definitions", {}, true)).result, dd = (await hmRun("definition_data", {}, true)).result || {tables: {}};
+  const cur = s && pd ? pd.shell_sections.find(x => x.name === s.name) : null, was = s && !copy ? s.name : null, kind = s ? s.kind : "slab";
+  const ex = {...((cur && cur.extras) || {})}, modeling = (pd && pd.modeling_types) || ["ShellThin", "ShellThick", "Membrane", "Layered"];
+  let mods = cur ? {...cur.modifiers} : null;
+  if (!ex.Color) ex.Color = "Cyan";
+  const th = s && s.thickness != null ? s.thickness : 0.25 * (uLen[u.l] || 1), name0 = s ? (copy ? s.name + " copy" : s.name) : "ASEC" + (defs.shell_sections.length + 1);
+  const rowOf = t => { const x = dd.tables && dd.tables[t]; return (x && s && x.rows.find(r => r.Section === s.name)) || {}; };
+  let design = {...rowOf("Area Section Property Design Parameters")}, timeDep = {...rowOf("Area Section Property - Time Dependent")};
+  const was0 = JSON.stringify([design, timeDep]);
+  const mats = (pd ? pd.materials : defs.materials).map(m => m.name), now = cur && cur.modeling || "ShellThin";
+  const d = dialog("Shell Section Data", `<div class="sapSh"><style>.sapSh fieldset{margin:0 0 8px}.sapSh .g2{grid-template-columns:110px 1fr}</style>
+    <fieldset><div style="display:grid;grid-template-columns:90px 160px 1fr auto 26px;gap:6px 10px;align-items:center"><b>Section Name</b><input id="aN" value="${esc(name0)}"><span></span><span>Display Color</span><button id="aCol" style="width:18px;height:16px;padding:0"></button>
+      <span>Section Notes</span><button id="aNotes">Modify/Show...</button><span></span><span></span><span></span></div></fieldset>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 8px">
+      <div><fieldset><legend>Type</legend>${sapShellTypes.map(([k, l]) => `<label style="display:block;margin:3px 0"><input type="radio" name="aG" value="${k}" ${now === k ? "checked" : ""} ${modeling.includes(k) ? "" : 'disabled title="Not in the Engine yet"'}> ${l}</label>`).join("")}
+          <div style="text-align:center;margin-top:6px"><button id="aLay" style="width:80%">Modify/Show Layer Definition...</button></div></fieldset>
+        <fieldset><legend>Concrete Shell Section Design Parameters</legend><button id="aDes" style="width:100%">Modify/Show Shell Design Parameters...</button></fieldset></div>
+      <div><fieldset id="aThF"><legend>Thickness</legend><div class="g2"><span>Membrane</span><input id="aT" value="${esc(sapFmt(th))}"><span>Bending</span><input id="aBT" value="${esc(ex.BendThick || sapFmt(th))}"></div></fieldset>
+        <fieldset id="aMF"><legend>Material</legend><div class="g2"><span>Material Name</span><span style="display:flex;gap:4px"><button id="aMplus" style="width:22px;padding:0">+</button><select id="aM" style="flex:1;min-width:0">${opts(mats, s && mats.includes(s.material) ? s.material : mats.find(m => /psi|^C\d|concrete/i.test(m)) || mats[0])}</select></span>
+          <span>Material Angle</span><input id="aMA" value="${esc(ex.MatAngle || "0.")}"></div></fieldset>
+        <fieldset><legend>Time Dependent Properties</legend><button id="aTime" style="width:100%">Set Time Dependent Properties...</button></fieldset>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px"><fieldset style="margin:0"><legend>Stiffness Modifiers</legend><button id="aMod" style="width:100%">Set Modifiers...</button></fieldset>
+          <fieldset style="margin:0"><legend>Temp Dependent Properties</legend><button disabled style="width:100%" title="Not in the Engine yet">Thermal Properties...</button></fieldset></div></div></div></div>`,
+    [["OK", d => {
+      const name = q(d, "#aN").value.trim(), g = q(d, "input[name=aG]:checked").value;
+      const e = {Color: ex.Color, Notes: ex.Notes || "", MatAngle: /^0\.?0*$/.test(q(d, "#aMA").value.trim()) ? "" : q(d, "#aMA").value.trim(), BendThick: Math.abs(fnum(d, "#aBT") - fnum(d, "#aT")) > 1e-12 ? q(d, "#aBT").value.trim() : ""};
+      for (const f of ["NotSizeType", "NotAutoFact", "NotUserSize", "RigidZone"]) if (ex[f] && (f !== "RigidZone" || kind === "wall")) e[f] = ex[f];
+      formError(d, "");
+      (async () => {
+        const j = await hmRun("define_shell_type", {name, was, kind, thickness: fnum(d, "#aT"), material: q(d, "#aM").value, modeling: g, modifiers: mods || undefined, extras: e}, true); if (!j.ok) return formError(d, j.error);
+        // The sub-forms' rows go in only when changed (or the section is new or renamed), so OK alone adds no step to Undo.
+        if (JSON.stringify([design, timeDep]) !== was0 || name !== was) for (const [t, r] of [["Area Section Property Design Parameters", design], ["Area Section Property - Time Dependent", timeDep]]) {
+          const rows = Object.values(r).some(v => v !== "" && v != null) ? [Object.fromEntries(Object.entries(r).filter(([k, v]) => k !== "Section" && v !== "" && v != null))] : [];
+          if (!rows.length && !was) continue;
+          const k = await hmRun("define_table_rows", {table: t, name, rows}, true); if (!k.ok) return formError(d, k.error);
+        }
+        hm.sec[kind] = name; d.close(); hmSay("Done. Edit > Undo steps back."); if (after) after(j);
+      })();
+      return false;
+    }, true], ["Cancel"]], {width: 640});
+  const swatch = () => q(d, "#aCol").style.background = matColorCss(ex.Color);
+  // Layered/Nonlinear takes the thickness and material from its layers: SAP2000 greys those boxes.
+  const paint = () => { const lay = q(d, "input[name=aG]:checked").value === "Layered"; q(d, "#aLay").disabled = !lay; ["#aT", "#aBT", "#aM", "#aMA", "#aMplus"].forEach(id => q(d, id).disabled = lay); q(d, "#aThF").style.opacity = q(d, "#aMF").style.opacity = lay ? ".55" : ""; q(d, "#aBT").disabled = lay || q(d, "input[name=aG]:checked").value === "Membrane"; };
+  d.querySelectorAll("input[name=aG]").forEach(r => r.onchange = paint);
+  q(d, "#aT").oninput = () => { if (q(d, "#aBT").value === q(d, "#aT").dataset.was || !q(d, "#aT").dataset.was) q(d, "#aBT").value = q(d, "#aT").value; q(d, "#aT").dataset.was = q(d, "#aT").value; };
+  q(d, "#aT").dataset.was = q(d, "#aT").value;
+  q(d, "#aCol").onclick = () => hmColor(ex.Color, c => { ex.Color = c; swatch(); });
+  q(d, "#aNotes").onclick = () => dialog("Area Section Property Notes", `<textarea id="nT" rows="5" maxlength="255" style="width:100%;box-sizing:border-box">${esc(ex.Notes || "")}</textarea><p class="kv" style="margin:4px 0 0">Note: Notes are limited to 255 characters maximum.</p>`, [["OK", n => { ex.Notes = q(n, "#nT").value; }], ["Cancel"]], {width: 420});
+  q(d, "#aMplus").onclick = () => hmSapMaterials();
+  q(d, "#aLay").onclick = () => hmDefineTable((kind === "wall" ? "Wall" : "Slab") + " Property Definitions - Layers");
+  q(d, "#aMod").onclick = () => hmModifiers((pd && pd.shell_modifiers) || [], mods, o => { mods = o; });
+  // Concrete Shell Section Design Parameters: Rebar Material, Rebar Layout Options and the Cover to Centroid of Steel.
+  q(d, "#aDes").onclick = () => {
+    const rebars = ["None", ...(pd ? pd.materials : defs.materials).filter(m => /rebar/i.test(m.type)).map(m => m.name)], opt = design.RebarOpt || "Default";
+    const x = dialog("Concrete Shell Section Design Parameters", `<div class="g2" style="grid-template-columns:110px 1fr;margin-bottom:6px"><b>Section Name</b><input class="grey" readonly value="${esc(q(d, "#aN").value)}"></div>
+      <fieldset><legend>Rebar Material</legend><div class="g2"><span>Material</span><span style="display:flex;gap:4px"><button class="dpPlus" style="width:22px;padding:0">+</button><select id="dpM" style="flex:1">${opts(rebars, design.RebarMat || "None")}</select></span></div></fieldset>
+      <fieldset><legend>Rebar Layout Options</legend>${[["Default", "Default - 10% of shell thickness for top and bottom"], ["One Layer", "One Layer - at the middle of the shell section"], ["Two Layers", "Two Layers"]].map(([k, l]) => `<label style="display:block"><input type="radio" name="dpO" value="${k}" ${opt === k ? "checked" : ""}> ${l}</label>`).join("")}</fieldset>
+      <fieldset><legend>Cover to Centroid of Steel</legend><div class="g2" style="grid-template-columns:1fr 90px">${[["CoverTop1", "Top Bar  -  Direction 1"], ["CoverTop2", "Top Bar  -  Direction 2"], ["CoverBot1", "Bottom Bar  -  Direction 1"], ["CoverBot2", "Bottom Bar  -  Direction 2"]].map(([k, l]) => `<span class="dpL">${l}</span><input data-c="${k}" value="${esc(design[k] || "")}">`).join("")}</div></fieldset>`,
+      [["OK", x => { design = {RebarMat: q(x, "#dpM").value === "None" ? "" : q(x, "#dpM").value, RebarOpt: q(x, "input[name=dpO]:checked").value === "Default" ? "" : q(x, "input[name=dpO]:checked").value}; x.querySelectorAll("[data-c]").forEach(c => { if (!c.disabled && c.value.trim()) design[c.dataset.c] = c.value.trim(); }); }], ["Cancel"]], {width: 400});
+    const lay = () => { const o = q(x, "input[name=dpO]:checked").value, none = q(x, "#dpM").value === "None"; x.querySelectorAll("input[name=dpO]").forEach(r => r.disabled = none); x.querySelectorAll("[data-c]").forEach(c => c.disabled = none || o === "Default" || (o === "One Layer" && /Bot/.test(c.dataset.c))); x.querySelectorAll(".dpL").forEach((l, i) => l.style.opacity = x.querySelectorAll("[data-c]")[i].disabled ? ".5" : ""); };
+    x.querySelectorAll("input[name=dpO]").forEach(r => r.onchange = lay); q(x, "#dpM").onchange = lay; q(x, ".dpPlus").onclick = () => hmSapMaterials(); lay();
+  };
+  // Time Dependent Properties: Notional Size, h: Auto (Thickness), User-defined or None, with the Auto factor.
+  q(d, "#aTime").onclick = () => {
+    const t = timeDep.TypeSize || "None";
+    dialog("Time Dependent Properties", `<fieldset><legend>Notional Size, h</legend><div style="display:grid;grid-template-columns:auto 90px auto 70px;gap:6px 10px;align-items:center">
+      <label><input type="radio" name="tdT" value="Auto" ${t === "Auto" ? "checked" : ""}> Auto (Thickness)</label><span></span><span>Factor</span><input id="tdF" value="${esc(timeDep.AutoSFSize || "1.")}">
+      <label><input type="radio" name="tdT" value="User" ${t === "User" ? "checked" : ""}> User-defined</label><input id="tdU" value="${esc(timeDep.UserValSize || "1.")}"><span></span><span></span>
+      <label><input type="radio" name="tdT" value="None" ${t !== "Auto" && t !== "User" ? "checked" : ""}> None</label></div></fieldset>`,
+      [["OK", x => { const v = q(x, "input[name=tdT]:checked").value; timeDep = v === "None" ? {} : {TypeSize: v, AutoSFSize: v === "Auto" ? q(x, "#tdF").value.trim() : "", UserValSize: v === "User" ? q(x, "#tdU").value.trim() : ""}; }], ["Cancel"]], {width: 420});
+  };
+  swatch(); paint();
+  return d;
+}
 // ---- Define: slab and wall sections ----
 // Slab Properties and Wall Properties, each a list of its own as ETABS and SAFE have them (Define > Section
 // Properties > Slab Sections / Wall Sections); SAP2000 has one Area Sections list of shell sections.
@@ -6185,6 +6285,7 @@ function hmDeck(s, pd, after, copy) {
   q(d, "#dkNo").onclick = () => { const n = dialog("Property Notes", `<textarea id="nT" rows="8" style="width:100%">${esc(notes)}</textarea>`, [["OK", n => { notes = q(n, "#nT").value; }], ["Cancel"]], {width: 420}); };
 }
 async function hmShellSections(kind) {
+  if (program === "sap2000") return hmSapAreaSections();
   const defs = await hmDefs(), sap = program === "sap2000";
   if (!sap && !kind) kind = "slab";
   const again = () => { const x = document.querySelector(".dlg:last-of-type"); if (x) x.close(); hmShellSections(kind); };
@@ -6203,6 +6304,7 @@ async function hmShellSections(kind) {
 }
 // Slab Property Data / Wall Property Data (ETABS, SAFE) and Shell Section Data (SAP2000), field by field.
 async function hmShellSection(s, after, copy, newKind) {
+  if (program === "sap2000") return hmSapShellSection(s, after, copy);
   const defs = await hmDefs(), u = hmU(), pd = (await hmRun("property_definitions", {}, true)).result;
   const cur = s && pd ? pd.shell_sections.find(x => x.name === s.name) : null, was = s && !copy ? s.name : null;
   let mods = cur ? {...cur.modifiers} : null;
@@ -7883,7 +7985,7 @@ function bayAt(p, x, y) {
 }
 async function drawSection(kind) {
   if (kind === "joint" || kind === "reshape") return {list: [], now: ""};
-  const defs = await hmDefs(), list = kind === "slab" || kind === "wall" ? defs.shell_sections.filter(s => s.kind === kind || (kind === "slab" && s.kind === "deck")).map(s => s.name) : defs.frame_sections.map(s => s.name);
+  const defs = await hmDefs(), list = kind === "slab" || kind === "wall" ? defs.shell_sections.filter(s => s.kind === kind || (kind === "slab" && s.kind === "deck") || (program === "sap2000" && s.kind !== "deck")).map(s => s.name) : defs.frame_sections.map(s => s.name);
   if (!hm.sec[kind] || !list.includes(hm.sec[kind])) {
     // A concrete section made for this kind first (ETABS's own ConcCol and ConcBm in a new model), then any.
     const pref = kind === "column" || kind === "beam" || kind === "brace" ? defs.frame_sections.find(s => s.kind === kind && s.editable) || defs.frame_sections.find(s => s.kind === kind) || defs.frame_sections.find(s => s.kind === "column") : null;
